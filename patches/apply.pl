@@ -297,7 +297,7 @@ sub export_series {
     my @Patches = list_patches ($distro);
 
     for my $patch (@Patches) {
-	$patch =~ s/$patch_dir\/..\///;
+	$patch =~ s/^\Q$patch_dir\E\/..\///;
 	print "$patch -p0\n";
     }
 }
