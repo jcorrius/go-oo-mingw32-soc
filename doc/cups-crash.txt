@@ -51,7 +51,7 @@ Writer too crashes the sameway in ImplPrnDlgUpdatePrinter.
 #36 0x422cd5c7 in g_main_context_iterate () from /opt/gnome/lib/libglib-2.0.so.0
 
 
-The Solution:
+Solution:
 
 there is SfxPrinter *mpPrinter pointer which is bogus. It means, that this is freed
 and later the same thing is used.
@@ -102,7 +102,9 @@ Printer::~Printer()
 
 It reveals that it is freed from 
 
-sfx2/source/view/viewprn.cxx +348 is the place where it frees. 
+sfx2/source/view/viewprn.cxx +348 is the place where it frees at
+SfxPrinter* SfxViewShell::SetPrinter_Impl( SfxPrinter *pNewPrinter )
+
 >>SNIP
 
         if ( aNewJobSetup != aOldJobSetup )
@@ -123,56 +125,79 @@ sfx2/source/view/viewprn.cxx +348 is the place where it frees.
         return pDocPrinter;
 <<SNIP
 
+Going slightly up the stack to its caller 
+SfxViewShell::ExecPrint_Impl at sfx2/source/view/viewprn.cxx +366
+I came to the conclusion, that the pointer is freed. But used later
 
-It does a 
-        pDocPrinter->SetPrinterProps( pNewPrinter );
-
-and frees the pointer. But SetPrinterProps assigns some memory location of 
-pNewPrinter to pDocPrinter which gets freed later which is the source of the problem.
-
-vcl/source/gdi/impprn.cxx +110 shows a example how SetPrinterProps should be used and not freed.
+Lemme explain:
 
 >>SNIP
-ImplQPrinter::ImplQPrinter( Printer* pParent ) :
-        Printer( pParent->GetName() )
-{
-        SetSelfAsQueuePrinter( TRUE );
-        SetPrinterProps( pParent ); // THIS HOW pParent SHOULD BE LEFT UNTOUCHED. 
-        SetPageQueueSize( 0 );
-        mpParent                = pParent;
-        mnCopyCount     = pParent->mnCopyCount;
-        mbCollateCopy   = pParent->mbCollateCopy;
+               // if no arguments are given, retrieve them from a dialog
+                if ( !bIsAPI )
+                        {
+                    // PrinterDialog needs a temporary printer
+                                SfxPrinter* pDlgPrinter = pPrinter->Clone();
+                                nDialogRet = 0;
+                                if ( SID_PRINTDOC == nId )
+                                {
+<<SNIP.
+
+In the above function pDlgPrinter is cloned from pPrinter.
+
+>>SNIP
+                                // set printer on dialog and execute
+                                                pPrintDlg->SetPrinter( pDlgPrinter );
+                                ::DisableRanges( *pPrintDlg, pDlgPrinter );
+                                                nDialogRet = pPrintDlg->Execute();
+<<SNIP
+
+That cloned pointer is set as the printer to pPrintDlg <NOTE THIS POINT !!!>
+and the window is executed.
+
+>>SNIP
+                        // take the changes made in the dialog
+                                        pPrinter = SetPrinter_Impl( pDlgPrinter );
+                                                                                                                             
+                        // forget new printer, it was taken over (as pPrinter) or deleted
+                        pDlgPrinter = NULL;
+
+<<SNIP
+This code frees pDlgPrinter inside the function SetPrinter_Impl which is the place
+the pointer is freed as explained above.
+
+But remember though the pDlgPrinter is freed and NULLed, but the pPrintDlg still points
+to the freed location of pDlgPrinter.
+
+>>SNIP
+               if ( bDontModifyDoc && bOldFlag != pObjSh->IsEnableSetModified() )
+                    pObjSh->EnableSetModified( bOldFlag );
+                                                                                                                             
+                        GetObjectShell()->Broadcast( SfxPrintingHint( -1, pPrintDlg, pPrinter ) );
+                        ErrCode nError = DoPrint( pPrinter, pPrintDlg, bSilent );
+                        if ( nError == PRINTER_OK )
+                        {
 
 <<SNIP
 
-A LXR search on SetPrinterProps showed how this function should be used and how this misused.
-This function is defined in vcl/source/gdi/print.cxx
+At this place still pPrintDlg points to the pDlgPrinter freed location, which on exec
+crashes.
 
+Now i added 
 
 >>SNIP
-BOOL Printer::SetPrinterProps( const Printer* pPrinter )
-{
-        if ( IsJobActive() || IsPrinting() )
-                return FALSE;
+
+                        // take the changes made in the dialog
+                                        pPrinter = SetPrinter_Impl( pDlgPrinter );
                                                                                                                              
-        ImplSVData* pSVData = ImplGetSVData();
+                        // forget new printer, it was taken over (as pPrinter) or deleted
+                        pDlgPrinter = NULL;
+                        /* Now lets reset the Dialog printer, since its freed */
+                        pPrintDlg->SetPrinter (pPrinter);
                                                                                                                              
-        mbDefPrinter        = pPrinter->mbDefPrinter;
-        maPrintFile         = pPrinter->maPrintFile;
-        mbPrintFile         = pPrinter->mbPrintFile;
-        mnCopyCount         = pPrinter->mnCopyCount;
-        mbCollateCopy       = pPrinter->mbCollateCopy;
-        mnPageQueueSize     = pPrinter->mnPageQueueSize;
-    *mpPrinterOptions   = *pPrinter->mpPrinterOptions;
-                                                                                                                             
+    
 <<SNIP
 
+which should solve the problem
 
-SetPrinterProps sets the the mpPrinterOptions from pPrinter to this->mpPrinterOptions.
-This impress atleast crashes when it tries to display a warning dialog, to ask for
-whether to  store Fit/Scale to page, and other page related options are stored.
-When the function to ask the warning dialog is commeneted it doesnt crash too, but
-thatz the work-around. These options are stored in mpPrinterOptions in vcl/inc/print.hxx
 
-Just removing this delete of mpPrinter should solve the problem.
 
