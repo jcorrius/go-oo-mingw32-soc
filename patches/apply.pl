@@ -133,6 +133,8 @@ sub list_patches {
             s/\s*#.*//;
             chomp;
 	    s/\r//; # Win32
+	    s/\s*$//;
+	    s/^\s*//;
             $_ eq '' && next;
 
             if (/\[\s*(.*)\]/) {
