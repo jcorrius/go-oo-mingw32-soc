@@ -168,7 +168,7 @@ sub list_patches {
 	    my $set;
 	    my $match = 0;
 	    for $set (@targets) {
-		if (grep /$set/i, @selected_subsets) {
+		if (grep /^$set$/i, @selected_subsets) {
 		    $match = 1;
 		}
 	    }
@@ -315,6 +315,8 @@ foreach $a (@ARGV) {
 	    $quiet = 1;
 	} elsif ($a =~ m/--distro=(.*)/) {
 	    $distro = $1;
+	} elsif ($a =~ m/--dry-run/g) {
+	    die "FIXME: Can't pass --dry-run to apply, it badly confuses it";
 	} else {
 	    push @arguments, $a;
 	}

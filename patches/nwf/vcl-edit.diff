@@ -1,0 +1,193 @@
+unchanged:
+--- vcl/inc/edit.hxx	27 Mar 2003 17:57:20 -0000	1.11
++++ vcl/inc/edit.hxx	3 Mar 2004 15:32:06 -0000
+@@ -174,6 +174,7 @@ protected:
+ 	void				ImplLoadRes( const ResId& rResId );
+ 	void				ImplSetSelection( const Selection& rSelection, BOOL bPaint = TRUE );
+ #endif
++    int                 ImplGetNativeControlType();
+ 
+ 	::com::sun::star::uno::Reference< ::com::sun::star::datatransfer::dnd::XDragSourceListener > mxDnDListener;
+ 
+unchanged:
+--- vcl/source/control/edit.cxx	3 Mar 2004 15:32:07 -0000
++++ vcl/source/control/edit.cxx	2004-03-11 14:33:37.000000000 +0100
+@@ -390,18 +390,26 @@
+     if( Application::GetSettings().GetLayoutRTL() )
+         mnAlign	= EDIT_ALIGN_RIGHT;
+ 
+-	if ( nStyle & WB_RIGHT )
+-		mnAlign = EDIT_ALIGN_RIGHT;
+-	else if ( nStyle & WB_CENTER )
+-		mnAlign = EDIT_ALIGN_CENTER;
+-
+-	const StyleSettings& rStyleSettings = GetSettings().GetStyleSettings();
+-	SetBackground( Wallpaper( rStyleSettings.GetFieldColor() ) );
+-	SetFillColor( rStyleSettings.GetFieldColor() );
+-	SetCursor( new Cursor );
++    if ( nStyle & WB_RIGHT )
++        mnAlign = EDIT_ALIGN_RIGHT;
++    else if ( nStyle & WB_CENTER )
++        mnAlign = EDIT_ALIGN_CENTER;
++
++    const StyleSettings& rStyleSettings = GetSettings().GetStyleSettings();
++    if ( IsNativeControlSupported(ImplGetNativeControlType(), HAS_BACKGROUND_TEXTURE) )
++    {
++        SetBackground();
++        SetFillColor();
++    }
++    else
++    {
++        SetBackground( Wallpaper( rStyleSettings.GetFieldColor() ) );
++        SetFillColor( rStyleSettings.GetFieldColor() );
++    }
++    SetCursor( new Cursor );
+ 
+-	SetPointer( Pointer( POINTER_TEXT ) );
+-	ImplInitSettings( TRUE, TRUE, TRUE );
++    SetPointer( Pointer( POINTER_TEXT ) );
++    ImplInitSettings( TRUE, TRUE, TRUE );
+ 
+     uno::Reference< datatransfer::dnd::XDragGestureListener> xDGL( mxDnDListener, uno::UNO_QUERY );
+     uno::Reference< datatransfer::dnd::XDragGestureRecognizer > xDGR = GetDragGestureRecognizer();
+@@ -470,7 +478,13 @@
+ 
+ 	if ( bBackground )
+ 	{
+-		if( IsControlBackground() )
++		if ( IsNativeControlSupported( ImplGetNativeControlType(), HAS_BACKGROUND_TEXTURE ) )
++		{
++			// Transparent background
++			SetBackground();
++			SetFillColor();
++		}
++		else if ( IsControlBackground() )
+ 		{
+ 			SetBackground( GetControlBackground() );
+ 			SetFillColor( GetControlBackground() );
+@@ -576,7 +590,11 @@
+ 	else
+ 		SetTextColor( rStyleSettings.GetDisableColor() );
+ 
+-	SetTextFillColor( IsControlBackground() ? GetControlBackground() : rStyleSettings.GetFieldColor() );
++	// Set background color of the normal text
++	if ( IsNativeControlSupported( ImplGetNativeControlType(), HAS_BACKGROUND_TEXTURE ) )
++		SetTextFillColor();
++	else
++		SetTextFillColor( IsControlBackground() ? GetControlBackground() : rStyleSettings.GetFieldColor() );
+ 
+ 	BOOL bDrawSelection = maSelection.Len() && ( HasFocus() || ( GetStyle() & WB_NOHIDESELECTION ) || mbActivePopup );
+ 
+@@ -619,8 +637,14 @@
+         // draw normal text
+         Color aNormalTextColor = GetTextColor();
+         SetClipRegion( aNormalClipRegion );
+-        SetTextFillColor( IsControlBackground() ? GetControlBackground() : rStyleSettings.GetFieldColor() );
++
++	    // Set background color when part of the text is selected
++	    if ( IsNativeControlSupported( ImplGetNativeControlType(), HAS_BACKGROUND_TEXTURE ) )
++		    SetTextFillColor();
++	    else
++		    SetTextFillColor( IsControlBackground() ? GetControlBackground() : rStyleSettings.GetFieldColor() );
+ 		DrawText( aPos, aText, nStart, nEnd - nStart );
++
+         // draw highlighted text
+         SetClipRegion( aHiglightClipRegion );
+         SetTextColor( rStyleSettings.GetHighlightTextColor() );
+@@ -853,6 +877,51 @@
+ 
+ // -----------------------------------------------------------------------
+ 
++int Edit::ImplGetNativeControlType()
++{
++    int nCtrl = 0;
++    Window *pControl = mbIsSubEdit ? GetParent() : this;
++
++    switch( pControl->GetType() )
++    {
++        case WINDOW_COMBOBOX:
++        case WINDOW_PATTERNBOX:			
++        case WINDOW_NUMERICBOX:			
++        case WINDOW_METRICBOX:			
++        case WINDOW_CURRENCYBOX:
++        case WINDOW_DATEBOX:		
++        case WINDOW_TIMEBOX:			
++        case WINDOW_LONGCURRENCYBOX:
++            nCtrl = CTRL_COMBOBOX;
++            break;
++
++        case WINDOW_EDIT:
++        case WINDOW_MULTILINEEDIT:
++        case WINDOW_PATTERNFIELD:
++        case WINDOW_METRICFIELD:
++        case WINDOW_CURRENCYFIELD:
++        case WINDOW_DATEFIELD:
++        case WINDOW_TIMEFIELD:
++        case WINDOW_LONGCURRENCYFIELD:
++        case WINDOW_NUMERICFIELD:
++        case WINDOW_SPINFIELD:
++            if( pControl->GetStyle() & WB_SPIN )
++                nCtrl = CTRL_SPINBOX;
++            else
++            {
++                if ( GetWindow( WINDOW_BORDER ) != this )
++                    nCtrl = CTRL_EDITBOX;
++                else
++                    nCtrl = CTRL_EDITBOX_NOBORDER;
++            }
++            break;
++
++        default:
++            nCtrl = CTRL_EDITBOX;
++    }
++    return nCtrl;
++}
++
+ void Edit::ImplClearBackground( long nXStart, long nXEnd )
+ {
+ 	Point aTmpPoint;
+@@ -865,7 +934,43 @@
+ 	if ( pCursor )
+ 		pCursor->Hide();
+ 
+-	Erase( aRect );
++    if ( IsNativeControlSupported( ImplGetNativeControlType(), HAS_BACKGROUND_TEXTURE ) )
++    {
++        // draw the inner part by painting the whole control using its border window
++        Window *pControl = this;
++        Window *pBorder = GetWindow( WINDOW_BORDER );
++        if( pBorder == this )
++        {
++            // we have no border, use parent
++            pControl = mbIsSubEdit ? GetParent() : this;
++            pBorder = pControl->GetWindow( WINDOW_BORDER );
++        }
++        
++        if( pBorder )
++        {
++            // set proper clipping region to not overdraw the whole control
++            Region aClipRgn = GetPaintRegion();
++            if( !aClipRgn.IsNull() )
++            {
++                // transform clipping region to border window's coordinate system
++                Point aBorderOffs;
++                aBorderOffs = pBorder->ScreenToOutputPixel( OutputToScreenPixel( aBorderOffs ) );
++                aClipRgn.Move( aBorderOffs.X(), aBorderOffs.Y() );
++
++                Region oldRgn( pBorder->GetClipRegion() );
++                pBorder->SetClipRegion( aClipRgn );
++
++                pBorder->Paint( Rectangle() );
++
++                pBorder->SetClipRegion( oldRgn );
++            }
++            else
++                pBorder->Paint( Rectangle() );
++
++        }
++    }
++    else
++	    Erase( aRect );
+ 
+ 	if ( pCursor )
+ 		pCursor->Show();

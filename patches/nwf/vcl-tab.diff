@@ -1,0 +1,409 @@
+diff -u vcl/inc/tabctrl.hxx vcl/inc/tabctrl.hxx
+--- vcl/inc/tabctrl.hxx	3 Mar 2004 15:32:07 -0000
++++ vcl/inc/tabctrl.hxx	2004-03-17 17:25:30.000000000 +0100
+@@ -124,7 +124,7 @@
+     void                ImplActivateTabPage( BOOL bNext );
+     void                ImplSetFirstPagePos( USHORT nPagePos );
+     void                ImplShowFocus();
+-    void                ImplDrawItem( ImplTabItem* pItem, const Rectangle& rCurRect, bool bLayout = false );
++    void                ImplDrawItem( ImplTabItem* pItem, const Rectangle& rCurRect, bool bLayout = false, bool bFirstInGroup = false, bool bLastInGroup = false, bool bIsCurrentItem = false );
+     void				ImplPaint( const Rectangle& rRect, bool bLayout = false );
+     void				ImplFreeLayoutData();
+                         DECL_LINK( ImplScrollBtnHdl, PushButton* pBtn );
+@@ -134,6 +134,7 @@
+     void                ImplLoadRes( const ResId& rResId );
+ 
+     virtual void		FillLayoutData() const;
++    Rectangle*          ImplFindPartRect( const Point& rPt );
+ 
+ public:
+                         TabControl( Window* pParent,
+@@ -152,6 +153,7 @@
+     virtual long        Notify( NotifyEvent& rNEvt );
+     virtual void        StateChanged( StateChangedType nType );
+     virtual void        DataChanged( const DataChangedEvent& rDCEvt );
++    virtual long        PreNotify( NotifyEvent& rNEvt );
+ 
+     virtual void        ActivatePage();
+     virtual long        DeactivatePage();
+unchanged:
+--- vcl/inc/tabpage.hxx	24 Apr 2003 16:30:10 -0000	1.3
++++ vcl/inc/tabpage.hxx	3 Mar 2004 15:32:07 -0000
+@@ -85,6 +85,8 @@ public:
+ 					TabPage( Window* pParent, WinBits nStyle = 0 );
+ 					TabPage( Window* pParent, const ResId& rResId );
+ 
++    virtual void    Paint( const Rectangle& rRect );
++
+ 	virtual void	StateChanged( StateChangedType nStateChange );
+ 	virtual void	DataChanged( const DataChangedEvent& rDCEvt );
+ 
+
+diff -u vcl/source/control/tabctrl.cxx vcl/source/control/tabctrl.cxx
+--- vcl/source/control/tabctrl.cxx	3 Mar 2004 15:32:07 -0000
++++ vcl/source/control/tabctrl.cxx	2004-03-17 17:25:30.000000000 +0100
+@@ -204,6 +204,11 @@
+         mbSingleLine = TRUE;
+ 
+     ImplInitSettings( TRUE, TRUE, TRUE );
++
++    // if the tabcontrol is drawn (ie filled) by a native widget, make sure all contols will have transparent background
++    // otherwise they will paint with a wrong background
++    if( IsNativeControlSupported(CTRL_TAB_PANE, PART_ENTIRE_CONTROL) )
++        EnableChildTransparentMode( TRUE );
+ }
+ 
+ // -----------------------------------------------------------------------
+@@ -235,8 +240,13 @@
+     if ( bBackground )
+     {
+         Window* pParent = GetParent();
+-        if ( pParent->IsChildTransparentModeEnabled() && !IsControlBackground() )
++        if ( (pParent->IsChildTransparentModeEnabled() && !IsControlBackground() )
++            || IsNativeControlSupported(CTRL_TAB_PANE, PART_ENTIRE_CONTROL) 
++            || IsNativeControlSupported(CTRL_TAB_ITEM, PART_ENTIRE_CONTROL) )
++
+         {
++            // set transparent mode for NWF tabcontrols to have
++            // the background always cleared properly
+             EnableChildTransparentMode( TRUE );
+             SetParentClipMode( PARENTCLIPMODE_NOCLIP );
+             SetPaintTransparent( TRUE );
+@@ -922,7 +932,7 @@
+ 
+ // -----------------------------------------------------------------------
+ 
+-void TabControl::ImplDrawItem( ImplTabItem* pItem, const Rectangle& rCurRect, bool bLayout )
++void TabControl::ImplDrawItem( ImplTabItem* pItem, const Rectangle& rCurRect, bool bLayout, bool bFirstInGroup, bool bLastInGroup, bool bIsCurrentItem )
+ {
+     if ( pItem->maRect.IsEmpty() )
+         return;
+@@ -945,6 +955,7 @@
+     BOOL                    bLeftBorder = TRUE;
+     BOOL                    bRightBorder = TRUE;
+     USHORT                  nOff;
++    BOOL                    bNativeOK = FALSE;
+ 
+     USHORT nOff2 = 0;
+     USHORT nOff3 = 0;
+@@ -982,7 +993,47 @@
+         }
+     }
+ 
+-    if( ! bLayout )
++    if( !bLayout && (bNativeOK = IsNativeControlSupported(CTRL_TAB_ITEM, PART_ENTIRE_CONTROL)) == TRUE )
++    {
++        ImplControlValue		aControlValue;
++        Region				aCtrlRegion( pItem->maRect );
++        ControlState		nState = 0;
++
++        if( pItem->mnId == mnCurPageId )
++            nState |= CTRL_STATE_SELECTED;
++        if ( HasFocus() )
++            nState |= CTRL_STATE_FOCUSED;
++        if ( IsEnabled() )
++            nState |= CTRL_STATE_ENABLED;
++        if( IsMouseOver() && pItem->maRect.IsInside( GetPointerPosPixel() ) )
++        {
++            nState |= CTRL_STATE_ROLLOVER;
++            ImplTabItem* pI;
++            int idx=0;
++            while( (pI = mpItemList->GetObject(idx++)) )
++                if( (pI != pItem) && (pI->maRect.IsInside( GetPointerPosPixel() ) ) )
++                {
++                    nState &= ~CTRL_STATE_ROLLOVER; // avoid multiple highlighted tabs
++                    break;
++                }
++        }
++
++        TabitemValue tiValue;
++        if(pItem->maRect.Left() < 5)
++            tiValue.mnAlignment |= TABITEM_LEFTALIGNED;
++        if(pItem->maRect.Right() > mnLastWidth - 5)
++            tiValue.mnAlignment |= TABITEM_RIGHTALIGNED;
++        if ( bFirstInGroup )
++            tiValue.mnAlignment |= TABITEM_FIRST_IN_GROUP;
++        if ( bLastInGroup )
++            tiValue.mnAlignment |= TABITEM_LAST_IN_GROUP;
++        aControlValue.setOptionalVal( (void *)(&tiValue) );
++
++        bNativeOK = DrawNativeControl( CTRL_TAB_ITEM, PART_ENTIRE_CONTROL, aCtrlRegion, nState,
++                    aControlValue, rtl::OUString() );
++    }
++
++    if( ! bLayout && !bNativeOK )
+     {
+         if ( !(rStyleSettings.GetOptions() & STYLE_OPTION_MONO) )
+         {
+@@ -1004,14 +1055,14 @@
+             }
+             
+             SetLineColor( rStyleSettings.GetLightColor() );
+-            DrawPixel( Point( aRect.Left()+1-nOff2, aRect.Top()+1-nOff2 ) );
++            DrawPixel( Point( aRect.Left()+1-nOff2, aRect.Top()+1-nOff2 ) );    // diagonally indented top-left pixel
+             if ( bLeftBorder )
+             {
+                 DrawLine( Point( aRect.Left()-nOff2, aRect.Top()+2-nOff2 ),
+                           Point( aRect.Left()-nOff2, nLeftBottom-1 ) );
+             }
+-            DrawLine( Point( aRect.Left()+2-nOff2, aRect.Top()-nOff2 ),
+-                      Point( aRect.Right()+nOff2-3, aRect.Top()-nOff2 ) );
++            DrawLine( Point( aRect.Left()+2-nOff2, aRect.Top()-nOff2 ),         // top line starting 2px from left border
++                      Point( aRect.Right()+nOff2-3, aRect.Top()-nOff2 ) );      // ending 3px from right border
+             
+             if ( bRightBorder )
+             {
+@@ -1053,6 +1104,13 @@
+         mpTabCtrlData->maTabRectangles.push_back( aRect );
+     }
+ 
++    // set font accordingly, current item is painted bold
++    // we set the font attributes always before drawing to be re-entrant (DrawNativeControl may trigger additional paints)
++    Font aFont( GetFont() );
++    aFont.SetTransparent( TRUE );
++    aFont.SetWeight( bIsCurrentItem ? WEIGHT_BOLD : WEIGHT_LIGHT );
++    SetFont( aFont );
++
+     Size aTabSize = aRect.GetSize();
+     long nTextHeight = GetTextHeight();
+     long nTextWidth = GetCtrlTextWidth( pItem->maFormatText );
+@@ -1153,65 +1211,105 @@
+     aRect.Top()    -= TAB_OFFSET;
+     aRect.Right()  += TAB_OFFSET;
+     aRect.Bottom() += TAB_OFFSET;
+-    if ( !(rStyleSettings.GetOptions() & STYLE_OPTION_MONO) )
+-        SetLineColor( rStyleSettings.GetLightColor() );
+-    else
+-        SetLineColor( Color( COL_BLACK ) );
+-    if ( pCurItem && !pCurItem->maRect.IsEmpty() )
++
++    BOOL bNativeOK = FALSE;
++    if( (bNativeOK = IsNativeControlSupported( CTRL_TAB_PANE, PART_ENTIRE_CONTROL) ) == TRUE )
+     {
+-        aCurRect = pCurItem->maRect;
+-        if( ! bLayout )
+-            DrawLine( aRect.TopLeft(), Point( aCurRect.Left()-2, aRect.Top() ) );
+-        if ( aCurRect.Right()+1 < aRect.Right() )
+-        {
+-            if( ! bLayout )
+-                DrawLine( Point( aCurRect.Right(), aRect.Top() ), aRect.TopRight() );
+-        }
+-        else
+-            nTopOff = 0;
++        const ImplControlValue aControlValue( BUTTONVALUE_DONTKNOW, rtl::OUString(), 0 );
++
++        ControlState nState = CTRL_STATE_ENABLED;
++        int part = PART_ENTIRE_CONTROL;
++        if ( !IsEnabled() )
++            nState &= ~CTRL_STATE_ENABLED;
++        if ( HasFocus() )
++            nState |= CTRL_STATE_FOCUSED;
++        Region aCtrlRegion( aRect );
++        bNativeOK = DrawNativeControl( CTRL_TAB_PANE, part, aCtrlRegion, nState,
++                aControlValue, rtl::OUString() );
+     }
+     else
+-        if( ! bLayout )
+-            DrawLine( aRect.TopLeft(), aRect.TopRight() );
+-
+-    if( ! bLayout )
+     {
+-        DrawLine( aRect.TopLeft(), aRect.BottomLeft() );
+-
+         if ( !(rStyleSettings.GetOptions() & STYLE_OPTION_MONO) )
++            SetLineColor( rStyleSettings.GetLightColor() );
++        else
++            SetLineColor( Color( COL_BLACK ) );
++        if ( pCurItem && !pCurItem->maRect.IsEmpty() )
+         {
+-            SetLineColor( rStyleSettings.GetShadowColor() );
+-            DrawLine( Point( 1, aRect.Bottom()-1 ),
+-                      Point( aRect.Right()-1, aRect.Bottom()-1 ) );
+-            DrawLine( Point( aRect.Right()-1, aRect.Top()+nTopOff ),
+-                      Point( aRect.Right()-1, aRect.Bottom()-1 ) );
+-            SetLineColor( rStyleSettings.GetDarkShadowColor() );
+-            DrawLine( Point( 0, aRect.Bottom() ),
+-                      Point( aRect.Right(), aRect.Bottom() ) );
+-            DrawLine( Point( aRect.Right(), aRect.Top()+nTopOff ),
+-                      Point( aRect.Right(), aRect.Bottom() ) );
++            aCurRect = pCurItem->maRect;
++            if( ! bLayout )
++                DrawLine( aRect.TopLeft(), Point( aCurRect.Left()-2, aRect.Top() ) );
++            if ( aCurRect.Right()+1 < aRect.Right() )
++            {
++                if( ! bLayout )
++                    DrawLine( Point( aCurRect.Right(), aRect.Top() ), aRect.TopRight() );
++            }
++            else
++                nTopOff = 0;
+         }
+         else
++            if( ! bLayout )
++                DrawLine( aRect.TopLeft(), aRect.TopRight() );
++
++        if( ! bLayout )
+         {
+-            DrawLine( aRect.TopRight(), aRect.BottomRight() );
+-            DrawLine( aRect.BottomLeft(), aRect.BottomRight() );
++            DrawLine( aRect.TopLeft(), aRect.BottomLeft() );
++
++            if ( !(rStyleSettings.GetOptions() & STYLE_OPTION_MONO) )
++            {
++                SetLineColor( rStyleSettings.GetShadowColor() );
++                DrawLine( Point( 1, aRect.Bottom()-1 ),
++                        Point( aRect.Right()-1, aRect.Bottom()-1 ) );
++                DrawLine( Point( aRect.Right()-1, aRect.Top()+nTopOff ),
++                        Point( aRect.Right()-1, aRect.Bottom()-1 ) );
++                SetLineColor( rStyleSettings.GetDarkShadowColor() );
++                DrawLine( Point( 0, aRect.Bottom() ),
++                        Point( aRect.Right(), aRect.Bottom() ) );
++                DrawLine( Point( aRect.Right(), aRect.Top()+nTopOff ),
++                        Point( aRect.Right(), aRect.Bottom() ) );
++            }
++            else
++            {
++                DrawLine( aRect.TopRight(), aRect.BottomRight() );
++                DrawLine( aRect.BottomLeft(), aRect.BottomRight() );
++            }
+         }
+     }
+ 
+-    // Alle Items bis auf das aktuelle Zeichnen (nicht fett)
+-    SetFont( aLightFont );
+-    pItem = mpItemList->First();
+-    while ( pItem )
++    // Some native toolkits (GTK+) draw tabs right-to-left, with an
++    // overlap between adjacent tabs
++    bool			bDrawTabsRTL = IsNativeControlSupported( CTRL_TAB_ITEM, PART_TABS_DRAW_RTL );
++    ImplTabItem *	pFirstTab = NULL;
++    ImplTabItem *	pLastTab = NULL;
++    unsigned idx;
++
++    // Event though there is a tab overlap with GTK+, the first tab is not
++    // overlapped on the left side.  Other tookits ignore this option.
++    if ( bDrawTabsRTL )
++    {
++        pFirstTab = mpItemList->First();
++        pLastTab = mpItemList->Last();
++        idx = mpItemList->Count()-1;
++    }
++    else
++    {
++        pLastTab = mpItemList->Last();
++        pFirstTab = mpItemList->First();
++        idx = 0;
++    }
++
++    while ( (pItem = mpItemList->GetObject(idx)) != NULL )
+     {
+         if ( pItem != pCurItem )
+-            ImplDrawItem( pItem, aCurRect, bLayout );
+-        pItem = mpItemList->Next();
++            ImplDrawItem( pItem, aCurRect, bLayout, (pItem==pFirstTab), (pItem==pLastTab), FALSE );
++
++        if ( bDrawTabsRTL )
++            idx--;
++        else
++            idx++;
+     }
+ 
+-    // aktuelles Item zeichnen wir fett
+-    SetFont( aFont );
+     if ( pCurItem )
+-        ImplDrawItem( pCurItem, aCurRect, bLayout );
++        ImplDrawItem( pCurItem, aCurRect, bLayout, (pCurItem==pFirstTab), (pItem==pLastTab), TRUE );
+ 
+     if ( !bLayout && HasFocus() )
+         ImplShowFocus();
+@@ -1452,0 +1551,52 @@
++
++Rectangle* TabControl::ImplFindPartRect( const Point& rPt )
++{
++    ImplTabItem* pItem = mpItemList->First();
++    ImplTabItem* pFoundItem = NULL;
++    int nFound = 0;
++    while ( pItem )
++    {
++        if ( pItem->maRect.IsInside( rPt ) )
++        {
++            // assure that only one tab is highlighted at a time
++            nFound++;
++            pFoundItem = pItem;
++        }
++        pItem = mpItemList->Next();
++    }
++    // assure that only one tab is highlighted at a time
++    return nFound == 1 ? &pFoundItem->maRect : NULL;
++}
++
++long TabControl::PreNotify( NotifyEvent& rNEvt )
++{
++    long nDone = 0;
++    const MouseEvent* pMouseEvt = NULL;
++
++    if( (rNEvt.GetType() == EVENT_MOUSEMOVE) && (pMouseEvt = rNEvt.GetMouseEvent()) )
++    {
++        if( !pMouseEvt->GetButtons() && !pMouseEvt->IsSynthetic() && !pMouseEvt->IsModifierChanged() )
++        {
++            // trigger redraw if mouse over state has changed
++            if( IsNativeControlSupported(CTRL_TAB_ITEM, PART_ENTIRE_CONTROL) )
++            {
++                Rectangle* pRect = ImplFindPartRect( GetPointerPosPixel() );
++                Rectangle* pLastRect = ImplFindPartRect( GetLastPointerPosPixel() );
++                if( pRect != pLastRect || (pMouseEvt->IsLeaveWindow() || pMouseEvt->IsEnterWindow()) )
++                {
++                    Region aClipRgn;
++                    if( pLastRect )
++                        aClipRgn.Union( *pLastRect );
++                    if( pRect )
++                        aClipRgn.Union( *pRect );
++                    if( !aClipRgn.IsEmpty() )
++                        Invalidate( aClipRgn );
++                }
++            }
++        }
++    }
++
++    return nDone ? nDone : Control::PreNotify(rNEvt);
++}
++
++// -----------------------------------------------------------------------
+diff -u vcl/source/window/tabpage.cxx vcl/source/window/tabpage.cxx
+--- vcl/source/window/tabpage.cxx	3 Mar 2004 15:32:07 -0000
++++ vcl/source/window/tabpage.cxx	2004-03-17 17:25:30.000000000 +0100
+@@ -99,6 +99,11 @@
+     Window::ImplInit( pParent, nStyle, NULL );
+ 
+     ImplInitSettings();
++
++    // if the tabpage is drawn (ie filled) by a native widget, make sure all contols will have transparent background
++    // otherwise they will paint with a wrong background
++    if( IsNativeControlSupported(CTRL_TAB_BODY, PART_ENTIRE_CONTROL) && GetParent() && (GetParent()->GetType() == WINDOW_TABCONTROL) )
++        EnableChildTransparentMode( TRUE );
+ }
+ 
+ // -----------------------------------------------------------------------
+@@ -182,0 +188,23 @@
++// -----------------------------------------------------------------------
++
++void TabPage::Paint( const Rectangle& rRect )
++{
++    if( IsNativeControlSupported(CTRL_TAB_BODY, PART_ENTIRE_CONTROL) )
++    {
++        const ImplControlValue aControlValue( BUTTONVALUE_DONTKNOW, rtl::OUString(), 0 );
++
++        ControlState nState = CTRL_STATE_ENABLED;
++        int part = PART_ENTIRE_CONTROL;
++        if ( !IsEnabled() )
++            nState &= ~CTRL_STATE_ENABLED;
++        if ( HasFocus() )
++            nState |= CTRL_STATE_FOCUSED;
++        Point aPoint;
++        // pass the whole window region to NWF as the tab body might be a gradient or bitmap
++        // that has to be scaled properly, clipping makes sure that we do not paint too much
++        Region aCtrlRegion( Rectangle( aPoint, GetOutputSizePixel() ) );
++        DrawNativeControl( CTRL_TAB_BODY, part, aCtrlRegion, nState,
++                aControlValue, rtl::OUString() );
++    }
++}
++
