@@ -24,6 +24,8 @@ ooo_bonobo_bin_SOURCES =		\
 	ooo-bonobo-control.h	\
 	remote-uno-helper.cxx	\
 	remote-uno-helper.h	\
+	services.h		\
 	star-frame-widget.cxx	\
 	star-frame-widget.h	\
+	string-macros.h		\
 	main.cxx
