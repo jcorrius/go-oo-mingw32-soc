@@ -1,6 +1,4 @@
 script_files = \
-	build-ooo \
-	font-munge \
 	oowintool \
 	install-dict.in \
 	latest-patchset \
@@ -13,6 +11,11 @@ script_files = \
 	package-lang \
 	package-ooo \
 	relocate \
-	scale-icons
+	scale-icons \
+	unpack \
+	font-munge \
+	install-artwork \
+	build-tools \
+	build-ooo
 
 EXTRA_DIST = $(script_files)
