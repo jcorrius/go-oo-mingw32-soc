@@ -1,8 +1,4 @@
-if BONOBO
-  MAYBE_BONOBO = bonobo
-endif
-
-SUBDIRS = po desktop bin etc patches man doc www $(MAYBE_BONOBO)
+SUBDIRS = po desktop bin etc patches man doc www
 
 
 EXTRA_DIST = \
