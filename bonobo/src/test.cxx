@@ -4,6 +4,7 @@
 #include <cppuhelper/bootstrap.hxx>
 
 #include <com/sun/star/bridge/XUnoUrlResolver.hpp>
+#include <com/sun/star/document/XTypeDetection.hpp>
 #include <com/sun/star/lang/XMultiComponentFactory.hpp>
 #include <com/sun/star/lang/XMultiServiceFactory.hpp>
 #include <com/sun/star/frame/XFrame.hpp>
@@ -21,6 +22,15 @@ using namespace com::sun::star::beans;
 using rtl::OUString;
 using com::sun::star::uno::Reference;
 
+static char *
+gimme_utf8_please (const rtl::OUString &oustring)
+{
+	rtl::OString ostring;
+
+	ostring = ::rtl::OUStringToOString (oustring, RTL_TEXTENCODING_UTF8);
+        return g_strdup (ostring.pData->buffer);
+}
+
 static void
 destroy( GtkWidget *widget, gpointer data )
 {
@@ -30,7 +40,8 @@ destroy( GtkWidget *widget, gpointer data )
 static void
 FrameLoaderLoadFileFromUrl( Reference< frame::XSynchronousFrameLoader > xFrameLoader,
 							Reference< frame::XFrame > xFrame,
-							OUString sUrl)
+							OUString sUrl,
+							OUString sTypeName)
 {
 	uno::Sequence< beans::PropertyValue > aProperties( 3 );
 
@@ -41,7 +52,7 @@ FrameLoaderLoadFileFromUrl( Reference< frame::XSynchronousFrameLoader > xFrameLo
 	
 	aProperties[ 1 ] = PropertyValue( OUString::createFromAscii( "TypeName" ),
 									  0,
-									  uno::makeAny( OUString::createFromAscii( "writer_StarOffice_XML_Writer" ) ),
+									  uno::makeAny( sTypeName ),
 									  PropertyState_DIRECT_VALUE ); 
 	
 	aProperties[ 2 ] = PropertyValue( OUString::createFromAscii( "ReadOnly" ),
@@ -116,20 +127,30 @@ main( int argc, char *argv[] )
 		star_frame_widget_get_frame( STAR_FRAME_WIDGET( pSocket ) ) );
 	g_assert( xFrame.is() );
 
+	// Loading
+	Reference< document::XTypeDetection > xTypeDetection(
+		xMultiServiceFactory->createInstance(
+			OUString::createFromAscii( "com.sun.star.document.TypeDetection" ) ),
+		uno::UNO_QUERY );
+	g_assert( xTypeDetection.is() );
+
 	Reference< XMultiServiceFactory > xFrameLoaderFactory(
 		xMultiServiceFactory->createInstance(
 			OUString::createFromAscii( "com.sun.star.frame.FrameLoaderFactory" ) ),
 		uno::UNO_QUERY );
+	g_assert( xFrameLoaderFactory.is() );
+
+	OUString sTypeName( xTypeDetection->queryTypeByURL( OUString::createFromAscii( FILENAME ) ) );
 
 	Reference< frame::XSynchronousFrameLoader > xFrameLoader(
-		xFrameLoaderFactory->createInstance(
-			OUString::createFromAscii( "writer_StarOffice_XML_Writer" ) ),
+		xFrameLoaderFactory->createInstance(sTypeName),
 		uno::UNO_QUERY );
 	g_assert( xFrameLoader.is() );
 		
 	FrameLoaderLoadFileFromUrl(
 		xFrameLoader, xFrame,
-		OUString::createFromAscii( FILENAME ) );
+		OUString::createFromAscii( FILENAME ),
+		sTypeName );
 
 	gtk_widget_grab_focus( pSocket );
 	gtk_widget_show( pSocket );
