@@ -108,7 +108,7 @@ factory( BonoboGenericFactory *factory,
 
 		Reference< uno::XInterface > xInterface =
 			xMultiComponentFactoryClient->createInstanceWithContext(
-				SERVICENAME_UNOURLRESOLVER ), xComponentContext );
+				SERVICENAME_UNOURLRESOLVER, xComponentContext );
 		g_assert( xInterface.is() );
 
 		Reference< bridge::XUnoUrlResolver > xUnoUrlResolver(
