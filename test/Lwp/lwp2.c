@@ -37,6 +37,27 @@ dump_hex (unsigned char *data, int len, int indent)
 }
 
 static void
+dump_at (FILE *in)
+{
+		int i = 0;
+		byte_t frame = 0x01;
+		byte_t data[65536] = { 0, };
+		byte_t last = 0;
+		int indent = 0;
+
+		while (!feof(in)) {
+				data[i] = fgetc (in);
+				if (data[i] == '@') {
+						fprintf( stderr, "Field length %d\n", i );
+						dump_hex (data, i, 0);
+						data[0] = data[i];
+						i = 0;
+				}
+				i++;
+		}
+}
+
+static void
 dump_simple (FILE *in)
 {
 		int i = 0;
@@ -76,7 +97,8 @@ dump_simple (FILE *in)
 // 00 02 6a c1 02 2f 41 02 2d 48 0f 61 01 6d 46 8d | ..j../A.-H.a.mF.
 // 46 c3 01 f6 28 0e 41 01 96 40 01 42 | F...(.A..@.B
 
-#define is_ctrl(c) ((c) == 1 || (c) == 2)
+// #define is_ctrl(c) ((c) == 1 || (c) == 2)
+#define is_ctrl(c) ((c) == '@')
 int
 main (int argc, char **argv)
 {
@@ -92,7 +114,11 @@ main (int argc, char **argv)
 		fseek (in, init_offset, SEEK_SET);
 
 #if 1
+#  if 1
+		dump_at (in);
+#  else
 		dump_simple (in);
+#  endif
 #else
 
 		while (!feof(in)) {
