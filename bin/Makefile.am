@@ -8,6 +8,7 @@ script_files = \
 	ootouch \
 	linkoo \
 	install-dict.in \
-	ooo-wrapper.in
+	ooo-wrapper.in \
+	latest-patchset
 
 EXTRA_DIST = $(script_files) ooo1.1.spec.in ooo.spec.in
