@@ -9,12 +9,6 @@ typedef unsigned char byte_t;
 static long init_offset = 0x2633;
 
 static void
-print_special (unsigned char c)
-{
-		fprintf( stderr, "<0x%x>", c);
-}
-
-static void
 dump_string (FILE *fin, int char_len)
 {
 		byte_t datum;
@@ -23,29 +17,8 @@ dump_string (FILE *fin, int char_len)
 				if (isascii (datum)) {
 						fprintf (stderr, "%c", datum);
 						char_len--;
-				} else switch (datum) {
-				case 0x91:
-				case 0x88:
-				case 0x8f:
-				case 0xc6:
-						fprintf (stderr, "<magicnolen0x%x>", datum);
-						break;
-				case 0x82:
-				case 0x8a:	
-				case 0x8d:
-				case 0x97:
-				case 0xa9:
-				case 0xb9:
-				case 0xbd:
-				case 0xbf:
-						char_len--;
+				} else
 						fprintf (stderr, "<magic0x%x>", datum);
-						break;
-				default:
-						fprintf (stderr, "Error: unknown code 0x%x\n", datum);
-						print_special (datum);
-						break;
-				}
 		}
 		fprintf (stderr, "'\n");
 }
@@ -98,14 +71,14 @@ get_len (byte_t codea, byte_t codeb, ValueType *type)
 		if (codea == 0x02) {
 				switch (codeb) {
 				case 0x02:
-						len = (byte_t) fgetc(in) + 1;
+						len = (byte_t) fgetc(in);
 						*type = VALUE_STRING;
 						break;
 				case 0x04: 
 				{ /* Almost certainly wrong */
 						int i;
 						for (i = 0; i < 10; i++) fgetc(in);
-						len = (byte_t) fgetc(in) + 1;
+						len = (byte_t) fgetc(in);
 						*type = VALUE_STRING;
 						break;
 				}
@@ -161,15 +134,22 @@ main (int argc, char **argv)
 		in = fopen(argv[1], "r");
 		fseek (in, init_offset, SEEK_SET);
 
-		while (!feof(in) && !die) {
+		while (!feof(in)) {
 				byte_t codea = fgetc (in);
 				byte_t codeb = fgetc (in);
 				ValueType type;
 				int len = get_len (codea, codeb, &type);
 				if (len < 0) {
-						fprintf (stderr, "Parsing error:\n");
-						len = 1024;
-						die = 1;
+						fprintf (stderr, "Error: unknown code 0x%x, 0x%x:\n", codea, codeb);
+						fread (data, 1, 64, in);
+						dump_hex (data, len);
+						fseek (in, -64, SEEK_CUR);
+						
+						while ((len = get_len (codea, codeb, &type)) < 0) {
+								fprintf (stderr, "Error: re-framing: skip byte 0x%x\n", codea );
+								codea = codeb;
+								codeb = fgetc (in);
+						}
 				}
 				if (type == VALUE_STRING)
 				{
