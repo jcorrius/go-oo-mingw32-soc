@@ -28,4 +28,4 @@ ini_DATA = $(ini_in_files:.ini.in=.ini)
 
 EXTRA_DIST=$(server_in_files) $(ini_in_files)
 
-DISTCLEANFILES = $(rdb_DATA) $(server_DATA) $(ini_DATA)
+CLEANFILES = $(rdb_DATA) $(server_DATA) $(ini_DATA)
