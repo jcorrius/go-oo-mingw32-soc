@@ -34,8 +34,10 @@ using com::sun::star::uno::Reference;
 struct _OOoBonoboControlPrivate {
 	GtkWidget *hbox;
 	StarFrameWidget *sfw;
-	rtl::OUString uri;
 	BonoboZoomable *zoomable;
+
+	rtl::OUString uri;
+	gboolean pending_load;
 };
 
 BONOBO_CLASS_BOILERPLATE( OOoBonoboControl, ooo_bonobo_control,
@@ -273,12 +275,15 @@ static int
 load_uri( BonoboPersistFile *pf, const CORBA_char *text_uri,
 		  CORBA_Environment *ev, gpointer user_data )
 {
-	OOoBonoboControl *pControl = OOO_BONOBO_CONTROL( user_data );
+	OOoBonoboControl *control = OOO_BONOBO_CONTROL( user_data );
 
-	pControl->priv->uri =
-		DECLARE_ASCII( "file://" ) + B2U( rtl::OString( text_uri ) );
-
-	g_message( "Load_uri called: %s", text_uri );
+	if( GTK_WIDGET_REALIZED( control->priv->sfw ) ) {
+		// FIXME implement
+	} else {
+		control->priv->uri =
+			DECLARE_ASCII( "file://" ) + B2U( rtl::OString( text_uri ) );
+		control->priv->pending_load = TRUE;
+	}
 }
 
 static void
@@ -330,11 +335,14 @@ frame_widget_realize( GtkWidget *widget, gpointer user_data )
 	Reference< frame::XFrame > xFrame(
 		star_frame_widget_get_frame( STAR_FRAME_WIDGET( pSocket ) ) );
 	g_assert( xFrame.is() );
+
+	if( control->priv->pending_load ) {
+		FrameLoadFileFromUrl( xFrame, pSocket->service_manager, control->priv->uri );
 		
-	FrameLoadFileFromUrl( xFrame, pSocket->service_manager, control->priv->uri );
-	
-	// change to full screen mode (the frame)
-	star_frame_widget_set_fullscreen( pSocket, sal_True );
+		// change to full screen mode (the frame)
+		star_frame_widget_set_fullscreen( pSocket, sal_True );
+		control->priv->pending_load = FALSE;
+	}
 }
 
 static BonoboUIVerb verbs[] = {
