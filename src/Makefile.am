@@ -13,5 +13,7 @@ EXTRA_DIST=\
 	openabout_ark.png \
 	file-bug-24.png \
 	file-bug-16.png \
-	novell-team.png
+	novell-team.png \
+	evolocal.odb
+
 
