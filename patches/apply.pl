@@ -208,7 +208,7 @@ foreach $a (@ARGV) {
 	}
 }
 
-$base_cmd = "patch -l -b -p0 $opts -d $dest_dir";
+$base_cmd = "patch -l -b --fuzz=1 -p0 $opts -d $dest_dir";
 
 print "Execute: $base_cmd for distro '$distro'\n" unless $quiet;
 
