@@ -1,4 +1,4 @@
-SUBDIRS = m4 po desktop bin etc patches www
+SUBDIRS = po desktop bin etc patches www
 
 EXTRA_DIST = config.rpath 			\
 	mkinstalldirs		\
