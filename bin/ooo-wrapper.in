@@ -22,7 +22,6 @@
 
 use strict;
 use IO::Handle;
-use XML::Twig;
 use Fcntl ':flock';
 
 my $Debug = $ENV{OOO_DEBUG};
@@ -61,17 +60,9 @@ my $SetupProgram = "$SystemInstallDir/program/setup";
 my $SetupConfig = "/etc/openoffice/autoresponse$BinSuffix.conf";
 
 # Options to pass to setup.
-my $ConfigPath;
-my $XmlSuffix;
-my $AppArg;
+my $AppArg = '-'
 
-$XmlSuffix = '.xcu';
-$ConfigPath = 'registry/data';
-$AppArg = '-';
-
-# Define user TypeDetection.xml file
-my $TypeDetectionXML = "$UserInstallDir/user/$ConfigPath/org/openoffice/Office/TypeDetection.$XmlSuffix";
-
+# Where gconftool is...
 my $GConfTool = 'gconftool-2';
 
 my $ConfQuickstart = '/apps/ooo-ximian/quickstart';
@@ -158,151 +149,6 @@ sub WriteVersionFile(%) {
     DoWriteVersionFile \%config, "$VersionFile";
 }
 
-#=============================================================================
-# Dump XML tree into file specified by name
-#=============================================================================
-sub OutputXML($$) {
-    my ($file, $tree) = @_;
-    local *F;
-    open F, ">$file" or die "Cannot write to file $file\n";
-    $tree->print(\*F);
-    close F;
-}
-
-sub AddFormatNode($$$$)
-{
-    my ($froot, $name, $default, $flagValue) = @_;
-    my $child;
-    my $set = 0;
-    my $changed = 0;
-    my @melems = split ',', $default, -1;
-
-    foreach $child ( $froot->children ) {
-	my $fdata = $child->first_child( 'Data' );
-	if (!$fdata) {
-	    print "Serious config XML node format error:\n";
-	    $child->print;
-	    next;
-	}
-	
-	my @elems = split ',', $fdata->text, -1;
-	if ($melems[1] eq $elems[1]) {
-	    $Debug && print "Elem ". $elems[1] . ' -> ' . $elems[4] . "\n";
-	    if ($elems[4] ne $flagValue) {
-		$elems[4] = $flagValue;
-
-		my $newText = join (',', @elems);
-		$Debug && print "'" . $fdata->text . "' ->\n'$newText'\n";
-		$fdata->set_text ($newText);
-		$changed = 1;
-	    }
-	    $set = 1;
-	}
-    }
-    if (!$set) { # splice in a new node.
-	my $newFilter;
-
-	$melems[4] = $flagValue;
-	$newFilter = XML::Twig->new();
-        $newFilter->parsestring("<Filter cfg:name=\"$name\">\n".
-				'<Data cfg:type="string">'.join(',',@melems).
-				"</Data>\n</Filter>");
-	$newFilter || die "Failed parse";
-        $newFilter->root->paste('first_child', $froot);
-	$Debug && print "Created new node for '$name'\n";
-	$changed = 1;
-    }
-    return $changed;
-}
-
-sub SyncFormat() {
-    my $format = `$GConfTool --get $ConfDefaultFormat 2>&1`;
-    if (!$format) {
-	$format = '';
-    }
-    if ($format =~ m/$ConfDefaultFormat/) {
-	$format = '';
-    }
-
-    my $ms = $format =~ m/MS/i;
-    my $oo = $format =~ m/OOo/i;
-
-    $Debug && print "MS: $ms, OO.o: $oo\n";
-
-    if ($ms || $oo) {
-	# Initialize Twig XML parser
-	my $type_xml = XML::Twig->new(pretty_print => "indented", keep_encoding => 1);
-    
-	if (!-f $TypeDetectionXML) {
-	    my $Handle;
-	    if (open ($Handle, ">$TypeDetectionXML")) {
-		print $Handle '<?xml version="1.0" encoding="UTF-8"?>
-<TypeDetection state="modified" cfg:package="org.openoffice.Office" xmlns="http://openoffice.org/2000/registry/components/TypeDetection" xmlns:cfg="http://openoffice.org/2000/registry/instance" xmlns:xsi="http://www.w3.org/1999/XMLSchema-instance">
- <Filters cfg:element-type="Filter"/>
-</TypeDetection>';
-		close ($Handle);
-	    } elsif ($Debug) {
-		print "Failed to open $TypeDetectionXML\n";
-	    }
-	}
-
-	# Adjust user interface language, in Setup.xml
-	my $p = $type_xml->parsefile("$TypeDetectionXML");
-	my $oolocale_node;
-	if (!$p) {
-	    $Debug && print "Failed to create or open $TypeDetectionXML\n";
-	    return;
-	}
-
-	my $froot;
-	if (! ($froot = ($type_xml->get_xpath("/TypeDetection/Filters"))[0]) &&
-	    ! ($froot = ($type_xml->get_xpath("/Filters"))[0])) {
-	    $Debug && print "Failed to find Filters node in $TypeDetectionXML\n";
-	    # FIXME: Ideally we could splice some filters in here ... Twig 
-	    # nastiness makes it harder
-	    return;
-	}
-
-	my $changed = 0;
-
-	# Don't you just love magic numbers ...
-	if (AddFormatNode ($froot, 'MS Excel 97',
-			   'm,calc_MS_Excel_97,com.sun.star.sheet.SpreadsheetDocument,,259,,0,,',
-			   $oo ?  '3' : '259')) {
-	    $changed = 1;
-	}
-	if (AddFormatNode ($froot, 'MS PowerPoint 97',
-			   '3,impress_MS_PowerPoint_97,com.sun.star.presentation.PresentationDocument,,323,emp,0,,',
-			   $oo ? '67' : '323')) {
-	    $changed = 1;
-	}
-	if (AddFormatNode ($froot, 'MS Word 97',
-			   '3,writer_MS_Word_97,com.sun.star.text.TextDocument,,67,CWW8,0,,',
-			   $oo ? '67' : '323')) {
-	    $changed = 1;
-	}
-	if (AddFormatNode ($froot, 'StarOffice XML (Calc)',
-			   '1,calc_StarOffice_XML_Calc,com.sun.star.sheet.SpreadsheetDocument,,39,,6200,,',
-			   $oo ?       '295' : '39')) {
-	    $changed = 1;
-	}
-	if (AddFormatNode ($froot, 'StarOffice XML (Impress)',
-			   '1,impress_StarOffice_XML_Impress,com.sun.star.presentation.PresentationDocument,,268435495,XML,6200,,',
-			   $oo ? '268435751' : '268435495')) {
-	    $changed = 1;
-	}
-	if (AddFormatNode ($froot, 'StarOffice XML (Writer)',
-			   '1,writer_StarOffice_XML_Writer,com.sun.star.text.TextDocument,,268435495,CXML,6200,,',
-			   $oo ? '268435751' : '268435495')) {
-	    $changed = 1;
-	}
-
-	if ($changed) {
-	    $Debug && print "Changed; re-writing";
-	    OutputXML "$TypeDetectionXML", $type_xml;
-	}
-    }
-}
 #=============================================================================
 # Main
 #=============================================================================
@@ -463,7 +309,11 @@ symlinkf $UserWorkDir, "$UserInstallDir/user/work"
 symlinkf "$SystemInstallDir/program/soffice", "$UserInstallDir/soffice";
 symlinkf "$SystemInstallDir/program/setup", "$UserInstallDir/setup";
 
-SyncFormat();
+my $format = `$GConfTool --get $ConfDefaultFormat 2>&1`;
+
+if ($format =~ m/MS/i) {
+    $ENV{COMPATIBLE}="1";
+}
 
 flock ($Lock, LOCK_UN);
 close ($Lock);
