@@ -33,6 +33,7 @@ sub do_patch {
     my $cmd_suffix = "";
 
     print "$patch_file: testing..."; 
+    return;
 
     if ($quiet) 
         { $cmd_output = " > /dev/null " }
@@ -75,6 +76,7 @@ sub apply_patches {
     open (PatchList, "$apply_list") || die "Can't find $apply_list";
 
     my @targets=($distro);
+    my @subsets=($distro);
     while (<PatchList>) {
             s/\s*#.*//;
             chomp;
@@ -83,22 +85,37 @@ sub apply_patches {
             if (/\[\s*(.*)\]/) {
                 my $tmp = $1;
                 $tmp =~ s/\s+$//;
-                #print "Distro: '$tmp'\n"; 
-
-                @targets = split /\s*,\s*/, $tmp;
+#               print "Target: '$tmp'\n"; 
+                @targets = (split /\s*,\s*/, $tmp);
                 next;
             }
 
-            if (/\s*(\S+)\s*\s*=(\S+)/) {
-                $options{$1} = $2;
-                print "$1 => $2\n" unless $quiet;
+            if (/\s*([_\S]+)\s*=\s*(.*)/) {
+		my $key = $1;
+		my $value = $2;
+		if ($key =~ /^_/) {
+		    if ($key =~ /^_$distro/) {
+			@subsets = (split /\s*,\s*/, $value);
+			print "selected sets: @subsets\n";
+		    }
+		} else {
+		    $options{$key} = $value;
+		    print "$key => $value\n" unless $quiet;
+		}
                 next;
             }
 
-            if (!grep /$distro/i, @targets) {
-                #print "$distro: skipping '$_'\n";
-                next;
-            }
+	    my $set;
+	    my $match = 0;
+	    for $set (@targets) {
+		if (grep /$set/i, @subsets) {
+		    $match = 1;
+		}
+	    }
+	    if (!$match) {
+#		print "@subsets: @targets: skipping '$_'\n";
+		next;
+	    }
 
             push @Patches, find_file ($patch_dir, $_);
     }
