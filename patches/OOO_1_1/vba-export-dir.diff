@@ -1,0 +1,1057 @@
+--- /dev/null	2003-09-23 18:59:22.000000000 +0100
++++ svx/source/msfilter/msvbasicdir.cxx	2004-03-29 08:47:59.000000000 +0100
+@@ -0,0 +1,970 @@
++#include <string.h> 	// memset(), ...
++#ifndef UNX
++#include <io.h> 		// access()
++#endif
++#ifndef _SFX_OBJSH_HXX
++#include <sfx2/objsh.hxx>
++#endif
++#ifndef _SFXAPP_HXX
++#include <sfx2/app.hxx>
++#endif
++#ifndef _BASMGR_HXX
++#include <basic/basmgr.hxx>
++#endif
++#ifndef _SB_SBMOD_HXX
++#include <basic/sbmod.hxx>
++#endif
++#ifndef _SVXERR_HXX
++#include <svxerr.hxx>
++#endif
++#ifndef _SOT_STORINFO_HXX
++#include <sot/storinfo.hxx>
++#endif
++#ifndef _MSVBASIC_HXX
++#include "msvbasicdir.hxx"
++#endif
++
++#include <com/sun/star/container/XNameContainer.hpp>
++#include <com/sun/star/script/XLibraryContainer.hpp>
++using namespace com::sun::star::container;
++using namespace com::sun::star::script;
++using namespace com::sun::star::uno;
++using namespace com::sun::star::lang;
++using namespace rtl;
++
++#define nWINDOWLEN 4096
++
++static unsigned int
++getShift( ULONG nPos )
++{
++	if (nPos <= 0x80) {
++		if (nPos <= 0x20)
++			return (nPos <= 0x10) ? 12 : 11;
++		else
++			return (nPos <= 0x40) ? 10 : 9;
++	} else {
++		if (nPos <= 0x200)
++			return (nPos <= 0x100) ? 8 : 7;
++		else if (nPos <= 0x800)
++			return (nPos <= 0x400) ? 6 : 5;
++		else
++			return 4;
++	}
++}
++
++struct CompressBuffer {
++	// buffer for match making
++	UINT8 mpBuffer[ nWINDOWLEN ];
++	ULONG mnLength;
++
++	// output buffering
++	SvStream   *mpOutput;
++	UINT8       mnMask;
++	UINT8       maBlock[16];
++	UINT8		mnBlockLength;
++	UINT8		mnShift;
++
++	CompressBuffer( SvStream *pOutput )
++	{
++		memset( mpBuffer, 0, sizeof( mpBuffer ) );
++		mnLength = 0;
++		mnBlockLength = 0;
++		mpOutput = pOutput;
++		mnShift  = 0;
++		mnMask   = 0;
++	}
++
++	void
++	flush()
++	{
++		if( mnBlockLength ) {
++			*mpOutput << mnMask;
++			mpOutput->Write( maBlock, mnBlockLength );
++			mnBlockLength = 0;
++			mnMask = mnShift = 0;
++		}
++	}
++
++	void outputData( UINT8 *pData, bool bCompressed )
++	{
++		if (bCompressed)
++		{
++			mnMask |= 1 << mnShift;
++			maBlock[ mnBlockLength++ ] = pData[0];
++			maBlock[ mnBlockLength++ ] = pData[1];
++		}
++		else
++			maBlock[ mnBlockLength++ ] = pData[0];
++
++		if( ++mnShift == 8)
++			flush();
++	}
++
++	void
++	outputMatch( ULONG nCurPos, ULONG nMatchPos, ULONG nLength )
++	{
++		ULONG nShift, nToken, nDistance;
++		UINT8 aData[2];
++
++		nShift = getShift( nCurPos );
++
++		nDistance = nCurPos - nMatchPos - 1;
++		nToken = (nDistance << nShift) + ((nLength - 3) & ((1<<nShift)-1));
++
++		aData[0] = nToken & 0xff;
++		aData[1] = nToken >> 8;
++
++		outputData( aData, TRUE );
++	}
++
++	int /* Unbelievably slow, but ... */
++	findMatch (ULONG nPos, ULONG &rnLen)
++	{
++		int i;
++
++		/* FIXME: the MS impl. does different to a linear search here
++		   and is not very good at this either; is happy to get much
++		   worse matches; perhaps some single-entry match lookup table ?
++		   it seems to ~regularly truncate strings, and get earlier
++		   / later matches of equivalent length with no predictability
++		   ( hashing ? ).
++		*/
++		for (i = nPos - 1; i >= 0; i--)
++		{
++			int j;
++
++			for (j = 0; j < mnLength - nPos && j < nPos; j++)
++				if (mpBuffer[nPos + j] != mpBuffer[i + j])
++					break;
++
++			if (j >= 3)
++			{
++				rnLen = j;
++				return i;
++			}
++		}
++		return -1;
++	}
++
++	bool
++	readBlock( SvStream *pInStream )
++	{
++		mnLength = pInStream->Read( mpBuffer, nWINDOWLEN );
++		return mnLength > 0;
++	}
++};
++
++static void
++compressBlock( CompressBuffer &rBuffer )
++{
++	ULONG nPos, nMatchLen;
++	int   nMatchPos;
++
++	for (nPos = 0; nPos < rBuffer.mnLength;)
++	{
++		if ((nMatchPos = rBuffer.findMatch( nPos, /* ref */ nMatchLen )) >= 0)
++		{
++			rBuffer.outputMatch( nPos, nMatchPos, nMatchLen );
++			nPos += nMatchLen;
++		}
++		else
++			rBuffer.outputData( &(rBuffer.mpBuffer[ nPos++ ]), FALSE );
++	}
++}
++namespace MSLZSS {
++
++void compressStream( SvStream *pStream, SvStream *pInStream )
++{
++	ULONG nStartPos = pStream->Tell();
++	pStream->Seek( nStartPos + 3 );
++	CompressBuffer aBuffer( pStream );
++
++	while( aBuffer.readBlock( pInStream ) )
++			compressBlock( aBuffer );
++	aBuffer.flush();
++
++	ULONG nSize = pStream->Tell() - nStartPos;
++	ULONG nLength = nSize - 3 - 1;
++
++	if( nLength > 0x0c0c ) /* TESTME: really right ? */
++		nLength = 0x0c0c;  /* follow-on chunk sizes ? */
++
++	pStream->Seek( nStartPos );
++	*pStream << UINT8(0x01);
++	*pStream << UINT8( nLength & 0xff);
++	*pStream << UINT8( nLength >> 8 | 0xb0 );
++}
++
++void
++compressString( SvStream *pStream, const OString &rString )
++{
++	SvMemoryStream aStream( (void *) rString.getStr(), rString.getLength(), STREAM_READ );
++	compressStream( pStream, &aStream );
++}
++
++SvMemoryStream *decompressAsStream( SvStream *pStream, ULONG nOffset, ULONG *pCompressedLength, ULONG *pLength )
++{
++	SvMemoryStream *pResult;
++
++	pResult = new SvMemoryStream();
++	
++	sal_uInt8 nLeadbyte;
++	unsigned int nPos = 0;
++	int nLen, nDistance, nShift, nClean=1;
++	sal_uInt8 aHistory[ nWINDOWLEN ];
++
++	pStream->Seek( nOffset + 3 );
++
++	while( pStream->Read( &nLeadbyte, 1 ) )
++	{
++		for(int nMask=0x01; nMask < 0x100; nMask = nMask<<1)
++		{
++			// we see if the leadbyte has flagged this location as a dataunit
++			// which is actually a token which must be looked up in the history
++			if( nLeadbyte & nMask )
++			{
++				sal_uInt16 nToken;
++
++				*pStream >> nToken;
++
++				if (nClean == 0)
++					nClean=1;
++
++                //For some reason the division of the token into the length
++                //field of the data to be inserted, and the distance back into
++                //the history differs depending on how full the history is
++				nShift = getShift( nPos % nWINDOWLEN );
++
++				nLen = (nToken & ((1<<nShift) - 1)) + 3;
++				nDistance = nToken >> nShift;
++
++                //read the len of data from the history, wrapping around the
++                //nWINDOWLEN boundary if necessary data read from the history
++                //is also copied into the recent part of the history as well.
++				for (int i = 0; i < nLen; i++)
++				{
++					unsigned char c;
++					c = aHistory[(nPos-nDistance-1) % nWINDOWLEN];
++					aHistory[nPos % nWINDOWLEN] = c;
++					nPos++;
++				}
++			}
++			else
++			{
++                // special boundary case code, not guarantueed to be correct
++                // seems to work though, there is something wrong with the
++                // compression scheme (or maybe a feature) where when the data
++                // ends on a nWINDOWLEN boundary and the excess bytes in the 8
++                // dataunit list are discarded, and not interpreted as tokens
++                // or normal data.
++				if ((nPos != 0) && ((nPos % nWINDOWLEN) == 0) && (nClean))
++				{
++					pStream->SeekRel(2);
++					nClean=0;
++					pResult->Write( aHistory, nWINDOWLEN );
++					break;
++				}
++				//This is the normal case for when the data unit is not a
++				//token to be looked up, but instead some normal data which
++				//can be output, and placed in the history.
++				if (pStream->Read(&aHistory[nPos % nWINDOWLEN],1))
++					nPos++;
++
++				if (nClean == 0)
++					nClean=1;
++			}
++		}
++	}
++	if (nPos % nWINDOWLEN)
++		pResult->Write( aHistory, nPos % nWINDOWLEN );
++	pResult->Flush();
++
++	if( pCompressedLength )
++		*pCompressedLength = nPos;
++
++	if( pLength )
++		*pLength = pResult->Tell();
++
++#if 0
++ {
++	fprintf( stderr, "Decompressed stream: %d bytes, size: %d\n",
++			 pResult->Tell(), pResult->GetSize() );
++	pResult->Seek( 0 );
++	UINT8 aData[8];
++	ULONG nUrk = 0;
++	UINT8 nCnt;
++	while( ( nCnt = pResult->Read( aData, 8 ) ) > 0 )
++	{
++		int i;
++		fprintf( stderr, "%.8x : ", nUrk);
++		nUrk += nCnt;
++		for( i = 0; i < nCnt; i++ )
++			fprintf( stderr, "%.2x ", aData[i] );
++
++		fprintf( stderr," | " );
++		for( i = 0; i < nCnt; i++ )
++			fprintf( stderr, "%c", aData[i] >= 0x20 ? aData[i] : '.' );
++		fprintf( stderr, "\n" );
++	}
++ }
++#endif	
++
++	pResult->Seek( 0 );
++
++	return pResult;
++}
++
++OString decompressAsString( SvStream *pStream, ULONG nOffset, ULONG *pCompressedLength, ULONG *pLength )
++{
++	ULONG nResultLength;
++	SvMemoryStream *pResultStream = decompressAsStream( pStream, nOffset, pCompressedLength, &nResultLength );
++
++	// Isn't it just marvelous that SvMemoryStream has no sensible 'size'
++	// method that returns nEndOfData [!]
++	if( pLength )
++		*pLength = nResultLength;
++
++	OString aResult( (const sal_Char *)pResultStream->GetData(), nResultLength );
++	delete pResultStream;
++	return aResult;
++}
++
++}; /* End MSLZSS */
++
++static void
++stripAttributes( OUString &rVBA, bool bIsMac )
++{
++	const sal_Unicode cLineEnd = bIsMac ? '\x0D' : '\x0A';
++	const rtl::OUString sAttribute( OUString::createFromAscii( "Attribute" ) );
++	while( rVBA.indexOf( sAttribute ) == 0 )
++	{
++		sal_Int32 nEnd = rVBA.indexOf( cLineEnd );
++		if( nEnd == -1 )
++	 		break;
++		rVBA = rVBA.copy( nEnd + 1 );
++	}
++}
++
++static void
++commentSource( OUString &rVBA, const OUString &rName, bool bIsMac )
++{
++	OUString sTempStringa(OUString::createFromAscii(
++								  bIsMac ? "\x0D": "\x0D\x0A"));
++	OUString sTempStringb( sTempStringa );
++	OUString sTempRem = OUString::createFromAscii( "Rem " );
++	sTempStringb += sTempRem;
++	sal_Int32 nFromIndex = 0;
++	sal_Int32 nToIndex = -1;
++	while( (nToIndex = rVBA.indexOf( sTempStringa, nFromIndex ) ) != -1 )
++	{
++		rVBA = rVBA.replaceAt( nToIndex, sTempStringa.getLength(), sTempStringb);
++		nFromIndex = nToIndex += sTempStringb.getLength();
++	}
++	rVBA = sTempRem + rVBA;
++
++	// Streams can have spaces in them, but modulenames
++	// cannot !
++	rtl::OUString sTemp( rtl::OUString::createFromAscii( "Sub " ) );
++	sTemp += rName.replace( sal_Unicode(' '), sal_Unicode('_') );
++	sTemp += OUString::createFromAscii("\n");
++	rVBA = sTemp + rVBA;
++	rVBA += OUString::createFromAscii("\nEnd Sub");
++}
++
++struct DirTokenizer {
++	SvStream *mpStream;
++	UINT16    mnToken;
++	UINT32    mnLength;
++	UINT32    mnConsumed;
++	bool	  mnbEof;
++
++	DirTokenizer( SvStream *pStream ) :
++		mpStream(pStream), mnToken(0),
++		mnLength(0), mnConsumed(0),
++		mnbEof(false) {}
++	~DirTokenizer() {}
++
++	bool
++	nextToken()
++	{
++		mpStream->SeekRel( mnLength - mnConsumed );
++
++		mnToken = mnLength = mnConsumed = 0;
++
++		// Seeking clears the eof marker - so read first ...
++		*mpStream >> mnToken;
++		if( mpStream->IsEof() )
++			return !(mnbEof = true);
++
++		*mpStream >> mnLength;
++		if( mpStream->IsEof() )
++			return !(mnbEof = true);
++	
++		if( mnToken == VBA_DIR_OP_PAPER_SIZE ) /* Quirk */
++			mnLength += 2;
++
++		fprintf( stderr, "Next token 0x%x (%d long)\n",
++				 mnToken, mnLength );
++
++		return true;
++	}
++
++	bool
++	isEof()
++	{
++		return mnbEof;
++	}
++
++	UINT32
++	getLong()
++	{
++		UINT32 nResult;
++		mnConsumed += 4;
++		*mpStream >> nResult;
++		return nResult;
++	}
++
++	UINT16
++	getShort()
++	{
++		UINT16 nResult;
++		mnConsumed += 2;
++		*mpStream >> nResult;
++		return nResult;
++	}
++
++	OUString
++	getUString()
++	{
++		sal_Unicode aData[ ( mnLength + 1 ) / 2 ];
++		mpStream->Read( aData, mnLength );
++		mnConsumed += mnLength;
++		return OUString( aData, mnLength/2 );
++	}
++
++	OUString
++	getString()
++	{
++		sal_Char aData[ mnLength ];
++		mpStream->Read( aData, mnLength );
++		mnConsumed += mnLength;
++		return OUString( aData, mnLength, RTL_TEXTENCODING_MS_1252 );
++	}
++
++	Reference< XNameContainer > 
++	parseHeader( const Reference< XLibraryContainer > &xLibContainer )
++	{
++		OUString aProjectName = OUString::createFromAscii( "Standard" );
++		Reference< XNameContainer > xLib;
++
++		if( !xLibContainer.is() )
++			return xLib;
++
++		// Parse the header
++		while( nextToken() && mnToken != VBA_DIR_SHORT_OBJECT_COUNT )
++		{
++			switch( mnToken )
++			{
++			case VBA_DIR_STR_PROJECT_NAME:
++//				aProjectName = getString(); - this causes export grief.
++				break;
++			}
++		}
++
++		if( !mnToken )
++			return xLib;
++
++		fprintf( stderr, "CreateLibrary: '%s'\n",
++					 (const sal_Char *) rtl::OUStringToOString(
++							 aProjectName, RTL_TEXTENCODING_UTF8 ) );
++				 
++		if( !xLibContainer->hasByName( aProjectName ) )
++			xLibContainer->createLibrary( aProjectName );
++
++		Any aLibAny = xLibContainer->getByName( aProjectName );
++		aLibAny >>= xLib;
++
++		return xLib;
++	}
++
++	bool
++	readObject( const SvStorageRef &xStorage,
++				Reference< XNameContainer > &xLib,
++				bool bStripped, bool bAsComment)
++	{
++		OUString aName;
++		ULONG    nOffset = 0;
++		OUString aStreamName;
++
++		while( nextToken() && mnToken != VBA_DIR_OBJECT_END )
++		{
++			switch( mnToken )
++			{
++			case VBA_DIR_STR_USER_NAME:
++				aName = getString();
++				break;
++			case VBA_DIR_USTR_USER_NAME:
++				aName = getUString();
++				break;
++			case VBA_DIR_STR_STREAM_NAME:
++				aStreamName = getString();
++				break;
++			case VBA_DIR_USTR_STREAM_NAME:
++				aStreamName = getUString();
++				break;
++			case VBA_DIR_LONG_VBA_OFFSET:
++				nOffset = getLong();
++				break;
++			default:
++				break;
++			}
++		}
++		if( aStreamName.getLength() )
++		{
++			fprintf( stderr, "Open stream: '%s' (0x%x)\n",
++					 (const sal_Char *) rtl::OUStringToOString(
++							 aStreamName, RTL_TEXTENCODING_UTF8 ),
++					 nOffset );
++
++			SotStorageStreamRef xVBA;
++
++			xVBA = xStorage->OpenSotStream( aStreamName, STREAM_STD_READ );
++			if( !xVBA.Is() )
++			{
++				fprintf( stderr, "Failed to open stream\n" );
++				return false;
++			}
++
++			OUString sSource = OStringToOUString(
++					MSLZSS::decompressAsString( xVBA, nOffset ),
++					RTL_TEXTENCODING_MS_1252 );
++
++			bool bIsMac = false; /* FIXME */
++			if( bStripped )
++				stripAttributes( sSource, bIsMac );
++			if( bAsComment )
++				commentSource( sSource, aName, bIsMac );
++
++			if( sSource.getLength() <= 0 )
++				return true;
++
++			rtl::OUString aModName( aName );
++			Any aSourceAny;
++			aSourceAny <<= sSource;
++			if (xLib->hasByName(aModName))
++				xLib->replaceByName(aModName, aSourceAny);
++			else
++				xLib->insertByName(aModName, aSourceAny);
++
++			return true;
++		}
++		else
++			fprintf( stderr, "Duff stream name\n" );
++	}
++};
++
++VBADir::VBADir( SvStorageRef &xProjectStorage, SvStorageRef &xStorage ) :
++		mxStorage( xStorage ), mxProjectStorage( xProjectStorage )
++{
++}
++
++VBADir::~VBADir()
++{
++}
++
++bool
++VBADir::readBasic( SfxObjectShell &rDocSh, bool bAsComment, bool bStripped )
++{
++	bool bRet = false;
++	SotStorageStreamRef xDir;
++
++	// Clobber
++	bAsComment = false;
++
++	xDir = mxStorage->OpenSotStream( OUString::createFromAscii( "dir"),
++									 STREAM_STD_READ );
++	if( !xDir.Is() )
++	{
++		DBG_WARNING( "No 'dir' stream" );
++		return FALSE;
++	}
++
++	SvMemoryStream *pPlain = MSLZSS::decompressAsStream( xDir, 0 );
++	if( !pPlain )
++	{
++		DBG_WARNING( "Failed to decompress 'dir' stream" );
++		return FALSE;
++	}
++
++	SFX_APP()->EnterBasicCall();
++
++	Reference< XLibraryContainer > xLibContainer = rDocSh.GetBasicContainer();
++
++	DirTokenizer aTok( pPlain );
++	Reference< XNameContainer > xLib;
++
++	xLib = aTok.parseHeader( xLibContainer );
++	if( !xLib.is() )
++	{
++		DBG_WARNING( "Broken header /library" );
++		return FALSE;
++	}
++		
++	// Parse the objects
++	USHORT nItems = aTok.getShort();
++	for( USHORT nItem = 0; nItem < nItems && !aTok.isEof(); nItem++)
++		aTok.readObject( mxStorage, xLib, bStripped, bAsComment );
++	
++	bRet = true;
++	delete pPlain;
++
++	SFX_APP()->LeaveBasicCall();
++
++	return bRet;
++}
++
++void
++VBADir::deleteSRPs()
++{
++	SvStorageInfoList aInfoList;
++
++	mxStorage->FillInfoList( &aInfoList );
++
++	// Remove highly version specific compiled VBA streams
++	for( ULONG i = 0; i < aInfoList.Count(); i++ )
++	{
++		SvStorageInfo& rInfo = aInfoList[i];
++
++		if( rInfo.IsStream() &&
++			rInfo.GetName().EqualsAscii( "__SRP_", 0, 6 ) )
++			mxStorage->Remove( rInfo.GetName() );
++	}
++}
++
++void
++VBADir::clobberProject()
++{
++	SotStorageStreamRef xProject;
++
++	xProject = mxStorage->OpenSotStream( OUString::createFromAscii( "_VBA_PROJECT" ),
++										 STREAM_STD_WRITE );
++	if( !xProject.Is() )
++	{
++		DBG_WARNING( "Failed to clobber VBA project" );
++		return;
++	}
++
++	UINT8 nMagicVersion = 0x01;
++	UINT8 nData[8] = { 0xcc, 0x61, 0x00, 0, 0,1,0,0 };
++	UINT8 nZeros[8] = { 0,0,0,0, 0,0,0,0 };
++	nData[2] = nMagicVersion;
++
++	xProject->Seek( 0 );
++	xProject->Write( nData, 8 );
++	xProject->Write( nZeros, 8 );
++	xProject->Write( nZeros, 8 );
++	xProject->Write( nZeros, 3 );
++	xProject->Flush();
++}
++
++struct DirOutput {
++	SvStream *mpStream;
++
++	DirOutput( SvStream *pDirStream ) :
++		mpStream( pDirStream ) {}
++	~DirOutput() {}
++
++	void
++	writeLong( UINT16 nToken, UINT32 nLong )
++	{
++		*mpStream << nToken;
++		*mpStream << UINT32(4);
++		*mpStream << nLong;
++	}
++
++	void
++	writeShort( UINT16 nToken, UINT16 nShort )
++	{
++		*mpStream << nToken;
++		*mpStream << UINT32(2);
++		*mpStream << nShort;
++	}
++
++	void	
++	writeUString( UINT16 nToken, const OUString &rString )
++	{
++		*mpStream << nToken;
++		*mpStream << UINT32( rString.getLength() * 2 );
++		mpStream->Write( (const sal_Unicode *)rString,
++						 rString.getLength() * 2 );
++	}
++
++	void
++	writeString( UINT16 nToken, const OString &rString )
++	{
++		*mpStream << nToken;
++		*mpStream << UINT32( rString.getLength() );
++		mpStream->Write( (const sal_Char *)rString,
++						 rString.getLength() );
++	}
++
++	void
++	writeUStringPair( UINT16 nPlainToken, UINT16 nUniToken, const OUString &rString )
++	{
++		writeString( nPlainToken, OUStringToOString( rString, RTL_TEXTENCODING_MS_1252 ) );
++		writeUString( nUniToken, rString );
++	}
++
++	void
++	writeHeader()
++	{
++		writeLong( VBA_DIR_LONG_START, 1 );
++		writeLong( VBA_DIR_LONG_ENCODING_1, 0x409 );
++		writeLong( VBA_DIR_LONG_ENCODING_2, 0x409 );
++		writeShort( VBA_DIR_SHORT_VERSION_1, 0x4e4 );
++		writeString( VBA_DIR_STR_PROJECT_NAME, OString( "ProjectFoo" ) );
++		writeUStringPair( VBA_DIR_STR_DESCRIPTION,
++						  VBA_DIR_USTR_DESCRIPTION, OUString() );
++		writeUStringPair( VBA_DIR_STR_HELP_FILENAME,
++						  VBA_DIR_USTR_HELP_FILENAME, OUString() );
++		writeLong( VBA_DIR_LONG_HELP_CTXT_ID, 0 );
++		writeLong( VBA_DIR_LONG_UNKNOWN_0x08, 0 );
++
++		// Whacked out 0x09 token:
++		*mpStream << UINT16( VBA_DIR_OP_PAPER_SIZE );
++		*mpStream << UINT32( 6 - 2 ); // totally magic: A4
++		*mpStream << UINT16( 0x4b0 ) << UINT16( 0x419a ) << UINT16( 0x34 );
++
++		writeUStringPair( VBA_DIR_STR_COND_COMP_ARGS,
++						  VBA_DIR_USTR_COND_COMP_ARGS, OUString() );
++
++/*		// Magic libraries we use
++		writeString( VBA_DIR_STR_STREAM_TYPE, OString( "stdole" ) );
++		writeUString( VBA_DIR_USTR_STREAM_TYPE,
++						OUString::createFromAscii( "stdole" ) ); */
++	}
++
++	void
++	writeModuleCount( ULONG nModules )
++	{
++		writeShort( VBA_DIR_SHORT_OBJECT_COUNT, nModules );
++		writeShort( VBA_DIR_SHORT_UNKNOWN_0x13, 0x7384 ); // Concerning ...
++	}
++
++	void
++	writeFlag( UINT16 nToken )
++	{
++		*mpStream << UINT16( nToken );
++		*mpStream << UINT32( 0 );
++	}
++
++	void
++	writeEnd()
++	{
++		writeFlag( VBA_DIR_FLAG_END );
++		mpStream->Flush();
++	}
++
++	void
++	writeModule( const OUString &rName, const OUString &rSource )
++	{
++		writeUStringPair( VBA_DIR_STR_USER_NAME,
++						  VBA_DIR_USTR_USER_NAME, rName );
++		writeUStringPair( VBA_DIR_STR_STREAM_NAME,
++						  VBA_DIR_USTR_STREAM_NAME, rName );
++		writeUStringPair( VBA_DIR_STR_UNKNOWN_0x1c,
++						  VBA_DIR_USTR_UNKNOWN_0x48, OUString() );
++		// Our streams start at the very beginning ...
++		writeLong( VBA_DIR_LONG_VBA_OFFSET, 0x0 );
++		writeLong( VBA_DIR_LONG_UNKNOWN_0x1e, 0x0 );
++		writeShort( VBA_DIR_SHORT_UNKNOWN_0x2c, 0x3672 ); // Concerning ...
++		writeFlag( VBA_DIR_FLAG_MACRO );
++		writeFlag( VBA_DIR_OBJECT_END );
++	}
++};
++
++struct ProjectOutput {
++	SotStorageStreamRef mxProject;
++	SotStorageStreamRef mxProjectWm;
++
++	ProjectOutput() {}
++	~ProjectOutput() {}
++
++	bool initialize( const SvStorageRef &xStorage )
++	{
++		mxProject = xStorage->OpenSotStream(
++				rtl::OUString::createFromAscii( "PROJECT" ),
++				STREAM_STD_WRITE );
++		mxProjectWm = xStorage->OpenSotStream(
++				rtl::OUString::createFromAscii( "PROJECTwm" ),
++				STREAM_STD_WRITE );
++
++		return mxProject.Is() && mxProjectWm.Is();
++	}
++
++	void writeString( const OString &rString )
++	{
++		OString sTempStringa( "\n" );
++		OString sTempStringb( "\x0D\x0A" );
++		OString sOutput = rString;
++		
++	   	sal_Int32 nFromIndex = 0;
++		sal_Int32 nToIndex = -1;
++		while( (nToIndex = sOutput.indexOf( sTempStringa, nFromIndex ) ) != -1 )
++		{
++			sOutput = sOutput.replaceAt( nToIndex, sTempStringa.getLength(), sTempStringb);
++			nFromIndex = nToIndex += sTempStringb.getLength();
++		}
++		mxProject->Write( (const sal_Char *) sOutput, sOutput.getLength() );
++	}
++
++	void writeModule( const OUString &rName )
++	{
++		OString sName = OUStringToOString( rName, RTL_TEXTENCODING_MS_1252 );
++		writeString( "Module=" );
++		writeString( sName );
++		writeString( "\n" );
++		mxProjectWm->Write( (const sal_Char *) sName, sName.getLength() );
++		*mxProjectWm << UINT8( 0 );
++		mxProjectWm->Write( (const sal_Unicode *) rName, rName.getLength() * 2);
++		*mxProjectWm << UINT16( 0 );
++	}
++
++	void writeHeader()
++	{
++		writeString("ID=\"{33C90A8B-9E30-406E-BC0F-D2863F9025D7}\"\n");
++	}
++
++	void writeModules( Sequence<OUString> &rNames )
++	{
++		int i;
++
++		for (i = 0; i < rNames.getLength(); i++)
++			writeModule( rNames[i] );
++
++		// Some bits ...
++		writeString( "\n"
++					 "[Workspace]\n" );
++
++		for (i = 0; i < rNames.getLength(); i++)
++		{
++			OString aName = OUStringToOString( rNames[i], RTL_TEXTENCODING_MS_1252 );
++			writeString( aName );
++			writeString( "=0, 0, 0, 0, C\n" );
++		}
++	}
++
++	void writeEnd()
++	{
++		*mxProjectWm << UINT16( 0 );
++
++		mxProject->Flush();
++		mxProjectWm->Flush();
++	}
++};
++
++void
++VBADir::writeModule( const OUString &rName, const OUString &rSource )
++{
++	SvStorageStreamRef xStream;
++	xStream = mxStorage->OpenSotStream( rName, STREAM_STD_WRITE );
++
++	OString sSource = OUStringToOString( rSource, RTL_TEXTENCODING_MS_1252 );
++	MSLZSS::compressString( xStream, sSource );
++}
++
++bool
++VBADir::writeBasic( SfxObjectShell &rDocSh )
++{
++	bool bRet = true;
++
++	fprintf( stderr, "writeBasic\n");
++	deleteSRPs();
++	clobberProject();
++
++	SvMemoryStream aMemStream;
++	ProjectOutput  aProject;
++
++	if( !aProject.initialize( mxProjectStorage ) )
++	{
++		fprintf( stderr, "Error opening project streams\n");
++		return false;
++	}
++	aProject.writeHeader();
++
++	DirOutput aDir( &aMemStream );
++	aDir.writeHeader();
++
++	SFX_APP()->EnterBasicCall();
++
++	Reference< XLibraryContainer > xLibContainer = rDocSh.GetBasicContainer();
++
++	Sequence< OUString > aNames;
++	aNames = xLibContainer->getElementNames();
++	if( aNames.getLength() > 1 )
++	{
++		fprintf( stderr, "Seriously odd - more than 1 macro storage thing\n") ;
++		for( int i = 0; i < aNames.getLength(); i++ )
++			fprintf( stderr, "Container: '%s'\n",
++				 (const sal_Char *) OUStringToOString(
++						 aNames[i], RTL_TEXTENCODING_UTF8 ) );
++	}
++
++	Reference< XNameContainer > xLib;
++	if( aNames.getLength() >= 1 )
++	{
++		fprintf( stderr, "Container: '%s'\n",
++				 (const sal_Char *) OUStringToOString(
++						 aNames[0], RTL_TEXTENCODING_UTF8 ) );
++		Any aLibAny = xLibContainer->getByName( aNames[0] );
++		aLibAny >>= xLib;
++	}
++
++	if( xLib.is() )
++	{
++		Sequence< OUString > aProjects;
++		aProjects = xLib->getElementNames();
++		aProject.writeModules( aProjects );
++		aDir.writeModuleCount( aProjects.getLength() );
++		for( int i = 0; i < aProjects.getLength(); i++ )
++		{
++			Any aSourceAny;
++			OUString sSource;
++			OUString &rName = aProjects[i];
++
++			aSourceAny = xLib->getByName( rName );
++			aSourceAny >>= sSource;
++			if( sSource.getLength() >= 0 )
++			{
++				writeModule( rName, sSource );
++				aDir.writeModule( rName, sSource );
++			}
++		}
++	}
++	else
++		aDir.writeModuleCount( 0 );
++
++	aDir.writeEnd();
++	aProject.writeEnd();
++
++	aMemStream.Seek( 0 );
++
++	// Compress dir to the real stream
++	SvStorageStreamRef xDir;
++	xDir = mxStorage->OpenSotStream( OUString::createFromAscii( "dir" ),
++									 STREAM_STD_WRITE );
++	if( !xDir.Is() )
++	{
++		fprintf( stderr, "Failed to open dir\n" );
++		bRet = false;
++	}
++	else
++	{
++		MSLZSS::compressStream( xDir, &aMemStream );
++		xDir->Flush();
++	}
++
++	SFX_APP()->LeaveBasicCall();
++
++	return bRet;
++}
+--- /dev/null	2003-09-23 18:59:22.000000000 +0100
++++ svx/source/msfilter/msvbasicdir.hxx	2004-03-23 13:21:15.000000000 +0000
+@@ -0,0 +1,81 @@
++#ifndef _MSVBASICDIR_HXX
++#define _MSVBASICDIR_HXX
++
++#ifdef _SOLAR_H
++#include <tools/solar.h>
++#endif
++#ifndef _TOOLS_DEBUG_HXX
++#include <tools/debug.hxx>
++#endif
++#ifndef _SVSTOR_HXX
++#include <so3/svstor.hxx>
++#endif
++#ifndef _DYNARY_HXX
++#include <tools/dynary.hxx>
++#endif
++#ifndef __SGI_STL_VECTOR
++#include <vector>
++#endif
++
++namespace MSLZSS {
++	void	        compressString( SvStream *pStream, const rtl::OString &rString );
++	void	        compressStream( SvStream *pStream, SvStream *pInStream );
++	SvMemoryStream *decompressAsStream( SvStream *pStream, ULONG nOffset, ULONG *pCompressedLength = NULL, ULONG *pLength = NULL );
++	rtl::OString    decompressAsString( SvStream *pStream, ULONG nOffset, ULONG *pCompressedLength = NULL, ULONG *pLength = NULL );
++};
++
++// An unset strings is 0 length & looks like a flag ...
++
++#define VBA_DIR_LONG_START			0x01 // seemingly always 1
++#define VBA_DIR_LONG_ENCODING_1		0x02 // normally 0x409
++#define VBA_DIR_SHORT_VERSION_1		0x03 // seemingly always 0x4e4
++#define VBA_DIR_STR_PROJECT_NAME	0x04
++#define VBA_DIR_STR_DESCRIPTION		0x05
++#define VBA_DIR_STR_HELP_FILENAME	0x06
++#define VBA_DIR_LONG_HELP_CTXT_ID	0x07
++#define VBA_DIR_LONG_UNKNOWN_0x08	0x08
++#define VBA_DIR_OP_PAPER_SIZE		0x09
++#define VBA_DIR_STR_COND_COMP_ARGS	0x0c
++#define VBA_DIR_EXTERNAL_LINKAGE	0x0d
++#define VBA_DIR_SHORT_OBJECT_COUNT	0x0f
++#define VBA_DIR_FLAG_END			0x10 // ?
++#define VBA_DIR_SHORT_UNKNOWN_0x13	0x13
++#define VBA_DIR_LONG_ENCODING_2		0x14 // normally 0x409
++#define VBA_DIR_STR_STREAM_TYPE		0x16
++#define VBA_DIR_STR_USER_NAME		0x19
++#define VBA_DIR_STR_STREAM_NAME		0x1a
++#define VBA_DIR_STR_UNKNOWN_0x1c	0x1c
++#define VBA_DIR_LONG_UNKNOWN_0x1e	0x1e
++#define VBA_DIR_FLAG_MACRO			0x21
++#define VBA_DIR_FLAG_WB_SHEET		0x22
++#define VBA_DIR_SHORT_UNKNOWN_0x2c	0x2c
++#define VBA_DIR_OBJECT_END			0x2b
++#define VBA_DIR_LONG_VBA_OFFSET		0x31
++#define VBA_DIR_USTR_STREAM_NAME	0x32
++#define VBA_DIR_USTR_COND_COMP_ARGS	0x3c
++#define VBA_DIR_USTR_HELP_FILENAME	0x3d
++#define VBA_DIR_USTR_STREAM_TYPE	0x3e
++#define VBA_DIR_USTR_DESCRIPTION	0x40
++#define VBA_DIR_USTR_USER_NAME		0x47
++#define VBA_DIR_USTR_UNKNOWN_0x48	0x48
++
++class VBADir
++{
++private:
++	SvStorageRef mxStorage;
++	SvStorageRef mxProjectStorage;
++
++	void deleteSRPs();
++	void clobberProject();
++	void writeModule( const rtl::OUString &rName, const rtl::OUString &rSource );
++						  
++public:
++	VBADir( SvStorageRef &xProjectStorage, SvStorageRef &xStorage );
++	~VBADir();
++
++	bool readBasic( SfxObjectShell &rDocSh, bool bComment, bool bStripped );
++	bool writeBasic( SfxObjectShell &rDocSh );
++};
++
++
++#endif // _MSVBASICDIR_HXX

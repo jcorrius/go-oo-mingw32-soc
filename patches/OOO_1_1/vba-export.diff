@@ -1,0 +1,269 @@
+Index: svx/source/msfilter/makefile.mk
+===================================================================
+RCS file: /cvs/graphics/svx/source/msfilter/makefile.mk,v
+retrieving revision 1.11
+diff -u -p -u -r1.11 makefile.mk
+--- svx/source/msfilter/makefile.mk	24 Apr 2003 13:26:39 -0000	1.11
++++ svx/source/msfilter/makefile.mk	29 Mar 2004 08:26:31 -0000
+@@ -79,6 +79,7 @@ SLOFILES=\
+ 	$(SLO)$/msdffimp.obj	\
+ 	$(SLO)$/msoleexp.obj	\
+ 	$(SLO)$/msvbasic.obj	\
++	$(SLO)$/msvbasicdir.obj	\
+ 	$(SLO)$/msashape.obj	\
+ 	$(SLO)$/svxmsbas.obj	\
+ 	$(SLO)$/msocximex.obj	\
+Index: svx/source/msfilter/svxmsbas.cxx
+===================================================================
+RCS file: /cvs/graphics/svx/source/msfilter/svxmsbas.cxx,v
+retrieving revision 1.4
+diff -u -p -u -r1.4 svxmsbas.cxx
+--- svx/source/msfilter/svxmsbas.cxx	15 Apr 2003 08:47:59 -0000	1.4
++++ svx/source/msfilter/svxmsbas.cxx	29 Mar 2004 08:26:39 -0000
+@@ -84,7 +84,7 @@
+ #include <svxmsbas.hxx>
+ #endif
+ #ifndef _MSVBASIC_HXX
+-#include <msvbasic.hxx>
++#include <msvbasicdir.hxx>
+ #endif
+ 
+ #include <com/sun/star/container/XNameContainer.hpp>
+@@ -141,112 +141,47 @@ BOOL SvxImportMSVBasic::CopyStorage_Impl
+ 	return bValidStg;
+ }
+ 
++BOOL
++SvxImportMSVBasic::GetVBAStorage(const String &rStorageName,
++								 const String &rSubStorageName,
++								 SvStorageRef &rProject,
++								 SvStorageRef &rVBA,
++								 bool bCreate)
++{
++	ULONG nFlags = STREAM_READWRITE | STREAM_SHARE_DENYALL;
++
++	if( !bCreate )
++			nFlags |= STREAM_NOCREATE;
++
++	rProject = xRoot->OpenStorage( rStorageName, nFlags );
++	if( rProject.Is() && SVSTREAM_OK == rProject->GetError() )
++	{
++		rVBA = rProject->OpenStorage( rSubStorageName, nFlags );
++		if( rVBA.Is() && SVSTREAM_OK == rVBA->GetError() )
++			return true;
++		else
++			DBG_WARNING("No Visual Basic in Storage");
++	}
++	else
++		DBG_WARNING("No Macros Storage");
++
++	return false;
++}
++
+ BOOL SvxImportMSVBasic::ImportCode_Impl( const String& rStorageName,
+ 										const String &rSubStorageName,
+ 										BOOL bAsComment, BOOL bStripped )
+ {
+-	BOOL bRet = FALSE;
+-	VBA_Impl aVBA( *xRoot, bAsComment );
+-	if( aVBA.Open(rStorageName,rSubStorageName) )
+-	{
+-		SFX_APP()->EnterBasicCall();
+-//this method is removed in the Unicode-Version
+-//		rDocSh.GetSbxObject();
+-
+-        Reference< XLibraryContainer > xLibContainer = rDocSh.GetBasicContainer();
+-		BasicManager *pBasicMan = rDocSh.GetBasicManager();
+-		DBG_ASSERT( xLibContainer.is(), "No BasicContainer!" );
+-
+-        UINT16 nStreamCount = aVBA.GetNoStreams();
+-		Reference< XNameContainer > xLib;
+-        if( xLibContainer.is() && nStreamCount )
+-        {
+-			String aLibName( String::CreateFromAscii(
+-					RTL_CONSTASCII_STRINGPARAM( "Standard" )));
+-		    if( !xLibContainer->hasByName( aLibName ) )
+-			    xLibContainer->createLibrary( aLibName );
+-
+-            Any aLibAny = xLibContainer->getByName( aLibName );
+-		    aLibAny >>= xLib;
+-        }
+-		if( xLib.is() )
+-		{
+-			for( UINT16 i=0; i<nStreamCount;i++)
+-			{
+-				StringArray aDecompressed = aVBA.Decompress(i);
+-				ByteString sByteBasic(aVBA.GetStreamName(i),
+-					RTL_TEXTENCODING_ASCII_US,
+-						(RTL_UNICODETOTEXT_FLAGS_UNDEFINED_UNDERLINE|
+-						RTL_UNICODETOTEXT_FLAGS_INVALID_UNDERLINE |
+-						RTL_UNICODETOTEXT_FLAGS_PRIVATE_MAPTO0 |
+-						RTL_UNICODETOTEXT_FLAGS_NOCOMPOSITE)
+-				);
+-
+-				//const String &sBasicModule = aVBA.GetStreamName( i);
+-				const String sBasicModule(sByteBasic,
+-					RTL_TEXTENCODING_ASCII_US);
+-				for(ULONG j=0;j<aDecompressed.GetSize();j++)
+-				{
+-					String sModule(sBasicModule);
+-					if (j>0)
+-					{
+-						sModule.AppendAscii("_Part");
+-						sModule += String::CreateFromInt32(j+1);
+-					}
+-
+-					if (bStripped)
+-					{
+-                        String *pStr = aDecompressed.Get(j);
+-                        bool bMac = true;
+-                        xub_StrLen nBegin = pStr->Search('\x0D');
+-                        if ((STRING_NOTFOUND != nBegin) && (pStr->Len() > 1) && (pStr->GetChar(nBegin+1) == '\x0A'))
+-                            bMac = false;
+-
+-                        const char cLineEnd = bMac ? '\x0D' : '\x0A';
+-                        const String sAttribute(String::CreateFromAscii(
+-                            bAsComment ? "Rem Attribute" : "Attribute"));
+-						while (STRING_NOTFOUND != (nBegin =	pStr->Search(sAttribute)))
+-						{
+-                            if ((nBegin) && pStr->GetChar(nBegin-1) != cLineEnd)
+-                                continue;
+-							xub_StrLen nEnd = pStr->Search(cLineEnd ,nBegin);
+-							pStr->Erase(nBegin, (nEnd-nBegin)+1);
+-						}
+-					}
+-
+-					if( aDecompressed.Get(j)->Len() )
+-					{
+-						if (bAsComment)
+-						{
+-							String sTemp( String::CreateFromAscii(
+-									RTL_CONSTASCII_STRINGPARAM( "Sub " )));
+-							String sMunge(sModule);
+-							//Streams can have spaces in them, but modulenames
+-							//cannot !
+-							sMunge.SearchAndReplaceAll(' ','_');
+-							
+-							sTemp += sMunge;
+-							sTemp.AppendAscii("\n");
+-							aDecompressed.Get(j)->Insert(sTemp,0);
+-							aDecompressed.Get(j)->InsertAscii("\nEnd Sub");
+-						}
+-
+-			            ::rtl::OUString aModName( sModule );
+-			            ::rtl::OUString aSource( *aDecompressed.Get(j) );
+-			            Any aSourceAny;
+-			            aSourceAny <<= aSource;
+-			            if( xLib->hasByName( aModName ) )
+-				            xLib->replaceByName( aModName, aSourceAny );
+-			            else
+-				            xLib->insertByName( aModName, aSourceAny );
+-
+-						bRet = true;
+-					}
+-				}
+-			}
+-		}
+-		SFX_APP()->LeaveBasicCall();
++	bool bRet = false;
++
++	SvStorageRef xProject, xVBA;
++
++	if( GetVBAStorage( rStorageName, rSubStorageName, xProject, xVBA, false ) )
++	{
++		VBADir aVBA( xProject, xVBA );
++		bRet = aVBA.readBasic( rDocSh, bAsComment, bStripped );
+ 	}
++
+ 	return bRet;
+ }
+ 
+@@ -254,34 +189,56 @@ ULONG SvxImportMSVBasic::SaveOrDelMSVBAS
+ 												const String& rStorageName )
+ {
+ 	ULONG nRet = ERRCODE_NONE;
++	bool bWroteCopy = false;
+ 	SvStorageRef xSrcRoot( rDocSh.GetStorage() );
+ 	String aDstStgName( GetMSBasicStorageName() );
+ 	SvStorageRef xVBAStg( xSrcRoot->OpenStorage( aDstStgName,
+ 								STREAM_READWRITE | STREAM_NOCREATE |
+ 								STREAM_SHARE_DENYALL ));
++	
++	fprintf( stderr, "SaveOrDelMSVBAStorage ... %d\n", bSaveInto );
+ 	if( xVBAStg.Is() && !xVBAStg->GetError() )
+ 	{
+ 		xVBAStg = 0;
+ 		if( bSaveInto )
+ 		{
++			SFX_APP()->EnterBasicCall();
++
+ 			BasicManager *pBasicMan = rDocSh.GetBasicManager();
+-			if( pBasicMan && pBasicMan->IsBasicModified() )
+-			{
+-				nRet = ERRCODE_SVX_MODIFIED_VBASIC_STORAGE;
++			bool bIsModified = pBasicMan && pBasicMan->IsBasicModified();
+ 
+-// don't reset the modified flag
+-//				StarBASIC *pBasic = pBasicMan->GetStdLib();
+-//				if( pBasic )
+-//					pBasic->SetModified( FALSE );
+-			}
+-// JP 02.05.00: Bug 75492 - save always the BasicStorage
+-//			else
++			SFX_APP()->LeaveBasicCall();
++
++			if( !bIsModified )
++				fprintf( stderr, "Error - probably bogus unmodified state ...\n" );
++#if 0
++			if( !bIsModified )
++			{
++				fprintf( stderr, "Unmodified foo\n" );
+ 				xSrcRoot->CopyTo( aDstStgName, xRoot, rStorageName);
++				bWroteCopy = true;
++			}
++#endif
+ 		}
+-// we never stored this storage in our own format, so it may not be deleted
+-//		else
+-//			rDocSh.SvPersist::Remove( aDstStgName );
+ 	}
++
++	if( !bWroteCopy )
++	{
++		fprintf(stderr, "Crazy VBA writing hack !\n" );
++
++		SvStorageRef xProject, xVBA;
++		if( GetVBAStorage( // HACK:
++				rtl::OUString::createFromAscii( "_VBA_PROJECT_CUR" ),
++				rtl::OUString::createFromAscii( "VBA" ),
++				xProject, xVBA, true ) )
++		{
++			VBADir aDir( xProject, xVBA );
++			aDir.writeBasic( rDocSh );
++		}
++		else
++			fprintf( stderr, "Failed to create VBA storage\n" );
++	}
++
+ 	return nRet;
+ }
+ 
+Index: svx/inc/svxmsbas.hxx
+===================================================================
+RCS file: /cvs/graphics/svx/inc/svxmsbas.hxx,v
+retrieving revision 1.1.1.1
+diff -u -p -u -r1.1.1.1 svxmsbas.hxx
+--- svx/inc/svxmsbas.hxx	18 Sep 2000 17:01:01 -0000	1.1.1.1
++++ svx/inc/svxmsbas.hxx	29 Mar 2004 08:31:03 -0000
+@@ -118,6 +118,11 @@ private:
+ 	BOOL bImport;
+ 	BOOL bCopy;
+ 
++	BOOL GetVBAStorage(const String& rStorageName,
++					   const String &rSubStorageName,
++					   SvStorageRef &rProject,
++					   SvStorageRef &rVBA,
++					   bool  bCreate);
+ 	BOOL ImportCode_Impl( const String& rStorageName,
+ 						  const String &rSubStorageName,
+ 						  BOOL bAsComment, BOOL bStripped);
