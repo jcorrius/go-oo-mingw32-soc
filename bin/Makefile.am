@@ -1,6 +1,7 @@
 script_files = \
 	build-ooo \
 	font-munge \
+	oowintool \
 	install-dict.in \
 	latest-patchset \
 	linkoo \
