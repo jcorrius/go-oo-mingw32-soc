@@ -8,4 +8,4 @@ aclocal
 automake --gnu --add-missing
 # intltoolize --copy --force --automake
 autoconf
-./configure $@
+./configure --with-tag=OOO_1_1_1 
