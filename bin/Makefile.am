@@ -18,4 +18,3 @@ all:
 
 install:
 	./package-ooo ${TAG} --clean
-
