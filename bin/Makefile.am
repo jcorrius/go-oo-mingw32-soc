@@ -2,6 +2,7 @@ script_files = \
 	build-ooo \
 	build-tools \
 	font-munge \
+	fix-deps \
 	help-font-munge \
 	install-artwork \
 	install-dict.in \
