@@ -7,7 +7,7 @@
 # ooo-build/build/src680-mxx/solver/680/unxlngi4.pro/lib
 # 
 
-%libs = ();
+@libs = ();
 %symbols = ();
 
 sub insert_symbols {
@@ -30,6 +30,8 @@ sub insert_symbols {
 
 	if ($symbol =~ /\w+C+[0-9]{1}/){
 	 if ($type eq '.text') {
+	    $symbol =~ /_GLOBAL_/ && next; # bin global symbols - we don't grok them well
+
 	    my $name = `c++filt $symbol`;
 	    my @symb_arr = split /\(/, $name;
 	    $name = $symb_arr[0];
@@ -39,7 +41,7 @@ sub insert_symbols {
 
 	    if (exists $symbols{$name}) {
 		if($symbols{$name} ne $lib){
-			print "$lib and $symbols{$name} defines '$name'\n";
+			print "$lib and $symbols{$name} defines '$name' ]\n";
 		}
 	    } else {
 		$symbols{$name} = $lib;
@@ -66,15 +68,30 @@ my $file;
 my $dirhandle;
 my $path = ".";
 
+my @exceptions = ( 'cppuhelper3gcc3', 'uno_cppuhelpergcc',
+		   'salhelper3gcc3', 'uno_salhelpergcc' );
+sub is_exception($)
+{
+    my $file = shift;
+    for my $exc (@exceptions) {
+	if ($file =~ /$exc/) {
+	    return 1;
+	}
+    }
+    return 0;
+}
+
 opendir ($dirhandle, $path) || die "Can't open dir $path: $!";
 while ($file = readdir ($dirhandle)) {
-	if ($file =~ m/\S+.so/ &&
-	    !($file =~ m/used/)) {
-	    $libs{"$path/$file"} = undef;
-	}
+    $file =~ /^\./ && next;
+    is_exception($file) && next;
+
+    if ($file =~ m/.so$/) {
+	push @libs, "$path/$file";
+    }
 }
 closedir ($dirhandle);
 
-for $lib (keys %libs) {
+for $lib (@libs) {
     resolve_symbols ($lib);
 }
