@@ -68,7 +68,7 @@ sub slurp {
     return $content;
 }
 
-sub apply_patches {
+sub list_patches {
 
     my @Patches = ();
 
@@ -119,6 +119,14 @@ sub apply_patches {
             push @Patches, find_file ($patch_dir, $_);
     }
     close (PatchList);
+
+    return @Patches;
+}
+
+sub apply_patches {
+
+    my @Patches = list_patches ();
+
     print "\n" unless $quiet;
 
     for $opt (@required_opts) { 
@@ -196,6 +204,15 @@ sub remove_patches {
     rmdir $applied_patches
 }
 
+sub export_series {
+
+    my @Patches = list_patches ();
+
+    for my $patch (@Patches) {
+	print "$patch -p0\n";
+    }
+}
+
 (@ARGV > 1) || die "Syntax:\napply <path-to-patchdir> <src root> [--distro=Debian] [patch flags '--dry-run' eg.]\n";
 
 $patch_dir = shift (@ARGV);
@@ -206,16 +223,17 @@ $applied_patches = $dest_dir.'/applied_patches';
 
 $quiet = 0;
 $remove = 0;
+$export = 0;
 $opts = "";
 $distro = 'Ximian';
 @required_opts = ( 'PATCHPATH' );
 
 foreach $a (@ARGV) {
 	if ($a eq '-R') {
-	    	$remove = 1;
-	}
-
-	if ($a eq '--quiet') {
+	    $remove = 1;
+	} elsif ($a eq '--export-series') {
+	    $export = 1;
+	} elsif ($a eq '--quiet') {
 	    $quiet = 1;
 	} elsif ($a =~ m/--distro=(.*)/) {
 	    $distro = $1;
@@ -226,17 +244,15 @@ foreach $a (@ARGV) {
 
 $base_cmd = "patch -l -b -p0 $opts -d $dest_dir";
 
-# Compatibility for a little ...
-if (!($patch_dir =~ /RC3_030729/)) {
-    $base_cmd .= ' --fuzz=1';
-}
-
 print "Execute: $base_cmd for distro '$distro'\n" unless $quiet;
 
-if (!$remove) {
-    apply_patches();
+if ($export) {
+    export_series();
+}
+elsif ($remove) {
+    remove_patches();
 }
 else {
-    remove_patches();
+    apply_patches();
 }
 
