@@ -1,6 +1,6 @@
 --- /dev/null	
 +++ bridges/source/mono_uno/uno_proxy.cs	
-@@ -0,0 +1,1712 @@
+@@ -0,0 +1,1951 @@
 +/*************************************************************************
 + *
 + *  $RCSfile: $
@@ -70,6 +70,7 @@
 +using System.Runtime.Remoting;
 +using System.Runtime.Remoting.Messaging;
 +using System.Runtime.Remoting.Proxies;
++using System.Text;
 +
 +using uno.Binary;
 +using uno.Typelib;
@@ -1064,7 +1065,7 @@
 +                TypeDescription.Complete((TypeDescription **)&compTD);
 +
 +            // create the type
-+            Type managedType = LoadCliType(type->pTypeName.ToString());
++            Type managedType = LoadCliType(type->pTypeName);
 +
 +            // detect if we recursivly convert inherited
 +            // structures. If this point is reached because of a
@@ -1577,19 +1578,252 @@
 +        return result;
 +    }
 +
++    static string MapManagedPolymorphicName(string unoName)
++    {
++        int startIndex = unoName.LastIndexOf('<');
++        if (startIndex == -1)
++            return unoName;
++
++        // get the type list withing < and >
++        int endIndex = unoName.LastIndexOf('>');
++        string list = unoName.Substring(startIndex + 1, endIndex - startIndex - 1);
++
++        // parse the type list and replace the types with the corresponding CLI types
++        char[] delimiters = new char[1];
++        delimiters[0] = ',';
++        string[] unoTypes = list.Split(delimiters);
++
++        StringBuilder builder = new StringBuilder(unoName.Substring(0, startIndex + 1));
++        
++        int typeCount = unoTypes.Length;
++        for (int i = 0; i < typeCount; ++i)
++            builder.Append(MapManagedTypeName(unoTypes[i]));
++        builder.Append('>');
++        return builder.ToString();
++    }
++
 +    static uno.rtl.UStringPtr MapManagedTypeName(string typeName)
 +    {
-+        throw new NotImplementedException();
++        int dims = 0;
++        int index = 0;
++        
++        if ((index = typeName.IndexOf("[]")) > 0)
++        {
++            dims = 1;
++            
++            int curIndex = index;
++            while ((curIndex + 2) < typeName.Length &&
++                   (curIndex = typeName.IndexOf("[]", curIndex + 2)) > 0)
++                ++dims;
++
++            // get the element name by removing the brackets
++            typeName = typeName.Substring(0, index);            
++        }
++            
++        StringBuilder buf = new StringBuilder(256);
++        for (; dims > 0; --dims)
++            buf.Append("[]");
++
++        switch (typeName)
++        {
++        case "System.Boolean":
++            buf.Append("boolean");
++            break;
++        case "System.Char":
++            buf.Append("char");
++            break;
++        case "System.Byte":
++            buf.Append("byte");
++            break;
++        case "System.Int16":
++            buf.Append("short");
++            break;
++        case "System.UInt16":
++            buf.Append("unsigned short");
++            break;
++        case "System.Int32":
++            buf.Append("long");
++            break;
++        case "System.UInt32":
++            buf.Append("unsigned long");
++            break;
++        case "System.Int64":
++            buf.Append("hyper");
++            break;
++        case "System.UInt64":
++            buf.Append("unsigned hyper");
++            break;
++        case "System.Single":
++            buf.Append("float");
++            break;
++        case "System.Double":
++            buf.Append("double");
++            break;
++        case "System.String":
++            buf.Append("string");
++            break;
++        case "System.Void":
++            buf.Append("void");
++            break;
++        case "System.Type":
++            buf.Append("type");
++            break;
++        case "System.Object":
++            buf.Append("com.sun.star.uno.XInterface");
++            break;
++        case "uno.Any":
++            buf.Append("any");
++            break;
++        default:
++        {
++            string name = MapManagedPolymorphicName(typeName);
++            int i = name.IndexOf('.');
++            buf.Append(name.Substring(i + 1));
++            break;
++        }
++        }
++
++        void *rtl_uString = null;
++        uno.rtl.UStringPtr.rtl_uString_newFromStr_WithLength(
++            &rtl_uString, buf, buf.Length);
++        return new uno.rtl.UStringPtr(rtl_uString);
 +    }
 +
 +    static Type MapUnoType(TypeDescription *TD)
 +    {
-+        throw new NotImplementedException();
++        return MapUnoType(TD->pWeakRef);
 +    }
 +    
 +    static Type MapUnoType(TypeDescriptionReference *TD)
 +    {
-+        throw new NotImplementedException();
++        Type result;
++
++        switch(TD->eTypeClass)
++        {
++        case TypeClass.VOID:
++            result = typeof(void);
++            break;
++        case TypeClass.CHAR:
++            result = typeof(char);
++            break;
++        case TypeClass.BOOLEAN:
++            result = typeof(bool);
++            break;
++        case TypeClass.BYTE:
++            result = typeof(byte);
++            break;
++        case TypeClass.SHORT:
++            result = typeof(short);
++            break;
++        case TypeClass.UNSIGNED_SHORT:
++            result = typeof(ushort);
++            break;
++        case TypeClass.LONG:
++            result = typeof(int);
++            break;
++        case TypeClass.UNSIGNED_LONG:
++            result = typeof(uint);
++            break;
++        case TypeClass.HYPER:
++            result = typeof(long);
++            break;
++        case TypeClass.UNSIGNED_HYPER:
++            result = typeof(ulong);
++            break;
++        case TypeClass.FLOAT:
++            result = typeof(float);
++            break;
++        case TypeClass.DOUBLE:
++            result = typeof(double);
++            break;
++        case TypeClass.STRING:
++            result = typeof(string);
++            break;
++        case TypeClass.TYPE:
++            result = typeof(Type);
++            break;
++        case TypeClass.ANY:
++            result = typeof(uno.Any);
++            break;
++        case TypeClass.ENUM:
++        case TypeClass.STRUCT:
++        case TypeClass.EXCEPTION:
++            result = LoadCliType(TD->pTypeName);
++            break;
++        case TypeClass.INTERFACE:
++            // special handling for XInterface, since it does not exist in cli.
++            if (TD->pTypeName.ToString() == "com.sun.star.uno.XInterface")
++                result = typeof(object);
++            else
++                result = LoadCliType(TD->pTypeName);
++            break;
++        case TypeClass.SEQUENCE:
++        {
++            // FIXME do something with TD here?
++            TypeDescriptionReference *elementTDRef =
++                ((IndirectTypeDescription *)TD)->pType;
++            switch (elementTDRef->eTypeClass)
++            {
++            case TypeClass.CHAR:
++                result = Type.GetType("System.Char[]");
++                break;
++            case TypeClass.BOOLEAN:
++                result = Type.GetType("System.Boolean[]");
++                break;
++            case TypeClass.BYTE:
++                result = Type.GetType("System.Byte[]");
++                break;
++            case TypeClass.SHORT:
++                result = Type.GetType("System.Int16[]");
++                break;
++            case TypeClass.UNSIGNED_SHORT:
++                result = Type.GetType("System.UInt16[]");
++                break;
++            case TypeClass.LONG:
++                result = Type.GetType("System.Int32[]");
++                break;
++            case TypeClass.UNSIGNED_LONG:
++                result = Type.GetType("System.UInt32[]");
++                break;
++            case TypeClass.HYPER:
++                result = Type.GetType("System.Int64[]");
++                break;
++            case TypeClass.UNSIGNED_HYPER:
++                result = Type.GetType("System.UInt64[]");
++                break;
++            case TypeClass.FLOAT:
++                result = Type.GetType("System.Single[]");
++                break;
++            case TypeClass.DOUBLE:
++                result = Type.GetType("System.Double[]");
++                break;
++            case TypeClass.STRING:
++                result = Type.GetType("System.String[]");
++                break;
++            case TypeClass.TYPE:
++                result = Type.GetType("System.Type[]");
++                break;
++            case TypeClass.ANY:
++            case TypeClass.ENUM:
++            case TypeClass.EXCEPTION:
++            case TypeClass.STRUCT:
++            case TypeClass.INTERFACE:
++            case TypeClass.SEQUENCE:
++                result = LoadCliType(TD->pTypeName);
++                break;
++            default:
++                // FIXME can't happen
++                result = null;
++                break;
++            }
++            break;
++        }
++        default:
++            // FIXME can't happen
++            result = null;
++            break;
++        }
++        return result;
 +    }
 +    
 +    IMessage InvokeObjectMethod(IMessage request)
@@ -1633,6 +1867,11 @@
 +
 +    public string Oid {
 +        get { return oid; }
++    }
++
++    static Type LoadCliType(uno.rtl.UStringPtr unoName)
++    {
++        throw new NotImplementedException();
 +    }
 +
 +    static Type LoadCliType(string unoName)
