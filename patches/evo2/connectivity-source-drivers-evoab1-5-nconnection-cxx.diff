@@ -1,7 +1,13 @@
---- /dev/null	
-+++ connectivity/source/drivers/evoab1.5/NConnection.cxx	
-@@ -0,0 +1,367 @@
-+/*************************************************************************
+--- /dev/null	2004-08-25 23:04:59.000000000 +0530
++++ connectivity/source/drivers/evoab1.5/NConnection.cxx	2005-02-01 19:54:15.468952431 +0530
+@@ -0,0 +1,403 @@
++ /*************************************************************************
++ *
++ *  $RCSfile$
++ *
++ *  $Revision$
++ *
++ *  last change: $Author$ $Date$
 + *
 + *  The Contents of this file are made available subject to the terms of
 + *  either of the following licenses
@@ -34,11 +40,11 @@
 + *  Sun Industry Standards Source License Version 1.1
 + *  =================================================
 + *  The contents of this file are subject to the Sun Industry Standards
-+ *  Source License Version 1.1 (the "License"); You may not use this file
++ *  Source License Version 1.1 (the License); You may not use this file
 + *  except in compliance with the License. You may obtain a copy of the
 + *  License at http://www.openoffice.org/license.html.
 + *
-+ *  Software provided under this License is provided on an "AS IS" basis,
++ *  Software provided under this License is provided on an AS IS basis,
 + *  WITHOUT WARRANTY OF ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING,
 + *  WITHOUT LIMITATION, WARRANTIES THAT THE SOFTWARE IS FREE OF DEFECTS,
 + *  MERCHANTABLE, FIT FOR A PARTICULAR PURPOSE, OR NON-INFRINGING.
@@ -51,7 +57,7 @@
 + *
 + *  All Rights Reserved.
 + *
-+ *  Contributor(s): _______________________________________
++ *  Contributor(s): Michael Meeks, Jayant Madavi
 + *
 + *
 + ************************************************************************/
@@ -140,12 +146,12 @@
 +{
 +     ::rtl::OUString aExceptionType = aExceptionType_;
 +     if( aExceptionType.getLength() == 0 )
-+         aExceptionType = ::rtl::OUString( ::rtl::OUString::createFromAscii("Unknown" ) );
++         aExceptionType =  ::rtl::OUString::createFromAscii("Unknown" ) ;
 + 
-+     ::rtl::OUString aTypeLine( ::rtl::OUString::createFromAscii("\nType: " ) );
++     ::rtl::OUString aTypeLine( RTL_CONSTASCII_USTRINGPARAM("\nType: " ) );
 +     aTypeLine += aExceptionType;
 + 
-+     ::rtl::OUString aMessageLine( ::rtl::OUString::createFromAscii("\nMessage: " ) );
++     ::rtl::OUString aMessageLine( RTL_CONSTASCII_USTRINGPARAM("\nMessage: " ) );
 +         aMessageLine += ::rtl::OUString( e.Message );
 + 
 +	 ::rtl::OUString aMsg(aTypeLine);
@@ -167,28 +173,19 @@
 +    ,m_xMetaData(NULL)
 +	,m_pDriver(_pDriver)
 +	,m_pBook(NULL)
-+	,m_bFixedLength(sal_False)
-+	,m_bHeaderLine(sal_True)
-+	,m_cFieldDelimiter(',')
-+	,m_cStringDelimiter('"')
-+	,m_cDecimalDelimiter('.')
-+	,m_cThousandDelimiter(' ')
 +	,m_aPassword()
 +{
-+	m_pDriver->acquire();
 +}
 +//-----------------------------------------------------------------------------
 +OEvoabConnection::~OEvoabConnection()
 +{
-+	{
 +		::osl::MutexGuard aGuard( m_aMutex );
-+		g_object_unref (m_pBook);
++
++	if(!isClosed()) {
++		acquire();
++		close();
 +	}
 +
-+	if(!isClosed())
-+		close();
-+
-+	m_pDriver->release();
 +	m_pDriver = NULL;
 +}
 +
@@ -208,8 +205,28 @@
 +	osl_incrementInterlockedCount( &m_refCount );
 +	EVO_TRACE_STRING("OEvoabConnection::construct()::url = %s\n", url );
 +
-+	setURL(url);
++ 	::rtl::OUString sPassword;
++        const char* pPwd                = "password";
++                                                                                                    
++        const PropertyValue *pIter      = info.getConstArray();
++        const PropertyValue *pEnd       = pIter + info.getLength();
++        for(;pIter != pEnd;++pIter)
++        {
++                if(!pIter->Name.compareToAscii(pPwd))
++                {
++                        pIter->Value >>= sPassword;
++                        break;
++                }
++        }
 +
++	if (url.equalsAscii("sdbc:address:evolution:groupwise"))
++		setSDBCAddressType(SDBCAddress::EVO_GWISE);
++	else if (url.equalsAscii("sdbc:address:evolution:ldap"))
++		setSDBCAddressType(SDBCAddress::EVO_LDAP);
++	else
++		setSDBCAddressType(SDBCAddress::EVO_LOCAL);
++	setURL(url);
++	setPassword(::rtl::OUStringToOString(sPassword,RTL_TEXTENCODING_UTF8));
 +	osl_decrementInterlockedCount( &m_refCount );
 +}
 +
@@ -272,10 +289,12 @@
 +	m_aStatements.push_back(WeakReferenceHelper(*pStmt));
 +	return xStmt;
 +}
-+Reference< XPreparedStatement > SAL_CALL OEvoabConnection::prepareCall( const ::rtl::OUString& sql ) throw(SQLException, RuntimeException)
++
++Reference< XPreparedStatement > SAL_CALL OEvoabConnection::prepareCall( const ::rtl::OUString& sql ) throw( SQLException, RuntimeException)
 +{
 +	::osl::MutexGuard aGuard( m_aMutex );
 +	checkDisposed(OConnection_BASE::rBHelper.bDisposed);
++        ::dbtools::throwFunctionNotSupportedException(::rtl::OUString::createFromAscii("Not Implemented"),NULL);
 +	return NULL;
 +}
 +sal_Bool SAL_CALL OEvoabConnection::isClosed(  ) throw(SQLException, RuntimeException)
@@ -311,12 +330,22 @@
 +{
 +	// we noticed that we should be destroyed in near future so we have to dispose our statements
 +	::osl::MutexGuard aGuard(m_aMutex);
-+
++ 	if (m_pBook) {
++		g_object_unref (m_pBook);
++		m_pBook=NULL;
++	}
 +	for (OWeakRefArray::iterator i = m_aStatements.begin(); m_aStatements.end() != i; ++i)
 +	{
 +		Reference< XComponent > xComp(i->get(), UNO_QUERY);
-+		if (xComp.is())
-+			xComp->dispose();
++		if (xComp.is()) {
++			try {
++				xComp->dispose();
++			}
++			catch (com::sun::star::lang::DisposedException e) {
++			xComp=NULL;
++			throw e;
++			}
++		}
 +	}
 +	m_aStatements.clear();
 +
@@ -329,6 +358,7 @@
 +// -------------------------------- stubbed methods ------------------------------------------------
 +void SAL_CALL OEvoabConnection::setAutoCommit( sal_Bool autoCommit ) throw(SQLException, RuntimeException)
 +{
++	::dbtools::throwFunctionNotSupportedException(::rtl::OUString::createFromAscii("Not Implemented"),NULL);
 +}
 +sal_Bool SAL_CALL OEvoabConnection::getAutoCommit(  ) throw(SQLException, RuntimeException)
 +{
@@ -342,6 +372,7 @@
 +}
 +void SAL_CALL OEvoabConnection::setReadOnly( sal_Bool readOnly ) throw(SQLException, RuntimeException)
 +{
++	::dbtools::throwFunctionNotSupportedException(::rtl::OUString::createFromAscii("Not Implemented"),NULL);
 +}
 +sal_Bool SAL_CALL OEvoabConnection::isReadOnly(  ) throw(SQLException, RuntimeException)
 +{
@@ -349,14 +380,18 @@
 +}
 +void SAL_CALL OEvoabConnection::setCatalog( const ::rtl::OUString& catalog ) throw(SQLException, RuntimeException)
 +{
++        ::dbtools::throwFunctionNotSupportedException(::rtl::OUString::createFromAscii("Not Implemented"),NULL);
 +}
++
 +::rtl::OUString SAL_CALL OEvoabConnection::getCatalog(  ) throw(SQLException, RuntimeException)
 +{
 +	return ::rtl::OUString();
 +}
 +void SAL_CALL OEvoabConnection::setTransactionIsolation( sal_Int32 level ) throw(SQLException, RuntimeException)
 +{
++        ::dbtools::throwFunctionNotSupportedException(::rtl::OUString::createFromAscii("Not Implemented"),NULL);
 +}
++
 +sal_Int32 SAL_CALL OEvoabConnection::getTransactionIsolation(  ) throw(SQLException, RuntimeException)
 +{
 +	return TransactionIsolation::NONE;
@@ -367,4 +402,5 @@
 +}
 +void SAL_CALL OEvoabConnection::setTypeMap( const Reference< ::com::sun::star::container::XNameAccess >& typeMap ) throw(SQLException, RuntimeException)
 +{
++        ::dbtools::throwFunctionNotSupportedException(::rtl::OUString::createFromAscii("Not Implemented"),NULL);
 +}
