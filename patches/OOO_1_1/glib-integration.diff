@@ -1,0 +1,258 @@
+--- vcl/unx/source/app/salgxlib.cxx
++++ vcl/unx/source/app/salgxlib.cxx
+@@ -0,0 +1,161 @@
++#ifndef _SV_SALDISP_HXX
++#include <saldisp.hxx>
++#endif
++#ifndef _SV_SALDATA_HXX
++#include <saldata.hxx>
++#endif
++
++#include <glib.h>
++
++typedef struct {
++	GSource       source;
++
++	GPollFD       pollfd;
++	GIOCondition  condition;
++	
++	YieldFunc     pending;
++	YieldFunc     handle;
++	gpointer      user_data;
++} SalWatch;
++
++extern "C" {
++
++static gboolean 
++sal_source_prepare (GSource *source,
++		    gint    *timeout)
++{
++	SalWatch *watch = (SalWatch *)source;
++
++	*timeout = -1;
++
++	if (watch->pending &&
++	    watch->pending (watch->pollfd.fd, watch->user_data)) {
++		watch->pollfd.revents |= watch->condition;
++		return TRUE;
++	}
++
++	return FALSE;
++}
++
++static gboolean 
++sal_source_check (GSource *source)
++{
++	SalWatch *watch = (SalWatch *)source;
++
++	return watch->pollfd.revents & watch->condition;
++}
++
++static gboolean
++sal_source_dispatch (GSource    *source,
++		     GSourceFunc callback,
++		     gpointer    user_data)
++{
++	SalWatch *watch = (SalWatch *) source;
++
++	watch->handle (watch->pollfd.fd, watch->user_data);
++
++	return TRUE;
++}
++
++static void
++sal_source_finalize (GSource *source)
++{
++}
++
++static GSourceFuncs sal_source_watch_funcs = {
++	sal_source_prepare,
++	sal_source_check,
++	sal_source_dispatch,
++	sal_source_finalize
++};
++
++static GSource *
++sal_source_create_watch (int           fd,
++			 GIOCondition  condition,
++			 YieldFunc     pending,
++			 YieldFunc     handle,
++			 gpointer      user_data)
++{
++	GSource      *source;
++	SalWatch     *watch;
++	GMainContext *context = g_main_context_default ();
++
++	source = g_source_new (&sal_source_watch_funcs,
++			       sizeof (SalWatch));
++	watch = (SalWatch *) source;
++
++	watch->pollfd.fd     = fd;
++	watch->pollfd.events = condition;
++	watch->condition = condition;
++	watch->pending   = pending;
++	watch->handle    = handle;
++	watch->user_data = user_data;
++
++	g_source_set_can_recurse (source, TRUE);
++	g_source_add_poll (source, &watch->pollfd);
++	g_source_attach (source, context);
++
++	return source;
++}
++static gboolean
++dummy_fn (gpointer data)
++{
++	return FALSE;
++}
++
++} // extern "C"
++
++void SalXLib::Insert( int       nFD,
++		      void     *data,
++		      YieldFunc pending,
++		      YieldFunc queued,
++		      YieldFunc handle )
++{
++	GSource *source = sal_source_create_watch
++		( nFD, (GIOCondition) ((G_IO_IN|G_IO_PRI) |
++				       (G_IO_ERR|G_IO_HUP|G_IO_NVAL)),
++		  pending, handle, data);
++	pSources = g_list_prepend (pSources, source);
++}
++
++void SalXLib::Remove( int nFD )
++{
++	GList *l;
++
++	for (l = pSources; l; l = l->next) {
++		SalWatch *watch = (SalWatch *)l->data;
++
++		if (watch->pollfd.fd == nFD) {
++			pSources = g_list_delete_link (pSources, l);
++
++			g_source_destroy ((GSource *)watch);
++			g_source_unref   ((GSource *)watch);
++			return;
++		}
++	}
++}
++
++void SalXLib::Yield( BOOL bWait )
++{
++	timeval thisTimeout = { 0 };
++
++	if (bWait) {
++		if (Timeout_.tv_sec) {
++			// determine remaining timeout.
++			gettimeofday (&thisTimeout, 0);
++			thisTimeout = Timeout_ - thisTimeout;
++		}
++	}
++	guint wait_ms = thisTimeout.tv_usec/1000 + thisTimeout.tv_sec;
++	if (wait_ms > 0)
++		g_timeout_add (wait_ms, dummy_fn, NULL);
++
++	g_main_context_iteration (NULL, wait_ms > 0);
++
++	CheckTimeout();
++}
++
++void SalXLib::Wakeup()
++{
++	g_main_context_wakeup (g_main_context_default ());
++}
+Index: vcl/unx/source/app/saldata.cxx
+===================================================================
+RCS file: /cvs/gsl/vcl/unx/source/app/saldata.cxx,v
+retrieving revision 1.25.50.1
+diff -u -p -u -r1.25.50.1 saldata.cxx
+--- vcl/unx/source/app/saldata.cxx	21 Jul 2003 14:48:43 -0000	1.25.50.1
++++ vcl/unx/source/app/saldata.cxx	12 Aug 2003 17:27:13 -0000
+@@ -459,6 +459,7 @@ SalXLib::SalXLib()
+ 	Timeout_.tv_usec		= 0;
+ 	nTimeoutMS_ 			= 0;
+ 
++#ifdef USE_NON_GLIB_LOOP
+ 	nFDs_					= 0;
+ 	FD_ZERO( &aReadFDS_ );
+ 	FD_ZERO( &aExceptionFDS_ );
+@@ -497,6 +498,9 @@ SalXLib::SalXLib()
+ 		FD_SET( pTimeoutFDS_[0], &aReadFDS_ );
+ 		nFDs_ = pTimeoutFDS_[0] + 1;
+ 	}
++#else
++	pSources = NULL;
++#endif
+ 
+ 	bWasXError_ 			= FALSE;
+ 	bIgnoreXErrors_ 		= !!getenv( "SAL_IGNOREXERRORS" );
+@@ -506,9 +510,11 @@ SalXLib::SalXLib()
+ 
+ SalXLib::~SalXLib()
+ {
++#ifdef USE_NON_GLIB_LOOP
+ 	// close 'wakeup' pipe.
+ 	close (pTimeoutFDS_[0]);
+ 	close (pTimeoutFDS_[1]);
++#endif
+ 
+ // completetly disabled Bug Nr. #47319 -> segv while using xsuntransport=shmem
+ // #ifdef SAL_XT
+@@ -721,6 +727,7 @@ void SalXLib::XError( Display *pDisplay,
+ 	bWasXError_ = TRUE;
+ }
+ 
++#ifdef USE_NON_GLIB_LOOP
+ struct YieldEntry
+ {
+ 	YieldEntry* next;		// pointer to next entry
+@@ -776,6 +783,7 @@ void SalXLib::Remove( int nFD )
+ 		nFDs_ = nFD + 1;
+ 	}
+ }
++#endif
+ 
+ bool SalXLib::CheckTimeout( bool bExecuteTimers )
+ {
+@@ -806,6 +814,8 @@ bool SalXLib::CheckTimeout( bool bExecut
+     return bRet;
+ }
+ 
++#ifdef USE_NON_GLIB_LOOP
++
+ void SalXLib::Yield( BOOL bWait )
+ {
+     // check for timeouts here if you want to make screenshots
+@@ -952,3 +962,5 @@ void SalXLib::Wakeup()
+ {
+ 	write (pTimeoutFDS_[1], "", 1);
+ }
++
++#endif /* USE_NON_GLIB_LOOP */
+
+
+Index: vcl/unx/source/app/makefile.mk
+===================================================================
+RCS file: /cvs/gsl/vcl/unx/source/app/makefile.mk,v
+retrieving revision 1.9.232.1
+diff -u -p -r1.9.232.1 makefile.mk
+--- vcl/unx/source/app/makefile.mk	21 Jul 2003 14:48:43 -0000	1.9.232.1
++++ vcl/unx/source/app/makefile.mk	12 Aug 2003 17:37:51 -0000
+@@ -95,6 +95,7 @@ SLOFILES=\
+ 			$(SLO)$/i18n_keysym.obj		\
+ 			$(SLO)$/salmain.obj			\
+ 			$(SLO)$/saldata.obj			\
++			$(SLO)$/salgxlib.obj			\
+ 			$(SLO)$/saltimer.obj		\
+ 			$(SLO)$/saldisp.obj			\
+ 			$(SLO)$/salinst.obj			\
+@@ -110,6 +111,8 @@ SLOFILES=\
+ 			$(SLO)$/stacktrace.obj		\
+ 			$(SLO)$/keysymnames.obj		\
+ 			$(SLO)$/wmadaptor.obj
++
++CFLAGS+=`pkg-config --cflags glib-2.0`
+ 
+ .IF "$(WITH_LIBSN)"=="YES"
+ CDEFS+=-DHAVE_LIBSN
