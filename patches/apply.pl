@@ -220,6 +220,7 @@ sub apply_patches {
         print "Unapplying obsolete patch $patch\n";
         do_patch $patch, $base_cmd." -R";
         unlink $patch || die "Can't remove $patch $!";
+	delete $existing_patches{$a};
     }
 
     foreach $patch (@Patches) {
