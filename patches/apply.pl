@@ -186,6 +186,18 @@ sub list_patches {
     return @Patches;
 }
 
+sub applied_patches_list
+{
+    my @patches;
+    
+    foreach (glob($applied_patches."/???-*")) { 
+	m/\~$/ && next; # backup file.
+	push @patches, $_;
+    }
+
+    return @patches;
+}
+
 sub apply_patches {
 
     my @Patches = list_patches ($distro);
@@ -203,10 +215,8 @@ sub apply_patches {
     my $patch_num = 0;
     my %existing_patches;
 
-    foreach (glob($applied_patches."/???-*")) { 
+    foreach (applied_patches_list()) {
         my $file = basename $_;
-
-	$file =~ m/\~$/ && next; # backup file.
 
         $file =~ s/^([0-9]{3})-//;
         $existing_patches{$file} = $_;
@@ -275,7 +285,7 @@ sub remove_patches {
 
     -d $applied_patches || return;
 
-    foreach $patch_file (reverse glob($applied_patches."/???-*")) {
+    foreach $patch_file (reverse (applied_patches_list())) {
         print "\nRemoving ".basename($patch_file)."...\n" unless $quiet;
         do_patch $patch_file, $base_cmd;
         unlink $patch_file;
@@ -311,8 +321,7 @@ foreach $a (@ARGV) {
 	if ($a eq '-R') {
 	    $remove = 1;	    
 	    push @arguments, $a;
-	}
-	if ($a =~ m/--series-from=(.*)/) {
+	} elsif ($a =~ m/--series-from=(.*)/) {
 	    $export = 1;
 	    $quiet = 1;
 	    $distro = $1;
