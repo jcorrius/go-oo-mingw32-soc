@@ -210,6 +210,18 @@ sub apply_patches {
     }
     $patch_num++;
 
+    my %obsolete_patches = %existing_patches;
+    foreach $patch (@Patches) {
+	delete $obsolete_patches{basename($patch)};
+    }
+
+    foreach $a (reverse sort keys %obsolete_patches) {
+	$patch = $obsolete_patches{$a};
+        print "Unapplying obsolete patch $patch\n";
+        do_patch $patch, $base_cmd." -R";
+        unlink $patch || die "Can't remove $patch $!";
+    }
+
     foreach $patch (@Patches) {
         my $patch_file = basename($patch);
         
@@ -245,10 +257,8 @@ sub apply_patches {
         }
     }
 
-    foreach (values %existing_patches) {
-        print "Unapplying obsolete patch $_\n";
-        do_patch $_, $base_cmd." -R";
-        unlink $_ || die "Can't remove $_ $!";
+    if (keys %existing_patches) {
+	die "Error - leftover obsolete patches\n";
     }
 }
 
