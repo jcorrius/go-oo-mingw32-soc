@@ -1,0 +1,927 @@
+--- /dev/null	
++++ bridges/source/mono_uno/uno_proxy.cs	
+@@ -0,0 +1,924 @@
++/*************************************************************************
++ *
++ *  $RCSfile: $
++ *
++ *  $Revision: $
++ *
++ *  last change: $Author: $ $Date: $
++ *
++ *  The Contents of this file are made available subject to the terms of
++ *  either of the following licenses
++ *
++ *         - GNU Lesser General Public License Version 2.1
++ *         - Sun Industry Standards Source License Version 1.1
++ *
++ *  Sun Microsystems Inc., October, 2000
++ *
++ *  GNU Lesser General Public License Version 2.1
++ *  =============================================
++ *  Copyright 2000 by Sun Microsystems, Inc.
++ *  901 San Antonio Road, Palo Alto, CA 94303, USA
++ *
++ *  This library is free software; you can redistribute it and/or
++ *  modify it under the terms of the GNU Lesser General Public
++ *  License version 2.1, as published by the Free Software Foundation.
++ *
++ *  This library is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ *  Lesser General Public License for more details.
++ *
++ *  You should have received a copy of the GNU Lesser General Public
++ *  License along with this library; if not, write to the Free Software
++ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ *  MA  02111-1307  USA
++ *
++ *
++ *  Sun Industry Standards Source License Version 1.1
++ *  =================================================
++ *  The contents of this file are subject to the Sun Industry Standards
++ *  Source License Version 1.1 (the "License"); You may not use this file
++ *  except in compliance with the License. You may obtain a copy of the
++ *  License at http://www.openoffice.org/license.html.
++ *
++ *  Software provided under this License is provided on an "AS IS" basis,
++ *  WITHOUT WARRANTY OF ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING,
++ *  WITHOUT LIMITATION, WARRANTIES THAT THE SOFTWARE IS FREE OF DEFECTS,
++ *  MERCHANTABLE, FIT FOR A PARTICULAR PURPOSE, OR NON-INFRINGING.
++ *  See the License for the specific provisions governing your rights and
++ *  obligations concerning the Software.
++ *
++ *  The Initial Developer of the Original Code is: Sun Microsystems, Inc.
++ *
++ *  Copyright: 2000 by Sun Microsystems, Inc.
++ *
++ *  All Rights Reserved.
++ *
++ *  Contributor(s): _______________________________________
++ *
++ *
++ ************************************************************************/
++
++using System;
++using System.Collections;
++using System.Diagnostics;
++using System.Reflection;
++using System.Runtime.InteropServices;
++using System.Runtime.Remoting;
++using System.Runtime.Remoting.Messaging;
++using System.Runtime.Remoting.Proxies;
++
++using uno.Typelib;
++
++namespace com.sun.star.bridges.mono_uno /* FIXME use some uno.foo namespace ? */
++{
++
++class Bridge
++{
++    [DllImport("cli_uno", EntryPoint="Bridge_acquire")]
++    public static extern void Acquire(IntPtr bridge);
++
++    [DllImport("cli_uno", EntryPoint="Bridge_release")]
++    public static extern void Release(IntPtr bridge);
++
++    [DllImport("cli_uno", EntryPoint="Bridge_registerInterfaceWithCliEnvironment")]
++    public static extern void registerInterfaceWithCliEnvironment(
++        IntPtr bridge,
++        /* FIXME GCHandle */ object proxy,
++        /* FIXME UStringPtr */ string oid);
++
++    [DllImport("cli_uno", EntryPoint="Bridge_registerInterfaceWithUnoEnvironment")]
++    public static unsafe extern void registerInterfaceWithUnoEnvironment(
++        IntPtr bridge,
++        ref IntPtr unoInterface,
++        /* FIXME UStringPtr */ string oid,
++        InterfaceTypeDescription *TD);
++
++    [DllImport("cli_uno", EntryPoint="Bridge_revokeInterfaceFromUnoEnvironment")]
++    public static unsafe extern void revokeInterfaceFromUnoEnvironment(
++        IntPtr bridge,
++        IntPtr unoInterface);
++        
++    // FIXME use consistent names
++    public static unsafe IntPtr BinaryProxy(object managedData, TypeDescription *td)
++    {
++        throw new NotImplementedException();
++    }
++}
++
++public unsafe class UnoInterfaceInfo
++{
++    public IntPtr UnoInterface; // wrapped interface
++    public Type Type; // mapped type
++    public IntPtr Bridge;
++    public InterfaceTypeDescription *TypeDesc;
++
++    public UnoInterfaceInfo(IntPtr bridge, IntPtr unoInterface,
++                            InterfaceTypeDescription *td)
++    {
++        Bridge = bridge;
++        com.sun.star.bridges.mono_uno.Bridge.Acquire(Bridge);
++        UnoInterface = unoInterface;
++        uno.Binary.Interface.Acquire(UnoInterface);
++        TypeDesc = td;
++        InterfaceTypeDescription.Acquire(TypeDesc);
++
++        if (((TypeDescription *)TypeDesc)->bComplete == 0 &&
++            TypeDescription.Complete((TypeDescription *)TypeDesc))
++        {
++            // FIXME throw a uno runtime exception
++        }
++    }
++
++    ~UnoInterfaceInfo()
++    {
++        com.sun.star.bridges.mono_uno.Bridge.revokeInterfaceFromUnoEnvironment(
++            Bridge, UnoInterface);
++        com.sun.star.bridges.mono_uno.Bridge.Release(Bridge);
++        uno.Binary.Interface.Release(UnoInterface);
++        InterfaceTypeDescription.Release(TypeDesc);        
++    }
++}
++
++public unsafe class UnoInterfaceProxy: RealProxy, IRemotingTypeInfo
++{
++    /** used for IRemotingTypeInfo.TypeName
++     */
++    string typeName = "System.Object";
++
++    /** The list is filled with UnoInterfaceInfo objects. The list can only
++        grow and elements are never changed. If an element was added it
++        must not be changed!
++    */
++    ArrayList interfaces = new ArrayList(10); // of UnoInterfaceInfo
++
++    /** The list is filled with additional UnoInterfaceProxy object due
++        to aggregation via bridges.  Though the latter is strongly
++        discouraged, this has to be supported.
++    */
++    ArrayList additionalProxies = new ArrayList();
++
++    IntPtr bridge;
++    string oid;
++
++    private unsafe UnoInterfaceProxy(IntPtr bridge, IntPtr unoInterface,
++                                     InterfaceTypeDescription *TD, string oid)
++        : base(typeof(MarshalByRefObject)) // FIXME is there a better type?
++    {
++        this.bridge = bridge;
++        Bridge.Acquire(bridge);
++        this.oid = oid;
++        AddUnoInterface(unoInterface, TD);
++    }
++
++    ~UnoInterfaceProxy()
++    {
++        // FIXME should revokeInterface from environment, but can't
++        // access managed string oid any longer.
++    }
++
++    public static unsafe object Create(IntPtr bridge, IntPtr unoInterface,
++                                       InterfaceTypeDescription *TD, string oid)
++    {
++        UnoInterfaceProxy realProxy = new UnoInterfaceProxy(bridge, unoInterface,
++                                                            TD, oid);
++        object proxy = realProxy.GetTransparentProxy();
++        Bridge.registerInterfaceWithCliEnvironment(bridge, proxy, oid);
++        return proxy;
++    }
++
++    // RealProxy members
++    public unsafe override IMessage Invoke(IMessage request)
++    {
++        IMethodCallMessage callmsg = (IMethodCallMessage)request;
++        LogicalCallContext context = callmsg.LogicalCallContext;
++
++        // Find out which UNO interface is being called
++        string typeName = callmsg.TypeName;
++        typeName = typeName.Substring(0, typeName.IndexOf(','));
++
++        // Special Handling for System.Object methods
++        if (typeName.IndexOf("System.Object") != -1)
++        {
++            return InvokeObjectMethod(request);
++        }
++
++        Type typeBeingCalled = LoadCliType(typeName);
++        UnoInterfaceInfo info = FindInfo(typeBeingCalled);
++
++        Trace.Assert(info != null);
++        
++        string methodName = callmsg.MethodName;
++        TypeDescriptionReference **ppAllMembers =
++        info.TypeDesc->ppAllMembers;
++        int numMembers = info.TypeDesc->nAllMembers;
++        for (int i = numMembers; i > 0; --i)
++        {
++            TypeDescriptionReference *memberTD = *(ppAllMembers + i);
++
++            // FIXME do without string conversion?
++            string memberTypeName = memberTD->pTypeName.ToString();
++            // check methodName against fully qualified memberTypeName
++            // of memberTD; memberTypeName is of the form
++            //  <name> "::" <methodName> *(":@" <idx> "," <idx> ":" <name>)
++
++            int offset = memberTypeName.IndexOf(':') + 2;
++            int remainder = memberTypeName.Length - offset;
++            if (memberTD->eTypeClass == TypeClass.INTERFACE_METHOD)
++            {
++                if ((methodName.Length == remainder ||
++                     (methodName.Length < remainder &&
++                      memberTypeName[offset + methodName.Length] == ':')) &&
++                    String.Compare(memberTypeName, offset,
++                                   methodName, 0, methodName.Length) == 0)
++                {
++                    InterfaceMethodTypeDescription *methodTD =
++                        (InterfaceMethodTypeDescription *)memberTD;
++
++                    uno.Any exception;
++                    uno.Any result = CallUno(info.UnoInterface,
++                                             (TypeDescription *)methodTD,
++                                             methodTD->pReturnTypeRef,
++                                             methodTD->nParams, methodTD->pParams,
++                                             callmsg.Args,
++                                             /* FIXME this is an implementation detail,
++                                                documented on MSDN, but still an implementation
++                                                detail. cli_uno does the same */
++                                             (System.Type[])callmsg.MethodSignature,
++                                             out exception);
++                    return ConstructReturnMessage(result, null, null,
++                                                  callmsg, exception);
++                }
++            }
++            else // INTERFACE_ATTRIBUTE
++            {
++                if (methodName.Length > 4 &&
++                    (methodName.Length - 4 == remainder ||
++                     (methodName.Length - 4 <  remainder &&
++                      memberTypeName[offset + methodName.Length - 4] == ':')) &&
++                    methodName[1] == 'e' && methodName[2] == 't' &&
++                    String.Compare(memberTypeName, offset,
++                                   methodName, 4, methodName.Length - 4) == 0)
++                {
++                    InterfaceAttributeTypeDescription *attributeTD =
++                        (InterfaceAttributeTypeDescription *)memberTD;
++                    uno.Any exception;
++                    uno.Any result;
++
++                    if (methodName[0] == 'g') // "get"
++                    {
++                        result = CallUno(info.UnoInterface,
++                                         (TypeDescription *)attributeTD,
++                                         attributeTD->pAttributeTypeRef,
++                                         0, null, null, null,
++                                         out exception);
++                        return ConstructReturnMessage(result, null, null,
++                                                      callmsg, exception);
++                    }
++                    else if (methodName[0] == 's') // "set"
++                    {
++                        if (attributeTD->bReadOnly != 0)
++                            /* FIXME should we generate an exception? */
++                            return ConstructReturnMessage(uno.Any.VOID, null, null,
++                                                          callmsg, uno.Any.VOID);
++
++                        MethodParameter param;
++                        param.pTypeRef = attributeTD->pAttributeTypeRef;
++                        param.bIn = 1;
++                        param.bOut = 0;
++
++                        result = CallUno(info.UnoInterface,
++                                         (TypeDescription *)attributeTD,
++                                         TypeDescription.VoidType,
++                                         1, &param, // param is on the stack, pinning not necessary
++                                         callmsg.Args, null, /* FIXME ??? from cli_uno */
++                                         out exception);
++                        return ConstructReturnMessage(uno.Any.VOID, null, null,
++                                                      callmsg, exception);
++                    }
++                    break;
++                }                                   
++            }
++        }
++        // FIXME check if the message of the exception is not crippled
++
++        // the thing that should not be... no method info found!
++        // FIXME throw unoidl.com.sun.star.uno.RuntimeException
++
++        return null;
++    }
++
++    // IRemotingTypeInfo members
++    public string TypeName
++    {
++        get { return typeName; }
++        set { typeName = value; }
++    }
++
++    public unsafe bool CanCastTo(Type fromType, object o)
++    {
++        if (fromType == typeof(Object))
++        return true;
++
++        lock (this) {
++            if (FindInfo(fromType) != null)
++                // type is already in our list of Interfaces
++                return true;
++            
++            // queryInterface for the required type
++            // there is always a least one interface in our list
++            UnoInterfaceInfo info = (UnoInterfaceInfo)interfaces[0];
++            // ppAllMembers[0] corresponds to queryInterface
++            InterfaceMethodTypeDescription *queryI =
++                (InterfaceMethodTypeDescription *)*(info.TypeDesc->ppAllMembers);
++        
++            object[] args = new object[] { fromType };
++            uno.Any exception;
++            uno.Any result = CallUno(info.UnoInterface,
++                                     (TypeDescription *)queryI,
++                                     queryI->pReturnTypeRef,
++                                     1, queryI->pParams, args, null,
++                                     out exception);
++
++            // queryInterface doesn't throw exceptions.
++            
++            if (result.Type != typeof(void)) // result has a value
++            {
++                if (FindInfo(fromType) != null)
++                {
++                    // the proxy supports the requested interface now
++                    return true;
++                }
++                
++                // via aggregation: it is possible that queryInterface() returns
++                //                  and interface with a different oid.
++                //                  That way, this type is supported for the CLI
++                //                  interpreter (CanCastTo() returns true)
++                object obj = result.Value;
++                if (RemotingServices.IsTransparentProxy(obj))
++                {
++                    UnoInterfaceProxy proxy =
++                        (UnoInterfaceProxy)RemotingServices.GetRealProxy(obj);
++                    additionalProxies.Add(proxy);
++                    return true;
++                }
++            }
++        }
++        return false;
++    }
++
++    // internals
++    unsafe void AddUnoInterface(IntPtr unoInterface, InterfaceTypeDescription *TD)
++    {
++        lock (this)
++        {
++            foreach (UnoInterfaceInfo info in interfaces)
++            {
++                if (InterfaceTypeDescription.Equal(info.TypeDesc, TD))
++                    return;
++            }
++            // This proxy does not contain the unoInterface. Add it.
++            Bridge.registerInterfaceWithUnoEnvironment(bridge, ref unoInterface,
++                                                       oid, TD);
++            interfaces.Add(new UnoInterfaceInfo(bridge, unoInterface, TD));         
++        }
++    }
++
++    UnoInterfaceInfo FindInfo(Type type)
++    {
++        foreach (UnoInterfaceInfo info in interfaces)
++        {
++            if (type.IsAssignableFrom(info.Type))
++                return info;
++        }
++        foreach (UnoInterfaceProxy proxy in additionalProxies)
++        {
++            UnoInterfaceInfo info = proxy.FindInfo(type);
++            if (info != null)
++                return info;
++        }
++        return null;
++    }
++
++    [StructLayout(LayoutKind.Explicit)]
++    private unsafe struct largest
++    {
++        [FieldOffset(0)] long n;
++        [FieldOffset(0)] double d;
++        [FieldOffset(0)] void *p;
++        [FieldOffset(0)] uno.Binary.Any a;    
++    }
++
++    // FIXME args[i] must be of same type as return value
++    static unsafe uno.Any CallUno(IntPtr unoInterface, TypeDescription *memberTD,
++                                  TypeDescriptionReference *returnType, int nParams,
++                                  MethodParameter *parameters, object[] args,
++                                  Type[] argTypes, out uno.Any exception)
++    {
++        int returnSize = sizeof(largest);
++
++        if (returnType != null &&
++            returnType->eTypeClass == TypeClass.STRUCT ||
++            returnType->eTypeClass == TypeClass.EXCEPTION)
++        {
++            if (((TypeDescription *)returnType)->nSize > returnSize)
++                returnSize = ((TypeDescription *)returnType)->nSize;
++        }
++
++        // Prepare memory that contains all converted arguments and
++        // return values. The memory block contains first pointers to
++        // the arguments which are in the same block For example, 2
++        // arguments, 1 ret.
++        //
++        //      | Pointer
++        //      | Pointer
++        //      | Return value
++        //      | Arg 1
++        //      | Arg 2
++        //
++        // If an argument is larger then struct largest, such as some
++        // structures, then the pointer points to an extra block of
++        // memory. The same goes for a big return value.
++        // FIXME the last sentence is bullshit. Get it deleted from cli_uno ;)
++        byte *mem = stackalloc byte[nParams * sizeof(void *) +
++                                    returnSize +
++                                    nParams * sizeof(largest)];
++
++        // array of pointers to args
++        void **unoArgPtrs = (void **)mem;
++
++        // Return Value
++        void *unoRetPtr;
++        if (memberTD->eTypeClass == TypeClass.INTERFACE_ATTRIBUTE && nParams == 1)
++            // If an attribute is set, then unoRet must be null, e.g. void setAttribute(int)
++            unoRetPtr = null;
++        else
++            unoRetPtr = (void *)(unoArgPtrs + nParams);
++
++        // args
++        largest *unoArgs = (largest *)((byte *)unoRetPtr + returnSize);
++
++        for (int i = 0; i < nParams; ++i)
++        {
++            TypeDescription *type = (TypeDescription *)parameters[i].pTypeRef;
++
++            unoArgPtrs[i] = unoArgs + i;
++            if ((type->eTypeClass == TypeClass.STRUCT ||
++                 type->eTypeClass == TypeClass.EXCEPTION) &&
++                (type->nSize > sizeof(largest)))
++            {
++                // stackalloc is only allowed in initializers
++                byte *bigArgPtr = stackalloc byte[type->nSize];
++
++                unoArgPtrs[i] = bigArgPtr;
++            }
++                            
++            if (parameters[i].bIn != 0)
++            {
++                // FIXME error handling
++                MapToUno(unoArgPtrs[i], args[i], type, false /* no assign */);
++            }
++        }
++
++        uno.Binary.Any unoExceptionHolder;
++        uno.Binary.Any *unoExc = & unoExceptionHolder;
++
++        // call binary uno
++        uno.Binary.Interface.Dispatch(
++            unoInterface, memberTD, unoRetPtr, unoArgPtrs, &unoExc);
++
++        if (unoExc == null)
++        {
++            exception = uno.Any.VOID;
++
++            // convert out args, destroy uno args
++            for (int i = 0; i < nParams; ++i)
++            {
++                TypeDescription *type = (TypeDescription *)parameters[i].pTypeRef;
++
++                if (parameters[i].bOut != 0)
++                {
++                    // FIXME error handling
++                    MapToManaged(out args[i], unoArgPtrs[i], parameters[i].pTypeRef,
++                                 argTypes != null ? argTypes[i] : null, false);
++                }
++
++                // cleanup args
++                if (type->eTypeClass < TypeClass.DOUBLE &&
++                    type->eTypeClass != TypeClass.ENUM) // no need to destroy these
++                    uno.Binary.Data.Destroy(unoArgPtrs[i], type, null);
++            }
++
++            if (returnType != null && returnType->eTypeClass != TypeClass.VOID)
++            {
++                // convert uno return value
++                object result;
++                // FIXME error handling
++                MapToManaged(out result, unoRetPtr, returnType, null, false);
++                uno.Binary.Data.Destroy(unoRetPtr, (TypeDescription *)returnType, null);
++                return new uno.Any(result.GetType(), result); // FIXME is this correct?
++            }
++        }
++        else // exception occured
++        {
++            for (int i = 0; i < nParams; ++i)
++                if (parameters[i].bIn != 0)
++                    uno.Binary.Data.Destroy(unoArgPtrs[i], (TypeDescription *)parameters[i].pTypeRef, null);
++
++            // FIXME needs uno.Any vs System.Object clarification
++            object exc;
++            MapToManaged(out exc, unoExceptionHolder.pData,
++                         unoExceptionHolder.pType, null, false);
++            exception = new uno.Any(exc.GetType(), exc);
++            return uno.Any.VOID;
++        }
++
++        throw new NotImplementedException();
++    }
++
++    // FIXME convert cli types to expected types, e.g a long to a short where the uno type
++    // is a sal_Int16. This could be necessary if a scripting language (typeless) is used
++    // @param assign the uno_data has to be destructed (in/out args)
++    static void MapToUno(void *unoData, object managedData, TypeDescription *type,
++                         bool assign)
++    {
++        // FIXME acquire the TypeDescription?
++        // FIXME assert that all the type equivalences in the comments hold
++        switch (type->eTypeClass)
++        {
++        case TypeClass.VOID:
++            break;
++        case TypeClass.CHAR:
++            *(ushort *)unoData = (char)managedData; // sal_Unicode = ushort
++            break;
++        case TypeClass.BOOLEAN:
++            *(byte *)unoData = (bool)managedData ? (byte)1 : (byte)0; // sal_Bool = byte
++            break;
++        case TypeClass.BYTE:
++            // FIXME fix cli_uno which doesn't use sbyte on the RHS
++            *(sbyte *)unoData = (sbyte)managedData; // sal_Int8 = sbyte
++            break;
++        case TypeClass.SHORT:
++            *(short *)unoData = (short)managedData; // sal_Int16 = short
++            break;
++        case TypeClass.UNSIGNED_SHORT:
++            *(ushort *)unoData = (ushort)managedData; // sal_uInt16 = ushort
++            break;
++        case TypeClass.LONG:
++            *(int *)unoData = (int)managedData; // sal_Int32 = int
++            break;
++        case TypeClass.UNSIGNED_LONG:
++            *(uint *)unoData = (uint)managedData; // sal_uInt32 = uint
++            break;
++        case TypeClass.HYPER:
++            *(long *)unoData = (long)managedData; // sal_Int64 = long
++            break;
++        case TypeClass.UNSIGNED_HYPER:
++            *(ulong *)unoData = (ulong)managedData; // sal_uInt64 = ulong
++            break;
++        case TypeClass.FLOAT:
++            *(float *)unoData = (float)managedData; // C++ float = C# float
++            break;
++        case TypeClass.DOUBLE:
++            *(double *)unoData = (double)managedData; // C++ double = C# double
++            break;
++        case TypeClass.STRING:
++        {
++            if (managedData == null)
++            {
++                // This releases any old string if necessary
++                uno.rtl.UStringPtr.rtl_uString_new(unoData);
++            }
++            else
++            {
++                string s = (string)managedData;
++                uno.rtl.UStringPtr.rtl_uString_newFromStr_WithLength(unoData,
++                                                                     s, s.Length);
++            }
++        }
++        break;
++        case TypeClass.TYPE:
++            if (assign)
++                TypeDescriptionReference.Release(*(TypeDescriptionReference **)unoData);
++
++            *(TypeDescriptionReference **)unoData = MapCliType((Type)managedData);
++            break;
++        case TypeClass.ANY:
++        {
++            uno.Binary.Any *binAny = (uno.Binary.Any *)unoData;
++
++            if (assign)
++                uno.Binary.Any.Destroy(binAny, null);
++
++            if (managedData == null)
++            {
++                uno.Binary.Any.Construct(binAny, null, null, null);
++                break;
++            }
++
++            uno.Any any = (uno.Any)managedData;
++            TypeDescription *valueTD = (TypeDescription *)MapCliType(any.Type);
++
++            // if there's enough room in void *pReserved, store the value in the pointer
++            fixed (void *p = &binAny->pReserved)
++            {
++                binAny->pData = p; // This may look like something
++                                   // that I shouldn't do, but it's
++                                   // just to circumvent a bug in
++                                   // older mcs (< 1.1.4).
++                                   //  binAny->pReserved is always fixed
++            }
++            switch (valueTD->eTypeClass)
++            {
++            case TypeClass.VOID:
++                break;
++            case TypeClass.CHAR:
++                *(ushort *)binAny->pData = (char)any.Value;
++                break;
++            case TypeClass.BOOLEAN:
++                *(byte *)binAny->pData = (bool)any.Value ? (byte)1 : (byte)0;
++                break;
++            case TypeClass.BYTE:
++                *(sbyte *)binAny->pData = (sbyte)any.Value;
++                break;
++            case TypeClass.SHORT:
++                *(short *)binAny->pData = (short)any.Value;
++                break;
++            case TypeClass.UNSIGNED_SHORT:
++                *(ushort *)binAny->pData = (ushort)any.Value;
++                break;
++            case TypeClass.LONG:
++                *(int *)binAny->pData = (int)any.Value;
++                break;
++            case TypeClass.UNSIGNED_LONG:
++                *(uint *)binAny->pData = (uint)any.Value;
++                break;
++            case TypeClass.HYPER:
++                if (sizeof(long) > sizeof(void *))
++                    binAny->pData = uno.rtl.Mem.Allocate(sizeof(long));
++
++                *(long *)binAny->pData = (long)any.Value;
++                break;
++            case TypeClass.UNSIGNED_HYPER:
++                if (sizeof(ulong) > sizeof(void *))
++                    binAny->pData = uno.rtl.Mem.Allocate(sizeof(ulong));
++
++                *(ulong *)binAny->pData = (ulong)any.Value;
++                break;
++            case TypeClass.FLOAT:
++                if (sizeof(float) > sizeof(void *)) // FIXME can this happen?
++                    binAny->pData = uno.rtl.Mem.Allocate(sizeof(float));
++
++                *(float *)binAny->pData = (float)any.Value;
++                break;
++            case TypeClass.DOUBLE:
++                if (sizeof(double) > sizeof(void *))
++                    binAny->pData = uno.rtl.Mem.Allocate(sizeof(double));
++
++                *(double *)binAny->pData = (double)any.Value;
++                break;
++            case TypeClass.STRING:
++                // string anies are used so often, that we handle them
++                // separately, to be a little faster than with an
++                // extra MapToUno call
++                if (managedData == null)
++                {
++                    uno.rtl.UStringPtr.rtl_uString_new(binAny->pData);
++                }
++                else
++                {
++                    string s = (string)any.Value;
++                    uno.rtl.UStringPtr.rtl_uString_newFromStr_WithLength(
++                        binAny->pData, s, s.Length);
++                }
++                break;
++            case TypeClass.ENUM:
++                *(int *) binAny->pData = System.Convert.ToInt32(any.Value);
++                break;
++            case TypeClass.TYPE:
++            case TypeClass.SEQUENCE:
++            case TypeClass.INTERFACE:
++                binAny->pReserved = null;
++                MapToUno(binAny->pData, any.Value, valueTD, false /* no assign */);
++                break;
++            case TypeClass.STRUCT:
++            case TypeClass.EXCEPTION:
++                binAny->pData = uno.rtl.Mem.Allocate(valueTD->nSize);
++                MapToUno(binAny->pData, any.Value, valueTD, false /* no assign */);
++                break;
++            default:
++                // FIXME
++                throw new Exception();
++            }
++            binAny->pType = (TypeDescriptionReference *)valueTD;
++            TypeDescriptionReference.Acquire(binAny->pType);
++        }
++        break;
++        case TypeClass.ENUM:
++            *(int *)unoData = System.Convert.ToInt32(managedData);
++            break;
++        case TypeClass.STRUCT:
++        case TypeClass.EXCEPTION:
++        {
++            CompoundTypeDescription *compTD = (CompoundTypeDescription *)type;
++            StructTypeDescription *structTD;
++
++            if (type->eTypeClass == TypeClass.STRUCT)
++                structTD = (StructTypeDescription *)type;
++
++            if (((TypeDescription *)compTD)->bComplete == 0)
++                TypeDescription.Complete((TypeDescription *)compTD);
++
++            int members = compTD->nMembers;
++            bool exception = false;
++            Type managedType = null;
++            if (managedData != null)
++                managedType = managedData.GetType();
++
++            if (compTD->pBaseTypeDescription != null)
++                MapToUno(unoData, managedData,
++                         (TypeDescription *)((TypeDescription *)compTD->pBaseTypeDescription)->pWeakRef,
++                         assign);
++
++            TypeDescriptionReference *memberType = null;
++            for (int i = 0; i < members; ++i)
++            {
++                memberType = compTD->ppTypeRefs[i];
++
++                object val = null;
++                if (managedData != null)
++                {
++                    FieldInfo fieldInfo = managedType.GetField(
++                        compTD->ppMemberNames[i].ToString());
++                    // special case for Exception.Message property
++                    // The com.sun.star.uno.Exception.Message field is mapped to the
++                    // System.Exception property. Type.GetField("Message") returns null
++                    if (fieldInfo == null &&
++                        type->pTypeName.ToString() == "com.sun.star.uno.Exception")
++                    {
++                        // FIXME
++                    }
++                    else
++                    {
++                        // FIXME
++                    }
++                }
++            }            
++        }
++        break;
++        case TypeClass.SEQUENCE:
++        {
++            // FIXME
++            throw new NotImplementedException();
++        }
++        case TypeClass.INTERFACE:
++        {
++            if (assign && *(void **)unoData != null)
++                uno.Binary.Interface.Release(new IntPtr(*(void **)unoData));
++
++            if (managedData == null)
++                *(void **)unoData = null;
++            else
++                *(void **)unoData =
++                    com.sun.star.bridges.mono_uno.Bridge.BinaryProxy(managedData, type).ToPointer();
++            break;
++        }
++        default:
++        {
++            // FIXME
++            throw new NotImplementedException();
++        }
++        }
++    }
++
++    static void MapToManaged(out object managedData, void *unoData, TypeDescriptionReference *type, Type info, bool dontCreateObj)
++    {
++        throw new NotImplementedException();
++    }
++
++    static TypeDescriptionReference *MapCliType(Type managedType)
++    {
++        throw new NotImplementedException();
++    }
++    
++    IMessage InvokeObjectMethod(IMessage request)
++    {
++        IMethodMessage methodmsg = (IMethodMessage)request;
++        object ret;
++        switch (methodmsg.MethodName)
++        {
++        case "Equals":
++            RealProxy realProxy = RemotingServices.GetRealProxy(methodmsg.Args[0]);
++            ret = false;
++            if (realProxy != null)
++            {
++                UnoInterfaceProxy unoProxy = realProxy as UnoInterfaceProxy;
++                if (unoProxy != null)
++                {
++                    ret = oid.Equals(unoProxy.Oid);
++                    break;
++                }
++            }
++            break;
++        case "GetHashCode":
++            ret = oid.GetHashCode();
++            break;
++        case "GetType":
++            ret = typeof(System.Object);
++            break;
++        case "ToString":
++            ret = String.Format("Uno object proxy. OID: {0}", oid);
++            break;
++        default:
++            // Cannot happen
++            ret = null;
++            break;
++        }
++
++        return new ReturnMessage(ret, new object[0], 0,
++                                 methodmsg.LogicalCallContext,
++                                 (IMethodCallMessage)methodmsg);
++    }
++
++    public string Oid {
++        get { return oid; }
++    }
++
++    Type LoadCliType(string unoName)
++    {
++        Type result = null;
++        bool isPolymorphic = false;
++
++        string loadName = unoName;
++        int index = unoName.IndexOf('<');
++        if (index != -1)
++        {
++            loadName = unoName.Substring(0, index);
++            isPolymorphic = true;
++        }
++        
++        result = Type.GetType(loadName + ",cli_types");
++
++        if (result == null)
++            result = Type.GetType(loadName + ",cli_basetypes");
++
++        if (result == null)
++            result = Type.GetType(loadName, false);
++
++        if (result == null)
++        {
++            foreach (Assembly a in AppDomain.CurrentDomain.GetAssemblies())
++            {
++                result = a.GetType(loadName, false);
++                if (result != null)
++                    break;
++            }
++        }
++
++        if (result == null)
++            // FIXME don't use generic Exception type
++            throw new Exception("A type could not be loaded: " + loadName);
++
++        if (isPolymorphic)
++            result = uno.PolymorphicType.GetType(result, unoName);
++
++        return result;            
++    }
++
++    IMessage ConstructReturnMessage(uno.Any result, object[] args,
++                                    InterfaceMethodTypeDescription *methodTD,
++                                    IMethodCallMessage callmsg, uno.Any exception)
++    {
++        if (exception.hasValue())
++        {
++            throw (System.Exception)exception.Value;
++        }
++        else
++        {
++            if (args != null)
++            {
++                object[] outArgs = new object[methodTD->nParams];
++                int numOutArgs = 0;
++                for (int i = 0; i < methodTD->nParams; ++i)
++                {
++                    if (methodTD->pParams[i].bOut == 1)
++                    {
++                        outArgs[i] = args[i];
++                        ++numOutArgs;
++                    }
++                }
++                return new ReturnMessage(result.Value, outArgs, numOutArgs,
++                                         callmsg.LogicalCallContext,
++                                         callmsg);
++            }
++            else
++            {
++                return new ReturnMessage(result.Value, null, 0,
++                                         callmsg.LogicalCallContext,
++                                         callmsg);
++            }
++        }
++    }
++}
++
++}
