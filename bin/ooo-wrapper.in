@@ -178,44 +178,56 @@ open ($Lock, ">$LockFile") || print "Can't open $LockFile\n";
 flock ($Lock, LOCK_EX) || print "Warning: can't flock $LockFile\n";
 $Debug && print "Obtained lock: $LockFile\n";
 
-# Remove any stale entry from versions file
+my %config;
+my $config_changed = 0;
+
+
+sub config_remove_by_path($$)
+{
+    my $config = shift;
+    my $path = shift;
+    my $versions = $config->{'Versions'};
+    my $changed = 0;
+    
+    foreach (keys %$versions) {
+	if ($versions->{$_} eq $path) {
+	    delete $versions->{$_};
+	    $changed++;
+	}
+    }
+
+    return $changed;
+}
+
+my $targetVersion = "OpenOffice.org $Version";
+
+# Remove any non-standard path installs
 if ( -r "$VersionFile" ) {
-    my %config = ReadVersionFile "$VersionFile";
+    %config = ReadVersionFile "$VersionFile";
     my $versions = $config{Versions};
-    my $home = $versions->{"OpenOffice.org $Version"};
+    my $home = $versions->{$targetVersion};
     if ($home && $home ne "file://$UserInstallDir") {
-	$Debug && print "Re-writing $VersionFile\n";
-        foreach (keys %$versions) {
-	    if ($versions->{$_} eq $home) {
-#		print "Removing stale foo '$home'\n";
-		delete $versions->{$_};
-	    }
-        }
-        WriteVersionFile %config;
+	$Debug && print "Removing odd path $home\n";
+	$config_changed += config_remove_by_path (\%config, $home);
     }
 }
 
-# Perform a user installation, if necessary.
+# Prune broken looking installs & force a re-install
 if ( ! -d $UserInstallDir || ! -e "$UserInstallDir/soffice" ) {
-    # First, make sure to remove any reference to $UserInstallDir, from older
-    # (and broken) installation
-    $Debug && print "Do fresh user install\n";
-    if ( -f $VersionFile ) {
-        my %config = ReadVersionFile "$VersionFile";
-        my $versions = $config{Versions};
-        my $changed = 0;
-        foreach (keys %$versions) {
-            if ($versions->{$_} eq "file://$UserInstallDir") {
-                delete $versions->{$_};
-                $changed = 1;
-            }
-        }
-        WriteVersionFile %config if ($changed);
-    }
+    $config_changed += config_remove_by_path (\%config, "file://$UserInstallDir");
+}
+
+if (%config && $config_changed) {
+    $Debug && print "Write version file\n";
+    WriteVersionFile %config;
+}
+
+# Perform a user install / upgrade, if necessary.
+if (! exists $config{'Versions'}->{$targetVersion}) {
     # We can safely do the installation now
     # We also must make sure setup can find the libraries it needs
-    my $setup_cmd = "LD_LIBRARY_PATH=$SystemInstallDir:$SystemInstallDir/program $SetupProgram -R:$SetupConfig -v -nogui";
-
+    my $setup_cmd = "LD_LIBRARY_PATH=$SystemInstallDir:$SystemInstallDir/program " .
+                    "$SetupProgram -R:$SetupConfig -v -nogui";
     if (!$Debug) {
 	$setup_cmd .= " >& ~/.openoffice-install-log";
     }
@@ -223,48 +235,6 @@ if ( ! -d $UserInstallDir || ! -e "$UserInstallDir/soffice" ) {
     $Debug && print "Calling setup: '$setup_cmd'\n";
     system ($setup_cmd) &&
         die "Installation of OpenOffice.org $Version failed:\n '$setup_cmd'\n";
-}
-
-# Clean the installation version tags.
-if ( -f "$VersionFile" ) {
-    my %config = ReadVersionFile "$VersionFile";
-    my $versions = $config{Versions};
-    my $changed = 0;
-    foreach (keys %$versions) {
-	$_ eq "OpenOffice.org $Version" && next;
-
-        if ($_ =~ /^OpenOffice.org ([0-9]+)\.([0-9]+)(.*)/) {
-	    my ($iv_maj, $iv_min, $iv_mic) = ($1, $2, $3);
-	    $Version =~ /([0-9]+)\.([0-9]+)(.*)/;
-	    my ($v_maj, $v_min, $v_mic) = ($1, $2, $3);
-
-	    $Debug && print "Old $iv_maj $iv_min $iv_mic, new $v_maj $v_min $v_mic\n";
-
-	    if ($iv_maj == $v_maj && $iv_min == $v_min) {
-		$Debug && print "Deleting old version\n";
-		delete $versions->{$_};
-		$changed = 1;
-	    }
-        }
-    }
-    # Add current version tag if it does not exist already. This
-    # occurs when you upgrade from 1.0 to 1.0.1 for example.
-    if (!$versions->{"OpenOffice.org $Version"}) {
-	$versions->{"OpenOffice.org $Version"} = "file://$UserInstallDir";
-	$changed = '1';
-	$Debug && print "Missing version, added\n";
-    }
-    if ($changed) {
-	$Debug && print "Version changed, re-writing config\n";
-	WriteVersionFile %config;
-    }
-}
-else {
-    # The versions file is bound to exist unless we (or the user)
-    # nuked it somehow. Regenerate it. We already have the
-    # installation directory at this point.
-    WriteVersionFile Versions => { "OpenOffice.org $Version" => "file://$UserInstallDir" };
-    $Debug && print "Re-generate config\n";
 }
 
 sub symlinkf { unlink $_[1]; symlink $_[0], $_[1] }
