@@ -132,15 +132,17 @@ sub version_filter_targets($)
     $tlist =~ m/([^<>]*)(.*)/;
     my $rules = $2;
     my $targets = $1;
+    $targets =~ s/\s*$//;
+
     @targets = split /\s*,\s*/, $targets;
 
 #    printf "Rules '$rules' targets '$targets'\n";
 
     if (!rules_pass ($rules)) {
-#	printf "Rule '$rules' failed\n";
+	printf "Rule '$rules' failed ['@targets']\n";
 	@targets = ();
     } else {
-#	printf "Rule '$rules' passed\n";
+	printf "Rule '$rules' passed ['@targets']\n";
     }
 
     return @targets;
