@@ -24,13 +24,14 @@ AC_ARG_WITH(
 	AC_HELP_STRING([--with-ooo-solver-dir=DIR],
 		[path to your OpenOffice.org solver]),
 	[ac_ooodev_bindir="${withval}/bin"
-	 ac_ooodev_includes="${withval}/inc"])
+	 ac_ooodev_includes="${withval}/inc"
+	 ac_ooodev_libdir="${withval}/lib"])
 
 AC_ARG_WITH(
 	[ooo-install-dir],
 	AC_HELP_STRING([--with-ooo-install-dir=DIR],
 		[path to your OpenOffice.org installation]),
-	[ac_ooo_libdir="${withval}/program"])
+	[ac_ooo_installdir="${withval}"])
 
 PKG_CHECK_MODULES(OOO_BONOBO, gtk+-2.0 libgnome-2.0 libbonoboui-2.0)
 
@@ -53,11 +54,11 @@ if test -z "$REGCOMP" ; then
 fi
 AC_SUBST(REGCOMP)
 
-if test ! -d "$ac_ooo_libdir" ; then
-	AC_MSG_ERROR([[OpenOffice.org installation not found. Please use --with-ooo-install-dir=/path/to/ooo-installation]])
+if test ! -d "$ac_ooodev_libdir" ; then
+	AC_MSG_ERROR([[OpenOffice.org libraries not found. Please use --with-ooo-solver-dir=/path/to/solver]])
 fi
-OOO_BONOBO_LIBS="$OOO_BONOBO_LIBS -L$ac_ooo_libdir"
-OOO_libdir="$ac_ooo_libdir"
+OOO_BONOBO_LIBS="$OOO_BONOBO_LIBS -L$ac_ooodev_libdir"
+OOO_libdir="$ac_ooodev_libdir"
 AC_SUBST(OOO_libdir)
 
 dnl Type Registry (types.rdb = offapi + udkapi)
