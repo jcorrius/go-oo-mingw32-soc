@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <malloc.h>
 
+int init_offset = 68;
+
 // Define VERBOSE to get more debug
 int verbose = 0;
 
@@ -14,37 +16,39 @@ int verbose = 0;
 // 46 c3 01 f6 28 0e 41 01 96 40 01 42 | F...(.A..@.B
 
 
-FILE *in;
+static unsigned char
+my_fgetc (FILE *fin)
+{
+		/* Very, very odd: custom hacks for austin.lwp */
+		switch (ftell (fin)) {
+		case 0x2858: // 0xc0
+		case 0x28c4: // 0xc6
+		case 0x2b67: // 0xc2
+		case 0x2fd4: // 0xc1
+				fgetc (fin); // skip duff byte
+				break;
+		default:
+				break;
+		};
+		return fgetc (fin);
+}
 
 static void
-dump_string(unsigned char *data, int len)
+dump_string (FILE *fin, int len)
 {
 	int i;
 	fprintf(stderr ,"(%d): '", len);
-	for (i = 0; i < len; i++)
-		fprintf(stderr ,"%c", data[i]);
-	fprintf(stderr ,"'\n");
-}
-
-static void
-dump_hex(unsigned char *data, int len)
-{
-	while (len > 0) {
-		int i;
-		int chunk = len < 16 ? len : 16;
-
-		for (i = 0; i < chunk; i++)
-			fprintf( stderr, "%.2x ", data[i] );
-		fprintf( stderr, "| " );
-		for (i = 0; i < chunk; i++)
-			fprintf( stderr, "%c", data[i] < 127 && data[i] > 30 ? data[i] : '.' );
-		fprintf( stderr, "\n" );
-
-		len -= chunk;
-		data += 16;
+	for (i = 0; i < len; i++) {
+			unsigned char c = my_fgetc (fin);
+			if (c >= 0x20 && c < 0x80)
+					fprintf (stderr, "%c", c);
+			else
+					fprintf (stderr, "#0x%x#", c);
 	}
+	fprintf (stderr,"'\n");
 }
 
+#if 0
 static int
 dump_runs(unsigned char *data, int len)
 {
@@ -82,29 +86,108 @@ dump_runs(unsigned char *data, int len)
 	}	
 	return pos;
 }
+#endif
 
 static void
-dump(unsigned char *data, int len)
+dump_hex(unsigned char *data, int len)
 {
-	if (verbose) {
-			fprintf( stderr, "Record:\n" );
-			dump_hex(data, len);
-	}
+	while (len > 0) {
+		int i;
+		int chunk = len < 16 ? len : 16;
 
-	if (len > 4) {
-		if (data[1] == 0x20 &&
-		    len > 2) {
-			int ptg = dump_runs( data + 2, len - 2);
-		} 
+		for (i = 0; i < chunk; i++)
+			fprintf( stderr, "%.2x ", data[i] );
+		fprintf( stderr, "| " );
+		for (i = 0; i < chunk; i++)
+			fprintf( stderr, "%c", data[i] < 127 && data[i] > 30 ? data[i] : '.' );
+		fprintf( stderr, "\n" );
+
+		len -= chunk;
+		data += 16;
 	}
+}
+
+static void
+skip_to_at (FILE *fin, unsigned char code, int print)
+{
+		int i;
+		unsigned char skip_data[65536];
+		skip_data[0] = code;
+		for (i = 1; (skip_data[i] = my_fgetc (fin)) != '@' && i < sizeof (skip_data); i++);
+		dump_hex (skip_data, i + 1);
+}
+
+
+static void
+scan_text (FILE *fin)
+{
+		int end_of_run = 0;
+		while (!feof (fin) && !end_of_run) {
+				unsigned char codea = my_fgetc (fin);
+				unsigned char codeb = my_fgetc (fin);
+				int code = codeb + (codea << 8);
+				int skip = 0;
+				switch (code) {
+				case 0x0202:
+				case 0x0bc0: {
+						unsigned char len = my_fgetc (fin);
+						unsigned char subc = my_fgetc (fin);
+						dump_string (fin, len);
+						break;
+				}
+				case 0x0102: { /* SSE */
+						char data[29];
+						int len = 22;
+						fprintf (stderr, "SSE\n");
+						fread (data, 1, len, fin); // or 29 ?
+						if (verbose)
+								dump_hex (data, len);
+						break;
+				}
+				case 0x016d: /* SSE */
+						skip = 3;
+						break;
+
+				case 0x0c41: /* SSE */
+				case 0x0141:
+				case 0x0e41:
+						fprintf (stderr, "0x%x\n", code);
+						break;
+				case 0x01f6:
+						fprintf (stderr, "0x%x\n", code);
+						skip = 3;
+						break;
+				case 0x0196: { // embedded @ somehow
+						skip = 3;
+						break;
+				}
+				case 0x8202:
+						skip = 2;
+						break;
+				case 0xc301:
+						fprintf (stderr, "0x%x\n", code);
+						skip = 4;
+						break;
+				default: {
+						int len;
+						fprintf (stderr, "Unknown code 0x%x\n", code);
+						fseek (fin, -2, SEEK_CUR);
+						skip_to_at (fin, 0x20, 1);
+						end_of_run = 1;
+						break;
+				}
+				}
+				if (skip)
+						fseek (fin, skip, SEEK_CUR);
+		}
 }
 
 int
 main (int argc, char **argv)
 {
-	int i = 0;
+	int i;
 	const char *fname = NULL;
-	unsigned char data[256];
+	FILE *fin;
 
 	for (i = 1; i < argc; i++)
 	{
@@ -115,20 +198,30 @@ main (int argc, char **argv)
 					fname = argv[i];
 	}
 
-	in = fopen (fname, "r");
-
-	i = 0;
-	while (!feof (in)) {b
-		data[i] = fgetc (in);
-
-		if (data[i] == '@') { // Magic char
-			dump (data, i);
-			data[0] = '@';
-			i = 0;
+	fin = fopen (fname, "r");
+	fseek (fin, init_offset, SEEK_SET);
+	
+	while (!feof (fin)) {
+		unsigned char code;
+		code = my_fgetc (fin);
+		switch (code) {
+		case 0x20:
+				code = my_fgetc (fin);
+				if (code == 0x40)
+						fprintf (stderr, "2040\n");
+				else {
+						ungetc (code, fin);
+						scan_text (fin);
+				}
+				break;
+		default: {
+				skip_to_at (fin, code, verbose);
+				break;
 		}
-		i++;
+		}
 	}
 
-	close (in);
+	fclose (fin);
+
 	return 0;
 } 
