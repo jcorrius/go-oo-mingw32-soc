@@ -208,7 +208,12 @@ foreach $a (@ARGV) {
 	}
 }
 
-$base_cmd = "patch -l -b --fuzz=1 -p0 $opts -d $dest_dir";
+$base_cmd = "patch -l -b -p0 $opts -d $dest_dir";
+
+# Compatibility for a little ...
+if (!($patch_dir =~ /RC3_030729/)) {
+    $base_cmd .= ' --fuzz=1';
+}
 
 print "Execute: $base_cmd for distro '$distro'\n" unless $quiet;
 
