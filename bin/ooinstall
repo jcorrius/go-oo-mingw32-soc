@@ -1,41 +1,91 @@
-#!/bin/bash
+#!/usr/bin/perl -w 
 
-if test -f ./setup; then
-	. ./setup
-elif test -f bin/setup; then
-	. bin/setup
-else
-	echo "Can't find setup";
-	exit 1;
-fi
+%setup_vars = ();
+%configure_vars = ();
 
-if test "z$1" = "z"; then
-	echo "ooinstall <prefix to install to> [-l]";
-	echo "  -l - performs a linkoo on the installed source";
-	exit 1;
-fi
+sub suck_setup($)
+{
+    my $file = shift;
+    if (-f $file) {
+	print "Reading setup from $file\n";
+	open ($Vars, ". $file ; set|") || die "Can't find $file: $!";
+	while (<$Vars>) {
+	    /([^=]*)=(.*)/ || next;
+	    $setup_vars{$1} = $2;
+	}
+	close ($Vars);
+	return 1;
+    }
+    return 0;
+}
 
-#
-# This is one big, horrible - but useful hack ...
-#
+suck_setup ("./setup") || suck_setup ("bin/setup") || die "can't find bin/setup";
 
-INSTALL_PATH=$1
-export SOLARENV=$OOBUILDDIR/solenv
-BUILD=8825
-export OUT='../unxlngi4.pro'
-export LOCAL_OUT='../unxlngi4.pro'
-export LOCAL_COMMON_OUT='../unxlngi4.pro'
+print "Sucking env from build setup\n";
+my $fname = `ls $setup_vars{'OOBUILDDIR'}/*.[sS]et.sh`;
+open ($Vars, $fname) || die "Can't open $fname: $!";
+while (<$Vars>) {
+    /^alias/ && next;
+    /([^=]*)=\S*"(.*)"\S*/ || next;
+    if (!defined $configure_vars{$1}) {
+	$configure_vars{$1} = $2;
+#	print "Configure var '$1' -> '$2'\n";
+    }
+}
+close ($Vars);
 
-cd $OOBUILDDIR/instsetoo_native/util
-perl -w $SOLARENV/bin/make_installer.pl \
-	-f openoffice.lst -l en-US -p OpenOffice \
-	-packagelist ../inc_openoffice/unix/packagelist.txt \
-	-buildid $BUILD -rpm -simple $INSTALL_PATH
+print "Performing environment substitutions ...\n";
+my @substitutions = ( 'SOLARENVINC', 'SOLARENV', 'SRC_ROOT', 'UPD', 'INPATH',
+		      'OUTPATH', 'SOLARVER', 'JAVA_HOME' );
+# perform substitutions
+for my $subst (@substitutions) {
+    for my $key (keys %configure_vars) {
+#	$configure_vars{$key} =~ m/\$$subst/ && print "Match $subst in $key\n";
+	$configure_vars{$key} =~ s/\$$subst/$configure_vars{$subst}/g;
+    }
+}    
 
-cd $INSTALL_PATH/program
-./pkgchk --shared --quiet || exit 1;
-./configimport --spool || exit 1;
+my $path = '';
+my $do_link = 0;
 
-if test "z$2" = "z-l"; then
-	$SOLARENV/bin/linkoo $INSTALL_PATH $SRC_ROOT
-fi
+for $arg (@ARGV) {
+    if ($arg eq '-l') {
+	$do_link = 1;
+
+    } elsif ($arg eq '-h' || $arg eq '--help') {
+	$help = 1;
+    } else {
+	$path = $arg;
+    }
+}
+
+$help = 1 if $path eq '';
+
+if ($help) {
+    print "ooinstall [-l] <prefix to install to>\n";
+    print "  -l - performs a linkoo on the installed source\n";
+    exit 1;
+}
+
+print "Setting up environment\n";
+for $a (keys %configure_vars) {
+    $ENV{$a} = $configure_vars{$a};
+}
+$BUILD=8825;
+$ENV{OUT} = '../unxlngi4.pro';
+$ENV{LOCAL_OUT} = $ENV{OUT};
+$ENV{LOCAL_COMMON_OUT} = $ENV{OUT};
+
+print "Running installer\n";
+system ("cd $setup_vars{OOBUILDDIR}/instsetoo_native/util ; " .
+	"perl -w $configure_vars{SOLARENV}/bin/make_installer.pl " .
+	"-f openoffice.lst -l en-US -p OpenOffice " .
+	"-packagelist ../inc_openoffice/unix/packagelist.txt " .
+	"-buildid $BUILD -rpm -simple $path") && die "Failed to install: $!";
+
+`cd $path/program ; ./pkgchk --shared --quiet || exit 1`;
+`cd $path/program ; ./configimport --spool || exit 1`;
+
+if ($do_link) {
+    `$setup_vars{TOOLSDIR}/bin/linkoo $path $configure_vars{SRC_ROOT}`;
+}
