@@ -7,7 +7,6 @@ SUBDIRS = po desktop bin etc patches man doc fonts src www $(MAYBE_BONOBO)
 
 EXTRA_DIST = \
 	emacs.el		\
-	mkinstalldirs		\
 	MAINTAINERS		\
 	HACKING			\
 	download.in		\
