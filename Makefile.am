@@ -2,7 +2,8 @@ if BONOBO
   MAYBE_BONOBO = bonobo
 endif
 
-SUBDIRS = po desktop bin etc patches man doc fonts src www $(MAYBE_BONOBO)
+SUBDIRS = po desktop bin etc patches man doc fonts stamp src www $(MAYBE_BONOBO)
+
 
 
 EXTRA_DIST = \
