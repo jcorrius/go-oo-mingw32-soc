@@ -18,3 +18,12 @@ EXTRA_DIST = \
 	ChangeLog-to-1.3.0
 
 ACLOCAL_AMFLAGS = -I m4
+
+clean-local:
+	test -z "$(OOBUILDDIR)" || rm -rf $(OOBUILDDIR)
+	for icons in $(OOO_ICONS_VERS) ; do \
+	    test "$(BUILDDIR)/$$icons" = "/" || rm -rf "$(BUILDDIR)/$$icons" ; \
+	done
+
+maintainer-clean-local:
+	test -z "$(BUILDDIR)" || rm -rf $(BUILDDIR)
