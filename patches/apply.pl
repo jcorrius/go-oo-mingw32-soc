@@ -8,37 +8,20 @@ sub find_file($$)
     my $dir = shift;
     my $file = shift;
 
-    print "Find file '$dir' '$file'\n";
-
     if (!-f "$dir/$file") {
-
-	print "File not initially in '$dir/$file'\n";
-
 	my @search = split /:/, $options{'PATCHPATH'};
 
-	print "Search is '@search'\n";
-
 	for $stem (@search) {
-	    print "Stem '$stem', dir: '$dir', file '$file'\n";
 	    my $testdir = "$dir/$stem";
-	    print "testdir: '$testdir'\n";
 	    if (-f "$testdir/$file") {
-		print "Hit file $testdir/$file\n";
 		$dir = $testdir;
 		last;
-	    } else {
-		print "File $testdir/$file does not exist\n";
-		my @args = stat("$testdir/$file");
-		print "Stat results: @args\n";
 	    }
 	}
-    } else {
-	print "File was initially in '$dir/$file'\n";
     }
 
     -f "$dir/$file" || die "\n\n** Error ** - Can't find file $dir/$file\n\n\n";
 
-    print "\n\nFound: '$dir/$file'\n\n\n";
     return "$dir/$file";
 }
 
