@@ -29,7 +29,8 @@ sub find_patch_file($)
 	}
     }
 
-    -f $file_path || die "\n\n** Error ** - Can't find file $$file in patch path\n\n\n";
+    -f $file_path || die "\n\n** Error ** - Can't find file $file " .
+	"in patch path '" . $options{'PATCHPATH'} . "'\n\n\n";
 
     return $file_path;
 }
