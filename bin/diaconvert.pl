@@ -14,7 +14,8 @@ my $prefix = '      ';
 sub get_size_attr($$)
 {
     my ($value, $name) = @_;
-    return $value->[0]->{$name} / $scale;
+    return $value->[0]->{$name} / $scale if defined $value->[0]->{$name};
+    return 0.0;
 }
 
 sub get_point_attr($$)
@@ -24,10 +25,8 @@ sub get_point_attr($$)
     if ($name =~ /x/) {
 	$offset = $xoffset;
     }
-    my $transformed = get_size_attr ($value, $name) + $offset;
-    return "$transformed$unit";
+    return get_size_attr ($value, $name) + $offset;
 }
-
 
 sub parse_glue
 {
@@ -46,7 +45,7 @@ sub parse_glue
 
 	    $glue .= $prefix . '  ';
 	    $glue .= "<draw:glue-point draw:id=\"$count\" ".
-		"svg:x=\"$x\" svg:y=\"$y\"/>\n";
+		"svg:x=\"$x$unit\" svg:y=\"$y$unit\"/>\n";
 	    $count++;
 	}
 #	print "glue elem '" . $elems->[$idx] . "'\n";
@@ -56,11 +55,13 @@ sub parse_glue
     return $glue;
 }
 
-sub draw_preamble($)
+sub draw_preamble($@)
 {
     my $name = shift;
+    my $style = shift;
+    $style = 'def' if (!defined $style);
     return $prefix . '  ' .
-	    "<draw:$name draw:style-name=\"gr1\" " .
+	    "<draw:$name draw:style-name=\"$style\" " .
 	    "draw:text-style-name=\"P1\" " .
 	    "draw:layer=\"layout\"\n" .
 	    $prefix . '  ' . ' ';
@@ -70,13 +71,50 @@ sub transfer_attr($$)
 {
     my ($value, $name) = @_;
     my $attr = get_point_attr ($value, $name);
-    return "svg:$name=\"$attr\" ";
+    return "svg:$name=\"$attr$unit\" ";
 }
 
 sub draw_postamble($)
 {
     my $name = shift;
     return ">\n" . $prefix . '  ' . "<text:p/></draw:$name>\n";
+}
+
+sub draw_poly($$)
+{
+    my ($attr, $value) = @_;
+    my $svg = '';
+    my $src_points = $value->[0]->{points};
+    my $points = '';
+    my ($maxx, $maxy) = ( 0, 0 );
+    my ($minx, $miny) = ( 10000000, 10000000 );
+
+    print  $maxx;
+
+    for my $coord (split / /, $src_points) {
+	my ($a, $b) = split /,/, $coord;
+	my $x = ($a / $scale + $xoffset) * 1000;
+	my $y = ($b / $scale + $yoffset) * 1000;
+	
+	$points .= "$x,$y ";
+
+	$minx = $x if ($x < $minx);
+	$miny = $y if ($y < $miny);
+	$maxx = $x if ($x > $maxx);
+	$maxy = $y if ($y > $maxy);
+    }
+
+    my $viewbox = "0 0 " . $maxx . " " . $maxy;
+    
+    $attr =~ s/^svg://;
+    $svg .= draw_preamble ($attr, 'nofill') .
+	    "svg:x=\"" . $minx/1000 . "$unit\" " .
+	    "svg:y=\"" . $miny/1000 . "$unit\" " .
+	    "svg:width=\"" . $maxx/1000 . "$unit\" " .
+	    "svg:height=\"" . $maxy/1000 . "$unit\" " .
+	    "svg:viewBox=\"$viewbox\" " .
+	    "draw:points=\"$points\" " .
+	    draw_postamble ($attr);
 }
 
 sub parse_svg
@@ -101,13 +139,31 @@ sub parse_svg
 	} elsif ($attr eq 'svg:rect') {
 	    my $width = get_size_attr ($value, 'width');
 	    my $height = get_size_attr ($value, 'height');
-	    $svg .= draw_preamble ('rect') .
+	    $svg .= draw_preamble ('rect', 'nofill') .
 		    transfer_attr ($value, 'x') .
 		    transfer_attr ($value, 'y') .
 		    "svg:width=\"$width$unit\" " .
 		    "svg:height=\"$height$unit\" " .
 		    draw_postamble ('rect');
-	} elsif ($attr eq 'svg:polygon') {
+
+	} elsif ($attr eq 'svg:polygon' ||
+		 $attr eq 'svg:polyline') {
+	    $svg .= draw_poly ($attr, $value);
+
+	} elsif ($attr eq 'svg:circle') {
+	    my $r  = get_size_attr ($value, 'r'); 
+	    my $x = get_point_attr ($value, 'cx') - $r;
+	    my $y = get_point_attr ($value, 'cy') - $r;
+	    my $size = $r * 2;
+
+	    $svg .= draw_preamble ('circle', 'nofill') .
+		    "svg:width=\"$size$unit\" " .
+		    "svg:height=\"$size$unit\" " .
+		    "svg:x=\"$x$unit\" " .
+		    "svg:y=\"$y$unit\" " .
+		    draw_postamble ('circle');
+
+	} elsif ($attr eq 'svg:circle') {
 
 	} elsif ($attr ne '0') {
 	    print STDERR "unknown svg elem '" . $elems->[$idx] . "'\n";
@@ -151,7 +207,6 @@ EOS
 
 sub output_header
 {
-
 print <<'EOS'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE office:document-content PUBLIC "-//OpenOffice.org//DTD OfficeDocument 1.0//EN" "office.dtd">
@@ -159,8 +214,11 @@ print <<'EOS'
   <office:script/>
   <office:automatic-styles>
     <style:style style:name="dp1" style:family="drawing-page"/>
-    <style:style style:name="gr1" style:family="graphics" style:parent-style-name="standard">
+    <style:style style:name="def" style:family="graphics" style:parent-style-name="standard">
       <style:properties draw:textarea-horizontal-align="center" draw:textarea-vertical-align="middle"/>
+    </style:style>
+    <style:style style:name="nofill" style:family="graphics" style:parent-style-name="objectwithoutfill">
+      <style:properties draw:fill="none" draw:textarea-horizontal-align="center" draw:textarea-vertical-align="middle"/>
     </style:style>
     <style:style style:name="P1" style:family="paragraph">
       <style:properties fo:text-align="center"/>
