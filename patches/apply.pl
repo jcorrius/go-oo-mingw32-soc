@@ -37,13 +37,13 @@ sub do_patch {
     if ($quiet) 
         { $cmd_output = " > /dev/null " }
 
-    $cmd_suffix .= " < $patch";
-    my $cmd = "$base_cmd --dry-run ".$cmd_output.$cmd_suffix;
+    $cmd_pipe = " < $patch";
+    my $cmd = "( $base_cmd --dry-run ".$cmd_output.$cmd_suffix.")".$cmd_pipe;
 
     print "$cmd\n" unless $quiet;
     system ($cmd) && die "Testing patch $patch_file failed.";
 
-    $cmd = "$base_cmd > /dev/null".$cmd_suffix;
+    $cmd = "( $base_cmd > /dev/null".$cmd_suffix.")".$cmd_pipe;
     if($quiet)
         { print "applying..." }
     else
