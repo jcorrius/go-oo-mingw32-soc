@@ -56,7 +56,74 @@ The Solution:
 there is SfxPrinter *mpPrinter pointer which is bogus. It means, that this is freed
 and later the same thing is used.
 
+>> SNIP
+Printer* ImplPrnDlgUpdatePrinter( Printer* pPrinter, Printer* pTempPrinter )
+{
+        XubString aPrnName;
+        if ( pTempPrinter )
+                aPrnName = pTempPrinter->GetName();
+        else
+                aPrnName = pPrinter->GetName(); /* CRASHES HERE BECAUSE pPrinter is bogus */
+                                                                                                                             
+        BOOL    bFound = FALSE;
+<< SNIP
+
+So this pPrinter which is of SfxPrinter * is freed somewhere.
+SfxPrinter is inherited from Printer (vcl/source/gdi/print.cxx)
+
+>>SNIP
+
+// class SfxPrinter ------------------------------------------------------
+                                                                                                                             
+class SFX2_DLLPUBLIC SfxPrinter : public Printer
+{
+private:
+        JobSetup                                aOrigJobSetup;
+        SfxItemSet*                             pOptions;
+        SfxPrinter_Impl*                pImpl;
+        BOOL                                    bKnown;
+                                                                                                                             
+
+<<SNIP
+
+So putting a break point into Printer::~Printer() at vcl/source/gdi/print.cxx
+
+>>SNIP
+Printer::~Printer()
+{
+        DBG_ASSERT( !IsPrinting(), "Printer::~Printer() - Job is printing" );
+        DBG_ASSERT( !IsJobActive(), "Printer::~Printer() - Job is active" );
+        DBG_ASSERT( !mpQPrinter, "Printer::~Printer() - QueuePrinter not destroyed" );
+        DBG_ASSERT( !mpQMtf, "Printer::~Printer() - QueueMetafile not destroyed" );
+                                                                                                                             
+    delete mpPrinterOptions;
+                                                                                                                           
+<<SNIP
+
+It reveals that it is freed from 
+
 sfx2/source/view/viewprn.cxx +348 is the place where it frees. 
+>>SNIP
+
+        if ( aNewJobSetup != aOldJobSetup )
+        {
+            // JobSetup hat sich geaendert (=> App mu\s neu formatieren)
+            // pDocPrinter->SetOrigJobSetup( aNewJobSetup );
+            nChangedFlags |= SFX_PRINTER_JOBSETUP;
+        }
+                                                                                                                             
+        // alten, ver"anderten Printer behalten
+        pDocPrinter->SetPrinterProps( pNewPrinter );
+        delete pNewPrinter; // FREED FROM HERE.
+        }
+                                                                                                                             
+        if ( 0 != nChangedFlags )
+        // SetPrinter will delete the old printer if it changes
+        SetPrinter( pDocPrinter, nChangedFlags );
+        return pDocPrinter;
+<<SNIP
+
+
 It does a 
         pDocPrinter->SetPrinterProps( pNewPrinter );
 
@@ -65,4 +132,47 @@ pNewPrinter to pDocPrinter which gets freed later which is the source of the pro
 
 vcl/source/gdi/impprn.cxx +110 shows a example how SetPrinterProps should be used and not freed.
 
-Just removing this delete should solve the problem.
+>>SNIP
+ImplQPrinter::ImplQPrinter( Printer* pParent ) :
+        Printer( pParent->GetName() )
+{
+        SetSelfAsQueuePrinter( TRUE );
+        SetPrinterProps( pParent ); // THIS HOW pParent SHOULD BE LEFT UNTOUCHED. 
+        SetPageQueueSize( 0 );
+        mpParent                = pParent;
+        mnCopyCount     = pParent->mnCopyCount;
+        mbCollateCopy   = pParent->mbCollateCopy;
+
+<<SNIP
+
+A LXR search on SetPrinterProps showed how this function should be used and how this misused.
+This function is defined in vcl/source/gdi/print.cxx
+
+
+>>SNIP
+BOOL Printer::SetPrinterProps( const Printer* pPrinter )
+{
+        if ( IsJobActive() || IsPrinting() )
+                return FALSE;
+                                                                                                                             
+        ImplSVData* pSVData = ImplGetSVData();
+                                                                                                                             
+        mbDefPrinter        = pPrinter->mbDefPrinter;
+        maPrintFile         = pPrinter->maPrintFile;
+        mbPrintFile         = pPrinter->mbPrintFile;
+        mnCopyCount         = pPrinter->mnCopyCount;
+        mbCollateCopy       = pPrinter->mbCollateCopy;
+        mnPageQueueSize     = pPrinter->mnPageQueueSize;
+    *mpPrinterOptions   = *pPrinter->mpPrinterOptions;
+                                                                                                                             
+<<SNIP
+
+
+SetPrinterProps sets the the mpPrinterOptions from pPrinter to this->mpPrinterOptions.
+This impress atleast crashes when it tries to display a warning dialog, to ask for
+whether to  store Fit/Scale to page, and other page related options are stored.
+When the function to ask the warning dialog is commeneted it doesnt crash too, but
+thatz the work-around. These options are stored in mpPrinterOptions in vcl/inc/print.hxx
+
+Just removing this delete of mpPrinter should solve the problem.
+
