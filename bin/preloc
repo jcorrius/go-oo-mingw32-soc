@@ -1,25 +1,51 @@
 #!/usr/bin/perl -w
 
+#
+# Use example: cd /opt/OOInstall/program
+#              preloc --quiet --plt --for=svx *.so | sort | c++filt > svx
+#
+
+# misc. argument options / defaults
+my $opt_plt_too = 0;
+my $unused = 0;
+my $for_lib = '';
+my $quiet = 0;
+
 sub read_relocs($)
 {
     my $file = shift;
     my $pipe;
     my %relocs;
     my %symbols;
+    my %used;
+    my %lib;
+
+#    print "Read '$file'\n";
 
     open ($pipe, "readelf -r -W $file |") || die "Can't readelf -r $file: $!";
     while (<$pipe>) {
-	/'.rel.plt'/ && last;
-	/(R_\S+).*(_Z.*)/ || next;
-	my ($type, $sym) = ($1, $2);
-	$symbols{$sym} = $2;
+	/'.rel.plt'/ && !$opt_plt_too && last;
+	if (! m/(R_\S+)\s+([0-9a-f]+)\s+(.*)\s*/) {
+#	    print "Bin line '$_'\n";
+            next;
+	}
+	my ($type, $loc, $sym) = ($1, $2, $3);
+	$symbols{$sym} = hex ($loc);
     }
     close ($pipe);
 
-    $relocs{file} = $file;
-    $relocs{symbols} = \%symbols;
+    $lib{file} = $file;
+    $lib{symbols} = \%symbols;
+    $lib{used} = \%used;
 
-    return \%relocs;
+    return \%lib;
+}
+
+sub add_used($$)
+{
+  my ($lib, $sym) = @_;
+  $lib->{used}->{$sym} = $lib->{symbols}->{$sym};
+  delete $lib->{symbols}->{$sym};
 }
 
 sub find_matches($$)
@@ -27,40 +53,100 @@ sub find_matches($$)
     my ($sym, $list) = @_;
     my @collisions = ();
 
-    for my $relocs (@{$list}) {
-	if (defined $relocs->{symbols}->{$sym}) {
-	    push @collisions, $relocs->{file};
-	    delete $relocs->{symbols}->{$sym};
+    for my $lib (@{$list}) {
+	if (defined $lib->{symbols}->{$sym}) {
+	    push @collisions, $lib->{file};
+	    add_used ($lib, $sym);
 	}
     }
 
     return @collisions;
 }
 
+sub by_internal
+{
+  keys (%{$a->{symbols}}) <=> keys (%{$b->{symbols}});
+}
+
+#
+# munge options
+#
+my @files = ();
+for my $arg (@ARGV) {
+  if ($arg =~ m/^--plt/) {
+    $opt_plt_too = 1;
+  } elsif ($arg =~ m/^--unused/) {
+    $unused = 1;
+  } elsif ($arg =~ m/^--quiet/) {
+    $quiet = 1;
+  } elsif ($arg =~ m/^--for=(.*)/) {
+    $for_lib = $1;
+  } else {
+    push @files, $arg;
+  }
+}
+
+#
+# read relocation data from elf shared libraries
+#
 my @libs = ();
-
-my $total = 0;
-for $lib (@ARGV) {
-    my $relocs = read_relocs ($lib);
-    push @libs, $relocs;
-    my $count = keys(%{$relocs->{symbols}});
-    $total += $count;
-    print "$lib : relocations $count\n";
+my $lib;
+print STDERR "reading relocs ";
+for my $file (@files) {
+    $lib = read_relocs ($file);
+    push @libs, $lib;
+    print STDERR ".";
 }
-print "Total relocs: $total\n";
+print STDERR "\n";
 
+#
+# process it
+#
 my $dups = 0;
-while ($lib = shift @libs) {
-    my $relocs = $lib;
-    
-    for my $sym (keys (%{($relocs->{symbols})})) {
-	my @hits = find_matches ($sym, \@libs);
-	if (@hits) {
-	    print "Symbol $sym duplicate @hits " . $relocs->{file} . "\n"; 
-	    $dups++;
-	}
+my @lib_copy = @libs;
+print STDERR "processing relocs ";
+while ($lib = shift @lib_copy) {
+    for my $sym (keys (%{($lib->{symbols})})) {
+	my @hits = find_matches ($sym, \@lib_copy);
+	@hits && add_used ($lib, $sym);
     }
+    print STDERR ".";
+}
+print STDERR "\n";
+
+#
+# pretty print it
+#
+if (!$quiet) {
+  my $total = 0;
+  for $lib (sort by_internal @libs) {
+    my $extint_count = keys(%{$lib->{symbols}});
+    my $used_count = keys(%{$lib->{used}});
+    my $sub_total = $used_count + $extint_count;
+    
+    print STDERR $lib->{file} . " : used $used_count int/ext $extint_count total $sub_total\n";
+    
+    $total += $sub_total;
+  }
+  print STDERR "Total relocs: $total\n";
 }
 
-print "Duplicates: $dups of total $total\n";
+if ($for_lib) {
+  for $lib (@libs) {
+    if ($lib->{file} =~ m/$for_lib/) {
+      print STDERR "Dumping symbols for '" . $lib->{file} . "'\n";
+      my $hash;
+      if ($unused) {
+	$hash = $lib->{symbols};
+      } else {
+	$hash = $lib->{used};
+      }
+      for $sym (keys %{$hash}) {
+        if ($hash->{$sym}) {
+	  print "$sym\n";
+        }
+      }
+    }
+  }
+}
 
