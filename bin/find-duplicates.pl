@@ -21,19 +21,21 @@ sub insert_symbols {
     while (<$obj>) {
 	/[0-9a-f]*\s+([g ])\s+..\s+(\S*).....................\s+(.*)/ || next;
 	
-	my ($symbol, $type) = ($3, $2);
+	my ($linkage, $type, $symbol) = ($1, $2, $3);
 
-	if (!$symbol || !$type) {
-	    next;
-	}
+	$symbol && $type || next;
+
+	# Is this correct ?
+	$linkage =~ /g/ || next; # bin weak symbols.
 
 	if ($symbol =~ /\w+C+[0-9]{1}/){
-	#print "Symbol Name :: $symbol \n";
 	 if ($type eq '.text') {
 	    my $name = `c++filt $symbol`;
 	    my @symb_arr = split /\(/, $name;
 	    $name = $symb_arr[0];
 	    $name =~ s/\:\:[^\:]*$//;
+
+#	    print "Sane constructor '$name' ($linkage, $type)\n";
 
 	    if (exists $symbols{$name}) {
 		if($symbols{$name} ne $lib){
