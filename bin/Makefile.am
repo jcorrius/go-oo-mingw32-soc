@@ -8,6 +8,7 @@ script_files = \
 	install-dict.in \
 	install-dictionaries \
 	install-help \
+	java-set-classpath.in \
 	latest-patchset \
 	nothing \
 	ooinstall \
