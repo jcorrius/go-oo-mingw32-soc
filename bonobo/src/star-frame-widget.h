@@ -44,5 +44,7 @@ GtkWidget *star_frame_widget_new ( Reference< XComponentContext > component_cont
 Reference< XFrame > star_frame_widget_get_frame( StarFrameWidget *sfw );
 void star_frame_widget_dispatch_slot_url( StarFrameWidget *sfw, ::com::sun::star::util::URL url, const ::com::sun::star::uno::Sequence< ::com::sun::star::beans::PropertyValue > &properties );
 void star_frame_widget_set_fullscreen( StarFrameWidget *sfw, sal_Bool fullscreen );
+void star_frame_widget_zoom_100( StarFrameWidget *sfw );
+void star_frame_widget_zoom_page_width( StarFrameWidget *sfw );
 
 #endif /* STAR_FRAME_WIDGET_H */

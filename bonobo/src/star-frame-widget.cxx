@@ -11,6 +11,8 @@
 #include <com/sun/star/lang/SystemDependent.hpp>
 #include <com/sun/star/util/URL.hpp>
 #include <com/sun/star/util/XURLTransformer.hpp>
+#include <com/sun/star/view/DocumentZoomType.hpp>
+#include <com/sun/star/view/XViewSettingsSupplier.hpp>
 
 #include "services.h"
 
@@ -21,6 +23,7 @@ using namespace com::sun::star::frame;
 using namespace com::sun::star::lang;
 using namespace com::sun::star::uno;
 using namespace com::sun::star::util;
+using namespace com::sun::star::view;
 
 #define CLASS_BOILERPLATE(type, type_as_function,			\
 						  parent_type, parent_type_macro)		\
@@ -40,7 +43,47 @@ CLASS_BOILERPLATE( StarFrameWidget, star_frame_widget,
 struct _StarFrameWidgetPrivate {
     Reference< XWindowPeer > x_window_peer;
 	Reference< XFrame > x_frame;
+	Reference< XPropertySet > view_properties;
 };
+
+void
+star_frame_widget_zoom_100( StarFrameWidget *sfw )
+{
+ 	if( !sfw->priv->view_properties.is() ) {
+		Reference< XViewSettingsSupplier > xViewSettingsSupplier(
+			sfw->priv->x_frame->getController(), UNO_QUERY );
+		if( !xViewSettingsSupplier.is() )
+			return;
+		
+		sfw->priv->view_properties = xViewSettingsSupplier->getViewSettings();
+		g_assert( sfw->priv->view_properties.is() );
+	}
+
+	sfw->priv->view_properties->setPropertyValue(
+		DECLARE_ASCII( "ZoomType" ),
+		makeAny( ( sal_Int16 ) DocumentZoomType::BY_VALUE ) );
+	sfw->priv->view_properties->setPropertyValue(
+		DECLARE_ASCII( "ZoomValue" ),
+		makeAny( ( sal_Int16 ) 100 ) );
+}
+
+void
+star_frame_widget_zoom_page_width( StarFrameWidget *sfw )
+{
+	if( !sfw->priv->view_properties.is() ) {
+		Reference< XViewSettingsSupplier > xViewSettingsSupplier(
+			sfw->priv->x_frame->getController(), UNO_QUERY );
+		if( !xViewSettingsSupplier.is() )
+			return;
+		
+		sfw->priv->view_properties = xViewSettingsSupplier->getViewSettings();
+		g_assert( sfw->priv->view_properties.is() );
+	}
+
+	sfw->priv->view_properties->setPropertyValue(
+		DECLARE_ASCII( "ZoomType" ),
+		makeAny( ( sal_Int16 ) DocumentZoomType::PAGE_WIDTH ) );
+}
 
 static void
 star_frame_widget_create_window_peer( StarFrameWidget *sfw )
@@ -124,7 +167,7 @@ star_frame_widget_create_frame( StarFrameWidget *sfw )
     Reference< XFrames > xChildContainer = xTreeRoot->getFrames();
     xChildContainer->append( sfw->priv->x_frame );
 
-    xWindow->setVisible( sal_True ); // FIXME
+    xWindow->setVisible( sal_True );
 }
 
 static void
@@ -150,6 +193,9 @@ static void
 star_frame_widget_dispose( GObject *object )
 {
 	StarFrameWidget *sfw = STAR_FRAME_WIDGET( object );
+
+	if( sfw->priv->view_properties.is() )
+		sfw->priv->view_properties.clear();
 
 	if( sfw->priv->x_frame.is() )
 		sfw->priv->x_frame.clear();

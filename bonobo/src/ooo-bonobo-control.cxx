@@ -115,6 +115,22 @@ verb_EditCopy_cb( BonoboUIComponent *uic, gpointer user_data, const char *cname)
 										 uno::Sequence< PropertyValue >(0) );
 }
 
+static void
+verb_ZoomNormal_cb( BonoboUIComponent *uic, gpointer user_data, const char *cname)
+{
+	OOoBonoboControl *control = OOO_BONOBO_CONTROL( user_data );
+
+	star_frame_widget_zoom_100( control->priv->sfw );
+}
+
+static void
+verb_ZoomFit_cb( BonoboUIComponent *uic, gpointer user_data, const char *cname)
+{
+	OOoBonoboControl *control = OOO_BONOBO_CONTROL( user_data );
+
+	star_frame_widget_zoom_page_width( control->priv->sfw );
+}
+
 static int
 load_uri( BonoboPersistFile *pf, const CORBA_char *text_uri,
 		  CORBA_Environment *ev, gpointer user_data )
@@ -194,8 +210,8 @@ static BonoboUIVerb verbs[] = {
 
 // 	BONOBO_UI_VERB( "ZoomIn",			verb_ZoomIn_cb ),
 // 	BONOBO_UI_VERB( "ZoomOut",			verb_ZoomOut_cb ),
-// 	BONOBO_UI_VERB( "ZoomNormal",		verb_ZoomNormal_cb ),
-// 	BONOBO_UI_VERB( "ZoomFit",			verb_ZoomFit_cb ),
+ 	BONOBO_UI_VERB( "ZoomNormal",		verb_ZoomNormal_cb ),
+ 	BONOBO_UI_VERB( "ZoomFit",			verb_ZoomFit_cb ),
 
 	BONOBO_UI_VERB_END
 };
