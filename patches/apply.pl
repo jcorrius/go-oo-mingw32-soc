@@ -98,6 +98,29 @@ sub select_subset ($$)
 
 sub list_patches {
 
+    sub checkTerminal {
+	my $subsets = shift;
+	my $referenced = shift;
+	my $distro = shift;
+
+	if (defined $referenced->{$distro} ||
+	    !defined $subsets->{$distro}) {
+	    print "Error: you must use a terminal node for distro:\n";
+	    my $ref;
+	    my @terminals;
+	    print "    One of: ";
+	    for $ref(keys %{$subsets}) {
+		if (!defined $referenced->{$ref}) {
+		    push @terminals, $ref;
+		}
+	    }
+	    print join ', ', sort (@terminals);
+	    print "\n";
+	    exit (1);
+	}
+    }
+
+    my $forDistro = shift;
     my @Patches = ();
 
     open (PatchList, "$apply_list") || die "Can't find $apply_list";
@@ -105,6 +128,7 @@ sub list_patches {
     my @targets=();
     my %subsets=();
     my @selected_subsets=();
+    my %referenced=();
     while (<PatchList>) {
             s/\s*#.*//;
             chomp;
@@ -128,8 +152,13 @@ sub list_patches {
 		my $key = $1;
 		my @value = (split /\s*,\s*/, $2);
 		$subsets{$key} = [@value];
-		@selected_subsets = select_subset (\%subsets, $distro);
+		@selected_subsets = select_subset (\%subsets, $forDistro);
 #		print "selected sets: @selected_subsets\n" unless $quiet;
+		# update terminality map
+		my $ref;
+		for $ref(@value) {
+		    $referenced{$ref} = 1;
+		}
                 next;
             }
 
@@ -149,12 +178,14 @@ sub list_patches {
     }
     close (PatchList);
 
+    checkTerminal (\%subsets, \%referenced, $forDistro);
+
     return @Patches;
 }
 
 sub apply_patches {
 
-    my @Patches = list_patches ();
+    my @Patches = list_patches ($distro);
 
     print "\n" unless $quiet;
 
@@ -234,7 +265,7 @@ sub remove_patches {
 }
 
 sub export_series {
-    my @Patches = list_patches ();
+    my @Patches = list_patches ($distro);
 
     for my $patch (@Patches) {
 	$patch =~ s/$patch_dir\/..\///;
@@ -277,7 +308,7 @@ foreach $a (@ARGV) {
 $patch_dir = shift (@arguments);
 $apply_list = $patch_dir.'/apply';
 
-print "Execute: $base_cmd for distro '$distro'\n" unless $quiet;
+print "Execute with $opts for distro '$distro'\n" unless $quiet;
 
 if ($export) {
     export_series();
