@@ -2,6 +2,7 @@ INCLUDES =								    \
 	-DINIFILE=\"$(datadir)/ooo-bonobo/ooo-bonobo-uno-bootstraprc\"	    \
 	-DDATADIR=\""$(datadir)"\"					    \
 	-DRDBFILE=\""$(libdir)/ooo-bonobo/ooo-bonobo.rdb"\"		    \
+	-DGNOMELOCALEDIR=\""$(datadir)/locale"\"			    \
 	$(OOO_BONOBO_CFLAGS)							
 
 LDADD =	\

@@ -51,6 +51,10 @@ factory( BonoboGenericFactory *factory,
 int
 main( int argc, char *argv[] )
 {
+	bindtextdomain( GETTEXT_PACKAGE, GNOMELOCALEDIR );
+	bind_textdomain_codeset( GETTEXT_PACKAGE, "UTF-8" );
+	textdomain( GETTEXT_PACKAGE );
+
 	BONOBO_FACTORY_INIT( "ooo-bonobo", VERSION, &argc, argv );
 	return bonobo_generic_factory_main( "OAFIID:GNOME_OpenOfficeOrg_Factory", factory, NULL );
 }
