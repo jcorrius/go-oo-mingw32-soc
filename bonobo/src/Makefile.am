@@ -7,7 +7,7 @@ INCLUDES =								    \
 LDADD =	\
 	$(OOO_BONOBO_LIBS)
 
-libexec_PROGRAMS = ooo-bonobo
+libexec_PROGRAMS = ooo-bonobo.bin
 
 noinst_PROGRAMS = test
 
@@ -18,7 +18,7 @@ test_SOURCES =			\
 	star-frame-widget.h	\
 	test.cxx
 
-ooo_bonobo_SOURCES =		\
+ooo_bonobo_bin_SOURCES =		\
 	ooo-bonobo-control.cxx	\
 	ooo-bonobo-control.h	\
 	remote-uno-helper.cxx	\
