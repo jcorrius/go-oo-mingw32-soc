@@ -1,0 +1,1 @@
+SUBDIRS = artwork bin desktop etc patches www
