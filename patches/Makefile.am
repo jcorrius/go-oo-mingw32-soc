@@ -1,4 +1,5 @@
 SUBDIRS=\
+	wpd \
 	evo2 \
 	vclplug \
 	OOO_1_1   \
