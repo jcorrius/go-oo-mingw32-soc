@@ -15,7 +15,7 @@ fi
 # echo "NOT YET."
 
 aclocal $ACLOCAL_FLAGS
-automake --gnu --add-missing
+automake --gnu --add-missing --copy
 # intltoolize --copy --force --automake
 autoconf
 ./configure $@
