@@ -11,6 +11,7 @@ EXTRA_DIST = \
 	MAINTAINERS		\
 	HACKING			\
 	download.in		\
+	Makefile.shared		\
 	intltool-merge.in	\
 	intltool-update.in	\
 	intltool-extract.in
