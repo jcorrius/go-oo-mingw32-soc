@@ -1,6 +1,8 @@
 #!/usr/bin/perl -w
 
-my $output_unix = 1;
+use File::Copy;
+
+my $output_format = 'u';
 
 sub reg_get_value($)
 {
@@ -11,8 +13,13 @@ sub reg_get_value($)
     my $value;
 
     open ($fhandle, "/proc/registry/$key") || return;
-    $value = <$fhandle>;
+    # reg keys have 0x00 0x5c at the end
+    $value = (split /\0/, <$fhandle>)[0];
     close ($fhandle);
+
+    chomp ($value);
+    $value =~ s|\r\n||;
+#    print "Value '$value' at '$key'\n";
 
     return $value;
 }
@@ -31,21 +38,37 @@ sub print_syntax()
     print "   --help                  - this message\n";
 }
 
-sub print_path($$)
+sub cygpath($$$)
 {
-    my ($path, $unix) = @_;
+    my ($path, $input_format, $format) = @_;
+
+    # Strip trailing path separators
+    if ($input_format eq 'u') {
+	$path =~ s|/*\s*$||;
+    } else {
+	$path =~ s|\\*\s*$||;
+    }
 
     # 'Unterminated quoted string errors' from 'ash' when 
     # forking cygpath  so - reimplement cygpath in perl [ gack ]
-    if ($output_unix && !$unix) {
+    if ($format eq 'u' && $input_format eq 'w') {
 	$path =~ s|\\|/|g;
 	$path =~ s|([a-zA-Z]):/|/cygdrive/$1/|g;
     }
-    elsif (!$output_unix && $unix) {
+    elsif ($format eq 'w' && $input_format eq 'u') {
 	$path =~ s|/cygdrive/([a-zA-Z])/|/$1/|g;
 	$path =~ s|/|\\|g;
     }
 
+    return $path;
+}
+
+sub print_path($$)
+{
+    my ($path, $unix) = @_;
+
+    $path = cygpath ($path, $unix, $output_format);
+    
     print $path;
 }
 
@@ -54,7 +77,78 @@ sub print_psdk_home()
     my $value;
     $value = reg_get_value ('HKEY_LOCAL_MACHINE/SOFTWARE/Microsoft/MicrosoftSDK/Directories/Install Dir');
     defined $value || die "psdk not found";
-    print_path ($value, 0);
+
+    print cygpath ($value, 'w', $output_format);
+}
+
+my %msvc6 = (
+    'ver' => '6.0',
+    'key' => 'Microsoft/VisualStudio/6.0/Setup/Microsoft Visual C++/ProductDir',
+);
+my %msvs_net_2002 = (
+    'ver' => '7.0',
+    'key' => 'Microsoft/VisualStudio/7.0/Setup/VC/ProductDir',
+    'dll_path' => '../SDK/v1.1/Bin', # testme ...
+    'dll_suffix' => '70'
+);
+my %msvs_net_2003 = (
+    'ver' => '7.1',
+    'key' => 'Microsoft/VisualStudio/7.1/Setup/VC/ProductDir',
+    'dll_path' => '../SDK/v1.1/Bin',
+    'dll_suffix' => '71'
+);
+
+sub find_msvs()
+{
+    my @ms_versions = ( \%msvs_net_2003, \%msvs_net_2002, \%msvc6 );
+
+    for $ver (@ms_versions)
+    {
+	my $install = reg_get_value ("HKEY_LOCAL_MACHINE/SOFTWARE/" . $ver->{'key'});
+	if (defined $install && $install ne '') {
+	    $ver->{'product_dir'} = $install;
+	    return $ver;
+	}
+    }
+    die "Can't find MS Visual Studio / VC++";
+}
+
+sub print_msvc_ver()
+{
+    my $ver = find_msvs();
+    print $ver->{'ver'};
+}
+
+sub print_msvc_product_dir()
+{
+    my $ver = find_msvs();
+    print cygpath ($ver->{'product_dir'}, 'w', $output_format);
+}
+
+sub copy_dll($$)
+{
+    my ($src, $dest) = @_;
+
+    -f $src || die "can't find $src";
+    -d $dest || die "no directory $dest";
+
+    copy ($src, $dest) || die "copy failed: $!";
+}
+
+sub msvc_copy_dlls($)
+{
+    my $dest = shift;
+    my $ver = find_msvs();
+
+    defined $ver->{'dll_path'} || return;
+
+    my $srcdir = (cygpath ($ver->{'product_dir'}, 'w', 'u') . '/' . 
+		  $ver->{'dll_path'});
+
+    copy_dll ("$srcdir/msvcp" . $ver->{'dll_suffix'} . ".dll",
+	      $dest . $ver->{'dll_suffix'});
+    copy_dll ("$srcdir/msvcr" . $ver->{'dll_suffix'} . ".dll",
+	      $dest . $ver->{'dll_suffix'});
 }
 
 if (!@ARGV) {
@@ -63,33 +157,29 @@ if (!@ARGV) {
 }
 
 my @commands = ();
+my $opt;
 while (@ARGV) {
-    my $opt = shift @ARGV;
+    $opt = shift @ARGV;
     
-    if (0) {
-    } elsif ($opt eq '-w') {
-	$output_unix = 0;
-    } elsif ($opt eq '-u') {
-	$output_unix = 1;
+    if ($opt eq '-w' || $opt eq '-u') {
+	$output_format = substr($opt, 1, 1);
     } else {
 	push @commands, $opt;
     }
 }
 
 while (@commands) {
-    my $opt = shift @commands;
+    $opt = shift @commands;
 
     if (0) {
-    } elsif ($opt eq '-w') {
-	$output_unix = 0;
-    } elsif ($opt eq '-u') {
-	$output_unix = 1;
     } elsif ($opt eq '--msvc-ver') {
-	print "Unimplemented\n";
+	print_msvc_ver();
     } elsif ($opt eq '--msvc-copy-dlls') {
-	print "Unimplemented\n";
+	my $dest = shift @commands;
+	defined $dest || die "copy-dlls requires a destination directory";
+	msvc_copy_dlls( $dest );
     } elsif ($opt eq '--msvc-productdir') {
-	print "Unimplemented\n";
+	print_msvc_product_dir();
     } elsif ($opt eq '--psdk-home') {
 	print_psdk_home();
     } elsif ($opt eq '--help' || $opt eq '/?') {
