@@ -1,6 +1,6 @@
 --- /dev/null	
 +++ connectivity/source/drivers/evoab1.5/NConnection.cxx	
-@@ -0,0 +1,537 @@
+@@ -0,0 +1,367 @@
 +/*************************************************************************
 + *
 + *  The Contents of this file are made available subject to the terms of
@@ -173,6 +173,7 @@
 +	,m_cStringDelimiter('"')
 +	,m_cDecimalDelimiter('.')
 +	,m_cThousandDelimiter(' ')
++	,m_aPassword()
 +{
 +	m_pDriver->acquire();
 +}
@@ -201,185 +202,14 @@
 +// --------------------------------------------------------------------------------
 +IMPLEMENT_SERVICE_INFO(OEvoabConnection, "com.sun.star.sdbc.drivers.evoab.Connection", "com.sun.star.sdbc.Connection")
 +
-+static void
-+parseEvoURI( const rtl::OUString &rUrl, const Sequence< PropertyValue >& info,
-+			 rtl::OUString *pEvoUri, SDBCAddress::sdbc_address_type *pType )
-+{
-+	rtl::OUString aEvoURI;
-+	const PropertyValue* pInfoD = info.getConstArray();
-+	const PropertyValue* pInfoEndD = pInfoD + info.getLength();		
-+
-+#ifdef DEBUG
-+	for (; pInfoD != pInfoEndD; ++pInfoD)
-+	{
-+		rtl::OUString Name;
-+		pInfoD->Value >>= Name;
-+		EVO_TRACE_STRING("pinfoD->Name: %s", pInfoD->Name);
-+		EVO_TRACE_STRING(" %s\n", Name);
-+	}
-+#endif
-+	
-+	//
-+	// Skip 'sdbc:address: part of URL
-+	//
-+	sal_Int32 nLen = rUrl.indexOf(':');
-+	nLen = rUrl.indexOf(':',nLen+1);
-+	::rtl::OUString aAddrbookURI(rUrl.copy(nLen+1));
-+	// Get Scheme
-+	nLen = aAddrbookURI.indexOf(':');
-+	::rtl::OUString aAddrbookScheme;
-+	if ( nLen == -1 )
-+	{
-+		// There isn't any subschema: - but could be just subschema
-+		if ( aAddrbookURI.getLength() > 0 )
-+			aAddrbookScheme= aAddrbookURI;
-+		else
-+		{
-+			OSL_TRACE( "No subschema given!!!\n");
-+			::dbtools::throwGenericSQLException(
-+				::rtl::OUString::createFromAscii("No subschema provided"),NULL);
-+		}
-+	}
-+	else
-+		aAddrbookScheme = aAddrbookURI.copy(0, nLen);
-+
-+	EVO_TRACE_STRING("URI = %s\n", aAddrbookURI);
-+	EVO_TRACE_STRING("Scheme = %s\n", aAddrbookScheme);
-+
-+	//
-+	// Now we have a URI convert it to a Evolution URI
-+	//
-+	// The Mapping being used is:
-+	//
-+	// * for Evolution
-+	//      "sdbc:address:evolution:"        -> flat://
-+	// * for LDAP
-+	//      "sdbc:address:ldap:"           ->  ldap://
-+	// * for Groupwise
-+	//      "sdbc:address:groupwise:"        -> groupwise://
-+
-+	if ( aAddrbookScheme.compareToAscii( OEvoabDriver::getSDBC_SCHEME_EVOLUTION() ) == 0 )
-+	{
-+		aEvoURI = rtl::OUString::createFromAscii( EVO_SCHEME_EVOLUTION );
-+		*pType = SDBCAddress::Evolution;
-+	}
-+	else if ( aAddrbookScheme.compareToAscii( OEvoabDriver::getSDBC_SCHEME_LDAP() ) == 0 )
-+	{
-+		rtl::OUString sHostName;
-+		rtl::OUString sBaseDN;
-+		rtl::OUString sPasswd;
-+		sal_Int32     nPortNumber = -1;
-+		
-+		aEvoURI = rtl::OUString::createFromAscii( EVO_SCHEME_LDAP );
-+		
-+		const PropertyValue* pInfo = info.getConstArray();
-+		const PropertyValue* pInfoEnd = pInfo + info.getLength();
-+
-+		*pType = SDBCAddress::LDAP;
-+		
-+		for (; pInfo != pInfoEnd; ++pInfo)
-+		{
-+			if ( 0 == pInfo->Name.compareToAscii("HostName") )
-+				pInfo->Value >>= sHostName;
-+			else if ( 0 == pInfo->Name.compareToAscii("BaseDN") )
-+				pInfo->Value >>= sBaseDN;
-+			else if ( 0 == pInfo->Name.compareToAscii("PortNumber") )
-+				pInfo->Value >>= nPortNumber;
-+//			else if ( 0 == pInfo->Name.compareToAscii("MaxRowCount") )
-+//				pInfo->Value >>= m_nMaxResultRecords;
-+			}
-+		if ( sHostName.getLength() != 0 )
-+			aEvoURI += sHostName;
-+		else
-+			::dbtools::throwGenericSQLException(
-+				::rtl::OUString::createFromAscii("No HostName provided"),NULL);
-+		
-+		if ( nPortNumber > 0 )
-+		{
-+			aEvoURI += rtl::OUString::createFromAscii( ":" );
-+			aEvoURI += rtl::OUString::valueOf( nPortNumber );
-+		}
-+		
-+		if ( sBaseDN.getLength() != 0 ) {
-+			aEvoURI += rtl::OUString::createFromAscii( "/" );
-+			aEvoURI += sBaseDN;
-+		}
-+		else
-+			::dbtools::throwGenericSQLException(
-+							    ::rtl::OUString::createFromAscii("No BaseDN provided"),NULL);
-+
-+		// Addition of a fake query to enable the LDAP directory to work correctly.
-+//		aEvoURI += ::rtl::OUString::createFromAscii("??sub?(*)");
-+	}
-+	else if ( aAddrbookScheme.compareToAscii( OEvoabDriver::getSDBC_SCHEME_GWISE() ) == 0 )
-+	{
-+		rtl::OUString sHostName;
-+		rtl::OUString sUserName;
-+		rtl::OUString sPasswd;
-+		sal_Int32     nPortNumber = -1;
-+		
-+		aEvoURI = rtl::OUString::createFromAscii( EVO_SCHEME_GWISE );
-+		
-+		const PropertyValue* pInfo = info.getConstArray();
-+		const PropertyValue* pInfoEnd = pInfo + info.getLength();
-+
-+		
-+		*pType = SDBCAddress::GWISE;
-+		
-+		for (; pInfo != pInfoEnd; ++pInfo)
-+		{
-+			if ( 0 == pInfo->Name.compareToAscii("HostName") )
-+				pInfo->Value >>= sHostName;
-+//			else if ( 0 == pInfo->Name.compareToAscii("user") )
-+//				pInfo->Value >>= m_aUserName;
-+//			else if ( 0 == pInfo->Name.compareToAscii("password") )
-+//				pInfo->Value >>= m_aPassword;
-+			else if ( 0 == pInfo->Name.compareToAscii("PortNumber") )
-+				pInfo->Value >>= nPortNumber;
-+//			else if ( 0 == pInfo->Name.compareToAscii("MaxRowCount") )
-+//				pInfo->Value >>= m_nMaxResultRecords;
-+		}
-+		if ( sHostName.getLength() != 0 )
-+		{
-+			aEvoURI += sHostName;
-+			EVO_TRACE_STRING("LConnection aEvoURI: %s\n", aEvoURI);
-+		}
-+		else
-+			::dbtools::throwGenericSQLException(
-+				::rtl::OUString::createFromAscii("No HostName provided"),NULL);
-+		
-+		if ( nPortNumber < 0 ) // try default port
-+			nPortNumber = 7181;
-+
-+		aEvoURI += rtl::OUString::createFromAscii( ":" );
-+		aEvoURI += rtl::OUString::valueOf( nPortNumber );
-+		aEvoURI += rtl::OUString::createFromAscii( "/" );
-+		aEvoURI += rtl::OUString::createFromAscii( "soap" );
-+	}
-+	else
-+	{
-+		OSL_TRACE("Invalid subschema given!!!\n");
-+		::dbtools::throwGenericSQLException(
-+			::rtl::OUString::createFromAscii("Invalid subschema provided"),NULL);
-+	}
-+	*pEvoUri = aEvoURI;
-+}
-+
 +//-----------------------------------------------------------------------------
 +void OEvoabConnection::construct(const ::rtl::OUString& url, const Sequence< PropertyValue >& info)  throw(SQLException)
 +{
 +	osl_incrementInterlockedCount( &m_refCount );
 +	EVO_TRACE_STRING("OEvoabConnection::construct()::url = %s\n", url );
 +
-+	/* get the evo schema properties based on the kind of urls for example ldap will need user name and password etc and set it here 
-+	   as shown below */
-+
-+	OSL_TRACE("IN OConnection::construct()\n" );
 +	setURL(url);
-+	parseEvoURI( url, info, &m_aEvoURI, &m_eSDBCAddressType );
-+	
-+	EVO_TRACE_STRING("LConnection m_aEvoURI: %s\n", m_aEvoURI);
-+        
++
 +	osl_decrementInterlockedCount( &m_refCount );
 +}
 +

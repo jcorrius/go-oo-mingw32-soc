@@ -1,6 +1,6 @@
 --- /dev/null	
 +++ connectivity/source/drivers/evoab1.5/NResultSet.cxx	
-@@ -0,0 +1,810 @@
+@@ -0,0 +1,849 @@
 +/*************************************************************************
 + *
 + *  The Contents of this file are made available subject to the terms of
@@ -85,9 +85,6 @@
 +#ifndef _COM_SUN_STAR_BEANS_PROPERTYATTRIBUTE_HPP_
 +#include <com/sun/star/beans/PropertyAttribute.hpp>
 +#endif
-+//#ifndef _COM_SUN_STAR_SDBCX_COMPAREBOOKMARK_HPP_
-+//#include <com/sun/star/sdbcx/CompareBookmark.hpp>
-+//#endif
 +#ifndef _CPPUHELPER_TYPEPROVIDER_HXX_
 +#include <cppuhelper/typeprovider.hxx>
 +#endif
@@ -119,7 +116,6 @@
 +::rtl::OUString SAL_CALL OEvoabResultSet::getImplementationName(  ) throw ( RuntimeException)	\
 +{
 +	return ::rtl::OUString::createFromAscii("com.sun.star.sdbcx.evoab.ResultSet");
-+  	//return ::rtl::OUString::createFromAscii("com.sun.star.sdbc.evoab.ResultSet");
 +}
 +// -------------------------------------------------------------------------
 + Sequence< ::rtl::OUString > SAL_CALL OEvoabResultSet::getSupportedServiceNames(  ) throw( RuntimeException)
@@ -211,40 +207,81 @@
 +	return pBook;
 +}
 +
++static bool isLDAP( EBook *pBook )
++{
++	return pBook && !strncmp( "ldap://", e_book_get_uri( pBook ), 6 );
++}
++
++static bool isAuthRequired( EBook *pBook )
++{
++	return e_source_get_property( e_book_get_source( pBook ),
++								  "auth" ) != NULL;
++}
++
++static rtl::OString getUserName( EBook *pBook )
++{
++	rtl::OString aName;
++	if( isLDAP( pBook ) )
++		aName = e_source_get_property( e_book_get_source( pBook ), "binddn" );
++	else
++		aName = e_source_get_property( e_book_get_source( pBook ), "user" );
++	return aName;
++}
++
 +static bool
-+executeQuery (EBook *pBook, EBookQuery *pQuery, GList **ppList, GError **pError)
++userAuthenticate( EBook * pBook, const char *pAuth, rtl::OString &rUser,
++				  rtl::OString &rPassword, GError **pError )
++{
++	do
++	{
++		::svt::LoginDialog aDlg (NULL,
++								 LF_NO_PATH | LF_NO_ACCOUNT | LF_NO_ERRORTEXT |
++								 LF_NO_SAVEPASSWORD | LF_NO_ERRORTEXT, String(), NULL);
++		aDlg.SetName( ::rtl::OStringToOUString( rUser, RTL_TEXTENCODING_UTF8 ) );
++		aDlg.ClearPassword();  // gives the password field focus
++		aDlg.SetLoginRequestText(::rtl::OUString::createFromAscii(""));
++		sal_Int32 nResult = aDlg.Execute();
++		if ( nResult != TRUE)
++			return false;
++		rPassword = rtl::OUStringToOString( aDlg.GetPassword(),
++											RTL_TEXTENCODING_UTF8 );
++		rUser = rtl::OUStringToOString( aDlg.GetName(),
++										RTL_TEXTENCODING_UTF8 );
++		fprintf( stderr, "User '%s', pwd: '%s'\n",
++				 (const sal_Char *) rUser,
++				 (const sal_Char *) rPassword );
++		if (e_book_authenticate_user (pBook, rUser, rPassword, pAuth, pError))
++			break;
++		else
++			OSL_ASSERT( "authentication failed" );
++	} while (true);
++
++	return true;
++}
++
++static bool
++executeQuery (EBook *pBook, EBookQuery *pQuery, GList **ppList,
++			  rtl::OString &rPassword, GError **pError)
 +{
 +	ESource *pSource = e_book_get_source (pBook);
-+	const char *pAuth = e_source_get_property (pSource, "auth");
++	bool bSuccess = false;
++	bool bAuthSuccess = true;
 +
 +	*ppList = NULL;
 +
-+	gboolean success = e_book_get_contacts (pBook, pQuery, ppList, pError);
-+
-+	if (!success && pAuth)
-+	{	// Most likely failed authentication
-+		do
-+		{
-+			const char *pUser = e_source_get_property (pSource, "user");
-+			::svt::LoginDialog aDlg (NULL,
-+									 LF_NO_PATH | LF_NO_ACCOUNT | LF_NO_ERRORTEXT |
-+									 LF_USERNAME_READONLY | LF_NO_SAVEPASSWORD |
-+									 LF_NO_ERRORTEXT, String(), NULL);
-+			aDlg.SetName( ::rtl::OUString::createFromAscii(pUser));
-+			aDlg.ClearPassword();  // gives the password field focus
-+			aDlg.SetLoginRequestText(::rtl::OUString::createFromAscii(""));
-+			sal_Int32 nResult = aDlg.Execute();
-+			if ( nResult != TRUE)
-+				return false;
-+			rtl::OString sPassword = rtl::OUStringToOString( aDlg.GetPassword(),
-+															 RTL_TEXTENCODING_UTF8 );
-+			if (e_book_authenticate_user (pBook, pUser, sPassword, pAuth, pError))
-+				break;
-+		} while (true);
-+		
-+		success = e_book_get_contacts (pBook, pQuery, ppList, pError);
++	if( isAuthRequired( pBook ) )
++	{
++		rtl::OString aUser( getUserName( pBook ) );
++		const char *pAuth = e_source_get_property( pSource, "auth" );
++		bAuthSuccess = e_book_authenticate_user( pBook, aUser, rPassword, pAuth, pError );
++		if( !bAuthSuccess )
++			bAuthSuccess = userAuthenticate( pBook, pAuth, aUser, rPassword, pError );
 +	}
-+	return success;
++
++	if (bAuthSuccess)
++		bSuccess = e_book_get_contacts( pBook, pQuery, ppList, pError );
++
++	return bSuccess;
 +}
 +
 +void OEvoabResultSet::construct( EBookQuery *pQuery, rtl::OString aTable )
@@ -253,7 +290,9 @@
 +
 +	if (pBook)
 +	{
-+		executeQuery( pBook, pQuery, &m_pContacts, NULL );
++		rtl::OString aPassword = m_pConnection->getPassword();
++		executeQuery( pBook, pQuery, &m_pContacts, aPassword, NULL );
++		m_pConnection->setPassword( aPassword );
 +		m_nLength = g_list_length( m_pContacts );
 +		OSL_TRACE( "Query return %d records", m_nLength );
 +		m_nIndex = -1;
