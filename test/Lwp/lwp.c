@@ -1,35 +1,38 @@
 #include <stdio.h>
 #include <malloc.h>
-#include <ctype.h>
 
-static FILE *in;
+// Define VERBOSE to get more debug
+int verbose = 0;
 
-typedef unsigned char byte_t;
+// Odd section:
+// 02 02 3f bf 62 65 20 6f 6e 20 68 69 73 20 66 69 | ..?.be on his fi
+// 72 73 74 20 65 6e 74 65 72 69 6e 67 20 61 20 6e | rst entering a n
+// 65 69 67 68 62 6f 75 72 68 6f 6f 64 2c 20 74 68 | eighbourhood, th
+// 69 73 20 74 72 75 74 68 20 69 73 20 73 6f 20 77 | is truth is so w
+// 65 6c 6c 01 c0 02 53 53 45 6e 64 00 00 94 02 2e | ell...SSEnd.....
+// 00 02 6a c1 02 2f 41 02 2d 48 0f 61 01 6d 46 8d | ..j../A.-H.a.mF.
+// 46 c3 01 f6 28 0e 41 01 96 40 01 42 | F...(.A..@.B
 
-static long init_offset = 0x2633;
+
+FILE *in;
 
 static void
-dump_string (FILE *fin, int char_len)
+dump_string(unsigned char *data, int len)
 {
-		byte_t datum;
-		while (char_len > 0) {
-				datum = fgetc(fin);
-				if (isascii (datum)) {
-						fprintf (stderr, "%c", datum);
-						char_len--;
-				} else
-						fprintf (stderr, "<magic0x%x>", datum);
-		}
-		fprintf (stderr, "'\n");
+	int i;
+	fprintf(stderr ,"(%d): '", len);
+	for (i = 0; i < len; i++)
+		fprintf(stderr ,"%c", data[i]);
+	fprintf(stderr ,"'\n");
 }
 
 static void
-dump_hex (unsigned char *data, int len)
+dump_hex(unsigned char *data, int len)
 {
 	while (len > 0) {
-		int chunk = len < 16 ? len : 16;
 		int i;
-		
+		int chunk = len < 16 ? len : 16;
+
 		for (i = 0; i < chunk; i++)
 			fprintf( stderr, "%.2x ", data[i] );
 		fprintf( stderr, "| " );
@@ -42,133 +45,90 @@ dump_hex (unsigned char *data, int len)
 	}
 }
 
-typedef enum {
-		VALUE_STRING,
-		VALUE_BIN
-} ValueType;
-
 static int
-get_len (byte_t codea, byte_t codeb, ValueType *type)
+dump_runs(unsigned char *data, int len)
 {
-#define MAP(_val,_len) \
-		case _val: len = _len; break
+	int i;
+	int pos = 0;
 
-		*type = VALUE_BIN;
+	while (pos < len) {
+		int typea = data[0]; // Continuations show hdr to be 4 bytes
+		int typeb = data[1];
+		int run_len = data[2];
+		int typec = data[3];
 
-		int len = -1;
-		if (codea == 0x01) {
-				switch (codeb) {
-				MAP( 0x02, 8 ); /* SSEnd */
-				MAP( 0x40, 0); MAP( 0x41, 0 ); MAP( 0x42, 0 );
-				MAP( 0x6d, 4 );
-				MAP( 0x96, 1 );
-				MAP( 0xc0, 0 );
-				MAP( 0xf6, 3 );
-				default:
-						break;
-				}
+		if (run_len > len - 5)
+			run_len = len - 5;
+		
+		if (typea == 0x0b &&
+		    typeb == 0xc0) { // starter thing
+			fprintf( stderr, "String: [0x%x]\n", typeb );
+			dump_string( data + 4, run_len );
+		} else if (typea == 0x82 &&
+			   typeb == 0x02 &&
+			   run_len == 0x04) {
+			// CRLF ? - end marker anyway.
+			break;
+		} else if (typeb == 0x02) {
+			fprintf( stderr, "StringC: [0x%x]\n", typeb );
+			dump_string( data + 4, run_len );
+		} else {
+			fprintf( stderr, "unknown type 0x%x 0x%x 0x%x 0x%x\n", 
+				 typea, typeb, run_len, typec );
+			break;
 		}
-		if (codea == 0x02) {
-				switch (codeb) {
-				case 0x02:
-						len = (byte_t) fgetc(in);
-						*type = VALUE_STRING;
-						break;
-				case 0x04: 
-				{ /* Almost certainly wrong */
-						int i;
-						for (i = 0; i < 10; i++) fgetc(in);
-						len = (byte_t) fgetc(in);
-						*type = VALUE_STRING;
-						break;
-				}
-				case 0x20:
-				case 0x26: case 0x27:
-				case 0x28: case 0x29: case 0x2a: case 0x2b:
-				case 0x2c: case 0x2d: case 0x2e: case 0x2f:
-				case 0x30: case 0x31: case 0x32:
-						len = 1;
-						break;
-				MAP( 0x53, 7 ); /* SSEnd */
-				case 0x5c:
-				case 0x60: case 0x62:
-				case 0x64:
-				case 0x6a:
-				case 0x76:
-						len = 1;
-						break;
-				default:
-						fprintf( stderr, "Guess (A) length as 1 for 0x%x\n", codeb );
-						len = 1;
-						break;
-				}
-		}
-		if (codea == 0x20 && codeb == 0x40)
-				len = 0;
+		pos += run_len + 4;
+		data += run_len + 4;
+	}	
+	return pos;
+}
 
-		if (codea >= 0x08 && codea <= 0x11 &&
-			codeb == 0x61)
-				len = 0;
-		if (len < 0 && codeb == 0x61) {
-				fprintf( stderr, "Guess (B) length 0 for 0x%x\n", codea );
-				len = 0;
-		}
+static void
+dump(unsigned char *data, int len)
+{
+	if (verbose) {
+			fprintf( stderr, "Record:\n" );
+			dump_hex(data, len);
+	}
 
-		if ((codea == 0x12 || codea == 0x13) &&
-			codeb == 0x50)
-				len = 2;
-		if (len < 0 && codeb == 0x50) {
-				fprintf( stderr, "Guess (C) length 2 for 0x%x\n", codea );
-				len = 2;
-		}
-#undef MAP
-		return len;
+	if (len > 4) {
+		if (data[1] == 0x20 &&
+		    len > 2) {
+			int ptg = dump_runs( data + 2, len - 2);
+		} 
+	}
 }
 
 int
 main (int argc, char **argv)
 {
-		int die = 0;
-		byte_t data[65536] = { 0, };
+	int i = 0;
+	const char *fname = NULL;
+	unsigned char data[256];
 
-		in = fopen(argv[1], "r");
-		fseek (in, init_offset, SEEK_SET);
+	for (i = 1; i < argc; i++)
+	{
+			if (argv[i][0] == '-' &&
+				argv[i][1] == 'v')
+					verbose = 1;
+			else if (!fname)
+					fname = argv[i];
+	}
 
-		while (!feof(in)) {
-				byte_t codea = fgetc (in);
-				byte_t codeb = fgetc (in);
-				ValueType type;
-				int len = get_len (codea, codeb, &type);
-				if (len < 0) {
-						fprintf (stderr, "Error: unknown code 0x%x, 0x%x:\n", codea, codeb);
-						fread (data, 1, 64, in);
-						dump_hex (data, len);
-						fseek (in, -64, SEEK_CUR);
-						
-						while ((len = get_len (codea, codeb, &type)) < 0) {
-								fprintf (stderr, "Error: re-framing: skip byte 0x%x\n", codea );
-								codea = codeb;
-								codeb = fgetc (in);
-						}
-				}
-				if (type == VALUE_STRING)
-				{
-						fprintf (stderr, "String (0x%x): %.2x%.2x: ", len, codea, codeb);
-						dump_string (in, len);
-				}
-				else
-				{
-						if (len == 0)
-								fprintf (stderr, "Flag: 0x%.2x%.2x\n", codea, codeb);
-						else
-						{
-								fread (data, 1, len, in);
-								fprintf (stderr, "Record: 0x%.2x%.2x (0x%d bytes): ",
-										 codea, codeb, len );
-								dump_hex (data, len);
-						}
-				}
+	in = fopen (fname, "r");
+
+	i = 0;
+	while (!feof (in)) {b
+		data[i] = fgetc (in);
+
+		if (data[i] == '@') { // Magic char
+			dump (data, i);
+			data[0] = '@';
+			i = 0;
 		}
-		fclose (in);
-		return 0;
+		i++;
+	}
+
+	close (in);
+	return 0;
 } 
