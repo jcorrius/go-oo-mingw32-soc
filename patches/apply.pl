@@ -237,9 +237,16 @@ sub export_series {
 
     my @Patches = list_patches ();
 
+    print "Writing list of patches to $series_file... ";
+    open ($fh, ">", $series_file);
+
     for my $patch (@Patches) {
-	print "$patch -p0\n";
+	$patch =~ s/$patch_dir\/..\///;
+	print $fh "$patch -p0\n";
     }
+
+    close ($fh);
+    print "done.\n";
 }
 
 (@ARGV > 1) || die "Syntax:\napply <path-to-patchdir> <src root> [--distro=Debian] [patch flags '--dry-run' eg.]\n";
@@ -262,7 +269,8 @@ foreach $a (@ARGV) {
 	    $remove = 1;	    
 	}
 
-	if ($a eq '--export-series') {
+	if ($a =~ m/--export-series-to=(.*)/) {
+	    $series_file = $1;
 	    $export = 1;
 	} elsif ($a eq '--quiet') {
 	    $quiet = 1;
