@@ -18,9 +18,7 @@ script_files = \
 	package-lang \
 	package-ooo \
 	relocate \
-	save-resources \
 	scale-icons \
-	unpack \
-	unpack-icons
+	unpack
 
 EXTRA_DIST = $(script_files)
