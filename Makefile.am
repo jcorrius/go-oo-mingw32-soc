@@ -1,7 +1,7 @@
 
 SUBDIRS = bin desktop etc patches www
 
-EXTRA_DIST = MAINTAINERS HACKING
+EXTRA_DIST = MAINTAINERS HACKING download
 
 all:
 	cd bin; ./build-ooo ${TAG} --checkout
