@@ -1,0 +1,973 @@
+--- /dev/null	2004-06-30 20:04:37.000000000 +0100
++++ writerperfect/source/filter/WordPerfectCollector.cxx	2004-07-30 22:12:28.332746584 +0100
+@@ -0,0 +1,970 @@
++/* WordPerfectCollector: Collects sections and runs of text from a
++ * wordperfect file (and styles to go along with them) and writes them
++ * to a Writer target document
++ *
++ * Copyright (C) 2002-2003 William Lachance (william.lachance@sympatico.ca)
++ * Copyright (C) 2003 Net Integration Technologies (http://www.net-itech.com)
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2 of the License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Library General Public License for more details.
++ *
++ * You should have received a copy of the GNU Library General Public
++ * License along with this library; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
++ *
++ * For further information visit http://libwpd.sourceforge.net
++ *
++ */
++
++/* "This product is not manufactured, approved, or supported by
++ * Corel Corporation or Corel Corporation Limited."
++ */
++
++#include <libwpd/libwpd.h>
++#include <string.h> // for strcmp
++
++#include "WordPerfectCollector.hxx"
++#include "DocumentElement.hxx"
++#include "TextRunStyle.hxx"
++#include "FontStyle.hxx"
++#include "ListStyle.hxx"
++#include "PageSpan.hxx"
++#include "SectionStyle.hxx"
++#include "TableStyle.hxx"
++#include "FilterInternal.hxx"
++#include "WriterProperties.hxx"
++#include "FontMap.hxx"
++
++#ifndef _COM_SUN_STAR_XML_SAX_XATTRIBUTELIST_HPP_
++#include <com/sun/star/xml/sax/XAttributeList.hpp>
++#endif
++
++using namespace ::rtl;
++using rtl::OUString;
++
++using com::sun::star::xml::sax::XAttributeList;
++
++// const char *headerStr = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><!DOCTYPE office:document-content PUBLIC \"-//OpenOffice.org//DTD OfficeDocument 1.0//EN\" \"office.dtd\">\n";
++
++WordPerfectCollector::WordPerfectCollector()
++{
++	_resetDocumentState();
++}
++
++bool WordPerfectCollector::filter(WPXInputStream &input, Reference < XDocumentHandler > &xHandler)
++{
++ 	// initialize temporary state
++	_resetDocumentState();
++
++	// parse & write
++ 	if (!_parseSourceDocument(input))
++		return false;
++	if (!_writeTargetDocument(xHandler))
++		return false;
++
++ 	// clean up the mess we made
++ 	WRITER_DEBUG_MSG(("WriterWordPerfect: Cleaning up our mess..\n"));
++
++	WRITER_DEBUG_MSG(("Destroying the body elements\n"));
++	for (vector<DocumentElement *>::iterator iterBody = mBodyElements.begin(); iterBody != mBodyElements.end(); iterBody++) {
++		delete((*iterBody));
++		(*iterBody) = NULL;
++	}
++
++	WRITER_DEBUG_MSG(("Destroying the styles elements\n"));
++	for (vector<DocumentElement *>::iterator iterStyles = mStylesElements.begin(); iterStyles != mStylesElements.end(); iterStyles++) {
++ 		if (!(*iterStyles))
++			WRITER_DEBUG_MSG(("NULL\n"));
++		else
++			(*iterStyles)->print();
++ 		delete (*iterStyles);
++		(*iterStyles) = NULL; // we may pass over the same element again (in the case of headers/footers spanning multiple pages)
++		                // so make sure we don't do a double del
++	}
++
++	WRITER_DEBUG_MSG(("Destroying the rest of the styles elements\n"));
++	for (map<UTF8String, Style *, ltstr>::iterator iterTextStyle = mTextStyleHash.begin(); iterTextStyle != mTextStyleHash.end(); iterTextStyle++) {
++		delete(iterTextStyle->second);
++	}
++	for (map<UTF8String, FontStyle *, ltstr>::iterator iterFont = mFontHash.begin(); iterFont != mFontHash.end(); iterFont++) {
++		delete(iterFont->second);
++	}
++
++	for (vector<ListStyle *>::iterator iterListStyles = mListStyles.begin(); iterListStyles != mListStyles.end(); iterListStyles++) {
++		delete((*iterListStyles));
++	}
++	for (vector<SectionStyle *>::iterator iterSectionStyles = mSectionStyles.begin(); iterSectionStyles != mSectionStyles.end(); iterSectionStyles++) {
++		delete((*iterSectionStyles));
++	}
++	for (vector<TableStyle *>::iterator iterTableStyles = mTableStyles.begin(); iterTableStyles != mTableStyles.end(); iterTableStyles++) {
++		delete((*iterTableStyles));
++	}
++
++	for (vector<PageSpan *>::iterator iterPageSpans = mPageSpans.begin(); iterPageSpans != mPageSpans.end(); iterPageSpans++) {
++		delete((*iterPageSpans));
++	}
++
++ 	return true;
++ }
++
++void WordPerfectCollector::_resetDocumentState()
++{
++	while (!mWriterDocumentState.mFakeSectionStack.empty())
++		mWriterDocumentState.mFakeSectionStack.pop();
++
++	mWriterDocumentState.mbListElementOpenedAtCurrentLevel = false;
++
++	mWriterDocumentState.mbTableCellOpened = false;
++
++	miNumStyles = 1;
++	miNumSections = 0;
++	miNumTables = 0;
++	miNumListStyles = 0;
++	miCurrentListLevel = 0;
++	miLastListLevel = 0;
++	miLastListNumber = 0;
++	miCurrentNumColumns = 1;
++	mfSectionSpaceAfter = 0.0f;
++	mbListContinueNumbering = false;
++	mbListElementParagraphOpened = false;
++	mbListElementOpened = false;
++
++// 	WRITER_DEBUG_MSG(("WriterWordPerfect:Adding no properties style\n"));
++// 	mWriterDocumentState.mbFirstElement = false;
++//  	_requestParagraphStyle(WPX_PARAGRAPH_JUSTIFICATION_LEFT, 0, 0.0f, 0.0f, IMP_DEFAULT_FONT_NAME, IMP_DEFAULT_FONT_SIZE, 0.0f,
++// 			       false, false);
++ 	mWriterDocumentState.mbFirstElement = true;
++
++ 	mSectionStyles.clear();
++
++	mStylesElements.clear();
++	mBodyElements.clear();
++	mpCurrentContentElements = &mBodyElements;
++
++ 	mTableStyles.clear();
++ 	mListStyles.clear();
++
++	miNumPageStyles = 0;
++
++	mpCurrentPageSpan = NULL;
++
++	// fixme: should we clear the paragraph styles class as well?
++	// or maybe this whole function is completely redundant? need
++	// to think more about how this class is actually being used
++
++	mpCurrentListStyle = NULL;
++}
++
++bool WordPerfectCollector::_parseSourceDocument(WPXInputStream &input)
++{
++	// create a header for the preamble + add some default settings to it
++
++ 	WRITER_DEBUG_MSG(("WriterWordPerfect: Attempting to process state\n"));
++	bool bRetVal = true;
++	try {
++		WPDocument::parse(&input, static_cast<WPXHLListenerImpl *>(this));
++	}
++	catch (FileException)
++		{
++			WRITER_DEBUG_MSG(("Caught a file exception..\n"));
++			bRetVal = false;
++		}
++
++	return bRetVal;
++}
++
++void WordPerfectCollector::_writeDefaultStyles(Reference < XDocumentHandler > &xHandler)
++{
++	TagOpenElement stylesOpenElement("office:styles");
++	stylesOpenElement.write(xHandler);
++
++	TagOpenElement defaultParagraphStyleOpenElement("style:default-style");
++	defaultParagraphStyleOpenElement.addAttribute("style:family", "paragraph");
++	defaultParagraphStyleOpenElement.write(xHandler);
++
++	TagOpenElement defaultParagraphStylePropertiesOpenElement("style:properties");
++	defaultParagraphStylePropertiesOpenElement.addAttribute("style:family", "paragraph");
++	defaultParagraphStylePropertiesOpenElement.addAttribute("style:tab-stop-distance", "0.5inch");
++	defaultParagraphStylePropertiesOpenElement.write(xHandler);
++	TagCloseElement defaultParagraphStylePropertiesCloseElement("style:properties");
++	defaultParagraphStylePropertiesCloseElement.write(xHandler);
++
++	TagCloseElement defaultParagraphStyleCloseElement("style:default-style");
++	defaultParagraphStyleCloseElement.write(xHandler);
++	TagCloseElement stylesCloseElement("office:styles");
++	stylesCloseElement.write(xHandler);
++
++}
++
++void WordPerfectCollector::_writeContentPreamble(Reference < XDocumentHandler > &xHandler)
++{
++// the old content pre-amble: remove me after a few releases
++// const char *headerStr = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><!DOCTYPE office:document-content PUBLIC \"-//OpenOffice.org//DTD OfficeDocument 1.0//EN\" \"office.dtd\"><office:document-content xmlns:office=\"http://openoffice.org/2000/office\" xmlns:style=\"http://openoffice.org/2000/style\" xmlns:text=\"http://openoffice.org/2000/text\" xmlns:number=\"http://openoffice.org/2000/datastyle\" xmlns:table=\"http://openoffice.org/2000/table\" xmlns:fo=\"http://www.w3.org/1999/XSL/Format\" office:class=\"text\"><office:script/>";
++	TagOpenElement documentContentOpenElement("office:document-content");
++	documentContentOpenElement.addAttribute("xmlns:office", "http://openoffice.org/2000/office");
++	documentContentOpenElement.addAttribute("xmlns:style", "http://openoffice.org/2000/style");
++	documentContentOpenElement.addAttribute("xmlns:text", "http://openoffice.org/2000/text");
++	documentContentOpenElement.addAttribute("xmlns:table", "http://openoffice.org/2000/table");
++	documentContentOpenElement.addAttribute("xmlns:draw", "http://openoffice.org/2000/draw");
++	documentContentOpenElement.addAttribute("xmlns:fo", "http://www.w3.org/1999/XSL/Format");
++	documentContentOpenElement.addAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
++	documentContentOpenElement.addAttribute("xmlns:number", "http://openoffice.org/2000/datastyle");
++	documentContentOpenElement.addAttribute("xmlns:svg", "http://www.w3.org/2000/svg");
++	documentContentOpenElement.addAttribute("xmlns:chart", "http://openoffice.org/2000/chart");
++	documentContentOpenElement.addAttribute("xmlns:dr3d", "http://openoffice.org/2000/dr3d");
++	documentContentOpenElement.addAttribute("xmlns:math", "http://www.w3.org/1998/Math/MathML");
++	documentContentOpenElement.addAttribute("xmlns:form", "http://openoffice.org/2000/form");
++	documentContentOpenElement.addAttribute("xmlns:script", "http://openoffice.org/2000/script");
++	documentContentOpenElement.addAttribute("office:class", "text");
++	documentContentOpenElement.addAttribute("office:version", "1.0");
++	documentContentOpenElement.write(xHandler);
++}
++
++void WordPerfectCollector::_writeMasterPages(Reference < XDocumentHandler > &xHandler)
++{
++	SvXMLAttributeList * pAttrList = new SvXMLAttributeList;
++	Reference < XAttributeList > xBlankAttrList ( pAttrList );
++
++	xHandler->startElement(OUString::createFromAscii("office:master-styles"), xBlankAttrList);
++	int pageNumber = 1;
++	for (int i=0; i<mPageSpans.size(); i++)
++	{
++		bool bLastPage;
++		(i == (mPageSpans.size() - 1)) ? bLastPage = true : bLastPage = false;
++		mPageSpans[i]->writeMasterPages(pageNumber, i, bLastPage, xHandler);
++		pageNumber += mPageSpans[i]->getSpan();
++	}
++	xHandler->endElement(OUString::createFromAscii("office:master-styles"));
++}
++
++void WordPerfectCollector::_writePageMasters(Reference < XDocumentHandler > &xHandler)
++{
++	int pageNumber = 1;
++	for (int i=0; i<mPageSpans.size(); i++)
++	{
++		mPageSpans[i]->writePageMaster(i, xHandler);
++	}
++}
++
++bool WordPerfectCollector::_writeTargetDocument(Reference < XDocumentHandler > &xHandler)
++{
++	WRITER_DEBUG_MSG(("WriterWordPerfect: Document Body: Printing out the header stuff..\n"));
++ 	SvXMLAttributeList * pAttrList = new SvXMLAttributeList;
++	Reference < XAttributeList > xBlankAttrList ( pAttrList );
++
++	WRITER_DEBUG_MSG(("WriterWordPerfect: Document Body: Start Document\n"));
++	xHandler->startDocument();
++
++	WRITER_DEBUG_MSG(("WriterWordPerfect: Document Body: preamble\n"));
++	_writeContentPreamble(xHandler);
++
++ 	WRITER_DEBUG_MSG(("WriterWordPerfect: Document Body: Writing out the styles..\n"));
++
++	// write out the font styles
++	xHandler->startElement(OUString::createFromAscii("office:font-decls"), xBlankAttrList);
++	for (map<UTF8String, FontStyle *, ltstr>::iterator iterFont = mFontHash.begin(); iterFont != mFontHash.end(); iterFont++) {
++		iterFont->second->write(xHandler);
++	}
++	TagOpenElement symbolFontOpen("style:font-decl");
++	symbolFontOpen.addAttribute("style:name", "StarSymbol");
++	symbolFontOpen.addAttribute("fo:font-family", "StarSymbol");
++	symbolFontOpen.addAttribute("style:font-charset", "x-symbol");
++	symbolFontOpen.write(xHandler);
++	TagCloseElement symbolFontClose("style:font-decl");
++	symbolFontClose.write(xHandler);
++
++	xHandler->endElement(OUString::createFromAscii("office:font-decls"));
++
++	// write default styles
++	_writeDefaultStyles(xHandler);
++
++	// write automatic styles: which encompasses quite a bit
++	xHandler->startElement(OUString::createFromAscii("office:automatic-styles"), xBlankAttrList);
++	for (map<UTF8String, Style *, ltstr>::iterator iterTextStyle = mTextStyleHash.begin(); iterTextStyle != mTextStyleHash.end(); iterTextStyle++) {
++		// writing out the paragraph styles
++		if (strcmp((iterTextStyle->second)->getName(), "Standard") ||
++		    !(dynamic_cast<ParagraphStyle *>(iterTextStyle->second))) {
++			// don't write standard paragraph "no styles" style
++			(iterTextStyle->second)->write(xHandler);
++		}
++	}
++
++ 	// writing out the sections styles
++	for (vector<SectionStyle *>::iterator iterSectionStyles = mSectionStyles.begin(); iterSectionStyles != mSectionStyles.end(); iterSectionStyles++) {
++		(*iterSectionStyles)->write(xHandler);
++	}
++
++	// writing out the lists styles
++	for (vector<ListStyle *>::iterator iterListStyles = mListStyles.begin(); iterListStyles != mListStyles.end(); iterListStyles++) {
++		(*iterListStyles)->write(xHandler);
++	}
++
++ 	// writing out the table styles
++	for (vector<TableStyle *>::iterator iterTableStyles = mTableStyles.begin(); iterTableStyles != mTableStyles.end(); iterTableStyles++) {
++		(*iterTableStyles)->write(xHandler);
++	}
++
++	// writing out the page masters
++	_writePageMasters(xHandler);
++
++	xHandler->endElement(OUString::createFromAscii("office:automatic-styles"));
++
++	_writeMasterPages(xHandler);
++
++ 	WRITER_DEBUG_MSG(("WriterWordPerfect: Document Body: Writing out the document..\n"));
++ 	// writing out the document
++	xHandler->startElement(OUString::createFromAscii("office:body"), xBlankAttrList);
++
++	for (vector<DocumentElement *>::iterator iterBodyElements = mBodyElements.begin(); iterBodyElements != mBodyElements.end(); iterBodyElements++) {
++		(*iterBodyElements)->write(xHandler);
++	}
++ 	WRITER_DEBUG_MSG(("WriterWordPerfect: Document Body: Finished writing all doc els..\n"));
++
++	xHandler->endElement(OUString::createFromAscii("office:body"));
++	xHandler->endElement(OUString::createFromAscii("office:document-content"));
++
++	xHandler->endDocument();
++
++	return true;
++}
++
++// _requestParagraphRunStyle: returns a paragraph style, if it already exists. creates it, adds it
++// to the list of defined styles, and returns it otherwise.
++ParagraphStyle * WordPerfectCollector::_requestParagraphStyle(const uint8_t iParagraphJustification,
++							      const float fMarginLeft, const float fMarginRight, const float fTextIndent,
++							      const float fLineSpacing, const float fSpacingAfterParagraph,
++							      const bool bColumnBreak, const bool bPageBreak,
++							      const char *pParentName, const char *pName)
++{
++	if (mWriterDocumentState.mbFirstElement && mpCurrentContentElements == &mBodyElements)
++	{
++		WRITER_DEBUG_MSG(("WriterWordPerfect: If.. (mbFirstElement=%i)", mWriterDocumentState.mbFirstElement));
++		ParagraphStyle * pParagraphStyle = new ParagraphStyle(iParagraphJustification,
++								      fMarginLeft, fMarginRight, fTextIndent, fLineSpacing,
++								      fSpacingAfterParagraph, bColumnBreak, bPageBreak, "FS", pParentName);
++
++		UTF8String sParagraphHashKey("P|FS");
++		UTF8String sMasterPageName("Page Style 1");
++		pParagraphStyle->setMasterPageName(sMasterPageName);
++		mTextStyleHash[sParagraphHashKey] = pParagraphStyle;
++		mWriterDocumentState.mbFirstElement = false;
++
++		return pParagraphStyle;
++ 	}
++
++	// else.. do the following:
++	WRITER_DEBUG_MSG(("WriterWordPerfect: Else.. (mbFirstElement=%i)", mWriterDocumentState.mbFirstElement));
++
++	UTF8String sParagraphHashKey;
++	sParagraphHashKey.sprintf("P|%s|%i|%f|%f|%f|%f|%f|%i|%i",
++				      pParentName, iParagraphJustification, fMarginLeft, fMarginRight, fTextIndent,
++				      fLineSpacing, fSpacingAfterParagraph, bColumnBreak, bPageBreak);
++	WRITER_DEBUG_MSG(("WriterWordPerfect: P|%s|%i|%f|%f|%f|%f|%f|%i|%i\n",
++					  pParentName, iParagraphJustification, fMarginLeft, fMarginRight, fTextIndent,
++					  fLineSpacing, fSpacingAfterParagraph, bColumnBreak, bPageBreak));
++	WRITER_DEBUG_MSG(("WriterWordPerfect: Paragraph Hash Key: %s\n", sParagraphHashKey.getUTF8()));
++
++	// Get the style
++	ParagraphStyle * pParagraphStyle = NULL;
++	if (mTextStyleHash.find(sParagraphHashKey) == mTextStyleHash.end()) {
++		// allocate a new paragraph style
++		const char *pFinalStyleName = NULL;
++		UTF8String sName;
++		sName.sprintf("S%i", miNumStyles); // have to define here so it doesn't go out of scope
++		if (pName != NULL)
++			pFinalStyleName = pName;
++		else {
++			pFinalStyleName = sName.getUTF8();
++		}
++		WRITER_DEBUG_MSG(("WriterWordPerfect: final paragraph style name: %s\n", pFinalStyleName));
++
++		pParagraphStyle = new ParagraphStyle(iParagraphJustification,
++						     fMarginLeft, fMarginRight, fTextIndent, fLineSpacing,
++						     fSpacingAfterParagraph, bColumnBreak, bPageBreak, pFinalStyleName, pParentName);
++
++		miNumStyles++;
++		mTextStyleHash[sParagraphHashKey] = pParagraphStyle;
++		WRITER_DEBUG_MSG(("WriterWordPerfect: Successfully added to hash, returning it\n"));
++	}
++	else
++	{
++		pParagraphStyle = static_cast<ParagraphStyle *>(mTextStyleHash.find(sParagraphHashKey)->second);
++	}
++
++	return pParagraphStyle;
++}
++
++
++// _requestParagraphRunStyle: returns a paragraph style, if it already exists. creates it, adds it
++// to the list of defined styles, and returns it otherwise.
++ParagraphStyle * WordPerfectCollector::_requestListParagraphStyle(const ListStyle * pListStyle, const uint8_t iParagraphJustification,
++									const float fMarginLeft, const float fMarginRight, const float fTextIndent,
++									const float fLineSpacing, const float fSpacingAfterParagraph)
++{
++	if (mWriterDocumentState.mbFirstElement && mpCurrentContentElements == &mBodyElements)
++	{
++		WRITER_DEBUG_MSG(("WriterWordPerfect: If.. (mbFirstElement=%i)", mWriterDocumentState.mbFirstElement));
++
++		ParagraphStyle * pListParagraphStyle = new ParagraphStyle(iParagraphJustification,
++									  fMarginLeft, fMarginRight, fTextIndent,
++									  fLineSpacing, fSpacingAfterParagraph, false, false,
++									  "FS1", "Standard");
++
++		UTF8String sParagraphHashKey("P|ListFS");
++		UTF8String sMasterPageName("Page Style 1");
++		pListParagraphStyle->setMasterPageName(sMasterPageName);
++		mTextStyleHash[sParagraphHashKey] = pListParagraphStyle;
++		mWriterDocumentState.mbFirstElement = false;
++
++		return pListParagraphStyle;
++ 	}
++
++	UTF8String sParagraphHashKey;
++	sParagraphHashKey.sprintf("P|%s|%i|%f|%f|%f|%f|%f", (const char *)pListStyle->getName(),
++				     iParagraphJustification, fMarginLeft, fMarginRight, fTextIndent,
++				     fLineSpacing, fSpacingAfterParagraph);
++	WRITER_DEBUG_MSG(("WriterWordPerfect: Paragraph Hash Key: %s\n", sParagraphHashKey.getUTF8()));
++
++	// Get the style
++	ParagraphStyle * pListParagraphStyle = NULL;
++	if (mTextStyleHash.find(sParagraphHashKey) == mTextStyleHash.end()) {
++		// allocate a new paragraph style
++		UTF8String sName;
++		sName.sprintf("S%i", miNumStyles);
++		UTF8String sListStyleName(pListStyle->getName());
++
++		pListParagraphStyle = new ParagraphStyle(iParagraphJustification,
++							 fMarginLeft, fMarginRight, fTextIndent,
++							 fLineSpacing, fSpacingAfterParagraph, false, false,
++							 sName.getUTF8(), "Standard");
++
++		pListParagraphStyle->setListStyleName(sListStyleName);
++		miNumStyles++;
++		mTextStyleHash[sParagraphHashKey] = pListParagraphStyle;
++	}
++
++	WRITER_DEBUG_MSG(("WriterWordPerfect: Successfully added to hash, returning it\n"));
++
++	return static_cast<ParagraphStyle *>(mTextStyleHash.find(sParagraphHashKey)->second);
++}
++
++// _allocateFontName: add a (potentially mapped) font style to the hash if it's not already there, do nothing otherwise
++void WordPerfectCollector::_allocateFontName(const UTF8String & sFontName)
++{
++	if (mFontHash.find(sFontName) == mFontHash.end())
++	{
++		FontStyle *pFontStyle = new FontStyle(sFontName.getUTF8(), sFontName.getUTF8());
++		mFontHash[sFontName] = pFontStyle;
++	}
++}
++
++void WordPerfectCollector::openPageSpan(const int span, const bool isLastPageSpan,
++					const float formLength, const float formWidth,
++					const WPXFormOrientation formOrientation,
++					const float marginLeft, const float marginRight,
++					const float marginTop, const float marginBottom)
++{
++	PageSpan *pPageSpan = new PageSpan(span, formLength, formWidth, formOrientation, marginLeft, marginRight, marginTop, marginBottom);
++	mPageSpans.push_back(pPageSpan);
++	mpCurrentPageSpan = pPageSpan;
++}
++
++void WordPerfectCollector::openHeaderFooter(const WPXHeaderFooterType headerFooterType, const WPXHeaderFooterOccurence headerFooterOccurence)
++{
++	vector<DocumentElement *> * pHeaderFooterContentElements = new vector<DocumentElement *>;
++
++	if (headerFooterType == HEADER)
++	{
++		switch (headerFooterOccurence)
++		{
++		case ALL:
++		case ODD:
++			WRITER_DEBUG_MSG(("WriterWordPerfect: Opening h_all or h_odd\n"));
++			mpCurrentPageSpan->setHeaderContent(pHeaderFooterContentElements);
++			break;
++		case EVEN:
++			WRITER_DEBUG_MSG(("WriterWordPerfect: Opening h_even\n"));
++			mpCurrentPageSpan->setHeaderLeftContent(pHeaderFooterContentElements);
++			break;
++		}
++	}
++	else
++	{
++		switch (headerFooterOccurence)
++		{
++		case ALL:
++		case ODD:
++			WRITER_DEBUG_MSG(("WriterWordPerfect: Opening f_all or f_odd\n"));
++			mpCurrentPageSpan->setFooterContent(pHeaderFooterContentElements);
++			break;
++		case EVEN:
++			WRITER_DEBUG_MSG(("WriterWordPerfect: Opening f_even\n"));
++			mpCurrentPageSpan->setFooterLeftContent(pHeaderFooterContentElements);
++			break;
++		}
++	}
++
++	mpCurrentContentElements = pHeaderFooterContentElements;
++}
++
++void WordPerfectCollector::closeHeaderFooter(const WPXHeaderFooterType headerFooterType,
++					     const WPXHeaderFooterOccurence headerFooterOccurence)
++{
++	mpCurrentContentElements = &mBodyElements;
++}
++
++void WordPerfectCollector::openSection(const unsigned int numColumns, const float spaceAfter)
++{
++	// OLD: since a section for OO means a different thing than it does for libwpd, we only
++	// start a new section if the number of columns has changed
++	// FIXME: do we want to remove some of the logic here? libwpd no longer sends
++	// fake sections, but maybe this isn't what we want?
++	if (miCurrentNumColumns != numColumns) {
++		miCurrentNumColumns = numColumns;
++
++		if (miCurrentNumColumns > 1)
++		{
++			miNumSections++;
++			mfSectionSpaceAfter = spaceAfter;
++			UTF8String sSectionName;
++			sSectionName.sprintf("Section%i", miNumSections);
++			WRITER_DEBUG_MSG(("WriterWordPerfect:  New Section: %s\n", sSectionName.getUTF8()));
++
++			SectionStyle *pSectionStyle = new SectionStyle(miCurrentNumColumns, sSectionName.getUTF8());
++			mSectionStyles.push_back(pSectionStyle);
++
++			TagOpenElement *pSectionOpenElement = new TagOpenElement("text:section");
++			pSectionOpenElement->addAttribute("text:style-name", pSectionStyle->getName());
++			pSectionOpenElement->addAttribute("text:name", pSectionStyle->getName());
++			mpCurrentContentElements->push_back(static_cast<DocumentElement *>(pSectionOpenElement));
++		}
++		else
++			mWriterDocumentState.mFakeSectionStack.push(1);
++	}
++	else {
++		mWriterDocumentState.mFakeSectionStack.push(1);
++	}
++
++}
++
++void WordPerfectCollector::closeSection()
++{
++	if (mWriterDocumentState.mFakeSectionStack.empty())
++		mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new TagCloseElement("text:section")));
++	else
++		mWriterDocumentState.mFakeSectionStack.pop();
++
++	// open as many paragraphs as needed to simulate section space after
++	for (float f=0.0f; f<mfSectionSpaceAfter; f+=1.0f) {
++		openParagraph(WPX_PARAGRAPH_JUSTIFICATION_LEFT, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, false, false);
++		closeParagraph();
++	}
++	mfSectionSpaceAfter = 0.0f;
++}
++
++void WordPerfectCollector::openParagraph(const uint8_t paragraphJustification,
++					 const float marginLeftOffset, const float marginRightOffset, const float textIndent,
++					 const float lineSpacing, const float spacingAfterParagraph,
++					 const bool isColumnBreak, const bool isPageBreak)
++{
++	Style *pTextRunStyle;
++
++	if (mWriterDocumentState.mbTableCellOpened)
++		pTextRunStyle = _requestParagraphStyle(paragraphJustification, 0.0f, 0.0f, 0.0f,
++						       lineSpacing, spacingAfterParagraph, false, false, "Table Contents");
++	else if (miCurrentNumColumns > 1)
++		pTextRunStyle = _requestParagraphStyle(paragraphJustification, 0.0f, 0.0f, 0.0f,
++								lineSpacing, spacingAfterParagraph, isColumnBreak, isPageBreak, "Standard");
++	else
++		pTextRunStyle = _requestParagraphStyle(paragraphJustification, marginLeftOffset, marginRightOffset, textIndent,
++								lineSpacing, spacingAfterParagraph, isColumnBreak, isPageBreak, "Standard");
++
++
++	// create a document element corresponding to the paragraph, and append it to our list of document elements
++	TagOpenElement *pParagraphOpenElement = new TagOpenElement("text:p");
++	pParagraphOpenElement->addAttribute("text:style-name", pTextRunStyle->getName());
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(pParagraphOpenElement));
++}
++
++void WordPerfectCollector::closeParagraph()
++{
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new TagCloseElement("text:p")));
++}
++
++void WordPerfectCollector::openSpan(const uint32_t textAttributeBits, const char *fontName, const float fontSize,
++									const RGBSColor *fontColor, const RGBSColor *highlightColor)
++{
++	UTF8String sMappedFontName(mapFont(fontName));
++	_allocateFontName(sMappedFontName);
++	UTF8String sSpanHashKey;
++	sSpanHashKey.sprintf("S|%i|%s|%f|%.2x%.2x%.2x%.2x|%.2x%.2x%.2x%.2x", textAttributeBits, sMappedFontName.getUTF8(),
++						fontSize, fontColor->m_r, fontColor->m_g, fontColor->m_b, fontColor->m_s,
++						(highlightColor?highlightColor->m_r:0xff), (highlightColor?highlightColor->m_g:0xff),
++						(highlightColor?highlightColor->m_b:0xff), (highlightColor?highlightColor->m_s:0xff));
++	WRITER_DEBUG_MSG(("WriterWordPerfect: Span Hash Key: %s\n", sSpanHashKey.getUTF8()));
++
++	// Get the style
++	Style * pTextRunStyle = NULL;
++	if (mTextStyleHash.find(sSpanHashKey) == mTextStyleHash.end()) {
++		// allocate a new paragraph style
++		UTF8String sName;
++		sName.sprintf("S%i", miNumStyles);
++		pTextRunStyle = new SpanStyle(textAttributeBits, sMappedFontName.getUTF8(), fontSize, fontColor,
++									  highlightColor, sName.getUTF8());
++
++		miNumStyles++;
++		mTextStyleHash[sSpanHashKey] = pTextRunStyle;
++	}
++	else {
++		pTextRunStyle = mTextStyleHash.find(sSpanHashKey)->second; // yes, this could be optimized (see dup call above)
++	}
++
++	// create a document element corresponding to the paragraph, and append it to our list of document elements
++	TagOpenElement *pSpanOpenElement = new TagOpenElement("text:span");
++	pSpanOpenElement->addAttribute("text:style-name", pTextRunStyle->getName());
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(pSpanOpenElement));
++}
++
++void WordPerfectCollector::closeSpan()
++{
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new TagCloseElement("text:span")));
++}
++
++void WordPerfectCollector::defineOrderedListLevel(const int listID, const int listLevel, const WPXNumberingType listType,
++						  const UCSString &textBeforeNumber, const UCSString &textAfterNumber,
++						  int startingNumber)
++{
++	WRITER_DEBUG_MSG(("Define ordered list level (listid: %i)\n", listID));
++ 	OrderedListStyle *pOrderedListStyle = NULL;
++	if (mpCurrentListStyle && mpCurrentListStyle->getListID() == listID)
++		pOrderedListStyle = static_cast<OrderedListStyle *>(mpCurrentListStyle); // FIXME: using a dynamic cast here causes oo to crash?!
++	// this rather appalling conditional makes sure we only start a new list (rather than continue an old
++	// one) iff: (1) we have no prior list OR (2) the prior list is actually definitively different
++	// from the list that is just being defined (listIDs differ) OR (3) we can tell that the user actually
++	// is starting a new list at level 1 (and only level 1)
++	if (pOrderedListStyle == NULL || pOrderedListStyle->getListID() != listID ||
++	    (listLevel==1 && (startingNumber != (miLastListNumber+1))))
++	{
++		WRITER_DEBUG_MSG(("Attempting to create a new ordered list style (listid: %i)\n"));
++		UTF8String sName;
++		sName.sprintf("OL%i", miNumListStyles);
++		miNumListStyles++;
++		pOrderedListStyle = new OrderedListStyle(sName.getUTF8(), listID);
++		mListStyles.push_back(static_cast<ListStyle *>(pOrderedListStyle));
++		mpCurrentListStyle = static_cast<ListStyle *>(pOrderedListStyle);
++		mbListContinueNumbering = false;
++		miLastListNumber = 0;
++	}
++	else
++		mbListContinueNumbering = true;
++
++	pOrderedListStyle->updateListLevel(miCurrentListLevel, listType, textBeforeNumber, textAfterNumber, startingNumber);
++}
++
++void WordPerfectCollector::defineUnorderedListLevel(const int listID, const int listLevel, const UCSString &bullet)
++{
++	WRITER_DEBUG_MSG(("Define unordered list level (listid: %i)\n", listID));
++
++ 	UnorderedListStyle *pUnorderedListStyle = NULL;
++	if (mpCurrentListStyle && mpCurrentListStyle->getListID() == listID)
++		pUnorderedListStyle = static_cast<UnorderedListStyle *>(mpCurrentListStyle); // FIXME: using a dynamic cast here causes oo to crash?!
++
++	if (pUnorderedListStyle == NULL) {
++		WRITER_DEBUG_MSG(("Attempting to create a new unordered list style (listid: %i)\n", listID));
++		UTF8String sName;
++		sName.sprintf("UL%i", miNumListStyles);
++		pUnorderedListStyle = new UnorderedListStyle(sName, listID);
++		mListStyles.push_back(static_cast<ListStyle *>(pUnorderedListStyle));
++		mpCurrentListStyle = static_cast<ListStyle *>(pUnorderedListStyle);
++	}
++	pUnorderedListStyle->updateListLevel(miCurrentListLevel, bullet);
++}
++
++void WordPerfectCollector::openOrderedListLevel(const int listID)
++{
++	WRITER_DEBUG_MSG(("Open ordered list level (listid: %i)\n", listID));
++	miCurrentListLevel++;
++	TagOpenElement *pListLevelOpenElement = new TagOpenElement("text:ordered-list");
++	_openListLevel(pListLevelOpenElement);
++
++	if (mbListContinueNumbering) {
++		pListLevelOpenElement->addAttribute("text:continue-numbering", "true");
++	}
++
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(pListLevelOpenElement));
++}
++
++void WordPerfectCollector::openUnorderedListLevel(const int listID)
++{
++	WRITER_DEBUG_MSG(("Open unordered list level (listid: %i)\n", listID));
++	miCurrentListLevel++;
++	TagOpenElement *pListLevelOpenElement = new TagOpenElement("text:unordered-list");
++	_openListLevel(pListLevelOpenElement);
++
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(pListLevelOpenElement));
++}
++
++void WordPerfectCollector::_openListLevel(TagOpenElement *pListLevelOpenElement)
++{
++  	if (!mbListElementOpened && miCurrentListLevel > 1)
++  	{
++  		mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new TagOpenElement("text:list-item")));
++  	}
++	else if (mbListElementParagraphOpened)
++	{
++		mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new TagCloseElement("text:p")));
++		mbListElementParagraphOpened = false;
++	}
++
++	if (miCurrentListLevel==1) {
++		pListLevelOpenElement->addAttribute("text:style-name", mpCurrentListStyle->getName());
++	}
++
++	mbListElementOpened = false;
++}
++
++void WordPerfectCollector::closeOrderedListLevel()
++{
++	WRITER_DEBUG_MSG(("Close ordered list level)\n"));
++	_closeListLevel("ordered-list");
++}
++
++void WordPerfectCollector::closeUnorderedListLevel()
++{
++	WRITER_DEBUG_MSG(("Close unordered list level\n"));
++	_closeListLevel("unordered-list");
++}
++
++void WordPerfectCollector::_closeListLevel(const char *szListType)
++{
++	if (mbListElementOpened)
++		mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new TagCloseElement("text:list-item")));
++
++	miCurrentListLevel--;
++
++	UTF8String sCloseElement;
++	sCloseElement.sprintf("text:%s", szListType);
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new TagCloseElement(sCloseElement.getUTF8())));
++
++	if (miCurrentListLevel > 0)
++		mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new TagCloseElement("text:list-item")));
++	mbListElementOpened = false;
++}
++
++void WordPerfectCollector::openListElement(const uint8_t paragraphJustification,
++					   const float marginLeftOffset, const float marginRightOffset, const float textIndent,
++					   const float lineSpacing, const float spacingAfterParagraph)
++{
++	miLastListLevel = miCurrentListLevel;
++	if (miCurrentListLevel == 1)
++		miLastListNumber++;
++
++	if (mbListElementOpened)
++		mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new TagCloseElement("text:list-item")));
++
++ 	ParagraphStyle * pListParagraphStyle = _requestListParagraphStyle(mpCurrentListStyle, paragraphJustification,
++									  marginLeftOffset, marginRightOffset, textIndent, lineSpacing, spacingAfterParagraph);
++
++	if (!pListParagraphStyle) {
++		throw ParseException();
++	}
++	TagOpenElement *pOpenListElement = new TagOpenElement("text:list-item");
++	TagOpenElement *pOpenListElementParagraph = new TagOpenElement("text:p");
++	pOpenListElementParagraph->addAttribute("text:style-name", pListParagraphStyle->getName());
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(pOpenListElement));
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(pOpenListElementParagraph));
++
++	mbListElementOpened = true;
++	mbListElementParagraphOpened = true;
++	mbListContinueNumbering = false;
++}
++
++void WordPerfectCollector::closeListElement()
++{
++	WRITER_DEBUG_MSG(("close list element\n"));
++
++	// this code is kind of tricky, because we don't actually close the list element (because this list element
++	// could contain another list level in OOo's implementation of lists). that is done in the closeListLevel
++	// code (or when we open another list element)
++
++	if (mbListElementParagraphOpened)
++	{
++		mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new TagCloseElement("text:p")));
++		mbListElementParagraphOpened = false;
++	}
++}
++
++void WordPerfectCollector::openFootnote(int number)
++{
++	WRITER_DEBUG_MSG(("open footnote\n"));
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new TagOpenElement("text:footnote")));
++
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new TagOpenElement("text:footnote-citation")));
++	UTF8String sFootnoteNumber;
++	sFootnoteNumber.sprintf("%i", number);
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new CharDataElement(sFootnoteNumber.getUTF8())));
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new TagCloseElement("text:footnote-citation")));
++
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new TagOpenElement("text:footnote-body")));
++
++}
++
++void WordPerfectCollector::closeFootnote()
++{
++	WRITER_DEBUG_MSG(("close footnote\n"));
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new TagCloseElement("text:footnote-body")));
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new TagCloseElement("text:footnote")));
++}
++
++void WordPerfectCollector::openEndnote(int number)
++{
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new TagOpenElement("text:endnote")));
++
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new TagOpenElement("text:endnote-citation")));
++	UTF8String sEndnoteNumber;
++	sEndnoteNumber.sprintf("%i", number);
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new CharDataElement(sEndnoteNumber.getUTF8())));
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new TagCloseElement("text:endnote-citation")));
++
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new TagOpenElement("text:endnote-body")));
++
++}
++void WordPerfectCollector::closeEndnote()
++{
++	WRITER_DEBUG_MSG(("close endnote\n"));
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new TagCloseElement("text:endnote-body")));
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new TagCloseElement("text:endnote")));
++}
++
++void WordPerfectCollector::openTable(const uint8_t tablePositionBits, const float marginLeftOffset, const float marginRightOffset,
++				     const float leftOffset, const vector < WPXColumnDefinition > &columns)
++{
++	mbTableFirstRow = true;
++	miNumTables++;
++
++	UTF8String sTableName;
++	sTableName.sprintf("Table%i", miNumTables);
++	WRITER_DEBUG_MSG(("WriterWordPerfect:  New Table: %s\n", sTableName.getUTF8()));
++
++	// FIXME: we base the table style off of the page's margin left, ignoring (potential) wordperfect margin
++	// state which is transmitted inside the page. could this lead to unacceptable behaviour?
++	TableStyle *pTableStyle = new TableStyle(mpCurrentPageSpan->getMarginLeft(), mpCurrentPageSpan->getMarginRight(), marginLeftOffset, marginRightOffset, tablePositionBits, leftOffset, columns, sTableName.getUTF8());
++
++	if (mWriterDocumentState.mbFirstElement && mpCurrentContentElements == &mBodyElements)
++	{
++		UTF8String sMasterPageName("Page Style 1");
++		pTableStyle->setMasterPageName(sMasterPageName);
++		mWriterDocumentState.mbFirstElement = false;
++	}
++
++	mTableStyles.push_back(pTableStyle);
++
++	mpCurrentTableStyle = pTableStyle;
++
++	TagOpenElement *pTableOpenElement = new TagOpenElement("table:table");
++
++	pTableOpenElement->addAttribute("table:name", sTableName.getUTF8());
++	pTableOpenElement->addAttribute("table:style-name", sTableName.getUTF8());
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(pTableOpenElement));
++
++	for (int i=0; i<pTableStyle->getNumColumns(); i++) {
++		TagOpenElement *pTableColumnOpenElement = new TagOpenElement("table:table-column");
++		UTF8String sColumnStyleName;
++		sColumnStyleName.sprintf("%s.Column%i", sTableName.getUTF8(), (i+1));
++		pTableColumnOpenElement->addAttribute("table:style-name", sColumnStyleName.getUTF8());
++		mpCurrentContentElements->push_back(pTableColumnOpenElement);
++
++		TagCloseElement *pTableColumnCloseElement = new TagCloseElement("table:table-column");
++		mpCurrentContentElements->push_back(pTableColumnCloseElement);
++	}
++}
++
++void WordPerfectCollector::openTableRow()
++{
++
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new TagOpenElement("table:table-row")));
++}
++
++void WordPerfectCollector::closeTableRow()
++{
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new TagCloseElement("table:table-row")));
++}
++
++void WordPerfectCollector::openTableCell(const uint32_t col, const uint32_t row, const uint32_t colSpan, const uint32_t rowSpan,
++					 const uint8_t borderBits, const RGBSColor * cellFgColor, const RGBSColor * cellBgColor)
++{
++	float fLeftBorderThickness = (borderBits & WPX_TABLE_CELL_LEFT_BORDER_OFF) ? 0.0f : 0.0007f;
++	float fRightBorderThickness = (borderBits & WPX_TABLE_CELL_RIGHT_BORDER_OFF) ? 0.0f : 0.0007f;
++	float fTopBorderThickness = (borderBits & WPX_TABLE_CELL_TOP_BORDER_OFF) ? 0.0f : 0.0007f;
++	float fBottomBorderThickness = (borderBits & WPX_TABLE_CELL_BOTTOM_BORDER_OFF) ? 0.0f : 0.0007f;
++	WRITER_DEBUG_MSG(("WriterWordPerfect: Borderbits=%d\n", borderBits));
++
++	UTF8String sTableCellStyleName; 
++	sTableCellStyleName.sprintf( "%s.Cell%i",
++								 (const char *)mpCurrentTableStyle->getName(),
++								 mpCurrentTableStyle->getNumTableCellStyles());
++	TableCellStyle *pTableCellStyle = new TableCellStyle(fLeftBorderThickness, fRightBorderThickness,
++							     fTopBorderThickness, fBottomBorderThickness,
++							     cellFgColor, cellBgColor,
++							     sTableCellStyleName);
++	mpCurrentTableStyle->addTableCellStyle(pTableCellStyle);
++
++	TagOpenElement *pTableCellOpenElement = new TagOpenElement("table:table-cell");
++	rtl::OString sNumColsSpanned = utf8_itoa(colSpan);
++	rtl::OString sNumRowsSpanned = utf8_itoa(rowSpan);
++	pTableCellOpenElement->addAttribute("table:style-name", sTableCellStyleName);
++	pTableCellOpenElement->addAttribute("table:number-columns-spanned", sNumColsSpanned);
++	pTableCellOpenElement->addAttribute("table:number-rows-spanned", sNumRowsSpanned);
++	pTableCellOpenElement->addAttribute("table:value-type", "string");
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(pTableCellOpenElement));
++
++	mWriterDocumentState.mbTableCellOpened = true;
++}
++
++void WordPerfectCollector::closeTableCell()
++{
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new TagCloseElement("table:table-cell")));
++	mWriterDocumentState.mbTableCellOpened = false;
++}
++
++void WordPerfectCollector::insertCoveredTableCell(const uint32_t col, const uint32_t row)
++{
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new TagOpenElement("table:covered-table-cell")));
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new TagCloseElement("table:covered-table-cell")));
++}
++
++void WordPerfectCollector::closeTable()
++{
++	WRITER_DEBUG_MSG(("WriterWordPerfect: Closing Table\n"));
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new TagCloseElement("table:table")));
++}
++
++
++void WordPerfectCollector::insertTab()
++{
++	WRITER_DEBUG_MSG(("WriterWordPerfect: Insert Tab\n"));
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new TagOpenElement("text:tab-stop")));
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new TagCloseElement("text:tab-stop")));
++}
++
++void WordPerfectCollector::insertLineBreak()
++{
++	WRITER_DEBUG_MSG(("WriterWordPerfect: Insert Line Break\n"));
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new TagOpenElement("text:line-break")));
++	mpCurrentContentElements->push_back(static_cast<DocumentElement *>(new TagCloseElement("text:line-break")));
++}
++
++void WordPerfectCollector::insertText(const UCSString &text)
++{
++	WRITER_DEBUG_MSG(("WriterWordPerfect: Insert Text\n"));
++
++	DocumentElement *pText = new TextElement(text);
++	mpCurrentContentElements->push_back(pText);
++}
