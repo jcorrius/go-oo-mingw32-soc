@@ -75,6 +75,7 @@ main( int argc, char *argv[] )
 
 	Reference< uno::XComponentContext > xRemoteContext(
 		getRemoteComponentContext( xComponentContext ) );
+	g_assert( xRemoteContext.is() );
 
     GtkWidget *pWindow = gtk_window_new( GTK_WINDOW_TOPLEVEL );
     g_signal_connect (G_OBJECT (pWindow), "destroy",
