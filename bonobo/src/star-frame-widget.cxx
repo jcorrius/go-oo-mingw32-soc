@@ -60,7 +60,6 @@ Reference< XFrame >
 star_frame_widget_get_frame( StarFrameWidget *sfw )
 {
 	g_assert( sfw->priv->x_window_peer.is() );
-	g_assert( sfw->priv->x_frame.is() );
 	g_assert( sfw->service_manager.is() );
 
 	sfw->priv->x_frame.set(

@@ -36,7 +36,7 @@ FrameLoaderLoadFileFromUrl( Reference< frame::XSynchronousFrameLoader > xFrameLo
 
 	aProperties[ 0 ] = PropertyValue( OUString::createFromAscii("FileName"),
 									  0,
-									  uno::makeAny(OUString::createFromAscii(FILENAME)),
+									  uno::makeAny( sUrl ),
 									  PropertyState_DIRECT_VALUE ); 
 	
 	aProperties[ 1 ] = PropertyValue( OUString::createFromAscii( "TypeName" ),

@@ -60,9 +60,9 @@ OOO_BONOBO_LIBS="$OOO_BONOBO_LIBS -L$ac_ooo_libdir"
 OOO_libdir="$ac_ooo_libdir"
 AC_SUBST(OOO_libdir)
 
-dnl UDK Type Registry
-AC_CHECK_FILE([$ac_ooodev_bindir/udkapi.rdb],
-	      [DKREGISTRYNAME="$ac_ooodev_bindir/udkapi.rdb"],
+dnl Type Registry (types.rdb = offapi + udkapi)
+AC_CHECK_FILE([$ac_ooodev_bindir/types.rdb],
+	      [DKREGISTRYNAME="$ac_ooodev_bindir/types.rdb"],
 	      AC_MSG_ERROR([[udkapi.rdb not found. Please use --with-ooo-install-dir=/path/to/ooo-installation]]))
 
 AC_SUBST(DKREGISTRYNAME)
