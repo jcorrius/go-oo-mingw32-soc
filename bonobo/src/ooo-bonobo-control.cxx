@@ -13,6 +13,7 @@
 #include <com/sun/star/lang/XMultiServiceFactory.hpp>
 #include <com/sun/star/util/URL.hpp>
 #include <com/sun/star/util/XURLTransformer.hpp>
+#include <com/sun/star/view/DocumentZoomType.hpp>
 
 #include "services.h"
 #include "star-frame-widget.h"
@@ -116,6 +117,54 @@ verb_EditCopy_cb( BonoboUIComponent *uic, gpointer user_data, const char *cname)
 }
 
 static void
+verb_ZoomIn_cb( BonoboUIComponent *uic, gpointer user_data, const char *cname)
+{
+	OOoBonoboControl *control = OOO_BONOBO_CONTROL( user_data );
+
+	Reference< XPropertySet > view_properties(
+		star_frame_widget_get_view_properties( control->priv->sfw ) );
+
+	if( !view_properties.is() )
+		return;
+
+	uno::Any a = view_properties->getPropertyValue( DECLARE_ASCII( "ZoomValue" ) );
+	sal_Int16 view_zoom;
+	a >>= view_zoom;
+
+	view_zoom = ( sal_Int16 )( view_zoom * 1.2 );
+
+	view_properties->setPropertyValue(
+		DECLARE_ASCII( "ZoomType" ),
+		uno::makeAny( (sal_Int16) view::DocumentZoomType::BY_VALUE ));
+	view_properties->setPropertyValue( DECLARE_ASCII( "ZoomValue" ),
+									   uno::makeAny( view_zoom ) );
+}
+
+static void
+verb_ZoomOut_cb( BonoboUIComponent *uic, gpointer user_data, const char *cname)
+{
+	OOoBonoboControl *control = OOO_BONOBO_CONTROL( user_data );
+
+	Reference< XPropertySet > view_properties(
+		star_frame_widget_get_view_properties( control->priv->sfw ) );
+
+	if( !view_properties.is() )
+		return;
+
+	uno::Any a = view_properties->getPropertyValue( DECLARE_ASCII( "ZoomValue" ) );
+	sal_Int16 view_zoom;
+	a >>= view_zoom;
+
+	view_zoom = ( sal_Int16 )( view_zoom / 1.2 );
+
+	view_properties->setPropertyValue(
+		DECLARE_ASCII( "ZoomType" ),
+		uno::makeAny( (sal_Int16) view::DocumentZoomType::BY_VALUE ));
+	view_properties->setPropertyValue( DECLARE_ASCII( "ZoomValue" ),
+									   uno::makeAny( view_zoom ) );
+}
+
+static void
 verb_ZoomNormal_cb( BonoboUIComponent *uic, gpointer user_data, const char *cname)
 {
 	OOoBonoboControl *control = OOO_BONOBO_CONTROL( user_data );
@@ -208,8 +257,8 @@ static BonoboUIVerb verbs[] = {
 
 	BONOBO_UI_VERB( "EditCopy",			verb_EditCopy_cb ),
 
-// 	BONOBO_UI_VERB( "ZoomIn",			verb_ZoomIn_cb ),
-// 	BONOBO_UI_VERB( "ZoomOut",			verb_ZoomOut_cb ),
+ 	BONOBO_UI_VERB( "ZoomIn",			verb_ZoomIn_cb ),
+ 	BONOBO_UI_VERB( "ZoomOut",			verb_ZoomOut_cb ),
  	BONOBO_UI_VERB( "ZoomNormal",		verb_ZoomNormal_cb ),
  	BONOBO_UI_VERB( "ZoomFit",			verb_ZoomFit_cb ),
 

@@ -5,7 +5,6 @@
 
 #include <com/sun/star/awt/XToolkit.hpp>
 #include <com/sun/star/awt/XSystemChildFactory.hpp>
-#include <com/sun/star/beans/XPropertySet.hpp>
 #include <com/sun/star/frame/XDispatchProvider.hpp>
 #include <com/sun/star/frame/XDispatch.hpp>
 #include <com/sun/star/lang/SystemDependent.hpp>
@@ -46,18 +45,35 @@ struct _StarFrameWidgetPrivate {
 	Reference< XPropertySet > view_properties;
 };
 
+static void
+star_frame_widget_create_view_properties( StarFrameWidget *sfw )
+{
+	if( !sfw->priv->x_frame.is() )
+		return;
+
+	Reference< XViewSettingsSupplier > xViewSettingsSupplier(
+		sfw->priv->x_frame->getController(), UNO_QUERY );
+	if( !xViewSettingsSupplier.is() )
+		return;
+
+	sfw->priv->view_properties = xViewSettingsSupplier->getViewSettings();
+}
+
+Reference< XPropertySet >
+star_frame_widget_get_view_properties( StarFrameWidget *sfw )
+{
+	if( !sfw->priv->view_properties.is() )
+		star_frame_widget_create_view_properties( sfw );
+
+	return sfw->priv->view_properties;
+}
+
 void
 star_frame_widget_zoom_100( StarFrameWidget *sfw )
 {
- 	if( !sfw->priv->view_properties.is() ) {
-		Reference< XViewSettingsSupplier > xViewSettingsSupplier(
-			sfw->priv->x_frame->getController(), UNO_QUERY );
-		if( !xViewSettingsSupplier.is() )
-			return;
-		
-		sfw->priv->view_properties = xViewSettingsSupplier->getViewSettings();
-		g_assert( sfw->priv->view_properties.is() );
-	}
+ 	if( !sfw->priv->view_properties.is() )
+		star_frame_widget_create_view_properties( sfw );
+	g_assert( sfw->priv->view_properties.is() );
 
 	sfw->priv->view_properties->setPropertyValue(
 		DECLARE_ASCII( "ZoomType" ),
@@ -70,15 +86,9 @@ star_frame_widget_zoom_100( StarFrameWidget *sfw )
 void
 star_frame_widget_zoom_page_width( StarFrameWidget *sfw )
 {
-	if( !sfw->priv->view_properties.is() ) {
-		Reference< XViewSettingsSupplier > xViewSettingsSupplier(
-			sfw->priv->x_frame->getController(), UNO_QUERY );
-		if( !xViewSettingsSupplier.is() )
-			return;
-		
-		sfw->priv->view_properties = xViewSettingsSupplier->getViewSettings();
-		g_assert( sfw->priv->view_properties.is() );
-	}
+	if( !sfw->priv->view_properties.is() )
+		star_frame_widget_create_view_properties( sfw );
+	g_assert( sfw->priv->view_properties.is() );	
 
 	sfw->priv->view_properties->setPropertyValue(
 		DECLARE_ASCII( "ZoomType" ),

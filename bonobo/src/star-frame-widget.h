@@ -20,6 +20,7 @@ typedef struct _StarFrameWidgetPrivate StarFrameWidgetPrivate;
 #include <com/sun/star/lang/XMultiServiceFactory.hpp>
 #include <com/sun/star/uno/XComponentContext.hpp>
 #include <com/sun/star/util/URL.hpp>
+#include <com/sun/star/beans/XPropertySet.hpp>
 
 using com::sun::star::uno::Reference;
 using com::sun::star::frame::XFrame;
@@ -46,5 +47,5 @@ void star_frame_widget_dispatch_slot_url( StarFrameWidget *sfw, ::com::sun::star
 void star_frame_widget_set_fullscreen( StarFrameWidget *sfw, sal_Bool fullscreen );
 void star_frame_widget_zoom_100( StarFrameWidget *sfw );
 void star_frame_widget_zoom_page_width( StarFrameWidget *sfw );
-
+::com::sun::star::uno::Reference< ::com::sun::star::beans::XPropertySet > star_frame_widget_get_view_properties( StarFrameWidget *sfw );
 #endif /* STAR_FRAME_WIDGET_H */
