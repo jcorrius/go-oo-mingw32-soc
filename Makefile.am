@@ -10,7 +10,7 @@ EXTRA_DIST = \
 	mkinstalldirs		\
 	MAINTAINERS		\
 	HACKING			\
-	download		\
+	download.in		\
 	intltool-merge.in	\
 	intltool-update.in	\
 	intltool-extract.in
