@@ -1,16 +1,18 @@
 script_files = \
 	build-ooo \
-	scale-icons \
+	font-munge
+	install-dict.in \
+	latest-patchset \
+	linkoo \
 	nothing \
+	ooo-wrapper.in \
+	ootouch \
 	openoffice-xlate-lang \
+	owner \
 	package-lang \
 	package-ooo \
-	ootouch \
-	linkoo \
-	install-dict.in \
-	ooo-wrapper.in \
-	latest-patchset \
-	font-munge
+	relocate \
+	scale-icons
 
 EXTRA_DIST = $(script_files)
 
