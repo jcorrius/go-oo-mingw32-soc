@@ -26,6 +26,7 @@ ini_DATA = $(ini_in_files:.ini.in=.ini)
 %.ini: %.ini.in
 	sed -e "s|\@RDBDIR\@|$(rdbdir)|" $< > $@
 
-EXTRA_DIST=$(server_in_files) $(ini_in_files)
+BUILT_SOURCES=$(ini_DATA) $(rdb_DATA) $(server_DATA)
+CLEANFILES=$(BUILT_SOURCES)
 
-CLEANFILES = $(rdb_DATA) $(server_DATA) $(ini_DATA)
+EXTRA_DIST=$(server_in_files) $(ini_in_files)
