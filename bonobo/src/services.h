@@ -13,6 +13,8 @@
 	DECLARE_ASCII("com.sun.star.document.TypeDetection"     			)
 #define	SERVICENAME_UNOURLRESOLVER \
 	DECLARE_ASCII("com.sun.star.bridge.UnoUrlResolver"					)
+#define	SERVICENAME_URLTRANSFORMER \
+	DECLARE_ASCII("com.sun.star.util.URLTransformer"					)
 #define	SERVICENAME_VCLTOOLKIT \
 	DECLARE_ASCII("com.sun.star.awt.Toolkit"							)
 

@@ -4,13 +4,17 @@
 
 #include <cppuhelper/bootstrap.hxx>
 
+#include <com/sun/star/beans/XPropertySet.hpp>
 #include <com/sun/star/bridge/XUnoUrlResolver.hpp>
 #include <com/sun/star/document/XTypeDetection.hpp>
-#include <com/sun/star/lang/XMultiComponentFactory.hpp>
-#include <com/sun/star/lang/XMultiServiceFactory.hpp>
+#include <com/sun/star/frame/XDispatchProvider.hpp>
+#include <com/sun/star/frame/XDispatch.hpp>
 #include <com/sun/star/frame/XFrame.hpp>
 #include <com/sun/star/frame/XSynchronousFrameLoader.hpp>
-#include <com/sun/star/beans/XPropertySet.hpp>
+#include <com/sun/star/lang/XMultiComponentFactory.hpp>
+#include <com/sun/star/lang/XMultiServiceFactory.hpp>
+#include <com/sun/star/util/URL.hpp>
+#include <com/sun/star/util/XURLTransformer.hpp>
 
 #include "remote-uno-helper.h"
 #include "services.h"
@@ -100,6 +104,31 @@ realize( GtkWidget *widget, gpointer user_data )
 	
 	FrameLoaderLoadFileFromUrl(
 		xFrameLoader, xFrame, pSocket->uri, sTypeName );
+	
+	// chnage to full screen mode (the frame)
+	Reference< util::XURLTransformer > xURLTransformer(
+		pSocket->service_manager->createInstance( SERVICENAME_URLTRANSFORMER ),
+		uno::UNO_QUERY );
+
+	util::URL url;
+
+	url.Complete = DECLARE_ASCII( "slot:5627" );
+	url.Port = 0;
+
+	xURLTransformer->parseSmart( url, DECLARE_ASCII( "slot" ) );
+
+	Reference< frame::XDispatchProvider > xDispProv( xFrame, uno::UNO_QUERY );
+	Reference< frame::XDispatch > xDispatch =
+		xDispProv->queryDispatch( url, OUString(), 0);
+
+	uno::Sequence< beans::PropertyValue > aProperties( 1 );
+	aProperties[ 0 ] = PropertyValue( DECLARE_ASCII( "FullScreen" ),
+									  0,
+									  uno::makeAny( sal_True ),
+									  PropertyState_DIRECT_VALUE );
+
+	g_message( "switch to full screen" );
+	xDispatch->dispatch( url, aProperties );
 }
 
 static void
