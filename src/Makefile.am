@@ -10,5 +10,6 @@ EXTRA_DIST=\
 	openintro_kde.bmp \
 	openabout_kde.png \
 	file-bug-24.png \
-	file-bug-16.png
+	file-bug-16.png \
+	novell-team.png
 
