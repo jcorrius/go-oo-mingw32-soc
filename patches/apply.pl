@@ -74,6 +74,8 @@ $quiet = 0;
 $remove = 0;
 $opts = "";
 $distro = 'Ximian';
+@required_opts = ( 'PATCHPATH' );
+
 foreach $a (@ARGV) {
 	if ($a eq '-R') {
     		print ("Removing patched files for update ...\n");
@@ -127,6 +129,11 @@ while (<PatchList>) {
 	push @Patches, find_file ($patch_dir, $_);
 }
 close (PatchList);
+
+for $opt (@required_opts) { 
+    defined $options{$opt} || die "Required option $opt not defined"; 
+}
+
 
 if ($remove) {
     @Patches = reverse @Patches;
