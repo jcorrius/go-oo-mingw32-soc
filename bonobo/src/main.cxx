@@ -15,6 +15,7 @@
 
 #define UNO_BOOTSTRAP_INI "file://" INIFILE
 #define OAFIID "OAFIID:GNOME_OpenOfficeOrg_Control"
+#define FILENAME "file:///demo/schmidt.sxw"
 
 using namespace com::sun::star;
 using namespace com::sun::star::beans;
@@ -33,7 +34,7 @@ FrameLoaderLoadFileFromUrl( Reference< frame::XSynchronousFrameLoader > xFrameLo
 
 	aProperties[ 0 ] = PropertyValue( OUString::createFromAscii("FileName"),
 									  0,
-									  uno::makeAny(OUString::createFromAscii("file:///home/martin/gtk.sxw") ),
+									  uno::makeAny(OUString::createFromAscii( FILENAME) ),
 									  PropertyState_DIRECT_VALUE ); 
 	
 	aProperties[ 1 ] = PropertyValue( OUString::createFromAscii( "TypeName" ),
@@ -74,7 +75,7 @@ realize( GtkWidget *widget, gpointer user_data )
 	
 	FrameLoaderLoadFileFromUrl(
 		xFrameLoader, xFrame,
-		OUString::createFromAscii( "file:///home/martin/gtk.sxw" ) );
+		OUString::createFromAscii( FILENAME ) );
 }
 
 static void
