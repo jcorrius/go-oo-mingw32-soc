@@ -1,6 +1,6 @@
-SUBDIRS = bin po desktop etc patches www
+SUBDIRS = m4  bin po desktop etc patches www
 
-EXTRA_DIST =			\
+EXTRA_DIST = config.rpath 			\
 	mkinstalldirs		\
 	MAINTAINERS		\
 	HACKING			\
@@ -8,3 +8,5 @@ EXTRA_DIST =			\
 	intltool-merge.in	\
 	intltool-update.in	\
 	intltool-extract.in
+
+ACLOCAL_AMFLAGS = -I m4
