@@ -86,8 +86,18 @@ star_frame_widget_get_frame( StarFrameWidget *sfw )
 }
 
 static void
-star_frame_widget_class_init( StarFrameWidgetClass * )
+star_frame_widget_finalize( GObject *object )
 {
+	delete STAR_FRAME_WIDGET( object )->priv;
+	BONOBO_CALL_PARENT( G_OBJECT_CLASS, finalize, ( object ) );
+}
+
+static void
+star_frame_widget_class_init( StarFrameWidgetClass *klass )
+{
+	GObjectClass *object_class = G_OBJECT_CLASS( klass );
+
+	object_class->finalize = star_frame_widget_finalize;
 }
 
 static void

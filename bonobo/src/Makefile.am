@@ -17,6 +17,8 @@ test_SOURCES =			\
 	test.cxx
 
 ooo_bonobo_SOURCES =		\
+	ooo-bonobo-control.cxx	\
+	ooo-bonobo-control.h	\
 	remote-uno-helper.cxx	\
 	remote-uno-helper.h	\
 	star-frame-widget.cxx	\

@@ -31,7 +31,6 @@ struct _StarFrameWidget {
 
 	/* Temporary */
 	Reference< XMultiServiceFactory > service_manager;
-	rtl::OUString uri;
 };
 
 struct _StarFrameWidgetClass {

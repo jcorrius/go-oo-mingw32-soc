@@ -16,6 +16,7 @@
 #include <com/sun/star/util/URL.hpp>
 #include <com/sun/star/util/XURLTransformer.hpp>
 
+#include "ooo-bonobo-control.h"
 #include "remote-uno-helper.h"
 #include "services.h"
 #include "string-macros.h"
@@ -33,102 +34,15 @@ using com::sun::star::uno::Reference;
 
 extern "C" {
 
-static void
-FrameLoaderLoadFileFromUrl( Reference< frame::XSynchronousFrameLoader > xFrameLoader,
-							Reference< frame::XFrame > xFrame,
-							OUString sUrl,
-							OUString sTypeName)
-{
-	uno::Sequence< beans::PropertyValue > aProperties( 3 );
-
-	aProperties[ 0 ] = PropertyValue( DECLARE_ASCII( "FileName" ),
-									  0,
-									  uno::makeAny( sUrl ),
-									  PropertyState_DIRECT_VALUE ); 
-	
-	aProperties[ 1 ] = PropertyValue( DECLARE_ASCII( "TypeName" ),
-									  0,
-									  uno::makeAny( sTypeName ),
-									  PropertyState_DIRECT_VALUE ); 
-	
-	aProperties[ 2 ] = PropertyValue( DECLARE_ASCII( "ReadOnly" ),
-									  0,
-									  uno::makeAny( sal_True ),
-									  PropertyState_DIRECT_VALUE ); 
-
-	xFrameLoader->load( aProperties, xFrame );
-}
-
 static int
 load_uri( BonoboPersistFile *pf, const CORBA_char *text_uri,
 		  CORBA_Environment *ev, gpointer user_data )
 {
-	StarFrameWidget *pSocket = STAR_FRAME_WIDGET( user_data );
+	OOoBonoboControl *pControl = OOO_BONOBO_CONTROL( user_data );
 
- 	if( !GTK_WIDGET_REALIZED( GTK_WIDGET( pSocket ) ) )
-		/* FIXME */
-		pSocket->uri = DECLARE_ASCII( "file://" ) + B2U( rtl::OString( text_uri ) );
+	pControl->uri = DECLARE_ASCII( "file://" ) + B2U( rtl::OString( text_uri ) );
 
 	g_message( "Load_uri called: %s", text_uri );
-}
-
-static void
-realize( GtkWidget *widget, gpointer user_data )
-{
-	StarFrameWidget *pSocket = STAR_FRAME_WIDGET( widget );
-
-	Reference< awt::XWindowPeer > xWindowPeer(
-		star_frame_widget_get_window_peer( STAR_FRAME_WIDGET( pSocket ) ) );
-	g_assert( xWindowPeer.is() );
-	Reference< frame::XFrame > xFrame(
-		star_frame_widget_get_frame( STAR_FRAME_WIDGET( pSocket ) ) );
-	g_assert( xFrame.is() );
-	
-	Reference< document::XTypeDetection > xTypeDetection(
-		pSocket->service_manager->createInstance( SERVICENAME_TYPEDETECTION ),
-		uno::UNO_QUERY );
-	g_assert( xTypeDetection.is() );
-	
-	Reference< XMultiServiceFactory > xFrameLoaderFactory(
-		pSocket->service_manager->createInstance(
-			SERVICENAME_FRAMELOADERFACTORY ),
-		uno::UNO_QUERY );
-
-	OUString sTypeName( xTypeDetection->queryTypeByURL( pSocket->uri ) );
-	g_message( "%s", U2B( sTypeName ).pData->buffer);
-
-	Reference< frame::XSynchronousFrameLoader > xFrameLoader(
-		xFrameLoaderFactory->createInstance( sTypeName ),
-		uno::UNO_QUERY );
-	g_assert( xFrameLoader.is() );
-	
-	FrameLoaderLoadFileFromUrl(
-		xFrameLoader, xFrame, pSocket->uri, sTypeName );
-	
-	// chnage to full screen mode (the frame)
-	Reference< util::XURLTransformer > xURLTransformer(
-		pSocket->service_manager->createInstance( SERVICENAME_URLTRANSFORMER ),
-		uno::UNO_QUERY );
-
-	util::URL url;
-
-	url.Complete = DECLARE_ASCII( "slot:5627" );
-	url.Port = 0;
-
-	xURLTransformer->parseSmart( url, DECLARE_ASCII( "slot" ) );
-
-	Reference< frame::XDispatchProvider > xDispProv( xFrame, uno::UNO_QUERY );
-	Reference< frame::XDispatch > xDispatch =
-		xDispProv->queryDispatch( url, OUString(), 0);
-
-	uno::Sequence< beans::PropertyValue > aProperties( 1 );
-	aProperties[ 0 ] = PropertyValue( DECLARE_ASCII( "FullScreen" ),
-									  0,
-									  uno::makeAny( sal_True ),
-									  PropertyState_DIRECT_VALUE );
-
-	g_message( "switch to full screen" );
-	xDispatch->dispatch( url, aProperties );
 }
 
 static void
@@ -154,23 +68,13 @@ factory( BonoboGenericFactory *factory,
 		Reference< uno::XComponentContext > xRemoteContext(
 			getRemoteComponentContext( xComponentContext ) );
 		
-		GtkWidget *pSocket = star_frame_widget_new( xRemoteContext );
-		g_signal_connect( pSocket, "realize", G_CALLBACK( realize ), NULL );
+		BonoboControl *pControl = ooo_bonobo_control_new( xRemoteContext );
 
-		GtkWidget *pHBox = gtk_hbox_new( FALSE, 0 );
- 		gtk_box_pack_start( GTK_BOX( pHBox ), pSocket, TRUE, TRUE, 0 );
-
-		BonoboControl *pControl = bonobo_control_new( pHBox );
-		g_signal_connect( pControl, "activate", G_CALLBACK( activate ), pSocket );
-
-		STAR_FRAME_WIDGET( pSocket )->uri = FILENAME;
 		BonoboPersistFile *pPersistFile =
-			bonobo_persist_file_new( load_uri, NULL, OAFIID, pSocket );
+			bonobo_persist_file_new( load_uri, NULL, OAFIID, pControl );
 
 		bonobo_object_add_interface( BONOBO_OBJECT( pControl ),
 									 BONOBO_OBJECT( pPersistFile ) );
-
-		gtk_widget_show( pHBox );
 
 		return BONOBO_OBJECT( pControl );
 	}
