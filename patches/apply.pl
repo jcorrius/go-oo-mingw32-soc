@@ -1,46 +1,5 @@
 #!/usr/bin/perl -w
 
-sub revert_touched_files
-{
-    my $patch = shift;
-    my $dest_dir = shift;
-    my $file;
-    my $orig_file;
-    my $Patch;
-
-    $dest_dir && $patch || die "Invalid args";
-
-    open ($Patch, "$patch") || die "Can't open patch $patch";
-    while (<$Patch>) {
-	if (/^\+\+\+ ([^ \t]*)/) {
-	    $file = $1;
-	    chomp ($file);
-	    $file = $dest_dir.'/'.$file;
-#	    print ("File '$file' '$dest_dir/$file.orig'\n");
-	    $orig_file = $file.'.orig';
-	    if (-f $orig_file) {
-		
-		my ($dev,$ino,$mode,$nlink,$uid,$gid,$rdev,$size,
-		    $atime,$mtime,$ctime,$blksize,$blocks)
-		    = stat($orig_file);
-		my $vmode = $mode & 0777;
-		if ($size == 0 && $vmode == 0) {
-		    $quiet || print "Removing new & orig file - originally null $orig_file\n";
-		    unlink ($file);
-		    unlink ($orig_file);
-		} else {
-		    $quiet || print "Restoring $orig_file\n";
-		    rename ($orig_file, $file) || die "Failed to rename $!";
-		}
-	    } else {
-		$quiet || print "Removing patched file $file\n";
-		unlink ($file);
-	    }
-	}
-    }
-    close ($Patch);
-}
-
 sub find_file($$)
 {
     my $dir = shift;
@@ -78,10 +37,11 @@ $distro = 'Ximian';
 
 foreach $a (@ARGV) {
 	if ($a eq '-R') {
-    		print ("Removing patched files for update ...\n");
+    		print ("Reversing patched files ...\n");
 	    	$remove = 1;
 	}
-	elsif ($a eq '--quiet') {
+
+	if ($a eq '--quiet') {
 	    $quiet = 1;
 	} elsif ($a =~ m/--distro=(.*)/) {
 	    $distro = $1;
@@ -140,15 +100,13 @@ if ($remove) {
 }
 
 for $patch_file (@Patches) {
-    if ($remove) {
-	revert_touched_files ($patch_file, $dest_dir);
-    } else {
 	$cmd = $base_cmd;
+        my $cmd_suffix;
 	if ($quiet) {
-	    $cmd .= " >& /dev/null ";
+	    $cmd_suffix = " >& /dev/null ";
 	}
-	$cmd .= " < $patch_file";
+	$cmd_suffix .= " < $patch_file";
 	$quiet || print "$cmd\n";
-	system ($cmd) && die "Failed to patch $patch_file: $!";
-    }
+	system ($cmd." --dry-run ".$cmd_suffix) && die "Testing patch $patch_file failed: $!";
+	system ($cmd.$cmd_suffix) && die "Failed to patch $patch_file: $!";
 }
