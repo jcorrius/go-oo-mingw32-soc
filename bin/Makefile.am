@@ -23,6 +23,7 @@ script_files = \
 	scale-icons \
 	unpack \
 	setup.in \
+	transform \
 	README
 
 EXTRA_DIST = $(script_files)
