@@ -18,4 +18,4 @@ all:
 	./build-ooo ${TAG} --checkout
 
 install:
-	./package-ooo ${TAG} --clean
+	./package-ooo ${TAG}
