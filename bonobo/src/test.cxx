@@ -5,8 +5,6 @@
 #include <gdk/gdkx.h>
 #include <gtk/gtk.h>
 
-#include <cppuhelper/bootstrap.hxx>
-
 #include <com/sun/star/document/XTypeDetection.hpp>
 #include <com/sun/star/lang/XMultiComponentFactory.hpp>
 #include <com/sun/star/lang/XMultiServiceFactory.hpp>
@@ -18,8 +16,6 @@
 #include "string-macros.h"
 #include "services.h"
 #include "star-frame-widget.h"
-
-#define UNO_BOOTSTRAP_INI DECLARE_ASCII( "file://" INIFILE )
 
 using namespace com::sun::star;
 using namespace com::sun::star::beans;
@@ -70,21 +66,17 @@ main( int argc, char *argv[] )
 		exit( 1 );
 	}
     const char *pFileName = argv[ argc - 1 ];
+	if( strncmp( pFileName, "file:", 5 ) )
+	{
+        fprintf( stderr, "test prefers URIs\n" );
+		pFileName = g_strconcat( "file://", pFileName, NULL );
+	}
 	OUString aFileName = OUString( pFileName, strlen( pFileName ),
 								   RTL_TEXTENCODING_UTF8 );
 
     gtk_init( &argc, &argv );
 
-    Reference< uno::XComponentContext > xComponentContext =
-		::cppu::defaultBootstrap_InitialComponentContext( UNO_BOOTSTRAP_INI );
-    g_assert( xComponentContext.is() );
-
-    Reference< lang::XMultiComponentFactory > xMultiComponentFactoryClient(
-		xComponentContext->getServiceManager() );
-    g_assert( xMultiComponentFactoryClient.is() );
-
-	Reference< uno::XComponentContext > xRemoteContext(
-		getRemoteComponentContext( xComponentContext ) );
+	Reference< uno::XComponentContext > xRemoteContext = getComponentContext();
 	g_assert( xRemoteContext.is() );
 
     GtkWidget *pWindow = gtk_window_new( GTK_WINDOW_TOPLEVEL );

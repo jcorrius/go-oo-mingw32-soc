@@ -4,10 +4,13 @@
 
 #include <glib.h>
 
+#include <cppuhelper/bootstrap.hxx>
 #include <com/sun/star/bridge/XUnoUrlResolver.hpp>
 #include <com/sun/star/lang/XMultiComponentFactory.hpp>
 
 #include "services.h"
+
+#define UNO_BOOTSTRAP_INI DECLARE_ASCII( "file://" INIFILE )
 
 using namespace com::sun::star;
 using namespace com::sun::star::bridge;
@@ -24,7 +27,7 @@ getPipeName()
 		DECLARE_ASCII( "_ooo_bonobo" );
 }
 
-Reference< XComponentContext >
+static Reference< XComponentContext >
 getRemoteComponentContext( const Reference< XComponentContext >& xComponentContext )
 {
 	Reference< XMultiComponentFactory > xLocalSMgr(
@@ -91,4 +94,24 @@ getRemoteComponentContext( const Reference< XComponentContext >& xComponentConte
 		xInterface, UNO_QUERY );
 
 	return xRemoteComponentContext;
+}
+
+::com::sun::star::uno::Reference< ::com::sun::star::uno::XComponentContext >
+getComponentContext()
+{
+    if( !g_file_test( INIFILE, G_FILE_TEST_EXISTS ) )
+        g_error( "Without '%s' installed nothing will work", INIFILE );
+
+    if( !g_file_test( RDBFILE, G_FILE_TEST_EXISTS ) )
+        g_error( "Without '%s' installed nothing will work", RDBFILE );
+
+    Reference< uno::XComponentContext > xComponentContext =
+        ::cppu::defaultBootstrap_InitialComponentContext( UNO_BOOTSTRAP_INI );
+	g_assert( xComponentContext.is() );
+
+	Reference< lang::XMultiComponentFactory > xMultiComponentFactoryClient(
+        xComponentContext->getServiceManager() );
+	g_assert( xMultiComponentFactoryClient.is() );
+
+	return getRemoteComponentContext( xComponentContext );
 }

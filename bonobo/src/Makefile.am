@@ -1,6 +1,7 @@
 INCLUDES =								    \
 	-DINIFILE=\"$(datadir)/ooo-bonobo/ooo-bonobo-uno-bootstrap.ini\"    \
 	-DDATADIR=\""$(datadir)"\"					    \
+	-DRDBFILE=\""$(libdir)/ooo-bonobo/ooo-bonobo.rdb"\"		    \
 	$(OOO_BONOBO_CFLAGS)							
 
 LDADD =	\

@@ -2,8 +2,6 @@
 #include <gtk/gtk.h>
 #include <libbonoboui.h>
 
-#include <cppuhelper/bootstrap.hxx>
-
 #include <com/sun/star/beans/XPropertySet.hpp>
 #include <com/sun/star/bridge/XUnoUrlResolver.hpp>
 #include <com/sun/star/document/XTypeDetection.hpp>
@@ -22,9 +20,7 @@
 #include "string-macros.h"
 #include "star-frame-widget.h"
 
-#define UNO_BOOTSTRAP_INI DECLARE_ASCII( "file://" INIFILE )
 #define OAFIID "OAFIID:GNOME_OpenOfficeOrg_Control"
-#define FILENAME DECLARE_ASCII( "file:///demo/schmidt.sxw" )
 
 using namespace com::sun::star;
 using namespace com::sun::star::beans;
@@ -39,23 +35,17 @@ factory( BonoboGenericFactory *factory,
 		 const char *component_id,
 		 gpointer data )
 {
-	if( !strcmp( component_id, OAFIID ) ) {
-		Reference< uno::XComponentContext > xComponentContext =
-			::cppu::defaultBootstrap_InitialComponentContext( UNO_BOOTSTRAP_INI );
-		g_assert( xComponentContext.is() );
+	if( !strcmp( component_id, OAFIID ) )
+	{
+		Reference< uno::XComponentContext > xRemoteContext = getComponentContext();
+		g_assert( xRemoteContext.is() );
 
-		Reference< lang::XMultiComponentFactory > xMultiComponentFactoryClient(
-			xComponentContext->getServiceManager() );
-		g_assert( xMultiComponentFactoryClient.is() );
-
-		Reference< uno::XComponentContext > xRemoteContext(
-			getRemoteComponentContext( xComponentContext ) );
-		
 		BonoboControl *pControl =
 			ooo_bonobo_control_new( xRemoteContext );
 
 		return BONOBO_OBJECT( pControl );
 	}
+	return NULL;
 }
 
 int
