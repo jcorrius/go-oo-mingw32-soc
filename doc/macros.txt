@@ -1,187 +1,85 @@
-* References:
-    * svx/source/msfilter/msvbasic.cxx
-    * Costin Raiu, Kaspersky Labs, 'Apple of Discord'
-    * Virus bulletin's bontchev.pdf, svajcer.pdf
+* VBA compatibility thoughts:
 
-Using a hacked libgsf's test-cp-msole.c:
-
-      * round-trip - works fine, 'security warning from OXP'
-      * deleting the __SRP_* streams: works fine ...
-
-'Simple' stream:
-      * Simple: 'SGetThree' -> 'SGetThack' - no pcode changes ...
-	    + no visible changes
-      * Compressed text:
-	    + 0d 0a is the VBA test line terminator
-	    + Screwing up the compression can cause _serious_
-	      artefacts - ie. Excel loop/lock / crash etc.
-      * VBA 5 -> VBA 6 ... (?)
-      * pcode line table start marker: FE CA 01 00
-	    + following 2 bytes : seemingly not a clobberable version.
-	    + blanking (0x00) pcode between 42 81 0C 00 and ff ff ff ff -
-	      gives empty 1st macro in spreadsheet.
-	    + clobbering with 0xff's results in XP crasher.
-      * clobbering the pcode results in the text changing ie.
-	   For i = 0 To 10 -> For i = 0 To 31 - with no other change.
-      * clobbered pcode with 0's from & inc. feca0100
-      * ie. pcode totally ignored.
-      * Can totally wipe all data from start to "01 ae b0 00'A''t''t',"
-	none of it used (seemingly)
-      * Can totally wipe all data _except_ pre-pended 3 items:
-        0x01 0xae 0xb0 - as long as we update offsets in 'dir' stream;
-	see later.
-      * re-compressing seems to cause some nasty grief;
-        _looks_ like a length is stored somewhere here.
-	Our version is shrunk by N bytes, - we get N bytes of
-	de-compressed crud at the end of the macro.
-
-'_VBA_PROJECT' stream:
-      * clobber byte 3 of _VBA_PROJECT to 0xa8 - also works going backwards: 0x01
-	    + no need to clobber pcode table ... [ presumably not read !? ]
-      * Office XP only requires this data in this file:
-	    + cc 61 <01> 00 00 01 + pad to 32 bytes with 0s.
-      * clobber macro name - reflected in re-load in
-	    <module-name> [functions] list - ordering odd there though.
-
-Generic stream description:
-    + first byte '1'
-    + 2nd byte == length of compressed data - 1
-    + 3rd byte == 0xb + 4 bits MSB of compressed data length
-	+ maximum recorded compressed size is 0xc0c ie 0x010cbc
-	  above which it (appears) that it reads to the EOS.
-    + 4th ... bytes = LZSS compressed macro text.
-    + VBA editor can't cope with unicode - just barfs
-	+ VBA editor can cope with 8bit chars - and writes them
-	  out as such too.
-    + can insert invalid / broken VBA with no problems.
-
-All streams contain compressed text:
-    + Sheet / Workbook / VBA etc. all re-constructed ... [!]
-
-'dir' stream:
-    * Looks like the project stream - but more authoritative ?
-    * Compression is (essentially) LZSS with no Huffman post-coding,
-        and some window size tweakage.
-    * Contains authoritative offsets for VBA text in streams
-    * re-compression a total pain; managed to get Excel to accept
-        a re-compressed 'dir' - by truncating a number of the longer
-	back-matches to < 1/2 the window size.
-    * altering the offsets - works.
-    * Stream format is:
-	    + 2 byte tag, 4 byte length, <data> [ repeat ]
-	    + the tag 0x9 is broken: it's length is 2 bytes too short.
-    * Each Stream has 4 strings: ascii/unicode pairs
-	    + unicode canonical; 1st pair: unknown, 2nd: stream name.
-	    + serious problems if all names not in sync (hmm)
+    + Basic types
+    + Syntactic issues
+    + Annoyances
+    + Global objects / object model
 
 
-    * Cutting / reduction:
-	    + Removing both external linkage records + prepended 2 name
-	      pair works fine.
-	    + fiddling with the object count - appears to have
-	      little effect on OfficeXP - reads to EOF.
-	    + removing objects:
-		    + removing SHORT_OBJECT_COUNT -> Sheet1's name ->
-		      crashes Excel (even with decrementing the count)
-		    + If the equivalent PROJECT reference removed -
-		      works fine, can remove all Sheets.
-		    + can remove workbook if not in PROJECT.
-	    + not understood fields:
-		+ Fields 0x13, 0x2c - can be 00'd with no apparent problems
-	    + Binning all the VBA stream names (ie. not Sheet*,wbk) results
-	      in very odd loading - populates project tree just fine, (from
-	      OLE stream names?) - but code view / calculate hangs the
-	      editor; hmm.
+* Basic types
+    + missing 'Date' type
 
-    * finally realised that the _VBA_PROJECT_CUR/PROJECT and PROJECTwm
-      streams are rather important.
+* Syntactic issues
+    + StarBasic - very global keywords cf. tokenizer
+	+ do we tolerate eg. 'Option' as a method
+	    + does MS.
+    + Investigate operators: ':=' vs. '=' eg.
 
-    * PROJECTwm - looks like an i18n hash; 8bit -> 16bit; simple list,
-      all 0 terminated with a trailing 16bits of 0.
-	+ what is VersionCompatible32="393222000" ?
+* Annoyances
+    + lots of errors on load cause massive dialog spewage
+	+ extremely annoying.
 
+* Global objects / object model
 
-* Office 97 quirks:
+    + VBA has _lots_ of global / implicit objects
 
-    + exports a '_VBA_PROJECT' storage - but can just trash it.
-	+ this is for backwards compatibility with Office 95
-	+ Office 95 doesn't have a _VBA_PROJECT stream.
-    + everything very fragile until you delete the __SRP_X
-      streams.
-    + Clobbering the 'byte 3' _VBA_PROJECT version works nicely,
-      [ you can flawlessly export OfficeXP to Office97 macros ].
-    + Binning the 'PROJECTwm' stream appears to have no effect though
-      Also mangling down the PROJECTwm set to only the macro names
-      works fine.
-    + Serious problems arise when we omit the 'Sheet 1' type
-      references in the PROJECT stream.
-	+ we can omit them from the [Workspace] section,
-	+ we must have lots of 'Document=' nodes.
-	+ [HostExtenderInfo] not necessary.
-	+ HelpContextID, HelpFile, Name not necessary.
-	+ CMG, DPB, GC: not necessary
-	+ VersionCompatible32="393222000" not necessary
-	    + Sheet names must be there; Foo1,Foo2,Foo3 no good.
-		+ they must exactly match the 'dir' entries [I guess]
-		+ The 'dir' entries must be there too ...
-	+ Workbook & Sheet streams ...
-	    The 'Workbook' stream must contain _at least_:
-		+ Attribute VB_Base = "0{00020819-0000-0000-C000-000000000046}"
-	    The 'Sheet' stream must contain _at least_:
-		+ Attribute VB_Base = "0{00020820-0000-0000-C000-000000000046}"
-	+ Naming consistency
-	    + 'Workbook' name (stream & PROJECT) _must_ match with
-	       Excel 'CODENAME' (0x01ba) record, or SEGV result.
-	    + Similarly, Sheet 'CODENAME' records must also match.
-	+ Office 97 also segv's if we don't have a valuid
-	    + Attribute VB_Name = "<MacroSheet>"
-	    record in the macro ...
+    + StarBasic seems to have 1: 'ThisComponent'
+	+ ThisComponent usage / setup:
+	    + framework/sfx2/source/appl/appbas.cxx	    x1
+	    + framework/sfx2/source/appl/appuno.cxx	    x6
+	    + framework/sfx2/source/control/macrconf.cxx    x4
+	    + framework/sfx2/source/doc/objxtor.cxx	    x5
+	    + framework/sfx2/source/doc/sfxbasemodel.cxx    x4
+	    + script/basic/source/classes/eventatt.cxx	    x1
+	    + sw/sw/source/ui/wizard/wizgo3.cxx		    x1
 
+    + We need to provide new (compatible) UNO interfaces
+	+ we need to beef up the global/implicit object support
 
-** Appendix 1: Random _VBA_PROJECT observations:
-   
-    + Examining a typical stream;
+    + On-load global dereference failure case:
 
-00000000  cc 61 5e 00 00 01 00 ff  09 08 00 00 09 04 00 00  |Ìa^....ÿ........|
-          ^^^^^^^^^^-1-^^^^^^^^^^  ^^^^-2-^^^^ ^^^^-3-^^^^
-00000010  e4 04 01 00 00 00 00 00  00 00 00 00 01 00 05 00  |ä...............|
-	  ^-4-^ ^-A-^ ^-B-^ ^-C-^  ^-D-^ ^-E-^ ^-F-^ ^-G-^
-00000020  02 00 16 01 2a 00 5c 00  47 00 7b 00 30 00 30 00  |....*.\.G.{.0.0.|
-          ^-H-^
+	A run-time rather than parse-time problem (thankfully):
 
-[1]   - version / magic
-[2/3] - language identifiers
-[4]   - char-set
-Lengths:
-[A]   - 
-[B]   - 
-[C]   - 
-[D]   - 
-[E]   - 
-[F]   - 
-[G]   - number of plugins / strings.
-[H]   - 
-
-      ... a number of strings ...
-      VBA section:
-
-00000770  0b 00 02 00 02 00 02 00  02 00 01 00 01 00 01 00  |................|
-	  ^-1-^ ^^^^^^^^^^^^^^^^^^^^^^^^^^^-2-^^^^^^^^^^^^
-00000780  01 00 02 04 02 04 02 04  03 00 04 02 00 00 06 02  |................|
-          ^^^^^^^^^^^^^^^^^^^^^^^  ^-3-^ ^^^^^^^^^^^ ^-4-^
-00000790  01 00 08 02 00 00 0a 02  ff ff ff ff ff ff 00 00  |................|
-          ^^^^^^^^^^^^^^^^^ ^^^^^^^^^-5-^^^^^^^^^^^^
--000007a0  00 00 ff ff 00 00 5a f6  67 40 03 00 00 00 01 00  |......Z.g@......|
-
-
-
-	This is all tedious overall project stuff so far ...
-
-[1] - count of VBA project elements ...
-[2] - element types - each USHORT:
-	0x1   == VBA module,
-	0x2   == sheet/workbook,
-	0x402 == class or form
-[3] - count of int32s - tags of some form (?); effectively magic:
-[5] - an offset table in 16bit chunks (?)
-	+ fixed length of 100bytes
+#13 0x4356c455 in OfficeApplication::GlobalBasicErrorHdl () from ./libofa645li.so
+#14 0x4356c2fc in OfficeApplication::LinkStubGlobalBasicErrorHdl () from ./libofa645li.so
+#15 0x4461e05c in StarBASIC::RTError () from ./libsb645li.so
+#16 0x4465abb6 in SbiInstance::Abort () from ./libsb645li.so
+#17 0x4465be8a in SbiRuntime::Step () from ./libsb645li.so
+#18 0x446215df in SbModule::Run () from ./libsb645li.so
+#19 0x44620aad in SbModule::Notify () from ./libsb645li.so
+#20 0x40410e50 in SfxBroadcaster::Broadcast () from ./libsvl645li.so
+#21 0x44626343 in SbMethod::Broadcast () from ./libsb645li.so
+#22 0x4074debf in SbxValue::Get () from ./libsvt645li.so
+#23 0x44626109 in SbMethod::Call () from ./libsb645li.so
+#24 0x443ea77d in SfxMacroConfig::Call () from ./libsfx645li.so
+#25 0x4431a2e1 in SfxObjectShell::CallBasic () from ./libsfx645li.so
+#26 0x456d96f1 in ScInterpreter::ScMacro () from ./libsc645li.so
+#27 0x456dc09b in ScInterpreter::Interpret () from ./libsc645li.so
+#28 0x4560758d in ScFormulaCell::Interpret () from ./libsc645li.so
+#29 0x456097d0 in ScFormulaCell::GetErrCode () from ./libsc645li.so
+#30 0x45679005 in ScCellFormat::GetString () from ./libsc645li.so
+#31 0x455dc37c in ScDocument::GetCellScriptType () from ./libsc645li.so
+#32 0x455dc4e1 in ScDocument::GetScriptType () from ./libsc645li.so
+#33 0x455b71fc in ScColumn::HasEditCells () from ./libsc645li.so
+#34 0x455ba81d in ScColumn::GetOptimalHeight () from ./libsc645li.so
+#35 0x455e6b5b in ScTable::SetOptimalHeight () from ./libsc645li.so
+#36 0x455c7d76 in ScDocument::SetOptimalHeight () from ./libsc645li.so
+#37 0x452f22f3 in ScDocShell::AdjustRowHeight () from ./libsc645li.so
+#38 0x454b9a2d in ScModelObj::AdjustRowHeight () from ./libsc645li.so
+#39 0x4577c9e8 in ImportExcel::AdjustRowHeight () from ./libsc645li.so
+#40 0x45774591 in ImportExcel8::Read () from ./libsc645li.so
+#41 0x45784135 in ScImportExcel () from ./libsc645li.so
+#42 0x452e1aa0 in ScDocShell::ConvertFrom () from ./libsc645li.so
+#43 0x4431f81b in SfxObjectShell::DoLoad () from ./libsfx645li.so
+#44 0x442a1fa0 in LoadEnvironment_Impl::Load () from ./libsfx645li.so
+#45 0x442a38a4 in LoadEnvironment_Impl::LoadDataAvailable () from ./libsfx645li.so
+#46 0x442a3a54 in LoadEnvironment_Impl::LoadDataAvailable () from ./libsfx645li.so
+#47 0x442a1434 in LoadEnvironment_Impl::Start () from ./libsfx645li.so
+#48 0x4437f684 in SfxFrameLoader_Impl::load () from ./libsfx645li.so
+#49 0x44ee3656 in framework::BaseDispatcher::implts_loadIt () from ./libfwk645li.so
+#50 0x44ee9e3e in framework::BlankDispatcher::dispatch () from ./libfwk645li.so
+#51 0x44edf258 in framework::BaseDispatcher::dispatchWithNotification () from ./libfwk645li.so
+#52 0x44ef60f8 in framework::Desktop::loadComponentFromURL () from ./libfwk645li.so
+#53 0x0807b8ac in desktop::DispatchWatcher::executeDispatchRequests ()
+#54 0x08072997 in desktop::OfficeIPCThread::ExecuteCmdLineRequests ()
+#55 0x080697ef in desktop::Desktop::OpenClients ()
