@@ -271,21 +271,6 @@ verb_ZoomFit_cb( BonoboUIComponent *uic, gpointer user_data, const char *cname)
 	star_frame_widget_zoom_page_width( control->priv->sfw );
 }
 
-static int
-load_uri( BonoboPersistFile *pf, const CORBA_char *text_uri,
-		  CORBA_Environment *ev, gpointer user_data )
-{
-	OOoBonoboControl *control = OOO_BONOBO_CONTROL( user_data );
-
-	if( GTK_WIDGET_REALIZED( control->priv->sfw ) ) {
-		// FIXME implement
-	} else {
-		control->priv->uri =
-			DECLARE_ASCII( "file://" ) + B2U( rtl::OString( text_uri ) );
-		control->priv->pending_load = TRUE;
-	}
-}
-
 static void
 FrameLoadFileFromUrl( Reference< frame::XFrame > xFrame,
 					  Reference< lang::XMultiServiceFactory > xSMgr,
@@ -324,6 +309,26 @@ FrameLoadFileFromUrl( Reference< frame::XFrame > xFrame,
 									  PropertyState_DIRECT_VALUE ); 
 
 	xFrameLoader->load( aProperties, xFrame );
+}
+
+static int
+load_uri( BonoboPersistFile *pf, const CORBA_char *text_uri,
+		  CORBA_Environment *ev, gpointer user_data )
+{
+	OOoBonoboControl *control = OOO_BONOBO_CONTROL( user_data );
+
+	control->priv->uri =
+		DECLARE_ASCII( "file://" ) + B2U( rtl::OString( text_uri ) );
+	if( GTK_WIDGET_REALIZED( control->priv->sfw ) ) {
+		// FIXME implement
+		FrameLoadFileFromUrl(
+			star_frame_widget_get_frame( control->priv->sfw ),
+			control->priv->sfw->service_manager,
+			control->priv->uri );
+		control->priv->pending_load = FALSE;
+	} else {
+		control->priv->pending_load = TRUE;
+	}
 }
 
 static void
