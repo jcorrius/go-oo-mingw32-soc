@@ -18,4 +18,8 @@ aclocal $ACLOCAL_FLAGS
 automake --gnu --add-missing --copy
 # intltoolize --copy --force --automake
 autoconf
-./configure $@
+if test "x$NOCONFIGURE" = "x"; then
+    ./configure $@
+else
+    echo "Skipping configure process."
+fi
