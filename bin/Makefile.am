@@ -9,7 +9,8 @@ script_files = \
 	linkoo \
 	install-dict.in \
 	ooo-wrapper.in \
-	latest-patchset
+	latest-patchset \
+	font-munge
 
 EXTRA_DIST = $(script_files)
 
