@@ -1,6 +1,6 @@
 --- /dev/null	2004-04-06 15:27:52.000000000 +0200
 +++ fpicker/source/unx/kde/kdecommandthread.cxx	2004-06-21 17:38:20.886719904 +0200
-@@ -0,0 +1,207 @@
+@@ -0,0 +1,208 @@
 +/*************************************************************************
 + *
 + *
@@ -95,6 +95,7 @@
 +        { "setDirectory",      SetDirectory },
 +        { "getFiles",          GetFiles },
 +        { "setTitle",          SetTitle },
++        { "setType",           SetType },
 +        { "setDefaultName",    SetDefaultName },
 +        { "setMultiSelection", SetMultiSelection },
 +        { "exec",              Exec },
@@ -210,7 +211,7 @@
 +}
 --- /dev/null	2004-04-06 15:27:52.000000000 +0200
 +++ fpicker/source/unx/kde/kdecommandthread.hxx	2004-06-14 14:37:20.597310272 +0200
-@@ -0,0 +1,127 @@
+@@ -0,0 +1,128 @@
 +/*************************************************************************
 + *
 + *
@@ -302,6 +303,7 @@
 +        GetFiles,
 +
 +        SetTitle,
++        SetType,
 +        SetDefaultName,
 +        SetMultiSelection,
 +
@@ -340,7 +342,7 @@
 +#endif // _KDECOMMANDTHREAD_HXX_
 --- /dev/null	2004-04-06 15:27:52.000000000 +0200
 +++ fpicker/source/unx/kde/kdefilepicker.cxx	2004-09-08 17:01:55.270345192 +0200
-@@ -0,0 +1,572 @@
+@@ -0,0 +1,600 @@
 +/*************************************************************************
 + *
 + *
@@ -418,6 +420,8 @@
 +#include <kdiroperator.h>
 +#include <kfiledialog.h>
 +#include <kfilefiltercombo.h>
++#include <klocale.h>
++#include <kmessagebox.h>
 +
 +#include <algorithm>
 +#include <iostream>
@@ -433,17 +437,9 @@
 +      m_pLabels( new QVBox( m_pCombosAndButtons ) ),
 +      m_pComboBoxes( new QVBox( m_pCombosAndButtons ) ),
 +      m_pPushButtons( new QVBox( m_pCombosAndButtons ) ),
-+      m_pCheckBoxes( new QGrid( 2, m_pCustomWidget ) )
++      m_pCheckBoxes( new QGrid( 2, m_pCustomWidget ) ),
++      m_bIsSave( false )
 +{
-+    connect( this, SIGNAL( okClicked() ),
-+             this, SLOT( acceptCommand() ) );
-+
-+    connect( this, SIGNAL( cancelClicked() ),
-+             this, SLOT( rejectCommand() ) );
-+
-+    connect( this, SIGNAL( closeClicked() ),
-+             this, SLOT( rejectCommand() ) );
-+
 +    connect( this, SIGNAL( fileHighlighted( const QString & ) ),
 +             this, SLOT( fileHighlightedCommand( const QString & ) ) );
 +
@@ -594,36 +590,13 @@
 +
 +                    qString.append( "files" );
 +
-+                    QString qExtension;
-+                    QWidget *pExtensionWidget = findControl( "100" ); // CHECKBOX_AUTOEXTENSION
-+                    QCheckBox *pExtensionCB = pExtensionWidget? pExtensionWidget->qt_cast( "QCheckBox" ): NULL;
-+                    if ( pExtensionCB && pExtensionCB->isChecked() )
-+                    {
-+                        // FIXME: qFilter can be a MIME; we ignore it now...
-+                        QStringList qFilterList = QStringList::split( " ", currentFilter() );
-+                        for ( QStringList::const_iterator it = qFilterList.begin();
-+                              qExtension.isEmpty() && it != qFilterList.end();
-+                              ++it )
-+                        {
-+                            int nUnwanted = (*it).findRev( '*' );
-+                            if ( nUnwanted < 0 )
-+                                nUnwanted = (*it).findRev( '?' );
-+                            else
-+                                nUnwanted = ::std::max( nUnwanted, (*it).find( '?', nUnwanted ) );
-+
-+                            int nIdx = (*it).find( '.', ::std::max( nUnwanted, 0 ) );
-+                            if ( nIdx >= 0 )
-+                                qExtension = (*it).mid( nIdx ).lower();
-+                        }
-+                    }
-+
 +                    if ( result() == QDialog::Accepted )
 +                    {
 +                        KURL::List qList( selectedURLs() );
 +                        for ( KURL::List::const_iterator it = qList.begin(); it != qList.end(); ++it )
 +                        {
 +                            qString.append( " " );
-+                            appendEscaped( qString, (*it).url() + qExtension );
++                            appendEscaped( qString, addExtension( (*it).url() ) );
 +                        }
 +                    }
 +                    else
@@ -633,7 +606,7 @@
 +                        for ( KFileItemListIterator it( *pItems ); it.current(); ++it )
 +                        {
 +                            qString.append( " " );
-+                            appendEscaped( qString, (*it)->url().url() + qExtension );
++                            appendEscaped( qString, addExtension( (*it)->url().url() ) );
 +                        }
 +                    }
 +
@@ -644,6 +617,22 @@
 +                if ( nListSize >= 1 )
 +                {
 +                    setCaption( pStringList->front() );
++                }
++                break;
++            case CommandEvent::SetType:
++                if ( nListSize >= 1 )
++                {
++                    QString qType( pStringList->front() );
++                    if ( qType == "open" )
++                    {
++                        setIsSave( false );
++                        setCaption( i18n( "Open" ) );
++                    }
++                    else if ( qType == "save" )
++                    {
++                        setIsSave( true );
++                        setCaption( i18n( "Save As" ) );
++                    }
 +                }
 +                break;
 +            case CommandEvent::SetDefaultName:
@@ -664,7 +653,23 @@
 +            case CommandEvent::Exec:
 +                {
 +                    filterWidget->setEditable( false );
-+                    exec();
++                    QString qSelectedURL;
++                    do {
++                        exec();
++                        qSelectedURL = addExtension( selectedURL().url() );
++                    } while ( isSave() &&
++                              result() == QDialog::Accepted &&
++                              ( qSelectedURL.startsWith( "file:" ) && QFile::exists( qSelectedURL.mid( 5 ) ) ) &&
++                              KMessageBox::warningYesNo( 0,
++                                  i18n( "A file named \"%1\" already exists. "
++                                      "Are you sure you want to overwrite it?" ).arg( qSelectedURL ),
++                                  i18n( "Overwrite File?" ),
++                                  i18n( "Overwrite" ), KStdGuiItem::cancel() ) != KMessageBox::Yes );
++
++                    if ( result() == QDialog::Accepted )
++                        sendCommand( "accept" );
++                    else
++                        sendCommand( "reject" );
 +                }
 +                break;
 +            default:
@@ -854,14 +859,39 @@
 +    return qString;
 +}
 +
-+void FileDialog::acceptCommand()
++QString FileDialog::addExtension( const QString &rFileName ) const
 +{
-+    sendCommand( "accept" );
-+}
++    if ( !isSave() )
++        return rFileName;
 +
-+void FileDialog::rejectCommand()
-+{
-+    sendCommand( "reject" );
++    QString qExtension;
++
++    QWidget *pExtensionWidget = findControl( "100" ); // CHECKBOX_AUTOEXTENSION
++    QCheckBox *pExtensionCB = pExtensionWidget? static_cast< QCheckBox* >( pExtensionWidget->qt_cast( "QCheckBox" ) ): NULL;
++    if ( pExtensionCB && pExtensionCB->isChecked() )
++    {
++        // FIXME: qFilter can be a MIME; we ignore it now...
++        QStringList qFilterList = QStringList::split( " ", currentFilter() );
++        for ( QStringList::const_iterator it = qFilterList.begin();
++              qExtension.isEmpty() && it != qFilterList.end();
++              ++it )
++        {
++            int nUnwanted = (*it).findRev( '*' );
++            if ( nUnwanted < 0 )
++                nUnwanted = (*it).findRev( '?' );
++            else
++                nUnwanted = ::std::max( nUnwanted, (*it).find( '?', nUnwanted ) );
++
++            int nIdx = (*it).find( '.', ::std::max( nUnwanted, 0 ) );
++            if ( nIdx >= 0 )
++                qExtension = (*it).mid( nIdx ).lower();
++        }
++    }
++
++    if ( qExtension.isEmpty() || qExtension == "." || rFileName.endsWith( qExtension ) )
++        return rFileName;
++    else
++        return rFileName + qExtension;
 +}
 +
 +void FileDialog::fileHighlightedCommand( const QString & )
@@ -915,7 +945,7 @@
 +}
 --- /dev/null	2004-04-06 15:27:52.000000000 +0200
 +++ fpicker/source/unx/kde/kdefilepicker.hxx	2004-06-11 14:03:03.937359576 +0200
-@@ -0,0 +1,125 @@
+@@ -0,0 +1,135 @@
 +/*************************************************************************
 + *
 + *
@@ -1005,6 +1035,15 @@
 +
 +    FilterList                  m_aFilters;
 +
++    /** Are we a "Save As" dialog?
++     * 
++     *  We cannot use KFileDialog::setOperationMode() here, because then
++     *  it automatically adds an "Automatically select filename extension"
++     *  check box, and completely destroys the dialog's layout
++     *  (custom list boxes are under this check box, which looks ugly).
++     */
++    bool                        m_bIsSave;
++
 +public:
 +    FileDialog( const QString &startDir, const QString &filter,
 +                QWidget *parent, const char *name );
@@ -1026,11 +1065,12 @@
 +    
 +    void                        appendFilter( const QString &rTitle, const QString &rFilter );
 +    QString                     filters() const;
++    QString                     addExtension( const QString &rFileName ) const;
++
++    void                        setIsSave( bool bIsSave ) { m_bIsSave = bIsSave; }
++    bool                        isSave( void ) const { return m_bIsSave; }
 +
 +protected slots:
-+    void                        acceptCommand();
-+    void                        rejectCommand();
-+
 +    void                        fileHighlightedCommand( const QString & );
 +    void                        selectionChangedCommand();
 +
@@ -1043,7 +1083,7 @@
 +#endif // _KDEFILEPICKER_HXX_
 --- /dev/null	2004-04-06 15:27:52.000000000 +0200
 +++ fpicker/source/unx/kde/kdefpmain.cxx	2004-06-21 17:40:44.786843760 +0200
-@@ -0,0 +1,105 @@
+@@ -0,0 +1,107 @@
 +/*************************************************************************
 + *
 + *
@@ -1135,6 +1175,8 @@
 +
 +    KCmdLineArgs::init( argc, argv, &qAboutData );
 +
++    KLocale::setMainCatalogue( "kdialog" );
++    
 +    KApplication kApplication;
 +    //ModalityFilter qFilter( /*winid*/ 79691780 );
 +
