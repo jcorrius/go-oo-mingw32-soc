@@ -48,7 +48,7 @@ sub find_file($$)
 
     if (!-f "$dir/$file") {
 	$dir =~ s/_[0-9]+//;
-	print "Re-work to $dir\n";
+#	print "Re-work to $dir\n";
     }
 
     -f "$dir/$file" || die "\n\n** Error ** - Can't find file $dir/$file\n\n\n";
@@ -56,7 +56,7 @@ sub find_file($$)
     return "$dir/$file";
 }
 
-(@ARGV > 1) || die "Syntax:\napply <path-to-patchdir> <src root> [patch flags '--dry-run' eg.]\n";
+(@ARGV > 1) || die "Syntax:\napply <path-to-patchdir> <src root> [--distro=Debian] [patch flags '--dry-run' eg.]\n";
 
 $patch_dir = shift (@ARGV);
 $apply_list = $patch_dir.'/apply';
@@ -65,6 +65,7 @@ $dest_dir = shift (@ARGV);
 $quiet = 0;
 $remove = 0;
 $opts = "";
+$distro = 'Ximian';
 foreach $a (@ARGV) {
 	if ($a eq '-R') {
     		print ("Removing patched files for update ...\n");
@@ -72,8 +73,9 @@ foreach $a (@ARGV) {
 	}
 	elsif ($a eq '--quiet') {
 	    $quiet = 1;
-	}
-	else {
+	} elsif ($a =~ m/--distro=(.*)/) {
+	    $distro = $1;
+	} else {
 		$opts = $opts . " " . $a;
 	}
 }
@@ -81,20 +83,37 @@ foreach $a (@ARGV) {
 $base_cmd = "patch -l -b -p0 $opts -d $dest_dir";
 
 if (!$remove) {
-    print "Execute: $base_cmd\n";
+    print "Execute: $base_cmd for distro '$distro'\n";
 }
 
 open (PatchList, "$apply_list") || die "Can't find $apply_list";
 
+my @targets=($distro);
 while (<PatchList>) {
-	if (/^#/) {
-		next;
+	s/#.*//;
+	chomp;
+	$_ eq '' && next;
+
+	if (/\[\s*(.*)\]/) {
+	    my $tmp = $1;
+	    $tmp =~ s/\s+$//;
+	    print "Distro: '$tmp'\n";
+
+	    @targets = split /\s*,\s*/, $tmp;
+	    next;
 	}
+
+	if (!grep /$distro/i, @targets) {
+	    print "$distro: skipping '$_'\n";
+	    next;
+	}
+
 	chomp ();
 	if (s/^\%copy\s+//) {
 	    m/(\S+)\s+(\S+)/ || die "Bad format of copy: $_";
 	    $quiet || print "copy $patch_dir/$1 $dest_dir/$2\n";
 	    system ("cp -f $patch_dir/$1 $dest_dir/$2");
+
 	} elsif ($_) {
 	    $patch_file = find_file ($patch_dir, $_);
 	    
