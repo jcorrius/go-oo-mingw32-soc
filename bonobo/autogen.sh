@@ -70,7 +70,8 @@ else
 	echo "You must have automake >= 1.6 installed to compile $PROJECT."
 	echo "Get ftp://ftp.gnu.org/pub/gnu/automake/automake-1.6.0.tar.gz"
 	echo "(or a newer version if it is available)"
-	DIE=1
+	AUTOMAKE=automake
+	ACLOCAL=aclocal
 fi
 
 if test "$DIE" -eq 1; then
