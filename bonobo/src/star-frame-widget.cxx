@@ -35,13 +35,11 @@ struct _StarFrameWidgetPrivate {
 	Reference< XFrame > x_frame;
 };
 
-Reference< XWindowPeer >
-star_frame_widget_get_window_peer( StarFrameWidget *sfw )
+static void
+star_frame_widget_create_window_peer( StarFrameWidget *sfw )
 {
-	if( ! GTK_WIDGET_REALIZED( GTK_WIDGET( sfw ) ) )
-		gtk_widget_realize( GTK_WIDGET( sfw ) );
-
 	g_assert( sfw->service_manager.is() );
+
 	Reference< XSystemChildFactory > xChildFactory(
 		sfw->service_manager->createInstance( SERVICENAME_VCLTOOLKIT ),
 		UNO_QUERY );
@@ -53,12 +51,16 @@ star_frame_widget_get_window_peer( StarFrameWidget *sfw )
 			Sequence< sal_Int8 >(),
 			SystemDependent::SYSTEM_XWINDOW ) );
 	g_assert( sfw->priv->x_window_peer.is() );
-
-	return sfw->priv->x_window_peer;		
 }
 
 Reference< XFrame >
 star_frame_widget_get_frame( StarFrameWidget *sfw )
+{
+	return sfw->priv->x_frame;
+}
+
+static void
+star_frame_widget_create_frame( StarFrameWidget *sfw )
 {
 	g_assert( sfw->priv->x_window_peer.is() );
 	g_assert( sfw->service_manager.is() );
@@ -81,8 +83,17 @@ star_frame_widget_get_frame( StarFrameWidget *sfw )
     xChildContainer->append( sfw->priv->x_frame );
 
     xWindow->setVisible( sal_True ); // FIXME
+}
 
-	return sfw->priv->x_frame;
+static void
+star_frame_widget_realize( GtkWidget *widget )
+{
+	BONOBO_CALL_PARENT( GTK_WIDGET_CLASS, realize, ( widget ) );
+
+	StarFrameWidget *sfw = STAR_FRAME_WIDGET( widget );
+
+	star_frame_widget_create_window_peer( sfw );
+	star_frame_widget_create_frame( sfw );
 }
 
 static void
@@ -98,6 +109,10 @@ star_frame_widget_class_init( StarFrameWidgetClass *klass )
 	GObjectClass *object_class = G_OBJECT_CLASS( klass );
 
 	object_class->finalize = star_frame_widget_finalize;
+
+	GtkWidgetClass *widget_class = GTK_WIDGET_CLASS( klass );
+
+	widget_class->realize = star_frame_widget_realize;
 }
 
 static void

@@ -93,9 +93,7 @@ main( int argc, char *argv[] )
 	GtkWidget *pSocket = star_frame_widget_new( xRemoteContext );
  	gtk_box_pack_start( GTK_BOX( pVBox ), pSocket, TRUE, TRUE, 5 );
 
-	Reference< awt::XWindowPeer > xWindowPeer(
-		star_frame_widget_get_window_peer( STAR_FRAME_WIDGET( pSocket ) ) );
-	g_assert( xWindowPeer.is() );
+	gtk_widget_realize( pSocket );
 
     Reference< frame::XFrame > xFrame(
 		star_frame_widget_get_frame( STAR_FRAME_WIDGET( pSocket ) ) );

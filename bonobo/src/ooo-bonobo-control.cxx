@@ -75,9 +75,6 @@ frame_widget_realize( GtkWidget *widget, gpointer user_data )
 {
 	StarFrameWidget *pSocket = STAR_FRAME_WIDGET( widget );
 
-	Reference< awt::XWindowPeer > xWindowPeer(
-		star_frame_widget_get_window_peer( STAR_FRAME_WIDGET( pSocket ) ) );
-	g_assert( xWindowPeer.is() );
 	Reference< frame::XFrame > xFrame(
 		star_frame_widget_get_frame( STAR_FRAME_WIDGET( pSocket ) ) );
 	g_assert( xFrame.is() );
