@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <unistd.h>
+#include <string.h>
 
 #include <gdk/gdkx.h>
 #include <gtk/gtk.h>
@@ -19,7 +20,6 @@
 #include "star-frame-widget.h"
 
 #define UNO_BOOTSTRAP_INI DECLARE_ASCII( "file://" INIFILE )
-#define FILENAME DECLARE_ASCII( "file:///demo/schmidt.sxw" )
 
 using namespace com::sun::star;
 using namespace com::sun::star::beans;
@@ -63,6 +63,16 @@ FrameLoaderLoadFileFromUrl( Reference< frame::XSynchronousFrameLoader > xFrameLo
 int
 main( int argc, char *argv[] )
 {
+    if( argc < 2 || !strcmp( argv [1], "--help" ) )
+	{
+        fprintf( stderr, "Syntax:\n" );
+		fprintf( stderr, "  test <document-name>\n" );
+		exit( 1 );
+	}
+    const char *pFileName = argv[ argc - 1 ];
+	OUString aFileName = OUString( pFileName, strlen( pFileName ),
+								   RTL_TEXTENCODING_UTF8 );
+
     gtk_init( &argc, &argv );
 
     Reference< uno::XComponentContext > xComponentContext =
@@ -114,14 +124,14 @@ main( int argc, char *argv[] )
 		uno::UNO_QUERY );
 	g_assert( xFrameLoaderFactory.is() );
 
-	OUString sTypeName( xTypeDetection->queryTypeByURL( FILENAME ) );
+	OUString sTypeName( xTypeDetection->queryTypeByURL( aFileName ) );
 
 	Reference< frame::XSynchronousFrameLoader > xFrameLoader(
 		xFrameLoaderFactory->createInstance(sTypeName),
 		uno::UNO_QUERY );
 	g_assert( xFrameLoader.is() );
 		
-	FrameLoaderLoadFileFromUrl( xFrameLoader, xFrame, FILENAME, sTypeName );
+	FrameLoaderLoadFileFromUrl( xFrameLoader, xFrame, aFileName, sTypeName );
 
 	gtk_widget_grab_focus( pSocket );
 	gtk_widget_show( pSocket );
