@@ -1,0 +1,2131 @@
+Index: svtools/source/control/valueset.cxx
+===================================================================
+RCS file: /cvs/util/svtools/source/control/valueset.cxx,v
+retrieving revision 1.22
+retrieving revision 1.22.228.1
+diff -u -p -r1.22 -r1.22.228.1
+--- svtools/source/control/valueset.cxx	2 Aug 2004 17:56:55 -0000	1.22
++++ svtools/source/control/valueset.cxx	3 Feb 2005 14:34:44 -0000	1.22.228.1
+@@ -2220,7 +2220,7 @@ void ValueSet::SelectItem( USHORT nItemI
+ 
+ 	if ( (mnSelItemId != nItemId) || mbNoSelection )
+ 	{
+-		USHORT nOldItem = mnSelItemId;
++        USHORT nOldItem = mnSelItemId ? mnSelItemId : 1;
+ 		mnSelItemId = nItemId;
+ 		mbNoSelection = FALSE;
+ 
+Index: sw/source/core/crsr/swcrsr.cxx
+===================================================================
+RCS file: /cvs/sw/sw/source/core/crsr/swcrsr.cxx,v
+retrieving revision 1.43
+retrieving revision 1.42.244.2
+diff -u -p -r1.43 -r1.42.244.2
+--- sw/source/core/crsr/swcrsr.cxx	21 Jan 2005 10:28:33 -0000	1.43
++++ sw/source/core/crsr/swcrsr.cxx	17 Feb 2005 14:52:59 -0000	1.42.244.2
+@@ -153,6 +153,12 @@
+ #ifndef _STATSTR_HRC
+ #include <statstr.hrc>			// ResId fuer Statusleiste
+ #endif
++#ifndef _REDLINE_HXX
++#include <redline.hxx>      // SwRedline
++#endif
++#ifndef _DOCARY_HXX
++#include <docary.hxx>       // SwRedlineTbl
++#endif
+ 
+ using namespace ::com::sun::star::i18n;
+ 
+@@ -1429,44 +1435,66 @@ FASTBOOL SwCursor::GoSentence( SentenceM
+ 	const SwTxtNode* pTxtNd = GetNode()->GetTxtNode();
+ 	if( pTxtNd && pBreakIt->xBreak.is() )
+ 	{
+-		SwCrsrSaveState aSave( *this );
++        //mask deleted redlines 
++        String sNodeText(pTxtNd->GetTxt());
++        const SwDoc& rDoc = *pTxtNd->GetDoc();
++        const sal_Bool bShowChg = ::IsShowChanges( rDoc.GetRedlineMode() );
++        if ( bShowChg )
++        {
++            USHORT nAct = rDoc.GetRedlinePos( *pTxtNd );
++            for ( ; nAct < rDoc.GetRedlineTbl().Count(); nAct++ )
++            {
++                const SwRedline* pRed = rDoc.GetRedlineTbl()[ nAct ];
++                if ( pRed->Start()->nNode > pTxtNd->GetIndex() )
++                    break;
++
++                if( REDLINE_DELETE == pRed->GetType() )
++                {
++                    xub_StrLen nStart, nEnd;
++                    pRed->CalcStartEnd( pTxtNd->GetIndex(), nStart, nEnd );
++
++                    while ( nStart < nEnd && nStart < sNodeText.Len() )
++                        sNodeText.SetChar( nStart++, CH_TXTATR_INWORD );
++                }
++            }
++        }    
++        SwCrsrSaveState aSave( *this );
+ 		xub_StrLen nPtPos = GetPoint()->nContent.GetIndex();
+ 		switch ( eMoveType )
+ 		{
+ 		case END_SENT:
+             nPtPos = (xub_StrLen)pBreakIt->xBreak->endOfSentence(
+-                                    pTxtNd->GetTxt(),
++                                    sNodeText,
+                                     nPtPos, pBreakIt->GetLocale(
+                                                 pTxtNd->GetLang( nPtPos ) ));
+ 			break;
+ 		case NEXT_SENT:
+ 			{
+-				String aTxt( pTxtNd->GetTxt() );
+ 				nPtPos = (xub_StrLen)pBreakIt->xBreak->endOfSentence(
+-										aTxt,
++                                        sNodeText,
+ 										nPtPos, pBreakIt->GetLocale(
+ 													pTxtNd->GetLang( nPtPos ) ));
+-				while (nPtPos != (USHORT) -1 && ++nPtPos < aTxt.Len()
+-					   && aTxt.GetChar(nPtPos)== ' ' /*isWhiteSpace( aTxt.GetChar(nPtPos)*/ )
++                while (nPtPos != (USHORT) -1 && ++nPtPos < sNodeText.Len()
++                       && sNodeText.GetChar(nPtPos)== ' ' /*isWhiteSpace( aTxt.GetChar(nPtPos)*/ )
+ 					;
+ 				break;
+ 			}
+ 		case START_SENT:
+ 			nPtPos = (xub_StrLen)pBreakIt->xBreak->beginOfSentence(
+-									pTxtNd->GetTxt(),
++                                    sNodeText,
+ 									nPtPos, pBreakIt->GetLocale(
+ 											pTxtNd->GetLang( nPtPos ) ));
+ 			break;
+ 		case PREV_SENT:
+ 			nPtPos = (xub_StrLen)pBreakIt->xBreak->beginOfSentence(
+-                                    pTxtNd->GetTxt(),
++                                    sNodeText,
+                                     nPtPos, pBreakIt->GetLocale(
+                                                 pTxtNd->GetLang( nPtPos ) ));
+ 			if (nPtPos == 0)
+ 				return FALSE;	// the previous sentence is not in this paragraph
+ 			if (nPtPos > 0)
+ 				nPtPos = (xub_StrLen)pBreakIt->xBreak->beginOfSentence(
+-                                    pTxtNd->GetTxt(),
++                                    sNodeText,
+                                     nPtPos - 1, pBreakIt->GetLocale(
+                                                 pTxtNd->GetLang( nPtPos ) ));
+ 			break;
+Index: sw/source/core/doc/doclay.cxx
+===================================================================
+RCS file: /cvs/sw/sw/source/core/doc/doclay.cxx,v
+retrieving revision 1.31
+retrieving revision 1.29.66.2
+diff -u -p -r1.31 -r1.29.66.2
+--- sw/source/core/doc/doclay.cxx	27 Jan 2005 11:10:37 -0000	1.31
++++ sw/source/core/doc/doclay.cxx	17 Feb 2005 14:53:52 -0000	1.29.66.2
+@@ -1622,6 +1622,7 @@ SwFlyFrmFmt* SwDoc::InsertLabel( const S
+ 					pUndo->SetUndoKeep();
+ 			}
+ 		}
++	    SetModified();
+ 	}
+ 
+ 	if( pUndo )
+Index: sw/source/core/docnode/section.cxx
+===================================================================
+RCS file: /cvs/sw/sw/source/core/docnode/section.cxx,v
+retrieving revision 1.16
+retrieving revision 1.16.34.1
+diff -u -p -r1.16 -r1.16.34.1
+--- sw/source/core/docnode/section.cxx	11 Jan 2005 12:18:56 -0000	1.16
++++ sw/source/core/docnode/section.cxx	17 Feb 2005 10:39:34 -0000	1.16.34.1
+@@ -1278,7 +1278,7 @@ int lcl_FindDocShell( SfxObjectShellRef&
+ 		}
+ 
+ 		if( !pSfxFlt )
+-			pSfxFlt = SwIoSystem::GetFileFilter( pMed->GetPhysicalName(), aEmptyStr );
++			pSfxFlt = SwIoSystem::GetFileFilter( pMed->GetPhysicalName(), aEmptyStr, pMed );
+ 
+ 		if( pSfxFlt )
+ 		{
+Index: sw/source/core/edit/edlingu.cxx
+===================================================================
+RCS file: /cvs/sw/sw/source/core/edit/edlingu.cxx,v
+retrieving revision 1.14
+retrieving revision 1.14.110.1
+diff -u -p -r1.14 -r1.14.110.1
+--- sw/source/core/edit/edlingu.cxx	27 Nov 2004 13:18:01 -0000	1.14
++++ sw/source/core/edit/edlingu.cxx	3 Feb 2005 12:10:00 -0000	1.14.110.1
+@@ -153,6 +153,12 @@
+ #ifndef _UNOOBJ_HXX
+ #include <unoobj.hxx>
+ #endif
++#ifndef _REDLINE_HXX
++#include <redline.hxx>      // SwRedline
++#endif
++#ifndef _DOCARY_HXX
++#include <docary.hxx>       // SwRedlineTbl
++#endif
+ 
+ 
+ using namespace ::svx;
+@@ -219,8 +225,10 @@ class SwSpellIter : public SwLinguIter
+     SpellContentPositions               aLastPositions;    
+ 
+     
+-    void    CreatePortion(uno::Reference< XSpellAlternatives > xAlt, bool bIsField);
+-    void    AddPortion(uno::Reference< XSpellAlternatives > xAlt);
++    void    CreatePortion(uno::Reference< XSpellAlternatives > xAlt, 
++                bool bIsField, bool bIsHidden);
++    void    AddPortion(uno::Reference< XSpellAlternatives > xAlt, 
++                       const SpellContentPositions& rDeletedRedlines);
+ public:
+ 	SwSpellIter() {}
+ 
+@@ -1213,6 +1221,21 @@ void lcl_AddToTempAutoCorrect(const Stri
+         pTempAuto->Insert( pCorr );
+     }
+ }
++/*-- 02.02.2005 14:34:41---------------------------------------------------
++
++  -----------------------------------------------------------------------*/
++sal_uInt32 lcl_CountRedlines(
++                            const ::svx::SpellPortions& rLastPortions)
++{
++    sal_uInt32 nRet = 0;
++    SpellPortions::const_iterator aIter = rLastPortions.begin();
++    for( ; aIter != rLastPortions.end(); ++aIter)
++    {
++        if( aIter->bIsHidden ) 
++            ++nRet;
++    }            
++    return nRet;
++}
+ /*-- 18.09.2003 15:08:20---------------------------------------------------
+ 
+   -----------------------------------------------------------------------*/
+@@ -1236,7 +1259,8 @@ void SwEditShell::ApplyChangedSentence(c
+         SwPaM *pCrsr = GetCrsr();
+         pDoc->StartUndo( UNDO_OVERWRITE );
+         StartAction();
+-        if(rLastPortions.size() == rNewPortions.size())
++        sal_uInt32 nRedlinePortions = lcl_CountRedlines(rLastPortions);
++        if((rLastPortions.size() - nRedlinePortions) == rNewPortions.size())
+         {
+             //the simple case: the same number of elements on both sides 
+             //each changed element has to be applied to the corresponding source element
+@@ -1248,6 +1272,12 @@ void SwEditShell::ApplyChangedSentence(c
+                 --aCurrentNewPortion;
+                 --aCurrentOldPortion;
+                 --aCurrentOldPosition;
++                //jump over redline portions
++                while(aCurrentOldPortion->bIsHidden)
++                {
++                    --aCurrentOldPortion;
++                    --aCurrentOldPosition;
++                }            
+ 				if ( !pCrsr->HasMark() )				
+ 					pCrsr->SetMark();
+                 pCrsr->GetPoint()->nContent = aCurrentOldPosition->nLeft;
+@@ -1262,7 +1292,7 @@ void SwEditShell::ApplyChangedSentence(c
+                 if(aCurrentNewPortion->sText != aCurrentOldPortion->sText)
+                 {
+                     //change text ...
+-                    pDoc->Delete(*pCrsr);
++                    pDoc->DeleteAndJoin(*pCrsr);
+                     // ... and apply language if necessary
+                     if(aCurrentNewPortion->eLanguage != aCurrentOldPortion->eLanguage)
+                         SetAttr( SvxLanguageItem(aCurrentNewPortion->eLanguage), nLangWhichId );
+@@ -1292,7 +1322,7 @@ void SwEditShell::ApplyChangedSentence(c
+             pCrsr->GetMark()->nContent = aCurrentEndPosition->nRight;
+             
+             //delete the sentence completely 
+-            pDoc->Delete(*pCrsr);
++            pDoc->DeleteAndJoin(*pCrsr);
+             svx::SpellPortions::const_iterator aCurrentNewPortion = rNewPortions.begin();
+             while(aCurrentNewPortion != rNewPortions.end())
+             {
+@@ -1324,6 +1354,85 @@ void SwEditShell::ApplyChangedSentence(c
+         EndAction();
+     }            
+ }
++/*-- 02.02.2005 10:46:45---------------------------------------------------
++    collect all deleted redlines of the current text node beginning at the
++    start of the cursor position
++  -----------------------------------------------------------------------*/
++SpellContentPositions lcl_CollectDeletedRedlines(SwEditShell* pSh)
++{
++    SpellContentPositions aRedlines;
++    SwDoc* pDoc = pSh->GetDoc();
++    const sal_Bool bShowChg = ::IsShowChanges( pDoc->GetRedlineMode() );
++    if ( bShowChg )
++    {
++        SwPaM *pCrsr = pSh->GetCrsr();
++        const SwPosition* pStartPos = pCrsr->Start();
++        const SwTxtNode* pTxtNode = pCrsr->GetNode()->GetTxtNode();
++
++        USHORT nAct = pDoc->GetRedlinePos( *pTxtNode );
++        const xub_StrLen nStartIndex = pStartPos->nContent.GetIndex();
++        for ( ; nAct < pDoc->GetRedlineTbl().Count(); nAct++ )
++        {
++            const SwRedline* pRed = pDoc->GetRedlineTbl()[ nAct ];
++
++            if ( pRed->Start()->nNode > pTxtNode->GetIndex() )
++                break;
++
++            if( REDLINE_DELETE == pRed->GetType() )
++            {
++                xub_StrLen nStart, nEnd;
++                pRed->CalcStartEnd( pTxtNode->GetIndex(), nStart, nEnd );
++                if(nStart >= nStartIndex || nEnd >= nStartIndex)
++                {        
++                    SpellContentPosition aAdd;
++                    aAdd.nLeft = nStart;
++                    aAdd.nRight = nEnd;
++                    aRedlines.push_back(aAdd);
++                }
++            }
++        }
++    }
++    return aRedlines;
++}
++/*-- 02.02.2005 11:06:12---------------------------------------------------
++    remove the redline positions after the current selection
++  -----------------------------------------------------------------------*/
++void lcl_CutRedlines( SpellContentPositions& aDeletedRedlines, SwEditShell* pSh )
++{
++    if(!aDeletedRedlines.empty())
++    {        
++        SwPaM *pCrsr = pSh->GetCrsr();
++        const SwPosition* pEndPos = pCrsr->End();
++        xub_StrLen nEnd = pEndPos->nContent.GetIndex();
++        while(!aDeletedRedlines.empty() && 
++                aDeletedRedlines.back().nLeft > nEnd)
++        {
++            aDeletedRedlines.pop_back();
++        }            
++    }
++}
++/*-- 02.02.2005 11:43:00---------------------------------------------------
++                    
++  -----------------------------------------------------------------------*/
++SpellContentPosition  lcl_FindNextDeletedRedline( 
++        const SpellContentPositions& rDeletedRedlines, 
++        xub_StrLen nSearchFrom )
++{
++    SpellContentPosition aRet;
++    aRet.nLeft = aRet.nRight = STRING_MAXLEN;
++    if(!rDeletedRedlines.empty())
++    {
++        SpellContentPositions::const_iterator aIter = rDeletedRedlines.begin();
++        for( ; aIter != rDeletedRedlines.end(); ++aIter)
++        {
++            if(aIter->nLeft < nSearchFrom)
++                continue;
++            aRet = *aIter;
++            break;
++        }            
++    }            
++    return aRet;
++}
+ /*-- 18.09.2003 15:08:20---------------------------------------------------
+ 
+   -----------------------------------------------------------------------*/
+@@ -1389,15 +1498,16 @@ bool SwSpellIter::SpellSentence(::svx::S
+         if ( *pCrsr->GetPoint() < *pCrsr->GetMark() )
+             pCrsr->Exchange();
+         BOOL bStartSent = pSh->GoStartSentence();
++        SpellContentPositions aDeletedRedlines = lcl_CollectDeletedRedlines(pSh);
+         if(bStartSent)
+         {        
+             //create a portion from the start part      
+-            AddPortion(0);
++            AddPortion(0, aDeletedRedlines);
+         }                
+         //Set the cursor to the error already found
+         *pCrsr->GetPoint() = *GetCurrX();
+         *pCrsr->GetMark() = *GetCurr();
+-        AddPortion(xSpellRet);
++        AddPortion(xSpellRet, aDeletedRedlines);
+         
+ 
+         //determine the end of the current sentence
+@@ -1408,7 +1518,7 @@ bool SwSpellIter::SpellSentence(::svx::S
+         SwPosition aSaveStartPos = *pCrsr->GetMark();
+         
+         BOOL bEndSent = pSh->GoEndSentence();
+-            
++        lcl_CutRedlines( aDeletedRedlines, pSh );
+         //save the 'global' end of the spellchecking
+         const SwPosition aSaveEndPos = *GetEnd();
+         //set the sentence end as 'local' end
+@@ -1436,13 +1546,13 @@ bool SwSpellIter::SpellSentence(::svx::S
+                 *pCrsr->GetMark() = *GetCurr();
+ 			}
+ 			//add the portion
+-            AddPortion(0);
++            AddPortion(0, aDeletedRedlines);
+             
+             if(xSpellRet.is())
+ 			{
+                 *pCrsr->GetPoint() = *GetCurr();
+                 *pCrsr->GetMark() = *GetCurrX();
+-				AddPortion(xSpellRet);
++                AddPortion(xSpellRet, aDeletedRedlines);
+                 //move the cursor to the end of the error string
+                 *pCrsr->GetPoint() = *GetCurrX();
+ 				//and save the end of the error as new start position
+@@ -1460,7 +1570,7 @@ bool SwSpellIter::SpellSentence(::svx::S
+         *pSh->GetCrsr()->GetPoint() = *GetEnd();
+         if(*GetCurrX() < *GetEnd())
+         {
+-            AddPortion(0);
++            AddPortion(0, aDeletedRedlines);
+         }
+         //set the shell cursor to the end of the sentence to prevent a visible selection
+         *pCrsr->GetMark() = *GetEnd();
+@@ -1501,16 +1611,23 @@ LanguageType lcl_GetLanguage(SwEditShell
+ /*-- 08.10.2003 08:53:27---------------------------------------------------
+     create a text portion at the given position
+   -----------------------------------------------------------------------*/
+-void SwSpellIter::CreatePortion(uno::Reference< XSpellAlternatives > xAlt, bool bIsField)
++void SwSpellIter::CreatePortion(uno::Reference< XSpellAlternatives > xAlt, 
++        bool bIsField, bool bIsHidden)
+ {
+     svx::SpellPortion aPortion;
+     String sText;
+     GetSh()->GetSelectedText( sText );
+ 	if(sText.Len())
+ 	{
+-		aPortion.sText = sText;
++        //in case of redlined deletions the selection of an error is not 
++        //the same as the _real_ word
++        if(xAlt.is())
++            aPortion.sText = xAlt->getWord();
++        else
++            aPortion.sText = sText;
+ 		aPortion.eLanguage = lcl_GetLanguage(*GetSh());
+ 		aPortion.bIsField = bIsField;
++        aPortion.bIsHidden = bIsHidden;
+ 		aPortion.xAlternatives = xAlt;
+ 		SpellContentPosition aPosition;
+ 		SwPaM *pCrsr = GetSh()->GetCrsr();
+@@ -1523,7 +1640,8 @@ void SwSpellIter::CreatePortion(uno::Ref
+ /*-- 19.09.2003 13:05:43---------------------------------------------------
+ 
+   -----------------------------------------------------------------------*/
+-void    SwSpellIter::AddPortion(uno::Reference< XSpellAlternatives > xAlt)
++void    SwSpellIter::AddPortion(uno::Reference< XSpellAlternatives > xAlt, 
++                                const SpellContentPositions& rDeletedRedlines)
+ {
+     SwEditShell *pSh = GetSh();
+     String sText;
+@@ -1532,7 +1650,7 @@ void    SwSpellIter::AddPortion(uno::Ref
+     {        
+         if(xAlt.is())
+         {        
+-            CreatePortion(xAlt, false);
++            CreatePortion(xAlt, false, false);
+         }
+         else
+         {
+@@ -1545,9 +1663,23 @@ void    SwSpellIter::AddPortion(uno::Ref
+             //iterate over the text to find changes in language
+             //set the mark equal to the point
+             *pCrsr->GetMark() = aStart;
+-            const SwTxtNode* pTxtNode = pCrsr->GetNode()->GetTxtNode();
++            SwTxtNode* pTxtNode = pCrsr->GetNode()->GetTxtNode();
+             LanguageType eStartLanguage = lcl_GetLanguage(*GetSh());
+-            do
++            SpellContentPosition  aNextRedline = lcl_FindNextDeletedRedline( 
++                        rDeletedRedlines, aStart.nContent.GetIndex() );
++            if( aNextRedline.nLeft == aStart.nContent.GetIndex() )
++            {
++                //select until the end of the current redline
++                xub_StrLen nEnd = aEnd.nContent.GetIndex() < aNextRedline.nRight ?
++                            aEnd.nContent.GetIndex() : aNextRedline.nRight;
++                pCrsr->GetPoint()->nContent.Assign( pTxtNode, nEnd );
++                CreatePortion(xAlt, false, true);
++                aStart = *pCrsr->End();
++                //search for next redline
++                aNextRedline = lcl_FindNextDeletedRedline( 
++                            rDeletedRedlines, aStart.nContent.GetIndex() );
++            }    
++            while(*pCrsr->GetPoint() < aEnd)
+             {
+                 GetSh()->Right(1, CRSR_SKIP_CELLS);
+                 bool bField = false;
+@@ -1573,34 +1705,54 @@ void    SwSpellIter::AddPortion(uno::Ref
+                 }
+ 
+                 LanguageType eCurLanguage = lcl_GetLanguage(*GetSh());
+-                if(bField || eCurLanguage != eStartLanguage)
++                bool bRedline = aNextRedline.nLeft == pCrsr->GetPoint()->nContent.GetIndex();
++                // create a portion if the next character 
++                //  - is a field,
++                //  - is at the beginning of a deleted redline
++                //  - has a different language
++                if(bField || bRedline || eCurLanguage != eStartLanguage)
+                 {
+                     eStartLanguage = eCurLanguage;
+                     //go one step back - the cursor currently selects the first character 
+                     //with a different language
+-                    *pCrsr->GetPoint() = *pCrsr->GetMark();
++                    //in the case of redlining it's different
++                    if(eCurLanguage != eStartLanguage || bField)
++                        *pCrsr->GetPoint() = *pCrsr->GetMark();
+                     //set to the last start
+                     *pCrsr->GetMark() = aStart;
+                     //create portion should only be called if a selection exists
+                     //there's no selection if there's a field at the beginning
+                     if(*pCrsr->Start() != *pCrsr->End())
+-                        CreatePortion(xAlt, false);
++                        CreatePortion(xAlt, false, false);
+                     aStart = *pCrsr->End();
+                     //now export the field - if there is any
+                     if(bField)
+                     {
+                         *pCrsr->GetMark() = *pCrsr->GetPoint();
+                         GetSh()->Right(1, CRSR_SKIP_CELLS);
+-                        CreatePortion(xAlt, true);
++                        CreatePortion(xAlt, true, false);
+                         aStart = *pCrsr->End();
+                     }        
+                 }
++                // if a redline start then create a portion for it
++                if(bRedline)
++                {
++                    *pCrsr->GetMark() = *pCrsr->GetPoint();
++                    //select until the end of the current redline
++                    xub_StrLen nEnd = aEnd.nContent.GetIndex() < aNextRedline.nRight ?
++                                aEnd.nContent.GetIndex() : aNextRedline.nRight;
++                    pCrsr->GetPoint()->nContent.Assign( pTxtNode, nEnd );
++                    CreatePortion(xAlt, false, true);
++                    aStart = *pCrsr->End();
++                    //search for next redline
++                    aNextRedline = lcl_FindNextDeletedRedline( 
++                                rDeletedRedlines, aStart.nContent.GetIndex() );
++                }            
+                 *pCrsr->GetMark() = *pCrsr->GetPoint();
+-            }        
+-            while(*pCrsr->GetPoint() < aEnd);
++            }
+             pCrsr->SetMark();
+             *pCrsr->GetMark() = aStart;
+-            CreatePortion(xAlt, false);
++            CreatePortion(xAlt, false, false);
+         }        
+     }
+ }
+Index: sw/source/core/frmedt/fecopy.cxx
+===================================================================
+RCS file: /cvs/sw/sw/source/core/frmedt/fecopy.cxx,v
+retrieving revision 1.30
+retrieving revision 1.29.144.3
+diff -u -p -r1.30 -r1.29.144.3
+--- sw/source/core/frmedt/fecopy.cxx	9 Feb 2005 14:50:41 -0000	1.30
++++ sw/source/core/frmedt/fecopy.cxx	21 Feb 2005 09:18:54 -0000	1.29.144.3
+@@ -1163,8 +1163,12 @@ BOOL SwFEShell::Paste( SwDoc* pClpDoc, B
+   -----------------------------------------------------------------------*/
+ BOOL SwFEShell::PastePages( SwFEShell& rToFill, USHORT nStartPage, USHORT nEndPage)
+ {
++    Push();
+     if(!GotoPage(nStartPage))
++    {
++        Pop(sal_False);
+         return FALSE;
++    }            
+     MovePage( fnPageCurr, fnPageStart );
+     SwPaM aCpyPam( *GetCrsr()->GetPoint() );
+     String sStartingPageDesc = GetPageDesc( GetCurPageDesc()).GetName();
+@@ -1173,7 +1177,10 @@ BOOL SwFEShell::PastePages( SwFEShell& r
+         rToFill.ChgCurPageDesc( *pDesc );
+ 
+     if(!GotoPage(nEndPage))
++    {
++        Pop(sal_False);
+         return FALSE;
++    }            
+     //if the page starts with a table a paragraph has to be inserted before
+     SwNode* pTableNode = aCpyPam.GetNode()->FindTableNode();
+     if(pTableNode)
+@@ -1198,7 +1205,6 @@ BOOL SwFEShell::PastePages( SwFEShell& r
+ 
+     StartAllAction();
+     GetDoc()->LockExpFlds();
+-    Push();
+     SetSelection(aCpyPam);
+     // copy the text of the selection
+     SwEditShell::Copy(&rToFill);
+@@ -1236,10 +1242,9 @@ BOOL SwFEShell::PastePages( SwFEShell& r
+             SwFrmFmt * pNew = rToFill.GetDoc()->CopyLayoutFmt( rCpyFmt, aAnchor );
+         }
+     }
+-
+-    Pop();
+     GetDoc()->UnlockExpFlds();
+     GetDoc()->UpdateFlds();
++    Pop(sal_False);    
+     EndAllAction();
+ 
+     return TRUE;
+Index: sw/source/core/txtnode/txtedt.cxx
+===================================================================
+RCS file: /cvs/sw/sw/source/core/txtnode/txtedt.cxx,v
+retrieving revision 1.62
+retrieving revision 1.61.108.2
+diff -u -p -r1.62 -r1.61.108.2
+--- sw/source/core/txtnode/txtedt.cxx	21 Jan 2005 10:41:49 -0000	1.62
++++ sw/source/core/txtnode/txtedt.cxx	17 Feb 2005 15:01:13 -0000	1.61.108.2
+@@ -719,7 +719,12 @@ USHORT SwTxtNode::Spell(SwSpellArgs* pAr
+         {
+             xub_StrLen nTemp = GetWrong()->NextWrong( nBegin );
+             if(nTemp > nEnd)
++            {        
++                // reset original text
++                if ( bRestoreString )
++                    aText = aOldTxt;
+                 return 0;
++            }
+             if(nTemp > nBegin)
+                 nBegin = nTemp;
+ 
+Index: sw/source/ui/chrdlg/chardlg.cxx
+===================================================================
+RCS file: /cvs/sw/sw/source/ui/chrdlg/chardlg.cxx,v
+retrieving revision 1.21
+retrieving revision 1.21.34.1
+diff -u -p -r1.21 -r1.21.34.1
+--- sw/source/ui/chrdlg/chardlg.cxx	11 Jan 2005 12:39:08 -0000	1.21
++++ sw/source/ui/chrdlg/chardlg.cxx	1 Feb 2005 09:46:44 -0000	1.21.34.1
+@@ -408,8 +408,9 @@ BOOL SwCharURLPage::FillItemSet(SfxItemS
+ {
+ 	String sURL = aURLED.GetText();
+ 	if(sURL.Len())
+-        sURL = INetURLObject( sURL ).GetMainURL( INetURLObject::NO_DECODE );
+-	SwFmtINetFmt aINetFmt(sURL, aTargetFrmLB.GetText());
++        sURL = URIHelper::SmartRel2Abs(INetURLObject(), sURL, Link(), false );  
++    
++    SwFmtINetFmt aINetFmt(sURL, aTargetFrmLB.GetText());
+ 	aINetFmt.SetName(aNameED.GetText());
+ 	SwWrtShell &rSh = ::GetActiveView()->GetWrtShell();
+ 	bModified |= aURLED.GetText() != aURLED.GetSavedValue();
+Index: sw/source/ui/dbui/addresslistdialog.cxx
+===================================================================
+RCS file: /cvs/sw/sw/source/ui/dbui/addresslistdialog.cxx,v
+retrieving revision 1.4
+retrieving revision 1.4.190.1
+diff -u -p -r1.4 -r1.4.190.1
+--- sw/source/ui/dbui/addresslistdialog.cxx	22 Oct 2004 13:57:06 -0000	1.4
++++ sw/source/ui/dbui/addresslistdialog.cxx	14 Feb 2005 11:49:39 -0000	1.4.190.1
+@@ -702,15 +702,18 @@ void SwAddressListDialog::DetectTablesAn
+                 }            
+             }            
+         }            
+-        uno::Reference<beans::XPropertySet> xSourceProperties;
+-        m_xDBContext->getByName(m_aDBData.sDataSource) >>= xSourceProperties;
+-        pUserData->sURL = lcl_getFlatURL( xSourceProperties );
++        if ( m_aDBData.sCommand.getLength() )
++        {
++            uno::Reference<beans::XPropertySet> xSourceProperties;
++            m_xDBContext->getByName(m_aDBData.sDataSource) >>= xSourceProperties;
++            pUserData->sURL = lcl_getFlatURL( xSourceProperties );
+ 
+-        m_aListLB.SetEntryText(m_aDBData.sCommand, pSelect, ITEMID_TABLE - 1);
+-        pUserData->xColumnsSupplier = SwNewDBMgr::GetColumnSupplier(pUserData->xConnection,
+-                                m_aDBData.sCommand,
+-                                m_aDBData.nCommandType == CommandType::TABLE ? 
+-                                        SW_DB_SELECT_TABLE : SW_DB_SELECT_QUERY );
++            m_aListLB.SetEntryText(m_aDBData.sCommand, pSelect, ITEMID_TABLE - 1);
++            pUserData->xColumnsSupplier = SwNewDBMgr::GetColumnSupplier(pUserData->xConnection,
++                                    m_aDBData.sCommand,
++                                    m_aDBData.nCommandType == CommandType::TABLE ? 
++                                            SW_DB_SELECT_TABLE : SW_DB_SELECT_QUERY );
++        }
+         m_aOK.Enable(pSelect && m_aListLB.GetEntryText(pSelect, ITEMID_TABLE - 1).Len());
+         m_aFilterPB.Enable( pUserData->xConnection.is() );
+         m_aTablePB.Enable( pUserData->nTableAndQueryCount > 1 );
+Index: sw/source/ui/dbui/customizeaddresslistdialog.cxx
+===================================================================
+RCS file: /cvs/sw/sw/source/ui/dbui/customizeaddresslistdialog.cxx,v
+retrieving revision 1.3
+retrieving revision 1.3.242.1
+diff -u -p -r1.3 -r1.3.242.1
+--- sw/source/ui/dbui/customizeaddresslistdialog.cxx	29 Sep 2004 09:30:34 -0000	1.3
++++ sw/source/ui/dbui/customizeaddresslistdialog.cxx	14 Feb 2005 11:49:39 -0000	1.3.242.1
+@@ -168,16 +168,18 @@ IMPL_LINK(SwCustomizeAddressListDialog, 
+         }            
+         else
+         {
++            if ( m_aFieldsLB.GetSelectEntryPos() != LISTBOX_ENTRY_NOTFOUND )
++                ++nPos; // append the new entry behind the selected
+             //add the new column
+-            sal_uInt32 nInsertPos = nPos + 1;
+-            m_pNewData->aDBColumnHeaders.insert(m_pNewData->aDBColumnHeaders.begin() + nInsertPos, sNew);
++            m_pNewData->aDBColumnHeaders.insert(m_pNewData->aDBColumnHeaders.begin() + nPos, sNew);
+             //add a new entry into all data arrays
+             String sTemp;
+             ::std::vector< ::std::vector< ::rtl::OUString > >::iterator aDataIter;
+             for( aDataIter = m_pNewData->aDBData.begin(); aDataIter != m_pNewData->aDBData.end(); ++aDataIter)
+-                aDataIter->insert(aDataIter->begin() + nInsertPos, sTemp);
++                aDataIter->insert(aDataIter->begin() + nPos, sTemp);
+             
+-        }        
++        }
++        
+         m_aFieldsLB.InsertEntry(sNew, nPos);
+         m_aFieldsLB.SelectEntryPos(nPos);
+     }            
+Index: sw/source/ui/dbui/dbmgr.cxx
+===================================================================
+RCS file: /cvs/sw/sw/source/ui/dbui/dbmgr.cxx,v
+retrieving revision 1.88
+retrieving revision 1.87.14.3
+diff -u -p -r1.88 -r1.87.14.3
+--- sw/source/ui/dbui/dbmgr.cxx	28 Jan 2005 15:47:46 -0000	1.88
++++ sw/source/ui/dbui/dbmgr.cxx	17 Feb 2005 15:06:33 -0000	1.87.14.3
+@@ -2038,9 +2038,14 @@ String SwNewDBMgr::GetDBField(uno::Refer
+ 					rDBFormatData.xFormatter,
+ 					rDBFormatData.aLocale,
+ 					rDBFormatData.aNullDate);
+-				double fVal = xColumn->getDouble();
+ 				if (pNumber)
+-					*pNumber = fVal;
++                {
++				    double fVal = xColumn->getDouble();
++                    if(!xColumn->wasNull())
++                    {        
++                        *pNumber = fVal;
++                    }
++                }
+ 			}
+             catch(Exception& )
+ 			{
+@@ -3064,14 +3069,18 @@ sal_Int32 SwNewDBMgr::MergeDocuments( Sw
+         sSourceDocURL = URIHelper::SmartRel2Abs(
+             INetURLObject(), utl::TempFile::CreateTempName(),
+             URIHelper::GetMaybeFileHdl());
+-        SfxStringItem aURL( SID_FILE_NAME, sSourceDocURL );
+         const SfxFilter *pSfxFlt = SwIoSystem::GetFilterOfFormat(
+                 String::CreateFromAscii( FILTER_XML ),
+                 SwDocShell::Factory().GetFilterContainer() );
+ 
+         SfxStringItem aFilterName( SID_FILTER_NAME, pSfxFlt->GetFilterName());
+-        rSourceView.GetViewFrame()->GetDispatcher()->Execute( 
+-                            SID_EXPORTDOC, SFX_CALLMODE_SYNCHRON, &aURL, &aFilterName, 0);
++        uno::Sequence< beans::PropertyValue > aValues(1);
++        beans::PropertyValue* pValues = aValues.getArray();
++        pValues[0].Name = C2U("FilterName");
++        pValues[0].Value <<= ::rtl::OUString(pSfxFlt->GetFilterName());
++        uno::Reference< frame::XStorable > xStore( rSourceView.GetDocShell()->GetModel(), uno::UNO_QUERY);
++        xStore->storeToURL( sSourceDocURL, aValues );
++        
+     
+         // create a target docshell to put the merged document into
+         SfxObjectShellRef xTargetDocShell( new SwDocShell( SFX_CREATE_MODE_STANDARD ) );
+@@ -3123,6 +3132,7 @@ sal_Int32 SwNewDBMgr::MergeDocuments( Sw
+             SfxBoolItem aHidden( SID_HIDDEN, TRUE );
+             SfxStringItem aReferer( SID_REFERER, String::CreateFromAscii(URL_PREFIX_PRIV_SOFFICE ));
+             SfxStringItem aTarget( SID_TARGETNAME, String::CreateFromAscii("_blank") );
++            SfxStringItem aURL( SID_FILE_NAME, sSourceDocURL );
+             const SfxPoolItem* pReturnValue = 
+                             rSourceView.GetViewFrame()->GetDispatcher()->Execute( SID_OPENDOC, SFX_CALLMODE_SYNCHRON,
+                                     &aURL, &aFilterName, &aHidden, &aReferer, &aTarget, 0);
+Index: sw/source/ui/dbui/maildispatcher.cxx
+===================================================================
+RCS file: /cvs/sw/sw/source/ui/dbui/maildispatcher.cxx,v
+retrieving revision 1.2
+retrieving revision 1.2.242.1
+diff -u -p -r1.2 -r1.2.242.1
+--- sw/source/ui/dbui/maildispatcher.cxx	20 Sep 2004 13:12:39 -0000	1.2
++++ sw/source/ui/dbui/maildispatcher.cxx	31 Jan 2005 19:57:53 -0000	1.2.242.1
+@@ -144,7 +144,8 @@ namespace /* private */
+ MailDispatcher::MailDispatcher(uno::Reference<mail::XSmtpService> mailserver) :
+     mailserver_ (mailserver),
+     run_(false),    
+-    shutdown_requested_(false)
++    shutdown_requested_(false),
++    bIsInRun(false)
+ {            
+     wakening_call_.reset();
+     mail_dispatcher_active_.reset();
+@@ -234,11 +235,17 @@ void MailDispatcher::shutdown()
+     wakening_call_.set();        
+ }
+ 
+-bool MailDispatcher::isStarted()
++bool MailDispatcher::isStarted() const
+ {
+     return run_;
+ }
+ 
++bool MailDispatcher::isRunning() const
++{
++    return bIsInRun;
++} 
++
++
+ void MailDispatcher::addListener(::rtl::Reference<IMailDispatcherListener> listener)
+ {
+     OSL_PRECOND(!shutdown_requested_, "MailDispatcher thread is shuting down already");
+@@ -294,6 +301,7 @@ void MailDispatcher::run()
+     // signal that the mail dispatcher thread is now alive
+     mail_dispatcher_active_.set();
+     
++    bIsInRun = true;
+     for(;;)
+     {       
+         wakening_call_.wait();
+@@ -321,6 +329,7 @@ void MailDispatcher::run()
+             std::for_each(listeners_cloned.begin(), listeners_cloned.end(), GenericEventNotifier(&IMailDispatcherListener::idle, this));               
+         }                                                    
+     } // end for        SSH ALI
++    bIsInRun = false;
+ }
+ /*-- 27.08.2004 12:04:46---------------------------------------------------
+ 
+Index: sw/source/ui/dbui/mailmergechildwindow.cxx
+===================================================================
+RCS file: /cvs/sw/sw/source/ui/dbui/mailmergechildwindow.cxx,v
+retrieving revision 1.3
+retrieving revision 1.2.242.5
+diff -u -p -r1.3 -r1.2.242.5
+--- sw/source/ui/dbui/mailmergechildwindow.cxx	28 Jan 2005 15:28:17 -0000	1.3
++++ sw/source/ui/dbui/mailmergechildwindow.cxx	21 Feb 2005 09:15:58 -0000	1.2.242.5
+@@ -202,49 +202,30 @@ void    SwMailMergeChildWin::FillInfo(Sf
+     rInfo.aWinState.Erase();
+     rInfo.bVisible = sal_False;
+ }
+-/*------------------------------------------------------------------------
+-    Beschreibung:
+-------------------------------------------------------------------------*/
+-
+-/*SwSendMailChildWindow::SwSendMailChildWindow( Window* pParent,
+-                                USHORT nId,
+-                                SfxBindings* pBindings,
+-                                SfxChildWinInfo* pInfo ) :
+-                                SfxChildWindow( pParent, nId )
+-{
+-    pWindow = new SwSendMailDialog( pBindings, this, pParent);
+-    static_cast<SwSendMailDialog *>(pWindow)->Initialize(pInfo);
+-    pWindow->Show();
+-}
+-/*-- 01.07.2004 08:21:17---------------------------------------------------
+-
+-  -----------------------------------------------------------------------*/
+-/*SwSendMailDialog*   SwSendMailChildWindow::GetMailDialog()
+-{
+-    return (SwSendMailDialog*)GetWindow();
+-}
+-
+-/*-- 26.08.2004 14:40:00---------------------------------------------------
+-
+-  -----------------------------------------------------------------------*/
+-/*sal_Bool    SwSendMailChildWindow::QueryClose()
+-{
+-    return static_cast<SwSendMailDialog*>(GetWindow())->QueryTermination() && 
+-            SfxChildWindow::QueryClose();
+-}
+ /*-- 21.05.2004 14:07:37---------------------------------------------------
+ 
+   -----------------------------------------------------------------------*/
+ struct SwSendMailDialog_Impl 
+ {
+     friend class SwSendMailDialog;
++    ::osl::Mutex                                aDescriptorMutex;
++    
+     ::std::vector< SwMailDescriptor >           aDescriptors;
++    sal_uInt32                                  nCurrentDescriptor;
++    sal_uInt32                                  nDocumentCount;
+     ::rtl::Reference< MailDispatcher >          xMailDispatcher;
+     ::rtl::Reference< IMailDispatcherListener>  xMailListener;
+     uno::Reference< mail::XMailService >        xConnectedMailService;
+     uno::Reference< mail::XMailService >        xConnectedInMailService;
++    Timer                                       aRemoveTimer;
+ 
+-    SwSendMailDialog_Impl() {}
++  
++    SwSendMailDialog_Impl() :
++        nCurrentDescriptor(0),
++        nDocumentCount(0)
++             {
++                aRemoveTimer.SetTimeout(500);
++             }
+     
+     ~SwSendMailDialog_Impl()
+     {
+@@ -253,9 +234,23 @@ struct SwSendMailDialog_Impl 
+         // shutdown of the mail dispatcher thread.
+         // 'join' with the mail dispatcher thread leads to a 
+         // deadlock (SolarMutex).
+-        xMailDispatcher->shutdown();        
++        if(!xMailDispatcher->isShutdownRequested() )
++            xMailDispatcher->shutdown();        
+     }
++    const SwMailDescriptor* GetNextDescriptor();
+ };
++
++const SwMailDescriptor* SwSendMailDialog_Impl::GetNextDescriptor()
++{
++    ::osl::MutexGuard aGuard(aDescriptorMutex);
++    if(nCurrentDescriptor < aDescriptors.size())
++    {
++        ++nCurrentDescriptor;
++        return &aDescriptors[nCurrentDescriptor - 1]; 
++    }
++    return 0;
++}            
++
+ /*-- 23.06.2004 10:19:55---------------------------------------------------
+ 
+   -----------------------------------------------------------------------*/
+@@ -391,14 +386,11 @@ SwSendWarningBox_Impl::~SwSendWarningBox
+ #define ITEMID_TASK     1
+ #define ITEMID_STATUS   2
+ 
+-//SwSendMailDialog::SwSendMailDialog(SfxBindings* pBindings, 
+-//                                SfxChildWindow* pChild, Window *pParent) :
+-//    SfxFloatingWindow(pBindings, pChild, pParent, SW_RES(DLG_MM_SENDMAILS)),
+ SwSendMailDialog::SwSendMailDialog(Window *pParent, SwMailMergeConfigItem& rConfigItem) :
+-    SfxModalDialog(pParent, SW_RES(DLG_MM_SENDMAILS)),
++    ModelessDialog /*SfxModalDialog*/(pParent, SW_RES(DLG_MM_SENDMAILS)),
+ #pragma warning (disable : 4355)
+     m_aStatusFL( this, ResId(             FL_STATUS             )),
+-    m_aStatusFT( this, ResId(             FT_STATUS             )),
++    m_aStatusFT( this, ResId(             FT_STATUS1            )),
+     m_PausedFI(this, ResId(               FI_PAUSED             )),
+     m_aTransferStatusFL( this, ResId(     FL_TRANSFERSTATUS     )),
+     m_aTransferStatusFT( this, ResId(     FT_TRANSFERSTATUS     )),
+@@ -428,7 +420,8 @@ SwSendMailDialog::SwSendMailDialog(Windo
+     m_pConfigItem(&rConfigItem),
+     m_bCancel(false),
+     m_nSendCount(0),
+-    m_nErrorCount(0)
++    m_nErrorCount(0),
++    m_bDesctructionEnabled(false)
+ {
+     m_nStatusHeight =  m_aSeparatorFL.GetPosPixel().Y() - m_aStatusLB.GetPosPixel().Y();
+     String sTask(ResId(ST_TASK));
+@@ -472,6 +465,7 @@ SwSendMailDialog::SwSendMailDialog(Windo
+     m_aStatusLB.SetTabs(&nTabs[0], MAP_PIXEL);
+     m_aStatusLB.SetSpaceBetweenEntries(3);
+ 
++    DetailsHdl_Impl( &m_aDetailsPB );
+     UpdateTransferStatus();
+ }
+ /*-- 21.05.2004 14:10:39---------------------------------------------------
+@@ -509,7 +503,22 @@ SwSendMailDialog::~SwSendMailDialog()
+   -----------------------------------------------------------------------*/
+ void SwSendMailDialog::AddDocument( SwMailDescriptor& rDesc )
+ {
++    ::osl::MutexGuard aGuard(m_pImpl->aDescriptorMutex);
+     m_pImpl->aDescriptors.push_back(rDesc);
++    // if the dialog is already running then continue sending of documents
++    if(m_pImpl->xMailDispatcher.is())
++    {
++        IterateMails();
++    }
++                
++}
++/*-- 31.01.2005 08:59:35---------------------------------------------------
++
++  -----------------------------------------------------------------------*/
++void SwSendMailDialog::SetDocumentCount( sal_Int32 nAllDocuments )
++{
++    m_pImpl->nDocumentCount = nAllDocuments;
++    UpdateTransferStatus();
+ }
+ /*-- 21.05.2004 14:10:40---------------------------------------------------
+ 
+@@ -575,12 +584,7 @@ IMPL_LINK( SwSendMailDialog, StopHdl_Imp
+   -----------------------------------------------------------------------*/
+ IMPL_LINK( SwSendMailDialog, CloseHdl_Impl, PushButton*, pButton )
+ {
+-    // prevent a query for termination 
+-    m_nSendCount = m_pImpl->aDescriptors.size();
+-    EndDialog( RET_OK );
+-//    GetBindings().GetDispatcher()->Execute(FN_MAILMERGE_SENDMAIL_CHILDWINDOW,
+-//        SFX_CALLMODE_ASYNCHRON);
+-
++    ModelessDialog::Show( sal_False );
+     return 0;
+ }
+ /*-- 14.06.2004 09:48:30---------------------------------------------------
+@@ -591,6 +595,31 @@ IMPL_STATIC_LINK( SwSendMailDialog, Star
+     pDialog->SendMails();
+     return 0;
+ }
++/*-- 14.06.2004 09:48:30---------------------------------------------------
++
++  -----------------------------------------------------------------------*/
++IMPL_STATIC_LINK( SwSendMailDialog, RemoveThis, Timer*, pTimer )
++{
++    if( pThis->m_pImpl->xMailDispatcher.is() )
++    {
++        if(pThis->m_pImpl->xMailDispatcher->isStarted())
++            pThis->m_pImpl->xMailDispatcher->stop();
++        if(!pThis->m_pImpl->xMailDispatcher->isShutdownRequested()) 
++            pThis->m_pImpl->xMailDispatcher->shutdown();
++    }        
++
++    if( pThis->m_bDesctructionEnabled && 
++            (!pThis->m_pImpl->xMailDispatcher.is() || 
++                    !pThis->m_pImpl->xMailDispatcher->isRunning()))
++    {
++        delete pThis;
++    }
++    else
++    {
++        pTimer->Start();
++    }
++    return 0;
++}
+ /*-- 07.07.2004 14:34:05---------------------------------------------------
+     
+   -----------------------------------------------------------------------*/
+@@ -632,19 +661,30 @@ void  SwSendMailDialog::SendMails()
+         return;
+     }
+     m_pImpl->xMailDispatcher.set( new MailDispatcher(xSmtpServer));
+-    ::std::vector< SwMailDescriptor >::iterator aCurrentMailDescriptor;
+-    for( aCurrentMailDescriptor = m_pImpl->aDescriptors.begin(); 
+-            aCurrentMailDescriptor != m_pImpl->aDescriptors.end(); 
+-                    ++aCurrentMailDescriptor)
++    IterateMails();
++    m_pImpl->xMailListener = new SwMailDispatcherListener_Impl(*this);
++    m_pImpl->xMailDispatcher->addListener(m_pImpl->xMailListener);
++    if(!m_bCancel)
++    {        
++        m_pImpl->xMailDispatcher->start();
++    }
++}
++/* -----------------28.01.2005 10:17-----------------
++
++ --------------------------------------------------*/
++void  SwSendMailDialog::IterateMails()
++{
++    const SwMailDescriptor* pCurrentMailDescriptor = m_pImpl->GetNextDescriptor();
++    while( pCurrentMailDescriptor )
+     {        
+-        if(!SwMailMergeHelper::CheckMailAddress( aCurrentMailDescriptor->sEMail ))
++        if(!SwMailMergeHelper::CheckMailAddress( pCurrentMailDescriptor->sEMail ))
+         {
+             ImageList& rImgLst = GetSettings().GetStyleSettings().GetWindowColor().IsDark() ? 
+                                         m_aImageListHC : m_aImageList;
+             Image aInsertImg =   rImgLst.GetImage( FN_FORMULA_CANCEL );
+ 
+             String sMessage = m_sSendingTo;
+-            String sTmp(aCurrentMailDescriptor->sEMail);
++            String sTmp(pCurrentMailDescriptor->sEMail);
+             sTmp += '\t';
+             sTmp += m_sFailed;
+             sMessage.SearchAndReplaceAscii("%1", sTmp);
+@@ -652,36 +692,37 @@ void  SwSendMailDialog::SendMails()
+             ++m_nSendCount;
+             ++m_nErrorCount;
+             UpdateTransferStatus( );
++            pCurrentMailDescriptor = m_pImpl->GetNextDescriptor();    
+             continue;
+         }
+         SwMailMessage* pMessage = 0;
+         uno::Reference< mail::XMailMessage > xMessage = pMessage = new SwMailMessage;
+         if(m_pConfigItem->IsMailReplyTo())
+             pMessage->setReplyToAddress(m_pConfigItem->GetMailReplyTo());
+-        pMessage->addRecipient( aCurrentMailDescriptor->sEMail );
++        pMessage->addRecipient( pCurrentMailDescriptor->sEMail );
+         pMessage->SetSenderAddress( m_pConfigItem->GetMailAddress() );
+-        if(aCurrentMailDescriptor->sAttachmentURL.getLength())
++        if(pCurrentMailDescriptor->sAttachmentURL.getLength())
+         {
+             mail::MailAttachment aAttach;
+             aAttach.Data = 
+                     new SwMailTransferable(
+-                        aCurrentMailDescriptor->sAttachmentURL, 
+-                        aCurrentMailDescriptor->sAttachmentName, 
+-                        aCurrentMailDescriptor->sMimeType );
+-            aAttach.ReadableName = aCurrentMailDescriptor->sAttachmentName;
++                        pCurrentMailDescriptor->sAttachmentURL, 
++                        pCurrentMailDescriptor->sAttachmentName, 
++                        pCurrentMailDescriptor->sMimeType );
++            aAttach.ReadableName = pCurrentMailDescriptor->sAttachmentName;
+             pMessage->addAttachment( aAttach ); 
+         }
+-        pMessage->setSubject( aCurrentMailDescriptor->sSubject );
++        pMessage->setSubject( pCurrentMailDescriptor->sSubject );
+         uno::Reference< datatransfer::XTransferable> xBody = 
+                     new SwMailTransferable(
+-                        aCurrentMailDescriptor->sBodyContent, 
+-                        aCurrentMailDescriptor->sBodyMimeType);
++                        pCurrentMailDescriptor->sBodyContent, 
++                        pCurrentMailDescriptor->sBodyMimeType);
+         pMessage->setBody( xBody );
+             
+         //CC and BCC are tokenized by ';'
+-        if(aCurrentMailDescriptor->sCC.getLength())
++        if(pCurrentMailDescriptor->sCC.getLength())
+         {        
+-            String sTokens( aCurrentMailDescriptor->sCC );
++            String sTokens( pCurrentMailDescriptor->sCC );
+             sal_uInt16 nTokens = sTokens.GetTokenCount( ';' );
+             xub_StrLen nPos = 0;
+             for( sal_uInt16 nToken = 0; nToken < nTokens; ++nToken)
+@@ -691,9 +732,9 @@ void  SwSendMailDialog::SendMails()
+                     pMessage->addCcRecipient( sTmp );
+             }
+         }
+-        if(aCurrentMailDescriptor->sBCC.getLength())
++        if(pCurrentMailDescriptor->sBCC.getLength())
+         {        
+-            String sTokens( aCurrentMailDescriptor->sBCC );
++            String sTokens( pCurrentMailDescriptor->sBCC );
+             sal_uInt16 nTokens = sTokens.GetTokenCount( ';' );
+             xub_StrLen nPos = 0;
+             for( sal_uInt16 nToken = 0; nToken < nTokens; ++nToken)
+@@ -704,33 +745,31 @@ void  SwSendMailDialog::SendMails()
+             }
+         }
+         m_pImpl->xMailDispatcher->enqueueMailMessage( xMessage );
++        pCurrentMailDescriptor = m_pImpl->GetNextDescriptor();    
+     }
+-    m_pImpl->aDescriptors.clear();
+     UpdateTransferStatus();
+-    m_pImpl->xMailListener = new SwMailDispatcherListener_Impl(*this);
+-    m_pImpl->xMailDispatcher->addListener(m_pImpl->xMailListener);
+-    if(!m_bCancel)
+-    {        
+-        m_pImpl->xMailDispatcher->start();
+-    }
+ }
+ /*-- 27.08.2004 10:50:17---------------------------------------------------
+ 
+   -----------------------------------------------------------------------*/
+-short SwSendMailDialog::Execute()
++void SwSendMailDialog::Show()
+ {
+     Application::PostUserEvent( STATIC_LINK( this, SwSendMailDialog,
+                                                 StartSendMails ), this );
+-    return SfxModalDialog::Execute();
++    ModelessDialog::Show();
+ }            
+-
+-/*-- 14.06.2004 09:50:18---------------------------------------------------
++/*-- 27.08.2004 10:50:17---------------------------------------------------
+ 
+   -----------------------------------------------------------------------*/
+-/*void SwSendMailDialog::Start()
++void  SwSendMailDialog::StateChanged( StateChangedType nStateChange )
+ {
+-    Application::PostUserEvent( STATIC_LINK( this, SwSendMailDialog,
+-                                                StartSendMails ), this );
++    ModelessDialog::StateChanged( nStateChange );
++    if(STATE_CHANGE_VISIBLE == nStateChange && !IsVisible())
++    {
++        m_pImpl->aRemoveTimer.SetTimeoutHdl( STATIC_LINK( this, SwSendMailDialog,
++                                                    RemoveThis ) );
++        m_pImpl->aRemoveTimer.Start();
++    }
+ }
+ 
+ /*-- 23.06.2004 10:14:22---------------------------------------------------
+@@ -776,7 +815,7 @@ void SwSendMailDialog::UpdateTransferSta
+ {        
+     String sStatus( m_sTransferStatus );
+     sStatus.SearchAndReplaceAscii("%1", String::CreateFromInt32(m_nSendCount) );
+-    sStatus.SearchAndReplaceAscii("%2", String::CreateFromInt32(m_pImpl->aDescriptors.size()));
++    sStatus.SearchAndReplaceAscii("%2", String::CreateFromInt32(m_pImpl->nDocumentCount));
+     m_aTransferStatusFT.SetText(sStatus);
+     
+     sStatus = m_sErrorStatus;
+@@ -795,27 +834,5 @@ void SwSendMailDialog::AllMailsSent() 
+ {
+     m_aStopPB.Enable(sal_False);
+ }
+-/*-- 01.07.2004 08:16:26---------------------------------------------------
+-
+-  -----------------------------------------------------------------------*/
+-/*void    SwSendMailDialog::FillInfo(SfxChildWinInfo& rInfo) const
+-{
+-    SfxFloatingWindow::FillInfo(rInfo);
+-    rInfo.bVisible = sal_False;
+-}
+-/*-- 18.08.2004 12:54:30---------------------------------------------------
+-
+-  -----------------------------------------------------------------------*/
+-/*sal_Bool SwSendMailDialog::QueryTermination()
+-{
+-    bool bRet = sal_True;
+-    if(m_nSendCount < m_pImpl->aDescriptors.size())
+-    {        
+-        QueryBox aQuery(this, WB_YES_NO, m_sTerminateQuery);
+-        USHORT nRet = aQuery.Execute();
+-        bRet = nRet == RET_YES;
+-    }
+-    return bRet; 
+-}*/
+ 
+ 
+Index: sw/source/ui/dbui/mailmergechildwindow.hrc
+===================================================================
+RCS file: /cvs/sw/sw/source/ui/dbui/mailmergechildwindow.hrc,v
+retrieving revision 1.2
+retrieving revision 1.2.242.1
+diff -u -p -r1.2 -r1.2.242.1
+--- sw/source/ui/dbui/mailmergechildwindow.hrc	20 Sep 2004 13:13:01 -0000	1.2
++++ sw/source/ui/dbui/mailmergechildwindow.hrc	31 Jan 2005 19:57:54 -0000	1.2.242.1
+@@ -66,7 +66,7 @@
+ #define FL_SEPARATOR                7
+ 
+ #define FL_STATUS                   60
+-#define FT_STATUS                   61
++#define FT_STATUS1                  61
+ #define FL_TRANSFERSTATUS           62
+ #define FT_TRANSFERSTATUS           63
+ #define PB_PROGRESS                 64
+Index: sw/source/ui/dbui/mailmergechildwindow.src
+===================================================================
+RCS file: /cvs/sw/sw/source/ui/dbui/mailmergechildwindow.src,v
+retrieving revision 1.2
+retrieving revision 1.2.242.1
+diff -u -p -r1.2 -r1.2.242.1
+--- sw/source/ui/dbui/mailmergechildwindow.src	20 Sep 2004 13:13:11 -0000	1.2
++++ sw/source/ui/dbui/mailmergechildwindow.src	31 Jan 2005 19:57:54 -0000	1.2.242.1
+@@ -116,7 +116,7 @@ FloatingWindow DLG_MAILMERGECHILD
+     };
+ };
+ //FloatingWindow DLG_MM_SENDMAILS
+-ModalDialog DLG_MM_SENDMAILS
++ModelessDialog /*ModalDialog*/ DLG_MM_SENDMAILS
+ {
+     OutputSize = TRUE ;
+     SVLook = TRUE ;
+@@ -135,7 +135,7 @@ ModalDialog DLG_MM_SENDMAILS
+         Text [ de ] = "Verbindungsstatus" ;
+         Text[ en-US ] = "Connection status";
+     };
+-    FixedText  FT_STATUS
++    FixedText  FT_STATUS1
+     {
+         Pos = MAP_APPFONT ( 12 , 14 ) ;
+         Size = MAP_APPFONT ( 226 , 8 ) ;
+Index: sw/source/ui/dbui/mmaddressblockpage.src
+===================================================================
+RCS file: /cvs/sw/sw/source/ui/dbui/mmaddressblockpage.src,v
+retrieving revision 1.2
+retrieving revision 1.2.242.1
+diff -u -p -r1.2 -r1.2.242.1
+--- sw/source/ui/dbui/mmaddressblockpage.src	20 Sep 2004 13:14:52 -0000	1.2
++++ sw/source/ui/dbui/mmaddressblockpage.src	31 Jan 2005 07:15:24 -0000	1.2.242.1
+@@ -120,7 +120,7 @@ TabPage DLG_MM_ADDRESSBLOCK_PAGE
+         Pos = MAP_APPFONT ( 6 , 72 ) ;
+         Size = MAP_APPFONT ( 248 , 8 ) ;
+         Text [ de ] = "2. Wählen Sie den Adressblock, der in das Dokument eingefügt werden soll." ;
+-        Text[ en-US ] = "2. Select the address block you want to inserted in the document";
++        Text[ en-US ] = "2. Select the address block you want inserted in the document";
+     };
+     CheckBox        CB_ADDRESS  
+     {
+Index: sw/source/ui/dbui/mmlayoutpage.cxx
+===================================================================
+RCS file: /cvs/sw/sw/source/ui/dbui/mmlayoutpage.cxx,v
+retrieving revision 1.5
+retrieving revision 1.5.66.2
+diff -u -p -r1.5 -r1.5.66.2
+--- sw/source/ui/dbui/mmlayoutpage.cxx	28 Jan 2005 15:29:36 -0000	1.5
++++ sw/source/ui/dbui/mmlayoutpage.cxx	21 Feb 2005 07:28:39 -0000	1.5.66.2
+@@ -109,6 +109,9 @@
+ #ifndef _COM_SUN_STAR_VIEW_DOCUMENTZOOMTYPE_HPP_
+ #include <com/sun/star/view/DocumentZoomType.hpp>
+ #endif
++#ifndef _COM_SUN_STAR_BEANS_PROPERTYVALUE_HPP_
++#include <com/sun/star/beans/PropertyValue.hpp>
++#endif
+ #ifndef _FLDMGR_HXX
+ #include <fldmgr.hxx>
+ #endif
+@@ -165,6 +168,7 @@
+ 
+ using namespace osl;
+ using namespace svt;
++using namespace ::com::sun::star;
+ using namespace ::com::sun::star::uno;
+ using namespace ::com::sun::star::text;
+ using namespace ::com::sun::star::frame;
+@@ -227,10 +231,14 @@ SwMailMergeLayoutPage::SwMailMergeLayout
+         aTempFile.EnableKillingFile();
+     }
+     SwView* pView = m_pWizard->GetSwView();
+-    SfxStringItem aURL( SID_FILE_NAME, m_sExampleURL);
++    uno::Sequence< beans::PropertyValue > aValues(1);
++    beans::PropertyValue* pValues = aValues.getArray();
++    pValues[0].Name = C2U("FilterName");
++    pValues[0].Value <<= ::rtl::OUString(pSfxFlt->GetFilterName());
++
++    uno::Reference< frame::XStorable > xStore( pView->GetDocShell()->GetModel(), uno::UNO_QUERY);
++    xStore->storeToURL( m_sExampleURL, aValues   );
+ 
+-    SfxStringItem aFilterName( SID_FILTER_NAME, pSfxFlt->GetFilterName());
+-    pView->GetViewFrame()->GetDispatcher()->Execute( SID_EXPORTDOC, SFX_CALLMODE_SYNCHRON, &aURL, &aFilterName, 0);
+     Link aLink(LINK(this, SwMailMergeLayoutPage, PreviewLoadedHdl_Impl));
+     m_pExampleFrame = new SwOneExampleFrame( m_aExampleWIN,
+                                     EX_SHOW_DEFAULT_PAGE, &aLink, &m_sExampleURL );
+Index: sw/source/ui/dbui/mmoutputpage.cxx
+===================================================================
+RCS file: /cvs/sw/sw/source/ui/dbui/mmoutputpage.cxx,v
+retrieving revision 1.5
+retrieving revision 1.5.34.5
+diff -u -p -r1.5 -r1.5.34.5
+--- sw/source/ui/dbui/mmoutputpage.cxx	11 Jan 2005 12:39:56 -0000	1.5
++++ sw/source/ui/dbui/mmoutputpage.cxx	21 Feb 2005 08:46:00 -0000	1.5.34.5
+@@ -113,6 +113,9 @@
+ #ifndef _SV_MSGBOX_HXX
+ #include <vcl/msgbox.hxx>
+ #endif
++#ifndef _SFX_DINFDLG_HXX
++#include <sfx2/dinfdlg.hxx>
++#endif
+ #ifndef _SFX_PRINTER_HXX
+ #include <sfx2/printer.hxx>
+ #endif
+@@ -147,12 +150,18 @@
+ #ifndef _MAILMERGEGREETINGSPAGE_HXX
+ #include <mmgreetingspage.hxx>
+ #endif
++#ifndef _COM_SUN_STAR_FRAME_XSTORABLE_HPP_
++#include <com/sun/star/frame/XStorable.hpp>
++#endif
+ #ifndef _COM_SUN_STAR_SDBCX_XCOLUMNSSUPPLIER_HPP_
+ #include <com/sun/star/sdbcx/XColumnsSupplier.hpp>
+ #endif
+ #ifndef _COM_SUN_STAR_SDB_XCOLUMN_HPP_
+ #include <com/sun/star/sdb/XColumn.hpp>
+ #endif
++#ifndef _COM_SUN_STAR_BEANS_PROPERTYVALUE_HPP_
++#include <com/sun/star/beans/PropertyValue.hpp>
++#endif
+ #ifndef _BASEDLGS_HXX 
+ #include <sfx2/basedlgs.hxx>
+ #endif
+@@ -182,6 +191,7 @@ using namespace svt;
+ using namespace ::com::sun::star;
+ using namespace ::com::sun::star::uno;
+ 
++#define C2U(cChar) ::rtl::OUString::createFromAscii(cChar)
+ /*-- 01.07.2004 16:47:49---------------------------------------------------
+ 
+   -----------------------------------------------------------------------*/
+@@ -479,6 +489,23 @@ SwMailMergeOutputPage::SwMailMergeOutput
+ 
+     m_aCopyToPB.SetClickHdl(LINK(this, SwMailMergeOutputPage, CopyToHdl_Impl));
+ 
++}    
++/*-- 02.04.2004 13:15:44---------------------------------------------------
++
++  -----------------------------------------------------------------------*/
++SwMailMergeOutputPage::~SwMailMergeOutputPage()
++{
++    USHORT nEntryCount = m_aPrinterLB.GetEntryCount();
++    for ( USHORT i = 0; i < nEntryCount; i++ )
++        delete (QueueInfo*)m_aPrinterLB.GetEntryData( i );
++    delete m_pTempPrinter;
++    delete m_pDocumentPrinterCopy;
++}
++/*-- 31.01.2005 08:38:14---------------------------------------------------
++
++  -----------------------------------------------------------------------*/
++void SwMailMergeOutputPage::ActivatePage()
++{
+     //fill printer ListBox
+     USHORT nCount = Printer::GetQueueCount();
+     if ( nCount )
+@@ -504,6 +531,7 @@ SwMailMergeOutputPage::SwMailMergeOutput
+         m_pDocumentPrinterCopy = pTargetView->GetWrtShell().GetPrt( TRUE )->Clone();
+     }
+     m_aPrinterLB.SelectEntry( rConfigItem.GetSelectedPrinter() );
++
+     SwView* pSourceView = rConfigItem.GetSourceView();
+     DBG_ASSERT(pSourceView, "no source view exists")
+     if(pSourceView)
+@@ -518,19 +546,7 @@ SwMailMergeOutputPage::SwMailMergeOutput
+     }
+     if(!rConfigItem.IsMailAvailable())
+         m_aSendMailRB.Enable(sal_False);
+-}    
+-/*-- 02.04.2004 13:15:44---------------------------------------------------
+-
+-  -----------------------------------------------------------------------*/
+-SwMailMergeOutputPage::~SwMailMergeOutputPage()
+-{
+-    USHORT nEntryCount = m_aPrinterLB.GetEntryCount();
+-    for ( USHORT i = 0; i < nEntryCount; i++ )
+-        delete (QueueInfo*)m_aPrinterLB.GetEntryData( i );
+-    delete m_pTempPrinter;
+-    delete m_pDocumentPrinterCopy;
+ }
+-
+ /*-- 05.07.2004 13:54:11---------------------------------------------------
+ 
+   -----------------------------------------------------------------------*/
+@@ -771,7 +787,17 @@ IMPL_LINK(SwMailMergeOutputPage, SaveOut
+ 
+     if(m_aSaveAsOneRB.IsChecked())
+     {
+-        pTargetView->GetViewFrame()->GetDispatcher()->Execute(SID_SAVEDOC);
++        String sFilter;
++        String sPath = SwMailMergeHelper::CallSaveAsDialog(sFilter);
++        if(!sPath.Len())
++            return 0;
++        uno::Sequence< beans::PropertyValue > aValues(1);
++        beans::PropertyValue* pValues = aValues.getArray();
++        pValues[0].Name = C2U("FilterName");
++        pValues[0].Value <<= ::rtl::OUString(sFilter);
++
++        uno::Reference< frame::XStorable > xStore( pTargetView->GetDocShell()->GetModel(), uno::UNO_QUERY);
++        xStore->storeToURL( sPath, aValues );
+     }
+     else 
+     {
+@@ -796,14 +822,17 @@ IMPL_LINK(SwMailMergeOutputPage, SaveOut
+         String sTargetTempURL = URIHelper::SmartRel2Abs(
+             INetURLObject(), utl::TempFile::CreateTempName(),
+             URIHelper::GetMaybeFileHdl());
+-        SfxStringItem aURL( SID_FILE_NAME, sTargetTempURL );
+         const SfxFilter *pSfxFlt = SwIoSystem::GetFilterOfFormat(
+                 String::CreateFromAscii( GetFILTER_XML() ),
+                 SwDocShell::Factory().GetFilterContainer() );
+ 
+-        SfxStringItem aFilterName( SID_FILTER_NAME, pSfxFlt->GetFilterName());
+-        pTargetView->GetViewFrame()->GetDispatcher()->Execute( 
+-                            SID_EXPORTDOC, SFX_CALLMODE_SYNCHRON, &aURL, &aFilterName, 0);
++        uno::Sequence< beans::PropertyValue > aValues(1);
++        beans::PropertyValue* pValues = aValues.getArray();
++        pValues[0].Name = C2U("FilterName");
++        pValues[0].Value <<= ::rtl::OUString(pSfxFlt->GetFilterName());
++
++        uno::Reference< frame::XStorable > xStore( pTargetView->GetDocShell()->GetModel(), uno::UNO_QUERY);
++        xStore->storeToURL( sTargetTempURL, aValues   );
+ 
+         for(sal_uInt32 nDoc = nBegin; nDoc < nEnd; ++nDoc)
+         {        
+@@ -840,8 +869,8 @@ IMPL_LINK(SwMailMergeOutputPage, SaveOut
+             String sCounter('_');
+             sCounter += String::CreateFromInt32(nDoc);
+             sOutPath.Insert(sCounter, sPath.Len() - sExtension.Len() - 1);
+-            SfxStringItem aName(SID_FILE_NAME, sOutPath);
+-            SfxStringItem aFilter(SID_FILTER_NAME, sFilter);
++            //SfxStringItem aName(SID_FILE_NAME, sOutPath);
++            //SfxStringItem aFilter(SID_FILTER_NAME, sFilter);
+ 
+             const SfxBoolItem* pBool = 0;
+             while(true)
+@@ -849,14 +878,27 @@ IMPL_LINK(SwMailMergeOutputPage, SaveOut
+                 //time for other slots is needed
+                 for(sal_Int16 r = 0; r < 10; ++r)
+                     Application::Reschedule();
+-                pBool = (const SfxBoolItem*)
+-                        pTempFrame->GetDispatcher()->Execute(
+-                                SID_SAVEASDOC, SFX_CALLMODE_SYNCHRON, &aName, &aFilter, 0L );
+-                if(!pBool || !pBool->GetValue())
++                bool bFailed = false;
++                try
++                {
++                    uno::Sequence< beans::PropertyValue > aValues(1);
++                    beans::PropertyValue* pValues = aValues.getArray();
++                    pValues[0].Name = C2U("FilterName");
++                    pValues[0].Value <<= ::rtl::OUString(sFilter);
++
++                    uno::Reference< frame::XStorable > xStore( xTempDocShell->GetModel(), uno::UNO_QUERY);
++                    xStore->storeToURL( sOutPath, aValues   );
++                }
++                catch( const uno::Exception& )
++                {
++                    bFailed = true; 
++                }
++                
++                if(bFailed)
+                 {
+-                    SwSaveWarningBox_Impl aWarning( pButton, aName.GetValue() );
++                    SwSaveWarningBox_Impl aWarning( pButton, sOutPath );
+                     if(RET_OK == aWarning.Execute())
+-                        aName.SetValue(aWarning.GetFileName());
++                        sOutPath = aWarning.GetFileName();
+                     else
+                     {        
+                         xTempDocShell->DoClose();
+@@ -1169,18 +1211,26 @@ IMPL_LINK(SwMailMergeOutputPage, SendDoc
+     String sTargetTempURL = URIHelper::SmartRel2Abs(
+         INetURLObject(), utl::TempFile::CreateTempName(),
+         URIHelper::GetMaybeFileHdl());
+-    SfxStringItem aURL( SID_FILE_NAME, sTargetTempURL );
+     const SfxFilter *pTargetSfxFlt = SwIoSystem::GetFilterOfFormat(
+             String::CreateFromAscii( GetFILTER_XML() ),
+             SwDocShell::Factory().GetFilterContainer() );
+ 
+-    SfxStringItem aTargetFilterName( SID_FILTER_NAME, pTargetSfxFlt->GetFilterName());
+-    pTargetView->GetViewFrame()->GetDispatcher()->Execute( 
+-                        SID_EXPORTDOC, SFX_CALLMODE_SYNCHRON, &aURL, &aTargetFilterName, 0);
++    uno::Sequence< beans::PropertyValue > aValues(1);
++    beans::PropertyValue* pValues = aValues.getArray();
++    pValues[0].Name = C2U("FilterName");
++    pValues[0].Value <<= ::rtl::OUString(pTargetSfxFlt->GetFilterName());
++
++    uno::Reference< frame::XStorable > xStore( pTargetView->GetDocShell()->GetModel(), uno::UNO_QUERY);
++    xStore->storeToURL( sTargetTempURL, aValues   );
+     
+-    m_pWizard->EnterWait();
++    pDlg->SetDocumentCount( nEnd );
++    pDlg->Show();
++    //help to force painting the dialog
++    for ( sal_Int16 i = 0; i < 25; i++)
++        Application::Reschedule();
+     for(sal_uInt32 nDoc = nBegin; nDoc < nEnd; ++nDoc)
+     {        
++        m_pWizard->EnterWait();
+         SwDocMergeInfo& rInfo = rConfigItem.GetDocumentMergeInfo(nDoc);
+             
+         //now extract a document from the target document
+@@ -1203,21 +1253,34 @@ IMPL_LINK(SwMailMergeOutputPage, SendDoc
+         pTargetView->GetWrtShell().EndAction();
+         
+         //then save it
+-        SfxDispatcher* pSfxDispatcher = pTempView->GetViewFrame()->GetDispatcher();
+         SfxStringItem aName(SID_FILE_NAME, 
+                 URIHelper::SmartRel2Abs(
+                     INetURLObject(), utl::TempFile::CreateTempName(0),
+                     URIHelper::GetMaybeFileHdl()) );
+-        SfxStringItem aFilterOptions(SID_FILE_FILTEROPTIONS, sFilterOptions);
+         const SfxStringItem* pFilterOptions = 0;
+-        if(MM_DOCTYPE_TEXT == nDocType)
+-            pFilterOptions = &aFilterOptions;
+         
+-        const SfxBoolItem* pBool = (const SfxBoolItem*)
+-                    pSfxDispatcher->Execute(
+-                            bIsPDF ? SID_DIRECTEXPORTDOCASPDF: SID_EXPORTDOC, 
+-                                  SFX_CALLMODE_SYNCHRON, &aName, &aFilterName, 
+-                                    pFilterOptions, 0L );
++/*        if(bIsPDF)
++        {
++            SfxDispatcher* pSfxDispatcher = pTempView->GetViewFrame()->GetDispatcher();
++            pSfxDispatcher->Execute(
++                            SID_DIRECTEXPORTDOCASPDF,
++                                  SFX_CALLMODE_SYNCHRON, &aName, &aFilterName, 0L );
++        }
++        else*/
++        {
++            uno::Sequence< beans::PropertyValue > aValues(MM_DOCTYPE_TEXT == nDocType ? 2 : 1);
++            beans::PropertyValue* pValues = aValues.getArray();
++            pValues[0].Name = C2U("FilterName");
++            pValues[0].Value <<= ::rtl::OUString(pSfxFlt->GetFilterName());
++            if(MM_DOCTYPE_TEXT == nDocType)
++            {        
++                pValues[1].Name = C2U("FilterOptions");
++                pValues[1].Value <<= ::rtl::OUString(sFilterOptions);
++            }
++
++            uno::Reference< frame::XStorable > xStore( pTempView->GetDocShell()->GetModel(), uno::UNO_QUERY);
++            xStore->storeToURL( aName.GetValue(), aValues );
++        }            
+         xTempDocShell->DoClose();
+             
+         sal_Int32 nTarget = rConfigItem.MoveResultSet(rInfo.nDBRow);
+@@ -1314,14 +1377,22 @@ IMPL_LINK(SwMailMergeOutputPage, SendDoc
+         aDesc.sCC = m_sCC;
+         aDesc.sBCC = m_sBCC;
+         pDlg->AddDocument( aDesc );
++        //help to force painting the dialog
++        for ( sal_Int16 i = 0; i < 25; i++)
++            Application::Reschedule();
++        //stop creating of data when dialog has been closed
++        if(!pDlg->IsVisible())
++        {
++            m_pWizard->LeaveWait();
++            break;
++        }
++        m_pWizard->LeaveWait();
+     }
++    pDlg->EnableDesctruction();
+     ::osl::File::remove( sTargetTempURL );
+-    m_pWizard->LeaveWait();
+ 
+     m_pWizard->enableButtons(WZB_FINISH, sal_True);
+-    
+-    pDlg->Execute();
+-    delete pDlg;
++    //the dialog deletes itself
++    //delete pDlg;
+     return 0;
+ }
+-
+Index: sw/source/ui/dbui/mmoutputpage.hxx
+===================================================================
+RCS file: /cvs/sw/sw/source/ui/dbui/mmoutputpage.hxx,v
+retrieving revision 1.3
+retrieving revision 1.3.190.2
+diff -u -p -r1.3 -r1.3.190.2
+--- sw/source/ui/dbui/mmoutputpage.hxx	22 Oct 2004 10:58:10 -0000	1.3
++++ sw/source/ui/dbui/mmoutputpage.hxx	1 Feb 2005 09:15:36 -0000	1.3.190.2
+@@ -104,6 +104,7 @@
+ 
+ class SwMailMergeWizard;
+ class SfxPrinter;
++class SwSendMailDialog;
+ 
+ namespace com{ namespace sun{ namespace star{ 
+     namespace mail{
+@@ -197,6 +198,7 @@ class SwMailMergeOutputPage : public svt
+ 
+ protected:
+         virtual sal_Bool determineNextButtonState();
++        virtual void     ActivatePage();
+ public:     
+         SwMailMergeOutputPage( SwMailMergeWizard* _pParent);
+         ~SwMailMergeOutputPage();
+@@ -222,7 +224,7 @@ struct SwMailDescriptor
+ struct SwSendMailDialog_Impl;
+ class MailProgressBar_Impl;
+ class SwMailMergeConfigItem;
+-class SW_DLLPUBLIC SwSendMailDialog : public SfxModalDialog
++class SW_DLLPUBLIC SwSendMailDialog : public ModelessDialog //SfxModalDialog
+ {
+     FixedLine               m_aStatusFL;
+     FixedText               m_aStatusFT;
+@@ -255,6 +257,7 @@ class SW_DLLPUBLIC SwSendMailDialog : pu
+     String                  m_sTerminateQuery;
+ 
+     bool                    m_bCancel;
++    bool                    m_bDesctructionEnabled;
+ 
+     ImageList               m_aImageList;
+     ImageList               m_aImageListHC;
+@@ -270,15 +273,22 @@ class SW_DLLPUBLIC SwSendMailDialog : pu
+     SW_DLLPRIVATE DECL_LINK( CloseHdl_Impl, PushButton* );
+     SW_DLLPRIVATE DECL_STATIC_LINK( SwSendMailDialog, StartSendMails, SwSendMailDialog* );
+     SW_DLLPRIVATE DECL_STATIC_LINK( SwSendMailDialog, StopSendMails, SwSendMailDialog* );
++    SW_DLLPRIVATE DECL_STATIC_LINK( SwSendMailDialog, RemoveThis, Timer* );
+ 
++    SW_DLLPRIVATE void        IterateMails();
+     SW_DLLPRIVATE void        SendMails();
+     SW_DLLPRIVATE void        UpdateTransferStatus();
++
++    virtual void        StateChanged( StateChangedType nStateChange );
++
+ public:
+     SwSendMailDialog( Window* pParent, SwMailMergeConfigItem& );
+     ~SwSendMailDialog();
+ 
+     void                AddDocument( SwMailDescriptor& rDesc );
+-    virtual short       Execute();
++    void                SetDocumentCount( sal_Int32 nAllDocuments );
++    void                EnableDesctruction() {m_bDesctructionEnabled = true;}
++    void                Show();
+ 
+     void                DocumentSent( ::com::sun::star::uno::Reference< ::com::sun::star::mail::XMailMessage>,
+                                         bool bResult,
+Index: sw/source/ui/dbui/selectdbtabledialog.cxx
+===================================================================
+RCS file: /cvs/sw/sw/source/ui/dbui/selectdbtabledialog.cxx,v
+retrieving revision 1.3
+retrieving revision 1.3.242.1
+diff -u -p -r1.3 -r1.3.242.1
+--- sw/source/ui/dbui/selectdbtabledialog.cxx	29 Sep 2004 09:32:37 -0000	1.3
++++ sw/source/ui/dbui/selectdbtabledialog.cxx	14 Feb 2005 11:49:39 -0000	1.3.242.1
+@@ -143,10 +143,10 @@ SwSelectDBTableDialog::SwSelectDBTableDi
+     m_aTableLB.SetPosSizePixel(aLBPos, aLBSize);
+     
+     Size aSz(m_aTableHB.GetOutputSizePixel());
+-    m_aTableHB.InsertItem( 0, m_sName,
++    m_aTableHB.InsertItem( 1, m_sName,
+                             aSz.Width()/2,
+                             HIB_LEFT | HIB_VCENTER /*| HIB_CLICKABLE | HIB_UPARROW */);
+-    m_aTableHB.InsertItem( 1, m_sType,
++    m_aTableHB.InsertItem( 2, m_sType,
+                             aSz.Width()/2,
+                             HIB_LEFT | HIB_VCENTER /*| HIB_CLICKABLE | HIB_UPARROW */);
+     m_aTableHB.SetHelpId(HID_MM_ADDRESSLIST_HB );
+Index: sw/source/ui/dochdl/swdtflvr.cxx
+===================================================================
+RCS file: /cvs/sw/sw/source/ui/dochdl/swdtflvr.cxx,v
+retrieving revision 1.90
+retrieving revision 1.87.32.2
+diff -u -p -r1.90 -r1.87.32.2
+--- sw/source/ui/dochdl/swdtflvr.cxx	9 Feb 2005 14:50:57 -0000	1.90
++++ sw/source/ui/dochdl/swdtflvr.cxx	17 Feb 2005 15:08:45 -0000	1.87.32.2
+@@ -2305,9 +2305,9 @@ int SwTransferable::_PasteGrf( Transfera
+ 				String sDesc;
+ 				SwTransferable::_CheckForURLOrLNKFile( rData, sTxt, &sDesc );
+ 
+-                INetURLObject aTemp( sTxt );
+-                aBkmk = INetBookmark(
+-                    aTemp.GetMainURL(INetURLObject::NO_DECODE), sDesc );
++                aBkmk = INetBookmark( 
++                        URIHelper::SmartRel2Abs(INetURLObject(), sTxt, Link(), false ), 
++                        sDesc );
+ 				bCheckForGrf = TRUE;
+ 				bCheckForImageMap = SW_PASTESDR_REPLACE == nAction;
+ 			}
+@@ -2530,8 +2530,10 @@ int SwTransferable::_PasteFileName( Tran
+                 BOOL bIsURLFile = SwTransferable::_CheckForURLOrLNKFile( rData, sFile, &sDesc );
+ 
+                 //Eigenes FileFormat? -->Einfuegen, nicht fuer StarWriter/Web
++                String sFileURL = URIHelper::SmartRel2Abs(INetURLObject(), sFile, Link(), false );
+                 const SfxFilter* pFlt = SW_PASTESDR_SETATTR == nAction
+-                        ? 0 : SwIoSystem::GetFileFilter( sFile, aEmptyStr );
++                        ? 0 : SwIoSystem::GetFileFilter( 
++                        sFileURL, aEmptyStr );
+                 if( pFlt && !rSh.GetView().GetDocShell()->ISA(SwWebDocShell)
+     /*
+     JP 02.07.98: warum nur fuer die Formate ??
+@@ -2545,8 +2547,7 @@ int SwTransferable::_PasteFileName( Tran
+     // und dann per PostUser Event den Bereich-Einfuegen-Dialog hochreissen
+                     SwSection* pSect = new SwSection( FILE_LINK_SECTION,
+                                     rSh.GetDoc()->GetUniqueSectionName() );
+-                    INetURLObject aTemp( sFile );
+-                    pSect->SetLinkFileName( aTemp.GetMainURL(INetURLObject::NO_DECODE) );
++                    pSect->SetLinkFileName( sFileURL );
+                     pSect->SetProtect( TRUE );
+ 
+                     Application::PostUserEvent( STATIC_LINK( &rSh, SwWrtShell,
+Index: sw/source/ui/inc/maildispatcher.hxx
+===================================================================
+RCS file: /cvs/sw/sw/source/ui/inc/maildispatcher.hxx,v
+retrieving revision 1.2
+retrieving revision 1.2.242.1
+diff -u -p -r1.2 -r1.2.242.1
+--- sw/source/ui/inc/maildispatcher.hxx	20 Sep 2004 13:22:15 -0000	1.2
++++ sw/source/ui/inc/maildispatcher.hxx	31 Jan 2005 19:57:55 -0000	1.2.242.1
+@@ -171,8 +171,15 @@ public:
+         @return 
+         <TRUE/> if the sending thread is running.
+     */
+-    bool isStarted();
++    bool isStarted() const;
+             
++    /** returns if the thread is still running
++    */
++    bool isRunning() const;
++    /** returns if shutdown has already been called
++    */
++    bool isShutdownRequested() const  
++        { return shutdown_requested_; }  
+     /**
+         Register a listener for mail dispatcher events.
+     */
+@@ -202,7 +209,8 @@ private:    
+     ::osl::Condition wakening_call_;    
+     ::rtl::Reference<MailDispatcher> m_xSelfReference;
+     bool run_;    
+-    bool shutdown_requested_;    
++    bool shutdown_requested_;
++    bool bIsInRun;    
+ };
+ 
+ #endif // INCLUDED_MAILDISPATCHER_HXX
+Index: sw/source/ui/inc/mailmergechildwindow.hxx
+===================================================================
+RCS file: /cvs/sw/sw/source/ui/inc/mailmergechildwindow.hxx,v
+retrieving revision 1.3
+retrieving revision 1.3.242.1
+diff -u -p -r1.3 -r1.3.242.1
+--- sw/source/ui/inc/mailmergechildwindow.hxx	27 Sep 2004 11:48:12 -0000	1.3
++++ sw/source/ui/inc/mailmergechildwindow.hxx	31 Jan 2005 19:57:55 -0000	1.3.242.1
+@@ -110,21 +110,5 @@ public:
+     SFX_DECL_CHILDWINDOW( SwMailMergeChildWindow );
+ };
+ 
+-/*-- 01.07.2004 08:01:29---------------------------------------------------
+-
+-  -----------------------------------------------------------------------*/
+-/*class SwSendMailChildWindow : public SfxChildWindow
+-{
+-public:
+-    SwSendMailChildWindow( Window* ,
+-                    USHORT nId,
+-                    SfxBindings*,
+-                    SfxChildWinInfo*  );
+-
+-    SFX_DECL_CHILDWINDOW( SwSendMailChildWindow );
+-    SwSendMailDialog*   GetMailDialog();
+-    virtual sal_Bool    QueryClose();
+-};*/
+-
+ #endif
+ 
+Index: sw/source/ui/inc/outline.hxx
+===================================================================
+RCS file: /cvs/sw/sw/source/ui/inc/outline.hxx,v
+retrieving revision 1.4
+retrieving revision 1.4.1068.1
+diff -u -p -r1.4 -r1.4.1068.1
+--- sw/source/ui/inc/outline.hxx	7 Nov 2002 14:42:42 -0000	1.4
++++ sw/source/ui/inc/outline.hxx	1 Feb 2005 11:13:26 -0000	1.4.1068.1
+@@ -113,7 +113,9 @@ class SwChapterNumRules;
+  * --------------------------------------------------*/
+ class SwOutlineTabDialog : public SfxTabDialog
+ {
+-	String				aNullStr;
++    static     USHORT    nNumLevel;
++    
++    String              aNullStr;
+ 	String				aCollNames[MAXLEVEL];
+ 	PopupMenu			aFormMenu;
+ 
+@@ -121,8 +123,7 @@ class SwOutlineTabDialog : public SfxTab
+ 	SwNumRule*			pNumRule;
+ 	SwChapterNumRules*	pChapterNumRules;
+ 
+-	USHORT 				nNumLevel;
+-	BOOL 				bModified : 1;
++    BOOL                bModified : 1;
+ 
+ 	protected:
+ 	DECL_LINK( CancelHdl, Button * );
+@@ -141,8 +142,9 @@ class SwOutlineTabDialog : public SfxTab
+ 	SwNumRule*			GetNumRule() {return pNumRule;}
+ 	USHORT 				GetLevel(const String &rFmtName) const;
+ 	String*				GetCollNames() {return aCollNames;}
+-	USHORT 				GetActNumLevel() {return nNumLevel;}
+-	void				SetActNumLevel(USHORT nSet) {nNumLevel = nSet;}
++    
++    static USHORT       GetActNumLevel() {return nNumLevel;}
++    static void         SetActNumLevel(USHORT nSet) {nNumLevel = nSet;}
+ };
+ /* -----------------07.07.98 13:47-------------------
+  *
+Index: sw/source/ui/misc/num.cxx
+===================================================================
+RCS file: /cvs/sw/sw/source/ui/misc/num.cxx,v
+retrieving revision 1.10
+retrieving revision 1.10.258.1
+diff -u -p -r1.10 -r1.10.258.1
+--- sw/source/ui/misc/num.cxx	23 Aug 2004 09:07:16 -0000	1.10
++++ sw/source/ui/misc/num.cxx	1 Feb 2005 11:13:27 -0000	1.10.258.1
+@@ -489,10 +489,7 @@ void SwNumPositionTabPage::ActivatePage(
+ --------------------------------------------------*/
+ int  SwNumPositionTabPage::DeactivatePage(SfxItemSet *pSet)
+ {
+-	if(pOutlineDlg)
+-		pOutlineDlg->SetActNumLevel(nActNumLvl);
+-//	else
+-//		((SwNumBulletTabDialog*)GetTabDialog())->SetActNumLevel(nActNumLvl);
++    SwOutlineTabDialog::SetActNumLevel(nActNumLvl);
+ 	if(pSet)
+ 		FillItemSet(*pSet);
+ 	return TRUE;
+@@ -529,9 +526,7 @@ void SwNumPositionTabPage::Reset( const 
+ 	else if(SFX_ITEM_SET == rSet.GetItemState(FN_PARAM_ACT_NUMBER, FALSE, &pItem))
+ 		pSaveNum = ((SwUINumRuleItem*)pItem)->GetNumRule();
+ 
+-	nActNumLvl =
+-		pOutlineDlg ? pOutlineDlg->GetActNumLevel() : 0;
+-//		((SwNumBulletTabDialog*)GetTabDialog())->GetActNumLevel();
++    nActNumLvl = SwOutlineTabDialog::GetActNumLevel();
+ 	USHORT nMask = 1;
+ 	aLevelLB.SetUpdateMode(FALSE);
+ 	aLevelLB.SetNoSelection();
+Index: sw/source/ui/misc/outline.cxx
+===================================================================
+RCS file: /cvs/sw/sw/source/ui/misc/outline.cxx,v
+retrieving revision 1.25
+retrieving revision 1.25.258.1
+diff -u -p -r1.25 -r1.25.258.1
+--- sw/source/ui/misc/outline.cxx	23 Aug 2004 10:49:34 -0000	1.25
++++ sw/source/ui/misc/outline.cxx	1 Feb 2005 11:13:26 -0000	1.25.258.1
+@@ -290,6 +290,7 @@ USHORT lcl_BitToLevel(USHORT nActLevel)
+ /* -----------------07.07.98 14:13-------------------
+  *
+  * --------------------------------------------------*/
++USHORT SwOutlineTabDialog::nNumLevel = 1;
+ SwOutlineTabDialog::SwOutlineTabDialog(Window* pParent,
+ 					const SfxItemSet* pSwItemSet,
+ 					SwWrtShell &rSh) :
+@@ -298,7 +299,6 @@ SwOutlineTabDialog::SwOutlineTabDialog(W
+ 		aFormMenu(SW_RES(MN_FORM)),
+ 		bModified(rWrtSh.IsModified()),
+ 		aNullStr(C2S("____")),
+-		nNumLevel(1),
+ 		pChapterNumRules(SW_MOD()->GetChapterNumRules()),
+ 		rWrtSh(rSh)
+ {
+@@ -959,7 +959,7 @@ void SwOutlineSettingsTabPage::SetWrtShe
+  * --------------------------------------------------*/
+ void 	SwOutlineSettingsTabPage::ActivatePage(const SfxItemSet& rSet)
+ {
+-	nActLevel = ((SwOutlineTabDialog*)GetTabDialog())->GetActNumLevel();
++    nActLevel = SwOutlineTabDialog::GetActNumLevel();
+ 	if(nActLevel != USHRT_MAX)
+ 		aLevelLB.SelectEntryPos(lcl_BitToLevel(nActLevel));
+ 	else
+@@ -971,7 +971,7 @@ void 	SwOutlineSettingsTabPage::Activate
+  * --------------------------------------------------*/
+ int 	SwOutlineSettingsTabPage::DeactivatePage(SfxItemSet *pSet)
+ {
+-	((SwOutlineTabDialog*)GetTabDialog())->SetActNumLevel(nActLevel);
++    SwOutlineTabDialog::SetActNumLevel(nActLevel);
+ 	return LEAVE_PAGE;
+ }
+ /* -----------------07.07.98 14:19-------------------
+@@ -1085,13 +1085,13 @@ void	NumberingPreview::Paint( const Rect
+ 			nWidthRelation = 30; // Kapiteldialog
+ 
+ 		//Hoehe pro Ebene
+-		USHORT nXStep = aSize.Width() / (3 * MAXLEVEL);
++        USHORT nXStep = USHORT(aSize.Width() / (3 * MAXLEVEL));
+ 		if(MAXLEVEL < 10)
+ 			nXStep /= 2;
+ 		USHORT nYStart = 4;
+-		USHORT nYStep = (aSize.Height() - 6)/ MAXLEVEL;
++        USHORT nYStep = USHORT((aSize.Height() - 6)/ MAXLEVEL);
+         aStdFont = OutputDevice::GetDefaultFont(
+-					                DEFAULTFONT_UI_SANS, GetAppLanguage(),
++                                    DEFAULTFONT_UI_SANS, (LanguageType)GetAppLanguage(),
+ 									DEFAULTFONT_FLAGS_ONLYONE, this );
+ 		// #101524# OJ
+         aStdFont.SetColor( SwViewOption::GetFontColor() );
+Index: sw/source/ui/utlui/glbltree.cxx
+===================================================================
+RCS file: /cvs/sw/sw/source/ui/utlui/glbltree.cxx,v
+retrieving revision 1.25
+retrieving revision 1.23.34.2
+diff -u -p -r1.25 -r1.23.34.2
+--- sw/source/ui/utlui/glbltree.cxx	4 Feb 2005 12:31:02 -0000	1.25
++++ sw/source/ui/utlui/glbltree.cxx	17 Feb 2005 15:13:48 -0000	1.23.34.2
+@@ -899,7 +899,7 @@ void SwGlobalTree::InsertRegion( const S
+             {
+                 String sFileName = pMed->GetURLObject().GetMainURL( INetURLObject::NO_DECODE );
+                 sFileName += sfx2::cTokenSeperator;
+-		sFileName += pMed->GetFilter()->GetFilterName();
++                sFileName += pMed->GetFilter()->GetFilterName();
+                 sFileName += sfx2::cTokenSeperator;
+                 pFileNames[nPos++] = sFileName;
+                 pMed = pMedList->Next();
+Index: svx/inc/SpellPortions.hxx
+===================================================================
+RCS file: /cvs/graphics/svx/inc/SpellPortions.hxx,v
+retrieving revision 1.2
+retrieving revision 1.2.314.1
+diff -u -p -r1.2 -r1.2.314.1
+--- svx/inc/SpellPortions.hxx	17 Sep 2004 14:09:57 -0000	1.2
++++ svx/inc/SpellPortions.hxx	3 Feb 2005 12:09:06 -0000	1.2.314.1
+@@ -90,6 +90,11 @@ struct SpellPortion
+      should be protected against unintentional deletion.
+      */
+     bool bIsField;
++    /** Marks the portion hidden content that should not be touched by spell checking 
++        and not be removed like redlines. The creator of the portions has to take care 
++        for them.
++     */
++    bool bIsHidden;
+     /** contains the language applied to the text. It has to match the script type.
+      */
+     LanguageType    eLanguage;
+@@ -100,6 +105,7 @@ struct SpellPortion
+ 
+     SpellPortion() :
+         bIsField(false),
++        bIsHidden(false),
+         eLanguage(LANGUAGE_DONTKNOW)
+         {}
+ };
+Index: svx/inc/optgenrl.hrc
+===================================================================
+RCS file: /cvs/graphics/svx/inc/optgenrl.hrc,v
+retrieving revision 1.2
+retrieving revision 1.2.656.1
+diff -u -p -r1.2 -r1.2.656.1
+--- svx/inc/optgenrl.hrc	3 Feb 2004 17:37:50 -0000	1.2
++++ svx/inc/optgenrl.hrc	1 Feb 2005 09:02:35 -0000	1.2.656.1
+@@ -105,12 +105,12 @@
+ #define LINEH		12
+ #define FLINEH		8
+ #define	LEFT		12
+-#define MID			88
++#define MID         96
+ #define RIGHT		248
+ #define TOP			10
+ #define LINE(y)		(14+y*15)
+ #define FLINE(y)	(16+y*15)
+-#define NAMELEN		78
++#define NAMELEN     74
+ 
+ #endif // #ifndef _SVX_OPTGENRL_HRC
+ 
+Index: svx/source/dialog/SpellDialog.cxx
+===================================================================
+RCS file: /cvs/graphics/svx/source/dialog/SpellDialog.cxx,v
+retrieving revision 1.6
+retrieving revision 1.3.314.2
+diff -u -p -r1.6 -r1.3.314.2
+--- svx/source/dialog/SpellDialog.cxx	31 Jan 2005 09:14:31 -0000	1.6
++++ svx/source/dialog/SpellDialog.cxx	17 Feb 2005 16:37:25 -0000	1.3.314.2
+@@ -1034,7 +1034,9 @@ bool SpellDialog::GetNextSentence_Impl(b
+         rtl::OUString sText;
+         while(aStart != aSentence.end())
+         {
+-            sText += aStart->sText;
++            // hidden text has to be ignored
++            if(!aStart->bIsHidden)
++                sText += aStart->sText;
+             aStart++;
+         }
+         aSentenceED.SetText(sText);
+@@ -1044,13 +1046,17 @@ bool SpellDialog::GetNextSentence_Impl(b
+ 
+         while(aStart != aSentence.end())
+         {
+-            nEndPosition += aStart->sText.getLength();
+-            if(aStart->xAlternatives.is())
+-                aSentenceED.SetAttrib( SpellErrorAttrib(aStart->xAlternatives), 0, (USHORT) nStartPosition, (USHORT) nEndPosition );
+-            if(aStart->bIsField)
+-                aSentenceED.SetAttrib( SpellBackgroundAttrib(COL_LIGHTGRAY), 0, (USHORT) nStartPosition, (USHORT) nEndPosition );
+-            aSentenceED.SetAttrib( SpellLanguageAttrib(aStart->eLanguage), 0, (USHORT) nStartPosition, (USHORT) nEndPosition );
+-            nStartPosition = nEndPosition;
++            // hidden text has to be ignored
++            if(!aStart->bIsHidden)
++            {        
++                nEndPosition += aStart->sText.getLength();
++                if(aStart->xAlternatives.is())
++                    aSentenceED.SetAttrib( SpellErrorAttrib(aStart->xAlternatives), 0, (USHORT) nStartPosition, (USHORT) nEndPosition );
++                if(aStart->bIsField)
++                    aSentenceED.SetAttrib( SpellBackgroundAttrib(COL_LIGHTGRAY), 0, (USHORT) nStartPosition, (USHORT) nEndPosition );
++                aSentenceED.SetAttrib( SpellLanguageAttrib(aStart->eLanguage), 0, (USHORT) nStartPosition, (USHORT) nEndPosition );
++                nStartPosition = nEndPosition;
++            }
+             aStart++;
+         }
+         //the edit field needs to be modified to apply the change from the ApplyChangeAllList
+Index: svx/source/dialog/treeopt.src
+===================================================================
+RCS file: /cvs/graphics/svx/source/dialog/treeopt.src,v
+retrieving revision 1.12
+retrieving revision 1.12.314.1
+diff -u -p -r1.12 -r1.12.314.1
+--- svx/source/dialog/treeopt.src	20 Sep 2004 13:58:03 -0000	1.12
++++ svx/source/dialog/treeopt.src	28 Jan 2005 14:30:14 -0000	1.12.314.1
+@@ -405,8 +405,8 @@ Resource RID_OFADLG_OPTIONS_TREE_PAGES
+ 	{
+ 		ItemList [ de ] =
+ 		{
+-			< "Tabellendokument" ; 0; > ;
+-			< "Allgemein" ;			SID_SC_TP_LAYOUT			;> ;
++            < "%PRODUCTNAME Calc" ; 0; > ;
++            < "Allgemein" ;         SID_SC_TP_LAYOUT            ;> ;
+ 			< "Ansicht" ;			SID_SC_TP_CONTENT			;> ;
+ 			< "International" ;		RID_OFA_TP_INTERNATIONAL	;> ;
+ 			< "Berechnen" ;			SID_SC_TP_CALC				;> ;
+Index: svx/source/options/optgenrl.src
+===================================================================
+RCS file: /cvs/graphics/svx/source/options/optgenrl.src,v
+retrieving revision 1.50
+retrieving revision 1.49.446.2
+diff -u -p -r1.50 -r1.49.446.2
+--- svx/source/options/optgenrl.src	28 Jan 2005 15:42:58 -0000	1.50
++++ svx/source/options/optgenrl.src	17 Feb 2005 17:04:08 -0000	1.49.446.2
+@@ -81,7 +81,7 @@ TabPage RID_SFXPAGE_GENERAL
+ 	FixedText FT_COMPANY
+ 	{
+ 		Pos = MAP_APPFONT ( LEFT , FLINE ( 0 ) ) ;
+-		Size = MAP_APPFONT ( MID-LEFT-3 , FLINEH ) ;
++        Size = MAP_APPFONT ( MID-LEFT-2 , FLINEH ) ;
+ 		LeftLabel = TRUE ;
+ 		Text [ de ] = "~Firma" ;
+ 		Text [ en-US ] = "~Company" ;
+@@ -96,7 +96,7 @@ TabPage RID_SFXPAGE_GENERAL
+ 	FixedText FT_NAME
+ 	{
+ 		Pos = MAP_APPFONT ( LEFT , FLINE ( 1 ) ) ;
+-		Size = MAP_APPFONT ( MID-LEFT-3 , FLINEH ) ;
++        Size = MAP_APPFONT ( MID-LEFT-2 , FLINEH ) ;
+ 		LeftLabel = TRUE ;
+ 		Text [ de ] = "~Vor-/Name/Kürzel" ;
+ 		Text [ en-US ] = "First/Last ~name/Initials" ;
+@@ -105,7 +105,7 @@ TabPage RID_SFXPAGE_GENERAL
+ 	FixedText FT_NAME_RUSS
+ 	{
+ 		Pos = MAP_APPFONT ( LEFT , FLINE ( 1 ) ) ;
+-		Size = MAP_APPFONT ( MID-LEFT-3 , FLINEH ) ;
++        Size = MAP_APPFONT ( MID-LEFT-2 , FLINEH ) ;
+ 		LeftLabel = TRUE ;
+ 		Hide = TRUE;
+ 		Text [ de ] = "~Vor-/Vaters-/Name/Kürzel" ;
+@@ -139,7 +139,7 @@ TabPage RID_SFXPAGE_GENERAL
+ 	FixedText FT_STREET
+ 	{
+ 		Pos = MAP_APPFONT ( LEFT , FLINE ( 2 ) ) ;
+-		Size = MAP_APPFONT ( MID-LEFT-3 , FLINEH ) ;
++        Size = MAP_APPFONT ( MID-LEFT-2 , FLINEH ) ;
+ 		LeftLabel = TRUE ;
+ 		Text [ de ] = "~Straße" ;
+ 		Text [ en-US ] = "~Street" ;
+@@ -148,7 +148,7 @@ TabPage RID_SFXPAGE_GENERAL
+ 	FixedText FT_STREET_RUSS
+ 	{
+ 		Pos = MAP_APPFONT ( LEFT , FLINE ( 2 ) ) ;
+-		Size = MAP_APPFONT ( MID-LEFT-3 , FLINEH ) ;
++        Size = MAP_APPFONT ( MID-LEFT-2 , FLINEH ) ;
+ 		LeftLabel = TRUE ;
+ 		Hide = TRUE;
+ 		Text [ de ] = "~Straße/Wohnungsnummer" ;
+@@ -170,7 +170,7 @@ TabPage RID_SFXPAGE_GENERAL
+ 	FixedText FT_CITY
+ 	{
+ 		Pos = MAP_APPFONT ( LEFT , FLINE ( 3 ) ) ;
+-		Size = MAP_APPFONT ( MID-LEFT-3 , FLINEH ) ;
++        Size = MAP_APPFONT ( MID-LEFT-2 , FLINEH ) ;
+ 		LeftLabel = TRUE ;
+ 		Text [ de ] = "PL~Z/Ort" ;
+ 		Text [ en-US ] = "Zip/City";
+@@ -209,7 +209,7 @@ TabPage RID_SFXPAGE_GENERAL
+ 	FixedText FT_COUNTRY
+ 	{
+ 		Pos = MAP_APPFONT ( LEFT , FLINE ( 4 ) ) ;
+-		Size = MAP_APPFONT ( MID-LEFT-3 , FLINEH ) ;
++        Size = MAP_APPFONT ( MID-LEFT-2 , FLINEH ) ;
+ 		LeftLabel = TRUE ;
+         Text [ de ] = "~Land/Region" ;
+         Text [ en-US ] = "Country/Region";
+@@ -224,7 +224,7 @@ TabPage RID_SFXPAGE_GENERAL
+ 	FixedText FT_TITLEPOS
+ 	{
+ 		Pos = MAP_APPFONT ( LEFT , FLINE ( 5 ) ) ;
+-		Size = MAP_APPFONT ( MID-LEFT-3 , FLINEH ) ;
++        Size = MAP_APPFONT ( MID-LEFT-2 , FLINEH ) ;
+ 		LeftLabel = TRUE ;
+ 		Text [ de ] = "~Titel/Position" ;
+ 		Text [ en-US ] = "~Title/Position" ;
+@@ -245,7 +245,7 @@ TabPage RID_SFXPAGE_GENERAL
+ 	FixedText FT_PHONE
+ 	{
+ 		Pos = MAP_APPFONT ( LEFT , FLINE ( 6 ) ) ;
+-		Size = MAP_APPFONT ( MID-LEFT-3 , FLINEH ) ;
++        Size = MAP_APPFONT ( MID-LEFT-2 , FLINEH ) ;
+ 		Text [ de ] = "T~el. (Priv/Ge.)" ;
+ 		Text [ en-US ] = "Tel. (Home/Work)" ;
+ 		LeftLabel = TRUE ;
+@@ -266,7 +266,7 @@ TabPage RID_SFXPAGE_GENERAL
+ 	FixedText FT_FAXMAIL
+ 	{
+ 		Pos = MAP_APPFONT ( LEFT , FLINE ( 7 ) ) ;
+-		Size = MAP_APPFONT ( MID-LEFT-3 , FLINEH ) ;
++        Size = MAP_APPFONT ( MID-LEFT-2 , FLINEH ) ;
+ 		LeftLabel = TRUE ;
+ 		Text [ de ] = "Fa~x/E-Mail" ;
+ 		Text [ en-US ] = "Fa~x / E-mail" ;
+Index: sfx2/source/dialog/templdlg.cxx
+===================================================================
+RCS file: /cvs/framework/sfx2/source/dialog/templdlg.cxx,v
+retrieving revision 1.44
+retrieving revision 1.43.104.2
+diff -u -p -r1.44 -r1.43.104.2
+--- sfx2/source/dialog/templdlg.cxx	27 Jan 2005 10:49:14 -0000	1.44
++++ sfx2/source/dialog/templdlg.cxx	17 Feb 2005 17:24:07 -0000	1.43.104.2
+@@ -2659,12 +2659,12 @@ IMPL_LINK( SfxTemplateDialog_Impl, ToolB
+             sLabel = lcl_GetLabel( aCommand );
+ 
+             pMenu->InsertItem( SID_STYLE_UPDATE_BY_EXAMPLE, sLabel );
+-            pMenu->SetHelpId(SID_STYLE_NEW_BY_EXAMPLE, HID_TEMPLDLG_NEWBYEXAMPLE);
++            pMenu->SetHelpId(SID_STYLE_UPDATE_BY_EXAMPLE, HID_TEMPLDLG_UPDATEBYEXAMPLE);
+ 
+             aCommand = xUICommands->getByName(::rtl::OUString::createFromAscii(".uno:LoadStyles"));
+             sLabel = lcl_GetLabel( aCommand );
+             pMenu->InsertItem( SID_TEMPLATE_LOAD, sLabel );
+-            pMenu->SetHelpId(SID_STYLE_NEW_BY_EXAMPLE, SID_TEMPLATE_LOAD);
++            pMenu->SetHelpId(SID_TEMPLATE_LOAD, SID_TEMPLATE_LOAD);
+ 
+             pMenu->SetSelectHdl(LINK(this, SfxTemplateDialog_Impl, MenuSelectHdl));
+             pMenu->Execute( pBox,
