@@ -1,0 +1,184 @@
+#!/usr/bin/perl -w
+
+use strict;
+
+# globals
+my $warn = 0;
+
+sub read_dir($@)
+{
+    my $dir_path = shift;
+    my $type = shift;
+    my $misc_dir;
+    my @result;
+
+    opendir ($misc_dir, $dir_path) || return;
+    my $name;
+    while ($name = readdir ($misc_dir)) {
+	$name =~ /^\./ && next;
+	$name =~ /unxlngi4\.pro/ && next; # testing
+
+	$type && $type eq 'd' && !-d "$dir_path/$name" && next;
+
+	push @result, $name;
+    }
+    closedir ($misc_dir);
+
+    return @result;
+}
+
+sub warn_msg($$)
+{
+    my ($stats, $message) = @_;
+
+    $warn || return;
+
+    chomp ($message);
+    defined $stats->{'projects'}->{'warnings'}->{$message} && return;
+    $stats->{'projects'}->{'warnings'}->{$message} = 1;
+}
+
+sub check_translations($$@)
+{
+    my $stats = shift;
+    my $base = shift;
+    my $fname = shift;
+    my %done_langs = ();
+
+#    print "Check translations $fname ($base)\n";
+
+    $stats->{'lang_data'}->{'german'}++;
+
+    while (my $lang = lc shift) {
+	my $trans = shift;
+
+	if (defined $done_langs{$lang}) {
+	    warn_msg ($stats, "Duplicate strings in $fname for $lang");
+	    next;
+	}
+	$done_langs{$lang} = 1;
+	
+	if (!defined $stats->{'projects'}->{'languages'}->{$lang}) {
+	    $stats->{'projects'}->{'languages'}->{$lang} = 1;
+	}
+
+	if ($trans ne $base) {
+	    $stats->{'lang_data'}->{$lang}++;
+	}
+    }
+}
+
+sub scan_src($$)
+{
+    my ($stats, $fname) = @_;
+    my $InFile;
+    my $base;
+    my @transls = ();
+
+    open $InFile, $fname || die "Can't open $fname: $!";
+    while (<$InFile>) {
+	s/\/\/.*//;
+
+	if (/text\s*=\s*"(.*)"\s*;/i) {
+	    $base && check_translations ($stats, $base, $fname, @transls);
+	    $base = $1;
+	    @transls = ();
+
+	} elsif (/text\s*\[\s*(\S+)\s*\]\s*=\s*"(.*)"\s*;/i) {
+	    push @transls, $1, $2;
+	} 
+    }
+    close $InFile;
+
+    $base && check_translations ($stats, $fname, $base, @transls);
+}
+
+sub scan_dirs($$);
+sub scan_dirs($$)
+{
+    my $stats = shift;
+    my $dir_path = shift;
+    my @sub_dirs = read_dir ($dir_path);
+
+    @sub_dirs || return;
+
+    for my $name (@sub_dirs) {
+	$name =~ /\.src$/ && scan_src ($stats, "$dir_path/$name");
+	-d "$dir_path/$name" && scan_dirs ($stats, "$dir_path/$name");
+    }
+}
+
+sub get_percent($$)
+{
+    my ($a, $b) = @_;
+    return sprintf("%2.2f%%", $a * 100.0 / $b);
+}
+
+my $src_path;
+if (!($src_path = shift @ARGV)) {
+    print "Syntax error: l10n-status <path-to-source-root>\n";
+}
+
+for my $arg (@ARGV) {
+    $warn = 1 if $arg =~ /--warn/;
+}
+
+my %languages = ( 'german' => '1' );
+my %warnings;
+my %projects = ( 'languages' => \%languages,
+		  'warnings' => \%warnings );
+
+my @project_list = read_dir ($src_path, 'd');
+
+@project_list || die "Can't read directory: $src_path";
+
+my $i = 0;
+
+for my $project (@project_list) {
+    print "Project '$project'\n";
+
+    my %lang_data;
+    my %stats = ( 'name'      => $project, 
+		  'projects'  => \%projects,
+		  'lang_data' => \%lang_data );
+    $projects{$project} = \%stats;
+
+    scan_dirs (\%stats, "$src_path/$project");
+
+    $i++ > 10 && last;
+}
+
+if ($warn) {
+    print "Warnings:\n";
+    for my $warning (sort keys %{$projects{'warnings'}}) {
+	print "$warning\n";
+    }
+}
+
+print "Languages: ";
+for my $lang (sort keys %languages) {
+    print "$lang ";
+}
+print "\n";
+
+for my $lang (sort keys %languages) {
+    print "Language: $lang\n";
+    my $total = 0;
+    my $count = 0;
+
+    for my $project (sort keys %projects) {
+	my $lang_data = $projects{$project}->{'lang_data'};
+	my $prj_total = $lang_data->{'german'};
+	$prj_total || next;
+	my $prj_count = $lang_data->{$lang};
+	$prj_count = 0 if !$prj_count;
+	my $prj_percent = get_percent ($prj_count, $prj_total);
+	print " $project : $prj_count / $prj_total: $prj_percent%\n";
+
+	$total += $prj_total;
+	$count += $prj_count;
+    }
+
+    my $percent = get_percent ($count, $total);
+    print "Total: $count / $total: $percent\n";
+}
