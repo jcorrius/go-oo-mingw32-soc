@@ -1,6 +1,6 @@
-if BONOBO
-  MAYBE_BONOBO = bonobo
-endif
+# if BONOBO
+#  MAYBE_BONOBO = bonobo
+# endif
 
 SUBDIRS = po desktop bin etc patches man doc fonts stamp src www $(MAYBE_BONOBO)
 

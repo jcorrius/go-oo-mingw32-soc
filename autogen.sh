@@ -11,8 +11,8 @@ if test "z$1" == "z--clean"; then
     exit 1;
 fi
 
-(cd bonobo && ./autogen.sh)
-echo "NOT YET."
+# (cd bonobo && ./autogen.sh)
+# echo "NOT YET."
 
 aclocal $ACLOCAL_FLAGS
 automake --gnu --add-missing
