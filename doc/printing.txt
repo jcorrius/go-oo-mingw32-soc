@@ -1,0 +1,313 @@
+
+* Print Properties
+
+** How W97 does print properties
+
+3 scopes:
+
+	+ per document: each document has a page size setting, this is
+	                constant, to avoid re-layout.
+	+ per printer: there is a default 'paper size' setting, this
+		       is (perhaps) analgous to gnome-cups-manager's
+	+ per session: if you change the 'paper size' - it persists only
+		       for that session, in effect with a copy of the	
+		       settings for that printer.
+
+	Since we 
+
+** Issue
+
+	Staroffice has a synchronous, modal properties dialog, that is
+passed the PrinterInfo 'aInfo' structure in SalInfoPrinter::Setup,
+then on exit JobData is transfered to the pJobSetup passed to
+'::Setup' by 'copyJobDataToJobSetup'.
+
+	Unfortunately, we can't do this - since gnome-print-manager
+fires off a separate process that creates the dialog.
+
+	We need to unwind what is done with that; and whether we can
+simply delay that work until StartJob time - which (presumably) gets
+the same pJobSetup.
+
+	'Setup' is called by vcl/source/gdi/print.cxx (Setup), all the
+data appears to be local. If the sal level data has changed;
+'ImplUpdateJobSetupPaper' + ImplUpdatePageData + ImplUpdateFontList
+are called.
+
+	ImplUpdateJobSetupPaper pokes at and verifies the contents of
+the JobSetup impl, to set standard page sizes etc. There is also a UNO
+'UserSetupCompleted' callback, that seems to do what we want.
+
+	It doesn't _look_ like we can do this in
+'SalPrinter::StartJob' NB. SalPrinter != SalInfoPrinter. The
+UserSetupCompleted code is used only for the remote appserver case.
+
+	Somehow we need to turn modality on; spawn the manager
+synchronously etc. - or can we hook into StartJob ?
+
+	Then again - it seems there is no messing about in
+printdlg.cxx's (ImplPRopertiesHdl) wrt. re-synching changed settings.
+After running the dialog we get a Printer->EnablePrintFile (foo) call
+svtools/source/dialog/printdlg.cxx (ImplFillDialogData).
+
+	Need to test the 'print' button to make that work; and/or
+ensure that we re-parse ppd files occasionally.
+
+	Is 'Printer::StartJob' always called before
+'Printer::GetPaperSize*' ? It seems 'StartJob' emits the 'StartPrint'
+signal.
+
+	Can we update the PrinterInfo from the maJobSetup
+unconditionally after the StartJob there ? Testing made hader by
+Print::GetPaperSize[Pixel] being inline.
+
+	The safest path seems to be via. the dialog; with a new API
+addition to print.hxx (& salprn.hxx). I wonder how the windows backend
+deals with this.
+
+	The OK button in the svtools dialog (if we have a TEMPPRINTER)
+dows a SetPrinterProps on mpPrinter. If you hit properties - it
+creates a TEMPPRINTER. Printer::SetPrinterProps does a 'SetJobSetup',
+which does a 'mpInfoPrinter->SetPrinterData (new_setup)' if the
+printer names are the same & refreshes everything nicely.
+
+	ARGH - discovered that the settings are per document in some
+sense, and not in fact printer properties - but document/printer
+properties: Bother !
+
+	sdraw: new drawing, Page -> User 21x29.7
+	config printer: ->A5,landscape -> No effect on new drawing
+	   -> print settings -> vanished => per document
+
+	Set settings from 'spadmin' -> A5,landscape
+	Re-run - it uses that paper size [!] - nice :-)
+
+
+	It seems CreateInfoPrinter->getJobInfo->mergeToJobData is the
+live path for interesting information getting to the job info.
+	Also PrinterGfx::Init (JobData) -> ::InitForPrinter, grabs
+pParser & mbUploadPS42Fonts [etc.]
+
+	It seems the PPDContext - is the place where settings must
+lurk; 'getPageSize', setValue etc.
+
+	Is printerjob.cxx::InitPaperSize - a valid PPD the source of
+our margin problems ? - are we marginalized by it ;-)
+
+** ARGH ** Two copies of PPDContext / PPDParser
+	etc. vcl/inc/ppdparser.hxx vs psprint/inc/psprint/ppdparser.hxx
+
+
+cf. vcl/inc/jobset.h
+
+-- 
+
+
+* TODO
+	+ get vcl/inc/salprn.hxx (SalPrinterQueueInfo):
+		+ mnStatus
+		+ mnJobs 
+		+ printer tray listing ...
+	+ re-architect API to provide a sensible callback system
+	  and / or mapping
+	+ bin all uses of salprnpsp.cxx (getPaLib)
+
+* The hard-core printing seems to go to a buffer and in:
+
+	printerjob.cxx (EndJob): we have a popen () on the shell
+command's stuff, looks like we should instead do a 'cupsFoo' there.
+
+* salprnpsp.cxx includes psprint/printerinfomanager.hxx - good [!]
+
+	vcl/source/gdi/print[2].cxx implement printing code,
+
+* GUI is defined in:
+
+	svtools/source/dialogs/printdlg.src
+
+* configuration
+
+	It seems we use a separate config file to work out which
+printers to show to the user - rather than just using the output of
+the commands we use to interrogate the system ... [ most curious ]
+
+* Printing seems to be used in:
+
+	vcl/unx/source/gdi/salprnpsp.cxx,
+	vcl/unx/inc/salprn.h (SalPrinterData) - 'm_bFax' eg.
+
+	again, all ugly public structs.
+
+* Trace through a print toolbar item:
+
+	sfx2/source/view/viewprn.cxx (DoPrint):
+	sends an 'SFX_EVENT_PRINTDOC' to the SfxApp (OnPrint?) - untraceable
+
+	SfxPrinter ...
+
+* In the short term
+
+	We can just support CUPS - and have nasty ugly printer
+selection, but ensure that it actually works.
+
+** Paths:
+	+ source/printer/printerinfomanager.cxx
+	none of the code is privatized - all hacky public structs [!]
+
+** What does 'padmin' do ?
+
+	Run 'spadmin' from program/ - a separate GUI, seemingly
+inaccessible from the main app - we prolly don't want to ship /
+support that.
+
+	CUPS provides duplicate functionality here - so we just need
+to bin spadmin.
+
+** Postscript Prinder Description (PPD) files ...
+
+	CUPS provides some PPD file handling (remote printers ?) -
+OO.o also provides PPD stuff, do we need both ?
+
+* How to port printing to libgnomeprint
+
+	We need to attack printergfx.hxx - and progressively re-write
+source/printergfx/common_gfx.cxx.
+
+
+* How Printing works ...
+
+OutputDevice::
+	Implemented in vcl/source/gdi/outdev*
+	Proxies rendering onto the mpGraphics context
+
+class OutputDevice : public Resource
+{
+    friend class Window;
+    friend class VirtualDevice;
+    friend class Printer;
+    friend class ImplQPrinter;
+    friend class OpenGL;
+
+private:
+#ifndef REMOTE_APPSERVER
+    SalGraphics*        mpGraphics;
+#else
+    ImplServerGraphics* mpGraphics;
+#endif
+
+	The SalGraphics comes from 'salgdi.hxx':
+
+vcl/unx/source/gdi/salgdi.h
+
+	Which implements:
+
+vcl/inc/salgdi.hxx for X
+
+
+psprint/inc/psprint/printerjob.hxx:
+
+	SalGraphics * StartPage (const JobData& rJobSetup, sal_Bool bNewJobData);
+
+seems to implement
+
+vcl/inc/salprn.hxx
+
+	class SalPrinter
+
+vcl/inc/impprn.hxx
+
+	class ImplQPrinter : public Printer
+
+vcl/inc/print.hxx
+
+	class Printer : public OutputDevice
+
+vcl/inc/gdi/print.cxx: fetch an mpGraphics context:
+
+	// we need a graphics
+	if ( !ImplGetGraphics() )
+
+vcl/source/gdi/outdev.cxx (ImplGetGraphics):
+
+	else if ( meOutDevType == OUTDEV_PRINTER )
+	{
+		Printer* pPrinter = (Printer*)this;
+
+		if ( pPrinter->mpJobGraphics )
+			mpGraphics = pPrinter->mpJobGraphics;
+
+[ vcl/source/gdi/print.cxx (StartPage): 
+
+	if ( mpPrinter || mpQPrinter )
+	{
+		if ( mpPrinter )
+		{
+			SalGraphics* pGraphics = mpPrinter->StartPage( maJobSetup.ImplGetConstData(), mbNewJobSetup );
+			if ( pGraphics )
+			{
+				ImplReleaseGraphics();
+				mpJobGraphics = pGraphics;
+			}
+			mbDevOutput = TRUE;
+		}
+		else
+		{
+			ImplGetGraphics();
+			mpJobGraphics = mpGraphics;
+		}
+
+	...
+]
+
+		else if ( pPrinter->mpDisplayDev )
+		{
+			VirtualDevice* pVirDev = pPrinter->mpDisplayDev;
+			mpGraphics = pVirDev->mpVirDev->GetGraphics();
+
+[ vcl/source/gdi/print.cxx (ImplInitDisplay):
+
+	if ( pWindow )
+		mpDisplayDev = new VirtualDevice( *pWindow );
+	else
+		mpDisplayDev = new VirtualDevice();
+
+]
+
+			while ( !mpGraphics )
+			{
+				if ( !pSVData->maGDIData.mpLastVirGraphics )
+					break;
+				pSVData->maGDIData.mpLastVirGraphics->ImplReleaseGraphics();
+				mpGraphics = pVirDev->mpVirDev->GetGraphics();
+			}
+			if ( mpGraphics )
+			{
+				mpNextGraphics = pSVData->maGDIData.mpFirstVirGraphics;
+				pSVData->maGDIData.mpFirstVirGraphics = this;
+				if ( mpNextGraphics )
+					mpNextGraphics->mpPrevGraphics = this;
+				if ( !pSVData->maGDIData.mpLastVirGraphics )
+					pSVData->maGDIData.mpLastVirGraphics = this;
+			}
+		}
+		else
+		{
+			mpGraphics = pPrinter->mpInfoPrinter->GetGraphics();
+			while ( !mpGraphics )
+			{
+				if ( !pSVData->maGDIData.mpLastPrnGraphics )
+					break;
+				pSVData->maGDIData.mpLastPrnGraphics->ImplReleaseGraphics();
+				mpGraphics = pPrinter->mpInfoPrinter->GetGraphics();
+			}
+			if ( mpGraphics )
+			{
+				mpNextGraphics = pSVData->maGDIData.mpFirstPrnGraphics;
+				pSVData->maGDIData.mpFirstPrnGraphics = this;
+				if ( mpNextGraphics )
+					mpNextGraphics->mpPrevGraphics = this;
+				if ( !pSVData->maGDIData.mpLastPrnGraphics )
+					pSVData->maGDIData.mpLastPrnGraphics = this;
+			}
+		}
+	}

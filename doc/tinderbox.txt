@@ -1,0 +1,267 @@
+* Use patched rebuildhistory.cgi, cf bottom.
+
+	  still needs code to poke changed names at it.
+
+* Bonsai sync replacement using cvsup
+
+	+ dolog.pl
+	    (process_cvs_info):
+		groks:
+			/ChangeLog/1.68/Thu Sep 26 12:25:08 2002//
+		from CVS/Entries type thing.
+		$username,$lines_added,$lines_removed from rlog -N -r foo
+	     . Does it for all @changed_files, and @added_files in a directory.
+	     . builds @outlist of [R]| | delimited, + LOGCOMMENT at end.
+
+	+ Poser - how do we de-scatter this info from CVSup ?
+	     . we have:
+		  journal record
+			  + parse journal
+			  + rcs query between dates ?
+		  timestamps
+		  etc.
+
+	+ At the other end we process it with:
+		globals.pl: AddToDatabase - collates descr.
+		How do we get 'Removes' ... ? what is a remove ? from what branch etc. ?
+
+	+ We need a non-0 'selected revisions'; flatten the 'Attic' into the
+	  repo - it's not interesting; but an anachronism
+description:
+----------------------------
+revision 1.2
+date: 2002/09/27 14:52:24;  author: michael;  state: dead;  lines: +0 -0
+remove it from HEAD
+----------------------------
+revision 1.1
+date: 2002/09/27 14:51:16;  author: michael;  state: Exp;
+branches:  1.1.2;
+A test on HEAD
+----------------------------
+revision 1.1.2.3
+date: 2002/09/27 14:53:52;  author: michael;  state: dead;  lines: +0 -0
+remove from Foo branch
+----------------------------
+revision 1.1.2.2
+date: 2002/09/27 14:53:23;  author: michael;  state: Exp;  lines: +1 -1
+updated after remove
+----------------------------
+revision 1.1.2.1
+date: 2002/09/27 14:51:41;  author: michael;  state: Exp;  lines: +1 -1
+upd.
+=============================================================================
+
+
+	
+
+
+The plan:
+
+	+ auto-pop and deliver that mail on a cron job here
+	+ build the web pages from external tinderbox contributions.
+
+	To use tinderbox etc. checkout the source:
+
+* Ongoing
+	+ (/etc/cvsup/cvsup-auto.sh &) - syncs with OO.o
+
+* Setup log:
+
+	cvs -z3 -d ':pserver:anonymous@cvs-mirror.mozilla.org:/cvsroot' checkout mozilla/webtools/<foo>
+	Where <foo> is 'lxr', 'tinderbox2', 'bonsai', 'registry'
+
+	+ First time db setup:
+		sudo mysqladmin create bonsai
+		sudo mysql -u root mysql
+		GRANT ALL PRIVILEGES ON *.* TO nobody@localhost\g
+		quit\g
+		sudo mysqladmin reload
+	+ Install libnet, MailTools, TimeDate from CPAN
+	+ bonsai/configure --prefix=/var/www
+	+ cp -a registry /var/www
+	+ Setup Apache to exec scripts in these dirs
+	+ Hack all the scripts to get the perl path right [!]
+	+ LXR's 'virtroot' has to have a '/lxr' in it NB '/'
+
+	+ Had to hack adminfuncs.pl, cvsquery.pl to add #!/bin/perl
+	  to each, and push (@INC, "/var/www/bonsai")
+
+<darragh> My incprefix in lxr.conf is : 'incprefix' => ['/include', '/include/linux', '/inc', 'inc', '/*', '*', '/inc/*', '/inc/*/*', '/.*', '/.*/inc', '/.*/inc/', '/inc/*/*/*', '/inc/*/*/*/*', '/*/include', '/*/include/linux', '/*/inc', 'inc', '/.*/inc', '/.*/.*/inc', '/.*/.*/.*/inc', '/.*/.*/.*/.*/inc', '/*/inc/', '/*/*/inc', '/*/*/*/inc', '/*/*/*/*/inc', '/*/*', '*', '/*/inc/*', '/*/inc/*/*', '/*/inc/*/*/*', '/*/inc/*/*/*/*', '/.*/include', '/.
+<darragh> */include/linux', '/inc', 'inc', '/.*', '.*', '/inc/.*', '/inc/.*/.*', '/.*', '/.*/inc', '/.*/inc/', '/.*/.*/inc/.*/.*/.*', '/inc/...*/.*/.*/.*', '/.*/include', '/.*/include/linux', '/.*/inc', 'inc', '/.*/.*', '.*', '/.*/inc/.*', '/.*/inc/.*/.*', '/.*/inc/.*/.*/.*', '/.*/inc/.*/.*/.*/.*'],
+
+
+Index: rebuildcvshistory.cgi
+===================================================================
+RCS file: /cvsroot/mozilla/webtools/bonsai/rebuildcvshistory.cgi,v
+retrieving revision 1.8
+diff -u -p -u -r1.8 rebuildcvshistory.cgi
+--- rebuildcvshistory.cgi	27 Jun 2002 04:31:28 -0000	1.8
++++ rebuildcvshistory.cgi	2 Oct 2002 09:35:46 -0000
+@@ -1,4 +1,4 @@
+-#!/usr/bonsaitools/bin/perl -w
++#!/usr/bin/perl -w
+ #
+ # The contents of this file are subject to the Netscape Public
+ # License Version 1.1 (the "License"); you may not use this file
+@@ -19,6 +19,8 @@
+ #
+ # Contributor(s): 
+ 
++push (@INC, "/var/www/bonsai");
++
+ use diagnostics;
+ use strict;
+ 
+@@ -39,6 +41,7 @@ sub ProcessOneFile {
+      my ($filename) = @_;
+      my $rlog = Param('rlogcommand') . " $filename |";
+      my $doingtags = 0;
++     my $stat = 'C';
+      my $filehead = dirname($filename);
+      my (%branchname, $filerealname, $filetail, $line, $trimmed);
+      my ($tag, $version, $branchid, $dirid, $fileid, $indesc, $desc);
+@@ -112,7 +115,7 @@ sub ProcessOneFile {
+                                    $datestr =~ s!^(\d{4})/(\d+/\d+)!$2/$1!;
+                                    $date = str2time($datestr, "GMT");
+                                    if ($date >= $::StartFrom) {
+-                                        AddToDatabase("C|$date|$author|$::Repository|$filehead|$filetail|$revision||$branch|+$pluscount|-$minuscount", $desc);
++                                        AddToDatabase("$stat|$date|$author|$::Repository|$filehead|$filetail|$revision||$branch|+$pluscount|-$minuscount", $desc);
+                                    }
+                               }
+                               $indesc = 0;
+@@ -127,6 +130,7 @@ sub ProcessOneFile {
+                          if ($line =~ /^revision ([0-9.]*)$/) {
+                               $pluscount = ($minuscount = 0);
+                               $date = ($indesc = 0);
++			      $stat = 'C';
+                               $datestr = ($desc = ($branch = ($author = "")));
+                               $revision = $1;
+ 
+@@ -142,10 +146,18 @@ sub ProcessOneFile {
+                               $line =~ s!^author: ([^;]*);\s+!!;
+                               $author = $1;
+ 
++			      if ($line =~ /state: dead;/) {
++				  $stat = 'R';
++			      } else {
++				  $stat = 'C';
++			      }
++
+                               if ($line =~ /lines: \+(\d+) -(\d+)/) {
+                                    $pluscount = $1;
+                                    $minuscount = $2;
+-                              }
++			      } else {
++				   $stat = 'A';
++			      }
+                          }
+ 
+                          elsif ($line =~ /^branches: [0-9 .;]*$/) {
+@@ -204,6 +216,13 @@ sub ProcessDirectory {
+ 
+ 
+ $| = 1;
++my $update = 0;
++my $TIMESTAMP_PATH = '/var/lxr/batch-timestamp';
++# max time from ooo cvs -> me refreshing [?]
++my $DODGY_SAFETY_FACTOR = 3600 * 4;
++my $a;
++my $mtime;
++my $cvsup_upd = 0;
+ 
+ if ($#ARGV == 4) {
+      $::TreeID                   = $ARGV[0];
+@@ -211,6 +230,26 @@ if ($#ARGV == 4) {
+      $::FORM{'firstfile'}        = $ARGV[2];
+      $::FORM{'subdir'}           = $ARGV[3];
+      $::FORM{'modules'}          = $ARGV[4];
++} elsif ($#ARGV == 0) {
++     $::TreeID                   = $ARGV[0];
++
++# Coupled to cvsup via this ...     
++     $mtime = 0;
++     ($a,$a,$a,$a,$a,$a,$a,$a,
++      $a,$mtime,$a,$a,$a)
++	 = stat($TIMESTAMP_PATH);
++     if ($mtime) {
++	 $::FORM{'startfrom'} = gmtime ($mtime - $DODGY_SAFETY_FACTOR);
++     } else {
++	 $::FORM{'startfrom'} = '';
++     }
++     print ("Updating from stamp ". gmtime ($mtime));
++     
++     $::FORM{'firstfile'}        = '';
++     $::FORM{'subdir'}           = '';
++     $::FORM{'modules'}          = '';
++
++     $cvsup_upd = 1;
+ } else {
+      print "Content-type: text/html
+ 
+@@ -255,21 +294,51 @@ my $StartingDir;
+ ($StartingDir = "$::Repository/$::SubDir") =~ s!/.?$!! if $::SubDir;
+ 
+ 
+-print "Doing directories: @Dirs ...\n";
+-foreach my $Dir (@Dirs) {
+-     my $dir = "$::Repository/$Dir";
+-
+-     unless (grep $Dir, @::LegalDirs) {
+-          print "$Dir: is invalid, skipping...\n";
+-     }
+-
+-     if (-f $dir) {
+-          ProcessOneFile($dir);
+-     } elsif (-d $dir) {
+-          ProcessDirectory($dir);
+-     } else {
+-          print "$Dir: not a file or directory, skipping...\n";
+-     }
++if ($cvsup_upd) {
++    # CVSup prints before synching ...
++    my $delay_line='';
++    while (<STDIN>) {
++	my $line;
++	my $attic;
++	my $basename;
++	my $fname;
++	
++	$line = $_;
++
++	if ($delay_line) {
++		ProcessOneFile($delay_line);
++		$delay_line='';
++	}
++
++	if ($line =~ /\-\> Attic/) {
++	    $attic = "/Attic";
++	} else {
++	    $attic = '';
++	}
++	if ($line =~ /^ (Edit|Create) (.*\,v)/) {
++	    $basename = $fname = $2;
++	    $basename =~ s|/([^/]*)$||;
++	    $fname = $1;
++	    $delay_line = "$::Repository/$basename$attic/$fname";
++	}
++    }
++} else {
++    print "Doing directories: @Dirs ...\n";
++    foreach my $Dir (@Dirs) {
++	my $dir = "$::Repository/$Dir";
++	my $attic;
++	
++	unless (grep $Dir, @::LegalDirs) {
++	    print "$Dir: is invalid, skipping...\n";
++	
++        } elsif (-f $dir) {
++	    ProcessOneFile($dir);
++	} elsif (-d $dir) {
++	    ProcessDirectory($dir);
++	} else {
++	    print "$Dir: not a file or directory, skipping...\n";
++	}
++    }
+ }
+ 
+ exit 0;
