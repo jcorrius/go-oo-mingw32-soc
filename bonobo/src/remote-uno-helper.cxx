@@ -44,7 +44,7 @@ getRemoteComponentContext( const Reference< XComponentContext >& xComponentConte
 	} catch( uno::Exception ) {
 		g_message( "Trying to start OOo" );
 
-		gchar *pArgv[4];
+		gchar *pArgv[5];
 		
 		pArgv[ 0 ] = "ooffice";
 		pArgv[ 1 ] = g_strconcat( "-accept=pipe,name=",
@@ -52,7 +52,8 @@ getRemoteComponentContext( const Reference< XComponentContext >& xComponentConte
 								  ";urp;StarOffice.ComponentContext",
 								  NULL );
 		pArgv[ 2 ] = "-bean";
-		pArgv[ 3 ] = NULL;
+		pArgv[ 3 ] = "-norestore";
+		pArgv[ 4 ] = NULL;
 
 		gboolean result = g_spawn_async( NULL,	// Working directory
 										 pArgv,	// Child's argv

@@ -97,6 +97,23 @@ star_frame_widget_realize( GtkWidget *widget )
 }
 
 static void
+star_frame_widget_dispose( GObject *object )
+{
+	StarFrameWidget *sfw = STAR_FRAME_WIDGET( object );
+
+	if( sfw->priv->x_frame.is() )
+		sfw->priv->x_frame.clear();
+
+	if( sfw->priv->x_window_peer.is() )
+		sfw->priv->x_window_peer.clear();
+
+	if( sfw->service_manager.is() )
+		sfw->service_manager.clear();
+
+	BONOBO_CALL_PARENT( G_OBJECT_CLASS, dispose, ( object ) );
+}
+
+static void
 star_frame_widget_finalize( GObject *object )
 {
 	delete STAR_FRAME_WIDGET( object )->priv;
@@ -108,6 +125,7 @@ star_frame_widget_class_init( StarFrameWidgetClass *klass )
 {
 	GObjectClass *object_class = G_OBJECT_CLASS( klass );
 
+ 	object_class->dispose = star_frame_widget_dispose;
 	object_class->finalize = star_frame_widget_finalize;
 
 	GtkWidgetClass *widget_class = GTK_WIDGET_CLASS( klass );
