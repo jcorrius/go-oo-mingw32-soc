@@ -25,11 +25,16 @@ AC_ARG_ENABLE(
 		[check for the presence of headers, binaries, etc.]),,
 	[enable_strict_tests="no"])
 
+dnl FIXME
+TAG="OOO_1_1_0"
+BASEDIR=`pwd`/..
+
 AC_ARG_WITH(
 	[ooo-builddir],
 	AC_HELP_STRING([--with-ooo-builddir],
 		[define the directory where openoffice.org will be compiled, e.g. the root of an ooo cvs checkout.]),
-	[ac_solver_dir="${withval}/solver/645/unxlngi4.pro"],)
+	[ac_solver_dir="${withval}/solver/645/unxlngi4.pro"],
+	[ac_solver_dir="${BASEDIR}/build/${TAG}/solver/645/unxlngi4.pro"])
 
 AC_ARG_WITH(
 	[ooo-solver-dir],
