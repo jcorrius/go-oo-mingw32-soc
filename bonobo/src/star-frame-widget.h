@@ -36,8 +36,8 @@ struct _StarFrameWidgetClass {
     GtkSocketClass parent_class;
 };
 
-GType star_frame_widget_get_type	    ( void );
-GtkWidget *star_frame_widget_new	    ( void );
+GType star_frame_widget_get_type ( void );
+GtkWidget *star_frame_widget_new ( Reference< XMultiServiceFactory > service_factory );
 
 Reference< XWindowPeer > star_frame_widget_get_window_peer( StarFrameWidget * );
 Reference< XFrame > star_frame_widget_get_frame( StarFrameWidget * );

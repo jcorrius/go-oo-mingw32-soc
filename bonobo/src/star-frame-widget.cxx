@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include "star-frame-widget.h"
 
 #include <libgnome/gnome-macros.h>
@@ -38,6 +39,7 @@ star_frame_widget_get_window_peer( StarFrameWidget *sfw )
 	if( ! GTK_WIDGET_REALIZED( GTK_WIDGET( sfw ) ) )
 		gtk_widget_realize( GTK_WIDGET( sfw ) );
 
+	g_assert( sfw->service_manager.is() );
 	Reference< XSystemChildFactory > xChildFactory(
 		sfw->service_manager->createInstance(
 			OUString::createFromAscii( "com.sun.star.awt.Toolkit" ) ),
@@ -58,6 +60,8 @@ Reference< XFrame >
 star_frame_widget_get_frame( StarFrameWidget *sfw )
 {
 	g_assert( sfw->priv->x_window_peer.is() );
+	g_assert( sfw->priv->x_frame.is() );
+	g_assert( sfw->service_manager.is() );
 
 	sfw->priv->x_frame.set(
 		sfw->service_manager->createInstance(
@@ -95,7 +99,9 @@ star_frame_widget_instance_init( StarFrameWidget *sfw )
 }
 
 GtkWidget *
-star_frame_widget_new()
+star_frame_widget_new ( Reference< XMultiServiceFactory > service_factory )
 {
-    return GTK_WIDGET( g_object_new( TYPE_STAR_FRAME_WIDGET, NULL ) );	     
+    StarFrameWidget *swf = (StarFrameWidget *)g_object_new( TYPE_STAR_FRAME_WIDGET, NULL );
+	swf->service_manager = service_factory;
+	return GTK_WIDGET( swf );
 }

@@ -13,6 +13,7 @@
 #include "star-frame-widget.h"
 
 #define UNO_BOOTSTRAP_INI "file://" INIFILE
+#define FILENAME "file:///demo/schmidt.sxw"
 
 using namespace com::sun::star;
 using namespace com::sun::star::beans;
@@ -35,7 +36,7 @@ FrameLoaderLoadFileFromUrl( Reference< frame::XSynchronousFrameLoader > xFrameLo
 
 	aProperties[ 0 ] = PropertyValue( OUString::createFromAscii("FileName"),
 									  0,
-									  uno::makeAny(OUString::createFromAscii("file:///home/martin/gtk.sxw") ),
+									  uno::makeAny(OUString::createFromAscii(FILENAME)),
 									  PropertyState_DIRECT_VALUE ); 
 	
 	aProperties[ 1 ] = PropertyValue( OUString::createFromAscii( "TypeName" ),
@@ -104,10 +105,9 @@ main( int argc, char *argv[] )
 	GtkWidget *pText2 = gtk_entry_new();
 	gtk_box_pack_start( GTK_BOX( pVBox ), pText2, FALSE, FALSE, 5 );
 
-	GtkWidget *pSocket = star_frame_widget_new();
+	GtkWidget *pSocket = star_frame_widget_new( xMultiServiceFactory );
  	gtk_box_pack_start( GTK_BOX( pVBox ), pSocket, TRUE, TRUE, 5 );
 
-	STAR_FRAME_WIDGET( pSocket )->service_manager.set( xMultiServiceFactory );
 	Reference< awt::XWindowPeer > xWindowPeer(
 		star_frame_widget_get_window_peer( STAR_FRAME_WIDGET( pSocket ) ) );
 	g_assert( xWindowPeer.is() );
@@ -129,7 +129,7 @@ main( int argc, char *argv[] )
 		
 	FrameLoaderLoadFileFromUrl(
 		xFrameLoader, xFrame,
-		OUString::createFromAscii( "file:///home/martin/gtk.sxw" ) );
+		OUString::createFromAscii( FILENAME ) );
 
 	gtk_widget_grab_focus( pSocket );
 	gtk_widget_show( pSocket );
