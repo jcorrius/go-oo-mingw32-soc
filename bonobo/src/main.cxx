@@ -5,6 +5,7 @@
 #include <cppuhelper/bootstrap.hxx>
 
 #include <com/sun/star/bridge/XUnoUrlResolver.hpp>
+#include <com/sun/star/document/XTypeDetection.hpp>
 #include <com/sun/star/lang/XMultiComponentFactory.hpp>
 #include <com/sun/star/lang/XMultiServiceFactory.hpp>
 #include <com/sun/star/frame/XFrame.hpp>
@@ -31,7 +32,8 @@ extern "C" {
 static void
 FrameLoaderLoadFileFromUrl( Reference< frame::XSynchronousFrameLoader > xFrameLoader,
 							Reference< frame::XFrame > xFrame,
-							OUString sUrl)
+							OUString sUrl,
+							OUString sTypeName)
 {
 	uno::Sequence< beans::PropertyValue > aProperties( 3 );
 
@@ -42,7 +44,7 @@ FrameLoaderLoadFileFromUrl( Reference< frame::XSynchronousFrameLoader > xFrameLo
 	
 	aProperties[ 1 ] = PropertyValue( DECLARE_ASCII( "TypeName" ),
 									  0,
-									  uno::makeAny( DECLARE_ASCII( "writer_StarOffice_XML_Writer" ) ),
+									  uno::makeAny( sTypeName ),
 									  PropertyState_DIRECT_VALUE ); 
 	
 	aProperties[ 2 ] = PropertyValue( DECLARE_ASCII( "ReadOnly" ),
@@ -51,6 +53,19 @@ FrameLoaderLoadFileFromUrl( Reference< frame::XSynchronousFrameLoader > xFrameLo
 									  PropertyState_DIRECT_VALUE ); 
 
 	xFrameLoader->load( aProperties, xFrame );
+}
+
+static int
+load_uri( BonoboPersistFile *pf, const CORBA_char *text_uri,
+		  CORBA_Environment *ev, gpointer user_data )
+{
+	StarFrameWidget *pSocket = STAR_FRAME_WIDGET( user_data );
+
+ 	if( !GTK_WIDGET_REALIZED( GTK_WIDGET( pSocket ) ) )
+		/* FIXME */
+		pSocket->uri = DECLARE_ASCII( "file://" ) + B2U( rtl::OString( text_uri ) );
+
+	g_message( "Load_uri called: %s", text_uri );
 }
 
 static void
@@ -65,19 +80,26 @@ realize( GtkWidget *widget, gpointer user_data )
 		star_frame_widget_get_frame( STAR_FRAME_WIDGET( pSocket ) ) );
 	g_assert( xFrame.is() );
 	
+	Reference< document::XTypeDetection > xTypeDetection(
+		pSocket->service_manager->createInstance( SERVICENAME_TYPEDETECTION ),
+		uno::UNO_QUERY );
+	g_assert( xTypeDetection.is() );
+	
 	Reference< XMultiServiceFactory > xFrameLoaderFactory(
 		pSocket->service_manager->createInstance(
 			SERVICENAME_FRAMELOADERFACTORY ),
 		uno::UNO_QUERY );
-	
+
+	OUString sTypeName( xTypeDetection->queryTypeByURL( pSocket->uri ) );
+	g_message( "%s", U2B( sTypeName ).pData->buffer);
+
 	Reference< frame::XSynchronousFrameLoader > xFrameLoader(
-		xFrameLoaderFactory->createInstance(
-			DECLARE_ASCII( "writer_StarOffice_XML_Writer" ) ),
+		xFrameLoaderFactory->createInstance( sTypeName ),
 		uno::UNO_QUERY );
 	g_assert( xFrameLoader.is() );
 	
 	FrameLoaderLoadFileFromUrl(
-		xFrameLoader, xFrame, FILENAME );
+		xFrameLoader, xFrame, pSocket->uri, sTypeName );
 }
 
 static void
@@ -112,8 +134,9 @@ factory( BonoboGenericFactory *factory,
 		BonoboControl *pControl = bonobo_control_new( pHBox );
 		g_signal_connect( pControl, "activate", G_CALLBACK( activate ), pSocket );
 
+		STAR_FRAME_WIDGET( pSocket )->uri = FILENAME;
 		BonoboPersistFile *pPersistFile =
-			bonobo_persist_file_new( NULL, NULL, OAFIID, NULL );
+			bonobo_persist_file_new( load_uri, NULL, OAFIID, pSocket );
 
 		bonobo_object_add_interface( BONOBO_OBJECT( pControl ),
 									 BONOBO_OBJECT( pPersistFile ) );

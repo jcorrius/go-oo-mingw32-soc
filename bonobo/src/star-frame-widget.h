@@ -25,13 +25,13 @@ using com::sun::star::frame::XFrame;
 using com::sun::star::lang::XMultiServiceFactory;
 using com::sun::star::uno::XComponentContext;
 
-
 struct _StarFrameWidget {
     GtkSocket parent;
     StarFrameWidgetPrivate *priv;
 
 	/* Temporary */
 	Reference< XMultiServiceFactory > service_manager;
+	rtl::OUString uri;
 };
 
 struct _StarFrameWidgetClass {
