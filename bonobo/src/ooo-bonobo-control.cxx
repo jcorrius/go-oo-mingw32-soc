@@ -17,6 +17,8 @@
 #include "services.h"
 #include "star-frame-widget.h"
 
+#define OAFIID "OAFIID:GNOME_OpenOfficeOrg_Control"
+
 using namespace com::sun::star;
 using namespace com::sun::star::beans;
 
@@ -31,13 +33,24 @@ struct _OOoBonoboControlPrivate {
 BONOBO_CLASS_BOILERPLATE( OOoBonoboControl, ooo_bonobo_control,
 						  BonoboControl, BONOBO_TYPE_CONTROL);
 
+static int
+load_uri( BonoboPersistFile *pf, const CORBA_char *text_uri,
+		  CORBA_Environment *ev, gpointer user_data )
+{
+	OOoBonoboControl *pControl = OOO_BONOBO_CONTROL( user_data );
+
+	pControl->uri = DECLARE_ASCII( "file://" ) + B2U( rtl::OString( text_uri ) );
+
+	g_message( "Load_uri called: %s", text_uri );
+}
+
 static void
 FrameLoaderLoadFileFromUrl( Reference< frame::XSynchronousFrameLoader > xFrameLoader,
 							Reference< frame::XFrame > xFrame,
 							OUString sUrl,
 							OUString sTypeName)
 {
-	uno::Sequence< beans::PropertyValue > aProperties( 3 );
+	uno::Sequence< PropertyValue > aProperties( 3 );
 
 	aProperties[ 0 ] = PropertyValue( DECLARE_ASCII( "FileName" ),
 									  0,
@@ -167,6 +180,12 @@ ooo_bonobo_control_new( Reference< XComponentContext > component_context )
 						GTK_WIDGET( control->priv->sfw ), TRUE, TRUE, 0 );
 
 	gtk_widget_show( control->priv->hbox );
+
+	BonoboPersistFile *persist_file =
+		bonobo_persist_file_new( load_uri, NULL, OAFIID, control );
+
+	bonobo_object_add_interface( BONOBO_OBJECT( control ),
+								 BONOBO_OBJECT( persist_file ) );
 
 	return bonobo_control_construct( BONOBO_CONTROL( control ),
 									 control->priv->hbox );

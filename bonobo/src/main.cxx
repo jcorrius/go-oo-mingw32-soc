@@ -34,23 +34,6 @@ using com::sun::star::uno::Reference;
 
 extern "C" {
 
-static int
-load_uri( BonoboPersistFile *pf, const CORBA_char *text_uri,
-		  CORBA_Environment *ev, gpointer user_data )
-{
-	OOoBonoboControl *pControl = OOO_BONOBO_CONTROL( user_data );
-
-	pControl->uri = DECLARE_ASCII( "file://" ) + B2U( rtl::OString( text_uri ) );
-
-	g_message( "Load_uri called: %s", text_uri );
-}
-
-static void
-activate( BonoboControl *bonobocontrol, gboolean arg1, gpointer user_data)
-{
-	gtk_widget_show( GTK_WIDGET( user_data ) );
-}
-
 static BonoboObject *
 factory( BonoboGenericFactory *factory,
 		 const char *component_id,
@@ -68,13 +51,8 @@ factory( BonoboGenericFactory *factory,
 		Reference< uno::XComponentContext > xRemoteContext(
 			getRemoteComponentContext( xComponentContext ) );
 		
-		BonoboControl *pControl = ooo_bonobo_control_new( xRemoteContext );
-
-		BonoboPersistFile *pPersistFile =
-			bonobo_persist_file_new( load_uri, NULL, OAFIID, pControl );
-
-		bonobo_object_add_interface( BONOBO_OBJECT( pControl ),
-									 BONOBO_OBJECT( pPersistFile ) );
+		BonoboControl *pControl =
+			ooo_bonobo_control_new( xRemoteContext );
 
 		return BONOBO_OBJECT( pControl );
 	}
