@@ -41,8 +41,7 @@ star_frame_widget_get_window_peer( StarFrameWidget *sfw )
 
 	g_assert( sfw->service_manager.is() );
 	Reference< XSystemChildFactory > xChildFactory(
-		sfw->service_manager->createInstance(
-			OUString::createFromAscii( "com.sun.star.awt.Toolkit" ) ),
+		sfw->service_manager->createInstance( SERVICENAME_VCLTOOLKIT ),
 		UNO_QUERY );
 	g_assert( xChildFactory.is() );
 
@@ -63,8 +62,7 @@ star_frame_widget_get_frame( StarFrameWidget *sfw )
 	g_assert( sfw->service_manager.is() );
 
 	sfw->priv->x_frame.set(
-		sfw->service_manager->createInstance(
-			OUString::createFromAscii( "com.sun.star.frame.Frame" ) ),
+		sfw->service_manager->createInstance( SERVICENAME_FRAME ),
 		UNO_QUERY );
 
     sfw->priv->x_frame->setName( OUString::createFromAscii( "A Frame in GTK+" ) );
@@ -73,8 +71,7 @@ star_frame_widget_get_frame( StarFrameWidget *sfw )
 	sfw->priv->x_frame->initialize( xWindow );
 	
     Reference< XFramesSupplier > xTreeRoot(
-		sfw->service_manager->createInstance(
-			OUString::createFromAscii( "com.sun.star.frame.Desktop" ) ),
+		sfw->service_manager->createInstance( SERVICENAME_DESKTOP ),
 		UNO_QUERY );
     g_assert( xTreeRoot.is() );
 

@@ -70,8 +70,7 @@ main( int argc, char *argv[] )
 
     Reference< uno::XInterface > xInterface =
 		xMultiComponentFactoryClient->createInstanceWithContext(
-			DECLARE_ASCII( "com.sun.star.bridge.UnoUrlResolver" ),
-			xComponentContext );
+			SERVICENAME_UNOURLRESOLVER, xComponentContext );
     g_assert( xInterface.is() );
 
     Reference< bridge::XUnoUrlResolver > xUnoUrlResolver(
@@ -119,14 +118,12 @@ main( int argc, char *argv[] )
 
 	// Loading
 	Reference< document::XTypeDetection > xTypeDetection(
-		xMultiServiceFactory->createInstance(
-			DECLARE_ASCII( "com.sun.star.document.TypeDetection" ) ),
+		xMultiServiceFactory->createInstance( SERVICENAME_TYPEDETECTION ),
 		uno::UNO_QUERY );
 	g_assert( xTypeDetection.is() );
 
 	Reference< XMultiServiceFactory > xFrameLoaderFactory(
-		xMultiServiceFactory->createInstance(
-			DECLARE_ASCII( "com.sun.star.frame.FrameLoaderFactory" ) ),
+		xMultiServiceFactory->createInstance( SERVICENAME_FRAMELOADERFACTORY ),
 		uno::UNO_QUERY );
 	g_assert( xFrameLoaderFactory.is() );
 

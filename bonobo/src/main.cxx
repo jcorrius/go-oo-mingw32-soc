@@ -11,6 +11,7 @@
 #include <com/sun/star/frame/XSynchronousFrameLoader.hpp>
 #include <com/sun/star/beans/XPropertySet.hpp>
 
+#include "services.h"
 #include "string-macros.h"
 #include "star-frame-widget.h"
 
@@ -65,8 +66,8 @@ realize( GtkWidget *widget, gpointer user_data )
 	
 	Reference< XMultiServiceFactory > xFrameLoaderFactory(
 		pSocket->service_manager->createInstance(
-			DECLARE_ASCII( "com.sun.star.frame.FrameLoaderFactory" ) ),
-			uno::UNO_QUERY );
+			SERVICENAME_FRAMELOADERFACTORY ),
+		uno::UNO_QUERY );
 	
 	Reference< frame::XSynchronousFrameLoader > xFrameLoader(
 		xFrameLoaderFactory->createInstance(
@@ -107,8 +108,7 @@ factory( BonoboGenericFactory *factory,
 
 		Reference< uno::XInterface > xInterface =
 			xMultiComponentFactoryClient->createInstanceWithContext(
-				DECLARE_ASCII( "com.sun.star.bridge.UnoUrlResolver" ),
-				xComponentContext );
+				SERVICENAME_UNOURLRESOLVER ), xComponentContext );
 		g_assert( xInterface.is() );
 
 		Reference< bridge::XUnoUrlResolver > xUnoUrlResolver(
