@@ -67,6 +67,8 @@ if test -z "$REGMERGE" ; then
     AC_MSG_ERROR([regmerge not found, try '--with-ooo-solver-dir=location_of_ODK'.])
   fi
 fi
+dnl FIXME
+REGMERGE="LD_LIBRARY_PATH=$ac_ooodev_libdir:\$\$LD_LIBRARY_PATH $REGMERGE"
 AC_SUBST(REGMERGE)
 
 AC_PATH_PROG([REGCOMP], [regcomp], [], [$ac_ooodev_bindir:$PATH])
@@ -77,6 +79,8 @@ if test -z "$REGCOMP" ; then
     AC_MSG_ERROR([regcomp not found, try '--with-ooo-solver-dir=location_of_ODK'.])
   fi
 fi
+dnl FIXME
+REGCOMP="LD_LIBRARY_PATH=$ac_ooodev_libdir:\$\$LD_LIBRARY_PATH $REGCOMP"
 AC_SUBST(REGCOMP)
 
 if test ! -d "$ac_ooodev_libdir" && "z$enable_strict_tests" != "zno" ; then
