@@ -212,6 +212,9 @@ sub apply_patches {
     }
     $patch_num++;
 
+# Foo ! - we really need to look for different patches here and
+# reverse them ahead of time, not just missing ones [!]
+
     my %obsolete_patches = %existing_patches;
     foreach $patch (@Patches) {
 	delete $obsolete_patches{basename($patch)};
