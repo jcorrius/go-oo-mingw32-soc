@@ -1,109 +1,25 @@
---- /dev/null	2002-08-31 00:31:37.000000000 +0100
-+++ vcl/inc/layout.hxx	2003-08-26 17:26:23.000000000 +0100
-@@ -0,0 +1,100 @@
-+#ifndef _SV_LAYOUT_HXX
-+#define _SV_LAYOUT_HXX
-+
-+#include <list>
-+
-+#include <gen.hxx>
-+#include <resmgr.hxx>
-+#include <window.hxx>
-+
-+class Layout;
-+//
-+//      The connector exists to connect widgets as they are
-+// instantiated later, to the pre-existing layout peers.
-+//
-+class LayoutConnector {
-+	struct Connection {
-+		USHORT  nId;
-+		Layout *pLayout;
-+		Window *pWindow;
-+	};
-+	std::list<Connection> m_aMap;
-+	ResMgr *m_pResMgr;
-+	Window *m_pTopWindow;
-+	Layout *m_pTopLayout;
-+    private:
-+	void    reconcile( Connection &pCnx );
-+    public:
-+	LayoutConnector( Window *pWindow, ResMgr *pMgr, USHORT nId );
-+
-+	// Construction time bits
-+	ResMgr *getSetupMgr();
-+	void    addMap( USHORT nId, Layout *pLayout );
-+	Layout *loadLayout();
-+
-+	// later association bits
-+	void    reconcileMap( USHORT nId, Window *pWindow );
-+};
-+
-+class Layout {
-+public: // sucking child properties ...
-+	Window *m_pPeer;
-+	Size    m_aRequisition;
-+	int     m_nBorderWidth;
-+	bool    m_bHomogeneous;
-+// Unsatisfactory child properties ...
-+	int     m_nPadding;
-+	bool    m_bExpand;
-+	bool    m_bFill;
-+	bool    m_bPackStart;
-+    public:
-+	Layout();
-+	~Layout();
-+	virtual void readRes( LayoutConnector &rCnx, ResMgr *pResMgr );
-+	virtual void requestSize( Size &rSize );
-+	virtual void allocateSize( const Point &rPoint,
-+				   const Size  &rSize );
-+	virtual void addChild( Layout *pLayout );
-+	const Size  &getRequisition()        { return m_aRequisition; }
-+	void         setPeer( Window *pPeer) { m_pPeer = pPeer; }
-+	Window      *getPeer()               { return  m_pPeer; }
-+	bool         visible() { return m_pPeer ? m_pPeer->IsVisible() : TRUE; }
-+};
-+
-+class LayoutBin : public Layout {
-+    protected:
-+	Layout *m_pChild;
-+    public:
-+	LayoutBin();
-+	~LayoutBin();
-+	virtual void requestSize( Size &rSize );
-+	virtual void allocateSize( const Point &rPoint, const Size &rSize );
-+};
-+
-+class LayoutBox : public Layout {
-+    protected:
-+//	bool    m_bHomogeneous;
-+	struct BoxChild {
-+		Layout *pLayout;
-+		int     nPadding;
-+		bool    bExpand;
-+		bool    bFill;
-+		bool    bPackStart;
-+	};
-+	int m_nSpacing;
-+	std::list<BoxChild> m_aChildren;
-+    public:
-+	LayoutBox();
-+	~LayoutBox();
-+	virtual void addChild( Layout *pLayout );
-+};
-+
-+class LayoutHBox : public LayoutBox {
-+    public:
-+	LayoutHBox();
-+	virtual void  requestSize( Size &rSize );
-+	virtual void  allocateSize( const Point &rPoint,
-+				    const Size  &rSize );
-+};
-+
-+#endif // _SV_LAYOUT_HXX
---- /dev/null	2002-08-31 00:31:37.000000000 +0100
-+++ vcl/source/window/layout.cxx	2003-08-26 17:36:06.000000000 +0100
-@@ -0,0 +1,353 @@
+Index: vcl/source/window/makefile.mk
+===================================================================
+RCS file: /cvs/gsl/vcl/source/window/makefile.mk,v
+retrieving revision 1.10
+diff -u -p -u -r1.10 makefile.mk
+--- vcl/source/window/makefile.mk	27 Mar 2003 17:58:22 -0000	1.10
++++ vcl/source/window/makefile.mk	27 Aug 2003 12:18:43 -0000
+@@ -76,6 +76,7 @@ TARGET=win
+ # --- Files --------------------------------------------------------
+ 
+ SLOFILES=	$(SLO)$/accel.obj		\
++		$(SLO)$/layout.obj		\
+ 			$(SLO)$/accmgr.obj		\
+ 			$(SLO)$/brdwin.obj		\
+ 			$(SLO)$/btndlg.obj		\
+Index: vcl/source/window/layout.cxx
+===================================================================
+RCS file: vcl/source/window/layout.cxx
+diff -N vcl/source/window/layout.cxx
+--- /dev/null	1 Jan 1970 00:00:00 -0000
++++ vcl/source/window/layout.cxx	27 Aug 2003 12:18:43 -0000
+@@ -0,0 +1,390 @@
 +#include <sal/macros.h>
 +#include <tools/rcid.h>
 +#include <tools/rc.h>
@@ -174,7 +90,8 @@
 +{
 +	fprintf( stderr, "Reconcile mapping 0x%x\n", pCnx );
 +	pCnx.pLayout->setPeer( pCnx.pWindow );
-+	fprintf( stderr, "FIXME: trigger re-layout\n" );
++	if( pCnx.pWindow->IsVisible() )
++		fprintf( stderr, "FIXME: trigger re-layout\n" );
 +}
 +void LayoutConnector::addMap( USHORT nId, Layout *pLayout )
 +{
@@ -200,11 +117,28 @@
 +		}
 +	}
 +}
++bool LayoutConnector::checkReconciled()
++{
++	bool bResult = true;
++
++	std::list<Connection>::iterator aIter;
++	for (aIter = m_aMap.begin(); aIter != m_aMap.end(); aIter++) {
++		if( !aIter->pWindow ) {
++			fprintf( stderr, "Unreconciled id 0x%x -> %p\n",
++				 aIter->nId, aIter->pLayout );
++			bResult = false;
++		}
++	}
++
++	return bResult;
++}
 +
 +// --- Layout ---
 +
 +Layout::Layout() :
-+	m_pPeer( NULL ), m_nBorderWidth( 0 ),
++	m_pPeer( NULL ),
++	m_aRequisition( 0, 0),
++	m_nBorderWidth( 0 ),
 +	m_bHomogeneous( FALSE ),
 +	m_nPadding( 0 ),
 +	m_bExpand( 0 ),
@@ -264,16 +198,24 @@
 +}
 +void Layout::requestSize( Size &rSize )
 +{
-+	if( m_pPeer )
++	if( m_pPeer ) {
 +		m_pPeer->VtkRequestSize( rSize );
-+	else
++		// Size requesting doesn't seem too accurate
++		rSize.Width() += 8;
++	} else
 +		rSize = Size();
++	fprintf( stderr, "Layout::RequestSize -> %d, %d [%p]\n",
++		 rSize.Width(), rSize.Height(), m_pPeer );
++	m_aRequisition = rSize;
 +}
 +void Layout::allocateSize( const Point &rPoint,
 +			   const Size  &rSize )
 +{
 +	if( m_pPeer )
 +		m_pPeer->SetPosSizePixel( rPoint, rSize );
++	fprintf( stderr, "Layout::allocateSize -> %d,%d (%d, %d) [%p]\n",
++		 rPoint.X(), rPoint.Y(), rSize.Width(), rSize.Height(),
++		 m_pPeer );
 +}
 +
 +// --- LayoutBin ---
@@ -301,7 +243,8 @@
 +
 +// --- LayoutBox ---
 +
-+LayoutBox::LayoutBox() : Layout()
++LayoutBox::LayoutBox() :
++	Layout(), m_nSpacing(0)
 +{
 +}
 +LayoutBox::~LayoutBox()
@@ -350,7 +293,7 @@
 +		if( m_bHomogeneous )
 +			rSize.Width() = SAL_MAX( rSize.Width(), nThisWidth );
 +		else
-+			rSize.Width() = nThisWidth;
++			rSize.Width() += nThisWidth;
 +
 +		rSize.Height() = SAL_MAX( rSize.Height(), aChildSize.Height() );
 +
@@ -365,6 +308,9 @@
 +
 +	rSize.Width() += m_nBorderWidth * 2;
 +	rSize.Height() += m_nBorderWidth * 2;
++
++	fprintf( stderr, "LayoutHBox::RequestSize -> %d, %d [%p]\n",
++		 rSize.Width(), rSize.Height(), this );
 +
 +	m_aRequisition = rSize;
 +}
@@ -396,10 +342,14 @@
 +				  ( nVisibleChildren - 1 ) * m_nSpacing ) * FIXED_PT ) / nVisibleChildren;
 +
 +	else if( nExpandChildren )
-+		fExtraSpace = ( rSize.Width() - m_aRequisition.Width() ) * FIXED_PT;
++		fExtraSpace = ( ( rSize.Width() - m_aRequisition.Width() ) * FIXED_PT ) / nExpandChildren;
 +
 +	else
 +		fExtraSpace = 0;
++
++
++	fprintf( stderr, "Layout::allocateSize extra space %g [%p]\n",
++		 (double)fExtraSpace/FIXED_PT, this );
 +
 +	fStartPos = rPoint;
 +	fStartPos.Move( m_nBorderWidth, m_nBorderWidth );
@@ -434,6 +384,9 @@
 +			aChildSize.Width() = aIter->pLayout->getRequisition().Width();
 +			nSlackSpace = (fBoxWidth / FIXED_PT - aChildSize.Width()) / 2;
 +		}
++		
++		fprintf( stderr, "LayoutHBox::alloc_child [%p] slack %d, childSize: %d,%d\n",
++			 aIter->pLayout, nSlackSpace, aChildSize.Width(), aChildSize.Height() );
 +
 +		Point aPlace;
 +		if( aIter->bPackStart ) {
@@ -457,3 +410,112 @@
 +}
 +
 +
+Index: vcl/inc/layout.hxx
+===================================================================
+RCS file: vcl/inc/layout.hxx
+diff -N vcl/inc/layout.hxx
+--- /dev/null	1 Jan 1970 00:00:00 -0000
++++ vcl/inc/layout.hxx	27 Aug 2003 12:18:43 -0000
+@@ -0,0 +1,102 @@
++#ifndef _SV_LAYOUT_HXX
++#define _SV_LAYOUT_HXX
++
++#include <list>
++
++#include <gen.hxx>
++#include <resmgr.hxx>
++#include <window.hxx>
++
++class Layout;
++//
++//      The connector exists to connect widgets as they are
++// instantiated later, to the pre-existing layout peers.
++//
++class LayoutConnector {
++	struct Connection {
++		USHORT  nId;
++		Layout *pLayout;
++		Window *pWindow;
++	};
++	std::list<Connection> m_aMap;
++	ResMgr *m_pResMgr;
++	Window *m_pTopWindow;
++	Layout *m_pTopLayout;
++    private:
++	void    reconcile( Connection &pCnx );
++    public:
++	LayoutConnector( Window *pWindow, ResMgr *pMgr, USHORT nId );
++
++	// Construction time bits
++	ResMgr *getSetupMgr();
++	void    addMap( USHORT nId, Layout *pLayout );
++	Layout *loadLayout();
++
++	// later association bits
++	void    reconcileMap( USHORT nId, Window *pWindow );
++	bool    checkReconciled();
++	Layout *getLayout() { return m_pTopLayout; }
++};
++
++class Layout {
++public: // sucking child properties ...
++	Window *m_pPeer;
++	Size    m_aRequisition;
++	int     m_nBorderWidth;
++	bool    m_bHomogeneous;
++// Unsatisfactory child properties ...
++	int     m_nPadding;
++	bool    m_bExpand;
++	bool    m_bFill;
++	bool    m_bPackStart;
++    public:
++	Layout();
++	~Layout();
++	virtual void readRes( LayoutConnector &rCnx, ResMgr *pResMgr );
++	virtual void requestSize( Size &rSize );
++	virtual void allocateSize( const Point &rPoint,
++				   const Size  &rSize );
++	virtual void addChild( Layout *pLayout );
++	const Size  &getRequisition()        { return m_aRequisition; }
++	void         setPeer( Window *pPeer) { m_pPeer = pPeer; }
++	Window      *getPeer()               { return  m_pPeer; }
++	bool         visible() { return m_pPeer ? m_pPeer->IsVisible() : TRUE; }
++};
++
++class LayoutBin : public Layout {
++    protected:
++	Layout *m_pChild;
++    public:
++	LayoutBin();
++	~LayoutBin();
++	virtual void requestSize( Size &rSize );
++	virtual void allocateSize( const Point &rPoint, const Size &rSize );
++};
++
++class LayoutBox : public Layout {
++    protected:
++//	bool    m_bHomogeneous;
++	struct BoxChild {
++		Layout *pLayout;
++		int     nPadding;
++		bool    bExpand;
++		bool    bFill;
++		bool    bPackStart;
++	};
++	int m_nSpacing;
++	std::list<BoxChild> m_aChildren;
++    public:
++	LayoutBox();
++	~LayoutBox();
++	virtual void addChild( Layout *pLayout );
++};
++
++class LayoutHBox : public LayoutBox {
++    public:
++	LayoutHBox();
++	virtual void  requestSize( Size &rSize );
++	virtual void  allocateSize( const Point &rPoint,
++				    const Size  &rSize );
++};
++
++#endif // _SV_LAYOUT_HXX
