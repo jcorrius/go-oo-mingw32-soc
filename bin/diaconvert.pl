@@ -2,15 +2,32 @@
 
 use XML::Parser;
 
-my $offset = 0;
-my $scale = 1.0;
-my $unit = "cm";
+my $X_OFFSET_MIN = 2;
+my $X_OFFSET_MAX = 8;
 
-sub get_point_attr
+my $xoffset = $X_OFFSET_MIN;
+my $yoffset = 2;
+my $scale = 5;
+my $unit = "cm";
+my $prefix = '      ';
+
+sub get_size_attr($$)
 {
     my ($value, $name) = @_;
-    return $value->[0]->{$name} / $scale + $offset;
+    return $value->[0]->{$name} / $scale;
 }
+
+sub get_point_attr($$)
+{
+    my ($value, $name) = @_;
+    my $offset = $yoffset;
+    if ($name =~ /x/) {
+	$offset = $xoffset;
+    }
+    my $transformed = get_size_attr ($value, $name) + $offset;
+    return "$transformed$unit";
+}
+
 
 sub parse_glue
 {
@@ -27,8 +44,9 @@ sub parse_glue
 	    my $x = get_point_attr($value, 'x');
 	    my $y = get_point_attr($value, 'y');
 
+	    $glue .= $prefix . '  ';
 	    $glue .= "<draw:glue-point draw:id=\"$count\" ".
-		"svg:x=\"$x$unit\" svg:y=\"$y$unit\"/>\n";
+		"svg:x=\"$x\" svg:y=\"$y\"/>\n";
 	    $count++;
 	}
 #	print "glue elem '" . $elems->[$idx] . "'\n";
@@ -36,6 +54,29 @@ sub parse_glue
     }
 
     return $glue;
+}
+
+sub draw_preamble($)
+{
+    my $name = shift;
+    return $prefix . '  ' .
+	    "<draw:$name draw:style-name=\"gr1\" " .
+	    "draw:text-style-name=\"P1\" " .
+	    "draw:layer=\"layout\"\n" .
+	    $prefix . '  ' . ' ';
+}
+
+sub transfer_attr($$)
+{
+    my ($value, $name) = @_;
+    my $attr = get_point_attr ($value, $name);
+    return "svg:$name=\"$attr\" ";
+}
+
+sub draw_postamble($)
+{
+    my $name = shift;
+    return ">\n" . $prefix . '  ' . "<text:p/></draw:$name>\n";
 }
 
 sub parse_svg
@@ -50,10 +91,27 @@ sub parse_svg
 	my $value = $elems->[$idx+1];
 
 	if ($attr eq 'svg:line') {
-	    my $x1 = $value->[0]->{x1} / $scale + $offset;
-	    my $y1 = $value->[0]->{y1} / $scale + $offset;
+	    $svg .= draw_preamble ('line') .
+		    transfer_attr ($value, 'x1') .
+		    transfer_attr ($value, 'y1') .
+		    transfer_attr ($value, 'x2') .
+		    transfer_attr ($value, 'y2') .
+		    draw_postamble ('line');
+
+	} elsif ($attr eq 'svg:rect') {
+	    my $width = get_size_attr ($value, 'width');
+	    my $height = get_size_attr ($value, 'height');
+	    $svg .= draw_preamble ('rect') .
+		    transfer_attr ($value, 'x') .
+		    transfer_attr ($value, 'y') .
+		    "svg:width=\"$width$unit\" " .
+		    "svg:height=\"$height$unit\" " .
+		    draw_postamble ('rect');
+	} elsif ($attr eq 'svg:polygon') {
+
+	} elsif ($attr ne '0') {
+	    print STDERR "unknown svg elem '" . $elems->[$idx] . "'\n";
 	}
-#	print "svg elem '" . $elems->[$idx] . "'\n";
 	$idx+=2;
     }
 
@@ -79,21 +137,74 @@ sub parse_shape
 	$draw = parse_svg ($value)  if ($attr eq 'svg:svg');
 	
 #	print "elem '" . $elems->[$idx] . "'\n";
-	$idx+=2;
+	$idx += 2;
     }
 
-    print "$name: $descr\n";
-    print "$glue\n";
+    print <<"EOS"
+$prefix<draw:g draw:name="$name">
+$glue
+$draw
+$prefix</draw:g>
+EOS
+;
 }
 
-my $file = shift;
+sub output_header
+{
 
-die "Can't find file \"$file\""
-  unless -f $file;
+print <<'EOS'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE office:document-content PUBLIC "-//OpenOffice.org//DTD OfficeDocument 1.0//EN" "office.dtd">
+<office:document-content xmlns:office="http://openoffice.org/2000/office" xmlns:style="http://openoffice.org/2000/style" xmlns:text="http://openoffice.org/2000/text" xmlns:table="http://openoffice.org/2000/table" xmlns:draw="http://openoffice.org/2000/drawing" xmlns:fo="http://www.w3.org/1999/XSL/Format" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:number="http://openoffice.org/2000/datastyle" xmlns:presentation="http://openoffice.org/2000/presentation" xmlns:svg="http://www.w3.org/2000/svg" xmlns:chart="http://openoffice.org/2000/chart" xmlns:dr3d="http://openoffice.org/2000/dr3d" xmlns:math="http://www.w3.org/1998/Math/MathML" xmlns:form="http://openoffice.org/2000/form" xmlns:script="http://openoffice.org/2000/script" office:class="drawing" office:version="1.0">
+  <office:script/>
+  <office:automatic-styles>
+    <style:style style:name="dp1" style:family="drawing-page"/>
+    <style:style style:name="gr1" style:family="graphics" style:parent-style-name="standard">
+      <style:properties draw:textarea-horizontal-align="center" draw:textarea-vertical-align="middle"/>
+    </style:style>
+    <style:style style:name="P1" style:family="paragraph">
+      <style:properties fo:text-align="center"/>
+    </style:style>
+  </office:automatic-styles>
+  <office:body>
+    <draw:page draw:name="page1" draw:style-name="dp1" draw:master-page-name="Default">
+EOS
+;
+}
 
-my $parser = new XML::Parser (Style => 'Tree');
-my $tree = $parser->parsefile ($file) || die "Faield to parse\n";
+sub output_footer
+{
+print <<'EOS'
+    </draw:page>
+  </office:body>
+</office:document-content>
+EOS
+;
+}
 
-$tree->[0] eq 'shape' || die "No shape\n";
+sub output_shape($)
+{
+    my $file = shift;
 
-parse_shape ($tree->[1]);
+    my $parser = new XML::Parser (Style => 'Tree');
+    my $tree = $parser->parsefile ($file) || die "Faield to parse\n";
+    
+    $tree->[0] eq 'shape' || die "No shape\n";
+    parse_shape ($tree->[1]);
+}
+
+output_header ();
+
+while (my $file = shift @ARGV)
+{
+    die "Can't find file \"$file\""
+	unless -f $file;
+    output_shape ($file);
+    $xoffset += 2.0;
+    if ($xoffset > $X_OFFSET_MAX) {
+	$xoffset = $X_OFFSET_MIN;
+	$yoffset += 2.0
+    }
+}
+
+output_footer ();
