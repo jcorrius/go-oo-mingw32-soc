@@ -1,5 +1,8 @@
 #!/usr/bin/perl -w
 
+use File::Copy;
+use File::Basename;
+
 sub find_file($$)
 {
     my $dir = shift;
@@ -22,11 +25,122 @@ sub find_file($$)
     return "$dir/$file";
 }
 
+sub do_patch {
+    my $patch = shift;
+    my $patch_file = basename($patch);
+    my $cmd_output = "";
+    my $cmd_suffix = "";
+
+    print "$patch_file: testing..."; 
+
+    if ($quiet) 
+        { $cmd_output = " > /dev/null " }
+
+    $cmd_suffix .= " < $patch";
+    my $cmd = "$base_cmd --dry-run ".$cmd_output.$cmd_suffix;
+
+    print "$cmd\n" unless $quiet;
+    system ($cmd) && die "Testing patch $patch_file failed.";
+
+    $cmd = "$base_cmd > /dev/null".$cmd_suffix;
+    if($quiet)
+        { print "applying..." }
+    else
+        { print "$cmd\n" }
+
+    system ($cmd) && die "Failed to patch $patch_file.";
+    print "done.\n";
+}
+
+sub apply_patches {
+
+    my @Patches = ();
+
+    open (PatchList, "$apply_list") || die "Can't find $apply_list";
+
+    my @targets=($distro);
+    while (<PatchList>) {
+            s/\s*#.*//;
+            chomp;
+            $_ eq '' && next;
+
+            if (/\[\s*(.*)\]/) {
+                my $tmp = $1;
+                $tmp =~ s/\s+$//;
+                #print "Distro: '$tmp'\n"; 
+
+                @targets = split /\s*,\s*/, $tmp;
+                next;
+            }
+
+            if (/\s*(\S+)\s*\s*=(\S+)/) {
+                $options{$1} = $2;
+                print "$1 => $2\n" unless $quiet;
+                next;
+            }
+
+            if (!grep /$distro/i, @targets) {
+                #print "$distro: skipping '$_'\n";
+                next;
+            }
+
+            push @Patches, find_file ($patch_dir, $_);
+    }
+    close (PatchList);
+    print "\n" unless $quiet;
+
+    for $opt (@required_opts) { 
+        defined $options{$opt} || die "Required option $opt not defined"; 
+    }
+
+    if( ! -d $applied_patches ) {
+        mkdir $applied_patches || die "Can't make directory $patch_dir: $!";
+    }
+
+    my @existing_patches = glob($applied_patches."/???-*");
+    my $patch_num = $#existing_patches + 1;
+
+    foreach $patch (@Patches) {
+        my $patch_file = basename($patch);
+        
+        my @applied = glob($applied_patches."/???-$patch_file");
+
+        if (!@applied) {
+            print "\n" unless $quiet;
+            do_patch $patch;
+
+            my $patch_copy = sprintf("%s/%03d-%s", $applied_patches, ++$patch_num, $patch_file);
+
+            print "copy $patch_file -> $patch_copy\n" unless $quiet;
+
+            copy($patch, $patch_copy) 
+                || die "Can't copy $patch to $patch_copy $!";
+        }
+        else {
+            print "$patch_file already applied, skipped\n";
+        }
+    }
+}
+
+sub remove_patches {
+    my @Patches = ();
+
+    -d $applied_patches || return;
+
+    foreach $patch_file (reverse glob($applied_patches."/???-*")) {
+        print "\nRemoving ".basename($patch_file)."...\n" unless $quiet;
+        do_patch $patch_file;
+        unlink $patch_file;
+    }
+    rmdir $applied_patches
+}
+
 (@ARGV > 1) || die "Syntax:\napply <path-to-patchdir> <src root> [--distro=Debian] [patch flags '--dry-run' eg.]\n";
 
 $patch_dir = shift (@ARGV);
 $apply_list = $patch_dir.'/apply';
 $dest_dir = shift (@ARGV);
+$applied_patches = $dest_dir.'/applied_patches';
 %options = ();
 
 $quiet = 0;
@@ -37,7 +151,6 @@ $distro = 'Ximian';
 
 foreach $a (@ARGV) {
 	if ($a eq '-R') {
-    		print ("Reversing patched files ...\n");
 	    	$remove = 1;
 	}
 
@@ -52,69 +165,12 @@ foreach $a (@ARGV) {
 
 $base_cmd = "patch -l -b -p0 $opts -d $dest_dir";
 
+print "Execute: $base_cmd for distro '$distro'\n" unless $quiet;
+
 if (!$remove) {
-    print "Execute: $base_cmd for distro '$distro'\n";
+    apply_patches();
+}
+else {
+    remove_patches();
 }
 
-@Patches = ();
-
-open (PatchList, "$apply_list") || die "Can't find $apply_list";
-
-my @targets=($distro);
-while (<PatchList>) {
-	s/\s*#.*//;
-	chomp;
-	$_ eq '' && next;
-
-	if (/\[\s*(.*)\]/) {
-	    my $tmp = $1;
-	    $tmp =~ s/\s+$//;
-	    print "Distro: '$tmp'\n";
-
-	    @targets = split /\s*,\s*/, $tmp;
-	    next;
-	}
-
-	if (/\s*(\S+)\s*\s*=(\S+)/) {
-	    $options{$1} = $2;
-	    print "$1 => $2\n";
-	    next;
-	}
-
-	if (!grep /$distro/i, @targets) {
-	    print "$distro: skipping '$_'\n";
-	    next;
-	}
-
-	push @Patches, find_file ($patch_dir, $_);
-}
-close (PatchList);
-
-for $opt (@required_opts) { 
-    defined $options{$opt} || die "Required option $opt not defined"; 
-}
-
-
-if ($remove) {
-    @Patches = reverse @Patches;
-}
-
-print "testing patches...\n";
-
-for $test_patch_file (@Patches) {
-	$cmd = $base_cmd." --dry-run";
-	if ($quiet) {
-	    $cmd .= " > /dev/null ";
-	}
-	$cmd .= " < $test_patch_file";
-	$quiet || print "$cmd\n";
-	system ($cmd) && die "Testing patch $test_patch_file failed: $!";
-}
-
-print "applying patches...\n";
-
-for $patch_file (@Patches) {
-	$cmd = "$base_cmd > /dev/null < $patch_file";
-	$quiet || print "$cmd\n";
-	system ($cmd) && die "Failed to patch $patch_file: $!";
-}
