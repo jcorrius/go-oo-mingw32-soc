@@ -318,6 +318,8 @@ foreach $a (@ARGV) {
 	}
 }
 $patch_dir = shift (@arguments);
+substr ($patch_dir, 0, 1) eq '/' || die "apply.pl requires absolute paths";
+
 $apply_list = $patch_dir.'/apply';
 
 print "Execute with $opts for distro '$distro'\n" unless $quiet;
@@ -327,6 +329,7 @@ if ($export) {
 
 } else {
     $dest_dir = shift (@arguments);
+    substr ($dest_dir, 0, 1) eq '/' || die "apply.pl requires absolute paths";
     $applied_patches = $dest_dir.'/applied_patches';
 
     $opts = join ' ', @arguments;
