@@ -1,0 +1,2419 @@
+Index: vcl/unx/source/app/saldata.cxx
+===================================================================
+RCS file: /cvs/gsl/vcl/unx/source/app/saldata.cxx,v
+retrieving revision 1.32
+retrieving revision 1.30.2.6
+diff -u -p -u -r1.32 -r1.30.2.6
+--- vcl/unx/source/app/saldata.cxx	8 Jan 2004 14:55:41 -0000	1.32
++++ vcl/unx/source/app/saldata.cxx	22 Jan 2004 13:38:48 -0000	1.30.2.6
+@@ -282,10 +282,10 @@ static const char* XRequest[] = {
+ 	"X_NoOperation"
+ };
+ 
+-BEGIN_C
+ // -=-= C statics =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+ // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+ 
++BEGIN_C
+ 
+ static oslSignalAction SalSignalHdl (void* pData, oslSignalInfo* pInfo)
+ {
+@@ -305,14 +305,15 @@ static oslSignalAction SalSignalHdl (voi
+ 	return osl_Signal_ActAbortApp;
+ }
+ 
++END_C
+ 
+-static int sal_XErrorHdl( Display *pDisplay, XErrorEvent *pEvent )
++int SalData::XErrorHdl( Display *pDisplay, XErrorEvent *pEvent )
+ {
+ 	GetSalData()->XError( pDisplay, pEvent );
+ 	return 0;
+ }
+ 
+-static int sal_XIOErrorHdl( Display *pDisplay )
++int SalData::XIOErrorHdl( Display *pDisplay )
+ {
+     /*  #106197# hack: until a real shutdown procedure exists
+      *  _exit ASAP
+@@ -336,18 +337,15 @@ static int sal_XIOErrorHdl( Display *pDi
+ 	return 0;
+ }
+ 
+-END_C
+-
+ // -=-= SalData =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+ // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+ #include <pthread.h>
+ 
+ SalData::SalData()
+ {
+-	memset( sig_, 0, sizeof( sig_ ) ); // SIG_DFL
+ 	bNoExceptions_	= !!getenv( "SAL_NOSEGV" );
+ 
+-	pXLib_			= new SalXLib();
++	pXLib_			= NULL;
+ 	pDefDisp_		= 0;
+ 	pCurDisp_		= 0;
+ 
+@@ -375,10 +373,6 @@ void SalData::DeleteDisplays()
+ 
+ long SalData::Close() const
+ {
+-	signal( SIGTERM, sig_[SIGTERM] );
+-	if( !pFirstFrame_ )
+-		return 1;
+-
+ 	X11SalFrame *pFrame = pFirstFrame_;
+ 	while( pFrame )
+ 	{
+@@ -391,9 +385,6 @@ long SalData::Close() const
+ 
+ long SalData::ShutDown() const
+ {
+-	if( !pFirstFrame_ )
+-		return 1;
+-
+ 	X11SalFrame *pFrame = pFirstFrame_;
+ 	while( pFrame )
+ 	{
+@@ -406,9 +397,6 @@ long SalData::ShutDown() const
+ 
+ SalDisplay *SalData::GetDisplay( Display *pDisplay )
+ {
+-#if OSL_DEBUG_LEVEL > 1
+-    fprintf( stderr, "shutting down display\n" );
+-#endif
+ 	SalDisplay *pSalDisplay = SalDisplays_.First();
+ 	while( pSalDisplay && pSalDisplay->GetDisplay() != pDisplay )
+ 		pSalDisplay = SalDisplays_.Next();
+@@ -417,7 +405,8 @@ SalDisplay *SalData::GetDisplay( Display
+ 
+ void SalData::Init()
+ {
+-	pXLib_->Init();
++    pXLib_ = new SalXLib();
++    pXLib_->Init();
+ }
+ 
+ // -=-= SalXLib =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+@@ -470,7 +459,6 @@ SalXLib::SalXLib()
+ 	bWasXError_ 			= FALSE;
+ 	bIgnoreXErrors_ 		= !!getenv( "SAL_IGNOREXERRORS" );
+ 	nIgnoreErrorLevel               = 0;
+-	nStateOfYield_			= 0;
+ }
+ 
+ SalXLib::~SalXLib()
+@@ -566,10 +554,10 @@ void SalXLib::Init()
+ 								   aVI.visual,
+ 								   AllocNone );
+ 
+-	XSetIOErrorHandler	  ( (XIOErrorHandler)sal_XIOErrorHdl );
+-	XSetErrorHandler	  ( (XErrorHandler)sal_XErrorHdl );
++	XSetIOErrorHandler	  ( (XIOErrorHandler)SalData::XIOErrorHdl );
++	XSetErrorHandler	  ( (XErrorHandler)SalData::XErrorHdl );
+ 
+-	SalDisplay *pSalDisplay = new SalDisplay( pDisp, aVI.visual, aColMap );
++	SalDisplay *pSalDisplay = new SalX11Display( pDisp, aVI.visual, aColMap );
+ 
+     pInputMethod->CreateMethod( pDisp );
+ 	pInputMethod->AddConnectionWatch( pDisp, (void*)this );
+@@ -646,7 +634,7 @@ void SalXLib::XError( Display *pDisplay,
+ #endif
+ 		fprintf( stderr, "X-Error: %s\n", msg );
+ 		if( pEvent->request_code > capacityof( XRequest ) )
+-			fprintf( stderr, "\tMajor opcode: %d (Shm?)\n", pEvent->request_code );
++			fprintf( stderr, "\tMajor opcode: %d\n", pEvent->request_code );
+ 		else if( XRequest[pEvent->request_code] )
+ 			fprintf( stderr, "\tMajor opcode: %d (%s)\n",
+ 					 pEvent->request_code, XRequest[pEvent->request_code] );
+@@ -775,8 +763,6 @@ void SalXLib::Yield( BOOL bWait )
+     if (p_prioritize_timer != NULL)
+         CheckTimeout();
+ 
+-	nStateOfYield_ = 0; // is not 0 if we are recursive called
+-
+ 	// first, check for already queued events.
+ 	for ( int nFD = 0; nFD < nFDs_; nFD++ )
+ 	{
+@@ -828,7 +814,6 @@ void SalXLib::Yield( BOOL bWait )
+ 		}
+ 	}
+ 
+-	nStateOfYield_ = 1;
+ 	{
+ 		// release YieldMutex (and re-acquire at block end)
+ 		YieldMutexReleaser aReleaser;
+@@ -839,10 +824,8 @@ void SalXLib::Yield( BOOL bWait )
+ 	if( nFound < 0 ) // error
+ 	{
+ #ifdef DBG_UTIL
+-		fprintf( stderr, "SalXLib::Yield s=%d e=%d f=%d\n",
+-				 nStateOfYield_, errno, nFound );
++		fprintf( stderr, "SalXLib::Yield e=%d f=%d\n", errno, nFound );
+ #endif
+-		nStateOfYield_ = 0;
+ 		if( EINTR == errno )
+ 		{
+ 			errno = 0;
+@@ -874,10 +857,7 @@ void SalXLib::Yield( BOOL bWait )
+ 
+ 		// someone-else has done the job for us
+ 		if (nFound == 0)
+-		{
+-			nStateOfYield_ = 0;
+ 			return;
+-		}
+ 
+ 		for ( int nFD = 0; nFD < nFDs_; nFD++ )
+ 		{
+@@ -892,22 +872,17 @@ void SalXLib::Yield( BOOL bWait )
+ 				}
+ 				if ( FD_ISSET( nFD, &ReadFDS ) )
+ 				{
+-					nStateOfYield_ = 3;
+ 					if ( pEntry->IsEventQueued() )
+ 					{
+-						nStateOfYield_ = 4;
+ 						pEntry->HandleNextEvent();
+ 						// if a recursive call has done the job
+ 						// so abort here
+-						if ( nStateOfYield_ != 4 )
+-							break;
+ 					}
+ 					nFound--;
+ 				}
+ 			}
+ 		}
+ 	}
+-	nStateOfYield_ = 0;
+ }
+ 
+ void SalXLib::Wakeup()
+Index: vcl/unx/source/app/saldisp.cxx
+===================================================================
+RCS file: /cvs/gsl/vcl/unx/source/app/saldisp.cxx,v
+retrieving revision 1.50
+retrieving revision 1.48.2.13
+diff -u -p -u -r1.50 -r1.48.2.13
+--- vcl/unx/source/app/saldisp.cxx	6 Jan 2004 14:31:11 -0000	1.50
++++ vcl/unx/source/app/saldisp.cxx	22 Jan 2004 13:22:04 -0000	1.48.2.13
+@@ -82,146 +82,8 @@
+ 
+ #include <prex.h>
+ #include <X11/cursorfont.h>
+-#include "nodrop_curs.h"
+-#include "nodrop_mask.h"
+-#include "wait_curs.h"
+-#include "wait_mask.h"
+-#include "hsplit_curs.h"
+-#include "hsplit_mask.h"
+-#include "vsplit_curs.h"
+-#include "vsplit_mask.h"
+-#include "neswsize_curs.h"
+-#include "neswsize_mask.h"
+-#include "nwsesize_curs.h"
+-#include "nwsesize_mask.h"
+-#include "magnify_curs.h"
+-#include "magnify_mask.h"
+-#include "rotate_curs.h"
+-#include "rotate_mask.h"
+-#include "hshear_curs.h"
+-#include "hshear_mask.h"
+-#include "vshear_curs.h"
+-#include "vshear_mask.h"
+-#include "drawline_curs.h"
+-#include "drawline_mask.h"
+-#include "drawrect_curs.h"
+-#include "drawrect_mask.h"
+-#include "drawpolygon_curs.h"
+-#include "drawpolygon_mask.h"
+-#include "drawbezier_curs.h"
+-#include "drawbezier_mask.h"
+-#include "drawarc_curs.h"
+-#include "drawarc_mask.h"
+-#include "drawpie_curs.h"
+-#include "drawpie_mask.h"
+-#include "drawcirclecut_curs.h"
+-#include "drawcirclecut_mask.h"
+-#include "drawellipse_curs.h"
+-#include "drawellipse_mask.h"
+-#include "drawconnect_curs.h"
+-#include "drawconnect_mask.h"
+-#include "drawtext_curs.h"
+-#include "drawtext_mask.h"
+-#include "mirror_curs.h"
+-#include "mirror_mask.h"
+-#include "crook_curs.h"
+-#include "crook_mask.h"
+-#include "crop_curs.h"
+-#include "crop_mask.h"
+-#include "move_curs.h"
+-#include "move_mask.h"
+-#include "movepoint_curs.h"
+-#include "movepoint_mask.h"
+-#include "movebezierweight_curs.h"
+-#include "movebezierweight_mask.h"
+-#include "drawfreehand_curs.h"
+-#include "drawfreehand_mask.h"
+-#include "drawcaption_curs.h"
+-#include "drawcaption_mask.h"
+-#include "movedata_curs.h"
+-#include "movedata_mask.h"
+-#include "copydata_curs.h"
+-#include "copydata_mask.h"
+-#include "linkdata_curs.h"
+-#include "linkdata_mask.h"
+-#include "movedlnk_curs.h"
+-#include "movedlnk_mask.h"
+-#include "copydlnk_curs.h"
+-#include "copydlnk_mask.h"
+-#include "movefile_curs.h"
+-#include "movefile_mask.h"
+-#include "copyfile_curs.h"
+-#include "copyfile_mask.h"
+-#include "linkfile_curs.h"
+-#include "linkfile_mask.h"
+-#include "moveflnk_curs.h"
+-#include "moveflnk_mask.h"
+-#include "copyflnk_curs.h"
+-#include "copyflnk_mask.h"
+-#include "movefiles_curs.h"
+-#include "movefiles_mask.h"
+-#include "copyfiles_curs.h"
+-#include "copyfiles_mask.h"
+-
+-#include "chart_curs.h"
+-#include "chart_mask.h"
+-#include "detective_curs.h"
+-#include "detective_mask.h"
+-#include "pivotcol_curs.h"
+-#include "pivotcol_mask.h"
+-#include "pivotfld_curs.h"
+-#include "pivotfld_mask.h"
+-#include "pivotrow_curs.h"
+-#include "pivotrow_mask.h"
+-#include "pivotdel_curs.h"
+-#include "pivotdel_mask.h"
+-
+-#include "chain_curs.h"
+-#include "chain_mask.h"
+-#include "chainnot_curs.h"
+-#include "chainnot_mask.h"
+-
+-#include "timemove_curs.h"
+-#include "timemove_mask.h"
+-#include "timesize_curs.h"
+-#include "timesize_mask.h"
+-
+-#include "ase_curs.h"
+-#include "ase_mask.h"
+-#include "asn_curs.h"
+-#include "asn_mask.h"
+-#include "asne_curs.h"
+-#include "asne_mask.h"
+-#include "asns_curs.h"
+-#include "asns_mask.h"
+-#include "asnswe_curs.h"
+-#include "asnswe_mask.h"
+-#include "asnw_curs.h"
+-#include "asnw_mask.h"
+-#include "ass_curs.h"
+-#include "ass_mask.h"
+-#include "asse_curs.h"
+-#include "asse_mask.h"
+-#include "assw_curs.h"
+-#include "assw_mask.h"
+-#include "asw_curs.h"
+-#include "asw_mask.h"
+-#include "aswe_curs.h"
+-#include "aswe_mask.h"
+-#include "null_curs.h"
+-#include "null_mask.h"
+-
+-#include "airbrush_curs.h"
+-#include "airbrush_mask.h" 
+-#include "fill_curs.h"
+-#include "fill_mask.h"
+-#include "vertcurs_curs.h" 
+-#include "vertcurs_mask.h" 
+-
++#include "salcursors.h"
+ #include "invert50.h"
+-#if !(defined AIX)
+-#include <X11/extensions/XShm.h>
+-#endif
+ #ifdef SOLARIS
+ #define XK_KOREAN
+ #endif
+@@ -317,8 +179,6 @@ using namespace vcl_sal;
+ 
+ // -=-= Prototyps =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+ // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+-EXTERN_C int XShmGetEventBase( Display* );
+-
+ // -=-= static variables -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+ // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+ static const char* const VisualClassName[] = {
+@@ -737,14 +597,17 @@ extern "C" {
+ }
+ #endif /* HAVE_LIBSN */
+ 
+-SalDisplay::SalDisplay( Display *display, Visual *pVisual, Colormap aColMap ) : 
+-		mpFallbackFactory ( NULL ),
++SalDisplay::SalDisplay( Display *display, Colormap aColMap ) :
+ 		pDisp_( display ),
++		mpFallbackFactory ( NULL ),
++        m_pWMAdaptor( NULL ),
+         hRefWindow_( None ),
+-        m_pWMAdaptor( NULL )
++        mpInputMethod( NULL )
+ {
++#if OSL_DEBUG_LEVEL > 1
++    fprintf( stderr, "SalDisplay::SalDisplay()\n" );
++#endif
+     SalData *pSalData  = GetSalData();
+-    XVisualInfo aXVI;
+ 
+     if( !pSalData->GetDefDisp() )
+         pSalData->SetDefDisp( this );
+@@ -762,26 +625,26 @@ SalDisplay::SalDisplay( Display *display
+ 		aColMap = DefaultColormap( display, nScreen_ );
+     if( !IsDisplay() && !aColMap)
+     	aColMap = 1;   // trick for XPrinter
+-    if (!pVisual)
+-        pVisual = DefaultVisual( pDisp_, nScreen_ );
+-
+-    sal_GetVisualInfo( pDisp_, XVisualIDFromVisual( pVisual ), aXVI );
+-    Init( aColMap, &aXVI );
+-
+-#ifdef HAVE_LIBSN
+-    m_pSnDisplay = sn_display_new( display, SnErrorTrapPush, SnErrorTrapPop );
+-    m_pSnLauncheeContext = sn_launchee_context_new_from_environment( m_pSnDisplay, nScreen_ );
+-#  ifdef DBG_UTIL
+-    if( !m_pSnLauncheeContext )
+-         fprintf( stderr, "Failed to get launch feedback info from "
+-		  "DESKTOP_LAUNCH_ID/DESKTOP_LAUNCH_WINDOW\n" );
+-#  endif /* DBG_UTIL */
+-#endif /* HAVE_LIBSN */
+ }
+ 
+ // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+ SalDisplay::~SalDisplay( )
+ {
++#if OSL_DEBUG_LEVEL > 1
++    fprintf( stderr, "SalDisplay::~SalDisplay()\n" );
++#endif
++    if( pDisp_ )
++    {
++        doDestruct();
++#if OSL_DEBUG_LEVEL > 1
++        fprintf( stderr, "display %p closed\n", pDisp_ );
++#endif
++        pDisp_ = NULL;
++    }
++}
++
++void SalDisplay::doDestruct()
++{
+     SalData *pSalData = GetSalData();
+ 
+     delete m_pWMAdaptor;
+@@ -821,7 +684,7 @@ SalDisplay::~SalDisplay( )
+         pXLib_->Remove( ConnectionNumber( pDisp_ ) );
+ 		
+         // free colormap before modifying pVisual_
+-        xColor_.Clear();
++        delete m_pColormap;
+         
+         delete pVisual_;
+         
+@@ -830,10 +693,6 @@ SalDisplay::~SalDisplay( )
+ 
+ 		delete mpInputMethod;
+ 		delete mpKbdExtension;
+-        XCloseDisplay( pDisp_ );
+-#if OSL_DEBUG_LEVEL > 1
+-        fprintf( stderr, "display %p closed\n", pDisp_ );
+-#endif
+     }
+ 
+ #ifdef HAVE_LIBSN
+@@ -842,8 +701,6 @@ SalDisplay::~SalDisplay( )
+     sn_display_unref( m_pSnDisplay );
+ #endif /* HAVE_LIBSN */
+ 
+-    pDisp_  = (Display*)ILLEGAL_POINTER;
+-
+     pSalData->Remove( this );
+ 
+     pVisual_        = (SalVisual*)ILLEGAL_POINTER;
+@@ -855,7 +712,7 @@ SalDisplay::~SalDisplay( )
+         pSalData->SetCurDisp( NULL );
+ }
+ 
+-static int DisplayHasEvent( int fd, SalDisplay *pDisplay  )
++static int DisplayHasEvent( int fd, SalX11Display *pDisplay  )
+ {
+   DBG_ASSERT( ConnectionNumber( pDisplay->GetDisplay() ) == fd,
+               "wrong fd in DisplayHasEvent" );
+@@ -867,7 +724,7 @@ static int DisplayHasEvent( int fd, SalD
+   ::vos::OGuard aGuard( *pSalInstYieldMutex );
+   return pDisplay->IsEvent();
+ }
+-static int DisplayQueue( int fd, SalDisplay *pDisplay )
++static int DisplayQueue( int fd, SalX11Display *pDisplay )
+ {
+   DBG_ASSERT( ConnectionNumber( pDisplay->GetDisplay() ) == fd,
+               "wrong fd in DisplayHasEvent" )
+@@ -877,7 +734,7 @@ static int DisplayQueue( int fd, SalDisp
+   return XEventsQueued( pDisplay->GetDisplay(),
+                         QueuedAfterReading );
+ }
+-static int DisplayYield( int fd, SalDisplay *pDisplay )
++static int DisplayYield( int fd, SalX11Display *pDisplay )
+ {
+   DBG_ASSERT( ConnectionNumber( pDisplay->GetDisplay() ) == fd,
+               "wrong fd in DisplayHasEvent" );
+@@ -888,9 +745,40 @@ static int DisplayYield( int fd, SalDisp
+   return TRUE;
+ }
+ 
++SalX11Display::SalX11Display( Display *display, Visual *pVisual, Colormap aColMap )
++		: SalDisplay( display, aColMap )
++{
++    Init( aColMap, pVisual );
++
++	pXLib_->Insert( ConnectionNumber( pDisp_ ),
++					this,
++					(YieldFunc) DisplayHasEvent,
++					(YieldFunc) DisplayQueue,
++					(YieldFunc) DisplayYield );
++}
++
++SalX11Display::~SalX11Display()
++{
++#if OSL_DEBUG_LEVEL > 1
++    fprintf( stderr, "SalX11Display::~SalX11Display()\n" );
++#endif
++	if( pDisp_ )
++	{
++		doDestruct();
++		XCloseDisplay( pDisp_ );
++		pDisp_ = NULL;
++	}
++}
++
+ // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+-void SalDisplay::Init( Colormap hXColmap, const XVisualInfo* pXVI )
++void SalDisplay::Init( Colormap hXColmap, Visual *pVisual )
+ {
++    XVisualInfo aXVI;
++
++    if (!pVisual)
++        pVisual = DefaultVisual( pDisp_, nScreen_ );
++    sal_GetVisualInfo( pDisp_, XVisualIDFromVisual( pVisual ), aXVI );
++
+     GetSalData()->Insert( this );
+ 
+     for( size_t i = 0; i < POINTER_COUNT; i++ )
+@@ -898,16 +786,12 @@ void SalDisplay::Init( Colormap hXColmap
+ 
+     eWindowManager_     = otherwm;
+     nProperties_        = PROPERTY_DEFAULT;
+-    nStateOfYield_      = 0;
+-    nStateOfSendEvent_  = 0;
+     hEventGuard_        = NULL;
+-    pEventQueue_        = NULL;
+-    pDispatchStack_     = NULL;
+     pFontCache_         = NULL;
+ 	mpFontList			= (XlfdStorage*)NULL;
+ 	mpFactory  			= (AttributeProvider*)NULL;
+     pCapture_           = NULL;
+-    pVisual_            = new SalVisual( pXVI );
++    pVisual_            = new SalVisual( &aXVI );
+     m_bXinerama			= false;
+     aSize_              = Size( DisplayWidth ( pDisp_, nScreen_ ),
+                                 DisplayHeight( pDisp_, nScreen_ ) );
+@@ -943,12 +827,6 @@ void SalDisplay::Init( Colormap hXColmap
+     {
+         hEventGuard_    = osl_createMutex();
+ 
+-        pXLib_->Insert( ConnectionNumber( pDisp_ ),
+-                        this,
+-                        (YieldFunc) DisplayHasEvent,
+-                        (YieldFunc) DisplayQueue,
+-                        (YieldFunc) DisplayYield );
+-
+         pScreen_        = ScreenOfDisplay( pDisp_, nScreen_ );
+         hRootWindow_    = RootWindowOfScreen( pScreen_ );
+ 
+@@ -958,7 +836,6 @@ void SalDisplay::Init( Colormap hXColmap
+ 
+         // - - - - - - - - - - Visuals - - - - - - - - - - - - - - -
+         Visual *pRootVisual = DefaultVisual( pDisp_, nScreen_ );
+-        // if( pRootVisual != pXVI->visual )
+         if( pRootVisual->visualid != pVisual_->GetVisualId() )
+         {
+             XVisualInfo aXVI;
+@@ -1010,40 +887,6 @@ void SalDisplay::Init( Colormap hXColmap
+         // - - - - - - - - - - Synchronize - - - - - - - - - - - - -
+         if( getenv( "SAL_SYNCHRONIZE" ) )
+             XSynchronize( pDisp_, True );
+-
+-        // - - - - - - - - - - Shared Images - - - - - - - - - - - -
+-#if defined _XSHM_H_ // && defined DBG_UTIL
+-        // SharedMem wird nur noch ueber SalProperties enabled
+-        // wegen Bugs #47289 und #46512
+-
+-        if(    ( nProperties_ & PROPERTY_FEATURE_SharedMemory )
+-            && (    *DisplayString( pDisp_ ) == ':'
+-                || !strncmp( DisplayString( pDisp_ ), "localhost:", 10 ))
+-          )
+-        {
+-            int  nMinor, nMajor;
+-            Bool bPixmaps;
+-
+-            nSharedImages_      = XShmQueryVersion( pDisp_,
+-                                                    &nMajor,
+-                                                    &nMinor,
+-                                                    &bPixmaps )
+-                ? 0x80000000 : 0;
+-        }
+-        else
+-            nSharedImages_      = 0;
+-#else
+-        nSharedImages_      = 0;
+-#endif
+-        // - - - - - - - - - - Images  - - - - - - - - - - - - - - -
+-        nImageDepths_       = 0x00000000;
+-        int nCount, *pDepths = XListDepths( pDisp_, nScreen_, &nCount );
+-        if( pDepths )
+-        {
+-            for( int i = 0; i < nCount; i++ )
+-                nImageDepths_ |= 1 << (pDepths[i]-1);
+-            XFree( pDepths );
+-        }
+     }
+     else
+     {
+@@ -1078,22 +921,10 @@ void SalDisplay::Init( Colormap hXColmap
+         bLocal_             = TRUE;	/* always true for xprinter */
+ 		mbLocalIsValid		= TRUE; /* yes bLocal_ is initialized */
+         nProperties_       &= ~PROPERTY_SUPPORT_XSetClipMask; //XPrinter doesnt
+-        nSharedImages_      = 0;
+-        nImageDepths_       = 0xFFFFFFFF;
+     }
+ 
+     // - - - - - - - - - - Images  - - - - - - - - - - - - - - -
+-    // 0x8080C889
+-    nImageDepths_ &= (1<<(32-1))
+-                     |(1<<(24-1))
+-                     |(1<<(16-1))
+-                     |(1<<(15-1))
+-                     |(1<<(12-1))
+-                     |(1<<(8-1))
+-                     |(1<<(4-1))
+-                     |(1<<(1-1));
+-
+-    xColor_             = new SalColormap( this, hXColmap );
++    m_pColormap             = new SalColormap( this, hXColmap );
+ 
+     // - - - - - - - - - - GCs - - - - - - - - - - - - - - - - -
+     XGCValues values;
+@@ -1163,10 +994,6 @@ void SalDisplay::Init( Colormap hXColmap
+                                             invert50_width,
+                                             invert50_height );
+ 
+-        // - - - - - - - - - - Sound - - - - - - - - - - - - - - - -
+-
+-        nBeepVolume_    = 0;
+-
+         // - - - - - - - - - - Fonts - - - - - - - - - - - - - - - -
+ 
+ #ifndef USE_BUILTIN_RASTERIZER
+@@ -1337,6 +1164,16 @@ void SalDisplay::Init( Colormap hXColmap
+     DtIntegrator* pIntegrator = DtIntegrator::CreateDtIntegrator();
+     pIntegrator->Acquire();
+ 
++#ifdef HAVE_LIBSN
++    m_pSnDisplay = sn_display_new( display, SnErrorTrapPush, SnErrorTrapPop );
++    m_pSnLauncheeContext = sn_launchee_context_new_from_environment( m_pSnDisplay, nScreen_ );
++#  ifdef DBG_UTIL
++    if( !m_pSnLauncheeContext )
++         fprintf( stderr, "Failed to get launch feedback info from "
++		  "DESKTOP_LAUNCH_ID/DESKTOP_LAUNCH_WINDOW\n" );
++#  endif /* DBG_UTIL */
++#endif /* HAVE_LIBSN */
++
+ #ifdef DBG_UTIL
+     PrintInfo();
+ #endif
+@@ -1346,7 +1183,7 @@ void SalDisplay::Init( Colormap hXColmap
+ // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+ void SalDisplay::Beep() const
+ {
+-    XBell( pDisp_, nBeepVolume_ );
++    XBell( pDisp_, 0 );
+ }
+ 
+ // Keyboard
+@@ -2345,7 +2182,7 @@ XLIB_Cursor SalDisplay::GetPointer( int 
+     if( None == aCur )
+     {
+         XColor      aBlack, aWhite, aDummy;
+-        Colormap    hColormap = xColor_->GetXColormap();
++        Colormap    hColormap = m_pColormap->GetXColormap();
+ 
+         XAllocNamedColor( pDisp_, hColormap, "black", &aBlack, &aDummy );
+         XAllocNamedColor( pDisp_, hColormap, "white", &aWhite, &aDummy );
+@@ -2475,68 +2312,12 @@ void SalDisplay::AddFontPath( const Byte
+ 
+ // Events
+ // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+-void SalDisplay::Remove( XEvent *pEvent )
+-{
+-}
+-
+-void SalDisplay::SendEvent( Atom          aEvent,
+-                                  void         *pData,
+-                                  XLIB_Window   hReceiver ) const
+-{
+-    UINT32 aData[5];
+-
+-#if __SIZEOFLONG > 4
+-    aData[0] = (UINT32)((long)pData & 0xffffffff);
+-    aData[1] = (UINT32)((long)pData >> 32);
+-#else
+-    aData[0] = (UINT32)(long)pData;
+-    aData[1] = NULL;
+-#endif
+-    aData[2] = NULL;
+-    aData[3] = NULL;
+-    aData[4] = NULL;
+-
+-    SendEvent( aEvent, aData, hReceiver );
+-}
+ 
+-void SalDisplay::SendEvent( Atom          aEvent,
+-                                  UINT32       *Data,
+-                                  XLIB_Window   hReceiver ) const
++void SalDisplay::SendInternalEvent( SalFrame* pFrame, void* pData, USHORT nEvent )
+ {
+-#define pClient (&(aClient.xclient))
+-    XEvent aClient;
+-
+-    if( !hReceiver )
+-        hReceiver = hReceiver;
+-
+-    pClient->type           = ClientMessage;
+-    pClient->display        = pDisp_;
+-    pClient->window         = hReceiver;
+-    pClient->message_type   = aEvent;
+-    pClient->format         = 32;
+-
+-    if( Data ) for( int i = 0; i < 5; i++ )
+-        pClient->data.l[i] = Data[i];
+-
+ 	if( osl_acquireMutex( hEventGuard_ ) )
+     {
+-        pClient->send_event     = 2;
+-        if( pEventQueue_ )
+-        {
+-            SalXEvent *pEvent = pEventQueue_;
+-            while( pEvent->pNext_ )
+-                pEvent = pEvent->pNext_;
+-
+-            pEvent->pNext_                      = new SalXEvent;
+-            pEvent->pNext_->event_              = aClient;
+-            pEvent->pNext_->pNext_              = NULL;
+-        }
+-        else
+-        {
+-            ((SalDisplay*)this)->pEventQueue_   = new SalXEvent;
+-            pEventQueue_->event_                = aClient;
+-            pEventQueue_->pNext_                = NULL;
+-        }
++        m_aUserEvents.push_back( SalUserEvent( pFrame, pData, nEvent ) );
+ 
+ 		// Notify SalXLib::Yield() of a pending event.
+ 		pXLib_->Wakeup();
+@@ -2548,86 +2329,86 @@ void SalDisplay::SendEvent( Atom        
+ #undef pClient
+ }
+ 
+-BOOL SalDisplay::IsEvent()
++BOOL SalX11Display::IsEvent()
+ {
+-    if( pEventQueue_ )
+-        return TRUE;
+-
+-    if( XEventsQueued( pDisp_, QueuedAlready ) )
++    BOOL bRet = FALSE;
++    
++    if( osl_acquireMutex( hEventGuard_ ) )
++    {
++        if( m_aUserEvents.begin() != m_aUserEvents.end() )
++            bRet = TRUE;
++        osl_releaseMutex( hEventGuard_ );
++    }
++    
++    if( bRet || XEventsQueued( pDisp_, QueuedAlready ) )
+         return TRUE;
+ 
+     XFlush( pDisp_ );
+     return FALSE;
+ }
+ 
+-// -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+-
+-void SalDisplay::Yield( BOOL bWait )
++bool SalDisplay::DispatchInternalEvent()
+ {
+-    SalXEvent aEvent;
+-    while( !nStateOfYield_ )
++    SalFrame* pFrame = NULL;
++    void* pData = NULL;
++    USHORT nEvent = 0;
++
++    if( osl_acquireMutex( hEventGuard_ ) )
+     {
+-        if( pEventQueue_ )
++        if( m_aUserEvents.begin() != m_aUserEvents.end() )
+         {
+-            nStateOfYield_ = 5;
+-            if( osl_acquireMutex( hEventGuard_ ) )
+-            {
+-                nStateOfYield_ = 6;
++            pFrame	= m_aUserEvents.front().m_pFrame;
++            pData	= m_aUserEvents.front().m_pData;
++            nEvent	= m_aUserEvents.front().m_nEvent;
+ 
+-                SalXEvent *pEvent = pEventQueue_;
+-
+-                pEventQueue_    = pEventQueue_->pNext_;
+-
+-                osl_releaseMutex( hEventGuard_ );
++            m_aUserEvents.pop_front();
++        }
++        osl_releaseMutex( hEventGuard_ );
++    }
++    else
++        DBG_ASSERT( 1, "SalDisplay::Yield !acquireMutex\n" );
+ 
+-                aEvent.event_   = pEvent->event_;
++    if( pFrame )
++        pFrame->CallCallback( nEvent, pData );
+ 
+-                delete pEvent;
++    return pFrame != NULL;
++}
+ 
+-                break;
+-            }
+-            else
+-                DBG_ASSERT( 1, "SalDisplay::Yield !acquireMutex\n" );
+-        }
++// -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+ 
+-        nStateOfYield_ = 1;
++void SalX11Display::Yield( BOOL bWait )
++{
++    if( DispatchInternalEvent() )
++        return;
+ 
+-		DBG_ASSERT( static_cast<SalYieldMutex*>(GetSalData()->pInstance_->GetYieldMutex())->GetThreadId() ==
+-				   NAMESPACE_VOS(OThread)::getCurrentIdentifier(),
+-					"will crash soon since solar mutex not locked in SalDisplay::Yield" );
++    XEvent aEvent;
++    DBG_ASSERT( static_cast<SalYieldMutex*>(GetSalData()->pInstance_->GetYieldMutex())->GetThreadId() ==
++                NAMESPACE_VOS(OThread)::getCurrentIdentifier(),
++                "will crash soon since solar mutex not locked in SalDisplay::Yield" );
+ 
+-		// note: alternate input is dispatched by XtAppNextEvent
+-		XNextEvent( pDisp_, &aEvent.event_ );		
++    XNextEvent( pDisp_, &aEvent );		
+ 
+ #ifdef HAVE_LIBSN
+-		if( m_pSnLauncheeContext )
+-	        {
+-			sn_launchee_context_complete( m_pSnLauncheeContext );
+-			sn_launchee_context_unref( m_pSnLauncheeContext );
+-			m_pSnLauncheeContext = NULL;
+-		}
+-
+-		if( sn_display_process_event( m_pSnDisplay, &aEvent.event_ ) )
+-			return;
++    if( m_pSnLauncheeContext )
++    {
++        sn_launchee_context_complete( m_pSnLauncheeContext );
++        sn_launchee_context_unref( m_pSnLauncheeContext );
++        m_pSnLauncheeContext = NULL;
++    }
++    
++    if( sn_display_process_event( m_pSnDisplay, &aEvent ) )
++        return;
+ #endif /* HAVE_LIBSN */
+-	}
+-
+-    nStateOfYield_ = 0;
+ 
+     BOOL bIgnoreXErrors = pXLib_->GetIgnoreXErrors();
+ 
+-    aEvent.pNext_   = pDispatchStack_;
+-    pDispatchStack_ = &aEvent;
+-
+-    Dispatch( &aEvent.event_ );
+-
+-    pDispatchStack_ = aEvent.pNext_;
++    Dispatch( &aEvent );
+ 
+ #ifdef DBG_UTIL
+     if( pXLib_->WasXError() )
+     {
+         XFlush( pDisp_ );
+-        PrintEvent( "SalDisplay::Yield (WasXError)", &aEvent.event_ );
++        PrintEvent( "SalDisplay::Yield (WasXError)", &aEvent );
+     }
+ #endif
+ 
+@@ -2698,19 +2479,6 @@ long SalDisplay::Dispatch( XEvent *pEven
+ 				GetKbdExtension()->Dispatch( pEvent );
+ 				return 1;
+ 			}
+-
+-#ifdef _XSHM_H_
+-		{
+-			BOOL bPrevious = pXLib_->GetIgnoreXErrors();
+-			pXLib_->SetIgnoreXErrors( TRUE );
+-            if( pEvent->type == XShmGetEventBase( pDisp_ ) + ShmCompletion )
+-            {
+-                Remove( pEvent );
+-                return 1;
+-            }
+-			pXLib_->SetIgnoreXErrors( bPrevious );
+-		}
+-#endif
+             break;
+     }
+ 
+@@ -2869,24 +2637,6 @@ void SalDisplay::PrintEvent( const ByteS
+                 break;
+         }
+     }
+-#ifdef _XSHM_H_
+-    else if( pEvent->type == XShmGetEventBase( pDisp_ ) + ShmCompletion )
+-    {
+-#define pCompletionEvent ((XShmCompletionEvent*)pEvent)
+-        fprintf( stderr, "[%s] %s s=%d d=%ld\n",
+-                 rComment.GetBuffer(),
+-                 "ShmCompletion",
+-                 pCompletionEvent->send_event,
+-                 pCompletionEvent->drawable );
+-
+-        fprintf( stderr, "\t\tc=%d.%d s=%ld o=%ld\n",
+-                 pCompletionEvent->major_code,
+-                 pCompletionEvent->minor_code,
+-                 pCompletionEvent->shmseg,
+-                 pCompletionEvent->offset );
+-#undef pCompletionEvent
+-    }
+-#endif
+     else
+         fprintf( stderr, "[%s] %d s=%d w=%ld\n",
+                  rComment.GetBuffer(),
+@@ -2955,7 +2705,7 @@ void SalDisplay::PrintInfo() const
+              Hypothenuse( DisplayWidthMM ( pDisp_, nScreen_ ),
+                           DisplayHeightMM( pDisp_, nScreen_ ) ) / 25.4 );
+     fprintf( stderr, "\tBlack&White       \t%lu %lu\n",
+-             xColor_->GetBlackPixel(), xColor_->GetWhitePixel() );
++             m_pColormap->GetBlackPixel(), m_pColormap->GetWhitePixel() );
+     fprintf( stderr, "\tRGB               \t0x%lx 0x%lx 0x%lx\n",
+              pVisual_->red_mask, pVisual_->green_mask, pVisual_->blue_mask );
+     fprintf( stderr, "\tVisual            \t%d-bit %s ID=0x%x\n",
+@@ -2967,25 +2717,6 @@ void SalDisplay::PrintInfo() const
+                  pRootVisual_->GetDepth(),
+                  VisualClassName[ pRootVisual_->GetClass() ],
+                  pRootVisual_->GetVisualId() );
+-    fprintf( stderr, "\tImages (Shared)   \t0x%lx (%lx)\n",
+-             nImageDepths_, nSharedImages_ );
+-
+-    if( nStateOfYield_ || nStateOfSendEvent_ )
+-    {
+-        fprintf( stderr, "Thread/Signal\n" );
+-        fprintf( stderr, "\tNextEvent         \t%d\n", nStateOfYield_ );
+-        fprintf( stderr, "\tSendEvent         \t%d\n", nStateOfSendEvent_ );
+-    }
+-    if( pDispatchStack_ )
+-    {
+-        fprintf( stderr, "Event\n" );
+-        SalXEvent *pEvent = pDispatchStack_;
+-        while( pEvent )
+-        {
+-            PrintEvent( "\t\x08\x08", &pEvent->event_ );
+-            pEvent = pEvent->pNext_;
+-        }
+-    }
+ }
+ 
+ void SalDisplay::GetScreenFontResolution( long& rDPIX, long& rDPIY ) const
+Index: vcl/unx/source/app/salinst.cxx
+===================================================================
+RCS file: /cvs/gsl/vcl/unx/source/app/salinst.cxx,v
+retrieving revision 1.19
+retrieving revision 1.18.2.2
+diff -u -p -u -r1.19 -r1.18.2.2
+--- vcl/unx/source/app/salinst.cxx	6 Jan 2004 14:31:59 -0000	1.19
++++ vcl/unx/source/app/salinst.cxx	21 Jan 2004 20:27:05 -0000	1.18.2.2
+@@ -151,21 +151,16 @@ extern "C" 
+ {
+     SalInstance* create_SalInstance()
+     {
+-        return new X11SalInstance();
+-    }
+-}
++        X11SalInstance* pInstance = new X11SalInstance( new SalYieldMutex() );
+ 
+-X11SalInstance::X11SalInstance()
+-{
+-	mpSalYieldMutex		= new SalYieldMutex;
+-	mpSalYieldMutex->acquire();
+-    mbPrinterInit		= false;
+-
+-    // initialize SalData
+-	SalData *pSalData = new SalData;
+-	SetSalData( pSalData );
+-    pSalData->pInstance_ = this;
+-    pSalData->Init();
++        // initialize SalData
++        SalData *pSalData = new SalData;
++        SetSalData( pSalData );
++        pSalData->pInstance_ = pInstance;
++        pSalData->Init();
++
++        return pInstance;
++    }
+ }
+ 
+ X11SalInstance::~X11SalInstance()
+Index: vcl/unx/source/app/salsys.cxx
+===================================================================
+RCS file: /cvs/gsl/vcl/unx/source/app/salsys.cxx,v
+retrieving revision 1.9
+retrieving revision 1.8.2.2
+diff -u -p -u -r1.9 -r1.8.2.2
+--- vcl/unx/source/app/salsys.cxx	6 Jan 2004 14:32:45 -0000	1.9
++++ vcl/unx/source/app/salsys.cxx	21 Jan 2004 20:28:29 -0000	1.8.2.2
+@@ -67,33 +67,15 @@
+ #include <svdata.hxx>
+ #include <salinst.h>
+ #include <saldisp.hxx>
++#include <salsys.h>
+ #include <cstdio>
+ 
+ 
+-class X11SalSystem : public SalSystem
+-{
+-public:
+-    X11SalSystem() {}
+-    virtual ~X11SalSystem();
+-    
+-    // overload pure virtual methods
+-    virtual bool GetSalSystemDisplayInfo( DisplayInfo& rInfo );
+-    virtual int ShowNativeDialog( const String& rTitle,
+-                                  const String& rMessage,
+-                                  const std::list< String >& rButtons,
+-                                  int nDefButton );
+-    virtual int ShowNativeMessageBox( const String& rTitle,
+-                                      const String& rMessage,
+-                                      int nButtonCombination,
+-                                      int nDefaultButton);
+-};
+-
+ SalSystem* X11SalInstance::CreateSalSystem()
+ {
+     return new X11SalSystem();
+ }
+ 
+-
+ // -----------------------------------------------------------------------
+ 
+ X11SalSystem::~X11SalSystem()
+@@ -133,57 +115,19 @@ int X11SalSystem::ShowNativeDialog( cons
+     if( pSVData->mpIntroWindow )
+         pSVData->mpIntroWindow->Hide();
+ 
+-    DtIntegrator* pIntegrator = DtIntegrator::CreateDtIntegrator();
+-    if( pIntegrator->GetDtType() == DtGNOME )
+-    {
+-        ByteString aCmdLine( "msgbox-gnome ");
+-        int nButton = 0;
+-        for( std::list< String >::const_iterator it = rButtons.begin(); it != rButtons.end(); ++it )
+-        {
+-            if( nButton == nDefButton )
+-                aCmdLine.Append( "-defaultbutton" );
+-            else
+-                aCmdLine.Append( "-button" );
+-            nButton++;
+-            aCmdLine.Append( " \"" );
+-            aCmdLine.Append( ByteString( *it, RTL_TEXTENCODING_UTF8 ) );
+-            aCmdLine.Append( "\" " );
+-        }
+-        aCmdLine.Append( " \"" );
+-        aCmdLine.Append( ByteString( rTitle, RTL_TEXTENCODING_UTF8 ) );
+-        aCmdLine.Append( "\" \"" );
+-        aCmdLine.Append( ByteString( rMessage, RTL_TEXTENCODING_UTF8 ) );
+-        aCmdLine.Append( "\" 2>/dev/null" );
+-
+-        FILE* fp = popen( aCmdLine.GetBuffer(), "r" );
+-        if( fp )
+-        {
+-            ByteString aAnswer;
+-            char buf[16];
+-            while( fgets( buf, sizeof( buf ), fp ) )
+-            {
+-                aAnswer.Append( buf );
+-            }
+-            pclose( fp );
+-            nRet = aAnswer.ToInt32();
+-        }
+-    }
+-    else // default to a VCL dialogue since we do not have a native implementation
+-    {
+-        WarningBox aWarn( NULL, WB_STDWORK, rMessage );
+-        aWarn.SetText( rTitle );
+-        aWarn.Clear();
+-
+-        USHORT nButton = 0;
+-        for( std::list< String >::const_iterator it = rButtons.begin(); it != rButtons.end(); ++it )
+-        {
++	WarningBox aWarn( NULL, WB_STDWORK, rMessage );
++	aWarn.SetText( rTitle );
++	aWarn.Clear();
++
++	USHORT nButton = 0;
++	for( std::list< String >::const_iterator it = rButtons.begin(); it != rButtons.end(); ++it )
++	{
+             aWarn.AddButton( *it, nButton+1, nButton == (USHORT)nDefButton ? BUTTONDIALOG_DEFBUTTON : 0 );
+             nButton++;
+-        }
+-        aWarn.SetFocusButton( (USHORT)nDefButton+1 );
+-
+-        nRet = ((int)aWarn.Execute()) - 1;
+-    }
++	}
++	aWarn.SetFocusButton( (USHORT)nDefButton+1 );
++	
++	nRet = ((int)aWarn.Execute()) - 1;
+ 
+     // normalize behaviour, actually this should never happen
+     if( nRet < -1 || nRet >= rButtons.size() )
+Index: vcl/unx/source/app/wmadaptor.cxx
+===================================================================
+RCS file: /cvs/gsl/vcl/unx/source/app/wmadaptor.cxx,v
+retrieving revision 1.46
+retrieving revision 1.45.2.2
+diff -u -p -u -r1.46 -r1.45.2.2
+--- vcl/unx/source/app/wmadaptor.cxx	6 Jan 2004 14:36:15 -0000	1.46
++++ vcl/unx/source/app/wmadaptor.cxx	21 Jan 2004 20:29:29 -0000	1.45.2.2
+@@ -323,6 +323,11 @@ WMAdaptor::WMAdaptor( SalDisplay* pDispl
+             }
+             XFree (pProperty);
+         }
++        else if( pProperty )
++        {
++            XFree( pProperty );
++            pProperty = NULL;
++        }
+     }
+     if( m_aWMName.Len() == 0 )
+     {
+@@ -346,6 +351,11 @@ WMAdaptor::WMAdaptor( SalDisplay* pDispl
+ 			XFree( pProperty );
+             m_nInitWinGravity = NorthWestGravity;
+ 		}
++        else if( pProperty )
++        {
++            XFree( pProperty );
++            pProperty = NULL;
++        }
+     }
+     if( m_aWMName.Len() == 0 )
+     {
+@@ -496,6 +506,11 @@ NetWMAdaptor::NetWMAdaptor( SalDisplay* 
+             XFree( pProperty );
+             pProperty = NULL;
+         }
++        else if( pProperty )
++        {
++            XFree( pProperty );
++            pProperty = NULL;
++        }
+ 
+         // get number of desktops
+         if( m_aWMAtoms[ NET_NUMBER_OF_DESKTOPS ]
+@@ -567,6 +582,16 @@ NetWMAdaptor::NetWMAdaptor( SalDisplay* 
+                 }
+             }
+         }
++        else if( pProperty )
++        {
++            XFree( pProperty );
++            pProperty = NULL;
++        }
++    }
++    else if( pProperty )
++    {
++        XFree( pProperty );
++        pProperty = NULL;
+     }
+ }
+ 
+@@ -656,6 +681,11 @@ GnomeWMAdaptor::GnomeWMAdaptor( SalDispl
+             }
+             m_pSalDisplay->GetXLib()->SetIgnoreXErrors( bIgnore );
+         }
++        else if( pProperty )
++        {
++            XFree( pProperty );
++            pProperty = NULL;
++        }
+     }
+     if( m_bValid
+         && XGetWindowProperty( m_pDisplay,
+@@ -734,6 +764,11 @@ GnomeWMAdaptor::GnomeWMAdaptor( SalDispl
+             XFree( pProperty );
+             pProperty = NULL;
+         }
++        else if( pProperty )
++        {
++            XFree( pProperty );
++            pProperty = NULL;
++        }
+ 
+         // get number of desktops
+         if( m_aWMAtoms[ WIN_WORKSPACE_COUNT ]
+@@ -755,6 +790,16 @@ GnomeWMAdaptor::GnomeWMAdaptor( SalDispl
+             XFree( pProperty );
+             pProperty = NULL;
+         }
++        else if( pProperty )
++        {
++            XFree( pProperty );
++            pProperty = NULL;
++        }
++    }
++    else if( pProperty )
++    {
++        XFree( pProperty );
++        pProperty = NULL;
+     }
+ }
+ 
+@@ -854,10 +899,25 @@ bool WMAdaptor::getNetWmName()
+                         XFree( pProperty );
+                         pProperty = NULL;
+                     }
++                    else if( pProperty )
++                    {
++                        XFree( pProperty );
++                        pProperty = NULL;
++                    }
+                 }
+             }
++            else if( pProperty )
++            {
++                XFree( pProperty );
++                pProperty = NULL;
++            }
+             m_pSalDisplay->GetXLib()->SetIgnoreXErrors( bIgnore );
+         }
++        else if( pProperty )
++        {
++            XFree( pProperty );
++            pProperty = NULL;
++        }
+     }
+     return bNetWM;
+ }
+@@ -1154,6 +1214,11 @@ void NetWMAdaptor::setNetWMState( X11Sal
+                     nCurrent = *(sal_Int32*)pProperty;
+                     XFree( pProperty );
+                 }
++                else if( pProperty )
++                {
++                    XFree( pProperty );
++                    pProperty = NULL;
++                }
+             }
+             Rectangle aPosSize = m_aWMWorkAreas[nCurrent];
+             const SalFrameGeometry& rGeom( pFrame->GetUnmirroredGeometry() );
+@@ -1264,6 +1329,11 @@ void GnomeWMAdaptor::setGnomeWMState( X1
+                 {
+                     nCurrent = *(sal_Int32*)pProperty;
+                     XFree( pProperty );
++                }
++                else if( pProperty )
++                {
++                    XFree( pProperty );
++                    pProperty = NULL;
+                 }
+             }
+             Rectangle aPosSize = m_aWMWorkAreas[nCurrent];
+Index: vcl/unx/source/gdi/dtint.cxx
+===================================================================
+RCS file: /cvs/gsl/vcl/unx/source/gdi/dtint.cxx,v
+retrieving revision 1.17
+retrieving revision 1.17.2.1
+diff -u -p -u -r1.17 -r1.17.2.1
+--- vcl/unx/source/gdi/dtint.cxx	18 Nov 2003 14:44:37 -0000	1.17
++++ vcl/unx/source/gdi/dtint.cxx	18 Dec 2003 16:14:35 -0000	1.17.2.1
+@@ -72,7 +72,6 @@
+ #include <cdeint.hxx>
+ #endif
+ #include <kdeint.hxx>
+-#include <gnomeint.hxx>
+ #include <saldisp.hxx>
+ #include <saldata.hxx>
+ #include <wmadaptor.hxx>
+@@ -148,451 +147,10 @@ DtIntegrator* DtIntegrator::CreateDtInte
+     if( pSalDisplay->getWMAdaptor()->getWindowManagerName().EqualsAscii( "KWin" ) )
+ 		return new KDEIntegrator();
+ 
+-    // actually this is not that good an indicator for a GNOME running
+-    // but there currently does not seem to be a better one
+-    nDtAtom = XInternAtom( pDisplay, "GNOME_SM_PROXY", True );
+-	Atom nDtAtom2 = XInternAtom( pDisplay, "NAUTILUS_DESKTOP_WINDOW_ID", True );
+-    if( nDtAtom || nDtAtom2 )
+-    {
+-        int nProperties = 0;
+-        Atom* pProperties = XListProperties( pDisplay, pSalDisplay->GetRootWindow(), &nProperties );
+-        if( pProperties && nProperties )
+-        {
+-            for( int i = 0; i < nProperties; i++ )
+-                if( pProperties[ i ] == nDtAtom ||
+-					pProperties[ i ] == nDtAtom2 )
+-                {
+-                    XFree( pProperties );
+-                    return new GNOMEIntegrator();
+-                }
+-            XFree( pProperties );
+-        }
+-    }
+-
+ 	// default: generic implementation
+ 	return new DtIntegrator();
+ }
+ 
+ void DtIntegrator::GetSystemLook( AllSettings& rSettings )
+ {
+-}
+-
+-Color DtIntegrator::parseColor( const ByteString& rLine )
+-{
+-    Color aColor;
+-
+-    xub_StrLen nPos1 = rLine.Search( '(' );
+-    xub_StrLen nPos2 = rLine.Search( ')', nPos1 != STRING_NOTFOUND ? nPos1 : 0 );
+-    if( nPos1 != STRING_NOTFOUND && nPos2 != STRING_NOTFOUND
+-        && (int)nPos2 - (int)nPos1 > 5 )
+-    {
+-        ByteString aTriple( rLine.Copy( nPos1+1, nPos2-nPos1-1 ) );
+-        xub_StrLen nIndex = 0;
+-        int nRed = 0, nGreen = 0, nBlue = 0, nColor = 0;
+-        do
+-        {
+-            switch( nColor )
+-            {
+-                case 0: nRed = aTriple.GetToken( 0, ',', nIndex ).ToInt32();break;
+-                case 1: nGreen = aTriple.GetToken( 0, ',', nIndex ).ToInt32();break;
+-                case 2: nBlue = aTriple.GetToken( 0, ',', nIndex ).ToInt32();break;
+-            }
+-            nColor++;
+-        } while(  nIndex != STRING_NOTFOUND );
+-        if( nColor == 3 )
+-        {
+-            aColor = Color( nRed, nGreen, nBlue );
+-        }
+-    }
+-    return aColor;
+-}
+-
+-Font DtIntegrator::parseFont( const ByteString& rLine )
+-{
+-    Font aFont;
+-
+-    xub_StrLen nPos1 = rLine.Search( '"' );
+-    xub_StrLen nPos2 = rLine.Search( '"', nPos1 != STRING_NOTFOUND ? nPos1+1 : 0 );
+-    if( nPos1 != STRING_NOTFOUND && nPos2 != STRING_NOTFOUND
+-        && (int)nPos2 - (int)nPos1 > 1 )
+-    {
+-        aFont.SetName( String( rLine.Copy( nPos1+1, nPos2-nPos1-1 ), osl_getThreadTextEncoding() ) );
+-        xub_StrLen nIndex = nPos2;
+-        ByteString aToken = rLine.GetToken( 1, ',', nIndex );
+-        if( aToken.Len() )
+-        {
+-            int nPixelHeight = aToken.ToInt32();
+-            long nDPIX, nDPIY;
+-            long nDispDPIY = mpSalDisplay->GetResolution().B();
+-            mpSalDisplay->GetScreenFontResolution( nDPIX, nDPIY );
+-            int nHeight = nPixelHeight * nDispDPIY / nDPIY;
+-            // allow for rounding in back conversion (at SetFont)
+-            while( (nHeight * nDPIY / nDispDPIY) > nPixelHeight )
+-                nHeight--;
+-            while( (nHeight * nDPIY / nDispDPIY) < nPixelHeight )
+-                nHeight++;
+-            aFont.SetHeight( nHeight );
+-        }
+-        while( nIndex != STRING_NOTFOUND )
+-        {
+-            aToken = rLine.GetToken( 0, ',', nIndex );
+-            if( aToken.Equals( "bold" ) )
+-                aFont.SetWeight( WEIGHT_BOLD );
+-            else if( aToken.Equals( "light" ) )
+-                aFont.SetWeight( WEIGHT_LIGHT );
+-            else if( aToken.Equals( "italic" ) )
+-                aFont.SetItalic( ITALIC_NORMAL );
+-        }
+-    }
+-    return aFont;
+-}
+-
+-bool DtIntegrator::StartSystemLookProcess( const char* pCommand )
+-{
+-    ByteString aCommand, aArgWindow;
+-    if( pCommand[0] == '/' )
+-        aCommand = pCommand;
+-    else
+-    {
+-        OUString aExec;
+-        OUString aSys;
+-        osl_getExecutableFile( &aExec.pData );
+-        if( osl_File_E_None != osl_getSystemPathFromFileURL( aExec.pData, &aSys.pData ) )
+-            return false; // huh ?
+-        aCommand = ByteString( String( aSys ), osl_getThreadTextEncoding() );
+-        aCommand.Erase( aCommand.SearchBackward( '/' )+1 );
+-        aCommand.Append( pCommand );
+-    }
+-    aArgWindow = ByteString::CreateFromInt32( mpSalDisplay->GetDrawable() );
+-    mnSystemLookCommandProcess = fork();
+-    if( mnSystemLookCommandProcess == 0 )
+-    {
+-#if OSL_DEBUG_LEVEL > 1
+-        fprintf( stderr, "exec( \"%s --vcl-system-settings-window %s\" )\n", aCommand.GetBuffer(), aArgWindow.GetBuffer() );
+-#endif
+-        int nRedirect = open( "/dev/null", O_WRONLY );
+-        if( nRedirect != -1 )
+-        {
+-            dup2( nRedirect, STDOUT_FILENO );
+-            dup2( nRedirect, STDERR_FILENO );
+-        }
+-        execl( aCommand.GetBuffer(), aCommand.GetBuffer(), "--vcl-system-settings-window", aArgWindow.GetBuffer(), NULL );
+-        _exit(1);
+-    }
+-    return mnSystemLookCommandProcess != -1;
+-}
+-
+-void DtIntegrator::GetSystemLook( const char* pCommand, AllSettings& rSettings )
+-{
+-    BOOL bRet = FALSE;
+-    std::list< ByteString > aLines;
+-
+-    if( pCommand )
+-    {
+-        char pBuffer[1024];
+-        FILE* pOutput = NULL;
+-
+-        ByteString aCommand;
+-        if( pCommand[0] == '/' )
+-            aCommand = pCommand;
+-        else
+-        {
+-            OUString aExec;
+-            OUString aSys;
+-            osl_getExecutableFile( &aExec.pData );
+-            if( osl_File_E_None != osl_getSystemPathFromFileURL( aExec.pData, &aSys.pData ) )
+-                return; // huh ?
+-            aCommand = ByteString( String( aSys ), osl_getThreadTextEncoding() );
+-            aCommand.Erase( aCommand.SearchBackward( '/' )+1 );
+-            aCommand.Append( pCommand );
+-        }
+-#if OSL_DEBUG_LEVEL < 2
+-        aCommand.Append( " 2>/dev/null" );
+-#endif
+-        pOutput = popen( aCommand.GetBuffer(), "r" );
+-#if OSL_DEBUG_LEVEL > 1
+-        fprintf( stderr, "popen( \"%s\", \"r\" ) = %p\n", aCommand.GetBuffer(), pOutput );
+-#endif
+-        while( fgets( pBuffer, sizeof( pBuffer ), pOutput ) )
+-        {
+-            aLines.push_back( ByteString( pBuffer ) );
+-        }
+-        pclose( pOutput );
+-    }
+-    else if( ! pCommand && mnSystemLookCommandProcess != -1 )
+-    {
+-        // get the lines from the VCL_SYSTEM_SETTINGS property
+-        Atom nType = 0;
+-        int nFormat = 0;
+-        unsigned long nItems = 0, nBytes = 0;
+-        char* pData = NULL;
+-        // query size of the property
+-        XGetWindowProperty( mpSalDisplay->GetDisplay(),
+-                            mpSalDisplay->GetDrawable(),
+-                            mpSalDisplay->getWMAdaptor()->getAtom( WMAdaptor::VCL_SYSTEM_SETTINGS ),
+-                            0, 0,
+-                            False,
+-                            XA_STRING,
+-                            &nType,
+-                            &nFormat,
+-                            &nItems,
+-                            &nBytes,
+-                            (unsigned char**)&pData );
+-        if( nBytes )
+-        {
+-            // query the actual data
+-            XGetWindowProperty( mpSalDisplay->GetDisplay(),
+-                                mpSalDisplay->GetDrawable(),
+-                                mpSalDisplay->getWMAdaptor()->getAtom( WMAdaptor::VCL_SYSTEM_SETTINGS ),
+-                                0, (nBytes+3)/4,
+-                                False,
+-                                XA_STRING,
+-                                &nType,
+-                                &nFormat,
+-                                &nItems,
+-                                &nBytes,
+-                                (unsigned char**)&pData );
+-            // sanity check
+-            if( nFormat == 8 && nType == XA_STRING && nItems )
+-            {
+-#if OSL_DEBUG_LEVEL > 1
+-                fprintf( stderr, "got %ld data items:\n%.*s", nItems, (int)nItems, pData );
+-#endif
+-                // fill in the lines
+-                char* pRun = pData;
+-                char* pLastLine = pData;
+-                while( (pRun-pData) <= (int)nItems )
+-                {
+-                    if( *pRun == '\n' )
+-                    {
+-                        if( pRun-pLastLine > 1 )
+-                        {
+-                            aLines.push_back( ByteString( pLastLine, pRun - pLastLine ) );
+-                            pLastLine = pRun+1;
+-                        }
+-                    }
+-                    pRun++;
+-                }
+-            }
+-#if OSL_DEBUG_LEVEL > 1
+-            else
+-                fprintf( stderr, "query of data failed with nFormat = %d, nType = %d, nItems = %ld\n", nFormat, (int)nType, nItems );
+-#endif
+-            XFree( pData );
+-        }
+-#if OSL_DEBUG_LEVEL > 1
+-        else
+-            fprintf( stderr, "query of bytes failed\n" );
+-#endif
+-    }
+-
+-    // nothing to do ?
+-    if( aLines.begin() == aLines.end() )
+-        return;
+-
+-    StyleSettings aStyleSettings( rSettings.GetStyleSettings() );
+-    MouseSettings aMouseSettings( rSettings.GetMouseSettings() );
+-    KeyboardSettings aKeyboardSettings( rSettings.GetKeyboardSettings() );
+-
+-    std::set< DtSetEnum > aItemSet;
+-
+-    while( aLines.begin() != aLines.end() )
+-    {
+-        ByteString aLine( aLines.front() );
+-        aLines.pop_front();
+-        if( aLine.GetChar( aLine.Len()-1 ) == '\n' )
+-            aLine.Erase( aLine.Len()-1 ); // cut newline
+-
+-        USHORT nPos = aLine.Search( '=' );
+-        if( nPos == STRING_NOTFOUND )
+-            continue;
+-
+-        DtSetEnum aToken = (DtSetEnum)aLine.Copy( 0, nPos ).ToInt32();
+-        aLine.Erase( 0, nPos+1 );
+-
+-        if( aToken )
+-        {
+-            bRet = TRUE;
+-            aItemSet.insert( aToken );
+-        }
+-
+-        switch( aToken )
+-        {
+-            case MouseOptions:			aMouseSettings.SetOptions( aLine.ToInt32() );break;
+-            case DoubleClickTime:		aMouseSettings.SetDoubleClickTime( aLine.ToInt32() );break;
+-            case DoubleClickWidth:		aMouseSettings.SetDoubleClickWidth( aLine.ToInt32() );break;
+-            case DoubleClickHeight:		aMouseSettings.SetDoubleClickHeight( aLine.ToInt32() );break;
+-            case StartDragWidth:		aMouseSettings.SetStartDragWidth( aLine.ToInt32() );break;
+-            case StartDragHeight:		aMouseSettings.SetStartDragHeight( aLine.ToInt32() );break;
+-            case DragMoveCode:			aMouseSettings.SetDragMoveCode( aLine.ToInt32() );break;
+-            case DragCopyCode:			aMouseSettings.SetDragCopyCode( aLine.ToInt32() );break;
+-            case DragLinkCode:			aMouseSettings.SetDragLinkCode( aLine.ToInt32() );break;
+-            case ContextMenuCode:		aMouseSettings.SetContextMenuCode( aLine.ToInt32() );break;
+-            case ContextMenuClicks:		aMouseSettings.SetContextMenuClicks( aLine.ToInt32() );break;
+-            case ContextMenuDown:		aMouseSettings.SetContextMenuDown( aLine.ToInt32() );break;
+-            case ScrollRepeat:			aMouseSettings.SetScrollRepeat( aLine.ToInt32() );break;
+-            case ButtonStartRepeat:		aMouseSettings.SetButtonStartRepeat( aLine.ToInt32() );break;
+-            case ButtonRepeat:			aMouseSettings.SetButtonRepeat( aLine.ToInt32() );break;
+-            case ActionDelay:			aMouseSettings.SetActionDelay( aLine.ToInt32() );break;
+-            case MenuDelay:				aMouseSettings.SetMenuDelay( aLine.ToInt32() );break;
+-            case Follow:				aMouseSettings.SetFollow( aLine.ToInt32() );break;
+-            case MiddleButtonAction:	aMouseSettings.SetMiddleButtonAction( aLine.ToInt32() );break;
+-            case KeyboardOptions:		aKeyboardSettings.SetOptions( aLine.ToInt32() );break;
+-            case StyleOptions:			aStyleSettings.SetOptions( aLine.ToInt32() );break;
+-            case BorderSize:			aStyleSettings.SetBorderSize( aLine.ToInt32() );break;
+-            case TitleHeight:			aStyleSettings.SetTitleHeight( aLine.ToInt32() );break;
+-            case FloatTitleHeight:		aStyleSettings.SetFloatTitleHeight( aLine.ToInt32() );break;
+-            case TearOffTitleHeight:	aStyleSettings.SetTearOffTitleHeight( aLine.ToInt32() );break;
+-            case MenuBarHeight:			aStyleSettings.SetMenuBarHeight( aLine.ToInt32() );break;
+-            case ScrollBarSize:			aStyleSettings.SetScrollBarSize( aLine.ToInt32() );break;
+-            case SpinSize:				aStyleSettings.SetSpinSize( aLine.ToInt32() );break;
+-            case SplitSize:				aStyleSettings.SetSplitSize( aLine.ToInt32() );break;
+-            case IconHorzSpace:			aStyleSettings.SetIconHorzSpace( aLine.ToInt32() );break;
+-            case IconVertSpace:			aStyleSettings.SetIconVertSpace( aLine.ToInt32() );break;
+-            case CursorSize:			aStyleSettings.SetCursorSize( aLine.ToInt32() );break;
+-            case CursorBlinkTime:		aStyleSettings.SetCursorBlinkTime( aLine.ToInt32() );break;
+-            case ScreenZoom:			aStyleSettings.SetScreenZoom( aLine.ToInt32() );break;
+-            case ScreenFontZoom:		aStyleSettings.SetScreenFontZoom( aLine.ToInt32() );break;
+-            case LogoDisplayTime:		aStyleSettings.SetLogoDisplayTime( aLine.ToInt32() );break;
+-            case DragFullOptions:		aStyleSettings.SetDragFullOptions( aLine.ToInt32() );break;
+-            case AnimationOptions:		aStyleSettings.SetAnimationOptions( aLine.ToInt32() );break;
+-            case SelectionOptions:		aStyleSettings.SetSelectionOptions( aLine.ToInt32() );break;
+-            case DisplayOptions:		aStyleSettings.SetDisplayOptions( aLine.ToInt32() );break;
+-            case AntialiasingMinPixelHeight: aStyleSettings.SetAntialiasingMinPixelHeight( aLine.ToInt32() );break;
+-            case ThreeDColor:			aStyleSettings.Set3DColors( parseColor( aLine ) );break;
+-            case FaceColor:				aStyleSettings.SetFaceColor( parseColor( aLine ) );break;
+-            case CheckedColor:			aStyleSettings.SetCheckedColor( parseColor( aLine ) );break;
+-            case LightColor:			aStyleSettings.SetLightColor( parseColor( aLine ) );break;
+-            case LightBorderColor:		aStyleSettings.SetLightBorderColor( parseColor( aLine ) );break;
+-            case ShadowColor:			aStyleSettings.SetShadowColor( parseColor( aLine ) );break;
+-            case DarkShadowColor:		aStyleSettings.SetDarkShadowColor( parseColor( aLine ) );break;
+-            case ButtonTextColor:		aStyleSettings.SetButtonTextColor( parseColor( aLine ) );break;
+-            case RadioCheckTextColor:	aStyleSettings.SetRadioCheckTextColor( parseColor( aLine ) );break;
+-            case GroupTextColor:		aStyleSettings.SetGroupTextColor( parseColor( aLine ) );break;
+-            case LabelTextColor:		aStyleSettings.SetLabelTextColor( parseColor(aLine ) );break;
+-            case InfoTextColor:			aStyleSettings.SetInfoTextColor( parseColor( aLine ) );break;
+-            case WindowColor:			aStyleSettings.SetWindowColor( parseColor( aLine ) );break;
+-            case WindowTextColor:		aStyleSettings.SetWindowTextColor( parseColor( aLine ) );break;
+-            case DialogColor:			aStyleSettings.SetDialogColor( parseColor( aLine ) );break;
+-            case DialogTextColor:		aStyleSettings.SetDialogTextColor( parseColor( aLine ) );break;
+-            case WorkspaceColor:		aStyleSettings.SetWorkspaceColor( parseColor( aLine ) );break;
+-            case FieldColor:			aStyleSettings.SetFieldColor( parseColor( aLine ) );break;
+-            case FieldTextColor:		aStyleSettings.SetFieldTextColor( parseColor( aLine ) );break;
+-            case ActiveColor:			aStyleSettings.SetActiveColor( parseColor( aLine ) );break;
+-            case ActiveColor2:			aStyleSettings.SetActiveColor2( parseColor( aLine ) );break;
+-            case ActiveTextColor:		aStyleSettings.SetActiveTextColor( parseColor( aLine ) );break;
+-            case ActiveBorderColor:		aStyleSettings.SetActiveBorderColor( parseColor( aLine ) );break;
+-            case DeactiveColor:			aStyleSettings.SetDeactiveColor( parseColor( aLine ) );break;
+-            case DeactiveColor2:		aStyleSettings.SetDeactiveColor2( parseColor( aLine ) );break;
+-            case DeactiveTextColor:		aStyleSettings.SetDeactiveTextColor( parseColor( aLine ) );break;
+-            case DeactiveBorderColor:	aStyleSettings.SetDeactiveBorderColor( parseColor( aLine ) );break;
+-            case HighlightColor:		aStyleSettings.SetHighlightColor( parseColor( aLine ) );break;
+-            case HighlightTextColor:	aStyleSettings.SetHighlightTextColor( parseColor( aLine ) );break;
+-            case DisableColor:			aStyleSettings.SetDisableColor( parseColor( aLine ) );break;
+-            case HelpColor:				aStyleSettings.SetHelpColor( parseColor( aLine ) );break;
+-            case HelpTextColor:			aStyleSettings.SetHelpTextColor( parseColor( aLine ) );break;
+-            case MenuColor:				aStyleSettings.SetMenuColor( parseColor( aLine ) );break;
+-            case MenuBarColor:			aStyleSettings.SetMenuBarColor( parseColor( aLine ) );break;
+-            case MenuTextColor:			aStyleSettings.SetMenuTextColor( parseColor( aLine ) );break;
+-            case MenuHighlightColor:	aStyleSettings.SetMenuHighlightColor( parseColor( aLine ) );break;
+-            case MenuHighlightTextColor: aStyleSettings.SetMenuHighlightTextColor( parseColor( aLine ) );break;
+-            case LinkColor:				aStyleSettings.SetLinkColor( parseColor( aLine ) );break;
+-            case VisitedLinkColor:		aStyleSettings.SetVisitedLinkColor( parseColor( aLine ) );break;
+-            case HighlightLinkColor:	aStyleSettings.SetHighlightLinkColor( parseColor( aLine ) );break;
+-            case HighContrastMode:		aStyleSettings.SetHighContrastMode( aLine.ToInt32() );break;
+-            case AppFont:				aStyleSettings.SetAppFont( parseFont( aLine ) );break;
+-            case HelpFont:				aStyleSettings.SetHelpFont( parseFont( aLine ) );break;
+-            case TitleFont:				aStyleSettings.SetTitleFont( parseFont( aLine ) );break;
+-            case FloatTitleFont:		aStyleSettings.SetFloatTitleFont( parseFont( aLine ) );break;
+-            case MenuFont:				aStyleSettings.SetMenuFont( parseFont( aLine ) );break;
+-            case ToolFont:				aStyleSettings.SetToolFont( parseFont( aLine ) );break;
+-            case GroupFont:				aStyleSettings.SetGroupFont( parseFont( aLine ) );break;
+-            case LabelFont:				aStyleSettings.SetLabelFont( parseFont( aLine ) );break;
+-            case InfoFont:				aStyleSettings.SetInfoFont( parseFont( aLine ) );break;
+-            case RadioCheckFont:		aStyleSettings.SetRadioCheckFont( parseFont( aLine ) );break;
+-            case PushButtonFont:		aStyleSettings.SetPushButtonFont( parseFont( aLine ) );break;
+-            case FieldFont:				aStyleSettings.SetFieldFont( parseFont( aLine ) );break;
+-            case IconFont:				aStyleSettings.SetIconFont( parseFont( aLine ) );break;
+-            case RadioButtonStyle:		aStyleSettings.SetRadioButtonStyle( aLine.ToInt32() );break;
+-            case CheckBoxStyle:			aStyleSettings.SetCheckBoxStyle( aLine.ToInt32() );break;
+-            case PushButtonStyle:		aStyleSettings.SetPushButtonStyle( aLine.ToInt32() );break;
+-            case TabControlStyle:		aStyleSettings.SetTabControlStyle( aLine.ToInt32() );
+-                break;
+-
+-            case AllTextColors:
+-            {
+-                Color aTextColor = parseColor( aLine );
+-                aStyleSettings.SetDialogTextColor( aTextColor );
+-                aStyleSettings.SetMenuTextColor( aTextColor );
+-                aStyleSettings.SetButtonTextColor( aTextColor );
+-                aStyleSettings.SetRadioCheckTextColor( aTextColor );
+-                aStyleSettings.SetGroupTextColor( aTextColor );
+-                aStyleSettings.SetLabelTextColor( aTextColor );
+-                aStyleSettings.SetInfoTextColor( aTextColor );
+-                aStyleSettings.SetWindowTextColor( aTextColor );
+-                aStyleSettings.SetFieldTextColor( aTextColor );
+-            }
+-            break;
+-            case AllBackColors:
+-            {
+-                Color aBack = parseColor( aLine );
+-                aStyleSettings.Set3DColors( aBack );
+-                aStyleSettings.SetFaceColor( aBack );
+-                aStyleSettings.SetDialogColor( aBack );
+-                aStyleSettings.SetMenuColor( aBack );
+-                aStyleSettings.SetMenuBarColor( aBack );
+-                aStyleSettings.SetWindowColor( aBack );
+-                aStyleSettings.SetFieldColor( aBack );
+-                if( aBack == COL_LIGHTGRAY )
+-                    aStyleSettings.SetCheckedColor( Color( 0xCC, 0xCC, 0xCC ) );
+-                else
+-                {
+-                    Color aColor2 = aStyleSettings.GetLightColor();
+-                    aStyleSettings.
+-                        SetCheckedColor( Color(
+-                                               (BYTE)(((USHORT)aBack.GetRed()+(USHORT)aColor2.GetRed())/2),
+-                                               (BYTE)(((USHORT)aBack.GetGreen()+(USHORT)aColor2.GetGreen())/2),
+-                                               (BYTE)(((USHORT)aBack.GetBlue()+(USHORT)aColor2.GetBlue())/2)
+-                                               ) );
+-                }
+-            }
+-            break;
+-            case UIFont:
+-                if( aStyleSettings.GetUseSystemUIFonts() )
+-                {
+-                    Font aFont = parseFont( aLine );
+-                    aStyleSettings.SetAppFont( aFont );
+-                    aStyleSettings.SetHelpFont( aFont );
+-                    aStyleSettings.SetMenuFont( aFont );
+-                    aStyleSettings.SetToolFont( aFont );
+-                    aStyleSettings.SetLabelFont( aFont );
+-                    aStyleSettings.SetInfoFont( aFont );
+-                    aStyleSettings.SetRadioCheckFont( aFont );
+-                    aStyleSettings.SetPushButtonFont( aFont );
+-                    aStyleSettings.SetFieldFont( aFont );
+-                    aStyleSettings.SetIconFont( aFont );
+-                    aStyleSettings.SetGroupFont( aFont );
+-                }
+-                break;
+-            case ToolbarIconSize:
+-                if( aLine.EqualsIgnoreCaseAscii( "large" ) )
+-                    aStyleSettings.SetToolbarIconSize( STYLE_TOOLBAR_ICONSIZE_LARGE );
+-                else if( aLine.EqualsIgnoreCaseAscii( "small" ) )
+-                    aStyleSettings.SetToolbarIconSize( STYLE_TOOLBAR_ICONSIZE_SMALL );
+-                else
+-                    aStyleSettings.SetToolbarIconSize( STYLE_TOOLBAR_ICONSIZE_UNKNOWN );
+-                break;
+-#if OSL_DEBUG_LEVEL > 1
+-            default:
+-                fprintf( stderr, "don't understand \"%d=%s\"\n", aToken, aLine.GetBuffer() );
+-                break;
+-#endif
+-        }
+-    }
+-    if( bRet )
+-    {
+-        rSettings.SetKeyboardSettings( aKeyboardSettings );
+-        rSettings.SetMouseSettings( aMouseSettings );
+-        rSettings.SetStyleSettings( aStyleSettings );
+-    }
+ }
+Index: vcl/unx/source/inc/salcursors.h
+===================================================================
+RCS file: vcl/unx/source/inc/salcursors.h
+diff -N vcl/unx/source/inc/salcursors.h
+--- /dev/null	1 Jan 1970 00:00:00 -0000
++++ vcl/unx/source/inc/salcursors.h	17 Dec 2003 21:28:31 -0000	1.1.2.1
+@@ -0,0 +1,196 @@
++/*************************************************************************
++ *
++ *  $RCSfile$
++ *
++ *  $Revision$
++ *
++ *  last change: $Author$ $Date$
++ *
++ *  The Contents of this file are made available subject to the terms of
++ *  either of the following licenses
++ *
++ *         - GNU Lesser General Public License Version 2.1
++ *         - Sun Industry Standards Source License Version 1.1
++ *
++ *  Sun Microsystems Inc., October, 2000
++ *
++ *  GNU Lesser General Public License Version 2.1
++ *  =============================================
++ *  Copyright 2000 by Sun Microsystems, Inc.
++ *  901 San Antonio Road, Palo Alto, CA 94303, USA
++ *
++ *  This library is free software; you can redistribute it and/or
++ *  modify it under the terms of the GNU Lesser General Public
++ *  License version 2.1, as published by the Free Software Foundation.
++ *
++ *  This library is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ *  Lesser General Public License for more details.
++ *
++ *  You should have received a copy of the GNU Lesser General Public
++ *  License along with this library; if not, write to the Free Software
++ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ *  MA  02111-1307  USA
++ *
++ *
++ *  Sun Industry Standards Source License Version 1.1
++ *  =================================================
++ *  The contents of this file are subject to the Sun Industry Standards
++ *  Source License Version 1.1 (the "License"); You may not use this file
++ *  except in compliance with the License. You may obtain a copy of the
++ *  License at http://www.openoffice.org/license.html.
++ *
++ *  Software provided under this License is provided on an "AS IS" basis,
++ *  WITHOUT WARRANTY OF ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING,
++ *  WITHOUT LIMITATION, WARRANTIES THAT THE SOFTWARE IS FREE OF DEFECTS,
++ *  MERCHANTABLE, FIT FOR A PARTICULAR PURPOSE, OR NON-INFRINGING.
++ *  See the License for the specific provisions governing your rights and
++ *  obligations concerning the Software.
++ *
++ *  The Initial Developer of the Original Code is: Sun Microsystems, Inc.
++ *
++ *  Copyright: 2000 by Sun Microsystems, Inc.
++ *
++ *  All Rights Reserved.
++ *
++ *  Contributor(s): _______________________________________
++ *
++ *
++ ************************************************************************/
++
++#include "nodrop_curs.h"
++#include "nodrop_mask.h"
++#include "wait_curs.h"
++#include "wait_mask.h"
++#include "hsplit_curs.h"
++#include "hsplit_mask.h"
++#include "vsplit_curs.h"
++#include "vsplit_mask.h"
++#include "neswsize_curs.h"
++#include "neswsize_mask.h"
++#include "nwsesize_curs.h"
++#include "nwsesize_mask.h"
++#include "magnify_curs.h"
++#include "magnify_mask.h"
++#include "rotate_curs.h"
++#include "rotate_mask.h"
++#include "hshear_curs.h"
++#include "hshear_mask.h"
++#include "vshear_curs.h"
++#include "vshear_mask.h"
++#include "drawline_curs.h"
++#include "drawline_mask.h"
++#include "drawrect_curs.h"
++#include "drawrect_mask.h"
++#include "drawpolygon_curs.h"
++#include "drawpolygon_mask.h"
++#include "drawbezier_curs.h"
++#include "drawbezier_mask.h"
++#include "drawarc_curs.h"
++#include "drawarc_mask.h"
++#include "drawpie_curs.h"
++#include "drawpie_mask.h"
++#include "drawcirclecut_curs.h"
++#include "drawcirclecut_mask.h"
++#include "drawellipse_curs.h"
++#include "drawellipse_mask.h"
++#include "drawconnect_curs.h"
++#include "drawconnect_mask.h"
++#include "drawtext_curs.h"
++#include "drawtext_mask.h"
++#include "mirror_curs.h"
++#include "mirror_mask.h"
++#include "crook_curs.h"
++#include "crook_mask.h"
++#include "crop_curs.h"
++#include "crop_mask.h"
++#include "move_curs.h"
++#include "move_mask.h"
++#include "movepoint_curs.h"
++#include "movepoint_mask.h"
++#include "movebezierweight_curs.h"
++#include "movebezierweight_mask.h"
++#include "drawfreehand_curs.h"
++#include "drawfreehand_mask.h"
++#include "drawcaption_curs.h"
++#include "drawcaption_mask.h"
++#include "movedata_curs.h"
++#include "movedata_mask.h"
++#include "copydata_curs.h"
++#include "copydata_mask.h"
++#include "linkdata_curs.h"
++#include "linkdata_mask.h"
++#include "movedlnk_curs.h"
++#include "movedlnk_mask.h"
++#include "copydlnk_curs.h"
++#include "copydlnk_mask.h"
++#include "movefile_curs.h"
++#include "movefile_mask.h"
++#include "copyfile_curs.h"
++#include "copyfile_mask.h"
++#include "linkfile_curs.h"
++#include "linkfile_mask.h"
++#include "moveflnk_curs.h"
++#include "moveflnk_mask.h"
++#include "copyflnk_curs.h"
++#include "copyflnk_mask.h"
++#include "movefiles_curs.h"
++#include "movefiles_mask.h"
++#include "copyfiles_curs.h"
++#include "copyfiles_mask.h"
++
++#include "chart_curs.h"
++#include "chart_mask.h"
++#include "detective_curs.h"
++#include "detective_mask.h"
++#include "pivotcol_curs.h"
++#include "pivotcol_mask.h"
++#include "pivotfld_curs.h"
++#include "pivotfld_mask.h"
++#include "pivotrow_curs.h"
++#include "pivotrow_mask.h"
++#include "pivotdel_curs.h"
++#include "pivotdel_mask.h"
++
++#include "chain_curs.h"
++#include "chain_mask.h"
++#include "chainnot_curs.h"
++#include "chainnot_mask.h"
++
++#include "timemove_curs.h"
++#include "timemove_mask.h"
++#include "timesize_curs.h"
++#include "timesize_mask.h"
++
++#include "ase_curs.h"
++#include "ase_mask.h"
++#include "asn_curs.h"
++#include "asn_mask.h"
++#include "asne_curs.h"
++#include "asne_mask.h"
++#include "asns_curs.h"
++#include "asns_mask.h"
++#include "asnswe_curs.h"
++#include "asnswe_mask.h"
++#include "asnw_curs.h"
++#include "asnw_mask.h"
++#include "ass_curs.h"
++#include "ass_mask.h"
++#include "asse_curs.h"
++#include "asse_mask.h"
++#include "assw_curs.h"
++#include "assw_mask.h"
++#include "asw_curs.h"
++#include "asw_mask.h"
++#include "aswe_curs.h"
++#include "aswe_mask.h"
++#include "null_curs.h"
++#include "null_mask.h"
++
++#include "airbrush_curs.h"
++#include "airbrush_mask.h" 
++#include "fill_curs.h"
++#include "fill_mask.h"
++#include "vertcurs_curs.h" 
++#include "vertcurs_mask.h" 
+Index: vcl/unx/source/plugadapt/salplug.cxx
+===================================================================
+RCS file: /cvs/gsl/vcl/unx/source/plugadapt/salplug.cxx,v
+retrieving revision 1.2
+retrieving revision 1.2.2.8
+diff -u -p -u -r1.2 -r1.2.2.8
+--- vcl/unx/source/plugadapt/salplug.cxx	18 Nov 2003 14:47:17 -0000	1.2
++++ vcl/unx/source/plugadapt/salplug.cxx	12 Jan 2004 12:57:14 -0000	1.2.2.8
+@@ -62,25 +62,36 @@
+ #ifndef OSL_MODULE_H
+ #include <osl/module.h>
+ #endif
++#ifndef OSL_PROCESS_H
++#include <osl/process.h>
++#endif
+ #ifndef RTL_STRING_HXX
+ #include <rtl/ustrbuf.hxx>
+ #endif
+ 
++#include <svunx.h>
++#include <prex.h>
++#include <X11/Xatom.h>
++#include <postx.h>
++
+ #include <salinst.hxx>
+ #include <saldata.hxx>
+ 
+ #include <cstdio>
++#include <unistd.h>
+ 
+ using namespace rtl;
+ 
+-typedef SalInstance*(*salFactoryProc)();
++typedef SalInstance*(*salFactoryProc)( oslModule pModule);
++
++static oslModule pCloseModule = NULL;
+ 
+ static SalInstance* tryInstance( const OUString& rModuleBase )
+ {
+     SalInstance* pInst = NULL;
+     
+     OUStringBuffer aModName( 128 );
+-    aModName.appendAscii( SAL_DLLPREFIX );
++    aModName.appendAscii( SAL_DLLPREFIX"vclplug_" );
+     aModName.append( rModuleBase );
+     aModName.append( (sal_Int32)SUPD );
+     aModName.appendAscii( SAL_DLLPOSTFIX );
+@@ -94,33 +105,251 @@ static SalInstance* tryInstance( const O
+         salFactoryProc aProc = (salFactoryProc)osl_getSymbol( aMod, aSym.pData );
+         if( aProc )
+         {
+-            pInst = aProc();
++            pInst = aProc( aMod );
+ #if OSL_DEBUG_LEVEL > 1
+             fprintf( stderr, "sal plugin %s produced instance %p\n", 
+                      OUStringToOString( aModule, RTL_TEXTENCODING_ASCII_US ).getStr(),
+                      pInst );
+ #endif
++            pCloseModule = aMod;
+         }
+-#if OSL_DEBUG_LEVEL > 1
+         else
++        {
++#if OSL_DEBUG_LEVEL > 1
+             fprintf( stderr, "could not load symbol %s from shared object %s\n",
+                      OUStringToOString( aSym, RTL_TEXTENCODING_ASCII_US ).getStr(),
+                      OUStringToOString( aModule, RTL_TEXTENCODING_ASCII_US ).getStr() );
+ #endif
++            osl_unloadModule( aMod );
++        }
+     }
+ #if OSL_DEBUG_LEVEL > 1
+     else
+         fprintf( stderr, "could not load shared object %s\n",
+                  OUStringToOString( aModule, RTL_TEXTENCODING_ASCII_US ).getStr() );
+ #endif  
++
+     return pInst;
+ }
+ 
++static const char* autodetect_gnome( Display* pDisplay )
++{
++    const char* pRet = NULL;
++    
++    // warning: this check is coincidental, GNOME does not
++    // explicitly advertise itself
++    Atom nAtom1 = XInternAtom( pDisplay, "GNOME_SM_PROXY", True );
++    Atom nAtom2 = XInternAtom( pDisplay, "NAUTILUS_DESKTOP_WINDOW_ID", True );
++    if( nAtom1 || nAtom2 )
++    {
++        int nProperties = 0;
++        Atom* pProperties = XListProperties( pDisplay, DefaultRootWindow( pDisplay ), &nProperties );
++        if( pProperties && nProperties )
++        {
++            for( int i = 0; i < nProperties; i++ )
++                if( pProperties[ i ] == nAtom1 ||
++                    pProperties[ i ] == nAtom2 )
++                {
++                    pRet = "gtk";
++                }
++            XFree( pProperties );
++        }
++    }
++    return pRet;
++}
++
++static bool bWasXError = false;
++
++static inline bool WasXError()
++{
++    bool bRet = bWasXError;
++    bWasXError = false;
++    return bRet;
++}
++
++extern "C"
++{
++    static int autodect_error_handler( Display*, XErrorEvent* )
++    {
++        bWasXError = true;
++        return 0;
++    }
++}
++
++static OUString getNetWMName( Display* pDisplay )
++{
++    OUString aRet;
++
++    Atom nWmCheck	= XInternAtom( pDisplay, "_NET_SUPPORTING_WM_CHECK", True );
++    Atom nWmName	= XInternAtom( pDisplay, "_NET_WM_NAME", True );
++    if( nWmName && nWmCheck )
++    {
++        XLIB_Window			aCheckWin	= None;
++        Atom				aRealType	= None;
++        int					nFormat		= 8;
++        unsigned long		nItems		= 0;
++        unsigned long		nBytesLeft	= 0;
++        unsigned char*	pProperty	= NULL;
++        XGetWindowProperty( pDisplay,
++                            DefaultRootWindow( pDisplay ),
++                            nWmCheck,
++                            0, 1,
++                            False,
++                            XA_WINDOW,
++                            &aRealType,
++                            &nFormat,
++                            &nItems,
++                            &nBytesLeft,
++                            &pProperty );
++        if( aRealType == XA_WINDOW && nFormat == 32 && nItems != 0 )
++            aCheckWin = *(XLIB_Window*)pProperty;
++        if( pProperty )
++        {
++            XFree( pProperty );
++            pProperty = NULL;
++        }
++
++        // see if that window really exists and has the check property set
++        if( aCheckWin != None )
++        {
++            // clear error flag
++            WasXError();
++            // get the property
++            XGetWindowProperty( pDisplay,
++                                aCheckWin,
++                                nWmCheck,
++                                0, 1,
++                                False,
++                                XA_WINDOW,
++                                &aRealType,
++                                &nFormat,
++                                &nItems,
++                                &nBytesLeft,
++                                &pProperty );
++            if( ! WasXError() && aRealType == XA_WINDOW && nFormat == 32 && nItems != 0 && pProperty )
++            {
++                if( aCheckWin == *(XLIB_Window*)pProperty )
++                {
++                    XFree( pProperty );
++                    pProperty = NULL;
++                    XGetWindowProperty( pDisplay,
++                                        aCheckWin,
++                                        nWmName,
++                                        0, 256,
++                                        False,
++                                        AnyPropertyType,
++                                        &aRealType,
++                                        &nFormat,
++                                        &nItems,
++                                        &nBytesLeft,
++                                        &pProperty );
++                    if( !WasXError() && nItems != 0 && pProperty && *pProperty )
++                    {
++                        if( aRealType == XA_STRING ) // some WM's use this although the should use UTF8_STRING
++                        {
++                            aRet = rtl::OStringToOUString( rtl::OString( (sal_Char*)pProperty ), RTL_TEXTENCODING_ISO_8859_1 );
++                        }
++                        else
++                            aRet = rtl::OStringToOUString( rtl::OString( (sal_Char*)pProperty ), RTL_TEXTENCODING_UTF8 );                        
++                    }
++                }
++            }
++            if( pProperty )
++            {
++                XFree( pProperty );
++                pProperty = NULL;
++            }
++        }
++    }
++    return aRet;
++}
++
++static const char* autodetect_kde( Display* pDisplay )
++{
++    const char* pRet = NULL;
++    // check for kwin
++    rtl::OUString aWM = getNetWMName( pDisplay );
++    if( aWM.equalsIgnoreAsciiCaseAscii( "KWin" ) )
++        pRet = "kde";
++    
++    return pRet;
++}
++
++static const char* autodetect_plugin()
++{
++    // get display to connect to
++    static const char* pDisplayStr = getenv( "DISPLAY" );
++    int nParams = osl_getCommandArgCount();
++    OUString aParam;
++    OString aBParm;
++    for( int i = 0; i < nParams-1; i++ )
++    {
++        osl_getCommandArg( i, &aParam.pData );
++        if( aParam.equalsAscii( "-display" ) || aParam.equalsAscii( "--display" ) )
++        {
++            osl_getCommandArg( i+1, &aParam.pData );
++            aBParm = OUStringToOString( aParam, osl_getThreadTextEncoding() );
++            pDisplayStr = aBParm.getStr();
++            break;
++        }
++    }
++    
++    const char* pRet = NULL;
++    // no server at all: dummy plugin
++    if( ! pDisplayStr || !*pDisplayStr )
++        pRet = "dummy";
++    else
++    {
++        Display* pDisplay = XOpenDisplay( pDisplayStr );
++        if( pDisplay )
++        {
++            int(*pOldHdl)(Display*,XErrorEvent*) = XSetErrorHandler( autodect_error_handler );
++            pRet = autodetect_gnome( pDisplay );        
++            if( ! pRet )
++                pRet = autodetect_kde( pDisplay );
++            if( ! pRet )
++                pRet = "gen";
++            
++            // set the default handler again
++            XSetErrorHandler( pOldHdl );
++            
++            XCloseDisplay( pDisplay );
++        }
++    }
++#if OSL_DEBUG_LEVEL > 1
++    fprintf( stderr, "plugin autodetection: %s\n", pRet );
++#endif
++
++    return pRet;
++}
++
+ SalInstance *CreateSalInstance()
+ {
+     SalInstance*	pInst = NULL;
+ 
+-    pInst = tryInstance( OUString( RTL_CONSTASCII_USTRINGPARAM( "pure_x_" ) ) );
++    static const char* pUsePlugin = getenv( "SAL_USE_VCLPLUGIN" );
++
++    if( !(pUsePlugin && *pUsePlugin) )
++        pUsePlugin = autodetect_plugin();
++    
++    if( pUsePlugin && *pUsePlugin )
++        pInst = tryInstance( OUString::createFromAscii( pUsePlugin ) );
++
++    if( ! pInst )
++        pInst = tryInstance( OUString( RTL_CONSTASCII_USTRINGPARAM( "gtk" ) ) );
++
++    if( ! pInst )
++        pInst = tryInstance( OUString( RTL_CONSTASCII_USTRINGPARAM( "kde" ) ) );
++
++    // fallback to gen
++    if( ! pInst )
++        pInst = tryInstance( OUString( RTL_CONSTASCII_USTRINGPARAM( "gen" ) ) );
++
++    if( ! pInst )
++    {
++        fprintf( stderr, "no suitable windowing system found, exiting.\n" );
++        _exit( 1 );
++    }
+     
+ 	return pInst;
+ }
+@@ -128,6 +357,8 @@ SalInstance *CreateSalInstance()
+ void DestroySalInstance( SalInstance *pInst )
+ {
+ 	delete pInst;
++    if( pCloseModule )
++        osl_unloadModule( pCloseModule );
+ }
+ 
+ void InitSalData()
+Index: vcl/unx/source/window/salframe.cxx
+===================================================================
+RCS file: /cvs/gsl/vcl/unx/source/window/salframe.cxx,v
+retrieving revision 1.168
+retrieving revision 1.166.2.4
+diff -u -p -u -r1.168 -r1.166.2.4
+--- vcl/unx/source/window/salframe.cxx	6 Jan 2004 14:45:00 -0000	1.168
++++ vcl/unx/source/window/salframe.cxx	21 Jan 2004 20:23:00 -0000	1.166.2.4
+@@ -797,7 +797,7 @@ SalGraphics *X11SalFrame::GetGraphics()
+ 	else
+ 	{
+ 		pGraphics_ = new X11SalGraphics();
+-		pGraphics_->Init( this );
++		pGraphics_->Init( this, GetWindow() );
+ 	}
+ 
+ 	return pGraphics_;
+@@ -904,6 +904,8 @@ void X11SalFrame::SetIcon( USHORT nIcon 
+                     if( pName )
+                         XFree( pName );
+                  }
++                if( pProps )
++                    XFree( pProps );
+             }
+             if( bGnomeIconSize )
+                 iconSize = 20;
+@@ -1948,20 +1950,27 @@ X11SalFrame::PostExtTextEvent (sal_uInt1
+ 	XLIB_Window nFocusWindow = GetWindow();
+ 	Atom 		nEventAtom	 = GetDisplay()->getWMAdaptor()->getAtom( WMAdaptor::SAL_EXTTEXTEVENT );
+ 
+-	sal_uInt32 pEventData[5];
++    XEvent aEvent;
++    aEvent.xclient.type			= ClientMessage;
++    aEvent.xclient.serial		= 0;
++    aEvent.xclient.send_event	= True;
++    aEvent.xclient.display		= GetXDisplay();
++    aEvent.xclient.window		= nFocusWindow;
++    aEvent.xclient.message_type	= nEventAtom;
++    aEvent.xclient.format		= 32;
+ 
+ #if __SIZEOFLONG > 4
+-    pEventData[0] = (sal_uInt32)((long)pExtTextEvent & 0xffffffff);
+-    pEventData[1] = (sal_uInt32)((long)pExtTextEvent >> 32);
++    aEvent.xclient.data.l[0] = (sal_uInt32)((long)pExtTextEvent & 0xffffffff);
++    aEvent.xclient.data.l[1] = (sal_uInt32)((long)pExtTextEvent >> 32);
+ #else
+-    pEventData[0] = (sal_uInt32)((long)pExtTextEvent);
+-    pEventData[1] = NULL;
++    aEvent.xclient.data.l[0] = (sal_uInt32)((long)pExtTextEvent);
++    aEvent.xclient.data.l[1] = NULL;
+ #endif
+-    pEventData[2] = (sal_uInt32)nExtTextEventType;
+-    pEventData[3] = NULL;
+-    pEventData[4] = NULL;
++    aEvent.xclient.data.l[2] = (sal_uInt32)nExtTextEventType;
++    aEvent.xclient.data.l[3] = NULL;
++    aEvent.xclient.data.l[4] = NULL;
+ 
+-	GetDisplay()->SendEvent (nEventAtom, pEventData, nFocusWindow);
++    XPutBackEvent( GetXDisplay(), &aEvent );
+ }
+ 
+ void
+@@ -2006,9 +2015,7 @@ X11SalFrame::HandleExtTextEvent (XClient
+ // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+ BOOL X11SalFrame::PostEvent( void *pData )
+ {
+-	GetDisplay()->SendEvent( GetDisplay()->getWMAdaptor()->getAtom( WMAdaptor::SAL_USEREVENT ),
+-							  pData,
+-							  GetWindow() );
++    GetDisplay()->SendInternalEvent( this, pData );
+ 	return TRUE;
+ }
+ 
+@@ -3108,6 +3115,9 @@ long X11SalFrame::HandleReparentEvent( X
+ 
+ 	static const char* pDisableStackingCheck = getenv( "SAL_DISABLE_STACKING_CHECK" );
+ 
++    BOOL bOldIgnore = GetDisplay()->GetXLib()->GetIgnoreXErrors();
++    GetDisplay()->GetXLib()->SetIgnoreXErrors( TRUE );
++
+     /*
+      *  #89186# don't rely on the new parent from the event.
+      *  the event may be "out of date", that is the window manager
+@@ -3118,14 +3128,19 @@ long X11SalFrame::HandleReparentEvent( X
+     hWM_Parent = GetShellWindow();
+     do
+     {
+-	Children = NULL;
++        Children = NULL;
+         XQueryTree( pDisplay,
+                     hWM_Parent,
+                     &hRoot,
+                     &hDummy,
+                     &Children,
+                     &nChildren );
+-        /* #107048# this sometimes happens if a Show(TRUE) is
++        if( GetDisplay()->GetXLib()->WasXError() )
++        {
++            hWM_Parent = GetShellWindow();
++            break;
++        }
++         /* #107048# this sometimes happens if a Show(TRUE) is
+          *  immediately followed by Show(FALSE) (which is braindead anyway)
+          */
+         if(  hDummy == hWM_Parent )
+@@ -3159,6 +3174,7 @@ long X11SalFrame::HandleReparentEvent( X
+ 		// Reparenting before Destroy
+         aPresentationReparentList.remove( GetStackingWindow() );
+ 		mhStackingWindow = None;
++        GetDisplay()->GetXLib()->SetIgnoreXErrors( bOldIgnore );
+ 		return 0;
+ 	}
+ 
+@@ -3219,17 +3235,21 @@ long X11SalFrame::HandleReparentEvent( X
+                   hWM_Parent,
+                   &hRoot,
+                   &xp, &yp, &wp, &hp, &bw, &d );
+-    maGeometry.nRightDecoration 	= wp - w - maGeometry.nLeftDecoration;
+-    maGeometry.nBottomDecoration	= hp - h - maGeometry.nTopDecoration;
+-    /*
+-     *  note: this works because hWM_Parent is direct child of root,
+-     *  not necessarily parent of GetShellWindow()
+-     */
+-    maGeometry.nX		= xp + nLeft;
+-    maGeometry.nY		= yp + nTop;
+-    bool bResized = w != maGeometry.nWidth || h != maGeometry.nHeight;
+-    maGeometry.nWidth	= w;
+-    maGeometry.nHeight = h;
++    bool bResized = false;
++    if( ! GetDisplay()->GetXLib()->WasXError() )
++    {
++        maGeometry.nRightDecoration 	= wp - w - maGeometry.nLeftDecoration;
++        maGeometry.nBottomDecoration	= hp - h - maGeometry.nTopDecoration;
++        /*
++         *  note: this works because hWM_Parent is direct child of root,
++         *  not necessarily parent of GetShellWindow()
++         */
++        maGeometry.nX		= xp + nLeft;
++        maGeometry.nY		= yp + nTop;
++        bResized = w != maGeometry.nWidth || h != maGeometry.nHeight;
++        maGeometry.nWidth	= w;
++        maGeometry.nHeight = h;
++    }
+ 
+     // limit width and height if we are too large: #47757
+     // olwm and fvwm need this, it doesnt harm the rest
+@@ -3253,6 +3273,8 @@ long X11SalFrame::HandleReparentEvent( X
+     else if( bResized )
+         CallCallback( SALEVENT_RESIZE, NULL );
+ 
++    GetDisplay()->GetXLib()->SetIgnoreXErrors( bOldIgnore );
++
+ 	return 1;
+ }
+ 
+@@ -3305,17 +3327,6 @@ long X11SalFrame::HandleClientMessage( X
+ {
+     const WMAdaptor& rWMAdaptor( *pDisplay_->getWMAdaptor() );
+ 
+-	if( pEvent->message_type == rWMAdaptor.getAtom( WMAdaptor::SAL_USEREVENT ) )
+-	{
+-#if __SIZEOFLONG > 4
+-		void* pData = (void*)
+-			( (pEvent->data.l[0] & 0xffffffff) | (pEvent->data.l[1] << 32) );
+-#else
+-		void* pData = (void*)(pEvent->data.l[0]);
+-#endif
+-		CallCallback( SALEVENT_USEREVENT, pData );
+-		return 1;
+-	}
+ #if !defined(__synchronous_extinput__)
+ 	if( pEvent->message_type == rWMAdaptor.getAtom( WMAdaptor::SAL_EXTTEXTEVENT ) )
+ 	{
