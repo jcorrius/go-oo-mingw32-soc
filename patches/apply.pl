@@ -99,14 +99,22 @@ if ($remove) {
     @Patches = reverse @Patches;
 }
 
-for $patch_file (@Patches) {
-	$cmd = $base_cmd;
-        my $cmd_suffix;
+print "testing patches...\n";
+
+for $test_patch_file (@Patches) {
+	$cmd = $base_cmd." --dry-run";
 	if ($quiet) {
-	    $cmd_suffix = " >& /dev/null ";
+	    $cmd .= " > /dev/null ";
 	}
-	$cmd_suffix .= " < $patch_file";
+	$cmd .= " < $test_patch_file";
 	$quiet || print "$cmd\n";
-	system ($cmd." --dry-run ".$cmd_suffix) && die "Testing patch $patch_file failed: $!";
-	system ($cmd.$cmd_suffix) && die "Failed to patch $patch_file: $!";
+	system ($cmd) && die "Testing patch $test_patch_file failed: $!";
+}
+
+print "applying patches...\n";
+
+for $patch_file (@Patches) {
+	$cmd = "$base_cmd > /dev/null < $patch_file";
+	$quiet || print "$cmd\n";
+	system ($cmd) && die "Failed to patch $patch_file: $!";
 }
