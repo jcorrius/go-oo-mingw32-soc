@@ -14,6 +14,7 @@ EXTRA_DIST = \
 	Makefile.shared		\
 	intltool-merge.in	\
 	intltool-update.in	\
-	intltool-extract.in
+	intltool-extract.in	\
+	ChangeLog-to-1.3.0
 
 ACLOCAL_AMFLAGS = -I m4
