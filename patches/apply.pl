@@ -234,27 +234,19 @@ sub remove_patches {
 }
 
 sub export_series {
-
     my @Patches = list_patches ();
-
-    print "Writing list of patches to $series_file... ";
-    open ($fh, ">", $series_file);
 
     for my $patch (@Patches) {
 	$patch =~ s/$patch_dir\/..\///;
-	print $fh "$patch -p0\n";
+	print "$patch -p0\n";
     }
-
-    close ($fh);
-    print "done.\n";
 }
 
-(@ARGV > 1) || die "Syntax:\napply <path-to-patchdir> <src root> [--distro=Debian] [patch flags '--dry-run' eg.]\n";
+(@ARGV > 1) ||
+    die "Syntax:\n".
+    "apply <path-to-patchdir> <src root> [--distro=Debian] [patch flags '--dry-run' eg.]\n".
+    "apply <path-to-patchdir> --series-to";
 
-$patch_dir = shift (@ARGV);
-$apply_list = $patch_dir.'/apply';
-$dest_dir = shift (@ARGV);
-$applied_patches = $dest_dir.'/applied_patches';
 %options = ();
 
 $quiet = 0;
@@ -263,35 +255,44 @@ $export = 0;
 $opts = "";
 $distro = 'Ximian';
 @required_opts = ( 'PATCHPATH' );
+@arguments = ();
 
 foreach $a (@ARGV) {
 	if ($a eq '-R') { # -R will also be appended to $opts
 	    $remove = 1;	    
 	}
 
-	if ($a =~ m/--export-series-to=(.*)/) {
-	    $series_file = $1;
+	if ($a =~ m/--series-from=(.*)/) {
 	    $export = 1;
+	    $quiet = 1;
+	    $distro = $1;
 	} elsif ($a eq '--quiet') {
 	    $quiet = 1;
 	} elsif ($a =~ m/--distro=(.*)/) {
 	    $distro = $1;
 	} else {
-		$opts = $opts . " " . $a;
+	    push @arguments, $a;
 	}
 }
-
-$base_cmd = "patch -l -b -p0 $opts -d $dest_dir";
+$patch_dir = shift (@arguments);
+$apply_list = $patch_dir.'/apply';
 
 print "Execute: $base_cmd for distro '$distro'\n" unless $quiet;
 
 if ($export) {
     export_series();
-}
-elsif ($remove) {
-    remove_patches();
-}
-else {
-    apply_patches();
+
+} else {
+    $dest_dir = shift (@arguments);
+    $applied_patches = $dest_dir.'/applied_patches';
+
+    $opts = join @arguments, ' ';
+    $base_cmd = "patch -l -b -p0 $opts -d $dest_dir";
+
+    if ($remove) {
+	remove_patches();
+    } else {
+	apply_patches();
+    }
 }
 
