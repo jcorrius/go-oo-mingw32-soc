@@ -51,14 +51,14 @@ dump_simple (FILE *in)
 					data[i] == 2) {
 
 						if (data[0] == 1 && last == 2)
-								indent--;
+								indent-=2;
 						else if (data[0] == 2 && last == 1)
-								indent++;
+								indent+=2;
 
 						print_indent (indent);
 						fprintf( stderr, "Field 0x%.2x (last %.2x) [%d] length %d\n",
 								 data[0], last, indent, i );
-						dump_hex (data, i, indent);
+						dump_hex (data, i, indent + 1);
 						last = data [0];
 						data[0] = data[i];
 						i = 0;
@@ -82,7 +82,7 @@ main (int argc, char **argv)
 {
 		int i = 0;
 		byte_t frame = 0x01;
-		byte_t data[65536] = { 0, };
+		byte_t data[655360] = { 0, };
 
 		in = fopen(argv[1], "r");
 
