@@ -132,6 +132,7 @@ sub list_patches {
     while (<PatchList>) {
             s/\s*#.*//;
             chomp;
+	    s/\r//; # Win32
             $_ eq '' && next;
 
             if (/\[\s*(.*)\]/) {
