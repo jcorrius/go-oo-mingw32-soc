@@ -111,7 +111,7 @@ fi
 $ACLOCAL $ACLOCAL_FLAGS
 
 glib-gettextize --copy --force
-intltoolize --copy --force --automake
+# intltoolize --copy --force --automake
 libtoolize --copy --automake
 
 $AUTOMAKE --add-missing --copy 
