@@ -11,25 +11,17 @@
 #include <com/sun/star/frame/XSynchronousFrameLoader.hpp>
 #include <com/sun/star/beans/XPropertySet.hpp>
 
+#include "string-macros.h"
 #include "star-frame-widget.h"
 
-#define UNO_BOOTSTRAP_INI "file://" INIFILE
-#define FILENAME "file:///demo/schmidt.sxw"
+#define UNO_BOOTSTRAP_INI DECLARE_ASCII( "file://" INIFILE )
+#define FILENAME DECLARE_ASCII( "file:///demo/schmidt.sxw" )
 
 using namespace com::sun::star;
 using namespace com::sun::star::beans;
 
 using rtl::OUString;
 using com::sun::star::uno::Reference;
-
-static char *
-gimme_utf8_please (const rtl::OUString &oustring)
-{
-	rtl::OString ostring;
-
-	ostring = ::rtl::OUStringToOString (oustring, RTL_TEXTENCODING_UTF8);
-        return g_strdup (ostring.pData->buffer);
-}
 
 static void
 destroy( GtkWidget *widget, gpointer data )
@@ -45,17 +37,17 @@ FrameLoaderLoadFileFromUrl( Reference< frame::XSynchronousFrameLoader > xFrameLo
 {
 	uno::Sequence< beans::PropertyValue > aProperties( 3 );
 
-	aProperties[ 0 ] = PropertyValue( OUString::createFromAscii("FileName"),
+	aProperties[ 0 ] = PropertyValue( DECLARE_ASCII( "FileName" ),
 									  0,
 									  uno::makeAny( sUrl ),
 									  PropertyState_DIRECT_VALUE ); 
 	
-	aProperties[ 1 ] = PropertyValue( OUString::createFromAscii( "TypeName" ),
+	aProperties[ 1 ] = PropertyValue( DECLARE_ASCII( "TypeName" ),
 									  0,
 									  uno::makeAny( sTypeName ),
 									  PropertyState_DIRECT_VALUE ); 
 	
-	aProperties[ 2 ] = PropertyValue( OUString::createFromAscii( "ReadOnly" ),
+	aProperties[ 2 ] = PropertyValue( DECLARE_ASCII( "ReadOnly" ),
 									  0,
 									  uno::makeAny( sal_True ),
 									  PropertyState_DIRECT_VALUE ); 
@@ -69,8 +61,7 @@ main( int argc, char *argv[] )
     gtk_init( &argc, &argv );
 
     Reference< uno::XComponentContext > xComponentContext =
-		::cppu::defaultBootstrap_InitialComponentContext(
-			OUString::createFromAscii( UNO_BOOTSTRAP_INI ) );
+		::cppu::defaultBootstrap_InitialComponentContext( UNO_BOOTSTRAP_INI );
     g_assert( xComponentContext.is() );
 
     Reference< lang::XMultiComponentFactory > xMultiComponentFactoryClient(
@@ -79,7 +70,7 @@ main( int argc, char *argv[] )
 
     Reference< uno::XInterface > xInterface =
 		xMultiComponentFactoryClient->createInstanceWithContext(
-			OUString::createFromAscii( "com.sun.star.bridge.UnoUrlResolver" ),
+			DECLARE_ASCII( "com.sun.star.bridge.UnoUrlResolver" ),
 			xComponentContext );
     g_assert( xInterface.is() );
 
@@ -87,16 +78,15 @@ main( int argc, char *argv[] )
 		xInterface, uno::UNO_QUERY );
     g_assert( xUnoUrlResolver.is() );
 
-    OUString sConnectionString = OUString::createFromAscii(
-		"uno:pipe,name=martin_ooo_bonobo;"
-		"urp;StarOffice.ServiceManager" );
+    OUString sConnectionString = DECLARE_ASCII(
+		"uno:pipe,name=martin_ooo_bonobo;urp;StarOffice.ServiceManager" );
 
     xInterface = Reference< uno::XInterface >(
 		xUnoUrlResolver->resolve( sConnectionString ), uno::UNO_QUERY );
     g_assert( xInterface.is() );
 
     Reference< beans::XPropertySet > xPropSet( xInterface, uno::UNO_QUERY );
-    xPropSet->getPropertyValue( OUString::createFromAscii( "DefaultContext") )
+    xPropSet->getPropertyValue( DECLARE_ASCII( "DefaultContext") )
 		>>= xComponentContext;
 
     Reference< lang::XMultiServiceFactory > xMultiServiceFactory(
@@ -130,27 +120,24 @@ main( int argc, char *argv[] )
 	// Loading
 	Reference< document::XTypeDetection > xTypeDetection(
 		xMultiServiceFactory->createInstance(
-			OUString::createFromAscii( "com.sun.star.document.TypeDetection" ) ),
+			DECLARE_ASCII( "com.sun.star.document.TypeDetection" ) ),
 		uno::UNO_QUERY );
 	g_assert( xTypeDetection.is() );
 
 	Reference< XMultiServiceFactory > xFrameLoaderFactory(
 		xMultiServiceFactory->createInstance(
-			OUString::createFromAscii( "com.sun.star.frame.FrameLoaderFactory" ) ),
+			DECLARE_ASCII( "com.sun.star.frame.FrameLoaderFactory" ) ),
 		uno::UNO_QUERY );
 	g_assert( xFrameLoaderFactory.is() );
 
-	OUString sTypeName( xTypeDetection->queryTypeByURL( OUString::createFromAscii( FILENAME ) ) );
+	OUString sTypeName( xTypeDetection->queryTypeByURL( FILENAME ) );
 
 	Reference< frame::XSynchronousFrameLoader > xFrameLoader(
 		xFrameLoaderFactory->createInstance(sTypeName),
 		uno::UNO_QUERY );
 	g_assert( xFrameLoader.is() );
 		
-	FrameLoaderLoadFileFromUrl(
-		xFrameLoader, xFrame,
-		OUString::createFromAscii( FILENAME ),
-		sTypeName );
+	FrameLoaderLoadFileFromUrl( xFrameLoader, xFrame, FILENAME, sTypeName );
 
 	gtk_widget_grab_focus( pSocket );
 	gtk_widget_show( pSocket );

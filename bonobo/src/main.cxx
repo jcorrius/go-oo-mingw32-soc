@@ -11,11 +11,12 @@
 #include <com/sun/star/frame/XSynchronousFrameLoader.hpp>
 #include <com/sun/star/beans/XPropertySet.hpp>
 
+#include "string-macros.h"
 #include "star-frame-widget.h"
 
-#define UNO_BOOTSTRAP_INI "file://" INIFILE
+#define UNO_BOOTSTRAP_INI DECLARE_ASCII( "file://" INIFILE )
 #define OAFIID "OAFIID:GNOME_OpenOfficeOrg_Control"
-#define FILENAME "file:///demo/schmidt.sxw"
+#define FILENAME DECLARE_ASCII( "file:///demo/schmidt.sxw" )
 
 using namespace com::sun::star;
 using namespace com::sun::star::beans;
@@ -32,17 +33,17 @@ FrameLoaderLoadFileFromUrl( Reference< frame::XSynchronousFrameLoader > xFrameLo
 {
 	uno::Sequence< beans::PropertyValue > aProperties( 3 );
 
-	aProperties[ 0 ] = PropertyValue( OUString::createFromAscii("FileName"),
+	aProperties[ 0 ] = PropertyValue( DECLARE_ASCII( "FileName" ),
 									  0,
 									  uno::makeAny( sUrl ),
 									  PropertyState_DIRECT_VALUE ); 
 	
-	aProperties[ 1 ] = PropertyValue( OUString::createFromAscii( "TypeName" ),
+	aProperties[ 1 ] = PropertyValue( DECLARE_ASCII( "TypeName" ),
 									  0,
-									  uno::makeAny( OUString::createFromAscii( "writer_StarOffice_XML_Writer" ) ),
+									  uno::makeAny( DECLARE_ASCII( "writer_StarOffice_XML_Writer" ) ),
 									  PropertyState_DIRECT_VALUE ); 
 	
-	aProperties[ 2 ] = PropertyValue( OUString::createFromAscii( "ReadOnly" ),
+	aProperties[ 2 ] = PropertyValue( DECLARE_ASCII( "ReadOnly" ),
 									  0,
 									  uno::makeAny( sal_True ),
 									  PropertyState_DIRECT_VALUE ); 
@@ -64,18 +65,17 @@ realize( GtkWidget *widget, gpointer user_data )
 	
 	Reference< XMultiServiceFactory > xFrameLoaderFactory(
 		pSocket->service_manager->createInstance(
-			OUString::createFromAscii( "com.sun.star.frame.FrameLoaderFactory" ) ),
+			DECLARE_ASCII( "com.sun.star.frame.FrameLoaderFactory" ) ),
 			uno::UNO_QUERY );
 	
 	Reference< frame::XSynchronousFrameLoader > xFrameLoader(
 		xFrameLoaderFactory->createInstance(
-			OUString::createFromAscii( "writer_StarOffice_XML_Writer" ) ),
+			DECLARE_ASCII( "writer_StarOffice_XML_Writer" ) ),
 		uno::UNO_QUERY );
 	g_assert( xFrameLoader.is() );
 	
 	FrameLoaderLoadFileFromUrl(
-		xFrameLoader, xFrame,
-		OUString::createFromAscii( FILENAME ) );
+		xFrameLoader, xFrame, FILENAME );
 }
 
 static void
@@ -98,8 +98,7 @@ factory( BonoboGenericFactory *factory,
 {
 	if( !strcmp( component_id, OAFIID ) ) {
 		Reference< uno::XComponentContext > xComponentContext =
-			::cppu::defaultBootstrap_InitialComponentContext(
-				OUString::createFromAscii( UNO_BOOTSTRAP_INI ) );
+			::cppu::defaultBootstrap_InitialComponentContext( UNO_BOOTSTRAP_INI );
 		g_assert( xComponentContext.is() );
 
 		Reference< lang::XMultiComponentFactory > xMultiComponentFactoryClient(
@@ -108,7 +107,7 @@ factory( BonoboGenericFactory *factory,
 
 		Reference< uno::XInterface > xInterface =
 			xMultiComponentFactoryClient->createInstanceWithContext(
-				OUString::createFromAscii( "com.sun.star.bridge.UnoUrlResolver" ),
+				DECLARE_ASCII( "com.sun.star.bridge.UnoUrlResolver" ),
 				xComponentContext );
 		g_assert( xInterface.is() );
 
@@ -116,16 +115,15 @@ factory( BonoboGenericFactory *factory,
 			xInterface, uno::UNO_QUERY );
 		g_assert( xUnoUrlResolver.is() );
 
-		OUString sConnectionString = OUString::createFromAscii(
-			"uno:pipe,name=martin_ooo_bonobo;"
-			"urp;StarOffice.ServiceManager" );
+		OUString sConnectionString = DECLARE_ASCII(
+			"uno:pipe,name=martin_ooo_bonobo;urp;StarOffice.ServiceManager" );
 
 		xInterface = Reference< uno::XInterface >(
 			xUnoUrlResolver->resolve( sConnectionString ), uno::UNO_QUERY );
 		g_assert( xInterface.is() );
 
 		Reference< beans::XPropertySet > xPropSet( xInterface, uno::UNO_QUERY );
-		xPropSet->getPropertyValue( OUString::createFromAscii( "DefaultContext") )
+		xPropSet->getPropertyValue( DECLARE_ASCII( "DefaultContext") )
 			>>= xComponentContext;
 
 		Reference< lang::XMultiServiceFactory > xMultiServiceFactory(
