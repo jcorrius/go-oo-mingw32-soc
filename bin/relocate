@@ -14,28 +14,10 @@ sub sniff_set($)
     return $fname;
 }
 
-sub rewrite_value($$$)
+sub sed_file($$$)
 {
-    my ($value, $old_root, $new_root) = @_;
-
-# unix style
-    $value =~ s/$old_root/$new_root/g;
-
-# win32 style
-    $old_root =~ s/\//\\\\\\\\\\\\\\\\/g;
-    $new_root =~ s/\//\\\\\\\\/g;
-    $value =~ s/$old_root/$new_root/g;
-
-    return $value;
-}
-
-sub rewrite_set($$)
-{
-    my $new_root = shift;
-    my $set = shift;
-    my $old_root;
-    my $tmp_fname = "$new_root/$set.new";
-    my $old_fname = "$new_root/$set";
+    my ($old_fname, $function, $state) = @_;
+    my $tmp_fname = "$old_fname.new";
     my $old_file;
     my $new_file;
 
@@ -43,24 +25,79 @@ sub rewrite_set($$)
     open ($new_file, ">$tmp_fname") || die "Can't open $tmp_fname: $!";
     
     while (<$old_file>) {
-	if (/\s*([^=]+)\s*=\s*\"([^\"]+)\"/) {
-	    my ($name, $value) = ($1, $2);
-	    if ($name eq 'SRC_ROOT') {
-		$old_root = $value;
-	    }
-
-	    $value = rewrite_value ($value, $old_root, $new_root);
-
-	    print $new_file "$name=\"$value\"\n";
-	} else {
-	    print $new_file $_;
-	}
+	my $value = &$function($state, $_);
+	print $new_file $value;
     }
     
     close ($new_file) || die "Failed to close $tmp_fname: $!";
     close ($old_file) || die "Failed to close $old_fname: $!";
 
     rename $tmp_fname, $old_fname || die "Failed to replace $old_fname: $!";
+}
+
+sub rewrite_value($$)
+{
+    my ($state, $value) = @_;
+
+    $value =~ s/$state->{'old_root'}/$state->{'new_root'}/g;
+    $value =~ s/$state->{'win32_old_root'}/$state->{'win32_new_root'}/g;
+
+    return $value;
+}
+
+sub rewrite_set($$$)
+{
+    my $new_root = shift;
+    my $old_root = shift;
+    my $set = shift;
+    my $tmp;
+    my %state;
+
+    print "   $set\n";
+
+# unix style
+    $state{'old_root'} = $old_root;
+    $state{'new_root'} = $new_root;
+# win32 style
+    $tmp = $old_root;
+    $tmp =~ s/\//\\\\\\\\\\\\\\\\/g;
+    $state{'win32_old_root'} = $tmp;
+    $tmp = $new_root;
+    $tmp =~ s/\//\\\\\\\\/g;
+    $state{'win32_new_root'} = $tmp;
+
+    sed_file ("$new_root/$set", \&rewrite_value, \%state);
+
+    my $tcsh_set = $set;
+    $tcsh_set =~ s/\.sh$//;
+
+    print "   $tcsh_set\n";
+
+    sed_file ("$new_root/$tcsh_set", \&rewrite_value, \%state);
+}
+
+sub find_old_root($$)
+{
+    my $new_root = shift;
+    my $set = shift;
+    my $fname = "$new_root/$set";
+    my $old_root;
+    my $file;
+
+    open ($file, $fname) || die "Can't open $fname: $!";
+    
+    while (<$file>) {
+	if (/\s*([^=]+)\s*=\s*\"([^\"]+)\"/) {
+	    my ($name, $value) = ($1, $2);
+
+	    if ($name eq 'SRC_ROOT') {
+		$old_root = $value;
+		last;
+	    }
+	}
+    }
+    
+    close ($file) || die "Failed to close $fname: $!";
 
     return $old_root;
 }
@@ -88,7 +125,6 @@ sub rewrite_dpcc($$)
     my $new_root = shift;
     my $old_root = shift;
 
-    print "re-writing dependencies:";
     my $top_dir;
     my $idx = 0;
     opendir ($top_dir, $new_root) || die "Can't open $new_root: $!";
@@ -112,6 +148,23 @@ sub rewrite_dpcc($$)
     closedir ($top_dir);
 }
 
+sub rewrite_bootstrap($$)
+{
+    my $new_root = shift;
+    my $old_root = shift;
+
+    print "   bootstrap\n";
+
+    my %state;
+    $state{'old_root'} = $old_root;
+    $state{'new_root'} = $new_root;
+
+    my $rewrite = sub { my $state = shift; my $value = shift;
+			$value =~ s/$state->{'old_root'}/$state->{'new_root'}/g;
+			return $value; };
+    sed_file ("$new_root/bootstrap", $rewrite, \%state);
+}
+
 for $a (@ARGV) {
     if ($a eq '--help' || $a eq '-h') {
 	print "relocate: syntax\n";
@@ -122,11 +175,19 @@ for $a (@ARGV) {
 $OOO_BUILD = shift (@ARGV) || die "Pass path to relocated source tree";
 substr ($OOO_BUILD, 0, 1) eq '/' || die "relocate requires absolute paths";
 
-$set = sniff_set($OOO_BUILD) || die "Can't find env. set";
+my $set;
 
-$OLD_ROOT = rewrite_set($OOO_BUILD, $set);
+$set = sniff_set($OOO_BUILD) || die "Can't find env. set";
+$OLD_ROOT = find_old_root($OOO_BUILD, $set);
 
 print "Relocate: $OLD_ROOT -> $OOO_BUILD\n";
+
+print "re-writing environment:\n";
+
+rewrite_set($OOO_BUILD, $OLD_ROOT, $set);
+rewrite_bootstrap($OOO_BUILD, $OLD_ROOT);
+
+print "re-writing dependencies:\n";
 
 rewrite_dpcc($OOO_BUILD, $OLD_ROOT);
 
