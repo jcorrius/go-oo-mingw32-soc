@@ -18,3 +18,6 @@ all:
 
 install:
 	./package-ooo ${TAG} --clean
+
+foo:
+	./echo.sh
