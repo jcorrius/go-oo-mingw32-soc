@@ -47,8 +47,15 @@ sub find_file($$)
     my $file = shift;
 
     if (!-f "$dir/$file") {
-	$dir =~ s/_[0-9]+//;
-#	print "Re-work to $dir\n";
+	my @search = split /:/, $options{'PATCHPATH'};
+
+	for $stem (@search) {
+	    my $testdir = "$dir/$stem";
+	    if (-f "$testdir/$file") {
+		$dir = $testdir;
+		last;
+	    }
+	}
     }
 
     -f "$dir/$file" || die "\n\n** Error ** - Can't find file $dir/$file\n\n\n";
@@ -61,6 +68,7 @@ sub find_file($$)
 $patch_dir = shift (@ARGV);
 $apply_list = $patch_dir.'/apply';
 $dest_dir = shift (@ARGV);
+%options = ();
 
 $quiet = 0;
 $remove = 0;
@@ -86,11 +94,13 @@ if (!$remove) {
     print "Execute: $base_cmd for distro '$distro'\n";
 }
 
+@Patches = ();
+
 open (PatchList, "$apply_list") || die "Can't find $apply_list";
 
 my @targets=($distro);
 while (<PatchList>) {
-	s/#.*//;
+	s/\s*#.*//;
 	chomp;
 	$_ eq '' && next;
 
@@ -103,31 +113,35 @@ while (<PatchList>) {
 	    next;
 	}
 
+	if (/\s*(\S+)\s*\s*=(\S+)/) {
+	    $options{$1} = $2;
+	    print "$1 => $2\n";
+	    next;
+	}
+
 	if (!grep /$distro/i, @targets) {
 	    print "$distro: skipping '$_'\n";
 	    next;
 	}
 
-	chomp ();
-	if (s/^\%copy\s+//) {
-	    m/(\S+)\s+(\S+)/ || die "Bad format of copy: $_";
-	    $quiet || print "copy $patch_dir/$1 $dest_dir/$2\n";
-	    system ("cp -f $patch_dir/$1 $dest_dir/$2");
-
-	} elsif ($_) {
-	    $patch_file = find_file ($patch_dir, $_);
-	    
-	    if ($remove) {
-		revert_touched_files ($patch_file, $dest_dir);
-	    } else {
-		$cmd = $base_cmd;
-		if ($quiet) {
-		    $cmd .= " >& /dev/null ";
-		}
-		$cmd .= " < $patch_file";
-		$quiet || print "$cmd\n";
-		system ($cmd) && die "Failed to patch $patch_file: $!";
-	    }
-	}
+	push @Patches, find_file ($patch_dir, $_);
 }
 close (PatchList);
+
+if ($remove) {
+    @Patches = reverse @Patches;
+}
+
+for $patch_file (@Patches) {
+    if ($remove) {
+	revert_touched_files ($patch_file, $dest_dir);
+    } else {
+	$cmd = $base_cmd;
+	if ($quiet) {
+	    $cmd .= " >& /dev/null ";
+	}
+	$cmd .= " < $patch_file";
+	$quiet || print "$cmd\n";
+	system ($cmd) && die "Failed to patch $patch_file: $!";
+    }
+}
