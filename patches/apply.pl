@@ -33,7 +33,6 @@ sub do_patch {
     my $cmd_suffix = "";
 
     print "$patch_file: testing..."; 
-    return;
 
     if ($quiet) 
         { $cmd_output = " > /dev/null " }
