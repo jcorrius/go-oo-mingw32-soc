@@ -19,13 +19,27 @@ ALL_LINGUAS=""
 AM_GLIB_GNU_GETTEXT
 AC_PROG_INTLTOOL
 
+AC_ARG_ENABLE(
+	[strict-tests],
+	AC_HELP_STRING([--enable-strict-tests],
+		[check for the presence of headers, binaries, etc.]),,
+	[enable_strict_tests="no"])
+
+AC_ARG_WITH(
+	[ooo-builddir],
+	AC_HELP_STRING([--with-ooo-builddir],
+		[define the directory where openoffice.org will be compiled, e.g. the root of an ooo cvs checkout.]),
+	[ac_solver_dir="${withval}/solver/645/unxlngi4.pro"],)
+
 AC_ARG_WITH(
 	[ooo-solver-dir],
 	AC_HELP_STRING([--with-ooo-solver-dir=DIR],
 		[path to your OpenOffice.org solver]),
-	[ac_ooodev_bindir="${withval}/bin"
-	 ac_ooodev_includes="${withval}/inc"
-	 ac_ooodev_libdir="${withval}/lib"])
+	[ac_solver_dir="${withval}"],)
+
+ac_ooodev_bindir="${ac_solver_dir}/bin"
+ac_ooodev_includes="${ac_solver_dir}/inc"
+ac_ooodev_libdir="${ac_solver_dir}/lib"
 
 AC_ARG_WITH(
 	[ooo-install-dir],
@@ -38,24 +52,33 @@ PKG_CHECK_MODULES(OOO_BONOBO, gtk+-2.0 libgnome-2.0 libbonoboui-2.0)
 ac_cppflags_safe="$CPPFLAGS"
 CPPFLAGS="-I$ac_ooodev_includes"
 AC_CHECK_HEADERS([sal/config.h],
-		 [OOO_BONOBO_CFLAGS="$OOO_BONOBO_CFLAGS -I$ac_ooodev_includes"],
-		 AC_MSG_ERROR([[OpenOffice.org include files not found, try '--with-ooo-solver-dir=/path/to/solver']]))
+		 [],
+		 test "z$enable_strict_tests" = "zno" || AC_MSG_ERROR([[OpenOffice.org include files not found, try '--with-ooo-solver-dir=/path/to/solver']]))
+OOO_BONOBO_CFLAGS="$OOO_BONOBO_CFLAGS -I$ac_ooodev_includes"
 CPPFLAGS="$ac_cppflags_safe"
 
 AC_PATH_PROG([REGMERGE], [regmerge], [], [$ac_ooodev_bindir:$PATH])
 if test -z "$REGMERGE" ; then
-  AC_MSG_ERROR([regmerge not found, try '--with-ooo-solver-dir=location_of_ODK'.])
+  if test "z$enable_strict_tests" = "zno"; then
+    REGMERGE="$ac_ooodev_bindir/regmerge"
+  else
+    AC_MSG_ERROR([regmerge not found, try '--with-ooo-solver-dir=location_of_ODK'.])
+  fi
 fi
 AC_SUBST(REGMERGE)
 
 AC_PATH_PROG([REGCOMP], [regcomp], [], [$ac_ooodev_bindir:$PATH])
 if test -z "$REGCOMP" ; then
-  AC_MSG_ERROR([regcomp not found, try '--with-ooo-solver-dir=location_of_ODK'.])
+  if test "z$enable_strict_tests" = "zno"; then
+    REGCOMP="$ac_ooodev_bindir/regcomp"
+  else
+    AC_MSG_ERROR([regcomp not found, try '--with-ooo-solver-dir=location_of_ODK'.])
+  fi
 fi
 AC_SUBST(REGCOMP)
 
-if test ! -d "$ac_ooodev_libdir" ; then
-	AC_MSG_ERROR([[OpenOffice.org libraries not found. Please use --with-ooo-solver-dir=/path/to/solver]])
+if test ! -d "$ac_ooodev_libdir" && "z$enable_strict_tests" != "zno" ; then
+  AC_MSG_ERROR([[OpenOffice.org libraries not found. Please use --with-ooo-solver-dir=/path/to/solver]])
 fi
 OOO_BONOBO_LIBS="$OOO_BONOBO_LIBS -L$ac_ooodev_libdir"
 OOO_libdir="$ac_ooodev_libdir"
@@ -63,9 +86,10 @@ AC_SUBST(OOO_libdir)
 
 dnl Type Registry (types.rdb = offapi + udkapi)
 AC_CHECK_FILE([$ac_ooodev_bindir/types.rdb],
-	      [DKREGISTRYNAME="$ac_ooodev_bindir/types.rdb"],
-	      AC_MSG_ERROR([[udkapi.rdb not found. Please use --with-ooo-install-dir=/path/to/ooo-installation]]))
+	      [],
+	      test "z$enable_strict_tests" = "zno" || AC_MSG_ERROR([[udkapi.rdb not found. Please use --with-ooo-install-dir=/path/to/ooo-installation]]))
 
+DKREGISTRYNAME="$ac_ooodev_bindir/types.rdb"
 AC_SUBST(DKREGISTRYNAME)
 
 dnl FIXME
