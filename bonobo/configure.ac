@@ -45,7 +45,8 @@ AC_ARG_WITH(
 	[ooo-install-dir],
 	AC_HELP_STRING([--with-ooo-install-dir=DIR],
 		[path to your OpenOffice.org installation]),
-	[OOO_INSTALLDIR=${withval}])
+	[OOO_INSTALLDIR=${withval}],
+	[OOO_INSTALLDIR=${libdir}/ooo-1.1.0])
 AC_SUBST(OOO_INSTALLDIR)
 
 PKG_CHECK_MODULES(OOO_BONOBO, gtk+-2.0 libgnome-2.0 libbonoboui-2.0)
