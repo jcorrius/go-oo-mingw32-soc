@@ -8,6 +8,8 @@ sub find_file($$)
     my $dir = shift;
     my $file = shift;
 
+    $file =~ m/\.diff$/ || die "Patch file '$file' is not a .diff";
+
     if (!-f "$dir/$file") {
 	my @search = split /:/, $options{'PATCHPATH'};
 
