@@ -26,7 +26,7 @@ AC_ARG_ENABLE(
 	[enable_strict_tests="no"])
 
 dnl FIXME
-TAG="OOO_1_1_0"
+TAG=`$srcdir/../bin/latest-patchset $srcdir/../patches`;
 BASEDIR=`pwd`/..
 
 AC_ARG_WITH(
@@ -57,7 +57,7 @@ AC_ARG_WITH(
 	AC_HELP_STRING([--with-ooo-install-dir=DIR],
 		[path to your OpenOffice.org installation]),
 	[OOO_INSTALLDIR=${withval}],
-	[OOO_INSTALLDIR=${libdir}/ooo-1.1.0])
+	[OOO_INSTALLDIR=${libdir}/ooo-1.1])
 AC_SUBST(OOO_INSTALLDIR)
 
 PKG_CHECK_MODULES(OOO_BONOBO, gtk+-2.0 libgnome-2.0 libbonoboui-2.0)
