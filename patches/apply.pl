@@ -3,28 +3,35 @@
 use File::Copy;
 use File::Basename;
 
-sub find_file($$)
+sub get_search_paths()
 {
-    my $dir = shift;
+    my @paths = ();
+    my @search = split /:/, $options{'PATCHPATH'};
+
+    for my $stem (@search) {
+	push @paths, "$patch_dir/$stem";
+    }
+#    print "Search paths are '@paths'\n";
+    return @paths;
+}
+
+sub find_patch_file($)
+{
     my $file = shift;
+    my $file_path = '';
 
     $file =~ m/\.diff$/ || die "Patch file '$file' is not a .diff";
 
-    if (!-f "$dir/$file") {
-	my @search = split /:/, $options{'PATCHPATH'};
-
-	for $stem (@search) {
-	    my $testdir = "$dir/$stem";
-	    if (-f "$testdir/$file") {
-		$dir = $testdir;
-		last;
-	    }
+    for my $path (get_search_paths()) {
+	if (-f "$path/$file") {
+	    $file_path = "$path/$file";
+	    last;
 	}
     }
 
-    -f "$dir/$file" || die "\n\n** Error ** - Can't find file $dir/$file\n\n\n";
+    -f $file_path || die "\n\n** Error ** - Can't find file $$file in patch path\n\n\n";
 
-    return "$dir/$file";
+    return $file_path;
 }
 
 sub do_patch {
@@ -228,6 +235,8 @@ sub list_patches {
                 next;
             }
 
+	    push @unfiltered_patch_list, $_;
+
 	    my $set;
 	    my $match = 0;
 	    for $set (@targets) {
@@ -240,7 +249,7 @@ sub list_patches {
 		next;
 	    }
 
-            push @Patches, find_file ($patch_dir, $_);
+            push @Patches, find_patch_file ($_);
     }
     close (PatchList);
 
@@ -384,10 +393,50 @@ sub is_old_patch_version()
     return $is_old;
 }
 
+
+sub scan_unused($$)
+{
+    my $dir = shift;
+    my $patches = shift;
+    my $dirh;
+    my $warned = 0;
+
+    opendir($dirh, $dir) || die "Can't open $dir: $!";
+    while (my $file = readdir ($dirh)) {
+	$file =~ /^\./ && next;     # hidden
+	$file =~ /\.diff$/ || next; # non-patch
+
+	if (!defined $patches->{$file}) {
+	    if (!$warned) {
+		print "Warning: unused files in $dir\n";
+		$warned++;
+	    }
+	    print "\t$file\n";
+	}
+    }
+    closedir($dirh);
+}
+
+sub check_for_unused ($$)
+{
+    my $patch_dir = shift;
+    my $patches = shift;
+    my %patches;
+    for my $patch (@{$patches}) {
+#	print "Check for $patch\n";
+	$patches{$patch} = 1;
+    }
+
+    for my $path (get_search_paths()) {
+	scan_unused ($path, \%patches);
+    }
+}
+
 (@ARGV > 1) ||
     die "Syntax:\n".
-    "apply <path-to-patchdir> <src root> [--distro=Debian] [patch flags '--dry-run' eg.]\n".
-    "apply <path-to-patchdir> --series-to";
+    "apply <path-to-patchdir> <src root> --tag=<src680-m90> [--distro=Debian] [--quiet] [--dry-run] [ patch flags ]\n" .
+    "apply <path-to-patchdir> --series-to\n" .
+    "apply <path-to-patchdir> --find-unused\n";
 
 %options = ();
 
@@ -398,8 +447,10 @@ $opts = "";
 $distro = 'NLD';
 $tag = '';
 $dry_run = 0;
+$find_unused = 0;
 @required_opts = ( 'PATCHPATH' );
 @arguments = ();
+@unfiltered_patch_list = ();
 
 
 foreach $a (@ARGV) {
@@ -414,6 +465,8 @@ foreach $a (@ARGV) {
 	    $quiet = 1;
 	} elsif ($a =~ m/--distro=(.*)/) {
 	    $distro = $1;
+	} elsif ($a =~ m/--find-unused/) {
+	    $find_unused = 1;
 	} elsif ($a =~ m/--tag=(.*)/) {
 	    $tag = $1;
 	} elsif ($a =~ m/--dry-run/g) {
@@ -429,10 +482,14 @@ $apply_list = $patch_dir.'/apply';
 
 print "Execute with $opts for distro '$distro'\n" unless $quiet;
 
-if ($dry_run) {
+if ($dry_run || $find_unused) {
+    $tag = '' if ($find_unused);
     my @Patches = list_patches ($distro);
-    printf "Exiting before applying patches\n";
-    
+    if ($find_unused) {
+	check_for_unused ($patch_dir, \@unfiltered_patch_list);
+    } else {
+	printf "Dry-run: exiting before applying patches\n";
+    }
 } elsif ($export) {
     export_series();
 
