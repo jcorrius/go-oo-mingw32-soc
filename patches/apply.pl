@@ -51,7 +51,9 @@ sub do_patch {
     else
         { print "$cmd\n" }
 
-    system ($cmd) && die "Failed to patch $patch_file.";
+    system ($cmd) && die "Failed to patch $patch_file\n" .
+			 "- this is often caused by duplicate sections in a patch.\n".
+			 "you will need to manually reverse this patch\n";
     print "done.\n";
 }
 
