@@ -17,11 +17,13 @@ typedef struct _StarFrameWidgetPrivate StarFrameWidgetPrivate;
 #include <com/sun/star/awt/XWindowPeer.hpp>
 #include <com/sun/star/frame/XFrame.hpp>
 #include <com/sun/star/lang/XMultiServiceFactory.hpp>
+#include <com/sun/star/uno/XComponentContext.hpp>
 
 using com::sun::star::uno::Reference;
 using com::sun::star::awt::XWindowPeer;
 using com::sun::star::frame::XFrame;
 using com::sun::star::lang::XMultiServiceFactory;
+using com::sun::star::uno::XComponentContext;
 
 
 struct _StarFrameWidget {
@@ -37,7 +39,7 @@ struct _StarFrameWidgetClass {
 };
 
 GType star_frame_widget_get_type ( void );
-GtkWidget *star_frame_widget_new ( Reference< XMultiServiceFactory > service_factory );
+GtkWidget *star_frame_widget_new ( Reference< XComponentContext > component_context );
 
 Reference< XWindowPeer > star_frame_widget_get_window_peer( StarFrameWidget * );
 Reference< XFrame > star_frame_widget_get_frame( StarFrameWidget * );

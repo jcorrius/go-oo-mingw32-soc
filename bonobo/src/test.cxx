@@ -76,10 +76,6 @@ main( int argc, char *argv[] )
 	Reference< uno::XComponentContext > xRemoteContext(
 		getRemoteComponentContext( xComponentContext ) );
 
-    Reference< lang::XMultiServiceFactory > xMultiServiceFactory(
-		xRemoteContext->getServiceManager(), uno::UNO_QUERY );
-    g_assert (xMultiServiceFactory.is() );
-
     GtkWidget *pWindow = gtk_window_new( GTK_WINDOW_TOPLEVEL );
     g_signal_connect (G_OBJECT (pWindow), "destroy",
 					  G_CALLBACK (destroy), NULL);
@@ -93,7 +89,7 @@ main( int argc, char *argv[] )
 	GtkWidget *pText2 = gtk_entry_new();
 	gtk_box_pack_start( GTK_BOX( pVBox ), pText2, FALSE, FALSE, 5 );
 
-	GtkWidget *pSocket = star_frame_widget_new( xMultiServiceFactory );
+	GtkWidget *pSocket = star_frame_widget_new( xRemoteContext );
  	gtk_box_pack_start( GTK_BOX( pVBox ), pSocket, TRUE, TRUE, 5 );
 
 	Reference< awt::XWindowPeer > xWindowPeer(
@@ -105,6 +101,10 @@ main( int argc, char *argv[] )
 	g_assert( xFrame.is() );
 
 	// Loading
+    Reference< lang::XMultiServiceFactory > xMultiServiceFactory(
+		xRemoteContext->getServiceManager(), uno::UNO_QUERY );
+    g_assert (xMultiServiceFactory.is() );
+
 	Reference< document::XTypeDetection > xTypeDetection(
 		xMultiServiceFactory->createInstance( SERVICENAME_TYPEDETECTION ),
 		uno::UNO_QUERY );

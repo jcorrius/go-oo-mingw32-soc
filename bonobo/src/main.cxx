@@ -103,11 +103,7 @@ factory( BonoboGenericFactory *factory,
 		Reference< uno::XComponentContext > xRemoteContext(
 			getRemoteComponentContext( xComponentContext ) );
 		
-		Reference< lang::XMultiServiceFactory > xMultiServiceFactory(
-			xRemoteContext->getServiceManager(), uno::UNO_QUERY );
-		g_assert ( xMultiServiceFactory.is() );
-
-		GtkWidget *pSocket = star_frame_widget_new( xMultiServiceFactory );
+		GtkWidget *pSocket = star_frame_widget_new( xRemoteContext );
 		g_signal_connect( pSocket, "realize", G_CALLBACK( realize ), NULL );
 
 		GtkWidget *pHBox = gtk_hbox_new( FALSE, 0 );

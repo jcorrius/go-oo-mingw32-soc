@@ -97,9 +97,9 @@ star_frame_widget_instance_init( StarFrameWidget *sfw )
 }
 
 GtkWidget *
-star_frame_widget_new ( Reference< XMultiServiceFactory > service_factory )
+star_frame_widget_new ( Reference< XComponentContext > component_context )
 {
     StarFrameWidget *swf = (StarFrameWidget *)g_object_new( TYPE_STAR_FRAME_WIDGET, NULL );
-	swf->service_manager = service_factory;
+	swf->service_manager = Reference< XMultiServiceFactory >::query( component_context->getServiceManager() );
 	return GTK_WIDGET( swf );
 }
