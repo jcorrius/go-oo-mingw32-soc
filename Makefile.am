@@ -1,6 +1,11 @@
-SUBDIRS = po desktop bin etc patches man doc www
+if BONOBO
+  MAYBE_BONOBO = bonobo
+endif
 
-EXTRA_DIST = config.rpath	\
+SUBDIRS = po desktop bin etc patches man doc www $(MAYBE_BONOBO)
+
+
+EXTRA_DIST = \
 	emacs.el		\
 	mkinstalldirs		\
 	MAINTAINERS		\
