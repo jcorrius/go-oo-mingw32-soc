@@ -80,6 +80,47 @@ sub draw_postamble($)
     return ">\n" . $prefix . '  ' . "<text:p/></draw:$name>\n";
 }
 
+sub draw_line($$)
+{
+    my ($attr, $value) = @_;
+    return draw_preamble ('line') .
+	    transfer_attr ($value, 'x1') .
+	    transfer_attr ($value, 'y1') .
+	    transfer_attr ($value, 'x2') .
+	    transfer_attr ($value, 'y2') .
+	    draw_postamble ('line');
+}
+
+sub draw_rect($$)
+{
+    my ($attr, $value) = @_;
+    my $svg;
+    my $width = get_size_attr ($value, 'width');
+    my $height = get_size_attr ($value, 'height');
+    return draw_preamble ('rect', 'nofill') .
+	    transfer_attr ($value, 'x') .
+	    transfer_attr ($value, 'y') .
+	    "svg:width=\"$width$unit\" " .
+	    "svg:height=\"$height$unit\" " .
+	    draw_postamble ('rect');
+}
+
+sub draw_circle($$)
+{
+    my ($attr, $value) = @_;
+    my $r  = get_size_attr ($value, 'r'); 
+    my $x = get_point_attr ($value, 'cx') - $r;
+    my $y = get_point_attr ($value, 'cy') - $r;
+    my $size = $r * 2;
+
+    return draw_preamble ('circle', 'nofill') .
+	    "svg:width=\"$size$unit\" " .
+	    "svg:height=\"$size$unit\" " .
+	    "svg:x=\"$x$unit\" " .
+	    "svg:y=\"$y$unit\" " .
+	    draw_postamble ('circle');
+}
+
 sub draw_poly($$)
 {
     my ($attr, $value) = @_;
@@ -89,7 +130,7 @@ sub draw_poly($$)
     my ($maxx, $maxy) = ( 0, 0 );
     my ($minx, $miny) = ( 10000000, 10000000 );
 
-    print  $maxx;
+    print $maxx;
 
     for my $coord (split / /, $src_points) {
 	my ($a, $b) = split /,/, $coord;
@@ -115,7 +156,30 @@ sub draw_poly($$)
 	    "svg:viewBox=\"$viewbox\" " .
 	    "draw:points=\"$points\" " .
 	    draw_postamble ($attr);
+
+    return $svg;
 }
+
+sub draw_path
+{
+    my ($attr, $value) = @_;
+    my $svg = '';
+    print STDERR "No svg:path handling\n";
+# path is 'M\s+<x>\s+<y>
+# L<x><y>
+# C<x1y1> <x2y2> <x3y3>
+#    viewbox calculation ?!? - guess it ? expand bits ?
+    return $svg;
+}
+
+%draw_handlers = (
+    'svg:rect'     => \&draw_rect,
+    'svg:polygon'  => \&draw_poly,
+    'svg:polyline' => \&draw_poly,
+    'svg:line'     => \&draw_line,
+    'svg:circle'   => \&draw_circle,
+    'svg:path'     => \&draw_path
+);
 
 sub parse_svg
 {
@@ -127,43 +191,10 @@ sub parse_svg
     while (defined $elems->[$idx]) {
 	my $attr = $elems->[$idx];
 	my $value = $elems->[$idx+1];
-
-	if ($attr eq 'svg:line') {
-	    $svg .= draw_preamble ('line') .
-		    transfer_attr ($value, 'x1') .
-		    transfer_attr ($value, 'y1') .
-		    transfer_attr ($value, 'x2') .
-		    transfer_attr ($value, 'y2') .
-		    draw_postamble ('line');
-
-	} elsif ($attr eq 'svg:rect') {
-	    my $width = get_size_attr ($value, 'width');
-	    my $height = get_size_attr ($value, 'height');
-	    $svg .= draw_preamble ('rect', 'nofill') .
-		    transfer_attr ($value, 'x') .
-		    transfer_attr ($value, 'y') .
-		    "svg:width=\"$width$unit\" " .
-		    "svg:height=\"$height$unit\" " .
-		    draw_postamble ('rect');
-
-	} elsif ($attr eq 'svg:polygon' ||
-		 $attr eq 'svg:polyline') {
-	    $svg .= draw_poly ($attr, $value);
-
-	} elsif ($attr eq 'svg:circle') {
-	    my $r  = get_size_attr ($value, 'r'); 
-	    my $x = get_point_attr ($value, 'cx') - $r;
-	    my $y = get_point_attr ($value, 'cy') - $r;
-	    my $size = $r * 2;
-
-	    $svg .= draw_preamble ('circle', 'nofill') .
-		    "svg:width=\"$size$unit\" " .
-		    "svg:height=\"$size$unit\" " .
-		    "svg:x=\"$x$unit\" " .
-		    "svg:y=\"$y$unit\" " .
-		    draw_postamble ('circle');
-
-	} elsif ($attr eq 'svg:circle') {
+	my $draw = $draw_handlers{$attr};
+	
+	if (defined $draw) {
+	    $svg .= $draw->($attr, $value);
 
 	} elsif ($attr ne '0') {
 	    print STDERR "unknown svg elem '" . $elems->[$idx] . "'\n";
