@@ -19,6 +19,11 @@
 #include "star-frame-widget.h"
 
 #define OAFIID "OAFIID:GNOME_OpenOfficeOrg_Control"
+// 16% is the minimum for sc, sw crashes at <5%, sd can go down to 4%
+#define MIN_ZOOM 16
+// 500% is the maximum for sc, sw crashes at 1000%+, sd can go to 3600%
+#define MAX_ZOOM 500
+#define CLAMP_ZOOM(x) CLAMP(x, MIN_ZOOM, MAX_ZOOM)
 
 using namespace com::sun::star;
 using namespace com::sun::star::beans;
@@ -30,6 +35,7 @@ struct _OOoBonoboControlPrivate {
 	GtkWidget *hbox;
 	StarFrameWidget *sfw;
 	rtl::OUString uri;
+	BonoboZoomable *zoomable;
 };
 
 BONOBO_CLASS_BOILERPLATE( OOoBonoboControl, ooo_bonobo_control,
@@ -41,6 +47,99 @@ BONOBO_CLASS_BOILERPLATE( OOoBonoboControl, ooo_bonobo_control,
 #define URL_PRINTDOC			DECLARE_ASCII( "slot:5504" )
 #define URL_DOCINFO				DECLARE_ASCII( "slot:5535" )
 #define URL_COPY				DECLARE_ASCII( "slot:5711" )
+
+static void
+zoomable_set_zoom_level_cb (BonoboZoomable *zoomable,
+							CORBA_float new_zoom_level,
+							OOoBonoboControl *user_data)
+{
+	g_return_if_fail (IS_OOO_BONOBO_CONTROL (user_data));
+
+	OOoBonoboControl *control = OOO_BONOBO_CONTROL( user_data );
+
+	Reference< XPropertySet > view_properties(
+		star_frame_widget_get_view_properties( control->priv->sfw ) );
+
+	if( !view_properties.is() )
+		return;
+
+	view_properties->setPropertyValue(
+		DECLARE_ASCII( "ZoomType" ),
+		uno::makeAny( (sal_Int16) view::DocumentZoomType::BY_VALUE ));
+	view_properties->setPropertyValue(
+		DECLARE_ASCII( "ZoomValue" ),
+		uno::makeAny( (sal_Int16) ( CLAMP_ZOOM( new_zoom_level * 100 ) ) ) );
+}
+
+static void
+zoom_in_cb (GtkObject *source, gpointer user_data)
+{
+	g_return_if_fail (IS_OOO_BONOBO_CONTROL (user_data));
+
+	OOoBonoboControl *control = OOO_BONOBO_CONTROL( user_data );
+
+	Reference< XPropertySet > view_properties(
+		star_frame_widget_get_view_properties( control->priv->sfw ) );
+
+	if( !view_properties.is() )
+		return;
+
+	uno::Any a = view_properties->getPropertyValue( DECLARE_ASCII( "ZoomValue" ) );
+	sal_Int16 view_zoom;
+	a >>= view_zoom;
+
+	view_zoom = ( sal_Int16 )( view_zoom * 1.2 );
+	view_zoom = CLAMP_ZOOM( view_zoom );
+
+	view_properties->setPropertyValue(
+		DECLARE_ASCII( "ZoomType" ),
+		uno::makeAny( (sal_Int16) view::DocumentZoomType::BY_VALUE ));
+	view_properties->setPropertyValue( DECLARE_ASCII( "ZoomValue" ),
+									   uno::makeAny( view_zoom ) );
+}
+
+static void
+zoom_out_cb (GtkObject *source, gpointer user_data)
+{
+	g_return_if_fail (IS_OOO_BONOBO_CONTROL (user_data));
+
+	OOoBonoboControl *control = OOO_BONOBO_CONTROL( user_data );
+
+	Reference< XPropertySet > view_properties(
+		star_frame_widget_get_view_properties( control->priv->sfw ) );
+
+	if( !view_properties.is() )
+		return;
+
+	uno::Any a = view_properties->getPropertyValue( DECLARE_ASCII( "ZoomValue" ) );
+	sal_Int16 view_zoom;
+	a >>= view_zoom;
+
+	view_zoom = ( sal_Int16 )( view_zoom / 1.2 );
+	view_zoom = CLAMP_ZOOM( view_zoom );
+
+	view_properties->setPropertyValue(
+		DECLARE_ASCII( "ZoomType" ),
+		uno::makeAny( (sal_Int16) view::DocumentZoomType::BY_VALUE ));
+	view_properties->setPropertyValue( DECLARE_ASCII( "ZoomValue" ),
+									   uno::makeAny( view_zoom ) );
+}
+
+static void
+zoom_to_fit_cb (GtkObject *source, gpointer user_data)
+{
+	OOoBonoboControl *control = OOO_BONOBO_CONTROL( user_data );
+
+	star_frame_widget_zoom_page_width( control->priv->sfw );
+}
+
+static void
+zoom_to_default_cb (GtkObject *source, gpointer user_data)
+{
+	OOoBonoboControl *control = OOO_BONOBO_CONTROL( user_data );
+
+	star_frame_widget_zoom_100( control->priv->sfw );
+}
 
 static void
 verb_FileSaveAs_cb( BonoboUIComponent *uic, gpointer user_data, const char *cname)
@@ -119,57 +218,19 @@ verb_EditCopy_cb( BonoboUIComponent *uic, gpointer user_data, const char *cname)
 static void
 verb_ZoomIn_cb( BonoboUIComponent *uic, gpointer user_data, const char *cname)
 {
-	OOoBonoboControl *control = OOO_BONOBO_CONTROL( user_data );
-
-	Reference< XPropertySet > view_properties(
-		star_frame_widget_get_view_properties( control->priv->sfw ) );
-
-	if( !view_properties.is() )
-		return;
-
-	uno::Any a = view_properties->getPropertyValue( DECLARE_ASCII( "ZoomValue" ) );
-	sal_Int16 view_zoom;
-	a >>= view_zoom;
-
-	view_zoom = ( sal_Int16 )( view_zoom * 1.2 );
-
-	view_properties->setPropertyValue(
-		DECLARE_ASCII( "ZoomType" ),
-		uno::makeAny( (sal_Int16) view::DocumentZoomType::BY_VALUE ));
-	view_properties->setPropertyValue( DECLARE_ASCII( "ZoomValue" ),
-									   uno::makeAny( view_zoom ) );
+	zoom_in_cb( NULL, user_data );
 }
 
 static void
 verb_ZoomOut_cb( BonoboUIComponent *uic, gpointer user_data, const char *cname)
 {
-	OOoBonoboControl *control = OOO_BONOBO_CONTROL( user_data );
-
-	Reference< XPropertySet > view_properties(
-		star_frame_widget_get_view_properties( control->priv->sfw ) );
-
-	if( !view_properties.is() )
-		return;
-
-	uno::Any a = view_properties->getPropertyValue( DECLARE_ASCII( "ZoomValue" ) );
-	sal_Int16 view_zoom;
-	a >>= view_zoom;
-
-	view_zoom = ( sal_Int16 )( view_zoom / 1.2 );
-
-	view_properties->setPropertyValue(
-		DECLARE_ASCII( "ZoomType" ),
-		uno::makeAny( (sal_Int16) view::DocumentZoomType::BY_VALUE ));
-	view_properties->setPropertyValue( DECLARE_ASCII( "ZoomValue" ),
-									   uno::makeAny( view_zoom ) );
+	zoom_out_cb( NULL, user_data );
 }
 
 static void
 verb_ZoomNormal_cb( BonoboUIComponent *uic, gpointer user_data, const char *cname)
 {
-	OOoBonoboControl *control = OOO_BONOBO_CONTROL( user_data );
-
-	star_frame_widget_zoom_100( control->priv->sfw );
+	zoom_to_default_cb( NULL, user_data );
 }
 
 static void
@@ -315,6 +376,25 @@ ooo_bonobo_control_class_init( OOoBonoboControlClass *klass )
 	control_class->activate = ooo_bonobo_control_activate;
 }
 
+#define MAGSTEP   1.2
+#define MAGSTEP2  MAGSTEP * MAGSTEP
+#define MAGSTEP4  MAGSTEP2 * MAGSTEP2
+#define IMAGSTEP  0.8333333333
+#define IMAGSTEP2 IMAGSTEP * IMAGSTEP
+#define IMAGSTEP4 IMAGSTEP2 * IMAGSTEP2
+
+static float preferred_zoom_levels [] = {
+	IMAGSTEP4 * IMAGSTEP4, IMAGSTEP4 * IMAGSTEP2 * IMAGSTEP,
+	IMAGSTEP4 * IMAGSTEP2, IMAGSTEP4 * IMAGSTEP, IMAGSTEP4,
+	IMAGSTEP2 * IMAGSTEP, IMAGSTEP2, IMAGSTEP,
+	1.0,
+	MAGSTEP, MAGSTEP2, MAGSTEP2 * MAGSTEP, MAGSTEP4,
+	MAGSTEP4 * MAGSTEP, MAGSTEP4 * MAGSTEP2, MAGSTEP4 * MAGSTEP2 * MAGSTEP,
+	MAGSTEP4 * MAGSTEP4
+};
+
+static const int n_zoom_levels = G_N_ELEMENTS( preferred_zoom_levels );
+
 BonoboControl *
 ooo_bonobo_control_new( Reference< XComponentContext > component_context )
 {
@@ -336,6 +416,38 @@ ooo_bonobo_control_new( Reference< XComponentContext > component_context )
 
 	BonoboPersistFile *persist_file =
 		bonobo_persist_file_new( load_uri, NULL, OAFIID, control );
+
+	BonoboZoomable *zoomable = bonobo_zoomable_new();
+	control->priv->zoomable = zoomable;
+
+	g_signal_connect (G_OBJECT (zoomable), "set_zoom_level",
+			  G_CALLBACK (zoomable_set_zoom_level_cb),
+			  control);
+	g_signal_connect (G_OBJECT (zoomable), "zoom_in",
+			  G_CALLBACK (zoom_in_cb),
+			  control);
+	g_signal_connect (G_OBJECT (zoomable), "zoom_out",
+			  G_CALLBACK (zoom_out_cb),
+			  control);
+	g_signal_connect (G_OBJECT (zoomable), "zoom_to_fit",
+			  G_CALLBACK (zoom_to_fit_cb),
+			  control);
+	g_signal_connect (G_OBJECT (zoomable), "zoom_to_default",
+			  G_CALLBACK (zoom_to_default_cb),
+			  control);
+
+	bonobo_zoomable_set_parameters_full (
+		control->priv->zoomable,
+		1.0,
+		preferred_zoom_levels [0],
+		preferred_zoom_levels [n_zoom_levels - 1],
+		TRUE, TRUE, TRUE,
+		preferred_zoom_levels,
+		NULL,
+		n_zoom_levels);
+
+	bonobo_object_add_interface (BONOBO_OBJECT (control),
+				     BONOBO_OBJECT (zoomable));
 
 	bonobo_object_add_interface( BONOBO_OBJECT( control ),
 								 BONOBO_OBJECT( persist_file ) );
