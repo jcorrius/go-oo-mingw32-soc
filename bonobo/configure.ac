@@ -33,8 +33,14 @@ AC_ARG_WITH(
 	[ooo-builddir],
 	AC_HELP_STRING([--with-ooo-builddir],
 		[define the directory where openoffice.org will be compiled, e.g. the root of an ooo cvs checkout.]),
-	[ac_solver_dir="${withval}/solver/645/unxlngi4.pro"],
-	[ac_solver_dir="${BASEDIR}/build/${TAG}/solver/645/unxlngi4.pro"])
+	[OOBUILDDIR="${withval}"],
+	[if test "z$with_src" = "z"; then
+      	    OOBUILDDIR=$BASEDIR/build/$TAG
+   	 else
+      	    OOBUILDDIR=$with_src/$TAG
+   	 fi])
+
+ac_solver_dir="$OOBUILDDIR/solver/645/unxlngi4.pro"
 
 AC_ARG_WITH(
 	[ooo-solver-dir],
@@ -88,7 +94,7 @@ dnl FIXME
 REGCOMP="LD_LIBRARY_PATH=$ac_ooodev_libdir:\$\$LD_LIBRARY_PATH $REGCOMP"
 AC_SUBST(REGCOMP)
 
-if test ! -d "$ac_ooodev_libdir" && "z$enable_strict_tests" != "zno" ; then
+if test ! -d "$ac_ooodev_libdir" && test "z$enable_strict_tests" != "zno" ; then
   AC_MSG_ERROR([[OpenOffice.org libraries not found. Please use --with-ooo-solver-dir=/path/to/solver]])
 fi
 OOO_BONOBO_LIBS="$OOO_BONOBO_LIBS -L$ac_ooodev_libdir"
