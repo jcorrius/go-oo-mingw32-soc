@@ -229,9 +229,11 @@ $distro = 'Ximian';
 @required_opts = ( 'PATCHPATH' );
 
 foreach $a (@ARGV) {
-	if ($a eq '-R') {
-	    $remove = 1;
-	} elsif ($a eq '--export-series') {
+	if ($a eq '-R') { # -R will also be appended to $opts
+	    $remove = 1;	    
+	}
+
+	if ($a eq '--export-series') {
 	    $export = 1;
 	} elsif ($a eq '--quiet') {
 	    $quiet = 1;
