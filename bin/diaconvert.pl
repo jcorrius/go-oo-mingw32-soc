@@ -121,14 +121,24 @@ sub draw_circle($$)
 	    draw_postamble ('circle');
 }
 
+sub adapt_bbox($$$)
+{
+    my ($data, $x, $y) = @_;
+
+    $data->{minx} = $x if ($x < $data->{minx});
+    $data->{miny} = $y if ($y < $data->{miny});
+    $data->{maxx} = $x if ($x > $data->{maxx});
+    $data->{maxy} = $y if ($y > $data->{maxy});
+}
+
 sub draw_poly($$)
 {
     my ($attr, $value) = @_;
     my $svg = '';
     my $src_points = $value->[0]->{points};
     my $points = '';
-    my ($maxx, $maxy) = ( 0, 0 );
-    my ($minx, $miny) = ( 10000000, 10000000 );
+    my %bbox = ( maxx => 0, maxy => 0,
+		 minx => 10000000, miny => 10000000 );
 
     print $maxx;
 
@@ -138,11 +148,7 @@ sub draw_poly($$)
 	my $y = ($b / $scale + $yoffset) * 1000;
 	
 	$points .= "$x,$y ";
-
-	$minx = $x if ($x < $minx);
-	$miny = $y if ($y < $miny);
-	$maxx = $x if ($x > $maxx);
-	$maxy = $y if ($y > $maxy);
+	adapt_bbox (\%bbox, $x, $y);
     }
 
     my $viewbox = "0 0 " . $maxx . " " . $maxy;
@@ -164,10 +170,37 @@ sub draw_path
 {
     my ($attr, $value) = @_;
     my $svg = '';
-    print STDERR "No svg:path handling\n";
+    my $path = $value->[0]->{'d'};
+
+# ensure adequate field separation
+    $path =~ s/[lL]/ l /g;
+    $path =~ s/[mM]/ m /g;
+    $path =~ s/[cC]/ c /g;
+    $path =~ s/[zZ]/ z /g;
+    $path =~ s/-/ -/g;
+
+    $path =~ s/^\s*//;
+    my @elems = split (/ +/, $path);
+
+    my %bbox = ( maxx => 0, maxy => 0,
+		 minx => 10000000, miny => 10000000 );
+    while (my $elem = shift @elems) {
+	if ($elem eq 'm') {
+	    adapt_bbox (\%bbox, $x, $y);
+	} elsif ($elem eq 'l') {
+	} elsif ($elem eq 'c') {
+	} elsif ($elem eq 'z') {
+	    printf STDERR "What does 'z' do ?\n";
+	}
+    }
+
+    print STDERR "Path '@elems'\n";
+    
+#    print STDERR "No svg:path handling\n";
 # path is 'M\s+<x>\s+<y>
 # L<x><y>
 # C<x1y1> <x2y2> <x3y3>
+# 'z'
 #    viewbox calculation ?!? - guess it ? expand bits ?
     return $svg;
 }
