@@ -68,14 +68,43 @@ sub slurp {
     return $content;
 }
 
+sub select_subset ($$);
+
+sub select_subset ($$)
+{
+    my $subsets = shift;
+    my $tag = shift;
+    my @nodes = ();
+
+    if (defined $subsets->{$tag}) {
+	@nodes = @{$subsets->{$tag}};
+    }
+	
+    if (!@nodes) {
+	return @nodes;
+    }
+
+    my $subtag;
+    my @result = @nodes;
+
+    my $count = @nodes;
+    for $subtag (@nodes) {
+	my @subset = select_subset($subsets, $subtag);
+	push @result, @subset;
+    }
+
+    return @result;
+}
+
 sub list_patches {
 
     my @Patches = ();
 
     open (PatchList, "$apply_list") || die "Can't find $apply_list";
 
-    my @targets=($distro);
-    my @subsets=($distro);
+    my @targets=();
+    my %subsets=();
+    my @selected_subsets=();
     while (<PatchList>) {
             s/\s*#.*//;
             chomp;
@@ -90,24 +119,24 @@ sub list_patches {
             }
 
             if (/\s*([_\S]+)\s*=\s*(.*)/) {
+		$options{$1} = $2;
+		print "$1 => $2\n" unless $quiet;
+		next;
+	    }
+
+            if (/\s*([_\S]+)\s*:\s*(.*)/) {
 		my $key = $1;
-		my $value = $2;
-		if ($key =~ /^_/) {
-		    if ($key =~ /^_$distro/) {
-			@subsets = (split /\s*,\s*/, $value);
-			print "selected sets: @subsets\n";
-		    }
-		} else {
-		    $options{$key} = $value;
-		    print "$key => $value\n" unless $quiet;
-		}
+		my @value = (split /\s*,\s*/, $2);
+		$subsets{$key} = [@value];
+		@selected_subsets = select_subset (\%subsets, $distro);
+#		print "selected sets: @selected_subsets\n" unless $quiet;
                 next;
             }
 
 	    my $set;
 	    my $match = 0;
 	    for $set (@targets) {
-		if (grep /$set/i, @subsets) {
+		if (grep /$set/i, @selected_subsets) {
 		    $match = 1;
 		}
 	    }
