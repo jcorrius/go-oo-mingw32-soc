@@ -302,6 +302,25 @@ sub export_series {
     }
 }
 
+sub is_old_patch_version()
+{
+    my $Patch;
+    my $ver_line;
+    my $is_old = 1;
+
+    open ($Patch, "patch --version|") || die "Can't run patch: $!";
+    $ver_line = <$Patch>;
+    $ver_line =~ m/\s+(\d+)\.(\d+)\.(\d+)/ || die "Can't get patch version\n";
+    if ($1 >= 2 && $2 >= 5 && $3 >= 9) {
+	$is_old = 0;
+    }
+    
+    if ($is_old) {
+	print "Old patch version - pruning LFs\n";
+    }
+    return $is_old;
+}
+
 (@ARGV > 1) ||
     die "Syntax:\n".
     "apply <path-to-patchdir> <src root> [--distro=Debian] [patch flags '--dry-run' eg.]\n".
@@ -316,6 +335,7 @@ $opts = "";
 $distro = 'NLD';
 @required_opts = ( 'PATCHPATH' );
 @arguments = ();
+
 
 foreach $a (@ARGV) {
 	if ($a eq '-R') {
@@ -352,6 +372,9 @@ if ($export) {
 
     $opts = join ' ', @arguments;
     $base_cmd = "patch -l -b -p0 $opts -d $dest_dir";
+    if (is_old_patch_version()) {
+	$base_cmd = 'sed \'s/^\(@.*\)\r$/\1/\' | ' . $base_cmd;
+    }
 
     if ($remove) {
 	remove_patches();
@@ -359,4 +382,3 @@ if ($export) {
 	apply_patches();
     }
 }
-
