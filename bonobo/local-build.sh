@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 TAG='OOO_1_1_0'
 CWD=`pwd`;
