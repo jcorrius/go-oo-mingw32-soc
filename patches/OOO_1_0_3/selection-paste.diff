@@ -1,0 +1,513 @@
+--- dtrans/source/X11/X11_selection.hxx	Fri Mar 15 04:46:43 2002
++++ dtrans/source/X11/X11_selection.hxx	Tue Jan 21 14:47:30 2003
+@@ -349,7 +349,9 @@
+ 		int							m_nNoPosX, m_nNoPosY, m_nNoPosWidth, m_nNoPosHeight;
+ 		int							m_nDragButton;
+ 		sal_Int8					m_nUserDragAction;
++        sal_Int8					m_nTargetAcceptAction;
+ 		sal_Int8					m_nSourceActions;
++        bool						m_bLastDropAccepted;
+ 		bool						m_bDropSuccess;
+ 		bool						m_bDropSent;
+ 		time_t						m_nDropTimeout;
+@@ -453,6 +455,8 @@
+         // compound text conversion
+         ::rtl::OString convertToCompound( const ::rtl::OUString& rText );
+         ::rtl::OUString convertFromCompound( const char* pText, int nLen = -1 );
++
++        sal_Int8 getUserDragAction() const;
+ 	public:
+ 		static SelectionManager& get( const ::rtl::OUString& rDisplayName = ::rtl::OUString() );
+ 
+@@ -471,7 +475,7 @@
+ 		// type conversion
+         // note: convertTypeToNative does NOT clear the list, so you can append
+         // multiple types to the same list
+-		void convertTypeToNative( const ::rtl::OUString& rType, Atom selection, int& rFormat, ::std::list< Atom >& rConversions );
++		void convertTypeToNative( const ::rtl::OUString& rType, Atom selection, int& rFormat, ::std::list< Atom >& rConversions, bool bPushFront = false );
+ 		::rtl::OUString convertTypeFromNative( Atom nType, Atom selection, int& rFormat );
+ 
+ 		// methods for transferable
+--- dtrans/source/X11/X11_selection.cxx	Wed Apr 24 11:12:52 2002
++++ dtrans/source/X11/X11_selection.cxx	Tue Jan 21 14:47:30 2003
+@@ -61,6 +61,7 @@
+ 
+ #include <unistd.h>
+ #include <stdio.h>
++#include <string.h>
+ #include <X11/Xatom.h>
+ #include <X11/keysym.h>
+ #include <X11/Xlib.h>
+@@ -267,7 +268,8 @@
+         m_aCopyCursor( None ),
+         m_aLinkCursor( None ),
+         m_aNoneCursor( None ),
+-        m_aCurrentCursor( None )
++        m_aCurrentCursor( None ),
++        m_bLastDropAccepted( false )
+ {
+ 	m_aDropEnterEvent.data.l[0]	= None;
+ 	m_bDropEnterSent			= true;
+@@ -767,7 +769,7 @@
+ 
+ // ------------------------------------------------------------------------
+ 
+-void SelectionManager::convertTypeToNative( const OUString& rType, Atom selection, int& rFormat, ::std::list< Atom >& rConversions )
++void SelectionManager::convertTypeToNative( const OUString& rType, Atom selection, int& rFormat, ::std::list< Atom >& rConversions, bool bPushFront )
+ {
+ 	NativeTypeEntry* pTab = selection == m_nXdndSelection ? aXdndConversionTab : aNativeConversionTab;
+ 	int nTabEntries = selection == m_nXdndSelection
+@@ -783,12 +785,18 @@
+ 			if( ! pTab[i].nAtom )
+ 				pTab[i].nAtom = getAtom( OStringToOUString( pTab[i].pNativeType, RTL_TEXTENCODING_ISO_8859_1 ) );
+ 			rFormat = pTab[i].nFormat;
+-            rConversions.push_back( pTab[i].nAtom );
++            if( bPushFront )
++                rConversions.push_front( pTab[i].nAtom );
++            else
++                rConversions.push_back( pTab[i].nAtom );
+ 		}
+ 	}
+     if( ! rFormat )
+         rFormat = 8; // byte buffer
+-	rConversions.push_back( getAtom( rType ) );
++    if( bPushFront )
++        rConversions.push_front( getAtom( rType ) );
++    else
++        rConversions.push_back( getAtom( rType ) );
+ };
+ 
+ // ------------------------------------------------------------------------
+@@ -821,6 +829,15 @@
+ 	::std::hash_map< Atom, Selection* >::iterator it;
+ 	bool bSuccess = false;
+ 
++#ifdef DEBUG
++    OUString aSelection( getString( selection ) );
++    OUString aType( getString( type ) );
++    fprintf( stderr, "getPasteData( %s, native: %s )\n",
++             OUStringToOString( aSelection, RTL_TEXTENCODING_ISO_8859_1 ).getStr(),
++             OUStringToOString( aType, RTL_TEXTENCODING_ISO_8859_1 ).getStr()
++             );
++#endif
++
+ 	{
+ 		MutexGuard aGuard(m_aMutex);
+ 	
+@@ -898,12 +915,20 @@
+ 		osl_yieldThread();
+ 	} while( ! it->second->m_aDataArrived.check() && time(NULL)-nBegin < 3 );
+ 
++#ifdef DEBUG
++    if( time(NULL)-nBegin >= 2 )
++        fprintf( stderr, "timed out\n" );
++#endif
+ 	if( it->second->m_aDataArrived.check() &&
+ 		it->second->m_aData.getLength() )
+ 	{
+ 		rData = it->second->m_aData;
+ 		bSuccess = true;
+ 	}
++#ifdef DEBUG
++    else
++        fprintf( stderr, "conversion unsuccessfull\n" );
++#endif
+ 	return bSuccess;
+ }
+ 
+@@ -924,6 +949,11 @@
+     }
+     const Sequence< DataFlavor >& rTypes( it->second->m_aTypes );
+     const Sequence< Atom >& rNativeTypes( it->second->m_aNativeTypes );
++#ifdef DEBUG
++    fprintf( stderr, "getPasteData( \"%s\", \"%s\" )\n",
++             OUStringToOString( getString( selection ), RTL_TEXTENCODING_ISO_8859_1 ).getStr(),
++             OUStringToOString( rType, RTL_TEXTENCODING_ISO_8859_1 ).getStr() );
++#endif
+ 
+ 	if( rType.equalsAsciiL( "text/plain;charset=utf-16", 25 ) )
+ 	{
+@@ -1101,6 +1131,10 @@
+         Atom* pNativeTypes = aNativeTypes.getArray();
+ 		while( nAtoms-- )
+ 		{
++#ifdef DEBUG
++            if( *pAtoms && *pAtoms < 0x01000000 )
++                fprintf( stderr, "native type: %s\n", OUStringToOString( getString( *pAtoms ), RTL_TEXTENCODING_ISO_8859_1 ).getStr() );
++#endif
+             if( *pAtoms == m_nCOMPOUNDAtom )
+                 bHaveText = bHaveCompound = true;
+ 			else if( *pAtoms && *pAtoms < 0x01000000 )
+@@ -1111,6 +1145,12 @@
+                 sal_Int32 nIndex = 0;
+ 				if( pFlavors->MimeType.getToken( 0, ';', nIndex ).equalsAsciiL( "text/plain", 10 ) )
+ 				{
++                    // omit text/plain;charset=unicode since it is not well defined
++					if( pFlavors->MimeType.getToken( 0, ';', nIndex ).compareToAscii( "charset=unicode" ) == 0 )
++                    {
++                        pAtoms++;
++                        continue;
++                    }
+ 					bHaveText = true;
+ 					if( pFlavors->MimeType.getToken( 0, ';', nIndex ).compareToAscii( "charset=utf-16" ) == 0 )
+ 					{
+@@ -1123,6 +1163,8 @@
+ 			}
+ 			pAtoms++;
+ 		}
++        if( (pFlavors - rTypes.getArray()) < rTypes.getLength() )
++            rTypes.realloc(pFlavors - rTypes.getArray());
+ 		bSuccess = rTypes.getLength() ? true : false;
+ 		if( bHaveText && ! bHaveUTF16 )
+ 		{
+@@ -1167,7 +1209,7 @@
+ 	}
+ 
+ #ifdef DEBUG
+-    if( selection != m_nCLIPBOARDAtom )
++//    if( selection != m_nCLIPBOARDAtom )
+     {
+         fprintf( stderr, "SelectionManager::getPasteDataTypes( %s ) = %s\n", OUStringToOString( getString( selection ), RTL_TEXTENCODING_ISO_8859_1 ).getStr(), bSuccess ? "true" : "false" );
+         for( int i = 0; i < rTypes.getLength(); i++ )
+@@ -1219,21 +1261,25 @@
+                 ::std::list< Atom > aConversions;
+                 int i, nFormat;
+                 int nFlavors = aFlavors.getLength();
++                const DataFlavor* pFlavors = aFlavors.getConstArray();
++                bool bHaveText = false;
+                 for( i = 0; i < nFlavors; i++ )
+-                    convertTypeToNative( aFlavors.getConstArray()[i].MimeType, rRequest.selection, nFormat, aConversions );
+-                bool bHaveUTF16 = false;
+-                ::std::list< Atom >::const_iterator it;
+-                for( it = aConversions.begin(); it != aConversions.end() && ! bHaveUTF16; ++it )
+-                    if( *it == m_nUTF16Atom )
+-                        bHaveUTF16 = true;
+-                if( bHaveUTF16 )
+                 {
+-                    convertTypeToNative( OUString::createFromAscii( "text/plain;charset=utf-8" ), rRequest.selection, nFormat, aConversions );
+-                    aConversions.push_back( m_nCOMPOUNDAtom );
++                    if( pFlavors[i].MimeType.compareToAscii( "text/plain", 10 ) == 0)
++                        bHaveText = true;
++                    else
++                        convertTypeToNative( pFlavors[i].MimeType, rRequest.selection, nFormat, aConversions );
++                }
++                if( bHaveText )
++                {
++                    aConversions.push_front( XA_STRING );
++                    aConversions.push_front( m_nCOMPOUNDAtom );
++                    convertTypeToNative( OUString::createFromAscii( "text/plain;charset=utf-8" ), rRequest.selection, nFormat, aConversions, true );
+                 }
+ 
+                 int nTypes = aConversions.size();
+ 				Atom* pTypes = (Atom*)alloca( nTypes * sizeof( Atom ) );
++                std::list< Atom >::const_iterator it;
+ 				for( i = 0, it = aConversions.begin(); i < nTypes; i++, ++it )
+ 					pTypes[i] = *it;
+ 				XChangeProperty( m_pDisplay, rRequest.requestor, rRequest.property,
+@@ -1411,11 +1457,19 @@
+ 			}
+ 			else if( it->second->m_eState == Selection::IncrementalTransfer )
+ 			{
+-				// append data
+-				Sequence< sal_Int8 > aData( it->second->m_aData.getLength() + nItems*nFormat/8 );
+-				memcpy( aData.getArray(), it->second->m_aData.getArray(), it->second->m_aData.getLength() );
+-				memcpy( aData.getArray() + it->second->m_aData.getLength(), pData, nItems*nFormat/8 );
+-				it->second->m_aData = aData;
++                if( nItems )
++                {
++                    // append data
++                    Sequence< sal_Int8 > aData( it->second->m_aData.getLength() + nItems*nFormat/8 );
++                    memcpy( aData.getArray(), it->second->m_aData.getArray(), it->second->m_aData.getLength() );
++                    memcpy( aData.getArray() + it->second->m_aData.getLength(), pData, nItems*nFormat/8 );
++                    it->second->m_aData = aData;
++                }
++                else
++                {
++                    it->second->m_eState = Selection::Inactive;
++                    it->second->m_aDataArrived.set();
++                }
+ 			}
+ 			if( pData )
+ 				XFree( pData );
+@@ -1499,27 +1553,43 @@
+ 
+ 	// notification about success/failure of one of our conversion requests
+ #ifdef DEBUG
+-	fprintf( stderr, "handleSelectionNotify for selection %s and property %s\n",
+-			 OUStringToOString( getString( rNotify.selection ), RTL_TEXTENCODING_ISO_8859_1 ).getStr(),
+-			 rNotify.property == None ? "None" : OUStringToOString( getString( rNotify.property ), RTL_TEXTENCODING_ISO_8859_1 ).getStr()
++    OUString aSelection( getString( rNotify.selection ) );
++    OUString aProperty( OUString::createFromAscii( "None" ) );
++    if( rNotify.property )
++        aProperty = getString( rNotify.property );
++	fprintf( stderr, "handleSelectionNotify for selection %s and property %s (0x%x)\n",
++			 OUStringToOString( aSelection, RTL_TEXTENCODING_ISO_8859_1 ).getStr(),
++			 OUStringToOString( aProperty, RTL_TEXTENCODING_ISO_8859_1 ).getStr(),
++             rNotify.property
+ 			 );
++    if( rNotify.requestor != m_aWindow && rNotify.requestor != m_aCurrentDropWindow )
++        fprintf( stderr, "Warning: selection notify for unknown window 0x%x\n", rNotify.requestor );
+ #endif
+ 	::std::hash_map< Atom, Selection* >::iterator it =
+ 		  m_aSelections.find( rNotify.selection );
+ 	if( ( rNotify.requestor == m_aWindow || rNotify.requestor == m_aCurrentDropWindow )		&&
+ 		it != m_aSelections.end()			&&
+-		it->second->m_eState == Selection::WaitingForResponse )
++		( it->second->m_eState == Selection::WaitingForResponse ) ||
++        ( it->second->m_eState == Selection::WaitingForData ) )
+ 	{
+-		// get the bytes, by INCR if necessary
++        // WaitingForData can actually happen; some
++        // applications (e.g. cmdtool on Solaris) first send
++        // a success and then cancel it. Weird !
+ 		if( rNotify.property == None )
+ 		{
++            // conversion failed, stop transfer
+ 			it->second->m_eState		= Selection::Inactive;
+ 			it->second->m_aData			= Sequence< sal_Int8 >();
+ 			it->second->m_aDataArrived.set();
+ 		}
++		// get the bytes, by INCR if necessary
+ 		else
+ 			it->second->m_eState = Selection::WaitingForData;
+ 	}
++#ifdef DEBUG
++    else if( it != m_aSelections.end() )
++        fprintf( stderr, "Warning: selection in state %d\n", it->second->m_eState );
++#endif
+ }
+ 
+ // ------------------------------------------------------------------------
+@@ -1614,11 +1684,12 @@
+ #endif
+ 			DropTargetEvent aEvent;
+ 			aEvent.Source = static_cast< XDropTarget* >(it->second.m_pTarget);
+-			it->second->dragExit( aEvent );
+ 			m_aDropEnterEvent.data.l[0] = None;
+ 			if( m_aCurrentDropWindow == aTarget )
+ 				m_aCurrentDropWindow = None;
+ 			m_nCurrentProtocolVersion = nXdndProtocolRevision;
++            aGuard.clear();
++			it->second->dragExit( aEvent );
+ 		}
+ 		else if(
+                 rMessage.message_type == m_nXdndDrop &&
+@@ -1630,20 +1701,33 @@
+ #ifdef DEBUG
+ 			fprintf( stderr, "received XdndDrop on 0x%x (%d, %d)\n", aTarget, m_nLastX, m_nLastY );
+ #endif
+-			DropTargetDropEvent aEvent;
+-			aEvent.Source		= static_cast< XDropTarget* >(it->second.m_pTarget);
+-			aEvent.Context		= new DropTargetDropContext( m_aCurrentDropWindow, m_nDropTimestamp, *this );
+-			aEvent.LocationX	= m_nLastX;
+-			aEvent.LocationY	= m_nLastY;
+-			aEvent.DropAction	= m_nLastDropAction;
+-			// there is nothing corresponding to source supported actions
+-			// every source can do link, copy and move
+-			aEvent.SourceActions= m_nLastDropAction;
+-			aEvent.Transferable	= m_xDropTransferable;
+-
+-            aGuard.clear();
+-			it->second->drop( aEvent );
+-		}
++            if( m_bLastDropAccepted )
++            {
++                DropTargetDropEvent aEvent;
++                aEvent.Source		= static_cast< XDropTarget* >(it->second.m_pTarget);
++                aEvent.Context		= new DropTargetDropContext( m_aCurrentDropWindow, m_nDropTimestamp, *this );
++                aEvent.LocationX	= m_nLastX;
++                aEvent.LocationY	= m_nLastY;
++                aEvent.DropAction	= m_nLastDropAction;
++                // there is nothing corresponding to source supported actions
++                // every source can do link, copy and move
++                aEvent.SourceActions= m_nLastDropAction;
++                aEvent.Transferable	= m_xDropTransferable;
++                
++                aGuard.clear();
++                it->second->drop( aEvent );
++            }
++            else
++            {
++#ifdef DEBUG
++                fprintf( stderr, "XdndDrop canceled due to m_bLastDropAccepted = fale\n" );
++#endif
++                DropTargetEvent aEvent;
++                aEvent.Source = static_cast< XDropTarget* >(it->second.m_pTarget);
++                aGuard.clear();
++                it->second->dragExit( aEvent );
++            }
++        }
+ 	}
+ }
+ 
+@@ -1663,7 +1747,7 @@
+ 			dsde.Source				= static_cast< OWeakObject* >(this);
+ 			dsde.DragSourceContext	= new DragSourceContext( m_aDropWindow, m_nDragTimestamp, *this );
+ 			dsde.DragSource			= static_cast< XDragSource* >(this);
+-			dsde.DropAction			= m_nUserDragAction;
++			dsde.DropAction			= getUserDragAction();
+ 			dsde.DropSuccess		= bSuccess;
+             Reference< XDragSourceListener > xListener = m_xDragSourceListener;
+ 			m_xDragSourceListener.clear();
+@@ -1722,14 +1806,19 @@
+ 		else
+ 			nNewDragAction = DNDConstants::ACTION_NONE;
+         nNewDragAction &= m_nSourceActions;
+-        setCursor( getDefaultCursor( nNewDragAction ), m_aDropWindow, m_nDragTimestamp );
++
++        if( nNewDragAction != m_nTargetAcceptAction )
++        {
++            setCursor( getDefaultCursor( nNewDragAction ), m_aDropWindow, m_nDragTimestamp );
++            m_nTargetAcceptAction = nNewDragAction;
++        }
+ 
+ 		DragSourceDragEvent dsde;
+ 		dsde.Source				= static_cast< OWeakObject* >(this);
+ 		dsde.DragSourceContext	= new DragSourceContext( m_aDropWindow, m_nDragTimestamp, *this );
+ 		dsde.DragSource			= static_cast< XDragSource* >(this);
+ 		dsde.DropAction			= m_nSourceActions;
+-		dsde.UserAction			= m_nUserDragAction;
++		dsde.UserAction			= getUserDragAction();
+ 
+         Reference< XDragSourceListener > xListener( m_xDragSourceListener );
+         // caution: do not change anything after this
+@@ -1769,6 +1858,13 @@
+ 
+ // ------------------------------------------------------------------------
+ 
++sal_Int8 SelectionManager::getUserDragAction() const
++{
++    return (m_nTargetAcceptAction != DNDConstants::ACTION_DEFAULT) ? m_nTargetAcceptAction : m_nUserDragAction;
++}
++
++// ------------------------------------------------------------------------
++
+ bool SelectionManager::updateDragAction( int modifierState )
+ {
+ 	bool bRet = false;
+@@ -1800,7 +1896,7 @@
+         nNewDropAction |= DNDConstants::ACTION_DEFAULT;
+     }
+ 
+-	if( nNewDropAction != m_nUserDragAction )
++	if( nNewDropAction != m_nUserDragAction || m_nTargetAcceptAction != DNDConstants::ACTION_DEFAULT )
+ 	{
+ #ifdef DEBUG
+         fprintf( stderr, "updateDragAction: %x -> %x\n", (int)m_nUserDragAction, (int)nNewDropAction );
+@@ -1814,7 +1910,7 @@
+ 		dsde.DragSource			= static_cast< XDragSource* >(this);
+ 		dsde.DropAction			= m_nUserDragAction;
+ 		dsde.UserAction			= m_nUserDragAction;
+-		setCursor( getDefaultCursor( m_nUserDragAction ), m_aDropWindow, m_nDragTimestamp );
++        m_nTargetAcceptAction	= DNDConstants::ACTION_DEFAULT; // invalidate last accept
+ 		m_xDragSourceListener->dropActionChanged( dsde );
+ 	}
+ 	return bRet;
+@@ -1840,7 +1936,7 @@
+ 			dtde.Context		= new DropTargetDragContext( m_aCurrentDropWindow, m_nDropTimestamp, *this );
+ 			dtde.LocationX		= x;
+ 			dtde.LocationY		= y;
+-			dtde.DropAction		= m_nUserDragAction;
++			dtde.DropAction		= getUserDragAction();
+ 			dtde.SourceActions	= m_nSourceActions;
+             aGuard.clear();
+ 			it->second->dragOver( dtde );
+@@ -1931,8 +2027,8 @@
+ 			dsde.Source					= static_cast< OWeakObject* >(this);
+ 			dsde.DragSourceContext		= new DragSourceContext( m_aDropWindow, m_nDragTimestamp, *this );
+ 			dsde.DragSource				= static_cast< XDragSource* >( this );
++            dsde.UserAction = getUserDragAction();
+ 			dsde.DropAction = DNDConstants::ACTION_NONE;
+-			dsde.UserAction = m_nUserDragAction;
+ 			m_bDropSuccess = rMessage.xclient.data.l[1] & 1 ? true : false;
+ 			if( rMessage.xclient.data.l[1] & 1 )
+ 			{
+@@ -1948,6 +2044,7 @@
+ 				else
+ 					dsde.DropAction = DNDConstants::ACTION_COPY;
+ 			}
++			m_nTargetAcceptAction = dsde.DropAction;
+ 
+ 			if( ! ( rMessage.xclient.data.l[1] & 2 ) )
+ 			{
+@@ -1959,6 +2056,7 @@
+ 			else
+ 				m_nNoPosX = m_nNoPosY = m_nNoPosWidth = m_nNoPosHeight = 0;
+ 
++            setCursor( getDefaultCursor( dsde.DropAction ), m_aDropWindow, m_nDragTimestamp );
+             aGuard.clear();
+             m_xDragSourceListener->dragOver( dsde );
+ 		}
+@@ -1969,7 +2067,7 @@
+ 			dsde.Source				= static_cast< OWeakObject* >(this);
+ 			dsde.DragSourceContext	= new DragSourceContext( m_aDropWindow, m_nDragTimestamp, *this );
+ 			dsde.DragSource			= static_cast< XDragSource* >(this);
+-			dsde.DropAction			= m_nUserDragAction;
++			dsde.DropAction			= m_nTargetAcceptAction;
+ 			dsde.DropSuccess		= m_bDropSuccess;
+             Reference< XDragSourceListener > xListener( m_xDragSourceListener );
+ 			m_xDragSourceListener.clear();
+@@ -2075,7 +2173,7 @@
+ 		{
+ 			if( it != m_aDropTargets.end() )
+ 			{
+-				if( it->second.m_pTarget->m_bActive && m_nUserDragAction != DNDConstants::ACTION_NONE )
++				if( it->second.m_pTarget->m_bActive && m_nUserDragAction != DNDConstants::ACTION_NONE && m_bLastDropAccepted )
+ 				{
+ 					int x, y;
+ 					Window aChild;
+@@ -2133,7 +2231,7 @@
+ 					aEvent.xbutton.time			= rMessage.xbutton.time+1;
+ 					aEvent.xbutton.x_root		= rMessage.xbutton.x_root;
+ 					aEvent.xbutton.y_root		= rMessage.xbutton.y_root;
+-					aEvent.xbutton.state		= rMessage.xbutton.state | Button2Mask;
++					aEvent.xbutton.state		= rMessage.xbutton.state;
+ 					aEvent.xbutton.button		= Button2;
+ 					aEvent.xbutton.same_screen	= True;
+ 					XTranslateCoordinates( m_pDisplay,
+@@ -2144,7 +2242,7 @@
+ 					XSendEvent( m_pDisplay, m_aDropWindow, False, ButtonPressMask, &aEvent );
+ 					aEvent.xbutton.type   = ButtonRelease;
+ 					aEvent.xbutton.time++;
+-					aEvent.xbutton.state &= ~Button2Mask;
++					aEvent.xbutton.state |= Button2Mask;
+ 					XSendEvent( m_pDisplay, m_aDropWindow, False, ButtonReleaseMask, &aEvent );
+ 
+ 					m_bDropSent					= true;
+@@ -2182,6 +2280,9 @@
+ {
+ 	if( aDropWindow == m_aCurrentDropWindow )
+ 	{
++#ifdef DEBUG
++        fprintf( stderr, "accept: %x\n", dragOperation );
++#endif
+ 		Atom nAction = None;
+         dragOperation &= (DNDConstants::ACTION_MOVE | DNDConstants::ACTION_COPY | DNDConstants::ACTION_LINK);
+         if( dragOperation & DNDConstants::ACTION_MOVE )
+@@ -2190,6 +2291,7 @@
+             nAction = m_nXdndActionCopy;
+         else if( dragOperation & DNDConstants::ACTION_LINK )
+             nAction = m_nXdndActionLink;
++        m_bLastDropAccepted = true;
+ 		sendDragStatus( nAction );
+ 	}
+ }
+@@ -2200,6 +2302,10 @@
+ {
+ 	if( aDropWindow == m_aCurrentDropWindow )
+ 	{
++#ifdef DEBUG
++        fprintf( stderr, "reject\n" );
++#endif
++        m_bLastDropAccepted = false;
+ 		sendDragStatus( None );
+ 		if( m_bDropSent && m_xDragSourceListener.is() )
+ 		{
+@@ -2600,6 +2706,7 @@
+             m_nUserDragAction			= DNDConstants::ACTION_COPY & m_nSourceActions;
+         if( ! m_nUserDragAction )
+             m_nUserDragAction			= DNDConstants::ACTION_LINK & m_nSourceActions;
++        m_nTargetAcceptAction			= DNDConstants::ACTION_DEFAULT;
+ 		m_bDropSent						= false;
+ 		m_bDropSuccess					= false;
+ 		m_bWaitingForPrimaryConversion	= false;

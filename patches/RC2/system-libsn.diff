@@ -1,0 +1,212 @@
+Index: vcl/unx/inc/saldisp.hxx
+===================================================================
+RCS file: /cvs/gsl/vcl/unx/inc/saldisp.hxx,v
+retrieving revision 1.16
+diff -u -p -u -r1.16 saldisp.hxx
+--- vcl/unx/inc/saldisp.hxx	11 Apr 2003 17:31:38 -0000	1.16
++++ vcl/unx/inc/saldisp.hxx	15 Jul 2003 14:18:04 -0000
+@@ -274,6 +274,7 @@ class SalXLib
+     int 		    nStateOfYield_;
+     BOOL			bWasXError_;
+     BOOL			bIgnoreXErrors_;
++    int                         nIgnoreErrorLevel;
+ 
+     int				nFDs_;
+     fd_set	        aReadFDS_;
+@@ -295,6 +296,8 @@ public:
+     void			Remove( int fd );
+     
+     void			XError( Display *pDisp, XErrorEvent *pEvent );
++	inline  void                    PushErrorTrap() { nIgnoreErrorLevel++; }
++	inline  void                    PopErrorTrap() { nIgnoreErrorLevel--; }
+ 	inline	BOOL			WasXError() const { return bWasXError_; }
+ 	inline	BOOL			GetIgnoreXErrors() const { return bIgnoreXErrors_; }
+ 	inline	void			SetIgnoreXErrors( BOOL b )
+@@ -326,6 +329,11 @@ class SalConverterCache;
+ 
+ DECLARE_LIST( SalFontCache, ExtendedFontStruct* )
+ 
++extern "C" {
++    struct SnDisplay;
++    struct SnLauncheeContext;
++};
++
+ class SalDisplay
+ {
+ 	STDAPI( SalDisplay );
+@@ -402,6 +410,9 @@ class SalDisplay
+ 
+     bool			m_bXinerama;
+     std::vector< Rectangle > m_aXineramaScreens;
++
++    struct SnDisplay           *m_pSnDisplay;
++    struct SnLauncheeContext   *m_pSnLauncheeContext;
+ 	
+     void			DestroyFontCache();
+     long			Dispatch( XEvent *pEvent );
+Index: vcl/unx/source/app/saldata.cxx
+===================================================================
+RCS file: /cvs/gsl/vcl/unx/source/app/saldata.cxx,v
+retrieving revision 1.25
+diff -u -p -u -r1.25 saldata.cxx
+--- vcl/unx/source/app/saldata.cxx	10 Jun 2003 09:09:13 -0000	1.25
++++ vcl/unx/source/app/saldata.cxx	15 Jul 2003 14:19:05 -0000
+@@ -500,6 +500,7 @@ SalXLib::SalXLib()
+ 
+ 	bWasXError_ 			= FALSE;
+ 	bIgnoreXErrors_ 		= !!getenv( "SAL_IGNOREXERRORS" );
++	nIgnoreErrorLevel               = 0;
+ 	nStateOfYield_			= 0;
+ }
+ 
+@@ -639,6 +640,9 @@ void EmitFontpathWarning( void )
+ void SalXLib::XError( Display *pDisplay, XErrorEvent *pEvent )
+ {
+ 	char msg[ 120 ] = "";
++
++	if( nIgnoreErrorLevel > 0 )
++		return;
+ 
+ 	if( ! bIgnoreXErrors_ )
+ 	{
+Index: vcl/util/makefile.mk
+===================================================================
+RCS file: /cvs/gsl/vcl/util/makefile.mk,v
+retrieving revision 1.45
+diff -u -p -u -r1.45 makefile.mk
+--- vcl/util/makefile.mk	10 Jun 2003 14:31:36 -0000	1.45
++++ vcl/util/makefile.mk	15 Jul 2003 14:45:32 -0000
+@@ -283,6 +283,10 @@ SHL1STDLIBS += -lXext
+ LINKFLAGSRUNPATH!:="-Wl,-rpath,/usr/lib" $(LINKFLAGSRUNPATH)
+ .ENDIF
+ 
++.IF "$(WITH_LIBSN)"=="YES"
++SHL1STDLIBS+=$(LIBSN_LIBS)
++.ENDIF
++
+ # Solaris
+ .IF "$(OS)"=="SOLARIS"
+ 
+Index: vcl/unx/source/app/makefile.mk
+===================================================================
+RCS file: /cvs/gsl/vcl/unx/source/app/makefile.mk,v
+retrieving revision 1.9
+diff -u -p -u -r1.9 makefile.mk
+--- vcl/unx/source/app/makefile.mk	13 Dec 2002 13:27:30 -0000	1.9
++++ vcl/unx/source/app/makefile.mk	15 Jul 2003 14:45:32 -0000
+@@ -111,6 +111,11 @@ SLOFILES=\
+ 			$(SLO)$/keysymnames.obj		\
+ 			$(SLO)$/wmadaptor.obj
+ 
++.IF "$(WITH_LIBSN)"=="YES"
++CDEFS+=-DHAVE_LIBSN
++CFLAGS+=$(LIBSN_CFLAGS)
++.ENDIF
++
+ .IF "$(OS)$(CPU)" == "SOLARISS"
+ .IF "$(COM)"!="GCC"
+ SLOFILES+=$(SLO)$/getfpsols.obj
+Index: vcl/unx/source/app/saldisp.cxx
+===================================================================
+RCS file: /cvs/gsl/vcl/unx/source/app/saldisp.cxx,v
+retrieving revision 1.43
+diff -u -p -u -r1.43 saldisp.cxx
+--- vcl/unx/source/app/saldisp.cxx	30 Jun 2003 14:31:48 -0000	1.43
++++ vcl/unx/source/app/saldisp.cxx	21 Jul 2003 14:45:50 -0000
+@@ -230,9 +230,17 @@ extern "C" { int gethostname(char*,int);
+ #include <X11/Xatom.h>
+ #ifndef SOLARIS
+ #ifdef X86
++extern "C" {
+ #include <X11/extensions/Xinerama.h>
++}
++#endif
+ #endif
++
++#ifdef HAVE_LIBSN
++#  define SN_API_NOT_YET_FROZEN
++#  include <libsn/sn.h>
+ #endif
++
+ #include <postx.h>
+ 
+ #include <salunx.h>
+@@ -706,6 +714,31 @@ BOOL SalDisplay::BestVisual( Display    
+ 
+ // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+ 
++#ifdef HAVE_LIBSN
++extern "C" {
++    static void
++    SnErrorTrapPush( SnDisplay *display,
++		     Display   *xdisplay )
++    {
++        SalXLib *pXLib = GetSalData()->GetLib();
++	if (pXLib)
++             pXLib->PushErrorTrap();
++    }
++
++    static void
++    SnErrorTrapPop( SnDisplay *display,
++		    Display   *xdisplay )
++    {
++        SalXLib *pXLib = GetSalData()->GetLib();
++
++	XSync( xdisplay, False ); // flush error queue
++
++	if (pXLib)
++             pXLib->PopErrorTrap();
++    }
++}
++#endif /* HAVE_LIBSN */
++
+ SalDisplay::SalDisplay( Display *display, Visual *pVisual, Colormap aColMap ) : 
+ 		pDisp_( display ),
+ 		mpFallbackFactory ( NULL ),
+@@ -736,6 +769,14 @@ SalDisplay::SalDisplay( Display *display
+ 
+     sal_GetVisualInfo( pDisp_, XVisualIDFromVisual( pVisual ), aXVI );
+     Init( aColMap, &aXVI );
++
++#ifdef HAVE_LIBSN
++    m_pSnDisplay = sn_display_new( display, SnErrorTrapPush, SnErrorTrapPop );
++    m_pSnLauncheeContext = sn_launchee_context_new_from_environment( m_pSnDisplay, nScreen_ );
++    if( !m_pSnLauncheeContext )
++         fprintf( stderr, "Failed to get launch feedback info from "
++		  "DESKTOP_LAUNCH_ID/DESKTOP_LAUNCH_WINDOW\n" );
++#endif /* HAVE_LIBSN */
+ }
+ 
+ // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+@@ -794,6 +835,12 @@ SalDisplay::~SalDisplay( )
+         XCloseDisplay( pDisp_ );
+     }
+ 
++#ifdef HAVE_LIBSN
++    if( m_pSnLauncheeContext )
++        sn_launchee_context_unref( m_pSnLauncheeContext );
++    sn_display_unref( m_pSnDisplay );
++#endif /* HAVE_LIBSN */
++
+     pDisp_  = (Display*)ILLEGAL_POINTER;
+ 
+     pSalData->Remove( this );
+@@ -2554,6 +2612,18 @@ void SalDisplay::Yield( BOOL bWait )
+ 		
+ 		// note: alternate input is dispatched by XtAppNextEvent
+ 		XNextEvent( pDisp_, &aEvent.event_ );		
++
++#ifdef HAVE_LIBSN
++		if( m_pSnLauncheeContext )
++	        {
++			sn_launchee_context_complete( m_pSnLauncheeContext );
++			sn_launchee_context_unref( m_pSnLauncheeContext );
++			m_pSnLauncheeContext = NULL;
++		}
++
++		if( sn_display_process_event( m_pSnDisplay, &aEvent.event_ ) )
++			return;
++#endif /* HAVE_LIBSN */
+ 	}
+ 
+     nStateOfYield_ = 0;
