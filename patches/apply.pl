@@ -139,10 +139,10 @@ sub version_filter_targets($)
 #    printf "Rules '$rules' targets '$targets'\n";
 
     if (!rules_pass ($rules)) {
-	printf "Rule '$rules' failed ['@targets']\n";
+#	printf "Rule '$rules' failed ['@targets']\n";
 	@targets = ();
     } else {
-	printf "Rule '$rules' passed ['@targets']\n";
+#	printf "Rule '$rules' passed ['@targets']\n";
     }
 
     return @targets;
