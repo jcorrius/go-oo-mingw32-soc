@@ -1,0 +1,230 @@
+Index: sc/source/filter/excel/exccomp.cxx
+===================================================================
+RCS file: /cvs/sc/sc/source/filter/excel/exccomp.cxx,v
+retrieving revision 1.28
+diff -u -p -u -r1.28 exccomp.cxx
+--- sc/source/filter/excel/exccomp.cxx	23 Apr 2003 17:28:24 -0000	1.28
++++ sc/source/filter/excel/exccomp.cxx	15 Mar 2004 17:32:25 -0000
+@@ -1370,12 +1371,31 @@ void CExcelCompiler::Factor()
+ 
+         // for ptgNameX (extern name): [0] = EXTERNSHEET index, [1] = EXTERNNAME index
+         UINT16 pExtNameData[ 2 ] = { 0, 0xFFFF };
++		UINT16 nFunctionOp = pCur->GetOpCode();
+ 
+-		if( pCur->GetOpCode() == ocExternal )
++		if( nFunctionOp == ocExternal )
+             pExcRoot->pER->GetLinkManager().InsertAddIn(
+                 pExtNameData[ 0 ], pExtNameData[ 1 ],
+                 pExcRoot->pER->GetXclAddInName( pCur->GetExternal() ) );
+ 
++		else if (nFunctionOp == ocMacro) 
++		{
++			UINT16 nIdx;
++            pExcRoot->pER->GetLinkManager().InsertMacro(nIdx, pCur->GetExternal() );
++
++			SToken aToken;
++
++			aToken.ptg = ptgName; /* FIXME: need ptgNameR not NameV */
++			aToken.Set( 0, nIdx );
++			if ( pExcRoot->eDateiTyp >= Biff8 )
++		   		aToken.Set( 2, UINT16(0) );
++		   	else
++		   		memset( &aToken.Data[2], 0, 12 );
++		   
++			PutCode( aToken );
++			nParamCount++;
++		}
++
+ 		pFacToken = new SToken( m_Token );
+ 		GetNextToken();
+ 		if (m_Token.ptg == ptgParen)
+Index: sc/source/filter/excel/excrecds.cxx
+===================================================================
+RCS file: /cvs/sc/sc/source/filter/excel/excrecds.cxx,v
+retrieving revision 1.64.18.1
+diff -u -p -u -r1.64.18.1 excrecds.cxx
+--- sc/source/filter/excel/excrecds.cxx	9 Jan 2004 14:40:43 -0000	1.64.18.1
++++ sc/source/filter/excel/excrecds.cxx	15 Mar 2004 17:32:28 -0000
+@@ -1592,6 +1592,12 @@ void ExcNameListEntry::DeleteData()
+ }
+ 
+ 
++const String &ExcNameListEntry::GetName() const
++{
++		static String sEmpty;
++		return sEmpty;
++}
++
+ void ExcNameListEntry::SetCode( const ExcUPN& rUPN )
+ {
+     DeleteData();
+@@ -1646,14 +1652,25 @@ ULONG ExcNameListEntry::GetLen() const
+ }
+ 
+ 
++UINT16
++ExcNameList::GetMacroIdx( RootData &rRootData, const String &rName )
++{
++	for( ULONG i = 0; i < Count(); i++ )
++		if (_Get( i )->GetName().Equals( rName ))
++			return i;
++
++	return Append( new ExcName( rRootData, rName ) );
++}
++
+ 
+ //------------------------------------------------------------- class ExcName -
+ 
+-void ExcName::Init( BOOL bHid, BOOL bBIn )
++void ExcName::Init( BOOL bHid, BOOL bBIn, BOOL bBMacro )
+ {
+     eBiff = pExcRoot->eDateiTyp;
+     bHidden = bHid;
+     bBuiltIn = bBIn;
++	bMacro = bBMacro;
+ }
+ 
+ 
+@@ -1701,6 +1718,13 @@ ExcName::ExcName( RootData& rRootData, S
+     }
+ }
+ 
++ExcName::ExcName( RootData& rRootData, const String& rName ) :
++        ExcRoot( &rRootData )
++{
++	Init();
++	bMacro = TRUE;
++	aName = rName;
++}
+ 
+ ExcName::ExcName( RootData& rRootData, ScDBData* pArea ) :
+         ExcRoot( &rRootData )
+@@ -1803,8 +1827,8 @@ void ExcName::SaveCont( XclExpStream& rS
+ {
+     UINT8   nNameLen = (UINT8) Min( aName.Len(), (xub_StrLen)255 );
+     UINT16  nGrbit = (bHidden ? EXC_NAME_HIDDEN : 0) | (bBuiltIn ? EXC_NAME_BUILTIN : 0);
+-    if( !nFormLen )
+-        nGrbit |= EXC_NAME_VB | EXC_NAME_PROC;
++    if( !nFormLen || bMacro )
++		nGrbit |= EXC_NAME_FUNC | EXC_NAME_VB | EXC_NAME_PROC;
+ 
+ 	rStrm	<< nGrbit					// grbit
+ 			<< (BYTE) 0x00				// chKey
+Index: sc/source/filter/excel/functab.cxx
+===================================================================
+RCS file: /cvs/sc/sc/source/filter/excel/functab.cxx,v
+retrieving revision 1.9
+diff -u -p -u -r1.9 functab.cxx
+--- sc/source/filter/excel/functab.cxx	23 Nov 2001 13:04:17 -0000	1.9
++++ sc/source/filter/excel/functab.cxx	15 Mar 2004 17:32:28 -0000
+@@ -310,6 +310,7 @@ static const SFuncData FuncTab[] =
+ 	{ 0 },
+ 	//! from here on only >= Biff8
+ 	{ ocExternal      , 255, nTypeVal, FALSE,		nVarParam,	2, nTypeInsert, nTypeRef },
++	{ ocMacro         , 255, nTypeVal, FALSE,		nVarParam,	1, nTypeRef },
+ 	{ ocISPMT	      , 350, nTypeVal, FALSE,		4,			1, nTypeVal, nTypeVal, nTypeVal, nTypeVal },
+ 	{ ocAverageA      ,	361, nTypeVal, FALSE,		nVarParam,	1, nTypeRef },
+ 	{ ocMaxA          ,	362, nTypeVal, FALSE,		nVarParam,	1, nTypeRef },
+Index: sc/source/filter/excel/xelink.cxx
+===================================================================
+RCS file: /cvs/sc/sc/source/filter/excel/xelink.cxx,v
+retrieving revision 1.4
+diff -u -p -u -r1.4 xelink.cxx
+--- sc/source/filter/excel/xelink.cxx	27 May 2003 10:37:28 -0000	1.4
++++ sc/source/filter/excel/xelink.cxx	15 Mar 2004 17:32:31 -0000
+@@ -88,6 +88,7 @@
+ #endif
+ 
+ #include "root.hxx"
++#include "excrecds.hxx"
+ 
+ const sal_Unicode DDE_DELIM         = '|';
+ 
+@@ -843,6 +844,16 @@ void XclExpLinkManager::InsertAddIn( sal
+     sal_uInt16 nSupbook;
+     maSBBuffer.InsertAddIn( nSupbook, rnExtName, rName );
+     rnXti = InsertXti( nSupbook, EXC_TAB_EXTERNAL, EXC_TAB_EXTERNAL );
++}
++
++
++void
++XclExpLinkManager::InsertMacro(sal_uInt16& rnFnIdx, const String& rName )
++{
++	rnFnIdx = mpRD->pNameList->GetMacroIdx( *mpRD, rName );
++	fprintf( stderr, "InsertMacro '%s' => 0x%x\n",
++			 (const sal_Char *) rtl::OUStringToOString( rName, RTL_TEXTENCODING_UTF8 ),
++			 rnFnIdx);
+ }
+ 
+ bool XclExpLinkManager::InsertDde(
+Index: sc/source/filter/inc/excrecds.hxx
+===================================================================
+RCS file: /cvs/sc/sc/source/filter/inc/excrecds.hxx,v
+retrieving revision 1.34
+diff -u -p -u -r1.34 excrecds.hxx
+--- sc/source/filter/inc/excrecds.hxx	28 Apr 2003 15:37:12 -0000	1.34
++++ sc/source/filter/inc/excrecds.hxx	15 Mar 2004 17:32:32 -0000
+@@ -832,6 +832,7 @@ public:
+ 
+     virtual UINT16          GetNum() const;
+     virtual ULONG           GetLen() const;
++	virtual const String   &GetName() const;
+ };
+ 
+ 
+@@ -844,8 +845,9 @@ private:
+ 	BiffTyp					eBiff;
+     BOOL                    bHidden;
+     BOOL                    bBuiltIn;
++	BOOL					bMacro;
+ 
+-    void                    Init( BOOL bHid = FALSE, BOOL bBIn = FALSE );
++    void                    Init( BOOL bHid = FALSE, BOOL bBIn = FALSE, BOOL bBMacro = FALSE );
+     void                    BuildFormula( const ScRange& rRange );
+ 
+ 	void					SetName( const String& rRangeName );
+@@ -862,8 +864,9 @@ public:
+ 									const String& rName );
+                             ExcName( RootData& rRootData, const ScRange& rRange,
+                                     UINT8 nKey, BOOL bHid = FALSE );
++							ExcName( RootData& rRootData, const String& rName );
+ 
+-    inline const String&    GetName() const     { return aName; }
++    inline virtual const String&    GetName() const     { return aName; }
+ 
+     virtual ULONG           GetLen() const;
+ };
+@@ -921,11 +924,15 @@ public:
+                             ExcNameList( RootData& rRootData );
+ 	virtual					~ExcNameList();
+ 
++	inline ExcNameListEntry *GetObject( ULONG nIndex ) const
++				{ return (ExcNameListEntry*) List::GetObject( nIndex ); }
++
+     UINT16                  GetBuiltInIx( const ExcNameListEntry* pName );
+ 
+     /** Inserts a named range in table name sort order. */
+     void                    InsertSorted( RootData& rRootData, ExcNameListEntry* pName, sal_uInt16 nScTab );
+ 
++	UINT16					GetMacroIdx( RootData &rRootData, const String &rName );
+ 
+ 	virtual void			Save( XclExpStream& rStrm );
+ };
+Index: sc/source/filter/inc/xelink.hxx
+===================================================================
+RCS file: /cvs/sc/sc/source/filter/inc/xelink.hxx,v
+retrieving revision 1.4
+diff -u -p -u -r1.4 xelink.hxx
+--- sc/source/filter/inc/xelink.hxx	27 May 2003 10:37:38 -0000	1.4
++++ sc/source/filter/inc/xelink.hxx	15 Mar 2004 17:32:33 -0000
+@@ -581,6 +581,10 @@ public:
+     void                        InsertAddIn(
+                                     sal_uInt16& rnXti, sal_uInt16& rnExtName,
+                                     const String& rName );
++    /** Finds or inserts a NAME record for a macro function name.
++        @param rnXti  Returns the index of the name for this macro */
++    void                        InsertMacro(
++                                    sal_uInt16& rnFnIdx, const String& rName );
+     /** Finds or inserts an EXTERNNAME record for DDE links.
+         @param rnXti  Returns the index of the XTI structure which contains the DDE link.
+         @param rnExtName  Returns the 1-based EXTERNNAME record index. */
