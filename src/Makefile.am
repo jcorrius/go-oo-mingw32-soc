@@ -9,6 +9,7 @@ EXTRA_DIST=\
 	openabout_pld.png \
 	openintro_kde.bmp \
 	openabout_kde.png \
+	openintro_ark.bmp \
 	openabout_ark.png \
 	file-bug-24.png \
 	file-bug-16.png \
