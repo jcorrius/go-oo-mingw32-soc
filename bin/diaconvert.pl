@@ -1,5 +1,9 @@
 #!/usr/bin/perl -w
 
+# TODO:
+#   glue-point positioning
+#   line-width, fill
+
 use XML::Parser;
 
 my $X_OFFSET_MIN = 2;
@@ -131,16 +135,26 @@ sub adapt_bbox($$$)
     $data->{maxy} = $y if ($y > $data->{maxy});
 }
 
+sub draw_bbox($)
+{
+    my $bbox = shift;
+    return "svg:x=\"" . $bbox->{minx}/1000 . "$unit\" " .
+	   "svg:y=\"" . $bbox->{miny}/1000 . "$unit\" " .
+	   "svg:width=\"" . $bbox->{maxx}/1000 . "$unit\" " .
+	   "svg:height=\"" . $bbox->{maxy}/1000 . "$unit\" " .
+	   "svg:viewBox=\"" . $bbox->{minx} . " " . $bbox->{miny} . " " .
+			       $bbox->{maxx} . " " . $bbox->{maxy} . "\" ";
+}
+
 sub draw_poly($$)
 {
     my ($attr, $value) = @_;
     my $svg = '';
     my $src_points = $value->[0]->{points};
     my $points = '';
-    my %bbox = ( maxx => 0, maxy => 0,
-		 minx => 10000000, miny => 10000000 );
-
-    print $maxx;
+    my %rbbox = ( maxx => 0, maxy => 0,
+		  minx => 10000000, miny => 10000000 );
+    my $bbox = \%rbbox;
 
     for my $coord (split / /, $src_points) {
 	my ($a, $b) = split /,/, $coord;
@@ -148,22 +162,28 @@ sub draw_poly($$)
 	my $y = ($b / $scale + $yoffset) * 1000;
 	
 	$points .= "$x,$y ";
-	adapt_bbox (\%bbox, $x, $y);
+	adapt_bbox ($bbox, $x, $y);
     }
 
-    my $viewbox = "0 0 " . $maxx . " " . $maxy;
+    my $viewbox = 
     
     $attr =~ s/^svg://;
     $svg .= draw_preamble ($attr, 'nofill') .
-	    "svg:x=\"" . $minx/1000 . "$unit\" " .
-	    "svg:y=\"" . $miny/1000 . "$unit\" " .
-	    "svg:width=\"" . $maxx/1000 . "$unit\" " .
-	    "svg:height=\"" . $maxy/1000 . "$unit\" " .
-	    "svg:viewBox=\"$viewbox\" " .
+	    draw_bbox ($bbox) .
 	    "draw:points=\"$points\" " .
 	    draw_postamble ($attr);
 
     return $svg;
+}
+
+sub adapt_point ($$$)
+{
+    my ($bbox, $x, $y) = @_;
+    
+    $x = ($x / $scale) * 1000 + $xoffset;
+    $y = ($y / $scale) * 1000 + $yoffset;
+    adapt_bbox ($bbox, $x, $y);
+    return "$x $y ";
 }
 
 sub draw_path
@@ -178,23 +198,35 @@ sub draw_path
     $path =~ s/[cC]/ c /g;
     $path =~ s/[zZ]/ z /g;
     $path =~ s/-/ -/g;
+    $path =~ s/,/ /g;
 
     $path =~ s/^\s*//;
     my @elems = split (/ +/, $path);
 
-    my %bbox = ( maxx => 0, maxy => 0,
-		 minx => 10000000, miny => 10000000 );
+    my %rbbox = ( maxx => 0, maxy => 0,
+		  minx => 10000000, miny => 10000000 );
+    my $bbox = \%rbbox;
+
+    my $data = '';
+
     while (my $elem = shift @elems) {
-	if ($elem eq 'm') {
-	    adapt_bbox (\%bbox, $x, $y);
-	} elsif ($elem eq 'l') {
-	} elsif ($elem eq 'c') {
+	if ($elem eq 'm' || $elem eq 'l') {
+	    $data .= $elem . " " . adapt_point ($bbox, shift (@elems), shift (@elems));
+
+	} elsif ($elem eq 's' || $elem eq 'c') {
+	    $data .= $elem . " ";
+	    $data .= adapt_point ($bbox, shift (@elems), shift (@elems));
+	    $data .= adapt_point ($bbox, shift (@elems), shift (@elems));
+
 	} elsif ($elem eq 'z') {
-	    printf STDERR "What does 'z' do ?\n";
+	    $data .= "z";
 	}
     }
 
-    print STDERR "Path '@elems'\n";
+    $svg .= draw_preamble('path') .
+	    "svg:d=\"$data\" " .
+	    draw_bbox($bbox) .
+	    "/>";
     
 #    print STDERR "No svg:path handling\n";
 # path is 'M\s+<x>\s+<y>
