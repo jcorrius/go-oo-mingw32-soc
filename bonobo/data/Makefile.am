@@ -19,11 +19,11 @@ ooo-bonobo.rdb:
 	$(REGCOMP) -register -r $@.tmp -c $(OOO_libdir)/uuresolver.uno$(SHARELIBEXT)
 	mv $@.tmp $@
 
-ini_in_files = ooo-bonobo-uno-bootstrap.ini.in
+ini_in_files = ooo-bonobo-uno-bootstraprc.in
 inidir = $(datadir)/ooo-bonobo
-ini_DATA = $(ini_in_files:.ini.in=.ini)
+ini_DATA = $(ini_in_files:rc.in=rc)
 
-%.ini: %.ini.in
+%rc: %rc.in
 	sed -e "s|\@RDBDIR\@|$(rdbdir)|" $< > $@
 
 uidir = $(datadir)/gnome-2.0/ui

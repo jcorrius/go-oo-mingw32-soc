@@ -105,9 +105,18 @@ getComponentContext()
     if( !g_file_test( RDBFILE, G_FILE_TEST_EXISTS ) )
         g_error( "Without '%s' installed nothing will work", RDBFILE );
 
-    Reference< uno::XComponentContext > xComponentContext =
-        ::cppu::defaultBootstrap_InitialComponentContext( UNO_BOOTSTRAP_INI );
+	Reference< uno::XComponentContext > xComponentContext;
+	try {
+		xComponentContext =
+			::cppu::defaultBootstrap_InitialComponentContext( UNO_BOOTSTRAP_INI );
+	} catch( registry::InvalidRegistryException &ire ) {
+		g_error( "InvalidRegistryException."
+				 " %s is invalid or %s doesn't contain the correct path.",
+				 RDBFILE, INIFILE );
+	}
+
 	g_assert( xComponentContext.is() );
+
 
 	Reference< lang::XMultiComponentFactory > xMultiComponentFactoryClient(
         xComponentContext->getServiceManager() );

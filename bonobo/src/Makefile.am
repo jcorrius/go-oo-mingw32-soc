@@ -1,5 +1,5 @@
 INCLUDES =								    \
-	-DINIFILE=\"$(datadir)/ooo-bonobo/ooo-bonobo-uno-bootstrap.ini\"    \
+	-DINIFILE=\"$(datadir)/ooo-bonobo/ooo-bonobo-uno-bootstraprc\"	    \
 	-DDATADIR=\""$(datadir)"\"					    \
 	-DRDBFILE=\""$(libdir)/ooo-bonobo/ooo-bonobo.rdb"\"		    \
 	$(OOO_BONOBO_CFLAGS)							
