@@ -16,9 +16,3 @@ script_files = \
 	scale-icons
 
 EXTRA_DIST = $(script_files)
-
-all:
-	./build-ooo ${TAG} --checkout
-
-install:
-	./package-ooo ${TAG}

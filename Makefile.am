@@ -4,7 +4,7 @@ endif
 
 SUBDIRS = po desktop bin etc patches man doc fonts stamp src www $(MAYBE_BONOBO)
 
-
+include $(top_srcdir)/Makefile.shared
 
 EXTRA_DIST = \
 	emacs.el		\
