@@ -1,10 +1,10 @@
 #include <stdio.h>
 #include <malloc.h>
 
-int init_offset = 68;
+// This is only any good for austin.lwp - oddly.
 
-// Define VERBOSE to get more debug
 int verbose = 0;
+int init_offset = 68;
 
 // Odd section:
 // 02 02 3f bf 62 65 20 6f 6e 20 68 69 73 20 66 69 | ..?.be on his fi
@@ -21,10 +21,10 @@ my_fgetc (FILE *fin)
 {
 		/* Very, very odd: custom hacks for austin.lwp */
 		switch (ftell (fin)) {
-		case 0x2858: // 0xc0
-		case 0x28c4: // 0xc6
-		case 0x2b67: // 0xc2
-		case 0x2fd4: // 0xc1
+
+		case 0x28c4: // 0xc6 - mid-string
+		case 0x2b67: // 0xc2 - mid string
+		case 0x2fd4: // 0xc1 - c1 01 02
 				fgetc (fin); // skip duff byte
 				break;
 		default:
@@ -114,7 +114,8 @@ skip_to_at (FILE *fin, unsigned char code, int print)
 		unsigned char skip_data[65536];
 		skip_data[0] = code;
 		for (i = 1; (skip_data[i] = my_fgetc (fin)) != '@' && i < sizeof (skip_data); i++);
-		dump_hex (skip_data, i + 1);
+		if (print)
+				dump_hex (skip_data, i + 1);
 }
 
 
@@ -131,10 +132,19 @@ scan_text (FILE *fin)
 				case 0x0202:
 				case 0x0bc0: {
 						unsigned char len = my_fgetc (fin);
-						unsigned char subc = my_fgetc (fin);
+						unsigned char dummy = my_fgetc (fin);
 						dump_string (fin, len);
 						break;
 				}
+				case 0x01c0: // for some reason we often get 0x01c002
+						codeb = my_fgetc (fin);
+						if (codeb != 0x02)
+						{
+								fprintf (stderr, "Odd 0x1c0\n");
+								end_of_run = 1;
+								break;
+						}
+						// drop through
 				case 0x0102: { /* SSE */
 						char data[29];
 						int len = 22;
@@ -148,6 +158,7 @@ scan_text (FILE *fin)
 						skip = 3;
 						break;
 
+				case 0x0c10: /* SSE */
 				case 0x0c41: /* SSE */
 				case 0x0141:
 				case 0x0e41:
@@ -162,6 +173,7 @@ scan_text (FILE *fin)
 						break;
 				}
 				case 0x8202:
+						fprintf (stderr, "CRLF?\n");
 						skip = 2;
 						break;
 				case 0xc301:
@@ -169,7 +181,6 @@ scan_text (FILE *fin)
 						skip = 4;
 						break;
 				default: {
-						int len;
 						fprintf (stderr, "Unknown code 0x%x\n", code);
 						fseek (fin, -2, SEEK_CUR);
 						skip_to_at (fin, 0x20, 1);
