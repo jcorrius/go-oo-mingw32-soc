@@ -1,0 +1,268 @@
+Index: sch/inc/chtmodel.hxx
+===================================================================
+RCS file: /cvs/graphics/sch/inc/chtmodel.hxx,v
+retrieving revision 1.51
+retrieving revision 1.51.48.1
+diff -u -p -u -p -r1.51 -r1.51.48.1
+--- sch/inc/chtmodel.hxx	9 Nov 2004 18:40:05 -0000	1.51
++++ sch/inc/chtmodel.hxx	25 Feb 2005 12:43:49 -0000	1.51.48.1
+@@ -1327,6 +1327,8 @@ private:
+ 	SfxUndoAction*	m_pUndoActionFromDraw;
+ 	BOOL	m_bDeleteUndoActionNotificationFromDraw;
+ 
++    bool    m_bChangeNotificationsEnabled;
++
+     // -------
+     // methods
+     // -------
+Index: sch/source/core/calculat.cxx
+===================================================================
+RCS file: /cvs/graphics/sch/source/core/calculat.cxx,v
+retrieving revision 1.6
+retrieving revision 1.6.162.1
+diff -u -p -u -p -r1.6 -r1.6.162.1
+--- sch/source/core/calculat.cxx	6 Jan 2004 12:34:42 -0000	1.6
++++ sch/source/core/calculat.cxx	24 Feb 2005 08:32:54 -0000	1.6.162.1
+@@ -427,6 +427,9 @@ void lcl_SplineCalculation::Calculate()
+ {
+     // n is the last valid index to m_aPoints
+     const tPointVecType::size_type n = m_aPoints.size() - 1;
++    if( n < 1 )
++        return;
++
+     vector< double > u( n );
+     m_aSecDerivY.resize( n + 1, 0.0 );
+ 
+@@ -492,11 +495,19 @@ void lcl_SplineCalculation::Calculate()
+ 
+ double lcl_SplineCalculation::GetInterpolatedValue( double x )
+ {
+-    DBG_ASSERT( ( m_aPoints[ 0 ].first <= x ) &&
+-                ( x <= m_aPoints[ m_aPoints.size() - 1 ].first ),
++    DBG_ASSERT( m_aPoints.size() < 1 ||
++                ( ( m_aPoints[ 0 ].first <= x ) &&
++                  ( x <= m_aPoints[ m_aPoints.size() - 1 ].first ) ),
+                 "Trying to extrapolate" );
+ 
+     const tPointVecType::size_type n = m_aPoints.size() - 1;
++    if( n < 1 )
++    {
++        double fNan;
++        ::rtl::math::setNan( & fNan );
++        return fNan;
++    }
++
+     if( x < m_fLastInterpolatedValue )
+     {
+         m_nKLow = 0;
+Index: sch/source/core/chartdoc.cxx
+===================================================================
+RCS file: /cvs/graphics/sch/source/core/chartdoc.cxx,v
+retrieving revision 1.24
+retrieving revision 1.24.50.1
+diff -u -p -u -p -r1.24 -r1.24.50.1
+--- sch/source/core/chartdoc.cxx	3 Nov 2004 09:05:14 -0000	1.24
++++ sch/source/core/chartdoc.cxx	25 Feb 2005 12:43:49 -0000	1.24.50.1
+@@ -509,23 +509,22 @@ SdrPage* ChartModel::AllocPage(FASTBOOL 
+ 
+ void ChartModel::SetChanged(sal_Bool bFlag)
+ {
+-	if (pDocShell)
++    if( m_bChangeNotificationsEnabled &&
++        ! bNoBuildChart )
+ 	{
+-		if (bNewOrLoadCompleted && pDocShell->IsEnableSetModified())
++        if( pDocShell )
+ 		{
+-			// weitergeben an Basisklasse
+-			//ChartModel
+-			SdrModel::SetChanged(bFlag);
++            SdrModel::SetChanged( bFlag );
+ 
+-			// an ObjectShell weiterleiten
+-			pDocShell->SetModified(bFlag);
++            if( bNewOrLoadCompleted )
++            {
++                pDocShell->SetModified( bFlag );
+ 		}
+ 	}
+ 	else
+ 	{
+-		// weitergeben an Basisklasse
+-		//ChartModel
+-		SdrModel::SetChanged(bFlag);
++            SdrModel::SetChanged( bFlag );
++        }
+ 	}
+ }
+ 
+Index: sch/source/core/chtmode4.cxx
+===================================================================
+RCS file: /cvs/graphics/sch/source/core/chtmode4.cxx,v
+retrieving revision 1.44
+retrieving revision 1.44.14.1
+diff -u -p -u -p -r1.44 -r1.44.14.1
+--- sch/source/core/chtmode4.cxx	4 Feb 2005 14:09:05 -0000	1.44
++++ sch/source/core/chtmode4.cxx	25 Feb 2005 12:43:50 -0000	1.44.14.1
+@@ -1854,6 +1854,23 @@ private:
+     MapMode          m_aMapMode;
+ };
+ 
++class lcl_EnableChangeGuard
++{
++public:
++    explicit lcl_EnableChangeGuard( bool & bChangeFlag ) : m_rChangeFlag( bChangeFlag )
++    {
++        m_rChangeFlag = false;
++    }
++
++    ~lcl_EnableChangeGuard()
++    {
++        m_rChangeFlag = true;
++    }
++
++private:
++    bool & m_rChangeFlag;
++};
++
+ }
+ 
+ void ChartModel::BuildChart(BOOL bCheckRanges,long whatTitle)
+@@ -1884,6 +1901,8 @@ void ChartModel::BuildChart(BOOL bCheckR
+ 	}
+ 	else
+ 	{
++        lcl_EnableChangeGuard aGuard( m_bChangeNotificationsEnabled );
++
+ 		RTL_LOGFILE_CONTEXT_AUTHOR (context2,
+ 			"sch", "af119097", "::ChartModel::BuildChart not locked");
+ 		//nicht ganz so schön, aber vorteilhaft. Hiermit wird ein Itemset mit
+@@ -2163,8 +2182,12 @@ void ChartModel::BuildChart(BOOL bCheckR
+ 	SetDiagramRectangle( aChartRect );
+ 	eOldChartStyle = eChartStyle;
+ 
+-    // notify build to listeners
+-    Broadcast( SchReBuildHint());
++	if( ! bNoBuildChart )
++    {
++        // notify build to listeners
++        Broadcast( SchReBuildHint());
++        SetChanged( sal_True );
++    }
+ }
+ 
+ 
+Index: sch/source/core/chtmodel.cxx
+===================================================================
+RCS file: /cvs/graphics/sch/source/core/chtmodel.cxx,v
+retrieving revision 1.70
+retrieving revision 1.70.50.1
+diff -u -p -u -p -r1.70 -r1.70.50.1
+--- sch/source/core/chtmodel.cxx	3 Nov 2004 09:05:44 -0000	1.70
++++ sch/source/core/chtmodel.cxx	25 Feb 2005 12:43:50 -0000	1.70.50.1
+@@ -361,7 +361,8 @@ ChartModel::ChartModel( const String& rP
+ 	eLanguageCTL( LANGUAGE_SYSTEM ),
+     mpDocStor( NULL ),
+ 	m_pUndoActionFromDraw(NULL),
+-	m_bDeleteUndoActionNotificationFromDraw(TRUE)
++	m_bDeleteUndoActionNotificationFromDraw(TRUE),
++    m_bChangeNotificationsEnabled(true)
+ {
+ 	SdrModel::SetNotifyUndoActionHdl(LINK( this, ChartModel, NotifyUndoActionHdl ));
+ 
+Index: svx/source/svdraw/svdoole2.cxx
+===================================================================
+RCS file: /cvs/graphics/svx/source/svdraw/svdoole2.cxx,v
+retrieving revision 1.52
+retrieving revision 1.52.20.1
+diff -u -p -u -p -r1.52 -r1.52.20.1
+--- svx/source/svdraw/svdoole2.cxx	17 Feb 2005 09:54:15 -0000	1.52
++++ svx/source/svdraw/svdoole2.cxx	25 Feb 2005 12:59:08 -0000	1.52.20.1
+@@ -281,11 +281,11 @@ public:
+ 
+ 	SdrOle2ObjImpl()
+ 	: pGraphicObject( NULL )
+-	, mpObjectLink( NULL )
+ 	// #107645#
+ 	// init to start situation, loading did not fail
+ 	, mbLoadingOLEObjectFailed( sal_False )
+ 	, mbConnected( sal_False )
++	, mpObjectLink( NULL )
+ 	{
+ 	}
+ };
+@@ -826,6 +826,10 @@ void SdrOle2Obj::SetModel(SdrModel* pNew
+ 
+ 	SdrRectObj::SetModel( pNewModel );
+ 
++    // #i43086#
++    if( pModel && !pModel->isLocked() )
++        ImpSetVisAreaSize();
++
+     if( pDestPers && !IsEmptyPresObj() )
+     {
+         if ( !pSrcPers || IsEmptyPresObj() )
+@@ -1251,6 +1255,7 @@ void SdrOle2Obj::ImpSetVisAreaSize()
+     GetObjRef();
+     if (xObjRef.is())
+ 	{
++        OSL_ASSERT( pModel );
+         sal_Int64 nMiscStatus = xObjRef->getStatus( GetAspect() );
+         if ( (nMiscStatus & embed::EmbedMisc::MS_EMBED_RECOMPOSEONRESIZE) && svt::EmbeddedObjectRef::TryRunningState( xObjRef.GetObject() ) )
+ 		{
+@@ -1269,8 +1274,8 @@ void SdrOle2Obj::ImpSetVisAreaSize()
+             if (aVisArea.GetSize() != aAcceptedVisArea.GetSize())
+ 			{
+                 // server changed VisArea to its liking
+-                MapUnit aMapUnit = VCLUnoHelper::UnoEmbed2VCLMapUnit( xObjRef->getMapUnit( GetAspect() ) );
+-                aRect.SetSize(OutputDevice::LogicToLogic( aAcceptedVisArea.GetSize(), aMapUnit, pModel->GetScaleUnit()));
++                MapUnit aNewMapUnit = VCLUnoHelper::UnoEmbed2VCLMapUnit( xObjRef->getMapUnit( GetAspect() ) );
++                aRect.SetSize(OutputDevice::LogicToLogic( aAcceptedVisArea.GetSize(), aNewMapUnit, pModel->GetScaleUnit()));
+ 			}
+ 
+             xObjRef.UpdateReplacement();
+@@ -1322,7 +1327,7 @@ void SdrOle2Obj::NbcResize(const Point& 
+ 		aGeo.nTan=0.0;
+ 		SetRectsDirty();
+ 	}
+-	if( (NULL == pModel) || !pModel->isLocked() )
++	if( pModel && !pModel->isLocked() )
+ 		ImpSetVisAreaSize();
+ }
+ 
+@@ -1331,7 +1336,7 @@ void SdrOle2Obj::NbcResize(const Point& 
+ void SdrOle2Obj::SetGeoData(const SdrObjGeoData& rGeo)
+ {
+ 	SdrRectObj::SetGeoData(rGeo);
+-	if( (NULL == pModel) || !pModel->isLocked() )
++	if( pModel && !pModel->isLocked() )
+ 		ImpSetVisAreaSize();
+ }
+ 
+@@ -1340,7 +1345,7 @@ void SdrOle2Obj::SetGeoData(const SdrObj
+ void SdrOle2Obj::NbcSetSnapRect(const Rectangle& rRect)
+ {
+ 	SdrRectObj::NbcSetSnapRect(rRect);
+-	if( (NULL == pModel) || !pModel->isLocked() )
++	if( pModel && !pModel->isLocked() )
+ 		ImpSetVisAreaSize();
+ }
+ 
+@@ -1349,7 +1354,7 @@ void SdrOle2Obj::NbcSetSnapRect(const Re
+ void SdrOle2Obj::NbcSetLogicRect(const Rectangle& rRect)
+ {
+ 	SdrRectObj::NbcSetLogicRect(rRect);
+-	if( (NULL == pModel) || !pModel->isLocked() )
++	if( pModel && !pModel->isLocked() )
+ 		ImpSetVisAreaSize();
+ }
+ 
+@@ -1371,7 +1376,7 @@ void SdrOle2Obj::GetNewReplacement()
+ void SdrOle2Obj::NbcMove(const Size& rSize)
+ {
+ 	SdrRectObj::NbcMove(rSize);
+-	if( (NULL == pModel) || !pModel->isLocked() )
++	if( pModel && !pModel->isLocked() )
+ 		ImpSetVisAreaSize();
+ }
+ 
