@@ -1,33 +1,3 @@
---- svtools/util/makefile.mk.orig	2003-06-05 22:18:51.000000000 -0500
-+++ svtools/util/makefile.mk	2003-06-05 22:19:38.000000000 -0500
-@@ -233,6 +233,10 @@
- 		$(VOSLIB)			\
- 		$(SALLIB)
- 
-+.IF "$(GUI)"=="UNX"
-+SHL2STDLIBS+= $(EXPATASCII3RDLIB) `pkg-config --libs glib-2.0`
-+.ENDIF
-+
- .IF "$(GUI)"=="WNT"
- SHL2STDLIBS+= \
- 		uwinapi.lib \
---- svtools/source/config/makefile.mk.orig	2003-06-05 22:19:59.000000000 -0500
-+++ svtools/source/config/makefile.mk	2003-06-05 22:21:02.000000000 -0500
-@@ -107,7 +107,13 @@
- 	$(SLO)$/accessibilityoptions.obj	\
- 	$(SLO)$/cmdoptions.obj				\
-     $(SLO)$/extendedsecurityoptions.obj \
--    $(SLO)$/sourceviewconfig.obj
-+    $(SLO)$/sourceviewconfig.obj			\
-+	$(SLO)$/recent-files.obj
-+
-+.IF "$(GUI)"=="UNX"
-+CFLAGS+=-Wall
-+CFLAGS+=`pkg-config --cflags glib-2.0`
-+.ENDIF
- 
- EXCEPTIONSFILES = \
-     $(SLO)$/accelcfg.obj				\
 --- svtools/prj/build.lst.orig	2003-06-05 22:23:34.000000000 -0500
 +++ svtools/prj/build.lst	2003-06-05 22:23:42.000000000 -0500
 @@ -1,4 +1,4 @@
@@ -295,18 +265,35 @@
 +};
 +
 +#endif
---- svtools/source/config/recent-files.cxx	2003-01-30 04:24:37.000000000 -0600
-+++ svtools/source/config/recent-files.cxx	2003-06-05 23:28:52.000000000 -0500
-@@ -0,0 +1,802 @@
+--- svtools/source/config/recent-files.cxx	2003-12-07 18:35:03.000000000 +0530
++++ svtools/source/config/recent-files.cxx	2003-12-10 14:07:51.000000000 +0530
+@@ -0,0 +1,801 @@
 +#include <stdio.h>
 +#include <string.h>
 +#include <time.h>
 +#include <unistd.h>
 +#include <sys/file.h>
-+#include <glib.h>
 +#include <tools/string.hxx>
 +#include "expat/xmlparse.h"
 +#include "recent-files.hxx"
++
++#include <rtl/ustring.hxx>
++#include <osl/security.hxx>
++#ifndef _OSL_THREAD_H_
++#include <osl/thread.h>
++#endif
++
++#ifndef _CONFIG_HXX
++#include <tools/config.hxx>
++#endif
++
++
++#include <list>
++#include <functional>
++
++using namespace osl;
++using namespace rtl;
++using namespace ::std;
 +
 +namespace svt {
 +
@@ -358,13 +345,27 @@
 +#define TAG_GROUPS		"Groups"
 +#define TAG_GROUP		"Group"
 +
++  typedef list<OString> StringList;
 +/* Recent item as parsed from the file */
-+struct Item {
-+	char *uri;
-+	char *mimeType;
++class Item {
++public:
++  	OString uri;
++  	OString mimeType;
++
 +	time_t timestamp;
-+	gboolean isPrivate;
-+	GSList *groups;
++	bool isPrivate;
++  StringList groups;
++
++  Item()
++  {
++	timestamp = -1;
++	isPrivate = false;
++  }
++  ~Item()
++  {
++	if (!(groups.empty()))
++	  groups.clear();
++  }
 +};
 +
 +/* Parser state */
@@ -382,33 +383,35 @@
 +	STATE_ERROR		/* Bad XML */
 +};
 +
++  typedef list<Item*> ItemList;
++
 +/* XML parsing context */
 +struct ParseContext {
-+	GSList *items;
++    ItemList items;
 +
 +	State state;
 +};
 +
 +/* Computes the name of the ~/.recent-files file */
-+static char *
++static OString
 +getRecentFilename (void)
 +{
-+	return g_strdup_printf ("%s/" RECENT_FILE_NAME, g_get_home_dir ());
-+}
++    OUString ustrHomeDir;
++    oslSecurity aSec = osl_getCurrentSecurity();
++    osl_getHomeDir( aSec, &ustrHomeDir.pData );
++    osl_freeSecurityHandle( aSec );
++    OString strHomeUrl, strHomeDir;
 +
-+/* Returns whether a string is null or empty */
-+static gboolean
-+stringIsEmpty (const char *s)
-+{
-+	return (s == NULL || strlen (s) == 0);
-+}
++    static OString strFileUrlPrefix("file://");
++    if (ustrHomeDir.convertToString(&strHomeUrl, osl_getThreadTextEncoding(), OUSTRING_TO_OSTRING_CVTFLAGS))
++      {
++	if (strHomeUrl.indexOf(strFileUrlPrefix) == 0)
++	{
++	  strHomeDir = strHomeUrl.copy(strFileUrlPrefix.getLength());
++	}
++      }
 +
-+/* Frees the contents of str, if any, and g_strdup()s the newStr into it */
-+static void
-+replaceString (char **str, const char *newStr, int newStrLen)
-+{
-+	g_free (*str);
-+	*str = g_strndup (newStr, newStrLen);
++    return strHomeDir.concat("/").concat(RECENT_FILE_NAME);
 +}
 +
 +/* Creates a new item in the context as a result of entering a RecentItem element */
@@ -417,35 +420,8 @@
 +{
 +	Item *item;
 +
-+	item = g_new (Item, 1);
-+
-+	item->uri = NULL;
-+	item->mimeType = NULL;
-+	item->timestamp = -1;
-+	item->isPrivate = FALSE;
-+	item->groups = NULL;
-+
-+	context->items = g_slist_prepend (context->items, item);
-+}
-+
-+/* Frees an Item */
-+static void
-+freeItem (Item *item)
-+{
-+	GSList *l;
-+
-+	g_free (item->uri);
-+	g_free (item->mimeType);
-+
-+	for (l = item->groups; l; l = l->next) {
-+		char *group;
-+
-+		group = l->data;
-+		g_free (group);
-+	}
-+	g_slist_free (item->groups);
-+
-+	g_free (item);
++	item = new Item();
++	context->items.push_front(item);
 +}
 +
 +/* Terminates a RecentItem element by ensuring that the basic properties of the
@@ -456,19 +432,18 @@
 +endRecentItem (ParseContext *context)
 +{
 +	Item *item;
-+	GSList *listItem;
 +
-+	g_assert (context->items != NULL);
-+	item = context->items->data;
++	assert (!(context->items.empty()));
++	item = *(context->items.begin());
 +
-+	if (stringIsEmpty (item->uri)) {
-+		freeItem (item);
-+		context->items = g_slist_delete_link (context->items, context->items);
++	if (0 == item->uri.getLength()) {
++	  delete item;
++	  context->items.pop_front();
 +		return;
 +	}
 +
-+	if (stringIsEmpty (item->mimeType))
-+		replaceString (&item->mimeType, APPLICATION_OCTET_STREAM, strlen (APPLICATION_OCTET_STREAM));
++	if (0 == item->mimeType.getLength())
++	  item->mimeType = APPLICATION_OCTET_STREAM;
 +
 +	if (item->timestamp == -1)
 +		item->timestamp = time (NULL);
@@ -480,10 +455,10 @@
 +{
 +	Item *item;
 +
-+	g_assert (context->items != NULL);
-+	item = context->items->data;
++	assert (!(context->items.empty()));
++	item = *(context->items.begin());
 +
-+	item->isPrivate = TRUE;
++	item->isPrivate = true;
 +}
 +
 +/* Start element handler for the parser */
@@ -547,7 +522,7 @@
 +		break;
 +
 +	default:
-+		g_assert_not_reached ();
++	  assert(0);
 +	}
 +}
 +
@@ -625,7 +600,7 @@
 +		break;
 +
 +	default:
-+		g_assert_not_reached ();
++	  assert(0);
 +	}
 +}
 +
@@ -636,30 +611,35 @@
 +	char *dup;
 +	long t;
 +
-+	dup = g_strndup (s, len);
++	dup = strndup (s, len);
 +	if (sscanf (dup, "%ld", &t) != 1)
 +		item->timestamp = -1;
 +	else
 +		item->timestamp = t;
 +
-+	g_free (dup);
++	free (dup);
 +}
++
++// binary predicate object type
++class CompareWithLength : binary_function<OString, OString, bool>
++{
++public: 
++  bool operator()(const OString& str1, const OString& str2) const
++  {
++    return (0 == str2.compareTo(str1, str2.getLength()));
++  }
++};
 +
 +/* Adds a group to an item */
 +static void
 +addGroup (Item *item, const char *s, int len)
 +{
-+	GSList *l;
 +
-+	for (l = item->groups; l; l = l->next) {
-+		const char *group;
++	StringList::iterator i = find_if(item->groups.begin(), item->groups.end(), bind2nd(CompareWithLength(), OString(s,len)));
++	if (i != item->groups.end())
++	  return;
 +
-+		group = l->data;
-+		if (strncmp (group, s, len) == 0)
-+			return;
-+	}
-+
-+	item->groups = g_slist_prepend (item->groups, g_strndup (s, len));
++	item->groups.push_front(OString(s, len));
 +}
 +
 +/* Handler for character data between tags */
@@ -670,15 +650,21 @@
 +	Item *item;
 +
 +	context = data;
-+	item = context->items ? context->items->data : NULL;
++	item = !(context->items.empty()) ? *(context->items.begin()) : NULL;
 +
 +	switch (context->state) {
 +	case STATE_URI:
-+		replaceString (&item->uri, s, len);
++		{
++		  OString tempStr(s, len);
++		  item->uri = tempStr;
++		}
 +		break;
 +
 +	case STATE_MIME_TYPE:
-+		replaceString (&item->mimeType, s, len);
++		{
++		  OString tempStr(s, len);
++		  item->mimeType = tempStr;
++		}
 +		break;
 +
 +	case STATE_TIMESTAMP:
@@ -700,7 +686,7 @@
 +		break;
 +
 +	default:
-+		g_assert_not_reached ();
++	  assert(0);
 +	}
 +}
 +
@@ -721,62 +707,52 @@
 +	return parser;
 +}
 +
-+/* Compares items by timestamps so as to sort them in DECREASING order */
-+static gint
-+compareTimestampsCb (gconstpointer a, gconstpointer b, gpointer data)
++/* Binary predicate class - Compares items by timestamps so as to sort them in DECREASING order */
++class CompareTimestamps : binary_function<Item*, Item*, bool>
 +{
-+	Item *ia, *ib;
++public: 
++  bool operator()(const Item* pItem1, const Item* pItem2) const
++  {
 +	time_t ta, tb;
 +
-+	ia = a;
-+	ta = ia->timestamp;
++	ta = pItem1->timestamp;
 +
-+	ib = b;
-+	tb = ib->timestamp;
++	tb = pItem2->timestamp;
 +
-+	return (ta < tb) ? 1 : (ta > tb) ? -1 : 0;
-+}
++	return (ta > tb);
++  }
++};
 +
 +/* Returns whether an item has a certain group */
-+static gboolean
++static bool
 +hasGroup (Item *item, const char *group)
 +{
-+	GSList *l;
-+
-+	for (l = item->groups; l; l = l->next) {
-+		const char *g;
-+
-+		g = l->data;
-+		if (strcmp (g, group) == 0)
-+			return TRUE;
-+	}
-+
-+	return FALSE;
++	StringList::iterator i = find(item->groups.begin(), item->groups.end(), OString(group));
++	return (i != item->groups.end());
 +}
 +
 +/* Removes the oldest items from the context */
 +static void
 +trimOldItems (ParseContext *context)
 +{
-+	GSList *l, *next;
 +	int i;
 +
 +	i = 0;
-+	l = context->items;
++	ItemList::iterator l = context->items.begin();
++	ItemList::iterator next;
 +
-+	while (l) {
++	while (l != context->items.end()) {
 +		Item *item;
 +
-+		item = l->data;
-+		next = l->next;
++		item = *l;
++		next = (++l)--;
 +
 +		if (hasGroup (item, GROUP_OPENOFFICE_ORG)) {
 +			i++;
 +
 +			if (i > MAX_ITEMS) {
-+				freeItem (item);
-+				context->items = g_slist_remove_link (context->items, l);
-+				g_slist_free_1 (l);
++			  delete item;
++			  context->items.erase(l);
 +			}
 +		}
 +
@@ -791,17 +767,16 @@
 +	XML_Parser parser;
 +	char buf[BUFFER_SIZE];
 +
-+	context->items = NULL;
 +	context->state = STATE_BEGIN;
 +
 +	parser = createParser (context);
 +
 +	if (!parser)
-+		return FALSE;
++		return;
 +
 +	while (1) {
 +		int len;
-+		gboolean eof;
++		int eof;
 +
 +		len = fread (buf, 1, sizeof (buf), file);
 +		if (ferror (file))
@@ -818,12 +793,12 @@
 +			break;
 +	}
 +
-+	if (context->items)
++	if (!(context->items.empty()))
 +		endRecentItem (context); /* Finish it off for if we terminated prematurely on error */
 +
 +	XML_ParserFree (parser);
 +
-+	context->items = g_slist_sort (context->items, compareTimestampsCb);
++	context->items.sort(CompareTimestamps());
 +	trimOldItems (context);
 +}
 +
@@ -831,32 +806,29 @@
 +static void
 +freeContext(ParseContext *context)
 +{
-+	GSList *l;
-+
-+	for (l = context->items; l; l = l->next) {
++	for (ItemList::iterator l = context->items.begin(); l != context->items.end(); l++) {
 +		Item *item;
 +
-+		item = l->data;
-+		freeItem (item);
++		item = *l;
++		delete item;
 +	}
 +
-+	g_slist_free (context->items);
++	context->items.clear();
 +}
 +
 +/* Converts our items into exported structures */
 +static void
 +convertItems (ParseContext *context, RecentFileItem **items, int *nItems)
 +{
-+	GSList *l;
 +	int i;
 +
 +	/* Count items with the OpenOffice.org group */
 +
 +	*nItems = 0;
-+	for (l = context->items; l; l = l->next) {
++	for (ItemList::iterator l = context->items.begin(); l != context->items.end(); l++) {
 +		Item *item;
 +
-+		item = l->data;
++		item = *l;
 +		if (hasGroup (item, GROUP_OPENOFFICE_ORG))
 +			(*nItems)++;
 +	}
@@ -866,14 +838,14 @@
 +
 +	/* Add only the items we want */
 +
-+	*items = g_new (RecentFileItem, *nItems);
++	*items = malloc (sizeof(RecentFileItem) * *nItems);
 +
 +	i = 0;
 +
-+	for (l = context->items; l; l = l->next) {
++	for (l = context->items.begin(); l != context->items.end(); l++) {
 +		Item *item;
 +
-+		item = l->data;
++		item = *l;
 +
 +		if (hasGroup (item, GROUP_OPENOFFICE_ORG)) {
 +			RecentFileItem *rfi;
@@ -893,18 +865,18 @@
 +}
 +
 +/* Opens ~/.recent-files and locks it.  If something fails, returns NULL. */
++
 +static FILE *
 +openAndLock (void)
 +{
 +	char *filename;
 +	FILE *file;
 +	int fd;
-+	ParseContext context;
++	//	ParseContext context;
 +
-+	filename = getRecentFilename ();
++	filename = getRecentFilename ().getStr();
 +
 +	file = fopen (filename, "r+");
-+	g_free (filename);
 +
 +	if (!file)
 +		return NULL;
@@ -928,7 +900,6 @@
 +	lockf (fd, F_ULOCK, 0);
 +	fclose (file);
 +}
-+
 +
 +/**
 + * recentFilesGetList:
@@ -962,17 +933,15 @@
 +static void
 +writeXml (FILE *file, ParseContext *context)
 +{
-+	GSList *l;
 +
 +	fputs ("<?xml version=\"1.0\"?>\n"
 +	       "<" TAG_RECENT_FILES ">\n",
 +	       file);
 +
-+	for (l = context->items; l; l = l->next) {
++	for (ItemList::iterator l = context->items.begin(); l != context->items.end(); l++) {
 +		Item *item;
-+		GSList *gl;
 +
-+		item = l->data;
++		item = *l;
 +
 +		fputs ("  <" TAG_RECENT_ITEM ">\n", file);
 +		fprintf (file,
@@ -981,15 +950,16 @@
 +			 "    <" TAG_TIMESTAMP ">%ld</" TAG_TIMESTAMP ">\n"
 +			 "%s"
 +			 "    <" TAG_GROUPS ">\n",
-+			 item->uri,
-+			 item->mimeType,
++			 item->uri.getStr(),
++			 item->mimeType.getStr(),
 +			 (long) item->timestamp,
 +			 item->isPrivate ? "    <" TAG_PRIVATE "/>\n" : "");
 +
-+		for (gl = item->groups; gl; gl = gl->next) {
++		StringList::iterator gl;
++		for (gl = item->groups.begin(); gl != item->groups.end(); gl++) {
 +			const char *group;
 +
-+			group = gl->data;
++			group = (*gl).getStr();
 +			fprintf (file,
 +				 "      <" TAG_GROUP ">%s</" TAG_GROUP ">\n",
 +				 group);
@@ -1020,7 +990,7 @@
 +		rtl_uString_release (items[i].mimeType);
 +	}
 +
-+	g_free (items);
++	free (items);
 +}
 +
 +/**
@@ -1035,8 +1005,7 @@
 +{
 +	FILE *file;
 +	ParseContext context;
-+	GSList *l;
-+	gboolean alreadyExists;
++	bool alreadyExists;
 +	int fd;
 +	rtl_String *uriString;
 +	rtl_String *mimeTypeString;
@@ -1047,22 +1016,22 @@
 +
 +	parse (file, &context);
 +
-+	alreadyExists = FALSE;
++	alreadyExists = false;
 +
 +	uriString = NULL;
 +	mimeTypeString = NULL;
 +	rtl_uString2String (&uriString, uri->buffer, uri->length, RTL_TEXTENCODING_UTF8, 0);
 +	rtl_uString2String (&mimeTypeString, mimeType->buffer, mimeType->length, RTL_TEXTENCODING_UTF8, 0);
 +
-+	for (l = context.items; l; l = l->next) {
++	for (ItemList::iterator l = context.items.begin(); l != context.items.end(); l++) {
 +		Item *item;
 +
-+		item = l->data;
++		item = *l;
 +		if (strcmp (item->uri, uriString->buffer) == 0) {
-+			g_free (item->mimeType);
-+			item->mimeType = g_strdup (mimeTypeString->buffer);
++			free (item->mimeType);
++			item->mimeType = strdup (mimeTypeString->buffer);
 +			item->timestamp = time (NULL);
-+			alreadyExists = TRUE;
++			alreadyExists = true;
 +			break;
 +		}
 +	}
@@ -1070,14 +1039,14 @@
 +	if (!alreadyExists) {
 +		Item *item;
 +
-+		item = g_new (Item, 1);
-+		item->uri = g_strdup (uriString->buffer);
-+		item->mimeType = g_strdup (mimeTypeString->buffer);
++		item = new Item();
++		item->uri = strdup (uriString->buffer);
++		item->mimeType = strdup (mimeTypeString->buffer);
 +		item->timestamp = time (NULL);
-+		item->isPrivate = FALSE;
-+		item->groups = g_slist_prepend (NULL, g_strdup (GROUP_OPENOFFICE_ORG));
++		item->isPrivate = false;
++		item->groups.push_front(GROUP_OPENOFFICE_ORG);
 +
-+		context.items = g_slist_prepend (context.items, item);
++		context.items.push_front(item);
 +	}
 +
 +	rtl_string_release (uriString);
@@ -1100,635 +1069,32 @@
 +}
 +
 +};
---- svtools/source/config/recent-files.cxx.orig	2003-12-04 16:40:42.000000000 +0530
-+++ svtools/source/config/recent-files.cxx	2003-12-10 14:40:20.000000000 +0530
-@@ -3,11 +3,28 @@
- #include <time.h>
- #include <unistd.h>
- #include <sys/file.h>
--#include <glib.h>
- #include <tools/string.hxx>
- #include "expat/xmlparse.h"
- #include "recent-files.hxx"
- 
-+#include <rtl/ustring.hxx>
-+#include <osl/security.hxx>
-+#ifndef _OSL_THREAD_H_
-+#include <osl/thread.h>
-+#endif
-+
-+#ifndef _CONFIG_HXX
-+#include <tools/config.hxx>
-+#endif
-+
-+
-+#include <list>
-+#include <functional>
-+
-+using namespace osl;
-+using namespace rtl;
-+using namespace ::std;
-+
- namespace svt {
- 
- /*
-@@ -58,13 +75,27 @@
- #define TAG_GROUPS		"Groups"
- #define TAG_GROUP		"Group"
- 
-+  typedef list<OString> StringList;
- /* Recent item as parsed from the file */
--struct Item {
--	char *uri;
--	char *mimeType;
-+class Item {
-+public:
-+  	OString uri;
-+  	OString mimeType;
-+
- 	time_t timestamp;
--	gboolean isPrivate;
--	GSList *groups;
-+	bool isPrivate;
-+  StringList groups;
-+
-+  Item()
-+  {
-+	timestamp = -1;
-+	isPrivate = false;
-+  }
-+  ~Item()
-+  {
-+	if (!(groups.empty()))
-+	  groups.clear();
-+  }
- };
- 
- /* Parser state */
-@@ -82,33 +113,35 @@
- 	STATE_ERROR		/* Bad XML */
- };
- 
-+  typedef list<Item*> ItemList;
-+
- /* XML parsing context */
- struct ParseContext {
--	GSList *items;
-+    ItemList items;
- 
- 	State state;
- };
- 
- /* Computes the name of the ~/.recent-files file */
--static char *
-+static OString
- getRecentFilename (void)
- {
--	return g_strdup_printf ("%s/" RECENT_FILE_NAME, g_get_home_dir ());
--}
--
--/* Returns whether a string is null or empty */
--static gboolean
--stringIsEmpty (const char *s)
--{
--	return (s == NULL || strlen (s) == 0);
--}
-+    OUString ustrHomeDir;
-+    oslSecurity aSec = osl_getCurrentSecurity();
-+    osl_getHomeDir( aSec, &ustrHomeDir.pData );
-+    osl_freeSecurityHandle( aSec );
-+    OString strHomeUrl, strHomeDir;
-+
-+    static OString strFileUrlPrefix("file://");
-+    if (ustrHomeDir.convertToString(&strHomeUrl, osl_getThreadTextEncoding(), OUSTRING_TO_OSTRING_CVTFLAGS))
-+      {
-+	if (strHomeUrl.indexOf(strFileUrlPrefix) == 0)
-+	{
-+	  strHomeDir = strHomeUrl.copy(strFileUrlPrefix.getLength());
-+	}
-+      }
- 
--/* Frees the contents of str, if any, and g_strdup()s the newStr into it */
--static void
--replaceString (char **str, const char *newStr, int newStrLen)
--{
--	g_free (*str);
--	*str = g_strndup (newStr, newStrLen);
-+    return strHomeDir.concat("/").concat(RECENT_FILE_NAME);
- }
- 
- /* Creates a new item in the context as a result of entering a RecentItem element */
-@@ -117,35 +150,8 @@
- {
- 	Item *item;
- 
--	item = g_new (Item, 1);
--
--	item->uri = NULL;
--	item->mimeType = NULL;
--	item->timestamp = -1;
--	item->isPrivate = FALSE;
--	item->groups = NULL;
--
--	context->items = g_slist_prepend (context->items, item);
--}
--
--/* Frees an Item */
--static void
--freeItem (Item *item)
--{
--	GSList *l;
--
--	g_free (item->uri);
--	g_free (item->mimeType);
--
--	for (l = item->groups; l; l = l->next) {
--		char *group;
--
--		group = l->data;
--		g_free (group);
--	}
--	g_slist_free (item->groups);
--
--	g_free (item);
-+	item = new Item();
-+	context->items.push_front(item);
- }
- 
- /* Terminates a RecentItem element by ensuring that the basic properties of the
-@@ -156,19 +162,18 @@
- endRecentItem (ParseContext *context)
- {
- 	Item *item;
--	GSList *listItem;
- 
--	g_assert (context->items != NULL);
--	item = context->items->data;
-+	assert (!(context->items.empty()));
-+	item = *(context->items.begin());
- 
--	if (stringIsEmpty (item->uri)) {
--		freeItem (item);
--		context->items = g_slist_delete_link (context->items, context->items);
-+	if (0 == item->uri.getLength()) {
-+	  delete item;
-+	  context->items.pop_front();
- 		return;
- 	}
- 
--	if (stringIsEmpty (item->mimeType))
--		replaceString (&item->mimeType, APPLICATION_OCTET_STREAM, strlen (APPLICATION_OCTET_STREAM));
-+	if (0 == item->mimeType.getLength())
-+	  item->mimeType = APPLICATION_OCTET_STREAM;
- 
- 	if (item->timestamp == -1)
- 		item->timestamp = time (NULL);
-@@ -180,10 +185,10 @@
- {
- 	Item *item;
- 
--	g_assert (context->items != NULL);
--	item = context->items->data;
-+	assert (!(context->items.empty()));
-+	item = *(context->items.begin());
- 
--	item->isPrivate = TRUE;
-+	item->isPrivate = true;
- }
- 
- /* Start element handler for the parser */
-@@ -247,7 +252,7 @@
- 		break;
- 
- 	default:
--		g_assert_not_reached ();
-+	  assert(0);
- 	}
- }
- 
-@@ -325,7 +330,7 @@
- 		break;
- 
- 	default:
--		g_assert_not_reached ();
-+	  assert(0);
- 	}
- }
- 
-@@ -336,30 +341,35 @@
- 	char *dup;
- 	long t;
- 
--	dup = g_strndup (s, len);
-+	dup = strndup (s, len);
- 	if (sscanf (dup, "%ld", &t) != 1)
- 		item->timestamp = -1;
- 	else
- 		item->timestamp = t;
- 
--	g_free (dup);
-+	free (dup);
- }
- 
-+// binary predicate object type
-+class CompareWithLength : binary_function<OString, OString, bool>
-+{
-+public: 
-+  bool operator()(const OString& str1, const OString& str2) const
-+  {
-+    return (0 == str2.compareTo(str1, str2.getLength()));
-+  }
-+};
-+
- /* Adds a group to an item */
- static void
- addGroup (Item *item, const char *s, int len)
- {
--	GSList *l;
- 
--	for (l = item->groups; l; l = l->next) {
--		const char *group;
-+	StringList::iterator i = find_if(item->groups.begin(), item->groups.end(), bind2nd(CompareWithLength(), OString(s,len)));
-+	if (i != item->groups.end())
-+	  return;
- 
--		group = l->data;
--		if (strncmp (group, s, len) == 0)
--			return;
--	}
--
--	item->groups = g_slist_prepend (item->groups, g_strndup (s, len));
-+	item->groups.push_front(OString(s, len));
- }
- 
- /* Handler for character data between tags */
-@@ -370,15 +380,21 @@
- 	Item *item;
- 
- 	context = data;
--	item = context->items ? context->items->data : NULL;
-+	item = !(context->items.empty()) ? *(context->items.begin()) : NULL;
- 
- 	switch (context->state) {
- 	case STATE_URI:
--		replaceString (&item->uri, s, len);
-+		{
-+		  OString tempStr(s, len);
-+		  item->uri = tempStr;
-+		}
- 		break;
- 
- 	case STATE_MIME_TYPE:
--		replaceString (&item->mimeType, s, len);
-+		{
-+		  OString tempStr(s, len);
-+		  item->mimeType = tempStr;
-+		}
- 		break;
- 
- 	case STATE_TIMESTAMP:
-@@ -400,7 +416,7 @@
- 		break;
- 
- 	default:
--		g_assert_not_reached ();
-+	  assert(0);
- 	}
- }
- 
-@@ -421,62 +437,52 @@
- 	return parser;
- }
- 
--/* Compares items by timestamps so as to sort them in DECREASING order */
--static gint
--compareTimestampsCb (gconstpointer a, gconstpointer b, gpointer data)
-+/* Binary predicate class - Compares items by timestamps so as to sort them in DECREASING order */
-+class CompareTimestamps : binary_function<Item*, Item*, bool>
- {
--	Item *ia, *ib;
-+public: 
-+  bool operator()(const Item* pItem1, const Item* pItem2) const
-+  {
- 	time_t ta, tb;
- 
--	ia = a;
--	ta = ia->timestamp;
-+	ta = pItem1->timestamp;
- 
--	ib = b;
--	tb = ib->timestamp;
-+	tb = pItem2->timestamp;
- 
--	return (ta < tb) ? 1 : (ta > tb) ? -1 : 0;
--}
-+	return (ta > tb);
-+  }
-+};
- 
- /* Returns whether an item has a certain group */
--static gboolean
-+static bool
- hasGroup (Item *item, const char *group)
- {
--	GSList *l;
--
--	for (l = item->groups; l; l = l->next) {
--		const char *g;
--
--		g = l->data;
--		if (strcmp (g, group) == 0)
--			return TRUE;
--	}
--
--	return FALSE;
-+	StringList::iterator i = find(item->groups.begin(), item->groups.end(), OString(group));
-+	return (i != item->groups.end());
- }
- 
- /* Removes the oldest items from the context */
- static void
- trimOldItems (ParseContext *context)
- {
--	GSList *l, *next;
- 	int i;
- 
- 	i = 0;
--	l = context->items;
-+	ItemList::iterator l = context->items.begin();
-+	ItemList::iterator next;
- 
--	while (l) {
-+	while (l != context->items.end()) {
- 		Item *item;
- 
--		item = l->data;
--		next = l->next;
-+		item = *l;
-+		next = (++l)--;
- 
- 		if (hasGroup (item, GROUP_OPENOFFICE_ORG)) {
- 			i++;
- 
- 			if (i > MAX_ITEMS) {
--				freeItem (item);
--				context->items = g_slist_remove_link (context->items, l);
--				g_slist_free_1 (l);
-+			  delete item;
-+			  context->items.erase(l);
- 			}
- 		}
- 
-@@ -491,17 +497,16 @@
- 	XML_Parser parser;
- 	char buf[BUFFER_SIZE];
- 
--	context->items = NULL;
- 	context->state = STATE_BEGIN;
- 
- 	parser = createParser (context);
- 
- 	if (!parser)
--		return FALSE;
-+		return;
- 
- 	while (1) {
- 		int len;
--		gboolean eof;
-+		int eof;
- 
- 		len = fread (buf, 1, sizeof (buf), file);
- 		if (ferror (file))
-@@ -518,12 +523,12 @@
- 			break;
- 	}
- 
--	if (context->items)
-+	if (!(context->items.empty()))
- 		endRecentItem (context); /* Finish it off for if we terminated prematurely on error */
- 
- 	XML_ParserFree (parser);
- 
--	context->items = g_slist_sort (context->items, compareTimestampsCb);
-+	context->items.sort(CompareTimestamps());
- 	trimOldItems (context);
- }
- 
-@@ -531,32 +536,29 @@
- static void
- freeContext(ParseContext *context)
- {
--	GSList *l;
--
--	for (l = context->items; l; l = l->next) {
-+	for (ItemList::iterator l = context->items.begin(); l != context->items.end(); l++) {
- 		Item *item;
- 
--		item = l->data;
--		freeItem (item);
-+		item = *l;
-+		delete item;
- 	}
- 
--	g_slist_free (context->items);
-+	context->items.clear();
- }
- 
- /* Converts our items into exported structures */
- static void
- convertItems (ParseContext *context, RecentFileItem **items, int *nItems)
- {
--	GSList *l;
- 	int i;
- 
- 	/* Count items with the OpenOffice.org group */
- 
- 	*nItems = 0;
--	for (l = context->items; l; l = l->next) {
-+	for (ItemList::iterator l = context->items.begin(); l != context->items.end(); l++) {
- 		Item *item;
- 
--		item = l->data;
-+		item = *l;
- 		if (hasGroup (item, GROUP_OPENOFFICE_ORG))
- 			(*nItems)++;
- 	}
-@@ -566,14 +568,14 @@
- 
- 	/* Add only the items we want */
- 
--	*items = g_new (RecentFileItem, *nItems);
-+	*items = malloc (sizeof(RecentFileItem) * *nItems);
- 
- 	i = 0;
- 
--	for (l = context->items; l; l = l->next) {
-+	for (l = context->items.begin(); l != context->items.end(); l++) {
- 		Item *item;
- 
--		item = l->data;
-+		item = *l;
- 
- 		if (hasGroup (item, GROUP_OPENOFFICE_ORG)) {
- 			RecentFileItem *rfi;
-@@ -593,18 +595,18 @@
- }
- 
- /* Opens ~/.recent-files and locks it.  If something fails, returns NULL. */
-+
- static FILE *
- openAndLock (void)
- {
- 	char *filename;
- 	FILE *file;
- 	int fd;
--	ParseContext context;
-+	//	ParseContext context;
- 
--	filename = getRecentFilename ();
-+	filename = getRecentFilename ().getStr();
- 
- 	file = fopen (filename, "r+");
--	g_free (filename);
- 
- 	if (!file)
- 		return NULL;
-@@ -629,7 +631,6 @@
- 	fclose (file);
- }
- 
--
- /**
-  * recentFilesGetList:
-  * @items: Return value; pointer to an array of items.  Should be freed with recentFilesFree().
-@@ -662,17 +663,15 @@
- static void
- writeXml (FILE *file, ParseContext *context)
- {
--	GSList *l;
- 
- 	fputs ("<?xml version=\"1.0\"?>\n"
- 	       "<" TAG_RECENT_FILES ">\n",
- 	       file);
- 
--	for (l = context->items; l; l = l->next) {
-+	for (ItemList::iterator l = context->items.begin(); l != context->items.end(); l++) {
- 		Item *item;
--		GSList *gl;
- 
--		item = l->data;
-+		item = *l;
- 
- 		fputs ("  <" TAG_RECENT_ITEM ">\n", file);
- 		fprintf (file,
-@@ -681,15 +680,16 @@
- 			 "    <" TAG_TIMESTAMP ">%ld</" TAG_TIMESTAMP ">\n"
- 			 "%s"
- 			 "    <" TAG_GROUPS ">\n",
--			 item->uri,
--			 item->mimeType,
-+			 item->uri.getStr(),
-+			 item->mimeType.getStr(),
- 			 (long) item->timestamp,
- 			 item->isPrivate ? "    <" TAG_PRIVATE "/>\n" : "");
- 
--		for (gl = item->groups; gl; gl = gl->next) {
-+		StringList::iterator gl;
-+		for (gl = item->groups.begin(); gl != item->groups.end(); gl++) {
- 			const char *group;
- 
--			group = gl->data;
-+			group = (*gl).getStr();
- 			fprintf (file,
- 				 "      <" TAG_GROUP ">%s</" TAG_GROUP ">\n",
- 				 group);
-@@ -720,7 +720,7 @@
- 		rtl_uString_release (items[i].mimeType);
- 	}
- 
--	g_free (items);
-+	free (items);
- }
- 
- /**
-@@ -735,8 +735,7 @@
- {
- 	FILE *file;
- 	ParseContext context;
--	GSList *l;
--	gboolean alreadyExists;
-+	bool alreadyExists;
- 	int fd;
- 	rtl_String *uriString;
- 	rtl_String *mimeTypeString;
-@@ -747,22 +746,22 @@
- 
- 	parse (file, &context);
- 
--	alreadyExists = FALSE;
-+	alreadyExists = false;
- 
- 	uriString = NULL;
- 	mimeTypeString = NULL;
- 	rtl_uString2String (&uriString, uri->buffer, uri->length, RTL_TEXTENCODING_UTF8, 0);
- 	rtl_uString2String (&mimeTypeString, mimeType->buffer, mimeType->length, RTL_TEXTENCODING_UTF8, 0);
- 
--	for (l = context.items; l; l = l->next) {
-+	for (ItemList::iterator l = context.items.begin(); l != context.items.end(); l++) {
- 		Item *item;
- 
--		item = l->data;
-+		item = *l;
- 		if (strcmp (item->uri, uriString->buffer) == 0) {
--			g_free (item->mimeType);
--			item->mimeType = g_strdup (mimeTypeString->buffer);
-+			free (item->mimeType);
-+			item->mimeType = strdup (mimeTypeString->buffer);
- 			item->timestamp = time (NULL);
--			alreadyExists = TRUE;
-+			alreadyExists = true;
- 			break;
- 		}
- 	}
-@@ -770,14 +769,14 @@
- 	if (!alreadyExists) {
- 		Item *item;
- 
--		item = g_new (Item, 1);
--		item->uri = g_strdup (uriString->buffer);
--		item->mimeType = g_strdup (mimeTypeString->buffer);
-+		item = new Item();
-+		item->uri = strdup (uriString->buffer);
-+		item->mimeType = strdup (mimeTypeString->buffer);
- 		item->timestamp = time (NULL);
--		item->isPrivate = FALSE;
--		item->groups = g_slist_prepend (NULL, g_strdup (GROUP_OPENOFFICE_ORG));
-+		item->isPrivate = false;
-+		item->groups.push_front(GROUP_OPENOFFICE_ORG);
- 
--		context.items = g_slist_prepend (context.items, item);
-+		context.items.push_front(item);
- 	}
- 
- 	rtl_string_release (uriString);
 --- svtools/source/config/makefile.mk.orig	2003-12-07 18:35:03.000000000 +0530
 +++ svtools/source/config/makefile.mk	2003-12-10 14:07:51.000000000 +0530
-@@ -112,7 +112,6 @@
- 
- .IF "$(GUI)"=="UNX"
- CFLAGS+=-Wall
--CFLAGS+=`pkg-config --cflags glib-2.0`
- .ENDIF
+@@ -107,7 +107,12 @@
+ 	$(SLO)$/accessibilityoptions.obj	\
+ 	$(SLO)$/cmdoptions.obj				\
+     $(SLO)$/extendedsecurityoptions.obj \
+-    $(SLO)$/sourceviewconfig.obj
++    $(SLO)$/sourceviewconfig.obj			\
++	$(SLO)$/recent-files.obj
++
++.IF "$(GUI)"=="UNX"
++CFLAGS+=-Wall
++.ENDIF
  
  EXCEPTIONSFILES = \
+     $(SLO)$/accelcfg.obj				\
 --- svtools/util/makefile.mk.orig	2003-12-07 18:34:32.000000000 +0530
 +++ svtools/util/makefile.mk	2003-12-10 14:08:21.000000000 +0530
-@@ -241,7 +241,7 @@
+@@ -240,6 +240,10 @@
+ 		$(VOSLIB)			\
  		$(SALLIB)
  
- .IF "$(GUI)"=="UNX"
--SHL2STDLIBS+= $(EXPATASCII3RDLIB) `pkg-config --libs glib-2.0`
++.IF "$(GUI)"=="UNX"
 +SHL2STDLIBS+= $(EXPATASCII3RDLIB)
- .ENDIF
- 
++.ENDIF
++
  .IF "$(GUI)"=="WNT"
+ SHL2STDLIBS+= \
+ 		uwinapi.lib \
