@@ -1,60 +1,92 @@
 #include <stdio.h>
-#include <glib.h>
+#include <malloc.h>
 
-/*
- * To build:
- *   gcc -Wall `pkg-config --libs --cflags glib-2.0` lwp.c
- */
+// This is only any good for austin.lwp - oddly.
+
 int verbose = 0;
+int init_offset = 68;
+
+// Odd section:
+// 02 02 3f bf 62 65 20 6f 6e 20 68 69 73 20 66 69 | ..?.be on his fi
+// 72 73 74 20 65 6e 74 65 72 69 6e 67 20 61 20 6e | rst entering a n
+// 65 69 67 68 62 6f 75 72 68 6f 6f 64 2c 20 74 68 | eighbourhood, th
+// 69 73 20 74 72 75 74 68 20 69 73 20 73 6f 20 77 | is truth is so w
+// 65 6c 6c 01 c0 02 53 53 45 6e 64 00 00 94 02 2e | ell...SSEnd.....
+// 00 02 6a c1 02 2f 41 02 2d 48 0f 61 01 6d 46 8d | ..j../A.-H.a.mF.
+// 46 c3 01 f6 28 0e 41 01 96 40 01 42 | F...(.A..@.B
 
 
-typedef struct {
-  unsigned char  magic[8];
-  guint16 flags;
-  guint16 blockSize;
-  guint16 majorVersion;
-  guint16 minorVersion;
-  guint32  tocOffset;
-  guint32  tocSize;
-} ContainerLabel; /* 24 bytes */
+static unsigned char
+my_fgetc (FILE *fin)
+{
+		/* Very, very odd: custom hacks for austin.lwp */
+		switch (ftell (fin)) {
 
+		case 0x28c4: // 0xc6 - mid-string
+		case 0x2b67: // 0xc2 - mid string
+		case 0x2fd4: // 0xc1 - c1 01 02
+				fgetc (fin); // skip duff byte
+				break;
+		default:
+				break;
+		};
+		return fgetc (fin);
+}
 
-#define TOC_NewObject        1
-#define TOC_NewProperty      2
-#define TOC_NewType          3
-#define TOC_ExplicitGen      4
-#define TOC_Offset4Len4      5
-#define TOC_ContdOffset4Len4 6
-#define TOC_Offset8Len4      7
-#define TOC_ContdOffset8Len4 8
-#define TOC_Immediate0       9
-#define TOC_Immediate1       10 /* 0x0a */
-#define TOC_Immediate2       11 /* 0x0b */
-#define TOC_Immediate3       12 /* 0x0c */
-#define TOC_Immediate4       13 /* 0x0d */
-#define TOC_ContdImmediate4  14 /* 0x0e */
-#define TOC_ReferenceListId  15 /* 0x0f */
-#define TOC_EndOfBufr        24 /* 0x16 */
-#define TOC_NOP             255 /* 0xff */
+static void
+dump_string (FILE *fin, int len)
+{
+	int i;
+	fprintf(stderr ,"(%d): '", len);
+	for (i = 0; i < len; i++) {
+			unsigned char c = my_fgetc (fin);
+			if (c >= 0x20 && c < 0x80)
+					fprintf (stderr, "%c", c);
+			else
+					fprintf (stderr, "#0x%x#", c);
+	}
+	fprintf (stderr,"'\n");
+}
 
-typedef struct {
-  guint32 typeId;
-  guint32 gen_num;
-  guint32 ref_obj_id;
-  /* data */
-} ContainerTocValue;
+#if 0
+static int
+dump_runs(unsigned char *data, int len)
+{
+	int i;
+	int pos = 0;
 
-typedef struct {
-  guint32 propId;
-  GSList *values;
-} ContainerTocProperty;
+	while (pos < len) {
+		int typea = data[0]; // Continuations show hdr to be 4 bytes
+		int typeb = data[1];
+		int run_len = data[2];
+		int typec = data[3];
 
-typedef struct {
-  guint32 objectId;
-  GSList *properties;
-} ContainerTocObject;
-
-typedef GSList *  ContainerToc;       /* objects */
+		if (run_len > len - 5)
+			run_len = len - 5;
+		
+		if (typea == 0x0b &&
+		    typeb == 0xc0) { // starter thing
+			fprintf( stderr, "String: [0x%x]\n", typeb );
+			dump_string( data + 4, run_len );
+		} else if (typea == 0x82 &&
+			   typeb == 0x02 &&
+			   run_len == 0x04) {
+			// CRLF ? - end marker anyway.
+			break;
+		} else if (typeb == 0x02) {
+			fprintf( stderr, "StringC: [0x%x]\n", typeb );
+			dump_string( data + 4, run_len );
+		} else {
+			fprintf( stderr, "unknown type 0x%x 0x%x 0x%x 0x%x\n", 
+				 typea, typeb, run_len, typec );
+			break;
+		}
+		pos += run_len + 4;
+		data += run_len + 4;
+	}	
+	return pos;
+}
+#endif
 
 static void
 dump_hex(unsigned char *data, int len)
@@ -75,266 +107,132 @@ dump_hex(unsigned char *data, int len)
 	}
 }
 
-static guint16
-read_ushort (FILE *fin)
+static void
+skip_to_at (FILE *fin, unsigned char code, int print)
 {
-  unsigned char data[2];
-  fread (data, 1, 2, fin);
-  return data[0] + (data[1] << 8);
+		int i;
+		unsigned char skip_data[65536];
+		skip_data[0] = code;
+		for (i = 1; (skip_data[i] = my_fgetc (fin)) != '@' && i < sizeof (skip_data); i++);
+		if (print)
+				dump_hex (skip_data, i + 1);
 }
 
-static guint32
-read_ulong (FILE *fin)
+
+static void
+scan_text (FILE *fin)
 {
-  unsigned char data[4];
-  fread (data, 1, 4, fin);
-  return data[0] + (data[1] << 8) + (data[2] << 16) + (data[3] << 24);
-}
+		int end_of_run = 0;
+		while (!feof (fin) && !end_of_run) {
+				unsigned char codea = my_fgetc (fin);
+				unsigned char codeb = my_fgetc (fin);
+				int code = codeb + (codea << 8);
+				int skip = 0;
+				switch (code) {
+				case 0x0202:
+				case 0x0bc0: {
+						unsigned char len = my_fgetc (fin);
+						unsigned char dummy = my_fgetc (fin);
+						dump_string (fin, len);
+						break;
+				}
+				case 0x01c0: // for some reason we often get 0x01c002
+						codeb = my_fgetc (fin);
+						if (codeb != 0x02)
+						{
+								fprintf (stderr, "Odd 0x1c0\n");
+								end_of_run = 1;
+								break;
+						}
+						// drop through
+				case 0x0102: { /* SSE */
+						char data[29];
+						int len = 22;
+						fprintf (stderr, "SSE\n");
+						fread (data, 1, len, fin); // or 29 ?
+						if (verbose)
+								dump_hex (data, len);
+						break;
+				}
+				case 0x016d: /* SSE */
+						skip = 3;
+						break;
 
-/*
- * The 'Label' is always at the end of the Bento container.
- */
-static ContainerLabel *
-read_label (FILE *fin)
-{
-  ContainerLabel *label = g_new0 (ContainerLabel, 1);
-
-  fseek (fin, -24, SEEK_END);
-  fread (label->magic, 1, 8, fin);
-  label->flags = read_ushort (fin);
-  label->blockSize = read_ushort (fin); /* size of toc in blocks multiples of 1024 */
-  label->majorVersion = read_ushort (fin);
-  label->minorVersion = read_ushort (fin);
-  label->tocOffset = read_ulong (fin);
-  label->tocSize = read_ulong (fin);
-
-  if (verbose)
-    fprintf (stderr, "flags 0x%x blockSize 0x%x, ver: 0x%x.%x "
-	     "toc Offset 0x%x, size 0x%x\n",
-	     label->flags, label->blockSize, label->majorVersion,
-	     label->minorVersion, label->tocOffset, label->tocSize);
-
-  return label;
-}
-
-static ContainerTocValue *
-read_toc_value (FILE *fin)
-{
-  int end = 0;
-  guint8 ctrl;
-  int have_contd = 0;
-  ContainerTocValue *value = g_new0 (ContainerTocValue, 1);
-
-  value->typeId = read_ulong (fin);
-  fprintf( stderr, "Read value 0x%x\n", value->typeId );
-  
-  while (!end && !feof (fin))
-    {
-      ctrl = fgetc (fin);
-      switch (ctrl) {
-      case TOC_NewObject:
-      case TOC_NewProperty:
-      case TOC_NewType:
-	//	fprintf( stderr, "FIXME: Unexpected parent op in value: 0x%x\n", ctrl );
-	ungetc (ctrl, fin);
-	end = 1;
-	break;
-      case TOC_ExplicitGen: {
-	guint32 gen = read_ulong (fin);
-	fprintf (stderr, "Explict Gen: 0x%x\n", gen);
-	break;
-      }
-      case TOC_Offset4Len4: {
-	guint32 offset = read_ulong (fin);
-	fprintf (stderr, "Offset4Len4: 0x%x\n", offset);
-      }
-      case TOC_ContdOffset4Len4: {
-	guint32 offset = read_ulong (fin);
-	fprintf (stderr, "ContdOffset4Len4: 0x%x\n", offset);
-	have_contd = 1;
-      }
-      case TOC_Offset8Len4: {
-	guint8 data[8];
-	fread (data, 1, 8, fin);
-	fprintf (stderr, "Offset8Len4: ");
-	dump_hex (data, 8);
-      }
-      case TOC_ContdOffset8Len4: {
-	guint8 data[8];
-	fread (data, 1, 8, fin);
-	fprintf (stderr, "ContdOffset8Len4: ");
-	dump_hex (data, 8);
-	have_contd = 1;
-      }
-      case TOC_EndOfBufr:
-	if (have_contd) {
-	  have_contd = 0;
-	  fprintf (stderr, "end continuation\n");
-	} else {
-	  end = 1;
-	  fprintf (stderr, "end value\n");
-	}
-	break;
-      case TOC_Immediate4:
-      case TOC_Immediate3:
-      case TOC_Immediate2:
-      case TOC_Immediate1: {
-	guint32 data = read_ulong (fin);
-	fprintf (stderr, "Immediate [%d] 0x%x\n", ctrl, data);
-	break;
-      }
-      case TOC_Immediate0:
-	fprintf (stderr, "Immediate 0\n");
-	break;
-      default:
-	fprintf (stderr, "Unknown value type %d (0x%x)\n", ctrl, ctrl);
-	break;
-      }
-    }  
-
-  return value;
-}
-
-static ContainerTocProperty *
-read_toc_prop (FILE *fin)
-{
-  int end = 0;
-  guint8 ctrl = TOC_NewType;
-  ContainerTocProperty *prop = g_new0 (ContainerTocProperty, 1);
-
-  prop->propId = read_ulong (fin);
-  fprintf (stderr, "Read prop id 0x%x\n", prop->propId);
-
-  while (!end && !feof (fin))
-    {
-      switch (ctrl)
-	{
-	case TOC_NewObject:
-	case TOC_NewProperty:
-	  //	  fprintf( stderr, "FIXME: Unexpected parent op in property: 0x%x\n", ctrl );
-	  ungetc (ctrl, fin);
-	  end = 1;
-	  break;
-	case TOC_NewType:
-	  prop->values = g_slist_append (prop->values,
-					 read_toc_value (fin));
-	  break;
-	case TOC_EndOfBufr:
-	  end = 1;
-	  fprintf (stderr, "end property\n");
-	  break;
-	default:
-	  fprintf (stderr, "Unknown property type %d\n", ctrl);
-	  break;
-	}
-      if (!end)
-	ctrl = fgetc (fin);
-    }
-
-  return prop;
-}
-
-static ContainerTocObject *
-read_toc_object (FILE *fin, ContainerTocObject *last)
-{
-  int end = 0;
-  guint8 ctrl = TOC_NewProperty;
-  ContainerTocObject *object = g_new0 (ContainerTocObject, 1);
-  
-  object->objectId = read_ulong (fin);
-  fprintf (stderr, "Read object id 0x%x\n", object->objectId);
-  while (!end && !feof (fin)) {
-    switch (ctrl) {
-    case TOC_NewObject:
-      //      fprintf( stderr, "FIXME: Unexpected parent op in object: 0x%x\n", ctrl );
-      ungetc (ctrl, fin);
-      end = 1;
-      break;
-    case TOC_NewProperty: {
-      ContainerTocProperty *prop = read_toc_prop (fin);
-      object->properties = g_slist_append (object->properties, prop);
-      break;
-    }
-    case TOC_EndOfBufr:
-      end = 1;
-      fprintf (stderr, "end object\n");
-      break;
-    default:
-      fprintf (stderr, "Unknown object type %d\n", ctrl);
-      break;
-    }
-    if (!end)
-      ctrl = fgetc (fin);
-  }
-  return object;
-}
-
-static ContainerToc *
-read_toc (FILE *fin, ContainerLabel *label)
-{
-  int end;
-  GSList *toc = NULL;
-  ContainerTocObject *last = NULL;
-  
-  if (verbose)
-    {
-      guint8 *data = g_malloc (label->tocSize);
-      fprintf (stderr, "Tok:\n");
-      fseek (fin, label->tocOffset, SEEK_SET);
-      fread (data, 1, label->tocSize, fin);
-      dump_hex (data, label->tocSize);
-    }
-
-  fseek (fin, label->tocOffset, SEEK_SET);
-  while (!end && !feof (fin)) {
-    guint8 ctrl = fgetc (fin);
-    switch (ctrl) {
-    case TOC_NewObject: {
-      ContainerTocObject *obj = read_toc_object (fin, last);
-      toc = g_slist_append (toc, obj);
-      last = obj;
-      break;
-    }
-    case TOC_NOP:
-      fprintf (stderr, "NOP\n");
-      break;
-    case TOC_EndOfBufr:
-      end = 1;
-      fprintf (stderr, "end toc\n");
-      break;
-    default:
-      fprintf (stderr, "Unknown code %d\n", ctrl);
-      break;
-    }
-  }
-
-  return (ContainerToc *)toc;
+				case 0x0c10: /* SSE */
+				case 0x0c41: /* SSE */
+				case 0x0141:
+				case 0x0e41:
+						fprintf (stderr, "0x%x\n", code);
+						break;
+				case 0x01f6:
+						fprintf (stderr, "0x%x\n", code);
+						skip = 3;
+						break;
+				case 0x0196: { // embedded @ somehow
+						skip = 3;
+						break;
+				}
+				case 0x8202:
+						fprintf (stderr, "CRLF?\n");
+						skip = 2;
+						break;
+				case 0xc301:
+						fprintf (stderr, "0x%x\n", code);
+						skip = 4;
+						break;
+				default: {
+						fprintf (stderr, "Unknown code 0x%x\n", code);
+						fseek (fin, -2, SEEK_CUR);
+						skip_to_at (fin, 0x20, 1);
+						end_of_run = 1;
+						break;
+				}
+				}
+				if (skip)
+						fseek (fin, skip, SEEK_CUR);
+		}
 }
 
 int
 main (int argc, char **argv)
 {
-  int i;
-  const char *fname = NULL;
-  ContainerLabel *label;
-  ContainerToc *toc;
-  FILE *fin;
+	int i;
+	const char *fname = NULL;
+	FILE *fin;
 
-  for (i = 1; i < argc; i++)
-    {
-      if (argv[i][0] == '-' &&
-	  argv[i][1] == 'v')
-	verbose = 1;
-      else if (!fname)
-	fname = argv[i];
-    }
+	for (i = 1; i < argc; i++)
+	{
+			if (argv[i][0] == '-' &&
+				argv[i][1] == 'v')
+					verbose = 1;
+			else if (!fname)
+					fname = argv[i];
+	}
 
-  fin = fopen (fname, "r");
+	fin = fopen (fname, "r");
+	fseek (fin, init_offset, SEEK_SET);
+	
+	while (!feof (fin)) {
+		unsigned char code;
+		code = my_fgetc (fin);
+		switch (code) {
+		case 0x20:
+				code = my_fgetc (fin);
+				if (code == 0x40)
+						fprintf (stderr, "2040\n");
+				else {
+						ungetc (code, fin);
+						scan_text (fin);
+				}
+				break;
+		default: {
+				skip_to_at (fin, code, verbose);
+				break;
+		}
+		}
+	}
 
-  label = read_label (fin);
-  toc = read_toc (fin, label);
+	fclose (fin);
 
-  fclose (fin);
-
-  return 0;
+	return 0;
 } 
