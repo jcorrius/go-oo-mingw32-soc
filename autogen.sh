@@ -14,7 +14,7 @@ fi
 (cd bonobo && ./autogen.sh)
 echo "NOT YET."
 
-aclocal
+aclocal $ACLOCAL_FLAGS
 automake --gnu --add-missing
 # intltoolize --copy --force --automake
 autoconf
