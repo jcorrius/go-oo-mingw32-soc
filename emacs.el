@@ -10,7 +10,7 @@
 			    76 80 84 88 92 96 100 104 108 112 116 120))
       (c-set-style "stroustrup")
       (set-variable 'c-basic-offset 4)
-      (set-variable 'indent-tabs-mode t)))
+      (set-variable 'indent-tabs-mode nil)))
 
 (add-hook 'c-mode-common-hook 'my-openoffice-c-hook)
 
