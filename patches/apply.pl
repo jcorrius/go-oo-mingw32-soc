@@ -258,10 +258,10 @@ $distro = 'Ximian';
 @arguments = ();
 
 foreach $a (@ARGV) {
-	if ($a eq '-R') { # -R will also be appended to $opts
+	if ($a eq '-R') {
 	    $remove = 1;	    
+	    push @arguments, $a;
 	}
-
 	if ($a =~ m/--series-from=(.*)/) {
 	    $export = 1;
 	    $quiet = 1;
@@ -286,7 +286,7 @@ if ($export) {
     $dest_dir = shift (@arguments);
     $applied_patches = $dest_dir.'/applied_patches';
 
-    $opts = join @arguments, ' ';
+    $opts = join ' ', @arguments;
     $base_cmd = "patch -l -b -p0 $opts -d $dest_dir";
 
     if ($remove) {
