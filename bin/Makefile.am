@@ -14,7 +14,9 @@ script_files = \
 	scale-icons \
 	unpack \
 	font-munge \
+	help-font-munge \
 	install-artwork \
+	install-help \
 	build-tools \
 	build-ooo
 
