@@ -1,6 +1,7 @@
 SUBDIRS = po desktop bin etc patches man doc www
 
-EXTRA_DIST = config.rpath 			\
+EXTRA_DIST = config.rpath	\
+	emacs.el		\
 	mkinstalldirs		\
 	MAINTAINERS		\
 	HACKING			\
