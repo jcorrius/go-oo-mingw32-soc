@@ -1,0 +1,1532 @@
+Index: source/mtfrenderer/mtftools.cxx
+===================================================================
+RCS file: /cvs/gsl/cppcanvas/source/mtfrenderer/mtftools.cxx,v
+retrieving revision 1.3.6.1
+diff -u -r1.3.6.1 mtftools.cxx
+--- cppcanvas/source/mtfrenderer/mtftools.cxx	16 Feb 2005 11:14:28 -0000	1.3.6.1
++++ cppcanvas/source/mtfrenderer/mtftools.cxx	10 Mar 2005 14:25:17 -0000
+@@ -59,27 +59,67 @@
+  *
+  ************************************************************************/
+ 
++#include <canvas/debug.hxx>
++#include <canvas/verbosetrace.hxx>
++
+ #include <mtftools.hxx>
+ #include <outdevstate.hxx>
++#include <polypolyaction.hxx>
+ 
+ #ifndef _COM_SUN_STAR_RENDERING_RENDERSTATE_HPP__
+ #include <com/sun/star/rendering/RenderState.hpp>
+ #endif
++#ifndef _COM_SUN_STAR_RENDERING_XCANVAS_HPP__
++#include <com/sun/star/rendering/XCanvas.hpp>
++#endif
+ 
++#ifndef _BGFX_NUMERIC_FTOOLS_HXX
++#include <basegfx/numeric/ftools.hxx>
++#endif
++#ifndef _BGFX_TOOLS_CANVASTOOLS_HXX
++#include <basegfx/tools/canvastools.hxx>
++#endif
++#ifndef _BGFX_POLYGON_B2DPOLYGONTOOLS_HXX
++#include <basegfx/polygon/b2dpolygontools.hxx>
++#endif
++#ifndef _BGFX_POLYGON_B2DPOLYGON_HXX
++#include <basegfx/polygon/b2dpolygon.hxx>
++#endif
++#ifndef _BGFX_RANGE_B2DRECTANGLE_HXX
++#include <basegfx/range/b2drectangle.hxx>
++#endif
++#ifndef _BGFX_VECTOR_B2DVECTOR_HXX
++#include <basegfx/vector/b2dvector.hxx>
++#endif
+ #ifndef _CANVAS_CANVASTOOLS_HXX
+ #include <canvas/canvastools.hxx>
+ #endif
+ 
++#ifndef _SV_GDIMTF_HXX
++#include <vcl/gdimtf.hxx>
++#endif
++#ifndef _SV_METAACT_HXX
++#include <vcl/metaact.hxx>
++#endif
++#ifndef _SV_VIRDEV_HXX
++#include <vcl/virdev.hxx>
++#endif
++#ifndef _SV_METRIC_HXX
++#include <vcl/metric.hxx>
++#endif
++#ifndef _TL_POLY_HXX
++#include <tools/poly.hxx>
++#endif
++
+ 
+ using namespace ::com::sun::star;
+ 
+ namespace cppcanvas
+ {
+-
+     namespace tools
+     {
+-        void initRenderState( ::com::sun::star::rendering::RenderState&	renderState,
+-                              const struct ::cppcanvas::internal::OutDevState&	outdevState )
++        void initRenderState( rendering::RenderState&					renderState,
++                              const ::cppcanvas::internal::OutDevState&	outdevState )
+         {
+             ::canvas::tools::initRenderState( renderState );
+             ::canvas::tools::setRenderStateTransform( renderState, 
+@@ -87,6 +127,422 @@
+             renderState.Clip = outdevState.xClipPoly;
+         }
+ 
+-    }
++
++        ::basegfx::B2DHomMatrix& calcLogic2PixelLinearTransform( ::basegfx::B2DHomMatrix&	o_rMatrix,
++                                                                 const VirtualDevice& 		rVDev )
++        {
++            // select size value in the middle of the available range,
++            // to have headroom both when map mode scales up, and when
++            // it scales down.
++            const ::Size aSizeLogic( 0x00010000L,
++                                     0x00010000L );
++
++            const ::Size aSizePixel( rVDev.LogicToPixel( aSizeLogic ) );
++
++            o_rMatrix.identity();
++            o_rMatrix.scale( aSizePixel.Width() / (double)aSizeLogic.Width(),
++                             aSizePixel.Height() / (double)aSizeLogic.Height() );
++
++            return o_rMatrix;
++        }
++
++        bool modifyClip( rendering::RenderState&							o_rRenderState,
++                         const struct ::cppcanvas::internal::OutDevState&	rOutdevState,
++                         const CanvasSharedPtr&								rCanvas,
++                         const ::basegfx::B2DPoint&							rOffset,
++                         const ::basegfx::B2DVector*						pScaling )
++        {
++            const ::Point aEmptyPoint;
++
++            const bool bOffsetting( !rOffset.equalZero() );
++            const bool bScaling( pScaling && 
++                                 pScaling->getX() != 1.0 && 
++                                 pScaling->getY() != 1.0 );
++
++            if( !bOffsetting && !bScaling )
++                return false; // nothing to do
++            
++            if( rOutdevState.clip.count() )
++            {
++                // general polygon case
++
++                ::basegfx::B2DPolyPolygon aLocalClip( rOutdevState.clip );
++                ::basegfx::B2DHomMatrix	  aTransform;
++                    
++                if( bOffsetting )
++                    aTransform.translate( -rOffset.getX(),
++                                          -rOffset.getY() );
++                if( bScaling )
++                    aTransform.scale( 1.0/pScaling->getX(), 1.0/pScaling->getY() );
++
++                aLocalClip.transform( aTransform );
++                
++                o_rRenderState.Clip = ::basegfx::unotools::xPolyPolygonFromB2DPolyPolygon(
++                    rCanvas->getUNOCanvas()->getDevice(),
++                    aLocalClip );
++
++                return true;
++            }
++            else if( !rOutdevState.clipRect.IsEmpty() )
++            {
++                // simple rect case
++
++                const ::Rectangle aLocalClipRect( rOutdevState.clipRect );
++                
++                if( bScaling )
++                {
++                    // scale and offset - do it on the fly, have to
++                    // convert to float anyway.
++                    o_rRenderState.Clip = ::basegfx::unotools::xPolyPolygonFromB2DPolyPolygon(
++                        rCanvas->getUNOCanvas()->getDevice(),
++                        ::basegfx::B2DPolyPolygon(
++                            ::basegfx::tools::createPolygonFromRect( 
++                                ::basegfx::B2DRectangle( 
++                                    (double)(aLocalClipRect.Left() - rOffset.getX())/pScaling->getX(),
++                                    (double)(aLocalClipRect.Top() - rOffset.getY())/pScaling->getY(),
++                                    (double)(aLocalClipRect.Right() - rOffset.getX())/pScaling->getX(),
++                                    (double)(aLocalClipRect.Bottom() - rOffset.getY())/pScaling->getY() ) ) ) );
++                }
++                else
++                {
++                    // offset only - do it on the fly, have to convert
++                    // to float anyway.
++                    o_rRenderState.Clip = ::basegfx::unotools::xPolyPolygonFromB2DPolyPolygon(
++                        rCanvas->getUNOCanvas()->getDevice(),
++                        ::basegfx::B2DPolyPolygon(
++                            ::basegfx::tools::createPolygonFromRect( 
++                                ::basegfx::B2DRectangle( aLocalClipRect.Left() - rOffset.getX(),
++                                                         aLocalClipRect.Top() - rOffset.getY(),
++                                                         aLocalClipRect.Right() - rOffset.getX(),
++                                                         aLocalClipRect.Bottom() - rOffset.getY() ) ) ) );
++                }
++
++                return true;
++            }
++
++            // empty clip, nothing to do
++            return false;
++        }
++
++        bool modifyClip( rendering::RenderState&							o_rRenderState,
++                         const struct ::cppcanvas::internal::OutDevState&	rOutdevState,
++                         const CanvasSharedPtr&								rCanvas,
++                         const ::Point&										rOffset,
++                         const ::basegfx::B2DVector*						pScaling )
++        {
++            return modifyClip( o_rRenderState, 
++                               rOutdevState, 
++                               rCanvas, 
++                               ::basegfx::B2DPoint( rOffset.X(), 
++                                                    rOffset.Y() ), 
++                               pScaling );
++        }
++
++        bool modifyClip( rendering::RenderState&							o_rRenderState,
++                         const struct ::cppcanvas::internal::OutDevState&	rOutdevState,
++                         const CanvasSharedPtr&								rCanvas,
++                         const ::basegfx::B2DHomMatrix&						rTransform )
++        {
++            if( !rTransform.isIdentity() ||
++                !rTransform.isInvertible() )
++                return false; // nothing to do
++            
++            ::basegfx::B2DPolyPolygon aLocalClip;
++
++            if( rOutdevState.clip.count() )
++            {
++                aLocalClip = rOutdevState.clip;
++            }
++            else if( !rOutdevState.clipRect.IsEmpty() )
++            {
++                const ::Rectangle aLocalClipRect( rOutdevState.clipRect );
+ 
++                aLocalClip = ::basegfx::B2DPolyPolygon(
++                    ::basegfx::tools::createPolygonFromRect( 
++                        ::basegfx::B2DRectangle( 
++                            aLocalClipRect.Left(),
++                            aLocalClipRect.Top(),
++                            aLocalClipRect.Right(),
++                            aLocalClipRect.Bottom() ) ) );
++            }
++            else
++            {
++                // empty clip, nothing to do
++                return false;
++            }
++
++            // invert transformation and modify
++            ::basegfx::B2DHomMatrix aLocalTransform( rTransform );
++            aLocalTransform.invert();
++
++            aLocalClip.transform( aLocalTransform );
++
++            o_rRenderState.Clip = ::basegfx::unotools::xPolyPolygonFromB2DPolyPolygon(
++                rCanvas->getUNOCanvas()->getDevice(),
++                aLocalClip );
++
++            return true;
++        }
++
++        // create underline/strikeout line info struct
++        TextLineInfo createTextLineInfo( const ::VirtualDevice& 					rVDev,
++                                         const ::cppcanvas::internal::OutDevState&	rState )
++        {
++            const BOOL bOldMode( rVDev.IsMapModeEnabled() );
++
++            // will restore map mode below
++            const_cast< ::VirtualDevice& >(rVDev).EnableMapMode( FALSE );
++
++            const ::FontMetric aMetric = rVDev.GetFontMetric();
++
++            TextLineInfo aTextInfo(
++                (aMetric.GetDescent() + 2) / 4.0,
++                aMetric.GetDescent() / 2.0,
++                (aMetric.GetIntLeading() - aMetric.GetAscent()) / 3.0,
++                rState.textUnderlineStyle,
++                rState.textStrikeoutStyle );
++
++            const_cast< ::VirtualDevice& >(rVDev).EnableMapMode( bOldMode );
++
++            return aTextInfo;
++        }
++
++        namespace
++        {
++            void appendRect( ::basegfx::B2DPolyPolygon& o_rPoly,
++                             const ::basegfx::B2DPoint& rStartPos,
++                             const double 				nX1,
++                             const double 				nY1,
++                             const double 				nX2,
++                             const double 				nY2 )
++            {
++                const double x( rStartPos.getX() );
++                const double y( rStartPos.getY() );
++
++                o_rPoly.append(
++                    ::basegfx::tools::createPolygonFromRect( 
++                        ::basegfx::B2DRectangle( x + nX1, y + nY1, x + nX2, y + nY2 ) ) );
++            }
++
++            void appendRect( ::basegfx::B2DPolyPolygon& o_rPoly,
++                             const double 				nX1,
++                             const double 				nY1,
++                             const double 				nX2,
++                             const double 				nY2 )
++            {
++                o_rPoly.append(
++                    ::basegfx::tools::createPolygonFromRect( 
++                        ::basegfx::B2DRectangle( nX1, nY1, nX2, nY2 ) ) );
++            }
++
++            void appendDashes( ::basegfx::B2DPolyPolygon&	o_rPoly,
++                               const double 				nX,
++                               const double 				nY,
++                               const double 				nLineWidth,
++                               const double 				nLineHeight,
++                               const double 				nDashWidth,
++                               const double 				nDashSkip )
++            {
++                const sal_Int32 nNumLoops( 
++                    static_cast< sal_Int32 >(
++                        ::std::max( 1.0,
++                                    nLineWidth / nDashSkip ) + .5) );
++
++                double x = nX;
++                for( sal_Int32 i=0; i<nNumLoops; ++i )
++                {
++                    appendRect( o_rPoly,
++                                x, 				nY,
++                                x + nDashWidth, nY + nLineHeight );
++
++                    x += nDashSkip;
++                }
++            }
++        }
++
++        // create line actions for text such as underline and
++        // strikeout
++        ::basegfx::B2DPolyPolygon createTextLinesPolyPolygon( const ::basegfx::B2DPoint rStartPos,
++                                                              const double&				rLineWidth,
++                                                              const TextLineInfo&		rTextLineInfo )
++        {
++            // fill the polypolygon with all text lines
++            ::basegfx::B2DPolyPolygon aTextLinesPolyPoly;
++
++            switch( rTextLineInfo.mnUnderlineStyle )
++            {
++                case UNDERLINE_NONE:    	  // nothing to do
++                    // FALLTHROUGH intended
++                case UNDERLINE_DONTKNOW:
++                    break;
++
++                case UNDERLINE_SMALLWAVE:     // TODO(F3): NYI
++                    // FALLTHROUGH intended
++                case UNDERLINE_WAVE:          // TODO(F3): NYI
++                    // FALLTHROUGH intended
++                case UNDERLINE_SINGLE:
++                    appendRect( 
++                        aTextLinesPolyPoly,
++                        rStartPos,
++                        0,
++                        rTextLineInfo.mnUnderlineOffset, 
++                        rLineWidth,
++                        rTextLineInfo.mnUnderlineOffset + rTextLineInfo.mnLineHeight );
++                    break;
++
++                case UNDERLINE_BOLDDOTTED:    // TODO(F3): NYI
++                    // FALLTHROUGH intended
++                case UNDERLINE_BOLDDASH:      // TODO(F3): NYI
++                    // FALLTHROUGH intended
++                case UNDERLINE_BOLDLONGDASH:  // TODO(F3): NYI
++                    // FALLTHROUGH intended
++                case UNDERLINE_BOLDDASHDOT:   // TODO(F3): NYI
++                    // FALLTHROUGH intended
++                case UNDERLINE_BOLDDASHDOTDOT:// TODO(F3): NYI
++                    // FALLTHROUGH intended
++                case UNDERLINE_BOLDWAVE:      // TODO(F3): NYI
++                    // FALLTHROUGH intended
++                case UNDERLINE_BOLD:
++                    appendRect( 
++                        aTextLinesPolyPoly,
++                        rStartPos,
++                        0,
++                        rTextLineInfo.mnUnderlineOffset, 
++                        rLineWidth,
++                        rTextLineInfo.mnUnderlineOffset + 2*rTextLineInfo.mnLineHeight );
++                    break;
++
++                case UNDERLINE_DOUBLEWAVE:    // TODO(F3): NYI
++                    // FALLTHROUGH intended
++                case UNDERLINE_DOUBLE:
++                    appendRect( 
++                        aTextLinesPolyPoly,
++                        rStartPos,
++                        0,
++                        rTextLineInfo.mnUnderlineOffset - rTextLineInfo.mnLineHeight, 
++                        rLineWidth,
++                        rTextLineInfo.mnUnderlineOffset );
++
++                    appendRect( 
++                        aTextLinesPolyPoly,
++                        rStartPos,
++                        0,
++                        rTextLineInfo.mnUnderlineOffset + 2*rTextLineInfo.mnLineHeight, 
++                        rLineWidth,
++                        rTextLineInfo.mnUnderlineOffset + 3*rTextLineInfo.mnLineHeight );
++                    break;
++
++                case UNDERLINE_DASHDOTDOT:    // TODO(F3): NYI
++                    // FALLTHROUGH intended
++                case UNDERLINE_DOTTED:
++                    appendDashes( 
++                        aTextLinesPolyPoly,
++                        rStartPos.getX(),
++                        rStartPos.getY() + rTextLineInfo.mnUnderlineOffset,
++                        rLineWidth,
++                        rTextLineInfo.mnLineHeight,
++                        rTextLineInfo.mnLineHeight, 
++                        2*rTextLineInfo.mnLineHeight );
++                    break;
++
++                case UNDERLINE_DASHDOT:       // TODO(F3): NYI
++                    // FALLTHROUGH intended
++                case UNDERLINE_DASH:
++                    appendDashes( 
++                        aTextLinesPolyPoly,
++                        rStartPos.getX(),
++                        rStartPos.getY() + rTextLineInfo.mnUnderlineOffset,
++                        rLineWidth,
++                        rTextLineInfo.mnLineHeight,
++                        3*rTextLineInfo.mnLineHeight, 
++                        6*rTextLineInfo.mnLineHeight );
++                    break;
++
++                case UNDERLINE_LONGDASH:
++                    appendDashes( 
++                        aTextLinesPolyPoly,
++                        rStartPos.getX(),
++                        rStartPos.getY() + rTextLineInfo.mnUnderlineOffset,
++                        rLineWidth,
++                        rTextLineInfo.mnLineHeight,
++                        6*rTextLineInfo.mnLineHeight, 
++                        12*rTextLineInfo.mnLineHeight );
++                    break;
++
++                default:
++                    ENSURE_AND_THROW( false,
++                                      "::cppcanvas::internal::createTextLinesPolyPolygon(): Unexpected underline case" );
++            }
++
++            switch( rTextLineInfo.mnStrikeoutStyle )
++            {
++                case STRIKEOUT_NONE:    // nothing to do
++                    // FALLTHROUGH intended
++                case STRIKEOUT_DONTKNOW:
++                    break;
++
++                case STRIKEOUT_SLASH:   // TODO(Q1): we should handle this in the text layer
++                    // FALLTHROUGH intended
++                case STRIKEOUT_X:
++                    break;
++
++                case STRIKEOUT_SINGLE:
++                    appendRect( 
++                        aTextLinesPolyPoly,
++                        rStartPos,
++                        0,
++                        rTextLineInfo.mnStrikeoutOffset, 
++                        rLineWidth,
++                        rTextLineInfo.mnStrikeoutOffset + rTextLineInfo.mnLineHeight );
++                    break;
++
++                case STRIKEOUT_BOLD:
++                    appendRect( 
++                        aTextLinesPolyPoly,
++                        rStartPos,
++                        0,
++                        rTextLineInfo.mnStrikeoutOffset, 
++                        rLineWidth,
++                        rTextLineInfo.mnStrikeoutOffset + 2*rTextLineInfo.mnLineHeight );
++                    break;
++
++                case STRIKEOUT_DOUBLE:
++                    appendRect( 
++                        aTextLinesPolyPoly,
++                        rStartPos,
++                        0,
++                        rTextLineInfo.mnStrikeoutOffset - rTextLineInfo.mnLineHeight, 
++                        rLineWidth,
++                        rTextLineInfo.mnStrikeoutOffset );
++
++                    appendRect( 
++                        aTextLinesPolyPoly,
++                        rStartPos,
++                        0,
++                        rTextLineInfo.mnStrikeoutOffset + 2*rTextLineInfo.mnLineHeight, 
++                        rLineWidth,
++                        rTextLineInfo.mnStrikeoutOffset + 3*rTextLineInfo.mnLineHeight );
++                    break;
++
++                default:
++                    ENSURE_AND_THROW( false,
++                                      "::cppcanvas::internal::createTextLinesPolyPolygon(): Unexpected strikeout case" );
++            }
++
++            return aTextLinesPolyPoly;
++        }
++
++        // create line actions for text such as underline and
++        // strikeout
++        ::basegfx::B2DPolyPolygon createTextLinesPolyPolygon( const double&			rStartOffset,
++                                                              const double&			rLineWidth,
++                                                              const TextLineInfo&	rTextLineInfo )
++        {
++            return createTextLinesPolyPolygon( 
++                ::basegfx::B2DPoint( rStartOffset,
++                                     0.0 ),
++                rLineWidth,
++                rTextLineInfo );
++        }
++    }
+ }
+
+Index: source/mtfrenderer/mtftools.hxx
+===================================================================
+RCS file: /cvs/gsl/cppcanvas/source/mtfrenderer/mtftools.hxx,v
+retrieving revision 1.2.22.1
+diff -u -r1.2.22.1 mtftools.hxx
+--- cppcanvas/source/mtfrenderer/mtftools.hxx	16 Feb 2005 11:14:28 -0000	1.2.22.1
++++ cppcanvas/source/mtfrenderer/mtftools.hxx	10 Mar 2005 14:25:17 -0000
+@@ -62,10 +62,19 @@
+ #ifndef _CPPCANVAS_RENDERER_MTFTOOLS_HXX
+ #define _CPPCANVAS_RENDERER_MTFTOOLS_HXX
+ 
+-#ifndef _SAL_TYPES_H_
+-#	include <sal/types.h>
+-#endif
++#include <action.hxx>
++#include <cppcanvas/canvas.hxx>
+ 
++
++class VirtualDevice;
++class Point;
++class Size;
++
++namespace basegfx
++{
++    class B2DVector;
++    class B2DPoint;
++}
+ namespace com { namespace sun { namespace star { namespace rendering 
+ {
+     struct RenderState;
+@@ -81,8 +90,159 @@
+ 
+     namespace tools
+     {
++        /** Init render state from OutDevState
++
++        	This method initializes the given render state object,
++        	sets up the transformation and the clip from the
++        	OutDevState.
++         */
+         void initRenderState( ::com::sun::star::rendering::RenderState&	renderState,
+                               const ::cppcanvas::internal::OutDevState&			outdevState );
++
++        /** Construct a matrix that converts from logical to pixel
++            coordinate system.
++
++            This method calculates a matrix that approximates the
++            VirtualDevice's LogicToPixel conversion (disregarding any
++            offset components, thus the 'linear' in the method name -
++            the returned matrix is guaranteed to be linear).
++
++            @param o_rMatrix
++            This matrix will receive the calculated transform, and is
++            also returned from this method.
++
++            @return the calculated transformation matrix.
++         */
++        ::basegfx::B2DHomMatrix& calcLogic2PixelLinearTransform( ::basegfx::B2DHomMatrix&	o_rMatrix,
++                                                                 const VirtualDevice& 		rVDev );
++
++        /** This method modifies the clip, to cancel the given
++            transformation.
++
++            As the clip is relative to the render state
++            transformation, offsetting or scaling the render state
++            must modify the clip, to keep it at the same position
++            relative to the primitive at hand
++
++            @param o_rRenderState
++            Render state to change the clip in
++
++            @param rOutdevState
++            Input state. Is used to retrieve the original clip from
++
++            @param rOffset
++            The clip is offsetted by the negative of this value.
++
++            @param pScaling
++            The clip is inversely scaled by this value (if given)
++
++            @return true, if the clip has changed, false if not
++         */
++        bool modifyClip( ::com::sun::star::rendering::RenderState&			o_rRenderState,
++                         const struct ::cppcanvas::internal::OutDevState&	rOutdevState,
++                         const CanvasSharedPtr&								rCanvas,
++                         const ::Point&										rOffset,
++                         const ::basegfx::B2DVector*						pScaling );
++
++        /** This method modifies the clip, to cancel the given
++            transformation.
++
++            As the clip is relative to the render state
++            transformation, offsetting or scaling the render state
++            must modify the clip, to keep it at the same position
++            relative to the primitive at hand
++
++            @param o_rRenderState
++            Render state to change the clip in
++
++            @param rOutdevState
++            Input state. Is used to retrieve the original clip from
++
++            @param rOffset
++            The clip is offsetted by the negative of this value.
++
++            @param pScaling
++            The clip is inversely scaled by this value (if given)
++
++            @return true, if the clip has changed, false if not
++         */
++        bool modifyClip( ::com::sun::star::rendering::RenderState&			o_rRenderState,
++                         const struct ::cppcanvas::internal::OutDevState&	rOutdevState,
++                         const CanvasSharedPtr&								rCanvas,
++                         const ::basegfx::B2DPoint&							rOffset,
++                         const ::basegfx::B2DVector*						pScaling );
++
++        /** This method modifies the clip, to cancel the given
++            transformation.
++
++            As the clip is relative to the render state
++            transformation, transforming the render state further must
++            modify the clip, to keep it at the same position relative
++            to the primitive at hand
++
++            @param o_rRenderState
++            Render state to change the clip in
++
++            @param rOutdevState
++            Input state. Is used to retrieve the original clip from
++
++            @param rTransform
++            The clip is transformed by the inverse of this value.
++
++            @return true, if the clip has changed, false if not
++         */
++        bool modifyClip( ::com::sun::star::rendering::RenderState&			o_rRenderState,
++                         const struct ::cppcanvas::internal::OutDevState&	rOutdevState,
++                         const CanvasSharedPtr&								rCanvas,
++                         const ::basegfx::B2DHomMatrix&						rTransform );
++
++        struct TextLineInfo
++        {
++            TextLineInfo( const double& rLineHeight,
++                          const double& rUnderlineOffset,
++                          const double& rStrikeoutOffset,
++                          sal_Int8		nUnderlineStyle,
++                          sal_Int8		nStrikeoutStyle ) :
++                mnLineHeight( rLineHeight ),
++                mnUnderlineOffset( rUnderlineOffset ),
++                mnStrikeoutOffset( rStrikeoutOffset ),
++                mnUnderlineStyle( nUnderlineStyle ),
++                mnStrikeoutStyle( nStrikeoutStyle )
++            {
++            }
++
++            double 		mnLineHeight;
++            double 		mnUnderlineOffset;
++            double 		mnStrikeoutOffset;
++            sal_Int8	mnUnderlineStyle;
++            sal_Int8	mnStrikeoutStyle;
++        };
++
++        /** Generate text underline/strikeout info struct from OutDev
++            state.
++         */
++        TextLineInfo createTextLineInfo( const ::VirtualDevice& 					rVDev,
++                                         const ::cppcanvas::internal::OutDevState&	rState );
++
++        /** Create a poly-polygon representing the given combination
++            of strikeout and underline.
++
++            @param rStartOffset
++            Offset in X direction, where the underline starts
++
++            @param rLineWidth
++            Width of the line of text to underline/strikeout
++
++            @param rTextLineInfo
++            Common info needed for strikeout/underline generation
++         */
++        ::basegfx::B2DPolyPolygon createTextLinesPolyPolygon( const double&			rStartOffset,
++                                                              const double&			rLineWidth,
++                                                              const TextLineInfo&	rTextLineInfo );
++
++        ::basegfx::B2DPolyPolygon createTextLinesPolyPolygon( const ::basegfx::B2DPoint rStartPos,
++                                                              const double&				rLineWidth,
++                                                              const TextLineInfo&		rTextLineInfo );
+     }
+ }
+ 
+
+Index: cppcanvas/source/inc/action.hxx
+===================================================================
+RCS file: /cvs/gsl/cppcanvas/source/inc/action.hxx,v
+retrieving revision 1.4
+diff -u -r1.4 action.hxx
+--- cppcanvas/source/inc/action.hxx	26 Nov 2004 20:53:15 -0000	1.4
++++ cppcanvas/source/inc/action.hxx	10 Mar 2005 14:25:16 -0000
+@@ -62,8 +62,8 @@
+ #ifndef _CPPCANVAS_ACTION_HXX
+ #define _CPPCANVAS_ACTION_HXX
+ 
+-#ifndef _SAL_CONFIG_H_
+-#include <sal/config.h>
++#ifndef _SAL_TYPES_H_
++#include <sal/types.h>
+ #endif
+ 
+ #ifndef BOOST_SHARED_PTR_HPP_INCLUDED
+@@ -75,16 +75,55 @@
+     class B2DHomMatrix;
+ }
+ 
++
+ /* Definition of Action interface */
+ 
+ namespace cppcanvas 
+ { 
+     namespace internal
+     {
++        /** Interface for internal render actions
+ 
++        	This interface is implemented by all objects generated
++        	from the metafile renderer, and corresponds roughly to the
++        	VCL meta action.
++         */
+         class Action
+         {
+         public:
++            /** Used for rendering action subsets
++
++            	There are several cases where an Action might have
++            	subsettable content, e.g. text, or referenced
++            	metafiles, like the transparent action.
++
++                Generally, at the metafile renderer, all actions are
++                'flattened' out, i.e. a meta action rendering the
++                string "Hello" counts five indices, and a transparent
++                action containing a metafile with 100 actions counts
++                at least 100 indices (contained transparency or text
++                actions recursively add to this value). From the
++                outside, the subset to render is referenced via this
++                flat index range
++             */
++            struct Subset
++            {
++                /** Denotes start of the subset.
++
++                	The index given here specifies the first subaction
++                	to render.
++                 */
++                sal_Int32	mnSubsetBegin;
++
++                /** Denotes end of the subset
++
++                	The index given here specifies the first subaction
++                	<em>not<em> to render, i.e. one action behind the
++                	subset to be rendered
++                 */
++                sal_Int32	mnSubsetEnd;
++            };
++
+             virtual ~Action() {}
+ 
+             /** Render this action to the associated canvas
+@@ -93,6 +132,7 @@
+                 Transformation matrix to apply before rendering
+             */
+             virtual bool render( const ::basegfx::B2DHomMatrix& rTransformation ) const = 0;
++            virtual sal_Int32 getActionCount() { return 1; }
+         };
+ 
+         typedef ::boost::shared_ptr< Action > ActionSharedPtr;
+
+
+Index: cppcanvas/source/mtfrenderer/bitmapaction.cxx
+===================================================================
+RCS file: /cvs/gsl/cppcanvas/source/mtfrenderer/bitmapaction.cxx,v
+retrieving revision 1.3.6.1
+diff -u -r1.3.6.1 bitmapaction.cxx
+--- cppcanvas/source/mtfrenderer/bitmapaction.cxx	16 Feb 2005 11:14:26 -0000	1.3.6.1
++++ cppcanvas/source/mtfrenderer/bitmapaction.cxx	10 Mar 2005 14:25:16 -0000
+@@ -86,10 +86,15 @@
+ #ifndef _BGFX_MATRIX_B2DHOMMATRIX_HXX
+ #include <basegfx/matrix/b2dhommatrix.hxx>
+ #endif
++#ifndef _BGFX_VECTOR_B2DSIZE_HXX
++#include <basegfx/vector/b2dsize.hxx>
++#endif
+ #ifndef _BGFX_TOOLS_CANVASTOOLS_HXX
+ #include <basegfx/tools/canvastools.hxx>
+ #endif
+ 
++#include <boost/utility.hpp>
++
+ #include <mtftools.hxx>
+ 
+ 
+@@ -99,127 +104,143 @@
+ { 
+     namespace internal
+     {
+-		// free support functions
+-		// ======================
+         namespace
+         {
+-            /** Setup transformation such that the next render call is
+-                moved rPoint away.
+-            */
+-            void implSetupTransform( rendering::RenderState& 	rRenderState, 
+-                                     const Point&				rPoint			)
+-            {
+-                ::basegfx::B2DHomMatrix	aLocalTransformation;
+-                
+-                aLocalTransformation.translate( rPoint.X(), 
+-                                                rPoint.Y() );
+-                ::canvas::tools::appendToRenderState( rRenderState, 
+-                                                      aLocalTransformation );
+-            }
+ 
+-            /** Setup transformation such that the next render call is
+-                moved rPoint away, and scaled according to the ratio
+-                given by src and dst size.
+-            */
+-            void implSetupTransform( rendering::RenderState& 	rRenderState,
+-                                     const Point&				rPoint,
+-                                     const Size&				rSrcSize,
+-                                     const Size&				rDstSize		)
++            class BitmapAction : public Action, private ::boost::noncopyable
++            { 
++            public: 
++                BitmapAction( const ::BitmapEx&,  
++                              const ::Point& 	rDstPoint,  
++                              const CanvasSharedPtr&, 
++                              const OutDevState& ); 
++                BitmapAction( const ::BitmapEx&,
++                              const ::Point& 	rDstPoint,  
++                              const ::Size& 	rDstSize,
++                              const CanvasSharedPtr&, 
++                              const OutDevState& ); 
++
++                virtual bool render( const ::basegfx::B2DHomMatrix& rTransformation ) const;
++                virtual bool render( const ::basegfx::B2DHomMatrix& rTransformation,
++                                     const Subset&					rSubset ) const;
++
++                virtual sal_Int32 getActionCount() const;
++
++            private:
++                uno::Reference< rendering::XBitmap > 	mxBitmap;
++                CanvasSharedPtr							mpCanvas;
++                rendering::RenderState					maState;
++            };
++
++
++            BitmapAction::BitmapAction( const ::BitmapEx&		rBmpEx,  
++                                        const ::Point& 			rDstPoint,  
++                                        const CanvasSharedPtr&	rCanvas, 
++                                        const OutDevState& 		rState ) :
++                mxBitmap( ::vcl::unotools::xBitmapFromBitmapEx( rCanvas->getUNOCanvas()->getDevice(), 
++                                                                rBmpEx ) ),
++                mpCanvas( rCanvas ),
++                maState()
+             {
++                tools::initRenderState(maState,rState);
++
++                // Setup transformation such that the next render call is
++                // moved rPoint away.
+                 ::basegfx::B2DHomMatrix	aLocalTransformation;
+-                
+-                aLocalTransformation.scale( static_cast<double>(rDstSize.Width()) / rSrcSize.Width(), 
+-                                            static_cast<double>(rDstSize.Height()) / rSrcSize.Height() );
+-                aLocalTransformation.translate( rPoint.X(), 
+-                                                rPoint.Y() );
+-                ::canvas::tools::appendToRenderState( rRenderState,
++                aLocalTransformation.translate( rDstPoint.X(), 
++                                                rDstPoint.Y() );
++                ::canvas::tools::appendToRenderState( maState, 
+                                                       aLocalTransformation );
++
++                // correct clip (which is relative to original transform)
++                tools::modifyClip( maState, rState, rCanvas, rDstPoint, NULL );
+             }
+ 
+-            /** Setup transformation such that the next render call
+-                paints the content given by the src area into the dst
+-                area. No clipping is set whatsoever.
+-            */
+-            void implSetupTransform( rendering::RenderState& 	rRenderState,
+-                                     const Point&				rSrcPoint,
+-                                     const Size&				rSrcSize,
+-                                     const Point&				rDstPoint,
+-                                     const Size&				rDstSize		)
++            BitmapAction::BitmapAction( const ::BitmapEx&		rBmpEx,
++                                        const ::Point& 			rDstPoint,  
++                                        const ::Size& 			rDstSize,
++                                        const CanvasSharedPtr&	rCanvas, 
++                                        const OutDevState&  	rState 		) :
++                mxBitmap( ::vcl::unotools::xBitmapFromBitmapEx( rCanvas->getUNOCanvas()->getDevice(), 
++                                                                rBmpEx ) ),
++                mpCanvas( rCanvas ),
++                maState()
+             {
++                tools::initRenderState(maState,rState);
++
++                // Setup transformation such that the next render call is
++                // moved rPoint away, and scaled according to the ratio
++                // given by src and dst size.
++                const ::Size aBmpSize( rBmpEx.GetSizePixel() );
+                 ::basegfx::B2DHomMatrix	aLocalTransformation;
+                 
+-                aLocalTransformation.scale( static_cast<double>(rDstSize.Width()) / rSrcSize.Width(), 
+-                                            static_cast<double>(rDstSize.Height()) / rSrcSize.Height() );
+-                aLocalTransformation.translate( rDstPoint.X() - rSrcPoint.X(), 
+-                                                rDstPoint.Y() - rSrcPoint.Y() );
+-                ::canvas::tools::appendToRenderState( rRenderState, 
++                const ::basegfx::B2DSize aScale( static_cast<double>(rDstSize.Width()) / aBmpSize.Width(), 
++                                                 static_cast<double>(rDstSize.Height()) / aBmpSize.Height() );
++                aLocalTransformation.scale( aScale.getX(), aScale.getY() );
++                aLocalTransformation.translate( rDstPoint.X(), 
++                                                rDstPoint.Y() );
++                ::canvas::tools::appendToRenderState( maState,
+                                                       aLocalTransformation );
++            
++                // correct clip (which is relative to original transform)
++                tools::modifyClip( maState, rState, rCanvas, rDstPoint, &aScale );
+             }
+-        }
+ 
+-        BitmapAction::BitmapAction( const ::BitmapEx&		rBmpEx,  
+-                                    const ::Point& 			rDstPoint,  
+-                                    const CanvasSharedPtr&	rCanvas, 
+-                                    const OutDevState& 		rState ) :
+-            mxBitmap( ::vcl::unotools::xBitmapFromBitmapEx( rCanvas->getUNOCanvas()->getDevice(), 
+-                                                            rBmpEx ) ),
+-            mpCanvas( rCanvas ),
+-            maState()
+-        {
+-            tools::initRenderState(maState,rState);
+-            implSetupTransform( maState, rDstPoint );
+-        }
+-
+-        BitmapAction::BitmapAction( const ::BitmapEx&		rBmpEx,
+-                                    const ::Point& 			rDstPoint,  
+-                                    const ::Size& 			rDstSize,
+-                                    const CanvasSharedPtr&	rCanvas, 
+-                                    const OutDevState&  	rState 		) :
+-            mxBitmap( ::vcl::unotools::xBitmapFromBitmapEx( rCanvas->getUNOCanvas()->getDevice(), 
+-                                                            rBmpEx ) ),
+-            mpCanvas( rCanvas ),
+-            maState()
+-        {
+-            tools::initRenderState(maState,rState);
+-            implSetupTransform( maState, rDstPoint, rBmpEx.GetSizePixel(), rDstSize );
+-        }
+-
+-        BitmapAction::BitmapAction( const ::BitmapEx& 		rBmpEx,
+-                                    const ::Point& 			rSrcPoint,
+-                                    const ::Size& 			rSrcSize,
+-                                    const ::Point& 			rDstPoint,
+-                                    const ::Size& 			rDstSize,
+-                                    const CanvasSharedPtr&	rCanvas, 
+-                                    const OutDevState&  	rState		) :
+-            mxBitmap( ::vcl::unotools::xBitmapFromBitmapEx( rCanvas->getUNOCanvas()->getDevice(), 
+-                                                            rBmpEx ) ),
+-            mpCanvas( rCanvas ),
+-            maState()
+-        {
+-            tools::initRenderState(maState,rState);
++            bool BitmapAction::render( const ::basegfx::B2DHomMatrix& rTransformation ) const
++            {
++                RTL_LOGFILE_CONTEXT( aLog, "::cppcanvas::internal::BitmapAction::render()" );
++                RTL_LOGFILE_CONTEXT_TRACE1( aLog, "::cppcanvas::internal::BitmapAction: 0x%X", this );
+ 
+-            // TODO(F2): setup clipping/extract only part of the bitmap
+-            implSetupTransform( maState, rSrcPoint, rSrcSize, rDstPoint, rDstSize );
+-        }
++                rendering::RenderState aLocalState( maState );
++                ::canvas::tools::prependToRenderState(aLocalState, rTransformation);
+ 
+-        BitmapAction::~BitmapAction()
+-        {
+-        }
++                mpCanvas->getUNOCanvas()->drawBitmap( mxBitmap,
++                                                      mpCanvas->getViewState(),
++                                                      aLocalState );
+ 
+-        bool BitmapAction::render( const ::basegfx::B2DHomMatrix& rTransformation ) const
+-        {
+-            RTL_LOGFILE_CONTEXT( aLog, "::cppcanvas::internal::BitmapAction::render()" );
+-            RTL_LOGFILE_CONTEXT_TRACE1( aLog, "::cppcanvas::internal::BitmapAction: 0x%X", this );
+-
+-            rendering::RenderState aLocalState( maState );
+-            ::canvas::tools::prependToRenderState(aLocalState, rTransformation);
++                return true;
++            }
+ 
+-            mpCanvas->getUNOCanvas()->drawBitmap( mxBitmap,
+-                                                  mpCanvas->getViewState(),
+-                                                  aLocalState );
++            bool BitmapAction::render( const ::basegfx::B2DHomMatrix&	rTransformation,
++                                       const Subset&					rSubset ) const
++            {
++                // bitmap only contains a single action, fail if subset
++                // requests different range
++                if( rSubset.mnSubsetBegin != 0 ||
++                    rSubset.mnSubsetEnd != 1 )
++                    return false;
+ 
+-            return true;
+-        }
++                return render( rTransformation );
++            }
+ 
++            sal_Int32 BitmapAction::getActionCount() const
++            {
++                return 1;
++            }
++        } 
++        
++        ActionSharedPtr BitmapActionFactory::createBitmapAction( const ::BitmapEx&		rBmpEx,  
++                                                                 const ::Point& 		rDstPoint,  
++                                                                 const CanvasSharedPtr&	rCanvas, 
++                                                                 const OutDevState&		rState )
++        {
++            return ActionSharedPtr( new BitmapAction(rBmpEx,
++                                                     rDstPoint,
++                                                     rCanvas,
++                                                     rState ) );
++        }
++        
++        ActionSharedPtr BitmapActionFactory::createBitmapAction( const ::BitmapEx&		rBmpEx,
++                                                                 const ::Point& 		rDstPoint,  
++                                                                 const ::Size& 			rDstSize,
++                                                                 const CanvasSharedPtr&	rCanvas, 
++                                                                 const OutDevState& 	rState )
++        {
++            return ActionSharedPtr( new BitmapAction(rBmpEx,
++                                                     rDstPoint,
++                                                     rDstSize,
++                                                     rCanvas,
++                                                     rState ) );
++        } 
+     }
+ }
+Index: cppcanvas/source/mtfrenderer/bitmapaction.hxx
+===================================================================
+RCS file: /cvs/gsl/cppcanvas/source/mtfrenderer/bitmapaction.hxx,v
+retrieving revision 1.3.6.1
+diff -u -r1.3.6.1 bitmapaction.hxx
+--- cppcanvas/source/mtfrenderer/bitmapaction.hxx	16 Feb 2005 11:14:27 -0000	1.3.6.1
++++ cppcanvas/source/mtfrenderer/bitmapaction.hxx	10 Mar 2005 14:25:16 -0000
+@@ -62,28 +62,14 @@
+ #ifndef _CPPCANVAS_BITMAPACTION_HXX
+ #define _CPPCANVAS_BITMAPACTION_HXX
+ 
+-#ifndef _COM_SUN_STAR_UNO_REFERENCE_HXX_
+-#include <com/sun/star/uno/Reference.hxx>
+-#endif
+-
+-#ifndef _COM_SUN_STAR_RENDERING_RENDERSTATE_HPP__
+-#include <com/sun/star/rendering/RenderState.hpp>
+-#endif
+-
+ #include <cppcanvas/canvas.hxx>
+ #include <action.hxx>
+ 
+ class Point;
+ class Size;
+ class BitmapEx;
+-class Color;
+-
+-namespace com { namespace sun { namespace star { namespace rendering 
+-{
+-    class 	XBitmap;
+-} } } }
+ 
+-/* Definition of internal::BitmapAction class */
++/* Definition of internal::BitmapActionFactory class */
+ 
+ namespace cppcanvas 
+ { 
+@@ -91,47 +77,37 @@
+     {
+         struct OutDevState;
+ 
+-        /** Encapsulated converter between GDIMetaFile and
++        /** Creates encapsulated converters between GDIMetaFile and
+             XCanvas. The Canvas argument is deliberately placed at the
+             constructor, to force reconstruction of this object for a
+             new canvas. This considerably eases internal state
+-            handling, since a lot of the internal state
+-            (e.g. deviceColor) is Canvas-dependent.
++            handling, since a lot of the internal state (e.g. fonts,
++            text layout) is Canvas-dependent.
+          */
+-        class BitmapAction : public Action
+-        { 
+-        public: 
+-            BitmapAction( const ::BitmapEx&,  
+-                          const ::Point& 	rDstPoint,  
+-                          const CanvasSharedPtr&, 
+-                          const OutDevState& ); 
+-            BitmapAction( const ::BitmapEx&,
+-                          const ::Point& 	rDstPoint,  
+-                          const ::Size& 	rDstSize,
+-                          const CanvasSharedPtr&, 
+-                          const OutDevState& ); 
+-            BitmapAction( const ::BitmapEx&,
+-                          const ::Point& 	rSrcPoint,
+-                          const ::Size& 	rSrcSize,
+-                          const ::Point& 	rDstPoint,
+-                          const ::Size& 	rDstSize,
+-                          const CanvasSharedPtr&, 
+-                          const OutDevState& ); 
+-            virtual ~BitmapAction(); 
+-
+-            virtual bool render( const ::basegfx::B2DHomMatrix& rTransformation ) const;
++        class BitmapActionFactory
++        {
++        public:
++            /// Unscaled bitmap action, only references destination point
++            static ActionSharedPtr createBitmapAction( const ::BitmapEx&,  
++                                                       const ::Point& 	rDstPoint,  
++                                                       const CanvasSharedPtr&, 
++                                                       const OutDevState& ); 
++            
++            /// Scaled bitmap action, dest point and dest size
++            static ActionSharedPtr createBitmapAction( const ::BitmapEx&,
++                                                       const ::Point& 	rDstPoint,  
++                                                       const ::Size& 	rDstSize,
++                                                       const CanvasSharedPtr&, 
++                                                       const OutDevState& );
+ 
+         private:
+-            // default: disabled copy/assignment
+-            BitmapAction(const BitmapAction&);
+-            BitmapAction& operator = ( const BitmapAction& );
+-
+-            ::com::sun::star::uno::Reference<
+-                ::com::sun::star::rendering::XBitmap > 	mxBitmap;
+-            CanvasSharedPtr										mpCanvas;
+-            ::com::sun::star::rendering::RenderState	maState;
++            // static factory, disable big four
++            BitmapActionFactory();
++            ~BitmapActionFactory();
++            BitmapActionFactory(const BitmapActionFactory&);
++            BitmapActionFactory& operator=( const BitmapActionFactory& );
+         };
+-    } 
++    }
+ }
+ 
+ #endif /*_CPPCANVAS_BITMAPACTION_HXX */
+
+
+--- cppcanvas/source/mtfrenderer/implrenderer.cxx	24 Feb 2005 20:29:02 -0000	1.4.4.4
++++ cppcanvas/source/mtfrenderer/implrenderer.cxx	10 Mar 2005 14:25:17 -0000
+@@ -2045,15 +1962,22 @@
+                     {
+                         MetaBmpAction* pAct = static_cast<MetaBmpAction*>(pCurrAct);
+ 
+-                        maActions.push_back(
+-                            MtfAction(
+-                                ActionSharedPtr(
+-                                    new internal::BitmapAction(
+-                                        pAct->GetBitmap(),
+-                                        rVDev.LogicToPixel( pAct->GetPoint() ),
+-                                        rCanvas,
+-                                        getState( rStates ) ) ),
+-                                io_rCurrActionIndex ) );
++                        ActionSharedPtr pBmpAction(
++                                internal::BitmapActionFactory::createBitmapAction(
++                                    pAct->GetBitmap(),
++                                    rVDev.LogicToPixel( pAct->GetPoint() ),
++                                    rCanvas,
++                                    getState( rStates ) ) );
++
++                        if( pBmpAction )
++                        {
++                            maActions.push_back(
++                                MtfAction(
++                                    pBmpAction,
++                                    io_rCurrActionIndex ) );
++                            
++                            io_rCurrActionIndex += pBmpAction->getActionCount()-1;
++                        }
+                     }
+                     break;
+ 
+@@ -2061,16 +1985,23 @@
+                     {
+                         MetaBmpScaleAction* pAct = static_cast<MetaBmpScaleAction*>(pCurrAct);
+ 
+-                        maActions.push_back(
+-                            MtfAction(
+-                                ActionSharedPtr(
+-                                    new internal::BitmapAction(
+-                                        pAct->GetBitmap(),
+-                                        rVDev.LogicToPixel( pAct->GetPoint() ),
+-                                        rVDev.LogicToPixel( pAct->GetSize() ),
+-                                        rCanvas,
+-                                        getState( rStates ) ) ),
+-                                io_rCurrActionIndex ) );
++                        ActionSharedPtr pBmpAction(
++                                internal::BitmapActionFactory::createBitmapAction(
++                                    pAct->GetBitmap(),
++                                    rVDev.LogicToPixel( pAct->GetPoint() ),
++                                    rVDev.LogicToPixel( pAct->GetSize() ),
++                                    rCanvas,
++                                    getState( rStates ) ) );
++
++                        if( pBmpAction )
++                        {
++                            maActions.push_back(
++                                MtfAction(
++                                    pBmpAction,
++                                    io_rCurrActionIndex ) );
++                            
++                            io_rCurrActionIndex += pBmpAction->getActionCount()-1;
++                        }
+                     }
+                     break;
+ 
+@@ -2078,18 +2009,30 @@
+                     {
+                         MetaBmpScalePartAction* pAct = static_cast<MetaBmpScalePartAction*>(pCurrAct);
+ 
+-                        maActions.push_back(
+-                            MtfAction(
+-                                ActionSharedPtr(
+-                                    new internal::BitmapAction(
+-                                        pAct->GetBitmap(),
+-                                        pAct->GetSrcPoint(),
+-                                        pAct->GetSrcSize(),
+-                                        rVDev.LogicToPixel( pAct->GetDestPoint() ),
+-                                        rVDev.LogicToPixel( pAct->GetDestSize() ),
+-                                        rCanvas,
+-                                        getState( rStates ) ) ),
+-                                io_rCurrActionIndex ) );
++                        // crop bitmap to given source rectangle (no
++                        // need to copy and convert the whole bitmap)
++                        Bitmap aBmp( pAct->GetBitmap() );
++                        const Rectangle aCropRect( pAct->GetSrcPoint(),
++                                                    pAct->GetSrcSize() );
++                        aBmp.Crop( aCropRect );
++
++                        ActionSharedPtr pBmpAction(
++                                internal::BitmapActionFactory::createBitmapAction(
++                                    aBmp,
++                                    rVDev.LogicToPixel( pAct->GetDestPoint() ),
++                                    rVDev.LogicToPixel( pAct->GetDestSize() ),
++                                    rCanvas,
++                                    getState( rStates ) ) );
++
++                        if( pBmpAction )
++                        {
++                            maActions.push_back(
++                                MtfAction(
++                                    pBmpAction,
++                                    io_rCurrActionIndex ) );
++                            
++                            io_rCurrActionIndex += pBmpAction->getActionCount()-1;
++                        }
+                     }
+                     break;
+ 
+@@ -2097,15 +2040,22 @@
+                     {
+                         MetaBmpExAction* pAct = static_cast<MetaBmpExAction*>(pCurrAct);
+ 
+-                        maActions.push_back(
+-                            MtfAction(
+-                                ActionSharedPtr(
+-                                    new internal::BitmapAction(
+-                                        pAct->GetBitmapEx(),
+-                                        rVDev.LogicToPixel( pAct->GetPoint() ),
+-                                        rCanvas,
+-                                        getState( rStates ) ) ),
+-                                io_rCurrActionIndex ) );
++                        ActionSharedPtr pBmpAction(
++                                internal::BitmapActionFactory::createBitmapAction(
++                                    pAct->GetBitmapEx(),
++                                    rVDev.LogicToPixel( pAct->GetPoint() ),
++                                    rCanvas,
++                                    getState( rStates ) ) );
++
++                        if( pBmpAction )
++                        {
++                            maActions.push_back(
++                                MtfAction(
++                                    pBmpAction,
++                                    io_rCurrActionIndex ) );
++                            
++                            io_rCurrActionIndex += pBmpAction->getActionCount()-1;
++                        }
+                     }
+                     break;
+ 
+@@ -2113,16 +2063,23 @@
+                     {
+                         MetaBmpExScaleAction* pAct = static_cast<MetaBmpExScaleAction*>(pCurrAct);
+ 
+-                        maActions.push_back(
+-                            MtfAction(
+-                                ActionSharedPtr(
+-                                    new internal::BitmapAction(
+-                                        pAct->GetBitmapEx(),
+-                                        rVDev.LogicToPixel( pAct->GetPoint() ),
+-                                        rVDev.LogicToPixel( pAct->GetSize() ),
+-                                        rCanvas,
+-                                        getState( rStates ) ) ),
+-                                io_rCurrActionIndex ) );
++                        ActionSharedPtr pBmpAction(
++                                internal::BitmapActionFactory::createBitmapAction(
++                                    pAct->GetBitmapEx(),
++                                    rVDev.LogicToPixel( pAct->GetPoint() ),
++                                    rVDev.LogicToPixel( pAct->GetSize() ),
++                                    rCanvas,
++                                    getState( rStates ) ) );
++
++                        if( pBmpAction )
++                        {
++                            maActions.push_back(
++                                MtfAction(
++                                    pBmpAction,
++                                    io_rCurrActionIndex ) );
++                            
++                            io_rCurrActionIndex += pBmpAction->getActionCount()-1;
++                        }
+                     }
+                     break;
+ 
+@@ -2130,18 +2087,30 @@
+                     {
+                         MetaBmpExScalePartAction* pAct = static_cast<MetaBmpExScalePartAction*>(pCurrAct);
+ 
+-                        maActions.push_back(
+-                            MtfAction(
+-                                ActionSharedPtr(
+-                                    new internal::BitmapAction(
+-                                        pAct->GetBitmapEx(),
+-                                        pAct->GetSrcPoint(),
+-                                        pAct->GetSrcSize(),
+-                                        rVDev.LogicToPixel( pAct->GetDestPoint() ),
+-                                        rVDev.LogicToPixel( pAct->GetDestSize() ),
+-                                        rCanvas,
+-                                        getState( rStates ) ) ),
+-                                io_rCurrActionIndex ) );
++                        // crop bitmap to given source rectangle (no
++                        // need to copy and convert the whole bitmap)
++                        BitmapEx aBmp( pAct->GetBitmapEx() );
++                        const Rectangle aCropRect( pAct->GetSrcPoint(),
++                                                   pAct->GetSrcSize() );
++                        aBmp.Crop( aCropRect );
++
++                        ActionSharedPtr pBmpAction(
++                            internal::BitmapActionFactory::createBitmapAction(
++                                aBmp,
++                                rVDev.LogicToPixel( pAct->GetDestPoint() ),
++                                rVDev.LogicToPixel( pAct->GetDestSize() ),
++                                rCanvas,
++                                getState( rStates ) ) );
++
++                        if( pBmpAction )
++                        {
++                            maActions.push_back(
++                                MtfAction(
++                                    pBmpAction,
++                                    io_rCurrActionIndex ) );
++                            
++                            io_rCurrActionIndex += pBmpAction->getActionCount()-1;
++                        }
+                     }
+                     break;
+ 
+@@ -2149,16 +2118,31 @@
+                     {
+                         MetaMaskAction* pAct = static_cast<MetaMaskAction*>(pCurrAct);
+ 
+-                        // TODO(F2): masking NYI. Further members: mask color
+-                        maActions.push_back(
+-                            MtfAction(
+-                                ActionSharedPtr(
+-                                    new internal::BitmapAction(
+-                                        pAct->GetBitmap(),
+-                                        rVDev.LogicToPixel( pAct->GetPoint() ),
+-                                        rCanvas,
+-                                        getState( rStates ) ) ),
+-                                io_rCurrActionIndex ) );
++                        // create masked BitmapEx right here, as the
++                        // canvas does not provide equivalent
++                        // functionality
++                        Bitmap aMask( pAct->GetBitmap().CreateMask( pAct->GetColor() ) );
++                        aMask.Invert();
++
++                        BitmapEx aBmp( pAct->GetBitmap(),
++                                       aMask );
++
++                        ActionSharedPtr pBmpAction(
++                            internal::BitmapActionFactory::createBitmapAction(
++                                aBmp,
++                                rVDev.LogicToPixel( pAct->GetPoint() ),
++                                rCanvas,
++                                getState( rStates ) ) );
++
++                        if( pBmpAction )
++                        {
++                            maActions.push_back(
++                                MtfAction(
++                                    pBmpAction,
++                                    io_rCurrActionIndex ) );
++                            
++                            io_rCurrActionIndex += pBmpAction->getActionCount()-1;
++                        }
+                     }
+                     break;
+ 
+@@ -2166,17 +2150,32 @@
+                     {
+                         MetaMaskScaleAction* pAct = static_cast<MetaMaskScaleAction*>(pCurrAct);
+ 
+-                        // TODO(F2): masking NYI. Further members: mask color
+-                        maActions.push_back(
+-                            MtfAction(
+-                                ActionSharedPtr(
+-                                    new internal::BitmapAction(
+-                                        pAct->GetBitmap(),
+-                                        rVDev.LogicToPixel( pAct->GetPoint() ),
+-                                        rVDev.LogicToPixel( pAct->GetSize() ),
+-                                        rCanvas,
+-                                        getState( rStates ) ) ),
+-                                io_rCurrActionIndex ) );
++                        // create masked BitmapEx right here, as the
++                        // canvas does not provide equivalent
++                        // functionality
++                        Bitmap aMask( pAct->GetBitmap().CreateMask( pAct->GetColor() ) );
++                        aMask.Invert();
++
++                        BitmapEx aBmp( pAct->GetBitmap(),
++                                       aMask );
++
++                        ActionSharedPtr pBmpAction(
++                            internal::BitmapActionFactory::createBitmapAction(
++                                aBmp,
++                                rVDev.LogicToPixel( pAct->GetPoint() ),
++                                rVDev.LogicToPixel( pAct->GetSize() ),
++                                rCanvas,
++                                getState( rStates ) ) );
++                        
++                        if( pBmpAction )
++                        {
++                            maActions.push_back(
++                                MtfAction(
++                                    pBmpAction,
++                                    io_rCurrActionIndex ) );
++                            
++                            io_rCurrActionIndex += pBmpAction->getActionCount()-1;
++                        }
+                     }
+                     break;
+ 
+@@ -2184,19 +2183,38 @@
+                     {
+                         MetaMaskScalePartAction* pAct = static_cast<MetaMaskScalePartAction*>(pCurrAct);
+ 
+-                        // TODO(F2): masking NYI. Further members: mask color
+-                        maActions.push_back(
+-                            MtfAction(
+-                                ActionSharedPtr(
+-                                    new internal::BitmapAction(
+-                                        pAct->GetBitmap(),
+-                                        pAct->GetSrcPoint(),
+-                                        pAct->GetSrcSize(),
+-                                        rVDev.LogicToPixel( pAct->GetDestPoint() ),
+-                                        rVDev.LogicToPixel( pAct->GetDestSize() ),
+-                                        rCanvas,
+-                                        getState( rStates ) ) ),
+-                                io_rCurrActionIndex ) );
++                        // create masked BitmapEx right here, as the
++                        // canvas does not provide equivalent
++                        // functionality
++                        Bitmap aMask( pAct->GetBitmap().CreateMask( pAct->GetColor() ) );
++                        aMask.Invert();
++
++                        BitmapEx aBmp( pAct->GetBitmap(),
++                                       aMask );
++
++                        // crop bitmap to given source rectangle (no
++                        // need to copy and convert the whole bitmap)
++                        const Rectangle aCropRect( pAct->GetSrcPoint(),
++                                                   pAct->GetSrcSize() );
++                        aBmp.Crop( aCropRect );
++
++                        ActionSharedPtr pBmpAction(
++                            internal::BitmapActionFactory::createBitmapAction(
++                                aBmp,
++                                rVDev.LogicToPixel( pAct->GetDestPoint() ),
++                                rVDev.LogicToPixel( pAct->GetDestSize() ),
++                                rCanvas,
++                                getState( rStates ) ) );
++
++                        if( pBmpAction )
++                        {
++                            maActions.push_back(
++                                MtfAction(
++                                    pBmpAction,
++                                    io_rCurrActionIndex ) );
++                            
++                            io_rCurrActionIndex += pBmpAction->getActionCount()-1;
++                        }
+                     }
+                     break;
+ 
+@@ -2511,10 +2584,11 @@
+             // create a single action for the provided BitmapEx
+             maActions.push_back(
+                 MtfAction(
+-                    ActionSharedPtr( new BitmapAction(rBmpEx,
+-                                                      Point(),
+-                                                      rCanvas,
+-                                                      aState) ),
++                    BitmapActionFactory::createBitmapAction( 
++                        rBmpEx,
++                        Point(),
++                        rCanvas,
++                        aState),
+                     0 ) );
+         }
+ 
