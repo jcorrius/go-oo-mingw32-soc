@@ -21,9 +21,6 @@ struct _OOoBonoboControl {
 	BonoboControl parent;
 
 	OOoBonoboControlPrivate *priv;
-
-	/* Temporary */
-	rtl::OUString uri;
 };
 
 struct _OOoBonoboControlClass {

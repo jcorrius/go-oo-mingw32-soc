@@ -28,6 +28,7 @@ using com::sun::star::uno::Reference;
 struct _OOoBonoboControlPrivate {
 	GtkWidget *hbox;
 	StarFrameWidget *sfw;
+	rtl::OUString uri;
 };
 
 BONOBO_CLASS_BOILERPLATE( OOoBonoboControl, ooo_bonobo_control,
@@ -39,17 +40,32 @@ load_uri( BonoboPersistFile *pf, const CORBA_char *text_uri,
 {
 	OOoBonoboControl *pControl = OOO_BONOBO_CONTROL( user_data );
 
-	pControl->uri = DECLARE_ASCII( "file://" ) + B2U( rtl::OString( text_uri ) );
+	pControl->priv->uri =
+		DECLARE_ASCII( "file://" ) + B2U( rtl::OString( text_uri ) );
 
 	g_message( "Load_uri called: %s", text_uri );
 }
 
 static void
-FrameLoaderLoadFileFromUrl( Reference< frame::XSynchronousFrameLoader > xFrameLoader,
-							Reference< frame::XFrame > xFrame,
-							OUString sUrl,
-							OUString sTypeName)
+FrameLoadFileFromUrl( Reference< frame::XFrame > xFrame,
+					  Reference< lang::XMultiServiceFactory > xSMgr,
+					  OUString sUrl )
 {
+	Reference< document::XTypeDetection > xTypeDetection(
+		xSMgr->createInstance( SERVICENAME_TYPEDETECTION ), uno::UNO_QUERY );
+	g_assert( xTypeDetection.is() );
+	
+	OUString sTypeName( xTypeDetection->queryTypeByURL( sUrl ) );
+
+	Reference< lang::XMultiServiceFactory > xFrameLoaderFactory(
+		xSMgr->createInstance( SERVICENAME_FRAMELOADERFACTORY ),
+		uno::UNO_QUERY );
+
+	Reference< frame::XSynchronousFrameLoader > xFrameLoader(
+		xFrameLoaderFactory->createInstance( sTypeName ),
+		uno::UNO_QUERY );
+	g_assert( xFrameLoader.is() );
+
 	uno::Sequence< PropertyValue > aProperties( 3 );
 
 	aProperties[ 0 ] = PropertyValue( DECLARE_ASCII( "FileName" ),
@@ -74,57 +90,16 @@ static void
 frame_widget_realize( GtkWidget *widget, gpointer user_data )
 {
 	StarFrameWidget *pSocket = STAR_FRAME_WIDGET( widget );
+	OOoBonoboControl *control = OOO_BONOBO_CONTROL( user_data );
 
 	Reference< frame::XFrame > xFrame(
 		star_frame_widget_get_frame( STAR_FRAME_WIDGET( pSocket ) ) );
 	g_assert( xFrame.is() );
-	
-	Reference< document::XTypeDetection > xTypeDetection(
-		pSocket->service_manager->createInstance( SERVICENAME_TYPEDETECTION ),
-		uno::UNO_QUERY );
-	g_assert( xTypeDetection.is() );
-	
-	Reference< XMultiServiceFactory > xFrameLoaderFactory(
-		pSocket->service_manager->createInstance(
-			SERVICENAME_FRAMELOADERFACTORY ),
-		uno::UNO_QUERY );
-
-	OOoBonoboControl *control = OOO_BONOBO_CONTROL( user_data );
-	OUString sTypeName( xTypeDetection->queryTypeByURL( control->uri ) );
-	g_message( "%s", U2B( sTypeName ).pData->buffer);
-
-	Reference< frame::XSynchronousFrameLoader > xFrameLoader(
-		xFrameLoaderFactory->createInstance( sTypeName ),
-		uno::UNO_QUERY );
-	g_assert( xFrameLoader.is() );
-	
-	FrameLoaderLoadFileFromUrl(
-		xFrameLoader, xFrame, control->uri, sTypeName );
+		
+	FrameLoadFileFromUrl( xFrame, pSocket->service_manager, control->priv->uri );
 	
 	// change to full screen mode (the frame)
-	Reference< util::XURLTransformer > xURLTransformer(
-		pSocket->service_manager->createInstance( SERVICENAME_URLTRANSFORMER ),
-		uno::UNO_QUERY );
-
-	util::URL url;
-
-	url.Complete = DECLARE_ASCII( "slot:5627" );
-	url.Port = 0;
-
-	xURLTransformer->parseSmart( url, DECLARE_ASCII( "slot" ) );
-
-	Reference< frame::XDispatchProvider > xDispProv( xFrame, uno::UNO_QUERY );
-	Reference< frame::XDispatch > xDispatch =
-		xDispProv->queryDispatch( url, OUString(), 0);
-
-	uno::Sequence< beans::PropertyValue > aProperties( 1 );
-	aProperties[ 0 ] = PropertyValue( DECLARE_ASCII( "FullScreen" ),
-									  0,
-									  uno::makeAny( sal_True ),
-									  PropertyState_DIRECT_VALUE );
-
-	g_message( "switch to full screen" );
-	xDispatch->dispatch( url, aProperties );
+	star_frame_widget_set_fullscreen( pSocket, sal_True );
 }
 
 

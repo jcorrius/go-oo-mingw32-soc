@@ -5,15 +5,22 @@
 
 #include <com/sun/star/awt/XToolkit.hpp>
 #include <com/sun/star/awt/XSystemChildFactory.hpp>
+#include <com/sun/star/beans/XPropertySet.hpp>
+#include <com/sun/star/frame/XDispatchProvider.hpp>
+#include <com/sun/star/frame/XDispatch.hpp>
 #include <com/sun/star/lang/SystemDependent.hpp>
+#include <com/sun/star/util/URL.hpp>
+#include <com/sun/star/util/XURLTransformer.hpp>
 
 #include "services.h"
 
 using rtl::OUString;
 using namespace com::sun::star::awt;
+using namespace com::sun::star::beans;
 using namespace com::sun::star::frame;
 using namespace com::sun::star::lang;
 using namespace com::sun::star::uno;
+using namespace com::sun::star::util;
 
 #define CLASS_BOILERPLATE(type, type_as_function,			\
 						  parent_type, parent_type_macro)		\
@@ -59,6 +66,36 @@ star_frame_widget_get_frame( StarFrameWidget *sfw )
 	return sfw->priv->x_frame;
 }
 
+void
+star_frame_widget_set_fullscreen( StarFrameWidget *sfw, sal_Bool fullscreen )
+{
+	if( !sfw->priv->x_frame.is() )
+		return;
+
+	Reference< XURLTransformer > xURLTransformer(
+		sfw->service_manager->createInstance( SERVICENAME_URLTRANSFORMER ),
+		UNO_QUERY );
+
+	URL url;
+
+	url.Complete = DECLARE_ASCII( "slot:5627" );
+	url.Port = 0;
+
+	xURLTransformer->parseSmart( url, DECLARE_ASCII( "slot" ) );
+
+	Reference< XDispatchProvider > xDispProv( sfw->priv->x_frame, UNO_QUERY );
+	Reference< XDispatch > xDispatch =
+		xDispProv->queryDispatch( url, OUString(), 0);
+
+	Sequence< PropertyValue > aProperties( 1 );
+	aProperties[ 0 ] = PropertyValue( DECLARE_ASCII( "FullScreen" ),
+									  0,
+									  makeAny( fullscreen ),
+									  PropertyState_DIRECT_VALUE );
+
+	xDispatch->dispatch( url, aProperties );
+}
+
 static void
 star_frame_widget_create_frame( StarFrameWidget *sfw )
 {
@@ -97,6 +134,14 @@ star_frame_widget_realize( GtkWidget *widget )
 }
 
 static void
+star_frame_widget_unrealize( GtkWidget *widget )
+{
+	star_frame_widget_set_fullscreen( STAR_FRAME_WIDGET( widget ), sal_False );
+
+	BONOBO_CALL_PARENT( GTK_WIDGET_CLASS, unrealize, ( widget ) );
+}
+
+static void
 star_frame_widget_dispose( GObject *object )
 {
 	StarFrameWidget *sfw = STAR_FRAME_WIDGET( object );
@@ -131,6 +176,7 @@ star_frame_widget_class_init( StarFrameWidgetClass *klass )
 	GtkWidgetClass *widget_class = GTK_WIDGET_CLASS( klass );
 
 	widget_class->realize = star_frame_widget_realize;
+	widget_class->unrealize = star_frame_widget_unrealize;
 }
 
 static void

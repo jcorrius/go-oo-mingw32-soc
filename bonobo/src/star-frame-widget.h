@@ -39,6 +39,7 @@ struct _StarFrameWidgetClass {
 GType star_frame_widget_get_type ( void );
 GtkWidget *star_frame_widget_new ( Reference< XComponentContext > component_context );
 
-Reference< XFrame > star_frame_widget_get_frame( StarFrameWidget * );
+Reference< XFrame > star_frame_widget_get_frame( StarFrameWidget *sfw );
+void star_frame_widget_set_fullscreen( StarFrameWidget *sfw, sal_Bool fullscreen );
 
 #endif /* STAR_FRAME_WIDGET_H */
