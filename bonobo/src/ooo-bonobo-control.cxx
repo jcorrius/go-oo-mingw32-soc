@@ -49,6 +49,18 @@ BONOBO_CLASS_BOILERPLATE( OOoBonoboControl, ooo_bonobo_control,
 #define URL_COPY				DECLARE_ASCII( "slot:5711" )
 
 static void
+zoomable_report_zoom_level_changed( BonoboZoomable *zoomable,
+									Reference< XPropertySet > view_properties )
+{
+	sal_Int16 zoom;
+	uno::Any a = view_properties->getPropertyValue( DECLARE_ASCII( "ZoomValue" ) );
+	a >>= zoom;
+
+	CORBA_float zoom_level = zoom / 100.0;
+	bonobo_zoomable_report_zoom_level_changed( zoomable, zoom_level, NULL );
+}
+
+static void
 zoomable_set_zoom_level_cb (BonoboZoomable *zoomable,
 							CORBA_float new_zoom_level,
 							OOoBonoboControl *user_data)
@@ -69,6 +81,8 @@ zoomable_set_zoom_level_cb (BonoboZoomable *zoomable,
 	view_properties->setPropertyValue(
 		DECLARE_ASCII( "ZoomValue" ),
 		uno::makeAny( (sal_Int16) ( CLAMP_ZOOM( new_zoom_level * 100 ) ) ) );
+
+	zoomable_report_zoom_level_changed( zoomable, view_properties );
 }
 
 static void
@@ -96,6 +110,9 @@ zoom_in_cb (GtkObject *source, gpointer user_data)
 		uno::makeAny( (sal_Int16) view::DocumentZoomType::BY_VALUE ));
 	view_properties->setPropertyValue( DECLARE_ASCII( "ZoomValue" ),
 									   uno::makeAny( view_zoom ) );
+
+	zoomable_report_zoom_level_changed( control->priv->zoomable,
+										view_properties );
 }
 
 static void
@@ -123,6 +140,9 @@ zoom_out_cb (GtkObject *source, gpointer user_data)
 		uno::makeAny( (sal_Int16) view::DocumentZoomType::BY_VALUE ));
 	view_properties->setPropertyValue( DECLARE_ASCII( "ZoomValue" ),
 									   uno::makeAny( view_zoom ) );
+
+	zoomable_report_zoom_level_changed( control->priv->zoomable,
+										view_properties );
 }
 
 static void
@@ -131,6 +151,10 @@ zoom_to_fit_cb (GtkObject *source, gpointer user_data)
 	OOoBonoboControl *control = OOO_BONOBO_CONTROL( user_data );
 
 	star_frame_widget_zoom_page_width( control->priv->sfw );
+
+	zoomable_report_zoom_level_changed(
+		control->priv->zoomable,
+		star_frame_widget_get_view_properties( control->priv->sfw ) );
 }
 
 static void
@@ -139,6 +163,10 @@ zoom_to_default_cb (GtkObject *source, gpointer user_data)
 	OOoBonoboControl *control = OOO_BONOBO_CONTROL( user_data );
 
 	star_frame_widget_zoom_100( control->priv->sfw );
+
+	zoomable_report_zoom_level_changed(
+		control->priv->zoomable,
+		star_frame_widget_get_view_properties( control->priv->sfw ) );
 }
 
 static void
