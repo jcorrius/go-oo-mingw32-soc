@@ -1,20 +1,3 @@
-Index: svtools/bmpmaker/bmpcore.cxx
-===================================================================
-RCS file: /cvs/oo/util/svtools/bmpmaker/bmpcore.cxx,v
-retrieving revision 1.9
-diff -u -r1.9 bmpcore.cxx
---- svtools/bmpmaker/bmpcore.cxx	2002/06/28 09:26:43	1.9
-+++ svtools/bmpmaker/bmpcore.cxx	2002/11/05 20:11:48
-@@ -303,6 +311,9 @@
- 				}
-                 else
-                 {
-+					if (aBmp.GetBitCount () != 32)
-+						aBmp.Convert (BMP_CONVERSION_32BIT);
-+						
- 		            if( aTotalBmp.IsEmpty() )
- 		            {
-                         // first bitmap determines metrics of total bitmap
 Index: vcl/inc/bitmap.hxx
 ===================================================================
 RCS file: /cvs/oo/gsl/vcl/inc/bitmap.hxx,v
@@ -188,59 +171,6 @@ diff -u -r1.3 salbtype.hxx
  #endif
  }
  
-Index: vcl/source/gdi/bitmap2.cxx
-===================================================================
-RCS file: /cvs/oo/gsl/vcl/source/gdi/bitmap2.cxx,v
-retrieving revision 1.3
-diff -u -r1.3 bitmap2.cxx
---- vcl/source/gdi/bitmap2.cxx	2001/06/28 13:10:36	1.3
-+++ vcl/source/gdi/bitmap2.cxx	2002/11/05 20:13:01
-@@ -204,7 +204,8 @@
- 	{
- 		USHORT nBitCount = ( aHeader.nBitCount <= 1 ) ? 1 :
- 						   ( aHeader.nBitCount <= 4 ) ? 4 :
--						   ( aHeader.nBitCount <= 8 ) ? 8 : 24;
-+						   ( aHeader.nBitCount <= 8 ) ? 8 : 
-+						   ( aHeader.nBitCount <= 24 ) ? 24 : 32;
- 
- 		const Size			aSizePixel( aHeader.nWidth, aHeader.nHeight );
- 		BitmapPalette		aDummyPal;
-@@ -1009,6 +1010,27 @@
- 				}
- 				break;
- 
-+				case 24:
-+				{
-+					BitmapColor aPixelColor;
-+
-+					for( long nY = nHeight - 1; nY >= 0L; nY-- )
-+					{
-+						pTmp = pBuf;
-+
-+						for( long nX = 0L; nX < nWidth; nX++ )
-+						{
-+							aPixelColor = rAcc.GetPixel( nY, nX );
-+							*pTmp++ = aPixelColor.GetBlue();
-+							*pTmp++ = aPixelColor.GetGreen();
-+							*pTmp++ = aPixelColor.GetRed();
-+						}
-+
-+						rOStm.Write( pBuf, nAlignedWidth );
-+					}
-+				}
-+				break;
-+
- 				default:
- 				{
- 					BitmapColor aPixelColor;
-@@ -1023,6 +1045,7 @@
- 							*pTmp++ = aPixelColor.GetBlue();
- 							*pTmp++ = aPixelColor.GetGreen();
- 							*pTmp++ = aPixelColor.GetRed();
-+							*pTmp++ = aPixelColor.GetAlpha();
- 						}
- 
- 						rOStm.Write( pBuf, nAlignedWidth );
 Index: vcl/source/gdi/bmpacc2.cxx
 ===================================================================
 RCS file: /cvs/oo/gsl/vcl/source/gdi/bmpacc2.cxx,v
@@ -340,90 +270,6 @@ diff -u -r1.1.1.1 impbmp.cxx
  }
  
  // -----------------------------------------------------------------------
-Index: vcl/source/gdi/outdev2.cxx
-===================================================================
-RCS file: /cvs/oo/gsl/vcl/source/gdi/outdev2.cxx,v
-retrieving revision 1.5
-diff -u -r1.5 outdev2.cxx
---- vcl/source/gdi/outdev2.cxx	2001/07/27 13:35:51	1.5
-+++ vcl/source/gdi/outdev2.cxx	2002/11/09 00:42:21
-@@ -849,12 +849,75 @@
- 		if( aPosAry.mnSrcWidth && aPosAry.mnSrcHeight && aPosAry.mnDestWidth && aPosAry.mnDestHeight )
- 		{
- #ifndef REMOTE_APPSERVER
--
- 			if( nMirrFlags )
- 				aBmpEx.Mirror( nMirrFlags );
- 
-+			Bitmap composited (aBmpEx.GetSizePixel (), 24, NULL);
-+
- 			const ImpBitmap* pImpBmp = aBmpEx.ImplGetBitmapImpBitmap();
- 			const ImpBitmap* pMaskBmp = aBmpEx.ImplGetMaskImpBitmap();
-+
-+			if (aBmpEx.GetBitCount () == 32) {
-+				Bitmap bitmap = aBmpEx.GetBitmap ();
-+				BitmapReadAccess *read = bitmap.AcquireReadAccess ();
-+
-+				if (!read)
-+					return;
-+
-+				BitmapWriteAccess *write = composited.AcquireWriteAccess ();
-+
-+				if (!write) {
-+					bitmap.ReleaseAccess (read);
-+					return;
-+				}
-+
-+				const Color &bg = GetFillColor ();
-+
-+				int x, y, width, height;
-+				int bg_r, bg_g, bg_b;
-+				unsigned char *src, *dest, *sp, *dp;
-+				int src_rowstride, dest_rowstride;
-+
-+				width = aBmpEx.GetSizePixel ().getWidth ();
-+				height = aBmpEx.GetSizePixel ().getHeight ();
-+				bg_r = bg.GetRed ();
-+				bg_g = bg.GetGreen ();
-+				bg_b = bg.GetBlue ();
-+
-+				src = read->GetBuffer ();
-+				src_rowstride = read->GetScanlineSize ();
-+
-+				dest = write->GetBuffer ();
-+				dest_rowstride = write->GetScanlineSize ();
-+
-+				for (y = 0; y < height; y++) {
-+					sp = src + y * src_rowstride;
-+					dp = dest + y * dest_rowstride;
-+					
-+					for (x = 0; x < width; x++) {
-+						BitmapColor c;
-+						int tmp;
-+
-+						/* Remember, this is BGR, not RGB */
-+						tmp = (sp[0] - bg_b) * sp[3];
-+						dp[0] = bg_b + ((tmp + (tmp >> 8) + 0x80) >> 8);
-+
-+						tmp = (sp[1] - bg_g) * sp[3];
-+						dp[1] = bg_g + ((tmp + (tmp >> 8) + 0x80) >> 8);
-+
-+						tmp = (sp[2] - bg_r) * sp[3];
-+						dp[2] = bg_r + ((tmp + (tmp >> 8) + 0x80) >> 8);
-+
-+						sp += 4;
-+						dp += 3;
-+					}
-+				}
-+
-+				bitmap.ReleaseAccess (read);
-+				composited.ReleaseAccess (write);
-+
-+				pImpBmp = composited.ImplGetImpBitmap ();
-+			}
- 
- 			if ( pMaskBmp )
- 				mpGraphics->DrawBitmap( &aPosAry, *pImpBmp->ImplGetSalBitmap(), *pMaskBmp->ImplGetSalBitmap() );
 Index: vcl/unx/source/gdi/salbmp.cxx
 ===================================================================
 RCS file: /cvs/oo/gsl/vcl/unx/source/gdi/salbmp.cxx,v
@@ -537,41 +383,195 @@ diff -u -p -u -r1.3 bitmap3.cxx
  
  								pWriteAcc->SetPixel( nY, nX, aCol0 );
  							}
-Index: vcl/source/window/toolbox.cxx
+Index: svtools/bmpmaker/bmpcore.cxx
 ===================================================================
-RCS file: /cvs/gsl/vcl/source/window/toolbox.cxx,v
-retrieving revision 1.60
-diff -u -p -u -r1.60 toolbox.cxx
---- vcl/source/window/toolbox.cxx	17 Apr 2003 15:19:46 -0000	1.60
-+++ vcl/source/window/toolbox.cxx	28 May 2003 13:49:23 -0000
-@@ -3069,11 +3068,16 @@ void ToolBox::ImplDrawItem( USHORT nPos,
-                 if( bHighContrastWhite )
-                     nImageStyle |= IMAGE_DRAW_COLORTRANSFORM;
-             }
--            DrawImage( Point( nTempOffX, nTempOffY ), *pImage, nImageStyle );
-+	}
- 
--        }
--        else
--            DrawImage( Point( nTempOffX, nTempOffY ), *pImage, nImageStyle );
-+	if ( ( mnOutStyle & TOOLBOX_STYLE_FLAT ) &&
-+	     ( (pItem->meState != STATE_NOCHECK) || !bPaint ) &&
-+	     ( pItem->meState != STATE_NOCHECK ) )
-+                SetFillColor( rStyleSettings.GetCheckedColor() );
-+	else
-+		SetFillColor (rStyleSettings.GetFaceColor ());
+RCS file: /cvs/util/svtools/bmpmaker/bmpcore.cxx,v
+retrieving revision 1.12
+diff -u -p -u -r1.12 bmpcore.cxx
+--- svtools/bmpmaker/bmpcore.cxx	24 Apr 2003 13:01:46 -0000	1.12
++++ svtools/bmpmaker/bmpcore.cxx	11 Sep 2003 11:59:39 -0000
+@@ -107,7 +107,8 @@ void BmpCreator::ImplCreate( SvStream& r
+                              const ::std::vector< DirEntry >& rInDirs, 
+                              const DirEntry& rOut, 
+                              const String& rName, 
+-                             const LangInfo& rLang )
++                             const LangInfo& rLang,
++							 const Color& rMaskColor)
+ {
+     const sal_uInt32    nOldPos = pSRS->Tell();
+    	const char*         pCollectFile = getenv( "BMP_COLLECT_FILE" );
+@@ -237,6 +238,26 @@ void BmpCreator::ImplCreate( SvStream& r
+ 				}
+                 else
+                 {
++				    if (aBmp.GetBitCount () != 32)
++					{
++						aBmp.Convert (BMP_CONVERSION_32BIT);
 +
-+	DrawImage( Point( nTempOffX, nTempOffY ), *pImage, nImageStyle );
-     }
++						BitmapWriteAccess *pUpd = aBmp.AcquireWriteAccess();
++						
++						for( long nY = 0; nY < aSize.Height(); nY++ ) {
++								for( long nX = 0; nX < aSize.Width(); nX++ ) {
++										BitmapColor aCol;
++										aCol = pUpd->GetPixel( nY, nX );
++										if( aCol == rMaskColor ) {
++												aCol.SetAlpha( 0 );
++												pUpd->SetPixel( nY, nX, aCol );
++										}
++								}
++						}
++
++						aBmp.ReleaseAccess( pUpd );
++					}
++						
+ 		            if( aTotalBmp.IsEmpty() )
+ 		            {
+                         // first bitmap determines metrics of total bitmap
+@@ -335,6 +356,13 @@ void BmpCreator::ImplCreate( SvStream& r
  
-     // Text ausgeben
+ // -----------------------------------------------------------------------------
+ 
++static sal_Int32 GetColorVal( const ByteString &rLine )
++{
++    ByteString aVal( rLine.GetToken( 1, '=' ) );
++	aVal.EraseLeadingChars();
++	return aVal.ToInt32() / 256;
++}
++
+ void BmpCreator::Create( const String& rSRSName, 
+                          const ::std::vector< String >& rInDirs,
+ 			             const String& rOutName, 
+@@ -395,6 +423,8 @@ void BmpCreator::Create( const String& r
+ 
+ 			const String aName( aText.GetToken( 1, '"' ) );
+ 
++			Color aMaskColor;
++
+ 			do
+ 			{
+ 				if( !bLangDep &&
+@@ -405,6 +435,13 @@ void BmpCreator::Create( const String& r
+ 					bLangDep = TRUE;
+ 				}
+ 
++				if( aByteText.Search( "Red" ) != STRING_NOTFOUND )
++					aMaskColor.SetRed( GetColorVal( aByteText ) );
++				if( aByteText.Search( "Green" ) != STRING_NOTFOUND )
++					aMaskColor.SetGreen( GetColorVal( aByteText ) );
++				if( aByteText.Search( "Blue" ) != STRING_NOTFOUND )
++					aMaskColor.SetBlue( GetColorVal( aByteText ) );
++
+ 				if (!pSRS->ReadLine(aByteText))
+ 					 break;
+ 			}
+@@ -415,7 +452,7 @@ void BmpCreator::Create( const String& r
+ 			if( aText.Len() )
+ 			{
+ 				bDone = TRUE;
+- 				ImplCreate( *pSRS, aInDirs, aOutDir, aName, rLang );
++ 				ImplCreate( *pSRS, aInDirs, aOutDir, aName, rLang, aMaskColor );
+ 			}
+ 			else if( ( rLang.mnLangNum != 49 ) && !bLangDep )
+ 			{
+Index: vcl/source/gdi/bitmap2.cxx
+===================================================================
+RCS file: /cvs/gsl/vcl/source/gdi/bitmap2.cxx,v
+retrieving revision 1.4
+diff -u -p -u -r1.4 bitmap2.cxx
+--- vcl/source/gdi/bitmap2.cxx	24 Apr 2003 13:17:58 -0000	1.4
++++ vcl/source/gdi/bitmap2.cxx	12 Sep 2003 14:11:50 -0000
+@@ -204,7 +204,8 @@ BOOL Bitmap::ImplReadDIB( SvStream& rISt
+ 	{
+ 		USHORT nBitCount = ( aHeader.nBitCount <= 1 ) ? 1 :
+ 						   ( aHeader.nBitCount <= 4 ) ? 4 :
+-						   ( aHeader.nBitCount <= 8 ) ? 8 : 24;
++						   ( aHeader.nBitCount <= 8 ) ? 8 : 
++						   ( aHeader.nBitCount <= 24 ) ? 24 : 32;
+ 
+ 		const Size			aSizePixel( aHeader.nWidth, aHeader.nHeight );
+ 		BitmapPalette		aDummyPal;
+@@ -1009,6 +1010,27 @@ BOOL Bitmap::ImplWriteDIBBits( SvStream&
+ 				}
+ 				break;
+ 
++				case 24:
++				{
++					BitmapColor aPixelColor;
++
++					for( long nY = nHeight - 1; nY >= 0L; nY-- )
++					{
++						pTmp = pBuf;
++
++						for( long nX = 0L; nX < nWidth; nX++ )
++						{
++							aPixelColor = rAcc.GetPixel( nY, nX );
++							*pTmp++ = aPixelColor.GetBlue();
++							*pTmp++ = aPixelColor.GetGreen();
++							*pTmp++ = aPixelColor.GetRed();
++						}
++
++						rOStm.Write( pBuf, nAlignedWidth );
++					}
++				}
++				break;
++
+ 				default:
+ 				{
+ 					BitmapColor aPixelColor;
+@@ -1023,6 +1045,7 @@ BOOL Bitmap::ImplWriteDIBBits( SvStream&
+ 							*pTmp++ = aPixelColor.GetBlue();
+ 							*pTmp++ = aPixelColor.GetGreen();
+ 							*pTmp++ = aPixelColor.GetRed();
++							*pTmp++ = aPixelColor.GetAlpha();
+ 						}
+ 
+ 						rOStm.Write( pBuf, nAlignedWidth );
+@@ -1038,6 +1061,38 @@ BOOL Bitmap::ImplWriteDIBBits( SvStream&
+ 	rImageSize = rOStm.Tell() - rImageSize;
+ 
+ 	return( rOStm.GetError() == 0UL );
++}
++
++// ------------------------------------------------------------------
++
++Bitmap
++Bitmap::GetAlphaMask()
++{
++	if( GetBitCount() < 32 )
++        return Bitmap();
++
++    Size aSize = GetSizePixel();
++    Bitmap aAlpha( aSize, 8, &GetGreyPalette( 256 ) );
++
++	aAlpha.Erase( COL_WHITE );
++
++	BitmapReadAccess *pSrc = AcquireReadAccess();
++	BitmapWriteAccess *pDst = aAlpha.AcquireWriteAccess();
++
++	for( long nY = 0; nY < aSize.Height(); nY++ )
++	{
++		for( long nX = 0; nX < aSize.Width(); nX++ )
++		{
++            BitmapColor aCol;
++			aCol = pSrc->GetPixel( nY, nX );
++			pDst->SetPixel( nY, nX, BitmapColor( 255 - aCol.GetAlpha() ) );
++		}
++	}
++	
++	ReleaseAccess( pSrc );
++	ReleaseAccess( pDst );
++		
++	return aAlpha;
+ }
+ 
+ // ------------------------------------------------------------------
 Index: vcl/source/gdi/bitmap.cxx
 ===================================================================
 RCS file: /cvs/gsl/vcl/source/gdi/bitmap.cxx,v
 retrieving revision 1.7
 diff -u -p -u -r1.7 bitmap.cxx
 --- vcl/source/gdi/bitmap.cxx	24 Apr 2003 14:56:22 -0000	1.7
-+++ vcl/source/gdi/bitmap.cxx	2 Jun 2003 15:32:20 -0000
++++ vcl/source/gdi/bitmap.cxx	12 Sep 2003 14:18:51 -0000
 @@ -980,7 +984,9 @@ BOOL Bitmap::CopyPixel( const Rectangle&
  			{
  				long nNextIndex = 0L;
@@ -583,7 +583,21 @@ diff -u -p -u -r1.7 bitmap.cxx
  					Convert( BMP_CONVERSION_24BIT );
  				else if( ( nSrcBitCount == 8 ) && ( nDstBitCount < 8 ) )
  				{
-@@ -1775,17 +1781,46 @@ Bitmap Bitmap::CreateDisplayBitmap( Outp
+@@ -1772,20 +1778,58 @@ Bitmap Bitmap::CreateDisplayBitmap( Outp
+ 
+ // ------------------------------------------------------------------
+ 
++static BYTE doSaturate( BYTE c, BYTE i)
++{
++    int v = 1.2 * c - 0.2 * i;
++	if( v < 0 )
++        return 0;
++	else if( v > 255 )
++        return 255;
++	else
++        return v;
++}
++
  Bitmap Bitmap::GetColorTransformedBitmap( BmpColorMode eColorMode ) const
  {
      Bitmap  aRet( *this );
@@ -592,13 +606,13 @@ diff -u -p -u -r1.7 bitmap.cxx
 -    ULONG   nColorCount = 0;
 -
 -    Image::GetColorTransformArrays( (ImageColorTransform) eColorMode, pSrcColors, pDstColors, nColorCount );
--
+ 
 -    if( nColorCount && pSrcColors && pDstColors )
 -        aRet.Replace( pSrcColors, pDstColors, nColorCount ); 
++    if (eColorMode == BMP_COLOR_HIGHCONTRAST && GetBitCount() >= 24) {
  
 -    delete[] pSrcColors;
 -    delete[] pDstColors;
-+    if (eColorMode == BMP_COLOR_HIGHCONTRAST && GetBitCount() == 32) {
 +	    // Yet another special case for icons
 +	    BitmapReadAccess* pAcc = AcquireReadAccess();
 +	    BitmapWriteAccess* pDis = aRet.AcquireWriteAccess();
@@ -608,16 +622,12 @@ diff -u -p -u -r1.7 bitmap.cxx
 +	    for( long nY = 0; nY < aSize.Height(); nY++ ) {
 +		    for( long nX = 0; nX < aSize.Width(); nX++ ) {
 +			    BitmapColor col = pAcc->GetPixel( nY, nX );
-+			    unsigned char i;
-+			    i = ( col.GetRed() * 0.3 + // magic numbers from gdk-pixbuf
-+				  col.GetGreen() * 0.59 +
-+				  col.GetBlue () * 0.11 );
-+#define SATURATE(c) ((1.2 * c - 0.2 * i) < 255 ? (1.2 * c - 0.2 * i) : 255)
-+			    col.SetRed   (SATURATE ( col.GetRed() ) );
-+			    col.SetGreen (SATURATE ( col.GetGreen() ) );
-+			    col.SetBlue  (SATURATE ( col.GetBlue() ) );
-+#undef SATURATE
-+			    col.SetAlpha( col.GetAlpha() / 2 );
++			    BYTE i = ( col.GetRed() * 0.3 + // magic numbers from gdk-pixbuf
++						   col.GetGreen() * 0.59 +
++						   col.GetBlue () * 0.11 );
++			    col.SetRed   (doSaturate ( col.GetRed(), i ) );
++			    col.SetGreen (doSaturate ( col.GetGreen(), i ) );
++			    col.SetBlue  (doSaturate ( col.GetBlue(), i ) );
 +			    pDis->SetPixel( nY, nX, col );
 +		    }
 +	    }
@@ -625,7 +635,8 @@ diff -u -p -u -r1.7 bitmap.cxx
 +	    aRet.ReleaseAccess( pDis );
 +	    ReleaseAccess( pAcc );
 +    } else {
-+	    Color*  pSrcColors = NULL;
++	
++		Color*  pSrcColors = NULL;
 +	    Color*  pDstColors = NULL;
 +	    ULONG   nColorCount = 0;
 +	    
