@@ -1,14 +1,14 @@
 EXTRA_DIST=\
-	openintro_redhat.png \
-	openabout_redhat.png \
-	openintro_suse.png \
-	openabout_suse.png \
-	openintro_nld.png \
-	openabout_nld.png \
-	openintro_pld.png \
-	openabout_pld.png \
-	openintro_kde.png \
-	openabout_kde.png \
+	openintro_redhat.bmp \
+	openabout_redhat.bmp \
+	openintro_suse.bmp \
+	openabout_suse.bmp \
+	openintro_nld.bmp \
+	openabout_nld.bmp \
+	openintro_pld.bmp \
+	openabout_pld.bmp \
+	openintro_kde.bmp \
+	openabout_kde.bmp \
 	file-bug-24.png \
 	file-bug-16.png
 
