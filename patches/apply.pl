@@ -266,7 +266,7 @@ sub apply_patches {
             print "\n" unless $quiet;
             do_patch $patch, $base_cmd;
 
-            my $patch_copy = sprintf("%s/%03d-%s", $applied_patches, ++$patch_num, $patch_file);
+            my $patch_copy = sprintf("%s/%03d-%s", $applied_patches, $patch_num++, $patch_file);
 
             print "copy $patch_file -> $patch_copy\n" unless $quiet;
 
