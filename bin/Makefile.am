@@ -3,6 +3,7 @@ script_files = \
 	build-tools \
 	font-munge \
 	fix-deps \
+	generate-bash-completion \
 	help-font-munge \
 	install-dict.in \
 	install-dictionaries \
