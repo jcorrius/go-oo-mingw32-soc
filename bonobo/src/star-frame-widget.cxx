@@ -53,10 +53,11 @@ star_frame_widget_create_view_properties( StarFrameWidget *sfw )
 
 	Reference< XViewSettingsSupplier > xViewSettingsSupplier(
 		sfw->priv->x_frame->getController(), UNO_QUERY );
-	if( !xViewSettingsSupplier.is() )
-		return;
-
-	sfw->priv->view_properties = xViewSettingsSupplier->getViewSettings();
+	if( xViewSettingsSupplier.is() )
+		sfw->priv->view_properties = xViewSettingsSupplier->getViewSettings();
+	else
+		sfw->priv->view_properties.set( sfw->priv->x_frame->getController(),
+										UNO_QUERY );
 }
 
 Reference< XPropertySet >
