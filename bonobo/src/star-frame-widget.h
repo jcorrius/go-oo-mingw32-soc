@@ -15,9 +15,11 @@ typedef struct _StarFrameWidgetPrivate StarFrameWidgetPrivate;
 
 #include <com/sun/star/awt/XWindow.hpp>
 #include <com/sun/star/awt/XWindowPeer.hpp>
+#include <com/sun/star/beans/XPropertySet.hpp>
 #include <com/sun/star/frame/XFrame.hpp>
 #include <com/sun/star/lang/XMultiServiceFactory.hpp>
 #include <com/sun/star/uno/XComponentContext.hpp>
+#include <com/sun/star/util/URL.hpp>
 
 using com::sun::star::uno::Reference;
 using com::sun::star::frame::XFrame;
@@ -40,6 +42,7 @@ GType star_frame_widget_get_type ( void );
 GtkWidget *star_frame_widget_new ( Reference< XComponentContext > component_context );
 
 Reference< XFrame > star_frame_widget_get_frame( StarFrameWidget *sfw );
+void star_frame_widget_dispatch_slot_url( StarFrameWidget *sfw, ::com::sun::star::util::URL url, const ::com::sun::star::uno::Sequence< ::com::sun::star::beans::PropertyValue > &properties );
 void star_frame_widget_set_fullscreen( StarFrameWidget *sfw, sal_Bool fullscreen );
 
 #endif /* STAR_FRAME_WIDGET_H */

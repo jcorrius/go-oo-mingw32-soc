@@ -1,6 +1,7 @@
 INCLUDES =								    \
 	-DINIFILE=\"$(datadir)/ooo-bonobo/ooo-bonobo-uno-bootstrap.ini\"    \
-	$(OOO_BONOBO_CFLAGS)
+	-DDATADIR=\""$(datadir)"\"					    \
+	$(OOO_BONOBO_CFLAGS)							
 
 LDADD =	\
 	$(OOO_BONOBO_LIBS)

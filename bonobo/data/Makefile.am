@@ -26,7 +26,10 @@ ini_DATA = $(ini_in_files:.ini.in=.ini)
 %.ini: %.ini.in
 	sed -e "s|\@RDBDIR\@|$(rdbdir)|" $< > $@
 
+uidir = $(datadir)/gnome-2.0/ui
+ui_DATA = ooo-bonobo-control-ui.xml
+
 BUILT_SOURCES=$(ini_DATA) $(rdb_DATA) $(server_DATA)
 CLEANFILES=$(BUILT_SOURCES)
 
-EXTRA_DIST=$(server_in_files) $(ini_in_files)
+EXTRA_DIST=$(server_in_files) $(ini_in_files) $(ui_DATA)

@@ -34,6 +34,87 @@ struct _OOoBonoboControlPrivate {
 BONOBO_CLASS_BOILERPLATE( OOoBonoboControl, ooo_bonobo_control,
 						  BonoboControl, BONOBO_TYPE_CONTROL);
 
+#define URL_SAVEASDOC			DECLARE_ASCII( "slot:5502" )
+#define URL_EXPORTDOC			DECLARE_ASCII( "slot:5829" )
+#define URL_EXPORTDOCASPDF		DECLARE_ASCII( "slot:6673" )
+#define URL_PRINTDOC			DECLARE_ASCII( "slot:5504" )
+#define URL_DOCINFO				DECLARE_ASCII( "slot:5535" )
+#define URL_COPY				DECLARE_ASCII( "slot:5711" )
+
+static void
+verb_FileSaveAs_cb( BonoboUIComponent *uic, gpointer user_data, const char *cname)
+{
+	OOoBonoboControl *control = OOO_BONOBO_CONTROL( user_data );
+
+	util::URL url;
+	url.Complete = URL_SAVEASDOC;
+
+	star_frame_widget_dispatch_slot_url( control->priv->sfw, url,
+										 uno::Sequence< PropertyValue >(0) );
+}
+
+static void
+verb_FileExport_cb( BonoboUIComponent *uic, gpointer user_data, const char *cname)
+{
+	OOoBonoboControl *control = OOO_BONOBO_CONTROL( user_data );
+
+	util::URL url;
+	url.Complete = URL_EXPORTDOC;
+
+	star_frame_widget_dispatch_slot_url( control->priv->sfw, url,
+										 uno::Sequence< PropertyValue >(0) );
+}
+
+static void
+verb_FileExportPDF_cb( BonoboUIComponent *uic, gpointer user_data, const char *cname)
+{
+	OOoBonoboControl *control = OOO_BONOBO_CONTROL( user_data );
+
+	util::URL url;
+	url.Complete = URL_EXPORTDOCASPDF;
+
+	star_frame_widget_dispatch_slot_url( control->priv->sfw, url,
+										 uno::Sequence< PropertyValue >(0) );
+}
+
+static void
+verb_FilePrint_cb( BonoboUIComponent *uic, gpointer user_data, const char *cname)
+{
+	OOoBonoboControl *control = OOO_BONOBO_CONTROL( user_data );
+
+	util::URL url;
+	url.Complete = URL_PRINTDOC;
+
+	star_frame_widget_dispatch_slot_url( control->priv->sfw, url,
+										 uno::Sequence< PropertyValue >(0) );
+}
+
+static void
+verb_FileProperties_cb( BonoboUIComponent *uic, gpointer user_data, const char *cname)
+{
+	OOoBonoboControl *control = OOO_BONOBO_CONTROL( user_data );
+
+	util::URL url;
+	url.Complete = URL_DOCINFO;
+
+	star_frame_widget_dispatch_slot_url( control->priv->sfw, url,
+										 uno::Sequence< PropertyValue >(0) );
+}
+
+
+// FIXME make insensitive when selection is empty
+static void
+verb_EditCopy_cb( BonoboUIComponent *uic, gpointer user_data, const char *cname)
+{
+	OOoBonoboControl *control = OOO_BONOBO_CONTROL( user_data );
+
+	util::URL url;
+	url.Complete = URL_COPY;
+
+	star_frame_widget_dispatch_slot_url( control->priv->sfw, url,
+										 uno::Sequence< PropertyValue >(0) );
+}
+
 static int
 load_uri( BonoboPersistFile *pf, const CORBA_char *text_uri,
 		  CORBA_Environment *ev, gpointer user_data )
@@ -102,11 +183,46 @@ frame_widget_realize( GtkWidget *widget, gpointer user_data )
 	star_frame_widget_set_fullscreen( pSocket, sal_True );
 }
 
+static BonoboUIVerb verbs[] = {
+	BONOBO_UI_VERB( "FileSaveAs",		verb_FileSaveAs_cb ),
+	BONOBO_UI_VERB( "FileExport",		verb_FileExport_cb ),
+	BONOBO_UI_VERB( "FileExportPDF",	verb_FileExportPDF_cb ),
+	BONOBO_UI_VERB( "FilePrint",		verb_FilePrint_cb ),
+	BONOBO_UI_VERB( "FileProperties",	verb_FileProperties_cb ),
+
+	BONOBO_UI_VERB( "EditCopy",			verb_EditCopy_cb ),
+
+// 	BONOBO_UI_VERB( "ZoomIn",			verb_ZoomIn_cb ),
+// 	BONOBO_UI_VERB( "ZoomOut",			verb_ZoomOut_cb ),
+// 	BONOBO_UI_VERB( "ZoomNormal",		verb_ZoomNormal_cb ),
+// 	BONOBO_UI_VERB( "ZoomFit",			verb_ZoomFit_cb ),
+
+	BONOBO_UI_VERB_END
+};
 
 static void
 ooo_bonobo_control_activate( BonoboControl *control, gboolean activate )
 {
 	gtk_widget_show( GTK_WIDGET( OOO_BONOBO_CONTROL( control )->priv->sfw ) );
+
+	BonoboUIComponent *ui_component = bonobo_control_get_ui_component( control );
+	if( activate ) {
+		Bonobo_UIContainer ui_container =
+			bonobo_control_get_remote_ui_container( control, NULL );
+
+		if( ui_container != CORBA_OBJECT_NIL ) {
+			bonobo_ui_component_set_container( ui_component, ui_container, NULL );
+			bonobo_ui_component_add_verb_list_with_data(
+				ui_component, verbs, control );
+			bonobo_ui_util_set_ui( ui_component, DATADIR,
+								   "ooo-bonobo-control-ui.xml",
+								   "ooo-bonobo", NULL );			
+		}
+	} else {
+		bonobo_ui_component_unset_container( ui_component, NULL );
+	}
+
+	BONOBO_CALL_PARENT( BONOBO_CONTROL_CLASS, activate, ( control, activate ) );
 }
 
 static void

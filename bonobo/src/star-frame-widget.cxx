@@ -67,7 +67,8 @@ star_frame_widget_get_frame( StarFrameWidget *sfw )
 }
 
 void
-star_frame_widget_set_fullscreen( StarFrameWidget *sfw, sal_Bool fullscreen )
+star_frame_widget_dispatch_slot_url( StarFrameWidget *sfw, URL url,
+									 const Sequence< PropertyValue > &properties )
 {
 	if( !sfw->priv->x_frame.is() )
 		return;
@@ -76,24 +77,28 @@ star_frame_widget_set_fullscreen( StarFrameWidget *sfw, sal_Bool fullscreen )
 		sfw->service_manager->createInstance( SERVICENAME_URLTRANSFORMER ),
 		UNO_QUERY );
 
-	URL url;
-
-	url.Complete = DECLARE_ASCII( "slot:5627" );
-	url.Port = 0;
-
 	xURLTransformer->parseSmart( url, DECLARE_ASCII( "slot" ) );
 
 	Reference< XDispatchProvider > xDispProv( sfw->priv->x_frame, UNO_QUERY );
 	Reference< XDispatch > xDispatch =
 		xDispProv->queryDispatch( url, OUString(), 0);
 
-	Sequence< PropertyValue > aProperties( 1 );
-	aProperties[ 0 ] = PropertyValue( DECLARE_ASCII( "FullScreen" ),
-									  0,
-									  makeAny( fullscreen ),
-									  PropertyState_DIRECT_VALUE );
+	xDispatch->dispatch( url, properties );
+}
 
-	xDispatch->dispatch( url, aProperties );
+void
+star_frame_widget_set_fullscreen( StarFrameWidget *sfw, sal_Bool fullscreen )
+{
+	URL url;
+
+	url.Complete = DECLARE_ASCII( "slot:5627" );
+
+	Sequence< PropertyValue > properties( 1 );
+	properties[ 0 ] = PropertyValue( DECLARE_ASCII( "FullScreen" ),
+									 0,
+									 makeAny( fullscreen ),
+									 PropertyState_DIRECT_VALUE );
+	star_frame_widget_dispatch_slot_url( sfw, url, properties );
 }
 
 static void
