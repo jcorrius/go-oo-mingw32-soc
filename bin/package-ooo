@@ -13,6 +13,7 @@ export LANG='';
 
 echo "Cleaning $OOINSTDIR";
 rm -Rf $OOINSTDIR;
+set -e
 
 echo "Building $OOINSTDIR/ooo-wrapper$BINSUFFIX";
 sed -e "s|@OOINSTBASE@|$OOINSTBASE|g
@@ -74,7 +75,8 @@ else
 	chmod +x $PREFIX/bin/ooo-wrapper$BINSUFFIX
 	for app in calc draw fromtemplate impress html math web writer ffice; do
 		ln -sf ooo-wrapper${BINSUFFIX} $PREFIX/bin/oo${app}${BINSUFFIX}
-		if test "z$VENDORNAME" = "zNovell" -o "z$VENDORNAME" = "zSUSE" -o "z$VENDORNAME" = "zPLD"; then
+		if test "z$VENDORNAME" = "zNovell" -o "z$VENDORNAME" = "zSUSE" -o "z$VENDORNAME" = "zPLD" \
+		        -o "z$VENDORNAME" = "zDebian"; then
 			echo ".so man1/openoffice$BINSUFFIX.1" >| $MANDIR/man1/oo${app}$BINSUFFIX.1;
 		fi
 	done
@@ -176,7 +178,9 @@ echo "Execute ooinstall ...";
 cd $TOOLSDIR/bin
 
 ./ooinstall $OOINSTDIR || exit 1;
-
+##cp -ra $OODESTDIR $OODESTDIR.1 || exit 1
+##rm -r $OODESTDIR
+##cp -ra $OODESTDIR.1 $OODESTDIR || exit 1
 echo "Cleaning up ...";
 
 # No idea what these files are good for (?)
@@ -191,9 +195,11 @@ echo "Installing extra dictionaries..."
 
 $TOOLSDIR/bin/install-dictionaries $OOINSTDIR || exit 1;
 
-echo "Installing localized help contents..."
-
-$TOOLSDIR/bin/install-help || exit 1;
+# Java-disabled builds do not create help
+if test -d $OOINSTDIR/help; then
+  echo "Installing localized help contents..."
+  $TOOLSDIR/bin/install-help || exit 1
+fi
 
 # move one file from one list of files to a second one
 # Params: target_file_list source_file_list file_to_move
@@ -214,8 +220,6 @@ add_used_directories()
     rm $2.pattern
 }
 
-echo "Moving package file lists..."
-
 if ! test -f $OODESTDIR/gid_Module_Root; then
     echo "Failed to generate package file lists";
     exit 1;
@@ -223,48 +227,118 @@ fi
 
 cd $OODESTDIR
 
-# Nasty hack for now...
-echo "$OOINSTBASE/dictionary.lst
-$OOINSTBASE/install-dict
-$OOINSTBASE/program/liblnth680li.so" > gid_Module_Hack
+if test "z$VENDORNAME" != "zDebian" ; then
+	echo "Moving package file lists..."
 
-cat gid_Module_Optional_Grfflt \
-    gid_Module_Prg_Calc \
-    gid_Module_Prg_Math \
-    gid_Module_Optional_Javafilter \
-    gid_Module_Optional_Testtool \
-    gid_Module_Prg_Draw \
-    gid_Module_Prg_Wrt \
-    gid_Module_Optional_Mailcap \
-    gid_Module_Optional_Xsltfiltersamples \
-    gid_Module_Prg_Impress \
-    gid_Module_Root \
-    gid_Module_Hack \
-    | sort | uniq \
-    > $BUILDDIR/common_list.txt
+	# Nasty hack for now...
+	echo "$OOINSTBASE/dictionary.lst
+	$OOINSTBASE/install-dict
+	$OOINSTBASE/program/liblnth680li.so" > gid_Module_Hack
+	
+	cat gid_Module_Optional_Grfflt \
+		gid_Module_Prg_Calc \
+		gid_Module_Prg_Math \
+		gid_Module_Optional_Javafilter \
+		gid_Module_Optional_Testtool \
+		gid_Module_Prg_Draw \
+		gid_Module_Prg_Wrt \
+		gid_Module_Optional_Mailcap \
+		gid_Module_Optional_Xsltfiltersamples \
+		gid_Module_Prg_Impress \
+		gid_Module_Root \
+		gid_Module_Hack \
+		| sort | uniq \
+		> $BUILDDIR/common_list.txt
+	
+	# sort && uniq suck but eg. gid_Module_Optional_Draw & Impress have substantial overlap
+	
+	#
+	# FIXME: lang-packs etc.
+	#    gid_Module_Optional_Oo_English
+	#
+	
+	cd $BUILDDIR
+	
+	# kde subpackage
+	rm -f kde_list.txt
+	mv_file_between_flists kde_list.txt common_list.txt $OOINSTBASE/program/kdefilepicker
+	mv_file_between_flists kde_list.txt common_list.txt $OOINSTBASE/program/libfps_kde.so
+	mv_file_between_flists kde_list.txt common_list.txt $OOINSTBASE/program/libvclplug_kde[0-9]*li.so
+	add_used_directories kde_list.txt common_list.txt
+	
+	# gnome subpackage
+	rm -f gnome_list.txt
+	mv_file_between_flists gnome_list.txt common_list.txt $OOINSTBASE/program/libevoab2.so
+	mv_file_between_flists gnome_list.txt common_list.txt $OOINSTBASE/program/libfps_gnome.so
+	mv_file_between_flists gnome_list.txt common_list.txt $OOINSTBASE/program/libvclplug_gtk[0-9]*li.so
+	add_used_directories gnome_list.txt common_list.txt
+else
+	echo "Creating package directories..."
 
-# sort && uniq suck but eg. gid_Module_Optional_Draw & Impress have substantial overlap
+	test -d pkg && rm -r pkg
 
-#
-# FIXME: lang-packs etc.
-#    gid_Module_Optional_Oo_English
-#
+	# Create package tree (needed by Debian's dpkg)
+	# create_package_directory <list_file> <directory_name>
+	create_package_directory()
+	{
+		listfile=$1
+		directory="$2"
+		perl -nl \
+			-e " if(/^%dir (.*)/)
+					{system('mkdir', '-p', '-m', '755', \"$directory\".\$1);}
+				else
+					{rename('./'.\$_, \"$directory\".\$_);}
+				" \
+			$listfile
+	}
 
-cd $BUILDDIR
+	create_package_directory gid_Module_Root pkg/openoffice.org-common
+	create_package_directory gid_Module_Optional_Grfflt 			pkg/openoffice.org-common
+	create_package_directory gid_Module_Optional_Mailcap 			pkg/openoffice.org-common
+	create_package_directory gid_Module_Optional_Xsltfiltersamples 	pkg/openoffice.org-common
+	create_package_directory gid_Module_Prg_Calc 					pkg/openoffice.org-calc
+	create_package_directory gid_Module_Prg_Math 					pkg/openoffice.org-math	
+	create_package_directory gid_Module_Prg_Draw 					pkg/openoffice.org-draw
+	create_package_directory gid_Module_Prg_Wrt 					pkg/openoffice.org-writer
+	create_package_directory gid_Module_Prg_Impress 				pkg/openoffice.org-impress
 
-# kde subpackage
-rm -f kde_list.txt
-mv_file_between_flists kde_list.txt common_list.txt $OOINSTBASE/program/kdefilepicker
-mv_file_between_flists kde_list.txt common_list.txt $OOINSTBASE/program/libfps_kde.so
-mv_file_between_flists kde_list.txt common_list.txt $OOINSTBASE/program/libvclplug_kde[0-9]*li.so
-add_used_directories kde_list.txt common_list.txt
+	# move_wrappers <directory_name> <name> [...]
+	move_wrappers()
+	{
+		directory=$1
+		shift
+		mkdir -m755 -p "$directory"/usr/bin
+		mkdir -m755 -p "$directory"/usr/man/man1
+		while test -n "$1"; do
+			mv usr/*bin/"$1$BINSUFFIX" "$directory"/usr/bin
+			mv usr/man/man1/"$1$BINSUFFIX.1" "$directory"/usr/man/man1
+			shift
+		done
+	}
+	move_wrappers pkg/openoffice.org-common ooffice oofromtemplate 
+	move_wrappers pkg/openoffice.org-writer oowriter oohtml ooweb
+	move_wrappers pkg/openoffice.org-calc oocalc
+	move_wrappers pkg/openoffice.org-impress ooimpress
+	move_wrappers pkg/openoffice.org-math oomath
+	move_wrappers pkg/openoffice.org-draw oodraw
+	for F in sbin/oojvmsetup sbin/oopadmin bin/ooo-wrapper; do
+		mv usr/$F$BINSUFFIX pkg/openoffice.org-common/usr/bin
+	done
 
-# gnome subpackage
-rm -f gnome_list.txt
-mv_file_between_flists gnome_list.txt common_list.txt $OOINSTBASE/program/libevoab2.so
-mv_file_between_flists gnome_list.txt common_list.txt $OOINSTBASE/program/libfps_gnome.so
-mv_file_between_flists gnome_list.txt common_list.txt $OOINSTBASE/program/libvclplug_gtk[0-9]*li.so
-add_used_directories gnome_list.txt common_list.txt
+	# Core package contains arch dependent files
+	mkdir -m755 -p pkg/openoffice.org-core/$OOINSTBASE/program/filter
+	mv pkg/openoffice.org-common/$OOINSTBASE/program/filter/* pkg/openoffice.org-core/$OOINSTBASE/program/filter
+	
+	# Move all libraries, binaries, *.rdb from -common to -core
+	( cd pkg/openoffice.org-common/$OOINSTBASE/program
+	  find -type f -maxdepth 1 \
+	       -regex '\./\(.*\.so.*\|.*\.bin\|pagein\|nsplugin\|kdefilepicker\|.*\.rdb\)' \
+		   -exec mv {} $OODESTDIR/pkg/openoffice.org-core/$OOINSTBASE/program \;
+	)
+	
+	# Warn for any remaining files
+	find . -path './pkg' -prune -o -not -name 'gid_Module_*' -not -type d -exec echo "File not packaged: {}" \;
+fi
 
 echo "Cleaning up lists of files...";
 mv -f $OODESTDIR/gid_Module_* $BUILDDIR
