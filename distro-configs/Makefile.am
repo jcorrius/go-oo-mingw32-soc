@@ -1,1 +1,1 @@
-EXTRA_DIRS = $(wildcard *.conf.in)
+EXTRA_DIST = $(wildcard *.conf.in)
