@@ -313,7 +313,7 @@ $quiet = 0;
 $remove = 0;
 $export = 0;
 $opts = "";
-$distro = 'Ximian';
+$distro = 'NLD';
 @required_opts = ( 'PATCHPATH' );
 @arguments = ();
 
