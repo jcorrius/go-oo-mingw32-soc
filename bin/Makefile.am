@@ -12,3 +12,9 @@ script_files = \
 	latest-patchset
 
 EXTRA_DIST = $(script_files) ooo1.1.spec.in ooo.spec.in
+
+all:
+	./build-ooo ${TAG} --checkout
+
+install:
+	./package-ooo ${TAG} --clean
