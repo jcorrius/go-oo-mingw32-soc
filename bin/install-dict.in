@@ -1,109 +1,79 @@
 #!/usr/bin/perl -w
 
+#*****************************************************************************
+# 
+#  install-dict - Script to update dictionaries configuration for OpenOffice.org
+# 
+#  Initial version by: Federico Mena Quintero <federico@ximian.com>
+#  Future improvements by: Michael Meeks <michael.meeks@novell.com>
+#			   Petr Mladek <pmladek@suse.cz>
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License version 2, as
+#  published by the Free Software Foundation.
+# 
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+# 
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+# 
+#*****************************************************************************
+
 use strict;
 use File::Temp qw/ tempfile /;
 
-my $DictRegEx = '^[a-z][a-z]_[A-Z][A-Z]\.dic$';
-my $AffRegEx  = '^[a-z][a-z]_[A-Z][A-Z]\.aff$';
-my $HyphRegEx = '^hyph_[a-z][a-z].*\.dic$';
-my $ThesRegEx = '^th_[a-z][a-z]_[A-Z][A-Z]\.dat$';
-
 my $Debug = $ENV{'OOO_DEBUG'};
-my $OOO_DIR = '@OOINSTBASE@';
+my $OOoDir = '@OOINSTBASE@';
 
-if ($Debug && $OOO_DIR =~ /^\@/) {
-    $OOO_DIR = '/usr/lib/ooo-1.1.0';
+if ($Debug && $OOoDir =~ /^\@/) {
+    $OOoDir = '/usr/lib/ooo-2.0';
 }
 
-my $option = shift (@ARGV);
-my $FILENAME = shift (@ARGV);
+my $SharedDictDir = "/usr/share/myspell/";
 
-my $SHARED_DICT_DIR = "/usr/share/myspell/";
-my $DICT_DIR = $OOO_DIR . "/share/dict/ooo/";
-my $DICT_FILENAME = $DICT_DIR . "dictionary.lst";
 
-sub get_dict_files($)
-{
-    my $path = shift;
-    my $dirhandle;
-    my $fname;
-    my @files = ();
-
-    opendir ($dirhandle, $path) || die "can't opendir $path: $!";
-    while ($fname = readdir ($dirhandle)) {
-	if ($fname =~ m/$DictRegEx/ ||
-	    $fname =~ m/$AffRegEx/  ||
-	    $fname =~ m/$HyphRegEx/ ||
-	    $fname =~ m/$ThesRegEx/) {
-	    push @files, $fname;
-	}
-    }
-    closedir ($dirhandle);
-
-    return @files;
-}
-
+# simply remove all invalid symlinks from the given directory
 sub remove_unused_symlinks {
-    my $path = shift;
+    my $dir = shift;
     my $dirhandle;
     my $fname;
 
-    opendir ($dirhandle, $path) || die "can't opendir $path: $!";
+    opendir ($dirhandle, $dir) || die "can't opendir $dir: $!";
     while ($fname = readdir ($dirhandle)) {
-	unless (-r "$path/$fname") {
-	    unlink "$path/$fname" || die "can't unlink $path/$fname: $!";
+	unless (-r "$dir/$fname") {
+	    (unlink "$dir/$fname") || die "can't unlink $dir/$fname: $!";
 	}
     }
     closedir ($dirhandle);
 }
 
+# create the symlink if it does already not exist
+sub update_symlink($$) {
+    my ($target, $link_name) = @_;
+    unless (-r "$link_name") {
+	symlink ("$target", "$link_name") || die "can't crate symlink $link_name -> $target: $!";
+    }
+}
+
+# create symlinks from the OOo tree to the shared dictionaries
 sub link_shared_dict_files {
-  my ($shared_dict_dir, $dict_dir) = @_;
-  return unless -d $shared_dict_dir;
-  my @shared_files=get_dict_files ("$shared_dict_dir");
-  
-  foreach my $file (@shared_files) {
-    unless (-r "$dict_dir/$file") {
-      symlink ("$shared_dict_dir/$file", "$dict_dir/$file") || die "can't crate symlink $dict_dir/$file -> $shared_dict_dir/$file: $!";
-    }
-  }
-}
+    my ($shared_dict_dir, $dict_dir) = @_;
+    return unless -d $shared_dict_dir;
 
-remove_unused_symlinks ($DICT_DIR);
-link_shared_dict_files ($SHARED_DICT_DIR, $DICT_DIR);
-
-my $file;
-my @files = get_dict_files ($DICT_DIR);
-my $CONFIG_FILE;
-
-open ($CONFIG_FILE, ">$DICT_FILENAME") || die "Can't open $DICT_FILENAME: $!\n";
-
-for $file (@files) {
-    install ($file);
-}
-
-close ($CONFIG_FILE);
-
-sub filetype {
-    my ($filename) = @_;
-
-    if ($filename =~ m/$DictRegEx/) {
-	return "DICT";
-    } elsif ($filename =~ m/$AffRegEx/) {
-	return "AFF";
-    } elsif ($filename =~ m/$HyphRegEx/) {
-	return "HYPH";
-    } elsif ($filename =~ m/$ThesRegEx/) {
-	return "THES";
-    } else {
-	print "\"$filename\" does not look like a dictionary, hyphenation table, or thesaurus file\n"
-	    . "Dictionaries are of the form xx_YY.dic\n"
-	    . "Hyphenation tables are of the form hyph_xx_YY.dic\n"
-	    . "Thesauruses are of the form th_xx_YY.dat\n";
-	exit (1);
+    my $shared_dicts = get_dicts ("$shared_dict_dir");
+    foreach my $dict (keys %$shared_dicts) {
+	if ($dict =~ m/^[a-z]+(_[A-Z]+)?$/) {
+	    update_symlink("$shared_dict_dir/$dict.dic", "$dict_dir/$dict.dic");
+	    update_symlink("$shared_dict_dir/$dict.aff", "$dict_dir/$dict.aff");
+	}
     }
 }
 
+# change extesion of a filename
 sub change_extension {
     my ($filename, $ext, $newext) = @_;
 
@@ -111,109 +81,127 @@ sub change_extension {
     return $filename;
 }
 
-sub get_dict_list_entry {
-    my ($filename) = @_;
+# get list of installed dictionaries
+sub get_dicts($)
+{
+    my $dir = shift;
+    my $dirhandle;
+    my $fname;
+    my %dicts = ();
 
-    $filename =~ m/^([a-z][a-z])_([A-Z][A-Z])/;
-
-    my $language = $1;
-    my $country = $2;
-    my $file_prefix = $1 . "_" . $2;
-
-    return ($language, $country, $file_prefix);
+    opendir ($dirhandle, $dir) || die "can't opendir $dir: $!";
+    while ($fname = readdir ($dirhandle)) {
+	if ($fname =~ m/^([a-z]+(_[A-Z]+)?)\.dic$/) {
+	    if (-f $dir . change_extension ($fname, "dic", "aff")) {
+		$dicts{$1}=0;
+	    }
+	} elsif ($fname =~ m/^(hyph_[a-z]+(_[A-Z]+)?)\.dic$/) {
+		$dicts{$1}=0;
+	} elsif ($fname =~ m/^(th_[a-z]+(_[A-Z]+)?)\.dat$/) {
+	    if (-f $dir . change_extension ($fname, "dat", "idx")) {
+		$dicts{$1}=0;
+	    }
+	}
+    }
+    closedir ($dirhandle);
+    return \%dicts;
 }
 
-sub lookup_default_country {
-    my $lang = shift;
+
+# just read the old config file in an array
+sub read_config_file($) {
+    my $config_filename = shift;
+    my @config =();
     
-    if ($lang eq 'en') {
-	return 'US';
-    } elsif ($lang eq 'da') {
-	return 'DK';
-    } else {
-	return uc ($lang);
+    -e $config_filename || return;
+    open (CONFIG_FILE, $config_filename) || die "can't open $config_filename for reading: $!\n";
+
+    while (my $line = <CONFIG_FILE>) {
+	chomp $line;
+	push @config, $line;
+    }
+    close CONFIG_FILE;
+    return \@config;
+}
+
+# write the old config file back but remove unused or invalid lines
+sub write_fixed_old_config($$$) {
+    my ($dicts_ref, $old_config_ref, $CONFIG_FILE) = @_;
+
+    foreach my $line (@$old_config_ref) {
+	if ($line =~ m/^\s*DICT\s*([a-z]+)\s+([A-Z]+)\s+([a-z]+(_[A-Z]+)?)\s*$/) {
+	    if (defined $dicts_ref->{$3}) {
+		# dictionary file exists, so the config line can be used
+		print $CONFIG_FILE "$line\n";
+		if (defined $dicts_ref->{"$1_$2"}) {
+		    # mark this lang- and country-related dictionary configured
+		    $dicts_ref->{"$1_$2"}=1;
+		}
+	    }
+	} elsif ($line =~ m/^\s*HYPH\s*([a-z]+)\s+([A-Z]+)\s+(hyph_[a-z]+(_[A-Z]+)?)\s*$/) {
+	    if (defined $dicts_ref->{$3}) {
+		# dictionary file exists, so the config line can be used
+		print $CONFIG_FILE "$line\n";
+		if (defined $dicts_ref->{"hyph_$1_$2"}) {
+		    # mark this lang- and country-related dictionary configured
+		    $dicts_ref->{"hyph_$1_$2"}=1;
+		}
+	    }
+	} elsif ($line =~ m/^\s*THES\s*([a-z]+)\s+([A-Z]+)\s+(th_[a-z]+(_[A-Z]+)?)\s*$/) {
+	    if (defined $dicts_ref->{$3}) {
+		# dictionary file exists, so the config line can be used
+		print $CONFIG_FILE "$line\n";
+		if (defined $dicts_ref->{"th_$1_$2"}) {
+		    # mark this lang- and country-related dictionary configured
+		    $dicts_ref->{"th_$1_$2"}=1;
+		}
+	    }
+	} elsif ($line =~ m/^\s*\#.*/ || $line =~ m/^\s*$/) {
+	    print $CONFIG_FILE "$line\n";
+	}
     }
 }
 
-sub get_hyph_list_entry {
-    my ($filename) = @_;
+# add entry for the not yet configured dictionaries
+sub write_missing_config($$) {
 
-    $filename =~ s/^hyph_([a-z][a-z])//;
+    my ($dicts_ref, $CONFIG_FILE) = @_;
 
-    my $language = $1;
-    my $country;
-    my $suffix = '';
-
-    if ($filename =~ m/_([A-Z][A-Z])/) {
-	$country = $1;
-	$suffix = "_" . $country;
-    } else {
-	$country = lookup_default_country ($language);
+    foreach my $dict (sort(keys %$dicts_ref)) {
+	next if ($dicts_ref->{$dict});
+	
+	if ($dict =~ m/^([a-z]+)_([A-Z]+)$/) {
+	    print $CONFIG_FILE "DICT $1 $2 $1_$2\n";
+	} elsif ($dict =~ m/^hyph_([a-z]+)_([A-Z]+)$/) {
+	    print $CONFIG_FILE "HYPH $1 $2 hyph_$1_$2\n";
+	} elsif ($dict =~ m/^th_([a-z]+)_([A-Z]+)$/) {
+	    print $CONFIG_FILE "THES $1 $2 th_$1_$2\n";
+	}
     }
-
-    my $file_prefix = "hyph_" . $language . $suffix;
-
-    return ($language, $country, $file_prefix);
 }
 
-sub get_thes_list_entry {
-    my ($filename) = @_;
+sub write_config_file($$$) {
+    my ($config_filename, $dicts_ref, $old_config_ref)  = @_;
+    my $CONFIG_FILE;
+    open ($CONFIG_FILE, ">$config_filename") || die "can't open $config_filename for writing: $!\n";
 
-    $filename =~ m/^th_([a-z][a-z])_([A-Z][A-Z])/;
+    write_fixed_old_config($dicts_ref, $old_config_ref, $CONFIG_FILE);
+    write_missing_config($dicts_ref, $CONFIG_FILE);
 
-    my $language = $1;
-    my $country = $2;
-    my $file_prefix = "th_" . $1 . "_" . $2;
+    close CONFIG_FILE;
+}    
 
-    return ($language, $country, $file_prefix);
-}
 
-sub install {
-    my $type;
-    my $language;
-    my $country;
-    my $file_prefix;
-    my $filename = shift;
+######################################################################
+###########################      MAIN    #############################
+######################################################################
 
-    $type = filetype ($filename);
+my $DictDir = $OOoDir . "/share/dict/ooo/";
+my $ConfigFilename = $DictDir . "dictionary.lst";
 
-    if ($type eq "DICT") {
-	my $dict_file = $DICT_DIR . $filename;
-	my $affix_file = $DICT_DIR . change_extension ($filename, "dic", "aff");
+remove_unused_symlinks ($DictDir);
+link_shared_dict_files ($SharedDictDir, $DictDir);
 
-	if (!-f $dict_file || !-f $affix_file) {
-	    print "Error: These files must be present:\n"
-		. $dict_file . "\n"
-		. $affix_file . "\n";
-	    exit (1);
-	}
-
-	($language, $country, $file_prefix) = get_dict_list_entry ($filename);
-    } elsif ($type eq "AFF") {
-	# nothing to do
-	return;
-    } elsif ($type eq "HYPH") {
-	my $hyph_file = $DICT_DIR . $filename;
-
-	if (!-f $hyph_file) {
-	    print ("Error: $hyph_file is not present\n");
-	    exit (1);
-	}
-
-	($language, $country, $file_prefix) = get_hyph_list_entry ($filename);
-    } elsif ($type eq "THES") {
-	my $thes_file = $DICT_DIR . $filename;
-	my $idx_file = $DICT_DIR . change_extension ($filename, "dat", "idx");
-
-	if (!-f $thes_file || !-f $idx_file) {
-	    print "Error: These files must be present:\n"
-		. $thes_file . "\n"
-		. $idx_file . "\n";
-	    exit (1);
-	}
-
-	($language, $country, $file_prefix) = get_thes_list_entry ($filename);
-    }
-
-    print $CONFIG_FILE "$type $language $country $file_prefix\n";
-}
+my $DictsRef = get_dicts ($DictDir);
+my $OldConfigRef = read_config_file($ConfigFilename);
+write_config_file($ConfigFilename, $DictsRef, $OldConfigRef);
