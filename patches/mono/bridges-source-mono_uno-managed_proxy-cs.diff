@@ -1,6 +1,6 @@
 --- /dev/null	
 +++ bridges/source/mono_uno/managed_proxy.cs	
-@@ -0,0 +1,319 @@
+@@ -0,0 +1,463 @@
 +/*************************************************************************
 + *
 + *  $RCSfile: $
@@ -72,9 +72,13 @@
 +using uno.Typelib;
 +using uno.rtl;    
 +
-+public class ManagedProxy
++public unsafe class ManagedProxy
 +{
++    Bridge bridge;
 +    object managedI;
++    TypeDescription *unoType;
++    UString* unoOid;
++    string oid;
 +    Type type;
 +
 +    enum MethodKind {METHOD = 0, SET, GET};
@@ -126,20 +130,33 @@
 +
 +    /** Count of inherited interfaces of the cli interface.
 +     */
-+    int inheritedInterfacesCount;
++    int inheritedInterfacesCount = 0;
 +    /** Contains the number of methods of each interface. 
 +     */
 +    int[] interfaceMethodCounts;
 +
 +    public unsafe ManagedProxy(Bridge bridge, object managedI,
-+                               TypeDescription *TD, UString *oid)
++                               TypeDescription* TD, UString* oid)
 +    {
-+        // FIXME
-+        throw new NotImplementedException();
++        this.bridge = bridge;
++        this.managedI = managedI;
++        this.unoType = TD;
++        TypeDescription.Acquire(this.unoType);
++        this.unoOid = oid;
++        UString.Acquire(this.unoOid);
++        this.oid = UString.UStringToString(oid);
++
++        if (TD != null && TD->bComplete == 0)
++            TypeDescription.Complete(&TD);
++
++        this.type = Bridge.MapUnoType(this.unoType);
++        makeMethodInfos();
 +    }
 +
 +    ~ManagedProxy()
 +    {
++        UString.Release(this.unoOid);
++        TypeDescription.Release(this.unoType);
 +    }
 +
 +    /** Prepares an array (m_arMethoInfos) containing MethodInfo object of the
@@ -217,7 +234,7 @@
 +            interfaceMethodCounts[inheritedInterfacesCount] =
 +                map.TargetMethods.Length;
 +            for (int j = 0;
-+                 j < interfaceMethodCounts[inheritedInterfacesCount]; ++j)
++                 j < interfaceMethodCounts[inheritedInterfacesCount]; ++j, ++index)
 +            {
 +                methodInfos[index] = map.TargetMethods[j] as MethodInfo;
 +                interfaceMethodInfos[index] =
@@ -279,6 +296,7 @@
 +                // FIXME assert not reached
 +                break;
 +            }
++
 +            // Find the cli interface method that corresponds to the Uno method
 +            int indexCliMethod = -1;
 +            // If the cli interfaces and their methods are in the same order
@@ -291,11 +309,13 @@
 +            {
 +                int methodCount = interfaceMethodInfos.Length;
 +                for (int i = 0; i < methodCount; ++i)
++                {
 +                    if (interfaceMethodInfos[i].Name == methodName)
 +                    {
 +                        indexCliMethod = i;
 +                        break;
 +                    }
++                }
 +            }
 +            
 +            if (indexCliMethod == -1 )
@@ -310,12 +330,136 @@
 +        return result;
 +    }
 +
-+    public static unsafe IntPtr Create(Bridge bridge, object managedInterface,
-+                                       InterfaceTypeDescription *td,
-+                                       /* uno.rtl.UString * */ void *oid)
++    void Acquire()
 +    {
-+        // throw new NotImplementedException();
-+        return new IntPtr(null);
++        // FIXME
++    }
++
++    void Release()
++    {
++    }
++
++    unsafe void Dispatch(TypeDescription* memberTD, void* unoRet, void** unoArgs,
++                         uno.Binary.Any** unoExc)
++    {
++        switch (memberTD->eTypeClass)
++        {
++        case TypeClass.INTERFACE_ATTRIBUTE:
++        {
++            int memberPos = ((InterfaceMemberTypeDescription*)memberTD)->nPosition;
++            InterfaceTypeDescription* ifaceTD = (InterfaceTypeDescription*)unoType;
++            int functionPos = ifaceTD->pMapMemberIndexToFunctionIndex[memberPos];
++
++            if (unoRet != null) // is getter method
++            {
++                MethodInfo info = getMethodInfo(
++                    functionPos,
++                    ((InterfaceMemberTypeDescription*)memberTD)->pMemberName,
++                    MethodKind.GET);
++                bridge.CallManaged(
++                    managedI, type, info,
++                    ((InterfaceAttributeTypeDescription*)memberTD)->pAttributeTypeRef,
++                    null, 0, // no params
++                    unoRet, null, unoExc);
++            }
++            else // is setter method
++            {
++                MethodInfo info = getMethodInfo(
++                    // set follows get method
++                    functionPos + 1,
++                    ((InterfaceMemberTypeDescription*)memberTD)->pMemberName,
++                    MethodKind.SET);
++                MethodParameter param;
++                param.pTypeRef = ((InterfaceAttributeTypeDescription*)memberTD)->pAttributeTypeRef;
++                param.bIn = 1;
++                param.bOut = 0;
++
++                bridge.CallManaged(
++                    managedI, type, info,
++                    null /* indicated void return */, &param, 1,
++                    null, unoArgs, unoExc);                    
++            }
++            break;
++        }
++        case TypeClass.INTERFACE_METHOD:
++        {
++            int memberPos = ((InterfaceMemberTypeDescription*)memberTD)->nPosition;
++            InterfaceTypeDescription* ifaceTD = (InterfaceTypeDescription*)unoType;
++            int functionPos = ifaceTD->pMapMemberIndexToFunctionIndex[memberPos];
++
++            switch (functionPos)
++            {
++            case 0: // queryInterface()
++            {
++                TypeDescription* requestedTD;
++                // FIXME leak
++                TypeDescriptionReference.GetDescription(
++                    &requestedTD, (TypeDescriptionReference*)unoArgs[0]);
++                if (requestedTD->eTypeClass != TypeClass.INTERFACE)
++                    ; // FIXME this is an error
++
++                IntPtr unoInterface = IntPtr.Zero;
++
++                bridge.GetInterfaceFromUnoEnvironment(ref unoInterface, unoOid,
++                                                      (InterfaceTypeDescription*)requestedTD);
++
++                if (unoInterface == IntPtr.Zero)
++                {
++                    Type requestedType = Bridge.MapUnoType(requestedTD);
++                    if (requestedType.IsInstanceOfType(managedI))
++                    {
++                        IntPtr unoI = bridge.MapManagedToUno(managedI, requestedTD);
++                        uno.Binary.Any.Construct(
++                            (uno.Binary.Any*)unoRet, &unoI, requestedTD, null);
++                        uno.Binary.Interface.Release(unoI);
++                    }
++                    else // object does not support requested interface
++                    {
++                        uno.Binary.Any.Construct((uno.Binary.Any*)unoRet, null, null, null);
++                    }
++                    // no exception occurred
++                    *unoExc = null;
++                }
++                else
++                {
++                    uno.Binary.Any.Construct((uno.Binary.Any*)unoRet, &unoInterface,
++                                             requestedTD, null);
++                    *unoExc = null;
++                }
++                break;
++            }
++            case 1: // acquire this proxy()
++                Acquire();
++                *unoExc = null;
++                break;
++            case 2: // release this proxy()
++                Release();
++                *unoExc = null;
++                break;
++            default: // arbitrary method call
++            {
++                InterfaceMethodTypeDescription* methodTD = 
++                    (InterfaceMethodTypeDescription*)memberTD;
++                UString* methodName = ((InterfaceMemberTypeDescription*)memberTD)->pMemberName;
++
++                MethodInfo info = getMethodInfo(functionPos, methodName, MethodKind.METHOD);
++
++                bridge.CallManaged(
++                    managedI, type, info,
++                    methodTD->pReturnTypeRef, methodTD->pParams,
++                    methodTD->nParams,
++                    unoRet, unoArgs, unoExc);
++                break;
++            }
++            }
++      
++            break;
++        }
++        default: // Cannot happen
++        {
++            break;// FIXME Throw an error
++        }
++        }
 +    }
 +}
 +
