@@ -1,7 +1,6 @@
 SUBDIRS=\
 	evo2 \
 	src680 \
-	src680-m72 \
 	src680-m74 \
 	src680-m76
 
