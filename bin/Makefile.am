@@ -9,6 +9,7 @@ script_files = \
 	install-help \
 	latest-patchset \
 	nothing \
+	ooinstall \
 	ooo-wrapper.in \
 	ootouch \
 	oowintool \
