@@ -1,0 +1,342 @@
+Index: desktop/source/app/cmdlineargs.cxx
+===================================================================
+RCS file: /cvs/framework/desktop/source/app/cmdlineargs.cxx,v
+retrieving revision 1.22
+diff -u -p -u -r1.22 cmdlineargs.cxx
+--- desktop/source/app/cmdlineargs.cxx	27 Jun 2003 09:42:22 -0000	1.22
++++ desktop/source/app/cmdlineargs.cxx	23 Apr 2004 15:21:22 -0000
+@@ -348,6 +348,11 @@ sal_Bool CommandLineArgs::InterpretComma
+ 		SetBoolParam_Impl( CMD_BOOLPARAM_QUICKSTART, sal_True );
+ 		return sal_True;
+ 	}
++	else if ( aArg.equalsAsciiL( RTL_CONSTASCII_STRINGPARAM( "-wait" )) == sal_True )
++	{
++		SetBoolParam_Impl( CMD_BOOLPARAM_WAIT, sal_True );
++        return sal_True;
++	}
+ 	else if ( aArg.equalsAsciiL( RTL_CONSTASCII_STRINGPARAM( "-terminate_after_init" )) == sal_True )
+ 	{
+ 		SetBoolParam_Impl( CMD_BOOLPARAM_TERMINATEAFTERINIT, sal_True );
+@@ -697,6 +702,12 @@ sal_Bool CommandLineArgs::IsWeb() const
+ {
+ 	osl::MutexGuard  aMutexGuard( m_aMutex );
+ 	return m_aBoolParams[ CMD_BOOLPARAM_WEB ];
++}
++
++sal_Bool CommandLineArgs::ShouldWait() const
++{
++	osl::MutexGuard  aMutexGuard( m_aMutex );
++	return m_aBoolParams[ CMD_BOOLPARAM_WAIT ];
+ }
+ 
+ sal_Bool CommandLineArgs::HasModuleParam() const
+Index: desktop/source/app/cmdlineargs.hxx
+===================================================================
+RCS file: /cvs/framework/desktop/source/app/cmdlineargs.hxx,v
+retrieving revision 1.17
+diff -u -p -u -r1.17 cmdlineargs.hxx
+--- desktop/source/app/cmdlineargs.hxx	27 Jun 2003 09:42:33 -0000	1.17
++++ desktop/source/app/cmdlineargs.hxx	23 Apr 2004 15:21:22 -0000
+@@ -107,6 +107,7 @@ class CommandLineArgs
+ 			CMD_BOOLPARAM_HELPBASIC,
+ 			CMD_BOOLPARAM_HELPMATH,            
+ 			CMD_BOOLPARAM_HELPIMPRESS,
++			CMD_BOOLPARAM_WAIT,
+ 			CMD_BOOLPARAM_COUNT				// must be last element!
+ 		};
+ 
+@@ -174,6 +175,7 @@ class CommandLineArgs
+ 		sal_Bool				IsGlobal() const;
+ 		sal_Bool				IsMath() const;
+ 		sal_Bool				IsWeb() const;
++		sal_Bool				ShouldWait() const;
+ 		sal_Bool				HasModuleParam() const;
+ 
+ 		// Access to string parameters
+Index: desktop/source/app/dispatchwatcher.cxx
+===================================================================
+RCS file: /cvs/framework/desktop/source/app/dispatchwatcher.cxx,v
+retrieving revision 1.15.82.1
+diff -u -p -u -r1.15.82.1 dispatchwatcher.cxx
+--- desktop/source/app/dispatchwatcher.cxx	9 Jan 2004 16:43:26 -0000	1.15.82.1
++++ desktop/source/app/dispatchwatcher.cxx	23 Apr 2004 15:21:26 -0000
+@@ -92,9 +92,17 @@
+ #ifndef _COM_SUN_STAR_FRAME_XFRAMESSUPPLIER_HPP_
+ #include <com/sun/star/frame/XFramesSupplier.hpp>
+ #endif
++#ifndef _COM_SUN_STAR_FRAME_XFRAMESSUPPLIER_HPP_
++#include <com/sun/star/frame/XController.hpp>
++#endif
++#ifndef _COM_SUN_STAR_FRAME_XFRAMESSUPPLIER_HPP_
++#include <com/sun/star/frame/XModel.hpp>
++#endif
+ #ifndef _COM_SUN_STAR_FRAME_XDISPATCH_HPP_
+ #include <com/sun/star/frame/XDispatch.hpp>
+ #endif
++#include <com/sun/star/frame/DispatchResultEvent.hpp>
++#include <com/sun/star/frame/DispatchResultState.hpp>
+ #ifndef _COM_SUN_STAR_FRAME_XCOMPONENTLOADER_HPP_
+ #include <com/sun/star/frame/XComponentLoader.hpp>
+ #endif
+@@ -362,12 +370,21 @@ void DispatchWatcher::executeDispatchReq
+                     + ioe.Message;
+                 OSL_ENSURE( sal_False, aMsg);
+             }
++
+ 			if ( aDispatchRequest.aRequestType == REQUEST_OPEN ||
+ 				 aDispatchRequest.aRequestType == REQUEST_VIEW ||
+                  aDispatchRequest.aRequestType == REQUEST_START ||
+ 				 aDispatchRequest.aRequestType == REQUEST_FORCEOPEN ||
+ 				 aDispatchRequest.aRequestType == REQUEST_FORCENEW		)
+ 			{
++				Reference< XCloseBroadcaster > xCloseBroadcaster( xDoc, UNO_QUERY );
++				if( xCloseBroadcaster.is() )
++				{
++					if( aDispatchRequest.aRequestType == REQUEST_OPEN ||
++						aDispatchRequest.aRequestType == REQUEST_FORCEOPEN )
++						OfficeIPCThread::LoadCompleted( xCloseBroadcaster );
++				}
++
+ 				// request is completed
+ 				OfficeIPCThread::RequestsCompleted( 1 );
+ 			}
+Index: desktop/source/app/officeipcthread.cxx
+===================================================================
+RCS file: /cvs/framework/desktop/source/app/officeipcthread.cxx,v
+retrieving revision 1.36.26.2
+diff -u -p -u -r1.36.26.2 officeipcthread.cxx
+--- desktop/source/app/officeipcthread.cxx	9 Jan 2004 16:43:27 -0000	1.36.26.2
++++ desktop/source/app/officeipcthread.cxx	23 Apr 2004 15:21:26 -0000
+@@ -100,6 +100,7 @@ using namespace vos;
+ using namespace rtl;
+ using namespace desktop;
+ using namespace ::com::sun::star::uno;
++using namespace ::com::sun::star::util;
+ using namespace ::com::sun::star::lang;
+ using namespace ::com::sun::star::frame;
+ 
+@@ -107,8 +108,8 @@ const char  *OfficeIPCThread::sc_aTermin
+ const int OfficeIPCThread::sc_nTSeqLength = 28;
+ const char  *OfficeIPCThread::sc_aShowSequence = "-tofront";
+ const int OfficeIPCThread::sc_nShSeqLength = 5;
+-const char  *OfficeIPCThread::sc_aConfirmationSequence = "InternalIPC::ProcessingDone";
+-const int OfficeIPCThread::sc_nCSeqLength = 27;
++static const char  *sc_aConfirmationSequence = "InternalIPC::ProcessingDone";
++static const int sc_nCSeqLength = 27;
+ 
+ // Type of pipe we use
+ enum PipeMode
+@@ -302,6 +303,55 @@ sal_Bool OfficeIPCThread::AreRequestsPen
+ 		return sal_False;
+ }
+ 
++OfficeIPCClientHandle::~OfficeIPCClientHandle()
++{
++	int nResult, nBytes;
++
++	nBytes = 0;
++	while ( (nResult = mClientPipe.send( sc_aConfirmationSequence + nBytes,
++										 sc_nCSeqLength - nBytes )) > 0 &&
++			((nBytes += nResult) < sc_nCSeqLength) );
++}
++
++void SAL_CALL OfficeIPCClientHandle::notifyClosing( const ::com::sun::star::lang::EventObject& Source ) throw (::com::sun::star::uno::RuntimeException)
++{
++	// We will be unreffed in a bit anyway.
++}
++
++// Utility
++void OfficeIPCClientHandle::ReadArguments( ByteString &rArgs )
++{
++	// test byte by byte
++	char pBuf[2048];
++	int nResult = 0;
++
++	// read into pBuf until '\0' is read or read-error
++	while ((nResult = mClientPipe.recv( pBuf, sizeof (pBuf - 1))) > 0)
++	{
++		pBuf[nResult] = '\0';
++		rArgs += pBuf;
++		if (pBuf[nResult - 1]=='\0')
++			break;
++	}
++}
++
++OPipe::TPipeError OfficeIPCClientHandle::Accept( vos::OPipe &rPipe )
++{
++	return rPipe.accept( mClientPipe );
++}
++
++void OfficeIPCThread::LoadCompleted( const Reference< XCloseBroadcaster > &xDoc )
++{
++	::osl::MutexGuard	aGuard( GetMutex() );
++	if( !pGlobalOfficeIPCThread )
++		return;
++
++	if( !pGlobalOfficeIPCThread->mbClientWait )
++		return;
++
++	xDoc->addCloseListener( pGlobalOfficeIPCThread->mxClient );
++}
++
+ void OfficeIPCThread::RequestsCompleted( int nCount )
+ {
+ 	// Remove nCount pending requests from our internal counter
+@@ -525,30 +575,41 @@ void OfficeIPCThread::SetReady(OfficeIPC
+ 
+ }
+ 
++static bool
++ShouldWait( const CommandLineArgs &rCmdLineArgs )
++{
++	const char *force_env;
++
++	if( !rCmdLineArgs.ShouldWait() )
++	{
++		force_env = getenv( "OOO_FORCE_WAIT" );
++		if( !force_env || !atoi( force_env ) )
++			return false; // common case
++	}
++
++	rtl::OUString aDummy;
++
++	if( rCmdLineArgs.GetOpenList( aDummy ) ||
++		rCmdLineArgs.GetForceOpenList( aDummy ) )
++		return true;
++	else
++		return false;
++}
++
+ void SAL_CALL OfficeIPCThread::run()
+ {
+     do
+ 	{
+-        OPipe::TPipeError
+-			nError = maPipe.accept( maStreamPipe );
++		mxClient = new OfficeIPCClientHandle();
+ 
++		OfficeIPCClientHandle *pClient = static_cast<OfficeIPCClientHandle *>(mxClient.get());
++        OPipe::TPipeError nError = pClient->Accept( maPipe );
+ 
+ 		if( nError == OStreamPipe::E_None )
+ 		{			
+             ByteString aArguments;
+-            // test byte by byte
+-            const int nBufSz = 2048;
+-            char pBuf[nBufSz];
+-            int nBytes = 0;
+-            int nResult = 0;
+-            // read into pBuf until '\0' is read or read-error
+-            while ((nResult=maStreamPipe.recv( pBuf+nBytes, nBufSz-nBytes))>0) {
+-				nBytes += nResult;
+-				if (pBuf[nBytes-1]=='\0') {
+-					aArguments += pBuf;
+-			        break;
+-		        }
+-	        }
++
++			pClient->ReadArguments( aArguments );
+ 
+             // #111143# and others:
+             // if we receive a request while the office is displaying some dialog or error during
+@@ -718,6 +779,8 @@ void SAL_CALL OfficeIPCThread::run()
+                 cProcessed.set();
+ 			}
+ 
++			mbClientWait = ShouldWait( aCmdLineArgs );
++
+ 			if ((( aArguments.CompareTo( sc_aShowSequence, sc_nShSeqLength ) == COMPARE_EQUAL ) ||
+ 				!bDocRequestSent ) && !bAcceptorRequest )
+ 			{
+@@ -731,14 +794,6 @@ void SAL_CALL OfficeIPCThread::run()
+ 			aGuard.clear();
+ 			// wait for processing to finish
+ 			cProcessed.wait();
+-			// processing finished, inform the requesting end
+-			nBytes = 0;
+-			while (
+-                (nResult = maStreamPipe.send(sc_aConfirmationSequence+nBytes, sc_nCSeqLength-nBytes))>0 &&
+-                ((nBytes += nResult) < sc_nCSeqLength) );
+-			// now we can close, don't we?
+-			// maStreamPipe.close();
+-            
+         }
+         else
+         {
+Index: desktop/source/app/officeipcthread.hxx
+===================================================================
+RCS file: /cvs/framework/desktop/source/app/officeipcthread.hxx,v
+retrieving revision 1.13.26.2
+diff -u -p -u -r1.13.26.2 officeipcthread.hxx
+--- desktop/source/app/officeipcthread.hxx	9 Jan 2004 16:43:28 -0000	1.13.26.2
++++ desktop/source/app/officeipcthread.hxx	23 Apr 2004 15:21:26 -0000
+@@ -68,6 +68,9 @@
+ #ifndef _COM_SUN_STAR_FRAME_XTERMINATELISTENER_HPP_
+ #include <com/sun/star/frame/XTerminateListener.hpp>
+ #endif
++#ifndef _COM_SUN_STAR_UTIL_XCLOSEBROADCASTER_HPP_
++#include <com/sun/star/util/XCloseBroadcaster.hpp>
++#endif
+ 
+ #ifndef _VOS_PIPE_HXX_
+ #include <vos/pipe.hxx>
+@@ -84,6 +87,9 @@
+ #ifndef _RTL_USTRING_HXX_
+ #include <rtl/ustring.hxx>
+ #endif
++#ifndef _CPPUHELPER_WEAKBASE1_HXX_
++#include <cppuhelper/implbase1.hxx>
++#endif
+ #ifndef _CPPUHELPER_WEAKBASE2_HXX_
+ #include <cppuhelper/implbase2.hxx>
+ #endif
+@@ -94,6 +100,23 @@
+ namespace desktop
+ {
+ 
++class OfficeIPCClientHandle : public ::cppu::WeakImplHelper1<com::sun::star::util::XCloseListener >
++{
++	vos::OStreamPipe mClientPipe;
++public:
++	OfficeIPCClientHandle() {}
++	virtual ~OfficeIPCClientHandle();
++
++	// XCloseListener
++	virtual void SAL_CALL disposing( const ::com::sun::star::lang::EventObject& Source ) throw (::com::sun::star::uno::RuntimeException) {}
++	virtual void SAL_CALL queryClosing( const ::com::sun::star::lang::EventObject& Source, sal_Bool GetsOwnership ) throw (::com::sun::star::util::CloseVetoException, ::com::sun::star::uno::RuntimeException) {}
++	virtual void SAL_CALL notifyClosing( const ::com::sun::star::lang::EventObject& Source ) throw (::com::sun::star::uno::RuntimeException);
++
++	// Utility
++	void ReadArguments( ByteString &rArgs );
++	vos::OPipe::TPipeError Accept( vos::OPipe &rPipe );
++};
++
+ class SalMainPipeExchangeSignalHandler : public vos::OSignalHandler
+ {
+     virtual TSignalAction SAL_CALL signal(TSignalInfo *pInfo);
+@@ -123,6 +146,8 @@ class OfficeIPCThread : public vos::OThr
+ 
+     vos::OPipe					maPipe;
+     vos::OStreamPipe			maStreamPipe;
++	com::sun::star::uno::Reference< com::sun::star::util::XCloseListener > mxClient;
++	sal_Bool					mbClientWait;
+     static vos::OSecurity		maSecurity;
+ 	rtl::OUString				maPipeIdent;
+ 	sal_Bool					mbBlockRequests;
+@@ -142,8 +167,6 @@ class OfficeIPCThread : public vos::OThr
+ 	static const int sc_nTSeqLength;
+ 	static const char *sc_aShowSequence;
+ 	static const int sc_nShSeqLength;
+-	static const char *sc_aConfirmationSequence;
+-	static const int sc_nCSeqLength;
+ 
+ 	OfficeIPCThread();
+ 
+@@ -165,6 +188,7 @@ class OfficeIPCThread : public vos::OThr
+ 	static OfficeIPCThread*		GetOfficeIPCThread();
+ 	static void					BlockAllRequests();
+ 	static sal_Bool				AreRequestsPending();
++	static void				    LoadCompleted( const com::sun::star::uno::Reference< com::sun::star::util::XCloseBroadcaster > &xDoc );
+ 	static void					RequestsCompleted( int n = 1 );
+ 	static void					ExecuteCmdLineRequests( ProcessDocumentsRequest& );
+ 
