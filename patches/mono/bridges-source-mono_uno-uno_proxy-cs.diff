@@ -1,6 +1,6 @@
 --- /dev/null	
 +++ bridges/source/mono_uno/uno_proxy.cs	
-@@ -0,0 +1,2027 @@
+@@ -0,0 +1,586 @@
 +/*************************************************************************
 + *
 + *  $RCSfile: $
@@ -70,7 +70,6 @@
 +using System.Runtime.Remoting;
 +using System.Runtime.Remoting.Messaging;
 +using System.Runtime.Remoting.Proxies;
-+using System.Text;
 +
 +using uno.Binary;
 +using uno.Typelib;
@@ -82,14 +81,14 @@
 +{
 +    public IntPtr UnoInterface; // wrapped interface
 +    public Type Type; // mapped type
-+    public IntPtr Bridge;
++    public com.sun.star.bridges.mono_uno.Bridge Bridge;
 +    public InterfaceTypeDescription *TypeDesc;
 +
-+    public UnoInterfaceInfo(IntPtr bridge, IntPtr unoInterface,
++    public UnoInterfaceInfo(com.sun.star.bridges.mono_uno.Bridge bridge,
++                            IntPtr unoInterface,
 +                            InterfaceTypeDescription *td)
 +    {
 +        Bridge = bridge;
-+        com.sun.star.bridges.mono_uno.Bridge.Acquire(Bridge);
 +        UnoInterface = unoInterface;
 +        uno.Binary.Interface.Acquire(UnoInterface);
 +        TypeDesc = td;
@@ -105,9 +104,7 @@
 +
 +    ~UnoInterfaceInfo()
 +    {
-+        com.sun.star.bridges.mono_uno.Bridge.revokeInterfaceFromUnoEnvironment(
-+            Bridge, UnoInterface);
-+        com.sun.star.bridges.mono_uno.Bridge.Release(Bridge);
++        Bridge.RevokeFromUnoEnvironment(UnoInterface);
 +        uno.Binary.Interface.Release(UnoInterface);
 +        InterfaceTypeDescription.Release(TypeDesc);        
 +    }
@@ -131,15 +128,14 @@
 +    */
 +    ArrayList additionalProxies = new ArrayList();
 +
-+    IntPtr bridge;
++    Bridge bridge;
 +    string oid;
 +
-+    private unsafe UnoInterfaceProxy(IntPtr bridge, IntPtr unoInterface,
++    private unsafe UnoInterfaceProxy(Bridge bridge, IntPtr unoInterface,
 +                                     InterfaceTypeDescription *TD, string oid)
 +        : base(typeof(MarshalByRefObject)) // FIXME is there a better type?
 +    {
 +        this.bridge = bridge;
-+        Bridge.Acquire(bridge);
 +        this.oid = oid;
 +        AddUnoInterface(unoInterface, TD);
 +    }
@@ -150,13 +146,13 @@
 +        // access managed string oid any longer.
 +    }
 +
-+    public static unsafe object Create(IntPtr bridge, IntPtr unoInterface,
++    public static unsafe object Create(Bridge bridge, IntPtr unoInterface,
 +                                       InterfaceTypeDescription *TD, string oid)
 +    {
 +        UnoInterfaceProxy realProxy = new UnoInterfaceProxy(bridge, unoInterface,
 +                                                            TD, oid);
 +        object proxy = realProxy.GetTransparentProxy();
-+        Bridge.registerInterfaceWithCliEnvironment(bridge, proxy, oid);
++        bridge.RegisterWithCliEnvironment(proxy, oid);
 +        return proxy;
 +    }
 +
@@ -175,7 +171,7 @@
 +            return InvokeObjectMethod(request);
 +        }
 +
-+        Type typeBeingCalled = LoadCliType(typeName);
++        Type typeBeingCalled = Bridge.LoadCliType(typeName);
 +        UnoInterfaceInfo info = FindInfo(typeBeingCalled);
 +
 +        Trace.Assert(info != null);
@@ -208,16 +204,17 @@
 +                        (InterfaceMethodTypeDescription *)memberTD;
 +
 +                    uno.Any exception;
-+                    uno.Any result = CallUno(info.UnoInterface,
-+                                             (TypeDescription *)methodTD,
-+                                             methodTD->pReturnTypeRef,
-+                                             methodTD->nParams, methodTD->pParams,
-+                                             callmsg.Args,
-+                                             /* FIXME this is an implementation detail,
-+                                                documented on MSDN, but still an implementation
-+                                                detail. cli_uno does the same */
-+                                             (System.Type[])callmsg.MethodSignature,
-+                                             out exception);
++                    uno.Any result =
++                        bridge.CallUno(info.UnoInterface,
++                                       (TypeDescription *)methodTD,
++                                       methodTD->pReturnTypeRef,
++                                       methodTD->nParams, methodTD->pParams,
++                                       callmsg.Args,
++                                       /* FIXME this is an implementation detail,
++                                          documented on MSDN, but still an implementation
++                                          detail. cli_uno does the same */
++                                       (System.Type[])callmsg.MethodSignature,
++                                       out exception);
 +                    return ConstructReturnMessage(result, null, null,
 +                                                  callmsg, exception);
 +                }
@@ -239,11 +236,11 @@
 +
 +                    if (methodName[0] == 'g') // "get"
 +                    {
-+                        result = CallUno(info.UnoInterface,
-+                                         (TypeDescription *)attributeTD,
-+                                         attributeTD->pAttributeTypeRef,
-+                                         0, null, null, null,
-+                                         out exception);
++                        result = bridge.CallUno(info.UnoInterface,
++                                                (TypeDescription *)attributeTD,
++                                                attributeTD->pAttributeTypeRef,
++                                                0, null, null, null,
++                                                out exception);
 +                        return ConstructReturnMessage(result, null, null,
 +                                                      callmsg, exception);
 +                    }
@@ -259,12 +256,13 @@
 +                        param.bIn = 1;
 +                        param.bOut = 0;
 +
-+                        result = CallUno(info.UnoInterface,
-+                                         (TypeDescription *)attributeTD,
-+                                         TypeDescription.VoidType,
-+                                         1, &param, // param is on the stack, pinning not necessary
-+                                         callmsg.Args, null, /* FIXME ??? from cli_uno */
-+                                         out exception);
++                        result =
++                            bridge.CallUno(info.UnoInterface,
++                                           (TypeDescription *)attributeTD,
++                                           TypeDescription.VoidType,
++                                           1, &param,
++                                           callmsg.Args, null, /* FIXME ??? from cli_uno */
++                                           out exception);
 +                        return ConstructReturnMessage(uno.Any.VOID, null, null,
 +                                                      callmsg, exception);
 +                    }
@@ -306,11 +304,11 @@
 +        
 +            object[] args = new object[] { fromType };
 +            uno.Any exception;
-+            uno.Any result = CallUno(info.UnoInterface,
-+                                     (TypeDescription *)queryI,
-+                                     queryI->pReturnTypeRef,
-+                                     1, queryI->pParams, args, null,
-+                                     out exception);
++            uno.Any result = bridge.CallUno(info.UnoInterface,
++                                            (TypeDescription *)queryI,
++                                            queryI->pReturnTypeRef,
++                                            1, queryI->pParams, args, null,
++                                            out exception);
 +
 +            // queryInterface doesn't throw exceptions.
 +            
@@ -340,7 +338,7 @@
 +    }
 +
 +    // internals
-+    unsafe void AddUnoInterface(IntPtr unoInterface, InterfaceTypeDescription *TD)
++    public unsafe void AddUnoInterface(IntPtr unoInterface, InterfaceTypeDescription *TD)
 +    {
 +        lock (this)
 +        {
@@ -350,8 +348,8 @@
 +                    return;
 +            }
 +            // This proxy does not contain the unoInterface. Add it.
-+            Bridge.registerInterfaceWithUnoEnvironment(bridge, ref unoInterface,
-+                                                       oid, TD);
++            bridge.RegisterWithUnoEnvironment(ref unoInterface,
++                                              oid, TD);
 +            interfaces.Add(new UnoInterfaceInfo(bridge, unoInterface, TD));         
 +        }
 +    }
@@ -370,1284 +368,6 @@
 +                return info;
 +        }
 +        return null;
-+    }
-+
-+    [StructLayout(LayoutKind.Explicit)]
-+    private unsafe struct largest
-+    {
-+        [FieldOffset(0)] long n;
-+        [FieldOffset(0)] double d;
-+        [FieldOffset(0)] void *p;
-+        [FieldOffset(0)] uno.Binary.Any a;    
-+    }
-+
-+    // FIXME args[i] must be of same type as return value
-+    static unsafe uno.Any CallUno(IntPtr unoInterface, TypeDescription *memberTD,
-+                                  TypeDescriptionReference *returnType, int nParams,
-+                                  MethodParameter *parameters, object[] args,
-+                                  Type[] argTypes, out uno.Any exception)
-+    {
-+        int returnSize = sizeof(largest);
-+
-+        if (returnType != null &&
-+            returnType->eTypeClass == TypeClass.STRUCT ||
-+            returnType->eTypeClass == TypeClass.EXCEPTION)
-+        {
-+            if (((TypeDescription *)returnType)->nSize > returnSize)
-+                returnSize = ((TypeDescription *)returnType)->nSize;
-+        }
-+
-+        // Prepare memory that contains all converted arguments and
-+        // return values. The memory block contains first pointers to
-+        // the arguments which are in the same block For example, 2
-+        // arguments, 1 ret.
-+        //
-+        //      | Pointer
-+        //      | Pointer
-+        //      | Return value
-+        //      | Arg 1
-+        //      | Arg 2
-+        //
-+        // If an argument is larger then struct largest, such as some
-+        // structures, then the pointer points to an extra block of
-+        // memory. The same goes for a big return value.
-+        // FIXME the last sentence is bullshit. Get it deleted from cli_uno ;)
-+        byte *mem = stackalloc byte[nParams * sizeof(void *) +
-+                                    returnSize +
-+                                    nParams * sizeof(largest)];
-+
-+        // array of pointers to args
-+        void **unoArgPtrs = (void **)mem;
-+
-+        // Return Value
-+        void *unoRetPtr;
-+        if (memberTD->eTypeClass == TypeClass.INTERFACE_ATTRIBUTE && nParams == 1)
-+            // If an attribute is set, then unoRet must be null, e.g. void setAttribute(int)
-+            unoRetPtr = null;
-+        else
-+            unoRetPtr = (void *)(unoArgPtrs + nParams);
-+
-+        // args
-+        largest *unoArgs = (largest *)((byte *)unoRetPtr + returnSize);
-+
-+        for (int i = 0; i < nParams; ++i)
-+        {
-+            TypeDescription *type = (TypeDescription *)parameters[i].pTypeRef;
-+
-+            unoArgPtrs[i] = unoArgs + i;
-+            if ((type->eTypeClass == TypeClass.STRUCT ||
-+                 type->eTypeClass == TypeClass.EXCEPTION) &&
-+                (type->nSize > sizeof(largest)))
-+            {
-+                // stackalloc is only allowed in initializers
-+                byte *bigArgPtr = stackalloc byte[type->nSize];
-+
-+                unoArgPtrs[i] = bigArgPtr;
-+            }
-+                            
-+            if (parameters[i].bIn != 0)
-+            {
-+                // FIXME error handling
-+                MapToUno(unoArgPtrs[i], args[i], type, false /* no assign */);
-+            }
-+        }
-+
-+        uno.Binary.Any unoExceptionHolder;
-+        uno.Binary.Any *unoExc = & unoExceptionHolder;
-+
-+        // call binary uno
-+        uno.Binary.Interface.Dispatch(
-+            unoInterface, memberTD, unoRetPtr, unoArgPtrs, &unoExc);
-+
-+        if (unoExc == null)
-+        {
-+            exception = uno.Any.VOID;
-+
-+            // convert out args, destroy uno args
-+            for (int i = 0; i < nParams; ++i)
-+            {
-+                TypeDescription *type = (TypeDescription *)parameters[i].pTypeRef;
-+
-+                if (parameters[i].bOut != 0)
-+                {
-+                    // FIXME error handling
-+                    MapToManaged(ref args[i], unoArgPtrs[i], parameters[i].pTypeRef,
-+                                 argTypes != null ? argTypes[i] : null, false);
-+                }
-+
-+                // cleanup args
-+                if (type->eTypeClass < TypeClass.DOUBLE &&
-+                    type->eTypeClass != TypeClass.ENUM) // no need to destroy these
-+                    uno.Binary.Data.Destroy(unoArgPtrs[i], type, null);
-+            }
-+
-+            if (returnType != null && returnType->eTypeClass != TypeClass.VOID)
-+            {
-+                // convert uno return value
-+                object result = null;
-+                // FIXME error handling
-+                MapToManaged(ref result, unoRetPtr, returnType, null, false);
-+                uno.Binary.Data.Destroy(unoRetPtr, (TypeDescription *)returnType, null);
-+                return new uno.Any(result.GetType(), result); // FIXME is this correct?
-+            }
-+
-+            return uno.Any.VOID;
-+        }
-+        else // exception occured
-+        {
-+            for (int i = 0; i < nParams; ++i)
-+                if (parameters[i].bIn != 0)
-+                    uno.Binary.Data.Destroy(unoArgPtrs[i], (TypeDescription *)parameters[i].pTypeRef, null);
-+
-+            // FIXME needs uno.Any vs System.Object clarification
-+            object exc = null;
-+            MapToManaged(ref exc, unoExceptionHolder.pData,
-+                         unoExceptionHolder.pType, null, false);
-+            exception = new uno.Any(exc.GetType(), exc);
-+            return uno.Any.VOID;
-+        }
-+
-+        // FIXME error handling
-+    }
-+
-+    // FIXME convert cli types to expected types, e.g a long to a short where the uno type
-+    // is a sal_Int16. This could be necessary if a scripting language (typeless) is used
-+    // @param assign the uno_data has to be destructed (in/out args)
-+    static void MapToUno(void *unoData, object managedData, TypeDescription *type,
-+                         bool assign)
-+    {
-+        // FIXME acquire the TypeDescription?
-+        // FIXME assert that all the type equivalences in the comments hold
-+        switch (type->eTypeClass)
-+        {
-+        case TypeClass.VOID:
-+            break;
-+        case TypeClass.CHAR:
-+            *(ushort *)unoData = (char)managedData; // sal_Unicode = ushort
-+            break;
-+        case TypeClass.BOOLEAN:
-+            *(byte *)unoData = (bool)managedData ? (byte)1 : (byte)0; // sal_Bool = byte
-+            break;
-+        case TypeClass.BYTE:
-+            // FIXME fix cli_uno which doesn't use sbyte on the RHS
-+            *(sbyte *)unoData = (sbyte)managedData; // sal_Int8 = sbyte
-+            break;
-+        case TypeClass.SHORT:
-+            *(short *)unoData = (short)managedData; // sal_Int16 = short
-+            break;
-+        case TypeClass.UNSIGNED_SHORT:
-+            *(ushort *)unoData = (ushort)managedData; // sal_uInt16 = ushort
-+            break;
-+        case TypeClass.LONG:
-+            *(int *)unoData = (int)managedData; // sal_Int32 = int
-+            break;
-+        case TypeClass.UNSIGNED_LONG:
-+            *(uint *)unoData = (uint)managedData; // sal_uInt32 = uint
-+            break;
-+        case TypeClass.HYPER:
-+            *(long *)unoData = (long)managedData; // sal_Int64 = long
-+            break;
-+        case TypeClass.UNSIGNED_HYPER:
-+            *(ulong *)unoData = (ulong)managedData; // sal_uInt64 = ulong
-+            break;
-+        case TypeClass.FLOAT:
-+            *(float *)unoData = (float)managedData; // C++ float = C# float
-+            break;
-+        case TypeClass.DOUBLE:
-+            *(double *)unoData = (double)managedData; // C++ double = C# double
-+            break;
-+        case TypeClass.STRING:
-+        {
-+            if (managedData == null)
-+            {
-+                // This releases any old string if necessary
-+                uno.rtl.UStringPtr.rtl_uString_new(unoData);
-+            }
-+            else
-+            {
-+                string s = (string)managedData;
-+                uno.rtl.UStringPtr.rtl_uString_newFromStr_WithLength(unoData,
-+                                                                     s, s.Length);
-+            }
-+        }
-+        break;
-+        case TypeClass.TYPE:
-+            if (assign)
-+                TypeDescriptionReference.Release(*(TypeDescriptionReference **)unoData);
-+
-+            *(TypeDescriptionReference **)unoData = MapManagedType((Type)managedData);
-+            break;
-+        case TypeClass.ANY:
-+        {
-+            uno.Binary.Any *binAny = (uno.Binary.Any *)unoData;
-+
-+            if (assign)
-+                uno.Binary.Any.Destroy(binAny, null);
-+
-+            if (managedData == null)
-+            {
-+                uno.Binary.Any.Construct(binAny, null, null, null);
-+                break;
-+            }
-+
-+            uno.Any any = (uno.Any)managedData;
-+            TypeDescription *valueTD = (TypeDescription *)MapManagedType(any.Type);
-+
-+            // if there's enough room in void *pReserved, store the value in the pointer
-+            binAny->pData = &binAny->pReserved; // this triggers a bug in mcs < 1.1.4
-+            switch (valueTD->eTypeClass)
-+            {
-+            case TypeClass.VOID:
-+                break;
-+            case TypeClass.CHAR:
-+                *(ushort *)binAny->pData = (char)any.Value;
-+                break;
-+            case TypeClass.BOOLEAN:
-+                *(byte *)binAny->pData = (bool)any.Value ? (byte)1 : (byte)0;
-+                break;
-+            case TypeClass.BYTE:
-+                *(sbyte *)binAny->pData = (sbyte)any.Value;
-+                break;
-+            case TypeClass.SHORT:
-+                *(short *)binAny->pData = (short)any.Value;
-+                break;
-+            case TypeClass.UNSIGNED_SHORT:
-+                *(ushort *)binAny->pData = (ushort)any.Value;
-+                break;
-+            case TypeClass.LONG:
-+                *(int *)binAny->pData = (int)any.Value;
-+                break;
-+            case TypeClass.UNSIGNED_LONG:
-+                *(uint *)binAny->pData = (uint)any.Value;
-+                break;
-+            case TypeClass.HYPER:
-+                if (sizeof(long) > sizeof(void *))
-+                    binAny->pData = uno.rtl.Mem.Allocate(sizeof(long));
-+
-+                *(long *)binAny->pData = (long)any.Value;
-+                break;
-+            case TypeClass.UNSIGNED_HYPER:
-+                if (sizeof(ulong) > sizeof(void *))
-+                    binAny->pData = uno.rtl.Mem.Allocate(sizeof(ulong));
-+
-+                *(ulong *)binAny->pData = (ulong)any.Value;
-+                break;
-+            case TypeClass.FLOAT:
-+                if (sizeof(float) > sizeof(void *)) // FIXME can this happen?
-+                    binAny->pData = uno.rtl.Mem.Allocate(sizeof(float));
-+
-+                *(float *)binAny->pData = (float)any.Value;
-+                break;
-+            case TypeClass.DOUBLE:
-+                if (sizeof(double) > sizeof(void *))
-+                    binAny->pData = uno.rtl.Mem.Allocate(sizeof(double));
-+
-+                *(double *)binAny->pData = (double)any.Value;
-+                break;
-+            case TypeClass.STRING:
-+                // string anies are used so often, that we handle them
-+                // separately, to be a little faster than with an
-+                // extra MapToUno call
-+                if (managedData == null)
-+                {
-+                    uno.rtl.UStringPtr.rtl_uString_new(binAny->pData);
-+                }
-+                else
-+                {
-+                    string s = (string)any.Value;
-+                    uno.rtl.UStringPtr.rtl_uString_newFromStr_WithLength(
-+                        binAny->pData, s, s.Length);
-+                }
-+                break;
-+            case TypeClass.ENUM:
-+                *(int *) binAny->pData = System.Convert.ToInt32(any.Value);
-+                break;
-+            case TypeClass.TYPE:
-+            case TypeClass.SEQUENCE:
-+            case TypeClass.INTERFACE:
-+                binAny->pReserved = null;
-+                MapToUno(binAny->pData, any.Value, valueTD, false /* no assign */);
-+                break;
-+            case TypeClass.STRUCT:
-+            case TypeClass.EXCEPTION:
-+                binAny->pData = uno.rtl.Mem.Allocate(valueTD->nSize);
-+                MapToUno(binAny->pData, any.Value, valueTD, false /* no assign */);
-+                break;
-+            default:
-+                // FIXME
-+                throw new Exception();
-+            }
-+            binAny->pType = (TypeDescriptionReference *)valueTD;
-+            TypeDescriptionReference.Acquire(binAny->pType);
-+        }
-+        break;
-+        case TypeClass.ENUM:
-+            *(int *)unoData = System.Convert.ToInt32(managedData);
-+            break;
-+        case TypeClass.STRUCT:
-+        case TypeClass.EXCEPTION:
-+        {
-+            CompoundTypeDescription *compTD = (CompoundTypeDescription *)type;
-+            StructTypeDescription *structTD = null;
-+
-+            if (type->eTypeClass == TypeClass.STRUCT)
-+                structTD = (StructTypeDescription *)type;
-+
-+            if (((TypeDescription *)compTD)->bComplete == 0)
-+                TypeDescription.Complete((TypeDescription **)&compTD);
-+
-+            int members = compTD->nMembers;
-+            Type managedType = null;
-+            if (managedData != null)
-+                managedType = managedData.GetType();
-+
-+            if (compTD->pBaseTypeDescription != null)
-+                MapToUno(unoData, managedData,
-+                         (TypeDescription *)((TypeDescription *)compTD->pBaseTypeDescription)->pWeakRef,
-+                         assign);
-+
-+            TypeDescriptionReference *memberType = null;
-+            for (int i = 0; i < members; ++i)
-+            {
-+                memberType = compTD->ppTypeRefs[i];
-+
-+                object val = null;
-+                if (managedData != null)
-+                {
-+                    string fieldName = compTD->ppMemberNames[i].ToString();
-+                    FieldInfo fieldInfo = managedType.GetField(fieldName);
-+                    // special case for Exception.Message property
-+                    // The com.sun.star.uno.Exception.Message field is mapped to the
-+                    // System.Exception property. Type.GetField("Message") returns null
-+                    if (fieldInfo == null &&
-+                        type->pTypeName.ToString() == "com.sun.star.uno.Exception")
-+                    {
-+                        // get ExceptionMessage property
-+                        if (fieldName == "Message")
-+                        {
-+                            PropertyInfo propInfo = managedType.GetProperty(fieldName);
-+                            val = propInfo.GetValue(managedData, null);
-+                        } // FIXME  else throw exception
-+                    }
-+                    else if (fieldInfo != null)
-+                    {
-+                        val = fieldInfo.GetValue(managedData);
-+                    } // FIXME else throw exception
-+                }
-+
-+                void *p = (byte *)unoData + compTD->pMemberOffsets[i];
-+                // When using polymorphic structs then the parameterized members can be null.
-+                // Then we set a default value.
-+                bool useDefault = ((structTD != null &&
-+                                    structTD->pParameterizedTypes != null &&
-+                                    structTD->pParameterizedTypes[i] == 1 &&
-+                                    val == null) ||
-+                                   managedData == null);
-+                switch (memberType->eTypeClass)
-+                {
-+                case TypeClass.CHAR:
-+                    if (useDefault)
-+                        *(ushort *)p = 0;
-+                    else
-+                        *(ushort *)p = (char)val;
-+                    break;
-+                case TypeClass.BOOLEAN:
-+                    if (useDefault)
-+                        *(byte *)p = (byte)0;
-+                    else
-+                        *(byte *)p = (bool)val ? (byte)1 : (byte)0;
-+                    break;
-+                case TypeClass.BYTE:
-+                    if (useDefault)
-+                        *(sbyte *)p = (sbyte)0;
-+                    else
-+                        *(sbyte *)p = (sbyte)val;
-+                    break;
-+                case TypeClass.SHORT:
-+                    if (useDefault)
-+                        *(short *)p = (short)0;
-+                    else
-+                        *(short *)p = (short)val;
-+                    break;
-+                case TypeClass.UNSIGNED_SHORT:
-+                    if (useDefault)
-+                        *(ushort *)p = (ushort)0;
-+                    else
-+                        *(ushort *)p = (ushort)val;
-+                    break;
-+                case TypeClass.LONG:
-+                    if (useDefault)
-+                        *(int *)p = 0;
-+                    else
-+                        *(int *)p = (int)val;
-+                    break;
-+                case TypeClass.UNSIGNED_LONG:
-+                    if (useDefault)
-+                        *(uint *)p = (uint)0;
-+                    else
-+                        *(uint *)p = (uint)val;
-+                    break;
-+                case TypeClass.HYPER:
-+                    if (useDefault)
-+                        *(long *)p = (long)0;
-+                    else
-+                        *(long *)p = (long)val;
-+                    break;
-+                case TypeClass.UNSIGNED_HYPER:
-+                    if (useDefault)
-+                        *(ulong *)p = (ulong)0;
-+                    else
-+                        *(ulong *)p = (ulong)val;
-+                    break;
-+                case TypeClass.FLOAT:
-+                    if (useDefault)
-+                        *(float *)p = 0.0F;
-+                    else
-+                        *(float *)p = (float)val;
-+                    break;
-+                case TypeClass.DOUBLE:
-+                    if (useDefault)
-+                        *(double *)p = 0.0;
-+                    else
-+                        *(double *)p = (double)val;
-+                    break;
-+                default:
-+                    // FIXME enum should be converted here
-+                    MapToUno(p, val, (TypeDescription *)memberType, assign);
-+                    break;
-+                }       
-+            }
-+            // FIXME exception handling
-+        }
-+        break;
-+        case TypeClass.SEQUENCE:
-+        {
-+            TypeDescriptionReference *elementType =
-+                ((IndirectTypeDescription *)type)->pType;
-+
-+            SequencePtr seq = new SequencePtr();
-+
-+            if (managedData != null)
-+            {
-+                Array array = (Array)managedData;
-+                int length = array.GetLength(0);
-+
-+                switch (elementType->eTypeClass)
-+                {
-+                case TypeClass.CHAR:
-+                    seq = SequencePtr.Allocate(length, sizeof(ushort));
-+                    Marshal.Copy((char [])managedData, 0, seq.elementsPtr, length);
-+                    break;
-+                case TypeClass.BOOLEAN:
-+                    // FIXME bool vs. byte ???
-+                    seq = SequencePtr.Allocate(length, sizeof(byte));
-+                    Marshal.Copy((byte [])managedData, 0, seq.elementsPtr, length);
-+                    break;
-+                case TypeClass.BYTE:
-+                    seq = SequencePtr.Allocate(length, sizeof(sbyte));
-+                    Marshal.Copy((byte [])managedData, 0, seq.elementsPtr, length);
-+                    break;
-+                case TypeClass.SHORT:
-+                    seq = SequencePtr.Allocate(length, sizeof(short));
-+                    Marshal.Copy((short [])managedData, 0, seq.elementsPtr, length);
-+                    break;
-+                case TypeClass.UNSIGNED_SHORT:
-+                    seq = SequencePtr.Allocate(length, sizeof(ushort));
-+                    Marshal.Copy((short [])managedData, 0, seq.elementsPtr, length);
-+                    break;
-+                case TypeClass.LONG:
-+                    seq = SequencePtr.Allocate(length, sizeof(int));
-+                    Marshal.Copy((int [])managedData, 0, seq.elementsPtr, length);
-+                    break;
-+                case TypeClass.UNSIGNED_LONG:
-+                    seq = SequencePtr.Allocate(length, sizeof(uint));
-+                    Marshal.Copy((int [])managedData, 0, seq.elementsPtr, length);
-+                    break;
-+                case TypeClass.HYPER:
-+                    seq = SequencePtr.Allocate(length, sizeof(long));
-+                    Marshal.Copy((long [])managedData, 0, seq.elementsPtr, length);
-+                    break;
-+                case TypeClass.UNSIGNED_HYPER:
-+                    seq = SequencePtr.Allocate(length, sizeof(ulong));
-+                    Marshal.Copy((long [])managedData, 0, seq.elementsPtr, length);
-+                    break;
-+                case TypeClass.FLOAT:
-+                    seq = SequencePtr.Allocate(length, sizeof(float));
-+                    Marshal.Copy((float [])managedData, 0, seq.elementsPtr, length);
-+                    break;
-+                case TypeClass.DOUBLE:
-+                    seq = SequencePtr.Allocate(length, sizeof(double));
-+                    Marshal.Copy((double [])managedData, 0, seq.elementsPtr, length);
-+                    break;
-+                case TypeClass.STRING:
-+                {
-+                    // FIXME make better use of UStringPtr
-+                    seq = SequencePtr.Allocate(length, sizeof(void *));
-+                    string[] stringArray = (string [])managedData;
-+                    for (int i = 0; i < length; ++i)
-+                    {
-+                        void **pStr = ((void **)seq.elementsPtr) + i;
-+                        *pStr = null;
-+                        uno.rtl.UStringPtr.rtl_uString_newFromStr_WithLength(
-+                            pStr, stringArray[i], stringArray[i].Length);
-+                    }
-+                }
-+                break;
-+                case TypeClass.ENUM:
-+                    seq = SequencePtr.Allocate(length, sizeof(int));
-+                    for (int i = 0; i < length; ++i)
-+                        ((int *)seq.elementsPtr)[i] =
-+                            Convert.ToInt32(array.GetValue(i));
-+                    break;
-+                case TypeClass.TYPE:
-+                case TypeClass.ANY:
-+                case TypeClass.STRUCT:
-+                case TypeClass.EXCEPTION:
-+                case TypeClass.SEQUENCE:
-+                case TypeClass.INTERFACE:
-+                {
-+                    seq = SequencePtr.Allocate(
-+                        length, ((TypeDescription *)elementType)->nSize);
-+
-+                    for (int i = 0; i < length; ++i)
-+                    {
-+                        void *p =
-+                            (byte *)seq.elementsPtr +
-+                            i * ((TypeDescription *)elementType)->nSize;
-+                        object elementData = ((Array)managedData).GetValue(i);
-+                        MapToUno(p, elementData,
-+                                 (TypeDescription *)((TypeDescription *)elementType)->pWeakRef,
-+                                 false /* no assign */);
-+                    }
-+                    // FIXME exception handling
-+                }
-+                break;
-+                default:
-+                    break; // FIXME throw some exception
-+                }
-+            }
-+            else
-+            {
-+                seq = SequencePtr.Allocate(0, sizeof(int));
-+            }
-+            *(SequencePtr *)unoData = seq;
-+        }
-+        break;
-+        case TypeClass.INTERFACE:
-+        {
-+            if (assign && *(void **)unoData != null)
-+                uno.Binary.Interface.Release(new IntPtr(*(void **)unoData));
-+
-+            if (managedData == null)
-+                *(void **)unoData = null;
-+            else
-+                *(void **)unoData =
-+                    com.sun.star.bridges.mono_uno.Bridge.BinaryProxy(managedData, type).ToPointer();
-+            break;
-+        }
-+        default:
-+            // FIXME throw some exception
-+            break;
-+        }
-+    }
-+
-+    static void MapToManaged(ref object managedData, void *unoData, TypeDescriptionReference *type, Type info, bool dontCreateObj)
-+    {
-+        switch (type->eTypeClass)
-+        {
-+        case TypeClass.CHAR:
-+            managedData = (char)*(ushort *)unoData;
-+            break;
-+        case TypeClass.BOOLEAN:
-+            managedData = (*(byte *)unoData != 0);
-+            break;
-+        case TypeClass.BYTE:
-+            managedData = *(sbyte *)unoData; // FIXME cli_uno has this wrong
-+            break;
-+        case TypeClass.SHORT:
-+            managedData = *(short *)unoData;
-+            break;
-+        case TypeClass.UNSIGNED_SHORT:
-+            managedData = *(ushort *)unoData;
-+            break;
-+        case TypeClass.LONG:
-+            managedData = *(int *)unoData;
-+            break;
-+        case TypeClass.UNSIGNED_LONG:
-+            managedData = *(uint *)unoData;
-+            break;
-+        case TypeClass.HYPER:
-+            managedData = *(long *)unoData;
-+            break;
-+        case TypeClass.UNSIGNED_HYPER:
-+            managedData = *(ulong *)unoData;
-+            break;
-+        case TypeClass.FLOAT:
-+            managedData = *(float *)unoData;
-+            break;
-+        case TypeClass.DOUBLE:
-+            managedData = *(double *)unoData;
-+            break;
-+        case TypeClass.STRING:
-+            managedData = ((uno.rtl.UStringPtr)unoData).ToString();
-+            break;
-+        case TypeClass.TYPE:
-+            managedData = MapUnoType( *(TypeDescriptionReference **)unoData);
-+            break;
-+        case TypeClass.ANY:
-+        {
-+            uno.Binary.Any *binAny = (uno.Binary.Any *)unoData;
-+            if (binAny->pType->eTypeClass != TypeClass.VOID)
-+            {
-+                object value = null;
-+                MapToManaged(ref value, binAny->pData, binAny->pType, null, false);
-+                managedData = new uno.Any(MapUnoType(binAny->pType), value);
-+            }
-+            else
-+            {
-+                managedData = uno.Any.VOID;
-+            }
-+            break;
-+        }
-+        case TypeClass.ENUM:
-+            if (info != null)
-+                managedData = Enum.ToObject(
-+                    info.GetElementType(), *(int *)unoData);
-+            else
-+                managedData = Enum.ToObject(
-+                    MapUnoType(type), *(int *)unoData);
-+            break;
-+        case TypeClass.STRUCT:
-+        case TypeClass.EXCEPTION:
-+        {
-+            CompoundTypeDescription *compTD =
-+                (CompoundTypeDescription *)type;
-+
-+            if (((TypeDescription *)compTD)->bComplete == 0)
-+                TypeDescription.Complete((TypeDescription **)&compTD);
-+
-+            // create the type
-+            Type managedType = LoadCliType(type->pTypeName);
-+
-+            // detect if we recursivly convert inherited
-+            // structures. If this point is reached because of a
-+            // recursive call during converting a struct then we must
-+            // not create a new object rather we use the one in
-+            // cli_data argument.
-+            object managedObject;
-+            if (dontCreateObj)
-+                managedObject = managedData;
-+            else
-+            {
-+                // Special handling for Exception conversion. We must
-+                // call constructor System::Exception to pass the
-+                // message string
-+                /* FIXME needs working climaker or at least its output */
-+                /* if (typeof(unoidl.com.sun.star.uno.Exception).IsAssignableFrom(managedType)) */
-+                if (typeof(System.Exception).IsAssignableFrom(managedType))
-+                {
-+                    // We need to get the Message field. Therefore we
-+                    // must obtain the offset from the
-+                    // typedescription. The base interface of all
-+                    // exceptions is com::sun::star::uno::Exception
-+                    // which contains the message
-+                    CompoundTypeDescription *pCTD = compTD;
-+                    while (pCTD->pBaseTypeDescription != null)
-+                        pCTD = pCTD->pBaseTypeDescription;
-+
-+                    int pos = -1;                    
-+                    for (int i = 0; i < pCTD->nMembers; ++i)
-+                    {
-+                        if (pCTD->ppMemberNames[i].ToString() == "Message")
-+                        {
-+                            pos = i;
-+                            break;
-+                        }
-+                    }
-+
-+                    int offset = pCTD->pMemberOffsets[pos];
-+                    // With the offset within the exception we can get
-+                    // the message string
-+                    string message = (*(uno.rtl.UStringPtr *)
-+                                      ((byte *)unoData + offset)).ToString();
-+                    // We need to find a constructor for the exception
-+                    // that takes the message string.  We assume that
-+                    // the first argument is the message string
-+                    ConstructorInfo[] ctorInfos = managedType.GetConstructors();
-+                    ConstructorInfo ctorInfo = null;
-+                    // Constructor must at least have 2 params for the base
-+                    // unoidl.com.sun.star.uno.Exception (String, Object);
-+                    int numArgs = -1;
-+                    foreach (ConstructorInfo ci in ctorInfos)
-+                    {
-+                        numArgs = ci.GetParameters().Length;
-+                        if (numArgs < 2)
-+                            continue;
-+                        ctorInfo = ci;
-+                        break;                            
-+                    }
-+                    
-+                    // Prepare parameters for constructor
-+                    object[] args = new object[numArgs];
-+                    // only initialize the first argument with the
-+                    // message. All unoidl.<Foo Exception>s are
-+                    // autogenerated, we know that this is safe.
-+                    args[0] = message;
-+                    managedObject = ctorInfo.Invoke(args);
-+                }
-+                else
-+                    managedObject = Activator.CreateInstance(managedType);
-+            }
-+
-+            TypeDescriptionReference **memberTypeRefs = compTD->ppTypeRefs;
-+            int *memberOffsets = compTD->pMemberOffsets;
-+
-+            if (compTD->pBaseTypeDescription != null)
-+            {
-+                // convert inherited struct
-+                // cliObj is passed inout (args in_param, out_param are true), hence the passed
-+                // cliObj is used by the callee instead of a newly created struct
-+                MapToManaged(ref managedObject,  unoData,
-+                             ((TypeDescription *)compTD->pBaseTypeDescription)->pWeakRef,
-+                             null,
-+                             true);
-+            }
-+            for (int i = compTD->nMembers; i != 0; --i)
-+            {
-+                TypeDescriptionReference *memberType = memberTypeRefs[i];
-+                string memberName = compTD->ppMemberNames[i].ToString();
-+                FieldInfo fieldInfo = managedType.GetField(memberName);
-+                // special case for Exception.Message. The field has already been
-+                // set while constructing cli object
-+                if (fieldInfo == null &&
-+                    type->pTypeName.ToString() == "com.sun.star.uno.Exception")
-+                    continue;
-+
-+                void *p = (byte *)unoData + memberOffsets[i];
-+                switch (memberType->eTypeClass)
-+                {
-+                case TypeClass.CHAR:
-+                    fieldInfo.SetValue(managedObject, (char)*(short *)p);
-+                    break;
-+                case TypeClass.BOOLEAN:
-+                    fieldInfo.SetValue(managedObject, (*(byte *)p) != 0);
-+                    break;
-+                case TypeClass.BYTE:
-+                    fieldInfo.SetValue(managedObject, *(sbyte *)p);
-+                    break;
-+                case TypeClass.SHORT:
-+                    fieldInfo.SetValue(managedObject, *(short *)p);
-+                    break;
-+                case TypeClass.UNSIGNED_SHORT:
-+                    fieldInfo.SetValue(managedObject, *(ushort *)p);
-+                    break;
-+                case TypeClass.LONG:
-+                    fieldInfo.SetValue(managedObject, *(int *)p);
-+                    break;
-+                case TypeClass.UNSIGNED_LONG:
-+                    fieldInfo.SetValue(managedObject, *(uint *)p);
-+                    break;
-+                case TypeClass.HYPER:
-+                    fieldInfo.SetValue(managedObject, *(long *)p);
-+                    break;
-+                case TypeClass.UNSIGNED_HYPER:
-+                    fieldInfo.SetValue(managedObject, *(ulong *)p);
-+                    break;
-+                case TypeClass.FLOAT:
-+                    fieldInfo.SetValue(managedObject, *(float *)p);
-+                    break;
-+                case TypeClass.DOUBLE:
-+                    fieldInfo.SetValue(managedObject, *(double *)p);
-+                    break;
-+                default:
-+                {
-+                    object managedValue = null;
-+                    MapToManaged(ref managedValue, p, memberType, null, false);
-+                    fieldInfo.SetValue(managedObject, managedValue);
-+                    break;
-+                }
-+                }
-+            }
-+            managedData = managedObject;
-+            break;
-+        }
-+        case TypeClass.SEQUENCE:
-+        {
-+            SequencePtr seq = *(SequencePtr *)unoData;
-+            int length = seq.nElements;
-+
-+            TypeDescriptionReference *elementType =
-+                ((IndirectTypeDescription *)type)->pType;
-+
-+            switch (elementType->eTypeClass)
-+            {
-+            case TypeClass.CHAR:
-+            {
-+                char[] array = new char[length];
-+                Marshal.Copy(seq.elementsPtr, array, 0, length);
-+                managedData = array;
-+                break;
-+            }
-+            case TypeClass.BOOLEAN:
-+            {
-+                bool[] array = new bool[length];
-+                byte *source = (byte *)seq.elementsPtr;
-+                fixed (bool *arrayPtr = array)
-+                {
-+                    bool *dest = arrayPtr;
-+                    for (int i = 0; i < length; ++i)
-+                        *dest++ = (*source++ != 0);
-+                }
-+                managedData = array;
-+                break;
-+            }
-+            case TypeClass.BYTE:
-+            {
-+                byte[] array = new byte[length];
-+                byte *source = (byte *)seq.elementsPtr;
-+                fixed (byte *arrayPtr = array)
-+                {
-+                    byte *dest = arrayPtr;
-+                    for (int i = 0; i < length; ++i)
-+                        *dest++ = *source++;
-+                }
-+                managedData = array;
-+                break;
-+            }
-+            case TypeClass.SHORT:
-+            {
-+                short[] array = new short[length];
-+                Marshal.Copy(seq.elementsPtr, array, 0, length);
-+                managedData = array;
-+                break;
-+            }
-+            case TypeClass.UNSIGNED_SHORT:
-+            {
-+                ushort[] array = new ushort[length];
-+                ushort *source = (ushort *)seq.elementsPtr;
-+                fixed (ushort *arrayPtr = array)
-+                {
-+                    ushort *dest = arrayPtr;
-+                    for (int i = 0; i < length; ++i)
-+                        *dest++ = *source++;
-+                }
-+                managedData = array;
-+                break;
-+            }
-+            case TypeClass.LONG:
-+            {
-+                int[] array = new int[length];
-+                Marshal.Copy(seq.elementsPtr, array, 0, length);
-+                managedData = array;
-+                break;
-+            }
-+            case TypeClass.UNSIGNED_LONG:
-+            {
-+                uint[] array = new uint[length];
-+                uint *source = (uint *)seq.elementsPtr;
-+                fixed (uint *arrayPtr = array)
-+                {
-+                    uint *dest = arrayPtr;
-+                    for (int i = 0; i < length; ++i)
-+                        *dest++ = *source++;
-+                }
-+                managedData = array;
-+                break;
-+            }
-+            case TypeClass.HYPER:
-+            {
-+                long[] array = new long[length];
-+                Marshal.Copy(seq.elementsPtr, array, 0, length);
-+                managedData = array;
-+                break;
-+            }
-+            case TypeClass.UNSIGNED_HYPER:
-+            {
-+                ulong[] array = new ulong[length];
-+                ulong *source = (ulong *)seq.elementsPtr;
-+                fixed (ulong *arrayPtr = array)
-+                {
-+                    ulong *dest = arrayPtr;
-+                    for (int i = 0; i < length; ++i)
-+                        *dest++ = *source++;
-+                }
-+                managedData = array;
-+                break;
-+            }
-+            case TypeClass.FLOAT:
-+            {
-+                float[] array = new float[length];
-+                Marshal.Copy(seq.elementsPtr, array, 0, length);
-+                managedData = array;
-+                break;
-+            }
-+            case TypeClass.DOUBLE:
-+            {
-+                double[] array = new double[length];
-+                Marshal.Copy(seq.elementsPtr, array, 0, length);
-+                managedData = array;
-+                break;
-+            }
-+            case TypeClass.STRING:
-+            {
-+                string[] array = new string[length];
-+                for (int i = 0; i < length; ++i)
-+                    array[i] = ((uno.rtl.UStringPtr)(((void **)seq.elementsPtr)[i])).ToString();
-+                managedData = array;
-+                break;
-+            }
-+            case TypeClass.TYPE:
-+            {
-+                Type[] array = new Type[length];
-+                for (int i = 0; i < length; ++i)
-+                    array[i] = MapUnoType(((TypeDescriptionReference **)
-+                                           seq.elementsPtr)[i]);
-+                managedData = array;
-+                break;
-+            }
-+            case TypeClass.ANY:
-+            {
-+                uno.Any[] array = new uno.Any[length];
-+                uno.Binary.Any *binAny = (uno.Binary.Any *)seq.elementsPtr;
-+                for (int i = 0; i < length; ++i)
-+                {
-+                    object any = new uno.Any();
-+                    MapToManaged(ref any, (void **)binAny + i,
-+                                 (TypeDescriptionReference *)elementType,
-+                                 null, false);
-+                    array[i] = (uno.Any)any;
-+                }
-+                managedData = array;
-+                break;
-+            }
-+            case TypeClass.ENUM:
-+            {
-+                Type enumType = null;
-+                if (info != null)
-+                {
-+                    enumType = info.GetElementType();
-+                    // enumType is EnumType[], get EnumType
-+                    enumType = enumType.GetElementType();
-+                }
-+                else
-+                    enumType = MapUnoType(elementType);
-+
-+                Array array = Array.CreateInstance(enumType, length);
-+                for (int i = 0; i < length; ++i)
-+                {
-+                    array.SetValue(Enum.ToObject(enumType,
-+                                                 ((int *)seq.elementsPtr)[i]),
-+                                   i);
-+                }
-+                managedData = array;
-+                break;
-+            }
-+            case TypeClass.STRUCT:
-+            case TypeClass.EXCEPTION:
-+            {
-+                Array array = Array.CreateInstance(MapUnoType(elementType), length);
-+                if (length > 0)
-+                {
-+                    // FIXME check this
-+                    byte *p = (byte *)seq.elementsPtr;
-+                    int size = ((TypeDescription *)elementType)->nSize;
-+                    for (int i = 0; i < length; ++i)
-+                    {
-+                        object val = null;
-+                        MapToManaged(ref val, p + (size * i), elementType, null, false);
-+                        array.SetValue(val, i);
-+                    }
-+                }
-+                managedData = array;
-+                break;
-+            }
-+            // FIXME verify (says cli_data.cxx)
-+            case TypeClass.SEQUENCE:
-+            {
-+                Array array = Array.CreateInstance(
-+                    MapUnoType(elementType), length);
-+                if (length > 0)
-+                {
-+                    SequencePtr *elements = (SequencePtr *)seq.elementsPtr;
-+                    for (int i = 0; i < length; ++i)
-+                    {
-+                        object val = null;
-+                        MapToManaged(ref val, elements + i, elementType, null, false);
-+                        array.SetValue(val, i);
-+                    }
-+                }
-+                managedData = array;
-+                break;
-+            }
-+            case TypeClass.INTERFACE:
-+            {
-+                Type ifaceType = MapUnoType(elementType);
-+                Array array = Array.CreateInstance(ifaceType, length);
-+
-+                byte *p = (byte *)seq.elementsPtr;
-+                int size = ((TypeDescription *)elementType)->nSize;
-+                for (int i = 0; i < length; ++i)
-+                {
-+                    object val = null;
-+                    MapToManaged(ref val, p + (size * i), elementType, null, false);
-+                    array.SetValue(val, i);
-+                }
-+                managedData = array;
-+                break;
-+            }
-+            default:
-+            {
-+                // FIXME throw some exception
-+                break;
-+            }
-+            }
-+            break;
-+        }
-+        case TypeClass.INTERFACE:
-+        {
-+            IntPtr unoI = new IntPtr((void **)unoData);
-+            if (unoI != IntPtr.Zero)
-+                managedData = Bridge.MapUnoToManaged(
-+                    unoI, (InterfaceTypeDescription *)type);                                                     
-+            else
-+                managedData = null;
-+            break;
-+        }
-+        default:
-+        {
-+            // FIXME throw some exception
-+            break;
-+        }
-+        }
-+    }
-+
-+    static TypeDescriptionReference *MapManagedType(Type managedType)
-+    {
-+        TypeDescriptionReference *result = null;
-+        if (managedType == null)
-+        {
-+            result = *TypeDescriptionReference.GetByTypeClass(TypeClass.VOID);
-+            TypeDescriptionReference.Acquire(result);
-+            return result;
-+        }
-+
-+        // check for Enum first,
-+        // because otherwise case System.TypeCode.Int32 applies
-+        if (managedType.IsEnum)
-+        {
-+            uno.rtl.UStringPtr unoTypeName = MapManagedTypeName(managedType.FullName);
-+            TypeDescriptionReference.New(&result, TypeClass.ENUM, unoTypeName);
-+            TypeDescriptionReference.Acquire(result);
-+        }
-+        else
-+        {
-+            switch (System.Type.GetTypeCode(managedType))
-+            {
-+            case System.TypeCode.Boolean:
-+                result = *TypeDescriptionReference.GetByTypeClass(TypeClass.BOOLEAN);
-+                TypeDescriptionReference.Acquire(result);
-+                break;
-+            case System.TypeCode.Char:
-+                result = *TypeDescriptionReference.GetByTypeClass(TypeClass.CHAR);
-+                TypeDescriptionReference.Acquire(result);
-+                break;
-+            case System.TypeCode.Byte:
-+                result = *TypeDescriptionReference.GetByTypeClass(TypeClass.BYTE);
-+                TypeDescriptionReference.Acquire(result);
-+                break;
-+            case System.TypeCode.Int16:
-+                result = *TypeDescriptionReference.GetByTypeClass(TypeClass.SHORT);
-+                TypeDescriptionReference.Acquire(result);
-+                break;
-+            case System.TypeCode.Int32:
-+                result = *TypeDescriptionReference.GetByTypeClass(TypeClass.LONG);
-+                TypeDescriptionReference.Acquire(result);
-+                break;
-+            case System.TypeCode.Int64:
-+                result = *TypeDescriptionReference.GetByTypeClass(TypeClass.HYPER);
-+                TypeDescriptionReference.Acquire(result);
-+                break;
-+            case System.TypeCode.UInt16:
-+                result = *TypeDescriptionReference.GetByTypeClass(TypeClass.UNSIGNED_SHORT);
-+                TypeDescriptionReference.Acquire(result);
-+                break;
-+            case System.TypeCode.UInt32:
-+                result = *TypeDescriptionReference.GetByTypeClass(TypeClass.UNSIGNED_LONG);
-+                TypeDescriptionReference.Acquire(result);
-+                break;
-+            case System.TypeCode.UInt64:
-+                result = *TypeDescriptionReference.GetByTypeClass(TypeClass.UNSIGNED_HYPER);
-+                TypeDescriptionReference.Acquire(result);
-+                break;
-+            case System.TypeCode.Single:
-+                result = *TypeDescriptionReference.GetByTypeClass(TypeClass.FLOAT);
-+                TypeDescriptionReference.Acquire(result);
-+                break;
-+            case System.TypeCode.Double:
-+                result = *TypeDescriptionReference.GetByTypeClass(TypeClass.DOUBLE);
-+                TypeDescriptionReference.Acquire(result);
-+                break;
-+            case System.TypeCode.String:
-+                result = *TypeDescriptionReference.GetByTypeClass(TypeClass.STRING);
-+                TypeDescriptionReference.Acquire(result);
-+                break;
-+            }
-+        }
-+
-+        if (result == null)
-+        {
-+            string managedTypeName = managedType.FullName;
-+            if (managedTypeName == "System.Void")
-+            {
-+                result = *TypeDescriptionReference.GetByTypeClass(TypeClass.VOID);
-+                TypeDescriptionReference.Acquire(result);
-+            }
-+            else if (managedTypeName == "System.Type")
-+            {
-+                result = *TypeDescriptionReference.GetByTypeClass(TypeClass.TYPE);
-+                TypeDescriptionReference.Acquire(result);
-+            }
-+            else if (managedTypeName == "uno.Any")
-+            {
-+                result = *TypeDescriptionReference.GetByTypeClass(TypeClass.ANY);
-+                TypeDescriptionReference.Acquire(result);
-+            }
-+            else
-+            {
-+                uno.rtl.UStringPtr unoTypeName;
-+
-+                uno.PolymorphicType poly = managedType as uno.PolymorphicType;
-+                if (poly != null)
-+                    unoTypeName = MapManagedTypeName(poly.PolymorphicName);
-+                else
-+                    unoTypeName = MapManagedTypeName(managedTypeName);
-+                TypeDescription *td = null;
-+                TypeDescription.GetByName(&td, unoTypeName);
-+                if (td != null)
-+                {
-+                    result = td->pWeakRef;
-+                    TypeDescriptionReference.Acquire(result);
-+                    TypeDescription.Release(td);
-+                }
-+            }
-+        }
-+
-+        if (result == null)
-+        {
-+            // FIXME throw some exception
-+        }
-+
-+        return result;
-+    }
-+
-+    static string MapManagedPolymorphicName(string unoName)
-+    {
-+        int startIndex = unoName.LastIndexOf('<');
-+        if (startIndex == -1)
-+            return unoName;
-+
-+        // get the type list withing < and >
-+        int endIndex = unoName.LastIndexOf('>');
-+        string list = unoName.Substring(startIndex + 1, endIndex - startIndex - 1);
-+
-+        // parse the type list and replace the types with the corresponding CLI types
-+        char[] delimiters = new char[] { ',' };
-+        string[] unoTypes = list.Split(delimiters);
-+
-+        StringBuilder builder = new StringBuilder(unoName.Substring(0, startIndex + 1));
-+        
-+        int typeCount = unoTypes.Length;
-+        for (int i = 0; i < typeCount; ++i)
-+            builder.Append(MapManagedTypeName(unoTypes[i]));
-+        builder.Append('>');
-+        return builder.ToString();
-+    }
-+
-+    static uno.rtl.UStringPtr MapManagedTypeName(string typeName)
-+    {
-+        int dims = 0;
-+        int index = 0;
-+        
-+        if ((index = typeName.IndexOf("[]")) > 0)
-+        {
-+            dims = 1;
-+            
-+            int curIndex = index;
-+            while ((curIndex + 2) < typeName.Length &&
-+                   (curIndex = typeName.IndexOf("[]", curIndex + 2)) > 0)
-+                ++dims;
-+
-+            // get the element name by removing the brackets
-+            typeName = typeName.Substring(0, index);            
-+        }
-+            
-+        StringBuilder buf = new StringBuilder(256);
-+        for (; dims > 0; --dims)
-+            buf.Append("[]");
-+
-+        switch (typeName)
-+        {
-+        case "System.Boolean":
-+            buf.Append("boolean");
-+            break;
-+        case "System.Char":
-+            buf.Append("char");
-+            break;
-+        case "System.Byte":
-+            buf.Append("byte");
-+            break;
-+        case "System.Int16":
-+            buf.Append("short");
-+            break;
-+        case "System.UInt16":
-+            buf.Append("unsigned short");
-+            break;
-+        case "System.Int32":
-+            buf.Append("long");
-+            break;
-+        case "System.UInt32":
-+            buf.Append("unsigned long");
-+            break;
-+        case "System.Int64":
-+            buf.Append("hyper");
-+            break;
-+        case "System.UInt64":
-+            buf.Append("unsigned hyper");
-+            break;
-+        case "System.Single":
-+            buf.Append("float");
-+            break;
-+        case "System.Double":
-+            buf.Append("double");
-+            break;
-+        case "System.String":
-+            buf.Append("string");
-+            break;
-+        case "System.Void":
-+            buf.Append("void");
-+            break;
-+        case "System.Type":
-+            buf.Append("type");
-+            break;
-+        case "System.Object":
-+            buf.Append("com.sun.star.uno.XInterface");
-+            break;
-+        case "uno.Any":
-+            buf.Append("any");
-+            break;
-+        default:
-+        {
-+            string name = MapManagedPolymorphicName(typeName);
-+            int i = name.IndexOf('.');
-+            buf.Append(name.Substring(i + 1));
-+            break;
-+        }
-+        }
-+
-+        void *rtl_uString = null;
-+        uno.rtl.UStringPtr.rtl_uString_newFromStr_WithLength(
-+            &rtl_uString, buf, buf.Length);
-+        return new uno.rtl.UStringPtr(rtl_uString);
 +    }
 +
 +    static Type MapUnoType(TypeDescription *TD)
@@ -1709,14 +429,14 @@
 +        case TypeClass.ENUM:
 +        case TypeClass.STRUCT:
 +        case TypeClass.EXCEPTION:
-+            result = LoadCliType(TD->pTypeName);
++            result = Bridge.LoadCliType(TD->pTypeName);
 +            break;
 +        case TypeClass.INTERFACE:
 +            // special handling for XInterface, since it does not exist in cli.
 +            if (TD->pTypeName.ToString() == "com.sun.star.uno.XInterface")
 +                result = typeof(object);
 +            else
-+                result = LoadCliType(TD->pTypeName);
++                result = Bridge.LoadCliType(TD->pTypeName);
 +            break;
 +        case TypeClass.SEQUENCE:
 +        {
@@ -1770,7 +490,7 @@
 +            case TypeClass.STRUCT:
 +            case TypeClass.INTERFACE:
 +            case TypeClass.SEQUENCE:
-+                result = LoadCliType(TD->pTypeName);
++                result = Bridge.LoadCliType(TD->pTypeName);
 +                break;
 +            default:
 +                // FIXME can't happen
@@ -1787,121 +507,6 @@
 +        return result;
 +    }
 +
-+    static string MapUnoTypeName(string typeName)
-+    {
-+        StringBuilder buf = new StringBuilder();
-+
-+        // determine if the type is a sequence and its dimensions
-+        int dims = 0;
-+        if (typeName[0] == '[')
-+        {
-+            int index = 1;
-+            while (true)
-+            {
-+                if (typeName[index++] == ']')
-+                    ++dims;
-+                if (typeName[index++] != '[')
-+                    break;
-+            }
-+            typeName = typeName.Substring(index - 1);
-+        }
-+
-+        switch (typeName)
-+        {
-+        case "boolean":
-+            buf.Append("System.Boolean");
-+            break;
-+        case "char":
-+            buf.Append("System.Char");
-+            break;
-+        case "byte":
-+            buf.Append("System.Byte");
-+            break;
-+        case "short":
-+            buf.Append("System.Int16");
-+            break;
-+        case "unsigned short":
-+            buf.Append("System.UInt16");
-+            break;
-+        case "long":
-+            buf.Append("System.Int32");
-+            break;
-+        case "unsigned long":
-+            buf.Append("System.UInt32");
-+            break;
-+        case "hyper":
-+            buf.Append("System.Int64");
-+            break;
-+        case "unsigned hyper":
-+            buf.Append("System.UInt64");
-+            break;
-+        case "float":
-+            buf.Append("System.Single");
-+            break;
-+        case "double":
-+            buf.Append("System.Double");
-+            break;
-+        case "string":
-+            buf.Append("System.String");
-+            break;
-+        case "void":
-+            buf.Append("System.Void");
-+            break;
-+        case "type":
-+            buf.Append("System.Type");
-+            break;
-+        case "com.sun.star.uno.XInterface":
-+            buf.Append("System.Object");
-+            break;
-+        case "any":
-+            buf.Append("uno.Any");
-+            break;
-+        default:
-+            // put "unoidl." at the beginning
-+            buf.Append("unoidl.");
-+            // for polymorphic struct types remove the brackets, e.g. mystruct<bool> -> mystruct
-+            buf.Append(MapUnoPolymorphicName(typeName));
-+            break;
-+        }
-+
-+        // append []
-+        for ( ; dims > 0; --dims)
-+            buf.Append("[]");
-+
-+        return buf.ToString();
-+    }
-+
-+    /** For example, there is a uno type
-+        com.sun.star.Foo<char, long>.
-+        The values in the type list
-+        are uno types and are replaced by cli types, such as System.Char,
-+        System.Int32, etc.
-+    */
-+    static string MapUnoPolymorphicName(string unoName)
-+    {
-+        int startIndex = unoName.LastIndexOf('<');
-+        if (startIndex == -1)
-+            return unoName;
-+
-+        // get the type list within < and >
-+        int endIndex = unoName.LastIndexOf('>');
-+        string list = unoName.Substring(startIndex + 1, endIndex - startIndex - 1);
-+
-+        // parse the type list and replace the types with the corresponding CLI types
-+        char[] delimiters = new char[] { ',' };
-+        string[] unoTypes = list.Split(delimiters);
-+
-+        StringBuilder builder = new StringBuilder(unoName.Substring(0, startIndex + 1));
-+
-+        int typeCount = unoTypes.Length;
-+        for (int i = 0; i < typeCount; ++i)
-+            builder.Append(MapUnoTypeName(unoTypes[i]));
-+
-+        builder.Append('>');
-+        return builder.ToString();            
-+    }
-+
-+    
 +    IMessage InvokeObjectMethod(IMessage request)
 +    {
 +        IMethodMessage methodmsg = (IMethodMessage)request;
@@ -1943,52 +548,6 @@
 +
 +    public string Oid {
 +        get { return oid; }
-+    }
-+
-+    static Type LoadCliType(uno.rtl.UStringPtr unoName)
-+    {
-+        return LoadCliType(MapUnoTypeName(unoName.ToString()));
-+    }
-+
-+    static Type LoadCliType(string unoName)
-+    {
-+        Type result = null;
-+        bool isPolymorphic = false;
-+
-+        string loadName = unoName;
-+        int index = unoName.IndexOf('<');
-+        if (index != -1)
-+        {
-+            loadName = unoName.Substring(0, index);
-+            isPolymorphic = true;
-+        }
-+        
-+        result = Type.GetType(loadName + ",cli_types");
-+
-+        if (result == null)
-+            result = Type.GetType(loadName + ",cli_basetypes");
-+
-+        if (result == null)
-+            result = Type.GetType(loadName, false);
-+
-+        if (result == null)
-+        {
-+            foreach (Assembly a in AppDomain.CurrentDomain.GetAssemblies())
-+            {
-+                result = a.GetType(loadName, false);
-+                if (result != null)
-+                    break;
-+            }
-+        }
-+
-+        if (result == null)
-+            // FIXME don't use generic Exception type
-+            throw new Exception("A type could not be loaded: " + loadName);
-+
-+        if (isPolymorphic)
-+            result = uno.PolymorphicType.GetType(result, unoName);
-+
-+        return result;            
 +    }
 +
 +    IMessage ConstructReturnMessage(uno.Any result, object[] args,
