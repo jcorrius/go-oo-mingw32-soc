@@ -1,0 +1,341 @@
+diff -u -r ../../../sc.bak/inc/dpobject.hxx sc/inc/dpobject.hxx
+--- ../../../sc.bak/inc/dpobject.hxx	2004-12-22 14:05:07.000000000 +0530
++++ sc/inc/dpobject.hxx	2005-01-11 13:20:14.887574368 +0530
+@@ -142,6 +142,7 @@
+ 	ScDPOutput*				pOutput;
+ 	BOOL					bSettingsChanged;
+ 	BOOL					bAlive;			// FALSE if only used to hold settings
++	USHORT                                  nAutoFormatIndex;
+ 	BOOL					bAllowMove;
+ 	BOOL					bInfoValid;		// affects: nHeaderRows
+ 	long					nHeaderRows;	// page fields plus filter button
+@@ -172,6 +173,9 @@
+ 	void				SetOutRange(const ScRange& rRange);
+ 	const ScRange&		GetOutRange() const		{ return aOutRange; }
+ 
++	void 			SetAutoFormatIndex (const USHORT nIndex);
++	const USHORT		GetAutoFormatIndex ()	{ if (this == NULL) return 65535; else return nAutoFormatIndex; }
++
+ 	void				SetSheetDesc(const ScSheetSourceDesc& rDesc);
+ 	void				SetImportDesc(const ScImportSourceDesc& rDesc);
+ 	void				SetServiceData(const ScDPServiceDesc& rDesc);
+diff -u -r ../../../sc.bak/inc/sc.hrc sc/inc/sc.hrc
+--- ../../../sc.bak/inc/sc.hrc	2004-12-22 14:05:07.000000000 +0530
++++ sc/inc/sc.hrc	2005-01-11 13:19:28.850573056 +0530
+@@ -1608,6 +1608,7 @@
+ #define RID_SCDLG_DPDATEGROUP           (SC_DIALOGS_START + 136)
+ #define RID_SCDLG_DPSHOWDETAIL          (SC_DIALOGS_START + 137)
+ 
++#define SID_PIVOT_AFMT					(SC_DIALOGS_START + 133)
+ #define SC_DIALOGS_END          (SC_DIALOGS_START + 150)
+ 
+ #ifndef STD_MASKCOLOR
+diff -u -r ../../../sc.bak/sdi/pivotsh.sdi sc/sdi/pivotsh.sdi
+--- ../../../sc.bak/sdi/pivotsh.sdi	2004-12-22 14:05:07.000000000 +0530
++++ sc/sdi/pivotsh.sdi	2005-01-11 13:19:28.000000000 +0530
+@@ -65,6 +65,7 @@
+ 	SID_PIVOT_RECALC	[ ExecMethod = Execute; StateMethod = GetState; Export = FALSE; ]
+ 	SID_PIVOT_KILL		[ ExecMethod = Execute; StateMethod = GetState; Export = FALSE; ]
+         SID_DP_FILTER           [ ExecMethod = Execute; StateMethod = GetState; Export = FALSE; ]
++	SID_PIVOT_AFMT		[ ExecMethod = Execute; StateMethod = GetState; Export = FALSE; ]
+ }
+ 
+ shell ScPivotShell
+diff -u -r ../../../sc.bak/sdi/scalc.sdi sc/sdi/scalc.sdi
+--- ../../../sc.bak/sdi/scalc.sdi	2004-12-22 14:05:07.000000000 +0530
++++ sc/sdi/scalc.sdi	2005-01-11 13:19:28.000000000 +0530
+@@ -1906,6 +1906,31 @@
+ 	GroupId = GID_DATA;
+ ]
+ 
++SfxVoidItem AutoFormatPivotTable SID_PIVOT_AFMT
++()
++[
++        /* flags: */
++        AutoUpdate = FALSE,
++        Cachable = Cachable,
++        FastCall = FALSE,
++        HasCoreId = FALSE,
++        HasDialog = FALSE,
++        ReadOnlyDoc = TRUE,
++        Toggle = FALSE,
++        Container = FALSE,
++        RecordAbsolute = FALSE,
++        RecordPerSet;
++        Synchron;
++                                                                                                                             
++        /* config: */
++        AccelConfig = FALSE,
++        MenuConfig = TRUE,
++        StatusBarConfig = FALSE,
++        ToolBoxConfig = FALSE,
++        GroupId = GID_DATA;
++]
++
++
+ //--------------------------------------------------------------------------
+ SfxVoidItem DeletePrintArea SID_DELETE_PRINTAREA
+ ()
+diff -u -r ../../../sc.bak/source/core/data/dpobject.cxx sc/source/core/data/dpobject.cxx
+--- ../../../sc.bak/source/core/data/dpobject.cxx	2004-12-22 14:05:08.000000000 +0530
++++ sc/source/core/data/dpobject.cxx	2005-01-11 13:19:28.863571080 +0530
+@@ -182,6 +182,7 @@
+ 	pImpDesc( NULL ),
+ 	pServDesc( NULL ),
+ 	pOutput( NULL ),
++	nAutoFormatIndex(65535),
+ 	bSettingsChanged( FALSE )
+ {
+ }
+@@ -196,6 +197,7 @@
+ 	aTableName( r.aTableName ),
+ 	aTableTag( r.aTableTag ),
+ 	aOutRange( r.aOutRange ),
++	nAutoFormatIndex(r.nAutoFormatIndex),
+ 	pSheetDesc( NULL ),
+ 	pImpDesc( NULL ),
+ 	pServDesc( NULL ),
+@@ -245,6 +247,11 @@
+ 	InvalidateData();		// re-init source from SaveData
+ }
+ 
++void ScDPObject::SetAutoFormatIndex(const USHORT nIndex)
++{
++	nAutoFormatIndex	= nIndex;
++}
++
+ void ScDPObject::SetOutRange(const ScRange& rRange)
+ {
+ 	aOutRange = rRange;
+diff -u -r ../../../sc.bak/source/ui/docshell/dbdocfun.cxx sc/source/ui/docshell/dbdocfun.cxx
+--- ../../../sc.bak/source/ui/docshell/dbdocfun.cxx	2004-12-22 14:05:08.000000000 +0530
++++ sc/source/ui/docshell/dbdocfun.cxx	2005-01-11 13:54:59.264700880 +0530
+@@ -1376,6 +1376,36 @@
+ 	delete pNewUndoDoc;
+ 	delete pUndoDPObj;
+ 
++	if (const_cast<ScDPObject *>(pNewObj)->GetAutoFormatIndex() != 65535)
++	{
++		ScViewData* pViewData = rDocShell.GetViewData();
++  		ScDocument* pDoc = pViewData->GetDocument();
++		rDocShell.GetViewData()->GetViewShell()->GetDBData( TRUE, SC_DB_OLD );
++		const ScMarkData& rMark1 = pViewData->GetMarkData();
++		SCCOL nStartCol;
++		SCROW nStartRow;
++		SCTAB nStartTab;
++		SCCOL nEndCol;
++		SCROW nEndRow;
++		SCTAB nEndTab;
++
++		rDocShell.GetViewData()->GetSimpleArea( nStartCol,nStartRow,nStartTab,nEndCol,nEndRow,nEndTab );
++		ScRange Outrange = pNewObj->GetOutRange();
++		if (( (Outrange.aStart.Col() <= nStartCol) && (nStartCol <= Outrange.aEnd.Col() )&& (nStartTab == Outrange.aStart.Tab()))
++			&& ( (Outrange.aStart.Row() <= nStartRow) && (nStartRow <= Outrange.aEnd.Row() )) )
++			{
++		
++			if ( !rMark1.IsMarked() && !rMark1.IsMultiMarked() )
++				rDocShell.GetViewData()->GetViewShell()->MarkDataArea( TRUE );
++			//FIXME: Autoformat even when clicked from a non-dp cell.
++			pViewData->MoveNextRow();		
++			rDocShell.GetViewData()->GetViewShell()->AutoFormat( const_cast<ScDPObject *>(pNewObj)->GetAutoFormatIndex());
++			rDocShell.GetViewData()->GetViewShell()->AutoFormatPivotTable( const_cast<ScDPObject *>(pNewObj), const_cast<ScDPObject *>(pNewObj)->GetAutoFormatIndex() );		
++			pViewData->MovePrevRow();
++			}
++	}
++
++
+ 	if (bDone)
+ 		aModificator.SetDocumentModified();
+ 
+diff -u -r ../../../sc.bak/source/ui/inc/dbfunc.hxx sc/source/ui/inc/dbfunc.hxx
+--- ../../../sc.bak/source/ui/inc/dbfunc.hxx	2004-12-22 14:05:07.000000000 +0530
++++ sc/source/ui/inc/dbfunc.hxx	2005-01-11 13:21:00.515637848 +0530
+@@ -117,6 +117,8 @@
+ 									const ScDPObject& rSource, BOOL bApi = FALSE );
+ 	void			DeletePivotTable();
+ 	void			RecalcPivotTable();
++        void                    AutoFormatPivotTable(USHORT nIndex);
++        void            	AutoFormatPivotTable(ScDPObject*        pDPObj, USHORT nIndex);
+ 
+     BOOL            HasSelectionForDateGroup( ScDPNumGroupInfo& rOldInfo, sal_Int32& rParts );
+     BOOL            HasSelectionForNumGroup( ScDPNumGroupInfo& rOldInfo );
+diff -u -r ../../../sc.bak/source/ui/inc/viewdata.hxx sc/source/ui/inc/viewdata.hxx
+--- ../../../sc.bak/source/ui/inc/viewdata.hxx	2004-12-22 14:05:07.000000000 +0530
++++ sc/source/ui/inc/viewdata.hxx	2005-01-11 13:21:48.324369816 +0530
+@@ -331,6 +331,9 @@
+ 
+ 	BOOL			GetSimpleArea( SCCOL& rStartCol, SCROW& rStartRow, SCTAB& rStartTab,
+ 									SCCOL& rEndCol, SCROW& rEndRow, SCTAB& rEndTab );
++        void                    MoveNextRow();
++        void                    MovePrevRow();
++
+ 	BOOL			GetSimpleArea( ScRange& rRange );
+ 	void			GetMultiArea( ScRangeListRef& rRange );
+ 
+diff -u -r ../../../sc.bak/source/ui/miscdlgs/makefile.mk sc/source/ui/miscdlgs/makefile.mk
+--- ../../../sc.bak/source/ui/miscdlgs/makefile.mk	2004-12-22 14:05:08.000000000 +0530
++++ sc/source/ui/miscdlgs/makefile.mk	2005-01-11 14:43:07.477625776 +0530
+@@ -136,7 +136,9 @@
+ 	$(SLO)$/highred.obj			\
+ 	$(SLO)$/simpref.obj			\
+ 	$(SLO)$/redcom.obj			\
+-	$(SLO)$/warnbox.obj
++	$(SLO)$/warnbox.obj			\
++	$(SLO)$/scuiautofmt.obj			\
++	$(SLO)$/strindlg.obj            
+ 
+ # --- Tagets -------------------------------------------------------
+ 
+diff -u -r ../../../sc.bak/source/ui/src/popup.src sc/source/ui/src/popup.src
+--- ../../../sc.bak/source/ui/src/popup.src	2004-12-22 14:05:07.000000000 +0530
++++ sc/source/ui/src/popup.src	2005-01-11 13:25:54.836894216 +0530
+@@ -262,6 +262,13 @@
+ 			Text [ x-comment ] = " ";
+ 		};
+ 		MenuItem
++                {
++                        Identifier = SID_PIVOT_AFMT ;
++                        HelpId = SID_PIVOT_AFMT ;
++                        Text = "A~ktualisieren" ;
++			Text [ en-US ] = "~AutoFormat..." ; 
++		};
++		MenuItem
+ 		{
+ 			Identifier = SID_PIVOT_RECALC ;
+ 			HelpId = SID_PIVOT_RECALC ;
+diff -u -r ../../../sc.bak/source/ui/view/dbfunc3.cxx sc/source/ui/view/dbfunc3.cxx
+--- ../../../sc.bak/source/ui/view/dbfunc3.cxx	2004-12-22 14:05:08.000000000 +0530
++++ sc/source/ui/view/dbfunc3.cxx	2005-01-11 13:19:28.894566368 +0530
+@@ -1794,7 +1794,29 @@
+ 	else		// "Keine Operationen auszufuehren"
+ 		ErrorMessage(STR_MSSG_REPEATDB_0);
+ }
++void ScDBFunc::AutoFormatPivotTable(USHORT nIndex)
++{
++	ScDocShell* pDocSh  = GetViewData()->GetDocShell();
++	ScDocument* pDoc	= GetViewData()->GetDocument();
+ 
++	//	old pivot not used any more
++
++	ScDPObject*	pDPObj	= pDoc->GetDPAtCursor( GetViewData()->GetCurX(),
++												  GetViewData()->GetCurY(),
++												  GetViewData()->GetTabNo() );
++	if ( pDPObj )
++	{
++		pDPObj->SetAutoFormatIndex(nIndex);
++	}
++	else
++		ErrorMessage(STR_PIVOT_NOTFOUND);
++
++}
++
++void ScDBFunc::AutoFormatPivotTable(ScDPObject*	pDPObj, USHORT nIndex)
++{
++	pDPObj->SetAutoFormatIndex(nIndex);
++}
+ 
+ 
+ 
+diff -u -r ../../../sc.bak/source/ui/view/pivotsh.cxx sc/source/ui/view/pivotsh.cxx
+--- ../../../sc.bak/source/ui/view/pivotsh.cxx	2004-12-22 14:05:08.000000000 +0530
++++ sc/source/ui/view/pivotsh.cxx	2005-01-11 13:46:00.779563064 +0530
+@@ -88,6 +88,12 @@
+ #include "uiitems.hxx"
+ //CHINA001 #include "pfiltdlg.hxx"
+ #include "scabstdlg.hxx" //CHINA001
++
++#include "autoform.hxx"
++#include "scuiautofmt.hxx"
++#include "editable.hxx"
++
++
+ //------------------------------------------------------------------------
+ 
+ #define ScPivotShell
+@@ -125,13 +131,56 @@
+ {
+ 	switch ( rReq.GetSlot() )
+ 	{
+-		case SID_PIVOT_RECALC:
+-			pViewShell->RecalcPivotTable();
+-			break;
++		case SID_PIVOT_AFMT:
++			{
++			ScViewData* pViewData = pViewShell->GetViewData();
++
++			pViewShell->GetDBData( TRUE, SC_DB_OLD );
++			const ScMarkData& rMark1 = pViewData->GetMarkData();
++			if ( !rMark1.IsMarked() && !rMark1.IsMultiMarked() )
++				pViewShell->MarkDataArea( TRUE );
++			
++			Window* pDlgParent = pViewShell->GetDialogParent();
++			
++			pViewData->MoveNextRow();
++				
++			ScGlobal::ClearAutoFormat();
++			ScAutoFormatData* pNewEntry = pViewShell->CreateAutoFormatData();
++			ScAutoFormatDlg*  pDlg		= new ScAutoFormatDlg(
++													pDlgParent,
++													ScGlobal::GetAutoFormat(),
++				                                                               pNewEntry,
++                            				                                   pViewShell->GetViewData()->GetDocument() );
++
++			if ( pDlg->Execute() == RET_OK )
++			{
++				ScEditableTester aTester( pViewShell );
++				if ( !aTester.IsEditable() )
++				{
++					pViewShell->ErrorMessage(aTester.GetMessageId());
++				}
++				else
++				{
++					/* AutoFormat and Store the index */
++					pViewShell->AutoFormat( pDlg->GetIndex() );
++					pViewShell->AutoFormatPivotTable( pDlg->GetIndex() );
++				}
++			}
++			delete pDlg;
++			delete pNewEntry;
+ 
++
++			//pViewShell->DeletePivotTable();
++			//pViewShell->RecalcPivotTable();
++			break;
++			}
+ 		case SID_PIVOT_KILL:
+ 			pViewShell->DeletePivotTable();
+ 			break;
++		case SID_PIVOT_RECALC:
++			//pViewShell->DeletePivotTable();
++			pViewShell->RecalcPivotTable();
++			break;
+ 
+         case SID_DP_FILTER:
+         {
+diff -u -r ../../../sc.bak/source/ui/view/viewdata.cxx sc/source/ui/view/viewdata.cxx
+--- ../../../sc.bak/source/ui/view/viewdata.cxx	2004-12-22 14:05:08.000000000 +0530
++++ sc/source/ui/view/viewdata.cxx	2005-01-11 13:23:56.430894664 +0530
+@@ -654,6 +654,23 @@
+ 	aLogicMode.SetScaleY( GetZoomY() );
+ }
+ 
++
++void ScViewData::MoveNextRow()
++{
++      ScRange aMarkRange;
++      aMarkData.GetMarkArea(aMarkRange);
++      aMarkRange.aStart.Set(aMarkRange.aStart.Col(), aMarkRange.aStart.Row() +1, aMarkRange.aStart.Tab());
++      aMarkData.SetMarkArea(aMarkRange);
++}
++
++void ScViewData::MovePrevRow()
++{
++      ScRange aMarkRange;
++      aMarkData.GetMarkArea(aMarkRange);
++      aMarkRange.aStart.Set(aMarkRange.aStart.Col(), aMarkRange.aStart.Row() -1, aMarkRange.aStart.Tab());
++      aMarkData.SetMarkArea(aMarkRange);
++}
++
+ BOOL ScViewData::GetSimpleArea( SCCOL& rStartCol, SCROW& rStartRow, SCTAB& rStartTab,
+ 								SCCOL& rEndCol, SCROW& rEndRow, SCTAB& rEndTab )
+ {
