@@ -100,6 +100,52 @@ sub select_subset ($$)
     return @result;
 }
 
+sub rules_pass($)
+{
+    my $original_rule = shift;
+    my $rule = $original_rule;
+
+    while ($rule ne '') {
+	my $lastrule = $rule;
+#	print "verify rule '$rule'\n";
+	# less than or equal (<=)
+	if ($rule =~ s/\<=\s*(\S+)// && ($tag cmp $1) > 0 ) { return 0; };
+	# less than (<)
+	if ($rule =~ s/\<\s*(\S+)// && ($tag cmp $1) >= 0 ) { return 0; };
+	# greater than or equal (>=)
+	if ($rule =~ s/\>=\s*(\S+)// && ($tag cmp $1) < 0 ) { return 0; }; 
+	# greater than (>)
+	if ($rule =~ s/\>\s*(\S+)// && ($tag cmp $1) <= 0 ) { return 0; }; 
+
+	$rule =~ s/^\s*//;
+
+	$lastrule eq $rule && die "Invalid syntax in rule: $original_rule\n";
+    }
+    return 1;
+}
+
+sub version_filter_targets($)
+{
+    my $tlist = shift;
+    my @targets;
+
+    $tlist =~ m/([^<>]*)(.*)/;
+    my $rules = $2;
+    my $targets = $1;
+    @targets = split /\s*,\s*/, $targets;
+
+#    printf "Rules '$rules' targets '$targets'\n";
+
+    if (!rules_pass ($rules)) {
+#	printf "Rule '$rules' failed\n";
+	@targets = ();
+    } else {
+#	printf "Rule '$rules' passed\n";
+    }
+
+    return @targets;
+}
+
 sub list_patches {
 
     sub checkTerminal {
@@ -156,7 +202,7 @@ sub list_patches {
                 my $tmp = $1;
                 $tmp =~ s/\s+$//;
 #               print "Target: '$tmp'\n"; 
-                @targets = (split /\s*,\s*/, $tmp);
+		@targets = version_filter_targets($tmp);
                 next;
             }
 
@@ -348,6 +394,8 @@ $remove = 0;
 $export = 0;
 $opts = "";
 $distro = 'NLD';
+$tag = '';
+$dry_run = 0;
 @required_opts = ( 'PATCHPATH' );
 @arguments = ();
 
@@ -364,8 +412,10 @@ foreach $a (@ARGV) {
 	    $quiet = 1;
 	} elsif ($a =~ m/--distro=(.*)/) {
 	    $distro = $1;
+	} elsif ($a =~ m/--tag=(.*)/) {
+	    $tag = $1;
 	} elsif ($a =~ m/--dry-run/g) {
-	    die "FIXME: Can't pass --dry-run to apply, it badly confuses it";
+	    $dry_run = 1;
 	} else {
 	    push @arguments, $a;
 	}
@@ -377,7 +427,11 @@ $apply_list = $patch_dir.'/apply';
 
 print "Execute with $opts for distro '$distro'\n" unless $quiet;
 
-if ($export) {
+if ($dry_run) {
+    my @Patches = list_patches ($distro);
+    printf "Exiting before applying patches\n";
+    
+} elsif ($export) {
     export_series();
 
 } else {
