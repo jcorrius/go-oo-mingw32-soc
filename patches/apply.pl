@@ -137,6 +137,17 @@ sub list_patches {
 	    s/^\s*//;
             $_ eq '' && next;
 
+	    # continuation
+	    if (defined $lastline) {
+		$_ = $lastline . $_;
+		undef $lastline;
+	    }
+	    if (m/\\\S*$/) {
+		s/\\//g;
+		$lastline = $_;
+		next;
+	    }
+
             if (/\[\s*(.*)\]/) {
                 my $tmp = $1;
                 $tmp =~ s/\s+$//;
