@@ -1,0 +1,627 @@
+#!/usr/bin/perl -w
+#*****************************************************************************
+# 
+#  ooffice - Wrapper script for OpenOffice.org
+# 
+#  Substantially based on the Mandrake work.
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License version 2, as
+#  published by the Free Software Foundation.
+# 
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+# 
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+# 
+#*****************************************************************************
+
+use strict;
+use IO::Handle;
+use XML::Twig;
+use Fcntl ':flock';
+
+my $Debug = $ENV{OOO_DEBUG};
+
+# Substituted by the build system:
+# Define OpenOffice.org version
+my $Version = '@VERSION@';
+# Define system installation directory
+my $SystemInstallDir = '/@OOINSTBASE@';
+# Suffix for parallel installable versioning
+my $BinSuffix = '@BINSUFFIX@';
+
+if ($Debug && $Version =~ /^\@/) {
+    $Version = "1.0.3";
+    $SystemInstallDir = "/usr/lib/ooo-$Version";
+    $BinSuffix = '';
+}
+
+# Define lock-file for this script
+my $LockFile = "$ENV{HOME}/.openoffice-lock";
+
+# Define user OOo versions file
+my $VersionFile = "$ENV{HOME}/.sversionrc";
+
+# Define user installation directory
+my $UserInstallDir = "$ENV{HOME}/.xopenoffice$BinSuffix";
+
+# Define user work directory ($HOME directory)
+my $UserWorkDir = "$ENV{HOME}";
+
+# Define OOo setup program
+my $SetupProgram = "$SystemInstallDir/program/setup";
+
+# Define setup autoresponse file for user installation
+my $SetupConfig = "/etc/openoffice/autoresponse$BinSuffix.conf";
+
+# Options to pass to setup.
+my $DoLangPokes = 1;
+my $ConfigPath;
+my $XmlSuffix;
+my $AppArg;
+
+#
+# Version specific bits ...
+#
+if ($BinSuffix eq '') { # Version 1.0
+    $ConfigPath = 'config/registry/instance';
+    $XmlSuffix = '.xml';
+    $AppArg = 'private:factory/s';
+} else {                # Version 1.1
+    $DoLangPokes = 0;
+    $XmlSuffix = '.xcu';
+    $ConfigPath = 'registry/data';
+    $AppArg = '-';
+}
+
+# Define user Setup.xml file
+my $SetupXML = "$UserInstallDir/user/config/registry/instance/org/openoffice/Setup.xml";
+
+# Define user Linguistic.xml file
+my $LinguisticXML = "$UserInstallDir/user/config/registry/instance/org/openoffice/Office/Linguistic.xml";
+
+# Define global Linguistic.xml file
+my $SystemLinguisticXML = "$SystemInstallDir/share/config/registry/instance/org/openoffice/Office/Linguistic.xml";
+
+# Define user TypeDetection.xml file
+my $TypeDetectionXML = "$UserInstallDir/user/$ConfigPath/org/openoffice/Office/TypeDetection.$XmlSuffix";
+
+my $GConfTool = 'gconftool-2';
+
+my $ConfQuickstart = '/apps/ooo-ximian/quickstart';
+my $ConfDefaultFormat = '/apps/ooo-ximian/default-format';
+
+sub GetConfBool($)
+{
+    my ($path) = @_;
+    my ($value, $ret);
+
+    $value = `$GConfTool --get $path 2>&1`;
+
+    if (!$value) {
+	$ret = 0;
+    } elsif ($value =~ m/^true.*/i ||
+	     $value =~ m/^yes.*/i ||
+	     $value =~ m/^on.*/i) {
+	$ret = 1;
+    } else {
+	$ret = 0;
+    }
+
+    return $ret;
+}
+
+#=============================================================================
+# Read versions config file
+#=============================================================================
+
+sub ReadVersionFile($) {
+    my ($file) = @_;
+    my $e;
+    my %entries;
+    my $Rc;
+
+    if (open ($Rc, "$file")) {
+        while (<$Rc>) {
+            chomp;
+            if (/^\[(\w+)\]/) {
+                $entries{$1} = $e = { };
+            }
+            elsif (/^([^=]+)=([^\r\n]+)/) {
+                $e->{$1} = $2;
+            }
+        }
+        close ($Rc);
+    }
+    %entries;
+}
+
+#=============================================================================
+# Write versions config file
+#=============================================================================
+
+sub DoWriteVersionFile(%$) {
+    my ($config, $file) = @_;
+    local *F;
+    
+    if ($file) {
+        open F, ">$file" or die "Cant write to $file\n";
+        select F;
+    }
+    local $\ = "\n";
+    while (my ($secname, $secvars) = each %$config) {
+        print "[$secname]";
+        while (my ($key, $value) = each %$secvars) {
+            print "$key=$value";
+        }
+        print "";
+    }
+    if ($file) {
+        close F;
+        select STDOUT;
+    }
+}
+
+sub DumpVersionFile(%) {
+    my (%config) = @_;
+    DoWriteVersionFile \%config;
+}
+
+sub WriteVersionFile(%) {
+    my (%config) = @_;
+    DoWriteVersionFile \%config, "$VersionFile";
+}
+
+#=============================================================================
+# Define default language -> country mappings
+#=============================================================================
+
+sub CountryOfLanguage($) {
+    my ($lang) = @_;
+    
+    # Note if language is not in the table of exceptions below, it is
+    # assumed that country is uc $lang
+    my %countryOf = ("en" => "US",
+                     "cs" => "CZ",
+                     "ca" => "ES",
+                     "da" => "DK",
+                     "el" => "GR",
+                     "ja" => "JP",
+                     "ko" => "KR",
+                     "sv" => "SE");
+
+    $countryOf{$lang} || uc $lang;
+}
+
+sub ReWriteValue($$$)
+{
+    my ($node, $newval) = @_;
+    my $changed;
+}
+
+#=============================================================================
+# Dump XML tree into file specified by name
+#=============================================================================
+sub OutputXML($$) {
+    my ($file, $tree) = @_;
+    local *F;
+    open F, ">$file" or die "Cannot write to file $file\n";
+    $tree->print(\*F);
+    close F;
+}
+
+sub AddFormatNode($$$$)
+{
+    my ($froot, $name, $default, $flagValue) = @_;
+    my $child;
+    my $set = 0;
+    my $changed = 0;
+    my @melems = split ',', $default, -1;
+
+    foreach $child ( $froot->children ) {
+	my $fdata = $child->first_child( 'Data' );
+	if (!$fdata) {
+	    print "Serious config XML node format error:\n";
+	    $child->print;
+	    next;
+	}
+	
+	my @elems = split ',', $fdata->text, -1;
+	if ($melems[1] eq $elems[1]) {
+	    $Debug && print "Elem ". $elems[1] . ' -> ' . $elems[4] . "\n";
+	    if ($elems[4] ne $flagValue) {
+		$elems[4] = $flagValue;
+
+		my $newText = join (',', @elems);
+		$Debug && print "'" . $fdata->text . "' ->\n'$newText'\n";
+		$fdata->set_text ($newText);
+		$changed = 1;
+	    }
+	    $set = 1;
+	}
+    }
+    if (!$set) { # splice in a new node.
+	my $newFilter;
+
+	$melems[4] = $flagValue;
+	$newFilter = XML::Twig->new();
+        $newFilter->parsestring("<Filter cfg:name=\"$name\">\n".
+				'<Data cfg:type="string">'.join(',',@melems).
+				"</Data>\n</Filter>");
+	$newFilter || die "Failed parse";
+        $newFilter->root->paste('first_child', $froot);
+	$Debug && print "Created new node for '$name'\n";
+	$changed = 1;
+    }
+    return $changed;
+}
+
+sub SyncFormat() {
+    my $format = `$GConfTool --get $ConfDefaultFormat 2>&1`;
+    if (!$format) {
+	$format = '';
+    }
+    if ($format =~ m/$ConfDefaultFormat/) {
+	$format = '';
+    }
+
+    my $ms = $format =~ m/MS/i;
+    my $oo = $format =~ m/OOo/i;
+
+    $Debug && print "MS: $ms, OO.o: $oo\n";
+
+    if ($ms || $oo) {
+	# Initialize Twig XML parser
+	my $type_xml = XML::Twig->new(pretty_print => "indented", keep_encoding => 1);
+    
+	if (!-f $TypeDetectionXML) {
+	    my $Handle;
+	    if (open ($Handle, ">$TypeDetectionXML")) {
+		print $Handle '<?xml version="1.0" encoding="UTF-8"?>
+<TypeDetection state="modified" cfg:package="org.openoffice.Office" xmlns="http://openoffice.org/2000/registry/components/TypeDetection" xmlns:cfg="http://openoffice.org/2000/registry/instance" xmlns:xsi="http://www.w3.org/1999/XMLSchema-instance">
+ <Filters cfg:element-type="Filter"/>
+</TypeDetection>';
+		close ($Handle);
+	    } elsif ($Debug) {
+		print "Failed to open $TypeDetectionXML\n";
+	    }
+	}
+
+	# Adjust user interface language, in Setup.xml
+	my $p = $type_xml->parsefile("$TypeDetectionXML");
+	my $oolocale_node;
+	if (!$p) {
+	    $Debug && print "Failed to create or open $TypeDetectionXML\n";
+	    return;
+	}
+
+	my $froot;
+	if (! ($froot = ($type_xml->get_xpath("/TypeDetection/Filters"))[0]) &&
+	    ! ($froot = ($type_xml->get_xpath("/Filters"))[0])) {
+	    $Debug && print "Failed to find Filters node in $TypeDetectionXML\n";
+	    # FIXME: Ideally we could splice some filters in here ... Twig 
+	    # nastiness makes it harder
+	    return;
+	}
+
+	my $changed = 0;
+
+	# Don't you just love magic numbers ...
+	if (AddFormatNode ($froot, 'MS Excel 97',
+			   'm,calc_MS_Excel_97,com.sun.star.sheet.SpreadsheetDocument,,259,,0,,',
+			   $oo ?  '3' : '259')) {
+	    $changed = 1;
+	}
+	if (AddFormatNode ($froot, 'MS PowerPoint 97',
+			   '3,impress_MS_PowerPoint_97,com.sun.star.presentation.PresentationDocument,,323,emp,0,,',
+			   $oo ? '67' : '323')) {
+	    $changed = 1;
+	}
+	if (AddFormatNode ($froot, 'MS Word 97',
+			   '3,writer_MS_Word_97,com.sun.star.text.TextDocument,,67,CWW8,0,,',
+			   $oo ? '67' : '323')) {
+	    $changed = 1;
+	}
+	if (AddFormatNode ($froot, 'StarOffice XML (Calc)',
+			   '1,calc_StarOffice_XML_Calc,com.sun.star.sheet.SpreadsheetDocument,,39,,6200,,',
+			   $oo ?       '295' : '39')) {
+	    $changed = 1;
+	}
+	if (AddFormatNode ($froot, 'StarOffice XML (Impress)',
+			   '1,impress_StarOffice_XML_Impress,com.sun.star.presentation.PresentationDocument,,268435495,XML,6200,,',
+			   $oo ? '268435751' : '268435495')) {
+	    $changed = 1;
+	}
+	if (AddFormatNode ($froot, 'StarOffice XML (Writer)',
+			   '1,writer_StarOffice_XML_Writer,com.sun.star.text.TextDocument,,268435495,CXML,6200,,',
+			   $oo ? '268435751' : '268435495')) {
+	    $changed = 1;
+	}
+
+	if ($changed) {
+	    $Debug && print "Changed; re-writing";
+	    OutputXML "$TypeDetectionXML", $type_xml;
+	}
+    }
+}
+#=============================================================================
+# Main
+#=============================================================================
+
+# Parse command line arguments
+my @ooo_argv;
+my $override_lang;
+my $session_quickstart;
+while ($ARGV[0]) {
+    $_ = shift;
+    if (m/^--lang(=(\S+))?/) {
+        $override_lang = $2 || shift;
+    }
+    elsif (m/^--session-quickstart/) {
+	$session_quickstart = 1;
+    }
+    else {
+        push @ooo_argv, $_;
+    }
+}
+
+if ($0 =~ m/\/oo(calc|draw|impress|math|writer)$BinSuffix$/) {
+    my $app = $1;
+    push @ooo_argv, "$AppArg$app";
+    $Debug && print "Append arg: $AppArg$app\n";
+}
+
+# Get current language code
+my $lang = $override_lang || $ENV{LC_MESSAGES} || $ENV{LANG} || "en_US";
+if ($lang eq 'C') {
+    $lang = 'en_US';
+}
+$lang =~ tr/-/_/;
+$lang =~ s/(.*)\..*/$1/;
+$lang .= "_" . CountryOfLanguage $lang if ($lang !~ /_/);
+(my $isocode = $lang) =~ s/([a-z]+)_.*/$1/;
+(my $oolang = $lang) =~ tr/_/-/;
+$Debug && print "Lang: '$lang' ($oolang) ($isocode)\n";
+
+
+my $Lock;
+
+$Debug && print "Taking lock: $LockFile\n";
+open ($Lock, ">$LockFile") || print "Can't open $LockFile\n";
+flock ($Lock, LOCK_EX) || print "Warning: can't flock $LockFile\n";
+$Debug && print "Obtained lock: $LockFile\n";
+
+# Remove any stale entry from versions file
+if ( -r "$VersionFile" ) {
+    my %config = ReadVersionFile "$VersionFile";
+    my $versions = $config{Versions};
+    my $home = $versions->{"OpenOffice.org $Version"};
+    if ($home && $home ne "file://$UserInstallDir") {
+	$Debug && print "Re-writing $VersionFile\n";
+        foreach (keys %$versions) {
+            delete $versions->{$_} if ($versions->{$_} eq $home);
+        }
+        WriteVersionFile %config;
+    }
+}
+
+# Perform a user installation, if necessary.
+if ( ! -d $UserInstallDir || ! -e "$UserInstallDir/soffice" ) {
+    # First, make sure to remove any reference to $UserInstallDir, from older
+    # (and broken) installation
+    $Debug && print "Do fresh user install\n";
+    if ( -f $VersionFile ) {
+        my %config = ReadVersionFile "$VersionFile";
+        my $versions = $config{Versions};
+        my $changed = 0;
+        foreach (keys %$versions) {
+            if ($versions->{$_} eq "file://$UserInstallDir") {
+                delete $versions->{$_};
+                $changed = 1;
+            }
+        }
+        WriteVersionFile %config if ($changed);
+    }
+    # We can safely do the installation now
+    my $setup_cmd = "$SetupProgram -R:$SetupConfig -v -nogui";
+
+    if (!$Debug) {
+	$setup_cmd .= " >& ~/.openoffice-install-log";
+    }
+
+    $Debug && print "Calling setup: '$setup_cmd'\n";
+    system ($setup_cmd) &&
+        die "Installation of OpenOffice.org $Version failed:\n '$setup_cmd'\n";
+}
+
+# Clean the installation version tags.
+if ( -f "$VersionFile" ) {
+    my %config = ReadVersionFile "$VersionFile";
+    my $versions = $config{Versions};
+    my $changed = 0;
+    foreach (keys %$versions) {
+	$_ eq "OpenOffice.org $Version" && next;
+
+        if ($_ =~ /^OpenOffice.org ([0-9]+)\.([0-9]+)(.*)/) {
+	    my ($iv_maj, $iv_min, $iv_mic) = ($1, $2, $3);
+	    $Version =~ /([0-9]+)\.([0-9]+)(.*)/;
+	    my ($v_maj, $v_min, $v_mic) = ($1, $2, $3);
+
+	    $Debug && print "Old $iv_maj $iv_min $iv_mic, new $v_maj $v_min $v_mic\n";
+
+	    if ($iv_maj == $v_maj && $iv_min == $v_min) {
+		$Debug && print "Deleting old version\n";
+		delete $versions->{$_};
+		$changed = 1;
+	    }
+        }
+    }
+    # Add current version tag if it does not exist already. This
+    # occurs when you upgrade from 1.0 to 1.0.1 for example.
+    if (!$versions->{"OpenOffice.org $Version"}) {
+	$versions->{"OpenOffice.org $Version"} = "file://$UserInstallDir";
+	$changed = '1';
+	$Debug && print "Missing version, added\n";
+    }
+    if ($changed) {
+	$Debug && print "Version changed, re-writing config\n";
+	WriteVersionFile %config;
+    }
+}
+else {
+    # The versions file is bound to exist unless we (or the user)
+    # nuked it somehow. Regenerate it. We already have the
+    # installation directory at this point.
+    WriteVersionFile Versions => { "OpenOffice.org $Version" => "file://$UserInstallDir" };
+    $Debug && print "Re-generate config\n";
+}
+
+# Remove broken links and previous dictionaries symlinks.
+# As of 1.0.1-1mdk, dictionaries stuff is global in /usr/share/dict/ooo.
+my @stale_dictentries;
+foreach (glob("$UserInstallDir/user/wordbook/*.aff")) {
+    if ( -l $_ ) {
+        (my $entry = $_) =~ s|.*/([^/]+)\.aff|$1|;
+        push @stale_dictentries, $entry;
+        unlink $_, ((dirname $_) . "/$entry.dic");
+    }
+}
+my $dict_list = "$UserInstallDir/user/wordbook/dictionary.lst";
+my $dict_pattern = join "|", @stale_dictentries;
+my $DictFile;
+my $dict_empty = 1;
+substInFile { s|^(\s*DICT.*\s($dict_pattern))$|\# Removed: $1| } "$dict_list"
+    if ( $dict_pattern && -f "$dict_list" );
+
+# Remove dictionary.lst if it no longer contains any valid dictionary
+# (DICT) or hyphenation (HYPH) entries.
+if (open ($DictFile, "$dict_list")) {
+    while (<$DictFile>) {
+        if (/^\s*(DICT|HYPH)/) {
+            $dict_empty = 0;
+        }
+    }
+    close ($DictFile);
+}
+if ($dict_empty) {
+    unlink "$dict_list";
+}
+
+# Create the user/work link for "Open..." menu command to work
+# flawlessly
+sub symlinkf { unlink $_[1]; symlink $_[0], $_[1] }
+
+symlinkf $UserWorkDir, "$UserInstallDir/user/work"
+    if ( ! -l "$UserInstallDir/user/work" && ! -d "$UserInstallDir/user/work" );
+
+symlinkf "$SystemInstallDir/program/soffice", "$UserInstallDir/soffice";
+symlinkf "$SystemInstallDir/program/setup", "$UserInstallDir/setup";
+
+#=============================================================================
+# Misc configuration setup in user *.xml files
+#=============================================================================
+
+if ( $lang && $DoLangPokes )
+{
+    # Initialize Twig XML parser
+    my $setup_xml = XML::Twig->new(pretty_print => "indented", keep_encoding => 1);
+    
+    # Adjust user interface language, in Setup.xml
+    my $p = $setup_xml->parsefile("$SetupXML");
+    my $oolocale_node;
+    if (!$p) {
+        print "No setup xml... $SetupXML\n";
+    }
+    #
+    #  Well one might wonder why we look for each node in two places
+    # it's down to nasty breakage between Twig versions, clearly with
+    # such ugliness we can't mandate a newer Twig without breaking
+    # others. Hopefully sane LANG obediance will be folded upstream soon.
+    # 
+    if (! ($oolocale_node = ($setup_xml->get_xpath("/Setup/L10N/ooLocale"))[0]) &&
+	! ($oolocale_node = ($setup_xml->get_xpath("/L10N/ooLocale"))[0])) {
+	my $insert_node;
+	my $insert_xml;
+
+	$Debug && print "No existing L10N data\n";
+
+        # Glue in new <L10N> section, "en-US" is the default locale
+	$insert_xml = '<ooLocale cfg:type="string">en-US</ooLocale>';
+	if (!($insert_node = ($setup_xml->get_xpath("/Setup/L10N"))[0])) {
+	    $Debug && print "Missing L10N section, create it\n";
+	    $insert_node = ($setup_xml->get_xpath("/Setup"))[0] ||
+			   ($setup_xml->get_xpath("/"))[0];
+	    $insert_xml = "<L10N>\n$insert_xml</L10N>\n";
+	}
+	
+        $oolocale_node = XML::Twig->new();
+        $oolocale_node->parsestring($insert_xml);
+	$oolocale_node || die "Failed parse";
+        $oolocale_node->root->paste('first_child', $insert_node);
+
+	$oolocale_node = ($setup_xml->get_xpath("/Setup/L10N/ooLocale"))[0] ||
+			 ($setup_xml->get_xpath("/L10N/ooLocale"))[0];
+    }
+    my $old_oolang = $oolocale_node->text();
+    if (!($old_oolang eq $oolang)) {
+	$oolocale_node->set_text("$oolang");
+	OutputXML "$SetupXML", $setup_xml;
+	if ($Debug) {
+	    print "Pasted new lang $oolang:\n";
+	    $setup_xml->root->print();
+	    print "\n";
+	}
+    }
+
+    # Update default language for documents, in Linguistic.xml
+    my $linguistic_xml = XML::Twig->new(pretty_print => "indented", keep_encoding => 1);
+    my $linguistic_file;
+    my $changed = 0;
+    if ( -f ( $linguistic_file = "$LinguisticXML" ) ||
+	 -f ( $linguistic_file = "$SystemLinguisticXML" ) ) {
+	my $node;
+
+        $linguistic_xml->parsefile("$linguistic_file");
+
+	foreach $node ( $linguistic_xml->get_xpath("/Linguistic/General/DefaultLocale") ) {
+	    if (!($node->text() eq $oolang)) {
+		$node->set_text("$oolang");
+		$changed = 1;
+	    }
+	}
+
+	foreach $node ( $linguistic_xml->get_xpath("/General/DefaultLocale") ) {
+	    if (!($node->text() eq $oolang)) {
+		$node->set_text("$oolang");
+		$changed = 1;
+	    }
+	}
+	if ($changed) {
+	    $Debug && print "Clobbered Linguistic.xml\n";
+	    OutputXML "$LinguisticXML", $linguistic_xml;
+	}
+    }
+}
+
+SyncFormat();
+
+flock ($Lock, LOCK_UN);
+close ($Lock);
+$Debug && print "Released lock: $LockFile\n";
+
+if ($session_quickstart) {
+    my $do_qstart = GetConfBool ($ConfQuickstart);
+    if (!$do_qstart) {
+	exit 1;
+    }
+    $Debug && print "Execute quickstarter\n";
+    push @ooo_argv, '-quickstart';
+}
+
+# And here we go. ;-)
+exec "$UserInstallDir/soffice", @ooo_argv

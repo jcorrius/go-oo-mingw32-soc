@@ -1,0 +1,224 @@
+#!/usr/bin/perl -w
+
+#
+# Pinched from Debian:
+#  http://cvs.debian.org/oo-deb/debian/local/openoffice-dpack-lang?rev=1.2&cvsroot=debian-openoffice&content-type=text/vnd.viewcvs-markup
+#
+
+# Load settings from 'setup'
+my $Vars;
+my %setup_vars;
+
+if (!$ENV{'TOOLSDIR'}) {
+    print "Sucking env from setup\n";
+    open ($Vars, ". ./setup ; set|") || die "Can't find setup: $!";
+    while (<$Vars>) {
+	/([^=]*)=(.*)/ || next;
+	$setup_vars{$1} = $2;
+    }
+    close ($Vars);
+} else {
+    print "Using inherited env\n";
+    for $a (keys %ENV) {
+	$setup_vars{$a} = $ENV{$a};
+    }
+}
+
+my $UnzipCommand = "/usr/bin/unzip";
+my $DestDir = $setup_vars{'OOINSTDIR'};
+my $Xlate = $setup_vars{'TOOLSDIR'}. "/bin/openoffice-xlate-lang";
+my @Langs = split (' ', `$Xlate -p all`);
+
+# Parse enough of <setup.in> to get correct Directory and File sections.
+sub ReadSetup($) {
+	my ($file) = @_;
+    my $e;
+    my %entries;
+    open FILE,"$file" || die "Can't read setup from $file : $!\n";
+    while (<FILE>) {
+		if (/^([_A-Za-z]+)\s*([_A-Za-z0-9]+)/) {
+			$entries{$1}{$2} = $e = { };
+		}
+		elsif (/\s*([_A-Za-z]+)\s*=\s*\"?([^;\"]+)\"?;/) {
+			$e->{$1} = $2;
+		}
+    }
+    close FILE;
+	
+	# Expand predefined dirs to de $DestDir variable
+	$entries{Directory}{$_} = { HostName => "$DestDir" } foreach
+		qw( PREDEFINED_HOMEDIR  PREDEFINED_PROGDIR PREDEFINED_CONFIGDIR );
+			
+    \%entries;
+}
+
+sub DumpEntries(\%$) {
+    my $entries = shift;
+    my ($basename) = @_;
+    my $sections = $entries->{$basename} if $entries->{$basename};
+    while (my ($key, $value) = each(%$sections)) {
+	print "$basename $key\n";
+	$value->{$_} and print "\t$_\t= \"$value->{$_}\";\n"
+	    foreach qw(Bitmap Date DefaultDestPath DefaultLanguage
+		       Description FadeType FileName fontsDirFile
+		       fontsDirGlobalFile fontspath HostName ID Key
+		       Languages Name PackedName Path ProcName
+		       ProductName ProductVersion Section Text Time
+		       Value VendorBitmap);
+	$value->{$_} and print "\t$_\t= $value->{$_};\n"
+	    foreach qw(ArchiveFiles ArchiveSize BitmapPosX BitmapPoxY
+		       Carrier Default Dir DiskNo FileID FontSize
+		       Minimal ModuleID NetDir Order ParentID
+		       ProfileID RegistryID ScriptVersion Size
+		       TextHeight TextWidth UnixRights);
+	print "End\n\n";
+    }
+}
+
+sub GetFullPath {
+    my $dirs = shift;
+    my ($id) = @_;
+	return ( $dirs->{$id}->{ParentID} ? GetFullPath($dirs, $dirs->{$id}->{ParentID}) . "/" : "" )
+		   . $dirs->{$id}->{HostName};
+}
+
+sub mkpath {
+    # Stolen in File::Path
+    my($paths, $verbose, $mode) = @_;
+    # $paths   -- either a path string or ref to list of paths
+    # $verbose -- optional print "mkdir $path" for each directory created
+    # $mode    -- optional permissions, defaults to 0777
+    local($")= "/";
+    $mode = 0777 unless defined($mode);
+    $paths = [$paths] unless ref $paths;
+    my(@created,$path);
+    foreach $path (@$paths) {
+        next if -d $path;
+	# parent=dirname
+        my $parent = $path; $parent =~ s#/[^/]*/?$##;
+        unless (-d $parent or $path eq $parent) {
+            push(@created,mkpath($parent, $verbose, $mode));
+        }
+        print "mkdir $path\n" if $verbose;
+        unless (mkdir($path,$mode)) {
+            my $e = $!;
+            # allow for another process to have created it meanwhile
+            die "mkdir $path: $e" unless -d $path;
+        }
+        push(@created, $path);
+    }
+    @created;
+}
+
+sub BuildLang {
+	my $lang = shift;
+	my $SetupDir = $setup_vars{'OOBUILDDIR'} . "/instsetoo/unxlngi4.pro/$lang/normal";
+	my $SetupConf = "$SetupDir/setup.ins";
+
+	if (!-r $SetupConf) {
+		print "not found";
+		return 1;
+	}
+
+	# Parse the file and get all entries
+	my $setup = ReadSetup($SetupConf);
+
+	#DumpEntries %$setup, "Directory";
+	#DumpEntries %$setup, "File";
+
+	die "$UnzipCommand not found, please set the full path to the unzip command\n" if
+	    ( ! -x "$UnzipCommand" );
+
+	while (my ($key, $value) = each (%{$setup->{File}})) {
+		if ($value->{PackedName}) {
+			my $zipfile = "$SetupDir/$value->{PackedName}";
+			die "$0: zip file $zipfile not accessible" if
+				( ! -r "$zipfile" );
+		
+			# Find language-specific candidates
+			if (($key =~ /_Lang$/) || ($value->{Name} =~ /\.res$/) ||
+			    ($key =~ /File_Help/ && $value->{Dir} =~ /gid_Dir_Help_Isolanguage/)) {
+
+#				print "Unpacking $zipfile... \n";
+				# Prefer NetDir path over simple Dir
+				my $outpath = GetFullPath \%{$setup->{Directory}}, $value->{NetDir} ?
+				    $value->{NetDir} : $value->{Dir};
+				-d $outpath or mkpath($outpath);
+
+				my $outp;
+				open $outp, "$UnzipCommand -o $zipfile -d $outpath|" || die "Can't unzip: $!";
+				while (<$outp>) {
+					/inflating: (.*)/ || next;
+				}
+				close ($outp);
+#				system("$UnzipCommand -o $zipfile -d $outpath");
+			}
+		}
+	}
+
+	print "done";
+
+	return 0;
+}
+
+for $a (@Langs) {
+	$a eq '01' && next; # English built-in
+
+	$std_locale = `$Xlate -i $a`;
+	chomp ($std_locale);
+	$txt_name = `$Xlate -l $a`;
+	chomp ($txt_name);
+
+	print "Building language $txt_name ($std_locale:$a): ";
+
+	my $RpmFile;
+	my $RpmName = "ooo-l10n-$std_locale";
+	my $RpmPath = $setup_vars{'OOBUILDDIR'}."/$RpmName.spec";
+
+	open ($RpmFile, ">$RpmPath") || die "Can't open rpm path: $!";
+
+	my $FONTPACKAGES = ''; # for later ...
+	print $RpmFile "
+Name:           $RpmName
+Version:        $setup_vars{'VERSION'}
+Vendor:		Ximian, Inc.
+Release:        17.ximian.2
+Summary:	$txt_name language support for OpenOffice.org.
+Group:		Applications/Office
+Copyright:      LGPL
+Requires:	ooo$setup_vars{'BINSUFFIX'}-$setup_vars{'VERSION'} $FONTPACKAGES
+URL:            http://ooo.ximian.com/
+BuildArch:	noarch
+
+%description
+OpenOffice.org is an Open Source, community-developed, office suite.
+
+This package contains the localization of OpenOffice.org in $txt_name,
+It contains the user interface, templates, autotext and help
+features. Please note that some of these are not available for
+some languages.
+
+%prep
+%build
+%clean
+%files
+%defattr(-,root,root)
+#
+#   The soffice help/ files are strangely (not) licensed
+# so we get English all over - there's no point in that
+# so, we don't ship these files.
+#
+# $DestDir/help/$std_locale
+$DestDir/program/resource/*$a.res
+$DestDir/share/template/$txt_name
+$DestDir/user/autotext/$txt_name
+";
+
+	close ($RpmFile);
+
+	$failed = BuildLang ($a);
+
+	$failed && unlink ($RpmPath);
+
+	print "\n";
+}

@@ -1,0 +1,302 @@
+#!/usr/bin/perl -w
+
+use strict;
+use File::Temp qw/ tempfile /;
+use XML::Twig;
+
+my $DictRegEx = '^[a-z][a-z]_[A-Z][A-Z]\.dic$';
+my $HyphRegEx = '^hyph_[a-z][a-z].*\.dic$';
+my $ThesRegEx = '^th_[a-z][a-z]_[A-Z][A-Z]\.dat$';
+
+my $Debug = $ENV{'OOO_DEBUG'};
+my $OOO_DIR = '/@OOINSTBASE@';
+
+if ($Debug && $OOO_DIR =~ /^\/\@/) {
+    $OOO_DIR = '/usr/lib/ooo-1.0.3';
+}
+
+my $option = shift (@ARGV);
+my $FILENAME = shift (@ARGV);
+
+my $DICT_DIR = $OOO_DIR . "/share/dict/ooo/";
+my $DICT_FILENAME = $DICT_DIR . "dictionary.lst";
+my $CONFIG_FILENAME = $OOO_DIR . "/share/config/registry/instance/org/openoffice/Office/Linguistic.xml";
+
+sub get_dict_files($)
+{
+    my $path = shift;
+    my $dirhandle;
+    my $fname;
+    my @files = ();
+
+    opendir ($dirhandle, $path) || die "can't opendir $path: $!";
+    while ($fname = readdir ($dirhandle)) {
+	if ($fname =~ m/$DictRegEx/ ||
+	    $fname =~ m/$HyphRegEx/ ||
+	    $fname =~ m/$ThesRegEx/) {
+	    push @files, $fname;
+	}
+    }
+    closedir ($dirhandle);
+
+    return @files;
+}
+
+my $file;
+my @files = get_dict_files ($DICT_DIR);
+my $XML_ROOT;
+my $CONFIG_FILE;
+
+$XML_ROOT = XML::Twig->new (pretty_print => "indented", keep_encoding => 1);
+$XML_ROOT->parsefile ($CONFIG_FILENAME) || die "Couldn't parse $CONFIG_FILENAME: $!\n";
+
+clean_old_nodes ();
+
+open ($CONFIG_FILE, ">$DICT_FILENAME") || die "Can't open $DICT_FILENAME: $!\n";
+
+for $file (@files) {
+    install ($file);
+}
+
+close ($CONFIG_FILE);
+replace_xml_file ($CONFIG_FILENAME, $XML_ROOT);
+
+sub filetype {
+    my ($filename) = @_;
+
+    if ($filename =~ m/$DictRegEx/) {
+	return "DICT";
+    } elsif ($filename =~ m/$HyphRegEx/) {
+	return "HYPH";
+    } elsif ($filename =~ m/$ThesRegEx/) {
+	return "THES";
+    } else {
+	print "\"$filename\" does not look like a dictionary, hyphenation table, or thesaurus file\n"
+	    . "Dictionaries are of the form xx_YY.dic\n"
+	    . "Hyphenation tables are of the form hyph_xx_YY.dic\n"
+	    . "Thesauruses are of the form th_xx_YY.dat\n";
+	exit (1);
+    }
+}
+
+sub change_extension {
+    my ($filename, $ext, $newext) = @_;
+
+    $filename =~ s/^(.*)\.($ext)$/$1\.$newext/g;
+    return $filename;
+}
+
+sub get_node_parent {
+    my $type = shift;
+
+    my $parent_name;
+    my $parent_node;
+    
+    if ($type eq "DICT") {
+	$parent_name = "ServiceManager/SpellCheckerList";
+    } elsif ($type eq "HYPH") {
+	$parent_name = "ServiceManager/HyphenatorList";
+    } elsif ($type eq "THES") {
+	$parent_name = "ServiceManager/ThesaurusList";
+    }
+
+    # XML::Twig changed at some point to actually pay attention to the
+    # root node, so we need both checks.  Sigh...
+    my $test_path;
+
+    $test_path = "/$parent_name";
+    $parent_node = ($XML_ROOT->get_xpath ($test_path))[0];
+    if ($parent_node) {
+	$parent_name = $test_path;
+    } else {
+	$test_path = "/Linguistic/$parent_name";
+	$parent_node = ($XML_ROOT->get_xpath ($test_path))[0];
+	if ($parent_node) {
+	    $parent_name = $test_path;
+	} else {
+	    print ("Could not find node $parent_name in $CONFIG_FILENAME\n");
+	    exit (1);
+	}
+    }
+
+    return ($parent_name, $parent_node);
+}
+
+sub clean_old_nodes {
+    my @types = ( 'DICT', 'HYPH', 'THES' );
+    my $t;
+
+    for $t (@types) {
+	my $node;
+	my ($parent_path, $dummy) = get_node_parent ($t);
+
+	foreach $node ($XML_ROOT->get_xpath ($parent_path . "/cfg:any")) {
+	    $node->delete;
+	}
+    }
+}
+
+sub replace_xml_file {
+    my ($base_filename, $xml_root) = @_;
+
+    my $temp_filename;
+    my $temp_file;
+
+    ($temp_file, $temp_filename) = tempfile ($base_filename . ".XXXXXX");
+    $temp_file || die ("Cannot open a temporary file");
+
+    $xml_root->print ($temp_file);
+
+    close ($temp_file);
+
+    rename ($temp_filename, $base_filename);
+    chmod (0644, $base_filename);
+}
+
+sub add_config_entry {
+    my ($type, $language, $country) = @_;
+
+    my $mangled_prefix;
+    my $parent_name;
+    my $parent_node;
+
+    $mangled_prefix = $language . "-" . $country;
+    ($parent_name, $parent_node) = get_node_parent ($type);
+
+    # FIXME: we only support the stock MySpellChecker,
+    # LibHngHyphenator, and Thesaurus types.  Finnish will need
+    # extended support for other types, as it brings in its own
+    # language .so
+
+    my $new_node_content;
+
+    if ($type eq "DICT") {
+	$new_node_content = "org.openoffice.lingu.MySpellSpellChecker";
+    } elsif ($type eq "HYPH") {
+	$new_node_content = "org.openoffice.lingu.LibHnjHyphenator";
+    } elsif ($type eq "THES") {
+	$new_node_content = "org.openoffice.lingu.basic.Thesaurus";
+    }
+
+    # See if the node exists
+    my $node;
+
+    foreach $node ($XML_ROOT->get_xpath ($parent_name . "/cfg:any")) {
+	if ($node->att ("cfg:name") eq $mangled_prefix) {
+	    print ("$mangled_prefix already exists in $CONFIG_FILENAME; ignoring\n");
+	    return;
+	}
+    }
+
+    # Add a new node
+    $node = XML::Twig->new ();
+    $node->parsestring ("<cfg:any cfg:type=\"string\" cfg:derivedBy=\"list\" cfg:name=\"$mangled_prefix\">$new_node_content</cfg:any>");
+
+    $node->root->paste("first_child", $parent_node);
+}
+
+sub get_dict_list_entry {
+    my ($filename) = @_;
+
+    $filename =~ m/^([a-z][a-z])_([A-Z][A-Z])/;
+
+    my $language = $1;
+    my $country = $2;
+    my $file_prefix = $1 . "_" . $2;
+
+    return ($language, $country, $file_prefix);
+}
+
+sub lookup_default_country {
+    my $lang = shift;
+    
+    if ($lang eq 'en') {
+	return 'US';
+    } elsif ($lang eq 'da') {
+	return 'DK';
+    } else {
+	return uc ($lang);
+    }
+}
+
+sub get_hyph_list_entry {
+    my ($filename) = @_;
+
+    $filename =~ s/^hyph_([a-z][a-z])//;
+
+    my $language = $1;
+    my $country;
+    my $suffix = '';
+
+    if ($filename =~ m/_([A-Z][A-Z])/) {
+	$country = $1;
+	$suffix = "_" . $country;
+    } else {
+	$country = lookup_default_country ($language);
+    }
+
+    my $file_prefix = "hyph_" . $language . $suffix;
+
+    return ($language, $country, $file_prefix);
+}
+
+sub get_thes_list_entry {
+    my ($filename) = @_;
+
+    $filename =~ m/^th_([a-z][a-z])_([A-Z][A-Z])/;
+
+    my $language = $1;
+    my $country = $2;
+    my $file_prefix = "th_" . $1 . "_" . $2;
+
+    return ($language, $country, $file_prefix);
+}
+
+sub install {
+    my $type;
+    my $language;
+    my $country;
+    my $file_prefix;
+    my $filename = shift;
+
+    $type = filetype ($filename);
+
+    if ($type eq "DICT") {
+	my $dict_file = $DICT_DIR . $filename;
+	my $affix_file = $DICT_DIR . change_extension ($filename, "dic", "aff");
+
+	if (!-f $dict_file || !-f $affix_file) {
+	    print "Error: These files must be present:\n"
+		. $dict_file . "\n"
+		. $affix_file . "\n";
+	    exit (1);
+	}
+
+	($language, $country, $file_prefix) = get_dict_list_entry ($filename);
+    } elsif ($type eq "HYPH") {
+	my $hyph_file = $DICT_DIR . $filename;
+
+	if (!-f $hyph_file) {
+	    print ("Error: $hyph_file is not present\n");
+	    exit (1);
+	}
+
+	($language, $country, $file_prefix) = get_hyph_list_entry ($filename);
+    } elsif ($type eq "THES") {
+	my $thes_file = $DICT_DIR . $filename;
+	my $idx_file = $DICT_DIR . change_extension ($filename, "dat", "idx");
+
+	if (!-f $thes_file || !-f $idx_file) {
+	    print "Error: These files must be present:\n"
+		. $thes_file . "\n"
+		. $idx_file . "\n";
+	    exit (1);
+	}
+
+	($language, $country, $file_prefix) = get_thes_list_entry ($filename);
+    }
+
+    print $CONFIG_FILE "$type $language $country $file_prefix\n";
+
+    add_config_entry ($type, $language, $country);
+}
