@@ -12,6 +12,7 @@
 #include <com/sun/star/beans/XPropertySet.hpp>
 
 #include "string-macros.h"
+#include "services.h"
 #include "star-frame-widget.h"
 
 #define UNO_BOOTSTRAP_INI DECLARE_ASCII( "file://" INIFILE )
@@ -19,6 +20,9 @@
 
 using namespace com::sun::star;
 using namespace com::sun::star::beans;
+using namespace com::sun::star::bridge;
+using namespace com::sun::star::lang;
+using namespace com::sun::star::uno;
 
 using rtl::OUString;
 using com::sun::star::uno::Reference;
@@ -55,6 +59,82 @@ FrameLoaderLoadFileFromUrl( Reference< frame::XSynchronousFrameLoader > xFrameLo
 	xFrameLoader->load( aProperties, xFrame );
 }
 
+static OUString
+getPipeName()
+{
+	return 
+		OUString::createFromAscii( g_get_user_name() ) +
+		DECLARE_ASCII( "_ooo_bonobo" );
+}
+
+static Reference< XMultiComponentFactory >
+getRemoteServiceManager( const Reference< XComponentContext >& xComponentContext )
+{
+	Reference< XMultiComponentFactory > xLocalSMgr(
+		xComponentContext->getServiceManager() );
+
+	Reference< XUnoUrlResolver > xUnoUrlResolver(
+		xLocalSMgr->createInstanceWithContext( SERVICENAME_UNOURLRESOLVER,
+											   xComponentContext ),
+		UNO_QUERY );
+
+	Reference< XInterface > xInterface;
+	OUString sConnect( DECLARE_ASCII( "uno:pipe,name=" ) +
+					   getPipeName() +
+					   DECLARE_ASCII( ";urp;StarOffice.ServiceManager" ) );
+	try {
+		xInterface = xUnoUrlResolver->resolve( sConnect );
+	} catch( uno::Exception ) {
+		g_message( "Trying to start OOo" );
+
+		gchar *pArgv[4];
+		
+		pArgv[ 0 ] = "ooffice";
+		pArgv[ 1 ] = g_strconcat( "-accept=pipe,name=",
+								  U2B( getPipeName() ).pData->buffer,
+								  ";urp;StarOffice.ServiceManager",
+								  NULL );
+		pArgv[ 2 ] = "-bean";
+		pArgv[ 3 ] = NULL;
+
+		gboolean result = g_spawn_async( NULL,	// Working directory
+										 pArgv,	// Child's argv
+										 NULL,	// Child's envp
+										 G_SPAWN_SEARCH_PATH,
+										 NULL,	// Child setup function
+										 NULL,	// User data for child_setup
+										 NULL,	// &child_pid
+										 NULL);	// GError ** FIXME
+
+		g_free( pArgv[ 1 ] );
+
+		if( !result ) {
+			g_warning( "Unable to start OpenOffice.org" );
+			exit(1);
+		}
+
+		for( int counter = 0; counter < 30; ++counter ) {
+			try {
+				g_message( "Trying to connect to OOo (%d)", counter + 2 );
+				xInterface = xUnoUrlResolver->resolve( sConnect );
+				break;
+			} catch( uno::Exception ) {
+				sleep( 1 );
+			}
+		}
+	}
+	
+	if( !xInterface.is() ) {
+		g_warning( "Unable to connect to OpenOffice.org" );
+		exit( 2 );
+	}
+
+	Reference< XMultiComponentFactory > xRemoteComponentFactory(
+		xInterface, UNO_QUERY );
+
+	return xRemoteComponentFactory;
+}
+
 int
 main( int argc, char *argv[] )
 {
@@ -68,21 +148,9 @@ main( int argc, char *argv[] )
 		xComponentContext->getServiceManager() );
     g_assert( xMultiComponentFactoryClient.is() );
 
-    Reference< uno::XInterface > xInterface =
-		xMultiComponentFactoryClient->createInstanceWithContext(
-			SERVICENAME_UNOURLRESOLVER, xComponentContext );
-    g_assert( xInterface.is() );
-
-    Reference< bridge::XUnoUrlResolver > xUnoUrlResolver(
-		xInterface, uno::UNO_QUERY );
-    g_assert( xUnoUrlResolver.is() );
-
-    OUString sConnectionString = DECLARE_ASCII(
-		"uno:pipe,name=martin_ooo_bonobo;urp;StarOffice.ServiceManager" );
-
-    xInterface = Reference< uno::XInterface >(
-		xUnoUrlResolver->resolve( sConnectionString ), uno::UNO_QUERY );
-    g_assert( xInterface.is() );
+	Reference< XInterface > xInterface(
+		getRemoteServiceManager( xComponentContext ),
+		UNO_QUERY );
 
     Reference< beans::XPropertySet > xPropSet( xInterface, uno::UNO_QUERY );
     xPropSet->getPropertyValue( DECLARE_ASCII( "DefaultContext") )
