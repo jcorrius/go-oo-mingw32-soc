@@ -27,6 +27,7 @@ sub find_file($$)
 
 sub do_patch {
     my $patch = shift;
+    my $base_cmd = shift;
     my $patch_file = basename($patch);
     my $cmd_output = "";
     my $cmd_suffix = "";
@@ -50,6 +51,21 @@ sub do_patch {
 
     system ($cmd) && die "Failed to patch $patch_file.";
     print "done.\n";
+}
+
+sub slurp {
+    my $from = shift;
+    my $save = $/;
+    my $FROM;
+
+    undef $/;
+    open ($FROM, "<$from");
+    # slurp whole file in one big string
+    my $content = <$FROM>;
+    close ($FROM);
+    $/ = $save;
+
+    return $content;
 }
 
 sub apply_patches {
@@ -97,17 +113,43 @@ sub apply_patches {
         mkdir $applied_patches || die "Can't make directory $patch_dir: $!";
     }
 
-    my @existing_patches = glob($applied_patches."/???-*");
-    my $patch_num = $#existing_patches + 1;
+    my $patch_num = 0;
+    my %existing_patches;
+
+    foreach (glob($applied_patches."/???-*")) { 
+        my $file = basename $_;
+
+        $file =~ s/^[0-9]{3}-//;
+        $existing_patches{$file} = $_;
+
+        $patch_num++;
+    }
 
     foreach $patch (@Patches) {
         my $patch_file = basename($patch);
         
-        my @applied = glob($applied_patches."/???-$patch_file");
+        my $is_applied = 0;
+        
+        if( exists $existing_patches{$patch_file} ) {
+            my $applied_patch = $existing_patches{$patch_file};
+            my $patch_content = slurp($patch);
+            my $applied_content = slurp($applied_patch);
+            if (length ($patch_content) == length ($applied_content) &&
+                $patch_content eq $applied_content) {
+                print "$patch_file already applied, skipped\n";
+                $is_applied = 1;
+            }
+            else {
+                print "$patch_file changed, unapplying\n";
+                do_patch $applied_patch, $base_cmd." -R";
+                unlink $applied_patch || die "Can't remove $applied_patch: $!";
+            }
+            delete $existing_patches{$patch_file};
+        }
 
-        if (!@applied) {
+        if (!$is_applied) {
             print "\n" unless $quiet;
-            do_patch $patch;
+            do_patch $patch, $base_cmd;
 
             my $patch_copy = sprintf("%s/%03d-%s", $applied_patches, ++$patch_num, $patch_file);
 
@@ -116,9 +158,12 @@ sub apply_patches {
             copy($patch, $patch_copy) 
                 || die "Can't copy $patch to $patch_copy $!";
         }
-        else {
-            print "$patch_file already applied, skipped\n";
-        }
+    }
+
+    foreach (values %existing_patches) {
+        print "Unapplying obsolete patch $_\n";
+        do_patch $_, $base_cmd." -R";
+        unlink $_ || die "Can't remove $_ $!";
     }
 }
 
@@ -129,7 +174,7 @@ sub remove_patches {
 
     foreach $patch_file (reverse glob($applied_patches."/???-*")) {
         print "\nRemoving ".basename($patch_file)."...\n" unless $quiet;
-        do_patch $patch_file;
+        do_patch $patch_file, $base_cmd;
         unlink $patch_file;
     }
     rmdir $applied_patches
