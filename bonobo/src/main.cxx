@@ -11,6 +11,7 @@
 #include <com/sun/star/frame/XSynchronousFrameLoader.hpp>
 #include <com/sun/star/beans/XPropertySet.hpp>
 
+#include "remote-uno-helper.h"
 #include "services.h"
 #include "string-macros.h"
 #include "star-frame-widget.h"
@@ -85,13 +86,6 @@ activate( BonoboControl *bonobocontrol, gboolean arg1, gpointer user_data)
 	gtk_widget_show( GTK_WIDGET( user_data ) );
 }
 
-static void
-clicked( GtkWidget *widget, gpointer user_data )
-{
-	gtk_widget_show( GTK_WIDGET( user_data ) );
-	gtk_widget_hide( GTK_WIDGET( widget ) );
-}
-
 static BonoboObject *
 factory( BonoboGenericFactory *factory,
 		 const char *component_id,
@@ -106,28 +100,11 @@ factory( BonoboGenericFactory *factory,
 			xComponentContext->getServiceManager() );
 		g_assert( xMultiComponentFactoryClient.is() );
 
-		Reference< uno::XInterface > xInterface =
-			xMultiComponentFactoryClient->createInstanceWithContext(
-				SERVICENAME_UNOURLRESOLVER, xComponentContext );
-		g_assert( xInterface.is() );
-
-		Reference< bridge::XUnoUrlResolver > xUnoUrlResolver(
-			xInterface, uno::UNO_QUERY );
-		g_assert( xUnoUrlResolver.is() );
-
-		OUString sConnectionString = DECLARE_ASCII(
-			"uno:pipe,name=martin_ooo_bonobo;urp;StarOffice.ServiceManager" );
-
-		xInterface = Reference< uno::XInterface >(
-			xUnoUrlResolver->resolve( sConnectionString ), uno::UNO_QUERY );
-		g_assert( xInterface.is() );
-
-		Reference< beans::XPropertySet > xPropSet( xInterface, uno::UNO_QUERY );
-		xPropSet->getPropertyValue( DECLARE_ASCII( "DefaultContext") )
-			>>= xComponentContext;
-
+		Reference< uno::XComponentContext > xRemoteContext(
+			getRemoteComponentContext( xComponentContext ) );
+		
 		Reference< lang::XMultiServiceFactory > xMultiServiceFactory(
-			xComponentContext->getServiceManager(), uno::UNO_QUERY );
+			xRemoteContext->getServiceManager(), uno::UNO_QUERY );
 		g_assert ( xMultiServiceFactory.is() );
 
 		GtkWidget *pSocket = star_frame_widget_new( xMultiServiceFactory );
@@ -135,10 +112,6 @@ factory( BonoboGenericFactory *factory,
 
 		GtkWidget *pHBox = gtk_hbox_new( FALSE, 0 );
  		gtk_box_pack_start( GTK_BOX( pHBox ), pSocket, TRUE, TRUE, 0 );
-
-		GtkWidget *pButton = gtk_button_new_with_label( "Click me" );
-		gtk_box_pack_start( GTK_BOX( pHBox ), pButton, FALSE, FALSE, 0 );
-		g_signal_connect( pButton, "clicked", G_CALLBACK( clicked ), pSocket );
 
 		BonoboControl *pControl = bonobo_control_new( pHBox );
 		g_signal_connect( pControl, "activate", G_CALLBACK( activate ), pSocket );
@@ -149,7 +122,6 @@ factory( BonoboGenericFactory *factory,
 		bonobo_object_add_interface( BONOBO_OBJECT( pControl ),
 									 BONOBO_OBJECT( pPersistFile ) );
 
-		gtk_widget_show( pButton );
 		gtk_widget_show( pHBox );
 
 		return BONOBO_OBJECT( pControl );

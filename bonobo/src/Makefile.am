@@ -10,11 +10,15 @@ libexec_PROGRAMS = ooo-bonobo
 noinst_PROGRAMS = test
 
 test_SOURCES =			\
+	remote-uno-helper.cxx	\
+	remote-uno-helper.h	\
 	star-frame-widget.cxx	\
 	star-frame-widget.h	\
 	test.cxx
 
 ooo_bonobo_SOURCES =		\
+	remote-uno-helper.cxx	\
+	remote-uno-helper.h	\
 	star-frame-widget.cxx	\
 	star-frame-widget.h	\
 	main.cxx
