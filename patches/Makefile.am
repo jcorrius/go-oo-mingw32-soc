@@ -1,6 +1,7 @@
 SUBDIRS=\
+	evo2 \
+	vclplug \
 	OOO_1_1   \
-	OOO_1_1_0 \
 	OOO_1_1_1 \
 	OOO_1_1_2
 
