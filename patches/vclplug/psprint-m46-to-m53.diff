@@ -1,0 +1,1618 @@
+Index: inc/cupsmgr.hxx
+===================================================================
+RCS file: /cvs/gsl/psprint/inc/cupsmgr.hxx,v
+retrieving revision 1.2
+retrieving revision 1.3
+diff -w -u -r1.2 -r1.3
+--- psprint/inc/cupsmgr.hxx	17 Mar 2004 10:47:45 -0000	1.2
++++ psprint/inc/cupsmgr.hxx	23 Jul 2004 10:07:09 -0000	1.3
+@@ -64,6 +64,8 @@
+ 
+ #include <psprint/printerinfomanager.hxx>
+ #include <osl/module.h>
++#include <osl/thread.h>
++#include <osl/mutex.hxx>
+ 
+ namespace psp
+ {
+@@ -83,7 +85,7 @@
+     std::hash_map< FILE*, rtl::OString, FPtrHash >				m_aSpoolFiles;
+     int															m_nDests;
+     void*														m_pDests;
+-    bool														m_bFirstDest;
++    bool														m_bNewDests;
+     std::hash_map< rtl::OUString, int, rtl::OUStringHash >		m_aCUPSDestMap;
+ 
+     rtl::OString												m_aUser;
+@@ -92,10 +94,16 @@
+     // the password, so this cannot be helped
+     rtl::OString												m_aPassword;
+ 
+-    CUPSManager( CUPSWrapper*, int nDests = 0, void* pDests = NULL );
++    osl::Mutex													m_aCUPSMutex;
++    oslThread													m_aDestThread;
++
++    CUPSManager( CUPSWrapper* );
+     virtual ~CUPSManager();
+ 
+     virtual void initialize();
++
++    void runDests();
++    static void runDestThread(void* pMgr);
+ public:
+ 
+     static CUPSManager* tryLoadCUPS();
+Index: inc/psprint/fontcache.hxx
+===================================================================
+RCS file: /cvs/gsl/psprint/inc/psprint/fontcache.hxx,v
+retrieving revision 1.3
+retrieving revision 1.4
+diff -w -u -r1.3 -r1.4
+--- psprint/inc/psprint/fontcache.hxx	2 Feb 2004 18:52:33 -0000	1.3
++++ psprint/inc/psprint/fontcache.hxx	5 Jul 2004 09:21:57 -0000	1.4
+@@ -108,6 +108,7 @@
+     void clearCache();
+ 
+     void copyPrintFont( const PrintFontManager::PrintFont* pFrom, PrintFontManager::PrintFont* pTo ) const;
++    bool equalsPrintFont( const PrintFontManager::PrintFont* pLeft, PrintFontManager::PrintFont* pRight ) const;
+     PrintFontManager::PrintFont* clonePrintFont( const PrintFontManager::PrintFont* pFont ) const;
+ 
+     void createCacheDir( int nDirID );
+Index: inc/psprint/fontmanager.hxx
+===================================================================
+RCS file: /cvs/gsl/psprint/inc/psprint/fontmanager.hxx,v
+retrieving revision 1.18
+retrieving revision 1.19
+diff -w -u -r1.18 -r1.19
+--- psprint/inc/psprint/fontmanager.hxx	17 Jun 2004 13:50:47 -0000	1.18
++++ psprint/inc/psprint/fontmanager.hxx	5 Jul 2004 09:22:12 -0000	1.19
+@@ -191,6 +191,17 @@
+     weight::type            				m_eWeight;
+     pitch::type             				m_ePitch;
+     rtl_TextEncoding        				m_aEncoding;
++
++    FastPrintFontInfo() :
++            m_nID( 0 ),
++            m_eType( fonttype::Unknown ),
++            m_eFamilyStyle( family::Unknown ),
++            m_eItalic( italic::Unknown ),
++            m_eWidth( width::Unknown ),
++            m_eWeight( weight::Unknown ),
++            m_ePitch( pitch::Unknown ),
++            m_aEncoding( RTL_TEXTENCODING_DONTKNOW )
++    {}
+ };
+ 
+ struct PrintFontInfo : public FastPrintFontInfo
+@@ -199,6 +210,14 @@
+     int                     				m_nDescend;
+     int                     				m_nLeading;
+     int                     				m_nWidth;
++
++    PrintFontInfo() :
++            FastPrintFontInfo(),
++            m_nAscend( 0 ),
++            m_nDescend( 0 ),
++            m_nLeading( 0 ),
++            m_nWidth( 0 )
++    {}
+ };
+ 
+ // the values are per thousand of the font size
+@@ -208,6 +227,10 @@
+     short int width, height;
+ 
+     CharacterMetric() : width( 0 ), height( 0 ) {}
++    bool operator==( const CharacterMetric& rOther ) const
++    { return rOther.width == width && rOther.height == height; }
++    bool operator!=( const CharacterMetric& rOther ) const
++    { return rOther.width != width || rOther.height != height; }
+ };
+ 
+ struct KernPair
+@@ -421,11 +444,18 @@
+ 
+     void getServerDirectories(); // get font server directories on e.g. redhat
+ 
+-    // try to initialize from libfontconfig
+-    // returns true if at least one font was added by libfontconfig,
+-    // else returns false (e.g. no libfontconfig found
+-    // called from initialize()
++    /* try to initialize fonts from libfontconfig
++
++    called from <code>initialize()</code>
++
++    @returns
++    true if at least one font was added by libfontconfig
++    false else (e.g. no libfontconfig found)
++    */
+     bool initFontconfig();
++    /* deinitialize fontconfig
++     */
++    void deinitFontconfig();
+ 
+     static bool parseXLFD( const rtl::OString& rXLFD, XLFDEntry& rEntry );
+     void parseXLFD_appendAliases( const std::list< rtl::OString >& rXLFDs, std::list< XLFDEntry >& rEntries ) const;
+@@ -657,6 +687,36 @@
+ 
+     // returns false if there were not any
+     bool getAlternativeFamilyNames( fontID nFont, std::list< rtl::OUString >& rNames ) const;
++
++    /*  system dependendent font matching
++
++    <p>
++    <code>matchFont</code> matches a pattern of font characteristics
++    and returns the closest match if possibe. If a match was found
++    the <code>FastPrintFontInfo</code> passed in as parameter
++    will be update to the found matching font.
++    </p>
++    <p>
++    implementation note: currently the function is only implemented
++    for fontconfig.
++    </p>
++
++    @param rInfo
++    out of the FastPrintFontInfo structure the following
++    fields will be used for the match:
++    <ul>
++    <li>family name</li>
++    <li>italic</li>
++    <li>width</li>
++    <li>weight</li>
++    <li>pitch</li>
++    </ul>
++
++    @returns
++    true if a match was found
++    false else
++     */
++    bool matchFont( FastPrintFontInfo& rInfo );
+ };
+ 
+ } // namespace
+Index: inc/psprint/ppdparser.hxx
+===================================================================
+RCS file: /cvs/gsl/psprint/inc/psprint/ppdparser.hxx,v
+retrieving revision 1.5
+retrieving revision 1.6
+diff -w -u -r1.5 -r1.6
+--- psprint/inc/psprint/ppdparser.hxx	17 Mar 2004 10:48:09 -0000	1.5
++++ psprint/inc/psprint/ppdparser.hxx	23 Jul 2004 10:07:44 -0000	1.6
+@@ -223,7 +223,7 @@
+     static void initPPDFiles();
+     static String getPPDFile( const String& rFile );
+ public:
+-    static const PPDParser* getParser( String aFile );
++    static const PPDParser* getParser( const String& rFile );
+     static String getPPDPrinterName( const String& rFile );
+     static void freeAll();
+ 
+Index: inc/psprint/printerinfomanager.hxx
+===================================================================
+RCS file: /cvs/gsl/psprint/inc/psprint/printerinfomanager.hxx,v
+retrieving revision 1.6
+retrieving revision 1.7
+diff -w -u -r1.6 -r1.7
+--- psprint/inc/psprint/printerinfomanager.hxx	17 Mar 2004 10:48:31 -0000	1.6
++++ psprint/inc/psprint/printerinfomanager.hxx	23 Jul 2004 09:58:25 -0000	1.7
+@@ -143,6 +143,11 @@
+     m_aFontSubstitutes;
+     std::hash_map< fontID, fontID >
+     m_aFontSubstitutions;
++
++    PrinterInfo() :
++            JobData(),
++            m_bPerformFontSubstitution( false )
++    {}
+ };
+ 
+ class PrinterInfoManager
+Index: source/fontmanager/fontcache.cxx
+===================================================================
+RCS file: /cvs/gsl/psprint/source/fontmanager/fontcache.cxx,v
+retrieving revision 1.10
+retrieving revision 1.11
+diff -w -u -r1.10 -r1.11
+--- psprint/source/fontmanager/fontcache.cxx	17 Mar 2004 10:48:54 -0000	1.10
++++ psprint/source/fontmanager/fontcache.cxx	5 Jul 2004 09:22:24 -0000	1.11
+@@ -549,6 +549,73 @@
+ }
+ 
+ /*
++ *  FontCache::equalsPrintFont
++ */
++bool FontCache::equalsPrintFont( const PrintFontManager::PrintFont* pLeft, PrintFontManager::PrintFont* pRight ) const
++{
++    if( pLeft->m_eType != pRight->m_eType )
++        return false;
++    switch( pLeft->m_eType )
++    {
++        case fonttype::TrueType:
++        {
++            const PrintFontManager::TrueTypeFontFile* pLT = static_cast<const PrintFontManager::TrueTypeFontFile*>(pLeft);
++            const PrintFontManager::TrueTypeFontFile* pRT = static_cast<const PrintFontManager::TrueTypeFontFile*>(pRight);
++            if( pRT->m_nDirectory		!= pLT->m_nDirectory		||
++                pRT->m_aFontFile		!= pLT->m_aFontFile			||
++                pRT->m_nCollectionEntry	!= pLT->m_nCollectionEntry	||
++                pRT->m_nTypeFlags		!= pLT->m_nTypeFlags )
++                return false;
++        }
++        break;
++        case fonttype::Type1:
++        {
++            const PrintFontManager::Type1FontFile* pLT = static_cast<const PrintFontManager::Type1FontFile*>(pLeft);
++            const PrintFontManager::Type1FontFile* pRT = static_cast<const PrintFontManager::Type1FontFile*>(pRight);
++            if( pRT->m_nDirectory		!= pLT->m_nDirectory		||
++                pRT->m_aFontFile		!= pLT->m_aFontFile			||
++                pRT->m_aMetricFile		!= pLT->m_aMetricFile )
++                return false;
++        }
++        break;
++        case fonttype::Builtin:
++        {
++            const PrintFontManager::BuiltinFont* pLT = static_cast<const PrintFontManager::BuiltinFont*>(pLeft);
++            const PrintFontManager::BuiltinFont* pRT = static_cast<const PrintFontManager::BuiltinFont*>(pRight);
++            if( pRT->m_nDirectory		!= pLT->m_nDirectory		||
++                pRT->m_aMetricFile		!= pLT->m_aMetricFile )
++                return false;
++        }
++        break;
++        default: break;
++    }
++    if( pRight->m_nFamilyName		!= pLeft->m_nFamilyName		||
++        pRight->m_nPSName			!= pLeft->m_nPSName			||
++        pRight->m_eItalic			!= pLeft->m_eItalic			||
++        pRight->m_eWeight			!= pLeft->m_eWeight			||
++        pRight->m_eWidth			!= pLeft->m_eWidth			||
++        pRight->m_ePitch			!= pLeft->m_ePitch			||
++        pRight->m_aEncoding			!= pLeft->m_aEncoding		||
++        pRight->m_aGlobalMetricX	!= pLeft->m_aGlobalMetricX	||
++        pRight->m_aGlobalMetricY	!= pLeft->m_aGlobalMetricY	||
++        pRight->m_nAscend			!= pLeft->m_nAscend			||
++        pRight->m_nDescend			!= pLeft->m_nDescend		||
++        pRight->m_nLeading			!= pLeft->m_nLeading		||
++        pRight->m_nXMin				!= pLeft->m_nXMin			||
++        pRight->m_nYMin				!= pLeft->m_nYMin			||
++        pRight->m_nXMax				!= pLeft->m_nXMax			||
++        pRight->m_nYMax				!= pLeft->m_nYMax			||
++        pRight->m_bHaveVerticalSubstitutedGlyphs != pLeft->m_bHaveVerticalSubstitutedGlyphs )
++        return false;
++    std::list< int >::const_iterator lit, rit;
++    for( lit = pLeft->m_aAliases.begin(), rit = pRight->m_aAliases.begin();
++         lit != pLeft->m_aAliases.end() && rit != pRight->m_aAliases.end() && (*lit) == (*rit);
++         ++lit, ++rit )
++        ;
++    return lit == pLeft->m_aAliases.end() && rit == pRight->m_aAliases.end();
++}
++
++/*
+  *  FontCache::clonePrintFont
+  */
+ PrintFontManager::PrintFont* FontCache::clonePrintFont( const PrintFontManager::PrintFont* pOldFont ) const
+@@ -650,7 +717,13 @@
+         createCacheDir( nDirID );
+ 
+     if( pCacheFont )
++    {
++        if( ! equalsPrintFont( pFont, pCacheFont ) )
++        {
+         copyPrintFont( pFont, pCacheFont );
++            m_bDoFlush = true;
++        }
++    }
+     else
+     {
+         pCacheFont = clonePrintFont( pFont );
+@@ -662,8 +735,8 @@
+         struct stat aStat;
+         if( ! stat( aPath.GetBuffer(), &aStat ) )
+             m_aCache[nDirID].m_aEntries[aFile].m_nTimestamp = (sal_Int64)aStat.st_mtime;
+-    }
+     m_bDoFlush = true;
++    }
+     if( bFlush )
+         flush();
+ }
+Index: source/fontmanager/fontconfig.cxx
+===================================================================
+RCS file: /cvs/gsl/psprint/source/fontmanager/fontconfig.cxx,v
+retrieving revision 1.4
+retrieving revision 1.6
+diff -w -u -r1.4 -r1.6
+--- psprint/source/fontmanager/fontconfig.cxx	1 Jun 2004 09:35:26 -0000	1.4
++++ psprint/source/fontmanager/fontconfig.cxx	23 Jul 2004 10:08:07 -0000	1.6
+@@ -61,6 +61,10 @@
+ 
+ #ifdef ENABLE_FONTCONFIG
+ #include <fontconfig/fontconfig.h>
++// be compatible with fontconfig 2.2.0 release
++#ifndef FC_WEIGHT_BOOK
++#define FC_WEIGHT_BOOK 75
++#endif
+ #else
+ typedef void FcConfig;
+ typedef void FcObjectSet;
+@@ -68,8 +72,8 @@
+ typedef void FcFontSet;
+ typedef int FcResult;
+ typedef int FcBool;
++typedef int FcMatchKind;
+ typedef char FcChar8;
+-
+ #endif
+ 
+ #include <cstdio>
+@@ -98,6 +102,7 @@
+ class FontCfgWrapper
+ {
+     void*			m_pLib;
++    FcConfig*		m_pDefConfig;
+ 
+     FcConfig*		(*m_pFcInitLoadConfigAndFonts)();
+     FcObjectSet*	(*m_pFcObjectSetVaBuild)(const char*,va_list);
+@@ -105,20 +110,34 @@
+     FcPattern*		(*m_pFcPatternCreate)();
+     void			(*m_pFcPatternDestroy)(FcPattern*);
+     FcFontSet*		(*m_pFcFontList)(FcConfig*,FcPattern*,FcObjectSet*);
++    FcFontSet*		(*m_pFcFontSetCreate)();
+     void			(*m_pFcFontSetDestroy)(FcFontSet*);
++    FcBool			(*m_pFcFontSetAdd)(FcFontSet*,FcPattern*);
+     FcResult		(*m_pFcPatternGetString)(const FcPattern*,const char*,int,FcChar8**);
+     FcResult		(*m_pFcPatternGetInteger)(const FcPattern*,const char*,int,int*);
+     FcResult		(*m_pFcPatternGetDouble)(const FcPattern*,const char*,int,double*);
+     FcResult		(*m_pFcPatternGetBool)(const FcPattern*,const char*,int,FcBool*);
++    void			(*m_pFcDefaultSubstitute)(FcPattern *);
++    FcPattern*		(*m_pFcFontMatch)(FcConfig*,FcPattern*,FcResult*);    
++    FcBool			(*m_pFcConfigSubstitute)(FcConfig*,FcPattern*,FcMatchKind);
++    FcBool			(*m_pFcPatternAddInteger)(FcPattern*,const char*,int);
++    FcBool			(*m_pFcPatternAddString)(FcPattern*,const char*,const FcChar8*);
+     
+     void* loadSymbol( const char* );
+-public:
++
+     FontCfgWrapper();
+     ~FontCfgWrapper();
+ 
++public:
++    static FontCfgWrapper& get();
++    static void release();
++
+     bool isValid() const 
+     { return m_pLib != NULL;}
+ 
++    FcConfig* getDefConfig() { return m_pDefConfig; }
++
++
+     FcConfig* FcInitLoadConfigAndFonts()
+     { return m_pFcInitLoadConfigAndFonts(); }
+ 
+@@ -143,8 +162,12 @@
+     FcFontSet* FcFontList( FcConfig* pConfig, FcPattern* pPattern, FcObjectSet* pSet )
+     { return m_pFcFontList( pConfig, pPattern, pSet ); }
+     
++    FcFontSet* FcFontSetCreate()
++    { return m_pFcFontSetCreate(); }
+     void FcFontSetDestroy( FcFontSet* pSet )
+     { m_pFcFontSetDestroy( pSet );}
++    FcBool FcFontSetAdd( FcFontSet* pSet, FcPattern* pPattern )
++    { return m_pFcFontSetAdd( pSet, pPattern ); }
+ 
+     FcResult FcPatternGetString( const FcPattern* pPattern, const char* object, int n, FcChar8** s )
+     { return m_pFcPatternGetString( pPattern, object, n, s ); }
+@@ -157,6 +180,16 @@
+ 
+     FcResult FcPatternGetBool( const FcPattern* pPattern, const char* object, int n, FcBool* s )
+     { return m_pFcPatternGetBool( pPattern, object, n, s ); }
++    void FcDefaultSubstitute( FcPattern* pPattern )
++    { m_pFcDefaultSubstitute( pPattern ); }
++    FcPattern* FcFontMatch( FcConfig* pConfig, FcPattern* pPattern, FcResult* pResult )
++    { return m_pFcFontMatch( pConfig, pPattern, pResult ); }
++    FcBool FcConfigSubstitute( FcConfig* pConfig, FcPattern* pPattern, FcMatchKind eKind )
++    { return m_pFcConfigSubstitute( pConfig, pPattern, eKind ); }
++    FcBool FcPatternAddInteger( FcPattern* pPattern, const char* pObject, int nValue )
++    { return m_pFcPatternAddInteger( pPattern, pObject, nValue ); }
++    FcBool FcPatternAddString( FcPattern* pPattern, const char* pObject, const FcChar8* pString )
++    { return m_pFcPatternAddString( pPattern, pObject, pString ); }
+ };
+ 
+ void* FontCfgWrapper::loadSymbol( const char* pSymbol )
+@@ -170,7 +203,8 @@
+ }
+ 
+ FontCfgWrapper::FontCfgWrapper()
+-        : m_pLib( NULL )
++        : m_pLib( NULL ),
++          m_pDefConfig( NULL )
+ {
+ #ifdef ENABLE_FONTCONFIG
+     OUString aLib( RTL_CONSTASCII_USTRINGPARAM( "libfontconfig.so.1" ) );
+@@ -202,8 +236,12 @@
+         loadSymbol( "FcPatternDestroy" );
+     m_pFcFontList = (FcFontSet*(*)(FcConfig*,FcPattern*,FcObjectSet*))
+         loadSymbol( "FcFontList" );
++    m_pFcFontSetCreate = (FcFontSet*(*)())
++        loadSymbol( "FcFontSetCreate" );
+     m_pFcFontSetDestroy = (void(*)(FcFontSet*))
+         loadSymbol( "FcFontSetDestroy" );
++    m_pFcFontSetAdd = (FcBool(*)(FcFontSet*,FcPattern*))
++        loadSymbol( "FcFontSetAdd" );
+     m_pFcPatternGetString = (FcResult(*)(const FcPattern*,const char*,int,FcChar8**))
+         loadSymbol( "FcPatternGetString" );
+     m_pFcPatternGetInteger = (FcResult(*)(const FcPattern*,const char*,int,int*))
+@@ -212,6 +250,16 @@
+         loadSymbol( "FcPatternGetDouble" );
+     m_pFcPatternGetBool = (FcResult(*)(const FcPattern*,const char*,int,FcBool*))
+         loadSymbol( "FcPatternGetBool" );
++    m_pFcDefaultSubstitute = (void(*)(FcPattern *))
++        loadSymbol( "FcDefaultSubstitute" );
++    m_pFcFontMatch = (FcPattern*(*)(FcConfig*,FcPattern*,FcResult*))
++        loadSymbol( "FcFontMatch" );
++    m_pFcConfigSubstitute = (FcBool(*)(FcConfig*,FcPattern*,FcMatchKind))
++        loadSymbol( "FcConfigSubstitute" );
++    m_pFcPatternAddInteger = (FcBool(*)(FcPattern*,const char*,int))
++        loadSymbol( "FcPatternAddInteger" );
++    m_pFcPatternAddString = (FcBool(*)(FcPattern*,const char*,const FcChar8*))
++        loadSymbol( "FcPatternAddString" );
+ 
+     if( ! (
+             m_pFcInitLoadConfigAndFonts		&&
+@@ -220,11 +268,18 @@
+             m_pFcPatternCreate				&&
+             m_pFcPatternDestroy				&&
+             m_pFcFontList					&&
++            m_pFcFontSetCreate				&&
+             m_pFcFontSetDestroy				&&
++            m_pFcFontSetAdd					&&
+             m_pFcPatternGetString			&&
+             m_pFcPatternGetInteger			&&
+             m_pFcPatternGetDouble			&&
+-            m_pFcPatternGetBool
++            m_pFcPatternGetBool				&&
++            m_pFcDefaultSubstitute			&&
++            m_pFcFontMatch					&&
++            m_pFcConfigSubstitute			&&
++            m_pFcPatternAddInteger			&&
++            m_pFcPatternAddString
+             ) )
+      {
+          osl_unloadModule( m_pLib );
+@@ -233,6 +288,13 @@
+          fprintf( stderr, "not all needed symbols were found in libfontconfig\n" );
+ #endif
+      }
++
++    m_pDefConfig = FcInitLoadConfigAndFonts();
++    if( ! m_pDefConfig )
++    {
++        osl_unloadModule( m_pLib );
++        m_pLib = NULL;
++    }
+ }
+ 
+ FontCfgWrapper::~FontCfgWrapper()
+@@ -241,6 +303,24 @@
+         osl_unloadModule( m_pLib );
+ }
+ 
++static FontCfgWrapper* pOneInstance = NULL;
++
++FontCfgWrapper& FontCfgWrapper::get()
++{
++    if( ! pOneInstance )
++        pOneInstance = new FontCfgWrapper();
++    return *pOneInstance;
++}
++
++void FontCfgWrapper::release()
++{
++    if( pOneInstance )
++    {
++        delete pOneInstance;
++        pOneInstance = NULL;
++    }
++}
++
+ /*
+  * PrintFontManager::initFontconfig
+  */
+@@ -249,24 +329,22 @@
+     int nFonts = 0;
+ 
+ #ifdef ENABLE_FONTCONFIG    
+-    FontCfgWrapper aWrapper;
+-    if( ! aWrapper.isValid() )
++    FontCfgWrapper& rWrapper = FontCfgWrapper::get();
++    if( ! rWrapper.isValid() )
+         return false;
+ 
+-    FcConfig* pConfig = aWrapper.FcInitLoadConfigAndFonts();
+-    if( ! pConfig )
+-        return false;
+-
+-    FcObjectSet* pOSet = aWrapper.FcObjectSetBuild( FC_FAMILY,
++    FcConfig* pConfig = rWrapper.getDefConfig();
++    FcObjectSet* pOSet = rWrapper.FcObjectSetBuild( FC_FAMILY,
+                                                     FC_STYLE,
+                                                     FC_SLANT,
+                                                     FC_WEIGHT,
+                                                     FC_SPACING,
+                                                     FC_FILE,
+                                                     FC_OUTLINE,
++                                                    FC_INDEX,
+                                                     NULL );
+-    FcPattern* pPattern = aWrapper.FcPatternCreate();
+-    FcFontSet* pFSet = aWrapper.FcFontList( pConfig, pPattern, pOSet );
++    FcPattern* pPattern = rWrapper.FcPatternCreate();
++    FcFontSet* pFSet = rWrapper.FcFontList( pConfig, pPattern, pOSet );
+ 
+     if( pFSet )
+     {
+@@ -281,16 +359,17 @@
+             int slant = 0;
+             int weight = 0;
+             int spacing = 0;
++            int nCollectionEntry = -1;
+             FcBool outline = false;
+             
+-            FcResult eFileRes	= aWrapper.FcPatternGetString( pFSet->fonts[i], FC_FILE, 0, &file );
+-            FcResult eFamilyRes	= aWrapper.FcPatternGetString( pFSet->fonts[i], FC_FAMILY, 0, &family );
+-            FcResult eStyleRes	= aWrapper.FcPatternGetString( pFSet->fonts[i], FC_STYLE, 0, &style );
+-            FcResult eSlantRes	= aWrapper.FcPatternGetInteger( pFSet->fonts[i], FC_SLANT, 0, &slant );
+-            FcResult eWeightRes	= aWrapper.FcPatternGetInteger( pFSet->fonts[i], FC_WEIGHT, 0, &weight );
+-            FcResult eSpacRes	= aWrapper.FcPatternGetInteger( pFSet->fonts[i], FC_SPACING, 0, &spacing );
+-            FcResult eOutRes	= aWrapper.FcPatternGetBool( pFSet->fonts[i], FC_OUTLINE, 0, &outline );
+-            
++            FcResult eFileRes	= rWrapper.FcPatternGetString( pFSet->fonts[i], FC_FILE, 0, &file );
++            FcResult eFamilyRes	= rWrapper.FcPatternGetString( pFSet->fonts[i], FC_FAMILY, 0, &family );
++            FcResult eStyleRes	= rWrapper.FcPatternGetString( pFSet->fonts[i], FC_STYLE, 0, &style );
++            FcResult eSlantRes	= rWrapper.FcPatternGetInteger( pFSet->fonts[i], FC_SLANT, 0, &slant );
++            FcResult eWeightRes	= rWrapper.FcPatternGetInteger( pFSet->fonts[i], FC_WEIGHT, 0, &weight );
++            FcResult eSpacRes	= rWrapper.FcPatternGetInteger( pFSet->fonts[i], FC_SPACING, 0, &spacing );
++            FcResult eOutRes	= rWrapper.FcPatternGetBool( pFSet->fonts[i], FC_OUTLINE, 0, &outline );
++            FcResult eIndexRes = rWrapper.FcPatternGetInteger( pFSet->fonts[i], FC_INDEX, 0, &nCollectionEntry );            
+             
+             if( eFileRes != FcResultMatch || eFamilyRes != FcResultMatch || eOutRes != FcResultMatch )
+                 continue;
+@@ -327,81 +406,132 @@
+                 // not described by fontconfig (e.g. alias names, PSName)
+                 std::list< OString > aDummy;
+                 analyzeFontFile( nDirID, aBase, true, aDummy, aFonts );
+-            }
+ #if OSL_DEBUG_LEVEL > 1
+-            if( aFonts.size() > 1 )
+-                fprintf( stderr, "Warning: file contains more than one font, updating all to fontconfig data\n" );
+-            else if( aFonts.empty() )
++                if( aFonts.empty() )
+                 fprintf( stderr, "Warning: file is unusable to psprint\n" );
+ #endif
++            }
++            if( aFonts.empty() )
++                continue;
++
+             int nFamilyName = m_pAtoms->getAtom( ATOM_FAMILYNAME, OStringToOUString( OString( (sal_Char*)family ), osl_getThreadTextEncoding() ), sal_True );
++            PrintFont* pUpdate = aFonts.front();
++            if( ++aFonts.begin() != aFonts.end() ) // more than one font
++            {
++                // a collection entry, get the correct index
++                if( eIndexRes == FcResultMatch && nCollectionEntry != -1 )
++                {
++                    for( std::list< PrintFont* >::iterator it = aFonts.begin(); it != aFonts.end(); ++it )
++                    {
++                        if( (*it)->m_eType == fonttype::TrueType &&
++                            static_cast<TrueTypeFontFile*>(*it)->m_nCollectionEntry == nCollectionEntry )
++                        {
++                            pUpdate = *it;
++                            break;
++                        }
++                    }
++                    // update collection entry
++                    // additional entries will be created in the cache
++                    // if this is a new index (that is if the loop above
++                    // ran to the end of the list)
++                    if( pUpdate->m_eType == fonttype::TrueType ) // sanity check, this should always be the case here
++                        static_cast<TrueTypeFontFile*>(pUpdate)->m_nCollectionEntry = nCollectionEntry;
++                }
++                else
++                {
++#if OSL_DEBUG_LEVEL > 1
++                    fprintf( stderr, "multiple fonts for file, but no index in fontconfig pattern ! (index res = %d collection entry = %d\nfile will not be used\n", eIndexRes, nCollectionEntry );
++#endif
++                    // we have found more than one font in this file
++                    // but fontconfig will not tell us which index is meant
++                    // -> something is in disorder, do not use this font
++                    pUpdate = NULL;
++                }
++            }
+             
+-            for( std::list< PrintFont* >::iterator it = aFonts.begin();
+-                 it != aFonts.end(); ++it )
++            if( pUpdate )
+             {
+                 // set family name
+-                if( (*it)->m_nFamilyName != nFamilyName )
++                if( pUpdate->m_nFamilyName != nFamilyName )
+                 {
+-                    (*it)->m_aAliases.remove( (*it)->m_nFamilyName );
+-                    (*it)->m_aAliases.push_back( (*it)->m_nFamilyName );
+-                    (*it)->m_aAliases.remove( nFamilyName );
+-                    (*it)->m_nFamilyName = nFamilyName;
++                    pUpdate->m_aAliases.remove( pUpdate->m_nFamilyName );
++                    pUpdate->m_aAliases.push_back( pUpdate->m_nFamilyName );
++                    pUpdate->m_aAliases.remove( nFamilyName );
++                    pUpdate->m_nFamilyName = nFamilyName;
+                 }
+                 if( eWeightRes == FcResultMatch )
+                 {
+                     // set weight
+-                    if( weight == FC_WEIGHT_LIGHT )
+-                        (*it)->m_eWeight = weight::Light;
+-                    else if( weight == FC_WEIGHT_MEDIUM )
+-                        (*it)->m_eWeight = weight::Medium;
+-                    else if( weight == FC_WEIGHT_DEMIBOLD )
+-                        (*it)->m_eWeight = weight::SemiBold;
+-                    else if( weight == FC_WEIGHT_BOLD )
+-                        (*it)->m_eWeight = weight::Bold;
+-                    else if( weight == FC_WEIGHT_BLACK )
+-                        (*it)->m_eWeight = weight::Black;
++                    if( weight <= FC_WEIGHT_THIN )
++                        pUpdate->m_eWeight = weight::Thin;
++                    else if( weight <= FC_WEIGHT_ULTRALIGHT )
++                        pUpdate->m_eWeight = weight::UltraLight;
++                    else if( weight <= FC_WEIGHT_LIGHT )
++                        pUpdate->m_eWeight = weight::Light;
++                    else if( weight <= FC_WEIGHT_BOOK )
++                        pUpdate->m_eWeight = weight::SemiLight;
++                    else if( weight <= FC_WEIGHT_NORMAL )
++                        pUpdate->m_eWeight = weight::Normal;
++                    else if( weight <= FC_WEIGHT_MEDIUM )
++                        pUpdate->m_eWeight = weight::Medium;
++                    else if( weight <= FC_WEIGHT_SEMIBOLD )
++                        pUpdate->m_eWeight = weight::SemiBold;
++                    else if( weight <= FC_WEIGHT_BOLD )
++                        pUpdate->m_eWeight = weight::Bold;
++                    else if( weight <= FC_WEIGHT_ULTRABOLD )
++                        pUpdate->m_eWeight = weight::UltraBold;
++                    else
++                        pUpdate->m_eWeight = weight::Black;
+                 }
+                 if( eSpacRes == FcResultMatch )
+                 {
+                     // set pitch
+                     if( spacing == FC_PROPORTIONAL )
+-                        (*it)->m_ePitch = pitch::Variable;
++                        pUpdate->m_ePitch = pitch::Variable;
+                     else if( spacing == FC_MONO || spacing == FC_CHARCELL )
+-                        (*it)->m_ePitch = pitch::Fixed;
++                        pUpdate->m_ePitch = pitch::Fixed;
+                 }
+                 if( eSlantRes == FcResultMatch )
+                 {
+                     // set italic
+                     if( slant == FC_SLANT_ROMAN )
+-                        (*it)->m_eItalic = italic::Upright;
++                        pUpdate->m_eItalic = italic::Upright;
+                     else if( slant == FC_SLANT_ITALIC )
+-                        (*it)->m_eItalic = italic::Italic;
++                        pUpdate->m_eItalic = italic::Italic;
+                     else if( slant == FC_SLANT_OBLIQUE )
+-                        (*it)->m_eItalic = italic::Oblique;
++                        pUpdate->m_eItalic = italic::Oblique;
+                 }
+                 
+                 // update font cache
+-                m_pFontCache->updateFontCacheEntry( *it, false );
++                m_pFontCache->updateFontCacheEntry( pUpdate, false );
+                 // sort into known fonts
+                 fontID aFont = m_nNextFontID++;
+-                m_aFonts[ aFont ] = *it;
++                m_aFonts[ aFont ] = pUpdate;
+                 m_aFontFileToFontID[ aBase ].insert( aFont );
+                 nFonts++;
+ #if OSL_DEBUG_LEVEL > 1
+                 fprintf( stderr, "inserted font %s as fontID %d\n", family, aFont );
+ #endif
+             }
++            // clean up the fonts we did not put into the list
++            for( std::list< PrintFont* >::iterator it = aFonts.begin(); it != aFonts.end(); ++it )
++            {
++                if( *it != pUpdate )
++                {
++                    m_pFontCache->updateFontCacheEntry( *it, false ); // prepare a cache entry for a collection item
++                    delete *it;
++                }
++            }
+         }
+     }
+-    
+     
+     // cleanup
+     if( pPattern )
+-        aWrapper.FcPatternDestroy( pPattern );
++        rWrapper.FcPatternDestroy( pPattern );
+     if( pFSet )
+-        aWrapper.FcFontSetDestroy( pFSet );
++        rWrapper.FcFontSetDestroy( pFSet );
+     if( pOSet )
+-        aWrapper.FcObjectSetDestroy( pOSet );
++        rWrapper.FcObjectSetDestroy( pOSet );
+     
+     // how does one get rid of the config ?
+ #if OSL_DEBUG_LEVEL > 1
+@@ -409,4 +539,125 @@
+ #endif
+ #endif // ENABLE_FONTCONFIG
+     return nFonts != 0;
++}
++
++void PrintFontManager::deinitFontconfig()
++{
++    FontCfgWrapper::release();
++}
++
++bool PrintFontManager::matchFont( FastPrintFontInfo& rInfo )
++{
++#ifdef ENABLE_FONTCONFIG
++    FontCfgWrapper& rWrapper = FontCfgWrapper::get();
++    if( ! rWrapper.isValid() )
++        return false;
++
++    FcConfig* pConfig = rWrapper.getDefConfig();
++    FcPattern* pPattern = rWrapper.FcPatternCreate();
++
++    // populate pattern with font characteristics
++    OString aFamily = OUStringToOString( rInfo.m_aFamilyName, RTL_TEXTENCODING_UTF8 );
++    if( aFamily.getLength() )
++        rWrapper.FcPatternAddString( pPattern, FC_FAMILY, (FcChar8*)aFamily.getStr() );
++    if( rInfo.m_eItalic != italic::Unknown )
++    {
++        int nSlant = FC_SLANT_ROMAN;
++        switch( rInfo.m_eItalic )
++        {
++            case italic::Italic:	 	nSlant = FC_SLANT_ITALIC;break;
++            case italic::Oblique:	 	nSlant = FC_SLANT_OBLIQUE;break;
++            default:
++                break;
++        }
++        rWrapper.FcPatternAddInteger( pPattern, FC_SLANT, nSlant );
++    }
++    if( rInfo.m_eWeight != weight::Unknown )
++    {
++        int nWeight = FC_WEIGHT_NORMAL;
++        switch( rInfo.m_eWeight )
++        {
++            case weight::Thin:			nWeight = FC_WEIGHT_THIN;break;
++            case weight::UltraLight:	nWeight = FC_WEIGHT_ULTRALIGHT;break;
++            case weight::Light:			nWeight = FC_WEIGHT_LIGHT;break;
++            case weight::SemiLight:		nWeight = FC_WEIGHT_BOOK;break;
++            case weight::Normal:		nWeight = FC_WEIGHT_NORMAL;break;
++            case weight::Medium:		nWeight = FC_WEIGHT_MEDIUM;break;
++            case weight::SemiBold:		nWeight = FC_WEIGHT_SEMIBOLD;break;
++            case weight::Bold:			nWeight = FC_WEIGHT_BOLD;break;
++            case weight::UltraBold:		nWeight	= FC_WEIGHT_ULTRABOLD;break;
++            case weight::Black:			nWeight	= FC_WEIGHT_BLACK;break;
++            default:
++                break;
++        }
++        rWrapper.FcPatternAddInteger( pPattern, FC_WEIGHT, nWeight );
++    }
++    if( rInfo.m_eWidth != width::Unknown )
++    {
++        int nWidth = FC_WIDTH_NORMAL;
++        switch( rInfo.m_eWidth )
++        {
++            case width::UltraCondensed:	nWidth = FC_WIDTH_ULTRACONDENSED;break;
++            case width::ExtraCondensed: nWidth = FC_WIDTH_EXTRACONDENSED;break;
++            case width::Condensed:		nWidth = FC_WIDTH_CONDENSED;break;
++            case width::SemiCondensed:	nWidth = FC_WIDTH_SEMICONDENSED;break;
++            case width::Normal:			nWidth = FC_WIDTH_NORMAL;break;
++            case width::SemiExpanded:	nWidth = FC_WIDTH_SEMIEXPANDED;break;
++            case width::Expanded:		nWidth = FC_WIDTH_EXPANDED;break;
++            case width::ExtraExpanded:	nWidth = FC_WIDTH_EXTRAEXPANDED;break;
++            case width::UltraExpanded:	nWidth = FC_WIDTH_ULTRACONDENSED;break;
++            default:
++                break;
++        }
++        rWrapper.FcPatternAddInteger( pPattern, FC_WIDTH, nWidth );
++    }
++    if( rInfo.m_ePitch != pitch::Unknown )
++    {
++        int nSpacing = FC_PROPORTIONAL;
++        switch( rInfo.m_ePitch )
++        {
++            case pitch::Fixed:			nSpacing = FC_MONO;break;
++            case pitch::Variable:		nSpacing = FC_PROPORTIONAL;break;
++            default:
++                break;
++        }
++        rWrapper.FcPatternAddInteger( pPattern, FC_SPACING, nSpacing );
++    }
++
++    rWrapper.FcConfigSubstitute( pConfig, pPattern, FcMatchPattern );
++    rWrapper.FcDefaultSubstitute( pPattern );
++    FcResult eResult = FcResultNoMatch;
++    FcPattern* pResult = rWrapper.FcFontMatch( pConfig, pPattern, &eResult );
++    bool bSuccess = false;
++    if( pResult )
++    {
++        FcFontSet* pSet = rWrapper.FcFontSetCreate();
++        rWrapper.FcFontSetAdd( pSet, pResult );
++        if( pSet->nfont > 0 )
++        {
++            //extract the closest match
++            FcChar8* file = NULL;
++            FcResult eFileRes	= rWrapper.FcPatternGetString( pSet->fonts[0], FC_FILE, 0, &file );
++            if( eFileRes == FcResultMatch )
++            {
++                OString aDir, aBase, aOrgPath( (sal_Char*)file );
++                splitPath( aOrgPath, aDir, aBase );
++                int nDirID = getDirectoryAtom( aDir, true );
++                fontID aFont = findFontFileID( nDirID, aBase );
++                if( aFont > 0 )
++                    bSuccess = getFontFastInfo( aFont, rInfo );
++            }
++        }
++        // info: destroying the pSet destroys pResult implicitly
++        // since pResult was "added" to pSet
++        rWrapper.FcFontSetDestroy( pSet );
++    }
++
++    // cleanup
++    rWrapper.FcPatternDestroy( pPattern );
++
++    return bSuccess;
++#else
++    return false;
++#endif
+ }
+Index: source/fontmanager/fontmanager.cxx
+===================================================================
+RCS file: /cvs/gsl/psprint/source/fontmanager/fontmanager.cxx,v
+retrieving revision 1.50
+retrieving revision 1.51
+diff -w -u -r1.50 -r1.51
+--- psprint/source/fontmanager/fontmanager.cxx	17 Jun 2004 13:51:09 -0000	1.50
++++ psprint/source/fontmanager/fontmanager.cxx	5 Jul 2004 09:22:51 -0000	1.51
+@@ -581,10 +581,10 @@
+                         case 2:
+                         {
+                             const sal_uInt8* pSubTable = pTable;
+-                            sal_uInt16 nRowWidth    = getUInt16BE( pTable );
++                            /*sal_uInt16 nRowWidth    =*/ getUInt16BE( pTable );
+                             sal_uInt16 nOfLeft      = getUInt16BE( pTable );
+                             sal_uInt16 nOfRight     = getUInt16BE( pTable );
+-                            sal_uInt16 nOfArray     = getUInt16BE( pTable );
++                            /*sal_uInt16 nOfArray     =*/ getUInt16BE( pTable );
+                             const sal_uInt8* pTmp = pSubTable + nOfLeft;
+                             sal_uInt16 nFirstLeft   = getUInt16BE( pTmp );
+                             sal_uInt16 nLastLeft    = getUInt16BE( pTmp ) + nFirstLeft - 1;
+@@ -592,7 +592,7 @@
+                             sal_uInt16 nFirstRight  = getUInt16BE( pTmp );
+                             sal_uInt16 nLastRight   = getUInt16BE( pTmp ) + nFirstRight -1;
+ 
+-                            int nPairs = (int)(nLastLeft-nFirstLeft+1)*(int)(nLastRight-nFirstRight+1);
++                            // int nPairs = (int)(nLastLeft-nFirstLeft+1)*(int)(nLastRight-nFirstRight+1);
+                             for( aPair.first = nFirstLeft; aPair.first < nLastLeft; aPair.first++ )
+                             {
+                                 for( aPair.second = 0; aPair.second < nLastRight; aPair.second++ )
+@@ -634,18 +634,18 @@
+                 
+                 // Loop through each of the 'kern' subtables
+                 KernPair aPair;
+-                for( i = 0; i < pImplTTFont->nkern; i++ )
++                for( i = 0; (unsigned int)i < pImplTTFont->nkern; i++ )
+                 {
+                     const sal_uInt8* pTable = pImplTTFont->kerntables[i];
+                     
+-                    sal_uInt32 nLength      = getUInt32BE( pTable );
++                    /*sal_uInt32 nLength      =*/ getUInt32BE( pTable );
+                     sal_uInt16 nCoverage    = getUInt16BE( pTable );
+-                    sal_uInt16 nTupleIndex  = getUInt16BE( pTable );
++                    /*sal_uInt16 nTupleIndex  =*/ getUInt16BE( pTable );
+ 
+                     // Get kerning type
+-                    sal_Bool bKernVertical     = nCoverage & 0x8000;
+-                    sal_Bool bKernCrossStream  = nCoverage & 0x4000;
+-                    sal_Bool bKernVariation    = nCoverage & 0x2000;
++                    // sal_Bool bKernVertical     = nCoverage & 0x8000;
++                    // sal_Bool bKernCrossStream  = nCoverage & 0x4000;
++                    // sal_Bool bKernVariation    = nCoverage & 0x2000;
+ 
+                     // Kerning sub-table format, 0 through 3
+                     sal_uInt8 nSubTableFormat  = nCoverage & 0x00FF;
+@@ -1154,6 +1154,7 @@
+ 
+ PrintFontManager::~PrintFontManager()
+ {
++    deinitFontconfig();
+     for( ::std::hash_map< fontID, PrintFont* >::const_iterator it = m_aFonts.begin(); it != m_aFonts.end(); ++it )
+         delete (*it).second;
+     delete m_pAtoms;
+@@ -1238,7 +1239,7 @@
+         // first look for an adjacent file
+         static const char* pSuffix[] = { ".afm", ".AFM" };
+         
+-        for( int i = 0; i < sizeof(pSuffix)/sizeof(pSuffix[0]); i++ )
++        for( unsigned int i = 0; i < sizeof(pSuffix)/sizeof(pSuffix[0]); i++ )
+         {
+             ByteString aName( rFontFile );
+             aName.Erase( aName.Len()-4 );
+@@ -1549,6 +1550,8 @@
+                     break;
+                 case fonttype::TrueType:
+                     static_cast<TrueTypeFontFile*>(pFont)->m_aXLFD = rXLFDs.front();
++                    break;
++                default:
+                     break;
+             }
+         }
+Index: source/helper/ppdparser.cxx
+===================================================================
+RCS file: /cvs/gsl/psprint/source/helper/ppdparser.cxx,v
+retrieving revision 1.14
+retrieving revision 1.16
+diff -w -u -r1.14 -r1.16
+--- psprint/source/helper/ppdparser.cxx	18 May 2004 10:45:57 -0000	1.14
++++ psprint/source/helper/ppdparser.cxx	30 Jul 2004 15:14:16 -0000	1.16
+@@ -68,7 +68,7 @@
+ namespace psp { class PPDKey; }
+ 
+ namespace  _STL {
+-struct hash< const psp::PPDKey* >
++template<> struct hash< const psp::PPDKey* >
+ {
+     size_t operator()( const psp::PPDKey * pKey) const
+     { return (size_t)pKey; }
+@@ -268,16 +268,19 @@
+     return aName;
+ }
+ 
+-const PPDParser* PPDParser::getParser( String aFile )
++const PPDParser* PPDParser::getParser( const String& rFile )
+ {
+     static ::osl::Mutex aMutex;
+     ::osl::Guard< ::osl::Mutex > aGuard( aMutex );
+ 
+-    if( aFile.CompareToAscii( "CUPS:", 5 ) != COMPARE_EQUAL )
+-        aFile = getPPDFile( aFile );
++    String aFile = rFile;
++    if( rFile.CompareToAscii( "CUPS:", 5 ) != COMPARE_EQUAL )
++        aFile = getPPDFile( rFile );
+     if( ! aFile.Len() )
+     {
+-        fprintf( stderr, "Could not get printer PPD file!\n" );
++#if OSL_DEBUG_LEVEL > 1
++        fprintf( stderr, "Could not get printer PPD file \"%s\" !\n", OUStringToOString( rFile, osl_getThreadTextEncoding() ).getStr() );
++#endif
+         return NULL;
+     }
+ 
+@@ -294,12 +297,16 @@
+         if( rMgr.getType() == PrinterInfoManager::CUPS )
+         {
+             pNewParser = const_cast<PPDParser*>(static_cast<CUPSManager&>(rMgr).createCUPSParser( aFile ));
+-            if( pNewParser )
+-                pNewParser->m_aFile = aFile;
+         }
+     }
+     if( pNewParser )
+-        aAllParsers.push_back( pNewParser );
++    {
++        // this may actually be the SGENPRT parser,
++        // so ensure uniquness here
++        aAllParsers.remove( pNewParser );
++        // insert new parser to list
++        aAllParsers.push_front( pNewParser );
++    }
+     return pNewParser;
+ }
+ 
+
+
+Index: source/printer/printerinfomanager.cxx
+===================================================================
+RCS file: /cvs/gsl/psprint/source/printer/printerinfomanager.cxx,v
+retrieving revision 1.23
+retrieving revision 1.25
+diff -w -u -r1.23 -r1.25
+--- psprint/source/printer/printerinfomanager.cxx	17 Mar 2004 10:51:45 -0000	1.23
++++ psprint/source/printer/printerinfomanager.cxx	23 Jul 2004 10:09:11 -0000	1.25
+@@ -133,6 +133,9 @@
+ 
+         if( pManager )
+             pManager->initialize();
++#if OSL_DEBUG_LEVEL > 1
++        fprintf( stderr, "PrinterInfoManager::get create Manager of type %d\n", pManager->getType() );
++#endif
+     }
+ 
+     return *pManager;
+@@ -1161,7 +1164,7 @@
+                 if( nSubstitute != -1 )
+                 {
+                     rInfo.m_aFontSubstitutions[ it->m_nID ] = nSubstitute;
+-#if OSL_DEBUG_LEVEL > 1
++#if OSL_DEBUG_LEVEL > 2
+                     FastPrintFontInfo aInfo;
+                     rFontManager.getFontFastInfo( nSubstitute, aInfo );
+                     fprintf( stderr,
+@@ -1220,7 +1223,8 @@
+ {
+     const PrinterInfo&   rPrinterInfo	= getPrinterInfo (rPrintername);
+     const rtl::OUString& rCommand		= rPrinterInfo.m_aCommand;
+-    const rtl::OString aShellCommand	= OUStringToOString (rCommand, RTL_TEXTENCODING_ISO_8859_1);
++    rtl::OString aShellCommand	= OUStringToOString (rCommand, RTL_TEXTENCODING_ISO_8859_1);
++    aShellCommand += rtl::OString( " 2>/dev/null" );
+ 													  
+     return popen (aShellCommand.getStr(), "w");
+ }
+@@ -1282,7 +1286,7 @@
+     const char*		pPrintCommand;
+     const char*		pForeToken;
+     const char*		pAftToken;
+-    int					nForeTokenCount;
++    unsigned int	nForeTokenCount;
+ };
+ 
+ static const struct SystemCommandParameters aParms[] =
+@@ -1312,7 +1316,7 @@
+ {
+     char pBuffer[1024];
+     ByteString aPrtQueueCmd, aForeToken, aAftToken, aString;
+-    int nForeTokenCount = 0, i;
++    unsigned int nForeTokenCount = 0, i;
+     FILE *pPipe;
+     bool bSuccess = false;
+     std::list< ByteString > aLines;
+@@ -1355,6 +1359,7 @@
+         else
+ #endif
+         {
++			aPrtQueueCmd += ByteString( " 2>/dev/null" );	
+             if( pPipe = popen( aPrtQueueCmd.GetBuffer(), "r" ) )
+             {
+                 while( fgets( pBuffer, 1024, pPipe ) )
+@@ -1403,7 +1408,7 @@
+                 ByteString aOutLine( aLines.front() );
+                 aLines.pop_front();
+             
+-                for( int i = 0; i < nForeTokenCount && nPos != STRING_NOTFOUND; i++ )
++                for( i = 0; i < nForeTokenCount && nPos != STRING_NOTFOUND; i++ )
+                 {
+                     nPos = aOutLine.Search( aForeToken, nPos );
+                     if( nPos != STRING_NOTFOUND && aOutLine.Len() >= nPos+aForeToken.Len() )
+@@ -1496,6 +1501,7 @@
+      return( applePrintSysType );
+ }
+ 
++#if 0
+ /*
+  * macxp_GetSystemPrintFormat()
+  *
+@@ -1509,7 +1515,7 @@
+  * therefore the environment variable OOO_PRINT_PS_DIRECTLY, if set,
+  * forces OOo to NOT undergo the PS -> PDF translation by default.
+  */
+-/*sal_Int32 macxp_GetSystemPrintFormat( void )
++sal_Int32 macxp_GetSystemPrintFormat( void )
+ {
+      int			printFormat;
+      int			err;
+@@ -1520,15 +1526,15 @@
+ 	
+      /* Check for presence of OSAScript executable, which is
+       * believed to be MacOS X only (ie not present on Darwin).
+-      *
++      */
+      err = stat( "/usr/bin/osascript", &status );
+      if ( err == 0 )
+      {
+-          /* Check to see if the user wants to print PS anyway *
++         /* Check to see if the user wants to print PS anyway */
+           pPDFOverride = getenv( "OOO_PRINT_PS_DIRECTLY" );
+           if ( pPDFOverride == NULL )
+           {
+-               /* Now we have to check for ps2pdf to make sure we can do the conversion *
++          /* Now we have to check for ps2pdf to make sure we can do the conversion */
+                err = stat( kApplePS2PDFLocation, &status );
+                if ( err == 0 )
+                {
+@@ -1541,6 +1547,7 @@
+      }
+ 	
+      return( printFormat );
+-}*/
++}
++#endif
+ #endif
+ 
+--- ../OOO_1_1_3_fix2/psprint/source/printer/cupsmgr.cxx	2004-08-30 16:46:55.000000000 +0100
++++ psprint/source/printer/cupsmgr.cxx	2004-09-07 11:18:11.200669640 +0100
+@@ -1,10 +1,10 @@
+ /*************************************************************************
+  *
+- *  
++ *  $RCSfile$
+  *
+- *  
++ *  $Revision$
+  *
+- *  
++ *  last change: $Author$ $Date$
+  *
+  *  The Contents of this file are made available subject to the terms of
+  *  either of the following licenses
+@@ -70,6 +70,7 @@
+ 
+ #include <osl/thread.h>
+ #include <osl/diagnose.h>
++#include <osl/conditn.hxx>
+ #include <rtl/ustrbuf.hxx>
+ #include <cupsmgr.hxx>
+ 
+@@ -78,20 +79,21 @@
+ class CUPSWrapper
+ {
+     oslModule		m_pLib;
++    osl::Mutex		m_aGetPPDMutex;
+ 
+     int				(*m_pcupsPrintFile)(const char*, const char*, const char*, int, cups_option_t*);
+     int				(*m_pcupsGetDests)(cups_dest_t**);
+     void			(*m_pcupsSetDests)(int,cups_dest_t*);
+     void			(*m_pcupsFreeDests)(int,cups_dest_t*);
+-    const char*	(*m_pcupsGetPPD)(const char*);
++    const char*		(*m_pcupsGetPPD)(const char*);
+     int				(*m_pcupsMarkOptions)(ppd_file_t*,int,cups_option_t*);
+     int				(*m_pcupsAddOption)(const char*,const char*,int,cups_option_t**);
+     void			(*m_pcupsFreeOptions)(int,cups_option_t*);
+     ppd_file_t*		(*m_pppdOpenFile)(const char* pFile);
+     void			(*m_pppdClose)(ppd_file_t*);
+-    const char*	(*m_pcupsServer)();
++    const char*		(*m_pcupsServer)();
+     void			(*m_pcupsSetPasswordCB)(const char*(cb)(const char*));
+-    const char*	(*m_pcupsUser)();
++    const char*		(*m_pcupsUser)();
+     void			(*m_pcupsSetUser)(const char*);
+ 
+     void* loadSymbol( const char* );
+@@ -117,8 +119,7 @@
+                    cups_option_t* pOptions )
+     { return m_pcupsPrintFile( pPrinter, pFileName, pTitle, nOptions, pOptions ); }
+ 
+-    const char* cupsGetPPD( const char* pPrinter )
+-    { return m_pcupsGetPPD( pPrinter ); }
++    const char* cupsGetPPD( const char* pPrinter );
+ 
+     int cupsMarkOptions(ppd_file_t* pPPD, int nOptions, cups_option_t* pOptions )
+     { return m_pcupsMarkOptions(pPPD, nOptions, pOptions); }
+@@ -251,6 +252,70 @@
+     return m_pLib != NULL;
+ }
+ 
++static struct GetPPDAttribs
++{
++    const char* (*pFunction)(const char*);
++    osl::Condition		m_aCondition;
++    const char*			m_pParameter;
++    const char*			m_pResult;
++    oslThread			m_aThread;
++} *pAttribs = NULL;
++
++extern "C" {
++    static void getPPDWorker(void*)
++    {
++        pAttribs->m_pResult = pAttribs->pFunction( pAttribs->m_pParameter );
++        if( pAttribs->m_aCondition.check() )
++        {
++            // timed out, unlink file
++            if( pAttribs->m_pResult )
++                unlink( pAttribs->m_pResult );
++            delete pAttribs;
++            pAttribs = NULL;
++        }
++        else
++            pAttribs->m_aCondition.set();
++    }
++}
++
++const char* CUPSWrapper::cupsGetPPD( const char* pPrinter )
++{
++    const char* pResult = NULL;
++
++    // if one thread hangs in cupsGetPPD already, don't start another
++    if( ! pAttribs )
++    {
++        pAttribs = new GetPPDAttribs();
++        pAttribs->pFunction			= m_pcupsGetPPD;
++        pAttribs->m_aCondition.reset();
++        pAttribs->m_pParameter		= pPrinter;
++        pAttribs->m_pResult			= NULL;
++        pAttribs->m_aThread			= osl_createThread( getPPDWorker, NULL );
++
++        TimeValue aValue;
++        aValue.Seconds = 5;
++        aValue.Nanosec = 0;
++        if( pAttribs->m_aCondition.wait( &aValue ) == Condition::result_ok )
++        {
++            osl_destroyThread( pAttribs->m_aThread );
++            pResult = pAttribs->m_pResult;
++            delete pAttribs;
++            pAttribs = NULL;
++        }
++        else
++        {
++#if OSL_DEBUG_LEVEL > 1
++            fprintf( stderr, "cupsGetPPD %s timed out\n", pPrinter );
++#endif
++            // should the thread awake again notify it to clean up itself
++            pAttribs->m_aCondition.set();
++            osl_destroyThread( pAttribs->m_aThread );
++        }
++    }
++
++    return pResult;
++}
++
+ static const char* setPasswordCallback( const char* pIn )
+ {
+     const char* pRet = NULL;
+@@ -276,66 +341,91 @@
+         // try to load CUPS
+         CUPSWrapper* pWrapper = new CUPSWrapper();
+         if( pWrapper->isValid() )
+-        {
+-            // check if there are any dests; if not
+-            // CUPS is unconfigured (at least) and
+-            // should not be used
+-            cups_dest_t* pDests = NULL;
+-            int nDests = pWrapper->cupsGetDests( &pDests );
+-            if( nDests && pDests )
+-                pManager = new CUPSManager( pWrapper, nDests, pDests );
+-#if OSL_DEBUG_LEVEL > 1
+-            else
+-                fprintf( stderr, "CUPS loaded but no dests -> CUPS disabled\n" );
+-#endif
+-        }
+-        // something failed, don't use CUPS
+-        if( ! pManager )
++            pManager = new CUPSManager( pWrapper );
++        else
+             delete pWrapper;
+     }
+ #endif
+     return pManager;
+ }
+ 
+-CUPSManager::CUPSManager( CUPSWrapper* pWrapper, int nDests, void* pDests ) :
++CUPSManager::CUPSManager( CUPSWrapper* pWrapper ) :
+         PrinterInfoManager( CUPS ),
+         m_pCUPSWrapper( pWrapper ),
+-        m_nDests( nDests ),
+-        m_pDests( pDests )
++        m_nDests( 0 ),
++        m_pDests( NULL ),
++        m_bNewDests( false )
+ {
+-        m_bFirstDest = (nDests && pDests);
++    m_aDestThread = osl_createThread( runDestThread, this );
+ }
+ 
+ CUPSManager::~CUPSManager()
+ {
++    if( m_aDestThread )
++    {
++        // if the thread is still running here, then
++        // cupsGetDests is hung; terminate the thread instead of joining
++        osl_terminateThread( m_aDestThread );
++        osl_destroyThread( m_aDestThread );
++    }
++
+     if( m_nDests && m_pDests )
+         m_pCUPSWrapper->cupsFreeDests( m_nDests, (cups_dest_t*)m_pDests );
+     delete m_pCUPSWrapper;
+ }
+ 
++void CUPSManager::runDestThread( void* pThis )
++{
++    ((CUPSManager*)pThis)->runDests();
++}
++
++void CUPSManager::runDests()
++{
++#if OSL_DEBUG_LEVEL > 1
++    fprintf( stderr, "starting cupsGetDests\n" );
++#endif
++    osl::MutexGuard aGuard( m_aCUPSMutex );
++
++    m_nDests = m_pCUPSWrapper->cupsGetDests( (cups_dest_t**)&m_pDests );
++    m_bNewDests = true;
++#if OSL_DEBUG_LEVEL > 1
++    fprintf( stderr, "finished cupsGetDests\n" );
++#endif
++}
++
+ void CUPSManager::initialize()
+ {
++    // get normal printers, clear printer list
++    PrinterInfoManager::initialize();
++
+ #ifdef ENABLE_CUPS
+-    // there may have been a previous run
+-    if( m_nDests && m_pDests && !m_bFirstDest )
+-        m_pCUPSWrapper->cupsFreeDests( m_nDests, (cups_dest_t*)m_pDests );
+-    m_aPrinters.clear();
++    // check whether thread has completed
++    // if not behave like old printing system
++    osl::MutexGuard aGuard( m_aCUPSMutex );
++
++    if( ! (m_nDests && m_pDests ) )
++        return;
++
++    // dest thread has run, clean up
++    if( m_aDestThread )
++    {
++        osl_joinWithThread( m_aDestThread );
++        osl_destroyThread( m_aDestThread );
++        m_aDestThread = NULL;
++    }
++
++    // clear old stuff
+     m_aCUPSDestMap.clear();
+ 
+-    // get normal printers
+-    PrinterInfoManager::initialize();
++#if 0
++    // update dests
++    m_pCUPSWrapper->cupsFreeDests( m_nDests, (cups_dest_t*)m_pDests );
++    m_nDests = m_pCUPSWrapper->cupsGetDests( (cups_dest_t**)&m_pDests );
++#endif
++    m_bNewDests = false;
+ 
+     rtl_TextEncoding aEncoding = osl_getThreadTextEncoding();
+-    int nPrinter = 0;
+-
+-    // get CUPS dests if this is not the first run after the constructor
+-    // in which case m_pDests was already intialized
+-    if( m_bFirstDest && m_nDests && m_pDests )
+-        nPrinter = m_nDests;
+-    else
+-        m_nDests = nPrinter = m_pCUPSWrapper->cupsGetDests( (cups_dest_t**)&m_pDests );
+-    
+-    m_bFirstDest = false;
++    int nPrinter = m_nDests;
+ 
+     // add CUPS printers, should there be a printer
+     // with the same name as a CUPS printer, overwrite it
+@@ -464,53 +554,60 @@
+         aPrinter = rPrinter;
+ 
+ #ifdef ENABLE_CUPS
+-    std::hash_map< OUString, int, OUStringHash >::iterator dest_it =
+-        m_aCUPSDestMap.find( aPrinter );
+-    if( dest_it != m_aCUPSDestMap.end() )
++    if( m_aCUPSMutex.tryToAcquire() && m_nDests && m_pDests )
+     {
+-        cups_dest_t* pDest = ((cups_dest_t*)m_pDests) + dest_it->second;
+-        const char* pPPDFile = m_pCUPSWrapper->cupsGetPPD( pDest->name );
++        std::hash_map< OUString, int, OUStringHash >::iterator dest_it =
++            m_aCUPSDestMap.find( aPrinter );
++        if( dest_it != m_aCUPSDestMap.end() )
++        {
++            cups_dest_t* pDest = ((cups_dest_t*)m_pDests) + dest_it->second;
++            const char* pPPDFile = m_pCUPSWrapper->cupsGetPPD( pDest->name );
+ #if OSL_DEBUG_LEVEL > 1
+-        fprintf( stderr, "PPD for %s is %s\n", OUStringToOString( aPrinter, osl_getThreadTextEncoding() ).getStr(), pPPDFile );
++            fprintf( stderr, "PPD for %s is %s\n", OUStringToOString( aPrinter, osl_getThreadTextEncoding() ).getStr(), pPPDFile );
+ #endif
+-        if( pPPDFile )
+-        {
+-            rtl_TextEncoding aEncoding = osl_getThreadTextEncoding();
+-            OUString aFileName( OStringToOUString( pPPDFile, aEncoding ) );
+-            // create the new parser
+-            pNewParser = new PPDParser( aFileName );
+-
+-            // update the printer info with context information
+-            ppd_file_t* pPPD = m_pCUPSWrapper->ppdOpenFile( pPPDFile );
+-            /*int nConflicts =*/ m_pCUPSWrapper->cupsMarkOptions( pPPD, pDest->num_options, pDest->options );
+-#if OSL_DEBUG_LEVEL > 1
+-            fprintf( stderr, "processing the following options for printer %s (instance %s):\n",
+-                     pDest->name, pDest->instance );
+-            for( int k = 0; k < pDest->num_options; k++ )
+-                fprintf( stderr, "   \"%s\" = \"%s\"\n",
+-                         pDest->options[k].name,
+-                         pDest->options[k].value );
+-#endif
+-            PrinterInfo& rInfo = m_aPrinters[ aPrinter ].m_aInfo;
+-
+-            rInfo.m_pParser = pNewParser;
+-            rInfo.m_aContext.setParser( pNewParser );
+-            for( int i = 0; i < pPPD->num_groups; i++ )
+-                updatePrinterContextInfo( pPPD->groups + i, rInfo );
++            if( pPPDFile )
++            {
++                rtl_TextEncoding aEncoding = osl_getThreadTextEncoding();
++                OUString aFileName( OStringToOUString( pPPDFile, aEncoding ) );
++                // create the new parser
++                PPDParser* pCUPSParser =  new PPDParser( aFileName );
++                pCUPSParser->m_aFile = rPrinter;
++                pNewParser = pCUPSParser;
++
++                // update the printer info with context information
++                ppd_file_t* pPPD = m_pCUPSWrapper->ppdOpenFile( pPPDFile );
++                /*int nConflicts =*/ m_pCUPSWrapper->cupsMarkOptions( pPPD, pDest->num_options, pDest->options );
++#if OSL_DEBUG_LEVEL > 1
++                fprintf( stderr, "processing the following options for printer %s (instance %s):\n",
++                         pDest->name, pDest->instance );
++                for( int k = 0; k < pDest->num_options; k++ )
++                    fprintf( stderr, "   \"%s\" = \"%s\"\n",
++                             pDest->options[k].name,
++                             pDest->options[k].value );
++#endif
++                PrinterInfo& rInfo = m_aPrinters[ aPrinter ].m_aInfo;
++
++                rInfo.m_pParser = pNewParser;
++                rInfo.m_aContext.setParser( pNewParser );
++                for( int i = 0; i < pPPD->num_groups; i++ )
++                    updatePrinterContextInfo( pPPD->groups + i, rInfo );
+ 
+-            // clean up the mess
+-            m_pCUPSWrapper->ppdClose( pPPD );
++                // clean up the mess
++                m_pCUPSWrapper->ppdClose( pPPD );
+ 
+-            // remove temporary PPD file
+-            unlink( pPPDFile );
+-        }
++                // remove temporary PPD file
++                unlink( pPPDFile );
++            }
+ #if OSL_DEBUG_LEVEL > 1
+-        else
+-            fprintf( stderr, "no dest found for printer %s\n", OUStringToOString( aPrinter, osl_getThreadTextEncoding() ).getStr() );
++            else
++                fprintf( stderr, "no dest found for printer %s\n", OUStringToOString( aPrinter, osl_getThreadTextEncoding() ).getStr() );
+ #endif
++        }
++        m_aCUPSMutex.release();
+     }
+-    if( ! pNewParser )
+ #endif // ENABLE_CUPS
++
++    if( ! pNewParser )
+     {
+         // get the default PPD
+         pNewParser = PPDParser::getParser( String( RTL_CONSTASCII_USTRINGPARAM( "SGENPRT" ) ) );
+@@ -583,6 +680,8 @@
+         fclose( pFile );
+         rtl_TextEncoding aEnc = osl_getThreadTextEncoding();
+ 
++        osl::MutexGuard aGuard( m_aCUPSMutex );
++
+         std::hash_map< OUString, int, OUStringHash >::iterator dest_it =
+             m_aCUPSDestMap.find( rPrintername );
+         if( dest_it != m_aCUPSDestMap.end() )
+@@ -625,7 +724,18 @@
+ 
+ bool CUPSManager::checkPrintersChanged()
+ {
+-    return PrinterInfoManager::checkPrintersChanged();
++    bool bChanged = false;
++    if( m_aCUPSMutex.tryToAcquire() )
++    {
++        bChanged = m_bNewDests;
++        m_aCUPSMutex.release();
++        initialize();
++    }
++
++    if( ! bChanged )
++        bChanged = PrinterInfoManager::checkPrintersChanged();
++
++    return bChanged;
+ }
+ 
+ bool CUPSManager::addPrinter( const OUString& rName, const OUString& rDriver )
+@@ -648,23 +758,23 @@
+ 
+ bool CUPSManager::setDefaultPrinter( const OUString& rName )
+ {
++    bool bSuccess = false;
+ #ifdef ENABLE_CUPS
+     std::hash_map< OUString, int, OUStringHash >::iterator nit =
+         m_aCUPSDestMap.find( rName );
+-    if( nit == m_aCUPSDestMap.end() )
+-        return false;
+-
+-    cups_dest_t* pDests = (cups_dest_t*)m_pDests;
+-    for( int i = 0; i < m_nDests; i++ )
+-        pDests[i].is_default = 0;
+-    pDests[ nit->second ].is_default = 1;
+-    m_pCUPSWrapper->cupsSetDests( m_nDests, (cups_dest_t*)m_pDests );
+-    m_aDefaultPrinter = rName;
+-
+-    return true;
+-#else
+-    return false;
++    if( nit != m_aCUPSDestMap.end() && m_aCUPSMutex.tryToAcquire() )
++    {
++        cups_dest_t* pDests = (cups_dest_t*)m_pDests;
++        for( int i = 0; i < m_nDests; i++ )
++            pDests[i].is_default = 0;
++        pDests[ nit->second ].is_default = 1;
++        m_pCUPSWrapper->cupsSetDests( m_nDests, (cups_dest_t*)m_pDests );
++        m_aDefaultPrinter = rName;
++        m_aCUPSMutex.release();
++        bSuccess = true;
++    }
+ #endif
++    return bSuccess;
+ }
+ 
+ bool CUPSManager::writePrinterConfig()
+@@ -684,32 +794,39 @@
+         if( ! prt->second.m_bModified )
+             continue;
+ 
+-        bDestModified = true;
+-        cups_dest_t* pDest = ((cups_dest_t*)m_pDests) + nit->second;
+-        PrinterInfo& rInfo = prt->second.m_aInfo;
+-
+-        // create new option list
+-        int nNewOptions = 0;
+-        cups_option_t* pNewOptions = NULL; 
+-        int nValues = rInfo.m_aContext.countValuesModified();
+-        for( int i = 0; i < nValues; i++ )
++        if( m_aCUPSMutex.tryToAcquire() )
+         {
+-            const PPDKey* pKey = rInfo.m_aContext.getModifiedKey( i );
+-            const PPDValue* pValue = rInfo.m_aContext.getValue( pKey );
+-            if( pKey && pValue ) // sanity check
++            bDestModified = true;
++            cups_dest_t* pDest = ((cups_dest_t*)m_pDests) + nit->second;
++            PrinterInfo& rInfo = prt->second.m_aInfo;
++
++            // create new option list
++            int nNewOptions = 0;
++            cups_option_t* pNewOptions = NULL; 
++            int nValues = rInfo.m_aContext.countValuesModified();
++            for( int i = 0; i < nValues; i++ )
+             {
+-                OString aName = OUStringToOString( pKey->getKey(), aEncoding );
+-                OString aValue = OUStringToOString( pValue->m_aOption, aEncoding );
+-                nNewOptions = m_pCUPSWrapper->cupsAddOption( aName.getStr(), aValue.getStr(), nNewOptions, &pNewOptions );
++                const PPDKey* pKey = rInfo.m_aContext.getModifiedKey( i );
++                const PPDValue* pValue = rInfo.m_aContext.getValue( pKey );
++                if( pKey && pValue ) // sanity check
++                {
++                    OString aName = OUStringToOString( pKey->getKey(), aEncoding );
++                    OString aValue = OUStringToOString( pValue->m_aOption, aEncoding );
++                    nNewOptions = m_pCUPSWrapper->cupsAddOption( aName.getStr(), aValue.getStr(), nNewOptions, &pNewOptions );
++                }
+             }
++            // set PPD options on CUPS dest
++            m_pCUPSWrapper->cupsFreeOptions( pDest->num_options, pDest->options );
++            pDest->num_options = nNewOptions;
++            pDest->options = pNewOptions;
++            m_aCUPSMutex.release();
+         }
+-        // set PPD options on CUPS dest
+-        m_pCUPSWrapper->cupsFreeOptions( pDest->num_options, pDest->options );
+-        pDest->num_options = nNewOptions;
+-        pDest->options = pNewOptions;
+     }
+-    if( bDestModified )
++    if( bDestModified && m_aCUPSMutex.tryToAcquire() )
++    {
+         m_pCUPSWrapper->cupsSetDests( m_nDests, (cups_dest_t*)m_pDests );
++        m_aCUPSMutex.release();
++    }
+ #endif // ENABLE_CUPS
+ 
+     return PrinterInfoManager::writePrinterConfig();
+@@ -731,6 +848,8 @@
+             (bool(*)(const OString&,OString&,OString&))osl_getSymbol( pLib, aSym.pData );
+         if( getpw )
+         {
++            osl::MutexGuard aGuard( m_aCUPSMutex );
++
+             OString aUser = m_pCUPSWrapper->cupsUser();
+             OString aServer = m_pCUPSWrapper->cupsServer();
+             OString aPassword;
