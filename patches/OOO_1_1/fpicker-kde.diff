@@ -1,0 +1,1418 @@
+--- /dev/null	2004-04-06 15:27:52.000000000 +0200
++++ fpicker/source/unx/kde/kdecommandthread.cxx	2004-06-21 17:38:20.886719904 +0200
+@@ -0,0 +1,207 @@
++/*************************************************************************
++ *
++ *  $RCSfile$
++ *
++ *  $Revision$ 
++ *
++ *  last change: $Author$ $Date$
++ *
++ *  The Contents of this file are made available subject to the terms of
++ *  either of the following licenses
++ *
++ *         - GNU Lesser General Public License Version 2.1
++ *         - Sun Industry Standards Source License Version 1.1
++ *
++ *  Sun Microsystems Inc., October, 2000
++ *
++ *  GNU Lesser General Public License Version 2.1
++ *  =============================================
++ *  Copyright 2000 by Sun Microsystems, Inc.
++ *  901 San Antonio Road, Palo Alto, CA 94303, USA
++ *
++ *  This library is free software; you can redistribute it and/or
++ *  modify it under the terms of the GNU Lesser General Public
++ *  License version 2.1, as published by the Free Software Foundation.
++ *
++ *  This library is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ *  Lesser General Public License for more details.
++ *
++ *  You should have received a copy of the GNU Lesser General Public
++ *  License along with this library; if not, write to the Free Software
++ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ *  MA  02111-1307  USA
++ *
++ *
++ *  Sun Industry Standards Source License Version 1.1
++ *  =================================================
++ *  The contents of this file are subject to the Sun Industry Standards
++ *  Source License Version 1.1 (the "License"); You may not use this file
++ *  except in compliance with the License. You may obtain a copy of the
++ *  License at http://www.openoffice.org/license.html.
++ *
++ *  Software provided under this License is provided on an "AS IS" basis,
++ *  WITHOUT WARRANTY OF ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING,
++ *  WITHOUT LIMITATION, WARRANTIES THAT THE SOFTWARE IS FREE OF DEFECTS,
++ *  MERCHANTABLE, FIT FOR A PARTICULAR PURPOSE, OR NON-INFRINGING.
++ *  See the License for the specific provisions governing your rights and
++ *  obligations concerning the Software.
++ *
++ *  The Initial Developer of the Original Code is: Sun Microsystems, Inc.
++ *
++ *  Copyright: 2000 by Sun Microsystems, Inc.
++ *
++ *  All Rights Reserved.
++ *
++ *  Contributor(s): Jan Holesovsky <kendy@openoffice.org>
++ *
++ *
++ ************************************************************************/
++
++#include <kdecommandthread.hxx>
++
++#include <qstringlist.h>
++
++#include <kapplication.h>
++
++#include <iostream>
++
++//////////////////////////////////////////////////////////////////////////
++// CommandEvent
++//////////////////////////////////////////////////////////////////////////
++
++CommandEvent::CommandEvent( const QString &qCommand, QStringList *pStringList )
++    : QCustomEvent( TypeId, pStringList ),
++      m_eCommand( Unknown )
++{
++    struct {
++        const char *pName;
++        CommandEventType eType;
++    } *pIdx, pMapping[] =
++    {
++        { "appendControl",     AppendControl },
++        { "enableControl",     EnableControl },
++        { "getValue",          GetValue },
++        { "setValue",          SetValue },
++        { "appendFilter",      AppendFilter },
++        { "appendFilterGroup", AppendFilterGroup },
++        { "getCurrentFilter",  GetCurrentFilter },
++        { "setCurrentFilter",  SetCurrentFilter },
++        { "getDirectory",      GetDirectory },
++        { "setDirectory",      SetDirectory },
++        { "getFiles",          GetFiles },
++        { "setTitle",          SetTitle },
++        { "setDefaultName",    SetDefaultName },
++        { "setMultiSelection", SetMultiSelection },
++        { "exec",              Exec },
++        { 0, Unknown }
++    };
++
++    for ( pIdx = pMapping; pIdx->pName && qCommand != pIdx->pName; ++pIdx )
++        ;
++
++    m_eCommand = pIdx->eType;
++}
++
++//////////////////////////////////////////////////////////////////////////
++// CommandThread
++//////////////////////////////////////////////////////////////////////////
++
++CommandThread::CommandThread( QWidget *pObject )
++    : m_pObject( pObject )
++{
++}
++
++CommandThread::~CommandThread()
++{
++}
++
++void CommandThread::run()
++{
++    QTextIStream qStream( stdin );
++    qStream.setEncoding( QTextStream::UnicodeUTF8 );
++
++    QString qLine;
++    bool bQuit = false;
++    while ( !bQuit && !qStream.atEnd() )
++    {
++        qLine = qStream.readLine();
++        handleCommand( qLine, bQuit );
++    }
++}
++
++void CommandThread::handleCommand( const QString &rString, bool &bQuit )
++{
++    QMutexLocker qMutexLocker( &m_aMutex );
++
++#if OSL_DEBUG_LEVEL > 0
++    ::std::cerr << "kdefilepicker received: " << rString.latin1() << ::std::endl;
++#endif
++
++    bQuit = false;
++    QStringList *pTokens = tokenize( rString );
++
++    if ( !pTokens )
++        return;
++    if ( pTokens->empty() )
++    {
++        delete pTokens, pTokens = NULL;
++        return;
++    }
++
++    QString qCommand = pTokens->front();
++    pTokens->pop_front();
++
++    if ( qCommand == "exit" )
++    {
++        bQuit = true;
++        kapp->exit();
++        kapp->wakeUpGuiThread();
++    }
++    else
++        kapp->postEvent( m_pObject, new CommandEvent( qCommand, pTokens ) );
++}
++
++QStringList* CommandThread::tokenize( const QString &rString )
++{
++    // Commands look like:
++    // command arg1 arg2 arg3 ...
++    // Args may be enclosed in '"', if they contain spaces.
++
++    QStringList *pList = new QStringList();
++
++    QString qBuffer;
++    qBuffer.reserve( 1024 );
++
++    const QChar *pUnicode = rString.unicode();
++    const QChar *pEnd     = pUnicode + rString.length();
++    bool bQuoted          = false;
++    
++    for ( ; pUnicode != pEnd; ++pUnicode )
++    {
++        if ( *pUnicode == '\\' )
++        {
++            ++pUnicode;
++            if ( pUnicode != pEnd )
++            {
++                if ( *pUnicode == 'n' )
++                    qBuffer.append( '\n' );
++                else
++                    qBuffer.append( *pUnicode );
++            }
++        }
++        else if ( *pUnicode == '"' )
++            bQuoted = !bQuoted;
++        else if ( *pUnicode == ' ' && !bQuoted )
++        {
++            pList->push_back( qBuffer );
++            qBuffer.setLength( 0 );
++        }
++        else
++            qBuffer.append( *pUnicode );
++    }
++    pList->push_back( qBuffer );
++    
++    return pList;
++}
+--- /dev/null	2004-04-06 15:27:52.000000000 +0200
++++ fpicker/source/unx/kde/kdecommandthread.hxx	2004-06-14 14:37:20.597310272 +0200
+@@ -0,0 +1,127 @@
++/*************************************************************************
++ *
++ *  $RCSfile$
++ *
++ *  $Revision$ 
++ *
++ *  last change: $Author$ $Date$
++ *
++ *  The Contents of this file are made available subject to the terms of
++ *  either of the following licenses
++ *
++ *         - GNU Lesser General Public License Version 2.1
++ *         - Sun Industry Standards Source License Version 1.1
++ *
++ *  Sun Microsystems Inc., October, 2000
++ *
++ *  GNU Lesser General Public License Version 2.1
++ *  =============================================
++ *  Copyright 2000 by Sun Microsystems, Inc.
++ *  901 San Antonio Road, Palo Alto, CA 94303, USA
++ *
++ *  This library is free software; you can redistribute it and/or
++ *  modify it under the terms of the GNU Lesser General Public
++ *  License version 2.1, as published by the Free Software Foundation.
++ *
++ *  This library is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ *  Lesser General Public License for more details.
++ *
++ *  You should have received a copy of the GNU Lesser General Public
++ *  License along with this library; if not, write to the Free Software
++ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ *  MA  02111-1307  USA
++ *
++ *
++ *  Sun Industry Standards Source License Version 1.1
++ *  =================================================
++ *  The contents of this file are subject to the Sun Industry Standards
++ *  Source License Version 1.1 (the "License"); You may not use this file
++ *  except in compliance with the License. You may obtain a copy of the
++ *  License at http://www.openoffice.org/license.html.
++ *
++ *  Software provided under this License is provided on an "AS IS" basis,
++ *  WITHOUT WARRANTY OF ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING,
++ *  WITHOUT LIMITATION, WARRANTIES THAT THE SOFTWARE IS FREE OF DEFECTS,
++ *  MERCHANTABLE, FIT FOR A PARTICULAR PURPOSE, OR NON-INFRINGING.
++ *  See the License for the specific provisions governing your rights and
++ *  obligations concerning the Software.
++ *
++ *  The Initial Developer of the Original Code is: Sun Microsystems, Inc.
++ *
++ *  Copyright: 2000 by Sun Microsystems, Inc.
++ *
++ *  All Rights Reserved.
++ *
++ *  Contributor(s): Jan Holesovsky <kendy@openoffice.org>
++ *
++ *
++ ************************************************************************/
++
++#ifndef _KDECOMMANDTHREAD_HXX_
++#define _KDECOMMANDTHREAD_HXX_
++
++#include <qevent.h>
++#include <qmutex.h>
++#include <qthread.h>
++
++class CommandEvent : public QCustomEvent
++{
++public:
++    enum CommandEventType {
++        Unknown = 0,
++        
++        AppendControl,
++        EnableControl,
++        GetValue,
++        SetValue,
++
++        AppendFilter,
++        AppendFilterGroup,
++        UpdateFilters,
++        GetCurrentFilter,
++        SetCurrentFilter,
++
++        GetDirectory,
++        SetDirectory,
++        
++        GetFiles,
++
++        SetTitle,
++        SetDefaultName,
++        SetMultiSelection,
++
++        Exec
++    };
++    static const QEvent::Type   TypeId = (QEvent::Type) ( (int) QEvent::User + 42 /*random magic value*/ );
++    
++protected:
++    CommandEventType            m_eCommand;
++
++public:
++    CommandEvent( const QString &qCommand, QStringList *pStringList );
++
++    CommandEventType            command() const { return m_eCommand; }
++    QStringList*                stringList() { return static_cast< QStringList* >( data() ); }
++};
++
++class CommandThread : public QThread
++{
++protected:
++    QObject                    *m_pObject;
++
++    QMutex                      m_aMutex;
++
++public:
++    CommandThread( QWidget *pObject );
++    virtual ~CommandThread();
++
++    virtual void                run();
++
++protected:
++    void                        handleCommand( const QString &rString, bool &bQuit );
++    QStringList*                tokenize( const QString &rString );
++};
++
++#endif // _KDECOMMANDTHREAD_HXX_
+--- /dev/null	2004-04-06 15:27:52.000000000 +0200
++++ fpicker/source/unx/kde/kdefilepicker.cxx	2004-06-21 17:37:51.360208616 +0200
+@@ -0,0 +1,548 @@
++/*************************************************************************
++ *
++ *  $RCSfile$
++ *
++ *  $Revision$ 
++ *
++ *  last change: $Author$ $Date$
++ *
++ *  The Contents of this file are made available subject to the terms of
++ *  either of the following licenses
++ *
++ *         - GNU Lesser General Public License Version 2.1
++ *         - Sun Industry Standards Source License Version 1.1
++ *
++ *  Sun Microsystems Inc., October, 2000
++ *
++ *  GNU Lesser General Public License Version 2.1
++ *  =============================================
++ *  Copyright 2000 by Sun Microsystems, Inc.
++ *  901 San Antonio Road, Palo Alto, CA 94303, USA
++ *
++ *  This library is free software; you can redistribute it and/or
++ *  modify it under the terms of the GNU Lesser General Public
++ *  License version 2.1, as published by the Free Software Foundation.
++ *
++ *  This library is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ *  Lesser General Public License for more details.
++ *
++ *  You should have received a copy of the GNU Lesser General Public
++ *  License along with this library; if not, write to the Free Software
++ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ *  MA  02111-1307  USA
++ *
++ *
++ *  Sun Industry Standards Source License Version 1.1
++ *  =================================================
++ *  The contents of this file are subject to the Sun Industry Standards
++ *  Source License Version 1.1 (the "License"); You may not use this file
++ *  except in compliance with the License. You may obtain a copy of the
++ *  License at http://www.openoffice.org/license.html.
++ *
++ *  Software provided under this License is provided on an "AS IS" basis,
++ *  WITHOUT WARRANTY OF ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING,
++ *  WITHOUT LIMITATION, WARRANTIES THAT THE SOFTWARE IS FREE OF DEFECTS,
++ *  MERCHANTABLE, FIT FOR A PARTICULAR PURPOSE, OR NON-INFRINGING.
++ *  See the License for the specific provisions governing your rights and
++ *  obligations concerning the Software.
++ *
++ *  The Initial Developer of the Original Code is: Sun Microsystems, Inc.
++ *
++ *  Copyright: 2000 by Sun Microsystems, Inc.
++ *
++ *  All Rights Reserved.
++ *
++ *  Contributor(s): Jan Holesovsky <kendy@openoffice.org>
++ *
++ *
++ ************************************************************************/
++
++#include <kdecommandthread.hxx>
++#include <kdefilepicker.hxx>
++
++#include <qcheckbox.h>
++#include <qcombobox.h>
++#include <qgrid.h>
++#include <qhbox.h>
++#include <qlabel.h>
++#include <qlayout.h>
++#include <qobjectlist.h>
++#include <qpushbutton.h>
++#include <qvbox.h>
++
++#include <kdiroperator.h>
++#include <kfiledialog.h>
++#include <kfilefiltercombo.h>
++
++#include <iostream>
++
++//////////////////////////////////////////////////////////////////////////
++// FileDialog
++//////////////////////////////////////////////////////////////////////////
++
++FileDialog::FileDialog( const QString &startDir, const QString &filter,
++        QWidget *parent, const char *name )
++    : KFileDialog( startDir, filter, parent, name, true, m_pCustomWidget = new QVBox() ),
++      m_pCombosAndButtons( new QHBox( m_pCustomWidget ) ),
++      m_pLabels( new QVBox( m_pCombosAndButtons ) ),
++      m_pComboBoxes( new QVBox( m_pCombosAndButtons ) ),
++      m_pPushButtons( new QVBox( m_pCombosAndButtons ) ),
++      m_pCheckBoxes( new QGrid( 2, m_pCustomWidget ) )
++{
++    connect( this, SIGNAL( okClicked() ),
++             this, SLOT( acceptCommand() ) );
++
++    connect( this, SIGNAL( cancelClicked() ),
++             this, SLOT( rejectCommand() ) );
++
++    connect( this, SIGNAL( closeClicked() ),
++             this, SLOT( rejectCommand() ) );
++
++    connect( this, SIGNAL( fileHighlighted( const QString & ) ),
++             this, SLOT( fileHighlightedCommand( const QString & ) ) );
++
++    connect( this, SIGNAL( selectionChanged() ),
++             this, SLOT( selectionChangedCommand() ) );
++
++    m_pCustomWidget->setSpacing( KDialog::spacingHint() );
++    m_pCombosAndButtons->setSpacing( KDialog::spacingHint() );
++
++    updateCustomWidgetLayout();
++}
++
++FileDialog::~FileDialog()
++{
++}
++
++void FileDialog::resizeEvent( QResizeEvent *pEvent )
++{
++    KFileDialog::resizeEvent( pEvent );
++
++    updateCustomWidgetLayout();
++}
++
++void FileDialog::showEvent( QShowEvent *pEvent )
++{
++    KFileDialog::showEvent( pEvent );
++
++    updateCustomWidgetLayout();
++}
++
++void FileDialog::updateCustomWidgetLayout()
++{
++    QPoint qReferencePoint = filterWidget->mapTo( this, QPoint( 0, 0 ) );
++    QPoint qCustomPoint = m_pCustomWidget->mapTo( this, QPoint( 0, 0 ) );
++
++    int nLeft = qReferencePoint.x() - qCustomPoint.x();
++    int nRight = m_pCustomWidget->width() - filterWidget->width() - nLeft;
++    
++    nLeft -= KDialog::spacingHint();
++    nRight -= KDialog::spacingHint();
++    m_pLabels->setFixedWidth( ( nLeft > 0 )? nLeft: 80 );
++    // FIXME The following call sets the width of m_pPushButtons all right,
++    // but it also increases the width of m_pComboBoxes rapidly. Can we do
++    // anything about it?
++    m_pPushButtons->setFixedWidth( ( nRight > 0 )? nRight: 100 );
++}
++
++void FileDialog::customEvent( QCustomEvent *pEvent )
++{
++    if ( pEvent && pEvent->type() == CommandEvent::TypeId )
++    {
++        CommandEvent *pCommandEvent = static_cast< CommandEvent* >( pEvent );
++        QStringList *pStringList = pCommandEvent->stringList();
++
++        int nListSize = -1;
++        if ( pStringList )
++            nListSize = pStringList->size();
++
++        switch ( pCommandEvent->command() )
++        {
++            case CommandEvent::AppendControl:
++                if ( nListSize >= 3 )
++                {
++                    appendControl( (*pStringList)[0], (*pStringList)[1], (*pStringList)[2] );
++                }
++                break;
++            case CommandEvent::EnableControl:
++                if ( nListSize >= 2 )
++                {
++                    enableControl( (*pStringList)[0], (*pStringList)[1] );
++                }
++                break;
++            case CommandEvent::GetValue:
++                if ( nListSize >= 2 )
++                {
++                    getValue( (*pStringList)[0], (*pStringList)[1] );
++                }
++                break;
++            case CommandEvent::SetValue:
++                if ( nListSize >= 2 )
++                {
++                    QStringList qStringList = (*pStringList);
++                    qStringList.pop_front();
++                    qStringList.pop_front();
++
++                    setValue( (*pStringList)[0], (*pStringList)[1], qStringList );
++                }
++                break;
++            case CommandEvent::AppendFilter:
++                if ( nListSize >= 2 )
++                {
++                    appendFilter( (*pStringList)[0], (*pStringList)[1] );
++
++                    // update the filters widget
++                    setFilter( filters() );
++                }
++                break;
++            case CommandEvent::AppendFilterGroup:
++                if ( nListSize >= 1 )
++                {
++                    QStringList::const_iterator it = pStringList->begin();
++                    ++it; // We ignore the filter group name
++
++                    while ( it != pStringList->end() )
++                    {
++                        QString qTitle = *it;
++                        ++it;
++                        if ( it != pStringList->end() )
++                        {
++                            appendFilter( qTitle, (*it) );
++                            ++it;
++                        }
++                    }
++
++                    // update the filters widget
++                    setFilter( filters() );
++                }
++                break;
++            case CommandEvent::GetCurrentFilter:
++                {
++                    QString qCurrentFilter = filterWidget->currentText();
++                    sendCommand( "currentFilter " + escapeString( qCurrentFilter ) );
++                }
++                break;
++            case CommandEvent::SetCurrentFilter:
++                if ( nListSize >= 1 )
++                {
++                    filterWidget->setCurrentItem( pStringList->front() );
++                    // FIXME notify that the filter changed (otherwise the old
++                    // is still used)
++                }
++            case CommandEvent::GetDirectory:
++                {
++                    QString qDirectory = baseURL().url();
++                    sendCommand( "currentDirectory " + escapeString( qDirectory ) );
++                }
++                break;
++            case CommandEvent::SetDirectory:
++                if ( nListSize >= 1 )
++                {
++                    setURL( pStringList->front() );
++                }
++                break;
++            case CommandEvent::GetFiles:
++                {
++                    QString qString;
++                    qString.reserve( 1024 );
++
++                    qString.append( "files" );
++
++                    if ( result() == QDialog::Accepted )
++                    {
++                        KURL::List qList( selectedURLs() );
++                        for ( KURL::List::const_iterator it = qList.begin(); it != qList.end(); ++it )
++                        {
++                            qString.append( " " );
++                            appendEscaped( qString, (*it).url() );
++                        }
++                    }
++                    else
++                    {
++                        // we have to return the selected files anyway
++                        const KFileItemList *pItems = ops->selectedItems();
++                        for ( KFileItemListIterator it( *pItems ); it.current(); ++it )
++                        {
++                            qString.append( " " );
++                            appendEscaped( qString, (*it)->url().url() );
++                        }
++                    }
++
++                    sendCommand( qString );
++                }
++                break;
++            case CommandEvent::SetTitle:
++                if ( nListSize >= 1 )
++                {
++                    setCaption( pStringList->front() );
++                }
++                break;
++            case CommandEvent::SetDefaultName:
++                if ( nListSize >= 1 )
++                {
++                    setSelection( pStringList->front() );
++                }
++                break;
++            case CommandEvent::SetMultiSelection:
++                if ( nListSize >= 1 )
++                {
++                    if ( pStringList->front() == "true" )
++                        setMode( KFile::Files );
++                    else
++                        setMode( KFile::File );
++                }   
++                break;
++            case CommandEvent::Exec:
++                {
++                    filterWidget->setEditable( false );
++                    exec();
++                }
++                break;
++            default:
++                break;
++        }
++
++        // FIXME Some cleanup of pEvent? delete something, etc.?
++    }
++}
++
++void FileDialog::appendControl( const QString &rId, const QString &rType, const QString &rTitle )
++{
++    QString qLabel( rTitle );
++    qLabel.replace( '~', '&' );
++
++    if ( rType == "checkbox" )
++    {
++        QCheckBox *pCheckBox = new QCheckBox( qLabel, m_pCheckBoxes, rId.utf8() );
++
++        pCheckBox->setEnabled( true );
++        pCheckBox->setChecked( false );
++    }
++    else if ( rType == "listbox" )
++    {
++        QLabel *pComboLabel = new QLabel( qLabel, m_pLabels );
++        QComboBox *pComboBox = new QComboBox( m_pComboBoxes, rId.utf8() );
++
++        pComboLabel->setBuddy( pComboBox );
++        pComboBox->setEnabled( true );
++    }
++    else if ( rType == "pushbutton" )
++    {
++        QPushButton *pPushButton = new QPushButton( qLabel, m_pPushButtons, rId.utf8() );
++        pPushButton->setEnabled( true );
++    }
++}
++
++QWidget* FileDialog::findControl( const QString &rId ) const
++{
++    QObjectList *pList = m_pCustomWidget->queryList();
++    QCString qName( rId.utf8() );
++    QObjectList::const_iterator it = pList->begin();
++    
++    for ( ; it != pList->end() && qName != (*it)->name(); ++it )
++        ;
++
++    QWidget *pWidget = NULL;
++    if ( it != pList->end() )
++        pWidget = static_cast< QWidget* >( *it );
++    
++    delete pList;
++
++    return pWidget;
++}
++
++void FileDialog::enableControl( const QString &rId, const QString &rValue )
++{
++    QWidget *pWidget = findControl( rId );
++
++    if ( pWidget )
++        pWidget->setEnabled( rValue.lower() == "true" );
++}
++
++void FileDialog::getValue( const QString &rId, const QString &rAction )
++{
++    QWidget *pWidget = findControl( rId );
++    QString qString;
++    qString.reserve( 1024 );
++    qString.append( "value" );
++
++    if ( pWidget )
++    {
++        QCString qClassName = pWidget->className();
++        if ( qClassName == "QCheckBox" )
++        {
++            QCheckBox *pCheckBox = static_cast< QCheckBox* >( pWidget );
++
++            if ( pCheckBox->isChecked() )
++                qString.append( " bool true" );
++            else
++                qString.append( " bool false" );
++        }
++        else if ( qClassName == "QComboBox" )
++        {
++            QComboBox *pComboBox = static_cast< QComboBox* >( pWidget );
++            if ( rAction == "getItems" )
++            {
++                qString.append( " stringList" );
++                for ( int nIdx = 0; nIdx < pComboBox->count(); ++nIdx )
++                {
++                    qString.append( ' ' );
++                    appendEscaped( qString, pComboBox->text( nIdx ) );
++                }
++            }
++            else if ( rAction == "getSelectedItem" )
++            {
++                qString.append( " string " );
++                appendEscaped( qString, pComboBox->currentText() );
++            }
++            else if ( rAction == "getSelectedItemIndex" )
++            {
++                qString.append( " int " );
++                qString.append( QString().setNum( pComboBox->currentItem() ) );
++            }
++            // TODO getHelpURL
++        }
++        // TODO push button
++    }
++
++    sendCommand( qString );
++}
++
++void FileDialog::setValue( const QString &rId, const QString &rAction, const QStringList &rValue )
++{
++    QWidget *pWidget = findControl( rId );
++
++    if ( pWidget )
++    {
++        QCString qClassName = pWidget->className();
++        if ( qClassName == "QCheckBox" )
++        {
++            QCheckBox *pCheckBox = static_cast< QCheckBox* >( pWidget );
++
++            bool bValue = ( !rValue.isEmpty() ) && ( rValue.front().lower() == "true" );
++            pCheckBox->setChecked( bValue );
++        }
++        else if ( qClassName == "QComboBox" )
++        {
++            QComboBox *pComboBox = static_cast< QComboBox* >( pWidget );
++            if ( rAction == "addItem" )
++            {
++                if ( !rValue.isEmpty() )
++                    pComboBox->insertItem( rValue.front() );
++            }
++            else if ( rAction == "addItems" )
++            {
++                pComboBox->insertStringList( rValue );
++            }
++            else if ( rAction == "deleteItem" )
++            {
++                if ( !rValue.isEmpty() )
++                    pComboBox->removeItem( rValue.front().toInt() );
++            }
++            else if ( rAction == "deleteItems" )
++            {
++                pComboBox->clear();
++            }
++            else if ( rAction == "setSelectedItem" )
++            {
++                if ( !rValue.isEmpty() )
++                    pComboBox->setCurrentItem( rValue.front().toInt() );
++            }
++            // FIXME setHelpURL is ignored
++        }
++        // TODO push button
++    }
++}
++
++void FileDialog::appendFilter( const QString &rTitle, const QString &rFilter )
++{
++    // Filters are separated by ';'
++    QString qFilter( rFilter );
++    qFilter.replace( QChar( ';' ), QChar( ' ' ) );
++
++    m_aFilters.push_back( qMakePair( rTitle, qFilter ) );
++}
++
++QString FileDialog::filters() const
++{
++    QString qString, qTmp;
++    bool bFirstFilter = true;
++    
++    for ( FilterList::const_iterator it = m_aFilters.begin(); it != m_aFilters.end(); ++it )
++    {
++        if ( bFirstFilter )
++            bFirstFilter = false;
++        else
++            qString.append( '\n' );
++        
++        qString.append( (*it).second );
++        qString.append( '|' );
++        
++        qTmp = (*it).first;
++        qString.append( qTmp.replace( '/', "\\/" ) );
++    }
++
++    return qString;
++}
++
++void FileDialog::acceptCommand()
++{
++    sendCommand( "accept" );
++}
++
++void FileDialog::rejectCommand()
++{
++    sendCommand( "reject" );
++}
++
++void FileDialog::fileHighlightedCommand( const QString & )
++{
++    sendCommand( "fileSelectionChanged" );
++}
++
++void FileDialog::selectionChangedCommand()
++{
++    sendCommand( "fileSelectionChanged" );
++}
++
++void FileDialog::sendCommand( const QString &rCommand )
++{
++#if OSL_DEBUG_LEVEL > 0
++    ::std::cerr << "kdefilepicker sent: " << rCommand.latin1() << ::std::endl;
++#endif
++
++    //m_aOutputStream << rCommand << endl;
++    ::std::cout << rCommand.utf8() << ::std::endl;
++}
++
++void FileDialog::appendEscaped( QString &rBuffer, const QString &rString )
++{
++    const QChar *pUnicode = rString.unicode();
++    const QChar *pEnd     = pUnicode + rString.length();
++
++    rBuffer.append( '"' );
++    for ( ; pUnicode != pEnd; ++pUnicode )
++    {
++        if ( *pUnicode == '\\' )
++            rBuffer.append( "\\\\" );
++        else if ( *pUnicode == '"' )
++            rBuffer.append( "\\\"" );
++        else if ( *pUnicode == '\n' )
++            rBuffer.append( "\\\n" );
++        else
++            rBuffer.append( *pUnicode );
++    }
++    rBuffer.append( '"' );
++}
++
++QString FileDialog::escapeString( const QString &rString )
++{
++    QString qString;
++    qString.reserve( 2*rString.length() + 2 ); // every char escaped + quotes
++
++    appendEscaped( qString, rString );
++
++    return qString;
++}
+--- /dev/null	2004-04-06 15:27:52.000000000 +0200
++++ fpicker/source/unx/kde/kdefilepicker.hxx	2004-06-11 14:03:03.937359576 +0200
+@@ -0,0 +1,125 @@
++/*************************************************************************
++ *
++ *  $RCSfile$
++ *
++ *  $Revision$ 
++ *
++ *  last change: $Author$ $Date$
++ *
++ *  The Contents of this file are made available subject to the terms of
++ *  either of the following licenses
++ *
++ *         - GNU Lesser General Public License Version 2.1
++ *         - Sun Industry Standards Source License Version 1.1
++ *
++ *  Sun Microsystems Inc., October, 2000
++ *
++ *  GNU Lesser General Public License Version 2.1
++ *  =============================================
++ *  Copyright 2000 by Sun Microsystems, Inc.
++ *  901 San Antonio Road, Palo Alto, CA 94303, USA
++ *
++ *  This library is free software; you can redistribute it and/or
++ *  modify it under the terms of the GNU Lesser General Public
++ *  License version 2.1, as published by the Free Software Foundation.
++ *
++ *  This library is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ *  Lesser General Public License for more details.
++ *
++ *  You should have received a copy of the GNU Lesser General Public
++ *  License along with this library; if not, write to the Free Software
++ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ *  MA  02111-1307  USA
++ *
++ *
++ *  Sun Industry Standards Source License Version 1.1
++ *  =================================================
++ *  The contents of this file are subject to the Sun Industry Standards
++ *  Source License Version 1.1 (the "License"); You may not use this file
++ *  except in compliance with the License. You may obtain a copy of the
++ *  License at http://www.openoffice.org/license.html.
++ *
++ *  Software provided under this License is provided on an "AS IS" basis,
++ *  WITHOUT WARRANTY OF ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING,
++ *  WITHOUT LIMITATION, WARRANTIES THAT THE SOFTWARE IS FREE OF DEFECTS,
++ *  MERCHANTABLE, FIT FOR A PARTICULAR PURPOSE, OR NON-INFRINGING.
++ *  See the License for the specific provisions governing your rights and
++ *  obligations concerning the Software.
++ *
++ *  The Initial Developer of the Original Code is: Sun Microsystems, Inc.
++ *
++ *  Copyright: 2000 by Sun Microsystems, Inc.
++ *
++ *  All Rights Reserved.
++ *
++ *  Contributor(s): Jan Holesovsky <kendy@openoffice.org>
++ *
++ *
++ ************************************************************************/
++
++#ifndef _KDEFILEPICKER_HXX_
++#define _KDEFILEPICKER_HXX_
++
++#include <kfiledialog.h>
++
++class QGrid;
++class QHBox;
++class QVBox;
++
++class FileDialog : public KFileDialog
++{
++    Q_OBJECT
++
++protected:
++    typedef QPair< QString, QString > FilterEntry;
++    typedef QValueList< FilterEntry > FilterList;
++    
++    QVBox                      *m_pCustomWidget;
++    QHBox                      *m_pCombosAndButtons;
++    
++    QVBox                      *m_pLabels;
++    QVBox                      *m_pComboBoxes;
++    QVBox                      *m_pPushButtons;
++
++    QGrid                      *m_pCheckBoxes;
++
++    FilterList                  m_aFilters;
++
++public:
++    FileDialog( const QString &startDir, const QString &filter,
++                QWidget *parent, const char *name );
++    virtual ~FileDialog();
++
++protected:
++    virtual void                resizeEvent( QResizeEvent *pEvent );
++    virtual void                showEvent( QShowEvent *pEvent );
++    void                        updateCustomWidgetLayout();
++
++    virtual void                customEvent( QCustomEvent *pEvent );
++
++protected:
++    void                        appendControl( const QString &rId, const QString &rType, const QString &rTitle );
++    QWidget*                    findControl( const QString &rId ) const;
++    void                        enableControl( const QString &rId, const QString &rValue );
++    void                        getValue( const QString &rId, const QString &rAction );
++    void                        setValue( const QString &rId, const QString &rAction, const QStringList &rValue );
++    
++    void                        appendFilter( const QString &rTitle, const QString &rFilter );
++    QString                     filters() const;
++
++protected slots:
++    void                        acceptCommand();
++    void                        rejectCommand();
++
++    void                        fileHighlightedCommand( const QString & );
++    void                        selectionChangedCommand();
++
++protected:
++    void                        sendCommand( const QString &rCommand );
++    void                        appendEscaped( QString &rBuffer, const QString &rString );
++    QString                     escapeString( const QString &rString );
++};
++
++#endif // _KDEFILEPICKER_HXX_
+--- /dev/null	2004-04-06 15:27:52.000000000 +0200
++++ fpicker/source/unx/kde/kdefpmain.cxx	2004-06-21 17:40:44.786843760 +0200
+@@ -0,0 +1,105 @@
++/*************************************************************************
++ *
++ *  $RCSfile$
++ *
++ *  $Revision$ 
++ *
++ *  last change: $Author$ $Date$
++ *
++ *  The Contents of this file are made available subject to the terms of
++ *  either of the following licenses
++ *
++ *         - GNU Lesser General Public License Version 2.1
++ *         - Sun Industry Standards Source License Version 1.1
++ *
++ *  Sun Microsystems Inc., October, 2000
++ *
++ *  GNU Lesser General Public License Version 2.1
++ *  =============================================
++ *  Copyright 2000 by Sun Microsystems, Inc.
++ *  901 San Antonio Road, Palo Alto, CA 94303, USA
++ *
++ *  This library is free software; you can redistribute it and/or
++ *  modify it under the terms of the GNU Lesser General Public
++ *  License version 2.1, as published by the Free Software Foundation.
++ *
++ *  This library is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ *  Lesser General Public License for more details.
++ *
++ *  You should have received a copy of the GNU Lesser General Public
++ *  License along with this library; if not, write to the Free Software
++ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ *  MA  02111-1307  USA
++ *
++ *
++ *  Sun Industry Standards Source License Version 1.1
++ *  =================================================
++ *  The contents of this file are subject to the Sun Industry Standards
++ *  Source License Version 1.1 (the "License"); You may not use this file
++ *  except in compliance with the License. You may obtain a copy of the
++ *  License at http://www.openoffice.org/license.html.
++ *
++ *  Software provided under this License is provided on an "AS IS" basis,
++ *  WITHOUT WARRANTY OF ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING,
++ *  WITHOUT LIMITATION, WARRANTIES THAT THE SOFTWARE IS FREE OF DEFECTS,
++ *  MERCHANTABLE, FIT FOR A PARTICULAR PURPOSE, OR NON-INFRINGING.
++ *  See the License for the specific provisions governing your rights and
++ *  obligations concerning the Software.
++ *
++ *  The Initial Developer of the Original Code is: Sun Microsystems, Inc.
++ *
++ *  Copyright: 2000 by Sun Microsystems, Inc.
++ *
++ *  All Rights Reserved.
++ *
++ *  Contributor(s): Jan Holesovsky <kendy@openoffice.org>
++ *
++ *
++ ************************************************************************/
++
++#include <kdemodalityfilter.hxx>
++#include <kdefilepicker.hxx>
++#include <kdecommandthread.hxx>
++
++#include <kaboutdata.h>
++#include <kapplication.h>
++#include <kcmdlineargs.h>
++
++#include <iostream>
++
++//////////////////////////////////////////////////////////////////////////
++// Main
++//////////////////////////////////////////////////////////////////////////
++
++int main( int argc, char* argv[] )
++{
++    // we fake the name of the application to have "OpenOffice.org" in the
++    // title
++    KAboutData qAboutData( "kdefilepicker", I18N_NOOP( "OpenOffice.org" ),
++            "0.1", I18N_NOOP( "kdefilepicker is an implementation of the KDE file dialog for OpenOffice.org." ),
++            KAboutData::License_LGPL,
++            "(c) 2004, Jan Holesovsky" );
++    qAboutData.addAuthor( "Jan Holesovsky", I18N_NOOP("Original author and current maintainer"), "kendy@openoffice.org" );
++
++    // Let the user see that this does something...
++    ::std::cerr << "kdefilepicker, an implementation of KDE file dialog for OOo." << ::std::endl
++        << "Type 'exit' and press Enter to finish." << ::std::endl;
++
++    KCmdLineArgs::init( argc, argv, &qAboutData );
++
++    KApplication kApplication;
++    //ModalityFilter qFilter( /*winid*/ 79691780 );
++
++    FileDialog aFileDialog( NULL, QString(), NULL, "kdefiledialog" );
++    
++    CommandThread qCommandThread( &aFileDialog );
++    qCommandThread.start();
++
++    kApplication.exec();
++
++    qCommandThread.wait();
++
++    return 0;
++}
+--- /dev/null	2004-04-06 15:27:52.000000000 +0200
++++ fpicker/source/unx/kde/kdemodalityfilter.cxx	2004-06-11 14:18:36.003663960 +0200
+@@ -0,0 +1,100 @@
++/*************************************************************************
++ *
++ *  $RCSfile$
++ *
++ *  $Revision$ 
++ *
++ *  last change: $Author$ $Date$
++ *
++ *  The Contents of this file are made available subject to the terms of
++ *  either of the following licenses
++ *
++ *         - GNU Lesser General Public License Version 2.1
++ *         - Sun Industry Standards Source License Version 1.1
++ *
++ *  Sun Microsystems Inc., October, 2000
++ *
++ *  GNU Lesser General Public License Version 2.1
++ *  =============================================
++ *  Copyright 2000 by Sun Microsystems, Inc.
++ *  901 San Antonio Road, Palo Alto, CA 94303, USA
++ *
++ *  This library is free software; you can redistribute it and/or
++ *  modify it under the terms of the GNU Lesser General Public
++ *  License version 2.1, as published by the Free Software Foundation.
++ *
++ *  This library is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ *  Lesser General Public License for more details.
++ *
++ *  You should have received a copy of the GNU Lesser General Public
++ *  License along with this library; if not, write to the Free Software
++ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ *  MA  02111-1307  USA
++ *
++ *
++ *  Sun Industry Standards Source License Version 1.1
++ *  =================================================
++ *  The contents of this file are subject to the Sun Industry Standards
++ *  Source License Version 1.1 (the "License"); You may not use this file
++ *  except in compliance with the License. You may obtain a copy of the
++ *  License at http://www.openoffice.org/license.html.
++ *
++ *  Software provided under this License is provided on an "AS IS" basis,
++ *  WITHOUT WARRANTY OF ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING,
++ *  WITHOUT LIMITATION, WARRANTIES THAT THE SOFTWARE IS FREE OF DEFECTS,
++ *  MERCHANTABLE, FIT FOR A PARTICULAR PURPOSE, OR NON-INFRINGING.
++ *  See the License for the specific provisions governing your rights and
++ *  obligations concerning the Software.
++ *
++ *  The Initial Developer of the Original Code is: Sun Microsystems, Inc.
++ *
++ *  Copyright: 2000 by Sun Microsystems, Inc.
++ *
++ *  All Rights Reserved.
++ *
++ *  Contributor(s): Jan Holesovsky <kendy@openoffice.org>
++ *
++ *
++ ************************************************************************/
++
++#include <kdemodalityfilter.hxx>
++
++#include <kapplication.h>
++#include <kdialogbase.h>
++
++#include <netwm.h>
++#include <X11/Xlib.h>
++#include <X11/Xutil.h>
++
++//////////////////////////////////////////////////////////////////////////
++// Modality filter
++//////////////////////////////////////////////////////////////////////////
++
++ModalityFilter::ModalityFilter( WId nWinId )
++    : m_nWinId( nWinId )
++{
++    kapp->installEventFilter( this );
++}
++
++ModalityFilter::~ModalityFilter()
++{
++    kapp->removeEventFilter( this );
++}
++
++bool ModalityFilter::eventFilter( QObject *pObject, QEvent *pEvent )
++{
++    if ( pObject->isWidgetType() && pEvent->type() == QEvent::Show )
++    {
++        KDialogBase* pDlg = ::qt_cast< KDialogBase* >( pObject );
++        if ( pDlg != NULL && m_nWinId != 0 )
++        {
++            XSetTransientForHint( qt_xdisplay(), pDlg->winId(), m_nWinId );
++            NETWinInfo aInfo( qt_xdisplay(), pDlg->winId(), qt_xrootwin(), NET::WMState );
++            aInfo.setState( NET::Modal, NET::Modal );
++            m_nWinId = 0;
++        }
++    }
++    return false;
++}
+--- /dev/null	2004-04-06 15:27:52.000000000 +0200
++++ fpicker/source/unx/kde/kdemodalityfilter.hxx	2004-06-11 13:50:46.856412912 +0200
+@@ -0,0 +1,79 @@
++/*************************************************************************
++ *
++ *  $RCSfile$
++ *
++ *  $Revision$ 
++ *
++ *  last change: $Author$ $Date$
++ *
++ *  The Contents of this file are made available subject to the terms of
++ *  either of the following licenses
++ *
++ *         - GNU Lesser General Public License Version 2.1
++ *         - Sun Industry Standards Source License Version 1.1
++ *
++ *  Sun Microsystems Inc., October, 2000
++ *
++ *  GNU Lesser General Public License Version 2.1
++ *  =============================================
++ *  Copyright 2000 by Sun Microsystems, Inc.
++ *  901 San Antonio Road, Palo Alto, CA 94303, USA
++ *
++ *  This library is free software; you can redistribute it and/or
++ *  modify it under the terms of the GNU Lesser General Public
++ *  License version 2.1, as published by the Free Software Foundation.
++ *
++ *  This library is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ *  Lesser General Public License for more details.
++ *
++ *  You should have received a copy of the GNU Lesser General Public
++ *  License along with this library; if not, write to the Free Software
++ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ *  MA  02111-1307  USA
++ *
++ *
++ *  Sun Industry Standards Source License Version 1.1
++ *  =================================================
++ *  The contents of this file are subject to the Sun Industry Standards
++ *  Source License Version 1.1 (the "License"); You may not use this file
++ *  except in compliance with the License. You may obtain a copy of the
++ *  License at http://www.openoffice.org/license.html.
++ *
++ *  Software provided under this License is provided on an "AS IS" basis,
++ *  WITHOUT WARRANTY OF ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING,
++ *  WITHOUT LIMITATION, WARRANTIES THAT THE SOFTWARE IS FREE OF DEFECTS,
++ *  MERCHANTABLE, FIT FOR A PARTICULAR PURPOSE, OR NON-INFRINGING.
++ *  See the License for the specific provisions governing your rights and
++ *  obligations concerning the Software.
++ *
++ *  The Initial Developer of the Original Code is: Sun Microsystems, Inc.
++ *
++ *  Copyright: 2000 by Sun Microsystems, Inc.
++ *
++ *  All Rights Reserved.
++ *
++ *  Contributor(s): Jan Holesovsky <kendy@openoffice.org>
++ *
++ *
++ ************************************************************************/
++
++#ifndef _KDEMODALITYFILTER_HXX_
++#define _KDEMODALITYFILTER_HXX_
++
++#include <qobject.h>
++
++class ModalityFilter : public QObject
++{
++private:
++    WId m_nWinId;
++
++public:
++    ModalityFilter( WId nWinId );
++    virtual ~ModalityFilter();
++
++    virtual bool eventFilter( QObject *pObject, QEvent *pEvent );
++};
++
++#endif // _KDEMODALITYFILTER_HXX_
+--- /dev/null	2004-04-06 15:27:52.000000000 +0200
++++ fpicker/source/unx/kde/makefile.mk	2004-06-15 10:53:54.282583408 +0200
+@@ -0,0 +1,103 @@
++#*************************************************************************
++#
++#   $RCSfile$
++#
++#   $Revision$
++#
++#   last change: $Author$ $Date$
++#
++#   The Contents of this file are made available subject to the terms of
++#   either of the following licenses
++#
++#          - GNU Lesser General Public License Version 2.1
++#          - Sun Industry Standards Source License Version 1.1
++#
++#   Sun Microsystems Inc., October, 2000
++#
++#   GNU Lesser General Public License Version 2.1
++#   =============================================
++#   Copyright 2000 by Sun Microsystems, Inc.
++#   901 San Antonio Road, Palo Alto, CA 94303, USA
++#
++#   This library is free software; you can redistribute it and/or
++#   modify it under the terms of the GNU Lesser General Public
++#   License version 2.1, as published by the Free Software Foundation.
++#
++#   This library is distributed in the hope that it will be useful,
++#   but WITHOUT ANY WARRANTY; without even the implied warranty of
++#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++#   Lesser General Public License for more details.
++#
++#   You should have received a copy of the GNU Lesser General Public
++#   License along with this library; if not, write to the Free Software
++#   Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++#   MA  02111-1307  USA
++#
++#
++#   Sun Industry Standards Source License Version 1.1
++#   =================================================
++#   The contents of this file are subject to the Sun Industry Standards
++#   Source License Version 1.1 (the "License"); You may not use this file
++#   except in compliance with the License. You may obtain a copy of the
++#   License at http://www.openoffice.org/license.html.
++#
++#   Software provided under this License is provided on an "AS IS" basis,
++#   WITHOUT WARRANTY OF ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING,
++#   WITHOUT LIMITATION, WARRANTIES THAT THE SOFTWARE IS FREE OF DEFECTS,
++#   MERCHANTABLE, FIT FOR A PARTICULAR PURPOSE, OR NON-INFRINGING.
++#   See the License for the specific provisions governing your rights and
++#   obligations concerning the Software.
++#
++#   The Initial Developer of the Original Code is: Sun Microsystems, Inc.
++#
++#   Copyright: 2000 by Sun Microsystems, Inc.
++#
++#   All Rights Reserved.
++#
++#   Contributor(s): _______________________________________
++#
++#
++#
++#*************************************************************************
++
++PRJ=..$/..$/..
++
++PRJNAME=fpicker
++TARGET=kdefilepicker
++LIBTARGET=NO
++ENABLE_EXCEPTIONS=TRUE
++#COMP1TYPELIST=$(TARGET)
++#COMPRDB=$(SOLARBINDIR)$/types.rdb
++
++# --- Settings -----------------------------------------------------
++
++.INCLUDE :  settings.mk
++
++# ------------------------------------------------------------------
++
++.IF "$(GUIBASE)" != "unx" || "$(ENABLE_FPICKER_KDE)" != "TRUE"
++
++dummy:
++	@echo "Nothing to build. GUIBASE == $(GUIBASE), ENABLE_FPICKER_KDE is not set"
++
++.ELSE # we build for KDE
++
++CFLAGS+= $(FPICKER_KDE_CFLAGS)
++
++# --- Files --------------------------------------------------------
++
++SLOFILES =\
++		$(SLO)$/kdecommandthread.obj \
++		$(SLO)$/kdefilepicker.obj \
++		$(SLO)$/kdefilepicker.moc.obj \
++		$(SLO)$/kdefpmain.obj \
++		$(SLO)$/kdemodalityfilter.obj
++
++.ENDIF # "$(GUIBASE)" != "unx" || "$(ENABLE_FPICKER_KDE)" != "TRUE"
++
++# --- Targets ------------------------------------------------------
++
++.INCLUDE :	target.mk
++
++kdefilepicker.moc.cxx : kdefilepicker.hxx
++	moc $< -o $@
