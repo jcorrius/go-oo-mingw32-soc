@@ -119,8 +119,8 @@ sub apply_patches {
     foreach (glob($applied_patches."/???-*")) { 
         my $file = basename $_;
 
-        $existing_patches{$file} = $_;
         $file =~ s/^([0-9]{3})-//;
+        $existing_patches{$file} = $_;
         $patch_num = $1;
     }
     $patch_num++;
