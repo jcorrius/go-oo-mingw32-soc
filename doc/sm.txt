@@ -1,0 +1,115 @@
+These are the notes Raul should have taken:
+
+* Code reading in vcl/unx/source/app/sm.txt
+  + follow 'Save Yourself'
+
+Callback is connected to
+
+void SessionManagerClient::SaveYourselfProc(
+
+posts event:
+
+    Application::PostUserEvent( STATIC_LINK( (void*)(shutdown ? 0xffffffff : 0x0), SessionManagerClient, SaveYourselfHdl ) );
+    SMprintf( "waiting for save yourself event to be processed\n" );
+
+
+* Query - does that really wait ?
+
+vcl/source/app/svapp.cxx:
+
+BOOL Application::PostUserEvent( ULONG& rEventId, ULONG nEvent, void* pEventData )
+
+    rEventId = (ULONG)pSVEvent;
+    if ( ImplGetDefaultWindow()->ImplGetFrame()->PostEvent( pSVEvent ) )
+        return TRUE;
+
+app/svdata.cxx (ImplGetDefaultWindow):
+    + returns a Window * - some random window.
+
+window/window2.cxx (ImplGetFrame)
+    + returns a SalFrame * simple method accessor
+
+salframe.cxx:
+
+BOOL X11SalFrame::PostEvent( void *pData )
+{
+    GetDisplay()->SendInternalEvent( this, pData );
+	return TRUE;
+}
+
+gtkframe.cxx:
+BOOL GtkSalFrame::PostEvent( void* pData )
+{
+	getDisplay()->SendInternalEvent( this, pData );
+	return TRUE;
+}
+
+source/app/saldisp.cxx
+void SalDisplay::SendInternalEvent( SalFrame* pFrame, void* pData, USHORT nEvent )
+{
+	if( osl_acquireMutex( hEventGuard_ ) )
+    {
+        m_aUserEvents.push_back( SalUserEvent( pFrame, pData, nEvent ) );
+
+		// Notify SalXLib::Yield() of a pending event.
+		pXLib_->PostUserEvent();
+
+        osl_releaseMutex( hEventGuard_ );
+    }
+    else
+        DBG_ASSERT( 1, "SalDisplay::SendEvent !acquireMutex\n" );
+}
+
+*** Doesn't look like anything blocks so far ...
+*** How are we handling the m_aUserEvents queue in gtk+ land ?
+*** What is happening there ?
+*** How / where are we waiting for completion of this lot ?
+*** Do we even need to block 'SaveYourselfProc' from completing ?
+
+Bounces to the main thread and runs:
+
+IMPL_STATIC_LINK( SessionManagerClient, SaveYourselfHdl, void*, pDummy )
+{
+    SMprintf( "posting save documents event shutdown = %s\n", (pThis!=0) ? "true" : "false" );
+    if( pOneInstance )
+    {
+        SalSessionSaveRequestEvent aEvent( pThis != 0, false );
+        pOneInstance->CallCallback( &aEvent );        
+    }
+    else
+        saveDone();
+    return 0;
+}
+
+pOneInstance != NULL is the common case: ->
+
+'CallCallback' is inherited from IceSalSession:
+
+vcl/unx/inc/sm.hxx:
+class IceSalSession : public SalSession
+
+instantiated from
+
+vcl/unx/inc/salinst.h (CreateSalSession)
+not overridden in GtkInstance; implemented in sm.cxx.
+
+Implemented in vcl/inc/salsession.hxx, that has:
+
+    void SetCallback( SessionProc aCallback ) 
+    {
+        m_aProc = aCallback;
+    }
+    void CallCallback( SalSessionEvent* pEvent )
+    {
+        if( m_aProc )
+            m_aProc( pEvent );
+    }
+
+* Is it possible the callback isn't set ?
+  + no - cf. vcl/source/app/session.cxx:
+    m_pSession = ImplGetSVData()->mpDefInst->CreateSalSession();
+    if( m_pSession )
+        m_pSession->SetCallback( SalSessionEventProc );
+
+
+
