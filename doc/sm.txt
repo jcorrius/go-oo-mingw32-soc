@@ -1,3 +1,250 @@
+
+The end result of the exercise is the dialog prompting the
+user on logout in the gen plugin to save all open documents:
+
+vcl/source/window/winproc.cxx:
+        case SALEVENT_SHUTDOWN:
+			{
+				static bool bInQueryExit = false;
+				if( !bInQueryExit )
+				{
+					bInQueryExit = true;
+					if ( GetpApp()->QueryExit() )
+					{
+						// Message-Schleife beenden
+						Application::Quit();
+						return FALSE;
+					}
+					else
+					{
+						bInQueryExit = false;
+						return TRUE;
+					}
+				}
+				else
+					return FALSE;
+			}
+            break;
+
+This happens when the SHUTDOWN event is launched by:
+
+[ GetpApp()->QueryExit() is the one in desktop/source/app/app.cxx which is 
+inside the unlinked soffice.bin, should it be necessary to poke at it...] 
+
+vcl/source/app/sm.cxx:
+IMPL_STATIC_LINK( SessionManagerClient, ShutDownHdl, void*, pDummy )
+{
+    const std::list< SalFrame* >& rFrames = GetSalData()->GetDisplay()->getFrames();
+    SMprintf( rFrames.begin() != rFrames.end() ? "shutdown on first frame\n" : "shutdown event but no frame\n" );
+    if( rFrames.begin() != rFrames.end() )
+        rFrames.front()->CallCallback( SALEVENT_SHUTDOWN, 0 );
+    return 0;
+}
+
+which in turn is launched by:
+
+vcl/source/app/sm.cxx:
+void SessionManagerClient::DieProc(
+	SmcConn connection,
+	SmPointer client_data
+	)
+{
+    SMprintf( "Session: die\n" );
+	if( connection == aSmcConnection )
+    {
+        Application::PostUserEvent( STATIC_LINK( NULL, SessionManagerClient, ShutDownHdl ) );
+        SMprintf( "waiting for shutdown event to be processed\n" );
+    }
+}
+
+The initial problem was that the DieProc was not invoked at all from the gtk
+plugin. One thing that was not available was the initialization of the
+SessionManagerClient in gtkframe.cxx, that was done:
+
+--- vcl/unx/gtk/window/gtkframe.cxx	2005-03-16 14:56:46.000000000 +0530
++++ vcl/unx/gtk/window/gtkframe.cxx	2005-04-07 18:33:49.868673152 +0530
+@@ -84,9 +84,17 @@
+ #if OSL_DEBUG_LEVEL > 1
+ #include <cstdio>
+ #endif
++#ifndef _VCL_SM_HXX
++#include <sm.hxx>
++#endif
++#ifndef _OSL_SIGNAL_H_
++#include <osl/signal.h>
++#endif
+ 
+ int GtkSalFrame::m_nFloats = 0;
+ 
+@@ -864,6 +911,8 @@ void GtkSalFrame::Show( BOOL bVisible, B
+                 if( m_pParent )
+                     m_pParent->EndExtTextInput(0);
+             }
++
++		    SessionManagerClient::open();
+         }
+         else
+         {
+--- vcl/unx/gtk/app/gtkinst.cxx	2005-01-13 23:38:47.000000000 +0530
++++ vcl/unx/gtk/app/gtkinst.cxx	2005-04-07 18:08:28.242914745 +0530
+@@ -69,6 +69,9 @@
+ #if OSL_DEBUG_LEVEL > 1
+ #include <cstdio>
+ #endif
++#ifndef _VCL_SM_HXX
++#include <sm.hxx>
++#endif
+ 
+ GtkHookedYieldMutex::GtkHookedYieldMutex()
+ {
+@@ -195,6 +198,8 @@ extern "C" 
+ 
+ GtkInstance::~GtkInstance()
+ {
++    // close session management
++    SessionManagerClient::close();
+ }
+ 
+ SalFrame* GtkInstance::CreateFrame( SalFrame* pParent, ULONG nStyle )
+
+That did initialize the SessionManagerClient, but the Die procedure was still
+not invoked, so after fiddling with the passOnSaveYourself procedure in
+salframe.cxx, eventually made these changes:
+
+X11SalFrame* X11SalFrame::s_pSaveYourselfFrame = NULL; in salframe.cxx brought
+into gtkframe.cxx with this patch:
+
+--- vcl/unx/gtk/window/gtkframe.cxx	2005-03-16 14:56:46.000000000 +0530
++++ vcl/unx/gtk/window/gtkframe.cxx	2005-04-07 18:33:49.868673152 +0530
+@@ -84,9 +84,17 @@
+
+ int GtkSalFrame::m_nFloats = 0;
+ 
++GtkSalFrame* GtkSalFrame::s_pSaveYourselfFrame = NULL;
++
+ static USHORT GetModCode( guint state )
+ {
+     USHORT nCode = 0;
+@@ -256,6 +264,36 @@ GtkSalFrame::GtkSalFrame( SystemParentDa
+     Init( pSysData );
+ }
+ 
++void GtkSalFrame::passOnSaveYourSelf()
++{
++	fprintf( stderr, "GtkSalFrame::passOnSaveYourSelf()\n" );
++	using namespace vcl_sal;
++    if( this == s_pSaveYourselfFrame )
++    {
++        // pass on SaveYourself
++        const GtkSalFrame* pFrame = NULL;
++        const std::list< SalFrame* >& rFrames = GetSalData()->GetDisplay()->getFrames();
++        std::list< SalFrame* >::const_iterator it = rFrames.begin();
++        while( it != rFrames.end() )
++        {
++            pFrame = static_cast< const GtkSalFrame* >(*it);
++            if( ! (pFrame->m_nStyle & (SAL_FRAME_STYLE_FLOAT|SAL_FRAME_STYLE_CHILD) || pFrame->m_pParent ) )
++                break;
++            ++it;    
++        }
++        
++        s_pSaveYourselfFrame = (it != rFrames.end() ) ? const_cast<GtkSalFrame*>(pFrame) : NULL;
++        if( s_pSaveYourselfFrame )
++        {
++            Atom a[4];
++            int  n = 0;
++            a[n++] = GetSalData()->GetDisplay()->getWMAdaptor()->getAtom( WMAdaptor::WM_DELETE_WINDOW );
++            a[n++] = GetSalData()->GetDisplay()->getWMAdaptor()->getAtom( WMAdaptor::WM_SAVE_YOURSELF );
++            XSetWMProtocols( getDisplay()->GetDisplay(), s_pSaveYourselfFrame->GetSystemData()->aShellWindow, a, n );
++        }
++    }
++}
++
+ GtkSalFrame::~GtkSalFrame()
+ {
+ 	getDisplay()->deregisterFrame( this );
+@@ -277,6 +315,8 @@ GtkSalFrame::~GtkSalFrame()
+         g_object_unref( G_OBJECT(m_pForeignParent) );
+     if( m_pForeignTopLevel )
+         g_object_unref(G_OBJECT( m_pForeignTopLevel) );
++
++    passOnSaveYourSelf();
+ }
+ 
+ void GtkSalFrame::hardIMReset()
+@@ -504,6 +544,13 @@ void GtkSalFrame::Init( SalFrame* pParen
+     m_aForeignTopLevelWindow = None;
+     m_nStyle = nStyle;
+ 
++	if( ! s_pSaveYourselfFrame && ! m_pParent && ! (m_nStyle & SAL_FRAME_STYLE_CHILD) )
++	{
++		// at all times have only one frame with SaveYourself
++//		a[n++] = pDisplay_->getWMAdaptor()->getAtom( WMAdaptor::WM_SAVE_YOURSELF );
++		s_pSaveYourselfFrame = this;
++	}
++
+ 	if( m_pParent && m_pParent->m_pWindow && ! (m_pParent->m_nStyle & SAL_FRAME_STYLE_CHILD) )
+ 		gtk_window_set_screen( m_pWindow, gtk_window_get_screen( m_pParent->m_pWindow ) );
+ 
+@@ -1517,6 +1566,8 @@ bool GtkSalFrame::SetPluginParent( Syste
+     if( m_pForeignTopLevel )
+         g_object_unref( G_OBJECT(m_pForeignTopLevel) );
+ 
++    passOnSaveYourSelf();
++
+     // init new window
+     if( pSysParent && pSysParent->aWindow != None )
+         Init( pSysParent );
+--- vcl/unx/inc/plugins/gtk/gtkframe.hxx	2005-03-16 14:56:46.000000000 +0530
++++ vcl/unx/inc/plugins/gtk/gtkframe.hxx	2005-04-07 14:06:59.668222775 +0530
+@@ -159,6 +159,8 @@ class GtkSalFrame : public SalFrame
+         }
+     };
+ 
++    static GtkSalFrame* s_pSaveYourselfFrame;
++                                
+     GtkWindow*                      m_pWindow;
+     GdkWindow*                      m_pForeignParent;
+     GdkNativeWindow                 m_aForeignParentWindow;
+@@ -355,6 +357,7 @@ public:
+     virtual bool                SetPluginParent( SystemParentData* pNewParent );
+ 
+     virtual void                SetBackgroundBitmap( SalBitmap* );
++    void			passOnSaveYourSelf();
+ };
+
+
+With this, finally the die procedure seemed to be invoked or so it seems
+because now it seems to be invoked even if just the two lines of
+SessionManagerClient::open and close remain.
+
+Now the problem is that while the GtkSalFrame's Die Procedure is invoked and
+the dialog prompting the user does come up, the whole application is killed
+off by X instantly, whereas in the X11SalFrame, the prompt remains long enough
+to save all the open documents. 
+
+The gtk plugin does get the Die Procedure and the save prompt up, but the X
+Session dies killing off all the applications which X11SalFrame is managing to
+hold on to till saving is complete.
+
+FWIW, I got the gen plugin to crash practically the same way the gtk one
+crashes commenting out the one line:
+
+--- vcl/unx/source/window/salframe.cxx	2005-03-16		14:56:46.000000000 +0530
++++ vcl/unx/source/window/salframe.cxx	2005-04-08		16:37:42.142357942 +0530
+@@ -563,7 +563,7 @@ void X11SalFrame::Init( ULONG nSalFrameS
+         {
+             // at all times have only one frame with SaveYourself
+             a[n++] = pDisplay_->getWMAdaptor()->getAtom( WMAdaptor::WM_SAVE_YOURSELF );
+-            s_pSaveYourselfFrame = this;
++//            s_pSaveYourselfFrame = this;
+         }
+         if( (nSalFrameStyle & SAL_FRAME_STYLE_OWNERDRAWDECORATION) )
+             a[n++] = pDisplay_->getWMAdaptor()->getAtom( WMAdaptor::WM_TAKE_FOCUS );
+
+However, now commenting it out does not seem to be affecting it either now so ... :-O
+
+-------
+
 These are the notes Raul should have taken:
 
 * Code reading in vcl/unx/source/app/sm.txt
