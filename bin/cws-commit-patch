@@ -1,0 +1,234 @@
+#! /usr/bin/perl -w
+
+$mws = 'SRC680';
+
+sub usage()
+{
+    print STDERR "cws-commit-patch - automate the creation of CWSes
+Usage: cws-commit-patch ...params... patch1.diff patch2.diff ...
+
+  -i, --iz        IZ number (XXXX or iXXXX)
+  -c, --cws       CWS name (to be created or existing
+  -d              cvs root
+  -h, --help      Help
+  -m, --milestone Milestone to base the CWS (defaults to current)
+  -s, --summary   Summary describing the change (for cvs commit)\n";
+    exit 1;
+}
+
+sub cws_create($$)
+{
+    my ( $cws, $milestone ) = @_;
+
+    my $tmp = "/tmp/$cws.$$";
+    mkdir( $tmp );
+    chdir( $tmp );
+    print "Temp dir:\t$tmp\n";
+
+    my $state = `cwsquery -m $mws -c $cws state 2>> .log`;
+    $state =~ s/\n//g;
+    if ( $state ne "" ) {
+	print "CWS:\t\t'$cws' already exists, its state is '$state'\n";
+    }
+    else {
+	print "CWS:\t\tcreating '$cws'\n";
+	
+	# FIXME Real cwscreate here
+	if ( system( "echo cwscreate -f $mws $milestone $cws" ) != 0 ) {
+	    print STDERR "Unable to execute cwscreate.\n";
+	    exit 1;
+	}
+    }
+}
+
+sub cws_modules($) {
+    my ( $cws ) = @_;
+
+    my $mod_str = `cwsquery -m $mws -c $cws modules 2>> .log`;
+    return split( '\n', $mod_str );
+}
+
+sub cws_add_modules($$@)
+{
+    my ( $cws, $milestone, @patches ) = @_;
+
+    my %modules = ();
+    
+    for $patch ( @patches ) {
+	if ( ! open( $PATCH, "$patch" ) ) {
+	    print STDERR "Unable to open patch '$patch'.";
+	    exit 1;
+	}
+	while (<$PATCH>) {
+	    if ( /^\+\+\+ ([^\/]*)/ ) {
+		if ( $1 ne "" ) {
+		    $modules{$1} = "add";
+		}
+		else {
+		    print STDERR "Unable to guess module name ($1) from $patch.";
+		    close( $PATCH );
+		    exit 1;
+		}
+	    }
+	}
+	close( $PATCH );
+    }
+
+    my @cws_modules = cws_modules( $cws );
+    for $cws_mod ( @cws_modules ) {
+	if ( defined( $modules{$cws_mod} ) ) {
+	    $modules{$cws_mod} = "checkout";
+	}
+    }
+
+    while ( ( $module, $what ) = each( %modules ) ) {
+	if ( $what eq "add" ) {
+	    # FIXME Real cwsadd here
+	    if ( system( "echo cwsadd -a $module" ) != 0 ) {
+		print STDERR "Unable to execute cwsadd.\n";
+		exit 1;
+	    }
+	    print "Module:\t\t'$module' created in $cws\n";
+	}
+	elsif ( $what eq "checkout" ) {
+	    if ( system( "cvs checkout -r cws_src680_$cws $module >> .log 2>&1" ) != 0 ) {
+		print STDERR "Unable to execute cvs checkout.\n";
+		exit 1;
+	    }
+	    print "Module:\t\t'$module' already exists in $cws, checked out\n";
+	}
+    }
+}
+
+sub cws_add_task($)
+{
+    my ( $iz ) = @_;
+
+    # FIXME Real cwsaddtask here
+    if ( system( "echo cwsaddtask i$iz" ) != 0 ) {
+	print STDERR "Unable to add task number $iz.\n";
+	exit 1;
+    }
+
+    print "IZ:\t\tSet to '$iz'\n";
+}
+
+sub apply_patches(@)
+{
+    my ( @patches ) = @_;
+
+    for $patch ( @patches ) {
+	if ( system( "patch -p0 < $patch" ) != 0 ) {
+	    print STDERR "Unable to apply patch $patch.\n";
+	    exit 1;
+	}
+	print "Patch:\t\t'$patch' applied\n";
+    }
+}
+
+sub cws_commit($$$$@)
+{
+    my ( $cws, $iz, $summary, $milestone, @patches ) = @_;
+
+    cws_create( $cws, $milestone );
+    cws_add_modules( $cws, $milestone, @patches );
+    cws_add_task( $iz );
+
+    apply_patches( @patches );
+
+    my @cws_modules = cws_modules( $cws );
+    my $commit_message = "#i$iz#\n" . $summary;
+
+    # FIXME Real cvs commit here
+    if ( system( "echo cvs commit -m '$commit_message' " . join( ' ', @cws_modules ) ) != 0 ) {
+	print STDERR "Unable to apply patch $patch.\n";
+	exit 1;
+    }
+}
+
+#
+# main()
+#
+my $my_path = $0;
+$my_path =~ s#/[^/]*$##;
+my $build_dir = `. $my_path/setup > /dev/null 2>&1 ; echo \$OOBUILDDIR`;
+if ( $build_dir eq "" ) {
+    print STDERR "Unable to find build dir, check OOBUILDDIR in bin/setup.\n";
+    exit 1;
+}
+$build_dir =~ s/\n//;
+if ( ! -f "$build_dir/LinuxIntelEnv.Set.sh" ) {
+    print STDERR "Unable to find '$build_dir/LinuxIntelEnv.Set.sh'.\n";
+    exit 1;
+}
+open( $VARS, ". $build_dir/LinuxIntelEnv.Set.sh ; set|");
+while ( <$VARS> ) {
+    /([^=]*)=(.*)/ || next;
+    $ENV{$1} = $2 unless "$1" eq "SHELLOPTS";
+}
+close( $VARS );
+
+my $iz = "";
+my $cws = "";
+my $milestone = "";
+my $summary = "";
+my @patches = ();
+
+( my $pwd = `pwd` ) =~ s/\n//;
+
+while (@ARGV) {
+    $opt = shift @ARGV;
+
+    if ( $opt eq "-i" || $opt eq "--iz" ) {
+	$iz = shift @ARGV;
+    }
+    elsif ( $opt eq "-c" || $opt eq "--cws" ) {
+	$cws = shift @ARGV;
+    }
+    elsif ( $opt eq "-d" ) {
+	$ENV{'CVSROOT'} = shift @ARGV;
+    }
+    elsif ( $opt eq "-h" || $opt eq "--help" ) {
+	usage();
+    }
+    elsif ( $opt eq "-s" || $opt eq "--summary" ) {
+	$summary = shift @ARGV;
+    }
+    elsif ( $opt eq "-m" || $opt eq "--milestone" ) {
+	$cws = shift @ARGV;
+    }
+    else {
+	push @patches, "$pwd/$opt";
+    }
+}
+
+if ( !defined( $ENV{'CVSROOT'} ) || $ENV{'CVSROOT'} eq "" ) {
+    print STDERR "Please specify cvs root (using -d or environment variable).\n";
+    exit 1;
+}
+if ( !defined( $iz ) || !( $iz =~ /^i?[0-9]+$/ ) ) {
+    print STDERR "Please specify IZ number as XXXX, or iXXXX.\n";
+    exit 1;
+}
+if ( !defined( $cws ) || $cws eq "" ) {
+    print STDERR "Please specify CWS.\n";
+    exit 1;
+}
+if ( !defined( $summary ) ||  $summary eq "" ) {
+    print STDERR "Please provide summary.\n";
+    exit 1;
+}
+if ( !defined( $milestone ) ||  $milestone eq "" ) {
+    my $latest = `cwsquery -m $mws latest 2> /dev/null`;
+
+    ( $_, $milestone ) = split( ' ', $latest );
+    print "Milestone:\tnot specified, assuming '$milestone'\n";
+}
+else {
+    print "Milestone:\t$milestone\n";
+}
+
+$iz =~ s/^i//;
+$ENV{'CWS_WORK_STAMP'} = $cws;
+
+cws_commit( $cws, $iz, $summary, $milestone, @patches ) || exit 1;
