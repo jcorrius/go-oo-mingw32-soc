@@ -352,11 +352,144 @@ Implemented in vcl/inc/salsession.hxx, that has:
             m_aProc( pEvent );
     }
 
-* Is it possible the callback isn't set ?
-  + no - cf. vcl/source/app/session.cxx:
+The callback is set - cf. vcl/source/app/session.cxx:
     m_pSession = ImplGetSVData()->mpDefInst->CreateSalSession();
     if( m_pSession )
         m_pSession->SetCallback( SalSessionEventProc );
 
+
+With the 'gen' plugin, it _seems_ that OO.o is serializing the session
+on exit, and re-loading it on startup - regardless of the state of
+'save session'.
+
+The session mgmt spec. here:
+http://netmirror.org/mirror/xfree86.org/4.1.0/doc/SMlib.TXT
+
+says:
+
+[snip]
+The session manager sends a ``Save Yourself'' message  to  a
+client either to checkpoint it or just before termination so
+that it can save its state.  The client responds  with	zero
+or  more  calls to SmcSetProperties to update the properties
+indicating how to restart the client.  When all the  proper-
+ties have been set, the client calls SmcSaveYourselfDone.
+
+If  interact_style  is	SmInteractStyleNone, the client must
+not interact with the user while saving  state.   If  inter-
+act_style  is SmInteractStyleErrors, the client may interact
+with the user only if an error condition arises.  If  inter-
+act_style  is SmInteractStyleAny, then the client may inter-
+act with the user for any purpose.  Because only one  client
+can  interact  with the user at a time, the client must call
+SmcInteractRequest and wait for an ``Interact'' message from
+the  session  manager.	 When the client is done interacting
+with the user, it calls  SmcInteractDone.   The  client  may
+only  call  SmcInteractRequest	after  it  receives a ``Save
+Yourself'' message and before it calls	SmcSaveYourselfDone.
+[snip]
+
+We - however, discard our 'interact_style' immediately inside
+'SaveYourselfProc'; indeed - everything except 'shutdown'
+
+
+Gnumeric's gnome-client.c usage does:
+
+static gboolean
+client_save_yourself_cb (GnomeClient *client, int phase, 
+			 GnomeSaveStyle what_to_save,
+			 gboolean end, GnomeInteractStyle interaction,
+			 gboolean fast, gpointer data)
+{
+	gboolean res = TRUE;
+
+	if (!end)
+		return TRUE;  /* If we aren't shutting down, don't bother us any further. */
+
+	gnome_client_set_current_directory (client, current_dir);
+
+	if (!(interaction == GNOME_INTERACT_ANY))
+		res = FALSE;
+	else
+		gnome_client_request_interaction (client, 
+						  GNOME_DIALOG_NORMAL, 
+						  interaction_function,
+						  NULL);
+	set_clone_restart (client);	
+	return res;
+}
+
+static void 
+interaction_function (GnomeClient *client, gint key, GnomeDialogType dialog_type, gpointer shutdown)
+{
+	gboolean do_not_cancel = FALSE;
+...
+	gnome_interaction_key_return (key, do_not_cancel);
+}
+
+/**
+ * gnome_client_request_interaction:
+ ...
+ * Description: Use the following functions, if you want to interact with the
+ * user during a "save_yourself" handler without being restricted to using the
+ * dialog based commands gnome_client_save_any_dialog() or
+ * gnome_client_save_error_dialog(). Note, however, that overriding the session
+ * manager specified preference in this way (by using arbitrary dialog boxes)
+ * is not very nice.
+ *
+ * If and when the session manager decides that it's the app's turn to interact
+ * then 'func' will be called with the specified arguments and a unique
+ * 'GnomeInteractionKey'. The session manager will block other
+ * clients from interacting until this key is returned with
+ * gnome_interaction_key_return().
+ **/
+
+* I also get crashers from incorrect resource setup, on
+  forking 'soffice.bin'
+
+
+SalSessionSaveRequestEvent & SalSessionInteractionEvent are both
+trapped in:
+
+vcl/source/app/session.cxx (SalSessionEventProc)
+    calls pOneInstance->callSaveRequested
+    or    pOneInstance->callInteractionGranted
+static VCLSession *pOneInstance ...
+
+    This code fires off an UNO 'doSave' method to all it's
+XSessionManagerListener objects; or an 'approveInteraction' method.
+
+    Could the crash-on-login bug be related to getting an application
+name of 'soffice.bin' - when it needs to be soffice to have any
+chance of finding the right resources ?
+
+cf. String SessionManagerClient::getExecName()
+    This turns 'soffice.bin' into 'soffice'
+
+vcl/unx/source/app/saldisp.cxx:
+
+	// set client leader (session id gets set when session is started)
+	if( hRefWindow_ ) {
+		// client leader must have WM_CLIENT_LEADER pointing to itself
+		XChangeProperty( pDisp_, hRefWindow_,
+				 XInternAtom( pDisp_, "WM_CLIENT_LEADER", False ),
+				 XA_WINDOW, 32, PropModeReplace,
+				 (unsigned char*)&hRefWindow_, 1);
+		ByteString aExec( SessionManagerClient::getExecName(), osl_getThreadTextEncoding() );
+		const char* argv[2];
+		argv[0] = "/bin/sh";
+		argv[1] = aExec.GetBuffer();
+		XSetCommand( pDisp_, hRefWindow_, const_cast<char**>(argv), 2 );
+		...
+
+Gnome doesn't ever do an XSetCommand though - quite possibly it
+relies on the SmRestartCommand functionality that gnome-client
+implements.
+
+We seem to create a correct SmRestartCommand property; but only send
+it on SaveYourself ( BuildSmPropertyList vs. saveDone ).
+
+** If we run 'oowriter2' do we get 'soffice' as the correct save
+   exec. name ? the gnome-client sets this property on startup.
 
 
