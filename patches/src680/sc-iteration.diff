@@ -1,0 +1,198 @@
+--- sc/source/core/data/table4.cxx	2005-03-24 17:17:40.000000000 +0530
++++ sc/source/core/data/table4.cxx	2005-04-12 14:06:45.741558748 +0530
+@@ -111,6 +111,12 @@
+ #include "docpool.hxx"
+ #include "progress.hxx"
+ 
++#include <svx/editobj.hxx>
++#include <svx/editeng.hxx>
++#include <svx/eeitem.hxx>
++#include <svx/escpitem.hxx>
++
++
+ // STATIC DATA -----------------------------------------------------------
+ 
+ #define _D_MAX_LONG_  (double) 0x7fffffff
+@@ -186,6 +193,69 @@
+ 		return aStr;
+ 	}
+ }
++static void lcl_GetOrdinalSuffixEn( String &aValue, long nDigits )
++{
++	switch( labs( nDigits ) % 100 )
++	{
++		case 11: case 12: case 13:
++			aValue.AssignAscii( "th" );
++			break;
++		default:
++			switch( nDigits % 10 )
++			{
++				case 1:
++					aValue.AssignAscii( "st" );
++					break;
++				case 2:
++					aValue.AssignAscii( "nd" );
++					break;
++				case 3:
++					aValue.AssignAscii( "rd" );
++					break;
++				default:
++					aValue.AssignAscii( "th" );
++					break;
++			}
++			break;
++	}
++}
++
++static void lcl_GetOrdinalSuffix( String &aValue, long nDigits, ScDocument *pDoc )
++{
++	LanguageType curLang, rCjk, rCtl; 
++	pDoc->GetLanguage( curLang, rCjk, rCtl );
++
++	if( curLang & LANGUAGE_ENGLISH == LANGUAGE_ENGLISH )
++		lcl_GetOrdinalSuffixEn( aValue, nDigits );
++
++}
++
++static bool lcl_IsOrdinalSuffix( String aValue, long nStringValue, ScDocument *pDoc )
++{
++	String curIteration;
++	lcl_GetOrdinalSuffix( curIteration, nStringValue, pDoc );
++
++	if( aValue.Equals( curIteration ) )
++		return TRUE;
++	return FALSE;
++}
++
++static ScBaseCell *lcl_getSuperScriptCell( ScDocument *pDocument, String aStr, String aValue, CellType eCellType, BOOL bIsOrdinalSuffix )
++{
++	if( eCellType!=CELLTYPE_EDIT || !bIsOrdinalSuffix )
++	{
++		aStr += aValue;
++		return new ScStringCell( aStr );
++	}
++
++	EditEngine aEngine( pDocument->GetEnginePool() );
++	SfxItemSet aAttr = aEngine.GetEmptyItemSet();
++	aAttr.Put( SvxEscapementItem( SVX_ESCAPEMENT_SUPERSCRIPT, EE_CHAR_ESCAPEMENT ) );
++	aEngine.SetText( aStr );
++	aEngine.QuickInsertText( aValue, ESelection( 0, aStr.Len(), 0, aStr.Len() + aValue.Len() ) );
++	aEngine.QuickSetAttribs( aAttr, ESelection( 0, aStr.Len(), 0, aStr.Len() + aValue.Len() ) );
++	return new ScEditCell( aEngine.CreateTextObject(), pDocument, NULL );
++}
+ 
+ void ScTable::FillAnalyse( SCCOL nCol1, SCROW nRow1, SCCOL nCol2, SCROW nRow2,
+ 							FillCmd& rCmd, FillDateCmd& rDateCmd,
+@@ -741,6 +814,8 @@
+ 			String aValue;
+ 			ScBaseCell* pSrcCell;
+ 			CellType eCellType;
++			BOOL bIsOrdinalSuffix = FALSE;
++
+ 
+ 			for (rInner = nIStart;;)
+ 			{
+@@ -770,6 +845,8 @@
+ 									nCellDigits = 0;	// look at each source cell individually
+ 									nHeadNoneTail = lcl_DecompValueString(
+ 										aValue, nStringValue, &nCellDigits );
++
++									bIsOrdinalSuffix = lcl_IsOrdinalSuffix( aValue, nStringValue, pDocument );
+ 								}
+ 							break;
+ 						}
+@@ -790,14 +867,18 @@
+ 							if ( nHeadNoneTail < 0 )
+ 							{
+ 								aStr = lcl_ValueString( nStringValue+(long)nDelta, nCellDigits );
+-								aStr += aValue;
++
++								if( bIsOrdinalSuffix )
++									lcl_GetOrdinalSuffix( aValue, nStringValue + (long)nDelta, pDocument );
++								aCol[nCol].Insert( static_cast<SCROW>(nRow),
++									lcl_getSuperScriptCell( pDocument, aStr, aValue, eCellType, bIsOrdinalSuffix ) );
+ 							}
+ 							else
+ 							{
+ 								aStr = aValue;
+ 								aStr += lcl_ValueString( nStringValue+(long)nDelta, nCellDigits );
++								aCol[nCol].Insert( static_cast<SCROW>(nRow), new ScStringCell( aStr ) );
+ 							}
+-							aCol[nCol].Insert(static_cast<SCROW>(nRow), new ScStringCell( aStr ) );
+ 						}
+ 						else
+ 						{
+@@ -985,7 +1066,12 @@
+ 							USHORT nCellDigits = 0;	// look at each source cell individually
+ 							short nFlag = lcl_DecompValueString( aValue, nVal, &nCellDigits );
+ 							if ( nFlag < 0 )
++							{
++								if( lcl_IsOrdinalSuffix( aValue, nVal, pDocument ) )
++									lcl_GetOrdinalSuffix( aValue, nVal + nDelta, pDocument );
++
+ 								aValue.Insert( lcl_ValueString( nVal + nDelta, nCellDigits ), 0 );
++							}
+ 							else if ( nFlag > 0 )
+ 								aValue += lcl_ValueString( nVal + nDelta, nCellDigits );
+ 						}
+@@ -1012,6 +1101,7 @@
+ 		{
+ 			BOOL bOk;
+ 			double nStart;
++			long nVal;
+ 			short nHeadNoneTail = 0;
+ 			ScBaseCell*	pCell = GetCell( nCol1, nRow1 );
+ 			if ( pCell )
+@@ -1026,7 +1116,6 @@
+ 							((ScStringCell*)pCell)->GetString( aValue );
+ 						else
+ 							((ScEditCell*)pCell)->GetString( aValue );
+-						long nVal;
+ 						nHeadNoneTail = lcl_DecompValueString( aValue, nVal );
+ 						if ( nHeadNoneTail )
+ 							nStart = (double)nVal;
+@@ -1070,7 +1159,12 @@
+ 				if ( nHeadNoneTail )
+ 				{
+ 					if ( nHeadNoneTail < 0 )
++					{
++						if( lcl_IsOrdinalSuffix( aValue, nVal, pDocument ) )
++							lcl_GetOrdinalSuffix( aValue, (long)nStart, pDocument );
++
+ 						aValue.Insert( lcl_ValueString( (long)nStart, nMinDigits ), 0 );
++					}
+ 					else
+ 						aValue += lcl_ValueString( (long)nStart, nMinDigits );
+ 				}
+@@ -1417,6 +1515,8 @@
+ 					BOOL bError = FALSE;
+ 					BOOL bOverflow = FALSE;
+ 
++					BOOL bIsOrdinalSuffix = lcl_IsOrdinalSuffix( aValue, (long)nStartVal, pDocument );
++
+ 					for (rInner = nIStart;;)
+ 					{
+ 						if (!bError && !bOverflow)
+@@ -1467,15 +1569,19 @@
+ 							if ( nHeadNoneTail < 0 )
+ 							{
+ 								aStr = lcl_ValueString( nStringValue, nMinDigits );
+-								aStr += aValue;
++
++								if( bIsOrdinalSuffix )
++									lcl_GetOrdinalSuffix( aValue, (long)nStringValue, pDocument );
++								aCol[nCol].Insert( static_cast<SCROW>(nRow),
++									lcl_getSuperScriptCell( pDocument, aStr, aValue, eCellType, bIsOrdinalSuffix ) );
+ 							}
+ 							else
+ 							{
+ 								aStr = aValue;
+ 								aStr += lcl_ValueString( nStringValue, nMinDigits );
++								ScStringCell* pCell = new ScStringCell( aStr );
++								aCol[nCol].Insert( static_cast<SCROW>(nRow), pCell );
+ 							}
+-							ScStringCell* pCell = new ScStringCell( aStr );
+-							aCol[nCol].Insert(static_cast<SCROW>(nRow), pCell);
+ 						}
+ 
+ 						if (rInner == nIEnd) break;
