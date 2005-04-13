@@ -1,12 +1,13 @@
 --- /dev/null	
 +++ vcl/unx/gtk/a11y/atkwrapper.cxx	
-@@ -0,0 +1,294 @@
+@@ -0,0 +1,335 @@
 +#include <com/sun/star/uno/Any.hxx>
 +#include <com/sun/star/uno/Type.hxx>
 +#include <com/sun/star/uno/Sequence.hxx>
 +#include <com/sun/star/accessibility/AccessibleRole.hpp>
 +#include <com/sun/star/accessibility/XAccessible.hpp>
 +#include <com/sun/star/accessibility/XAccessibleContext.hpp>
++#include <com/sun/star/accessibility/XAccessibleComponent.hpp>
 +#include <com/sun/star/awt/XExtendedToolkit.hpp>
 +#include <com/sun/star/awt/XTopWindow.hpp>
 +#include <com/sun/star/awt/XTopWindowListener.hpp>
@@ -30,6 +31,8 @@
 +
 +static GObjectClass *parent_class = NULL;
 +static GHashTable   *uno_to_gobject = NULL;
++
++extern "C" {
 +
 +static gint
 +wrapper_get_n_children (AtkObject *accessible)
@@ -125,10 +128,66 @@
 +        (GInstanceInitFunc) atk_object_wrapper_init,
 +      } ;
 +      type = g_type_register_static (ATK_TYPE_OBJECT,
-+									 "OOoAtkObjectWrapper",
++									 "OOoAtkObj",
 +									 &typeInfo, (GTypeFlags)0) ;
 +    }
 +  return type;
++}
++
++static bool
++isOfType( uno::XInterface *pInterface, const uno::Type & rType )
++{
++	g_return_val_if_fail( pInterface != NULL, false );
++
++	bool bIs = false;
++	try {
++		uno::Any aRet = pInterface->queryInterface( rType );
++
++		bIs = ( ( typelib_TypeClass_INTERFACE == aRet.pType->eTypeClass ) &&
++				( aRet.pReserved != NULL ) );
++	} catch( const uno::Exception &e) { }
++	
++	return bIs;
++}
++
++// I suck: bite me.
++#include "atkcomponent.cxx"
++
++static GType
++ensureTypeFor( uno::XInterface *pAccessible )
++{
++	bool bIsComponent = false;
++	rtl::OString aTypeName( "OOoAtkObj" );
++
++	if( isOfType( pAccessible, accessibility::XAccessibleComponent::static_type() ) )
++	{
++		aTypeName += rtl::OString( "Comp" );
++		bIsComponent = true;
++	}
++
++	GType nType = g_type_from_name( aTypeName );
++	if( nType == G_TYPE_INVALID )
++	{
++		GTypeInfo aTypeInfo = {
++			sizeof( AtkObjectWrapperClass ),
++			NULL, NULL, NULL, NULL, NULL,
++			sizeof( AtkObjectWrapper ),
++			0, NULL
++		} ;
++		nType = g_type_register_static( ATK_TYPE_OBJECT_WRAPPER,
++										aTypeName, &aTypeInfo, (GTypeFlags)0 ) ;
++
++		if( bIsComponent )
++		{
++			static const GInterfaceInfo aComponentInfo =
++			{
++				(GInterfaceInitFunc) componentIfaceInit, NULL, NULL
++			};
++			g_type_add_interface_static (nType, ATK_TYPE_COMPONENT,
++										 &aComponentInfo);
++		}
++    }
++	return nType;
 +}
 +
 +static AtkRole mapToAtkRole( sal_Int16 nRole )
@@ -179,7 +238,7 @@
 +		MAP( ::accessibility::AccessibleRole::PAGE_TAB, ATK_ROLE_PAGE_TAB );
 +		MAP( ::accessibility::AccessibleRole::PAGE_TAB_LIST, ATK_ROLE_PAGE_TAB_LIST );
 +		MAP( ::accessibility::AccessibleRole::PANEL, ATK_ROLE_PANEL );
-+		MAP( ::accessibility::AccessibleRole::PARAGRAPH, ATK_ROLE_TEXT ); // - FIXME -
++		MAP( ::accessibility::AccessibleRole::PARAGRAPH, ATK_ROLE_PARAGRAPH );
 +		MAP( ::accessibility::AccessibleRole::PASSWORD_TEXT, ATK_ROLE_PASSWORD_TEXT );
 +		MAP( ::accessibility::AccessibleRole::POPUP_MENU, ATK_ROLE_POPUP_MENU );
 +		MAP( ::accessibility::AccessibleRole::PUSH_BUTTON, ATK_ROLE_PUSH_BUTTON );
@@ -208,33 +267,15 @@
 +		MAP( ::accessibility::AccessibleRole::WINDOW, ATK_ROLE_WINDOW );
 +#undef MAP
 +	}
++/* Roles unimplemented by OO.o / a11y:
++  ATK_ROLE_INVALID,      ATK_ROLE_ACCEL_LABEL,    ATK_ROLE_ANIMATION,
++  ATK_ROLE_ARROW,        ATK_ROLE_CALENDAR,       ATK_ROLE_DIAL,
++  ATK_ROLE_DRAWING_AREA, ATK_ROLE_HTML_CONTAINER, ATK_ROLE_IMAGE,
++  ATK_ROLE_TABLE_COLUMN_HEADER, ATK_ROLE_TABLE_ROW_HEADER, ATK_ROLE_TEAR_OFF_MENU_ITEM,
++  ATK_ROLE_TERMINAL,            ATK_ROLE_TREE_TABLE,       ATK_ROLE_RULER,
++  ATK_ROLE_APPLICATION,         ATK_ROLE_AUTOCOMPLETE,     ATK_ROLE_EDITBAR */
 +
-+/* Mostly unused ...
-+  ATK_ROLE_INVALID = 0, 
-+  ATK_ROLE_ACCEL_LABEL,
-+  ATK_ROLE_ANIMATION,
-+  ATK_ROLE_ARROW,
-+  ATK_ROLE_CALENDAR,
-+  ATK_ROLE_DIAL,
-+  ATK_ROLE_DIRECTORY_PANE,
-+  ATK_ROLE_DRAWING_AREA,
-+  ATK_ROLE_HTML_CONTAINER,
-+  ATK_ROLE_IMAGE,
-+  ATK_ROLE_POPUP_MENU,
-+  ATK_ROLE_TABLE_COLUMN_HEADER,
-+  ATK_ROLE_TABLE_ROW_HEADER,
-+  ATK_ROLE_TEAR_OFF_MENU_ITEM,
-+  ATK_ROLE_TERMINAL,
-+  ATK_ROLE_TOGGLE_BUTTON,
-+  ATK_ROLE_TREE,
-+  ATK_ROLE_TREE_TABLE,
-+  ATK_ROLE_PARAGRAPH,
-+  ATK_ROLE_RULER,
-+  ATK_ROLE_APPLICATION,
-+  ATK_ROLE_AUTOCOMPLETE,
-+  ATK_ROLE_EDITBAR,
-+  ATK_ROLE_LAST_DEFINED */
-+	return ATK_ROLE_INVALID;
++	return ATK_ROLE_UNKNOWN;
 +}
 +
 +static void initialize( AtkObjectWrapper *pWrap )
@@ -242,33 +283,19 @@
 +	AtkObject *pAObj = ATK_OBJECT( pWrap );
 +
 +	try {
-+
-+		uno::Reference< accessibility::XAccessibleContext > xContext;
-+		xContext = pWrap->mpAccessible->getAccessibleContext();
-+		if( !xContext.is() )
-+			return;
-+		pWrap->mpContext = xContext.get();
-+		pWrap->mpContext->acquire();
-+
-+		if( xContext.is() )
-+		{
-+			rtl::OString aValue;
-+			atk_object_set_role( pAObj, mapToAtkRole( xContext->getAccessibleRole() ) );
-+			aValue = rtl::OUStringToOString( xContext->getAccessibleName(), RTL_TEXTENCODING_UTF8 );
-+			atk_object_set_name( pAObj, aValue );
-+			aValue = rtl::OUStringToOString( xContext->getAccessibleDescription(), RTL_TEXTENCODING_UTF8 );
-+			atk_object_set_description( pAObj, aValue );
-+			g_warning ("Set descr '%s' !\n", (const sal_Char *) aValue );
-+
-+			uno::Reference< accessibility::XAccessible > xParent;
-+			xParent = xContext->getAccessibleParent();
-+			if( xParent.is() )
-+				atk_object_set_parent( pAObj, atk_object_wrapper_construct( xParent ) );
-+			else
-+				atk_object_set_parent( pAObj, atk_get_root() );
-+		}
++		uno::Reference< accessibility::XAccessibleContext > xContext = pWrap->mpContext;
++		rtl::OString aValue;
++		atk_object_set_role( pAObj, mapToAtkRole( xContext->getAccessibleRole() ) );
++		aValue = rtl::OUStringToOString( xContext->getAccessibleName(), RTL_TEXTENCODING_UTF8 );
++		atk_object_set_name( pAObj, aValue );
++		aValue = rtl::OUStringToOString( xContext->getAccessibleDescription(), RTL_TEXTENCODING_UTF8 );
++		atk_object_set_description( pAObj, aValue );
++		uno::Reference< accessibility::XAccessible > xParent;
++		xParent = xContext->getAccessibleParent();
++		if( xParent.is() )
++			atk_object_set_parent( pAObj, atk_object_wrapper_construct( xParent ) );
 +		else
-+				g_warning ("No XContent interface !\n" );
++			atk_object_set_parent( pAObj, atk_get_root() );
 +	} catch (const uno::Exception &e)
 +	{
 +		g_warning( "exception initializing accessible" );
@@ -278,20 +305,34 @@
 +AtkObject *
 +atk_object_wrapper_construct( const uno::Reference< accessibility::XAccessible > &rAccessible )
 +{
-+	GType type;
 +	gpointer cached;
-+	accessibility::XAccessible *accessible = rAccessible.get();
++	accessibility::XAccessible *pAccessible = rAccessible.get();
 +
-+	if( (cached = g_hash_table_lookup (uno_to_gobject, (gpointer) accessible) ) )
++	g_return_val_if_fail( pAccessible != NULL, NULL );
++
++	if( (cached = g_hash_table_lookup (uno_to_gobject, (gpointer) pAccessible) ) )
 +		return ATK_OBJECT (g_object_ref (cached));
 +
-+	type = ATK_TYPE_OBJECT_WRAPPER; // lookup / detect sub-type etc.
-+	cached = g_object_new (type, NULL);
-+	g_hash_table_insert( uno_to_gobject, (gpointer) accessible, cached );
-+	accessible->acquire();
-+	ATK_OBJECT_WRAPPER(cached)->mpAccessible = accessible;
++	uno::Reference< accessibility::XAccessibleContext > xContext;
++	xContext = pAccessible->getAccessibleContext();
 +
-+	initialize( ATK_OBJECT_WRAPPER( cached ) );
++	accessibility::XAccessibleContext *pContext = xContext.get();
 +
-+	return ATK_OBJECT( cached );
++	g_return_val_if_fail( xContext != NULL, NULL );
++
++	GType nType = ensureTypeFor( pContext );
++	cached = g_object_new( nType, NULL);
++	g_hash_table_insert( uno_to_gobject, (gpointer) pAccessible, cached );
++	AtkObjectWrapper *pWrap = ATK_OBJECT_WRAPPER( cached );
++
++	pAccessible->acquire();
++	pWrap->mpAccessible = pAccessible;
++	pContext->acquire();
++	pWrap->mpContext = pContext;
++
++	initialize( pWrap );
++
++	return ATK_OBJECT( pWrap );
 +}
++
++}; // extern C
