@@ -1,11 +1,12 @@
 --- /dev/null	
 +++ vcl/unx/gtk/a11y/atkwrapper.cxx	
-@@ -0,0 +1,335 @@
+@@ -0,0 +1,368 @@
 +#include <com/sun/star/uno/Any.hxx>
 +#include <com/sun/star/uno/Type.hxx>
 +#include <com/sun/star/uno/Sequence.hxx>
 +#include <com/sun/star/accessibility/AccessibleRole.hpp>
 +#include <com/sun/star/accessibility/XAccessible.hpp>
++#include <com/sun/star/accessibility/XAccessibleAction.hpp>
 +#include <com/sun/star/accessibility/XAccessibleContext.hpp>
 +#include <com/sun/star/accessibility/XAccessibleComponent.hpp>
 +#include <com/sun/star/awt/XExtendedToolkit.hpp>
@@ -32,6 +33,10 @@
 +static GObjectClass *parent_class = NULL;
 +static GHashTable   *uno_to_gobject = NULL;
 +
++#define TRY_START try {
++#define TRY_END() } catch(const uno::Exception &e) { }
++#define TRY_END_RETURN(v) } catch(const uno::Exception &e) { return v; }
++
 +extern "C" {
 +
 +static gint
@@ -50,7 +55,7 @@
 +	try {
 +			pChild = atk_object_wrapper_construct( pWrap->mpContext->getAccessibleChild( i ) );
 +	} catch( const uno::Exception &e) {
-+			g_warning ("Exception getting child %d", i );
++//			g_warning ("Exception getting child %d", i );
 +	}
 +	return pChild;
 +}
@@ -78,6 +83,7 @@
 +		wrapper->mpContext->release();
 +		wrapper->mpContext = NULL;
 +	}
++	delete wrapper->pConstCache;
 +
 +	parent_class->finalize (obj);
 +}
@@ -103,9 +109,10 @@
 +}
 +
 +static void
-+atk_object_wrapper_init (AtkObjectWrapper      *accessible,
-+						 AtkObjectWrapperClass *klass)
++atk_object_wrapper_init (AtkObjectWrapper      *pWrap,
++						 AtkObjectWrapperClass *pClass)
 +{
++	pWrap->pConstCache = new rtl::OString();
 +}
 +
 +GType
@@ -152,17 +159,44 @@
 +
 +// I suck: bite me.
 +#include "atkcomponent.cxx"
++#include "atkaction.cxx"
++
++const struct {
++		const char          *name;
++		GInterfaceInitFunc   aInit;
++		GType              (*aGetGIfaceType) (void);
++		const uno::Type &  (*aGetUnoType) (void *);
++} aTypeTable[] = {
++// re-location heaven:
++	{
++		"Comp", (GInterfaceInitFunc) componentIfaceInit,
++		atk_component_get_type,
++		accessibility::XAccessibleComponent::static_type
++	},
++	{
++		"Act",  (GInterfaceInitFunc) actionIfaceInit,
++		atk_action_get_type,
++		accessibility::XAccessibleAction::static_type
++	}
++};
++const int aTypeTableSize = G_N_ELEMENTS( aTypeTable );
 +
 +static GType
 +ensureTypeFor( uno::XInterface *pAccessible )
 +{
-+	bool bIsComponent = false;
++	int i;
++	int bTypes[ aTypeTableSize ] = { 0, };
 +	rtl::OString aTypeName( "OOoAtkObj" );
 +
-+	if( isOfType( pAccessible, accessibility::XAccessibleComponent::static_type() ) )
++	for( i = 0; i < aTypeTableSize; i++ )
 +	{
-+		aTypeName += rtl::OString( "Comp" );
-+		bIsComponent = true;
++		if( isOfType( pAccessible, aTypeTable[i].aGetUnoType(0) ) )
++		{
++			aTypeName += aTypeTable[i].name;
++			bTypes[i] = TRUE;
++		}
++//		g_message( "Accessible %p has type '%s' (%d)",
++//				   pAccessible, aTypeTable[i].name, bTypes[i] );
 +	}
 +
 +	GType nType = g_type_from_name( aTypeName );
@@ -177,15 +211,14 @@
 +		nType = g_type_register_static( ATK_TYPE_OBJECT_WRAPPER,
 +										aTypeName, &aTypeInfo, (GTypeFlags)0 ) ;
 +
-+		if( bIsComponent )
-+		{
-+			static const GInterfaceInfo aComponentInfo =
++		for( int i = 0; i < aTypeTableSize; i++ )
++			if( bTypes[i] )
 +			{
-+				(GInterfaceInitFunc) componentIfaceInit, NULL, NULL
-+			};
-+			g_type_add_interface_static (nType, ATK_TYPE_COMPONENT,
-+										 &aComponentInfo);
-+		}
++				GInterfaceInfo aIfaceInfo = { NULL, NULL, NULL };
++				aIfaceInfo.interface_init = aTypeTable[i].aInit;
++				g_type_add_interface_static (nType, aTypeTable[i].aGetGIfaceType(),
++											 &aIfaceInfo);
++			}
 +    }
 +	return nType;
 +}
