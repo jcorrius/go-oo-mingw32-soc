@@ -1,11 +1,12 @@
 --- /dev/null	
 +++ vcl/unx/gtk/a11y/atkwrapper.cxx	
-@@ -0,0 +1,368 @@
+@@ -0,0 +1,385 @@
 +#include <com/sun/star/uno/Any.hxx>
 +#include <com/sun/star/uno/Type.hxx>
 +#include <com/sun/star/uno/Sequence.hxx>
 +#include <com/sun/star/accessibility/AccessibleRole.hpp>
 +#include <com/sun/star/accessibility/XAccessible.hpp>
++#include <com/sun/star/accessibility/XAccessibleText.hpp>
 +#include <com/sun/star/accessibility/XAccessibleAction.hpp>
 +#include <com/sun/star/accessibility/XAccessibleContext.hpp>
 +#include <com/sun/star/accessibility/XAccessibleComponent.hpp>
@@ -34,194 +35,8 @@
 +static GHashTable   *uno_to_gobject = NULL;
 +
 +#define TRY_START try {
-+#define TRY_END() } catch(const uno::Exception &e) { }
++#define TRY_END } catch(const uno::Exception &e) { }
 +#define TRY_END_RETURN(v) } catch(const uno::Exception &e) { return v; }
-+
-+extern "C" {
-+
-+static gint
-+wrapper_get_n_children (AtkObject *accessible)
-+{
-+	AtkObjectWrapper *pWrap = ATK_OBJECT_WRAPPER( accessible );
-+	return pWrap->mpContext ? pWrap->mpContext->getAccessibleChildCount() : 0;
-+}
-+
-+static AtkObject *
-+wrapper_ref_child (AtkObject *accessible,
-+				   gint       i)
-+{
-+	AtkObjectWrapper *pWrap = ATK_OBJECT_WRAPPER( accessible );
-+	AtkObject *pChild = NULL;
-+	try {
-+			pChild = atk_object_wrapper_construct( pWrap->mpContext->getAccessibleChild( i ) );
-+	} catch( const uno::Exception &e) {
-+//			g_warning ("Exception getting child %d", i );
-+	}
-+	return pChild;
-+}
-+
-+static gint
-+wrapper_get_index_in_parent (AtkObject *accessible)
-+{
-+	AtkObjectWrapper *pWrap = ATK_OBJECT_WRAPPER( accessible );
-+	return pWrap->mpContext ? pWrap->mpContext->getAccessibleIndexInParent() : 0;
-+}
-+
-+static void
-+atk_object_wrapper_finalize (GObject *obj)
-+{
-+	AtkObjectWrapper *wrapper = ATK_OBJECT_WRAPPER (obj);
-+
-+	if (wrapper->mpAccessible)
-+	{
-+		g_hash_table_remove (uno_to_gobject, wrapper->mpAccessible);
-+		wrapper->mpAccessible->release();
-+		wrapper->mpAccessible = NULL;
-+	}
-+	if (wrapper->mpContext)
-+	{
-+		wrapper->mpContext->release();
-+		wrapper->mpContext = NULL;
-+	}
-+	delete wrapper->pConstCache;
-+
-+	parent_class->finalize (obj);
-+}
-+
-+static void
-+atk_object_wrapper_class_init (AtkObjectWrapperClass *klass)
-+{
-+  GObjectClass *gobject_class = G_OBJECT_CLASS( klass );
-+  AtkObjectClass *atk_class = ATK_OBJECT_CLASS( klass );
-+
-+  parent_class = (GObjectClass *) g_type_class_peek_parent (klass);
-+
-+  // GObject methods
-+  gobject_class->finalize = atk_object_wrapper_finalize;
-+
-+  // AtkObject methods
-+  atk_class->get_n_children = wrapper_get_n_children;
-+  atk_class->ref_child = wrapper_ref_child;
-+  atk_class->get_index_in_parent = wrapper_get_index_in_parent;
-+
-+  // We assume direct pointer comparison is sufficient...
-+  uno_to_gobject = g_hash_table_new (NULL, NULL);
-+}
-+
-+static void
-+atk_object_wrapper_init (AtkObjectWrapper      *pWrap,
-+						 AtkObjectWrapperClass *pClass)
-+{
-+	pWrap->pConstCache = new rtl::OString();
-+}
-+
-+GType
-+atk_object_wrapper_get_type (void)
-+{
-+  static GType type = 0;
-+
-+  if (!type)
-+    {
-+      static const GTypeInfo typeInfo =
-+      {
-+        sizeof (AtkObjectWrapperClass),
-+        (GBaseInitFunc) NULL,
-+        (GBaseFinalizeFunc) NULL,
-+        (GClassInitFunc) atk_object_wrapper_class_init,
-+        (GClassFinalizeFunc) NULL,
-+        NULL,
-+        sizeof (AtkObjectWrapper),
-+        0,
-+        (GInstanceInitFunc) atk_object_wrapper_init,
-+      } ;
-+      type = g_type_register_static (ATK_TYPE_OBJECT,
-+									 "OOoAtkObj",
-+									 &typeInfo, (GTypeFlags)0) ;
-+    }
-+  return type;
-+}
-+
-+static bool
-+isOfType( uno::XInterface *pInterface, const uno::Type & rType )
-+{
-+	g_return_val_if_fail( pInterface != NULL, false );
-+
-+	bool bIs = false;
-+	try {
-+		uno::Any aRet = pInterface->queryInterface( rType );
-+
-+		bIs = ( ( typelib_TypeClass_INTERFACE == aRet.pType->eTypeClass ) &&
-+				( aRet.pReserved != NULL ) );
-+	} catch( const uno::Exception &e) { }
-+	
-+	return bIs;
-+}
-+
-+// I suck: bite me.
-+#include "atkcomponent.cxx"
-+#include "atkaction.cxx"
-+
-+const struct {
-+		const char          *name;
-+		GInterfaceInitFunc   aInit;
-+		GType              (*aGetGIfaceType) (void);
-+		const uno::Type &  (*aGetUnoType) (void *);
-+} aTypeTable[] = {
-+// re-location heaven:
-+	{
-+		"Comp", (GInterfaceInitFunc) componentIfaceInit,
-+		atk_component_get_type,
-+		accessibility::XAccessibleComponent::static_type
-+	},
-+	{
-+		"Act",  (GInterfaceInitFunc) actionIfaceInit,
-+		atk_action_get_type,
-+		accessibility::XAccessibleAction::static_type
-+	}
-+};
-+const int aTypeTableSize = G_N_ELEMENTS( aTypeTable );
-+
-+static GType
-+ensureTypeFor( uno::XInterface *pAccessible )
-+{
-+	int i;
-+	int bTypes[ aTypeTableSize ] = { 0, };
-+	rtl::OString aTypeName( "OOoAtkObj" );
-+
-+	for( i = 0; i < aTypeTableSize; i++ )
-+	{
-+		if( isOfType( pAccessible, aTypeTable[i].aGetUnoType(0) ) )
-+		{
-+			aTypeName += aTypeTable[i].name;
-+			bTypes[i] = TRUE;
-+		}
-+//		g_message( "Accessible %p has type '%s' (%d)",
-+//				   pAccessible, aTypeTable[i].name, bTypes[i] );
-+	}
-+
-+	GType nType = g_type_from_name( aTypeName );
-+	if( nType == G_TYPE_INVALID )
-+	{
-+		GTypeInfo aTypeInfo = {
-+			sizeof( AtkObjectWrapperClass ),
-+			NULL, NULL, NULL, NULL, NULL,
-+			sizeof( AtkObjectWrapper ),
-+			0, NULL
-+		} ;
-+		nType = g_type_register_static( ATK_TYPE_OBJECT_WRAPPER,
-+										aTypeName, &aTypeInfo, (GTypeFlags)0 ) ;
-+
-+		for( int i = 0; i < aTypeTableSize; i++ )
-+			if( bTypes[i] )
-+			{
-+				GInterfaceInfo aIfaceInfo = { NULL, NULL, NULL };
-+				aIfaceInfo.interface_init = aTypeTable[i].aInit;
-+				g_type_add_interface_static (nType, aTypeTable[i].aGetGIfaceType(),
-+											 &aIfaceInfo);
-+			}
-+    }
-+	return nType;
-+}
 +
 +static AtkRole mapToAtkRole( sal_Int16 nRole )
 +{
@@ -311,6 +126,203 @@
 +	return ATK_ROLE_UNKNOWN;
 +}
 +
++static gchar *
++mapToGChar( rtl::OUString aString )
++{
++	rtl::OString aUtf8 = rtl::OUStringToOString( aString, RTL_TEXTENCODING_UTF8 );
++	return g_strdup( aUtf8 );
++}
++
++extern "C" {
++
++static gint
++wrapper_get_n_children (AtkObject *accessible)
++{
++	AtkObjectWrapper *pWrap = ATK_OBJECT_WRAPPER( accessible );
++	return pWrap->mpContext ? pWrap->mpContext->getAccessibleChildCount() : 0;
++}
++
++static AtkObject *
++wrapper_ref_child (AtkObject *accessible,
++				   gint       i)
++{
++	AtkObjectWrapper *pWrap = ATK_OBJECT_WRAPPER( accessible );
++	AtkObject *pChild = NULL;
++	try {
++			pChild = atk_object_wrapper_construct( pWrap->mpContext->getAccessibleChild( i ) );
++	} catch( const uno::Exception &e) {
++//			g_warning ("Exception getting child %d", i );
++	}
++	return pChild;
++}
++
++static gint
++wrapper_get_index_in_parent (AtkObject *accessible)
++{
++	AtkObjectWrapper *pWrap = ATK_OBJECT_WRAPPER( accessible );
++	return pWrap->mpContext ? pWrap->mpContext->getAccessibleIndexInParent() : 0;
++}
++
++static void
++atk_object_wrapper_finalize (GObject *obj)
++{
++	AtkObjectWrapper *wrapper = ATK_OBJECT_WRAPPER (obj);
++
++	if (wrapper->mpAccessible)
++	{
++		g_assert( g_hash_table_lookup (uno_to_gobject, wrapper->mpAccessible) );
++		g_hash_table_remove (uno_to_gobject, wrapper->mpAccessible);
++		wrapper->mpAccessible->release();
++		wrapper->mpAccessible = NULL;
++	}
++	if (wrapper->mpContext)
++	{
++		wrapper->mpContext->release();
++		wrapper->mpContext = NULL;
++	}
++	delete wrapper->pConstCache;
++
++	parent_class->finalize (obj);
++}
++
++static void
++atk_object_wrapper_class_init (AtkObjectWrapperClass *klass)
++{
++  GObjectClass *gobject_class = G_OBJECT_CLASS( klass );
++  AtkObjectClass *atk_class = ATK_OBJECT_CLASS( klass );
++
++  parent_class = (GObjectClass *) g_type_class_peek_parent (klass);
++
++  // GObject methods
++  gobject_class->finalize = atk_object_wrapper_finalize;
++
++  // AtkObject methods
++  atk_class->get_n_children = wrapper_get_n_children;
++  atk_class->ref_child = wrapper_ref_child;
++  atk_class->get_index_in_parent = wrapper_get_index_in_parent;
++}
++
++static void
++atk_object_wrapper_init (AtkObjectWrapper      *pWrap,
++						 AtkObjectWrapperClass *pClass)
++{
++	pWrap->pConstCache = new rtl::OString();
++}
++
++GType
++atk_object_wrapper_get_type (void)
++{
++  static GType type = 0;
++
++  if (!type)
++    {
++      static const GTypeInfo typeInfo =
++      {
++        sizeof (AtkObjectWrapperClass),
++        (GBaseInitFunc) NULL,
++        (GBaseFinalizeFunc) NULL,
++        (GClassInitFunc) atk_object_wrapper_class_init,
++        (GClassFinalizeFunc) NULL,
++        NULL,
++        sizeof (AtkObjectWrapper),
++        0,
++        (GInstanceInitFunc) atk_object_wrapper_init,
++      } ;
++      type = g_type_register_static (ATK_TYPE_OBJECT,
++									 "OOoAtkObj",
++									 &typeInfo, (GTypeFlags)0) ;
++    }
++  return type;
++}
++
++static bool
++isOfType( uno::XInterface *pInterface, const uno::Type & rType )
++{
++	g_return_val_if_fail( pInterface != NULL, false );
++
++	bool bIs = false;
++	try {
++		uno::Any aRet = pInterface->queryInterface( rType );
++
++		bIs = ( ( typelib_TypeClass_INTERFACE == aRet.pType->eTypeClass ) &&
++				( aRet.pReserved != NULL ) );
++	} catch( const uno::Exception &e) { }
++	
++	return bIs;
++}
++
++// I suck: bite me.
++#include "atkcomponent.cxx"
++#include "atkaction.cxx"
++#include "atktext.cxx"
++
++const struct {
++		const char          *name;
++		GInterfaceInitFunc   aInit;
++		GType              (*aGetGIfaceType) (void);
++		const uno::Type &  (*aGetUnoType) (void *);
++} aTypeTable[] = {
++// re-location heaven:
++	{
++		"Comp", (GInterfaceInitFunc) componentIfaceInit,
++		atk_component_get_type,
++		accessibility::XAccessibleComponent::static_type
++	},
++	{
++		"Act",  (GInterfaceInitFunc) actionIfaceInit,
++		atk_action_get_type,
++		accessibility::XAccessibleAction::static_type
++	},
++	{
++		"Txt",  (GInterfaceInitFunc) textIfaceInit,
++		atk_text_get_type,
++		accessibility::XAccessibleText::static_type
++	}
++};
++const int aTypeTableSize = G_N_ELEMENTS( aTypeTable );
++
++static GType
++ensureTypeFor( uno::XInterface *pAccessible )
++{
++	int i;
++	int bTypes[ aTypeTableSize ] = { 0, };
++	rtl::OString aTypeName( "OOoAtkObj" );
++
++	for( i = 0; i < aTypeTableSize; i++ )
++	{
++		if( isOfType( pAccessible, aTypeTable[i].aGetUnoType(0) ) )
++		{
++			aTypeName += aTypeTable[i].name;
++			bTypes[i] = TRUE;
++		}
++//		g_message( "Accessible %p has type '%s' (%d)",
++//				   pAccessible, aTypeTable[i].name, bTypes[i] );
++	}
++
++	GType nType = g_type_from_name( aTypeName );
++	if( nType == G_TYPE_INVALID )
++	{
++		GTypeInfo aTypeInfo = {
++			sizeof( AtkObjectWrapperClass ),
++			NULL, NULL, NULL, NULL, NULL,
++			sizeof( AtkObjectWrapper ),
++			0, NULL
++		} ;
++		nType = g_type_register_static( ATK_TYPE_OBJECT_WRAPPER,
++										aTypeName, &aTypeInfo, (GTypeFlags)0 ) ;
++
++		for( int i = 0; i < aTypeTableSize; i++ )
++			if( bTypes[i] )
++			{
++				GInterfaceInfo aIfaceInfo = { NULL, NULL, NULL };
++				aIfaceInfo.interface_init = aTypeTable[i].aInit;
++				g_type_add_interface_static (nType, aTypeTable[i].aGetGIfaceType(),
++											 &aIfaceInfo);
++			}
++    }
++	return nType;
++}
++
 +static void initialize( AtkObjectWrapper *pWrap )
 +{
 +	AtkObject *pAObj = ATK_OBJECT( pWrap );
@@ -343,14 +355,19 @@
 +
 +	g_return_val_if_fail( pAccessible != NULL, NULL );
 +
++	// We assume direct pointer comparison is sufficient...
++	if( !uno_to_gobject )
++		uno_to_gobject = g_hash_table_new (NULL, NULL);
++
 +	if( (cached = g_hash_table_lookup (uno_to_gobject, (gpointer) pAccessible) ) )
 +		return ATK_OBJECT (g_object_ref (cached));
 +
 +	uno::Reference< accessibility::XAccessibleContext > xContext;
-+	xContext = pAccessible->getAccessibleContext();
++	try {
++		xContext = pAccessible->getAccessibleContext();
++	} catch(const uno::Exception &e) {}
 +
 +	accessibility::XAccessibleContext *pContext = xContext.get();
-+
 +	g_return_val_if_fail( xContext != NULL, NULL );
 +
 +	GType nType = ensureTypeFor( pContext );
