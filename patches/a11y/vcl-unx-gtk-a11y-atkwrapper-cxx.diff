@@ -1,6 +1,6 @@
 --- /dev/null	
 +++ vcl/unx/gtk/a11y/atkwrapper.cxx	
-@@ -0,0 +1,403 @@
+@@ -0,0 +1,432 @@
 +#include <com/sun/star/uno/Any.hxx>
 +#include <com/sun/star/uno/Type.hxx>
 +#include <com/sun/star/uno/Sequence.hxx>
@@ -39,6 +39,17 @@
 +#define TRY_START try {
 +#define TRY_END } catch(const uno::Exception &e) { }
 +#define TRY_END_RETURN(v) } catch(const uno::Exception &e) { return v; }
++
++static G_CONST_RETURN gchar *
++getAsConst( rtl::OUString rString )
++{
++	static const int nMax = 10;
++	static rtl::OString aUgly[nMax];
++	static int nIdx = 0;
++	nIdx = (nIdx + 1) % nMax;
++	aUgly[nIdx] = rtl::OUStringToOString( rString, RTL_TEXTENCODING_UTF8 );
++	return aUgly[ nIdx ];
++}
 +
 +static AtkRole mapToAtkRole( sal_Int16 nRole )
 +{
@@ -137,32 +148,53 @@
 +
 +extern "C" {
 +
-+static gint
-+wrapper_get_n_children (AtkObject *accessible)
++static uno::Reference< accessibility::XAccessibleContext >
++	getContext( AtkObject *pObject )
 +{
-+	AtkObjectWrapper *pWrap = ATK_OBJECT_WRAPPER( accessible );
-+	return pWrap->mpContext ? pWrap->mpContext->getAccessibleChildCount() : 0;
++	AtkObjectWrapper *pWrap = ATK_OBJECT_WRAPPER( pObject );
++	return uno::Reference< accessibility::XAccessibleContext >(
++		pWrap->mpContext, uno::UNO_QUERY );
++}
++
++static G_CONST_RETURN gchar *
++wrapper_get_name( AtkObject *pObject )
++{
++	TRY_START
++	return getAsConst( getContext( pObject )->getAccessibleName() );
++	TRY_END_RETURN( NULL )
++}
++
++static G_CONST_RETURN gchar *
++wrapper_get_description( AtkObject *pObject )
++{
++	TRY_START
++	return getAsConst( getContext( pObject )->getAccessibleDescription() );
++	TRY_END_RETURN( NULL )
++}
++
++static gint
++wrapper_get_n_children( AtkObject *pObject )
++{
++	TRY_START
++	return getContext( pObject )->getAccessibleChildCount();
++	TRY_END_RETURN( 0 )
 +}
 +
 +static AtkObject *
-+wrapper_ref_child (AtkObject *accessible,
-+				   gint       i)
++wrapper_ref_child( AtkObject *pObject,
++				   gint       i )
 +{
-+	AtkObjectWrapper *pWrap = ATK_OBJECT_WRAPPER( accessible );
-+	AtkObject *pChild = NULL;
-+	try {
-+			pChild = atk_object_wrapper_construct( pWrap->mpContext->getAccessibleChild( i ) );
-+	} catch( const uno::Exception &e) {
-+//			g_warning ("Exception getting child %d", i );
-+	}
-+	return pChild;
++	TRY_START
++	return atk_wrapper_get( getContext( pObject )->getAccessibleChild( i ) );
++	TRY_END_RETURN( NULL )
 +}
 +
 +static gint
-+wrapper_get_index_in_parent (AtkObject *accessible)
++wrapper_get_index_in_parent( AtkObject *pObject )
 +{
-+	AtkObjectWrapper *pWrap = ATK_OBJECT_WRAPPER( accessible );
-+	return pWrap->mpContext ? pWrap->mpContext->getAccessibleIndexInParent() : 0;
++	TRY_START
++	return getContext( pObject )->getAccessibleIndexInParent();
++	TRY_END_RETURN( 0 )
 +}
 +
 +static void
@@ -188,7 +220,6 @@
 +		pWrap->mpContext->release();
 +		pWrap->mpContext = NULL;
 +	}
-+	delete pWrap->pConstCache;
 +
 +	parent_class->finalize( obj );
 +}
@@ -205,6 +236,8 @@
 +  gobject_class->finalize = atk_object_wrapper_finalize;
 +
 +  // AtkObject methods
++  atk_class->get_name = wrapper_get_name;
++  atk_class->get_description = wrapper_get_description;
 +  atk_class->get_n_children = wrapper_get_n_children;
 +  atk_class->ref_child = wrapper_ref_child;
 +  atk_class->get_index_in_parent = wrapper_get_index_in_parent;
@@ -214,7 +247,6 @@
 +atk_object_wrapper_init (AtkObjectWrapper      *pWrap,
 +						 AtkObjectWrapperClass *pClass)
 +{
-+	pWrap->pConstCache = new rtl::OString();
 +}
 +
 +GType
@@ -337,17 +369,14 @@
 +
 +	try {
 +		uno::Reference< accessibility::XAccessibleContext > xContext = pWrap->mpContext;
-+		// FIXME: a quick hack for now - should not store state.
++
 +		rtl::OString aValue;
 +		atk_object_set_role( pAObj, mapToAtkRole( xContext->getAccessibleRole() ) );
-+		aValue = rtl::OUStringToOString( xContext->getAccessibleName(), RTL_TEXTENCODING_UTF8 );
-+		atk_object_set_name( pAObj, aValue );
-+		aValue = rtl::OUStringToOString( xContext->getAccessibleDescription(), RTL_TEXTENCODING_UTF8 );
-+		atk_object_set_description( pAObj, aValue );
++
 +		uno::Reference< accessibility::XAccessible > xParent;
 +		xParent = xContext->getAccessibleParent();
 +		if( xParent.is() )
-+			atk_object_set_parent( pAObj, atk_object_wrapper_construct( xParent ) );
++			atk_object_set_parent( pAObj, atk_wrapper_get( xParent ) );
 +		else
 +			atk_object_set_parent( pAObj, atk_get_root() );
 +
@@ -366,7 +395,7 @@
 +}
 +
 +AtkObject *
-+atk_object_wrapper_construct( const uno::Reference< accessibility::XAccessible > &rAccessible )
++atk_wrapper_get( const uno::Reference< accessibility::XAccessible > &rAccessible )
 +{
 +	gpointer cached;
 +	accessibility::XAccessible *pAccessible = rAccessible.get();
