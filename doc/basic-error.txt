@@ -118,3 +118,97 @@ Generic coercion argument 4(/5) from type 0  [ Array() -> Void !? why ? ]
 
 So - the question is why is the 'Array()' not getting converted
 properly (?)
+
+Suspicious of sbunoobj.cxx:
+
+Any sbxToUnoValue( SbxVariable* pVar, const Type& rType, Property* pUnoProperty )
+
+Some printouts:
+
+sbxToUnoValue to type = com.sun.star.frame.XDispatchProvider
+sbxToUnoValue to type = string
+sbxToUnoValue to type = string
+sbxToUnoValue to type = long
+sbxToUnoValue to type = []com.sun.star.beans.PropertyValue
+Sequence section ...
+Is an SbxDimArray (0) ...
+
+URGH
+    So - the real problem is that we create a '0 dimensional array' when
+we have no arguments: Array() is 0 dimensional [ Why !? ]
+
+    This patch - appears to fix the symptoms:
+
+--- basic/source/classes/sbunoobj.cxx	12 Oct 2004 10:58:10 -0000	1.25.44.3
++++ basic/source/classes/sbunoobj.cxx	18 Apr 2005 14:58:49 -0000
+@@ -1089,9 +1097,10 @@ Any sbxToUnoValue( SbxVariable* pVar, co
+ 
+ 				short nDims = pArray->GetDims();
+ 
+ 				// Normal case: One dimensional array
+ 				sal_Int32 nLower, nUpper;
+-				if( nDims == 1 && pArray->GetDim32( 1, nLower, nUpper ) )
++				if( ( nDims == 1 && pArray->GetDim32( 1, nLower, nUpper ) ) ||
++					nDims == 0 && (nLower = 0, nUpper = -1, 1) )
+ 				{
+ 					sal_Int32 nSeqSize = nUpper - nLower + 1;
+ 
+
+    ** Diffing between OpenOffice_1_1_3 and OpenOffice_1_1_4 it
+_Seems_ that this change introduced this problem:
+
+@@ -980,16 +1087,17 @@ Any sbxToUnoValue( SbxVariable* pVar, co
+ 				SbxBase* pObj = (SbxBase*)xObj;
+ 				SbxDimArray* pArray = (SbxDimArray*)pObj;
+ 
+-				// Instanz der geforderten Sequence erzeugen
+-				Reference< XIdlClass > xIdlTargetClass = TypeToIdlClass( rType );
+-				xIdlTargetClass->createObject( aRetVal );
++				short nDims = pArray->GetDims();
+ 
+-				// es muss ein eindimensionales Array sein
++				// Normal case: One dimensional array
+ 				sal_Int32 nLower, nUpper;
+-				if( pArray->GetDims() == 1 && pArray->GetDim32( 1, nLower, nUpper ) )
++				if( nDims == 1 && pArray->GetDim32( 1, nLower, nUpper ) )
+
+    By not initializing the default value of a 0 dimensional array to
+the correct type; with the 'createObject' method.
+
+
+corereflection debug diff:
+
+--- stoc/source/corereflection/criface.cxx	9 Jan 2004 19:01:26 -0000	1.8.38.1
++++ stoc/source/corereflection/criface.cxx	18 Apr 2005 14:59:17 -0000
+@@ -690,7 +690,10 @@ Any SAL_CALL IdlInterfaceMethodImpl::inv
+ 			ppParamTypes[nPos] = 0;
+ 			TYPELIB_DANGER_GET( ppParamTypes + nPos, pParams[nPos].pTypeRef );
+ 			typelib_TypeDescription * pTD = ppParamTypes[nPos];
+-			
++
++//			fprintf(stderr, "Try to coerce argument %d(/%d) to type %d\n",
++//					nPos, nParams, pTD->eTypeClass );
++
+ 			ppUnoArgs[nPos] = alloca( pTD->nSize );
+ 			if (pParams[nPos].bIn)
+ 			{
+@@ -724,6 +727,10 @@ Any SAL_CALL IdlInterfaceMethodImpl::inv
+ 				{
+ 					typelib_TypeDescription * pValueTD = 0;
+ 					TYPELIB_DANGER_GET( &pValueTD, pCppArgs[nPos].getValueTypeRef() );
++
++//					fprintf(stderr, "Generic  coercion argument %d(/%d) from type %d\n",
++//							nPos, nParams, pValueTD->eTypeClass );
++			
+ 					// construct temp uno val to do proper assignment: todo opt
+ 					void * pTemp = alloca( pValueTD->nSize );
+ 					uno_copyAndConvertData(
+@@ -734,6 +741,8 @@ Any SAL_CALL IdlInterfaceMethodImpl::inv
+ 					// assignment does simple conversion
+ 					bAssign = uno_assignData(
+ 						ppUnoArgs[nPos], pTD, pTemp, pValueTD, 0, 0, 0 );
++//					if( !bAssign )
++//						fprintf(stderr, "Failed to coerce argument\n" );
+ 					uno_destructData(
+ 						pTemp, pValueTD, 0 );
+ 					TYPELIB_DANGER_RELEASE( pValueTD );
