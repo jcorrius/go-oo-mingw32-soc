@@ -11,15 +11,12 @@ if test "z$1" == "z--clean"; then
     exit 1;
 fi
 
-# (cd bonobo && ./autogen.sh)
-# echo "NOT YET."
-
 aclocal $ACLOCAL_FLAGS
 automake --gnu --add-missing --copy
 # intltoolize --copy --force --automake
 autoconf
 if test "x$NOCONFIGURE" = "x"; then
-    ./configure $@
+    ./configure "$@"
 else
     echo "Skipping configure process."
 fi
