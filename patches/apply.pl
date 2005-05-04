@@ -108,6 +108,28 @@ sub select_subset ($$)
     return @result;
 }
 
+sub canonicalize_milestone($)
+{
+    my $milestone = shift;
+    $milestone =~ m/([0-9]+)$/ || return $milestone;
+    my $stem = $milestone;
+    my $num = $1;
+    $num = sprintf("%04d", $num);
+    $stem =~ s/([0-9]+)$//;
+    $milestone = $stem . $num;
+#    print "Canonicalize milestone to '$milestone'\n";
+    return $milestone;
+}
+
+sub milestone_cmp($$)
+{
+    my $a = shift;
+    my $b = shift;
+    $a = canonicalize_milestone($a);
+    $b = canonicalize_milestone($b);
+    return $a cmp $b;
+}
+
 sub rules_pass($)
 {
     my $original_rule = shift;
@@ -117,13 +139,13 @@ sub rules_pass($)
 	my $lastrule = $rule;
 #	print "verify rule '$rule'\n";
 	# less than or equal (<=)
-	if ($rule =~ s/\<=\s*(\S+)// && ($tag cmp $1) > 0 ) { return 0; };
+	if ($rule =~ s/\<=\s*(\S+)// && milestone_cmp ($tag, $1) > 0 ) { return 0; };
 	# less than (<)
-	if ($rule =~ s/\<\s*(\S+)// && ($tag cmp $1) >= 0 ) { return 0; };
+	if ($rule =~ s/\<\s*(\S+)// && milestone_cmp ($tag, $1) >= 0 ) { return 0; };
 	# greater than or equal (>=)
-	if ($rule =~ s/\>=\s*(\S+)// && ($tag cmp $1) < 0 ) { return 0; }; 
+	if ($rule =~ s/\>=\s*(\S+)// && milestone_cmp ($tag, $1) < 0 ) { return 0; }; 
 	# greater than (>)
-	if ($rule =~ s/\>\s*(\S+)// && ($tag cmp $1) <= 0 ) { return 0; }; 
+	if ($rule =~ s/\>\s*(\S+)// && milestone_cmp ($tag, $1) <= 0 ) { return 0; }; 
 
 	$rule =~ s/^\s*//;
 
