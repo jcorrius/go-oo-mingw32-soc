@@ -1,6 +1,6 @@
---- /dev/null	2005-03-19 20:36:14.000000000 +0100
-+++ connectivity/source/drivers/evoab1.5/NResultSet.cxx	2005-04-19 18:00:29.000000000 +0200
-@@ -0,0 +1,886 @@
+--- /dev/null	2005-03-20 01:06:14.000000000 +0530
++++ connectivity/source/drivers/evoab1.5/NResultSet.cxx	2005-05-09 20:41:48.000000000 +0530
+@@ -0,0 +1,1025 @@
 + /*************************************************************************
 + *
 + *  $RCSfile$
@@ -318,7 +318,7 @@
 +	::osl::MutexGuard aGuard(m_aMutex);
 +
 +	m_pStatement	= NULL;
-+	m_xMetaData		= NULL;
++	m_xMetaData	= NULL;
 +}
 +// -------------------------------------------------------------------------
 +Any SAL_CALL OEvoabResultSet::queryInterface( const Type & rType ) throw(RuntimeException)
@@ -339,25 +339,167 @@
 +	return ::comphelper::concatSequences(aTypes.getTypes(),OResultSet_BASE::getTypes());
 +}
 +
++static int 
++whichAddress(int value)
++{
++	int fieldEnum;
++	switch (value) 
++	{
++		case HOME_ADDR_LINE1:
++		case HOME_ADDR_LINE2:
++		case HOME_CITY:
++		case HOME_STATE:
++		case HOME_COUNTRY:
++		case HOME_ZIP:
++			bIsEVO_2_2 ? fieldEnum=89:fieldEnum=88/*E_CONTACT_ADDRESS_HOME*/;break; 
++		case WORK_ADDR_LINE1:
++		case WORK_ADDR_LINE2:
++		case WORK_CITY:
++		case WORK_STATE:
++		case WORK_COUNTRY:
++		case WORK_ZIP: 
++			bIsEVO_2_2 ? fieldEnum = 90:fieldEnum=89/*E_CONTACT_ADDRESS_WORK*/;break;
++		case OTHER_ADDR_LINE1:
++		case OTHER_ADDR_LINE2:
++		case OTHER_CITY:
++		case OTHER_STATE:
++		case OTHER_COUNTRY:
++		case OTHER_ZIP:
++			bIsEVO_2_2 ? fieldEnum=91:fieldEnum= 90/*E_	CONTACT_ADDRESS_OTHER*/; break;
++    	default: fieldEnum=89;        
++	  }
++	return fieldEnum;
++}
++
++/*
++* This function decides the default column values based on the first field of EContactAddress.
++* The search order is Work->Home->other(defaults).
++*/
++static EContactAddress * 
++getDefaultContactAddress(EContact *pContact,int *value) 
++{
++	EContactAddress *ec = (EContactAddress *)e_contact_get(pContact,whichAddress(WORK_ADDR_LINE1));
++	if ( ec && (strlen(ec->street)>0) ) 
++	{
++		*value= *value +WORK_ADDR_LINE1 -1;
++		return ec;	
++	}
++	else  
++		{
++			ec = (EContactAddress *)e_contact_get(pContact,whichAddress(HOME_ADDR_LINE1));
++			if ( ec && (strlen(ec->street)>0) ) 
++			{ 
++				*value=*value+HOME_ADDR_LINE1-1;
++				return ec;
++			}
++		}
++
++	*value=*value+OTHER_ADDR_LINE1-1;
++	return (EContactAddress *)e_contact_get(pContact,whichAddress(OTHER_ADDR_LINE1));
++}
++
++static EContactAddress* 
++getContactAddress(EContact *pContact, int * address_enum) 
++{ 
++	EContactAddress *ec = NULL;
++    switch (*address_enum) {
++	
++        case DEFAULT_ADDR_LINE1:
++        case DEFAULT_ADDR_LINE2:
++        case DEFAULT_CITY:
++        case DEFAULT_STATE:
++        case DEFAULT_COUNTRY:
++        case DEFAULT_ZIP:
++			ec = getDefaultContactAddress(pContact,address_enum);break;
++   		default:
++			ec = (EContactAddress *)e_contact_get(pContact,whichAddress(*address_enum));
++    }
++	return ec;
++}
++
++static bool 
++handleSplitAddress(EContact *pContact,GValue *pStackValue,int value) 
++{
++
++	EContactAddress *ec = getContactAddress(pContact,&value) ;
++
++	if (ec==NULL)
++		return true;
++
++	switch (value) {
++    	case WORK_ADDR_LINE1:
++		    g_value_set_string(pStackValue,ec->street ); break;
++	    case WORK_ADDR_LINE2:
++		    g_value_set_string(pStackValue,ec->po ); break;
++    	case WORK_CITY: 
++	    	g_value_set_string(pStackValue,ec->locality ); break;
++    	case WORK_STATE:
++ 	    	g_value_set_string(pStackValue,ec->region ); break;
++    	case WORK_COUNTRY:
++	    	g_value_set_string(pStackValue,ec->country ); break;
++    	case WORK_ZIP:
++	    	g_value_set_string(pStackValue,ec->code ); break;
++
++        case HOME_ADDR_LINE1:
++			g_value_set_string(pStackValue,ec->street ); break;
++        case HOME_ADDR_LINE2:
++			g_value_set_string(pStackValue,ec->po ); break;
++        case HOME_CITY:
++			g_value_set_string(pStackValue,ec->locality ); break;
++        case HOME_STATE:
++			g_value_set_string(pStackValue,ec->region ); break;
++        case HOME_COUNTRY:
++			g_value_set_string(pStackValue,ec->country ); break;
++        case HOME_ZIP:
++			g_value_set_string(pStackValue,ec->code ); break;
++
++        case OTHER_ADDR_LINE1:
++			g_value_set_string(pStackValue,ec->street ); break;
++        case OTHER_ADDR_LINE2:
++			g_value_set_string(pStackValue,ec->po ); break;
++        case OTHER_CITY:
++			g_value_set_string(pStackValue,ec->locality ); break;
++        case OTHER_STATE:
++			g_value_set_string(pStackValue,ec->region ); break;
++        case OTHER_COUNTRY:
++			g_value_set_string(pStackValue,ec->country ); break;
++        case OTHER_ZIP:
++			g_value_set_string(pStackValue,ec->code ); break;
++
++	}
++
++return false;
++}
 +// -------------------------------------------------------------------------
 +// XRow Interface 
 +
 +bool
 +OEvoabResultSet::getValue( sal_Int32 nColumnNum, GType nType, GValue *pStackValue)
 +{
-+	const GParamSpec *pSpec = evoab::getField (nColumnNum - 1);
++	const ColumnProperty * pSpecs = evoab::getField (nColumnNum - 1);
++	GParamSpec *pSpec = pSpecs->pField;
++	gboolean bIsSplittedColumn=pSpecs->bIsSplittedValue;
 +	EContact *pContact = getCur();
-+	
-+	m_bWasNull = true;
-+	if (!pSpec || !pContact)
-+		return false;
 +
++	m_bWasNull = true;
++	if (!pSpec || !pContact) {
++		return false;
++		}
 +	if (G_PARAM_SPEC_VALUE_TYPE (pSpec) != nType)
 +	{
 +		g_warning ("Wrong type");
 +		return false;
 +	}
 +	g_value_init (pStackValue, nType);
++	if (bIsSplittedColumn) {
++		for (int i=0;i<OTHER_ZIP;i++) {
++			if (0==strcmp(g_param_spec_get_name(( GParamSpec * )pSpec),evo_addr[i].pColumnName)) {
++				m_bWasNull = handleSplitAddress(pContact,pStackValue,evo_addr[i].value);
++				return true;
++			}
++		}
++	}
++	else {
 +	g_object_get_property (G_OBJECT (pContact),
 +						   g_param_spec_get_name ((GParamSpec *) pSpec),
 +						   pStackValue);
@@ -367,7 +509,7 @@
 +		g_value_unset (pStackValue);
 +		return false;
 +	}
-+
++	}
 +	m_bWasNull = false;
 +	return true;
 +}
@@ -635,7 +777,6 @@
 +	checkDisposed(OResultSet_BASE::rBHelper.bDisposed);
 +
 +	m_nIndex = 0;
-+	return true;
 +}
 +// -------------------------------------------------------------------------
 +
@@ -645,7 +786,6 @@
 +	checkDisposed(OResultSet_BASE::rBHelper.bDisposed);
 +
 +	m_nIndex = m_nLength - 1;
-+	return true;
 +}
 +// -------------------------------------------------------------------------
 +sal_Bool SAL_CALL OEvoabResultSet::absolute( sal_Int32 row ) throw(SQLException, RuntimeException)
@@ -742,7 +882,6 @@
 +	{
 +		::osl::MutexGuard aGuard( m_aMutex );
 +		checkDisposed(OResultSet_BASE::rBHelper.bDisposed);
-+
 +	}
 +	OSL_TRACE("In/Out: OEvoabResultSet::close" );
 +	dispose();
