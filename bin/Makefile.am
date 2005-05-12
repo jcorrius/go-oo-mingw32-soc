@@ -1,4 +1,5 @@
 script_files = \
+	build-galleries \
 	build-ooo \
 	build-tools \
 	font-munge \
