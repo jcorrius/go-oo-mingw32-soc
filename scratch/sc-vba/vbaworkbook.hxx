@@ -27,10 +27,10 @@ public:
 	virtual uno::Reference< vba::XWorksheet > SAL_CALL getActiveSheet() throw (uno::RuntimeException);
 
 	// Methods
-	virtual void SAL_CALL close( const uno::Any &bSaveChanges,
+	virtual void SAL_CALL Close( const uno::Any &bSaveChanges,
 								 const uno::Any &aFileName,
 								 const uno::Any &bRouteWorkbook ) throw (uno::RuntimeException);
-	virtual void SAL_CALL protect() throw (uno::RuntimeException);
+	virtual void SAL_CALL Protect() throw (uno::RuntimeException);
 };
 
 #endif /* SC_VBA_WORKBOOK_HXX */

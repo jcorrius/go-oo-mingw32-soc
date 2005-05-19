@@ -11,7 +11,6 @@ PACKAGE=org$/openoffice$/vba
 # ------------------------------------------------------------------------
 
 IDLFILES=\
-	OptionalAny.idl\
 	XApplication.idl\
 	XGlobals.idl\
 	XRange.idl\

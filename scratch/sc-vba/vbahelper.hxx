@@ -4,6 +4,12 @@
 using namespace ::com::sun::star;
 using namespace ::org::openoffice;
 
+#ifdef DEBUG
+#  define SC_VBA_FIXME(a) printf a
+#else
+#  define SC_VBA_FIXME(a)
+#endif
+
 #define SC_VBA_UNO_HELPER_MEMBERS \
 		sal_Int32 mnRefCount
 

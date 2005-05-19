@@ -39,7 +39,7 @@ ScVbaWorkbook::getPath() throw (uno::RuntimeException)
 ::rtl::OUString
 ScVbaWorkbook::getFullName() throw (uno::RuntimeException)
 {
-	// FIXME: what is the difference here ?
+	SC_VBA_FIXME(("Workbook::FullName unclear / needs work"));
 	return getName();
 }
 
@@ -53,35 +53,27 @@ ScVbaWorkbook::getActiveSheet() throw (uno::RuntimeException)
 }
 
 void
-ScVbaWorkbook::close( const uno::Any &rSaveArg, const uno::Any &rFileArg,
+ScVbaWorkbook::Close( const uno::Any &rSaveArg, const uno::Any &rFileArg,
 					  const uno::Any &rRouteArg ) throw (uno::RuntimeException)
 {
 	sal_Bool bSaveChanges = sal_False;
-	rtl::OUString aFileName( RTL_CONSTASCII_USTRINGPARAM( "BeforeDefault" ) );
+	rtl::OUString aFileName( RTL_CONSTASCII_USTRINGPARAM( "" ) );
 	sal_Bool bRouteWorkbook = sal_True;
 
 	rSaveArg >>= bSaveChanges;
 	rFileArg >>= aFileName;
 	rRouteArg >>= bRouteWorkbook;
 
-	rtl::OString aDbgType = rtl::OUStringToOString( rFileArg.getValueTypeName(),
-													RTL_TEXTENCODING_UTF8 );
-	rtl::OString aDbgFileName = rtl::OUStringToOString( aFileName, RTL_TEXTENCODING_UTF8 );
-	fprintf( stderr, "Close '%d' '%s'('%s') '%d' \n", bSaveChanges,
-			 (const sal_Char *)aDbgFileName, (const sal_Char *)aDbgType,
-			 bRouteWorkbook );
-			 
-
-//	uno::Reference< util::XCloseable > xCloseable( mxModel, uno::UNO_QUERY_THROW );
-	// FIXME: ignores 3 arguments.
-//	xCloseable->close( FALSE );
+	uno::Reference< util::XCloseable > xCloseable( mxModel, uno::UNO_QUERY_THROW );
+	SC_VBA_FIXME(("Workbook::Close ignores 3 arguments"));
+	xCloseable->close( FALSE );
 }
 
 void
-ScVbaWorkbook::protect() throw (uno::RuntimeException)
+ScVbaWorkbook::Protect() throw (uno::RuntimeException)
 {
 	uno::Reference< util::XProtectable > xProt( mxModel, uno::UNO_QUERY_THROW );
-	// FIXME: password ?
+	SC_VBA_FIXME(("Workbook::Protect stub"));
 	xProt->protect( rtl::OUString() );
 }
 

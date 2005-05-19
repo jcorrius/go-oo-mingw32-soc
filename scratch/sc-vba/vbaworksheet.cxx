@@ -58,8 +58,10 @@ ScVbaWorksheet::Activate() throw (uno::RuntimeException)
 }
 
 uno::Reference< vba::XRange >
-ScVbaWorksheet::Range( const ::rtl::OUString &rRange ) throw (uno::RuntimeException)
+ScVbaWorksheet::Range( const ::uno::Any &rRange ) throw (uno::RuntimeException)
 {
+	rtl::OUString aStringRange;
+	rRange >>= aStringRange;
 	uno::Reference< table::XCellRange > xRanges( mxSheet, uno::UNO_QUERY_THROW );
-	return uno::Reference< vba::XRange >( new ScVbaRange( xRanges->getCellRangeByName( rRange ) ) );
+	return uno::Reference< vba::XRange >( new ScVbaRange( xRanges->getCellRangeByName( aStringRange ) ) );
 }
