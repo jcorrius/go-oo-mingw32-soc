@@ -2,11 +2,13 @@
 #define SC_VBA_WORKBOOKS_HXX
 
 #include <org/openoffice/vba/XWorkbooks.hpp>
+#include <com/sun/star/container/XEnumerationAccess.hpp>
 #include "vbahelper.hxx"
 
 class ScModelObj;
 
-class ScVbaWorkbooks : public org::openoffice::vba::XWorkbooks
+class ScVbaWorkbooks : public org::openoffice::vba::XWorkbooks,
+					   public com::sun::star::container::XEnumerationAccess
 {
 	SC_VBA_UNO_HELPER_MEMBERS;
 
@@ -16,6 +18,11 @@ public:
 	virtual ~ScVbaWorkbooks() {}
 
 	SC_VBA_UNO_HELPER_XINTERFACE;
+
+	// XEnumerationAccess
+	virtual ::com::sun::star::uno::Type SAL_CALL getElementType() throw (::com::sun::star::uno::RuntimeException);
+	virtual ::sal_Bool SAL_CALL hasElements() throw (::com::sun::star::uno::RuntimeException);
+	virtual uno::Reference< container::XEnumeration > SAL_CALL createEnumeration() throw (uno::RuntimeException);
 
 	// XCollection
     virtual ::sal_Int32 SAL_CALL getCount() throw (uno::RuntimeException);

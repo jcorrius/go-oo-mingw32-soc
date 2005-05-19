@@ -53,15 +53,23 @@ uno::Any ScVbaGlobals::queryInterface( const uno::Type & rType ) throw (uno::Run
 			 static_cast< vba::XGlobals * >( this ) );
 }
 
-uno::Sequence< uno::Any > ScVbaGlobals::getGlobals()
+ScVbaGlobals *
+ScVbaGlobals::get()
 {
 	static ScVbaGlobals *pGlobals = NULL;
 
 	if( !pGlobals )
 		pGlobals = new ScVbaGlobals();
 
-	return pGlobals->pImpl->getGlobals();
+	return pGlobals;
 }
+
+uno::Sequence< uno::Any >
+ScVbaGlobals::getGlobals()
+{
+	return get()->pImpl->getGlobals();
+}
+
 
 uno::Reference<vba::XApplication >
 ScVbaGlobals::getApplication() throw (uno::RuntimeException)
