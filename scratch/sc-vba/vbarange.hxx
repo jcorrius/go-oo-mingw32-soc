@@ -22,6 +22,11 @@ public:
     // Attributes
 	virtual double SAL_CALL getValue() throw (::com::sun::star::uno::RuntimeException);
 	virtual void   SAL_CALL setValue( double value ) throw (::com::sun::star::uno::RuntimeException);
+
+	virtual void SAL_CALL Clear() throw (uno::RuntimeException);
+	virtual void SAL_CALL ClearComments() throw (uno::RuntimeException);
+	virtual void SAL_CALL ClearContents() throw (uno::RuntimeException);
+	virtual void SAL_CALL ClearFormats() throw (uno::RuntimeException);
 };
 
 #endif /* SC_VBA_RANGE_HXX */
