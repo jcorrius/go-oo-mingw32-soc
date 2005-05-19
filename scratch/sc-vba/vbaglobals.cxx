@@ -20,10 +20,20 @@ class ScVbaGlobalsImpl
 
 		uno::Sequence< uno::Any > getGlobals()
 		{
-			uno::Sequence< uno::Any > maGlobals(3);
-			maGlobals[0] <<= mxGlobals;
-			maGlobals[1] <<= mxApplication;
-			maGlobals[2] <<= mxApplication->getActiveWorkbook();
+			sal_uInt32 nMax = 0;
+			uno::Sequence< uno::Any > maGlobals(4);
+			maGlobals[ nMax++ ] <<= mxGlobals;
+			maGlobals[ nMax++ ] <<= mxApplication;
+
+			uno::Reference< vba::XWorkbook > xWorkbook = mxApplication->getActiveWorkbook();
+			if( xWorkbook.is() )
+			{
+				maGlobals[ nMax++ ] <<= xWorkbook;
+				uno::Reference< vba::XWorksheet > xWorksheet = xWorkbook->getActiveSheet();
+				if( xWorksheet.is() )
+					maGlobals[ nMax++ ] <<= xWorksheet;
+			}
+			maGlobals.realloc( nMax );
 			return maGlobals;
 		}
 };

@@ -12,9 +12,11 @@ PACKAGE=org$/openoffice$/vba
 
 IDLFILES=\
 	XApplication.idl\
+	XCollection.idl\
 	XGlobals.idl\
 	XRange.idl\
 	XWorkbook.idl\
+	XWorkbooks.idl\
 	XWorksheet.idl\
 
 # ------------------------------------------------------------------

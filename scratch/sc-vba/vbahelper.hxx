@@ -6,8 +6,10 @@ using namespace ::org::openoffice;
 
 #ifdef DEBUG
 #  define SC_VBA_FIXME(a) printf a
+#  define SC_VBA_STUB() SC_VBA_FIXME(( "%s - stubbed\n", __FUNCTION__ ))
 #else
 #  define SC_VBA_FIXME(a)
+#  define SC_VBA_STUB()
 #endif
 
 #define SC_VBA_UNO_HELPER_MEMBERS \

@@ -20,6 +20,7 @@ SLO1FILES =  \
         $(SLO)$/vbaglobals.obj \
         $(SLO)$/vbarange.obj \
         $(SLO)$/vbaworkbook.obj \
+        $(SLO)$/vbaworkbooks.obj \
         $(SLO)$/vbaworksheet.obj
 
 LIB1TARGET = \

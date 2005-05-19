@@ -2,6 +2,7 @@
 #include <sfx2/objsh.hxx>
 
 #include "vbaapplication.hxx"
+#include "vbaworkbooks.hxx"
 #include "vbaworkbook.hxx"
 
 using namespace ::org::openoffice;
@@ -45,4 +46,10 @@ ScVbaApplication::getSelection() throw (uno::RuntimeException)
 {
 	fprintf( stderr, "GetSelection stub ...\n" );
 	return uno::Reference< vba::XRange >( NULL );
+}
+
+uno::Reference< vba::XWorkbooks >
+ScVbaApplication::getWorkbooks() throw (uno::RuntimeException)
+{
+	return uno::Reference< vba::XWorkbooks >( new ScVbaWorkbooks() );
 }
