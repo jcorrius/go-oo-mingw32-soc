@@ -1,0 +1,331 @@
+--- vcl/inc/image.hxx	2005-03-23 13:43:47.000000000 +0100
++++ vcl/inc/image.hxx	2005-05-23 10:57:53.367883004 +0200
+@@ -231,6 +231,7 @@ private:
+ 
+     SAL_DLLPRIVATE void    ImplInitBitmapEx( const ::rtl::OUString& rUserImageName,
+                                              const ::std::vector< ::rtl::OUString >& rImageNames,
++                                             const ::rtl::OUString& rSymbolsStyle,
+                                              BitmapEx& rBmpEx,
+                                              const Color* pMaskColor ) const;
+ 	SAL_DLLPRIVATE void    ImplInit( const BitmapEx& rBitmapEx, USHORT nInit, const USHORT* pIdAry, const ::std::vector< ::rtl::OUString >* pNames, USHORT nGrow );
+--- vcl/inc/impimagetree.hxx	2005-03-23 13:44:01.000000000 +0100
++++ vcl/inc/impimagetree.hxx	2005-05-23 11:48:39.997379699 +0200
+@@ -89,7 +89,10 @@ public:
+ 					ImplImageTree();
+ 					~ImplImageTree();
+ 
+-	bool 			loadImage( const ::rtl::OUString& rName, BitmapEx& rReturn, bool bSearchLanguageDependent = false );
++	bool 			loadImage( const ::rtl::OUString& rName,
++							   const ::rtl::OUString& rSymbolsStyle,
++							   BitmapEx& rReturn,
++							   bool bSearchLanguageDependent = false );
+ 	void			addUserImage( const ::rtl::OUString& rName, const BitmapEx& rReturn );
+ 	
+ 	static void     cleanup();
+@@ -101,15 +104,17 @@ private:
+ 	::com::sun::star::uno::Reference< ::com::sun::star::beans::XPropertySet > 			mxPathSettings;
+ 	::com::sun::star::uno::Reference< ::com::sun::star::ucb::XSimpleFileAccess > 		mxFileAccess;
+ 	bool																				mbInit;
+-			
++	::rtl::OUString																		maSymbolsStyle;
++
+ 	bool					implInit();
+-	const ::rtl::OUString&	implGetZipFileURL() const;
++	::rtl::OUString			implGetZipFileURL( bool bWithStyle = true ) const;
+ 	const ::rtl::OUString&	implGetUserDirURL() const;
+ 	::rtl::OUString 		implGetUserFileURL( const ::rtl::OUString& rName ) const;
+ 	void					implCheckUserCache();
+ 	bool					implLoadFromStream( SvStream& rIStm, const ::rtl::OUString& rFileName, BitmapEx& rReturn );
+     ::std::auto_ptr< SvStream > implGetStream( const ::com::sun::star::uno::Reference< 
+                                                         ::com::sun::star::io::XInputStream >& rxIStm ) const;
++	void					implUpdateSymbolsStyle( const ::rtl::OUString& rSymbolsStyle );
+ };
+ 
+ typedef ::salhelper::SingletonRef< ImplImageTree > ImplImageTreeSingletonRef;
+--- vcl/inc/settings.hxx	2005-01-31 14:19:19.000000000 +0100
++++ vcl/inc/settings.hxx	2005-05-20 16:25:22.418254426 +0200
+@@ -454,6 +454,7 @@ private:
+     ULONG                           mnLogoDisplayTime;
+     ULONG                           mnDisplayOptions;
+     ULONG                           mnToolbarIconSize;
++    ULONG                           mnSymbolsStyle;
+     ULONG                           mnUseFlatMenues;
+     ULONG                           mnOptions;
+     USHORT                          mnScreenZoom;
+@@ -543,6 +544,11 @@ private:
+ #define STYLE_TOOLBAR_ICONSIZE_SMALL		((ULONG)1)
+ #define STYLE_TOOLBAR_ICONSIZE_LARGE		((ULONG)2)
+ 
++#define STYLE_SYMBOLS_AUTO			((ULONG)0)
++#define STYLE_SYMBOLS_DEFAULT		((ULONG)1)
++#define STYLE_SYMBOLS_INDUSTRIAL	((ULONG)2)
++#define STYLE_SYMBOLS_CRYSTAL		((ULONG)3)
++
+ #define STYLE_CURSOR_NOBLINKTIME    ((ULONG)0xFFFFFFFF)
+ 
+ class VCL_DLLPUBLIC StyleSettings
+@@ -930,6 +936,13 @@ public:
+     ULONG							GetToolbarIconSize() const
+     									{ return mpData->mnToolbarIconSize; }
+ 
++    void							SetSymbolsStyle( ULONG nStyle )
++    									{ CopyData(); mpData->mnSymbolsStyle = nStyle; }
++    ULONG							GetSymbolsStyle() const
++    									{ return mpData->mnSymbolsStyle; }
++    ULONG							GetCurrentSymbolsStyle() const;
++    ::rtl::OUString					GetCurrentSymbolsStyleName() const;
++
+     void                            SetStandardStyles();
+     void                            SetStandardWinStyles();
+     void                            SetStandardOS2Styles();
+--- vcl/source/app/settings.cxx	2005-05-13 17:45:56.511440487 +0200
++++ vcl/source/app/settings.cxx	2005-05-20 17:46:55.803210222 +0200
+@@ -66,6 +66,9 @@
+ #include <tools/isolang.hxx>
+ #endif
+ 
++#ifndef _SV_SVAPP_HXX
++#include <svapp.hxx>
++#endif
+ #ifndef _SV_SVDATA_HXX
+ #include <svdata.hxx>
+ #endif
+@@ -490,6 +493,7 @@ ImplStyleData::ImplStyleData()
+     mnOptions                   = 0;
+     mnAutoMnemonic				= 1;
+     mnToolbarIconSize			= STYLE_TOOLBAR_ICONSIZE_UNKNOWN;
++    mnSymbolsStyle				= STYLE_SYMBOLS_AUTO;
+ 
+     SetStandardStyles();
+ }
+@@ -587,6 +591,7 @@ ImplStyleData::ImplStyleData( const Impl
+     mnAutoMnemonic				= rData.mnAutoMnemonic;
+     mnUseImagesInMenus			= rData.mnUseImagesInMenus;
+     mnToolbarIconSize			= rData.mnToolbarIconSize;
++    mnSymbolsStyle				= rData.mnSymbolsStyle;
+ }
+ 
+ // -----------------------------------------------------------------------
+@@ -735,6 +740,48 @@ void StyleSettings::Set3DColors( const C
+ 
+ // -----------------------------------------------------------------------
+ 
++ULONG StyleSettings::GetCurrentSymbolsStyle() const
++{
++	ULONG nStyle = GetSymbolsStyle();
++
++	if ( nStyle == STYLE_SYMBOLS_AUTO )
++	{
++		static bool sbDesktopChecked = false;
++		static ULONG snDesktopStyle = STYLE_SYMBOLS_DEFAULT;
++
++		if ( !sbDesktopChecked )
++		{
++			const ::rtl::OUString &rDesktopEnvironment = Application::GetDesktopEnvironment();
++
++			if( rDesktopEnvironment.equalsIgnoreAsciiCaseAscii( "gnome" ) )
++				snDesktopStyle = STYLE_SYMBOLS_INDUSTRIAL;
++			else if( rDesktopEnvironment.equalsIgnoreAsciiCaseAscii( "kde" ) )
++				snDesktopStyle = STYLE_SYMBOLS_CRYSTAL;
++
++			sbDesktopChecked = true;
++		}
++
++		nStyle = snDesktopStyle;
++	}
++
++	return nStyle;
++}
++
++// -----------------------------------------------------------------------
++
++::rtl::OUString StyleSettings::GetCurrentSymbolsStyleName() const
++{
++	switch ( GetCurrentSymbolsStyle() )
++	{
++		case STYLE_SYMBOLS_INDUSTRIAL: return ::rtl::OUString::createFromAscii( "industrial" );
++		case STYLE_SYMBOLS_CRYSTAL:    return ::rtl::OUString::createFromAscii( "crystal" );
++	}
++
++	return ::rtl::OUString();
++}
++
++// -----------------------------------------------------------------------
++
+ void StyleSettings::SetStandardStyles()
+ {
+     CopyData();
+--- vcl/source/gdi/bitmapex.cxx	2005-03-29 16:37:15.000000000 +0200
++++ vcl/source/gdi/bitmapex.cxx	2005-05-23 11:02:04.059641990 +0200
+@@ -93,6 +93,9 @@
+ #ifndef _SV_RC_H
+ #include <tools/rc.h>
+ #endif
++#ifndef _SV_SVAPP_HXX
++#include <svapp.hxx>
++#endif
+ 
+ // ------------
+ // - BitmapEx -
+@@ -129,9 +132,12 @@ BitmapEx::BitmapEx( const ResId& rResId 
+ 	pResMgr->ReadLong();
+ 	pResMgr->ReadLong();
+ 	
+-	const String aFileName( pResMgr->ReadString() );
++	::rtl::OUString aCurrentSymbolsStyle = Application::GetSettings().GetStyleSettings().GetCurrentSymbolsStyleName();
++
++	::rtl::OUString aFileName( pResMgr->ReadString() );
++	aFileName += aCurrentSymbolsStyle;
+ 	
+-	if( !aImageTree->loadImage( aFileName, *this ) )
++	if( !aImageTree->loadImage( aFileName, aCurrentSymbolsStyle, *this ) )
+ 	{
+ #ifdef DBG_UTIL		
+ 		ByteString aErrorStr( "BitmapEx::BitmapEx( const ResId& rResId ): could not load image <" );
+--- vcl/source/gdi/image.cxx	2005-03-23 13:44:15.000000000 +0100
++++ vcl/source/gdi/image.cxx	2005-05-23 11:05:45.103514845 +0200
+@@ -561,8 +561,11 @@ ImageList::ImageList( const ResId& rResI
+ 
+         aUserImageName += ::rtl::OUString::valueOf( static_cast< sal_Int32 >( rResId.GetId() ) );
+         aUserImageName += ::rtl::OUString::valueOf( nCount );
++
++        ::rtl::OUString aCurrentSymbolsStyle = Application::GetSettings().GetStyleSettings().GetCurrentSymbolsStyleName();
++        aUserImageName += aCurrentSymbolsStyle;
+         
+-        ImplInitBitmapEx( aUserImageName, aImageNames, aBmpEx, spMaskColor.get() );
++        ImplInitBitmapEx( aUserImageName, aImageNames, aCurrentSymbolsStyle, aBmpEx, spMaskColor.get() );
+ 
+ 		if( nObjMask & RSC_IMAGELIST_IDCOUNT )
+ 			pResMgr->ReadShort();
+@@ -594,8 +597,11 @@ ImageList::ImageList( const ::std::vecto
+         
+     aUserImageName = ( ( aUserImageName += rLocale.Language ) += rLocale.Country ).replace( '/', '_' );
+     aUserImageName += ::rtl::OUString::valueOf( static_cast< sal_Int32 >( rNameVector.size() ) );
++
++    ::rtl::OUString aCurrentSymbolsStyle = Application::GetSettings().GetStyleSettings().GetCurrentSymbolsStyleName();
++    aUserImageName += aCurrentSymbolsStyle;
+     
+-    ImplInitBitmapEx( aUserImageName, aImageNames, aBmpEx, pMaskColor );
++    ImplInitBitmapEx( aUserImageName, aImageNames, aCurrentSymbolsStyle, aBmpEx, pMaskColor );
+ 	ImplInit( aBmpEx, static_cast< USHORT >( rNameVector.size() ), NULL, &rNameVector, 4 );
+ }
+ 
+@@ -695,12 +701,13 @@ ImageList::~ImageList()
+ 
+ void ImageList::ImplInitBitmapEx( const ::rtl::OUString& rUserImageName,
+                                   const ::std::vector< ::rtl::OUString >& rImageNames,
++                                  const ::rtl::OUString& rSymbolsStyle,
+                                   BitmapEx& rBmpEx, 
+                                   const Color* pMaskColor ) const
+ {
+     static ImplImageTreeSingletonRef aImageTree;
+     
+-    if( !aImageTree->loadImage( rUserImageName, rBmpEx ) )
++    if( !aImageTree->loadImage( rUserImageName, rSymbolsStyle, rBmpEx ) )
+     {
+         BitmapEx    aCurBmpEx;
+         Size        aItemSizePixel;
+@@ -708,7 +715,7 @@ void ImageList::ImplInitBitmapEx( const 
+         
+         for( sal_Int32 i = 0, nCount = rImageNames.size(); i < nCount; ++i )
+         {
+-            if( aImageTree->loadImage( rImageNames[ i ], aCurBmpEx, true ) )
++            if( aImageTree->loadImage( rImageNames[ i ], rSymbolsStyle, aCurBmpEx, true ) )
+             {
+                 const Size aCurSizePixel( aCurBmpEx.GetSizePixel() );
+            
+--- vcl/source/gdi/impimagetree.cxx	2005-03-23 13:44:31.000000000 +0100
++++ vcl/source/gdi/impimagetree.cxx	2005-05-23 15:36:45.333840109 +0200
+@@ -118,7 +118,8 @@
+ #include <hash_map>
+ 
+ #define DEFAULT_PROJECTNAME "res"
+-#define IMAGES_ZIPFILENAME	"images.zip"
++#define IMAGES_ZIPFILENAME_PREFIX	"images"
++#define IMAGES_ZIPFILENAME_SUFFIX	".zip"
+ #define IMAGES_CACHEDIR		"imagecache"
+ 
+ using namespace ::com::sun::star;
+@@ -133,7 +134,8 @@ static BmpExHashMap aBmpExHashMap;
+ // -----------------------------------------------------------------------
+ 
+ ImplImageTree::ImplImageTree() :
+-	mbInit( false )
++	mbInit( false ),
++	maSymbolsStyle( Application::GetSettings().GetStyleSettings().GetCurrentSymbolsStyleName() )
+ {
+ }
+ 
+@@ -212,13 +214,20 @@ bool ImplImageTree::implInit()
+ 
+ // -----------------------------------------------------------------------
+ 
+-const ::rtl::OUString& ImplImageTree::implGetZipFileURL() const
++::rtl::OUString ImplImageTree::implGetZipFileURL( bool bWithStyle ) const
+ {
+-	static ::rtl::OUString aRet;
++	::rtl::OUString aRet;
+ 	
+ 	if( !aRet.getLength() && mxPathSettings.is() && mxFileAccess.is() )
+ 	{
+-		const ::rtl::OUString	aZipFileName( ::rtl::OUString::createFromAscii( IMAGES_ZIPFILENAME ) );
++		::rtl::OUString	aZipFileName( ::rtl::OUString::createFromAscii( IMAGES_ZIPFILENAME_PREFIX ) );
++		if ( bWithStyle && maSymbolsStyle.getLength() > 0 )
++		{
++			aZipFileName += ::rtl::OUString::createFromAscii( "_" );
++			aZipFileName += maSymbolsStyle;
++		}
++		aZipFileName += ::rtl::OUString::createFromAscii( IMAGES_ZIPFILENAME_SUFFIX );
++
+ 		uno::Any 				aAny( mxPathSettings->getPropertyValue( ::rtl::OUString::createFromAscii( "UserConfig" ) ) );
+ 		INetURLObject			aZipURL;
+ 	
+@@ -238,7 +247,10 @@ const ::rtl::OUString& ImplImageTree::im
+ 				
+ 					if( !mxFileAccess->exists( aRet = aZipURL.GetMainURL( INetURLObject::NO_DECODE ) ) )
+ 					{
+-						aRet = ::rtl::OUString();
++						if ( bWithStyle && maSymbolsStyle.getLength() > 0 )
++							aRet = implGetZipFileURL( false ); // Try without style
++						else
++							aRet = ::rtl::OUString();
+ 					}
+ 				}
+ 			}
+@@ -395,8 +407,35 @@ bool ImplImageTree::implLoadFromStream( 
+ 
+ // ------------------------------------------------------------------------------
+ 
+-bool ImplImageTree::loadImage( const ::rtl::OUString& rName, BitmapEx& rReturn, bool bSearchLanguageDependent )
++void ImplImageTree::implUpdateSymbolsStyle( const ::rtl::OUString& rSymbolsStyle )
+ {
++	if ( rSymbolsStyle != maSymbolsStyle )
++	{
++		maSymbolsStyle = rSymbolsStyle;
++		if ( mbInit )
++		{
++			mxNameAcc.clear();
++			mxZipAcc.clear();
++			mxFileAccess.clear();
++			mxPathSettings.clear();
++
++			BmpExHashMap aTmp;
++			aBmpExHashMap.swap( aTmp );
++
++			mbInit = false;
++		}
++	}
++}
++
++// ------------------------------------------------------------------------------
++
++bool ImplImageTree::loadImage( const ::rtl::OUString& rName,
++		const ::rtl::OUString& rSymbolsStyle,
++		BitmapEx& rReturn,
++		bool bSearchLanguageDependent )
++{
++	implUpdateSymbolsStyle( rSymbolsStyle );
++
+ 	const BmpExHashMap::const_iterator	aBmpExFindIter( aBmpExHashMap.find( rName ) );
+ 	
+ 	if( aBmpExFindIter != aBmpExHashMap.end() )
