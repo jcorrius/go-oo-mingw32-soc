@@ -1,3 +1,21 @@
+--- framework/inc/services/layoutmanager.hxx	2005-06-01 15:59:12.289866000 +0200
++++ framework/inc/services/layoutmanager.hxx	2005-06-02 15:52:55.859938235 +0200
+@@ -484,6 +484,7 @@ namespace framework
+             void implts_toggleFloatingUIElementsVisibility( sal_Bool bActive );
+             sal_Bool implts_isEmbeddedLayoutManager() const;
+             sal_Int16 implts_getCurrentSymbolsSize();
++            sal_Int16 implts_getCurrentSymbolsStyle();
+             ::com::sun::star::uno::Reference< com::sun::star::awt::XWindowPeer > implts_createToolkitWindow( const ::com::sun::star::uno::Reference< com::sun::star::awt::XWindowPeer >& rParent );
+             ::com::sun::star::uno::Reference< ::com::sun::star::ui::XUIElement > implts_createElement( const rtl::OUString& aName );
+             rtl::OUString implts_generateGenericAddonToolbarTitle( sal_Int32 nNumber ) const;
+@@ -621,6 +622,7 @@ namespace framework
+             AddonsOptions*                                                              m_pAddonOptions;
+             SvtMiscOptions*                                                             m_pMiscOptions;
+             sal_Int16                                                                   m_eSymbolsSize;
++            sal_Int16                                                                   m_eSymbolsStyle;
+ 	        Timer				                                                        m_aAsyncLayoutTimer;
+             ::cppu::OMultiTypeInterfaceContainerHelper                                  m_aListenerContainer; // container for ALL Listener
+     };
 --- framework/inc/uiconfiguration/moduleimagemanager.hxx	2005-03-01 20:26:44.000000000 +0100
 +++ framework/inc/uiconfiguration/moduleimagemanager.hxx	2005-05-20 16:57:35.288859803 +0200
 @@ -200,6 +200,7 @@ namespace framework
@@ -18,6 +36,70 @@
  };
  
  } // namespace
+--- framework/inc/uielement/toolbarmanager.hxx	2005-06-01 15:59:12.308863000 +0200
++++ framework/inc/uielement/toolbarmanager.hxx	2005-06-01 17:10:12.344063631 +0200
+@@ -272,6 +272,7 @@ class ToolBarManager : public ::com::sun
+         CommandToInfoMap                                                                                m_aCommandMap;
+         SubToolBarToSubToolBarControllerMap                                                             m_aSubToolBarControllerMap;
+         Timer				                                                                            m_aAsyncUpdateControllersTimer;
++        sal_Int16                                                                                       m_nSymbolsStyle;
+ };
+     
+ }
+--- framework/source/layoutmanager/layoutmanager.cxx	2005-06-01 15:59:12.314862000 +0200
++++ framework/source/layoutmanager/layoutmanager.cxx	2005-06-02 15:56:05.958148807 +0200
+@@ -462,6 +462,7 @@ LayoutManager::LayoutManager( const Refe
+     m_pMiscOptions->AddListener( LINK( this, LayoutManager, OptionsChanged ) );
+     Application::AddEventListener( LINK( this, LayoutManager, SettingsChanged ) );
+     m_eSymbolsSize = m_pMiscOptions->GetSymbolsSize();
++    m_eSymbolsStyle = m_pMiscOptions->GetCurrentSymbolsStyle();
+ 
+ 	m_aAsyncLayoutTimer.SetTimeout( 50 );
+ 	m_aAsyncLayoutTimer.SetTimeoutHdl( LINK( this, LayoutManager, AsyncLayoutHdl ) );
+@@ -5629,6 +5630,20 @@ sal_Int16 LayoutManager::implts_getCurre
+     return eOptSymbolsSize;
+ }
+ 
++sal_Int16 LayoutManager::implts_getCurrentSymbolsStyle()
++{
++    sal_Int16 eOptSymbolsStyle( 0 );
++
++    {
++        ReadGuard aReadLock( m_aLock );
++        vos::OGuard aGuard( Application::GetSolarMutex() );
++        if ( m_pMiscOptions )
++            eOptSymbolsStyle = m_pMiscOptions->GetCurrentSymbolsStyle();
++    }
++
++    return eOptSymbolsStyle;
++}
++
+ IMPL_LINK( LayoutManager, MenuBarClose, MenuBar *, pMenu )
+ {
+     ReadGuard aReadLock( m_aLock );
+@@ -5649,17 +5664,19 @@ IMPL_LINK( LayoutManager, MenuBarClose, 
+ 
+ IMPL_LINK( LayoutManager, OptionsChanged, void*, pVoid )
+ {
+-    sal_Int16 eOldSymbolsSize( 0 );
+     sal_Int16 eSymbolsSize( implts_getCurrentSymbolsSize() );
++    sal_Int16 eSymbolsStyle( implts_getCurrentSymbolsStyle() );
+ 
+     ReadGuard aReadLock( m_aLock );
+-    eOldSymbolsSize = m_eSymbolsSize;
++    sal_Int16 eOldSymbolsSize = m_eSymbolsSize;
++    sal_Int16 eOldSymbolsStyle = m_eSymbolsStyle;
+     aReadLock.unlock();
+ 
+-    if ( eSymbolsSize != eOldSymbolsSize )
++    if ( eSymbolsSize != eOldSymbolsSize || eSymbolsStyle != eOldSymbolsStyle )
+     {
+         WriteGuard aWriteLock( m_aLock );
+         m_eSymbolsSize = eSymbolsSize;
++        m_eSymbolsStyle = eSymbolsStyle;
+         aWriteLock.unlock();
+ 
+         std::vector< Reference< XUpdatable > > aToolBarVector;
 --- framework/source/uiconfiguration/moduleimagemanager.cxx	2005-03-01 20:39:42.000000000 +0100
 +++ framework/source/uiconfiguration/moduleimagemanager.cxx	2005-05-20 18:44:19.418232163 +0200
 @@ -140,6 +140,10 @@
@@ -115,3 +197,38 @@
  			AddonsOptions		aAddonOptions;
  
  			for ( USHORT nPos = 0; nPos < pMenu->GetItemCount(); nPos++ )
+--- framework/source/uielement/toolbarmanager.cxx	2005-06-01 15:59:12.340857000 +0200
++++ framework/source/uielement/toolbarmanager.cxx	2005-06-02 16:00:54.004464627 +0200
+@@ -325,7 +325,8 @@ ToolBarManager::ToolBarManager( const Re
+     m_bImageOrientationRegistered( sal_False ),
+     m_bImageMirrored( sal_False ),
+     m_bCanBeCustomized( sal_True ),
+-    m_lImageRotation( 0 )
++    m_lImageRotation( 0 ),
++    m_nSymbolsStyle( SvtMiscOptions().GetCurrentSymbolsStyle() )
+ {
+     Window* pWindow = m_pToolBar;
+     while ( pWindow && !pWindow->IsSystemWindow() )
+@@ -414,13 +415,21 @@ void ToolBarManager::CheckAndUpdateImage
+ 	    m_bIsHiContrast = sal_False;
+ 	}
+ 
+-    bool bCurrentSymbolsSmall = !SvtMiscOptions().AreCurrentSymbolsLarge();
++    SvtMiscOptions aMiscOptions;
++    bool bCurrentSymbolsSmall = !aMiscOptions.AreCurrentSymbolsLarge();
+     if ( m_bSmallSymbols != bCurrentSymbolsSmall )
+     {
+         bRefreshImages = sal_True;
+         m_bSmallSymbols = bCurrentSymbolsSmall;
+     }
+ 
++    sal_Int16 nCurrentSymbolsStyle = aMiscOptions.GetCurrentSymbolsStyle();
++    if ( m_nSymbolsStyle != nCurrentSymbolsStyle )
++    {
++        bRefreshImages = sal_True;
++        m_nSymbolsStyle = nCurrentSymbolsStyle;
++    }
++
+     // Refresh images if requested
+     if ( bRefreshImages )
+         RefreshImages();
