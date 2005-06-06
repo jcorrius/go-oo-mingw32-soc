@@ -2,6 +2,13 @@
 
 #include <com/sun/star/sheet/XSheetOperation.hpp>
 #include <com/sun/star/sheet/CellFlags.hpp>
+#include <com/sun/star/table/XColumnRowRange.hpp>
+#include <com/sun/star/table/XTableRows.hpp>
+#include <com/sun/star/table/CellRangeAddress.hpp>
+#include <com/sun/star/sheet/XCellRangeAddressable.hpp>
+#include <com/sun/star/table/CellContentType.hpp>
+#include <com/sun/star/beans/XPropertySet.hpp>
+#include <com/sun/star/table/XCell.hpp>
 
 #include "vbarange.hxx"
 
@@ -35,7 +42,7 @@ void
 ScVbaRange::Clear() throw (uno::RuntimeException)
 {
 	//FIXME: should get cell range by name ? and not by position 
-	uno::Reference< sheet::XSheetOperation > xSheetOperation(mxRange->getCellRangeByPosition( 0, 0, 0, 0 ), uno::UNO_QUERY);
+	uno::Reference< sheet::XSheetOperation > xSheetOperation(mxRange/*->getCellRangeByPosition( 0, 0, 0, 0 )*/, uno::UNO_QUERY);
 	//FIXME: add all flags here?
 	xSheetOperation->clearContents(sheet::CellFlags::VALUE );
 }
@@ -66,3 +73,16 @@ ScVbaRange::ClearFormats() throw (uno::RuntimeException)
 	xSheetOperation->clearContents(sheet::CellFlags::HARDATTR | sheet::CellFlags::FORMATTED | sheet::CellFlags::EDITATTR);
 }
 
+::rtl::OUString
+ScVbaRange::getFormula() throw (::com::sun::star::uno::RuntimeException)
+{
+    uno::Reference< table::XCell > xCell = mxRange->getCellByPosition( 0, 0 );
+    return xCell->getFormula();
+}
+
+void
+ScVbaRange::setFormula(const ::rtl::OUString &rFormula ) throw (uno::RuntimeException)
+{
+	uno::Reference< table::XCell > xCell = mxRange->getCellByPosition( 0, 0 );
+	xCell->setFormula( rFormula );
+} 
