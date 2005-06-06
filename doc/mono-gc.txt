@@ -109,3 +109,337 @@ We need to add the functionality we need to mono_thread_attach
 <michael_> lupus: anyhow - thanks for taking that on.
 <michael_> lupus: when is the next release ? :-)
 <lupus> michael_: likely in a month or so
+
+
+
+
+--------------------- Debugging my bogus (non)-GC related bug ---------------------
+
+0x8240e70
+
+	+ Threads created outside Mono's control ...
+	+ GC crash - under gdb:
+		+ greatest_ha - 
+(gdb) p limit
+$1 = (word *) 0x83c2104
+(gdb) p *limit
+Cannot access memory at address 0x83c2104
+(gdb) p *(limit - 4096)
+$2 = 0
+(gdb) p *(limit + 4096)
+Cannot access memory at address 0x83c6104
+
+	GC_mark_from mis-calculates limit, clearly it's scanning a
+broken / non-object; missing the length [ with 0 bottom 2 bits] tag /
+marker. Who sets that up ?
+
+	The mark stack is a simple array, and looks fine ( in places ):
+
+$42 = {mse_start = 0x81fd800, mse_descr = 1024}
+(gdb) p mark_stack[14]
+$43 = {mse_start = 0x81eff00, mse_descr = 32}
+(gdb) p mark_stack[15]
+$44 = {mse_start = 0x81eef00, mse_descr = 160}
+(gdb) p mark_stack[16]
+$45 = {mse_start = 0x81fae00, mse_descr = 4294967279}
+... <identical > ...
+(gdb) p mark_stack[20]
+$52 = {mse_start = 0x8355000, mse_descr = 4294967279}
+(gdb) p mark_stack[21]
+$53 = {mse_start = 0x83c2108, mse_descr = 136027216}
+(gdb) p mark_stack[22]
+$54 = {mse_start = 0x83acd20, mse_descr = 80}
+(gdb) p mark_stack[23]
+$55 = {mse_start = 0x83accd0, mse_descr = 80}
+
+	The mark stack data comes from: MARK_FROM_MARK_STACK
+
+	GC_mark_stack_top = GC_mark_from(GC_mark_stack_top, \
+					 GC_mark_stack, \
+					 GC_mark_stack + GC_mark_stack_size);
+
+	+ need to watch all manipulations of the GC_mark_stack ... (?)
+		gc_pmark.h
+	+ GC_PUSH_ONE_HEAP, GC_PUSH_ONE_STACK (calls)
+		-> GC_mark_and_push, GC_mark_and_push_stack
+
+	The problem comes from: GC_push_all_stacks ... (pthread_stop_world.c)
+
+#1  0x080fbe2b in GC_push_all_eager (bottom=0xbfffc1b4 "0%Gï¿½ï¿½ï¿½%@", top=0xbfffce30 "\002") at mark.c:1485
+#2  0x0813a7eb in pthread_push_all_stacks () at pthread_stop_world.c:260
+#3  0x0813a6ad in GC_push_all_stacks () at pthread_stop_world.c:291
+#4  0x080f673b in GC_push_roots (all=1, cold_gc_frame=0xbfffc254 "\200") at mark_rts.c:643
+#5  0x080fd0ea in GC_mark_some (cold_gc_frame=0xbfffc254 "\200") at mark.c:306
+#6  0x080ff51c in GC_stopped_mark (stop_func=0x80febe0 <GC_never_stop_func>) at alloc.c:533
+#7  0x080ff7d8 in GC_try_to_collect_inner (stop_func=0x80febe0 <GC_never_stop_func>) at alloc.c:375
+#8  0x080ff98d in GC_collect_or_expand (needed_blocks=1, ignore_off_page=0) at alloc.c:1035
+#9  0x080ffe23 in GC_allocobj (sz=128, kind=0) at alloc.c:1112
+#10 0x080f9041 in GC_generic_malloc_inner (lb=454, k=0) at malloc.c:136
+#11 0x080f90b4 in GC_generic_malloc (lb=454, k=0) at malloc.c:192
+#12 0x080f9361 in GC_malloc_atomic (lb=454) at malloc.c:270
+#13 0x080c226a in mono_string_new_size (domain=0x81eef00, len=220) at object.c:2081
+#14 0x080d1c18 in ves_icall_System_String_InternalAllocateStr (length=220) at string-icalls.c:634
+
+	* pthread_stop_world.c - do we set p->flags & MAIN_THREAD ?
+		+ bs_lo = p->backing_store_end
+		+ bs_hi = GC_save_regs_in_stack etc.
+
+	* GC_push_all_eager - must get the wrong end of the stick somehow (?)
+
+initially (fine):
+
+Pushing stacks from thread 0x4021abc0
+Stack for thread 0x4021abc0(0x6) = [bfffcd64,bfffd0b0)
+
+later (broken):
+
+Pushing stacks from thread 0x4021abc0
+Stack for thread 0x40b01bb0(0x2) = [40b01594,40b02000)
+Stack for thread 0x4021abc0(0x6) = [bfffc434,bfffd0b0)
+
+	hi < lo etc. [!]...
+
+	+ How does MAIN_THREAD get set (?)
+		- surely correct (by Mono)
+
+	+ Header from pointer: GET_HDR()... GC_find_header(p)
+
+	hdr * GC_find_header(h) ptr_t h;
+		+ does return HDR_INNER(h)
+
+# define HDR_FROM_BI(bi, p) \
+		((bi)->index[((word)(p) >> LOG_HBLKSIZE) & (BOTTOM_SZ - 1)])
+# ifndef HASH_TL
+#   define BI(p) (GC_top_index \
+		[(word)(p) >> (LOG_BOTTOM_SZ + LOG_HBLKSIZE)])
+#   define HDR_INNER(p) HDR_FROM_BI(BI(p),p)
+
+
+#   define LOG_BOTTOM_SZ 10
+#   define BOTTOM_SZ 1<<10
+#   define LOG_HBLKSIZE 12
+
+	By instrumenting hb_descr setting with:
+
+Set hb_descr to 16 on hdr 0x81eed70
+Set hb_descr to -17 on hdr 0x81efe08
+
+#0  setup_header (hhdr=0x81efe08, sz=4, kind=4, flags=0 '\0') at allchblk.c:243
+#1  0x080fc1e5 in GC_allochblk_nth (sz=4, kind=4, flags=0 '\0', n=6) at allchblk.c:743
+#2  0x080fbd78 in GC_allochblk (sz=4, kind=4, flags=0) at allchblk.c:558
+#3  0x081018a9 in GC_new_hblk (sz=4, kind=4) at new_hblk.c:253
+#4  0x081013d0 in GC_allocobj (sz=4, kind=4) at alloc.c:1103
+#5  0x080f94f6 in GC_generic_malloc_inner (lb=12, k=4) at malloc.c:136
+#6  0x080ff9c6 in GC_gcj_malloc (lb=12, ptr_to_struct_containing_descr=0x81b3b38) at gcj_mlc.c:157
+#7  0x080fa20b in GC_local_gcj_malloc (bytes=12, ptr_to_struct_containing_descr=0x81b3b38) at pthread_support.c:387
+#8  0x080c1117 in mono_object_new_alloc_specific (vtable=0x81b3b38) at object.c:2089
+#9  0x080c127b in mono_object_new_specific (vtable=0x81b3b38) at object.c:2147
+#10 0x080af01f in mono_type_get_object (domain=0x81f0f00, type=0x81c7e34) at reflection.c:5381
+#11 0x080c2094 in mono_class_vtable (domain=0x81f0f00, class=0x81c7d88) at object.c:861
+#12 0x080c20ca in mono_class_vtable (domain=0x81f0f00, class=0x81c7cb8) at object.c:859
+#13 0x080c20ca in mono_class_vtable (domain=0x81f0f00, class=0x81c7be8) at object.c:859
+#14 0x080c3223 in mono_object_new (domain=0x81f0f00, klass=0x81c7be8) at object.c:2108
+#15 0x080af01f in mono_type_get_object (domain=0x81f0f00, type=0x81c550c) at reflection.c:5381
+#16 0x080c2094 in mono_class_vtable (domain=0x81f0f00, class=0x81c5460) at object.c:861
+#17 0x080c20ca in mono_class_vtable (domain=0x81f0f00, class=0x81cc9a0) at object.c:859
+#18 0x080c3223 in mono_object_new (domain=0x81f0f00, klass=0x81cc9a0) at object.c:2108
+#19 0x080a7a1f in mono_runtime_init (domain=0x81f0f00, start_cb=0x81036b0 <mono_thread_start_cb>, 
+    attach_cb=0x8103760 <mono_thread_attach_cb>) at appdomain.c:96
+#20 0x081053cd in mini_init (filename=0xbfffd37d "ViewSample.exe") at mini.c:10053
+#21 0x0805b99b in mono_main (argc=2, argv=0xbfffce24) at driver.c:837
+#22 0x0805b218 in main (argc=2, argv=0xbfffce24) at main.c:6
+
+	So: 
+
+(gdb) p GC_obj_kinds[kind].ok_descriptor
+$3 = 4294967279
+(gdb) p GC_obj_kinds[kind]
+$4 = {ok_freelist = 0x81f4000, ok_reclaim_list = 0x8223000, ok_descriptor = 4294967279, ok_relocate_descr = 0, ok_init = 1}
+(gdb) p kind
+$5 = 4
+
+	Clearly ok_descriptor must be valid ... - do we not use this
+as a size ?
+	allchblk.c (setup_header):
+	      descr = GC_obj_kinds[kind].ok_descriptor;
+	      if (...) descr += WORDS_TO_BYTES(sz);
+
+	PUSH_OBJ(obj,hhdr) -> sets mse_descr to _descr
+
+	Is this:
+	      GC_obj_kinds[NORMAL].ok_descriptor = ((word)(-ALIGNMENT) | GC_DS_LENGTH);
+		responsible !?
+
+/* Predefined kinds: */
+# define PTRFREE 0
+# define NORMAL  1
+# define UNCOLLECTABLE 2
+# ifdef ATOMIC_UNCOLLECTABLE
+#   define AUNCOLLECTABLE 3
+#   define STUBBORN 4
+#   define IS_UNCOLLECTABLE(k) (((k) & ~1) == UNCOLLECTABLE)
+# else
+#   define STUBBORN 3
+#   define IS_UNCOLLECTABLE(k) ((k) == UNCOLLECTABLE)
+# endif
+
+GC_new_kind_inner screwed up -17
+
+Program received signal SIGSEGV, Segmentation fault.
+[Switching to Thread 1075948480 (LWP 8355)]
+GC_new_kind_inner (fl=0x81f4000, descr=4294967279, adjust=0, clear=1) at misc.c:1128
+1128                *(int *)NULL = 0;
+(gdb) bt
+#0  GC_new_kind_inner (fl=0x81f4000, descr=4294967279, adjust=0, clear=1) at misc.c:1128
+#1  0x080ff8f8 in GC_init_gcj_malloc (mp_index=5, mp=0x0) at gcj_mlc.c:87
+#2  0x080c1886 in mono_class_compute_gc_descriptor (class=0x81cc9a0) at object.c:539
+#3  0x080c1a77 in mono_class_vtable (domain=0x81f0f00, class=0x81cc9a0) at object.c:695
+#4  0x080c3223 in mono_object_new (domain=0x81f0f00, klass=0x81cc9a0) at object.c:2108
+#5  0x080a7a1f in mono_runtime_init (domain=0x81f0f00, start_cb=0x8103720 <mono_thread_start_cb>, 
+    attach_cb=0x81037d0 <mono_thread_attach_cb>) at appdomain.c:96
+#6  0x0810543d in mini_init (filename=0xbfffd37d "ViewSample.exe") at mini.c:10053
+#7  0x0805b99b in mono_main (argc=2, argv=0xbfffce24) at driver.c:837
+#8  0x0805b218 in main (argc=2, argv=0xbfffce24) at main.c:6
+(gdb) 
+
+	So - I hypothesize - the kinds are meant to be big/negative - but this is
+compensated for by the size of the allocation.
+
+	GC_gcj_kind = GC_new_kind_inner(
+			(void **)GC_gcjobjfreelist,
+			(((word)(-MARK_DESCR_OFFSET - GC_INDIR_PER_OBJ_BIAS))
+	   		 | GC_DS_PER_OBJECT),
+			FALSE, TRUE);
+
+
+	export GC_IGNORE_GCJ_INFO=1 - and it works ...
+
+	My gamble on GC_gcj_kind being broken ...
+
+	The problem comes from:
+
+(gdb) bt
+#0  setup_header (hhdr=0x81efe08, sz=4, kind=4, flags=0 '\0') at allchblk.c:245
+#1  0x080fc1ed in GC_allochblk_nth (sz=4, kind=4, flags=0 '\0', n=6) at allchblk.c:744
+#2  0x080fbd80 in GC_allochblk (sz=4, kind=4, flags=0) at allchblk.c:559
+#3  0x081018fd in GC_new_hblk (sz=4, kind=4) at new_hblk.c:253
+#4  0x08101424 in GC_allocobj (sz=4, kind=4) at alloc.c:1103
+#5  0x080f94f6 in GC_generic_malloc_inner (lb=12, k=4) at malloc.c:136
+#6  0x080ffa1a in GC_gcj_malloc (lb=12, ptr_to_struct_containing_descr=0x81b3b38) at gcj_mlc.c:157
+#7  0x080fa20b in GC_local_gcj_malloc (bytes=12, ptr_to_struct_containing_descr=0x81b3b38) at pthread_support.c:387
+#8  0x080c1117 in mono_object_new_alloc_specific (vtable=0x81b3b38) at object.c:2089
+#9  0x080c127b in mono_object_new_specific (vtable=0x81b3b38) at object.c:2147
+#10 0x080af01f in mono_type_get_object (domain=0x81f0f00, type=0x81c7e34) at reflection.c:5381
+#11 0x080c2094 in mono_class_vtable (domain=0x81f0f00, class=0x81c7d88) at object.c:861
+#12 0x080c20ca in mono_class_vtable (domain=0x81f0f00, class=0x81c7cb8) at object.c:859
+#13 0x080c20ca in mono_class_vtable (domain=0x81f0f00, class=0x81c7be8) at object.c:859
+#14 0x080c3223 in mono_object_new (domain=0x81f0f00, klass=0x81c7be8) at object.c:2108
+#15 0x080af01f in mono_type_get_object (domain=0x81f0f00, type=0x81c550c) at reflection.c:5381
+#16 0x080c2094 in mono_class_vtable (domain=0x81f0f00, class=0x81c5460) at object.c:861
+#17 0x080c20ca in mono_class_vtable (domain=0x81f0f00, class=0x81cc9a0) at object.c:859
+#18 0x080c3223 in mono_object_new (domain=0x81f0f00, klass=0x81cc9a0) at object.c:2108
+#19 0x080a7a1f in mono_runtime_init (domain=0x81f0f00, start_cb=0x8103700 <mono_thread_start_cb>, 
+    attach_cb=0x81037b0 <mono_thread_attach_cb>) at appdomain.c:96
+#20 0x0810541d in mini_init (filename=0xbfffd37d "ViewSample.exe") at mini.c:10053
+#21 0x0805b99b in mono_main (argc=2, argv=0xbfffce24) at driver.c:837
+#22 0x0805b218 in main (argc=2, argv=0xbfffce24) at main.c:6
+(gdb) up
+
+	So - then - negative hb_descrs are to be expected (apparently).
+
+process slot: 27
+ DS_PER_OBJECT: 0xffffffef
+  Object of type 'MonoType' has size 536870913
+ DS_BITMAP: 0x20000001
+process slot: 26
+ DS_PER_OBJECT: 0xffffffef
+  Object of type 'XModel' has size 138021856
+ DS_LENGTH: 0x83a0be0
+Assertion failure: mark.c:658
+assertion failure
+
+	...
+
+(gdb) p mark_stack_top
+$1 = (mse *) 0x81e50d0
+(gdb) p *mark_stack_top
+$2 = {mse_start = 0x8240e70, mse_descr = 4294967279}
+(gdb) p *mark_stack_top->mse_start
+$3 = 137267600
+(gdb) p *(MonoVTable **)mark_stack_top->mse_start
+$4 = (struct MonoVTable *) 0x82e8990
+(gdb) p *$4
+$5 = {klass = 0x8398d38, gc_descr = 0x8398ec0, domain = 0x83a0bc0, interface_offsets = 0x83a0ce8, data = 0x0, type = 0x81fffa0, 
+  max_interface_id = 34, rank = 0 '\0', remote = 0, initialized = 1, vtable = 0x82e89ac}
+(gdb) p *$4->klass
+$6 = {image = 0x8225010, enum_basetype = 0x0, element_class = 0x8398d38, cast_class = 0x8398d38, rank = 0 '\0', inited = 1, 
+  init_pending = 0, size_inited = 1, valuetype = 0, enumtype = 0, blittable = 1, unicode = 0, wastypebuilder = 0, min_align = 1, 
+  packing_size = 0, ghcimpl = 0, has_finalize = 0, marshalbyref = 0, contextbound = 0, delegate = 0, gc_descr_inited = 1, has_cctor = 0, 
+  dummy = 0, has_references = 0, has_static_refs = 0, declsec_flags = 0, exception_type = 0, exception_data = 0x0, parent = 0x0, 
+  nested_in = 0x0, nested_classes = 0x0, type_token = 33554953, name = 0x40b62892 "XModel", 
+  name_space = 0x40b62899 "unoidl.com.sun.star.frame", supertypes = 0x83a1988, idepth = 1, interface_count = 1, interface_id = 72, 
+  max_interface_id = 72, interface_offsets = 0x8397128, interfaces = 0x8352e28, instance_size = 8, class_size = 0, vtable_size = 0, 
+  flags = 161, field = {first = 911, last = 911, count = 0}, method = {first = 1137, last = 1148, count = 11}, property = {first = 0, 
+    last = 0, count = 0}, event = {first = 0, last = 0, count = 0}, marshal_info = 0x0, fields = 0x0, properties = 0x0, events = 0x0, 
+  methods = 0x83985d8, this_arg = {data = {klass = 0x8398d38, type = 0x8398d38, array = 0x8398d38, method = 0x8398d38, 
+      generic_param = 0x8398d38, generic_class = 0x8398d38}, attrs = 0, type = 18, num_mods = 0, byref = 1, pinned = 0, 
+    modifiers = 0x8398de4}, byval_arg = {data = {klass = 0x8398d38, type = 0x8398d38, array = 0x8398d38, method = 0x8398d38, 
+      generic_param = 0x8398d38, generic_class = 0x8398d38}, attrs = 0, type = 18, num_mods = 0, byref = 0, pinned = 0, 
+    modifiers = 0x8398dec}, generic_class = 0x0, generic_container = 0x0, reflection_info = 0x0, gc_descr = 0x0, 
+  runtime_info = 0x82470a0, vtable = 0x0}
+(gdb) p mono_class_get_parent($4->klass)
+$7 = (MonoClass *) 0x0
+(gdb) 
+
+with:
+
+(gdb) p fprintf(stderr, "0x%x\n", 137989824)
+0x8398ec0
+
+	ie. the gc_descr looks dead wrong.
+
+
+	** Frighteningly the gc_descr points to another MonoClass - instead of a GC value [!?]
+
+	With more debug printout we see:
+
+Add interface 'XComponentContext'
+Set pvt->gc_descr to 0x30000001: vtable 0x82e8888
+...
+  Object of type 'TransparentProxy' vtable 0x82e8888 class 0x81cd9d0 currentp 0x8240e70 has size 805306369 slot 29 on stack
+ DS_BITMAP: 0x30000001
+...
+  Object of type 'XModel' vtable 0x82e8888 class 0x838a538 currentp 0x8240e70 has size 137930328 slot 26 on stack
+ DS_LENGTH: 0x838a658
+
+    The instance seems to change type [!?]
+
+	Break in:
+
+Hardware watchpoint 3: *$3
+
+Old value = (MonoClass *) 0x81cd9d0
+New value = (MonoClass *) 0x838a538
+0x080c1545 in mono_upgrade_remote_class (domain=0x81f5f00, remote_class=0x82bdbd0, klass=0x838a538) at object.c:1108
+1108                            remote_class->interfaces [remote_class->interface_count-1] = klass;
+(gdb) bt
+#0  0x080c1545 in mono_upgrade_remote_class (domain=0x81f5f00, remote_class=0x82bdbd0, klass=0x838a538) at object.c:1108
+#1  0x0809506a in mono_upgrade_remote_class_wrapper (rtype=0x7, tproxy=0x836c120) at marshal.c:6806
+
+From TransparentProxy -> XModel
+
+...
+
+Then - trampling all over the GC data:
+
+Hardware watchpoint 2: *$2
+
+Old value = (void *) 0x30000001
+New value = (void *) 0x838a658
+0x080c1545 in mono_upgrade_remote_class (domain=0x81f5f00, remote_class=0x82bdbd0, klass=0x838a658) at object.c:1108
+1108                            remote_class->interfaces [remote_class->interface_count-1] = klass;
+(gdb) bt
+#0  0x080c1545 in mono_upgrade_remote_class (domain=0x81f5f00, remote_class=0x82bdbd0, klass=0x838a658) at object.c:1108
+#1  0x080c4563 in mono_object_isinst_mbyref (obj=0x837ecd8, klass=0x838a658) at object.c:2862
+#2  0x080c655e in ves_icall_type_IsInstanceOfType (type=0x8, obj=0x837ecd8) at icall.c:1189
+
