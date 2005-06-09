@@ -2,9 +2,9 @@
 #
 #   $RCSfile: makefile.mk,v $
 #
-#   $Revision: 1.1 $
+#   $Revision: 1.2 $
 #
-#   last change: $Author: rodo $ $Date: 2005/06/09 16:45:18 $
+#   last change: $Author: rodo $ $Date: 2005/06/09 17:32:18 $
 #
 #   The Contents of this file are made available subject to the terms of
 #   either of the following licenses
@@ -70,9 +70,12 @@ ENABLE_EXCEPTIONS=TRUE
 
 .INCLUDE :	settings.mk
 DLLPRE =
-INCPRE += -I/usr/local/include/cairo
 
 # --- Common ----------------------------------------------------------
+
+PKGCONFIG_MODULES=cairo
+.INCLUDE: pkg_config.mk
+
 
 .IF "$(verbose)"!="" || "$(VERBOSE)"!=""
 CDEFS+= -DVERBOSE
@@ -102,7 +105,7 @@ SLOFILES =		$(SLO)$/cairo_spritecanvas.obj \
 
 SHL1TARGET=$(TARGET).uno
 
-SHL1STDLIBS= $(TOOLSLIB) $(CPPULIB) $(SALLIB) $(VCLLIB) $(COMPHELPERLIB) $(CPPUHELPERLIB) $(BASEGFXLIB) $(CANVASTOOLSLIB) $(GOODIESLIB) -L/usr/local/lib -lcairo
+SHL1STDLIBS= $(TOOLSLIB) $(CPPULIB) $(SALLIB) $(VCLLIB) $(COMPHELPERLIB) $(CPPUHELPERLIB) $(BASEGFXLIB) $(CANVASTOOLSLIB) $(GOODIESLIB) $(PKGCONFIG_LIBS)
 
 SHL1IMPLIB=i$(TARGET)
 SHL1LIBS=$(SLB)$/$(TARGET).lib
