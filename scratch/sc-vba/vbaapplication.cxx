@@ -4,6 +4,7 @@
 #include "vbaapplication.hxx"
 #include "vbaworkbooks.hxx"
 #include "vbaworkbook.hxx"
+#include "vbaworksheets.hxx"
 
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
@@ -53,3 +54,10 @@ ScVbaApplication::getWorkbooks() throw (uno::RuntimeException)
 {
 	return uno::Reference< vba::XWorkbooks >( new ScVbaWorkbooks() );
 }
+
+uno::Reference< vba::XWorksheets >
+ScVbaApplication::getWorksheets() throw (uno::RuntimeException)
+{
+	return uno::Reference< vba::XWorksheets >( new ScVbaWorksheets() );
+}
+

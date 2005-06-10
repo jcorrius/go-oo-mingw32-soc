@@ -21,7 +21,8 @@ SLO1FILES =  \
         $(SLO)$/vbarange.obj \
         $(SLO)$/vbaworkbook.obj \
         $(SLO)$/vbaworkbooks.obj \
-        $(SLO)$/vbaworksheet.obj
+        $(SLO)$/vbaworksheet.obj \
+	$(SLO)$/vbaworksheets.obj
 
 LIB1TARGET = \
 	$(SLB)$/$(TARGET).lib
