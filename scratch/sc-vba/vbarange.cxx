@@ -4,6 +4,7 @@
 #include <com/sun/star/sheet/CellFlags.hpp>
 #include <com/sun/star/table/XColumnRowRange.hpp>
 #include <com/sun/star/sheet/XCellAddressable.hpp>
+#include <com/sun/star/table/CellContentType.hpp>
 
 #include "vbarange.hxx"
 
@@ -96,13 +97,20 @@ long
 ScVbaRange::getRow() throw (uno::RuntimeException)
 {
 	uno::Reference< sheet::XCellAddressable > xCellAddressable(mxRange->getCellByPosition(0, 0), ::uno::UNO_QUERY);
-	return xCellAddressable->getCellAddress().Row + 1; // Zero value indexing
-}
+	return xCellAddressable->getCellAddress().Row + 1; // Zero value indexing 
+}	
 		
 long 
 ScVbaRange::getColumn() throw (uno::RuntimeException)
 {
 	uno::Reference< sheet::XCellAddressable > xCellAddressable(mxRange->getCellByPosition(0, 0), ::uno::UNO_QUERY);
-	return xCellAddressable->getCellAddress().Column + 1; // Zero value indexing 
+	return xCellAddressable->getCellAddress().Column + 1; // Zero value indexing
+}
+
+sal_Bool
+ScVbaRange::HasFormula() throw (uno::RuntimeException)
+{
+	uno::Reference< table::XCell > xCell = mxRange->getCellByPosition(0, 0);
+	return( xCell->getType() == table::CellContentType_FORMULA );
 }
 

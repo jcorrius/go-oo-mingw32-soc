@@ -25,7 +25,6 @@ public:
 	virtual void   SAL_CALL setValue( double value ) throw (::com::sun::star::uno::RuntimeException);
 	virtual ::rtl::OUString SAL_CALL getFormula() throw (uno::RuntimeException);
 	virtual void   SAL_CALL setFormula( const ::rtl::OUString &rFormula ) throw (uno::RuntimeException);
-	virtual ::rtl::OUString SAL_CALL getAddress() throw (uno::RuntimeException);
 	virtual double SAL_CALL getCount() throw (uno::RuntimeException);
 	virtual long   SAL_CALL getRow() throw (uno::RuntimeException);
 	virtual long   SAL_CALL getColumn() throw (uno::RuntimeException);
