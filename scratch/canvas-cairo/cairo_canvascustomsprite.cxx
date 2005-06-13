@@ -259,6 +259,8 @@ namespace vclcanvas
     {
         tools::LocalGuard aGuard;
 
+	printf ("custom sprite move to new pos %f, %f\n", aNewPos.X, aNewPos.Y);
+
         if( !mpSpriteCanvas.get() )
             return; // we're disposed
 

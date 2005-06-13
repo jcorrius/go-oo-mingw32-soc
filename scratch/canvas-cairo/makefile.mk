@@ -2,9 +2,9 @@
 #
 #   $RCSfile: makefile.mk,v $
 #
-#   $Revision: 1.2 $
+#   $Revision: 1.3 $
 #
-#   last change: $Author: rodo $ $Date: 2005/06/09 17:32:18 $
+#   last change: $Author: rodo $ $Date: 2005/06/13 09:32:55 $
 #
 #   The Contents of this file are made available subject to the terms of
 #   either of the following licenses
@@ -70,10 +70,11 @@ ENABLE_EXCEPTIONS=TRUE
 
 .INCLUDE :	settings.mk
 DLLPRE =
+SOLARLIB+=-L/usr/local/lib
 
 # --- Common ----------------------------------------------------------
 
-PKGCONFIG_MODULES=cairo
+PKGCONFIG_MODULES=glitz glitz-glx cairo
 .INCLUDE: pkg_config.mk
 
 
@@ -101,7 +102,9 @@ SLOFILES =		$(SLO)$/cairo_spritecanvas.obj \
 			$(SLO)$/cairo_cachedbitmap.obj \
 			$(SLO)$/cairo_redrawmanager.obj \
 			$(SLO)$/cairo_impltools.obj \
-			$(SLO)$/cairo_parametricpolypolygon.obj
+			$(SLO)$/cairo_parametricpolypolygon.obj \
+			$(SLO)$/cairo_helper.obj
+
 
 SHL1TARGET=$(TARGET).uno
 

@@ -127,7 +127,6 @@ namespace vclcanvas
 
 	// rodo TODO
 	maBitmap = rBitmap;
-	printf ("CanvasBitmapHelper::setBitmap called, we don't have bitmap back buffer yet\n");
     }
 
     void CanvasBitmapHelper::disposing()

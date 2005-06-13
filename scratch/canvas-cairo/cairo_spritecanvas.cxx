@@ -243,12 +243,11 @@ namespace vclcanvas
 
 	::cairo::Surface* pSurface = mpBackBuffer->getSurface();
 	if( pSurface ) {
-	    ::canvas::tools::ElapsedTime aElapsedTime;
-
  	    ::cairo::Cairo* pCairo = ::cairo::cairo_create( mxDevice->getSurface() );
-	    ::cairo::cairo_set_source_surface( pCairo, pSurface, maBounds.X, maBounds.Y );
+
+	    ::cairo::cairo_set_source_surface( pCairo, pSurface, 0, 0 );
 	    ::cairo::cairo_paint( pCairo );
- 	    ::cairo::cairo_destroy( pCairo );
+	    ::cairo::cairo_destroy( pCairo );
 	}
 
         return sal_True;
