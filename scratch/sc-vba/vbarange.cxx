@@ -5,6 +5,11 @@
 #include <com/sun/star/table/XColumnRowRange.hpp>
 #include <com/sun/star/sheet/XCellAddressable.hpp>
 #include <com/sun/star/table/CellContentType.hpp>
+#include <com/sun/star/sheet/XCellSeries.hpp>
+#include <com/sun/star/sheet/FillDateMode.hpp>
+#include <com/sun/star/sheet/FillMode.hpp>
+#include <com/sun/star/sheet/FillDirection.hpp>
+#include <com/sun/star/text/XTextRange.hpp>
 
 #include "vbarange.hxx"
 
@@ -37,7 +42,6 @@ ScVbaRange::setValue( double value ) throw (::com::sun::star::uno::RuntimeExcept
 void
 ScVbaRange::Clear() throw (uno::RuntimeException)
 {
-	//FIXME: should get cell range by name ? and not by position 
 	uno::Reference< sheet::XSheetOperation > xSheetOperation(mxRange, uno::UNO_QUERY);
 	//FIXME: add all flags here?
 	xSheetOperation->clearContents(sheet::CellFlags::VALUE );
@@ -46,7 +50,6 @@ ScVbaRange::Clear() throw (uno::RuntimeException)
 void
 ScVbaRange::ClearComments() throw (uno::RuntimeException)
 {
-	//FIXME: should get cell range by name ? and not by position 
 	uno::Reference< sheet::XSheetOperation > xSheetOperation(mxRange, uno::UNO_QUERY);
 	//FIXME: STRING is not the correct type; May require special handling; clearNotes?
 	xSheetOperation->clearContents(sheet::CellFlags::STRING);
@@ -55,7 +58,6 @@ ScVbaRange::ClearComments() throw (uno::RuntimeException)
 void
 ScVbaRange::ClearContents() throw (uno::RuntimeException)
 {
-	//FIXME: should get cell range by name ? and not by position 
 	uno::Reference< sheet::XSheetOperation > xSheetOperation(mxRange, uno::UNO_QUERY);
 	xSheetOperation->clearContents(sheet::CellFlags::VALUE | sheet::CellFlags::STRING );
 }
@@ -63,7 +65,6 @@ ScVbaRange::ClearContents() throw (uno::RuntimeException)
 void
 ScVbaRange::ClearFormats() throw (uno::RuntimeException)
 {
-	//FIXME: should get cell range by name ? and not by position 
 	uno::Reference< sheet::XSheetOperation > xSheetOperation(mxRange, uno::UNO_QUERY);
 	//FIXME: need to check if we need to combine sheet::CellFlags::FORMATTED
 	xSheetOperation->clearContents(sheet::CellFlags::HARDATTR | sheet::CellFlags::FORMATTED | sheet::CellFlags::EDITATTR);
@@ -114,3 +115,48 @@ ScVbaRange::HasFormula() throw (uno::RuntimeException)
 	return( xCell->getType() == table::CellContentType_FORMULA );
 }
 
+void 
+ScVbaRange::FillLeft() throw (uno::RuntimeException)
+{
+	uno::Reference< sheet::XCellSeries > xCellSeries(mxRange, ::uno::UNO_QUERY);
+	xCellSeries->fillSeries(sheet::FillDirection_TO_LEFT, 
+							sheet::FillMode_LINEAR, sheet::FillDateMode_FILL_DATE_DAY, 0, 0x7FFFFFFF);
+}
+
+void 
+ScVbaRange::FillRight() throw (uno::RuntimeException)
+{
+	uno::Reference< sheet::XCellSeries > xCellSeries(mxRange, ::uno::UNO_QUERY);
+	xCellSeries->fillSeries(sheet::FillDirection_TO_RIGHT, 
+							sheet::FillMode_LINEAR, sheet::FillDateMode_FILL_DATE_DAY, 0, 0x7FFFFFFF);
+}
+
+void 
+ScVbaRange::FillUp() throw (uno::RuntimeException)
+{
+	uno::Reference< sheet::XCellSeries > xCellSeries(mxRange, ::uno::UNO_QUERY);
+    xCellSeries->fillSeries(sheet::FillDirection_TO_TOP, 
+							sheet::FillMode_LINEAR, sheet::FillDateMode_FILL_DATE_DAY, 0, 0x7FFFFFFF);
+}
+
+void 
+ScVbaRange::FillDown() throw (uno::RuntimeException)
+{
+	uno::Reference< sheet::XCellSeries > xCellSeries(mxRange, ::uno::UNO_QUERY);
+    xCellSeries->fillSeries(sheet::FillDirection_TO_BOTTOM, 
+							sheet::FillMode_LINEAR, sheet::FillDateMode_FILL_DATE_DAY, 0, 0x7FFFFFFF);
+}
+
+::rtl::OUString
+ScVbaRange::getText() throw (uno::RuntimeException)
+{
+	uno::Reference< text::XTextRange > xTextRange(mxRange, ::uno::UNO_QUERY);
+	return xTextRange->getString();
+}
+
+void 
+ScVbaRange::setText( const ::rtl::OUString &rString ) throw (uno::RuntimeException)
+{
+	uno::Reference< text::XTextRange > xTextRange(mxRange, ::uno::UNO_QUERY);
+	xTextRange->setString( rString );
+}

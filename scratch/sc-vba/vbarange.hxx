@@ -28,12 +28,19 @@ public:
 	virtual double SAL_CALL getCount() throw (uno::RuntimeException);
 	virtual long   SAL_CALL getRow() throw (uno::RuntimeException);
 	virtual long   SAL_CALL getColumn() throw (uno::RuntimeException);
+	virtual ::rtl::OUString SAL_CALL getText() throw (uno::RuntimeException);
+	virtual void   SAL_CALL setText( const ::rtl::OUString &rString ) throw (uno::RuntimeException);
 
+	// Methods
 	virtual void SAL_CALL Clear() throw (uno::RuntimeException);
 	virtual void SAL_CALL ClearComments() throw (uno::RuntimeException);
 	virtual void SAL_CALL ClearContents() throw (uno::RuntimeException);
 	virtual void SAL_CALL ClearFormats() throw (uno::RuntimeException);
 	virtual sal_Bool SAL_CALL HasFormula() throw (uno::RuntimeException);
+	virtual void SAL_CALL FillLeft() throw (uno::RuntimeException);
+	virtual void SAL_CALL FillRight() throw (uno::RuntimeException);
+	virtual void SAL_CALL FillUp() throw (uno::RuntimeException);
+	virtual void SAL_CALL FillDown() throw (uno::RuntimeException);
 };
 
 #endif /* SC_VBA_RANGE_HXX */
