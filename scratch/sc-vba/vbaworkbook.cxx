@@ -4,6 +4,7 @@
 #include <com/sun/star/util/XCloseable.hpp>
 #include <com/sun/star/util/XProtectable.hpp>
 #include <com/sun/star/sheet/XSpreadsheetView.hpp>
+#include <com/sun/star/sheet/XSpreadsheetDocument.hpp>
 
 #include "vbaworksheet.hxx"
 #include "vbaworkbook.hxx"
@@ -82,4 +83,27 @@ ScVbaWorkbook::getProtectStructure() throw (uno::RuntimeException)
 {
 	uno::Reference< util::XProtectable > xProt( mxModel, uno::UNO_QUERY_THROW );
 	return xProt->isProtected();
+}
+
+uno::Reference< vba::XWorksheet >
+ScVbaWorkbook::Worksheets( const ::uno::Any &rSheet ) throw (uno::RuntimeException)
+{
+	rtl::OUString aStringSheet;
+	rSheet >>= aStringSheet;
+
+        uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( mxModel, uno::UNO_QUERY );
+        if ( xSpreadDoc.is() )
+        {
+        	uno::Reference<sheet::XSpreadsheets> xSheets = xSpreadDoc->getSheets();
+		if (xSheets.is())
+		{
+			uno::Reference <container::XNameAccess> xName( xSheets, uno::UNO_QUERY );
+			if ( xName.is() )
+			{
+				uno::Reference< sheet::XSpreadsheet > xSheet(xName->getByName(aStringSheet), uno::UNO_QUERY);
+				return uno::Reference< vba::XWorksheet >( new ScVbaWorksheet(xSheet));
+			}
+		}
+        }
+
 }
