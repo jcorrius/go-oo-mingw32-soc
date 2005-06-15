@@ -110,7 +110,7 @@ namespace vclcanvas
             sprite's output position)
          */
         virtual void redraw( ::cairo::Cairo* pCairo,
-                             const Point& rOutputPos ) const = 0;
+                             const ::basegfx::B2DPoint& rOutputPos ) const = 0;
 
         /** Query whether sprite update will fully cover the given area.
 

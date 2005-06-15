@@ -73,8 +73,9 @@ namespace vclcanvas
 	printf("BackBuffer::setSize called\n");
 	if( rNewSize != maSize ) {
 	    maSize = rNewSize;
-	    printf ("back buffer size: %d x %d\n", maSize.Width(), maSize.Height() );
-	    setSurface( mxGraphicDevice->getSimilarSurface( maSize ) );
+	    printf ("back buffer (%p) size: %d x %d\n", this, maSize.Width(), maSize.Height() );
+	    if( mpSurface )
+		setSurface( mxGraphicDevice->getSimilarSurface( maSize ) );
 	}
     }
 

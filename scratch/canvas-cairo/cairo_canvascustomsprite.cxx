@@ -158,9 +158,11 @@ namespace vclcanvas
         
         // create content backbuffer in screen depth
         mpBackBuffer.reset( new BackBuffer( rDevice ) );
+	mpBackBuffer->setSize( maSize );
 
         // create mask backbuffer, with one bit color depth
         mpBackBufferMask.reset( new BackBuffer( rDevice ) );
+	mpBackBufferMask->setSize( maSize );
 
         // setup canvas helper
         // -------------------
@@ -563,13 +565,14 @@ namespace vclcanvas
         }
 
         // clear surface
-	// rodo TODO
-//         OutputDevice& rOutDev( mpBackBuffer->getOutDev() );
-//         rOutDev.EnableMapMode( FALSE );
-//         rOutDev.SetFillColor( Color( COL_WHITE ) );
-//         rOutDev.SetLineColor();
-//         rOutDev.DrawRect( Rectangle(Point(), maSize) );
+// 	::cairo::Cairo* pCairo = mpBackBuffer->getCairo();
+// 	::cairo::cairo_save( pCairo );
+// 	::cairo::cairo_set_source_rgb( pCairo, 1, 1, 1 );
+// 	::cairo::cairo_rectangle( pCairo, 0, 0, maSize.Width(), maSize.Height() );
+// 	::cairo::cairo_fill( pCairo );
+// 	::cairo::cairo_restore( pCairo );
 
+	// rodo TODO
 //         OutputDevice& rMaskOutDev( mpBackBufferMask->getOutDev() );
 //         rMaskOutDev.SetDrawMode( DRAWMODE_DEFAULT );
 //         rMaskOutDev.EnableMapMode( FALSE );
@@ -611,19 +614,22 @@ namespace vclcanvas
     // Sprite
     void CanvasCustomSprite::redraw( ::cairo::Cairo* pCairo ) const
     {
-        redraw( pCairo, 
-                ::vcl::unotools::pointFromB2DPoint( maPosition ) );
+        redraw( pCairo, maPosition );
     }
 
     void CanvasCustomSprite::redraw( ::cairo::Cairo* pCairo,
-                                     const Point& rOutputPos ) const
+                                     const ::basegfx::B2DPoint& rOutputPos ) const
     {
 	printf ("CanvasCustomSprite::redraw called\n");
 	if( pCairo ) {
-	    printf ("CanvasCustomSprite::redraw painting surface %p on %p cairo with surface %p\n",
-		    mpBackBuffer->getSurface(), pCairo, ::cairo::cairo_get_target( pCairo ) );
+	    Size aSize = mpBackBuffer->getSize();
+	    printf ("CanvasCustomSprite::redraw painting surface %p on %p cairo with surface %p on %f,%f size %d x %d\n",
+		    mpBackBuffer->getSurface(), pCairo, ::cairo::cairo_get_target( pCairo ), rOutputPos.getX(), rOutputPos.getY(),
+		    aSize.Width(), aSize.Height() );
 	    ::cairo::cairo_save( pCairo );
-	    ::cairo::cairo_set_source_surface( pCairo, mpBackBuffer->getSurface(), rOutputPos.X(), rOutputPos.Y() );
+	    ::cairo::cairo_rectangle( pCairo, rOutputPos.getX(), rOutputPos.getY(), aSize.Width(), aSize.Height() );
+	    ::cairo::cairo_clip( pCairo );
+	    ::cairo::cairo_set_source_surface( pCairo, mpBackBuffer->getSurface(), rOutputPos.getX(), rOutputPos.getY() );
 	    ::cairo::cairo_paint( pCairo );
 	    ::cairo::cairo_restore( pCairo );
 	}

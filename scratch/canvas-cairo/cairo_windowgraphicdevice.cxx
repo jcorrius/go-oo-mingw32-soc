@@ -80,8 +80,6 @@ namespace cairo {
 #endif
 
 }
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
 
 #include <canvas/canvastools.hxx>
 
@@ -448,36 +446,10 @@ namespace vclcanvas
     	if( !mpWindowSurface ) {
 #if 0
 #ifdef CAIRO_HAS_GLITZ_SURFACE
-	    ::cairo::glitz_drawable_t *pDrawable = NULL;
-	    ::cairo::glitz_format_t* pFormat = NULL;
-	    ::cairo::glitz_drawable_format_t aTemplate;
-	    ::cairo::glitz_drawable_format_t* pDrawableFormat;
-	    ::cairo::glitz_surface_t* pGlitzSurface = NULL;
-	    unsigned long mask = 0;
-
-	    aTemplate.samples = 4;
-	    mask |= GLITZ_FORMAT_SAMPLES_MASK;
-	    aTemplate.types.window = 1;
-	    mask |= GLITZ_FORMAT_WINDOW_MASK;
-	    aTemplate.doublebuffer = 0;
-	    mask |= GLITZ_FORMAT_DOUBLEBUFFER_MASK;
-
-	    pDrawableFormat = ::cairo::glitz_glx_find_drawable_format ( (::cairo::Display*) mpSysData->pDisplay,
-									cairoHelperGetDefaultScreen( mpSysData->pDisplay ),
-									mask, &aTemplate, 0);
-
-	    if( pDrawableFormat )
-		pDrawable = ::cairo::glitz_glx_create_drawable_for_window( (::cairo::Display*) mpSysData->pDisplay,
-									   cairoHelperGetDefaultScreen( mpSysData->pDisplay ),
-									   pDrawableFormat,
-									   mpSysData->aWindow,
-									   aSize.Width(), aSize.Height() );
-
-	    if( pDrawable )
-		pFormat = ::cairo::glitz_find_standard_format (pDrawable, ::cairo::GLITZ_STANDARD_ARGB32 );
-
-	    if( pFormat )
-		pGlitzSurface = ::cairo::glitz_surface_create( pDrawable, pFormat, aSize.Width() + mpOutputWindow->GetOutOffXPixel(), aSize.Height() + mpOutputWindow->GetOutOffYPixel(), 0, NULL );
+	    ::cairo::glitz_surface_t* pGlitzSurface = (::cairo::glitz_surface_t*)
+		  cairoHelperGetGlitzSurface( mpSysData,
+					      mpOutputWindow->GetOutOffXPixel(), mpOutputWindow->GetOutOffYPixel(),
+					      aSize.Width(), aSize.Height() );
 
 	    if( pGlitzSurface )
 		mpWindowSurface=::cairo::cairo_glitz_surface_create( pGlitzSurface );

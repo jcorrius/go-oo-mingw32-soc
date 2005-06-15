@@ -93,6 +93,7 @@
 #include <canvas/elapsedtime.hxx>
 #include <canvas/redrawmanagement.hxx>
 
+#include "cairo_cairo.hxx"
 #include "cairo_sprite.hxx"
 #include "cairo_backbuffer.hxx"
 #include "cairo_impltools.hxx"
@@ -125,8 +126,10 @@ namespace vclcanvas
             provided from elsewhere, everytime back buffer content
             changes, backgroundDirty() must be called.
          */
-        RedrawManager( OutputDevice&				rOutDev,
-                       const BackBufferSharedPtr& 	rBackBuffer );
+        RedrawManager( OutputDevice&			rOutDev,
+                       const BackBufferSharedPtr& 	rBackBuffer,
+		       ::cairo::Surface*                pSurface);
+	~RedrawManager();
 
         void updateScreen( bool bUpdateAll );
         void backgroundDirty();
@@ -187,9 +190,11 @@ namespace vclcanvas
                 	                		                             // call
         OutputDevice&									mrOutDev;
         BackBufferSharedPtr 							mpBackBuffer;
-        ::canvas::vcltools::VCLObject<VirtualDevice>	maVDev; 		// for the repaint accumulator
         ::canvas::tools::ElapsedTime					maLastUpdate;	// for the frame counter
         bool											mbBackgroundDirty;
+	::cairo::Surface* mpWinSurface;
+	::cairo::Surface* mpSurface;
+	::cairo::Cairo* mpCairo;
     };
 }
 

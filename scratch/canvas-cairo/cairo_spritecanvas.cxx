@@ -241,15 +241,6 @@ namespace vclcanvas
 //                    aElapsedTime.getElapsedTime() );
 // #endif
 
-	::cairo::Surface* pSurface = mpBackBuffer->getSurface();
-	if( pSurface ) {
- 	    ::cairo::Cairo* pCairo = ::cairo::cairo_create( mxDevice->getSurface() );
-
-	    ::cairo::cairo_set_source_surface( pCairo, pSurface, 0, 0 );
-	    ::cairo::cairo_paint( pCairo );
-	    ::cairo::cairo_destroy( pCairo );
-	}
-
         return sal_True;
     }
 
@@ -297,7 +288,8 @@ namespace vclcanvas
 
             // setup RedrawManager
             mpRedrawManager.reset( new RedrawManager( *pOutputWindow,
-                                                      mpBackBuffer ) );
+                                                      mpBackBuffer,
+						      mxDevice->getSurface() ) );
 
 	    //Size aSize = pOutputWindow->GetOutputSizePixel();
 	    //maCanvasHelper.setSurface (::cairo::cairo_xlib_surface_create( (::cairo::Display*) mpSysData->pDisplay, mpSysData->aWindow, (::cairo::Visual*) mpSysData->pVisual, aSize.Width(), aSize.Height() ), aSize );
