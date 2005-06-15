@@ -203,34 +203,6 @@ namespace vclcanvas
             }
         }
 
-        ::BitmapEx bitmapExFromXBitmap( const uno::Reference< rendering::XBitmap >& xBitmap )
-        {
-            uno::Reference< lang::XServiceInfo > xRef( xBitmap, 
-                                                       uno::UNO_QUERY );
-
-            if( xRef.is() && 
-                xRef->getImplementationName().equals( ::rtl::OUString(RTL_CONSTASCII_USTRINGPARAM(CANVASBITMAP_IMPLEMENTATION_NAME))) )
-            {
-                // TODO(Q1): Maybe use dynamic_cast here
-                return static_cast<CanvasBitmap*>(xBitmap.get())->getBitmap();
-            }
-            else
-            {
-                uno::Reference< lang::XUnoTunnel > xTunnel( xBitmap, uno::UNO_QUERY );
-                if( xTunnel.is() )
-                {
-                    sal_Int64 nPtr = xTunnel->getSomething( vcl::unotools::getTunnelIdentifier( vcl::unotools::Id_BitmapEx ) );
-                    if( nPtr )
-                        return BitmapEx( *(BitmapEx*)nPtr );
-                }
-                // TODO(F1): extract pixel from XBitmap interface
-                ENSURE_AND_THROW( false, 
-                                  "bitmapExFromXBitmap(): could not extract bitmap" );
-            }
- 
-            return ::BitmapEx();
-        }
-
         ::cairo::Cairo* cairoFromXBitmap( const uno::Reference< rendering::XBitmap >& xBitmap )
         {
             uno::Reference< lang::XServiceInfo > xRef( xBitmap, 
@@ -238,27 +210,29 @@ namespace vclcanvas
 
             if( xRef.is() && 
                 xRef->getImplementationName().equals( ::rtl::OUString(RTL_CONSTASCII_USTRINGPARAM(CANVASBITMAP_IMPLEMENTATION_NAME))) )
-            {
+	    {
                 // TODO(Q1): Maybe use dynamic_cast here
                 return static_cast<CanvasBitmap*>(xBitmap.get())->getCairo();
             }
-            else
-            {
-		// rodo TODO
-//                 uno::Reference< lang::XUnoTunnel > xTunnel( xBitmap, uno::UNO_QUERY );
-//                 if( xTunnel.is() )
-//                 {
-//                     sal_Int64 nPtr = xTunnel->getSomething( vcl::unotools::getTunnelIdentifier( vcl::unotools::Id_Cairo ) );
-//                     if( nPtr )
-//                         return (::cairo::Cairo*) *(BitmapEx*)nPtr;
-//                 }
-                // TODO(F1): extract pixel from XBitmap interface
-//                 ENSURE_AND_THROW( false, 
-//                                   "bitmapExFromXBitmap(): could not extract cairo" );
-		printf ("unable to get cairo from bitmap\n");
-            }
  
             return NULL;
+        }
+
+        ::BitmapEx bitmapExFromXBitmap( const uno::Reference< rendering::XBitmap >& xBitmap )
+        {
+	    uno::Reference< lang::XUnoTunnel > xTunnel( xBitmap, uno::UNO_QUERY );
+	    if( xTunnel.is() )
+            {
+		sal_Int64 nPtr = xTunnel->getSomething( vcl::unotools::getTunnelIdentifier( vcl::unotools::Id_BitmapEx ) );
+		if( nPtr )
+		    return BitmapEx( *(BitmapEx*)nPtr );
+	    }
+
+	    // TODO(F1): extract pixel from XBitmap interface
+	    ENSURE_AND_THROW( false, 
+			      "bitmapExFromXBitmap(): could not extract cairo" );
+ 
+            return ::BitmapEx();
         }
 
         bool setupFontTransform( ::Point&						o_rPoint,

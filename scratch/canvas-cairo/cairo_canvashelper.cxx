@@ -573,9 +573,10 @@ namespace vclcanvas
                                                                                 const rendering::RenderState& 				renderState,
                                                                                 bool 										bModulateColors )
     {
-	// rodo TODO
+	if( mpCairo )
+        {
+	    useStates( viewState, renderState, true );
 
-	if( mpCairo ) {
 	    ::cairo::Cairo* pCairo = tools::cairoFromXBitmap( xBitmap );
 	    if( pCairo ) {
 		::cairo::Surface* pSurface = ::cairo::cairo_get_target( pCairo );
@@ -586,174 +587,43 @@ namespace vclcanvas
 		::cairo::cairo_set_source_surface( mpCairo, pSurface, 0, 0 );
 		::cairo::cairo_paint( mpCairo );
 		::cairo::cairo_restore( mpCairo );
+	    } else {
+		BitmapEx aBmpEx = tools::bitmapExFromXBitmap(xBitmap);
+		Bitmap aBitmap = aBmpEx.GetBitmap();
+		Bitmap aMask = aBmpEx.GetMask();
+
+		BitmapReadAccess*	pBitmapReadAcc = aBitmap.AcquireReadAccess();
+		BitmapReadAccess*	pMaskReadAcc = aMask.AcquireReadAccess();
+
+		const long		nWidth = pBitmapReadAcc->Width();
+		const long		nHeight = pBitmapReadAcc->Height();
+		long nX, nY;
+
+		unsigned char* data = (unsigned char*) malloc( nWidth*nHeight*4 );
+		long nOff = 0;
+		Color aColor;
+
+		for( nY = 0; nY < nHeight; nY++ )
+		    for( nX = 0; nX < nWidth; nX++ ) {
+			aColor = pBitmapReadAcc->GetColor( nY, nX );
+			data [nOff++] = aColor.GetBlue();
+			data [nOff++] = aColor.GetGreen();
+			data [nOff++] = aColor.GetRed();
+			data [nOff++] = 255 - pMaskReadAcc->GetColor( nY, nX ).GetRed();
+		    }
+
+		::cairo::Surface* pImageSurface = ::cairo::cairo_image_surface_create_for_data( data, ::cairo::CAIRO_FORMAT_ARGB32, nWidth, nHeight, nWidth*4 );
+
+		::cairo::cairo_save( mpCairo );
+		::cairo::cairo_set_source_surface( mpCairo, pImageSurface, 0, 0 );
+		::cairo::cairo_paint( mpCairo );
+		::cairo::cairo_restore( mpCairo );
+
+		::cairo::cairo_surface_destroy( pImageSurface );
+		free( data );
 	    }
 	}
 
-//         CHECK_AND_THROW( xBitmap.is(),
-//                          "CanvasHelper::implDrawBitmap(): bitmap is NULL");
-
-//         if( mpOutDev.get() )
-//         {
-//             tools::OutDevStateKeeper aStateKeeper( mpProtectedOutDev );
-
-//             setupOutDevState( viewState, renderState, IGNORE_COLOR );
-
-//             ::basegfx::B2DHomMatrix aMatrix;
-//             ::canvas::tools::mergeViewAndRenderTransform(aMatrix, viewState, renderState);
-
-//             ::basegfx::B2DPoint aOutputPos( 0.0, 0.0 );
-//             aOutputPos *= aMatrix;
-
-//             BitmapEx aBmpEx( tools::bitmapExFromXBitmap(xBitmap) );
-
-//             // TODO(F2): Implement modulation again for other color
-//             // channels (currently, works only for alpha). Note: this
-//             // is already implemented in transformBitmap()
-//             if( bModulateColors &&
-//                 renderState.DeviceColor.getLength() > 3 )
-//             {
-//                 // optimize away the case where alpha modulation value
-//                 // is 1.0 - we then simply switch off modulation at all
-//                 bModulateColors = !::rtl::math::approxEqual(
-//                     renderState.DeviceColor[3], 1.0);
-//             }
-
-//             // check whether we can render bitmap as-is: must not
-//             // modulate colors, matrix must either be the identity
-//             // transform (that's clear), _or_ contain only
-//             // translational components.
-// 			if( !bModulateColors &&
-//                 (aMatrix.isIdentity() ||
-//                  (::basegfx::fTools::equalZero( aMatrix.get(0,1) ) &&
-//                   ::basegfx::fTools::equalZero( aMatrix.get(1,0) ) &&
-//                   ::rtl::math::approxEqual(aMatrix.get(0,0), 1.0) &&
-//                   ::rtl::math::approxEqual(aMatrix.get(1,1), 1.0)) ) )
-//             {
-//                 // optimized case: identity matrix, or only
-//                 // translational components.
-//                 mpOutDev->getOutDev().DrawBitmapEx( ::vcl::unotools::pointFromB2DPoint( aOutputPos ),
-//                                                     aBmpEx );
-
-//                 if( mp2ndOutDev.get() )
-//                     mp2ndOutDev->getOutDev().DrawBitmapEx( ::vcl::unotools::pointFromB2DPoint( aOutputPos ),
-//                                                            aBmpEx );
-
-//                 // Returning a cache object is not useful, the XBitmap
-//                 // itself serves this purpose
-//                 return uno::Reference< rendering::XCachedPrimitive >(NULL);
-//             }
-//             else
-//             {
-//                 // Matrix contains non-trivial transformation (or
-//                 // color modulation is requested), decompose to check
-//                 // whether GraphicObject suffices
-//                 ::basegfx::B2DVector aScale;
-//                 double				 nRotate;
-//                 double				 nShearX;
-//                 aMatrix.decompose( aScale, aOutputPos, nRotate, nShearX );
-                
-//                 GraphicAttr 			aGrfAttr;
-//                 GraphicObjectSharedPtr 	pGrfObj;
-
-//                 ::Size aBmpSize( aBmpEx.GetSizePixel() );
-
-//                 // setup alpha modulation
-//                 if( bModulateColors )
-//                 {
-//                     const double nAlphaModulation( renderState.DeviceColor[3] );
-
-//                     // TODO(F1): Note that the GraphicManager has a
-//                     // subtle difference in how it calculates the
-//                     // resulting alpha value: it's using the inverse
-//                     // alpha values (i.e. 'transparency'), and
-//                     // calculates transOrig + transModulate, instead
-//                     // of transOrig + transModulate -
-//                     // transOrig*transModulate (which would be
-//                     // equivalent to the origAlpha*modulateAlpha the
-//                     // DX canvas performs)
-//                     aGrfAttr.SetTransparency( 
-//                         static_cast< BYTE >( 
-//                             ::basegfx::fround( 255.0*( 1.0 - nAlphaModulation ) ) ) );
-//                 }
-
-//                 if( ::basegfx::fTools::equalZero( nShearX ) )
-//                 {
-//                     // no shear, GraphicObject is enough (the
-//                     // GraphicObject only supports scaling, rotation
-//                     // and translation)
-
-//                     // setup GraphicAttr
-//                     aGrfAttr.SetMirrorFlags( 
-//                         ( aScale.getX() < 0.0 ? BMP_MIRROR_HORZ : 0 ) | 
-//                         ( aScale.getY() < 0.0 ? BMP_MIRROR_VERT : 0 ) );
-//                     aGrfAttr.SetRotation( static_cast< USHORT >(::basegfx::fround( nRotate*10.0 )) );
-
-//                     pGrfObj.reset( new GraphicObject( aBmpEx ) );
-//                 }
-//                 else
-//                 {
-//                     // modify output position, to account for the fact
-//                     // that transformBitmap() always normalizes its output
-//                     // bitmap into the smallest enclosing box.
-//                     ::basegfx::B2DRectangle	aDestRect;            
-//                     ::canvas::tools::calcTransformedRectBounds( aDestRect, 
-//                                                                 ::basegfx::B2DRectangle(0,
-//                                                                                         0,
-//                                                                                         aBmpSize.Width(),
-//                                                                                         aBmpSize.Height()),
-//                                                                 aMatrix );
-
-//                     aOutputPos.setX( aDestRect.getMinX() );
-//                     aOutputPos.setY( aDestRect.getMinY() );
-
-//                     // complex transformation, use generic affine bitmap
-//                     // transformation
-//                     aBmpEx = tools::transformBitmap( aBmpEx,
-//                                                      aMatrix, 
-//                                                      renderState.DeviceColor,
-//                                                      tools::MODULATE_NONE );
-
-//                     pGrfObj.reset( new GraphicObject( aBmpEx ) );
-
-//                     // clear scale values, generated bitmap already
-//                     // contains scaling
-//                     aScale.setX( 1.0 ); aScale.setY( 1.0 );
-
-//                     // update bitmap size, bitmap has changed above.
-//                     aBmpSize = aBmpEx.GetSizePixel();
-//                 }
-
-//                 // output GraphicObject
-//                 const ::Point aPt( ::vcl::unotools::pointFromB2DPoint( aOutputPos ) );
-//                 const ::Size  aSz( ::basegfx::fround( aScale.getX() * aBmpSize.Width() ),
-//                                    ::basegfx::fround( aScale.getY() * aBmpSize.Height() ) );
-
-//                 pGrfObj->Draw( &mpOutDev->getOutDev(),
-//                                aPt,
-//                                aSz,
-//                                &aGrfAttr );
-
-//                 if( mp2ndOutDev.get() )
-//                     pGrfObj->Draw( &mp2ndOutDev->getOutDev(),
-//                                    aPt,
-//                                    aSz,
-//                                    &aGrfAttr );
-                
-//                 // created GraphicObject, which possibly cached
-//                 // display bitmap - return cache object, to retain
-//                 // that information.
-//                 return uno::Reference< rendering::XCachedPrimitive >(
-//                     new CachedBitmap( pGrfObj,
-//                                       aPt,
-//                                       aSz,
-//                                       aGrfAttr,
-//                                       viewState,
-//                                       uno::Reference< rendering::XCanvas >( 
-//                                           const_cast< rendering::XCanvas* >(&rCanvas)) ) );
-//             }
-//         }
-
-        // Nothing rendered
         return uno::Reference< rendering::XCachedPrimitive >(NULL);
     }
 
