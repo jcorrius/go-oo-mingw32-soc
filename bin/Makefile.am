@@ -8,7 +8,6 @@ script_files = \
 	help-font-munge \
 	install-dict.in \
 	install-dictionaries \
-	install-help \
 	java-set-classpath.in \
 	nothing \
 	ooinstall \
