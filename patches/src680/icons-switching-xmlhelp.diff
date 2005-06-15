@@ -1,0 +1,179 @@
+--- xmlhelp/inc/provider/databases.hxx	2005-03-30 10:36:33.000000000 +0200
++++ xmlhelp/inc/provider/databases.hxx	2005-06-15 13:53:18.784739977 +0200
+@@ -233,7 +233,7 @@ namespace chelp {
+ 		 */
+ 
+ 		Databases( const rtl::OUString& instPath,
+-                   const rtl::OUString& imageZip,
++                   const com::sun::star::uno::Sequence< rtl::OUString >& imagesZipPaths,
+                    const rtl::OUString& productName,
+ 				   const rtl::OUString& productVersion,
+ 				   const rtl::OUString& vendorName,
+@@ -386,7 +386,9 @@ namespace chelp {
+             prodName,prodVersion,vendName,vendVersion,vendShort;
+ 		
+ 		rtl::OUString          m_aInstallDirectory;                // Installation directory
++        com::sun::star::uno::Sequence< rtl::OUString > m_aImagesZipPaths;
+         rtl::OString           m_aImagesZipFileURL;
++        sal_Int16              m_nSymbolsStyle;
+ 		rtl::OUString          m_aInstallDirectoryWithoutEncoding; // a work around for a Sablot bug.
+ 		rtl::OUString          m_aInstallDirectoryAsSystemPath;    // Installation directory
+ 		
+--- xmlhelp/source/cxxhelp/provider/databases.cxx	2005-06-14 18:26:53.312308000 +0200
++++ xmlhelp/source/cxxhelp/provider/databases.cxx	2005-06-15 14:40:35.283481449 +0200
+@@ -89,6 +89,9 @@
+ #ifndef _RTL_USTRBUF_HXX_
+ #include <rtl/ustrbuf.hxx>
+ #endif
++#ifndef INCLUDED_SVTOOLS_MISCOPT_HXX
++#include <svtools/miscopt.hxx>
++#endif
+ #include "inputstream.hxx"
+ #include <algorithm>
+ 
+@@ -102,7 +105,7 @@ using namespace com::sun::star::lang;
+ 
+ 
+ Databases::Databases( const rtl::OUString& instPath,
+-                      const rtl::OUString& imageZip,
++					  const com::sun::star::uno::Sequence< rtl::OUString >& imagesZipPaths,
+ 					  const rtl::OUString& productName,
+ 					  const rtl::OUString& productVersion,
+ 					  const rtl::OUString& vendorName,
+@@ -116,12 +119,8 @@ Databases::Databases( const rtl::OUStrin
+ 	  m_nCustomCSSDocLength( 0 ),
+ 	  m_pCustomCSSDoc( 0 ),
+ 	  m_aCSS(styleSheet.toAsciiLowerCase()),
+-      m_aImagesZipFileURL(rtl::OUStringToOString(
+-                              rtl::Uri::encode(
+-                                  imageZip,
+-                                  rtl_UriCharClassPchar,
+-                                  rtl_UriEncodeIgnoreEscapes,
+-                                  RTL_TEXTENCODING_UTF8 ),RTL_TEXTENCODING_UTF8)),
++	  m_aImagesZipPaths( imagesZipPaths ),
++	  m_aImagesZipFileURL(),
+ 	  newProdName(rtl::OUString::createFromAscii( "$[officename]" ) ),
+       newProdVersion(rtl::OUString::createFromAscii( "$[officeversion]" ) ),
+       prodName( rtl::OUString::createFromAscii( "%PRODUCTNAME" ) ),
+@@ -198,9 +197,65 @@ Databases::~Databases()
+ 
+ }
+ 
++static bool impl_getZipFile(
++        Sequence< rtl::OUString > & rImagesZipPaths,
++        const rtl::OUString & rZipName,
++        rtl::OUString & rFileName )
++{
++    const rtl::OUString *pPathArray = rImagesZipPaths.getArray();
++    for ( int i = 0; i < rImagesZipPaths.getLength(); ++i )
++    {
++        rFileName = pPathArray[ i ];
++        if ( rFileName.getLength() )
++        {
++            if ( 1 + rFileName.lastIndexOf( '/' ) != rFileName.getLength() )
++            {
++                rFileName += rtl::OUString::createFromAscii( "/" );
++            }
++            rFileName += rZipName;
++
++            // test existence
++            osl::DirectoryItem aDirItem;
++            if ( osl::DirectoryItem::get( rFileName, aDirItem ) == osl::FileBase::E_None )
++                return true;
++        }
++    }
++}
+ 
+ rtl::OString Databases::getImagesZipFileURL()
+ {
++    sal_Int16 nSymbolsStyle = SvtMiscOptions().GetCurrentSymbolsStyle();
++    if ( !m_aImagesZipFileURL.getLength() || ( m_nSymbolsStyle != nSymbolsStyle ) )
++    {
++        m_nSymbolsStyle = nSymbolsStyle;
++
++        rtl::OUString aImageZip;
++        rtl::OUString aSymbolsStyleName = SvtMiscOptions().GetCurrentSymbolsStyleName();
++        bool bFound = false;
++
++        if ( aSymbolsStyleName.getLength() != 0 )
++        {
++            rtl::OUString aZipName = rtl::OUString::createFromAscii( "images_" );
++            aZipName += aSymbolsStyleName;
++            aZipName += rtl::OUString::createFromAscii( ".zip" );
++
++            bFound = impl_getZipFile( m_aImagesZipPaths, aZipName, aImageZip );
++        }
++
++        if ( ! bFound )
++            bFound = impl_getZipFile( m_aImagesZipPaths, rtl::OUString::createFromAscii( "images.zip" ), aImageZip );
++
++        if ( ! bFound )
++            aImageZip = rtl::OUString();
++
++        m_aImagesZipFileURL = rtl::OUStringToOString(
++                    rtl::Uri::encode(
++                        aImageZip,
++                        rtl_UriCharClassPchar,
++                        rtl_UriEncodeIgnoreEscapes,
++                        RTL_TEXTENCODING_UTF8 ), RTL_TEXTENCODING_UTF8 );
++    }
++
+     return m_aImagesZipFileURL;
+ }
+ 
+--- xmlhelp/source/cxxhelp/provider/provider.cxx	2005-06-14 18:26:57.871522000 +0200
++++ xmlhelp/source/cxxhelp/provider/provider.cxx	2005-06-15 14:15:12.194194212 +0200
+@@ -396,33 +396,20 @@ void ContentProvider::init()
+ 	rtl::OUString vendorshort = vendorname;
+ 
+ 	
+-    bool found = false;
++    Sequence< rtl::OUString > aImagesZipPaths( 2 );
+     xHierAccess = getHierAccess( sProvider,
+ 								 "org.openoffice.Office.Common" );
+-    rtl::OUString imageZip(getKey(xHierAccess,"Path/Current/UserConfig"));
+-    subst(imageZip);
+-    if(imageZip.getLength()) {
+-        // test existence
+-        if(1+imageZip.lastIndexOf('/') == imageZip.getLength())
+-            imageZip += rtl::OUString::createFromAscii("images.zip");
+-        else
+-            imageZip += rtl::OUString::createFromAscii("/images.zip");
+-        osl::DirectoryItem aDirItem;
+-        if(osl::DirectoryItem::get(imageZip,aDirItem) == osl::FileBase::E_None)
+-            found = true;
+-    }
+-    
+-    if(!found) {
+-        imageZip = getKey(xHierAccess,"Path/Current/Config");
+-        subst(imageZip);
+-        if(1+imageZip.lastIndexOf('/') == imageZip.getLength())
+-            imageZip += rtl::OUString::createFromAscii("images.zip");
+-        else
+-            imageZip += rtl::OUString::createFromAscii("/images.zip");        
+-    }
++	
++    rtl::OUString aPath( getKey( xHierAccess, "Path/Current/UserConfig" ) );
++    subst( aPath );
++    aImagesZipPaths[ 0 ] = aPath;
++
++    aPath = getKey( xHierAccess, "Path/Current/Config" );
++    subst( aPath );
++    aImagesZipPaths[ 1 ] = aPath;
+ 	
+     m_pDatabases = new Databases( instPath,
+-                                  imageZip,
++                                  aImagesZipPaths,
+                                   productname,
+ 								  productversion,
+ 								  vendorname,
+--- xmlhelp/util/makefile.mk	2005-03-30 10:38:50.000000000 +0200
++++ xmlhelp/util/makefile.mk	2005-06-15 14:23:57.503585288 +0200
+@@ -105,6 +105,7 @@ SHL1STDLIBS=                     \
+ 	$(SABLOT3RDLIB)          \
+ 	$(EXPATASCII3RDLIB)      \
+ 	$(UCBHELPERLIB)          \
++	$(SVTOOLLIB)             \
+ 	$(BERKELEYLIB)
+ #	$(BERKELEYCPPLIB)
+ 
