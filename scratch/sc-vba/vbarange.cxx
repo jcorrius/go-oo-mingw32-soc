@@ -10,6 +10,11 @@
 #include <com/sun/star/sheet/FillMode.hpp>
 #include <com/sun/star/sheet/FillDirection.hpp>
 #include <com/sun/star/text/XTextRange.hpp>
+#include <com/sun/star/sheet/XCellRangeAddressable.hpp>
+#include <com/sun/star/sheet/XSheetCellRange.hpp>
+#include <com/sun/star/sheet/XSpreadsheet.hpp>
+#include <com/sun/star/sheet/XSheetCellCursor.hpp>
+#include <com/sun/star/sheet/XArrayFormulaRange.hpp>
 
 #include "vbarange.hxx"
 
@@ -159,4 +164,67 @@ ScVbaRange::setText( const ::rtl::OUString &rString ) throw (uno::RuntimeExcepti
 {
 	uno::Reference< text::XTextRange > xTextRange(mxRange, ::uno::UNO_QUERY);
 	xTextRange->setString( rString );
+}
+
+uno::Reference< vba::XRange >
+ScVbaRange::Offset( const ::uno::Any &nRowOff, const uno::Any &nColOff ) throw (uno::RuntimeException)
+{
+	sal_Int16 nRowOffset = 0, nColOffset = 0;
+	nRowOff >>= nRowOffset;
+	nColOff >>= nColOffset;
+	uno::Reference< sheet::XSheetCellRange > xSheetCellRange(mxRange, ::uno::UNO_QUERY);
+	uno::Reference< sheet::XSpreadsheet > xSheet = xSheetCellRange->getSpreadsheet();
+	uno::Reference< sheet::XCellRangeAddressable > xCellRangeAddressable(mxRange, ::uno::UNO_QUERY);
+	uno::Reference< table::XCellRange > xRange(xSheet, uno::UNO_QUERY);
+	return uno::Reference< vba::XRange >( new ScVbaRange( xRange->getCellRangeByPosition(
+										xCellRangeAddressable->getRangeAddress().StartColumn + nColOffset,
+                                        xCellRangeAddressable->getRangeAddress().StartRow + nRowOffset,
+                                        xCellRangeAddressable->getRangeAddress().EndColumn + nColOffset,
+                                        xCellRangeAddressable->getRangeAddress().EndRow + nRowOffset ) ) );
+}
+
+uno::Reference< vba::XRange >
+ScVbaRange::CurrentRegion() throw (uno::RuntimeException)
+{
+	uno::Reference< sheet::XSheetCellRange > xSheetCellRange(mxRange, ::uno::UNO_QUERY);
+	uno::Reference< sheet::XSpreadsheet > xSheet = xSheetCellRange->getSpreadsheet();
+	uno::Reference< sheet::XSheetCellCursor > xSheetCellCursor = xSheet->createCursorByRange( xSheetCellRange );
+	xSheetCellCursor->collapseToCurrentRegion();
+	uno::Reference< sheet::XCellRangeAddressable > xCellRangeAddressable(xSheetCellCursor, ::uno::UNO_QUERY);
+	uno::Reference< table::XCellRange > xRange( xSheet, ::uno::UNO_QUERY);
+	return uno::Reference< vba::XRange >( new ScVbaRange( xRange->getCellRangeByPosition(
+                                        xCellRangeAddressable->getRangeAddress().StartColumn,
+                                        xCellRangeAddressable->getRangeAddress().StartRow,
+                                        xCellRangeAddressable->getRangeAddress().EndColumn,
+                                        xCellRangeAddressable->getRangeAddress().EndRow ) ) );
+}
+
+uno::Reference< vba::XRange >
+ScVbaRange::CurrentArray() throw (uno::RuntimeException)
+{
+	uno::Reference< sheet::XSheetCellRange > xSheetCellRange(mxRange, ::uno::UNO_QUERY);
+    uno::Reference< sheet::XSpreadsheet > xSheet = xSheetCellRange->getSpreadsheet();
+    uno::Reference< sheet::XSheetCellCursor > xSheetCellCursor = xSheet->createCursorByRange( xSheetCellRange );
+	xSheetCellCursor->collapseToCurrentArray();
+	uno::Reference< sheet::XCellRangeAddressable > xCellRangeAddressable(xSheetCellCursor, ::uno::UNO_QUERY);
+    uno::Reference< table::XCellRange > xRange( xSheet, ::uno::UNO_QUERY);
+    return uno::Reference< vba::XRange >( new ScVbaRange( xRange->getCellRangeByPosition(
+                                        xCellRangeAddressable->getRangeAddress().StartColumn,
+                                        xCellRangeAddressable->getRangeAddress().StartRow,
+                                        xCellRangeAddressable->getRangeAddress().EndColumn,
+                                        xCellRangeAddressable->getRangeAddress().EndRow ) ) );
+}
+
+::rtl::OUString
+ScVbaRange::getFormulaArray() throw (uno::RuntimeException)
+{
+	uno::Reference< sheet::XArrayFormulaRange > xArrayFormulaRange(mxRange, ::uno::UNO_QUERY);
+	return xArrayFormulaRange->getArrayFormula();
+}
+
+void 
+ScVbaRange::setFormulaArray(const ::rtl::OUString &rFormula) throw (uno::RuntimeException)
+{
+	uno::Reference< sheet::XArrayFormulaRange > xArrayFormulaRange(mxRange, ::uno::UNO_QUERY);
+	xArrayFormulaRange->setArrayFormula( rFormula );
 }

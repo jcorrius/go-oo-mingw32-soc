@@ -30,6 +30,8 @@ public:
 	virtual long   SAL_CALL getColumn() throw (uno::RuntimeException);
 	virtual ::rtl::OUString SAL_CALL getText() throw (uno::RuntimeException);
 	virtual void   SAL_CALL setText( const ::rtl::OUString &rString ) throw (uno::RuntimeException);
+	virtual ::rtl::OUString SAL_CALL getFormulaArray() throw (uno::RuntimeException);
+	virtual void   SAL_CALL setFormulaArray(const ::rtl::OUString &rFormula) throw (uno::RuntimeException);
 
 	// Methods
 	virtual void SAL_CALL Clear() throw (uno::RuntimeException);
@@ -41,6 +43,10 @@ public:
 	virtual void SAL_CALL FillRight() throw (uno::RuntimeException);
 	virtual void SAL_CALL FillUp() throw (uno::RuntimeException);
 	virtual void SAL_CALL FillDown() throw (uno::RuntimeException);
+	virtual	uno::Reference< vba::XRange > SAL_CALL Offset( const ::uno::Any &nRowOffset, const ::uno::Any &nColOffset )
+														   throw (uno::RuntimeException);
+	virtual uno::Reference< vba::XRange > SAL_CALL CurrentRegion() throw (uno::RuntimeException);
+	virtual uno::Reference< vba::XRange > SAL_CALL CurrentArray() throw (uno::RuntimeException);
 };
 
 #endif /* SC_VBA_RANGE_HXX */
