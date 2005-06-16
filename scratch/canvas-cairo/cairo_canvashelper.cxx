@@ -590,10 +590,10 @@ namespace vclcanvas
 	    } else {
 		BitmapEx aBmpEx = tools::bitmapExFromXBitmap(xBitmap);
 		Bitmap aBitmap = aBmpEx.GetBitmap();
-		Bitmap aMask = aBmpEx.GetMask();
+		AlphaMask aAlpha = aBmpEx.GetAlpha();
 
 		BitmapReadAccess*	pBitmapReadAcc = aBitmap.AcquireReadAccess();
-		BitmapReadAccess*	pMaskReadAcc = aMask.AcquireReadAccess();
+		BitmapReadAccess*	pAlphaReadAcc = aAlpha.AcquireReadAccess();
 
 		const long		nWidth = pBitmapReadAcc->Width();
 		const long		nHeight = pBitmapReadAcc->Height();
@@ -602,14 +602,19 @@ namespace vclcanvas
 		unsigned char* data = (unsigned char*) malloc( nWidth*nHeight*4 );
 		long nOff = 0;
 		Color aColor;
+		unsigned int nAlpha;
 
 		for( nY = 0; nY < nHeight; nY++ )
 		    for( nX = 0; nX < nWidth; nX++ ) {
+			nAlpha = 255 - pAlphaReadAcc->GetColor( nY, nX ).GetBlue();
 			aColor = pBitmapReadAcc->GetColor( nY, nX );
-			data [nOff++] = aColor.GetBlue();
-			data [nOff++] = aColor.GetGreen();
-			data [nOff++] = aColor.GetRed();
-			data [nOff++] = 255 - pMaskReadAcc->GetColor( nY, nX ).GetRed();
+
+			// cairo need premultiplied color values
+			// TODO(rodo) handle endianess
+			data [nOff++] = ( nAlpha*aColor.GetBlue() )/255;
+			data [nOff++] = ( nAlpha*aColor.GetGreen() )/255;
+			data [nOff++] = ( nAlpha*aColor.GetRed() )/255;
+			data [nOff++] = nAlpha;
 		    }
 
 		::cairo::Surface* pImageSurface = ::cairo::cairo_image_surface_create_for_data( data, ::cairo::CAIRO_FORMAT_ARGB32, nWidth, nHeight, nWidth*4 );
