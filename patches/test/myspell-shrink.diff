@@ -1,0 +1,406 @@
+Index: lingucomponent/source/spellcheck/myspell/hashmgr.cxx
+===================================================================
+RCS file: /cvs/whiteboard/lingucomponent/source/spellcheck/myspell/hashmgr.cxx,v
+retrieving revision 1.9
+diff -u -r1.9 hashmgr.cxx
+--- lingucomponent/source/spellcheck/myspell/hashmgr.cxx	25 Feb 2004 14:07:47 -0000	1.9
++++ lingucomponent/source/spellcheck/myspell/hashmgr.cxx	17 Jun 2005 10:43:17 -0000
+@@ -6,11 +6,26 @@
+ 
+ #include "hashmgr.hxx"
+ 
++#ifdef SMALL
++#  include <sys/mman.h>
++#  include <sys/types.h>
++#  include <sys/stat.h>
++#  include <unistd.h>
++#  include <errno.h>
++#  include <fcntl.h>
++#  define IS_END(c) ((c) == '\r' || (c) == '\n')
++#endif
++
+ extern void mychomp(char * s);
+ extern char * mystrdup(const char *);
+ 
+ using namespace std;
+ 
++#ifdef SMALL
++# define WORD_END_CONDITN(c) ((c) == 0 || (c) == '/')
++#else
++# define WORD_END_CONDITN(c) ((c) == 0)
++#endif
+ 
+ // build a hash table from a munched word list
+ 
+@@ -28,11 +43,22 @@
+     }
+     tablesize = 0;
+   }
++#ifdef SMALL
++  compat.wlen = 0;
++  compat.alen = 0;
++  compat.word = NULL;
++  compat.astr = NULL;
++  compat.next = NULL;
++  fd = -1;
++  length = 0;
++  buffer = NULL;
++#endif
+ }
+ 
+ 
+ HashMgr::~HashMgr()
+ {
++#ifndef SMALL
+   if (tableptr) {
+     // now pass through hash table freeing up everything
+     // go through column by column of the table
+@@ -54,6 +80,25 @@
+     }
+     free(tableptr);
+   }
++#else // SMALL
++#ifdef UNX
++  if (fd != -1)
++  {
++	  if (buffer)
++		 munmap (buffer, length);
++	  close (fd);
++  }
++  else
++#endif
++  {
++	  if (buffer)
++		free (buffer);
++  }
++  delete[] compat.word;
++
++  buffer = NULL;
++  fd = -1;
++#endif
+   tablesize = 0;
+ }
+ 
+@@ -63,6 +108,7 @@
+ 
+ struct hentry * HashMgr::lookup(const char *word) const
+ {
++#ifndef SMALL
+     struct hentry * dp;
+     if (tableptr) {
+        dp = &tableptr[hash(word)];
+@@ -72,12 +118,30 @@
+        }
+     }
+     return NULL;
++#else
++	const char *hash_str;
++	int hash_id = hash(word);
++	while ((hash_str = tableptr[hash_id%tablesize]) != NULL)
++	{
++		int i;
++		for (i = 0; (word[i] != '\0' && !IS_END(hash_str[i]) &&
++					 hash_str[i] != '/' && word[i] == hash_str[i]); i++)
++				;
++		if (word[i] == '\0' && (IS_END(hash_str[i]) || hash_str[i] == '/'))
++			return ((HashMgr*)this)->setup_hentry (hash_str);
++		hash_id++;
++	}
++	fprintf( stderr, "No instance of '%s' hashid 0x%x\n", word, hash(word) );
++	return NULL;
++#endif
+ }
+ 
+ 
+ 
+ // add a word to the hash table (private)
+ 
++#ifndef SMALL
++
+ int HashMgr::add_word(const char * word, int wl, const char * aff, int al)
+ {
+     int i = hash(word);
+@@ -107,11 +171,48 @@
+     return 0;
+ }     
+ 
++#else
+ 
++struct hentry *HashMgr::setup_hentry(const char *ptr)
++{
++	int i;
++	const char *end;
++	for ( i = 0; !IS_END(ptr[i]); i++);
++// FIXME: could/should have a member/buffer to save this for
++// the common/short-string case
++	delete[] compat.word;
++	compat.word = new char[ i + 1 ];
++	compat.wlen = i;
++	compat.astr = NULL;
++	compat.alen = 0;
++	for (i = 0; !IS_END(ptr[i]) != '/'; i++) {
++			compat.word[i] = ptr[i];
++			if (ptr[i] == '/') {
++					compat.word[i] = '\0';
++					compat.wlen = i;
++					compat.astr = compat.word + i + 1;
++			}
++	}
++	compat.word[i] = '\0';
++	if (compat.astr)
++			compat.alen = i - compat.wlen - 1;
++	fprintf( stderr, "Hit '%s' ('%s')\n", compat.word, compat.astr );
++
++	return &compat;
++}
++#endif
+ 
+ // walk the hash table entry by entry - null at end
+ struct hentry * HashMgr::walk_hashtable(int &col, struct hentry * hp) const
+ {
++#ifdef SMALL
++  if (col < 0)
++	  col = -1;
++  while (col < tablesize && !tableptr[++col]);
++  if (col < tablesize)
++	  return ((HashMgr *)this)->setup_hentry(tableptr[col]);
++  return NULL;			  
++#else
+   //reset to start
+   if ((col < 0) || (hp == NULL)) {
+     col = -1;
+@@ -133,14 +234,129 @@
+     col = -1;
+   }
+   return hp;
++#endif
+ }
+ 
+ 
+ 
+ // load a munched word list and build a hash table on the fly
++#ifdef SMALL
++int
++HashMgr::slurp( int fd, size_t bytes )
++{
++	size_t offset = 0;
++	ssize_t count;
++	do
++	{
++		count = read (fd, buffer + offset, bytes);
++		if (count < 0)
++		{
++			if (errno == EINTR)
++				continue;
++			else
++				return 1;
++		}
++		bytes -= count;
++		offset += count;
++	}
++	while (bytes > 0);
++}
+ 
++size_t
++HashMgr::seek_newline( size_t i )
++{
++  while (i < length && !IS_END(buffer[i])) i++;
++  while (i < length && IS_END(buffer[i])) i++;
++  return i;
++}
++
++#endif
+ int HashMgr::load_tables(const char * tpath)
+ {
++#ifdef SMALL
++#define HASH_DEBUG
++
++#ifdef HASH_DEBUG
++  fprintf( stderr, "Load tables from '%s'\n", tpath );
++#endif
++  fd = open (tpath, O_RDONLY);
++  if (fd < 0)
++	  return 1;
++  struct stat info;
++  if (fstat(fd, &info) < 0)
++	  return 1;
++#ifdef UNX
++  length = info.st_size;
++  if (buffer = (char *)mmap (NULL, info.st_size, PROT_READ, MAP_SHARED, fd, 0))
++	  ;
++  else
++#endif 
++  {
++	  buffer = new char[ length ];
++	  int failed = slurp (fd, length);
++	  close (fd);
++	  fd = -1;
++	  if (failed)
++	  {
++		delete buffer;
++		return 1;
++	  }
++  }
++  if (!buffer)
++	  return 1;
++  size_t second_line = seek_newline (0);
++  char *str = new char [ second_line + 1 ];
++  memcpy (str, buffer, second_line);
++  str[second_line] = '\0';
++  tablesize = strtol(str, NULL, 0);
++  delete[] str;
++  if (tablesize <= 0)
++	  return 4;
++  long sparse = tablesize * 2;
++
++  // Bin any small prime factors
++  while (!(sparse % 2) || !(sparse % 3) || !(sparse % 5 ) ||
++		 !(sparse % 7) || !(sparse % 11) || !(sparse % 13 ))
++	  sparse++;
++
++  fprintf( stderr, "Switch table size to %d from %d\n", 
++		   tablesize, sparse);
++  tablesize = sparse;
++
++  // Hash - normal fixed size sparse hash, compare until we hit a NULL
++  tableptr = (char **)calloc (sizeof(char *), tablesize );
++
++#ifdef HASH_DEBUG
++  static int total_cols = 0;
++  static int total_lookups = 0;
++#endif
++  size_t i = 0;
++  // CHECKME: '\n' on Win32 ? - cf. Win32 binary downloads I guess.
++  for (i = second_line; i < length;)
++  {
++	  int hash_id;
++	  size_t next_line = seek_newline (i);
++	  if (next_line >= length)
++		  break;
++
++	  hash_id = hash(buffer + i);
++	  int collisions = 0;
++	  while (tableptr[hash_id%tablesize]) {
++			  collisions++;
++			  hash_id++;
++	  }
++#ifdef HASH_DEBUG
++	  total_lookups++;
++	  total_cols += collisions;
++#endif
++	  tableptr[hash_id] = buffer + i;
++	  i = next_line;
++  }  
++#ifdef HASH_DEBUG
++  fprintf (stderr, "%d collisions on %d lookups\n", total_cols, total_lookups);
++#endif
++
++#else // ! SMALL
+   int wl, al;
+   char * ap;
+ 
+@@ -186,22 +402,33 @@
+   }
+ 
+   fclose(rawdict);
++#endif
+   return 0;
+ }
+ 
++int HashMgr::hash(const char * word) const
++{
++#ifdef SMALL
++	unsigned long hv = word[0];
++	for (int i = 1; !WORD_END_CONDITN(word[i]) && !IS_END(word[i]); i++)
++		hv = (hv << 5) - hv + word[i];
++/*	fprintf(stderr, "string '");
++	for (int i = 0; !WORD_END_CONDITN(word[ i ] && !IS_END(word[i])); i++)
++		fprintf( stderr, "%c", word[i] );
++		fprintf(stderr, "' 0x%x \n", (int)hv % tablesize); */
+ 
++	return hv % tablesize;
++#else
+ // the hash function is a simple load and rotate
+ // algorithm borrowed
+-
+-int HashMgr::hash(const char * word) const
+-{
+     long  hv = 0;
+-    for (int i=0; i < 4  &&  *word != 0; i++)
++    for (int i=0; i < 4  && !WORD_END_CONDITN (*word); i++)
+ 	hv = (hv << 8) | (*word++);
+-    while (*word != 0) {
++    while (WORD_END_CONDITN (*word)) {
+       ROTATE(hv,ROTATE_LEN);
+       hv ^= (*word++);
+     }
+     return (unsigned long) hv % tablesize;
++#endif
+ }
+ 
+Index: lingucomponent/source/spellcheck/myspell/hashmgr.hxx
+===================================================================
+RCS file: /cvs/whiteboard/lingucomponent/source/spellcheck/myspell/hashmgr.hxx,v
+retrieving revision 1.6
+diff -u -r1.6 hashmgr.hxx
+--- lingucomponent/source/spellcheck/myspell/hashmgr.hxx	24 Jun 2003 19:48:03 -0000	1.6
++++ lingucomponent/source/spellcheck/myspell/hashmgr.hxx	17 Jun 2005 10:43:17 -0000
+@@ -3,20 +3,36 @@
+ 
+ #include "htypes.hxx"
+ 
++#define SMALL
++
+ class HashMgr
+ {
+-  int             tablesize;
+-  struct hentry * tableptr;
++  int                 tablesize;
++#ifndef SMALL
++  struct hentry     * tableptr;
++#else
++  char             ** tableptr;
++  mutable struct hentry compat;
++  int   fd;
++  char *buffer;
++  size_t length;
++  // FIXME: this API sucks - ideally need to re-work all
++  // struct hentry use - and encapsulate those operations
++  // in a more abstract class.
++  struct hentry *setup_hentry(const char *ptr);
++  size_t seek_newline(size_t from_offset);
++  int slurp( int fd, size_t bytes );
++#endif
+ 
+ public:
+   HashMgr(const char * tpath);
+   ~HashMgr();
+ 
+   struct hentry * lookup(const char *) const;
+-  int hash(const char *) const;
+   struct hentry * walk_hashtable(int & col, struct hentry * hp) const;
+ 
+ private:
++  int hash(const char *) const;
+   HashMgr( const HashMgr & ); // not implemented
+   HashMgr &operator=( const HashMgr & ); // not implemented
+   int load_tables(const char * tpath);
+Index: lingucomponent/source/spellcheck/myspell/makefile.mk
+===================================================================
+RCS file: /cvs/whiteboard/lingucomponent/source/spellcheck/myspell/makefile.mk,v
+retrieving revision 1.8
+diff -u -r1.8 makefile.mk
+--- lingucomponent/source/spellcheck/myspell/makefile.mk	9 Mar 2004 12:42:12 -0000	1.8
++++ lingucomponent/source/spellcheck/myspell/makefile.mk	17 Jun 2005 10:43:17 -0000
+@@ -72,6 +72,11 @@
+ 
+ # --- Files --------------------------------------------------------
+ 
++.IF "$(SYSTEM_MYSPELL)" == "YES"
++@all:
++	@echo "Using system myspell..."
++.ENDIF
++
+ # all_target: ALLTAR DICTIONARY
+ all_target: ALLTAR
+ 
