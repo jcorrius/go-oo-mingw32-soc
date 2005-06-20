@@ -62,6 +62,8 @@
 #include "cairo_backbuffer.hxx"
 #include "cairo_cairo.hxx"
 
+using namespace ::cairo;
+
 namespace vclcanvas
 {
     BackBuffer::BackBuffer( WindowGraphicDevice::ImplRef xGraphicDevice ) : mxGraphicDevice( xGraphicDevice ), mpSurface( NULL ), mpCairo( NULL ), maSize( xGraphicDevice->getSurfaceSize() )
@@ -79,7 +81,7 @@ namespace vclcanvas
 	}
     }
 
-    ::cairo::Surface* BackBuffer::getSurface()
+    Surface* BackBuffer::getSurface()
     {
 	if( !mpSurface ) {
 	    printf ("back buffer size: %d x %d\n", maSize.Width(), maSize.Height() );
@@ -88,18 +90,18 @@ namespace vclcanvas
 	return mpSurface;
     }
 
-    void BackBuffer::setSurface( ::cairo::Surface* pSurface )
+    void BackBuffer::setSurface( Surface* pSurface )
     {
 	if( mpSurface )
-	    ::cairo::cairo_surface_destroy( mpSurface );
+	    cairo_surface_destroy( mpSurface );
 	if( mpCairo )
-	    ::cairo::cairo_destroy( mpCairo );
+	    cairo_destroy( mpCairo );
 
 	mpSurface = pSurface;
-	mpCairo = ::cairo::cairo_create( mpSurface );
+	mpCairo = cairo_create( mpSurface );
     }
 
-    ::cairo::Cairo* BackBuffer::getCairo()
+    Cairo* BackBuffer::getCairo()
     {
 	if( !mpCairo )
 	    getSurface();

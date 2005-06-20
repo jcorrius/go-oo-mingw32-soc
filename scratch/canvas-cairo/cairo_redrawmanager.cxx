@@ -94,9 +94,7 @@
 #define FPS_BOUNDS Rectangle(0,0,130,90)
 #define INFO_COLOR COL_RED
 
-namespace
-{
-}
+using namespace ::cairo;
 
 namespace vclcanvas
 {
@@ -104,7 +102,7 @@ namespace vclcanvas
     class SpritePainter
     {
     public:
-        SpritePainter( ::cairo::Cairo* pCairo )
+        SpritePainter( Cairo* pCairo )
         {
 	    mpCairo = pCairo;
         }
@@ -115,7 +113,7 @@ namespace vclcanvas
         }
 
     private:
-	::cairo::Cairo* mpCairo;
+	Cairo* mpCairo;
     };
 
     inline double accumulatePixel( double nPrevVal, const ::vclcanvas::Sprite::ImplRef& rSprite )
@@ -130,7 +128,7 @@ namespace vclcanvas
     
     RedrawManager::RedrawManager( OutputDevice&					rOutDev,
                                   const BackBufferSharedPtr&            	rBackBuffer,
-				  ::cairo::Surface*                             pSurface) :
+				  Surface*                             pSurface) :
         maSprites(),
         maChangeRecords(),
         mrOutDev( rOutDev ),
@@ -143,17 +141,17 @@ namespace vclcanvas
         maChangeRecords.reserve( CHANGE_RECORDS_INITIAL_SIZE );
 
 	Size aSize = mpBackBuffer->getSize();
-	mpSurface = ::cairo::cairo_surface_create_similar( mpBackBuffer->getSurface(), ::cairo::CAIRO_FORMAT_RGB24, aSize.Width(), aSize.Height() );
-	mpCairo = ::cairo::cairo_create( mpSurface );
+	mpSurface = cairo_surface_create_similar( mpBackBuffer->getSurface(), CAIRO_FORMAT_RGB24, aSize.Width(), aSize.Height() );
+	mpCairo = cairo_create( mpSurface );
 	mpWinSurface = pSurface;
-	::cairo::cairo_surface_reference( mpWinSurface );
+	cairo_surface_reference( mpWinSurface );
     }
 
     RedrawManager::~RedrawManager()
     {
- 	::cairo::cairo_destroy( mpCairo );
- 	::cairo::cairo_surface_destroy( mpSurface );
- 	::cairo::cairo_surface_destroy( mpWinSurface );
+ 	cairo_destroy( mpCairo );
+ 	cairo_surface_destroy( mpSurface );
+ 	cairo_surface_destroy( mpWinSurface );
     }
 
     void RedrawManager::updateScreen( bool bUpdateAll )
@@ -246,8 +244,8 @@ namespace vclcanvas
         {
 	    printf ("redraw manager: update all\n");
 
-	    ::cairo::cairo_set_source_surface( mpCairo, mpBackBuffer->getSurface(), 0, 0 );
-	    ::cairo::cairo_paint( mpCairo );
+	    cairo_set_source_surface( mpCairo, mpBackBuffer->getSurface(), 0, 0 );
+	    cairo_paint( mpCairo );
 
             // repaint all active sprites
             ::std::for_each( maSprites.begin(), 
@@ -255,11 +253,11 @@ namespace vclcanvas
                              SpritePainter( mpCairo ) );
 
             // flush to screen
-	    ::cairo::Cairo* pCairo = ::cairo::cairo_create( mpWinSurface );
-	    ::cairo::cairo_set_operator( pCairo, ::cairo::CAIRO_OPERATOR_SOURCE );
-	    ::cairo::cairo_set_source_surface( pCairo, mpSurface, 0, 0 );
-	    ::cairo::cairo_paint( pCairo );
-	    ::cairo::cairo_destroy( pCairo );
+	    Cairo* pCairo = cairo_create( mpWinSurface );
+	    cairo_set_operator( pCairo, CAIRO_OPERATOR_SOURCE );
+	    cairo_set_source_surface( pCairo, mpSurface, 0, 0 );
+	    cairo_paint( pCairo );
+	    cairo_destroy( pCairo );
         }
 
         // change record vector must be cleared, for the next turn of
@@ -416,7 +414,7 @@ namespace vclcanvas
         }
 
         void spriteRedrawStub( const Point& 												rOffset, 
-                               ::cairo::Cairo* pCairo,
+                               Cairo* pCairo,
                                const RedrawManager::SpriteConnectedRanges::ComponentType&	rComponent )
         {
             const Sprite::ImplRef& pAffectedSprite( rComponent.second );
@@ -483,11 +481,11 @@ namespace vclcanvas
             // clip output to actual update region (otherwise a)
             // wouldn't save much render time, and b) might clutter
             // sprites outside this area)
-	    ::cairo::cairo_save( mpCairo );
- 	    ::cairo::cairo_rectangle( mpCairo, aOutputPosition.X(), aOutputPosition.Y(), aOutputSize.Width(), aOutputSize.Height() );
- 	    ::cairo::cairo_clip( mpCairo );
+	    cairo_save( mpCairo );
+ 	    cairo_rectangle( mpCairo, aOutputPosition.X(), aOutputPosition.Y(), aOutputSize.Width(), aOutputSize.Height() );
+ 	    cairo_clip( mpCairo );
 
-	    ::cairo::Cairo* pCairo = ::cairo::cairo_create( mpWinSurface );
+	    Cairo* pCairo = cairo_create( mpWinSurface );
 
             // paint all affected sprites to update area
             ::std::for_each( rComponents.maComponentList.begin(),
@@ -497,25 +495,25 @@ namespace vclcanvas
                                             mpCairo,
                                             _1 ) );
 
-	    ::cairo::cairo_restore( mpCairo );
+	    cairo_restore( mpCairo );
         }
         else
         {
-	    ::cairo::cairo_save( mpCairo );
+	    cairo_save( mpCairo );
 
             // paint background
 // 	    {
             printf("sprite size: %d x %d\n", aOutputSize.Width(), aOutputSize.Height() );
-// 	    ::cairo::Cairo* pCairo = ::cairo::cairo_create( mpBackBuffer->getSurface() );
-// 	    ::cairo::cairo_set_source_rgb( pCairo, 1, 1, 0 );
-// 	    ::cairo::cairo_rectangle( pCairo, 0, 0, mpBackBuffer->getSize().Width(), mpBackBuffer->getSize().Height() );
-// 	    ::cairo::cairo_fill( pCairo );
+// 	    Cairo* pCairo = cairo_create( mpBackBuffer->getSurface() );
+// 	    cairo_set_source_rgb( pCairo, 1, 1, 0 );
+// 	    cairo_rectangle( pCairo, 0, 0, mpBackBuffer->getSize().Width(), mpBackBuffer->getSize().Height() );
+// 	    cairo_fill( pCairo );
 // 	    }
 
-	    ::cairo::cairo_rectangle( mpCairo, aOutputPosition.X(), aOutputPosition.Y(), aOutputSize.Width(), aOutputSize.Height() );
- 	    ::cairo::cairo_clip( mpCairo );
-	    ::cairo::cairo_set_source_surface( mpCairo, mpBackBuffer->getSurface(), 0, 0 );
-	    ::cairo::cairo_paint( mpCairo );
+	    cairo_rectangle( mpCairo, aOutputPosition.X(), aOutputPosition.Y(), aOutputSize.Width(), aOutputSize.Height() );
+ 	    cairo_clip( mpCairo );
+	    cairo_set_source_surface( mpCairo, mpBackBuffer->getSurface(), 0, 0 );
+	    cairo_paint( mpCairo );
         
             // paint all affected sprites to update area
             ::std::for_each( rComponents.maComponentList.begin(),
@@ -525,23 +523,23 @@ namespace vclcanvas
                                             mpCairo,
                                             _1 ) );
 
-// 	    ::cairo::cairo_reset_clip( mpCairo );
-// 	    ::cairo::cairo_set_line_width( mpCairo, 6 );
-// 	    ::cairo::cairo_set_source_rgb( mpCairo, 1, 1, 0 );
-// 	    ::cairo::cairo_rectangle( mpCairo, aOutputPosition.X(), aOutputPosition.Y(), aOutputSize.Width(), aOutputSize.Height() );
-// 	    ::cairo::cairo_stroke( mpCairo );
+// 	    cairo_reset_clip( mpCairo );
+// 	    cairo_set_line_width( mpCairo, 6 );
+// 	    cairo_set_source_rgb( mpCairo, 1, 1, 0 );
+// 	    cairo_rectangle( mpCairo, aOutputPosition.X(), aOutputPosition.Y(), aOutputSize.Width(), aOutputSize.Height() );
+// 	    cairo_stroke( mpCairo );
 
             // flush to screen
-	    ::cairo::Cairo* pCairo = ::cairo::cairo_create( mpWinSurface );
- 	    ::cairo::cairo_rectangle( pCairo, aOutputPosition.X(), aOutputPosition.Y(), aOutputSize.Width(), aOutputSize.Height() );
- 	    ::cairo::cairo_clip( pCairo );
-	    ::cairo::cairo_set_operator( pCairo, ::cairo::CAIRO_OPERATOR_SOURCE );
- 	    ::cairo::cairo_set_source_surface( pCairo, mpSurface, 0, 0 );
- 	    ::cairo::cairo_paint( pCairo );
+	    Cairo* pCairo = cairo_create( mpWinSurface );
+ 	    cairo_rectangle( pCairo, aOutputPosition.X(), aOutputPosition.Y(), aOutputSize.Width(), aOutputSize.Height() );
+ 	    cairo_clip( pCairo );
+	    cairo_set_operator( pCairo, CAIRO_OPERATOR_SOURCE );
+ 	    cairo_set_source_surface( pCairo, mpSurface, 0, 0 );
+ 	    cairo_paint( pCairo );
 
-	    ::cairo::cairo_destroy( pCairo );
+	    cairo_destroy( pCairo );
 
-	    ::cairo::cairo_restore( mpCairo );
+	    cairo_restore( mpCairo );
         }
     }
 }

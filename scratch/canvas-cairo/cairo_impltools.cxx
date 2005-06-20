@@ -151,6 +151,7 @@
 
 
 using namespace ::com::sun::star;
+using namespace ::cairo;
 
 namespace vclcanvas
 {
@@ -203,7 +204,7 @@ namespace vclcanvas
             }
         }
 
-        ::cairo::Cairo* cairoFromXBitmap( const uno::Reference< rendering::XBitmap >& xBitmap )
+        Cairo* cairoFromXBitmap( const uno::Reference< rendering::XBitmap >& xBitmap )
         {
             uno::Reference< lang::XServiceInfo > xRef( xBitmap, 
                                                        uno::UNO_QUERY );

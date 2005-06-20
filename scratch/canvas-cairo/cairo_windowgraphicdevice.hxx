@@ -180,8 +180,6 @@ namespace vclcanvas
         ::cairo::Surface* getSimilarSurface();
         ::cairo::Surface* getSimilarSurface( Size aSize );
 
-	void flush();
-
     protected:
         ~WindowGraphicDevice(); // we're a ref-counted UNO class. _We_ destroy ourselves.
 
@@ -199,11 +197,6 @@ namespace vclcanvas
 
         const SystemEnvData* mpSysData;
         ::cairo::Surface* mpWindowSurface;
-
-#ifdef CAIRO_HAS_GLITZ_SURFACE
-	::cairo::glitz_surface_t* mpGlitzSurface;
-	::cairo::glitz_drawable_t* mpGlitzDrawable;
-#endif
     };
 }
 

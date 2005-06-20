@@ -67,17 +67,6 @@
 #include "cairo_parametricpolypolygon.hxx"
 #include "cairo_canvasbitmap.hxx"
 
-namespace cairo {
-
-#ifndef CAIRO_XLIB_H
-#include <cairo-xlib.h>
-#endif
-#ifdef CAIRO_HAS_GLITZ_SURFACE
-#include <cairo-glitz.h>
-#endif
-
-}
-
 #include <canvas/canvastools.hxx>
 
 #ifndef _SV_SYSDATA_HXX
@@ -101,6 +90,7 @@ namespace cairo {
 #endif
 
 using namespace ::com::sun::star;
+using namespace ::cairo;
 
 namespace vclcanvas
 {
@@ -118,7 +108,7 @@ namespace vclcanvas
     {
 	if( mpWindowSurface ) {
 	    printf( "going to destroy mpWindowSurface\n" );
-	    ::cairo::cairo_surface_destroy( mpWindowSurface );
+	    cairo_surface_destroy( mpWindowSurface );
 	    mpWindowSurface = NULL;
 	}
     }
@@ -442,38 +432,18 @@ namespace vclcanvas
         return mpOutputWindow;
     }
 
-    ::cairo::Surface* WindowGraphicDevice::getSurface( Size aSize )
+    Surface* WindowGraphicDevice::getSurface( Size aSize )
     {
-    	if( !mpWindowSurface ) {
-#if 0
-#ifdef CAIRO_HAS_GLITZ_SURFACE
-	    printf ("try to create glitz surface %d x %d\n", aSize.Width(), aSize.Height());
-	    mpGlitzDrawable = (::cairo::glitz_drawable_t*)
-		cairoHelperGetGlitzDrawable( mpSysData,
-					     aSize.Width(), aSize.Height() );
-	    mpGlitzSurface = (::cairo::glitz_surface_t*)
-		cairoHelperGetGlitzSurface( mpSysData, mpGlitzDrawable,
-					    mpOutputWindow->GetOutOffXPixel(), mpOutputWindow->GetOutOffYPixel(),
-					    aSize.Width(), aSize.Height() );
+    	if( !mpWindowSurface )
+	    mpWindowSurface = (Surface*) cairoHelperGetSurface( mpSysData,
+								mpOutputWindow->GetOutOffXPixel(), mpOutputWindow->GetOutOffYPixel(),
+								aSize.Width(), aSize.Height() );
 
-	    if( mpGlitzSurface )
-		mpWindowSurface = ::cairo::cairo_glitz_surface_create( mpGlitzSurface );
-	    printf ("mpGlitzSurface %p surface %p\n", mpGlitzSurface, mpWindowSurface);
-#endif
-#endif
-	    if( !mpWindowSurface ) {
-		mpWindowSurface=::cairo::cairo_xlib_surface_create( (::cairo::Display*) mpSysData->pDisplay,
-								    mpSysData->aWindow,
-								    (::cairo::Visual*) mpSysData->pVisual,
-								    aSize.Width() + mpOutputWindow->GetOutOffXPixel(), aSize.Height() + mpOutputWindow->GetOutOffYPixel() );
-		::cairo::cairo_surface_set_device_offset( mpWindowSurface, mpOutputWindow->GetOutOffXPixel(), mpOutputWindow->GetOutOffYPixel() );
-	    }
-	}
     	if( aSize == mpOutputWindow->GetOutputSizePixel() ) {
 	    return mpWindowSurface;
     	}
 	printf( "called WindowGraphicDevice::getSurface(size) - creating similar surface\n" );
-	return ::cairo::cairo_surface_create_similar( mpWindowSurface, ::cairo::CAIRO_FORMAT_ARGB32, aSize.Width(), aSize.Height() );
+	return cairo_surface_create_similar( mpWindowSurface, CAIRO_FORMAT_ARGB32, aSize.Width(), aSize.Height() );
     }
 
     Size WindowGraphicDevice::getSurfaceSize()
@@ -481,25 +451,20 @@ namespace vclcanvas
 	return mpOutputWindow->GetOutputSizePixel();
     }
 
-    ::cairo::Surface* WindowGraphicDevice::getSurface()
+    Surface* WindowGraphicDevice::getSurface()
     {
 	printf( "called WindowGraphicDevice::getSurface %d x %d\n", getSurfaceSize().Width(), getSurfaceSize().Height() );
 	return getSurface( getSurfaceSize() );
     }
 
-    ::cairo::Surface* WindowGraphicDevice::getSimilarSurface( Size aSize )
+    Surface* WindowGraphicDevice::getSimilarSurface( Size aSize )
     {
 	printf( "called WindowGraphicDevice::getSimilarSurface %d x %d\n", aSize.Width(), aSize.Height() );
-	return ::cairo::cairo_surface_create_similar( getSurface(), ::cairo::CAIRO_FORMAT_ARGB32, aSize.Width(), aSize.Height() );
+	return cairo_surface_create_similar( getSurface(), CAIRO_FORMAT_ARGB32, aSize.Width(), aSize.Height() );
     }
 
-    ::cairo::Surface* WindowGraphicDevice::getSimilarSurface()
+    Surface* WindowGraphicDevice::getSimilarSurface()
     {
 	return getSimilarSurface( getSurfaceSize() );
-    }
-
-    void WindowGraphicDevice::flush()
-    {
-	::cairo::glitz_drawable_swap_buffers( mpGlitzDrawable );
     }
 }

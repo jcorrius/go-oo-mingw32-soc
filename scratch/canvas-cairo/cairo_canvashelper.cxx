@@ -139,6 +139,7 @@
 
 
 using namespace ::com::sun::star;
+using namespace ::cairo;
 
 namespace vclcanvas
 {
@@ -187,7 +188,7 @@ namespace vclcanvas
         mxDevice = rDevice;
     }
 
-    void CanvasHelper::setCairo( ::cairo::Cairo* pCairo )
+    void CanvasHelper::setCairo( Cairo* pCairo )
     {
 	mpCairo = pCairo;
     }
@@ -223,26 +224,26 @@ namespace vclcanvas
 				  const rendering::RenderState& renderState,
 				  bool setColor )
     {
-	::cairo::Matrix aViewMatrix;
-	::cairo::Matrix aRenderMatrix;
-	::cairo::Matrix aCombinedMatrix;
+	Matrix aViewMatrix;
+	Matrix aRenderMatrix;
+	Matrix aCombinedMatrix;
 
-	::cairo::cairo_matrix_init( &aViewMatrix,
+	cairo_matrix_init( &aViewMatrix,
 				    viewState.AffineTransform.m00, viewState.AffineTransform.m10, viewState.AffineTransform.m01,
 				    viewState.AffineTransform.m11, viewState.AffineTransform.m02, viewState.AffineTransform.m12);
-	::cairo::cairo_matrix_init( &aRenderMatrix,
+	cairo_matrix_init( &aRenderMatrix,
 				    renderState.AffineTransform.m00, renderState.AffineTransform.m10, renderState.AffineTransform.m01,
 				    renderState.AffineTransform.m11, renderState.AffineTransform.m02, renderState.AffineTransform.m12);
-	::cairo::cairo_matrix_multiply( &aCombinedMatrix, &aRenderMatrix, &aViewMatrix);
+	cairo_matrix_multiply( &aCombinedMatrix, &aRenderMatrix, &aViewMatrix);
 
         if( viewState.Clip.is() ) {
 	    printf ("view clip\n");
 
-	    ::cairo::cairo_set_matrix( mpCairo, &aViewMatrix );
+	    cairo_set_matrix( mpCairo, &aViewMatrix );
 	    drawPolyPolygonPath( viewState.Clip, Clip );
 	}
 
-	::cairo::cairo_set_matrix( mpCairo, &aCombinedMatrix );
+	cairo_set_matrix( mpCairo, &aCombinedMatrix );
 
         if( renderState.Clip.is() ) {
 	    printf ("render clip\n");
@@ -252,13 +253,13 @@ namespace vclcanvas
 
 	if (setColor) {
 	    if (renderState.DeviceColor.getLength() > 3)
-		::cairo::cairo_set_source_rgba( mpCairo,
+		cairo_set_source_rgba( mpCairo,
 						renderState.DeviceColor [0],
 						renderState.DeviceColor [1],
 						renderState.DeviceColor [2],
 						renderState.DeviceColor [3] );
 	    else if (renderState.DeviceColor.getLength() == 3)
-		::cairo::cairo_set_source_rgb( mpCairo,
+		cairo_set_source_rgb( mpCairo,
 					       renderState.DeviceColor [0],
 					       renderState.DeviceColor [1],
 					       renderState.DeviceColor [2] );
@@ -272,16 +273,16 @@ namespace vclcanvas
                                  const rendering::RenderState& 	renderState )
     {
 	if(mpCairo) {
-	    ::cairo::cairo_save( mpCairo );
+	    cairo_save( mpCairo );
 
 	    useStates( viewState, renderState, true );
 
-	    ::cairo::cairo_set_line_width( mpCairo, 1 );
-	    ::cairo::cairo_move_to( mpCairo, aStartRealPoint2D.X, aStartRealPoint2D.Y );
-	    ::cairo::cairo_line_to( mpCairo, aEndRealPoint2D.X, aEndRealPoint2D.Y );
-	    ::cairo::cairo_stroke( mpCairo );
+	    cairo_set_line_width( mpCairo, 1 );
+	    cairo_move_to( mpCairo, aStartRealPoint2D.X, aStartRealPoint2D.Y );
+	    cairo_line_to( mpCairo, aEndRealPoint2D.X, aEndRealPoint2D.Y );
+	    cairo_stroke( mpCairo );
 
-	    ::cairo::cairo_restore( mpCairo );
+	    cairo_restore( mpCairo );
 	}
     }
 
@@ -314,13 +315,13 @@ namespace vclcanvas
     {
 	switch( aOperation ) {
 	case Fill:
-	    ::cairo::cairo_fill( mpCairo );
+	    cairo_fill( mpCairo );
 	break;
 	case Stroke:
-	    ::cairo::cairo_stroke( mpCairo );
+	    cairo_stroke( mpCairo );
 	break;
 	case Clip:
-	    ::cairo::cairo_clip( mpCairo );
+	    cairo_clip( mpCairo );
 	break;
 	}
     }
@@ -328,7 +329,7 @@ namespace vclcanvas
     void CanvasHelper::drawPolyPolygonPath( const uno::Reference< rendering::XPolyPolygon2D >& xPolyPolygon, Operation aOperation )
     {
 	printf ("CanvasHelper::drawPolyPolygonPath, number of polygons: %d on surface %p\n",
-		xPolyPolygon->getNumberOfPolygons(), ::cairo::cairo_get_target ( mpCairo ) );
+		xPolyPolygon->getNumberOfPolygons(), cairo_get_target ( mpCairo ) );
 	const sal_Int32 nPolys( xPolyPolygon->getNumberOfPolygons() );
 
 	uno::Reference< rendering::XLinePolyPolygon2D > xLinePoly( xPolyPolygon, uno::UNO_QUERY );
@@ -339,13 +340,13 @@ namespace vclcanvas
 	    for( sal_Int32 i = 0; i < nPolys; i ++ ) {
 		printf ("CanvasHelper::drawPolyPolygonPath, lines: %d\n", aPoints[i].getLength() );
 
-		::cairo::cairo_move_to( mpCairo, aPoints[i][0].X, aPoints[i][0].Y );
+		cairo_move_to( mpCairo, aPoints[i][0].X, aPoints[i][0].Y );
 
 		for( sal_Int32 j = 0; j < aPoints[i].getLength(); j ++ )
-		    ::cairo::cairo_line_to( mpCairo, aPoints[i][j].X, aPoints[i][j].Y );
+		    cairo_line_to( mpCairo, aPoints[i][j].X, aPoints[i][j].Y );
 
 		if( xPolyPolygon->isClosed( i ) )
-		    ::cairo::cairo_close_path( mpCairo );
+		    cairo_close_path( mpCairo );
 
 		doOperation( aOperation );
 	    }
@@ -360,21 +361,21 @@ namespace vclcanvas
 		for( sal_Int32 i = 0; i < nPolys; i ++ ) {
 		    printf ("CanvasHelper::drawPolyPolygonPath, bezier segments: %d\n", aSegments[i].getLength() );
 
-		    ::cairo::cairo_move_to( mpCairo, aSegments[i][0].Px, aSegments[i][0].Py );
+		    cairo_move_to( mpCairo, aSegments[i][0].Px, aSegments[i][0].Py );
 		    nC1x = aSegments[i][0].C1x;
 		    nC1y = aSegments[i][0].C1y;
 		    nC2x = aSegments[i][0].C2x;
 		    nC2y = aSegments[i][0].C2y;
 
 		    for( sal_Int32 j = 1; j < aSegments[i].getLength(); j ++ ) {
-			::cairo::cairo_curve_to( mpCairo, nC1x, nC1y, nC2x, nC2y, aSegments[i][j].Px, aSegments[i][j].Py );
+			cairo_curve_to( mpCairo, nC1x, nC1y, nC2x, nC2y, aSegments[i][j].Px, aSegments[i][j].Py );
 			nC1x = aSegments[i][j].C1x;
 			nC1y = aSegments[i][j].C1y;
 			nC2x = aSegments[i][j].C2x;
 			nC2y = aSegments[i][j].C2y;
 		    }
 		    if( xPolyPolygon->isClosed( i ) )
-			::cairo::cairo_close_path( mpCairo );
+			cairo_close_path( mpCairo );
 
 		    doOperation( aOperation );
 		}
@@ -388,13 +389,13 @@ namespace vclcanvas
 										 const rendering::RenderState& 						renderState )
     {
 	if( mpCairo ) {
-	    ::cairo::cairo_save( mpCairo );
+	    cairo_save( mpCairo );
 
 	    useStates( viewState, renderState, true );
-	    ::cairo::cairo_set_line_width( mpCairo, 1 );
+	    cairo_set_line_width( mpCairo, 1 );
 	    drawPolyPolygonPath( xPolyPolygon, Stroke );
 	    
-	    ::cairo::cairo_restore( mpCairo );
+	    cairo_restore( mpCairo );
 	}
 
 	// TODO(P1): Provide caching here.
@@ -407,23 +408,23 @@ namespace vclcanvas
                                                                                    const rendering::RenderState& 						renderState,
                                                                                    const rendering::StrokeAttributes& 					strokeAttributes )
     {
-	::cairo::cairo_save( mpCairo );
+	cairo_save( mpCairo );
 
 	useStates( viewState, renderState, true );
 
-	::cairo::cairo_set_line_width( mpCairo, strokeAttributes.StrokeWidth );
-	::cairo::cairo_set_miter_limit( mpCairo, strokeAttributes.MiterLimit );
+	cairo_set_line_width( mpCairo, strokeAttributes.StrokeWidth );
+	cairo_set_miter_limit( mpCairo, strokeAttributes.MiterLimit );
 
 	// FIXME: cairo doesn't handle end cap so far (rodo)
 	switch( strokeAttributes.StartCapType ) {
 	case rendering::PathCapType::BUTT:
-	    ::cairo::cairo_set_line_cap( mpCairo, ::cairo::CAIRO_LINE_CAP_BUTT );
+	    cairo_set_line_cap( mpCairo, CAIRO_LINE_CAP_BUTT );
 	break;
 	case rendering::PathCapType::ROUND:
-	    ::cairo::cairo_set_line_cap( mpCairo, ::cairo::CAIRO_LINE_CAP_ROUND );
+	    cairo_set_line_cap( mpCairo, CAIRO_LINE_CAP_ROUND );
 	break;
 	case rendering::PathCapType::SQUARE:
-	    ::cairo::cairo_set_line_cap( mpCairo, ::cairo::CAIRO_LINE_CAP_SQUARE );
+	    cairo_set_line_cap( mpCairo, CAIRO_LINE_CAP_SQUARE );
 	break;
 	}
 
@@ -431,13 +432,13 @@ namespace vclcanvas
 	    // cairo doesn't have join type NONE so we use MITTER as it's pretty close
 	case rendering::PathJoinType::NONE:
 	case rendering::PathJoinType::MITER:
-	    ::cairo::cairo_set_line_join( mpCairo, ::cairo::CAIRO_LINE_JOIN_MITER );
+	    cairo_set_line_join( mpCairo, CAIRO_LINE_JOIN_MITER );
 	break;
 	case rendering::PathJoinType::ROUND:
-	    ::cairo::cairo_set_line_join( mpCairo, ::cairo::CAIRO_LINE_JOIN_ROUND );
+	    cairo_set_line_join( mpCairo, CAIRO_LINE_JOIN_ROUND );
 	break;
 	case rendering::PathJoinType::BEVEL:
-	    ::cairo::cairo_set_line_join( mpCairo, ::cairo::CAIRO_LINE_JOIN_BEVEL );
+	    cairo_set_line_join( mpCairo, CAIRO_LINE_JOIN_BEVEL );
 	break;
 	}
 
@@ -445,7 +446,7 @@ namespace vclcanvas
 	    double* pDashArray = new double[ strokeAttributes.DashArray.getLength() ];
 	    for( sal_Int32 i=0; i<strokeAttributes.DashArray.getLength(); i++ )
 		pDashArray[i]=strokeAttributes.DashArray[i];
-	    ::cairo::cairo_set_dash( mpCairo, pDashArray, strokeAttributes.DashArray.getLength(), 0 );
+	    cairo_set_dash( mpCairo, pDashArray, strokeAttributes.DashArray.getLength(), 0 );
 	    delete[] pDashArray;
 	}
 
@@ -453,7 +454,7 @@ namespace vclcanvas
 
 	drawPolyPolygonPath( xPolyPolygon, Stroke );
 	    
-	::cairo::cairo_restore( mpCairo );
+	cairo_restore( mpCairo );
 
         // TODO(P1): Provide caching here.
         return uno::Reference< rendering::XCachedPrimitive >(NULL);
@@ -495,12 +496,12 @@ namespace vclcanvas
                                                                                  const rendering::RenderState& 						renderState )
     {
 	if( mpCairo ) {
-	    ::cairo::cairo_save( mpCairo );
+	    cairo_save( mpCairo );
 
 	    useStates( viewState, renderState, true );
 	    drawPolyPolygonPath( xPolyPolygon, Fill );
 	    
-	    ::cairo::cairo_restore( mpCairo );
+	    cairo_restore( mpCairo );
 	}
 
         // TODO(P1): Provide caching here.
@@ -549,15 +550,15 @@ namespace vclcanvas
                                                                           sal_Int8				 							textDirection )
     {
 	 if (mpCairo) {
-		 ::cairo::cairo_save( mpCairo );
+		 cairo_save( mpCairo );
 
 		 useStates( viewState, renderState, true );
 
 		 // fixme (rodo) - use xFont
-		 ::cairo::cairo_select_font_face( mpCairo, "Sans", ::cairo::CAIRO_FONT_SLANT_NORMAL, ::cairo::CAIRO_FONT_WEIGHT_NORMAL );
-		 ::cairo::cairo_show_text( mpCairo, ::rtl::OUStringToOString( text.Text, RTL_TEXTENCODING_UTF8 ) );
+		 cairo_select_font_face( mpCairo, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL );
+		 cairo_show_text( mpCairo, ::rtl::OUStringToOString( text.Text, RTL_TEXTENCODING_UTF8 ) );
 
-		 ::cairo::cairo_restore( mpCairo );
+		 cairo_restore( mpCairo );
 	 }
 
 
@@ -617,20 +618,20 @@ namespace vclcanvas
     {
 	if( mpCairo )
         {
-	    ::cairo::cairo_save( mpCairo );
+	    cairo_save( mpCairo );
 
 	    useStates( viewState, renderState, true );
 
-	    ::cairo::Cairo* pCairo = tools::cairoFromXBitmap( xBitmap );
+	    Cairo* pCairo = tools::cairoFromXBitmap( xBitmap );
 	    if( pCairo ) {
-		::cairo::Surface* pSurface = ::cairo::cairo_get_target( pCairo );
+		Surface* pSurface = cairo_get_target( pCairo );
 
-		printf ("draw bitmap: paint surface %p on surface %p\n", pSurface, ::cairo::cairo_get_target( mpCairo ) );
+		printf ("draw bitmap: paint surface %p on surface %p\n", pSurface, cairo_get_target( mpCairo ) );
 
-		::cairo::cairo_save( mpCairo );
-		::cairo::cairo_set_source_surface( mpCairo, pSurface, 0, 0 );
-		::cairo::cairo_paint( mpCairo );
-		::cairo::cairo_restore( mpCairo );
+		cairo_save( mpCairo );
+		cairo_set_source_surface( mpCairo, pSurface, 0, 0 );
+		cairo_paint( mpCairo );
+		cairo_restore( mpCairo );
 	    } else {
 		BitmapEx aBmpEx = tools::bitmapExFromXBitmap(xBitmap);
 		Bitmap aBitmap = aBmpEx.GetBitmap();
@@ -661,18 +662,18 @@ namespace vclcanvas
 			data [nOff++] = nAlpha;
 		    }
 
-		::cairo::Surface* pImageSurface = ::cairo::cairo_image_surface_create_for_data( data, ::cairo::CAIRO_FORMAT_ARGB32, nWidth, nHeight, nWidth*4 );
+		Surface* pImageSurface = cairo_image_surface_create_for_data( data, CAIRO_FORMAT_ARGB32, nWidth, nHeight, nWidth*4 );
 
-		::cairo::cairo_save( mpCairo );
-		::cairo::cairo_set_source_surface( mpCairo, pImageSurface, 0, 0 );
-		::cairo::cairo_paint( mpCairo );
-		::cairo::cairo_restore( mpCairo );
+		cairo_save( mpCairo );
+		cairo_set_source_surface( mpCairo, pImageSurface, 0, 0 );
+		cairo_paint( mpCairo );
+		cairo_restore( mpCairo );
 
-		::cairo::cairo_surface_destroy( pImageSurface );
+		cairo_surface_destroy( pImageSurface );
 		free( data );
 	    }
 
-	    ::cairo::cairo_restore( mpCairo );
+	    cairo_restore( mpCairo );
 	}
 
         return uno::Reference< rendering::XCachedPrimitive >(NULL);

@@ -1,7 +1,14 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 
+#include <cairo.h>
+#include <cairo-xlib.h>
+
+#ifdef CAIRO_HAS_GLITZ_SURFACE
+#include <cairo-glitz.h>
+#include <glitz.h>
 #include <glitz-glx.h>
+#endif
 
 #ifndef _SV_SYSDATA_HXX
 #include <vcl/sysdata.hxx>
@@ -67,4 +74,36 @@ cairoHelperGetGlitzSurface( const SystemEnvData* pSysData, void *drawable, int x
 	printf ("glitz surface created successfully\n");
 
     return pGlitzSurface;
+}
+
+void*
+cairoHelperGetSurface( const SystemEnvData* pSysData, int x, int y, int width, int height )
+{
+    cairo_surface_t* pSurface = NULL;
+    glitz_drawable_t* pGlitzDrawable;
+    glitz_surface_t* pGlitzSurface;
+
+#if 0
+#ifdef CAIRO_HAS_GLITZ_SURFACE
+    printf ("try to create glitz surface %d x %d\n", width, height );
+    pGlitzDrawable = (glitz_drawable_t*) cairoHelperGetGlitzDrawable( mpSysData, width, height );
+
+    if( pGlitzDrawable )
+	pGlitzSurface = (glitz_surface_t*) cairoHelperGetGlitzSurface( mpSysData, mpGlitzDrawable, x, y, width, height );
+
+    if( pGlitzSurface )
+	pSurface = cairo_glitz_surface_create( mpGlitzSurface );
+
+    printf ("mpGlitzSurface %p surface %p\n", pGlitzSurface, pWindowSurface);
+#endif
+#endif
+    if( !pSurface ) {
+	pSurface=cairo_xlib_surface_create( (Display*) pSysData->pDisplay,
+					    pSysData->aWindow,
+					    (Visual*) pSysData->pVisual,
+					    width + x, height + y );
+	cairo_surface_set_device_offset( pSurface, x, y );
+    }
+
+    return pSurface;
 }

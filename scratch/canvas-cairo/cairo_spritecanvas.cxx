@@ -294,9 +294,6 @@ namespace vclcanvas
             mpRedrawManager.reset( new RedrawManager( *pOutputWindow,
                                                       mpBackBuffer,
 						      mxDevice->getSurface() ) );
-
-	    //Size aSize = pOutputWindow->GetOutputSizePixel();
-	    //maCanvasHelper.setSurface (::cairo::cairo_xlib_surface_create( (::cairo::Display*) mpSysData->pDisplay, mpSysData->aWindow, (::cairo::Visual*) mpSysData->pVisual, aSize.Width(), aSize.Height() ), aSize );
         }
     }
 

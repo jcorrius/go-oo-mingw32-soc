@@ -70,7 +70,7 @@
 #endif
 
 using namespace ::com::sun::star;
-
+using namespace ::cairo;
 
 namespace vclcanvas
 {
@@ -88,7 +88,7 @@ namespace vclcanvas
         OutputDevice& 			 rOutDev( *rDevice->getOutDev() );
         tools::OutDevStateKeeper aStateKeeper( rOutDev );
 
-	mpCairo = ::cairo::cairo_create( xDevice->getSimilarSurface(rSize) );
+	mpCairo = cairo_create( xDevice->getSimilarSurface(rSize) );
 	maCanvasHelper.setCairo( mpCairo );
 
         // create bitmap for given reference device
@@ -148,7 +148,7 @@ namespace vclcanvas
 
 	WindowGraphicDevice::ImplRef xDevice = rDevice;
 
-	mpCairo = ::cairo::cairo_create( xDevice->getSimilarSurface() );
+	mpCairo = cairo_create( xDevice->getSimilarSurface() );
 
 	maCanvasHelper.setCairo( mpCairo );
         maCanvasHelper.setBitmap( rBitmap,
@@ -157,7 +157,7 @@ namespace vclcanvas
 
     CanvasBitmap::~CanvasBitmap()
     {
-	::cairo::cairo_destroy( mpCairo );
+	cairo_destroy( mpCairo );
     }
 
     void SAL_CALL CanvasBitmap::disposing()
@@ -205,7 +205,7 @@ namespace vclcanvas
         return maCanvasHelper.repaint( rGrf, rPt, rSz, rAttr );
     }
 
-    ::cairo::Cairo* CanvasBitmap::getCairo()
+    Cairo* CanvasBitmap::getCairo()
     {
 	return mpCairo;
     }
