@@ -33,8 +33,6 @@ public:
 
 	// XWorksheets
     virtual uno::Any SAL_CALL Add( const uno::Any& Before, const uno::Any& After, const uno::Any& Count, const uno::Any& Type ) throw (uno::RuntimeException);
-    virtual void SAL_CALL Copy( const uno::Any& Before, const uno::Any& After ) throw (uno::RuntimeException);
-    virtual void SAL_CALL Move( const uno::Any& Before, const uno::Any& After ) throw (uno::RuntimeException);
     virtual void SAL_CALL Delete(  ) throw (uno::RuntimeException);
 };
 

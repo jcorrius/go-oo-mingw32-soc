@@ -5,6 +5,7 @@
 #include <com/sun/star/sheet/XSpreadsheetDocument.hpp>
 #include <com/sun/star/container/XEnumerationAccess.hpp>
 #include <com/sun/star/sheet/XSpreadsheetView.hpp>
+#include <com/sun/star/container/XNamed.hpp>
 
 #include <sfx2/objsh.hxx>
 
@@ -96,19 +97,57 @@ uno::Any
 ScVbaWorksheets::Add( const uno::Any& Before, const uno::Any& After,
 					 const uno::Any& Count, const uno::Any& Type ) throw (uno::RuntimeException)
 {
-	SC_VBA_STUB();
+	rtl::OUString aStringSheet;
+	Before >>= aStringSheet;
+	sal_Int32 nSheetIndex = -1;
+	sal_Int32 nNewSheets;
+	Count >>= nNewSheets; 
+	sal_Int32 nCount = 0;
+
+	//FIXME: Handle 'After' 
+	//FIXME: Need to see if it makes sense to get the current shell
+        SfxObjectShell* pObjSh = SfxObjectShell::Current();
+        if ( pObjSh )
+        {
+            uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( pObjSh->GetModel(), uno::UNO_QUERY );
+            if ( xSpreadDoc.is() )
+            {
+                uno::Reference<sheet::XSpreadsheets> xSheets = xSpreadDoc->getSheets();
+		if (xSheets.is())
+		{
+			uno::Reference <container::XIndexAccess> xIndex( xSheets, uno::UNO_QUERY );
+			if ( xIndex.is() )
+			{
+				nCount = xIndex->getCount();
+				for (sal_Int32 i=0; i < nCount; i++)
+				{
+					uno::Reference< sheet::XSpreadsheet > xSheet(xIndex->getByIndex(i), uno::UNO_QUERY);
+					uno::Reference< container::XNamed > xNamed( xSheet, uno::UNO_QUERY_THROW );
+					if (xNamed->getName() == aStringSheet)
+					{
+						nSheetIndex = i;
+						break;
+					}
+				}
+			}
+		}
+		if(nSheetIndex != -1)
+		{
+			//FIXME: Default index case, if Before/After not specified
+			fprintf(stderr, "nSheetIndex:: %d\n",  nSheetIndex);
+			for (sal_Int32 i=0; i < nNewSheets; i++)
+			{
+		                String aStringName( RTL_CONSTASCII_USTRINGPARAM("Sheet") );
+				aStringName += String::CreateFromInt32(nCount + i + 1L);
+				fprintf(stderr, "aStringName :: %s\n",  rtl::OUStringToOString(aStringName, RTL_TEXTENCODING_UTF8).getStr());
+				xSheets->insertNewByName(aStringName, nSheetIndex + i);
+			}
+		}
+            }
+        }
 	return uno::Any();
 }
-void
-ScVbaWorksheets::Copy( const uno::Any& Before, const uno::Any& After ) throw (uno::RuntimeException)
-{
-	SC_VBA_STUB();
-}
-void
-ScVbaWorksheets::Move( const uno::Any& Before, const uno::Any& After ) throw (uno::RuntimeException)
-{
-	SC_VBA_STUB();
-}
+
 void
 ScVbaWorksheets::Delete() throw (uno::RuntimeException)
 {

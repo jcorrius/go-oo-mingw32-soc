@@ -29,6 +29,9 @@ public:
     // Methods
 	virtual void SAL_CALL Activate() throw (uno::RuntimeException);
 	virtual uno::Reference< vba::XRange > SAL_CALL Range( const ::uno::Any &rRange ) throw (uno::RuntimeException);
+	virtual void SAL_CALL Copy( const uno::Any& Before, const uno::Any& After ) throw (uno::RuntimeException);
+	virtual void SAL_CALL Move( const ::uno::Any& Before, const ::uno::Any& After ) throw (uno::RuntimeException);
+
 };
 
 #endif /* SC_VBA_WORKSHEET_HXX */
