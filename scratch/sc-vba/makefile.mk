@@ -22,7 +22,7 @@ SLO1FILES =  \
         $(SLO)$/vbaworkbook.obj \
         $(SLO)$/vbaworkbooks.obj \
         $(SLO)$/vbaworksheet.obj \
-	$(SLO)$/vbaworksheets.obj
+		$(SLO)$/vbafont.obj
 
 LIB1TARGET = \
 	$(SLB)$/$(TARGET).lib

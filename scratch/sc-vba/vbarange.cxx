@@ -15,8 +15,12 @@
 #include <com/sun/star/sheet/XSpreadsheet.hpp>
 #include <com/sun/star/sheet/XSheetCellCursor.hpp>
 #include <com/sun/star/sheet/XArrayFormulaRange.hpp>
+#include <com/sun/star/beans/XPropertySet.hpp>
+#include <com/sun/star/sheet/XFunctionAccess.hpp>
+#include <org/openoffice/vba/XFont.hpp>
 
 #include "vbarange.hxx"
+#include "vbafont.hxx"
 
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
@@ -228,3 +232,20 @@ ScVbaRange::setFormulaArray(const ::rtl::OUString &rFormula) throw (uno::Runtime
 	uno::Reference< sheet::XArrayFormulaRange > xArrayFormulaRange(mxRange, ::uno::UNO_QUERY);
 	xArrayFormulaRange->setArrayFormula( rFormula );
 }
+
+::rtl::OUString
+ScVbaRange::Characters(long nIndex, long nCount) throw (uno::RuntimeException)
+{
+	::rtl::OUString rString;
+	uno::Reference< text::XTextRange > xTextRange(mxRange, ::uno::UNO_QUERY);
+	rString = xTextRange->getString();
+	return rString.copy( --nIndex, nCount ); // Zero value indexing
+}
+    
+uno::Reference < vba::XFont >
+ScVbaRange::Font() throw (uno::RuntimeException)
+{
+	uno::Reference< beans::XPropertySet > xProps(mxRange, ::uno::UNO_QUERY );
+	return uno::Reference< vba::XFont >( new ScVbaFont( xProps ) );
+}
+

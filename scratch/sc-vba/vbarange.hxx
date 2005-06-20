@@ -3,7 +3,7 @@
 
 #include <org/openoffice/vba/XRange.hpp>
 #include <com/sun/star/table/XCellRange.hpp>
-#include <com/sun/star/table/XTableRows.hpp>
+#include <org/openoffice/vba/XFont.hpp>
 #include "vbahelper.hxx"
 
 class ScTableSheetsObj;
@@ -47,6 +47,8 @@ public:
 														   throw (uno::RuntimeException);
 	virtual uno::Reference< vba::XRange > SAL_CALL CurrentRegion() throw (uno::RuntimeException);
 	virtual uno::Reference< vba::XRange > SAL_CALL CurrentArray() throw (uno::RuntimeException);
+	virtual ::rtl::OUString SAL_CALL Characters( long nIndex, long nCount ) throw (uno::RuntimeException);
+	virtual uno::Reference< vba::XFont > SAL_CALL Font() throw (uno::RuntimeException);
 };
 
 #endif /* SC_VBA_RANGE_HXX */
