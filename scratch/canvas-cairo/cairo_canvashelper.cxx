@@ -289,61 +289,72 @@ namespace vclcanvas
 
     void CanvasHelper::drawPolyPolygonPath( const uno::Reference< rendering::XPolyPolygon2D >& xPolyPolygon, bool fill )
     {
-	    printf ("CanvasHelper::drawPolyPolygonPath, fill: %d number of polygons: %d on surface %p\n", fill, xPolyPolygon->getNumberOfPolygons(), ::cairo::cairo_get_target ( mpCairo ) );
-	/* TODO: optimize using known implementation as vcl canvas does (rodo)
+	printf ("CanvasHelper::drawPolyPolygonPath, fill: %d number of polygons: %d on surface %p\n",
+		fill, xPolyPolygon->getNumberOfPolygons(), ::cairo::cairo_get_target ( mpCairo ) );
+	const sal_Int32 nPolys( xPolyPolygon->getNumberOfPolygons() );
 
-	  LinePolyPolygon* pPolyImpl = dynamic_cast< LinePolyPolygon* >( xPoly.get() );
+	uno::Reference< rendering::XLinePolyPolygon2D > xLinePoly( xPolyPolygon, uno::UNO_QUERY );
+	if( xLinePoly.is() ) {
+			    
+	    uno::Sequence< uno::Sequence< ::com::sun::star::geometry::RealPoint2D > > aPoints = xLinePoly->getPoints( 0, nPolys, 0, -1 );
 
-	if( pPolyImpl )
-		{
-			return pPolyImpl->getPolyPolygon();
+	    for( sal_Int32 i = 0; i < nPolys; i ++ ) {
+		printf ("CanvasHelper::drawPolyPolygonPath, lines: %d\n", aPoints[i].getLength() );
+
+		::cairo::cairo_move_to( mpCairo, aPoints[i][0].X, aPoints[i][0].Y );
+
+		for( sal_Int32 j = 0; j < aPoints[i].getLength(); j ++ )
+		    ::cairo::cairo_line_to( mpCairo, aPoints[i][j].X, aPoints[i][j].Y );
+
+		if( xPolyPolygon->isClosed( i ) )
+		    ::cairo::cairo_close_path( mpCairo );
+
+		if (fill)
+		    ::cairo::cairo_fill( mpCairo );
+		else
+		    ::cairo::cairo_stroke( mpCairo );
+	    }
+	} else {
+
+	    uno::Reference< rendering::XBezierPolyPolygon2D > xBezierPoly( xPolyPolygon, uno::UNO_QUERY );
+	    if( xBezierPoly.is() ) {
+
+		uno::Sequence< uno::Sequence< ::com::sun::star::geometry::RealBezierSegment2D > > aSegments = xBezierPoly->getBezierSegments( 0, nPolys, 0, -1 );
+		double nC1x, nC1y, nC2x, nC2y;
+
+		for( sal_Int32 i = 0; i < nPolys; i ++ ) {
+		    printf ("CanvasHelper::drawPolyPolygonPath, bezier segments: %d\n", aSegments[i].getLength() );
+
+		    ::cairo::cairo_move_to( mpCairo, aSegments[i][0].Px, aSegments[i][0].Py );
+		    nC1x = aSegments[i][0].C1x;
+		    nC1y = aSegments[i][0].C1y;
+		    nC2x = aSegments[i][0].C2x;
+		    nC2y = aSegments[i][0].C2y;
+
+		    for( sal_Int32 j = 1; j < aSegments[i].getLength(); j ++ ) {
+			::cairo::cairo_curve_to( mpCairo, nC1x, nC1y, nC2x, nC2y, aSegments[i][j].Px, aSegments[i][j].Py );
+			nC1x = aSegments[i][j].C1x;
+			nC1y = aSegments[i][j].C1y;
+			nC2x = aSegments[i][j].C2x;
+			nC2y = aSegments[i][j].C2y;
+		    }
+		    if( xPolyPolygon->isClosed( i ) )
+			::cairo::cairo_close_path( mpCairo );
+
+		    if (fill)
+			::cairo::cairo_fill( mpCairo );
+		    else
+			::cairo::cairo_stroke( mpCairo );
 		}
-		else */
-	{
-		const sal_Int32 nPolys( xPolyPolygon->getNumberOfPolygons() );
 
-		// not a known implementation object - try data source
-		// interfaces
-		/*uno::Reference< rendering::XBezierPolyPolygon2D > xBezierPoly( xPolyPolygon, uno::UNO_QUERY );
-
-		if( xBezierPoly.is() )
-			printf ("bezier polygon\n");
-			//return ::basegfx::unotools::polyPolygonFromBezier2DSequenceSequence( xBezierPoly->getBezierSegments( 0, nPolys, 0, -1 ) );
-			else */ {
-			uno::Reference< rendering::XLinePolyPolygon2D > xLinePoly( xPolyPolygon, uno::UNO_QUERY );
-
-			// no implementation class and no data provider
-			// found - contract violation.
-			CHECK_AND_THROW( xLinePoly.is(),
-					 "Cairo CanvasHelper::drawPolyPolygon: Invalid input "
-					 "poly-polygon, cannot retrieve vertex data" );
-			uno::Sequence< uno::Sequence< ::com::sun::star::geometry::RealPoint2D > > aPoints = xLinePoly->getPoints( 0, nPolys, 0, -1 );
-
-			for( sal_Int32 i = 0; i < nPolys; i ++ ) {
-				printf ("CanvasHelper::drawPolyPolygonPath, lines: %d\n", aPoints[i].getLength() );
-
-				for( sal_Int32 j = 0; j < aPoints[i].getLength(); j ++ ) {
-					if( j == 0 )
-						::cairo::cairo_move_to( mpCairo, aPoints[i][j].X, aPoints[i][j].Y );
-					else
-						::cairo::cairo_line_to( mpCairo, aPoints[i][j].X, aPoints[i][j].Y );
-				}
-				if( xPolyPolygon->isClosed( i ) )
-					::cairo::cairo_close_path( mpCairo );
-				if (fill)
-					::cairo::cairo_fill( mpCairo );
-				else
-					::cairo::cairo_stroke( mpCairo );
-			}
-		}
+	    }
 	}
-
     }
 
     uno::Reference< rendering::XCachedPrimitive > CanvasHelper::drawPolyPolygon( const rendering::XCanvas& 							rCanvas, 
-                                                                                 const uno::Reference< rendering::XPolyPolygon2D >& xPolyPolygon,
-                                                                                 const rendering::ViewState& 						viewState,
-                                                                                 const rendering::RenderState& 						renderState )
+										 const uno::Reference< rendering::XPolyPolygon2D >& xPolyPolygon,
+										 const rendering::ViewState& 						viewState,
+										 const rendering::RenderState& 						renderState )
     {
 	if( mpCairo ) {
 	    ::cairo::cairo_save( mpCairo );
@@ -355,8 +366,8 @@ namespace vclcanvas
 	    ::cairo::cairo_restore( mpCairo );
 	}
 
-        // TODO(P1): Provide caching here.
-        return uno::Reference< rendering::XCachedPrimitive >(NULL);
+	// TODO(P1): Provide caching here.
+	return uno::Reference< rendering::XCachedPrimitive >(NULL);
     }
 
     uno::Reference< rendering::XCachedPrimitive > CanvasHelper::strokePolyPolygon( const rendering::XCanvas& 							rCanvas, 
@@ -375,36 +386,36 @@ namespace vclcanvas
 	// FIXME: cairo doesn't handle end cap so far (rodo)
 	switch( strokeAttributes.StartCapType ) {
 	case rendering::PathCapType::BUTT:
-		::cairo::cairo_set_line_cap( mpCairo, ::cairo::CAIRO_LINE_CAP_BUTT );
-	        break;
+	    ::cairo::cairo_set_line_cap( mpCairo, ::cairo::CAIRO_LINE_CAP_BUTT );
+	break;
 	case rendering::PathCapType::ROUND:
-		::cairo::cairo_set_line_cap( mpCairo, ::cairo::CAIRO_LINE_CAP_ROUND );
-	        break;
+	    ::cairo::cairo_set_line_cap( mpCairo, ::cairo::CAIRO_LINE_CAP_ROUND );
+	break;
 	case rendering::PathCapType::SQUARE:
-		::cairo::cairo_set_line_cap( mpCairo, ::cairo::CAIRO_LINE_CAP_SQUARE );
-	        break;
+	    ::cairo::cairo_set_line_cap( mpCairo, ::cairo::CAIRO_LINE_CAP_SQUARE );
+	break;
 	}
 
 	switch( strokeAttributes.JoinType ) {
-	// cairo doesn't have join type NONE so we use MITTER as it's pretty close
+	    // cairo doesn't have join type NONE so we use MITTER as it's pretty close
 	case rendering::PathJoinType::NONE:
 	case rendering::PathJoinType::MITER:
-		::cairo::cairo_set_line_join( mpCairo, ::cairo::CAIRO_LINE_JOIN_MITER );
-	        break;
+	    ::cairo::cairo_set_line_join( mpCairo, ::cairo::CAIRO_LINE_JOIN_MITER );
+	break;
 	case rendering::PathJoinType::ROUND:
-		::cairo::cairo_set_line_join( mpCairo, ::cairo::CAIRO_LINE_JOIN_ROUND );
-	        break;
+	    ::cairo::cairo_set_line_join( mpCairo, ::cairo::CAIRO_LINE_JOIN_ROUND );
+	break;
 	case rendering::PathJoinType::BEVEL:
-		::cairo::cairo_set_line_join( mpCairo, ::cairo::CAIRO_LINE_JOIN_BEVEL );
-	        break;
+	    ::cairo::cairo_set_line_join( mpCairo, ::cairo::CAIRO_LINE_JOIN_BEVEL );
+	break;
 	}
 
 	if( strokeAttributes.DashArray.getLength() > 0 ) {
-		double* pDashArray = new double[ strokeAttributes.DashArray.getLength() ];
-		for( sal_Int32 i=0; i<strokeAttributes.DashArray.getLength(); i++ )
-			pDashArray[i]=strokeAttributes.DashArray[i];
-		::cairo::cairo_set_dash( mpCairo, pDashArray, strokeAttributes.DashArray.getLength(), 0 );
-		delete[] pDashArray;
+	    double* pDashArray = new double[ strokeAttributes.DashArray.getLength() ];
+	    for( sal_Int32 i=0; i<strokeAttributes.DashArray.getLength(); i++ )
+		pDashArray[i]=strokeAttributes.DashArray[i];
+	    ::cairo::cairo_set_dash( mpCairo, pDashArray, strokeAttributes.DashArray.getLength(), 0 );
+	    delete[] pDashArray;
 	}
 
 	// TODO(rodo) use LineArray of strokeAttributes

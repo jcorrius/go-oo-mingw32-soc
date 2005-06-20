@@ -165,6 +165,8 @@ namespace vclcanvas
     {
         tools::LocalGuard aGuard;
 
+	printf ("disposing sprite canvas\n");
+
 	dispose();
 
         // forward to parent
@@ -229,6 +231,8 @@ namespace vclcanvas
         }
         
         mpRedrawManager->updateScreen( bUpdateAll );
+
+	//mxDevice->flush();
 
         // commit to screen
         // rodo maCanvasHelper.flush();

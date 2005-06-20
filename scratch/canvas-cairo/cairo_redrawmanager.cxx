@@ -143,7 +143,7 @@ namespace vclcanvas
         maChangeRecords.reserve( CHANGE_RECORDS_INITIAL_SIZE );
 
 	Size aSize = mpBackBuffer->getSize();
-	mpSurface = ::cairo::cairo_surface_create_similar( mpBackBuffer->getSurface(), ::cairo::CAIRO_FORMAT_RGB24, aSize.Width(), aSize.Height() );
+	mpSurface = ::cairo::cairo_surface_create_similar( mpBackBuffer->getSurface(), ::cairo::CAIRO_FORMAT_ARGB32, aSize.Width(), aSize.Height() );
 	mpCairo = ::cairo::cairo_create( mpSurface );
 	mpWinSurface = pSurface;
 	::cairo::cairo_surface_reference( mpWinSurface );
@@ -268,9 +268,9 @@ namespace vclcanvas
         mbBackgroundDirty = false;
 
 #if defined(VERBOSE) && defined(DBG_UTIL)
-        renderFrameCounter();
-        renderSpriteCount();
-        renderMemUsage();
+        //renderFrameCounter();
+        //renderSpriteCount();
+        //renderMemUsage();
 #endif
     }
 

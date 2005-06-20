@@ -98,6 +98,17 @@
 
 #include "cairo_cairo.hxx"
 
+namespace cairo {
+
+// including glitz here conflicts with boost headers
+// #ifdef CAIRO_HAS_GLITZ_SURFACE
+// #include <glitz.h>
+// #endif
+
+    typedef struct _glitz_surface glitz_surface_t;
+    typedef struct _glitz_drawable glitz_drawable_t;
+}
+
 /* Definition of WindowGraphicDevice class */
 
 namespace vclcanvas
@@ -169,6 +180,8 @@ namespace vclcanvas
         ::cairo::Surface* getSimilarSurface();
         ::cairo::Surface* getSimilarSurface( Size aSize );
 
+	void flush();
+
     protected:
         ~WindowGraphicDevice(); // we're a ref-counted UNO class. _We_ destroy ourselves.
 
@@ -186,6 +199,11 @@ namespace vclcanvas
 
         const SystemEnvData* mpSysData;
         ::cairo::Surface* mpWindowSurface;
+
+#ifdef CAIRO_HAS_GLITZ_SURFACE
+	::cairo::glitz_surface_t* mpGlitzSurface;
+	::cairo::glitz_drawable_t* mpGlitzDrawable;
+#endif
     };
 }
 
