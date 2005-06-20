@@ -148,420 +148,64 @@ namespace vclcanvas
     uno::Reference< rendering::XBitmap > SAL_CALL CanvasBitmapHelper::getScaledBitmap( const geometry::RealSize2D& 	newSize, 
                                                                                        sal_Bool 					beFast )
     {
+	printf ("CanvasBitmapHelper::getScaledBitmap TODO\n");
+
         RTL_LOGFILE_CONTEXT( aLog, "::cairocanvas::CanvasBitmapHelper::getScaledBitmap()" );
 
         if( !mpBackBuffer.get() )
             return uno::Reference< rendering::XBitmap >(); // we're disposed
 
-        BitmapEx aRes( *maBitmap );
-
-        aRes.Scale( ::vcl::unotools::sizeFromRealSize2D(newSize), 
-                     beFast ? BMP_SCALE_FAST : BMP_SCALE_INTERPOLATE );
-
-        return uno::Reference< rendering::XBitmap >( new CanvasBitmap( aRes,
-                                                                       mxDevice ) );
+	return uno::Reference< rendering::XBitmap >(); // we're disposed
     }
 
     uno::Sequence< sal_Int8 > SAL_CALL CanvasBitmapHelper::getData( const geometry::IntegerRectangle2D& rect )
     {
+	printf ("CanvasBitmapHelper::getData TODO\n");
+
         RTL_LOGFILE_CONTEXT( aLog, "::cairocanvas::CanvasBitmapHelper::getData()" );
 
         if( !mpBackBuffer.get() )
             return uno::Sequence< sal_Int8 >(); // we're disposed
 
-        Bitmap aBitmap( maBitmap->GetBitmap() );
-        Bitmap aAlpha( maBitmap->GetAlpha().GetBitmap() );
-
-        ScopedBitmapReadAccess pReadAccess( aBitmap.AcquireReadAccess(),
-                                            aBitmap );
-        ScopedBitmapReadAccess pAlphaReadAccess( aAlpha.IsEmpty() ? 
-                                                 (BitmapReadAccess*)NULL : aAlpha.AcquireReadAccess(),
-                                                 aAlpha );
-
-        if( pReadAccess.get() != NULL )
-        {
-            // TODO(F1): Support more formats.
-            const Size aBmpSize( aBitmap.GetSizePixel() );
-            
-            // for the time being, always return as BGRA 
-            uno::Sequence< sal_Int8 > aRes( 4*aBmpSize.Width()*aBmpSize.Height() );
-            sal_Int8* pRes = aRes.getArray();
-
-            int nCurrPos(0);
-            for( int y=rect.Y1; 
-                 y<aBmpSize.Height() && y<rect.Y2; 
-                 ++y )
-            {
-                if( pAlphaReadAccess.get() != NULL )
-                {
-                    for( int x=rect.X1; 
-                         x<aBmpSize.Width() && x<rect.X2; 
-                         ++x )
-                    {
-                        pRes[ nCurrPos++ ] = pReadAccess->GetColor( y, x ).GetBlue();
-                        pRes[ nCurrPos++ ] = pReadAccess->GetColor( y, x ).GetGreen();
-                        pRes[ nCurrPos++ ] = pReadAccess->GetColor( y, x ).GetRed();
-                        pRes[ nCurrPos++ ] = pAlphaReadAccess->GetPixel( y, x ).GetIndex();
-                    }
-                }
-                else
-                {
-                    for( int x=rect.X1; 
-                         x<aBmpSize.Width() && x<rect.X2; 
-                         ++x )
-                    {
-                        pRes[ nCurrPos++ ] = pReadAccess->GetColor( y, x ).GetBlue();
-                        pRes[ nCurrPos++ ] = pReadAccess->GetColor( y, x ).GetGreen();
-                        pRes[ nCurrPos++ ] = pReadAccess->GetColor( y, x ).GetRed();
-                        pRes[ nCurrPos++ ] = (sal_Int8)255;
-                    }
-                }
-            }
-
-            return aRes;
-        }
-
-        return uno::Sequence< sal_Int8 >();
+	return uno::Sequence< sal_Int8 >(); // we're disposed
     }
 
     void SAL_CALL CanvasBitmapHelper::setData( const uno::Sequence< sal_Int8 >& 	data, 
                                                const geometry::IntegerRectangle2D&	rect )
     {
+	printf ("CanvasBitmapHelper::setData TODO\n");
+
         RTL_LOGFILE_CONTEXT( aLog, "::cairocanvas::CanvasBitmapHelper::setData()" );
 
         if( !mpBackBuffer.get() )
             return; // we're disposed
 
-        // retrieve local copies from the BitmapEx, which are later
-        // stored back. Unfortunately, the BitmapEx does not permit
-        // in-place modifications, as they are necessary here.
-        Bitmap aBitmap( maBitmap->GetBitmap() );
-        Bitmap aAlpha( maBitmap->GetAlpha().GetBitmap() );
-
-        bool bCopyBack( false ); // only copy something back, if we
-                                 // actually changed a pixel
-
-        {
-            ScopedBitmapWriteAccess pWriteAccess( aBitmap.AcquireWriteAccess(),
-                                                  aBitmap );
-            ScopedBitmapWriteAccess pAlphaWriteAccess( aAlpha.IsEmpty() ? 
-                                                       (BitmapWriteAccess*)NULL : aAlpha.AcquireWriteAccess(),
-                                                       aAlpha );
-
-            if( pAlphaWriteAccess.get() )
-            {
-                DBG_ASSERT( pAlphaWriteAccess->GetScanlineFormat() == BMP_FORMAT_8BIT_PAL ||
-                            pAlphaWriteAccess->GetScanlineFormat() == BMP_FORMAT_8BIT_TC_MASK, 
-                            "CanvasBitmapHelper::setData(): non-8bit alpha not supported!" );
-            } 
-            
-            if( pWriteAccess.get() != NULL )
-            {
-                // TODO(F1): Support more formats.
-                const Size aBmpSize( aBitmap.GetSizePixel() ); 
-
-                // for the time being, always read as BGRA 
-                int x, y, nCurrPos(0);
-                for( y=rect.Y1; 
-                     y<aBmpSize.Height() && y<rect.Y2; 
-                     ++y )
-                {
-                    if( pAlphaWriteAccess.get() != NULL )
-                    {
-                        switch( pWriteAccess->GetScanlineFormat() )
-                        {
-                            case BMP_FORMAT_8BIT_PAL:
-                            {
-                                Scanline pScan  = pWriteAccess->GetScanline( y );
-                                Scanline pAScan = pAlphaWriteAccess->GetScanline( y );
-
-                                for( x=rect.X1; 
-                                     x<aBmpSize.Width() && x<rect.X2; 
-                                     ++x )
-                                {
-                                    *pScan++ = (BYTE)pWriteAccess->GetBestPaletteIndex(
-                                        BitmapColor( data[ nCurrPos+2 ],
-                                                     data[ nCurrPos+1 ],
-                                                     data[ nCurrPos ] ) );
-
-                                    nCurrPos += 3;
-                        
-                                    // cast to unsigned byte, for correct subtraction result
-                                    *pAScan++ = static_cast<BYTE>(255 - 
-                                                                  static_cast<sal_uInt8>(data[ nCurrPos++ ]));
-                                }
-                            }
-                            break;
-
-                            case BMP_FORMAT_24BIT_TC_BGR:
-                            {
-                                Scanline pScan  = pWriteAccess->GetScanline( y );
-                                Scanline pAScan = pAlphaWriteAccess->GetScanline( y );
-
-                                for( x=rect.X1; 
-                                     x<aBmpSize.Width() && x<rect.X2; 
-                                     ++x )
-                                {
-                                    Scanline pTmp = pScan + x * 3;
-
-                                    *pScan++ = data[ nCurrPos   ];
-                                    *pScan++ = data[ nCurrPos+1 ];
-                                    *pScan++ = data[ nCurrPos+2 ];
-
-                                    nCurrPos += 3;
-                        
-                                    // cast to unsigned byte, for correct subtraction result
-                                    *pAScan++ = static_cast<BYTE>(255 - 
-                                                                  static_cast<sal_uInt8>(data[ nCurrPos++ ]));
-                                }
-                            }
-                            break;
-
-                            case BMP_FORMAT_24BIT_TC_RGB:
-                            {
-                                Scanline pScan  = pWriteAccess->GetScanline( y );
-                                Scanline pAScan = pAlphaWriteAccess->GetScanline( y );
-
-                                for( x=rect.X1; 
-                                     x<aBmpSize.Width() && x<rect.X2; 
-                                     ++x )
-                                {
-                                    Scanline pTmp = pScan + x * 3;
-
-                                    *pScan++ = data[ nCurrPos+2 ];
-                                    *pScan++ = data[ nCurrPos+1 ];
-                                    *pScan++ = data[ nCurrPos   ];
-
-                                    nCurrPos += 3;
-                        
-                                    // cast to unsigned byte, for correct subtraction result
-                                    *pAScan++ = static_cast<BYTE>(255 - 
-                                                                  static_cast<sal_uInt8>(data[ nCurrPos++ ]));
-                                }
-                            }
-                            break;
-
-                            default:
-                            {
-                                for( x=rect.X1; 
-                                     x<aBmpSize.Width() && x<rect.X2; 
-                                     ++x )
-                                { 
-                                    pWriteAccess->SetPixel( y, x, BitmapColor( data[ nCurrPos+2 ],
-                                                                               data[ nCurrPos+1 ],
-                                                                               data[ nCurrPos ] ) );
-                                    nCurrPos += 3;
-                        
-                                    // cast to unsigned byte, for correct subtraction result
-                                    pAlphaWriteAccess->SetPixel( y, x, 
-                                                                 BitmapColor( 
-                                                                     static_cast<BYTE>(255 - 
-                                                                                       static_cast<sal_uInt8>(data[ nCurrPos++ ])) ) );
-                                }
-                            }
-                            break;
-                        }
-                    }
-                    else
-                    {
-                        // TODO(Q3): This is copy'n'pasted from
-                        // canvashelper.cxx, unify!
-                        switch( pWriteAccess->GetScanlineFormat() )
-                        {
-                            case BMP_FORMAT_8BIT_PAL:
-                            {
-                                Scanline pScan = pWriteAccess->GetScanline( y );
-
-                                for( x=rect.X1; 
-                                     x<aBmpSize.Width() && x<rect.X2; 
-                                     ++x )
-                                {
-                                    *pScan++ = (BYTE)pWriteAccess->GetBestPaletteIndex(
-                                        BitmapColor( data[ nCurrPos+2 ],
-                                                     data[ nCurrPos+1 ],
-                                                     data[ nCurrPos ] ) );
-
-                                    nCurrPos += 4; // skip three colors, _plus_ alpha
-                                }
-                            }
-                            break;
-
-                            case BMP_FORMAT_24BIT_TC_BGR:
-                            {
-                                Scanline pScan = pWriteAccess->GetScanline( y );
-
-                                for( x=rect.X1; 
-                                     x<aBmpSize.Width() && x<rect.X2; 
-                                     ++x )
-                                {
-                                    Scanline pTmp = pScan + x * 3;
-
-                                    *pScan++ = data[ nCurrPos   ];
-                                    *pScan++ = data[ nCurrPos+1 ];
-                                    *pScan++ = data[ nCurrPos+2 ];
-
-                                    nCurrPos += 4; // skip three colors, _plus_ alpha
-                                }
-                            }
-                            break;
-
-                            case BMP_FORMAT_24BIT_TC_RGB:
-                            {
-                                Scanline pScan = pWriteAccess->GetScanline( y );
-
-                                for( x=rect.X1; 
-                                     x<aBmpSize.Width() && x<rect.X2; 
-                                     ++x )
-                                {
-                                    Scanline pTmp = pScan + x * 3;
-
-                                    *pScan++ = data[ nCurrPos+2 ];
-                                    *pScan++ = data[ nCurrPos+1 ];
-                                    *pScan++ = data[ nCurrPos   ];
-
-                                    nCurrPos += 4; // skip three colors, _plus_ alpha
-                                }
-                            }
-                            break;
-
-                            default:
-                            {
-                                for( x=rect.X1; 
-                                     x<aBmpSize.Width() && x<rect.X2; 
-                                     ++x )
-                                {
-                                    pWriteAccess->SetPixel( y, x, BitmapColor( data[ nCurrPos+2 ],
-                                                                               data[ nCurrPos+1 ],
-                                                                               data[ nCurrPos ] ) );
-                                    nCurrPos += 4; // skip three colors, _plus_ alpha
-                                }
-                            }
-                            break;
-                        }
-                    }
-
-                    bCopyBack = true;
-                }
-            }
-        }
-
-        // copy back only here, since the BitmapAccessors must be
-        // destroyed beforehand
-        if( bCopyBack )
-        {
-            if( aAlpha.IsEmpty() )
-                setBitmap( BitmapEx( aBitmap ),
-                           mxDevice );
-            else
-                setBitmap( BitmapEx( aBitmap, 
-                                     AlphaMask( aAlpha ) ),
-                           mxDevice );
-        }
+        return; 
     }
 
     void SAL_CALL CanvasBitmapHelper::setPixel( const uno::Sequence< sal_Int8 >& 	color, 
                                                 const geometry::IntegerPoint2D& 	pos )
     {
+	printf ("CanvasBitmapHelper::setPixel TODO\n");
+
         RTL_LOGFILE_CONTEXT( aLog, "::cairocanvas::CanvasBitmapHelper::setPixel()" );
 
         if( !mpBackBuffer.get() )
             return; // we're disposed
 
-        const Size aBmpSize( mpBackBuffer->getSize() );
-
-        CHECK_AND_THROW( pos.X >= 0 && pos.X < aBmpSize.Width(), 
-                         "CanvasBitmapHelper::setPixel: X coordinate out of bounds" );
-        CHECK_AND_THROW( pos.Y >= 0 && pos.Y < aBmpSize.Height(), 
-                         "CanvasBitmapHelper::setPixel: Y coordinate out of bounds" );
-        CHECK_AND_THROW( color.getLength() > 3, 
-                         "CanvasBitmapHelper::setPixel: not enough color components" );
-
-        // retrieve local copies from the BitmapEx, which are later
-        // stored back. Unfortunately, the BitmapEx does not permit
-        // in-place modifications, as they are necessary here.
-        Bitmap aBitmap( maBitmap->GetBitmap() );
-        Bitmap aAlpha( maBitmap->GetAlpha().GetBitmap() );
-
-        bool bCopyBack( false ); // only copy something back, if we
-                                 // actually changed a pixel
-
-        {
-            ScopedBitmapWriteAccess pWriteAccess( aBitmap.AcquireWriteAccess(),
-                                                  aBitmap );
-            ScopedBitmapWriteAccess pAlphaWriteAccess( aAlpha.IsEmpty() ? 
-                                                       (BitmapWriteAccess*)NULL : aAlpha.AcquireWriteAccess(),
-                                                       aAlpha );
-
-            if( pWriteAccess.get() != NULL )
-            {
-                pWriteAccess->SetPixel( pos.Y, pos.X, BitmapColor( color[ 2 ],
-                                                                   color[ 1 ],
-                                                                   color[ 0 ] ) );
-
-                if( pAlphaWriteAccess.get() != NULL )
-                    pAlphaWriteAccess->SetPixel( pos.Y, pos.X, BitmapColor( 255 - color[ 3 ] ) );
-
-                bCopyBack = true;
-            }
-        }
-
-        // copy back only here, since the BitmapAccessors must be
-        // destroyed beforehand
-        if( bCopyBack )
-        {
-            if( aAlpha.IsEmpty() )
-                setBitmap( BitmapEx( aBitmap ),
-                           mxDevice );
-            else
-                setBitmap( BitmapEx( aBitmap, 
-                                     AlphaMask( aAlpha ) ),
-                           mxDevice );
-        }
+	return;
     }
 
     uno::Sequence< sal_Int8 > SAL_CALL CanvasBitmapHelper::getPixel( const geometry::IntegerPoint2D& pos )
     {
+	printf ("CanvasBitmapHelper::getPixel TODO\n");
+
         RTL_LOGFILE_CONTEXT( aLog, "::cairocanvas::CanvasBitmapHelper::getPixel()" );
 
         if( !mpBackBuffer.get() )
             return uno::Sequence< sal_Int8 >(); // we're disposed
 
-        const Size aBmpSize( mpBackBuffer->getSize() );
-
-        CHECK_AND_THROW( pos.X >= 0 && pos.X < aBmpSize.Width(), 
-                         "CanvasBitmapHelper::getPixel: X coordinate out of bounds" );
-        CHECK_AND_THROW( pos.Y >= 0 && pos.Y < aBmpSize.Height(), 
-                         "CanvasBitmapHelper::getPixel: Y coordinate out of bounds" );
-
-        Bitmap aBitmap( maBitmap->GetBitmap() );
-        Bitmap aAlpha( maBitmap->GetAlpha().GetBitmap() );
-
-        ScopedBitmapReadAccess pReadAccess( aBitmap.AcquireReadAccess(),
-                                            aBitmap );
-        ScopedBitmapReadAccess pAlphaReadAccess( aAlpha.IsEmpty() ? 
-                                                 (BitmapReadAccess*)NULL : aAlpha.AcquireReadAccess(),
-                                                 aAlpha );
-
-        if( pReadAccess.get() != NULL )
-        {
-            // for the time being, always return as BGRA 
-            uno::Sequence< sal_Int8 > aRes( 4 );
-            sal_Int8* pRes = aRes.getArray();
-            
-            const BitmapColor aColor( pReadAccess->GetColor( pos.Y, pos.X ) );
-            pRes[ 3 ] = aColor.GetRed();
-            pRes[ 2 ] = aColor.GetGreen();
-            pRes[ 1 ] = aColor.GetBlue();
-
-            if( pAlphaReadAccess.get() != NULL )
-                pRes[ 3 ] = pAlphaReadAccess->GetPixel( pos.Y, pos.X ).GetIndex();
-            else
-                pRes[ 3 ] = (sal_Int8)255;
-
-            return aRes;
-        }
-
-        return uno::Sequence< sal_Int8 >();
+	return uno::Sequence< sal_Int8 >(); // we're disposed
     }
 
     uno::Reference< rendering::XBitmapPalette > SAL_CALL CanvasBitmapHelper::getPalette()

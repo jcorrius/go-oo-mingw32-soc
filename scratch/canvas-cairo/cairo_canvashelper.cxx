@@ -223,23 +223,46 @@ namespace vclcanvas
 				  const rendering::RenderState& renderState,
 				  bool setColor )
     {
-	    //   if( viewState.Clip.is() ) {
-	    ::cairo::Matrix aViewMatrix;
-	    ::cairo::Matrix aRenderMatrix;
-	    ::cairo::Matrix aCombinedMatrix;
+	::cairo::Matrix aViewMatrix;
+	::cairo::Matrix aRenderMatrix;
+	::cairo::Matrix aCombinedMatrix;
 
-	    ::cairo::cairo_matrix_init( &aViewMatrix, viewState.AffineTransform.m00, viewState.AffineTransform.m10, viewState.AffineTransform.m01, viewState.AffineTransform.m11, viewState.AffineTransform.m02, viewState.AffineTransform.m12);
-	    ::cairo::cairo_matrix_init( &aRenderMatrix, renderState.AffineTransform.m00, renderState.AffineTransform.m10, renderState.AffineTransform.m01, renderState.AffineTransform.m11, renderState.AffineTransform.m02, renderState.AffineTransform.m12);
-	    ::cairo::cairo_matrix_multiply( &aCombinedMatrix, &aRenderMatrix, &aViewMatrix);
-	    ::cairo::cairo_set_matrix( mpCairo, &aCombinedMatrix );
-	    //   }
+	::cairo::cairo_matrix_init( &aViewMatrix,
+				    viewState.AffineTransform.m00, viewState.AffineTransform.m10, viewState.AffineTransform.m01,
+				    viewState.AffineTransform.m11, viewState.AffineTransform.m02, viewState.AffineTransform.m12);
+	::cairo::cairo_matrix_init( &aRenderMatrix,
+				    renderState.AffineTransform.m00, renderState.AffineTransform.m10, renderState.AffineTransform.m01,
+				    renderState.AffineTransform.m11, renderState.AffineTransform.m02, renderState.AffineTransform.m12);
+	::cairo::cairo_matrix_multiply( &aCombinedMatrix, &aRenderMatrix, &aViewMatrix);
 
-	    if (setColor) {
-		    if (renderState.DeviceColor.getLength() > 3)
-			    ::cairo::cairo_set_source_rgba( mpCairo, renderState.DeviceColor [0], renderState.DeviceColor [1], renderState.DeviceColor [2], renderState.DeviceColor [3] );
-		    else if (renderState.DeviceColor.getLength() == 3)
-			    ::cairo::cairo_set_source_rgb( mpCairo, renderState.DeviceColor [0], renderState.DeviceColor [1], renderState.DeviceColor [2] );
-	    }
+        if( viewState.Clip.is() ) {
+	    printf ("view clip\n");
+
+	    ::cairo::cairo_set_matrix( mpCairo, &aViewMatrix );
+	    drawPolyPolygonPath( viewState.Clip, Clip );
+	}
+
+	::cairo::cairo_set_matrix( mpCairo, &aCombinedMatrix );
+
+        if( renderState.Clip.is() ) {
+	    printf ("render clip\n");
+
+	    drawPolyPolygonPath( renderState.Clip, Clip );
+	}
+
+	if (setColor) {
+	    if (renderState.DeviceColor.getLength() > 3)
+		::cairo::cairo_set_source_rgba( mpCairo,
+						renderState.DeviceColor [0],
+						renderState.DeviceColor [1],
+						renderState.DeviceColor [2],
+						renderState.DeviceColor [3] );
+	    else if (renderState.DeviceColor.getLength() == 3)
+		::cairo::cairo_set_source_rgb( mpCairo,
+					       renderState.DeviceColor [0],
+					       renderState.DeviceColor [1],
+					       renderState.DeviceColor [2] );
+	}
     }
 
     void CanvasHelper::drawLine( const rendering::XCanvas& 		rCanvas, 
@@ -287,10 +310,25 @@ namespace vclcanvas
 //         }
     }
 
-    void CanvasHelper::drawPolyPolygonPath( const uno::Reference< rendering::XPolyPolygon2D >& xPolyPolygon, bool fill )
+    void CanvasHelper::doOperation( Operation aOperation )
     {
-	printf ("CanvasHelper::drawPolyPolygonPath, fill: %d number of polygons: %d on surface %p\n",
-		fill, xPolyPolygon->getNumberOfPolygons(), ::cairo::cairo_get_target ( mpCairo ) );
+	switch( aOperation ) {
+	case Fill:
+	    ::cairo::cairo_fill( mpCairo );
+	break;
+	case Stroke:
+	    ::cairo::cairo_stroke( mpCairo );
+	break;
+	case Clip:
+	    ::cairo::cairo_clip( mpCairo );
+	break;
+	}
+    }
+
+    void CanvasHelper::drawPolyPolygonPath( const uno::Reference< rendering::XPolyPolygon2D >& xPolyPolygon, Operation aOperation )
+    {
+	printf ("CanvasHelper::drawPolyPolygonPath, number of polygons: %d on surface %p\n",
+		xPolyPolygon->getNumberOfPolygons(), ::cairo::cairo_get_target ( mpCairo ) );
 	const sal_Int32 nPolys( xPolyPolygon->getNumberOfPolygons() );
 
 	uno::Reference< rendering::XLinePolyPolygon2D > xLinePoly( xPolyPolygon, uno::UNO_QUERY );
@@ -309,10 +347,7 @@ namespace vclcanvas
 		if( xPolyPolygon->isClosed( i ) )
 		    ::cairo::cairo_close_path( mpCairo );
 
-		if (fill)
-		    ::cairo::cairo_fill( mpCairo );
-		else
-		    ::cairo::cairo_stroke( mpCairo );
+		doOperation( aOperation );
 	    }
 	} else {
 
@@ -341,12 +376,8 @@ namespace vclcanvas
 		    if( xPolyPolygon->isClosed( i ) )
 			::cairo::cairo_close_path( mpCairo );
 
-		    if (fill)
-			::cairo::cairo_fill( mpCairo );
-		    else
-			::cairo::cairo_stroke( mpCairo );
+		    doOperation( aOperation );
 		}
-
 	    }
 	}
     }
@@ -361,7 +392,7 @@ namespace vclcanvas
 
 	    useStates( viewState, renderState, true );
 	    ::cairo::cairo_set_line_width( mpCairo, 1 );
-	    drawPolyPolygonPath( xPolyPolygon, false );
+	    drawPolyPolygonPath( xPolyPolygon, Stroke );
 	    
 	    ::cairo::cairo_restore( mpCairo );
 	}
@@ -420,7 +451,7 @@ namespace vclcanvas
 
 	// TODO(rodo) use LineArray of strokeAttributes
 
-	drawPolyPolygonPath( xPolyPolygon, false );
+	drawPolyPolygonPath( xPolyPolygon, Stroke );
 	    
 	::cairo::cairo_restore( mpCairo );
 
@@ -467,7 +498,7 @@ namespace vclcanvas
 	    ::cairo::cairo_save( mpCairo );
 
 	    useStates( viewState, renderState, true );
-	    drawPolyPolygonPath( xPolyPolygon, true );
+	    drawPolyPolygonPath( xPolyPolygon, Fill );
 	    
 	    ::cairo::cairo_restore( mpCairo );
 	}
@@ -586,6 +617,8 @@ namespace vclcanvas
     {
 	if( mpCairo )
         {
+	    ::cairo::cairo_save( mpCairo );
+
 	    useStates( viewState, renderState, true );
 
 	    ::cairo::Cairo* pCairo = tools::cairoFromXBitmap( xBitmap );
@@ -638,6 +671,8 @@ namespace vclcanvas
 		::cairo::cairo_surface_destroy( pImageSurface );
 		free( data );
 	    }
+
+	    ::cairo::cairo_restore( mpCairo );
 	}
 
         return uno::Reference< rendering::XCachedPrimitive >(NULL);
@@ -719,42 +754,6 @@ namespace vclcanvas
     uno::Sequence< sal_Int8 > CanvasHelper::getData( const geometry::IntegerRectangle2D& rect )
     {
 	printf ("CanvasHelper::getData returns empty sequence, TODO\n");
-//         if( !mpOutDev.get() )
-//             return uno::Sequence< sal_Int8 >(); // we're disposed
-
-//         // TODO(F2): Support alpha canvas here
-//         const Rectangle	aRect( ::vcl::unotools::rectangleFromIntegerRectangle2D(rect) );
-
-//         Bitmap aBitmap( mpOutDev->getOutDev().GetBitmap(aRect.TopLeft(), 
-//                                                         aRect.GetSize()) );
-
-//         ScopedBitmapReadAccess pReadAccess( aBitmap.AcquireReadAccess(),
-//                                             aBitmap );
-
-//         if( pReadAccess.get() != NULL )
-//         {
-//             // TODO(F1): Support more formats.
-//             const sal_Int32 nWidth( rect.X2 - rect.X1 );
-//             const sal_Int32 nHeight( rect.Y2 - rect.Y1 );
-
-//             // for the time being, always return as BGRA 
-//             uno::Sequence< sal_Int8 > aRes( 4*nWidth*nHeight );
-//             sal_Int8* pRes = aRes.getArray();
-
-//             int nCurrPos(0);
-//             for( int y=0; y<nHeight; ++y )
-//             {
-//                 for( int x=0; x<nWidth; ++x )
-//                 {
-//                     pRes[ nCurrPos++ ] = pReadAccess->GetColor( y, x ).GetBlue();
-//                     pRes[ nCurrPos++ ] = pReadAccess->GetColor( y, x ).GetGreen();
-//                     pRes[ nCurrPos++ ] = pReadAccess->GetColor( y, x ).GetRed();
-//                     pRes[ nCurrPos++ ] = (sal_Int8)255L;
-//                 }
-//             }
-
-//             return aRes;
-//         }
 
         return uno::Sequence< sal_Int8 >();
     }
@@ -763,131 +762,6 @@ namespace vclcanvas
                                 const geometry::IntegerRectangle2D&	rect )
     {
 	printf ("canvas helper set data called, TODO\n");
-//         if( !mpOutDev.get() )
-//             return; // we're disposed
-
-//         OutputDevice& rOutDev( mpOutDev->getOutDev() );
-
-//         const Rectangle 		aRect( ::vcl::unotools::rectangleFromIntegerRectangle2D(rect) );
-//         const USHORT 			nBitCount( ::std::min( (USHORT)24U, 
-//                                                        (USHORT)rOutDev.GetBitCount() ) );
-//         const BitmapPalette*	pPalette = NULL;
-
-//         if( nBitCount <= 8 )
-//         {
-//             // TODO(Q1): Extract this to a common place, e.g. GraphicDevice
-
-//             // try to determine palette from output device (by
-//             // extracting a 1,1 bitmap, and querying it)
-//             const Point aEmptyPoint;
-//             const Size  aSize(1,1);
-//             Bitmap aTmpBitmap( rOutDev.GetBitmap( aEmptyPoint,
-//                                                   aSize ) );
-            
-//             ScopedBitmapReadAccess pReadAccess( aTmpBitmap.AcquireReadAccess(),
-//                                                 aTmpBitmap );
-
-//             pPalette = &pReadAccess->GetPalette();
-//         }
-
-//         // TODO(F2): Support alpha canvas here
-//         Bitmap aBitmap( aRect.GetSize(), nBitCount, pPalette );
-
-//         bool bCopyBack( false ); // only copy something back, if we
-//                                  // actually changed some pixel
-
-//         {
-//             ScopedBitmapWriteAccess pWriteAccess( aBitmap.AcquireWriteAccess(),
-//                                                   aBitmap );
-            
-//             if( pWriteAccess.get() != NULL )
-//             {
-//                 // for the time being, always read as BGRA 
-//                 const sal_Int32 nWidth( rect.X2 - rect.X1 );
-//                 const sal_Int32 nHeight( rect.Y2 - rect.Y1 );
-//                 int x, y, nCurrPos(0);
-//                 for( y=0; y<nHeight; ++y )
-//                 {
-//                     switch( pWriteAccess->GetScanlineFormat() )
-//                     {
-//                         case BMP_FORMAT_8BIT_PAL:
-//                         {
-//                             Scanline pScan = pWriteAccess->GetScanline( y );
-
-//                             for( x=0; x<nWidth; ++x )
-//                             {
-//                                 *pScan++ = (BYTE)pWriteAccess->GetBestPaletteIndex(
-//                                     BitmapColor( data[ nCurrPos+2 ],
-//                                                  data[ nCurrPos+1 ],
-//                                                  data[ nCurrPos ] ) );
-
-//                                 nCurrPos += 4; // skip three colors, _plus_ alpha
-//                             }
-//                         }
-//                         break;
-
-//                         case BMP_FORMAT_24BIT_TC_BGR:
-//                         {
-//                             Scanline pScan = pWriteAccess->GetScanline( y );
-
-//                             for( x=0; x<nWidth; ++x )
-//                             {
-//                                 Scanline pTmp = pScan + x * 3;
-
-//                                 *pScan++ = data[ nCurrPos   ];
-//                                 *pScan++ = data[ nCurrPos+1 ];
-//                                 *pScan++ = data[ nCurrPos+2 ];
-
-//                                 nCurrPos += 4; // skip three colors, _plus_ alpha
-//                             }
-//                         }
-//                         break;
-
-//                         case BMP_FORMAT_24BIT_TC_RGB:
-//                         {
-//                             Scanline pScan = pWriteAccess->GetScanline( y );
-
-//                             for( x=0; x<nWidth; ++x )
-//                             {
-//                                 Scanline pTmp = pScan + x * 3;
-
-//                                 *pScan++ = data[ nCurrPos+2 ];
-//                                 *pScan++ = data[ nCurrPos+1 ];
-//                                 *pScan++ = data[ nCurrPos   ];
-
-//                                 nCurrPos += 4; // skip three colors, _plus_ alpha
-//                             }
-//                         }
-//                         break;
-
-//                         default:
-//                         {
-//                             for( x=0; x<nWidth; ++x )
-//                             {
-//                                 pWriteAccess->SetPixel( y, x, BitmapColor( data[ nCurrPos+2 ],
-//                                                                            data[ nCurrPos+1 ],
-//                                                                            data[ nCurrPos ] ) );
-//                                 nCurrPos += 4; // skip three colors, _plus_ alpha
-//                             }
-//                         }
-//                         break;
-//                     }
-//                 }
-
-//                 bCopyBack = true;
-//             }
-//         }
-
-//         // copy back only here, since the BitmapAccessors must be
-//         // destroyed beforehand
-//         if( bCopyBack )
-//         {
-//             tools::OutDevStateKeeper aStateKeeper( mpProtectedOutDev );
-
-//             // TODO(F2): Support alpha canvas here
-//             rOutDev.EnableMapMode( FALSE );
-//             rOutDev.DrawBitmap(aRect.TopLeft(), aBitmap);
-//         }
     }
 
     void CanvasHelper::setPixel( const uno::Sequence< sal_Int8 >& 	color, 

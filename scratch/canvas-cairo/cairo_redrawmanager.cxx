@@ -143,7 +143,7 @@ namespace vclcanvas
         maChangeRecords.reserve( CHANGE_RECORDS_INITIAL_SIZE );
 
 	Size aSize = mpBackBuffer->getSize();
-	mpSurface = ::cairo::cairo_surface_create_similar( mpBackBuffer->getSurface(), ::cairo::CAIRO_FORMAT_ARGB32, aSize.Width(), aSize.Height() );
+	mpSurface = ::cairo::cairo_surface_create_similar( mpBackBuffer->getSurface(), ::cairo::CAIRO_FORMAT_RGB24, aSize.Width(), aSize.Height() );
 	mpCairo = ::cairo::cairo_create( mpSurface );
 	mpWinSurface = pSurface;
 	::cairo::cairo_surface_reference( mpWinSurface );
@@ -256,6 +256,7 @@ namespace vclcanvas
 
             // flush to screen
 	    ::cairo::Cairo* pCairo = ::cairo::cairo_create( mpWinSurface );
+	    ::cairo::cairo_set_operator( pCairo, ::cairo::CAIRO_OPERATOR_SOURCE );
 	    ::cairo::cairo_set_source_surface( pCairo, mpSurface, 0, 0 );
 	    ::cairo::cairo_paint( pCairo );
 	    ::cairo::cairo_destroy( pCairo );

@@ -253,13 +253,7 @@ namespace vclcanvas
             MODULATE_NONE,
             MODULATE_WITH_DEVICECOLOR
         };
-
-        ::BitmapEx transformBitmap( const BitmapEx& 									rBitmap,
-                                    const ::basegfx::B2DHomMatrix& 						rTransform,
-                                    const ::com::sun::star::uno::Sequence< double >&	rDeviceColor,
-                                    ModulationMode										eModulationMode );
-
-	}
+    }
 }
 
 #endif /* _VCLCANVAS_TOOLS_HXX */

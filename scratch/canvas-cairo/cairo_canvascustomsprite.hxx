@@ -166,8 +166,6 @@ namespace vclcanvas
         virtual void redraw( ::cairo::Cairo* pCairo ) const;
         virtual void redraw( ::cairo::Cairo* pCairo,
                              const ::basegfx::B2DPoint& rOutputPos ) const;
-        virtual void redrawOld( OutputDevice& 	rTargetSurface, 
-				const Point& 	rOutputPos ) const;
         virtual bool isAreaUpdateOpaque( const Rectangle& rUpdateArea ) const;
         virtual ::basegfx::B2DPoint getSpritePos() const;
         virtual ::basegfx::B2DSize 	getSpriteSize() const;

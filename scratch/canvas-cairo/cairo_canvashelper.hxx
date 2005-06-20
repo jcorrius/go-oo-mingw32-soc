@@ -316,8 +316,17 @@ namespace vclcanvas
 	void useStates( const ::com::sun::star::rendering::ViewState& viewState,
 			const ::com::sun::star::rendering::RenderState& renderState,
 			bool setColor );
+
+	enum Operation {
+	    Stroke,
+	    Fill,
+	    Clip
+	};
+
+	void doOperation( Operation aOperation );
+
 	void drawPolyPolygonPath( const ::com::sun::star::uno::Reference< ::com::sun::star::rendering::XPolyPolygon2D >& xPolyPolygon,
-				  bool fill );
+				  Operation aOperation );
     };
 }
 
