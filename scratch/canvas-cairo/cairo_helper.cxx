@@ -45,7 +45,7 @@ cairoHelperGetGlitzDrawable( const SystemEnvData* pSysData, int width, int heigh
 		pDrawableFormat->color.alpha_size,
 		pDrawableFormat->doublebuffer);
 
-    if( pDrawableFormat )
+    if( pDrawableFormat && pDrawableFormat->doublebuffer == 0 )
 	pDrawable = glitz_glx_create_drawable_for_window( display, screen, pDrawableFormat, window, attrs.width, attrs.height );
 
     return pDrawable;
