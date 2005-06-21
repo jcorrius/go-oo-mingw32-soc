@@ -22,6 +22,7 @@ int cairoHelperGetDefaultScreen( void* display )
 void*
 cairoHelperGetGlitzDrawable( const SystemEnvData* pSysData, int width, int height )
 {
+#if 0
     Display* display = (Display*) pSysData->pDisplay;
     Window window = pSysData->aWindow;
     VisualID vid = XVisualIDFromVisual( (Visual*) pSysData->pVisual );
@@ -49,11 +50,14 @@ cairoHelperGetGlitzDrawable( const SystemEnvData* pSysData, int width, int heigh
 	pDrawable = glitz_glx_create_drawable_for_window( display, screen, pDrawableFormat, window, attrs.width, attrs.height );
 
     return pDrawable;
+#endif
+    return NULL;
 }
 
 void*
 cairoHelperGetGlitzSurface( const SystemEnvData* pSysData, void *drawable, int x, int y, int width, int height )
 {
+#if 0
     Display* display = (Display*) pSysData->pDisplay;
     Window window = pSysData->aWindow;
 
@@ -74,6 +78,8 @@ cairoHelperGetGlitzSurface( const SystemEnvData* pSysData, void *drawable, int x
 	printf ("glitz surface created successfully\n");
 
     return pGlitzSurface;
+#endif
+    return NULL;
 }
 
 void*
