@@ -292,23 +292,16 @@ namespace vclcanvas
                                    const rendering::ViewState& 			viewState,
                                    const rendering::RenderState& 		renderState )
     {
-	// rodo TODO
-//         if( mpOutDev.get() )
-//         {
-//             tools::OutDevStateKeeper aStateKeeper( mpProtectedOutDev );
+	if( mpCairo )
+	    cairo_save( mpCairo );
 
-//             setupOutDevState( viewState, renderState, LINE_COLOR );
-
-//             const Point aStartPoint( tools::mapRealPoint2D( geometry::RealPoint2D(aBezierSegment.Px, aBezierSegment.Py),
-//                                                             viewState, renderState ) );
-//             const Point aEndPoint( tools::mapRealPoint2D( _aEndPoint,
-//                                                           viewState, renderState ) );
-//             // TODO(F1): Provide true beziers here!
-//             // TODO(F2): alpha
-//             mpOutDev->getOutDev().DrawLine( aStartPoint, aEndPoint );
-//             if( mp2ndOutDev.get() )
-//                 mp2ndOutDev->getOutDev().DrawLine( aStartPoint, aEndPoint );
-//         }
+	    useStates( viewState, renderState, true );
+	    cairo_set_line_width( mpCairo, 1 );
+	    cairo_move_to( mpCairo, aBezierSegment.Px, aBezierSegment.Py );
+	    cairo_curve_to( mpCairo, aBezierSegment.C1x, aBezierSegment.C1y, aBezierSegment.C2x, aBezierSegment.C2y, _aEndPoint.X, _aEndPoint.Y );
+	    cairo_stroke( mpCairo );
+	    
+	    cairo_restore( mpCairo );
     }
 
     void CanvasHelper::doOperation( Operation aOperation )
