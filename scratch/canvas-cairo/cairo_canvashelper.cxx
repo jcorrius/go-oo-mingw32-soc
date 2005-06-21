@@ -136,7 +136,7 @@
 #include "cairo_canvasbitmap.hxx"
 #include "cairo_impltools.hxx"
 #include "cairo_canvasfont.hxx"
-
+#include "cairo_linepolypolygon.hxx"
 
 using namespace ::com::sun::star;
 using namespace ::cairo;
@@ -326,20 +326,50 @@ namespace vclcanvas
 	}
     }
 
-    void CanvasHelper::drawPolyPolygonPath( const uno::Reference< rendering::XPolyPolygon2D >& xPolyPolygon, Operation aOperation )
+    void CanvasHelper::drawPolyPolygonImplementation( ::basegfx::B2DPolyPolygon aPolyPolygon, Operation aOperation )
     {
-	printf ("CanvasHelper::drawPolyPolygonPath, number of polygons: %d on surface %p\n",
-		xPolyPolygon->getNumberOfPolygons(), cairo_get_target ( mpCairo ) );
+	for( sal_uInt32 i = 0; i < aPolyPolygon.count(); i++ ) {
+	    ::basegfx::B2DPolygon aPolygon = aPolyPolygon.getB2DPolygon( i );
+	    bool bIsBezier = aPolygon.areControlPointsUsed();
+	    ::basegfx::B2DPoint aA, aB, aP;
+
+	    aP = aPolygon.getB2DPoint( 0 );
+	    cairo_move_to( mpCairo, aP.getX(), aP.getY() );
+
+	    if( bIsBezier ) {
+		aA = aPolygon.getControlPointA( 0 );
+		aB = aPolygon.getControlPointB( 0 );
+	    }
+
+	    for( sal_uInt32 j = 1; j < aPolygon.count(); j++ ) {
+		aP = aPolygon.getB2DPoint( j );
+
+		if( bIsBezier ) {
+		    cairo_curve_to( mpCairo, aA.getX(), aA.getY(), aB.getX(), aB.getY(), aP.getX(), aP.getY() );
+			
+		    aA = aPolygon.getControlPointA( j );
+		    aB = aPolygon.getControlPointB( j );
+		} else
+		    cairo_line_to( mpCairo, aP.getX(), aP.getY() );
+	    }
+
+	    if( aPolygon.isClosed() )
+		cairo_close_path( mpCairo );
+
+	    doOperation( aOperation );
+	}
+    }
+
+    void CanvasHelper::drawPolyPolygonFallback( const uno::Reference< rendering::XPolyPolygon2D >& xPolyPolygon, Operation aOperation )
+    {
 	const sal_Int32 nPolys( xPolyPolygon->getNumberOfPolygons() );
 
 	uno::Reference< rendering::XLinePolyPolygon2D > xLinePoly( xPolyPolygon, uno::UNO_QUERY );
-	if( xLinePoly.is() ) {
+	if( false && xLinePoly.is() ) {
 			    
 	    uno::Sequence< uno::Sequence< ::com::sun::star::geometry::RealPoint2D > > aPoints = xLinePoly->getPoints( 0, nPolys, 0, -1 );
 
 	    for( sal_Int32 i = 0; i < nPolys; i ++ ) {
-		printf ("CanvasHelper::drawPolyPolygonPath, lines: %d\n", aPoints[i].getLength() );
-
 		cairo_move_to( mpCairo, aPoints[i][0].X, aPoints[i][0].Y );
 
 		for( sal_Int32 j = 0; j < aPoints[i].getLength(); j ++ )
@@ -359,20 +389,13 @@ namespace vclcanvas
 		double nC1x, nC1y, nC2x, nC2y;
 
 		for( sal_Int32 i = 0; i < nPolys; i ++ ) {
-		    printf ("CanvasHelper::drawPolyPolygonPath, bezier segments: %d\n", aSegments[i].getLength() );
-
 		    cairo_move_to( mpCairo, aSegments[i][0].Px, aSegments[i][0].Py );
-		    nC1x = aSegments[i][0].C1x;
-		    nC1y = aSegments[i][0].C1y;
-		    nC2x = aSegments[i][0].C2x;
-		    nC2y = aSegments[i][0].C2y;
 
 		    for( sal_Int32 j = 1; j < aSegments[i].getLength(); j ++ ) {
-			cairo_curve_to( mpCairo, nC1x, nC1y, nC2x, nC2y, aSegments[i][j].Px, aSegments[i][j].Py );
-			nC1x = aSegments[i][j].C1x;
-			nC1y = aSegments[i][j].C1y;
-			nC2x = aSegments[i][j].C2x;
-			nC2y = aSegments[i][j].C2y;
+			cairo_curve_to( mpCairo,
+					aSegments[i][j - 1].C1x, aSegments[i][j - 1].C1y,
+					aSegments[i][j - 1].C2x, aSegments[i][j - 1].C2y,
+					aSegments[i][j].Px, aSegments[i][j].Py );
 		    }
 		    if( xPolyPolygon->isClosed( i ) )
 			cairo_close_path( mpCairo );
@@ -381,6 +404,16 @@ namespace vclcanvas
 		}
 	    }
 	}
+    }
+
+    void CanvasHelper::drawPolyPolygonPath( const uno::Reference< rendering::XPolyPolygon2D >& xPolyPolygon, Operation aOperation )
+    {
+	LinePolyPolygon* pPolyImpl = dynamic_cast< LinePolyPolygon* >( xPolyPolygon.get() );
+
+	if( false && pPolyImpl )
+	    drawPolyPolygonImplementation( pPolyImpl->getPolyPolygon(), aOperation );
+	else
+	    drawPolyPolygonFallback( xPolyPolygon, aOperation );
     }
 
     uno::Reference< rendering::XCachedPrimitive > CanvasHelper::drawPolyPolygon( const rendering::XCanvas& 							rCanvas, 

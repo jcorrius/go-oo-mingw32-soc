@@ -325,6 +325,9 @@ namespace vclcanvas
 
 	void doOperation( Operation aOperation );
 
+	void drawPolyPolygonImplementation( ::basegfx::B2DPolyPolygon aPolyPolygon, Operation aOperation );
+	void drawPolyPolygonFallback( const ::com::sun::star::uno::Reference< ::com::sun::star::rendering::XPolyPolygon2D >& xPolyPolygon,
+				      Operation aOperation );
 	void drawPolyPolygonPath( const ::com::sun::star::uno::Reference< ::com::sun::star::rendering::XPolyPolygon2D >& xPolyPolygon,
 				  Operation aOperation );
     };
