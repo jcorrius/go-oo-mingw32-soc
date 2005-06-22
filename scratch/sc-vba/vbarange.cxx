@@ -1,4 +1,7 @@
 #include <cppuhelper/queryinterface.hxx>
+#include <comphelper/processfactory.hxx>
+
+#include <sfx2/objsh.hxx>
 
 #include <com/sun/star/sheet/XSheetOperation.hpp>
 #include <com/sun/star/sheet/CellFlags.hpp>
@@ -249,3 +252,40 @@ ScVbaRange::Font() throw (uno::RuntimeException)
 	return uno::Reference< vba::XFont >( new ScVbaFont( xProps ) );
 }
 
+::rtl::OUString
+ScVbaRange::Address() throw (uno::RuntimeException)
+{
+	::rtl::OUString aStart, aEnd;
+	uno::Sequence< uno::Any > aAddrArray1, aAddrArray2;	
+	uno::Reference< lang::XMultiServiceFactory > xSMgr = ::comphelper::getProcessServiceFactory();
+	uno::Reference< sheet::XFunctionAccess > xFunctionAccess( 
+											 xSMgr->createInstance(::rtl::OUString::createFromAscii(
+											 "com.sun.star.sheet.FunctionAccess")), ::uno::UNO_QUERY);
+	uno::Reference< sheet::XCellRangeAddressable > xCellRangeAddressable( mxRange, ::uno::UNO_QUERY );
+	if( aAddrArray1.getLength() == 0 )
+	{
+		aAddrArray1.realloc(2);
+		uno::Any* aArray = aAddrArray1.getArray();
+		aArray[0] = ( uno::Any )( xCellRangeAddressable->getRangeAddress().StartRow + 1 );
+		aArray[1] = ( uno::Any )( xCellRangeAddressable->getRangeAddress().StartColumn + 1 );
+	}
+	uno::Any aString1 = xFunctionAccess->callFunction(rtl::OUString(RTL_CONSTASCII_USTRINGPARAM("ADDRESS")), aAddrArray1);
+	aString1 >>= aStart;
+
+	if( xCellRangeAddressable->getRangeAddress().StartColumn == xCellRangeAddressable->getRangeAddress().EndColumn &&
+        xCellRangeAddressable->getRangeAddress().StartRow == xCellRangeAddressable->getRangeAddress().EndRow )
+		return aStart;
+
+	String aString(aStart);
+	aStart = rtl::OUString(aString.Append((sal_Unicode)':'));
+	if( aAddrArray2.getLength() == 0 )
+    {
+		aAddrArray2.realloc(2);
+		uno::Any* aArray = aAddrArray2.getArray();
+		aArray[0] = ( uno::Any )( xCellRangeAddressable->getRangeAddress().EndRow + 1 );
+		aArray[1] = ( uno::Any )( xCellRangeAddressable->getRangeAddress().EndColumn + 1 );
+    }
+    uno::Any aString2 = xFunctionAccess->callFunction(rtl::OUString(RTL_CONSTASCII_USTRINGPARAM("ADDRESS")), aAddrArray2);
+	aString2 >>= aEnd;
+	return aStart.concat( aEnd );
+} 
