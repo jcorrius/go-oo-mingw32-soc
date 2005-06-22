@@ -61,28 +61,15 @@ ScVbaWorksheets::getApplication() throw (uno::RuntimeException)
 {
 	return ScVbaGlobals::get()->getApplication();
 }
+
 ::sal_Int32
 ScVbaWorksheets::getCount() throw (uno::RuntimeException)
 {
-
-        SfxObjectShell* pObjSh = SfxObjectShell::Current();
-        if ( pObjSh )
-        {
-            uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( pObjSh->GetModel(), uno::UNO_QUERY );
-            if ( xSpreadDoc.is() )
-            {
-                uno::Reference<sheet::XSpreadsheets> xSheets = xSpreadDoc->getSheets();
-		if (xSheets.is())
-		{
-			uno::Reference <container::XIndexAccess> xIndex( xSheets, uno::UNO_QUERY );
-			if ( xIndex.is() )
-			{
-				return xIndex->getCount();
-			}
-		}
-            }
-        }
-
+	uno::Reference <container::XIndexAccess> xIndex( mxSheets, uno::UNO_QUERY );
+	if ( xIndex.is() )
+	{
+		return xIndex->getCount();
+	}
 	return 0;
 }
 
@@ -105,46 +92,41 @@ ScVbaWorksheets::Add( const uno::Any& Before, const uno::Any& After,
 	sal_Int32 nCount = 0;
 
 	//FIXME: Handle 'After' 
-	//FIXME: Need to see if it makes sense to get the current shell
-        SfxObjectShell* pObjSh = SfxObjectShell::Current();
-        if ( pObjSh )
-        {
-            uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( pObjSh->GetModel(), uno::UNO_QUERY );
-            if ( xSpreadDoc.is() )
-            {
-                uno::Reference<sheet::XSpreadsheets> xSheets = xSpreadDoc->getSheets();
-		if (xSheets.is())
+	uno::Reference <container::XIndexAccess> xIndex( mxSheets, uno::UNO_QUERY );
+	if ( xIndex.is() )
+	{
+		nCount = xIndex->getCount();
+		for (sal_Int32 i=0; i < nCount; i++)
 		{
-			uno::Reference <container::XIndexAccess> xIndex( xSheets, uno::UNO_QUERY );
-			if ( xIndex.is() )
+			uno::Reference< sheet::XSpreadsheet > xSheet(xIndex->getByIndex(i), uno::UNO_QUERY);
+			uno::Reference< container::XNamed > xNamed( xSheet, uno::UNO_QUERY_THROW );
+			if (xNamed->getName() == aStringSheet)
 			{
-				nCount = xIndex->getCount();
-				for (sal_Int32 i=0; i < nCount; i++)
-				{
-					uno::Reference< sheet::XSpreadsheet > xSheet(xIndex->getByIndex(i), uno::UNO_QUERY);
-					uno::Reference< container::XNamed > xNamed( xSheet, uno::UNO_QUERY_THROW );
-					if (xNamed->getName() == aStringSheet)
-					{
-						nSheetIndex = i;
-						break;
-					}
-				}
+				nSheetIndex = i;
+				break;
 			}
 		}
-		if(nSheetIndex != -1)
+	}
+
+	if(nSheetIndex != -1)
+	{
+		//FIXME: Default index case, if Before/After not specified
+		uno::Reference< container::XNameAccess > xNameAccess( mxSheets, uno::UNO_QUERY_THROW );
+		sal_Int32 nSheetName = nCount + 1L;
+                String aStringBase( RTL_CONSTASCII_USTRINGPARAM("Sheet") );				
+		for (sal_Int32 i=0; i < nNewSheets; i++, nSheetName++)
 		{
-			//FIXME: Default index case, if Before/After not specified
-			fprintf(stderr, "nSheetIndex:: %d\n",  nSheetIndex);
-			for (sal_Int32 i=0; i < nNewSheets; i++)
+			String aStringName = aStringBase;
+			aStringName += String::CreateFromInt32(nSheetName);
+			while (xNameAccess->hasByName(aStringName))
 			{
-		                String aStringName( RTL_CONSTASCII_USTRINGPARAM("Sheet") );
-				aStringName += String::CreateFromInt32(nCount + i + 1L);
-				fprintf(stderr, "aStringName :: %s\n",  rtl::OUStringToOString(aStringName, RTL_TEXTENCODING_UTF8).getStr());
-				xSheets->insertNewByName(aStringName, nSheetIndex + i);
+				nSheetName++;
+				aStringName = aStringBase;
+				aStringName += String::CreateFromInt32(nSheetName);
 			}
+			mxSheets->insertNewByName(aStringName, nSheetIndex + i);
 		}
-            }
-        }
+	}
 	return uno::Any();
 }
 

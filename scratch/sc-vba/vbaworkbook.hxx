@@ -25,9 +25,10 @@ public:
 	virtual ::rtl::OUString SAL_CALL getFullName() throw (uno::RuntimeException);
 	virtual ::sal_Bool SAL_CALL getProtectStructure() throw (uno::RuntimeException);
 	virtual uno::Reference< vba::XWorksheet > SAL_CALL getActiveSheet() throw (uno::RuntimeException);
+	virtual uno::Reference< vba::XWorksheets > getWorkSheets() throw (uno::RuntimeException);
 
 	// Methods
-	virtual uno::Reference< vba::XWorksheet > SAL_CALL Worksheets( const ::uno::Any &rSheet ) throw (uno::RuntimeException);
+	//virtual uno::Reference< vba::XWorksheet > SAL_CALL Worksheets( const ::uno::Any &rSheet ) throw (uno::RuntimeException);
 	virtual void SAL_CALL Close( const uno::Any &bSaveChanges,
 								 const uno::Any &aFileName,
 								 const uno::Any &bRouteWorkbook ) throw (uno::RuntimeException);

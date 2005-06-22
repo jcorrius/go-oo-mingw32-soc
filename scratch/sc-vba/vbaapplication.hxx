@@ -19,7 +19,6 @@ public:
     virtual uno::Reference< vba::XRange > getSelection() throw (uno::RuntimeException);
     virtual uno::Reference< vba::XWorkbook > getActiveWorkbook() throw (uno::RuntimeException);
 	virtual uno::Reference< vba::XWorkbooks > getWorkbooks() throw (uno::RuntimeException);
-	virtual uno::Reference< vba::XWorksheets > getWorksheets() throw (uno::RuntimeException);
 };
 
 #endif /* SC_VBA_APPLICATION_HXX */

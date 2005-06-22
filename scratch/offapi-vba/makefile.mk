@@ -18,6 +18,7 @@ IDLFILES=\
 	XWorkbook.idl\
 	XWorkbooks.idl\
 	XWorksheet.idl\
+	XWorksheets.idl\
 	XFont.idl\
 
 # ------------------------------------------------------------------

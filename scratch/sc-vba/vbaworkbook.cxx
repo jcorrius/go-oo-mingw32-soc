@@ -7,6 +7,7 @@
 #include <com/sun/star/sheet/XSpreadsheetDocument.hpp>
 
 #include "vbaworksheet.hxx"
+#include "vbaworksheets.hxx"
 #include "vbaworkbook.hxx"
 
 // Much of the impl. for the equivalend UNO module is
@@ -53,6 +54,15 @@ ScVbaWorkbook::getActiveSheet() throw (uno::RuntimeException)
 	return uno::Reference< vba::XWorksheet >( new ScVbaWorksheet( xSpreadsheet->getActiveSheet() ) );
 }
 
+uno::Reference< vba::XWorksheets >
+ScVbaWorkbook::getWorkSheets() throw (uno::RuntimeException)
+{
+        uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( mxModel, uno::UNO_QUERY );
+       	uno::Reference<sheet::XSpreadsheets> xSheets = xSpreadDoc->getSheets();
+
+	return uno::Reference< vba::XWorksheets >( new ScVbaWorksheets(xSheets) );
+}
+
 void
 ScVbaWorkbook::Close( const uno::Any &rSaveArg, const uno::Any &rFileArg,
 					  const uno::Any &rRouteArg ) throw (uno::RuntimeException)
@@ -84,7 +94,7 @@ ScVbaWorkbook::getProtectStructure() throw (uno::RuntimeException)
 	uno::Reference< util::XProtectable > xProt( mxModel, uno::UNO_QUERY_THROW );
 	return xProt->isProtected();
 }
-
+/*
 uno::Reference< vba::XWorksheet >
 ScVbaWorkbook::Worksheets( const ::uno::Any &rSheet ) throw (uno::RuntimeException)
 {
@@ -107,3 +117,4 @@ ScVbaWorkbook::Worksheets( const ::uno::Any &rSheet ) throw (uno::RuntimeExcepti
         }
 
 }
+*/

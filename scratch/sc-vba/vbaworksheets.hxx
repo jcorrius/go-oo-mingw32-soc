@@ -2,6 +2,7 @@
 #define SC_VBA_WORKSHEETS_HXX
 
 #include <org/openoffice/vba/XWorksheets.hpp>
+#include <com/sun/star/sheet/XSpreadsheets.hpp>
 #include <com/sun/star/container/XEnumerationAccess.hpp>
 #include "vbahelper.hxx"
 
@@ -11,10 +12,11 @@ class ScVbaWorksheets : public org::openoffice::vba::XWorksheets,
 					   public com::sun::star::container::XEnumerationAccess
 {
 	SC_VBA_UNO_HELPER_MEMBERS;
+	uno::Reference< sheet::XSpreadsheets > mxSheets;
 
 public:
-	ScVbaWorksheets() :
-		mnRefCount( 1 ) {}
+	ScVbaWorksheets(uno::Reference< sheet::XSpreadsheets > xSheets ) :
+		mxSheets( xSheets ), mnRefCount( 1 ) {}
 	virtual ~ScVbaWorksheets() {}
 
 	SC_VBA_UNO_HELPER_XINTERFACE;

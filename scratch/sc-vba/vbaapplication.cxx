@@ -55,9 +55,4 @@ ScVbaApplication::getWorkbooks() throw (uno::RuntimeException)
 	return uno::Reference< vba::XWorkbooks >( new ScVbaWorkbooks() );
 }
 
-uno::Reference< vba::XWorksheets >
-ScVbaApplication::getWorksheets() throw (uno::RuntimeException)
-{
-	return uno::Reference< vba::XWorksheets >( new ScVbaWorksheets() );
-}
 
