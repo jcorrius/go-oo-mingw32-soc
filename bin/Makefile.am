@@ -20,6 +20,7 @@ script_files = \
 	package-ooo \
 	re-root \
 	scale-icons \
+	strace-rewrite \
 	unpack \
 	setup.in \
 	transform \
