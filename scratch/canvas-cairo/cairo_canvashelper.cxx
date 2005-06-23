@@ -173,6 +173,7 @@ namespace vclcanvas
     CanvasHelper::CanvasHelper() :
         mxDevice(),
 	mpCairo( NULL ),
+	mpTextures( NULL ),
         mp2ndOutDev()
     {
     }
@@ -308,7 +309,28 @@ namespace vclcanvas
     {
 	switch( aOperation ) {
 	case Fill:
-	    cairo_fill( mpCairo );
+	    if( mpTextures ) {
+		if( (*mpTextures)[mnPolygonIndex].Bitmap.is() ) {
+		    unsigned char* data;
+		    Surface* pSurface = tools::surfaceFromXBitmap( (*mpTextures)[mnPolygonIndex].Bitmap, data );
+
+		    if( pSurface ) {
+			cairo_pattern_t *pPattern;
+
+			pPattern = cairo_pattern_create_for_surface( pSurface );
+			cairo_pattern_set_extend( pPattern, CAIRO_EXTEND_REPEAT );
+			cairo_set_source( mpCairo, pPattern );
+			cairo_fill( mpCairo );
+
+			cairo_pattern_destroy( pPattern );
+			cairo_surface_destroy( pSurface );
+		    }
+
+		    if( data )
+			free( data );
+		}
+	    } else
+		cairo_fill( mpCairo );
 	break;
 	case Stroke:
 	    cairo_stroke( mpCairo );
@@ -321,8 +343,8 @@ namespace vclcanvas
 
     void CanvasHelper::drawPolyPolygonImplementation( ::basegfx::B2DPolyPolygon aPolyPolygon, Operation aOperation )
     {
-	for( sal_uInt32 i = 0; i < aPolyPolygon.count(); i++ ) {
-	    ::basegfx::B2DPolygon aPolygon = aPolyPolygon.getB2DPolygon( i );
+	for( mnPolygonIndex = 0; mnPolygonIndex < aPolyPolygon.count(); mnPolygonIndex++ ) {
+	    ::basegfx::B2DPolygon aPolygon = aPolyPolygon.getB2DPolygon( mnPolygonIndex );
 	    bool bIsBezier = aPolygon.areControlPointsUsed();
 	    ::basegfx::B2DPoint aA, aB, aP;
 
@@ -358,17 +380,17 @@ namespace vclcanvas
 	const sal_Int32 nPolys( xPolyPolygon->getNumberOfPolygons() );
 
 	uno::Reference< rendering::XLinePolyPolygon2D > xLinePoly( xPolyPolygon, uno::UNO_QUERY );
-	if( false && xLinePoly.is() ) {
+	if( xLinePoly.is() ) {
 			    
 	    uno::Sequence< uno::Sequence< ::com::sun::star::geometry::RealPoint2D > > aPoints = xLinePoly->getPoints( 0, nPolys, 0, -1 );
 
-	    for( sal_Int32 i = 0; i < nPolys; i ++ ) {
-		cairo_move_to( mpCairo, aPoints[i][0].X, aPoints[i][0].Y );
+	    for( mnPolygonIndex = 0; mnPolygonIndex < nPolys; mnPolygonIndex++ ) {
+		cairo_move_to( mpCairo, aPoints[mnPolygonIndex][0].X, aPoints[mnPolygonIndex][0].Y );
 
-		for( sal_Int32 j = 0; j < aPoints[i].getLength(); j ++ )
-		    cairo_line_to( mpCairo, aPoints[i][j].X, aPoints[i][j].Y );
+		for( sal_Int32 j = 0; j < aPoints[mnPolygonIndex].getLength(); j ++ )
+		    cairo_line_to( mpCairo, aPoints[mnPolygonIndex][j].X, aPoints[mnPolygonIndex][j].Y );
 
-		if( xPolyPolygon->isClosed( i ) )
+		if( xPolyPolygon->isClosed( mnPolygonIndex ) )
 		    cairo_close_path( mpCairo );
 
 		doOperation( aOperation );
@@ -381,16 +403,16 @@ namespace vclcanvas
 		uno::Sequence< uno::Sequence< ::com::sun::star::geometry::RealBezierSegment2D > > aSegments = xBezierPoly->getBezierSegments( 0, nPolys, 0, -1 );
 		double nC1x, nC1y, nC2x, nC2y;
 
-		for( sal_Int32 i = 0; i < nPolys; i ++ ) {
-		    cairo_move_to( mpCairo, aSegments[i][0].Px, aSegments[i][0].Py );
+		for( mnPolygonIndex = 0; mnPolygonIndex < nPolys; mnPolygonIndex++ ) {
+		    cairo_move_to( mpCairo, aSegments[mnPolygonIndex][0].Px, aSegments[mnPolygonIndex][0].Py );
 
-		    for( sal_Int32 j = 1; j < aSegments[i].getLength(); j ++ ) {
+		    for( sal_Int32 j = 1; j < aSegments[mnPolygonIndex].getLength(); j ++ ) {
 			cairo_curve_to( mpCairo,
-					aSegments[i][j - 1].C1x, aSegments[i][j - 1].C1y,
-					aSegments[i][j - 1].C2x, aSegments[i][j - 1].C2y,
-					aSegments[i][j].Px, aSegments[i][j].Py );
+					aSegments[mnPolygonIndex][j - 1].C1x, aSegments[mnPolygonIndex][j - 1].C1y,
+					aSegments[mnPolygonIndex][j - 1].C2x, aSegments[mnPolygonIndex][j - 1].C2y,
+					aSegments[mnPolygonIndex][j].Px, aSegments[mnPolygonIndex][j].Py );
 		    }
-		    if( xPolyPolygon->isClosed( i ) )
+		    if( xPolyPolygon->isClosed( mnPolygonIndex ) )
 			cairo_close_path( mpCairo );
 
 		    doOperation( aOperation );
@@ -403,7 +425,7 @@ namespace vclcanvas
     {
 	LinePolyPolygon* pPolyImpl = dynamic_cast< LinePolyPolygon* >( xPolyPolygon.get() );
 
-	if( false && pPolyImpl )
+	if( pPolyImpl )
 	    drawPolyPolygonImplementation( pPolyImpl->getPolyPolygon(), aOperation );
 	else
 	    drawPolyPolygonFallback( xPolyPolygon, aOperation );
@@ -550,12 +572,12 @@ namespace vclcanvas
                                                                        const geometry::Matrix2D& 						fontMatrix )
     {
 	// rodo TODO
-//         if( mpOutDev.get() )
-//         {
-//             // TODO(F2): font properties and font matrix
-//             return uno::Reference< rendering::XCanvasFont >(
-//                     new CanvasFont(fontRequest, extraFontProperties, fontMatrix, mpOutDev) );
-//         }
+        if( mpCairo )
+        {
+            // TODO(F2): font properties and font matrix
+            return uno::Reference< rendering::XCanvasFont >(
+                    new CanvasFont(fontRequest, extraFontProperties, fontMatrix) );
+        }
 
         return uno::Reference< rendering::XCanvasFont >();
     }
@@ -596,42 +618,32 @@ namespace vclcanvas
                                                                                 const rendering::ViewState& 					viewState,
                                                                                 const rendering::RenderState& 					renderState )
     {
-	// rodo TODO
-//         CHECK_AND_THROW( xLayoutedText.is(),
-//                          "CanvasHelper::drawTextLayout(): layout is NULL");
+         CHECK_AND_THROW( xLayoutedText.is(),
+                          "CanvasHelper::drawTextLayout(): layout is NULL");
 
-//         uno::Reference< lang::XServiceInfo > xRef( xLayoutedText,
-//                                                    uno::UNO_QUERY );
+	 if (mpCairo) {
+	     cairo_save( mpCairo );
 
-//         TextLayout* pTextLayout = NULL;
+	     uno::Reference< lang::XServiceInfo > xRef( xLayoutedText,
+							uno::UNO_QUERY );
 
-//         if( xRef.is() &&
-//             xRef->getImplementationName().equals( ::rtl::OUString(RTL_CONSTASCII_USTRINGPARAM(TEXTLAYOUT_IMPLEMENTATION_NAME))) )
-//         {
-//             // TODO(P2): Maybe use dynamic_cast here (saves us a queryInterface)
-//             pTextLayout = static_cast<TextLayout*>(xLayoutedText.get());
-//         }
-//         else
-//         {
-//             CHECK_AND_THROW( false,
-//                              "CanvasHelper::drawTextLayout(): TextLayout not compatible with this canvas" );
-//         }
+	     TextLayout* pTextLayout = NULL;
 
-//         if( mpOutDev.get() )
-//         {
-//             tools::OutDevStateKeeper aStateKeeper( mpProtectedOutDev );
+	     if( xRef.is() &&
+		 xRef->getImplementationName().equals( ::rtl::OUString(RTL_CONSTASCII_USTRINGPARAM(TEXTLAYOUT_IMPLEMENTATION_NAME))) ) {
+		 // TODO(P2): Maybe use dynamic_cast here (saves us a queryInterface)
+		 pTextLayout = static_cast<TextLayout*>(xLayoutedText.get());
+	     } else {
+		 CHECK_AND_THROW( false,
+				  "CanvasHelper::drawTextLayout(): TextLayout not compatible with this canvas" );
+	     }
 
-//             ::Point aOutpos;
-//             if( !setupTextOutput( aOutpos, viewState, renderState, xLayoutedText->getFont() ) )
-//                 return uno::Reference< rendering::XCachedPrimitive >(NULL); // no output necessary
+	     useStates( viewState, renderState, true );
 
-//             // TODO(F2): What about the offset scalings?
-//             // TODO(F2): alpha
-//             pTextLayout->draw( mpOutDev->getOutDev(), aOutpos, viewState, renderState );
+	     pTextLayout->draw( mpCairo );
 
-//             if( mp2ndOutDev.get() )
-//                 pTextLayout->draw( mp2ndOutDev->getOutDev(), aOutpos, viewState, renderState );
-//         }
+	     cairo_restore( mpCairo );
+	 }
 
         return uno::Reference< rendering::XCachedPrimitive >(NULL);
     }
@@ -642,65 +654,24 @@ namespace vclcanvas
                                                                                 const rendering::RenderState& 				renderState,
                                                                                 bool 										bModulateColors )
     {
-	if( mpCairo )
+	unsigned char* data;
+	Surface* pSurface = tools::surfaceFromXBitmap( xBitmap, data );
+
+	if( mpCairo && pSurface )
         {
 	    cairo_save( mpCairo );
 
 	    useStates( viewState, renderState, true );
 
-	    Cairo* pCairo = tools::cairoFromXBitmap( xBitmap );
-	    if( pCairo ) {
-		Surface* pSurface = cairo_get_target( pCairo );
-
-		printf ("draw bitmap: paint surface %p on surface %p\n", pSurface, cairo_get_target( mpCairo ) );
-
-		cairo_save( mpCairo );
-		cairo_set_source_surface( mpCairo, pSurface, 0, 0 );
-		cairo_paint( mpCairo );
-		cairo_restore( mpCairo );
-	    } else {
-		BitmapEx aBmpEx = tools::bitmapExFromXBitmap(xBitmap);
-		Bitmap aBitmap = aBmpEx.GetBitmap();
-		AlphaMask aAlpha = aBmpEx.GetAlpha();
-
-		BitmapReadAccess*	pBitmapReadAcc = aBitmap.AcquireReadAccess();
-		BitmapReadAccess*	pAlphaReadAcc = aAlpha.AcquireReadAccess();
-
-		const long		nWidth = pBitmapReadAcc->Width();
-		const long		nHeight = pBitmapReadAcc->Height();
-		long nX, nY;
-
-		unsigned char* data = (unsigned char*) malloc( nWidth*nHeight*4 );
-		long nOff = 0;
-		Color aColor;
-		unsigned int nAlpha;
-
-		for( nY = 0; nY < nHeight; nY++ )
-		    for( nX = 0; nX < nWidth; nX++ ) {
-			nAlpha = 255 - pAlphaReadAcc->GetColor( nY, nX ).GetBlue();
-			aColor = pBitmapReadAcc->GetColor( nY, nX );
-
-			// cairo need premultiplied color values
-			// TODO(rodo) handle endianess
-			data [nOff++] = ( nAlpha*aColor.GetBlue() )/255;
-			data [nOff++] = ( nAlpha*aColor.GetGreen() )/255;
-			data [nOff++] = ( nAlpha*aColor.GetRed() )/255;
-			data [nOff++] = nAlpha;
-		    }
-
-		Surface* pImageSurface = cairo_image_surface_create_for_data( data, CAIRO_FORMAT_ARGB32, nWidth, nHeight, nWidth*4 );
-
-		cairo_save( mpCairo );
-		cairo_set_source_surface( mpCairo, pImageSurface, 0, 0 );
-		cairo_paint( mpCairo );
-		cairo_restore( mpCairo );
-
-		cairo_surface_destroy( pImageSurface );
-		free( data );
-	    }
-
+	    cairo_set_source_surface( mpCairo, pSurface, 0, 0 );
+	    cairo_paint( mpCairo );
 	    cairo_restore( mpCairo );
+
+	    cairo_surface_destroy( pSurface );
 	}
+
+	if( data )
+	    free( data );
 
         return uno::Reference< rendering::XCachedPrimitive >(NULL);
     }

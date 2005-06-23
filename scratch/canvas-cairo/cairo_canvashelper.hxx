@@ -323,7 +323,10 @@ namespace vclcanvas
 	    Clip
 	};
 
+
+	const ::com::sun::star::uno::Sequence< ::com::sun::star::rendering::Texture >* mpTextures;
 	void doOperation( Operation aOperation );
+	sal_uInt32 mnPolygonIndex;
 
 	void drawPolyPolygonImplementation( ::basegfx::B2DPolyPolygon aPolyPolygon, Operation aOperation );
 	void drawPolyPolygonFallback( const ::com::sun::star::uno::Reference< ::com::sun::star::rendering::XPolyPolygon2D >& xPolyPolygon,

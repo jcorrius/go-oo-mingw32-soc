@@ -187,54 +187,6 @@ namespace vclcanvas
         CanvasCustomSprite_Base::disposing();
     }
 
-    uno::Reference< rendering::XCachedPrimitive > SAL_CALL CanvasCustomSprite::drawBitmap( const uno::Reference< rendering::XBitmap >&	xBitmap, 
-                                                                                           const rendering::ViewState& 					viewState, 
-                                                                                           const rendering::RenderState& 				renderState ) throw (lang::IllegalArgumentException, uno::RuntimeException)
-    {
-        tools::LocalGuard aGuard;
-
-        const ::BitmapEx& rBmpEx( tools::bitmapExFromXBitmap(xBitmap) );
-
-        // check whether bitmap is non-alpha, and whether its
-        // transformed size covers the whole sprite.
-        if( !rBmpEx.IsTransparent() )
-        {
-            // TODO(Q2): Factor out to canvastools or similar
-
-            ::basegfx::B2DHomMatrix aTransform;
-            ::canvas::tools::mergeViewAndRenderTransform(aTransform,
-                                                         viewState, 
-                                                         renderState);
-            
-            const geometry::IntegerSize2D& rSize( xBitmap->getSize() );
-
-            ::basegfx::B2DPolygon aPoly( 
-                ::basegfx::tools::createPolygonFromRect(
-                    ::basegfx::B2DRectangle( 0.0,0.0,
-                                             rSize.Width+1,
-                                             rSize.Height+1 ) ) );
-            aPoly.transform( aTransform );
-
-            if( ::basegfx::tools::isInside( 
-                    aPoly,
-                    ::basegfx::tools::createPolygonFromRect(
-                        ::basegfx::B2DRectangle( 0.0,0.0,
-                                                 maSize.Width(),
-                                                 maSize.Height() ) ),
-                    true ) )
-            {
-                // bitmap will fully cover the sprite, set flag
-                // appropriately
-                mbIsContentFullyOpaque = true;
-            }
-        }
-            
-        // delegate to base
-        return CanvasCustomSprite_Base::drawBitmap( xBitmap,
-                                                    viewState,
-                                                    renderState );
-    }
-
     void SAL_CALL CanvasCustomSprite::setAlpha( double alpha ) throw (lang::IllegalArgumentException, uno::RuntimeException)
     {
         tools::LocalGuard aGuard;

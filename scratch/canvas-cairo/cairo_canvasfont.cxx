@@ -83,18 +83,13 @@ namespace vclcanvas
 {
     CanvasFont::CanvasFont( const rendering::FontRequest& 					rFontRequest,
                             const uno::Sequence< beans::PropertyValue >& 	rExtraFontProperties, 
-                            const geometry::Matrix2D& 						rFontMatrix,
-                            const OutDevProviderSharedPtr&					rDevice ) :
+                            const geometry::Matrix2D& 						rFontMatrix) :
         CanvasFont_Base( m_aMutex ),
         maFont( Font( rFontRequest.FontDescription.FamilyName,
                       rFontRequest.FontDescription.StyleName,
                       Size( 0, ::basegfx::fround(rFontRequest.CellSize) ) ) ),
-        maFontRequest( rFontRequest ),
-        mpRefDevice( rDevice )
+        maFontRequest( rFontRequest )
     {
-        CHECK_AND_THROW( mpRefDevice.get(),
-                         "CanvasFont::CanvasFont(): Invalid ref device" );
-
         maFont->SetAlign( ALIGN_BASELINE );
         maFont->SetCharSet( (rFontRequest.FontDescription.IsSymbolFont==com::sun::star::util::TriState_YES) ? RTL_TEXTENCODING_SYMBOL : RTL_TEXTENCODING_UNICODE );
         maFont->SetVertical( (rFontRequest.FontDescription.IsVertical==com::sun::star::util::TriState_YES) ? TRUE : FALSE );
@@ -104,21 +99,21 @@ namespace vclcanvas
         maFont->SetItalic( (rFontRequest.FontDescription.FontDescription.Letterform<=8) ? ITALIC_NONE : ITALIC_NORMAL );
 
         // adjust to stretched font
-        if( !::rtl::math::approxEqual( rFontMatrix.m00, rFontMatrix.m11) )
-        {
-            const OutputDevice& rOutDev( mpRefDevice->getOutDev() );
-            const Size aSize = rOutDev.GetFontMetric( *maFont ).GetSize();
+//         if( !::rtl::math::approxEqual( rFontMatrix.m00, rFontMatrix.m11) )
+//         {
+//             const OutputDevice& rOutDev( mpRefDevice->getOutDev() );
+//             const Size aSize = rOutDev.GetFontMetric( *maFont ).GetSize();
 
-            const double fDividend( rFontMatrix.m10 + rFontMatrix.m11 );
-            double fStretch = (rFontMatrix.m00 + rFontMatrix.m01);            
+//             const double fDividend( rFontMatrix.m10 + rFontMatrix.m11 );
+//             double fStretch = (rFontMatrix.m00 + rFontMatrix.m01);            
 
-            if( !::basegfx::fTools::equalZero( fDividend) )
-                fStretch /= fDividend;
+//             if( !::basegfx::fTools::equalZero( fDividend) )
+//                 fStretch /= fDividend;
 
-            const long nNewWidth = ::basegfx::fround( aSize.Width() * fStretch );
+//             const long nNewWidth = ::basegfx::fround( aSize.Width() * fStretch );
 
-            maFont->SetWidth( nNewWidth );
-        }
+//             maFont->SetWidth( nNewWidth );
+//         }
     }
 
     CanvasFont::~CanvasFont()
@@ -128,18 +123,13 @@ namespace vclcanvas
     void SAL_CALL CanvasFont::disposing()
     {
         tools::LocalGuard aGuard;
-
-        mpRefDevice.reset();
     }
 
     uno::Reference< rendering::XTextLayout > SAL_CALL  CanvasFont::createTextLayout( const rendering::StringContext& aText, sal_Int8 nDirection, sal_Int64 nRandomSeed ) throw (uno::RuntimeException)
     {
         tools::LocalGuard aGuard;
 
-        if( !mpRefDevice.get() )
-            return uno::Reference< rendering::XTextLayout >(); // we're disposed
-
-        return new TextLayout( aText, nDirection, nRandomSeed, ImplRef( this ), mpRefDevice );
+        return new TextLayout( aText, nDirection, nRandomSeed, ImplRef( this ) );
     }
 
     rendering::FontRequest SAL_CALL  CanvasFont::getFontRequest(  ) throw (uno::RuntimeException)

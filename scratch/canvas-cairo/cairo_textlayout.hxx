@@ -78,6 +78,7 @@
 
 #include <canvas/vclwrapper.hxx>
 
+#include "cairo_cairo.hxx"
 #include "cairo_canvasfont.hxx"
 #include "cairo_impltools.hxx"
 
@@ -97,8 +98,7 @@ namespace vclcanvas
         TextLayout( const ::com::sun::star::rendering::StringContext& 	aText, 
                     sal_Int8                                                  	nDirection, 
                     sal_Int64                                                 	nRandomSeed,
-                    const CanvasFont::ImplRef&                                	rFont,
-                    const OutDevProviderSharedPtr&								rRefDevice );
+                    const CanvasFont::ImplRef&                                	rFont );
 
         /// Dispose all internal references
         virtual void SAL_CALL disposing();
@@ -127,10 +127,7 @@ namespace vclcanvas
         virtual sal_Bool SAL_CALL supportsService( const ::rtl::OUString& ServiceName ) throw( ::com::sun::star::uno::RuntimeException );
         virtual ::com::sun::star::uno::Sequence< ::rtl::OUString > SAL_CALL getSupportedServiceNames()  throw( ::com::sun::star::uno::RuntimeException );
 
-        bool draw( OutputDevice&                                           rOutDev, 
-                   const Point&                                            rOutpos, 
-                   const ::com::sun::star::rendering::ViewState&   viewState, 
-                   const ::com::sun::star::rendering::RenderState& renderState ) const;
+        bool draw( ::cairo::Cairo*                                 pCairo ) const;
 
     protected:
         ~TextLayout(); // we're a ref-counted UNO class. _We_ destroy ourselves.
@@ -148,7 +145,6 @@ namespace vclcanvas
         ::com::sun::star::rendering::StringContext maText;
         ::com::sun::star::uno::Sequence< double >          maLogicalAdvancements;
         CanvasFont::ImplRef                                mpFont;
-        OutDevProviderSharedPtr		                   	   mpRefDevice;
         sal_Int8                                           mnTextDirection;
     };
 

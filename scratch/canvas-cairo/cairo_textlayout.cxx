@@ -87,8 +87,8 @@
 
 #include "cairo_impltools.hxx"
 
-
 using namespace ::com::sun::star;
+using namespace ::cairo;
 
 namespace vclcanvas
 {
@@ -127,13 +127,11 @@ namespace vclcanvas
     TextLayout::TextLayout( const rendering::StringContext& aText,
                             sal_Int8                        nDirection,
                             sal_Int64                       nRandomSeed,
-                            const CanvasFont::ImplRef&      rFont,
-                            const OutDevProviderSharedPtr&	rRefDevice ) :
+                            const CanvasFont::ImplRef&      rFont ) :
         TextLayout_Base( m_aMutex ),
         maText( aText ),
         maLogicalAdvancements(),
         mpFont( rFont ),
-        mpRefDevice( rRefDevice ),
         mnTextDirection( nDirection )
     {
     }
@@ -147,7 +145,6 @@ namespace vclcanvas
         tools::LocalGuard aGuard;
 
         mpFont.reset();
-        mpRefDevice.reset();
     }
 
     // XTextLayout
@@ -196,33 +193,33 @@ namespace vclcanvas
     {
         tools::LocalGuard aGuard;
 
-        VirtualDevice aVDev( mpRefDevice->getOutDev() );
-        aVDev.SetFont( mpFont->getVCLFont() );
-
         // need metrics for Y offset, the XCanvas always renders
         // relative to baseline
-        const ::FontMetric& aMetric( aVDev.GetFontMetric() );
+	// TODO(rodo)
+//         const ::FontMetric& aMetric( aVDev.GetFontMetric() );
 
-        setupLayoutMode( aVDev, mnTextDirection );
+//         setupLayoutMode( aVDev, mnTextDirection );
 
-        const sal_Int32 nAboveBaseline( -aMetric.GetIntLeading() - aMetric.GetAscent() );
-        const sal_Int32 nBelowBaseline( aMetric.GetDescent() );
+//         const sal_Int32 nAboveBaseline( -aMetric.GetIntLeading() - aMetric.GetAscent() );
+//         const sal_Int32 nBelowBaseline( aMetric.GetDescent() );
 
-        if( maLogicalAdvancements.getLength() )
-        {
-            return geometry::RealRectangle2D( 0, nAboveBaseline,
-                                              maLogicalAdvancements[ maLogicalAdvancements.getLength()-1 ],
-                                              nBelowBaseline );
-        }
-        else
-        {
-            return geometry::RealRectangle2D( 0, nAboveBaseline,
-                                              aVDev.GetTextWidth(
-                                                  maText.Text,
-                                                  ::canvas::tools::numeric_cast<USHORT>(maText.StartPosition),
-                                                  ::canvas::tools::numeric_cast<USHORT>(maText.Length) ),
-                                              nBelowBaseline );
-        }
+//         if( maLogicalAdvancements.getLength() )
+//         {
+//             return geometry::RealRectangle2D( 0, nAboveBaseline,
+//                                               maLogicalAdvancements[ maLogicalAdvancements.getLength()-1 ],
+//                                               nBelowBaseline );
+//         }
+//         else
+//         {
+//             return geometry::RealRectangle2D( 0, nAboveBaseline,
+//                                               aVDev.GetTextWidth(
+//                                                   maText.Text,
+//                                                   ::canvas::tools::numeric_cast<USHORT>(maText.StartPosition),
+//                                                   ::canvas::tools::numeric_cast<USHORT>(maText.Length) ),
+//                                               nBelowBaseline );
+//         }
+
+            return geometry::RealRectangle2D( 0, 0, 0, 0);
     }
 
     double SAL_CALL TextLayout::justify( double nSize ) throw (lang::IllegalArgumentException, uno::RuntimeException)
@@ -310,37 +307,37 @@ namespace vclcanvas
         return maText;
     }
 
-    bool TextLayout::draw( OutputDevice&                 rOutDev,
-                           const Point&                  rOutpos,
-                           const rendering::ViewState&   viewState,
-                           const rendering::RenderState& renderState ) const
+    bool TextLayout::draw( Cairo*                        pCairo ) const
     {
         tools::LocalGuard aGuard;
 
-        setupLayoutMode( rOutDev, mnTextDirection );
+	cairo_select_font_face( pCairo, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL );
+	cairo_show_text( pCairo, ::rtl::OUStringToOString( maText.Text, RTL_TEXTENCODING_UTF8 ) );
 
-        if( maLogicalAdvancements.getLength() )
-        {
-            // TODO(P2): cache that
-            ::boost::scoped_array< long > aOffsets(new long[maLogicalAdvancements.getLength()]);
-            setupTextOffsets( aOffsets.get(), maLogicalAdvancements, viewState, renderState );
+//         setupLayoutMode( rOutDev, mnTextDirection );
+
+//         if( maLogicalAdvancements.getLength() )
+//         {
+//             // TODO(P2): cache that
+//             ::boost::scoped_array< long > aOffsets(new long[maLogicalAdvancements.getLength()]);
+//             setupTextOffsets( aOffsets.get(), maLogicalAdvancements, viewState, renderState );
             
-            // TODO(F3): ensure correct length and termination for DX
-            // array (last entry _must_ contain the overall width)
+//             // TODO(F3): ensure correct length and termination for DX
+//             // array (last entry _must_ contain the overall width)
             
-            rOutDev.DrawTextArray( rOutpos,
-                                   maText.Text,
-                                   aOffsets.get(),
-                                   ::canvas::tools::numeric_cast<USHORT>(maText.StartPosition),
-                                   ::canvas::tools::numeric_cast<USHORT>(maText.Length) );
-        }
-        else
-        {
-            rOutDev.DrawText( rOutpos,
-                              maText.Text,
-                              ::canvas::tools::numeric_cast<USHORT>(maText.StartPosition),
-                              ::canvas::tools::numeric_cast<USHORT>(maText.Length) );
-        }
+//             rOutDev.DrawTextArray( rOutpos,
+//                                    maText.Text,
+//                                    aOffsets.get(),
+//                                    ::canvas::tools::numeric_cast<USHORT>(maText.StartPosition),
+//                                    ::canvas::tools::numeric_cast<USHORT>(maText.Length) );
+//         }
+//         else
+//         {
+//             rOutDev.DrawText( rOutpos,
+//                               maText.Text,
+//                               ::canvas::tools::numeric_cast<USHORT>(maText.StartPosition),
+//                               ::canvas::tools::numeric_cast<USHORT>(maText.Length) );
+//         }
 
         return true;
     }

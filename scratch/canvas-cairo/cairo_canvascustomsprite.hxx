@@ -138,12 +138,6 @@ namespace vclcanvas
 
         virtual void SAL_CALL disposing();
 
-        // XCanvas: selectively override base's method here, for opacity tracking
-        virtual ::com::sun::star::uno::Reference< ::com::sun::star::rendering::XCachedPrimitive > SAL_CALL 	
-        	drawBitmap( const ::com::sun::star::uno::Reference< ::com::sun::star::rendering::XBitmap >& xBitmap, 
-                        const ::com::sun::star::rendering::ViewState& 									viewState, 
-                        const ::com::sun::star::rendering::RenderState& 								renderState ) throw (::com::sun::star::lang::IllegalArgumentException, ::com::sun::star::uno::RuntimeException);
-
         // XSprite
         virtual void SAL_CALL setAlpha( double alpha ) throw (::com::sun::star::lang::IllegalArgumentException, ::com::sun::star::uno::RuntimeException);
         virtual void SAL_CALL move( const ::com::sun::star::geometry::RealPoint2D& aNewPos, const ::com::sun::star::rendering::ViewState& viewState, const ::com::sun::star::rendering::RenderState& renderState ) throw (::com::sun::star::lang::IllegalArgumentException, ::com::sun::star::uno::RuntimeException);

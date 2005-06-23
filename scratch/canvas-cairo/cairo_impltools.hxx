@@ -153,13 +153,9 @@ namespace vclcanvas
         polyPolygonFromXPolyPolygon2D( const ::com::sun::star::uno::Reference< 
                                        ::com::sun::star::rendering::XPolyPolygon2D >& );
 
-        ::BitmapEx
-        bitmapExFromXBitmap( const ::com::sun::star::uno::Reference< 
-                             ::com::sun::star::rendering::XBitmap >& );
-
-        ::cairo::Cairo*
-	cairoFromXBitmap( const ::com::sun::star::uno::Reference< 
-			  ::com::sun::star::rendering::XBitmap >& );
+        ::BitmapEx bitmapExFromXBitmap( const ::com::sun::star::uno::Reference< ::com::sun::star::rendering::XBitmap >& );
+        ::cairo::Cairo* cairoFromXBitmap( const ::com::sun::star::uno::Reference< ::com::sun::star::rendering::XBitmap >& );
+        ::cairo::Surface* surfaceFromXBitmap( const ::com::sun::star::uno::Reference< ::com::sun::star::rendering::XBitmap >& xBitmap, unsigned char*& data );
 
         /** Setup VCL font and output position
 

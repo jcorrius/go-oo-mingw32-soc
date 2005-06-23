@@ -109,8 +109,7 @@ namespace vclcanvas
 
         CanvasFont( const ::com::sun::star::rendering::FontRequest& 								fontRequest,
                     const ::com::sun::star::uno::Sequence< ::com::sun::star::beans::PropertyValue >& 		extraFontProperties, 
-                    const ::com::sun::star::geometry::Matrix2D&										rFontMatrix,
-                    const OutDevProviderSharedPtr&															rDevice );
+                    const ::com::sun::star::geometry::Matrix2D&										rFontMatrix );
 
         /// Dispose all internal references
         virtual void SAL_CALL disposing();
@@ -139,7 +138,6 @@ namespace vclcanvas
 
         ::canvas::vcltools::VCLObject<Font>					maFont;
         ::com::sun::star::rendering::FontRequest	maFontRequest;
-        OutDevProviderSharedPtr								mpRefDevice;
     };
 
 }

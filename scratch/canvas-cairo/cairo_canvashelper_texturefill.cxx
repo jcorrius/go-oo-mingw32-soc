@@ -202,5 +202,13 @@ namespace vclcanvas
                          "CanvasHelper::fillTexturedPolyPolygon: empty texture sequence");
 
 	printf ("texture fill called, TODO\n");
+
+	mpTextures = &textures;
+
+	drawPolyPolygonPath( xPolyPolygon, Fill );
+
+	mpTextures = NULL;
+
+        return uno::Reference< rendering::XCachedPrimitive >(NULL);
     }
 }

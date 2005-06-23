@@ -231,10 +231,55 @@ namespace vclcanvas
 
 	    // TODO(F1): extract pixel from XBitmap interface
 	    ENSURE_AND_THROW( false, 
-			      "bitmapExFromXBitmap(): could not extract cairo" );
+			      "bitmapExFromXBitmap(): could not extract BitmapEx" );
  
             return ::BitmapEx();
         }
+
+        Surface* surfaceFromXBitmap( const uno::Reference< rendering::XBitmap >& xBitmap, unsigned char*& data )
+        {
+	    Surface* pSurface = NULL;
+	    Cairo* pCairo = cairoFromXBitmap( xBitmap );
+	    if( pCairo ) {
+		pSurface = cairo_get_target( pCairo );
+		cairo_surface_reference( pSurface );
+		data = NULL;
+	    } else {
+		BitmapEx aBmpEx = bitmapExFromXBitmap(xBitmap);
+		Bitmap aBitmap = aBmpEx.GetBitmap();
+		AlphaMask aAlpha = aBmpEx.GetAlpha();
+
+		BitmapReadAccess*	pBitmapReadAcc = aBitmap.AcquireReadAccess();
+		BitmapReadAccess*	pAlphaReadAcc = aAlpha.AcquireReadAccess();
+
+		const long		nWidth = pBitmapReadAcc->Width();
+		const long		nHeight = pBitmapReadAcc->Height();
+		long nX, nY;
+
+		data = (unsigned char*) malloc( nWidth*nHeight*4 );
+		long nOff = 0;
+		Color aColor;
+		unsigned int nAlpha = 255;
+
+		for( nY = 0; nY < nHeight; nY++ )
+		    for( nX = 0; nX < nWidth; nX++ ) {
+			if( pAlphaReadAcc)
+			    nAlpha = 255 - pAlphaReadAcc->GetColor( nY, nX ).GetBlue();
+			aColor = pBitmapReadAcc->GetColor( nY, nX );
+
+			// cairo need premultiplied color values
+			// TODO(rodo) handle endianess
+			data [nOff++] = ( nAlpha*aColor.GetBlue() )/255;
+			data [nOff++] = ( nAlpha*aColor.GetGreen() )/255;
+			data [nOff++] = ( nAlpha*aColor.GetRed() )/255;
+			data [nOff++] = nAlpha;
+		    }
+
+		pSurface = cairo_image_surface_create_for_data( data, CAIRO_FORMAT_ARGB32, nWidth, nHeight, nWidth*4 );
+	    }
+
+	    return pSurface;
+	}
 
         bool setupFontTransform( ::Point&						o_rPoint,
                                  ::Font& 						io_rVCLFont, 
