@@ -178,7 +178,18 @@ sub version_filter_targets($)
     return @targets;
 }
 
-sub list_patches {
+sub list_patches(@) {
+    my ( @distros ) = @_;
+
+    my @Patches = ();
+    foreach $distro ( @distros ) {
+	@Patches = ( @Patches, list_patches_single( $distro ) );
+    }
+
+    return @Patches;
+}
+
+sub list_patches_single {
 
     sub checkTerminal {
 	my $subsets = shift;
@@ -295,7 +306,7 @@ sub applied_patches_list
 
 sub apply_patches {
 
-    my @Patches = list_patches ($distro);
+    my @Patches = list_patches (@distros);
 
     print "\n" unless $quiet;
 
@@ -389,7 +400,7 @@ sub remove_patches {
 }
 
 sub export_series {
-    my @Patches = list_patches ($distro);
+    my @Patches = list_patches (@distros);
 
     for my $patch (@Patches) {
 	$patch =~ s/^\Q$patch_dir\E\/..\///;
@@ -457,7 +468,7 @@ sub check_for_unused ($$)
 
 (@ARGV > 1) ||
     die "Syntax:\n".
-    "apply <path-to-patchdir> <src root> --tag=<src680-m90> [--distro=Debian] [--quiet] [--dry-run] [ patch flags ]\n" .
+    "apply <path-to-patchdir> <src root> --tag=<src680-m90> [--distro=Debian [--distro=Binfilter [...]]] [--quiet] [--dry-run] [ patch flags ]\n" .
     "apply <path-to-patchdir> --series-to\n" .
     "apply <path-to-patchdir> --find-unused\n";
 
@@ -467,7 +478,7 @@ $quiet = 0;
 $remove = 0;
 $export = 0;
 $opts = "";
-$distro = 'Debian';
+@distros = ();
 $tag = '';
 $dry_run = 0;
 $find_unused = 0;
@@ -483,11 +494,11 @@ foreach $a (@ARGV) {
 	} elsif ($a =~ m/--series-from=(.*)/) {
 	    $export = 1;
 	    $quiet = 1;
-	    $distro = $1;
+	    push @distros, $1;
 	} elsif ($a eq '--quiet') {
 	    $quiet = 1;
 	} elsif ($a =~ m/--distro=(.*)/) {
-	    $distro = $1;
+	    push @distros, $1;
 	} elsif ($a =~ m/--find-unused/) {
 	    $find_unused = 1;
 	} elsif ($a =~ m/--tag=(.*)/) {
@@ -498,16 +509,21 @@ foreach $a (@ARGV) {
 	    push @arguments, $a;
 	}
 }
+
+if ( ! @distros ) {
+    @distros = ( "Debian" );
+}
+
 $patch_dir = shift (@arguments);
 substr ($patch_dir, 0, 1) eq '/' || die "apply.pl requires absolute paths";
 
 $apply_list = $patch_dir.'/apply';
 
-print "Execute with $opts for distro '$distro'\n" unless $quiet;
+print "Execute with $opts for distro(s) '" . join( " ", @distros ) . "'\n" unless $quiet;
 
 if ($dry_run || $find_unused) {
     $tag = '' if ($find_unused);
-    my @Patches = list_patches ($distro);
+    my @Patches = list_patches (@distros);
     if ($find_unused) {
 	check_for_unused ($patch_dir, \@unfiltered_patch_list);
     } else {
