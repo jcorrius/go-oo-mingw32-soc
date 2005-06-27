@@ -7,11 +7,12 @@
 #include <com/sun/star/sheet/XSpreadsheetView.hpp>
 #include <com/sun/star/container/XNamed.hpp>
 
-#include <sfx2/objsh.hxx>
+#include <tools/string.hxx>
 
 #include "vbaglobals.hxx"
 #include "vbaworksheet.hxx"
 #include "vbaworksheets.hxx"
+#include "vbaworkbook.hxx"
 
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
@@ -48,7 +49,7 @@ ScVbaWorksheets::createEnumeration() throw (uno::RuntimeException)
 uno::Any
 ScVbaWorksheets::getParent() throw (uno::RuntimeException)
 {
-	return uno::Any( ScVbaGlobals::get()->getApplication() );
+	return uno::Any( ScVbaGlobals::get()->getApplication()->getActiveWorkbook() );
 }
 ::sal_Int32
 ScVbaWorksheets::getCreator() throw (uno::RuntimeException)
@@ -85,13 +86,23 @@ ScVbaWorksheets::Add( const uno::Any& Before, const uno::Any& After,
 					 const uno::Any& Count, const uno::Any& Type ) throw (uno::RuntimeException)
 {
 	rtl::OUString aStringSheet;
-	Before >>= aStringSheet;
-	sal_Int32 nSheetIndex = -1;
-	sal_Int32 nNewSheets;
-	Count >>= nNewSheets; 
+	sal_Bool bBefore(sal_True);
+	sal_Int32 nSheetIndex;
+	sal_Int32 nNewSheets = 1, nType = 0;
+	Count >>= nNewSheets;
+	Type >>= nType;
 	sal_Int32 nCount = 0;
-
-	//FIXME: Handle 'After' 
+	Before >>= aStringSheet;
+	if (aStringSheet == NULL)
+	{
+		After >>= aStringSheet;
+		bBefore = sal_False;
+	}
+	if (aStringSheet == NULL)
+	{
+		aStringSheet = ScVbaGlobals::get()->getApplication()->getActiveWorkbook()->getActiveSheet()->getName();
+		bBefore = sal_True;
+	}
 	uno::Reference <container::XIndexAccess> xIndex( mxSheets, uno::UNO_QUERY );
 	if ( xIndex.is() )
 	{
@@ -108,24 +119,23 @@ ScVbaWorksheets::Add( const uno::Any& Before, const uno::Any& After,
 		}
 	}
 
-	if(nSheetIndex != -1)
+	if(!bBefore)
+		nSheetIndex++;
+
+	uno::Reference< container::XNameAccess > xNameAccess( mxSheets, uno::UNO_QUERY_THROW );
+	sal_Int32 nSheetName = nCount + 1L;
+	String aStringBase( RTL_CONSTASCII_USTRINGPARAM("Sheet") );				
+	for (sal_Int32 i=0; i < nNewSheets; i++, nSheetName++)
 	{
-		//FIXME: Default index case, if Before/After not specified
-		uno::Reference< container::XNameAccess > xNameAccess( mxSheets, uno::UNO_QUERY_THROW );
-		sal_Int32 nSheetName = nCount + 1L;
-                String aStringBase( RTL_CONSTASCII_USTRINGPARAM("Sheet") );				
-		for (sal_Int32 i=0; i < nNewSheets; i++, nSheetName++)
+		String aStringName = aStringBase;
+		aStringName += String::CreateFromInt32(nSheetName);
+		while (xNameAccess->hasByName(aStringName))
 		{
-			String aStringName = aStringBase;
+			nSheetName++;
+			aStringName = aStringBase;
 			aStringName += String::CreateFromInt32(nSheetName);
-			while (xNameAccess->hasByName(aStringName))
-			{
-				nSheetName++;
-				aStringName = aStringBase;
-				aStringName += String::CreateFromInt32(nSheetName);
-			}
-			mxSheets->insertNewByName(aStringName, nSheetIndex + i);
 		}
+		mxSheets->insertNewByName(aStringName, nSheetIndex + i);
 	}
 	return uno::Any();
 }
