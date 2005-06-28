@@ -66,7 +66,7 @@ using namespace ::cairo;
 
 namespace vclcanvas
 {
-    BackBuffer::BackBuffer( WindowGraphicDevice::ImplRef xGraphicDevice ) : mxGraphicDevice( xGraphicDevice ), mpSurface( NULL ), mpCairo( NULL ), maSize( xGraphicDevice->getSurfaceSize() )
+    BackBuffer::BackBuffer( WindowGraphicDevice::ImplRef xGraphicDevice, Format aFormat ) : mxGraphicDevice( xGraphicDevice ), mpSurface( NULL ), mpCairo( NULL ), maSize( xGraphicDevice->getSurfaceSize() ), maFormat( aFormat )
     {
     }
         
@@ -77,7 +77,7 @@ namespace vclcanvas
 	    maSize = rNewSize;
 	    printf ("back buffer (%p) size: %d x %d\n", this, maSize.Width(), maSize.Height() );
 	    if( mpSurface )
-		setSurface( mxGraphicDevice->getSimilarSurface( maSize ) );
+		createSurface();
 	}
     }
 
@@ -85,19 +85,21 @@ namespace vclcanvas
     {
 	if( !mpSurface ) {
 	    printf ("back buffer size: %d x %d\n", maSize.Width(), maSize.Height() );
-	    setSurface( mxGraphicDevice->getSimilarSurface( maSize ) );
+	    createSurface();
 	}
 	return mpSurface;
     }
 
-    void BackBuffer::setSurface( Surface* pSurface )
+    void BackBuffer::createSurface()
     {
+	Surface* pNewSurface = mxGraphicDevice->getSimilarSurface( maSize, maFormat );
+
 	if( mpSurface )
 	    cairo_surface_destroy( mpSurface );
 	if( mpCairo )
 	    cairo_destroy( mpCairo );
 
-	mpSurface = pSurface;
+	mpSurface = pNewSurface;
 	mpCairo = cairo_create( mpSurface );
     }
 

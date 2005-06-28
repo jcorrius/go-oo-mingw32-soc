@@ -169,16 +169,6 @@ namespace vclcanvas
         // changes, too.
         if( !bUpdateAll && !mbBackgroundDirty )
         {
-	    // limit FPS to 50
-	    // it's hacky, we should handle it better, possibly in impress iteself
-	    // TODO(rodo)
-	    const double denominator( maLastUpdate.getElapsedTime() );
-
-	    if (denominator < 0.02)
-		return;
-
-	    maLastUpdate.reset();
-
             // background has not changed, so we're free to optimize
             // repaint to areas where a sprite has changed
 
@@ -244,18 +234,28 @@ namespace vclcanvas
         {
 	    printf ("redraw manager: update all\n");
 
-	    cairo_set_source_surface( mpCairo, mpBackBuffer->getSurface(), 0, 0 );
-	    cairo_paint( mpCairo );
+	    Surface* pBackingStoreSurface;
 
-            // repaint all active sprites
-            ::std::for_each( maSprites.begin(), 
-                             maSprites.end(), 
-                             SpritePainter( mpCairo ) );
+	    if( maSprites.size() > 0 ) {
+		cairo_save( mpCairo );
+		cairo_set_operator( mpCairo, CAIRO_OPERATOR_SOURCE );
+		cairo_set_source_surface( mpCairo, mpBackBuffer->getSurface(), 0, 0 );
+		cairo_paint( mpCairo );
+		cairo_restore( mpCairo );
+
+		// repaint all active sprites
+		::std::for_each( maSprites.begin(), 
+				 maSprites.end(), 
+				 SpritePainter( mpCairo ) );
+
+		pBackingStoreSurface = mpSurface;
+	    } else
+		pBackingStoreSurface = mpBackBuffer->getSurface();
 
             // flush to screen
 	    Cairo* pCairo = cairo_create( mpWinSurface );
 	    cairo_set_operator( pCairo, CAIRO_OPERATOR_SOURCE );
-	    cairo_set_source_surface( pCairo, mpSurface, 0, 0 );
+	    cairo_set_source_surface( pCairo, pBackingStoreSurface, 0, 0 );
 	    cairo_paint( pCairo );
 	    cairo_destroy( pCairo );
         }
@@ -468,36 +468,36 @@ namespace vclcanvas
         
         const Point aEmptyPoint(0,0);
 
-        if( rComponents.maComponentList.size() < 3 &&
-            ::std::find_if( rComponents.maComponentList.begin(),
-                            rComponents.maComponentList.end(),
-                            ::boost::bind( &isAreaUpdateNotOpaque,
-                                           ::boost::cref(aUpdateArea),
-                                           _1 ) ) == rComponents.maComponentList.end() )
-        {
-            // no more than two sprites, and all opaque - can render
-            // directly to the frontbuffer
+//         if( rComponents.maComponentList.size() < 3 &&
+//             ::std::find_if( rComponents.maComponentList.begin(),
+//                             rComponents.maComponentList.end(),
+//                             ::boost::bind( &isAreaUpdateNotOpaque,
+//                                            ::boost::cref(aUpdateArea),
+//                                            _1 ) ) == rComponents.maComponentList.end() )
+//         {
+//             // no more than two sprites, and all opaque - can render
+//             // directly to the frontbuffer
 
-            // clip output to actual update region (otherwise a)
-            // wouldn't save much render time, and b) might clutter
-            // sprites outside this area)
-	    cairo_save( mpCairo );
- 	    cairo_rectangle( mpCairo, aOutputPosition.X(), aOutputPosition.Y(), aOutputSize.Width(), aOutputSize.Height() );
- 	    cairo_clip( mpCairo );
+//             // clip output to actual update region (otherwise a)
+//             // wouldn't save much render time, and b) might clutter
+//             // sprites outside this area)
+// 	    cairo_save( mpCairo );
+//  	    cairo_rectangle( mpCairo, aOutputPosition.X(), aOutputPosition.Y(), aOutputSize.Width(), aOutputSize.Height() );
+//  	    cairo_clip( mpCairo );
 
-	    Cairo* pCairo = cairo_create( mpWinSurface );
+// 	    Cairo* pCairo = cairo_create( mpWinSurface );
 
-            // paint all affected sprites to update area
-            ::std::for_each( rComponents.maComponentList.begin(),
-                             rComponents.maComponentList.end(),
-                             ::boost::bind( &spriteRedrawStub,
-                                            ::boost::cref(aEmptyPoint),
-                                            mpCairo,
-                                            _1 ) );
+//             // paint all affected sprites to update area
+//             ::std::for_each( rComponents.maComponentList.begin(),
+//                              rComponents.maComponentList.end(),
+//                              ::boost::bind( &spriteRedrawStub,
+//                                             ::boost::cref(aEmptyPoint),
+//                                             mpCairo,
+//                                             _1 ) );
 
-	    cairo_restore( mpCairo );
-        }
-        else
+// 	    cairo_restore( mpCairo );
+//         }
+//         else
         {
 	    cairo_save( mpCairo );
 
@@ -510,10 +510,13 @@ namespace vclcanvas
 // 	    cairo_fill( pCairo );
 // 	    }
 
+	    cairo_save( mpCairo );
 	    cairo_rectangle( mpCairo, aOutputPosition.X(), aOutputPosition.Y(), aOutputSize.Width(), aOutputSize.Height() );
  	    cairo_clip( mpCairo );
+	    cairo_set_operator( mpCairo, CAIRO_OPERATOR_SOURCE );
 	    cairo_set_source_surface( mpCairo, mpBackBuffer->getSurface(), 0, 0 );
 	    cairo_paint( mpCairo );
+	    cairo_restore( mpCairo );
         
             // paint all affected sprites to update area
             ::std::for_each( rComponents.maComponentList.begin(),
@@ -531,11 +534,14 @@ namespace vclcanvas
 
             // flush to screen
 	    Cairo* pCairo = cairo_create( mpWinSurface );
+
+	    cairo_save( mpCairo );
  	    cairo_rectangle( pCairo, aOutputPosition.X(), aOutputPosition.Y(), aOutputSize.Width(), aOutputSize.Height() );
  	    cairo_clip( pCairo );
 	    cairo_set_operator( pCairo, CAIRO_OPERATOR_SOURCE );
  	    cairo_set_source_surface( pCairo, mpSurface, 0, 0 );
  	    cairo_paint( pCairo );
+	    cairo_restore( mpCairo );
 
 	    cairo_destroy( pCairo );
 

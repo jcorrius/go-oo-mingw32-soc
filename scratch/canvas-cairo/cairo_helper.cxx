@@ -14,6 +14,8 @@
 #include <vcl/sysdata.hxx>
 #endif
 
+#define OOO_CANVAS_GLITZ 0
+
 int cairoHelperGetDefaultScreen( void* display )
 {
     return DefaultScreen( ( (Display *) display ) );
@@ -22,7 +24,7 @@ int cairoHelperGetDefaultScreen( void* display )
 void*
 cairoHelperGetGlitzDrawable( const SystemEnvData* pSysData, int width, int height )
 {
-#if 0
+#ifdef OOO_CANVAS_GLITZ
     Display* display = (Display*) pSysData->pDisplay;
     Window window = pSysData->aWindow;
     VisualID vid = XVisualIDFromVisual( (Visual*) pSysData->pVisual );
@@ -57,7 +59,7 @@ cairoHelperGetGlitzDrawable( const SystemEnvData* pSysData, int width, int heigh
 void*
 cairoHelperGetGlitzSurface( const SystemEnvData* pSysData, void *drawable, int x, int y, int width, int height )
 {
-#if 0
+#ifdef OOO_CANVAS_GLITZ
     Display* display = (Display*) pSysData->pDisplay;
     Window window = pSysData->aWindow;
 
@@ -86,21 +88,21 @@ void*
 cairoHelperGetSurface( const SystemEnvData* pSysData, int x, int y, int width, int height )
 {
     cairo_surface_t* pSurface = NULL;
+
+#ifdef OOO_CANVAS_GLITZ
+#ifdef CAIRO_HAS_GLITZ_SURFACE
     glitz_drawable_t* pGlitzDrawable;
     glitz_surface_t* pGlitzSurface;
 
-#if 0
-#ifdef CAIRO_HAS_GLITZ_SURFACE
     printf ("try to create glitz surface %d x %d\n", width, height );
-    pGlitzDrawable = (glitz_drawable_t*) cairoHelperGetGlitzDrawable( mpSysData, width, height );
+    pGlitzDrawable = (glitz_drawable_t*) cairoHelperGetGlitzDrawable( pSysData, width, height );
 
     if( pGlitzDrawable )
-	pGlitzSurface = (glitz_surface_t*) cairoHelperGetGlitzSurface( mpSysData, mpGlitzDrawable, x, y, width, height );
+	pGlitzSurface = (glitz_surface_t*) cairoHelperGetGlitzSurface( pSysData, pGlitzDrawable, x, y, width, height );
 
     if( pGlitzSurface )
-	pSurface = cairo_glitz_surface_create( mpGlitzSurface );
+	pSurface = cairo_glitz_surface_create( pGlitzSurface );
 
-    printf ("mpGlitzSurface %p surface %p\n", pGlitzSurface, pWindowSurface);
 #endif
 #endif
     if( !pSurface ) {
@@ -112,4 +114,10 @@ cairoHelperGetSurface( const SystemEnvData* pSysData, int x, int y, int width, i
     }
 
     return pSurface;
+}
+
+void
+cairoHelperFlush( const SystemEnvData* pSysData )
+{
+    XSync( (Display*) pSysData->pDisplay, false );
 }

@@ -6,3 +6,4 @@ int cairoHelperGetDefaultScreen( void* display );
 void* cairoHelperGetGlitzDrawable( const SystemEnvData* pSysData, int width, int height );
 void* cairoHelperGetGlitzSurface( const SystemEnvData* pSysData, void *drawable, int x, int y, int width, int height );
 void* cairoHelperGetSurface( const SystemEnvData* pSysData, int x, int y, int width, int height );
+void  cairoHelperFlush( const SystemEnvData* pSysData );

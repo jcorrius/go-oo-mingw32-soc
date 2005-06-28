@@ -443,7 +443,7 @@ namespace vclcanvas
 	    return mpWindowSurface;
     	}
 	printf( "called WindowGraphicDevice::getSurface(size) - creating similar surface\n" );
-	return cairo_surface_create_similar( mpWindowSurface, CAIRO_FORMAT_ARGB32, aSize.Width(), aSize.Height() );
+	return cairo_surface_create_similar( mpWindowSurface, CAIRO_FORMAT_RGB24, aSize.Width(), aSize.Height() );
     }
 
     Size WindowGraphicDevice::getSurfaceSize()
@@ -457,14 +457,19 @@ namespace vclcanvas
 	return getSurface( getSurfaceSize() );
     }
 
-    Surface* WindowGraphicDevice::getSimilarSurface( Size aSize )
+    Surface* WindowGraphicDevice::getSimilarSurface( Size aSize, Format aFormat )
     {
 	printf( "called WindowGraphicDevice::getSimilarSurface %d x %d\n", aSize.Width(), aSize.Height() );
-	return cairo_surface_create_similar( getSurface(), CAIRO_FORMAT_ARGB32, aSize.Width(), aSize.Height() );
+	return cairo_surface_create_similar( getSurface(), aFormat, aSize.Width(), aSize.Height() );
     }
 
-    Surface* WindowGraphicDevice::getSimilarSurface()
+    Surface* WindowGraphicDevice::getSimilarSurface( Format aFormat )
     {
-	return getSimilarSurface( getSurfaceSize() );
+	return getSimilarSurface( getSurfaceSize(), aFormat );
+    }
+
+    void WindowGraphicDevice::flush()
+    {
+	cairoHelperFlush( mpSysData );
     }
 }

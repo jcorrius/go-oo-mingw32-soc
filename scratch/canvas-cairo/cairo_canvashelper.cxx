@@ -576,7 +576,7 @@ namespace vclcanvas
         {
             // TODO(F2): font properties and font matrix
             return uno::Reference< rendering::XCanvasFont >(
-                    new CanvasFont(fontRequest, extraFontProperties, fontMatrix) );
+                    new CanvasFont( fontRequest, extraFontProperties, fontMatrix, mpCairo ) );
         }
 
         return uno::Reference< rendering::XCanvasFont >();

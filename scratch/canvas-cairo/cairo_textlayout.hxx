@@ -98,7 +98,8 @@ namespace vclcanvas
         TextLayout( const ::com::sun::star::rendering::StringContext& 	aText, 
                     sal_Int8                                                  	nDirection, 
                     sal_Int64                                                 	nRandomSeed,
-                    const CanvasFont::ImplRef&                                	rFont );
+                    const CanvasFont::ImplRef&                               	        rFont,
+		    ::cairo::Cairo*                                             pCairo );
 
         /// Dispose all internal references
         virtual void SAL_CALL disposing();
@@ -127,7 +128,7 @@ namespace vclcanvas
         virtual sal_Bool SAL_CALL supportsService( const ::rtl::OUString& ServiceName ) throw( ::com::sun::star::uno::RuntimeException );
         virtual ::com::sun::star::uno::Sequence< ::rtl::OUString > SAL_CALL getSupportedServiceNames()  throw( ::com::sun::star::uno::RuntimeException );
 
-        bool draw( ::cairo::Cairo*                                 pCairo ) const;
+        bool draw( ::cairo::Cairo*                                 pCairo );
 
     protected:
         ~TextLayout(); // we're a ref-counted UNO class. _We_ destroy ourselves.
@@ -142,10 +143,13 @@ namespace vclcanvas
                                const ::com::sun::star::rendering::ViewState& 	viewState, 
                                const ::com::sun::star::rendering::RenderState& 	renderState		) const;
 
+	void useFont( ::cairo::Cairo* pCairo );
+
         ::com::sun::star::rendering::StringContext maText;
         ::com::sun::star::uno::Sequence< double >          maLogicalAdvancements;
         CanvasFont::ImplRef                                mpFont;
         sal_Int8                                           mnTextDirection;
+	::cairo::Cairo* mpCairo;
     };
 
 }

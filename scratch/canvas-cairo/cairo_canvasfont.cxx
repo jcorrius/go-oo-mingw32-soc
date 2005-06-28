@@ -77,18 +77,20 @@
 #include "cairo_textlayout.hxx"
 
 using namespace ::com::sun::star;
-
+using namespace ::cairo;
 
 namespace vclcanvas
 {
     CanvasFont::CanvasFont( const rendering::FontRequest& 					rFontRequest,
-                            const uno::Sequence< beans::PropertyValue >& 	rExtraFontProperties, 
-                            const geometry::Matrix2D& 						rFontMatrix) :
+                            const uno::Sequence< beans::PropertyValue >& 	                rExtraFontProperties, 
+                            const geometry::Matrix2D& 						rFontMatrix,
+			    Cairo*                                                              pCairo) :
         CanvasFont_Base( m_aMutex ),
         maFont( Font( rFontRequest.FontDescription.FamilyName,
                       rFontRequest.FontDescription.StyleName,
                       Size( 0, ::basegfx::fround(rFontRequest.CellSize) ) ) ),
-        maFontRequest( rFontRequest )
+        maFontRequest( rFontRequest ),
+	mpCairo( pCairo )
     {
         maFont->SetAlign( ALIGN_BASELINE );
         maFont->SetCharSet( (rFontRequest.FontDescription.IsSymbolFont==com::sun::star::util::TriState_YES) ? RTL_TEXTENCODING_SYMBOL : RTL_TEXTENCODING_UNICODE );
@@ -129,7 +131,7 @@ namespace vclcanvas
     {
         tools::LocalGuard aGuard;
 
-        return new TextLayout( aText, nDirection, nRandomSeed, ImplRef( this ) );
+        return new TextLayout( aText, nDirection, nRandomSeed, ImplRef( this ), mpCairo );
     }
 
     rendering::FontRequest SAL_CALL  CanvasFont::getFontRequest(  ) throw (uno::RuntimeException)

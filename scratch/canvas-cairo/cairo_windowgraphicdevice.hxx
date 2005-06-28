@@ -177,8 +177,10 @@ namespace vclcanvas
         ::cairo::Surface* getSurface();
         ::cairo::Surface* getSurface( Size aSize );
 
-        ::cairo::Surface* getSimilarSurface();
-        ::cairo::Surface* getSimilarSurface( Size aSize );
+        ::cairo::Surface* getSimilarSurface( ::cairo::Format aFormat = ::cairo::CAIRO_FORMAT_ARGB32 );
+        ::cairo::Surface* getSimilarSurface( Size aSize, ::cairo::Format aFormat = ::cairo::CAIRO_FORMAT_ARGB32 );
+
+	void flush();
 
     protected:
         ~WindowGraphicDevice(); // we're a ref-counted UNO class. _We_ destroy ourselves.

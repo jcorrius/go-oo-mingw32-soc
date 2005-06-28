@@ -231,8 +231,7 @@ namespace vclcanvas
         }
         
         mpRedrawManager->updateScreen( bUpdateAll );
-
-	//mxDevice->flush();
+	mxDevice->flush();
 
         // commit to screen
         // rodo maCanvasHelper.flush();
@@ -283,7 +282,7 @@ namespace vclcanvas
             maCanvasHelper.setGraphicDevice( mxDevice );
 
             // setup back buffer
-            mpBackBuffer.reset( new BackBuffer( mxDevice ) );
+            mpBackBuffer.reset( new BackBuffer( mxDevice, ::cairo::CAIRO_FORMAT_RGB24 ) );
             mpBackBuffer->setSize( pOutputWindow->GetOutputSizePixel() );
            
             // always render into back buffer, don't preserve state

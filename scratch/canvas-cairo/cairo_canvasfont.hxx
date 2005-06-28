@@ -87,6 +87,7 @@
 
 #include <canvas/vclwrapper.hxx>
 
+#include "cairo_cairo.hxx"
 #include "cairo_canvashelper.hxx"
 #include "cairo_impltools.hxx"
 
@@ -107,9 +108,10 @@ namespace vclcanvas
             CanvasFont,
             ::com::sun::star::rendering::XCanvasFont > ImplRef;
 
-        CanvasFont( const ::com::sun::star::rendering::FontRequest& 								fontRequest,
-                    const ::com::sun::star::uno::Sequence< ::com::sun::star::beans::PropertyValue >& 		extraFontProperties, 
-                    const ::com::sun::star::geometry::Matrix2D&										rFontMatrix );
+        CanvasFont( const ::com::sun::star::rendering::FontRequest& 					  fontRequest,
+                    const ::com::sun::star::uno::Sequence< ::com::sun::star::beans::PropertyValue >& 	  extraFontProperties, 
+                    const ::com::sun::star::geometry::Matrix2D&						  rFontMatrix,
+		    ::cairo::Cairo*                                                                       pCairo );
 
         /// Dispose all internal references
         virtual void SAL_CALL disposing();
@@ -138,6 +140,8 @@ namespace vclcanvas
 
         ::canvas::vcltools::VCLObject<Font>					maFont;
         ::com::sun::star::rendering::FontRequest	maFontRequest;
+
+	::cairo::Cairo* mpCairo;
     };
 
 }

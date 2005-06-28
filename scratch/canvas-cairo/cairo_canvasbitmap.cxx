@@ -88,7 +88,7 @@ namespace vclcanvas
         OutputDevice& 			 rOutDev( *rDevice->getOutDev() );
         tools::OutDevStateKeeper aStateKeeper( rOutDev );
 
-	mpCairo = cairo_create( xDevice->getSimilarSurface(rSize) );
+	mpCairo = cairo_create( xDevice->getSimilarSurface( rSize, CAIRO_FORMAT_RGB24 ) );
 	maCanvasHelper.setCairo( mpCairo );
 
         // create bitmap for given reference device
@@ -148,7 +148,7 @@ namespace vclcanvas
 
 	WindowGraphicDevice::ImplRef xDevice = rDevice;
 
-	mpCairo = cairo_create( xDevice->getSimilarSurface() );
+	mpCairo = cairo_create( xDevice->getSimilarSurface( CAIRO_FORMAT_RGB24 ) );
 
 	maCanvasHelper.setCairo( mpCairo );
         maCanvasHelper.setBitmap( rBitmap,

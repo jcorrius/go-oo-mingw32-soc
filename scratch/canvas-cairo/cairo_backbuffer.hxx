@@ -74,7 +74,8 @@ namespace vclcanvas
 	class BackBuffer
     {
     public:
-        BackBuffer( WindowGraphicDevice::ImplRef xGraphicDevice );
+        BackBuffer( WindowGraphicDevice::ImplRef xGraphicDevice,
+		    ::cairo::Format aFormat = ::cairo::CAIRO_FORMAT_ARGB32 );
         
 	Size getSize();
         void setSize( const ::Size& rNewSize );
@@ -82,12 +83,13 @@ namespace vclcanvas
 	::cairo::Cairo* getCairo();
         
     private:
-	void setSurface( ::cairo::Surface* pSurface );
+	void createSurface();
 
 	WindowGraphicDevice::ImplRef mxGraphicDevice;
 	Size maSize;
 	::cairo::Surface* mpSurface;
 	::cairo::Cairo* mpCairo;
+	::cairo::Format maFormat;
     };
 
     typedef ::boost::shared_ptr< BackBuffer > BackBufferSharedPtr;

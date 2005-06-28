@@ -9,6 +9,7 @@ namespace cairo {
 typedef cairo_surface_t Surface;
 typedef cairo_t Cairo;
 typedef cairo_matrix_t Matrix;
+typedef cairo_format_t Format;
 
 }
 

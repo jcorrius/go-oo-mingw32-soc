@@ -127,17 +127,21 @@ namespace vclcanvas
     TextLayout::TextLayout( const rendering::StringContext& aText,
                             sal_Int8                        nDirection,
                             sal_Int64                       nRandomSeed,
-                            const CanvasFont::ImplRef&      rFont ) :
+                            const CanvasFont::ImplRef&      rFont,
+			    Cairo*                          pCairo) :
         TextLayout_Base( m_aMutex ),
         maText( aText ),
         maLogicalAdvancements(),
         mpFont( rFont ),
-        mnTextDirection( nDirection )
+        mnTextDirection( nDirection ),
+	mpCairo( pCairo )
     {
+	cairo_reference( mpCairo );
     }
 
     TextLayout::~TextLayout()
     {
+	cairo_destroy( mpCairo );
     }
 
     void SAL_CALL TextLayout::disposing()
@@ -193,33 +197,39 @@ namespace vclcanvas
     {
         tools::LocalGuard aGuard;
 
-        // need metrics for Y offset, the XCanvas always renders
-        // relative to baseline
-	// TODO(rodo)
-//         const ::FontMetric& aMetric( aVDev.GetFontMetric() );
+	geometry::RealRectangle2D aBounds( 0, 0, 0, 0 );
 
-//         setupLayoutMode( aVDev, mnTextDirection );
+// TODO(rodo)
+// 	if( maLogicalAdvancements.getLength() ) {
+// 	    cairo_save( mpCairo );
+// 	    useFont( mpCairo );
+// 	    cairo_font_extents_t aFontExtents;
+// 	    cairo_font_extents( mpCairo, &aFontExtents );
+// 	    cairo_restore( mpCairo );
 
-//         const sal_Int32 nAboveBaseline( -aMetric.GetIntLeading() - aMetric.GetAscent() );
-//         const sal_Int32 nBelowBaseline( aMetric.GetDescent() );
+// 	    aBounds = geometry::RealRectangle2D( 0, -aFontExtents.ascent,
+// 						 maLogicalAdvancements[ maLogicalAdvancements.getLength()-1 ],
+// 						 aFontExtents.descent );
+// 	} else {
 
-//         if( maLogicalAdvancements.getLength() )
-//         {
-//             return geometry::RealRectangle2D( 0, nAboveBaseline,
-//                                               maLogicalAdvancements[ maLogicalAdvancements.getLength()-1 ],
-//                                               nBelowBaseline );
-//         }
-//         else
-//         {
-//             return geometry::RealRectangle2D( 0, nAboveBaseline,
-//                                               aVDev.GetTextWidth(
-//                                                   maText.Text,
-//                                                   ::canvas::tools::numeric_cast<USHORT>(maText.StartPosition),
-//                                                   ::canvas::tools::numeric_cast<USHORT>(maText.Length) ),
-//                                               nBelowBaseline );
-//         }
+	    cairo_save( mpCairo );
 
-            return geometry::RealRectangle2D( 0, 0, 0, 0);
+	    ::rtl::OUString aSubText = maText.Text.copy( maText.StartPosition, maText.Length );
+	    ::rtl::OString aUTF8String = ::rtl::OUStringToOString( aSubText, RTL_TEXTENCODING_UTF8 );
+
+	    useFont( mpCairo );
+
+	    cairo_font_extents_t aFontExtents;
+	    cairo_font_extents( mpCairo, &aFontExtents );
+	    cairo_text_extents_t aTextExtents;
+	    cairo_text_extents( mpCairo, aUTF8String, &aTextExtents );
+	    cairo_restore( mpCairo );
+
+	    aBounds = geometry::RealRectangle2D( aTextExtents.x_bearing, -aFontExtents.ascent,
+						 aTextExtents.x_bearing + aTextExtents.width, aFontExtents.descent );
+// 	}
+
+	return aBounds;
     }
 
     double SAL_CALL TextLayout::justify( double nSize ) throw (lang::IllegalArgumentException, uno::RuntimeException)
@@ -307,37 +317,27 @@ namespace vclcanvas
         return maText;
     }
 
-    bool TextLayout::draw( Cairo*                        pCairo ) const
+    void TextLayout::useFont( Cairo* pCairo )
+    {
+	rendering::FontRequest aFontRequest = mpFont->getFontRequest();
+	rendering::FontInfo aFontInfo = aFontRequest.FontDescription;
+	
+	cairo_select_font_face( pCairo, ::rtl::OUStringToOString( aFontInfo.FamilyName, RTL_TEXTENCODING_UTF8 ), CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL );
+	cairo_set_font_size( pCairo, aFontRequest.CellSize );
+    }
+
+    bool TextLayout::draw( Cairo* pCairo )
     {
         tools::LocalGuard aGuard;
 
-	cairo_select_font_face( pCairo, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL );
-	cairo_show_text( pCairo, ::rtl::OUStringToOString( maText.Text, RTL_TEXTENCODING_UTF8 ) );
+	::rtl::OUString aSubText = maText.Text.copy( maText.StartPosition, maText.Length );
+	::rtl::OString aUTF8String = ::rtl::OUStringToOString( aSubText, RTL_TEXTENCODING_UTF8 );
 
-//         setupLayoutMode( rOutDev, mnTextDirection );
 
-//         if( maLogicalAdvancements.getLength() )
-//         {
-//             // TODO(P2): cache that
-//             ::boost::scoped_array< long > aOffsets(new long[maLogicalAdvancements.getLength()]);
-//             setupTextOffsets( aOffsets.get(), maLogicalAdvancements, viewState, renderState );
-            
-//             // TODO(F3): ensure correct length and termination for DX
-//             // array (last entry _must_ contain the overall width)
-            
-//             rOutDev.DrawTextArray( rOutpos,
-//                                    maText.Text,
-//                                    aOffsets.get(),
-//                                    ::canvas::tools::numeric_cast<USHORT>(maText.StartPosition),
-//                                    ::canvas::tools::numeric_cast<USHORT>(maText.Length) );
-//         }
-//         else
-//         {
-//             rOutDev.DrawText( rOutpos,
-//                               maText.Text,
-//                               ::canvas::tools::numeric_cast<USHORT>(maText.StartPosition),
-//                               ::canvas::tools::numeric_cast<USHORT>(maText.Length) );
-//         }
+	cairo_save( pCairo );
+	useFont( pCairo );
+	cairo_show_text( pCairo, aUTF8String );
+	cairo_restore( pCairo );
 
         return true;
     }
