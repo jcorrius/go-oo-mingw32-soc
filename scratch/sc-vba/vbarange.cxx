@@ -20,10 +20,11 @@
 #include <com/sun/star/sheet/XArrayFormulaRange.hpp>
 #include <com/sun/star/beans/XPropertySet.hpp>
 #include <com/sun/star/sheet/XFunctionAccess.hpp>
-#include <org/openoffice/vba/XFont.hpp>
+#include <com/sun/star/frame/XModel.hpp>
+#include <com/sun/star/view/XSelectionSupplier.hpp>
+#include <com/sun/star/table/XCellCursor.hpp>
 
 #include "vbarange.hxx"
-#include "vbafont.hxx"
 
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
@@ -245,13 +246,6 @@ ScVbaRange::Characters(long nIndex, long nCount) throw (uno::RuntimeException)
 	return rString.copy( --nIndex, nCount ); // Zero value indexing
 }
     
-uno::Reference < vba::XFont >
-ScVbaRange::Font() throw (uno::RuntimeException)
-{
-	uno::Reference< beans::XPropertySet > xProps(mxRange, ::uno::UNO_QUERY );
-	return uno::Reference< vba::XFont >( new ScVbaFont( xProps ) );
-}
-
 ::rtl::OUString
 ScVbaRange::Address() throw (uno::RuntimeException)
 {
@@ -288,4 +282,38 @@ ScVbaRange::Address() throw (uno::RuntimeException)
     uno::Any aString2 = xFunctionAccess->callFunction(rtl::OUString(RTL_CONSTASCII_USTRINGPARAM("ADDRESS")), aAddrArray2);
 	aString2 >>= aEnd;
 	return aStart.concat( aEnd );
-} 
+}
+
+uno::Reference< vba::XRange >
+ScVbaRange::Cells( const uno::Any &nRowIndex, const uno::Any &nColumnIndex ) throw(uno::RuntimeException)
+{
+	long nRow = 0, nCol = 0;
+	sal_Bool bIsIndex =	nRowIndex >>= nRow, bIsColumnIndex = nColumnIndex >>= nCol;
+	if( !bIsIndex && !bIsColumnIndex ) // .Cells
+		return uno::Reference< vba::XRange >( new ScVbaRange( mxRange ) );
+	if( bIsIndex && !bIsColumnIndex ) // .Cells(n)
+	{
+		int nIndex = nRow;
+	    uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, ::uno::UNO_QUERY);
+		int nColCount = xColumnRowRange->getColumns()->getCount();
+        nRow = nIndex / nColCount;
+		nCol = nIndex % nColCount;
+	}
+	return uno::Reference< vba::XRange >( new ScVbaRange( mxRange->getCellRangeByPosition( nCol, nRow, nCol, nRow ) ) );
+}
+
+void
+ScVbaRange::Select() throw (uno::RuntimeException)
+{
+	sal_Bool bSelect;
+	SfxObjectShell* pDoc = SfxObjectShell::Current();
+    uno::Reference< frame::XModel > xModel;
+                                                                                                                             
+    if( pDoc )
+        xModel = pDoc->GetModel();
+
+	uno::Reference< view::XSelectionSupplier > xSelection( xModel->getCurrentController(), uno::UNO_QUERY);
+	bSelect = xSelection->select( ( uno::Any )mxRange );
+}
+
+	
