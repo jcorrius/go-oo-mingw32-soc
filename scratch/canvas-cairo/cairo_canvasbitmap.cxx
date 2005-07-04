@@ -101,7 +101,7 @@ namespace vclcanvas
 
 	cairo_save( mpCairo );
 	cairo_set_source_surface( mpCairo, pSrcSurface, 0, 0 );
-	cairo__scale( mpCairo, rSize.Width/aSrcSize.Width, rSize.Height/aSrcSize.Height );
+	cairo_scale( mpCairo, rSize.Width/aSrcSize.Width, rSize.Height/aSrcSize.Height );
 	cairo_set_operator( mpCairo, CAIRO_OPERATOR_SOURCE );
 	cairo_paint( mpCairo );
 	cairo_restore( mpCairo );
