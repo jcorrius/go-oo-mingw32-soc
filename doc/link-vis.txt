@@ -226,4 +226,186 @@ public:
     + Fix 'ld -Bsymbolic' to use weakness too...
     + get a nice run-time test of that ...
 	+ bfd/elf32-i386.c '->symbolic' usage
+	    + this is just an incidental usage - not the filtering
 
+'w' == (bfd/syms.c:) (type & BSF_WEAK) ? 'w' : ' ', on an 'asymbol'
+
+We need to hack elflink.c: 
+   _bfd_elf_symbol_refs_local_p (struct elf_link_hash_entry *h,
+   + Unfortunately 'h' points to the relocation itself seemingly
+	+ all of STT_OBJECT
+	+ => need to de-ref the symbol name to get the real data ...
+
+   + This function called from SYMBOL_REFERENCES_LOCAL
+        ... potentially has:
+	    + input_bfd, output_bfd, bfd_link_info *info,
+	    + input_section, contents, relocs, local_syms,
+	    + local_sections
+Called from:
+    elf_i386_relocate_section ...
+
+
+** How the (correct)BSF_WEAK flag gets set:
+
+elfcode.h (elf_slurp_symbol_table):
+  Elf_Internal_Sym *isym;
+  isym = bfd_elf_get_elf_syms
+	  switch (ELF_ST_BIND (isym->st_info))
+	    case STB_WEAK:
+	      sym->symbol.flags |= BSF_WEAK;
+
+   isym from:
+   -> elf.c (bfd_elf_get_elf_syms): read/convert symbols to internal format
+	-> read with elfcode.h (elf_swap_symbol_in)
+	
+
+
+static bfd_boolean
+elf_i386_relocate_section (bfd *output_bfd,
+			   struct bfd_link_info *info,
+			   bfd *input_bfd,
+			   asection *input_section,
+			   bfd_byte *contents,
+			   Elf_Internal_Rela *relocs,
+			   Elf_Internal_Sym *local_syms,
+			   asection **local_sections)
+
+called from: elflink.c (elf_link_input_bfd)
+
+
+  /* The RELOCATE_SECTION function is called by the ELF backend linker
+     to handle the relocations for a section.
+
+     The relocs are always passed as Rela structures; if the section
+     actually uses Rel structures, the r_addend field will always be
+     zero.
+
+     This function is responsible for adjust the section contents as
+     necessary, and (if using Rela relocs and generating a
+     relocatable output file) adjusting the reloc addend as
+     necessary.
+
+     This function does not have to worry about setting the reloc
+     address or the reloc symbol index.
+
+     LOCAL_SYMS is a pointer to the swapped in local symbols.
+
+     LOCAL_SECTIONS is an array giving the section in the input file
+     corresponding to the st_shndx field of each local symbol.
+
+     The global hash table entry for the global symbols can be found
+     via elf_sym_hashes (input_bfd).
+
+     When generating relocatable output, this function must handle
+     STB_LOCAL/STT_SECTION symbols specially.  The output symbol is
+     going to be the section symbol corresponding to the output
+     section, which means that the addend must be adjusted
+     accordingly.  */
+
+Dumping the contents of LOCAL_SYMS - we get:
+
+fprintf( stderr, "Process reloc %2d 0x%2x 0x%2x '%s'\n",
+	 rel - relocs, 
+	 sym->st_info, sym->st_other,
+	 h->root.root.string );
+
+Process reloc  1 0x 3 0x 0 'typeinfo name for SubClass'
+Process reloc  2 0x 3 0x 0 'typeinfo for BaseClass'
+Process reloc  0 0x 0 0x 0 'typeinfo for SubClass'
+Process reloc  1 0x 3 0x 0 'SubClass::doFoo()'
+Process reloc  0 0x 3 0x 0 '__i686.get_pc_thunk.bx'
+Process reloc  1 0x 3 0x 0 '_GLOBAL_OFFSET_TABLE_'
+Process reloc  2 0x 3 0x 0 'BaseClass::BaseClass()'
+Process reloc  3 0x 3 0x 0 'vtable for SubClass'
+Process reloc  0 0x 3 0x 0 'DW.ref._ZTI11MyException'
+Process reloc  1 0x 3 0x 0 'DW.ref._ZTI11MyException'
+Process reloc  0 0x 3 0x 0 'vtable for __cxxabiv1::__class_type_info'
+Process reloc  1 0x 3 0x 0 'typeinfo name for MyException'
+Process reloc  0 0x 3 0x 0 'DW.ref.__gxx_personality_v0'
+Process reloc  0 0x 3 0x 0 '__gxx_personality_v0'
+Process reloc  0 0x 3 0x 0 'typeinfo for MyException'
+Process reloc  0 0x 4 0x 0 '__i686.get_pc_thunk.bx'
+Process reloc  1 0x 3 0x 0 '_GLOBAL_OFFSET_TABLE_'
+Process reloc  2 0x 3 0x 0 '__fini_array_end'
+Process reloc  3 0x 3 0x 0 '__fini_array_start'
+Process reloc  4 0x 3 0x 0 '_fini'
+Process reloc  5 0x 3 0x 0 '_fini'
+Process reloc  6 0x 4 0x 0 '__i686.get_pc_thunk.bx'
+Process reloc  7 0x 3 0x 0 '_GLOBAL_OFFSET_TABLE_'
+Process reloc  8 0x 3 0x 0 '_init'
+Process reloc  9 0x 3 0x 0 '__init_array_end'
+Process reloc 10 0x 3 0x 0 '__init_array_start'
+
+#define ELF_ST_INFO(bind,type)		(((bind) << 4) + ((type) & 0xF))
+an st_info of 3 means: 
+STB_LOCAL |
+#define STT_SECTION	3		/* Symbol associated with a section */
+#define STT_FILE	4		/* Symbol gives a file name */
+
+	Looks pretty broken [!]
+
+
+elflink.c (elf_link_input_bfd):
+    the 'symbols' data here - is just section names /
+    data for them. ie. irrelevant nonsense.
+
+	+ the bfd_elf_get_elf_syms seems to split the syms into
+	  finfo->internal_syms / external_syms / locsym_shndx etc.
+
+** In the .o file - each function is in a separate section
+
+Very odd oddness: adding debug:
+
+** bfd_elf_get_elf_syms ** 1 syms from file 'lib.o' section '.symtab'
+Symbol typeinfo for BaseClass(0x21, 0x 0)
+** bfd_elf_get_elf_syms ** 1 syms from file 'lib.o' section '.symtab'
+Symbol typeinfo name for BaseClass(0x21, 0x 0)
+** bfd_elf_get_elf_syms ** 1 syms from file 'lib.o' section '.symtab'
+Symbol vtable for BaseClass(0x21, 0x 0)
+** bfd_elf_get_elf_syms ** 1 syms from file 'lib.o' section '.symtab'
+Symbol typeinfo for MyException(0x21, 0x 0)
+
+followed by:
+
+** bfd_elf_get_elf_syms ** 20 syms from file 'lib.o' section '.symtab'
+Symbol typeinfo for BaseClass(0x21, 0x 0)
+Symbol vtable for __cxxabiv1::__class_type_info(0x10, 0x 0)
+Symbol typeinfo name for BaseClass(0x21, 0x 0)
+Symbol vtable for BaseClass(0x21, 0x 0)
+Symbol BaseClass::doFoo()    (0x12, 0x 0)
+Symbol typeinfo for MyException(0x21, 0x 0)
+Symbol typeinfo name for MyException(0x21, 0x 0)
+Symbol BaseClass::BaseClass()(0x12, 0x 0)
+Symbol __i686.get_pc_thunk.cx (0x12, 0x 2)
+Symbol _GLOBAL_OFFSET_TABLE_ (0x10, 0x 0)
+Symbol BaseClass::BaseClass()(0x12, 0x 0)
+Symbol MyException::MyException()(0x12, 0x 0)
+Symbol __i686.get_pc_thunk.bx (0x12, 0x 2)
+Symbol stderr (0x10, 0x 0)
+Symbol fprintf (0x10, 0x 0)
+
+Very odd - same file, same 'section' - but reading
+very different stuff; some different hdr type or somesuch ?
+
+subsequently we have:
+
+** bfd_elf_get_elf_syms ** 33 syms from file 'lib.o' section '.symtab'
+Symbol  (0x 0, 0x 0)
+Symbol lib.cxx (0x 4, 0x 0)
+Symbol .text (0x 3, 0x 0)
+Symbol .data (0x 3, 0x 0)
+Symbol .bss (0x 3, 0x 0)
+Symbol .debug_abbrev (0x 3, 0x 0)
+Symbol .debug_info (0x 3, 0x 0)
+Symbol .debug_line (0x 3, 0x 0)
+Symbol .gnu.linkonce.d._ZTI9BaseClass (0x 3, 0x 0)
+Symbol .gnu.linkonce.r._ZTS9BaseClass (0x 3, 0x 0)
+Symbol .gnu.linkonce.d._ZTV9BaseClass (0x 3, 0x 0)
+Symbol .gnu.linkonce.d._ZTI11MyException (0x 3, 0x 0)
+Symbol .gnu.linkonce.r._ZTS11MyException (0x 3, 0x 0)
+
+- ie. completely broken symbol / flags again (or at least per-section flags).
+
+TODO: dump the 'sh_offset' file offset data as well [!?]
+      + start printing 'dynindx' and 'indx' to get 'real' symbol offsets ?
+	    + look those up to get real weak/strong foo ?
