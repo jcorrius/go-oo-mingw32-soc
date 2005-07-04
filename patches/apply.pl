@@ -138,6 +138,8 @@ sub rules_pass($)
     while ($rule ne '') {
 	my $lastrule = $rule;
 #	print "verify rule '$rule'\n";
+	# equal to (==)
+	if ($rule =~ s/\=\=\s*(\S+)// && milestone_cmp ($tag, $1) != 0 ) { return 0; }; 
 	# less than or equal (<=)
 	if ($rule =~ s/\<=\s*(\S+)// && milestone_cmp ($tag, $1) > 0 ) { return 0; };
 	# less than (<)
