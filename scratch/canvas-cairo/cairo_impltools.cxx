@@ -236,7 +236,7 @@ namespace vclcanvas
             return ::BitmapEx();
         }
 
-        Surface* surfaceFromXBitmap( const uno::Reference< rendering::XBitmap >& xBitmap, unsigned char*& data )
+        Surface* surfaceFromXBitmap( const uno::Reference< rendering::XBitmap >& xBitmap, const WindowGraphicDevice::ImplRef& rDevice, unsigned char*& data )
         {
 	    Surface* pSurface = NULL;
 	    Cairo* pCairo = cairoFromXBitmap( xBitmap );
@@ -249,33 +249,45 @@ namespace vclcanvas
 		Bitmap aBitmap = aBmpEx.GetBitmap();
 		AlphaMask aAlpha = aBmpEx.GetAlpha();
 
-		BitmapReadAccess*	pBitmapReadAcc = aBitmap.AcquireReadAccess();
-		BitmapReadAccess*	pAlphaReadAcc = aAlpha.AcquireReadAccess();
+		// there's no pixmap for alpha bitmap. we might still
+		// use rgb pixmap and only access alpha pixels the
+		// slow way. now we just speedup rgb bitmaps
+		if( !aBmpEx.IsTransparent() && !aBmpEx.IsAlpha() ) {
+		    WindowGraphicDevice::ImplRef xDevice = rDevice;
+		    pSurface = xDevice->getSurface( aBitmap );
+		    data = NULL;
+		}
 
-		const long		nWidth = pBitmapReadAcc->Width();
-		const long		nHeight = pBitmapReadAcc->Height();
-		long nX, nY;
+		if( !pSurface ) {
 
-		data = (unsigned char*) malloc( nWidth*nHeight*4 );
-		long nOff = 0;
-		Color aColor;
-		unsigned int nAlpha = 255;
+		    BitmapReadAccess*	pBitmapReadAcc = aBitmap.AcquireReadAccess();
+		    BitmapReadAccess*	pAlphaReadAcc = aAlpha.AcquireReadAccess();
 
-		for( nY = 0; nY < nHeight; nY++ )
-		    for( nX = 0; nX < nWidth; nX++ ) {
-			if( pAlphaReadAcc)
-			    nAlpha = 255 - pAlphaReadAcc->GetColor( nY, nX ).GetBlue();
-			aColor = pBitmapReadAcc->GetColor( nY, nX );
+		    const long		nWidth = pBitmapReadAcc->Width();
+		    const long		nHeight = pBitmapReadAcc->Height();
+		    long nX, nY;
 
-			// cairo need premultiplied color values
-			// TODO(rodo) handle endianess
-			data [nOff++] = ( nAlpha*aColor.GetBlue() )/255;
-			data [nOff++] = ( nAlpha*aColor.GetGreen() )/255;
-			data [nOff++] = ( nAlpha*aColor.GetRed() )/255;
-			data [nOff++] = nAlpha;
-		    }
+		    data = (unsigned char*) malloc( nWidth*nHeight*4 );
+		    long nOff = 0;
+		    Color aColor;
+		    unsigned int nAlpha = 255;
 
-		pSurface = cairo_image_surface_create_for_data( data, CAIRO_FORMAT_ARGB32, nWidth, nHeight, nWidth*4 );
+		    for( nY = 0; nY < nHeight; nY++ )
+			for( nX = 0; nX < nWidth; nX++ ) {
+			    if( pAlphaReadAcc)
+				nAlpha = 255 - pAlphaReadAcc->GetColor( nY, nX ).GetBlue();
+			    aColor = pBitmapReadAcc->GetColor( nY, nX );
+
+			    // cairo need premultiplied color values
+			    // TODO(rodo) handle endianess
+			    data [nOff++] = ( nAlpha*aColor.GetBlue() )/255;
+			    data [nOff++] = ( nAlpha*aColor.GetGreen() )/255;
+			    data [nOff++] = ( nAlpha*aColor.GetRed() )/255;
+			    data [nOff++] = nAlpha;
+			}
+
+		    pSurface = cairo_image_surface_create_for_data( data, CAIRO_FORMAT_ARGB32, nWidth, nHeight, nWidth*4 );
+		}
 	    }
 
 	    return pSurface;

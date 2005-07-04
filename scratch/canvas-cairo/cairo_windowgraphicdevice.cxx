@@ -446,6 +446,20 @@ namespace vclcanvas
 	return cairo_surface_create_similar( mpWindowSurface, CAIRO_FORMAT_RGB24, aSize.Width(), aSize.Height() );
     }
 
+    Surface* WindowGraphicDevice::getSurface( Bitmap& rBitmap )
+    {
+	Surface *pSurface = NULL;
+
+	BitmapSystemData aData;
+	if( rBitmap.GetSystemData( aData ) ) {
+	    const Size& rSize = rBitmap.GetSizePixel();
+
+	    pSurface = (Surface *) cairoHelperGetSurface( mpSysData, aData, rSize.Width(), rSize.Height() );
+	}
+
+	return pSurface;
+    }
+
     Size WindowGraphicDevice::getSurfaceSize()
     {
 	return mpOutputWindow->GetOutputSizePixel();

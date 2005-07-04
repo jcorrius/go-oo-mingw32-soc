@@ -95,6 +95,7 @@
 
 #include "cairo_cairo.hxx"
 #include "cairo_outdevprovider.hxx"
+#include "cairo_windowgraphicdevice.hxx"
 
 class OutputDevice;
 class Point;
@@ -155,7 +156,9 @@ namespace vclcanvas
 
         ::BitmapEx bitmapExFromXBitmap( const ::com::sun::star::uno::Reference< ::com::sun::star::rendering::XBitmap >& );
         ::cairo::Cairo* cairoFromXBitmap( const ::com::sun::star::uno::Reference< ::com::sun::star::rendering::XBitmap >& );
-        ::cairo::Surface* surfaceFromXBitmap( const ::com::sun::star::uno::Reference< ::com::sun::star::rendering::XBitmap >& xBitmap, unsigned char*& data );
+        ::cairo::Surface* surfaceFromXBitmap( const ::com::sun::star::uno::Reference< ::com::sun::star::rendering::XBitmap >& xBitmap,
+					      const WindowGraphicDevice::ImplRef& rDevice,
+					      unsigned char*& data );
 
         /** Setup VCL font and output position
 

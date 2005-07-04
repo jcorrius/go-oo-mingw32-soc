@@ -68,96 +68,51 @@
 #ifndef _SV_BMPACC_HXX
 #include <vcl/bmpacc.hxx>
 #endif
+#ifndef _VCL_CANVASTOOLS_HXX
+#include <vcl/canvastools.hxx>
+#endif
 
 using namespace ::com::sun::star;
 using namespace ::cairo;
 
 namespace vclcanvas
 {
-    // Currently, the only way to generate an XBitmap is from
-    // XGraphicDevice.getCompatibleBitmap(). Therefore, we don't even
-    // take a bitmap here, but a VDev directly.
     CanvasBitmap::CanvasBitmap( const ::Size& 						rSize,
                                 bool								bAlphaBitmap,
                                 const WindowGraphicDevice::ImplRef&	rDevice )
     { 
-        ENSURE_AND_THROW( rDevice->getOutDev(),
-                          "CanvasBitmap::CanvasBitmap(): Invalid reference outdev" );
-
 	WindowGraphicDevice::ImplRef xDevice = rDevice;
-        OutputDevice& 			 rOutDev( *rDevice->getOutDev() );
-        tools::OutDevStateKeeper aStateKeeper( rOutDev );
 
-	mpCairo = cairo_create( xDevice->getSimilarSurface( rSize, CAIRO_FORMAT_RGB24 ) );
+	mpCairo = cairo_create( xDevice->getSimilarSurface( rSize, bAlphaBitmap ? CAIRO_FORMAT_ARGB32 : CAIRO_FORMAT_RGB24 ) );
 	maCanvasHelper.setCairo( mpCairo );
-
-        // create bitmap for given reference device
-        // ========================================
-        const USHORT nBitCount( (USHORT)24U );
-        const BitmapPalette*	pPalette = NULL;
-
-#if 0
-        // TODO(P2): Seems like VCL doesn't handle palette bitmap with
-        // alpha channel. Devise other ways to handle this, or fix VCL
-        const USHORT nBitCount( ::std::min( (USHORT)24U, 
-                                            (USHORT)rOutDev.GetBitCount() ) );
-
-        if( nBitCount <= 8 )
-        {
-            rOutDev.EnableMapMode( FALSE );
-
-            // try to determine palette from output device (by
-            // extracting a 1,1 bitmap, and querying it)
-            const Point aEmptyPoint;
-            const Size  aSize(1,1);
-            Bitmap aTmpBitmap( rOutDev.GetBitmap( aEmptyPoint,
-                                                  aSize ) );
-            
-            ScopedBitmapReadAccess pReadAccess( aTmpBitmap.AcquireReadAccess(),
-                                                aTmpBitmap );
-
-            pPalette = &pReadAccess->GetPalette();
-        }
-#endif
-
-        Bitmap aBitmap( rSize, nBitCount, pPalette );
-
-        // only create alpha channel bitmap, if factory requested
-        // that. Providing alpha-channeled bitmaps by default has,
-        // especially under VCL, a huge performance penalty (have to
-        // use alpha VDev, then).
-        if( bAlphaBitmap )
-        {
-            AlphaMask 	aAlpha ( rSize );
-            
-            maCanvasHelper.setBitmap( BitmapEx( aBitmap, aAlpha ),
-                                      rDevice );
-        }
-        else
-        {
-            maCanvasHelper.setBitmap( BitmapEx( aBitmap ),
-                                      rDevice );
-        }
+	maCanvasHelper.setDevice( rDevice );
     }
 
-    CanvasBitmap::CanvasBitmap( const BitmapEx& 					rBitmap,
-                                const WindowGraphicDevice::ImplRef&	rDevice )
+    CanvasBitmap::CanvasBitmap( const geometry::RealSize2D& rSize, Surface* pSrcSurface,
+                                const WindowGraphicDevice::ImplRef& rDevice )
     {
-        ENSURE_AND_THROW( rDevice->getOutDev(),
-                          "CanvasBitmap::CanvasBitmap(): Invalid reference outdev" );
-
 	WindowGraphicDevice::ImplRef xDevice = rDevice;
 
-	mpCairo = cairo_create( xDevice->getSimilarSurface( CAIRO_FORMAT_RGB24 ) );
-
+	mpCairo = cairo_create( xDevice->getSimilarSurface( ::vcl::unotools::sizeFromRealSize2D(rSize), CAIRO_FORMAT_RGB24 ) );
 	maCanvasHelper.setCairo( mpCairo );
-        maCanvasHelper.setBitmap( rBitmap,
-                                  rDevice );
+	maCanvasHelper.setDevice( rDevice );
+
+	geometry::RealSize2D aSrcSize = xDevice->getSize();
+
+	cairo_save( mpCairo );
+	cairo_set_source_surface( mpCairo, pSrcSurface, 0, 0 );
+	cairo__scale( mpCairo, rSize.Width/aSrcSize.Width, rSize.Height/aSrcSize.Height );
+	cairo_set_operator( mpCairo, CAIRO_OPERATOR_SOURCE );
+	cairo_paint( mpCairo );
+	cairo_restore( mpCairo );
     }
 
     CanvasBitmap::~CanvasBitmap()
     {
+	Surface *pSurface = cairo_get_target( mpCairo );
+
 	cairo_destroy( mpCairo );
+	cairo_surface_destroy( pSurface );
     }
 
     void SAL_CALL CanvasBitmap::disposing()
@@ -186,11 +141,6 @@ namespace vclcanvas
         aRet[0] = ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM ( SERVICE_NAME ) );
         
         return aRet;
-    }
-
-    BitmapEx CanvasBitmap::getBitmap() const
-    {
-        return maCanvasHelper.getBitmap();
     }
 
     bool CanvasBitmap::repaint( const GraphicObjectSharedPtr&	rGrf,

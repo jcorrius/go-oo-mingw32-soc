@@ -1,3 +1,4 @@
+namespace cairo {
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 
@@ -5,16 +6,26 @@
 #include <cairo-xlib.h>
 
 #ifdef CAIRO_HAS_GLITZ_SURFACE
+#include <GL/glx.h>
+
 #include <cairo-glitz.h>
+
 #include <glitz.h>
 #include <glitz-glx.h>
 #endif
+}
 
 #ifndef _SV_SYSDATA_HXX
 #include <vcl/sysdata.hxx>
 #endif
 
-#define OOO_CANVAS_GLITZ 0
+#ifndef _SV_BITMAP_HXX
+#include <vcl/bitmap.hxx>
+#endif
+
+using namespace ::cairo;
+
+#define OOO_CANVAS_GLITZ 1
 
 int cairoHelperGetDefaultScreen( void* display )
 {
@@ -26,7 +37,7 @@ cairoHelperGetGlitzDrawable( const SystemEnvData* pSysData, int width, int heigh
 {
 #ifdef OOO_CANVAS_GLITZ
     Display* display = (Display*) pSysData->pDisplay;
-    Window window = pSysData->aWindow;
+    ::cairo::Window window = pSysData->aWindow;
     VisualID vid = XVisualIDFromVisual( (Visual*) pSysData->pVisual );
     int screen = DefaultScreen( display );
 
@@ -61,7 +72,7 @@ cairoHelperGetGlitzSurface( const SystemEnvData* pSysData, void *drawable, int x
 {
 #ifdef OOO_CANVAS_GLITZ
     Display* display = (Display*) pSysData->pDisplay;
-    Window window = pSysData->aWindow;
+    ::cairo::Window window = pSysData->aWindow;
 
     glitz_drawable_t *pDrawable = (glitz_drawable_t *) drawable;
     glitz_format_t* pFormat = NULL;
@@ -119,5 +130,20 @@ cairoHelperGetSurface( const SystemEnvData* pSysData, int x, int y, int width, i
 void
 cairoHelperFlush( const SystemEnvData* pSysData )
 {
+// #ifdef CAIRO_HAS_GLITZ_SURFACE
+//     //glXWaitGL();
+//     //glXWaitX();
+//     glFinish();
+// #else
     XSync( (Display*) pSysData->pDisplay, false );
+// #endif
+}
+
+void*
+cairoHelperGetSurface( const SystemEnvData* pSysData, const BitmapSystemData& rBmpData, int width, int height )
+{
+	return cairo_xlib_surface_create( (Display*) pSysData->pDisplay,
+					  (Drawable) rBmpData.aPixmap,
+					  (Visual*) pSysData->pVisual,
+					  width, height );
 }

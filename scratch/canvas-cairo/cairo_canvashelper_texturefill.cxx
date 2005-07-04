@@ -203,11 +203,17 @@ namespace vclcanvas
 
 	printf ("texture fill called, TODO\n");
 
+	cairo_save( mpCairo );
+
+	useStates( viewState, renderState, true );
+
 	mpTextures = &textures;
 
 	drawPolyPolygonPath( xPolyPolygon, Fill );
 
 	mpTextures = NULL;
+
+	cairo_restore( mpCairo );
 
         return uno::Reference< rendering::XCachedPrimitive >(NULL);
     }

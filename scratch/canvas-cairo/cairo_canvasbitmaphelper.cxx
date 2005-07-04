@@ -107,26 +107,19 @@ using namespace ::com::sun::star;
 namespace vclcanvas
 {
     CanvasBitmapHelper::CanvasBitmapHelper() :
-        mpBackBuffer(),
-	maBitmap()
+        mpBackBuffer()
     { 
     }
 
-    void CanvasBitmapHelper::setBitmap( const BitmapEx& 			rBitmap,
-                                        const WindowGraphicDevice::ImplRef&	rDevice )
+    void CanvasBitmapHelper::setDevice( const WindowGraphicDevice::ImplRef&	rDevice )
     {
-        ENSURE_AND_THROW( rDevice.is() && rDevice->getOutDev(),
+        ENSURE_AND_THROW( rDevice.is(),
                           "CanvasBitmapHelper::setBitmap(): Invalid reference device" );
 
-//         mpBackBuffer.reset( new BitmapBackBuffer( rBitmap,
-//                                                   *rDevice->getOutDev() ) );
         mpBackBuffer.reset( new BackBuffer( rDevice ) );
 
         // forward new settings to base class
         setGraphicDevice( rDevice );
-
-	// rodo TODO
-	maBitmap = rBitmap;
     }
 
     void CanvasBitmapHelper::disposing()
@@ -235,13 +228,4 @@ namespace vclcanvas
 
         return aLayout;
     }
-
-    BitmapEx CanvasBitmapHelper::getBitmap() const
-    {
-        if( !mpBackBuffer.get() )
-            return BitmapEx(); // we're disposed
-        else
-            return *maBitmap;
-    }
-
 }

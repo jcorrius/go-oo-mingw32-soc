@@ -310,20 +310,57 @@ namespace vclcanvas
 	switch( aOperation ) {
 	case Fill:
 	    if( mpTextures ) {
-		if( (*mpTextures)[mnPolygonIndex].Bitmap.is() ) {
+		::com::sun::star::rendering::Texture aTexture ( (*mpTextures)[mnPolygonIndex] );
+		if( aTexture.Bitmap.is() ) {
 		    unsigned char* data;
-		    Surface* pSurface = tools::surfaceFromXBitmap( (*mpTextures)[mnPolygonIndex].Bitmap, data );
+		    Surface* pSurface = tools::surfaceFromXBitmap( (*mpTextures)[mnPolygonIndex].Bitmap, mxDevice, data );
 
 		    if( pSurface ) {
 			cairo_pattern_t *pPattern;
 
+			cairo_save( mpCairo );
+
+			::com::sun::star::geometry::AffineMatrix2D aTransform( aTexture.AffineTransform );
+			Matrix aScaleMatrix, aTextureMatrix, aScaledTextureMatrix, aOrigMatrix, aNewMatrix;
+
+			cairo_matrix_init( &aTextureMatrix,
+					   aTransform.m00, aTransform.m10, aTransform.m01,
+					   aTransform.m11, aTransform.m02, aTransform.m12);
+
+			geometry::IntegerSize2D aSize = aTexture.Bitmap->getSize();
+
+			cairo_matrix_init_scale( &aScaleMatrix, 1.0/aSize.Width, 1.0/aSize.Height );
+			cairo_matrix_multiply( &aScaledTextureMatrix, &aTextureMatrix, &aScaleMatrix );
+			cairo_matrix_invert( &aScaledTextureMatrix );
+
+#if 0
+			// workaround for X/glitz and/or cairo bug
+			// we create big enough temporary surface, copy texture bitmap there and use it for the pattern
+			// it only happens on enlargening matrices with REPEAT mode enabled
+			Surface* pTmpSurface = mxDevice->getSimilarSurface();
+			Cairo* pTmpCairo = cairo_create( pTmpSurface );
+			cairo_set_source_surface( pTmpCairo, pSurface, 0, 0 );
+			cairo_paint( pTmpCairo );
+#endif
+
+			// use pTmpSurface to enable the workaround
+			// we don't care about repeat mode yet, so the workaround is disabled for now
 			pPattern = cairo_pattern_create_for_surface( pSurface );
-			cairo_pattern_set_extend( pPattern, CAIRO_EXTEND_REPEAT );
+			cairo_pattern_set_matrix( pPattern, &aScaledTextureMatrix );
+			//cairo_pattern_set_extend( pPattern, CAIRO_EXTEND_REPEAT );
+
 			cairo_set_source( mpCairo, pPattern );
 			cairo_fill( mpCairo );
 
+			cairo_restore( mpCairo );
+
 			cairo_pattern_destroy( pPattern );
 			cairo_surface_destroy( pSurface );
+
+#if 0
+			cairo_destroy( pTmpCairo );
+			cairo_surface_destroy( pTmpSurface );
+#endif
 		    }
 
 		    if( data )
@@ -350,6 +387,7 @@ namespace vclcanvas
 
 	    aP = aPolygon.getB2DPoint( 0 );
 	    cairo_move_to( mpCairo, aP.getX(), aP.getY() );
+	    printf( "move to %d,%d\n", aP.getX(), aP.getY() );
 
 	    if( bIsBezier ) {
 		aA = aPolygon.getControlPointA( 0 );
@@ -364,8 +402,10 @@ namespace vclcanvas
 			
 		    aA = aPolygon.getControlPointA( j );
 		    aB = aPolygon.getControlPointB( j );
-		} else
+		} else {
 		    cairo_line_to( mpCairo, aP.getX(), aP.getY() );
+		    printf( "line to %d,%d\n", aP.getX(), aP.getY() );
+		}
 	    }
 
 	    if( aPolygon.isClosed() )
@@ -655,7 +695,7 @@ namespace vclcanvas
                                                                                 bool 										bModulateColors )
     {
 	unsigned char* data;
-	Surface* pSurface = tools::surfaceFromXBitmap( xBitmap, data );
+	Surface* pSurface = tools::surfaceFromXBitmap( xBitmap, mxDevice, data );
 
 	if( mpCairo && pSurface )
         {
@@ -732,7 +772,11 @@ namespace vclcanvas
     {
 	// rodo FIXME
 	printf ("called CanvasHelper::getScaledBitmap, we return NULL, TODO\n");
-            return uno::Reference< rendering::XBitmap >(); // we're disposed
+
+	Surface *pSurface = cairo_get_target( mpCairo );
+	return uno::Reference< rendering::XBitmap >( new CanvasBitmap( newSize, pSurface, mxDevice ) );
+
+	return uno::Reference< rendering::XBitmap >(); // we're disposed
 //         if( !mpOutDev.get() )
 //             return uno::Reference< rendering::XBitmap >(); // we're disposed
 

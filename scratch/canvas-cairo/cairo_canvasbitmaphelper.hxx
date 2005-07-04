@@ -89,15 +89,7 @@ namespace vclcanvas
     public:
         CanvasBitmapHelper();
 
-        /** Set a new bitmap on this helper.
-
-        	This method force-sets a new bitmap. The internally stored
-        	bitmap representation is updated from the given bitmap,
-        	including any size changes.
-         */
-        void setBitmap( const BitmapEx&				rBitmap,
-                        const WindowGraphicDevice::ImplRef&	rDevice );
-
+        void setDevice( const WindowGraphicDevice::ImplRef&	rDevice );
 
         // Overridden CanvasHelper functionality
         // =====================================
@@ -128,16 +120,12 @@ namespace vclcanvas
 
         ::com::sun::star::rendering::IntegerBitmapLayout SAL_CALL getMemoryLayout();
 
-        /// @internal
-        BitmapEx getBitmap() const;
-
     private:
         // default: disabled copy/assignment
         CanvasBitmapHelper(const CanvasBitmapHelper&);
         CanvasBitmapHelper& operator=( const CanvasBitmapHelper& );        
 
         BackBufferSharedPtr	mpBackBuffer;
-	::canvas::vcltools::VCLObject<BitmapEx>	maBitmap;
     };
 }
 
