@@ -1,5 +1,3 @@
-#include <cppuhelper/queryinterface.hxx>
-
 #include <com/sun/star/beans/XProperty.hpp>
 #include <com/sun/star/awt/FontWeight.hpp>
 #include <com/sun/star/awt/FontUnderline.hpp>
@@ -9,15 +7,6 @@
 
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
-
-// XInterface implementation
-uno::Any ScVbaFont::queryInterface( const uno::Type & rType ) throw ( uno::RuntimeException )
-{
-    return cppu::queryInterface
-			(rType, 
-			 static_cast< uno::XInterface * >( static_cast< vba::XFont * >( this ) ),
-			 static_cast< vba::XFont * >( this ) );
-}
 
 void 
 ScVbaFont::setBold( sal_Bool bValue ) throw( uno::RuntimeException )

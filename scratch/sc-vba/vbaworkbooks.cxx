@@ -1,4 +1,3 @@
-#include <cppuhelper/queryinterface.hxx>
 #include <comphelper/processfactory.hxx>
 
 #include <com/sun/star/frame/XDesktop.hpp>
@@ -13,16 +12,6 @@
 
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
-
-// XInterface implementation
-uno::Any ScVbaWorkbooks::queryInterface( const uno::Type & rType ) throw (uno::RuntimeException)
-{
-    return cppu::queryInterface
-			(rType, 
-			 static_cast< uno::XInterface * >( static_cast< vba::XWorkbooks * >( this ) ),
-			 static_cast< vba::XWorkbooks * >( this ),
-			 static_cast< container::XEnumerationAccess * >( this ) );
-}
 
 static uno::Any
 getWorkbook( const uno::Reference< sheet::XSpreadsheetDocument > &xDoc )

@@ -1,23 +1,24 @@
 #ifndef SC_VBA_WORKBOOK_HXX
 #define SC_VBA_WORKBOOK_HXX
 
+#include <cppuhelper/implbase1.hxx>
+
 #include <com/sun/star/frame/XModel.hpp>
 #include <org/openoffice/vba/XWorkbook.hpp>
 #include "vbahelper.hxx"
 
 class ScModelObj;
 
-class ScVbaWorkbook : public org::openoffice::vba::XWorkbook
+typedef ::cppu::WeakImplHelper1< org::openoffice::vba::XWorkbook > ScVbaWorkbook_BASE;
+
+class ScVbaWorkbook : public ScVbaWorkbook_BASE
 {
-	SC_VBA_UNO_HELPER_MEMBERS;
 	uno::Reference< frame::XModel > mxModel;
 
 public:
 	ScVbaWorkbook( 	uno::Reference< frame::XModel > xModel ) :
- 			mxModel( xModel ), mnRefCount( 1 ) {}
+ 			mxModel( xModel ){}
 	virtual ~ScVbaWorkbook() {}
-
-	SC_VBA_UNO_HELPER_XINTERFACE;
 
     // Attributes
 	virtual ::rtl::OUString SAL_CALL getName() throw (uno::RuntimeException);

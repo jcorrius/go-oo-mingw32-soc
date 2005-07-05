@@ -1,6 +1,8 @@
 #ifndef SC_VBA_WORKSHEETS_HXX
 #define SC_VBA_WORKSHEETS_HXX
 
+#include <cppuhelper/implbase2.hxx>
+
 #include <org/openoffice/vba/XWorksheets.hpp>
 #include <com/sun/star/sheet/XSpreadsheets.hpp>
 #include <com/sun/star/container/XEnumerationAccess.hpp>
@@ -8,18 +10,17 @@
 
 class ScModelObj;
 
-class ScVbaWorksheets : public org::openoffice::vba::XWorksheets,
-					   public com::sun::star::container::XEnumerationAccess
+typedef ::cppu::WeakImplHelper2< org::openoffice::vba::XWorksheets,
+         com::sun::star::container::XEnumerationAccess > ScVbaWorksheets_BASE;
+
+class ScVbaWorksheets : public ScVbaWorksheets_BASE
 {
-	SC_VBA_UNO_HELPER_MEMBERS;
 	uno::Reference< sheet::XSpreadsheets > mxSheets;
 
 public:
 	ScVbaWorksheets(uno::Reference< sheet::XSpreadsheets > xSheets ) :
-		mxSheets( xSheets ), mnRefCount( 1 ) {}
+		mxSheets( xSheets ) {}
 	virtual ~ScVbaWorksheets() {}
-
-	SC_VBA_UNO_HELPER_XINTERFACE;
 
 	// XEnumerationAccess
 	virtual ::com::sun::star::uno::Type SAL_CALL getElementType() throw (::com::sun::star::uno::RuntimeException);

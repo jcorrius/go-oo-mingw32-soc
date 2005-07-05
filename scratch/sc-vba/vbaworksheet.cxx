@@ -1,4 +1,3 @@
-#include <cppuhelper/queryinterface.hxx>
 
 #include <com/sun/star/beans/XPropertySet.hpp>
 #include <com/sun/star/container/XNamed.hpp>
@@ -8,16 +7,6 @@
 
 #include "vbarange.hxx"
 #include "vbaworksheet.hxx"
-
-// XInterface implementation
-uno::Any ScVbaWorksheet::queryInterface( const uno::Type & rType ) throw (uno::RuntimeException)
-{
-    return cppu::queryInterface
-			(rType, 
-			 static_cast< uno::XInterface * >( static_cast< vba::XWorksheet * >( this ) ),
-			 static_cast< vba::XWorksheet * >( this ) );
-}
-
 
 ::rtl::OUString
 ScVbaWorksheet::getName() throw (uno::RuntimeException)

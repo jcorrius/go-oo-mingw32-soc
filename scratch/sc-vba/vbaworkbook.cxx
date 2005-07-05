@@ -1,4 +1,3 @@
-#include <cppuhelper/queryinterface.hxx>
 #include <tools/urlobj.hxx>
 
 #include <com/sun/star/util/XCloseable.hpp>
@@ -15,15 +14,6 @@
 
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
-
-// XInterface implementation
-uno::Any ScVbaWorkbook::queryInterface( const uno::Type & rType ) throw (uno::RuntimeException)
-{
-    return cppu::queryInterface
-			(rType, 
-			 static_cast< uno::XInterface * >( static_cast< vba::XWorkbook * >( this ) ),
-			 static_cast< vba::XWorkbook * >( this ) );
-}
 
 ::rtl::OUString
 ScVbaWorkbook::getName() throw (uno::RuntimeException)

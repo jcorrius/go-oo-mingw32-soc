@@ -1,4 +1,3 @@
-#include <cppuhelper/queryinterface.hxx>
 #include <sfx2/objsh.hxx>
 
 #include<com/sun/star/sheet/XCellRangeAddressable.hpp>
@@ -21,21 +20,12 @@ using namespace ::com::sun::star;
 
 ScVbaApplication::ScVbaApplication()
 {
-	mnRefCount = 1;
 }
 
 ScVbaApplication::~ScVbaApplication()
 {
 }
 
-// XInterface implementation
-uno::Any ScVbaApplication::queryInterface( const uno::Type & rType ) throw (uno::RuntimeException)
-{
-    return cppu::queryInterface
-			(rType, 
-			 static_cast< uno::XInterface * >( static_cast< vba::XApplication * >( this ) ),
-			 static_cast< vba::XApplication * >( this ) );
-}
 
 uno::Reference< vba::XWorkbook >
 ScVbaApplication::getActiveWorkbook() throw (uno::RuntimeException)

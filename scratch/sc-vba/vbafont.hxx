@@ -1,21 +1,23 @@
 #ifndef SC_VBA_FONT_HXX
 #define SC_VBA_FONT_HXX
 
+#include <cppuhelper/implbase1.hxx>
+
 #include <org/openoffice/vba/XFont.hpp>
 #include <com/sun/star/beans/XPropertySet.hpp>
 #include "vbahelper.hxx"
 
 class ScTableSheetsObj;
 
+typedef  ::cppu::WeakImplHelper1< org::openoffice::vba::XFont > ScVbaFont_BASE;
+
 class ScVbaFont : public org::openoffice::vba::XFont
 {
-	SC_VBA_UNO_HELPER_MEMBERS;
     uno::Reference< beans::XPropertySet > mxFont;
 public:
 	ScVbaFont( uno::Reference< beans::XPropertySet > xPropertySet ) :
-            mxFont( xPropertySet ), mnRefCount( 1 ) {}
+            mxFont( xPropertySet ){}
 	virtual ~ScVbaFont() {}
-	SC_VBA_UNO_HELPER_XINTERFACE;
 
 	// Attributes
 	virtual void SAL_CALL setBold( sal_Bool bValue ) throw (uno::RuntimeException);

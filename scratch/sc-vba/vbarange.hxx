@@ -1,6 +1,8 @@
 #ifndef SC_VBA_RANGE_HXX
 #define SC_VBA_RANGE_HXX
 
+#include <cppuhelper/implbase1.hxx>
+
 #include <org/openoffice/vba/XRange.hpp>
 #include <com/sun/star/table/XCellRange.hpp>
 #include <org/openoffice/vba/XFont.hpp>
@@ -8,17 +10,15 @@
 
 class ScTableSheetsObj;
 
-class ScVbaRange : public org::openoffice::vba::XRange
+typedef ::cppu::WeakImplHelper1< org::openoffice::vba::XRange > ScVbaRange_BASE;
+
+class ScVbaRange : public ScVbaRange_BASE
 {
-	SC_VBA_UNO_HELPER_MEMBERS;
 	uno::Reference< table::XCellRange > mxRange;
 
 public:
-	ScVbaRange( uno::Reference< table::XCellRange > xRange ) :
- 			mxRange( xRange ), mnRefCount( 1 ) {}
+	ScVbaRange( uno::Reference< table::XCellRange > xRange ) : mxRange( xRange ) {}
 	virtual ~ScVbaRange() {}
-
-	SC_VBA_UNO_HELPER_XINTERFACE;
 
     // Attributes
 	virtual double SAL_CALL getValue() throw (::com::sun::star::uno::RuntimeException);

@@ -1,6 +1,8 @@
 #ifndef SC_VBA_WORKSHEET_HXX
 #define SC_VBA_WORKSHEET_HXX
 
+#include <cppuhelper/implbase1.hxx>
+
 #include <com/sun/star/sheet/XSpreadsheet.hpp>
 #include <org/openoffice/vba/XWorksheet.hpp>
 #include <org/openoffice/vba/XRange.hpp>
@@ -8,17 +10,16 @@
 
 class ScModelObj;
 
-class ScVbaWorksheet : public org::openoffice::vba::XWorksheet
+typedef ::cppu::WeakImplHelper1< org::openoffice::vba::XWorksheet > ScVbaWorksheet_BASE;
+
+class ScVbaWorksheet : public ScVbaWorksheet_BASE
 {
-	SC_VBA_UNO_HELPER_MEMBERS;
 	uno::Reference< sheet::XSpreadsheet > mxSheet;
 
 public:
 	ScVbaWorksheet( uno::Reference< sheet::XSpreadsheet > xSheet ) :
- 			mxSheet( xSheet ), mnRefCount( 1 ) {}
+ 			mxSheet( xSheet ){}
 	virtual ~ScVbaWorksheet() {}
-
-	SC_VBA_UNO_HELPER_XINTERFACE;
 
     // Attributes
 	virtual ::rtl::OUString SAL_CALL getName() throw (uno::RuntimeException);

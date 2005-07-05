@@ -1,23 +1,23 @@
 #ifndef SC_VBA_WORKBOOKS_HXX
 #define SC_VBA_WORKBOOKS_HXX
 
+#include <cppuhelper/implbase2.hxx>
+
 #include <org/openoffice/vba/XWorkbooks.hpp>
 #include <com/sun/star/container/XEnumerationAccess.hpp>
 #include "vbahelper.hxx"
 
 class ScModelObj;
 
-class ScVbaWorkbooks : public org::openoffice::vba::XWorkbooks,
-					   public com::sun::star::container::XEnumerationAccess
+typedef ::cppu::WeakImplHelper2< org::openoffice::vba::XWorkbooks,
+        com::sun::star::container::XEnumerationAccess > ScVbaWorkbooks_BASE;
+
+class ScVbaWorkbooks : public ScVbaWorkbooks_BASE
 {
-	SC_VBA_UNO_HELPER_MEMBERS;
 
 public:
-	ScVbaWorkbooks() :
-		mnRefCount( 1 ) {}
+	ScVbaWorkbooks() {}
 	virtual ~ScVbaWorkbooks() {}
-
-	SC_VBA_UNO_HELPER_XINTERFACE;
 
 	// XEnumerationAccess
 	virtual ::com::sun::star::uno::Type SAL_CALL getElementType() throw (::com::sun::star::uno::RuntimeException);

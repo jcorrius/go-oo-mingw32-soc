@@ -1,19 +1,19 @@
 #ifndef SC_VBA_APPLICATION_HXX
 #define SC_VBA_APPLICATION_HXX
 
+#include <cppuhelper/implbase1.hxx>
+
 #include <org/openoffice/vba/XApplication.hpp>
 #include "vbahelper.hxx"
 
-class ScVbaApplication : public org::openoffice::vba::XApplication
+typedef ::cppu::WeakImplHelper1< org::openoffice::vba::XApplication > ScVbaApplication_BASE;
+
+class ScVbaApplication : public ScVbaApplication_BASE
 {
-	SC_VBA_UNO_HELPER_MEMBERS;
 
 public:
 	ScVbaApplication();
 	virtual ~ScVbaApplication();
-
-	// XInterface
-	SC_VBA_UNO_HELPER_XINTERFACE;
 
     // XApplication
     virtual uno::Reference< vba::XRange > getSelection() throw (uno::RuntimeException);
