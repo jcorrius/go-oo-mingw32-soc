@@ -1,5 +1,7 @@
 #include <comphelper/processfactory.hxx>
 
+#include <cppuhelper/implbase1.hxx>
+
 #include <com/sun/star/frame/XDesktop.hpp>
 #include <com/sun/star/sheet/XSpreadsheetDocument.hpp>
 #include <com/sun/star/container/XEnumerationAccess.hpp>
@@ -25,9 +27,10 @@ getWorkbook( const uno::Reference< sheet::XSpreadsheetDocument > &xDoc )
 	return uno::Any( uno::Reference< vba::XWorkbook > (pWb) );
 }
 
-class ScVbaWorkbooksIterator : public container::XEnumeration
+typedef ::cppu::WeakImplHelper1< com::sun::star::container::XEnumeration > ScVbaWorkbooksIterator_BASE;
+
+class ScVbaWorkbooksIterator : public ScVbaWorkbooksIterator_BASE
 {
-	SC_VBA_UNO_HELPER_MEMBERS;
 	uno::Reference< container::XEnumeration > mxComponents;
 	uno::Reference< sheet::XSpreadsheetDocument > mxSpreadsheet;
   public:
@@ -41,14 +44,6 @@ class ScVbaWorkbooksIterator : public container::XEnumeration
 	}
 	~ScVbaWorkbooksIterator() {}
 
-	SC_VBA_UNO_HELPER_XINTERFACE
-	{
-		return cppu::queryInterface
-			(rType, 
-			 static_cast< uno::XInterface * >( static_cast< container::XEnumeration * >( this ) ),
-			 static_cast< container::XEnumeration * >( this ) );
-	}
-	
 	virtual sal_Bool hasMoreElements() throw (uno::RuntimeException)
 	{
 		return mxSpreadsheet.is();
