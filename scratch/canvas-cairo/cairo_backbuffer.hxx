@@ -76,6 +76,7 @@ namespace vclcanvas
     public:
         BackBuffer( WindowGraphicDevice::ImplRef xGraphicDevice,
 		    ::cairo::Format aFormat = ::cairo::CAIRO_FORMAT_ARGB32 );
+	~BackBuffer();
         
 	Size getSize();
         void setSize( const ::Size& rNewSize );

@@ -68,6 +68,17 @@ namespace vclcanvas
 {
     BackBuffer::BackBuffer( WindowGraphicDevice::ImplRef xGraphicDevice, Format aFormat ) : mxGraphicDevice( xGraphicDevice ), mpSurface( NULL ), mpCairo( NULL ), maSize( xGraphicDevice->getSurfaceSize() ), maFormat( aFormat )
     {
+	printf("BackBuffer constructor\n");
+    }
+
+    BackBuffer::~BackBuffer()
+    {
+	printf("BackBuffer destructor\n");
+	if( mpCairo )
+	    cairo_destroy( mpCairo );
+	if( mpSurface )
+	    cairo_surface_destroy( mpSurface );
+	mxGraphicDevice.reset();
     }
         
     void BackBuffer::setSize( const ::Size& rNewSize )

@@ -180,6 +180,7 @@ namespace vclcanvas
 
     void CanvasHelper::disposing()
     {
+	printf("canvas helper disposing\n");
         mxDevice.reset();
         mp2ndOutDev.reset();
     }
@@ -706,9 +707,10 @@ namespace vclcanvas
 	    cairo_set_source_surface( mpCairo, pSurface, 0, 0 );
 	    cairo_paint( mpCairo );
 	    cairo_restore( mpCairo );
-
-	    cairo_surface_destroy( pSurface );
 	}
+
+	if( pSurface )
+	    cairo_surface_destroy( pSurface );
 
 	if( data )
 	    free( data );

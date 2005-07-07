@@ -99,6 +99,8 @@ namespace vclcanvas
         mpOutputWindow( &rOutputWindow ),
         mpWindowSurface( NULL )
     {
+	printf( "WindowGraphicDevice constructor\n" );
+
         CHECK_AND_THROW( mpOutputWindow != NULL,
                          "WindowGraphicDevice::WindowGraphicDevice(): pWindow is NULL" );
 	mpSysData = pSysData;
@@ -106,11 +108,7 @@ namespace vclcanvas
 
     WindowGraphicDevice::~WindowGraphicDevice()
     {
-	if( mpWindowSurface ) {
-	    printf( "going to destroy mpWindowSurface\n" );
-	    cairo_surface_destroy( mpWindowSurface );
-	    mpWindowSurface = NULL;
-	}
+	printf( "WindowGraphicDevice destructor\n" );
     }
 
     uno::Reference< rendering::XBufferController > SAL_CALL WindowGraphicDevice::getBufferController() throw (uno::RuntimeException)
@@ -421,10 +419,18 @@ namespace vclcanvas
     
     void SAL_CALL WindowGraphicDevice::disposing()
     {
+	printf("WindowGraphicDevice disposing\n");
+
         ::osl::MutexGuard aGuard( m_aMutex );
 
         // release all references
         mpOutputWindow = NULL;
+
+	if( mpWindowSurface ) {
+	    printf( "going to destroy mpWindowSurface\n" );
+	    cairo_surface_destroy( mpWindowSurface );
+	    mpWindowSurface = NULL;
+	}
     }
        
     OutputDevice* WindowGraphicDevice::getOutDev() const
@@ -432,18 +438,15 @@ namespace vclcanvas
         return mpOutputWindow;
     }
 
-    Surface* WindowGraphicDevice::getSurface( Size aSize )
+    Surface* WindowGraphicDevice::getSurface()
     {
-    	if( !mpWindowSurface )
+    	if( !mpWindowSurface ) {
+	    Size aSize = getSurfaceSize();
 	    mpWindowSurface = (Surface*) cairoHelperGetSurface( mpSysData,
 								mpOutputWindow->GetOutOffXPixel(), mpOutputWindow->GetOutOffYPixel(),
 								aSize.Width(), aSize.Height() );
-
-    	if( aSize == mpOutputWindow->GetOutputSizePixel() ) {
-	    return mpWindowSurface;
-    	}
-	printf( "called WindowGraphicDevice::getSurface(size) - creating similar surface\n" );
-	return cairo_surface_create_similar( mpWindowSurface, CAIRO_FORMAT_RGB24, aSize.Width(), aSize.Height() );
+	}
+	return mpWindowSurface;
     }
 
     Surface* WindowGraphicDevice::getSurface( Bitmap& rBitmap )
@@ -463,12 +466,6 @@ namespace vclcanvas
     Size WindowGraphicDevice::getSurfaceSize()
     {
 	return mpOutputWindow->GetOutputSizePixel();
-    }
-
-    Surface* WindowGraphicDevice::getSurface()
-    {
-	printf( "called WindowGraphicDevice::getSurface %d x %d\n", getSurfaceSize().Width(), getSurfaceSize().Height() );
-	return getSurface( getSurfaceSize() );
     }
 
     Surface* WindowGraphicDevice::getSimilarSurface( Size aSize, Format aFormat )

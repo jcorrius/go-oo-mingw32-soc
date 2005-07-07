@@ -136,6 +136,7 @@ namespace vclcanvas
         maLastUpdate(),
         mbBackgroundDirty( true )
     {
+	printf("redraw manager constructor\n");
         ENSURE_AND_THROW( mpBackBuffer.get(),
                           "RedrawManager::RedrawManager(): Invalid backbuffer" );
         maChangeRecords.reserve( CHANGE_RECORDS_INITIAL_SIZE );
@@ -149,6 +150,7 @@ namespace vclcanvas
 
     RedrawManager::~RedrawManager()
     {
+	printf("redraw manager destructor\n");
  	cairo_destroy( mpCairo );
  	cairo_surface_destroy( mpSurface );
  	cairo_surface_destroy( mpWinSurface );

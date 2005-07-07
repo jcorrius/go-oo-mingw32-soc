@@ -175,7 +175,6 @@ namespace vclcanvas
 
 	Size getSurfaceSize();
         ::cairo::Surface* getSurface();
-        ::cairo::Surface* getSurface( Size aSize );
 	::cairo::Surface* getSurface( Bitmap& rBitmap );
 
         ::cairo::Surface* getSimilarSurface( ::cairo::Format aFormat = ::cairo::CAIRO_FORMAT_ARGB32 );

@@ -124,6 +124,7 @@
 #include "cairo_windowgraphicdevice.hxx"
 
 using namespace ::com::sun::star;
+using namespace ::cairo;
 
 #define IMPLEMENTATION_NAME "CairoCanvas::SpriteCanvas"
 #define SERVICE_NAME "com.sun.star.rendering.CairoCanvas"
@@ -261,7 +262,7 @@ namespace vclcanvas
             aArguments[0].getValueTypeClass() == uno::TypeClass_HYPER )
         {
             // TODO(Q2): This now works for Solaris, but still warns for gcc
-            Window* pOutputWindow = (Window*) *reinterpret_cast<const sal_Int64*>(aArguments[0].getValue()); 
+            ::Window* pOutputWindow = (::Window*) *reinterpret_cast<const sal_Int64*>(aArguments[0].getValue()); 
 
             CHECK_AND_THROW( pOutputWindow != NULL, 
                              "SpriteCanvas::initialize: invalid Window pointer" );
@@ -300,9 +301,13 @@ namespace vclcanvas
     {
         tools::LocalGuard aGuard;
 
+	printf("sprite canvas dispose\n");
+
         maCanvasHelper.disposing();
 
         mxComponentContext.clear();
+	if( mxDevice.is() )
+	    mxDevice->dispose();
         mxDevice.reset();
         mpBackBuffer.reset(),
         mpRedrawManager.reset();

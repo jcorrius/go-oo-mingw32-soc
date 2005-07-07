@@ -130,13 +130,13 @@ cairoHelperGetSurface( const SystemEnvData* pSysData, int x, int y, int width, i
 void
 cairoHelperFlush( const SystemEnvData* pSysData )
 {
-// #ifdef CAIRO_HAS_GLITZ_SURFACE
-//     //glXWaitGL();
-//     //glXWaitX();
-//     glFinish();
-// #else
+ #ifdef CAIRO_HAS_GLITZ_SURFACE
+     glXWaitGL();
+     glXWaitX();
+     //glFinish();
+ #else
     XSync( (Display*) pSysData->pDisplay, false );
-// #endif
+ #endif
 }
 
 void*

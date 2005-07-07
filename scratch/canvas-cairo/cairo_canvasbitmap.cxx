@@ -83,6 +83,8 @@ namespace vclcanvas
     { 
 	WindowGraphicDevice::ImplRef xDevice = rDevice;
 
+	printf("canvas bitmap constructor\n");
+
 	mpCairo = cairo_create( xDevice->getSimilarSurface( rSize, bAlphaBitmap ? CAIRO_FORMAT_ARGB32 : CAIRO_FORMAT_RGB24 ) );
 	maCanvasHelper.setCairo( mpCairo );
 	maCanvasHelper.setDevice( rDevice );
@@ -92,6 +94,8 @@ namespace vclcanvas
                                 const WindowGraphicDevice::ImplRef& rDevice )
     {
 	WindowGraphicDevice::ImplRef xDevice = rDevice;
+
+	printf("canvas bitmap constructor\n");
 
 	mpCairo = cairo_create( xDevice->getSimilarSurface( ::vcl::unotools::sizeFromRealSize2D(rSize), CAIRO_FORMAT_RGB24 ) );
 	maCanvasHelper.setCairo( mpCairo );
@@ -110,6 +114,8 @@ namespace vclcanvas
     CanvasBitmap::~CanvasBitmap()
     {
 	Surface *pSurface = cairo_get_target( mpCairo );
+
+	printf("canvas bitmap destructor\n");
 
 	cairo_destroy( mpCairo );
 	cairo_surface_destroy( pSurface );
