@@ -62,7 +62,7 @@ sub insert_symbols {
     open $obj, "objdump -T $lib|" || die "Can't objdump $lib: $!";
 
     while (<$obj>) {
-	/[0-9a-f]*\s+([g ])\s+..\s+(\S*).....................\s+(.*)/ || next;
+	/[0-9a-f]*\s+([gw ])\s+..\s+(\S*)\s*......................\s+(.*)/;
 	
 	my ($symbol, $type) = ($3, $2);
 
