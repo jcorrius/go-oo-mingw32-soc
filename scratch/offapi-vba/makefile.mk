@@ -20,6 +20,8 @@ IDLFILES=\
 	XWorksheet.idl\
 	XWorksheets.idl\
 	XFont.idl\
+	XRows.idl\
+	XColumns.idl
 
 # ------------------------------------------------------------------
 

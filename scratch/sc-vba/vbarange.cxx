@@ -22,8 +22,12 @@
 #include <com/sun/star/frame/XModel.hpp>
 #include <com/sun/star/view/XSelectionSupplier.hpp>
 #include <com/sun/star/table/XCellCursor.hpp>
+#include <com/sun/star/table/XTableRows.hpp>
+#include <com/sun/star/table/XTableColumns.hpp>
 
 #include "vbarange.hxx"
+#include "vbarows.hxx"
+#include "vbacolumns.hxx"
 
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
@@ -307,3 +311,25 @@ ScVbaRange::Select() throw (uno::RuntimeException)
 }
 
 	
+uno::Reference< vba::XRows >
+ScVbaRange::Rows() throw (uno::RuntimeException)
+{
+
+        uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, ::uno::UNO_QUERY);
+	uno::Reference< table::XTableRows > xTableRows(xColumnRowRange->getRows(), ::uno::UNO_QUERY);
+
+	return uno::Reference< vba::XRows >(new ScVbaRows(xTableRows));
+
+}
+
+uno::Reference< vba::XColumns >
+ScVbaRange::Columns() throw (uno::RuntimeException)
+{
+
+        uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, ::uno::UNO_QUERY);
+	uno::Reference< table::XTableColumns > xTableColumns(xColumnRowRange->getColumns(), ::uno::UNO_QUERY);
+
+	return uno::Reference< vba::XColumns >(new ScVbaColumns(xTableColumns));
+
+}
+
