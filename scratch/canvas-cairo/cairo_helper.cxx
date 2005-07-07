@@ -25,7 +25,7 @@ namespace cairo {
 
 using namespace ::cairo;
 
-#define OOO_CANVAS_GLITZ 1
+//#define OOO_CANVAS_GLITZ 1
 
 int cairoHelperGetDefaultScreen( void* display )
 {
