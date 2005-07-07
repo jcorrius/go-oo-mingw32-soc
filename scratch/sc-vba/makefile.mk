@@ -31,6 +31,8 @@ LIB1TARGET = \
 	$(SLB)$/$(TARGET).lib
 LIB1OBJFILES = \
 	$(SLO1FILES)
+SLOFILES = \
+        $(SLO1FILES)
 
 # --- Tagets -------------------------------------------------------
 
