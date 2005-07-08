@@ -248,23 +248,24 @@ namespace vclcanvas
 	cairo_set_matrix( mpCairo, &aCombinedMatrix );
 
         if( renderState.Clip.is() ) {
-	    printf ("render clip\n");
+	    printf ("render clip BEGIN\n");
 
 	    drawPolyPolygonPath( renderState.Clip, Clip );
+	    printf ("render clip END\n");
 	}
 
-	if (setColor) {
-	    if (renderState.DeviceColor.getLength() > 3)
+	if( setColor ) {
+	    if( renderState.DeviceColor.getLength() > 3 )
 		cairo_set_source_rgba( mpCairo,
-						renderState.DeviceColor [0],
-						renderState.DeviceColor [1],
-						renderState.DeviceColor [2],
-						renderState.DeviceColor [3] );
+				       renderState.DeviceColor [0],
+				       renderState.DeviceColor [1],
+				       renderState.DeviceColor [2],
+				       renderState.DeviceColor [3] );
 	    else if (renderState.DeviceColor.getLength() == 3)
 		cairo_set_source_rgb( mpCairo,
-					       renderState.DeviceColor [0],
-					       renderState.DeviceColor [1],
-					       renderState.DeviceColor [2] );
+				      renderState.DeviceColor [0],
+				      renderState.DeviceColor [1],
+				      renderState.DeviceColor [2] );
 	}
     }
 
@@ -388,7 +389,7 @@ namespace vclcanvas
 
 	    aP = aPolygon.getB2DPoint( 0 );
 	    cairo_move_to( mpCairo, aP.getX(), aP.getY() );
-	    printf( "move to %d,%d\n", aP.getX(), aP.getY() );
+	    printf( "move to %f,%f\n", aP.getX(), aP.getY() );
 
 	    if( bIsBezier ) {
 		aA = aPolygon.getControlPointA( 0 );
@@ -405,15 +406,18 @@ namespace vclcanvas
 		    aB = aPolygon.getControlPointB( j );
 		} else {
 		    cairo_line_to( mpCairo, aP.getX(), aP.getY() );
-		    printf( "line to %d,%d\n", aP.getX(), aP.getY() );
+		    printf( "line to %f,%f\n", aP.getX(), aP.getY() );
 		}
 	    }
 
 	    if( aPolygon.isClosed() )
 		cairo_close_path( mpCairo );
 
-	    doOperation( aOperation );
+	    if( aOperation == Fill &&  mpTextures )
+		doOperation( aOperation );
 	}
+	if( aOperation != Fill || !mpTextures )
+	    doOperation( aOperation );
     }
 
     void CanvasHelper::drawPolyPolygonFallback( const uno::Reference< rendering::XPolyPolygon2D >& xPolyPolygon, Operation aOperation )
@@ -434,8 +438,11 @@ namespace vclcanvas
 		if( xPolyPolygon->isClosed( mnPolygonIndex ) )
 		    cairo_close_path( mpCairo );
 
-		doOperation( aOperation );
+		if( aOperation == Fill &&  mpTextures )
+		    doOperation( aOperation );
 	    }
+	    if( aOperation != Fill || !mpTextures )
+		doOperation( aOperation );
 	} else {
 
 	    uno::Reference< rendering::XBezierPolyPolygon2D > xBezierPoly( xPolyPolygon, uno::UNO_QUERY );
@@ -456,8 +463,11 @@ namespace vclcanvas
 		    if( xPolyPolygon->isClosed( mnPolygonIndex ) )
 			cairo_close_path( mpCairo );
 
-		    doOperation( aOperation );
+		    if( aOperation == Fill &&  mpTextures )
+			doOperation( aOperation );
 		}
+		if( aOperation != Fill || !mpTextures )
+		    doOperation( aOperation );
 	    }
 	}
     }
@@ -772,27 +782,8 @@ namespace vclcanvas
     uno::Reference< rendering::XBitmap > CanvasHelper::getScaledBitmap( const geometry::RealSize2D& newSize, 
                                                                         sal_Bool 					beFast )
     {
-	// rodo FIXME
-	printf ("called CanvasHelper::getScaledBitmap, we return NULL, TODO\n");
-
 	Surface *pSurface = cairo_get_target( mpCairo );
 	return uno::Reference< rendering::XBitmap >( new CanvasBitmap( newSize, pSurface, mxDevice ) );
-
-	return uno::Reference< rendering::XBitmap >(); // we're disposed
-//         if( !mpOutDev.get() )
-//             return uno::Reference< rendering::XBitmap >(); // we're disposed
-
-//         // TODO(F2): Support alpha vdev canvas here
-//         const Point aEmptyPoint(0,0);
-//         const Size  aBmpSize( mpOutDev->getOutDev().GetOutputSizePixel() );
-
-//         Bitmap aBitmap( mpOutDev->getOutDev().GetBitmap(aEmptyPoint, aBmpSize) );
-
-//         aBitmap.Scale( ::vcl::unotools::sizeFromRealSize2D(newSize), 
-//                        beFast ? BMP_SCALE_FAST : BMP_SCALE_INTERPOLATE );
-
-//         return uno::Reference< rendering::XBitmap >( new CanvasBitmap( aBitmap,
-//                                                                        mxDevice ) );
     }
 
     uno::Sequence< sal_Int8 > CanvasHelper::getData( const geometry::IntegerRectangle2D& rect )

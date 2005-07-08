@@ -154,6 +154,8 @@ namespace vclcanvas
                                 const ::Size& 					rSz,
                                 const GraphicAttr&				rAttr ) const
     {
+	printf ("CanvasBitmap::repaint called, TODO\n");
+
         tools::LocalGuard aGuard;
 
         mbSurfaceDirty = true;

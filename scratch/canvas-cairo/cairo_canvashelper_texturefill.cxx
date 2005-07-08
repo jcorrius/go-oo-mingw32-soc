@@ -201,16 +201,11 @@ namespace vclcanvas
         CHECK_AND_THROW( textures.getLength(), 
                          "CanvasHelper::fillTexturedPolyPolygon: empty texture sequence");
 
-	printf ("texture fill called, TODO\n");
-
 	cairo_save( mpCairo );
 
 	useStates( viewState, renderState, true );
-
 	mpTextures = &textures;
-
 	drawPolyPolygonPath( xPolyPolygon, Fill );
-
 	mpTextures = NULL;
 
 	cairo_restore( mpCairo );
