@@ -1,5 +1,8 @@
 #!/usr/bin/perl -w
 
+# FIXME: there are some relocs with *thousands* of targets ...
+#        we elide them all & count almost none of them.
+
 #
 # Use example: cd /opt/OOInstall/program
 #              preloc --quiet --plt --for=svx *.so | sort | c++filt > svx
@@ -30,17 +33,18 @@ sub read_relocs($$)
     open ($pipe, "readelf -r -W $file |") || die "Can't readelf -r $file: $!";
     while (<$pipe>) {
 	/'.rel.plt'/ && !$opt_plt_too && last;
-	if (! m/(R_\S+)\s+([0-9a-f]+)\s+(.*)\s*/) {
+	if (! m/^([0-9a-f]+)\s+([0-9a-f]+)\s+(R_\S+)\s+([0-9a-f]+)\s+(.*)\s*/) {
 #	    print "Bin line '$_'\n";
             next;
 	}
-	my ($type, $loc, $sym) = ($1, $2, $3);
-	$symbols{$sym} = hex ($loc);
+	my ($offset, $info, $type, $loc, $sym) = ($1, $2, $3, $4, $5);
+#	print "$sym reloc at 0x$offset : $type, $loc, $sym\n";
+	$symbols{$sym} = hex ($offset);
     }
     close ($pipe);
 
     $lib->{file} = $file;
-    $lib->{symbols} = \%symbols;
+    $lib->{relocs} = \%symbols;
     $lib->{used} = \%used;
 }
 
@@ -52,6 +56,7 @@ sub read_symbols($$)
     my %def;
     my %undef;
     my %data;
+    my %addr_space;
 
 #    print "Read '$file'\n";
 
@@ -73,7 +78,17 @@ sub read_symbols($$)
 	    my %datum;
 	    $datum{size} = $realsize;
 	    $datum{address} = $realaddress;
+	    $datum{symbol} = $symbol;
 	    $data{$symbol} = \%datum;
+#	    print "Symbol '$symbol' type '$type' '$linkage' addr 0x$address, size $size\n";
+
+	    # yes there should be a btree in perl.
+	    for (my $i = 0; $i < $realsize; $i+=4) {
+		my $key = $realaddress + $i;
+#		printf "Set... '$key'\n";
+#		defined $addr_space{$key} && die "Overlap: $key";
+		$addr_space{$key} = \%datum;
+	    }
 	}
 
 	if ($type ne '*UND*') {
@@ -87,11 +102,35 @@ sub read_symbols($$)
     $lib->{def} = \%def;
     $lib->{undef} = \%undef;
     $lib->{data} = \%data;
+    $lib->{addr_space} = \%addr_space;
 }
 
 sub by_internal
 {
-  keys (%{$a->{symbols}}) <=> keys (%{$b->{symbols}});
+  keys (%{$a->{relocs}}) <=> keys (%{$b->{relocs}});
+}
+
+sub is_vtable($)
+{
+    my $sym = shift;
+    return $sym =~ /^_ZTV/;
+}
+
+sub is_rtti($)
+{
+    my $sym = shift;
+    return $sym =~ /^_ZTI/ || $sym =~ /^_ZTS/;
+}
+
+sub find_nearest($$)
+{
+    my $addr_space = shift;
+    my $addr = shift;
+    for (my $delta = 0; $delta < (256 * 8); $delta += 4) {
+	return ($addr_space->{$addr+$delta})->{symbol} if (defined $addr_space->{$addr + $delta});
+	return ($addr_space->{$addr-$delta})->{symbol} if (defined $addr_space->{$addr - $delta});
+    }
+    return '<unknown>';
 }
 
 #
@@ -141,7 +180,7 @@ for $lib (sort by_internal @libs) {
     my $external_relocs = 0;
     my $def = $lib->{def};
     my $undef = $lib->{undef};
-    for $sym (keys %{$lib->{symbols}}) {
+    for $sym (keys %{$lib->{relocs}}) {
 	if (defined $undef->{$sym}) {
 	    $external_relocs++;
 	} elsif (defined $def->{$sym}) {
@@ -154,7 +193,7 @@ for $lib (sort by_internal @libs) {
 	    print STDERR "broken symbol '$sym'\n";
 	}
     }
-    my $total = keys %{$lib->{symbols}};
+    my $total = keys %{$lib->{relocs}};
     my $percentage = sprintf ("%2.2g", $internal_strong_relocs / $total * 100);
     print STDERR $lib->{file} . " total relocs $total external $external_relocs, internal weak " .
 	"$internal_weak_relocs, internal strong $internal_strong_relocs: saving $percentage\%\n";
@@ -162,7 +201,7 @@ for $lib (sort by_internal @libs) {
     if ($random_symbols) {
 	print "\n";
 
-	my @keys = keys %{$lib->{symbols}};
+	my @keys = keys %{$lib->{relocs}};
 	print "Random symbols:\n";
 	for ($i = 0; $i < 20; $i++) {
 	    my $sym = $keys[rand $total];
@@ -172,35 +211,70 @@ for $lib (sort by_internal @libs) {
 	}
     }
 
-    my $vtable_size = 0;
-    my $vtable_count = 0;
-    my $rtti_size = 0;
-    my $rtti_count = 0;
-    my $other_size = 0;
-    my $other_count = 0;
-    for $sym (keys %{$lib->{data}}) {
-	my $data = ($lib->{data})->{$sym};
-
-	if ($sym =~ /^_ZTV/) {
-	    $vtable_count++;
-	    $vtable_size += $data->{size};
-
-	} elsif ($sym =~ /^_ZTI/) {
-	    $rtti_count++;
-	    $rtti_size += $data->{size};
-
-	} else {
-	    $other_count++;
-	    $other_size += $data->{size};
+    {
+	my $vtable_size = 0;
+	my $vtable_count = 0;
+	my $rtti_size = 0;
+	my $rtti_count = 0;
+	my $other_size = 0;
+	my $other_count = 0;
+	for $sym (keys %{$lib->{data}}) {
+	    my $data = ($lib->{data})->{$sym};
+	    
+	    if (is_vtable ($sym)) {
+		$vtable_count++;
+		$vtable_size += $data->{size};
+		
+	    } elsif (is_rtti ($sym)) {
+		$rtti_count++;
+		$rtti_size += $data->{size};
+		
+	    } else {
+		$other_count++;
+		$other_size += $data->{size};
+	    }
 	}
+	my $total_size = 1.0 * ($vtable_size + $rtti_size + $other_size) / 100.0;
+	print ".data:\n";
+	print " vtables: $vtable_count size $vtable_size bytes - " . sprintf ("%2.2g", $vtable_size/$total_size) . "\%\n";
+	print " rtti: $rtti_count size $rtti_size bytes - " . sprintf ("%2.2g", $rtti_size/$total_size) . "\%\n";
+	print " other: $other_count size $other_size bytes - " . sprintf ("%2.2g", $other_size/$total_size) . "\%\n";
+	print "\n";
     }
-    my $total_size = 1.0 * ($vtable_size + $rtti_size + $other_size) / 100.0;
-    print ".data:\n";
-    print " vtables: $vtable_count size $vtable_size bytes - " . sprintf ("%2.2g", $vtable_size/$total_size) . "\%\n";
-    print " rtti: $rtti_count size $rtti_size bytes - " . sprintf ("%2.2g", $rtti_size/$total_size) . "\%\n";
-    print " other: $other_count size $other_size bytes - " . sprintf ("%2.2g", $other_size/$total_size) . "\%\n";
+	
+    {
+	my $vtable_relocs = 0;
+	my $rtti_relocs = 0;
+	my $data_relocs = 0;
+	my $other_relocs = 0;
+	my $addr_space = $lib->{addr_space};
+	my $key_count = keys %{$lib->{addr_space}};
+	print "Data section contains " . $key_count * 4 . " bytes\n";
+	for $sym (sort { ($lib->{relocs})->{$a} <=> ($lib->{relocs})->{$b} } keys %{$lib->{relocs}}) {
+	    my $addr = ($lib->{relocs})->{$sym};
+	    if (defined $addr_space->{$addr}) {
+		my $datum = $addr_space->{$addr};
 
-    print "\n";
+#		print "Hit '$sym' at " . sprintf ("0x%.8x", $addr) . "\n";
 
+		if (is_vtable ($datum->{symbol})) {
+		    $vtable_relocs++;
+		} elsif (is_rtti ($datum->{symbol})) {
+		    $rtti_relocs++;
+		} else {
+		    $data_relocs++;
+		}
+	    } else {
+		$other_relocs++;
+# relocs in the data section, but not inside one of our symbols.
+#	    print "Odd '$sym' at " . sprintf ("0x%.8x", $addr) .
+#		  " nearest '" . find_nearest ($addr_space, $addr) . "'\n";
+	    }
+	}
+	print "reloc breakdown:\n";
+	print " vtables: $vtable_relocs\n";
+	print " rtti: $rtti_relocs\n";
+	print " .data/non-vtable $data_relocs\n";
+	print " other: $other_relocs\n";
+    }
 }
-
