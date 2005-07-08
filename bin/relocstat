@@ -9,20 +9,21 @@
 #
 
 # misc. argument options / defaults
-my $opt_plt_too = 1;
+my $opt_plt_too = 0;
+my $random_symbols = 0;
 my $unused = 0;
 my $for_lib = '';
 my $quiet = 0;
 my $strip = 0;
 
-sub read_relocs($)
+sub read_relocs($$)
 {
     my $file = shift;
+    my $lib = shift;
     my $pipe;
     my %relocs;
     my %symbols;
     my %used;
-    my %lib;
 
 #    print "Read '$file'\n";
 
@@ -38,11 +39,9 @@ sub read_relocs($)
     }
     close ($pipe);
 
-    $lib{file} = $file;
-    $lib{symbols} = \%symbols;
-    $lib{used} = \%used;
-
-    return \%lib;
+    $lib->{file} = $file;
+    $lib->{symbols} = \%symbols;
+    $lib->{used} = \%used;
 }
 
 sub read_symbols($$)
@@ -52,28 +51,42 @@ sub read_symbols($$)
     my $pipe;
     my %def;
     my %undef;
+    my %data;
 
 #    print "Read '$file'\n";
 
     open ($pipe, "objdump -T $file |") || die "Can't objdump -T $file: $!";
     while (<$pipe>) {
-	/[0-9a-f]*\s+([gw ])\s+..\s+(\S*)\s*......................\s+(.*)/; # || next;
+	/([0-9a-f]*)\s+([gw ])\s+..\s+(\S*)\s*([0-9a-f]+)..............(.*)/; # || next;
 
-	my ($linkage, $type, $symbol) = ($1, $2, $3);
+	my ($address, $linkage, $type, $size, $symbol) = ($1, $2, $3, $4, $5);
+#	print "Symbol '$symbol' type '$type' '$linkage' addr $address, size $size\n";
 
-	$symbol && $type || next;
+	if (!$symbol || !$type) {
+#	    print "Bogus line: $_\n";
+	    next;
+	}
+
+	if ($type eq '.data') {
+	    my $realsize = hex ($size);
+	    my $realaddress = hex ($address);
+	    my %datum;
+	    $datum{size} = $realsize;
+	    $datum{address} = $realaddress;
+	    $data{$symbol} = \%datum;
+	}
 
 	if ($type ne '*UND*') {
 	    $def{$symbol} = $linkage;
 	} else {
 	    $undef{$symbol} = $linkage;
 	}
-#	print "Symbol '$symbol' type '$type' '$linkage'\n";
     }
     close ($pipe);
 
     $lib->{def} = \%def;
     $lib->{undef} = \%undef;
+    $lib->{data} = \%data;
 }
 
 sub by_internal
@@ -96,6 +109,8 @@ for my $arg (@ARGV) {
     $for_lib = $1;
   } elsif ($arg =~ m/^--strip/) {
     $strip = 1;
+  } elsif ($arg =~ m/^--random-syms/) {
+    $random_symbols = 1;
   } else {
     push @files, $arg;
   }
@@ -108,7 +123,9 @@ my @libs = ();
 my $lib;
 print STDERR "reading relocs ";
 for my $file (@files) {
-    $lib = read_relocs ($file);
+    my %lib_hash;
+    my $lib = \%lib_hash;
+    read_relocs ($file, $lib);
     read_symbols($file, $lib);
     push @libs, $lib;
     print STDERR ".";
@@ -141,4 +158,49 @@ for $lib (sort by_internal @libs) {
     my $percentage = sprintf ("%2.2g", $internal_strong_relocs / $total * 100);
     print STDERR $lib->{file} . " total relocs $total external $external_relocs, internal weak " .
 	"$internal_weak_relocs, internal strong $internal_strong_relocs: saving $percentage\%\n";
+
+    if ($random_symbols) {
+	print "\n";
+
+	my @keys = keys %{$lib->{symbols}};
+	print "Random symbols:\n";
+	for ($i = 0; $i < 20; $i++) {
+	    my $sym = $keys[rand $total];
+	    my $demangled = `c++filt $sym`;
+	    chomp $demangled;
+	    print "$demangled\t$sym\n";
+	}
+    }
+
+    my $vtable_size = 0;
+    my $vtable_count = 0;
+    my $rtti_size = 0;
+    my $rtti_count = 0;
+    my $other_size = 0;
+    my $other_count = 0;
+    for $sym (keys %{$lib->{data}}) {
+	my $data = ($lib->{data})->{$sym};
+
+	if ($sym =~ /^_ZTV/) {
+	    $vtable_count++;
+	    $vtable_size += $data->{size};
+
+	} elsif ($sym =~ /^_ZTI/) {
+	    $rtti_count++;
+	    $rtti_size += $data->{size};
+
+	} else {
+	    $other_count++;
+	    $other_size += $data->{size};
+	}
+    }
+    my $total_size = 1.0 * ($vtable_size + $rtti_size + $other_size) / 100.0;
+    print ".data:\n";
+    print " vtables: $vtable_count size $vtable_size bytes - " . sprintf ("%2.2g", $vtable_size/$total_size) . "\%\n";
+    print " rtti: $rtti_count size $rtti_size bytes - " . sprintf ("%2.2g", $rtti_size/$total_size) . "\%\n";
+    print " other: $other_count size $other_size bytes - " . sprintf ("%2.2g", $other_size/$total_size) . "\%\n";
+
+    print "\n";
+
 }
+
