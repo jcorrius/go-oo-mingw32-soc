@@ -41,7 +41,7 @@ ScVbaWorkbook::getActiveSheet() throw (uno::RuntimeException)
 	uno::Reference< sheet::XSpreadsheetView > xSpreadsheet(
 			mxModel->getCurrentController(), uno::UNO_QUERY_THROW );
 
-	return uno::Reference< vba::XWorksheet >( new ScVbaWorksheet( xSpreadsheet->getActiveSheet() ) );
+	return uno::Reference< vba::XWorksheet >( new ScVbaWorksheet( xSpreadsheet->getActiveSheet() ),mxModel );
 }
 
 uno::Reference< vba::XWorksheets >
