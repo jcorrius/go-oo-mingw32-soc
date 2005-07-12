@@ -101,11 +101,13 @@ namespace vclcanvas
 	maCanvasHelper.setCairo( mpCairo );
 	maCanvasHelper.setDevice( rDevice );
 
-	geometry::RealSize2D aSrcSize = xDevice->getSize();
+	Size aSrcSize = xDevice->getSurfaceSize();
+	cairo_matrix_t aScaleMatrix;
 
 	cairo_save( mpCairo );
 	cairo_set_source_surface( mpCairo, pSrcSurface, 0, 0 );
-	cairo_scale( mpCairo, rSize.Width/aSrcSize.Width, rSize.Height/aSrcSize.Height );
+	cairo_matrix_init_scale( &aScaleMatrix, rSize.Width/aSrcSize.Width(), rSize.Height/aSrcSize.Height() );
+	cairo_set_matrix( mpCairo, &aScaleMatrix );
 	cairo_set_operator( mpCairo, CAIRO_OPERATOR_SOURCE );
 	cairo_paint( mpCairo );
 	cairo_restore( mpCairo );

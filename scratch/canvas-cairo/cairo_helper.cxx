@@ -25,7 +25,7 @@ namespace cairo {
 
 using namespace ::cairo;
 
-#define OOO_CANVAS_GLITZ 1
+//#define OOO_CANVAS_GLITZ 1
 
 int cairoHelperGetDefaultScreen( void* display )
 {
@@ -108,11 +108,15 @@ cairoHelperGetSurface( const SystemEnvData* pSysData, int x, int y, int width, i
     printf ("try to create glitz surface %d x %d\n", width, height );
     pGlitzDrawable = (glitz_drawable_t*) cairoHelperGetGlitzDrawable( pSysData, width, height );
 
-    if( pGlitzDrawable )
+    if( pGlitzDrawable ) {
 	pGlitzSurface = (glitz_surface_t*) cairoHelperGetGlitzSurface( pSysData, pGlitzDrawable, x, y, width, height );
+	glitz_drawable_destroy( pGlitzDrawable );
+    }
 
-    if( pGlitzSurface )
+    if( pGlitzSurface ) {
 	pSurface = cairo_glitz_surface_create( pGlitzSurface );
+	glitz_surface_destroy( pGlitzSurface );
+    }
 
 #endif
 #endif
@@ -130,6 +134,7 @@ cairoHelperGetSurface( const SystemEnvData* pSysData, int x, int y, int width, i
 void
 cairoHelperFlush( const SystemEnvData* pSysData )
 {
+#ifdef OOO_CANVAS_GLITZ
  #ifdef CAIRO_HAS_GLITZ_SURFACE
      glXWaitGL();
      glXWaitX();
@@ -137,6 +142,9 @@ cairoHelperFlush( const SystemEnvData* pSysData )
  #else
     XSync( (Display*) pSysData->pDisplay, false );
  #endif
+#else
+    XSync( (Display*) pSysData->pDisplay, false );
+#endif
 }
 
 void*
