@@ -91,7 +91,7 @@ namespace vclcanvas
     }
 
     CanvasBitmap::CanvasBitmap( const geometry::RealSize2D& rSize, Surface* pSrcSurface,
-                                const WindowGraphicDevice::ImplRef& rDevice )
+                                const WindowGraphicDevice::ImplRef& rDevice, bool bFast )
     {
 	WindowGraphicDevice::ImplRef xDevice = rDevice;
 
@@ -103,14 +103,19 @@ namespace vclcanvas
 
 	Size aSrcSize = xDevice->getSurfaceSize();
 	cairo_matrix_t aScaleMatrix;
+	cairo_pattern_t* pPattern;
 
 	cairo_save( mpCairo );
+	pPattern = cairo_pattern_create_for_surface( pSrcSurface );
 	cairo_set_source_surface( mpCairo, pSrcSurface, 0, 0 );
-	cairo_matrix_init_scale( &aScaleMatrix, rSize.Width/aSrcSize.Width(), rSize.Height/aSrcSize.Height() );
-	cairo_set_matrix( mpCairo, &aScaleMatrix );
+	cairo_matrix_init_scale( &aScaleMatrix, aSrcSize.Width()/rSize.Width, aSrcSize.Height()/rSize.Height );
+	cairo_pattern_set_matrix( pPattern, &aScaleMatrix );
+	cairo_pattern_set_filter( pPattern, bFast ? CAIRO_FILTER_FAST : CAIRO_FILTER_BEST );
 	cairo_set_operator( mpCairo, CAIRO_OPERATOR_SOURCE );
+	cairo_set_source( mpCairo, pPattern );
 	cairo_paint( mpCairo );
 	cairo_restore( mpCairo );
+	cairo_pattern_destroy( pPattern );
     }
 
     CanvasBitmap::~CanvasBitmap()

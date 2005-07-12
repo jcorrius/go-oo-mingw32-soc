@@ -125,7 +125,8 @@ namespace vclcanvas
 
         /// Must be called with locked Solar mutex
 	CanvasBitmap::CanvasBitmap( const ::com::sun::star::geometry::RealSize2D& rSize, ::cairo::Surface* pSrcSurface,
-				    const WindowGraphicDevice::ImplRef& rDevice );
+				    const WindowGraphicDevice::ImplRef& rDevice,
+				    bool bFast);
 
         /// Dispose all internal references
         virtual void SAL_CALL disposing();

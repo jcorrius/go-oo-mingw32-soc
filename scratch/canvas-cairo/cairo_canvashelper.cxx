@@ -318,7 +318,7 @@ namespace vclcanvas
 		    Surface* pSurface = tools::surfaceFromXBitmap( (*mpTextures)[mnPolygonIndex].Bitmap, mxDevice, data );
 
 		    if( pSurface ) {
-			cairo_pattern_t *pPattern;
+			cairo_pattern_t* pPattern;
 
 			cairo_save( mpCairo );
 
@@ -783,7 +783,7 @@ namespace vclcanvas
                                                                         sal_Bool 					beFast )
     {
 	Surface *pSurface = cairo_get_target( mpCairo );
-	return uno::Reference< rendering::XBitmap >( new CanvasBitmap( newSize, pSurface, mxDevice ) );
+	return uno::Reference< rendering::XBitmap >( new CanvasBitmap( newSize, pSurface, mxDevice, beFast ) );
     }
 
     uno::Sequence< sal_Int8 > CanvasHelper::getData( const geometry::IntegerRectangle2D& rect )
