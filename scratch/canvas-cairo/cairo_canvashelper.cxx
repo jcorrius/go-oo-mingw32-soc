@@ -774,9 +774,9 @@ namespace vclcanvas
         if( !mxDevice.get() )
             return geometry::IntegerSize2D(); // we're disposed
 
-	geometry::RealSize2D aSize = mxDevice->getSize();
+	Size aSize = mxDevice->getSurfaceSize();
 
-        return geometry::IntegerSize2D( (sal_Int32) aSize.Width, (sal_Int32) aSize.Height );
+        return geometry::IntegerSize2D( aSize.Width(), aSize.Height() );
     }
 
     uno::Reference< rendering::XBitmap > CanvasHelper::getScaledBitmap( const geometry::RealSize2D& newSize, 
