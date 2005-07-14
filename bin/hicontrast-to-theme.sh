@@ -12,7 +12,7 @@ if [ -z "$SRC" -o -z "$DST" ] ; then
     exit 1
 fi
 
-DST="`pwd`/$DST"
+[ "$DST" == "${DST#/}" ] && DST="`pwd`/$DST"
 cd "$SRC"
 
 while read WHAT F T ; do
@@ -23,7 +23,7 @@ while read WHAT F T ; do
 	 [ "$D" = "$FILE" ] && D="" ; \
 	 D="'"$DST"'/$D" ; \
 	 [ -d "$D" ] || mkdir -p "$D" ; \
-	 mv "$FILE" "$D/${FNAME/'"$F"'/'"$T"'}"' \;
+	 cp "$FILE" "$D/${FNAME/'"$F"'/'"$T"'}"' \;
 done << EOF
 *_h.png		_h.png	.png
 *_sch.png	_sch.png	.png
