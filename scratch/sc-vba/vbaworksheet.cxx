@@ -14,9 +14,55 @@
 #include <com/sun/star/sheet/XSpreadsheets.hpp>
 #include <com/sun/star/sheet/XSheetPastable.hpp>
 #include <com/sun/star/sheet/XCellAddressable.hpp>
+#include <cppuhelper/bootstrap.hxx>
+#include <com/sun/star/util/XURLTransformer.hpp>
 #include <viewuno.hxx>
 #include "vbarange.hxx"
 #include "vbaworksheet.hxx"
+
+
+static void
+dispatchMyRequests (uno::Reference< frame::XModel>& xModel,rtl::OUString & aUrl) {
+
+	util::URL  url ;
+	url.Complete = aUrl;
+	rtl::OUString emptyString = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "" ));
+	uno::Reference<frame::XController> xController = xModel->getCurrentController();
+	uno::Reference<frame::XFrame> xFrame = xController->getFrame();
+	uno::Reference<frame::XDispatchProvider> xDispatchProvider (xFrame,uno::UNO_QUERY_THROW);
+	try
+	{
+		uno::Reference<uno::XComponentContext > xContext(  ::cppu::defaultBootstrap_InitialComponentContext());
+		if ( !xContext.is() )
+		{
+			return ;
+		}
+
+        // get the remote office service manager
+		uno::Reference<lang::XMultiComponentFactory > xServiceManager(
+		            xContext->getServiceManager() );
+		if ( !xServiceManager.is() )
+		{
+			return ;
+		}
+		uno::Reference<util::XURLTransformer> xParser( xServiceManager->createInstanceWithContext(
+		rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "com.sun.star.util.URLTransformer" ) )
+					,xContext), uno::UNO_QUERY_THROW );
+
+		xParser->parseStrict (url);
+	}
+	catch ( ::cppu::BootstrapException & e )
+	{
+		return ;
+	}
+	catch ( uno::Exception & e )
+	{
+		return ;
+	}
+
+	uno::Reference<frame::XDispatch> xDispatcher = xDispatchProvider->queryDispatch(url,emptyString,0);
+	xDispatcher->dispatch( url,uno::Sequence< beans::PropertyValue >(0) );
+}
 
 ::rtl::OUString
 ScVbaWorksheet::getName() throw (uno::RuntimeException)
@@ -123,38 +169,38 @@ ScVbaWorksheet::Move( const uno::Any& before, const uno::Any& after ) throw (uno
 
 	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( mxModel, uno::UNO_QUERY );
 	uno::Reference< sheet::XSpreadsheetView > xSpreadsheetView(
-                        mxModel->getCurrentController(), uno::UNO_QUERY_THROW );
+					mxModel->getCurrentController(), uno::UNO_QUERY_THROW );
 	uno::Reference<sheet::XSpreadsheet> xSpreadSheet = xSpreadsheetView->getActiveSheet();
 	uno::Reference<sheet::XSpreadsheets> xSheets = xSpreadDoc->getSheets();
 	uno::Reference <container::XIndexAccess> xIndex( xSheets, uno::UNO_QUERY );
-       	sal_Int16 nCount = xIndex->getCount();
+	sal_Int16 nCount = xIndex->getCount();
 
 	if (aBefore==NULL && aAfter==NULL) 
 	{
-	        if ( xIndex.is() )
-        	{
+		if ( xIndex.is() )
+		{
 			//FIXME Ideally it should open a new workbook 
 			xSheets->moveByName(getName(),1 + nCount);	
-                	return ;
-        	}
+			return ;
+		}
 
 	}
 
 	if (aBefore) 
 	{
-        	if ( xIndex.is() )
-        	{
-	                for (sal_Int16 i=0; i < nCount; i++)
-        	        {
-                	        uno::Reference< sheet::XSpreadsheet > xSheet(xIndex->getByIndex(i), uno::UNO_QUERY);
-                        	uno::Reference< container::XNamed > xNamed( xSheet, uno::UNO_QUERY_THROW );
-                        if (xNamed->getName() == aBefore)
-                        {
-                                nDest = i - 1;
-                                break;
-                        }
-                }
-        }
+		if ( xIndex.is() )
+		{
+			for (sal_Int16 i=0; i < nCount; i++)
+			{
+				uno::Reference< sheet::XSpreadsheet > xSheet(xIndex->getByIndex(i), uno::UNO_QUERY);
+				uno::Reference< container::XNamed > xNamed( xSheet, uno::UNO_QUERY_THROW );
+				if (xNamed->getName() == aBefore)
+				{
+					nDest = i - 1;
+					break;
+				}
+			}
+		}
 	
 	}
 	
@@ -201,7 +247,7 @@ ScVbaWorksheet::Copy( const uno::Any& before, const uno::Any& after ) throw (uno
 	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( mxModel, uno::UNO_QUERY );
 	uno::Reference<sheet::XSpreadsheets> xSheets = xSpreadDoc->getSheets();
 	uno::Reference <container::XIndexAccess> xIndex( xSheets, uno::UNO_QUERY );
-       	sal_Int16 nCount = xIndex->getCount();
+	sal_Int16 nCount = xIndex->getCount();
 
 	if (aBefore==NULL && aAfter==NULL) 
 	{
@@ -215,7 +261,7 @@ ScVbaWorksheet::Copy( const uno::Any& before, const uno::Any& after ) throw (uno
 			aName += String::CreateFromInt32((1+nCount));
 			xSheets->copyByName(getName(),aName,nCount);
 			return ;
-        }
+		}
 	}
 
 	if (aBefore) 
@@ -236,7 +282,7 @@ ScVbaWorksheet::Copy( const uno::Any& before, const uno::Any& after ) throw (uno
 	}
 	
 	aName= getName() ;
-		aName += String::CreateFromInt32((1+nCount));
+	aName += String::CreateFromInt32((1+nCount));
 	if (nDest >= 0)
 		xSheets->copyByName(getName(),aName,nDest);	
 	else
@@ -247,17 +293,8 @@ ScVbaWorksheet::Copy( const uno::Any& before, const uno::Any& after ) throw (uno
 void 
 ScVbaWorksheet::Paste( const uno::Any& Destination, const uno::Any& Link ) throw (uno::RuntimeException)
 {
-	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( mxModel, uno::UNO_QUERY );
-	uno::Reference<sheet::XSpreadsheets> xSheets = xSpreadDoc->getSheets();
-	uno::Reference<sheet::XSheetPastable> xsheetpastable(mxModel,uno::UNO_QUERY_THROW);
-
-	uno::Reference<table::XCellRange> xCellRange(mxSheet,uno::UNO_QUERY_THROW);
-        uno::Reference<table::XCell> xCell = xCellRange->getCellByPosition( 6,4 );
-	uno::Reference<sheet::XCellAddressable> xCellAddr(xCell,uno::UNO_QUERY_THROW);
-
-	table::CellAddress xcelladdress = xCellAddr->getCellAddress();
-	//FIXME : XSheetPastable not implemented by OOo
-	xsheetpastable->paste(xcelladdress);
+	rtl::OUString url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:Paste"));
+	dispatchMyRequests(mxModel,url);
 }
 
 void 
@@ -323,3 +360,9 @@ ScVbaWorksheet::Range( const ::uno::Any &rRange ) throw (uno::RuntimeException)
 	return NULL;
 }
 
+void
+ScVbaWorksheet::CheckSpelling( const uno::Any& CustomDictionary,const uno::Any& IgnoreUppercase,const uno::Any& AlwaysSuggest, const uno::Any& SpellingLang ) throw (uno::RuntimeException)
+{
+	rtl::OUString url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:SpellDialog"));
+	dispatchMyRequests(mxModel,url);
+}

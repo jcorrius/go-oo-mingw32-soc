@@ -39,11 +39,12 @@ public:
 	virtual void SAL_CALL Move( const uno::Any& before, const uno::Any& after ) throw (uno::RuntimeException) ;
  	virtual void SAL_CALL Copy( const uno::Any& before, const uno::Any& after ) throw (uno::RuntimeException);
 	virtual void SAL_CALL Paste( const uno::Any& Destination, const uno::Any& Link ) throw (uno::RuntimeException);
-    	virtual void SAL_CALL Delete(  ) throw (uno::RuntimeException);
+	virtual void SAL_CALL Delete(  ) throw (uno::RuntimeException);
 	virtual void SAL_CALL Protect( const uno::Any& Password, const uno::Any& DrawingObjects, const uno::Any& Contents, const uno::Any& Scenarios, const uno::Any& UserInterfaceOnly ) throw (uno::RuntimeException);
-    	virtual void SAL_CALL Unprotect( const uno::Any& Password ) throw (uno::RuntimeException);
+	virtual void SAL_CALL Unprotect( const uno::Any& Password ) throw (uno::RuntimeException);
 
 	virtual void SAL_CALL Calculate(  ) throw (uno::RuntimeException);
+	virtual void SAL_CALL CheckSpelling( const uno::Any& CustomDictionary,const uno::Any& IgnoreUppercase,const uno::Any& AlwaysSuggest, const uno::Any& SpellingLang ) throw (uno::RuntimeException);
 };
 
 #endif /* SC_VBA_WORKSHEET_HXX */
