@@ -36,6 +36,7 @@ public:
     virtual void SAL_CALL Copy( const uno::Any& Before, const uno::Any& After ) throw (uno::RuntimeException);
     virtual void SAL_CALL Move( const uno::Any& Before, const uno::Any& After ) throw (uno::RuntimeException);
     virtual void SAL_CALL Delete(  ) throw (uno::RuntimeException);
+    virtual void SAL_CALL Close(  ) throw (uno::RuntimeException);
 };
 
-#endif /* SC_VBA_WORKBOOK_HXX */
+#endif /* SC_VBA_WORKBOOKS_HXX */

@@ -158,3 +158,13 @@ ScVbaWorkbooks::Delete() throw (uno::RuntimeException)
 {
 	SC_VBA_STUB();
 }
+
+void
+ScVbaWorkbooks::Close() throw (uno::RuntimeException)
+{
+	uno::Reference< lang::XMultiServiceFactory > xSMgr = ::comphelper::getProcessServiceFactory();
+	uno::Reference< frame::XDesktop > xDesktop
+			(xSMgr->createInstance(::rtl::OUString::createFromAscii("com.sun.star.frame.Desktop")), uno::UNO_QUERY_THROW );
+	xDesktop->terminate();
+}
+
