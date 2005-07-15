@@ -141,8 +141,8 @@ Gcc hack:
 	    + no need to put code in the foo anyway [?]
 	+ optimise parent/chain calls:
 	    + switch to vtable usage (?) => relocation (?)
-    + Is there a 'call (%eax)' type instruction ?
-	+ if so, can we use it !?
+    + Can we use the 'call *(%eax)' instruction
+	+ how bad is that wrt. stalling data fetch etc. ?
 
 Interesting:
     + if we know what the type is; we do a 'direct' function call
@@ -316,6 +316,10 @@ decl.c (cxx_init_decl_processing):
 
     vtable_entry_type = build_pointer_type (vfunc_type);
   }
+  record_builtin_type (RID_MAX, VTBL_PTR_TYPE, vtable_entry_type);
+#define VTBL_PTR_TYPE		"__vtbl_ptr_type"
+
+
 
 tree.c (build_pointer_type):
   return build_pointer_type_for_mode (to_type, ptr_mode, false);
@@ -403,3 +407,59 @@ varasm.c (assemble_variable): called for:
     value of compute_reloc_for_constant 'BaseClass::_ZTV9BaseClass' is 2
 
     -> varasm.c (output_constant):
+
+      if (! assemble_integer (expand_expr (exp, NULL_RTX, VOIDmode,
+					   EXPAND_INITIALIZER),
+			      MIN (size, thissize), align, 0))
+	error ("initializer for integer value is too complicated");
+
+expr.c (expand_expr) ->
+	    (expand_expr_addr_expr) -> most likely 'default:' path.
+
+Perhaps can hook via cp/expr.c (cxx_expand_expr): ?
+    cf. langhooks-def.h -> cp/cp-lang.c (lang_hooks)
+
+varasm.c:
+
+bool
+assemble_integer (rtx x, unsigned int size, unsigned int align, int force)
+{
+  int aligned_p;
+
+  aligned_p = (align >= MIN (size * BITS_PER_UNIT, BIGGEST_ALIGNMENT));
+
+  /* See if the target hook can handle this kind of object.  */
+  if (targetm.asm_out.integer (x, size, aligned_p))
+    ** most likely down this path **
+
+    -> varasm.c (default_assemble_integer):
+	-> varasm.c (assemble_integer_with_op)
+	    -> final.c (output_addr_const)
+
+eg. vtable method:
+varasm.c (assemble_integer) -> expand_expr_addr_expr_1 ->
+    -> default_assemble_integer '      .long   '
+    -> OutputAddrConst (SYMBOL_REF)
+	-> assemble_name (file, XSTR (x, 0));
+	    ** This is where our label is generated that
+	       needs an appended '@PLT' **
+
+** So - (perhaps) don't want to poke 'assemble_integer'
+   unless we absolutely have to **
+
+/* Used in VAR_DECLs to indicate that the variable is a vtable.
+   Used in FIELD_DECLs for vtable pointers.
+   Used in FUNCTION_DECLs to indicate that the function is virtual.  */
+#define DECL_VIRTUAL_P(NODE) (DECL_CHECK (NODE)->decl.virtual_flag)
+
+
+varasm.c(output_constant):
+    at edge of assemble_integer call we have:
+	exp == ADDR_EXPR
+	    TREE_OPERAND(exp, 0) == FUNCTION_DECL 
+	code == POINTER_TYPE
+    
+
+** Have patch to output PLT relocs for these...
+   + But ... - PLT is not populated by linker (somehow).
+
