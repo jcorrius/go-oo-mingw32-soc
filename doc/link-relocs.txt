@@ -132,6 +132,23 @@ Relocations:
 		  methods (from publicly exposed things)
 		+ eg. SvXML
 
+Gcc hack:
+    + output location of PLT function instead of address
+      of function - (easy?)
+	#pragma push relocating_vtables
+	#pragma pop relocating_vtables (?)
+	+ -fvtable-via-plt
+	    + no need to put code in the foo anyway [?]
+	+ optimise parent/chain calls:
+	    + switch to vtable usage (?) => relocation (?)
+    + Is there a 'call (%eax)' type instruction ?
+	+ if so, can we use it !?
+
+Interesting:
+    + if we know what the type is; we do a 'direct' function call
+	+ instead of the vtable lookup [wow]
+	    + => in fact ~always slower than a vtable
+	      lookup (surely)
 	
     + work out how large a plt entry is & how many vtable
       entries we have.
@@ -247,3 +264,142 @@ typeinfo for XLineDashItem      _ZTI13XLineDashItem
      45 _ZNK11CntBoolItem17GetValueTextByValEh
      15 _ZTI12SvxColorItem
 
+
++ notes on layout foo:
+	+ layout_decl (vtable) ? - call to the backend for layout ?
+		+ stor-layout.c (layout_decl) - allocates storage.
+		+ sets rtl - if known
+  /* Make the rtl for any new vtables we have created, and unmark
+     the base types we marked.  */
+	+ class.c (finish_vtbls):
+
+    + class.c (layout_class_type): interesting stuff...
+
+    + class.c (create_vtable_ptr): interesting ...
+	+ The initial code creates the TREE_LIST nodes for
+	  the virtual functions:
+
+  /* Collect the virtual functions declared in T.  */
+  for (fn = TYPE_METHODS (t); fn; fn = TREE_CHAIN (fn))
+    if (DECL_VINDEX (fn) && !DECL_MAYBE_IN_CHARGE_DESTRUCTOR_P (fn)
+	&& TREE_CODE (DECL_VINDEX (fn)) != INTEGER_CST)
+      {
+	tree new_virtual = make_node (TREE_LIST);
+
+//	cp_warning_at ("create_vtable_ptr for method: %qD", fn);
+	
+	BV_FN (new_virtual) = fn;
+	BV_DELTA (new_virtual) = integer_zero_node;
+	BV_VCALL_INDEX (new_virtual) = NULL_TREE;
+
+	TREE_CHAIN (new_virtual) = *virtuals_p;
+	*virtuals_p = new_virtual;
+      }
+
+-> build_vtbl_initializer ...  
+   + calls: 
+	init = build1 (ADDR_EXPR, vfunc_ptr_type_node, fn);
+vs
+	init = build1 (ADDR_EXPR, vfunc_ptr_type_node, fn);
+
+tree.h:#define build1(c,t1,t2) build1_stat (c,t1,t2 MEM_STAT_INFO)
+cp-tree.h:#define vfunc_ptr_type_node  vtable_entry_type
+
+decl.c (cxx_init_decl_processing):
+  {
+    /* Make sure we get a unique function type, so we can give
+       its pointer type a name.  (This wins for gdb.) */
+    tree vfunc_type = make_node (FUNCTION_TYPE);
+    TREE_TYPE (vfunc_type) = integer_type_node;
+    TYPE_ARG_TYPES (vfunc_type) = NULL_TREE;
+    layout_type (vfunc_type);
+
+    vtable_entry_type = build_pointer_type (vfunc_type);
+  }
+
+tree.c (build_pointer_type):
+  return build_pointer_type_for_mode (to_type, ptr_mode, false);
+
+emit-rtl.c:
+enum machine_mode ptr_mode;	/* Mode whose width is POINTER_SIZE.  */
+
+'enum machine_mode' - never declared (apparently)
+
+* Pointing to the PLT works well at the assembler level.
+
+gcc/config/i386/i386.c:
+
+static void
+output_pic_addr_const (FILE *file, rtx x, int code)
+    case SYMBOL_REF:
+     /* Mark the decl as referenced so that cgraph will output the function.  */
+     if (SYMBOL_REF_DECL (x))
+       mark_decl_referenced (SYMBOL_REF_DECL (x));
+
+      assemble_name (file, XSTR (x, 0));
+      if (!TARGET_MACHO && code == 'P' && ! SYMBOL_REF_LOCAL_P (x))
+	fputs ("@PLT", file);
+      break;
+
+from i386:print_operand():
+/* Meaning of CODE:
+...
+   P -- if PIC, print an @PLT suffix.
+ */
+
+called from gcc/final.c (output_operand):
+
+or config/i386/sol2.h:
+#define ASM_OUTPUT_CALL(FILE, FN)				\
+  do								\
+    {								\
+      fprintf (FILE, "\tcall\t");				\
+      print_operand (FILE, XEXP (DECL_RTL (FN), 0), 'P');	\
+      fprintf (FILE, "\n");					\
+    }								\
+  while (0)
+
+These magic names come from some highly magic
+printf style output macros; cf. final.c (output_asm_insn):
+
+eg. config/i386/i386.md:
+
+(define_insn "*call_pop_0"
+  [(call (mem:QI (match_operand:SI 0 "constant_call_address_operand" ""))
+	 (match_operand:SI 1 "" ""))
+   (set (reg:SI SP_REG) (plus:SI (reg:SI SP_REG)
+			    (match_operand:SI 2 "immediate_operand" "")))]
+  "!TARGET_64BIT"
+{
+  if (SIBLING_CALL_P (insn))
+    return "jmp\t%P0";
+  else
+    return "call\t%P0";
+}
+
+(define_insn "*call_1_rex64"
+  [(call (mem:QI (match_operand:DI 0 "call_insn_operand" "rsm"))
+	 (match_operand 1 "" ""))]
+  "!SIBLING_CALL_P (insn) && TARGET_64BIT"
+{
+  if (constant_call_address_operand (operands[0], Pmode))
+    return "call\t%P0";
+  return "call\t%A0";
+}
+
+is an '@PLT' reloc machine-specific ? - yes prolly; the 'P' has to
+come from i386/ somewhere ...
+
+** No current relocations use %P - so ... no use grepping for it **
+
+* Interestingly builtins.c (build_function_call_expr)
+    + Seems to have an 'ADDR_EXPR' as it's argument to 'CALL_EXPR'
+    + PLT selection must be lower down ...
+
+varasm.c (compute_reloc_for_constant) ?
+
+varasm.c (assemble_variable): called for:
+    assemble variable 'BaseClass::_ZTV9BaseClass'
+    value of compute_reloc_for_constant 'BaseClass::_ZTV9BaseClass' is 2
+
+    -> varasm.c (output_constant):
