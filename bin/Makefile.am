@@ -6,6 +6,7 @@ script_files = \
 	fix-deps \
 	generate-bash-completion \
 	help-font-munge \
+	hicontrast-to-theme.sh \
 	install-dict.in \
 	install-dictionaries \
 	java-set-classpath.in \
