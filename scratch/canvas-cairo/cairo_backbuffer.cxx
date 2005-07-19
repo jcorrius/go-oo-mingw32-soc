@@ -66,7 +66,8 @@ using namespace ::cairo;
 
 namespace vclcanvas
 {
-    BackBuffer::BackBuffer( WindowGraphicDevice::ImplRef xGraphicDevice, Format aFormat ) : mxGraphicDevice( xGraphicDevice ), mpSurface( NULL ), mpCairo( NULL ), maSize( xGraphicDevice->getSurfaceSize() ), maFormat( aFormat )
+    BackBuffer::BackBuffer( WindowGraphicDevice::ImplRef xGraphicDevice, Content aContent )
+	: mxGraphicDevice( xGraphicDevice ), mpSurface( NULL ), mpCairo( NULL ), maSize( xGraphicDevice->getSurfaceSize() ), maContent( aContent )
     {
 	printf("BackBuffer constructor\n");
     }
@@ -103,7 +104,7 @@ namespace vclcanvas
 
     void BackBuffer::createSurface()
     {
-	Surface* pNewSurface = mxGraphicDevice->getSimilarSurface( maSize, maFormat );
+	Surface* pNewSurface = mxGraphicDevice->getSimilarSurface( maSize, maContent );
 
 	if( mpSurface )
 	    cairo_surface_destroy( mpSurface );

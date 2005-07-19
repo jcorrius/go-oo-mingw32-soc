@@ -287,6 +287,15 @@ namespace vclcanvas
             LINE_COLOR, FILL_COLOR, TEXT_COLOR, IGNORE_COLOR
         };
         
+	enum Operation {
+	    Stroke,
+	    Fill,
+	    Clip
+	};
+
+	void drawPolyPolygonPath( const ::com::sun::star::uno::Reference< ::com::sun::star::rendering::XPolyPolygon2D >& xPolyPolygon,
+				  Operation aOperation, ::cairo::Cairo* pCairo=NULL ) const;
+
     protected:
         /// Phyical output device
         WindowGraphicDevice::ImplRef	mxDevice;
@@ -317,22 +326,13 @@ namespace vclcanvas
 			const ::com::sun::star::rendering::RenderState& renderState,
 			bool setColor );
 
-	enum Operation {
-	    Stroke,
-	    Fill,
-	    Clip
-	};
 
 
 	const ::com::sun::star::uno::Sequence< ::com::sun::star::rendering::Texture >* mpTextures;
-	void doOperation( Operation aOperation );
-	sal_uInt32 mnPolygonIndex;
-
-	void drawPolyPolygonImplementation( ::basegfx::B2DPolyPolygon aPolyPolygon, Operation aOperation );
+	void doOperation( Operation aOperation, ::cairo::Cairo* pCairo, sal_uInt32 nPolygonIndex=0 ) const;
+	void drawPolyPolygonImplementation( ::basegfx::B2DPolyPolygon aPolyPolygon, Operation aOperation, ::cairo::Cairo* pCairo ) const;
 	void drawPolyPolygonFallback( const ::com::sun::star::uno::Reference< ::com::sun::star::rendering::XPolyPolygon2D >& xPolyPolygon,
-				      Operation aOperation );
-	void drawPolyPolygonPath( const ::com::sun::star::uno::Reference< ::com::sun::star::rendering::XPolyPolygon2D >& xPolyPolygon,
-				  Operation aOperation );
+				      Operation aOperation, ::cairo::Cairo* pCairo ) const;
     };
 }
 

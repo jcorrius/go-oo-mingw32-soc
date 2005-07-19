@@ -142,7 +142,7 @@ namespace vclcanvas
         maChangeRecords.reserve( CHANGE_RECORDS_INITIAL_SIZE );
 
 	Size aSize = mpBackBuffer->getSize();
-	mpSurface = cairo_surface_create_similar( mpBackBuffer->getSurface(), CAIRO_FORMAT_RGB24, aSize.Width(), aSize.Height() );
+	mpSurface = cairo_surface_create_similar( mpBackBuffer->getSurface(), CAIRO_CONTENT_COLOR, aSize.Width(), aSize.Height() );
 	mpCairo = cairo_create( mpSurface );
 	mpWinSurface = pSurface;
 	cairo_surface_reference( mpWinSurface );

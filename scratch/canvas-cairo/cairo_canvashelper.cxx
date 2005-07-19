@@ -307,20 +307,20 @@ namespace vclcanvas
 	    cairo_restore( mpCairo );
     }
 
-    void CanvasHelper::doOperation( Operation aOperation )
+    void CanvasHelper::doOperation( Operation aOperation, Cairo* pCairo, sal_uInt32 nPolygonIndex ) const
     {
 	switch( aOperation ) {
 	case Fill:
 	    if( mpTextures ) {
-		::com::sun::star::rendering::Texture aTexture ( (*mpTextures)[mnPolygonIndex] );
+		::com::sun::star::rendering::Texture aTexture ( (*mpTextures)[nPolygonIndex] );
 		if( aTexture.Bitmap.is() ) {
 		    unsigned char* data;
-		    Surface* pSurface = tools::surfaceFromXBitmap( (*mpTextures)[mnPolygonIndex].Bitmap, mxDevice, data );
+		    Surface* pSurface = tools::surfaceFromXBitmap( (*mpTextures)[nPolygonIndex].Bitmap, mxDevice, data );
 
 		    if( pSurface ) {
 			cairo_pattern_t* pPattern;
 
-			cairo_save( mpCairo );
+			cairo_save( pCairo );
 
 			::com::sun::star::geometry::AffineMatrix2D aTransform( aTexture.AffineTransform );
 			Matrix aScaleMatrix, aTextureMatrix, aScaledTextureMatrix, aOrigMatrix, aNewMatrix;
@@ -351,10 +351,10 @@ namespace vclcanvas
 			cairo_pattern_set_matrix( pPattern, &aScaledTextureMatrix );
 			//cairo_pattern_set_extend( pPattern, CAIRO_EXTEND_REPEAT );
 
-			cairo_set_source( mpCairo, pPattern );
-			cairo_fill( mpCairo );
+			cairo_set_source( pCairo, pPattern );
+			cairo_fill( pCairo );
 
-			cairo_restore( mpCairo );
+			cairo_restore( pCairo );
 
 			cairo_pattern_destroy( pPattern );
 			cairo_surface_destroy( pSurface );
@@ -369,26 +369,26 @@ namespace vclcanvas
 			free( data );
 		}
 	    } else
-		cairo_fill( mpCairo );
+		cairo_fill( pCairo );
 	break;
 	case Stroke:
-	    cairo_stroke( mpCairo );
+	    cairo_stroke( pCairo );
 	break;
 	case Clip:
-	    cairo_clip( mpCairo );
+	    cairo_clip( pCairo );
 	break;
 	}
     }
 
-    void CanvasHelper::drawPolyPolygonImplementation( ::basegfx::B2DPolyPolygon aPolyPolygon, Operation aOperation )
+    void CanvasHelper::drawPolyPolygonImplementation( ::basegfx::B2DPolyPolygon aPolyPolygon, Operation aOperation, Cairo* pCairo ) const
     {
-	for( mnPolygonIndex = 0; mnPolygonIndex < aPolyPolygon.count(); mnPolygonIndex++ ) {
-	    ::basegfx::B2DPolygon aPolygon = aPolyPolygon.getB2DPolygon( mnPolygonIndex );
+	for( sal_uInt32 nPolygonIndex = 0; nPolygonIndex < aPolyPolygon.count(); nPolygonIndex++ ) {
+	    ::basegfx::B2DPolygon aPolygon = aPolyPolygon.getB2DPolygon( nPolygonIndex );
 	    bool bIsBezier = aPolygon.areControlPointsUsed();
 	    ::basegfx::B2DPoint aA, aB, aP;
 
 	    aP = aPolygon.getB2DPoint( 0 );
-	    cairo_move_to( mpCairo, aP.getX(), aP.getY() );
+	    cairo_move_to( pCairo, aP.getX(), aP.getY() );
 	    printf( "move to %f,%f\n", aP.getX(), aP.getY() );
 
 	    if( bIsBezier ) {
@@ -400,27 +400,27 @@ namespace vclcanvas
 		aP = aPolygon.getB2DPoint( j );
 
 		if( bIsBezier ) {
-		    cairo_curve_to( mpCairo, aA.getX(), aA.getY(), aB.getX(), aB.getY(), aP.getX(), aP.getY() );
+		    cairo_curve_to( pCairo, aA.getX(), aA.getY(), aB.getX(), aB.getY(), aP.getX(), aP.getY() );
 			
 		    aA = aPolygon.getControlPointA( j );
 		    aB = aPolygon.getControlPointB( j );
 		} else {
-		    cairo_line_to( mpCairo, aP.getX(), aP.getY() );
+		    cairo_line_to( pCairo, aP.getX(), aP.getY() );
 		    printf( "line to %f,%f\n", aP.getX(), aP.getY() );
 		}
 	    }
 
 	    if( aPolygon.isClosed() )
-		cairo_close_path( mpCairo );
+		cairo_close_path( pCairo );
 
 	    if( aOperation == Fill &&  mpTextures )
-		doOperation( aOperation );
+		doOperation( aOperation, pCairo, nPolygonIndex );
 	}
-	if( aOperation != Fill || !mpTextures )
-	    doOperation( aOperation );
+	if( aPolyPolygon.count() && ( aOperation != Fill || !mpTextures ) )
+	    doOperation( aOperation, pCairo );
     }
 
-    void CanvasHelper::drawPolyPolygonFallback( const uno::Reference< rendering::XPolyPolygon2D >& xPolyPolygon, Operation aOperation )
+    void CanvasHelper::drawPolyPolygonFallback( const uno::Reference< rendering::XPolyPolygon2D >& xPolyPolygon, Operation aOperation, Cairo* pCairo ) const
     {
 	const sal_Int32 nPolys( xPolyPolygon->getNumberOfPolygons() );
 
@@ -429,20 +429,20 @@ namespace vclcanvas
 			    
 	    uno::Sequence< uno::Sequence< ::com::sun::star::geometry::RealPoint2D > > aPoints = xLinePoly->getPoints( 0, nPolys, 0, -1 );
 
-	    for( mnPolygonIndex = 0; mnPolygonIndex < nPolys; mnPolygonIndex++ ) {
-		cairo_move_to( mpCairo, aPoints[mnPolygonIndex][0].X, aPoints[mnPolygonIndex][0].Y );
+	    for( sal_uInt32 nPolygonIndex = 0; nPolygonIndex < nPolys; nPolygonIndex++ ) {
+		cairo_move_to( pCairo, aPoints[nPolygonIndex][0].X, aPoints[nPolygonIndex][0].Y );
 
-		for( sal_Int32 j = 0; j < aPoints[mnPolygonIndex].getLength(); j ++ )
-		    cairo_line_to( mpCairo, aPoints[mnPolygonIndex][j].X, aPoints[mnPolygonIndex][j].Y );
+		for( sal_Int32 j = 0; j < aPoints[nPolygonIndex].getLength(); j ++ )
+		    cairo_line_to( pCairo, aPoints[nPolygonIndex][j].X, aPoints[nPolygonIndex][j].Y );
 
-		if( xPolyPolygon->isClosed( mnPolygonIndex ) )
-		    cairo_close_path( mpCairo );
+		if( xPolyPolygon->isClosed( nPolygonIndex ) )
+		    cairo_close_path( pCairo );
 
 		if( aOperation == Fill &&  mpTextures )
-		    doOperation( aOperation );
+		    doOperation( aOperation, pCairo, nPolygonIndex );
 	    }
-	    if( aOperation != Fill || !mpTextures )
-		doOperation( aOperation );
+	    if( nPolys && ( aOperation != Fill || !mpTextures ) )
+		doOperation( aOperation, pCairo );
 	} else {
 
 	    uno::Reference< rendering::XBezierPolyPolygon2D > xBezierPoly( xPolyPolygon, uno::UNO_QUERY );
@@ -451,35 +451,38 @@ namespace vclcanvas
 		uno::Sequence< uno::Sequence< ::com::sun::star::geometry::RealBezierSegment2D > > aSegments = xBezierPoly->getBezierSegments( 0, nPolys, 0, -1 );
 		double nC1x, nC1y, nC2x, nC2y;
 
-		for( mnPolygonIndex = 0; mnPolygonIndex < nPolys; mnPolygonIndex++ ) {
-		    cairo_move_to( mpCairo, aSegments[mnPolygonIndex][0].Px, aSegments[mnPolygonIndex][0].Py );
+		for( sal_uInt32 nPolygonIndex = 0; nPolygonIndex < nPolys; nPolygonIndex++ ) {
+		    cairo_move_to( pCairo, aSegments[nPolygonIndex][0].Px, aSegments[nPolygonIndex][0].Py );
 
-		    for( sal_Int32 j = 1; j < aSegments[mnPolygonIndex].getLength(); j ++ ) {
-			cairo_curve_to( mpCairo,
-					aSegments[mnPolygonIndex][j - 1].C1x, aSegments[mnPolygonIndex][j - 1].C1y,
-					aSegments[mnPolygonIndex][j - 1].C2x, aSegments[mnPolygonIndex][j - 1].C2y,
-					aSegments[mnPolygonIndex][j].Px, aSegments[mnPolygonIndex][j].Py );
+		    for( sal_Int32 j = 1; j < aSegments[nPolygonIndex].getLength(); j ++ ) {
+			cairo_curve_to( pCairo,
+					aSegments[nPolygonIndex][j - 1].C1x, aSegments[nPolygonIndex][j - 1].C1y,
+					aSegments[nPolygonIndex][j - 1].C2x, aSegments[nPolygonIndex][j - 1].C2y,
+					aSegments[nPolygonIndex][j].Px, aSegments[nPolygonIndex][j].Py );
 		    }
-		    if( xPolyPolygon->isClosed( mnPolygonIndex ) )
-			cairo_close_path( mpCairo );
+		    if( xPolyPolygon->isClosed( nPolygonIndex ) )
+			cairo_close_path( pCairo );
 
 		    if( aOperation == Fill &&  mpTextures )
-			doOperation( aOperation );
+			doOperation( aOperation, pCairo, nPolygonIndex );
 		}
-		if( aOperation != Fill || !mpTextures )
-		    doOperation( aOperation );
+		if( nPolys && ( aOperation != Fill || !mpTextures ) )
+		    doOperation( aOperation, pCairo );
 	    }
 	}
     }
 
-    void CanvasHelper::drawPolyPolygonPath( const uno::Reference< rendering::XPolyPolygon2D >& xPolyPolygon, Operation aOperation )
+    void CanvasHelper::drawPolyPolygonPath( const uno::Reference< rendering::XPolyPolygon2D >& xPolyPolygon, Operation aOperation, Cairo* pCairo ) const
     {
 	LinePolyPolygon* pPolyImpl = dynamic_cast< LinePolyPolygon* >( xPolyPolygon.get() );
 
+	if( !pCairo )
+	    pCairo = mpCairo;
+
 	if( pPolyImpl )
-	    drawPolyPolygonImplementation( pPolyImpl->getPolyPolygon(), aOperation );
+	    drawPolyPolygonImplementation( pPolyImpl->getPolyPolygon(), aOperation, pCairo );
 	else
-	    drawPolyPolygonFallback( xPolyPolygon, aOperation );
+	    drawPolyPolygonFallback( xPolyPolygon, aOperation, pCairo );
     }
 
     uno::Reference< rendering::XCachedPrimitive > CanvasHelper::drawPolyPolygon( const rendering::XCanvas& 							rCanvas, 
@@ -552,7 +555,7 @@ namespace vclcanvas
 	// TODO(rodo) use LineArray of strokeAttributes
 
 	drawPolyPolygonPath( xPolyPolygon, Stroke );
-	    
+
 	cairo_restore( mpCairo );
 
         // TODO(P1): Provide caching here.

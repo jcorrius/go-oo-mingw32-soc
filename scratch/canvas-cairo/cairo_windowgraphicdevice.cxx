@@ -468,15 +468,15 @@ namespace vclcanvas
 	return mpOutputWindow->GetOutputSizePixel();
     }
 
-    Surface* WindowGraphicDevice::getSimilarSurface( Size aSize, Format aFormat )
+    Surface* WindowGraphicDevice::getSimilarSurface( Size aSize, Content aContent )
     {
 	printf( "called WindowGraphicDevice::getSimilarSurface %d x %d\n", aSize.Width(), aSize.Height() );
-	return cairo_surface_create_similar( getSurface(), aFormat, aSize.Width(), aSize.Height() );
+	return cairo_surface_create_similar( getSurface(), aContent, aSize.Width(), aSize.Height() );
     }
 
-    Surface* WindowGraphicDevice::getSimilarSurface( Format aFormat )
+    Surface* WindowGraphicDevice::getSimilarSurface( Content aContent )
     {
-	return getSimilarSurface( getSurfaceSize(), aFormat );
+	return getSimilarSurface( getSurfaceSize(), aContent );
     }
 
     void WindowGraphicDevice::flush()

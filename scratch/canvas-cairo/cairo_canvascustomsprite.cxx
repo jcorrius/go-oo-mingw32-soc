@@ -576,18 +576,53 @@ namespace vclcanvas
     {
         tools::LocalGuard aGuard;
 
-	if( mbActive ) {
+	if( mbActive && !::basegfx::fTools::equalZero( mfAlpha ) ) {
 	    printf ("CanvasCustomSprite::redraw called\n");
 	    if( pCairo ) {
+
 		Size aSize = mpBackBuffer->getSize();
 		printf ("CanvasCustomSprite::redraw painting surface %p on %p cairo with surface %p on %f,%f size %d x %d\n",
 			mpBackBuffer->getSurface(), pCairo, cairo_get_target( pCairo ), rOutputPos.getX(), rOutputPos.getY(),
 			aSize.Width(), aSize.Height() );
 		cairo_save( pCairo );
-		cairo_rectangle( pCairo, rOutputPos.getX(), rOutputPos.getY(), aSize.Width(), aSize.Height() );
-		cairo_clip( pCairo );
-		cairo_set_source_surface( pCairo, mpBackBuffer->getSurface(), rOutputPos.getX(), rOutputPos.getY() );
-		cairo_paint( pCairo );
+
+		double fX, fY;
+
+		fX = rOutputPos.getX();
+		fY = rOutputPos.getY();
+
+ 		if( !maTransform.isIdentity() ) {
+ 		    cairo_matrix_t aMatrix, aInverseMatrix;
+ 		    cairo_matrix_init( &aMatrix,
+ 				       maTransform.get( 0, 0 ), maTransform.get( 1, 0 ), maTransform.get( 0, 1 ),
+ 				       maTransform.get( 1, 1 ), maTransform.get( 0, 2 ), maTransform.get( 1, 2 ) );
+		    cairo_matrix_init( &aInverseMatrix, aMatrix.xx, aMatrix.yx, aMatrix.xy, aMatrix.yy, aMatrix.x0, aMatrix.y0 );
+		    cairo_matrix_invert( &aInverseMatrix );
+		    cairo_matrix_transform_distance( &aInverseMatrix, &fX, &fY );
+ 		    cairo_set_matrix( pCairo, &aMatrix );
+ 		}
+
+		cairo_matrix_t aOrigMatrix;
+		cairo_get_matrix( pCairo, &aOrigMatrix );
+		cairo_translate( pCairo, fX, fY );
+		if( mbIsCurrClipRectangle ) {
+		    if( maCurrClipBounds.isEmpty() )
+			cairo_rectangle( pCairo, 0, 0, maSize.Width(), maSize.Height() );
+		    else
+			cairo_rectangle( pCairo, maCurrClipBounds.getMinX(), maCurrClipBounds.getMinY(),
+					 maCurrClipBounds.getMaxX() - maCurrClipBounds.getMinX(), maCurrClipBounds.getMaxY() - maCurrClipBounds.getMinY() );
+		    cairo_clip( pCairo );
+		}
+		if( mxClipPoly.is() )
+		    maCanvasHelper.drawPolyPolygonPath( mxClipPoly, CanvasHelper::Clip, pCairo );
+		cairo_set_matrix( pCairo, &aOrigMatrix );
+
+		cairo_set_source_surface( pCairo, mpBackBuffer->getSurface(), fX, fY );
+                if( ::rtl::math::approxEqual(mfAlpha, 1.0) )
+		    cairo_paint( pCairo );
+		else
+		    cairo_paint_with_alpha( pCairo, mfAlpha );
+
 		cairo_restore( pCairo );
 	    }
 	}

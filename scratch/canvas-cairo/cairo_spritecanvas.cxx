@@ -231,8 +231,16 @@ namespace vclcanvas
             mbSurfaceDirty = false;
         }
         
+	::canvas::tools::ElapsedTime aLastUpdate;
+        aLastUpdate.reset();                   
+
+	printf("update screen BEGIN\n");
         mpRedrawManager->updateScreen( bUpdateAll );
 	mxDevice->flush();
+
+	double nUpdateTime( aLastUpdate.getElapsedTime() );
+	printf("update screen END\n");
+	printf("update screen time: %f fps: %5.02f\n", nUpdateTime, 1/nUpdateTime );
 
         // commit to screen
         // rodo maCanvasHelper.flush();
@@ -283,7 +291,7 @@ namespace vclcanvas
             maCanvasHelper.setGraphicDevice( mxDevice );
 
             // setup back buffer
-            mpBackBuffer.reset( new BackBuffer( mxDevice, ::cairo::CAIRO_FORMAT_RGB24 ) );
+            mpBackBuffer.reset( new BackBuffer( mxDevice, ::cairo::CAIRO_CONTENT_COLOR ) );
             mpBackBuffer->setSize( pOutputWindow->GetOutputSizePixel() );
            
             // always render into back buffer, don't preserve state

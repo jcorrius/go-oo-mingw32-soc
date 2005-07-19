@@ -177,8 +177,8 @@ namespace vclcanvas
         ::cairo::Surface* getSurface();
 	::cairo::Surface* getSurface( Bitmap& rBitmap );
 
-        ::cairo::Surface* getSimilarSurface( ::cairo::Format aFormat = ::cairo::CAIRO_FORMAT_ARGB32 );
-        ::cairo::Surface* getSimilarSurface( Size aSize, ::cairo::Format aFormat = ::cairo::CAIRO_FORMAT_ARGB32 );
+        ::cairo::Surface* getSimilarSurface( ::cairo::Content aContent = ::cairo::CAIRO_CONTENT_COLOR_ALPHA );
+        ::cairo::Surface* getSimilarSurface( Size aSize, ::cairo::Content aContent = ::cairo::CAIRO_CONTENT_COLOR_ALPHA );
 
 	void flush();
 
