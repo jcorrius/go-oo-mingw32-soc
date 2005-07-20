@@ -36,8 +36,8 @@ public:
     // Methods
 	virtual void SAL_CALL Activate() throw (uno::RuntimeException);
 	virtual uno::Reference< vba::XRange > SAL_CALL Range( const ::uno::Any &rRange ) throw (uno::RuntimeException);
-	virtual void SAL_CALL Move( const uno::Any& before, const uno::Any& after ) throw (uno::RuntimeException) ;
- 	virtual void SAL_CALL Copy( const uno::Any& before, const uno::Any& after ) throw (uno::RuntimeException);
+	virtual void SAL_CALL Move( const uno::Any& Before, const uno::Any& After ) throw (uno::RuntimeException) ;
+ 	virtual void SAL_CALL Copy( const uno::Any& Before, const uno::Any& After ) throw (uno::RuntimeException);
 	virtual void SAL_CALL Paste( const uno::Any& Destination, const uno::Any& Link ) throw (uno::RuntimeException);
 	virtual void SAL_CALL Delete(  ) throw (uno::RuntimeException);
 	virtual void SAL_CALL Protect( const uno::Any& Password, const uno::Any& DrawingObjects, const uno::Any& Contents, const uno::Any& Scenarios, const uno::Any& UserInterfaceOnly ) throw (uno::RuntimeException);
