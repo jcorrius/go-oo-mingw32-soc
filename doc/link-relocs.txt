@@ -484,7 +484,7 @@ With just an appended '@PLT' the vtable then holds:
 suitable for a call <foo@plt> - but we want an absolute
 label reference there.
 
-bfd_howto_type -> (bfd/bfd.h) bfd_howto_struct:
+bfd_howto_type -> (bfd/bfd.h) reloc_howto_struct:
 cf. 
   HOWTO(R_386_PLT32, 0, 2, 32, TRUE /* pc_relative */, 0, complain_overflow_bitfield,
 	bfd_elf_generic_reloc, "R_386_PLT32",
@@ -525,3 +525,153 @@ So - somehow the @PLTABS relocation is getting clobbered
      This optimization requires GNU as and GNU ld.  Not all systems
      support this option.  `-Wl,--gc-sections' is ignored without
      `-static'.
+
+
+** So - patch works well for this case:
+
+    + VTable & PLT slot in main app object, (method already had
+      plt entry (?))
+    + we should be generating a non-symbol-driven relocation
+      *per* PLT slot (surely) - since these are not relative
+      jumps at all - but absolute fixups.
+	    + ... Hmm ...
+
+** Function pointer equality -
+    + already an issue with the PLT -> eg elf32-i386.c:
+
+elf_i386_finish_dynamic_symbol:
+      if (!h->def_regular)
+	{
+	  /* Mark the symbol as undefined, rather than as defined in
+	     the .plt section.  Leave the value if there were any
+	     relocations where pointer equality matters (this is a clue
+	     for the dynamic linker, to make function pointer
+	     comparisons work between an application and shared
+	     library), otherwise set it to zero.  If a function is only
+	     called from a binary, there is no need to slow down
+	     shared libraries because of that.  */
+	  sym->st_shndx = SHN_UNDEF;
+	  if (!h->pointer_equality_needed)
+	    sym->st_value = 0;
+	}
+
+
+** Fuzzy understanding:
+
+	+ What is a 'JUMP_SLOT' relocation we have 3 things:
+		+ a plt entry
+		+ a relocation pointing to it (should be relative)
+	+ Does the runtime fix up use the .dyn.plt relocation data
+	  to do the fixup ?: most likely ...
+		+ ie. we need to output 2 relocations: 1 JUMP_SLOT
+		  (done per-symbol)
+		  and also 1 RELATIVE relocation - per vtable entry.
+	+ we must already output 1 fixup per PLT entry - to
+	  point at that PLT entry - but this is not a relocation
+	  but an immediate link-time fixup (?)
+		
+
+* elf32-i386.c (elf_i386_relocate_section):
+	+ looks interesting - PLT code very light.
+
+	+ bfd_elf32_swap_reloc_out -> (bfd/elflink.h)
+
+/* Translate an ELF reloc from internal format to external format.  */
+void
+elf_swap_reloc_out (bfd *abfd,
+		    const Elf_Internal_Rela *src,
+		    bfd_byte *d)
+{
+  Elf_External_Rel *dst = (Elf_External_Rel *) d;
+  H_PUT_WORD (abfd, src->r_offset, dst->r_offset);
+  H_PUT_WORD (abfd, src->r_info, dst->r_info);
+}
+
+void
+elf_swap_reloca_out (bfd *abfd,
+		     const Elf_Internal_Rela *src,
+		     bfd_byte *d)
+{
+  Elf_External_Rela *dst = (Elf_External_Rela *) d;
+  H_PUT_WORD (abfd, src->r_offset, dst->r_offset);
+  H_PUT_WORD (abfd, src->r_info, dst->r_info);
+  H_PUT_SIGNED_WORD (abfd, src->r_addend, dst->r_addend);
+}
+
+
+* JUMP_SLOT relocation:
+	+ offset points into .got.plt
+		+ allows that to be fixed up idly.
+		+ .rel.plt - contains symbol index to do fixup
+	+ contents of <.got.plt> is
+		+ <raw address> -> jump back into
+		  equivalent PLT code
+
+    ** creating a jump-slot (PLT) reloc **
+	+ write reloc itself to /.rel.plt/
+		-> /.got.plt/
+		+ the reloc allows .got.plt to be relocated
+		  with the library.
+	+ create /.plt/ record
+		+ assign index -> /.got.plt/ etc.
+	+ write /.got.plt/ record
+		+ initially points into relevant /.plt/ record
+	+ <foreach referrer to symbol>
+		+ create relative address to that code
+		+ ie. call 790 <fprintf@plt> (pc-relative)
+
+    ** normal PLT code: 
+
+** The input code has:
+
+RELOCATION RECORDS FOR [.gnu.linkonce.d._ZTV9BaseClass]:
+OFFSET   TYPE              VALUE 
+00000008 R_386_PLT32ABS    _ZN9BaseClass5doFooEv
+0000000c R_386_PLT32ABS    _ZN9BaseClass5countEv
+00000010 R_386_PLT32ABS    _ZN9BaseClassixEi
+	 ie. the .d._ZTV9BaseClass is a section.
+	 each of these is a location we want to add an
+	 R_386_RELATIVE to.
+
+** Dynamic linker:
+   glibc/elf/do-rel.h: (elf_machine_lazy_rel)
+   cf. glibc/sysdeps/i386/dl-machine.h
+	+ a JUMP_SLOT reloc has:
+
+__attribute__ ((always_inline))
+elf_machine_lazy_rel (struct link_map *map,
+		      Elf32_Addr l_addr, const Elf32_Rel *reloc)
+{
+  Elf32_Addr *const reloc_addr = (void *) (l_addr + reloc->r_offset);
+  const unsigned int r_type = ELF32_R_TYPE (reloc->r_info);
+  /* Check for unexpected PLT reloc type.  */
+  if (__builtin_expect (r_type == R_386_JMP_SLOT, 1))
+    {
+      if (__builtin_expect (map->l_mach.plt, 0) == 0)
+	*reloc_addr += l_addr;
+      else
+	*reloc_addr = (map->l_mach.plt
+		       + (((Elf32_Addr) reloc_addr) - map->l_mach.gotplt) * 4);
+    }
+  else
+    _dl_reloc_bad_type (map, r_type, 1);
+}
+	This fixup occurs on the GOT reference.
+called from dynamic-link.h: ELF_DYNAMIC_DO_REL,
+and ELF_DYNAMIC_RELOCATE from glibc/elf/dl-reloc.c (_dl_relocate_object)
+
+	'lazy' is only set for DT_PLTREL sections,
+	not DT_RELOC ones.
+
+	Otherwise (glibc/elf/do-rel.h):
+	  for (; relative < r; ++relative)
+	    DO_ELF_MACHINE_REL_RELATIVE (map, l_addr, relative);
+
+	+ The runtime dylinker is very simple.
+
+
+
+
+
+* It must be the case that a more generic mechanism is doing
+  these fixups - via the reloc_howto_type table ?
