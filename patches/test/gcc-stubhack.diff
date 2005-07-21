@@ -1,0 +1,182 @@
+Index: varasm.c
+===================================================================
+RCS file: /cvsroot/gcc/gcc/gcc/varasm.c,v
+retrieving revision 1.477.6.11
+diff -u -r1.477.6.11 varasm.c
+--- varasm.c	17 May 2005 07:03:33 -0000	1.477.6.11
++++ varasm.c	21 Jul 2005 16:50:49 -0000
+@@ -1517,6 +1517,8 @@
+   int reloc = 0;
+   rtx decl_rtl;
+ 
++  //  warning ("assemble variable %qD ", decl);
++
+   if (lang_hooks.decls.prepare_assemble_variable)
+     lang_hooks.decls.prepare_assemble_variable (decl);
+ 
+@@ -1688,10 +1690,17 @@
+ 
+   /* Output any data that we will need to use the address of.  */
+   if (DECL_INITIAL (decl) == error_mark_node)
++  {
+     reloc = contains_pointers_p (TREE_TYPE (decl)) ? 3 : 0;
++    warning ("value of contains_pointers_p %qD is %d ", decl, reloc);
++  }
+   else if (DECL_INITIAL (decl))
+     {
+       reloc = compute_reloc_for_constant (DECL_INITIAL (decl));
++
++      //      warning ("value of compute_reloc_for_constant %qD is %d ",
++      //	       decl, reloc);
++
+       output_addressed_constants (DECL_INITIAL (decl));
+     }
+ 
+@@ -1888,7 +1897,7 @@
+ 	 If we know a method will be emitted in other TU and no new
+ 	 functions can be marked reachable, just use the external
+ 	 definition.  */
+-      struct cgraph_node *node = cgraph_node (decl);
++	    struct cgraph_node *node = cgraph_node (decl);
+       if (!DECL_EXTERNAL (decl)
+ 	  && (!node->local.vtable_method || !cgraph_global_info_ready
+ 	      || !node->local.finalized))
+@@ -2090,6 +2099,7 @@
+ 			  int aligned_p ATTRIBUTE_UNUSED)
+ {
+   const char *op = integer_asm_op (size, aligned_p);
++  //  fprintf (stderr, "default_assemble_integer '%s'\n", op);
+   /* Avoid GAS bugs for large values.  Specifically negative values whose
+      absolute value fits in a bfd_vma, but not in a bfd_signed_vma.  */
+   if (size > UNITS_PER_WORD && size > POINTER_SIZE / BITS_PER_UNIT)
+@@ -3730,6 +3740,15 @@
+ 
+    ALIGN is the alignment of the data in bits.  */
+ 
++#define DEFTREECODE(SYM, STRING, TYPE, NARGS) STRING,
++static const char *foo_codes[] =
++{
++#include "tree.def"
++};
++#undef DEFTREECODE
++
++char **glob_slots = NULL;
++
+ void
+ output_constant (tree exp, unsigned HOST_WIDE_INT size, unsigned int align)
+ {
+@@ -3785,10 +3804,60 @@
+     case POINTER_TYPE:
+     case REFERENCE_TYPE:
+     case OFFSET_TYPE:
+-      if (! assemble_integer (expand_expr (exp, NULL_RTX, VOIDmode,
+-					   EXPAND_INITIALIZER),
+-			      MIN (size, thissize), align, 0))
+-	error ("initializer for integer value is too complicated");
++      {
++        rtx expanded;
++	tree fn;
++
++	expanded = expand_expr (exp, NULL_RTX, VOIDmode,
++				EXPAND_INITIALIZER);
++
++        if (getenv("VTPLT") && TREE_CODE(exp) == ADDR_EXPR &&
++	    TREE_CODE((fn = TREE_OPERAND(exp, 0))) == FUNCTION_DECL &&
++	    DECL_VIRTUAL_P(fn) && !DECL_IS_BUILTIN(fn) &&
++	    GET_CODE (expanded) == SYMBOL_REF)
++          {
++	    int i;
++	    const char *p;
++	    const char *op = integer_asm_op(MIN(size,thissize), align);
++	    const char *buf = targetm.strip_name_encoding (XSTR (expanded, 0));
++	    fprintf (stderr, "vmethod: '%s'...\n", buf);
++
++	    fputs(op, asm_out_file);
++	    output_addr_const (asm_out_file, expanded); // FIXME: here
++	    fputs("Slot\n", asm_out_file);
++	    if (!glob_slots)
++              {
++	        glob_slots = xmalloc (sizeof (char *));
++		glob_slots[0] = NULL;
++	      }
++	    for (i = 0; (p = glob_slots[i]); i++)
++	      {
++	        if (!strcmp (buf, p))
++		  break;
++	      }
++	    if (!glob_slots[i])
++	    {
++	      glob_slots = xrealloc (glob_slots, (i + 2) * sizeof (char *));
++	      glob_slots[i] = xstrdup (buf);
++	      glob_slots[i+1] = NULL;
++	    }
++	    fprintf( stderr, "Added\n");
++	  }
++	else
++	  {
++	    if (! assemble_integer (expanded,
++				MIN (size, thissize), align, 0))
++	      error ("initializer for integer value is too complicated");
++	  }
++	/*	  {
++	    tree fn = TREE_OPERAND(exp, 0);
++	    if (TREE_CODE
++
++	    fprintf( stderr, "assemble_integer '%s' '%s' '%s' (%d)\n",
++		     foo_codes[code], foo_codes[TREE_CODE(exp)],
++		     foo_codes[TREE_CODE(fn)], BINFO_VIRTUAL_P(fn));
++		     }*/
++      }
+       break;
+ 
+     case REAL_TYPE:
+@@ -3823,6 +3892,8 @@
+ 	  tree link;
+ 	  unsigned int nalign;
+ 	  enum machine_mode inner;
++
++	  warning ("assemble_vector_cst"); // %qD", code);
+ 
+ 	  inner = TYPE_MODE (TREE_TYPE (TREE_TYPE (exp)));
+ 	  nalign = MIN (align, GET_MODE_ALIGNMENT (inner));
+Index: toplev.c
+===================================================================
+RCS file: /cvsroot/gcc/gcc/gcc/toplev.c,v
+retrieving revision 1.944.2.4
+diff -u -r1.944.2.4 toplev.c
+--- toplev.c	26 Apr 2005 00:30:16 -0000	1.944.2.4
++++ toplev.c	21 Jul 2005 16:50:50 -0000
+@@ -2038,6 +2038,8 @@
+ 
+ /* Clean up: close opened files, etc.  */
+ 
++extern char **glob_slots;
++
+ static void
+ finalize (void)
+ {
+@@ -2057,6 +2059,24 @@
+     {
+       if (ferror (asm_out_file) != 0)
+ 	fatal_error ("error writing to %s: %m", asm_file_name);
++      /* The world's grossest hack ? */
++      if (glob_slots)
++        {
++	  int i;
++	  const char *p;
++
++	  fprintf( stderr, "Build out section\n");
++	  fprintf (asm_out_file, ".section text.stubs,\"ax\",@progbits\n.align 2\n");
++
++	  for (i = 0; (p = glob_slots[i]); i++)
++	    {
++	      fprintf (asm_out_file, p);
++	      fprintf (asm_out_file, "Slot:\n\tjmp\t");
++	      fprintf (asm_out_file, p);
++	      fprintf (asm_out_file, "@plt\n");
++	    }
++	  fprintf( stderr, "Build out section donme\n");
++	}
+       if (fclose (asm_out_file) != 0)
+ 	fatal_error ("error closing %s: %m", asm_file_name);
+     }
