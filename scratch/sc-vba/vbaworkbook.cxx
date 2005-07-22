@@ -38,10 +38,18 @@ ScVbaWorkbook::getFullName() throw (uno::RuntimeException)
 uno::Reference< vba::XWorksheet >
 ScVbaWorkbook::getActiveSheet() throw (uno::RuntimeException)
 {
+	OSL_TRACE("In ScVbaWorkbook::getActiveSheet()");
 	uno::Reference< sheet::XSpreadsheetView > xSpreadsheet(
 			mxModel->getCurrentController(), uno::UNO_QUERY_THROW );
 
-	return uno::Reference< vba::XWorksheet >( new ScVbaWorksheet( xSpreadsheet->getActiveSheet() ,mxModel ));
+	//return uno::Reference< vba::XWorksheet >( new ScVbaWorksheet( m_xContext,xSpreadsheet->getActiveSheet() ,mxModel ));
+	uno::Reference< vba::XWorksheet > xWrkSt( new ScVbaWorksheet( m_xContext,xSpreadsheet->getActiveSheet() ,mxModel ));
+
+	if ( xWrkSt.is() )
+	{
+		OSL_TRACE("Looks like returning a valid worksheet");
+	}
+	return xWrkSt;
 }
 
 uno::Reference< vba::XWorksheets >
@@ -50,7 +58,8 @@ ScVbaWorkbook::getWorkSheets() throw (uno::RuntimeException)
         uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( mxModel, uno::UNO_QUERY );
        	uno::Reference<sheet::XSpreadsheets> xSheets = xSpreadDoc->getSheets();
 
-	return uno::Reference< vba::XWorksheets >( new ScVbaWorksheets(xSheets) );
+	return uno::Reference< vba::XWorksheets >( new ScVbaWorksheets(m_xContext,
+		xSheets) );
 }
 
 void

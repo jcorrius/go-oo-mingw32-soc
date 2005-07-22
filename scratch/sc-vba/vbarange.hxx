@@ -15,9 +15,11 @@ typedef ::cppu::WeakImplHelper1< org::openoffice::vba::XRange > ScVbaRange_BASE;
 class ScVbaRange : public ScVbaRange_BASE
 {
 	uno::Reference< table::XCellRange > mxRange;
+	uno::Reference< ::com::sun::star::uno::XComponentContext > m_xContext;
 
 public:
-	ScVbaRange( uno::Reference< table::XCellRange > xRange ) : mxRange( xRange ) {}
+	ScVbaRange( uno::Reference< ::com::sun::star::uno::XComponentContext >& xContext, uno::Reference< table::XCellRange > xRange ) : mxRange( xRange ),
+		m_xContext(xContext) {}
 	virtual ~ScVbaRange() {}
 
     // Attributes

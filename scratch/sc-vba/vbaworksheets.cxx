@@ -6,6 +6,8 @@
 #include <com/sun/star/sheet/XSpreadsheetView.hpp>
 #include <com/sun/star/container/XNamed.hpp>
 
+#include <org/openoffice/vba/XApplication.hpp>
+
 #include <tools/string.hxx>
 
 #include "vbaglobals.hxx"
@@ -15,7 +17,6 @@
 
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
-
 // XEnumerationAccess
 uno::Type
 ScVbaWorksheets::getElementType() throw (uno::RuntimeException)
@@ -37,7 +38,22 @@ ScVbaWorksheets::createEnumeration() throw (uno::RuntimeException)
 uno::Any
 ScVbaWorksheets::getParent() throw (uno::RuntimeException)
 {
-	return uno::Any( ScVbaGlobals::get()->getApplication()->getActiveWorkbook() );
+	OSL_TRACE("In ScVbaWorksheets::getParent()");
+	uno::Reference< vba::XApplication > xApplication =
+		ScVbaGlobals::getGlobalsImpl( m_xContext )->getApplication();
+	uno::Reference< vba::XWorkbook > xWorkbook;
+	if ( xApplication.is() )
+	{
+		xWorkbook = xApplication->getActiveWorkbook();
+	}
+	if ( !xWorkbook.is() )
+	{
+		uno::RuntimeException( rtl::OUString::createFromAscii(
+			"ScVbaWorksheets::getParent - No Parent" ), uno::Reference< uno::XInterface >() );
+	}
+	
+	OSL_TRACE("In ScVbaWorksheets::getParent() returning workbook");
+	return uno::Any( xWorkbook );
 }
 ::sal_Int32
 ScVbaWorksheets::getCreator() throw (uno::RuntimeException)
@@ -48,7 +64,7 @@ ScVbaWorksheets::getCreator() throw (uno::RuntimeException)
 uno::Reference< vba::XApplication >
 ScVbaWorksheets::getApplication() throw (uno::RuntimeException)
 {
-	return ScVbaGlobals::get()->getApplication();
+	return ScVbaGlobals::getGlobalsImpl( m_xContext )->getApplication();
 }
 
 ::sal_Int32
@@ -88,7 +104,8 @@ ScVbaWorksheets::Add( const uno::Any& Before, const uno::Any& After,
 	}
 	if (aStringSheet == NULL)
 	{
-		aStringSheet = ScVbaGlobals::get()->getApplication()->getActiveWorkbook()->getActiveSheet()->getName();
+		aStringSheet = ScVbaGlobals::getGlobalsImpl( 
+			m_xContext )->getApplication()->getActiveWorkbook()->getActiveSheet()->getName();
 		bBefore = sal_True;
 	}
 	uno::Reference <container::XIndexAccess> xIndex( mxSheets, uno::UNO_QUERY );

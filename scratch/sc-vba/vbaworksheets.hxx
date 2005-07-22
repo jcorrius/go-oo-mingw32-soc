@@ -6,6 +6,9 @@
 #include <org/openoffice/vba/XWorksheets.hpp>
 #include <com/sun/star/sheet/XSpreadsheets.hpp>
 #include <com/sun/star/container/XEnumerationAccess.hpp>
+#include <com/sun/star/uno/XComponentContext.hpp>
+#include <org/openoffice/vba/XGlobals.hpp>
+
 #include "vbahelper.hxx"
 
 class ScModelObj;
@@ -16,10 +19,11 @@ typedef ::cppu::WeakImplHelper2< org::openoffice::vba::XWorksheets,
 class ScVbaWorksheets : public ScVbaWorksheets_BASE
 {
 	uno::Reference< sheet::XSpreadsheets > mxSheets;
+	uno::Reference<  ::com::sun::star::uno::XComponentContext > m_xContext;
 
 public:
-	ScVbaWorksheets(uno::Reference< sheet::XSpreadsheets > xSheets ) :
-		mxSheets( xSheets ) {}
+	ScVbaWorksheets(uno::Reference< ::com::sun::star::uno::XComponentContext > & xContext, uno::Reference< sheet::XSpreadsheets > xSheets ) :
+		mxSheets( xSheets ), m_xContext( xContext ) {}
 	virtual ~ScVbaWorksheets() {}
 
 	// XEnumerationAccess

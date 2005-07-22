@@ -16,7 +16,10 @@
 #include <com/sun/star/sheet/XCellAddressable.hpp>
 #include <cppuhelper/bootstrap.hxx>
 #include <com/sun/star/util/XURLTransformer.hpp>
-#include <viewuno.hxx>
+#include <com/sun/star/frame/XDispatchProvider.hpp>
+
+#include <tools/string.hxx>
+
 #include "vbarange.hxx"
 #include "vbaworksheet.hxx"
 
@@ -111,7 +114,7 @@ ScVbaWorksheet::getUsedRange() throw (uno::RuntimeException)
 	uno::Reference< sheet::XCellRangeAddressable > xCellRangeAddressable(xSheetCellCursor, uno::UNO_QUERY);
 
 	uno::Reference< table::XCellRange > xRange( xSheetCellCursor, uno::UNO_QUERY);
-	return new ScVbaRange(xRange);
+	return new ScVbaRange(m_xContext, xRange);
 }
 
 sal_Int32 
@@ -337,7 +340,7 @@ ScVbaWorksheet::Range( const ::uno::Any &rRange ) throw (uno::RuntimeException)
 	uno::Reference< table::XCellRange > xRanges( mxSheet, uno::UNO_QUERY_THROW );
 	if (xRanges.is()) 
 	{
-		return uno::Reference< vba::XRange >( new ScVbaRange( xRanges->getCellRangeByName( aStringRange ) ) );
+		return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xRanges->getCellRangeByName( aStringRange ) ) );
 	}
 	return NULL;
 }

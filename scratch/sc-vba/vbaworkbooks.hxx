@@ -3,6 +3,7 @@
 
 #include <cppuhelper/implbase2.hxx>
 
+#include <org/openoffice/vba/XGlobals.hpp>
 #include <org/openoffice/vba/XWorkbooks.hpp>
 #include <com/sun/star/container/XEnumerationAccess.hpp>
 #include "vbahelper.hxx"
@@ -14,9 +15,12 @@ typedef ::cppu::WeakImplHelper2< org::openoffice::vba::XWorkbooks,
 
 class ScVbaWorkbooks : public ScVbaWorkbooks_BASE
 {
-
+private:
+	uno::Reference< ::com::sun::star::uno::XComponentContext > m_xContext;
+	uno::Reference< org::openoffice::vba::XGlobals > getGlobals() throw (uno::RuntimeException);
+	
 public:
-	ScVbaWorkbooks() {}
+	ScVbaWorkbooks( uno::Reference< ::com::sun::star::uno::XComponentContext >& xContext ): m_xContext( xContext ) {}
 	virtual ~ScVbaWorkbooks() {}
 
 	// XEnumerationAccess

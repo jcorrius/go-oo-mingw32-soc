@@ -20,6 +20,7 @@
 #include <com/sun/star/beans/XPropertySet.hpp>
 #include <com/sun/star/sheet/XFunctionAccess.hpp>
 #include <com/sun/star/frame/XModel.hpp>
+#include <com/sun/star/frame/XDesktop.hpp>
 #include <com/sun/star/view/XSelectionSupplier.hpp>
 #include <com/sun/star/table/XCellCursor.hpp>
 #include <com/sun/star/table/XTableRows.hpp>
@@ -178,7 +179,8 @@ ScVbaRange::Offset( const ::uno::Any &nRowOff, const uno::Any &nColOff ) throw (
 	uno::Reference< sheet::XSpreadsheet > xSheet = xSheetCellRange->getSpreadsheet();
 	uno::Reference< sheet::XCellRangeAddressable > xCellRangeAddressable(mxRange, ::uno::UNO_QUERY);
 	uno::Reference< table::XCellRange > xRange(xSheet, uno::UNO_QUERY);
-	return uno::Reference< vba::XRange >( new ScVbaRange( xRange->getCellRangeByPosition(
+	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext,
+		xRange->getCellRangeByPosition(
 										xCellRangeAddressable->getRangeAddress().StartColumn + nColOffset,
                                         xCellRangeAddressable->getRangeAddress().StartRow + nRowOffset,
                                         xCellRangeAddressable->getRangeAddress().EndColumn + nColOffset,
@@ -194,7 +196,8 @@ ScVbaRange::CurrentRegion() throw (uno::RuntimeException)
 	xSheetCellCursor->collapseToCurrentRegion();
 	uno::Reference< sheet::XCellRangeAddressable > xCellRangeAddressable(xSheetCellCursor, ::uno::UNO_QUERY);
 	uno::Reference< table::XCellRange > xRange( xSheet, ::uno::UNO_QUERY);
-	return uno::Reference< vba::XRange >( new ScVbaRange( xRange->getCellRangeByPosition(
+	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext,
+		xRange->getCellRangeByPosition(
                                         xCellRangeAddressable->getRangeAddress().StartColumn,
                                         xCellRangeAddressable->getRangeAddress().StartRow,
                                         xCellRangeAddressable->getRangeAddress().EndColumn,
@@ -210,7 +213,8 @@ ScVbaRange::CurrentArray() throw (uno::RuntimeException)
 	xSheetCellCursor->collapseToCurrentArray();
 	uno::Reference< sheet::XCellRangeAddressable > xCellRangeAddressable(xSheetCellCursor, ::uno::UNO_QUERY);
     uno::Reference< table::XCellRange > xRange( xSheet, ::uno::UNO_QUERY);
-    return uno::Reference< vba::XRange >( new ScVbaRange( xRange->getCellRangeByPosition(
+    return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext,
+		xRange->getCellRangeByPosition(
                                         xCellRangeAddressable->getRangeAddress().StartColumn,
                                         xCellRangeAddressable->getRangeAddress().StartRow,
                                         xCellRangeAddressable->getRangeAddress().EndColumn,
@@ -245,10 +249,13 @@ ScVbaRange::Address() throw (uno::RuntimeException)
 {
 	::rtl::OUString aStart, aEnd;
 	uno::Sequence< uno::Any > aAddrArray1, aAddrArray2;	
-	uno::Reference< lang::XMultiServiceFactory > xSMgr = ::comphelper::getProcessServiceFactory();
+
+	uno::Reference< lang::XMultiComponentFactory > xSMgr( m_xContext->getServiceManager(), uno::UNO_QUERY );
+
 	uno::Reference< sheet::XFunctionAccess > xFunctionAccess( 
-											 xSMgr->createInstance(::rtl::OUString::createFromAscii(
-											 "com.sun.star.sheet.FunctionAccess")), ::uno::UNO_QUERY);
+		xSMgr->createInstanceWithContext(::rtl::OUString::createFromAscii(
+			"com.sun.star.sheet.FunctionAccess"), m_xContext), 
+				::uno::UNO_QUERY);
 	uno::Reference< sheet::XCellRangeAddressable > xCellRangeAddressable( mxRange, ::uno::UNO_QUERY );
 	if( aAddrArray1.getLength() == 0 )
 	{
@@ -284,7 +291,7 @@ ScVbaRange::Cells( const uno::Any &nRowIndex, const uno::Any &nColumnIndex ) thr
 	long nRow = 0, nCol = 0;
 	sal_Bool bIsIndex =	nRowIndex >>= nRow, bIsColumnIndex = nColumnIndex >>= nCol;
 	if( !bIsIndex && !bIsColumnIndex ) // .Cells
-		return uno::Reference< vba::XRange >( new ScVbaRange( mxRange ) );
+		return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, mxRange ) );
 	if( bIsIndex && !bIsColumnIndex ) // .Cells(n)
 	{
 		int nIndex = nRow;
@@ -293,19 +300,21 @@ ScVbaRange::Cells( const uno::Any &nRowIndex, const uno::Any &nColumnIndex ) thr
         nRow = nIndex / nColCount;
 		nCol = nIndex % nColCount;
 	}
-	return uno::Reference< vba::XRange >( new ScVbaRange( mxRange->getCellRangeByPosition( nCol, nRow, nCol, nRow ) ) );
+	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, mxRange->getCellRangeByPosition( nCol, nRow, nCol, nRow ) ) );
 }
 
 void
 ScVbaRange::Select() throw (uno::RuntimeException)
 {
 	sal_Bool bSelect;
-	SfxObjectShell* pDoc = SfxObjectShell::Current();
-    uno::Reference< frame::XModel > xModel;
-                                                                                                                             
-    if( pDoc )
-        xModel = pDoc->GetModel();
+	uno::Reference< lang::XMultiComponentFactory > xSMgr(
+		m_xContext->getServiceManager(), uno::UNO_QUERY_THROW );
 
+	uno::Reference< frame::XDesktop > xDesktop
+		(xSMgr->createInstanceWithContext(::rtl::OUString::createFromAscii("com.sun.star.frame.Desktop"), m_xContext), uno::UNO_QUERY_THROW );
+
+    uno::Reference< frame::XModel > xModel( xDesktop->getCurrentComponent(),
+		uno::UNO_QUERY );
 	uno::Reference< view::XSelectionSupplier > xSelection( xModel->getCurrentController(), uno::UNO_QUERY);
 	bSelect = xSelection->select( ( uno::Any )mxRange );
 }

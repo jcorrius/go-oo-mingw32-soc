@@ -14,16 +14,15 @@
 
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
-
 static uno::Any
-getWorkbook( const uno::Reference< sheet::XSpreadsheetDocument > &xDoc )
+getWorkbook( uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< sheet::XSpreadsheetDocument > &xDoc )
 {
 	// FIXME: fine as long as ScVbaWorkbook is stateless ...
 	uno::Reference< frame::XModel > xModel( xDoc, uno::UNO_QUERY );
 	if( !xModel.is() )
 		return uno::Any();
 
-	ScVbaWorkbook *pWb = new ScVbaWorkbook( xModel );
+	ScVbaWorkbook *pWb = new ScVbaWorkbook( xContext, xModel );
 	return uno::Any( uno::Reference< vba::XWorkbook > (pWb) );
 }
 
@@ -33,12 +32,16 @@ class ScVbaWorkbooksIterator : public ScVbaWorkbooksIterator_BASE
 {
 	uno::Reference< container::XEnumeration > mxComponents;
 	uno::Reference< sheet::XSpreadsheetDocument > mxSpreadsheet;
+	uno::Reference< uno::XComponentContext > m_xContext;
   public:
-	ScVbaWorkbooksIterator()
+	ScVbaWorkbooksIterator( uno::Reference< uno::XComponentContext >& xContext)
+		: m_xContext( xContext )
 	{
-		uno::Reference< lang::XMultiServiceFactory > xSMgr = ::comphelper::getProcessServiceFactory();
+		uno::Reference< lang::XMultiComponentFactory > xSMgr(
+			m_xContext->getServiceManager(), uno::UNO_QUERY_THROW );
+
 		uno::Reference< frame::XDesktop > xDesktop
-			(xSMgr->createInstance(::rtl::OUString::createFromAscii("com.sun.star.frame.Desktop")), uno::UNO_QUERY_THROW );
+			(xSMgr->createInstanceWithContext(::rtl::OUString::createFromAscii("com.sun.star.frame.Desktop"), m_xContext), uno::UNO_QUERY_THROW );
 		mxComponents = xDesktop->getComponents()->createEnumeration();
 		nextElem();
 	}
@@ -56,7 +59,7 @@ class ScVbaWorkbooksIterator : public ScVbaWorkbooksIterator_BASE
 		uno::Reference< sheet::XSpreadsheetDocument > xNext = nextElem();
 		if( !xNext.is() )
 			throw container::NoSuchElementException();
-		return getWorkbook( xNext );
+		return getWorkbook( m_xContext, xNext );
 	}
 
 	uno::Reference< sheet::XSpreadsheetDocument > nextElem() throw (uno::RuntimeException)
@@ -88,15 +91,26 @@ ScVbaWorkbooks::hasElements() throw (uno::RuntimeException)
 uno::Reference< container::XEnumeration >
 ScVbaWorkbooks::createEnumeration() throw (uno::RuntimeException)
 {
-	return uno::Reference< container::XEnumeration >( new ScVbaWorkbooksIterator() );
+	return uno::Reference< container::XEnumeration >( new ScVbaWorkbooksIterator(m_xContext) );
 }
+
 
 // XCollection
 uno::Any
 ScVbaWorkbooks::getParent() throw (uno::RuntimeException)
 {
-	return uno::Any( ScVbaGlobals::get()->getApplication() );
+	uno::Reference< vba::XGlobals > xGlobals = ScVbaGlobals::getGlobalsImpl( m_xContext );
+	uno::Reference< vba::XApplication > xApplication = 
+		xGlobals->getApplication();
+	if ( !xApplication.is() )
+	{
+		throw uno::RuntimeException(
+                ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "ScVbaWorkbooks::getParent: Couldn't access Application object" ) ),
+                    uno::Reference< XInterface >() );
+	}
+	return uno::Any(xApplication);
 }
+
 ::sal_Int32
 ScVbaWorkbooks::getCreator() throw (uno::RuntimeException)
 {
@@ -106,13 +120,22 @@ ScVbaWorkbooks::getCreator() throw (uno::RuntimeException)
 uno::Reference< vba::XApplication >
 ScVbaWorkbooks::getApplication() throw (uno::RuntimeException)
 {
-	return ScVbaGlobals::get()->getApplication();
+	uno::Reference< vba::XApplication > xApplication = 
+		ScVbaGlobals::getGlobalsImpl( m_xContext )->getApplication();
+
+	if ( !xApplication.is() )
+	{
+		throw uno::RuntimeException(
+                ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "ScVbaWorkbooks::getParent: Couldn't access Application object" ) ),
+                    uno::Reference< XInterface >() );
+	}
+	return xApplication;
 }
 ::sal_Int32
 ScVbaWorkbooks::getCount() throw (uno::RuntimeException)
 {
 	sal_Int32 nCount;
-	ScVbaWorkbooksIterator aIter;
+	ScVbaWorkbooksIterator aIter(m_xContext);
 
 	for( nCount = 0; aIter.hasMoreElements(); nCount++ )
 		aIter.nextElem();
@@ -123,7 +146,7 @@ ScVbaWorkbooks::getCount() throw (uno::RuntimeException)
 uno::Any
 ScVbaWorkbooks::Item( ::sal_Int32 nIndex ) throw (uno::RuntimeException)
 {
-	ScVbaWorkbooksIterator aIter;
+	ScVbaWorkbooksIterator aIter(m_xContext);
 	uno::Reference< sheet::XSpreadsheetDocument > xDoc;
 
 	for( sal_Int32 i = 0; i <= nIndex; i++ )
@@ -132,7 +155,7 @@ ScVbaWorkbooks::Item( ::sal_Int32 nIndex ) throw (uno::RuntimeException)
 	if( !xDoc.is() )
 		return uno::Any( uno::Reference< vba::XWorkbook >(NULL) );
 	else
-		return uno::Any( getWorkbook( xDoc ) );
+		return uno::Any( getWorkbook( m_xContext, xDoc ) );
 }
 
 // XWorkbooks
@@ -162,9 +185,13 @@ ScVbaWorkbooks::Delete() throw (uno::RuntimeException)
 void
 ScVbaWorkbooks::Close() throw (uno::RuntimeException)
 {
-	uno::Reference< lang::XMultiServiceFactory > xSMgr = ::comphelper::getProcessServiceFactory();
+	uno::Reference< lang::XMultiComponentFactory > xSMgr(
+		m_xContext->getServiceManager(), uno::UNO_QUERY_THROW );
+
 	uno::Reference< frame::XDesktop > xDesktop
-			(xSMgr->createInstance(::rtl::OUString::createFromAscii("com.sun.star.frame.Desktop")), uno::UNO_QUERY_THROW );
+		(xSMgr->createInstanceWithContext(
+			::rtl::OUString::createFromAscii("com.sun.star.frame.Desktop"), 
+				m_xContext), uno::UNO_QUERY_THROW );
 	xDesktop->terminate();
 }
 

@@ -6,6 +6,7 @@
 #include <org/openoffice/vba/XWorksheet.hpp>
 #include <org/openoffice/vba/XRange.hpp>
 #include <com/sun/star/lang/XEventListener.hpp>
+#include <com/sun/star/uno/XComponentContext.hpp>
 #include <com/sun/star/frame/XModel.hpp>
 #include "vbahelper.hxx"
 
@@ -13,9 +14,14 @@ class ScVbaWorksheet : public ::cppu::WeakImplHelper1<vba::XWorksheet>
 {
 	uno::Reference< sheet::XSpreadsheet > mxSheet;
 	uno::Reference< frame::XModel > mxModel;
+	uno::Reference< ::com::sun::star::uno::XComponentContext > m_xContext;
 
 public:
-	ScVbaWorksheet( uno::Reference< sheet::XSpreadsheet > xSheet, uno::Reference< frame::XModel >xModel ) : mxSheet( xSheet ), mxModel(xModel)
+	ScVbaWorksheet( 
+		uno::Reference< ::com::sun::star::uno::XComponentContext >& xContext,
+		uno::Reference< sheet::XSpreadsheet > xSheet, 
+		uno::Reference< frame::XModel >xModel ) : 
+			m_xContext(xContext), mxSheet( xSheet ), mxModel(xModel)
 	{}
 
 	virtual ~ScVbaWorksheet() {}

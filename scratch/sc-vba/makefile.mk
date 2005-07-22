@@ -1,40 +1,52 @@
-PRJ=..$/..$/..
+PRJ=../..$/..
 
-PRJNAME=sc
-TARGET=vba
-
-LIBTARGET=NO
+PRJNAME=
+TARGET=vbaobj
+NO_BSYMBOLIC=	TRUE
 ENABLE_EXCEPTIONS=TRUE
+COMP1TYPELIST=$(TARGET)
+COMPRDB=$(SOLARBINDIR)$/types.rdb
 
 # --- Settings -----------------------------------------------------
 
-.INCLUDE :  scpre.mk
+.INCLUDE :  svpre.mk
 .INCLUDE :  settings.mk
-.INCLUDE :  sc.mk
-.INCLUDE :  $(PRJ)$/util$/makefile.pmk
+.INCLUDE :  sv.mk
+DLLPRE =
 
-# --- Files --------------------------------------------------------
+# ------------------------------------------------------------------
 
-SLO1FILES =  \
-        $(SLO)$/vbaapplication.obj \
-        $(SLO)$/vbaglobals.obj \
-        $(SLO)$/vbarange.obj \
-        $(SLO)$/vbaworkbook.obj \
-        $(SLO)$/vbaworkbooks.obj \
-        $(SLO)$/vbaworksheet.obj \
-	$(SLO)$/vbaworksheets.obj \
-	$(SLO)$/vbafont.obj \
-	$(SLO)$/vbarows.obj \
-	$(SLO)$/vbacolumns.obj
+#.INCLUDE :  ..$/cppumaker.mk
 
-LIB1TARGET = \
-	$(SLB)$/$(TARGET).lib
-LIB1OBJFILES = \
-	$(SLO1FILES)
-SLOFILES = \
-        $(SLO1FILES)
+SLOFILES= \
+		$(SLO)$/service.obj \
+		$(SLO)$/vbaglobals.obj \
+		$(SLO)$/vbaworkbook.obj \
+		$(SLO)$/vbaworksheets.obj \
+		$(SLO)$/vbaapplication.obj \
+		$(SLO)$/vbarange.obj \
+		$(SLO)$/vbaworkbooks.obj \
+		$(SLO)$/vbacolumns.obj \
+		$(SLO)$/vbaworksheet.obj \
+		$(SLO)$/vbarows.obj \
+		$(SLO)$/vbafont.obj
 
-# --- Tagets -------------------------------------------------------
+SHL1TARGET= $(TARGET)$(UPD)$(DLLPOSTFIX).uno
+SHL1IMPLIB=	i$(TARGET)
 
-.INCLUDE :  target.mk
+SHL1VERSIONMAP=$(TARGET).map
+SHL1DEF=$(MISC)$/$(SHL1TARGET).def
+DEF1NAME=$(SHL1TARGET)
 
+SHL1STDLIBS= \
+		$(CPPUHELPERLIB) \
+		$(CPPULIB) \
+		$(TOOLSLIB) \
+		$(SALLIB)
+
+SHL1DEPN=
+SHL1LIBS=$(SLB)$/$(TARGET).lib
+
+# --- Targets ------------------------------------------------------
+
+.INCLUDE :	target.mk

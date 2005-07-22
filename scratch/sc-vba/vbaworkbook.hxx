@@ -13,11 +13,13 @@ typedef ::cppu::WeakImplHelper1< org::openoffice::vba::XWorkbook > ScVbaWorkbook
 
 class ScVbaWorkbook : public ScVbaWorkbook_BASE
 {
+	uno::Reference< ::uno::XComponentContext > m_xContext;
 	uno::Reference< frame::XModel > mxModel;
 
 public:
-	ScVbaWorkbook( 	uno::Reference< frame::XModel > xModel ) :
- 			mxModel( xModel ){}
+	ScVbaWorkbook( 	uno::Reference< ::uno::XComponentContext >& xContext,
+			uno::Reference< frame::XModel > xModel ) :
+ 			mxModel( xModel ), m_xContext( xContext ){}
 	virtual ~ScVbaWorkbook() {}
 
     // Attributes
