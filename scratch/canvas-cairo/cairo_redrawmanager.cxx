@@ -258,6 +258,9 @@ namespace vclcanvas
 	    Cairo* pCairo = cairo_create( mpWinSurface );
 	    cairo_set_operator( pCairo, CAIRO_OPERATOR_SOURCE );
 	    cairo_set_source_surface( pCairo, pBackingStoreSurface, 0, 0 );
+	    Size aSize = mpBackBuffer->getSize();
+	    cairo_rectangle( pCairo, 0, 0, aSize.Width(), aSize.Height() );
+	    cairo_clip( pCairo );
 	    cairo_paint( pCairo );
 	    cairo_destroy( pCairo );
         }
@@ -468,86 +471,44 @@ namespace vclcanvas
                                      aOutputPosition.X() + aOutputSize.Width(),
                                      aOutputPosition.Y() + aOutputSize.Height() );
         
-        const Point aEmptyPoint(0,0);
+	printf("update area size: %d x %d\n", aOutputSize.Width(), aOutputSize.Height() );
 
-//         if( rComponents.maComponentList.size() < 3 &&
-//             ::std::find_if( rComponents.maComponentList.begin(),
-//                             rComponents.maComponentList.end(),
-//                             ::boost::bind( &isAreaUpdateNotOpaque,
-//                                            ::boost::cref(aUpdateArea),
-//                                            _1 ) ) == rComponents.maComponentList.end() )
-//         {
-//             // no more than two sprites, and all opaque - can render
-//             // directly to the frontbuffer
+	if( aOutputSize.Width() > 0 && aOutputSize.Height() > 0 ) {
 
-//             // clip output to actual update region (otherwise a)
-//             // wouldn't save much render time, and b) might clutter
-//             // sprites outside this area)
-// 	    cairo_save( mpCairo );
-//  	    cairo_rectangle( mpCairo, aOutputPosition.X(), aOutputPosition.Y(), aOutputSize.Width(), aOutputSize.Height() );
-//  	    cairo_clip( mpCairo );
-
-// 	    Cairo* pCairo = cairo_create( mpWinSurface );
-
-//             // paint all affected sprites to update area
-//             ::std::for_each( rComponents.maComponentList.begin(),
-//                              rComponents.maComponentList.end(),
-//                              ::boost::bind( &spriteRedrawStub,
-//                                             ::boost::cref(aEmptyPoint),
-//                                             mpCairo,
-//                                             _1 ) );
-
-// 	    cairo_restore( mpCairo );
-//         }
-//         else
-        {
-	    cairo_save( mpCairo );
-
-            // paint background
-// 	    {
-            printf("sprite size: %d x %d\n", aOutputSize.Width(), aOutputSize.Height() );
-// 	    Cairo* pCairo = cairo_create( mpBackBuffer->getSurface() );
-// 	    cairo_set_source_rgb( pCairo, 1, 1, 0 );
-// 	    cairo_rectangle( pCairo, 0, 0, mpBackBuffer->getSize().Width(), mpBackBuffer->getSize().Height() );
-// 	    cairo_fill( pCairo );
-// 	    }
 
 	    cairo_save( mpCairo );
+
 	    cairo_rectangle( mpCairo, aOutputPosition.X(), aOutputPosition.Y(), aOutputSize.Width(), aOutputSize.Height() );
- 	    cairo_clip( mpCairo );
+	    cairo_clip( mpCairo );
+
+	    cairo_save( mpCairo );
 	    cairo_set_operator( mpCairo, CAIRO_OPERATOR_SOURCE );
 	    cairo_set_source_surface( mpCairo, mpBackBuffer->getSurface(), 0, 0 );
 	    cairo_paint( mpCairo );
 	    cairo_restore( mpCairo );
         
-            // paint all affected sprites to update area
-            ::std::for_each( rComponents.maComponentList.begin(),
-                             rComponents.maComponentList.end(),
-                             ::boost::bind( &spriteRedrawStub,
-                                            ::boost::cref(aUpdateArea.TopLeft()),
-                                            mpCairo,
-                                            _1 ) );
-
-// 	    cairo_reset_clip( mpCairo );
-// 	    cairo_set_line_width( mpCairo, 6 );
-// 	    cairo_set_source_rgb( mpCairo, 1, 1, 0 );
-// 	    cairo_rectangle( mpCairo, aOutputPosition.X(), aOutputPosition.Y(), aOutputSize.Width(), aOutputSize.Height() );
-// 	    cairo_stroke( mpCairo );
+	    // paint all affected sprites to update area
+	    ::std::for_each( rComponents.maComponentList.begin(),
+			     rComponents.maComponentList.end(),
+			     ::boost::bind( &spriteRedrawStub,
+					    ::boost::cref(aUpdateArea.TopLeft()),
+					    mpCairo,
+					    _1 ) );
 
             // flush to screen
 	    Cairo* pCairo = cairo_create( mpWinSurface );
 
 	    cairo_save( mpCairo );
- 	    cairo_rectangle( pCairo, aOutputPosition.X(), aOutputPosition.Y(), aOutputSize.Width(), aOutputSize.Height() );
- 	    cairo_clip( pCairo );
+	    cairo_rectangle( pCairo, aOutputPosition.X(), aOutputPosition.Y(), aOutputSize.Width(), aOutputSize.Height() );
+	    cairo_clip( pCairo );
 	    cairo_set_operator( pCairo, CAIRO_OPERATOR_SOURCE );
- 	    cairo_set_source_surface( pCairo, mpSurface, 0, 0 );
- 	    cairo_paint( pCairo );
+	    cairo_set_source_surface( pCairo, mpSurface, 0, 0 );
+	    cairo_paint( pCairo );
+	    cairo_restore( mpCairo );
+
 	    cairo_restore( mpCairo );
 
 	    cairo_destroy( pCairo );
-
-	    cairo_restore( mpCairo );
-        }
+	}
     }
 }

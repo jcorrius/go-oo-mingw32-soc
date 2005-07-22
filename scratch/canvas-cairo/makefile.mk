@@ -2,9 +2,9 @@
 #
 #   $RCSfile: makefile.mk,v $
 #
-#   $Revision: 1.3 $
+#   $Revision: 1.4 $
 #
-#   last change: $Author: rodo $ $Date: 2005/06/13 09:32:55 $
+#   last change: $Author: rodo $ $Date: 2005/07/22 16:02:34 $
 #
 #   The Contents of this file are made available subject to the terms of
 #   either of the following licenses
@@ -70,11 +70,13 @@ ENABLE_EXCEPTIONS=TRUE
 
 .INCLUDE :	settings.mk
 DLLPRE =
-SOLARLIB+=-L/usr/local/lib
 
 # --- Common ----------------------------------------------------------
 
-PKGCONFIG_MODULES=glitz glitz-glx cairo
+.IF "$(ENABLE_CAIRO)" != ""
+
+PKGCONFIG_MODULES=$(CAIRO_PACKAGES)
+
 .INCLUDE: pkg_config.mk
 
 
@@ -121,6 +123,8 @@ SHL1VERSIONMAP=exports.map
 
 DEF1NAME=$(SHL1TARGET)
 DEF1EXPORTFILE=exports.dxp
+
+.ENDIF
 
 # ==========================================================================
 

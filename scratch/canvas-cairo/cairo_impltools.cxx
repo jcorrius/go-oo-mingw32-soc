@@ -267,6 +267,8 @@ namespace vclcanvas
 		    const long		nHeight = pBitmapReadAcc->Height();
 		    long nX, nY;
 
+		    printf("fallback to XBitmap interface - slow\n");
+
 		    data = (unsigned char*) malloc( nWidth*nHeight*4 );
 		    long nOff = 0;
 		    Color aColor;

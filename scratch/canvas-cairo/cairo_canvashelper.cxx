@@ -278,9 +278,10 @@ namespace vclcanvas
 	if(mpCairo) {
 	    cairo_save( mpCairo );
 
+	    cairo_set_line_width( mpCairo, 1 );
+
 	    useStates( viewState, renderState, true );
 
-	    cairo_set_line_width( mpCairo, 1 );
 	    cairo_move_to( mpCairo, aStartRealPoint2D.X, aStartRealPoint2D.Y );
 	    cairo_line_to( mpCairo, aEndRealPoint2D.X, aEndRealPoint2D.Y );
 	    cairo_stroke( mpCairo );
@@ -298,8 +299,9 @@ namespace vclcanvas
 	if( mpCairo )
 	    cairo_save( mpCairo );
 
-	    useStates( viewState, renderState, true );
 	    cairo_set_line_width( mpCairo, 1 );
+
+	    useStates( viewState, renderState, true );
 	    cairo_move_to( mpCairo, aBezierSegment.Px, aBezierSegment.Py );
 	    cairo_curve_to( mpCairo, aBezierSegment.C1x, aBezierSegment.C1y, aBezierSegment.C2x, aBezierSegment.C2y, _aEndPoint.X, _aEndPoint.Y );
 	    cairo_stroke( mpCairo );
@@ -370,12 +372,15 @@ namespace vclcanvas
 		}
 	    } else
 		cairo_fill( pCairo );
+	    printf("fill\n");
 	break;
 	case Stroke:
 	    cairo_stroke( pCairo );
+	    printf("stroke\n");
 	break;
 	case Clip:
 	    cairo_clip( pCairo );
+	    printf("clip\n");
 	break;
 	}
     }
@@ -493,8 +498,9 @@ namespace vclcanvas
 	if( mpCairo ) {
 	    cairo_save( mpCairo );
 
-	    useStates( viewState, renderState, true );
 	    cairo_set_line_width( mpCairo, 1 );
+
+	    useStates( viewState, renderState, true );
 	    drawPolyPolygonPath( xPolyPolygon, Stroke );
 	    
 	    cairo_restore( mpCairo );
