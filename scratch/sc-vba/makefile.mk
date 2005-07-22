@@ -9,14 +9,11 @@ COMPRDB=$(SOLARBINDIR)$/types.rdb
 
 # --- Settings -----------------------------------------------------
 
-.INCLUDE :  svpre.mk
 .INCLUDE :  settings.mk
 .INCLUDE :  sv.mk
 DLLPRE =
 
 # ------------------------------------------------------------------
-
-#.INCLUDE :  ..$/cppumaker.mk
 
 SLOFILES= \
 		$(SLO)$/service.obj \
