@@ -48,7 +48,7 @@ ScVbaWorksheets::getParent() throw (uno::RuntimeException)
 	}
 	if ( !xWorkbook.is() )
 	{
-		uno::RuntimeException( rtl::OUString::createFromAscii(
+		throw uno::RuntimeException( rtl::OUString::createFromAscii(
 			"ScVbaWorksheets::getParent - No Parent" ), uno::Reference< uno::XInterface >() );
 	}
 	
