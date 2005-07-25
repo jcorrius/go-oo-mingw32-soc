@@ -113,6 +113,54 @@ sub read_symbols($$)
     $lib->{addr_space} = \%addr_space;
 }
 
+sub get_class_stem($)
+{
+    my $sym = shift;
+    # relies on the integer in _ZTV[N]3...?? to disambiguate
+    # class SetFoo vs. class SetFooExtra
+    $sym =~ s/^_ZTVN*//;
+    $sym =~ s/E*$//;
+    return $sym;
+}
+
+sub breakdown_vtable($$$$)
+{
+    my $vtable_breakdown = shift;
+    my $lib = shift;
+    my $datum = shift;
+    my $sym = shift;
+
+    $sym =~ /_ZTI/ && return; # don't count type-info relocs
+
+    my $constr = $datum->{symbol};
+    
+    my $cdata = $vtable_breakdown->{$constr};
+    if (!defined $cdata) {
+	my %some_cdata;
+	$cdata = \%some_cdata;
+	$vtable_breakdown->{$constr} = $cdata;
+
+	$cdata->{slot_count} = 0;
+	$cdata->{self_impl_slot_count} = 0;
+	$cdata->{extern_impl_slot_count} = 0;
+	$cdata->{stem} = get_class_stem ($constr);
+	$cdata->{external_self} = 0;
+    }
+    $cdata->{slot_count}++;
+    
+    if ($sym =~ m/$cdata->{stem}/) {
+	$cdata->{self_impl_slot_count}++;
+	
+	if (defined $lib->{undef}->{$sym}) {
+	    $cdata->{external_self}++; # very unusual ...
+	}
+    }
+
+    if (defined $lib->{undef}->{$sym}) {
+	$cdata->{extern_impl_slot_count}++;
+    }
+}
+
 sub by_internal
 {
   keys (%{$a->{relocs}}) <=> keys (%{$b->{relocs}});
@@ -260,6 +308,8 @@ for $lib (sort by_internal @libs) {
 	my $other_relocs = 0;
 	my $addr_space = $lib->{addr_space};
 	my $key_count = keys %{$lib->{addr_space}};
+	my %vtable_breakdown;
+
 	print "Data section contains " . $key_count * 4 . " bytes\n";
 	for $sym (keys %{$lib->{relocs}}) {
 	    my $lst = ($lib->{relocs})->{$sym};
@@ -271,6 +321,7 @@ for $lib (sort by_internal @libs) {
 		    
 		    if (is_vtable ($datum->{symbol})) {
 			$vtable_relocs++;
+			breakdown_vtable (\%vtable_breakdown, $lib, $datum, $sym);
 		    } elsif (is_rtti ($datum->{symbol})) {
 			$rtti_relocs++;
 		    } else {
@@ -291,5 +342,32 @@ for $lib (sort by_internal @libs) {
 	print " .data/non-vtable $data_relocs - " . sprintf ("%2.2g", $data_relocs/$total_relocs) . "\%\n";
 	print " other: $other_relocs - " . sprintf ("%2.2g", $other_relocs/$total_relocs) . "\%\n";
 	print " grand-total: " . ($vtable_relocs + $rtti_relocs + $data_relocs + $other_relocs) . "\n";
+
+	print "\n";
+
+	my $vtable_slot_count = 0;
+	my $vtable_class_count = 0;
+	my $vtable_self_impl_slot_count = 0;
+	my $vtable_extern_impl_slot_count = 0;
+	my $vtable_extern_self = 0;
+	for my $vtbl (keys %vtable_breakdown) {
+	    $vtable_class_count++;
+	    $vtable_slot_count += $vtable_breakdown{$vtbl}->{slot_count};
+	    $vtable_self_impl_slot_count += $vtable_breakdown{$vtbl}->{self_impl_slot_count};
+	    $vtable_extern_impl_slot_count += $vtable_breakdown{$vtbl}->{extern_impl_slot_count};
+	    $vtable_extern_self += $vtable_breakdown{$vtbl}->{external_self};
+#	    print "Class '$vtbl': slots " . $vtable_breakdown{$vtbl}->{slot_count}
+#		. " self-impl " . $vtable_breakdown{$vtbl}->{self_impl_slot_count} . "\n";
+	}
+	if ($vtable_class_count) {
+	    print "vtables breakdown\n";
+	
+	    print " vtables: $vtable_class_count\n";
+	    print " slots / vtable: " . sprintf ("%.3g", $vtable_slot_count/$vtable_class_count) . " slots\n";
+	    print " self-impl / vtable: " . sprintf ("%.3g", $vtable_self_impl_slot_count/$vtable_class_count) . " slots\n";
+	    print " parent-impl / vtable: " . sprintf ("%.3g", ($vtable_slot_count - $vtable_self_impl_slot_count)/$vtable_class_count) . " slots\n";
+	    print " *extern-impl / vtable: " . sprintf ("%.3g", $vtable_extern_impl_slot_count/$vtable_class_count) . " slots\n";
+	    print " *extern-impl of self total: " . sprintf ("%.3g", $vtable_extern_self) . " slots\n";
+	}
     }
 }
