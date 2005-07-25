@@ -17,7 +17,7 @@
 #include <cppuhelper/bootstrap.hxx>
 #include <com/sun/star/util/XURLTransformer.hpp>
 #include <com/sun/star/frame/XDispatchProvider.hpp>
-
+#include <com/sun/star/frame/XComponentLoader.hpp>
 #include <tools/string.hxx>
 
 #include "vbarange.hxx"
@@ -25,8 +25,114 @@
 
 #define STANDARDWIDTH 2267 
 #define STANDARDHEIGHT 427
+#define DOESNOTEXIST -1
+
+static sal_Int16 
+nameExists( uno::Reference <sheet::XSpreadsheetDocument>& xSpreadDoc, ::rtl::OUString & name)
+{
+	uno::Reference<sheet::XSpreadsheets> xSheets = xSpreadDoc->getSheets();
+	uno::Reference <container::XIndexAccess> xIndex( xSheets, uno::UNO_QUERY );
+	if ( xIndex.is() )
+	{
+		sal_Int32  nCount = xIndex->getCount();
+		for (sal_Int32 i=0; i < nCount; i++)
+		{
+			uno::Reference< sheet::XSpreadsheet > xSheet(xIndex->getByIndex(i), uno::UNO_QUERY);
+			uno::Reference< container::XNamed > xNamed( xSheet, uno::UNO_QUERY_THROW );
+			if (xNamed->getName() == name)
+			{
+				return i;
+			}
+		}
+	}
+	return DOESNOTEXIST;
+}
+
+static void getNewSpreadsheetName (rtl::OUString &aNewName, rtl::OUString aOldName, uno::Reference <sheet::XSpreadsheetDocument>& xSpreadDoc )
+{
+	rtl::OUString aUnderScre( RTL_CONSTASCII_USTRINGPARAM( "_" ) );
+	int currentNum =2;
+	aNewName = aOldName + aUnderScre+
+					String::CreateFromInt32(currentNum) ;
+	while ( nameExists(xSpreadDoc,aNewName) != DOESNOTEXIST )
+	{
+		aNewName = aOldName + aUnderScre +
+		String::CreateFromInt32(++currentNum) ;
+	}
+}
+
+static void removeAllSheets( uno::Reference <sheet::XSpreadsheetDocument>& xSpreadDoc, rtl::OUString aSheetName)
+{
+	uno::Reference<sheet::XSpreadsheets> xSheets = xSpreadDoc->getSheets();
+	uno::Reference <container::XIndexAccess> xIndex( xSheets, uno::UNO_QUERY );
+
+	if ( xIndex.is() )
+	{
+		uno::Reference<container::XNameContainer> xNameContainer(xSheets,uno::UNO_QUERY_THROW);
+		for (sal_Int32 i = xIndex->getCount() -1; i>= 1; i--)
+		{
+			uno::Reference< sheet::XSpreadsheet > xSheet(xIndex->getByIndex(i), uno::UNO_QUERY);
+			uno::Reference< container::XNamed > xNamed( xSheet, uno::UNO_QUERY_THROW );
+			if (xNamed.is())
+			{
+				xNameContainer->removeByName(xNamed->getName());
+			}
+		}
+
+		uno::Reference< sheet::XSpreadsheet > xSheet(xIndex->getByIndex(0), uno::UNO_QUERY);                uno::Reference< container::XNamed > xNamed( xSheet, uno::UNO_QUERY_THROW );
+		if (xNamed.is())
+		{
+			xNamed->setName(aSheetName);
+		}
+	}
+}
+
+static uno::Reference<frame::XModel>
+openNewDoc(rtl::OUString aSheetName )
+{
+	uno::Reference<frame::XModel> xModel;
+	try
+	{
+		uno::Reference<uno::XComponentContext > xContext(  ::cppu::defaultBootstrap_InitialComponentContext());
+		if ( !xContext.is() )
+		{
+			return xModel;
+		}
+		uno::Reference<lang::XMultiComponentFactory > xServiceManager(
+										xContext->getServiceManager() );
+		if ( !xServiceManager.is() )
+		{
+			return xModel;
+		}
+		uno::Reference <frame::XComponentLoader > xComponentLoader(
+						xServiceManager->createInstanceWithContext(
+						rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "com.sun.star.frame.Desktop" ) ),
+						xContext ), uno::UNO_QUERY_THROW );
+
+		uno::Reference<lang::XComponent > xComponent( xComponentLoader->loadComponentFromURL(
+				rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "private:factory/scalc" ) ),
+				rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "_blank" ) ), 0,
+				uno::Sequence < ::com::sun::star::beans::PropertyValue >() ) );
+		uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( xComponent, uno::UNO_QUERY_THROW );
+		if ( xSpreadDoc.is() )
+		{
+			removeAllSheets(xSpreadDoc,aSheetName);
+		}
+		uno::Reference<frame::XModel> xModel(xSpreadDoc,uno::UNO_QUERY_THROW);
+		return xModel;
+	}
+	catch ( ::cppu::BootstrapException & e )    
+	{
+		return xModel;
+	}
+	catch ( uno::Exception & e )
+	{
+		return xModel;
+	}
+}
+
 static void
-dispatchMyRequests (uno::Reference< frame::XModel>& xModel,rtl::OUString & aUrl) {
+dispatchRequests (uno::Reference< frame::XModel>& xModel,rtl::OUString & aUrl) {
 
 	util::URL  url ;
 	url.Complete = aUrl;
@@ -156,135 +262,104 @@ ScVbaWorksheet::Activate() throw (uno::RuntimeException)
 	xSpreadsheet->setActiveSheet(mxSheet);	
 }
 
+void
+ScVbaWorksheet::Select() throw (uno::RuntimeException)
+{
+	Activate();
+}
+
 void 
 ScVbaWorksheet::Move( const uno::Any& Before, const uno::Any& After ) throw (uno::RuntimeException) 
 {
-
-	sal_Int32 nDest=0;
-	rtl::OUString aBefore;
-	rtl::OUString aAfter;
-	Before >>= aBefore;
-	After >>= aAfter;
-
 	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( mxModel, uno::UNO_QUERY );
-	//uno::Reference< sheet::XSpreadsheetView > xSpreadsheetView(
-	//				mxModel->getCurrentController(), uno::UNO_QUERY_THROW );
-	//uno::Reference<sheet::XSpreadsheet> xSpreadSheet = xSpreadsheetView->getActiveSheet();
-	uno::Reference<sheet::XSpreadsheets> xSheets = xSpreadDoc->getSheets();
-	uno::Reference <container::XIndexAccess> xIndex( xSheets, uno::UNO_QUERY );
-	sal_Int16 nCount = xIndex->getCount();
-	if (!xIndex.is() || 0==nCount)
-		return;
-	if (aBefore==NULL && aAfter==NULL) 
-	{
-			//FIXME Ideally it should open a new workbook 
-			xSheets->moveByName(getName(),1 + nCount);	
-			return ;
-	}
+	rtl::OUString aSheetName;
 
-	if (aBefore) 
+	if (!(Before >>= aSheetName) && !(After >>=aSheetName))
 	{
-		for (sal_Int16 i=0; i < nCount; i++)
+		uno::Reference<vba::XRange> xRange = getUsedRange();
+		xRange->Select();
+		rtl::OUString url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:Copy"));
+		dispatchRequests(mxModel,url);
+		uno::Reference<frame::XModel> xModel = openNewDoc(getName());
+		if (xModel.is()) 
 		{
-			uno::Reference< sheet::XSpreadsheet > xSheet(xIndex->getByIndex(i), uno::UNO_QUERY);
-			uno::Reference< container::XNamed > xNamed( xSheet, uno::UNO_QUERY_THROW );
-			if (xNamed->getName() == aBefore)
-			{
-				nDest = i - 1;
-				break;
-			}
+			url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:Paste"));
+			dispatchRequests(xModel,url);
+			Delete();
 		}
-	
+		return ;
 	}
-	
-	if (nDest >= 0)
-		xSheets->moveByName(getName(),nDest);	
+
+	sal_Int32 nDest = 0;
+	sal_Bool bAfter = false;
+	if (Before >>= aSheetName )
+	{
+		nDest = nameExists (xSpreadDoc, aSheetName);
+	}
 	else
-		xSheets->moveByName(getName(),0);
+	{
+		nDest = nameExists (xSpreadDoc, aSheetName);
+		bAfter =true;
+	}
 
-}
-
-static sal_Bool 
-nameExists( uno::Reference <sheet::XSpreadsheetDocument>& xSpreadDoc, ::rtl::OUString & name)
-{
-        uno::Reference<sheet::XSpreadsheets> xSheets = xSpreadDoc->getSheets();
-        uno::Reference <container::XIndexAccess> xIndex( xSheets, uno::UNO_QUERY );
-        if ( xIndex.is() )
-        {
-              sal_Int32  nCount = xIndex->getCount();
-                for (sal_Int32 i=0; i < nCount; i++)
-                {
-                        uno::Reference< sheet::XSpreadsheet > xSheet(xIndex->getByIndex(i), uno::UNO_QUERY);
-                        uno::Reference< container::XNamed > xNamed( xSheet, uno::UNO_QUERY_THROW );
-                        if (xNamed->getName() == name)
-                        {
-				return true;
-                        }
-                }
-        }
-return false;
-
+	if (nDest != DOESNOTEXIST)
+	{
+		if (bAfter)  nDest++;
+		uno::Reference<sheet::XSpreadsheets> xSheets = xSpreadDoc->getSheets();
+		xSheets->moveByName(getName(),nDest);
+	}
 }
 
 void 
 ScVbaWorksheet::Copy( const uno::Any& Before, const uno::Any& After ) throw (uno::RuntimeException) 
 {
-	sal_Int32 nDest=0;
-	rtl::OUString aBefore;
-	rtl::OUString aAfter;
-	Before >>= aBefore;
-	After >>= aAfter;
-	rtl::OUString aName( RTL_CONSTASCII_USTRINGPARAM( "Sheet" ) );
-	rtl::OUString sheetName = getName();
-
 	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( mxModel, uno::UNO_QUERY );
-	uno::Reference<sheet::XSpreadsheets> xSheets = xSpreadDoc->getSheets();
-	uno::Reference <container::XIndexAccess> xIndex( xSheets, uno::UNO_QUERY );
-	sal_Int16 nCount = xIndex->getCount();
+	rtl::OUString aSheetName;
 
-	if (!xIndex.is() || 0==nCount)
+	if (!(Before >>= aSheetName) && !(After >>=aSheetName))
+	{
+		uno::Reference<vba::XRange> xRange = getUsedRange();
+		xRange->Select();
+		rtl::OUString url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:Copy"));
+		dispatchRequests(mxModel,url);
+		uno::Reference<frame::XModel> xModel = openNewDoc(getName());
+		if (xModel.is())
+		{
+			url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:Paste"));
+			dispatchRequests(xModel,url);
+		}
 		return;
-
-	if (aBefore==NULL && aAfter==NULL) 
-	{
-		//FIXME Ideally it should open a new workbook and check if the new name exsists
-		if (!nameExists(xSpreadDoc,sheetName)) 
-		{
-			return;
-		}
-		aName += String::CreateFromInt32((1+nCount));
-		xSheets->copyByName(getName(),aName,nCount);
-		return ;
 	}
 
-	if (aBefore) 
+	sal_Int32 nDest = 0;
+	sal_Bool bAfter = false;
+	if (Before >>= aSheetName )
 	{
-		for (sal_Int16 i=0; i < nCount; i++)
-		{
-			uno::Reference< sheet::XSpreadsheet > xSheet(xIndex->getByIndex(i), uno::UNO_QUERY);
-			uno::Reference< container::XNamed > xNamed( xSheet, uno::UNO_QUERY_THROW );
-			if (xNamed->getName() == aBefore)
-			{
-				nDest = i - 1;
-				break;
-			}
-		}
+		nDest = nameExists (xSpreadDoc, aSheetName);
 	}
-	
-	aName= getName() ;
-	aName += String::CreateFromInt32((1+nCount));
-	if (nDest >= 0)
-		xSheets->copyByName(getName(),aName,nDest);	
 	else
-		xSheets->copyByName(getName(),aName,0);
+	{
+		nDest = nameExists (xSpreadDoc, aSheetName);
+		bAfter =true;
+	}
 
+	if (nDest != DOESNOTEXIST)
+	{
+		if(bAfter)  nDest++;
+		uno::Reference<sheet::XSpreadsheets> xSheets = xSpreadDoc->getSheets();
+		getNewSpreadsheetName(aSheetName,getName(),xSpreadDoc);
+		xSheets->copyByName(getName(),aSheetName,nDest);
+	}
 }
 
 void 
 ScVbaWorksheet::Paste( const uno::Any& Destination, const uno::Any& Link ) throw (uno::RuntimeException)
 {
+	uno::Reference<vba::XRange> xRange;
+	if (Destination >>= xRange)
+		xRange->Select();
 	rtl::OUString url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:Paste"));
-	dispatchMyRequests(mxModel,url);
+	dispatchRequests(mxModel,url);
 }
 
 void 
@@ -349,5 +424,5 @@ void
 ScVbaWorksheet::CheckSpelling( const uno::Any& CustomDictionary,const uno::Any& IgnoreUppercase,const uno::Any& AlwaysSuggest, const uno::Any& SpellingLang ) throw (uno::RuntimeException)
 {
 	rtl::OUString url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:SpellDialog"));
-	dispatchMyRequests(mxModel,url);
+	dispatchRequests(mxModel,url);
 }
