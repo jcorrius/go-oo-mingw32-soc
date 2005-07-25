@@ -1,5 +1,34 @@
 Relocations:
 
+** The problem:
+
+    C++ is very relocation heavy; large C++ apps generate many
+thousands of rel.dyn relocations all of which have to be processed on
+load. Using http://go-oo.org/ooo-build/bin/relocstat, on a recent OO.o
+2.0 milestone, without visibility markup (to allow 
+
+relocations by type for 2 different builts:
+
+library:    no visibility   visibility markup
+	    unique/sym	    unique/sym
+libsvx	    23707	    9866
+libsvt	    13039	    4766
+libvcl	    3122	    2304
+
+(non-unique) reloc breakdown:
+
+library:     vtables:	rtti:	other:
+libsvx	     85%	9%	6%
+libsvt	     77%	8%	15%
+libvcl	     81%	11%	8%
+
+    ie. visibility markup has a nice effect on symbol-driven
+relocation reduction, but it still leaves us with a large number of
+relocations to process during startup.
+
+    Want to replace 
+
+
 ** Interesting questions
     + *why* is it that (or even is it!?) that we export
       VTables stuffed full of relocations even when we're using
@@ -710,6 +739,14 @@ linker.c: has some great docs at the top:
 
 	+ need to bump up bfd_get_reloc_upper_bound ...
 
+** TODO:
+   + the elf_i386_relocate_section method needs the fixup:
+	+ iterates over the input_section relocs ...
+	    + foo ! :-)
+	+ this must do the in-line fixups for each source
+	  PLT32ABS - get it right ...
+	+ just need to output the R_386_RELATIVE here (?)
+	  (need allocated space for it though (?))
 
 *** ARGH - too much pain ...
 
@@ -731,3 +768,259 @@ Wow - adds even, even more inefficiency ;-)
 
     * But trivial - requires no linker changes & => worthwhile.
 
+
+* gennorm investigation:
+    * re-building the library with -O0 - doesn't make it work.
+    * 
+    * running 'gennorm' in icu fails with '-O' - but not if built with -O0
+
+    + re-building just the .cpp with -O0 - fails ...
+
+Breakpoint 1, uset_contains_2_6 (set=0x822d2a8, c=136499880) at uset.cpp:152
+152         return ((const UnicodeSet*) set)->contains(c);
+(gdb) s
+
+Program received signal SIGSEGV, Segmentation fault.
+0x00000000 in ?? ()
+(gdb) bt
+#0  0x00000000 in ?? ()
+#1  0x400a2076 in uset_contains_2_6 (set=0x822d2a8, c=193) at uset.cpp:152
+#2  0x0804b5a6 in postParseFn (context=0x0, code=193, norm=0x4033666c) at store.c:1110
+
+    ** Seems clear that the vtable entry there is NULL ...
+
+So - the call is correct:
+
+ends up in:
+
+00099451 <_ZNK7icu_2_610UnicodeSet8containsEiiSlot>:
+   99451:	e9 5e fc f8 ff       	jmp    290b4 <_ZNK7icu_2_610UnicodeSet8containsEii@plt>
+Disassembly of section text._ZNK7icu_2_610UnicodeSet11containsAllERKS0_:
+
+goes to:
+
+000290b4 <_ZNK7icu_2_610UnicodeSet8containsEii@plt>:
+   290b4:	ff a3 30 09 00 00    	jmp    *0x930(%ebx)
+   290ba:	68 48 12 00 00       	push   $0x1248
+   290bf:	e9 50 db ff ff       	jmp    26c14 <_init+0x18>
+
+** Most probable **:
+    + %ebx adjustment/assignment is not working ...
+
+0008292e <uset_contains_2_6>:
+   8292e:	55                   	push   %ebp
+   8292f:	89 e5                	mov    %esp,%ebp
+   82931:	83 ec 08             	sub    $0x8,%esp
+   82934:	8b 55 08             	mov    0x8(%ebp),%edx
+   82937:	8b 0a                	mov    (%edx),%ecx
+   82939:	8b 45 0c             	mov    0xc(%ebp),%eax
+   8293c:	89 44 24 04          	mov    %eax,0x4(%esp)
+   82940:	89 14 24             	mov    %edx,(%esp)
+   82943:	ff 51 1c             	call   *0x1c(%ecx)
+   82946:	0f be c0             	movsbl %al,%eax
+   82949:	c9                   	leave  
+   8294a:	c3                   	ret    
+   8294b:	90                   	nop    
+
+    * As is the case ! ...
+
+    (doh) ...
+
+gcc/config/i386/i386.c (output_set_got) 
+    + sets up %ebx 
+
+    (ix86_expand_prologue): calls (gen_set_got) - looks hopeful.
+
+gcc/config/i386/i386.c (ix86_expand_prologue):
+  pic_reg_used = false;
+  if (pic_offset_table_rtx
+      && (regs_ever_live[REAL_PIC_OFFSET_TABLE_REGNUM]
+	  || current_function_profile))
+
+** What are:
+    + current_function_profile
+	+ profiling hard-core goodness ...
+    + pic_offset_table_rtx
+	+ seems to be set if -fPIC is enabled otherwise not.
+    + regs_ever_live ?
+
+ix86_expand_prolog (nil) 0
+ix86_expand_prolog (nil) 0
+ix86_expand_prolog 0x4017f3f0 1
+ix86_expand_prolog 0x4017f3f0 1
+ix86_expand_prolog (nil) 1
+
+    
+
+gcc/function.h:
+    + 'unsigned int uses_pic_offset_table : 1'
+	+ used while generating the code - did this fn.
+	  use the pic offset ?
+    + ie. red-herring - only set in the config/ backends.
+
+  /* If we are doing position-independent code generation, now
+     is the time to output special prologues and epilogues.
+     We do not want to do this earlier, because it just clutters
+     up inline functions with meaningless insns.  */
+read FINALIZE_PIC ...
+
+*** URGH ......
+    + We have no idea what library the vtable is in:
+	=> there is no way we can setup the got properly ...
+	=> we have to generate different code ...
+
+We need to emit something like:
+
+_ZN8SubClass5doFooEvSlot:
+    push    %ebx
+    subl    $4, %esp
+    call    __i686.get_pc_thunk.bx
+    addl    $_GLOBAL_OFFSET_TABLE_, %ebx
+    call    _ZN8SubClass5doFooEv@plt
+    addl    $4, %esp
+    pop	%ebx
+    ret
+
+    ie. a proper stub function ...
+
+    Unfortunately the %esp adjustment necessary to read / calc the
+base-ptr offset is arg. list length dependant => we need some more
+heavy lifting; furthermore - we want to pass our arguments on
+un-changed [ => can't screw with the stack ... ] (without a highly
+painful copy in / out).
+
+    Read up on how the PLT works ... - must have the same problems ...
+
+    it does a jmp absolute(0x...)-> got -> push <immediate-idx>,
+jmp <foo>, push <immediate>, jmp GOT+1
+
+00000868 <plt0>:
+ 868:	ff b3 04 00 00 00    	pushl  0x4(%ebx)
+ 86e:	ff a3 08 00 00 00    	jmp    *0x8(%ebx)
+ 874:	00 00                	add    %al,(%eax)
+ 876:	00 00                	add    %al,(%eax)
+
+
+    Calls (via trampoline) into
+    'glibc/dl-runtime.c (fixup)'
+
+glibc/sysdeps/i386/dl-machine.h
+    #  define ELF_MACHINE_RUNTIME_TRAMPOLINE asm ("\
+	.text\n\
+	.globl _dl_runtime_resolve\n\
+	.type _dl_runtime_resolve, @function\n\
+	" CFI_STARTPROC "\n\
+	.align 16\n\
+_dl_runtime_resolve:\n\
+	" CFI_ADJUST_CFA_OFFSET (8) "\n\
+	pushl %eax		# Preserve registers otherwise clobbered.\n\
+	" CFI_ADJUST_CFA_OFFSET (4) "\n\
+	pushl %ecx\n\
+	" CFI_ADJUST_CFA_OFFSET (4) "\n\
+	pushl %edx\n\
+	" CFI_ADJUST_CFA_OFFSET (4) "\n\
+	movl 16(%esp), %edx	# Copy args pushed by PLT in register.  Note\n\
+	movl 12(%esp), %eax	# that `fixup' takes its parameters in regs.\n\
+	call fixup		# Call resolver.\n\
+	popl %edx		# Get register content back.\n\
+	" CFI_ADJUST_CFA_OFFSET (-4) "\n\
+	popl %ecx\n\
+	" CFI_ADJUST_CFA_OFFSET (-4) "\n\
+	xchgl %eax, (%esp)	# Get %eax contents end store function address.\n\
+	ret $8			# Jump to function address.\n\
+	" CFI_ENDPROC "\n\
+
+	ret $8 - cunning trick to return from the fn -> but
+really call another fn. / peel back the stack ...
+
+* Question - how does the get_pc_thunk.bx method work:
+
+	.section	.gnu.linkonce.t.__i686.get_pc_thunk.bx,"axG",@progbits,__i686.get_pc_thunk.bx,comdat
+.globl __i686.get_pc_thunk.bx
+	.hidden	__i686.get_pc_thunk.bx
+	.type	__i686.get_pc_thunk.bx, @function
+__i686.get_pc_thunk.bx:
+	movl	(%esp), %ebx
+	ret
+
+	* Seems to fetch from stack 
+	    * AH! - we 'call' (%esp) => pushes current PC -> stack
+
+    + Quandry:
+	+ we can't store %ebx on the stack
+	    + need to have %ebx setup right - but can't ...
+	+ can we call fixup ourselves & then chain ?
+	    + compare vs NULL first ?
+	    + [ ugly but ... ]
+
+	+ ie. duplicate the PLT entry for that symbol [tough]
+	    + can we use the instruction pointer in some addressing mode ?
+	+ can we jump straight into the GOT ?
+	    + nope plt0 requires %ebx.
+
+
+    + Output:
+	+ have to have a symbol index per symbol -
+	  tough wrt. linker changes (?) - done for PLT
+	  currently though.
+
+
+* Good news:
+  fprintf (stderr, "Vfunc ptr %p\n", &(pClass->doFoo));
+  app.cxx:35: error: ISO C++ forbids taking the address of a bound member function to form a pointer to member function.  Say '&BaseClass::doFoo'
+
+* So we can fiddle with that pointer value as much as we like.
+
+
+** Fuller design **:
+
+    *** development-gcc@suse.de ***
+	+ -foo-
+
+    + .rel.plt contains symbol indexes to do the fixup ...
+    + .got.foo: target for relocations when done ...
+
+    + Finding the index into the vtable:
+	+ we only call this once => it can be extremely slow ... *
+	+ the tail part of the PLT foo:
+	    + push $<plt-offset>
+	    + jmp <rel> _ZTV...<Init>
+	+ [ would prefer to have it in a register ]
+	    + [ but then unused in the common case ? ]
+
+    + Can we do the fixup & then 
+	+ We need an entirely new relocation type / more sections:
+	    + PLT fixup's relocations have 1 offset: index into table.
+	+ .got
+	    .long 00
+	    .long 00
+	    .long 00 <will be vlt fixup fn.>
+	+ .data
+	    + _ZTV3Foo:
+		.long _doFoo@vlt
+		.long _doBaa@vlt
+	+ .rel.vlt
+	    + JUMP_SLOT 'doFoo'
+	    + JUMP_SLOT 'doBaa' ...
+	+ .vlt (ronly?)
+	    _fixup@vlt: [ slot 0 ]
+		pushl %ebx
+		call __i686.get_pc_thunk.bx:
+		jmp *0x12(%ebx) // another magic GOT slot ?
+		
+	    _doFoo@vlt:	    
+		pushl $<index into rel.vlt of JUMP_SLOT relocation>
+		pushl $<address-of-vtable-slot> [ needs fixup but ... ]
+		// better to push just the slot offset ? we have
+		// this->_vtable_ptr of course.
+		jmp _fixup@vlt
+		
+		
+
+// potential optimisations:
+    + build whole vtable at once on 1st method call ...
+    + copy parent
+    + emit only JUMP_SLOTs for overridden methods ...
+
+
+  
