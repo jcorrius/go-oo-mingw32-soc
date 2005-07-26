@@ -26,7 +26,8 @@ SLOFILES= \
 		$(SLO)$/vbacolumns.obj \
 		$(SLO)$/vbaworksheet.obj \
 		$(SLO)$/vbarows.obj \
-		$(SLO)$/vbafont.obj
+		$(SLO)$/vbafont.obj \
+		$(SLO)$/vbaoutline.obj
 
 SHL1TARGET= $(TARGET)$(UPD)$(DLLPOSTFIX).uno
 SHL1IMPLIB=	i$(TARGET)

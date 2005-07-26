@@ -18,8 +18,10 @@
 #include <com/sun/star/util/XURLTransformer.hpp>
 #include <com/sun/star/frame/XDispatchProvider.hpp>
 #include <com/sun/star/frame/XComponentLoader.hpp>
+#include <com/sun/star/sheet/XSheetOutline.hpp>
 #include <tools/string.hxx>
 
+#include "vbaoutline.hxx"
 #include "vbarange.hxx"
 #include "vbaworksheet.hxx"
 
@@ -221,6 +223,13 @@ ScVbaWorksheet::getUsedRange() throw (uno::RuntimeException)
 
 	uno::Reference< table::XCellRange > xRange( xSheetCellCursor, uno::UNO_QUERY);
 	return new ScVbaRange(m_xContext, xRange);
+}
+
+uno::Reference< vba::XOutline >
+ScVbaWorksheet::Outline( ) throw (uno::RuntimeException)
+{
+	uno::Reference<sheet::XSheetOutline> xOutline(mxSheet,uno::UNO_QUERY_THROW);
+	return uno::Reference<vba::XOutline> (new ScVbaOutline(m_xContext, xOutline));
 }
 
 sal_Int32 

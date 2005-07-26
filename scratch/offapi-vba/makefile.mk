@@ -21,7 +21,8 @@ IDLFILES=\
 	XWorksheets.idl\
 	XFont.idl\
 	XRows.idl\
-	XColumns.idl
+	XColumns.idl\
+	XOutline.idl
 
 # ------------------------------------------------------------------
 
