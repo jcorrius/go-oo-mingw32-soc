@@ -59,6 +59,7 @@
  *
  ************************************************************************/
 
+#include <stdio.h>
 #include "cairo_backbuffer.hxx"
 #include "cairo_cairo.hxx"
 
