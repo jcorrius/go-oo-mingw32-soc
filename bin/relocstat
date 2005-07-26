@@ -13,11 +13,8 @@
 
 # misc. argument options / defaults
 my $opt_plt_too = 0;
-my $random_symbols = 0;
-my $unused = 0;
-my $for_lib = '';
-my $quiet = 0;
-my $strip = 0;
+my $random_symbol_sample = 0;
+my $do_data_profile = 0;
 
 sub read_relocs($$)
 {
@@ -194,21 +191,13 @@ sub find_nearest($$)
 #
 my @files = ();
 for my $arg (@ARGV) {
-  if ($arg =~ m/^--plt/) {
-    $opt_plt_too = 1;
-  } elsif ($arg =~ m/^--unused/) {
-    $unused = 1;
-  } elsif ($arg =~ m/^--quiet/) {
-    $quiet = 1;
-  } elsif ($arg =~ m/^--for=(.*)/) {
-    $for_lib = $1;
-  } elsif ($arg =~ m/^--strip/) {
-    $strip = 1;
-  } elsif ($arg =~ m/^--random-syms/) {
-    $random_symbols = 1;
-  } else {
-    push @files, $arg;
-  }
+    if ($arg =~ m/^--data-profile/) {
+	$do_data_profile = 1;
+    } elsif ($arg =~ m/^--random-syms/) {
+	$random_symbol_sample = 1;
+    } else {
+	push @files, $arg;
+    }
 }
 
 #
@@ -227,49 +216,71 @@ for my $file (@files) {
 }
 print STDERR "\n";
 
+my $do_print_relocs = 1;
+my $do_print_data_breakdown = 1;
+my $do_print_vtable_breakdown = 1;
+
+my %data_breakdown;
+
+if ($do_data_profile) {
+    $do_print_relocs = 0;
+    $do_print_data_breakdown = 0;
+    $do_print_vtable_breakdown = 0;
+    $data_breakdown{vtable} = 0;
+    $data_breakdown{vtable_count} = 0;
+    $data_breakdown{rtti_count} = 0;
+    $data_breakdown{other} = 0;
+}
 #
 # pretty print it
 #
 for $lib (sort by_internal @libs) {
-    my $internal_weak_relocs = 0;
-    my $internal_weak_thnk = 0;
-    my $internal_strong_relocs = 0;
-    my $external_relocs = 0;
-    my $def = $lib->{def};
-    my $undef = $lib->{undef};
-    for $sym (keys %{$lib->{relocs}}) {
-	if (defined $undef->{$sym}) {
-	    $external_relocs++;
-	} elsif (defined $def->{$sym}) {
-	    if ($def->{$sym} =~ m/w/) {
-		$internal_weak_relocs++;
-		$internal_weak_thnk++ if ($sym =~ m/^_ZThn/);
-	    } else {
-		$internal_strong_relocs++;
-	    }
-	} else {
-	    print STDERR "broken symbol '$sym'\n";
-	}
-    }
-    my $total = keys %{$lib->{relocs}};
-    my $percentage = sprintf ("%2.2g", $internal_strong_relocs / ($total + 1) * 100);
-    print STDERR $lib->{file} . " total relocs $total external $external_relocs, internal weak " .
-	"$internal_weak_relocs (of which thnks $internal_weak_thnk), " .
-	"internal strong $internal_strong_relocs: saving $percentage\%\n";
 
-    if ($random_symbols) {
+# Overall relocation information
+    if ($do_print_relocs)
+    {   
+	my $internal_weak_relocs = 0;
+	my $internal_weak_thnk = 0;
+	my $internal_strong_relocs = 0;
+	my $external_relocs = 0;
+	my $def = $lib->{def};
+	my $undef = $lib->{undef};
+	for $sym (keys %{$lib->{relocs}}) {
+	    if (defined $undef->{$sym}) {
+		$external_relocs++;
+	    } elsif (defined $def->{$sym}) {
+		if ($def->{$sym} =~ m/w/) {
+		    $internal_weak_relocs++;
+		    $internal_weak_thnk++ if ($sym =~ m/^_ZThn/);
+		} else {
+		    $internal_strong_relocs++;
+		}
+	    } else {
+		print STDERR "broken symbol '$sym'\n";
+	    }
+	}
+	my $total = keys %{$lib->{relocs}};
+	my $percentage = sprintf ("%2.2g", $internal_strong_relocs / ($total + 1) * 100);
+	
+	print $lib->{file} . " total relocs $total external $external_relocs, internal weak " .
+	    "$internal_weak_relocs (of which thnks $internal_weak_thnk), " .
+	    "internal strong $internal_strong_relocs: saving $percentage\%\n";
+    }
+
+    if ($random_symbol_sample) {
 	print "\n";
 
 	my @keys = keys %{$lib->{relocs}};
 	print "Random symbols:\n";
 	for ($i = 0; $i < 20; $i++) {
-	    my $sym = $keys[rand $total];
+	    my $sym = $keys[rand @keys];
 	    my $demangled = `c++filt $sym`;
 	    chomp $demangled;
 	    print "$demangled\t$sym\n";
 	}
     }
 
+# Break down the .data section by object details:
     {
 	my $vtable_size = 0;
 	my $vtable_count = 0;
@@ -294,13 +305,26 @@ for $lib (sort by_internal @libs) {
 	    }
 	}
 	my $total_size = 1.0 * ($vtable_size + $rtti_size + $other_size) / 100.0;
-	print ".data:\n";
-	print " vtables: $vtable_count size $vtable_size bytes - " . sprintf ("%2.2g", $vtable_size/$total_size) . "\%\n";
-	print " rtti: $rtti_count size $rtti_size bytes - " . sprintf ("%2.2g", $rtti_size/$total_size) . "\%\n";
-	print " other: $other_count size $other_size bytes - " . sprintf ("%2.2g", $other_size/$total_size) . "\%\n";
-	print "\n";
+
+	if ($do_data_profile) {
+	    $data_breakdown{vtable} += $vtable_size;
+	    $data_breakdown{vtable_count} += $vtable_count;
+	    $data_breakdown{rtti} += $rtti_size;
+	    $data_breakdown{rtti_count} += $rtti_count;
+	    $data_breakdown{other} += $other_size;
+	    $data_breakdown{other_count} += $other_count;
+	}
+
+	if ($do_print_data_breakdown && $total_size) {
+	    print ".data:\n";
+	    print " vtables: $vtable_count size $vtable_size bytes - " . sprintf ("%2.2g", $vtable_size/$total_size) . "\%\n";
+	    print " rtti: $rtti_count size $rtti_size bytes - " . sprintf ("%2.2g", $rtti_size/$total_size) . "\%\n";
+	    print " other: $other_count size $other_size bytes - " . sprintf ("%2.2g", $other_size/$total_size) . "\%\n";
+	    print "\n";
+	}
     }
-	
+
+    if ($do_print_vtable_breakdown)
     {
 	my $vtable_relocs = 0;
 	my $rtti_relocs = 0;
@@ -370,4 +394,12 @@ for $lib (sort by_internal @libs) {
 	    print " *extern-impl of self total: " . sprintf ("%.3g", $vtable_extern_self) . " slots\n";
 	}
     }
+}
+
+if ($do_data_profile) {
+    print ".data summary:\n";
+    print " vtables: " . $data_breakdown{vtable_count} . " size " . $data_breakdown{vtable} . " bytes\n";
+    print " rtti: " . $data_breakdown{rtti_count} . " size " . $data_breakdown{rtti} . " bytes\n";
+    print " other: " . $data_breakdown{other_count} . " size " . $data_breakdown{other} . " bytes\n";
+    print "\n";
 }
