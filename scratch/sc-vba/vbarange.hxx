@@ -36,6 +36,12 @@ public:
 	virtual void   SAL_CALL setFormulaArray(const ::rtl::OUString &rFormula) throw (uno::RuntimeException);
 	//virtual ::rtl::OUString SAL_CALL getNumberFormat() throw (uno::RuntimeException);
 	//virtual void   SAL_CALL setNumberFormat( const sal_Char* aFormat ) throw (uno::RuntimeException);
+	virtual void SAL_CALL setNumberFormat( const ::rtl::OUString &rNumberFormat ) throw (uno::RuntimeException);
+	virtual ::rtl::OUString SAL_CALL getNumberFormat() throw (uno::RuntimeException);
+	virtual void SAL_CALL setMergeCells( sal_Bool bMerge ) throw (uno::RuntimeException);
+	virtual sal_Bool SAL_CALL getMergeCells() throw (uno::RuntimeException);
+	virtual void SAL_CALL setWrapText( sal_Bool bIsWrapped ) throw (uno::RuntimeException);
+	virtual sal_Bool SAL_CALL getWrapText() throw (uno::RuntimeException);
 
 	// Methods
 	virtual void SAL_CALL Clear() throw (uno::RuntimeException);
@@ -51,13 +57,18 @@ public:
 														   throw (uno::RuntimeException);
 	virtual uno::Reference< vba::XRange > SAL_CALL CurrentRegion() throw (uno::RuntimeException);
 	virtual uno::Reference< vba::XRange > SAL_CALL CurrentArray() throw (uno::RuntimeException);
-	virtual ::rtl::OUString SAL_CALL Characters( long nIndex, long nCount ) throw (uno::RuntimeException);
+	virtual ::rtl::OUString SAL_CALL Characters( const ::uno::Any& nIndex, const ::uno::Any& nCount ) 
+												 throw (uno::RuntimeException);
 	virtual ::rtl::OUString SAL_CALL Address() throw (uno::RuntimeException);
 	virtual uno::Reference< vba::XRange > SAL_CALL Cells( const ::uno::Any &nRow, const ::uno::Any &nCol ) 
 														  throw (uno::RuntimeException);
 	virtual void SAL_CALL Select() throw (uno::RuntimeException);
 	virtual uno::Reference< vba::XRows > SAL_CALL Rows() throw (uno::RuntimeException);
 	virtual uno::Reference< vba::XColumns > SAL_CALL Columns() throw (uno::RuntimeException);
+	virtual void SAL_CALL Copy( const ::uno::Any& Destination ) throw (uno::RuntimeException);
+	virtual void SAL_CALL Cut( const ::uno::Any& Destination ) throw (uno::RuntimeException);
+	virtual uno::Reference< vba::XRange > SAL_CALL Resize( const ::uno::Any& RowSize, const ::uno::Any& ColumnSize ) 
+														   throw (uno::RuntimeException);
 
 };
 
