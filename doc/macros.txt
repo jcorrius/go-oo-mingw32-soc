@@ -282,6 +282,309 @@ basic/source/classes/sb.cxx
 	+ sbClassFactory
 	     Factory class to create class objects (type command) ?
 
+Some Misc ramblings on experience debugging starBasic wrt. Collections impl, 
+Default Method/properties
+===============================================================================
+e.g. 
+
+a) Worksheets("sheet1") or
+
+b)
+myObj = Worksheets
+myObj("sheets") ' simulates Worksheetss passed as arg to sub/func
+
+Refering to Worksheets("sheet1") as a globally accessable function should be 
+possible presently with the api if Workbooks is defined as a method like
+any Worksheets(any index). Similarly for Workbooks
+
+so Worksheets() should return a ref the XWorkSheets ref and
+Worksheets("sheet1") should return a XWorkSheet ref for the named sheet
+
+from some experimentation verified the following code works for the present api impl
+
+uno::Any
+ScVbaWorkbook::Worksheets( const ::uno::Any &rSheet ) throw (uno::RuntimeException)
+{
+        uno::Any result;
+        if ( rSheet.getValueType() == ::getCppuVoidType() )
+        {
+                uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( mxModel, uno::UNO_QUERY );
+                uno::Reference<sheet::XSpreadsheets> xSheets = xSpreadDoc->getSheets();
+
+                result <<=  uno::Reference< vba::XWorksheets >( new ScVbaWorksheets(m_xContext,
+                xSheets) );
+        }
+        else
+        {
+			// Try and extract string
+			// find sheet by name and return uno::Reference< vba::XWorksheet >
+		}
+}
+
+Note: the impl probably should call Item on the XWorksheets instance when a 
+string is passed in. XCollection should change the spec for Item from
+
+any  Item( [in] long Index )
+
+and the implementation should do the appropriate checks on type e.g. string or
+number ( so WorkSheets("sheet1") or WorkSheets(1) would both be valid )
+
+Caution: AFAIR oobasic will transfer a number index to the smallest type it
+fit it in so 1 -> probably will get passed as a byte to Item so care needed 
+when looking at value type of Any ( maybe the << operator handles the 
+convertion, need to check ).
+
+
+Default Property/Method
+=========================
+
+The only way to support something like case b) above (it seems ) is by modifying
+ the pcode emitted by the basic compiler.
+
+* Some Notes where the byte code comes from and where its handled
+
+All code in a module is compiled at some stage ( regardless of pressing the
+compile button from the IDE, some stale detection is in place somewhere that
+forces a recompile when the source had been changed )
+
+code is compiled to pCode ( or pointer code ) meaning the op codes emitted as
+a result of the compile can be translated into static function calls.
+
+    * pCode is stored in and SbiImage class ( see other basic/notes re.
+      token.cxx, parser.cxx that are already in this doc )
+      loaded in basic/source/classed/image.cxx:150 ( ish ) 
+
+	* image is obtained by instance of SbiRuntime from the SbModule ptr passed
+      to its ctor from Module::Run() in 
+      SbModule::Run( SbMethod* pMeth ) source/classes/sbxmod.cxx:777
+      Note: SbiInstance represents a stack level for recursion support
+      you can see the call levels being counted in the Run method
+
+The static function calls that the pCode represents are part of the SbiRuntime 
+class ( basic/source/runtime/runtime.cxx ). There are three types of functions;
+   * those that take no param
+   * those that take one param	
+   * those that take two params
+aStep0, aStep1, aStep2 respectively
+
+Example 1.
+==========
+
+example pCode for  
+
+Line 1	Sub Main
+Line 2	msgbox("blaa")
+Line 3	End Sub
+
+format of o/p below
+
+pCodeTable[ opCode/offset ] function ( params )
+
+aStep2[ 135 ] SbiRuntime::StepSTMNT (2, 0)
+aStep0[ 24 ] SbiRuntime::StepARGC
+aStep1[ 65 ] SbiRuntime::StepLOADSC (11)
+aStep0[ 25 ] SbiRuntime::StepARGV
+aStep2[ 128 ] SbiRuntime::StepRTL (32780, 2)
+aStep0[ 28 ] SbiRuntime::StepGET
+aStep2[ 135 ] SbiRuntime::StepSTMNT (3, 0)
+aStep0[ 43 ] SbiRuntime::StepLEAVE
+aStep0[ 0 ] SbiRuntime::StepNOP
+
+Example 2.
+==========
+
+Line 1	Sub Main
+Line 2	thiscomponent("blaa")
+Line 3	End Sub
+
+aStep2[ 135 ] SbiRuntime::StepSTMNT (2, 0)
+aStep0[ 24 ] SbiRuntime::StepARGC
+aStep1[ 65 ] SbiRuntime::StepLOADSC (11)
+aStep0[ 25 ] SbiRuntime::StepARGV
+aStep2[ 129 ] SbiRuntime::StepFIND (32780, 0)
+aStep0[ 28 ] SbiRuntime::StepGET
+aStep2[ 135 ] SbiRuntime::StepSTMNT (3, 0)
+aStep0[ 43 ] SbiRuntime::StepLEAVE
+aStep0[ 0 ] SbiRuntime::StepNOP
+
+interestingly this doesn't cause an error, however a little bit of 
+dereferencing seems to kick in an error
+
+Example 3.
+==========
+
+Line 1	Sub Main
+Line 2	obj=thiscomponent("blaa")
+Line 3	thiscomponent("blaa")
+Line 4	End Sub
+
+aStep2[ 135 ] SbiRuntime::StepSTMNT (1, 0)
+aStep2[ 135 ] SbiRuntime::StepSTMNT (2, 0)
+aStep2[ 129 ] SbiRuntime::StepFIND (11, 12)
+aStep2[ 129 ] SbiRuntime::StepFIND (12, 12)
+aStep0[ 30 ] SbiRuntime::StepPUT
+aStep2[ 135 ] SbiRuntime::StepSTMNT (3, 0)
+aStep0[ 24 ] SbiRuntime::StepARGC
+aStep1[ 65 ] SbiRuntime::StepLOADSC (13)
+aStep0[ 25 ] SbiRuntime::StepARGV
+aStep2[ 129 ] SbiRuntime::StepFIND (32779, 12)
+aStep0[ 28 ] SbiRuntime::StepGET
+** aStep2[ 135 ] SbiRuntime::StepSTMNT (4, 0)
+aStep0[ 43 ] SbiRuntime::StepLEAVE
+aStep0[ 0 ] SbiRuntime::StepNOP
+
+
+occurs at ** above in
+basic/source/runtime/step2.cxx:716
+which interstingly has a comment associated which translates as 
+
+"If the Expr stack at the beginning contains statement a variable, 
+ a nincompoop called X as function, although it is a variable!"
+
+After alot of wasted effort I couldn't twist this into doing what was
+required, I realised too late that when this is detected its too late and its 
+gone past the point where we can process. The STMNT function where this
+is detected is the next statement after the "real statement". Looking more
+closely this StepSTMNT relatets to the line "end sub" and not the line for 
+"obj("blaa")". So basically at this point the symantic info required is gone
+
+
+Interestingly defining a func that doesn't exist seems to be caught somewhere else ( in the StepFind, but I suppose that makes sense 'cause it doesn't 
+know about obj )
+
+Example 4.
+==========
+
+Line 1	Sub Main
+Line 2	obj("blaa")
+Line 3	End Sub
+
+aStep2[ 135 ] SbiRuntime::StepSTMNT (1, 0)
+aStep2[ 135 ] SbiRuntime::StepSTMNT (2, 0)
+aStep2[ 129 ] SbiRuntime::StepFIND (11, 12)
+aStep2[ 129 ] SbiRuntime::StepFIND (12, 12)
+aStep0[ 30 ] SbiRuntime::StepPUT
+aStep2[ 135 ] SbiRuntime::StepSTMNT (3, 0)
+aStep0[ 24 ] SbiRuntime::StepARGC
+aStep1[ 65 ] SbiRuntime::StepLOADSC (13)
+aStep0[ 25 ] SbiRuntime::StepARGV
+** aStep2[ 129 ] SbiRuntime::StepFIND (32782, 0) 
+aStep0[ 28 ] SbiRuntime::StepGET
+aStep2[ 135 ] SbiRuntime::StepSTMNT (4, 0)
+aStep0[ 43 ] SbiRuntime::StepLEAVE
+aStep0[ 0 ] SbiRuntime::StepNOP
+
+last example here shows a call to a method
+
+Example 5.
+==========
+
+Line 1 Sub Main
+Line 2 obj=WorkSheets
+Line 3 obj.Item(1)
+Line 4 end sub
+
+aStep2[ 135 ] SbiRuntime::StepSTMNT (1, 0)
+aStep2[ 135 ] SbiRuntime::StepSTMNT (2, 0)
+aStep2[ 129 ] SbiRuntime::StepFIND (11, 12)
+aStep2[ 129 ] SbiRuntime::StepFIND (12, 12)
+aStep0[ 30 ] SbiRuntime::StepPUT
+aStep2[ 135 ] SbiRuntime::StepSTMNT (3, 0)
+aStep2[ 129 ] SbiRuntime::StepFIND (11, 9)
+aStep0[ 24 ] SbiRuntime::StepARGC
+aStep1[ 66 ] SbiRuntime::StepLOADI (1)
+aStep0[ 25 ] SbiRuntime::StepARGV
+aStep2[ 130 ] SbiRuntime::StepELEM (32781, 12)
+aStep0[ 28 ] SbiRuntime::StepGET
+aStep2[ 135 ] SbiRuntime::StepSTMNT (4, 0)
+aStep0[ 43 ] SbiRuntime::StepLEAVE
+aStep0[ 0 ] SbiRuntime::StepNOP
+
+The key to solving this problem lies I guess with understanding how the
+pcode is generated and seeing if the correct pcode can be generated. todo :-)
+
+
+so The last example StepFIND and StepGET pcodes (in the failure cases ) seem 
+to be the problem should be replaced by a StepELEM, with some hacking to get 
+the object and the args.
+
+brief desc & psuedo explanation of the pcode stuff above ( from Example 5 )
+
+"Line 1 Sub Main"
+
+aStep2[ 135 ] SbiRuntime::StepSTMNT (1, 0) ( defined in
+    source/runtime/step2.cxx
+	handles Line 1 ( the definition of main ) can't add any more here I 
+    I know no more than that. 
+
+"Line 2 obj=WorkSheets"
+     
+aStep2[ 135 ] SbiRuntime::StepSTMNT (2, 0)
+    see above the definition of the statement
+aStep2[ 129 ] SbiRuntime::StepFIND (11, 12)
+    finds "obj" does a lookup of LocalRefs based on the code 11 which is 
+the string id ( this generated in image.cxx see AddString() method  ), the 12
+passed to this function relates to the type ( SbxVARIANT variant I think ) 
+and puts it on top of stack.
+aStep2[ 129 ] SbiRuntime::StepFIND (12, 12)
+    does the same for WorkSheets which has a stringId of 12, with the same
+type.
+aStep0[ 30 ] SbiRuntime::StepPUT
+    Pops the last two variabls from the top of stack and assigns them
+
+Line 3 obj.Item(1)
+
+aStep2[ 135 ] SbiRuntime::StepSTMNT (3, 0)
+    see above for non-information about this function
+
+aStep2[ 129 ] SbiRuntime::StepFIND (11, 9)
+    does a find on string id 11 which is "obj" type is 9 (SbxOBJECT)
+
+aStep0[ 24 ] SbiRuntime::StepARGC
+    pushes argv onto the stack ( presume that previous args being processed )
+sets up new Argv (SbxArray) to hold arguments ( params )
+
+aStep1[ 66 ] SbiRuntime::StepLOADI (1)
+    Creates a new SbxVariable containing integer 1 ( whats passed to Item ) 
+and puts it on the (variable) stack.
+
+aStep0[ 25 ] SbiRuntime::StepARGV
+    Creates a structure to contain the param ( value ) and sets it up
+with a variable poped from the variable stack
+
+aStep2[ 130 ] SbiRuntime::StepELEM (32781, 12)
+    will attempt to access method/attribute/property named by string-id
+13 which is Item ( 32781 is logically &'d with 0x0800 to get the string id ) 
+if bit 0x800 is set then there are params associated with this call and they
+are processed. 
+This method is the one that ends up calling SbxUnoObject::Find(Item) on object 
+ref for "obj" it also sets up the params (if needed ) and calls the method. 
+
+see trace below [1]
+
+aStep0[ 28 ] SbiRuntime::StepGET
+	calls BroadCast on the object top of the Stack, not sure what happens
+here or what this is for.
+
+Line 4    end sub
+aStep2[ 135 ] SbiRuntime::StepSTMNT (4, 0)
+
+
+[1] - trace of Line 3, method call for obj.Item(1)
+
+#0  ScVbaWorksheets::Item (this=0xae43c790, nIndex=1) at /export/noel/downloads/OOBUILD/ooo-buildLatest/build/src680-m110/sc/source/ui/vba/vbaworksheets.cxx:85
+#1  0xb30710e8 in Lcopy () from /export/noel/downloads/OOBUILD/ooo-buildLatest/InstallDir/program/libgcc3_uno.so
+#2  0xb30713fd in (anonymous namespace)::cpp_call () from /export/noel/downloads/OOBUILD/ooo-buildLatest/InstallDir/program/libgcc3_uno.so
+#3  0xb307179b in bridges::cpp_uno::shared::UnoInterfaceProxy::dispatch () from /export/noel/downloads/OOBUILD/ooo-buildLatest/InstallDir/program/libgcc3_uno.so
+#4  0xae919950 in stoc_corefl::IdlInterfaceMethodImpl::invoke (this=0xae869e10, rObj=@0xbfffe4e8, rArgs=@0xbfffe4d8) at /export/noel/downloads/OOBUILD/ooo-buildLatest/build/src680-m110/stoc/source/corereflection/criface.cxx:763
+#5  0xb341ae3c in SbUnoObject::Notify (this=0xae426ac8, rBC=@0xae421c30, rHint=@0xbfffe57c) at /export/noel/downloads/OOBUILD/ooo-buildLatest/build/src680-m110/basic/source/classes/sbunoobj.cxx:1973
+#6  0xb7d35315 in SfxBroadcaster::Broadcast () from /export/noel/downloads/OOBUILD/ooo-buildLatest/InstallDir/program/libsvl680li.so
+#7  0xb3482cc4 in SbxVariable::Broadcast (this=0xae440620, nHintId=65536) at /export/noel/downloads/OOBUILD/ooo-buildLatest/build/src680-m110/basic/source/sbx/sbxvar.cxx:186
+#8  0xb347d495 in SbxValue (this=0xae43d118, __vtt_parm=0xb34c9e28, r=@0xae440620) at /export/noel/downloads/OOBUILD/ooo-buildLatest/build/src680-m110/basic/source/sbx/sbxvalue.cxx:328
+#9  0xb3482572 in SbxVariable (this=0xae43d118, __vtt_parm=0xb34c9e24, r=@0xae440620) at /export/noel/downloads/OOBUILD/ooo-buildLatest/build/src680-m110/basic/source/sbx/sbxvar.cxx:101
+#10 0xb3459998 in SbxMethod (this=0xae43d118, r=@0xae440620) at sbxmeth.hxx:77
+#11 0xb345620d in SbiRuntime::FindElement (this=0xae43a580, pObj=0xae426ac8, nOp1=32781, nOp2=12, nNotFound=87570, bLocal=0 '\0') at /export/noel/downloads/OOBUILD/ooo-buildLatest/build/src680-m110/basic/source/runtime/step2.cxx:227
+#12 0xb3457afa in SbiRuntime::StepELEM (this=0xae43a580, nOp1=32781, nOp2=12) at /export/noel/downloads/OOBUILD/ooo-buildLatest/build/src680-m110/basic/source/runtime/step2.cxx:592
 ---------------------------------------------
 
 Some notes on VBA to SB (StarBasic) [from VbaStartBasicXref.pdf]
