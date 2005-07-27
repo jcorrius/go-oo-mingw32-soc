@@ -1,0 +1,469 @@
+? desktop/source/pagein/bootstraprc
+? desktop/source/pagein/doflush
+? desktop/source/pagein/fillmem
+? desktop/source/pagein/fillmem.c
+? desktop/source/pagein/flushdisk
+? desktop/source/pagein/flushdisk.c
+Index: desktop/source/pagein/file_image.h
+===================================================================
+RCS file: /cvs/framework/desktop/source/pagein/file_image.h,v
+retrieving revision 1.2
+diff -u -r1.2 file_image.h
+--- desktop/source/pagein/file_image.h	4 Jun 2003 10:43:03 -0000	1.2
++++ desktop/source/pagein/file_image.h	27 Jul 2005 15:41:01 -0000
+@@ -83,6 +83,7 @@
+ 
+ #define FILE_IMAGE_INITIALIZER { 0, 0 }
+ 
++int file_image_setup_idle_load (void);
+ 
+ /** file_image_open.
+  */
+Index: desktop/source/pagein/file_image_unx.c
+===================================================================
+RCS file: /cvs/framework/desktop/source/pagein/file_image_unx.c,v
+retrieving revision 1.4
+diff -u -r1.4 file_image_unx.c
+--- desktop/source/pagein/file_image_unx.c	4 Feb 2004 12:52:24 -0000	1.4
++++ desktop/source/pagein/file_image_unx.c	27 Jul 2005 15:41:01 -0000
+@@ -74,8 +74,266 @@
+ 
+ #include <sys/mman.h>
+ #include <sys/stat.h>
+-
++#include <sys/types.h>
++#include <stdio.h>
++#include <stdlib.h>
+ #include <string.h>
++#include <dirent.h>
++
++#ifdef DEBUG
++#  define dprintf(a) fprintf a
++#else
++#  define dprintf(a)
++#endif
++
++static char *
++get_user_installation (void)
++{
++	static char *installation = NULL;
++	FILE *bootstraprc;
++	const char *home;
++	char *user_installation = NULL;
++
++	if (installation)
++		return installation;
++
++	home = getenv ("HOME");
++
++	bootstraprc = fopen ("bootstraprc", "r");
++	if (bootstraprc)
++	{
++		char buf[80];
++		static const char *key = "UserInstallation=$SYSUSERCONFIG/";
++		while (fgets (buf, sizeof (buf), bootstraprc))
++		{
++			if (!strncmp (buf, key, strlen (key)))
++			{
++				char *p;
++				user_installation = strdup (buf + strlen (key));
++				/* chomp */
++				for (p = user_installation; *p != '\0'; p++)
++					if (*p == '\r' || *p == '\n')
++						break;
++				*p = '\0';
++				break;
++			}
++		}
++	}
++	else
++		dprintf ((stderr, "Failed to open bootstraprc\n"));
++
++	if (!user_installation)
++	{
++		dprintf ((stderr, "using default path\n"));
++		user_installation = strdup (".ooo-2.0");
++	}
++
++	installation = malloc (strlen (home) + 1 + strlen (user_installation) + 1);
++	strcpy (installation, home);
++	strcat (installation, "/");
++	strcat (installation, user_installation);
++	free (user_installation);
++
++	return installation;
++}
++
++static char *
++collate (char **split)
++{
++	int i;
++	int offs;
++	char *res;
++	for (offs = i = 0; split[i]; i++)
++		offs += strlen (split[i]);
++	res = malloc (offs + 1);
++	for (offs = i = 0; split[i]; i++)
++	{
++		int len = strlen (split[i]);
++		memcpy (res + offs, split[i], len);
++		offs += len;
++	}
++	res[offs] = '\0';
++	return res;
++}
++
++static char *
++do_strndup (const char *str, int len)
++{
++	int i;
++	char *res = malloc (len + 1);
++	for (i = 0; str[i] && i < len; i++)
++		res[i] = str[i];
++	res[i] = '\0';
++	return res;
++}
++
++static char **
++split_filename (const char *filename)
++{
++	int i, j, last_fragment;
++	char **split;
++
++	split = malloc (sizeof (char *) * strlen (filename) + 1);
++	for (last_fragment = j = i = 0; filename [i] != '\0'; i++)
++	{
++		if (filename[i] == '%')
++		{
++			split[j++] = do_strndup (filename + last_fragment, i - last_fragment);
++			last_fragment = i + 1;
++		}
++	}
++	split[j] = do_strndup (filename + last_fragment, i - last_fragment);
++	split[j+1] = NULL;
++	return split;
++}
++
++static char *
++try_lang (char **split, int idx, char *lang)
++{
++	char *path;
++	struct stat st;
++
++	free (split[idx]);
++	split[idx] = strdup (lang);
++	path = collate (split);
++	dprintf ((stderr, "Try '%s' - path ", path));
++	if (access (path, R_OK))
++	{
++		free (path);
++		path = NULL;
++	}
++	else
++		free (lang); /* sucky but ... */
++	dprintf ((stderr, "there: %d\n", path != NULL));
++	return path;
++}
++
++const char *en_fallbacks[] = { "US", NULL };
++const char *es_fallbacks[] = { "ES", NULL };
++
++const struct {
++		const char *base;
++		const char **fallback_locales;
++} fallbacks[] =
++{
++		{ "en", en_fallbacks },
++		{ "es", es_fallbacks },
++		{ NULL, NULL }
++};
++
++/*
++ * This is really crude, to do this correctly is really
++ * tough, a maintenance nightmare etc. Hopefully we can do
++ * quite well without much effort though & just seek for
++ * the rest.
++ */
++static char *
++guess_lang (char **split, int idx)
++{
++	int i;
++	char *lang = strdup (getenv ("LANG"));
++	char *p, *ret;
++	char *locale = NULL;
++	char *scratch;
++
++	scratch = malloc (strlen(lang) + 2);
++
++	if ((p = strchr (lang, '.')))
++		*p = '\0';
++
++	/* hopefully now of the form 'fr_FR' or 'fr' */
++	if ((locale = strchr (lang, '_')) ||
++		(locale = strchr (lang, '-')))
++		*locale++ = '\0';
++	
++	dprintf ((stderr, "i18n: '%s'-'%s'\n", lang, locale));
++
++	/* Try with fr-FR */
++	if (locale)
++	{
++		strcpy (scratch, lang);
++		strcat (scratch, "-");
++		strcat (scratch, locale);
++		if ((ret = try_lang (split, idx, scratch)))
++			return ret;
++	}
++
++	/* Try with fr */
++	strcpy (scratch, lang);
++	if ((ret = try_lang (split, idx, scratch)))
++		return ret;
++
++	/* Try other prefixes */
++	strcat (scratch, "-");
++	locale = scratch + strlen(scratch);
++	for (i = 0; fallbacks[i].base; i++)
++	{
++		if (!strcmp (lang, fallbacks[i].base))
++		{
++			int j;
++			for (j = 0; fallbacks[i].fallback_locales[j]; j++)
++			{
++				strcpy (locale, fallbacks[i].fallback_locales[j]);
++				if ((ret = try_lang (split, idx, scratch)))
++					return ret;
++			}
++		}
++	}
++
++	return NULL;
++}
++
++static char *
++expand_filename (const char *filename)
++{
++	char *tilde;
++	char *ver;
++	char *ret = NULL;
++	int   i;
++	int   lang_idx = -1;
++
++	char **split = split_filename (filename);
++
++	for (i = 1; split[i]; i += 2 )
++	{
++		if (!strcmp (split[i], "userinst"))
++		{
++			free (split[i]);
++			split[i] = strdup (get_user_installation());
++		}
++		else if (!strcmp (split[i], "ver"))
++		{
++			free (split[i]);
++			split[i] = strdup ("680"); /* hard-coded - sigh */
++		}
++		else if (!strcmp (split[i], "lang"))
++		{
++			free (split[i]); /* handle later */
++			split[i] = NULL;
++			lang_idx = i;
++		}
++		else
++			dprintf ((stderr, "Warning: Unknown control name '%s'\n", split[i]));
++	}
++
++	if (lang_idx >= 0)
++	{
++		if (!(ret = guess_lang (split, lang_idx)))
++		{
++			dprintf ((stderr, "Failed to find lang dicts\n"));
++			goto cleanup;
++		}
++	}
++
++	if (!ret)
++		ret = collate (split);
++ cleanup:
++	for (i = 0; split[i]; i++)
++		free (split[i]);
++	free (split);
++
++	return ret;
++}
+ 
+ /*
+  * file_image_open
+@@ -86,14 +344,25 @@
+     int         fd;
+     struct stat st;
+     void *      p;
++	char       *fname;
+ 
+     if (image == 0)
+         return (EINVAL);
+ 
++	fname = expand_filename (filename);
++	if (!fname)
++			fprintf (stderr, "Failed to expand '%s'\n", filename);
++	else
++			dprintf ((stderr, "Expanded '%s' to '%s'\n", filename, fname));
++
+     image->m_base = MAP_FAILED, image->m_size = 0;
+ 
+-    if ((fd = open (filename, O_RDONLY)) == -1)
++    if ((fd = open (fname, O_RDONLY)) == -1)
++	{
++		free (fname);
+         return (errno);
++	}
++	free (fname);
+ 
+     if (fstat (fd, &st) == -1)
+     {
+@@ -101,6 +370,14 @@
+         goto cleanup_and_leave;
+     }
+ 
++	if (S_ISDIR (st.st_mode))
++	{
++		DIR *dirent = opendir (fname);
++		dprintf ((stderr, "Read directory '%s'\n", fname));
++		while (dirent && readdir (dirent));
++		goto cleanup_and_leave;
++	}
++
+     p = mmap (0, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+ 	if (p == MAP_FAILED)
+     {
+@@ -143,7 +420,6 @@
+ #endif
+ 	}
+ 
+-
+ #ifndef MACOSX	
+ 	if ((s = sysconf (_SC_PAGESIZE)) == -1)
+ 		s = 0x1000;
+@@ -182,3 +458,70 @@
+ 	image->m_base = 0, image->m_size = 0;
+     return (0);
+ }
++
++/*
++ * Highly Linux specific - and functions only with
++ * recent CFQ & linux >= 2.6.12
++ * http://www.ibiblio.org/peanut/Kernel-2.6.12/block/ioprio.txt
++ */
++#if defined(LINUX)
++
++#include <getopt.h>
++#include <sys/ptrace.h>
++#include <asm/unistd.h>
++
++/* Syscall-numbers - nice ... */
++#if defined(__i386__)
++#define __NR_ioprio_set		289
++#elif defined(__ppc__)
++#define __NR_ioprio_set		273
++#elif defined(__x86_64__)
++#define __NR_ioprio_set		251
++#elif defined(__ia64__)
++#define __NR_ioprio_set		1274
++#else
++#error "Unsupported arch"
++#endif
++
++extern int sys_ioprio_set(int, int, int);
++_syscall3(int, ioprio_set, int, which, int, who, int, ioprio);
++
++enum {
++	IOPRIO_CLASS_NONE,
++	IOPRIO_CLASS_RT,
++	IOPRIO_CLASS_BE,
++	IOPRIO_CLASS_IDLE,
++};
++
++enum {
++	IOPRIO_WHO_PROCESS = 1,
++	IOPRIO_WHO_PGRP,
++	IOPRIO_WHO_USER,
++};
++
++#define IOPRIO_CLASS_SHIFT	13
++
++#endif
++
++/*
++ * Ideally this idle loading would synchronise occasionally
++ * with soffice.bin to ensure we don't:
++ *	    read (pagein) / evict / re-read (soffice.bin)
++ * giving worse performance than before. Most modern machines
++ * have loads of RAM anyway, so should improve things. Ideally
++ * soffice.bin will catch up with pagein's I/O.
++ */
++int file_image_setup_idle_load (void)
++{
++#if !defined(LINUX)
++	return 1;
++#else
++	int ioprio = 7;
++	int ioprio_class = IOPRIO_CLASS_IDLE;
++
++	if (ioprio_set (IOPRIO_WHO_PROCESS, 0,
++					ioprio | ioprio_class << IOPRIO_CLASS_SHIFT) == -1)
++		return 0; // testing ... 1;
++	return 0;
++#endif
++}
+Index: desktop/source/pagein/pagein.c
+===================================================================
+RCS file: /cvs/framework/desktop/source/pagein/pagein.c,v
+retrieving revision 1.2
+diff -u -r1.2 pagein.c
+--- desktop/source/pagein/pagein.c	4 Jun 2003 10:43:30 -0000	1.2
++++ desktop/source/pagein/pagein.c	27 Jul 2005 15:41:01 -0000
+@@ -61,6 +61,7 @@
+ 
+ #include "file_image.h"
+ 
++#include <stdlib.h>
+ #include <unistd.h>
+ #include <errno.h>
+ #include <stdio.h>
+@@ -88,6 +89,7 @@
+ 
+ cleanup_and_leave:
+ 	file_image_close (&image);
++
+ 	return (result);
+ }
+ 
+@@ -101,7 +103,7 @@
+ 	{
+ 		fprintf (
+ 			stderr,
+-			"%s: Usage: pagein [-v[v]] [-L<path>] [@]<filename> ...\n",
++			"%s: Usage: pagein [-i] [-v[v]] [-L<path>] [@]<filename> ...\n",
+ 			argv[0]);
+ 		return (1);
+ 	}
+@@ -122,6 +124,10 @@
+ 					for (v += 1, j += 1; argv[i][j]; j++)
+ 						v += (argv[i][j] == 'v');
+ 					break;
++				case 'i':
++					if (file_image_setup_idle_load())
++						exit (0);
++					break;
+ 				case 'L':
+ 					/* search path */
+ 					if (chdir (&(argv[i][2])) == -1)
+@@ -147,6 +153,8 @@
+ 			}
+ 			while (fgets (path, sizeof(path), fp) != 0)
+ 			{
++				if (path[0] == '#')
++					continue;
+ 				path[strlen(path) - 1] = '\0', k = 0;
+ 				if (do_pagein (path, &k) == 0)
+ 				{
