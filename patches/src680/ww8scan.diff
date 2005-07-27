@@ -1,0 +1,247 @@
+--- sw/source/filter/ww8/ww8scan.cxx.orig	2005-07-27 16:58:05.466753936 -0700
++++ sw/source/filter/ww8/ww8scan.cxx	2005-07-27 16:58:21.873259768 -0700
+@@ -73,6 +73,10 @@
+ #include <functional>
+ #endif
+ 
++#ifndef __SGI_STL_HASH_SET_H
++#include <hash_set>
++#endif
++
+ #include <string.h>         // memset()
+ 
+ #ifndef _OSL_ENDIAN_H_
+@@ -155,88 +159,39 @@
+     return bRet;
+ }
+ 
+-bool operator==(const SprmInfo &rFirst, const SprmInfo &rSecond)
++inline bool operator==(const SprmInfo &rFirst, const SprmInfo &rSecond)
+ {
+-    return (rFirst.nId == rSecond.nId);
++	return (rFirst.nId == rSecond.nId);
+ }
+ 
+-template<class C> class wwSortedArray
++namespace std
+ {
+-private:
+-    //The array e.g. of sprms.
+-    C *mpWwSprmTab;
+-    size_t mnNoElems;
+-public:
+-    wwSortedArray(C *pWwSprmTab, size_t nNoElems)
+-        : mpWwSprmTab(pWwSprmTab), mnNoElems(nNoElems)
+-    {
+-        ASSERT(mnNoElems && pWwSprmTab, "WW8: empty Array: Don't do that");
+-        std::sort(mpWwSprmTab, mpWwSprmTab + mnNoElems);
+-#if OSL_DEBUG_LEVEL > 1
+-        bool bBroken=false;
+-        rtl::OUString sError;
+-        const C *pIter = mpWwSprmTab;
+-        const C *pBeforeEnd = mpWwSprmTab + mnNoElems - 1;
+-        while (pIter < pBeforeEnd)
+-        {
+-            if (*pIter == *(pIter+1))
+-            {
+-                if (!bBroken)
+-                {
+-                    sError = rtl::OUString::createFromAscii(
+-                        "WW8: Duplicate in list, almost certainly don't "
+-                        "want that!\n"
+-                        "(You will not see this message again unless you "
+-                        "restart)\n"
+-                        "Extra entries are...\n");
+-                    bBroken=true;
+-                }
+-
+-                size_t nSize = sizeof(C);
+-                const sal_uInt8 *pHack =
+-                    reinterpret_cast<const sal_uInt8 *>(&(*pIter));
+-                for (size_t i=0; i < nSize; ++i)
+-                {
+-                    sError += rtl::OUString::valueOf(
+-                        static_cast<sal_Int32>(pHack[i]), 16);
+-                    sError += rtl::OUString::valueOf(sal_Unicode(' '));
+-                }
+-                sError += rtl::OUString::valueOf(sal_Unicode('\n'));
+-                while (*pIter == *(pIter+1) && pIter < pBeforeEnd)
+-                    ++pIter;
+-            }
+-            else
+-                ++pIter;
+-        }
+-        if (bBroken)
+-           DBG_ERROR(rtl::OUStringToOString(sError, RTL_TEXTENCODING_ASCII_US));
+-#endif
+-    }
+-
+-    //Find an entry, return its address if found and 0 if not
+-    const C *search(C aSrch) const;
+-};
+-
+-template<class C> const C *wwSortedArray<C>::search(C aSrch) const
+-{
+-    std::pair<C *, C *> aPair =
+-        std::equal_range(mpWwSprmTab, mpWwSprmTab + mnNoElems, aSrch);
+-    if (aPair.first != aPair.second)
+-        return aPair.first;
+-    else
+-        return 0;
++	using std::size_t;
++	
++	template<> struct hash<SprmInfo> 
++	{
++		size_t operator()(const SprmInfo &a) const  
++			{ 
++				return a.nId;  
++			}
++	};
+ }
+ 
+-bool operator<(const SprmInfo &rFirst, const SprmInfo &rSecond)
++const SprmInfo *SprmSearch(const std::hash_set<SprmInfo> *awwSprmSearcher, const SprmInfo &aSrch)
+ {
+-    return (rFirst.nId < rSecond.nId);
++	std::hash_set<SprmInfo>::iterator it;
++	it= awwSprmSearcher->find(aSrch);
++	if (it != awwSprmSearcher->end())
++		return &(*it);
++	else
++		return 0;
+ }
+ 
+ const wwSprmSearcher *wwSprmParser::GetWW6SprmSearcher()
+ {
+     //double lock me
+     // WW7- Sprms
+-    static SprmInfo aSprms[] =
++    const SprmInfo aSprms[] =
+     {
+         {  0, 0, L_FIX}, // "Default-sprm",  wird uebersprungen
+         {  2, 2, L_FIX}, // "sprmPIstd",  pap.istd (style code)
+@@ -409,16 +364,35 @@
+         {200, 4, L_FIX}, // "sprmTSetShd", tap.rgshd complex 4 bytes
+         {207, 0, L_VAR}  // rtl property ?
+     };
++	static bool hash_built= false;
++	static wwSprmSearcher aSet;
++	if (!hash_built)
++	{
++		for (int i= 0; i < sizeof(aSprms)/sizeof(aSprms[0]); i++)
++		{
++			aSet.insert(aSprms[i]);
++#if OSL_DEBUG_LEVEL > 1
++			rtl::OUString sError;
++			static bool broken= false;
++			if (SprmSearch(aSet, aSprms[i] && !broken)
++			{
++				sError = rtl::OUString::createFromAscii("WW6: Duplicate in list!\n");
++				DBG_ERROR(rtl::OUStringToOString(sError, RTL_TEXTENCODING_ASCII_US));
++				broken = true;
++			}			
++#endif
++		}
+ 
+-    static wwSprmSearcher aSprmSrch(aSprms, sizeof(aSprms) / sizeof(aSprms[0]));
+-    return &aSprmSrch;
++		hash_built= true;
++	}
++    return &aSet;
+ };
+ 
+ const wwSprmSearcher *wwSprmParser::GetWW8SprmSearcher()
+ {
+     //double lock me
+     //WW8+ Sprms
+-    static SprmInfo aSprms[] =
++    const SprmInfo aSprms[] =
+     {
+         {     0, 0, L_FIX}, // "Default-sprm"/ wird uebersprungen
+         {0x4600, 2, L_FIX}, // "sprmPIstd" pap.istd;istd (style code);short;
+@@ -747,9 +721,27 @@
+         // undocumented, don't add space between para of the same style
+         {0x246D, 1, L_FIX}
+     };
+-
+-    static wwSprmSearcher aSprmSrch(aSprms, sizeof(aSprms) / sizeof(aSprms[0]));
+-    return &aSprmSrch;
++	static bool hash_built= false;
++	static wwSprmSearcher aSet;
++	if (!hash_built)
++	{
++		for (int i= 0; i < sizeof(aSprms)/sizeof(aSprms[0]); i++)
++		{
++			aSet.insert(aSprms[i]);
++#if OSL_DEBUG_LEVEL > 1
++			rtl::OUString sError;
++			static bool broken= false;
++			if (SprmSearch(aSet, aSprms[i] && !broken)
++			{
++				sError = rtl::OUString::createFromAscii("WW8: Duplicate in list!\n");
++				DBG_ERROR(rtl::OUStringToOString(sError, RTL_TEXTENCODING_ASCII_US));
++				broken = true;
++			}			
++#endif
++		}
++		hash_built= true;
++	}
++    return &aSet;
+ };
+ 
+ wwSprmParser::wwSprmParser(int nVersion) : mnVersion(nVersion)
+@@ -769,7 +761,7 @@
+     // Find sprm
+     SprmInfo aSrch;
+     aSrch.nId = nId;
+-    const SprmInfo* pFound = mpKnownSprms->search(aSrch);
++    const SprmInfo* pFound = SprmSearch(mpKnownSprms, aSrch);
+     if (pFound == 0)
+     {
+         ASSERT(mnVersion >= 8,
+--- sw/source/filter/ww8/ww8scan.hxx.orig	2005-07-27 16:58:12.383702400 -0700
++++ sw/source/filter/ww8/ww8scan.hxx	2005-07-27 16:58:21.875259464 -0700
+@@ -76,6 +76,9 @@
+ #ifndef __SGI_STL_LIST
+ #include <list>
+ #endif
++#ifndef __SGI_STL_HASH_SET_H
++#include <hash_set>
++#endif
+ 
+ #ifndef _SOLAR_H
+ #include <tools/solar.h>        // UINTXX
+@@ -140,9 +143,6 @@
+ 
+ typedef wwString<sal_uInt16> ww8String;
+ 
+-//simple template that manages a static [] array by sorting at construction
+-template<class C> class wwSortedArray;
+-
+ struct SprmInfo
+ {
+     sal_uInt16 nId;         //A ww8 sprm is hardcoded as 16bits
+@@ -150,10 +150,10 @@
+     unsigned int nVari : 2;
+ };
+ 
+-//a managed sorted sequence of sprminfos
+-typedef wwSortedArray<SprmInfo> wwSprmSearcher;
+-//a managed sorted sequence of sprms
+-typedef wwSortedArray<sal_uInt16> wwSprmSequence;
++inline bool operator==(const SprmInfo &rFirst, const SprmInfo &rSecond);
++const SprmInfo *SprmSearch(const std::hash_set<SprmInfo> *awwSprmSearcher, const SprmInfo &aSrch);
++
++typedef std::hash_set<SprmInfo> wwSprmSearcher;
+ 
+ //wwSprmParser knows how to take a sequence of bytes and split it up into
+ //sprms and their arguments
+@@ -525,7 +525,7 @@
+                 mnIStd(0), mbMustDelete(false) {}
+             Entry(const Entry &rEntry);
+             ~Entry();
+-            bool operator<(const Entry& rEntry) const;
++            inline bool operator<(const Entry& rEntry) const;
+             Entry& operator=(const Entry& rEntry);
+         };
+         
