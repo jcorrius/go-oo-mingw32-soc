@@ -282,6 +282,7 @@ ScVbaWorksheet::Move( const uno::Any& Before, const uno::Any& After ) throw (uno
 {
 	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( mxModel, uno::UNO_QUERY );
 	rtl::OUString aSheetName;
+	rtl::OUString aCurrSheetName =getName();
 
 	if (!(Before >>= aSheetName) && !(After >>=aSheetName))
 	{
@@ -289,7 +290,7 @@ ScVbaWorksheet::Move( const uno::Any& Before, const uno::Any& After ) throw (uno
 		xRange->Select();
 		rtl::OUString url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:Copy"));
 		dispatchRequests(mxModel,url);
-		uno::Reference<frame::XModel> xModel = openNewDoc(getName());
+		uno::Reference<frame::XModel> xModel = openNewDoc(aCurrSheetName);
 		if (xModel.is()) 
 		{
 			url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:Paste"));
@@ -307,6 +308,7 @@ ScVbaWorksheet::Move( const uno::Any& Before, const uno::Any& After ) throw (uno
 	}
 	else
 	{
+		After >>= aSheetName;
 		nDest = nameExists (xSpreadDoc, aSheetName);
 		bAfter =true;
 	}
@@ -315,7 +317,7 @@ ScVbaWorksheet::Move( const uno::Any& Before, const uno::Any& After ) throw (uno
 	{
 		if (bAfter)  nDest++;
 		uno::Reference<sheet::XSpreadsheets> xSheets = xSpreadDoc->getSheets();
-		xSheets->moveByName(getName(),nDest);
+		xSheets->moveByName(aCurrSheetName,nDest);
 	}
 }
 
@@ -324,14 +326,14 @@ ScVbaWorksheet::Copy( const uno::Any& Before, const uno::Any& After ) throw (uno
 {
 	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( mxModel, uno::UNO_QUERY );
 	rtl::OUString aSheetName;
-
+	rtl::OUString aCurrSheetName =getName();
 	if (!(Before >>= aSheetName) && !(After >>=aSheetName))
 	{
 		uno::Reference<vba::XRange> xRange = getUsedRange();
 		xRange->Select();
 		rtl::OUString url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:Copy"));
 		dispatchRequests(mxModel,url);
-		uno::Reference<frame::XModel> xModel = openNewDoc(getName());
+		uno::Reference<frame::XModel> xModel = openNewDoc(aCurrSheetName);
 		if (xModel.is())
 		{
 			url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:Paste"));
@@ -340,7 +342,7 @@ ScVbaWorksheet::Copy( const uno::Any& Before, const uno::Any& After ) throw (uno
 		return;
 	}
 
-	sal_Int32 nDest = 0;
+	sal_Int32 nDest = DOESNOTEXIST;
 	sal_Bool bAfter = false;
 	if (Before >>= aSheetName )
 	{
@@ -348,6 +350,7 @@ ScVbaWorksheet::Copy( const uno::Any& Before, const uno::Any& After ) throw (uno
 	}
 	else
 	{
+		After >>= aSheetName;
 		nDest = nameExists (xSpreadDoc, aSheetName);
 		bAfter =true;
 	}
@@ -356,8 +359,8 @@ ScVbaWorksheet::Copy( const uno::Any& Before, const uno::Any& After ) throw (uno
 	{
 		if(bAfter)  nDest++;
 		uno::Reference<sheet::XSpreadsheets> xSheets = xSpreadDoc->getSheets();
-		getNewSpreadsheetName(aSheetName,getName(),xSpreadDoc);
-		xSheets->copyByName(getName(),aSheetName,nDest);
+		getNewSpreadsheetName(aSheetName,aCurrSheetName,xSpreadDoc);
+		xSheets->copyByName(aCurrSheetName,aSheetName,nDest);
 	}
 }
 
@@ -375,10 +378,10 @@ void
 ScVbaWorksheet::Delete(  ) throw (uno::RuntimeException)
 {
 	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( mxModel, uno::UNO_QUERY_THROW );
-	rtl::OUString sheetName = getName();
+	rtl::OUString aSheetName = getName();
 	if ( xSpreadDoc.is() )
 	{
-		if (!nameExists(xSpreadDoc, sheetName)) 
+		if (!nameExists(xSpreadDoc, aSheetName)) 
 		{
 			return;
 		}
@@ -386,7 +389,7 @@ ScVbaWorksheet::Delete(  ) throw (uno::RuntimeException)
 		if (xSheets.is())
 		{
 			uno::Reference<container::XNameContainer> xNameContainer(xSheets,uno::UNO_QUERY_THROW);
-			xNameContainer->removeByName(sheetName);
+			xNameContainer->removeByName(aSheetName);
 		}
 	}
 }
