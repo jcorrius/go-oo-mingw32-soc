@@ -1,0 +1,1431 @@
+--- /dev/null	2005-03-20 01:06:14.000000000 +0530
++++ connectivity/source/drivers/mdb/mdb_databasemetadata.cxx	2005-06-29 11:18:53.000000000 +0530
+@@ -0,0 +1,1428 @@
++/*************************************************************************
++ *
++ *  $RCSfile$
++ *
++ *  $Revision$
++ *
++ *  last change: $Author$ $Date$
++ *
++ *  The Contents of this file are made available subject to the terms of
++ *  either of the following licenses
++ *
++ *         - GNU Lesser General Public License Version 2.1
++ *         - Sun Industry Standards Source License Version 1.1
++ *
++ *  Sun Microsystems Inc., October, 2000
++ *
++ *  GNU Lesser General Public License Version 2.1
++ *  =============================================
++ *  Copyright 2000 by Sun Microsystems, Inc.
++ *  901 San Antonio Road, Palo Alto, CA 94303, USA
++ *
++ *  This library is free software; you can redistribute it and/or
++ *  modify it under the terms of the GNU Lesser General Public
++ *  License version 2.1, as published by the Free Software Foundation.
++ *
++ *  This library is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ *  Lesser General Public License for more details.
++ *
++ *  You should have received a copy of the GNU Lesser General Public
++ *  License along with this library; if not, write to the Free Software
++ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ *  MA  02111-1307  USA
++ *
++ *
++ *  Sun Industry Standards Source License Version 1.1
++ *  =================================================
++ *  The contents of this file are subject to the Sun Industry Standards
++ *  Source License Version 1.1 (the "License"); You may not use this file
++ *  except in compliance with the License. You may obtain a copy of the
++ *  License at http://www.openoffice.org/license.html.
++ *
++ *  Software provided under this License is provided on an "AS IS" basis,
++ *  WITHOUT WARRANTY OF ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING,
++ *  WITHOUT LIMITATION, WARRANTIES THAT THE SOFTWARE IS FREE OF DEFECTS,
++ *  MERCHANTABLE, FIT FOR A PARTICULAR PURPOSE, OR NON-INFRINGING.
++ *  See the License for the specific provisions governing your rights and
++ *  obligations concerning the Software.
++ *
++ *  The Initial Developer of the Original Code is: Joerg Budischewski
++ *
++ *   Copyright: 2000 by Sun Microsystems, Inc.
++ *
++ *   All Rights Reserved.
++ *
++ *   Contributor(s): Joerg Budischewski
++ *
++ *
++ ************************************************************************/
++#include <hash_map>
++
++#include "mdb_databasemetadata.hxx"
++#include "mdb_driver.hxx"
++#include "mdb_sequenceresultset.hxx"
++
++#include<com/sun/star/sdbc/TransactionIsolation.hpp>
++#include<com/sun/star/sdbc/ResultSetType.hpp>
++#include<com/sun/star/sdbc/XPreparedStatement.hpp>
++#include<com/sun/star/sdbc/XParameters.hpp>
++#include<com/sun/star/sdbc/DataType.hpp>
++#include<com/sun/star/sdbc/ColumnValue.hpp>
++
++using ::osl::MutexGuard;
++
++using ::rtl::OUString;
++
++using com::sun::star::sdbc::SQLException;
++using com::sun::star::sdbc::XStatement;
++using com::sun::star::sdbc::XResultSet;
++using com::sun::star::sdbc::XRow;
++using com::sun::star::sdbc::XCloseable;
++using com::sun::star::sdbc::XParameters;
++using com::sun::star::sdbc::XPreparedStatement;
++
++using com::sun::star::uno::RuntimeException;
++using com::sun::star::uno::Sequence;
++
++using com::sun::star::uno::Reference;
++using com::sun::star::uno::Sequence;
++using com::sun::star::uno::Any;
++using com::sun::star::uno::makeAny;
++using com::sun::star::uno::UNO_QUERY;
++
++namespace mdb_sdbc_driver
++{
++
++#define ASCII_STR(x) OUString( RTL_CONSTASCII_USTRINGPARAM( x ) )
++
++static const int MAX_COLUMNS_IN_GROUPBY = 16;
++static const int MAX_COLUMNS_IN_INDEX = 32;
++static const int MAX_COLUMNS_IN_ORDER_BY = 16;
++static const int MAX_COLUMNS_IN_SELECT = 1024;
++static const int MAX_IDENTIFIER_LENGTH = 63;
++static const int MAX_COLUMNS_IN_TABLE = 1024;
++static const int MAX_CONNECTIONS = 0xffff;
++static const int MAX_STATEMENTS = 0xffff;
++static const int MAX_STATEMENT_LENGTH = -1;
++static const int MAX_TABLES_IN_SELECT = 0xffff;
++static const int MAX_USER_NAME_LENGTH = MAX_IDENTIFIER_LENGTH;
++
++
++// alphabetically ordered !
++static const int PRIVILEGE_CREATE     = 0x1;  
++static const int PRIVILEGE_DELETE     = 0x2;  
++static const int PRIVILEGE_EXECUTE    = 0x4;  
++static const int PRIVILEGE_INSERT     = 0x8;  
++static const int PRIVILEGE_REFERENCES = 0x10; 
++static const int PRIVILEGE_RULE       = 0x20; 
++static const int PRIVILEGE_SELECT     = 0x40; 
++static const int PRIVILEGE_TEMPORARY  = 0x80; 
++static const int PRIVILEGE_TRIGGER    = 0x100;
++static const int PRIVILEGE_UPDATE     = 0x200;
++static const int PRIVILEGE_USAGE      = 0x400;
++static const int PRIVILEGE_MAX = PRIVILEGE_USAGE;
++
++typedef ::std::hash_map
++<
++   OUString,
++   sal_Int32,
++   rtl::OUStringHash,
++   ::std::equal_to< OUString >,
++   Allocator< ::std::pair< const OUString , sal_Int32 > >
++
++> BaseTypeMap;
++
++typedef std::vector< Sequence< Any >, Allocator< Sequence< Any > > > AnyVector;
++
++struct Strings
++{
++    OUString SYSTEM_TABLE;
++    OUString TABLE;
++    OUString VIEW;
++    OUString UNKNOWN;
++    OUString YES;
++    OUString NO;
++    OUString NO_NULLS;
++    OUString NULABLE;
++    OUString NULLABLE_UNKNOWN;
++    OUString SELECT;
++    OUString UPDATE;
++    OUString INSERT;
++    OUString DELETE;
++    OUString RULE;
++    OUString REFERENCES;
++    OUString TRIGGER;
++    OUString EXECUTE;
++    OUString USAGE;
++    OUString CREATE;
++    OUString TEMPORARY;
++    
++    Sequence< OUString > tablesRowNames;
++    Sequence< OUString > columnRowNames;
++    Sequence< OUString > primaryKeyNames;
++    Sequence< OUString > tablePrivilegesNames;
++    Sequence< OUString > schemaNames;
++    Sequence< OUString > tableTypeNames;
++    Sequence< Sequence< Any > > tableTypeData;
++    
++    BaseTypeMap baseTypeMap;
++};
++
++
++struct BaseTypeDef { const char * typeName; sal_Int32 value; };
++
++static Sequence< OUString > createStringSequence( const char * name[] , int length )
++{
++    Sequence< OUString > seq( length );
++    for( int i = 0; i < length; i ++ )
++    {
++        seq[i] = OUString( name[i] , strlen( name[i] ), RTL_TEXTENCODING_ASCII_US );
++    }
++    return seq;
++}
++const char * typeInfoColumn[] =
++{
++    "TYPE_NAME", "DATA_TYPE", "PRECISION", "LITERAL_PREFIX",
++    "LITERAL_SUFFIX", "CREATE_PARAMS", "NULLABLE", "CASE_SENSITIVE",
++    "SEARCHABLE", "UNSIGNED_ATTRIBUTE", "FIXED_PREC_SCALE", "AUTO_INCREMENT",
++    "LOCAL_TYPE_NAME", "MINIMUM_SCALE", "MAXIMUM_SCALE", "SQL_DATA_TYPE",
++    "SQL_DATETIME_SUB", "NUM_PREC_RADIX"
++};
++
++static Strings & sp()
++{
++    static Strings * p;
++    if( ! p )
++    {
++        ::osl::MutexGuard guard( ::osl::Mutex::getGlobalMutex() );
++        if( ! p )
++        {
++            static Strings statStrings;
++            statStrings.SYSTEM_TABLE = ASCII_STR( "SYSTEM_TABLE" );
++            statStrings.TABLE = ASCII_STR( "TABLE" );
++            statStrings.VIEW = ASCII_STR( "VIEW" );
++            statStrings.UNKNOWN = ASCII_STR( "UNKNOWN" );
++            statStrings.YES = ASCII_STR( "YES" );
++            statStrings.NO = ASCII_STR( "NO" );
++            statStrings.NO_NULLS = ASCII_STR( "NO_NULLS" );
++            statStrings.NULABLE = ASCII_STR( "NULABLE" );
++            statStrings.NULLABLE_UNKNOWN = ASCII_STR( "NULLABLE_UNKNOWN" );
++
++            statStrings.tablesRowNames = Sequence< OUString > ( 5 );
++            statStrings.tablesRowNames[0] = ASCII_STR( "TABLE_CAT" );
++            statStrings.tablesRowNames[1] = ASCII_STR( "TABLE_SCHEM" );
++            statStrings.tablesRowNames[2] = ASCII_STR( "TABLE_NAME" );
++            statStrings.tablesRowNames[3] = ASCII_STR( "TABLE_TYPE" );
++            statStrings.tablesRowNames[4] = ASCII_STR( "REMARKS" );
++
++            statStrings.primaryKeyNames = Sequence< OUString > ( 6 );
++            statStrings.primaryKeyNames[0] = ASCII_STR( "TABLE_CAT" );
++            statStrings.primaryKeyNames[1] = ASCII_STR( "TABLE_SCHEM" );
++            statStrings.primaryKeyNames[2] = ASCII_STR( "TABLE_NAME" );
++            statStrings.primaryKeyNames[3] = ASCII_STR( "COLUMN_NAME" );
++            statStrings.primaryKeyNames[4] = ASCII_STR( "KEY_SEQ" );
++            statStrings.primaryKeyNames[5] = ASCII_STR( "PK_NAME" );
++
++            statStrings.SELECT = ASCII_STR( "SELECT" );
++            statStrings.UPDATE = ASCII_STR( "UPDATE" );
++            statStrings.INSERT = ASCII_STR( "INSERT" );
++            statStrings.DELETE = ASCII_STR( "DELETE" );
++            statStrings.RULE = ASCII_STR( "RULE" );
++            statStrings.REFERENCES = ASCII_STR( "REFERENCES" );
++            statStrings.TRIGGER = ASCII_STR( "TRIGGER" );
++            statStrings.EXECUTE = ASCII_STR( "EXECUTE" );
++            statStrings.USAGE = ASCII_STR( "USAGE" );
++            statStrings.CREATE = ASCII_STR( "CREATE" );
++            statStrings.TEMPORARY = ASCII_STR( "TEMPORARY" );
++
++            statStrings.schemaNames = Sequence< OUString > ( 1 );
++            statStrings.schemaNames[0] = ASCII_STR( "TABLE_SCHEM" );
++
++            statStrings.tableTypeData = Sequence< Sequence< Any > >( 2 );
++            statStrings.tableTypeData[0] = Sequence< Any > ( 1 );
++            statStrings.tableTypeData[1] = Sequence< Any > ( 1 );
++//            statStrings.tableTypeData[2] = Sequence< Any > ( 1 );
++            statStrings.tableTypeData[1][0] <<= ASCII_STR( "SYSTEM TABLE" );
++            statStrings.tableTypeData[0][0] <<= ASCII_STR( "TABLE" );
++//            statStrings.tableTypeData[2][0] <<= ASCII_STR( "VIEW" );
++            statStrings.tableTypeNames = Sequence< OUString > ( 1 );
++            statStrings.tableTypeNames[0] = ASCII_STR( "TABLE_TYPE" );
++        
++            
++            
++    //     1. TABLE_CAT string =&gt; table catalog (may be NULL )
++    //     2. TABLE_SCHEM string =&gt; table schema (may be NULL )
++    //     3. TABLE_NAME string =&gt; table name
++    //     4. GRANTOR =&gt; grantor of access (may be NULL )
++    //     5. GRANTEE string =&gt; grantee of access
++    //     6. PRIVILEGE string =&gt; name of access (SELECT, INSERT, UPDATE, REFERENCES, ...)
++    //     7. IS_GRANTABLE string =&gt; "YES" if grantee is permitted to grant to
++    //        others; "NO" if not; NULL if unknown
++            const char *tablePrivilegesNames[] =
++                {
++                    "TABLE_CAT", "TABLE_SCHEM", "TABLE_NAME", "GRANTOR", "GRANTEE", "PRIVILEGE",
++                    "IS_GRANTABLE" 
++                };
++            statStrings.tablePrivilegesNames =
++                createStringSequence( tablePrivilegesNames, 7 );
++            
++            const char * columnNames[] =
++            {
++                "TABLE_CAT", "TABLE_SCHEM", "TABLE_NAME", "COLUMN_NAME",
++                "DATA_TYPE", "TYPE_NAME", "COLUMN_SIZE", "BUFFER_LENGTH",
++                "DECIMAL_DIGITS", "NUM_PREC_RADIX", "NULLABLE", "REMARKS",
++                "COLUMN_DEF", "SQL_DATA_TYPE", "SQL_DATETIME_SUB", "CHAR_OCTET_LENGTH",
++                "ORDINAL_POSITION", "IS_NULLABLE"
++            };
++            statStrings.columnRowNames =
++                createStringSequence( columnNames, 18 );
++
++            BaseTypeDef baseTypeDefs[] =
++            {
++                { "bool" , com::sun::star::sdbc::DataType::BIT },
++                { "bytea", com::sun::star::sdbc::DataType::VARBINARY },
++                { "char" , com::sun::star::sdbc::DataType::CHAR },
++                { "int8" , com::sun::star::sdbc::DataType::BIGINT },
++                { "int2" , com::sun::star::sdbc::DataType::SMALLINT },
++
++                { "int4" , com::sun::star::sdbc::DataType::INTEGER },
++                { "regproc" , com::sun::star::sdbc::DataType::INTEGER },
++                { "oid" , com::sun::star::sdbc::DataType::INTEGER },
++                { "xid" , com::sun::star::sdbc::DataType::INTEGER },
++                { "cid" , com::sun::star::sdbc::DataType::INTEGER },
++
++                { "text", com::sun::star::sdbc::DataType::VARCHAR },
++                { "bpchar", com::sun::star::sdbc::DataType::VARCHAR },
++                { "varchar", com::sun::star::sdbc::DataType::VARCHAR },
++
++                { "float4", com::sun::star::sdbc::DataType::REAL },
++                { "float8", com::sun::star::sdbc::DataType::DOUBLE },
++
++                { "date",  com::sun::star::sdbc::DataType::CHAR }, // switch to date later
++                { "time",  com::sun::star::sdbc::DataType::CHAR }, // switch to time later
++                { 0, 0 }
++
++            };
++            int i;
++            for( i = 0 ; baseTypeDefs[i].typeName ; i ++ )
++            {
++                statStrings.baseTypeMap[
++                    OUString::createFromAscii( baseTypeDefs[i].typeName) ] =
++                           baseTypeDefs[i].value;
++            }
++            p = &statStrings;
++        }
++    }
++    return *p;
++}
++
++    
++void DatabaseMetaData::checkClosed()
++        throw (SQLException, RuntimeException)
++{
++}
++
++DatabaseMetaData::DatabaseMetaData(
++    const ::rtl::Reference< RefCountedMutex > & refMutex,
++    const ::com::sun::star::uno::Reference< com::sun::star::sdbc::XConnection >  & origin,
++    ConnectionSettings *pSettings )
++    : m_pSettings( pSettings ),
++      m_origin( origin ),
++      m_refMutex( refMutex )
++    
++{
++
++}
++
++sal_Bool DatabaseMetaData::allProceduresAreCallable(  ) throw (SQLException, RuntimeException)
++{
++    // TODO
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::allTablesAreSelectable(  ) throw (SQLException, RuntimeException)
++{
++    return sal_True;
++}
++
++OUString DatabaseMetaData::getURL(  ) throw (SQLException, RuntimeException)
++{
++    // TODO
++    return OUString();
++}
++
++OUString DatabaseMetaData::getUserName(  ) throw (SQLException, RuntimeException)
++{
++    return m_pSettings->user;
++}
++
++sal_Bool DatabaseMetaData::isReadOnly(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++
++sal_Bool DatabaseMetaData::nullsAreSortedHigh(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::nullsAreSortedLow(  ) throw (SQLException, RuntimeException)
++{
++    return ! nullsAreSortedHigh();
++}
++
++sal_Bool DatabaseMetaData::nullsAreSortedAtStart(  ) throw (SQLException, RuntimeException)
++{
++    return ! nullsAreSortedHigh();
++}
++
++sal_Bool DatabaseMetaData::nullsAreSortedAtEnd(  ) throw (SQLException, RuntimeException)
++{
++    return nullsAreSortedHigh();
++}
++
++OUString DatabaseMetaData::getDatabaseProductName(  ) throw (SQLException, RuntimeException)
++{
++    return ASCII_STR( "mdb");
++}
++
++OUString DatabaseMetaData::getDatabaseProductVersion(  ) throw (SQLException, RuntimeException)
++{
++    return ASCII_STR( MDBTOOLS_VERSION );
++}
++OUString DatabaseMetaData::getDriverName(  ) throw (SQLException, RuntimeException)
++{
++    return ASCII_STR( "mdb-sdbc" );
++}
++
++OUString DatabaseMetaData::getDriverVersion(  ) throw (SQLException, RuntimeException)
++{
++    return ASCII_STR( MDB_SDBC_DRIVER_VERSION );
++}
++
++sal_Int32 DatabaseMetaData::getDriverMajorVersion(  ) throw (RuntimeException)
++{
++    return MDB_MAJOR;
++}
++
++sal_Int32 DatabaseMetaData::getDriverMinorVersion(  ) throw (RuntimeException)
++{
++    return MDB_MINOR;
++}
++
++sal_Bool DatabaseMetaData::usesLocalFiles(  ) throw (SQLException, RuntimeException)
++{
++    return sal_True;
++}
++
++sal_Bool DatabaseMetaData::usesLocalFilePerTable(  ) throw (SQLException, RuntimeException)
++{
++    return sal_True;
++}
++
++sal_Bool DatabaseMetaData::supportsMixedCaseIdentifiers(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::storesUpperCaseIdentifiers(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::storesLowerCaseIdentifiers(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++
++sal_Bool DatabaseMetaData::storesMixedCaseIdentifiers(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++
++sal_Bool DatabaseMetaData::supportsMixedCaseQuotedIdentifiers(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::storesUpperCaseQuotedIdentifiers(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++
++sal_Bool DatabaseMetaData::storesLowerCaseQuotedIdentifiers(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++
++sal_Bool DatabaseMetaData::storesMixedCaseQuotedIdentifiers(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++
++OUString DatabaseMetaData::getIdentifierQuoteString(  ) throw (SQLException, RuntimeException)
++{
++    return ASCII_STR( "\"" );
++}
++
++OUString DatabaseMetaData::getSQLKeywords(  ) throw (SQLException, RuntimeException)
++{
++    return ASCII_STR(
++        "ANALYZE,"
++        "ANALYSE,"
++        "DO,"
++        "ILIKE,"
++        "LIMIT,"
++        "NEW,"
++        "OFFSET,"
++        "OLD,"
++        "PLACING" );
++}
++OUString DatabaseMetaData::getNumericFunctions(  ) throw (SQLException, RuntimeException)
++{
++    // TODO
++    return OUString();
++}
++
++OUString DatabaseMetaData::getStringFunctions(  ) throw (SQLException, RuntimeException)
++{
++    // TODO
++    return OUString();
++}
++
++OUString DatabaseMetaData::getSystemFunctions(  ) throw (SQLException, RuntimeException)
++{
++    // TODO
++    return OUString();
++}
++OUString DatabaseMetaData::getTimeDateFunctions(  ) throw (SQLException, RuntimeException)
++{
++    // TODO
++    return OUString();
++}
++OUString DatabaseMetaData::getSearchStringEscape(  ) throw (SQLException, RuntimeException)
++{
++    return ASCII_STR( "\\" );
++}
++OUString DatabaseMetaData::getExtraNameCharacters(  ) throw (SQLException, RuntimeException)
++{
++    // TODO
++    return OUString();
++}
++
++sal_Bool DatabaseMetaData::supportsAlterTableWithAddColumn(  ) throw (SQLException, RuntimeException)
++{
++    return sal_True;
++}
++
++sal_Bool DatabaseMetaData::supportsAlterTableWithDropColumn(  ) throw (SQLException, RuntimeException)
++{
++    return sal_True;
++}
++
++sal_Bool DatabaseMetaData::supportsColumnAliasing(  ) throw (SQLException, RuntimeException)
++{
++    return sal_True;
++}
++
++sal_Bool DatabaseMetaData::nullPlusNonNullIsNull(  ) throw (SQLException, RuntimeException)
++{
++    return sal_True;
++}
++
++sal_Bool DatabaseMetaData::supportsTypeConversion(  ) throw (SQLException, RuntimeException)     // TODO, DON'T KNOW
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::supportsConvert( sal_Int32 fromType, sal_Int32 toType ) throw (SQLException, RuntimeException)  // TODO
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::supportsTableCorrelationNames(  ) throw (SQLException, RuntimeException)     // TODO, don't know
++{
++    return sal_False;
++}
++
++
++sal_Bool DatabaseMetaData::supportsDifferentTableCorrelationNames(  ) throw (SQLException, RuntimeException) // TODO, don't know
++{
++    return sal_False;
++}
++sal_Bool DatabaseMetaData::supportsExpressionsInOrderBy(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::supportsOrderByUnrelated(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::supportsGroupBy(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::supportsGroupByUnrelated(  ) throw (SQLException, RuntimeException) // TODO, DONT know
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::supportsGroupByBeyondSelect(  ) throw (SQLException, RuntimeException) // TODO, DON'T know
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::supportsLikeEscapeClause(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::supportsMultipleResultSets(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::supportsMultipleTransactions(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::supportsNonNullableColumns(  ) throw (SQLException, RuntimeException)
++{
++    return sal_True;
++}
++
++
++sal_Bool DatabaseMetaData::supportsMinimumSQLGrammar(  ) throw (SQLException, RuntimeException)
++{
++    return sal_True;
++}
++
++sal_Bool DatabaseMetaData::supportsCoreSQLGrammar(  ) throw (SQLException, RuntimeException)
++{
++    return sal_True;
++}
++
++sal_Bool DatabaseMetaData::supportsExtendedSQLGrammar(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::supportsANSI92EntryLevelSQL(  ) throw (SQLException, RuntimeException)
++{
++    return sal_True;
++}
++
++sal_Bool DatabaseMetaData::supportsANSI92IntermediateSQL(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::supportsANSI92FullSQL(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::supportsIntegrityEnhancementFacility(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::supportsOuterJoins(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::supportsFullOuterJoins(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::supportsLimitedOuterJoins(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++
++OUString DatabaseMetaData::getSchemaTerm(  ) throw (SQLException, RuntimeException)
++{
++    return ASCII_STR( "SCHEMA" );
++}
++
++OUString DatabaseMetaData::getProcedureTerm(  ) throw (SQLException, RuntimeException)
++{
++    // don't know
++    return OUString();
++}
++
++OUString DatabaseMetaData::getCatalogTerm(  ) throw (SQLException, RuntimeException)
++{
++    // TODO is this correct ?
++    return ASCII_STR( "DATABASE" );
++}
++
++sal_Bool DatabaseMetaData::isCatalogAtStart(  ) throw (SQLException, RuntimeException)     // TODO don't know
++{
++
++    return sal_True;
++}
++
++OUString DatabaseMetaData::getCatalogSeparator(  ) throw (SQLException, RuntimeException)
++{
++    // TODO don't know
++    return ASCII_STR( "." );
++}
++
++sal_Bool DatabaseMetaData::supportsSchemasInDataManipulation(  ) throw (SQLException, RuntimeException)
++{
++    return sal_True;
++}
++
++sal_Bool DatabaseMetaData::supportsSchemasInProcedureCalls(  ) throw (SQLException, RuntimeException)
++{
++    return sal_True;
++}
++
++sal_Bool DatabaseMetaData::supportsSchemasInTableDefinitions(  ) throw (SQLException, RuntimeException)
++{
++    return sal_True;
++}
++
++sal_Bool DatabaseMetaData::supportsSchemasInIndexDefinitions(  ) throw (SQLException, RuntimeException)
++{
++    return sal_True;
++}
++
++sal_Bool DatabaseMetaData::supportsSchemasInPrivilegeDefinitions(  ) throw (SQLException, RuntimeException)
++{
++    return sal_True;
++}
++
++sal_Bool DatabaseMetaData::supportsCatalogsInDataManipulation(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::supportsCatalogsInProcedureCalls(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::supportsCatalogsInTableDefinitions(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++
++sal_Bool DatabaseMetaData::supportsCatalogsInIndexDefinitions(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++
++sal_Bool DatabaseMetaData::supportsCatalogsInPrivilegeDefinitions(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++
++sal_Bool DatabaseMetaData::supportsPositionedDelete(  ) throw (SQLException, RuntimeException)
++{
++    // TODO 
++    return sal_True;
++}
++
++sal_Bool DatabaseMetaData::supportsPositionedUpdate(  ) throw (SQLException, RuntimeException)
++{
++    // TODO 
++    return sal_True;
++}
++
++
++sal_Bool DatabaseMetaData::supportsSelectForUpdate(  ) throw (SQLException, RuntimeException)
++{
++    // TODO 
++    return sal_False;
++}
++
++
++sal_Bool DatabaseMetaData::supportsStoredProcedures(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++
++sal_Bool DatabaseMetaData::supportsSubqueriesInComparisons(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::supportsSubqueriesInExists(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::supportsSubqueriesInIns(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::supportsSubqueriesInQuantifieds(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::supportsCorrelatedSubqueries(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++sal_Bool DatabaseMetaData::supportsUnion(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::supportsUnionAll(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::supportsOpenCursorsAcrossCommit(  ) throw (SQLException, RuntimeException)
++{
++    // TODO, don't know
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::supportsOpenCursorsAcrossRollback(  ) throw (SQLException, RuntimeException)
++{
++    // TODO, don't know
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::supportsOpenStatementsAcrossCommit(  ) throw (SQLException, RuntimeException)
++{
++    // TODO, don't know
++    return sal_False;
++}
++sal_Bool DatabaseMetaData::supportsOpenStatementsAcrossRollback(  ) throw (SQLException, RuntimeException)
++{
++    // TODO, don't know
++    return sal_False;
++}
++
++sal_Int32 DatabaseMetaData::getMaxBinaryLiteralLength(  ) throw (SQLException, RuntimeException)
++{
++    // TODO, don't know
++    return -1;
++}
++
++sal_Int32 DatabaseMetaData::getMaxCharLiteralLength(  ) throw (SQLException, RuntimeException)
++{
++    return -1;
++}
++
++sal_Int32 DatabaseMetaData::getMaxColumnNameLength(  ) throw (SQLException, RuntimeException) //TODO, don't know
++{
++    return MAX_IDENTIFIER_LENGTH;
++}
++
++sal_Int32 DatabaseMetaData::getMaxColumnsInGroupBy(  ) throw (SQLException, RuntimeException) //TODO, don't know
++{
++    return MAX_COLUMNS_IN_GROUPBY;
++}
++
++sal_Int32 DatabaseMetaData::getMaxColumnsInIndex(  ) throw (SQLException, RuntimeException) //TODO, don't know
++{
++    return MAX_COLUMNS_IN_INDEX;
++}
++
++sal_Int32 DatabaseMetaData::getMaxColumnsInOrderBy(  ) throw (SQLException, RuntimeException) //TODO, don't know
++{
++    return MAX_COLUMNS_IN_ORDER_BY;
++}
++
++sal_Int32 DatabaseMetaData::getMaxColumnsInSelect(  ) throw (SQLException, RuntimeException) //TODO, don't know
++{
++    return MAX_COLUMNS_IN_SELECT;
++}
++
++sal_Int32 DatabaseMetaData::getMaxColumnsInTable(  ) throw (SQLException, RuntimeException) //TODO, don't know
++{
++    return MAX_COLUMNS_IN_TABLE;
++}
++
++sal_Int32 DatabaseMetaData::getMaxConnections(  ) throw (SQLException, RuntimeException) //TODO, don't know
++{
++    return MAX_CONNECTIONS;
++}
++
++sal_Int32 DatabaseMetaData::getMaxCursorNameLength(  ) throw (SQLException, RuntimeException) //TODO, don't know
++{
++    return MAX_IDENTIFIER_LENGTH;
++}
++
++sal_Int32 DatabaseMetaData::getMaxIndexLength(  ) throw (SQLException, RuntimeException) //TODO, don't know
++{
++    return MAX_IDENTIFIER_LENGTH;
++}
++
++sal_Int32 DatabaseMetaData::getMaxSchemaNameLength(  ) throw (SQLException, RuntimeException) 
++{
++    return MAX_IDENTIFIER_LENGTH;
++}
++
++sal_Int32 DatabaseMetaData::getMaxProcedureNameLength(  ) throw (SQLException, RuntimeException)
++{
++    return MAX_IDENTIFIER_LENGTH;
++}
++
++sal_Int32 DatabaseMetaData::getMaxCatalogNameLength(  ) throw (SQLException, RuntimeException)
++{
++    return MAX_IDENTIFIER_LENGTH;
++}
++
++sal_Int32 DatabaseMetaData::getMaxRowSize(  ) throw (SQLException, RuntimeException) 
++{
++    return -1;
++}
++
++sal_Bool DatabaseMetaData::doesMaxRowSizeIncludeBlobs(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Int32 DatabaseMetaData::getMaxStatementLength(  ) throw (SQLException, RuntimeException) //TODO, don't know
++{
++    return MAX_STATEMENT_LENGTH;
++}
++
++sal_Int32 DatabaseMetaData::getMaxStatements(  ) throw (SQLException, RuntimeException) //TODO, don't know
++{
++    return MAX_STATEMENTS;
++}
++
++sal_Int32 DatabaseMetaData::getMaxTableNameLength(  ) throw (SQLException, RuntimeException) 
++{
++    return MAX_IDENTIFIER_LENGTH;
++}
++
++sal_Int32 DatabaseMetaData::getMaxTablesInSelect(  ) throw (SQLException, RuntimeException)
++{
++    return MAX_TABLES_IN_SELECT;
++}
++
++sal_Int32 DatabaseMetaData::getMaxUserNameLength(  ) throw (SQLException, RuntimeException)
++{
++    return MAX_USER_NAME_LENGTH;
++}
++
++sal_Int32 DatabaseMetaData::getDefaultTransactionIsolation(  ) throw (SQLException, RuntimeException)
++{
++    return com::sun::star::sdbc::TransactionIsolation::READ_COMMITTED;
++}
++
++sal_Bool DatabaseMetaData::supportsTransactions(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::supportsTransactionIsolationLevel( sal_Int32 level ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::supportsDataDefinitionAndDataManipulationTransactions(  )
++    throw (SQLException, RuntimeException)
++{
++    return sal_True;
++}
++
++sal_Bool DatabaseMetaData::supportsDataManipulationTransactionsOnly(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::dataDefinitionCausesTransactionCommit(  ) throw (SQLException, RuntimeException)
++{
++    // don't know 
++    return sal_True;
++}
++
++sal_Bool DatabaseMetaData::dataDefinitionIgnoredInTransactions(  ) throw (SQLException, RuntimeException)
++{
++    return sal_True;
++}
++
++::com::sun::star::uno::Reference< XResultSet > DatabaseMetaData::getProcedures(
++    const ::com::sun::star::uno::Any& catalog,
++    const OUString& schemaPattern,
++    const OUString& procedureNamePattern ) throw (SQLException, RuntimeException)
++{
++//        1.  PROCEDURE_CAT string =&gt; procedure catalog (may be NULL )
++//        2. PROCEDURE_SCHEM string =&gt; procedure schema (may be NULL )
++//        3. PROCEDURE_NAME string =&gt; procedure name
++//        4. reserved for future use
++//        5. reserved for future use
++//        6. reserved for future use
++//        7. REMARKS string =&gt; explanatory comment on the procedure
++//        8. PROCEDURE_TYPE short =&gt; kind of procedure:
++//               * UNKNOWN - May return a result
++//               * NO - Does not return a result
++//               * RETURN - Returns a result
++
++    MutexGuard guard( m_refMutex->mutex );
++    checkClosed();
++    return new SequenceResultSet(
++        m_refMutex, *this, Sequence< OUString >(), Sequence< Sequence< Any > > (), m_pSettings->tc );
++}
++
++::com::sun::star::uno::Reference< XResultSet > DatabaseMetaData::getProcedureColumns(
++    const ::com::sun::star::uno::Any& catalog,
++    const OUString& schemaPattern,
++    const OUString& procedureNamePattern,
++    const OUString& columnNamePattern ) throw (SQLException, RuntimeException)
++{
++    MutexGuard guard( m_refMutex->mutex );
++    checkClosed();
++    return new SequenceResultSet(
++        m_refMutex, *this, Sequence< OUString >(), Sequence< Sequence< Any > > (), m_pSettings->tc );
++}
++
++
++::com::sun::star::uno::Reference< XResultSet > DatabaseMetaData::getTables(
++    const ::com::sun::star::uno::Any& catalog,
++    const OUString& schemaPattern,
++    const OUString& tableNamePattern,
++    const ::com::sun::star::uno::Sequence< OUString >& types )
++    throw (SQLException, RuntimeException)
++{
++	ODatabaseMetaDataResultSet* pResultSet = new ODatabaseMetaDataResultSet();
++	Reference< XResultSet > xResultSet = pResultSet;
++	pResultSet->setTablesMap();
++
++    ODatabaseMetaDataResultSet::ORows _rRows;
++
++
++    ::std::vector< ::rtl::OUString > tables;
++
++    if ( !getTableStrings( m_pSettings->pConnection, tables,m_pSettings->encoding ) )
++        return sal_False;
++
++
++    ::rtl::OUString aTableType(::rtl::OUString::createFromAscii("TABLE"));
++    for ( sal_Int32 i = 0; i < tables.size(); i++ ) 
++    {
++        ODatabaseMetaDataResultSet::ORow aRow(3);
++        ::rtl::OUString aTableName  = tables[i];
++
++
++        // return tables to caller
++        if (match( tableNamePattern, aTableName, '\0' ))
++            if ( aTableName.getLength() == 0 ) 
++            {
++                aTableName = rtl::OUString::createFromAscii("table1");
++            }
++
++
++            aRow.push_back( new ORowSetValueDecorator( aTableName ) ); // Table name
++            aRow.push_back( new ORowSetValueDecorator( aTableType ) ); // Table Type
++            aRow.push_back( ODatabaseMetaDataResultSet::getEmptyValue() );                 // Remarks
++            _rRows.push_back(aRow);
++    }
++
++    pResultSet->setRows( _rRows );
++
++	return xResultSet;
++}
++
++::com::sun::star::uno::Reference< XResultSet > DatabaseMetaData::getSchemas(  )
++    throw (SQLException, RuntimeException)
++{
++    MutexGuard guard( m_refMutex->mutex );
++    checkClosed();
++    return new SequenceResultSet(
++        m_refMutex, *this, Sequence< OUString >(), Sequence< Sequence< Any > > (), m_pSettings->tc );
++}
++
++::com::sun::star::uno::Reference< XResultSet > DatabaseMetaData::getCatalogs(  )
++    throw (SQLException, RuntimeException)
++{
++    MutexGuard guard( m_refMutex->mutex );
++    checkClosed();
++    return new SequenceResultSet(
++        m_refMutex, *this, Sequence< OUString >(), Sequence< Sequence< Any > > (), m_pSettings->tc );
++}
++    
++::com::sun::star::uno::Reference< XResultSet > DatabaseMetaData::getTableTypes(  )
++    throw (SQLException, RuntimeException)
++{
++    MutexGuard guard( m_refMutex->mutex );
++    checkClosed();
++    return new SequenceResultSet(
++        m_refMutex, *this, sp().tableTypeNames, sp().tableTypeData,
++        m_pSettings->tc );
++}
++
++
++/** returns the constant from sdbc.DataType
++ */
++static OUString typeNameToDataType( const OUString &typeName, const OUString &typtype )
++{
++    sal_Int32 ret = com::sun::star::sdbc::DataType::VARCHAR;
++    if( 0 == typtype.compareToAscii( "b" ) )
++    {
++        // base type
++        Strings &strs = sp();
++        BaseTypeMap::iterator ii = strs.baseTypeMap.find( typeName );
++        if( ii != strs.baseTypeMap.end() )
++        {
++            ret = ii->second;
++        }
++    }
++    else if( 0 == typtype.compareToAscii( "c" ) )
++    {
++        ret = com::sun::star::sdbc::DataType::STRUCT;
++    }
++    else if( 0 == typtype.compareToAscii( "d" ) ) 
++    {
++        ret = com::sun::star::sdbc::DataType::DISTINCT;
++    }
++    return OUString::valueOf( ret );
++}
++
++static bool isSystemColumn( const OUString &columnName )
++{
++    return sal_False;
++}
++
++::com::sun::star::uno::Reference< XResultSet > DatabaseMetaData::getColumns(
++    const ::com::sun::star::uno::Any& catalog,
++    const OUString& schemaPattern,
++    const OUString& tableNamePattern,
++    const OUString& columnNamePattern ) throw (SQLException, RuntimeException)
++{
++    Strings &strs = sp();
++
++    // continue !
++    MutexGuard guard( m_refMutex->mutex );
++    checkClosed();
++
++    // ignore catalog, as a single pq connection
++    // does not support multiple catalogs eitherway
++
++    //  1. TABLE_CAT string => table catalog (may be NULL)
++    //               => not supported
++    //  2. TABLE_SCHEM string => table schema (may be NULL)
++    //  3. TABLE_NAME string => table name
++    //  4. COLUMN_NAME string => column name
++    //  5. DATA_TYPE short => SQL type from java.sql.Types 
++    //  6. TYPE_NAME string => Data source dependent type name, for a UDT the
++    //                         type name is fully qualified
++    //  7. COLUMN_SIZE long => column size. For char or date types this is
++    //                         the maximum number of characters, for numeric
++    //                         or decimal types this is precision.
++    //  8. BUFFER_LENGTH is not used.
++    //               => not used
++    //  9. DECIMAL_DIGITS long => the number of fractional digits
++    //               => don't know ! TODO !
++    //  10. NUM_PREC_RADIX long => Radix (typically either 10 or 2)
++    //               => TODO ??
++    //  11. NULLABLE long => is NULL allowed?
++    //                      NO_NULLS - might not allow NULL values
++    //                      NULABLE - definitely allows NULL values
++    //                      NULLABLE_UNKNOWN - nullability unknown
++    //  12. REMARKS string => comment describing column (may be NULL )
++    //  13. COLUMN_DEF string => default value (may be NULL)
++    //  14. SQL_DATA_TYPE long => unused
++    //               => empty
++    //  15. SQL_DATETIME_SUB long => unused
++    //               => empty
++    //  16. CHAR_OCTET_LENGTH long => for char types the maximum number of
++    //                                bytes in the column
++    //  17. ORDINAL_POSITION int => index of column in table (starting at 1)
++    //                              pg_attribute.attnum
++    //  18. IS_NULLABLE string => "NO" means column definitely does not allow
++    //                            NULL values; "YES" means the column might
++    //                            allow NULL values. An empty string means
++    //                            nobody knows.
++    AnyVector vec;
++    if (!getColumnStrings(m_pSettings->pConnection, tableNamePattern,vec,m_pSettings->encoding ))
++    	return NULL;
++
++    return new SequenceResultSet(
++        m_refMutex, *this, strs.columnRowNames,
++        Sequence< Sequence< Any > > ( &vec[0],vec.size() ), m_pSettings->tc );
++}
++
++::com::sun::star::uno::Reference< XResultSet > DatabaseMetaData::getColumnPrivileges(
++    const ::com::sun::star::uno::Any& catalog,
++    const OUString& schema,
++    const OUString& table,
++    const OUString& columnNamePattern ) throw (SQLException, RuntimeException)
++{
++    MutexGuard guard( m_refMutex->mutex );
++    checkClosed();
++    return new SequenceResultSet(
++        m_refMutex, *this, Sequence< OUString >(), Sequence< Sequence< Any > > (), m_pSettings->tc );
++}
++
++static void addPrivilegesToVector(
++    sal_Int32 privilege, const OUString &catalog, const OUString & schema,
++    const OUString &tableName, const OUString &grantor, const OUString &grantee,
++    bool grantable, AnyVector &vec )
++{
++    Strings & st = sp();
++    for( int index = 1; index <= PRIVILEGE_MAX ; index = index << 1 )
++    {
++        OUString privname;
++        switch( privilege & index )
++        {
++        case PRIVILEGE_SELECT:
++            privname = st.SELECT; break;
++        case PRIVILEGE_UPDATE:
++            privname = st.UPDATE; break;
++        case PRIVILEGE_INSERT:
++            privname = st.INSERT; break;
++        case PRIVILEGE_DELETE:
++            privname = st.DELETE; break;
++        case PRIVILEGE_RULE:
++            privname = st.RULE; break;
++        case PRIVILEGE_REFERENCES:
++            privname = st.REFERENCES; break;
++        case PRIVILEGE_TRIGGER:
++            privname = st.TRIGGER; break;
++        case PRIVILEGE_EXECUTE:
++            privname = st.EXECUTE; break;
++        case PRIVILEGE_USAGE:
++            privname = st.USAGE; break;
++        case PRIVILEGE_CREATE:
++            privname = st.CREATE; break;
++        case PRIVILEGE_TEMPORARY:
++            privname = st.TEMPORARY; break;
++        default:
++//            printf( "error\n" );
++            break;
++        }
++
++        Sequence< Any > seq( 7 );
++        seq[0] <<= catalog;
++        seq[1] <<= schema;
++        seq[2] <<= tableName;
++        seq[3] <<= grantor;
++        seq[4] <<= grantee;
++        seq[5] <<= privname;
++        seq[6] <<= (grantable ? st.YES : st.NO );
++        vec.push_back( seq );
++    }
++}
++                              
++
++::com::sun::star::uno::Reference< XResultSet > DatabaseMetaData::getTablePrivileges(
++    const ::com::sun::star::uno::Any& catalog,
++    const OUString& schemaPattern,
++    const OUString& tableNamePattern ) throw (SQLException, RuntimeException)
++{
++	return NULL;
++    MutexGuard guard( m_refMutex->mutex );
++    checkClosed();
++
++    return new SequenceResultSet(
++        m_refMutex, *this, Sequence< OUString >(), Sequence< Sequence< Any > > (), m_pSettings->tc );
++}
++
++::com::sun::star::uno::Reference< XResultSet > DatabaseMetaData::getBestRowIdentifier(
++    const ::com::sun::star::uno::Any& catalog,
++    const OUString& schema,
++    const OUString& table,
++    sal_Int32 scope,
++    sal_Bool nullable ) throw (SQLException, RuntimeException)
++{
++    MutexGuard guard( m_refMutex->mutex );
++    checkClosed();
++    return new SequenceResultSet(
++        m_refMutex, *this, Sequence< OUString >(), Sequence< Sequence< Any > > (), m_pSettings->tc );
++}
++
++::com::sun::star::uno::Reference< XResultSet > DatabaseMetaData::getVersionColumns(
++    const ::com::sun::star::uno::Any& catalog,
++    const OUString& schema,
++    const OUString& table ) throw (SQLException, RuntimeException)
++{
++    MutexGuard guard( m_refMutex->mutex );
++    checkClosed();
++    return new SequenceResultSet(
++        m_refMutex, *this, Sequence< OUString >(), Sequence< Sequence< Any > > (), m_pSettings->tc );
++}
++
++::com::sun::star::uno::Reference< XResultSet > DatabaseMetaData::getPrimaryKeys(
++    const ::com::sun::star::uno::Any& catalog,
++    const OUString& schema,
++    const OUString& table ) throw (SQLException, RuntimeException)
++{
++
++	return NULL;
++    MutexGuard guard( m_refMutex->mutex );
++    checkClosed();
++
++    return new SequenceResultSet(
++        m_refMutex, *this, Sequence< OUString >(), Sequence< Sequence< Any > > (), m_pSettings->tc );
++}
++
++::com::sun::star::uno::Reference< XResultSet > DatabaseMetaData::getImportedKeys(
++    const ::com::sun::star::uno::Any& catalog,
++    const OUString& schema,
++    const OUString& table ) throw (SQLException, RuntimeException)
++{
++    MutexGuard guard( m_refMutex->mutex );
++    checkClosed();
++    return new SequenceResultSet(
++        m_refMutex, *this, Sequence< OUString >(), Sequence< Sequence< Any > > (), m_pSettings->tc );
++}
++
++::com::sun::star::uno::Reference< XResultSet > DatabaseMetaData::getExportedKeys(
++    const ::com::sun::star::uno::Any& catalog,
++    const OUString& schema,
++    const OUString& table ) throw (SQLException, RuntimeException)
++{
++    throw ::com::sun::star::sdbc::SQLException(
++        ASCII_STR( "mdb_databasemetadata: imported keys from tables not supported " ),
++        *this,
++        OUString(), 1, Any() );
++}
++
++::com::sun::star::uno::Reference< XResultSet > DatabaseMetaData::getCrossReference(
++    const ::com::sun::star::uno::Any& primaryCatalog,
++    const OUString& primarySchema,
++    const OUString& primaryTable,
++    const ::com::sun::star::uno::Any& foreignCatalog,
++    const OUString& foreignSchema,
++    const OUString& foreignTable ) throw (SQLException, RuntimeException)
++{
++    MutexGuard guard( m_refMutex->mutex );
++    checkClosed();
++    return new SequenceResultSet(
++        m_refMutex, *this, Sequence< OUString >(), Sequence< Sequence< Any > > (), m_pSettings->tc );
++}
++
++
++::com::sun::star::uno::Reference< XResultSet > DatabaseMetaData::getTypeInfo(  )
++    throw (SQLException, RuntimeException)
++{
++    MutexGuard guard( m_refMutex->mutex );
++    checkClosed();
++	AnyVector vec;
++	if (!getTypeInfos(vec))
++		return new SequenceResultSet(
++        m_refMutex, *this, Sequence< OUString >(), Sequence< Sequence< Any > > (), m_pSettings->tc );
++	
++	Sequence< OUString > typeRowNames=createStringSequence( typeInfoColumn, 18 );
++	
++	return new SequenceResultSet(
++        m_refMutex, *this, typeRowNames,
++        Sequence< Sequence< Any > > ( &vec[0],vec.size() ), m_pSettings->tc );
++	
++}
++
++::com::sun::star::uno::Reference< XResultSet > DatabaseMetaData::getIndexInfo(
++    const ::com::sun::star::uno::Any& catalog,
++    const OUString& schema,
++    const OUString& table,
++    sal_Bool unique,
++    sal_Bool approximate ) throw (SQLException, RuntimeException)
++{
++    MutexGuard guard( m_refMutex->mutex );
++    checkClosed();
++    return new SequenceResultSet(
++        m_refMutex, *this, Sequence< OUString >(), Sequence< Sequence< Any > > (), m_pSettings->tc );
++}
++
++sal_Bool DatabaseMetaData::supportsResultSetType( sal_Int32 setType )
++    throw (SQLException, RuntimeException)
++{
++    return
++        setType == com::sun::star::sdbc::ResultSetType::SCROLL_INSENSITIVE ||
++        setType == com::sun::star::sdbc::ResultSetType::FORWARD_ONLY;
++}
++
++sal_Bool DatabaseMetaData::supportsResultSetConcurrency(
++    sal_Int32 setType, sal_Int32 concurrency ) throw (SQLException, RuntimeException)
++{
++    return supportsResultSetType( setType ) &&
++        (concurrency == com::sun::star::sdbc::TransactionIsolation::READ_COMMITTED ||
++         concurrency == com::sun::star::sdbc::TransactionIsolation::SERIALIZABLE );
++}
++
++sal_Bool DatabaseMetaData::ownUpdatesAreVisible( sal_Int32 setType ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::ownDeletesAreVisible( sal_Int32 setType ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::ownInsertsAreVisible( sal_Int32 setType ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::othersUpdatesAreVisible( sal_Int32 setType ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::othersDeletesAreVisible( sal_Int32 setType ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::othersInsertsAreVisible( sal_Int32 setType ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::updatesAreDetected( sal_Int32 setType ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::deletesAreDetected( sal_Int32 setType ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++sal_Bool DatabaseMetaData::insertsAreDetected( sal_Int32 setType ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++sal_Bool DatabaseMetaData::supportsBatchUpdates(  ) throw (SQLException, RuntimeException)
++{
++    return sal_False;
++}
++
++::com::sun::star::uno::Reference< XResultSet > DatabaseMetaData::getUDTs( const ::com::sun::star::uno::Any& catalog, const OUString& schemaPattern, const OUString& typeNamePattern, const ::com::sun::star::uno::Sequence< sal_Int32 >& types ) throw (SQLException, RuntimeException)
++{
++    MutexGuard guard( m_refMutex->mutex );
++    checkClosed();
++    return new SequenceResultSet(
++        m_refMutex, *this, Sequence< OUString >(), Sequence< Sequence< Any > > (), m_pSettings->tc );
++}
++
++::com::sun::star::uno::Reference< com::sun::star::sdbc::XConnection > DatabaseMetaData::getConnection()
++    throw (SQLException, RuntimeException)
++{
++    return m_origin;
++}
++}
++

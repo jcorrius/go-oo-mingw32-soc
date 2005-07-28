@@ -1,0 +1,560 @@
+--- /dev/null	2005-03-20 01:06:14.000000000 +0530
++++ connectivity/source/drivers/mdb/mdb_connection.cxx	2005-06-29 11:18:53.000000000 +0530
+@@ -0,0 +1,557 @@
++/*************************************************************************
++ *
++ *  $RCSfile$
++ *
++ *  $Revision$
++ *
++ *  last change: $Author$ $Date$
++ *
++ *  The Contents of this file are made available subject to the terms of
++ *  either of the following licenses
++ *
++ *         - GNU Lesser General Public License Version 2.1
++ *         - Sun Industry Standards Source License Version 1.1
++ *
++ *  Sun Microsystems Inc., October, 2000
++ *
++ *  GNU Lesser General Public License Version 2.1
++ *  =============================================
++ *  Copyright 2000 by Sun Microsystems, Inc.
++ *  901 San Antonio Road, Palo Alto, CA 94303, USA
++ *
++ *  This library is free software; you can redistribute it and/or
++ *  modify it under the terms of the GNU Lesser General Public
++ *  License version 2.1, as published by the Free Software Foundation.
++ *
++ *  This library is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ *  Lesser General Public License for more details.
++ *
++ *  You should have received a copy of the GNU Lesser General Public
++ *  License along with this library; if not, write to the Free Software
++ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ *  MA  02111-1307  USA
++ *
++ *
++ *  Sun Industry Standards Source License Version 1.1
++ *  =================================================
++ *  The contents of this file are subject to the Sun Industry Standards
++ *  Source License Version 1.1 (the "License"); You may not use this file
++ *  except in compliance with the License. You may obtain a copy of the
++ *  License at http://www.openoffice.org/license.html.
++ *
++ *  Software provided under this License is provided on an "AS IS" basis,
++ *  WITHOUT WARRANTY OF ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING,
++ *  WITHOUT LIMITATION, WARRANTIES THAT THE SOFTWARE IS FREE OF DEFECTS,
++ *  MERCHANTABLE, FIT FOR A PARTICULAR PURPOSE, OR NON-INFRINGING.
++ *  See the License for the specific provisions governing your rights and
++ *  obligations concerning the Software.
++ *
++ *  The Initial Developer of the Original Code is: Joerg Budischewski
++ *
++ *   Copyright: 2000 by Sun Microsystems, Inc.
++ *
++ *   All Rights Reserved.
++ *
++ *   Contributor(s): Joerg Budischewski
++ *
++ *
++ ************************************************************************/
++
++#include <list>
++#include <string.h>
++
++#include "mdb_connection.hxx"
++#include "mdb_statement.hxx"
++#include "mdb_preparedstatement.hxx"
++#include "mdb_databasemetadata.hxx"
++
++#include <rtl/ustrbuf.hxx>
++#include <rtl/strbuf.hxx>
++#include <rtl/uuid.h>
++
++#include <cppuhelper/implementationentry.hxx>
++#include <cppuhelper/implbase1.hxx>
++
++#include <com/sun/star/beans/PropertyValue.hpp>
++
++using rtl::OUStringBuffer;
++using rtl::OUString;
++using rtl::OString;
++using rtl::OStringBuffer;
++using rtl::OUStringToOString;
++using osl::MutexGuard;
++
++using com::sun::star::container::XNameAccess;
++
++using com::sun::star::lang::XComponent;
++using com::sun::star::lang::XInitialization;
++using com::sun::star::lang::IllegalArgumentException;
++
++using com::sun::star::script::XTypeConverter;
++
++using com::sun::star::uno::RuntimeException;
++using com::sun::star::uno::Exception;
++using com::sun::star::uno::Sequence;
++using com::sun::star::uno::Reference;
++using com::sun::star::uno::XInterface;
++using com::sun::star::uno::UNO_QUERY;
++using com::sun::star::uno::XComponentContext;
++using com::sun::star::uno::Any;
++
++using com::sun::star::beans::PropertyValue;
++
++using com::sun::star::sdbc::XConnection;
++using com::sun::star::sdbc::XCloseable;
++using com::sun::star::sdbc::SQLException;
++using com::sun::star::sdbc::XWarningsSupplier;
++using com::sun::star::sdbc::XPreparedStatement;
++using com::sun::star::sdbc::XStatement;
++using com::sun::star::sdbc::XDatabaseMetaData;
++
++namespace mdb_sdbc_driver
++{
++
++#define ASCII_STR(x) OUString( RTL_CONSTASCII_USTRINGPARAM( x ) )
++
++
++// ______________________________________________________________________________
++// Helper class for statement lifetime management
++class ClosableReference : public cppu::WeakImplHelper1< com::sun::star::uno::XReference >
++{
++    Connection *m_conn;
++    ::rtl::ByteSequence m_id;
++public:
++    ClosableReference( const ::rtl::ByteSequence & id , Connection *that )
++        : m_id( id ), m_conn( that )
++    {
++        that->acquire();
++    }
++    
++    virtual ~ClosableReference()
++    {
++        if( m_conn )
++            m_conn->release();
++    }
++        
++    virtual void SAL_CALL dispose() throw ()
++    {
++        if( m_conn )
++        {
++            m_conn->removeFromWeakMap(m_id);
++            m_conn->release();
++            m_conn = 0;
++        }
++    }
++};
++
++OUString 	ConnectionGetImplementationName()
++{
++    return OUString( RTL_CONSTASCII_USTRINGPARAM( "org.openoffice.comp.connectivity.mdb.Connection" ) );
++}
++com::sun::star::uno::Sequence<rtl::OUString> ConnectionGetSupportedServiceNames(void)
++{
++    OUString serv( RTL_CONSTASCII_USTRINGPARAM( "com.sun.star.sdbc.Connection" ) );
++    return Sequence< OUString> (&serv,1);
++}
++
++Connection::~Connection()
++{
++    POSTGRE_TRACE( "dtor connection" );
++    if( m_settings.pConnection )
++    {
++        //PQfinish( m_settings.pConnection );
++        m_settings.pConnection = 0;
++    }
++}
++typedef ::std::list< ::com::sun::star::uno::Reference< ::com::sun::star::sdbc::XCloseable > ,
++    ::mdb_sdbc_driver::Allocator < ::com::sun::star::uno::Reference< ::com::sun::star::sdbc::XCloseable > > > CloseableList;
++
++void Connection::close() throw ( SQLException, RuntimeException )
++{
++    CloseableList lst;
++
++    {
++        MutexGuard guard( m_refMutex->mutex );
++        // silently ignore, if the connection has been closed already
++        if( m_settings.pConnection )
++        {
++            //PQfinish( m_settings.pConnection );
++            m_settings.pConnection = 0;
++        }
++
++        for( WeakHashMap::iterator ii = m_myStatements.begin() ;
++             ii != m_myStatements.end() ;
++             ++ii )
++        {
++            Reference< XCloseable > r = ii->second;
++            if( r.is() )
++                lst.push_back( r );
++        }
++    }
++
++    // close all created statements 
++    for( CloseableList::iterator ii = lst.begin(); ii != lst.end() ; ++ii )
++        ii->get()->close();
++}
++
++
++void Connection::removeFromWeakMap( const ::rtl::ByteSequence & id )
++{
++    // shrink the list !
++    MutexGuard guard( m_refMutex->mutex );
++    WeakHashMap::iterator ii = m_myStatements.find( id );
++    if( ii != m_myStatements.end() )
++        m_myStatements.erase( ii );
++}
++
++Reference< XStatement > Connection::createStatement(  ) throw (SQLException, RuntimeException)
++{
++    MutexGuard guard( m_refMutex->mutex );
++    checkClosed();
++
++    Statement *stmt = new Statement( m_refMutex, this , &m_settings );
++    Reference< XStatement > ret( stmt );
++    ::rtl::ByteSequence id( 16 );
++    rtl_createUuid( (sal_uInt8*) id.getConstArray(), 0 , sal_False );
++    m_myStatements[ id ] = Reference< XCloseable > ( stmt );
++    stmt->queryAdapter()->addReference( new ClosableReference( id, this ) );
++    return ret;
++}
++
++Reference< XPreparedStatement > Connection::prepareStatement( const ::rtl::OUString& sql )
++        throw (SQLException, RuntimeException)
++{
++    MutexGuard guard( m_refMutex->mutex );
++    checkClosed();
++
++    rtl::OString byteSql = OUStringToOString( sql, RTL_TEXTENCODING_UTF8 );
++    PreparedStatement *stmt = new PreparedStatement( m_refMutex, this, &m_settings, byteSql );
++    Reference< XPreparedStatement > ret = stmt;
++    
++    ::rtl::ByteSequence id( 16 );
++    rtl_createUuid( (sal_uInt8*) id.getConstArray(), 0 , sal_False );
++    m_myStatements[ id ] = Reference< XCloseable > ( stmt );
++    stmt->queryAdapter()->addReference( new ClosableReference( id, this ) );
++    return ret;
++}
++
++Reference< XPreparedStatement > Connection::prepareCall( const ::rtl::OUString& sql )
++        throw (SQLException, RuntimeException)
++{
++    throw SQLException(
++        OUString(
++            RTL_CONSTASCII_USTRINGPARAM( "mdb_driver: Callable statements not supported" ) ),
++        Reference< XInterface > (), OUString() , 1, Any() );
++}
++
++
++::rtl::OUString Connection::nativeSQL( const ::rtl::OUString& sql )
++        throw (SQLException, RuntimeException)
++{
++    return sql;
++}
++
++void Connection::setAutoCommit( sal_Bool autoCommit ) throw (SQLException, RuntimeException)
++{
++    // UNSUPPORTED
++}
++
++sal_Bool Connection::getAutoCommit(  ) throw (SQLException, RuntimeException)
++{
++    // UNSUPPORTED
++    return sal_True;
++}
++
++void Connection::commit(  ) throw (SQLException, RuntimeException)
++{
++    // UNSUPPORTED
++}
++
++void Connection::rollback(  ) throw (SQLException, RuntimeException)
++{
++    // UNSUPPORTED    
++}
++
++sal_Bool Connection::isClosed(  ) throw (SQLException, RuntimeException)
++{
++    return m_settings.pConnection == 0;
++}
++
++Reference< XDatabaseMetaData > Connection::getMetaData(  )
++        throw (SQLException, RuntimeException)
++{
++    MutexGuard guard( m_refMutex->mutex );
++    checkClosed();
++    return new DatabaseMetaData( m_refMutex, this, &m_settings );
++}
++
++void  Connection::setReadOnly( sal_Bool readOnly ) throw (SQLException, RuntimeException)
++{
++    // UNSUPPORTED
++
++}
++
++sal_Bool Connection::isReadOnly(  ) throw (SQLException, RuntimeException)
++{
++    // UNSUPPORTED
++    return sal_False;
++}
++
++void Connection::setCatalog( const ::rtl::OUString& catalog )
++        throw (SQLException, RuntimeException)
++{
++    // UNSUPPORTED
++}
++
++::rtl::OUString Connection::getCatalog(  ) throw (SQLException, RuntimeException)
++{
++    OUString ret;
++    MutexGuard ( m_refMutex->mutex );
++    if( m_settings.pConnection == 0 )
++    {
++        throw SQLException( ASCII_STR( "mdb_connection: connection is closed" ), *this,
++                            OUString(), 1, Any() );
++    }
++    char * p = 0;//PQdb(m_settings.pConnection );
++    return OUString( p, strlen(p) ,  m_settings.encoding );
++}
++
++void Connection::setTransactionIsolation( sal_Int32 level )
++        throw (SQLException, RuntimeException)
++{
++    // UNSUPPORTED
++}
++
++sal_Int32 Connection::getTransactionIsolation(  ) throw (SQLException, RuntimeException)
++{
++    // UNSUPPORTED
++    return 0;
++}
++
++Reference< XNameAccess > Connection::getTypeMap(  ) throw (SQLException, RuntimeException)
++{
++    Reference< XNameAccess > t;
++    {
++        MutexGuard guard( m_refMutex->mutex );
++        t = m_typeMap;
++    }
++    return t;
++}
++
++void Connection::setTypeMap( const Reference< XNameAccess >& typeMap )
++        throw (SQLException, RuntimeException)
++{
++    MutexGuard guard( m_refMutex->mutex );
++    m_typeMap = typeMap;
++}
++Any Connection::getWarnings(  ) throw (SQLException, RuntimeException)
++{
++    return Any();
++}
++
++void Connection::clearWarnings(  ) throw (SQLException, RuntimeException)
++{
++}
++
++
++static OString properties2String( const OString initialString,
++                                   const Sequence< PropertyValue > & args,
++                                   const Reference< XTypeConverter> &tc )
++{
++    OStringBuffer ret;
++
++    ret.append( initialString );
++    if( initialString.getLength() )
++        ret.append( " " );
++        
++    bool initial = false;
++    for( int i = 0; i < args.getLength() ; i ++)
++    {
++        bool append = true;
++        if( args[i].Name.matchIgnoreAsciiCaseAsciiL( RTL_CONSTASCII_STRINGPARAM( "password" ) ) )
++        {
++            ret.append( "password=" );
++        }
++        else if( args[i].Name.matchIgnoreAsciiCaseAsciiL( RTL_CONSTASCII_STRINGPARAM( "user" ) ) )
++        {
++            ret.append( "user=" );
++        }
++        else if( args[i].Name.matchIgnoreAsciiCaseAsciiL( RTL_CONSTASCII_STRINGPARAM( "port" ) ) )
++        {
++            ret.append( "port=" );
++        }
++        else if( args[i].Name.matchIgnoreAsciiCaseAsciiL( RTL_CONSTASCII_STRINGPARAM( "dbname" ) ) )
++        {
++            ret.append( "dbname=" );
++        }
++        else if( args[i].Name.matchIgnoreAsciiCaseAsciiL( RTL_CONSTASCII_STRINGPARAM( "connect_timeout" ) ) )
++        {
++            ret.append( "connect_timeout=" );
++        }
++        else if( args[i].Name.matchIgnoreAsciiCaseAsciiL( RTL_CONSTASCII_STRINGPARAM( "options" ) ) )
++        {
++            ret.append( "options=" );
++        }
++        else if( args[i].Name.matchIgnoreAsciiCaseAsciiL( RTL_CONSTASCII_STRINGPARAM( "requiressl" ) ) )
++        {
++            ret.append( "requiressl=" );
++        }
++        else
++        {
++            append = false;
++            // ignore for now
++        }
++        if( append )
++        {
++            OUString value;
++            tc->convertTo( args[i].Value ,getCppuType( &value) ) >>= value;
++            ret.append( OUStringToOString( value, RTL_TEXTENCODING_UTF8) );
++            ret.append( " " );
++        }
++    }
++
++    return ret.makeStringAndClear();
++}
++
++void Connection::initialize( const Sequence< Any >& aArguments )
++        throw (Exception, RuntimeException)
++{
++	int i=0;
++	if(i)
++	{
++		return ;
++	}
++    OUString url;
++    Sequence< PropertyValue > args;
++
++    Reference< XTypeConverter > tc( m_ctx->getServiceManager()->createInstanceWithContext(
++        OUString( RTL_CONSTASCII_USTRINGPARAM( "com.sun.star.script.Converter" ) ), m_ctx ),
++                                    UNO_QUERY);
++    if( ! tc.is() )
++    {
++        throw RuntimeException(
++            OUString( RTL_CONSTASCII_USTRINGPARAM("mdb_driver: Couldn't instantiate converter service" )),
++            Reference< XInterface > () );
++    }
++    if( aArguments.getLength() != 2 )
++    {
++        OUStringBuffer buf(128);
++        buf.appendAscii( "mdb_driver: expected 2 arguments, got " );
++        buf.append( aArguments.getLength( ) );
++        throw IllegalArgumentException(buf.makeStringAndClear(), Reference< XInterface > () , 0 );
++    }
++
++    if( ! (aArguments[0] >>= url) )
++    {
++        OUStringBuffer buf(128);
++        buf.appendAscii( "mdb_driver: expected string as first argument, got " );
++        buf.append( aArguments[0].getValueType().getTypeName() );
++        throw IllegalArgumentException( buf.makeStringAndClear() , *this, 0 );
++    }
++
++    tc->convertTo( aArguments[1], getCppuType( &args ) ) >>= args;
++
++    OString o;
++    int nColon = url.indexOf( ':' );
++    if( nColon != -1 )
++    {
++        nColon = url.indexOf( ':' , 1+ nColon );
++        if( nColon != -1 )
++        {
++             o = OUStringToOString( url.getStr()+nColon+1, RTL_TEXTENCODING_UTF8);
++        }
++    }
++    //o = properties2String( o , args , tc );
++    char *test1 = strdup(o.getStr());
++    m_settings.pConnection = OpenMDB(test1);
++    if( ! m_settings.pConnection )
++        throw RuntimeException( OUString( RTL_CONSTASCII_USTRINGPARAM( "mdb_driver: out of memory" ) ),
++                                Reference< XInterface > () );
++    if( !m_settings.pConnection  )
++    {
++        OUStringBuffer buf( 128 );
++
++//        const char * error = PQerrorMessage( m_settings.pConnection );
++//        OUString errorMessage( error, strlen( error) , RTL_TEXTENCODING_ASCII_US );
++        buf.appendAscii( "Couldn't establish database connection to '" );
++        buf.append( url );
++        buf.appendAscii( "' (" );
++//        buf.append( errorMessage );
++        buf.appendAscii( ")" );
++//        PQfinish( m_settings.pConnection );
++        m_settings.pConnection = 0;
++//        throw SQLException( buf.makeStringAndClear(), *this, errorMessage, CONNECTION_BAD, Any() );
++    }
++//    PQsetClientEncoding( m_settings.pConnection, "UNICODE" );
++    //char *p = 0;//PQuser( m_settings.pConnection );
++    //m_settings.user = OUString( p, strlen(p), RTL_TEXTENCODING_UTF8);
++//    p = PQdb( m_settings.pConnection );
++    //m_settings.catalog = OUString( p, strlen(p), RTL_TEXTENCODING_UTF8); 
++    m_settings.tc = tc;
++	free(test1);
++}
++
++void Connection::disposing()
++{
++    close();
++}
++
++void Connection::checkClosed() throw ( SQLException, RuntimeException )
++{
++    if( !m_settings.pConnection )
++        throw SQLException( ASCII_STR( "mdb_connection: Connection already closed" ),
++                            *this, OUString(), 1, Any() );
++}
++
++Reference< XInterface >  ConnectionCreateInstance(
++    const Reference< XComponentContext > & ctx ) throw (Exception)
++{
++    ::rtl::Reference< RefCountedMutex > ref = new RefCountedMutex();
++    return * new Connection( ref, ctx );
++}
++
++
++}
++
++
++
++
++
++
++static struct cppu::ImplementationEntry g_entries[] =
++{
++	{
++		mdb_sdbc_driver::ConnectionCreateInstance, mdb_sdbc_driver::ConnectionGetImplementationName,
++		mdb_sdbc_driver::ConnectionGetSupportedServiceNames, cppu::createSingleComponentFactory,
++		0 , 0
++	},
++	{ 0, 0, 0, 0, 0, 0 }
++};
++
++
++extern "C"
++{
++
++//==================================================================================================
++void SAL_CALL component_getImplementationEnvironment(
++	const sal_Char ** ppEnvTypeName, uno_Environment ** ppEnv )
++{
++	*ppEnvTypeName = CPPU_CURRENT_LANGUAGE_BINDING_NAME;
++}
++//==================================================================================================
++sal_Bool SAL_CALL component_writeInfo(
++	void * pServiceManager, void * pRegistryKey )
++{
++	return cppu::component_writeInfoHelper( pServiceManager, pRegistryKey, g_entries );
++}
++//==================================================================================================
++void * SAL_CALL component_getFactory(
++	const sal_Char * pImplName, void * pServiceManager, void * pRegistryKey )
++{
++	return cppu::component_getFactoryHelper( pImplName, pServiceManager, pRegistryKey , g_entries );
++}
++
++}
++
