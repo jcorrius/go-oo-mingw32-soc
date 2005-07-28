@@ -1,3 +1,11 @@
+#ifndef _SV_SYSDATA_HXX
+#include <vcl/sysdata.hxx>
+#endif
+
+#ifndef _SV_BITMAP_HXX
+#include <vcl/bitmap.hxx>
+#endif
+
 namespace cairo {
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
@@ -14,14 +22,6 @@ namespace cairo {
 #include <glitz-glx.h>
 #endif
 }
-
-#ifndef _SV_SYSDATA_HXX
-#include <vcl/sysdata.hxx>
-#endif
-
-#ifndef _SV_BITMAP_HXX
-#include <vcl/bitmap.hxx>
-#endif
 
 using namespace ::cairo;
 
