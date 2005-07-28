@@ -75,7 +75,7 @@
 using namespace ::com::sun::star;
 using namespace ::cairo;
 
-namespace vclcanvas
+namespace cairocanvas
 {
     CanvasBitmap::CanvasBitmap( const ::Size& 						rSize,
                                 bool								bAlphaBitmap,
@@ -83,7 +83,7 @@ namespace vclcanvas
     { 
 	WindowGraphicDevice::ImplRef xDevice = rDevice;
 
-	printf("canvas bitmap constructor\n");
+	OSL_TRACE("canvas bitmap constructor\n");
 
 	mpCairo = cairo_create( xDevice->getSimilarSurface( rSize, bAlphaBitmap ? CAIRO_CONTENT_COLOR_ALPHA : CAIRO_CONTENT_COLOR ) );
 	maCanvasHelper.setCairo( mpCairo );
@@ -95,7 +95,7 @@ namespace vclcanvas
     {
 	WindowGraphicDevice::ImplRef xDevice = rDevice;
 
-	printf("canvas bitmap constructor\n");
+	OSL_TRACE("canvas bitmap constructor\n");
 
 	mpCairo = cairo_create( xDevice->getSimilarSurface( ::vcl::unotools::sizeFromRealSize2D(rSize), CAIRO_CONTENT_COLOR ) );
 	maCanvasHelper.setCairo( mpCairo );
@@ -122,7 +122,7 @@ namespace vclcanvas
     {
 	Surface *pSurface = cairo_get_target( mpCairo );
 
-	printf("canvas bitmap destructor\n");
+	OSL_TRACE("canvas bitmap destructor\n");
 
 	cairo_destroy( mpCairo );
 	cairo_surface_destroy( pSurface );
@@ -161,7 +161,7 @@ namespace vclcanvas
                                 const ::Size& 					rSz,
                                 const GraphicAttr&				rAttr ) const
     {
-	printf ("CanvasBitmap::repaint called, TODO\n");
+	OSL_TRACE ("CanvasBitmap::repaint called, TODO\n");
 
         tools::LocalGuard aGuard;
 

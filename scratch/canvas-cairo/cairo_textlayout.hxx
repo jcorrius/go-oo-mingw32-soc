@@ -87,7 +87,7 @@
 
 /* Definition of TextLayout class */
 
-namespace vclcanvas
+namespace cairocanvas
 {
     typedef ::cppu::WeakComponentImplHelper2< ::com::sun::star::rendering::XTextLayout,
                          					  ::com::sun::star::lang::XServiceInfo > TextLayout_Base;

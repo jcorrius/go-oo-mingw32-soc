@@ -104,7 +104,7 @@
 
 using namespace ::com::sun::star;
 
-namespace vclcanvas
+namespace cairocanvas
 {
     CanvasBitmapHelper::CanvasBitmapHelper() :
         mpBackBuffer()
@@ -141,7 +141,7 @@ namespace vclcanvas
     uno::Reference< rendering::XBitmap > SAL_CALL CanvasBitmapHelper::getScaledBitmap( const geometry::RealSize2D& 	newSize, 
                                                                                        sal_Bool 					beFast )
     {
-	printf ("CanvasBitmapHelper::getScaledBitmap TODO\n");
+	OSL_TRACE ("CanvasBitmapHelper::getScaledBitmap TODO\n");
 
         RTL_LOGFILE_CONTEXT( aLog, "::cairocanvas::CanvasBitmapHelper::getScaledBitmap()" );
 
@@ -153,7 +153,7 @@ namespace vclcanvas
 
     uno::Sequence< sal_Int8 > SAL_CALL CanvasBitmapHelper::getData( const geometry::IntegerRectangle2D& rect )
     {
-	printf ("CanvasBitmapHelper::getData TODO\n");
+	OSL_TRACE ("CanvasBitmapHelper::getData TODO\n");
 
         RTL_LOGFILE_CONTEXT( aLog, "::cairocanvas::CanvasBitmapHelper::getData()" );
 
@@ -166,7 +166,7 @@ namespace vclcanvas
     void SAL_CALL CanvasBitmapHelper::setData( const uno::Sequence< sal_Int8 >& 	data, 
                                                const geometry::IntegerRectangle2D&	rect )
     {
-	printf ("CanvasBitmapHelper::setData TODO\n");
+	OSL_TRACE ("CanvasBitmapHelper::setData TODO\n");
 
         RTL_LOGFILE_CONTEXT( aLog, "::cairocanvas::CanvasBitmapHelper::setData()" );
 
@@ -179,7 +179,7 @@ namespace vclcanvas
     void SAL_CALL CanvasBitmapHelper::setPixel( const uno::Sequence< sal_Int8 >& 	color, 
                                                 const geometry::IntegerPoint2D& 	pos )
     {
-	printf ("CanvasBitmapHelper::setPixel TODO\n");
+	OSL_TRACE ("CanvasBitmapHelper::setPixel TODO\n");
 
         RTL_LOGFILE_CONTEXT( aLog, "::cairocanvas::CanvasBitmapHelper::setPixel()" );
 
@@ -191,7 +191,7 @@ namespace vclcanvas
 
     uno::Sequence< sal_Int8 > SAL_CALL CanvasBitmapHelper::getPixel( const geometry::IntegerPoint2D& pos )
     {
-	printf ("CanvasBitmapHelper::getPixel TODO\n");
+	OSL_TRACE ("CanvasBitmapHelper::getPixel TODO\n");
 
         RTL_LOGFILE_CONTEXT( aLog, "::cairocanvas::CanvasBitmapHelper::getPixel()" );
 

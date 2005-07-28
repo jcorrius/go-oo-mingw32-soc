@@ -146,7 +146,7 @@ namespace
 
 }
 
-namespace vclcanvas
+namespace cairocanvas
 {
     SpriteCanvas::SpriteCanvas( const uno::Reference< uno::XComponentContext >& rxContext ) :
         maBounds(),
@@ -166,7 +166,7 @@ namespace vclcanvas
     {
         tools::LocalGuard aGuard;
 
-	printf ("disposing sprite canvas\n");
+	OSL_TRACE ("disposing sprite canvas\n");
 
 	dispose();
 
@@ -214,7 +214,7 @@ namespace vclcanvas
     {
         tools::LocalGuard aGuard;
 
-	printf ("update screen called begin\n");
+	OSL_TRACE ("update screen called begin\n");
 
         if( !mpRedrawManager.get() )
             return sal_False; // disposed
@@ -234,13 +234,13 @@ namespace vclcanvas
 	::canvas::tools::ElapsedTime aLastUpdate;
         aLastUpdate.reset();                   
 
-	printf("update screen BEGIN\n");
+	OSL_TRACE("update screen BEGIN\n");
         mpRedrawManager->updateScreen( bUpdateAll );
 	mxDevice->flush();
 
 	double nUpdateTime( aLastUpdate.getElapsedTime() );
-	printf("update screen END\n");
-	printf("update screen time: %f fps: %5.02f\n", nUpdateTime, 1/nUpdateTime );
+	OSL_TRACE("update screen END\n");
+	OSL_TRACE("update screen time: %f fps: %5.02f\n", nUpdateTime, 1/nUpdateTime );
 
         // commit to screen
         // rodo maCanvasHelper.flush();
@@ -309,7 +309,7 @@ namespace vclcanvas
     {
         tools::LocalGuard aGuard;
 
-	printf("sprite canvas dispose\n");
+	OSL_TRACE("sprite canvas dispose\n");
 
         maCanvasHelper.disposing();
 
@@ -530,7 +530,7 @@ namespace
     static struct ::cppu::ImplementationEntry s_component_entries [] =
     {
         {
-            vclcanvas::SpriteCanvas::createInstance, getImplementationName_SpriteCanvas,
+            cairocanvas::SpriteCanvas::createInstance, getImplementationName_SpriteCanvas,
             getSupportedServiceNames_SpriteCanvas, ::cppu::createSingleComponentFactory,
             0, 0
         },

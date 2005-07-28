@@ -105,7 +105,7 @@
 
 #define CANVASCUSTOMSPRITE_IMPLEMENTATION_NAME "CairoCanvas::CanvasCustomSprite"
 
-namespace vclcanvas
+namespace cairocanvas
 {
     typedef ::cppu::WeakComponentImplHelper3< ::com::sun::star::rendering::XCustomSprite,
 									 		  ::com::sun::star::rendering::XBitmapCanvas,

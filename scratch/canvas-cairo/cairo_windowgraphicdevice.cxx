@@ -92,14 +92,14 @@
 using namespace ::com::sun::star;
 using namespace ::cairo;
 
-namespace vclcanvas
+namespace cairocanvas
 {
     WindowGraphicDevice::WindowGraphicDevice( Window& rOutputWindow, const SystemEnvData* pSysData ) :
         WindowGraphicDevice_Base( m_aMutex ),
         mpOutputWindow( &rOutputWindow ),
         mpWindowSurface( NULL )
     {
-	printf( "WindowGraphicDevice constructor\n" );
+	OSL_TRACE( "WindowGraphicDevice constructor\n" );
 
         CHECK_AND_THROW( mpOutputWindow != NULL,
                          "WindowGraphicDevice::WindowGraphicDevice(): pWindow is NULL" );
@@ -108,7 +108,7 @@ namespace vclcanvas
 
     WindowGraphicDevice::~WindowGraphicDevice()
     {
-	printf( "WindowGraphicDevice destructor\n" );
+	OSL_TRACE( "WindowGraphicDevice destructor\n" );
     }
 
     uno::Reference< rendering::XBufferController > SAL_CALL WindowGraphicDevice::getBufferController() throw (uno::RuntimeException)
@@ -419,7 +419,7 @@ namespace vclcanvas
     
     void SAL_CALL WindowGraphicDevice::disposing()
     {
-	printf("WindowGraphicDevice disposing\n");
+	OSL_TRACE("WindowGraphicDevice disposing\n");
 
         ::osl::MutexGuard aGuard( m_aMutex );
 
@@ -427,7 +427,7 @@ namespace vclcanvas
         mpOutputWindow = NULL;
 
 	if( mpWindowSurface ) {
-	    printf( "going to destroy mpWindowSurface\n" );
+	    OSL_TRACE( "going to destroy mpWindowSurface\n" );
 	    cairo_surface_destroy( mpWindowSurface );
 	    mpWindowSurface = NULL;
 	}
@@ -470,7 +470,7 @@ namespace vclcanvas
 
     Surface* WindowGraphicDevice::getSimilarSurface( Size aSize, Content aContent )
     {
-	printf( "called WindowGraphicDevice::getSimilarSurface %d x %d\n", aSize.Width(), aSize.Height() );
+	OSL_TRACE( "called WindowGraphicDevice::getSimilarSurface %d x %d\n", aSize.Width(), aSize.Height() );
 	return cairo_surface_create_similar( getSurface(), aContent, aSize.Width(), aSize.Height() );
     }
 

@@ -77,7 +77,7 @@
 
 #define LINEPOLYPOLYGON_IMPLEMENTATION_NAME "CairoCanvas::LinePolyPolygon"
 
-namespace vclcanvas
+namespace cairocanvas
 {
 	class LinePolyPolygon : public ::canvas::tools::LinePolyPolygonBase
     {

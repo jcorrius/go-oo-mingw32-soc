@@ -141,7 +141,7 @@
 using namespace ::com::sun::star;
 using namespace ::cairo;
 
-namespace vclcanvas
+namespace cairocanvas
 {
     namespace
     {
@@ -180,7 +180,7 @@ namespace vclcanvas
 
     void CanvasHelper::disposing()
     {
-	printf("canvas helper disposing\n");
+	OSL_TRACE("canvas helper disposing\n");
         mxDevice.reset();
         mp2ndOutDev.reset();
     }
@@ -239,7 +239,7 @@ namespace vclcanvas
 	cairo_matrix_multiply( &aCombinedMatrix, &aRenderMatrix, &aViewMatrix);
 
         if( viewState.Clip.is() ) {
-	    printf ("view clip\n");
+	    OSL_TRACE ("view clip\n");
 
 	    cairo_set_matrix( mpCairo, &aViewMatrix );
 	    drawPolyPolygonPath( viewState.Clip, Clip );
@@ -248,10 +248,10 @@ namespace vclcanvas
 	cairo_set_matrix( mpCairo, &aCombinedMatrix );
 
         if( renderState.Clip.is() ) {
-	    printf ("render clip BEGIN\n");
+	    OSL_TRACE ("render clip BEGIN\n");
 
 	    drawPolyPolygonPath( renderState.Clip, Clip );
-	    printf ("render clip END\n");
+	    OSL_TRACE ("render clip END\n");
 	}
 
 	if( setColor ) {
@@ -372,15 +372,15 @@ namespace vclcanvas
 		}
 	    } else
 		cairo_fill( pCairo );
-	    printf("fill\n");
+	    OSL_TRACE("fill\n");
 	break;
 	case Stroke:
 	    cairo_stroke( pCairo );
-	    printf("stroke\n");
+	    OSL_TRACE("stroke\n");
 	break;
 	case Clip:
 	    cairo_clip( pCairo );
-	    printf("clip\n");
+	    OSL_TRACE("clip\n");
 	break;
 	}
     }
@@ -394,7 +394,7 @@ namespace vclcanvas
 
 	    aP = aPolygon.getB2DPoint( 0 );
 	    cairo_move_to( pCairo, aP.getX(), aP.getY() );
-	    printf( "move to %f,%f\n", aP.getX(), aP.getY() );
+	    OSL_TRACE( "move to %f,%f\n", aP.getX(), aP.getY() );
 
 	    if( bIsBezier ) {
 		aA = aPolygon.getControlPointA( 0 );
@@ -411,7 +411,7 @@ namespace vclcanvas
 		    aB = aPolygon.getControlPointB( j );
 		} else {
 		    cairo_line_to( pCairo, aP.getX(), aP.getY() );
-		    printf( "line to %f,%f\n", aP.getX(), aP.getY() );
+		    OSL_TRACE( "line to %f,%f\n", aP.getX(), aP.getY() );
 		}
 	    }
 
@@ -797,7 +797,7 @@ namespace vclcanvas
 
     uno::Sequence< sal_Int8 > CanvasHelper::getData( const geometry::IntegerRectangle2D& rect )
     {
-	printf ("CanvasHelper::getData returns empty sequence, TODO\n");
+	OSL_TRACE ("CanvasHelper::getData returns empty sequence, TODO\n");
 
         return uno::Sequence< sal_Int8 >();
     }
@@ -805,14 +805,14 @@ namespace vclcanvas
     void CanvasHelper::setData( const uno::Sequence< sal_Int8 >& 	data, 
                                 const geometry::IntegerRectangle2D&	rect )
     {
-	printf ("canvas helper set data called, TODO\n");
+	OSL_TRACE ("canvas helper set data called, TODO\n");
     }
 
     void CanvasHelper::setPixel( const uno::Sequence< sal_Int8 >& 	color, 
                                  const geometry::IntegerPoint2D& 	pos )
     {
 	// rodo TODO
-	printf ("CanvasHelper::setPixel called TODO\n");
+	OSL_TRACE ("CanvasHelper::setPixel called TODO\n");
 //         if( !mpOutDev.get() )
 //             return; // we're disposed
 
@@ -840,7 +840,7 @@ namespace vclcanvas
 
     uno::Sequence< sal_Int8 > CanvasHelper::getPixel( const geometry::IntegerPoint2D& pos )
     {
-	printf ("CanvasHelper::getPixel called TODO\n");
+	OSL_TRACE ("CanvasHelper::getPixel called TODO\n");
             return uno::Sequence< sal_Int8 >();
 
 //         if( !mpOutDev.get() )
@@ -876,7 +876,7 @@ namespace vclcanvas
         // TODO(F1): finish that one
         rendering::IntegerBitmapLayout aLayout;
 
-	printf ("CanvasHelper::getMemoryLayout called, TODO\n");
+	OSL_TRACE ("CanvasHelper::getMemoryLayout called, TODO\n");
 
 	return aLayout;
 
@@ -906,7 +906,7 @@ namespace vclcanvas
         ENSURE_AND_RETURN( rGrf,
                            "CanvasHelper::repaint(): Invalid Graphic" );
 
-	printf ("repaint called, TODO\n");
+	OSL_TRACE ("repaint called, TODO\n");
 
 //         if( !mpOutDev )
 //             return false; // disposed

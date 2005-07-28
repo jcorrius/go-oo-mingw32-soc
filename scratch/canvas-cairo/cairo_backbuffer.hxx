@@ -68,7 +68,7 @@
 
 #include "cairo_windowgraphicdevice.hxx"
 
-namespace vclcanvas
+namespace cairocanvas
 {
     /// OutDevProvider implementation for backbuffer VDev
 	class BackBuffer

@@ -96,7 +96,7 @@
 
 using namespace ::cairo;
 
-namespace vclcanvas
+namespace cairocanvas
 {
 
     class SpritePainter
@@ -107,7 +107,7 @@ namespace vclcanvas
 	    mpCairo = pCairo;
         }
 
-        void operator()( const ::vclcanvas::Sprite::ImplRef& rSprite )
+        void operator()( const ::cairocanvas::Sprite::ImplRef& rSprite )
         {
             rSprite->redraw( mpCairo );
         }
@@ -116,7 +116,7 @@ namespace vclcanvas
 	Cairo* mpCairo;
     };
 
-    inline double accumulatePixel( double nPrevVal, const ::vclcanvas::Sprite::ImplRef& rSprite )
+    inline double accumulatePixel( double nPrevVal, const ::cairocanvas::Sprite::ImplRef& rSprite )
     {
         const ::basegfx::B2DSize& rSize( rSprite->getSpriteSize() );
 
@@ -136,7 +136,7 @@ namespace vclcanvas
         maLastUpdate(),
         mbBackgroundDirty( true )
     {
-	printf("redraw manager constructor\n");
+	OSL_TRACE("redraw manager constructor\n");
         ENSURE_AND_THROW( mpBackBuffer.get(),
                           "RedrawManager::RedrawManager(): Invalid backbuffer" );
         maChangeRecords.reserve( CHANGE_RECORDS_INITIAL_SIZE );
@@ -150,7 +150,7 @@ namespace vclcanvas
 
     RedrawManager::~RedrawManager()
     {
-	printf("redraw manager destructor\n");
+	OSL_TRACE("redraw manager destructor\n");
  	cairo_destroy( mpCairo );
  	cairo_surface_destroy( mpSurface );
  	cairo_surface_destroy( mpWinSurface );
@@ -234,7 +234,7 @@ namespace vclcanvas
         // update, anyway.
         if( bUpdateAll )
         {
-	    printf ("redraw manager: update all\n");
+	    OSL_TRACE ("redraw manager: update all\n");
 
 	    Surface* pBackingStoreSurface;
 
@@ -424,7 +424,7 @@ namespace vclcanvas
         {
             const Sprite::ImplRef& pAffectedSprite( rComponent.second );
 
-	    printf ("spriteRedrawStub\n");
+	    OSL_TRACE ("spriteRedrawStub\n");
 
             if( !pAffectedSprite.is() )
                 return; // no sprite, no update!
@@ -471,7 +471,7 @@ namespace vclcanvas
                                      aOutputPosition.X() + aOutputSize.Width(),
                                      aOutputPosition.Y() + aOutputSize.Height() );
         
-	printf("update area size: %d x %d\n", aOutputSize.Width(), aOutputSize.Height() );
+	OSL_TRACE("update area size: %d x %d\n", aOutputSize.Width(), aOutputSize.Height() );
 
 	if( aOutputSize.Width() > 0 && aOutputSize.Height() > 0 ) {
 

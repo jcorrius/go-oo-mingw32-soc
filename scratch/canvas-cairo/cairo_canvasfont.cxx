@@ -79,7 +79,7 @@
 using namespace ::com::sun::star;
 using namespace ::cairo;
 
-namespace vclcanvas
+namespace cairocanvas
 {
     CanvasFont::CanvasFont( const rendering::FontRequest& 					rFontRequest,
                             const uno::Sequence< beans::PropertyValue >& 	                rExtraFontProperties, 

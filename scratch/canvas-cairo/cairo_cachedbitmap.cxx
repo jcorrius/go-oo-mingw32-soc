@@ -85,7 +85,7 @@ using namespace ::com::sun::star;
 #define IMPLEMENTATION_NAME "CairoCanvas::CachedBitmap"
 #define SERVICE_NAME "com.sun.star.rendering.CachedBitmap"
 
-namespace vclcanvas
+namespace cairocanvas
 {
     CachedBitmap::CachedBitmap( const GraphicObjectSharedPtr& 				rGraphicObject,
                                 const ::Point& 								rPoint, 

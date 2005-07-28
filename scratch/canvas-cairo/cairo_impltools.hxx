@@ -146,7 +146,7 @@ namespace com { namespace sun { namespace star { namespace rendering
 } } } }
 
 
-namespace vclcanvas
+namespace cairocanvas
 {
     namespace tools
     {

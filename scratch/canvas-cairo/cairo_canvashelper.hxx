@@ -81,7 +81,7 @@
 #include "cairo_windowgraphicdevice.hxx"
 
 
-namespace vclcanvas
+namespace cairocanvas
 {
     /** Helper class for basic canvas functionality. Also offers
         optional backbuffer painting, when providing it with a second

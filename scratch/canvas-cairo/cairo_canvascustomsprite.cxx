@@ -115,7 +115,7 @@
 using namespace ::com::sun::star;
 using namespace ::cairo;
 
-namespace vclcanvas
+namespace cairocanvas
 {
 
     CanvasCustomSprite::CanvasCustomSprite( const geometry::RealSize2D& 		rSpriteSize,
@@ -147,7 +147,7 @@ namespace vclcanvas
         ENSURE_AND_THROW( rDevice.get() && rSpriteCanvas.get(),
                           "CanvasBitmap::CanvasBitmap(): Invalid device or sprite canvas" );
 
-	printf("going to create canvas custom sprite\n");
+	OSL_TRACE("going to create canvas custom sprite\n");
 
         // setup graphic device
         maCanvasHelper.setGraphicDevice( rDevice );
@@ -213,7 +213,7 @@ namespace vclcanvas
     {
         tools::LocalGuard aGuard;
 
-	printf ("custom sprite move to new pos %f, %f\n", aNewPos.X, aNewPos.Y);
+	OSL_TRACE ("custom sprite move to new pos %f, %f\n", aNewPos.X, aNewPos.Y);
 
         if( !mpSpriteCanvas.get() )
             return; // we're disposed
@@ -577,11 +577,11 @@ namespace vclcanvas
         tools::LocalGuard aGuard;
 
 	if( mbActive && !::basegfx::fTools::equalZero( mfAlpha ) ) {
-	    printf ("CanvasCustomSprite::redraw called\n");
+	    OSL_TRACE ("CanvasCustomSprite::redraw called\n");
 	    if( pCairo ) {
 
 		Size aSize = mpBackBuffer->getSize();
-		printf ("CanvasCustomSprite::redraw painting surface %p on %p cairo with surface %p on %f,%f size %d x %d\n",
+		OSL_TRACE ("CanvasCustomSprite::redraw painting surface %p on %p cairo with surface %p on %f,%f size %d x %d\n",
 			mpBackBuffer->getSurface(), pCairo, cairo_get_target( pCairo ), rOutputPos.getX(), rOutputPos.getY(),
 			aSize.Width(), aSize.Height() );
 		cairo_save( pCairo );

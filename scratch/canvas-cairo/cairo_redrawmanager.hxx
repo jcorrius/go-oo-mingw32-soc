@@ -101,7 +101,7 @@
 
 /* Definition of RedrawManager class */
 
-namespace vclcanvas
+namespace cairocanvas
 {
 
     /** This class manages smooth SpriteCanvas updates

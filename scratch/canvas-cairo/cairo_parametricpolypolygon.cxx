@@ -104,7 +104,7 @@
 
 using namespace ::com::sun::star;
 
-namespace vclcanvas
+namespace cairocanvas
 {
     ParametricPolyPolygon* ParametricPolyPolygon::createLinearHorizontalGradient( const uno::Sequence< double >& 						leftColor, 
                                                                                   const uno::Sequence< double >& 						rightColor,

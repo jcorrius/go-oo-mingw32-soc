@@ -96,7 +96,7 @@
 
 /* Definition of CachedBitmap class */
 
-namespace vclcanvas
+namespace cairocanvas
 {
     typedef ::boost::shared_ptr< GraphicObject > GraphicObjectSharedPtr;
 

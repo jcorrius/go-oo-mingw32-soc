@@ -81,7 +81,7 @@
 
 class OutputDevice;
 
-namespace vclcanvas
+namespace cairocanvas
 {
 	/* Definition of Sprite class */
     

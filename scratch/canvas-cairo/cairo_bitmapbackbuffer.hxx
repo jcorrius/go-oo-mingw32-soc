@@ -70,7 +70,7 @@
 #include "cairo_outdevprovider.hxx"
 
 
-namespace vclcanvas
+namespace cairocanvas
 {
     /** OutDevProvider implementation for canvas bitmap.
 

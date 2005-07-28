@@ -111,7 +111,7 @@ namespace cairo {
 
 /* Definition of WindowGraphicDevice class */
 
-namespace vclcanvas
+namespace cairocanvas
 {
     typedef ::cppu::WeakComponentImplHelper4< ::com::sun::star::rendering::XGraphicDevice,
                                               ::com::sun::star::rendering::XParametricPolyPolygon2DFactory,

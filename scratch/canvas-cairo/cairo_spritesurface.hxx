@@ -72,7 +72,7 @@ class Point;
 class Size;
 class Rectangle;
 
-namespace vclcanvas
+namespace cairocanvas
 {
 	/* Definition of SpriteSurface interface */
     

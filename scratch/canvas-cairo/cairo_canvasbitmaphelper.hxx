@@ -73,7 +73,7 @@
 #include "cairo_backbuffer.hxx"
 
 
-namespace vclcanvas
+namespace cairocanvas
 {
     /** Helper class for basic canvasbitmap functionality. Extends
         CanvasHelper with some CanvasBitmap specialities, such as alpha

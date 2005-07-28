@@ -72,7 +72,7 @@ class Point;
 class Size;
 class GraphicAttr;
 
-namespace vclcanvas
+namespace cairocanvas
 {
 	/* Definition of RepaintTarget interface */
     

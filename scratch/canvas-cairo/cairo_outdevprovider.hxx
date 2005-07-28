@@ -70,7 +70,7 @@
 
 class OutputDevice;
 
-namespace vclcanvas
+namespace cairocanvas
 {
 	/* Definition of OutDevProvider interface */
 

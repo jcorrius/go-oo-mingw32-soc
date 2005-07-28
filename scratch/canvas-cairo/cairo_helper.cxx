@@ -48,11 +48,11 @@ cairoHelperGetGlitzDrawable( const SystemEnvData* pSysData, int width, int heigh
 
     XGetWindowAttributes (display, window, &attrs);
     VisualID wVID = XVisualIDFromVisual( attrs.visual );
-    printf ("find format for visual id %d (%d)\n", wVID, vid);
+    OSL_TRACE ("find format for visual id %d (%d)\n", wVID, vid);
     pDrawableFormat = glitz_glx_find_drawable_format_for_visual ( display, screen, wVID );
 
     if( pDrawableFormat )
-	printf ("format found color %d %d %d %d doublebuffer %d\n",
+	OSL_TRACE ("format found color %d %d %d %d doublebuffer %d\n",
 		pDrawableFormat->color.red_size,
 		pDrawableFormat->color.green_size,
 		pDrawableFormat->color.blue_size,
@@ -88,7 +88,7 @@ cairoHelperGetGlitzSurface( const SystemEnvData* pSysData, void *drawable, int x
 	glitz_surface_attach (pGlitzSurface, pDrawable, GLITZ_DRAWABLE_BUFFER_FRONT_COLOR, x, y );
 
     if( pGlitzSurface )
-	printf ("glitz surface created successfully\n");
+	OSL_TRACE ("glitz surface created successfully\n");
 
     return pGlitzSurface;
 #endif
@@ -105,7 +105,7 @@ cairoHelperGetSurface( const SystemEnvData* pSysData, int x, int y, int width, i
     glitz_drawable_t* pGlitzDrawable;
     glitz_surface_t* pGlitzSurface;
 
-    printf ("try to create glitz surface %d x %d\n", width, height );
+    OSL_TRACE ("try to create glitz surface %d x %d\n", width, height );
     pGlitzDrawable = (glitz_drawable_t*) cairoHelperGetGlitzDrawable( pSysData, width, height );
 
     if( pGlitzDrawable ) {

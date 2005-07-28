@@ -79,7 +79,7 @@
 #endif
 
 
-namespace vclcanvas
+namespace cairocanvas
 {
     BitmapBackBuffer::BitmapBackBuffer( const BitmapEx& 		rBitmap,
                                         const OutputDevice& 	rRefDevice ) :

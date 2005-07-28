@@ -96,7 +96,7 @@
 
 /* Definition of CanvasFont class */
 
-namespace vclcanvas
+namespace cairocanvas
 {
     typedef ::cppu::WeakComponentImplHelper2< ::com::sun::star::rendering::XCanvasFont,
                          					  ::com::sun::star::lang::XServiceInfo > CanvasFont_Base;

@@ -123,7 +123,7 @@ namespace com { namespace sun { namespace star { namespace uno
 } } } }
 
 
-namespace vclcanvas
+namespace cairocanvas
 {
     typedef ::cppu::WeakComponentImplHelper6< ::com::sun::star::rendering::XSpriteCanvas,
 			                         		  ::com::sun::star::rendering::XIntegerBitmap,

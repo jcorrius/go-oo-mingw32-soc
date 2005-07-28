@@ -102,7 +102,7 @@ namespace basegfx
 
 /* Definition of ParametricPolyPolygon class */
 
-namespace vclcanvas
+namespace cairocanvas
 {
     typedef ::cppu::WeakComponentImplHelper2< ::com::sun::star::rendering::XParametricPolyPolygon2D,
             		   			  		      ::com::sun::star::lang::XServiceInfo > ParametricPolyPolygon_Base;

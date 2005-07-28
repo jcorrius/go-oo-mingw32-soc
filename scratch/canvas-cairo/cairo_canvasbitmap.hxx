@@ -97,7 +97,7 @@
 
 /* Definition of CanvasBitmap class */
 
-namespace vclcanvas
+namespace cairocanvas
 {
     typedef ::cppu::WeakComponentImplHelper3< ::com::sun::star::rendering::XBitmapCanvas,
 			                         		  ::com::sun::star::rendering::XIntegerBitmap,

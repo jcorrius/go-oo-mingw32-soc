@@ -139,7 +139,7 @@
 
 using namespace ::com::sun::star;
 
-namespace vclcanvas
+namespace cairocanvas
 {
     namespace
     {
