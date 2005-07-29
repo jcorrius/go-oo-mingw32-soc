@@ -385,7 +385,7 @@ namespace cairocanvas
 	}
     }
 
-    void clipNULL( Cairo *pCairo )
+    static void clipNULL( Cairo *pCairo )
     {
 	cairo_reset_clip( pCairo );
 	cairo_rectangle( pCairo, 0, 0, 1, 1 );
