@@ -1,1 +1,1 @@
-EXTRA_DIST = apply ${wildcard *.diff}
+EXTRA_DIST = $(wildcard *.diff)
