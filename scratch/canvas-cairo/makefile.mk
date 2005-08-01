@@ -2,9 +2,9 @@
 #
 #   $RCSfile: makefile.mk,v $
 #
-#   $Revision: 1.6 $
+#   $Revision: 1.7 $
 #
-#   last change: $Author: rodo $ $Date: 2005/08/01 10:18:54 $
+#   last change: $Author: brosenk $ $Date: 2005/08/01 11:29:10 $
 #
 #   The Contents of this file are made available subject to the terms of
 #   either of the following licenses
@@ -70,6 +70,12 @@ ENABLE_EXCEPTIONS=TRUE
 
 .INCLUDE :	settings.mk
 DLLPRE =
+
+# --- Nothing to do if we're compiling with --disable-cairo -----------
+.IF "$(ENABLE_CAIRO)" != "TRUE"
+@all:
+	@echo "Building without cairo support..."
+.ENDIF
 
 # --- Common ----------------------------------------------------------
 
