@@ -150,7 +150,6 @@ dispatchRequests (uno::Reference< frame::XModel>& xModel,rtl::OUString & aUrl) {
 			return ;
 		}
 
-        // get the remote office service manager
 		uno::Reference<lang::XMultiComponentFactory > xServiceManager(
 		            xContext->getServiceManager() );
 		if ( !xServiceManager.is() )
@@ -160,7 +159,8 @@ dispatchRequests (uno::Reference< frame::XModel>& xModel,rtl::OUString & aUrl) {
 		uno::Reference<util::XURLTransformer> xParser( xServiceManager->createInstanceWithContext(
 		rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "com.sun.star.util.URLTransformer" ) )
 					,xContext), uno::UNO_QUERY_THROW );
-
+		if (!xParser.is())
+			return;
 		xParser->parseStrict (url);
 	}
 	catch ( ::cppu::BootstrapException & e )
@@ -173,7 +173,8 @@ dispatchRequests (uno::Reference< frame::XModel>& xModel,rtl::OUString & aUrl) {
 	}
 
 	uno::Reference<frame::XDispatch> xDispatcher = xDispatchProvider->queryDispatch(url,emptyString,0);
-	xDispatcher->dispatch( url,uno::Sequence< beans::PropertyValue >(0) );
+	if (xDispatcher.is())
+		xDispatcher->dispatch( url,uno::Sequence< beans::PropertyValue >(0) );
 }
 
 ::rtl::OUString
@@ -282,12 +283,14 @@ ScVbaWorksheet::Move( const uno::Any& Before, const uno::Any& After ) throw (uno
 {
 	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( mxModel, uno::UNO_QUERY );
 	rtl::OUString aSheetName;
+	uno::Reference<vba::XWorksheet> xSheet;
 	rtl::OUString aCurrSheetName =getName();
 
-	if (!(Before >>= aSheetName) && !(After >>=aSheetName))
+	if (!(Before >>= xSheet) && !(After >>=xSheet)&& !(Before.hasValue()) && !(After.hasValue()))
 	{
 		uno::Reference<vba::XRange> xRange = getUsedRange();
-		xRange->Select();
+		if (xRange.is())
+			xRange->Select();
 		rtl::OUString url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:Copy"));
 		dispatchRequests(mxModel,url);
 		uno::Reference<frame::XModel> xModel = openNewDoc(aCurrSheetName);
@@ -300,15 +303,16 @@ ScVbaWorksheet::Move( const uno::Any& Before, const uno::Any& After ) throw (uno
 		return ;
 	}
 
-	sal_Int32 nDest = 0;
+	sal_Int32 nDest = DOESNOTEXIST;
 	sal_Bool bAfter = false;
-	if (Before >>= aSheetName )
+	if (Before >>= xSheet )
 	{
+		aSheetName = xSheet->getName();
 		nDest = nameExists (xSpreadDoc, aSheetName);
 	}
-	else
+	else if (After >>= xSheet)
 	{
-		After >>= aSheetName;
+		aSheetName = xSheet->getName();
 		nDest = nameExists (xSpreadDoc, aSheetName);
 		bAfter =true;
 	}
@@ -326,11 +330,14 @@ ScVbaWorksheet::Copy( const uno::Any& Before, const uno::Any& After ) throw (uno
 {
 	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( mxModel, uno::UNO_QUERY );
 	rtl::OUString aSheetName;
+	uno::Reference<vba::XWorksheet> xSheet;
 	rtl::OUString aCurrSheetName =getName();
-	if (!(Before >>= aSheetName) && !(After >>=aSheetName))
+
+	if (!(Before >>= xSheet) && !(After >>=xSheet)&& !(Before.hasValue()) && !(After.hasValue()))
 	{
 		uno::Reference<vba::XRange> xRange = getUsedRange();
-		xRange->Select();
+		if (xRange.is())
+			xRange->Select();
 		rtl::OUString url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:Copy"));
 		dispatchRequests(mxModel,url);
 		uno::Reference<frame::XModel> xModel = openNewDoc(aCurrSheetName);
@@ -344,13 +351,14 @@ ScVbaWorksheet::Copy( const uno::Any& Before, const uno::Any& After ) throw (uno
 
 	sal_Int32 nDest = DOESNOTEXIST;
 	sal_Bool bAfter = false;
-	if (Before >>= aSheetName )
+	if (Before >>= xSheet )
 	{
+		aSheetName = xSheet->getName();
 		nDest = nameExists (xSpreadDoc, aSheetName);
 	}
-	else
+	else if (After >>= xSheet)
 	{
-		After >>= aSheetName;
+		aSheetName = xSheet->getName();
 		nDest = nameExists (xSpreadDoc, aSheetName);
 		bAfter =true;
 	}
