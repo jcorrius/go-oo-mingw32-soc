@@ -964,6 +964,8 @@ namespace cairocanvas
 
 	OSL_TRACE ("repaint called, TODO\n");
 
+	return true;
+
 //         if( !mpOutDev )
 //             return false; // disposed
 //         else
