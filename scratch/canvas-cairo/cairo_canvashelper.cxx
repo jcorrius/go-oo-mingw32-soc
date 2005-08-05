@@ -387,6 +387,8 @@ namespace cairocanvas
 
     static void clipNULL( Cairo *pCairo )
     {
+	OSL_TRACE("clipNULL\n");
+
 	cairo_reset_clip( pCairo );
 	cairo_rectangle( pCairo, 0, 0, 1, 1 );
 	cairo_clip( pCairo );
@@ -446,8 +448,9 @@ namespace cairocanvas
 	if( bOpToDo && ( aOperation != Fill || !mpTextures ) )
 	    doOperation( aOperation, pCairo );
 
-	if( aPolyPolygon.count() == 0 && aOperation == Clip )
-	    clipNULL( pCairo );
+// fixme, spec says even clipping polypolygon with zero polygons means NULL clip, but it breaks animations with sprites
+// 	if( aPolyPolygon.count() == 0 && aOperation == Clip )
+// 	    clipNULL( pCairo );
     }
 
     void CanvasHelper::drawPolyPolygonFallback( const uno::Reference< rendering::XPolyPolygon2D >& xPolyPolygon, Operation aOperation, Cairo* pCairo ) const
@@ -487,8 +490,9 @@ namespace cairocanvas
 	    if( bOpToDo && ( aOperation != Fill || !mpTextures ) )
 		doOperation( aOperation, pCairo );
 
-	    if( nPolys == 0 && aOperation == Clip )
-		clipNULL( pCairo );
+// fixme, spec says even clipping polypolygon with zero polygons means NULL clip, but it breaks animations with sprites
+// 	    if( nPolys == 0 && aOperation == Clip )
+// 		clipNULL( pCairo );
 	} else {
 
 	    uno::Reference< rendering::XBezierPolyPolygon2D > xBezierPoly( xPolyPolygon, uno::UNO_QUERY );
@@ -527,8 +531,9 @@ namespace cairocanvas
 		if( bOpToDo && ( aOperation != Fill || !mpTextures ) )
 		    doOperation( aOperation, pCairo );
 
-		if( nPolys == 0 && aOperation == Clip )
-		    clipNULL( pCairo );
+// fixme, spec says even clipping polypolygon with zero polygons means NULL clip, but it breaks animations with sprites
+// 		if( nPolys == 0 && aOperation == Clip )
+// 		    clipNULL( pCairo );
 	    }
 	}
     }
