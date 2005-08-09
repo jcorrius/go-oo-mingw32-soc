@@ -8,6 +8,11 @@ PACKAGE=org$/openoffice$/vba
 # --- Settings -----------------------------------------------------
 .INCLUDE :  $(PRJ)$/util$/makefile.pmk
 
+.IF "$(ENABLE_VBA)"!="YES"
+dummy:
+        @echo "not building vba..."
+.ENDIF
+
 # ------------------------------------------------------------------------
 
 IDLFILES=\
@@ -21,10 +26,9 @@ IDLFILES=\
 	XWorksheets.idl\
 	XFont.idl\
 	XRows.idl\
-	XColumns.idl\
-	XOutline.idl
+	XOutline.idl\
+	XColumns.idl
 
 # ------------------------------------------------------------------
 
 .INCLUDE :  target.mk
-.INCLUDE :  $(PRJ)$/util$/target.pmk
