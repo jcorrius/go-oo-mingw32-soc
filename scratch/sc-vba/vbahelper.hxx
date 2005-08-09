@@ -1,7 +1,21 @@
 #ifndef SC_VBA_HELPER_HXX
 #define SC_VBA_HELPER_HXX
 
+#include <com/sun/star/frame/XModel.hpp>
+
 using namespace ::com::sun::star;
+
+namespace org 
+{
+	namespace openoffice 
+	{
+		void dispatchRequests (::com::sun::star::uno::Reference< frame::XModel>& xModel,rtl::OUString & aUrl) ;
+		void implnCopy();
+		void implnPaste();
+		void implnCut();
+	}
+}
+
 using namespace ::org::openoffice;
 
 #ifdef DEBUG

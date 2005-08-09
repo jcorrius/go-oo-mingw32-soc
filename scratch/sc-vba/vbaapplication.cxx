@@ -48,17 +48,12 @@ ScVbaApplication::~ScVbaApplication()
 uno::Reference< vba::XWorkbook >
 ScVbaApplication::getActiveWorkbook() throw (uno::RuntimeException)
 {
-	OSL_TRACE("In ScVbaApplication::getActiveWorkbook() ");
 	uno::Reference< frame::XModel > xModel( m_xDesktop->getCurrentComponent(), uno::UNO_QUERY );
 
 	if( xModel.is() )
 	{
-		OSL_TRACE("ScVbaApplication::getActiveWorkbook() about to return new Workbook");
-		/*return uno::Reference< vba::XWorkbook >(new ScVbaWorkbook( m_xContext,
-			xModel ) ); */
 		uno::Reference< vba::XWorkbook > xWrkBk( new ScVbaWorkbook( m_xContext,
 			xModel )); 
-		OSL_TRACE("Have constucted a Workbook object ");
 		return xWrkBk; 
 	}
 	else
@@ -75,9 +70,26 @@ ScVbaApplication::getSelection() throw (uno::RuntimeException)
 	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xRange ) );
 }
 
-uno::Reference< vba::XWorkbooks >
-ScVbaApplication::getWorkbooks() throw (uno::RuntimeException)
+uno::Reference< vba::XRange >
+ScVbaApplication::getActiveCell() throw (uno::RuntimeException )
 {
-	return uno::Reference< vba::XWorkbooks >( new ScVbaWorkbooks( m_xContext ) );
+    uno::Reference< frame::XModel > xModel( m_xDesktop->getCurrentComponent(), uno::UNO_QUERY );
+                                                                                                                             
+    uno::Reference< table::XCellRange > xRange( xModel->getCurrentSelection(), ::uno::UNO_QUERY);
+                                                                                                                             
+    return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xRange ) );
+}
+
+uno::Any SAL_CALL
+ScVbaApplication::Workbooks( const uno::Any& aIndex ) throw (uno::RuntimeException)
+{
+	uno::Reference< vba::XWorkbooks > xWorkBooks( new ScVbaWorkbooks( m_xContext ) );
+	if (  aIndex.getValueTypeClass() == uno::TypeClass_VOID )
+	{
+		// void then somebody did Workbooks.something in vba
+	    return uno::Any( xWorkBooks );
+	}
+
+	return uno::Any ( xWorkBooks->Item( aIndex ) );
 }
 

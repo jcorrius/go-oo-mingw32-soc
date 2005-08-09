@@ -5,12 +5,25 @@
 #include <com/sun/star/frame/XDesktop.hpp>
 #include <com/sun/star/sheet/XSpreadsheetDocument.hpp>
 #include <com/sun/star/container/XEnumerationAccess.hpp>
+#include <com/sun/star/frame/XComponentLoader.hpp>
+#include <com/sun/star/lang/XComponent.hpp>
+#include <com/sun/star/frame/XModel.hpp>
+#include <com/sun/star/frame/XFrame.hpp>
+#include <com/sun/star/frame/FrameSearchFlag.hpp>
+#include <com/sun/star/util/XModifiable.hpp>
+#include <com/sun/star/frame/XStorable.hpp>
+#include <com/sun/star/lang/DisposedException.hpp>
+#include <com/sun/star/beans/PropertyVetoException.hpp>
+#include <com/sun/star/util/XCloseable.hpp>
+#include <com/sun/star/lang/IndexOutOfBoundsException.hpp>
 
 #include <sfx2/objsh.hxx>
+#include <tools/urlobj.hxx>
 
 #include "vbaglobals.hxx"
 #include "vbaworkbook.hxx"
 #include "vbaworkbooks.hxx"
+#include "vbahelper.hxx"
 
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
@@ -144,42 +157,137 @@ ScVbaWorkbooks::getCount() throw (uno::RuntimeException)
 }
 
 uno::Any
-ScVbaWorkbooks::Item( ::sal_Int32 nIndex ) throw (uno::RuntimeException)
+ScVbaWorkbooks::getItemByStringIndex( const rtl::OUString& sIndex ) throw (uno::RuntimeException)
 {
+	if ( !( sIndex.getLength() > 0 ) )
+	{
+		rtl::OUString message;
+		message = rtl::OUString::createFromAscii(
+			"index is a blank string");
+		throw  lang::IndexOutOfBoundsException( message,
+			uno::Reference< uno::XInterface >() );
+	}
+
 	ScVbaWorkbooksIterator aIter(m_xContext);
 	uno::Reference< sheet::XSpreadsheetDocument > xDoc;
 
-	for( sal_Int32 i = 0; i <= nIndex; i++ )
+	bool isFound = false;
+	// FIXME check if there is a XNameAccess for this, quick look says
+	// no, need to check this later. so. atm very inefficient below
+	uno::Reference< vba::XWorkbook > xWorkBook;
+	while ( aIter.hasMoreElements() )
+	{
 		xDoc = aIter.nextElem();
+		xWorkBook.set( getWorkbook( m_xContext, xDoc ), uno::UNO_QUERY );
+		if ( xWorkBook.is() )
+		{
+			if ( sIndex.equals( xWorkBook->getName() ) )
+			{
+				isFound = true;
+				break;
+			}
+		}
+	}
+
+	if ( !isFound )
+	{
+		rtl::OUString message;
+		message = rtl::OUString::createFromAscii(
+			"Element does not exist for index ");
+		throw  lang::IndexOutOfBoundsException( message,
+			uno::Reference< uno::XInterface >() );
+	}
+
+	return uno::Any( xWorkBook );	
+
+}
+
+uno::Any
+ScVbaWorkbooks::getItemByIntIndex( const sal_Int32 nIndex ) throw (uno::RuntimeException)
+{
+
+	if ( !( nIndex > 0 ) )
+	{
+		rtl::OUString message;
+		message = rtl::OUString::createFromAscii(
+			"index is 0 or negative");
+		throw  lang::IndexOutOfBoundsException( message,
+			uno::Reference< uno::XInterface >() );
+	}
+
+	ScVbaWorkbooksIterator aIter(m_xContext);
+	uno::Reference< sheet::XSpreadsheetDocument > xDoc;
+
+	sal_Int32 i = 0;
+	for( ; aIter.hasMoreElements() && i < nIndex; ++i )
+	{
+		xDoc = aIter.nextElem();
+	}
+
+	if ( i != nIndex )
+	{
+		rtl::OUString message;
+		message = rtl::OUString::createFromAscii(
+			"Element does not exist for index ");
+		throw  lang::IndexOutOfBoundsException( message,
+			uno::Reference< uno::XInterface >() );
+	}
 
 	if( !xDoc.is() )
 		return uno::Any( uno::Reference< vba::XWorkbook >(NULL) );
-	else
-		return uno::Any( getWorkbook( m_xContext, xDoc ) );
+
+	return uno::Any( getWorkbook( m_xContext, xDoc ) );
 }
 
-// XWorkbooks
 uno::Any
-ScVbaWorkbooks::Add( const uno::Any& Before, const uno::Any& After,
-					 const uno::Any& Count, const uno::Any& Type ) throw (uno::RuntimeException)
+ScVbaWorkbooks::Item( const uno::Any& aIndex ) throw (uno::RuntimeException)
 {
-	SC_VBA_STUB();
-	return uno::Any();
+	if ( aIndex.getValueTypeClass() ==  uno::TypeClass_STRING )
+	{
+		rtl::OUString sIndex;
+		if ( ( aIndex >>= sIndex ) != sal_True )
+		{
+			rtl::OUString message;
+			message = rtl::OUString::createFromAscii(
+				"Couldn't convert index to string");
+			throw uno::RuntimeException( message, uno::Reference< uno::XInterface >() );
+		}
+		return getItemByStringIndex( sIndex );
+
+	}
+
+	sal_Int32 nIndex = 0;
+
+	if ( ( aIndex >>= nIndex ) != sal_True )
+	{
+		rtl::OUString message;
+		message = rtl::OUString::createFromAscii(
+			"Couldn't convert index to Int32");
+		throw uno::RuntimeException( message, uno::Reference< uno::XInterface >() );
+	}
+	return getItemByIntIndex( nIndex );
 }
-void
-ScVbaWorkbooks::Copy( const uno::Any& Before, const uno::Any& After ) throw (uno::RuntimeException)
+
+uno::Any 
+ScVbaWorkbooks::Add() throw (uno::RuntimeException)
 {
-	SC_VBA_STUB();
-}
-void
-ScVbaWorkbooks::Move( const uno::Any& Before, const uno::Any& After ) throw (uno::RuntimeException)
-{
-	SC_VBA_STUB();
-}
-void
-ScVbaWorkbooks::Delete() throw (uno::RuntimeException)
-{
-	SC_VBA_STUB();
+	uno::Reference< lang::XMultiComponentFactory > xSMgr(
+        m_xContext->getServiceManager(), uno::UNO_QUERY_THROW );
+
+	 uno::Reference< frame::XComponentLoader > xLoader(
+        xSMgr->createInstanceWithContext(
+            ::rtl::OUString::createFromAscii("com.sun.star.frame.Desktop"),
+                m_xContext), uno::UNO_QUERY_THROW );
+	uno::Reference< lang::XComponent > xComponent = xLoader->loadComponentFromURL(
+									   rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("private:factory/scalc") ),
+									   rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("_blank") ), 0, 
+									   uno::Sequence< beans::PropertyValue >(0) );			   
+    uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( xComponent, uno::UNO_QUERY_THROW );
+    uno::Reference<frame::XModel> xNewModel(xSpreadDoc,uno::UNO_QUERY_THROW);
+                                                                                                                             
+    if( xSpreadDoc.is() )
+        return uno::Any( uno::Reference< vba::XWorkbook >( new ScVbaWorkbook( m_xContext, xNewModel ) ) );
+    return uno::Any();
 }
 
 void
@@ -187,11 +295,41 @@ ScVbaWorkbooks::Close() throw (uno::RuntimeException)
 {
 	uno::Reference< lang::XMultiComponentFactory > xSMgr(
 		m_xContext->getServiceManager(), uno::UNO_QUERY_THROW );
-
 	uno::Reference< frame::XDesktop > xDesktop
 		(xSMgr->createInstanceWithContext(
-			::rtl::OUString::createFromAscii("com.sun.star.frame.Desktop"), 
-				m_xContext), uno::UNO_QUERY_THROW );
-	xDesktop->terminate();
+		::rtl::OUString::createFromAscii("com.sun.star.frame.Desktop"),
+		m_xContext), uno::UNO_QUERY_THROW );
+	uno::Reference< lang::XComponent > xDoc = xDesktop->getCurrentComponent();
+	uno::Reference< frame::XModel > xModel( xDoc, uno::UNO_QUERY);
+	rtl::OUString url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:CloseDoc"));
+	dispatchRequests(xModel,url);
 }
 
+uno::Any
+ScVbaWorkbooks::Open( const uno::Any &aFileName ) throw (uno::RuntimeException)
+{
+	rtl::OUString aURL(rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("file://") ));
+	rtl::OUString aTempName;
+	aFileName >>= aTempName;
+	aURL += aTempName;
+
+	uno::Reference< lang::XMultiComponentFactory > xSMgr(
+        	m_xContext->getServiceManager(), uno::UNO_QUERY_THROW );
+
+	uno::Reference< frame::XDesktop > xDesktop
+		(xSMgr->createInstanceWithContext(::rtl::OUString::createFromAscii("com.sun.star.frame.Desktop")                    , m_xContext),
+		uno::UNO_QUERY_THROW );
+	uno::Reference< frame::XComponentLoader > xLoader(
+		xSMgr->createInstanceWithContext(
+		::rtl::OUString::createFromAscii("com.sun.star.frame.Desktop"),
+		m_xContext),
+		uno::UNO_QUERY_THROW );
+	uno::Reference< lang::XComponent > xComponent = xLoader->loadComponentFromURL( aURL,
+		rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("_default") ),
+		frame::FrameSearchFlag::CREATE,
+		uno::Sequence< beans::PropertyValue >(0));
+	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( xComponent, uno::UNO_QUERY_THROW );
+	uno::Reference<frame::XModel> xNewModel(xSpreadDoc,uno::UNO_QUERY_THROW);
+
+	return uno::Any( uno::Reference< vba::XWorkbook >( new ScVbaWorkbook( m_xContext, xNewModel ) ) );
+}

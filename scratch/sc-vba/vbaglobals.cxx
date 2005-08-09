@@ -48,7 +48,7 @@ namespace vbaobj
     ScVbaGlobals::ScVbaGlobals( const Reference< XComponentContext >& rxContext )
         :m_xContext( rxContext )
     {
-		OSL_TRACE("ScVbaGlobals::ScVbaGlobals()");
+	OSL_TRACE("ScVbaGlobals::ScVbaGlobals()");
         mxApplication = uno::Reference< vba::XApplication > ( new ScVbaApplication( m_xContext) );
     }
 
@@ -157,45 +157,29 @@ ScVbaGlobals::getActiveSheet() throw (uno::RuntimeException)
     return result;
 }
 
-uno::Reference< vba::XWorksheets > SAL_CALL 
-ScVbaGlobals::getWorkSheets() throw (uno::RuntimeException)
+uno::Any SAL_CALL 
+ScVbaGlobals::WorkBooks( const uno::Any& aIndex ) throw (uno::RuntimeException)
 {
-	OSL_TRACE("ScVbaGlobals::getWorkSheets()");
-    uno::Reference< vba::XWorksheets > result;
+	return uno::Any( mxApplication->Workbooks(aIndex) );
+}
+
+uno::Any SAL_CALL
+ScVbaGlobals::WorkSheets(const uno::Any& aIndex) throw (uno::RuntimeException)
+{
+        OSL_TRACE("ScVbaGlobals::getWorkSheets()");
     uno::Reference< vba::XWorkbook > xWorkbook( mxApplication->getActiveWorkbook(), uno::UNO_QUERY );
+        uno::Any result;
     if ( xWorkbook.is() )
     {
-        uno::Reference< vba::XWorksheets > xWorksheets( 
-        xWorkbook->getWorkSheets(), uno::UNO_QUERY );
-        if ( xWorksheets.is() )
-        {
-            result = xWorksheets;
-        }
+        result  = xWorkbook->Worksheets( aIndex );
     }
-
-    if ( !result.is() )
+    else
     {
         // Fixme - check if this is reasonable/desired behavior
         throw uno::RuntimeException( rtl::OUString::createFromAscii(
-            "No Worksheets available" ), Reference< uno::XInterface >() );
+            "No ActiveWorkBook available" ), Reference< uno::XInterface >() );
     }
-    return result;
-
-}
-
-uno::Reference< vba::XWorkbooks > SAL_CALL 
-ScVbaGlobals::getWorkBooks() throw (uno::RuntimeException)
-{
-	OSL_TRACE("ScVbaGlobals::getWorkBooks()");
-    uno::Reference< vba::XWorkbooks> xWorkbooks( mxApplication->getWorkbooks(), uno::UNO_QUERY );
-    if ( xWorkbooks.is() )
-    {
-        return xWorkbooks;
-    }	
-
-    // Fixme - check if this is reasonable/desired behavior
-    throw uno::RuntimeException( rtl::OUString::createFromAscii(
-        "No Worksheets available" ), Reference< uno::XInterface >() );
+        return result;
 }
 
 ::uno::Sequence< ::uno::Any > SAL_CALL

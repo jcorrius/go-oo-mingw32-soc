@@ -23,8 +23,8 @@ public:
 	virtual ~ScVbaRange() {}
 
     // Attributes
-	virtual double SAL_CALL getValue() throw (::com::sun::star::uno::RuntimeException);
-	virtual void   SAL_CALL setValue( double value ) throw (::com::sun::star::uno::RuntimeException);
+	virtual uno::Any SAL_CALL getValue() throw (::com::sun::star::uno::RuntimeException);
+	virtual void   SAL_CALL setValue( const uno::Any& aValue ) throw ( uno::RuntimeException);
 	virtual ::rtl::OUString SAL_CALL getFormula() throw (uno::RuntimeException);
 	virtual void   SAL_CALL setFormula( const ::rtl::OUString &rFormula ) throw (uno::RuntimeException);
 	virtual double SAL_CALL getCount() throw (uno::RuntimeException);
@@ -63,13 +63,13 @@ public:
 	virtual uno::Reference< vba::XRange > SAL_CALL Cells( const ::uno::Any &nRow, const ::uno::Any &nCol ) 
 														  throw (uno::RuntimeException);
 	virtual void SAL_CALL Select() throw (uno::RuntimeException);
-	virtual uno::Reference< vba::XRows > SAL_CALL Rows() throw (uno::RuntimeException);
-	virtual uno::Reference< vba::XColumns > SAL_CALL Columns() throw (uno::RuntimeException);
+	virtual uno::Any SAL_CALL Rows( const uno::Any& nIndex ) throw (uno::RuntimeException);
+	virtual uno::Any SAL_CALL Columns( const uno::Any &nIndex ) throw (uno::RuntimeException);
 	virtual void SAL_CALL Copy( const ::uno::Any& Destination ) throw (uno::RuntimeException);
 	virtual void SAL_CALL Cut( const ::uno::Any& Destination ) throw (uno::RuntimeException);
 	virtual uno::Reference< vba::XRange > SAL_CALL Resize( const ::uno::Any& RowSize, const ::uno::Any& ColumnSize ) 
 														   throw (uno::RuntimeException);
-
+	virtual uno::Reference< vba::XFont > SAL_CALL Font() throw (uno::RuntimeException);
 };
 
 #endif /* SC_VBA_RANGE_HXX */

@@ -48,8 +48,8 @@ ScVbaWorksheets::getParent() throw (uno::RuntimeException)
 	}
 	if ( !xWorkbook.is() )
 	{
-		throw uno::RuntimeException( rtl::OUString::createFromAscii(
-			"ScVbaWorksheets::getParent - No Parent" ), uno::Reference< uno::XInterface >() );
+		//uno::RuntimeException( rtl::OUString::createFromAscii("ScVbaWorksheets::getParent - No Parent" ),
+		//													   uno::Reference< uno::XInterface >() );
 	}
 	
 	OSL_TRACE("In ScVbaWorksheets::getParent() returning workbook");
@@ -79,8 +79,20 @@ ScVbaWorksheets::getCount() throw (uno::RuntimeException)
 }
 
 uno::Any
-ScVbaWorksheets::Item( ::sal_Int32 nIndex ) throw (uno::RuntimeException)
+ScVbaWorksheets::Item( sal_Int32 nIndex ) throw (uno::RuntimeException)
 {
+	uno::Reference <container::XIndexAccess> xIndex( mxSheets, uno::UNO_QUERY );
+    if ( xIndex.is() )
+    {
+       	uno::Reference< sheet::XSpreadsheet > xSheet(xIndex->getByIndex(nIndex), uno::UNO_QUERY);
+		uno::Reference< lang::XMultiComponentFactory > xSMgr( m_xContext->getServiceManager(), 
+															  uno::UNO_QUERY_THROW );
+    	uno::Reference< frame::XDesktop > xDesktop( xSMgr->createInstanceWithContext(
+    											  ::rtl::OUString::createFromAscii("com.sun.star.frame.Desktop"),m_xContext),
+                                      			  uno::UNO_QUERY_THROW );
+    	uno::Reference< frame::XModel > xModel( xDesktop->getCurrentComponent(),uno::UNO_QUERY );
+		return  uno::Any(uno::Reference< vba::XWorksheet >( new ScVbaWorksheet(m_xContext,xSheet,xModel)));
+    }
 	return uno::Any( uno::Reference< vba::XWorksheet >(NULL) );
 }
 
@@ -91,7 +103,7 @@ ScVbaWorksheets::Add( const uno::Any& Before, const uno::Any& After,
 {
 	rtl::OUString aStringSheet;
 	sal_Bool bBefore(sal_True);
-	sal_Int32 nSheetIndex;
+	sal_Int32 nSheetIndex = 0;
 	sal_Int32 nNewSheets = 1, nType = 0;
 	Count >>= nNewSheets;
 	Type >>= nType;
@@ -148,5 +160,5 @@ ScVbaWorksheets::Add( const uno::Any& Before, const uno::Any& After,
 void
 ScVbaWorksheets::Delete() throw (uno::RuntimeException)
 {
-	SC_VBA_STUB();
+	//SC_VBA_STUB();
 }

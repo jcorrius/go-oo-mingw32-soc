@@ -8,7 +8,7 @@
 #include <com/sun/star/container/XEnumerationAccess.hpp>
 #include <com/sun/star/uno/XComponentContext.hpp>
 #include <org/openoffice/vba/XGlobals.hpp>
-
+ 
 #include "vbahelper.hxx"
 
 class ScModelObj;
@@ -19,11 +19,11 @@ typedef ::cppu::WeakImplHelper2< org::openoffice::vba::XWorksheets,
 class ScVbaWorksheets : public ScVbaWorksheets_BASE
 {
 	uno::Reference< sheet::XSpreadsheets > mxSheets;
+	uno::Reference< frame::XModel > mxModel;
 	uno::Reference<  ::com::sun::star::uno::XComponentContext > m_xContext;
 
 public:
-	ScVbaWorksheets(uno::Reference< ::com::sun::star::uno::XComponentContext > & xContext, uno::Reference< sheet::XSpreadsheets > xSheets ) :
-		mxSheets( xSheets ), m_xContext( xContext ) {}
+	ScVbaWorksheets(uno::Reference< ::com::sun::star::uno::XComponentContext > & xContext, uno::Reference< frame::XModel > xModel );
 	virtual ~ScVbaWorksheets() {}
 
 	// XEnumerationAccess
@@ -36,11 +36,15 @@ public:
     virtual uno::Any SAL_CALL getParent() throw (uno::RuntimeException);
     virtual ::sal_Int32 SAL_CALL getCreator() throw (uno::RuntimeException);
     virtual uno::Reference< ::org::openoffice::vba::XApplication > SAL_CALL getApplication() throw (uno::RuntimeException);
-    virtual uno::Any SAL_CALL Item( ::sal_Int32 Index ) throw (uno::RuntimeException);
+    virtual uno::Any SAL_CALL Item( const uno::Any& Index ) throw (uno::RuntimeException);
 
 	// XWorksheets
     virtual uno::Any SAL_CALL Add( const uno::Any& Before, const uno::Any& After, const uno::Any& Count, const uno::Any& Type ) throw (uno::RuntimeException);
     virtual void SAL_CALL Delete(  ) throw (uno::RuntimeException);
+private:
+	uno::Any getItemByStringIndex( const rtl::OUString& sIndex ) throw (uno::RuntimeException);
+
+	uno::Any getItemByIntIndex( const sal_Int32 nIndex ) throw (uno::RuntimeException);
 };
 
 #endif /* SC_VBA_WORKSHEETS_HXX */

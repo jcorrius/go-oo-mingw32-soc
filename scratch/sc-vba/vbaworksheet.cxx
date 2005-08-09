@@ -133,49 +133,6 @@ openNewDoc(rtl::OUString aSheetName )
 	}
 }
 
-static void
-dispatchRequests (uno::Reference< frame::XModel>& xModel,rtl::OUString & aUrl) {
-
-	util::URL  url ;
-	url.Complete = aUrl;
-	rtl::OUString emptyString = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "" ));
-	uno::Reference<frame::XController> xController = xModel->getCurrentController();
-	uno::Reference<frame::XFrame> xFrame = xController->getFrame();
-	uno::Reference<frame::XDispatchProvider> xDispatchProvider (xFrame,uno::UNO_QUERY_THROW);
-	try
-	{
-		uno::Reference<uno::XComponentContext > xContext(  ::cppu::defaultBootstrap_InitialComponentContext());
-		if ( !xContext.is() )
-		{
-			return ;
-		}
-
-		uno::Reference<lang::XMultiComponentFactory > xServiceManager(
-		            xContext->getServiceManager() );
-		if ( !xServiceManager.is() )
-		{
-			return ;
-		}
-		uno::Reference<util::XURLTransformer> xParser( xServiceManager->createInstanceWithContext(
-		rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "com.sun.star.util.URLTransformer" ) )
-					,xContext), uno::UNO_QUERY_THROW );
-		if (!xParser.is())
-			return;
-		xParser->parseStrict (url);
-	}
-	catch ( ::cppu::BootstrapException & e )
-	{
-		return ;
-	}
-	catch ( uno::Exception & e )
-	{
-		return ;
-	}
-
-	uno::Reference<frame::XDispatch> xDispatcher = xDispatchProvider->queryDispatch(url,emptyString,0);
-	if (xDispatcher.is())
-		xDispatcher->dispatch( url,uno::Sequence< beans::PropertyValue >(0) );
-}
 
 ::rtl::OUString
 ScVbaWorksheet::getName() throw (uno::RuntimeException)
@@ -219,9 +176,6 @@ ScVbaWorksheet::getUsedRange() throw (uno::RuntimeException)
 	uno::Reference<sheet::XUsedAreaCursor> xUsedCursor(xSheetCellCursor,uno::UNO_QUERY_THROW);
 	xUsedCursor->gotoStartOfUsedArea( false );
 	xUsedCursor->gotoEndOfUsedArea( true );
-
-	uno::Reference< sheet::XCellRangeAddressable > xCellRangeAddressable(xSheetCellCursor, uno::UNO_QUERY);
-
 	uno::Reference< table::XCellRange > xRange( xSheetCellCursor, uno::UNO_QUERY);
 	return new ScVbaRange(m_xContext, xRange);
 }
@@ -288,16 +242,17 @@ ScVbaWorksheet::Move( const uno::Any& Before, const uno::Any& After ) throw (uno
 
 	if (!(Before >>= xSheet) && !(After >>=xSheet)&& !(Before.hasValue()) && !(After.hasValue()))
 	{
-		uno::Reference<vba::XRange> xRange = getUsedRange();
+		uno::Reference< sheet::XSheetCellCursor > xSheetCellCursor = mxSheet->createCursor( );
+		uno::Reference<sheet::XUsedAreaCursor> xUsedCursor(xSheetCellCursor,uno::UNO_QUERY_THROW);
+        	uno::Reference< table::XCellRange > xRange1( xSheetCellCursor, uno::UNO_QUERY);
+		uno::Reference<vba::XRange> xRange =  new ScVbaRange(m_xContext, xRange1);
 		if (xRange.is())
 			xRange->Select();
-		rtl::OUString url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:Copy"));
-		dispatchRequests(mxModel,url);
+		implnCopy();
 		uno::Reference<frame::XModel> xModel = openNewDoc(aCurrSheetName);
 		if (xModel.is()) 
 		{
-			url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:Paste"));
-			dispatchRequests(xModel,url);
+			implnPaste();
 			Delete();
 		}
 		return ;
@@ -332,19 +287,19 @@ ScVbaWorksheet::Copy( const uno::Any& Before, const uno::Any& After ) throw (uno
 	rtl::OUString aSheetName;
 	uno::Reference<vba::XWorksheet> xSheet;
 	rtl::OUString aCurrSheetName =getName();
-
 	if (!(Before >>= xSheet) && !(After >>=xSheet)&& !(Before.hasValue()) && !(After.hasValue()))
 	{
-		uno::Reference<vba::XRange> xRange = getUsedRange();
+		uno::Reference< sheet::XSheetCellCursor > xSheetCellCursor = mxSheet->createCursor( );
+		uno::Reference<sheet::XUsedAreaCursor> xUsedCursor(xSheetCellCursor,uno::UNO_QUERY_THROW);
+        	uno::Reference< table::XCellRange > xRange1( xSheetCellCursor, uno::UNO_QUERY);
+		uno::Reference<vba::XRange> xRange =  new ScVbaRange(m_xContext, xRange1);
 		if (xRange.is())
 			xRange->Select();
-		rtl::OUString url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:Copy"));
-		dispatchRequests(mxModel,url);
+		implnCopy();
 		uno::Reference<frame::XModel> xModel = openNewDoc(aCurrSheetName);
 		if (xModel.is())
 		{
-			url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:Paste"));
-			dispatchRequests(xModel,url);
+			implnPaste();
 		}
 		return;
 	}
@@ -378,8 +333,7 @@ ScVbaWorksheet::Paste( const uno::Any& Destination, const uno::Any& Link ) throw
 	uno::Reference<vba::XRange> xRange;
 	if (Destination >>= xRange)
 		xRange->Select();
-	rtl::OUString url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:Paste"));
-	dispatchRequests(mxModel,url);
+	implnPaste();
 }
 
 void 

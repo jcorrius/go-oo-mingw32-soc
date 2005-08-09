@@ -45,8 +45,8 @@
                         throw (com::sun::star::uno::RuntimeException);
         virtual ::com::sun::star::uno::Reference< ::org::openoffice::vba::XWorkbook > SAL_CALL getActiveWorkbook() throw (::com::sun::star::uno::RuntimeException);
         virtual ::com::sun::star::uno::Reference< ::org::openoffice::vba::XWorksheet > SAL_CALL getActiveSheet() throw (::com::sun::star::uno::RuntimeException);
-        virtual ::com::sun::star::uno::Reference< ::org::openoffice::vba::XWorksheets > SAL_CALL getWorkSheets() throw (::com::sun::star::uno::RuntimeException);
-        virtual ::com::sun::star::uno::Reference< ::org::openoffice::vba::XWorkbooks > SAL_CALL getWorkBooks() throw (::com::sun::star::uno::RuntimeException);
+        virtual ::com::sun::star::uno::Any SAL_CALL WorkSheets(const com::sun::star::uno::Any& aIndex ) throw (::com::sun::star::uno::RuntimeException);
+        virtual ::com::sun::star::uno::Any SAL_CALL WorkBooks(const com::sun::star::uno::Any& aIndex ) throw (::com::sun::star::uno::RuntimeException);
 
 	virtual ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Any > SAL_CALL getGlobals(  ) throw (::com::sun::star::uno::RuntimeException);
 

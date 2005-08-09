@@ -11,7 +11,7 @@ class ScTableSheetsObj;
 
 typedef  ::cppu::WeakImplHelper1< org::openoffice::vba::XFont > ScVbaFont_BASE;
 
-class ScVbaFont : public org::openoffice::vba::XFont
+class ScVbaFont : public ScVbaFont_BASE 
 {
     uno::Reference< beans::XPropertySet > mxFont;
 public:

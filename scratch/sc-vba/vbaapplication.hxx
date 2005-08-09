@@ -21,7 +21,8 @@ public:
     // XApplication
     virtual uno::Reference< vba::XRange > getSelection() throw (uno::RuntimeException);
     virtual uno::Reference< vba::XWorkbook > getActiveWorkbook() throw (uno::RuntimeException);
-	virtual uno::Reference< vba::XWorkbooks > getWorkbooks() throw (uno::RuntimeException);
+	virtual uno::Reference< vba::XRange > getActiveCell() throw (uno::RuntimeException);
+	virtual uno::Any SAL_CALL Workbooks( const uno::Any& aIndex ) throw (uno::RuntimeException);
 };
 
 #endif /* SC_VBA_APPLICATION_HXX */

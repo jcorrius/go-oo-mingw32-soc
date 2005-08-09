@@ -42,7 +42,6 @@ ScVbaWorkbook::getActiveSheet() throw (uno::RuntimeException)
 	uno::Reference< sheet::XSpreadsheetView > xSpreadsheet(
 			mxModel->getCurrentController(), uno::UNO_QUERY_THROW );
 
-	//return uno::Reference< vba::XWorksheet >( new ScVbaWorksheet( m_xContext,xSpreadsheet->getActiveSheet() ,mxModel ));
 	uno::Reference< vba::XWorksheet > xWrkSt( new ScVbaWorksheet( m_xContext,xSpreadsheet->getActiveSheet() ,mxModel ));
 
 	if ( xWrkSt.is() )
@@ -52,14 +51,19 @@ ScVbaWorkbook::getActiveSheet() throw (uno::RuntimeException)
 	return xWrkSt;
 }
 
-uno::Reference< vba::XWorksheets >
-ScVbaWorkbook::getWorkSheets() throw (uno::RuntimeException)
+uno::Any SAL_CALL
+ScVbaWorkbook::Worksheets( const uno::Any& aIndex ) throw (uno::RuntimeException)
 {
         uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( mxModel, uno::UNO_QUERY );
        	uno::Reference<sheet::XSpreadsheets> xSheets = xSpreadDoc->getSheets();
 
-	return uno::Reference< vba::XWorksheets >( new ScVbaWorksheets(m_xContext,
-		xSheets) );
+	uno::Reference< vba::XWorksheets > xWorkSheets( new ScVbaWorksheets(m_xContext,
+		mxModel) );
+	if (  aIndex.getValueTypeClass() == uno::TypeClass_VOID )
+	{
+		return uno::Any( xWorkSheets );	
+	}
+	return uno::Any( xWorkSheets->Item( aIndex ) );
 }
 
 void
