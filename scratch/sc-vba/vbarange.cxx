@@ -51,13 +51,16 @@ uno::Any
 ScVbaRange::getValue() throw (::com::sun::star::uno::RuntimeException)
 {
 	uno::Reference< table::XCell > xCell = mxRange->getCellByPosition( 0, 0 );
-	double fValue = xCell->getValue();
-	if( fValue == 0 )
+	table::CellContentType eType = xCell->getType();
+	if( eType == table::CellContentType_VALUE )
+		return uno::Any( xCell->getValue() );
+	if( eType == table::CellContentType_TEXT )
 	{
-		uno::Reference< text::XTextRange > xTextRange(mxRange, uno::UNO_QUERY);
+		uno::Reference< text::XTextRange > xTextRange(mxRange, ::uno::UNO_QUERY);
 		return ( uno::Any ) xTextRange->getString();
 	}
-	return ( uno::Any ) fValue;
+	if( eType == table::CellContentType_EMPTY )
+		return uno::Any( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("") ) );
 }
 
 void
@@ -234,13 +237,18 @@ uno::Reference< vba::XRange >
 ScVbaRange::Offset( const ::uno::Any &nRowOff, const uno::Any &nColOff ) throw (uno::RuntimeException)
 {
 	sal_Int16 nRowOffset = 0, nColOffset = 0;
-	nRowOff >>= nRowOffset;
-	nColOff >>= nColOffset;
-	uno::Reference< sheet::XSheetCellRange > xSheetCellRange(mxRange, uno::UNO_QUERY);
+	sal_Bool bIsRowOffset = nRowOff >>= nRowOffset, bIsColumnOffset = nColOff >>= nColOffset;
+	if( !bIsRowOffset && !bIsColumnOffset )
+		return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, mxRange ) );
+	if( !nRowOffset || !nColOffset )
+		throw uno::RuntimeException(
+			::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ": Invalid RowIndex or ColumnIndex" ) ),
+			uno::Reference< XInterface> () );
+	uno::Reference< sheet::XSheetCellRange > xSheetCellRange(mxRange, ::uno::UNO_QUERY);
 	uno::Reference< sheet::XSpreadsheet > xSheet = xSheetCellRange->getSpreadsheet();
-	uno::Reference< sheet::XCellRangeAddressable > xCellRangeAddressable(mxRange, uno::UNO_QUERY);
+	uno::Reference< sheet::XCellRangeAddressable > xCellRangeAddressable(mxRange, ::uno::UNO_QUERY);
 	uno::Reference< table::XCellRange > xRange(xSheet, uno::UNO_QUERY);
-	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xRange->getCellRangeByPosition( 
+	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xRange->getCellRangeByPosition(
 					xCellRangeAddressable->getRangeAddress().StartColumn + nColOffset,
 					xCellRangeAddressable->getRangeAddress().StartRow + nRowOffset,
 					xCellRangeAddressable->getRangeAddress().EndColumn + nColOffset,
@@ -360,21 +368,32 @@ ScVbaRange::Font() throw (uno::RuntimeException)
 uno::Reference< vba::XRange >
 ScVbaRange::Cells( const uno::Any &nRowIndex, const uno::Any &nColumnIndex ) throw(uno::RuntimeException)
 {
-	long nRow = 0, nCol = 0;
-	sal_Bool bIsIndex =	nRowIndex >>= nRow, bIsColumnIndex = nColumnIndex >>= nCol;
+	long nRow = 0, nColumn = 0;
+	sal_Bool bIsIndex = nRowIndex >>= nRow, bIsColumnIndex = nColumnIndex >>= nColumn;
 	if( !bIsIndex && !bIsColumnIndex ) // .Cells
 		return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, mxRange ) );
+	if( !nRow )
+		throw uno::RuntimeException(
+			::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ": Invalid RowIndex ") ),
+			uno::Reference< XInterface >() );
 	if( bIsIndex && !bIsColumnIndex ) // .Cells(n)
 	{
-		int nIndex = nRow;
+		int nIndex = --nRow;
 		uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, ::uno::UNO_QUERY);
 		int nColCount = xColumnRowRange->getColumns()->getCount();
 		nRow = nIndex / nColCount;
-		nCol = nIndex % nColCount;
+		nColumn = nIndex % nColCount;
+		return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, mxRange->getCellRangeByPosition( nColumn, nRow,
+											nColumn, nRow ) ) );
 	}
-	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, mxRange->getCellRangeByPosition( nCol, nRow, nCol, nRow ) ) );
+	if( !nColumn )
+		throw uno::RuntimeException(
+			::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ": Invalid ColumnIndex" ) ),
+			uno::Reference< XInterface >() );
+	--nRow, --nColumn;
+	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, mxRange->getCellRangeByPosition( nColumn, nRow,
+										nColumn, nRow ) ) );
 }
-
 void
 ScVbaRange::Select() throw (uno::RuntimeException)
 {

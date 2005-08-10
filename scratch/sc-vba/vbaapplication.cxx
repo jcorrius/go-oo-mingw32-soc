@@ -1,19 +1,15 @@
 #include <sfx2/objsh.hxx>
 
-#include<com/sun/star/sheet/XCellRangeAddressable.hpp>
-#include<com/sun/star/sheet/XCellAddressable.hpp>
-#include<com/sun/star/table/XCell.hpp>
-#include<com/sun/star/table/XCellRange.hpp>
 #include<com/sun/star/sheet/XSpreadsheetView.hpp>
 #include<com/sun/star/view/XSelectionSupplier.hpp>
-#include<com/sun/star/sheet/XViewPane.hpp>
-#include<com/sun/star/table/CellRangeAddress.hpp>
 
 #include "vbaapplication.hxx"
 #include "vbaworkbooks.hxx"
 #include "vbaworkbook.hxx"
 #include "vbaworksheets.hxx"
 #include "vbarange.hxx"
+
+#include "tabvwsh.hxx"
 
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
@@ -64,20 +60,22 @@ uno::Reference< vba::XRange >
 ScVbaApplication::getSelection() throw (uno::RuntimeException)
 {
 	uno::Reference< frame::XModel > xModel( m_xDesktop->getCurrentComponent(), uno::UNO_QUERY );
-                                                                                                                             
-    uno::Reference< table::XCellRange > xRange( xModel->getCurrentSelection(), ::uno::UNO_QUERY);
-
+	uno::Reference< table::XCellRange > xRange( xModel->getCurrentSelection(), ::uno::UNO_QUERY);
 	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xRange ) );
 }
 
 uno::Reference< vba::XRange >
 ScVbaApplication::getActiveCell() throw (uno::RuntimeException )
 {
-    uno::Reference< frame::XModel > xModel( m_xDesktop->getCurrentComponent(), uno::UNO_QUERY );
+	uno::Reference< frame::XModel > xModel( m_xDesktop->getCurrentComponent(), uno::UNO_QUERY_THROW );
+	uno::Reference< sheet::XSpreadsheetView > xView( xModel->getCurrentController(), uno::UNO_QUERY_THROW );
+	uno::Reference< table::XCellRange > xRange( xView->getActiveSheet(), ::uno::UNO_QUERY_THROW);
                                                                                                                              
-    uno::Reference< table::XCellRange > xRange( xModel->getCurrentSelection(), ::uno::UNO_QUERY);
-                                                                                                                             
-    return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xRange ) );
+	ScTabViewShell* pViewShell = ScTabViewShell::GetActiveViewShell();
+	sal_Int32 nCursorX, nCursorY;
+	nCursorX = sal_Int32(pViewShell->GetViewData()->GetCurX()), nCursorY = sal_Int32(pViewShell->GetViewData()->GetCurY());
+	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xRange->getCellRangeByPosition( nCursorX, nCursorY, 
+										nCursorX, nCursorY ) ) ); 
 }
 
 uno::Any SAL_CALL
