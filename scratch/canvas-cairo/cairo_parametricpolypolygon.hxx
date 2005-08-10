@@ -89,6 +89,8 @@
 #include <tools/color.hxx>
 #endif
 
+#include "cairo_cairo.hxx"
+
 class OutputDevice;
 class PolyPolygon;
 
@@ -129,7 +131,6 @@ namespace cairocanvas
                                                                  const ::com::sun::star::geometry::RealRectangle2D&	boundRect,
                                                                  const ::com::sun::star::uno::Reference< 
 	                                                             	 ::com::sun::star::rendering::XGraphicDevice >& xDevice );
-
         /// Dispose all internal references
         virtual void SAL_CALL disposing();
 
@@ -143,13 +144,7 @@ namespace cairocanvas
         virtual sal_Bool SAL_CALL supportsService( const ::rtl::OUString& ServiceName ) throw (::com::sun::star::uno::RuntimeException);
         virtual ::com::sun::star::uno::Sequence< ::rtl::OUString > SAL_CALL getSupportedServiceNames(  ) throw (::com::sun::star::uno::RuntimeException);
 
-        bool fill( OutputDevice&											rOutDev,
-                   OutputDevice*											p2ndOutDev,
-                   const PolyPolygon& 										rPoly,
-                   const ::com::sun::star::rendering::ViewState& 	viewState, 
-                   const ::com::sun::star::rendering::RenderState&	renderState,
-                   const ::com::sun::star::rendering::Texture&	    texture,
-                   int 														nTransparency ) const;
+	::cairo::Pattern* getPattern(::cairo::Matrix& rMatrix);
 
     protected:
         ~ParametricPolyPolygon(); // we're a ref-counted UNO class. _We_ destroy ourselves.
@@ -163,44 +158,12 @@ namespace cairocanvas
         {
             GRADIENT_LINEAR,
             GRADIENT_AXIAL,
-            GRADIENT_POLYGON
+            GRADIENT_ELLIPTICAL,
+            GRADIENT_RECTANGULAR,
         };
 
         /// Private, because objects can only be created from the static factories
-        ParametricPolyPolygon( const ::basegfx::B2DPolygon& rGradientPoly,
-                               const ::Color& 				rColor1,
-                               const ::Color& 				rColor2 );
-        ParametricPolyPolygon( const ::basegfx::B2DPolygon& rGradientPoly,
-                               const ::Color& 				rColor1,
-                               const ::Color& 				rColor2,
-                               double						nAspectRatio );
-        ParametricPolyPolygon( GradientType	  eType,
-                               const ::Color& rColor1,
-                               const ::Color& rColor2 );
-
-        void fillLinearGradient( OutputDevice&					rOutDev,
-                                 const ::basegfx::B2DHomMatrix&	rTextureTransform,
-                                 const ::Rectangle&				rBounds,
-                                 int							nStepCount,
-                                 bool							bFillNonOverlapping ) const;
-
-        void fillAxialGradient( OutputDevice&					rOutDev,
-                                const ::basegfx::B2DHomMatrix&	rTextureTransform,
-                                const ::Rectangle&				rBounds,
-                                int								nStepCount,
-                                bool							bFillNonOverlapping ) const;
-
-        void fillPolygonalGradient( OutputDevice&					rOutDev,
-                                    const ::basegfx::B2DHomMatrix&	rTextureTransform,
-                                    const ::Rectangle&				rBounds,
-                                    int								nStepCount,
-                                    bool							bFillNonOverlapping ) const;
-
-        void fill( OutputDevice&					rOutDev,
-                   const ::basegfx::B2DHomMatrix&	rTextureTransform,
-                   const ::Rectangle&				rBounds,
-                   int								nStepCount,
-                   bool								bFillNonOverlapping ) const;
+        ParametricPolyPolygon( GradientType eType, const ::com::sun::star::uno::Sequence< double >& rColor1, const ::com::sun::star::uno::Sequence< double >& rColor2, double nAspectRatio = 1);
 
 
         /// Polygon gradient shape
@@ -209,11 +172,9 @@ namespace cairocanvas
         /// Aspect ratio of gradient, affects scaling of innermost gradient polygon
         const double				mnAspectRatio;
 
-        /// First gradient color 
-        const ::Color				maColor1;
-
-        /// Second gradient color
-        const ::Color				maColor2;
+	// start and end gradient colors
+	::com::sun::star::uno::Sequence< double > maColor1;
+	::com::sun::star::uno::Sequence< double > maColor2;
 
         /// Type of gradient to render (as e.g. linear grads are not represented by maGradientPoly)
         const GradientType			meType;

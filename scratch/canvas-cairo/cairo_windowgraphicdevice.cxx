@@ -463,18 +463,21 @@ namespace cairocanvas
 	return pSurface;
     }
 
-    Size WindowGraphicDevice::getSurfaceSize()
+    Size WindowGraphicDevice::getSurfaceSize() const
     {
 	return mpOutputWindow->GetOutputSizePixel();
     }
 
-    Surface* WindowGraphicDevice::getSimilarSurface( Size aSize, Content aContent )
+    Surface* WindowGraphicDevice::getSimilarSurface( Size aSize, Content aContent ) const
     {
 	OSL_TRACE( "called WindowGraphicDevice::getSimilarSurface %d x %d\n", aSize.Width(), aSize.Height() );
-	return cairo_surface_create_similar( getSurface(), aContent, aSize.Width(), aSize.Height() );
+	if( mpWindowSurface )
+	    return cairo_surface_create_similar( mpWindowSurface, aContent, aSize.Width(), aSize.Height() );
+
+	return NULL;
     }
 
-    Surface* WindowGraphicDevice::getSimilarSurface( Content aContent )
+    Surface* WindowGraphicDevice::getSimilarSurface( Content aContent ) const
     {
 	return getSimilarSurface( getSurfaceSize(), aContent );
     }

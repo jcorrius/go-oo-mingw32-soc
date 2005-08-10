@@ -11,6 +11,7 @@ typedef cairo_t Cairo;
 typedef cairo_matrix_t Matrix;
 typedef cairo_format_t Format;
 typedef cairo_content_t Content;
+typedef cairo_pattern_t Pattern;
 
 }
 

@@ -2,9 +2,9 @@
 #
 #   $RCSfile: makefile.mk,v $
 #
-#   $Revision: 1.7 $
+#   $Revision: 1.8 $
 #
-#   last change: $Author: brosenk $ $Date: 2005/08/01 11:29:10 $
+#   last change: $Author: rodo $ $Date: 2005/08/10 15:12:03 $
 #
 #   The Contents of this file are made available subject to the terms of
 #   either of the following licenses
@@ -81,7 +81,11 @@ DLLPRE =
 
 .IF "$(GUI)"=="UNX"
 
+.IF "$(SYSTEM_CAIRO)" == "YES"
+CFLAGS+=$(CAIRO_CFLAGS)
+.ELSE
 CFLAGS+=-I$(SOLARINCDIR)/cairo
+.ENDIF
 
 .IF "$(verbose)"!="" || "$(VERBOSE)"!=""
 CDEFS+= -DVERBOSE
@@ -113,7 +117,13 @@ SLOFILES =		$(SLO)$/cairo_spritecanvas.obj \
 
 SHL1TARGET=$(TARGET).uno
 
-SHL1STDLIBS= $(TOOLSLIB) $(CPPULIB) $(SALLIB) $(VCLLIB) $(COMPHELPERLIB) $(CPPUHELPERLIB) $(BASEGFXLIB) $(CANVASTOOLSLIB) $(GOODIESLIB) -L$(SOLARLIBDIR) -lcairo -lpixman -lX11
+SHL1STDLIBS= $(TOOLSLIB) $(CPPULIB) $(SALLIB) $(VCLLIB) $(COMPHELPERLIB) $(CPPUHELPERLIB) $(BASEGFXLIB) $(CANVASTOOLSLIB) $(GOODIESLIB) -L$(SOLARLIBDIR)
+
+.IF "$(SYSTEM_CAIRO)" == "YES"
+SHL1STDLIBS+= $(CAIRO_LIBS)
+.ELSE
+SHL1STDLIBS+= -lcairo -lpixman -lX11
+.ENDIF
 
 SHL1IMPLIB=i$(TARGET)
 SHL1LIBS=$(SLB)$/$(TARGET).lib

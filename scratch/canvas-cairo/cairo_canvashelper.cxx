@@ -337,7 +337,7 @@ namespace cairocanvas
 			cairo_matrix_multiply( &aScaledTextureMatrix, &aTextureMatrix, &aScaleMatrix );
 			cairo_matrix_invert( &aScaledTextureMatrix );
 
-#if 0
+#if 1
 			// workaround for X/glitz and/or cairo bug
 			// we create big enough temporary surface, copy texture bitmap there and use it for the pattern
 			// it only happens on enlargening matrices with REPEAT mode enabled
@@ -345,13 +345,16 @@ namespace cairocanvas
 			Cairo* pTmpCairo = cairo_create( pTmpSurface );
 			cairo_set_source_surface( pTmpCairo, pSurface, 0, 0 );
 			cairo_paint( pTmpCairo );
-#endif
+			pPattern = cairo_pattern_create_for_surface( pTmpSurface );
+#else
 
-			// use pTmpSurface to enable the workaround
 			// we don't care about repeat mode yet, so the workaround is disabled for now
 			pPattern = cairo_pattern_create_for_surface( pSurface );
+#endif
+ 			if( aTexture.RepeatModeX == rendering::TexturingMode::REPEAT &&
+			    aTexture.RepeatModeY == rendering::TexturingMode::REPEAT )
+			    cairo_pattern_set_extend( pPattern, CAIRO_EXTEND_REPEAT );
 			cairo_pattern_set_matrix( pPattern, &aScaledTextureMatrix );
-			//cairo_pattern_set_extend( pPattern, CAIRO_EXTEND_REPEAT );
 
 			cairo_set_source( pCairo, pPattern );
 			cairo_fill( pCairo );
@@ -361,7 +364,7 @@ namespace cairocanvas
 			cairo_pattern_destroy( pPattern );
 			cairo_surface_destroy( pSurface );
 
-#if 0
+#if 1
 			cairo_destroy( pTmpCairo );
 			cairo_surface_destroy( pTmpSurface );
 #endif
@@ -369,6 +372,39 @@ namespace cairocanvas
 
 		    if( data )
 			free( data );
+		} else if( aTexture.Gradient.is() ) {
+		    uno::Reference< lang::XServiceInfo > xRef( aTexture.Gradient, uno::UNO_QUERY );
+
+		    OSL_TRACE( "gradient fill\n" );
+		    if( xRef.is() && 
+			xRef->getImplementationName().equals( ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( PARAMETRICPOLYPOLYGON_IMPLEMENTATION_NAME ) ) ) ) {
+				// TODO(Q1): Maybe use dynamic_cast here
+				
+				// TODO(E1): Return value
+				// TODO(F1): FillRule
+			OSL_TRACE( "known implementation\n" );
+
+			ParametricPolyPolygon* pPolyImpl = static_cast<ParametricPolyPolygon*>( aTexture.Gradient.get() );
+			::com::sun::star::geometry::AffineMatrix2D aTransform( aTexture.AffineTransform );
+			Matrix aTextureMatrix;
+
+			cairo_matrix_init( &aTextureMatrix,
+					   aTransform.m00, aTransform.m10, aTransform.m01,
+					   aTransform.m11, aTransform.m02, aTransform.m12);
+			Pattern* pPattern = pPolyImpl->getPattern( aTextureMatrix );
+
+			if( pPattern ) {
+			    OSL_TRACE( "filling with pattern\n" );
+
+			    cairo_save( pCairo );
+
+			    cairo_set_source( pCairo, pPattern );
+			    cairo_fill( pCairo );
+			    cairo_restore( pCairo );
+
+			    cairo_pattern_destroy( pPattern );
+			}
+		    }
 		}
 	    } else
 		cairo_fill( pCairo );

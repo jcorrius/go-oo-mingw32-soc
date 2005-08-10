@@ -173,12 +173,12 @@ namespace cairocanvas
 
         OutputDevice* getOutDev() const;
 
-	Size getSurfaceSize();
+	Size getSurfaceSize() const;
         ::cairo::Surface* getSurface();
 	::cairo::Surface* getSurface( Bitmap& rBitmap );
 
-        ::cairo::Surface* getSimilarSurface( ::cairo::Content aContent = ::cairo::CAIRO_CONTENT_COLOR_ALPHA );
-        ::cairo::Surface* getSimilarSurface( Size aSize, ::cairo::Content aContent = ::cairo::CAIRO_CONTENT_COLOR_ALPHA );
+        ::cairo::Surface* getSimilarSurface( ::cairo::Content aContent = ::cairo::CAIRO_CONTENT_COLOR_ALPHA ) const;
+        ::cairo::Surface* getSimilarSurface( Size aSize, ::cairo::Content aContent = ::cairo::CAIRO_CONTENT_COLOR_ALPHA ) const;
 
 	void flush();
 
