@@ -730,13 +730,32 @@ So I don't think BasicScriptListener::firing_impl() gets called for every event 
 
 ehhh no, not done in firing_impl no breakpoint hit, ok time for another breakpoint.
 
+
+#16 0x441327ed in SfxObjectShell::CallXScript () from /export/nld/OOBUILD/ooo-build/InstallDir/program/libsfx680li.so
+#17 0x46c181f8 in FmXUndoEnvironment::firing_Impl (this=0x486bd538, evt=@0xbfffde00, pSyncRet=0x0) at /export/nld/OOBUILD/ooo-build/build/src680-m121/svx/source/form/fmundo.cxx:972
+#18 0x46c18492 in FmXUndoEnvironment::firing (this=0x486bd538, evt=@0xbfffde00) at /export/nld/OOBUILD/ooo-build/build/src680-m121/svx/source/form/fmundo.cxx:990
+#19 0x40bb7fb4 in comphelper::AttacherAllListener_Impl::firing () from /export/nld/OOBUILD/ooo-build/InstallDir/program/libcomphelp4gcc3.so
+#20 0x480718cd in comp_EventAttacher::FilterAllListenerImpl::firing (this=0x48a5bbd0, Event=@0xbfffdeb0) at /export/nld/OOBUILD/ooo-build/build/src680-m121/eventattacher/source/eventattacher.cxx:549
+#21 0x4806ff9d in comp_EventAttacher::InvocationToAllListenerMapper::invoke (this=0x48272a98, FunctionName=@0x485f48ec, Params=@0xbfffdfe0, OutParamIndex=@0xbfffdfc0, OutParam=@0xbfffdfa0) at /export/nld/OOBUILD/ooo-build/build/src680-m121/eventattacher/source/eventattacher.cxx:249
+#22 0x4487c55d in Lcopy () from /export/nld/OOBUILD/ooo-build/InstallDir/program/libgcc3_uno.so
+#23 0x4487c8dc in (anonymous namespace)::cpp_call () from /export/nld/OOBUILD/ooo-build/InstallDir/program/libgcc3_uno.so
+#24 0x4487cdf6 in bridges::cpp_uno::shared::UnoInterfaceProxy::dispatch () from /export/nld/OOBUILD/ooo-build/InstallDir/program/libgcc3_uno.so
+#25 0x482899ca in stoc_invadp::AdapterImpl::invoke () from /export/nld/OOBUILD/ooo-build/InstallDir/program/invocadapt.uno.so
+#26 0x4828a09e in adapter_dispatch.2 () from /export/nld/OOBUILD/ooo-build/InstallDir/program/invocadapt.uno.so
+#27 0x4487bb83 in (anonymous namespace)::cpp2uno_call () from /export/nld/OOBUILD/ooo-build/InstallDir/program/libgcc3_uno.so
+#28 0x4487c0ed in cpp_vtable_call () from /export/nld/OOBUILD/ooo-build/InstallDir/program/libgcc3_uno.so
+#29 0x4487cfda in privateSnippetExecutorVoid () from /export/nld/OOBUILD/ooo-build/InstallDir/program/libgcc3_uno.so
+
+
 #32 0x47e3c493 in frm::OButtonControl::OnClick (this=0x47c40d70) at /export/nld/OOBUILD/ooo-build/build/src680-m121/forms/source/component/Button.cxx:408
 #33 0x47e3c21c in frm::OButtonControl::LinkStubOnClick (pThis=0x47c40d70, pCaller=0x0) at /export/nld/OOBUILD/ooo-build/build/src680-m121/forms/source/component/Button.cxx:373
 #34 0x403548ff in ImplHandleUserEvent () from /export/nld/OOBUILD/ooo-build/InstallDir/program/libvcl680li.so
 #35 0x4035542f in ImplWindowFrameProc () from /export/nld/OOBUILD/ooo-build/InstallDir/program/libvcl680li.so
 #36 0x4231a367 in SalDisplay::DispatchInternalEvent () from /export/nld/OOBUILD/ooo-build/InstallDir/program/libvclplug_gen680li.so
 
-so OnClick() does
+Ah, so firing really happens in svx/source/form/fmundo.cxx:972
+
+and OnClick() does
 400                         while(aIter.hasMoreElements() )
  401                         {
  406                                 try
@@ -748,10 +767,10 @@ so OnClick() does
  418                                         DBG_ERROR( "OButtonControl::OnClick: caught a exception other than RuntimeException!" );
  419                                 }
 
-aIter is an Enumeration of XActionListener(s), where do these get set up, how can we be piggyback one?
+OnClick and other routhines for other controls ( which are eventAttachers ) call appropriate handles (registered via registerScriptEventDescriptor )
+so aIter get popluated from the attachermanager
 
-ok the XActionListener impl is added via OButtonControl::addActionListener() thats
-what populates aIter, ok so where is that called from
+trace of  populating aIter, ok so where is that called from
 
 (gdb) where
 
@@ -772,11 +791,167 @@ what populates aIter, ok so where is that called from
 
 ms/source/misc/InterfaceContainer.cxx:1165 is where attach is called
 
-but I see there is a addScriptListener, and I bet its this listeren is the one that fires
+
+eventattachManager.cxx ( comphelper/source/ )
+has a registerScriptEvent method, it takes and index and a ScriptEventDescriptor
+
+for each index ( there are a number of event attachers )
+	* event attachers are attached using the attach method for a specified index
+
+each event attacher has a list of Sequence of 
+AttachedObject_Impl 
+	each AttachedObject_Impl has a member  aAttachedListenerSeq ( a sequence of XAllListener(s) )	
+
+every time a ScriptEvent is added for each aAttachedObjectImpl in the sequence a  new XEventListener is added to the aAttachedListenerSeq
+ Reference< XAllListener > xAll =
+            new AttacherAllListener_Impl( this, ScriptEvent.ScriptType, ScriptEvent.ScriptCode );
+  pArray[nPos] = xAttacher->attachSingleEventListener( (*aObjIt).xTarget, xAll,
+                        (*aObjIt).aHelper, ScriptEvent.ListenerType,
+                        ScriptEvent.AddListenerParam, ScriptEvent.EventMethod );
+xAttacher is and instance of "com.sun.star.script.EventAttacher"
 
 
-FmXFormXXXX.cxx stuff all defined in
-svx/source/form/*
+ok where is registerScriptEvent method called
+#1  0x40c15d9e in comphelper::ImplEventAttacherManager::registerScriptEvents (this=0x47daf030, nIndex=0, ScriptEvents=@0x4870eb9c) at /export/nld/OOBUILD/ooo-build/build/src680-m121/comphelper/source/eventattachermgr/eventattachermgr.cxx:666
+/export/nld/OOBUILD/ooo-build/build/src680-m121/comphelper/source/eventattachermgr/eventattachermgr.cxx:666:24659:beg:0x40c15d9e
+(gdb) up
+#2  0x47e76ce4 in frm::OInterfaceContainer::registerScriptEvents (this=0x47dae750, nIndex=0, aScriptEvents=@0x4870eb9c) at /export/nld/OOBUILD/ooo-build/build/src680-m121/forms/source/misc/InterfaceContainer.cxx:1121
+/export/nld/OOBUILD/ooo-build/build/src680-m121/forms/source/misc/InterfaceContainer.cxx:1121:38059:beg:0x47e76ce4
+(gdb) up
+#3  0x45244723 in xmloff::ODefaultEventAttacherManager::setEvents () from /export/nld/OOBUILD/ooo-build/InstallDir/program/libxo680li.so
+called from ms/source/misc/InterfaceContainer.cxx:1121
+
+in xmloff/source/forms/eventimport.cxx
+
+OInterfaceContainer ( in the file above ) seems to be a high level wrapper around the eventattacher(mgr) functionality. Also it seems to do other stuff like do transfomations to/from older formats like so5.2 so6.0. ( see TransformEventToxxx )
+
+you can see there is a call from xmloff ( from where the content.xml file got processed ) event definitions for scripts in FormControls are contained in the xml in content.xml
+
+
+
+another route to this is from the propcontroller dialog for form controls
+e.g. when you right-click on a form control in design mode, you are presented with dialog for setting up events for the control.
+
+
+to set up a ScriptEventDesciptor you need to know
+the 
+
+a) ListenerType 	 listener type as string, same as listener-XIdlClass.getName().
+b) EventMethod 	event method as string.
+c) AddListenerParam 	data to be used if the addListener method needs an additional parameter.
+d) ScriptType 	type of the script language as string; for example, "Basic" or "StarScript".
+e) ScriptCode 	script code as string (the code has to correspond with the language defined by ScriptType).
+
+so for a button the when initiating event is described by
+
+ListenerType from xmloff is XActionListener
+EventMethod from xmloff is actionPerformed
+ScriptCode from xmloff is vnd.sun.star.script:Standard.Module1.OnButtonPress?language=Basic&location=document
+ScriptType from xmloff is Script
+
+some code also in xmloff re. older script binding e.g. which if memory serves me correctly would have had format 
+
+ListenerType from xmloff is XActionListener
+EventMethod from xmloff is actionPerformed
+ScriptCode from document:Standard.Module1.OnButtonPress
+ScriptType from StarBasic
+
+finding out the ListenerTypes and evenmethods could do this by introspection I guess ( ok this is whats done in extenstions/source/propctrl/propcontroller/formcontroller.cxx )
+
+ok, so thats not a problem, finding out what the valid events are is, these are
+hardcoded "somewhere" gotta find out where, xmloff import/export maybe?
+we need to find out what the valid set of events for each control is, then generated the appopriate vba-basic subroutine names for them
+
+
+some code to dump all available listeners and their methods ( works if you put it in svx/source/form/fmctrler.cxx
+
+will need this to set up the ScriptDescriptor. 
+
+
+void DumpListenerClassAndMethods( const Reference< XControl >& xControl )
+{
+
+	Reference< XIntrospection > xIntrospection( 
+		::comphelper::getProcessServiceFactory()->createInstance( 
+			::rtl::OUString::createFromAscii( 
+				"com.sun.star.beans.Introspection" ) ), UNO_QUERY );
+	
+	Reference< XIntrospectionAccess > xIntrospectionAccess;
+
+	if  ( xIntrospection.is() )
+	{
+			xIntrospectionAccess = xIntrospection->inspect( 
+				makeAny( xControl ) );
+			Sequence< Type >	aModelListeners;
+			aModelListeners = xIntrospectionAccess->getSupportedListeners();
+			const Type* pListeners = aModelListeners.getConstArray();
+			sal_Int32 nLength = aModelListeners.getLength();
+			OSL_TRACE("** There are %d listener types for this control",
+				nLength );	
+			for ( sal_Int32 i = 0; i < nLength; ++i )
+			{
+				const Type* pListener = (pListeners + i );
+				String aListenerClassName = pListener->getTypeName();
+					OSL_TRACE("***Listener %d class name is %s", i,
+						(const sal_Char *) rtl::OUStringToOString( aListenerClassName, RTL_TEXTENCODING_UTF8 )  );	
+				Sequence< ::rtl::OUString> sMeths = getEventMethods(*pListener);
+				sal_Int32 methLen = sMeths.getLength();
+				const ::rtl::OUString* pMeths = sMeths.getConstArray();
+				for ( sal_Int32 c = 0; c < methLen; ++c )
+				{
+					OSL_TRACE("\t meth[%d] is %s", c,
+						(const sal_Char *) rtl::OUStringToOString( *(pMeths+c), RTL_TEXTENCODING_UTF8 )  );	
+			
+				}
+			
+				
+			}
+
+			
+			
+	}
+
+
+}
+
+seems there is a namereplace service somewhere that does the translation between the name thats in the xml to the listerer/listener-method pair
+
+e.g. a binding in the document is 
+
+<office:event-listeners><script:event-listener script:language="ooo:script" script:event-name="form:performaction" xlink:href="vnd.sun.star.script:Standard.Module1.OnButtonPress?language=Basic&amp;location=document"/></office:event-listeners>
+
+so form:performaction gets translated to XActionListener:actionPerformed ( I think )
+
+yes its done in a convoluted way in 
+
+xmloff/source/script/XMLEventImportHelper.cxx:184
+	XMLEventName aEventName( nMacroPrefix, sMacroName );
+	NameMap::iterator aNameIter = pEventNameMap->find(aEventName);
+	if (aNameIter != pEventNameMap->end()) 
+
+if the find above succeed it will have succeed in translating performaction to XActionListener:performAction the map used I guess is set up based on the "form:" prefix somewhere.
+
+
+need to check if multiple bindings can happen. also where propcontroler will
+zap any manual bindings made or display them. Maybe we need 2 eventattachermgr?
+
+multiple bindings are ok, but 
+1) scripts that I register if they don't exist cause error msg to be displayed
+	need either to supress that or ( maybe the old way behaves the same e.g.
+	fails silently ) blame the scripting framework for this, old work haunts you eventually :-)
+
+2) scripts for the basic event bindings will appear in the property browser, not sure I like that, additionally only one binding can appear ( even if there are multiple bindings )  ,,,,,
+
+I see 2 approaches, 
+	* jimme in some code that only will populate sub_mycontrolNameclick() for event ( or whatever the vba equiv handler is called only if a binding doesn't exist. This at least lets user override these default handlers that I need to set up to behave like vba. Bad news is they still will appear in the property editor for the control :-( ( could be confusing ) also means only one mechanism supported so for a specific event you can have the normal binding you make in the ui or you have the default sub_mycontrol....() you cant have both.
+		* we could hide display of the default bindings based on their name
+	* use a second attachermanager just for the vba bindings ( don't know how hard that is to do, see alot of special handling code for the exist attachmanager )
+		* this would be a cleaner solution, no polution of the events defined for a form controller that a user would see. You could have both types of bindings simulataniously.
+
+In anycase there is alot of stuff that needs to be done regardless of which approach is taken
+	* for a given control you need to be able to determine the listeners and the listener methods that are valid. ( note introspection gives you all of the possible listerns and methods but not the ones supported via the ui which is a subset )
+	* need to find the name of the sub_routine to be called for an event, afaik this is based on both the type of control and the name of the control. So for each control on the vba side need to accumulate the supported events and the names of the sub-routines that would get called, on the oo side get the listeners and methods for a control. Need then to see which events are common and generate some sort of translation mechanism on a per control basis. Need to be able to generate the sub_routine name on the fly based on the type of control and the instance ( e.g. the name of the control Button1..n etc )
+
 
 ---------------------------------------------
 
