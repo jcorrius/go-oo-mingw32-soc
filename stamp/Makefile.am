@@ -5,4 +5,5 @@ CLEANFILES=unpack \
 	   patch.apply \
 	   prebuild \
 	   build.tools \
+	   build.extra.translations \
 	   build
