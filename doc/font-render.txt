@@ -1,0 +1,94 @@
+* Making font rendering identical across OO.o / Gtk+ et. al.
+
+
+** We're missing gui-ft-set-hint.patch from 1.1.x
+   + but not the whole story,
+   + we never followed the font settings ...
+
+pangoft2.c (pango_ft2_font_get_face):
+    + sets ft2font->load_flags:
+      ft2font->load_flags = 0;
+      if (antialias)
+        ft2font->load_flags |= FT_LOAD_NO_BITMAP;
+      else
+	ft2font->load_flags |= FT_LOAD_TARGET_MONO;
+      if (!hinting)
+        ft2font->load_flags |= FT_LOAD_NO_HINTING;
+      if (autohint)
+        ft2font->load_flags |= FT_LOAD_FORCE_AUTOHINT;
+
+    + where these booleans are from fontconfig (apparently):
+  pattern = fcfont->font_pattern;
+      if (FcPatternGetBool (pattern,
+                            FC_ANTIALIAS, 0, &antialias) != FcResultMatch)
+	antialias = FcTrue;
+
+    + We use the load_flags in:
+	pango_ft2_font_get_glyph_info ->
+	pangofc-font.c (pango_fc_font_get_raw_extents):
+	    -> (get_per_char):
+		+ FT_Load_Glyph ...
+
+    + Also to render in:
+	+ pangoft2-render.c (pango_ft2_font_render_glyph):
+	FT_Load_Glyph (face, glyph_index, ft2font->load_flags);
+	FT_Render_Glyph (face->glyph,
+		       (ft2font->load_flags & FT_LOAD_TARGET_MONO ?
+			ft_render_mode_mono : ft_render_mode_normal));
+
+
+** XSettings infrastructure:
+
+    + from gtk+/gdk/x11/*settings*
+    + to gtk+/gdk/gtksettings.c - where we get a property change
+	+ GtkSettings *settings = gtk_settings_get_for_screen (gdk_drawable_get_screen (event->window));
+	+ just calls: gtk_rc_reset_styles ...
+
+    + gnome-control-center's font capplet sets gconf keys
+	+ gnome-settings-daemon syncs them to xsettings
+	    + xrdb -query: shows all settings.
+
+      xsettings_manager_set_int (managers [i], "Xft/Antialias", settings->antialias);
+      xsettings_manager_set_int (managers [i], "Xft/Hinting", settings->hinting);
+      xsettings_manager_set_string (managers [i], "Xft/HintStyle", settings->hintstyle);
+      xsettings_manager_set_int (managers [i], "Xft/DPI", settings->dpi);
+      xsettings_manager_set_string (managers [i], "Xft/RGBA", settings->rgba);
+
+
+** Not using Xft ? - just ft2 (?)
+    + gedit2 seems to have both pangoxft and pangoft2 linked (oddly) 
+
+
+** Another piece:
+    + init_xft_settings (GdkScreen *screen):
+	+ sets screen_x11->xft_antialias etc.
+	+ does it once only ? xft_init ?
+    + got from _gdk_x11_xft_setting
+	+ called from gdk_screen_get_setting
+	    + "gtk-xft-antialias" eg.
+
+** Are we using Cario to render text ?
+    + if so - we're loading & linking
+	(pango): pangox, pangoft2, pangocairo, pangoxft
+
+
+** Hacking OO.o:
+    + vcl/source/glyphs/gcach_ftyp.cxx:
+	+ only caller of FT_Load_Glyph
+	+ only caller of FT_Glyph_To_Bitmap
+	    + cf. pango_ft2_font_render_glyph's FT_Render_Glyph
+	    + [ same approach at root ]
+	+ *all* in FreetypeServerFont sub-class
+
+    + => need a helper object to store / sync the Xft.	
+      settings state, updated on XSettings (style change)
+      update [ prolly should be more discerning wrt.
+               settings changed / gui updates ]
+	     [ or at least stop the toolbar re-building
+	       slowly unless absolutely necessary ]
+
+    + mask the 'flags' with the system state for the glyphs
+      before we load/render ( in various places ).
+
+
+
