@@ -1,0 +1,157 @@
+Index: source/glyphs/gcach_ftyp.cxx
+===================================================================
+RCS file: /cvs/gsl/vcl/source/glyphs/gcach_ftyp.cxx,v
+retrieving revision 1.114
+diff -u -p -u -r1.114 gcach_ftyp.cxx
+--- source/glyphs/gcach_ftyp.cxx	3 May 2005 14:10:32 -0000	1.114
++++ source/glyphs/gcach_ftyp.cxx	15 Aug 2005 14:33:14 -0000
+@@ -805,13 +805,13 @@ FreetypeServerFont::FreetypeServerFont( 
+ 
+     ApplyGSUB( rFSD );
+ 
+-    // TODO: query GASP table for load flags
+-    mnLoadFlags = FT_LOAD_DEFAULT;
++	mnLoadFlags = Application::GetSettings().GetStyleSettings().GetFontRenderFlags();
+ 
+     if( (mnSin != 0) && (mnCos != 0) ) // hinting for 0/90/180/270 degrees only
+         mnLoadFlags |= FT_LOAD_NO_HINTING;
+     mnLoadFlags |= FT_LOAD_IGNORE_GLOBAL_ADVANCE_WIDTH; //#88334#
+ 
++#ifndef UNX
+ #if (FTVERSION >= 2005) || defined(TT_CONFIG_OPTION_BYTECODE_INTERPRETER)
+     if( nPrioAutoHint <= 0 )
+ #endif
+@@ -822,6 +822,7 @@ FreetypeServerFont::FreetypeServerFont( 
+     if( !(mnLoadFlags & FT_LOAD_NO_HINTING) && (nFTVERSION >= 2103))
+         mnLoadFlags |= FT_LOAD_TARGET_LIGHT;
+ #endif
++#endif
+ 
+     if( ((mnCos != 0) && (mnSin != 0)) || (nPrioEmbedded <= 0) )
+         mnLoadFlags |= FT_LOAD_NO_BITMAP;
+Index: unx/gtk/gdi/makefile.mk
+===================================================================
+RCS file: /cvs/gsl/vcl/unx/gtk/gdi/makefile.mk,v
+retrieving revision 1.5
+diff -u -p -u -r1.5 makefile.mk
+--- unx/gtk/gdi/makefile.mk	13 Jan 2005 18:09:28 -0000	1.5
++++ unx/gtk/gdi/makefile.mk	15 Aug 2005 14:33:14 -0000
+@@ -82,6 +82,10 @@ dummy:
+ 
+ .IF "$(ENABLE_GTK)" != ""
+ 
++.IF "$(SYSTEM_FREETYPE)" == "YES"
++CFLAGS+=-DSYSTEM_FREETYPE $(FREETYPE_CFLAGS)
++.ENDIF
++
+ PKGCONFIG_MODULES=gtk+-2.0
+ .INCLUDE : pkg_config.mk
+ 
+Index: unx/gtk/gdi/salnativewidgets-gtk.cxx
+===================================================================
+RCS file: /cvs/gsl/vcl/unx/gtk/gdi/salnativewidgets-gtk.cxx,v
+retrieving revision 1.15
+diff -u -p -u -r1.15 salnativewidgets-gtk.cxx
+--- unx/gtk/gdi/salnativewidgets-gtk.cxx	6 Jul 2005 09:21:55 -0000	1.15
++++ unx/gtk/gdi/salnativewidgets-gtk.cxx	15 Aug 2005 14:33:15 -0000
+@@ -78,6 +78,8 @@
+ #include <saldisp.hxx>
+ #endif
+ 
++#include <ft2build.h>
++#include FT_FREETYPE_H
+ 
+ #ifndef _OSL_CONDITN_HXX_
+ #include <osl/mutex.hxx>
+@@ -2823,6 +2879,55 @@ void printStyleColors( GtkStyle* pStyle 
+ }
+ #endif
+ 
++static void
++updateFontDetails( StyleSettings &rStyleSet, GtkWidget *widget )
++{
++	GtkSettings *pSettings;
++	long nLoadFlags = FT_LOAD_DEFAULT;
++	gint nAntiAlias;
++	gint nHinting;
++	gchar *pHintStyle;
++
++	pSettings = gtk_widget_get_settings (widget);
++	g_object_get (pSettings,
++				  "gtk-xft-antialias", &nAntiAlias,
++				  "gtk-xft-hinting",   &nHinting,
++				  "gtk-xft-hintstyle", &pHintStyle,
++				  NULL);
++  
++	if( nHinting >= 0 && !nHinting )
++		nLoadFlags |= FT_LOAD_NO_HINTING;
++	else if( pHintStyle )
++    {
++		if( !strcmp (pHintStyle, "hintnone") )
++			nLoadFlags |= FT_LOAD_NO_HINTING;
++		else if( !strcmp( pHintStyle, "hintslight") ||
++				 !strcmp( pHintStyle, "hintmedium") )
++			nLoadFlags |= FT_LOAD_TARGET_LIGHT;
++		else // if( !strcmp( pHintStyle, "hintfull" ) )
++			nLoadFlags |= FT_LOAD_TARGET_NORMAL;
++		g_free (pHintStyle);
++    }
++  
++  if (nAntiAlias >= 0 && !nAntiAlias)
++  {
++#ifdef FT_LOAD_TARGET_MONO
++	nLoadFlags |= FT_LOAD_TARGET_MONO;
++#endif
++	nLoadFlags |= FT_LOAD_MONOCHROME;
++  }
++  // FIXME: we need to fetch: "gtk-xft-rgba" enum:
++  // one of: rgb, bgr, vrgb, vbgr, use
++  // FT_LOAD_TARGET_LCD & _LCD_V & do more work.
++  // Hopefully we can move to using cairo for font
++  // rendering in future though.
++  else
++	nLoadFlags |= FT_LOAD_NO_BITMAP;
++
++  fprintf( stderr, "Generated render flags of 0x%x\n", nLoadFlags );
++  rStyleSet.SetFontRenderFlags( nLoadFlags );
++}
++
+ void GtkSalGraphics::updateSettings( AllSettings& rSettings )
+ {
+     // get the widgets in place
+@@ -3011,6 +3115,8 @@ void GtkSalGraphics::updateSettings( All
+     //  FIXME: need some way of fetching toolbar icon size.
+ //	aStyleSet.SetToolbarIconSize( STYLE_TOOLBAR_ICONSIZE_SMALL );
+ 
++	updateFontDetails( aStyleSet, m_pWindow );
++	
+     // finally update the collected settings
+     rSettings.SetStyleSettings( aStyleSet );
+ }
+
+Index: inc/settings.hxx
+===================================================================
+RCS file: /cvs/gsl/vcl/inc/settings.hxx,v
+retrieving revision 1.29
+diff -u -p -u -r1.29 settings.hxx
+--- inc/settings.hxx	31 Jan 2005 13:19:19 -0000	1.29
++++ inc/settings.hxx	15 Aug 2005 14:50:03 -0000
+@@ -447,6 +447,7 @@ private:
+     long                            mnIconHorzSpace;
+     long                            mnIconVertSpace;
+     long                            mnAntialiasedMin;
++	long							mnFontRenderFlags;
+     ULONG                           mnCursorBlinkTime;
+     ULONG                           mnDragFullOptions;
+     ULONG                           mnAnimationOptions;
+@@ -910,6 +918,10 @@ public:
+                                         { CopyData(); mpData->mnAntialiasedMin = nMinPixel; }
+     ULONG                           GetAntialiasingMinPixelHeight() const
+                                         { return mpData->mnAntialiasedMin; }
++    void                            SetFontRenderFlags( long nFlags )
++                                        { CopyData(); mpData->mnFontRenderFlags = nFlags; }
++    ULONG                           GetFontRenderFlags() const
++                                        { return mpData->mnFontRenderFlags; }
+ 
+     void                            SetOptions( ULONG nOptions )
+                                         { CopyData(); mpData->mnOptions = nOptions; }
