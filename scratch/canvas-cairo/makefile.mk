@@ -2,9 +2,9 @@
 #
 #   $RCSfile: makefile.mk,v $
 #
-#   $Revision: 1.8 $
+#   $Revision: 1.9 $
 #
-#   last change: $Author: rodo $ $Date: 2005/08/10 15:12:03 $
+#   last change: $Author: rengelhard $ $Date: 2005/08/16 23:28:20 $
 #
 #   The Contents of this file are made available subject to the terms of
 #   either of the following licenses
@@ -120,7 +120,7 @@ SHL1TARGET=$(TARGET).uno
 SHL1STDLIBS= $(TOOLSLIB) $(CPPULIB) $(SALLIB) $(VCLLIB) $(COMPHELPERLIB) $(CPPUHELPERLIB) $(BASEGFXLIB) $(CANVASTOOLSLIB) $(GOODIESLIB) -L$(SOLARLIBDIR)
 
 .IF "$(SYSTEM_CAIRO)" == "YES"
-SHL1STDLIBS+= $(CAIRO_LIBS)
+SHL1STDLIBS+= $(CAIRO_LIBS) -lX11
 .ELSE
 SHL1STDLIBS+= -lcairo -lpixman -lX11
 .ENDIF
