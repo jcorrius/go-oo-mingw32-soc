@@ -179,6 +179,7 @@ namespace cairocanvas
 
         ::cairo::Surface* getSimilarSurface( ::cairo::Content aContent = ::cairo::CAIRO_CONTENT_COLOR_ALPHA ) const;
         ::cairo::Surface* getSimilarSurface( Size aSize, ::cairo::Content aContent = ::cairo::CAIRO_CONTENT_COLOR_ALPHA ) const;
+	::cairo::Surface* getSimilarSurfaceNoConst( Size aSize, ::cairo::Content aContent = ::cairo::CAIRO_CONTENT_COLOR_ALPHA );
 
 	void flush();
 

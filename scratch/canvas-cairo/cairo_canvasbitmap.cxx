@@ -85,7 +85,7 @@ namespace cairocanvas
 
 	OSL_TRACE("canvas bitmap constructor\n");
 
-	mpCairo = cairo_create( xDevice->getSimilarSurface( rSize, bAlphaBitmap ? CAIRO_CONTENT_COLOR_ALPHA : CAIRO_CONTENT_COLOR ) );
+	mpCairo = cairo_create( xDevice->getSimilarSurfaceNoConst( rSize, bAlphaBitmap ? CAIRO_CONTENT_COLOR_ALPHA : CAIRO_CONTENT_COLOR ) );
 	maCanvasHelper.setCairo( mpCairo );
 	maCanvasHelper.setDevice( rDevice );
     }
@@ -97,7 +97,7 @@ namespace cairocanvas
 
 	OSL_TRACE("canvas bitmap constructor\n");
 
-	mpCairo = cairo_create( xDevice->getSimilarSurface( ::vcl::unotools::sizeFromRealSize2D(rSize), CAIRO_CONTENT_COLOR ) );
+	mpCairo = cairo_create( xDevice->getSimilarSurfaceNoConst( ::vcl::unotools::sizeFromRealSize2D(rSize), CAIRO_CONTENT_COLOR ) );
 	maCanvasHelper.setCairo( mpCairo );
 	maCanvasHelper.setDevice( rDevice );
 

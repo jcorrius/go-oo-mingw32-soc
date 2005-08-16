@@ -468,11 +468,26 @@ namespace cairocanvas
 	return mpOutputWindow->GetOutputSizePixel();
     }
 
+    // NoConst version is always able to create similar surface, the
+    // const version cannot modify this instance and thus can provide
+    // similar surface only once mpWindowSurface is already created
+    Surface* WindowGraphicDevice::getSimilarSurfaceNoConst( Size aSize, Content aContent )
+    {
+	OSL_TRACE( "called WindowGraphicDevice::getSimilarSurfaceNoConst %d x %d\n", aSize.Width(), aSize.Height() );
+	if( ! mpWindowSurface )
+	    getSurface();
+
+	return cairo_surface_create_similar( mpWindowSurface, aContent, aSize.Width(), aSize.Height() );
+
+    }
+
     Surface* WindowGraphicDevice::getSimilarSurface( Size aSize, Content aContent ) const
     {
 	OSL_TRACE( "called WindowGraphicDevice::getSimilarSurface %d x %d\n", aSize.Width(), aSize.Height() );
 	if( mpWindowSurface )
 	    return cairo_surface_create_similar( mpWindowSurface, aContent, aSize.Width(), aSize.Height() );
+
+	OSL_TRACE( "warning: called WindowGraphicDevice::getSimilarSurface before mpWindowSurface created. use getSimilarSurfaceNoConst if possible" );
 
 	return NULL;
     }

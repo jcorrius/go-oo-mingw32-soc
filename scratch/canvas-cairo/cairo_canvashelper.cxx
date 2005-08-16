@@ -180,9 +180,12 @@ namespace cairocanvas
 
     void CanvasHelper::disposing()
     {
-	OSL_TRACE("canvas helper disposing\n");
+	OSL_TRACE("canvas helper disposing %p\n", this);
         mxDevice.reset();
         mp2ndOutDev.reset();
+ 	if( mpCairo )
+ 	    cairo_destroy( mpCairo );
+ 	mpCairo = NULL;
     }
 
     void CanvasHelper::setGraphicDevice( const WindowGraphicDevice::ImplRef& rDevice )
@@ -192,7 +195,14 @@ namespace cairocanvas
 
     void CanvasHelper::setCairo( Cairo* pCairo )
     {
-	mpCairo = pCairo;
+	OSL_TRACE("set canvas helper %p Cairo to %p", this, pCairo);
+	if( pCairo != mpCairo ) {
+	    if( pCairo )
+		cairo_reference( pCairo );
+	    if( mpCairo )
+		cairo_destroy( mpCairo );
+	    mpCairo = pCairo;
+	}
     }
 
     void CanvasHelper::setBackgroundOutDev( const OutDevProviderSharedPtr& rOutDev )
@@ -275,7 +285,7 @@ namespace cairocanvas
                                  const rendering::ViewState& 	viewState,
                                  const rendering::RenderState& 	renderState )
     {
-	if(mpCairo) {
+	if( mpCairo ) {
 	    cairo_save( mpCairo );
 
 	    cairo_set_line_width( mpCairo, 1 );
@@ -287,7 +297,8 @@ namespace cairocanvas
 	    cairo_stroke( mpCairo );
 
 	    cairo_restore( mpCairo );
-	}
+	} else
+	    OSL_TRACE ("CanvasHelper called after it was disposed");
     }
 
     void CanvasHelper::drawBezier( const rendering::XCanvas& 			rCanvas, 
@@ -296,7 +307,7 @@ namespace cairocanvas
                                    const rendering::ViewState& 			viewState,
                                    const rendering::RenderState& 		renderState )
     {
-	if( mpCairo )
+	if( mpCairo ) {
 	    cairo_save( mpCairo );
 
 	    cairo_set_line_width( mpCairo, 1 );
@@ -307,6 +318,8 @@ namespace cairocanvas
 	    cairo_stroke( mpCairo );
 	    
 	    cairo_restore( mpCairo );
+	} else
+	    OSL_TRACE ("CanvasHelper called after it was disposed");
     }
 
     void CanvasHelper::doOperation( Operation aOperation, Cairo* pCairo, sal_uInt32 nPolygonIndex ) const
@@ -337,7 +350,8 @@ namespace cairocanvas
 			cairo_matrix_multiply( &aScaledTextureMatrix, &aTextureMatrix, &aScaleMatrix );
 			cairo_matrix_invert( &aScaledTextureMatrix );
 
-#if 1
+#if 0
+			OSL_TRACE("slow workaround");
 			// workaround for X/glitz and/or cairo bug
 			// we create big enough temporary surface, copy texture bitmap there and use it for the pattern
 			// it only happens on enlargening matrices with REPEAT mode enabled
@@ -364,7 +378,7 @@ namespace cairocanvas
 			cairo_pattern_destroy( pPattern );
 			cairo_surface_destroy( pSurface );
 
-#if 1
+#if 0
 			cairo_destroy( pTmpCairo );
 			cairo_surface_destroy( pTmpSurface );
 #endif
@@ -601,7 +615,8 @@ namespace cairocanvas
 	    drawPolyPolygonPath( xPolyPolygon, Stroke );
 	    
 	    cairo_restore( mpCairo );
-	}
+	} else
+	    OSL_TRACE ("CanvasHelper called after it was disposed");
 
 	// TODO(P1): Provide caching here.
 	return uno::Reference< rendering::XCachedPrimitive >(NULL);
@@ -613,53 +628,56 @@ namespace cairocanvas
                                                                                    const rendering::RenderState& 						renderState,
                                                                                    const rendering::StrokeAttributes& 					strokeAttributes )
     {
-	cairo_save( mpCairo );
+	if( mpCairo ) {
+	    cairo_save( mpCairo );
 
-	useStates( viewState, renderState, true );
+	    useStates( viewState, renderState, true );
 
-	cairo_set_line_width( mpCairo, strokeAttributes.StrokeWidth );
-	cairo_set_miter_limit( mpCairo, strokeAttributes.MiterLimit );
+	    cairo_set_line_width( mpCairo, strokeAttributes.StrokeWidth );
+	    cairo_set_miter_limit( mpCairo, strokeAttributes.MiterLimit );
 
-	// FIXME: cairo doesn't handle end cap so far (rodo)
-	switch( strokeAttributes.StartCapType ) {
-	case rendering::PathCapType::BUTT:
-	    cairo_set_line_cap( mpCairo, CAIRO_LINE_CAP_BUTT );
-	break;
-	case rendering::PathCapType::ROUND:
-	    cairo_set_line_cap( mpCairo, CAIRO_LINE_CAP_ROUND );
-	break;
-	case rendering::PathCapType::SQUARE:
-	    cairo_set_line_cap( mpCairo, CAIRO_LINE_CAP_SQUARE );
-	break;
-	}
+	    // FIXME: cairo doesn't handle end cap so far (rodo)
+	    switch( strokeAttributes.StartCapType ) {
+	    case rendering::PathCapType::BUTT:
+		cairo_set_line_cap( mpCairo, CAIRO_LINE_CAP_BUTT );
+		break;
+	    case rendering::PathCapType::ROUND:
+		cairo_set_line_cap( mpCairo, CAIRO_LINE_CAP_ROUND );
+		break;
+	    case rendering::PathCapType::SQUARE:
+		cairo_set_line_cap( mpCairo, CAIRO_LINE_CAP_SQUARE );
+		break;
+	    }
 
-	switch( strokeAttributes.JoinType ) {
-	    // cairo doesn't have join type NONE so we use MITTER as it's pretty close
-	case rendering::PathJoinType::NONE:
-	case rendering::PathJoinType::MITER:
-	    cairo_set_line_join( mpCairo, CAIRO_LINE_JOIN_MITER );
-	break;
-	case rendering::PathJoinType::ROUND:
-	    cairo_set_line_join( mpCairo, CAIRO_LINE_JOIN_ROUND );
-	break;
-	case rendering::PathJoinType::BEVEL:
-	    cairo_set_line_join( mpCairo, CAIRO_LINE_JOIN_BEVEL );
-	break;
-	}
+	    switch( strokeAttributes.JoinType ) {
+		// cairo doesn't have join type NONE so we use MITTER as it's pretty close
+	    case rendering::PathJoinType::NONE:
+	    case rendering::PathJoinType::MITER:
+		cairo_set_line_join( mpCairo, CAIRO_LINE_JOIN_MITER );
+		break;
+	    case rendering::PathJoinType::ROUND:
+		cairo_set_line_join( mpCairo, CAIRO_LINE_JOIN_ROUND );
+		break;
+	    case rendering::PathJoinType::BEVEL:
+		cairo_set_line_join( mpCairo, CAIRO_LINE_JOIN_BEVEL );
+		break;
+	    }
 
-	if( strokeAttributes.DashArray.getLength() > 0 ) {
-	    double* pDashArray = new double[ strokeAttributes.DashArray.getLength() ];
-	    for( sal_Int32 i=0; i<strokeAttributes.DashArray.getLength(); i++ )
-		pDashArray[i]=strokeAttributes.DashArray[i];
-	    cairo_set_dash( mpCairo, pDashArray, strokeAttributes.DashArray.getLength(), 0 );
-	    delete[] pDashArray;
-	}
+	    if( strokeAttributes.DashArray.getLength() > 0 ) {
+		double* pDashArray = new double[ strokeAttributes.DashArray.getLength() ];
+		for( sal_Int32 i=0; i<strokeAttributes.DashArray.getLength(); i++ )
+		    pDashArray[i]=strokeAttributes.DashArray[i];
+		cairo_set_dash( mpCairo, pDashArray, strokeAttributes.DashArray.getLength(), 0 );
+		delete[] pDashArray;
+	    }
 
-	// TODO(rodo) use LineArray of strokeAttributes
+	    // TODO(rodo) use LineArray of strokeAttributes
 
-	drawPolyPolygonPath( xPolyPolygon, Stroke );
+	    drawPolyPolygonPath( xPolyPolygon, Stroke );
 
-	cairo_restore( mpCairo );
+	    cairo_restore( mpCairo );
+	} else
+	    OSL_TRACE ("CanvasHelper called after it was disposed");
 
         // TODO(P1): Provide caching here.
         return uno::Reference< rendering::XCachedPrimitive >(NULL);
@@ -707,7 +725,8 @@ namespace cairocanvas
 	    drawPolyPolygonPath( xPolyPolygon, Fill );
 	    
 	    cairo_restore( mpCairo );
-	}
+	} else
+	    OSL_TRACE ("CanvasHelper called after it was disposed");
 
         // TODO(P1): Provide caching here.
         return uno::Reference< rendering::XCachedPrimitive >(NULL);
@@ -734,7 +753,8 @@ namespace cairocanvas
             // TODO(F2): font properties and font matrix
             return uno::Reference< rendering::XCanvasFont >(
                     new CanvasFont( fontRequest, extraFontProperties, fontMatrix, mpCairo ) );
-        }
+        } else
+	    OSL_TRACE ("CanvasHelper called after it was disposed");
 
         return uno::Reference< rendering::XCanvasFont >();
     }
@@ -754,7 +774,7 @@ namespace cairocanvas
                                                                           const rendering::RenderState& 					renderState,
                                                                           sal_Int8				 							textDirection )
     {
-	 if (mpCairo) {
+	 if ( mpCairo ) {
 		 cairo_save( mpCairo );
 
 		 useStates( viewState, renderState, true );
@@ -764,10 +784,10 @@ namespace cairocanvas
 		 cairo_show_text( mpCairo, ::rtl::OUStringToOString( text.Text, RTL_TEXTENCODING_UTF8 ) );
 
 		 cairo_restore( mpCairo );
-	 }
+	 } else
+	    OSL_TRACE ("CanvasHelper called after it was disposed");
 
-
-        return uno::Reference< rendering::XCachedPrimitive >(NULL);
+	 return uno::Reference< rendering::XCachedPrimitive >(NULL);
     }
 
     uno::Reference< rendering::XCachedPrimitive > CanvasHelper::drawTextLayout( const rendering::XCanvas& 						rCanvas, 
@@ -778,7 +798,7 @@ namespace cairocanvas
          CHECK_AND_THROW( xLayoutedText.is(),
                           "CanvasHelper::drawTextLayout(): layout is NULL");
 
-	 if (mpCairo) {
+	 if( mpCairo ) {
 	     cairo_save( mpCairo );
 
 	     uno::Reference< lang::XServiceInfo > xRef( xLayoutedText,
@@ -800,9 +820,10 @@ namespace cairocanvas
 	     pTextLayout->draw( mpCairo );
 
 	     cairo_restore( mpCairo );
-	 }
+	 } else
+	    OSL_TRACE ("CanvasHelper called after it was disposed");
 
-        return uno::Reference< rendering::XCachedPrimitive >(NULL);
+	 return uno::Reference< rendering::XCachedPrimitive >(NULL);
     }
 
     uno::Reference< rendering::XCachedPrimitive > CanvasHelper::implDrawBitmap( const rendering::XCanvas& 					rCanvas, 
@@ -823,7 +844,8 @@ namespace cairocanvas
 	    cairo_set_source_surface( mpCairo, pSurface, 0, 0 );
 	    cairo_paint( mpCairo );
 	    cairo_restore( mpCairo );
-	}
+	} else
+	    OSL_TRACE ("CanvasHelper called after it was disposed");
 
 	if( pSurface )
 	    cairo_surface_destroy( pSurface );
@@ -888,8 +910,13 @@ namespace cairocanvas
     uno::Reference< rendering::XBitmap > CanvasHelper::getScaledBitmap( const geometry::RealSize2D& newSize, 
                                                                         sal_Bool 					beFast )
     {
-	Surface *pSurface = cairo_get_target( mpCairo );
-	return uno::Reference< rendering::XBitmap >( new CanvasBitmap( newSize, pSurface, mxDevice, beFast ) );
+	if( mpCairo ) {
+	    Surface *pSurface = cairo_get_target( mpCairo );
+	    return uno::Reference< rendering::XBitmap >( new CanvasBitmap( newSize, pSurface, mxDevice, beFast ) );
+	} else
+	    OSL_TRACE ("CanvasHelper called after it was disposed");
+
+	return uno::Reference< rendering::XBitmap >(); // we're disposed
     }
 
     uno::Sequence< sal_Int8 > CanvasHelper::getData( const geometry::IntegerRectangle2D& rect )

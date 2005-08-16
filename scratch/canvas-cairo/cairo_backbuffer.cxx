@@ -105,7 +105,7 @@ namespace cairocanvas
 
     void BackBuffer::createSurface()
     {
-	Surface* pNewSurface = mxGraphicDevice->getSimilarSurface( maSize, maContent );
+	Surface* pNewSurface = mxGraphicDevice->getSimilarSurfaceNoConst( maSize, maContent );
 
 	if( mpSurface )
 	    cairo_surface_destroy( mpSurface );
