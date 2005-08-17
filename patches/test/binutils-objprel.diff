@@ -1,0 +1,190 @@
+--- binutils-2.16/bfd/elf32-i386.c	2005-02-06 18:11:29.000000000 +0000
++++ binutils.current/bfd/elf32-i386.c	2005-08-17 11:33:49.000000000 +0100
+@@ -24,6 +24,9 @@
+ #include "libbfd.h"
+ #include "elf-bfd.h"
+ 
++/* define for old behavior */
++#undef SANE_PLT
++
+ /* 386 uses REL relocations instead of RELA.  */
+ #define USE_REL	1
+ 
+@@ -495,6 +498,36 @@
+   0, 0, 0, 0	/* replaced with offset to start of .plt.  */
+ };
+ 
++
++#ifndef SANE_PLT
++/*
++   PLT0:  pushl GOT+4
++          jmp   *GOT+8
++          ....
++   PLTi:  jmp   *GOT+offset_of_got_entry
++          pushl $relocation_record_for_got_entry
++          jmp   PLT0
++*/
++
++static const bfd_byte elf_i386_pic_plt0_entry[PLT_ENTRY_SIZE] =
++{
++  0x68, 0, 0, 0, 0,	/* pushl $junk */
++  0x68, 0, 0, 0, 0,	/* pushl $junk */
++  0x90, 0x90, 0x90, 0x90, 0x90, 0x90 /* pad out to 16 bytes.  */
++};
++
++/* Subsequent entries in a PIC procedure linkage table look like this.  */
++
++static const bfd_byte elf_i386_pic_plt_entry[PLT_ENTRY_SIZE] =
++{
++  0xe9, 0xfc, 0xff, 0xff, 0xff,         /* jmp xxx@PC */
++  0x68, 0, 0, 0, 0,                     /* push $junk */
++  0xe9,		/* jmp relative */
++  0, 0, 0, 0	/* replaced with offset to start of .plt.  */
++};
++
++#else /* SANE_PLT */
++
+ /* The first entry in a PIC procedure linkage table look like this.  */
+ 
+ static const bfd_byte elf_i386_pic_plt0_entry[PLT_ENTRY_SIZE] =
+@@ -515,6 +548,7 @@
+   0xe9,		/* jmp relative */
+   0, 0, 0, 0	/* replaced with offset to start of .plt.  */
+ };
++#endif
+ 
+ /* The i386 linker needs to keep track of the number of relocs that it
+    decides to copy as dynamic relocs in check_relocs for each symbol.
+@@ -552,7 +586,7 @@
+ #define GOT_TLS_IE_POS	5
+ #define GOT_TLS_IE_NEG	6
+ #define GOT_TLS_IE_BOTH 7
+-  unsigned char tls_type;
++  unsigned char tls_type : 7;
+ };
+ 
+ #define elf_i386_hash_entry(ent) ((struct elf_i386_link_hash_entry *)(ent))
+@@ -1524,6 +1558,10 @@
+ 	     will be placed in the .got section by the linker script.  */
+ 	  htab->sgotplt->size += 4;
+ 
++#ifndef SANE_PLT
++	  htab->srelgot->size += 2 * sizeof (Elf32_External_Rel);
++#endif
++
+ 	  /* We also need to make an entry in the .rel.plt section.  */
+ 	  htab->srelplt->size += sizeof (Elf32_External_Rel);
+ 	}
+@@ -2324,6 +2362,9 @@
+ 	      break;
+ 	    }
+ 
++	  /* FIXME: foo - this is where we go wrong ! - we need to
++	     emit a R_386_RELATIVE reloc - for this point ... PLUS
++	     an absolute ref [as currently] to the plt ... */
+ 	  relocation = (htab->splt->output_section->vma
+ 			+ htab->splt->output_offset
+ 			+ h->plt.offset);
+@@ -3034,21 +3075,46 @@
+ 	{
+ 	  memcpy (htab->splt->contents + h->plt.offset, elf_i386_pic_plt_entry,
+ 		  PLT_ENTRY_SIZE);
++#ifndef SANE_PLT
++	  /* Abs address of the plt slot */
++	  bfd_put_32 (output_bfd,
++		      (htab->sgotplt->output_section->vma
++		       + htab->sgotplt->output_offset
++		       + got_offset),
++		      htab->splt->contents + h->plt.offset + 1);
++#else
+ 	  bfd_put_32 (output_bfd, got_offset,
+ 		      htab->splt->contents + h->plt.offset + 2);
++#endif
+ 	}
+ 
+       bfd_put_32 (output_bfd, plt_index * sizeof (Elf32_External_Rel),
+-		  htab->splt->contents + h->plt.offset + 7);
++		  htab->splt->contents + h->plt.offset
++#ifndef SANE_PLT
++		  + 6
++#else
++		  + 7
++#endif
++		  );
+       bfd_put_32 (output_bfd, - (h->plt.offset + PLT_ENTRY_SIZE),
+-		  htab->splt->contents + h->plt.offset + 12);
+-
++		  htab->splt->contents + h->plt.offset
++#ifndef SANE_PLT
++		  + 11
++#else
++		  + 12
++#endif
++		  );
+       /* Fill in the entry in the global offset table.  */
+       bfd_put_32 (output_bfd,
+ 		  (htab->splt->output_section->vma
+ 		   + htab->splt->output_offset
+ 		   + h->plt.offset
+-		   + 6),
++#ifndef SANE_PLT
++		   + 6
++#else
++		   + 5
++#endif
++		   ),
+ 		  htab->sgotplt->contents + got_offset);
+ 
+       /* Fill in the entry in the .rel.plt section.  */
+@@ -3059,6 +3125,28 @@
+       loc = htab->srelplt->contents + plt_index * sizeof (Elf32_External_Rel);
+       bfd_elf32_swap_reloc_out (output_bfd, &rel, loc);
+ 
++#ifndef SANE_PLT
++{ // whack it randomly in srelgot
++    asection *s;
++    bfd_byte *loc;
++
++    s = htab->srelgot;
++    if (s == NULL)
++	abort ();
++
++    rel.r_offset = (htab->splt->output_section->vma
++			+ htab->splt->output_offset
++		        + h->plt.offset + 1);
++    rel.r_info = ELF32_R_INFO (0, R_386_RELATIVE);
++    loc = s->contents + s->reloc_count++ * sizeof (Elf32_External_Rel);
++    bfd_elf32_swap_reloc_out (output_bfd, &rel, loc);
++
++    rel.r_offset += 5;
++    loc = s->contents + s->reloc_count++ * sizeof (Elf32_External_Rel);
++    bfd_elf32_swap_reloc_out (output_bfd, &rel, loc);
++}
++#endif
++
+       if (!h->def_regular)
+ 	{
+ 	  /* Mark the symbol as undefined, rather than as defined in
+@@ -3248,8 +3336,22 @@
+       if (htab->splt && htab->splt->size > 0)
+ 	{
+ 	  if (info->shared)
++	  {
+ 	    memcpy (htab->splt->contents,
+ 		    elf_i386_pic_plt0_entry, PLT_ENTRY_SIZE);
++#ifndef SANE_PLT
++	    bfd_put_32 (output_bfd,
++			(htab->sgotplt->output_section->vma
++			 + htab->sgotplt->output_offset
++			 + 4),
++			htab->splt->contents + 1);
++	    bfd_put_32 (output_bfd,
++			(htab->sgotplt->output_section->vma
++			 + htab->sgotplt->output_offset
++			 + 8),
++			htab->splt->contents + 6);
++#endif
++	  }
+ 	  else
+ 	    {
+ 	      memcpy (htab->splt->contents,
