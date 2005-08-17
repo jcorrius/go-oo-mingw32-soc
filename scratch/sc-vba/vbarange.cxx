@@ -52,7 +52,7 @@ ScVbaRange::getValue() throw (::com::sun::star::uno::RuntimeException)
 {
 	uno::Reference< table::XCell > xCell = mxRange->getCellByPosition( 0, 0 );
 	table::CellContentType eType = xCell->getType();
-	if( eType == table::CellContentType_VALUE )
+	if( eType == table::CellContentType_VALUE || eType == table::CellContentType_FORMULA )
 		return uno::Any( xCell->getValue() );
 	if( eType == table::CellContentType_TEXT )
 	{
