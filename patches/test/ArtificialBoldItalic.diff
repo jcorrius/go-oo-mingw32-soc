@@ -1,0 +1,751 @@
+Index: psprint/inc/psprint/fontcache.hxx
+===================================================================
+RCS file: /cvs/gsl/psprint/inc/psprint/fontcache.hxx,v
+retrieving revision 1.5
+diff -u -r1.5 fontcache.hxx
+--- psprint/inc/psprint/fontcache.hxx	31 Jan 2005 08:58:41 -0000	1.5
++++ psprint/inc/psprint/fontcache.hxx	24 Aug 2005 14:34:56 -0000
+@@ -110,7 +110,6 @@
+ 
+     void copyPrintFont( const PrintFontManager::PrintFont* pFrom, PrintFontManager::PrintFont* pTo ) const;
+     bool equalsPrintFont( const PrintFontManager::PrintFont* pLeft, PrintFontManager::PrintFont* pRight ) const;
+-    PrintFontManager::PrintFont* clonePrintFont( const PrintFontManager::PrintFont* pFont ) const;
+ 
+     void createCacheDir( int nDirID );
+ public:
+@@ -130,6 +129,8 @@
+     void flush();
+ 
+     void updateDirTimestamp( int nDirID );
++
++    PrintFontManager::PrintFont* clonePrintFont( const PrintFontManager::PrintFont* pFont ) const;
+ };
+ 
+ } // namespace psp
+Index: psprint/inc/psprint/fontmanager.hxx
+===================================================================
+RCS file: /cvs/gsl/psprint/inc/psprint/fontmanager.hxx,v
+retrieving revision 1.22
+diff -u -r1.22 fontmanager.hxx
+--- psprint/inc/psprint/fontmanager.hxx	31 Jan 2005 08:58:54 -0000	1.22
++++ psprint/inc/psprint/fontmanager.hxx	24 Aug 2005 14:35:04 -0000
+@@ -243,6 +243,8 @@
+     KernPair() : first( 0 ), second( 0 ), kern_x( 0 ), kern_y( 0 ) {}
+ };
+ 
++class FontCache;
++
+ // a class to manage printable fonts
+ // aims are type1 and truetype fonts
+ 
+@@ -392,6 +394,7 @@
+     fontID                                      m_nNextFontID;
+     std::hash_map< fontID, PrintFont* >       m_aFonts;
+     std::hash_map< int, family::type >        m_aFamilyTypes;
++    std::hash_map< int,  int >                m_aFamilyStyles;
+     std::list< rtl::OUString >              m_aPrinterDrivers;
+     std::list< rtl::OString >               m_aFontDirectories;
+     std::list< int >							m_aPrivateFontDirectories;
+@@ -434,7 +437,7 @@
+ 
+     PrintFont* getFont( fontID nID ) const
+     {
+-        std::hash_map< int, PrintFont* >::const_iterator it;
++        std::hash_map< fontID, PrintFont* >::const_iterator it;
+         it = m_aFonts.find( nID );
+         return it == m_aFonts.end() ? NULL : it->second;
+     }
+@@ -466,7 +469,14 @@
+ 
+     PrintFontManager();
+     ~PrintFontManager();
++
++    PrintFont* makeArtificialFont(const PrintFont* pFont, int type ) const ;
++    void updateFamilyStyles( PrintFontManager::PrintFont* pFont );
++    void createAndProcessArtFont( PrintFont* pFont, int type );
++
+ public:
++
++
+     static PrintFontManager& get(); // one instance only
+ 
+     int addFontFile( const rtl::OString& rFileName, int nFaceNum ); 
+Index: psprint/source/fontmanager/fontmanager.cxx
+===================================================================
+RCS file: /cvs/gsl/psprint/source/fontmanager/fontmanager.cxx,v
+retrieving revision 1.58
+diff -u -r1.58 fontmanager.cxx
+--- psprint/source/fontmanager/fontmanager.cxx	12 Apr 2005 12:11:17 -0000	1.58
++++ psprint/source/fontmanager/fontmanager.cxx	24 Aug 2005 15:05:45 -0000
+@@ -147,10 +147,117 @@
+ using namespace osl;
+ using namespace rtl;
+ 
++
+ /*
+  *  static helpers
+  */
+ 
++PrintFontManager::PrintFont* 
++PrintFontManager::makeArtificialFont(const PrintFont* pFont, int type ) const
++{
++    // type 0 = bold, 1 = italic, 2 = bold/italic
++    if ( type < 0 || type > 2 )
++        return NULL;
++    static const char* types[] = {"bold","italic","bold-italic" };
++    const ::rtl::OUString& fName =
++            m_pAtoms->getString( ATOM_FAMILYNAME, pFont->m_nFamilyName);
++
++    OUString sName(m_pAtoms->getString(
++        ATOM_PSNAME, pFont->m_nPSName), RTL_TEXTENCODING_UTF8 );
++    OSL_TRACE("Making artificial font for psname %s in family %s", 
++        ::rtl::OUStringToOString( sName,
++            RTL_TEXTENCODING_ASCII_US ).pData->buffer,
++        ::rtl::OUStringToOString( fName,
++            RTL_TEXTENCODING_ASCII_US ).pData->buffer, types[type] );
++    PrintFont* pArt = m_pFontCache->clonePrintFont(pFont);
++    switch (type)
++    {
++        case 0:    
++               {
++                   // Bold
++                   OSL_TRACE("Creating bold");
++                   pArt->m_eWeight = weight::Bold;
++	           pArt->m_nPSName = m_pAtoms->getAtom(ATOM_PSNAME, 
++                       sName.concat(OUString::createFromAscii("-Bold") ), sal_True );
++                   break;
++               }
++        case 1:   
++               {
++                   OSL_TRACE("Creating Italic");
++                   // Italic
++                   pArt->m_eItalic = italic::Italic;
++           	   pArt->m_nPSName = m_pAtoms->getAtom(ATOM_PSNAME, 
++                       sName.concat(OUString::createFromAscii("-Italic")), sal_True );
++                   break;
++               }
++        case 2:    
++               {
++                   OSL_TRACE("Creating Italic-Bold");
++                   // ItalicBold
++                   if ( pFont->m_eItalic == italic::Upright )
++                       pArt->m_eItalic = italic::Italic;
++                   if ( pFont->m_eWeight <= weight::Medium )
++                       pArt->m_eWeight = weight::Bold;
++                   pArt->m_nPSName = m_pAtoms->getAtom(ATOM_PSNAME, 
++                   sName.concat(OUString::createFromAscii("-ItalicBold") ), sal_True );
++                   break;
++               }
++        default:
++                   return NULL;
++    }
++    return pArt;
++}
++
++void PrintFontManager::updateFamilyStyles( PrintFontManager::PrintFont* pFont )
++{
++    int flags = m_aFamilyStyles[ pFont->m_nFamilyName ];
++    if ( pFont->m_eWeight > weight::Medium )
++    {
++        if ( pFont->m_eItalic > italic::Upright &&
++            pFont->m_eItalic < italic::Unknown )
++        {
++            flags = flags | 1;
++        }
++        else
++            flags = flags | 2; // bold   
++    } 
++    else if ( pFont->m_eItalic > italic::Upright &&
++            pFont->m_eItalic < italic::Unknown )
++    {
++        flags = flags | 4; //italic  
++    }     
++    m_aFamilyStyles[ pFont->m_nFamilyName ] = flags;
++}
++
++void PrintFontManager::createAndProcessArtFont( PrintFontManager::PrintFont* pFont, int type )
++{
++    PrintFontManager::PrintFont* result = NULL;
++    if ( pFont )
++    {
++        result = makeArtificialFont( pFont, type );
++        
++        if ( result )
++        {
++            fontID aFont = m_nNextFontID++;
++            if( result->m_eType == fonttype::Type1 )
++                m_aFontFileToFontID[ static_cast<Type1FontFile*>(result)->m_aFontFile ].insert( aFont );
++            else if( result->m_eType == fonttype::TrueType )
++                m_aFontFileToFontID[ static_cast<TrueTypeFontFile*>(result)->m_aFontFile ].insert( aFont );
++            else if( (result)->m_eType == fonttype::Builtin )
++                m_aFontFileToFontID[ static_cast<BuiltinFont*>(result)->m_aMetricFile ].insert( aFont );
++            m_aFonts[ aFont ] = result;
++            // track what family's have what styles {italic, bold, 
++            // italic-bold }
++            updateFamilyStyles( result); 
++            OSL_TRACE("added fontID %d for font file %s",
++                aFont, getFontFile( result ).getStr() );
++            // TODO there are times when we may need to pass true here
++            // TODO should really cache these items
++            //m_pFontCache->updateFontCacheEntry( result, false );
++        }
++        
++    }
++}
+ inline sal_uInt16 getUInt16BE( const sal_uInt8*& pBuffer )
+ {
+     sal_uInt16 nRet = (sal_uInt16)pBuffer[1] |
+@@ -1409,7 +1516,7 @@
+ fontID PrintFontManager::findFontBuiltinID( int nPSNameAtom ) const
+ {
+     fontID nID = 0;
+-    ::std::hash_map< int, PrintFont* >::const_iterator it;
++    ::std::hash_map< fontID, PrintFont* >::const_iterator it;
+     for( it = m_aFonts.begin(); nID == 0 && it != m_aFonts.end(); ++it )
+     {
+         if( it->second->m_eType == fonttype::Builtin &&
+@@ -1430,7 +1537,7 @@
+     {
+         for( ::std::set< fontID >::const_iterator font_it = set_it->second.begin(); font_it != set_it->second.end() && ! nID; ++font_it )
+         {
+-            ::std::hash_map< int, PrintFont* >::const_iterator it = m_aFonts.find( *font_it );
++            ::std::hash_map< fontID, PrintFont* >::const_iterator it = m_aFonts.find( *font_it );
+             if( it != m_aFonts.end() )
+             {
+                 switch( it->second->m_eType )
+@@ -1576,12 +1683,13 @@
+ 
+ void PrintFontManager::getFontAttributesFromXLFD( PrintFont* pFont, const std::list< OString >& rXLFDs ) const
+ {
++
+     bool bFamilyName = false;
+ 
+     std::list< XLFDEntry > aXLFDs;
+ 
+     parseXLFD_appendAliases( rXLFDs, aXLFDs );
+-    
++     
+     for( std::list< XLFDEntry >::const_iterator it = aXLFDs.begin();
+          it != aXLFDs.end(); ++it )
+     {
+@@ -1864,7 +1972,7 @@
+ 
+         ::std::list< OUString > aNames;
+         analyzeTrueTypeFamilyName( pTTFont, aNames );
+-
++ 
+         // set family name from XLFD if possible
+         if( ! pFont->m_nFamilyName )
+         {
+@@ -2113,6 +2221,7 @@
+         m_aFonts.clear();
+         m_aFontDirectories.clear();
+         m_aPrivateFontDirectories.clear();
++        m_aFamilyStyles.clear();
+     }
+ 
+ #if OSL_DEBUG_LEVEL > 1
+@@ -2233,7 +2342,6 @@
+ 
+     // fill XLFD aliases from fonts.alias files
+     initFontsAlias();
+-
+     // search for font files in each path
+     std::list< OString >::iterator dir_it;
+     // protect against duplicate paths
+@@ -2267,6 +2375,9 @@
+                     m_aFontFileToFontID[ static_cast<TrueTypeFontFile*>(*it)->m_aFontFile ].insert( aFont );
+                 else if( (*it)->m_eType == fonttype::Builtin )
+                     m_aFontFileToFontID[ static_cast<BuiltinFont*>(*it)->m_aMetricFile ].insert( aFont );
++                // track what family's have what styles {italic, bold, 
++                // italic-bold }
++                updateFamilyStyles( *it );
+ #ifdef DEBUG
+                 if( (*it)->m_eType == fonttype::Builtin )
+                     nBuiltinFonts++;
+@@ -2275,6 +2386,7 @@
+                          OUStringToOString( getFontFamily( aFont ), RTL_TEXTENCODING_MS_1252 ).getStr(),
+                          getFontFileSysPath( aFont ).getStr() );
+ #endif
++                
+             }
+             if( ! m_pFontCache->scanAdditionalFiles( aPath ) )
+                 continue;
+@@ -2349,6 +2461,7 @@
+                                 m_aFonts[ aFont ] = *it;
+                                 m_aFontFileToFontID[ aFileName ].insert( aFont );
+                                 m_pFontCache->updateFontCacheEntry( *it, false );
++                                updateFamilyStyles( *it );
+                                 nDirFonts++;
+ #if OSL_DEBUG_LEVEL > 1
+                                 fprintf( stderr, "adding font %d: \"%s\" from %s\n", aFont,
+@@ -2398,6 +2511,7 @@
+                     m_aFontFileToFontID[ static_cast<TrueTypeFontFile*>(*it)->m_aFontFile ].insert( aFont );
+                 else if( (*it)->m_eType == fonttype::Builtin )
+                     m_aFontFileToFontID[ static_cast<BuiltinFont*>(*it)->m_aMetricFile ].insert( aFont );
++                updateFamilyStyles( *it );
+ #ifdef DEBUG
+                 if( (*it)->m_eType == fonttype::Builtin )
+                     nBuiltinFonts++;
+@@ -2440,6 +2554,7 @@
+                             {
+                                 m_aFontFileToFontID[ aFileName ].insert( m_nNextFontID );
+                                 m_aFonts[ m_nNextFontID++ ] = *it;
++                                updateFamilyStyles( *it );
+                                 m_pFontCache->updateFontCacheEntry( *it, false );
+ #if OSL_DEBUG_LEVEL > 1
+                                 nBuiltinFonts++;
+@@ -2460,21 +2575,90 @@
+ #if OSL_DEBUG_LEVEL > 1
+     aStep2 = times( &tms );
+ #endif
+-
+-    // part three - fill in family styles
++    ::std::map< PrintFont*,  int > artFontsToCreate;
+     ::std::hash_map< fontID, PrintFont* >::iterator font_it;
+     for (font_it = m_aFonts.begin(); font_it != m_aFonts.end(); ++font_it)
+     {
++        OSL_TRACE("Processing fontid %d", font_it->first );
++        const ::rtl::OUString& rFamily =
++            m_pAtoms->getString( ATOM_FAMILYNAME, font_it->second->m_nFamilyName);
++        // detect any families that don't have italic, bold or bold-italic
++        // and create artificial ones.
++        // This loop is a little inefficient, ideally should be able to 
++        // choose/match the best font to create artificial font from i.e.
++        // just iterate over the m_aFamilyStyle map and create artificial fonts
++        // for the missing ones, but to do this would need to cache additional
++        // info and create some sort of font matching code/routine. 
++        ::std::hash_map< int,  int >::iterator styles_it = 
++            m_aFamilyStyles.find( font_it->second->m_nFamilyName );
++
++        if ( styles_it != m_aFamilyStyles.end() )
++        {
++            if ( styles_it->second == 7 )
++            {
++                // nothing to do 
++                OSL_TRACE("family %s has all styles",
++                    OUStringToOString( rFamily, RTL_TEXTENCODING_UTF8 ).getStr());
++            }
++            else
++            {
++                OUString missing;
++
++                if (  (styles_it->second & 1) == 0 ) 
++                {
++                    missing += OUString::createFromAscii("Bold-italic ");
++                    // Only create artificial bold-italic from either
++                    // a "normal", bold or italic font.
++		    if ( ( font_it->second->m_eItalic > italic::Upright &&
++                           font_it->second->m_eItalic < italic::Unknown ) || 
++                         ( font_it->second->m_eWeight > weight::Normal )  ||
++                         ( font_it->second->m_eItalic == italic::Upright && 
++                           font_it->second->m_eWeight <= weight::Medium ) )
++                    {
++                         // will create artificial font and
++                         // update fontId, maps & cache (TODO)
++                         // TODO create enum for type
++                         createAndProcessArtFont( font_it->second, 2 );
++                    }
++                        
++                }
++                if (  (styles_it->second & 2) == 0 ) 
++                {
++                    missing += OUString::createFromAscii("Bold ");
++                    // only create a Bold from a "normal" font
++                    if ( font_it->second->m_eItalic == italic::Upright && 
++                         font_it->second->m_eWeight<= weight::Medium )
++                    {
++                         createAndProcessArtFont( font_it->second, 0 );
++                    }
++                    
++                }
++                if (  (styles_it->second & 4) == 0 ) 
++                {
++                    missing += OUString::createFromAscii("Italic ");
++                    if ( font_it->second->m_eItalic == italic::Upright && 
++                         font_it->second->m_eWeight <= weight::Medium )
++                    {
++                         createAndProcessArtFont( font_it->second, 1 );
++                    }
++                }
++            }
++           
++        }
++        else
++        {
++            OSL_TRACE("family %s appears to have no entry.. why?",
++                OUStringToOString( rFamily, RTL_TEXTENCODING_UTF8 ).getStr() );
++        }
++    // part three - fill in family styles
+         ::std::hash_map< int, family::type >::const_iterator it =
+               m_aFamilyTypes.find( font_it->second->m_nFamilyName );
+         if (it != m_aFamilyTypes.end())
+             continue;
+-        const ::rtl::OUString& rFamily =
+-            m_pAtoms->getString( ATOM_FAMILYNAME, font_it->second->m_nFamilyName);
+         family::type eType = matchFamilyName( rFamily );
+         m_aFamilyTypes[ font_it->second->m_nFamilyName ] = eType;
+     }
+-
++    
+ #if OSL_DEBUG_LEVEL > 1
+     aStep3 = times( &tms );
+     fprintf( stderr, "PrintFontManager::initialize: collected %d fonts (%d builtin, %d cached)\n", m_aFonts.size(), nBuiltinFonts, nCached );
+Index: psprint/source/fontmanager/fontconfig.cxx
+===================================================================
+RCS file: /cvs/gsl/psprint/source/fontmanager/fontconfig.cxx,v
+retrieving revision 1.7
+diff -u -r1.7 fontconfig.cxx
+--- psprint/source/fontmanager/fontconfig.cxx	13 Oct 2004 08:22:03 -0000	1.7
++++ psprint/source/fontmanager/fontconfig.cxx	24 Aug 2005 15:05:56 -0000
+@@ -506,15 +506,22 @@
+                 }
+                 
+                 // update font cache
+-                m_pFontCache->updateFontCacheEntry( pUpdate, false );
+-                // sort into known fonts
+-                fontID aFont = m_nNextFontID++;
+-                m_aFonts[ aFont ] = pUpdate;
+-                m_aFontFileToFontID[ aBase ].insert( aFont );
+-                nFonts++;
++                ::std::list< PrintFont* > aArtFonts;
++                aArtFonts.push_back( pUpdate );
++                for( ::std::list< PrintFontManager::PrintFont* >::iterator it =
++aArtFonts.begin(); it != aArtFonts.end(); ++it )
++                {
++                    m_pFontCache->updateFontCacheEntry( *it, false );
++                    // sort into known fonts
++                    fontID aFont = m_nNextFontID++;
++                    m_aFonts[ aFont ] = *it;
++                    m_aFontFileToFontID[ aBase ].insert( aFont );
++                    nFonts++;
++                    updateFamilyStyles( *it );
+ #if OSL_DEBUG_LEVEL > 1
+-                fprintf( stderr, "inserted font %s as fontID %d\n", family, aFont );
++                    fprintf( stderr, "inserted font %s as fontID %d\n", family, aFont );      
+ #endif
++                }
+             }
+             // clean up the fonts we did not put into the list
+             for( std::list< PrintFont* >::iterator it = aFonts.begin(); it != aFonts.end(); ++it )
+Index: vcl/source/glyphs/gcach_ftyp.cxx
+===================================================================
+RCS file: /cvs/gsl/vcl/source/glyphs/gcach_ftyp.cxx,v
+retrieving revision 1.114
+diff -u -r1.114 gcach_ftyp.cxx
+--- vcl/source/glyphs/gcach_ftyp.cxx	3 May 2005 14:10:32 -0000	1.114
++++ vcl/source/glyphs/gcach_ftyp.cxx	24 Aug 2005 14:15:46 -0000
+@@ -147,6 +147,109 @@
+ typedef ::std::hash_map<const char*,FtFontFile*,::std::hash<const char*>, EqStr> FontFileList;
+ namespace { struct vclFontFileList : public rtl::Static< FontFileList, vclFontFileList > {}; }
+ 
++// noelpwer latest snapshots of freetype have experimental support for bold and
++// italic emulation which the routines below are based on.
++// These could/should be replaced when newer version of freetype
++// available. see FT_GlyphSlot_Embolden & FT_GlyphSlot_Oblique
++// 
++// makebold, basicalliy emulates bold by 'oring each horizontal pixel with the 
++// previous pixel. The routine uses the mnBitCount ( which as far as I can tell
++// refers to the number of bits in a pixel ) to determine how many previous bits
++// to 'or 
++
++void  FreetypeServerFont::makeBold( RawBitmap& rRawBitmap ) const
++  {
++    int ystr = 0;
++    int x = 0;
++    int y = 0;
++    int i = 0;
++    int xstr = rRawBitmap.mnBitCount; /* strength in pixels to overstrike */
++    unsigned char* p = NULL;
++
++    ULONG pitch = rRawBitmap.mnScanlineSize ;
++    if ( pitch > 0 )
++      p = rRawBitmap.mpBits + pitch * ystr; // some support for bold in Y dir
++                                            // note: not used by this patch
++    else
++    {
++      pitch = -pitch;
++      p = rRawBitmap.mpBits + pitch * ( rRawBitmap.mnWidth - 1 );
++    }
++
++    // for each row 
++    for ( y = 0; y < ( rRawBitmap.mnHeight ); y++ )
++    {
++     // 
++     // Horizontally:
++     // 
++     // From the last pixel on, make each pixel or'ed with the
++     // `xstr' pixels/bits before it.
++     //
++      for ( x = pitch - 1; x >= 0; x-- )
++      {
++        unsigned char tmp;
++
++        tmp = p[x];
++        for ( i = 1; i <= xstr; i++ )
++        {
++            p[x] |= tmp >> i;
++
++            // the maximum value of 8 for `xstr' comes from here//
++            if ( x > 0 )
++              p[x] |= p[x - 1] << ( 8 - i );
++        }
++      }
++
++     // 
++     // Vertically:
++     // 
++     // Make the above `ystr' rows or'ed with it.
++     // 
++     // note: not used by this patch
++      for ( x = 1; x <= ystr; x++ )
++      {
++        unsigned char*  q;
++
++        q = p - rRawBitmap.mnScanlineSize * x;
++        for ( i = 0; i < pitch; i++ )
++          q[i] |= p[i];
++      }
++
++      p += rRawBitmap.mnScanlineSize ;
++    }
++
++  }
++
++// makeItalic
++void FreetypeServerFont::makeItalic( FT_GlyphRec_* pGlyphFT ) const
++{
++    // from freetype cvs ftsynth.c
++    /*
++    FT_GlyphSlot  slot = maFaceFT->glyph;
++    FT_Outline*  outline = &slot->outline;
++    FT_Matrix transform;
++    // For italic, simply apply a shear transform, with an angle
++    // of about 12 degrees.                                     
++    
++    transform.xx = 0x10000L;
++    transform.yx = 0x00000L;
++    
++    transform.xy = 0x06000L;
++    transform.yy = 0x10000L;        
++    FT_Outline_Transform( outline, &transform );
++    */
++    FT_Matrix transform;
++    /* For italic, simply apply a shear transform, with an angle */
++    /* of about 12 degrees.                                      */
++  
++    transform.xx = 0x10000L;
++    transform.yx = 0x00000L;
++
++    transform.xy = 0x06000L;
++    transform.yy = 0x10000L;        
++    FT_Glyph_Transform( pGlyphFT, &transform, NULL );
++}
++
+ // -----------------------------------------------------------------------
+ 
+ // TODO: remove when the priorities are selected by UI
+@@ -692,7 +795,9 @@
+     maFaceFT( NULL ),
+     maSizeFT( NULL ),
+     maRecodeConverter( NULL ),
+-    mpLayoutEngine( NULL )
++    mpLayoutEngine( NULL ),
++    mbArtItalic( false ),
++    mbArtBold( false )
+ {
+     maFaceFT = pFI->GetFaceFT();
+ 
+@@ -704,6 +809,24 @@
+     if( !maFaceFT )
+         return;
+ 
++    //if ( GetFontSelData().GetWeight() != WEIGHT_NORMAL )
++    if ( mpFontInfo->GetFontAttributes().GetWeight() != WEIGHT_NORMAL )
++    {
++        if (  !(FT_STYLE_FLAG_BOLD & maFaceFT->style_flags )) 
++        {
++            mbArtBold = true;
++	}
++    }
++    //if ( GetFontSelData().GetSlant() ==  ITALIC_OBLIQUE || 
++    //    GetFontSelData().GetSlant() ==  ITALIC_NORMAL ) 
++    if ( mpFontInfo->GetFontAttributes().GetSlant() == ITALIC_OBLIQUE  ||
++         mpFontInfo->GetFontAttributes().GetSlant() == ITALIC_NORMAL )
++    {
++        if (  !(FT_STYLE_FLAG_ITALIC & mpFontInfo->GetFaceFT()->style_flags )) 
++        {
++            mbArtItalic = true;
++        }
++    }
+     FT_Encoding eEncoding = ft_encoding_unicode;
+     if( mpFontInfo->IsSymbolFont() )
+     {
+@@ -1268,6 +1391,9 @@
+ 
+     int nAngle = ApplyGlyphTransform( nGlyphFlags, pGlyphFT, true );
+ 
++    if ( GetArtificialItalic() )
++        makeItalic( pGlyphFT );
++
+     if( pGlyphFT->format != ft_glyph_format_bitmap )
+     {
+         if( pGlyphFT->format == ft_glyph_format_outline )
+@@ -1289,10 +1415,22 @@
+ 
+     const FT_Bitmap& rBitmapFT  = rBmpGlyphFT->bitmap;
+     rRawBitmap.mnHeight         = rBitmapFT.rows;
+-    rRawBitmap.mnWidth          = rBitmapFT.width;
+-    rRawBitmap.mnScanlineSize   = rBitmapFT.pitch;
+     rRawBitmap.mnBitCount       = 1;
+-
++    if ( GetArtificialBold() )
++    {
++        // add extra pixel for makeBold
++        // calcuate new mnScanlineSize in bytes
++        rRawBitmap.mnWidth          = rBitmapFT.width + rRawBitmap.mnBitCount;
++	int byteOff = rRawBitmap.mnWidth / 8;
++        if ( rRawBitmap.mnWidth % 8 )
++            ++byteOff;
++        rRawBitmap.mnScanlineSize = byteOff;
++    }
++    else
++    { 
++        rRawBitmap.mnWidth          = rBitmapFT.width;
++        rRawBitmap.mnScanlineSize   = rBitmapFT.pitch;
++    }
+     const ULONG nNeededSize = rRawBitmap.mnScanlineSize * rRawBitmap.mnHeight;
+ 
+     if( rRawBitmap.mnAllocated < nNeededSize )
+@@ -1303,7 +1441,10 @@
+     }
+ 
+     memcpy( rRawBitmap.mpBits, rBitmapFT.buffer, nNeededSize );
+-
++    if ( GetArtificialBold() )
++    {
++        makeBold( rRawBitmap );
++    }
+     FT_Done_Glyph( pGlyphFT );
+ 
+     // special case for 0/90/180/270 degree orientation
+@@ -1324,6 +1465,7 @@
+ 
+ bool FreetypeServerFont::GetGlyphBitmap8( int nGlyphIndex, RawBitmap& rRawBitmap ) const
+ {
++
+     if( maSizeFT )
+         pFTActivateSize( maSizeFT );
+ 
+@@ -1340,7 +1482,7 @@
+         nLoadFlags |= FT_LOAD_NO_HINTING;
+ #endif
+ 
+-    if( nPrioEmbedded <= nPrioAntiAlias )
++    if( nPrioEmbedded <= nPrioAntiAlias || GetArtificialItalic() )
+         nLoadFlags |= FT_LOAD_NO_BITMAP;
+ 
+     FT_Error rc = -1;
+@@ -1368,7 +1510,10 @@
+         return false;
+ 
+     int nAngle = ApplyGlyphTransform( nGlyphFlags, pGlyphFT, true );
+-
++    if ( GetArtificialItalic() )
++    {
++        makeItalic( pGlyphFT );
++    }
+     if( pGlyphFT->format == ft_glyph_format_outline )
+         ((FT_OutlineGlyph)pGlyphFT)->outline.flags |= ft_outline_high_precision;
+ 
+@@ -1387,9 +1532,27 @@
+     const FT_Bitmap& rBitmapFT  = rBmpGlyphFT->bitmap;
+     rRawBitmap.mnHeight         = rBitmapFT.rows;
+     rRawBitmap.mnWidth          = rBitmapFT.width;
+-    rRawBitmap.mnScanlineSize   = ((bEmbedded?rBitmapFT.width:rBitmapFT.pitch) + 3) & -4;
+     rRawBitmap.mnBitCount       = 8;
+ 
++    if ( GetArtificialBold() )
++    {
++        // noelpwer: 
++        // pitch is always the num bytes needed ( including padding ) to
++        // skip to the next row.
++        // if bEmbedded is true, width is in pixels where each pixel is a bit
++        // if bEmbedded is false 
++        // then width is in bytes ( appears still that each pixel is a bit )
++        // The code below this conditional seems to normalize rBitmapFT by
++        // filling rRawBitmap.mnBits buffer, if its embedded then the it's 
++        // "converted" to the non-embedd format (e.g. width in bytes).
++        // So we add 1 to either width or pitch so that the makeBold routine
++        // has room to do its stuff.
++	rRawBitmap.mnWidth = rRawBitmap.mnWidth + 1;
++	rRawBitmap.mnScanlineSize = ((bEmbedded?rRawBitmap.mnWidth:rBitmapFT.pitch+1) + 3) & -4;
++    }
++    else
++        rRawBitmap.mnScanlineSize   = ((bEmbedded?rBitmapFT.width:rBitmapFT.pitch) + 3) & -4;
++
+     const ULONG nNeededSize = rRawBitmap.mnScanlineSize * rRawBitmap.mnHeight;
+     if( rRawBitmap.mnAllocated < nNeededSize )
+     {
+@@ -1425,6 +1588,12 @@
+                 *(pDest++) = 0;
+         }
+     }
++    // when all the other stuff is done, lets see if we can make the
++    // font bold
++    if ( GetArtificialBold() )
++    {
++        makeBold( rRawBitmap );
++    }
+ 
+     FT_Done_Glyph( pGlyphFT );
+ 
+@@ -1969,6 +2138,7 @@
+     SplitGlyphFlags( *this, nGlyphIndex, nGlyphFlags );
+ 
+     FT_Int nLoadFlags = FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP;
++    
+     FT_Error rc = FT_Load_Glyph( maFaceFT, nGlyphIndex, nLoadFlags );
+     if( rc != FT_Err_Ok )
+         return false;
+Index: vcl/source/glyphs/gcach_ftyp.hxx
+===================================================================
+RCS file: /cvs/gsl/vcl/source/glyphs/gcach_ftyp.hxx,v
+retrieving revision 1.30
+diff -u -r1.30 gcach_ftyp.hxx
+--- vcl/source/glyphs/gcach_ftyp.hxx	13 Oct 2004 08:53:45 -0000	1.30
++++ vcl/source/glyphs/gcach_ftyp.hxx	24 Aug 2005 14:15:52 -0000
+@@ -221,7 +221,14 @@
+                                 { return mpFontInfo->GetTable( pName, pLength ); }
+     int                         GetEmUnits() const;
+     const FT_Size_Metrics&      GetMetricsFT() const { return maSizeFT->metrics; }
+-
++    bool                        GetArtificialItalic() const
++                                { 
++                                    return mbArtItalic;
++                                } 
++    bool                        GetArtificialBold() const
++                                { 
++                                    return mbArtBold; 
++                                }
+ protected:
+     friend class GlyphCache;
+ 
+@@ -230,6 +237,8 @@
+     virtual ULONG               GetFontCodeRanges( sal_uInt32* pCodes ) const;
+     bool                        ApplyGSUB( const ImplFontSelectData& );
+     virtual ServerFontLayoutEngine* GetLayoutEngine();
++    void                        makeBold( RawBitmap& rBitMap ) const;
++    void                        makeItalic( FT_GlyphRec_* pGlyphFT ) const;
+ 
+ private:
+     int                         mnWidth;
+@@ -244,6 +253,8 @@
+     rtl_UnicodeToTextConverter  maRecodeConverter;
+ 
+     ServerFontLayoutEngine*     mpLayoutEngine;
++    bool                        mbArtItalic; 
++    bool                        mbArtBold; 
+ };
+ 
+ // -----------------------------------------------------------------------
