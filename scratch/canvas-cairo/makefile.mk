@@ -2,9 +2,9 @@
 #
 #   $RCSfile: makefile.mk,v $
 #
-#   $Revision: 1.9 $
+#   $Revision: 1.10 $
 #
-#   last change: $Author: rengelhard $ $Date: 2005/08/16 23:28:20 $
+#   last change: $Author: rodo $ $Date: 2005/08/25 08:46:20 $
 #
 #   The Contents of this file are made available subject to the terms of
 #   either of the following licenses
@@ -122,7 +122,7 @@ SHL1STDLIBS= $(TOOLSLIB) $(CPPULIB) $(SALLIB) $(VCLLIB) $(COMPHELPERLIB) $(CPPUH
 .IF "$(SYSTEM_CAIRO)" == "YES"
 SHL1STDLIBS+= $(CAIRO_LIBS) -lX11
 .ELSE
-SHL1STDLIBS+= -lcairo -lpixman -lX11
+SHL1STDLIBS+= -lcairo -lX11
 .ENDIF
 
 SHL1IMPLIB=i$(TARGET)
