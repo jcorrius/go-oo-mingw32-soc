@@ -438,12 +438,25 @@ namespace cairocanvas
     static void clipNULL( Cairo *pCairo )
     {
 	OSL_TRACE("clipNULL\n");
+	Matrix aOrigMatrix, aIdentityMatrix;
+
+	/* we set identity matrix here to overcome bug in cairo 0.9.2
+	   where XCreatePixmap is called with zero width and height.
+
+	   it also reaches faster path in cairo clipping code.
+	*/
+	cairo_matrix_init_identity( &aIdentityMatrix );
+	cairo_get_matrix( pCairo, &aOrigMatrix );
+	cairo_set_matrix( pCairo, &aIdentityMatrix );
 
 	cairo_reset_clip( pCairo );
 	cairo_rectangle( pCairo, 0, 0, 1, 1 );
 	cairo_clip( pCairo );
 	cairo_rectangle( pCairo, 2, 0, 1, 1 );
 	cairo_clip( pCairo );
+
+	/* restore the original matrix */
+	cairo_set_matrix( pCairo, &aOrigMatrix );
     }
 
     void CanvasHelper::drawPolyPolygonImplementation( ::basegfx::B2DPolyPolygon aPolyPolygon, Operation aOperation, Cairo* pCairo ) const

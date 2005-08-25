@@ -128,6 +128,8 @@ cairoHelperGetSurface( const SystemEnvData* pSysData, int x, int y, int width, i
 	cairo_surface_set_device_offset( pSurface, x, y );
     }
 
+    /* XSynchronize( (Display*) pSysData->pDisplay, TRUE ); */
+
     return pSurface;
 }
 
