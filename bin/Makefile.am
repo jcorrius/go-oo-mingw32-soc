@@ -11,6 +11,7 @@ script_files = \
 	install-dictionaries \
 	java-set-classpath.in \
 	nothing \
+	ooconfig \
 	ooinstall \
 	ooo-wrapper.in \
 	ootouch \
