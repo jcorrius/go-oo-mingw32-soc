@@ -1,0 +1,454 @@
+--- /dev/null	2005-06-05 14:44:09.000000000 +0100
++++ svx/source/form/formControlVBAHandler.cxx	2005-08-30 16:31:15.535489563 +0100
+@@ -0,0 +1,451 @@
++#include <formControlVBAHandler.hxx>
++
++#include <comphelper/processfactory.hxx>
++#include <com/sun/star/beans/XPropertySet.hpp>
++#include <com/sun/star/beans/XIntrospection.hpp>
++#include <com/sun/star/lang/XMultiComponentFactory.hpp>
++#include <com/sun/star/lang/XServiceName.hpp>
++#include <com/sun/star/lang/XServiceInfo.hpp>
++#include <com/sun/star/frame/XModel.hpp>
++#include <com/sun/star/script/XLibraryContainer.hpp>
++
++#include <fmmodel.hxx>
++#include <sfx2/objsh.hxx>
++#include <basic/sbstar.hxx>
++#include <basic/basmgr.hxx>
++#include <basic/sbmeth.hxx>
++#include <basic/sbmod.hxx>
++#include <basic/sbx.hxx>
++
++#include <set>
++#include <list>
++
++using namespace ::com::sun::star;
++using namespace ::com::sun::star::uno;
++using namespace ::com::sun::star::awt;
++using namespace ::com::sun::star::script;
++
++struct ltstr
++{
++  bool operator()(const ::rtl::OUString& s1, const ::rtl::OUString& s2) const
++  {
++    return (s1.compareTo( s2 ) < 0);
++  }
++};
++
++struct vbaTransTable
++{
++     const char* ooEventMethod;
++     const char* msPartSubName;
++};
++
++// from MS, ones that don't seem immediately to have corrosponding
++// oo events
++//_BeforeDragOver
++//_BeforeDropOrPaste
++//_DblClick
++//_Error
++//_KeyPress ( whats the difference with KeyDown, KeyUp )
++
++vbaTransTable eventMethodToFuncMap[] = {
++"changed", "_Change", // on ooo side for form (e.g. form controls ) only 
++                      // it appears.
++"actionPerformed", "_Click",
++"focusGained", "_GotFocus",
++"focusLost", "_LostFocus",
++"keyPressed", "_KeyDown",
++"keyReleased", "_KeyUp",
++"mousePressed", "_MouseDown",
++"mouseReleased", "_MouseUp",
++//"mouseEntered", "",
++//"mouseExited", "" ,
++//"mouseDragged", "",  // ?
++"mouseMoved", "_MouseMove",
++//"approveAction", "",
++"adjustmentValueChanged", "_Scroll" 
++// mmm, not clear whether we can use this to generate _Scroll ( for scrollbar )
++// Also this method looks like something to be used to try and emulate _SpinUp 
++// &  _SpinDown events ( for SpinButton ),
++//
++// so, anyway looks like the table above isn't enough to to cope with
++// ooo methods that could be used to map to more than one vba method
++// e.g. adjustmentValueChanged -> "_Scroll", "_SpinUp", "_SpinDown" 
++// add to that the fact that when UserForms come into the equation
++// different translations will need to occur ( same methods but different params)
++};
++
++const int vbaTransEntries =  sizeof( eventMethodToFuncMap ) / sizeof( *eventMethodToFuncMap );
++
++// getEventMethods is defined in fmtools.cxx
++Sequence< ::rtl::OUString> getEventMethods(const Type& type);
++
++class ScriptEventFactory
++{
++public:
++    ScriptEventFactory();
++    css::uno::Sequence< css::script::ScriptEventDescriptor > createEvents( const Reference< XControl >& xControl );   
++private:
++    rtl::OUString getName( const Reference< XControl >& xControl );
++    bool findSubPart( const rtl::OUString& eventMethod, rtl::OUString& result );
++    Reference< XComponentContext > m_xCtx;
++};
++
++rtl::OUString
++ScriptEventFactory::getName( const Reference< XControl >& xControl )
++{
++    Reference< beans::XPropertySet > xProps( xControl->getModel(), UNO_QUERY );
++    ::rtl::OUString sName;
++    if ( xProps.is() )
++    {
++        try
++        {
++            // Try label first, spin button & scrollbar for form
++            // controls don't seem to have a label so fallback to Name
++            xProps->getPropertyValue(
++                ::rtl::OUString::createFromAscii("Label") ) >>= sName;
++        }
++        catch(Exception& e)
++        {
++            try
++            {
++                // fall back
++                xProps->getPropertyValue(
++                    ::rtl::OUString::createFromAscii("Name") ) >>= sName;
++            }
++            catch( Exception& e )
++            {
++                OSL_TRACE("PropertyStuff mucked up no name got exception: %s",
++                   (const sal_Char *) rtl::OUStringToOString( e.Message, RTL_TEXTENCODING_UTF8 ));	
++            }
++        }
++    }
++    return sName;
++}
++
++ScriptEventFactory::ScriptEventFactory()
++{
++    Reference < beans::XPropertySet > xProps(
++        ::comphelper::getProcessServiceFactory(), UNO_QUERY_THROW );
++    m_xCtx.set( xProps->getPropertyValue( rtl::OUString(
++        RTL_CONSTASCII_USTRINGPARAM( "DefaultContext" ))), 
++        uno::UNO_QUERY_THROW );
++}
++
++bool
++ScriptEventFactory::findSubPart( const rtl::OUString& eventMethod, rtl::OUString& result )
++{
++    const char* pChars = (const char*)rtl::OUStringToOString( eventMethod, RTL_TEXTENCODING_UTF8 ).getStr();
++    for ( int index = 0; index < vbaTransEntries; ++index )
++    {
++        if ( strcmp( eventMethodToFuncMap[ index ].ooEventMethod, pChars ) == 0)
++        {
++            result = ::rtl::OUString::createFromAscii( eventMethodToFuncMap[ index ].msPartSubName );
++            return true;
++        } 
++    }
++    return false;
++}
++
++void dumpListeners( const Reference< beans::XIntrospection >& xIntrospection, const Reference<XInterface>& xIfc)
++{
++    Reference< beans::XIntrospectionAccess > xIntrospectionAccess;
++    if ( xIntrospection.is() )
++    {
++        xIntrospectionAccess = xIntrospection->inspect( 
++            makeAny( xIfc ) );
++        Sequence< Type > aControlListeners = 
++            xIntrospectionAccess->getSupportedListeners();
++        sal_Int32 nLength = aControlListeners.getLength();
++             
++        for ( sal_Int32 i = 0; i< nLength; ++i )
++        {
++            Type& listType = aControlListeners[ i ];
++            rtl::OUString sFullTypeName = listType.getTypeName();
++            rtl::OUString sTypeName = listType.getTypeName();
++            sal_Int32 lastDotIndex = -1;
++            if ( ( lastDotIndex = sFullTypeName.lastIndexOf( '.' ) ) > -1 )
++            {
++                sTypeName = sFullTypeName.copy( lastDotIndex + 1 );    
++            } 
++            Sequence< ::rtl::OUString > sMeths = getEventMethods( listType );    
++            sal_Int32 sMethLen = sMeths.getLength();
++            for ( sal_Int32 j=0 ; j < sMethLen; ++j )
++            {
++                OSL_TRACE("**Listener [%d] Type[%s] Method[%s]",j,
++                    rtl::OUStringToOString( sTypeName, 
++                        RTL_TEXTENCODING_UTF8 ).getStr(),
++                    rtl::OUStringToOString( sMeths[ j ], 
++                        RTL_TEXTENCODING_UTF8 ).getStr() );
++            }
++        }
++       
++    }
++}
++
++Sequence< ScriptEventDescriptor > 
++ScriptEventFactory::createEvents( const Reference< XControl >& xControl )
++{
++    // can we detect what sheet we're in, or can we make 
++    // basic search? or we could make the script event handler do this
++    // what we can't do is hard code the bloody location:Library.Module.Macro
++    // thing!!
++    //static rtl::OUString part = rtl::OUString::createFromAscii("document:Standard.Sheet1.");
++
++    std::list< ScriptEventDescriptor > descs;        
++    Reference< lang::XMultiComponentFactory > xMFac( m_xCtx->getServiceManager(), UNO_QUERY );
++    if ( xMFac.is() )
++    {
++        Reference< beans::XIntrospection > xIntrospection( 
++            xMFac->createInstanceWithContext( rtl::OUString( 
++                RTL_CONSTASCII_USTRINGPARAM( "com.sun.star.beans.Introspection"  ) ), m_xCtx ), UNO_QUERY );
++        //dumpListeners( xIntrospection, xControl );
++        //dumpListeners( xIntrospection, xControl->getModel() );
++        Reference< beans::XIntrospectionAccess > xIntrospectionAccess;
++	if  ( xIntrospection.is() )
++	{
++            xIntrospectionAccess = xIntrospection->inspect( 
++                makeAny( xControl ) );
++            Sequence< Type > aControlListeners = 
++                xIntrospectionAccess->getSupportedListeners();
++            sal_Int32 nLength = aControlListeners.getLength();
++             
++            for ( sal_Int32 i = 0; i< nLength; ++i )
++            {
++                Type& listType = aControlListeners[ i ];
++                rtl::OUString sFullTypeName = listType.getTypeName();
++                rtl::OUString sTypeName = listType.getTypeName();
++                sal_Int32 lastDotIndex = -1;
++                if ( ( lastDotIndex = sFullTypeName.lastIndexOf( '.' ) ) > -1 )
++                {
++                    sTypeName = sFullTypeName.copy( lastDotIndex + 1 );    
++                } 
++                Sequence< ::rtl::OUString > sMeths = getEventMethods( listType );    
++                sal_Int32 sMethLen = sMeths.getLength();
++                for ( sal_Int32 j=0 ; j < sMethLen; ++j )
++                {
++                    /*
++                    OSL_TRACE("** Listener [%d] Type[%s] Method[%s]",j,
++                        rtl::OUStringToOString( sTypeName, 
++                            RTL_TEXTENCODING_UTF8 ).getStr(),
++                        rtl::OUStringToOString( sMeths[ j ], 
++                            RTL_TEXTENCODING_UTF8 ).getStr() );
++                    */
++                    rtl::OUString partSubName;
++                    if ( findSubPart( sMeths[ j ] , partSubName ) )
++                    {
++                        ScriptEventDescriptor evtDesc;
++                        // just fill in subRoutine name, event handler will
++                        // do the rest e.g. search for this routine in the doc 
++                        // and run it.
++                        evtDesc.ScriptCode =  getName(xControl).concat( partSubName );
++                        evtDesc.ListenerType = sTypeName;
++                        evtDesc.EventMethod = sMeths[ j ] ;
++                        // set this it VBAInterop, ensures that it doesn't
++                        // get persisted or shown in property editors
++                        evtDesc.ScriptType = rtl::OUString::createFromAscii(
++                            "VBAInterop" );	
++                        descs.push_back( evtDesc ); 
++                    }
++                }
++            } 
++        }
++    }
++    //
++    Sequence< ScriptEventDescriptor > results( descs.size() );
++    std::list< ScriptEventDescriptor >::const_iterator it = descs.begin();
++    ScriptEventDescriptor* pDest = results.getArray();
++    for ( ; it != descs.end(); ++it, ++pDest )
++    {
++        *pDest = *it;
++    }
++    return results;
++
++}
++
++FormControlVBAHandler::FormControlVBAHandler( const Reference< XEventAttacherManager >& xEvtAttachMgr, const Reference< XControl >& xControl) : m_xEvtAttachMgr( xEvtAttachMgr ), m_xControl( xControl )
++{
++    Reference < beans::XPropertySet > xProps(
++        ::comphelper::getProcessServiceFactory(), UNO_QUERY_THROW );
++    m_xCtx.set( xProps->getPropertyValue( rtl::OUString(
++        RTL_CONSTASCII_USTRINGPARAM( "DefaultContext" ))), 
++        uno::UNO_QUERY_THROW );
++    // get the implementation name of the object
++    //Reference< lang::XServiceName > xServiceName( m_xControl, UNO_QUERY );
++    //Might need this to identify the control, if not needed remove #TODO
++    Reference< lang::XServiceInfo > xServiceInfo( m_xControl, UNO_QUERY );
++    //if ( xServiceName.is() )
++    if ( xServiceInfo.is() )
++    {
++        //m_sControl = xServiceName->getServiceName();
++        m_sControl = xServiceInfo->getImplementationName();
++    }   
++
++}
++
++bool
++FormControlVBAHandler::hasEvtBinding( sal_Int32 nPos, ScriptEventDescriptor& desc )
++{
++    bool result = false;
++    Sequence< ScriptEventDescriptor > sEvts = m_xEvtAttachMgr->getScriptEvents(nPos);
++    ScriptEventDescriptor* pWriteScriptEvents = sEvts.getArray();
++    ScriptEventDescriptor* pEvt = pWriteScriptEvents;
++    sal_Int32 nNumEvts = sEvts.getLength();
++    for ( sal_Int32 index=0; index < nNumEvts; ++pEvt, ++index )
++    {
++        if ( pEvt->EventMethod.equals( desc.EventMethod ) &&
++            pEvt->ListenerType.equals( desc.ListenerType ) )
++        {
++            result = true;
++            break;
++        }
++    }
++    return result;    
++}
++
++bool
++FormControlVBAHandler::createEventBindings( sal_Int32 nPos )
++{
++    OSL_TRACE("createEventBindings for  %s",
++            ::rtl::OUStringToOString( m_sControl, 
++                RTL_TEXTENCODING_UTF8 ).getStr() );
++    ScriptEventFactory fac;
++    Sequence< ScriptEventDescriptor > descs = fac.createEvents( m_xControl );
++    sal_Int32 nLen = descs.getLength();
++    for ( sal_Int32 index = 0; index < nLen; ++index )
++    {
++        if ( !hasEvtBinding( nPos, descs[ index ] ) )
++        {
++            m_xEvtAttachMgr->registerScriptEvent( nPos, descs[ index ] );
++        }
++    }
++    return true; 
++}
++
++
++
++void
++VBAScriptEventListener::disposing(const lang::EventObject& Source)  throw( RuntimeException )
++{
++}
++
++void 
++VBAScriptEventListener::firing_Impl(const ScriptEvent& evt, Any* pRet ) throw(RuntimeException)
++{
++    static const ::rtl::OUString vbaInterOp =
++        ::rtl::OUString::createFromAscii("VBAInterop");
++
++    // let default handlers deal with non vba stuff
++    if ( !evt.ScriptType.equals( vbaInterOp ) )
++        return;
++
++    SfxObjectShellRef xObjSh;
++    if ( pModel )
++    {
++        xObjSh = pModel->GetObjectShell();
++    }
++    else
++    {
++        xObjSh = SfxObjectShell::Current();
++    } 
++    if ( xObjSh.Is() )
++    {
++        BasicManager* pDocBasicManager =  xObjSh->GetBasicManager();
++        Reference< XLibraryContainer > xLib( xObjSh->GetBasicContainer(), 
++            UNO_QUERY );
++        if ( pDocBasicManager && xLib.is() )
++        {
++            std::list< rtl::OUString > matchingMethods;
++            Sequence< ::rtl::OUString > aLibNames = xLib->getElementNames();
++            sal_Int32 nLibLen = aLibNames.getLength();
++            const ::rtl::OUString* pLibNames = aLibNames.getConstArray();
++            for ( sal_Int32 i = 0 ; i < nLibLen ; ++i )
++            {
++                // make sure library is loaded
++                if ( xLib->hasByName( pLibNames[ i ] ) && !xLib->isLibraryLoaded( pLibNames[ i ] ) )
++                    xLib->loadLibrary( pLibNames[ i ] );
++                     
++                Any aLib = xLib->getByName( pLibNames[ i ] );
++                Reference< container::XNameContainer > xNameCont( aLib, UNO_QUERY );
++                if ( !xNameCont.is() ) // this really is an error, flag it
++                {
++                    OSL_TRACE("No name container");
++                    continue;
++                }
++                // get Basic for the library 
++                StarBASIC* pBasic = pDocBasicManager->GetLib( pLibNames[ i ] );
++                // get the module names
++                Sequence< ::rtl::OUString > aModNames = xNameCont->getElementNames();
++                sal_Int32 nModLen = aModNames.getLength();
++                const ::rtl::OUString* pModNames = aModNames.getConstArray();
++                for ( sal_Int32 y = 0 ; y < nModLen ; ++y )
++                { 
++                    SbModule* pModule = pBasic->FindModule( pModNames[y] );
++                    // find the methods
++                    SbxArray* pMethods = pModule->GetMethods();
++                    sal_Int32 nMethLen = pMethods->Count();
++                    for ( sal_Int32 index = 0; index < nMethLen; ++index )
++                    {
++                        SbMethod* pMethod = static_cast< SbMethod* >( pMethods->Get( static_cast< USHORT >( index ) ) );
++                        if ( pMethod )
++                        {
++                           // form fully scoped ref to script e.g. document:Library.Module.method
++                           // using old starbasic form here to avoid 
++                           // nasty pop-up if the method for some reason is
++                           // not accessable
++                            rtl::OUString methName = pMethod->GetName();
++                            if ( methName.equals( evt.ScriptCode ) )
++                            {
++                                rtl::OUString scriptCode;
++                                scriptCode += pLibNames[ i ]; 
++                                scriptCode += ::rtl::OUString::createFromAscii( "." );
++                                scriptCode += pModNames[ y ]; 
++                                scriptCode += ::rtl::OUString::createFromAscii( "." );
++                                scriptCode += evt.ScriptCode;
++                                matchingMethods.push_back( scriptCode );
++                            }
++                        }
++                    }
++                }
++            }
++            std::list< rtl::OUString >::const_iterator it = matchingMethods.begin();
++            std::list< rtl::OUString >::const_iterator it_end = matchingMethods.end();
++            // set up args
++            // !! translate arguments #TODO 
++            // #FIXME ( hey, I have to have something to do tomorrow, or the
++            // day after or the day after that ! )
++            Sequence< Any > aArguments = evt.Arguments;
++             
++            for ( ; it != it_end; ++it )
++            {
++                //OSL_TRACE("%s", rtl::OUStringToOString( *it, RTL_TEXTENCODING_UTF8 ).getStr() );
++                // assume that vba-like event handler exist in the document
++                // only ( can come back to that if necessary )
++                const static rtl::OUString sDocLoc = 
++                    rtl::OUString::createFromAscii( "document" );
++
++                // call event handlers for event
++                xObjSh->CallStarBasicScript( *it, sDocLoc, 
++                    static_cast< void* >( &aArguments ), pRet ); 
++                
++            } 
++        }
++
++    }
++
++}
++
++void SAL_CALL 
++VBAScriptEventListener::firing(const ScriptEvent& evt) throw(RuntimeException)
++{
++    firing_Impl( evt );
++}
++
++Any SAL_CALL 
++VBAScriptEventListener::approveFiring(const ScriptEvent& evt) throw(reflection::InvocationTargetException, RuntimeException)
++{
++    Any ret;
++    firing_Impl( evt, &ret );
++    return ret;
++}
++
++
