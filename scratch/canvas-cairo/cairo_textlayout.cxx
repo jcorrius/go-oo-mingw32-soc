@@ -197,6 +197,7 @@ namespace cairocanvas
     {
         tools::LocalGuard aGuard;
 
+	    OSL_TRACE("queryTextBounds");
 	geometry::RealRectangle2D aBounds( 0, 0, 0, 0 );
 
 // TODO(rodo)
@@ -224,6 +225,8 @@ namespace cairocanvas
 	    cairo_text_extents_t aTextExtents;
 	    cairo_text_extents( mpCairo, aUTF8String, &aTextExtents );
 	    cairo_restore( mpCairo );
+
+	    OSL_TRACE("text extents, width: %d x_bearing: %d ascent: %d descent: %d\n", aTextExtents.width, aTextExtents.x_bearing, aFontExtents.ascent, aFontExtents.descent);
 
 	    aBounds = geometry::RealRectangle2D( aTextExtents.x_bearing, -aFontExtents.ascent,
 						 aTextExtents.x_bearing + aTextExtents.width, aFontExtents.descent );
@@ -333,8 +336,10 @@ namespace cairocanvas
 	::rtl::OUString aSubText = maText.Text.copy( maText.StartPosition, maText.Length );
 	::rtl::OString aUTF8String = ::rtl::OUStringToOString( aSubText, RTL_TEXTENCODING_UTF8 );
 
-
 	cairo_save( pCairo );
+	/* move to 0, 0 as cairo_show_text advances current point and current point is not restored by cairo_restore.
+	   before we were depending on unmodified current point which I believed was preserved by save/restore */
+	cairo_move_to( pCairo, 0, 0 );
 	useFont( pCairo );
 	cairo_show_text( pCairo, aUTF8String );
 	cairo_restore( pCairo );
