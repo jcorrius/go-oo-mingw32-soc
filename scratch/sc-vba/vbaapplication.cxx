@@ -14,6 +14,13 @@
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
 
+inline uno::Reference< frame::XModel > 
+ScVbaApplication::getCurrentDocument() throw (uno::RuntimeException)
+{
+	// This is lame - we should do better ... pwrt. the IDE ...
+	return uno::Reference< frame::XModel >( m_xDesktop->getCurrentComponent(), uno::UNO_QUERY_THROW );
+}
+
 ScVbaApplication::ScVbaApplication( uno::Reference<uno::XComponentContext >& xContext ): m_xContext( xContext )
 {
 	uno::Reference< lang::XMultiComponentFactory > xSMgr( m_xContext->getServiceManager(), uno::UNO_QUERY );
@@ -59,16 +66,14 @@ ScVbaApplication::getActiveWorkbook() throw (uno::RuntimeException)
 uno::Reference< vba::XRange >
 ScVbaApplication::getSelection() throw (uno::RuntimeException)
 {
-	uno::Reference< frame::XModel > xModel( m_xDesktop->getCurrentComponent(), uno::UNO_QUERY );
-	uno::Reference< table::XCellRange > xRange( xModel->getCurrentSelection(), ::uno::UNO_QUERY);
+	uno::Reference< table::XCellRange > xRange( getCurrentDocument()->getCurrentSelection(), ::uno::UNO_QUERY);
 	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xRange ) );
 }
 
 uno::Reference< vba::XRange >
 ScVbaApplication::getActiveCell() throw (uno::RuntimeException )
 {
-	uno::Reference< frame::XModel > xModel( m_xDesktop->getCurrentComponent(), uno::UNO_QUERY_THROW );
-	uno::Reference< sheet::XSpreadsheetView > xView( xModel->getCurrentController(), uno::UNO_QUERY_THROW );
+	uno::Reference< sheet::XSpreadsheetView > xView( getCurrentDocument()->getCurrentController(), uno::UNO_QUERY_THROW );
 	uno::Reference< table::XCellRange > xRange( xView->getActiveSheet(), ::uno::UNO_QUERY_THROW);
                                                                                                                              
 	ScTabViewShell* pViewShell = ScTabViewShell::GetActiveViewShell();
@@ -76,6 +81,21 @@ ScVbaApplication::getActiveCell() throw (uno::RuntimeException )
 	nCursorX = sal_Int32(pViewShell->GetViewData()->GetCurX()), nCursorY = sal_Int32(pViewShell->GetViewData()->GetCurY());
 	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xRange->getCellRangeByPosition( nCursorX, nCursorY, 
 										nCursorX, nCursorY ) ) ); 
+}
+
+sal_Bool
+ScVbaApplication::getScreenUpdating() throw (uno::RuntimeException)
+{
+	return !getCurrentDocument()->hasControllersLocked();
+}
+
+void
+ScVbaApplication::setScreenUpdating(sal_Bool bUpdate) throw (uno::RuntimeException)
+{
+	if (bUpdate)
+		getCurrentDocument()->unlockControllers();
+	else
+		getCurrentDocument()->lockControllers();
 }
 
 uno::Any SAL_CALL

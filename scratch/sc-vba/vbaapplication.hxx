@@ -14,6 +14,7 @@ class ScVbaApplication : public ScVbaApplication_BASE
 private:
 	uno::Reference< ::com::sun::star::uno::XComponentContext > m_xContext;
 	uno::Reference< ::com::sun::star::frame::XDesktop > m_xDesktop;
+	uno::Reference< frame::XModel > getCurrentDocument() throw (uno::RuntimeException);
 public:
 	ScVbaApplication( uno::Reference< ::com::sun::star::uno::XComponentContext >& m_xContext );
 	virtual ~ScVbaApplication();
@@ -22,6 +23,8 @@ public:
     virtual uno::Reference< vba::XRange > getSelection() throw (uno::RuntimeException);
     virtual uno::Reference< vba::XWorkbook > getActiveWorkbook() throw (uno::RuntimeException);
 	virtual uno::Reference< vba::XRange > getActiveCell() throw (uno::RuntimeException);
+    virtual sal_Bool getScreenUpdating() throw (uno::RuntimeException);
+    virtual void setScreenUpdating(sal_Bool bUpdate) throw (uno::RuntimeException);
 	virtual uno::Any SAL_CALL Workbooks( const uno::Any& aIndex ) throw (uno::RuntimeException);
 };
 

@@ -44,10 +44,9 @@ ScVbaWorkbook::getActiveSheet() throw (uno::RuntimeException)
 
 	uno::Reference< vba::XWorksheet > xWrkSt( new ScVbaWorksheet( m_xContext,xSpreadsheet->getActiveSheet() ,mxModel ));
 
-	if ( xWrkSt.is() )
-	{
-		OSL_TRACE("Looks like returning a valid worksheet");
-	}
+	if ( !xWrkSt.is() )
+		OSL_TRACE("Returning an invalid worksheet");
+
 	return xWrkSt;
 }
 

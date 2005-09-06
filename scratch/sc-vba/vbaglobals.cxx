@@ -15,16 +15,16 @@ namespace vbaobj
     ::rtl::OUString SAL_CALL getImplementationName()
     {
         static ::rtl::OUString* pImplName = 0;
-            if ( !pImplName )
-            {
+		if ( !pImplName )
+		{
             ::osl::MutexGuard aGuard( ::osl::Mutex::getGlobalMutex() );
             if ( !pImplName )
-                    {
-                static ::rtl::OUString aImplName( RTL_CONSTASCII_USTRINGPARAM( "org.openoffice.vba.Globals" ) );
-                            pImplName = &aImplName;
-                    }
-            }
-            return *pImplName;
+			{
+				static ::rtl::OUString aImplName( RTL_CONSTASCII_USTRINGPARAM( "org.openoffice.vba.Globals" ) );
+				pImplName = &aImplName;
+			}
+		}
+		return *pImplName;
     }
 
     uno::Reference< XInterface > SAL_CALL create(
@@ -34,31 +34,29 @@ namespace vbaobj
 		OSL_TRACE("In create component for vbaglobals");
         return static_cast< lang::XTypeProvider * >( new ScVbaGlobals( xContext ) );
     }
+
 	Sequence< ::rtl::OUString > SAL_CALL getSupportedServiceNames()
 	{
     	const ::rtl::OUString strName( ::vbaobj::getImplementationName() );
 		return Sequence< ::rtl::OUString >( &strName, 1 );
 	}	
-
 }
-    // =============================================================================
-    // ScVbaGlobals
-    // =============================================================================
 
-    ScVbaGlobals::ScVbaGlobals( const Reference< XComponentContext >& rxContext )
+// =============================================================================
+// ScVbaGlobals
+// =============================================================================
+
+ScVbaGlobals::ScVbaGlobals( const Reference< XComponentContext >& rxContext )
         :m_xContext( rxContext )
-    {
-	OSL_TRACE("ScVbaGlobals::ScVbaGlobals()");
-        mxApplication = uno::Reference< vba::XApplication > ( new ScVbaApplication( m_xContext) );
-    }
+{
+//	OSL_TRACE("ScVbaGlobals::ScVbaGlobals()");
+	mxApplication = uno::Reference< vba::XApplication > ( new ScVbaApplication( m_xContext) );
+}
 
-    // -----------------------------------------------------------------------------
-
-    ScVbaGlobals::~ScVbaGlobals()
-    {
-		OSL_TRACE("ScVbaGlobals::~ScVbaGlobals");
-    }
-
+ScVbaGlobals::~ScVbaGlobals()
+{
+//	OSL_TRACE("ScVbaGlobals::~ScVbaGlobals");
+}
 
 uno::Reference< vba::XGlobals >
 ScVbaGlobals::getGlobalsImpl( uno::Reference< uno::XComponentContext >& xContext ) throw ( uno::RuntimeException )
@@ -76,50 +74,45 @@ ScVbaGlobals::getGlobalsImpl( uno::Reference< uno::XComponentContext >& xContext
 	return xGlobals;
 }
 
-    // -----------------------------------------------------------------------------
-    // XServiceInfo
-    // -----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
+// XServiceInfo
+// -----------------------------------------------------------------------------
 
-    ::rtl::OUString ScVbaGlobals::getImplementationName(  ) throw (RuntimeException)
-    {
-        return ::vbaobj::getImplementationName();
-    }
+::rtl::OUString ScVbaGlobals::getImplementationName(  ) throw (RuntimeException)
+{
+	return ::vbaobj::getImplementationName();
+}
 
-    // -----------------------------------------------------------------------------
+sal_Bool ScVbaGlobals::supportsService( const ::rtl::OUString& rServiceName ) throw (RuntimeException)
+{
+	Sequence< ::rtl::OUString > aNames( ::vbaobj::getSupportedServiceNames() );
+	const ::rtl::OUString* pNames = aNames.getConstArray();
+	const ::rtl::OUString* pEnd = pNames + aNames.getLength();
+	for ( ; pNames != pEnd && !pNames->equals( rServiceName ); ++pNames )
+		;
 
-    sal_Bool ScVbaGlobals::supportsService( const ::rtl::OUString& rServiceName ) throw (RuntimeException)
-    {
-	    Sequence< ::rtl::OUString > aNames( ::vbaobj::getSupportedServiceNames() );
-	    const ::rtl::OUString* pNames = aNames.getConstArray();
-	    const ::rtl::OUString* pEnd = pNames + aNames.getLength();
-	    for ( ; pNames != pEnd && !pNames->equals( rServiceName ); ++pNames )
-		    ;
+	return pNames != pEnd;
+}
 
-	    return pNames != pEnd;
-    }
-
-    // -----------------------------------------------------------------------------
-
-    Sequence< ::rtl::OUString > ScVbaGlobals::getSupportedServiceNames(  ) throw (RuntimeException)
-    {
-        return vbaobj::getSupportedServiceNames();
-    }
-
+Sequence< ::rtl::OUString > ScVbaGlobals::getSupportedServiceNames(  ) throw (RuntimeException)
+{
+	return vbaobj::getSupportedServiceNames();
+}
 	
-    // =============================================================================
-    // XGlobals
-    // =============================================================================
+// =============================================================================
+// XGlobals
+// =============================================================================
 uno::Reference<vba::XApplication >
 ScVbaGlobals::getApplication() throw (uno::RuntimeException)
 {
-	OSL_TRACE("In ScVbaGlobals::getApplication");	
+//	OSL_TRACE("In ScVbaGlobals::getApplication");	
     return mxApplication;
 }
 
 uno::Reference< vba::XWorkbook > SAL_CALL 
 ScVbaGlobals::getActiveWorkbook() throw (uno::RuntimeException)
 {
-	OSL_TRACE("In ScVbaGlobals::getActiveWorkbook");	
+//	OSL_TRACE("In ScVbaGlobals::getActiveWorkbook");	
     uno::Reference< vba::XWorkbook > xWorkbook( mxApplication->getActiveWorkbook(), uno::UNO_QUERY);
     if ( xWorkbook.is() )
     {
@@ -134,7 +127,7 @@ ScVbaGlobals::getActiveWorkbook() throw (uno::RuntimeException)
 uno::Reference< vba::XWorksheet > SAL_CALL 
 ScVbaGlobals::getActiveSheet() throw (uno::RuntimeException)
 {
-	OSL_TRACE("ScVbaGlobals::getActiveSheet()");
+//	OSL_TRACE("ScVbaGlobals::getActiveSheet()");
     uno::Reference< vba::XWorksheet > result;
     uno::Reference< vba::XWorkbook > xWorkbook( 
         mxApplication->getActiveWorkbook(), uno::UNO_QUERY );
@@ -166,40 +159,36 @@ ScVbaGlobals::WorkBooks( const uno::Any& aIndex ) throw (uno::RuntimeException)
 uno::Any SAL_CALL
 ScVbaGlobals::WorkSheets(const uno::Any& aIndex) throw (uno::RuntimeException)
 {
-        OSL_TRACE("ScVbaGlobals::getWorkSheets()");
+//	OSL_TRACE("ScVbaGlobals::getWorkSheets()");
     uno::Reference< vba::XWorkbook > xWorkbook( mxApplication->getActiveWorkbook(), uno::UNO_QUERY );
         uno::Any result;
     if ( xWorkbook.is() )
-    {
         result  = xWorkbook->Worksheets( aIndex );
-    }
+
     else
-    {
         // Fixme - check if this is reasonable/desired behavior
         throw uno::RuntimeException( rtl::OUString::createFromAscii(
             "No ActiveWorkBook available" ), Reference< uno::XInterface >() );
-    }
-        return result;
+
+	return result;
 }
 
 ::uno::Sequence< ::uno::Any > SAL_CALL
 ScVbaGlobals::getGlobals(  ) throw (::uno::RuntimeException)
 {
-        sal_uInt32 nMax = 0;
-        uno::Sequence< uno::Any > maGlobals(4);
-        maGlobals[ nMax++ ] <<= ScVbaGlobals::getGlobalsImpl(m_xContext);
-        maGlobals[ nMax++ ] <<= mxApplication;
+	sal_uInt32 nMax = 0;
+	uno::Sequence< uno::Any > maGlobals(4);
+	maGlobals[ nMax++ ] <<= ScVbaGlobals::getGlobalsImpl(m_xContext);
+	maGlobals[ nMax++ ] <<= mxApplication;
 
-        uno::Reference< vba::XWorkbook > xWorkbook = mxApplication->getActiveWorkbook();
-        if( xWorkbook.is() )
-        {
-                maGlobals[ nMax++ ] <<= xWorkbook;
-                uno::Reference< vba::XWorksheet > xWorksheet = xWorkbook->getActiveSheet();
-                if( xWorksheet.is() )
-                maGlobals[ nMax++ ] <<= xWorksheet;
-        }
-        maGlobals.realloc( nMax );
-        return maGlobals;
+	uno::Reference< vba::XWorkbook > xWorkbook = mxApplication->getActiveWorkbook();
+	if( xWorkbook.is() )
+	{
+		maGlobals[ nMax++ ] <<= xWorkbook;
+		uno::Reference< vba::XWorksheet > xWorksheet = xWorkbook->getActiveSheet();
+		if( xWorksheet.is() )
+			maGlobals[ nMax++ ] <<= xWorksheet;
+	}
+	maGlobals.realloc( nMax );
+	return maGlobals;
 }
-
-    // -----------------------------------------------------------------------------
