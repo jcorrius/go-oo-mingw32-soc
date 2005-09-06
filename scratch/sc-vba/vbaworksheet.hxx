@@ -55,6 +55,8 @@ public:
 
 	virtual void SAL_CALL Calculate(  ) throw (uno::RuntimeException);
 	virtual void SAL_CALL CheckSpelling( const uno::Any& CustomDictionary,const uno::Any& IgnoreUppercase,const uno::Any& AlwaysSuggest, const uno::Any& SpellingLang ) throw (uno::RuntimeException);
+virtual uno::Reference< vba::XRange > SAL_CALL Cells( const ::uno::Any &nRow, const ::uno::Any &nCol ) throw (uno::RuntimeException);
+
 };
 
 #endif /* SC_VBA_WORKSHEET_HXX */
