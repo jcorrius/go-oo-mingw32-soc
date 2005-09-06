@@ -70,6 +70,7 @@ public:
 	virtual uno::Reference< vba::XRange > SAL_CALL Resize( const ::uno::Any& RowSize, const ::uno::Any& ColumnSize ) 
 														   throw (uno::RuntimeException);
 	virtual uno::Reference< vba::XFont > SAL_CALL Font() throw (uno::RuntimeException);
+	virtual uno::Reference< vba::XInterior > SAL_CALL Interior(  ) throw (::com::sun::star::uno::RuntimeException) ;
 };
 
 #endif /* SC_VBA_RANGE_HXX */

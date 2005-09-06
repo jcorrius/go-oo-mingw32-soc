@@ -38,16 +38,20 @@
 #include <com/sun/star/frame/XDispatchHelper.hpp>
 #include <com/sun/star/util/XURLTransformer.hpp>
 #include <com/sun/star/sheet/XCellRangeMovement.hpp>
+#include <com/sun/star/sheet/XCellRangeData.hpp>
 
 #include "vbarange.hxx"
 #include "vbarows.hxx"
 #include "vbacolumns.hxx"
 #include "vbafont.hxx"
+#include "vbainterior.hxx"
+
+#include <stdio.h>
 
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
 
-uno::Any
+uno::Any 
 ScVbaRange::getValue() throw (::com::sun::star::uno::RuntimeException)
 {
 	uno::Reference< table::XCell > xCell = mxRange->getCellByPosition( 0, 0 );
@@ -56,15 +60,14 @@ ScVbaRange::getValue() throw (::com::sun::star::uno::RuntimeException)
 		return uno::Any( xCell->getValue() );
 	if( eType == table::CellContentType_TEXT )
 	{
-		uno::Reference< text::XTextRange > xTextRange(mxRange, ::uno::UNO_QUERY);
+		uno::Reference< text::XTextRange > xTextRange(xCell, ::uno::UNO_QUERY);
 		return ( uno::Any ) xTextRange->getString();
 	}
-	if( eType == table::CellContentType_EMPTY )
-		return uno::Any( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("") ) );
+	return uno::Any( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("") ) );
 }
 
 void
-ScVbaRange::setValue( const uno::Any& aValue ) throw (uno::RuntimeException)
+ScVbaRange::setValue( const uno::Any  &aValue  ) throw (uno::RuntimeException)
 {
 	long nValue;
 	long nRowCount, nColCount;
@@ -422,7 +425,7 @@ uno::Any
 ScVbaRange::Columns( const uno::Any& aIndex ) throw (uno::RuntimeException)
 {
 	uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, uno::UNO_QUERY);
-	uno::Reference< table::XTableColumns > xTableColumns(xColumnRowRange->getRows(), uno::UNO_QUERY);
+	uno::Reference< table::XTableColumns > xTableColumns(xColumnRowRange->getColumns(), uno::UNO_QUERY);
 	uno::Reference< vba::XColumns > xColumns(new ScVbaColumns(xTableColumns, m_xContext, mxRange));
 	if (  aIndex.getValueTypeClass() == uno::TypeClass_VOID )
 		return uno::Any( xColumns );
@@ -565,11 +568,15 @@ ScVbaRange::setWrapText( sal_Bool bIsWrapped ) throw (uno::RuntimeException)
 sal_Bool
 ScVbaRange::getWrapText() throw (uno::RuntimeException)
 {
-	sal_Bool bWrapped;
+	sal_Bool bWrapped = false;
 	uno::Reference< beans::XPropertySet > xProps(mxRange, ::uno::UNO_QUERY );
 	uno::Any aValue = xProps->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "IsTextWrapped" ) ) );
 	aValue >>= bWrapped;
 	return bWrapped;
 }
-                                                                                                                             
+
+uno::Reference< vba::XInterior > ScVbaRange::Interior( ) throw (uno::RuntimeException)
+{
+        return uno::Reference<vba::XInterior> (new ScVbaInterior ( m_xContext, mxRange));
+}                                                                                                                             
 

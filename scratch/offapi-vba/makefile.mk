@@ -28,7 +28,8 @@ IDLFILES=\
 	XRows.idl\
 	XOutline.idl\
 	XColumns.idl \
-	MSFormReturnTypes.idl	
+	MSFormReturnTypes.idl\
+	XInterior.idl 
 
 # ------------------------------------------------------------------
 

@@ -5,6 +5,7 @@
 #include <com/sun/star/container/XEnumerationAccess.hpp>
 #include <com/sun/star/sheet/XSpreadsheetView.hpp>
 #include <com/sun/star/container/XNamed.hpp>
+#include <com/sun/star/lang/IndexOutOfBoundsException.hpp>
 
 #include <org/openoffice/vba/XApplication.hpp>
 
@@ -17,8 +18,22 @@
 
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
+
+ScVbaWorksheets::ScVbaWorksheets(uno::Reference< ::com::sun::star::uno::XComponentContext > & xContext, uno::Reference< frame::XModel > xModel ):
+		mxModel( xModel ), m_xContext( xContext ) 
+{ 
+	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( mxModel, uno::UNO_QUERY );
+        if ( !xSpreadDoc.is() )
+        {
+		throw uno::RuntimeException(
+			::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ": Couldn't obtain XSpreadsheetDocument interface from XModel" ) ), 
+			uno::Reference< uno::XInterface >() );
+	}
+       mxSheets = xSpreadDoc->getSheets();
+}
+
 // XEnumerationAccess
-uno::Type
+uno::Type 
 ScVbaWorksheets::getElementType() throw (uno::RuntimeException)
 {
 	return vba::XWorksheet::static_type(0);
@@ -48,8 +63,8 @@ ScVbaWorksheets::getParent() throw (uno::RuntimeException)
 	}
 	if ( !xWorkbook.is() )
 	{
-		//uno::RuntimeException( rtl::OUString::createFromAscii("ScVbaWorksheets::getParent - No Parent" ),
-		//													   uno::Reference< uno::XInterface >() );
+		//throw uno::RuntimeException( rtl::OUString::createFromAscii(
+		//	"ScVbaWorksheets::getParent - No Parent" ), uno::Reference< uno::XInterface >() );
 	}
 	
 	OSL_TRACE("In ScVbaWorksheets::getParent() returning workbook");
@@ -79,21 +94,76 @@ ScVbaWorksheets::getCount() throw (uno::RuntimeException)
 }
 
 uno::Any
-ScVbaWorksheets::Item( sal_Int32 nIndex ) throw (uno::RuntimeException)
+ScVbaWorksheets::getItemByStringIndex( const rtl::OUString& sIndex ) throw (uno::RuntimeException)
 {
+	uno::Reference <container::XNameAccess> xName( mxSheets, uno::UNO_QUERY );
+	uno::Reference< vba::XWorksheet > result;
+
+	if ( xName.is() )
+	{
+		uno::Reference< sheet::XSpreadsheet > xSheet(xName->getByName( sIndex ), uno::UNO_QUERY);
+		result =  new ScVbaWorksheet( m_xContext, xSheet, mxModel);
+	}
+	else
+	{
+		throw uno::RuntimeException(
+			::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( 
+			": Unable to obtain XNameAccess to query for spreadsheet name" ) ), 
+			uno::Reference< uno::XInterface >() );
+	}
+
+	return uno::Any( result );
+}
+
+uno::Any
+ScVbaWorksheets::getItemByIntIndex( const sal_Int32 nIndex ) throw (uno::RuntimeException)
+{
+	if ( nIndex <= 0 )
+	{
+		throw  lang::IndexOutOfBoundsException( 
+			::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( 
+			"index is 0 or negative" ) ), 
+			uno::Reference< uno::XInterface >() );
+	}
+
 	uno::Reference <container::XIndexAccess> xIndex( mxSheets, uno::UNO_QUERY );
-    if ( xIndex.is() )
-    {
-       	uno::Reference< sheet::XSpreadsheet > xSheet(xIndex->getByIndex(nIndex), uno::UNO_QUERY);
-		uno::Reference< lang::XMultiComponentFactory > xSMgr( m_xContext->getServiceManager(), 
-															  uno::UNO_QUERY_THROW );
-    	uno::Reference< frame::XDesktop > xDesktop( xSMgr->createInstanceWithContext(
-    											  ::rtl::OUString::createFromAscii("com.sun.star.frame.Desktop"),m_xContext),
-                                      			  uno::UNO_QUERY_THROW );
-    	uno::Reference< frame::XModel > xModel( xDesktop->getCurrentComponent(),uno::UNO_QUERY );
-		return  uno::Any(uno::Reference< vba::XWorksheet >( new ScVbaWorksheet(m_xContext,xSheet,xModel)));
-    }
-	return uno::Any( uno::Reference< vba::XWorksheet >(NULL) );
+
+	if ( !xIndex.is() )
+	{
+		throw uno::RuntimeException(
+			::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( 
+			": Unable to obtain XIndexAccess to query for spreadsheet name" ) ), 
+			uno::Reference< uno::XInterface >() );
+	}
+	// need to adjust for vba index ( for which first element is 1 )
+	uno::Reference< sheet::XSpreadsheet > xSheet(xIndex->getByIndex( nIndex - 1 ), uno::UNO_QUERY);
+	uno::Reference< vba::XWorksheet > result =  new ScVbaWorksheet( m_xContext, xSheet, mxModel);
+	
+	return uno::Any( result );
+}
+
+uno::Any
+ScVbaWorksheets::Item( const uno::Any& aIndex ) throw (uno::RuntimeException)
+{
+	if ( aIndex.getValueTypeClass() != uno::TypeClass_STRING )
+	{
+		sal_Int32 nIndex = 0;
+
+		if ( ( aIndex >>= nIndex ) != sal_True )
+		{
+			rtl::OUString message;
+			message = rtl::OUString::createFromAscii(
+				"Couldn't convert index to Int32");
+			throw  lang::IndexOutOfBoundsException( message,
+				uno::Reference< uno::XInterface >() );
+		}
+		return 	getItemByIntIndex( nIndex );
+	}
+	rtl::OUString aStringSheet;
+
+	aIndex >>= aStringSheet;
+	return getItemByStringIndex( aStringSheet );
+
 }
 
 // XWorksheets
