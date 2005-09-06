@@ -33,7 +33,7 @@
 static sal_Int16 
 nameExists( uno::Reference <sheet::XSpreadsheetDocument>& xSpreadDoc, ::rtl::OUString & name)
 {
-	uno::Reference<sheet::XSpreadsheets> xSheets = xSpreadDoc->getSheets();
+	uno::Reference <sheet::XSpreadsheets> xSheets = xSpreadDoc->getSheets();
 	uno::Reference <container::XIndexAccess> xIndex( xSheets, uno::UNO_QUERY );
 	if ( xIndex.is() )
 	{
@@ -338,7 +338,7 @@ ScVbaWorksheet::Paste( const uno::Any& Destination, const uno::Any& Link ) throw
 }
 
 void 
-ScVbaWorksheet::Delete(  ) throw (uno::RuntimeException)
+ScVbaWorksheet::Delete() throw (uno::RuntimeException)
 {
 	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( mxModel, uno::UNO_QUERY_THROW );
 	rtl::OUString aSheetName = getName();
@@ -355,6 +355,39 @@ ScVbaWorksheet::Delete(  ) throw (uno::RuntimeException)
 			xNameContainer->removeByName(aSheetName);
 		}
 	}
+}
+
+uno::Reference< vba::XWorksheet >
+ScVbaWorksheet::getSheetAtOffset(int offset) throw (uno::RuntimeException)
+{
+	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( mxModel, uno::UNO_QUERY );
+	uno::Reference <sheet::XSpreadsheets> xSheets = xSpreadDoc->getSheets();
+	uno::Reference <container::XIndexAccess> xIndex( xSheets, uno::UNO_QUERY_THROW );
+
+	rtl::OUString aName = getName();
+	sal_Int16 nIdx = nameExists (xSpreadDoc, aName);
+	if (nIdx >= 0)
+		nIdx += offset;
+
+	if (nIdx < 0 || nIdx >= xIndex->getCount()) // TESTME - throw ?
+		return uno::Reference< vba::XWorksheet >();
+	else
+	{
+		uno::Reference< sheet::XSpreadsheet > xSheet(xIndex->getByIndex(nIdx), uno::UNO_QUERY_THROW);
+		return new ScVbaWorksheet (m_xContext, xSheet, mxModel);
+	}
+}
+
+uno::Reference< vba::XWorksheet >
+ScVbaWorksheet::getNext() throw (uno::RuntimeException)
+{
+	return getSheetAtOffset(1);
+}
+
+uno::Reference< vba::XWorksheet >
+ScVbaWorksheet::getPrevious() throw (uno::RuntimeException)
+{
+	return getSheetAtOffset(-1);
 }
 
 void
@@ -376,7 +409,7 @@ ScVbaWorksheet::Unprotect( const uno::Any& Password ) throw (uno::RuntimeExcepti
 }
 
 void 
-ScVbaWorksheet::Calculate(  ) throw (uno::RuntimeException)
+ScVbaWorksheet::Calculate() throw (uno::RuntimeException)
 {
 	uno::Reference <sheet::XCalculatable> xReCalculate(mxModel, uno::UNO_QUERY_THROW);
 	xReCalculate->calculate();

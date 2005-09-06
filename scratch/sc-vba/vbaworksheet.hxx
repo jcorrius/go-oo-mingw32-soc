@@ -17,6 +17,8 @@ class ScVbaWorksheet : public ::cppu::WeakImplHelper1<vba::XWorksheet>
 	uno::Reference< sheet::XSpreadsheet > mxSheet;
 	uno::Reference< frame::XModel > mxModel;
 	uno::Reference< ::com::sun::star::uno::XComponentContext > m_xContext;
+		
+	uno::Reference< vba::XWorksheet > getSheetAtOffset(int offset) throw (uno::RuntimeException);
 
 public:
 	ScVbaWorksheet( 
@@ -41,6 +43,8 @@ public:
 	virtual ::sal_Bool SAL_CALL getProtectDrawingObjects() throw (uno::RuntimeException);
 	virtual uno::Reference< vba::XRange > SAL_CALL getUsedRange() throw (uno::RuntimeException) ;
 	virtual uno::Reference< vba::XOutline > SAL_CALL Outline( ) throw (uno::RuntimeException);
+	virtual uno::Reference< vba::XWorksheet > SAL_CALL getNext() throw (uno::RuntimeException);
+	virtual uno::Reference< vba::XWorksheet > SAL_CALL getPrevious() throw (uno::RuntimeException);
 
     // Methods
 	virtual void SAL_CALL Activate() throw (uno::RuntimeException);
