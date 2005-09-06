@@ -436,12 +436,29 @@ ScVbaWorksheet::CheckSpelling( const uno::Any& CustomDictionary,const uno::Any& 
 }
 
 uno::Reference< vba::XRange > 
-ScVbaWorksheet::Cells( const ::uno::Any &nRow, const ::uno::Any &nCol )
-
-              throw (uno::RuntimeException)
+ScVbaWorksheet::getSheetRange() throw (uno::RuntimeException)
 {
 	uno::Reference< table::XCellRange > xRange( mxSheet,uno::UNO_QUERY_THROW );
-	uno::Reference< vba::XRange > xVBARange( new ScVbaRange( m_xContext, xRange ) );
-	return xVBARange->Cells( nRow, nCol );
+	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xRange ) );
 }
 
+// These are hacks - we prolly (somehow) need to inherit
+// the vbarange functionality here ...
+uno::Reference< vba::XRange > 
+ScVbaWorksheet::Cells( const ::uno::Any &nRow, const ::uno::Any &nCol )
+		throw (uno::RuntimeException)
+{
+	return getSheetRange()->Cells( nRow, nCol );
+}
+
+uno::Any
+ScVbaWorksheet::Rows(const uno::Any& aIndex ) throw (uno::RuntimeException)
+{
+	return getSheetRange()->Rows( aIndex );
+}
+
+uno::Any
+ScVbaWorksheet::Columns( const uno::Any& aIndex ) throw (uno::RuntimeException)
+{
+	return getSheetRange()->Columns( aIndex );
+}

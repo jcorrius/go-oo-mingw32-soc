@@ -59,6 +59,6 @@ ScVbaRows::Item( const uno::Any &aIndex ) throw (uno::RuntimeException )
 	uno::Reference< sheet::XCellRangeAddressable > xAddressable( mxRange, uno::UNO_QUERY_THROW );
 	table::CellRangeAddress xAddress = xAddressable->getRangeAddress();
 	long nEndColumn = xAddress.EndColumn - xAddress.StartColumn;
-	aRange = new ScVbaRange( m_xContext,mxRange->getCellRangeByPosition(                                                                                  0, nIndexNumber,nEndColumn, nIndexNumber ) );
+	aRange = new ScVbaRange( m_xContext,mxRange->getCellRangeByPosition(0, nIndexNumber,nEndColumn, nIndexNumber ) );
     return uno::Any( aRange );
 } 	 

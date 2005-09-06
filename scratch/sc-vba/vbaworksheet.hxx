@@ -19,7 +19,7 @@ class ScVbaWorksheet : public ::cppu::WeakImplHelper1<vba::XWorksheet>
 	uno::Reference< ::com::sun::star::uno::XComponentContext > m_xContext;
 		
 	uno::Reference< vba::XWorksheet > getSheetAtOffset(int offset) throw (uno::RuntimeException);
-
+	uno::Reference< vba::XRange > getSheetRange() throw (uno::RuntimeException);
 public:
 	ScVbaWorksheet( 
 		uno::Reference< ::com::sun::star::uno::XComponentContext >& xContext,
@@ -59,8 +59,11 @@ public:
 
 	virtual void SAL_CALL Calculate(  ) throw (uno::RuntimeException);
 	virtual void SAL_CALL CheckSpelling( const uno::Any& CustomDictionary,const uno::Any& IgnoreUppercase,const uno::Any& AlwaysSuggest, const uno::Any& SpellingLang ) throw (uno::RuntimeException);
-virtual uno::Reference< vba::XRange > SAL_CALL Cells( const ::uno::Any &nRow, const ::uno::Any &nCol ) throw (uno::RuntimeException);
 
+	// Hacks (?)
+	virtual uno::Reference< vba::XRange > SAL_CALL Cells( const ::uno::Any &nRow, const ::uno::Any &nCol ) throw (uno::RuntimeException);
+	virtual uno::Any Rows(const uno::Any& aIndex ) throw (uno::RuntimeException);
+	virtual uno::Any Columns(const uno::Any& aIndex ) throw (uno::RuntimeException);
 };
 
 #endif /* SC_VBA_WORKSHEET_HXX */
