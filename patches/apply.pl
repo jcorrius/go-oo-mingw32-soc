@@ -180,6 +180,35 @@ sub version_filter_targets($)
     return @targets;
 }
 
+sub patched_files($) {
+    my ( $file ) = @_;
+    
+    my @lines = split (/\n/, $file);
+    my @dest;
+
+    foreach $line (@lines) {
+        if ( $line =~ /\+\+\+ ([^\s]*)/ ) {
+            push @dest, $1;
+        }
+    }
+
+    return @dest;
+}
+
+sub is_dependent_patch($$) {
+    my ( $patchedref, $patch ) = @_;
+    
+    my @files = patched_files ($patch);
+
+    foreach $file (@files) {
+        if ( exists $patchedref->{$file} ) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 sub list_patches(@) {
     my ( @distros ) = @_;
 
@@ -320,7 +349,6 @@ sub apply_patches {
         mkdir $applied_patches || die "Can't make directory $patch_dir: $!";
     }
 
-    my $patch_num = 0;
     my %existing_patches;
 
     foreach (applied_patches_list()) {
@@ -328,23 +356,25 @@ sub apply_patches {
 
         $file =~ s/^([0-9]{3})-//;
         $existing_patches{$file} = $_;
-        $patch_num = $1;
     }
-    $patch_num++;
-
-# Foo ! - we really need to look for different patches here and
-# reverse them ahead of time, not just missing ones [!]
 
     my %obsolete_patches = %existing_patches;
     foreach $patch (@Patches) {
 	delete $obsolete_patches{basename($patch)};
     }
 
-    foreach $a (reverse sort keys %obsolete_patches) {
+    my @to_apply;
+    my @to_unapply;
+    my %patched;
+
+    foreach $a (keys %obsolete_patches) {
 	$patch = $obsolete_patches{$a};
-        print "Unapplying obsolete patch $patch\n";
-        do_patch $patch, $base_cmd." -R";
-        unlink $patch || die "Can't remove $patch $!";
+
+        unshift @to_unapply, $patch;
+        foreach $pf ( patched_files (slurp ($patch)) ) {
+            $patched{$pf} = 1;
+        }
+
 	delete $existing_patches{$a};
     }
 
@@ -358,29 +388,56 @@ sub apply_patches {
             my $patch_content = slurp($patch);
             my $applied_content = slurp($applied_patch);
             if (length ($patch_content) == length ($applied_content) &&
-                $patch_content eq $applied_content) {
+                $patch_content eq $applied_content &&
+                !is_dependent_patch (\%patched, $applied_content))
+            {
                 print "$patch_file already applied, skipped\n";
                 $is_applied = 1;
             }
             else {
-                print "$patch_file changed, unapplying\n";
-                do_patch $applied_patch, $base_cmd." -R";
-                unlink $applied_patch || die "Can't remove $applied_patch: $!";
+                unshift @to_unapply, $applied_patch;
+                foreach $pf ( patched_files( $applied_content ) ) {
+                    $patched{$pf} = 1;
+                }
             }
             delete $existing_patches{$patch_file};
         }
 
         if (!$is_applied) {
-            print "\n" unless $quiet;
-            do_patch $patch, $base_cmd;
-
-            my $patch_copy = sprintf("%s/%03d-%s", $applied_patches, $patch_num++, $patch_file);
-
-            print "copy $patch_file -> $patch_copy\n" unless $quiet;
-
-            copy($patch, $patch_copy) 
-                || die "Can't copy $patch to $patch_copy $!";
+            push @to_apply, $patch;
         }
+    }
+
+    foreach $patch (@to_unapply) {
+        print "\n" unless $quiet;
+        print "Unapplying patch $patch\n";
+        do_patch $patch, $base_cmd." -R";
+        unlink $patch || die "Can't remove $patch $!";
+    }
+
+    my $patch_num = 0;
+    foreach (applied_patches_list()) {
+        my $file = basename $_;
+
+        if ( $file =~ /^([0-9]{3})-/ ) {
+            my $num = $1;
+            $num =~ s/^0*//;
+            
+            $patch_num = $num if ( $num > $patch_num );
+        }
+    }
+    $patch_num++;
+
+    foreach $patch (@to_apply) {
+        my $patch_file = basename($patch);
+        print "\n" unless $quiet;
+        do_patch $patch, $base_cmd;
+
+        my $patch_copy = sprintf("%s/%03d-%s", $applied_patches, $patch_num++, $patch_file);
+
+        print "copy $patch_file -> $patch_copy\n" unless $quiet;
+
+        copy($patch, $patch_copy) || die "Can't copy $patch to $patch_copy $!";
     }
 
     if (keys %existing_patches) {
