@@ -4,7 +4,6 @@
 #include <cppuhelper/implbase1.hxx>
 
 #include <org/openoffice/vba/XApplication.hpp>
-#include <com/sun/star/frame/XDesktop.hpp>
 #include "vbahelper.hxx"
 
 typedef ::cppu::WeakImplHelper1< org::openoffice::vba::XApplication > ScVbaApplication_BASE;
@@ -13,7 +12,6 @@ class ScVbaApplication : public ScVbaApplication_BASE
 {
 private:
 	uno::Reference< ::com::sun::star::uno::XComponentContext > m_xContext;
-	uno::Reference< ::com::sun::star::frame::XDesktop > m_xDesktop;
 	uno::Reference< frame::XModel > getCurrentDocument() throw (uno::RuntimeException);
 public:
 	ScVbaApplication( uno::Reference< ::com::sun::star::uno::XComponentContext >& m_xContext );

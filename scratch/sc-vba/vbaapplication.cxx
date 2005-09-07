@@ -1,4 +1,5 @@
 #include <sfx2/objsh.hxx>
+#include <sfx2/app.hxx>
 
 #include<com/sun/star/sheet/XSpreadsheetView.hpp>
 #include<com/sun/star/view/XSelectionSupplier.hpp>
@@ -11,36 +12,66 @@
 
 #include "tabvwsh.hxx"
 
+#include <basic/sbx.hxx>
+
+void unoToSbxValue( SbxVariable* pVar, const uno::Any& aValue );
+uno::Any sbxToUnoValue( SbxVariable* pVar );
+
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
 
 inline uno::Reference< frame::XModel > 
 ScVbaApplication::getCurrentDocument() throw (uno::RuntimeException)
 {
-	// This is lame - we should do better ... pwrt. the IDE ...
-	return uno::Reference< frame::XModel >( m_xDesktop->getCurrentComponent(), uno::UNO_QUERY_THROW );
-}
+	uno::Reference< frame::XModel > xModel;
+	SbxObject* pBasic = reinterpret_cast< SbxObject* > ( SFX_APP()->GetBasic() );
+	SbxObject* basicChosen =  pBasic ;
+	if ( basicChosen == NULL)
+	{
+		OSL_TRACE("getModelFromBasic() StarBASIC* is NULL" );
+		return xModel;
+	}    
+    SbxObject* p = pBasic;
+    SbxObject* pParent = p->GetParent();
+    SbxObject* pParentParent = pParent ? pParent->GetParent() : NULL;
 
+    if( pParentParent )
+    {
+        basicChosen = pParentParent;
+    }
+    else if( pParent )
+    {
+        basicChosen = pParent;
+    }
+
+
+    uno::Any aModel; 
+    SbxVariable *pCompVar = basicChosen->Find(  UniString(RTL_CONSTASCII_USTRINGPARAM("ThisComponent")), SbxCLASS_OBJECT );
+
+	if ( pCompVar )
+	{
+		aModel = sbxToUnoValue( pCompVar );
+		if ( sal_False == ( aModel >>= xModel ) ||
+			!xModel.is() )
+		{
+			OSL_TRACE("Failed to extract model from thisComponent ");
+			return xModel;
+		}
+		else
+		{
+			OSL_TRACE("Have model ThisComponent points to url %s",
+			::rtl::OUStringToOString( xModel->getURL(),
+				RTL_TEXTENCODING_ASCII_US ).pData->buffer );
+		}
+	}
+	else
+	{
+		OSL_TRACE("Failed to get ThisComponent");
+	}
+	return xModel;
+}
 ScVbaApplication::ScVbaApplication( uno::Reference<uno::XComponentContext >& xContext ): m_xContext( xContext )
 {
-	uno::Reference< lang::XMultiComponentFactory > xSMgr( m_xContext->getServiceManager(), uno::UNO_QUERY );
-	if ( !xSMgr.is() )
-	{
-		throw uno::RuntimeException(
-                ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ": Couldn't instantiate MultiComponent factory" ) ),
-                    uno::Reference< XInterface >() );
-
-	}
-	m_xDesktop.set( 
-		xSMgr->createInstanceWithContext( rtl::OUString::createFromAscii(
-			"com.sun.star.frame.Desktop"), xContext ) , uno::UNO_QUERY );
-
-	if ( !m_xDesktop.is() )
-	{
-		throw uno::RuntimeException(
-                ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ": Couldn't create Desktop component" ) ),
-                    uno::Reference< XInterface >() );
-	}
 }
 
 ScVbaApplication::~ScVbaApplication()
@@ -51,7 +82,7 @@ ScVbaApplication::~ScVbaApplication()
 uno::Reference< vba::XWorkbook >
 ScVbaApplication::getActiveWorkbook() throw (uno::RuntimeException)
 {
-	uno::Reference< frame::XModel > xModel( m_xDesktop->getCurrentComponent(), uno::UNO_QUERY );
+	uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY );
 
 	if( xModel.is() )
 	{
