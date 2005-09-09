@@ -169,14 +169,14 @@ ScVbaRange::getCount() throw (uno::RuntimeException)
 	return rowCount * colCount;
 }
 
-long 
+sal_Int32 
 ScVbaRange::getRow() throw (uno::RuntimeException)
 {
 	uno::Reference< sheet::XCellAddressable > xCellAddressable(mxRange->getCellByPosition(0, 0), uno::UNO_QUERY);
 	return xCellAddressable->getCellAddress().Row + 1; // Zero value indexing 
 }	
 		
-long 
+sal_Int32 
 ScVbaRange::getColumn() throw (uno::RuntimeException)
 {
 	uno::Reference< sheet::XCellAddressable > xCellAddressable(mxRange->getCellByPosition(0, 0), uno::UNO_QUERY);
