@@ -1,13 +1,18 @@
 #include <tools/urlobj.hxx>
 
-#include <com/sun/star/util/XCloseable.hpp>
+#include <com/sun/star/util/XModifiable.hpp>
 #include <com/sun/star/util/XProtectable.hpp>
 #include <com/sun/star/sheet/XSpreadsheetView.hpp>
 #include <com/sun/star/sheet/XSpreadsheetDocument.hpp>
+#include <com/sun/star/frame/XStorable.hpp>
+#include <com/sun/star/frame/XFrame.hpp>
 
 #include "vbaworksheet.hxx"
 #include "vbaworksheets.hxx"
 #include "vbaworkbook.hxx"
+#include "vbahelper.hxx"
+
+#include <stdio.h>
 
 // Much of the impl. for the equivalend UNO module is
 // sc/source/ui/unoobj/docuno.cxx, viewuno.cxx
@@ -25,14 +30,15 @@ ScVbaWorkbook::getName() throw (uno::RuntimeException)
 ScVbaWorkbook::getPath() throw (uno::RuntimeException)
 {
 	INetURLObject aURL( mxModel->getURL() );
+	aURL.CutLastName();
 	return aURL.GetURLPath();
 }
 
 ::rtl::OUString
 ScVbaWorkbook::getFullName() throw (uno::RuntimeException)
 {
-	SC_VBA_FIXME(("Workbook::FullName unclear / needs work"));
-	return getName();
+	INetURLObject aURL( mxModel->getURL() );
+	return aURL.GetURLPath();
 }
 
 uno::Reference< vba::XWorksheet >
@@ -44,9 +50,10 @@ ScVbaWorkbook::getActiveSheet() throw (uno::RuntimeException)
 
 	uno::Reference< vba::XWorksheet > xWrkSt( new ScVbaWorksheet( m_xContext,xSpreadsheet->getActiveSheet() ,mxModel ));
 
-	if ( !xWrkSt.is() )
-		OSL_TRACE("Returning an invalid worksheet");
-
+	if ( xWrkSt.is() )
+	{
+		OSL_TRACE("Looks like returning a valid worksheet");
+	}
 	return xWrkSt;
 }
 
@@ -70,53 +77,97 @@ ScVbaWorkbook::Close( const uno::Any &rSaveArg, const uno::Any &rFileArg,
 					  const uno::Any &rRouteArg ) throw (uno::RuntimeException)
 {
 	sal_Bool bSaveChanges = sal_False;
-	rtl::OUString aFileName( RTL_CONSTASCII_USTRINGPARAM( "" ) );
+	rtl::OUString aFileName;
 	sal_Bool bRouteWorkbook = sal_True;
 
 	rSaveArg >>= bSaveChanges;
-	rFileArg >>= aFileName;
+	sal_Bool bFileName =  ( rFileArg >>= aFileName );
 	rRouteArg >>= bRouteWorkbook;
+	uno::Reference< frame::XStorable > xStorable( mxModel, uno::UNO_QUERY_THROW );
+	uno::Reference< util::XModifiable > xModifiable( mxModel, uno::UNO_QUERY_THROW );
 
-	uno::Reference< util::XCloseable > xCloseable( mxModel, uno::UNO_QUERY_THROW );
-	SC_VBA_FIXME(("Workbook::Close ignores 3 arguments"));
-	xCloseable->close( FALSE );
+	if( bSaveChanges )
+	{
+		if( xStorable->isReadonly() )
+		{	
+			throw uno::RuntimeException(::rtl::OUString( 
+				RTL_CONSTASCII_USTRINGPARAM( "Unable to save to a read only file ") ),
+                        	uno::Reference< XInterface >() );
+		}
+		if( bFileName )
+			xStorable->storeAsURL( aFileName, uno::Sequence< beans::PropertyValue >(0) ); 
+		else
+			xStorable->store();
+	}	
+	else
+		xModifiable->setModified( false );		
+	
+	rtl::OUString url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:CloseDoc"));
+	dispatchRequests(mxModel,url);
 }
 
 void
-ScVbaWorkbook::Protect() throw (uno::RuntimeException)
+ScVbaWorkbook::Protect( const uno::Any &aPassword ) throw (uno::RuntimeException)
 {
+	rtl::OUString rPassword;
 	uno::Reference< util::XProtectable > xProt( mxModel, uno::UNO_QUERY_THROW );
 	SC_VBA_FIXME(("Workbook::Protect stub"));
-	xProt->protect( rtl::OUString() );
+	if(  aPassword >>= rPassword )
+		xProt->protect( rPassword );
+	else
+		xProt->protect( rtl::OUString() );
 }
 
+void 
+ScVbaWorkbook::Unprotect( const uno::Any &aPassword ) throw (uno::RuntimeException)
+{
+	rtl::OUString rPassword;
+	uno::Reference< util::XProtectable > xProt( mxModel, uno::UNO_QUERY_THROW );
+	if( !getProtectStructure() )
+		throw uno::RuntimeException(::rtl::OUString(
+			RTL_CONSTASCII_USTRINGPARAM( "File is already unprotected" ) ),
+			uno::Reference< XInterface >() );
+	else
+	{
+		if( aPassword >>= rPassword )
+			xProt->unprotect( rPassword );
+		else
+			xProt->unprotect( rtl::OUString() );
+	}
+}
+		
 ::sal_Bool
 ScVbaWorkbook::getProtectStructure() throw (uno::RuntimeException)
 {
 	uno::Reference< util::XProtectable > xProt( mxModel, uno::UNO_QUERY_THROW );
 	return xProt->isProtected();
 }
-/*
-uno::Reference< vba::XWorksheet >
-ScVbaWorkbook::Worksheets( const ::uno::Any &rSheet ) throw (uno::RuntimeException)
+
+void 
+ScVbaWorkbook::setSaved( sal_Bool bSave ) throw (uno::RuntimeException)
 {
-	rtl::OUString aStringSheet;
-	rSheet >>= aStringSheet;
-
-        uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( mxModel, uno::UNO_QUERY );
-        if ( xSpreadDoc.is() )
-        {
-        	uno::Reference<sheet::XSpreadsheets> xSheets = xSpreadDoc->getSheets();
-		if (xSheets.is())
-		{
-			uno::Reference <container::XNameAccess> xName( xSheets, uno::UNO_QUERY );
-			if ( xName.is() )
-			{
-				uno::Reference< sheet::XSpreadsheet > xSheet(xName->getByName(aStringSheet), uno::UNO_QUERY);
-				return uno::Reference< vba::XWorksheet >( new ScVbaWorksheet(xSheet));
-			}
-		}
-        }
-
+	uno::Reference< util::XModifiable > xModifiable( mxModel, uno::UNO_QUERY_THROW );
+	xModifiable->setModified( bSave );
 }
-*/
+
+sal_Bool
+ScVbaWorkbook::getSaved() throw (uno::RuntimeException)
+{
+	uno::Reference< util::XModifiable > xModifiable( mxModel, uno::UNO_QUERY_THROW );
+	return xModifiable->isModified();
+}
+
+void
+ScVbaWorkbook::Save() throw (uno::RuntimeException)
+{
+	rtl::OUString url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM(".uno:Save"));
+	dispatchRequests(mxModel,url);
+}
+
+void 
+ScVbaWorkbook::Activate() throw (uno::RuntimeException)
+{
+	uno::Reference< frame::XFrame > xFrame = mxModel->getCurrentController()->getFrame();
+	xFrame->activate();
+}	
+
