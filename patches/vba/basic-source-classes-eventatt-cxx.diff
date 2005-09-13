@@ -1,0 +1,364 @@
+Index: basic/source/classes/eventatt.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/classes/eventatt.cxx,v
+retrieving revision 1.21
+diff -u -p -r1.21 eventatt.cxx
+--- basic/source/classes/eventatt.cxx	13 Apr 2005 09:09:13 -0000	1.21
++++ basic/source/classes/eventatt.cxx	13 Sep 2005 09:43:51 -0000
+@@ -128,6 +128,10 @@
+ 
+ 
+ #include <cppuhelper/implbase1.hxx>
++#ifdef ENABLE_VBA
++#include <org/openoffice/vba/XVBAToOOEventDescGen.hpp>
++#endif //ENABLE_VBA
++
+ using namespace ::com::sun::star::script;
+ using namespace ::com::sun::star;
+ using namespace ::com::sun::star::uno;
+@@ -144,10 +148,10 @@ class DialogEventAttacher : public Scrip
+ 	::osl::Mutex maMutex;
+ 
+ public:
+-	DialogEventAttacher( void ) {}
++	DialogEventAttacher( void );
+ 
+     // Methods
+-    virtual void SAL_CALL attachEvents( const ::com::sun::star::uno::Sequence< 
++	virtual void SAL_CALL attachEvents( const ::com::sun::star::uno::Sequence< 
+ 		::com::sun::star::uno::Reference< ::com::sun::star::uno::XInterface > >& Objects, 
+ 		const ::com::sun::star::uno::Reference< ::com::sun::star::script::XScriptListener >& xListener, 
+ 		const ::com::sun::star::uno::Any& Helper ) 
+@@ -156,6 +160,34 @@ public:
+ 				  ::com::sun::star::script::CannotCreateAdapterException, 
+ 				  ::com::sun::star::lang::ServiceNotRegisteredException, 
+ 				  ::com::sun::star::uno::RuntimeException);
++
++#ifdef ENABLE_VBA
++    virtual void SAL_CALL attachVBAEvents( const ::com::sun::star::uno::Sequence< 
++		::com::sun::star::uno::Reference< ::com::sun::star::uno::XInterface > >& Objects, 
++		const ::com::sun::star::uno::Any& Helper,
++		const ::com::sun::star::uno::Reference< ::com::sun::star::frame::XModel >& xModel ) 
++			throw(::com::sun::star::lang::IllegalArgumentException, 
++				  ::com::sun::star::beans::IntrospectionException, 
++				  ::com::sun::star::script::CannotCreateAdapterException, 
++				  ::com::sun::star::lang::ServiceNotRegisteredException, 
++				  ::com::sun::star::uno::RuntimeException);
++#endif //ENABLE_VBA
++private:
++		virtual void attachEventsToControl( com::sun::star::uno::Reference< ::com::sun::star::script::XScriptEventsSupplier >& xEventsSupplier, 
++		const ::com::sun::star::uno::Reference< ::com::sun::star::script::XScriptListener >& xListener, 
++		com::sun::star::uno::Reference< com::sun::star::awt::XControl > xControl,
++		com::sun::star::uno::Reference< com::sun::star::awt::XControlModel > xControlModel,
++		const ::com::sun::star::uno::Any& Helper ); 
++
++		virtual void processControls( const ::com::sun::star::uno::Sequence< 
++		::com::sun::star::uno::Reference< ::com::sun::star::uno::XInterface > >& Objects, 
++		const ::com::sun::star::uno::Reference< ::com::sun::star::script::XScriptListener >& xListener, 
++		const ::com::sun::star::uno::Any& Helper
++#ifdef ENABLE_VBA
++		, bool replaceBinding = false 
++#endif //ENABLE_VBA
++		); 
++		com::sun::star::uno::Reference< com::sun::star::uno::XComponentContext > m_xCtx;
+ };
+ 
+ 
+@@ -505,10 +537,16 @@ void SAL_CALL attachDialogEvents( StarBA
+ 	//const ::com::sun::star::uno::Reference< ::com::sun::star::script::XScriptListener >& xListener )
+ {
+ 	static Reference< XScriptEventsAttacher > xEventsAttacher;
++#ifdef ENABLE_VBA
++	static DialogEventAttacher*  pEventsAttacher = NULL;
++#endif //ENABLE_VBA
+ 	Guard< Mutex > aGuard( Mutex::getGlobalMutex() );
+ 	{
+ 		if( !xEventsAttacher.is() )
+ 			xEventsAttacher = new DialogEventAttacher();
++#ifdef ENABLE_VBA
++		pEventsAttacher = static_cast< DialogEventAttacher* >( xEventsAttacher.get() );
++#endif //ENABLE_VBA
+ 	}
+ 
+ 	if( !xDialogControl.is() )
+@@ -535,8 +573,16 @@ void SAL_CALL attachDialogEvents( StarBA
+ 	pObjects[ nControlCount ] = xDialogIface;
+ 
+ 	Reference< XScriptListener > xScriptListener = new BasicScriptListener_Impl( pBasic, xModel );
++		
+ 	Any Helper;
+ 	xEventsAttacher->attachEvents( aObjectSeq, xScriptListener, Helper );
++
++#ifdef ENABLE_VBA
++	if ( pEventsAttacher )
++		pEventsAttacher->attachVBAEvents( aObjectSeq, Helper, xModel );
++#endif //ENABLE_VBA
++
++
+ }
+ 
+ 
+@@ -620,20 +666,7 @@ void DialogAllListener_Impl::firing_impl
+ 
+ 
+ //===================================================================
+-
+-
+-
+-void SAL_CALL DialogEventAttacher::attachEvents
+-(
+-	const Sequence< Reference< XInterface > >& Objects,
+-	const Reference< XScriptListener >& xListener, 
+-	const Any& Helper 
+-) 
+-	throw(	IllegalArgumentException, 
+-			IntrospectionException, 
+-			CannotCreateAdapterException, 
+-			ServiceNotRegisteredException, 
+-			RuntimeException )
++DialogEventAttacher::DialogEventAttacher()
+ {
+ 	// Get EventAttacher and Introspection (Introspection???)
+ 	{
+@@ -654,11 +687,49 @@ void SAL_CALL DialogEventAttacher::attac
+ 			if( !mxEventAttacher.is() )
+ 				throw ServiceNotRegisteredException();
+ 		}
++		Reference < XPropertySet > xProps(
++			::comphelper::getProcessServiceFactory(), UNO_QUERY );
++
++		if( xProps.is() )
++		{
++			m_xCtx.set( xProps->getPropertyValue(
++				rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "DefaultContext" ))), 
++			UNO_QUERY );
++		}
++	}
++}
++void 
++DialogEventAttacher::processControls( const Sequence< 
++		Reference< XInterface > >& Objects, 
++		const Reference<XScriptListener >& xListener, 
++		const Any& Helper
++#ifdef ENABLE_VBA
++		, bool replaceBindings 
++#endif //ENABLE_VBA
++)
++{
++#ifdef ENABLE_VBA
++	static Reference< org::openoffice::vba::XVBAToOOEventDescGen > xVBAToOOEvtDesc;
++	if (  m_xCtx.is() )
++	{
++		Reference< XMultiComponentFactory > xMFac( 
++			m_xCtx->getServiceManager(), UNO_QUERY );
++		if ( xMFac.is() )
++		{
++			if ( !xVBAToOOEvtDesc.is() )
++				xVBAToOOEvtDesc.set( 
++					xMFac->createInstanceWithContext( 
++						rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( 
++							"org.openoffice.vba.VBAToOOEventDesc"  ) ),
++							m_xCtx ), UNO_QUERY );
++		}
+ 	}
++#endif //ENABLE_VBA
+ 
+ 	// Go over all objects
+ 	const Reference< XInterface >* pObjects = Objects.getConstArray();
+ 	sal_Int32 i, nObjCount = Objects.getLength();
++
+ 	for( i = 0 ; i < nObjCount ; i++ )
+ 	{
+ 		// We know that we have to do with instances of XControl
+@@ -670,48 +741,111 @@ void SAL_CALL DialogEventAttacher::attac
+ 
+ 		// Get XEventsSupplier from ControlModel
+ 		Reference< XControlModel > xControlModel = xControl->getModel();
+-		Reference< XScriptEventsSupplier > xEventsSupplier( xControlModel, UNO_QUERY );
+-		if( xEventsSupplier.is() )
++		Reference< XScriptEventsSupplier > xEventsSupplier;
++#ifdef ENABLE_VBA
++		if ( replaceBindings && xVBAToOOEvtDesc.is() )
++            // Or get XEventSupplier for VBAEvents
++			xEventsSupplier.set( xVBAToOOEvtDesc->getEventSupplier( xControl ),
++				UNO_QUERY );
++		else
++#endif //ENABLE_VBA
++			xEventsSupplier.set( xControlModel, UNO_QUERY );
++			
++		attachEventsToControl( xEventsSupplier, xListener, xControl, xControlModel,Helper );
++	}
++
++}
++
++#ifdef ENABLE_VBA
++void
++DialogEventAttacher::attachVBAEvents( 
++	const Sequence< Reference< XInterface > >& Objects,
++	const Any& Helper,
++	const Reference< frame::XModel >& xModel 
++) 
++	throw(	IllegalArgumentException, 
++			IntrospectionException, 
++			CannotCreateAdapterException, 
++			ServiceNotRegisteredException, 
++			RuntimeException )
++{
++	
++	Reference< XScriptListener > xVbaScriptListener;
++	// #TODO ?? maybe better to create this object directly and not
++	// use UNO ( can pass the StarBasic* ptr in this case )
++	// to do that need to create .hxx file for 
++	// basic/source/vbaevents/eventhelper.cxx ( inc file needs to be
++    // in basic source/inc 
++	if (  m_xCtx.is() )
++	{
++		Reference< XMultiComponentFactory > xMFac( 
++			m_xCtx->getServiceManager(), UNO_QUERY );
++		if ( xMFac.is() )
++		{
++			Sequence< Any > args(1);
++			args[0] <<= xModel;
++			xVbaScriptListener.set( 
++				xMFac->createInstanceWithArgumentsAndContext( 
++					rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( 
++						"org.openoffice.vba.EventListener"  ) ), args, 
++						m_xCtx ), UNO_QUERY );
++		}		
++		if ( xVbaScriptListener.is() )
+ 		{
+-			Reference< XNameContainer > xEventCont = xEventsSupplier->getEvents();
+-			Sequence< OUString > aNames = xEventCont->getElementNames();
+-			const OUString* pNames = aNames.getConstArray();
+-			sal_Int32 j, nNameCount = aNames.getLength();
++			processControls( Objects, xVbaScriptListener, Helper, true );
++		}
++	}	
++}
++#endif //ENABLE_VBA
+ 
+-			for( j = 0 ; j < nNameCount ; j++ )
+-			{
+-				ScriptEventDescriptor aDesc;
++void 
++DialogEventAttacher::attachEventsToControl( Reference< XScriptEventsSupplier >& xEventsSupplier, 
++		const Reference< XScriptListener >& xListener, 
++		Reference< XControl > xControl,
++		Reference< XControlModel > xControlModel,
++		const Any& Helper )
++{
++	if( xEventsSupplier.is() )
++	{
++		Reference< XNameContainer > xEventCont = xEventsSupplier->getEvents();
++		Sequence< OUString > aNames = xEventCont->getElementNames();
++		const OUString* pNames = aNames.getConstArray();
++		sal_Int32 j, nNameCount = aNames.getLength();
+ 
+-				Any aElement = xEventCont->getByName( pNames[ j ] );
+-				aElement >>= aDesc;
+-				Reference< XAllListener > xAllListener =
+-					new DialogAllListener_Impl( xListener, aDesc.ScriptType, aDesc.ScriptCode );
+-
+-				// Try first to attach event to the ControlModel
+-				sal_Bool bSuccess = sal_False;
+-				try
+-				{
+-					Reference< XEventListener > xListener = mxEventAttacher->
+-						attachSingleEventListener( xControlModel, xAllListener, Helper, 
+-						aDesc.ListenerType, aDesc.AddListenerParam, aDesc.EventMethod );
++		for( j = 0 ; j < nNameCount ; j++ )
++		{
++			ScriptEventDescriptor aDesc;
+ 
+-					if( xListener.is() )
+-						bSuccess = sal_True;
+-				}
+-				catch( IllegalArgumentException& ) 
+-				{}
+-				catch( IntrospectionException& ) 
+-				{}
+-				catch( CannotCreateAdapterException& ) 
+-				{}
+-				catch( ServiceNotRegisteredException& ) 
+-				{}
+-				//{
+-					//throw IntrospectionException();
+-				//}
++			Any aElement = xEventCont->getByName( pNames[ j ] );
++			aElement >>= aDesc;
++			Reference< XAllListener > xAllListener =
++				new DialogAllListener_Impl( xListener, aDesc.ScriptType, aDesc.ScriptCode );
++
++			// Try first to attach event to the ControlModel
++			sal_Bool bSuccess = sal_False;
++			try
++			{
++				Reference< XEventListener > xListener = mxEventAttacher->
++					attachSingleEventListener( xControlModel, xAllListener, Helper, 
++					aDesc.ListenerType, aDesc.AddListenerParam, aDesc.EventMethod );
+ 
+-				try
+-				{
++				if( xListener.is() )
++					bSuccess = sal_True;
++			}
++			catch( IllegalArgumentException& ) 
++			{}
++			catch( IntrospectionException& ) 
++			{}
++			catch( CannotCreateAdapterException& ) 
++			{}
++			catch( ServiceNotRegisteredException& ) 
++			{}
++			//{
++				//throw IntrospectionException();
++			//}
++
++			try
++			{
+ 				// If we had no success, try to attach to the Control
+ 				if( !bSuccess )
+ 				{
+@@ -720,19 +854,33 @@ void SAL_CALL DialogEventAttacher::attac
+ 						( xControl, xAllListener, Helper, aDesc.ListenerType,
+ 						  aDesc.AddListenerParam, aDesc.EventMethod );
+ 				}
+-				}
+-				catch( IllegalArgumentException& ) 
+-				{}
+-				catch( IntrospectionException& ) 
+-				{}
+-				catch( CannotCreateAdapterException& ) 
+-				{}
+-				catch( ServiceNotRegisteredException& ) 
+-				{}
+ 			}
++			catch( IllegalArgumentException& ) 
++			{}
++			catch( IntrospectionException& ) 
++			{}
++			catch( CannotCreateAdapterException& ) 
++			{}
++			catch( ServiceNotRegisteredException& ) 
++			{}
+ 		}
+ 	}
++}
++
+ 
++void SAL_CALL DialogEventAttacher::attachEvents
++(
++	const Sequence< Reference< XInterface > >& Objects,
++	const Reference< XScriptListener >& xListener, 
++	const Any& Helper 
++) 
++	throw(	IllegalArgumentException, 
++			IntrospectionException, 
++			CannotCreateAdapterException, 
++			ServiceNotRegisteredException, 
++			RuntimeException )
++{
++	processControls( Objects, xListener, Helper );
+ }
+ 
+ void RTL_Impl_CreateUnoDialog( StarBASIC* pBasic, SbxArray& rPar, BOOL bWrite )
