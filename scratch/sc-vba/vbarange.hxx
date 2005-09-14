@@ -34,8 +34,6 @@ public:
 	virtual void   SAL_CALL setText( const ::rtl::OUString &rString ) throw (uno::RuntimeException);
 	virtual ::rtl::OUString SAL_CALL getFormulaArray() throw (uno::RuntimeException);
 	virtual void   SAL_CALL setFormulaArray(const ::rtl::OUString &rFormula) throw (uno::RuntimeException);
-	//virtual ::rtl::OUString SAL_CALL getNumberFormat() throw (uno::RuntimeException);
-	//virtual void   SAL_CALL setNumberFormat( const sal_Char* aFormat ) throw (uno::RuntimeException);
 	virtual void SAL_CALL setNumberFormat( const ::rtl::OUString &rNumberFormat ) throw (uno::RuntimeException);
 	virtual ::rtl::OUString SAL_CALL getNumberFormat() throw (uno::RuntimeException);
 	virtual void SAL_CALL setMergeCells( sal_Bool bMerge ) throw (uno::RuntimeException);
@@ -71,6 +69,8 @@ public:
 														   throw (uno::RuntimeException);
 	virtual uno::Reference< vba::XFont > SAL_CALL Font() throw (uno::RuntimeException);
 	virtual uno::Reference< vba::XInterior > SAL_CALL Interior(  ) throw (::com::sun::star::uno::RuntimeException) ;
+	virtual uno::Reference< vba::XRange > SAL_CALL Range( const uno::Any &Cell1, const uno::Any &Cell2 )
+															throw (uno::RuntimeException);
 };
 
 #endif /* SC_VBA_RANGE_HXX */
