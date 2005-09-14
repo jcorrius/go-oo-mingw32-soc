@@ -628,3 +628,10 @@ ScVbaRange::Range( const uno::Any &Cell1, const uno::Any &Cell2 ) throw (uno::Ru
 	return NULL;
 }
 
+::com::sun::star::uno::Any SAL_CALL
+ScVbaRange::getCellRange(  ) throw (::com::sun::star::uno::RuntimeException)
+{
+	uno::Any aAny;
+	aAny <<= mxRange;
+	return aAny;
+}

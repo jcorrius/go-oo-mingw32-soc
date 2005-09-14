@@ -71,6 +71,7 @@ public:
 	virtual uno::Reference< vba::XInterior > SAL_CALL Interior(  ) throw (::com::sun::star::uno::RuntimeException) ;
 	virtual uno::Reference< vba::XRange > SAL_CALL Range( const uno::Any &Cell1, const uno::Any &Cell2 )
 															throw (uno::RuntimeException);
+	virtual ::com::sun::star::uno::Any SAL_CALL getCellRange(  ) throw (::com::sun::star::uno::RuntimeException);
 };
 
 #endif /* SC_VBA_RANGE_HXX */

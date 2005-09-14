@@ -37,7 +37,8 @@ SLOFILES= \
 		$(SLO)$/vbaoutline.obj \
 		$(SLO)$/vbafont.obj\
 		$(SLO)$/vbahelper.obj\
-		$(SLO)$/vbainterior.obj
+		$(SLO)$/vbainterior.obj\
+		$(SLO)$/vbawsfunction.obj
 
 
 # --- Targets ------------------------------------------------------

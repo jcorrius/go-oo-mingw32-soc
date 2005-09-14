@@ -9,6 +9,7 @@
 #include "vbaworkbook.hxx"
 #include "vbaworksheets.hxx"
 #include "vbarange.hxx"
+#include "vbawsfunction.hxx"
 
 #include "tabvwsh.hxx"
 
@@ -142,3 +143,8 @@ ScVbaApplication::Workbooks( const uno::Any& aIndex ) throw (uno::RuntimeExcepti
 	return uno::Any ( xWorkBooks->Item( aIndex ) );
 }
 
+uno::Reference< vba::XWorksheetFunction > SAL_CALL
+ScVbaApplication::WorksheetFunction( ) throw (::com::sun::star::uno::RuntimeException)
+{
+        return new ScVbaWSFunction(m_xContext);
+}
