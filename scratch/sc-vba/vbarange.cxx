@@ -386,7 +386,7 @@ ScVbaRange::Cells( const uno::Any &nRowIndex, const uno::Any &nColumnIndex ) thr
 		return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, mxRange ) );
 	if( !nRow )
 			throw uno::RuntimeException(
-										:rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ": Invalid RowIndex ") ),
+										::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ": Invalid RowIndex ") ),
 										uno::Reference< XInterface >() );
 	if( bIsIndex && !bIsColumnIndex ) // .Cells(n)
 	{
