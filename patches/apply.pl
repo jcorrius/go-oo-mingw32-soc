@@ -597,7 +597,7 @@ if ($dry_run || $find_unused) {
     $applied_patches = $dest_dir.'/applied_patches';
 
     $opts = join ' ', @arguments;
-    $base_cmd = "patch -l -b -p0 $opts -d $dest_dir";
+    $base_cmd = "patch -l -p0 $opts -d $dest_dir";
     if (is_old_patch_version()) {
 	$base_cmd = 'sed \'s/^\(@.*\)\r$/\1/\' | ' . $base_cmd;
     }
