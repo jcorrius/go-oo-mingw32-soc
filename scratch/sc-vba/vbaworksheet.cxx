@@ -451,13 +451,13 @@ ScVbaWorksheet::Cells( const ::uno::Any &nRow, const ::uno::Any &nCol )
 	return getSheetRange()->Cells( nRow, nCol );
 }
 
-uno::Any
+uno::Reference< vba::XRange >
 ScVbaWorksheet::Rows(const uno::Any& aIndex ) throw (uno::RuntimeException)
 {
 	return getSheetRange()->Rows( aIndex );
 }
 
-uno::Any
+uno::Reference< vba::XRange >
 ScVbaWorksheet::Columns( const uno::Any& aIndex ) throw (uno::RuntimeException)
 {
 	return getSheetRange()->Columns( aIndex );

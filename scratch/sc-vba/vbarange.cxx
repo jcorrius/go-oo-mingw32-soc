@@ -41,8 +41,6 @@
 #include <com/sun/star/sheet/XCellRangeData.hpp>
 
 #include "vbarange.hxx"
-#include "vbarows.hxx"
-#include "vbacolumns.hxx"
 #include "vbafont.hxx"
 #include "vbainterior.hxx"
 
@@ -166,6 +164,10 @@ ScVbaRange::getCount() throw (uno::RuntimeException)
 	uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, uno::UNO_QUERY);
 	rowCount = xColumnRowRange->getRows()->getCount();
 	colCount = xColumnRowRange->getColumns()->getCount();
+	if( IsRows() )
+		return rowCount;	
+	if( IsColumns() )
+		return colCount;
 	return rowCount * colCount;
 }
 
@@ -400,8 +402,8 @@ ScVbaRange::Cells( const uno::Any &nRowIndex, const uno::Any &nColumnIndex ) thr
 	}
 	if( !nColumn )
 		throw uno::RuntimeException(
-									::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ": Invalid ColumnIndex" ) ),
-									uno::Reference< XInterface >() );
+					::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ": Invalid ColumnIndex" ) ),
+					uno::Reference< XInterface >() );
 	--nRow, --nColumn;
 	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xRangeReference->getCellRangeByPosition( nColumn, nRow,                                        nColumn, nRow ) ) );
 }
@@ -419,26 +421,36 @@ ScVbaRange::Select() throw (uno::RuntimeException)
 	xSelection->select( ( uno::Any )mxRange );
 }
 
-uno::Any
+uno::Reference< vba::XRange >
 ScVbaRange::Rows(const uno::Any& aIndex ) throw (uno::RuntimeException)
 {
-	uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, uno::UNO_QUERY);
-	uno::Reference< table::XTableRows > xTableRows(xColumnRowRange->getRows(), uno::UNO_QUERY);
-	uno::Reference< vba::XRows > xRows(new ScVbaRows(xTableRows, m_xContext, mxRange));
-	if (  aIndex.getValueTypeClass() == uno::TypeClass_VOID )
-		return uno::Any( xRows );	
-	return xRows->Item( aIndex );
-}
+	sal_Int32 nValue;
+	if( !aIndex.hasValue() )
+		return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, mxRange, true ) );
+	if( aIndex >>= nValue )
+	{
+		uno::Reference< sheet::XCellRangeAddressable > xAddressable( mxRange, uno::UNO_QUERY );
+		--nValue;
+		return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, mxRange->getCellRangeByPosition(
+						xAddressable->getRangeAddress().StartColumn, nValue,
+						xAddressable->getRangeAddress().EndColumn, nValue ), true ) ); 	
+	}
+}	
 
-uno::Any
+uno::Reference< vba::XRange >
 ScVbaRange::Columns( const uno::Any& aIndex ) throw (uno::RuntimeException)
 {
-	uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, uno::UNO_QUERY);
-	uno::Reference< table::XTableColumns > xTableColumns(xColumnRowRange->getColumns(), uno::UNO_QUERY);
-	uno::Reference< vba::XColumns > xColumns(new ScVbaColumns(xTableColumns, m_xContext, mxRange));
-	if (  aIndex.getValueTypeClass() == uno::TypeClass_VOID )
-		return uno::Any( xColumns );
-	return xColumns->Item( aIndex );
+	sal_Int32 nValue;
+	if( !aIndex.hasValue() )
+		return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, mxRange, false, true ) );
+	if( aIndex >>= nValue )
+	{
+		uno::Reference< sheet::XCellRangeAddressable > xAddressable( mxRange, uno::UNO_QUERY );
+		--nValue;
+		return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, mxRange->getCellRangeByPosition(
+							nValue, xAddressable->getRangeAddress().StartRow,
+							nValue, xAddressable->getRangeAddress().EndRow ), false, true ) ); 
+	}
 }
 
 void

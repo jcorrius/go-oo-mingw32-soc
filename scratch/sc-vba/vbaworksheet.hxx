@@ -62,8 +62,8 @@ public:
 
 	// Hacks (?)
 	virtual uno::Reference< vba::XRange > SAL_CALL Cells( const ::uno::Any &nRow, const ::uno::Any &nCol ) throw (uno::RuntimeException);
-	virtual uno::Any Rows(const uno::Any& aIndex ) throw (uno::RuntimeException);
-	virtual uno::Any Columns(const uno::Any& aIndex ) throw (uno::RuntimeException);
+	virtual uno::Reference< vba::XRange > Rows(const uno::Any& aIndex ) throw (uno::RuntimeException);
+	virtual uno::Reference< vba::XRange > Columns(const uno::Any& aIndex ) throw (uno::RuntimeException);
 };
 
 #endif /* SC_VBA_WORKSHEET_HXX */

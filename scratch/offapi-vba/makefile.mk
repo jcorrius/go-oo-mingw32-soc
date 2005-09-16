@@ -25,9 +25,7 @@ IDLFILES=\
 	XWorksheet.idl\
 	XWorksheets.idl\
 	XFont.idl\
-	XRows.idl\
 	XOutline.idl\
-	XColumns.idl \
 	MSFormReturnTypes.idl\
 	XInterior.idl\
 	XWorksheetFunction.idl 

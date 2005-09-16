@@ -16,10 +16,14 @@ class ScVbaRange : public ScVbaRange_BASE
 {
 	uno::Reference< table::XCellRange > mxRange;
 	uno::Reference< ::com::sun::star::uno::XComponentContext > m_xContext;
+	sal_Bool mbIsRows;
+	sal_Bool mbIsColumns;
 
 public:
-	ScVbaRange( uno::Reference< ::com::sun::star::uno::XComponentContext >& xContext, uno::Reference< table::XCellRange > xRange ) : mxRange( xRange ),
-		m_xContext(xContext) {}
+	ScVbaRange( uno::Reference< ::com::sun::star::uno::XComponentContext >& xContext, uno::Reference< table::XCellRange > xRange, sal_Bool bIsRows = false, sal_Bool bIsColumns = false ) : mxRange( xRange ),
+		m_xContext(xContext),
+		mbIsRows( bIsRows ),
+		mbIsColumns( bIsColumns ){}
 	virtual ~ScVbaRange() {}
 
     // Attributes
@@ -42,6 +46,8 @@ public:
 	virtual sal_Bool SAL_CALL getWrapText() throw (uno::RuntimeException);
 
 	// Methods
+	sal_Bool IsRows() { return mbIsRows; }
+	sal_Bool IsColumns() { return mbIsColumns; }
 	virtual void SAL_CALL Clear() throw (uno::RuntimeException);
 	virtual void SAL_CALL ClearComments() throw (uno::RuntimeException);
 	virtual void SAL_CALL ClearContents() throw (uno::RuntimeException);
@@ -61,8 +67,8 @@ public:
 	virtual uno::Reference< vba::XRange > SAL_CALL Cells( const ::uno::Any &nRow, const ::uno::Any &nCol ) 
 														  throw (uno::RuntimeException);
 	virtual void SAL_CALL Select() throw (uno::RuntimeException);
-	virtual uno::Any SAL_CALL Rows( const uno::Any& nIndex ) throw (uno::RuntimeException);
-	virtual uno::Any SAL_CALL Columns( const uno::Any &nIndex ) throw (uno::RuntimeException);
+	virtual uno::Reference< vba::XRange >  SAL_CALL Rows( const uno::Any& nIndex ) throw (uno::RuntimeException);
+	virtual uno::Reference< vba::XRange >  SAL_CALL Columns( const uno::Any &nIndex ) throw (uno::RuntimeException);
 	virtual void SAL_CALL Copy( const ::uno::Any& Destination ) throw (uno::RuntimeException);
 	virtual void SAL_CALL Cut( const ::uno::Any& Destination ) throw (uno::RuntimeException);
 	virtual uno::Reference< vba::XRange > SAL_CALL Resize( const ::uno::Any& RowSize, const ::uno::Any& ColumnSize ) 
