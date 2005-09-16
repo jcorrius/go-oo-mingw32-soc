@@ -28,15 +28,10 @@
 #include <com/sun/star/util/XMergeable.hpp>
 #include <com/sun/star/uno/XComponentContext.hpp>
 #include <com/sun/star/lang/XMultiComponentFactory.hpp>
-#include <com/sun/star/datatransfer/XTransferable.hpp>
-#include <com/sun/star/datatransfer/clipboard/XClipboard.hpp>
-#include <com/sun/star/datatransfer/DataFlavor.hpp>
 #include <com/sun/star/sheet/XSpreadsheetDocument.hpp>
 #include <com/sun/star/util/XNumberFormatsSupplier.hpp>
 #include <com/sun/star/util/XNumberFormats.hpp>
 #include <com/sun/star/util/XNumberFormatTypes.hpp>
-#include <com/sun/star/frame/XDispatchHelper.hpp>
-#include <com/sun/star/util/XURLTransformer.hpp>
 #include <com/sun/star/sheet/XCellRangeMovement.hpp>
 #include <com/sun/star/sheet/XCellRangeData.hpp>
 
@@ -471,11 +466,14 @@ ScVbaRange::getMergeCells() throw (uno::RuntimeException)
 void
 ScVbaRange::Copy(const ::uno::Any& Destination) throw (uno::RuntimeException)
 {
-	uno::Reference< sheet::XSheetCellRange > xSheetCellRange(mxRange, ::uno::UNO_QUERY);
-	uno::Reference< sheet::XSpreadsheet > xSheet = xSheetCellRange->getSpreadsheet();
 	uno::Reference< vba::XRange > xRange;
 	if( Destination >>= xRange )
 	{
+		uno::Any aRange = xRange->getCellRange();
+		uno::Reference< table::XCellRange > xCellRange;
+		aRange >>= xCellRange;
+		uno::Reference< sheet::XSheetCellRange > xSheetCellRange(xCellRange, ::uno::UNO_QUERY);
+		uno::Reference< sheet::XSpreadsheet > xSheet = xSheetCellRange->getSpreadsheet();
 		uno::Reference< table::XCellRange > xDest( xSheet, uno::UNO_QUERY);
 		uno::Reference< sheet::XCellRangeMovement > xMover( xSheet, uno::UNO_QUERY_THROW);
 		uno::Reference< sheet::XCellAddressable > xDestination( xDest->getCellByPosition(
@@ -493,11 +491,14 @@ ScVbaRange::Copy(const ::uno::Any& Destination) throw (uno::RuntimeException)
 void
 ScVbaRange::Cut(const ::uno::Any& Destination) throw (uno::RuntimeException)
 {
-	uno::Reference< sheet::XSheetCellRange > xSheetCellRange(mxRange, ::uno::UNO_QUERY);
-	uno::Reference< sheet::XSpreadsheet > xSheet = xSheetCellRange->getSpreadsheet();
 	uno::Reference< vba::XRange > xRange;
 	if( Destination >>= xRange )
 	{
+		uno::Reference< table::XCellRange > xCellRange;
+		uno::Any aRange = xRange->getCellRange();
+		aRange >>= xCellRange;
+		uno::Reference< sheet::XSheetCellRange > xSheetCellRange(xCellRange, ::uno::UNO_QUERY);
+		uno::Reference< sheet::XSpreadsheet > xSheet = xSheetCellRange->getSpreadsheet();
 		uno::Reference< table::XCellRange > xDest( xSheet, uno::UNO_QUERY);
 		uno::Reference< sheet::XCellRangeMovement > xMover( xSheet, uno::UNO_QUERY_THROW);
 		uno::Reference< sheet::XCellAddressable > xDestination( xDest->getCellByPosition(
@@ -617,26 +618,26 @@ ScVbaRange::Range( const uno::Any &Cell1, const uno::Any &Cell2 ) throw (uno::Ru
 	
 	if( !Cell1.hasValue() )
 		throw uno::RuntimeException(
-									rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( " Invalid Argument " ) ),
-									uno::Reference< XInterface >() );
+			rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( " Invalid Argument " ) ),
+			uno::Reference< XInterface >() );
 	if( ( Cell1 >>= rString ) && !Cell2.hasValue() )
 	{
 		uno::Reference< table::XCellRange > xRange = xRanges->getCellRangeByName( rString );
 		uno::Reference< sheet::XCellRangeAddressable > xRefAddress( xRange, uno::UNO_QUERY_THROW );
 		return uno::Reference< vba::XRange > ( new ScVbaRange( m_xContext, xReferrer->getCellRangeByPosition(
-																xRefAddress->getRangeAddress().StartColumn,
-																xRefAddress->getRangeAddress().StartRow,
-																xRefAddress->getRangeAddress().EndColumn,
-																xRefAddress->getRangeAddress().EndRow ) ) );
+							xRefAddress->getRangeAddress().StartColumn,
+							xRefAddress->getRangeAddress().StartRow,
+							xRefAddress->getRangeAddress().EndColumn,
+							xRefAddress->getRangeAddress().EndRow ) ) );
 	}
 	if( bIsCell1 && bIsCell2 )
 		return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xReferrer->getCellRangeByPosition(
-																aRange1->getColumn() - 1, aRange1->getRow() - 1,
-																aRange2->getColumn() - 1, aRange2->getRow() - 1 ) ) );
+							aRange1->getColumn() - 1, aRange1->getRow() - 1,
+							aRange2->getColumn() - 1, aRange2->getRow() - 1 ) ) );
 	if( bIsCell1 && !Cell2.hasValue() )
 		return uno::Reference< vba::XRange > ( new ScVbaRange( m_xContext, xReferrer->getCellRangeByPosition(
-																aRange1->getColumn() - 1, aRange1->getRow() - 1,
-																aRange1->getColumn() - 1, aRange1->getRow() - 1 ) ) );
+							aRange1->getColumn() - 1, aRange1->getRow() - 1,
+							aRange1->getColumn() - 1, aRange1->getRow() - 1 ) ) );
 	return NULL;
 }
 
