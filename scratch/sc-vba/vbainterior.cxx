@@ -30,18 +30,7 @@ ScVbaInterior::setColor( const ::com::sun::star::uno::Any& _color ) throw (::com
 Reference< XIntrospectionAccess >
 ScVbaInterior::getIntrospection(void)  throw(RuntimeException)
 {
-	uno::Any aAny;
-	uno::Reference<beans::XIntrospectionAccess> xAcc;
-	uno::Reference< beans::XIntrospection> xIspn(::comphelper::getProcessServiceFactory()->createInstance(::rtl::OUString::createFromAscii("com.sun.star.beans.Introspection")), uno::UNO_QUERY);
-	uno::Reference< beans::XPropertySet > xProps(mxRange, uno::UNO_QUERY );
-
-	if (xIspn.is() &&  xProps.is())
-	{
-		aAny <<= xProps;
-		xAcc = xIspn->inspect(aAny);
-	}
-
-	return xAcc;
+	return uno::Reference<beans::XIntrospectionAccess>();
 }
 
 Any
@@ -64,12 +53,23 @@ ScVbaInterior::setValue(const OUString& PropertyName, const Any& Value) throw(Un
 	{
 		xProps->setPropertyValue(PropertyName,Value);
 	}
+	if (PropertyName.equalsAscii("ColorIndex")) 
+	{
+	//FIXME:Need to add constants as parameter
+		xProps->setPropertyValue(rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "CellBackColor" ) ),Value);		
+	}
 }
 
 Any
 ScVbaInterior::getValue(const OUString& PropertyName) throw(UnknownPropertyException, RuntimeException)
 {
 	uno::Any aAny;
+	uno::Reference< beans::XPropertySet > xProps(mxRange, uno::UNO_QUERY );
+	if (PropertyName.equalsAscii("ColorIndex"))
+	{
+		aAny =  xProps->getPropertyValue(rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "CellBackColor" ) ));
+	}
+                        
 	return aAny;
 }
 
@@ -86,6 +86,8 @@ ScVbaInterior::hasProperty(const OUString& Name)  throw(RuntimeException)
 	if (Name.equalsAscii("RotateAngle"))
 		return true;
 	if (Name.equalsAscii("CellStyle"))
+		return true;
+	if (Name.equalsAscii("ColorIndex"))
 		return true;
 
  return false;
