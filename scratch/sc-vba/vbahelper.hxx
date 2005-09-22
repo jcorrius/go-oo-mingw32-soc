@@ -14,6 +14,7 @@ namespace org
 		void implnPaste();
 		void implnCut();
 		void implnPasteSpecial(sal_uInt16 nFlags,sal_uInt16 nFunction,sal_Bool bSkipEmpty, sal_Bool bTranspose);
+		bool isRangeShortCut( const ::rtl::OUString& sParam );
 	}
 }
 

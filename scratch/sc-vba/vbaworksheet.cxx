@@ -462,3 +462,15 @@ ScVbaWorksheet::Columns( const uno::Any& aIndex ) throw (uno::RuntimeException)
 {
 	return getSheetRange()->Columns( aIndex );
 }
+
+uno::Any SAL_CALL 
+ScVbaWorksheet::Evaluate( const ::rtl::OUString& Name ) throw (uno::RuntimeException)
+{
+	// #TODO Evaluate allows other things to be evaluated, e.g. functions
+	// I think ( like SIN(3) etc. ) need to investigate that
+	// named Ranges also? e.g. [MyRange] if so need a list of named ranges
+	if ( isRangeShortCut( Name ) )
+		return uno::Any( Range( uno::Any( Name ) ) );		
+	
+	return uno::Any();
+}

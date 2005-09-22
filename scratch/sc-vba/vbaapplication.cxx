@@ -148,3 +148,14 @@ ScVbaApplication::WorksheetFunction( ) throw (::com::sun::star::uno::RuntimeExce
 {
         return new ScVbaWSFunction(m_xContext);
 }
+
+uno::Any SAL_CALL 
+ScVbaApplication::Evaluate( const ::rtl::OUString& Name ) throw (uno::RuntimeException)
+{
+	// #TODO Evaluate allows other things to be evaluated, e.g. functions
+	// I think ( like SIN(3) etc. ) need to investigate that
+	// named Ranges also? e.g. [MyRange] if so need a list of named ranges
+	if ( isRangeShortCut( Name ) )
+		return uno::Any( getActiveWorkbook()->getActiveSheet()->Range( uno::Any( Name ) ) );	
+	return uno::Any();
+}

@@ -27,6 +27,6 @@ public:
 	virtual void setScreenUpdating(sal_Bool bUpdate) throw (uno::RuntimeException);
 	virtual uno::Any SAL_CALL Workbooks( const uno::Any& aIndex ) throw (uno::RuntimeException);
 	virtual ::com::sun::star::uno::Reference< ::org::openoffice::vba::XWorksheetFunction > SAL_CALL WorksheetFunction( ) throw (::com::sun::star::uno::RuntimeException);
+	virtual ::com::sun::star::uno::Any SAL_CALL Evaluate( const ::rtl::OUString& Name ) throw (::com::sun::star::uno::RuntimeException); 
 };
-
 #endif /* SC_VBA_APPLICATION_HXX */

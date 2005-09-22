@@ -111,3 +111,19 @@ void org::openoffice::implnPasteSpecial(USHORT nFlags,USHORT nFunction,sal_Bool 
 		pTabViewShell->CellContentChanged();
 		}
 }
+
+bool
+org::openoffice::isRangeShortCut( const ::rtl::OUString& sParam )
+{
+        // for a ShortCutRange param, I'd expect the first letter to be
+        //[A-Z] and the last letter to be a digit 0-9 e.g A10, [A1:A10] etc.
+        ::rtl::OString sStr = rtl::OUStringToOString( sParam,
+                RTL_TEXTENCODING_UTF8 );
+        const sal_Char* pFirst = (const sal_Char*)sStr;
+        const sal_Char* pLast = pFirst + ( sStr.getLength() - 1 );
+        if ( (( *pFirst >= 'A' && *pFirst <= 'Z' ) || ( *pFirst >= 'a' && *pFirst <= 'Z' ) )  )
+                if ( ( *pLast >= '0' ) && ( *pLast <= '9' ) )
+                        return true;
+
+        return false;
+}
