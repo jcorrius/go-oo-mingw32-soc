@@ -28,7 +28,10 @@ IDLFILES=\
 	XOutline.idl\
 	MSFormReturnTypes.idl\
 	XInterior.idl\
-	XWorksheetFunction.idl 
+	XWorksheetFunction.idl\
+	XlPasteSpecialOperation.idl\
+	XlPasteType.idl\
+	XShapes.idl
 
 # ------------------------------------------------------------------
 

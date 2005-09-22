@@ -5,11 +5,11 @@
 #include <com/sun/star/frame/XFrame.hpp>
 #include <com/sun/star/frame/XController.hpp>
 #include <com/sun/star/uno/XComponentContext.hpp>
-#include <cppuhelper/bootstrap.hxx>
 #include <com/sun/star/lang/XMultiComponentFactory.hpp>
 
 #include "vbahelper.hxx"
 #include "tabvwsh.hxx"
+#include "transobj.hxx"
 
 void
 org::openoffice::dispatchRequests (uno::Reference< frame::XModel>& xModel,rtl::OUString & aUrl) 
@@ -51,8 +51,21 @@ org::openoffice::dispatchRequests (uno::Reference< frame::XModel>& xModel,rtl::O
 	}
 
 	uno::Reference<frame::XDispatch> xDispatcher = xDispatchProvider->queryDispatch(url,emptyString,0);
+	uno::Sequence<beans::PropertyValue> sProps ;
+	sProps.realloc(2);
+        beans::PropertyValue * aArray = sProps.getArray();
+	aArray[0].Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Silent" ));
+	uno::Any aAny;
+	sal_Bool isTrue = true;
+	aAny <<= isTrue;
+
+	aArray[0].Value = aAny;
+	//aArray[0].Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "StatusIndicator" ));
+	//aArray[0].Value = true;
+
 	if (xDispatcher.is())
-		xDispatcher->dispatch( url,uno::Sequence< beans::PropertyValue >(0) );
+		//xDispatcher->dispatch( url,uno::Sequence< beans::PropertyValue >(0) );
+		xDispatcher->dispatch( url,sProps );
 }
 
 
@@ -63,6 +76,7 @@ org::openoffice::implnPaste()
 	pViewShell->PasteFromSystem();
 	pViewShell->CellContentChanged();
 }
+
 
 void
 org::openoffice::implnCopy()
@@ -76,4 +90,24 @@ org::openoffice::implnCut()
 {
 	ScTabViewShell* pViewShell = ScTabViewShell::GetActiveViewShell();
 	pViewShell->CutToClip( NULL, TRUE );
+}
+
+void org::openoffice::implnPasteSpecial(USHORT nFlags,USHORT nFunction,sal_Bool bSkipEmpty, sal_Bool bTranspose)
+{
+	sal_Bool bAsLink(sal_False), bOtherDoc(sal_False);
+	InsCellCmd eMoveMode = INS_NONE;
+
+	ScTabViewShell* pTabViewShell = ScTabViewShell::GetActiveViewShell();
+	Window* pWin = pTabViewShell->GetViewData()->GetActiveWin();
+	ScDocument* pDoc = pTabViewShell->GetViewData()->GetDocument();
+	ScTransferObj* pOwnClip = ScTransferObj::GetOwnClipboard( pWin );
+
+	if ( bAsLink && bOtherDoc )
+		pTabViewShell->PasteFromSystem(0);//SOT_FORMATSTR_ID_LINK
+	else {
+		pTabViewShell->PasteFromClip( nFlags, pOwnClip->GetDocument(),
+		nFunction, bSkipEmpty, bTranspose, bAsLink,
+		eMoveMode, IDF_NONE, TRUE );
+		pTabViewShell->CellContentChanged();
+		}
 }

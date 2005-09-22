@@ -13,6 +13,7 @@ namespace org
 		void implnCopy();
 		void implnPaste();
 		void implnCut();
+		void implnPasteSpecial(sal_uInt16 nFlags,sal_uInt16 nFunction,sal_Bool bSkipEmpty, sal_Bool bTranspose);
 	}
 }
 

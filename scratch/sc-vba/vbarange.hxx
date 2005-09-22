@@ -6,6 +6,9 @@
 #include <org/openoffice/vba/XRange.hpp>
 #include <com/sun/star/table/XCellRange.hpp>
 #include <org/openoffice/vba/XFont.hpp>
+#include "org/openoffice/vba/xlPasteType.hdl"
+#include "org/openoffice/vba/xlPasteSpecialOperation.hdl"
+
 #include "vbahelper.hxx"
 
 class ScTableSheetsObj;
@@ -78,6 +81,7 @@ public:
 	virtual uno::Reference< vba::XRange > SAL_CALL Range( const uno::Any &Cell1, const uno::Any &Cell2 )
 															throw (uno::RuntimeException);
 	virtual ::com::sun::star::uno::Any SAL_CALL getCellRange(  ) throw (::com::sun::star::uno::RuntimeException);
+	virtual void SAL_CALL PasteSpecial( sal_Int16 Paste, sal_Int16 Operation, ::sal_Bool SkipBlanks, ::sal_Bool Transpose ) throw (::com::sun::star::uno::RuntimeException);
 };
 
 #endif /* SC_VBA_RANGE_HXX */

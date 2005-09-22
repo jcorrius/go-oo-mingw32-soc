@@ -35,11 +35,15 @@
 #include <com/sun/star/sheet/XCellRangeMovement.hpp>
 #include <com/sun/star/sheet/XCellRangeData.hpp>
 
+#include <org/openoffice/vba/xlPasteSpecialOperation.hpp>
+#include <org/openoffice/vba/xlPasteType.hpp>
+
 #include "vbarange.hxx"
 #include "vbafont.hxx"
 #include "vbainterior.hxx"
 
 #include <stdio.h>
+#include "global.hxx"
 
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
@@ -647,4 +651,61 @@ ScVbaRange::getCellRange(  ) throw (::com::sun::star::uno::RuntimeException)
 	uno::Any aAny;
 	aAny <<= mxRange;
 	return aAny;
+}
+
+static USHORT 
+getPasteFlags (sal_Int16 Paste)
+{
+	USHORT nFlags = IDF_NONE;	
+	switch (Paste) {
+	case vba::xlPasteType::xlAll: 
+	case vba::xlPasteType::xlPasteAll: 
+        case vba::xlPasteType::xlPasteAllExceptBorders: 
+		nFlags = IDF_ALL;break;
+        case vba::xlPasteType::xlPasteComments: 
+		nFlags = IDF_NOTE;break;
+        case vba::xlPasteType::xlPasteFormats: 
+		nFlags = IDF_ATTRIB;break;
+        case vba::xlPasteType::xlPasteFormulas: 
+		nFlags = IDF_FORMULA;break;
+        case vba::xlPasteType::xlPasteFormulasAndNumberFormats : 
+		nFlags = IDF_FORMULA | IDF_VALUE ;break;
+        case vba::xlPasteType::xlPasteValues: 
+		nFlags = IDF_VALUE;break;
+        case vba::xlPasteType::xlPasteValuesAndNumberFormats:
+		nFlags = IDF_VALUE | IDF_ATTRIB; break;
+        case vba::xlPasteType::xlPasteColumnWidths:
+        case vba::xlPasteType::xlPasteValidation: nFlags = IDF_NONE;break;
+	};
+return nFlags;
+}
+
+static USHORT 
+getPasteFormulaBits( sal_Int16 Operation)
+{
+	USHORT nFormulaBits = PASTE_NOFUNC ;
+	switch (Operation)
+	{
+	case vba::xlPasteSpecialOperation::xlPasteSpecialOperationAdd: 
+		nFormulaBits = PASTE_ADD;break;
+	case vba::xlPasteSpecialOperation::xlPasteSpecialOperationSubtract: 
+		nFormulaBits = PASTE_SUB;break;
+	case vba::xlPasteSpecialOperation::xlPasteSpecialOperationMultiply: 
+		nFormulaBits = PASTE_MUL;break;
+	case vba::xlPasteSpecialOperation::xlPasteSpecialOperationDivide:
+		nFormulaBits = PASTE_DIV;break;
+	case vba::xlPasteSpecialOperation::xlPasteSpecialOperationNone: 
+	case  vba::xlPasteSpecialOperation::xlNone : 
+		nFormulaBits = PASTE_NOFUNC; 
+	};
+	
+return nFormulaBits;
+}
+void SAL_CALL 
+ScVbaRange::PasteSpecial(sal_Int16 Paste, sal_Int16 Operation, ::sal_Bool SkipBlanks, ::sal_Bool Transpose ) throw (::com::sun::star::uno::RuntimeException) 
+{
+	USHORT nFlags = getPasteFlags(Paste);
+	USHORT nFormulaBits = getPasteFormulaBits(Operation);
+	implnPasteSpecial(nFlags,nFormulaBits,SkipBlanks,Transpose);
+
 }
