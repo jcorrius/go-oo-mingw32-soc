@@ -13,6 +13,7 @@ EXTRA_DIST=\
 	openabout_ark.png \
 	openintro_mandriva.bmp \
 	openabout_mandriva.png \
+	openintro_gentoo.bmp \
 	file-bug-24.png \
 	file-bug-16.png \
 	novell-team.png \
