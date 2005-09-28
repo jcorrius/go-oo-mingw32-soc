@@ -30,8 +30,7 @@ IDLFILES=\
 	XInterior.idl\
 	XWorksheetFunction.idl\
 	XlPasteSpecialOperation.idl\
-	XlPasteType.idl\
-	XShapes.idl
+	XlPasteType.idl
 
 # ------------------------------------------------------------------
 
