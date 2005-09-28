@@ -49,14 +49,24 @@ ScVbaInterior::setValue(const OUString& PropertyName, const Any& Value) throw(Un
 	{
 		xProps->setPropertyValue(PropertyName,Value);
 	}
-	if (PropertyName.equalsAscii("CellStyle")) 
+	else if (PropertyName.equalsAscii("CellStyle")) 
 	{
 		xProps->setPropertyValue(PropertyName,Value);
 	}
-	if (PropertyName.equalsAscii("ColorIndex")) 
+	else if (PropertyName.equalsAscii("ColorIndex")) 
 	{
 	//FIXME:Need to add constants as parameter
 		xProps->setPropertyValue(rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "CellBackColor" ) ),Value);		
+	}
+	else if (PropertyName.equalsAscii("Color")) 
+	{
+		setColor( Value );
+	}
+	else
+	{
+		rtl::OUString msg = rtl::OUString::createFromAscii("No property named ");	
+	 	msg += PropertyName;	
+		throw UnknownPropertyException( msg, uno::Reference< uno::XInterface >() );
 	}
 }
 
@@ -69,7 +79,17 @@ ScVbaInterior::getValue(const OUString& PropertyName) throw(UnknownPropertyExcep
 	{
 		aAny =  xProps->getPropertyValue(rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "CellBackColor" ) ));
 	}
+	else if (PropertyName.equalsAscii("Color"))
+	{
+		aAny = getColor();
+	}
+	else
+	{
+		rtl::OUString msg = rtl::OUString::createFromAscii("No property named ");	
+	 	msg += PropertyName;	
+		throw UnknownPropertyException( msg, uno::Reference< uno::XInterface >() );
                         
+	}
 	return aAny;
 }
 
@@ -88,6 +108,8 @@ ScVbaInterior::hasProperty(const OUString& Name)  throw(RuntimeException)
 	if (Name.equalsAscii("CellStyle"))
 		return true;
 	if (Name.equalsAscii("ColorIndex"))
+		return true;
+	if (Name.equalsAscii("Color"))
 		return true;
 
  return false;
