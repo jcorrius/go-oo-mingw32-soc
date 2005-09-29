@@ -1,0 +1,369 @@
+Index: stoc/source/registry_tdprovider/makefile.mk
+===================================================================
+RCS file: /cvs/udk/stoc/source/registry_tdprovider/makefile.mk,v
+retrieving revision 1.13
+diff -u -r1.13 makefile.mk
+--- stoc/source/registry_tdprovider/makefile.mk	4 Jun 2004 02:32:05 -0000	1.13
++++ stoc/source/registry_tdprovider/makefile.mk	29 Sep 2005 11:27:37 -0000
+@@ -77,6 +77,10 @@
+ 
+ .INCLUDE :  ..$/cppumaker.mk
+ 
++.IF "$(ENABLE_VBA)"=="YES"
++        CDEFS+=-DENABLE_VBA
++.ENDIF
++
+ SLOFILES=	\
+ 		$(SLO)$/tdprovider.obj	\
+ 		$(SLO)$/td.obj		\
+Index: stoc/source/registry_tdprovider/rdbtdp.xml
+===================================================================
+RCS file: /cvs/udk/stoc/source/registry_tdprovider/rdbtdp.xml,v
+retrieving revision 1.14
+diff -u -r1.14 rdbtdp.xml
+--- stoc/source/registry_tdprovider/rdbtdp.xml	23 Jul 2004 15:03:39 -0000	1.14
++++ stoc/source/registry_tdprovider/rdbtdp.xml	29 Sep 2005 11:27:37 -0000
+@@ -45,6 +45,7 @@
+         <type>	com.sun.star.registry.XSimpleRegistry						</type>
+         <type>	com.sun.star.beans.PropertyAttribute				        </type>
+         <type>	com.sun.star.beans.XPropertySet 							</type>
++        <type>	com.sun.star.beans.XExactName 							</type>
+         <type>  com.sun.star.container.NoSuchElementException </type>
+         <type>	com.sun.star.container.XHierarchicalNameAccess				</type>
+         <type>	com.sun.star.container.XSet									</type>
+Index: stoc/source/registry_tdprovider/tdprovider.cxx
+===================================================================
+RCS file: /cvs/udk/stoc/source/registry_tdprovider/tdprovider.cxx,v
+retrieving revision 1.18
+diff -u -r1.18 tdprovider.cxx
+--- stoc/source/registry_tdprovider/tdprovider.cxx	20 Sep 2004 14:30:28 -0000	1.18
++++ stoc/source/registry_tdprovider/tdprovider.cxx	29 Sep 2005 11:27:37 -0000
+@@ -98,6 +98,12 @@
+ #include <com/sun/star/reflection/XTypeDescriptionEnumerationAccess.hpp>
+ #include "com/sun/star/uno/RuntimeException.hpp"
+ 
++#ifdef ENABLE_VBA
++#include <cppuhelper/compbase5.hxx>
++#include <com/sun/star/beans/XExactName.hpp>
++#include <rtl/ustrbuf.hxx>
++#endif //ENABLE_VBA
++
+ #include "registry/reader.hxx"
+ #include "registry/version.h"
+ 
+@@ -157,10 +163,17 @@
+ };
+ //==================================================================================================
+ class ProviderImpl
+-	: public MutexHolder
+-    , public WeakComponentImplHelper4< XServiceInfo,
++	: public MutexHolder ,
++#ifdef ENABLE_VBA
++	public WeakComponentImplHelper5< XServiceInfo,
++#else
++	public WeakComponentImplHelper4< XServiceInfo,
++#endif //ENABLE_VBA
+                                        XHierarchicalNameAccess,
+                                        XTypeDescriptionEnumerationAccess,
++#ifdef ENABLE_VBA
++                                       XExactName,
++#endif //ENABLE_VBA
+                                        XInitialization >
+ {
+     // XHierarchicalNameAccess + XTypeDescriptionEnumerationAccess wrapper
+@@ -238,12 +251,23 @@
+             throw ( ::com::sun::star::reflection::NoSuchTypeNameException,
+                     ::com::sun::star::reflection::InvalidTypeNameException,
+                     ::com::sun::star::uno::RuntimeException );
++#ifdef ENABLE_VBA
++    // XExactName
++    virtual ::rtl::OUString SAL_CALL getExactName( const ::rtl::OUString& aApproximateName ) throw (::com::sun::star::uno::RuntimeException); 
++#endif //ENABLE_VBA
++
+ };
+ //__________________________________________________________________________________________________
+ ProviderImpl::ProviderImpl( const com::sun::star::uno::Reference< XComponentContext > & xContext )
++#ifdef ENABLE_VBA
++    : WeakComponentImplHelper5<
++        XServiceInfo, XHierarchicalNameAccess,
++        XTypeDescriptionEnumerationAccess,  XExactName, XInitialization >( _aComponentMutex )
++#else
+     : WeakComponentImplHelper4<
+         XServiceInfo, XHierarchicalNameAccess,
+-        XTypeDescriptionEnumerationAccess, XInitialization >( _aComponentMutex )
++        XTypeDescriptionEnumerationAccess,  XInitialization >( _aComponentMutex )
++#endif //ENABLE_VBA
+ 	, _xContext( xContext )
+ {
+ 	g_moduleCount.modCnt.acquire( &g_moduleCount.modCnt );
+@@ -527,6 +551,140 @@
+                                                         _aBaseKeys ).get() );
+ }
+ 
++
++// Recursive routine to find the exact name of a namespace in the
++// Registry.
++// relativeName is the "/" delimited name e.g. org/openoffice/vba/xxx
++//    and represents the name to be resolved, each successive recursive
++//    call processes/resolves just the leading "/" delimited name. 
++//    e.g.  
++//       ->org/openoffice/vba/xxx ( findExactName just processes org )
++//         -> openoffice/vba/xx   (       "         "      "     openoffice )
++//            -> vba/xx                   "         "      "
++//               -> xx                    "         "      "
++// xParentKey is the key that "hopefully" contains the sub keys the match node
++//    to be processed/resolved
++// sExactNameBuf buffer is passed to each call that allows the exact name to
++//     built up.
++
++bool findExactName( const OUString& relativeName, const uno::Reference< XRegistryKey >& xParentKey,
++ OUStringBuffer& sExactNameBuf )
++{
++    OUString searchName = relativeName;
++    OUString newNameToSearch;
++    int dotIndex = 0;
++    if ( ( dotIndex = relativeName.indexOf('/') ) > -1 )
++    {
++        searchName = relativeName.copy( 0, dotIndex ); 
++        newNameToSearch = relativeName.copy( dotIndex+1 );
++    }
++    Sequence< OUString > aChildNames = xParentKey->getKeyNames();
++    sal_Int32 nLen = aChildNames.getLength();
++    OUString* pStr = aChildNames.getArray();
++    sal_Int32 nKeyLen = xParentKey->getKeyName().getLength();
++    OUString sExactName;
++    for ( sal_Int32 index=0; index<nLen; ++index, ++pStr )
++    {
++        sal_Int32 fromIndex = nKeyLen + 1;
++        OUString temp = pStr->copy( fromIndex );
++        if ( searchName.equalsIgnoreAsciiCase( temp  ) )
++        {
++            sExactName = temp;
++            break;
++        }
++    }
++    // no match && this is a leaf name ( the last "/" delimited element )
++    if ( !sExactName.getLength() && !newNameToSearch.getLength() )
++    {
++        try
++        {
++            // Maybe the leaf name is a constant or enum
++            // if so, the name is not in the registry keys but is a field of 
++            // a constant group or enum etc.
++       	    if ( xParentKey->isValid() )
++            {
++                if (xParentKey->getValueType() == RegistryValueType_BINARY)
++                {
++                    Sequence< sal_Int8 > aBytes( xParentKey->getBinaryValue() );
++                    typereg::Reader aReader(
++                        aBytes.getConstArray(), aBytes.getLength(),
++                        false, TYPEREG_VERSION_1);
++    
++                    if (aReader.getTypeClass() == RT_TYPE_MODULE ||
++                        aReader.getTypeClass() == RT_TYPE_CONSTANTS ||
++                        aReader.getTypeClass() == RT_TYPE_ENUM)
++                    {
++                        sal_Int16 nPos = aReader.getFieldCount();
++                        while (nPos--)
++                        {
++                            if (relativeName.equalsIgnoreAsciiCase(
++                                aReader.getFieldName(nPos)))
++                            {
++                                sExactName = aReader.getFieldName( nPos );
++                                break;
++                            }
++                        }
++                    }
++                }
++            }
++         }
++         catch ( InvalidRegistryException& e ) {}
++    }
++    if ( sExactName.getLength() )
++    {
++        sExactNameBuf.append( sExactName ); 
++        if ( newNameToSearch.getLength() )
++        {
++            try
++            {
++                uno::Reference< XRegistryKey > xMatchKey( xParentKey->openKey( sExactName ) );
++                if ( xMatchKey.is() )
++                {
++                    RegistryKeyCloser aCloser( xMatchKey );
++                    sExactNameBuf.append( OUString::createFromAscii(".") );
++                    return findExactName( newNameToSearch, xMatchKey, sExactNameBuf );
++                }
++             }
++             catch (  InvalidRegistryException& e ) {}
++
++             return false;
++        }
++        return true;
++    }
++    return false;  
++}
++#ifdef ENABLE_VBA
++// XExactName
++//__________________________________________________________________________________________________
++// virtual
++
++::rtl::OUString SAL_CALL 
++ProviderImpl::getExactName( const ::rtl::OUString& aApproximateName ) throw (::com::sun::star::uno::RuntimeException)
++{
++    OUString aKey( aApproximateName.replace( '.', '/' ) );
++    
++    OUStringBuffer sBuf( aKey.getLength() );
++    OUString sExactName;
++    
++    for ( RegistryKeyList::const_iterator iPos( _aBaseKeys.begin() );
++       iPos != _aBaseKeys.end(); ++iPos )
++    {
++        try
++        {
++            com::sun::star::uno::Reference< XRegistryKey > xBaseKey( *iPos );
++            if ( xBaseKey.is() )
++            {
++                Sequence< OUString > aStrings = xBaseKey->getKeyNames();
++                if ( findExactName( aKey, xBaseKey, sBuf ) )
++                    sExactName = sBuf.makeStringAndClear();
++            }
++        }
++        catch( InvalidRegistryException const & ) {}
++    }
++    return sExactName;
++}
++#endif //#ENABLE_VBA
++
+ //==================================================================================================
+ static com::sun::star::uno::Reference< XInterface > SAL_CALL ProviderImpl_create(
+     com::sun::star::uno::Reference< XComponentContext > const & xContext )
+Index: stoc/source/tdmanager/makefile.mk
+===================================================================
+RCS file: /cvs/udk/stoc/source/tdmanager/makefile.mk,v
+retrieving revision 1.10
+diff -u -r1.10 makefile.mk
+--- stoc/source/tdmanager/makefile.mk	12 Aug 2004 12:18:46 -0000	1.10
++++ stoc/source/tdmanager/makefile.mk	29 Sep 2005 11:27:37 -0000
+@@ -77,6 +77,10 @@
+ 
+ .INCLUDE :  ..$/cppumaker.mk
+ 
++.IF "$(ENABLE_VBA)"=="YES"
++        CDEFS+=-DENABLE_VBA
++.ENDIF
++
+ SLOFILES= \
+         $(SLO)$/tdmgr.obj \
+         $(SLO)$/tdmgr_check.obj \
+Index: stoc/source/tdmanager/tdmgr.cxx
+===================================================================
+RCS file: /cvs/udk/stoc/source/tdmanager/tdmgr.cxx,v
+retrieving revision 1.18
+diff -u -r1.18 tdmgr.cxx
+--- stoc/source/tdmanager/tdmgr.cxx	12 Aug 2004 12:18:59 -0000	1.18
++++ stoc/source/tdmanager/tdmgr.cxx	29 Sep 2005 11:27:38 -0000
+@@ -106,6 +106,13 @@
+ #include <com/sun/star/registry/XRegistryKey.hpp>
+ #include "com/sun/star/uno/RuntimeException.hpp"
+ 
++#ifdef ENABLE_VBA
++#ifndef _CPPUHELPER_IMPLBASE6_HXX_
++#include <cppuhelper/compbase6.hxx>
++#endif
++#include <com/sun/star/beans/XExactName.hpp>
++#endif //ENABLE_VBA
++
+ #include <algorithm>
+ #include <vector>
+ 
+@@ -197,10 +204,17 @@
+ 
+ //==================================================================================================
+ class ManagerImpl
++#ifdef ENABLE_VBA
++    : public WeakComponentImplHelper6< XServiceInfo,
++#else
+     : public WeakComponentImplHelper5< XServiceInfo,
++#endif //ENABLE_VBA
+                                        XSet,
+                                        XHierarchicalNameAccess,
+                                        XTypeDescriptionEnumerationAccess,
++#ifdef ENABLE_VBA
++                                       beans::XExactName,
++#endif //ENABLE_VBA
+                                        XInitialization >
+ {
+ 	friend class EnumerationImpl;
+@@ -262,6 +276,10 @@
+             throw ( ::com::sun::star::reflection::NoSuchTypeNameException,
+                     ::com::sun::star::reflection::InvalidTypeNameException,
+                     ::com::sun::star::uno::RuntimeException );
++#ifdef ENABLE_VBA
++    // XExactName
++	virtual ::rtl::OUString SAL_CALL getExactName( const ::rtl::OUString& aApproximateName ) throw (::com::sun::star::uno::RuntimeException);
++#endif //ENABLE_VBA
+ };
+ 
+ //==================================================================================================
+@@ -344,9 +362,15 @@
+ //__________________________________________________________________________________________________
+ ManagerImpl::ManagerImpl(
+     Reference< XComponentContext > const & xContext, sal_Int32 nCacheSize )
++#ifdef ENABLE_VBA
++    : WeakComponentImplHelper6<
++        XServiceInfo, XSet, XHierarchicalNameAccess,
++        XTypeDescriptionEnumerationAccess, beans::XExactName, XInitialization >( _aComponentMutex )
++#else
+     : WeakComponentImplHelper5<
+         XServiceInfo, XSet, XHierarchicalNameAccess,
+         XTypeDescriptionEnumerationAccess, XInitialization >( _aComponentMutex )
++#endif //ENABLE_VBA
+     , _xContext( xContext )
+ 	, _aEventListener( this )
+ 	, _bCaching( sal_True )
+@@ -641,6 +665,30 @@
+                                             aStack ) );
+ }
+ 
++#ifdef ENABLE_VBA
++::rtl::OUString SAL_CALL 
++ManagerImpl::getExactName( const ::rtl::OUString& aApproximateName ) throw (::com::sun::star::uno::RuntimeException)
++{
++    OUString sExactName;
++    for ( ProviderVector::const_iterator iPos( _aProviders.begin() );
++        iPos != _aProviders.end(); ++iPos )
++    {
++        try
++        {
++            Reference< XExactName > xExact( *iPos, UNO_QUERY );
++            if ( xExact.is() )
++            {
++                sExactName = xExact->getExactName( aApproximateName );
++                if ( sExactName.getLength() )
++                    break;
++            }
++        }
++        catch (NoSuchElementException &) {}
++    }
++    return sExactName;
++}
++#endif //ENABLE_VBA
++
+ 
+ //##################################################################################################
+ //##################################################################################################
+Index: stoc/source/tdmanager/tdmgr.xml
+===================================================================
+RCS file: /cvs/udk/stoc/source/tdmanager/tdmgr.xml,v
+retrieving revision 1.9
+diff -u -r1.9 tdmgr.xml
+--- stoc/source/tdmanager/tdmgr.xml	12 Aug 2004 12:19:13 -0000	1.9
++++ stoc/source/tdmanager/tdmgr.xml	29 Sep 2005 11:27:38 -0000
+@@ -48,6 +48,7 @@
+         <type>	com.sun.star.registry.XRegistryKey							</type>
+         <type>	com.sun.star.container.XSet									</type>
+         <type>	com.sun.star.container.XHierarchicalNameAccess				</type>
++        <type>	com.sun.star.beans.XExactName				</type>
+         <type>	com.sun.star.container.XContentEnumerationAccess			</type>
+         <type>	com.sun.star.uno.XAggregation								</type>
+         <type>	com.sun.star.uno.XWeak										</type>
