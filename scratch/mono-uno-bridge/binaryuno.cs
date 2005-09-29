@@ -164,12 +164,14 @@ public unsafe struct SequencePtr
 
     public unsafe int nElements
     {
+        // FIXME +1 is not 64 bit safe
         get { return *(sal_Sequence + 1); }
         set { *(sal_Sequence + 1) = value; }
     }
 
     public unsafe IntPtr elementsPtr
     {
+        // FIXME +2 is not 64 bit safe
         get { return new IntPtr((void *)(sal_Sequence + 2)); }        
     }
 
