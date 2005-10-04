@@ -238,6 +238,47 @@ namespace cairocanvas
             return ::BitmapEx();
         }
 
+	static bool readAlpha( BitmapReadAccess* pAlphaReadAcc, long nY, const long nWidth, unsigned char* data, long nOff )
+	{
+	    bool bIsAlpha = false;
+	    long nX;
+	    int nAlpha;
+	    Scanline pReadScan;
+
+	    nOff += 3;
+
+	    switch( pAlphaReadAcc->GetScanlineFormat() ) {
+	    case BMP_FORMAT_8BIT_TC_MASK:
+		pReadScan = pAlphaReadAcc->GetScanline( nY );
+		for( nX = 0; nX < nWidth; nX++ ) {
+		    nAlpha = data[ nOff ] = 255 - ( *pReadScan++ );
+		    if( nAlpha != 255 )
+			bIsAlpha = true;
+		    nOff += 4;
+		}
+		break;
+	    case BMP_FORMAT_8BIT_PAL:
+		pReadScan = pAlphaReadAcc->GetScanline( nY );
+		for( nX = 0; nX < nWidth; nX++ ) {
+		    nAlpha = data[ nOff ] = 255 - ( pAlphaReadAcc->GetPaletteColor( *pReadScan++ ).GetBlue() );
+		    if( nAlpha != 255 )
+			bIsAlpha = true;
+		    nOff += 4;
+		}
+		break;
+	    default:
+		OSL_TRACE( "fallback to GetColor for alpha - slow, format: %d\n", pAlphaReadAcc->GetScanlineFormat() );
+		for( nX = 0; nX < nWidth; nX++ ) {
+		    nAlpha = data[ nOff ] = 255 - pAlphaReadAcc->GetColor( nY, nX ).GetBlue();
+		    if( nAlpha != 255 )
+			bIsAlpha = true;
+		    nOff += 4;
+		}
+	    }
+
+	    return bIsAlpha;
+	}
+
         Surface* surfaceFromXBitmap( const uno::Reference< rendering::XBitmap >& xBitmap, const WindowGraphicDevice::ImplRef& rDevice, unsigned char*& data, bool& bHasAlpha )
         {
 	    Surface* pSurface = NULL;
@@ -273,34 +314,141 @@ namespace cairocanvas
 		    if( aBmpEx.IsTransparent() || aBmpEx.IsAlpha() )
 			pAlphaReadAcc = aAlpha.AcquireReadAccess();
 
-		    OSL_TRACE( "fallback to XBitmap interface - slow\n" );
-
 		    data = (unsigned char*) malloc( nWidth*nHeight*4 );
 
 		    long nOff = 0;
 		    Color aColor;
 		    unsigned int nAlpha = 255;
 
-		    for( nY = 0; nY < nHeight; nY++ )
-			for( nX = 0; nX < nWidth; nX++ ) {
-			    if( pAlphaReadAcc)
-				nAlpha = 255 - pAlphaReadAcc->GetColor( nY, nX ).GetBlue();
-			    aColor = pBitmapReadAcc->GetColor( nY, nX );
+		    for( nY = 0; nY < nHeight; nY++ ) {
+			Scanline pReadScan;
 
-			    // cairo need premultiplied color values
-			    // TODO(rodo) handle endianess
-			    data [nOff++] = ( nAlpha*aColor.GetBlue() )/255;
-			    data [nOff++] = ( nAlpha*aColor.GetGreen() )/255;
-			    data [nOff++] = ( nAlpha*aColor.GetRed() )/255;
-			    if( pAlphaReadAcc ) {
-				data [nOff++] = nAlpha;
-				if( nAlpha != 255 )
+			switch( pBitmapReadAcc->GetScanlineFormat() ) {
+			case BMP_FORMAT_8BIT_PAL:
+			    pReadScan = pBitmapReadAcc->GetScanline( nY );
+			    if( pAlphaReadAcc )
+				if( readAlpha( pAlphaReadAcc, nY, nWidth, data, nOff ) )
 				    bIsAlpha = true;
-			    } else
-				nOff ++;
-			}
 
+			    for( nX = 0; nX < nWidth; nX++ ) {
+				if( pAlphaReadAcc )
+				    nAlpha = data[ nOff + 3 ];
+				else
+				    nAlpha = data[ nOff + 3 ] = 255;
+				aColor = pBitmapReadAcc->GetPaletteColor( *pReadScan++ );
+
+				data[ nOff++ ] = ( nAlpha*( aColor.GetBlue() ) )/255;
+				data[ nOff++ ] = ( nAlpha*( aColor.GetGreen() ) )/255;
+				data[ nOff++ ] = ( nAlpha*( aColor.GetRed() ) )/255;
+
+				nOff++;
+			    }
+			    break;
+			case BMP_FORMAT_24BIT_TC_BGR:
+			    pReadScan = pBitmapReadAcc->GetScanline( nY );
+			    if( pAlphaReadAcc )
+				if( readAlpha( pAlphaReadAcc, nY, nWidth, data, nOff ) )
+				    bIsAlpha = true;
+
+			    for( nX = 0; nX < nWidth; nX++ ) {
+				if( pAlphaReadAcc )
+				    nAlpha = data[ nOff + 3 ];
+				else
+				    nAlpha = data[ nOff + 3 ] = 255;
+				data[ nOff++ ] = ( nAlpha*( *pReadScan++ ) )/255;
+				data[ nOff++ ] = ( nAlpha*( *pReadScan++ ) )/255;
+				data[ nOff++ ] = ( nAlpha*( *pReadScan++ ) )/255;
+
+				nOff++;
+			    }
+			    break;
+			case BMP_FORMAT_24BIT_TC_RGB:
+			    pReadScan = pBitmapReadAcc->GetScanline( nY );
+			    if( pAlphaReadAcc )
+				if( readAlpha( pAlphaReadAcc, nY, nWidth, data, nOff ) )
+				    bIsAlpha = true;
+
+			    for( nX = 0; nX < nWidth; nX++ ) {
+				if( pAlphaReadAcc )
+				    nAlpha = data[ nOff + 3 ];
+				else
+				    nAlpha = data[ nOff + 3 ] = 255;
+				data[ nOff++ ] = ( nAlpha*( pReadScan[ 2 ] ) )/255;
+				data[ nOff++ ] = ( nAlpha*( pReadScan[ 1 ] ) )/255;
+				data[ nOff++ ] = ( nAlpha*( pReadScan[ 0 ] ) )/255;
+
+				nOff++;
+				pReadScan += 3;
+			    }
+			    break;
+			case BMP_FORMAT_32BIT_TC_BGRA:
+			    pReadScan = pBitmapReadAcc->GetScanline( nY );
+			    if( pAlphaReadAcc )
+				if( readAlpha( pAlphaReadAcc, nY, nWidth, data, nOff ) )
+				    bIsAlpha = true;
+
+			    for( nX = 0; nX < nWidth; nX++ ) {
+				if( pAlphaReadAcc )
+				    nAlpha = data[ nOff + 3 ];
+				else
+				    nAlpha = data[ nOff + 3 ] = pReadScan[ 3 ];
+				data[ nOff++ ] = ( nAlpha*( *pReadScan++ ) )/255;
+				data[ nOff++ ] = ( nAlpha*( *pReadScan++ ) )/255;
+				data[ nOff++ ] = ( nAlpha*( *pReadScan++ ) )/255;
+
+				nOff++;
+				pReadScan++;
+			    }
+			    break;
+			case BMP_FORMAT_32BIT_TC_RGBA:
+			    pReadScan = pBitmapReadAcc->GetScanline( nY );
+			    if( pAlphaReadAcc )
+				if( readAlpha( pAlphaReadAcc, nY, nWidth, data, nOff ) )
+				    bIsAlpha = true;
+
+			    for( nX = 0; nX < nWidth; nX++ ) {
+				if( pAlphaReadAcc )
+				    nAlpha = data[ nOff + 3 ];
+				else
+				    nAlpha = data[ nOff + 3 ] = 255;
+				data[ nOff++ ] = ( nAlpha*( pReadScan[ 2 ] ) )/255;
+				data[ nOff++ ] = ( nAlpha*( pReadScan[ 1 ] ) )/255;
+				data[ nOff++ ] = ( nAlpha*( pReadScan[ 0 ] ) )/255;
+
+				nOff++;
+				pReadScan += 4;
+			    }
+			    break;
+			default:
+			    OSL_TRACE( "fallback to GetColor - slow, format: %d\n", pBitmapReadAcc->GetScanlineFormat() );
+
+			    if( pAlphaReadAcc )
+				if( readAlpha( pAlphaReadAcc, nY, nWidth, data, nOff ) )
+				    bIsAlpha = true;
+
+			    for( nX = 0; nX < nWidth; nX++ ) {
+				aColor = pBitmapReadAcc->GetColor( nY, nX );
+
+				// cairo need premultiplied color values
+				// TODO(rodo) handle endianess
+				if( pAlphaReadAcc )
+				    nAlpha = data[ nOff + 3 ];
+				else
+				    nAlpha = data[ nOff + 3 ] = 255;
+
+				data[ nOff++ ] = ( nAlpha*aColor.GetBlue() )/255;
+				data[ nOff++ ] = ( nAlpha*aColor.GetGreen() )/255;
+				data[ nOff++ ] = ( nAlpha*aColor.GetRed() )/255;
+
+				nOff ++;
+			    }
+			}
+		    }
 		    
+		    aBitmap.ReleaseAccess( pBitmapReadAcc );
+		    if( pAlphaReadAcc )
+			aAlpha.ReleaseAccess( pAlphaReadAcc );
+
 		    Surface* pImageSurface;
 		    if( bIsAlpha )
 			pImageSurface = cairo_image_surface_create_for_data( data, CAIRO_FORMAT_ARGB32, nWidth, nHeight, nWidth*4 );
