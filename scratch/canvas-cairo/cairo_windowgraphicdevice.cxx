@@ -477,15 +477,19 @@ namespace cairocanvas
 	if( ! mpWindowSurface )
 	    getSurface();
 
-	return cairo_surface_create_similar( mpWindowSurface, aContent, aSize.Width(), aSize.Height() );
+	return getSimilarSurface( aSize, aContent );
 
     }
 
     Surface* WindowGraphicDevice::getSimilarSurface( Size aSize, Content aContent ) const
     {
 	OSL_TRACE( "called WindowGraphicDevice::getSimilarSurface %d x %d\n", aSize.Width(), aSize.Height() );
-	if( mpWindowSurface )
-	    return cairo_surface_create_similar( mpWindowSurface, aContent, aSize.Width(), aSize.Height() );
+	if( mpWindowSurface ) {
+ 	    //OSL_TRACE( "try image surface\n" );
+	    
+ 	    //return cairo_image_surface_create( CAIRO_FORMAT_ARGB32, aSize.Width(), aSize.Height() );
+	    	    return cairo_surface_create_similar( mpWindowSurface, aContent, aSize.Width(), aSize.Height() );
+	}
 
 	OSL_TRACE( "warning: called WindowGraphicDevice::getSimilarSurface before mpWindowSurface created. use getSimilarSurfaceNoConst if possible" );
 

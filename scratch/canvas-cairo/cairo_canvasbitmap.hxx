@@ -142,6 +142,7 @@ namespace cairocanvas
                               const ::Size& 				rSz,
                               const GraphicAttr&			rAttr ) const;
 
+	bool hasAlpha();
 	::cairo::Cairo* getCairo();
 
     protected:
@@ -153,6 +154,7 @@ namespace cairocanvas
         CanvasBitmap& operator=( const CanvasBitmap& );
 
 	::cairo::Cairo* mpCairo;
+	bool bHasAlpha;
     };
 }
 

@@ -204,7 +204,7 @@ namespace cairocanvas
             }
         }
 
-        Cairo* cairoFromXBitmap( const uno::Reference< rendering::XBitmap >& xBitmap )
+        Cairo* cairoFromXBitmap( const uno::Reference< rendering::XBitmap >& xBitmap, bool &bHasAlpha )
         {
             uno::Reference< lang::XServiceInfo > xRef( xBitmap, 
                                                        uno::UNO_QUERY );
@@ -213,6 +213,8 @@ namespace cairocanvas
                 xRef->getImplementationName().equals( ::rtl::OUString(RTL_CONSTASCII_USTRINGPARAM(CANVASBITMAP_IMPLEMENTATION_NAME))) )
 	    {
                 // TODO(Q1): Maybe use dynamic_cast here
+		bHasAlpha = static_cast<CanvasBitmap*>(xBitmap.get())->hasAlpha();
+
                 return static_cast<CanvasBitmap*>(xBitmap.get())->getCairo();
             }
  
@@ -236,10 +238,10 @@ namespace cairocanvas
             return ::BitmapEx();
         }
 
-        Surface* surfaceFromXBitmap( const uno::Reference< rendering::XBitmap >& xBitmap, const WindowGraphicDevice::ImplRef& rDevice, unsigned char*& data )
+        Surface* surfaceFromXBitmap( const uno::Reference< rendering::XBitmap >& xBitmap, const WindowGraphicDevice::ImplRef& rDevice, unsigned char*& data, bool& bHasAlpha )
         {
 	    Surface* pSurface = NULL;
-	    Cairo* pCairo = cairoFromXBitmap( xBitmap );
+	    Cairo* pCairo = cairoFromXBitmap( xBitmap, bHasAlpha );
 	    if( pCairo ) {
 		pSurface = cairo_get_target( pCairo );
 		cairo_surface_reference( pSurface );
@@ -256,20 +258,25 @@ namespace cairocanvas
 		    WindowGraphicDevice::ImplRef xDevice = rDevice;
 		    pSurface = xDevice->getSurface( aBitmap );
 		    data = NULL;
+		    bHasAlpha = false;
 		}
 
 		if( !pSurface ) {
 
 		    BitmapReadAccess*	pBitmapReadAcc = aBitmap.AcquireReadAccess();
-		    BitmapReadAccess*	pAlphaReadAcc = aAlpha.AcquireReadAccess();
-
+		    BitmapReadAccess*	pAlphaReadAcc = NULL;
 		    const long		nWidth = pBitmapReadAcc->Width();
 		    const long		nHeight = pBitmapReadAcc->Height();
 		    long nX, nY;
+		    bool bIsAlpha = false;
+
+		    if( aBmpEx.IsTransparent() || aBmpEx.IsAlpha() )
+			pAlphaReadAcc = aAlpha.AcquireReadAccess();
 
 		    OSL_TRACE( "fallback to XBitmap interface - slow\n" );
 
 		    data = (unsigned char*) malloc( nWidth*nHeight*4 );
+
 		    long nOff = 0;
 		    Color aColor;
 		    unsigned int nAlpha = 255;
@@ -285,10 +292,37 @@ namespace cairocanvas
 			    data [nOff++] = ( nAlpha*aColor.GetBlue() )/255;
 			    data [nOff++] = ( nAlpha*aColor.GetGreen() )/255;
 			    data [nOff++] = ( nAlpha*aColor.GetRed() )/255;
-			    data [nOff++] = nAlpha;
+			    if( pAlphaReadAcc ) {
+				data [nOff++] = nAlpha;
+				if( nAlpha != 255 )
+				    bIsAlpha = true;
+			    } else
+				nOff ++;
 			}
 
-		    pSurface = cairo_image_surface_create_for_data( data, CAIRO_FORMAT_ARGB32, nWidth, nHeight, nWidth*4 );
+		    
+		    Surface* pImageSurface;
+		    if( bIsAlpha )
+			pImageSurface = cairo_image_surface_create_for_data( data, CAIRO_FORMAT_ARGB32, nWidth, nHeight, nWidth*4 );
+ 		    else
+ 			pImageSurface = cairo_image_surface_create_for_data( data, CAIRO_FORMAT_RGB24, nWidth, nHeight, nWidth*4 );
+
+// 		    WindowGraphicDevice::ImplRef xDevice = rDevice;
+// 		    pSurface = xDevice->getSimilarSurface( Size( nWidth, nHeight ), bIsAlpha ? CAIRO_CONTENT_COLOR_ALPHA : CAIRO_CONTENT_COLOR );
+// 		    Cairo* pTargetCairo = cairo_create( pSurface );
+// 		    cairo_set_source_surface( pTargetCairo, pImageSurface, 0, 0 );
+
+// 		    //if( !bIsAlpha )
+// 		    //cairo_set_operator( pTargetCairo, CAIRO_OPERATOR_SOURCE );
+
+// 		    cairo_paint( pTargetCairo );
+// 		    cairo_destroy( pTargetCairo );
+// 		    cairo_surface_destroy( pImageSurface );
+		    pSurface = pImageSurface;
+
+		    bHasAlpha = bIsAlpha;
+
+		    OSL_TRACE("image: %d x %d alpha: %d alphaRead %p", nWidth, nHeight, bIsAlpha, pAlphaReadAcc);
 		}
 	    }
 

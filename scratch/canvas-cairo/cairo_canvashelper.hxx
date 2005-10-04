@@ -296,6 +296,13 @@ namespace cairocanvas
 	void drawPolyPolygonPath( const ::com::sun::star::uno::Reference< ::com::sun::star::rendering::XPolyPolygon2D >& xPolyPolygon,
 				  Operation aOperation, ::cairo::Cairo* pCairo=NULL ) const;
 
+        ::com::sun::star::uno::Reference< ::com::sun::star::rendering::XCachedPrimitive > 	
+	implDrawBitmapSurface( ::cairo::Surface* pSurface, 
+			       const ::com::sun::star::rendering::ViewState& 	viewState, 
+			       const ::com::sun::star::rendering::RenderState& renderState,
+			       bool bModulateColors,
+			       bool bHasAlpha );
+
     protected:
         /// Phyical output device
         WindowGraphicDevice::ImplRef	mxDevice;
@@ -309,14 +316,6 @@ namespace cairocanvas
         CanvasHelper(const CanvasHelper&);
         CanvasHelper& operator=( const CanvasHelper& );
         
-        ::com::sun::star::uno::Reference< ::com::sun::star::rendering::XCachedPrimitive > 	
-        	implDrawBitmap( const ::com::sun::star::rendering::XCanvas& 	rCanvas,
-                            const ::com::sun::star::uno::Reference< 
-                  		          ::com::sun::star::rendering::XBitmap >& 	xBitmap, 
-                            const ::com::sun::star::rendering::ViewState& 	viewState, 
-                            const ::com::sun::star::rendering::RenderState& renderState,
-                            bool 											bModulateColors );
-
         bool setupTextOutput( ::Point&																						o_rOutPos,
                               const ::com::sun::star::rendering::ViewState& 										viewState, 
                               const ::com::sun::star::rendering::RenderState& 										renderState, 

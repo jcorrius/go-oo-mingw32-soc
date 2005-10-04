@@ -158,7 +158,7 @@ namespace cairocanvas
         ::cairo::Cairo* cairoFromXBitmap( const ::com::sun::star::uno::Reference< ::com::sun::star::rendering::XBitmap >& );
         ::cairo::Surface* surfaceFromXBitmap( const ::com::sun::star::uno::Reference< ::com::sun::star::rendering::XBitmap >& xBitmap,
 					      const WindowGraphicDevice::ImplRef& rDevice,
-					      unsigned char*& data );
+					      unsigned char*& data, bool& bHasAlpha );
 
         /** Setup VCL font and output position
 

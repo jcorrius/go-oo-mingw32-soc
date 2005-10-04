@@ -143,6 +143,7 @@ namespace cairocanvas
 
 	Size aSize = mpBackBuffer->getSize();
 	mpSurface = cairo_surface_create_similar( mpBackBuffer->getSurface(), CAIRO_CONTENT_COLOR, aSize.Width(), aSize.Height() );
+	//mpSurface = cairo_image_surface_create( CAIRO_FORMAT_RGB24, aSize.Width(), aSize.Height() );
 	mpCairo = cairo_create( mpSurface );
 	mpWinSurface = pSurface;
 	cairo_surface_reference( mpWinSurface );
@@ -475,7 +476,6 @@ namespace cairocanvas
 
 	if( aOutputSize.Width() > 0 && aOutputSize.Height() > 0 ) {
 
-
 	    cairo_save( mpCairo );
 
 	    cairo_rectangle( mpCairo, aOutputPosition.X(), aOutputPosition.Y(), aOutputSize.Width(), aOutputSize.Height() );
@@ -486,7 +486,7 @@ namespace cairocanvas
 	    cairo_set_source_surface( mpCairo, mpBackBuffer->getSurface(), 0, 0 );
 	    cairo_paint( mpCairo );
 	    cairo_restore( mpCairo );
-        
+
 	    // paint all affected sprites to update area
 	    ::std::for_each( rComponents.maComponentList.begin(),
 			     rComponents.maComponentList.end(),

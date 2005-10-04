@@ -80,6 +80,7 @@ namespace cairocanvas
     CanvasBitmap::CanvasBitmap( const ::Size& 						rSize,
                                 bool								bAlphaBitmap,
                                 const WindowGraphicDevice::ImplRef&	rDevice )
+	: bHasAlpha( bAlphaBitmap )
     { 
 	WindowGraphicDevice::ImplRef xDevice = rDevice;
 
@@ -92,6 +93,7 @@ namespace cairocanvas
 
     CanvasBitmap::CanvasBitmap( const geometry::RealSize2D& rSize, Surface* pSrcSurface,
                                 const WindowGraphicDevice::ImplRef& rDevice, bool bFast )
+	: bHasAlpha( true )
     {
 	WindowGraphicDevice::ImplRef xDevice = rDevice;
 
@@ -173,5 +175,10 @@ namespace cairocanvas
     Cairo* CanvasBitmap::getCairo()
     {
 	return mpCairo;
+    }
+
+    bool CanvasBitmap::hasAlpha()
+    {
+	return bHasAlpha;
     }
 }

@@ -251,10 +251,14 @@ namespace cairocanvas
         if( viewState.Clip.is() ) {
 	    OSL_TRACE ("view clip\n");
 
+	    aViewMatrix.x0 = round( aViewMatrix.x0 );
+	    aViewMatrix.y0 = round( aViewMatrix.y0 );
 	    cairo_set_matrix( mpCairo, &aViewMatrix );
 	    drawPolyPolygonPath( viewState.Clip, Clip );
 	}
 
+	aCombinedMatrix.x0 = round( aCombinedMatrix.x0 );
+	aCombinedMatrix.y0 = round( aCombinedMatrix.y0 );
 	cairo_set_matrix( mpCairo, &aCombinedMatrix );
 
         if( renderState.Clip.is() ) {
@@ -330,7 +334,8 @@ namespace cairocanvas
 		::com::sun::star::rendering::Texture aTexture ( (*mpTextures)[nPolygonIndex] );
 		if( aTexture.Bitmap.is() ) {
 		    unsigned char* data;
-		    Surface* pSurface = tools::surfaceFromXBitmap( (*mpTextures)[nPolygonIndex].Bitmap, mxDevice, data );
+		    bool bHasAlpha;
+		    Surface* pSurface = tools::surfaceFromXBitmap( (*mpTextures)[nPolygonIndex].Bitmap, mxDevice, data, bHasAlpha );
 
 		    if( pSurface ) {
 			cairo_pattern_t* pPattern;
@@ -368,9 +373,13 @@ namespace cairocanvas
  			if( aTexture.RepeatModeX == rendering::TexturingMode::REPEAT &&
 			    aTexture.RepeatModeY == rendering::TexturingMode::REPEAT )
 			    cairo_pattern_set_extend( pPattern, CAIRO_EXTEND_REPEAT );
+			aScaledTextureMatrix.x0 = round( aScaledTextureMatrix.x0 );
+			aScaledTextureMatrix.y0 = round( aScaledTextureMatrix.y0 );
 			cairo_pattern_set_matrix( pPattern, &aScaledTextureMatrix );
 
 			cairo_set_source( pCairo, pPattern );
+			if( !bHasAlpha )
+			    cairo_set_operator( pCairo, CAIRO_OPERATOR_SOURCE );
 			cairo_fill( pCairo );
 
 			cairo_restore( pCairo );
@@ -471,8 +480,8 @@ namespace cairocanvas
 		::basegfx::B2DPoint aA, aB, aP;
 
 		aP = aPolygon.getB2DPoint( 0 );
-		cairo_move_to( pCairo, aP.getX(), aP.getY() );
-		OSL_TRACE( "move to %f,%f\n", aP.getX(), aP.getY() );
+		cairo_move_to( pCairo, round(aP.getX()), round(aP.getY()) );
+		OSL_TRACE( "move to %f,%f\n", round(aP.getX()), round(aP.getY()) );
 
 		if( bIsBezier ) {
 		    aA = aPolygon.getControlPointA( 0 );
@@ -488,8 +497,8 @@ namespace cairocanvas
 			aA = aPolygon.getControlPointA( j );
 			aB = aPolygon.getControlPointB( j );
 		    } else {
-			cairo_line_to( pCairo, aP.getX(), aP.getY() );
-			OSL_TRACE( "line to %f,%f\n", aP.getX(), aP.getY() );
+			cairo_line_to( pCairo, round(aP.getX()), round(aP.getY()) );
+			OSL_TRACE( "line to %f,%f\n", round(aP.getX()), round(aP.getY()) );
 		    }
 		    bOpToDo = true;
 		}
@@ -842,32 +851,30 @@ namespace cairocanvas
 	 return uno::Reference< rendering::XCachedPrimitive >(NULL);
     }
 
-    uno::Reference< rendering::XCachedPrimitive > CanvasHelper::implDrawBitmap( const rendering::XCanvas& 					rCanvas, 
-                                                                                const uno::Reference< rendering::XBitmap >& xBitmap,
-                                                                                const rendering::ViewState& 				viewState,
-                                                                                const rendering::RenderState& 				renderState,
-                                                                                bool 										bModulateColors )
+    uno::Reference< rendering::XCachedPrimitive > CanvasHelper::implDrawBitmapSurface( Surface* pSurface,
+										       const rendering::ViewState& viewState,
+										       const rendering::RenderState& renderState,
+										       bool bModulateColors,
+										       bool bHasAlpha )
     {
-	unsigned char* data;
-	Surface* pSurface = tools::surfaceFromXBitmap( xBitmap, mxDevice, data );
-
-	if( mpCairo && pSurface )
-        {
+	if( mpCairo ) {
 	    cairo_save( mpCairo );
 
+	    Size aSize = mxDevice->getSurfaceSize();
+
+ 	    cairo_rectangle( mpCairo, 0, 0, aSize.Width(), aSize.Height() );
+ 	    cairo_clip( mpCairo );
+
 	    useStates( viewState, renderState, true );
+
+//  	    if( !bHasAlpha )
+//  		cairo_set_operator( mpCairo, CAIRO_OPERATOR_SOURCE );
 
 	    cairo_set_source_surface( mpCairo, pSurface, 0, 0 );
 	    cairo_paint( mpCairo );
 	    cairo_restore( mpCairo );
 	} else
 	    OSL_TRACE ("CanvasHelper called after it was disposed");
-
-	if( pSurface )
-	    cairo_surface_destroy( pSurface );
-
-	if( data )
-	    free( data );
 
         return uno::Reference< rendering::XCachedPrimitive >(NULL);
     }
@@ -877,11 +884,22 @@ namespace cairocanvas
                                                                             const rendering::ViewState& 				viewState,
                                                                             const rendering::RenderState& 				renderState )
     {
-        return implDrawBitmap( rCanvas, 
-                               xBitmap,
-                               viewState,
-                               renderState,
-                               false );
+	uno::Reference< rendering::XCachedPrimitive > rv;
+	unsigned char* data;
+	bool bHasAlpha;
+	Surface* pSurface = tools::surfaceFromXBitmap( xBitmap, mxDevice, data, bHasAlpha );
+
+	if( pSurface ) {
+	    rv = implDrawBitmapSurface( pSurface, viewState, renderState, false, bHasAlpha );
+
+	    cairo_surface_destroy( pSurface );
+
+	    if( data )
+		free( data );
+	} else
+	    rv = uno::Reference< rendering::XCachedPrimitive >(NULL);
+
+	return rv;
     }
 
     uno::Reference< rendering::XCachedPrimitive > CanvasHelper::drawBitmapModulated( const rendering::XCanvas& 						rCanvas, 
@@ -889,11 +907,21 @@ namespace cairocanvas
                                                                                      const rendering::ViewState& 					viewState,
                                                                                      const rendering::RenderState& 					renderState )
     {
-        return implDrawBitmap( rCanvas, 
-                               xBitmap,
-                               viewState,
-                               renderState,
-                               true );
+	uno::Reference< rendering::XCachedPrimitive > rv;
+	unsigned char* data;
+	bool bHasAlpha;
+	Surface* pSurface = tools::surfaceFromXBitmap( xBitmap, mxDevice, data, bHasAlpha );
+
+	if( pSurface ) {
+	    rv = implDrawBitmapSurface( pSurface, viewState, renderState, true, bHasAlpha );
+	    cairo_surface_destroy( pSurface );
+
+	    if( data )
+		free( data );
+	} else
+	    rv = uno::Reference< rendering::XCachedPrimitive >(NULL);
+
+	return rv;
     }
 
     uno::Reference< rendering::XGraphicDevice > CanvasHelper::getDevice()

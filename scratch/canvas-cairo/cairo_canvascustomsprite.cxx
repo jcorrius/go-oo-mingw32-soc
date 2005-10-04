@@ -125,7 +125,6 @@ namespace cairocanvas
         mpBackBuffer(),
         mpBackBufferMask(),
         mpSpriteCanvas( rSpriteCanvas ),
-        maContent(),
         maCurrClipBounds(),
         maPosition(0.0, 0.0),
         maSize( static_cast< sal_Int32 >( 
@@ -142,7 +141,8 @@ namespace cairocanvas
         mbActive(false),
         mbIsCurrClipRectangle(true),
         mbIsContentFullyOpaque( false ),
-        mbTransformDirty( true )
+        mbTransformDirty( true ),
+	mxDevice( rDevice )
     {
         ENSURE_AND_THROW( rDevice.get() && rSpriteCanvas.get(),
                           "CanvasBitmap::CanvasBitmap(): Invalid device or sprite canvas" );
@@ -150,27 +150,12 @@ namespace cairocanvas
 	OSL_TRACE("going to create canvas custom sprite\n");
 
         // setup graphic device
-        maCanvasHelper.setGraphicDevice( rDevice );
-        
-
-        // setup back buffer
-        // -----------------
-        
-        // create content backbuffer in screen depth
-        mpBackBuffer.reset( new BackBuffer( rDevice ) );
-	mpBackBuffer->setSize( maSize );
+        maCanvasHelper.setGraphicDevice( mxDevice );
+	setContent( CAIRO_CONTENT_COLOR_ALPHA );
 
         // create mask backbuffer, with one bit color depth
-        mpBackBufferMask.reset( new BackBuffer( rDevice ) );
+        mpBackBufferMask.reset( new BackBuffer( mxDevice ) );
 	mpBackBufferMask->setSize( maSize );
-
-        // setup canvas helper
-        // -------------------
-
-        // always render into back buffer, don't preserve state
-        // (it's our private VDev, after all)
-        maCanvasHelper.setCairo( mpBackBuffer->getCairo() );
-        // rodo TODO maCanvasHelper.setBackgroundOutDev( mpBackBufferMask );
     }
 
     CanvasCustomSprite::~CanvasCustomSprite()
@@ -182,9 +167,20 @@ namespace cairocanvas
         tools::LocalGuard aGuard;
 
         mpSpriteCanvas.clear();
+        mxDevice.reset();
 
         // forward to parent
         CanvasCustomSprite_Base::disposing();
+    }
+
+    void CanvasCustomSprite::setContent( Content aContent )
+    {
+	OSL_TRACE("set Content of %p to %x\n", this, aContent);
+	
+	mpBackBuffer.reset( new BackBuffer( mxDevice, aContent ) );
+	mpBackBuffer->setSize( maSize );
+	maCanvasHelper.setCairo( mpBackBuffer->getCairo() );
+	maContent = aContent;
     }
 
     void SAL_CALL CanvasCustomSprite::setAlpha( double alpha ) throw (lang::IllegalArgumentException, uno::RuntimeException)
@@ -571,6 +567,72 @@ namespace cairocanvas
         redraw( pCairo, maPosition );
     }
 
+    bool CanvasCustomSprite::doesBitmapCoverWholeSprite( const uno::Reference< rendering::XBitmap >& xBitmap, 
+							 const rendering::ViewState& viewState, 
+							 const rendering::RenderState& renderState )
+    {
+	// TODO(Q2): Factor out to canvastools or similar
+
+	::basegfx::B2DHomMatrix aTransform;
+	::canvas::tools::mergeViewAndRenderTransform(aTransform,
+						     viewState, 
+						     renderState);
+            
+	const geometry::IntegerSize2D& rSize( xBitmap->getSize() );
+
+	::basegfx::B2DPolygon aPoly( 
+				    ::basegfx::tools::createPolygonFromRect(
+									    ::basegfx::B2DRectangle( 0.0,0.0,
+												     rSize.Width+1,
+												     rSize.Height+1 ) ) );
+	aPoly.transform( aTransform );
+
+	if( ::basegfx::tools::isInside( 
+				       aPoly,
+				       ::basegfx::tools::createPolygonFromRect(
+									       ::basegfx::B2DRectangle( 0.0,0.0,
+													maSize.Width(),
+													maSize.Height() ) ),
+				       true ) )
+            {
+                // bitmap will fully cover the sprite, set flag
+                // appropriately
+                mbIsContentFullyOpaque = true;
+		OSL_TRACE ("sprite fully opaque");
+            }
+	return mbIsContentFullyOpaque;
+    }
+
+    uno::Reference< rendering::XCachedPrimitive > SAL_CALL CanvasCustomSprite::drawBitmap( const uno::Reference< rendering::XBitmap >&	xBitmap, 
+                                                                                           const rendering::ViewState& viewState, 
+                                                                                           const rendering::RenderState& renderState )
+	throw (lang::IllegalArgumentException, uno::RuntimeException)
+    {
+        tools::LocalGuard aGuard;
+
+	uno::Reference< rendering::XCachedPrimitive > rv;
+	bool bHasAlpha;
+	unsigned char* data;
+	Surface* pSurface = tools::surfaceFromXBitmap( xBitmap, mxDevice, data, bHasAlpha );
+	Content aRequiredContent;
+
+	if( pSurface ) {
+  	    aRequiredContent = bHasAlpha ? CAIRO_CONTENT_COLOR_ALPHA : CAIRO_CONTENT_COLOR;
+   	    if( aRequiredContent != maContent && aRequiredContent == CAIRO_CONTENT_COLOR && doesBitmapCoverWholeSprite( xBitmap, viewState, renderState ) )
+   		setContent( aRequiredContent );
+
+	    rv = maCanvasHelper.implDrawBitmapSurface( pSurface, viewState, renderState, false, bHasAlpha );
+
+	    cairo_surface_destroy( pSurface );
+
+	    if( data )
+		free( data );
+	} else
+	    rv = uno::Reference< rendering::XCachedPrimitive >(NULL);
+           
+	return rv;
+    }
+
     void CanvasCustomSprite::redraw( Cairo* pCairo,
                                      const ::basegfx::B2DPoint& rOutputPos ) const
     {
@@ -596,27 +658,48 @@ namespace cairocanvas
  		    cairo_matrix_init( &aMatrix,
  				       maTransform.get( 0, 0 ), maTransform.get( 1, 0 ), maTransform.get( 0, 1 ),
  				       maTransform.get( 1, 1 ), maTransform.get( 0, 2 ), maTransform.get( 1, 2 ) );
+
+		    aMatrix.x0 = round( aMatrix.x0 );
+		    aMatrix.y0 = round( aMatrix.y0 );
+
 		    cairo_matrix_init( &aInverseMatrix, aMatrix.xx, aMatrix.yx, aMatrix.xy, aMatrix.yy, aMatrix.x0, aMatrix.y0 );
 		    cairo_matrix_invert( &aInverseMatrix );
 		    cairo_matrix_transform_distance( &aInverseMatrix, &fX, &fY );
+
+
  		    cairo_set_matrix( pCairo, &aMatrix );
  		}
 
+// 		fX = floor( fX );
+// 		fY = floor( fY );
+
 		cairo_matrix_t aOrigMatrix;
 		cairo_get_matrix( pCairo, &aOrigMatrix );
-		cairo_translate( pCairo, fX, fY );
+		cairo_translate( pCairo, round(fX), round(fY) );
 		if( mbIsCurrClipRectangle ) {
-		    if( maCurrClipBounds.isEmpty() )
-			cairo_rectangle( pCairo, 0, 0, maSize.Width(), maSize.Height() );
-		    else
-			cairo_rectangle( pCairo, maCurrClipBounds.getMinX(), maCurrClipBounds.getMinY(),
-					 maCurrClipBounds.getMaxX() - maCurrClipBounds.getMinX(), maCurrClipBounds.getMaxY() - maCurrClipBounds.getMinY() );
-		    cairo_clip( pCairo );
+		    cairo_reset_clip( pCairo );
+ 		    if( ! maCurrClipBounds.isEmpty() ) {
+  			cairo_rectangle( pCairo,
+					 floor( maCurrClipBounds.getMinX() ),
+					 floor( maCurrClipBounds.getMinY() ),
+  					 ceil( maCurrClipBounds.getMaxX() - maCurrClipBounds.getMinX() ),
+					 ceil( maCurrClipBounds.getMaxY() - maCurrClipBounds.getMinY() ) );
+			cairo_clip( pCairo );
+		    }
+		    //else
+		    //cairo_rectangle( pCairo, 0, 0, maSize.Width(), maSize.Height() );
 		}
-		if( mxClipPoly.is() )
+		if( mxClipPoly.is() ) {
+		    cairo_reset_clip( pCairo );
 		    maCanvasHelper.drawPolyPolygonPath( mxClipPoly, CanvasHelper::Clip, pCairo );
+		}
+		OSL_TRACE ("maSize %d x %d\n", maSize.Width(), maSize.Height() );
+		cairo_rectangle( pCairo, 0, 0, ceil( maSize.Width() ), ceil( maSize.Height() ) );
+		cairo_clip( pCairo );
 		cairo_set_matrix( pCairo, &aOrigMatrix );
 
+		if( mbIsContentFullyOpaque )
+		    cairo_set_operator( pCairo, CAIRO_OPERATOR_SOURCE );
 		cairo_set_source_surface( pCairo, mpBackBuffer->getSurface(), fX, fY );
                 if( ::rtl::math::approxEqual(mfAlpha, 1.0) )
 		    cairo_paint( pCairo );
