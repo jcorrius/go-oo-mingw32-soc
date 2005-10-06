@@ -1,3 +1,3 @@
-SUBDIRS= evo2 vba mono src680 64bit cairo
+SUBDIRS=64bit OOO_2_0 a11y cairo evo2 mono src680 vba
 
 EXTRA_DIST=README apply.pl $(wildcard *.diff)
