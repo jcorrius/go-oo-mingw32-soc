@@ -10,6 +10,7 @@
 #include "vbaworksheets.hxx"
 #include "vbarange.hxx"
 #include "vbawsfunction.hxx"
+#include "vbadialogs.hxx"
 
 #include "tabvwsh.hxx"
 
@@ -159,3 +160,13 @@ ScVbaApplication::Evaluate( const ::rtl::OUString& Name ) throw (uno::RuntimeExc
 		return uno::Any( getActiveWorkbook()->getActiveSheet()->Range( uno::Any( Name ) ) );	
 	return uno::Any();
 }
+
+uno::Any 
+ScVbaApplication::Dialogs( const uno::Any &aIndex ) throw (uno::RuntimeException)
+{
+	uno::Reference< vba::XDialogs > xDialogs( new ScVbaDialogs( m_xContext ) );
+	if( !aIndex.hasValue() )
+		return uno::Any( xDialogs );
+	return uno::Any( xDialogs->Item( aIndex ) );
+}
+	
