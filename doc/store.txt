@@ -1,0 +1,439 @@
+types.rdb
+    - maps 6Mb of memory ... (up from 3)
+    + block based, but multi-block records
+      ok (apparently)
+    + <zip file same structure ?>
+	+ 512 byte blocks ...
+
+storbase.cxx:
+
+storeError OStoreSuperBlockPage::create (
+	OStorePageBIOS             &rBIOS,
+	const OStorePageDescriptor &rDescr)
+{
+	storeError eErrCode = store_E_OutOfMemory;
+	void * p = rtl_allocateMemory (rDescr.m_nSize);
+	if (p != 0)
+	{
+		// Setup initial Page.
+		__store_memset (p, 0, rDescr.m_nSize);
+
+		// Mark as modified.
+		m_aState.modified();
+
+		// Write initial Page.
+		eErrCode = rBIOS.write (0, p, rDescr.m_nSize);
+		if (eErrCode == store_E_None)
+
+storbase.cxx:
+
+storeError OStorePageBIOS::create (sal_uInt16 nPageSize)
+	eErrCode = m_pSuper->create (
+		*this, OStorePageDescriptor (nPageSize, nPageSize, nMinSize));
+
+...
+
+
+store/inc/store/types.h
+
+/** PageSize (recommended) default.
+    @see store_openFile()
+ */
+#define STORE_DEFAULT_PAGESIZE ((sal_uInt16)0x0100)
+
+
+/** PageSize (enforced) limits.
+    @see store_openFile()
+ */
+#define STORE_MINIMUM_PAGESIZE ((sal_uInt16)0x0100)
+#define STORE_MAXIMUM_PAGESIZE ((sal_uInt16)0x8000)
+
+...
+
+storeError SAL_CALL store_openFile (
+	rtl_uString     *pFilename,
+	storeAccessMode  eAccessMode,
+	sal_uInt16       nPageSize,
+	storeFileHandle *phFile
+) SAL_THROW_EXTERN_C();
+
+...
+
+Used from registry/
+
+    + store.hxx:
+      	inline storeError createInMemory (
+		sal_uInt16 nPageSize = STORE_DEFAULT_PAGESIZE
+	) SAL_THROW(());
+
+
+registry/source/regimpl.cxx
+
+(gdb) up
+#5  0x4001a69d in ORegistry::initRegistry (this=0x401fdea8, regName=@0xbfffc880, accessMode=4)
+    at /opt/OpenOffice/src680-m129/registry/source/regimpl.cxx:531
+531             errCode = rRegFile.create(regName, sAccessMode, REG_PAGESIZE);
+
+
+Crash in: storlckb.cxx
+
+#0  0x4046f0c0 in memset () from /lib/libc.so.6
+#1  0x4005cdf8 in rtl_zeroMemory () from /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/lib/libuno_sal.so.3
+#2  0x405288f7 in store::OStoreDirectory::create () from /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/lib/libstore.so.3
+#3  0x4052f7eb in store_openDirectory () from /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/lib/libstore.so.3
+#4  0x4001ae00 in ?? () from /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/lib/libreg.so.3
+#5  0x4002563d in reg_getResolvedKeyName () from /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/lib/libreg.so.3
+
+block samller than XYZ string lengths ?
+
+Page size selected is 256
+Start create
+xManager's page size 256
+
+
+	fprintf( stderr, "xManager's page size %d\n", m_aDescr.m_nSize );
+
+	delete m_pNode;
+	m_pNode = new(m_aDescr.m_nSize) inode(m_aDescr.m_nSize);
+	if (!m_pNode)
+		return store_E_OutOfMemory;
+	fprintf( stderr, "created m_pNode\n");
+
+
+ie. dies in this 'new' ...
+
+source/storpage.hxx:    typedef OStoreDirectoryPageData   inode;
+
+stordata.hxx:
+
+struct OStoreDirectoryPageData : public store::OStorePageData
+	(cf. storbase.hxx's OStorePageData )
+
+	+ the directory has a maxiumum namesize ...    
+
+
+Potentially use a smaller STORE_MAXIMUM_NAMESIZE if the
+block size is smaller ?
+
+** With a MAX_NAMESIZE of 64 bytes
+    + works perfectly for types.rdb ...
+
+** Problem:
+
+    types.h: __store_FindData: exposes STORE_MAXIMUM_NAMESIZE
+	     as part of the (stable?) API ...
+
+    => to shrink the block size ...
+
+    + Can we make directory entries variable size ?
+	    & leave the MAX_PATH thing in-place ?
+
+    + looks like the 'Directory' is a file ... (nice)
+	+ store.hxx:
+	    + Directory API has:
+		+ 'traveller' class 'travel' callback.
+		+ 'first', 'next' iterators.
+
+	-> store.inl:
+	    store_findFirst, store_findNext
+		+ the whole API 'storeFindData' ...
+
+    + registry lookups
+	- prolly deadly slow - linear search over this file ...
+	- m_nReserved - an index ?
+	    + storelcbk.cxx:
+	    OStoreDirectory::iterate (*pFindData)
+		+ single entry point ...
+
+	+ Crazy [!]
+	    + there is a public 'OStoreDirectory' interface,
+	      (all inline) store/inc/store/store.hxx
+	    + and a private 'OStoreDirectory' (storelckb.hxx)
+
+	- we can bin all the 'clever' ness, and just use a
+	  'file' to stream directory entries into (most likely)
+
+
+struct OStoreDirectoryPageData : public store::OStorePageData
+	NameBlock m_aNameBlock; - block == inline foo
+	DataBlock m_aDataBlock;
+	sal_uInt8 m_pData[1];
+
+	+ m_pData[1] == symlink target etc.
+
+	+ [!] hmm ... - lots of hard-coded sizes ...
+	+ [!] - no hashing of names ...
+
+
+* Stream API:
+    store_openStream: -> OStoreLockBytes::create
+	'Stream' is wrapper around 'OStoreLockBytes'
+	+ storlckb.cxx (OStoreLockBytes)
+
+	OStoreLockBytes::create
+	    __store_iget - unwinds path ?
+			 + returns 'inode' (m_pNode)
+	    OStorePageDescriptor: inode->m_aDescr
+	    inode == OStoreDirectoryPageData ...
+
+* Directory API:
+
+	+ inode ...
+
+	[ registry code !? ]
+	    + hmm ...
+
+
+* Registry API:
+
+    + Need to provide:
+
+    + <mmap the file>
+	    + just a ton of data structures
+	    + 1 big write,
+	    + multiple reads ...
+	    + linear scans ... [directory files]
+	    + <foo>
+    + <no extending of files etc.>
+
+    + directory at the end of the file ...
+    + ... foo ...
+    + zip file ?
+
+
+* The object to make vari-sized is:
+    + 'OStoreDirectoryPageData'
+	+ includes name, data, m_pDirData
+	    + is an 'OStorePageData' - implicitely '1 block'
+	+ Contains an:
+	    + OStoreDirectoryDataBlock
+		+ data length and
+		+ pointers to inodes
+		    + 16+8+1+1 * 4 bytes = 104 bytes.
+
+    + 'OStoreDirectoryPageObject'
+	+ seems to be the in-memory representation of
+	  the thing.
+	+ 'get' and 'put' methods.
+	+ [ gets a Page handle at construct time ]
+
+
+* What code is used to manipulate zip files  [!]
+	+ package/ - contains the .zip code...
+	+ is there .zip support in the URE !?
+	    + can we just use this component ?
+		+ do we need type data for it ? ...
+
+	+ can we use the 'ZipFile' code ...
+	    + 
+
+
+* Problems:
+    + directory mgmt:
+	+ most of the data is in the 'directory' ...
+	+ but we need to be able to extend it dynamically ...
+	+ how is that done ? [ nasty scattered linked list ? ]
+	    + most simply - yes ...
+	+ Represent files - they can grow too ?
+	    + chunk lists ?
+	+ fragmentation - not an issue - always foo ...
+	+ 'blocks' ? - what we want to avoid ...
+	+ => file descriptor foo ...
+
+
++ Problems:
+  + multiple directories open concurrently
+  + concurrent (thread-safe?) writes to multiple streams
+  + the registry API allows all of that.
+
+
++ Can we go 1 level up:
+    + to the 'types' & 'services' level ?
+    + why are we using this code to store them ?
+
+
++ Dies during registry foo with:
+
+Office/services.rdb/en-US_inprogress_1/services.rdb' succesful!
+Name too long (103) ...
+Name too long (103) ...
+>>>Connection_Impl.writeRegistryServi
+
+    ie. we need a more imaginative approach here ...
+
++ Symlinks - seem to use the data itself as
+  the destination (good) [ nice ]
+
++ 5 entry points where we need this.
+    + how do we allocate & chain a new block
+    + how do we subsequently free that (?)
+	+ deletefoo...
+
++ vari-sized blocks (?)
+  rBIOS.allocate(OStorePageObject) / OStorePageBIOS::free ...
+  STORE_PAGE_NULL 
+
++ TODO:
+    + check serialization of the extra data ...
+
+
+storlckb.cxx:
+1.    write name - from 'const rtl_String *'
+2.    read name - build CRC - requires psz char *
+3.    read from psz char * -> unicode conversion
+storpage.cxx:
+1.    write name - from pSrcName 'rtl_String *'
+2.    write name - from pDstName 'rtl_String *'
+
+OStorePageManager - more friendly ?
+
+
+setName '$VL_value'
+==25250== Invalid read of size 4
+==25250==    at 0x341997BF: rtl_freeMemory_CUSTOM (in /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/lib/libuno_sal.so.3)
+==25250==    by 0x341998F3: rtl_freeMemory (in /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/lib/libuno_sal.so.3)
+==25250==    by 0x3464BD16: store::OStorePageData::operator delete(void*) (storbase.hxx:561)
+==25250==    by 0x346514F4: store::OStoreLockBytes::~OStoreLockBytes() (storlckb.cxx:408)
+==25250==    by 0x34643624: store::OStoreObject::release() (object.cxx:128)
+==25250==    by 0x346515A8: store::OStoreLockBytes::release() (storlckb.cxx:436)
+==25250==    by 0x346584A2: store_releaseHandle (store.cxx:133)
+==25250==    by 0x341581FA: (within /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/lib/libreg.so.3)
+==25250==    by 0x34161D3E: (within /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/lib/libreg.so.3)
+==25250==    by 0x3415D65B: (within /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/lib/libreg.so.3)
+==25250==    by 0x8087F63: RegistryKey::setValue(rtl::OUString const&, RegValueType, void*, unsigned long) (in /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/bin/idlc)
+==25250==    by 0x8085F67: AstModule::dump(RegistryKey&) (in /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/bin/idlc)
+==25250==    by 0x80843A0: AstDeclaration::dump(RegistryKey&) (in /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/bin/idlc)
+==25250==    by 0x80860EA: AstModule::dump(RegistryKey&) (in /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/bin/idlc)
+==25250==    by 0x80843A0: AstDeclaration::dump(RegistryKey&) (in /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/bin/idlc)
+==25250==    by 0x80860EA: AstModule::dump(RegistryKey&) (in /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/bin/idlc)
+==25250==    by 0x80843A0: AstDeclaration::dump(RegistryKey&) (in /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/bin/idlc)
+==25250==    by 0x80860EA: AstModule::dump(RegistryKey&) (in /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/bin/idlc)
+==25250==    by 0x80843A0: AstDeclaration::dump(RegistryKey&) (in /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/bin/idlc)
+==25250==    by 0x80860EA: AstModule::dump(RegistryKey&) (in /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/bin/idlc)
+==25250==    by 0x807CC6E: produceFile(rtl::OString const&) (in /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/bin/idlc)
+==25250==    by 0x80780C1: sal_main (in /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/bin/idlc)
+==25250==    by 0x80776C7: main (in /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/bin/idlc)
+==25250==  Address 0xC92794DC is not stack'd, malloc'd or (recently) free'd
+==25250== 
+==25250== Process terminating with default action of signal 11 (SIGSEGV): dumping core
+==25250==    at 0x341997BF: rtl_freeMemory_CUSTOM (in /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/lib/libuno_sal.so.3)
+==25250==    by 0x341998F3: rtl_freeMemory (in /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/lib/libuno_sal.so.3)
+==25250==    by 0x3464BD16: store::OStorePageData::operator delete(void*) (storbase.hxx:561)
+==25250==    by 0x346514F4: store::OStoreLockBytes::~OStoreLockBytes() (storlckb.cxx:408)
+==25250==    by 0x34643624: store::OStoreObject::release() (object.cxx:128)
+==25250==    by 0x346515A8: store::OStoreLockBytes::release() (storlckb.cxx:436)
+==25250==    by 0x346584A2: store_releaseHandle (store.cxx:133)
+==25250==    by 0x341581FA: (within /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/lib/libreg.so.3)
+==25250==    by 0x34161D3E: (within /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/lib/libreg.so.3)
+==25250==    by 0x3415D65B: (within /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/lib/libreg.so.3)
+==25250==    by 0x8087F63: RegistryKey::setValue(rtl::OUString const&, RegValueType, void*, unsigned long) (in /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/bin/idlc)
+==25250==    by 0x8085F67: AstModule::dump(RegistryKey&) (in /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/bin/idlc)
+==25250==    by 0x80843A0: AstDeclaration::dump(RegistryKey&) (in /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/bin/idlc)
+==25250==    by 0x80860EA: AstModule::dump(RegistryKey&) (in /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/bin/idlc)
+==25250==    by 0x80843A0: AstDeclaration::dump(RegistryKey&) (in /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/bin/idlc)
+==25250==    by 0x80860EA: AstModule::dump(RegistryKey&) (in /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/bin/idlc)
+==25250==    by 0x80843A0: AstDeclaration::dump(RegistryKey&) (in /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/bin/idlc)
+==25250==    by 0x80860EA: AstModule::dump(RegistryKey&) (in /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/bin/idlc)
+==25250==    by 0x80843A0: AstDeclaration::dump(RegistryKey&) (in /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/bin/idlc)
+==25250==    by 0x80860EA: AstModule::dump(RegistryKey&) (in /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/bin/idlc)
+==25250==    by 0x807CC6E: produceFile(rtl::OString const&) (in /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/bin/idlc)
+==25250==    by 0x80780C1: sal_main (in /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/bin/idlc)
+==25250==    by 0x80776C7: main (in /opt/OpenOffice/src680-m129/solver/680/unxlngi4.pro/bin/idlc)
+
+
+urd files - being generated just fine ...
+
+* Nested directories ... (!?)
+
+* [ was not using rtl_string correctly - wrt. lengths ... ]
+
+
+* Problems
+    + can we re-work the inode stuff - to handle smaller files (?)
+	+ need tool to measure avg. size of entries in our .rdbs ...
+    + measure each stream size & each file-name size ...
+	+ add it to a bucket ... - log (?)
+
+    + with the new name stuff - identical types.rdb 'regview' output
+	+ 
+
+* On the 1st pass:
+michael@linux:/opt/OOInstall2/program> ls -l types.rdb 
+-r--r--r--  1 michael users 4096000 2005-10-07 15:32 types.rdb
+michael@linux:/opt/OOInstall2/program> ls -l services.rdb 
+-r--r--r--  1 michael users 3604480 2005-10-07 15:35 services.rdb
+michael@linux:/opt/OOInstall2/program> ls -l /opt/OOInstall/program/types.rdb
+-rw-r--r--  1 michael users 6127616 2005-10-05 10:01 /opt/OOInstall/program/types.rdb
+michael@linux:/opt/OOInstall2/program> ls -l /opt/OOInstall/program/services.rdb 
+-r--r--r--  1 michael users 4521984 2005-10-04 17:57 /opt/OOInstall/program/services.rdb
+
+
+'stats' command output for
+
+Store statistics: types.rdb
+ 3553 files
+ 3554 dirs
+ 0 links
+Sizes:
+ bucket - count - percentage
+ 2^ 0 - 3554 - 50
+ 2^ 1 - 0 -  0
+ 2^ 2 - 0 -  0
+ 2^ 3 - 0 -  0
+ 2^ 4 - 0 -  0
+ 2^ 5 - 0 -  0
+ 2^ 6 - 19 - 0.27
+ 2^ 7 - 268 - 3.8
+ 2^ 8 - 1436 - 20
+ 2^ 9 - 1156 - 16
+ 2^10 - 467 - 6.6
+ 2^11 - 150 - 2.1
+ 2^12 - 47 - 0.66
+ 2^13 - 9 - 0.13
+ 2^14 - 0 -  0
+ 2^15 - 1 - 0.014
+Name lengths:
+ bucket - count - percentage
+ 2^ 0 - 0 -  0
+ 2^ 1 - 0 -  0
+ 2^ 2 - 35 - 0.49
+ 2^ 3 - 376 - 5.3
+ 2^ 4 - 4975 - 70
+ 2^ 5 - 1667 - 23
+ 2^ 6 - 54 - 0.76
+
+Store statistics: services.rdb
+ 2436 files
+ 5863 dirs
+ 0 links
+Sizes:
+ bucket - count - percentage
+ 2^ 0 - 5863 - 71
+ 2^ 1 - 0 -  0
+ 2^ 2 - 0 -  0
+ 2^ 3 - 0 -  0
+ 2^ 4 - 1 - 0.012
+ 2^ 5 - 804 - 9.7
+ 2^ 6 - 1463 - 18
+ 2^ 7 - 139 - 1.7
+ 2^ 8 - 16 - 0.19
+ 2^ 9 - 11 - 0.13
+ 2^10 - 1 - 0.012
+ 2^11 - 0 -  0
+ 2^12 - 0 -  0
+ 2^13 - 1 - 0.012
+Name lengths:
+ bucket - count - percentage
+ 2^ 0 - 0 -  0
+ 2^ 1 - 0 -  0
+ 2^ 2 - 797 - 9.6
+ 2^ 3 - 1608 - 19
+ 2^ 4 - 3258 - 39
+ 2^ 5 - 386 - 4.7
+ 2^ 6 - 2212 - 27
+ 2^ 7 - 38 - 0.46
+
+
+Need to go up to 2^15 bytes == 32k
+     32k = 
+
