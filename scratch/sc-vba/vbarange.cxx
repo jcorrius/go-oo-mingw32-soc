@@ -709,3 +709,37 @@ ScVbaRange::PasteSpecial(sal_Int16 Paste, sal_Int16 Operation, ::sal_Bool SkipBl
 	implnPasteSpecial(nFlags,nFormulaBits,SkipBlanks,Transpose);
 
 }
+
+// XInterface
+
+IMPLEMENT_FORWARD_XINTERFACE2( ScVbaRange, ScVbaRange_BASE, OPropertyContainer )
+
+// XTypeProvider
+
+IMPLEMENT_FORWARD_XTYPEPROVIDER2( ScVbaRange, ScVbaRange_BASE, OPropertyContainer )
+
+// OPropertySetHelper
+
+::cppu::IPropertyArrayHelper& 
+ScVbaRange::getInfoHelper(  )
+{
+    return *getArrayHelper();
+}
+
+// OPropertyArrayUsageHelper
+
+::cppu::IPropertyArrayHelper* 
+ScVbaRange::createArrayHelper(  ) const
+{
+    Sequence< beans::Property > aProps;
+    describeProperties( aProps );
+    return new ::cppu::OPropertyArrayHelper( aProps );
+}
+
+// XPropertySet
+Reference< beans::XPropertySetInfo > 
+ScVbaRange::getPropertySetInfo(  ) throw (RuntimeException)
+{
+    Reference< beans::XPropertySetInfo > xInfo( createPropertySetInfo( getInfoHelper() ) );
+    return xInfo;
+}

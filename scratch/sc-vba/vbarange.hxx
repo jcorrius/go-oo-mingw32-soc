@@ -9,24 +9,47 @@
 #include "org/openoffice/vba/xlPasteType.hdl"
 #include "org/openoffice/vba/xlPasteSpecialOperation.hdl"
 
+#include <comphelper/proparrhlp.hxx>
+#include <comphelper/propertycontainer.hxx>
+#include <com/sun/star/beans/XPropertySet.hpp>
+#include <com/sun/star/beans/PropertyAttribute.hpp>
+
 #include "vbahelper.hxx"
 
 class ScTableSheetsObj;
 
 typedef ::cppu::WeakImplHelper1< org::openoffice::vba::XRange > ScVbaRange_BASE;
 
+const sal_Int32 RANGE_PROPERTY_ID_DFLT=1;
+// name is not defineable in IDL so no chance of a false detection of the 
+// another property/method of the same name
+const ::rtl::OUString RANGE_PROPERTY_DFLT( RTL_CONSTASCII_USTRINGPARAM( "_$DefaultProp" ) );
+
 class ScVbaRange : public ScVbaRange_BASE
+    ,public ::comphelper::OMutexAndBroadcastHelper
+    ,public ::comphelper::OPropertyContainer
+    ,public ::comphelper::OPropertyArrayUsageHelper< ScVbaRange >
+
 {
 	uno::Reference< table::XCellRange > mxRange;
 	uno::Reference< ::com::sun::star::uno::XComponentContext > m_xContext;
 	sal_Bool mbIsRows;
 	sal_Bool mbIsColumns;
+	rtl::OUString msDftPropName;
 
 public:
-	ScVbaRange( uno::Reference< ::com::sun::star::uno::XComponentContext >& xContext, uno::Reference< table::XCellRange > xRange, sal_Bool bIsRows = false, sal_Bool bIsColumns = false ) : mxRange( xRange ),
+	ScVbaRange( uno::Reference< ::com::sun::star::uno::XComponentContext >& xContext, uno::Reference< table::XCellRange > xRange, sal_Bool bIsRows = false, sal_Bool bIsColumns = false ) 
+:  OPropertyContainer(GetBroadcastHelper())
+,mxRange( xRange ),
 		m_xContext(xContext),
 		mbIsRows( bIsRows ),
-		mbIsColumns( bIsColumns ){}
+		mbIsColumns( bIsColumns )
+{
+	msDftPropName = ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Value" ) );
+	registerProperty( RANGE_PROPERTY_DFLT, RANGE_PROPERTY_ID_DFLT,
+        beans::PropertyAttribute::TRANSIENT | beans::PropertyAttribute::BOUND, &msDftPropName, ::getCppuType( &msDftPropName ) );
+
+}
 	virtual ~ScVbaRange() {}
 
     // Attributes
@@ -82,6 +105,22 @@ public:
 															throw (uno::RuntimeException);
 	virtual ::com::sun::star::uno::Any SAL_CALL getCellRange(  ) throw (::com::sun::star::uno::RuntimeException);
 	virtual void SAL_CALL PasteSpecial( sal_Int16 Paste, sal_Int16 Operation, ::sal_Bool SkipBlanks, ::sal_Bool Transpose ) throw (::com::sun::star::uno::RuntimeException);
+	// XPropertySet
+
+	virtual ::com::sun::star::uno::Reference< ::com::sun::star::beans::XPropertySetInfo > SAL_CALL getPropertySetInfo(  ) throw (::com::sun::star::uno::RuntimeException);  
+
+	// XInterface
+	DECLARE_XINTERFACE()
+
+	// XTypeProvider
+	DECLARE_XTYPEPROVIDER()
+protected:
+	// OPropertySetHelper
+	virtual ::cppu::IPropertyArrayHelper& SAL_CALL getInfoHelper();
+
+	// OPropertyArrayUsageHelper
+	virtual ::cppu::IPropertyArrayHelper* createArrayHelper() const;
+
 };
 
 #endif /* SC_VBA_RANGE_HXX */
