@@ -33,6 +33,7 @@ IDLFILES=\
 	XlPasteType.idl\
 	XlBuiltInDialog.idl\
 	XVBAToOOEventDescGen.idl\
+	XDialog.idl \
 	XDialogs.idl 
 
 # ------------------------------------------------------------------
