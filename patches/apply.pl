@@ -408,7 +408,7 @@ sub apply_patches {
         }
     }
 
-    foreach $patch (@to_unapply) {
+    foreach $patch ( sort { $b cmp $a } @to_unapply ) {
         print "\n" unless $quiet;
         print "Unapplying patch $patch\n";
         do_patch $patch, $base_cmd." -R";
