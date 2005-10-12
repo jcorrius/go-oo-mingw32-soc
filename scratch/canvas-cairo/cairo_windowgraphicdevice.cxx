@@ -89,6 +89,10 @@
 #include <com/sun/star/rendering/XLinePolyPolygon2D.hpp>
 #endif
 
+#ifdef CAIRO_CANVAS_PERF_TRACE
+#include <stdio.h>
+#endif
+
 using namespace ::com::sun::star;
 using namespace ::cairo;
 
@@ -501,8 +505,37 @@ namespace cairocanvas
 	return getSimilarSurface( getSurfaceSize(), aContent );
     }
 
-    void WindowGraphicDevice::flush()
+    void WindowGraphicDevice::flush() const
     {
 	cairoHelperFlush( mpSysData );
     }
+
+    #ifdef CAIRO_CANVAS_PERF_TRACE
+
+    void WindowGraphicDevice::startPerfTrace( struct timespec *pTimer ) const
+    {
+	flush();
+	clock_gettime( CLOCK_REALTIME, pTimer );
+    }
+
+    void WindowGraphicDevice::stopPerfTrace( struct timespec *pTimer, char *operationName ) const
+    {
+	struct timespec perfTimerStop;
+	char pad[71];
+	int i, len;
+
+	flush();
+	clock_gettime( CLOCK_REALTIME, &perfTimerStop );
+
+	len = strlen( operationName );
+	for (i = 0; i < 70 - len; i ++)
+	    pad [i] = ' ';
+	pad [i] = 0;
+	fprintf (stderr, "\t%s took %s%.4f seconds\n",
+		 operationName, pad,
+		 (((double) perfTimerStop.tv_nsec) - ((double) pTimer->tv_nsec))/1000000000.0 +
+		 (perfTimerStop.tv_sec - pTimer->tv_sec));
+    }
+
+    #endif
 }

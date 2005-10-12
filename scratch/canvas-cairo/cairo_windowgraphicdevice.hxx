@@ -98,6 +98,8 @@
 
 #include "cairo_cairo.hxx"
 
+#define CAIRO_CANVAS_PERF_TRACE
+
 namespace cairo {
 
 // including glitz here conflicts with boost headers
@@ -181,7 +183,13 @@ namespace cairocanvas
         ::cairo::Surface* getSimilarSurface( Size aSize, ::cairo::Content aContent = ::cairo::CAIRO_CONTENT_COLOR_ALPHA ) const;
 	::cairo::Surface* getSimilarSurfaceNoConst( Size aSize, ::cairo::Content aContent = ::cairo::CAIRO_CONTENT_COLOR_ALPHA );
 
-	void flush();
+	void flush() const;
+
+	#ifdef CAIRO_CANVAS_PERF_TRACE
+	#include <time.h>
+	void startPerfTrace( struct timespec *pTimer ) const;
+	void stopPerfTrace( struct timespec *pTimer, char *operationName ) const;
+        #endif
 
     protected:
         ~WindowGraphicDevice(); // we're a ref-counted UNO class. _We_ destroy ourselves.

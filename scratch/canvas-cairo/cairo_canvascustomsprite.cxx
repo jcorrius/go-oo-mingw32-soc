@@ -638,6 +638,11 @@ namespace cairocanvas
     {
         tools::LocalGuard aGuard;
 
+	#ifdef CAIRO_CANVAS_PERF_TRACE
+	struct timespec aTimer;
+	mxDevice->startPerfTrace( &aTimer );
+        #endif
+
 	if( mbActive && !::basegfx::fTools::equalZero( mfAlpha ) ) {
 	    OSL_TRACE ("CanvasCustomSprite::redraw called\n");
 	    if( pCairo ) {
@@ -709,6 +714,10 @@ namespace cairocanvas
 		cairo_restore( pCairo );
 	    }
 	}
+
+	#ifdef CAIRO_CANVAS_PERF_TRACE
+	mxDevice->stopPerfTrace( &aTimer, "sprite redraw" );
+        #endif
     }
 
     bool CanvasCustomSprite::isAreaUpdateOpaque( const Rectangle& rUpdateArea ) const
