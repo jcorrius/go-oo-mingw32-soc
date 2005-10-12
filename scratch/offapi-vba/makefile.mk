@@ -32,7 +32,7 @@ IDLFILES=\
 	XlPasteSpecialOperation.idl\
 	XlPasteType.idl\
 	XlBuiltInDialog.idl\
-	XDialog.idl\
+	XVBAToOOEventDescGen.idl\
 	XDialogs.idl 
 
 # ------------------------------------------------------------------
