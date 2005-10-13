@@ -1,0 +1,110 @@
+Threading problems with gnome-vfs & initialization
+    + could it be gconf causing problems ?
+
+gconf_orb = CORBA_ORB_init (&argc, argv, "orbit-local-orb", &ev);
+    + nope - the ORB is thread-safe by default
+	+ also does a g_thread_init
+	=> fine ...
+
+static void
+gnome_vfs_thread_init (void)
+{
+	private_is_primary_thread = g_private_new (NULL);
+	g_private_set (private_is_primary_thread, GUINT_TO_POINTER (1));
+	
+	_gnome_vfs_module_callback_private_init ();
+	
+	_gnome_vfs_async_job_map_init ();
+	_gnome_vfs_thread_pool_init ();
+	_gnome_vfs_job_queue_init ();
+}
+
+** And **
+
+gboolean
+gnome_vfs_is_primary_thread (void)
+{
+	if (g_thread_supported()) {
+		return GPOINTER_TO_UINT(g_private_get (private_is_primary_thread)) == 1;
+	} else {
+		return TRUE;
+	}
+}
+    + gnome_vfs_is_primary_thread not called explicitely
+
+*** URGH ***
+    + #define GNOME_VFS_ASSERT_PRIMARY_THREAD g_assert (gnome_vfs_is_primary_thread())
+    + #define GNOME_VFS_ASSERT_SECONDARY_THREAD g_assert (!gnome_vfs_is_primary_thread())
+    + not used inside gnome-vfs itself either ...
+
+Hmm...
+
+gboolean 
+gnome_vfs_init (void)
+{
+ 	if (!g_thread_supported ())
+ 		g_thread_init (NULL);
+	gnome_vfs_thread_init ();
+	if (bonobo_activation_orb_get() == NULL)
+	    bonobo_activation_init (0, bogus_argv);
+	bonobo_init (NULL, bogus_argv);
+	retval = gnome_vfs_method_init ();
+	retval = _gnome_vfs_configuration_init ();
+	signal (SIGPIPE, SIG_IGN);
+}
+
+=> ORB initialization ...
+    + assuming we initialize the ORB 1st ...
+	+ that -does- store a 'primary thread' concept.
+
+    + giop.c (giop_init)
+	+ sets 'giop_main_thread' to be the one with the
+	  g_main_context_default() association;
+	+ sets that thread's thread data to be that ...
+
+
+=> Using PostUserEvent:
+
+
+BOOL Application::PostUserEvent( ULONG& rEventId, ULONG nEvent, void* pEventData )
+{
+    ImplSVEvent* pSVEvent = new ImplSVEvent;
+    pSVEvent->mnEvent   = nEvent;
+    pSVEvent->mpData    = pEventData;
+    pSVEvent->mpLink    = NULL;
+    pSVEvent->mpWindow  = NULL;
+    pSVEvent->mbCall    = TRUE;
+    rEventId = (ULONG)pSVEvent;
+    if ( ImplGetDefaultWindow()->ImplGetFrame()->PostEvent( pSVEvent ) )
+        return TRUE;
+    else
+    {
+        rEventId = 0;
+        delete pSVEvent;
+        return FALSE;
+    }
+}
+
+-> 
+
+BOOL GtkSalFrame::PostEvent( void* pData )
+{
+	getDisplay()->SendInternalEvent( this, pData );
+	return TRUE;
+}
+
+vcl/unx/source/app/saldisp.cxx:
+void SalDisplay::SendInternalEvent( SalFrame* pFrame, void* pData, USHORT nEvent )
+{
+    if( osl_acquireMutex( hEventGuard_ ) )
+    {
+        m_aUserEvents.push_back( SalUserEvent( pFrame, pData, nEvent ) );
+
+		// Notify SalXLib::Yield() of a pending event.
+		pXLib_->PostUserEvent();
+
+        osl_releaseMutex( hEventGuard_ );
+    }
+}
+
++ pushes to m_aUserEvents ...
