@@ -26,9 +26,9 @@ const sal_Int32 RANGE_PROPERTY_ID_DFLT=1;
 const ::rtl::OUString RANGE_PROPERTY_DFLT( RTL_CONSTASCII_USTRINGPARAM( "_$DefaultProp" ) );
 
 class ScVbaRange : public ScVbaRange_BASE
-    ,public ::comphelper::OMutexAndBroadcastHelper
-    ,public ::comphelper::OPropertyContainer
-    ,public ::comphelper::OPropertyArrayUsageHelper< ScVbaRange >
+//    ,public ::comphelper::OMutexAndBroadcastHelper
+//    ,public ::comphelper::OPropertyContainer
+//    ,public ::comphelper::OPropertyArrayUsageHelper< ScVbaRange >
 
 {
 	uno::Reference< table::XCellRange > mxRange;
@@ -39,15 +39,15 @@ class ScVbaRange : public ScVbaRange_BASE
 
 public:
 	ScVbaRange( uno::Reference< ::com::sun::star::uno::XComponentContext >& xContext, uno::Reference< table::XCellRange > xRange, sal_Bool bIsRows = false, sal_Bool bIsColumns = false ) 
-:  OPropertyContainer(GetBroadcastHelper())
-,mxRange( xRange ),
+//:  OPropertyContainer(GetBroadcastHelper())
+:mxRange( xRange ),
 		m_xContext(xContext),
 		mbIsRows( bIsRows ),
 		mbIsColumns( bIsColumns )
 {
 	msDftPropName = ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Value" ) );
-	registerProperty( RANGE_PROPERTY_DFLT, RANGE_PROPERTY_ID_DFLT,
-        beans::PropertyAttribute::TRANSIENT | beans::PropertyAttribute::BOUND, &msDftPropName, ::getCppuType( &msDftPropName ) );
+//	registerProperty( RANGE_PROPERTY_DFLT, RANGE_PROPERTY_ID_DFLT,
+//        beans::PropertyAttribute::TRANSIENT | beans::PropertyAttribute::BOUND, &msDftPropName, ::getCppuType( &msDftPropName ) );
 
 }
 	virtual ~ScVbaRange() {}
@@ -106,7 +106,7 @@ public:
 	virtual ::com::sun::star::uno::Any SAL_CALL getCellRange(  ) throw (::com::sun::star::uno::RuntimeException);
 	virtual void SAL_CALL PasteSpecial( sal_Int16 Paste, sal_Int16 Operation, ::sal_Bool SkipBlanks, ::sal_Bool Transpose ) throw (::com::sun::star::uno::RuntimeException);
 	// XPropertySet
-
+/*
 	virtual ::com::sun::star::uno::Reference< ::com::sun::star::beans::XPropertySetInfo > SAL_CALL getPropertySetInfo(  ) throw (::com::sun::star::uno::RuntimeException);  
 
 	// XInterface
@@ -120,7 +120,7 @@ protected:
 
 	// OPropertyArrayUsageHelper
 	virtual ::cppu::IPropertyArrayHelper* createArrayHelper() const;
-
+*/
 };
 
 #endif /* SC_VBA_RANGE_HXX */

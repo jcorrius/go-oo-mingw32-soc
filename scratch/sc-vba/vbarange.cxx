@@ -706,7 +706,7 @@ ScVbaRange::PasteSpecial(sal_Int16 Paste, sal_Int16 Operation, ::sal_Bool SkipBl
 	implnPasteSpecial(nFlags,nFormulaBits,SkipBlanks,Transpose);
 
 }
-
+/* Causes hang on exit don't re-enable for the moment
 // XInterface
 
 IMPLEMENT_FORWARD_XINTERFACE2( ScVbaRange, ScVbaRange_BASE, OPropertyContainer )
@@ -739,4 +739,4 @@ ScVbaRange::getPropertySetInfo(  ) throw (RuntimeException)
 {
     Reference< beans::XPropertySetInfo > xInfo( createPropertySetInfo( getInfoHelper() ) );
     return xInfo;
-}
+}*/
