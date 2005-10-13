@@ -15,6 +15,9 @@ namespace org
 		void implnCut();
 		void implnPasteSpecial(sal_uInt16 nFlags,sal_uInt16 nFunction,sal_Bool bSkipEmpty, sal_Bool bTranspose);
 		bool isRangeShortCut( const ::rtl::OUString& sParam );
+		::com::sun::star::uno::Reference< com::sun::star::frame::XModel >
+			getCurrentDocument() throw (com::sun::star::uno::RuntimeException);
+
 	}
 }
 

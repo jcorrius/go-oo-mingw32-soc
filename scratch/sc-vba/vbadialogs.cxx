@@ -1,6 +1,5 @@
 #include <comphelper/processfactory.hxx>
 
-#include <com/sun/star/frame/XDesktop.hpp>
 #include <com/sun/star/lang/XMultiComponentFactory.hpp>
 #include <com/sun/star/frame/XModel.hpp>
 #include <org/openoffice/vba/XApplication.hpp>

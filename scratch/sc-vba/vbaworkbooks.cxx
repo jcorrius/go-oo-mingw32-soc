@@ -295,12 +295,7 @@ ScVbaWorkbooks::Close() throw (uno::RuntimeException)
 {
 	uno::Reference< lang::XMultiComponentFactory > xSMgr(
 		m_xContext->getServiceManager(), uno::UNO_QUERY_THROW );
-	uno::Reference< frame::XDesktop > xDesktop
-		(xSMgr->createInstanceWithContext(
-		::rtl::OUString::createFromAscii("com.sun.star.frame.Desktop"),
-		m_xContext), uno::UNO_QUERY_THROW );
-	uno::Reference< lang::XComponent > xDoc = xDesktop->getCurrentComponent();
-	uno::Reference< frame::XModel > xModel( xDoc, uno::UNO_QUERY);
+	uno::Reference< frame::XModel > xModel = getCurrentDocument();
 	rtl::OUString url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:CloseDoc"));
 	dispatchRequests(xModel,url);
 }

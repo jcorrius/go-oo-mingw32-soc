@@ -5,6 +5,7 @@
 
 #include <org/openoffice/vba/XWorksheetFunction.hpp>
 #include <org/openoffice/vba/XApplication.hpp>
+#include <com/sun/star/uno/XComponentContext.hpp>
 
 #include "vbahelper.hxx"
 
@@ -14,7 +15,6 @@ class ScVbaApplication : public ScVbaApplication_BASE
 {
 private:
 	uno::Reference< ::com::sun::star::uno::XComponentContext > m_xContext;
-	uno::Reference< frame::XModel > getCurrentDocument() throw (uno::RuntimeException);
 public:
 	ScVbaApplication( uno::Reference< ::com::sun::star::uno::XComponentContext >& m_xContext );
 	virtual ~ScVbaApplication();

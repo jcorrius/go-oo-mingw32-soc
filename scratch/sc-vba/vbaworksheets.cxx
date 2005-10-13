@@ -1,6 +1,5 @@
 #include <comphelper/processfactory.hxx>
 
-#include <com/sun/star/frame/XDesktop.hpp>
 #include <com/sun/star/sheet/XSpreadsheetDocument.hpp>
 #include <com/sun/star/container/XEnumerationAccess.hpp>
 #include <com/sun/star/sheet/XSpreadsheetView.hpp>

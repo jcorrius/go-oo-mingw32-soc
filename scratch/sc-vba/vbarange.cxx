@@ -20,7 +20,6 @@
 #include <com/sun/star/beans/XPropertySet.hpp>
 #include <com/sun/star/sheet/XFunctionAccess.hpp>
 #include <com/sun/star/frame/XModel.hpp>
-#include <com/sun/star/frame/XDesktop.hpp>
 #include <com/sun/star/view/XSelectionSupplier.hpp>
 #include <com/sun/star/table/XCellCursor.hpp>
 #include <com/sun/star/table/XTableRows.hpp>
@@ -411,11 +410,8 @@ void
 ScVbaRange::Select() throw (uno::RuntimeException)
 {
 	uno::Reference< lang::XMultiComponentFactory > xSMgr( m_xContext->getServiceManager(), uno::UNO_QUERY_THROW );
-	uno::Reference< frame::XDesktop > xDesktop
-	(xSMgr->createInstanceWithContext(::rtl::OUString::createFromAscii("com.sun.star.frame.Desktop"), m_xContext), 
-									uno::UNO_QUERY_THROW );
 
-	uno::Reference< frame::XModel > xModel( xDesktop->getCurrentComponent(),uno::UNO_QUERY );
+	uno::Reference< frame::XModel > xModel = getCurrentDocument();
 	uno::Reference< view::XSelectionSupplier > xSelection( xModel->getCurrentController(), uno::UNO_QUERY);
 	xSelection->select( ( uno::Any )mxRange );
 }
@@ -434,6 +430,10 @@ ScVbaRange::Rows(const uno::Any& aIndex ) throw (uno::RuntimeException)
 						xAddressable->getRangeAddress().StartColumn, nValue,
 						xAddressable->getRangeAddress().EndColumn, nValue ), true ) ); 	
 	}
+	// Questionable return, I'm just copying the invalid Any::value path
+	// above. Would seem to me that this is an internal error and 
+	// warrants an exception thrown
+	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, mxRange, true ) );
 }	
 
 uno::Reference< vba::XRange >
@@ -450,6 +450,10 @@ ScVbaRange::Columns( const uno::Any& aIndex ) throw (uno::RuntimeException)
 							nValue, xAddressable->getRangeAddress().StartRow,
 							nValue, xAddressable->getRangeAddress().EndRow ), false, true ) ); 
 	}
+	// Questionable return, I'm just copying the invalid Any::value path
+	// above. Would seem to me that this is an internal error and 
+	// warrants an exception thrown
+	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, mxRange, false, true ) );
 }
 
 void
@@ -521,11 +525,8 @@ void
 ScVbaRange::setNumberFormat( const ::rtl::OUString &rFormat ) throw (uno::RuntimeException)
 {
 	uno::Reference< lang::XMultiComponentFactory > xSMgr( m_xContext->getServiceManager(), uno::UNO_QUERY_THROW );
-	uno::Reference< frame::XDesktop > xDesktop
-		(xSMgr->createInstanceWithContext(::rtl::OUString::createFromAscii("com.sun.star.frame.Desktop"), m_xContext),
-										uno::UNO_QUERY_THROW );
                                                                                                                             
-	uno::Reference< frame::XModel > xModel( xDesktop->getCurrentComponent(),uno::UNO_QUERY );
+	uno::Reference< frame::XModel > xModel = getCurrentDocument();
 	uno::Reference< sheet::XSpreadsheetDocument > xDoc(xModel, uno::UNO_QUERY);
 	uno::Reference< util::XNumberFormatsSupplier > xSupplier(xDoc, uno::UNO_QUERY);
 	uno::Reference< util::XNumberFormats > xFormats = xSupplier->getNumberFormats();
@@ -541,11 +542,7 @@ ScVbaRange::setNumberFormat( const ::rtl::OUString &rFormat ) throw (uno::Runtim
 ScVbaRange::getNumberFormat() throw (uno::RuntimeException)
 {
 	uno::Reference< lang::XMultiComponentFactory > xSMgr( m_xContext->getServiceManager(), uno::UNO_QUERY_THROW );
-	uno::Reference< frame::XDesktop > xDesktop
-		(xSMgr->createInstanceWithContext(::rtl::OUString::createFromAscii("com.sun.star.frame.Desktop"), m_xContext),
-										uno::UNO_QUERY_THROW );
-                                                                                                                             
-	uno::Reference< frame::XModel > xModel( xDesktop->getCurrentComponent(),uno::UNO_QUERY );
+	uno::Reference< frame::XModel > xModel = getCurrentDocument();
 	uno::Reference< sheet::XSpreadsheetDocument > xDoc(xModel, uno::UNO_QUERY);
 	uno::Reference< util::XNumberFormatsSupplier > xSupplier(xDoc, uno::UNO_QUERY);
 	uno::Reference< util::XNumberFormats > xFormats = xSupplier->getNumberFormats();

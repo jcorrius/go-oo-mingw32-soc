@@ -155,7 +155,7 @@ ScVbaWorksheet::getVisible() throw (uno::RuntimeException)
 	uno::Reference< beans::XPropertySet > xProps( mxSheet, uno::UNO_QUERY_THROW );
 	uno::Any aValue = xProps->getPropertyValue
 			(rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "IsVisible" ) ) );
-	sal_Bool bRet;
+	sal_Bool bRet = false;
 	aValue >>= bRet;
 	return bRet;
 }

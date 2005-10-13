@@ -1,6 +1,5 @@
 #include <comphelper/processfactory.hxx>
 
-#include <com/sun/star/frame/XDesktop.hpp>
 #include <com/sun/star/lang/XMultiComponentFactory.hpp>
 #include <com/sun/star/frame/XModel.hpp>
 #include <org/openoffice/vba/XApplication.hpp>
@@ -20,11 +19,7 @@ ScVbaDialog::Show() throw(uno::RuntimeException)
 {
 	rtl::OUString aURL;
 	uno::Reference< lang::XMultiComponentFactory > xSMgr( m_xContext->getServiceManager(), uno::UNO_QUERY_THROW );
-	uno::Reference< frame::XDesktop > xDesktop(
-		xSMgr->createInstanceWithContext(::rtl::OUString::createFromAscii("com.sun.star.frame.Desktop"), m_xContext),
-							uno::UNO_QUERY_THROW );
-                                                                                                                             
-        uno::Reference< frame::XModel > xModel( xDesktop->getCurrentComponent(),uno::UNO_QUERY );
+        uno::Reference< frame::XModel > xModel = getCurrentDocument();
 
 	aURL = mapIndexToName( mnIndex );
 	if( aURL == rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("") ) )

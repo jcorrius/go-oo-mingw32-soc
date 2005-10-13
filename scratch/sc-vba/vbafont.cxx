@@ -39,7 +39,7 @@ ScVbaFont::setUnderline( sal_Bool bValue ) throw ( uno::RuntimeException )
 sal_Bool
 ScVbaFont::getUnderline() throw ( uno::RuntimeException )
 {
-	short nValue;
+	short nValue = 0;
 	uno::Any aValue = mxFont->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "CharUnderline" ) ) );
 	aValue >>= nValue;
 	return( nValue == awt::FontUnderline::SINGLE );
@@ -57,7 +57,7 @@ ScVbaFont::setStrikethrough( sal_Bool bValue ) throw ( uno::RuntimeException )
 sal_Bool
 ScVbaFont::getStrikethrough() throw ( uno::RuntimeException )
 {
-	short nValue;
+	short nValue = 0;
     uno::Any aValue = mxFont->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "CharStrikeout" ) ) );
     aValue >>= nValue;
     return( nValue == awt::FontStrikeout::SINGLE );
@@ -72,7 +72,7 @@ ScVbaFont::setShadow( sal_Bool bValue ) throw ( uno::RuntimeException )
 sal_Bool
 ScVbaFont::getShadow() throw (uno::RuntimeException)
 {
-	sal_Bool bValue;
+	sal_Bool bValue = false;
 	uno::Any aValue = mxFont->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "CharShadowed" ) ) );
 	aValue >>= bValue;
 	return bValue;
@@ -90,7 +90,7 @@ ScVbaFont::setItalic( sal_Bool bValue ) throw ( uno::RuntimeException )
 sal_Bool
 ScVbaFont::getItalic() throw ( uno::RuntimeException )
 {
-	short nValue;
+	short nValue = 0;  
 	uno::Any aValue = mxFont->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "CharPosture" ) ) );
 	aValue >>= nValue;
 	return( nValue == awt::FontSlant_ITALIC );
