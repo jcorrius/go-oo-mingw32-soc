@@ -1,6 +1,6 @@
 --- /dev/null	
 +++ canvas/source/cairo/cairo_canvashelper.cxx	
-@@ -0,0 +1,1058 @@
+@@ -0,0 +1,1188 @@
 +/*************************************************************************
 + *
 + *  $RCSfile$
@@ -254,10 +254,14 @@
 +        if( viewState.Clip.is() ) {
 +	    OSL_TRACE ("view clip\n");
 +
++	    aViewMatrix.x0 = round( aViewMatrix.x0 );
++	    aViewMatrix.y0 = round( aViewMatrix.y0 );
 +	    cairo_set_matrix( mpCairo, &aViewMatrix );
 +	    drawPolyPolygonPath( viewState.Clip, Clip );
 +	}
 +
++	aCombinedMatrix.x0 = round( aCombinedMatrix.x0 );
++	aCombinedMatrix.y0 = round( aCombinedMatrix.y0 );
 +	cairo_set_matrix( mpCairo, &aCombinedMatrix );
 +
 +        if( renderState.Clip.is() ) {
@@ -333,7 +337,8 @@
 +		::com::sun::star::rendering::Texture aTexture ( (*mpTextures)[nPolygonIndex] );
 +		if( aTexture.Bitmap.is() ) {
 +		    unsigned char* data;
-+		    Surface* pSurface = tools::surfaceFromXBitmap( (*mpTextures)[nPolygonIndex].Bitmap, mxDevice, data );
++		    bool bHasAlpha;
++		    Surface* pSurface = tools::surfaceFromXBitmap( (*mpTextures)[nPolygonIndex].Bitmap, mxDevice, data, bHasAlpha );
 +
 +		    if( pSurface ) {
 +			cairo_pattern_t* pPattern;
@@ -371,9 +376,13 @@
 + 			if( aTexture.RepeatModeX == rendering::TexturingMode::REPEAT &&
 +			    aTexture.RepeatModeY == rendering::TexturingMode::REPEAT )
 +			    cairo_pattern_set_extend( pPattern, CAIRO_EXTEND_REPEAT );
++			aScaledTextureMatrix.x0 = round( aScaledTextureMatrix.x0 );
++			aScaledTextureMatrix.y0 = round( aScaledTextureMatrix.y0 );
 +			cairo_pattern_set_matrix( pPattern, &aScaledTextureMatrix );
 +
 +			cairo_set_source( pCairo, pPattern );
++			if( !bHasAlpha )
++			    cairo_set_operator( pCairo, CAIRO_OPERATOR_SOURCE );
 +			cairo_fill( pCairo );
 +
 +			cairo_restore( pCairo );
@@ -465,6 +474,12 @@
 +    void CanvasHelper::drawPolyPolygonImplementation( ::basegfx::B2DPolyPolygon aPolyPolygon, Operation aOperation, Cairo* pCairo ) const
 +    {
 +	bool bOpToDo = false;
++	Matrix aOrigMatrix, aIdentityMatrix;
++	double nX, nY, nBX, nBY, nPX, nPY;
++
++	cairo_get_matrix( pCairo, &aOrigMatrix );
++	cairo_matrix_init_identity( &aIdentityMatrix );
++	cairo_set_matrix( pCairo, &aIdentityMatrix );
 +
 +	for( sal_uInt32 nPolygonIndex = 0; nPolygonIndex < aPolyPolygon.count(); nPolygonIndex++ ) {
 +	    ::basegfx::B2DPolygon aPolygon = aPolyPolygon.getB2DPolygon( nPolygonIndex );
@@ -474,8 +489,14 @@
 +		::basegfx::B2DPoint aA, aB, aP;
 +
 +		aP = aPolygon.getB2DPoint( 0 );
-+		cairo_move_to( pCairo, aP.getX(), aP.getY() );
-+		OSL_TRACE( "move to %f,%f\n", aP.getX(), aP.getY() );
++		nX = aP.getX();
++		nY = aP.getY();
++		cairo_matrix_transform_point( &aOrigMatrix, &nX, &nY );
++		if( bIsBezier )
++		    cairo_move_to( pCairo, nX, nY );
++		else
++		    cairo_move_to( pCairo, round(nX), round(nY) );
++		OSL_TRACE( "move to %f,%f\n", round(nX), round(nY) );
 +
 +		if( bIsBezier ) {
 +		    aA = aPolygon.getControlPointA( 0 );
@@ -485,14 +506,24 @@
 +		for( sal_uInt32 j = 1; j < aPolygon.count(); j++ ) {
 +		    aP = aPolygon.getB2DPoint( j );
 +
++		    nX = aP.getX();
++		    nY = aP.getY();
++		    cairo_matrix_transform_point( &aOrigMatrix, &nX, &nY );
++
 +		    if( bIsBezier ) {
-+			cairo_curve_to( pCairo, aA.getX(), aA.getY(), aB.getX(), aB.getY(), aP.getX(), aP.getY() );
++			nBX = aB.getX();
++			nBY = aB.getY();
++			nPX = aP.getX();
++			nPY = aP.getY();
++			cairo_matrix_transform_point( &aOrigMatrix, &nBX, &nBY );
++			cairo_matrix_transform_point( &aOrigMatrix, &nPX, &nPY );
++			cairo_curve_to( pCairo, nX, nY, nBX, nBY, nPX, nPY );
 +			
 +			aA = aPolygon.getControlPointA( j );
 +			aB = aPolygon.getControlPointB( j );
 +		    } else {
-+			cairo_line_to( pCairo, aP.getX(), aP.getY() );
-+			OSL_TRACE( "line to %f,%f\n", aP.getX(), aP.getY() );
++			cairo_line_to( pCairo, round(nX), round(nY) );
++			OSL_TRACE( "line to %f,%f\n", round(nX), round(nY) );
 +		    }
 +		    bOpToDo = true;
 +		}
@@ -513,6 +544,8 @@
 +	}
 +	if( bOpToDo && ( aOperation != Fill || !mpTextures ) )
 +	    doOperation( aOperation, pCairo );
++
++	cairo_set_matrix( pCairo, &aOrigMatrix );
 +
 +// fixme, spec says even clipping polypolygon with zero polygons means NULL clip, but it breaks animations with sprites
 +// 	if( aPolyPolygon.count() == 0 && aOperation == Clip )
@@ -622,6 +655,13 @@
 +										 const rendering::ViewState& 						viewState,
 +										 const rendering::RenderState& 						renderState )
 +    {
++	//return uno::Reference< rendering::XCachedPrimitive >(NULL);
++
++	#ifdef CAIRO_CANVAS_PERF_TRACE
++	struct timespec aTimer;
++	mxDevice->startPerfTrace( &aTimer );
++        #endif
++
 +	if( mpCairo ) {
 +	    cairo_save( mpCairo );
 +
@@ -634,6 +674,10 @@
 +	} else
 +	    OSL_TRACE ("CanvasHelper called after it was disposed");
 +
++	#ifdef CAIRO_CANVAS_PERF_TRACE
++	mxDevice->stopPerfTrace( &aTimer, "drawPolyPolygon" );
++        #endif
++
 +	// TODO(P1): Provide caching here.
 +	return uno::Reference< rendering::XCachedPrimitive >(NULL);
 +    }
@@ -644,6 +688,11 @@
 +                                                                                   const rendering::RenderState& 						renderState,
 +                                                                                   const rendering::StrokeAttributes& 					strokeAttributes )
 +    {
++	#ifdef CAIRO_CANVAS_PERF_TRACE
++	struct timespec aTimer;
++	mxDevice->startPerfTrace( &aTimer );
++        #endif
++
 +	if( mpCairo ) {
 +	    cairo_save( mpCairo );
 +
@@ -695,6 +744,10 @@
 +	} else
 +	    OSL_TRACE ("CanvasHelper called after it was disposed");
 +
++	#ifdef CAIRO_CANVAS_PERF_TRACE
++	mxDevice->stopPerfTrace( &aTimer, "strokePolyPolygon" );
++        #endif
++
 +        // TODO(P1): Provide caching here.
 +        return uno::Reference< rendering::XCachedPrimitive >(NULL);
 +    }
@@ -734,6 +787,13 @@
 +                                                                                 const rendering::ViewState& 						viewState,
 +                                                                                 const rendering::RenderState& 						renderState )
 +    {
++	//return uno::Reference< rendering::XCachedPrimitive >(NULL);
++
++	#ifdef CAIRO_CANVAS_PERF_TRACE
++	struct timespec aTimer;
++	mxDevice->startPerfTrace( &aTimer );
++        #endif
++
 +	if( mpCairo ) {
 +	    cairo_save( mpCairo );
 +
@@ -743,6 +803,10 @@
 +	    cairo_restore( mpCairo );
 +	} else
 +	    OSL_TRACE ("CanvasHelper called after it was disposed");
++
++	#ifdef CAIRO_CANVAS_PERF_TRACE
++	mxDevice->stopPerfTrace( &aTimer, "fillPolyPolygon" );
++        #endif
 +
 +        // TODO(P1): Provide caching here.
 +        return uno::Reference< rendering::XCachedPrimitive >(NULL);
@@ -790,23 +854,32 @@
 +                                                                          const rendering::RenderState& 					renderState,
 +                                                                          sal_Int8				 							textDirection )
 +    {
-+	 if ( mpCairo ) {
-+		 cairo_save( mpCairo );
++	#ifdef CAIRO_CANVAS_PERF_TRACE
++	struct timespec aTimer;
++	mxDevice->startPerfTrace( &aTimer );
++        #endif
 +
-+		 useStates( viewState, renderState, true );
++	if ( mpCairo ) {
++	    cairo_save( mpCairo );
 +
-+		 // fixme (rodo) - use xFont
-+		 cairo_select_font_face( mpCairo, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL );
-+		 /* move to 0, 0 as cairo_show_text advances current point and current point is not restored by cairo_restore.
-+		    before we were depending on unmodified current point which I believed was preserved by save/restore */
-+		 cairo_move_to( mpCairo, 0, 0 );
-+		 cairo_show_text( mpCairo, ::rtl::OUStringToOString( text.Text, RTL_TEXTENCODING_UTF8 ) );
++	    useStates( viewState, renderState, true );
 +
-+		 cairo_restore( mpCairo );
-+	 } else
++	    // fixme (rodo) - use xFont
++	    cairo_select_font_face( mpCairo, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL );
++	    /* move to 0, 0 as cairo_show_text advances current point and current point is not restored by cairo_restore.
++	       before we were depending on unmodified current point which I believed was preserved by save/restore */
++	    cairo_move_to( mpCairo, 0, 0 );
++	    cairo_show_text( mpCairo, ::rtl::OUStringToOString( text.Text, RTL_TEXTENCODING_UTF8 ) );
++
++	    cairo_restore( mpCairo );
++	} else
 +	    OSL_TRACE ("CanvasHelper called after it was disposed");
 +
-+	 return uno::Reference< rendering::XCachedPrimitive >(NULL);
++	#ifdef CAIRO_CANVAS_PERF_TRACE
++	mxDevice->stopPerfTrace( &aTimer, "drawText" );
++        #endif
++
++	return uno::Reference< rendering::XCachedPrimitive >(NULL);
 +    }
 +
 +    uno::Reference< rendering::XCachedPrimitive > CanvasHelper::drawTextLayout( const rendering::XCanvas& 						rCanvas, 
@@ -814,63 +887,72 @@
 +                                                                                const rendering::ViewState& 					viewState,
 +                                                                                const rendering::RenderState& 					renderState )
 +    {
-+         CHECK_AND_THROW( xLayoutedText.is(),
-+                          "CanvasHelper::drawTextLayout(): layout is NULL");
++	//return uno::Reference< rendering::XCachedPrimitive >(NULL);
 +
-+	 if( mpCairo ) {
-+	     cairo_save( mpCairo );
++	CHECK_AND_THROW( xLayoutedText.is(),
++			 "CanvasHelper::drawTextLayout(): layout is NULL");
 +
-+	     uno::Reference< lang::XServiceInfo > xRef( xLayoutedText,
-+							uno::UNO_QUERY );
++	#ifdef CAIRO_CANVAS_PERF_TRACE
++	struct timespec aTimer;
++	mxDevice->startPerfTrace( &aTimer );
++        #endif
 +
-+	     TextLayout* pTextLayout = NULL;
-+
-+	     if( xRef.is() &&
-+		 xRef->getImplementationName().equals( ::rtl::OUString(RTL_CONSTASCII_USTRINGPARAM(TEXTLAYOUT_IMPLEMENTATION_NAME))) ) {
-+		 // TODO(P2): Maybe use dynamic_cast here (saves us a queryInterface)
-+		 pTextLayout = static_cast<TextLayout*>(xLayoutedText.get());
-+	     } else {
-+		 CHECK_AND_THROW( false,
-+				  "CanvasHelper::drawTextLayout(): TextLayout not compatible with this canvas" );
-+	     }
-+
-+	     useStates( viewState, renderState, true );
-+
-+	     pTextLayout->draw( mpCairo );
-+
-+	     cairo_restore( mpCairo );
-+	 } else
-+	    OSL_TRACE ("CanvasHelper called after it was disposed");
-+
-+	 return uno::Reference< rendering::XCachedPrimitive >(NULL);
-+    }
-+
-+    uno::Reference< rendering::XCachedPrimitive > CanvasHelper::implDrawBitmap( const rendering::XCanvas& 					rCanvas, 
-+                                                                                const uno::Reference< rendering::XBitmap >& xBitmap,
-+                                                                                const rendering::ViewState& 				viewState,
-+                                                                                const rendering::RenderState& 				renderState,
-+                                                                                bool 										bModulateColors )
-+    {
-+	unsigned char* data;
-+	Surface* pSurface = tools::surfaceFromXBitmap( xBitmap, mxDevice, data );
-+
-+	if( mpCairo && pSurface )
-+        {
++	if( mpCairo ) {
 +	    cairo_save( mpCairo );
 +
++	    uno::Reference< lang::XServiceInfo > xRef( xLayoutedText,
++						       uno::UNO_QUERY );
++
++	    TextLayout* pTextLayout = NULL;
++
++	    if( xRef.is() &&
++		xRef->getImplementationName().equals( ::rtl::OUString(RTL_CONSTASCII_USTRINGPARAM(TEXTLAYOUT_IMPLEMENTATION_NAME))) ) {
++		// TODO(P2): Maybe use dynamic_cast here (saves us a queryInterface)
++		pTextLayout = static_cast<TextLayout*>(xLayoutedText.get());
++	    } else {
++		CHECK_AND_THROW( false,
++				 "CanvasHelper::drawTextLayout(): TextLayout not compatible with this canvas" );
++	    }
++
 +	    useStates( viewState, renderState, true );
++
++	    pTextLayout->draw( mpCairo );
++
++	    cairo_restore( mpCairo );
++	} else
++	    OSL_TRACE ("CanvasHelper called after it was disposed");
++
++	#ifdef CAIRO_CANVAS_PERF_TRACE
++	mxDevice->stopPerfTrace( &aTimer, "drawTextLayout" );
++        #endif
++
++	return uno::Reference< rendering::XCachedPrimitive >(NULL);
++    }
++
++    uno::Reference< rendering::XCachedPrimitive > CanvasHelper::implDrawBitmapSurface( Surface* pSurface,
++										       const rendering::ViewState& viewState,
++										       const rendering::RenderState& renderState,
++										       bool bModulateColors,
++										       bool bHasAlpha )
++    {
++	if( mpCairo ) {
++	    cairo_save( mpCairo );
++
++	    Size aSize = mxDevice->getSurfaceSize();
++
++ 	    cairo_rectangle( mpCairo, 0, 0, aSize.Width(), aSize.Height() );
++ 	    cairo_clip( mpCairo );
++
++	    useStates( viewState, renderState, true );
++
++//  	    if( !bHasAlpha )
++//  		cairo_set_operator( mpCairo, CAIRO_OPERATOR_SOURCE );
 +
 +	    cairo_set_source_surface( mpCairo, pSurface, 0, 0 );
 +	    cairo_paint( mpCairo );
 +	    cairo_restore( mpCairo );
 +	} else
 +	    OSL_TRACE ("CanvasHelper called after it was disposed");
-+
-+	if( pSurface )
-+	    cairo_surface_destroy( pSurface );
-+
-+	if( data )
-+	    free( data );
 +
 +        return uno::Reference< rendering::XCachedPrimitive >(NULL);
 +    }
@@ -880,11 +962,31 @@
 +                                                                            const rendering::ViewState& 				viewState,
 +                                                                            const rendering::RenderState& 				renderState )
 +    {
-+        return implDrawBitmap( rCanvas, 
-+                               xBitmap,
-+                               viewState,
-+                               renderState,
-+                               false );
++	#ifdef CAIRO_CANVAS_PERF_TRACE
++	struct timespec aTimer;
++	mxDevice->startPerfTrace( &aTimer );
++        #endif
++
++	uno::Reference< rendering::XCachedPrimitive > rv;
++	unsigned char* data;
++	bool bHasAlpha;
++	Surface* pSurface = tools::surfaceFromXBitmap( xBitmap, mxDevice, data, bHasAlpha );
++
++	if( pSurface ) {
++	    rv = implDrawBitmapSurface( pSurface, viewState, renderState, false, bHasAlpha );
++
++	    cairo_surface_destroy( pSurface );
++
++	    if( data )
++		free( data );
++	} else
++	    rv = uno::Reference< rendering::XCachedPrimitive >(NULL);
++
++	#ifdef CAIRO_CANVAS_PERF_TRACE
++	mxDevice->stopPerfTrace( &aTimer, "drawBitmap" );
++        #endif
++
++	return rv;
 +    }
 +
 +    uno::Reference< rendering::XCachedPrimitive > CanvasHelper::drawBitmapModulated( const rendering::XCanvas& 						rCanvas, 
@@ -892,11 +994,30 @@
 +                                                                                     const rendering::ViewState& 					viewState,
 +                                                                                     const rendering::RenderState& 					renderState )
 +    {
-+        return implDrawBitmap( rCanvas, 
-+                               xBitmap,
-+                               viewState,
-+                               renderState,
-+                               true );
++	#ifdef CAIRO_CANVAS_PERF_TRACE
++	struct timespec aTimer;
++	mxDevice->startPerfTrace( &aTimer );
++        #endif
++
++	uno::Reference< rendering::XCachedPrimitive > rv;
++	unsigned char* data;
++	bool bHasAlpha;
++	Surface* pSurface = tools::surfaceFromXBitmap( xBitmap, mxDevice, data, bHasAlpha );
++
++	if( pSurface ) {
++	    rv = implDrawBitmapSurface( pSurface, viewState, renderState, true, bHasAlpha );
++	    cairo_surface_destroy( pSurface );
++
++	    if( data )
++		free( data );
++	} else
++	    rv = uno::Reference< rendering::XCachedPrimitive >(NULL);
++
++	#ifdef CAIRO_CANVAS_PERF_TRACE
++	mxDevice->stopPerfTrace( &aTimer, "drawBitmapModulated" );
++        #endif
++
++	return rv;
 +    }
 +
 +    uno::Reference< rendering::XGraphicDevice > CanvasHelper::getDevice()
@@ -929,11 +1050,20 @@
 +    uno::Reference< rendering::XBitmap > CanvasHelper::getScaledBitmap( const geometry::RealSize2D& newSize, 
 +                                                                        sal_Bool 					beFast )
 +    {
++	#ifdef CAIRO_CANVAS_PERF_TRACE
++	struct timespec aTimer;
++	mxDevice->startPerfTrace( &aTimer );
++        #endif
++
 +	if( mpCairo ) {
 +	    Surface *pSurface = cairo_get_target( mpCairo );
 +	    return uno::Reference< rendering::XBitmap >( new CanvasBitmap( newSize, pSurface, mxDevice, beFast ) );
 +	} else
 +	    OSL_TRACE ("CanvasHelper called after it was disposed");
++
++	#ifdef CAIRO_CANVAS_PERF_TRACE
++	mxDevice->stopPerfTrace( &aTimer, "getScaledBitmap" );
++        #endif
 +
 +	return uno::Reference< rendering::XBitmap >(); // we're disposed
 +    }
