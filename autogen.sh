@@ -1,7 +1,7 @@
 #!/bin/sh
 # Run this to generate all the initial makefiles, etc.
 
-if test "z$1" == "z--clean"; then
+if test "z$1" = "z--clean"; then
     echo "Cleaning"
 
     rm -Rf autom4te.cache bonobo/autom4te.cache
