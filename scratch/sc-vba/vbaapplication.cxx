@@ -57,6 +57,8 @@ ScVbaApplication::getActiveCell() throw (uno::RuntimeException )
 	uno::Reference< table::XCellRange > xRange( xView->getActiveSheet(), ::uno::UNO_QUERY_THROW);
                                                                                                                              
 	ScTabViewShell* pViewShell = ScTabViewShell::GetActiveViewShell();
+	if ( !pViewShell )
+		throw uno::RuntimeException( rtl::OUString::createFromAscii("No ViewShell available"), uno::Reference< uno::XInterface >() );
 	sal_Int32 nCursorX, nCursorY;
 	nCursorX = sal_Int32(pViewShell->GetViewData()->GetCurX()), nCursorY = sal_Int32(pViewShell->GetViewData()->GetCurY());
 	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xRange->getCellRangeByPosition( nCursorX, nCursorY, 
