@@ -1,4 +1,6 @@
 #include "vbaoutline.hxx"
+using namespace ::com::sun::star;
+using namespace ::org::openoffice;
 
 void
 ScVbaOutline::ShowLevels( const uno::Any& RowLevels, const uno::Any& ColumnLevels ) throw (::com::sun::star::uno::RuntimeException) 

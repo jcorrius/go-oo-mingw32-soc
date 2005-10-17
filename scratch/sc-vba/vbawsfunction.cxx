@@ -10,19 +10,22 @@
 
 #include "vbawsfunction.hxx"
 
+using namespace com::sun::star;
+using namespace org::openoffice;
+
 void SAL_CALL 
-ScVbaWSFunction::dummy(  ) throw (::com::sun::star::uno::RuntimeException)
+ScVbaWSFunction::dummy(  ) throw (uno::RuntimeException)
 {
 }
 
-Reference< XIntrospectionAccess >
-ScVbaWSFunction::getIntrospection(void)  throw(RuntimeException)
+uno::Reference< beans::XIntrospectionAccess >
+ScVbaWSFunction::getIntrospection(void)  throw(uno::RuntimeException)
 {
 	return uno::Reference<beans::XIntrospectionAccess>();
 }
 
-Any SAL_CALL
-ScVbaWSFunction::invoke(const OUString& FunctionName, const Sequence< Any >& Params, Sequence< sal_Int16 >& OutParamIndex, Sequence< Any >& OutParam) throw(IllegalArgumentException, CannotConvertException, InvocationTargetException, RuntimeException)
+uno::Any SAL_CALL
+ScVbaWSFunction::invoke(const rtl::OUString& FunctionName, const uno::Sequence< uno::Any >& Params, uno::Sequence< sal_Int16 >& OutParamIndex, uno::Sequence< uno::Any >& OutParam) throw(lang::IllegalArgumentException, script::CannotConvertException, reflection::InvocationTargetException, uno::RuntimeException)
 {
 	uno::Any aAny;
 	uno::Reference< lang::XMultiComponentFactory > xSMgr( m_xContext->getServiceManager(), uno::UNO_QUERY );
@@ -56,24 +59,24 @@ ScVbaWSFunction::invoke(const OUString& FunctionName, const Sequence< Any >& Par
 }
 
 void SAL_CALL
-ScVbaWSFunction::setValue(const rtl::OUString& PropertyName, const Any& Value) throw(UnknownPropertyException, CannotConvertException, InvocationTargetException, RuntimeException)
+ScVbaWSFunction::setValue(const rtl::OUString& PropertyName, const uno::Any& Value) throw(beans::UnknownPropertyException, script::CannotConvertException, reflection::InvocationTargetException, uno::RuntimeException)
 {
 }
 
 uno::Any SAL_CALL
-ScVbaWSFunction::getValue(const rtl::OUString& PropertyName) throw(UnknownPropertyException, RuntimeException)
+ScVbaWSFunction::getValue(const rtl::OUString& PropertyName) throw(beans::UnknownPropertyException, uno::RuntimeException)
 {
 	return uno::Any();
 }
 
 sal_Bool SAL_CALL
-ScVbaWSFunction::hasMethod(const rtl::OUString& Name)  throw(RuntimeException)
+ScVbaWSFunction::hasMethod(const rtl::OUString& Name)  throw(uno::RuntimeException)
 {
 	return true;
 }
 
 sal_Bool SAL_CALL
-ScVbaWSFunction::hasProperty(const OUString& Name)  throw(RuntimeException)
+ScVbaWSFunction::hasProperty(const rtl::OUString& Name)  throw(uno::RuntimeException)
 {
 	 return false;
 }

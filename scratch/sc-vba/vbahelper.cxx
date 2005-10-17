@@ -16,6 +16,8 @@
 #include "tabvwsh.hxx"
 #include "transobj.hxx"
 
+using namespace ::com::sun::star;
+using namespace ::org::openoffice;
 void unoToSbxValue( SbxVariable* pVar, const uno::Any& aValue );
 uno::Any sbxToUnoValue( SbxVariable* pVar );
 

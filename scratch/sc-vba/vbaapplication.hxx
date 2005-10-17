@@ -9,26 +9,26 @@
 
 #include "vbahelper.hxx"
 
-typedef ::cppu::WeakImplHelper1< org::openoffice::vba::XApplication > ScVbaApplication_BASE;
+typedef ::cppu::WeakImplHelper1< oo::vba::XApplication > ScVbaApplication_BASE;
 
 class ScVbaApplication : public ScVbaApplication_BASE
 {
 private:
-	uno::Reference< ::com::sun::star::uno::XComponentContext > m_xContext;
+	css::uno::Reference< css::uno::XComponentContext > m_xContext;
 public:
-	ScVbaApplication( uno::Reference< ::com::sun::star::uno::XComponentContext >& m_xContext );
+	ScVbaApplication( css::uno::Reference< css::uno::XComponentContext >& m_xContext );
 	virtual ~ScVbaApplication();
 
     // XApplication
-	virtual uno::Reference< vba::XRange > getSelection() throw (uno::RuntimeException);
-	virtual uno::Reference< vba::XWorkbook > getActiveWorkbook() throw (uno::RuntimeException);
-	virtual uno::Reference< vba::XRange > getActiveCell() throw (uno::RuntimeException);
-	virtual sal_Bool getScreenUpdating() throw (uno::RuntimeException);
-	virtual void setScreenUpdating(sal_Bool bUpdate) throw (uno::RuntimeException);
-	virtual uno::Any SAL_CALL Workbooks( const uno::Any& aIndex ) throw (uno::RuntimeException);
-	virtual ::com::sun::star::uno::Reference< ::org::openoffice::vba::XWorksheetFunction > SAL_CALL WorksheetFunction( ) throw (::com::sun::star::uno::RuntimeException);
-	virtual ::com::sun::star::uno::Any SAL_CALL Evaluate( const ::rtl::OUString& Name ) throw (::com::sun::star::uno::RuntimeException); 
-	virtual ::com::sun::star::uno::Any SAL_CALL Dialogs( const ::com::sun::star::uno::Any& DialogIndex ) throw (::com::sun::star::uno::RuntimeException);
+	virtual css::uno::Reference< oo::vba::XRange > getSelection() throw (css::uno::RuntimeException);
+	virtual css::uno::Reference< oo::vba::XWorkbook > getActiveWorkbook() throw (css::uno::RuntimeException);
+	virtual css::uno::Reference< oo::vba::XRange > getActiveCell() throw ( css::uno::RuntimeException);
+	virtual sal_Bool getScreenUpdating() throw (css::uno::RuntimeException);
+	virtual void setScreenUpdating(sal_Bool bUpdate) throw (css::uno::RuntimeException);
+	virtual css::uno::Any SAL_CALL Workbooks( const css::uno::Any& aIndex ) throw (css::uno::RuntimeException);
+	virtual css::uno::Reference< oo::vba::XWorksheetFunction > SAL_CALL WorksheetFunction( ) throw (css::uno::RuntimeException);
+	virtual css::uno::Any SAL_CALL Evaluate( const ::rtl::OUString& Name ) throw (css::uno::RuntimeException); 
+	virtual css::uno::Any SAL_CALL Dialogs( const css::uno::Any& DialogIndex ) throw (css::uno::RuntimeException);
 
 };
 #endif /* SC_VBA_APPLICATION_HXX */

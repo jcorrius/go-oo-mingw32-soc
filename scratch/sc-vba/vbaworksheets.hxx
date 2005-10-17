@@ -13,38 +13,38 @@
 
 class ScModelObj;
 
-typedef ::cppu::WeakImplHelper2< org::openoffice::vba::XWorksheets,
-         com::sun::star::container::XEnumerationAccess > ScVbaWorksheets_BASE;
+typedef ::cppu::WeakImplHelper2< oo::vba::XWorksheets,
+         css::container::XEnumerationAccess > ScVbaWorksheets_BASE;
 
 class ScVbaWorksheets : public ScVbaWorksheets_BASE
 {
-	uno::Reference< sheet::XSpreadsheets > mxSheets;
-	uno::Reference< frame::XModel > mxModel;
-	uno::Reference<  ::com::sun::star::uno::XComponentContext > m_xContext;
+	css::uno::Reference< css::sheet::XSpreadsheets > mxSheets;
+	css::uno::Reference< css::frame::XModel > mxModel;
+	css::uno::Reference<  css::uno::XComponentContext > m_xContext;
 
 public:
-	ScVbaWorksheets(uno::Reference< ::com::sun::star::uno::XComponentContext > & xContext, uno::Reference< frame::XModel > xModel );
+	ScVbaWorksheets(css::uno::Reference< css::uno::XComponentContext > & xContext, css::uno::Reference< css::frame::XModel > xModel );
 	virtual ~ScVbaWorksheets() {}
 
 	// XEnumerationAccess
-	virtual ::com::sun::star::uno::Type SAL_CALL getElementType() throw (::com::sun::star::uno::RuntimeException);
-	virtual ::sal_Bool SAL_CALL hasElements() throw (::com::sun::star::uno::RuntimeException);
-	virtual uno::Reference< container::XEnumeration > SAL_CALL createEnumeration() throw (uno::RuntimeException);
+	virtual css::uno::Type SAL_CALL getElementType() throw (css::uno::RuntimeException);
+	virtual ::sal_Bool SAL_CALL hasElements() throw (css::uno::RuntimeException);
+	virtual css::uno::Reference< css::container::XEnumeration > SAL_CALL createEnumeration() throw (css::uno::RuntimeException);
 
 	// XCollection
-    virtual ::sal_Int32 SAL_CALL getCount() throw (uno::RuntimeException);
-    virtual uno::Any SAL_CALL getParent() throw (uno::RuntimeException);
-    virtual ::sal_Int32 SAL_CALL getCreator() throw (uno::RuntimeException);
-    virtual uno::Reference< ::org::openoffice::vba::XApplication > SAL_CALL getApplication() throw (uno::RuntimeException);
-    virtual uno::Any SAL_CALL Item( const uno::Any& Index ) throw (uno::RuntimeException);
+    virtual ::sal_Int32 SAL_CALL getCount() throw (css::uno::RuntimeException);
+    virtual css::uno::Any SAL_CALL getParent() throw (css::uno::RuntimeException);
+    virtual ::sal_Int32 SAL_CALL getCreator() throw (css::uno::RuntimeException);
+    virtual css::uno::Reference< oo::vba::XApplication > SAL_CALL getApplication() throw (css::uno::RuntimeException);
+    virtual css::uno::Any SAL_CALL Item( const css::uno::Any& Index ) throw (css::uno::RuntimeException);
 
 	// XWorksheets
-    virtual uno::Any SAL_CALL Add( const uno::Any& Before, const uno::Any& After, const uno::Any& Count, const uno::Any& Type ) throw (uno::RuntimeException);
-    virtual void SAL_CALL Delete(  ) throw (uno::RuntimeException);
+    virtual css::uno::Any SAL_CALL Add( const css::uno::Any& Before, const css::uno::Any& After, const css::uno::Any& Count, const css::uno::Any& Type ) throw (css::uno::RuntimeException);
+    virtual void SAL_CALL Delete(  ) throw (css::uno::RuntimeException);
 private:
-	uno::Any getItemByStringIndex( const rtl::OUString& sIndex ) throw (uno::RuntimeException);
+	css::uno::Any getItemByStringIndex( const rtl::OUString& sIndex ) throw (css::uno::RuntimeException);
 
-	uno::Any getItemByIntIndex( const sal_Int32 nIndex ) throw (uno::RuntimeException);
+	css::uno::Any getItemByIntIndex( const sal_Int32 nIndex ) throw (css::uno::RuntimeException);
 };
 
 #endif /* SC_VBA_WORKSHEETS_HXX */

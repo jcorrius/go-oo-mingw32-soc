@@ -29,7 +29,8 @@
 #define STANDARDWIDTH 2267 
 #define STANDARDHEIGHT 427
 #define DOESNOTEXIST -1
-
+using namespace com::sun::star;
+using namespace org::openoffice;
 static sal_Int16 
 nameExists( uno::Reference <sheet::XSpreadsheetDocument>& xSpreadDoc, ::rtl::OUString & name)
 {

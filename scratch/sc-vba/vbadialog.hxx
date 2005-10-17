@@ -11,24 +11,24 @@
 #include "vbahelper.hxx"
 #include "vbadialog.hxx"
 
-typedef ::cppu::WeakImplHelper1< org::openoffice::vba::XDialog > ScVbaDialog_BASE;
+typedef ::cppu::WeakImplHelper1< oo::vba::XDialog > ScVbaDialog_BASE;
 
 class ScVbaDialog : public ScVbaDialog_BASE
 {
 	sal_Int32 mnIndex;
-	uno::Reference< ::com::sun::star::uno::XComponentContext > m_xContext;
+	css::uno::Reference< css::uno::XComponentContext > m_xContext;
 public:
-	ScVbaDialog( sal_Int32 nIndex, uno::Reference< ::com::sun::star::uno::XComponentContext > xContext ):
+	ScVbaDialog( sal_Int32 nIndex, css::uno::Reference< css::uno::XComponentContext > xContext ):
 		mnIndex( nIndex ),
 		m_xContext( xContext ) {}
 	virtual ~ScVbaDialog() {}
 
 	// Attributes
-	virtual uno::Reference< vba::XApplication > SAL_CALL getApplication() throw (uno::RuntimeException);
-	virtual uno::Any SAL_CALL getParent() throw (uno::RuntimeException);
-	virtual sal_Int32 SAL_CALL getCreator() throw(uno::RuntimeException);
+	virtual css::uno::Reference< oo::vba::XApplication > SAL_CALL getApplication() throw (css::uno::RuntimeException);
+	virtual css::uno::Any SAL_CALL getParent() throw (css::uno::RuntimeException);
+	virtual sal_Int32 SAL_CALL getCreator() throw(css::uno::RuntimeException);
 	// Methods
-	virtual void SAL_CALL Show() throw (uno::RuntimeException);
+	virtual void SAL_CALL Show() throw (css::uno::RuntimeException);
 	rtl::OUString mapIndexToName( sal_Int32 nIndex );
 };
 

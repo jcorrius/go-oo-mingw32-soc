@@ -9,26 +9,26 @@
  
 class ScModelObj;
 
-typedef ::cppu::WeakImplHelper1< org::openoffice::vba::XDialogs > ScVbaDialogs_BASE;
+typedef ::cppu::WeakImplHelper1< oo::vba::XDialogs > ScVbaDialogs_BASE;
 
 class ScVbaDialogs : public ScVbaDialogs_BASE
 {
-	uno::Reference< ::com::sun::star::uno::XComponentContext > & m_xContext;
+	css::uno::Reference< css::uno::XComponentContext > & m_xContext;
 public:
-	ScVbaDialogs( uno::Reference< com::sun::star::uno::XComponentContext > &xContext ):
+	ScVbaDialogs( css::uno::Reference< css::uno::XComponentContext > &xContext ):
 	m_xContext( xContext ) {} 
 	virtual ~ScVbaDialogs() {}
 
 	// XCollection
-	virtual ::sal_Int32 SAL_CALL getCount() throw (uno::RuntimeException);
-	virtual uno::Any SAL_CALL getParent() throw (uno::RuntimeException);
-	virtual ::sal_Int32 SAL_CALL getCreator() throw (uno::RuntimeException);
-	virtual uno::Reference< ::org::openoffice::vba::XApplication > SAL_CALL getApplication() 
-									throw (uno::RuntimeException);
-	virtual uno::Any SAL_CALL Item( const uno::Any& Index ) throw (uno::RuntimeException);
+	virtual ::sal_Int32 SAL_CALL getCount() throw (css::uno::RuntimeException);
+	virtual css::uno::Any SAL_CALL getParent() throw (css::uno::RuntimeException);
+	virtual ::sal_Int32 SAL_CALL getCreator() throw (css::uno::RuntimeException);
+	virtual css::uno::Reference< oo::vba::XApplication > SAL_CALL getApplication() 
+									throw (css::uno::RuntimeException);
+	virtual css::uno::Any SAL_CALL Item( const css::uno::Any& Index ) throw (css::uno::RuntimeException);
 
 	// XDialogs
-	virtual void SAL_CALL Dummy() throw (uno::RuntimeException);
+	virtual void SAL_CALL Dummy() throw (css::uno::RuntimeException);
 };
 
 #endif /* SC_VBA_DIALOGS_HXX */

@@ -9,37 +9,37 @@
 
 class ScModelObj;
 
-typedef ::cppu::WeakImplHelper1< org::openoffice::vba::XWorkbook > ScVbaWorkbook_BASE;
+typedef ::cppu::WeakImplHelper1< oo::vba::XWorkbook > ScVbaWorkbook_BASE;
 
 class ScVbaWorkbook : public ScVbaWorkbook_BASE
 {
-	uno::Reference< ::uno::XComponentContext > m_xContext;
-	uno::Reference< frame::XModel > mxModel;
+	css::uno::Reference< css::uno::XComponentContext > m_xContext;
+	css::uno::Reference< css::frame::XModel > mxModel;
 
 public:
-	ScVbaWorkbook( 	uno::Reference< ::uno::XComponentContext >& xContext,
-			uno::Reference< frame::XModel > xModel ) :
+	ScVbaWorkbook( 	css::uno::Reference< css::uno::XComponentContext >& xContext,
+			css::uno::Reference< css::frame::XModel > xModel ) :
  			mxModel( xModel ), m_xContext( xContext ){}
 	virtual ~ScVbaWorkbook() {}
 
     // Attributes
-	virtual ::rtl::OUString SAL_CALL getName() throw (uno::RuntimeException);
-	virtual ::rtl::OUString SAL_CALL getPath() throw (uno::RuntimeException);
-	virtual ::rtl::OUString SAL_CALL getFullName() throw (uno::RuntimeException);
-	virtual ::sal_Bool SAL_CALL getProtectStructure() throw (uno::RuntimeException);
-	virtual uno::Reference< vba::XWorksheet > SAL_CALL getActiveSheet() throw (uno::RuntimeException);
-	virtual sal_Bool SAL_CALL getSaved() throw (uno::RuntimeException);
-	virtual void SAL_CALL setSaved( sal_Bool bSave ) throw (uno::RuntimeException);
+	virtual ::rtl::OUString SAL_CALL getName() throw (css::uno::RuntimeException);
+	virtual ::rtl::OUString SAL_CALL getPath() throw (css::uno::RuntimeException);
+	virtual ::rtl::OUString SAL_CALL getFullName() throw (css::uno::RuntimeException);
+	virtual ::sal_Bool SAL_CALL getProtectStructure() throw (css::uno::RuntimeException);
+	virtual css::uno::Reference< oo::vba::XWorksheet > SAL_CALL getActiveSheet() throw (css::uno::RuntimeException);
+	virtual sal_Bool SAL_CALL getSaved() throw (css::uno::RuntimeException);
+	virtual void SAL_CALL setSaved( sal_Bool bSave ) throw (css::uno::RuntimeException);
 
 	// Methods
-	virtual uno::Any Worksheets( const uno::Any& aIndex ) throw (uno::RuntimeException);
-	virtual void SAL_CALL Close( const uno::Any &bSaveChanges,
-								 const uno::Any &aFileName,
-								 const uno::Any &bRouteWorkbook ) throw (uno::RuntimeException);
-	virtual void SAL_CALL Protect( const uno::Any & aPassword ) throw (uno::RuntimeException);
-	virtual void SAL_CALL Unprotect( const uno::Any &aPassword ) throw (uno::RuntimeException);
-	virtual void SAL_CALL Save() throw (uno::RuntimeException);
-	virtual void SAL_CALL Activate() throw (uno::RuntimeException);
+	virtual css::uno::Any Worksheets( const css::uno::Any& aIndex ) throw (css::uno::RuntimeException);
+	virtual void SAL_CALL Close( const css::uno::Any &bSaveChanges,
+								 const css::uno::Any &aFileName,
+								 const css::uno::Any &bRouteWorkbook ) throw (css::uno::RuntimeException);
+	virtual void SAL_CALL Protect( const css::uno::Any & aPassword ) throw (css::uno::RuntimeException);
+	virtual void SAL_CALL Unprotect( const css::uno::Any &aPassword ) throw (css::uno::RuntimeException);
+	virtual void SAL_CALL Save() throw (css::uno::RuntimeException);
+	virtual void SAL_CALL Activate() throw (css::uno::RuntimeException);
 };
 
 #endif /* SC_VBA_WORKBOOK_HXX */

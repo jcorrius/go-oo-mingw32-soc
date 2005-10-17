@@ -14,19 +14,21 @@ using namespace ::org::openoffice;
 using namespace ::org::openoffice::vba;
 using namespace ::com::sun::star;
 
+// fails silently
 void
 ScVbaDialog::Show() throw(uno::RuntimeException)
 {
 	rtl::OUString aURL;
-	uno::Reference< lang::XMultiComponentFactory > xSMgr( m_xContext->getServiceManager(), uno::UNO_QUERY_THROW );
         uno::Reference< frame::XModel > xModel = getCurrentDocument();
-
-	aURL = mapIndexToName( mnIndex );
-	if( aURL == rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("") ) )
-		throw uno::RuntimeException(
-			::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( " Unable to open the specified dialog " ) ),
-			uno::Reference< XInterface > () );
-	dispatchRequests( xModel, aURL );
+	if ( xModel.is() )
+	{
+		aURL = mapIndexToName( mnIndex );
+		if( aURL.getLength()  )
+			throw uno::RuntimeException(
+				::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( " Unable to open the specified dialog " ) ),
+				uno::Reference< XInterface > () );
+		dispatchRequests( xModel, aURL );
+	}
 }	
 
 uno::Any
@@ -37,7 +39,7 @@ ScVbaDialog::getParent() throw (uno::RuntimeException)
 	if ( !xApplication.is() )
 	{
 		throw uno::RuntimeException(
-			::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "ScVbaWorkbooks::getParent: Couldn't access Application				object") ),uno::Reference< XInterface >() );
+			::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "ScVbaDialgs::getParent: Couldn't access Application object") ),uno::Reference< XInterface >() );
 	}
 	return uno::Any(xApplication);
 }
@@ -97,6 +99,6 @@ ScVbaDialog::mapIndexToName( sal_Int32 nIndex )
 {
 	if( nIndex < nSize )
 		return aStringList[ nIndex ];
-	return rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("") );
+	return rtl::OUString();
 }
 

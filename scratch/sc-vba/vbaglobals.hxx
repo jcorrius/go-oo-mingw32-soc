@@ -7,48 +7,48 @@
 #include <org/openoffice/vba/XGlobals.hpp>
 
 #include <cppuhelper/implbase2.hxx>
-
+#include "vbahelper.hxx"
 
     // =============================================================================
     // class ScVbaGlobals
     // =============================================================================
 
     typedef ::cppu::WeakImplHelper2<    
-        ::org::openoffice::vba::XGlobals,
-        ::com::sun::star::lang::XServiceInfo > ScVbaGlobals_BASE;
+        oo::vba::XGlobals,
+        css::lang::XServiceInfo > ScVbaGlobals_BASE;
 
 
     class ScVbaGlobals : public ScVbaGlobals_BASE
     {
     private:
-            ::com::sun::star::uno::Reference< ::com::sun::star::uno::XComponentContext > m_xContext;
-            ::com::sun::star::uno::Reference< ::org::openoffice::vba::XApplication > mxApplication;
+            css::uno::Reference< css::uno::XComponentContext > m_xContext;
+            css::uno::Reference< oo::vba::XApplication > mxApplication;
     public:
 	
         ScVbaGlobals(
-            const ::com::sun::star::uno::Reference< ::com::sun::star::uno::XComponentContext >& rxContext );
+            const css::uno::Reference< css::uno::XComponentContext >& rxContext );
         virtual ~ScVbaGlobals();
 
-		static 	com::sun::star::uno::Reference< org::openoffice::vba::XGlobals > getGlobalsImpl(::com::sun::star::uno::Reference< ::com::sun::star::uno::XComponentContext >& ) throw (com::sun::star::uno::RuntimeException);
+		static 	css::uno::Reference< oo::vba::XGlobals > getGlobalsImpl(css::uno::Reference< css::uno::XComponentContext >& ) throw (css::uno::RuntimeException);
 
         // XServiceInfo
         virtual ::rtl::OUString SAL_CALL getImplementationName(  ) 
-            throw (::com::sun::star::uno::RuntimeException);
+            throw (css::uno::RuntimeException);
         virtual sal_Bool SAL_CALL supportsService( const ::rtl::OUString& ServiceName ) 
-            throw (::com::sun::star::uno::RuntimeException);
-        virtual ::com::sun::star::uno::Sequence< ::rtl::OUString > SAL_CALL getSupportedServiceNames(  ) 
-            throw (::com::sun::star::uno::RuntimeException);
+            throw (css::uno::RuntimeException);
+        virtual css::uno::Sequence< ::rtl::OUString > SAL_CALL getSupportedServiceNames(  ) 
+            throw (css::uno::RuntimeException);
 
         // XGlobals
-        virtual ::com::sun::star::uno::Reference<
-                        ::org::openoffice::vba::XApplication > SAL_CALL getApplication()
-                        throw (com::sun::star::uno::RuntimeException);
-        virtual ::com::sun::star::uno::Reference< ::org::openoffice::vba::XWorkbook > SAL_CALL getActiveWorkbook() throw (::com::sun::star::uno::RuntimeException);
-        virtual ::com::sun::star::uno::Reference< ::org::openoffice::vba::XWorksheet > SAL_CALL getActiveSheet() throw (::com::sun::star::uno::RuntimeException);
-        virtual ::com::sun::star::uno::Any SAL_CALL WorkSheets(const com::sun::star::uno::Any& aIndex ) throw (::com::sun::star::uno::RuntimeException);
-        virtual ::com::sun::star::uno::Any SAL_CALL WorkBooks(const com::sun::star::uno::Any& aIndex ) throw (::com::sun::star::uno::RuntimeException);
+        virtual css::uno::Reference<
+                        oo::vba::XApplication > SAL_CALL getApplication()
+                        throw (css::uno::RuntimeException);
+        virtual css::uno::Reference< oo::vba::XWorkbook > SAL_CALL getActiveWorkbook() throw (css::uno::RuntimeException);
+        virtual css::uno::Reference< oo::vba::XWorksheet > SAL_CALL getActiveSheet() throw (css::uno::RuntimeException);
+        virtual css::uno::Any SAL_CALL WorkSheets(const css::uno::Any& aIndex ) throw (css::uno::RuntimeException);
+        virtual css::uno::Any SAL_CALL WorkBooks(const css::uno::Any& aIndex ) throw (css::uno::RuntimeException);
 
-	virtual ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Any > SAL_CALL getGlobals(  ) throw (::com::sun::star::uno::RuntimeException);
+	virtual css::uno::Sequence< css::uno::Any > SAL_CALL getGlobals(  ) throw (css::uno::RuntimeException);
 
 
     };

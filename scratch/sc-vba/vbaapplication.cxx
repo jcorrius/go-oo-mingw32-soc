@@ -31,16 +31,11 @@ ScVbaApplication::~ScVbaApplication()
 uno::Reference< vba::XWorkbook >
 ScVbaApplication::getActiveWorkbook() throw (uno::RuntimeException)
 {
-	uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY );
+	uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY_THROW );
 
-	if( xModel.is() )
-	{
-		uno::Reference< vba::XWorkbook > xWrkBk( new ScVbaWorkbook( m_xContext,
-			xModel )); 
-		return xWrkBk; 
-	}
-	else
-		return uno::Reference< vba::XWorkbook >( NULL );
+	uno::Reference< vba::XWorkbook > xWrkBk( new ScVbaWorkbook( m_xContext,
+		xModel )); 
+	return xWrkBk; 
 }
 
 uno::Reference< vba::XRange >
@@ -55,12 +50,16 @@ ScVbaApplication::getActiveCell() throw (uno::RuntimeException )
 {
 	uno::Reference< sheet::XSpreadsheetView > xView( getCurrentDocument()->getCurrentController(), uno::UNO_QUERY_THROW );
 	uno::Reference< table::XCellRange > xRange( xView->getActiveSheet(), ::uno::UNO_QUERY_THROW);
-                                                                                                                             
 	ScTabViewShell* pViewShell = ScTabViewShell::GetActiveViewShell();
 	if ( !pViewShell )
 		throw uno::RuntimeException( rtl::OUString::createFromAscii("No ViewShell available"), uno::Reference< uno::XInterface >() );
-	sal_Int32 nCursorX, nCursorY;
-	nCursorX = sal_Int32(pViewShell->GetViewData()->GetCurX()), nCursorY = sal_Int32(pViewShell->GetViewData()->GetCurY());
+	ScViewData* pTabView = pViewShell->GetViewData();
+	if ( !pTabView )
+		throw uno::RuntimeException( rtl::OUString::createFromAscii("No ViewData available"), uno::Reference< uno::XInterface >() );
+
+	sal_Int32 nCursorX = pTabView->GetCurX();
+	sal_Int32 nCursorY = pTabView->GetCurY();
+
 	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xRange->getCellRangeByPosition( nCursorX, nCursorY, 
 										nCursorX, nCursorY ) ) ); 
 }
@@ -68,16 +67,18 @@ ScVbaApplication::getActiveCell() throw (uno::RuntimeException )
 sal_Bool
 ScVbaApplication::getScreenUpdating() throw (uno::RuntimeException)
 {
-	return !getCurrentDocument()->hasControllersLocked();
+	uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY_THROW );
+	return !xModel->hasControllersLocked();
 }
 
 void
 ScVbaApplication::setScreenUpdating(sal_Bool bUpdate) throw (uno::RuntimeException)
 {
+	uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY_THROW );
 	if (bUpdate)
-		getCurrentDocument()->unlockControllers();
+		xModel->unlockControllers();
 	else
-		getCurrentDocument()->lockControllers();
+		xModel->lockControllers();
 }
 
 uno::Any SAL_CALL

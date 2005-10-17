@@ -3,25 +3,23 @@
 
 #include <com/sun/star/frame/XModel.hpp>
 
-using namespace ::com::sun::star;
-
+#define css com::sun::star
+#define oo org::openoffice
 namespace org 
 {
 	namespace openoffice 
 	{
-		void dispatchRequests (::com::sun::star::uno::Reference< frame::XModel>& xModel,rtl::OUString & aUrl) ;
+		void dispatchRequests (css::uno::Reference< css::frame::XModel>& xModel,rtl::OUString & aUrl) ;
 		void implnCopy();
 		void implnPaste();
 		void implnCut();
 		void implnPasteSpecial(sal_uInt16 nFlags,sal_uInt16 nFunction,sal_Bool bSkipEmpty, sal_Bool bTranspose);
 		bool isRangeShortCut( const ::rtl::OUString& sParam );
-		::com::sun::star::uno::Reference< com::sun::star::frame::XModel >
-			getCurrentDocument() throw (com::sun::star::uno::RuntimeException);
+		css::uno::Reference< css::frame::XModel >
+			getCurrentDocument() throw (css::uno::RuntimeException);
 
 	}
 }
-
-using namespace ::org::openoffice;
 
 #ifdef DEBUG
 #  define SC_VBA_FIXME(a) OSL_TRACE( a )

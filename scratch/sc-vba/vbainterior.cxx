@@ -9,6 +9,8 @@
 #include <cppuhelper/queryinterface.hxx>
 
 #include "vbainterior.hxx"
+using namespace ::com::sun::star;
+using namespace ::org::openoffice;
 
 ::com::sun::star::uno::Any
 ScVbaInterior::getColor() throw (::com::sun::star::uno::RuntimeException) 
@@ -27,21 +29,21 @@ ScVbaInterior::setColor( const ::com::sun::star::uno::Any& _color ) throw (::com
 	xProps->setPropertyValue(rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "CellBackColor" ) ), _color);
 }
 
-Reference< XIntrospectionAccess >
-ScVbaInterior::getIntrospection(void)  throw(RuntimeException)
+uno::Reference< beans::XIntrospectionAccess >
+ScVbaInterior::getIntrospection(void)  throw(uno::RuntimeException)
 {
 	return uno::Reference<beans::XIntrospectionAccess>();
 }
 
-Any
-ScVbaInterior::invoke(const OUString& FunctionName, const Sequence< Any >& Params, Sequence< sal_Int16 >& OutParamIndex, Sequence< Any >& OutParam) throw(IllegalArgumentException, CannotConvertException, InvocationTargetException, RuntimeException)
+uno::Any
+ScVbaInterior::invoke(const rtl::OUString& FunctionName, const uno::Sequence< uno::Any >& Params, uno::Sequence< sal_Int16 >& OutParamIndex, uno::Sequence< uno::Any >& OutParam) throw( lang::IllegalArgumentException, script::CannotConvertException, reflection::InvocationTargetException, uno::RuntimeException)
 {
 	uno::Any aAny;
 	return aAny;
 }
 
 void
-ScVbaInterior::setValue(const OUString& PropertyName, const Any& Value) throw(UnknownPropertyException, CannotConvertException, InvocationTargetException, RuntimeException)
+ScVbaInterior::setValue(const rtl::OUString& PropertyName, const uno::Any& Value) throw(beans::UnknownPropertyException, script::CannotConvertException, reflection::InvocationTargetException, uno::RuntimeException)
 {
 	uno::Reference< beans::XPropertySet > xProps(mxRange, uno::UNO_QUERY );
 
@@ -66,12 +68,12 @@ ScVbaInterior::setValue(const OUString& PropertyName, const Any& Value) throw(Un
 	{
 		rtl::OUString msg = rtl::OUString::createFromAscii("No property named ");	
 	 	msg += PropertyName;	
-		throw UnknownPropertyException( msg, uno::Reference< uno::XInterface >() );
+		throw beans::UnknownPropertyException( msg, uno::Reference< uno::XInterface >() );
 	}
 }
 
-Any
-ScVbaInterior::getValue(const OUString& PropertyName) throw(UnknownPropertyException, RuntimeException)
+uno::Any
+ScVbaInterior::getValue(const rtl::OUString& PropertyName) throw(beans::UnknownPropertyException, uno::RuntimeException)
 {
 	uno::Any aAny;
 	uno::Reference< beans::XPropertySet > xProps(mxRange, uno::UNO_QUERY );
@@ -87,20 +89,20 @@ ScVbaInterior::getValue(const OUString& PropertyName) throw(UnknownPropertyExcep
 	{
 		rtl::OUString msg = rtl::OUString::createFromAscii("No property named ");	
 	 	msg += PropertyName;	
-		throw UnknownPropertyException( msg, uno::Reference< uno::XInterface >() );
+		throw beans::UnknownPropertyException( msg, uno::Reference< uno::XInterface >() );
                         
 	}
 	return aAny;
 }
 
 sal_Bool
-ScVbaInterior::hasMethod(const OUString& Name)  throw(RuntimeException)
+ScVbaInterior::hasMethod(const rtl::OUString& Name)  throw(uno::RuntimeException)
 {
 	return false;
 }
 
 sal_Bool
-ScVbaInterior::hasProperty(const OUString& Name)  throw(RuntimeException)
+ScVbaInterior::hasProperty(const rtl::OUString& Name)  throw(uno::RuntimeException)
 {
 
 	if (Name.equalsAscii("RotateAngle"))

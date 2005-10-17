@@ -10,35 +10,26 @@
 #include <com/sun/star/script/XInvocation.hpp>
 #include <com/sun/star/sheet/XFunctionAccess.hpp>
 
-using namespace ::org::openoffice;
-using namespace rtl;
-using namespace com::sun::star::uno;
-using namespace com::sun::star::lang;
-using namespace com::sun::star::script;
-using namespace com::sun::star::beans;
-using namespace com::sun::star::reflection;
-using namespace ::com::sun::star;
-
-typedef ::cppu::WeakImplHelper2< org::openoffice::vba::XWorksheetFunction,XInvocation > ScVbaWSFunction_BASE;
+typedef ::cppu::WeakImplHelper2< oo::vba::XWorksheetFunction,css::script::XInvocation > ScVbaWSFunction_BASE;
 
 class ScVbaWSFunction :  public ScVbaWSFunction_BASE
 {
-	uno::Reference< ::com::sun::star::uno::XComponentContext > m_xContext;
+	css::uno::Reference< css::uno::XComponentContext > m_xContext;
 public:
-	ScVbaWSFunction( uno::Reference< uno::XComponentContext >& xContext
+	ScVbaWSFunction( css::uno::Reference< css::uno::XComponentContext >& xContext
 				):m_xContext(xContext)
 	{
 	}
 	virtual ~ScVbaWSFunction(){}
 
-	virtual void SAL_CALL dummy(  ) throw (::com::sun::star::uno::RuntimeException);
+	virtual void SAL_CALL dummy(  ) throw (css::uno::RuntimeException);
 
-	virtual Reference< XIntrospectionAccess >  SAL_CALL getIntrospection(void)  throw(RuntimeException);
-	virtual Any  SAL_CALL invoke(const OUString& FunctionName, const Sequence< Any >& Params, Sequence< sal_Int16 >& OutParamIndex, Sequence< Any >& OutParam) throw(IllegalArgumentException, CannotConvertException, InvocationTargetException, RuntimeException);
-	virtual void  SAL_CALL setValue(const OUString& PropertyName, const Any& Value) throw(UnknownPropertyException, CannotConvertException, InvocationTargetException, RuntimeException);
-	virtual Any  SAL_CALL getValue(const OUString& PropertyName) throw(UnknownPropertyException, RuntimeException);
-	virtual sal_Bool  SAL_CALL hasMethod(const OUString& Name)  throw(RuntimeException);
-	virtual sal_Bool  SAL_CALL hasProperty(const OUString& Name)  throw(RuntimeException);
+	virtual css::uno::Reference< css::beans::XIntrospectionAccess >  SAL_CALL getIntrospection(void)  throw(css::uno::RuntimeException);
+	virtual css::uno::Any  SAL_CALL invoke(const rtl::OUString& FunctionName, const css::uno::Sequence< css::uno::Any >& Params, css::uno::Sequence< sal_Int16 >& OutParamIndex, css::uno::Sequence< css::uno::Any >& OutParam) throw(css::lang::IllegalArgumentException, css::script::CannotConvertException, css::reflection::InvocationTargetException, css::uno::RuntimeException);
+	virtual void  SAL_CALL setValue(const rtl::OUString& PropertyName, const css::uno::Any& Value) throw(css::beans::UnknownPropertyException, css::script::CannotConvertException, css::reflection::InvocationTargetException, css::uno::RuntimeException);
+	virtual css::uno::Any  SAL_CALL getValue(const rtl::OUString& PropertyName) throw(css::beans::UnknownPropertyException, css::uno::RuntimeException);
+	virtual sal_Bool  SAL_CALL hasMethod(const rtl::OUString& Name)  throw(css::uno::RuntimeException);
+	virtual sal_Bool  SAL_CALL hasProperty(const rtl::OUString& Name)  throw(css::uno::RuntimeException);
 
 };
 #endif

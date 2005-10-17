@@ -706,7 +706,7 @@ ScVbaRange::PasteSpecial(sal_Int16 Paste, sal_Int16 Operation, ::sal_Bool SkipBl
 	implnPasteSpecial(nFlags,nFormulaBits,SkipBlanks,Transpose);
 
 }
-/* Causes hang on exit don't re-enable for the moment
+
 // XInterface
 
 IMPLEMENT_FORWARD_XINTERFACE2( ScVbaRange, ScVbaRange_BASE, OPropertyContainer )
@@ -720,23 +720,25 @@ IMPLEMENT_FORWARD_XTYPEPROVIDER2( ScVbaRange, ScVbaRange_BASE, OPropertyContaine
 ::cppu::IPropertyArrayHelper& 
 ScVbaRange::getInfoHelper(  )
 {
-    return *getArrayHelper();
+    static ::cppu::IPropertyArrayHelper* sProps = 0;
+    if ( !sProps )
+        sProps = createArrayHelper();
+    return *sProps;
 }
 
-// OPropertyArrayUsageHelper
 
 ::cppu::IPropertyArrayHelper* 
 ScVbaRange::createArrayHelper(  ) const
 {
-    Sequence< beans::Property > aProps;
+    uno::Sequence< beans::Property > aProps;
     describeProperties( aProps );
     return new ::cppu::OPropertyArrayHelper( aProps );
 }
 
 // XPropertySet
-Reference< beans::XPropertySetInfo > 
-ScVbaRange::getPropertySetInfo(  ) throw (RuntimeException)
+uno::Reference< beans::XPropertySetInfo > 
+ScVbaRange::getPropertySetInfo(  ) throw (uno::RuntimeException)
 {
-    Reference< beans::XPropertySetInfo > xInfo( createPropertySetInfo( getInfoHelper() ) );
+    uno::Reference< beans::XPropertySetInfo > xInfo( createPropertySetInfo( getInfoHelper() ) );
     return xInfo;
-}*/
+}
