@@ -20,11 +20,6 @@ class ScTableSheetsObj;
 
 typedef ::cppu::WeakImplHelper1< oo::vba::XRange > ScVbaRange_BASE;
 
-const sal_Int32 RANGE_PROPERTY_ID_DFLT=1;
-// name is not defineable in IDL so no chance of a false detection of the 
-// another property/method of the same name
-const ::rtl::OUString RANGE_PROPERTY_DFLT( RTL_CONSTASCII_USTRINGPARAM( "_$DefaultProp" ) );
-
 class ScVbaRange : public ScVbaRange_BASE
     ,public ::comphelper::OMutexAndBroadcastHelper
     ,public ::comphelper::OPropertyContainer
@@ -37,18 +32,8 @@ class ScVbaRange : public ScVbaRange_BASE
 	rtl::OUString msDftPropName;
 
 public:
-	ScVbaRange( css::uno::Reference< css::uno::XComponentContext >& xContext, css::uno::Reference< css::table::XCellRange > xRange, sal_Bool bIsRows = false, sal_Bool bIsColumns = false ) 
-:OPropertyContainer(GetBroadcastHelper())
-,mxRange( xRange ),
-		m_xContext(xContext),
-		mbIsRows( bIsRows ),
-		mbIsColumns( bIsColumns )
-{
-	msDftPropName = ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Value" ) );
-	registerProperty( RANGE_PROPERTY_DFLT, RANGE_PROPERTY_ID_DFLT,
-        css::beans::PropertyAttribute::TRANSIENT | css::beans::PropertyAttribute::BOUND, &msDftPropName, ::getCppuType( &msDftPropName ) );
+	ScVbaRange( css::uno::Reference< css::uno::XComponentContext >& xContext, css::uno::Reference< css::table::XCellRange > xRange, sal_Bool bIsRows = false, sal_Bool bIsColumns = false ) throw ( css::lang::IllegalArgumentException );
 
-}
 	virtual ~ScVbaRange() {}
 
     // Attributes

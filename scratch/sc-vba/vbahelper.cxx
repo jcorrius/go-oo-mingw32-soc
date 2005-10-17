@@ -61,20 +61,12 @@ org::openoffice::dispatchRequests (uno::Reference< frame::XModel>& xModel,rtl::O
 	}
 
 	uno::Reference<frame::XDispatch> xDispatcher = xDispatchProvider->queryDispatch(url,emptyString,0);
-	uno::Sequence<beans::PropertyValue> sProps ;
-	sProps.realloc(2);
+	uno::Sequence<beans::PropertyValue> sProps(2) ;
         beans::PropertyValue * aArray = sProps.getArray();
 	aArray[0].Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Silent" ));
-	uno::Any aAny;
-	sal_Bool isTrue = true;
-	aAny <<= isTrue;
-
-	aArray[0].Value = aAny;
-	//aArray[0].Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "StatusIndicator" ));
-	//aArray[0].Value = true;
+	aArray[0].Value <<= (sal_Bool)sal_True;
 
 	if (xDispatcher.is())
-		//xDispatcher->dispatch( url,uno::Sequence< beans::PropertyValue >(0) );
 		xDispatcher->dispatch( url,sProps );
 }
 
@@ -83,8 +75,11 @@ void
 org::openoffice::implnPaste()
 {
 	ScTabViewShell* pViewShell = ScTabViewShell::GetActiveViewShell();
-	pViewShell->PasteFromSystem();
-	pViewShell->CellContentChanged();
+	if ( pViewShell )
+	{
+		pViewShell->PasteFromSystem();
+		pViewShell->CellContentChanged();
+	}
 }
 
 
@@ -92,14 +87,16 @@ void
 org::openoffice::implnCopy()
 {
 	ScTabViewShell* pViewShell = ScTabViewShell::GetActiveViewShell();
-	pViewShell->CopyToClip(NULL,false,false,true);
+	if ( pViewShell )
+		pViewShell->CopyToClip(NULL,false,false,true);
 }
 
 void 
 org::openoffice::implnCut()
 {
 	ScTabViewShell* pViewShell = ScTabViewShell::GetActiveViewShell();
-	pViewShell->CutToClip( NULL, TRUE );
+	if ( pViewShell )
+		pViewShell->CutToClip( NULL, TRUE );
 }
 
 void org::openoffice::implnPasteSpecial(USHORT nFlags,USHORT nFunction,sal_Bool bSkipEmpty, sal_Bool bTranspose)
@@ -108,18 +105,28 @@ void org::openoffice::implnPasteSpecial(USHORT nFlags,USHORT nFunction,sal_Bool 
 	InsCellCmd eMoveMode = INS_NONE;
 
 	ScTabViewShell* pTabViewShell = ScTabViewShell::GetActiveViewShell();
-	Window* pWin = pTabViewShell->GetViewData()->GetActiveWin();
-	ScDocument* pDoc = pTabViewShell->GetViewData()->GetDocument();
-	ScTransferObj* pOwnClip = ScTransferObj::GetOwnClipboard( pWin );
-
-	if ( bAsLink && bOtherDoc )
-		pTabViewShell->PasteFromSystem(0);//SOT_FORMATSTR_ID_LINK
-	else {
-		pTabViewShell->PasteFromClip( nFlags, pOwnClip->GetDocument(),
-		nFunction, bSkipEmpty, bTranspose, bAsLink,
-		eMoveMode, IDF_NONE, TRUE );
-		pTabViewShell->CellContentChanged();
+	if ( pTabViewShell )
+	{
+		ScViewData* pView = pTabViewShell->GetViewData();	
+		Window* pWin = NULL;
+		if ( pView && ( pWin = pView->GetActiveWin() ) )
+		{
+			if ( bAsLink && bOtherDoc )
+				pTabViewShell->PasteFromSystem(0);//SOT_FORMATSTR_ID_LINK
+			else 
+			{
+				ScTransferObj* pOwnClip = ScTransferObj::GetOwnClipboard( pWin );
+				ScDocument* pDoc = NULL; 
+				if ( pOwnClip )
+					pDoc = pOwnClip->GetDocument();	
+				pTabViewShell->PasteFromClip( nFlags, pDoc,
+					nFunction, bSkipEmpty, bTranspose, bAsLink,
+					eMoveMode, IDF_NONE, TRUE );
+				pTabViewShell->CellContentChanged();
+			}
 		}
+	}
+
 }
 
 bool

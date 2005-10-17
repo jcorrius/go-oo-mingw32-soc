@@ -47,16 +47,39 @@
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
 
-uno::Any 
-ScVbaRange::getValue() throw (::com::sun::star::uno::RuntimeException)
+const sal_Int32 RANGE_PROPERTY_ID_DFLT=1;
+// name is not defineable in IDL so no chance of a false detection of the
+// another property/method of the same name
+const ::rtl::OUString RANGE_PROPERTY_DFLT( RTL_CONSTASCII_USTRINGPARAM( "_$DefaultProp" ) );
+
+
+ScVbaRange::ScVbaRange( uno::Reference< uno::XComponentContext >& xContext, uno::Reference< table::XCellRange > xRange, sal_Bool bIsRows, sal_Bool bIsColumns ) throw( lang::IllegalArgumentException )
+:OPropertyContainer(GetBroadcastHelper())
+,mxRange( xRange ),
+                m_xContext(xContext),
+                mbIsRows( bIsRows ),
+                mbIsColumns( bIsColumns )
 {
-	uno::Reference< table::XCell > xCell = mxRange->getCellByPosition( 0, 0 );
+	if  ( !xContext.is() )
+		throw lang::IllegalArgumentException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "context is not set " ) ), uno::Reference< uno::XInterface >() , 1 );
+	if  ( !xRange.is() )
+		throw lang::IllegalArgumentException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "range is not set " ) ), uno::Reference< uno::XInterface >() , 1 );
+	msDftPropName = ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Value" ) );
+	registerProperty( RANGE_PROPERTY_DFLT, RANGE_PROPERTY_ID_DFLT,
+beans::PropertyAttribute::TRANSIENT | beans::PropertyAttribute::BOUND, &msDftPropName, ::getCppuType( &msDftPropName ) );
+
+}
+
+uno::Any 
+ScVbaRange::getValue() throw (uno::RuntimeException)
+{
+	uno::Reference< table::XCell > xCell( mxRange->getCellByPosition( 0, 0 ), uno::UNO_QUERY_THROW );
 	table::CellContentType eType = xCell->getType();
 	if( eType == table::CellContentType_VALUE || eType == table::CellContentType_FORMULA )
 		return uno::Any( xCell->getValue() );
 	if( eType == table::CellContentType_TEXT )
 	{
-		uno::Reference< text::XTextRange > xTextRange(xCell, ::uno::UNO_QUERY);
+		uno::Reference< text::XTextRange > xTextRange(xCell, ::uno::UNO_QUERY_THROW);
 		return ( uno::Any ) xTextRange->getString();
 	}
 	return uno::Any( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("") ) );
@@ -69,7 +92,7 @@ ScVbaRange::setValue( const uno::Any  &aValue  ) throw (uno::RuntimeException)
 	long nRowCount, nColCount;
 	rtl::OUString aString;
 
-	uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, uno::UNO_QUERY);
+	uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, uno::UNO_QUERY_THROW );
 	nRowCount = xColumnRowRange->getRows()->getCount();
 	nColCount = xColumnRowRange->getColumns()->getCount();
 
@@ -79,7 +102,7 @@ ScVbaRange::setValue( const uno::Any  &aValue  ) throw (uno::RuntimeException)
 		{
 			for (long j = 0;j < nColCount; j++)
 			{
-				uno::Reference< table::XCell > xCell = mxRange->getCellByPosition(j, i );
+				uno::Reference< table::XCell > xCell( mxRange->getCellByPosition(j, i ), uno::UNO_QUERY_THROW );
 				xCell->setValue( nValue );
 			}
 		}
@@ -90,7 +113,7 @@ ScVbaRange::setValue( const uno::Any  &aValue  ) throw (uno::RuntimeException)
 		{
 			for (long j = 0;j < nColCount; j++)
 			{
-				uno::Reference< table::XCell > xCell = mxRange->getCellByPosition( j,i );
+				uno::Reference< table::XCell > xCell( mxRange->getCellByPosition( j,i ), uno::UNO_QUERY_THROW );
 				uno::Reference< text::XTextRange > xTextRange( xCell, uno::UNO_QUERY_THROW );
 				xTextRange->setString( aString );
 			}
@@ -101,7 +124,7 @@ ScVbaRange::setValue( const uno::Any  &aValue  ) throw (uno::RuntimeException)
 void
 ScVbaRange::Clear() throw (uno::RuntimeException)
 {
-	uno::Reference< sheet::XSheetOperation > xSheetOperation(mxRange, uno::UNO_QUERY);
+	uno::Reference< sheet::XSheetOperation > xSheetOperation(mxRange, uno::UNO_QUERY_THROW);
 	xSheetOperation->clearContents(sheet::CellFlags::VALUE | sheet::CellFlags::STRING | 
 					sheet::CellFlags::HARDATTR | sheet::CellFlags::FORMATTED | sheet::CellFlags::EDITATTR);
 }
@@ -109,7 +132,7 @@ ScVbaRange::Clear() throw (uno::RuntimeException)
 void
 ScVbaRange::ClearComments() throw (uno::RuntimeException)
 {
-	uno::Reference< sheet::XSheetOperation > xSheetOperation(mxRange, uno::UNO_QUERY);
+	uno::Reference< sheet::XSheetOperation > xSheetOperation(mxRange, uno::UNO_QUERY_THROW);
 	//FIXME: STRING is not the correct type; May require special handling; clearNotes?
 	xSheetOperation->clearContents(sheet::CellFlags::STRING);
 }
@@ -117,14 +140,14 @@ ScVbaRange::ClearComments() throw (uno::RuntimeException)
 void
 ScVbaRange::ClearContents() throw (uno::RuntimeException)
 {
-	uno::Reference< sheet::XSheetOperation > xSheetOperation(mxRange, uno::UNO_QUERY);
+	uno::Reference< sheet::XSheetOperation > xSheetOperation(mxRange, uno::UNO_QUERY_THROW);
 	xSheetOperation->clearContents(sheet::CellFlags::VALUE | sheet::CellFlags::STRING );
 }
 
 void
 ScVbaRange::ClearFormats() throw (uno::RuntimeException)
 {
-	uno::Reference< sheet::XSheetOperation > xSheetOperation(mxRange, uno::UNO_QUERY);
+	uno::Reference< sheet::XSheetOperation > xSheetOperation(mxRange, uno::UNO_QUERY_THROW);
 	//FIXME: need to check if we need to combine sheet::CellFlags::FORMATTED
 	xSheetOperation->clearContents(sheet::CellFlags::HARDATTR | sheet::CellFlags::FORMATTED | sheet::CellFlags::EDITATTR);
 }
@@ -132,7 +155,7 @@ ScVbaRange::ClearFormats() throw (uno::RuntimeException)
 ::rtl::OUString
 ScVbaRange::getFormula() throw (::com::sun::star::uno::RuntimeException)
 {
-	uno::Reference< table::XCell > xCell = mxRange->getCellByPosition( 0, 0 );
+	uno::Reference< table::XCell > xCell( mxRange->getCellByPosition( 0, 0 ), uno::UNO_QUERY_THROW );
 	return xCell->getFormula();
 }
 
@@ -141,7 +164,7 @@ ScVbaRange::setFormula(const ::rtl::OUString &rFormula ) throw (uno::RuntimeExce
 {
 	long nRowCount, nColCount;
 
-	uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, uno::UNO_QUERY);
+	uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, uno::UNO_QUERY_THROW);
 	nRowCount = xColumnRowRange->getRows()->getCount();
 	nColCount = xColumnRowRange->getColumns()->getCount();
 
@@ -149,7 +172,7 @@ ScVbaRange::setFormula(const ::rtl::OUString &rFormula ) throw (uno::RuntimeExce
 	{
 		for (long j = 0; j < nColCount; j++)
 		{
-			uno::Reference< table::XCell > xCell = mxRange->getCellByPosition( j,i );
+			uno::Reference< table::XCell > xCell( mxRange->getCellByPosition( j,i ), uno::UNO_QUERY_THROW );
 			xCell->setFormula( rFormula );
 		}
 	}
@@ -159,7 +182,7 @@ double
 ScVbaRange::getCount() throw (uno::RuntimeException)
 {
 	double rowCount, colCount;
-	uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, uno::UNO_QUERY);
+	uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, uno::UNO_QUERY_THROW );
 	rowCount = xColumnRowRange->getRows()->getCount();
 	colCount = xColumnRowRange->getColumns()->getCount();
 	if( IsRows() )
@@ -172,28 +195,28 @@ ScVbaRange::getCount() throw (uno::RuntimeException)
 sal_Int32 
 ScVbaRange::getRow() throw (uno::RuntimeException)
 {
-	uno::Reference< sheet::XCellAddressable > xCellAddressable(mxRange->getCellByPosition(0, 0), uno::UNO_QUERY);
+	uno::Reference< sheet::XCellAddressable > xCellAddressable(mxRange->getCellByPosition(0, 0), uno::UNO_QUERY_THROW );
 	return xCellAddressable->getCellAddress().Row + 1; // Zero value indexing 
 }	
 		
 sal_Int32 
 ScVbaRange::getColumn() throw (uno::RuntimeException)
 {
-	uno::Reference< sheet::XCellAddressable > xCellAddressable(mxRange->getCellByPosition(0, 0), uno::UNO_QUERY);
+	uno::Reference< sheet::XCellAddressable > xCellAddressable(mxRange->getCellByPosition(0, 0), uno::UNO_QUERY_THROW );
 	return xCellAddressable->getCellAddress().Column + 1; // Zero value indexing
 }
 
 sal_Bool
 ScVbaRange::HasFormula() throw (uno::RuntimeException)
 {
-	uno::Reference< table::XCell > xCell = mxRange->getCellByPosition(0, 0);
+	uno::Reference< table::XCell > xCell( mxRange->getCellByPosition(0, 0), uno::UNO_QUERY_THROW );
 	return( xCell->getType() == table::CellContentType_FORMULA );
 }
 
 void 
 ScVbaRange::FillLeft() throw (uno::RuntimeException)
 {
-	uno::Reference< sheet::XCellSeries > xCellSeries(mxRange, uno::UNO_QUERY);
+	uno::Reference< sheet::XCellSeries > xCellSeries(mxRange, uno::UNO_QUERY_THROW );
 	xCellSeries->fillSeries(sheet::FillDirection_TO_LEFT, 
 				sheet::FillMode_LINEAR, sheet::FillDateMode_FILL_DATE_DAY, 0, 0x7FFFFFFF);
 }
@@ -201,7 +224,7 @@ ScVbaRange::FillLeft() throw (uno::RuntimeException)
 void 
 ScVbaRange::FillRight() throw (uno::RuntimeException)
 {
-	uno::Reference< sheet::XCellSeries > xCellSeries(mxRange, uno::UNO_QUERY);
+	uno::Reference< sheet::XCellSeries > xCellSeries(mxRange, uno::UNO_QUERY_THROW );
 	xCellSeries->fillSeries(sheet::FillDirection_TO_RIGHT, 
 				sheet::FillMode_LINEAR, sheet::FillDateMode_FILL_DATE_DAY, 0, 0x7FFFFFFF);
 }
@@ -209,7 +232,7 @@ ScVbaRange::FillRight() throw (uno::RuntimeException)
 void 
 ScVbaRange::FillUp() throw (uno::RuntimeException)
 {
-	uno::Reference< sheet::XCellSeries > xCellSeries(mxRange, uno::UNO_QUERY);
+	uno::Reference< sheet::XCellSeries > xCellSeries(mxRange, uno::UNO_QUERY_THROW );
 	xCellSeries->fillSeries(sheet::FillDirection_TO_TOP, 
 				sheet::FillMode_LINEAR, sheet::FillDateMode_FILL_DATE_DAY, 0, 0x7FFFFFFF);
 }
@@ -217,7 +240,7 @@ ScVbaRange::FillUp() throw (uno::RuntimeException)
 void 
 ScVbaRange::FillDown() throw (uno::RuntimeException)
 {
-	uno::Reference< sheet::XCellSeries > xCellSeries(mxRange, uno::UNO_QUERY);
+	uno::Reference< sheet::XCellSeries > xCellSeries(mxRange, uno::UNO_QUERY_THROW );
 	xCellSeries->fillSeries(sheet::FillDirection_TO_BOTTOM, 
 				sheet::FillMode_LINEAR, sheet::FillDateMode_FILL_DATE_DAY, 0, 0x7FFFFFFF);
 }
@@ -225,14 +248,14 @@ ScVbaRange::FillDown() throw (uno::RuntimeException)
 ::rtl::OUString
 ScVbaRange::getText() throw (uno::RuntimeException)
 {
-	uno::Reference< text::XTextRange > xTextRange(mxRange, uno::UNO_QUERY);
+	uno::Reference< text::XTextRange > xTextRange(mxRange, uno::UNO_QUERY_THROW );
 	return xTextRange->getString();
 }
 
 void 
 ScVbaRange::setText( const ::rtl::OUString &rString ) throw (uno::RuntimeException)
 {
-	uno::Reference< text::XTextRange > xTextRange(mxRange, uno::UNO_QUERY);
+	uno::Reference< text::XTextRange > xTextRange(mxRange, uno::UNO_QUERY_THROW );
 	xTextRange->setString( rString );
 }
 
@@ -247,9 +270,9 @@ ScVbaRange::Offset( const ::uno::Any &nRowOff, const uno::Any &nColOff ) throw (
 		throw uno::RuntimeException(
 			::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ": Invalid RowIndex or ColumnIndex" ) ),
 			uno::Reference< XInterface> () );
-	uno::Reference< sheet::XSheetCellRange > xSheetCellRange(mxRange, ::uno::UNO_QUERY);
+	uno::Reference< sheet::XSheetCellRange > xSheetCellRange(mxRange, ::uno::UNO_QUERY_THROW);
 	uno::Reference< sheet::XSpreadsheet > xSheet = xSheetCellRange->getSpreadsheet();
-	uno::Reference< sheet::XCellRangeAddressable > xCellRangeAddressable(mxRange, ::uno::UNO_QUERY);
+	uno::Reference< sheet::XCellRangeAddressable > xCellRangeAddressable(mxRange, ::uno::UNO_QUERY_THROW);
 	uno::Reference< table::XCellRange > xRange(xSheet, uno::UNO_QUERY);
 	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xRange->getCellRangeByPosition(
 					xCellRangeAddressable->getRangeAddress().StartColumn + nColOffset,
@@ -261,11 +284,11 @@ ScVbaRange::Offset( const ::uno::Any &nRowOff, const uno::Any &nColOff ) throw (
 uno::Reference< vba::XRange >
 ScVbaRange::CurrentRegion() throw (uno::RuntimeException)
 {
-	uno::Reference< sheet::XSheetCellRange > xSheetCellRange(mxRange, uno::UNO_QUERY);
-	uno::Reference< sheet::XSpreadsheet > xSheet = xSheetCellRange->getSpreadsheet();
-	uno::Reference< sheet::XSheetCellCursor > xSheetCellCursor = xSheet->createCursorByRange( xSheetCellRange );
+	uno::Reference< sheet::XSheetCellRange > xSheetCellRange(mxRange, uno::UNO_QUERY_THROW);
+	uno::Reference< sheet::XSpreadsheet > xSheet( xSheetCellRange->getSpreadsheet(), uno::UNO_QUERY_THROW );
+	uno::Reference< sheet::XSheetCellCursor > xSheetCellCursor( xSheet->createCursorByRange( xSheetCellRange ), uno::UNO_QUERY_THROW );
 	xSheetCellCursor->collapseToCurrentRegion();
-	uno::Reference< sheet::XCellRangeAddressable > xCellRangeAddressable(xSheetCellCursor, uno::UNO_QUERY);
+	uno::Reference< sheet::XCellRangeAddressable > xCellRangeAddressable(xSheetCellCursor, uno::UNO_QUERY_THROW);
 	uno::Reference< table::XCellRange > xRange( xSheet, uno::UNO_QUERY);
 	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xRange->getCellRangeByPosition(
 					xCellRangeAddressable->getRangeAddress().StartColumn,
@@ -277,11 +300,11 @@ ScVbaRange::CurrentRegion() throw (uno::RuntimeException)
 uno::Reference< vba::XRange >
 ScVbaRange::CurrentArray() throw (uno::RuntimeException)
 {
-	uno::Reference< sheet::XSheetCellRange > xSheetCellRange(mxRange, ::uno::UNO_QUERY);
-	uno::Reference< sheet::XSpreadsheet > xSheet = xSheetCellRange->getSpreadsheet();
-	uno::Reference< sheet::XSheetCellCursor > xSheetCellCursor = xSheet->createCursorByRange( xSheetCellRange );
+	uno::Reference< sheet::XSheetCellRange > xSheetCellRange(mxRange, ::uno::UNO_QUERY_THROW );
+	uno::Reference< sheet::XSpreadsheet > xSheet( xSheetCellRange->getSpreadsheet(), uno::UNO_QUERY_THROW );
+	uno::Reference< sheet::XSheetCellCursor > xSheetCellCursor( xSheet->createCursorByRange( xSheetCellRange ), uno::UNO_QUERY_THROW );
 	xSheetCellCursor->collapseToCurrentArray();
-	uno::Reference< sheet::XCellRangeAddressable > xCellRangeAddressable(xSheetCellCursor, ::uno::UNO_QUERY);
+	uno::Reference< sheet::XCellRangeAddressable > xCellRangeAddressable(xSheetCellCursor, ::uno::UNO_QUERY_THROW );
 	uno::Reference< table::XCellRange > xRange( xSheet, ::uno::UNO_QUERY);
 	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xRange->getCellRangeByPosition(
 					xCellRangeAddressable->getRangeAddress().StartColumn,
@@ -293,14 +316,14 @@ ScVbaRange::CurrentArray() throw (uno::RuntimeException)
 ::rtl::OUString
 ScVbaRange::getFormulaArray() throw (uno::RuntimeException)
 {
-	uno::Reference< sheet::XArrayFormulaRange > xArrayFormulaRange(mxRange, ::uno::UNO_QUERY);
+	uno::Reference< sheet::XArrayFormulaRange > xArrayFormulaRange(mxRange, ::uno::UNO_QUERY_THROW );
 	return xArrayFormulaRange->getArrayFormula();
 }
 
 void 
 ScVbaRange::setFormulaArray(const ::rtl::OUString &rFormula) throw (uno::RuntimeException)
 {
-	uno::Reference< sheet::XArrayFormulaRange > xArrayFormulaRange(mxRange, ::uno::UNO_QUERY);
+	uno::Reference< sheet::XArrayFormulaRange > xArrayFormulaRange(mxRange, ::uno::UNO_QUERY_THROW );
 	xArrayFormulaRange->setArrayFormula( rFormula );
 }
 
@@ -309,7 +332,7 @@ ScVbaRange::Characters(const uno::Any& Start, const uno::Any& Length) throw (uno
 {
 	long nIndex, nCount;
 	::rtl::OUString rString;
-	uno::Reference< text::XTextRange > xTextRange(mxRange, ::uno::UNO_QUERY);
+	uno::Reference< text::XTextRange > xTextRange(mxRange, ::uno::UNO_QUERY_THROW );
 	rString = xTextRange->getString();
 	if( !( Start >>= nIndex ) && !( Length >>= nCount ) )
 		return rString;
@@ -326,13 +349,13 @@ ScVbaRange::Address() throw (uno::RuntimeException)
 	::rtl::OUString aStart, aEnd;
 	uno::Sequence< uno::Any > aAddrArray1, aAddrArray2;	
 
-	uno::Reference< lang::XMultiComponentFactory > xSMgr( m_xContext->getServiceManager(), uno::UNO_QUERY );
+	uno::Reference< lang::XMultiComponentFactory > xSMgr( m_xContext->getServiceManager(), uno::UNO_QUERY_THROW );
 
 	uno::Reference< sheet::XFunctionAccess > xFunctionAccess( 
 		xSMgr->createInstanceWithContext(::rtl::OUString::createFromAscii(
 			"com.sun.star.sheet.FunctionAccess"), m_xContext), 
-			::uno::UNO_QUERY);
-	uno::Reference< sheet::XCellRangeAddressable > xCellRangeAddressable( mxRange, ::uno::UNO_QUERY );
+			::uno::UNO_QUERY_THROW );
+	uno::Reference< sheet::XCellRangeAddressable > xCellRangeAddressable( mxRange, ::uno::UNO_QUERY_THROW );
 	if( aAddrArray1.getLength() == 0 )
 	{
 		aAddrArray1.realloc(2);
@@ -374,7 +397,7 @@ ScVbaRange::Cells( const uno::Any &nRowIndex, const uno::Any &nColumnIndex ) thr
 	long nRow = 0, nColumn = 0;
 	sal_Bool bIsIndex = nRowIndex >>= nRow, bIsColumnIndex = nColumnIndex >>= nColumn;
                                                                                                                        
-	uno::Reference< sheet::XSheetCellRange > xSheetCellRange(mxRange, ::uno::UNO_QUERY);
+	uno::Reference< sheet::XSheetCellRange > xSheetCellRange(mxRange, ::uno::UNO_QUERY_THROW );
 	uno::Reference< sheet::XSpreadsheet > xSheet = xSheetCellRange->getSpreadsheet();
 	uno::Reference< table::XCellRange > xRange(xSheet, uno::UNO_QUERY_THROW );
 	uno::Reference< sheet::XCellRangeAddressable > xAddressable( xRange, uno::UNO_QUERY_THROW );
@@ -391,7 +414,7 @@ ScVbaRange::Cells( const uno::Any &nRowIndex, const uno::Any &nColumnIndex ) thr
 	if( bIsIndex && !bIsColumnIndex ) // .Cells(n)
 	{
 		int nIndex = --nRow;
-		uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, ::uno::UNO_QUERY);
+		uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, ::uno::UNO_QUERY_THROW);
 		int nColCount = xColumnRowRange->getColumns()->getCount();
 		nRow = nIndex / nColCount;
 		nColumn = nIndex % nColCount;
@@ -409,10 +432,8 @@ ScVbaRange::Cells( const uno::Any &nRowIndex, const uno::Any &nColumnIndex ) thr
 void
 ScVbaRange::Select() throw (uno::RuntimeException)
 {
-	uno::Reference< lang::XMultiComponentFactory > xSMgr( m_xContext->getServiceManager(), uno::UNO_QUERY_THROW );
-
-	uno::Reference< frame::XModel > xModel = getCurrentDocument();
-	uno::Reference< view::XSelectionSupplier > xSelection( xModel->getCurrentController(), uno::UNO_QUERY);
+	uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY_THROW );
+	uno::Reference< view::XSelectionSupplier > xSelection( xModel->getCurrentController(), uno::UNO_QUERY_THROW );
 	xSelection->select( ( uno::Any )mxRange );
 }
 
@@ -444,7 +465,7 @@ ScVbaRange::Columns( const uno::Any& aIndex ) throw (uno::RuntimeException)
 		return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, mxRange, false, true ) );
 	if( aIndex >>= nValue )
 	{
-		uno::Reference< sheet::XCellRangeAddressable > xAddressable( mxRange, uno::UNO_QUERY );
+		uno::Reference< sheet::XCellRangeAddressable > xAddressable( mxRange, uno::UNO_QUERY_THROW );
 		--nValue;
 		return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, mxRange->getCellRangeByPosition(
 							nValue, xAddressable->getRangeAddress().StartRow,
@@ -459,7 +480,7 @@ ScVbaRange::Columns( const uno::Any& aIndex ) throw (uno::RuntimeException)
 void
 ScVbaRange::setMergeCells( sal_Bool bIsMerged ) throw (uno::RuntimeException)
 {
-	uno::Reference< util::XMergeable > xMerge( mxRange, ::uno::UNO_QUERY );
+	uno::Reference< util::XMergeable > xMerge( mxRange, ::uno::UNO_QUERY_THROW );
 	//FIXME need to check whether all the cell contents are retained or lost by popping up a dialog 
 	xMerge->merge( bIsMerged );
 }
@@ -467,29 +488,29 @@ ScVbaRange::setMergeCells( sal_Bool bIsMerged ) throw (uno::RuntimeException)
 sal_Bool
 ScVbaRange::getMergeCells() throw (uno::RuntimeException)
 {
-	uno::Reference< util::XMergeable > xMerge( mxRange, ::uno::UNO_QUERY );
+	uno::Reference< util::XMergeable > xMerge( mxRange, ::uno::UNO_QUERY_THROW );
 	return xMerge->getIsMerged();
 }
                                                                                                                              
 void
 ScVbaRange::Copy(const ::uno::Any& Destination) throw (uno::RuntimeException)
 {
-	uno::Reference< vba::XRange > xRange;
-	if( Destination >>= xRange )
+	if ( Destination.hasValue() )
 	{
+		uno::Reference< vba::XRange > xRange( Destination, uno::UNO_QUERY_THROW );
 		uno::Any aRange = xRange->getCellRange();
 		uno::Reference< table::XCellRange > xCellRange;
 		aRange >>= xCellRange;
-		uno::Reference< sheet::XSheetCellRange > xSheetCellRange(xCellRange, ::uno::UNO_QUERY);
+		uno::Reference< sheet::XSheetCellRange > xSheetCellRange(xCellRange, ::uno::UNO_QUERY_THROW);
 		uno::Reference< sheet::XSpreadsheet > xSheet = xSheetCellRange->getSpreadsheet();
-		uno::Reference< table::XCellRange > xDest( xSheet, uno::UNO_QUERY);
+		uno::Reference< table::XCellRange > xDest( xSheet, uno::UNO_QUERY_THROW );
 		uno::Reference< sheet::XCellRangeMovement > xMover( xSheet, uno::UNO_QUERY_THROW);
 		uno::Reference< sheet::XCellAddressable > xDestination( xDest->getCellByPosition(
-												xRange->getColumn()-1,xRange->getRow()-1), uno::UNO_QUERY);
+												xRange->getColumn()-1,xRange->getRow()-1), uno::UNO_QUERY_THROW );
 		uno::Reference< sheet::XCellRangeAddressable > xSource( mxRange, uno::UNO_QUERY);
 		xMover->copyRange( xDestination->getCellAddress(), xSource->getRangeAddress() );
 	}
-	else if (!Destination.hasValue())
+	else
 	{
 		Select();
 		implnCopy();
@@ -499,22 +520,19 @@ ScVbaRange::Copy(const ::uno::Any& Destination) throw (uno::RuntimeException)
 void
 ScVbaRange::Cut(const ::uno::Any& Destination) throw (uno::RuntimeException)
 {
-	uno::Reference< vba::XRange > xRange;
-	if( Destination >>= xRange )
+	if (Destination.hasValue())
 	{
-		uno::Reference< table::XCellRange > xCellRange;
-		uno::Any aRange = xRange->getCellRange();
-		aRange >>= xCellRange;
-		uno::Reference< sheet::XSheetCellRange > xSheetCellRange(xCellRange, ::uno::UNO_QUERY);
+		uno::Reference< vba::XRange > xRange( Destination, uno::UNO_QUERY_THROW );
+		uno::Reference< table::XCellRange > xCellRange( xRange->getCellRange(), uno::UNO_QUERY_THROW );
+		uno::Reference< sheet::XSheetCellRange > xSheetCellRange(xCellRange, ::uno::UNO_QUERY_THROW );
 		uno::Reference< sheet::XSpreadsheet > xSheet = xSheetCellRange->getSpreadsheet();
-		uno::Reference< table::XCellRange > xDest( xSheet, uno::UNO_QUERY);
+		uno::Reference< table::XCellRange > xDest( xSheet, uno::UNO_QUERY_THROW );
 		uno::Reference< sheet::XCellRangeMovement > xMover( xSheet, uno::UNO_QUERY_THROW);
 		uno::Reference< sheet::XCellAddressable > xDestination( xDest->getCellByPosition(
 												xRange->getColumn()-1,xRange->getRow()-1), uno::UNO_QUERY);
 		uno::Reference< sheet::XCellRangeAddressable > xSource( mxRange, uno::UNO_QUERY);
 		xMover->moveRange( xDestination->getCellAddress(), xSource->getRangeAddress() );
 	}
-	else if (!Destination.hasValue())
 	{
 		Select();
 		implnCut();
@@ -524,16 +542,12 @@ ScVbaRange::Cut(const ::uno::Any& Destination) throw (uno::RuntimeException)
 void
 ScVbaRange::setNumberFormat( const ::rtl::OUString &rFormat ) throw (uno::RuntimeException)
 {
-	uno::Reference< lang::XMultiComponentFactory > xSMgr( m_xContext->getServiceManager(), uno::UNO_QUERY_THROW );
-                                                                                                                            
-	uno::Reference< frame::XModel > xModel = getCurrentDocument();
-	uno::Reference< sheet::XSpreadsheetDocument > xDoc(xModel, uno::UNO_QUERY);
-	uno::Reference< util::XNumberFormatsSupplier > xSupplier(xDoc, uno::UNO_QUERY);
-	uno::Reference< util::XNumberFormats > xFormats = xSupplier->getNumberFormats();
-	uno::Reference< beans::XPropertySet > xRangeProps( mxRange, uno::UNO_QUERY);
+	uno::Reference< util::XNumberFormatsSupplier > xSupplier(getCurrentDocument(), uno::UNO_QUERY_THROW);
+	uno::Reference< util::XNumberFormats > xFormats( xSupplier->getNumberFormats(), uno::UNO_QUERY_THROW );
+	uno::Reference< beans::XPropertySet > xRangeProps( mxRange, uno::UNO_QUERY_THROW );
 	//FIXME behaviour with different locales
 	lang::Locale pLocale = ::com::sun::star::lang::Locale();
-	long nIndexKey =xFormats->queryKey( rFormat, pLocale, false );
+	long nIndexKey = xFormats->queryKey( rFormat, pLocale, false );
 	if( nIndexKey != -1 )
 		xRangeProps->setPropertyValue(rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("NumberFormat")), (uno::Any) nIndexKey );
 }
@@ -541,10 +555,7 @@ ScVbaRange::setNumberFormat( const ::rtl::OUString &rFormat ) throw (uno::Runtim
 ::rtl::OUString
 ScVbaRange::getNumberFormat() throw (uno::RuntimeException)
 {
-	uno::Reference< lang::XMultiComponentFactory > xSMgr( m_xContext->getServiceManager(), uno::UNO_QUERY_THROW );
-	uno::Reference< frame::XModel > xModel = getCurrentDocument();
-	uno::Reference< sheet::XSpreadsheetDocument > xDoc(xModel, uno::UNO_QUERY);
-	uno::Reference< util::XNumberFormatsSupplier > xSupplier(xDoc, uno::UNO_QUERY);
+	uno::Reference< util::XNumberFormatsSupplier > xSupplier( getCurrentDocument(), uno::UNO_QUERY_THROW );
 	uno::Reference< util::XNumberFormats > xFormats = xSupplier->getNumberFormats();
 	uno::Reference< beans::XPropertySet > xRangeProps( mxRange, uno::UNO_QUERY);
 	long nIndexKey;
@@ -562,9 +573,9 @@ ScVbaRange::Resize( const uno::Any &RowSize, const uno::Any &ColumnSize ) throw 
 {
 	long nRowSize, nColumnSize;
 	sal_Bool bIsRowChanged = ( RowSize >>= nRowSize ), bIsColumnChanged = ( ColumnSize >>= nColumnSize );
-	uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, ::uno::UNO_QUERY);
-	uno::Reference< sheet::XSheetCellRange > xSheetRange(mxRange, ::uno::UNO_QUERY);
-	uno::Reference< sheet::XSheetCellCursor > xCursor = xSheetRange->getSpreadsheet()->createCursorByRange(xSheetRange);
+	uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, ::uno::UNO_QUERY_THROW);
+	uno::Reference< sheet::XSheetCellRange > xSheetRange(mxRange, ::uno::UNO_QUERY_THROW);
+	uno::Reference< sheet::XSheetCellCursor > xCursor( xSheetRange->getSpreadsheet()->createCursorByRange(xSheetRange), ::uno::UNO_QUERY_THROW );
 	if( !nRowSize || !nColumnSize )
 		throw lang::IndexOutOfBoundsException();
 	if( !bIsRowChanged )
@@ -572,8 +583,8 @@ ScVbaRange::Resize( const uno::Any &RowSize, const uno::Any &ColumnSize ) throw 
 	if( !bIsColumnChanged )
 		nColumnSize = xColumnRowRange->getColumns()->getCount();
 	xCursor->collapseToSize( nColumnSize, nRowSize );
-	uno::Reference< sheet::XCellRangeAddressable > xCellRangeAddressable(xCursor, ::uno::UNO_QUERY);
-	uno::Reference< table::XCellRange > xRange( xSheetRange->getSpreadsheet(), ::uno::UNO_QUERY);
+	uno::Reference< sheet::XCellRangeAddressable > xCellRangeAddressable(xCursor, ::uno::UNO_QUERY_THROW );
+	uno::Reference< table::XCellRange > xRange( xSheetRange->getSpreadsheet(), ::uno::UNO_QUERY_THROW );
 	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext,xRange->getCellRangeByPosition(
 										xCellRangeAddressable->getRangeAddress().StartColumn,
 										xCellRangeAddressable->getRangeAddress().StartRow,
@@ -584,7 +595,7 @@ ScVbaRange::Resize( const uno::Any &RowSize, const uno::Any &ColumnSize ) throw 
 void
 ScVbaRange::setWrapText( sal_Bool bIsWrapped ) throw (uno::RuntimeException)
 {
-	uno::Reference< beans::XPropertySet > xProps(mxRange, ::uno::UNO_QUERY );
+	uno::Reference< beans::XPropertySet > xProps(mxRange, ::uno::UNO_QUERY_THROW );
 	xProps->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "IsTextWrapped" ) ), ( uno::Any )bIsWrapped );
 }
                                                                                                                              
@@ -592,7 +603,7 @@ sal_Bool
 ScVbaRange::getWrapText() throw (uno::RuntimeException)
 {
 	sal_Bool bWrapped = false;
-	uno::Reference< beans::XPropertySet > xProps(mxRange, ::uno::UNO_QUERY );
+	uno::Reference< beans::XPropertySet > xProps(mxRange, ::uno::UNO_QUERY_THROW );
 	uno::Any aValue = xProps->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "IsTextWrapped" ) ) );
 	aValue >>= bWrapped;
 	return bWrapped;
@@ -605,10 +616,10 @@ uno::Reference< vba::XInterior > ScVbaRange::Interior( ) throw (uno::RuntimeExce
 uno::Reference< vba::XRange >
 ScVbaRange::Range( const uno::Any &Cell1, const uno::Any &Cell2 ) throw (uno::RuntimeException)
 {
-	uno::Reference< sheet::XSheetCellRange > xSheetCellRange( mxRange, uno::UNO_QUERY );
+	uno::Reference< sheet::XSheetCellRange > xSheetCellRange( mxRange, uno::UNO_QUERY_THROW );
 	uno::Reference< sheet::XSpreadsheet > xSheet = xSheetCellRange->getSpreadsheet();
-	uno::Reference< table::XCellRange > xRanges( xSheet, uno::UNO_QUERY );
-	uno::Reference< sheet::XCellRangeAddressable > xAddressable( xRanges, uno::UNO_QUERY );
+	uno::Reference< table::XCellRange > xRanges( xSheet, uno::UNO_QUERY_THROW );
+	uno::Reference< sheet::XCellRangeAddressable > xAddressable( xRanges, uno::UNO_QUERY_THROW );
 	uno::Reference< table::XCellRange > xReferrer = xRanges->getCellRangeByPosition( 
 																				getColumn()-1, getRow()-1,
 																				xAddressable->getRangeAddress().EndColumn,

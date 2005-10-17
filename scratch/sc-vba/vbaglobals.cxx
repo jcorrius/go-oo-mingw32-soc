@@ -58,6 +58,7 @@ ScVbaGlobals::~ScVbaGlobals()
 //	OSL_TRACE("ScVbaGlobals::~ScVbaGlobals");
 }
 
+// Will throw if singleton can't be accessed 
 uno::Reference< vba::XGlobals >
 ScVbaGlobals::getGlobalsImpl( uno::Reference< uno::XComponentContext >& xContext ) throw ( uno::RuntimeException )
 {

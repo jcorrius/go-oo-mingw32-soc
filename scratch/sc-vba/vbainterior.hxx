@@ -20,8 +20,8 @@ class ScVbaInterior :  public ScVbaInterior_BASE
 
 public:
         ScVbaInterior( css::uno::Reference< css::uno::XComponentContext >& xContext,
-                 css::uno::Reference< css::table::XCellRange > range):m_xContext(xContext),mxRange(range)
-        {}
+                 css::uno::Reference< css::table::XCellRange > range) throw ( css::lang::IllegalArgumentException);
+
         virtual ~ScVbaInterior(){}
 
 	virtual css::uno::Any SAL_CALL getColor() throw (css::uno::RuntimeException) ;

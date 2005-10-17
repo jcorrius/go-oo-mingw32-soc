@@ -28,7 +28,7 @@ ScVbaWorksheets::ScVbaWorksheets(uno::Reference< ::com::sun::star::uno::XCompone
 			::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ": Couldn't obtain XSpreadsheetDocument interface from XModel" ) ), 
 			uno::Reference< uno::XInterface >() );
 	}
-       mxSheets = xSpreadDoc->getSheets();
+       mxSheets.set( xSpreadDoc->getSheets(), uno::UNO_QUERY_THROW );
 }
 
 // XEnumerationAccess

@@ -12,20 +12,28 @@
 using namespace ::com::sun::star;
 using namespace ::org::openoffice;
 
-::com::sun::star::uno::Any
-ScVbaInterior::getColor() throw (::com::sun::star::uno::RuntimeException) 
+ScVbaInterior::ScVbaInterior( uno::Reference< uno::XComponentContext >& xContext, uno::Reference< css::table::XCellRange > range) throw ( lang::IllegalArgumentException) : m_xContext(xContext),mxRange(range)
+{
+	if ( !xContext.is() )
+		throw lang::IllegalArgumentException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "context not set" ) ), uno::Reference< uno::XInterface >(), 1 ); 
+	if ( !mxRange.is() )
+		throw lang::IllegalArgumentException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "range not set") ), uno::Reference< uno::XInterface >(), 2 ); 
+}
+
+uno::Any
+ScVbaInterior::getColor() throw (uno::RuntimeException) 
 {
 	uno::Any aAny;
 	uno::Reference< table::XCell > xCell = mxRange->getCellByPosition(0,0 );
-	uno::Reference< beans::XPropertySet > xProps(xCell, uno::UNO_QUERY );
+	uno::Reference< beans::XPropertySet > xProps(xCell, uno::UNO_QUERY_THROW );
 	aAny = xProps->getPropertyValue(rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "CellBackColor" ) ));
 	return aAny;
 }
  
 void 
-ScVbaInterior::setColor( const ::com::sun::star::uno::Any& _color ) throw (::com::sun::star::uno::RuntimeException) 
+ScVbaInterior::setColor( const uno::Any& _color ) throw (uno::RuntimeException) 
 {
-	uno::Reference< beans::XPropertySet > xProps(mxRange, uno::UNO_QUERY );
+	uno::Reference< beans::XPropertySet > xProps(mxRange, uno::UNO_QUERY_THROW );
 	xProps->setPropertyValue(rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "CellBackColor" ) ), _color);
 }
 
@@ -45,8 +53,7 @@ ScVbaInterior::invoke(const rtl::OUString& FunctionName, const uno::Sequence< un
 void
 ScVbaInterior::setValue(const rtl::OUString& PropertyName, const uno::Any& Value) throw(beans::UnknownPropertyException, script::CannotConvertException, reflection::InvocationTargetException, uno::RuntimeException)
 {
-	uno::Reference< beans::XPropertySet > xProps(mxRange, uno::UNO_QUERY );
-
+	uno::Reference< beans::XPropertySet > xProps(mxRange, uno::UNO_QUERY_THROW );
 	if (PropertyName.equalsAscii("RotateAngle")) 
 	{
 		xProps->setPropertyValue(PropertyName,Value);
@@ -76,7 +83,7 @@ uno::Any
 ScVbaInterior::getValue(const rtl::OUString& PropertyName) throw(beans::UnknownPropertyException, uno::RuntimeException)
 {
 	uno::Any aAny;
-	uno::Reference< beans::XPropertySet > xProps(mxRange, uno::UNO_QUERY );
+	uno::Reference< beans::XPropertySet > xProps(mxRange, uno::UNO_QUERY_THROW );
 	if (PropertyName.equalsAscii("ColorIndex"))
 	{
 		aAny =  xProps->getPropertyValue(rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "CellBackColor" ) ));

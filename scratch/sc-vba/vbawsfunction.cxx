@@ -27,12 +27,11 @@ ScVbaWSFunction::getIntrospection(void)  throw(uno::RuntimeException)
 uno::Any SAL_CALL
 ScVbaWSFunction::invoke(const rtl::OUString& FunctionName, const uno::Sequence< uno::Any >& Params, uno::Sequence< sal_Int16 >& OutParamIndex, uno::Sequence< uno::Any >& OutParam) throw(lang::IllegalArgumentException, script::CannotConvertException, reflection::InvocationTargetException, uno::RuntimeException)
 {
-	uno::Any aAny;
-	uno::Reference< lang::XMultiComponentFactory > xSMgr( m_xContext->getServiceManager(), uno::UNO_QUERY );
+	uno::Reference< lang::XMultiComponentFactory > xSMgr( m_xContext->getServiceManager(), uno::UNO_QUERY_THROW );
 	uno::Reference< sheet::XFunctionAccess > xFunctionAccess(
                         xSMgr->createInstanceWithContext(::rtl::OUString::createFromAscii(
                         "com.sun.star.sheet.FunctionAccess"), m_xContext),
-                        ::uno::UNO_QUERY);
+                        ::uno::UNO_QUERY_THROW);
 	uno::Sequence< uno::Any > aParamTemp;
 	sal_Int32 nParamCount = Params.getLength();
 	aParamTemp.realloc(nParamCount);
@@ -41,19 +40,14 @@ ScVbaWSFunction::invoke(const rtl::OUString& FunctionName, const uno::Sequence< 
 
 	for (int i=0; i < Params.getLength();i++) 
 	{
-		uno::Reference<vba::XRange> myRange;
-		uno::Any aAnyTemp;
-		const uno::Any& rArg = aArray[i];
-		if (rArg >>= myRange) 
-		{
-			aAnyTemp = myRange->getCellRange();
-			aArrayTemp[i] = aAnyTemp;
-		}
+		uno::Reference<vba::XRange> myRange( aArray[ i ], uno::UNO_QUERY_THROW );
+		if ( myRange.is() ) 
+			aArrayTemp[i] = myRange->getCellRange();
 		else
 			aArrayTemp[i]= aArray[i];
 	}
 
-	aAny = xFunctionAccess->callFunction(FunctionName,aParamTemp);
+	uno::Any aAny = xFunctionAccess->callFunction(FunctionName,aParamTemp);
 
 	return aAny;
 }

@@ -295,7 +295,7 @@ ScVbaWorkbooks::Close() throw (uno::RuntimeException)
 {
 	uno::Reference< lang::XMultiComponentFactory > xSMgr(
 		m_xContext->getServiceManager(), uno::UNO_QUERY_THROW );
-	uno::Reference< frame::XModel > xModel = getCurrentDocument();
+	uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY_THROW );
 	rtl::OUString url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:CloseDoc"));
 	dispatchRequests(xModel,url);
 }

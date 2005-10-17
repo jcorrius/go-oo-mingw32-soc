@@ -32,8 +32,10 @@
 using namespace com::sun::star;
 using namespace org::openoffice;
 static sal_Int16 
-nameExists( uno::Reference <sheet::XSpreadsheetDocument>& xSpreadDoc, ::rtl::OUString & name)
+nameExists( uno::Reference <sheet::XSpreadsheetDocument>& xSpreadDoc, ::rtl::OUString & name) throw ( lang::IllegalArgumentException )
 {
+	if (!xSpreadDoc.is())
+		throw lang::IllegalArgumentException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "nameExists() xSpreadDoc is null" ) ), uno::Reference< uno::XInterface  >(), 1 );	
 	uno::Reference <sheet::XSpreadsheets> xSheets = xSpreadDoc->getSheets();
 	uno::Reference <container::XIndexAccess> xIndex( xSheets, uno::UNO_QUERY );
 	if ( xIndex.is() )
@@ -54,7 +56,9 @@ nameExists( uno::Reference <sheet::XSpreadsheetDocument>& xSpreadDoc, ::rtl::OUS
 
 static void getNewSpreadsheetName (rtl::OUString &aNewName, rtl::OUString aOldName, uno::Reference <sheet::XSpreadsheetDocument>& xSpreadDoc )
 {
-	rtl::OUString aUnderScre( RTL_CONSTASCII_USTRINGPARAM( "_" ) );
+	if (!xSpreadDoc.is())
+		throw lang::IllegalArgumentException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "getNewSpreadsheetName() xSpreadDoc is null" ) ), uno::Reference< uno::XInterface  >(), 1 );	
+	static rtl::OUString aUnderScre( RTL_CONSTASCII_USTRINGPARAM( "_" ) );
 	int currentNum =2;
 	aNewName = aOldName + aUnderScre+
 					String::CreateFromInt32(currentNum) ;
@@ -67,6 +71,8 @@ static void getNewSpreadsheetName (rtl::OUString &aNewName, rtl::OUString aOldNa
 
 static void removeAllSheets( uno::Reference <sheet::XSpreadsheetDocument>& xSpreadDoc, rtl::OUString aSheetName)
 {
+	if (!xSpreadDoc.is())
+		throw lang::IllegalArgumentException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "removeAllSheets() xSpreadDoc is null" ) ), uno::Reference< uno::XInterface  >(), 1 );	
 	uno::Reference<sheet::XSpreadsheets> xSheets = xSpreadDoc->getSheets();
 	uno::Reference <container::XIndexAccess> xIndex( xSheets, uno::UNO_QUERY );
 
@@ -173,8 +179,8 @@ ScVbaWorksheet::setVisible( sal_Bool bVisible ) throw (uno::RuntimeException)
 uno::Reference< vba::XRange > 
 ScVbaWorksheet::getUsedRange() throw (uno::RuntimeException)
 {
- 	uno::Reference< sheet::XSheetCellRange > xSheetCellRange(mxSheet, uno::UNO_QUERY);
-	uno::Reference< sheet::XSheetCellCursor > xSheetCellCursor = mxSheet->createCursorByRange( xSheetCellRange );
+ 	uno::Reference< sheet::XSheetCellRange > xSheetCellRange(mxSheet, uno::UNO_QUERY_THROW );
+	uno::Reference< sheet::XSheetCellCursor > xSheetCellCursor( mxSheet->createCursorByRange( xSheetCellRange ), uno::UNO_QUERY_THROW );
 	uno::Reference<sheet::XUsedAreaCursor> xUsedCursor(xSheetCellCursor,uno::UNO_QUERY_THROW);
 	xUsedCursor->gotoStartOfUsedArea( false );
 	xUsedCursor->gotoEndOfUsedArea( true );
@@ -237,7 +243,6 @@ ScVbaWorksheet::Select() throw (uno::RuntimeException)
 void 
 ScVbaWorksheet::Move( const uno::Any& Before, const uno::Any& After ) throw (uno::RuntimeException) 
 {
-	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( mxModel, uno::UNO_QUERY );
 	rtl::OUString aSheetName;
 	uno::Reference<vba::XWorksheet> xSheet;
 	rtl::OUString aCurrSheetName =getName();
@@ -260,6 +265,7 @@ ScVbaWorksheet::Move( const uno::Any& Before, const uno::Any& After ) throw (uno
 		return ;
 	}
 
+	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( mxModel, uno::UNO_QUERY_THROW );
 	sal_Int32 nDest = DOESNOTEXIST;
 	sal_Bool bAfter = false;
 	if (Before >>= xSheet )
@@ -285,7 +291,6 @@ ScVbaWorksheet::Move( const uno::Any& Before, const uno::Any& After ) throw (uno
 void 
 ScVbaWorksheet::Copy( const uno::Any& Before, const uno::Any& After ) throw (uno::RuntimeException) 
 {
-	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( mxModel, uno::UNO_QUERY );
 	rtl::OUString aSheetName;
 	uno::Reference<vba::XWorksheet> xSheet;
 	rtl::OUString aCurrSheetName =getName();
@@ -306,6 +311,7 @@ ScVbaWorksheet::Copy( const uno::Any& Before, const uno::Any& After ) throw (uno
 		return;
 	}
 
+	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( mxModel, uno::UNO_QUERY );
 	sal_Int32 nDest = DOESNOTEXIST;
 	sal_Bool bAfter = false;
 	if (Before >>= xSheet )
@@ -332,8 +338,8 @@ ScVbaWorksheet::Copy( const uno::Any& Before, const uno::Any& After ) throw (uno
 void 
 ScVbaWorksheet::Paste( const uno::Any& Destination, const uno::Any& Link ) throw (uno::RuntimeException)
 {
-	uno::Reference<vba::XRange> xRange;
-	if (Destination >>= xRange)
+	uno::Reference<vba::XRange> xRange( Destination, uno::UNO_QUERY );
+	if ( xRange.is() )
 		xRange->Select();
 	implnPaste();
 }
@@ -350,19 +356,16 @@ ScVbaWorksheet::Delete() throw (uno::RuntimeException)
 			return;
 		}
 		uno::Reference<sheet::XSpreadsheets> xSheets = xSpreadDoc->getSheets();
-		if (xSheets.is())
-		{
-			uno::Reference<container::XNameContainer> xNameContainer(xSheets,uno::UNO_QUERY_THROW);
-			xNameContainer->removeByName(aSheetName);
-		}
+		uno::Reference<container::XNameContainer> xNameContainer(xSheets,uno::UNO_QUERY_THROW);
+		xNameContainer->removeByName(aSheetName);
 	}
 }
 
 uno::Reference< vba::XWorksheet >
 ScVbaWorksheet::getSheetAtOffset(int offset) throw (uno::RuntimeException)
 {
-	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( mxModel, uno::UNO_QUERY );
-	uno::Reference <sheet::XSpreadsheets> xSheets = xSpreadDoc->getSheets();
+	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( mxModel, uno::UNO_QUERY_THROW );
+	uno::Reference <sheet::XSpreadsheets> xSheets( xSpreadDoc->getSheets(), uno::UNO_QUERY_THROW );
 	uno::Reference <container::XIndexAccess> xIndex( xSheets, uno::UNO_QUERY_THROW );
 
 	rtl::OUString aName = getName();
@@ -422,11 +425,7 @@ ScVbaWorksheet::Range( const ::uno::Any &rRange ) throw (uno::RuntimeException)
 	rtl::OUString aStringRange;
 	rRange >>= aStringRange;
 	uno::Reference< table::XCellRange > xRanges( mxSheet, uno::UNO_QUERY_THROW );
-	if (xRanges.is()) 
-	{
-		return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xRanges->getCellRangeByName( aStringRange ) ) );
-	}
-	return NULL;
+	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xRanges->getCellRangeByName( aStringRange ) ) );
 }
 
 void

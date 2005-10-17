@@ -60,9 +60,6 @@ ScVbaWorkbook::getActiveSheet() throw (uno::RuntimeException)
 uno::Any SAL_CALL
 ScVbaWorkbook::Worksheets( const uno::Any& aIndex ) throw (uno::RuntimeException)
 {
-        uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( mxModel, uno::UNO_QUERY );
-       	uno::Reference<sheet::XSpreadsheets> xSheets = xSpreadDoc->getSheets();
-
 	uno::Reference< vba::XWorksheets > xWorkSheets( new ScVbaWorksheets(m_xContext,
 		mxModel) );
 	if (  aIndex.getValueTypeClass() == uno::TypeClass_VOID )
@@ -167,7 +164,7 @@ ScVbaWorkbook::Save() throw (uno::RuntimeException)
 void 
 ScVbaWorkbook::Activate() throw (uno::RuntimeException)
 {
-	uno::Reference< frame::XFrame > xFrame = mxModel->getCurrentController()->getFrame();
+	uno::Reference< frame::XFrame > xFrame( mxModel->getCurrentController()->getFrame(), uno::UNO_QUERY_THROW );
 	xFrame->activate();
 }	
 
