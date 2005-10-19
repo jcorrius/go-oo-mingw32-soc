@@ -1,0 +1,208 @@
+diff -u -r -x '*.o' -x '*.1' -x 'Makefile*' -x 'config*' -x libtool -x '*.info' -x '*.tex' glibc-2.3-pristine/elf/dl-deps.c glibc-2.3/elf/dl-deps.c
+--- glibc-2.3-pristine/elf/dl-deps.c	2005-04-06 07:57:05.000000000 +0100
++++ glibc-2.3/elf/dl-deps.c	2005-10-19 21:15:52.000000000 +0100
+@@ -39,6 +39,9 @@
+ #define FILTERTAG (DT_NUM + DT_THISPROCNUM + DT_VERSIONTAGNUM \
+ 		   + DT_EXTRATAGIDX (DT_FILTER))
+ 
++#ifndef VERSYMIDX
++# define VERSYMIDX(sym)	(DT_NUM + DT_THISPROCNUM + DT_VERSIONTAGIDX (sym))
++#endif
+ 
+ /* When loading auxiliary objects we must ignore errors.  It's ok if
+    an object is missing.  */
+@@ -139,6 +142,62 @@
+     __result; })
+ 
+ 
++static void
++setup_direct (struct link_map *map, struct r_scope_elem *scope)
++{
++  if (map->l_info[VERSYMIDX(DT_DIRECT)] && map->l_info[DT_NEEDED])
++    {
++      const ElfW(Dyn) *d;
++      unsigned int i;
++      const char *strtab = (const void *) D_PTR (map, l_info[DT_STRTAB]);
++
++      _dl_debug_printf ("** direct linkage section in '%s' **\n",
++			map->l_name ? map->l_name : "<null>");
++
++      map->l_dtneeded.r_nlist = 0;
++      for (d = map->l_ld; d->d_tag != DT_NULL; ++d)
++        {
++	  if (__builtin_expect (d->d_tag, DT_NEEDED) == DT_NEEDED)
++	    map->l_dtneeded.r_nlist++;
++	}
++
++      map->l_dtneeded.r_list = (struct link_map **)
++	malloc ((map->l_dtneeded.r_nlist + 1) * sizeof (struct link_map *));
++
++      map->l_dtneeded.r_list[0] = map;
++      for (i = 1, d = map->l_ld; d->d_tag != DT_NULL; ++d)
++        {
++	  const char *name;
++	  unsigned int j;
++
++	  if (d->d_tag != DT_NEEDED)
++	    continue;
++
++	  name = expand_dst (map, strtab + d->d_un.d_val, 0);
++	  _dl_debug_printf (" direct index %u object '%s'\n", i, name);
++	  for (j = 0; j < scope->r_nlist; j++)
++	    {
++	      if (scope->r_list[j] &&
++		  _dl_name_match_p (name, scope->r_list[j]))
++	        {
++	          map->l_dtneeded.r_list[i] = scope->r_list[j];
++		  break;
++		}
++	    }
++          if (!map->l_dtneeded.r_list[i])
++	    _dl_debug_printf (" impossible error - can't find '%s'\n", name);
++	  i++;
++	}
++    }
++  else
++    {
++      _dl_debug_printf ("no direct linkage section in '%s'\n",
++			map->l_name ? map->l_name : "<null>");
++      map->l_dtneeded.r_nlist = 0;
++      map->l_dtneeded.r_list = NULL;
++    }
++}
++
+ void
+ internal_function
+ _dl_map_object_deps (struct link_map *map,
+@@ -555,6 +614,10 @@
+ 	}
+     }
+ 
++  /* Setup direct linkage dtneeded table */
++  for (i = 0; i < nlist; ++i)
++    setup_direct (map->l_searchlist.r_list[i], &map->l_searchlist);
++
+   /* Maybe we can remove some relocation dependencies now.  */
+   assert (map->l_searchlist.r_list[0] == map);
+   for (i = 0; i < map->l_reldepsact; ++i)
+Only in glibc-2.3/elf: dl-deps.c~
+Only in glibc-2.3/elf: dl-load.c~
+diff -u -r -x '*.o' -x '*.1' -x 'Makefile*' -x 'config*' -x libtool -x '*.info' -x '*.tex' glibc-2.3-pristine/elf/dl-lookup.c glibc-2.3/elf/dl-lookup.c
+--- glibc-2.3-pristine/elf/dl-lookup.c	2005-04-06 07:57:05.000000000 +0100
++++ glibc-2.3/elf/dl-lookup.c	2005-10-19 21:14:37.000000000 +0100
+@@ -32,6 +32,10 @@
+ 
+ #define VERSTAG(tag)	(DT_NUM + DT_THISPROCNUM + DT_VERSIONTAGIDX (tag))
+ 
++#ifndef VERSYMIDX
++# define VERSYMIDX(sym)	(DT_NUM + DT_THISPROCNUM + DT_VERSIONTAGIDX (sym))
++#endif
++
+ /* We need this string more than once.  */
+ static const char undefined_msg[] = "undefined symbol: ";
+ 
+@@ -216,6 +220,56 @@
+      up a versioned symbol.  */
+   assert (version == NULL || flags == 0 || flags == DL_LOOKUP_ADD_DEPENDENCY);
+ 
++  if (undef_map && undef_map->l_dtneeded.r_nlist)
++    {
++      unsigned int idx, noffset;
++      const ElfW(Sym) *symtab;
++      ElfW(Addr) direct;
++
++      /* We need a dynsym index ... */
++      symtab = (const void *) D_PTR (undef_map, l_info[DT_SYMTAB]);
++      direct = D_PTR (undef_map, l_info[VERSYMIDX(DT_DIRECT)]);
++
++      idx = *ref - symtab;
++      _dl_debug_printf ("dynamic symbol index %u from '%s' for %s base direct 0x%x start 0x%x\n", idx,
++			undef_map->l_name ? undef_map->l_name : "<noname>",
++			undef_name ? undef_name : "<undef>",
++			(int) direct, (int) undef_map->l_map_start);
++      direct += idx * 2;
++      if (direct >= undef_map->l_map_end || direct <= undef_map->l_map_start)
++        _dl_debug_printf ("broken: off end of map 0x%x\n", (int) direct);
++      else
++        {
++	  // FIXME: using low byte only ...
++          noffset = *(unsigned char *)direct;
++	  _dl_debug_printf ("dynamic symbol offset %u from %u\n", noffset, (int) direct);
++	  if (noffset < undef_map->l_dtneeded.r_nlist)
++	    {
++	      int res;
++	      struct r_scope_elem direct_elem;
++
++	      // FIXME: skip_map (?)
++	      direct_elem.r_list = undef_map->l_dtneeded.r_list + noffset;
++	      direct_elem.r_nlist = 1;
++
++	      res = do_lookup_x (undef_name, hash, *ref, &current_value, &direct_elem,
++				 0, version, flags, skip_map, type_class);
++	      if (res > 0)
++	        {
++		  _dl_debug_printf ("found directly ...\n");
++	          goto match;
++		}
++	      else
++		_dl_debug_printf ("Error in lookup %u - missing (?) - fallback "
++				  "to deps & then global ? ...\n", res);
++	    }
++	  else
++	    _dl_debug_printf ("foo symbol 0 < %u < %u\n", noffset,
++			      undef_map->l_dtneeded.r_nlist);
++	}
++#warning Implement me ...
++    }
++
+   size_t i = 0;
+   if (__builtin_expect (skip_map != NULL, 0))
+     {
+@@ -258,7 +312,7 @@
+ 	  return 0;
+ 	}
+     }
+-
++ match:
+   if (__builtin_expect (current_value.s == NULL, 0))
+     {
+       if ((*ref == NULL || ELFW(ST_BIND) ((*ref)->st_info) != STB_WEAK)
+Only in glibc-2.3/elf: dl-lookup.c~
+diff -u -r -x '*.o' -x '*.1' -x 'Makefile*' -x 'config*' -x libtool -x '*.info' -x '*.tex' glibc-2.3-pristine/elf/dynamic-link.h glibc-2.3/elf/dynamic-link.h
+--- glibc-2.3-pristine/elf/dynamic-link.h	2005-10-18 15:29:20.000000000 +0100
++++ glibc-2.3/elf/dynamic-link.h	2005-10-19 21:01:06.000000000 +0100
+@@ -94,6 +94,7 @@
+       ADJUST_DYN_INFO (DT_PLTGOT);
+       ADJUST_DYN_INFO (DT_STRTAB);
+       ADJUST_DYN_INFO (DT_SYMTAB);
++      ADJUST_DYN_INFO (VERSYMIDX(DT_DIRECT));
+ # if ! ELF_MACHINE_NO_RELA
+       ADJUST_DYN_INFO (DT_RELA);
+ # endif
+Only in glibc-2.3/elf: dynamic-link.h~
+diff -u -r -x '*.o' -x '*.1' -x 'Makefile*' -x 'config*' -x libtool -x '*.info' -x '*.tex' glibc-2.3-pristine/elf/elf.h glibc-2.3/elf/elf.h
+--- glibc-2.3-pristine/elf/elf.h	2004-11-15 09:35:22.000000000 +0000
++++ glibc-2.3/elf/elf.h	2005-10-18 15:58:28.000000000 +0100
+@@ -714,6 +714,7 @@
+ /* The versioning entry types.  The next are defined as part of the
+    GNU extension.  */
+ #define DT_VERSYM	0x6ffffff0
++#define DT_DIRECT	0x6ffffff1 /* FIXME - how are these allocated ? */
+ 
+ #define DT_RELACOUNT	0x6ffffff9
+ #define DT_RELCOUNT	0x6ffffffa
+Only in glibc-2.3/elf: elf.h~
+diff -u -r -x '*.o' -x '*.1' -x 'Makefile*' -x 'config*' -x libtool -x '*.info' -x '*.tex' glibc-2.3-pristine/include/link.h glibc-2.3/include/link.h
+--- glibc-2.3-pristine/include/link.h	2005-10-18 15:29:20.000000000 +0100
++++ glibc-2.3/include/link.h	2005-10-19 21:13:12.000000000 +0100
+@@ -299,6 +299,10 @@
+        done.  */
+     ElfW(Addr) l_relro_addr;
+     size_t l_relro_size;
++
++    /* Array of DT_NEEDED dependencies in order for use in
++       direct linkage - l_dtneeded[0] entry is self  */
++    struct r_scope_elem l_dtneeded;
+   };
+ 
+ struct dl_phdr_info
