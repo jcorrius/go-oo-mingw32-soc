@@ -1,0 +1,544 @@
+--- /dev/null	2005-10-19 10:48:52.004301250 +0100
++++ store/workben/t_shell.cxx	2005-10-10 14:28:25.000000000 +0100
+@@ -0,0 +1,541 @@
++#ifndef _SAL_TYPES_H_
++#include <sal/types.h>
++#endif
++
++#ifndef _OSL_DIAGNOSE_H_
++#include <osl/diagnose.h>
++#endif
++#ifndef _OSL_THREAD_H_
++#include <osl/thread.h>
++#endif
++#ifndef _OSL_TIME_H_
++#include <osl/time.h>
++#endif
++
++#ifndef _RTL_USTRING_HXX_
++#include <rtl/ustring.hxx>
++#endif
++
++#ifndef _STORE_STORE_HXX_
++#include <store/store.hxx>
++#endif
++
++#include <stdio.h>
++#include <math.h>
++
++static rtl::OUString aPathSep(RTL_CONSTASCII_USTRINGPARAM("/"));
++
++static const char *
++errName (storeError nErr)
++{
++		switch (nErr) {
++#define MAP(a) case store_E_##a: return #a
++		MAP (None);
++		MAP (AccessViolation);
++		MAP (LockingViolation);
++		MAP (CantSeek);
++		MAP (CantRead);
++		MAP (CantWrite);
++		MAP (InvalidAccess);
++		MAP (InvalidHandle);
++		MAP (InvalidParameter);
++		MAP (InvalidChecksum);
++		MAP (AlreadyExists);
++		MAP (NotExists);
++		MAP (NotDirectory);
++		MAP (NotFile);
++		MAP (NoMoreFiles);
++		MAP (NameTooLong);
++		MAP (OutOfMemory);
++		MAP (OutOfSpace);
++		MAP (Pending);
++		MAP (WrongFormat);
++		MAP (WrongVersion);
++		MAP (Unknown);
++#undef MAP
++		default:
++				return "broken error value";
++		}
++}
++
++static void
++dbg_put (rtl::OUString aArgh)
++{
++	rtl::OString aUgh = rtl::OUStringToOString(aArgh,
++											   RTL_TEXTENCODING_UTF8);
++	fprintf (stderr, "\t'%s'\n", (const sal_Char *)aUgh);
++}
++
++static void
++splitPath( const rtl::OUString &rSrc,
++		   rtl::OUString &rPath,
++		   rtl::OUString &rName)
++{
++	if (rSrc.equals(aPathSep))
++	{
++		rPath = rtl::OUString();
++		rName = rtl::OUString();
++	}
++	else
++	{
++    	rPath = rSrc.copy(0, rSrc.lastIndexOf('/') + 1);
++    	rName = rSrc.copy(rSrc.lastIndexOf('/') + 1);
++	}
++#if 0
++	fprintf (stderr, "Split a to b + c\n");
++	dbg_put(rSrc);
++	dbg_put(rPath);
++	dbg_put(rName);
++#endif
++}
++
++struct State
++{
++	rtl::OUString aCurPath;
++	store::OStoreFile aFile;
++	bool bExit;
++	FILE *pOut;
++	FILE *pIn;
++	State() : aCurPath(aPathSep),
++			  pOut(stdout), pIn(stdin),
++			  aFile(), bExit(false) {}
++
++	void splitPath (rtl::OUString &rPath, rtl::OUString &rName)
++	{
++		::splitPath (aCurPath, rPath, rName);
++	}
++};
++
++#define MAX_ARGS 32
++struct Arguments {
++		sal_uInt32 nArgs;
++		rtl::OUString aArgs[MAX_ARGS];
++};
++
++static rtl::OUString
++chompSlash(const rtl::OUString &aString)
++{
++	if (aString[aString.getLength() - 1] == (sal_Unicode) '/')
++		return aString.copy(0, aString.getLength() - 1);
++	else
++		return aString;
++}
++
++static rtl::OUString
++withSlash(const rtl::OUString &aString)
++{
++	if (aString[aString.getLength() - 1] != (sal_Unicode) '/')
++		return aString + aPathSep;
++	else
++		return aString;
++}
++
++static storeError
++do_cd (State *pState, Arguments *pArgs)
++{
++	storeError nErr;
++
++	if (pArgs->nArgs < 1)
++	{
++		pState->aCurPath = aPathSep;
++		return store_E_None;
++	}
++
++	rtl::OUString aNewDir = pArgs->aArgs[1];
++	rtl::OUString aPath, aName;
++
++	if (aNewDir.equalsAscii("."))
++		return store_E_None;
++
++	if (aNewDir.equalsAscii(".."))
++	{
++		pState->splitPath (aPath, aName);
++		pState->aCurPath = chompSlash (aPath);
++		if (!pState->aCurPath.getLength())
++			pState->aCurPath = aPathSep;
++		return store_E_None;
++	}
++
++	if (aNewDir[0] == (sal_Unicode) '/')
++		splitPath (aNewDir, aPath, aName);
++	else
++	{
++		aPath = withSlash (pState->aCurPath);
++		aName = aNewDir;
++	}
++
++	store::OStoreDirectory aDir;
++	nErr = aDir.create (pState->aFile, aPath, aName,
++						store_AccessReadOnly);
++	if (nErr != store_E_None)
++	{
++		fprintf (pState->pOut, "Error entering dir %s\n",
++				 errName (nErr));
++		return nErr;
++	}
++	else 
++		pState->aCurPath = chompSlash (aPath) + aPathSep + aName;
++
++	return store_E_None;
++}
++
++static storeError
++do_ls (State *pState, Arguments *pArgs)
++{
++	storeError nErr;
++	store::OStoreDirectory aDir;
++	rtl::OUString aPath, aName;
++	pState->splitPath(aPath, aName);
++
++	nErr = aDir.create (pState->aFile, aPath, aName, 
++						store_AccessReadOnly);
++	if (nErr != store_E_None)
++	{
++		fprintf (pState->pOut, "ls failed '%s'\n", errName (nErr));
++		return nErr;
++	}
++	storeFindData aFindData;
++
++	sal_Int32 nEntries = 0;
++	
++	for (nErr = aDir.first(aFindData); nErr == store_E_None;
++		 nErr = aDir.next(aFindData))
++	{
++		rtl::OUString aName (aFindData.m_pszName, aFindData.m_nLength);
++		rtl::OString aUsableName = rtl::OUStringToOString (aName, RTL_TEXTENCODING_UTF8);
++
++		fprintf (pState->pOut, " %s : %c%c%c : %d bytes\n",
++				 (const sal_Char *)aUsableName,
++				 aFindData.m_nAttrib & STORE_ATTRIB_ISDIR ? 'd' : ' ',
++				 aFindData.m_nAttrib & STORE_ATTRIB_ISFILE ? 's' : ' ',
++				 aFindData.m_nAttrib & STORE_ATTRIB_ISLINK ? 'l' : ' ',
++				 aFindData.m_nSize);
++		nEntries++;
++	}
++				 
++	if (nErr != store_E_NoMoreFiles)
++	{
++		fprintf (pState->pOut, "Error %s on directory read...\n", errName (nErr));
++		return nErr;
++	}
++
++	aDir.close();
++
++	return store_E_None;
++}
++
++static storeError
++do_mkdir (State *pState, Arguments *pArgs)
++{
++	storeError nErr;
++	store::OStoreDirectory aDir;
++
++	nErr = aDir.create (pState->aFile, withSlash (pState->aCurPath),
++						pArgs->aArgs[1], store_AccessCreate);
++	if (nErr != store_E_None)
++	{
++		fprintf (pState->pOut, "Error %s creating directory\n", errName (nErr));
++		return nErr;
++	}
++
++	aDir.close();
++	return store_E_None;
++}
++
++static storeError
++do_exit (State *pState, Arguments *pArgs)
++{
++	pState->bExit = true;
++	return store_E_None;
++}
++
++static storeError
++do_pwd (State *pState, Arguments *pArgs)
++{
++	rtl::OString aPath = rtl::OUStringToOString(pState->aCurPath,
++												RTL_TEXTENCODING_UTF8);
++	fprintf (pState->pOut, "Path: '%s'\n", (const sal_Char *)aPath);
++	return store_E_None;
++}
++
++static storeError
++do_cat (State *pState, Arguments *pArgs)
++{
++	storeError nErr;
++	store::OStoreStream aStream;
++
++	// cat > file
++	if (pArgs->aArgs[1].equalsAscii(">"))
++	{
++		nErr = aStream.create (pState->aFile, withSlash (pState->aCurPath),
++							   pArgs->aArgs[2], store_AccessCreate);
++		if (nErr != store_E_None)
++			fprintf (stderr, "Failed to create file: %s\n",
++					 errName (nErr));
++		sal_uInt32 nOffset = 0;
++		while (!feof (pState->pIn))
++		{
++			char data[4096];
++			fgets (data, sizeof(data), pState->pIn);
++			data[4095] = '\0';
++			if (pState->pIn != stdin)
++				fprintf (pState->pOut, "%s", data);
++			if (data[0] == '\n')
++				break;
++			sal_uInt32 nWritten;
++			aStream.writeAt(nOffset, (void *)data, strlen(data), nWritten);
++			nOffset += strlen(data);
++		}
++		aStream.flush();
++	}
++	else // cat file
++	{
++		nErr = aStream.create (pState->aFile, withSlash (pState->aCurPath),
++							   pArgs->aArgs[1], store_AccessReadOnly);
++		if (nErr != store_E_None)
++			fprintf (stderr, "Failed to open file: %s\n", errName (nErr));
++
++		sal_uInt32 nSize;
++		if ((nErr = aStream.getSize (nSize)) != store_E_None)
++			return nErr;
++
++		for (sal_uInt32 i = 0; i < nSize;)
++		{
++			char data[4096];
++			sal_uInt32 nRead;
++			aStream.readAt(i, data, 4095, nRead);
++			data[4095] = '\0';
++			fprintf (pState->pOut, "%s", data);
++			i += nRead;
++		}
++	}
++	aStream.close();
++
++	return store_E_None;
++}
++
++struct Stats {
++		sal_uInt32 nFiles;
++		sal_uInt32 nDirs;
++		sal_uInt32 nLinks;
++		sal_uInt32 nNameBuckets[32];
++		sal_uInt32 nSizeBuckets[32];
++		Stats() : nFiles(0), nDirs(0), nLinks(0)
++		{
++			memset (nNameBuckets, 0, sizeof (nNameBuckets));
++			memset (nSizeBuckets, 0, sizeof (nSizeBuckets));
++		}
++};
++
++static storeError
++collateStats (State *pState, Stats *pStats, const rtl::OUString &rPath)
++{
++	storeError nErr;
++	store::OStoreDirectory aDir;
++
++	rtl::OUString aPath, aName;
++	splitPath (rPath, aPath, aName);
++
++	dbg_put (rPath);
++	nErr = aDir.create (pState->aFile, aPath, aName, 
++						store_AccessReadOnly);
++	if (nErr != store_E_None)
++		return nErr;
++
++	storeFindData aFindData;
++
++	sal_Int32 nEntries = 0;
++	
++	for (nErr = aDir.first(aFindData); nErr == store_E_None;
++		 nErr = aDir.next(aFindData))
++	{
++		if (aFindData.m_nAttrib & STORE_ATTRIB_ISDIR)
++			pStats->nDirs++;
++		if (aFindData.m_nAttrib & STORE_ATTRIB_ISFILE)
++			pStats->nFiles++;
++		if (aFindData.m_nAttrib & STORE_ATTRIB_ISLINK)
++			pStats->nLinks++;
++
++		pStats->nNameBuckets[(int)(log(aFindData.m_nLength)/log(2) + 1)]++;
++		if (aFindData.m_nAttrib & STORE_ATTRIB_ISFILE)
++			pStats->nSizeBuckets[(int)(log(aFindData.m_nSize)/log(2) + 1)]++;
++
++		if (aFindData.m_nAttrib & STORE_ATTRIB_ISDIR)
++		{
++			rtl::OUString aSubDir = withSlash (rPath) +
++					rtl::OUString (aFindData.m_pszName, aFindData.m_nLength);
++			if ((nErr = collateStats (pState, pStats, aSubDir)) != store_E_None)
++				return nErr;
++		}
++	}
++				 
++	if (nErr != store_E_NoMoreFiles)
++		return nErr;
++
++	aDir.close();
++
++	return store_E_None;
++}
++
++static void
++printBuckets (State *pState, sal_uInt32 *pBuckets)
++{
++	sal_uInt32 nTotal = 0;
++	sal_uInt32 nMax = 32;
++	while (!pBuckets[nMax-1])
++		nMax--;
++
++	for (sal_uInt32 i = 0; i < nMax; i++)
++		nTotal += pBuckets[i];
++
++	fprintf (pState->pOut, " bucket - count - percentage\n");
++	for (sal_uInt32 i = 0; i < nMax; i++)
++		fprintf (pState->pOut, " 2^%2d - %d - %2.2g\n",
++				 i, pBuckets[i], (double)pBuckets[i]*100.0/nTotal);
++}
++
++static storeError
++do_stats (State *pState, Arguments *pArgs)
++{
++	storeError nErr;
++	Stats aStats;
++
++	if ((nErr = collateStats (pState, &aStats, aPathSep)) != store_E_None)
++	{
++		fprintf (stderr, "Error collecting stats %s\n", errName (nErr));
++		return nErr;
++	}
++
++	fprintf (pState->pOut, "Store statistics:\n");
++	fprintf (pState->pOut, " %d files\n", aStats.nFiles);
++	fprintf (pState->pOut, " %d dirs\n", aStats.nDirs);
++	fprintf (pState->pOut, " %d links\n", aStats.nLinks);
++
++	fprintf (pState->pOut, "Sizes:\n");
++	printBuckets (pState, aStats.nSizeBuckets);
++	fprintf (pState->pOut, "Name lengths:\n");
++	printBuckets (pState, aStats.nNameBuckets);
++
++	return store_E_None;
++}
++
++static struct {
++		const char *name;
++		storeError (*doCommand) (State *pState, Arguments *pArgs);
++} aCommands[] = {
++		{ "cat", do_cat },
++		{ "cd", do_cd },
++		{ "exit", do_exit },
++		{ "ls", do_ls },
++		{ "mkdir", do_mkdir },
++		{ "pwd", do_pwd },
++		{ "quit", do_exit },
++		{ "stats", do_stats },
++		{ NULL, NULL }
++};
++
++static void
++parseArgs (const char *args, Arguments *pArgs)
++{
++	sal_Int32 i;
++	sal_Int32 nOffset = 0;
++
++	rtl::OString aCmd(args);
++	for (i = 0; nOffset >= 0 ; i++)
++	{
++		nOffset = 0;
++		pArgs->aArgs[i] = rtl::OStringToOUString(aCmd.getToken(i, ' ', nOffset),
++												 RTL_TEXTENCODING_UTF8);
++	}
++	pArgs->nArgs = i;
++#if 0
++	fprintf (stderr, "Args:\n");
++	for (i = 0; i < pArgs->nArgs; i++)
++	{
++		rtl::OString aArg = rtl::OUStringToOString(pArgs->aArgs[i],
++												   RTL_TEXTENCODING_UTF8);
++		fprintf (stderr, "Arg %d: '%s'\n", i, (const sal_Char *)aArg);
++	}
++#endif
++}
++
++static void
++help()
++{
++	fprintf (stderr, "t_shell <store-file> [command file]\n");
++	exit (1);
++}
++
++
++int SAL_CALL
++main (int argc, char **argv)
++{
++	State aState;
++	storeError nErr = store_E_None;
++
++	if (argc < 2)
++		help();
++
++	rtl::OUString aFileName (argv[1], strlen (argv[1]),
++							 RTL_TEXTENCODING_UTF8);
++	if ((nErr = aState.aFile.create (aFileName, store_AccessReadCreate)) != store_E_None)
++	{
++		fprintf (stderr, "Couldn't open store file '%s' : %s\n", argv[1], errName (nErr));
++		return 1;
++	}
++
++	// Create root directory ... without this -really bad- things happen.
++	store::OStoreDirectory rStoreDir;
++	nErr = rStoreDir.create(aState.aFile,
++								rtl::OUString(),
++								rtl::OUString(),
++								store_AccessReadCreate);
++	if (nErr != store_E_None)
++	{
++		fprintf (stderr, "Failed to create root directory %s\n",
++				 errName (nErr));
++		exit (1);
++	}
++
++	if (argc > 2)
++	{
++		aState.pIn = fopen(argv[argc-1], "r");
++		if (!aState.pIn) help();
++	}
++
++	Arguments aArgs;
++
++	while (!feof (aState.pIn) && !aState.bExit)
++	{
++		rtl::OString aPath = rtl::OUStringToOString(aState.aCurPath,
++													RTL_TEXTENCODING_UTF8);
++		fprintf (aState.pOut, "%s > ", (const sal_Char *) aPath);
++		fflush (aState.pOut);
++
++		char command[4096];
++		fgets (command, sizeof(command), aState.pIn);
++		command[4095] = '\0';
++		if (strchr (command, '\n'))
++			*strchr (command, '\n') = '\0';
++		if (aState.pIn != stdin)
++			fprintf (aState.pOut, "%s\n", command);
++
++		// tokenize args
++		parseArgs (command, &aArgs);
++		if (!aArgs.nArgs)
++			continue;
++
++		for (int i = 0; aCommands[i].name; i++)
++		{
++			if (aArgs.aArgs[0].equalsAscii (aCommands[i].name))
++			{
++				// FIXME - warn on errors
++				nErr = aCommands[i].doCommand (&aState, &aArgs);
++			}
++		}
++	}
++
++	aState.aFile.close();
++
++	return 0;
++}

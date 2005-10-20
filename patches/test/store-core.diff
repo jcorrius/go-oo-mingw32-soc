@@ -1,0 +1,463 @@
+Index: store/inc/store/types.h
+===================================================================
+RCS file: /cvs/ucb/store/inc/store/types.h,v
+retrieving revision 1.6
+diff -u -p -u -r1.6 types.h
+--- store/inc/store/types.h	8 Sep 2005 08:40:21 -0000	1.6
++++ store/inc/store/types.h	20 Oct 2005 14:23:24 -0000
+@@ -51,13 +51,13 @@ extern "C" {
+ /** PageSize (recommended) default.
+     @see store_openFile()
+  */
+-#define STORE_DEFAULT_PAGESIZE ((sal_uInt16)0x0400)
++#define STORE_DEFAULT_PAGESIZE ((sal_uInt16)0x080)
+ 
+ 
+ /** PageSize (enforced) limits.
+     @see store_openFile()
+  */
+-#define STORE_MINIMUM_PAGESIZE ((sal_uInt16)0x0200)
++#define STORE_MINIMUM_PAGESIZE ((sal_uInt16)0x80)
+ #define STORE_MAXIMUM_PAGESIZE ((sal_uInt16)0x8000)
+ 
+ 
+Index: store/source/filelckb.cxx
+===================================================================
+RCS file: /cvs/ucb/store/source/filelckb.cxx,v
+retrieving revision 1.14
+diff -u -p -u -r1.14 filelckb.cxx
+--- store/source/filelckb.cxx	8 Sep 2005 08:40:46 -0000	1.14
++++ store/source/filelckb.cxx	20 Oct 2005 14:23:24 -0000
+@@ -659,7 +659,13 @@ storeError OFileLockBytes::writeAt (
+ 	// Acquire exclusive access.
+ 	osl::MutexGuard aGuard (m_aMutex);
+ 	if (m_pImpl->isValid())
+-		return m_pImpl->writeAt (nOffset, pBuffer, nBytes, rnDone);
++	{
++		storeError nErr;
++		nErr = m_pImpl->writeAt (nOffset, pBuffer, nBytes, rnDone);
++//		fprintf( stderr, "OFileLockBytes::writeAt %d (%d bytes) (%d written) err %d\n",
++//				 nOffset, nBytes, rnDone, nErr );
++		return nErr;
++	}
+ 	else
+ 		return store_E_InvalidHandle;
+ }
+Index: store/source/makefile.mk
+===================================================================
+RCS file: /cvs/ucb/store/source/makefile.mk,v
+retrieving revision 1.3
+diff -u -p -u -r1.3 makefile.mk
+--- store/source/makefile.mk	8 Sep 2005 08:42:35 -0000	1.3
++++ store/source/makefile.mk	20 Oct 2005 14:23:24 -0000
+@@ -44,6 +44,7 @@ TARGET=store
+ 
+ # --- Files ---
+ 
++CFLAGS+=-O0
+ SLOFILES=	\
+ 	$(SLO)$/object.obj		\
+ 	$(SLO)$/memlckb.obj		\
+Index: store/source/storbase.cxx
+===================================================================
+RCS file: /cvs/ucb/store/source/storbase.cxx,v
+retrieving revision 1.8
+diff -u -p -u -r1.8 storbase.cxx
+--- store/source/storbase.cxx	8 Sep 2005 08:43:44 -0000	1.8
++++ store/source/storbase.cxx	20 Oct 2005 14:23:24 -0000
+@@ -53,6 +53,9 @@
+ #ifndef _RTL_REF_HXX_
+ #include <rtl/ref.hxx>
+ #endif
++#ifndef _RTL_MEMORY_H_
++#include <rtl/memory.h>
++#endif
+ 
+ #ifndef _OSL_DIAGNOSE_H_
+ #include <osl/diagnose.h>
+@@ -2054,3 +2057,111 @@ storeError OStorePageBIOS::poke (OStoreP
+ 	return eErrCode;
+ }
+ 
++static void
++copyAndTerminate( sal_Char *pDest, const sal_Char *pSrc, sal_Int32 nBytes)
++{
++	rtl_copyMemory (pDest, pSrc, nBytes);
++	pDest[nBytes] = '\0';
++}
++
++struct OStorePageLongNameData : public OStorePageData
++{
++  public:
++	sal_Char m_nData[STORE_MAXIMUM_PAGESIZE - sizeof (OStorePageData)];
++	OStorePageLongNameData(sal_uInt16 nPageSize) :
++		OStorePageData (nPageSize) {}
++};
++
++static sal_uInt16
++lcl_getPageSize (OStorePageBIOS &rBIOS)
++{
++	sal_uInt16 nPageSize = STORE_MAXIMUM_PAGESIZE;
++	rBIOS.getPageSize(nPageSize);
++//	fprintf (stderr, "page size for extended names %d\n", nPageSize);
++	return nPageSize;
++}
++
++#define USE_OTHER_BLOCK STORE_INTERNAL_MAX_NAMESIZE
++
++storeError
++OStorePageNameBlock::setName (const rtl_String *pName, OStorePageBIOS &rBIOS)
++{
++	storeError nRet;
++	sal_Char *pDest;
++
++//	fprintf (stderr, "setName '%s'\n", pName->buffer);
++
++	m_nNameLength = pName->length;
++
++	if (pName->length >= USE_OTHER_BLOCK)
++	{
++		fprintf (stderr, "Pray I understood the block I/O layer\n");
++		OStorePageLongNameData aNameData(lcl_getPageSize(rBIOS));
++		OStorePageObject aNamePage(aNameData);
++		if (!m_pNameBlock)
++		{
++			if ((nRet = rBIOS.allocate (aNamePage)) != store_E_None)
++			{
++				fprintf (stderr, "failed to allocate name page %d\n", nRet);
++				return nRet;
++			}
++			m_pNameBlock = aNameData.location();
++		}
++		else
++		{
++			aNameData.location (m_pNameBlock);
++			if ((nRet = rBIOS.load(aNamePage)) != store_E_None)
++			{
++				fprintf (stderr, "failed to load name page %d\n", nRet);
++				return nRet;
++			}
++		}
++		copyAndTerminate (m_pNameData, pName->buffer, USE_OTHER_BLOCK - 1);
++		copyAndTerminate (aNameData.m_nData, pName->buffer + USE_OTHER_BLOCK - 1,
++						  pName->length - (USE_OTHER_BLOCK - 1));
++
++		if ((nRet = rBIOS.save (aNamePage)) != store_E_None)
++		{
++			fprintf (stderr, "failed to save name page %d\n", nRet);
++			return nRet;
++		}
++	}
++	else
++		copyAndTerminate (m_pNameData, pName->buffer, pName->length);
++
++	return store_E_None;
++}
++
++storeError
++OStorePageNameBlock::getName (rtl_String **pName, OStorePageBIOS &rBIOS)
++{
++	storeError nRet;
++
++//	fprintf (stderr, "get!Name (%d)...\n", m_nNameLength);
++
++	rtl_string_new_WithLength (pName, m_nNameLength + 1);
++	(*pName)->length = m_nNameLength;
++
++	if (m_nNameLength >= USE_OTHER_BLOCK)
++	{
++		OStorePageLongNameData aNameData(lcl_getPageSize (rBIOS));
++		OStorePageObject aNamePage(aNameData);
++		aNameData.location (m_pNameBlock);
++
++		if ((nRet = rBIOS.load(aNamePage)) != store_E_None)
++		{
++			fprintf (stderr, "failed to load name page %d\n", nRet);
++			return nRet;
++		}
++
++		copyAndTerminate ((*pName)->buffer, m_pNameData, USE_OTHER_BLOCK - 1);
++		copyAndTerminate ((*pName)->buffer + USE_OTHER_BLOCK - 1,
++						  aNameData.m_nData, m_nNameLength - (USE_OTHER_BLOCK - 1));
++	}
++	else
++		copyAndTerminate ((*pName)->buffer, m_pNameData, m_nNameLength);
++
++//	fprintf (stderr, "... returns '%s'\n", (*pName)->buffer);
++
++	return store_E_None;
++}
+Index: store/source/storbase.hxx
+===================================================================
+RCS file: /cvs/ucb/store/source/storbase.hxx,v
+retrieving revision 1.7
+diff -u -p -u -r1.7 storbase.hxx
+--- store/source/storbase.hxx	8 Sep 2005 08:44:04 -0000	1.7
++++ store/source/storbase.hxx	20 Oct 2005 14:23:24 -0000
+@@ -77,6 +77,9 @@
+ #define INCLUDED_CSTRING
+ #endif
+ 
++// #define STORE_INTERNAL_MAX_NAMESIZE 96-4
++#define STORE_INTERNAL_MAX_NAMESIZE 32
++
+ /*========================================================================
+  *
+  * store common internals.
+@@ -376,11 +379,15 @@ struct OStorePageLink
+ 	}
+ };
+ 
++
+ /*========================================================================
+  *
+  * OStorePageNameBlock.
+  *
+  *======================================================================*/
++
++class OStorePageBIOS;
++
+ struct OStorePageNameBlock
+ {
+ 	typedef OStorePageGuard G;
+@@ -391,14 +398,17 @@ struct OStorePageNameBlock
+ 	G          m_aGuard;
+ 	K          m_aKey;
+ 	sal_uInt32 m_nAttrib;
+-	sal_Char   m_pData[STORE_MAXIMUM_NAMESIZE];
++	sal_Char   m_pNameData[STORE_INTERNAL_MAX_NAMESIZE];
++	sal_uInt32 m_nNameLength;
++	sal_uInt32 m_pNameBlock;
+ 
+ 	/** size.
+ 	*/
+ 	static sal_uInt16 size (void)
+ 	{
+ 		return (sizeof(G) + sizeof(K) + sizeof(sal_uInt32) +
+-				sizeof(sal_Char[STORE_MAXIMUM_NAMESIZE]));
++				sizeof(sal_uInt32) + sizeof (sal_uInt32) +
++				sizeof(sal_Char[STORE_INTERNAL_MAX_NAMESIZE]));
+ 	}
+ 
+ 	/** initialize.
+@@ -408,15 +418,17 @@ struct OStorePageNameBlock
+ 		m_aGuard  = G();
+ 		m_aKey    = K();
+ 		m_nAttrib = 0;
+-		__store_memset (m_pData, 0, sizeof(m_pData));
++		m_pNameBlock = 0;
++		m_nNameLength = 0;
++		__store_memset (m_pNameData, 0, sizeof(m_pNameData));
+ 	}
+ 
+ 	/** Construction.
+ 	*/
+ 	OStorePageNameBlock (void)
+-		: m_nAttrib (0)
++		: m_nAttrib (0), m_pNameBlock (0), m_nNameLength (0)
+ 	{
+-		__store_memset (m_pData, 0, sizeof(m_pData));
++		__store_memset (m_pNameData, 0, sizeof(m_pNameData));
+ 	}
+ 
+ 	/** Comparison.
+@@ -434,6 +446,8 @@ struct OStorePageNameBlock
+ 		m_aGuard.swap();
+ 		m_aKey.swap();
+ 		m_nAttrib = OSL_SWAPDWORD(m_nAttrib);
++		m_nNameLength = OSL_SWAPDWORD(m_nNameLength);
++		m_pNameBlock = OSL_SWAPDWORD(m_pNameBlock);
+ #endif /* OSL_BIGENDIAN */
+ 	}
+ 
+@@ -466,6 +480,9 @@ struct OStorePageNameBlock
+ 			return store_E_None;
+ 	}
+ 
++	storeError setName (const rtl_String *pName, OStorePageBIOS &rBIOS);
++	storeError getName (rtl_String **pName, OStorePageBIOS &rBIOS);
++
+ 	/** namei.
+ 	*/
+ 	static storeError namei (
+@@ -475,8 +492,11 @@ struct OStorePageNameBlock
+ 		if (!(pPath && pName))
+ 			return store_E_InvalidParameter;
+ 
++		if (pName->length >= STORE_INTERNAL_MAX_NAMESIZE)
++			fprintf(stderr, "Intersting long name (%d) ...\n", pName->length);
++
+ 		// Check name length.
+-		if (!(pName->length < STORE_MAXIMUM_NAMESIZE))
++		if (pName->length >= STORE_MAXIMUM_NAMESIZE)
+ 			return store_E_NameTooLong;
+ 
+ 		// Transform pathname into key.
+Index: store/source/stordata.hxx
+===================================================================
+RCS file: /cvs/ucb/store/source/stordata.hxx,v
+retrieving revision 1.3
+diff -u -p -u -r1.3 stordata.hxx
+--- store/source/stordata.hxx	8 Sep 2005 08:45:37 -0000	1.3
++++ store/source/stordata.hxx	20 Oct 2005 14:23:25 -0000
+@@ -367,10 +367,10 @@ inline OStoreIndirectionPageObject::OSto
+  * OStoreDirectoryDataBlock.
+  *
+  *======================================================================*/
+-#define STORE_LIMIT_DATAPAGE_DIRECT 16
+-#define STORE_LIMIT_DATAPAGE_SINGLE  8
+-#define STORE_LIMIT_DATAPAGE_DOUBLE  1
+-#define STORE_LIMIT_DATAPAGE_TRIPLE  1
++#define STORE_LIMIT_DATAPAGE_DIRECT 4
++#define STORE_LIMIT_DATAPAGE_SINGLE 2
++#define STORE_LIMIT_DATAPAGE_DOUBLE 1
++#define STORE_LIMIT_DATAPAGE_TRIPLE 1
+ 
+ struct OStoreDirectoryDataBlock
+ {
+@@ -641,6 +641,13 @@ struct OStoreDirectoryPageData : public 
+ 	{
+ 		base::m_aGuard.m_nMagic = STORE_MAGIC_DIRECTORYPAGE;
+ 		base::m_aDescr.m_nUsed += self::size();
++		if (capacity() > STORE_MINIMUM_PAGESIZE ||
++			size() > STORE_MINIMUM_PAGESIZE)
++		{
++			fprintf (stderr, "OStoreDirectoryPageData size %d, capacity %d "
++					 "min %d\n", self::size(), capacity(), STORE_MINIMUM_PAGESIZE);
++			*(int *)(NULL) = 0;
++		}
+ 		rtl_zeroMemory (m_pData, capacity());
+ 	}
+ 
+Index: store/source/storlckb.cxx
+===================================================================
+RCS file: /cvs/ucb/store/source/storlckb.cxx,v
+retrieving revision 1.5
+diff -u -p -u -r1.5 storlckb.cxx
+--- store/source/storlckb.cxx	8 Sep 2005 08:46:28 -0000	1.5
++++ store/source/storlckb.cxx	20 Oct 2005 14:23:25 -0000
+@@ -153,10 +153,7 @@ static storeError __store_iget (
+ 		// Setup inode nameblock.
+ 		rNode.m_aNameBlock.m_aKey    = aKey;
+ 		rNode.m_aNameBlock.m_nAttrib = nAttrib;
+-
+-		rtl_copyMemory (
+-			&rNode.m_aNameBlock.m_pData[0],
+-			pName->buffer, pName->length);
++		rNode.m_aNameBlock.setName (pName, rManager);
+ 
+ 		// Save inode page.
+ 		eErrCode = rManager.save (aKey, aPage);
+@@ -275,11 +272,14 @@ storeError OStoreDirectory::create (
+ 	{
+ 		// Evaluate iteration path from NameBlock.
+ 		typedef OStorePageGuard G;
+-		sal_Char *pszName = m_pNode->m_aNameBlock.m_pData;
++		rtl_String *pItemName = NULL;
++		if ((eErrCode = m_pNode->m_aNameBlock.getName (&pItemName, *pManager)) != store_E_None)
++			return eErrCode;
+ 
+ 		m_nPath = m_pNode->m_aNameBlock.m_aKey.m_nHigh;
+-		m_nPath = G::crc32 (m_nPath, pszName, rtl_str_getLength(pszName));
++		m_nPath = G::crc32 (m_nPath, pItemName->buffer, pItemName->length);
+ 		m_nPath = G::crc32 (m_nPath, "/", 1);
++		rtl_string_release (pItemName);
+ 
+ 		// Accept page manager.
+ 		m_xManager = xManager;
+@@ -324,8 +324,13 @@ storeError OStoreDirectory::iterate (sto
+ 			if (eErrCode == store_E_None)
+ 			{
+ 				// Setup FindData.
+-				sal_Char *p = m_pNode->m_aNameBlock.m_pData;
+-				sal_Int32 n = rtl_str_getLength (p);
++
++				rtl_String *pItemName = NULL;
++				if ((eErrCode = m_pNode->m_aNameBlock.getName (&pItemName, *m_xManager)) != store_E_None)
++					return eErrCode;
++
++				sal_Char *p = pItemName->buffer;
++				sal_Int32 n = pItemName->length;
+ 				sal_Int32 k = rFindData.m_nLength;
+ 
+ 				n = __store_convertTextToUnicode (
+@@ -336,6 +341,7 @@ storeError OStoreDirectory::iterate (sto
+ 					k = (k - n) * sizeof(sal_Unicode);
+ 					rtl_zeroMemory (&rFindData.m_pszName[n], k);
+ 				}
++				rtl_string_release (pItemName);
+ 
+ 				rFindData.m_nLength  = n;
+ 				rFindData.m_nAttrib |= aPage.attrib();
+Index: store/source/storpage.cxx
+===================================================================
+RCS file: /cvs/ucb/store/source/storpage.cxx,v
+retrieving revision 1.4
+diff -u -p -u -r1.4 storpage.cxx
+--- store/source/storpage.cxx	8 Sep 2005 08:47:20 -0000	1.4
++++ store/source/storpage.cxx	20 Oct 2005 14:23:25 -0000
+@@ -954,9 +954,7 @@ storeError OStorePageManager::symlink (
+ 
+ 	// Setup as 'Source' directory page.
+ 	m_pDirect->m_aNameBlock.m_aKey = aSrcKey;
+-	rtl_copyMemory (
+-		&m_pDirect->m_aNameBlock.m_pData[0],
+-		pSrcName->buffer, pSrcName->length);
++	m_pDirect->m_aNameBlock.setName(pSrcName, *this);
+ 
+ 	// Store 'Destination' page key.
+ 	OStorePageKey aDstKey (rDstKey);
+@@ -1115,13 +1113,7 @@ storeError OStorePageManager::rename (
+ 	if (!(e.m_nAttrib & STORE_ATTRIB_ISLINK))
+ 	{
+ 		// Setup 'Destination' NameBlock.
+-        sal_Int32 nDstLen = pDstName->length;
+-        rtl_copyMemory (
+-			&m_pDirect->m_aNameBlock.m_pData[0],
+-			pDstName->buffer, nDstLen);
+-		rtl_zeroMemory (
+-			&m_pDirect->m_aNameBlock.m_pData[nDstLen],
+-			STORE_MAXIMUM_NAMESIZE - nDstLen);
++		m_pDirect->m_aNameBlock.setName (pDstName, *this);
+ 		m_pDirect->m_aNameBlock.m_aKey = e.m_aKey;
+ 
+ 		// Save directory page.
+Index: store/workben/makefile.mk
+===================================================================
+RCS file: /cvs/ucb/store/workben/makefile.mk,v
+retrieving revision 1.4
+diff -u -p -u -r1.4 makefile.mk
+--- store/workben/makefile.mk	8 Sep 2005 08:49:17 -0000	1.4
++++ store/workben/makefile.mk	20 Oct 2005 14:23:25 -0000
+@@ -68,12 +68,14 @@ CFLAGS+= -I..$/source
+ CXXFILES=	\
+ 	t_file.cxx	\
+ 	t_base.cxx	\
+-	t_store.cxx
++	t_store.cxx	\
++	t_shell.cxx
+ 
+ OBJFILES=	\
+ 	$(OBJ)$/t_file.obj	\
+ 	$(OBJ)$/t_base.obj	\
+-	$(OBJ)$/t_store.obj
++	$(OBJ)$/t_store.obj	\
++	$(OBJ)$/t_shell.obj
+ 
+ APP1TARGET=		t_file
+ APP1OBJS=		$(OBJ)$/t_file.obj
+@@ -99,6 +101,14 @@ APP3DEPN=	\
+ 	$(SLB)$/store.lib	\
+ 	$(L)$/isal.lib
+ 
++APP4TARGET=		t_shell
++APP4OBJS=		$(OBJ)$/t_shell.obj
++APP4STDLIBS=	$(STORELIB)
++APP4STDLIBS+=	$(SALLIB)
++APP4DEPN=	\
++	$(SLB)$/store.lib	\
++	$(L)$/isal.lib
++
+ # --- Targets ---
+ 
+ .INCLUDE : target.mk
