@@ -1,8 +1,5 @@
 #!/usr/bin/perl -w
 
-# FIXME: there are some relocs with *thousands* of targets ...
-#        we elide them all & count almost none of them.
-
 #
 # Use example: cd /opt/OOInstall/program
 #              preloc --quiet --plt --for=svx *.so | sort | c++filt > svx
@@ -10,6 +7,11 @@
 # use --strip to get the symbols for the constructors with the method name 
 #	stripped
 #
+
+#
+# TODO: add an object / size breakdown - how much is in XYZ sections ?
+#
+
 
 # misc. argument options / defaults
 my $opt_plt_too = 0;
@@ -24,27 +26,35 @@ sub read_relocs($$)
     my %relocs;
     my %symbols;
     my %used;
+    my $in_plt = 0;
 
 #    print "Read '$file'\n";
 
     open ($pipe, "readelf -r -W $file |") || die "Can't readelf -r $file: $!";
     while (<$pipe>) {
-	/'.rel.plt'/ && !$opt_plt_too && last;
+	if (m/'.rel.plt'/) {
+	    $in_plt = 1;
+	    next;
+	}
 	if (! m/^([0-9a-f]+)\s+([0-9a-f]+)\s+(R_\S+)\s+([0-9a-f]+)\s+(.*)\s*/) {
 #	    print "Bin line '$_'\n";
             next;
 	}
 	my ($offset, $info, $type, $loc, $sym) = ($1, $2, $3, $4, $5);
 #	print "$sym reloc at 0x$offset : $type, $loc, $sym\n";
-	my $lst; 
-	if (!defined ($symbols{$sym})) {
-	    my @rlst;
-	    $lst = \@rlst;
+	if ($in_plt) {
+	    $lib->{used_in_plt}->{$sym} = 1;
 	} else {
-	    $lst = $symbols{$sym};
+	    my $lst; 
+	    if (!defined ($symbols{$sym})) {
+		my @rlst;
+		$lst = \@rlst;
+	    } else {
+		$lst = $symbols{$sym};
+	    }
+	    push @{$lst}, hex ($offset);
+	    $symbols{$sym} = $lst;
 	}
-	push @{$lst}, hex ($offset);
-	$symbols{$sym} = $lst;
     }
     close ($pipe);
 
@@ -143,9 +153,11 @@ sub breakdown_vtable($$$$)
 	$cdata->{stem} = get_class_stem ($constr);
 	$cdata->{external_self} = 0;
     }
+
     $cdata->{slot_count}++;
     
     if ($sym =~ m/$cdata->{stem}/) {
+	# internal symbol
 	$cdata->{self_impl_slot_count}++;
 	
 	if (defined $lib->{undef}->{$sym}) {
@@ -154,6 +166,7 @@ sub breakdown_vtable($$$$)
     }
 
     if (defined $lib->{undef}->{$sym}) {
+	# external symbol
 	$cdata->{extern_impl_slot_count}++;
     }
 }
@@ -333,6 +346,7 @@ for $lib (sort by_internal @libs) {
 	my $addr_space = $lib->{addr_space};
 	my $key_count = keys %{$lib->{addr_space}};
 	my %vtable_breakdown;
+	my %vtable_wasted;
 
 	print "Data section contains " . $key_count * 4 . " bytes\n";
 	for $sym (keys %{$lib->{relocs}}) {
@@ -346,6 +360,15 @@ for $lib (sort by_internal @libs) {
 		    if (is_vtable ($datum->{symbol})) {
 			$vtable_relocs++;
 			breakdown_vtable (\%vtable_breakdown, $lib, $datum, $sym);
+			if (!defined $vtable_wasted{$sym} &&
+			     defined $lib->{undef}->{$sym}) {
+			    if (defined $lib->{used_in_plt}->{$sym}) {
+#				print "Symbol '$sym' used in plt and in vtable\n";
+			    } else {
+#				print "Symbol '$sym' used in plt and in vtable\n";
+				$vtable_wasted{$sym}++;
+			    }
+			}
 		    } elsif (is_rtti ($datum->{symbol})) {
 			$rtti_relocs++;
 		    } else {
@@ -392,6 +415,19 @@ for $lib (sort by_internal @libs) {
 	    print " parent-impl / vtable: " . sprintf ("%.3g", ($vtable_slot_count - $vtable_self_impl_slot_count)/$vtable_class_count) . " slots\n";
 	    print " *extern-impl / vtable: " . sprintf ("%.3g", $vtable_extern_impl_slot_count/$vtable_class_count) . " slots\n";
 	    print " *extern-impl of self total: " . sprintf ("%.3g", $vtable_extern_self) . " slots\n";
+	}
+
+	if ($vtable_extern_impl_slot_count) { # vtable wasted count
+	    my $vtable_wasted_syms = 0;
+	    my $vtable_wasted_size = 0;
+	    for my $sym (keys %vtable_wasted) {
+		$vtable_wasted_syms++;
+		$vtable_wasted_size += length ($sym) + 1 + 4; # \0, .hash etc.
+	    }
+	    print " extern (only) vtable symbols:\n";
+	    print "  wasted symbols: $vtable_wasted_syms (" .
+		sprintf ("%.3g", ($vtable_wasted_syms * 100.0) / $vtable_extern_impl_slot_count) . "%)\n";
+	    print "  wasted bytes: $vtable_wasted_size\n";
 	}
     }
 }
