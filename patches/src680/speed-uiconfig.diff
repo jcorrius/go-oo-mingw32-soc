@@ -1,0 +1,186 @@
+Index: ucb/source/ucp/file/filrset.cxx
+===================================================================
+RCS file: /cvs/ucb/ucb/source/ucp/file/filrset.cxx,v
+retrieving revision 1.17
+diff -u -p -u -r1.17 filrset.cxx
+--- ucb/source/ucp/file/filrset.cxx	9 Sep 2005 15:27:30 -0000	1.17
++++ ucb/source/ucp/file/filrset.cxx	26 Oct 2005 13:32:34 -0000
+@@ -322,12 +322,12 @@ XResultSet_impl::OneMore(
+ 	osl::FileBase::RC err;
+ 	sal_Bool IsRegular;
+ 	rtl::OUString aUnqPath;
+-	osl::DirectoryItem  m_aDirIte;
++	osl::DirectoryItem  aDirItem;
+ 	Reference< sdbc::XRow > aRow;
+ 
+ 	while( true )
+ 	{
+-		err = m_aFolder.getNextItem( m_aDirIte );
++		err = m_aFolder.getNextItem( aDirItem );
+ 
+ 		if( err == osl::FileBase::E_NOENT || err == osl::FileBase::E_INVAL )
+ 		{
+@@ -337,7 +337,7 @@ XResultSet_impl::OneMore(
+ 		}
+ 		else if( err == osl::FileBase::E_None )
+ 		{
+-			aRow = m_pMyShell->getv( -1,this,m_sProperty,m_aDirIte,aUnqPath,IsRegular );
++			aRow = m_pMyShell->getv( -1,this,m_sProperty,aDirItem,aUnqPath,IsRegular );
+ 
+ 			if( m_nOpenMode == OpenMode::DOCUMENTS && IsRegular )
+ 			{
+Index: ucb/source/ucp/file/shell.cxx
+===================================================================
+RCS file: /cvs/ucb/ucb/source/ucp/file/shell.cxx,v
+retrieving revision 1.84
+diff -u -p -u -r1.84 shell.cxx
+--- ucb/source/ucp/file/shell.cxx	9 Sep 2005 15:29:56 -0000	1.84
++++ ucb/source/ucp/file/shell.cxx	26 Oct 2005 13:32:35 -0000
+@@ -1119,8 +1119,8 @@ shell::getv( sal_Int32 CommandId,
+ {
+ 	uno::Sequence< uno::Any > seq( properties.getLength() );
+ 
+-	sal_Int32 n_Mask;
+-	getMaskFromProperties( n_Mask,properties );
++	sal_Int32 n_Mask = getMaskFromProperties( properties );
++	
+ 	osl::FileStatus aFileStatus( n_Mask );
+ 
+ 	osl::DirectoryItem aDirItem;
+@@ -2203,15 +2203,21 @@ sal_Bool SAL_CALL shell::ensuredir( sal_
+ //
+ 
+ 
+-void SAL_CALL
++sal_Int32 SAL_CALL
+ shell::getMaskFromProperties(
+-    sal_Int32& n_Mask,
+-    const uno::Sequence< beans::Property >& seq )
++    const uno::Sequence< beans::Property >& seq,
++	bool *bNameOnly)
+ {
+-    n_Mask = 0;
++    sal_Int32 n_Mask = 0;
++	if(bNameOnly)
++		*bNameOnly = false;
+     for(sal_Int32 j = 0; j < seq.getLength(); ++j) {
+         if(seq[j].Name == Title)
++		{
+             n_Mask |= FileStatusMask_FileName;
++			if(bNameOnly)
++				*bNameOnly = seq.getLength() == 1;
++		}
+         else if(seq[j].Name == CasePreservingURL)
+             n_Mask |= FileStatusMask_FileURL;
+         else if(seq[j].Name == IsDocument ||
+@@ -2240,6 +2246,7 @@ shell::getMaskFromProperties(
+ //         n_Mask |= FileStatusMask_FileSize;
+ //         n_Mask |= FileStatusMask_Attributes;
+     }
++	return n_Mask;
+ }
+ 
+ 
+@@ -2534,44 +2541,52 @@ shell::getv(
+ 	sal_Bool& aIsRegular )
+ {
+ 	uno::Sequence< uno::Any > seq( properties.getLength() );
++	
++	bool bNameOnly = false;
++	sal_Int32 n_Mask = getMaskFromProperties( properties, &bNameOnly );
+ 
+-	sal_Int32 n_Mask;
+-	getMaskFromProperties( n_Mask,properties );
++	sal_Int32 n_RealMask = n_Mask;
++	if ( !bNameOnly )
++	{   // Always retrieve the type and the target URL because item might be a link
++		n_RealMask |= ( FileStatusMask_FileURL |
++						FileStatusMask_Type |
++						FileStatusMask_LinkTargetURL );
++	}
+ 
+-	// Always retrieve the type and the target URL because item might be a link
+-	osl::FileStatus aFileStatus( n_Mask |
+-                                 FileStatusMask_FileURL |
+-                                 FileStatusMask_Type |
+-                                 FileStatusMask_LinkTargetURL );
++	osl::FileStatus aFileStatus( n_RealMask );
++	
+ 	aDirItem.getFileStatus( aFileStatus );
+ 	aUnqPath = aFileStatus.getFileURL();
+ 
+ 	// If the directory item type is a link retrieve the type of the target
+ 
+-	if ( aFileStatus.getFileType() == osl::FileStatus::Link )
++	if ( n_Mask & FileStatusMask_Type )
+ 	{
+-        // Assume failure
+-		osl::FileBase::RC	result = osl::FileBase::E_INVAL;
+-		osl::DirectoryItem	aTargetItem;
+-		osl::DirectoryItem::get( aFileStatus.getLinkTargetURL(), aTargetItem );
+-		if ( aTargetItem.is() )
+-		{
+-			osl::FileStatus	aTargetStatus( FileStatusMask_Type );
+-
+-			if ( osl::FileBase::E_None ==
+-                 ( result = aTargetItem.getFileStatus( aTargetStatus ) ) )
+-				aIsRegular =
+-                    aTargetStatus.getFileType() == osl::FileStatus::Regular;
+-		}
+-
+-		// FIXME: aIsRegular undefined in error case.
+-        // Don't know how to transport error
+-		OSL_ENSURE( osl::FileBase::E_None == result,
+-                    "shell::getv: Link target can't be retrieved."
+-                    " Missing error handling !!!" );
++		if ( aFileStatus.getFileType() == osl::FileStatus::Link )
++		{
++			// Assume failure
++			osl::FileBase::RC	result = osl::FileBase::E_INVAL;
++			osl::DirectoryItem	aTargetItem;
++			osl::DirectoryItem::get( aFileStatus.getLinkTargetURL(), aTargetItem );
++			if ( aTargetItem.is() )
++			{
++				osl::FileStatus	aTargetStatus( FileStatusMask_Type );
++
++				if ( osl::FileBase::E_None ==
++					 ( result = aTargetItem.getFileStatus( aTargetStatus ) ) )
++					aIsRegular =
++						aTargetStatus.getFileType() == osl::FileStatus::Regular;
++			}
++
++			// FIXME: aIsRegular undefined in error case.
++			// Don't know how to transport error
++			OSL_ENSURE( osl::FileBase::E_None == result,
++						"shell::getv: Link target can't be retrieved."
++						" Missing error handling !!!" );
++		}
++		else
++			aIsRegular = aFileStatus.getFileType() == osl::FileStatus::Regular;
+ 	}
+-	else
+-		aIsRegular = aFileStatus.getFileType() == osl::FileStatus::Regular;
+ 
+ 	registerNotifier( aUnqPath,pNotifier );
+ 	insertDefaultProperties( aUnqPath );
+Index: ucb/source/ucp/file/shell.hxx
+===================================================================
+RCS file: /cvs/ucb/ucb/source/ucp/file/shell.hxx,v
+retrieving revision 1.21
+diff -u -p -u -r1.21 shell.hxx
+--- ucb/source/ucp/file/shell.hxx	9 Sep 2005 15:30:10 -0000	1.21
++++ ucb/source/ucp/file/shell.hxx	26 Oct 2005 13:32:35 -0000
+@@ -583,10 +583,10 @@ namespace fileaccess {
+ 		 *  osl::DirectoryItem::getFileStatus fills the required fields.
+ 		 */
+ 
+-		void SAL_CALL
++		sal_Int32 SAL_CALL
+ 		getMaskFromProperties(
+-			sal_Int32& n_Mask,
+-			const com::sun::star::uno::Sequence< com::sun::star::beans::Property >& seq );
++			const com::sun::star::uno::Sequence< com::sun::star::beans::Property >& seq,
++			bool *bNameOnly = NULL);
+ 
+ 
+ 		void SAL_CALL
