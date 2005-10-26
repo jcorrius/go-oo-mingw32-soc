@@ -157,7 +157,7 @@ namespace cairocanvas
                         ::canvas::tools::polyPolygonFromXPolyPolygon2D( 
                             getClip() ));
 
-		    cairo_reset_clip( pCairo );
+		    //cairo_reset_clip( pCairo );
 		    drawPolyPolygonImplementation( aClipPoly, Clip, pCairo );
 		}
 
