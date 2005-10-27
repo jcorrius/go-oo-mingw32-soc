@@ -53,6 +53,7 @@ namespace cairocanvas
                           "CanvasBitmap::CanvasBitmap(): Invalid surface or device" );
 
 	mpBufferSurface = mpDevice->getSurface( rSize, bHasAlpha ? CAIRO_CONTENT_COLOR_ALPHA : CAIRO_CONTENT_COLOR );
+	//mpBufferSurface = mpDevice->getSurface( rSize, CAIRO_CONTENT_COLOR_ALPHA );
 	mpBufferCairo = cairo_create( mpBufferSurface );
 
         maCanvasHelper.init( rSize,

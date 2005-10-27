@@ -82,6 +82,7 @@ namespace cairocanvas
     SpriteCanvas::SpriteCanvas( const uno::Reference< uno::XComponentContext >& rxContext ) :
         mxComponentContext( rxContext )
     {
+	OSL_TRACE("SpriteCanvas created %p\n", this);
     }
 
     void SAL_CALL SpriteCanvas::disposing()

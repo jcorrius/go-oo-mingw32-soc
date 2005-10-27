@@ -161,13 +161,13 @@ namespace cairocanvas
 		    drawPolyPolygonImplementation( aClipPoly, Clip, pCairo );
 		}
 
-		OSL_TRACE ("aSize %d x %d\n", aSize.getX(), aSize.getY() );
-		cairo_rectangle( pCairo, 0, 0, ceil( aSize.getX() ), ceil( aSize.getY() ) );
+		OSL_TRACE ("aSize %f x %f\n", aSize.getX(), aSize.getY() );
+		cairo_rectangle( pCairo, 0, 0, floor( aSize.getX() ), floor( aSize.getY() ) );
 		cairo_clip( pCairo );
 		cairo_set_matrix( pCairo, &aOrigMatrix );
 
-		if( isContentFullyOpaque() )
-		    cairo_set_operator( pCairo, CAIRO_OPERATOR_SOURCE );
+ 		if( isContentFullyOpaque() )
+ 		    cairo_set_operator( pCairo, CAIRO_OPERATOR_SOURCE );
 		cairo_set_source_surface( pCairo, mpBufferSurface, fX, fY );
                 if( ::rtl::math::approxEqual( fAlpha, 1.0 ) )
 		    cairo_paint( pCairo );
@@ -188,7 +188,7 @@ namespace cairocanvas
 	Cairo* pCairo = cairo_create( mpBufferSurface );
 	const ::basegfx::B2DVector& rSize( getSizePixel() );
 
-	cairo_set_source_rgb( pCairo, 1, 1, 1 );
+	cairo_set_source_rgba( pCairo, 0, 0, 0, 0 );
 	cairo_rectangle( pCairo, 0, 0, rSize.getX(), rSize.getY() );
 	cairo_fill( pCairo );
 

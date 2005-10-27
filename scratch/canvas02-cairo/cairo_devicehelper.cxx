@@ -88,7 +88,7 @@ namespace cairocanvas
 	mpWindowSurface = (Surface*) cairoHelperGetSurface( mpSysData,
 							    mpOutputWindow->GetOutOffXPixel(), mpOutputWindow->GetOutOffYPixel(),
 							    maSize.getX(), maSize.getY() );
-	mpBufferSurface = cairo_surface_create_similar( mpWindowSurface, CAIRO_CONTENT_COLOR, maSize.getX(), maSize.getY() );
+	mpBufferSurface = cairo_surface_create_similar( mpWindowSurface, CAIRO_CONTENT_COLOR_ALPHA, maSize.getX(), maSize.getY() );
 	mpBufferCairo = cairo_create( mpBufferSurface );
     }
 

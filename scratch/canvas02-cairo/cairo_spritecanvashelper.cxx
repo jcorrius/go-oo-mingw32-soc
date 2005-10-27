@@ -89,6 +89,7 @@ namespace cairocanvas
             // clip output to actual update region (otherwise a)
             // wouldn't save much render time, and b) will clutter
             // scrolled sprite content outside this area)
+	    cairo_save( pCairo );
 	    cairo_rectangle( pCairo, rArea.getMinX(), rArea.getMinY(), rArea.getWidth(), rArea.getHeight() );
 	    cairo_clip( pCairo );
 
@@ -96,6 +97,8 @@ namespace cairocanvas
             // the actual screen output position)
 	    // rendering directly to device buffer
             ::boost::polymorphic_downcast< Sprite* >( rSprite.get() )->redraw( pCairo, false );
+
+	    cairo_restore( pCairo );
         }
 
         /** Repaint sprite at original position
@@ -125,12 +128,14 @@ namespace cairocanvas
                 Sprite* pSprite = ::boost::polymorphic_downcast< Sprite* >(
                     rSprite.get() );
 
-				// calc relative sprite position in rUpdateArea (which
-				// need not be the whole screen!)
-                const ::basegfx::B2DPoint& rSpriteScreenPos( pSprite->getPosPixel() );
-                const ::basegfx::B2DPoint& rSpriteRenderPos( rSpriteScreenPos - rOutPos );
+// 				// calc relative sprite position in rUpdateArea (which
+// 				// need not be the whole screen!)
+//                 const ::basegfx::B2DPoint& rSpriteScreenPos( pSprite->getPosPixel() );
+//                 const ::basegfx::B2DPoint& rSpriteRenderPos( rSpriteScreenPos - rOutPos );
 
-                pSprite->redraw( pCairo, rSpriteRenderPos, true );
+//                 pSprite->redraw( pCairo, rSpriteRenderPos, true );
+
+		pSprite->redraw( pCairo, rOutPos, true );
             }
         }
 
@@ -240,9 +245,11 @@ namespace cairocanvas
 
 	    cairo_rectangle( pBufferCairo, 0, 0, aSize.Width, aSize.Height );
 	    cairo_clip( pBufferCairo );
+	    cairo_save( pBufferCairo );
 	    cairo_set_source_surface( pBufferCairo, mpDevice->getBackgroundSurface(), 0, 0 );
 	    cairo_set_operator( pBufferCairo, CAIRO_OPERATOR_SOURCE );
 	    cairo_paint( pBufferCairo );
+	    cairo_restore( pBufferCairo );
 
             // repaint all active sprites on top of background into
             // VDev.
@@ -350,6 +357,7 @@ namespace cairocanvas
 	    ::basegfx::B2IRange aDestRect( rDestRect );
 	    aDestRect.intersect( aOutputBounds );
 
+	    cairo_save( pBufferCairo );
             // scroll content in device back buffer
 	    cairo_set_source_surface( pBufferCairo, mpDevice->getBufferSurface(),
 				      aDestPos.getX() - aSourceUpperLeftPos.getX(),
@@ -360,6 +368,7 @@ namespace cairocanvas
 	    cairo_clip( pBufferCairo );
 	    cairo_set_operator( pBufferCairo, CAIRO_OPERATOR_SOURCE );
 	    cairo_paint( pBufferCairo );
+	    cairo_restore( pBufferCairo );
 
             const ::canvas::SpriteRedrawManager::SpriteConnectedRanges::ComponentListType::const_iterator 
                 aFirst( rUpdateArea.maComponentList.begin() );
@@ -404,10 +413,6 @@ namespace cairocanvas
 
 	cairo_destroy( pBufferCairo );
 	cairo_destroy( pWindowCairo );
-
-        // commit to screen
-        mpDevice->flush();
-
     }
     
     void SpriteCanvasHelper::opaqueUpdate( const ::basegfx::B2DRange&                          rTotalArea,
@@ -420,9 +425,13 @@ namespace cairocanvas
 	OSL_TRACE("SpriteCanvasHelper::opaqueUpdate called");
 
 	Cairo* pBufferCairo = cairo_create( mpDevice->getBufferSurface() );
+	geometry::IntegerSize2D aDeviceSize = mpDevice->getSize();
+
+	cairo_rectangle( pBufferCairo, 0, 0, aDeviceSize.Width, aDeviceSize.Height );
+	cairo_clip( pBufferCairo );
+
 	::basegfx::B2DVector aPos( ceil( rTotalArea.getMinX() ), ceil( rTotalArea.getMinY() ) );
 	::basegfx::B2DVector aSize( floor( rTotalArea.getMaxX() - aPos.getX() ), floor( rTotalArea.getMaxY() - aPos.getY() ) );
-
 
 	cairo_rectangle( pBufferCairo, aPos.getX(), aPos.getY(), aSize.getX(), aSize.getY() );
 	cairo_clip( pBufferCairo );
@@ -438,17 +447,16 @@ namespace cairocanvas
         // flush to screen
 	Cairo* pWindowCairo = cairo_create( mpDevice->getWindowSurface() );
 
+	cairo_rectangle( pWindowCairo, 0, 0, aDeviceSize.Width, aDeviceSize.Height );
+	cairo_clip( pWindowCairo );
 	cairo_rectangle( pWindowCairo, aPos.getX(), aPos.getY(), aSize.getX(), aSize.getY() );
-	cairo_clip( pBufferCairo );
+	cairo_clip( pWindowCairo );
 	cairo_set_source_surface( pWindowCairo, mpDevice->getBufferSurface(), 0, 0 );
 	cairo_set_operator( pWindowCairo, CAIRO_OPERATOR_SOURCE );
 	cairo_paint( pWindowCairo );
 
 	cairo_destroy( pBufferCairo );
 	cairo_destroy( pWindowCairo );
-
-        // commit to screen
-        mpDevice->flush();
     }
     
     void SpriteCanvasHelper::genericUpdate( const ::basegfx::B2DRange&                          rRequestedArea,
@@ -488,9 +496,11 @@ namespace cairocanvas
  	cairo_clip( pBufferCairo );
 
         // paint background
+	cairo_save( pBufferCairo );
 	cairo_set_source_surface( pBufferCairo, mpDevice->getBackgroundSurface(), 0, 0 );
 	cairo_set_operator( pBufferCairo, CAIRO_OPERATOR_SOURCE );
 	cairo_paint( pBufferCairo );
+	cairo_restore( pBufferCairo );
         
         // repaint all affected sprites on top of background into
         // VDev.
@@ -513,8 +523,5 @@ namespace cairocanvas
 
 	cairo_destroy( pBufferCairo );
 	cairo_destroy( pWindowCairo );
-
-        // commit to screen
-        mpDevice->flush();
     }
 }
