@@ -18,6 +18,27 @@ my $opt_plt_too = 0;
 my $random_symbol_sample = 0;
 my $do_data_profile = 0;
 
+sub read_sections($$)
+{
+    my $file = shift;
+    my $lib = shift;
+    my $pipe;
+    my %sections;
+
+    $lib->{sections} = \%sections;
+
+    open ($pipe, "objdump -h $file |") || die "Can't objdump -h $file: $!";
+    while (<$pipe>) {
+	m/\s*([0-9]*)\s+([\S\._]*)\s+([0-9a-f]*)\s+/;
+	my ($section, $size) = ($2, $3);
+	$section || next;
+	$size = hex ($size);
+
+	$lib->{sections}->{$section} = $size;
+    }
+    close ($pipe);
+}
+
 sub read_relocs($$)
 {
     my $file = shift;
@@ -222,6 +243,7 @@ print STDERR "reading relocs ";
 for my $file (@files) {
     my %lib_hash;
     my $lib = \%lib_hash;
+    read_sections ($file, $lib);
     read_relocs ($file, $lib);
     read_symbols($file, $lib);
     push @libs, $lib;
@@ -232,6 +254,7 @@ print STDERR "\n";
 my $do_print_relocs = 1;
 my $do_print_data_breakdown = 1;
 my $do_print_vtable_breakdown = 1;
+my $do_section_breakdown = 1;
 
 my %data_breakdown;
 
@@ -430,6 +453,62 @@ for $lib (sort by_internal @libs) {
 	    print "  wasted bytes: $vtable_wasted_size\n";
 	}
     }
+    if ($do_section_breakdown) {
+	print "Section size breakdown\n";
+# cf. http://refspecs.freestandards.org/LSB_3.0.0/LSB-Core-generic/LSB-Core-generic/specialsections.html
+	my %breakdown = (
+	    '\.hash' => 'linking',
+	    '\.dynsym' => 'linking',
+	    '\.dynstr' => 'linking',
+	    '\.rel\.plt' => 'linking',
+	    '\.plt' => 'linking',
+	    '\.got' => 'linking',
+	    '\.got\.plt' => 'linking',
+	    '\.rel\.dyn' => 'data relocs',
+	    '\.gnu\.version.*' => 'versioning',
+	    '\.gcc_except_table' => 'exceptions',
+	    '\.[cd]tors' => 'c/d-tors',
+	    '\.data.*' => 'data',
+	    '\.rodata' => 'data',
+	    '\.bss' => 'data',
+#	    '\.rodata' => 'ro data'
+#	    '\.bss' => 'scratch globals',
+	    '\.debug.*' => 'debug',
+	    '\.comment' => 'comment',
+	    '\.text' => 'code',
+	    '\.eh_frame.*' => 'eh frame?',
+	    '\.init.*' => 'init/fini',
+	    '\.fini.*' => 'init/fini',
+	);
+	my %broken_down;
+	my $total_size = 0;
+	for my $sect (keys %{$lib->{sections}}) {
+	    my $bsect = 'misc';
+	    for my $match (keys %breakdown) {
+		if ($sect =~ m/^$match$/) {
+		    $bsect = $breakdown{$match};
+		    last;
+		}
+	    }
+#	    if ($bsect eq 'misc') {
+#		print "Section $sect size " . $lib->{sections}->{$sect} . " is misc...\n";
+#	    }
+	    $broken_down{$bsect} = 0 if (!defined $broken_down{$bsect});
+	    my $size = $lib->{sections}->{$sect};
+	    $broken_down{$bsect} += $size;
+	    $total_size += $size;
+	}
+	if ($total_size)
+	{
+	    for my $bsect (sort { $broken_down{$b} <=> $broken_down{$a} } (keys %broken_down)) {
+		next if ($broken_down{$bsect} < 1024);
+		print " " . sprintf ("%-15s", $bsect) .
+		    " " . sprintf ("%4d", ($broken_down{$bsect}/1024)) . 
+		    "kb - " . sprintf ("%2.2g", $broken_down{$bsect} * 100.0 /$total_size) . "\%\n";
+	    }
+	}
+	print " Total: $total_size bytes\n";
+    }
 }
 
 if ($do_data_profile) {
@@ -439,3 +518,4 @@ if ($do_data_profile) {
     print " other: " . $data_breakdown{other_count} . " size " . $data_breakdown{other} . " bytes\n";
     print "\n";
 }
+
