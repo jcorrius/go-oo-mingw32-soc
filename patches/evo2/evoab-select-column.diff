@@ -1,0 +1,754 @@
+--- connectivity/source/drivers/evoab2/NCatalog.cxx.bakj	2005-10-24 09:20:22.000000000 +0530
++++ connectivity/source/drivers/evoab2/NCatalog.cxx	2005-10-22 09:54:47.000000000 +0530
+@@ -72,7 +72,7 @@
+ {
+ 	TStringVector aVector;
+ 	Sequence< ::rtl::OUString > aTypes(1);
+-	aTypes[0] = ::rtl::OUString::createFromAscii("%");
++	aTypes[0] = ::rtl::OUString::createFromAscii("TABLE");
+ 	Reference< XResultSet > xResult = m_xMetaData->getTables(Any(),
+ 		::rtl::OUString::createFromAscii("%"),::rtl::OUString::createFromAscii("%"),aTypes);
+ 
+@@ -92,3 +92,27 @@
+ 	else
+ 		m_pTables = new OEvoabTables(m_xMetaData,*this,m_aMutex,aVector);
+ }
++// XTablesSupplier
++Reference< XNameAccess > SAL_CALL  OEvoabCatalog::getTables(  ) throw(RuntimeException)
++{
++        ::osl::MutexGuard aGuard(m_aMutex);
++
++        try
++        {
++                if (!m_pTables) {
++                        refreshTables();
++                        }
++        }
++        catch( const RuntimeException& )
++        {
++                // allowed to leave this method
++                throw;
++        }
++        catch( const Exception& )
++        {
++                // allowed
++        }
++
++        return m_pTables;
++}
++
+--- connectivity/source/drivers/evoab2/NCatalog.hxx.bakj	2005-10-24 09:20:12.000000000 +0530
++++ connectivity/source/drivers/evoab2/NCatalog.hxx	2005-10-21 10:19:34.000000000 +0530
+@@ -51,11 +51,14 @@
+             ::com::sun::star::uno::Reference< ::com::sun::star::sdbc::XDatabaseMetaData > m_xMetaData;
+ 		public:
+ 			OEvoabCatalog(OEvoabConnection *_pCon);
+-
++			inline OEvoabConnection* getConnection() const { return m_pConnection; }
+ 			virtual void refreshTables();
+ 			virtual void refreshViews() {}
+ 			virtual void refreshGroups() {}
+ 			virtual void refreshUsers() {}
++ // XTablesSupplier
++                        virtual ::com::sun::star::uno::Reference< ::com::sun::star::container::XNameAccess > SAL_CALL getTables(
++                                        ) throw(::com::sun::star::uno::RuntimeException);
+ 		};
+ 	}
+ }
+--- connectivity/source/drivers/evoab2/NDatabaseMetaData.hxx.bakj	2005-10-24 09:19:27.000000000 +0530
++++ connectivity/source/drivers/evoab2/NDatabaseMetaData.hxx	2005-10-21 17:05:37.000000000 +0530
+@@ -89,6 +89,7 @@
+ 		sal_Int32	 getFieldType(sal_Int32 nCol) ;
+ 		rtl::OUString	 getFieldTypeName(sal_Int32 nCol) ;
+ 		rtl::OUString    getFieldName(sal_Int32 nCol) ;
++		sal_Int32        findEvoabField(const rtl::OUString& aColName);
+ 
+ 		void free_column_resources();
+ 		class OEvoabDatabaseMetaData : public ODatabaseMetaDataBase
+--- connectivity/source/drivers/evoab2/NDatabaseMetaData.cxx.bakj	2005-10-24 09:19:41.000000000 +0530
++++ connectivity/source/drivers/evoab2/NDatabaseMetaData.cxx	2005-10-24 09:32:44.000000000 +0530
+@@ -198,6 +198,23 @@
+         return nType;
+     }
+ 
++    sal_Int32 findEvoabField(const rtl::OUString& aColName)
++    {
++        sal_Int32 nRet = -1;	
++        sal_Bool bFound = sal_False;
++        initFields();
++        for (int i=0;(i < nFields) && !bFound;i++)
++        {
++            rtl::OUString aName = getFieldName(i);
++            if (aName == aColName)
++            {
++                nRet = i;
++                bFound = sal_True;
++            }
++        }
++        return nRet;
++    }
++
+     rtl::OUString
+     getFieldTypeName( sal_Int32 nCol )
+     {
+--- connectivity/source/drivers/evoab2/NResultSet.cxx.bakj	2005-10-24 09:18:04.000000000 +0530
++++ connectivity/source/drivers/evoab2/NResultSet.cxx	2005-10-22 12:15:00.000000000 +0530
+@@ -276,6 +276,7 @@
+ 			m_pConnection->setPassword( aPassword );
+ 		}
+ 		m_nLength = g_list_length( m_pContacts );
++
+ 		OSL_TRACE( "Query return %d records", m_nLength );
+ 		m_nIndex = -1;
+ 	}
+@@ -453,7 +454,9 @@
+ bool
+ OEvoabResultSet::getValue( sal_Int32 nColumnNum, GType nType, GValue *pStackValue)
+ {
+-	const ColumnProperty * pSpecs = evoab::getField (nColumnNum - 1);
++	const ColumnProperty * pSpecs = evoab::getField (nColumnNum );
++	if (!pSpecs) 
++		return sal_False;
+ 	GParamSpec *pSpec = pSpecs->pField;
+ 	gboolean bIsSplittedColumn=pSpecs->bIsSplittedValue;
+ 	EContact *pContact = getCur();
+@@ -464,7 +467,9 @@
+ 		}
+ 	if (G_PARAM_SPEC_VALUE_TYPE (pSpec) != nType)
+ 	{
++#ifdef DEBUG
+ 		g_warning ("Wrong type");
++#endif
+ 		return false;
+ 	}
+ 	g_value_init (pStackValue, nType);
+@@ -482,7 +487,9 @@
+ 						   pStackValue);
+ 	if (G_VALUE_TYPE (pStackValue) != nType)
+ 	{
++#ifdef DEBUG
+ 		g_warning ("Fetched type mismatch");
++#endif
+ 		g_value_unset (pStackValue);
+ 		return false;
+ 	}
+@@ -503,14 +510,18 @@
+ 	::osl::MutexGuard aGuard( m_aMutex );
+ 	checkDisposed(OResultSet_BASE::rBHelper.bDisposed);
+ 	rtl::OUString aResult;
+-
+-	GValue aValue = { 0, };
+-	if (getValue (nColumnNum, G_TYPE_STRING, &aValue))
+-	{
+-		const char *pStr = g_value_get_string (&aValue);
+-		rtl::OString aStr (pStr ? pStr : "");
+-		aResult = rtl::OStringToOUString( aStr, RTL_TEXTENCODING_UTF8 );
+-		g_value_unset (&aValue);
++	if ( m_xMetaData.is())
++        {
++                OEvoabResultSetMetaData *pMeta = (OEvoabResultSetMetaData *) m_xMetaData.get();
++                sal_Int32 nFieldNumber = pMeta->fieldAtColumn(nColumnNum);
++		GValue aValue = { 0, };
++		if (getValue (nFieldNumber, G_TYPE_STRING, &aValue))
++		{
++			const char *pStr = g_value_get_string (&aValue);
++			rtl::OString aStr (pStr ? pStr : "");
++			aResult = rtl::OStringToOUString( aStr, RTL_TEXTENCODING_UTF8 );
++			g_value_unset (&aValue);
++		}
+ 	}
+ 	return aResult;
+ }
+@@ -521,11 +532,16 @@
+ 	checkDisposed(OResultSet_BASE::rBHelper.bDisposed);
+ 	sal_Bool bResult = sal_False;
+ 
+-	GValue aValue = { 0, };
+-	if (getValue (nColumnNum, G_TYPE_BOOLEAN, &aValue))
+-	{
+-		bResult = g_value_get_boolean (&aValue);
+-		g_value_unset (&aValue);
++	if ( m_xMetaData.is())
++        {
++                OEvoabResultSetMetaData *pMeta = (OEvoabResultSetMetaData *) m_xMetaData.get();
++                sal_Int32 nFieldNumber = pMeta->fieldAtColumn(nColumnNum);
++		GValue aValue = { 0, };
++		if (getValue (nFieldNumber, G_TYPE_STRING, &aValue))
++		{
++			bResult = g_value_get_boolean (&aValue);
++			g_value_unset (&aValue);
++		}
+ 	}
+ 	return bResult ? sal_True : sal_False;
+ }
+--- connectivity/source/drivers/evoab2/NResultSetMetaData.cxx.bakj	2005-10-24 09:18:59.000000000 +0530
++++ connectivity/source/drivers/evoab2/NResultSetMetaData.cxx	2005-10-22 12:03:26.000000000 +0530
+@@ -45,6 +45,7 @@
+ #ifndef _COM_SUN_STAR_SDBC_DATATYPE_HPP_
+ #include <com/sun/star/sdbc/DataType.hpp>
+ #endif
++#include "NDebug.hxx"
+ 
+ using namespace connectivity::evoab;
+ using namespace com::sun::star::uno;
+@@ -52,7 +53,8 @@
+ using namespace com::sun::star::sdbc;
+ 
+ OEvoabResultSetMetaData::OEvoabResultSetMetaData(const ::rtl::OUString& _aTableName) 
+-	: m_aTableName(_aTableName)
++	: m_aTableName(_aTableName),
++	  m_aEvoabFields()
+ {
+ 
+ }
+@@ -61,6 +63,27 @@
+ {
+ }
+ // -------------------------------------------------------------------------
++void OEvoabResultSetMetaData::setEvoabFields(const ::vos::ORef<connectivity::OSQLColumns> &xColumns) throw(SQLException)
++{
++        OSQLColumns::const_iterator aIter;
++        static const ::rtl::OUString aName(::rtl::OUString::createFromAscii("Name"));
++
++        for (aIter = xColumns->begin(); aIter != xColumns->end(); ++aIter)
++        {
++                ::rtl::OUString aFieldName;
++                sal_uInt32 nFieldNumber;
++
++                (*aIter)->getPropertyValue(aName) >>= aFieldName;
++                nFieldNumber = findEvoabField(aFieldName);
++		if (nFieldNumber == -1)
++		::dbtools::throwGenericSQLException(
++			::rtl::OUString::createFromAscii("Invalid column name: ") + aFieldName,
++			NULL);
++                m_aEvoabFields.push_back(nFieldNumber);
++        }
++}
++
++// -------------------------------------------------------------------------
+ void OEvoabResultSetMetaData::checkColumnIndex(sal_Int32 nColumnNum)  throw(SQLException, RuntimeException)
+ {
+ 	if( nColumnNum <= 0 || nColumnNum > getColumnCount() )
+@@ -74,12 +97,13 @@
+ // -------------------------------------------------------------------------
+ sal_Int32 SAL_CALL OEvoabResultSetMetaData::getColumnType( sal_Int32 nColumnNum ) throw(SQLException, RuntimeException)
+ {
+-	return evoab::getFieldType (nColumnNum - 1);
++        sal_uInt32 nField = m_aEvoabFields[nColumnNum - 1];
++	return evoab::getFieldType (nField);
+ }
+ // -------------------------------------------------------------------------
+ sal_Int32 SAL_CALL OEvoabResultSetMetaData::getColumnCount(  ) throw(SQLException, RuntimeException)
+ {
+-	return evoab::getFieldCount();
++	return m_aEvoabFields.size();
+ }
+ // -------------------------------------------------------------------------
+ sal_Bool SAL_CALL OEvoabResultSetMetaData::isCaseSensitive( sal_Int32 nColumnNum ) throw(SQLException, RuntimeException)
+@@ -94,17 +118,21 @@
+ // -------------------------------------------------------------------------
+ ::rtl::OUString SAL_CALL OEvoabResultSetMetaData::getColumnName( sal_Int32 nColumnNum ) throw(SQLException, RuntimeException)
+ {
+-	return evoab::getFieldName( nColumnNum - 1 );
++        sal_uInt32 nField = m_aEvoabFields[nColumnNum - 1];
++        return evoab::getFieldName( nField );
+ }
+ // -------------------------------------------------------------------------
+ ::rtl::OUString SAL_CALL OEvoabResultSetMetaData::getColumnTypeName( sal_Int32 nColumnNum ) throw(SQLException, RuntimeException)
+ {
+-	return evoab::getFieldTypeName( nColumnNum - 1 );
++        sal_uInt32 nField = m_aEvoabFields[nColumnNum - 1];
++	return evoab::getFieldTypeName( nField );
+ }
+ // -------------------------------------------------------------------------
+ ::rtl::OUString SAL_CALL OEvoabResultSetMetaData::getColumnLabel( sal_Int32 nColumnNum ) throw(SQLException, RuntimeException)
+ {
+-	const ColumnProperty *pSpecs = getField(nColumnNum - 1); 
++	
++        sal_uInt32 nField = m_aEvoabFields[nColumnNum - 1];
++	const ColumnProperty *pSpecs = getField(nField); 
+ 	GParamSpec *pSpec = pSpecs->pField;
+ 	rtl::OUString aLabel;
+ 
+--- connectivity/source/drivers/evoab2/NResultSetMetaData.hxx.bakj	2005-10-24 09:18:48.000000000 +0530
++++ connectivity/source/drivers/evoab2/NResultSetMetaData.hxx	2005-10-22 09:19:33.000000000 +0530
+@@ -46,6 +46,9 @@
+ #ifndef _CONNECTIVITY_EVOAB_CONNECTION_HXX_
+ #include "NConnection.hxx"
+ #endif 
++#ifndef _VOS_REF_HXX_
++#include <vos/ref.hxx>
++#endif
+ #include <com/sun/star/connection/XConnection.hpp>
+ namespace connectivity
+ {
+@@ -59,11 +62,17 @@
+ 		class OEvoabResultSetMetaData :	public 	OResultSetMetaData_BASE
+ 		{
+ 		  ::rtl::OUString       m_aTableName;
++                  ::std::vector<sal_Int32>        m_aEvoabFields;
++
+ 		protected:
+ 			virtual ~OEvoabResultSetMetaData();
+ 		public:
+ 		  OEvoabResultSetMetaData(const ::rtl::OUString& _aTableName);
+-
++		  void setEvoabFields(const ::vos::ORef<connectivity::OSQLColumns> &xColumns) throw(::com::sun::star::sdbc::SQLException);
++		  inline sal_uInt32 fieldAtColumn(sal_Int32 columnIndex) const
++                        { return m_aEvoabFields[columnIndex - 1]; }
++		  inline sal_Int32 getFieldSize() const 
++			{return m_aEvoabFields.size();}
+ 		  /// Avoid ambigous cast error from the compiler.
+ 		  inline operator ::com::sun::star::uno::Reference< ::com::sun::star::sdbc::XResultSetMetaData > () throw()
+ 		  { return this; }
+--- connectivity/source/drivers/evoab2/NStatement.cxx.bakj	2005-10-24 09:17:29.000000000 +0530
++++ connectivity/source/drivers/evoab2/NStatement.cxx	2005-10-22 11:38:34.000000000 +0530
+@@ -484,11 +484,20 @@
+ 	g_message( "Parsed SQL to sexpr '%s'\n", pSexpr );
+ 	g_free( pSexpr );
+ #endif
+-
++ 	::vos::ORef<connectivity::OSQLColumns> xColumns;
+ 	if (pQuery)
+ 	{
+ 		pResult->construct( pQuery, aTable, bIsWithoutWhere );
+ 		e_book_query_unref( pQuery );
++		xColumns = m_aSQLIterator.getSelectColumns();
++		if (!xColumns.isValid())
++		{
++			::dbtools::throwGenericSQLException(
++				::rtl::OUString::createFromAscii("Invalid selection of columns"),
++				NULL);
++		}
++		OEvoabResultSetMetaData *pMeta = (OEvoabResultSetMetaData *) pResult->getMetaData().get();
++		pMeta->setEvoabFields(xColumns);
+ 	}
+ 	m_xResultSet = xRS;
+ 	
+--- connectivity/source/drivers/evoab2/NTables.cxx.bakj	2005-10-24 09:16:46.000000000 +0530
++++ connectivity/source/drivers/evoab2/NTables.cxx	2005-10-24 09:10:02.000000000 +0530
+@@ -78,7 +78,9 @@
+ #ifndef CONNECTIVITY_EVOAB_DEBUG_HELPER_HXX
+ #include "NDebug.hxx"
+ #endif
+-
++#ifndef _CONNECTIVITY_EVOAB_TABLE_HXX_
++#include "NTable.hxx"
++#endif
+ using namespace ::comphelper;
+ 
+ using namespace ::cppu;
+@@ -98,7 +100,7 @@
+ 	::rtl::OUString aSchema = ::rtl::OUString::createFromAscii("%");
+ 
+     Sequence< ::rtl::OUString > aTypes(1);
+-	aTypes[0] = ::rtl::OUString::createFromAscii("%");
++	aTypes[0] = ::rtl::OUString::createFromAscii("TABLE");
+ 	::rtl::OUString sEmpty;
+ 
+     Reference< XResultSet > xResult = m_xMetaData->getTables(Any(),aSchema,aName,aTypes);
+@@ -109,12 +111,17 @@
+         Reference< XRow > xRow(xResult,UNO_QUERY);
+ 		if(xResult->next()) // there can be only one table with this name
+ 		{
+-			OTable* pRet = new OTable( this, sal_True,
+-									   aName, xRow->getString( 4 ),
+-									   xRow->getString( 5 ), sEmpty );
+-			xRet = pRet;
++			OEvoabTable* pRet = new OEvoabTable(
++					this,
++					(OEvoabConnection *)static_cast<OEvoabCatalog&>(m_rParent).getConnection(),
++					aName,
++					xRow->getString(4),
++					xRow->getString(5),
++					sEmpty);
++					xRet = pRet;
+ 		}
+ 	}
++
+ 	::comphelper::disposeComponent(xResult);
+ 
+ 	return xRet;
+--- /dev/null	2005-10-24 08:58:06.240378500 +0530
++++ connectivity/source/drivers/evoab2/NTable.hxx	2005-10-22 11:36:33.000000000 +0530
+@@ -0,0 +1,84 @@
++ /*************************************************************************
++ *
++ *  OpenOffice.org - a multi-platform office productivity suite
++ *
++ *  $RCSfile$
++ *
++ *  $Revision$
++ *
++ *  last change: $Author$ $Date$
++ *
++ *  The Contents of this file are made available subject to
++ *  the terms of GNU Lesser General Public License Version 2.1.
++ *
++ *
++ *    GNU Lesser General Public License Version 2.1
++ *    =============================================
++ *    Copyright 2005 by Sun Microsystems, Inc.
++ *    901 San Antonio Road, Palo Alto, CA 94303, USA
++ *
++ *    This library is free software; you can redistribute it and/or
++ *    modify it under the terms of the GNU Lesser General Public
++ *    License version 2.1, as published by the Free Software Foundation.
++ *
++ *    This library is distributed in the hope that it will be useful,
++ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ *    Lesser General Public License for more details.
++ *
++ *    You should have received a copy of the GNU Lesser General Public
++ *    License along with this library; if not, write to the Free Software
++ *    Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ *    MA  02111-1307  USA
++ *
++ *    Contributor(s): Jayant Madavi_______________________________________
++ *
++ *
++ ************************************************************************/
++
++#ifndef _CONNECTIVITY_EVOAB_TABLE_HXX_
++#define _CONNECTIVITY_EVOAB_TABLE_HXX_
++
++#ifndef _CONNECTIVITY_EVOAB_CONNECTION_HXX_
++#include "NConnection.hxx"
++#endif
++
++#ifndef _CONNECTIVITY_SDBCX_TABLE_HXX_
++#include "connectivity/sdbcx/VTable.hxx"
++#endif
++
++namespace connectivity
++{
++	namespace evoab
++	{
++		typedef connectivity::sdbcx::OTable OEvoabTable_TYPEDEF;
++
++		::rtl::OUString getTypeString(const ::com::sun::star::uno::Reference< ::com::sun::star::beans::XPropertySet >& xColProp);
++
++		class OEvoabTable : public OEvoabTable_TYPEDEF
++		{
++			::com::sun::star::uno::Reference< ::com::sun::star::sdbc::XDatabaseMetaData > m_xMetaData;
++			OEvoabConnection* m_pConnection;
++
++		public:
++			OEvoabTable(	sdbcx::OCollection* _pTables, OEvoabConnection* _pConnection);
++			OEvoabTable(	sdbcx::OCollection* _pTables, 
++					OEvoabConnection* _pConnection,
++					const ::rtl::OUString& _Name,
++					const ::rtl::OUString& _Type,
++					const ::rtl::OUString& _Description = ::rtl::OUString(),
++					const ::rtl::OUString& _SchemaName = ::rtl::OUString(),
++					const ::rtl::OUString& _CatalogName = ::rtl::OUString()
++				);
++
++			OEvoabConnection* getConnection() { return m_pConnection;}
++
++			virtual void refreshColumns();
++
++			::rtl::OUString getTableName() const { return m_Name; }
++			::rtl::OUString getSchema() const { return m_SchemaName; }
++		};
++	}
++}
++
++#endif // _CONNECTIVITY_EVOAB_TABLE_HXX_
+--- /dev/null	2005-10-24 08:58:06.240378500 +0530
++++ connectivity/source/drivers/evoab2/NTable.cxx	2005-10-22 12:02:52.000000000 +0530
+@@ -0,0 +1,108 @@
++ /*************************************************************************
++ *
++ *  OpenOffice.org - a multi-platform office productivity suite
++ *
++ *  $RCSfile$
++ *
++ *  $Revision$
++ *
++ *  last change: $Author$ $Date$
++ *
++ *  The Contents of this file are made available subject to
++ *  the terms of GNU Lesser General Public License Version 2.1.
++ *
++ *
++ *    GNU Lesser General Public License Version 2.1
++ *    =============================================
++ *    Copyright 2005 by Sun Microsystems, Inc.
++ *    901 San Antonio Road, Palo Alto, CA 94303, USA
++ *
++ *    This library is free software; you can redistribute it and/or
++ *    modify it under the terms of the GNU Lesser General Public
++ *    License version 2.1, as published by the Free Software Foundation.
++ *
++ *    This library is distributed in the hope that it will be useful,
++ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ *    Lesser General Public License for more details.
++ *
++ *    You should have received a copy of the GNU Lesser General Public
++ *    License along with this library; if not, write to the Free Software
++ *    Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ *    MA  02111-1307  USA
++ *
++ *    Contributor(s): Jayant Madavi_______________________________________
++ *
++ *
++ ************************************************************************/
++
++#include "NTable.hxx"
++#ifndef _CONNECTIVITY_EVOAB_TABLES_HXX_
++#include "NTables.hxx"
++#endif
++#ifndef _CONNECTIVITY_EVOAB_COLUMNS_HXX_
++#include "NColumns.hxx"
++#endif
++#ifndef _CONNECTIVITY_EVOAB_CATALOG_HXX__
++#include "NCatalog.hxx"
++#endif
++
++using namespace connectivity;
++using namespace ::comphelper;
++using namespace ::com::sun::star::uno;
++using namespace ::com::sun::star::beans;
++using namespace ::com::sun::star::sdbcx;
++using namespace ::com::sun::star::sdbc;
++using namespace ::com::sun::star::container;
++using namespace ::com::sun::star::lang;
++using namespace connectivity::evoab;
++// -------------------------------------------------------------------------
++OEvoabTable::OEvoabTable( sdbcx::OCollection* _pTables, OEvoabConnection* _pConnection) 
++	: OEvoabTable_TYPEDEF(_pTables, sal_True),
++	m_pConnection(_pConnection)
++{
++	construct();
++}
++// -------------------------------------------------------------------------
++OEvoabTable::OEvoabTable( sdbcx::OCollection* _pTables,
++	            OEvoabConnection* _pConnection,
++	            const ::rtl::OUString& _Name,
++	            const ::rtl::OUString& _Type,
++	            const ::rtl::OUString& _Description ,
++	            const ::rtl::OUString& _SchemaName,
++	            const ::rtl::OUString& _CatalogName
++	            ) : OEvoabTable_TYPEDEF(_pTables,sal_True,
++	                              _Name,
++	                              _Type,
++	                              _Description,
++	                              _SchemaName,
++	                              _CatalogName),
++	                m_pConnection(_pConnection)
++{
++	construct();
++}
++// -------------------------------------------------------------------------
++void OEvoabTable::refreshColumns()
++{
++	TStringVector aVector;
++
++	if (!isNew())
++	{
++	    Reference< XResultSet > xResult = m_pConnection->getMetaData()->getColumns(
++				Any(),
++				m_SchemaName,
++				m_Name,
++				::rtl::OUString(RTL_CONSTASCII_USTRINGPARAM("%")));
++
++	    if (xResult.is())
++	    {
++		Reference< XRow > xRow(xResult, UNO_QUERY);
++		while (xResult->next())
++				aVector.push_back(xRow->getString(4));
++	    }
++	}
++	if (m_pColumns)
++	    m_pColumns->reFill(aVector);
++	else
++	    m_pColumns  = new OEvoabColumns(this,m_aMutex,aVector);
++}
+--- /dev/null	2005-10-24 08:58:06.240378500 +0530
++++ connectivity/source/drivers/evoab2/NColumns.hxx	2005-10-22 11:37:26.000000000 +0530
+@@ -0,0 +1,73 @@
++ /*************************************************************************
++ *
++ *  OpenOffice.org - a multi-platform office productivity suite
++ *
++ *  $RCSfile$
++ *
++ *  $Revision$
++ *
++ *  last change: $Author$ $Date$
++ *
++ *  The Contents of this file are made available subject to
++ *  the terms of GNU Lesser General Public License Version 2.1.
++ *
++ *
++ *    GNU Lesser General Public License Version 2.1
++ *    =============================================
++ *    Copyright 2005 by Sun Microsystems, Inc.
++ *    901 San Antonio Road, Palo Alto, CA 94303, USA
++ *
++ *    This library is free software; you can redistribute it and/or
++ *    modify it under the terms of the GNU Lesser General Public
++ *    License version 2.1, as published by the Free Software Foundation.
++ *
++ *    This library is distributed in the hope that it will be useful,
++ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ *    Lesser General Public License for more details.
++ *
++ *    You should have received a copy of the GNU Lesser General Public
++ *    License along with this library; if not, write to the Free Software
++ *    Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ *    MA  02111-1307  USA
++ *
++ *    Contributor(s): Jayant Madavi_______________________________________
++ *
++ *
++ ************************************************************************/
++
++#ifndef _CONNECTIVITY_EVOAB_COLUMNS_HXX_
++#define _CONNECTIVITY_EVOAB_COLUMNS_HXX_
++
++#ifndef _CONNECTIVITY_EVOAB_TABLE_HXX_
++#include "NTable.hxx"
++#endif
++
++#ifndef _CONNECTIVITY_SDBCX_COLLECTION_HXX_
++#include "connectivity/sdbcx/VCollection.hxx"
++#endif
++
++namespace connectivity
++{
++	namespace evoab
++	{
++		class OEvoabColumns : public sdbcx::OCollection
++		{
++		protected:
++			OEvoabTable*	m_pTable;
++
++			virtual sdbcx::ObjectType createObject(const ::rtl::OUString& _rName);
++			virtual void impl_refresh() throw(::com::sun::star::uno::RuntimeException);
++
++		public:
++			OEvoabColumns(	OEvoabTable* _pTable,
++						::osl::Mutex& _rMutex,
++						const TStringVector &_rVector
++						) : sdbcx::OCollection(*_pTable,sal_True,_rMutex,_rVector),
++							m_pTable(_pTable)
++			{ }
++		};
++	}
++}
++
++#endif // _CONNECTIVITY_EVOAB_COLUMNS_HXX_
+--- /dev/null	2005-10-24 08:58:06.240378500 +0530
++++ connectivity/source/drivers/evoab2/NColumns.cxx	2005-10-22 11:38:07.000000000 +0530
+@@ -0,0 +1,106 @@
++ /*************************************************************************
++ *
++ *  OpenOffice.org - a multi-platform office productivity suite
++ *
++ *  $RCSfile$
++ *
++ *  $Revision$
++ *
++ *  last change: $Author$ $Date$
++ *
++ *  The Contents of this file are made available subject to
++ *  the terms of GNU Lesser General Public License Version 2.1.
++ *
++ *
++ *    GNU Lesser General Public License Version 2.1
++ *    =============================================
++ *    Copyright 2005 by Sun Microsystems, Inc.
++ *    901 San Antonio Road, Palo Alto, CA 94303, USA
++ *
++ *    This library is free software; you can redistribute it and/or
++ *    modify it under the terms of the GNU Lesser General Public
++ *    License version 2.1, as published by the Free Software Foundation.
++ *
++ *    This library is distributed in the hope that it will be useful,
++ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ *    Lesser General Public License for more details.
++ *
++ *    You should have received a copy of the GNU Lesser General Public
++ *    License along with this library; if not, write to the Free Software
++ *    Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ *    MA  02111-1307  USA
++ *
++ *    Contributor(s): Jayant Madavi_______________________________________
++ *
++ *
++ ************************************************************************/
++
++#include "NColumns.hxx"
++#ifndef _CONNECTIVITY_EVOAB_TABLE_HXX_
++#include "NTable.hxx"
++#endif
++#ifndef _CONNECTIVITY_EVOAB_TABLES_HXX_
++#include "NTables.hxx"
++#endif
++#ifndef _CONNECTIVITY_EVOAB_CATALOG_HXX_
++#include "NCatalog.hxx"
++#endif
++
++#ifndef _CONNECTIVITY_SDBCX_COLUMN_HXX_
++#include "connectivity/sdbcx/VColumn.hxx"
++#endif
++
++using namespace connectivity::sdbcx;
++using namespace connectivity;
++using namespace ::comphelper;
++using namespace ::com::sun::star::uno;
++using namespace ::com::sun::star::beans;
++using namespace ::com::sun::star::sdbc;
++using namespace ::com::sun::star::container;
++using namespace ::com::sun::star::lang;
++using namespace connectivity::evoab;
++
++// -------------------------------------------------------------------------
++sdbcx::ObjectType OEvoabColumns::createObject(const ::rtl::OUString& _rName)
++{
++	Reference< XResultSet > xResult = m_pTable->getConnection()->getMetaData()->getColumns(
++		Any(),
++		m_pTable->getSchema(),
++		m_pTable->getTableName(),
++		_rName);
++
++	sdbcx::ObjectType xRet = NULL;
++	if (xResult.is())
++	{
++		Reference< XRow > xRow(xResult,UNO_QUERY);
++
++		while (xResult->next())
++		{
++			if (xRow->getString(4) == _rName)
++			{
++				OColumn* pRet = new OColumn(
++						_rName,
++						xRow->getString(6),
++						xRow->getString(13),
++						xRow->getInt(11),
++						xRow->getInt(7),
++						xRow->getInt(9),
++						xRow->getInt(5),
++						sal_False,
++						sal_False,
++						sal_False,
++						sal_True);
++				xRet = pRet;
++				break;
++			}
++		}
++	}
++
++	return xRet;
++}
++// -------------------------------------------------------------------------
++void OEvoabColumns::impl_refresh() throw(RuntimeException)
++{
++	m_pTable->refreshColumns();
++}
