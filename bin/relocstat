@@ -9,7 +9,8 @@
 #
 
 #
-# TODO: add an object / size breakdown - how much is in XYZ sections ?
+# TODO: use 'objdump -t' for read_symbols if it's there:
+#       much more reliable.
 #
 
 
@@ -17,6 +18,7 @@
 my $opt_plt_too = 0;
 my $random_symbol_sample = 0;
 my $do_data_profile = 0;
+my $summary_only = 0;
 
 sub read_sections($$)
 {
@@ -27,13 +29,14 @@ sub read_sections($$)
 
     $lib->{sections} = \%sections;
 
-    open ($pipe, "objdump -h $file |") || die "Can't objdump -h $file: $!";
+    open ($pipe, "readelf -W -e $file |") || die "Can't readelf -W -e $file: $!";
     while (<$pipe>) {
-	m/\s*([0-9]*)\s+([\S\._]*)\s+([0-9a-f]*)\s+/;
-	my ($section, $size) = ($2, $3);
-	$section || next;
+	m/\s*\[\s*([0-9]*)\]\s+([\S\._]*)\s+([A-Za-z]*)\s+([0-9a-f]*)\s+([0-9a-f]*)\s+([0-9a-f]*)\s+/ || next;
+	my ($section, $type, $address, $offset, $size) = ($2, $3, $4, $5, $6);
+	$section && $type || next;
 	$size = hex ($size);
 
+#	print "Section $section size $size\n";
 	$lib->{sections}->{$section} = $size;
     }
     close ($pipe);
@@ -229,6 +232,8 @@ for my $arg (@ARGV) {
 	$do_data_profile = 1;
     } elsif ($arg =~ m/^--random-syms/) {
 	$random_symbol_sample = 1;
+    } elsif ($arg =~ m/^--summary/) {
+	$summary_only = 1;
     } else {
 	push @files, $arg;
     }
@@ -267,6 +272,10 @@ if ($do_data_profile) {
     $data_breakdown{rtti_count} = 0;
     $data_breakdown{other} = 0;
 }
+
+my %section_breakdown;
+my $total_section_size = 0;
+
 #
 # pretty print it
 #
@@ -297,10 +306,12 @@ for $lib (sort by_internal @libs) {
 	}
 	my $total = keys %{$lib->{relocs}};
 	my $percentage = sprintf ("%2.2g", $internal_strong_relocs / ($total + 1) * 100);
-	
-	print $lib->{file} . " total relocs $total external $external_relocs, internal weak " .
-	    "$internal_weak_relocs (of which thnks $internal_weak_thnk), " .
-	    "internal strong $internal_strong_relocs: saving $percentage\%\n";
+
+	if (!$summary_only) {
+	    print $lib->{file} . " total relocs $total external $external_relocs, internal weak " .
+		"$internal_weak_relocs (of which thnks $internal_weak_thnk), " .
+		"internal strong $internal_strong_relocs: saving $percentage\%\n";
+	}
     }
 
     if ($random_symbol_sample) {
@@ -351,7 +362,7 @@ for $lib (sort by_internal @libs) {
 	    $data_breakdown{other_count} += $other_count;
 	}
 
-	if ($do_print_data_breakdown && $total_size) {
+	if ($do_print_data_breakdown && $total_size && !$summary_only) {
 	    print ".data:\n";
 	    print " vtables: $vtable_count size $vtable_size bytes - " . sprintf ("%2.2g", $vtable_size/$total_size) . "\%\n";
 	    print " rtti: $rtti_count size $rtti_size bytes - " . sprintf ("%2.2g", $rtti_size/$total_size) . "\%\n";
@@ -371,7 +382,6 @@ for $lib (sort by_internal @libs) {
 	my %vtable_breakdown;
 	my %vtable_wasted;
 
-	print "Data section contains " . $key_count * 4 . " bytes\n";
 	for $sym (keys %{$lib->{relocs}}) {
 	    my $lst = ($lib->{relocs})->{$sym};
 	    for $addr (@{$lst}) {
@@ -405,15 +415,17 @@ for $lib (sort by_internal @libs) {
 		}
 	    }
 	}
-	my $total_relocs = 1.0 * ($vtable_relocs + $rtti_relocs + $data_relocs + $other_relocs) / 100.0;
-	print "reloc breakdown:\n";
-	print " vtables: $vtable_relocs - " . sprintf ("%2.2g", $vtable_relocs/$total_relocs) . "\%\n";
-	print " rtti: $rtti_relocs - " . sprintf ("%2.2g", $rtti_relocs/$total_relocs) . "\%\n";
-	print " .data/non-vtable $data_relocs - " . sprintf ("%2.2g", $data_relocs/$total_relocs) . "\%\n";
-	print " other: $other_relocs - " . sprintf ("%2.2g", $other_relocs/$total_relocs) . "\%\n";
-	print " grand-total: " . ($vtable_relocs + $rtti_relocs + $data_relocs + $other_relocs) . "\n";
-
-	print "\n";
+	if (!$summary_only) {
+	    print "Data section contains " . $key_count * 4 . " bytes\n";
+	    my $total_relocs = 1.0 * ($vtable_relocs + $rtti_relocs + $data_relocs + $other_relocs) / 100.0;
+	    print "reloc breakdown:\n";
+	    print " vtables: $vtable_relocs - " . sprintf ("%2.2g", $vtable_relocs/$total_relocs) . "\%\n";
+	    print " rtti: $rtti_relocs - " . sprintf ("%2.2g", $rtti_relocs/$total_relocs) . "\%\n";
+	    print " .data/non-vtable $data_relocs - " . sprintf ("%2.2g", $data_relocs/$total_relocs) . "\%\n";
+	    print " other: $other_relocs - " . sprintf ("%2.2g", $other_relocs/$total_relocs) . "\%\n";
+	    print " grand-total: " . ($vtable_relocs + $rtti_relocs + $data_relocs + $other_relocs) . "\n";
+	    print "\n";
+	}
 
 	my $vtable_slot_count = 0;
 	my $vtable_class_count = 0;
@@ -429,7 +441,7 @@ for $lib (sort by_internal @libs) {
 #	    print "Class '$vtbl': slots " . $vtable_breakdown{$vtbl}->{slot_count}
 #		. " self-impl " . $vtable_breakdown{$vtbl}->{self_impl_slot_count} . "\n";
 	}
-	if ($vtable_class_count) {
+	if ($vtable_class_count && !$summary_only) {
 	    print "vtables breakdown\n";
 	
 	    print " vtables: $vtable_class_count\n";
@@ -440,7 +452,7 @@ for $lib (sort by_internal @libs) {
 	    print " *extern-impl of self total: " . sprintf ("%.3g", $vtable_extern_self) . " slots\n";
 	}
 
-	if ($vtable_extern_impl_slot_count) { # vtable wasted count
+	if ($vtable_extern_impl_slot_count && !$summary_only) { # vtable wasted count
 	    my $vtable_wasted_syms = 0;
 	    my $vtable_wasted_size = 0;
 	    for my $sym (keys %vtable_wasted) {
@@ -454,9 +466,8 @@ for $lib (sort by_internal @libs) {
 	}
     }
     if ($do_section_breakdown) {
-	print "Section size breakdown\n";
 # cf. http://refspecs.freestandards.org/LSB_3.0.0/LSB-Core-generic/LSB-Core-generic/specialsections.html
-	my %breakdown = (
+	my %sections = (
 	    '\.hash' => 'linking',
 	    '\.dynsym' => 'linking',
 	    '\.dynstr' => 'linking',
@@ -467,48 +478,45 @@ for $lib (sort by_internal @libs) {
 	    '\.rel\.dyn' => 'data relocs',
 	    '\.gnu\.version.*' => 'versioning',
 	    '\.gcc_except_table' => 'exceptions',
+	    '\.eh_frame.*' => 'exceptions',
 	    '\.[cd]tors' => 'c/d-tors',
 	    '\.data.*' => 'data',
 	    '\.rodata' => 'data',
-	    '\.bss' => 'data',
+	    '\.bss' => 'bss',
 #	    '\.rodata' => 'ro data'
 #	    '\.bss' => 'scratch globals',
 	    '\.debug.*' => 'debug',
+	    '\.stab.*' => 'debug',
 	    '\.comment' => 'comment',
 	    '\.text' => 'code',
-	    '\.eh_frame.*' => 'eh frame?',
 	    '\.init.*' => 'init/fini',
 	    '\.fini.*' => 'init/fini',
+	    '\.strtab' => 'symbols',
+	    '\.symtab' => 'symbols'
 	);
-	my %broken_down;
-	my $total_size = 0;
 	for my $sect (keys %{$lib->{sections}}) {
 	    my $bsect = 'misc';
-	    for my $match (keys %breakdown) {
+	    for my $match (keys %sections) {
 		if ($sect =~ m/^$match$/) {
-		    $bsect = $breakdown{$match};
+		    $bsect = $sections{$match};
 		    last;
 		}
 	    }
 #	    if ($bsect eq 'misc') {
 #		print "Section $sect size " . $lib->{sections}->{$sect} . " is misc...\n";
 #	    }
-	    $broken_down{$bsect} = 0 if (!defined $broken_down{$bsect});
+	    $section_breakdown{$bsect} = 0 if (!defined $section_breakdown{$bsect});
 	    my $size = $lib->{sections}->{$sect};
-	    $broken_down{$bsect} += $size;
-	    $total_size += $size;
+	    $section_breakdown{$bsect} += $size;
+	    $total_section_size += $size;
 	}
-	if ($total_size)
-	{
-	    for my $bsect (sort { $broken_down{$b} <=> $broken_down{$a} } (keys %broken_down)) {
-		next if ($broken_down{$bsect} < 1024);
-		print " " . sprintf ("%-15s", $bsect) .
-		    " " . sprintf ("%4d", ($broken_down{$bsect}/1024)) . 
-		    "kb - " . sprintf ("%2.2g", $broken_down{$bsect} * 100.0 /$total_size) . "\%\n";
-	    }
-	}
-	print " Total: $total_size bytes\n";
     }
+}
+
+if (@libs > 1) {
+    print "\n";
+    print "--- Total summary ---\n";
+    print "\n";
 }
 
 if ($do_data_profile) {
@@ -519,3 +527,17 @@ if ($do_data_profile) {
     print "\n";
 }
 
+if ($do_section_breakdown) {
+    print "Section size breakdown\n";
+
+    if ($total_section_size)
+    {
+	for my $bsect (sort { $section_breakdown{$b} <=> $section_breakdown{$a} } (keys %section_breakdown)) {
+	    next if ($section_breakdown{$bsect} < 1024);
+	    print " " . sprintf ("%-15s", $bsect) .
+		" " . sprintf ("%4d", ($section_breakdown{$bsect}/1024)) . 
+		"kb - " . sprintf ("%2.2g", $section_breakdown{$bsect} * 100.0 /$total_section_size) . "\%\n";
+	}
+    }
+    print " Total: $total_section_size bytes\n";
+}
