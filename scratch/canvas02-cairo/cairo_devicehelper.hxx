@@ -104,6 +104,7 @@ namespace cairocanvas
 	::cairo::Surface* getBufferSurface();
 	::cairo::Surface* getWindowSurface();
 	::cairo::Surface* getSurface( const ::basegfx::B2ISize& rSize, ::cairo::Content aContent = ::cairo::CAIRO_CONTENT_COLOR_ALPHA );
+	::cairo::Surface* getSurface( ::cairo::Content aContent = ::cairo::CAIRO_CONTENT_COLOR_ALPHA );
 	::cairo::Surface* getSurface( BitmapSystemData& rData, const Size& rSize );
 	void flush();
 

@@ -218,6 +218,11 @@ namespace cairocanvas
 	return maDeviceHelper.getSurface( rSize, aContent );
     }
 
+    Surface* SpriteCanvas::getSurface( Content aContent )
+    {
+	return maDeviceHelper.getSurface( aContent );
+    }
+
     Surface* SpriteCanvas::getSurface( Bitmap& rBitmap )
     {
 	Surface *pSurface = NULL;

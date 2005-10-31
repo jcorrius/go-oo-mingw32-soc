@@ -567,7 +567,7 @@ namespace cairocanvas
 			// workaround for X/glitz and/or cairo bug
 			// we create big enough temporary surface, copy texture bitmap there and use it for the pattern
 			// it only happens on enlargening matrices with REPEAT mode enabled
-			Surface* pTmpSurface = mxDevice->getSimilarSurface();
+			Surface* pTmpSurface = pDevice->getSurface();
 			Cairo* pTmpCairo = cairo_create( pTmpSurface );
 			cairo_set_source_surface( pTmpCairo, pSurface, 0, 0 );
 			cairo_paint( pTmpCairo );
@@ -739,8 +739,11 @@ namespace cairocanvas
 		if( aPolygon.isClosed() )
 		    cairo_close_path( pCairo );
 
-		if( aOperation == Fill && pTextures )
+		if( aOperation == Fill && pTextures ) {
+		    cairo_set_matrix( pCairo, &aOrigMatrix );
 		    doOperation( aOperation, pCairo, nPolygonIndex, pTextures, pDevice );
+		    cairo_set_matrix( pCairo, &aIdentityMatrix );
+		}
 	    } else {
 		OSL_TRACE( "empty polygon for op: %d\n\n", aOperation );
 		if( aOperation == Clip ) {

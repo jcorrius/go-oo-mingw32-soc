@@ -157,6 +157,7 @@ namespace cairocanvas
         static ::com::sun::star::uno::Reference< ::com::sun::star::uno::XInterface > SAL_CALL createInstance( const ::com::sun::star::uno::Reference< ::com::sun::star::uno::XComponentContext >& xContext ) throw ( ::com::sun::star::uno::Exception );
 
 	::cairo::Surface* getSurface( const ::basegfx::B2ISize& rSize, ::cairo::Content aContent = ::cairo::CAIRO_CONTENT_COLOR_ALPHA );
+	::cairo::Surface* getSurface( ::cairo::Content aContent = ::cairo::CAIRO_CONTENT_COLOR_ALPHA );
 	::cairo::Surface* getSurface( Bitmap& rBitmap );
 	::cairo::Surface* getBufferSurface();
 	::cairo::Surface* getWindowSurface();

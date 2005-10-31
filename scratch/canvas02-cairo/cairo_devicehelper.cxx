@@ -46,6 +46,7 @@
 #include <basegfx/tools/canvastools.hxx>
 
 #include <vcl/syschild.hxx>
+#include <vcl/canvastools.hxx>
 
 #include "cairo_helper.hxx"
 #include "cairo_spritecanvas.hxx"
@@ -111,13 +112,40 @@ namespace cairocanvas
 
     geometry::RealSize2D DeviceHelper::getPhysicalResolution()
     {
-        return geometry::RealSize2D( 75, 75 );
+        if( !mpOutputWindow )
+            return ::canvas::tools::createInfiniteSize2D(); // we're disposed
+
+        // Map a one-by-one millimeter box to pixel
+        const MapMode aOldMapMode( mpOutputWindow->GetMapMode() );
+        mpOutputWindow->SetMapMode( MapMode(MAP_MM) );
+        const Size aPixelSize( mpOutputWindow->LogicToPixel(Size(1,1)) );
+        mpOutputWindow->SetMapMode( aOldMapMode );
+
+        return ::vcl::unotools::size2DFromSize( aPixelSize );
     }
 
     geometry::RealSize2D DeviceHelper::getPhysicalSize()
     {
-        return geometry::RealSize2D( 210, 280 );
+        if( !mpOutputWindow )
+            return ::canvas::tools::createInfiniteSize2D(); // we're disposed
+
+        // Map the pixel dimensions of the output window to millimeter
+        const MapMode aOldMapMode( mpOutputWindow->GetMapMode() );
+        mpOutputWindow->SetMapMode( MapMode(MAP_MM) );
+        const Size aLogSize( mpOutputWindow->PixelToLogic(mpOutputWindow->GetOutputSizePixel()) );
+        mpOutputWindow->SetMapMode( aOldMapMode );
+
+        return ::vcl::unotools::size2DFromSize( aLogSize );
     }
+//     geometry::RealSize2D DeviceHelper::getPhysicalResolution()
+//     {
+//         return geometry::RealSize2D( 75, 75 );
+//     }
+
+//     geometry::RealSize2D DeviceHelper::getPhysicalSize()
+//     {
+//         return geometry::RealSize2D( 210, 280 );
+//     }
 
     uno::Reference< rendering::XLinePolyPolygon2D > DeviceHelper::createCompatibleLinePolyPolygon( 
         const uno::Reference< rendering::XGraphicDevice >& 				rDevice,
@@ -260,6 +288,11 @@ namespace cairocanvas
 	    return cairo_surface_create_similar( mpBufferSurface, aContent, rSize.getX(), rSize.getY() );
 
 	return NULL;
+    }
+
+    Surface* DeviceHelper::getSurface( Content aContent )
+    {
+	return getSurface( maSize, aContent );
     }
 
     Surface* DeviceHelper::getSurface( BitmapSystemData& rData, const Size& rSize )
