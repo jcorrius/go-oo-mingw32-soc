@@ -63,6 +63,7 @@ namespace cairocanvas
 	::basegfx::B2ISize aSize( ::canvas::tools::roundUp( rSpriteSize.Width ),
 				  ::canvas::tools::roundUp( rSpriteSize.Height ) );
 
+	//mpBufferSurface = mpSpriteCanvas->getSurface( aSize, CAIRO_CONTENT_COLOR );
 	mpBufferSurface = mpSpriteCanvas->getSurface( aSize );
 	mpCairo = cairo_create( mpBufferSurface );
 

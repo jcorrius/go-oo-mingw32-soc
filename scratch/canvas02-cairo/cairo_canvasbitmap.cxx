@@ -52,8 +52,9 @@ namespace cairocanvas
         ENSURE_AND_THROW( mpDevice.is(),
                           "CanvasBitmap::CanvasBitmap(): Invalid surface or device" );
 
+	OSL_TRACE( "bitmap size: %dx%d", rSize.getX(), rSize.getY() );
+
 	mpBufferSurface = mpDevice->getSurface( rSize, bHasAlpha ? CAIRO_CONTENT_COLOR_ALPHA : CAIRO_CONTENT_COLOR );
-	//mpBufferSurface = mpDevice->getSurface( rSize, CAIRO_CONTENT_COLOR_ALPHA );
 	mpBufferCairo = cairo_create( mpBufferSurface );
 
         maCanvasHelper.init( rSize,

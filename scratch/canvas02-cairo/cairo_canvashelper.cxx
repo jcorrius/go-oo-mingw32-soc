@@ -437,17 +437,16 @@ namespace cairocanvas
 		else
 		    pImageSurface = cairo_image_surface_create_for_data( data, CAIRO_FORMAT_RGB24, nWidth, nHeight, nWidth*4 );
 
-		// 		    WindowGraphicDevice::ImplRef xDevice = rDevice;
-		// 		    pSurface = xDevice->getSimilarSurface( Size( nWidth, nHeight ), bIsAlpha ? CAIRO_CONTENT_COLOR_ALPHA : CAIRO_CONTENT_COLOR );
-		// 		    Cairo* pTargetCairo = cairo_create( pSurface );
-		// 		    cairo_set_source_surface( pTargetCairo, pImageSurface, 0, 0 );
+// 		pSurface = rDevice->getSurface( ::basegfx::B2ISize( nWidth, nHeight ), bIsAlpha ? CAIRO_CONTENT_COLOR_ALPHA : CAIRO_CONTENT_COLOR );
+// 		Cairo* pTargetCairo = cairo_create( pSurface );
+// 		cairo_set_source_surface( pTargetCairo, pImageSurface, 0, 0 );
 
-		// 		    //if( !bIsAlpha )
-		// 		    //cairo_set_operator( pTargetCairo, CAIRO_OPERATOR_SOURCE );
+// 				    //if( !bIsAlpha )
+// 				    //cairo_set_operator( pTargetCairo, CAIRO_OPERATOR_SOURCE );
 
-		// 		    cairo_paint( pTargetCairo );
-		// 		    cairo_destroy( pTargetCairo );
-		// 		    cairo_surface_destroy( pImageSurface );
+// 		cairo_paint( pTargetCairo );
+// 		cairo_destroy( pTargetCairo );
+// 		cairo_surface_destroy( pImageSurface );
 		pSurface = pImageSurface;
 
 		bHasAlpha = bIsAlpha;
@@ -741,7 +740,7 @@ namespace cairocanvas
 		    cairo_close_path( pCairo );
 
 		if( aOperation == Fill && pTextures )
-		    doOperation( aOperation, pCairo, nPolygonIndex, pTextures );
+		    doOperation( aOperation, pCairo, nPolygonIndex, pTextures, pDevice );
 	    } else {
 		OSL_TRACE( "empty polygon for op: %d\n\n", aOperation );
 		if( aOperation == Clip ) {
@@ -771,7 +770,7 @@ namespace cairocanvas
 	if( !pCairo )
 	    pCairo = mpCairo;
 
-	drawPolyPolygonImplementation( aPoly, aOperation, pCairo, pTextures );
+	drawPolyPolygonImplementation( aPoly, aOperation, pCairo, pTextures, mpDevice );
     }
 
     uno::Reference< rendering::XCachedPrimitive > CanvasHelper::drawPolyPolygon( const rendering::XCanvas* 							pCanvas, 
@@ -1029,9 +1028,11 @@ namespace cairocanvas
 	    ENSURE_AND_THROW( pTextLayout,
 			      "CanvasHelper::drawTextLayout(): TextLayout not compatible with this canvas" );
 
+	    cairo_save( mpCairo );
 	    useStates( viewState, renderState, true );
 
 	    pTextLayout->draw( mpCairo );
+	    cairo_restore( mpCairo );
 	}
 
         return uno::Reference< rendering::XCachedPrimitive >(NULL);
@@ -1132,8 +1133,24 @@ namespace cairocanvas
     uno::Reference< rendering::XBitmap > CanvasHelper::getScaledBitmap( const geometry::RealSize2D&	newSize, 
                                                                         sal_Bool 					beFast )
     {
-        // TODO(F1):
-        return uno::Reference< rendering::XBitmap >();
+	#ifdef CAIRO_CANVAS_PERF_TRACE
+	struct timespec aTimer;
+	mxDevice->startPerfTrace( &aTimer );
+        #endif
+
+	if( mpCairo ) {
+	    Surface *pSurface = cairo_get_target( mpCairo );
+	    return uno::Reference< rendering::XBitmap >( new CanvasBitmap( ::basegfx::B2ISize( ::canvas::tools::roundUp( newSize.Width ),
+											       ::canvas::tools::roundUp( newSize.Height ) ),
+									   mpDevice, false ) );
+	} else
+	    OSL_TRACE ("CanvasHelper called after it was disposed");
+
+	#ifdef CAIRO_CANVAS_PERF_TRACE
+	mxDevice->stopPerfTrace( &aTimer, "getScaledBitmap" );
+        #endif
+
+	return uno::Reference< rendering::XBitmap >();
     }
 
     uno::Sequence< sal_Int8 > CanvasHelper::getData( rendering::IntegerBitmapLayout&     bitmapLayout, 
