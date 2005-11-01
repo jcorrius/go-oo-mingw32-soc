@@ -1,0 +1,381 @@
+2005-11-01  Federico Mena Quintero  <federico@ximian.com>
+
+	Add support for the VT_CF property to the serializer:
+
+	* build-hack/ooo680-m2/sfx2/source/doc/docinf.cxx (VT_CF): New
+	constant for VT_CF = 71.
+	(PID_THUMBNAIL): New property id (0x11).
+	(class SfxPSThumbnailProperty_Impl): New class, derived from
+	SfxPSProperty_Impl.  We use this to hold a VT_CF thumbnail.
+	(SfxPSThumbnailPropertySfxThumbnailProperty_Impl): Implement.  We
+	take in a metafile, convert it to BMP, serialize the BMP, and keep
+	the serialization around for when we are asked to ::Save() it in a
+	stream.
+	(SfxPSThumbnailProperty_Impl::~SfxPSThumbnailProperty_Impl):
+	Implement; free our serialized data.
+	(SfxPSThumbnailProperty_Impl::Save): Implement; serialize the
+	headers and the precomputed bitmap data.
+	(SfxPSThumbnailProperty_Impl::Len): Implement; just return the
+	size of the precomputed data.
+	(SfxPSThumbnailProperty_Impl::IsValid): Implement; return whether
+	we were able to render the data to a bitmap and serialize it.
+	(SfxDocumentInfo::SavePropertySet): Create a thumbnail property.
+	If we are successful, add the property to the property set.
+
+	Add a thumbnail metafile property to SfxDoccumentInfo:
+
+	* build/ooo680-m2/sfx2/source/doc/graphhelp.hxx (class
+	GraphicHelper): Make createThumb_Impl public.  I don't like this
+	at all, but there's doesn't seem to be a "turn this metafile into
+	a Bitmap" function that I can use.
+
+	* build-hack/ooo680-m2/sfx2/inc/docinf.hxx (class
+	SfxDocumentInfo): Added an aThumbnailMetaFile private field.  Added
+	GetThumbnailMetaFile() and SetThumbnailMetaFile() public methods.
+
+	* build-hack/ooo680-m2/sfx2/source/doc/docinf.cxx
+	(SfxDocumentInfo::SetThumbnailMetaFile): Implement.
+
+	* build/ooo680-m2/sw/inc/doc.hxx (class SwDoc): Make the GetInfo()
+	method non-const.
+
+	* build/ooo680-m2/sw/source/core/doc/docnew.cxx (SwDoc::GetInfo):
+	Make this non-const.
+
+	Generate the thumbnails:
+
+	* build-hack/ooo680-m2/sw/source/filter/ww8/wrtww8.cxx
+	(SwWW8Writer::PrepareStorage): Generate the thumbnail metafile,
+	and put it in the SfxDocumentInfo before serializing the info.
+	Also, our info is now non-const.
+
+	* build/ooo680-m2/sc/source/filter/excel/expop2.cxx
+	(ExportBiff5::Write): Generate the thumbnail metafile, and put it
+	in the SfxDocumentInfo before serializing the info.
+
+--- sfx2/inc/docinf.hxx	2005-09-07 11:50:53.000000000 -0500
++++ sfx2/inc/docinf.hxx	2005-10-27 14:00:59.000000000 -0500
+@@ -69,6 +69,10 @@ class SvStream;
+ #include <tools/timestamp.hxx>
+ #endif
+ 
++#ifndef _SV_GDIMTF_HXX
++#include <vcl/gdimtf.hxx>
++#endif
++
+ // SfxStamp changed to "tools/TimeStamp" !!!
+ typedef TimeStamp SfxStamp ;
+ 
+@@ -136,6 +140,8 @@ private:
+ 	String   aComment;
+ 	String   aKeywords;
+ 
++	GDIMetaFile aThumbnailMetaFile;
++
+ 	SfxDocUserKey aUserKeys[MAXDOCUSERKEYS];
+ 
+ 	String   aTemplateName;             // Name der Dokumentvorlage
+@@ -219,11 +225,15 @@ public:
+ 	const String&  GetComment() const   { return aComment;  }
+ 	const String&  GetKeywords()const   { return aKeywords; }
+ 
++	const GDIMetaFile &GetThumbnailMetaFile() const { return aThumbnailMetaFile; }
++
+ 	void  SetTitle( const String& rVal );
+ 	void  SetTheme( const String& rVal );
+ 	void  SetComment( const String& rVal );
+ 	void  SetKeywords( const String& rVal );
+ 
++	void  SetThumbnailMetaFile (const GDIMetaFile &aMetaFile);
++
+ 	void  SetChanged( const String& rChanger ) { SetChanged( SfxStamp( rChanger ) ); }
+ 	void  SetCreated( const String& rCreator ) { SetCreated( SfxStamp( rCreator ) ); }
+ 
+--- sfx2/source/doc/docinf.cxx	2005-09-07 13:39:29.000000000 -0500
++++ sfx2/source/doc/docinf.cxx	2005-10-27 14:01:34.000000000 -0500
+@@ -40,11 +40,13 @@
+ #include <svtools/sfxecode.hxx>
+ #endif
+ #include <tools/urlobj.hxx>
++#include <tools/new.hxx>
+ #include <svtools/saveopt.hxx>
+ #include <tools/tenccvt.hxx>
+ #include <svtools/useroptions.hxx>
+ #include <sot/exchange.hxx>
+ #include <sot/storage.hxx>
++#include <vcl/bitmapex.hxx>
+ #include "rtl/tencinfo.h"
+ 
+ #include "docfilt.hxx"
+@@ -54,6 +56,7 @@
+ #include "docinf.hxx"
+ #include "docfile.hxx"
+ #include "sfxtypes.hxx"
++#include "graphhelp.hxx"
+ 
+ //========================================================================
+ 
+@@ -68,6 +71,7 @@ static const char __FAR_DATA pDocInfoHea
+ #define VT_LPSTR      30
+ #define VT_LPWSTR     31
+ #define VT_FILETIME   64
++#define VT_CF         71
+ 
+ #define PID_TITLE              0x02
+ #define PID_SUBJECT            0x03
+@@ -81,6 +85,7 @@ static const char __FAR_DATA pDocInfoHea
+ #define PID_LASTPRINTED_DTM    0x0b
+ #define PID_CREATE_DTM         0x0c
+ #define PID_LASTSAVED_DTM      0x0d
++#define PID_THUMBNAIL          0x11
+ 
+ //=========================================================================
+ 
+@@ -411,6 +416,112 @@ ULONG SfxPSDateTimeProperty_Impl::Len()
+ 
+ //=========================================================================
+ 
++class SfxPSThumbnailProperty_Impl : public SfxPSProperty_Impl
++{
++private:
++	SvMemoryStream aMemStream;
++	sal_Bool bHaveBitmap;
++	sal_Size nBitmapDataSize;
++
++public:
++	SfxPSThumbnailProperty_Impl (UINT32 nIdP, const GDIMetaFile &rThumbnailMetaFile);
++	virtual ~SfxPSThumbnailProperty_Impl();
++
++	virtual ULONG Save (SvStream &rStream);
++	virtual ULONG Len ();
++
++	sal_Bool IsValid ();
++};
++
++//#include <stdio.h>
++
++#define CF_DIB 8				// this is the clip_data format identifier for a DIB
++
++SfxPSThumbnailProperty_Impl::SfxPSThumbnailProperty_Impl (UINT32 nIdP, const GDIMetaFile &rThumbnailMetaFile) :
++	SfxPSProperty_Impl (nIdP, VT_CF)
++{
++	BitmapEx aBitmap;
++
++	if (!GraphicHelper::createThumb_Impl (rThumbnailMetaFile,
++					      160, /* magic value taken from GraphicHelper::getThumbnailFormatFromGDI_Impl() */
++					      aBitmap))
++	{
++	    bHaveBitmap = sal_False;
++	    nBitmapDataSize = 0;
++	    return;
++	}
++
++	aMemStream << aBitmap;
++	nBitmapDataSize = aMemStream.Tell ();
++	bHaveBitmap = sal_True;
++	//fprintf (stderr, "ThumbnailProperty::constructor wrote %ld bytes for the bitmap\n", (long) nBitmapDataSize);
++}
++
++SfxPSThumbnailProperty_Impl::~SfxPSThumbnailProperty_Impl ()
++{
++    bHaveBitmap = sal_False;
++    nBitmapDataSize = 0;
++}
++
++ULONG
++SfxPSThumbnailProperty_Impl::Save (SvStream &rStream)
++{
++	/* clipboard size          uint32       sizeof (clipboard format tag) + sizeof (clipboard data)
++	 * clipboard format tag    int32        see below
++	 * clipboard data          byte[]       see below
++	 *
++	 * Clipboard format tag:
++	 * -1 - Windows clipboard format
++	 * -2 - Macintosh clipboard format
++	 * -3 - GUID that contains a format identifier (FMTID)
++	 * >0 - custom clipboard format name plus data (see msdn site below)
++	 *  0 - No data
++	 *
++	 * References:
++	 * http://msdn.microsoft.com/library/default.asp?url=/library/en-us/stg/stg/propvariant.asp
++	 * http://jakarta.apache.org/poi/hpsf/thumbnails.html
++	 * http://linux.com.hk/docs/poi/org/apache/poi/hpsf/Thumbnail.html
++	 * http://sparks.discreet.com/knowledgebase/public/solutions/ExtractThumbnailImg.htm
++	 */
++
++	UINT32 nClipSize;
++	INT32 nClipFormat;
++	INT32 nDataFormat;
++
++	if (!IsValid ())
++	    return SVSTREAM_INVALID_ACCESS;
++
++	nClipSize = 4 + 4 + nBitmapDataSize; /* clip_format_tag + data_format_tag + bitmap_len */
++	nClipFormat = -1; /* Windows clipboard format; we'll say "it's a BMP" in the data section */
++	nDataFormat = CF_DIB;
++#if 0
++	fprintf (stderr, "ThumbnailProperty::Save() writing clip_size %d, clip_format %d, data_format %d, bitmap_data_bytes %ld\n",
++			 (int) nClipSize,
++			 (int) nClipFormat,
++			 (int) nDataFormat,
++			 (long) nBitmapDataSize);
++#endif
++	rStream << nClipSize << nClipFormat << nDataFormat;
++	rStream.Write (aMemStream.GetData (), nBitmapDataSize);
++
++	return rStream.GetErrorCode ();
++}
++
++ULONG
++SfxPSThumbnailProperty_Impl::Len ()
++{
++	//fprintf (stderr, "ThumbnailProperty::Len() returns %ld\n", (long) 4 + 4 + 4 + nBitmapDataSize);
++    return 4 + 4 + 4 + nBitmapDataSize; /* total property size field + clip_format_tag + data_format_tag + bitmap_len */
++}
++
++sal_Bool
++SfxPSThumbnailProperty_Impl::IsValid ()
++{
++    return (bHaveBitmap && nBitmapDataSize != 0);
++}
++
++//=========================================================================
++
+ typedef SfxPSProperty_Impl *SfxPSPropertyPtr_Impl;
+ SV_DECL_PTRARR_DEL(SfxPSPropertyArr_Impl, SfxPSPropertyPtr_Impl, 10, 10);
+ SV_IMPL_PTRARR(SfxPSPropertyArr_Impl, SfxPSPropertyPtr_Impl);
+@@ -997,6 +1108,8 @@ BOOL SfxDocumentInfo::SavePropertySet( S
+ 	SfxPS_Impl* pPS = new SfxPS_Impl;
+ 	SotStorageStreamRef aStrPropSet = pStorage->OpenSotStream(
+ 		String::CreateFromAscii( pPropSlot ), STREAM_TRUNC | STREAM_STD_WRITE );
++	SfxPSThumbnailProperty_Impl *thumb_prop;
++
+ 	if ( !aStrPropSet.Is() )
+ 	{
+ 		DBG_ERRORFILE( "can not open the property set" );
+@@ -1022,6 +1135,13 @@ BOOL SfxDocumentInfo::SavePropertySet( S
+ 	pPS->AddProperty( new SfxPSStringProperty_Impl(
+ 		PID_REVNUMBER, String::CreateFromInt32( GetDocumentNumber() ) ) );
+ 	pPS->AddProperty( new SfxPSCodePageProperty_Impl( RTL_TEXTENCODING_UTF8 ));
++
++	thumb_prop = new SfxPSThumbnailProperty_Impl (PID_THUMBNAIL, GetThumbnailMetaFile());
++	if (thumb_prop->IsValid ())
++	    pPS->AddProperty (thumb_prop);
++	else
++	    delete thumb_prop;
++
+ 	pPS->Save( *aStrPropSet );
+ 	delete pPS;
+ 	return ( aStrPropSet->GetErrorCode() == 0 );
+@@ -1631,6 +1751,12 @@ void SfxDocumentInfo::SetKeywords( const
+ {
+ 	aKeywords = AdjustTextLen_Impl( rVal, SFXDOCINFO_KEYWORDLENMAX );
+ }
++//------------------------------------------------------------------------
++
++void SfxDocumentInfo::SetThumbnailMetaFile (const GDIMetaFile &aMetaFile)
++{
++	aThumbnailMetaFile = aMetaFile;
++}
+ 
+ void SfxDocumentInfo::DeleteUserData( BOOL bUseAuthor )
+ {
+--- sfx2/source/doc/graphhelp.hxx	2005-09-07 13:43:17.000000000 -0500
++++ sfx2/source/doc/graphhelp.hxx	2005-10-25 21:10:11.000000000 -0500
+@@ -52,14 +52,14 @@ class GraphicHelper
+ 	static sal_Bool mergeBitmaps_Impl( const BitmapEx& rBmpEx, const BitmapEx& rOverlay,
+ 				   const Rectangle& rOverlayRect, BitmapEx& rReturn );
+ 
++public:
++
+ 	static sal_Bool createThumb_Impl( const GDIMetaFile& rMtf,
+ 				       sal_uInt32 nMaximumExtent,
+ 				       BitmapEx& rBmpEx, 
+ 				       const BitmapEx* pOverlay = NULL,
+ 				       const Rectangle* pOverlayRect = NULL );
+ 
+-public:
+-
+ 	static SvMemoryStream* getFormatStrFromGDI_Impl( const GDIMetaFile* pGDIMeta, sal_uInt32 nFormat );
+ 
+ 	static void* getEnhMetaFileFromGDI_Impl( const GDIMetaFile* pGDIMeta );
+--- sw/source/core/doc/docnew.cxx	2005-09-08 22:13:48.000000000 -0500
++++ sw/source/core/doc/docnew.cxx	2005-10-25 22:29:10.000000000 -0500
+@@ -873,7 +873,7 @@ void SwDoc::SetPersist( SfxObjectShell* 
+ 
+ 
+ 
+-const SfxDocumentInfo* SwDoc::GetInfo()
++SfxDocumentInfo* SwDoc::GetInfo()
+ {
+ 	if( !pSwgInfo )
+ 		// Pointer-Members initialisieren
+--- sw/inc/doc.hxx	2005-09-08 20:40:43.000000000 -0500
++++ sw/inc/doc.hxx	2005-10-25 22:29:23.000000000 -0500
+@@ -1469,7 +1469,7 @@ public:
+ 
+         // Dokument - Info
+ 			// legt sie auf jedenfall an!
+-	const SfxDocumentInfo* GetInfo();
++	SfxDocumentInfo* GetInfo();
+ 			// kann auch 0 sein !!!
+ 	const SfxDocumentInfo* GetpInfo() const { return pSwgInfo; }
+ 
+--- sw/source/filter/ww8/wrtww8.cxx	2005-09-09 01:08:46.000000000 -0500
++++ sw/source/filter/ww8/wrtww8.cxx	2005-10-27 19:46:46.000000000 -0500
+@@ -2460,6 +2460,9 @@ void SwWW8Writer::PrepareStorage()
+     const BYTE* pData;
+     const char* pName;
+     UINT32 nId1;
++    const SwDocShell* pDocShell;
++    SfxDocumentInfo* pInfo;
++    
+ 
+     if (bWrtWW8)
+     {
+@@ -2518,8 +2521,23 @@ void SwWW8Writer::PrepareStorage()
+     pStg->SetClass( aGName, 0, String::CreateFromAscii( pName ));
+     SvStorageStreamRef xStor( pStg->OpenSotStream(sCompObj) );
+     xStor->Write( pData, nLen );
+-                // noch mal ueberplaetten, um auch Clipboardformat zu setzen
+-    pDoc->GetInfo()->SavePropertySet( pStg );   // DocInfo
++
++    pInfo = pDoc->GetInfo ();
++    pDocShell = pDoc->GetDocShell ();
++
++    if (pDocShell)
++    {
++		GDIMetaFile *pMetaFile;
++
++		pMetaFile = pDocShell->GetPreviewMetaFile (sal_False);
++		if (pMetaFile)
++		{
++			pInfo->SetThumbnailMetaFile (*pMetaFile);
++			delete pMetaFile;
++		}
++    }
++
++    pInfo->SavePropertySet( pStg );   // DocInfo
+ }
+ 
+ ULONG SwWW8Writer::WriteStorage()
+--- sc/source/filter/excel/expop2.cxx	2005-09-08 13:57:15.000000000 -0500
++++ sc/source/filter/excel/expop2.cxx	2005-10-27 19:41:33.000000000 -0500
+@@ -120,7 +120,17 @@ FltError ExportBiff5::Write()
+ 
+     if( pDocShell && xRootStrg.Is() )
+     {
++		GDIMetaFile *pMetaFile;
++
+         SfxDocumentInfo& rInfo = pDocShell->GetDocInfo();
++
++		pMetaFile = pDocShell->GetPreviewMetaFile (sal_False);
++		if (pMetaFile)
++		{
++			rInfo.SetThumbnailMetaFile (*pMetaFile);
++			delete pMetaFile;
++		}
++
+         rInfo.SavePropertySet( xRootStrg );
+     }
+ 
