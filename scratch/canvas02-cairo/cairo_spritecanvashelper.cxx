@@ -120,22 +120,11 @@ namespace cairocanvas
             Used for generic update, which renders into device buffer.
          */
         void spriteRedrawStub2( Cairo* pCairo,
-                                const ::basegfx::B2DPoint& rOutPos,
                                 const ::canvas::Sprite::Reference&	rSprite )
         {
             if( rSprite.is() )
             {
-                Sprite* pSprite = ::boost::polymorphic_downcast< Sprite* >(
-                    rSprite.get() );
-
-// 				// calc relative sprite position in rUpdateArea (which
-// 				// need not be the whole screen!)
-//                 const ::basegfx::B2DPoint& rSpriteScreenPos( pSprite->getPosPixel() );
-//                 const ::basegfx::B2DPoint& rSpriteRenderPos( rSpriteScreenPos - rOutPos );
-
-//                 pSprite->redraw( pCairo, rSpriteRenderPos, true );
-
-		pSprite->redraw( pCairo, rOutPos, true );
+                ::boost::polymorphic_downcast< Sprite* >( rSprite.get() )->redraw( pCairo, true );;
             }
         }
 
@@ -492,8 +481,8 @@ namespace cairocanvas
             ::std::min( aSize.Height,
                         ::canvas::tools::roundUp( rRequestedArea.getMaxY() - aOutputPosition.Y()) ) );
 
- 	cairo_rectangle( pBufferCairo, aOutputPosition.X(), aOutputPosition.Y(), aOutputSize.Width(), aOutputSize.Height() );
- 	cairo_clip( pBufferCairo );
+	cairo_rectangle( pBufferCairo, aOutputPosition.X(), aOutputPosition.Y(), aOutputSize.Width(), aOutputSize.Height() );
+	cairo_clip( pBufferCairo );
 
         // paint background
 	cairo_save( pBufferCairo );
@@ -508,8 +497,6 @@ namespace cairocanvas
                          rSortedUpdateSprites.end(),
                          ::boost::bind( &spriteRedrawStub2,
                                         pBufferCairo,
-                                        ::boost::cref(
-                                            ::vcl::unotools::b2DPointFromPoint(aOutputPosition)),
                                         _1 ) );
 
         // flush to screen

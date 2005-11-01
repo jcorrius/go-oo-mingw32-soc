@@ -118,7 +118,6 @@ namespace cairocanvas
 	if( isActive() && !::basegfx::fTools::equalZero( fAlpha ) ) {
 	    OSL_TRACE ("CanvasCustomSprite::redraw called\n");
 	    if( pCairo ) {
-
 		basegfx::B2DVector aSize = getSizePixel();
 		cairo_save( pCairo );
 
@@ -133,23 +132,22 @@ namespace cairocanvas
  				       aTransform.get( 0, 0 ), aTransform.get( 1, 0 ), aTransform.get( 0, 1 ),
  				       aTransform.get( 1, 1 ), aTransform.get( 0, 2 ), aTransform.get( 1, 2 ) );
 
-		    aMatrix.x0 = round( aMatrix.x0 );
-		    aMatrix.y0 = round( aMatrix.y0 );
+ 		    aMatrix.x0 = round( aMatrix.x0 );
+ 		    aMatrix.y0 = round( aMatrix.y0 );
 
 		    cairo_matrix_init( &aInverseMatrix, aMatrix.xx, aMatrix.yx, aMatrix.xy, aMatrix.yy, aMatrix.x0, aMatrix.y0 );
 		    cairo_matrix_invert( &aInverseMatrix );
 		    cairo_matrix_transform_distance( &aInverseMatrix, &fX, &fY );
 
-
  		    cairo_set_matrix( pCairo, &aMatrix );
  		}
 
-// 		fX = floor( fX );
-// 		fY = floor( fY );
+ 		fX = round( fX );
+ 		fY = round( fY );
 
 		cairo_matrix_t aOrigMatrix;
 		cairo_get_matrix( pCairo, &aOrigMatrix );
-		cairo_translate( pCairo, round(fX), round(fY) );
+		cairo_translate( pCairo, fX, fY );
 
                 if( getClip().is() )
                 {
@@ -166,7 +164,7 @@ namespace cairocanvas
 		cairo_clip( pCairo );
 		cairo_set_matrix( pCairo, &aOrigMatrix );
 
- 		if( isContentFullyOpaque() )
+		if( isContentFullyOpaque() )
  		    cairo_set_operator( pCairo, CAIRO_OPERATOR_SOURCE );
 		cairo_set_source_surface( pCairo, mpBufferSurface, fX, fY );
                 if( ::rtl::math::approxEqual( fAlpha, 1.0 ) )
