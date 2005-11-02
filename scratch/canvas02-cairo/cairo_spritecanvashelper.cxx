@@ -212,7 +212,7 @@ namespace cairocanvas
 	Cairo* pBufferCairo = cairo_create( mpDevice->getBufferSurface() );
 	Cairo* pWindowCairo = cairo_create( mpDevice->getWindowSurface() );
 
-	geometry::IntegerSize2D aSize = mpDevice->getSize();
+	const ::basegfx::B2ISize& rSize = mpDevice->getSizePixel();
 
         // TODO(P1): Might be worthwile to track areas of background
         // changes, too.
@@ -232,7 +232,7 @@ namespace cairocanvas
             // background has changed, so we currently have no choice
             // but repaint everything (or caller requested that)
 
-	    cairo_rectangle( pBufferCairo, 0, 0, aSize.Width, aSize.Height );
+	    cairo_rectangle( pBufferCairo, 0, 0, rSize.getX(), rSize.getY() );
 	    cairo_clip( pBufferCairo );
 	    cairo_save( pBufferCairo );
 	    cairo_set_source_surface( pBufferCairo, mpDevice->getBackgroundSurface(), 0, 0 );
@@ -249,14 +249,11 @@ namespace cairocanvas
                     _1 ) );
 
             // flush to screen
-	    cairo_rectangle( pWindowCairo, 0, 0, aSize.Width, aSize.Height );
+	    cairo_rectangle( pWindowCairo, 0, 0, rSize.getX(), rSize.getY() );
 	    cairo_clip( pWindowCairo );
 	    cairo_set_source_surface( pWindowCairo, mpDevice->getBufferSurface(), 0, 0 );
 	    cairo_set_operator( pWindowCairo, CAIRO_OPERATOR_SOURCE );
 	    cairo_paint( pWindowCairo );
-// 	    cairo_rectangle( pWindowCairo, 0, 0, aSize.Width, aSize.Height );
-// 	    cairo_set_source_rgb( pWindowCairo, 0, 0, 1 );
-// 	    cairo_stroke( pWindowCairo );
         }
 
 	cairo_destroy( pBufferCairo );
@@ -296,10 +293,10 @@ namespace cairocanvas
 
 	OSL_TRACE("SpriteCanvasHelper::scrollUpdate called");
 
-	geometry::IntegerSize2D aSize = mpDevice->getSize();
+	const ::basegfx::B2ISize& rSize = mpDevice->getSizePixel();
         const ::basegfx::B2IRange  aOutputBounds( 0,0,
-                                                  aSize.Width,
-                                                  aSize.Height );
+                                                  rSize.getX(),
+                                                  rSize.getY() );
 
         // round rectangles to integer pixel. Note: have to be
         // extremely careful here, to avoid off-by-one errors for
@@ -394,7 +391,7 @@ namespace cairocanvas
 
 	Cairo* pWindowCairo = cairo_create( mpDevice->getWindowSurface() );
 
-	cairo_rectangle( pWindowCairo, 0, 0, aSize.Width, aSize.Height );
+	cairo_rectangle( pWindowCairo, 0, 0, rSize.getX(), rSize.getY() );
 	cairo_clip( pWindowCairo );
 	cairo_set_source_surface( pWindowCairo, mpDevice->getBufferSurface(), 0, 0 );
 	cairo_set_operator( pWindowCairo, CAIRO_OPERATOR_SOURCE );
@@ -414,9 +411,9 @@ namespace cairocanvas
 	OSL_TRACE("SpriteCanvasHelper::opaqueUpdate called");
 
 	Cairo* pBufferCairo = cairo_create( mpDevice->getBufferSurface() );
-	geometry::IntegerSize2D aDeviceSize = mpDevice->getSize();
+	const ::basegfx::B2ISize& rDeviceSize = mpDevice->getSizePixel();
 
-	cairo_rectangle( pBufferCairo, 0, 0, aDeviceSize.Width, aDeviceSize.Height );
+	cairo_rectangle( pBufferCairo, 0, 0, rDeviceSize.getX(), rDeviceSize.getY() );
 	cairo_clip( pBufferCairo );
 
 	::basegfx::B2DVector aPos( ceil( rTotalArea.getMinX() ), ceil( rTotalArea.getMinY() ) );
@@ -436,7 +433,7 @@ namespace cairocanvas
         // flush to screen
 	Cairo* pWindowCairo = cairo_create( mpDevice->getWindowSurface() );
 
-	cairo_rectangle( pWindowCairo, 0, 0, aDeviceSize.Width, aDeviceSize.Height );
+	cairo_rectangle( pWindowCairo, 0, 0, rDeviceSize.getX(), rDeviceSize.getY() );
 	cairo_clip( pWindowCairo );
 	cairo_rectangle( pWindowCairo, aPos.getX(), aPos.getY(), aSize.getX(), aSize.getY() );
 	cairo_clip( pWindowCairo );
@@ -461,7 +458,7 @@ namespace cairocanvas
 	Cairo* pBufferCairo = cairo_create( mpDevice->getBufferSurface() );
 
         // limit size of update VDev to target outdev's size
-	geometry::IntegerSize2D aSize = mpDevice->getSize();
+	const ::basegfx::B2ISize& rSize = mpDevice->getSizePixel();
 
         // round output position towards zero. Don't want to truncate
         // a fraction of a sprite pixel...  Clip position at origin,
@@ -476,9 +473,9 @@ namespace cairocanvas
         // fraction of a sprite pixel... Limit size of VDev to output
         // device's area.
         const Size  aOutputSize( 
-            ::std::min( aSize.Width,
+            ::std::min( rSize.getX(),
                         ::canvas::tools::roundUp( rRequestedArea.getMaxX() - aOutputPosition.X()) ),
-            ::std::min( aSize.Height,
+            ::std::min( rSize.getY(),
                         ::canvas::tools::roundUp( rRequestedArea.getMaxY() - aOutputPosition.Y()) ) );
 
 	cairo_rectangle( pBufferCairo, aOutputPosition.X(), aOutputPosition.Y(), aOutputSize.Width(), aOutputSize.Height() );

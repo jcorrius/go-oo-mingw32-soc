@@ -74,8 +74,11 @@ namespace cairocanvas
     {
 	mpOutputWindow = &rOutputWindow;
         mpSpriteCanvas = &rSpriteCanvas;
-        maSize = rSize;
         mbFullScreen = bFullscreen;
+
+	mpWindowSurface = NULL;
+	mpBufferSurface = NULL;
+	mpBufferCairo = NULL;
 
 	// check whether we're a SysChild: have to fetch system data
 	// directly from SystemChildWindow, because the GetSystemData
@@ -86,17 +89,18 @@ namespace cairocanvas
 	else
 	    mpSysData = mpOutputWindow->GetSystemData();
 
-	mpWindowSurface = (Surface*) cairoHelperGetSurface( mpSysData,
-							    mpOutputWindow->GetOutOffXPixel(), mpOutputWindow->GetOutOffYPixel(),
-							    maSize.getX(), maSize.getY() );
-	mpBufferSurface = cairo_surface_create_similar( mpWindowSurface, CAIRO_CONTENT_COLOR, maSize.getX(), maSize.getY() );
-	mpBufferCairo = cairo_create( mpBufferSurface );
+	setSize( rSize );
     }
 
     void DeviceHelper::disposing()
     {
         // release all references
         mpSpriteCanvas = NULL;
+
+	if( mpWindowSurface ) {
+	    cairo_surface_destroy( mpWindowSurface );
+	    mpWindowSurface = NULL;
+	}
 
 	if( mpBufferCairo ) {
 	    cairo_destroy( mpBufferCairo );
@@ -107,7 +111,6 @@ namespace cairocanvas
 	    cairo_surface_destroy( mpBufferSurface );
 	    mpBufferSurface = NULL;
 	}
-
     }
 
     geometry::RealSize2D DeviceHelper::getPhysicalResolution()
@@ -267,9 +270,41 @@ namespace cairocanvas
         return NULL;
     }
     
+    void DeviceHelper::setSize( const ::basegfx::B2ISize& rSize )
+    {
+	OSL_TRACE("set device size %d x %d", rSize.getX(), rSize.getY() );
+
+        maSize = rSize;
+
+	if( mpWindowSurface )
+	{
+	    cairo_surface_destroy( mpWindowSurface );
+	}
+	mpWindowSurface = (Surface*) cairoHelperGetSurface( mpSysData,
+							    mpOutputWindow->GetOutOffXPixel(), mpOutputWindow->GetOutOffYPixel(),
+							    maSize.getX(), maSize.getY() );
+
+	if( mpBufferSurface )
+	{
+	    cairo_surface_destroy( mpBufferSurface );
+	}
+	mpBufferSurface = cairo_surface_create_similar( mpWindowSurface, CAIRO_CONTENT_COLOR, maSize.getX(), maSize.getY() );
+
+	if( mpBufferCairo )
+	{
+	    cairo_destroy( mpBufferCairo );
+	}
+	mpBufferCairo = cairo_create( mpBufferSurface );
+    }
+
+    const ::basegfx::B2ISize& DeviceHelper::getSizePixel()
+    {
+	return maSize;
+    }
+
     void DeviceHelper::notifySizeUpdate( const awt::Rectangle& rBounds )
     {
-        // TODO
+	setSize( ::basegfx::B2ISize(rBounds.Width, rBounds.Height) );
     }
 
     Surface* DeviceHelper::getBufferSurface()

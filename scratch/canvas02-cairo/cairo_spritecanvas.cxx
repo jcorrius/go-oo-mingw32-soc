@@ -160,14 +160,18 @@ namespace cairocanvas
 
         awt::Rectangle aRect;
         aArguments[2] >>= aRect;
-        const ::basegfx::B2ISize aSize(aRect.Width,
-                                       aRect.Height);
+//         const ::basegfx::B2ISize aSize(aRect.Width,
+//                                        aRect.Height);
 
         sal_Bool bIsFullscreen( sal_False );
         aArguments[3] >>= bIsFullscreen;
 
 	// TODO(Q2): This now works for Solaris, but still warns for gcc
 	Window* pOutputWindow = (Window*) *reinterpret_cast<const sal_Int64*>(aArguments[0].getValue()); 
+
+	Size aPixelSize( pOutputWindow->GetOutputSizePixel() );
+        const ::basegfx::B2ISize aSize( aPixelSize.Width(),
+					aPixelSize.Height() );
 
 	CHECK_AND_THROW( pOutputWindow != NULL, 
 			 "SpriteCanvas::initialize: invalid Window pointer" );
@@ -250,6 +254,11 @@ namespace cairocanvas
     Surface* SpriteCanvas::getBackgroundSurface()
     {
 	return mpBackgroundSurface;
+    }
+
+    const ::basegfx::B2ISize& SpriteCanvas::getSizePixel()
+    {
+	return maDeviceHelper.getSizePixel();
     }
 
     void SpriteCanvas::flush()

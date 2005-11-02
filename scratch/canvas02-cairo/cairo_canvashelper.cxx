@@ -78,7 +78,6 @@ namespace cairocanvas
 {
     CanvasHelper::CanvasHelper() :
         mpDevice( NULL ),
-        maSize(),
         mbHaveAlpha()
     {
     }
@@ -95,7 +94,6 @@ namespace cairocanvas
                              bool                      bHasAlpha )
     {
         mpDevice = &rDevice;
-        maSize = rSize;
         mbHaveAlpha = bHasAlpha;
 	mpCairo = pCairo;
     }
@@ -1048,9 +1046,11 @@ namespace cairocanvas
 										       bool bHasAlpha )
     {
 	if( mpCairo ) {
+	    const ::basegfx::B2ISize& aSize = mpDevice->getSizePixel();
+
 	    cairo_save( mpCairo );
 
- 	    cairo_rectangle( mpCairo, 0, 0, maSize.getX(), maSize.getY() );
+ 	    cairo_rectangle( mpCairo, 0, 0, aSize.getX(), aSize.getY() );
  	    cairo_clip( mpCairo );
 
 	    useStates( viewState, renderState, true );
@@ -1130,7 +1130,7 @@ namespace cairocanvas
         if( !mpDevice )
             geometry::IntegerSize2D(1, 1); // we're disposed
 
-        return ::basegfx::unotools::integerSize2DFromB2ISize( maSize );
+        return ::basegfx::unotools::integerSize2DFromB2ISize( mpDevice->getSizePixel() );
     }
 
     uno::Reference< rendering::XBitmap > CanvasHelper::getScaledBitmap( const geometry::RealSize2D&	newSize, 

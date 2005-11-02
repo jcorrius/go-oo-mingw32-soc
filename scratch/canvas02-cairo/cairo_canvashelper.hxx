@@ -302,9 +302,6 @@ namespace cairocanvas
 			const ::com::sun::star::rendering::RenderState& renderState,
 			bool setColor );
 
-        /// Current size of the output surface in pixel
-        ::basegfx::B2ISize				maSize;
-
         /// When true, content is able to represent alpha
         bool                            mbHaveAlpha;
 

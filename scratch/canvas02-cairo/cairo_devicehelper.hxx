@@ -100,12 +100,14 @@ namespace cairocanvas
         const void* getSurfaceHandle() const;
 
         void notifySizeUpdate( const ::com::sun::star::awt::Rectangle& rBounds );
+	void setSize( const ::basegfx::B2ISize&	rSize );
 
 	::cairo::Surface* getBufferSurface();
 	::cairo::Surface* getWindowSurface();
 	::cairo::Surface* getSurface( const ::basegfx::B2ISize& rSize, ::cairo::Content aContent = ::cairo::CAIRO_CONTENT_COLOR_ALPHA );
 	::cairo::Surface* getSurface( ::cairo::Content aContent = ::cairo::CAIRO_CONTENT_COLOR_ALPHA );
 	::cairo::Surface* getSurface( BitmapSystemData& rData, const Size& rSize );
+	const ::basegfx::B2ISize& getSizePixel();
 	void flush();
 
     private:
