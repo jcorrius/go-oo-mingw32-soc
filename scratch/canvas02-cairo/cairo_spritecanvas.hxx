@@ -163,6 +163,7 @@ namespace cairocanvas
 	::cairo::Surface* getWindowSurface();
 	::cairo::Surface* getBackgroundSurface();
 	const ::basegfx::B2ISize& getSizePixel();
+	void setSizePixel( const ::basegfx::B2ISize& rSize );
 	void flush();
 
      private:

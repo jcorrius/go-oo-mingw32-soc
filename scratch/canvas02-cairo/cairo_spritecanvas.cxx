@@ -176,14 +176,16 @@ namespace cairocanvas
 	CHECK_AND_THROW( pOutputWindow != NULL, 
 			 "SpriteCanvas::initialize: invalid Window pointer" );
 
+
+	// they are created in setSize, which is called from device helper
+	mpBackgroundSurface = NULL;
+	mpBackgroundCairo = NULL;
+
 	// setup helper
 	maDeviceHelper.init( *pOutputWindow,
 			     *this,
 			     aSize,
 			     bIsFullscreen );
-
-	mpBackgroundSurface = getSurface( aSize );
-	mpBackgroundCairo = cairo_create( mpBackgroundSurface );
 
         maCanvasHelper.init( maRedrawManager,
                              *this,
@@ -259,6 +261,21 @@ namespace cairocanvas
     const ::basegfx::B2ISize& SpriteCanvas::getSizePixel()
     {
 	return maDeviceHelper.getSizePixel();
+    }
+
+    void SpriteCanvas::setSizePixel( const ::basegfx::B2ISize& rSize )
+    {
+	if( mpBackgroundSurface )
+	{
+	    cairo_surface_destroy( mpBackgroundSurface );
+	}
+	mpBackgroundSurface = maDeviceHelper.getSurface();
+
+	if( mpBackgroundCairo )
+	{
+	    cairo_destroy( mpBackgroundCairo );
+	}
+	mpBackgroundCairo = cairo_create( mpBackgroundSurface );
     }
 
     void SpriteCanvas::flush()

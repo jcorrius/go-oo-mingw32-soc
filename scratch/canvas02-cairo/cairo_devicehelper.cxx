@@ -295,6 +295,8 @@ namespace cairocanvas
 	    cairo_destroy( mpBufferCairo );
 	}
 	mpBufferCairo = cairo_create( mpBufferSurface );
+
+	mpSpriteCanvas->setSizePixel( maSize );
     }
 
     const ::basegfx::B2ISize& DeviceHelper::getSizePixel()
