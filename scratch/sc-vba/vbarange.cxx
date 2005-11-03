@@ -36,6 +36,8 @@
 
 #include <org/openoffice/vba/xlPasteSpecialOperation.hpp>
 #include <org/openoffice/vba/xlPasteType.hpp>
+#include <org/openoffice/vba/Excel/Constants.hpp>
+#include <org/openoffice/vba/Excel/XlFindLookIn.hpp>
 
 #include "vbarange.hxx"
 #include "vbafont.hxx"
@@ -51,7 +53,7 @@ const sal_Int32 RANGE_PROPERTY_ID_DFLT=1;
 // name is not defineable in IDL so no chance of a false detection of the
 // another property/method of the same name
 const ::rtl::OUString RANGE_PROPERTY_DFLT( RTL_CONSTASCII_USTRINGPARAM( "_$DefaultProp" ) );
-
+const ::rtl::OUString ISVISIBLE(  RTL_CONSTASCII_USTRINGPARAM( "IsVisible"));
 
 ScVbaRange::ScVbaRange( uno::Reference< uno::XComponentContext >& xContext, uno::Reference< table::XCellRange > xRange, sal_Bool bIsRows, sal_Bool bIsColumns ) throw( lang::IllegalArgumentException )
 :OPropertyContainer(GetBroadcastHelper())
@@ -666,10 +668,6 @@ getPasteFlags (sal_Int16 Paste)
 {
 	USHORT nFlags = IDF_NONE;	
 	switch (Paste) {
-	case vba::xlPasteType::xlAll: 
-	case vba::xlPasteType::xlPasteAll: 
-        case vba::xlPasteType::xlPasteAllExceptBorders: 
-		nFlags = IDF_ALL;break;
         case vba::xlPasteType::xlPasteComments: 
 		nFlags = IDF_NOTE;break;
         case vba::xlPasteType::xlPasteFormats: 
@@ -678,12 +676,18 @@ getPasteFlags (sal_Int16 Paste)
 		nFlags = IDF_FORMULA;break;
         case vba::xlPasteType::xlPasteFormulasAndNumberFormats : 
 		nFlags = IDF_FORMULA | IDF_VALUE ;break;
+        case vba::Excel::XlFindLookIn::xlValues: 
         case vba::xlPasteType::xlPasteValues: 
 		nFlags = IDF_VALUE;break;
         case vba::xlPasteType::xlPasteValuesAndNumberFormats:
 		nFlags = IDF_VALUE | IDF_ATTRIB; break;
         case vba::xlPasteType::xlPasteColumnWidths:
-        case vba::xlPasteType::xlPasteValidation: nFlags = IDF_NONE;break;
+        case vba::xlPasteType::xlPasteValidation: 
+		nFlags = IDF_NONE;break;
+	case vba::xlPasteType::xlPasteAll: 
+        case vba::xlPasteType::xlPasteAllExceptBorders: 
+	default:
+		nFlags = IDF_ALL;break;
 	};
 return nFlags;
 }
@@ -702,9 +706,11 @@ getPasteFormulaBits( sal_Int16 Operation)
 		nFormulaBits = PASTE_MUL;break;
 	case vba::xlPasteSpecialOperation::xlPasteSpecialOperationDivide:
 		nFormulaBits = PASTE_DIV;break;
+
 	case vba::xlPasteSpecialOperation::xlPasteSpecialOperationNone: 
-	case  vba::xlPasteSpecialOperation::xlNone : 
-		nFormulaBits = PASTE_NOFUNC; 
+	case vba::Excel::Constants::xlNone:
+	default:
+		nFormulaBits = PASTE_NOFUNC; break;
 	};
 	
 return nFormulaBits;
@@ -716,6 +722,81 @@ ScVbaRange::PasteSpecial(sal_Int16 Paste, sal_Int16 Operation, ::sal_Bool SkipBl
 	USHORT nFormulaBits = getPasteFormulaBits(Operation);
 	implnPasteSpecial(nFlags,nFormulaBits,SkipBlanks,Transpose);
 
+}
+
+uno::Reference< vba::XRange > 
+ScVbaRange::getEntireColumnOrRow( bool bEntireRow ) throw (uno::RuntimeException)
+{
+	uno::Reference< sheet::XSheetCellRange > xSheetCellRange(mxRange, uno::UNO_QUERY_THROW);
+	uno::Reference< sheet::XSpreadsheet > xSheet( xSheetCellRange->getSpreadsheet(), uno::UNO_QUERY_THROW );
+	uno::Reference< sheet::XSheetCellCursor > xSheetCellCursor( xSheet->createCursorByRange( xSheetCellRange ), uno::UNO_QUERY_THROW );
+	if ( bEntireRow ) 
+		xSheetCellCursor->expandToEntireRows();
+	else
+		xSheetCellCursor->expandToEntireColumns();
+
+	uno::Reference< sheet::XCellRangeAddressable > xCellRangeAddressable(xSheetCellCursor, uno::UNO_QUERY_THROW);
+	uno::Reference< table::XCellRange > xCellRange( xSheet, uno::UNO_QUERY_THROW);
+	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xCellRange->getCellRangeByPosition( xCellRangeAddressable->getRangeAddress().StartColumn, xCellRangeAddressable->getRangeAddress().StartRow, xCellRangeAddressable->getRangeAddress().EndColumn, xCellRangeAddressable->getRangeAddress().EndRow ) , bEntireRow, !bEntireRow ) );
+}
+
+uno::Reference< vba::XRange > SAL_CALL 
+ScVbaRange::getEntireRow() throw (uno::RuntimeException)
+{
+	return getEntireColumnOrRow();
+}
+
+uno::Reference< vba::XRange > SAL_CALL 
+ScVbaRange::getEntireColumn() throw (uno::RuntimeException)
+{
+	return getEntireColumnOrRow( false );
+}
+
+uno::Reference< beans::XPropertySet >
+getRowOrColumnProps( const uno::Reference< table::XCellRange >& xCellRange, bool bRows ) throw ( uno::RuntimeException )
+{
+	uno::Reference< table::XColumnRowRange > xColRow( xCellRange, uno::UNO_QUERY_THROW );
+	uno::Reference< beans::XPropertySet > xProps;
+	if ( bRows )
+		xProps.set( xColRow->getRows(), uno::UNO_QUERY_THROW );
+	else
+		xProps.set( xColRow->getColumns(), uno::UNO_QUERY_THROW );
+	return xProps;	
+}
+
+uno::Any SAL_CALL 
+ScVbaRange::getHidden() throw (uno::RuntimeException)
+{
+	bool bIsVisible = false;
+	try
+	{
+		uno::Reference< beans::XPropertySet > xProps = getRowOrColumnProps( mxRange, mbIsRows );
+		if ( !( xProps->getPropertyValue( ISVISIBLE ) >>= bIsVisible ) )
+			throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Failed to get IsVisible property")), uno::Reference< uno::XInterface >() );
+	}
+	catch( uno::Exception& e )
+	{
+		throw uno::RuntimeException( e.Message, uno::Reference< uno::XInterface >() );
+	}
+	return uno::makeAny( !bIsVisible ); 
+}
+
+void SAL_CALL 
+ScVbaRange::setHidden( const uno::Any& _hidden ) throw (uno::RuntimeException)
+{
+	sal_Bool bHidden;
+	if ( !(_hidden >>= bHidden) )
+		throw uno::RuntimeException( ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Failed to extract param for Hidden property" ) ), uno::Reference< uno::XInterface >() ); 
+
+	try
+	{
+		uno::Reference< beans::XPropertySet > xProps = getRowOrColumnProps( mxRange, mbIsRows );
+		xProps->setPropertyValue( ISVISIBLE, uno::makeAny( !bHidden ) );
+	}
+	catch( uno::Exception& e )
+	{
+		throw uno::RuntimeException( e.Message, uno::Reference< uno::XInterface >() );
+	}	
 }
 
 // XInterface

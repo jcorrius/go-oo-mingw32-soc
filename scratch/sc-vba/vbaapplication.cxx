@@ -10,6 +10,7 @@
 #include "vbarange.hxx"
 #include "vbawsfunction.hxx"
 #include "vbadialogs.hxx"
+#include "vbawindow.hxx"
 
 #include "tabvwsh.hxx"
 
@@ -18,6 +19,17 @@
 
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
+
+class ActiveWorkbook : public ScVbaWorkbook
+{
+protected:
+	virtual uno::Reference< frame::XModel > getModel()
+	{ 	
+		return getCurrentDocument(); 
+	}
+public:
+	ActiveWorkbook( uno::Reference< uno::XComponentContext >& xContext) : ScVbaWorkbook(  xContext ){}
+};
 
 ScVbaApplication::ScVbaApplication( uno::Reference<uno::XComponentContext >& xContext ): m_xContext( xContext )
 {
@@ -31,11 +43,7 @@ ScVbaApplication::~ScVbaApplication()
 uno::Reference< vba::XWorkbook >
 ScVbaApplication::getActiveWorkbook() throw (uno::RuntimeException)
 {
-	uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY_THROW );
-
-	uno::Reference< vba::XWorkbook > xWrkBk( new ScVbaWorkbook( m_xContext,
-		xModel )); 
-	return xWrkBk; 
+	return new ActiveWorkbook( m_xContext ); 
 }
 
 uno::Reference< vba::XRange >
@@ -119,4 +127,24 @@ ScVbaApplication::Dialogs( const uno::Any &aIndex ) throw (uno::RuntimeException
 		return uno::Any( xDialogs );
 	return uno::Any( xDialogs->Item( aIndex ) );
 }
-	
+
+uno::Reference< vba::XWindow > SAL_CALL 
+ScVbaApplication::getActiveWindow() throw (uno::RuntimeException)
+{
+	return new ScVbaWindow( m_xContext );
+}
+
+uno::Any SAL_CALL 
+ScVbaApplication::getCutCopyMode() throw (uno::RuntimeException)
+{
+	//# FIXME TODO, implementation
+	uno::Any result;
+	result <<= sal_False;
+	return result;
+}
+void SAL_CALL 
+ScVbaApplication::setCutCopyMode( const uno::Any& _cutcopymode ) throw (uno::RuntimeException)
+{
+	//# FIXME TODO, implementation
+}
+

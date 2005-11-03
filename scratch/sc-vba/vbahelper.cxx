@@ -22,7 +22,7 @@ void unoToSbxValue( SbxVariable* pVar, const uno::Any& aValue );
 uno::Any sbxToUnoValue( SbxVariable* pVar );
 
 void
-org::openoffice::dispatchRequests (uno::Reference< frame::XModel>& xModel,rtl::OUString & aUrl) 
+org::openoffice::dispatchRequests (uno::Reference< frame::XModel>& xModel,rtl::OUString & aUrl, uno::Sequence< beans::PropertyValue >& sProps ) 
 {
 
 	util::URL  url ;
@@ -61,13 +61,33 @@ org::openoffice::dispatchRequests (uno::Reference< frame::XModel>& xModel,rtl::O
 	}
 
 	uno::Reference<frame::XDispatch> xDispatcher = xDispatchProvider->queryDispatch(url,emptyString,0);
-	uno::Sequence<beans::PropertyValue> sProps(2) ;
-        beans::PropertyValue * aArray = sProps.getArray();
-	aArray[0].Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Silent" ));
-	aArray[0].Value <<= (sal_Bool)sal_True;
+
+	uno::Sequence<beans::PropertyValue> dispatchProps(1);
+
+	sal_Int32 nProps = sProps.getLength();
+	beans::PropertyValue* pDest = dispatchProps.getArray();
+	if ( nProps )
+	{
+		dispatchProps.realloc( nProps + 1 );
+		// need to reaccquire pDest after realloc
+		pDest = dispatchProps.getArray();
+		beans::PropertyValue* pSrc = sProps.getArray();
+		for ( sal_Int32 index=0; index<nProps; ++index, ++pSrc, ++pDest )
+			*pDest = *pSrc;
+	}
+
+	(*pDest).Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Silent" ));
+	(*pDest).Value <<= (sal_Bool)sal_True;
 
 	if (xDispatcher.is())
-		xDispatcher->dispatch( url,sProps );
+		xDispatcher->dispatch( url, dispatchProps );
+}
+
+void
+org::openoffice::dispatchRequests (uno::Reference< frame::XModel>& xModel,rtl::OUString & aUrl) 
+{
+	uno::Sequence<beans::PropertyValue> dispatchProps;
+	dispatchRequests( xModel, aUrl, dispatchProps );
 }
 
 

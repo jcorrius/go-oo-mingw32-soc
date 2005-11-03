@@ -14,12 +14,22 @@
 
 class ScVbaWorksheet : public ::cppu::WeakImplHelper1<oo::vba::XWorksheet> 
 {
+	css::uno::Reference< css::uno::XComponentContext > m_xContext;
 	css::uno::Reference< css::sheet::XSpreadsheet > mxSheet;
 	css::uno::Reference< css::frame::XModel > mxModel;
-	css::uno::Reference< css::uno::XComponentContext > m_xContext;
 		
 	css::uno::Reference< oo::vba::XWorksheet > getSheetAtOffset(int offset) throw (css::uno::RuntimeException);
 	css::uno::Reference< oo::vba::XRange > getSheetRange() throw (css::uno::RuntimeException);
+
+
+protected:
+
+	virtual css::uno::Reference< css::frame::XModel > getModel()
+	{ return mxModel; }
+	virtual css::uno::Reference< css::sheet::XSpreadsheet > getSheet()
+	{ return mxSheet; }
+	ScVbaWorksheet( 
+		css::uno::Reference< css::uno::XComponentContext >& xContext ): m_xContext( xContext ) {}
 public:
 	ScVbaWorksheet( 
 		css::uno::Reference< css::uno::XComponentContext >& xContext,
@@ -59,7 +69,6 @@ public:
 
 	virtual void SAL_CALL Calculate(  ) throw (css::uno::RuntimeException);
 	virtual void SAL_CALL CheckSpelling( const css::uno::Any& CustomDictionary,const css::uno::Any& IgnoreUppercase,const css::uno::Any& AlwaysSuggest, const css::uno::Any& SpellingLang ) throw (css::uno::RuntimeException);
-
 	// Hacks (?)
 	virtual css::uno::Reference< oo::vba::XRange > SAL_CALL Cells( const css::uno::Any &nRow, const css::uno::Any &nCol ) throw (css::uno::RuntimeException);
 	virtual css::uno::Reference< oo::vba::XRange > Rows(const css::uno::Any& aIndex ) throw (css::uno::RuntimeException);

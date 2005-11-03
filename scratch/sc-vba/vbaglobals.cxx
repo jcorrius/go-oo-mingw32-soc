@@ -5,10 +5,13 @@
 #include <com/sun/star/lang/XMultiComponentFactory.hpp>
 
 #include "vbaapplication.hxx"
+#include "vbaworksheet.hxx"
 
 using namespace ::com::sun::star;
 using namespace ::com::sun::star::uno;
 using namespace ::org::openoffice;
+
+
 
 namespace vbaobj
 {
@@ -172,6 +175,11 @@ ScVbaGlobals::WorkSheets(const uno::Any& aIndex) throw (uno::RuntimeException)
             "No ActiveWorkBook available" ), Reference< uno::XInterface >() );
 
 	return result;
+}
+uno::Any SAL_CALL
+ScVbaGlobals::Sheets( const uno::Any& aIndex ) throw (uno::RuntimeException)
+{
+	return WorkSheets( aIndex );
 }
 
 ::uno::Sequence< ::uno::Any > SAL_CALL

@@ -145,21 +145,21 @@ openNewDoc(rtl::OUString aSheetName )
 ::rtl::OUString
 ScVbaWorksheet::getName() throw (uno::RuntimeException)
 {
-	uno::Reference< container::XNamed > xNamed( mxSheet, uno::UNO_QUERY_THROW );
+	uno::Reference< container::XNamed > xNamed( getSheet(), uno::UNO_QUERY_THROW );
 	return xNamed->getName();
 }
 
 void
 ScVbaWorksheet::setName(const ::rtl::OUString &rName ) throw (uno::RuntimeException)
 {
-	uno::Reference< container::XNamed > xNamed( mxSheet, uno::UNO_QUERY_THROW );
+	uno::Reference< container::XNamed > xNamed( getSheet(), uno::UNO_QUERY_THROW );
 	xNamed->setName( rName );
 }
 
 sal_Bool
 ScVbaWorksheet::getVisible() throw (uno::RuntimeException)
 {
-	uno::Reference< beans::XPropertySet > xProps( mxSheet, uno::UNO_QUERY_THROW );
+	uno::Reference< beans::XPropertySet > xProps( getSheet(), uno::UNO_QUERY_THROW );
 	uno::Any aValue = xProps->getPropertyValue
 			(rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "IsVisible" ) ) );
 	sal_Bool bRet = false;
@@ -170,7 +170,7 @@ ScVbaWorksheet::getVisible() throw (uno::RuntimeException)
 void
 ScVbaWorksheet::setVisible( sal_Bool bVisible ) throw (uno::RuntimeException)
 {
-	uno::Reference< beans::XPropertySet > xProps( mxSheet, uno::UNO_QUERY_THROW );
+	uno::Reference< beans::XPropertySet > xProps( getSheet(), uno::UNO_QUERY_THROW );
 	uno::Any aValue( bVisible );
 	xProps->setPropertyValue
 			(rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "IsVisible" ) ), aValue);
@@ -179,8 +179,8 @@ ScVbaWorksheet::setVisible( sal_Bool bVisible ) throw (uno::RuntimeException)
 uno::Reference< vba::XRange > 
 ScVbaWorksheet::getUsedRange() throw (uno::RuntimeException)
 {
- 	uno::Reference< sheet::XSheetCellRange > xSheetCellRange(mxSheet, uno::UNO_QUERY_THROW );
-	uno::Reference< sheet::XSheetCellCursor > xSheetCellCursor( mxSheet->createCursorByRange( xSheetCellRange ), uno::UNO_QUERY_THROW );
+ 	uno::Reference< sheet::XSheetCellRange > xSheetCellRange(getSheet(), uno::UNO_QUERY_THROW );
+	uno::Reference< sheet::XSheetCellCursor > xSheetCellCursor( getSheet()->createCursorByRange( xSheetCellRange ), uno::UNO_QUERY_THROW );
 	uno::Reference<sheet::XUsedAreaCursor> xUsedCursor(xSheetCellCursor,uno::UNO_QUERY_THROW);
 	xUsedCursor->gotoStartOfUsedArea( false );
 	xUsedCursor->gotoEndOfUsedArea( true );
@@ -191,7 +191,7 @@ ScVbaWorksheet::getUsedRange() throw (uno::RuntimeException)
 uno::Reference< vba::XOutline >
 ScVbaWorksheet::Outline( ) throw (uno::RuntimeException)
 {
-	uno::Reference<sheet::XSheetOutline> xOutline(mxSheet,uno::UNO_QUERY_THROW);
+	uno::Reference<sheet::XSheetOutline> xOutline(getSheet(),uno::UNO_QUERY_THROW);
 	return uno::Reference<vba::XOutline> (new ScVbaOutline(m_xContext, xOutline));
 }
 
@@ -216,7 +216,7 @@ ScVbaWorksheet::getProtectionMode() throw (uno::RuntimeException)
 sal_Bool
 ScVbaWorksheet::getProtectContents()throw (uno::RuntimeException) 
 {
-	uno::Reference<util::XProtectable > xProtectable(mxSheet, uno::UNO_QUERY_THROW);
+	uno::Reference<util::XProtectable > xProtectable(getSheet(), uno::UNO_QUERY_THROW);
 	return xProtectable->isProtected();
 }
 
@@ -230,8 +230,8 @@ void
 ScVbaWorksheet::Activate() throw (uno::RuntimeException)
 {
 	uno::Reference< sheet::XSpreadsheetView > xSpreadsheet(
-        	mxModel->getCurrentController(), uno::UNO_QUERY_THROW );
-	xSpreadsheet->setActiveSheet(mxSheet);	
+        	getModel()->getCurrentController(), uno::UNO_QUERY_THROW );
+	xSpreadsheet->setActiveSheet(getSheet());	
 }
 
 void
@@ -249,7 +249,7 @@ ScVbaWorksheet::Move( const uno::Any& Before, const uno::Any& After ) throw (uno
 
 	if (!(Before >>= xSheet) && !(After >>=xSheet)&& !(Before.hasValue()) && !(After.hasValue()))
 	{
-		uno::Reference< sheet::XSheetCellCursor > xSheetCellCursor = mxSheet->createCursor( );
+		uno::Reference< sheet::XSheetCellCursor > xSheetCellCursor = getSheet()->createCursor( );
 		uno::Reference<sheet::XUsedAreaCursor> xUsedCursor(xSheetCellCursor,uno::UNO_QUERY_THROW);
         	uno::Reference< table::XCellRange > xRange1( xSheetCellCursor, uno::UNO_QUERY);
 		uno::Reference<vba::XRange> xRange =  new ScVbaRange(m_xContext, xRange1);
@@ -265,7 +265,7 @@ ScVbaWorksheet::Move( const uno::Any& Before, const uno::Any& After ) throw (uno
 		return ;
 	}
 
-	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( mxModel, uno::UNO_QUERY_THROW );
+	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( getModel(), uno::UNO_QUERY_THROW );
 	sal_Int32 nDest = DOESNOTEXIST;
 	sal_Bool bAfter = false;
 	if (Before >>= xSheet )
@@ -296,7 +296,7 @@ ScVbaWorksheet::Copy( const uno::Any& Before, const uno::Any& After ) throw (uno
 	rtl::OUString aCurrSheetName =getName();
 	if (!(Before >>= xSheet) && !(After >>=xSheet)&& !(Before.hasValue()) && !(After.hasValue()))
 	{
-		uno::Reference< sheet::XSheetCellCursor > xSheetCellCursor = mxSheet->createCursor( );
+		uno::Reference< sheet::XSheetCellCursor > xSheetCellCursor = getSheet()->createCursor( );
 		uno::Reference<sheet::XUsedAreaCursor> xUsedCursor(xSheetCellCursor,uno::UNO_QUERY_THROW);
         	uno::Reference< table::XCellRange > xRange1( xSheetCellCursor, uno::UNO_QUERY);
 		uno::Reference<vba::XRange> xRange =  new ScVbaRange(m_xContext, xRange1);
@@ -311,7 +311,7 @@ ScVbaWorksheet::Copy( const uno::Any& Before, const uno::Any& After ) throw (uno
 		return;
 	}
 
-	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( mxModel, uno::UNO_QUERY );
+	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( getModel(), uno::UNO_QUERY );
 	sal_Int32 nDest = DOESNOTEXIST;
 	sal_Bool bAfter = false;
 	if (Before >>= xSheet )
@@ -347,7 +347,7 @@ ScVbaWorksheet::Paste( const uno::Any& Destination, const uno::Any& Link ) throw
 void 
 ScVbaWorksheet::Delete() throw (uno::RuntimeException)
 {
-	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( mxModel, uno::UNO_QUERY_THROW );
+	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( getModel(), uno::UNO_QUERY_THROW );
 	rtl::OUString aSheetName = getName();
 	if ( xSpreadDoc.is() )
 	{
@@ -364,7 +364,7 @@ ScVbaWorksheet::Delete() throw (uno::RuntimeException)
 uno::Reference< vba::XWorksheet >
 ScVbaWorksheet::getSheetAtOffset(int offset) throw (uno::RuntimeException)
 {
-	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( mxModel, uno::UNO_QUERY_THROW );
+	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( getModel(), uno::UNO_QUERY_THROW );
 	uno::Reference <sheet::XSpreadsheets> xSheets( xSpreadDoc->getSheets(), uno::UNO_QUERY_THROW );
 	uno::Reference <container::XIndexAccess> xIndex( xSheets, uno::UNO_QUERY_THROW );
 
@@ -378,7 +378,7 @@ ScVbaWorksheet::getSheetAtOffset(int offset) throw (uno::RuntimeException)
 	else
 	{
 		uno::Reference< sheet::XSpreadsheet > xSheet(xIndex->getByIndex(nIdx), uno::UNO_QUERY_THROW);
-		return new ScVbaWorksheet (m_xContext, xSheet, mxModel);
+		return new ScVbaWorksheet (m_xContext, xSheet, getModel());
 	}
 }
 
@@ -397,7 +397,7 @@ ScVbaWorksheet::getPrevious() throw (uno::RuntimeException)
 void
 ScVbaWorksheet::Protect( const uno::Any& Password, const uno::Any& DrawingObjects, const uno::Any& Contents, const uno::Any& Scenarios, const uno::Any& UserInterfaceOnly ) throw (uno::RuntimeException)
 {
-	uno::Reference<util::XProtectable > xProtectable(mxSheet, uno::UNO_QUERY_THROW);
+	uno::Reference<util::XProtectable > xProtectable(getSheet(), uno::UNO_QUERY_THROW);
 	::rtl::OUString aPasswd;
 	Password >>= aPasswd;
 	xProtectable->protect( aPasswd );
@@ -406,7 +406,7 @@ ScVbaWorksheet::Protect( const uno::Any& Password, const uno::Any& DrawingObject
 void 
 ScVbaWorksheet::Unprotect( const uno::Any& Password ) throw (uno::RuntimeException)
 {
-	uno::Reference<util::XProtectable > xProtectable(mxSheet, uno::UNO_QUERY_THROW);
+	uno::Reference<util::XProtectable > xProtectable(getSheet(), uno::UNO_QUERY_THROW);
 	::rtl::OUString aPasswd;
 	Password >>= aPasswd;
 	xProtectable->unprotect( aPasswd );
@@ -415,7 +415,7 @@ ScVbaWorksheet::Unprotect( const uno::Any& Password ) throw (uno::RuntimeExcepti
 void 
 ScVbaWorksheet::Calculate() throw (uno::RuntimeException)
 {
-	uno::Reference <sheet::XCalculatable> xReCalculate(mxModel, uno::UNO_QUERY_THROW);
+	uno::Reference <sheet::XCalculatable> xReCalculate(getModel(), uno::UNO_QUERY_THROW);
 	xReCalculate->calculate();
 }
 
@@ -424,7 +424,19 @@ ScVbaWorksheet::Range( const ::uno::Any &rRange ) throw (uno::RuntimeException)
 {
 	rtl::OUString aStringRange;
 	rRange >>= aStringRange;
-	uno::Reference< table::XCellRange > xRanges( mxSheet, uno::UNO_QUERY_THROW );
+	uno::Reference< table::XCellRange > xRanges( getSheet(), uno::UNO_QUERY_THROW );
+	OSL_TRACE("Trying to cell range by %s", rtl::OUStringToOString( 
+		aStringRange, RTL_TEXTENCODING_UTF8 ).getStr() );
+	try
+	{
+		uno::Reference< table::XCellRange > xRange = xRanges->getCellRangeByName( aStringRange );
+	}
+	catch ( uno::Exception& e )
+	{
+		OSL_TRACE("** Caught Exception with msg: %s",
+			rtl::OUStringToOString( e.Message, 
+				RTL_TEXTENCODING_UTF8 ).getStr() );
+	}
 	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xRanges->getCellRangeByName( aStringRange ) ) );
 }
 
@@ -432,13 +444,14 @@ void
 ScVbaWorksheet::CheckSpelling( const uno::Any& CustomDictionary,const uno::Any& IgnoreUppercase,const uno::Any& AlwaysSuggest, const uno::Any& SpellingLang ) throw (uno::RuntimeException)
 {
 	rtl::OUString url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:SpellDialog"));
-	dispatchRequests(mxModel,url);
+	uno::Reference< frame::XModel > xModel( getModel() );
+	dispatchRequests(xModel,url);
 }
 
 uno::Reference< vba::XRange > 
 ScVbaWorksheet::getSheetRange() throw (uno::RuntimeException)
 {
-	uno::Reference< table::XCellRange > xRange( mxSheet,uno::UNO_QUERY_THROW );
+	uno::Reference< table::XCellRange > xRange( getSheet(),uno::UNO_QUERY_THROW );
 	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xRange ) );
 }
 
@@ -474,3 +487,4 @@ ScVbaWorksheet::Evaluate( const ::rtl::OUString& Name ) throw (uno::RuntimeExcep
 	
 	return uno::Any();
 }
+

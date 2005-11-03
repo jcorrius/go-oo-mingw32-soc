@@ -30,6 +30,7 @@ class ScVbaRange : public ScVbaRange_BASE
 	sal_Bool mbIsRows;
 	sal_Bool mbIsColumns;
 	rtl::OUString msDftPropName;
+	css::uno::Reference< oo::vba::XRange > getEntireColumnOrRow( bool bEntireRow = true ) throw( css::uno::RuntimeException );
 
 public:
 	ScVbaRange( css::uno::Reference< css::uno::XComponentContext >& xContext, css::uno::Reference< css::table::XCellRange > xRange, sal_Bool bIsRows = false, sal_Bool bIsColumns = false ) throw ( css::lang::IllegalArgumentException );
@@ -54,7 +55,10 @@ public:
 	virtual sal_Bool SAL_CALL getMergeCells() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setWrapText( sal_Bool bIsWrapped ) throw (css::uno::RuntimeException);
 	virtual sal_Bool SAL_CALL getWrapText() throw (css::uno::RuntimeException);
-
+	virtual css::uno::Reference< oo::vba::XRange > SAL_CALL getEntireRow() throw (css::uno::RuntimeException);
+	virtual css::uno::Reference< oo::vba::XRange > SAL_CALL getEntireColumn() throw (css::uno::RuntimeException);
+	virtual css::uno::Any SAL_CALL getHidden() throw (css::uno::RuntimeException);
+	virtual void SAL_CALL setHidden( const css::uno::Any& _hidden ) throw (css::uno::RuntimeException);
 	// Methods
 	sal_Bool IsRows() { return mbIsRows; }
 	sal_Bool IsColumns() { return mbIsColumns; }

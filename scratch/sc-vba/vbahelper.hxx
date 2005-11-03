@@ -10,6 +10,7 @@ namespace org
 	namespace openoffice 
 	{
 		void dispatchRequests (css::uno::Reference< css::frame::XModel>& xModel,rtl::OUString & aUrl) ;
+		void dispatchRequests (css::uno::Reference< css::frame::XModel>& xModel,rtl::OUString & aUrl, css::uno::Sequence< css::beans::PropertyValue >& sProps ) ;
 		void implnCopy();
 		void implnPaste();
 		void implnCut();

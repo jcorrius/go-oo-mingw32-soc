@@ -15,7 +15,9 @@ class ScVbaWorkbook : public ScVbaWorkbook_BASE
 {
 	css::uno::Reference< css::uno::XComponentContext > m_xContext;
 	css::uno::Reference< css::frame::XModel > mxModel;
-
+protected:
+	virtual css::uno::Reference< css::frame::XModel >  getModel() { return mxModel; }
+	ScVbaWorkbook( 	css::uno::Reference< css::uno::XComponentContext >& xContext) : m_xContext( xContext ){}
 public:
 	ScVbaWorkbook( 	css::uno::Reference< css::uno::XComponentContext >& xContext,
 			css::uno::Reference< css::frame::XModel > xModel ) :
