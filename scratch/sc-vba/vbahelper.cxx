@@ -6,6 +6,7 @@
 #include <com/sun/star/frame/XController.hpp>
 #include <com/sun/star/uno/XComponentContext.hpp>
 #include <com/sun/star/lang/XMultiComponentFactory.hpp>
+#include <com/sun/star/beans/XPropertySet.hpp>
 
 #include <sfx2/objsh.hxx>
 #include <sfx2/app.hxx>
@@ -18,9 +19,56 @@
 
 using namespace ::com::sun::star;
 using namespace ::org::openoffice;
+
 void unoToSbxValue( SbxVariable* pVar, const uno::Any& aValue );
+
 uno::Any sbxToUnoValue( SbxVariable* pVar );
 
+const ::rtl::OUString REPLACE_CELLS_WARNING(  RTL_CONSTASCII_USTRINGPARAM( "ReplaceCellsWarning"));
+
+class PasteCellsWarningReseter
+{
+private:
+	bool bInitialWarningState;
+	static uno::Reference< beans::XPropertySet > getGlobalSheetSettings() throw ( uno::RuntimeException )
+	{
+		static uno::Reference<uno::XComponentContext > xContext( ::cppu::defaultBootstrap_InitialComponentContext(), uno::UNO_QUERY_THROW );
+		static uno::Reference<lang::XMultiComponentFactory > xServiceManager(
+				xContext->getServiceManager(), uno::UNO_QUERY_THROW );
+		static uno::Reference< beans::XPropertySet > xProps( xServiceManager->createInstanceWithContext( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "com.sun.star.sheet.GlobalSheetSettings" ) ) ,xContext ), uno::UNO_QUERY_THROW );
+		return xProps;
+	}	
+
+	bool getReplaceCellsWarning() throw ( uno::RuntimeException )
+	{
+		sal_Bool res = sal_False;
+		getGlobalSheetSettings()->getPropertyValue( REPLACE_CELLS_WARNING ) >>= res;
+		return ( res == sal_True );
+	}
+
+	void setReplaceCellsWarning( bool bState ) throw ( uno::RuntimeException )
+	{
+		getGlobalSheetSettings()->setPropertyValue( REPLACE_CELLS_WARNING, uno::makeAny( bState ) );
+	}
+public:
+	PasteCellsWarningReseter() throw ( uno::RuntimeException )
+	{
+		if ( bInitialWarningState = getReplaceCellsWarning() );
+			setReplaceCellsWarning( false );
+	}
+	~PasteCellsWarningReseter()
+	{
+		if ( bInitialWarningState )
+		{
+			// don't allow dtor to throw
+			try
+			{
+				setReplaceCellsWarning( true ); 
+			}
+			catch ( uno::Exception& e ){}
+		}
+	}
+};
 void
 org::openoffice::dispatchRequests (uno::Reference< frame::XModel>& xModel,rtl::OUString & aUrl, uno::Sequence< beans::PropertyValue >& sProps ) 
 {
@@ -94,6 +142,7 @@ org::openoffice::dispatchRequests (uno::Reference< frame::XModel>& xModel,rtl::O
 void
 org::openoffice::implnPaste()
 {
+	PasteCellsWarningReseter resetWarningBox;
 	ScTabViewShell* pViewShell = ScTabViewShell::GetActiveViewShell();
 	if ( pViewShell )
 	{
@@ -121,6 +170,7 @@ org::openoffice::implnCut()
 
 void org::openoffice::implnPasteSpecial(USHORT nFlags,USHORT nFunction,sal_Bool bSkipEmpty, sal_Bool bTranspose)
 {
+	PasteCellsWarningReseter resetWarningBox;
 	sal_Bool bAsLink(sal_False), bOtherDoc(sal_False);
 	InsCellCmd eMoveMode = INS_NONE;
 
