@@ -50,8 +50,6 @@
 #include <boost/shared_ptr.hpp>
 #include <boost/utility.hpp>
 
-#include "cairo_usagecounter.hxx"
-
 
 /* Definition of CanvasFont class */
 
@@ -64,7 +62,6 @@ namespace cairocanvas
 
     class CanvasFont : public ::comphelper::OBaseMutex, 
                        public CanvasFont_Base,
-                       private UsageCounter< CanvasFont >,
                        private ::boost::noncopyable
     {
     public:

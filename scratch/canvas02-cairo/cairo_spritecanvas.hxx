@@ -60,9 +60,9 @@
 
 #include <basegfx/vector/b2isize.hxx>
 
-#include "cairo_spritecanvashelper.hxx"
 #include "cairo_devicehelper.hxx"
-#include "cairo_usagecounter.hxx"
+#include "cairo_repainttarget.hxx"
+#include "cairo_spritecanvashelper.hxx"
 
 
 namespace cairocanvas
@@ -119,7 +119,7 @@ namespace cairocanvas
 		references, this is implemented as one single object.
      */
     class SpriteCanvas : public SpriteCanvasBaseT,
-                         private UsageCounter< SpriteCanvas >
+			 public RepaintTarget
     {
     public:
         SpriteCanvas( const ::com::sun::star::uno::Reference< 
@@ -165,6 +165,11 @@ namespace cairocanvas
 	const ::basegfx::B2ISize& getSizePixel();
 	void setSizePixel( const ::basegfx::B2ISize& rSize );
 	void flush();
+
+        // RepaintTarget
+        virtual bool repaint( ::cairo::Surface* pSurface,
+			      const ::com::sun::star::rendering::ViewState&	viewState,
+			      const ::com::sun::star::rendering::RenderState&	renderState );
 
      private:
         ::com::sun::star::uno::Reference< ::com::sun::star::uno::XComponentContext > mxComponentContext;

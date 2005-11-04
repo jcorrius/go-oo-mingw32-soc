@@ -69,8 +69,8 @@ namespace cairocanvas
 
         maCanvasHelper.init( aSize,
                              *rRefDevice.get(),
-			     mpCairo,
                              true );
+	maCanvasHelper.setCairo( mpCairo );
 
         maSpriteHelper.init( rSpriteSize,
                              rRefDevice,
@@ -117,6 +117,13 @@ namespace cairocanvas
                                bBufferedUpdate );
 
         mbSurfaceDirty = false;
+    }
+
+    bool CanvasCustomSprite::repaint( Surface* pSurface,
+				      const rendering::ViewState&	viewState,
+				      const rendering::RenderState&	renderState )
+    {
+	return maCanvasHelper.repaint( pSurface, viewState, renderState );
     }
 
 #define IMPLEMENTATION_NAME "CairoCanvas.CanvasCustomSprite"

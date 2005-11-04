@@ -48,7 +48,6 @@
 
 #include "cairo_cairo.hxx"
 #include "cairo_canvasfont.hxx"
-#include "cairo_usagecounter.hxx"
 
 
 /* Definition of TextLayout class */
@@ -60,7 +59,6 @@ namespace cairocanvas
 
     class TextLayout : public ::comphelper::OBaseMutex, 
                        public TextLayout_Base,
-                       private UsageCounter< TextLayout >,
                        private ::boost::noncopyable
     {
     public:

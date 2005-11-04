@@ -66,6 +66,7 @@
 #include "cairo_spritecanvas.hxx"
 #include "cairo_canvasfont.hxx"
 #include "cairo_textlayout.hxx"
+#include "cairo_cachedbitmap.hxx"
 #include "cairo_canvashelper.hxx"
 #include "cairo_canvasbitmap.hxx"
 
@@ -78,24 +79,40 @@ namespace cairocanvas
 {
     CanvasHelper::CanvasHelper() :
         mpDevice( NULL ),
-        mbHaveAlpha()
+        mbHaveAlpha(),
+	mpCairo( NULL )
     {
     }
 
     void CanvasHelper::disposing()
     {
         mpDevice = NULL;
-	mpCairo = NULL;
+
+	if( mpCairo )
+	{
+	    cairo_destroy( mpCairo );
+	    mpCairo = NULL;
+	}
     }
 
     void CanvasHelper::init( const ::basegfx::B2ISize& rSize,
                              SpriteCanvas&             rDevice,
-			     Cairo*                    pCairo,
                              bool                      bHasAlpha )
     {
         mpDevice = &rDevice;
         mbHaveAlpha = bHasAlpha;
+    }
+
+    void CanvasHelper::setCairo( Cairo* pCairo )
+    {
+	if( mpCairo )
+	{
+	    cairo_destroy( mpCairo );
+	}
+
 	mpCairo = pCairo;
+
+	cairo_reference( mpCairo );
     }
 
     void CanvasHelper::useStates( const rendering::ViewState& viewState,
@@ -1042,9 +1059,12 @@ namespace cairocanvas
     uno::Reference< rendering::XCachedPrimitive > CanvasHelper::implDrawBitmapSurface( Surface* pSurface,
 										       const rendering::ViewState& viewState,
 										       const rendering::RenderState& renderState,
+										       const geometry::IntegerSize2D& rSize,
 										       bool bModulateColors,
 										       bool bHasAlpha )
     {
+	uno::Reference< rendering::XCachedPrimitive > rv = uno::Reference< rendering::XCachedPrimitive >(NULL);
+
 	if( mpCairo ) {
 	    const ::basegfx::B2ISize& aSize = mpDevice->getSizePixel();
 
@@ -1058,13 +1078,49 @@ namespace cairocanvas
 //   	    if( !bHasAlpha )
 //   		cairo_set_operator( mpCairo, CAIRO_OPERATOR_SOURCE );
 
+	    Matrix aMatrix;
+
+	    cairo_get_matrix( mpCairo, &aMatrix );
+	    if( ! ::rtl::math::approxEqual( aMatrix.xx, 1 ) &&
+		! ::rtl::math::approxEqual( aMatrix.yy, 1 ) &&
+		::rtl::math::approxEqual( aMatrix.x0, 0 ) &&
+		::rtl::math::approxEqual( aMatrix.y0, 0 ) &&
+		round( rSize.Width * aMatrix.xx ) > 8 &&
+		round( rSize.Height* aMatrix.yy ) > 8 )
+	    {
+		double dWidth, dHeight;
+
+		dWidth = round( rSize.Width * aMatrix.xx );
+		dHeight = round( rSize.Height* aMatrix.yy );
+
+		Surface* pScaledSurface = mpDevice->getSurface( ::basegfx::B2ISize( static_cast<sal_Int32>( dWidth ),
+										    static_cast<sal_Int32>( dHeight ) ),
+								bHasAlpha ? CAIRO_CONTENT_COLOR_ALPHA : CAIRO_CONTENT_COLOR );
+		Cairo* pCairo = cairo_create( pScaledSurface );
+
+		cairo_set_source_surface( pCairo, pSurface, 0, 0 );
+		cairo_scale( pCairo, dWidth/rSize.Width, dHeight/rSize.Height );
+		cairo_paint( pCairo );
+
+		cairo_destroy( pCairo );
+
+		pSurface = pScaledSurface;
+
+		aMatrix.xx = aMatrix.yy = 1;
+		cairo_set_matrix( mpCairo, &aMatrix );
+
+		rv = uno::Reference< rendering::XCachedPrimitive >( new CachedBitmap( pSurface, viewState, renderState, mpDevice ) );
+
+		cairo_surface_destroy( pSurface );
+	    }
+
 	    cairo_set_source_surface( mpCairo, pSurface, 0, 0 );
 	    cairo_paint( mpCairo );
 	    cairo_restore( mpCairo );
 	} else
 	    OSL_TRACE ("CanvasHelper called after it was disposed");
 
-        return uno::Reference< rendering::XCachedPrimitive >(NULL);
+        return rv; // uno::Reference< rendering::XCachedPrimitive >(NULL);
     }
 
     uno::Reference< rendering::XCachedPrimitive > CanvasHelper::drawBitmap( const rendering::XCanvas* 					pCanvas, 
@@ -1081,9 +1137,10 @@ namespace cairocanvas
 	unsigned char* data;
 	bool bHasAlpha;
 	Surface* pSurface = surfaceFromXBitmap( xBitmap, mpDevice, data, bHasAlpha );
+	geometry::IntegerSize2D aSize = xBitmap->getSize();
 
 	if( pSurface ) {
-	    rv = implDrawBitmapSurface( pSurface, viewState, renderState, false, bHasAlpha );
+	    rv = implDrawBitmapSurface( pSurface, viewState, renderState, aSize, false, bHasAlpha );
 
 	    cairo_surface_destroy( pSurface );
 
@@ -1222,4 +1279,36 @@ namespace cairocanvas
         return mbHaveAlpha;
     }
 
+    bool CanvasHelper::repaint( Surface* pSurface,
+				const rendering::ViewState&	viewState,
+				const rendering::RenderState&	renderState )
+    {
+	OSL_TRACE("CanvasHelper::repaint");
+
+	if( mpCairo ) {
+	    const ::basegfx::B2ISize& aSize = mpDevice->getSizePixel();
+
+	    cairo_save( mpCairo );
+
+ 	    cairo_rectangle( mpCairo, 0, 0, aSize.getX(), aSize.getY() );
+ 	    cairo_clip( mpCairo );
+
+	    useStates( viewState, renderState, true );
+
+	    Matrix aMatrix;
+
+	    cairo_get_matrix( mpCairo, &aMatrix );
+	    aMatrix.xx = aMatrix.yy = 1;
+	    cairo_set_matrix( mpCairo, &aMatrix );
+
+//   	    if( !bHasAlpha )
+//   		cairo_set_operator( mpCairo, CAIRO_OPERATOR_SOURCE );
+
+	    cairo_set_source_surface( mpCairo, pSurface, 0, 0 );
+	    cairo_paint( mpCairo );
+	    cairo_restore( mpCairo );
+	}
+
+	return true;
+    }
 }

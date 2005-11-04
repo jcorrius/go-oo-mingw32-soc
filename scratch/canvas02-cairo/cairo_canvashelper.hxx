@@ -91,9 +91,9 @@ namespace cairocanvas
          */
         void init( const ::basegfx::B2ISize& rSizePixel,
                    SpriteCanvas&             rDevice,
-		   ::cairo::Cairo*           pCairo,
                    bool                      bHasAlpha );
 
+	void setCairo( ::cairo::Cairo* pCairo );
 
         // CanvasHelper functionality
         // ==========================
@@ -286,8 +286,13 @@ namespace cairocanvas
 	implDrawBitmapSurface( ::cairo::Surface* pSurface, 
 			       const ::com::sun::star::rendering::ViewState& 	viewState, 
 			       const ::com::sun::star::rendering::RenderState& renderState,
+			       const ::com::sun::star::geometry::IntegerSize2D& rSize,
 			       bool bModulateColors,
 			       bool bHasAlpha );
+
+        bool repaint( ::cairo::Surface* pSurface,
+		      const ::com::sun::star::rendering::ViewState&	viewState,
+		      const ::com::sun::star::rendering::RenderState&	renderState );
 
     protected:
         /** Phyical output device

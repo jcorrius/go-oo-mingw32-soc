@@ -55,9 +55,9 @@
 #include "sprite.hxx"
 #include "cairo_cairo.hxx"
 #include "cairo_canvashelper.hxx"
+#include "cairo_repainttarget.hxx"
 #include "cairo_spritehelper.hxx"
 #include "cairo_spritecanvas.hxx"
-#include "cairo_usagecounter.hxx"
 
 
 namespace cairocanvas
@@ -97,7 +97,7 @@ namespace cairocanvas
 	/* Definition of CanvasCustomSprite class */
 
     class CanvasCustomSprite : public CanvasCustomSpriteBaseT,
-                               private UsageCounter< CanvasCustomSprite >
+			       public RepaintTarget
     {
     public:
         /** Create a custom sprite
@@ -138,6 +138,10 @@ namespace cairocanvas
 			     const ::basegfx::B2DPoint& rOrigOutputPos,
 			     bool bBufferedUpdate ) const;
 
+        // RepaintTarget
+        virtual bool repaint( ::cairo::Surface* pSurface,
+			      const ::com::sun::star::rendering::ViewState&	viewState,
+			      const ::com::sun::star::rendering::RenderState&	renderState );
     private:
         /** MUST hold here, too, since CanvasHelper only contains a
             raw pointer (without refcounting) 

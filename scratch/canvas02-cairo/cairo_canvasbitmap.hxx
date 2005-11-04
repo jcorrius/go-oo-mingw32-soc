@@ -50,8 +50,8 @@
 
 #include "cairo_cairo.hxx"
 #include "cairo_canvashelper.hxx"
+#include "cairo_repainttarget.hxx"
 #include "cairo_spritecanvas.hxx"
-#include "cairo_usagecounter.hxx"
 
 
 /* Definition of CanvasBitmap class */
@@ -67,7 +67,7 @@ namespace cairocanvas
                                          ::cppu::OWeakObject >							CanvasBitmap_Base;
 
     class CanvasBitmap : public CanvasBitmap_Base,
-                         private UsageCounter< CanvasBitmap >
+			 public RepaintTarget
     {
     public:
         /** Create a canvas bitmap for the given surface
@@ -91,6 +91,12 @@ namespace cairocanvas
         virtual ::com::sun::star::uno::Sequence< ::rtl::OUString > SAL_CALL getSupportedServiceNames(  ) throw (::com::sun::star::uno::RuntimeException);
 
 	::cairo::Cairo* getCairo();
+
+        // RepaintTarget
+        virtual bool repaint( ::cairo::Surface* pSurface,
+			      const ::com::sun::star::rendering::ViewState&	viewState,
+			      const ::com::sun::star::rendering::RenderState&	renderState );
+
     private:
         /** MUST hold here, too, since CanvasHelper only contains a
             raw pointer (without refcounting) 

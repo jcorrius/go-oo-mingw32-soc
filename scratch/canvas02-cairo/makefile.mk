@@ -4,9 +4,9 @@
 #
 #   $RCSfile: makefile.mk,v $
 #
-#   $Revision: 1.2 $
+#   $Revision: 1.3 $
 #
-#   last change: $Author: rodo $ $Date: 2005/10/26 17:42:03 $
+#   last change: $Author: rodo $ $Date: 2005/11/04 19:05:58 $
 #
 #   The Contents of this file are made available subject to
 #   the terms of GNU Lesser General Public License Version 2.1.
@@ -57,6 +57,7 @@ CDEFS+= -DVERBOSE
 .ENDIF
 
 SLOFILES =	$(SLO)$/cairo_canvasbitmap.obj \
+			$(SLO)$/cairo_cachedbitmap.obj \
 			$(SLO)$/cairo_canvascustomsprite.obj \
 			$(SLO)$/cairo_canvasfont.obj \
 			$(SLO)$/cairo_canvashelper.obj \

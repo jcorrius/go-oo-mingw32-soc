@@ -150,13 +150,12 @@ namespace cairocanvas
 
     void SpriteCanvasHelper::init( ::canvas::SpriteRedrawManager& rManager,
                                    SpriteCanvas&                  rDevice,
-				   Cairo*                         pCairo,
                                    const ::basegfx::B2ISize&      rSize,
                                    bool                           bHasAlpha )
     {
         mpRedrawManager = &rManager;
 
-        CanvasHelper::init( rSize, rDevice, pCairo, bHasAlpha );
+        CanvasHelper::init( rSize, rDevice, bHasAlpha );
     }
     
     void SpriteCanvasHelper::disposing()

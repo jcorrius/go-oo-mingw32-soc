@@ -60,7 +60,6 @@ namespace cairocanvas
 
         void init( ::canvas::SpriteRedrawManager& rManager,
                    SpriteCanvas&                  rDevice,
-		   ::cairo::Cairo*           pCairo,
                    const ::basegfx::B2ISize&      rSize,
                    bool                           bHasAlpha );
     

@@ -189,7 +189,6 @@ namespace cairocanvas
 
         maCanvasHelper.init( maRedrawManager,
                              *this,
-			     mpBackgroundCairo,
                              aSize,
                              false );
     }
@@ -276,11 +275,20 @@ namespace cairocanvas
 	    cairo_destroy( mpBackgroundCairo );
 	}
 	mpBackgroundCairo = cairo_create( mpBackgroundSurface );
+
+	maCanvasHelper.setCairo( mpBackgroundCairo );
     }
 
     void SpriteCanvas::flush()
     {
 	maDeviceHelper.flush();
+    }
+
+    bool SpriteCanvas::repaint( Surface* pSurface,
+				const rendering::ViewState&	viewState,
+				const rendering::RenderState&	renderState )
+    {
+	return maCanvasHelper.repaint( pSurface, viewState, renderState );
     }
 }
 

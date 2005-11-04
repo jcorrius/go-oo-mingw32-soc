@@ -59,8 +59,8 @@ namespace cairocanvas
 
         maCanvasHelper.init( rSize,
                              *mpDevice.get(),
-			     mpBufferCairo,
                              bHasAlpha );
+	maCanvasHelper.setCairo( mpBufferCairo );
 
 	mbHasAlpha = bHasAlpha;
     }
@@ -86,6 +86,13 @@ namespace cairocanvas
     Cairo* CanvasBitmap::getCairo()
     {
 	return mpBufferCairo;
+    }
+
+    bool CanvasBitmap::repaint( Surface* pSurface,
+				const rendering::ViewState&	viewState,
+				const rendering::RenderState&	renderState )
+    {
+	return maCanvasHelper.repaint( pSurface, viewState, renderState );
     }
 
 #define IMPLEMENTATION_NAME "CairoCanvas.CanvasBitmap"
