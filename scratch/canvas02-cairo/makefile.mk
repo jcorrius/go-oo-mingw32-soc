@@ -4,9 +4,9 @@
 #
 #   $RCSfile: makefile.mk,v $
 #
-#   $Revision: 1.3 $
+#   $Revision: 1.4 $
 #
-#   last change: $Author: rodo $ $Date: 2005/11/04 19:05:58 $
+#   last change: $Author: rodo $ $Date: 2005/11/08 10:45:58 $
 #
 #   The Contents of this file are made available subject to
 #   the terms of GNU Lesser General Public License Version 2.1.
@@ -70,7 +70,7 @@ SLOFILES =	$(SLO)$/cairo_canvasbitmap.obj \
 
 SHL1TARGET=$(TARGET).uno
 
-SHL1STDLIBS= $(CPPULIB) $(SALLIB) $(VCLLIB) $(COMPHELPERLIB) $(CPPUHELPERLIB) $(BASEGFXLIB) $(CANVASTOOLSLIB)
+SHL1STDLIBS= $(CPPULIB) $(SALLIB) $(VCLLIB) $(COMPHELPERLIB) $(CPPUHELPERLIB) $(BASEGFXLIB) $(CANVASTOOLSLIB) $(TOOLSLIB)
 
 .IF "$(SYSTEM_CAIRO)" == "YES"
 SHL1STDLIBS+= $(CAIRO_LIBS) -lX11

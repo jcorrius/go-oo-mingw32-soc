@@ -48,6 +48,8 @@
 #include <vcl/syschild.hxx>
 #include <vcl/canvastools.hxx>
 
+#include <tools/stream.hxx>
+
 #include "cairo_helper.hxx"
 #include "cairo_spritecanvas.hxx"
 #include "cairo_canvasbitmap.hxx"
@@ -260,16 +262,53 @@ namespace cairocanvas
         return showBuffer( bUpdateAll );
     }
 
-    const void* DeviceHelper::getDeviceHandle() const
+    uno::Any DeviceHelper::getDeviceHandle() const
     {
-        return NULL;
+        return uno::makeAny( reinterpret_cast< sal_Int64 >(mpOutputWindow) );
     }
 
-    const void* DeviceHelper::getSurfaceHandle() const
+    uno::Any DeviceHelper::getSurfaceHandle() const
     {
-        return NULL;
+        return uno::Any();
     }
-    
+
+    void DeviceHelper::dumpScreenContent() const
+    {
+        static sal_uInt32 nFilePostfixCount(0);
+
+        if( mpOutputWindow )
+        {
+            String aFilename( String::CreateFromAscii("dbg_frontbuffer") );
+            aFilename += String::CreateFromInt32(nFilePostfixCount);
+            aFilename += String::CreateFromAscii(".bmp");
+
+            SvFileStream aStream( aFilename, STREAM_STD_READWRITE );
+
+            const ::Point aEmptyPoint;
+            bool bOldMap( mpOutputWindow->IsMapModeEnabled() );
+            mpOutputWindow->EnableMapMode( FALSE );
+            aStream << mpOutputWindow->GetBitmap(aEmptyPoint,
+                                                 mpOutputWindow->GetOutputSizePixel());
+            mpOutputWindow->EnableMapMode( bOldMap );
+
+//             if( mpBackBuffer )
+//             {
+//                 String aFilename2( String::CreateFromAscii("dbg_backbuffer") );
+//                 aFilename2 += String::CreateFromInt32(nFilePostfixCount);
+//                 aFilename2 += String::CreateFromAscii(".bmp");
+                
+//                 SvFileStream aStream2( aFilename2, STREAM_STD_READWRITE );
+                
+//                 const ::Point aEmptyPoint;
+//                 mpBackBuffer->getOutDev().EnableMapMode( FALSE );
+//                 aStream2 << mpBackBuffer->getOutDev().GetBitmap(aEmptyPoint,
+//                                                                 mpBackBuffer->getOutDev().GetOutputSizePixel());
+//             }
+
+            ++nFilePostfixCount;
+        }
+    }
+
     void DeviceHelper::setSize( const ::basegfx::B2ISize& rSize )
     {
 	OSL_TRACE("set device size %d x %d", rSize.getX(), rSize.getY() );

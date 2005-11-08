@@ -96,8 +96,13 @@ namespace cairocanvas
         ::sal_Bool  showBuffer( ::sal_Bool bUpdateAll );
         ::sal_Bool  switchBuffer( ::sal_Bool bUpdateAll );
 
-        const void* getDeviceHandle() const;
-        const void* getSurfaceHandle() const;
+        ::com::sun::star::uno::Any getDeviceHandle() const;
+        ::com::sun::star::uno::Any getSurfaceHandle() const;
+
+	/** called when DumpScreenContent property is enabled on
+            XGraphicDevice, and writes out bitmaps of current screen.
+         */
+        void dumpScreenContent() const;
 
         void notifySizeUpdate( const ::com::sun::star::awt::Rectangle& rBounds );
 	void setSize( const ::basegfx::B2ISize&	rSize );
