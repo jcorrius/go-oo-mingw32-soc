@@ -464,9 +464,9 @@ namespace cairocanvas
         // otherwise, truncation of size below might leave visible
         // areas uncovered by VDev.
         const Point aOutputPosition( 
-            ::std::max( 0L,
+            ::std::max( sal_Int32( 0 ),
                         static_cast< sal_Int32 >(rRequestedArea.getMinX()) ),
-            ::std::max( 0L,
+            ::std::max( sal_Int32( 0 ),
                         static_cast< sal_Int32 >(rRequestedArea.getMinY()) ) );
         // round output size towards +infty. Don't want to truncate a
         // fraction of a sprite pixel... Limit size of VDev to output
