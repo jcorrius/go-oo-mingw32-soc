@@ -103,6 +103,7 @@ ScVbaRange::setValue( const uno::Any  &aValue  ) throw (uno::RuntimeException)
 {
 	long nValue;
 	long nRowCount, nColCount;
+	sal_Bool bState;
 	rtl::OUString aString;
 
 	uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, uno::UNO_QUERY_THROW );
@@ -129,6 +130,24 @@ ScVbaRange::setValue( const uno::Any  &aValue  ) throw (uno::RuntimeException)
 				uno::Reference< table::XCell > xCell( mxRange->getCellByPosition( j,i ), uno::UNO_QUERY_THROW );
 				uno::Reference< text::XTextRange > xTextRange( xCell, uno::UNO_QUERY_THROW );
 				xTextRange->setString( aString );
+			}
+		}
+	}
+	else if (aValue >>= bState)
+	{
+		for (long i = 0;i < nRowCount; i++)
+		{
+			for (long j = 0;j < nColCount; j++)
+			{
+				uno::Reference< table::XCell > xCell( mxRange->getCellByPosition( j,i ), uno::UNO_QUERY_THROW );
+				static ::rtl::OUString sTrue( RTL_CONSTASCII_USTRINGPARAM("=TRUE()"));
+				static ::rtl::OUString sFalse( RTL_CONSTASCII_USTRINGPARAM("=FALSE()"));
+				
+				if ( bState )
+					xCell->setFormula( sTrue );
+				else
+					xCell->setFormula( sFalse );
+					
 			}
 		}
 	}
