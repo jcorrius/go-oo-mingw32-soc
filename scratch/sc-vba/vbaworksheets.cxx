@@ -1,4 +1,14 @@
 #include "vbaworksheets.hxx"
+
+#include <sfx2/dispatch.hxx>
+#include <sfx2/app.hxx>
+#include <sfx2/bindings.hxx>
+#include <sfx2/request.hxx>
+#include <sfx2/viewfrm.hxx>
+#include <sfx2/itemwrapper.hxx>
+#include <svtools/itemset.hxx>
+#include <svtools/eitem.hxx>
+
 #include <comphelper/processfactory.hxx>
 #include <cppuhelper/implbase3.hxx>
 
@@ -267,8 +277,6 @@ ScVbaWorksheets::isSelectedSheets()
 void SAL_CALL 
 ScVbaWorksheets::PrintOut( const uno::Any& From, const uno::Any& To, const uno::Any& Copies, const uno::Any& Preview, const uno::Any& ActivePrinter, const uno::Any& PrintToFile, const uno::Any& Collate, const uno::Any& PrToFileName ) throw (uno::RuntimeException)
 {
-	
-	sal_Int32 nArgs = 3;
 	sal_Int32 nTo = 0;
 	sal_Int32 nFrom = 0;
 	sal_Int16 nCopies = 1;
@@ -289,51 +297,53 @@ ScVbaWorksheets::PrintOut( const uno::Any& From, const uno::Any& To, const uno::
 			sRange = ( ::rtl::OUString::valueOf( nFrom ) + sRange );
 		if ( nTo )
 			sRange += ::rtl::OUString::valueOf( nTo );
-		nArgs++;
 	}
 	else if ( isSelectedSheets() )
 	{
 		bSelection = sal_True;
-		nArgs++;
 	}
 
 	if (  PrToFileName.getValue() )
 	{
 		PrToFileName >>= sFileName;
-		nArgs++;
+	}
+	// #FIXME #TODO using Current is bad form, from the IDE this
+	// will fail
+	SfxViewFrame* pViewFrame = SfxViewFrame::Current();
+	if ( pViewFrame )
+	{
+		SfxAllItemSet aArgs( SFX_APP()->GetPool() );
+			
+		SfxRequest rReq( SID_PRINTDOC, SFX_CALLMODE_ASYNCHRON, aArgs );
+		rReq.AppendItem( SfxBoolItem( SID_PRINT_COLLATE, bCollate ) );
+		rReq.AppendItem( SfxInt16Item( SID_PRINT_COPIES, nCopies ) );
+		if ( sFileName.getLength() )
+				rReq.AppendItem( SfxStringItem( SID_FILE_NAME, sFileName) );
+		if (  sRange.getLength() )
+			rReq.AppendItem( SfxStringItem( SID_PRINT_PAGES, sRange ) );
+		rReq.AppendItem( SfxBoolItem( SID_SELECTION, bSelection ) );
+		SfxDispatcher* pDispatcher = pViewFrame->GetDispatcher();
+		if ( pDispatcher )
+		{
+			pDispatcher->Execute( (USHORT)SID_PRINTDOC	, (SfxCallMode)SFX_CALLMODE_SYNCHRON, *rReq.GetArgs() );
+		}
+			
 	}
 	
-	uno::Sequence< beans::PropertyValue > args1( nArgs );
-	sal_Int32 nIndex = 0;
-	args1[nIndex].Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("CopyCount") );
-	args1[nIndex++].Value <<= nCopies;
-	args1[nIndex].Name =  rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Collate"));
-	args1[nIndex++].Value <<= bCollate;
-	
-	if ( sRange.getLength() > 1 )
-	{
-		args1[nIndex].Name =  rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("RangeText"));
-		args1[nIndex++].Value <<= sRange;
-	}
-	if ( sFileName.getLength() )
-	{
-		args1[nIndex].Name =  rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("FileName"));
-		args1[nIndex++].Value <<= sFileName;
-	}
-	if ( bSelection )
-	{
-		args1[nIndex].Name =  rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Selection"));
-		args1[nIndex++].Value <<= (sal_Bool)sal_True;
-		
-	}
 	// #FIXME #TODO
 	// 1 Preview ( does such a thing in OO.org? )
 	// 2 ActivePrinter ( how/can we switch a printer via API? )
 	// 3 PrintToFile ( ms behaviour if this option is specified but no 
 	//   filename supplied 'PrToFileName' then the user will be prompted )
-	// 4 Need to check behaviour of Selected sheets with range ( e.g. From & To values ) in oOO these options are mutually exclusive
-	uno::Reference< frame::XModel > xModel = getCurrentDocument();	
-	static rtl::OUString sUrl(RTL_CONSTASCII_USTRINGPARAM( ".uno:Print" ) );
-	dispatchRequests ( xModel, sUrl, args1 );
+	// 4 Need to check behaviour of Selected sheets with range ( e.g. From & To
+	//    values ) in oOO these options are mutually exclusive
+	// 5 There is a pop up to do with transparent objects in the print source
+	//   should be able to disable that via configuration for the duration
+	//   of this method
+	// 6 Even though this is a sychronous call, the printer printing is
+	//   not synchronous so currently on multiple prints some will fail
+	//   due to SfxViewShell::GetStat_Impl ( sfx2/source/view/viewsh.cxx:326 )
+	//      bEnabled = !pPrinter || !pPrinter->IsPrinting(); which you guessed
+	//      it is still printing :-(. So synchronous printing... sortof
 }
 

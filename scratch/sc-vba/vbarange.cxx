@@ -78,7 +78,18 @@ ScVbaRange::getValue() throw (uno::RuntimeException)
 	uno::Reference< table::XCell > xCell( mxRange->getCellByPosition( 0, 0 ), uno::UNO_QUERY_THROW );
 	table::CellContentType eType = xCell->getType();
 	if( eType == table::CellContentType_VALUE || eType == table::CellContentType_FORMULA )
+	{
+		if ( eType == table::CellContentType_FORMULA )
+		{
+			rtl::OUString sFormula = xCell->getFormula();
+			if ( sFormula.equals( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("=TRUE()") ) ) )
+				return uno::makeAny(sal_True);
+			else if ( sFormula.equals( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("=FALSE()") ) ) )
+				return uno::makeAny(sal_False);
+	
+		}
 		return uno::Any( xCell->getValue() );
+	}
 	if( eType == table::CellContentType_TEXT )
 	{
 		uno::Reference< text::XTextRange > xTextRange(xCell, ::uno::UNO_QUERY_THROW);
@@ -678,7 +689,7 @@ getPasteFlags (sal_Int16 Paste)
 		nFlags = IDF_FORMULA | IDF_VALUE ;break;
         case vba::Excel::XlFindLookIn::xlValues: 
         case vba::xlPasteType::xlPasteValues: 
-		nFlags = IDF_VALUE;break;
+		nFlags = IDF_VALUE | IDF_SPECIAL_BOOLEAN ;break;
         case vba::xlPasteType::xlPasteValuesAndNumberFormats:
 		nFlags = IDF_VALUE | IDF_ATTRIB; break;
         case vba::xlPasteType::xlPasteColumnWidths:
