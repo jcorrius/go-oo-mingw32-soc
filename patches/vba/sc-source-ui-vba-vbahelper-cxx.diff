@@ -1,6 +1,6 @@
---- /dev/null	2005-10-10 09:55:51.712408000 +0100
-+++ sc/source/ui/vba/vbahelper.cxx	2005-10-12 17:18:35.000000000 +0100
-@@ -0,0 +1,189 @@
+--- /dev/null	2005-11-06 11:49:58.372324250 +0000
++++ sc/source/ui/vba/vbahelper.cxx	2005-11-10 11:18:13.000000000 +0000
+@@ -0,0 +1,268 @@
 +#include <cppuhelper/bootstrap.hxx>
 +#include <com/sun/star/util/XURLTransformer.hpp>
 +#include <com/sun/star/frame/XDispatchProvider.hpp>
@@ -9,6 +9,7 @@
 +#include <com/sun/star/frame/XController.hpp>
 +#include <com/sun/star/uno/XComponentContext.hpp>
 +#include <com/sun/star/lang/XMultiComponentFactory.hpp>
++#include <com/sun/star/beans/XPropertySet.hpp>
 +
 +#include <sfx2/objsh.hxx>
 +#include <sfx2/app.hxx>
@@ -19,11 +20,60 @@
 +#include "tabvwsh.hxx"
 +#include "transobj.hxx"
 +
++using namespace ::com::sun::star;
++using namespace ::org::openoffice;
++
 +void unoToSbxValue( SbxVariable* pVar, const uno::Any& aValue );
++
 +uno::Any sbxToUnoValue( SbxVariable* pVar );
 +
++const ::rtl::OUString REPLACE_CELLS_WARNING(  RTL_CONSTASCII_USTRINGPARAM( "ReplaceCellsWarning"));
++
++class PasteCellsWarningReseter
++{
++private:
++	bool bInitialWarningState;
++	static uno::Reference< beans::XPropertySet > getGlobalSheetSettings() throw ( uno::RuntimeException )
++	{
++		static uno::Reference<uno::XComponentContext > xContext( ::cppu::defaultBootstrap_InitialComponentContext(), uno::UNO_QUERY_THROW );
++		static uno::Reference<lang::XMultiComponentFactory > xServiceManager(
++				xContext->getServiceManager(), uno::UNO_QUERY_THROW );
++		static uno::Reference< beans::XPropertySet > xProps( xServiceManager->createInstanceWithContext( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "com.sun.star.sheet.GlobalSheetSettings" ) ) ,xContext ), uno::UNO_QUERY_THROW );
++		return xProps;
++	}	
++
++	bool getReplaceCellsWarning() throw ( uno::RuntimeException )
++	{
++		sal_Bool res = sal_False;
++		getGlobalSheetSettings()->getPropertyValue( REPLACE_CELLS_WARNING ) >>= res;
++		return ( res == sal_True );
++	}
++
++	void setReplaceCellsWarning( bool bState ) throw ( uno::RuntimeException )
++	{
++		getGlobalSheetSettings()->setPropertyValue( REPLACE_CELLS_WARNING, uno::makeAny( bState ) );
++	}
++public:
++	PasteCellsWarningReseter() throw ( uno::RuntimeException )
++	{
++		if ( bInitialWarningState = getReplaceCellsWarning() );
++			setReplaceCellsWarning( false );
++	}
++	~PasteCellsWarningReseter()
++	{
++		if ( bInitialWarningState )
++		{
++			// don't allow dtor to throw
++			try
++			{
++				setReplaceCellsWarning( true ); 
++			}
++			catch ( uno::Exception& e ){}
++		}
++	}
++};
 +void
-+org::openoffice::dispatchRequests (uno::Reference< frame::XModel>& xModel,rtl::OUString & aUrl) 
++org::openoffice::dispatchRequests (uno::Reference< frame::XModel>& xModel,rtl::OUString & aUrl, uno::Sequence< beans::PropertyValue >& sProps ) 
 +{
 +
 +	util::URL  url ;
@@ -62,30 +112,46 @@
 +	}
 +
 +	uno::Reference<frame::XDispatch> xDispatcher = xDispatchProvider->queryDispatch(url,emptyString,0);
-+	uno::Sequence<beans::PropertyValue> sProps ;
-+	sProps.realloc(2);
-+        beans::PropertyValue * aArray = sProps.getArray();
-+	aArray[0].Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Silent" ));
-+	uno::Any aAny;
-+	sal_Bool isTrue = true;
-+	aAny <<= isTrue;
 +
-+	aArray[0].Value = aAny;
-+	//aArray[0].Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "StatusIndicator" ));
-+	//aArray[0].Value = true;
++	uno::Sequence<beans::PropertyValue> dispatchProps(1);
++
++	sal_Int32 nProps = sProps.getLength();
++	beans::PropertyValue* pDest = dispatchProps.getArray();
++	if ( nProps )
++	{
++		dispatchProps.realloc( nProps + 1 );
++		// need to reaccquire pDest after realloc
++		pDest = dispatchProps.getArray();
++		beans::PropertyValue* pSrc = sProps.getArray();
++		for ( sal_Int32 index=0; index<nProps; ++index, ++pSrc, ++pDest )
++			*pDest = *pSrc;
++	}
++
++	(*pDest).Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Silent" ));
++	(*pDest).Value <<= (sal_Bool)sal_True;
 +
 +	if (xDispatcher.is())
-+		//xDispatcher->dispatch( url,uno::Sequence< beans::PropertyValue >(0) );
-+		xDispatcher->dispatch( url,sProps );
++		xDispatcher->dispatch( url, dispatchProps );
++}
++
++void
++org::openoffice::dispatchRequests (uno::Reference< frame::XModel>& xModel,rtl::OUString & aUrl) 
++{
++	uno::Sequence<beans::PropertyValue> dispatchProps;
++	dispatchRequests( xModel, aUrl, dispatchProps );
 +}
 +
 +
 +void
 +org::openoffice::implnPaste()
 +{
++	PasteCellsWarningReseter resetWarningBox;
 +	ScTabViewShell* pViewShell = ScTabViewShell::GetActiveViewShell();
-+	pViewShell->PasteFromSystem();
-+	pViewShell->CellContentChanged();
++	if ( pViewShell )
++	{
++		pViewShell->PasteFromSystem();
++		pViewShell->CellContentChanged();
++	}
 +}
 +
 +
@@ -93,34 +159,47 @@
 +org::openoffice::implnCopy()
 +{
 +	ScTabViewShell* pViewShell = ScTabViewShell::GetActiveViewShell();
-+	pViewShell->CopyToClip(NULL,false,false,true);
++	if ( pViewShell )
++		pViewShell->CopyToClip(NULL,false,false,true);
 +}
 +
 +void 
 +org::openoffice::implnCut()
 +{
 +	ScTabViewShell* pViewShell = ScTabViewShell::GetActiveViewShell();
-+	pViewShell->CutToClip( NULL, TRUE );
++	if ( pViewShell )
++		pViewShell->CutToClip( NULL, TRUE );
 +}
 +
 +void org::openoffice::implnPasteSpecial(USHORT nFlags,USHORT nFunction,sal_Bool bSkipEmpty, sal_Bool bTranspose)
 +{
++	PasteCellsWarningReseter resetWarningBox;
 +	sal_Bool bAsLink(sal_False), bOtherDoc(sal_False);
 +	InsCellCmd eMoveMode = INS_NONE;
 +
 +	ScTabViewShell* pTabViewShell = ScTabViewShell::GetActiveViewShell();
-+	Window* pWin = pTabViewShell->GetViewData()->GetActiveWin();
-+	ScDocument* pDoc = pTabViewShell->GetViewData()->GetDocument();
-+	ScTransferObj* pOwnClip = ScTransferObj::GetOwnClipboard( pWin );
-+
-+	if ( bAsLink && bOtherDoc )
-+		pTabViewShell->PasteFromSystem(0);//SOT_FORMATSTR_ID_LINK
-+	else {
-+		pTabViewShell->PasteFromClip( nFlags, pOwnClip->GetDocument(),
-+		nFunction, bSkipEmpty, bTranspose, bAsLink,
-+		eMoveMode, IDF_NONE, TRUE );
-+		pTabViewShell->CellContentChanged();
++	if ( pTabViewShell )
++	{
++		ScViewData* pView = pTabViewShell->GetViewData();	
++		Window* pWin = NULL;
++		if ( pView && ( pWin = pView->GetActiveWin() ) )
++		{
++			if ( bAsLink && bOtherDoc )
++				pTabViewShell->PasteFromSystem(0);//SOT_FORMATSTR_ID_LINK
++			else 
++			{
++				ScTransferObj* pOwnClip = ScTransferObj::GetOwnClipboard( pWin );
++				ScDocument* pDoc = NULL; 
++				if ( pOwnClip )
++					pDoc = pOwnClip->GetDocument();	
++				pTabViewShell->PasteFromClip( nFlags, pDoc,
++					nFunction, bSkipEmpty, bTranspose, bAsLink,
++					eMoveMode, IDF_NONE, TRUE );
++				pTabViewShell->CellContentChanged();
++			}
 +		}
++	}
++
 +}
 +
 +bool
