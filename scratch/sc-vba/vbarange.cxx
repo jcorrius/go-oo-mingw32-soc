@@ -95,13 +95,13 @@ ScVbaRange::getValue() throw (uno::RuntimeException)
 		uno::Reference< text::XTextRange > xTextRange(xCell, ::uno::UNO_QUERY_THROW);
 		return ( uno::Any ) xTextRange->getString();
 	}
-	return uno::Any( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("") ) );
+	return uno::Any();
 }
 
 void
 ScVbaRange::setValue( const uno::Any  &aValue  ) throw (uno::RuntimeException)
 {
-	long nValue;
+	double nValue;
 	long nRowCount, nColCount;
 	sal_Bool bState;
 	rtl::OUString aString;
