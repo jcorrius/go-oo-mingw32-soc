@@ -34,6 +34,9 @@ IDLFILES=\
 	XlBuiltInDialog.idl\
 	XVBAToOOEventDescGen.idl\
 	XWindow.idl\
+	XChartObject.idl\
+	XChartObjects.idl\
+	XChart.idl\
 	XDialog.idl \
 	XDialogs.idl 
 
