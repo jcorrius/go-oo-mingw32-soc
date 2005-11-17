@@ -3,10 +3,13 @@
 #include <com/sun/star/table/XColumnRowRange.hpp>
 #include <com/sun/star/beans/XIntrospection.hpp>
 #include <com/sun/star/beans/XIntrospectionAccess.hpp>
+#include <com/sun/star/sheet/XCellRangesQuery.hpp>
+#include <com/sun/star/sheet/CellFlags.hpp>
 #include <com/sun/star/reflection/XIdlMethod.hpp>
 #include <com/sun/star/beans/MethodConcept.hpp>
 #include <comphelper/processfactory.hxx>
 #include <cppuhelper/queryinterface.hxx>
+#include <comphelper/anytostring.hxx>
 
 #include "vbawsfunction.hxx"
 
@@ -40,16 +43,19 @@ ScVbaWSFunction::invoke(const rtl::OUString& FunctionName, const uno::Sequence< 
 
 	for (int i=0; i < Params.getLength();i++) 
 	{
-		uno::Reference<vba::XRange> myRange( aArray[ i ], uno::UNO_QUERY_THROW );
+		uno::Reference<vba::XRange> myRange( aArray[ i ], uno::UNO_QUERY );
 		if ( myRange.is() ) 
+		{
 			aArrayTemp[i] = myRange->getCellRange();
-		else
-			aArrayTemp[i]= aArray[i];
+			continue;
+		}
+		aArrayTemp[i]= aArray[i];
 	}
 
-	uno::Any aAny = xFunctionAccess->callFunction(FunctionName,aParamTemp);
-
-	return aAny;
+	for ( int count=0; count < aParamTemp.getLength(); ++count )
+		OSL_TRACE("Param[%d] is %s",
+			count, rtl::OUStringToOString( comphelper::anyToString( aParamTemp[count] ), RTL_TEXTENCODING_UTF8 ).getStr()  );
+	return xFunctionAccess->callFunction(FunctionName,aParamTemp);
 }
 
 void SAL_CALL

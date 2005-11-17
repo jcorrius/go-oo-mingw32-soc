@@ -93,7 +93,7 @@ ScVbaRange::getValue() throw (uno::RuntimeException)
 	if( eType == table::CellContentType_TEXT )
 	{
 		uno::Reference< text::XTextRange > xTextRange(xCell, ::uno::UNO_QUERY_THROW);
-		return ( uno::Any ) xTextRange->getString();
+		return uno::makeAny( xTextRange->getString() );
 	}
 	return uno::Any();
 }
@@ -151,6 +151,8 @@ ScVbaRange::setValue( const uno::Any  &aValue  ) throw (uno::RuntimeException)
 			}
 		}
 	}
+	// maybe need to cater for XRange here also to coven ambigous
+	// basic default property handling
 }
 
 void
@@ -294,14 +296,8 @@ ScVbaRange::setText( const ::rtl::OUString &rString ) throw (uno::RuntimeExcepti
 uno::Reference< vba::XRange >
 ScVbaRange::Offset( const ::uno::Any &nRowOff, const uno::Any &nColOff ) throw (uno::RuntimeException)
 {
-	sal_Int16 nRowOffset = 0, nColOffset = 0;
+	sal_Int32 nRowOffset = 0, nColOffset = 0;
 	sal_Bool bIsRowOffset = nRowOff >>= nRowOffset, bIsColumnOffset = nColOff >>= nColOffset;
-	if( !bIsRowOffset && !bIsColumnOffset )
-		return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, mxRange ) );
-	if( !nRowOffset || !nColOffset )
-		throw uno::RuntimeException(
-			::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ": Invalid RowIndex or ColumnIndex" ) ),
-			uno::Reference< XInterface> () );
 	uno::Reference< sheet::XSheetCellRange > xSheetCellRange(mxRange, ::uno::UNO_QUERY_THROW);
 	uno::Reference< sheet::XSpreadsheet > xSheet = xSheetCellRange->getSpreadsheet();
 	uno::Reference< sheet::XCellRangeAddressable > xCellRangeAddressable(mxRange, ::uno::UNO_QUERY_THROW);

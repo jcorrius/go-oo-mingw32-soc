@@ -9,6 +9,7 @@
 #include <com/sun/star/uno/XComponentContext.hpp>
 #include <com/sun/star/frame/XModel.hpp>
 #include <org/openoffice/vba/XOutline.hpp>
+#include <org/openoffice/vba/XChartObjects.hpp>
 
 #include "vbahelper.hxx"
 
@@ -17,6 +18,7 @@ class ScVbaWorksheet : public ::cppu::WeakImplHelper1<oo::vba::XWorksheet>
 	css::uno::Reference< css::uno::XComponentContext > m_xContext;
 	css::uno::Reference< css::sheet::XSpreadsheet > mxSheet;
 	css::uno::Reference< css::frame::XModel > mxModel;
+	css::uno::Reference< oo::vba::XChartObjects > mxCharts;
 		
 	css::uno::Reference< oo::vba::XWorksheet > getSheetAtOffset(int offset) throw (css::uno::RuntimeException);
 	css::uno::Reference< oo::vba::XRange > getSheetRange() throw (css::uno::RuntimeException);
@@ -28,15 +30,12 @@ protected:
 	{ return mxModel; }
 	virtual css::uno::Reference< css::sheet::XSpreadsheet > getSheet()
 	{ return mxSheet; }
-	ScVbaWorksheet( 
-		css::uno::Reference< css::uno::XComponentContext >& xContext ): m_xContext( xContext ) {}
+	ScVbaWorksheet( const css::uno::Reference< css::uno::XComponentContext >& xContext );
 public:
 	ScVbaWorksheet( 
-		css::uno::Reference< css::uno::XComponentContext >& xContext,
-		css::uno::Reference< css::sheet::XSpreadsheet > xSheet, 
-		css::uno::Reference< css::frame::XModel >xModel ) : 
-			m_xContext(xContext), mxSheet( xSheet ), mxModel(xModel)
-	{}
+		const css::uno::Reference< css::uno::XComponentContext >& xContext,
+		const css::uno::Reference< css::sheet::XSpreadsheet >& xSheet, 
+		const css::uno::Reference< css::frame::XModel >& xModel )throw (css::uno::RuntimeException)  ;
 
 	virtual ~ScVbaWorksheet() {}
 
@@ -52,6 +51,7 @@ public:
 	virtual ::sal_Bool SAL_CALL getProtectContents() throw (css::uno::RuntimeException);
 	virtual ::sal_Bool SAL_CALL getProtectDrawingObjects() throw (css::uno::RuntimeException);
 	virtual css::uno::Reference< oo::vba::XRange > SAL_CALL getUsedRange() throw (css::uno::RuntimeException) ;
+	virtual css::uno::Any SAL_CALL ChartObjects( const css::uno::Any& Index ) throw (css::uno::RuntimeException);
 	virtual css::uno::Reference< oo::vba::XOutline > SAL_CALL Outline( ) throw (css::uno::RuntimeException);
 	virtual css::uno::Reference< oo::vba::XWorksheet > SAL_CALL getNext() throw (css::uno::RuntimeException);
 	virtual css::uno::Reference< oo::vba::XWorksheet > SAL_CALL getPrevious() throw (css::uno::RuntimeException);

@@ -20,11 +20,13 @@
 #include <com/sun/star/frame/XComponentLoader.hpp>
 #include <com/sun/star/sheet/XSheetOutline.hpp>
 #include <com/sun/star/table/XColumnRowRange.hpp>
+#include <com/sun/star/table/XTableChartsSupplier.hpp>
 #include <tools/string.hxx>
 
 #include "vbaoutline.hxx"
 #include "vbarange.hxx"
 #include "vbaworksheet.hxx"
+#include "vbachartobjects.hxx"
 
 #define STANDARDWIDTH 2267 
 #define STANDARDHEIGHT 427
@@ -141,6 +143,15 @@ openNewDoc(rtl::OUString aSheetName )
 	}
 }
 
+
+ScVbaWorksheet::ScVbaWorksheet( const uno::Reference< uno::XComponentContext >& xContext ): m_xContext( xContext ) 
+{
+}
+ScVbaWorksheet::ScVbaWorksheet(const uno::Reference< uno::XComponentContext >& xContext,
+		const uno::Reference< sheet::XSpreadsheet >& xSheet, 
+		const uno::Reference< frame::XModel >& xModel ) throw (uno::RuntimeException) : m_xContext(xContext), mxSheet( xSheet ), mxModel(xModel)
+{
+}
 
 ::rtl::OUString
 ScVbaWorksheet::getName() throw (uno::RuntimeException)
@@ -474,6 +485,23 @@ uno::Reference< vba::XRange >
 ScVbaWorksheet::Columns( const uno::Any& aIndex ) throw (uno::RuntimeException)
 {
 	return getSheetRange()->Columns( aIndex );
+}
+
+uno::Any SAL_CALL 
+ScVbaWorksheet::ChartObjects( const uno::Any& Index ) throw (uno::RuntimeException)
+{
+	if ( !mxCharts.is() )
+	{
+		uno::Reference< table::XTableChartsSupplier > xChartSupplier( getSheet(), uno::UNO_QUERY_THROW );
+		uno::Reference< table::XTableCharts > xTableCharts = xChartSupplier->getCharts();
+		
+		mxCharts = new ScVbaChartObjects( m_xContext, xTableCharts );
+	}
+	if ( Index.hasValue() )
+		return mxCharts->Item( Index );
+	else
+		return makeAny( mxCharts );
+	
 }
 
 uno::Any SAL_CALL 

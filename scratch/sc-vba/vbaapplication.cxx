@@ -2,6 +2,7 @@
 
 #include<com/sun/star/sheet/XSpreadsheetView.hpp>
 #include<com/sun/star/view/XSelectionSupplier.hpp>
+#include<org/openoffice/vba/Excel/XlCalculation.hpp>
 
 #include "vbaapplication.hxx"
 #include "vbaworkbooks.hxx"
@@ -31,7 +32,7 @@ public:
 	ActiveWorkbook( uno::Reference< uno::XComponentContext >& xContext) : ScVbaWorkbook(  xContext ){}
 };
 
-ScVbaApplication::ScVbaApplication( uno::Reference<uno::XComponentContext >& xContext ): m_xContext( xContext )
+ScVbaApplication::ScVbaApplication( uno::Reference<uno::XComponentContext >& xContext ): m_xContext( xContext ), m_xCalculation( vba::Excel::XlCalculation::xlCalculationAutomatic )
 {
 }
 
@@ -44,6 +45,11 @@ uno::Reference< vba::XWorkbook >
 ScVbaApplication::getActiveWorkbook() throw (uno::RuntimeException)
 {
 	return new ActiveWorkbook( m_xContext ); 
+}
+uno::Reference< oo::vba::XWorkbook > SAL_CALL 
+ScVbaApplication::getThisWorkbook() throw (uno::RuntimeException)
+{
+	return getActiveWorkbook();
 }
 
 uno::Reference< vba::XRange >
@@ -146,5 +152,34 @@ void SAL_CALL
 ScVbaApplication::setCutCopyMode( const uno::Any& _cutcopymode ) throw (uno::RuntimeException)
 {
 	//# FIXME TODO, implementation
+}
+double SAL_CALL 
+ScVbaApplication::CountA( const uno::Any& arg1 ) throw (uno::RuntimeException)
+{
+	double result;
+	uno::Reference< vba::XWorksheetFunction > xWksFn = WorksheetFunction();
+	uno::Reference< script::XInvocation > xInvoc( xWksFn, uno::UNO_QUERY_THROW );
+	if  ( xInvoc.is() )
+	{
+		static rtl::OUString FunctionName( RTL_CONSTASCII_USTRINGPARAM("CountA" ) );
+		uno::Sequence< uno::Any > Params(1);
+		Params[0] = arg1;
+		uno::Sequence< sal_Int16 > OutParamIndex;
+		uno::Sequence< uno::Any > OutParam;
+		xInvoc->invoke( FunctionName, Params, OutParamIndex, OutParam ) >>= result;
+	}
+	return result;
+}
+
+::sal_Int32 SAL_CALL 
+ScVbaApplication::getCalculation() throw (css::uno::RuntimeException)
+{
+	return m_xCalculation;
+}
+
+void SAL_CALL 
+ScVbaApplication::setCalculation( ::sal_Int32 _calculation ) throw (css::uno::RuntimeException)
+{
+	m_xCalculation = _calculation;
 }
 

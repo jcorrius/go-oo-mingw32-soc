@@ -38,6 +38,9 @@ SLOFILES= \
 		$(SLO)$/vbainterior.obj\
 		$(SLO)$/vbawsfunction.obj\
 		$(SLO)$/vbawindow.obj\
+		$(SLO)$/vbachart.obj\
+		$(SLO)$/vbachartobject.obj\
+		$(SLO)$/vbachartobjects.obj\
 		$(SLO)$/vbadialogs.obj \
 		$(SLO)$/vbadialog.obj	
  
