@@ -19,6 +19,7 @@ IDLFILES=\
 	XlCutCopyMode.idl \
 	XlFindLookIn.idl\
 	Constants.idl \
+	XlCalculation.idl \
 	XlCellType.idl
 
 # ------------------------------------------------------------------
