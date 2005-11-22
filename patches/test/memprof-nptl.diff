@@ -1,0 +1,357 @@
+? COPYING
+? INSTALL
+? autom4te.cache
+? depcomp
+? install-sh
+? missing
+? mkinstalldirs
+? stamp-h1
+Index: ChangeLog
+===================================================================
+RCS file: /cvs/gnome/memprof/ChangeLog,v
+retrieving revision 1.129
+diff -u -p -u -r1.129 ChangeLog
+--- ChangeLog	1 Apr 2005 23:09:59 -0000	1.129
++++ ChangeLog	22 Nov 2005 09:17:09 -0000
+@@ -1,3 +1,23 @@
++2005-06-14  Michael Meeks  <michael.meeks@novell.com>
++
++	* intercept.c (allocate_thread, find_thread):
++	update signatures and re-work for NPTL which gives
++	the same getpid() for each process: fixes all the
++	threading problems.
++
++	* process.c (input_func): reset the info structure
++	between messages; defensively.
++
++2005-06-13  Michael Meeks  <michael.meeks@novell.com>
++
++	* server.c (ensure_cleanup, mp_server_init),
++	* process.c (process_start_input): use a fuller set
++	of G_IO_ flags for various conditions.
++
++	* intercept.c (exit_wait, mi_write_stack): use atomic
++	increment for seqno - if we get out of step process.c
++	bombs with an ever-growing sorted GList.
++
+ 2005-04-01  Steve Murphy  <murf@e-tools.com>
+ 
+         * configure.in: Added "rw" to ALL_LINGUAS.
+Index: autogen.sh
+===================================================================
+RCS file: /cvs/gnome/memprof/autogen.sh,v
+retrieving revision 1.2
+diff -u -p -u -r1.2 autogen.sh
+--- autogen.sh	10 Dec 2001 23:46:25 -0000	1.2
++++ autogen.sh	22 Nov 2005 09:17:09 -0000
+@@ -17,4 +17,5 @@ which gnome-autogen.sh || {
+     echo "You need to install gnome-common from the GNOME CVS"
+     exit 1
+ }
++REQUIRED_AUTOMAKE_VERSION=1.8
+ USE_GNOME2_MACROS=1 . gnome-autogen.sh
+Index: bfdutils.c
+===================================================================
+RCS file: /cvs/gnome/memprof/bfdutils.c,v
+retrieving revision 1.8
+diff -u -p -u -r1.8 bfdutils.c
+--- bfdutils.c	24 Jan 2003 20:19:54 -0000	1.8
++++ bfdutils.c	22 Nov 2005 09:17:09 -0000
+@@ -352,8 +352,8 @@ process_map_sections (Map *map, SectionF
+ 				/* bfd_section_size() gives 0 for old versions of binutils, so peek
+ 				 * into the internals instead. :-(
+ 				 */
+-				/* (*func) (addr, bfd_section_size (map->abfd, section), user_data); */
+-				(*func) (addr, section->_cooked_size, user_data);
++				(*func) (addr, bfd_section_size (map->abfd, section), user_data);
++//				(*func) (addr, section->_cooked_size, user_data);
+ 			}
+ 		}
+ }
+Index: intercept.c
+===================================================================
+RCS file: /cvs/gnome/memprof/intercept.c,v
+retrieving revision 1.5
+diff -u -p -u -r1.5 intercept.c
+--- intercept.c	3 Sep 2004 22:29:47 -0000	1.5
++++ intercept.c	22 Nov 2005 09:17:10 -0000
+@@ -46,7 +46,9 @@
+  */
+ 
+ typedef struct {
++#ifdef NPTL
+ 	uint32_t ref_count;
++#endif
+ 	pid_t pid;
+ 	int outfd;
+ 	pid_t clone_pid;	/* See comments in clone_thunk */
+@@ -77,7 +79,7 @@ static MIBool tracing = MI_TRUE;
+ static ThreadInfo threads[MAX_THREADS];
+ static char *socket_path = NULL;
+ static char socket_buf[64];
+-static unsigned int seqno = 0;
++static uint32_t seqno = 0;
+ 
+ #undef ENABLE_DEBUG
+ 
+@@ -87,72 +89,85 @@ static unsigned int seqno = 0;
+ #define MI_DEBUG(arg) (void)0
+ #endif /* ENABLE_DEBUG */
+ 
++/*
++ * For the new NPTL implementation, all threads return the
++ * same 'getpid' - so instead we use a thread variable.
++ */
++#define NPTL
++
++#ifdef NPTL
++static __thread ThreadInfo global_per_thread = { 0, };
++#endif
++
+ static ThreadInfo *
+-allocate_thread (pid_t pid)
++allocate_thread (void)
+ {
++	ThreadInfo *thread = NULL;
++#ifdef NPTL
++	thread = &global_per_thread;
++#else
+ 	int i;
+ 	
+ 	for (i = 0; i < MAX_THREADS; i++) {
+ 		if (threads[i].ref_count == 0) {
+ 			unsigned int new_count = mi_atomic_increment (&threads[i].ref_count);
+ 			if (new_count == 1) {
+-				threads[i].pid = pid;
+-				threads[i].clone_pid = 0;
+-				return &threads[i];
++				thread = &threads[i];
++				break;
+ 			} else
+ 				mi_atomic_decrement (&threads[i].ref_count);
+ 		}
+ 	}
+-	
+-	mi_debug ("Can't find free thread slot");
+-	tracing = MI_FALSE;
+-	_exit(1);
++	if (!thread) {
++		mi_debug ("Can't find free thread slot");
++		tracing = MI_FALSE;
++		_exit(1);
++	}
++#endif	
++	thread->pid = getpid();
++	thread->clone_pid = 0;
+ 
+-	return NULL;
++	return thread;
+ }
+ 
+ static void
+ release_thread (ThreadInfo *thread)
+ {
+ 	thread->pid = 0;
++#ifndef NPTL
+ 	mi_atomic_decrement (&thread->ref_count);
++#endif
+ }
+ 
+ static ThreadInfo *
+-find_thread (pid_t pid)
++find_thread (void)
+ {
+-	int i;
+-#if 1
+ 	ThreadInfo *thread;
++#ifdef NPTL
++	thread = &global_per_thread;
+ #else
+-	/* Over-optimized GCC/GLibc extension happy version
+-	 * Requires gcc-3.2 and glibc-2.3.
+-	 */
+-	static __thread ThreadInfo *thread = NULL;
+ 	int i;
+-
+-a	if (__builtin_expect (thread == NULL, 0))
+-		return thread;
+-#endif	
++	pid_t pid = getpid();
+ 
+ 	for (i=0; i < MAX_THREADS; i++)
+ 		if (threads[i].pid == pid) {
+ 			thread = &threads[i];
+-
+-			if (thread->clone_pid) {
+-				/* See comments in clone_thunk() */
+-				new_process (thread, thread->clone_pid, MI_CLONE);
+-				thread->clone_pid = 0;
+-			}
+-
+-			return thread;
++			break;
+ 		}
++#endif
++	if (!thread) {
++			mi_debug ("Thread not found\n");
++			tracing = MI_FALSE;
++			_exit(1);
++	}
+ 
+-	mi_debug ("Thread not found\n");
+-	tracing = MI_FALSE;
+-	_exit(1);
+-
+-	return NULL;
++	if (thread->clone_pid) {
++			/* See comments in clone_thunk() */
++			new_process (thread, thread->clone_pid, MI_CLONE);
++			thread->clone_pid = 0;
++	}
++	
++	return thread;
+ }
+ 
+ static void
+@@ -249,7 +264,7 @@ new_process (ThreadInfo *thread,
+ 	info.fork.seqno = 0;
+ 
+ 	if (!thread)
+-		thread = allocate_thread (info.fork.new_pid);
++			thread = allocate_thread ();
+ 
+ 	thread->outfd = outfd;
+ 
+@@ -331,9 +346,9 @@ mi_write_stack (int      n_frames,
+ 
+ 	info->alloc.stack_size = n_frames;
+ 	info->alloc.pid = getpid();
+-	info->alloc.seqno = seqno++;
++	info->alloc.seqno = mi_atomic_increment (&seqno) - 1;
+ 
+-	thread = find_thread (info->alloc.pid);
++	thread = find_thread ();
+ 	
+ 	if (!mi_write (thread->outfd, info, sizeof (MIInfo)) ||
+ 	    !mi_write (thread->outfd, frames, n_frames * sizeof(void *)))
+@@ -352,7 +367,7 @@ __fork (void)
+ 		int pid;
+ 		int old_pid = getpid();
+ 
+-		find_thread (old_pid); /* Make sure we're registered */
++		find_thread (); /* Make sure we're registered */
+ 		
+ 		pid = (*old_fork) ();
+ 
+@@ -380,7 +395,7 @@ __vfork (void)
+ 		int pid;
+ 		int old_pid = getpid();
+ 
+-		find_thread (old_pid); /* Make sure we're registered */
++		find_thread (); /* Make sure we're registered */
+ 		
+ 		pid = (*old_vfork) ();
+ 
+@@ -434,7 +449,7 @@ clone_thunk (void *arg)
+ 	 * So, we simply allocate the structure for the thread and delay
+ 	 * the initialization.
+ 	 */
+-	thread = allocate_thread (getpid());
++	thread = allocate_thread ();
+ 	thread->clone_pid = data->pid;
+ 	data->started = 1;
+ 
+@@ -452,14 +467,14 @@ int __clone (int (*fn) (void *arg),
+ 
+ 	if (!mi_check_init ())
+ 		abort_unitialized ("__clone");
+-
++	
+ 	if (tracing) {
+ 		data.started = 0;
+ 		data.fn = fn;
+ 		data.arg = arg;
+ 		data.pid = getpid();
+ 		
+-		find_thread (data.pid); /* Make sure we're registered */
++		find_thread (); /* Make sure we're registered */
+ 		
+ 		pid = (*old_clone) (clone_thunk, child_stack, flags, (void *)&data, xarg1, xarg2, xarg3, xarg4);
+ 
+@@ -490,12 +505,12 @@ exit_wait (void)
+ 	int count;
+ 	char response;
+ 	info.any.operation = MI_EXIT;
+-	info.any.seqno = seqno++;
++	info.any.seqno = mi_atomic_increment (&seqno) - 1;
+ 	info.any.pid = getpid();
+ 	
+ 	mi_stop ();
+ 	
+-	thread = find_thread (info.any.pid);
++	thread = find_thread ();
+ 	
+ 	if (mi_write (thread->outfd, &info, sizeof (MIInfo)))
+ 		/* Wait for a response before really exiting
+Index: process.c
+===================================================================
+RCS file: /cvs/gnome/memprof/process.c,v
+retrieving revision 1.37
+diff -u -p -u -r1.37 process.c
+--- process.c	13 Sep 2004 18:43:52 -0000	1.37
++++ process.c	22 Nov 2005 09:17:10 -0000
+@@ -600,6 +600,8 @@ input_func (GIOChannel  *source,
+ 	MPProcess *process = NULL;
+   
+ 	do {
++		memset (&info, 0, sizeof (info));
++		info.operation = -1;
+ 		count = 0;
+ 		if (g_io_channel_get_flags(source) & G_IO_FLAG_IS_READABLE)
+ 			g_io_channel_read_chars (source, (char *)&info, sizeof(info), &count, NULL);
+@@ -621,7 +623,9 @@ input_func (GIOChannel  *source,
+ 			    info.operation == MI_TIME) {
+ 				void **stack_buffer = NULL;
+ 				StackStash *stash = get_stack_stash (input_process);
+-			
++
++				g_assert (count >= sizeof (MIInfoAlloc));
++
+ 				stack_buffer = g_alloca (sizeof (void *) * info.alloc.stack_size);
+ 				g_io_channel_read_chars (source, (char *)stack_buffer, sizeof(void *) * info.alloc.stack_size, &count, NULL);
+ 				stack = stack_stash_store (stash, stack_buffer, info.alloc.stack_size);
+@@ -667,7 +671,7 @@ process_start_input (MPProcess *process)
+ 	if (!process->input_tag && process->input_channel)
+ 		process->input_tag = g_io_add_watch_full (process->input_channel,
+ 							  G_PRIORITY_LOW,
+-							  G_IO_IN | G_IO_HUP,
++							  G_IO_IN | G_IO_PRI | G_IO_ERR | G_IO_HUP | G_IO_NVAL,
+ 							  input_func, process, NULL);
+ }
+ 
+Index: server.c
+===================================================================
+RCS file: /cvs/gnome/memprof/server.c,v
+retrieving revision 1.14
+diff -u -p -u -r1.14 server.c
+--- server.c	20 Sep 2003 21:02:18 -0000	1.14
++++ server.c	22 Nov 2005 09:17:10 -0000
+@@ -164,7 +164,8 @@ mp_server_init (MPServer *server)
+ 	channel = g_io_channel_unix_new (server->socket_fd);
+ 	g_io_channel_set_encoding (channel, NULL, NULL);
+ 	
+-	server->control_watch = g_io_add_watch (channel, G_IO_IN | G_IO_HUP, control_func, server);
++	server->control_watch = g_io_add_watch (channel, G_IO_IN | G_IO_PRI | G_IO_ERR | G_IO_HUP | G_IO_NVAL,
++											control_func, server);
+ 	g_io_channel_unref (channel);
+ 
+ 	g_object_ref (G_OBJECT (server));
+@@ -366,7 +367,7 @@ ensure_cleanup ()
+ 		channel = g_io_channel_unix_new (terminate_pipe[0]);
+ 		g_io_channel_set_encoding (channel, NULL, NULL);
+ 		
+-		g_io_add_watch (channel, G_IO_IN, terminate_io_handler, NULL);
++		g_io_add_watch (channel, G_IO_IN | G_IO_PRI, terminate_io_handler, NULL);
+ 		g_io_channel_unref (channel);
+ 		
+ 		added_cleanup = TRUE;
