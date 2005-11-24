@@ -137,7 +137,7 @@ sub rules_pass($)
 
     while ($rule ne '') {
 	my $lastrule = $rule;
-#	print "verify rule '$rule'\n";
+#	print "verify rule '$rule' vs '$tag'\n";
 	# equal to (==)
 	if ($rule =~ s/\=\=\s*(\S+)// && milestone_cmp ($tag, $1) != 0 ) { return 0; }; 
 	# less than or equal (<=)
@@ -161,7 +161,7 @@ sub version_filter_targets($)
     my $tlist = shift;
     my @targets;
 
-    $tlist =~ m/([^<>]*)(.*)/;
+    $tlist =~ m/([^<>=]*)(.*)/;
     my $rules = $2;
     my $targets = $1;
     $targets =~ s/\s*$//;
