@@ -1,0 +1,613 @@
+--- xmlhelp/source/com/sun/star/help/HelpCompiler.java	9 Sep 2005 12:15:19 -0000	1.10
++++ xmlhelp/source/com/sun/star/help/HelpCompiler.java	9 Nov 2005 13:19:49 -0000
+@@ -44,6 +44,7 @@ package com.sun.star.help;
+ import java.io.ByteArrayInputStream;
+ import java.io.File;
+ import java.io.IOException;
++import java.io.ByteArrayOutputStream;
+ import java.io.InputStreamReader;
+ import java.io.UnsupportedEncodingException;
+ import java.net.MalformedURLException;
+@@ -55,16 +56,20 @@ import java.util.Iterator;
+ import java.util.LinkedList;
+ import java.util.List;
+ 
++import javax.xml.parsers.DocumentBuilder;
++import javax.xml.parsers.DocumentBuilderFactory;
++
+ import org.w3c.dom.Document;
+ import org.w3c.dom.Element;
+ import org.w3c.dom.Node;
+ import org.w3c.dom.NodeList;
+ import org.w3c.dom.Text;
++import org.w3c.dom.traversal.DocumentTraversal;
++import org.w3c.dom.traversal.NodeFilter;
++import org.w3c.dom.traversal.TreeWalker;
++import org.w3c.dom.traversal.NodeIterator;
+ import org.xml.sax.InputSource;
+ 
+-import com.sun.xml.tree.TreeWalker;
+-import com.sun.xml.tree.XmlDocument;
+-
+ public class HelpCompiler implements HelpURLStreamHandlerFactory.Notify {
+ 
+ 	private static final String makeRelPrefix = ".." + File.separator;
+@@ -113,24 +118,24 @@ public class HelpCompiler implements Hel
+ 		urlHandler.setNotify(this);
+ 	}
+ 
+-	private Object[] switchFind(Node node) {
++	private Object[] switchFind(Document doc) {
+ 		HashSet hs = new HashSet();
+-		Node next;
+-		TreeWalker tw = new TreeWalker(node);
+-		while ((next = tw.getNextElement("switchinline")) != null) {
+-			Element el = (Element) next;
+-			if (!el.getAttribute("select").equals("appl"))
+-				continue;
+ 
+-			NodeList nl = el.getChildNodes();
+-			for (int i = 0; i < nl.getLength(); ++i) {
+-				if (nl.item(i).getNodeName().equals("caseinline")) {
+-					String appl = ((Element) nl.item(i)).getAttribute("select");
+-					hs.add(appl);
+-				} else if (nl.item(i).getNodeName().equals("defaultinline")) {
+-					hs.add("DEFAULT");
+-				}
+-			}
++		NodeList nodelist = doc.getElementsByTagName("switchinline");
++
++		for (int j = 0; j < nodelist.getLength(); ++j) {
++		    Element el = (Element) nodelist.item(j);
++		    if (el.getAttribute("select").equals("appl")) {
++		        NodeList nl = el.getChildNodes();
++		        for (int i = 0; i < nl.getLength(); ++i) {
++			        if (nl.item(i).getNodeName().equals("caseinline")) {
++				        String appl = ((Element) nl.item(i)).getAttribute("select");
++				        hs.add(appl);
++			        } else if (nl.item(i).getNodeName().equals("defaultinline")) {
++				        hs.add("DEFAULT");
++			        }
++                }
++            }
+ 		}
+ 
+ 		hs.add("DEFAULT");
+@@ -144,6 +149,9 @@ public class HelpCompiler implements Hel
+ 		NodeList nl = node.getChildNodes();
+ 		for (int i = 0; i < nl.getLength(); ++i) {
+ 			Node n = nl.item(i);
++			if (n == null) {
++				continue;
++			}
+ 			if ((n.getNodeName().equals("switchinline")
+ 				|| n.getNodeName().equals("switch"))
+ 				&& ((Element) n).getAttribute("select").equals("appl")) {
+@@ -183,89 +191,125 @@ public class HelpCompiler implements Hel
+ 		return parent;
+ 	}
+ 
+-	public boolean compile() throws UnsupportedEncodingException {
+-		// we now have the jaroutputstream, which will contain the document.
+-		// now determine the document as a dom tree in variable docResolved
+-		String absolutePath;
+-		String sourcePath;
+-		File inputFil = new File(inputFile);
+-		try {
+-			absolutePath = inputFil.getCanonicalPath();
+-		} catch (IOException e3) {
+-			absolutePath = inputFil.getAbsolutePath();
+-		}
+-		try {
+-			sourcePath = new File(src).getCanonicalPath();
+-		} catch (IOException e3) {
+-			sourcePath = new File(inputFile).getAbsolutePath();
+-		}
++    static byte[] docToBytes(Document doc)
++        throws IOException {
+ 
+-		byte[] embResolved = null;
+-		try {
+-			embResolved = getSourceDocument(inputFil.toURL().toExternalForm());
+-		} catch (MalformedURLException e4) {
+-			System.err.println(
+-				"ERROR: malformed URL '" + inputFile + "': " + e4.getMessage());
+-			return false;
+-		}
++        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+ 
+-		// now add path to the document
+-		// resolve the dom
+-		if (embResolved == null) {
+-			System.err.println("ERROR: file not existing: " + sourcePath);
+-			System.exit(1);
+-		}
+-
+-		ByteArrayInputStream inByte = new ByteArrayInputStream(embResolved);
+-		InputStreamReader inread;
+-		try {
+-			inread = new InputStreamReader(inByte, "UTF8");
+-		} catch (UnsupportedEncodingException e) {
+-			System.err.println(
+-				"ERROR: unsupported Encoding '"
+-					+ inputFile
+-					+ "': "
+-					+ e.getMessage());
+-			return false;
+-		}
+-
+-		InputSource inputSource = new InputSource(inread);
+-		inputSource.setEncoding("UTF8");
+-		Document docResolvedOrg = null;
+-		try {
+-			docResolvedOrg = XmlDocument.createXmlDocument(inputSource, false);
+-		} catch (Exception e) {
+-			System.err.println(
+-				"ERROR: XmlDocument.createXmlDocument() failed for '"
+-					+ inputFile
+-					+ "': "
+-					+ e.getMessage());
+-			return false;
+-		}
++        java.lang.reflect.Constructor con;
++        java.lang.reflect.Method meth;
++        
++        String domImpl = doc.getClass().getName();
+ 
+-		// now find all applications for which one has to compile
++        /*
++         * We may have multiple XML parsers in the Classpath.
++         * Depending on which one is first, the actual type of
++         * doc may vary.  Need a way to find out which API is being
++         * used and use an appropriate serialization method.
++         */
++        try {
++            // First of all try for JAXP 1.0
++            if (domImpl.equals("com.sun.xml.tree.XmlDocument")) {
++                
++                Class jaxpDoc = Class.forName("com.sun.xml.tree.XmlDocument");
++            
++                // The method is in the XMLDocument class itself, not a helper
++                meth = jaxpDoc.getMethod("write", 
++                            new Class[] { Class.forName("java.io.OutputStream") } );
++                                     
++                meth.invoke(doc, new Object [] { baos } );
++         }
++	     else if (domImpl.equals("org.apache.crimson.tree.XmlDocument")) {
++		        Class crimsonDoc = Class.forName("org.apache.crimson.tree.XmlDocument");
++		        // The method is in the XMLDocument class itself, not a helper
++                meth = crimsonDoc.getMethod("write", 
++                            new Class[] { Class.forName("java.io.OutputStream") } );
++                                     
++                meth.invoke(doc, new Object [] { baos } );  
++	     }
++         else if (domImpl.equals("gnu.xml.dom.DomDocument")) {
++                Class gnuSer = Class.forName("gnu.xml.dom.ls.DomLSSerializer");
++                
++                // Get the serialize method
++                meth = gnuSer.getMethod("serialize", 
++                            new Class [] { Class.forName("org.w3c.dom.Node"),
++							Class.forName("java.io.OutputStream") } );                                           
++                                           
++                // Get an instance
++				Object serializer = gnuSer.newInstance();
++                
++                // Now call serialize to write the document
++                meth.invoke(serializer, new Object [] { doc, baos } );
++         }
++         else if (domImpl.equals("org.apache.xerces.dom.DocumentImpl") 
++            || domImpl.equals("org.apache.xerces.dom.DeferredDocumentImpl")) {
++                
++                // Try for Xerces
++                Class xercesSer = 
++                        Class.forName("org.apache.xml.serialize.XMLSerializer");
++                
++                // Get the OutputStream constructor
++                // May want to use the OutputFormat parameter at some stage too
++                con = xercesSer.getConstructor(new Class [] 
++                        { Class.forName("java.io.OutputStream"),
++                          Class.forName("org.apache.xml.serialize.OutputFormat") } );
++                              
++                
++                // Get the serialize method
++                meth = xercesSer.getMethod("serialize", 
++                            new Class [] { Class.forName("org.w3c.dom.Document") } );                                           
++                                           
++                          
++                // Get an instance
++                Object serializer = con.newInstance(new Object [] { baos, null } );
++                
++                
++                // Now call serialize to write the document
++                meth.invoke(serializer, new Object [] { doc } );
++            }
++            else {
++                // We don't have another parser  
++                throw new IOException("No appropriate API (JAXP/Xerces) to serialize XML document: " + domImpl);
++            }
++        }
++        catch (ClassNotFoundException cnfe) {
++            throw new IOException(cnfe.toString());
++        }
++        catch (Exception e) {
++            // We may get some other errors, but the bottom line is that
++            // the steps being executed no longer work
++            throw new IOException(e.toString());
++        }
++
++        byte bytes[] = baos.toByteArray();
++
++        return bytes;
++    }
++
++
++	public class myparser {
++		HashSet hidlist = null;
++		HashSet extendedHelpText = null;
++		Hashtable keywords = null;
++		Hashtable helptexts = null;
+ 		String documentId = null;
+ 		String fileName = null;
+ 		String title = null;
+-		// returns all applications for which one has to compile
+-		Object[] applications = switchFind(docResolvedOrg);
+-        
+-        for (int i = 0; i < applications.length; ++i) {
+-			String appl = (String) applications[i];
+-            // returns a clone of the document with swich-cases resolved
+-			Element docResolved =
+-				(Element) clone(docResolvedOrg.getDocumentElement(), appl);
+-			// now determine the id of the document, which is part of the
+-			// bookmark - tag (HID)
+-			Node test;
+-			TreeWalker treewalker = new TreeWalker(docResolved);
+-			// a number to determine the anchor of the whole stuff
+-			HashSet hidlist = new HashSet();
+-			HashSet extendedHelpText = new HashSet();
+-			Hashtable keywords = new Hashtable();
+-			Hashtable helptexts = new Hashtable();
+-            
+-			while ((test = treewalker.getNext()) != null) {
++
++		public myparser(String indocumentId, String infileName, String intitle) {
++				hidlist = new HashSet();
++				extendedHelpText = new HashSet();
++				keywords = new Hashtable();
++				helptexts = new Hashtable();
++				documentId = indocumentId;
++				fileName = infileName;
++				title = intitle;
++		}
++
++		public void traverse( Node parentNode ) {
++			// traverse all nodes that belong to the parent
++			for(Node test=parentNode.getFirstChild(); test!=null; test=test.getNextSibling()) {
++
+ 				if (fileName == null
+ 					&& test.getNodeName().equals("filename")) {
+ 					NodeList list = test.getChildNodes();
+@@ -345,15 +389,102 @@ public class HelpCompiler implements Hel
+ 					if (!extendedHelpText.isEmpty())
+ 						extendedHelpText = new HashSet();
+ 				}
+-			} // now save the info
++			  // traverse children
++			  traverse(test);
++			}
++		  }
++	}
++
++	public boolean compile() throws UnsupportedEncodingException, java.io.IOException {
++		// we now have the jaroutputstream, which will contain the document.
++		// now determine the document as a dom tree in variable docResolved
++		String absolutePath;
++		String sourcePath;
++		File inputFil = new File(inputFile);
++		try {
++			absolutePath = inputFil.getCanonicalPath();
++		} catch (IOException e3) {
++			absolutePath = inputFil.getAbsolutePath();
++		}
++		try {
++			sourcePath = new File(src).getCanonicalPath();
++		} catch (IOException e3) {
++			sourcePath = new File(inputFile).getAbsolutePath();
++		}
++
++		byte[] embResolved = null;
++		try {
++			embResolved = getSourceDocument(inputFil.toURL().toExternalForm());
++		} catch (MalformedURLException e4) {
++			System.err.println(
++				"ERROR: malformed URL '" + inputFile + "': " + e4.getMessage());
++			return false;
++		}
++
++		// now add path to the document
++		// resolve the dom
++		if (embResolved == null) {
++			System.err.println("ERROR: file not existing: " + sourcePath);
++			System.exit(1);
++		}
++
++		ByteArrayInputStream inByte = new ByteArrayInputStream(embResolved);
++		InputStreamReader inread;
++		try {
++			inread = new InputStreamReader(inByte, "UTF8");
++		} catch (UnsupportedEncodingException e) {
++			System.err.println(
++				"ERROR: unsupported Encoding '"
++					+ inputFile
++					+ "': "
++					+ e.getMessage());
++			return false;
++		}
++
++		InputSource inputSource = new InputSource(inread);
++		inputSource.setEncoding("UTF8");
++		Document docResolvedOrg = null;
++		try {
++			//System.err.println("Compiling " + inputFile);
++			DocumentBuilderFactory dFactory = DocumentBuilderFactory.newInstance();
++			dFactory.setValidating(false);
++			DocumentBuilder dBuilder = dFactory.newDocumentBuilder();
++			docResolvedOrg = dBuilder.parse(inputSource);
++		} catch (Exception e) {
++			System.err.println(
++				"ERROR: XmlDocument.createXmlDocument() failed for '"
++					+ inputFile
++					+ "': "
++					+ e.getMessage());
++			return false;
++		}
++
++		// now find all applications for which one has to compile
++		String documentId = null;
++		String fileName = null;
++		String title = null;
++		// returns all applications for which one has to compile
++		Object[] applications = switchFind(docResolvedOrg);
++        
++        for (int i = 0; i < applications.length; ++i) {
++			String appl = (String) applications[i];
++            // returns a clone of the document with swich-cases resolved
++			Element docResolved =
++				(Element) clone(docResolvedOrg.getDocumentElement(), appl);
++
++			myparser aparser = new myparser(documentId, fileName, title);
++			aparser.traverse(docResolved);
++			documentId = aparser.documentId;
++			fileName = aparser.fileName;
++			title = aparser.title;
+ 
+ 			addEntryToJarFile(
+ 				appl,
+ 				"text",
+-				docResolved.toString().getBytes("UTF8"));
+-			addEntryToJarFile(appl, "hidlist", hidlist);
+-			addEntryToJarFile(appl, "helptexts", helptexts);
+-			addEntryToJarFile(appl, "keywords", keywords);
++				docToBytes(docResolved.getOwnerDocument()));
++			addEntryToJarFile(appl, "hidlist", aparser.hidlist);
++			addEntryToJarFile(appl, "helptexts", aparser.helptexts);
++			addEntryToJarFile(appl, "keywords", aparser.keywords);
+ 		} // end iteration over all applications
+ 
+ 		try {
+--- xmlhelp/source/com/sun/star/help/PreTransformer.java	25 Jan 2005 15:29:16 -0000	1.6
++++ xmlhelp/source/com/sun/star/help/PreTransformer.java	9 Nov 2005 13:19:52 -0000
+@@ -8,7 +8,6 @@ import java.util.zip.CRC32;
+ import java.util.zip.ZipEntry;
+ 
+ import org.w3c.dom.*;
+-import com.sun.xml.tree.*;
+ import org.xml.sax.*;
+ import javax.xml.parsers.*;
+ import com.jclark.xsl.sax.*;
+--- xmlhelp/source/com/sun/star/help/HelpIndexer.java	25 Oct 2005 11:24:55 -0000	1.16
++++ xmlhelp/source/com/sun/star/help/HelpIndexer.java	9 Nov 2005 13:24:14 -0000
+@@ -46,7 +46,6 @@ import java.net.URL;
+ import java.util.*;
+ 
+ import org.w3c.dom.*;
+-import com.sun.xml.tree.*;
+ import org.xml.sax.*;
+ import javax.xml.parsers.*;
+ import com.jclark.xsl.sax.*;
+@@ -246,7 +247,10 @@ public class HelpIndexer {
+ 					in.setEncoding("UTF8");
+ 					Document docResolved = null;
+ 					try {
+-						docResolved = XmlDocument.createXmlDocument(in, false);
++       					DocumentBuilderFactory dFactory = DocumentBuilderFactory.newInstance();
++                        dFactory.setValidating(false);
++                        DocumentBuilder dBuilder = dFactory.newDocumentBuilder();
++                        docResolved = dBuilder.parse(in);
+ 					} catch (Exception e) {
+ 						if (docResolved == null)
+ 							System.err.println("Nullpointer");
+--- officecfg/org/openoffice/configuration/XMLDefaultGenerator.java	8 Sep 2005 14:43:34 -0000	1.4
++++ officecfg/org/openoffice/configuration/XMLDefaultGenerator.java	11 Nov 2005 11:03:10 -0000
+@@ -36,12 +36,10 @@
+ 
+ import org.xml.sax.*;
+ import org.w3c.dom.*;
+-import com.sun.xml.tree.XmlDocument;
+ import org.xml.sax.SAXException;
+ import org.xml.sax.SAXParseException;
+ import javax.xml.parsers.SAXParserFactory;
+ import javax.xml.parsers.SAXParser;
+-import com.sun.xml.tree.*;
+ import java.util.*;
+ import java.io.*;
+ import com.jclark.xsl.sax.Driver;
+--- XmlSearch/src/com/sun/xmlsearch/makefile.mk	25 Oct 2005 11:11:58 -0000	1.5
++++ XmlSearch/src/com/sun/xmlsearch/makefile.mk	14 Nov 2005 14:22:22 -0000
+@@ -21,6 +21,10 @@ TARGET  = com_sun_xmlsearch
+ 
+ .INCLUDE : settings.mk
+ 
++.IF "$(XML_CLASSPATH)" != ""
++XCLASSPATH+=:$(XML_CLASSPATH)
++.ENDIF
++
+ JARFILES 		=  jaxp.jar parser.jar xt.jar
+ #EXTRAJARFILES 		=  jaxp.jar parser.jar xt.jar  
+ 
+--- XmlSearch/src/com/sun/xmlsearch/tree/TreeBuilder.java	9 Sep 2005 16:41:49 -0000	1.2
++++ XmlSearch/src/com/sun/xmlsearch/tree/TreeBuilder.java	14 Nov 2005 14:22:25 -0000
+@@ -46,7 +46,8 @@ import javax.swing.tree.TreeNode;
+ import org.xml.sax.HandlerBase;
+ import org.xml.sax.AttributeList;
+ import org.xml.sax.InputSource;
+-import com.sun.xml.parser.Parser;
++import javax.xml.parsers.SAXParserFactory;
++import javax.xml.parsers.SAXParser;
+ import com.sun.xmlsearch.util.IntegerArray;
+ import com.jclark.xsl.om.*;
+ 
+@@ -610,22 +611,29 @@ public final class TreeBuilder extends H
+ 		}
+     } // end of SubstitutedElement
+ 
++    private SAXParser getParser() throws org.xml.sax.SAXException, javax.xml.parsers.ParserConfigurationException
++    {
++        SAXParserFactory spf = SAXParserFactory.newInstance();
++        spf.setValidating(false);
++        return spf.newSAXParser();
++    }
++
+     private static final int InitStackSize = 256;
+     private static final Name EmptyName = null;
+-    private Parser _parser = new Parser();
++    private SAXParser _parser = null;
+     private Hashtable _names = new Hashtable(256);
+   
+     private NameTable _nameTable;
+     private NamespacePrefixMap _nsMap;
+   
+-    public TreeBuilder() {
++    public TreeBuilder() throws org.xml.sax.SAXException, javax.xml.parsers.ParserConfigurationException {
+ 		this(new NameTableImpl());
+     }
+ 
+-    public TreeBuilder(NameTable nameTable) {
++    public TreeBuilder(NameTable nameTable) throws org.xml.sax.SAXException, javax.xml.parsers.ParserConfigurationException {
++		_parser = getParser();
+ 		_nameTable = nameTable;
+ 		_nsMap = _nameTable.getEmptyNamespacePrefixMap();
+-		_parser.setFastStandalone(true);
+     }
+ 
+     public Node makeSubstituteElement(Name name, Node2[] children, Node original) {
+@@ -917,9 +925,8 @@ public final class TreeBuilder extends H
+     
+     public synchronized Node getRoot(InputSource input) {
+ 		try {
+-			_parser.setDocumentHandler(this);
+ 			// long start = System.currentTimeMillis();
+-			_parser.parse(input);
++			_parser.parse(input, this);
+ 			/*
+ 			  System.out.println((System.currentTimeMillis()-start)
+ 			  +" msec parse");
+--- XmlSearch/src/com/sun/xmlsearch/util/Configuration.java	9 Sep 2005 16:45:09 -0000	1.2
++++ XmlSearch/src/com/sun/xmlsearch/util/Configuration.java	14 Nov 2005 14:22:25 -0000
+@@ -40,8 +40,8 @@ import java.io.ByteArrayInputStream;
+ import java.util.Vector;
+ import java.net.URL;
+ import org.w3c.dom.*;
+-import com.sun.xml.tree.XmlDocument;
+-import com.sun.xml.parser.Resolver;
++import javax.xml.parsers.DocumentBuilder;
++import javax.xml.parsers.DocumentBuilderFactory;
+ import org.xml.sax.InputSource;
+ 
+ public final class Configuration {
+@@ -68,14 +68,19 @@ public final class Configuration {
+     }
+ 
+     public static Element parse(URL location) throws Exception {
+-	InputSource input = Resolver.createInputSource(location, true);
+-	XmlDocument document = XmlDocument.createXmlDocument(input, false);
++	DocumentBuilderFactory dFactory = DocumentBuilderFactory.newInstance();
++	dFactory.setValidating(false);
++	DocumentBuilder dBuilder = dFactory.newDocumentBuilder();
++	Document document = dBuilder.parse(location.openStream());
+ 	return document.getDocumentElement();
+     }
+ 
+     public static Element parse(byte[] xmlBytes) throws Exception {
+ 	ByteArrayInputStream input = new ByteArrayInputStream(xmlBytes);
+-	XmlDocument document = XmlDocument.createXmlDocument(input, false);
++	DocumentBuilderFactory dFactory = DocumentBuilderFactory.newInstance();
++	dFactory.setValidating(false);
++	DocumentBuilder dBuilder = dFactory.newDocumentBuilder();
++	Document document = dBuilder.parse(input);
+ 	return document.getDocumentElement();
+     }
+ 
+--- XmlSearch/src/com/sun/xmlsearch/xml/indexer/XmlIndexBuilder.java	9 Sep 2005 16:52:56 -0000	1.7
++++ XmlSearch/src/com/sun/xmlsearch/xml/indexer/XmlIndexBuilder.java	14 Nov 2005 14:22:26 -0000
+@@ -42,15 +42,17 @@ import java.util.Enumeration;
+ import java.net.URL;
+ import org.xml.sax.InputSource;
+ import org.xml.sax.HandlerBase;
+-import com.sun.xml.parser.Resolver;
+-import com.sun.xml.tree.XmlDocument;
+ import com.sun.xmlsearch.tree.*;
+ import com.sun.xmlsearch.util.*;
+ import com.sun.xmlsearch.db.*;
+ import com.sun.xmlsearch.xml.XmlIndex;
+ 
+-import com.sun.xml.parser.Parser;
+-import com.sun.xml.parser.ValidatingParser;
++import javax.xml.parsers.DocumentBuilder;
++import javax.xml.parsers.DocumentBuilderFactory;
++import javax.xml.parsers.SAXParserFactory;
++import javax.xml.parsers.SAXParser;
++import org.xml.sax.Parser;
++import org.w3c.dom.Document;
+ 
+ import com.jclark.xsl.om.*;
+ import com.jclark.xsl.sax.*;
+@@ -465,8 +467,11 @@ public final class XmlIndexBuilder {
+ 	public void indexDocument(URL docURL, String title) throws Exception {
+ 		InputSource source = new InputSource(docURL.openStream());
+ 		source.setSystemId(docURL.toString());
+-		Parser sourceParser = new Parser();
+-		sourceParser.setFastStandalone(true);
++        	SAXParserFactory spf = SAXParserFactory.newInstance();
++		spf.setValidating(false);
++		SAXParser saxParser = spf.newSAXParser();
++		Parser sourceParser = saxParser.getParser();
++
+ 		XMLProcessorEx sourceLoader = new XMLProcessorImpl(sourceParser);
+ 		//	long start = System.currentTimeMillis();
+ 		Node root =
+@@ -545,8 +550,12 @@ public final class XmlIndexBuilder {
+ 		}
+ 		// System.out.println(stylesheetUrl.toString());
+ 		InputStream stylesheetStream = stylesheetUrl.openStream();
+-		XmlDocument sheet =
+-			XmlDocument.createXmlDocument(stylesheetStream, false);
++
++		DocumentBuilderFactory dFactory = DocumentBuilderFactory.newInstance();
++		dFactory.setValidating(false);
++		DocumentBuilder dBuilder = dFactory.newDocumentBuilder();
++		Document sheet = dBuilder.parse(stylesheetStream);
++
+ 		return _transformEngine.createTransform(sheet);
+ 	}
+ 
+--- XmlSearch/src/com/sun/xmlsearch/xml/indexer/XmlIndexer.java	9 Sep 2005 16:53:09 -0000	1.2
++++ XmlSearch/src/com/sun/xmlsearch/xml/indexer/XmlIndexer.java	14 Nov 2005 14:22:27 -0000
+@@ -39,8 +39,6 @@ import java.net.MalformedURLException;
+ import java.io.*;
+ import java.util.*;
+ 
+-import com.sun.xml.tree.XmlDocument;
+-import com.sun.xml.parser.Resolver;
+ import org.w3c.dom.*;
+ import org.xml.sax.InputSource;
+ import org.xml.sax.SAXException;
