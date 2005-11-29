@@ -5,6 +5,8 @@ EXTRA_DIST=\
 	openabout_suse.png \
 	openintro_nld.bmp \
 	openabout_nld.png \
+	openintro_dropline-gnome.bmp \
+	openabout_dropline-gnome.png \
 	openintro_pld.bmp \
 	openabout_pld.png \
 	openintro_kde.bmp \
