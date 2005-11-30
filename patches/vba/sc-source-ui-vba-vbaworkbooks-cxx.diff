@@ -1,9 +1,10 @@
---- /dev/null	2005-11-06 11:49:58.372324250 +0000
-+++ sc/source/ui/vba/vbaworkbooks.cxx	2005-10-27 18:06:14.000000000 +0100
-@@ -0,0 +1,330 @@
+--- /dev/null	2005-11-27 19:42:11.860354750 +0000
++++ sc/source/ui/vba/vbaworkbooks.cxx	2005-11-30 13:44:25.000000000 +0000
+@@ -0,0 +1,291 @@
 +#include <comphelper/processfactory.hxx>
 +
 +#include <cppuhelper/implbase1.hxx>
++#include <cppuhelper/implbase3.hxx>
 +
 +#include <com/sun/star/frame/XDesktop.hpp>
 +#include <com/sun/star/sheet/XSpreadsheetDocument.hpp>
@@ -28,8 +29,20 @@
 +#include "vbaworkbooks.hxx"
 +#include "vbahelper.hxx"
 +
++#include <hash_map>
++
 +using namespace ::org::openoffice;
 +using namespace ::com::sun::star;
++
++
++typedef  std::hash_map< rtl::OUString,
++sal_Int32, ::rtl::OUStringHash,
++::std::equal_to< ::rtl::OUString > > NameIndexHash;
++
++typedef std::vector < uno::Reference< sheet::XSpreadsheetDocument > > WorkBooks;
++
++typedef ::cppu::WeakImplHelper1< container::XEnumeration > SpreadSheetDocEnumImpl_BASE;
++
 +static uno::Any
 +getWorkbook( uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< sheet::XSpreadsheetDocument > &xDoc )
 +{
@@ -42,236 +55,185 @@
 +	return uno::Any( uno::Reference< vba::XWorkbook > (pWb) );
 +}
 +
-+typedef ::cppu::WeakImplHelper1< com::sun::star::container::XEnumeration > ScVbaWorkbooksIterator_BASE;
 +
-+class ScVbaWorkbooksIterator : public ScVbaWorkbooksIterator_BASE
++// #FIXME clearly this is a candidate for some sort of helper base class as
++// this is a copy of SelectedSheetsEnum ( vbawindow.cxx )
++
++class SpreadSheetDocEnumImpl : public SpreadSheetDocEnumImpl_BASE
 +{
-+	uno::Reference< container::XEnumeration > mxComponents;
-+	uno::Reference< sheet::XSpreadsheetDocument > mxSpreadsheet;
 +	uno::Reference< uno::XComponentContext > m_xContext;
-+  public:
-+	ScVbaWorkbooksIterator( uno::Reference< uno::XComponentContext >& xContext)
-+		: m_xContext( xContext )
++	WorkBooks m_books;
++	WorkBooks::const_iterator m_it;
++
++public:
++	SpreadSheetDocEnumImpl( const uno::Reference< uno::XComponentContext >& xContext, const WorkBooks& books ) throw ( uno::RuntimeException ) :  m_xContext( xContext ), m_books( books )
++	{
++		m_it = m_books.begin();
++	}
++	SpreadSheetDocEnumImpl( const uno::Reference< uno::XComponentContext >& xContext ) throw ( uno::RuntimeException ) :  m_xContext( xContext )
 +	{
 +		uno::Reference< lang::XMultiComponentFactory > xSMgr(
 +			m_xContext->getServiceManager(), uno::UNO_QUERY_THROW );
 +
 +		uno::Reference< frame::XDesktop > xDesktop
 +			(xSMgr->createInstanceWithContext(::rtl::OUString::createFromAscii("com.sun.star.frame.Desktop"), m_xContext), uno::UNO_QUERY_THROW );
-+		mxComponents = xDesktop->getComponents()->createEnumeration();
-+		nextElem();
-+	}
-+	~ScVbaWorkbooksIterator() {}
-+
-+	virtual sal_Bool hasMoreElements() throw (uno::RuntimeException)
-+	{
-+		return mxSpreadsheet.is();
-+	}
-+	
-+	virtual ::com::sun::star::uno::Any nextElement() throw (container::NoSuchElementException,
-+															lang::WrappedTargetException,
-+															uno::RuntimeException)
-+	{
-+		uno::Reference< sheet::XSpreadsheetDocument > xNext = nextElem();
-+		if( !xNext.is() )
-+			throw container::NoSuchElementException();
-+		return getWorkbook( m_xContext, xNext );
-+	}
-+
-+	uno::Reference< sheet::XSpreadsheetDocument > nextElem() throw (uno::RuntimeException)
-+	{
-+		uno::Reference< sheet::XSpreadsheetDocument > xLast = mxSpreadsheet;
-+		mxSpreadsheet.clear();
-+
-+		while( !mxSpreadsheet.is() &&
-+			   mxComponents.is() && mxComponents->hasMoreElements() )
++		uno::Reference< container::XEnumeration > mxComponents = xDesktop->getComponents()->createEnumeration();
++		sal_Int32 nIndex=0;
++		while( mxComponents->hasMoreElements() )
 +		{
-+			uno::Any aElem = mxComponents->nextElement();
-+			mxSpreadsheet = uno::Reference< sheet::XSpreadsheetDocument >( aElem, uno::UNO_QUERY );
++			uno::Reference< sheet::XSpreadsheetDocument > xNext( mxComponents->nextElement(), uno::UNO_QUERY );
++			if ( xNext.is() )
++				m_books.push_back( xNext );
 +		}
-+		return xLast;
++		m_it = m_books.begin();
++	}
++	// XEnumeration
++	virtual ::sal_Bool SAL_CALL hasMoreElements(  ) throw (uno::RuntimeException) 
++	{ 
++		return m_it != m_books.end();
++	}
++
++	virtual uno::Any SAL_CALL nextElement(  ) throw (container::NoSuchElementException, lang::WrappedTargetException, uno::RuntimeException) 
++	{ 
++		if ( !hasMoreElements() )
++		{
++			throw container::NoSuchElementException();
++		}
++		return makeAny( *(m_it++) );
 +	}
 +};
 +
++class WorkBookEnumImpl : public EnumerationHelperImpl
++{
++public:
++	WorkBookEnumImpl( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< container::XEnumeration >& xEnumeration ) throw ( uno::RuntimeException ) : EnumerationHelperImpl( xContext, xEnumeration ){}
++
++	virtual uno::Any SAL_CALL nextElement(  ) throw (container::NoSuchElementException, lang::WrappedTargetException, uno::RuntimeException) 
++	{ 
++		uno::Reference< sheet::XSpreadsheetDocument > xDoc( m_xEnumeration->nextElement(), uno::UNO_QUERY_THROW );
++		return getWorkbook( m_xContext, xDoc );
++	}
++
++};
++
++// #FIXME clearly this is also a candidate for some sort of helper base class as
++// a very similar one is used in vbawindow ( SelectedSheetsEnumAccess )
++// Maybe a template base class that does all of the operations on the hashmap
++// and vector only, and the sub-class does everything else
++// => ctor, createEnumeration & factory method need be defined ( to be called 
++// by getByIndex, getByName )
++typedef ::cppu::WeakImplHelper3< container::XEnumerationAccess 
++	, com::sun::star::container::XIndexAccess
++	, com::sun::star::container::XNameAccess
++	> WorkBooksAccessImpl_BASE;
++
++class WorkBooksAccessImpl : public WorkBooksAccessImpl_BASE
++{
++	uno::Reference< uno::XComponentContext > m_xContext;
++	WorkBooks m_books;
++	NameIndexHash namesToIndices;
++public:	
++	WorkBooksAccessImpl( const uno::Reference< uno::XComponentContext >& xContext ):m_xContext( xContext )
++	{
++		uno::Reference< container::XEnumeration > xEnum = new SpreadSheetDocEnumImpl( m_xContext );
++		sal_Int32 nIndex=0;
++		while( xEnum->hasMoreElements() )
++		{
++			uno::Reference< sheet::XSpreadsheetDocument > xNext( xEnum->nextElement(), uno::UNO_QUERY );
++			if ( xNext.is() )
++			{
++				m_books.push_back( xNext );
++				uno::Reference< frame::XModel > xModel( xNext, uno::UNO_QUERY_THROW ); // that the spreadsheetdocument is a xmodel is a given
++				INetURLObject aURL( xModel->getURL() );
++				aURL.CutLastName();
++				namesToIndices[ aURL.GetURLPath() ] = nIndex++;
++			}
++		}
++			
++	}
++	
++	//XEnumerationAccess
++	virtual uno::Reference< container::XEnumeration > SAL_CALL createEnumeration(  ) throw (uno::RuntimeException)
++	{
++		return new SpreadSheetDocEnumImpl( m_xContext, m_books ); 
++	}
++	// XIndexAccess
++	virtual ::sal_Int32 SAL_CALL getCount(  ) throw (uno::RuntimeException) 
++	{ 
++		return m_books.size();
++	}
++	virtual uno::Any SAL_CALL getByIndex( ::sal_Int32 Index ) throw ( lang::IndexOutOfBoundsException, lang::WrappedTargetException, uno::RuntimeException) 
++	{ 
++		if ( Index < 0 
++			|| Index >= m_books.size() ) 
++			throw lang::IndexOutOfBoundsException();
++		return makeAny( m_books[ Index ] ); // returns xspreadsheetdoc
++	}
++
++	//XElementAccess
++	virtual uno::Type SAL_CALL getElementType(  ) throw (uno::RuntimeException)
++	{ 
++		return sheet::XSpreadsheetDocument::static_type(0); 
++	}
++
++	virtual ::sal_Bool SAL_CALL hasElements(  ) throw (uno::RuntimeException) 
++	{ 
++		return (m_books.size() > 0);
++	}
++
++	//XNameAccess
++	virtual uno::Any SAL_CALL getByName( const ::rtl::OUString& aName ) throw (container::NoSuchElementException, lang::WrappedTargetException, uno::RuntimeException) 
++	{ 
++		NameIndexHash::const_iterator it = namesToIndices.find( aName );
++		if ( it == namesToIndices.end() )
++			throw container::NoSuchElementException();
++		return makeAny( m_books[ it->second ] );
++		
++	}
++
++	virtual uno::Sequence< ::rtl::OUString > SAL_CALL getElementNames(  ) throw (uno::RuntimeException) 
++	{ 
++		uno::Sequence< ::rtl::OUString > names( namesToIndices.size() );
++		::rtl::OUString* pString = names.getArray();
++		NameIndexHash::const_iterator it = namesToIndices.begin();
++		NameIndexHash::const_iterator it_end = namesToIndices.end();
++		for ( ; it != it_end; ++it, ++pString )
++			*pString = it->first;	
++		return names;	
++	}
++
++	virtual ::sal_Bool SAL_CALL hasByName( const ::rtl::OUString& aName ) throw (uno::RuntimeException) 
++	{ 
++		NameIndexHash::const_iterator it = namesToIndices.find( aName );
++		return (it != namesToIndices.end());
++	}
++
++};
++
++ScVbaWorkbooks::ScVbaWorkbooks( const uno::Reference< css::uno::XComponentContext >& xContext ) : ScVbaWorkbooks_BASE( xContext, uno::Reference< container::XIndexAccess >( new WorkBooksAccessImpl( xContext ) ) )
++{
++}
 +// XEnumerationAccess
 +uno::Type
 +ScVbaWorkbooks::getElementType() throw (uno::RuntimeException)
 +{
 +	return vba::XWorkbook::static_type(0);
 +}
-+::sal_Bool
-+ScVbaWorkbooks::hasElements() throw (uno::RuntimeException)
-+{
-+	return sal_True;
-+}
 +uno::Reference< container::XEnumeration >
 +ScVbaWorkbooks::createEnumeration() throw (uno::RuntimeException)
 +{
-+	return uno::Reference< container::XEnumeration >( new ScVbaWorkbooksIterator(m_xContext) );
-+}
-+
-+
-+// XCollection
-+uno::Any
-+ScVbaWorkbooks::getParent() throw (uno::RuntimeException)
-+{
-+	uno::Reference< vba::XGlobals > xGlobals = ScVbaGlobals::getGlobalsImpl( m_xContext );
-+	uno::Reference< vba::XApplication > xApplication = 
-+		xGlobals->getApplication();
-+	if ( !xApplication.is() )
-+	{
-+		throw uno::RuntimeException(
-+                ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "ScVbaWorkbooks::getParent: Couldn't access Application object" ) ),
-+                    uno::Reference< XInterface >() );
-+	}
-+	return uno::Any(xApplication);
-+}
-+
-+::sal_Int32
-+ScVbaWorkbooks::getCreator() throw (uno::RuntimeException)
-+{
-+	SC_VBA_STUB();
-+	return 0;
-+}
-+uno::Reference< vba::XApplication >
-+ScVbaWorkbooks::getApplication() throw (uno::RuntimeException)
-+{
-+	uno::Reference< vba::XApplication > xApplication = 
-+		ScVbaGlobals::getGlobalsImpl( m_xContext )->getApplication();
-+
-+	if ( !xApplication.is() )
-+	{
-+		throw uno::RuntimeException(
-+                ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "ScVbaWorkbooks::getParent: Couldn't access Application object" ) ),
-+                    uno::Reference< XInterface >() );
-+	}
-+	return xApplication;
-+}
-+::sal_Int32
-+ScVbaWorkbooks::getCount() throw (uno::RuntimeException)
-+{
-+	sal_Int32 nCount;
-+	ScVbaWorkbooksIterator aIter(m_xContext);
-+
-+	for( nCount = 0; aIter.hasMoreElements(); nCount++ )
-+		aIter.nextElem();
-+
-+	return nCount;
++	return new WorkBookEnumImpl( m_xContext, uno::Reference< container::XEnumeration >( new SpreadSheetDocEnumImpl(m_xContext) ) );
 +}
 +
 +uno::Any
-+ScVbaWorkbooks::getItemByStringIndex( const rtl::OUString& sIndex ) throw (uno::RuntimeException)
++ScVbaWorkbooks::createCollectionObject( const css::uno::Any& aSource )
 +{
-+	if ( !( sIndex.getLength() > 0 ) )
-+	{
-+		rtl::OUString message;
-+		message = rtl::OUString::createFromAscii(
-+			"index is a blank string");
-+		throw  lang::IndexOutOfBoundsException( message,
-+			uno::Reference< uno::XInterface >() );
-+	}
-+
-+	ScVbaWorkbooksIterator aIter(m_xContext);
-+	uno::Reference< sheet::XSpreadsheetDocument > xDoc;
-+
-+	bool isFound = false;
-+	// FIXME check if there is a XNameAccess for this, quick look says
-+	// no, need to check this later. so. atm very inefficient below
-+	uno::Reference< vba::XWorkbook > xWorkBook;
-+	while ( aIter.hasMoreElements() )
-+	{
-+		xDoc = aIter.nextElem();
-+		xWorkBook.set( getWorkbook( m_xContext, xDoc ), uno::UNO_QUERY );
-+		if ( xWorkBook.is() )
-+		{
-+			if ( sIndex.equals( xWorkBook->getName() ) )
-+			{
-+				isFound = true;
-+				break;
-+			}
-+		}
-+	}
-+
-+	if ( !isFound )
-+	{
-+		rtl::OUString message;
-+		message = rtl::OUString::createFromAscii(
-+			"Element does not exist for index ");
-+		throw  lang::IndexOutOfBoundsException( message,
-+			uno::Reference< uno::XInterface >() );
-+	}
-+
-+	return uno::Any( xWorkBook );	
-+
++	uno::Reference< sheet::XSpreadsheetDocument > xDoc( aSource, uno::UNO_QUERY );
++	return getWorkbook( m_xContext, xDoc );
 +}
 +
-+uno::Any
-+ScVbaWorkbooks::getItemByIntIndex( const sal_Int32 nIndex ) throw (uno::RuntimeException)
-+{
 +
-+	if ( !( nIndex > 0 ) )
-+	{
-+		rtl::OUString message;
-+		message = rtl::OUString::createFromAscii(
-+			"index is 0 or negative");
-+		throw  lang::IndexOutOfBoundsException( message,
-+			uno::Reference< uno::XInterface >() );
-+	}
-+
-+	ScVbaWorkbooksIterator aIter(m_xContext);
-+	uno::Reference< sheet::XSpreadsheetDocument > xDoc;
-+
-+	sal_Int32 i = 0;
-+	for( ; aIter.hasMoreElements() && i < nIndex; ++i )
-+	{
-+		xDoc = aIter.nextElem();
-+	}
-+
-+	if ( i != nIndex )
-+	{
-+		rtl::OUString message;
-+		message = rtl::OUString::createFromAscii(
-+			"Element does not exist for index ");
-+		throw  lang::IndexOutOfBoundsException( message,
-+			uno::Reference< uno::XInterface >() );
-+	}
-+
-+	if( !xDoc.is() )
-+		return uno::Any( uno::Reference< vba::XWorkbook >(NULL) );
-+
-+	return uno::Any( getWorkbook( m_xContext, xDoc ) );
-+}
-+
-+uno::Any
-+ScVbaWorkbooks::Item( const uno::Any& aIndex ) throw (uno::RuntimeException)
-+{
-+	if ( aIndex.getValueTypeClass() ==  uno::TypeClass_STRING )
-+	{
-+		rtl::OUString sIndex;
-+		if ( ( aIndex >>= sIndex ) != sal_True )
-+		{
-+			rtl::OUString message;
-+			message = rtl::OUString::createFromAscii(
-+				"Couldn't convert index to string");
-+			throw uno::RuntimeException( message, uno::Reference< uno::XInterface >() );
-+		}
-+		return getItemByStringIndex( sIndex );
-+
-+	}
-+
-+	sal_Int32 nIndex = 0;
-+
-+	if ( ( aIndex >>= nIndex ) != sal_True )
-+	{
-+		rtl::OUString message;
-+		message = rtl::OUString::createFromAscii(
-+			"Couldn't convert index to Int32");
-+		throw uno::RuntimeException( message, uno::Reference< uno::XInterface >() );
-+	}
-+	return getItemByIntIndex( nIndex );
-+}
-+
-+uno::Any 
++uno::Any SAL_CALL
 +ScVbaWorkbooks::Add() throw (uno::RuntimeException)
 +{
 +	uno::Reference< lang::XMultiComponentFactory > xSMgr(
@@ -286,10 +248,9 @@
 +									   rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("_blank") ), 0, 
 +									   uno::Sequence< beans::PropertyValue >(0) );			   
 +    uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( xComponent, uno::UNO_QUERY_THROW );
-+    uno::Reference<frame::XModel> xNewModel(xSpreadDoc,uno::UNO_QUERY_THROW);
 +                                                                                                                             
 +    if( xSpreadDoc.is() )
-+        return uno::Any( uno::Reference< vba::XWorkbook >( new ScVbaWorkbook( m_xContext, xNewModel ) ) );
++        return getWorkbook( m_xContext, xSpreadDoc );
 +    return uno::Any();
 +}
 +
@@ -327,7 +288,7 @@
 +		frame::FrameSearchFlag::CREATE,
 +		uno::Sequence< beans::PropertyValue >(0));
 +	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( xComponent, uno::UNO_QUERY_THROW );
-+	uno::Reference<frame::XModel> xNewModel(xSpreadDoc,uno::UNO_QUERY_THROW);
-+
-+	return uno::Any( uno::Reference< vba::XWorkbook >( new ScVbaWorkbook( m_xContext, xNewModel ) ) );
++        return getWorkbook( m_xContext, xSpreadDoc );
 +}
++
++
