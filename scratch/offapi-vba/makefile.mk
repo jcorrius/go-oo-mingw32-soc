@@ -37,6 +37,8 @@ IDLFILES=\
 	XChartObject.idl\
 	XChartObjects.idl\
 	XChart.idl\
+	XSeriesCollection.idl\
+	XSeries.idl\
 	XDialog.idl \
 	XDialogs.idl 
 
