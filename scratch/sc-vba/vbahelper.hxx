@@ -2,6 +2,7 @@
 #define SC_VBA_HELPER_HXX
 
 #include <com/sun/star/frame/XModel.hpp>
+#include <docsh.hxx>
 
 #define css com::sun::star
 #define oo org::openoffice
@@ -18,7 +19,8 @@ namespace org
 		bool isRangeShortCut( const ::rtl::OUString& sParam );
 		css::uno::Reference< css::frame::XModel >
 			getCurrentDocument() throw (css::uno::RuntimeException);
-
+		ScTabViewShell* getCurrentBestViewShell();
+		SfxViewFrame* getCurrentViewFrame();
 	}
 }
 

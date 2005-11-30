@@ -34,10 +34,41 @@ ScVbaChartObject::getChart() throw (css::uno::RuntimeException)
 	
 	return new ScVbaChart( m_xContext, xChart );
 }
+/*
+#include<cppuhelper/implbase1.hxx>
+#include<org/openoffice/vba/XChartObject.hpp>
+#include"vbacollectionimpl.hxx"
 
-void SAL_CALL
+typedef ::cppu::ImplInheritanceHelper1< ScVbaCollectionBaseImpl, oo::vba::XChartObject > XSeriesCollectionBase;
+class MyCollectionImpl : public XSeriesCollectionBase
+{
+public:
+	//MyCollectionImpl( css::uno::Reference< css::uno::XComponentContext >& xContext ) : ScVbaCollectionBaseImpl( xContext ) {}
+	MyCollectionImpl( css::uno::Reference< css::uno::XComponentContext >& xContext ) : XSeriesCollectionBase( xContext ) {}
+        virtual ::rtl::OUString SAL_CALL getName() throw (css::uno::RuntimeException)
+	{
+		OSL_TRACE("**** In Get Name for mangled object");
+		rtl::OUString dummy;
+		return dummy;
+	}
+        virtual css::uno::Any test() throw (css::uno::RuntimeException)
+	{
+		OSL_TRACE("**** In test  for mangled object");
+		return uno::Any();
+	}
+	virtual css::uno::Reference< oo::vba::XChart > SAL_CALL getChart() throw (css::uno::RuntimeException)
+	{
+		OSL_TRACE("**** In getChart  for mangled object");
+		return css::uno::Reference< oo::vba::XChart >();
+	}
+
+};
+*/
+
+uno::Any SAL_CALL
 ScVbaChartObject::test()throw (css::uno::RuntimeException)
 {
+	return uno::Any();
 }
 
 

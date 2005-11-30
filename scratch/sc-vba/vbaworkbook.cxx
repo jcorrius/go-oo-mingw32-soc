@@ -74,8 +74,10 @@ ScVbaWorkbook::getActiveSheet() throw (uno::RuntimeException)
 uno::Any SAL_CALL
 ScVbaWorkbook::Worksheets( const uno::Any& aIndex ) throw (uno::RuntimeException)
 {
-	uno::Reference< vba::XWorksheets > xWorkSheets( new ScVbaWorksheets(m_xContext,
-		getModel()) );
+	uno::Reference< frame::XModel > xModel( getModel() );	
+	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( xModel, uno::UNO_QUERY_THROW );
+	uno::Reference<sheet::XSpreadsheets > xSheets( xSpreadDoc->getSheets(), uno::UNO_QUERY_THROW );
+	uno::Reference< vba::XCollection > xWorkSheets( uno::Reference< vba::XWorksheets >( new ScVbaWorksheets(m_xContext, xSheets, xModel ) ), uno::UNO_QUERY_THROW );
 	if (  aIndex.getValueTypeClass() == uno::TypeClass_VOID )
 	{
 		return uno::Any( xWorkSheets );	

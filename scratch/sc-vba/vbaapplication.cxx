@@ -64,7 +64,7 @@ ScVbaApplication::getActiveCell() throw (uno::RuntimeException )
 {
 	uno::Reference< sheet::XSpreadsheetView > xView( getCurrentDocument()->getCurrentController(), uno::UNO_QUERY_THROW );
 	uno::Reference< table::XCellRange > xRange( xView->getActiveSheet(), ::uno::UNO_QUERY_THROW);
-	ScTabViewShell* pViewShell = ScTabViewShell::GetActiveViewShell();
+	ScTabViewShell* pViewShell = getCurrentBestViewShell();
 	if ( !pViewShell )
 		throw uno::RuntimeException( rtl::OUString::createFromAscii("No ViewShell available"), uno::Reference< uno::XInterface >() );
 	ScViewData* pTabView = pViewShell->GetViewData();
@@ -98,7 +98,7 @@ ScVbaApplication::setScreenUpdating(sal_Bool bUpdate) throw (uno::RuntimeExcepti
 uno::Any SAL_CALL
 ScVbaApplication::Workbooks( const uno::Any& aIndex ) throw (uno::RuntimeException)
 {
-	uno::Reference< vba::XWorkbooks > xWorkBooks( new ScVbaWorkbooks( m_xContext ) );
+	uno::Reference< vba::XCollection > xWorkBooks( new ScVbaWorkbooks( m_xContext ) );
 	if (  aIndex.getValueTypeClass() == uno::TypeClass_VOID )
 	{
 		// void then somebody did Workbooks.something in vba

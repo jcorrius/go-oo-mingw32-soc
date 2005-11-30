@@ -16,6 +16,7 @@ class ScVbaChart : public ChartImpl_BASE
 public:
 	ScVbaChart( const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::chart::XChartDocument >& xChartDoc ) : m_xContext(xContext), m_xChartDoc( xChartDoc ) {}
 	virtual ::rtl::OUString SAL_CALL getName() throw (css::uno::RuntimeException);
+	virtual css::uno::Any SeriesCollection(const css::uno::Any&) throw (css::uno::RuntimeException);
 
 };
 

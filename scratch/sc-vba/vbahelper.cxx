@@ -11,6 +11,8 @@
 #include <sfx2/objsh.hxx>
 #include <sfx2/app.hxx>
 
+#include <docuno.hxx>
+
 #include <basic/sbx.hxx>
 
 #include "vbahelper.hxx"
@@ -264,5 +266,29 @@ org::openoffice::getCurrentDocument() throw (uno::RuntimeException)
 		OSL_TRACE("Failed to get ThisComponent");
 	}
 	return xModel;
+}
+ 
+ScTabViewShell* 
+org::openoffice::getCurrentBestViewShell()
+{
+	uno::Reference< frame::XModel > xModel = getCurrentDocument();
+	ScModelObj* pModel = static_cast< ScModelObj* >( xModel.get() );
+	if ( !pModel )
+	{
+		ScDocShell* pDocShell = (ScDocShell*)pModel->GetEmbeddedObject();
+		if ( !pDocShell )
+			return pDocShell->GetBestViewShell();
+	}
+	
+	return NULL;
+}
+
+SfxViewFrame* 
+org::openoffice::getCurrentViewFrame()
+{
+	ScTabViewShell* pViewShell = getCurrentBestViewShell();	
+	if ( pViewShell )
+		return pViewShell->GetViewFrame();
+	return NULL;
 }
 

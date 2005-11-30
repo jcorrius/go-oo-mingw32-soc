@@ -30,40 +30,27 @@
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
 
-typedef ::cppu::WeakImplHelper1< com::sun::star::container::XEnumeration 
-> Enumeration_BASE;
-
-class EnumerationImpl : public Enumeration_BASE
+class SheetsEnumeration : public EnumerationHelperImpl
 {
-public:
-	uno::Reference< uno::XComponentContext > m_xContext;
 	uno::Reference< frame::XModel > m_xModel;
-	uno::Reference< container::XEnumeration > m_xEnumeration;
+public:
+	SheetsEnumeration( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< container::XEnumeration >& xEnumeration,  const uno::Reference< frame::XModel >& xModel  ) throw ( uno::RuntimeException ) : EnumerationHelperImpl( xContext, xEnumeration ), m_xModel( xModel ) {}
 
-	EnumerationImpl( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< frame::XModel >& xModel ) throw ( uno::RuntimeException ) : m_xModel( xModel ), m_xContext( xContext )
-	{
-		uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( xModel, uno::UNO_QUERY_THROW );
-		uno::Reference<sheet::XSpreadsheets > xSheets( xSpreadDoc->getSheets(), uno::UNO_QUERY_THROW );
-		uno::Reference< container::XEnumerationAccess > xEnumAccess( xSheets, uno::UNO_QUERY_THROW );
-		m_xEnumeration.set( xEnumAccess->createEnumeration(), uno::UNO_QUERY_THROW );
-	}
-	// XEnumeration
-	virtual ::sal_Bool SAL_CALL hasMoreElements(  ) throw (uno::RuntimeException) { return m_xEnumeration->hasMoreElements(); }
 	virtual uno::Any SAL_CALL nextElement(  ) throw (container::NoSuchElementException, lang::WrappedTargetException, uno::RuntimeException) 
 	{ 
 		uno::Reference< sheet::XSpreadsheet > xSheet( m_xEnumeration->nextElement(), uno::UNO_QUERY_THROW );
 		return makeAny( uno::Reference< vba::XWorksheet > ( new ScVbaWorksheet( m_xContext, xSheet, m_xModel ) ) );
 	}
+
 };
 
-ScVbaWorksheets::ScVbaWorksheets( const uno::Reference< ::com::sun::star::uno::XComponentContext > & xContext, const uno::Reference< frame::XModel >& xModel ):
-		mxModel( xModel ), m_xContext( xContext ) 
-{ 
-	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( mxModel, uno::UNO_QUERY_THROW );
-	mxEnumAccess.set( xSpreadDoc->getSheets(), uno::UNO_QUERY_THROW );
+ScVbaWorksheets::ScVbaWorksheets( const uno::Reference< ::com::sun::star::uno::XComponentContext > & xContext, const uno::Reference< sheet::XSpreadsheets >& xSheets, const uno::Reference< frame::XModel >& xModel ): ScVbaWorksheets_BASE( xContext, uno::Reference< container::XIndexAccess >( xSheets, uno::UNO_QUERY ) ), mxModel( xModel ), m_xSheets( xSheets ) 
+{
 }
 
-ScVbaWorksheets::ScVbaWorksheets( const uno::Reference< ::com::sun::star::uno::XComponentContext > & xContext, const uno::Reference< container::XEnumerationAccess >& xEnumAccess, const uno::Reference< frame::XModel >& xModel  ): mxEnumAccess( xEnumAccess ), m_xContext( xContext ), mxModel(xModel) {}
+ScVbaWorksheets::ScVbaWorksheets( const uno::Reference< ::com::sun::star::uno::XComponentContext > & xContext, const uno::Reference< container::XEnumerationAccess >& xEnumAccess, const uno::Reference< frame::XModel >& xModel  ):  ScVbaWorksheets_BASE( xContext, uno::Reference< container::XIndexAccess >( xEnumAccess, uno::UNO_QUERY ) ), mxModel(xModel) 
+{
+}
 
 // XEnumerationAccess
 uno::Type 
@@ -71,133 +58,24 @@ ScVbaWorksheets::getElementType() throw (uno::RuntimeException)
 {
 	return vba::XWorksheet::static_type(0);
 }
-::sal_Bool
-ScVbaWorksheets::hasElements() throw (uno::RuntimeException)
-{
-	return sal_True;
-}
+
 uno::Reference< container::XEnumeration >
 ScVbaWorksheets::createEnumeration() throw (uno::RuntimeException)
 {
-	css::uno::Reference< css::sheet::XSpreadsheets > xSheets( mxEnumAccess, uno::UNO_QUERY );
-	if ( xSheets.is() )
-		return new EnumerationImpl( m_xContext, mxModel );
-	return mxEnumAccess->createEnumeration();
-}
-
-// XCollection
-uno::Any
-ScVbaWorksheets::getParent() throw (uno::RuntimeException)
-{
-	OSL_TRACE("In ScVbaWorksheets::getParent()");
-	uno::Reference< vba::XApplication > xApplication =
-		ScVbaGlobals::getGlobalsImpl( m_xContext )->getApplication();
-	uno::Reference< vba::XWorkbook > xWorkbook;
-	if ( xApplication.is() )
+	if ( !m_xSheets.is() )
 	{
-		xWorkbook = xApplication->getActiveWorkbook();
+		uno::Reference< container::XEnumerationAccess > xAccess( m_xIndexAccess, uno::UNO_QUERY_THROW );
+		return xAccess->createEnumeration(); 
 	}
-	if ( !xWorkbook.is() )
-	{
-		//throw uno::RuntimeException( rtl::OUString::createFromAscii(
-		//	"ScVbaWorksheets::getParent - No Parent" ), uno::Reference< uno::XInterface >() );
-	}
-	
-	OSL_TRACE("In ScVbaWorksheets::getParent() returning workbook");
-	return uno::Any( xWorkbook );
-}
-::sal_Int32
-ScVbaWorksheets::getCreator() throw (uno::RuntimeException)
-{
-	SC_VBA_STUB();
-	return 0;
-}
-uno::Reference< vba::XApplication >
-ScVbaWorksheets::getApplication() throw (uno::RuntimeException)
-{
-	return ScVbaGlobals::getGlobalsImpl( m_xContext )->getApplication();
-}
-
-::sal_Int32
-ScVbaWorksheets::getCount() throw (uno::RuntimeException)
-{
-	uno::Reference <container::XIndexAccess> xIndex( mxEnumAccess, uno::UNO_QUERY );
-	if ( xIndex.is() )
-	{
-		return xIndex->getCount();
-	}
-	return 0;
+	uno::Reference< container::XEnumerationAccess > xEnumAccess( m_xSheets, uno::UNO_QUERY_THROW );
+	return new SheetsEnumeration( m_xContext, xEnumAccess->createEnumeration(), mxModel );
 }
 
 uno::Any
-ScVbaWorksheets::getItemByStringIndex( const rtl::OUString& sIndex ) throw (uno::RuntimeException)
+ScVbaWorksheets::createCollectionObject( const css::uno::Any& aSource )
 {
-	uno::Reference <container::XNameAccess> xName( mxEnumAccess, uno::UNO_QUERY );
-	uno::Any result;
-
-	if ( xName.is() )
-	{
-		uno::Reference< sheet::XSpreadsheet > xSheet( xName->getByName( sIndex ), uno::UNO_QUERY );
-		result = makeAny( uno::Reference< vba::XWorksheet > ( new ScVbaWorksheet( m_xContext, xSheet, mxModel ) ) ); 
-	}
-	else
-	{
-		throw uno::RuntimeException(
-			::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( 
-			": Unable to obtain XNameAccess to query for spreadsheet name" ) ), 
-			uno::Reference< uno::XInterface >() );
-	}
-
-	return result;
-}
-
-uno::Any
-ScVbaWorksheets::getItemByIntIndex( const sal_Int32 nIndex ) throw (uno::RuntimeException)
-{
-	if ( nIndex <= 0 )
-	{
-		throw  lang::IndexOutOfBoundsException( 
-			::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( 
-			"index is 0 or negative" ) ), 
-			uno::Reference< uno::XInterface >() );
-	}
-
-	uno::Reference <container::XIndexAccess> xIndex( mxEnumAccess, uno::UNO_QUERY );
-
-	if ( !xIndex.is() )
-	{
-		throw uno::RuntimeException(
-			::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( 
-			": Unable to obtain XIndexAccess to query for spreadsheet name" ) ), 
-			uno::Reference< uno::XInterface >() );
-	}
-	// need to adjust for vba index ( for which first element is 1 )
-	uno::Reference< sheet::XSpreadsheet > xSheet( xIndex->getByIndex( nIndex - 1 ), uno::UNO_QUERY );
+	uno::Reference< sheet::XSpreadsheet > xSheet( aSource, uno::UNO_QUERY );
 	return makeAny( uno::Reference< vba::XWorksheet > ( new ScVbaWorksheet( m_xContext, xSheet, mxModel ) ) ); 
-}
-
-uno::Any
-ScVbaWorksheets::Item( const uno::Any& aIndex ) throw (uno::RuntimeException)
-{
-	if ( aIndex.getValueTypeClass() != uno::TypeClass_STRING )
-	{
-		sal_Int32 nIndex = 0;
-
-		if ( ( aIndex >>= nIndex ) != sal_True )
-		{
-			rtl::OUString message;
-			message = rtl::OUString::createFromAscii(
-				"Couldn't convert index to Int32");
-			throw  lang::IndexOutOfBoundsException( message,
-				uno::Reference< uno::XInterface >() );
-		}
-		return 	getItemByIntIndex( nIndex );
-	}
-	rtl::OUString aStringSheet;
-
-	aIndex >>= aStringSheet;
-	return getItemByStringIndex( aStringSheet );
-
 }
 
 // XWorksheets
@@ -205,6 +83,9 @@ uno::Any
 ScVbaWorksheets::Add( const uno::Any& Before, const uno::Any& After,
 					 const uno::Any& Count, const uno::Any& Type ) throw (uno::RuntimeException)
 {
+	if ( isSelectedSheets() )
+		return uno::Any(); // or should we throw?
+	
 	rtl::OUString aStringSheet;
 	sal_Bool bBefore(sal_True);
 	sal_Int32 nSheetIndex = 0;
@@ -224,13 +105,10 @@ ScVbaWorksheets::Add( const uno::Any& Before, const uno::Any& After,
 			m_xContext )->getApplication()->getActiveWorkbook()->getActiveSheet()->getName();
 		bBefore = sal_True;
 	}
-	uno::Reference <container::XIndexAccess> xIndex( mxEnumAccess, uno::UNO_QUERY );
-	if ( xIndex.is() )
-	{
-		nCount = xIndex->getCount();
+		nCount = m_xIndexAccess->getCount();
 		for (sal_Int32 i=0; i < nCount; i++)
 		{
-			uno::Reference< sheet::XSpreadsheet > xSheet(xIndex->getByIndex(i), uno::UNO_QUERY);
+			uno::Reference< sheet::XSpreadsheet > xSheet(m_xIndexAccess->getByIndex(i), uno::UNO_QUERY);
 			uno::Reference< container::XNamed > xNamed( xSheet, uno::UNO_QUERY_THROW );
 			if (xNamed->getName() == aStringSheet)
 			{
@@ -238,28 +116,28 @@ ScVbaWorksheets::Add( const uno::Any& Before, const uno::Any& After,
 				break;
 			}
 		}
-	}
 
 	if(!bBefore)
 		nSheetIndex++;
 
-	uno::Reference< container::XNameAccess > xNameAccess( mxEnumAccess, uno::UNO_QUERY_THROW );
-	uno::Reference< sheet::XSpreadsheets > xSheets( mxEnumAccess, uno::UNO_QUERY_THROW );
 	sal_Int32 nSheetName = nCount + 1L;
 	String aStringBase( RTL_CONSTASCII_USTRINGPARAM("Sheet") );				
+	uno::Any result;
 	for (sal_Int32 i=0; i < nNewSheets; i++, nSheetName++)
 	{
 		String aStringName = aStringBase;
 		aStringName += String::CreateFromInt32(nSheetName);
-		while (xNameAccess->hasByName(aStringName))
+		while (m_xNameAccess->hasByName(aStringName))
 		{
 			nSheetName++;
 			aStringName = aStringBase;
 			aStringName += String::CreateFromInt32(nSheetName);
 		}
-		xSheets->insertNewByName(aStringName, nSheetIndex + i);
+		m_xSheets->insertNewByName(aStringName, nSheetIndex + i);
+		result = getItemByStringIndex( aStringName );
 	}
-	return uno::Any();
+	
+	return  result;
 }
 
 void
@@ -268,12 +146,12 @@ ScVbaWorksheets::Delete() throw (uno::RuntimeException)
 	//SC_VBA_STUB();
 }
 
-bool 
+bool
 ScVbaWorksheets::isSelectedSheets()
 {
-	uno::Reference< sheet::XSpreadsheets > xSheets( mxEnumAccess, uno::UNO_QUERY );
-	return !xSheets.is();
+	return !m_xSheets.is();
 }
+
 void SAL_CALL 
 ScVbaWorksheets::PrintOut( const uno::Any& From, const uno::Any& To, const uno::Any& Copies, const uno::Any& Preview, const uno::Any& ActivePrinter, const uno::Any& PrintToFile, const uno::Any& Collate, const uno::Any& PrToFileName ) throw (uno::RuntimeException)
 {
@@ -307,25 +185,36 @@ ScVbaWorksheets::PrintOut( const uno::Any& From, const uno::Any& To, const uno::
 	{
 		PrToFileName >>= sFileName;
 	}
-	// #FIXME #TODO using Current is bad form, from the IDE this
-	// will fail
-	SfxViewFrame* pViewFrame = SfxViewFrame::Current();
+
+	SfxViewFrame* pViewFrame = getCurrentViewFrame();
 	if ( pViewFrame )
 	{
 		SfxAllItemSet aArgs( SFX_APP()->GetPool() );
-			
-		SfxRequest rReq( SID_PRINTDOC, SFX_CALLMODE_ASYNCHRON, aArgs );
-		rReq.AppendItem( SfxBoolItem( SID_PRINT_COLLATE, bCollate ) );
-		rReq.AppendItem( SfxInt16Item( SID_PRINT_COPIES, nCopies ) );
+				
+		SfxBoolItem sfxCollate( SID_PRINT_COLLATE, bCollate );
+		aArgs.Put( sfxCollate, sfxCollate.Which() );
+		SfxInt16Item sfxCopies( SID_PRINT_COPIES, nCopies );
+		aArgs.Put( sfxCopies, sfxCopies.Which() );
 		if ( sFileName.getLength() )
-				rReq.AppendItem( SfxStringItem( SID_FILE_NAME, sFileName) );
+		{
+			SfxStringItem sfxFileName( SID_FILE_NAME, sFileName);
+			aArgs.Put( sfxFileName, sfxFileName.Which() );
+		
+		}
 		if (  sRange.getLength() )
-			rReq.AppendItem( SfxStringItem( SID_PRINT_PAGES, sRange ) );
-		rReq.AppendItem( SfxBoolItem( SID_SELECTION, bSelection ) );
+		{
+			SfxStringItem sfxRange( SID_PRINT_PAGES, sRange );
+			aArgs.Put( sfxRange, sfxRange.Which() );
+		}
+		SfxBoolItem sfxSelection( SID_SELECTION, bSelection );
+		aArgs.Put( sfxSelection, sfxSelection.Which() );
+		SfxBoolItem sfxAsync( SID_ASYNCHRON, sal_False );
+		aArgs.Put( sfxAsync, sfxAsync.Which() );
 		SfxDispatcher* pDispatcher = pViewFrame->GetDispatcher();
+
 		if ( pDispatcher )
 		{
-			pDispatcher->Execute( (USHORT)SID_PRINTDOC	, (SfxCallMode)SFX_CALLMODE_SYNCHRON, *rReq.GetArgs() );
+			pDispatcher->Execute( (USHORT)SID_PRINTDOC, (SfxCallMode)SFX_CALLMODE_SYNCHRON, aArgs );
 		}
 			
 	}
@@ -340,10 +229,5 @@ ScVbaWorksheets::PrintOut( const uno::Any& From, const uno::Any& To, const uno::
 	// 5 There is a pop up to do with transparent objects in the print source
 	//   should be able to disable that via configuration for the duration
 	//   of this method
-	// 6 Even though this is a sychronous call, the printer printing is
-	//   not synchronous so currently on multiple prints some will fail
-	//   due to SfxViewShell::GetStat_Impl ( sfx2/source/view/viewsh.cxx:326 )
-	//      bEnabled = !pPrinter || !pPrinter->IsPrinting(); which you guessed
-	//      it is still printing :-(. So synchronous printing... sortof
 }
 

@@ -18,7 +18,7 @@ public:
 	virtual ::rtl::OUString SAL_CALL getName() throw (css::uno::RuntimeException);
 	virtual css::uno::Reference< oo::vba::XChart > SAL_CALL getChart() throw (css::uno::RuntimeException);
 	
-	 virtual void SAL_CALL test(  ) throw (css::uno::RuntimeException); 
+	virtual css::uno::Any SAL_CALL test(  ) throw (css::uno::RuntimeException); 
 };
 
 #endif //SC_VBA_WINDOW_HXX

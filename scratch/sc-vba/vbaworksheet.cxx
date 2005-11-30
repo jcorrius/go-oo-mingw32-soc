@@ -498,7 +498,10 @@ ScVbaWorksheet::ChartObjects( const uno::Any& Index ) throw (uno::RuntimeExcepti
 		mxCharts = new ScVbaChartObjects( m_xContext, xTableCharts );
 	}
 	if ( Index.hasValue() )
-		return mxCharts->Item( Index );
+	{
+		uno::Reference< vba::XCollection > xColl( mxCharts, uno::UNO_QUERY_THROW );
+		return xColl->Item( Index );
+	}
 	else
 		return makeAny( mxCharts );
 	

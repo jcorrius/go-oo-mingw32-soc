@@ -74,7 +74,7 @@ public:
 		ScDocShell* pDocShell = (ScDocShell*)pModel->GetEmbeddedObject();
 		if ( !pDocShell )
 			throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Cannot obtain docshell" ) ), uno::Reference< uno::XInterface >() );
-		ScTabViewShell* pViewShell = pDocShell->GetBestViewShell();
+		ScTabViewShell* pViewShell = getCurrentBestViewShell();
 		if ( !pViewShell )
 			throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Cannot obtain view shell" ) ), uno::Reference< uno::XInterface >() );
 			

@@ -21,5 +21,9 @@ ScVbaChart::getName() throw (css::uno::RuntimeException)
 	return sName;
 }
 
-
+uno::Any  SAL_CALL
+ScVbaChart::SeriesCollection(const uno::Any&) throw (uno::RuntimeException)
+{
+	return uno::Any();
+}
 
