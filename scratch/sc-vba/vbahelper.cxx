@@ -273,10 +273,10 @@ org::openoffice::getCurrentBestViewShell()
 {
 	uno::Reference< frame::XModel > xModel = getCurrentDocument();
 	ScModelObj* pModel = static_cast< ScModelObj* >( xModel.get() );
-	if ( !pModel )
+	if ( pModel )
 	{
 		ScDocShell* pDocShell = (ScDocShell*)pModel->GetEmbeddedObject();
-		if ( !pDocShell )
+		if ( pDocShell )
 			return pDocShell->GetBestViewShell();
 	}
 	
