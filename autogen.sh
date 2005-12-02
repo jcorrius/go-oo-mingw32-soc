@@ -11,10 +11,10 @@ if test "z$1" = "z--clean"; then
     exit 1;
 fi
 
-aclocal $ACLOCAL_FLAGS
-automake --gnu --add-missing --copy
+aclocal $ACLOCAL_FLAGS || exit 1;
+automake --gnu --add-missing --copy || exit 1;
 # intltoolize --copy --force --automake
-autoconf
+autoconf || exit 1;
 if test "x$NOCONFIGURE" = "x"; then
     ./configure "$@"
 else
