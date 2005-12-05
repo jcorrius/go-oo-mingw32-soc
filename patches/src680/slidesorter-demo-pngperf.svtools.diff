@@ -1,0 +1,234 @@
+Index: svtools/inc/filter.hxx
+===================================================================
+RCS file: /cvs/util/svtools/inc/filter.hxx,v
+retrieving revision 1.23
+retrieving revision 1.23.14.1
+diff -u -p -r1.23 -r1.23.14.1
+--- svtools/inc/filter.hxx	8 Sep 2005 09:28:45 -0000	1.23
++++ svtools/inc/filter.hxx	14 Oct 2005 12:54:49 -0000	1.23.14.1
+@@ -92,6 +92,8 @@ class Window;
+ 
+ #define GRFILTER_I_FLAGS_SET_LOGSIZE_FOR_JPEG       00000001
+ #define GRFILTER_I_FLAGS_DONT_SET_LOGSIZE_FOR_JPEG  00000002
++#define GRFILTER_I_FLAGS_FOR_PREVIEW                00000004
++#define GRFILTER_I_FLAGS_ALLOW_PARTIAL_STREAMREAD   00000010
+ 
+ #define IMP_BMP					"SVBMP"
+ #define IMP_SVMETAFILE			"SVMETAFILE"
+Index: svtools/source/filter.vcl/filter/filter.cxx
+===================================================================
+RCS file: /cvs/util/svtools/source/filter.vcl/filter/filter.cxx,v
+retrieving revision 1.58
+retrieving revision 1.58.14.1
+diff -u -p -r1.58 -r1.58.14.1
+--- svtools/source/filter.vcl/filter/filter.cxx	8 Sep 2005 15:37:30 -0000	1.58
++++ svtools/source/filter.vcl/filter/filter.cxx	14 Oct 2005 12:54:49 -0000	1.58.14.1
+@@ -1437,27 +1437,45 @@ USHORT GraphicFilter::ImportGraphic( Gra
+ 			if ( rGraphic.GetContext() == (GraphicReader*) 1 )
+ 				rGraphic.SetContext( NULL );
+ 
+-			vcl::PNGReader aPNGReader( rIStream );
+-			const std::vector< vcl::PNGReader::ChunkData >&	rChunkData = aPNGReader.GetChunks();
+-			std::vector< vcl::PNGReader::ChunkData >::const_iterator aIter( rChunkData.begin() );
+-			std::vector< vcl::PNGReader::ChunkData >::const_iterator aEnd ( rChunkData.end() );
+-			while( aIter != aEnd )
+-			{
+-				// Microsoft Office is storing Animated GIFs in following chunk
+-				if ( aIter->nType == PMGCHUNG_msOG )
+-				{
+-					sal_uInt32 nChunkSize = aIter->aData.size();
+-					if ( nChunkSize > 11 )
+-					{
+-						const std::vector< sal_uInt8 >& rData = aIter->aData;
+-						SvMemoryStream aIStrm( (void*)&rData[ 11 ], nChunkSize - 11, STREAM_READ );
+-						ImportGIF( aIStrm, rGraphic, NULL );
+-						eLinkType = GFX_LINK_TYPE_NATIVE_PNG;
+-						break;
+-					}
+-				}
+-				aIter++;
+-			}
++            vcl::PNGReader aPNGReader( rIStream );
++
++            // ignore animation for previews and set preview size
++            if( nImportFlags & GRFILTER_I_FLAGS_FOR_PREVIEW )
++            {
++                Size aPreviewSize( 64, 64 );
++                vcl::PNGReader::SetPreviewSizeHint( aPreviewSize );
++
++                // position the stream at the end of the image if requested
++                if( 0 == (nImportFlags & GRFILTER_I_FLAGS_ALLOW_PARTIAL_STREAMREAD) )
++                    aPNGReader.GetChunks();
++            }
++            else
++            {
++                vcl::PNGReader::DisablePreviewMode();
++
++                // check if this PNG contains a GIF chunk!
++                const std::vector< vcl::PNGReader::ChunkData >&    rChunkData = aPNGReader.GetChunks();
++                std::vector< vcl::PNGReader::ChunkData >::const_iterator aIter( rChunkData.begin() );
++                std::vector< vcl::PNGReader::ChunkData >::const_iterator aEnd ( rChunkData.end() );
++                while( aIter != aEnd )
++                {
++                    // Microsoft Office is storing Animated GIFs in following chunk
++                    if ( aIter->nType == PMGCHUNG_msOG )
++                    {
++                        sal_uInt32 nChunkSize = aIter->aData.size();
++                        if ( nChunkSize > 11 )
++                        {
++                            const std::vector< sal_uInt8 >& rData = aIter->aData;
++                            SvMemoryStream aIStrm( (void*)&rData[ 11 ], nChunkSize - 11, STREAM_READ );
++                            ImportGIF( aIStrm, rGraphic, NULL );
++                            eLinkType = GFX_LINK_TYPE_NATIVE_PNG;
++                            break;
++                        }
++                    }
++                    aIter++;
++                }
++            }
++
+ 			if ( eLinkType == GFX_LINK_TYPE_NONE )
+ 			{
+ 				BitmapEx aBmpEx( aPNGReader.Read() );
+Index: svtools/source/filter.vcl/jpeg/jpeg.cxx
+===================================================================
+RCS file: /cvs/util/svtools/source/filter.vcl/jpeg/jpeg.cxx,v
+retrieving revision 1.14
+retrieving revision 1.14.14.2
+diff -u -p -r1.14 -r1.14.14.2
+--- svtools/source/filter.vcl/jpeg/jpeg.cxx	8 Sep 2005 15:43:56 -0000	1.14
++++ svtools/source/filter.vcl/jpeg/jpeg.cxx	14 Oct 2005 12:54:50 -0000	1.14.14.2
+@@ -316,7 +316,7 @@ extern "C" void jpeg_svstream_src (j_dec
+ // - JPEGReader -
+ // --------------
+ 
+-JPEGReader::JPEGReader( SvStream& rStm, void* pCallData, sal_Bool bSetLS ) :
++JPEGReader::JPEGReader( SvStream& rStm, void* /*pCallData*/, sal_Bool bSetLS ) :
+ 		rIStm			( rStm ),
+ 		pAcc			( NULL ),
+ 		pAcc1			( NULL ),
+@@ -538,13 +538,13 @@ ReadState JPEGReader::Read( Graphic& rGr
+ 	BOOL		bRet = FALSE;
+ 	BYTE		cDummy;
+ 
+-	// sehen, ob wir _alles_ lesen koennen
++#if 1 // TODO: is it possible to get rid of this seek to the end?
++	// check if the stream's end is already available
+ 	rIStm.Seek( STREAM_SEEK_TO_END );
+ 	rIStm >> cDummy;
+ 	nEndPos = rIStm.Tell();
+ 
+-	// falls wir nicht alles lesen koennen, gucken wir,
+-	// ob min. JPEGMINREAD Bytes gelesen werden koennen
++	// else check if at least JPEGMINREAD bytes can be read
+ 	if( rIStm.GetError() == ERRCODE_IO_PENDING )
+ 	{
+ 		rIStm.ResetError();
+@@ -555,10 +555,14 @@ ReadState JPEGReader::Read( Graphic& rGr
+ 		}
+ 	}
+ 
+-	// an Anfang springen
++	// seek back to the original position
+ 	rIStm.Seek( nLastPos );
++#endif
++
++    Size aPreviewSize = GetPreviewSize();
++    SetJpegPreviewSizeHint( aPreviewSize.Width(), aPreviewSize.Height() );
+ 
+-	// (Teil-) Bild einlesen
++	// read the (partial) image
+ 	ReadJPEG( this, &rIStm, &nLines );
+ 
+ 	if( pAcc )
+@@ -730,6 +734,11 @@ BOOL ImportJPEG( SvStream& rStm, Graphic
+ 
+ 	if( !pJPEGReader )
+         pJPEGReader = new JPEGReader( rStm, pCallerData, ( nImportFlags & GRFILTER_I_FLAGS_SET_LOGSIZE_FOR_JPEG ) != 0 );
++
++    if( nImportFlags & GRFILTER_I_FLAGS_FOR_PREVIEW )
++        pJPEGReader->SetPreviewSize( Size(128,128) );
++    else
++        pJPEGReader->DisablePreviewMode();
+ 
+ 	rGraphic.SetContext( NULL );
+ 	eReadState = pJPEGReader->Read( rGraphic );
+Index: svtools/source/filter.vcl/jpeg/jpeg.h
+===================================================================
+RCS file: /cvs/util/svtools/source/filter.vcl/jpeg/jpeg.h,v
+retrieving revision 1.2
+retrieving revision 1.2.16.1
+diff -u -p -r1.2 -r1.2.16.1
+--- svtools/source/filter.vcl/jpeg/jpeg.h	8 Sep 2005 15:44:12 -0000	1.2
++++ svtools/source/filter.vcl/jpeg/jpeg.h	13 Oct 2005 08:06:19 -0000	1.2.16.1
+@@ -79,5 +79,9 @@ void*	GetScanline( void* pJPEGWriter, lo
+ 
+ void	ReadJPEG( void* pJPEGReader, void* pIStm, long* pLines );
+ void*	CreateBitmap( void* pJPEGReader, void* pJPEGCreateBitmapParam );
++
++/* TODO: when incompatible changes are possible again
++   the preview size hint should be redone */
++void    SetJpegPreviewSizeHint( int nWidth, int nHeight );
+ 
+ #endif
+Index: svtools/source/filter.vcl/jpeg/jpegc.c
+===================================================================
+RCS file: /cvs/util/svtools/source/filter.vcl/jpeg/jpegc.c,v
+retrieving revision 1.3
+retrieving revision 1.3.16.1
+diff -u -p -r1.3 -r1.3.16.1
+--- svtools/source/filter.vcl/jpeg/jpegc.c	8 Sep 2005 15:44:28 -0000	1.3
++++ svtools/source/filter.vcl/jpeg/jpegc.c	13 Oct 2005 08:06:19 -0000	1.3.16.1
+@@ -66,6 +66,16 @@ my_output_message (j_common_ptr cinfo)
+ 	(*cinfo->err->format_message) (cinfo, buffer);
+ }
+ 
++/* TODO: when incompatible changes are possible again
++   the preview size hint should be redone */
++static int nPreviewWidth = 0;
++static int nPreviewHeight = 0;
++void SetJpegPreviewSizeHint( int nWidth, int nHeight )
++{
++    nPreviewWidth = nWidth;
++    nPreviewHeight = nHeight;
++}
++
+ void ReadJPEG( void* pJPEGReader, void* pIStm, long* pLines )
+ {
+ 	struct jpeg_decompress_struct	cinfo;
+@@ -104,12 +114,32 @@ void ReadJPEG( void* pJPEGReader, void* 
+ 	if ( cinfo.jpeg_color_space != JCS_GRAYSCALE )
+ 		cinfo.out_color_space = JCS_RGB;
+ 
+-	jpeg_start_decompress( &cinfo);
++    /* change scale for preview import */
++    if( nPreviewWidth && nPreviewHeight )
++    {
++        for( cinfo.scale_denom = 1; cinfo.scale_denom < 8; cinfo.scale_denom *= 2 )
++        {
++            if( cinfo.image_width < nPreviewWidth * cinfo.scale_denom )
++                break;
++            if( cinfo.image_height < nPreviewHeight * cinfo.scale_denom )
++                break;
++        }
++
++        if( cinfo.scale_denom > 1 )
++        {
++            cinfo.dct_method            = JDCT_FASTEST;
++            cinfo.do_fancy_upsampling   = FALSE;
++            cinfo.do_block_smoothing    = FALSE;
++        }
++    }
+ 
+-    nWidth = cinfo.output_width;
+-    nHeight = cinfo.output_height;
++	jpeg_start_decompress( &cinfo );
++
++	nWidth = cinfo.output_width;
++	nHeight = cinfo.output_height;
+ 	aCreateBitmapParam.nWidth = nWidth;
+ 	aCreateBitmapParam.nHeight = nHeight;
++
+     aCreateBitmapParam.density_unit = cinfo.density_unit;
+     aCreateBitmapParam.X_density = cinfo.X_density;
+     aCreateBitmapParam.Y_density = cinfo.Y_density;
