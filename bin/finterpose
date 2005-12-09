@@ -1,0 +1,225 @@
+#!/usr/bin/perl -w
+
+#
+# Use example: find -name '*.so' | finterpose
+#
+
+my %common_symbols = (
+		      '__bss_start' => 1,
+		      '__invoke_dynamic_linker__' => 1,
+		      '_DYNAMIC' => 1,
+		      '_edata' => 1,
+		      '_end' => 1,
+		      '_fini' => 1,
+		      '_init' => 1,
+		      );
+
+import Strict;
+use File::Basename;
+
+# misc. argument options / defaults
+my $opt_debug = 0;
+
+sub add_sym($$$)
+{
+    my ($symbol_hash, $symbol, $file) = @_;
+    if (!defined $symbol_hash->{$symbol}) {
+	my @libs;
+	$symbol_hash->{$symbol} = \@libs;
+    }
+    push @{$symbol_hash->{$symbol}}, $file;
+}
+
+sub read_symbols($$)
+{
+    my $file = shift;
+    my $symbol_hash = shift;
+    my $pipe;
+
+#    print "Read '$file'\n";
+
+    $dumpsw = '-T';
+
+    open ($pipe, "objdump $dumpsw $file |") || die "Can't objdump $dumpsw $file: $!";
+    while (<$pipe>) {
+	/([0-9a-f]*)\s+([gw ])\s+..\s+(\S*)\s*([0-9a-f]+)(.*)$/; # || next;
+
+	my ($address, $linkage, $type, $size, $symbol_n_ver) = ($1, $2, $3, $4, $5);
+	my ($opt_ver, $symbol, $version) = ( '', '', '' );
+
+	next if (!$symbol_n_ver || !$type);
+
+	if ($symbol_n_ver =~ m/\s([\s\(])(\S+)[\)\s]+(\S+)/) {
+	    $opt_ver = $1; $version = $2; $symbol = $3;
+	} else {
+	    $symbol = $symbol_n_ver;
+	}
+	$symbol =~ s/^\s*//;
+	$symbol =~ s/\s*$//;
+
+	next if (!$symbol || !$type);
+
+#	print "Symbol '$symbol' version '$version' type '$type' '$linkage' addr $address, size $size\n";
+
+# Filter out things we're not interested in
+
+# remove undefined / external references
+	next if ($type eq '*UND*');
+# remove weak symbols
+	next if ($linkage =~ m/w/);
+# remove section names
+	next if ($symbol =~ m/^\./);
+# remove version symbols
+	next if ($symbol eq $version);
+
+	if ($version eq '') {
+	    add_sym ($symbol_hash, $symbol, $file);
+	} else {
+	    if ($opt_ver eq '(') {
+		add_sym ($symbol_hash, $symbol, $file);
+	    }
+	    add_sym ($symbol_hash, $symbol . '@' . $version, $file);
+	}
+    }
+    close ($pipe);
+}
+
+sub add_deps ($$$$)
+{
+    my $lib_dups = shift;
+    my $lib = shift;
+    my $libs = shift;
+    my $symbol = shift;
+
+#    print "Add deps for $lib: @{$libs}\n";
+    for my $other_lib (@{$libs}) {
+	($other_lib eq $lib) && next;
+#	print "Add deps from $lib: to $other_lib for $symbol\n";
+	if (!defined $lib_dups->{$lib}->{$other_lib}) {
+	    my @list;
+	    $lib_dups->{$lib}->{$other_lib} = \@list;
+#	    my $cnt = keys %{$lib_dups->{$lib}};
+#	    print "Add other lib $cnt\n";
+	}
+	push @{$lib_dups->{$lib}->{$other_lib}}, $symbol;
+    }
+}
+
+sub ignore_symbol($)
+{
+    my $symbol = shift;
+    return 1 if (defined $common_symbols{$symbol});
+    return 0;
+}
+
+my %symbol_table;
+my %lib_dups;
+
+my $option_cross_lib = 0;
+
+for my $arg (@ARGV) {
+    if ($arg eq '--help' || $arg eq '-h') {
+	print "finterpose [options]\n";
+	print " finds genuine interposing uses across many libraries read from stdin\n";
+	print " options:\n";
+	print "  --per-symbol: dump on symbol basis [default]\n";
+	print "  --cross-lib: dump on a per-library basis\n";
+    } elsif ($arg eq '--cross-lib') {
+	$option_cross_lib = 1;
+    } elsif ($arg eq '--per-symbol') {
+	$option_cross_lib = 0;
+    } 
+}
+
+print "Reading symbols:\n";
+while (<>) {
+    my $fname = $_;
+    $fname =~ s/[\r\n\t]*$//;
+    next if (! -f $fname);
+    if (-l $fname) {
+	my $link = readlink ($fname);
+	if ($link =~ /^\//) {
+	    $fname = $link;
+	} else {
+	    $fname = dirname ($fname) . "/" . $link;
+	}
+    }
+    next if (defined $lib_dups{$fname});
+
+    print "$fname ";
+    my %lib_stats;
+    $lib_dups{$fname} = \%lib_stats;
+    read_symbols ($fname, \%symbol_table);
+}
+print "\n";
+
+if (!$option_cross_lib) { # symbol-set dump
+
+    print "Duplicate symbol\n";
+
+    # detect substantially identical libraries ?
+    my %dup_syms;
+
+    # normalise libs to a string
+    for my $sym (keys %symbol_table) {
+	my $dupcnt = @{$symbol_table{$sym}};
+	$dupcnt > 1 || next;
+
+	my $lib_string = join (' ', @{$symbol_table{$sym}});
+	if (!defined $dup_syms{$lib_string}) {
+	    my @sym_list;
+	    $dup_syms{$lib_string} = \@sym_list;
+	}
+	push @{$dup_syms{$lib_string}}, $sym;
+    }
+
+    my @dup_libs;
+    for my $lib_list (sort { $a cmp $b } keys %dup_syms) {
+	if (@{$dup_syms{$lib_list}} > 10) {
+	    push @dup_libs, $lib_list;
+	} else {
+	    print "Libraries $lib_list implement:\n";
+	    print "\t" . join (' ', @{$dup_syms{$lib_list}}) . "\n";
+	}
+    }
+    print "These libraries look like duplicates:\n";
+    for my $dup (@dup_libs) {
+	print "$dup\n";
+    }
+} else { # cross-library dump    
+    print "Collating duplicates\n";
+
+    for my $symbol (keys %symbol_table) {
+	my $libs = $symbol_table{$symbol};
+	if (@{$libs} == 1) {
+	    delete $symbol_table{$symbol};
+	    next;
+	}
+	next if (ignore_symbol ($symbol));
+	
+	for my $lib (@{$libs}) {
+	    add_deps ($lib_dups, $lib, $libs, $symbol);
+	    my $cnt = keys %{($lib_dups->{$lib})};
+	}
+    }
+
+    print "Duplicate summary\n";
+
+    my $dups = keys %symbol_table;
+    print "  count of duplicates: $dups\n";
+    
+    for my $lib (keys %lib_dups) {
+	my $dupcnt = keys %{$lib_dups->{$lib}};
+	$dupcnt || next;
+	print "Library: '$lib':\n";
+	
+	my $these_libs = $lib_dups->{$lib};
+	for my $dup_lib (sort { $a cmp $b } keys %{$these_libs}) {
+	    print "    vs. '$dup_lib': ";
+	    for my $sym (@{$these_libs->{$dup_lib}}) {
+		print "$sym ";
+	    }
+	    print "\n";
+	}
+    }
+}
