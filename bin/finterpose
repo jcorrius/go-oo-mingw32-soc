@@ -12,7 +12,16 @@ my %common_symbols = (
 		      '_end' => 1,
 		      '_fini' => 1,
 		      '_init' => 1,
+		      '__bss_start@Base' => 1,
+		      '__invoke_dynamic_linker__@Base' => 1,
+		      '_DYNAMIC@Base' => 1,
+		      '_edata@Base' => 1,
+		      '_end@Base' => 1,
+		      '_fini@Base' => 1,
+		      '_init@Base' => 1,
 		      );
+
+my @exception_regexps;
 
 import Strict;
 use File::Basename;
@@ -26,6 +35,10 @@ sub add_sym($$$)
     if (!defined $symbol_hash->{$symbol}) {
 	my @libs;
 	$symbol_hash->{$symbol} = \@libs;
+    }
+    # versioning can create duplicates
+    for my $fname (@{$symbol_hash->{$symbol}}) {
+	return if ($fname eq $file);
     }
     push @{$symbol_hash->{$symbol}}, $file;
 }
@@ -72,14 +85,8 @@ sub read_symbols($$)
 # remove version symbols
 	next if ($symbol eq $version);
 
-	if ($version eq '') {
-	    add_sym ($symbol_hash, $symbol, $file);
-	} else {
-	    if ($opt_ver eq '(') {
-		add_sym ($symbol_hash, $symbol, $file);
-	    }
-	    add_sym ($symbol_hash, $symbol . '@' . $version, $file);
-	}
+# FIXME - Ignores versioning - too nasty for now ...
+	add_sym ($symbol_hash, $symbol, $file);
     }
     close ($pipe);
 }
@@ -109,6 +116,12 @@ sub ignore_symbol($)
 {
     my $symbol = shift;
     return 1 if (defined $common_symbols{$symbol});
+    for my $regex (@exception_regexps) {
+#	print "Match '$symbol' vs '$regex'\n";
+	if ($symbol =~ m/^$regex$/) {
+	    return 1;
+	}
+    }
     return 0;
 }
 
@@ -117,9 +130,11 @@ my %lib_dups;
 
 my $option_cross_lib = 0;
 
+my @exception_files;
+
 for my $arg (@ARGV) {
     if ($arg eq '--help' || $arg eq '-h') {
-	print "finterpose [options]\n";
+	print "finterpose [options] [list-of-exception-files]\n";
 	print " finds genuine interposing uses across many libraries read from stdin\n";
 	print " options:\n";
 	print "  --per-symbol: dump on symbol basis [default]\n";
@@ -128,11 +143,29 @@ for my $arg (@ARGV) {
 	$option_cross_lib = 1;
     } elsif ($arg eq '--per-symbol') {
 	$option_cross_lib = 0;
-    } 
+    } else {
+	push @exception_files, $arg;
+    }
 }
 
+print "Reading exceptions ";
+for my $fname (@exception_files) {
+    my $fh;
+    open ($fh, $fname) || die "Can't open $fname: $!";
+    print ".";
+    while (<$fh>) {
+	s/[\r\n]*$//;
+	m/^\#/ && next;
+	m/^$/ && next;
+#	print "Exception '$_'\n";
+	push @exception_regexps, $_;
+    }
+    close ($fh);
+}
+print "\n\n";
+
 print "Reading symbols:\n";
-while (<>) {
+while (<STDIN>) {
     my $fname = $_;
     $fname =~ s/[\r\n\t]*$//;
     next if (! -f $fname);
@@ -151,20 +184,25 @@ while (<>) {
     $lib_dups{$fname} = \%lib_stats;
     read_symbols ($fname, \%symbol_table);
 }
+print "\n\n";
+
+print "Removing singletons & filtering exceptions...\n";
+for my $symbol (keys %symbol_table) {
+    my $libs = $symbol_table{$symbol};
+    if (@{$libs} == 1 || ignore_symbol ($symbol)) {
+	delete $symbol_table{$symbol};
+	next;
+    }
+}
 print "\n";
 
 if (!$option_cross_lib) { # symbol-set dump
-
-    print "Duplicate symbol\n";
 
     # detect substantially identical libraries ?
     my %dup_syms;
 
     # normalise libs to a string
     for my $sym (keys %symbol_table) {
-	my $dupcnt = @{$symbol_table{$sym}};
-	$dupcnt > 1 || next;
-
 	my $lib_string = join (' ', @{$symbol_table{$sym}});
 	if (!defined $dup_syms{$lib_string}) {
 	    my @sym_list;
@@ -173,30 +211,31 @@ if (!$option_cross_lib) { # symbol-set dump
 	push @{$dup_syms{$lib_string}}, $sym;
     }
 
+    # prune probable duplicates
     my @dup_libs;
     for my $lib_list (sort { $a cmp $b } keys %dup_syms) {
 	if (@{$dup_syms{$lib_list}} > 10) {
 	    push @dup_libs, $lib_list;
-	} else {
-	    print "Libraries $lib_list implement:\n";
-	    print "\t" . join (' ', @{$dup_syms{$lib_list}}) . "\n";
+	    delete $dup_syms{$lib_list};
 	}
     }
-    print "These libraries look like duplicates:\n";
+
+    print "Probable duplicate libraries:\n";
     for my $dup (@dup_libs) {
-	print "$dup\n";
+	print "\t$dup\n";
+    }
+    print "\n";
+
+    print "Duplicate symbols:\n";
+
+    for my $lib_list (sort { $a cmp $b } keys %dup_syms) {
+	print "\t$lib_list implement:\n";
+	print "\t\t" . join (' ', @{$dup_syms{$lib_list}}) . "\n";
     }
 } else { # cross-library dump    
     print "Collating duplicates\n";
 
     for my $symbol (keys %symbol_table) {
-	my $libs = $symbol_table{$symbol};
-	if (@{$libs} == 1) {
-	    delete $symbol_table{$symbol};
-	    next;
-	}
-	next if (ignore_symbol ($symbol));
-	
 	for my $lib (@{$libs}) {
 	    add_deps ($lib_dups, $lib, $libs, $symbol);
 	    my $cnt = keys %{($lib_dups->{$lib})};
