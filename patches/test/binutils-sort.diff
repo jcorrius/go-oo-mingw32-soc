@@ -1,0 +1,207 @@
+diff -u -r -x texis -x Makeconfig -x version.h -x '*.o' -x '*.1' -x 'Makefile*' -x 'config*' -x libtool -x '*.info' -x '*.tex' binutils-2.16/bfd/elf-bfd.h binutils.current/bfd/elf-bfd.h
+--- binutils-2.16/bfd/elf-bfd.h	2005-03-03 20:52:31.000000000 +0000
++++ binutils.current/bfd/elf-bfd.h	2005-12-14 20:11:20.000000000 +0000
+@@ -338,6 +346,10 @@
+ {
+   struct bfd_link_hash_table root;
+ 
++  /* Symbol sort order for final traversal at output */
++  unsigned int sorted_size;
++  struct elf_link_hash_entry **sorted;
++
+   /* Whether we have created the special dynamic sections required
+      when linking against or generating a shared object.  */
+   bfd_boolean dynamic_sections_created;
+@@ -414,11 +429,16 @@
+ /* Traverse an ELF linker hash table.  */
+ 
+ #define elf_link_hash_traverse(table, func, info)			\
+-  (bfd_link_hash_traverse						\
+-   (&(table)->root,							\
+-    (bfd_boolean (*) (struct bfd_link_hash_entry *, void *)) (func),	\
++  (_bfd_elf_link_hash_traverse						\
++   ((table),								\
++    (bfd_boolean (*) (struct elf_link_hash_entry *, void *)) (func),	\
+     (info)))
+ 
++void _bfd_elf_link_hash_traverse
++  (struct elf_link_hash_table *table,
++   bfd_boolean (*func) (struct elf_link_hash_entry *, void *),
++   void *info);
++
+ /* Get the ELF linker hash table from a link_info structure.  */
+ 
+ #define elf_hash_table(p) ((struct elf_link_hash_table *) ((p)->hash))
+
+
+diff -u -r -x texis -x Makeconfig -x version.h -x '*.o' -x '*.1' -x 'Makefile*' -x 'config*' -x libtool -x '*.info' -x '*.tex' binutils-2.16/bfd/elflink.c binutils.current/bfd/elflink.c
+--- binutils-2.16/bfd/elflink.c	2005-04-29 14:40:22.000000000 +0100
++++ binutils.current/bfd/elflink.c	2005-12-15 10:13:57.000000000 +0000
+@@ -4914,6 +4978,132 @@
+   return best_size;
+ }
+ 
++void _bfd_elf_link_hash_traverse
++  (struct elf_link_hash_table *table,
++   bfd_boolean (*func) (struct elf_link_hash_entry *, void *),
++   void *info)
++{
++  if (!table->sorted)
++    bfd_link_hash_traverse						\
++      (&(table)->root,							\
++       (bfd_boolean (*) (struct bfd_link_hash_entry *, void *)) (func),	\
++       (info));
++  else
++    {
++      int i;
++      for (i = 0; i < table->sorted_size; i++)
++        {
++          if (! func (table->sorted[i], info))
++	    return;
++	}
++    }
++}
++
++/* Where is the qsort closure ? */
++static size_t give_me_a_bucket_count = 0;
++
++/* Sort by elf hash value % buckets  */
++static int
++elf_sort_dynsym_hash (const void *arg1, const void *arg2)
++{
++  size_t h1_bucket, h2_bucket;
++  const struct elf_link_hash_entry *h1;
++  const struct elf_link_hash_entry *h2;
++
++  h1 = *(const struct elf_link_hash_entry **) arg1;
++  h2 = *(const struct elf_link_hash_entry **) arg2;
++
++  h1_bucket = h1->u.elf_hash_value % give_me_a_bucket_count;
++  h2_bucket = h2->u.elf_hash_value % give_me_a_bucket_count;
++
++  /*  fprintf (stderr, "Sort: '%s'(0x%x) <> '%s'(0x%x) (%d)\n",
++	   h1->root.root.string, h1_bucket,
++	   h2->root.root.string, h2_bucket,
++	   give_me_a_bucket_count); */
++
++  /* Hack to test with objdump */
++  /*  return strcmp (h1->root.root.string, h2->root.root.string); */
++
++  if (h1_bucket > h2_bucket)
++    return 1;
++  if (h1_bucket < h2_bucket)
++    return -1;
++
++  /* Want locally defined symbols first ? */
++  return 0;
++}
++
++struct elf_dynsym_sort_info
++{
++  bfd_boolean  do_dynsym;
++  unsigned int alloc_size;
++  unsigned int sorted_size;
++  struct elf_link_hash_entry **sorted_syms;
++};
++
++/* collect sym entries into an array for later sorting */
++static bfd_boolean
++elf_sort_collect_dynsyms (struct elf_link_hash_entry *h, void *data)
++{
++  struct elf_dynsym_sort_info *sinfo = data;
++
++  if ((sinfo->do_dynsym && h->dynindx < 0) ||
++      (!sinfo->do_dynsym && h->dynindx >= 0))
++    return TRUE;
++
++  if (sinfo->sorted_size >= sinfo->alloc_size)
++    {
++      sinfo->alloc_size *= 2;
++      /* FIXME: need to free this data too ... */
++      sinfo->sorted_syms = bfd_realloc (sinfo->sorted_syms,
++					 sizeof (struct elf_link_hash_entry *) *
++					 sinfo->alloc_size);
++    }
++  sinfo->sorted_syms [sinfo->sorted_size++] = h;
++
++  return TRUE;
++}
++
++/*
++ * Sort the exported elf symbols by elf_hash % bucketcount to
++ * improve run-time linker cache behavior. Subsequent
++ * elf_link_hash_traverse calls will reflect this new order.
++ */
++static bfd_boolean
++_bfd_elf_sort_dynsyms (struct bfd_link_info *info)
++{
++  struct elf_dynsym_sort_info sinfo;
++
++  sinfo.alloc_size = 8;
++  sinfo.sorted_syms = bfd_malloc (sizeof (struct elf_link_hash_entry *) *
++				  sinfo.alloc_size);
++  if (!sinfo.sorted_syms)
++    return FALSE;
++
++  sinfo.sorted_size = 0;
++
++  /* append dynsyms for sorting */
++  sinfo.do_dynsym = TRUE;
++  elf_link_hash_traverse (elf_hash_table (info), elf_sort_collect_dynsyms, &sinfo);
++  fprintf (stderr, "sym count: 0x%x\n", sinfo.sorted_size);
++
++  /* sort them ... */
++  give_me_a_bucket_count = elf_hash_table (info)->bucketcount;
++  qsort (sinfo.sorted_syms, sinfo.sorted_size,
++	 sizeof (struct elf_link_hash_entry *),
++	 elf_sort_dynsym_hash);
++
++  /* append everything else */
++  sinfo.do_dynsym = FALSE;
++  elf_link_hash_traverse (elf_hash_table (info), elf_sort_collect_dynsyms, &sinfo);
++
++  /* transfer to the elf hash: FIXME - leaks ... */
++  elf_hash_table (info)->sorted = sinfo.sorted_syms;
++  elf_hash_table (info)->sorted_size = sinfo.sorted_size;
++
++  return TRUE;
++}
++
+ /* Set up the sizes and contents of the ELF dynamic sections.  This is
+    called by the ELF linker emulation before_allocation routine.  We
+    must set the sizes of the sections before the linker sets the
+@@ -5726,7 +5917,34 @@
+       for (dtagcount = 0; dtagcount <= info->spare_dynamic_tags; ++dtagcount)
+ 	if (!_bfd_elf_add_dynamic_entry (info, DT_NULL, 0))
+ 	  return FALSE;
++
++      
++      /* Sort the elf symbols to accelerate linking */
++      { /* HACK - FIXME - make this conditional (?) */
++        if (!_bfd_elf_sort_dynsyms (info))
++          return FALSE;
++	/* reflect the new sorting order */
++	_bfd_elf_link_renumber_dynsyms (output_bfd, info);
++      }
++
++      /* Create the direct bindings section - 1 entry per dynsym */
++      s = bfd_get_section_by_name (dynobj, ".direct");
++      if (s)
++        {
++  	  if (dynsymcount == 0)
++	    _bfd_strip_section_from_output (info, s);
++	  else
++	    {
++	      s->size = dynsymcount * sizeof (Elf_External_Direct);
++	      s->contents = bfd_zalloc (output_bfd, s->size);
++	      if (s->contents == NULL)
++	        return FALSE;
++	      memset (s->contents, 0xff, s->size);
++	      if (!_bfd_elf_add_dynamic_entry (info, DT_DIRECT, 0))
++	        return FALSE;
++	    }
++	}
+     }
+ 
+   return TRUE;
+
