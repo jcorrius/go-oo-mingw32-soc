@@ -2,21 +2,54 @@ Index: basic/source/runtime/step0.cxx
 ===================================================================
 RCS file: /cvs/script/basic/source/runtime/step0.cxx,v
 retrieving revision 1.21
-diff -u -r1.21 step0.cxx
+diff -u -p -r1.21 step0.cxx
 --- basic/source/runtime/step0.cxx	7 Sep 2005 21:42:01 -0000	1.21
-+++ basic/source/runtime/step0.cxx	10 Oct 2005 09:21:22 -0000
++++ basic/source/runtime/step0.cxx	15 Dec 2005 10:31:53 -0000
 @@ -52,6 +52,10 @@
  
  #include <algorithm>
  
 +#ifdef ENABLE_VBA
-+bool getDefaultPropName( SbUnoObject* pVar, String& sDfltProp );
++SbxVariable* getDefaultProp( SbxVariable* pRef );
 +#endif //ENABLE_VBA
 +
  #pragma SW_SEGMENT_CLASS( SBRUNTIME, SBRUNTIME_CODE )
  
  void SbiRuntime::StepNOP()
-@@ -213,6 +218,42 @@
+@@ -62,6 +66,32 @@ void SbiRuntime::StepArith( SbxOperator 
+ 	SbxVariableRef p1 = PopVar();
+ 	TOSMakeTemp();
+ 	SbxVariable* p2 = GetTOS();
++#ifdef ENABLE_VBA
++	bool bVBAInterop =  SbiRuntime::isVBAEnabled(); 
++	SbxVariable* defaultProp = NULL;
++
++	// This could & should be moved to the MakeTempTOS() method in runtime.cxx
++	// In the code which this is cut'npaste from there is a check for a ref
++	// count != 1 based on which the copy of the SbxVariable is done.
++	// see orig code in MakeTempTOS ( and I'm not sure what the significance,
++	// of that is )
++	// here we alway seem to have a refcount of 1. Also it seems that
++	// MakeTempTOS is called for other operation, so I hold off for now
++	// until I have a better idea
++	if ( bVBAInterop
++		&& ( p2->GetType() == SbxOBJECT || p2->GetType() == SbxVARIANT )
++	)
++	{
++		SbxVariable* pDflt = getDefaultProp( p2 );
++		if ( pDflt )
++		{
++			pDflt->Broadcast( SBX_HINT_DATAWANTED );
++			p2 = new SbxVariable( *pDflt );
++			p2->SetFlag( SBX_READWRITE );
++			refExprStk->Put( p2, nExprLvl - 1 );
++		}
++	}
++#endif //ENABLE_VBA
+ 	p2->ResetFlag( SBX_FIXED );
+ 	p2->Compute( eOp, *p1 );
+ 
+@@ -213,9 +243,37 @@ void SbiRuntime::StepPUT()
  		n = refVar->GetFlags();
  		refVar->SetFlag( SBX_WRITE );
  	}
@@ -28,40 +61,162 @@ diff -u -r1.21 step0.cxx
 +	// property exists.
 +	// to use e.g. Range{"A1") = 34
 +	// could equate to Range("A1").Value = 34 
-+	// Note: getDefaultPropName() returns the name of the default property
-+	//	also the object could change the name of it's default property
-+	//	depending on its state so don't cache it. 
 +	if ( bVBAInterop
-+		&& ( refVar->GetType() == SbxOBJECT || refVar->GetType() == SbxVARIANT )
-+		&& ( refVal->GetType() !=  SbxOBJECT ||  refVal->GetType() != SbxVARIANT )
-+	)
++		&& ( refVar->GetType() == SbxOBJECT  ) )
 +	{
-+		SbxObject* pObj = PTR_CAST(SbxObject,(SbxVariable*) refVar);
-+		if ( !pObj )
-+		{
-+			SbxBase* pObjVarObj = refVar->GetObject();
-+			pObj = PTR_CAST(SbxObject,pObjVarObj);
-+		}	
-+		if ( pObj && pObj->ISA(SbUnoObject) )
-+		{
-+			SbUnoObject* pUnoObj = PTR_CAST(SbUnoObject,(SbxObject*)pObj);	
-+			String sDfltPropName;
-+			if ( getDefaultPropName( pUnoObj, sDfltPropName ) )
-+			{
-+				SbxVariable* defaultProp = pUnoObj->Find( sDfltPropName , SbxCLASS_PROPERTY );
-+				if ( defaultProp )
-+					refVar = defaultProp;
-+			}
-+		}
++		SbxVariable* pDflt = getDefaultProp( refVar );
++		if ( pDflt )
++			refVar = pDflt;
++	}
++	if ( bVBAInterop
++		&& ( refVal->GetType() == SbxOBJECT  ) )
++	{
++		SbxVariable* pDflt = getDefaultProp( refVal );
++		if ( pDflt )
++			refVal = pDflt;
 +	}
 +#endif //ENABLE_VBA
 +
  	*refVar = *refVal;
++#ifdef ENABLE_VBA
++	// lhs is a property who's value is currently null
++	if ( !bVBAInterop || ( bVBAInterop && refVar->GetType() != SbxEMPTY ) )
++#endif //ENABLE_VBA
  	// #67607 Uno-Structs kopieren
- 	checkUnoStructCopy( refVal, refVar );
+-	checkUnoStructCopy( refVal, refVar );
++		checkUnoStructCopy( refVal, refVar );
+ 	if( bFlagsChanged )
+ 		refVar->SetFlags( n );
+ }
+@@ -226,28 +284,49 @@ void SbiRuntime::StepPUT()
+ 
+ void SbiRuntime::StepSET_Impl( SbxVariableRef& refVal, SbxVariableRef& refVar )
+ {
++	bool bVBAInterop =  SbiRuntime::isVBAEnabled(); 
+ 	// #67733 Typen mit Array-Flag sind auch ok
+ 	SbxDataType eValType = refVal->GetType();
+ 	SbxDataType eVarType = refVar->GetType();
+-	if( (eValType != SbxOBJECT && eValType != SbxEMPTY && !(eValType & SbxARRAY)) ||
+-		(eVarType != SbxOBJECT && eVarType != SbxEMPTY && !(eVarType & SbxARRAY) ) )
++        if( (eValType != SbxOBJECT 
++			&& eValType != SbxEMPTY 
++#ifdef ENABLE_VBA
++// seems like when using the default method its possible for objects
++// to be empty ( no broadcast has taken place yet ) or the actual value is
++
++			&& !bVBAInterop
++#endif //ENABLE_VBA
++			&& !(eValType & SbxARRAY)) ||
++            (eVarType != SbxOBJECT 
++			&& eVarType != SbxEMPTY 
++#ifdef ENABLE_VBA
++			&& !bVBAInterop
++#endif //ENABLE_VBA
++			&& !(eVarType & SbxARRAY) ) )
+ 	{
+ 		Error( SbERR_INVALID_USAGE_OBJECT );
+ 	}
+ 	else
+ 	{
+-		// Auf refVal GetObject fuer Collections ausloesen
+-		SbxBase* pObjVarObj = refVal->GetObject();
+-		if( pObjVarObj )
++#ifdef ENABLE_VBA
++		if ( refVal->GetType() == SbxOBJECT )
+ 		{
+-			SbxVariableRef refObjVal = PTR_CAST(SbxObject,pObjVarObj);
++#endif //ENABLE_VBA
++		// Auf refVal GetObject fuer Collections ausloesen
++			SbxBase* pObjVarObj = refVal->GetObject();
++			if( pObjVarObj )
++			{
++				SbxVariableRef refObjVal = PTR_CAST(SbxObject,pObjVarObj);
+ 
+-			// #67733 Typen mit Array-Flag sind auch ok
+-			if( refObjVal )
+-				refVal = refObjVal;
+-			else if( !(eValType & SbxARRAY) )
+-				refVal = NULL;
++				// #67733 Typen mit Array-Flag sind auch ok
++				if( refObjVal )
++					refVal = refObjVal;
++				else if( !(eValType & SbxARRAY) )
++					refVal = NULL;
++			}
++#ifdef ENABLE_VBA
+ 		}
++#endif //ENABLE_VBA
+ 
+ 		// #52896 Wenn Uno-Sequences bzw. allgemein Arrays einer als
+ 		// Object deklarierten Variable zugewiesen werden, kann hier
+@@ -270,8 +349,64 @@ void SbiRuntime::StepSET_Impl( SbxVariab
+ 			SbProcedureProperty* pProcProperty = PTR_CAST(SbProcedureProperty,(SbxVariable*)refVar);
+ 			if( pProcProperty )
+ 				pProcProperty->setSet( true );
++#ifdef ENABLE_VBA
++			// get default properties for lhs & rhs where necessary
++			// have to be careful though where a lhs object is null
++			// meaning a 'set something = someObject' has taken places
++			// which means we don't want to get the default prop for the rhs
++			SbxVariable* defaultProp = NULL;
++			bool bLHSHasDefaultProp = false;
++			// LHS try determine if a default prop exists
++			if ( bVBAInterop
++				&& ( refVar->GetType() == SbxOBJECT ) )
++			{
++					SbxVariable* pDflt = getDefaultProp( refVar );
++					if ( pDflt )
++					{
++						refVar = pDflt;
++						bLHSHasDefaultProp = true;
++					}
++			}
++			// RHS only get a default prop is the rhs has one
++			if ( bVBAInterop
++				&& ( refVal->GetType() == SbxOBJECT ) )
++			{
++				// check if lhs is a null object
++				// if it is then use the object not the default property
++				SbxObject* pObj = NULL;
++
++				if ( refVar->GetType() == SbxOBJECT || refVar->GetType() == SbxEMPTY ) 
++				{
++					
++					pObj = PTR_CAST(SbxObject,(SbxVariable*)refVar);
+ 
++					// calling GetObject on a SbxEMPTY variable raises
++					// object not set errors, make sure its an Object
++					if ( !pObj && refVar->GetType() == SbxOBJECT )
++					{
++						SbxBase* pObjVarObj = refVar->GetObject();
++						pObj = PTR_CAST(SbxObject,pObjVarObj);
++					}	
++					SbxVariable* pDflt = NULL;
++					if ( pObj || bLHSHasDefaultProp )
++						// lhs is either a valid object || or has a defaultProp
++						// e.g. ( NOT a 'set obj = anotherObj' operation )
++						pDflt = getDefaultProp( refVal );
++					if ( pDflt )
++						refVal = pDflt;
++				}		
++			}
++#endif //ENABLE_VBA
++			
+ 			*refVar = *refVal;
++#ifdef ENABLE_VBA
++	// lhs is a property who's value is currently (Empty e.g. no broadcast yet)
++	// in this case if there is a default prop involved the value of the 
++	// default property may infact be void so the type will also be SbxEMPTY
++	// in this case we do not want to call checkUnoStructCopy 'cause that will
++	// cause an error also
++		if ( !bVBAInterop || ( bVBAInterop && ( refVar->GetType() != SbxEMPTY ) ) )
++#endif //ENABLE_VBA
+ 			// #67607 Uno-Structs kopieren
+ 			checkUnoStructCopy( refVal, refVar );
+ 			if( bFlagsChanged )
 --- basic.orig/source/classes/sbunoobj.cxx	2005-10-06 23:48:06.000000000 +0100
 +++ basic/source/classes/sbunoobj.cxx	2005-10-10 10:25:20.000000000 +0100
-@@ -137,6 +137,35 @@
+@@ -137,6 +137,56 @@
  static OUString defaultNameSpace( RTL_CONSTASCII_USTRINGPARAM("org.openoffice.vba.") );
  static OUString defaultNameSpaceParent( RTL_CONSTASCII_USTRINGPARAM("org.openoffice") );
  
@@ -93,11 +248,32 @@ diff -u -r1.21 step0.cxx
 +	}
 +	return result;
 +}
++
++SbxVariable* getDefaultProp( SbxVariable* pRef )
++{
++	SbxVariable* pDefaultProp = NULL;		
++	SbxObject* pObj = PTR_CAST(SbxObject,(SbxVariable*) pRef);
++	if ( !pObj )
++	{
++		SbxBase* pObjVarObj = pRef->GetObject();
++		pObj = PTR_CAST(SbxObject,pObjVarObj);
++	}	
++	if ( pObj && pObj->ISA(SbUnoObject) )
++	{
++		String sDfltPropName;
++		SbUnoObject* pUnoObj = PTR_CAST(SbUnoObject,(SbxObject*)pObj);	
++		if ( getDefaultPropName( pUnoObj, sDfltPropName ) )
++		{
++			pDefaultProp = pUnoObj->Find( sDfltPropName , SbxCLASS_PROPERTY );
++		}
++	}
++	return pDefaultProp;
++}
 +#endif // ENABLE_VBA
  
  Reference< XComponentContext > getComponentContext_Impl( void )
  {
-@@ -551,6 +572,20 @@
+@@ -551,6 +572,16 @@
  			// SbUnoObject instanzieren
  			String aName;
  			SbUnoObject* pSbUnoObject = new SbUnoObject( aName, aValue );
@@ -105,14 +281,10 @@ diff -u -r1.21 step0.cxx
 +			String sDfltPropName;
 +			if ( getDefaultPropName( pSbUnoObject, sDfltPropName ) )
 +			{
-+				SbxVariable* pDefaultProp = pSbUnoObject->Find( 
++				SbxProperty* pDefaultProp = ( SbxProperty*)pSbUnoObject->Find( 
 +					String ( sDfltPropName ), SbxCLASS_PROPERTY );
 +				if ( pDefaultProp )
-+				{
-+					SbUnoProperty* pProp = PTR_CAST(SbUnoProperty,pDefaultProp);
-+					if (  pProp )
-+						pSbUnoObject->SetDfltProperty( pProp );
-+				} 
++					pSbUnoObject->SetDfltProperty( pDefaultProp );
 +			}
 +#endif //ENABLE_VBA
  			SbxObjectRef xWrapper = (SbxObject*)pSbUnoObject;
