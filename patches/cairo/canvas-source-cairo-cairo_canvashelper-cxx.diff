@@ -1,6 +1,6 @@
 --- /dev/null	
 +++ canvas/source/cairo/cairo_canvashelper.cxx	
-@@ -0,0 +1,1340 @@
+@@ -0,0 +1,1279 @@
 +/*************************************************************************
 + *
 + *  OpenOffice.org - a multi-platform office productivity suite
@@ -65,10 +65,9 @@
 +#include <vcl/canvastools.hxx>
 +#include <vcl/bitmapex.hxx>
 +#include <vcl/bmpacc.hxx>
++#include <vcl/virdev.hxx>
 +
 +#include "cairo_spritecanvas.hxx"
-+#include "cairo_canvasfont.hxx"
-+#include "cairo_textlayout.hxx"
 +#include "cairo_cachedbitmap.hxx"
 +#include "cairo_canvashelper.hxx"
 +#include "cairo_canvasbitmap.hxx"
@@ -83,7 +82,9 @@
 +    CanvasHelper::CanvasHelper() :
 +        mpDevice( NULL ),
 +        mbHaveAlpha(),
-+	mpCairo( NULL )
++		mpCairo( NULL ),
++		mpSurface( NULL ),
++		mpVirtualDevice( NULL )
 +    {
 +    }
 +
@@ -91,11 +92,21 @@
 +    {
 +        mpDevice = NULL;
 +
-+	if( mpCairo )
-+	{
-+	    cairo_destroy( mpCairo );
-+	    mpCairo = NULL;
-+	}
++		if( mpVirtualDevice ) {
++			delete mpVirtualDevice;
++			mpVirtualDevice = NULL;
++		}
++
++		if( mpCairo )
++	    {
++			cairo_destroy( mpCairo );
++			mpCairo = NULL;
++		}
++
++		if( mpSurface ) {
++			mpSurface->Unref();
++			mpSurface = NULL;
++		}
 +    }
 +
 +    void CanvasHelper::init( const ::basegfx::B2ISize& rSize,
@@ -106,16 +117,26 @@
 +        mbHaveAlpha = bHasAlpha;
 +    }
 +
-+    void CanvasHelper::setCairo( Cairo* pCairo )
++    void CanvasHelper::setSurface( Surface* pSurface )
 +    {
-+	if( mpCairo )
-+	{
-+	    cairo_destroy( mpCairo );
-+	}
++		if( mpSurface ) {
++			mpSurface->Unref();
++		}
 +
-+	mpCairo = pCairo;
++		if( mpVirtualDevice ) {
++			delete mpVirtualDevice;
++			mpVirtualDevice = NULL;
++		}
 +
-+	cairo_reference( mpCairo );
++		mpSurface = pSurface;
++		mpSurface->Ref();
++
++		if( mpCairo )
++		{
++			cairo_destroy( mpCairo );
++		}
++
++		mpCairo = pSurface->getCairo();
 +    }
 +
 +    void CanvasHelper::useStates( const rendering::ViewState& viewState,
@@ -208,18 +229,18 @@
 +#define CANVASBITMAP_IMPLEMENTATION_NAME "CairoCanvas::CanvasBitmap"
 +#define PARAMETRICPOLYPOLYGON_IMPLEMENTATION_NAME "Canvas::ParametricPolyPolygon"
 +
-+    static Cairo* cairoFromXBitmap( const uno::Reference< rendering::XBitmap >& xBitmap, bool &bHasAlpha )
++    static Surface* surfaceFromXBitmap( const uno::Reference< rendering::XBitmap >& xBitmap, bool &bHasAlpha )
 +    {
-+	CanvasBitmap* pBitmapImpl = dynamic_cast< CanvasBitmap* >( xBitmap.get() );
++		CanvasBitmap* pBitmapImpl = dynamic_cast< CanvasBitmap* >( xBitmap.get() );
 +
-+	if( pBitmapImpl ) {
-+	    // TODO(Q1): Maybe use dynamic_cast here
-+	    bHasAlpha = pBitmapImpl->hasAlpha();
++		if( pBitmapImpl ) {
++			// TODO(Q1): Maybe use dynamic_cast here
++			bHasAlpha = pBitmapImpl->hasAlpha();
 +
-+	    return pBitmapImpl->getCairo();
-+	}
++			return pBitmapImpl->getSurface();
++		}
 + 
-+	return NULL;
++		return NULL;
 +    }
 +
 +    static ::BitmapEx bitmapExFromXBitmap( const uno::Reference< rendering::XBitmap >& xBitmap )
@@ -282,198 +303,194 @@
 +
 +    static Surface* surfaceFromXBitmap( const uno::Reference< rendering::XBitmap >& xBitmap, const DeviceRef& rDevice, unsigned char*& data, bool& bHasAlpha )
 +    {
-+	Surface* pSurface = NULL;
-+	Cairo* pCairo = cairoFromXBitmap( xBitmap, bHasAlpha );
-+	if( pCairo ) {
-+	    pSurface = cairo_get_target( pCairo );
-+	    cairo_surface_reference( pSurface );
-+	    data = NULL;
-+	} else {
-+	    BitmapEx aBmpEx = bitmapExFromXBitmap(xBitmap);
-+	    Bitmap aBitmap = aBmpEx.GetBitmap();
-+	    AlphaMask aAlpha = aBmpEx.GetAlpha();
++		Surface* pSurface = surfaceFromXBitmap( xBitmap, bHasAlpha );
++		if( pSurface ) {
++			pSurface->Ref();
++			data = NULL;
++		} else {
++			BitmapEx aBmpEx = bitmapExFromXBitmap(xBitmap);
++			Bitmap aBitmap = aBmpEx.GetBitmap();
++			AlphaMask aAlpha = aBmpEx.GetAlpha();
 +
-+	    // there's no pixmap for alpha bitmap. we might still
-+	    // use rgb pixmap and only access alpha pixels the
-+	    // slow way. now we just speedup rgb bitmaps
-+	    if( !aBmpEx.IsTransparent() && !aBmpEx.IsAlpha() ) {
-+		pSurface = rDevice->getSurface( aBitmap );
-+		data = NULL;
-+		bHasAlpha = false;
-+	    }
-+
-+	    if( !pSurface ) {
-+
-+		BitmapReadAccess*	pBitmapReadAcc = aBitmap.AcquireReadAccess();
-+		BitmapReadAccess*	pAlphaReadAcc = NULL;
-+		const long		nWidth = pBitmapReadAcc->Width();
-+		const long		nHeight = pBitmapReadAcc->Height();
-+		long nX, nY;
-+		bool bIsAlpha = false;
-+
-+		if( aBmpEx.IsTransparent() || aBmpEx.IsAlpha() )
-+		    pAlphaReadAcc = aAlpha.AcquireReadAccess();
-+
-+		data = (unsigned char*) malloc( nWidth*nHeight*4 );
-+
-+		long nOff = 0;
-+		Color aColor;
-+		unsigned int nAlpha = 255;
-+
-+		for( nY = 0; nY < nHeight; nY++ ) {
-+		    Scanline pReadScan;
-+
-+		    switch( pBitmapReadAcc->GetScanlineFormat() ) {
-+		    case BMP_FORMAT_8BIT_PAL:
-+			pReadScan = pBitmapReadAcc->GetScanline( nY );
-+			if( pAlphaReadAcc )
-+			    if( readAlpha( pAlphaReadAcc, nY, nWidth, data, nOff ) )
-+				bIsAlpha = true;
-+
-+			for( nX = 0; nX < nWidth; nX++ ) {
-+			    if( pAlphaReadAcc )
-+				nAlpha = data[ nOff + 3 ];
-+			    else
-+				nAlpha = data[ nOff + 3 ] = 255;
-+			    aColor = pBitmapReadAcc->GetPaletteColor( *pReadScan++ );
-+
-+			    data[ nOff++ ] = ( nAlpha*( aColor.GetBlue() ) )/255;
-+			    data[ nOff++ ] = ( nAlpha*( aColor.GetGreen() ) )/255;
-+			    data[ nOff++ ] = ( nAlpha*( aColor.GetRed() ) )/255;
-+
-+			    nOff++;
++			// there's no pixmap for alpha bitmap. we might still
++			// use rgb pixmap and only access alpha pixels the
++			// slow way. now we just speedup rgb bitmaps
++			if( !aBmpEx.IsTransparent() && !aBmpEx.IsAlpha() ) {
++				pSurface = rDevice->getSurface( aBitmap );
++				data = NULL;
++				bHasAlpha = false;
 +			}
-+			break;
-+		    case BMP_FORMAT_24BIT_TC_BGR:
-+			pReadScan = pBitmapReadAcc->GetScanline( nY );
-+			if( pAlphaReadAcc )
-+			    if( readAlpha( pAlphaReadAcc, nY, nWidth, data, nOff ) )
-+				bIsAlpha = true;
 +
-+			for( nX = 0; nX < nWidth; nX++ ) {
-+			    if( pAlphaReadAcc )
-+				nAlpha = data[ nOff + 3 ];
-+			    else
-+				nAlpha = data[ nOff + 3 ] = 255;
-+			    data[ nOff++ ] = ( nAlpha*( *pReadScan++ ) )/255;
-+			    data[ nOff++ ] = ( nAlpha*( *pReadScan++ ) )/255;
-+			    data[ nOff++ ] = ( nAlpha*( *pReadScan++ ) )/255;
++			if( !pSurface ) {
 +
-+			    nOff++;
-+			}
-+			break;
-+		    case BMP_FORMAT_24BIT_TC_RGB:
-+			pReadScan = pBitmapReadAcc->GetScanline( nY );
-+			if( pAlphaReadAcc )
-+			    if( readAlpha( pAlphaReadAcc, nY, nWidth, data, nOff ) )
-+				bIsAlpha = true;
++				BitmapReadAccess*	pBitmapReadAcc = aBitmap.AcquireReadAccess();
++				BitmapReadAccess*	pAlphaReadAcc = NULL;
++				const long		nWidth = pBitmapReadAcc->Width();
++				const long		nHeight = pBitmapReadAcc->Height();
++				long nX, nY;
++				bool bIsAlpha = false;
 +
-+			for( nX = 0; nX < nWidth; nX++ ) {
-+			    if( pAlphaReadAcc )
-+				nAlpha = data[ nOff + 3 ];
-+			    else
-+				nAlpha = data[ nOff + 3 ] = 255;
-+			    data[ nOff++ ] = ( nAlpha*( pReadScan[ 2 ] ) )/255;
-+			    data[ nOff++ ] = ( nAlpha*( pReadScan[ 1 ] ) )/255;
-+			    data[ nOff++ ] = ( nAlpha*( pReadScan[ 0 ] ) )/255;
++				if( aBmpEx.IsTransparent() || aBmpEx.IsAlpha() )
++					pAlphaReadAcc = aAlpha.AcquireReadAccess();
 +
-+			    nOff++;
-+			    pReadScan += 3;
-+			}
-+			break;
-+		    case BMP_FORMAT_32BIT_TC_BGRA:
-+			pReadScan = pBitmapReadAcc->GetScanline( nY );
-+			if( pAlphaReadAcc )
-+			    if( readAlpha( pAlphaReadAcc, nY, nWidth, data, nOff ) )
-+				bIsAlpha = true;
++				data = (unsigned char*) malloc( nWidth*nHeight*4 );
 +
-+			for( nX = 0; nX < nWidth; nX++ ) {
-+			    if( pAlphaReadAcc )
-+				nAlpha = data[ nOff + 3 ];
-+			    else
-+				nAlpha = data[ nOff + 3 ] = pReadScan[ 3 ];
-+			    data[ nOff++ ] = ( nAlpha*( *pReadScan++ ) )/255;
-+			    data[ nOff++ ] = ( nAlpha*( *pReadScan++ ) )/255;
-+			    data[ nOff++ ] = ( nAlpha*( *pReadScan++ ) )/255;
++				long nOff = 0;
++				Color aColor;
++				unsigned int nAlpha = 255;
 +
-+			    nOff++;
-+			    pReadScan++;
-+			}
-+			break;
-+		    case BMP_FORMAT_32BIT_TC_RGBA:
-+			pReadScan = pBitmapReadAcc->GetScanline( nY );
-+			if( pAlphaReadAcc )
-+			    if( readAlpha( pAlphaReadAcc, nY, nWidth, data, nOff ) )
-+				bIsAlpha = true;
++				for( nY = 0; nY < nHeight; nY++ ) {
++					Scanline pReadScan;
 +
-+			for( nX = 0; nX < nWidth; nX++ ) {
-+			    if( pAlphaReadAcc )
-+				nAlpha = data[ nOff + 3 ];
-+			    else
-+				nAlpha = data[ nOff + 3 ] = 255;
-+			    data[ nOff++ ] = ( nAlpha*( pReadScan[ 2 ] ) )/255;
-+			    data[ nOff++ ] = ( nAlpha*( pReadScan[ 1 ] ) )/255;
-+			    data[ nOff++ ] = ( nAlpha*( pReadScan[ 0 ] ) )/255;
++					switch( pBitmapReadAcc->GetScanlineFormat() ) {
++					case BMP_FORMAT_8BIT_PAL:
++						pReadScan = pBitmapReadAcc->GetScanline( nY );
++						if( pAlphaReadAcc )
++							if( readAlpha( pAlphaReadAcc, nY, nWidth, data, nOff ) )
++								bIsAlpha = true;
 +
-+			    nOff++;
-+			    pReadScan += 4;
-+			}
-+			break;
-+		    default:
-+			OSL_TRACE( "fallback to GetColor - slow, format: %d\n", pBitmapReadAcc->GetScanlineFormat() );
++						for( nX = 0; nX < nWidth; nX++ ) {
++							if( pAlphaReadAcc )
++								nAlpha = data[ nOff + 3 ];
++							else
++								nAlpha = data[ nOff + 3 ] = 255;
++							aColor = pBitmapReadAcc->GetPaletteColor( *pReadScan++ );
 +
-+			if( pAlphaReadAcc )
-+			    if( readAlpha( pAlphaReadAcc, nY, nWidth, data, nOff ) )
-+				bIsAlpha = true;
++							data[ nOff++ ] = ( nAlpha*( aColor.GetBlue() ) )/255;
++							data[ nOff++ ] = ( nAlpha*( aColor.GetGreen() ) )/255;
++							data[ nOff++ ] = ( nAlpha*( aColor.GetRed() ) )/255;
 +
-+			for( nX = 0; nX < nWidth; nX++ ) {
-+			    aColor = pBitmapReadAcc->GetColor( nY, nX );
++							nOff++;
++						}
++						break;
++					case BMP_FORMAT_24BIT_TC_BGR:
++						pReadScan = pBitmapReadAcc->GetScanline( nY );
++						if( pAlphaReadAcc )
++							if( readAlpha( pAlphaReadAcc, nY, nWidth, data, nOff ) )
++								bIsAlpha = true;
 +
-+				// cairo need premultiplied color values
-+				// TODO(rodo) handle endianess
-+			    if( pAlphaReadAcc )
-+				nAlpha = data[ nOff + 3 ];
-+			    else
-+				nAlpha = data[ nOff + 3 ] = 255;
++						for( nX = 0; nX < nWidth; nX++ ) {
++							if( pAlphaReadAcc )
++								nAlpha = data[ nOff + 3 ];
++							else
++								nAlpha = data[ nOff + 3 ] = 255;
++							data[ nOff++ ] = ( nAlpha*( *pReadScan++ ) )/255;
++							data[ nOff++ ] = ( nAlpha*( *pReadScan++ ) )/255;
++							data[ nOff++ ] = ( nAlpha*( *pReadScan++ ) )/255;
 +
-+			    data[ nOff++ ] = ( nAlpha*aColor.GetBlue() )/255;
-+			    data[ nOff++ ] = ( nAlpha*aColor.GetGreen() )/255;
-+			    data[ nOff++ ] = ( nAlpha*aColor.GetRed() )/255;
++							nOff++;
++						}
++						break;
++					case BMP_FORMAT_24BIT_TC_RGB:
++						pReadScan = pBitmapReadAcc->GetScanline( nY );
++						if( pAlphaReadAcc )
++							if( readAlpha( pAlphaReadAcc, nY, nWidth, data, nOff ) )
++								bIsAlpha = true;
 +
-+			    nOff ++;
-+			}
-+		    }
-+		}
++						for( nX = 0; nX < nWidth; nX++ ) {
++							if( pAlphaReadAcc )
++								nAlpha = data[ nOff + 3 ];
++							else
++								nAlpha = data[ nOff + 3 ] = 255;
++							data[ nOff++ ] = ( nAlpha*( pReadScan[ 2 ] ) )/255;
++							data[ nOff++ ] = ( nAlpha*( pReadScan[ 1 ] ) )/255;
++							data[ nOff++ ] = ( nAlpha*( pReadScan[ 0 ] ) )/255;
++
++							nOff++;
++							pReadScan += 3;
++						}
++						break;
++					case BMP_FORMAT_32BIT_TC_BGRA:
++						pReadScan = pBitmapReadAcc->GetScanline( nY );
++						if( pAlphaReadAcc )
++							if( readAlpha( pAlphaReadAcc, nY, nWidth, data, nOff ) )
++								bIsAlpha = true;
++
++						for( nX = 0; nX < nWidth; nX++ ) {
++							if( pAlphaReadAcc )
++								nAlpha = data[ nOff + 3 ];
++							else
++								nAlpha = data[ nOff + 3 ] = pReadScan[ 3 ];
++							data[ nOff++ ] = ( nAlpha*( *pReadScan++ ) )/255;
++							data[ nOff++ ] = ( nAlpha*( *pReadScan++ ) )/255;
++							data[ nOff++ ] = ( nAlpha*( *pReadScan++ ) )/255;
++
++							nOff++;
++							pReadScan++;
++						}
++						break;
++					case BMP_FORMAT_32BIT_TC_RGBA:
++						pReadScan = pBitmapReadAcc->GetScanline( nY );
++						if( pAlphaReadAcc )
++							if( readAlpha( pAlphaReadAcc, nY, nWidth, data, nOff ) )
++								bIsAlpha = true;
++
++						for( nX = 0; nX < nWidth; nX++ ) {
++							if( pAlphaReadAcc )
++								nAlpha = data[ nOff + 3 ];
++							else
++								nAlpha = data[ nOff + 3 ] = 255;
++							data[ nOff++ ] = ( nAlpha*( pReadScan[ 2 ] ) )/255;
++							data[ nOff++ ] = ( nAlpha*( pReadScan[ 1 ] ) )/255;
++							data[ nOff++ ] = ( nAlpha*( pReadScan[ 0 ] ) )/255;
++
++							nOff++;
++							pReadScan += 4;
++						}
++						break;
++					default:
++						OSL_TRACE( "fallback to GetColor - slow, format: %d\n", pBitmapReadAcc->GetScanlineFormat() );
++
++						if( pAlphaReadAcc )
++							if( readAlpha( pAlphaReadAcc, nY, nWidth, data, nOff ) )
++								bIsAlpha = true;
++
++						for( nX = 0; nX < nWidth; nX++ ) {
++							aColor = pBitmapReadAcc->GetColor( nY, nX );
++
++							// cairo need premultiplied color values
++							// TODO(rodo) handle endianess
++							if( pAlphaReadAcc )
++								nAlpha = data[ nOff + 3 ];
++							else
++								nAlpha = data[ nOff + 3 ] = 255;
++
++							data[ nOff++ ] = ( nAlpha*aColor.GetBlue() )/255;
++							data[ nOff++ ] = ( nAlpha*aColor.GetGreen() )/255;
++							data[ nOff++ ] = ( nAlpha*aColor.GetRed() )/255;
++
++							nOff ++;
++						}
++					}
++				}
 +		    
-+		aBitmap.ReleaseAccess( pBitmapReadAcc );
-+		if( pAlphaReadAcc )
-+		    aAlpha.ReleaseAccess( pAlphaReadAcc );
++				aBitmap.ReleaseAccess( pBitmapReadAcc );
++				if( pAlphaReadAcc )
++					aAlpha.ReleaseAccess( pAlphaReadAcc );
 +
-+		Surface* pImageSurface;
-+		if( bIsAlpha )
-+		    pImageSurface = cairo_image_surface_create_for_data( data, CAIRO_FORMAT_ARGB32, nWidth, nHeight, nWidth*4 );
-+		else
-+		    pImageSurface = cairo_image_surface_create_for_data( data, CAIRO_FORMAT_RGB24, nWidth, nHeight, nWidth*4 );
++				Surface* pImageSurface = new Surface( cairo_image_surface_create_for_data( data,
++																						   bIsAlpha ? CAIRO_FORMAT_ARGB32 : CAIRO_FORMAT_RGB24,
++																						   nWidth, nHeight, nWidth*4 ) );
 +
-+// 		pSurface = rDevice->getSurface( ::basegfx::B2ISize( nWidth, nHeight ), bIsAlpha ? CAIRO_CONTENT_COLOR_ALPHA : CAIRO_CONTENT_COLOR );
-+// 		Cairo* pTargetCairo = cairo_create( pSurface );
-+// 		cairo_set_source_surface( pTargetCairo, pImageSurface, 0, 0 );
++				// 		pSurface = rDevice->getSurface( ::basegfx::B2ISize( nWidth, nHeight ), bIsAlpha ? CAIRO_CONTENT_COLOR_ALPHA : CAIRO_CONTENT_COLOR );
++				// 		Cairo* pTargetCairo = cairo_create( pSurface );
++				// 		cairo_set_source_surface( pTargetCairo, pImageSurface, 0, 0 );
 +
-+// 				    //if( !bIsAlpha )
-+// 				    //cairo_set_operator( pTargetCairo, CAIRO_OPERATOR_SOURCE );
++				// 				    //if( !bIsAlpha )
++				// 				    //cairo_set_operator( pTargetCairo, CAIRO_OPERATOR_SOURCE );
 +
-+// 		cairo_paint( pTargetCairo );
-+// 		cairo_destroy( pTargetCairo );
-+// 		cairo_surface_destroy( pImageSurface );
-+		pSurface = pImageSurface;
++				// 		cairo_paint( pTargetCairo );
++				// 		cairo_destroy( pTargetCairo );
++				// 		cairo_surface_destroy( pImageSurface );
++				pSurface = pImageSurface;
 +
-+		bHasAlpha = bIsAlpha;
++				bHasAlpha = bIsAlpha;
 +
-+		OSL_TRACE("image: %d x %d alpha: %d alphaRead %p", nWidth, nHeight, bIsAlpha, pAlphaReadAcc);
-+	    }
-+	}
++				OSL_TRACE("image: %d x %d alpha: %d alphaRead %p", nWidth, nHeight, bIsAlpha, pAlphaReadAcc);
++			}
++		}
 +
-+	return pSurface;
++		return pSurface;
 +    }
 +
 +    static void addColorStop( Pattern* pPattern, double nOffset, const uno::Sequence< double >& rColor )
@@ -593,7 +610,7 @@
 +#else
 +
 +			// we don't care about repeat mode yet, so the workaround is disabled for now
-+			pPattern = cairo_pattern_create_for_surface( pSurface );
++			pPattern = cairo_pattern_create_for_surface( pSurface->mpSurface );
 +#endif
 + 			if( aTexture.RepeatModeX == rendering::TexturingMode::REPEAT &&
 +			    aTexture.RepeatModeY == rendering::TexturingMode::REPEAT )
@@ -610,7 +627,7 @@
 +			cairo_restore( pCairo );
 +
 +			cairo_pattern_destroy( pPattern );
-+			cairo_surface_destroy( pSurface );
++			pSurface->Unref();
 +
 +#if 0
 +			cairo_destroy( pTmpCairo );
@@ -1008,146 +1025,69 @@
 +        return uno::Reference< rendering::XCachedPrimitive >(NULL);
 +    }
 +
-+    uno::Reference< rendering::XCanvasFont > CanvasHelper::createFont( const rendering::XCanvas* 					pCanvas, 
-+                                                                       const rendering::FontRequest& 				fontRequest, 
-+                                                                       const uno::Sequence< beans::PropertyValue >& extraFontProperties, 
-+                                                                       const geometry::Matrix2D& 					fontMatrix )
-+    {
-+        return uno::Reference< rendering::XCanvasFont >( 
-+            new CanvasFont(fontRequest, extraFontProperties, fontMatrix ) );
-+    }
-+
-+    uno::Sequence< rendering::FontInfo > CanvasHelper::queryAvailableFonts( const rendering::XCanvas* 						pCanvas, 
-+                                                                            const rendering::FontInfo& 						aFilter, 
-+                                                                            const uno::Sequence< beans::PropertyValue >& 	aFontProperties )
-+    {
-+        // TODO
-+        return uno::Sequence< rendering::FontInfo >();
-+    }
-+
-+    uno::Reference< rendering::XCachedPrimitive > CanvasHelper::drawText( const rendering::XCanvas* 						pCanvas, 
-+                                                                          const rendering::StringContext& 					text, 
-+                                                                          const uno::Reference< rendering::XCanvasFont >& 	xFont, 
-+                                                                          const rendering::ViewState& 						viewState, 
-+                                                                          const rendering::RenderState& 					renderState, 
-+                                                                          sal_Int8				 							textDirection )
-+    {
-+	#ifdef CAIRO_CANVAS_PERF_TRACE
-+	struct timespec aTimer;
-+	mxDevice->startPerfTrace( &aTimer );
-+        #endif
-+
-+	if ( mpCairo ) {
-+	    cairo_save( mpCairo );
-+
-+	    useStates( viewState, renderState, true );
-+
-+	    // fixme (rodo) - use xFont
-+	    cairo_select_font_face( mpCairo, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL );
-+	    /* move to 0, 0 as cairo_show_text advances current point and current point is not restored by cairo_restore.
-+	       before we were depending on unmodified current point which I believed was preserved by save/restore */
-+	    cairo_move_to( mpCairo, 0, 0 );
-+	    cairo_show_text( mpCairo, ::rtl::OUStringToOString( text.Text, RTL_TEXTENCODING_UTF8 ) );
-+
-+	    cairo_restore( mpCairo );
-+	} else
-+	    OSL_TRACE ("CanvasHelper called after it was disposed");
-+
-+	#ifdef CAIRO_CANVAS_PERF_TRACE
-+	mxDevice->stopPerfTrace( &aTimer, "drawText" );
-+        #endif
-+
-+	return uno::Reference< rendering::XCachedPrimitive >(NULL);
-+    }
-+
-+    uno::Reference< rendering::XCachedPrimitive > CanvasHelper::drawTextLayout( const rendering::XCanvas* 						pCanvas, 
-+                                                                                const uno::Reference< rendering::XTextLayout >& xLayoutetText, 
-+                                                                                const rendering::ViewState& 					viewState, 
-+                                                                                const rendering::RenderState& 					renderState )
-+    {
-+        ENSURE_AND_THROW( xLayoutetText.is(), 
-+                          "CanvasHelper::drawTextLayout: layout is NULL");
-+
-+	if( mpCairo ) {
-+	    TextLayout* pTextLayout = 
-+		dynamic_cast< TextLayout* >( xLayoutetText.get() );
-+        
-+	    ENSURE_AND_THROW( pTextLayout,
-+			      "CanvasHelper::drawTextLayout(): TextLayout not compatible with this canvas" );
-+
-+	    cairo_save( mpCairo );
-+	    useStates( viewState, renderState, true );
-+
-+	    pTextLayout->draw( mpCairo );
-+	    cairo_restore( mpCairo );
-+	}
-+
-+        return uno::Reference< rendering::XCachedPrimitive >(NULL);
-+    }
-+
 +    uno::Reference< rendering::XCachedPrimitive > CanvasHelper::implDrawBitmapSurface( Surface* pSurface,
-+										       const rendering::ViewState& viewState,
-+										       const rendering::RenderState& renderState,
-+										       const geometry::IntegerSize2D& rSize,
-+										       bool bModulateColors,
-+										       bool bHasAlpha )
++																					   const rendering::ViewState& viewState,
++																					   const rendering::RenderState& renderState,
++																					   const geometry::IntegerSize2D& rSize,
++																					   bool bModulateColors,
++																					   bool bHasAlpha )
 +    {
-+	uno::Reference< rendering::XCachedPrimitive > rv = uno::Reference< rendering::XCachedPrimitive >(NULL);
++		uno::Reference< rendering::XCachedPrimitive > rv = uno::Reference< rendering::XCachedPrimitive >(NULL);
 +
-+	if( mpCairo ) {
-+	    const ::basegfx::B2ISize& aSize = mpDevice->getSizePixel();
++		if( mpCairo ) {
++			const ::basegfx::B2ISize& aSize = mpDevice->getSizePixel();
 +
-+	    cairo_save( mpCairo );
++			cairo_save( mpCairo );
 +
-+ 	    cairo_rectangle( mpCairo, 0, 0, aSize.getX(), aSize.getY() );
-+ 	    cairo_clip( mpCairo );
++			cairo_rectangle( mpCairo, 0, 0, aSize.getX(), aSize.getY() );
++			cairo_clip( mpCairo );
 +
-+	    useStates( viewState, renderState, true );
++			useStates( viewState, renderState, true );
 +
-+//   	    if( !bHasAlpha )
-+//   		cairo_set_operator( mpCairo, CAIRO_OPERATOR_SOURCE );
++			//   	    if( !bHasAlpha )
++			//   		cairo_set_operator( mpCairo, CAIRO_OPERATOR_SOURCE );
 +
-+	    Matrix aMatrix;
++			Matrix aMatrix;
 +
-+	    cairo_get_matrix( mpCairo, &aMatrix );
-+	    if( ! ::rtl::math::approxEqual( aMatrix.xx, 1 ) &&
-+		! ::rtl::math::approxEqual( aMatrix.yy, 1 ) &&
-+		::rtl::math::approxEqual( aMatrix.x0, 0 ) &&
-+		::rtl::math::approxEqual( aMatrix.y0, 0 ) &&
-+		round( rSize.Width * aMatrix.xx ) > 8 &&
-+		round( rSize.Height* aMatrix.yy ) > 8 )
-+	    {
-+		double dWidth, dHeight;
++			cairo_get_matrix( mpCairo, &aMatrix );
++			if( ! ::rtl::math::approxEqual( aMatrix.xx, 1 ) &&
++				! ::rtl::math::approxEqual( aMatrix.yy, 1 ) &&
++				::rtl::math::approxEqual( aMatrix.x0, 0 ) &&
++				::rtl::math::approxEqual( aMatrix.y0, 0 ) &&
++				round( rSize.Width * aMatrix.xx ) > 8 &&
++				round( rSize.Height* aMatrix.yy ) > 8 )
++				{
++					double dWidth, dHeight;
 +
-+		dWidth = round( rSize.Width * aMatrix.xx );
-+		dHeight = round( rSize.Height* aMatrix.yy );
++					dWidth = round( rSize.Width * aMatrix.xx );
++					dHeight = round( rSize.Height* aMatrix.yy );
 +
-+		Surface* pScaledSurface = mpDevice->getSurface( ::basegfx::B2ISize( static_cast<sal_Int32>( dWidth ),
-+										    static_cast<sal_Int32>( dHeight ) ),
-+								bHasAlpha ? CAIRO_CONTENT_COLOR_ALPHA : CAIRO_CONTENT_COLOR );
-+		Cairo* pCairo = cairo_create( pScaledSurface );
++					Surface* pScaledSurface = mpDevice->getSurface( ::basegfx::B2ISize( static_cast<sal_Int32>( dWidth ),
++																						static_cast<sal_Int32>( dHeight ) ),
++																	bHasAlpha ? CAIRO_CONTENT_COLOR_ALPHA : CAIRO_CONTENT_COLOR );
++					Cairo* pCairo = pScaledSurface->getCairo();
 +
-+		cairo_set_source_surface( pCairo, pSurface, 0, 0 );
-+		cairo_scale( pCairo, dWidth/rSize.Width, dHeight/rSize.Height );
-+		cairo_paint( pCairo );
++					cairo_set_source_surface( pCairo, pSurface->mpSurface, 0, 0 );
++					cairo_scale( pCairo, dWidth/rSize.Width, dHeight/rSize.Height );
++					cairo_paint( pCairo );
 +
-+		cairo_destroy( pCairo );
++					cairo_destroy( pCairo );
 +
-+		pSurface = pScaledSurface;
++					pSurface = pScaledSurface;
 +
-+		aMatrix.xx = aMatrix.yy = 1;
-+		cairo_set_matrix( mpCairo, &aMatrix );
++					aMatrix.xx = aMatrix.yy = 1;
++					cairo_set_matrix( mpCairo, &aMatrix );
 +
-+		rv = uno::Reference< rendering::XCachedPrimitive >( new CachedBitmap( pSurface, viewState, renderState, mpDevice ) );
++					rv = uno::Reference< rendering::XCachedPrimitive >( new CachedBitmap( pSurface, viewState, renderState, mpDevice ) );
 +
-+		cairo_surface_destroy( pSurface );
-+	    }
++					pSurface->Unref();
++				}
 +
-+	    cairo_set_source_surface( mpCairo, pSurface, 0, 0 );
-+	    cairo_paint( mpCairo );
-+	    cairo_restore( mpCairo );
-+	} else
-+	    OSL_TRACE ("CanvasHelper called after it was disposed");
++			cairo_set_source_surface( mpCairo, pSurface->mpSurface, 0, 0 );
++			cairo_paint( mpCairo );
++			cairo_restore( mpCairo );
++		} else
++			OSL_TRACE ("CanvasHelper called after it was disposed");
 +
 +        return rv; // uno::Reference< rendering::XCachedPrimitive >(NULL);
 +    }
@@ -1171,7 +1111,7 @@
 +	if( pSurface ) {
 +	    rv = implDrawBitmapSurface( pSurface, viewState, renderState, aSize, false, bHasAlpha );
 +
-+	    cairo_surface_destroy( pSurface );
++	    pSurface->Unref();
 +
 +	    if( data )
 +		free( data );
@@ -1222,24 +1162,23 @@
 +    uno::Reference< rendering::XBitmap > CanvasHelper::getScaledBitmap( const geometry::RealSize2D&	newSize, 
 +                                                                        sal_Bool 					beFast )
 +    {
-+	#ifdef CAIRO_CANVAS_PERF_TRACE
-+	struct timespec aTimer;
-+	mxDevice->startPerfTrace( &aTimer );
-+        #endif
++#ifdef CAIRO_CANVAS_PERF_TRACE
++		struct timespec aTimer;
++		mxDevice->startPerfTrace( &aTimer );
++#endif
 +
-+	if( mpCairo ) {
-+	    Surface *pSurface = cairo_get_target( mpCairo );
-+	    return uno::Reference< rendering::XBitmap >( new CanvasBitmap( ::basegfx::B2ISize( ::canvas::tools::roundUp( newSize.Width ),
-+											       ::canvas::tools::roundUp( newSize.Height ) ),
-+									   mpDevice, false ) );
-+	} else
-+	    OSL_TRACE ("CanvasHelper called after it was disposed");
++		if( mpCairo ) {
++			return uno::Reference< rendering::XBitmap >( new CanvasBitmap( ::basegfx::B2ISize( ::canvas::tools::roundUp( newSize.Width ),
++																							   ::canvas::tools::roundUp( newSize.Height ) ),
++																		   mpDevice, false ) );
++		} else
++			OSL_TRACE ("CanvasHelper called after it was disposed");
 +
-+	#ifdef CAIRO_CANVAS_PERF_TRACE
-+	mxDevice->stopPerfTrace( &aTimer, "getScaledBitmap" );
-+        #endif
++#ifdef CAIRO_CANVAS_PERF_TRACE
++		mxDevice->stopPerfTrace( &aTimer, "getScaledBitmap" );
++#endif
 +
-+	return uno::Reference< rendering::XBitmap >();
++		return uno::Reference< rendering::XBitmap >();
 +    }
 +
 +    uno::Sequence< sal_Int8 > CanvasHelper::getData( rendering::IntegerBitmapLayout&     bitmapLayout, 
@@ -1309,35 +1248,35 @@
 +    }
 +
 +    bool CanvasHelper::repaint( Surface* pSurface,
-+				const rendering::ViewState&	viewState,
-+				const rendering::RenderState&	renderState )
++								const rendering::ViewState&	viewState,
++								const rendering::RenderState&	renderState )
 +    {
-+	OSL_TRACE("CanvasHelper::repaint");
++		OSL_TRACE("CanvasHelper::repaint");
 +
-+	if( mpCairo ) {
-+	    const ::basegfx::B2ISize& aSize = mpDevice->getSizePixel();
++		if( mpCairo ) {
++			const ::basegfx::B2ISize& aSize = mpDevice->getSizePixel();
 +
-+	    cairo_save( mpCairo );
++			cairo_save( mpCairo );
 +
-+ 	    cairo_rectangle( mpCairo, 0, 0, aSize.getX(), aSize.getY() );
-+ 	    cairo_clip( mpCairo );
++			cairo_rectangle( mpCairo, 0, 0, aSize.getX(), aSize.getY() );
++			cairo_clip( mpCairo );
 +
-+	    useStates( viewState, renderState, true );
++			useStates( viewState, renderState, true );
 +
-+	    Matrix aMatrix;
++			Matrix aMatrix;
 +
-+	    cairo_get_matrix( mpCairo, &aMatrix );
-+	    aMatrix.xx = aMatrix.yy = 1;
-+	    cairo_set_matrix( mpCairo, &aMatrix );
++			cairo_get_matrix( mpCairo, &aMatrix );
++			aMatrix.xx = aMatrix.yy = 1;
++			cairo_set_matrix( mpCairo, &aMatrix );
 +
-+//   	    if( !bHasAlpha )
-+//   		cairo_set_operator( mpCairo, CAIRO_OPERATOR_SOURCE );
++			//   	    if( !bHasAlpha )
++			//   		cairo_set_operator( mpCairo, CAIRO_OPERATOR_SOURCE );
 +
-+	    cairo_set_source_surface( mpCairo, pSurface, 0, 0 );
-+	    cairo_paint( mpCairo );
-+	    cairo_restore( mpCairo );
-+	}
++			cairo_set_source_surface( mpCairo, pSurface->mpSurface, 0, 0 );
++			cairo_paint( mpCairo );
++			cairo_restore( mpCairo );
++		}
 +
-+	return true;
++		return true;
 +    }
 +}

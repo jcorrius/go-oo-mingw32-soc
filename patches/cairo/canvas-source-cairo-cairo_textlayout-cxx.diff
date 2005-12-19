@@ -1,6 +1,6 @@
 --- /dev/null	
 +++ canvas/source/cairo/cairo_textlayout.cxx	
-@@ -0,0 +1,276 @@
+@@ -0,0 +1,397 @@
 +/*************************************************************************
 + *
 + *  OpenOffice.org - a multi-platform office productivity suite
@@ -42,6 +42,8 @@
 +#include <basegfx/matrix/b2dhommatrix.hxx>
 +#include <basegfx/numeric/ftools.hxx>
 +
++#include <boost/scoped_array.hpp>
++
 +#include "cairo_textlayout.hxx"
 +#include "cairo_spritecanvas.hxx"
 +
@@ -54,7 +56,7 @@
 +    TextLayout::TextLayout( const rendering::StringContext& 	aText, 
 +                            sal_Int8                        	nDirection, 
 +                            sal_Int64                       	nRandomSeed,
-+                            const CanvasFont::ImplRef&      	rFont ) :
++                            const CanvasFont::Reference&      	rFont ) :
 +        TextLayout_Base( m_aMutex ),
 +        maText( aText ),
 +        maLogicalAdvancements(),
@@ -241,20 +243,139 @@
 +    {
 +        ::osl::MutexGuard aGuard( m_aMutex );
 +
-+	::rtl::OUString aSubText = maText.Text.copy( maText.StartPosition, maText.Length );
-+	::rtl::OString aUTF8String = ::rtl::OUStringToOString( aSubText, RTL_TEXTENCODING_UTF8 );
++		::rtl::OUString aSubText = maText.Text.copy( maText.StartPosition, maText.Length );
++		::rtl::OString aUTF8String = ::rtl::OUStringToOString( aSubText, RTL_TEXTENCODING_UTF8 );
 +
-+	cairo_save( pCairo );
-+	/* move to 0, 0 as cairo_show_text advances current point and current point is not restored by cairo_restore.
-+	   before we were depending on unmodified current point which I believed was preserved by save/restore */
-+	cairo_move_to( pCairo, 0, 0 );
-+	useFont( pCairo );
-+	cairo_show_text( pCairo, aUTF8String );
-+	cairo_restore( pCairo );
++		cairo_save( pCairo );
++		/* move to 0, 0 as cairo_show_text advances current point and current point is not restored by cairo_restore.
++		   before we were depending on unmodified current point which I believed was preserved by save/restore */
++		cairo_move_to( pCairo, 0, 0 );
++		useFont( pCairo );
++		cairo_show_text( pCairo, aUTF8String );
++		cairo_restore( pCairo );
 +
 +        return true;
 +    }
 +
++    namespace
++    {
++        void setupLayoutMode( OutputDevice& rOutDev,
++                              sal_Int8		nTextDirection )	
++        {
++            // TODO(P3): avoid if already correctly set
++            ULONG nLayoutMode;
++            switch( nTextDirection )
++            {
++                default:
++                    nLayoutMode = 0;
++                    break;
++                case rendering::TextDirection::WEAK_LEFT_TO_RIGHT:
++                    nLayoutMode = TEXT_LAYOUT_BIDI_LTR;
++                    break;
++                case rendering::TextDirection::STRONG_LEFT_TO_RIGHT:
++                    nLayoutMode = TEXT_LAYOUT_BIDI_LTR | TEXT_LAYOUT_BIDI_STRONG;
++                    break;
++                case rendering::TextDirection::WEAK_RIGHT_TO_LEFT:
++                    nLayoutMode = TEXT_LAYOUT_BIDI_RTL;
++                    break;
++                case rendering::TextDirection::STRONG_RIGHT_TO_LEFT:
++                    nLayoutMode = TEXT_LAYOUT_BIDI_RTL | TEXT_LAYOUT_BIDI_STRONG;
++                    break;
++            }
++
++            // set calculated layout mode. Origin is always the left edge,
++            // as required at the API spec
++            rOutDev.SetLayoutMode( nLayoutMode | TEXT_LAYOUT_TEXTORIGIN_LEFT );
++        }
++    }
++
++    namespace
++    {
++        class OffsetTransformer
++        {
++        public:
++            OffsetTransformer( const ::basegfx::B2DHomMatrix& rMat ) :
++                maMatrix( rMat )
++            {
++            }
++
++            sal_Int32 operator()( const double& rOffset )
++            {
++                // This is an optimization of the normal rMat*[x,0]
++                // transformation of the advancement vector (in x
++                // direction), followed by a length calculation of the
++                // resulting vector: advancement' =
++                // ||rMat*[x,0]||. Since advancements are vectors, we
++                // can ignore translational components, thus if [x,0],
++                // it follows that rMat*[x,0]=[x',0] holds. Thus, we
++                // just have to calc the transformation of the x
++                // component.
++
++                // TODO(F2): Handle non-horizontal advancements!
++                return ::basegfx::fround( hypot(maMatrix.get(0,0)*rOffset,
++												maMatrix.get(1,0)*rOffset) );
++            }
++
++        private:
++            ::basegfx::B2DHomMatrix maMatrix;
++        };
++    }
++
++    void TextLayout::setupTextOffsets( sal_Int32*						outputOffsets,
++                                       const uno::Sequence< double >& 	inputOffsets,
++                                       const rendering::ViewState& 		viewState,
++                                       const rendering::RenderState& 	renderState		) const
++    {
++        ENSURE_AND_THROW( outputOffsets!=NULL,
++                          "TextLayout::setupTextOffsets offsets NULL" );
++
++        ::basegfx::B2DHomMatrix aMatrix;
++
++        ::canvas::tools::mergeViewAndRenderTransform(aMatrix,
++                                                     viewState,
++                                                     renderState);
++
++        // fill integer offsets
++        ::std::transform( const_cast< uno::Sequence< double >& >(inputOffsets).getConstArray(),
++                          const_cast< uno::Sequence< double >& >(inputOffsets).getConstArray()+inputOffsets.getLength(),
++                          outputOffsets,
++                          OffsetTransformer( aMatrix ) );
++    }
++
++    bool TextLayout::draw( OutputDevice&                 rOutDev,
++                           const Point&                  rOutpos,
++                           const rendering::ViewState&   viewState,
++                           const rendering::RenderState& renderState ) const
++    {
++        ::osl::MutexGuard aGuard( m_aMutex );
++
++        setupLayoutMode( rOutDev, mnTextDirection );
++
++        if( maLogicalAdvancements.getLength() )
++        {
++            // TODO(P2): cache that
++            ::boost::scoped_array< sal_Int32 > aOffsets(new sal_Int32[maLogicalAdvancements.getLength()]);
++            setupTextOffsets( aOffsets.get(), maLogicalAdvancements, viewState, renderState );
++            
++            // TODO(F3): ensure correct length and termination for DX
++            // array (last entry _must_ contain the overall width)
++            
++            rOutDev.DrawTextArray( rOutpos,
++                                   maText.Text,
++                                   aOffsets.get(),
++                                   ::canvas::tools::numeric_cast<USHORT>(maText.StartPosition),
++                                   ::canvas::tools::numeric_cast<USHORT>(maText.Length) );
++        }
++        else
++        {
++            rOutDev.DrawText( rOutpos,
++                              maText.Text,
++                              ::canvas::tools::numeric_cast<USHORT>(maText.StartPosition),
++                              ::canvas::tools::numeric_cast<USHORT>(maText.Length) );
++        }
++
++        return true;
++    }
 +
 +#define SERVICE_NAME "com.sun.star.rendering.TextLayout"
 +#define IMPLEMENTATION_NAME "CairoCanvas::TextLayout"

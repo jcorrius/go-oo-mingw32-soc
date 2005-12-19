@@ -1,0 +1,214 @@
+Index: vcl/inc/sysdata.hxx
+===================================================================
+diff -u -p -r1.7 -r1.7.54.1
+--- vcl/inc/sysdata.hxx	2 Nov 2005 13:29:23 -0000	1.7
++++ vcl/inc/sysdata.hxx	14 Dec 2005 15:36:38 -0000	1.7.54.1
+@@ -99,7 +99,8 @@ struct SystemGraphicsData
+ #if defined( WNT )
+ 	HDC			    hDC;			// handle to a device context
+ #elif defined( UNX )
+-	long		    aGC;            // a graphics context
++	long		    hDrawable;      // a drawable
++	void*           pRenderFormat;  // render format for drawable
+ #endif
+ };
+ 
+Index: vcl/source/gdi/virdev.cxx
+===================================================================
+diff -u -p -r1.21 -r1.21.128.1
+--- vcl/source/gdi/virdev.cxx	9 Sep 2005 12:12:30 -0000	1.21
++++ vcl/source/gdi/virdev.cxx	13 Dec 2005 12:52:33 -0000	1.21.128.1
+@@ -141,7 +141,10 @@ void VirtualDevice::ImplInitVirDev( cons
+ 
+ 	// Virtuelle Devices haben defaultmaessig einen weissen Hintergrund
+ 	SetBackground( Wallpaper( Color( COL_WHITE ) ) );
+-	Erase();
++
++    // #i59283# don't erase user-provided surface
++    if( !pData )
++        Erase();
+ 
+ 	// VirDev in Liste eintragen
+ 	mpNext = pSVData->maGDIData.mpFirstVirDev;
+Index: vcl/unx/inc/salgdi.h
+===================================================================
+diff -u -p -r1.33 -r1.33.54.1
+--- vcl/unx/inc/salgdi.h	2 Nov 2005 13:33:13 -0000	1.33
++++ vcl/unx/inc/salgdi.h	14 Dec 2005 15:36:39 -0000	1.33.54.1
+@@ -91,6 +91,7 @@ protected:
+     SalColormap    *m_pColormap;
+     SalColormap    *m_pDeleteColormap;
+     Drawable        hDrawable_;     // use
++	void*           pRenderFormat_;
+ 
+     XLIB_Region     pPaintRegion_;
+     XLIB_Region     pClipRegion_;
+@@ -207,6 +208,8 @@ public:
+     inline  SalVisual		*GetVisual() const;
+     inline  Drawable        GetDrawable() const { return hDrawable_; }
+     inline  void            SetDrawable( Drawable d ) { hDrawable_ = d; }
++	inline  void*           GetXRenderFormat() { return pRenderFormat_; }
++	inline  void            SetXRenderFormat( void* pRenderFormat ) { pRenderFormat_ = pRenderFormat; }
+     inline  SalColormap    &GetColormap() const { return *m_pColormap; }
+     inline  Pixel           GetPixel( SalColor nSalColor ) const;
+ 
+Index: vcl/unx/inc/salvd.h
+===================================================================
+diff -u -p -r1.5 -r1.5.128.1
+--- vcl/unx/inc/salvd.h	9 Sep 2005 12:48:06 -0000	1.5
++++ vcl/unx/inc/salvd.h	14 Dec 2005 15:36:39 -0000	1.5.128.1
+@@ -61,6 +61,7 @@ class X11SalVirtualDevice : public SalVi
+     int				nDY_;
+     USHORT			nDepth_;
+     BOOL			bGraphics_;			// is Graphics used
++	BOOL            bExternPixmap_;
+     
+ public:
+ 	X11SalVirtualDevice();
+@@ -68,7 +69,9 @@ public:
+ 
+     BOOL			Init( SalDisplay *pDisplay,
+                           long nDX, long nDY,
+-                          USHORT nBitCount );
++                          USHORT nBitCount,
++						  Pixmap hDrawable = None,
++						  void* pRenderFormat = NULL );
+ 	inline	void			InitGraphics( X11SalVirtualDevice *pVD );
+ 
+ 	inline	Display		   *GetXDisplay() const;
+Index: vcl/unx/source/gdi/salgdi.cxx
+===================================================================
+diff -u -p -r1.36 -r1.36.126.1
+--- vcl/unx/source/gdi/salgdi.cxx	9 Sep 2005 13:07:10 -0000	1.36
++++ vcl/unx/source/gdi/salgdi.cxx	14 Dec 2005 15:36:39 -0000	1.36.126.1
+@@ -118,6 +118,7 @@ X11SalGraphics::X11SalGraphics()
+     m_pVDev				= NULL;
+     m_pDeleteColormap	= NULL;
+ 	hDrawable_			= None;
++	pRenderFormat_      = NULL;
+ 
+ 	pClipRegion_			= NULL;
+ 	pPaintRegion_		= NULL;
+Index: vcl/unx/source/gdi/salgdi3.cxx
+===================================================================
+diff -u -p -r1.129 -r1.129.52.1
+--- vcl/unx/source/gdi/salgdi3.cxx	2 Nov 2005 13:34:53 -0000	1.129
++++ vcl/unx/source/gdi/salgdi3.cxx	14 Dec 2005 15:36:39 -0000	1.129.52.1
+@@ -730,13 +730,18 @@ ConvertTextItem16( XTextItem16* pTextIte
+ 
+ void X11SalGraphics::DrawServerAAFontString( const ServerFontLayout& rLayout )
+ {
+-    Display* pDisplay = GetXDisplay();
+-    Visual* pVisual = GetDisplay()->GetVisual()->GetVisual();
++	Display* pDisplay = GetXDisplay();
++	XRenderPictFormat* pVisualFormat = (XRenderPictFormat*) GetXRenderFormat();
++
++	if( !pVisualFormat )
++	{
++		Visual* pVisual = GetDisplay()->GetVisual()->GetVisual();
+ #ifdef XRENDER_LINK
+-    XRenderPictFormat* pVisualFormat = XRenderFindVisualFormat ( pDisplay, pVisual );
++		pVisualFormat = XRenderFindVisualFormat ( pDisplay, pVisual );
+ #else
+-    XRenderPictFormat* pVisualFormat = (*aX11GlyphPeer.pXRenderFindVisualFormat)( pDisplay, pVisual );
++		pVisualFormat = (*aX11GlyphPeer.pXRenderFindVisualFormat)( pDisplay, pVisual );
+ #endif
++	}
+ 
+     // create xrender Picture for font foreground
+     static Pixmap aPixmap;
+Index: vcl/unx/source/gdi/salvd.cxx
+===================================================================
+diff -u -p -r1.10 -r1.10.126.1
+--- vcl/unx/source/gdi/salvd.cxx	9 Sep 2005 13:08:36 -0000	1.10
++++ vcl/unx/source/gdi/salvd.cxx	14 Dec 2005 15:36:40 -0000	1.10.126.1
+@@ -50,6 +50,9 @@
+ #ifndef _SV_SALVD_H
+ #include <salvd.h>
+ #endif
++#ifndef _SV_SYSDATA_HXX
++#include <sysdata.hxx>
++#endif
+ 
+ // -=-= SalInstance =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+ // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+@@ -60,7 +63,16 @@ SalVirtualDevice* X11SalInstance::Create
+ 	X11SalVirtualDevice *pVDev = new X11SalVirtualDevice();
+ 	if( !nBitCount && pGraphics )
+ 		nBitCount = pGraphics->GetBitCount();
+-	if( !pVDev->Init( GetSalData()->GetDisplay(), nDX, nDY, nBitCount ) )
++
++	if( pData )
++    {
++		if( !pVDev->Init( GetSalData()->GetDisplay(), nDX, nDY, nBitCount, pData->hDrawable, pData->pRenderFormat ) )
++		{
++			delete pVDev;
++			return NULL;
++		}
++	}
++    else if( !pVDev->Init( GetSalData()->GetDisplay(), nDX, nDY, nBitCount ) )
+ 	{
+ 		delete pVDev;
+ 		return NULL;
+@@ -106,19 +118,29 @@ void X11SalGraphics::Init( X11SalVirtual
+ // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+ BOOL X11SalVirtualDevice::Init( SalDisplay *pDisplay,
+                                 long nDX, long nDY,
+-								USHORT nBitCount )
++								USHORT nBitCount,
++								Pixmap hDrawable,
++								void* pRenderFormat )
+ {
+     pDisplay_               = pDisplay;
+     pGraphics_				= new X11SalGraphics();
++	if( pRenderFormat )
++		pGraphics_->SetXRenderFormat( pRenderFormat );
+     pGraphics_->SetLayout( 0 ); // by default no! mirroring for VirtualDevices, can be enabled with EnableRTL()
+ 	nDX_                    = nDX;
+ 	nDY_                    = nDY;
+ 	nDepth_                 = nBitCount;
+ 
+-	hDrawable_              = XCreatePixmap( GetXDisplay(),
+-									 pDisplay_->GetDrawable(),
+-									 nDX_, nDY_,
+-									 GetDepth() );
++	if( hDrawable == None )
++		hDrawable_          = XCreatePixmap( GetXDisplay(),
++											 pDisplay_->GetDrawable(),
++											 nDX_, nDY_,
++											 GetDepth() );
++	else
++	{
++		hDrawable_ = hDrawable;
++		bExternPixmap_ = TRUE;
++	}
+ 
+     pGraphics_->Init( this );
+ 
+@@ -135,6 +157,7 @@ X11SalVirtualDevice::X11SalVirtualDevice
+ 	nDY_                    = 0;
+ 	nDepth_                 = 0;
+ 	bGraphics_              = FALSE;
++	bExternPixmap_          = FALSE;
+ }
+ 
+ // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+@@ -143,7 +166,7 @@ X11SalVirtualDevice::~X11SalVirtualDevic
+ 	if( pGraphics_ )
+ 		delete pGraphics_;
+ 
+-	if( GetDrawable() )
++	if( GetDrawable() && !bExternPixmap_ )
+ 		XFreePixmap( GetXDisplay(), GetDrawable() );
+ }
+ 
+@@ -163,6 +186,9 @@ void X11SalVirtualDevice::ReleaseGraphic
+ 
+ BOOL X11SalVirtualDevice::SetSize( long nDX, long nDY )
+ {
++	if( bExternPixmap_ )
++		return FALSE;
++
+ 	if( !nDX ) nDX = 1;
+ 	if( !nDY ) nDY = 1;
+ 
