@@ -6,13 +6,17 @@
 #include <org/openoffice/vba/XRange.hpp>
 #include <com/sun/star/table/XCellRange.hpp>
 #include <org/openoffice/vba/XFont.hpp>
-#include "org/openoffice/vba/xlPasteType.hdl"
-#include "org/openoffice/vba/xlPasteSpecialOperation.hdl"
+#include <org/openoffice/vba/xlPasteType.hdl>
+#include <org/openoffice/vba/xlPasteSpecialOperation.hdl>
 
 #include <comphelper/proparrhlp.hxx>
 #include <comphelper/propertycontainer.hxx>
 #include <com/sun/star/beans/XPropertySet.hpp>
 #include <com/sun/star/beans/PropertyAttribute.hpp>
+#include <com/sun/star/script/XTypeConverter.hpp>
+#include <com/sun/star/sheet/FillDateMode.hpp>
+#include <com/sun/star/sheet/FillMode.hpp>
+#include <com/sun/star/sheet/FillDirection.hpp>
 
 #include "vbahelper.hxx"
 
@@ -30,10 +34,19 @@ class ScVbaRange : public ScVbaRange_BASE
 	sal_Bool mbIsRows;
 	sal_Bool mbIsColumns;
 	rtl::OUString msDftPropName;
+
+	css::uno::Reference< css::script::XTypeConverter > getTypeConverter() throw (css::uno::RuntimeException);
+
 	css::uno::Reference< oo::vba::XRange > getEntireColumnOrRow( bool bEntireRow = true ) throw( css::uno::RuntimeException );
 
+	css::uno::Any getCellValue( sal_Int32 nRow, sal_Int32 nCol ) throw (css::uno::RuntimeException);
+
+	void  setCellValue( const css::uno::Any& aValue, sal_Int32 nRow, sal_Int32 nCol ) throw ( css::uno::RuntimeException);
+
+	void fillSeries(  css::sheet::FillDirection nFillDirection, css::sheet::FillMode nFillMode, css::sheet::FillDateMode nFillDateMode, double fStep, double fEndValue ) throw( css::uno::RuntimeException );	 
+
 public:
-	ScVbaRange( css::uno::Reference< css::uno::XComponentContext >& xContext, css::uno::Reference< css::table::XCellRange > xRange, sal_Bool bIsRows = false, sal_Bool bIsColumns = false ) throw ( css::lang::IllegalArgumentException );
+	ScVbaRange( const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::table::XCellRange >& xRange, sal_Bool bIsRows = false, sal_Bool bIsColumns = false ) throw ( css::lang::IllegalArgumentException );
 
 	virtual ~ScVbaRange() {}
 
