@@ -1,0 +1,148 @@
+Index: basic/source/classes/sbunoobj.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/classes/sbunoobj.cxx,v
+retrieving revision 1.35
+diff -u -p -r1.35 sbunoobj.cxx
+--- basic/source/classes/sbunoobj.cxx	29 Sep 2005 16:10:51 -0000	1.35
++++ basic/source/classes/sbunoobj.cxx	21 Dec 2005 17:08:46 -0000
+@@ -61,6 +61,9 @@
+ #include <rtl/ustrbuf.hxx>
+ #include <rtl/strbuf.hxx>
+ 
++#ifdef ENABLE_VBA
++#include <org/openoffice/vba/XArrayWrapper.hpp>
++#endif ENABLE_VBA
+ 
+ #include <com/sun/star/uno/XComponentContext.hpp>
+ #include <com/sun/star/uno/DeploymentException.hpp>
+@@ -467,11 +530,92 @@ SbxDataType unoToSbxType( const Referenc
+     }
+ 	return eRetType;
+ }
++#ifdef ENABLE_VBA
++void unoToSbxValue( SbxVariable* pVar, const Any& aValue );
++static void implSequenceToMultiDimArray( SbxDimArray*& pArray, Sequence< sal_Int32 >& indices, Sequence< sal_Int32 >& sizes, const Any& aValue, sal_Int32& dimension, sal_Bool bIsZeroIndex )
++{
++	Type aType = aValue.getValueType();
++	TypeClass eTypeClass = aType.getTypeClass();
++
++	sal_Int32 indicesIndex = indices.getLength() -1; 
++	sal_Int32 dimCopy = dimension;
++
++	if ( eTypeClass == TypeClass_SEQUENCE )
++	{
++		Reference< XIdlClass > xIdlTargetClass = TypeToIdlClass( aType );
++		Reference< XIdlArray > xIdlArray = xIdlTargetClass->getArray();
++		sal_Int32 nLen = xIdlArray->getLen( aValue );
++		for ( sal_Int32 index = 0; index < nLen; ++index )
++		{
++			Any aElementAny = xIdlArray->get( aValue, (UINT32)index );
++			// This detects the dimension were currently processing
++			if ( dimCopy == dimension )
++			{
++				++dimCopy;
++				if ( sizes.getLength() < dimCopy )
++				{
++					sizes.realloc( sizes.getLength() + 1 );	
++					sizes[ sizes.getLength() - 1 ] = nLen;
++					indices.realloc( indices.getLength() + 1 );
++					indicesIndex = indices.getLength() - 1;
++				}
++			}
++
++			if ( bIsZeroIndex )
++				indices[ dimCopy - 1 ] = index;
++			else 
++				indices[ dimCopy - 1] = index + 1;
++
++			implSequenceToMultiDimArray( pArray, indices, sizes, aElementAny, dimCopy, bIsZeroIndex );
++		}
++		
++	}
++	else
++	{
++		if ( indices.getLength() < 2 ) 
++		{
++			// #TODO find a suitable error and how to set it
++			OSL_TRACE("Error not a MultDim Array ");	
++			return;
++		}
++
++		if ( !pArray )
++		{
++			SbxDataType eSbxElementType = unoToSbxType( aValue.getValueTypeClass() );
++			pArray = new SbxDimArray( eSbxElementType );
++			sal_Int32 nIndexLen = indices.getLength();
++		
++			// Dimension the array
++			for ( sal_Int32 index = 0; index < nIndexLen; ++index )
++			{
++				if ( bIsZeroIndex )
++					pArray->unoAddDim32( 0, sizes[ index ] - 1);
++				else
++					pArray->unoAddDim32( 1, sizes[ index ] );
++
++			}
++		}
++
++		if ( pArray )
++		{
++			SbxDataType eSbxElementType = unoToSbxType( aValue.getValueTypeClass() );
++			SbxVariableRef xVar = new SbxVariable( eSbxElementType );
++			unoToSbxValue( (SbxVariable*)xVar, aValue );
++
++			sal_Int32* pIndices = indices.getArray();
++			pArray->Put32( 	(SbxVariable*)xVar, pIndices );
++
++		}
++	}
++}
++#endif //ENABLE_VBA
+ 
+ void unoToSbxValue( SbxVariable* pVar, const Any& aValue )
+ {
+ 	Type aType = aValue.getValueType();
++	Type aArrayWrapperType = org::openoffice::vba::XArrayWrapper::static_type();
+ 	TypeClass eTypeClass = aType.getTypeClass();
++	
+ 	switch( eTypeClass )
+ 	{
+ 		case TypeClass_TYPE:
+@@ -499,11 +643,36 @@ void unoToSbxValue( SbxVariable* pVar, c
+ 			}
+ 		}
+ 		break;
+-
+ 		// Interfaces und Structs muessen in ein SbUnoObject gewrappt werden
+ 		case TypeClass_INTERFACE:
+ 		case TypeClass_STRUCT:
+ 		{
++#ifdef ENABLE_VBA
++			if ( aType == aArrayWrapperType )
++			{
++				Reference< org::openoffice::vba::XArrayWrapper > xWrap( aValue, UNO_QUERY ); 
++				if ( xWrap.is() )
++				{
++					SbxDimArray* pArray = NULL;
++					Sequence< sal_Int32 > indices;
++					Sequence< sal_Int32 > sizes;
++					sal_Int32 dimension = 0;
++					implSequenceToMultiDimArray( pArray, indices, sizes, xWrap->getArray() , dimension, xWrap->getIsZeroIndex() );
++					if ( pArray )
++					{
++						SbxDimArrayRef xArray = pArray;
++						USHORT nFlags = pVar->GetFlags();
++						pVar->ResetFlag( SBX_FIXED );
++						pVar->PutObject( (SbxDimArray*)xArray );
++						pVar->SetFlags( nFlags );
++					}
++					else
++						pVar->PutEmpty();
++					break;	
++				}
++					
++			}
++#endif //ENABLE_VBA
+ 			if( eTypeClass == TypeClass_STRUCT )
+ 			{
+ 				SbiInstance* pInst = pINST;
