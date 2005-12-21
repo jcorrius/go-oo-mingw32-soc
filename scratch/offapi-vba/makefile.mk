@@ -40,6 +40,7 @@ IDLFILES=\
 	XSeriesCollection.idl\
 	XSeries.idl\
 	XDialog.idl \
+	XArrayWrapper.idl \
 	XDialogs.idl 
 
 # ------------------------------------------------------------------
