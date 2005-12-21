@@ -39,6 +39,7 @@
 #include "vbarange.hxx"
 #include "vbafont.hxx"
 #include "vbainterior.hxx"
+#include "vbaarraywrapper.hxx"
 
 #include <comphelper/anytostring.hxx>
 
@@ -140,25 +141,14 @@ ScVbaRange::getValue() throw (uno::RuntimeException)
 	if ( nRowCount == 1 && nColCount == 1 )
 		return getCellValue( 0, 0 );
 	uno::Sequence< uno::Sequence< uno::Any > > aMatrix( nRowCount );
-
+	
 	for ( sal_Int32 i=0; i<nRowCount; ++i )
 	{
 		aMatrix[ i ].realloc( nColCount );	
 		for ( sal_Int32 j=0; j<nColCount; ++j )
 			aMatrix[i][j] = getCellValue( i, j );
 	}
-	
-	/*uno::Sequence< uno::Any >* pCol = aMatrix.getArray();
-	for ( sal_Int32 i=0; i<nRowCount; ++i, ++pCol )
-	{
-		uno::Sequence< uno::Any > aRow( nColCount );
-		uno::Any* pRow = aRow.getArray();
-		*pCol  = aRow;
-		for ( sal_Int32 j=0; j<nColCount; ++j, ++pRow )
-			(*pRow) = getCellValue( i, j );
-	}
-	*/
-	return makeAny( aMatrix );
+	return makeAny( uno::Reference< vba::XArrayWrapper >( new ScArrayWrapper( makeAny( aMatrix ), sal_False ) ) );
 }
 
 uno::Any
@@ -191,9 +181,6 @@ ScVbaRange::getCellValue(sal_Int32 nRow, sal_Int32 nCol ) throw ( uno::RuntimeEx
 void SAL_CALL
 ScVbaRange::setValue( const uno::Any  &aValue  ) throw (uno::RuntimeException)
 {
-	OSL_TRACE("ScVbaRange::setValue() has value %s", 
-		rtl::OUStringToOString( comphelper::anyToString( aValue ), 
-			RTL_TEXTENCODING_UTF8 ).getStr() );
 	uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, uno::UNO_QUERY_THROW );
 	sal_Int32 nRowCount = xColumnRowRange->getRows()->getCount();
 	sal_Int32 nColCount = xColumnRowRange->getColumns()->getCount();
