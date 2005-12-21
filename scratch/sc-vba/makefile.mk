@@ -43,6 +43,7 @@ SLOFILES= \
 		$(SLO)$/vbachartobjects.obj\
 		$(SLO)$/vbaseriescollection.obj\
 		$(SLO)$/vbacollectionimpl.obj\
+		$(SLO)$/vbaarraywrapper.obj\
 		$(SLO)$/vbadialogs.obj \
 		$(SLO)$/vbadialog.obj	
  
