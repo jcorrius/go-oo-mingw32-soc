@@ -3,8 +3,8 @@ EXTRA_DIST=\
 	openabout_redhat.png \
 	openintro_suse.bmp \
 	openabout_suse.png \
-	openintro_nld.bmp \ # unusual/special case
-	openabout_nld.bmp \ # both bmps.
+	openintro_nld.bmp \
+	openabout_nld.bmp \
 	openintro_dropline-gnome.bmp \
 	openabout_dropline-gnome.png \
 	openintro_pld.bmp \
