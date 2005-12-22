@@ -1,8 +1,8 @@
 *** /dev/null	2005-12-16 09:19:58.720346000 +0000
---- sc/source/ui/vba/vbarange.cxx	2005-12-21 16:56:42.000000000 +0000
+--- sc/source/ui/vba/vbarange.cxx	2005-12-22 15:27:48.000000000 +0000
 ***************
 *** 0 ****
---- 1,925 ----
+--- 1,1028 ----
 + #include <comphelper/processfactory.hxx>
 + #include <sfx2/objsh.hxx>
 + 
@@ -58,6 +58,151 @@
 + // another property/method of the same name
 + const ::rtl::OUString RANGE_PROPERTY_DFLT( RTL_CONSTASCII_USTRINGPARAM( "_$DefaultProp" ) );
 + const ::rtl::OUString ISVISIBLE(  RTL_CONSTASCII_USTRINGPARAM( "IsVisible"));
++ 
++ class CellValueSetter : public ArrayVisitor
++ {
++ protected:
++ 	uno::Any maValue;
++ 	uno::TypeClass mTypeClass;
++ 	bool processValue( const uno::Any& aValue,  const uno::Reference< table::XCell >& xCell );
++ public:
++ 	CellValueSetter( const uno::Any& aValue );
++ 	virtual void visitNode( sal_Int32 x, sal_Int32 y, const uno::Reference< table::XCell >& xCell );
++ 		
++ };
++ 
++ CellValueSetter::CellValueSetter( const uno::Any& aValue ): maValue( aValue ), mTypeClass( aValue.getValueTypeClass() ) {}
++ 
++ void
++ CellValueSetter::visitNode( sal_Int32 i, sal_Int32 j, const uno::Reference< table::XCell >& xCell )
++ {
++ 	bool result = processValue( maValue, xCell );
++ }
++ 
++ bool
++ CellValueSetter::processValue( const uno::Any& aValue, const uno::Reference< table::XCell >& xCell )
++ {
++ 	bool isExtracted = false;
++ 	switch ( mTypeClass )
++ 	{
++ 		case  uno::TypeClass_BOOLEAN:
++ 		{
++ 			static ::rtl::OUString sTrue( RTL_CONSTASCII_USTRINGPARAM("=TRUE()"));
++ 			static ::rtl::OUString sFalse( RTL_CONSTASCII_USTRINGPARAM("=FALSE()"));
++ 			sal_Bool bState;
++ 			if ( aValue >>= bState 	 )
++ 			{
++ 				if ( bState )
++ 					xCell->setFormula( sTrue );
++ 				else
++ 					xCell->setFormula( sFalse );
++ 			}
++ 			else
++ 				isExtracted = false;	
++ 			break;
++ 		}
++ 		case uno::TypeClass_STRING:
++ 		{
++ 			rtl::OUString aString;
++ 			if ( aValue >>= aString )
++ 			{
++ 				uno::Reference< text::XTextRange > xTextRange( xCell, uno::UNO_QUERY_THROW );
++ 				xTextRange->setString( aString );
++ 			}
++ 			else
++ 				isExtracted = false;	
++ 			break;
++ 		}
++ 		default:
++ 		{
++ 			double nDouble;
++ 			if ( aValue >>= nDouble )
++ 				xCell->setValue( nDouble );
++ 			else
++ 				isExtracted = false;	
++ 			break;
++ 		}
++ 	}
++ 	return isExtracted;
++ 		
++ }
++ 
++ class CellValueGetter : public ArrayVisitor
++ {
++ protected:
++ 	uno::Any maValue;
++ 	uno::TypeClass mTypeClass;
++ 	virtual void processValue( sal_Int32 x, sal_Int32 y, const uno::Any& aValue );
++ public:
++ 	CellValueGetter() {}
++ 	virtual void visitNode( sal_Int32 x, sal_Int32 y, const uno::Reference< table::XCell >& xCell );
++ 	const uno::Any& getValue() const { return maValue; }
++ 		
++ };
++ 
++ void
++ CellValueGetter::processValue(  sal_Int32 x, sal_Int32 y, const uno::Any& aValue )
++ {
++ 	maValue = aValue;
++ }
++ void CellValueGetter::visitNode( sal_Int32 x, sal_Int32 y, const uno::Reference< table::XCell >& xCell )
++ {
++ 	uno::Any aValue;
++ 	table::CellContentType eType = xCell->getType();
++ 	if( eType == table::CellContentType_VALUE || eType == table::CellContentType_FORMULA )
++ 	{
++ 		if ( eType == table::CellContentType_FORMULA )
++ 		{
++ 			rtl::OUString sFormula = xCell->getFormula();
++ 			if ( sFormula.equals( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("=TRUE()") ) ) )
++ 				aValue <<= sal_True;
++ 			else if ( sFormula.equals( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("=FALSE()") ) ) )
++ 				aValue <<= sal_False;
++ 	
++ 		}
++ 		aValue <<= xCell->getValue();
++ 	}
++ 	if( eType == table::CellContentType_TEXT )
++ 	{
++ 		uno::Reference< text::XTextRange > xTextRange(xCell, ::uno::UNO_QUERY_THROW);
++ 		aValue <<= xTextRange->getString();
++ 	}
++ 	processValue( x,y,aValue );
++ }
++ 
++ class ArrayValueGetter : public CellValueGetter
++ {
++ protected:
++ 	virtual void processValue( sal_Int32 x, sal_Int32 y, const uno::Any& aValue )
++ 	{
++ 		uno::Sequence< uno::Sequence< uno::Any > >& aMatrix = *( uno::Sequence< uno::Sequence< uno::Any > >* )( maValue.getValue() );
++ 		aMatrix[x][y] = aValue;
++ 	}
++ 
++ public:
++ 	ArrayValueGetter(sal_Int32 nRowCount, sal_Int32 nColCount ):CellValueGetter() 
++ 	{
++ 		uno::Sequence< uno::Sequence< uno::Any > > aMatrix;
++ 		aMatrix.realloc( nRowCount );	
++ 		for ( sal_Int32 index = 0; index < nRowCount; ++index )
++ 			aMatrix[index].realloc( nColCount );
++ 		maValue <<= aMatrix;
++ 	}
++ };
++ 
++ class ArrayValueSetter : public CellValueSetter
++ {
++ 	uno::Sequence< uno::Sequence< uno::Any > > aMatrix;
++ public:
++ 	ArrayValueSetter( const uno::Any& aValue ) : CellValueSetter( aValue )
++ 	{
++ 		aValue >>= aMatrix;
++ 	}
++ 	virtual void visitNode( sal_Int32 x, sal_Int32 y, const uno::Reference< table::XCell >& xCell )
++ 	{
++ 		processValue( aMatrix[ x ][ y ], xCell );
++ 	}
++ };
 + 
 + class RangeHelper
 + {
@@ -135,118 +280,76 @@
 + 	return xTypeConv;
 + }
 + 
++ void
++ ScVbaRange::visitArray( ArrayVisitor& visitor )
++ {
++ 	uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, uno::UNO_QUERY_THROW );
++ 	sal_Int32 nRowCount = xColumnRowRange->getRows()->getCount();
++ 	sal_Int32 nColCount = xColumnRowRange->getColumns()->getCount();
++ 	for ( sal_Int32 i=0; i<nRowCount; ++i )
++ 	{
++ 		for ( sal_Int32 j=0; j<nColCount; ++j )
++ 		{
++ 			uno::Reference< table::XCell > xCell( mxRange->getCellByPosition( j, i ), uno::UNO_QUERY_THROW );
++ 
++ 			visitor.visitNode( i, j, xCell );
++ 		}
++ 	}
++ }
++ 
++ 
++ 
++ 
 + uno::Any SAL_CALL
 + ScVbaRange::getValue() throw (uno::RuntimeException)
 + {
 + 	uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, uno::UNO_QUERY_THROW );
 + 	sal_Int32 nRowCount = xColumnRowRange->getRows()->getCount();
 + 	sal_Int32 nColCount = xColumnRowRange->getColumns()->getCount();
-+ 
-+ 	// single cell range e.g. 'Range("A1")
++ 	// single cell range
 + 	if ( nRowCount == 1 && nColCount == 1 )
-+ 		return getCellValue( 0, 0 );
-+ 	uno::Sequence< uno::Sequence< uno::Any > > aMatrix( nRowCount );
-+ 	
-+ 	for ( sal_Int32 i=0; i<nRowCount; ++i )
 + 	{
-+ 		aMatrix[ i ].realloc( nColCount );	
-+ 		for ( sal_Int32 j=0; j<nColCount; ++j )
-+ 			aMatrix[i][j] = getCellValue( i, j );
++ 		CellValueGetter getter;
++ 		visitArray( getter );
++ 		return getter.getValue();
 + 	}
-+ 	return makeAny( uno::Reference< vba::XArrayWrapper >( new ScArrayWrapper( makeAny( aMatrix ), sal_False ) ) );
-+ }
++ 	// multi cell range ( return array )
++ 	ArrayValueGetter getter( nRowCount, nColCount );
++ 	visitArray( getter );
++ 	return makeAny( uno::Reference< vba::XArrayWrapper >( new ScArrayWrapper( getter.getValue(), sal_False ) ) );
 + 
-+ uno::Any
-+ ScVbaRange::getCellValue(sal_Int32 nRow, sal_Int32 nCol ) throw ( uno::RuntimeException)
-+ {
-+ 	uno::Reference< table::XCell > xCell( mxRange->getCellByPosition( nCol, nRow ), uno::UNO_QUERY_THROW );
-+ 
-+ 	table::CellContentType eType = xCell->getType();
-+ 	if( eType == table::CellContentType_VALUE || eType == table::CellContentType_FORMULA )
-+ 	{
-+ 		if ( eType == table::CellContentType_FORMULA )
-+ 		{
-+ 			rtl::OUString sFormula = xCell->getFormula();
-+ 			if ( sFormula.equals( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("=TRUE()") ) ) )
-+ 				return uno::makeAny(sal_True);
-+ 			else if ( sFormula.equals( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("=FALSE()") ) ) )
-+ 				return uno::makeAny(sal_False);
-+ 	
-+ 		}
-+ 		return uno::Any( xCell->getValue() );
-+ 	}
-+ 	if( eType == table::CellContentType_TEXT )
-+ 	{
-+ 		uno::Reference< text::XTextRange > xTextRange(xCell, ::uno::UNO_QUERY_THROW);
-+ 		return uno::makeAny( xTextRange->getString() );
-+ 	}
-+ 	return uno::Any();
 + }
 + 
 + void SAL_CALL
 + ScVbaRange::setValue( const uno::Any  &aValue  ) throw (uno::RuntimeException)
 + {
-+ 	uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, uno::UNO_QUERY_THROW );
-+ 	sal_Int32 nRowCount = xColumnRowRange->getRows()->getCount();
-+ 	sal_Int32 nColCount = xColumnRowRange->getColumns()->getCount();
-+ 	if ( nRowCount == 1 && nColCount == 1 )
-+ 		return setCellValue(aValue,0,0);
-+ 	
-+ 	uno::Reference< script::XTypeConverter > xConverter = getTypeConverter();
-+ 	uno::Any aConverted;
-+ 	try
++ 	uno::TypeClass aClass = aValue.getValueTypeClass();
++ 	if ( aClass == uno::TypeClass_SEQUENCE )
 + 	{
-+ 		aConverted = xConverter->convertTo( aValue, getCppuType((uno::Sequence< uno::Sequence< uno::Any > >*)0) );
-+ 		uno::Sequence< uno::Sequence< uno::Any > > aMatrix;
-+ 		if ( aConverted >>= aMatrix )
++ 		uno::Reference< script::XTypeConverter > xConverter = getTypeConverter();
++ 		uno::Any aConverted;
++ 		try
 + 		{
-+ 			sal_Int32 nRowCount = aMatrix.getLength();
-+ 			for ( sal_Int32 i=0; i<nRowCount; ++i )
++ 			aConverted = xConverter->convertTo( aValue, getCppuType((uno::Sequence< uno::Sequence< uno::Any > >*)0) );
++ 			uno::Sequence< uno::Sequence< uno::Any > > aMatrix;
++ 			if ( aConverted >>= aMatrix )
 + 			{
-+ 				sal_Int32 nColCount = aMatrix[ i ].getLength();
-+ 				for ( sal_Int32 j=0; j<nColCount; ++j )
-+ 					setCellValue( aMatrix[ i ][ j ], i, j );
++ 				ArrayValueSetter setter( aConverted );
++ 				visitArray( setter );
 + 			}
 + 		}
++ 		catch ( uno::Exception& e )
++ 		{
++ 			OSL_TRACE("Bahhh, caught exception %s", 
++ 				rtl::OUStringToOString( e.Message,
++ 					RTL_TEXTENCODING_UTF8 ).getStr() );
++ 		}
 + 	}
-+ 	catch ( uno::Exception& e )
++ 	else
 + 	{
-+ 		OSL_TRACE("Bahhh, caught exception %s", 
-+ 			rtl::OUStringToOString( e.Message,
-+ 				RTL_TEXTENCODING_UTF8 ).getStr() );
++ 		CellValueSetter setter( aValue );
++ 		visitArray( setter );
 + 	}
-+ }
-+ void 
-+ ScVbaRange::setCellValue( const uno::Any  &aValue, sal_Int32 nRow, sal_Int32 nCol ) throw (uno::RuntimeException)
-+ {
-+ 	double nValue;
-+ 	sal_Bool bState;
-+ 	rtl::OUString aString;
-+ 
-+ 	uno::Reference< table::XCell > xCell( mxRange->getCellByPosition(nCol, nRow ), uno::UNO_QUERY_THROW );
-+ 
-+ 	if (aValue >>= nValue)
-+ 	{
-+ 		xCell->setValue( nValue );
-+ 	}
-+ 	else if (aValue >>= aString)
-+ 	{
-+ 		uno::Reference< text::XTextRange > xTextRange( xCell, uno::UNO_QUERY_THROW );
-+ 		xTextRange->setString( aString );
-+ 	}
-+ 	else if (aValue >>= bState)
-+ 	{
-+ 		static ::rtl::OUString sTrue( RTL_CONSTASCII_USTRINGPARAM("=TRUE()"));
-+ 		static ::rtl::OUString sFalse( RTL_CONSTASCII_USTRINGPARAM("=FALSE()"));
-+ 				
-+ 		if ( bState )
-+ 			xCell->setFormula( sTrue );
-+ 		else
-+ 			xCell->setFormula( sFalse );
-+ 			
-+ 	}
-+ 	// maybe need to cater for XRange here also to coven ambigous
-+ 	// basic default property handling
 + }
 + 
 + void
