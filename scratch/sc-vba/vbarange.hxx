@@ -23,7 +23,11 @@
 class ScTableSheetsObj;
 
 typedef ::cppu::WeakImplHelper1< oo::vba::XRange > ScVbaRange_BASE;
-
+class ArrayVisitor
+{
+public:
+	virtual void visitNode( sal_Int32 x, sal_Int32 y, const css::uno::Reference< css::table::XCell >& xCell ) = 0;
+};
 class ScVbaRange : public ScVbaRange_BASE
     ,public ::comphelper::OMutexAndBroadcastHelper
     ,public ::comphelper::OPropertyContainer
@@ -34,14 +38,10 @@ class ScVbaRange : public ScVbaRange_BASE
 	sal_Bool mbIsRows;
 	sal_Bool mbIsColumns;
 	rtl::OUString msDftPropName;
-
+	void visitArray( ArrayVisitor& vistor );
 	css::uno::Reference< css::script::XTypeConverter > getTypeConverter() throw (css::uno::RuntimeException);
 
 	css::uno::Reference< oo::vba::XRange > getEntireColumnOrRow( bool bEntireRow = true ) throw( css::uno::RuntimeException );
-
-	css::uno::Any getCellValue( sal_Int32 nRow, sal_Int32 nCol ) throw (css::uno::RuntimeException);
-
-	void  setCellValue( const css::uno::Any& aValue, sal_Int32 nRow, sal_Int32 nCol ) throw ( css::uno::RuntimeException);
 
 	void fillSeries(  css::sheet::FillDirection nFillDirection, css::sheet::FillMode nFillMode, css::sheet::FillDateMode nFillDateMode, double fStep, double fEndValue ) throw( css::uno::RuntimeException );	 
 
