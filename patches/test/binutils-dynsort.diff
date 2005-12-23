@@ -64,7 +64,7 @@ diff -u -r -x texis -x Makeconfig -x version.h -x '*.o' -x '*.1' -x 'Makefile*' 
    elf_numsections (abfd) = section_number;
 diff -u -r -x texis -x Makeconfig -x version.h -x '*.o' -x '*.1' -x 'Makefile*' -x 'config*' -x libtool -x '*.info' -x '*.tex' binutils-2.16.91.0.4/bfd/elflink.c binutils.current/bfd/elflink.c
 --- binutils-2.16.91.0.4/bfd/elflink.c	2005-12-22 10:42:52.000000000 +0000
-+++ binutils.current/bfd/elflink.c	2005-12-22 10:42:56.000000000 +0000
++++ binutils.current/bfd/elflink.c	2005-12-23 10:58:52.000000000 +0000
 @@ -3007,7 +3007,8 @@
    const struct elf_backend_data *bed;
    bfd_byte *extdyn;
@@ -75,7 +75,445 @@ diff -u -r -x texis -x Makeconfig -x version.h -x '*.o' -x '*.1' -x 'Makefile*' 
    size = _bfd_elf_strtab_size (dynstr);
  
    bed = get_elf_backend_data (dynobj);
+@@ -4801,6 +4802,7 @@
+     return 0;
+   hashcodesp = hashcodes;
+ 
++  fprintf (stderr, "compute_bucket_count: generate hash codes ...\n");
+   /* Put all hash values in HASHCODES.  */
+   elf_link_hash_traverse (elf_hash_table (info),
+ 			  elf_collect_hash_codes, &hashcodesp);
 @@ -4920,6 +4922,125 @@
+   return best_size;
+ }
+ 
++void _bfd_elf_link_hash_traverse
++  (struct elf_link_hash_table *table,
++   bfd_boolean (*func) (struct elf_link_hash_entry *, void *),
++   void *info)
++{
++  if (!table->sorted)
++    bfd_link_hash_traverse						\
++      (&(table)->root,							\
++       (bfd_boolean (*) (struct bfd_link_hash_entry *, void *)) (func),	\
++       (info));
++  else
++    {
++      unsigned int i;
++      for (i = 0; i < table->sorted_size; i++)
++        {
++          if (! func (table->sorted[i], info))
++	    return;
++	}
++    }
++}
++
++/* Where is the qsort closure ? */
++static size_t give_me_a_bucket_count = 0;
++
++/* Sort by elf hash value % buckets  */
++static int
++elf_sort_dynsym_hash (const void *arg1, const void *arg2)
++{
++  size_t h1_bucket, h2_bucket;
++  const struct elf_link_hash_entry *h1;
++  const struct elf_link_hash_entry *h2;
++
++  h1 = *(const struct elf_link_hash_entry **) arg1;
++  h2 = *(const struct elf_link_hash_entry **) arg2;
++
++  h1_bucket = h1->u.elf_hash_value % give_me_a_bucket_count;
++  h2_bucket = h2->u.elf_hash_value % give_me_a_bucket_count;
++
++  if (h1_bucket > h2_bucket)
++    return 1;
++  if (h1_bucket < h2_bucket)
++    return -1;
++
++  return 0;
++}
++
++struct elf_dynsym_sort_info
++{
++  bfd_boolean  do_dynsym;
++  unsigned int alloc_size;
++  unsigned int sorted_size;
++  struct elf_link_hash_entry **sorted_syms;
++};
++
++/* collect sym entries into an array for later sorting */
++static bfd_boolean
++elf_sort_collect_dynsyms (struct elf_link_hash_entry *h, void *data)
++{
++  struct elf_dynsym_sort_info *sinfo = data;
++
++  if ((sinfo->do_dynsym && h->dynindx < 0) ||
++      (!sinfo->do_dynsym && h->dynindx >= 0))
++    return TRUE;
++
++  if (sinfo->sorted_size >= sinfo->alloc_size)
++    {
++      sinfo->alloc_size *= 2;
++      /* FIXME: need to free this data too ... */
++      sinfo->sorted_syms = bfd_realloc (sinfo->sorted_syms,
++					 sizeof (struct elf_link_hash_entry *) *
++					 sinfo->alloc_size);
++    }
++  sinfo->sorted_syms [sinfo->sorted_size++] = h;
++
++  return TRUE;
++}
++
++/*
++ * Sort the exported elf symbols by elf_hash % bucketcount to
++ * improve run-time linker cache behavior. Subsequent
++ * elf_link_hash_traverse calls will reflect this new order.
++ */
++static bfd_boolean
++_bfd_elf_sort_dynsyms (struct bfd_link_info *info)
++{
++  struct elf_dynsym_sort_info sinfo;
++
++  sinfo.alloc_size = 8;
++  sinfo.sorted_syms = bfd_malloc (sizeof (struct elf_link_hash_entry *) *
++				  sinfo.alloc_size);
++  if (!sinfo.sorted_syms)
++    return FALSE;
++
++  sinfo.sorted_size = 0;
++
++  /* append dynsyms for sorting */
++  sinfo.do_dynsym = TRUE;
++  elf_link_hash_traverse (elf_hash_table (info), elf_sort_collect_dynsyms, &sinfo);
++
++  /* sort them ... */
++  if (!getenv ("DONT_SORT_SYMS")) {
++	  fprintf (stderr, "Sorting dynsym\n");
++	  give_me_a_bucket_count = elf_hash_table (info)->bucketcount;
++	  qsort (sinfo.sorted_syms, sinfo.sorted_size,
++		 sizeof (struct elf_link_hash_entry *),
++		 elf_sort_dynsym_hash);
++  }
++
++  /* append everything else */
++  sinfo.do_dynsym = FALSE;
++  elf_link_hash_traverse (elf_hash_table (info), elf_sort_collect_dynsyms, &sinfo);
++
++  /* transfer to the elf hash: FIXME - leaks ... */
++  elf_hash_table (info)->sorted = sinfo.sorted_syms;
++  elf_hash_table (info)->sorted_size = sinfo.sorted_size;
++
++  return TRUE;
++}
++
+ /* Set up the sizes and contents of the ELF dynamic sections.  This is
+    called by the ELF linker emulation before_allocation routine.  We
+    must set the sizes of the sections before the linker sets the
+@@ -5686,6 +5807,7 @@
+ 	 section symbol for each output section, which come first.
+ 	 Next come all of the back-end allocated local dynamic syms,
+ 	 followed by the rest of the global symbols.  */
++      /* To sort these optimally we need the correct bucketcount */
+ 
+       dynsymcount = _bfd_elf_link_renumber_dynsyms (output_bfd, info,
+ 						    &section_sym_count);
+@@ -5756,6 +5878,15 @@
+       for (dtagcount = 0; dtagcount <= info->spare_dynamic_tags; ++dtagcount)
+ 	if (!_bfd_elf_add_dynamic_entry (info, DT_NULL, 0))
+ 	  return FALSE;
++
++      /* Sort .dynsym to accelerate runtime linking */
++      { /* FIXME - make this conditional (?) */
++        if (!_bfd_elf_sort_dynsyms (info))
++          return FALSE;
++	/* reflect the new sorting order */
++	_bfd_elf_link_renumber_dynsyms (output_bfd, info,
++					&section_sym_count);
++      }
+     }
+ 
+   return TRUE;
+@@ -5892,6 +6023,8 @@
+     bfd_vma sym_mask;
+   } u;
+   enum elf_reloc_type_class type;
++  struct elf_link_hash_entry *symbol;
++  unsigned long elf_hash;
+   /* We use this as an array of size int_rels_per_ext_rel.  */
+   Elf_Internal_Rela rela[1];
+ };
+@@ -5928,6 +6061,29 @@
+   const struct elf_link_sort_rela *b = B;
+   int copya, copyb;
+ 
++  /* 
++   * debug / verification ...
++   */
++#if 0
++  if (!a->symbol && b->symbol)
++    return -1;
++  if (!b->symbol && a->symbol)
++    return 1;
++  if (a->symbol && b->symbol)
++    {
++      copya = strcmp (a->symbol->root.root.string, 
++		      b->symbol->root.root.string);
++      fprintf (stderr, "Compare '%s' '%s' (%d)\n",
++	       a->symbol->root.root.string, 
++	       b->symbol->root.root.string, copya);
++      if (copya)
++        return copya > 0 ? 1 : -1;
++    }
++#endif
++  if (a->elf_hash < b->elf_hash)
++    return -1;
++  if (a->elf_hash > b->elf_hash)
++    return 1;
+   if (a->u.offset < b->u.offset)
+     return -1;
+   if (a->u.offset > b->u.offset)
+@@ -5946,8 +6102,9 @@
+ }
+ 
+ static size_t
+-elf_link_sort_relocs (bfd *abfd, struct bfd_link_info *info, asection **psec)
++elf_link_sort_relocs (bfd *abfd, struct elf_final_link_info *finfo, asection **psec)
+ {
++  struct bfd_link_info *info = finfo->info;
+   asection *reldyn;
+   bfd_size_type count, size;
+   size_t i, ret, sort_elt, ext_size;
+@@ -5959,6 +6116,8 @@
+   void (*swap_out) (bfd *, const Elf_Internal_Rela *, bfd_byte *);
+   struct bfd_link_order *lo;
+   bfd_vma r_sym_mask;
++  int r_sym_shift;
++  int do_sort_relocs = !getenv ("DONT_SORT_RELOCS");
+ 
+   reldyn = bfd_get_section_by_name (abfd, ".rela.dyn");
+   if (reldyn == NULL || reldyn->size == 0)
+@@ -6000,15 +6159,29 @@
+     }
+ 
+   if (bed->s->arch_size == 32)
+-    r_sym_mask = ~(bfd_vma) 0xff;
++    {
++      r_sym_mask = ~(bfd_vma) 0xff;
++      r_sym_shift = 8;
++    }
+   else
+-    r_sym_mask = ~(bfd_vma) 0xffffffff;
++    {
++      r_sym_mask = ~(bfd_vma) 0xffffffff;
++      r_sym_shift = 32;
++    }
+ 
+   for (lo = reldyn->map_head.link_order; lo != NULL; lo = lo->next)
+     if (lo->type == bfd_indirect_link_order)
+       {
+ 	bfd_byte *erel, *erelend;
+ 	asection *o = lo->u.indirect.section;
++	int base_offset = -1;
++	int base_max = 0;
++
++	if (elf_hash_table (info)->sorted_size > 0)
++	  {
++	    base_offset = elf_hash_table (info)->sorted[0]->dynindx;
++	    base_max = base_offset + elf_hash_table (info)->sorted_size;
++	  }
+ 
+ 	if (o->contents == NULL && o->size != 0)
+ 	  {
+@@ -6023,10 +6196,31 @@
+ 	p = sort + o->output_offset / ext_size * sort_elt;
+ 	while (erel < erelend)
+ 	  {
++	    long dyn_idx;
++	    size_t bucketcount = elf_hash_table (info)->bucketcount;
+ 	    struct elf_link_sort_rela *s = (struct elf_link_sort_rela *) p;
+ 	    (*swap_in) (abfd, erel, s->rela);
+ 	    s->type = (*bed->elf_backend_reloc_type_class) (s->rela);
+ 	    s->u.sym_mask = r_sym_mask;
++	    
++	    if (s->type != reloc_class_relative)
++	      dyn_idx = s->rela->r_info >> r_sym_shift;
++	    else
++	      dyn_idx = -1;
++
++	    if (do_sort_relocs &&
++		base_offset >= 0 &&
++		dyn_idx < base_max && dyn_idx >= base_offset)
++	    {
++	      s->elf_hash = elf_hash_table (info)->sorted [dyn_idx - base_offset]->u.elf_hash_value % bucketcount;
++	      s->symbol = elf_hash_table (info)->sorted [dyn_idx - base_offset];
++	    }
++	    else
++	    {
++	      s->elf_hash = 0;
++	      s->symbol = NULL;
++	    }
++				       
+ 	    p += sort_elt;
+ 	    erel += ext_size;
+ 	  }
+@@ -8426,7 +8620,7 @@
+     }
+ 
+   if (dynamic && info->combreloc && dynobj != NULL)
+-    relativecount = elf_link_sort_relocs (abfd, info, &reldyn);
++    relativecount = elf_link_sort_relocs (abfd, &finfo, &reldyn);
+ 
+   /* If we are linking against a dynamic object, or generating a
+      shared library, finish up the dynamic linking information.  */
+diff -u -r -x texis -x Makeconfig -x version.h -x '*.o' -x '*.1' -x 'Makefile*' -x 'config*' -x libtool -x '*.info' -x '*.tex' binutils-2.16.91.0.4/bfd/elflink.c~ binutils.current/bfd/elflink.c~
+--- binutils-2.16.91.0.4/bfd/elflink.c~	2005-12-07 11:20:22.000000000 +0000
++++ binutils.current/bfd/elflink.c~	2005-12-23 10:05:33.000000000 +0000
+@@ -194,16 +194,6 @@
+       elf_hash_table (info)->eh_info.hdr_sec = s;
+     }
+ 
+-  if ( info->direct && !info->executable )
+-    {
+-      s = bfd_make_section (abfd, ".direct");
+-      if (s == NULL
+-	  || ! bfd_set_section_flags (abfd, s, flags | SEC_READONLY)
+-	  || ! bfd_set_section_alignment (abfd, s, 2))
+-	return FALSE;
+-      elf_hash_table (info)->direct_sec = s;
+-    }
+-
+   /* Create sections to hold version informations.  These are removed
+      if they are not needed.  */
+   s = bfd_make_section_with_flags (abfd, ".gnu.version_d",
+@@ -2206,9 +2196,7 @@
+ 
+   return TRUE;
+ }
+-
+ 
+-
+ /* Fix up the flags for a symbol.  This handles various cases which
+    can only be fixed after all the input files are seen.  This is
+    currently called by both adjust_dynamic_symbol and
+@@ -2866,9 +2854,6 @@
+ 
+       if (!_bfd_elf_add_dynamic_entry (info, DT_NEEDED, strindex))
+ 	return -1;
+-      elf_dt_needed_idx (abfd) = ++(info->dt_needed_index);
+-/*      fprintf (stderr, "Set soname '%s' as index %d\n",
+-	       soname, info->dt_needed_index); */
+     }
+   else
+     /* We were just checking for existence of the tag.  */
+@@ -3022,7 +3007,8 @@
+   const struct elf_backend_data *bed;
+   bfd_byte *extdyn;
+ 
+-  _bfd_elf_strtab_finalize (dynstr);
++  _bfd_elf_strtab_finalize (dynstr,
++			    elf_hash_table (info)->bucketcount);
+   size = _bfd_elf_strtab_size (dynstr);
+ 
+   bed = get_elf_backend_data (dynobj);
+@@ -3164,8 +3150,6 @@
+   bfd_boolean add_needed;
+   struct elf_link_hash_table * hash_table;
+   bfd_size_type amt;
+-  asection *direct_sec;
+-  unsigned char *direct_data;
+ 
+   hash_table = elf_hash_table (info);
+ 
+@@ -3173,9 +3157,6 @@
+   add_symbol_hook = bed->elf_add_symbol_hook;
+   collect = bed->collect;
+ 
+-  direct_sec = NULL;
+-  direct_data = NULL;
+-
+   if ((abfd->flags & DYNAMIC) == 0)
+     dynamic = FALSE;
+   else
+@@ -3195,14 +3176,6 @@
+ 	    bfd_set_error (bfd_error_wrong_format);
+ 	  goto error_return;
+ 	}
+-      if (info->direct &&
+-	  (direct_sec = bfd_get_section_by_name (abfd, ".direct")))
+-        {
+-          direct_data = bfd_alloc (abfd, direct_sec->size);
+-	  if (direct_data == NULL ||
+-	      ! bfd_get_section_contents (abfd, direct_sec, direct_data, 0, direct_sec->size))
+-	    goto error_return;
+-	}
+     }
+ 
+   /* As a GNU extension, any input sections which are named
+@@ -3852,37 +3825,6 @@
+ 	      && vernum > 1
+ 	      && definition)
+ 	    h->verinfo.verdef = &elf_tdata (abfd)->verdef[vernum - 1];
+-
+-	  if (direct_sec)
+-	    {
+-	      unsigned long d_idx = isym - isymbuf;
+-	      /* FIXME: does bfd_elf_get_elf_syms read dynsym or the symbol
+-		 table ? */
+-	      d_idx += extsymoff;
+-	      d_idx *= 2;
+-	      if (d_idx > bfd_get_section_size (direct_sec))
+-	        fprintf (stderr, "Warning - strange error on '%s': 0x%x 0x%x\n",
+-			 h->root.root.string, (int)d_idx,
+-			 (int)bfd_get_section_size (direct_sec));
+-	      else
+-	        {
+-		  unsigned int direct_entry;
+-		  direct_entry = bfd_get_16 (abfd, direct_data + d_idx);
+-		  if ((direct_entry & DT_DIRECT_VAGUE))
+-		    h->vague_ref = 1;
+-		  if (!h->vague_ref &&
+-		      (direct_entry & DT_DIRECT_MASK) != DT_DIRECT_UNKNOWN)
+-		      h->concrete_ref = 1;
+-#if 0
+-		  fprintf (stderr, "symbol '%s': %s direct entry 0x%x (index %d) section '%s' : '%s'\n",
+-			   h->root.root.string,
+-			   h->vague_ref ? "vague " : h->concrete_ref ? "concrete" : "unknown",
+-			   direct_entry, (int)d_idx/2,
+-			   new_sec ? new_sec->name : "<nosec>",
+-			   new_sec && new_sec->owner ? new_sec->owner->filename : "<noownername>");
+-#endif
+-		}
+-	    }
+ 	}
+ 
+       if (! (_bfd_generic_link_add_one_symbol
+@@ -3896,8 +3838,6 @@
+ 	h = (struct elf_link_hash_entry *) h->root.u.i.link;
+       *sym_hash = h;
+ 
+-      /* FIXME: move direct bits here ? - seem fine where they are ... */
+-
+       new_weakdef = FALSE;
+       if (dynamic
+ 	  && definition
+@@ -4517,8 +4457,6 @@
+   if (isymbuf != NULL)
+     free (isymbuf);
+  error_return:
+-  if (direct_data != NULL)
+-    free (direct_data);
+   return FALSE;
+ }
+ 
+@@ -4864,6 +4802,7 @@
+     return 0;
+   hashcodesp = hashcodes;
+ 
++  fprintf (stderr, "compute_bucket_count: generate hash codes ...\n");
+   /* Put all hash values in HASHCODES.  */
+   elf_link_hash_traverse (elf_hash_table (info),
+ 			  elf_collect_hash_codes, &hashcodesp);
+@@ -4983,6 +4922,125 @@
    return best_size;
  }
  
@@ -201,7 +639,7 @@ diff -u -r -x texis -x Makeconfig -x version.h -x '*.o' -x '*.1' -x 'Makefile*' 
  /* Set up the sizes and contents of the ELF dynamic sections.  This is
     called by the ELF linker emulation before_allocation routine.  We
     must set the sizes of the sections before the linker sets the
-@@ -5686,6 +5807,7 @@
+@@ -5749,6 +5807,7 @@
  	 section symbol for each output section, which come first.
  	 Next come all of the back-end allocated local dynamic syms,
  	 followed by the rest of the global symbols.  */
@@ -209,7 +647,32 @@ diff -u -r -x texis -x Makeconfig -x version.h -x '*.o' -x '*.1' -x 'Makefile*' 
  
        dynsymcount = _bfd_elf_link_renumber_dynsyms (output_bfd, info,
  						    &section_sym_count);
-@@ -5756,6 +5878,15 @@
+@@ -5768,24 +5827,6 @@
+ 	    return FALSE;
+ 	}
+ 
+-      /* Create the direct bindings section - 1 entry per dynsym */
+-      s = bfd_get_section_by_name (dynobj, ".direct");
+-      if (s)
+-        {
+-  	  if (dynsymcount == 0)
+-	   /* _bfd_strip_section_from_output (info, s) */;
+-	  else
+-	    {
+-	      s->size = dynsymcount * sizeof (Elf_External_Direct);
+-	      s->contents = bfd_zalloc (output_bfd, s->size);
+-	      if (s->contents == NULL)
+-	        return FALSE;
+-	      memset (s->contents, 0xff, s->size);
+-	      if (!_bfd_elf_add_dynamic_entry (info, DT_DIRECT, 0))
+-	        return FALSE;
+-	    }
+-	}
+-
+       /* Set the size of the .dynsym and .hash sections.  We counted
+ 	 the number of dynamic symbols in elf_link_add_object_symbols.
+ 	 We will build the contents of .dynsym and .hash when we build
+@@ -5837,6 +5878,15 @@
        for (dtagcount = 0; dtagcount <= info->spare_dynamic_tags; ++dtagcount)
  	if (!_bfd_elf_add_dynamic_entry (info, DT_NULL, 0))
  	  return FALSE;
@@ -225,181 +688,232 @@ diff -u -r -x texis -x Makeconfig -x version.h -x '*.o' -x '*.1' -x 'Makefile*' 
      }
  
    return TRUE;
-diff -u -r -x texis -x Makeconfig -x version.h -x '*.o' -x '*.1' -x 'Makefile*' -x 'config*' -x libtool -x '*.info' -x '*.tex' binutils-2.16.91.0.4/bfd/elflink.c~ binutils.current/bfd/elflink.c~
---- binutils-2.16.91.0.4/bfd/elflink.c~	2005-12-07 11:20:22.000000000 +0000
-+++ binutils.current/bfd/elflink.c~	2005-12-22 09:26:41.000000000 +0000
-@@ -3022,7 +3022,8 @@
-   const struct elf_backend_data *bed;
-   bfd_byte *extdyn;
+@@ -5860,8 +5910,6 @@
+   asection *hash_sec;
+   /* symbol version section (.gnu.version).  */
+   asection *symver_sec;
+-  /* .direct linkage section */
+-  asection *direct_sec;
+   /* Buffer large enough to hold contents of any section.  */
+   bfd_byte *contents;
+   /* Buffer large enough to hold external relocs of any section.  */
+@@ -5975,6 +6023,8 @@
+     bfd_vma sym_mask;
+   } u;
+   enum elf_reloc_type_class type;
++  struct elf_link_hash_entry *symbol;
++  unsigned long elf_hash;
+   /* We use this as an array of size int_rels_per_ext_rel.  */
+   Elf_Internal_Rela rela[1];
+ };
+@@ -6011,6 +6061,29 @@
+   const struct elf_link_sort_rela *b = B;
+   int copya, copyb;
  
--  _bfd_elf_strtab_finalize (dynstr);
-+  _bfd_elf_strtab_finalize (dynstr,
-+			    elf_hash_table (info)->bucketcount);
-   size = _bfd_elf_strtab_size (dynstr);
- 
-   bed = get_elf_backend_data (dynobj);
-@@ -4983,6 +4986,133 @@
-   return best_size;
++  /* 
++   * debug / verification ...
++   */
++#if 0
++  if (!a->symbol && b->symbol)
++    return -1;
++  if (!b->symbol && a->symbol)
++    return 1;
++  if (a->symbol && b->symbol)
++    {
++      copya = strcmp (a->symbol->root.root.string, 
++		      b->symbol->root.root.string);
++      fprintf (stderr, "Compare '%s' '%s' (%d)\n",
++	       a->symbol->root.root.string, 
++	       b->symbol->root.root.string, copya);
++      if (copya)
++        return copya > 0 ? 1 : -1;
++    }
++#endif
++  if (a->elf_hash < b->elf_hash)
++    return -1;
++  if (a->elf_hash > b->elf_hash)
++    return 1;
+   if (a->u.offset < b->u.offset)
+     return -1;
+   if (a->u.offset > b->u.offset)
+@@ -6029,8 +6102,9 @@
  }
  
-+void _bfd_elf_link_hash_traverse
-+  (struct elf_link_hash_table *table,
-+   bfd_boolean (*func) (struct elf_link_hash_entry *, void *),
-+   void *info)
-+{
-+  if (!table->sorted)
-+    bfd_link_hash_traverse						\
-+      (&(table)->root,							\
-+       (bfd_boolean (*) (struct bfd_link_hash_entry *, void *)) (func),	\
-+       (info));
-+  else
-+    {
-+      int i;
-+      for (i = 0; i < table->sorted_size; i++)
-+        {
-+          if (! func (table->sorted[i], info))
-+	    return;
-+	}
-+    }
-+}
-+
-+/* Where is the qsort closure ? */
-+static size_t give_me_a_bucket_count = 0;
-+
-+/* Sort by elf hash value % buckets  */
-+static int
-+elf_sort_dynsym_hash (const void *arg1, const void *arg2)
-+{
-+  size_t h1_bucket, h2_bucket;
-+  const struct elf_link_hash_entry *h1;
-+  const struct elf_link_hash_entry *h2;
-+
-+  h1 = *(const struct elf_link_hash_entry **) arg1;
-+  h2 = *(const struct elf_link_hash_entry **) arg2;
-+
-+  h1_bucket = h1->u.elf_hash_value % give_me_a_bucket_count;
-+  h2_bucket = h2->u.elf_hash_value % give_me_a_bucket_count;
-+
-+  /*  fprintf (stderr, "Sort: '%s'(0x%x) <> '%s'(0x%x) (%d)\n",
-+	   h1->root.root.string, h1_bucket,
-+	   h2->root.root.string, h2_bucket,
-+	   give_me_a_bucket_count); */
-+
-+  /* Hack to test with objdump */
-+  /*  return strcmp (h1->root.root.string, h2->root.root.string); */
-+
-+  if (h1_bucket > h2_bucket)
-+    return 1;
-+  if (h1_bucket < h2_bucket)
-+    return -1;
-+
-+  return 0;
-+}
-+
-+struct elf_dynsym_sort_info
-+{
-+  bfd_boolean  do_dynsym;
-+  unsigned int alloc_size;
-+  unsigned int sorted_size;
-+  struct elf_link_hash_entry **sorted_syms;
-+};
-+
-+/* collect sym entries into an array for later sorting */
-+static bfd_boolean
-+elf_sort_collect_dynsyms (struct elf_link_hash_entry *h, void *data)
-+{
-+  struct elf_dynsym_sort_info *sinfo = data;
-+
-+  if ((sinfo->do_dynsym && h->dynindx < 0) ||
-+      (!sinfo->do_dynsym && h->dynindx >= 0))
-+    return TRUE;
-+
-+  if (sinfo->sorted_size >= sinfo->alloc_size)
-+    {
-+      sinfo->alloc_size *= 2;
-+      /* FIXME: need to free this data too ... */
-+      sinfo->sorted_syms = bfd_realloc (sinfo->sorted_syms,
-+					 sizeof (struct elf_link_hash_entry *) *
-+					 sinfo->alloc_size);
-+    }
-+  sinfo->sorted_syms [sinfo->sorted_size++] = h;
-+
-+  return TRUE;
-+}
-+
-+/*
-+ * Sort the exported elf symbols by elf_hash % bucketcount to
-+ * improve run-time linker cache behavior. Subsequent
-+ * elf_link_hash_traverse calls will reflect this new order.
-+ */
-+static bfd_boolean
-+_bfd_elf_sort_dynsyms (struct bfd_link_info *info)
-+{
-+  struct elf_dynsym_sort_info sinfo;
-+
-+  sinfo.alloc_size = 8;
-+  sinfo.sorted_syms = bfd_malloc (sizeof (struct elf_link_hash_entry *) *
-+				  sinfo.alloc_size);
-+  if (!sinfo.sorted_syms)
-+    return FALSE;
-+
-+  sinfo.sorted_size = 0;
-+
-+  /* append dynsyms for sorting */
-+  sinfo.do_dynsym = TRUE;
-+  elf_link_hash_traverse (elf_hash_table (info), elf_sort_collect_dynsyms, &sinfo);
-+
-+  /* sort them ... */
-+  if (getenv ("DO_SORT_SYMS")) {
-+	  fprintf (stderr, "sort dynsym\n");
-+	  give_me_a_bucket_count = elf_hash_table (info)->bucketcount;
-+	  qsort (sinfo.sorted_syms, sinfo.sorted_size,
-+		 sizeof (struct elf_link_hash_entry *),
-+		 elf_sort_dynsym_hash);
-+  }
-+
-+  /* append everything else */
-+  sinfo.do_dynsym = FALSE;
-+  elf_link_hash_traverse (elf_hash_table (info), elf_sort_collect_dynsyms, &sinfo);
-+
-+  /* transfer to the elf hash: FIXME - leaks ... */
-+  elf_hash_table (info)->sorted = sinfo.sorted_syms;
-+  elf_hash_table (info)->sorted_size = sinfo.sorted_size;
-+
-+  return TRUE;
-+}
-+
- /* Set up the sizes and contents of the ELF dynamic sections.  This is
-    called by the ELF linker emulation before_allocation routine.  We
-    must set the sizes of the sections before the linker sets the
-@@ -5749,6 +5880,7 @@
- 	 section symbol for each output section, which come first.
- 	 Next come all of the back-end allocated local dynamic syms,
- 	 followed by the rest of the global symbols.  */
-+      /* To sort these optimally we need the correct bucketcount */
+ static size_t
+-elf_link_sort_relocs (bfd *abfd, struct bfd_link_info *info, asection **psec)
++elf_link_sort_relocs (bfd *abfd, struct elf_final_link_info *finfo, asection **psec)
+ {
++  struct bfd_link_info *info = finfo->info;
+   asection *reldyn;
+   bfd_size_type count, size;
+   size_t i, ret, sort_elt, ext_size;
+@@ -6042,6 +6116,7 @@
+   void (*swap_out) (bfd *, const Elf_Internal_Rela *, bfd_byte *);
+   struct bfd_link_order *lo;
+   bfd_vma r_sym_mask;
++  int r_sym_shift;
  
-       dynsymcount = _bfd_elf_link_renumber_dynsyms (output_bfd, info,
- 						    &section_sym_count);
-@@ -5837,6 +5969,16 @@
-       for (dtagcount = 0; dtagcount <= info->spare_dynamic_tags; ++dtagcount)
- 	if (!_bfd_elf_add_dynamic_entry (info, DT_NULL, 0))
- 	  return FALSE;
-+
-+      
-+      /* Sort the elf symbols to accelerate linking */
-+      { /* HACK - FIXME - make this conditional (?) */
-+        if (!_bfd_elf_sort_dynsyms (info))
-+          return FALSE;
-+	/* reflect the new sorting order */
-+	_bfd_elf_link_renumber_dynsyms (output_bfd, info);
-+      }
-+
+   reldyn = bfd_get_section_by_name (abfd, ".rela.dyn");
+   if (reldyn == NULL || reldyn->size == 0)
+@@ -6106,10 +6181,30 @@
+ 	p = sort + o->output_offset / ext_size * sort_elt;
+ 	while (erel < erelend)
+ 	  {
++	    long dyn_idx;
+ 	    struct elf_link_sort_rela *s = (struct elf_link_sort_rela *) p;
+ 	    (*swap_in) (abfd, erel, s->rela);
+ 	    s->type = (*bed->elf_backend_reloc_type_class) (s->rela);
+ 	    s->u.sym_mask = r_sym_mask;
++	    dyn_idx = s->rela->r_info >> r_sym_shift;
++#ifdef SORT_RELOCS
++	    if (base_offset >= 0 &&
++		dyn_idx < base_max && dyn_idx >= base_offset)
++	    {
++	      s->elf_hash = elf_hash_table (info)->sorted [dyn_idx - base_offset]->u.elf_hash_value;
++	      s->symbol = elf_hash_table (info)->sorted [dyn_idx - base_offset];
++	    }
++	    else
++#endif
++	    {
++	      s->elf_hash = 0;
++	      s->symbol = NULL;
++#ifdef SORT_RELOCS
++	      fprintf (stderr, "Couldn't grok: %d < %d < %d\n",
++		       base_offset, (int)dyn_idx, base_max);
++#endif
++	    }
++				       
+ 	    p += sort_elt;
+ 	    erel += ext_size;
+ 	  }
+@@ -6726,64 +6821,6 @@
+ 	  eversym += h->dynindx;
+ 	  _bfd_elf_swap_versym_out (finfo->output_bfd, &iversym, eversym);
+ 	}
+-
+-      if (finfo->direct_sec)
+-	{
+-	  bfd_vma offset = 2 * h->dynindx;
+-	  if (offset > finfo->direct_sec->size)
+-	    fprintf (stderr, "Out of bounds direct section index %d\n",
+-		     (int) offset);
+-	  else
+-	    {
+-	      int dt_index = DT_DIRECT_UNKNOWN;
+-
+-#if 0
+-	      fprintf (stderr, "Symbol '%s' type %d\n",
+-	               h->root.root.string, h->root.type);
+-#endif
+-	      if ((h->root.type == bfd_link_hash_defined
+-		   || h->root.type == bfd_link_hash_defweak) &&
+-		  h->root.u.def.section != NULL &&
+-		  h->root.u.def.section->owner != NULL)
+-							   
+-	        {
+-		  asection *sec = h->root.u.def.section;
+-
+-		  dt_index = elf_dt_needed_idx (sec->owner);
+-
+-		  if (!(sec->owner->flags & DYNAMIC))
+-		    {
+-		      if (!sec->name ||
+-			  !strncmp (sec->name, ".gnu.linkonce", sizeof ".gnu.linkonce" - 1))
+-			dt_index |= DT_DIRECT_VAGUE;
+-
+-		      /* app -> library data references get turned into copy
+-			 relocs, so objects can migrate unpredictably into the
+-			 application itself. */
+-		      else if (h->type == STT_OBJECT)
+-			dt_index |= DT_DIRECT_VAGUE;
+-		    }
+-		  else if (h->vague_ref)
+-		    dt_index |= DT_DIRECT_VAGUE;
+-
+-		  else if (!h->concrete_ref)
+-		    dt_index = DT_DIRECT_UNKNOWN;
+-
+-#if 0
+-		  fprintf (stderr, "Sym '%s' (type %d) [type %d] section  %s [%s] owner '%s' [%d] offset %d resolves '%s'\n",
+-			   h->root.root.string, h->root.type, h->type,
+-			   sec->name ? sec->name : "<null>",
+-			   sec->owner->flags & DYNAMIC ? "dynamic" : "static",
+-			   sec->owner ? sec->owner->filename : "<noowner?>",
+-			   dt_index, (int) offset,
+-			   dt_index & DT_DIRECT_VAGUE ? "<vague>" : "concrete");
+-#endif
+-		}
+-	      bfd_put_16 (finfo->output_bfd,
+-			  dt_index,
+-			  finfo->direct_sec->contents + offset);
+-	    }
+-	}
      }
  
-   return TRUE;
+   /* If we're stripping it, then it was just a dynamic symbol, and
+@@ -7759,24 +7796,7 @@
+     }
+   else
+     {
+-      if (!elf_shdrp[elfsec]->bfd_section)
+-      {
+-	
+-      }
+       s = elf_shdrp[elfsec]->bfd_section;
+-      if (!s)
+-      {
+-	fprintf (stderr, "Section %p ('%s')");
+-
+-+		  fprintf (stderr, "symbol '%s': %s direct entry 0x%x (index %d) section '%s' : '%s'\n",
+-+			   h->root.root.string,
+-+			   h->vague_ref ? "vague " : h->concrete_ref ? "concrete" : "unknown",
+-+			   direct_entry, (int)d_idx/2,
+-+			   new_sec ? new_sec->name : "<nosec>",
+-+			   new_sec && new_sec->owner ? new_sec->owner->filename : "<noownername>");
+-        return 0;
+-      }
+-      else
+       return s->output_section->vma + s->output_offset;
+     }
+ }
+@@ -7944,7 +7964,6 @@
+       finfo.dynsym_sec = NULL;
+       finfo.hash_sec = NULL;
+       finfo.symver_sec = NULL;
+-      finfo.direct_sec = NULL;
+     }
+   else
+     {
+@@ -7953,7 +7972,6 @@
+       BFD_ASSERT (finfo.dynsym_sec != NULL && finfo.hash_sec != NULL);
+       finfo.symver_sec = bfd_get_section_by_name (dynobj, ".gnu.version");
+       /* Note that it is OK if symver_sec is NULL.  */
+-      finfo.direct_sec = bfd_get_section_by_name (dynobj, ".direct");
+     }
+ 
+   finfo.contents = NULL;
+@@ -8586,7 +8604,7 @@
+     }
+ 
+   if (dynamic && info->combreloc && dynobj != NULL)
+-    relativecount = elf_link_sort_relocs (abfd, info, &reldyn);
++    relativecount = elf_link_sort_relocs (abfd, &finfo, &reldyn);
+ 
+   /* If we are linking against a dynamic object, or generating a
+      shared library, finish up the dynamic linking information.  */
+@@ -8705,9 +8723,6 @@
+ 	    case DT_VERNEED:
+ 	      name = ".gnu.version_r";
+ 	      goto get_vma;
+-	    case DT_DIRECT:
+-	      name = ".direct";
+-	      goto get_vma;
+ 	    case DT_VERSYM:
+ 	      name = ".gnu.version";
+ 	    get_vma:
 diff -u -r -x texis -x Makeconfig -x version.h -x '*.o' -x '*.1' -x 'Makefile*' -x 'config*' -x libtool -x '*.info' -x '*.tex' binutils-2.16.91.0.4/bfd/elf-strtab.c binutils.current/bfd/elf-strtab.c
 --- binutils-2.16.91.0.4/bfd/elf-strtab.c	2005-05-10 23:46:41.000000000 +0100
-+++ binutils.current/bfd/elf-strtab.c	2005-12-22 10:40:32.000000000 +0000
++++ binutils.current/bfd/elf-strtab.c	2005-12-23 10:59:04.000000000 +0000
 @@ -39,6 +39,7 @@
      /* Entry this is a suffix of (if len < 0).  */
      struct elf_strtab_hash_entry *suffix;
@@ -534,7 +1048,7 @@ diff -u -r -x texis -x Makeconfig -x version.h -x '*.o' -x '*.1' -x 'Makefile*' 
 -alloc_failure:
 -  if (array)
 -    free (array);
-+  if (bucket_count && !getenv ("DONTSORT_SYMS"))
++  if (bucket_count && !getenv ("DONT_SORT_SYMS"))
 +    {
 +      fprintf (stderr, "Sorting symbols\n");
 +      give_me_a_bucket_count = bucket_count;
