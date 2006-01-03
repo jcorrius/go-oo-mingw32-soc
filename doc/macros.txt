@@ -85,7 +85,7 @@ New Problems/Funnies Needs attention
 
 always seems to generate the error ( "object not valid" )
 
-* handling of logical values in calc, no concept of true/false just the associated calc function e.g. { TRUE(), FALSE() }, additionally when interoperating with BASIC ( which has a build in boolean type ) problems occur ( In basic True is the result of and expression that evaluates to -1 ) Of course the problem is further compounded when you copy a cell that contains TRUE or FALSE ( only the intrinsic value is copied i.e. 0 or 1 ) a control associated with a cell ( linked cell ) sets the value to TRUE/FALSE ( which is always evaluated to the numeric value from the api )
+* handling of logical values in calc, no concept of true/false just the associated calc function e.g. { TRUE(), FALSE() }, additionally when interoperating with BASIC ( which has a built in boolean type ) problems occur ( In basic True is the result of and expression that evaluates to -1 ) Of course the problem is further compounded when you copy a cell that contains TRUE or FALSE ( only the intrinsic value is copied i.e. 0 or 1 ) a control associated with a cell ( linked cell ) sets the value to TRUE/FALSE ( which is always evaluated to the numeric value from the api )
 	+ should be able to detect whether a cell contains a logical type via the formatting of the cell.... but when copying this formatting should be preserved. Calc really should have its own built in Boolean type ( should not be impossible to achieve ) need to open bug about this
 
 * using Ranges.EntireColumn or Range.EntireRow and trying to pass the resulting
@@ -115,7 +115,7 @@ range into a worksheet fnction ( that accepts ranges ) e.g. COUNTA it thows an e
 	  handled, wrt. Dim A as com.sun.star.sheet.Worksheet
 	  etc. - possibly we can just do some 'Globals' magic
 	  here.
-	Note: this is handled by patches in patches/vba/vba-dim-and-constants-patch.diff see method ( checkUnoObjectType() defined in sbunoobj.cxx ) the namespace org.openoffice.vba is appended automatically and a sanity check to see if object implements the defined interface performed. What needs to happen is to change the uno type from XSomething to Something e.g. org.openoffice.vba.XRange => org.openoffice.vba.Range.	
+	Note: this is handled by patches in patches/vba/vba-dim-and-constants-patch.diff see method ( checkUnoObjectType() defined in sbunoobj.cxx ) the namespace org.openoffice.vba is appended automatically and a sanity check to see if object implements the defined interface performed. The sanity check changes the uno type from Something to XSomething e.g. Dim a as Range will result in a queryInterface for 'org.openoffice.vba.XRange'
 
     + 'WorkSheets("sheet1")' 
 	+ Now handled in vba-basic-collection.diff ( handled in CheckArray() 
@@ -352,6 +352,42 @@ end sub
 
 also interestingly something like
 msgbox ( "name is " + coll(1).Name  also works :-)
+
+
+Some Notes on Broadcast/Notify
+==============================
+
+At the heart of ooo-basic is the Broadcast/notification mechanism, this is used as a generic way to call methods of an object (sorta poor mans DII). Generally this is used as a way to delay ( or lazy initialize objects )
+
+In general a SbxVariable is an object that needs a Broadcast in order for it
+to have data available to it.
+
+To facilitate this a SbxVariable has a SfxBroadcaster member "pCst".
+
+In ooo-basic nearly every variable used in the runtime has been generated/returned a result of a Find method ( on a parent object or on the basic instance (StarBASIC) itself ). These variables are always SbxVariables. 
+
+looking at the inheritance hierarchy:
+
+SvRefBase<-SbxBase<-SbxValue<-SbxVariable
+SbxVariable<-SbxMethod<-SbUnoMethod
+SfxListener<-SbxVariable<-SbxObject
+SbxObject<-SbUnoObject
+
+All of uno methods & properties calls are handled by the SFX_NOTIFY method of the parent SbUnoObject.  Its not immediately obvious how a broadcast on an SbxVariable ( for example for a method ) can call the SFX_NOTIFY method of the SbUnoObject, there seems initially no relationship between the SbUnoMethod object and the SbUnoObject. There is in fact a relationship and it is setup as part of a Find call on the parent (SbUnoObject) object, this ends up calling SbxObject::QuickInsert() source/sbx/sbxobj.cxx:560 where it adds itself ( the parent object ) as a listener ( for broadcasts ) from the SbxVariable ( the method/property ) it inserts into itself.
+
+How does the value of the SbxVariable change say for a property?
+when the 'Broadcast' is called on SbxVariable it creats an SbxHint 
++ source/sbx/sbxvar.cxx
+    pSave->Broadcast( SbxHint( nHintId, this ) );
+passing itself ;-)
+
+the corrosponding Notify ( SbUnoObject::SFX_NOTIFY ) extracts that via 
++ source/classes/sbunoobj.cxx:
+    SbxVariable* pVar = pHint->GetVar();
+and equates pVar to the result of whatever operation occurs ( e.g. result of a method call )
+
+
+NOTE: Another interesting side-affect ( and  intentional ) is that if a copy is made of a SbxVariable ( say for a property ) then subsequent broadcasts ( for example SBX_HINT_DATACHANGED ) do not call notify on the parent object because when the SbxVariable is copied the broadcaster ( pCst ) is NULLED. This means that in the case of a property any assignments made do not result in an uno call, the sbxVariable ( SbUnoProperty ) values is modified locally only.
 
 
 
@@ -815,3 +851,7 @@ Unlikely looking interfaces:
  XTextOutputStream 
  XToolkit
  io::XActiveDataSource 
+
+
+
+
