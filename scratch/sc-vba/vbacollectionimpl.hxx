@@ -40,9 +40,9 @@ protected:
 	css::uno::Reference< css::container::XIndexAccess > m_xIndexAccess;
 	css::uno::Reference< css::container::XNameAccess > m_xNameAccess;
 
-	css::uno::Any getItemByStringIndex( const rtl::OUString& sIndex ) throw (css::uno::RuntimeException);
+	virtual css::uno::Any getItemByStringIndex( const rtl::OUString& sIndex ) throw (css::uno::RuntimeException);
 
-	css::uno::Any getItemByIntIndex( const sal_Int32 nIndex ) throw (css::uno::RuntimeException);
+	virtual css::uno::Any getItemByIntIndex( const sal_Int32 nIndex ) throw (css::uno::RuntimeException);
 public:
 	ScVbaCollectionBaseImpl( const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::container::XIndexAccess >& xIndexAccess ) throw( css::uno::RuntimeException );
 
