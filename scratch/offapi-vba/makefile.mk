@@ -41,6 +41,9 @@ IDLFILES=\
 	XSeries.idl\
 	XDialog.idl \
 	XArrayWrapper.idl \
+	XPivotTables.idl \
+	XPivotTable.idl \
+	XPivotCache.idl \
 	XDialogs.idl 
 
 # ------------------------------------------------------------------
