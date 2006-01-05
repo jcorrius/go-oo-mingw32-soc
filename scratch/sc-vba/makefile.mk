@@ -45,7 +45,10 @@ SLOFILES= \
 		$(SLO)$/vbacollectionimpl.obj\
 		$(SLO)$/vbaarraywrapper.obj\
 		$(SLO)$/vbadialogs.obj \
-		$(SLO)$/vbadialog.obj	
+		$(SLO)$/vbadialog.obj	\
+		$(SLO)$/vbapivottable.obj \
+		$(SLO)$/vbapivotcache.obj \
+		$(SLO)$/vbapivottables.obj
  
 
 # --- Targets ------------------------------------------------------

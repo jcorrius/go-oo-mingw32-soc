@@ -75,6 +75,7 @@ public:
 	virtual css::uno::Reference< oo::vba::XRange > Columns(const css::uno::Any& aIndex ) throw (css::uno::RuntimeException);
 
 	virtual css::uno::Any SAL_CALL Evaluate( const ::rtl::OUString& Name ) throw (css::uno::RuntimeException); 
+	virtual css::uno::Any SAL_CALL PivotTables( const css::uno::Any& Index ) throw (css::uno::RuntimeException);
 };
 
 #endif /* SC_VBA_WORKSHEET_HXX */

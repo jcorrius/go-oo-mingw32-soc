@@ -14,11 +14,12 @@
 #include <com/sun/star/sheet/XSpreadsheets.hpp>
 #include <com/sun/star/sheet/XSheetPastable.hpp>
 #include <com/sun/star/sheet/XCellAddressable.hpp>
+#include <com/sun/star/sheet/XSheetOutline.hpp>
+#include <com/sun/star/sheet/XDataPilotTablesSupplier.hpp>
 #include <cppuhelper/bootstrap.hxx>
 #include <com/sun/star/util/XURLTransformer.hpp>
 #include <com/sun/star/frame/XDispatchProvider.hpp>
 #include <com/sun/star/frame/XComponentLoader.hpp>
-#include <com/sun/star/sheet/XSheetOutline.hpp>
 #include <com/sun/star/table/XColumnRowRange.hpp>
 #include <com/sun/star/table/XTableChartsSupplier.hpp>
 #include <tools/string.hxx>
@@ -27,6 +28,7 @@
 #include "vbarange.hxx"
 #include "vbaworksheet.hxx"
 #include "vbachartobjects.hxx"
+#include "vbapivottables.hxx"
 
 #define STANDARDWIDTH 2267 
 #define STANDARDHEIGHT 427
@@ -505,6 +507,21 @@ ScVbaWorksheet::ChartObjects( const uno::Any& Index ) throw (uno::RuntimeExcepti
 	else
 		return makeAny( mxCharts );
 	
+}
+
+uno::Any SAL_CALL 
+ScVbaWorksheet::PivotTables( const uno::Any& Index ) throw (uno::RuntimeException)
+{
+	uno::Reference< css::sheet::XSpreadsheet > xSheet = getSheet();
+	uno::Reference< sheet::XDataPilotTablesSupplier > xTables(xSheet, uno::UNO_QUERY_THROW ) ;
+	uno::Reference< container::XIndexAccess > xIndexAccess( xTables->getDataPilotTables(), uno::UNO_QUERY_THROW );
+
+	uno::Reference< vba::XCollection > xColl( uno::Reference< vba::XPivotTables > ( new ScVbaPivotTables( m_xContext, xIndexAccess ) ), uno::UNO_QUERY_THROW );
+	if ( Index.hasValue() )
+		return xColl->Item( Index );
+	return makeAny( xColl );
+	
+		
 }
 
 uno::Any SAL_CALL 

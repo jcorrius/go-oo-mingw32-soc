@@ -218,3 +218,21 @@ ScVbaWindow::SelectedSheets( const uno::Any& aIndex ) throw (uno::RuntimeExcepti
 	uno::Reference< container::XEnumerationAccess > xEnumAccess( new SelectedSheetsEnumAccess( m_xContext, getCurrentDocument()  ) );
 	return makeAny( uno::Reference< vba::XWorksheets > ( new ScVbaWorksheets( m_xContext, xEnumAccess, getCurrentDocument() ) ) ); 	
 }
+
+void SAL_CALL 
+ScVbaWindow::ScrollWorkbookTabs( const uno::Any& Sheets, const uno::Any& Position ) throw (uno::RuntimeException)
+{
+	sal_Int32 nSheets = 0;
+	sal_Int32 nPosition = 0;
+	sal_Bool bSheets = ( Sheets >>= nSheets );
+	sal_Bool bPosition = ( Position >>= nPosition );
+// #TODO #FIXME need some implementation to scroll through the tabs
+// but where is this done?
+	if ( bSheets || bPosition ) // at least one param specified
+		if ( bSheets )
+			;// use sheets
+		else if ( bPosition )
+			; //use position
+
+}
+

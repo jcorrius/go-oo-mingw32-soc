@@ -20,7 +20,6 @@
 #include <com/sun/star/beans/XPropertySet.hpp>
 
 #include <org/openoffice/vba/XApplication.hpp>
-
 #include <tools/string.hxx>
 
 #include "vbaglobals.hxx"
@@ -29,6 +28,7 @@
 
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
+
 
 class SheetsEnumeration : public EnumerationHelperImpl
 {
@@ -229,5 +229,47 @@ ScVbaWorksheets::PrintOut( const uno::Any& From, const uno::Any& To, const uno::
 	// 5 There is a pop up to do with transparent objects in the print source
 	//   should be able to disable that via configuration for the duration
 	//   of this method
+}
+css::uno::Any SAL_CALL 
+ScVbaWorksheets::getVisible() throw (css::uno::RuntimeException)
+{
+	sal_Bool bVisible = sal_True;
+	uno::Reference< container::XEnumeration > xEnum( createEnumeration(), uno::UNO_QUERY_THROW );
+	while ( xEnum->hasMoreElements() )
+	{
+		uno::Reference< vba::XWorksheet > xSheet( xEnum->nextElement(), uno::UNO_QUERY_THROW );
+		if ( xSheet->getVisible() == sal_False )
+		{
+				bVisible = sal_False;
+				break;
+		}
+	}
+	return uno::makeAny( bVisible );
+}
+
+void SAL_CALL 
+ScVbaWorksheets::setVisible( const css::uno::Any& _visible ) throw (css::uno::RuntimeException)
+{
+	sal_Bool bState;
+	if ( _visible >>= bState )
+	{
+		uno::Reference< container::XEnumeration > xEnum( createEnumeration(), uno::UNO_QUERY_THROW );
+		while ( xEnum->hasMoreElements() )
+		{
+			uno::Reference< vba::XWorksheet > xSheet( xEnum->nextElement(), uno::UNO_QUERY_THROW );
+			xSheet->setVisible( bState );
+		}
+	}
+	else
+		throw uno::RuntimeException( rtl::OUString( 
+			RTL_CONSTASCII_USTRINGPARAM( "Visible property doesn't support non boolean #FIXME" ) ), uno::Reference< uno::XInterface >() );
+}
+//ScVbaCollectionBaseImpl
+uno::Any 
+ScVbaWorksheets::getItemByStringIndex( const rtl::OUString& sIndex ) throw (uno::RuntimeException)
+{
+	String sScIndex = sIndex;
+	ScDocument::ConvertToValidTabName( sScIndex, '_' );
+	return ScVbaCollectionBaseImpl::getItemByStringIndex( sScIndex );
 }
 
