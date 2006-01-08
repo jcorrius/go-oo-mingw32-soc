@@ -87,7 +87,8 @@ uno_Interface * SAL_CALL cli_uno_environment_createMonoProxyAndRegister(
     SAL_THROW_EXTERN_C()
 {
     uno_Interface * proxy = static_cast< uno_Interface * >(
-        new MonoProxy( pUnoEnv, reinterpret_cast< guint32 >( pMonoProxy ),
+        new MonoProxy( pUnoEnv,
+                       static_cast< guint32 >( reinterpret_cast< sal_IntPtr >( pMonoProxy ) ),
                        pOid, pTD ) );
 
     pUnoEnv->registerProxyInterface(
