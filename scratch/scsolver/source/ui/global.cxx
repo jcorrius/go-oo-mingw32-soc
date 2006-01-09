@@ -27,7 +27,7 @@
 
 #include <global.hxx>
 #include <sstream>
-
+#include <stdio.h>
 
 namespace scsolver {
 

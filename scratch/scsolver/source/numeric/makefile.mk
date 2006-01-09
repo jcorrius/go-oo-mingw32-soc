@@ -10,6 +10,14 @@ ENABLE_EXCEPTIONS=TRUE
 
 # --- Files --------------------------------------------------------
 
+#
+# FIXME - should go in workben ?
+#
+TESTFILES= \
+        $(SLO)$/nlp_test.obj \
+        $(SLO)$/matrix_test.obj \
+        $(SLO)$/simplex_test.obj
+
 SLOFILES =  \
         $(SLO)$/diff.obj \
         $(SLO)$/diff_test.obj \
@@ -18,12 +26,9 @@ SLOFILES =  \
         $(SLO)$/lpmodel.obj \
         $(SLO)$/lpsimplex.obj \
         $(SLO)$/matrix.obj \
-        $(SLO)$/matrix_test.obj \
-        $(SLO)$/nlp_test.obj \
         $(SLO)$/nlpbase.obj \
         $(SLO)$/nlpmodel.obj \
         $(SLO)$/nlpqnewton.obj \
-        $(SLO)$/simplex_test.obj
 
 # --- Tagets -------------------------------------------------------
 

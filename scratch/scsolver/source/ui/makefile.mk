@@ -19,7 +19,6 @@ SLOFILES =  \
         $(SLO)$/lpbuilder.obj \
         $(SLO)$/msgdlg.obj \
         $(SLO)$/solvemodel.obj \
-        $(SLO)$/solver.obj \
         $(SLO)$/unoglobal.obj \
         $(SLO)$/unohelper.obj \
         $(SLO)$/xcalc.obj

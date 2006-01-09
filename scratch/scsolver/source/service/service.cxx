@@ -100,7 +100,7 @@ Reference< frame::XDispatch > SAL_CALL SolverImpl::queryDispatch(
     Reference< frame::XDispatch > xRet;
     if ( aURL.Protocol.compareToAscii( "scsolver.SolverImpl:" ) == 0 )
     {
-        if ( aURL.Path.compareToAscii( "executeDialog" ) == 0 )
+        if ( aURL.Path.compareToAscii( "execute" ) == 0 )
             xRet = this;
     }
     return xRet;
@@ -234,6 +234,7 @@ static Reference< uno::XInterface > SAL_CALL create_SolverImpl(
     Reference< uno::XComponentContext > const & xContext )
     SAL_THROW( () )
 {
+	Debug ("Create Solver");
     return static_cast< lang::XTypeProvider * >( new SolverImpl( xContext ) );
 }
 
