@@ -33,13 +33,24 @@
 #include <string>
 #include <set>
 #include <exception>
+#include <iterator>
 
-#include <boost/algorithm/string/replace.hpp>
+#warning "No idea what's going on with noalias"
+#undef noalias
+#define noalias(a) (a)
+
+#warning "We should re-write this to use OUString:: methods I think."
+#if 0
+#  include <boost/algorithm/string/replace.hpp>
+using namespace ::boost::algorithm;
+#else
+//#  include <boost/mpl/distance.hpp>
+//using namespace ::boost::mpl;
+#endif
 #include <boost/numeric/ublas/matrix_proxy.hpp>
 #include <boost/numeric/ublas/io.hpp>
 #include <boost/numeric/ublas/matrix_expression.hpp>
 
-using namespace ::boost::algorithm;
 namespace bnu = ::boost::numeric::ublas;
 
 using std::cout;
@@ -308,9 +319,9 @@ void factorize( const bnu::matrix<double>& mxA, bnu::matrix<double>& mxL,
 	::std::vector<size_t>::const_iterator it, itBeg = cnP.begin(), itEnd = cnP.end();
 	for ( it = itBeg; it != itEnd; ++it )
 	{
-		size_t nIdx = distance( itBeg, it );
+		size_t nIdx = std::distance( itBeg, it );
 		cout << nIdx << endl;
-		P( distance( itBeg, it ), *it ) = 1.0;
+		P( std::distance( itBeg, it ), *it ) = 1.0;
 	}
 
 	noalias( mxU ) = U;
@@ -478,7 +489,7 @@ void MatrixImpl::swap( MatrixImpl& other ) throw()
 
 void MatrixImpl::clear()
 {
-	m_aArray.resize( 0, 0, false );
+	m_aArray.resize( 0, 0 );
 }
 
 void MatrixImpl::copy( const MatrixImpl& other )
@@ -541,6 +552,8 @@ bnu::matrix< std::string > MatrixImpl::getDisplayElements(
 		for ( unsigned int j = 0; j < mxElements.size2(); ++j )
 		{
 			double fVal = m_aArray( i, j );
+#warning Foo Baa here - update string code ..
+#if 0
 			if ( fVal == 1.0 )
 				replace_first( mxElements( i, j ), "1", " " );
 			else if ( fVal == -1.0 )
@@ -560,6 +573,7 @@ bnu::matrix< std::string > MatrixImpl::getDisplayElements(
 				}
 				mxElements( i, j ) = os.str();
 			}
+#endif
 		}
 	}
 	return mxElements;
@@ -965,7 +979,7 @@ void MatrixImpl::expandAsNeeded( size_t nRowId, size_t nColId )
 		{
 			size_t nNewRowSize = nRowId + 1 > nRowSize ? nRowId + 1 : nRowSize;
 			size_t nNewColSize = nColId + 1 > nColSize ? nColId + 1 : nColSize;
-			m_aArray.resize( nNewRowSize, nNewColSize, true ); // is this exception-safe?
+			m_aArray.resize( nNewRowSize, nNewColSize ); // is this exception-safe?
 		}
 	}
 }

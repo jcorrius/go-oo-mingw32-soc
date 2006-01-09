@@ -128,9 +128,9 @@ void SAL_CALL SolverImpl::dispatch(
 
     if ( aURL.Protocol.compareToAscii( "scsolver.SolverImpl:" ) == 0 )
     {
-        if ( aURL.Path.compareToAscii( "executeDialog" ) == 0 )
+        if ( aURL.Path.compareToAscii( "execute" ) == 0 )
         {
-            executeDialog();
+            execute();
         }
     }
 }
@@ -182,6 +182,8 @@ sal_Int16 SolverImpl::execute()
     Debug( "SolverImpl::executeDialog" );
 	
 	getMainDialog()->setVisible( true );
+
+	return 0;
 }
 
 sal_Bool SolverImpl::solveModel()

@@ -25,6 +25,7 @@
  *
  ************************************************************************/
 
+#include <osl/diagnose.h>
 
 #include <numeric/lpsimplex.hxx>
 #include <numeric/lpmodel.hxx>
