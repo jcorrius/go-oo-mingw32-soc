@@ -25,27 +25,24 @@
  *
  ************************************************************************/
 
-#ifndef _NUMERIC_FUNCOBJ_HXX
-#define _NUMERIC_FUNCOBJ_HXX
-
-#include <vector>
-#include <string>
+#include <numeric/funcobj.hxx>
 
 namespace scsolver { namespace numeric {
 
-class BaseFuncObj
+//---------------------------------------------------------------------------
+// BaseFuncObj
+
+BaseFuncObj::BaseFuncObj()
 {
-public:
-	BaseFuncObj();
-	virtual ~BaseFuncObj() throw() = 0;
+}
 
-	virtual double operator()( const std::vector<double>& ) const = 0;
-	virtual std::string getFuncString() const = 0;
+BaseFuncObj::~BaseFuncObj() throw()
+{
+}
 
-	double eval( const std::vector<double>& ) const;
-};
+double BaseFuncObj::eval( const std::vector<double>& cnX ) const
+{
+	return operator()( cnX );
+}
 
 }}
-
-#endif
-

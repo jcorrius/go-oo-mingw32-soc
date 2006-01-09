@@ -1,0 +1,110 @@
+/*************************************************************************
+ *
+ *  The Contents of this file are made available subject to
+ *  the terms of GNU Lesser General Public License Version 2.1.
+ *
+ *
+ *    GNU Lesser General Public License Version 2.1
+ *    =============================================
+ *    Copyright 2005 by Kohei Yoshida.
+ *    1039 Kingsway Dr., Apex, NC 27502, USA
+ *
+ *    This library is free software; you can redistribute it and/or
+ *    modify it under the terms of the GNU Lesser General Public
+ *    License version 2.1, as published by the Free Software Foundation.
+ *
+ *    This library is distributed in the hope that it will be useful,
+ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ *    Lesser General Public License for more details.
+ *
+ *    You should have received a copy of the GNU Lesser General Public
+ *    License along with this library; if not, write to the Free Software
+ *    Foundation, Inc., 59 Temple Place, Suite 330, Boston,
+ *    MA  02111-1307  USA
+ *
+ ************************************************************************/
+
+#include <numeric/diff.hxx>
+#include <numeric/funcobj.hxx>
+#include <vector>
+#include <string>
+#include <iostream>
+#include <boost/shared_ptr.hpp>
+
+using namespace std;
+using namespace scsolver::numeric;
+using namespace boost;
+
+class TestFunc : public BaseFuncObj
+{
+public:
+	virtual string getFuncString() const
+	{
+		string s( "f(x) = 2x^2 + 5x" );
+		return s;
+	}
+
+	virtual double operator()( const std::vector<double>& cnX ) const
+	{
+		double x = cnX.at( 0 );
+		return 2.0*x*x + 5.0*x;
+	}
+};
+
+class TestFunc2 : public BaseFuncObj
+{
+public:
+	virtual string getFuncString() const
+	{
+		string s( "f(x) = 2x^3 + 5x^2 - 2x" );
+		return s;
+	}
+
+	virtual double operator()( const std::vector<double>& cnX ) const
+	{
+		double x = cnX.at( 0 );
+		return 2.0*x*x*x + 5.0*x*x - 2.0*x;
+	}
+};
+
+void test( const shared_ptr<BaseFuncObj>& pF )
+{
+	vector<double> cnX;
+	cnX.push_back( 1.0 );
+	shared_ptr<Differentiate> pDiff( new Differentiate );
+	pDiff->setVariables( cnX );
+	pDiff->setPrecision( 5 );
+	pDiff->setFuncObject( pF );
+	double fAns = pDiff->run();
+	cout << fAns << endl;
+	pDiff->setSecondOrder( true );
+	fAns = pDiff->run();
+	cout << fAns << endl;
+}
+
+int main()
+{
+// 	TestFunc oF;
+	shared_ptr<TestFunc> pF( new TestFunc );
+	test( pF );
+	shared_ptr<TestFunc2> pF2( new TestFunc2 );
+// 	TestFunc2 oF2;
+	test( pF2 );
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

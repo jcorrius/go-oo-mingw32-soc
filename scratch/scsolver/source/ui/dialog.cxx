@@ -103,7 +103,7 @@ void ConstEditDialog::registerListeners()
 	registerListener( ascii( "btnCancel" ), m_pCancelListener );
 	
 	Reference< sheet::XRangeSelection > xRngSel = pCalc->getXRangeSelection();
-	assert( xRngSel != NULL );
+	OSL_ASSERT( xRngSel != NULL );
 	
 	m_pLeftRngListener = new RngBtnListener( this, xRngSel, ascii( "editLeft" ) );
 	m_pLeftRngListener->setSingleCell( true );
@@ -168,17 +168,17 @@ void ConstEditDialog::initialize()
 void ConstEditDialog::reset()
 {
 	Reference< uno::XInterface > oEditLeft = getWidgetByName( ascii( "editLeft" ) );
-	assert( oEditLeft != NULL );
+	OSL_ASSERT( oEditLeft != NULL );
 	Reference< awt::XTextComponent > xCompL( oEditLeft, UNO_QUERY );
 	xCompL->setText( ascii( "" ) );
 	
 	Reference< uno::XInterface > oEditRight = getWidgetByName( ascii( "editRight" ) );
-	assert( oEditRight != NULL );
+	OSL_ASSERT( oEditRight != NULL );
 	Reference< awt::XTextComponent > xCompR( oEditRight, UNO_QUERY );
 	xCompR->setText( ascii( "" ) );
 	
 	Reference< uno::XInterface > oEq = getWidgetByName( ascii( "lbEqual" ) );
-	assert( oEq != NULL );
+	OSL_ASSERT( oEq != NULL );
 	Reference< awt::XListBox > xEq( oEq, UNO_QUERY );
 	xEq->selectItemPos( 0, true );
 }
@@ -238,11 +238,11 @@ Equality ConstEditDialog::getEquality()
 				return GREATER_THAN_EQUAL;
 				break;
 			default:
-				assert( !"Unexpected (in)equal sign" );
+				OSL_ASSERT( !"Unexpected (in)equal sign" );
 		}
 	}
 	else
-		assert( !"xEq == NULL" );
+		OSL_ASSERT( !"xEq == NULL" );
 	
 	return EQUAL;
 }
@@ -298,11 +298,11 @@ void ConstEditDialog::setEquality( const Equality e )
 				xEq->selectItemPos( 2, true );
 				break;
 			default:
-				assert( !"Unexpected Equality" );
+				OSL_ASSERT( !"Unexpected Equality" );
 		}
 	}
 	else
-		assert( !"xEq == NULL" );
+		OSL_ASSERT( !"xEq == NULL" );
 }
 
 /** Checks if given two cell range references in the constraint dialog have 
@@ -432,7 +432,7 @@ void SolverDialog::registerListeners()
 	CalcInterface* pCalc = getSolverImpl()->getCalcInterface();
 
 	Reference< sheet::XRangeSelection > xRngSel = pCalc->getXRangeSelection();
-	assert( xRngSel != NULL );
+	OSL_ASSERT( xRngSel != NULL );
 
 	m_pVarCellsRngListener = new RngBtnListener( this, xRngSel, ascii( "editVarCells" ) );
 	m_pVarCellsRngListener->setSingleCell( false );
@@ -526,9 +526,9 @@ ConstEditDialog* SolverDialog::getConstEditDialog()
 sal_Int16 SolverDialog::getSelectedConstraintPos()
 {
 	Reference< uno::XInterface > oWgt = getWidgetByName( ascii( "lbConstraint" ) );
-	assert( oWgt != NULL );
+	OSL_ASSERT( oWgt != NULL );
 	Reference< awt::XListBox > xLB( oWgt, UNO_QUERY );
-	assert( xLB != NULL );
+	OSL_ASSERT( xLB != NULL );
 	return xLB->getSelectedItemPos();
 }
 
@@ -536,7 +536,7 @@ Reference< awt::XTextComponent > SolverDialog::getXTextComponentFromWidget(
 	const rtl::OUString& sName ) const
 {
 	Reference< uno::XInterface > oRngEdit = getWidgetByName( sName );
-	assert( oRngEdit != NULL );
+	OSL_ASSERT( oRngEdit != NULL );
 	Reference< awt::XTextComponent > xComp( oRngEdit, UNO_QUERY );
 	return xComp;
 }
@@ -632,7 +632,7 @@ void SolverDialog::output()
 				sLine += ascii( " <= " );
 				break;
 			default:
-				assert( !"wrong equality type" );
+				OSL_ASSERT( !"wrong equality type" );
 		}
 		sLine += aItem.Right;
 		printOUStr( sLine );
@@ -732,9 +732,9 @@ void SolverDialog::clearConstraints()
 void SolverDialog::removeConstraintsFromListBox( sal_Int16 nPos, sal_Int16 nCount )
 {
 	Reference< uno::XInterface > oWgt = getWidgetByName( ascii( "lbConstraint" ) );
-	assert( oWgt != NULL );
+	OSL_ASSERT( oWgt != NULL );
 	Reference< awt::XListBox > xLB( oWgt, UNO_QUERY );
-	assert( xLB != NULL );
+	OSL_ASSERT( xLB != NULL );
 	if ( nCount == 0 )
 	{
 		sal_Int16 nItemCount = xLB->getItemCount();
@@ -767,7 +767,7 @@ void SolverDialog::setConstraintImpl(
 			sEq = ascii( "<=" );
 			break;
 		default:
-			assert( !"Unknown equality" );
+			OSL_ASSERT( !"Unknown equality" );
 	}
 	
 	rtl::OUString sWhole = sLeft + ascii( " " ) + sEq + ascii( " " ) + sRight;
@@ -790,10 +790,10 @@ void SolverDialog::setConstraintImpl(
 			}
 		}
 		else
-			assert( !"xLB is NULL" );
+			OSL_ASSERT( !"xLB is NULL" );
  	}
  	else
- 		assert( !"oLB is NULL" );
+ 		OSL_ASSERT( !"oLB is NULL" );
 }
 
 void SolverDialog::showSolveError( const rtl::OUString& sMsg )
@@ -848,7 +848,7 @@ void SolverDialog::saveModelToDocument()
 		sb.append( ascii( "min" ) );
 		break;
 	default:
-		assert( eGoal == GOAL_UNKNOWN );
+		OSL_ASSERT( eGoal == GOAL_UNKNOWN );
 		sb.append( ascii( "unknown" ) );
 	}
 	sb.append( Global::STRING_SEPARATOR );
@@ -874,7 +874,7 @@ void SolverDialog::saveModelToDocument()
 			sb.append( ascii( "<=" ) );
 			break;
 		default:
-			assert( !"unknown equality sign" );
+			OSL_ASSERT( !"unknown equality sign" );
 		}
 		sb.append( Global::STRING_SEPARATOR );
 		sb.append( it->Right );
@@ -920,9 +920,9 @@ void SolverDialog::loadModelFromDocument()
 		else if ( nIdx > 2 )
 		{
 			OUString sLeft = *it++;
-			assert( it != itEnd );
+			OSL_ASSERT( it != itEnd );
 			OUString sEqual = *it++;
-			assert( it != itEnd );
+			OSL_ASSERT( it != itEnd );
 			OUString sRight = *it;
 			numeric::opres::Equality eEq;
 			if ( sEqual.equals( ascii( ">=" ) ) )
@@ -932,7 +932,7 @@ void SolverDialog::loadModelFromDocument()
 			else if ( sEqual.equals( ascii( "=" ) ) )
 				eEq = EQUAL;
 			else
-				assert( !"unknown equality value" );
+				OSL_ASSERT( !"unknown equality value" );
 			setConstraint( sLeft, sRight, eEq );
 		}
 	}

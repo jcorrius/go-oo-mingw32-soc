@@ -358,14 +358,14 @@ void ConstEditBtnListener::actionPerformed( const awt::ActionEvent& oEvt )
 					}
 					else
 					{
-						assert( eType == CONST_ADD );
+						OSL_ASSERT( eType == CONST_ADD );
 						pCE->setChangeMode( false );
 					}
 					
 					pCE->setVisible( true );
 				}
 				else
-					assert( !"ConstEditDialog is NULL" );
+					OSL_ASSERT( !"ConstEditDialog is NULL" );
 			}
 			break;
 			
@@ -382,7 +382,8 @@ void ConstEditBtnListener::actionPerformed( const awt::ActionEvent& oEvt )
 			break;
 	
 		default:
-			assert( !"Wrong button type!" );
+			OSL_ASSERT( !"Wrong button type!" );
+			break;
 	}
 }
 

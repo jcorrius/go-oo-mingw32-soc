@@ -351,7 +351,7 @@ void LpModelBuilderImpl::setCostVector( const table::CellAddress& aAddr, double 
 			return;
 		}
 	}
-	assert( !"LogicError: no matching address found" );
+	OSL_ASSERT( !"LogicError: no matching address found" );
 }
 
 const rtl::OUString LpModelBuilderImpl::getTempCellFormula( const table::CellAddress& aAddr ) const
@@ -384,7 +384,7 @@ void LpModelBuilderImpl::stripConstConstraint()
 	Debug( "stripConstConstraint" );
 
 	Matrix mxConstraint( m_mxConstraint ), mxRHS( m_mxRHS );
-	assert( mxConstraint.rows() == mxRHS.rows() );
+	OSL_ASSERT( mxConstraint.rows() == mxRHS.rows() );
 	size_t nRowSize = mxConstraint.rows();
 
 	vector<size_t> cnRowsToRemove;

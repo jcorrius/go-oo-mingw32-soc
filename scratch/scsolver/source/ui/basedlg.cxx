@@ -355,13 +355,13 @@ void lcl_dumpServiceNames( const Reference< uno::XInterface >& oWgt )
 	for ( int nIdx = 0; nIdx < sSN.getLength(); ++nIdx )
 		printOUStr( sSN[nIdx] );
 
-	assert( !"No appropriate widget type got picked up!" );
+	OSL_ASSERT( !"No appropriate widget type got picked up!" );
 #endif
 }
 
 void BaseDialogImpl::registerListener( const Reference< uno::XInterface >& oWgt, ActionListener* p )
 {
-	assert( oWgt != NULL );
+	OSL_ASSERT( oWgt != NULL );
 
 	Reference< awt::XButton > xWidget( oWgt, UNO_QUERY );
 	if ( xWidget.is() )
@@ -430,7 +430,7 @@ void BaseDialogImpl::unregisterListener( const rtl::OUString& sName, ListenerT* 
 
 void BaseDialogImpl::unregisterListener( const Reference< uno::XInterface >& oWgt, ActionListener* p )
 {
-	assert( oWgt != NULL );
+	OSL_ASSERT( oWgt != NULL );
 	Reference< awt::XButton > xWidget( oWgt, UNO_QUERY );
 	if ( xWidget.is() )
 	{

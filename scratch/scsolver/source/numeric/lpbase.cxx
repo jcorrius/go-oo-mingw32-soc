@@ -25,27 +25,38 @@
  *
  ************************************************************************/
 
-#ifndef _NUMERIC_FUNCOBJ_HXX
-#define _NUMERIC_FUNCOBJ_HXX
 
-#include <vector>
-#include <string>
+#include <numeric/lpbase.hxx>
+#include <cstddef>
 
-namespace scsolver { namespace numeric {
 
-class BaseFuncObj
+namespace scsolver { namespace numeric { namespace opres { namespace lp {
+
+const char* ConstraintError::what() const throw()
 {
-public:
-	BaseFuncObj();
-	virtual ~BaseFuncObj() throw() = 0;
+	return "Constraint error";
+}
 
-	virtual double operator()( const std::vector<double>& ) const = 0;
-	virtual std::string getFuncString() const = 0;
+const char* AssertionWrong::what() const throw()
+{
+	return "Wrong assertion! (tell Kohei immediately)";
+}
 
-	double eval( const std::vector<double>& ) const;
-};
+const char* ModelInfeasible::what() const throw()
+{
+	return "Model infeasible";
+}
 
-}}
+BaseAlgorithm::BaseAlgorithm() : m_pModel( NULL )
+{
+}
 
-#endif
+BaseAlgorithm::~BaseAlgorithm() {}
 
+void BaseAlgorithm::setSolution( const Matrix& other )
+{
+	Matrix m( other );
+	m_Solution.swap( m );
+}
+
+}}}}

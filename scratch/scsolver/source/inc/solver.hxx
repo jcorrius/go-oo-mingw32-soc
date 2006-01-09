@@ -36,7 +36,7 @@
 #include <com/sun/star/frame/XDispatchProvider.hpp>
 #include <com/sun/star/lang/XServiceInfo.hpp>
 
-#include <org/openoffice/sc/XSolver.hpp>
+#include <com/sun/star/ui/dialogs/XExecutableDialog.hpp>
 
 #include "type.hxx"
 #include <vector>
@@ -76,7 +76,8 @@ class SolverDialog;
 // SolverImpl
 
 class SolverImpl : public ::cppu::WeakImplHelper5<
-        ::org::openoffice::sc::XSolver, lang::XServiceInfo, lang::XInitialization,
+        ::com::sun::star::ui::dialogs::XExecutableDialog,
+		lang::XServiceInfo, lang::XInitialization,
         frame::XDispatchProvider, frame::XNotifyingDispatch >
 {
 public:
@@ -125,8 +126,11 @@ public:
 		const Reference< frame::XDispatchResultListener >& )
         throw ( RuntimeException );
 
-    // XSolver
-    virtual void SAL_CALL executeDialog() throw ( RuntimeException );
+    // XExecutableDialog
+	virtual void SAL_CALL setTitle( const ::rtl::OUString& aTitle )
+			throw (::com::sun::star::uno::RuntimeException);
+	virtual sal_Int16 SAL_CALL execute()
+			throw (::com::sun::star::uno::RuntimeException);
 
 	// The "get-pointer" methods
 	CalcInterface* getCalcInterface() const;	

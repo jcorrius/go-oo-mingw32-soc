@@ -28,7 +28,6 @@
  
 #include "unohelper.hxx"
 #include <com/sun/star/beans/XPropertySet.hpp>
-#include <cassert>
 
 using ::com::sun::star::uno::UNO_QUERY;
 
@@ -38,7 +37,7 @@ namespace scsolver { namespace unohelper {
 uno::Any getPropertyValue( const Reference< uno::XInterface >& obj, const rtl::OUString& sPropName )
 {
 	Reference< beans::XPropertySet > xPS( obj, UNO_QUERY );
-	assert( xPS != NULL );
+	OSL_ASSERT( xPS != NULL );
 	return xPS->getPropertyValue( sPropName );
 }
 
@@ -60,7 +59,7 @@ void setPropertyValue( const Reference< uno::XInterface >& obj, const rtl::OUStr
 		const uno::Any& aVal )
 {
 	Reference< beans::XPropertySet > xPS( obj, UNO_QUERY );
-	assert( xPS != NULL );
+	OSL_ASSERT( xPS != NULL );
 	xPS->setPropertyValue( sPropName, aVal );
 }
 

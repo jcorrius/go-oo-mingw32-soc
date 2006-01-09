@@ -25,27 +25,23 @@
  *
  ************************************************************************/
 
-#ifndef _NUMERIC_FUNCOBJ_HXX
-#define _NUMERIC_FUNCOBJ_HXX
+#include <numeric/nlpbase.hxx>
 
-#include <vector>
-#include <string>
+namespace scsolver { namespace numeric { namespace opres { namespace nlp {
 
-namespace scsolver { namespace numeric {
-
-class BaseFuncObj
+BaseAlgorithm::BaseAlgorithm() : m_pModel( NULL )
 {
-public:
-	BaseFuncObj();
-	virtual ~BaseFuncObj() throw() = 0;
+}
 
-	virtual double operator()( const std::vector<double>& ) const = 0;
-	virtual std::string getFuncString() const = 0;
+BaseAlgorithm::~BaseAlgorithm() throw()
+{
+}
 
-	double eval( const std::vector<double>& ) const;
-};
+void BaseAlgorithm::setSolution( const Matrix& other )
+{
+	Matrix m( other );
+	m_mxSolution.swap( m );
+}
 
-}}
-
-#endif
+}}}}
 

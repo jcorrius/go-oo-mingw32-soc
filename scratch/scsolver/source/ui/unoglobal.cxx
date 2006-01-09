@@ -27,7 +27,6 @@
  
 #include <unoglobal.hxx>
 #include <iostream>
-#include <cassert>
 #include <com/sun/star/lang/XServiceInfo.hpp>
 #include <com/sun/star/table/CellAddress.hpp>
 

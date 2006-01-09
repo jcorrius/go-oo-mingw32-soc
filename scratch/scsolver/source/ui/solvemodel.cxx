@@ -324,7 +324,7 @@ void SolveModelImpl::updateCells()
 {
 	vector<CellAddress> cnAddrs = m_pBuilder->getAllDecisionVarAddresses();
 	CalcInterface* pCalc = m_pSolverImpl->getCalcInterface();
-	assert( m_mxSolution.rows() == cnAddrs.size() );
+	OSL_ASSERT( m_mxSolution.rows() == cnAddrs.size() );
 	vector<CellAddress>::iterator it, itEnd = cnAddrs.end();
 	size_t nIdx = 0;
 	for ( it = cnAddrs.begin(); it != itEnd; ++it )

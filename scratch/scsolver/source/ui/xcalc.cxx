@@ -131,13 +131,13 @@ Reference< XRangeSelection > CalcInterface::getXRangeSelection() const
 	if ( m_xRngSel == NULL )
 	{
 		Reference< frame::XModel > xModel( getCurrentComponent(), UNO_QUERY );
-		assert( xModel != NULL );
+		OSL_ASSERT( xModel != NULL );
 		
 		Reference< frame::XController > xController = xModel->getCurrentController();
-		assert( xController != NULL );
+		OSL_ASSERT( xController != NULL );
 		
 		Reference< XRangeSelection > xRngSel( xController, UNO_QUERY );
-		assert( xRngSel != NULL );
+		OSL_ASSERT( xRngSel != NULL );
 
 		m_xRngSel = xRngSel;
 	}

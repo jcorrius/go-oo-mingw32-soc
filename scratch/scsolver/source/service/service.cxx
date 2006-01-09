@@ -170,7 +170,14 @@ CalcInterface* SolverImpl::getCalcInterface() const
 	return m_pCalc.get();
 }
 
-void SolverImpl::executeDialog() throw( RuntimeException )
+void SolverImpl::setTitle( const ::rtl::OUString& aTitle )
+		throw (uno::RuntimeException)
+{
+    Debug( "SolverImpl::setTitle - unimplemented ..." );
+}
+
+sal_Int16 SolverImpl::execute()
+		throw (::com::sun::star::uno::RuntimeException)
 {
     Debug( "SolverImpl::executeDialog" );
 	
