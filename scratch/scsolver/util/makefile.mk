@@ -9,6 +9,7 @@ TARGET=scsolver
 
 # --- Allgemein ----------------------------------------------------------
 
+DLLPRE=
 LIB1TARGET= $(SLB)$/$(TARGET).uno.lib
 LIB1FILES=	$(SLB)$/numeric.lib	\
 		$(SLB)$/service.lib		\
