@@ -1,0 +1,594 @@
+Index: desktop/prj/build.lst
+===================================================================
+RCS file: /cvs/framework/desktop/prj/build.lst,v
+retrieving revision 1.32
+diff -u -p -u -r1.32 build.lst
+--- desktop/prj/build.lst	25 Oct 2005 11:17:27 -0000	1.32
++++ desktop/prj/build.lst	10 Jan 2006 14:19:01 -0000
+@@ -14,6 +14,7 @@ dt	desktop\win32\source\setup				nmake	-
+ dt	desktop\win32\source\officeloader		nmake	-	w	dt_officeloader NULL
+ dt	desktop\win32\source\applauncher		nmake	-	w	dt_applauncher NULL
+ dt	desktop\win32\source\applauncher\ooo	nmake	-	w	dt_applauncher_ooo dt_applauncher.w NULL
++dt	desktop\unx\source					nmake	-	u	dt_uwrapper NULL
+ dt	desktop\source\pagein					nmake	-	u	dt_pagein NULL
+ dt	desktop\source\pkgchk					nmake	-	all	dt_pkgchk dt_dp_misc dt_app NULL
+ dt	desktop\source\pkgchk\msi				nmake	-	w	dt_pkgchk_msi dt_pkgchk NULL
+@@ -30,4 +31,4 @@ dt	desktop\source\deployment\registry\co
+ dt	desktop\source\deployment\registry\configuration	nmake	-	all	dt_dp_registry_configuration dt_dp_misc NULL
+ dt	desktop\scripts 						nmake	-	u	dt_scripts NULL
+ dt	desktop\macosx\source					nmake	-	u	dt_macosx_bundle	NULL
+-dt	desktop\util							nmake	-	all	dt_util dt_app dt_so_comp dt_spl dt_wrapper.w dt_officeloader.w dt_migr dt_macosx_bundle.u NULL
++dt	desktop\util							nmake	-	all	dt_util dt_app dt_so_comp dt_spl dt_uwrapper.u dt_wrapper.w dt_officeloader.w dt_migr dt_macosx_bundle.u NULL
+
+Index: desktop/prj/d.lst
+===================================================================
+RCS file: /cvs/framework/desktop/prj/d.lst,v
+retrieving revision 1.43
+diff -u -p -u -r1.43 d.lst
+--- desktop/prj/d.lst	13 Oct 2005 09:54:36 -0000	1.43
++++ desktop/prj/d.lst	10 Jan 2006 14:19:01 -0000
+@@ -7,7 +7,8 @@ mkdir: %_DEST%\bin%_EXT%\remote2
+ ..\%__SRC%\bin\soffice.bin %_DEST%\bin%_EXT%\soffice.bin
+ ..\%__SRC%\bin\officeloader.exe %_DEST%\bin%_EXT%\soffice.exe
+ ..\%__SRC%\bin\soffice %_DEST%\bin%_EXT%\soffice.bin
++..\%__SRC%\bin\ooqstart %_DEST%\bin%_EXT%\ooqstart
+ 
+ ..\%__SRC%\bin\soffice_oo.exe %_DEST%\bin%_EXT%\soffice_oo.exe
+ ..\%__SRC%\bin\soffice_so.exe %_DEST%\bin%_EXT%\soffice_so.exe
+
+
+Index: scp2/source/ooo/file_ooo.scp
+===================================================================
+RCS file: /cvs/installation/scp2/source/ooo/file_ooo.scp,v
+retrieving revision 1.129
+diff -u -p -u -r1.129 file_ooo.scp
+--- scp2/source/ooo/file_ooo.scp	22 Nov 2005 06:58:08 -0000	1.129
++++ scp2/source/ooo/file_ooo.scp	10 Jan 2006 14:30:04 -0000
+@@ -335,6 +335,15 @@ File gid_File_Bin_Soffice_Bin
+     Name = "soffice.bin";
+ End
+ 
++#if defined(UNX) && defined(ENABLE_GTK)
++File gid_File_Bin_QStart_Bin
++    BIN_FILE_BODY;
++    Dir = gid_Dir_Program;
++    Styles = (PACKED, PATCH);
++    Name = "ooqstart";
++End
++#endif
++
+ #ifdef UNX
+ 
+ File gid_File_Bin_Open_Url
+
+
+--- /dev/null	2006-01-09 09:20:37.168436500 +0000
++++ desktop/unx/source/makefile.mk	2006-01-10 13:49:10.000000000 +0000
+@@ -0,0 +1,30 @@
++PRJ=..$/..
++PRJNAME=desktop
++TARGET=ooqstart
++
++NO_DEFAULT_STL=TRUE
++
++.INCLUDE :  settings.mk
++
++.IF "$(ENABLE_GTK)" != "TRUE"
++dummy:
++	@echo "Nothing to build. GUIBASE == $(GUIBASE), WITH_WIDGETSET == $(WITH_WIDGETSET)"
++
++.ELSE # build with gtk+
++
++PKGCONFIG_MODULES=gtk+-2.0
++.INCLUDE: pkg_config.mk
++
++CFLAGS+= $(PKGCONFIG_CFLAGS)
++
++APP1TARGET = $(TARGET)
++APP1OBJS   = $(OBJ)$/start.obj
++APP1NOSAL  = TRUE
++APP1LIBSALCPPRT=
++APP1STDLIBS = $(PKGCONFIG_LIBS)
++
++.ENDIF
++
++# --- Targets ------------------------------------------------------
++
++.INCLUDE :	target.mk
+
+--- /dev/null	2006-01-09 09:20:37.168436500 +0000
++++ desktop/unx/source/start.c	2006-01-10 12:49:12.000000000 +0000
+@@ -0,0 +1,492 @@
++#include <signal.h>
++#include <unistd.h>
++#include <gtk/gtk.h>
++#include <limits.h>
++#include <stdlib.h>
++#include <sys/types.h>
++#include <sys/socket.h>
++#include <arpa/inet.h>
++#include <sys/un.h>
++#include <fcntl.h>
++
++#define PIPEDEFAULTPATH		"/tmp"
++#define PIPEALTERNATEPATH	"/var/tmp"
++
++static char *
++read_path_and_chomp (const char *app)
++{
++		int len;
++		char buffer[PATH_MAX];
++
++		/* Readlink on argv[0] to point to the install path */
++		if ((len = readlink (app, buffer, sizeof(buffer))) < 0)
++				return NULL;
++		buffer[MIN(len, 4095)] = '\0';
++
++		return g_path_get_dirname (buffer);
++}
++
++static char *
++get_app_path (const char *app_exec)
++{
++		if (app_exec[0] != '/')
++				g_error ("%s must be called with an absolute path\n", app_exec);
++		
++		return g_path_get_dirname (app_exec);
++}
++
++/* OO.o likes to find real paths, unwinding symlinks etc. */
++static char *
++get_real_app_path (const char *app_path)
++{
++		char *path, *bin_path;
++
++		path = g_strdup (app_path);
++
++		/* Hack for use with linkoo: follow soffice.bin
++		   if it is a symlink */
++		bin_path = g_strconcat (app_path, "/soffice.bin", NULL);
++		if (g_file_test (bin_path, G_FILE_TEST_IS_SYMLINK)) 
++		{
++				g_free (path);
++				path = read_path_and_chomp (bin_path);
++		}
++		g_free (bin_path);
++
++		/* Nasty - but OO.o likes to call realpath too ... */
++		char *real_path = (char *)g_malloc (PATH_MAX + 1);
++		realpath (path, real_path);
++		real_path[PATH_MAX] = '\0';
++		g_free (path);
++
++		return real_path;
++}
++
++static char *
++get_pipe_path (const char *app_path)
++{
++		char *pipe_path;
++		char *real_app_path;
++		char *terminated_path;
++		const char *base_path;
++
++		real_app_path = get_real_app_path (app_path);
++		terminated_path = g_strconcat (real_app_path, "/", NULL);
++
++		if (access(PIPEDEFAULTPATH, R_OK|W_OK) == 0)
++				base_path = PIPEDEFAULTPATH;
++		else
++				base_path = PIPEALTERNATEPATH;
++
++		pipe_path = g_strdup_printf (
++				"%s/OSL_PIPE_%u_SingleOfficeIPC_%d-%x", base_path, (int)getuid(),
++				SUPD, g_str_hash (terminated_path));
++
++/*		fprintf (stderr, "pipe path is '%s' from '%s'\n", pipe_path, real_app_path); */
++
++		g_free (terminated_path);
++		g_free (real_app_path);
++
++		return pipe_path;
++}
++
++static int
++connect_pipe (const char *pipe_path)
++{
++		int fd;
++		size_t len;
++		struct sockaddr_un addr;
++
++		memset(&addr, 0, sizeof(addr));
++
++		if ((fd = socket(AF_UNIX, SOCK_STREAM, 0)) < 0)
++				return fd;
++		
++		fcntl (fd, F_SETFD, FD_CLOEXEC);
++
++		addr.sun_family = AF_UNIX;
++		strncpy(addr.sun_path, pipe_path, sizeof(addr.sun_path));
++
++/* cut / paste from osl's pipe.c */
++#if defined(FREEBSD)
++		len = SUN_LEN(&addr);
++#else
++		len = sizeof(addr);
++#endif
++
++		if (connect (fd, (struct sockaddr *)&addr, len) < 0)
++				return -1;
++
++		return fd;
++}
++
++static gboolean
++send_args (int fd, GPtrArray *args, const char *cwd)
++{
++		int i, len;
++		GString *arg_str = g_string_new ("");
++
++		for (i = 1; i < args->len; i++)
++		{
++				g_string_append (arg_str, (char *)args->pdata[i]);
++				g_string_append_c (arg_str, '|');
++		}
++
++#ifdef DEBUG		
++		fprintf (stderr, "Pass args: '%s'\n", arg_str->str); 
++#endif
++		len = arg_str->len + 1;
++
++		return write (fd, arg_str->str, len) == len;
++}
++
++static void
++init_gtk (int argc, char **argv)
++{
++	int i;
++    char *args[3];
++	char **argptr = args;
++	
++	args[0] = argv[0];
++	argc = 1;
++	for (i = 0; i < argc - 1; i++)
++	{
++			if (!strcmp (argv[i], "-display") ||
++				!strcmp (argv[i], "--display"))
++			{
++					args[argc++] = g_strdup ("--display");
++					args[argc++] = argv[i+1];
++			}
++	}
++    gtk_init_check( &argc, &argptr );
++}
++
++static void
++center_window (GtkWindow *window, void *dummy)
++{
++	GdkRectangle rect;
++
++	gdk_screen_get_monitor_geometry (window->screen, 0, &rect);
++	int sx = rect.width;
++	int sy = rect.height;
++	
++	GdkGeometry geom;
++	geom.base_width = GTK_WIDGET (window)->allocation.width;
++	geom.base_height = GTK_WIDGET (window)->allocation.height;
++	geom.min_width = geom.max_width = geom.base_width;
++	geom.min_height = geom.max_height = geom.base_height;
++
++	gtk_window_move (window, sx / 2 - geom.min_width / 2,
++					 sy / 2 - geom.min_height / 2);
++
++	int hints = GDK_HINT_POS | GDK_HINT_USER_POS |
++			GDK_HINT_BASE_SIZE | GDK_HINT_MIN_SIZE | GDK_HINT_MAX_SIZE |
++			GDK_HINT_USER_SIZE;
++
++	gtk_window_set_geometry_hints (window, NULL, &geom, (GdkWindowHints) hints);
++}
++
++typedef struct {
++		gboolean finish;
++		gboolean error;
++		GtkProgressBar *progress_bar;
++}  StatusClosure;
++
++static gboolean
++status_pipe_update (GIOChannel * source,
++					GIOCondition condition, 
++					StatusClosure *cl)
++{
++	gboolean retval = TRUE;
++
++#ifdef DEBUG
++	fprintf (stderr, "Status pipe update (0x%x)\n", (int) condition);
++#endif
++
++	if ((int)condition & (G_IO_IN | G_IO_PRI))
++	{
++			int percent;
++			GString *str = g_string_new ("");
++			switch (g_io_channel_read_line_string (source, str, NULL, NULL)) {
++			case G_IO_STATUS_ERROR:
++					cl->error = TRUE;
++					/* drop through */
++			case G_IO_STATUS_EOF:
++					retval = FALSE;
++					break;
++			default:
++					/* pipe lifecycle is odd - HUP only for remote process death */
++					if (!g_ascii_strncasecmp (str->str, "end", 3))
++							retval = FALSE;
++					if (sscanf (str->str, "%d%%", &percent))
++							gtk_progress_bar_set_fraction (cl->progress_bar,
++														   (float) percent / 100.0);
++					break;
++			}
++			g_string_free (str, TRUE);
++	}
++
++	if ((int)condition & (G_IO_HUP | G_IO_NVAL | G_IO_ERR))
++	{
++			cl->error = TRUE;
++			retval = FALSE;
++	}
++
++	if (!retval)
++			cl->finish = TRUE;
++
++	return retval;
++}
++
++static GdkPixbuf *
++get_splash (const char *image_path)
++{
++		char *path;
++		GdkPixbuf *pixbuf;
++
++		path = g_strconcat (image_path, "/intro-nld.bmp", NULL);
++		pixbuf = gdk_pixbuf_new_from_file (path, NULL);
++		g_free (path);
++		if (pixbuf)
++				return pixbuf;
++
++		path = g_strconcat (image_path, "/intro.bmp", NULL);
++		pixbuf = gdk_pixbuf_new_from_file (path, NULL);
++		g_free (path);
++
++		return pixbuf;
++}
++
++static void
++show_splash (const char *image_path, GIOChannel *status_channel)
++{
++		GdkPixbuf *pixbuf;
++		GtkWidget *contents;
++		GtkWidget *vbox;
++		StatusClosure cl;
++
++		if ((pixbuf = get_splash (image_path)))
++				contents = gtk_image_new_from_pixbuf (pixbuf);
++		else
++				contents = gtk_label_new ("No splash pixmap");
++
++		/* setup closure */
++		cl.finish = FALSE;
++		cl.error = FALSE;
++		cl.progress_bar = GTK_PROGRESS_BAR (gtk_progress_bar_new ());
++
++		/* pack contents & progres bar */
++		vbox = gtk_vbox_new (FALSE, 0);
++		gtk_box_pack_start (GTK_BOX (vbox), contents,
++							TRUE, FALSE, 0);
++		gtk_progress_bar_set_orientation (
++			cl.progress_bar, GTK_PROGRESS_LEFT_TO_RIGHT);
++		gtk_progress_bar_set_fraction (cl.progress_bar, 0.03);
++		gtk_box_pack_start (GTK_BOX (vbox), GTK_WIDGET (cl.progress_bar),
++							FALSE, FALSE, 0);
++
++		/* setup window */
++		GtkWindow *window;
++		window = GTK_WINDOW (gtk_window_new (GTK_WINDOW_TOPLEVEL));
++		gtk_window_set_has_frame (window, FALSE);
++		gtk_window_set_resizable (window, FALSE);
++		gtk_window_set_decorated (window, FALSE);
++/*		gtk_window_set_icon_name (window, "foo"); FIXME splash WM icon ? */
++
++		/* click to dismiss */
++		GtkWidget *event_box;
++		event_box = gtk_event_box_new ();
++		gtk_container_add (GTK_CONTAINER (event_box), vbox);
++		g_signal_connect_swapped (G_OBJECT (event_box), "button_press_event",
++								  G_CALLBACK (gtk_widget_hide), (gpointer) window);
++
++		gtk_container_add (GTK_CONTAINER (window), event_box);
++		g_signal_connect (G_OBJECT (window), "realize", 
++						  G_CALLBACK (center_window), NULL);
++		gtk_widget_show_all (GTK_WIDGET (window));
++
++		/* setup status listener ... */
++		g_io_add_watch (status_channel, 
++						(GIOCondition)(G_IO_IN | G_IO_PRI | G_IO_HUP | G_IO_NVAL | G_IO_ERR),
++						(GIOFunc) status_pipe_update, (gpointer) &cl);
++
++#ifdef DEBUG
++		g_warning ("Start main loop...\n");
++#endif
++		while (!cl.finish)
++                g_main_context_iteration (g_main_context_default (), TRUE);
++
++		if (cl.error)
++				g_warning ("Unknown error forking main binary / abnormal early exit ...");
++        
++        g_io_channel_shutdown (status_channel, FALSE, NULL);
++        g_io_channel_unref (status_channel);
++}
++
++typedef struct {
++		int pipe_fd;
++		int clone_fd;
++} ChildClosure;
++
++static void
++child_setup (gpointer user_data)
++{
++		ChildClosure *cl = (ChildClosure *)user_data;
++		if (cl->pipe_fd >= 0)
++				close (cl->pipe_fd);
++		close (cl->clone_fd);
++}
++
++static gboolean
++fork_app (const char *app_path, GPtrArray *args, int pipe_fd,
++		  GIOChannel **status_channel)
++{
++		int status_pipe[2];
++		gboolean spawn_success;
++		GError *error = NULL;
++		char *splash_pipe_arg;
++		ChildClosure *cl = g_new (ChildClosure, 1);
++		GIOChannel *status;
++
++		args->pdata[0] = (gpointer)g_strconcat (app_path, "/soffice", NULL);
++
++		/* create pipe */
++     	if (pipe (status_pipe) < 0)
++				g_error ("no file handles\n");
++
++        status = g_io_channel_unix_new (status_pipe[0]);
++        g_io_channel_set_encoding (status, NULL, NULL);
++
++		splash_pipe_arg = g_strdup_printf ("-splash-pipe=%d", status_pipe[1]);
++#ifdef DEBUG
++		fprintf ( stderr, "Pass splash pipe arg: '%s'\n", splash_pipe_arg);
++#endif
++		g_ptr_array_add (args, splash_pipe_arg);
++
++#ifdef DEBUG
++		fprintf (stderr, "Fork app '%s' in '%s'\n", (char *)args->pdata[0], app_path);
++#endif
++		cl->pipe_fd = pipe_fd;
++		cl->clone_fd = status_pipe[0];
++		spawn_success = g_spawn_async
++				(app_path, (char **)args->pdata, NULL,
++				 G_SPAWN_LEAVE_DESCRIPTORS_OPEN,
++				 (GSpawnChildSetupFunc) child_setup,
++				 (gpointer) cl,
++				 NULL, /* child_pid */
++				 &error);
++		close (status_pipe[1]);
++
++		if (!spawn_success)
++				fprintf (stderr, "Error forking '%s/%s': '%s'\n",
++						 app_path, "/soffice",
++						 error ? error->message : "<no message>");
++
++		g_free (splash_pipe_arg);
++
++		*status_channel = status;
++
++		return spawn_success;
++}
++
++static gboolean
++arg_check (const char *arg, const char *cmp_with)
++{
++		if (arg[0] == '-')
++				arg++;
++		else
++				return FALSE;
++		if (arg[0] == '-') /* tolerate -- prefixes etc. */
++				arg++;
++		return !g_ascii_strcasecmp (arg, cmp_with);
++}
++
++static GPtrArray *
++setup_args (int argc, char **argv, gboolean *inhibit_splash)
++{
++		int i;
++		gboolean have_non_option = FALSE;
++		GPtrArray *args = g_ptr_array_sized_new (argc + 8);
++
++		*inhibit_splash = FALSE;
++		
++		for (i = 0; i < argc; i++)
++		{
++				g_ptr_array_add (args, g_strdup (argv[i]));
++				if (!i)
++						continue;
++
++				if (argv[i][0] != '-')
++						have_non_option = TRUE;
++
++				else if (arg_check (argv[i], "nologo") ||
++						 arg_check (argv[i], "headless") ||
++						 arg_check (argv[i], "invisible"))
++						*inhibit_splash = TRUE;
++		}
++
++		/* It's necessary to append eg. -writer for writer. */
++		if (!have_non_option)
++		{
++				const char *extra_arg = g_getenv ("OOO_EXTRA_ARG");
++				if (!extra_arg)
++						g_error ("Missing default argument in OOO_EXTRA_ARG");
++				g_ptr_array_add (args, g_strdup (extra_arg));
++		}
++
++		return args;
++}
++
++int main (int argc, char **argv)
++{
++		int fd;
++		gboolean inhibit_splash;
++		GIOChannel *status_channel = NULL;
++		gboolean sent_args = FALSE;
++		char *app_path, *pipe_path;
++		GPtrArray *args;
++		char cwd_str[PATH_MAX];
++
++		/* turn SIGPIPE into an error */
++		signal (SIGPIPE, SIG_IGN);
++		if (!getcwd (cwd_str, sizeof (cwd_str)))
++				g_error ("can't get cwd");
++		cwd_str[sizeof(cwd_str)-1] = '\0';
++	
++		args = setup_args (argc, argv, &inhibit_splash);
++
++		app_path = get_app_path (argv[0]);
++		if (!app_path)
++				g_error ("Pathalogical failure: can't read app link\n");
++
++		pipe_path = get_pipe_path (app_path);
++
++		if ((fd = connect_pipe (pipe_path)) >= 0)
++				sent_args = send_args (fd, args, cwd_str);
++#ifdef DEBUG
++		else
++				fprintf (stderr, "Failed to connect to pipe '%s'\n", pipe_path);
++#endif
++
++		if (!sent_args)
++		{
++				if (! fork_app (app_path, args, fd, &status_channel))
++						return 1;
++		}
++
++		init_gtk (argc, argv);
++		if (sent_args || inhibit_splash)
++		{
++				gdk_notify_startup_complete ();
++				return 0;
++		}
++
++		if (!inhibit_splash)
++				show_splash (app_path, status_channel);
++
++		g_ptr_array_foreach (args, (GFunc)g_free, NULL);
++		g_ptr_array_free (args, TRUE);
++		g_free (app_path);
++
++		return 0;
++}
+
