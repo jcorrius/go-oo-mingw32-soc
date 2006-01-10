@@ -1,3 +1,131 @@
+Index: desktop/source/splash/splash.hxx
+===================================================================
+RCS file: /cvs/framework/desktop/source/splash/splash.hxx,v
+retrieving revision 1.9
+diff -u -p -u -r1.9 splash.hxx
+--- desktop/source/splash/splash.hxx	8 Sep 2005 17:50:08 -0000	1.9
++++ desktop/source/splash/splash.hxx	10 Jan 2006 18:41:14 -0000
+@@ -33,6 +33,8 @@
+  *
+  ************************************************************************/
+ 
++#include <stdio.h>
++
+ #ifndef _COM_SUN_STAR_LANG_XSERVICEINFO_HPP_
+ #include <com/sun/star/lang/XServiceInfo.hpp>
+ #endif
+@@ -113,10 +115,13 @@ private:
+ 	sal_Bool _bPaintBitmap;
+ 	sal_Bool _bPaintProgress;
+ 	sal_Bool _bVisible;
++	FILE *_outFd;
+ 	long _height, _width, _tlx, _tly, _barwidth;
+     long _barheight, _barspace;
+     const long _xoffset, _yoffset;
+ 
++	bool doRender() { return _outFd == NULL; };
++
+ public:
+     static const char* interfaces[];
+ 	static const sal_Char *serviceName;
+
+Index: desktop/source/splash/splash.cxx
+===================================================================
+RCS file: /cvs/framework/desktop/source/splash/splash.cxx,v
+retrieving revision 1.16
+diff -u -p -u -r1.16 splash.cxx
+--- desktop/source/splash/splash.cxx	17 Nov 2005 10:00:26 -0000	1.16
++++ desktop/source/splash/splash.cxx	10 Jan 2006 18:40:37 -0000
+@@ -82,11 +85,34 @@ SplashScreen::SplashScreen(const Referen
+ 	, _yoffset(18)
+     , _barheight(-1)
+     , _barspace(2)
++    , _bVisible( FALSE )
++    , _outFd(NULL)
+ {
+ 	_rFactory = rSMgr;
+ 
+-    loadConfig();
+-	initBitmap();
++#ifdef UNX
++	::vos::OStartupInfo aInfo;
++#define PIPE_ARG "-splash-pipe="
++	for (sal_uInt32 i = 0; i < aInfo.getCommandArgCount(); i++)
++	{
++		rtl::OUString aArg;
++		if (aInfo.getCommandArg (i, aArg))
++		    break;
++		if (aArg.matchIgnoreAsciiCaseAsciiL (PIPE_ARG, sizeof (PIPE_ARG) - 1, 0))
++		{
++			OUString aNum = aArg.copy (sizeof (PIPE_ARG) - 1);
++			int fd = aNum.toInt32();
++			_outFd = fdopen (fd, "w");
++/*			fprintf (stderr, "Got argument '-splash-pipe=%d ('%s') (%p)\n",
++					 fd, (const sal_Char *)rtl::OUStringToOString (aNum, RTL_TEXTENCODING_UTF8),
++					 _outFd); */
++		}
++	}
++#endif
++
++	if (!doRender())
++		return;
++
+ 	Size aSize = _aIntroBmp.GetSizePixel();
+ 	SetOutputSizePixel( aSize );
+     _vdev.SetOutputSizePixel( aSize );
+@@ -139,9 +165,11 @@ SplashScreen::SplashScreen(const Referen
+ 
+ SplashScreen::~SplashScreen()
+ {
++	if (!doRender())
++		return;
+ 	Application::RemoveEventListener(
+ 		LINK( this, SplashScreen, AppEventListenerHdl ) );
+-	Hide();
++	if (_bVisible) Hide();
+ }
+ 
+ void SAL_CALL SplashScreen::start(const OUString& aText, sal_Int32 nRange)
+@@ -160,6 +188,15 @@ void SAL_CALL SplashScreen::end()
+ 	_iProgress = _iMax;
+ 	updateStatus();
+ 	if (_bVisible) Hide();
++#ifdef UNX
++	if (!doRender()) {
++/*			fprintf (stderr, "SplashScreen::end()\n"); */
++			fprintf (_outFd, "end\n");
++			fflush (_outFd);
++			fclose (_outFd);
++			_outFd = NULL;
++	}
++#endif
+ }
+ void SAL_CALL SplashScreen::reset()
+ 	throw (RuntimeException)
+@@ -184,6 +221,13 @@ void SAL_CALL SplashScreen::setValue(sal
+     RTL_LOGFILE_CONTEXT_TRACE1( aLog, "value=%d", nValue );
+ 
+     ::vos::OGuard aSolarGuard( Application::GetSolarMutex() );
++#ifdef UNX
++	if (!doRender())
++	{
++		fprintf (_outFd, "%d%%\n", nValue);
++		fflush (_outFd);
++	}
++#endif
+     if (_bVisible) {
+         Show();
+ 	    if (nValue >= _iMax) _iProgress = _iMax;
+@@ -198,7 +242,7 @@ SplashScreen::initialize( const ::com::s
+ 	throw (RuntimeException)
+ {
+ 	::osl::ClearableMutexGuard	aGuard(	_aMutex );
+-	if (aArguments.getLength() > 0)
++	if (aArguments.getLength() > 0 && doRender())
+ 		aArguments[0] >>= _bVisible;
+ }
+ 
+
 Index: desktop/prj/build.lst
 ===================================================================
 RCS file: /cvs/framework/desktop/prj/build.lst,v
@@ -97,18 +225,20 @@ diff -u -p -u -r1.129 file_ooo.scp
 +.INCLUDE :	target.mk
 
 --- /dev/null	2006-01-09 09:20:37.168436500 +0000
-+++ desktop/unx/source/start.c	2006-01-10 12:49:12.000000000 +0000
-@@ -0,0 +1,492 @@
++++ desktop/unx/source/start.c	2006-01-10 18:10:48.000000000 +0000
+@@ -0,0 +1,527 @@
 +#include <signal.h>
 +#include <unistd.h>
 +#include <gtk/gtk.h>
 +#include <limits.h>
 +#include <stdlib.h>
 +#include <sys/types.h>
++#include <sys/stat.h>
 +#include <sys/socket.h>
 +#include <arpa/inet.h>
 +#include <sys/un.h>
 +#include <fcntl.h>
++#include <stdio.h>
 +
 +#define PIPEDEFAULTPATH		"/tmp"
 +#define PIPEALTERNATEPATH	"/var/tmp"
@@ -513,6 +643,15 @@ diff -u -p -u -r1.129 file_ooo.scp
 +		
 +		for (i = 0; i < argc; i++)
 +		{
++				if (arg_check (argv[i], "widgets-set")) {
++						char *widget_env;
++						if (i >= argc - 1)
++								continue;
++						widget_env = g_strconcat ("SAL_USE_VCLPLUGIN=", argv[i+1], NULL);
++						putenv (widget_env); /* deliberate leak */
++						i++;
++						continue;
++				}
 +				g_ptr_array_add (args, g_strdup (argv[i]));
 +				if (!i)
 +						continue;
@@ -536,6 +675,30 @@ diff -u -p -u -r1.129 file_ooo.scp
 +		}
 +
 +		return args;
++}
++
++static void
++system_checks ()
++{
++#ifdef LINUX
++		int fd;
++		char *recently_used;
++
++		/* FIXME: force right ownership of ~/.ooo-* as well
++		 * really all that work should be done by OO.o - not here.
++		 */
++
++		/* force right ownership on ~/.recently-used despite umask */
++		recently_used = g_strconcat (g_get_home_dir (), "/.recently-used", NULL);
++		fd = open (recently_used, O_RDWR|O_CREAT, S_IREAD|S_IWRITE);
++		if (fd >= 0)
++				close (fd);
++		g_free (recently_used);
++
++		/* check proc is mounted - lots of things fail otherwise */
++		if (!g_file_test ("/proc/version", G_FILE_TEST_EXISTS))
++				g_warning ("/proc not mounted - OO.o is unlikely to work well if at all");
++#endif
 +}
 +
 +int main (int argc, char **argv)
@@ -591,4 +754,3 @@ diff -u -p -u -r1.129 file_ooo.scp
 +
 +		return 0;
 +}
-
