@@ -7,6 +7,22 @@
 # installer, as there is no system myspell that some distro package
 # management system would handle.
 
+# This script is more for documentation than to be used as such,
+# although it did work for me.
+
+# To use, you should download a selection of the *-pack.zip files from
+# http://ftp.stardiv.de/pub/OpenOffice.org/contrib/dictionaries/ or
+# one of its mirrors into the src directory. Then run this script,
+# then build. (If you already have a build and just want an
+# incremental rebuild to add the new dictionaries to the installer,
+# run "build" and "deliver" in dictionaries, then "build" in
+# instsetoo_native.)
+
+# Note that this script is not clever enough to notice that
+# pt_PT-pack.zip contains a dictionary also for pt_BR. Another quirk
+# is no_NO-pack.zip which contains dictionaries for nb_NO and nn_NO,
+# but not no_NO. Handle those manually.
+
 . bin/setup
 
 echo "Unpacking contributed dictionaries into the tree"
