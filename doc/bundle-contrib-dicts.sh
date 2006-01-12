@@ -1,11 +1,11 @@
 #!/bin/sh
 
-# Very hacky script to unpack contributed dictionary packs (which have
-# to have been downloaded into $SRCDIR) into the build source tree and
-# update the corresponding prj/build.lst. This is for Win32 where we
-# want to bundle selected contrib dictionaries into the base
-# installer, as there is no system myspell that some distro package
-# management system would handle.
+# Very hacky script to unpack contributed dictionary packs into the
+# build source tree, create dictionary.lst and makefile.mk files for
+# them, and update dictionaries/prj/build.lst. This is for Win32 where
+# we want to bundle selected contributed dictionaries into the base
+# installer, as there is no system myspell or package management
+# system.
 
 # This script is more for documentation than to be used as such,
 # although it did work for me.
