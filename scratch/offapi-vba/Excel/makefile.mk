@@ -16,11 +16,13 @@ dummy:
 # ------------------------------------------------------------------------
 
 IDLFILES=\
+	XlCreator.idl \
 	XlCutCopyMode.idl \
 	XlFindLookIn.idl\
 	Constants.idl \
 	XlCalculation.idl \
-	XlCellType.idl
+	XlCellType.idl \
+	XlCommentDisplayMode.idl
 
 # ------------------------------------------------------------------
 
