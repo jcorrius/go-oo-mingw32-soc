@@ -1,0 +1,466 @@
+Index: sc/inc/compiler.hrc
+===================================================================
+RCS file: /cvs/sc/sc/inc/compiler.hrc,v
+retrieving revision 1.10.38.5
+diff -u -w -p -r1.10.38.5 compiler.hrc
+--- sc/inc/compiler.hrc	28 Nov 2005 16:45:45 -0000	1.10.38.5
++++ sc/inc/compiler.hrc	12 Jan 2006 16:52:19 -0000
+@@ -363,9 +363,10 @@
+ #define SC_OPCODE_BAHTTEXT          388
+ #define	SC_OPCODE_INDIRECT_XL		389		/* See also INDIRECT for OOO variant */
+ #define	SC_OPCODE_ADRESS_XL		    390		/* See also ADRESS for OOO variant */
+-#define	SC_OPCODE_END_2_PAR			391
++#define SC_OPCODE_GET_PIVOT_DATA	391
++#define	SC_OPCODE_END_2_PAR			392
+ 
+-#define SC_OPCODE_LAST_OPCODE_ID    390      /* letzter OpCode */
++#define SC_OPCODE_LAST_OPCODE_ID    391      /* letzter OpCode */
+ 
+ /*** Interna ***/
+ #define	SC_OPCODE_INTERNAL_BEGIN   9995
+Index: sc/inc/document.hxx
+===================================================================
+RCS file: /cvs/sc/sc/inc/document.hxx,v
+retrieving revision 1.88.22.5
+diff -u -w -p -r1.88.22.5 document.hxx
+--- sc/inc/document.hxx	1 Dec 2005 19:52:17 -0000	1.88.22.5
++++ sc/inc/document.hxx	12 Jan 2006 16:52:20 -0000
+@@ -471,6 +471,7 @@ SC_DLLPUBLIC	ScDBCollection*	GetDBCollec
+ 
+ 	ScDPCollection*		GetDPCollection();
+ 	ScDPObject*			GetDPAtCursor(SCCOL nCol, SCROW nRow, SCTAB nTab) const;
++	ScDPObject*			GetDPAtBlock( const ScRange & rBlock ) const;
+ 
+ 	ScPivotCollection*	GetPivotCollection() const;
+ 	void				SetPivotCollection(ScPivotCollection* pNewPivotCollection);
+Index: sc/inc/dpobject.hxx
+===================================================================
+RCS file: /cvs/sc/sc/inc/dpobject.hxx,v
+retrieving revision 1.11.22.2
+diff -u -w -p -r1.11.22.2 dpobject.hxx
+--- sc/inc/dpobject.hxx	2 Nov 2005 02:41:33 -0000	1.11.22.2
++++ sc/inc/dpobject.hxx	12 Jan 2006 16:52:20 -0000
+@@ -56,6 +56,9 @@
+ #include <com/sun/star/sheet/XDimensionsSupplier.hpp>
+ #endif
+ 
++#ifndef __SGI_STL_VECTOR
++#include <vector>
++#endif
+ 
+ //------------------------------------------------------------------
+ 
+@@ -213,6 +216,16 @@ public:
+ 										 const ScRange& r, SCsCOL nDx, SCsROW nDy, SCsTAB nDz );
+ 	BOOL				RefsEqual( const ScDPObject& r ) const;
+ 	void				WriteRefsTo( ScDPObject& r ) const;
++
++	struct GetPivotDataField {
++		String maFieldName;
++
++		bool   mbValIsStr;
++		String maValStr;
++		double mnValNum;
++	};
++	BOOL				GetPivotData( GetPivotDataField& rTarget, /* returns result */
++									  const std::vector< GetPivotDataField >& rFilters ) const;
+ 
+ 	// apply drop-down attribute, initialize nHeaderRows, without accessing the source
+ 	// (button attribute must be present)
+Index: sc/inc/opcode.hxx
+===================================================================
+RCS file: /cvs/sc/sc/inc/opcode.hxx,v
+retrieving revision 1.12.38.4
+diff -u -w -p -r1.12.38.4 opcode.hxx
+--- sc/inc/opcode.hxx	28 Nov 2005 16:01:33 -0000	1.12.38.4
++++ sc/inc/opcode.hxx	12 Jan 2006 16:52:20 -0000
+@@ -377,6 +377,7 @@ enum OpCodeEnum
+ 		ocDecimal			= SC_OPCODE_DECIMAL,
+ 		ocConvert			= SC_OPCODE_CONVERT,
+ 		ocRoman				= SC_OPCODE_ROMAN,
++        ocGetPivotData      = SC_OPCODE_GET_PIVOT_DATA,
+         ocHyperLink         = SC_OPCODE_HYPERLINK,
+         ocBahtText          = SC_OPCODE_BAHTTEXT,
+ 		ocEnd2Par			= SC_OPCODE_END_2_PAR,
+Index: sc/inc/scfuncs.hrc
+===================================================================
+RCS file: /cvs/sc/sc/inc/scfuncs.hrc,v
+retrieving revision 1.8.38.4
+diff -u -w -p -r1.8.38.4 scfuncs.hrc
+--- sc/inc/scfuncs.hrc	28 Nov 2005 16:00:48 -0000	1.8.38.4
++++ sc/inc/scfuncs.hrc	12 Jan 2006 16:52:20 -0000
+@@ -299,6 +299,7 @@
+ #define HID_FUNC_HYPERLINK			(HID_SC_FUNC_DUMMY+(ID_FUNCTION_GRP_TABLE*ID_FUNCTION_OFFSET)+20)
+ #define HID_FUNC_INDIREKT_XL		(HID_SC_FUNC_DUMMY+(ID_FUNCTION_GRP_TABLE*ID_FUNCTION_OFFSET)+21)
+ #define HID_FUNC_ADRESSE_XL			(HID_SC_FUNC_DUMMY+(ID_FUNCTION_GRP_TABLE*ID_FUNCTION_OFFSET)+22)
++#define HID_FUNC_GETPIVOTDATA		(HID_SC_FUNC_DUMMY+(ID_FUNCTION_GRP_TABLE*ID_FUNCTION_OFFSET)+23)
+ 
+ #define HID_FUNC_CODE				(HID_SC_FUNC_DUMMY+(ID_FUNCTION_GRP_TEXT*ID_FUNCTION_OFFSET)+1)
+ #define HID_FUNC_DM					(HID_SC_FUNC_DUMMY+(ID_FUNCTION_GRP_TEXT*ID_FUNCTION_OFFSET)+2)
+Index: sc/source/core/data/documen3.cxx
+===================================================================
+RCS file: /cvs/sc/sc/source/core/data/documen3.cxx,v
+retrieving revision 1.29.22.3
+diff -u -w -p -r1.29.22.3 documen3.cxx
+--- sc/source/core/data/documen3.cxx	1 Dec 2005 19:52:19 -0000	1.29.22.3
++++ sc/source/core/data/documen3.cxx	12 Jan 2006 16:52:21 -0000
+@@ -271,6 +271,21 @@ ScDPObject* ScDocument::GetDPAtCursor(SC
+ 	return NULL;
+ }
+ 
++ScDPObject*	ScDocument::GetDPAtBlock( const ScRange & rBlock ) const
++{
++	if (!pDPCollection)
++		return NULL;
++
++	/* Walk the collection in reverse order to get something of an
++	 * approximation of MS Excels 'most recent' effect. */
++	USHORT i = pDPCollection->GetCount();
++	while ( i-- > 0 )
++		if ( (*pDPCollection)[i]->GetOutRange().In( rBlock ) )
++			return (*pDPCollection)[i];
++
++	return NULL;
++}
++
+ ScPivotCollection* ScDocument::GetPivotCollection() const
+ {
+ 	return pPivotCollection;
+Index: sc/source/core/data/dpobject.cxx
+===================================================================
+RCS file: /cvs/sc/sc/source/core/data/dpobject.cxx,v
+retrieving revision 1.17
+diff -u -w -p -r1.17 dpobject.cxx
+--- sc/source/core/data/dpobject.cxx	28 Sep 2005 11:32:07 -0000	1.17
++++ sc/source/core/data/dpobject.cxx	12 Jan 2006 16:52:21 -0000
+@@ -475,6 +475,82 @@ void ScDPObject::Output()
+ 	aOutRange = pOutput->GetOutputRange();
+ }
+ 
++#include <stdio.h>
++static const sal_Char *dbg_dump(const ByteString &rStr)
++{
++	static ByteString aStr;
++	aStr = rStr;
++	aStr.Append(static_cast< char >(0));
++	return aStr.GetBuffer();
++}
++static const sal_Char *dbg_dump(const UniString &rStr)
++{
++	return dbg_dump(ByteString(rStr, RTL_TEXTENCODING_UTF8));
++}
++
++// Returns TRUE on success and stores the result in rTarget
++BOOL ScDPObject::GetPivotData( GetPivotDataField& rTarget,
++							   const std::vector< GetPivotDataField >& rFilters ) const
++{
++	if ( !xSource.is() ) 
++		return FALSE;
++
++	// Collect field indicies
++	std::vector< unsigned int > aFilterIndex;
++	for ( unsigned int i = 0; i < rFilters.size(); i++ )
++	{
++#if 0
++		printf( "%d) %s\n", i, dbg_dump( rFilters[i].maFieldName ) );
++#endif
++
++		uno::Reference<container::XIndexAccess> xDims =
++				new ScNameToIndexAccess( xSource->getDimensions() );
++			long nDimCount = xDims->getCount();
++
++		for (long nDim=0; nDim < nDimCount; nDim++)
++		{
++			uno::Reference< uno::XInterface > xDim =
++					ScUnoHelpFunctions::AnyToInterface( xDims->getByIndex(nDim) );
++			uno::Reference< beans::XPropertySet > xDimProp( xDim, uno::UNO_QUERY );
++			uno::Reference< sheet::XHierarchiesSupplier > xDimSupp( xDim, uno::UNO_QUERY );
++
++			if ( xDimProp.is() && xDimSupp.is() )
++			{
++				uno::Reference<container::XIndexAccess> xHiers =
++						new ScNameToIndexAccess( xDimSupp->getHierarchies() );
++				long nHierarchy = ScUnoHelpFunctions::GetLongProperty( xDimProp,
++										rtl::OUString::createFromAscii(DP_PROP_USEDHIERARCHY) );
++				if ( nHierarchy >= xHiers->getCount() )
++					nHierarchy = 0;
++
++				uno::Reference<uno::XInterface> xHier =
++						ScUnoHelpFunctions::AnyToInterface(xHiers->getByIndex(nHierarchy) );
++
++				uno::Reference<sheet::XLevelsSupplier> xHierSupp( xHier, uno::UNO_QUERY );
++
++				if( xHierSupp.is() )
++				{
++					uno::Reference<container::XIndexAccess> xLevels =
++							new ScNameToIndexAccess( xHierSupp->getLevels() );
++					unsigned int nLevCount = xLevels->getCount();
++					for (unsigned int nLev=0; nLev<nLevCount; nLev++)
++					{
++						uno::Reference<uno::XInterface> xLevel =
++							ScUnoHelpFunctions::AnyToInterface( xLevels->getByIndex(nLev) );
++						uno::Reference<container::XNamed> xLevNam( xLevel, uno::UNO_QUERY );
++						uno::Reference<sheet::XDataPilotMemberResults> xLevRes(xLevel, uno::UNO_QUERY );
++						if( xLevNam.is() &&
++							xLevRes.is() )
++							aFilterIndex.push_back( nDim );
++					}
++				}
++			}
++		}
++	}
++
++	return FALSE;
++}
++
+ BOOL lcl_HasButton( ScDocument* pDoc, SCCOL nCol, SCROW nRow, SCTAB nTab )
+ {
+ 	return ((const ScMergeFlagAttr*)pDoc->GetAttr( nCol, nRow, nTab, ATTR_MERGE_FLAG ))->HasButton();
+Index: sc/source/core/inc/interpre.hxx
+===================================================================
+RCS file: /cvs/sc/sc/source/core/inc/interpre.hxx,v
+retrieving revision 1.23.20.2
+diff -u -w -p -r1.23.20.2 interpre.hxx
+--- sc/source/core/inc/interpre.hxx	28 Nov 2005 16:13:29 -0000	1.23.20.2
++++ sc/source/core/inc/interpre.hxx	12 Jan 2006 16:52:21 -0000
+@@ -452,6 +452,7 @@ BOOL SetSbxVariable( SbxVariable* pVar, 
+ void ScErrorType();
+ void ScDBArea();
+ void ScColRowNameAuto();
++void ScGetPivotData();
+ void ScHyperLink();
+ void ScBahtText();
+ void ScCalcTeam();
+Index: sc/source/core/src/compiler.src
+===================================================================
+RCS file: /cvs/sc/sc/source/core/src/compiler.src,v
+retrieving revision 1.47.22.2
+diff -u -w -p -r1.47.22.2 compiler.src
+--- sc/source/core/src/compiler.src	28 Nov 2005 16:14:14 -0000	1.47.22.2
++++ sc/source/core/src/compiler.src	12 Jan 2006 16:52:21 -0000
+@@ -1673,6 +1673,11 @@ Resource RID_SC_FUNCTION_NAMES
+ 		Text [ de ] = "RÖMISCH";
+ 		Text [ en-US ] = "ROMAN";
+ 	};
++	String SC_OPCODE_GET_PIVOT_DATA
++	{
++		Text [ de ] = "GETPIVOTDATA";
++		Text [ en-US ] = "GETPIVOTDATA" ;
++	};
+ 	String SC_OPCODE_HYPERLINK
+ 	{
+ 		Text [ de ] = "HYPERLINK";
+@@ -1979,6 +1984,7 @@ Resource RID_SC_FUNCTION_NAMES_ENGLISH
+ 	String SC_OPCODE_CONVERT { Text = "CONVERT" ; };
+ 	String SC_OPCODE_ROMAN { Text = "ROMAN" ; };
+ 	String SC_OPCODE_ARABIC { Text = "ARABIC" ; };
++	String SC_OPCODE_GET_PIVOT_DATA { Text = "GETPIVOTDATA" ; };
+ 	String SC_OPCODE_HYPERLINK { Text = "HYPERLINK" ; };
+     String SC_OPCODE_BAHTTEXT { Text = "BAHTTEXT" ; };
+ };
+Index: sc/source/core/tool/interpr2.cxx
+===================================================================
+RCS file: /cvs/sc/sc/source/core/tool/interpr2.cxx,v
+retrieving revision 1.25
+diff -u -w -p -r1.25 interpr2.cxx
+--- sc/source/core/tool/interpr2.cxx	21 Oct 2005 11:53:56 -0000	1.25
++++ sc/source/core/tool/interpr2.cxx	12 Jan 2006 16:52:22 -0000
+@@ -62,6 +62,7 @@
+ #include "unitconv.hxx"
+ #include "globstr.hrc"
+ #include "hints.hxx"
++#include "dpobject.hxx"
+ 
+ // STATIC DATA -----------------------------------------------------------
+ 
+@@ -2282,6 +2283,99 @@ void ScInterpreter::ScArabic()
+ 	}
+ }
+ 
++// TODO
++// 	1) check need for array iteration in filter name/values
++// 	2) check error when passing double as target field (GetString converts double -> str
++// 	3) check handling of names as src pivot range
++void ScInterpreter::ScGetPivotData()
++{
++	BYTE nParamCount = GetByte();
++
++    if ( MustHaveParamCount( nParamCount, 2, 30 ) )
++	{
++		// there must be an even number of args
++		// 		target, ref, then field/item pairs
++		if( (nParamCount % 2) == 1)
++			goto failed;
++
++		unsigned int i = nParamCount / 2 - 1;
++		std::vector< ScDPObject::GetPivotDataField > aFilters( i );
++
++		while( i-- > 0 )
++		{
++			switch (GetStackType())
++			{
++			case svDouble :
++				aFilters[i].mbValIsStr = FALSE;
++				aFilters[i].mnValNum = GetDouble();
++				break;
++
++			case svString:
++				aFilters[i].mbValIsStr = TRUE;
++				aFilters[i].maValStr = GetString();
++				break;
++
++			case svSingleRef :
++				{
++					ScAddress aAddr;
++					PopSingleRef( aAddr );
++					const ScBaseCell* pCell = GetCell( aAddr );
++					if ( (aFilters[i].mbValIsStr = !HasCellValueData(pCell)) )
++						GetCellString(aFilters[i].maValStr, pCell);
++					else
++						aFilters[i].mnValNum = GetCellValue( aAddr, pCell );
++				}
++				break;
++
++			// case svDoubleRef : TODO ?? Do we need implicit iteration support ?
++			default :
++				SetError( errIllegalParameter );
++				return;
++			}
++			aFilters[i].maFieldName = GetString();
++		}
++
++		ScDPObject::GetPivotDataField aTarget; /* returns result */
++		ScRange aBlock;
++
++		switch ( GetStackType() )
++		{
++		case svDoubleRef :
++			PopDoubleRef( aBlock );
++			break;
++
++		case svSingleRef :
++			{
++				ScAddress aAddr;
++				PopSingleRef( aAddr );
++				aBlock = aAddr;
++				break;
++			}
++		default:
++			goto failed;
++		}
++		// NOTE : MS Excel docs claim to use the 'most recent' which is not
++		// exactly the same as what we do in ScDocument::GetDPAtBlock
++		// However we do need to use GetDPABlock
++		ScDPObject *pSource = pDok->GetDPAtBlock ( aBlock );
++		if( NULL == pSource)
++			goto failed;
++ 
++        aTarget.maFieldName = GetString();
++
++		if(	pSource->GetPivotData( aTarget, aFilters ) )
++		{
++			if( aTarget.mbValIsStr )
++				PushString( aTarget.maValStr );
++			else
++				PushDouble( aTarget.mnValNum );
++			return;
++		}
++	}
++
++failed :
++	SetError( errNoRef );
++}
+ 
+ void ScInterpreter::ScHyperLink()
+ {
+Index: sc/source/core/tool/interpr4.cxx
+===================================================================
+RCS file: /cvs/sc/sc/source/core/tool/interpr4.cxx,v
+retrieving revision 1.38.36.2
+diff -u -w -p -r1.38.36.2 interpr4.cxx
+--- sc/source/core/tool/interpr4.cxx	28 Nov 2005 16:17:20 -0000	1.38.36.2
++++ sc/source/core/tool/interpr4.cxx	12 Jan 2006 16:52:23 -0000
+@@ -3510,6 +3510,7 @@ StackVar ScInterpreter::Interpret()
+                 case ocConvert          : ScConvert();                  break;
+                 case ocRoman            : ScRoman();                    break;
+                 case ocArabic           : ScArabic();                   break;
++                case ocGetPivotData     : ScGetPivotData();             break;
+                 case ocInfo             : ScInfo();                     break;
+                 case ocHyperLink        : ScHyperLink();                break;
+                 case ocBahtText         : ScBahtText();                 break;
+Index: sc/source/filter/excel/xlformula.cxx
+===================================================================
+RCS file: /cvs/sc/sc/source/filter/excel/xlformula.cxx,v
+retrieving revision 1.10.20.5
+diff -u -w -p -r1.10.20.5 xlformula.cxx
+--- sc/source/filter/excel/xlformula.cxx	28 Nov 2005 18:01:08 -0000	1.10.20.5
++++ sc/source/filter/excel/xlformula.cxx	12 Jan 2006 16:52:23 -0000
+@@ -318,7 +318,8 @@ static const XclFunctionInfo saFuncTable
+     { ocCountIf,            346,    2,  2,  V, { R, V } },
+     { ocCountEmptyCells,    347,    1,  1,  V, { R } },
+     { ocISPMT,              350,    4,  4,  V, { V } },
+-    { ocRoman,              354,    1,  2,  V, { V } }
++    { ocRoman,              354,    1,  2,  V, { V } },
++    { ocGetPivotData,       358,    2,  30, V, { V, R, V } }
+ };
+ 
+ #define EXC_FUNCNAME_PREFIX "_xlfn."
+Index: sc/source/ui/src/scfuncs.src
+===================================================================
+RCS file: /cvs/sc/sc/source/ui/src/scfuncs.src,v
+retrieving revision 1.84.22.2
+diff -u -w -p -r1.84.22.2 scfuncs.src
+--- sc/source/ui/src/scfuncs.src	28 Nov 2005 16:06:41 -0000	1.84.22.2
++++ sc/source/ui/src/scfuncs.src	12 Jan 2006 16:52:24 -0000
+@@ -9957,6 +9957,51 @@ Resource RID_SC_FUNCTION_DESCRIPTIONS2
+ 			Text [ x-comment ] = " ";
+ 		};
+ 	};
++    Resource SC_OPCODE_GET_PIVOT_DATA
++	{
++		String 1 // Description
++		{
++			Text [ de ] = "" ;
++			Text [ en-US ] = "Extracts value(s) from a DataPilot.";
++		};
++		ExtraData =
++		{
++			ID_FUNCTION_GRP_TABLE;
++			U2S( HID_FUNC_GETPIVOTDATA );
++			VAR_ARGS+2;      0;	0;	1;
++		};
++		String 2 // Name of Parameter 1
++		{
++			Text [ de ] = "" ;
++			Text [ en-US ] = "Target Field";
++		};
++		String 3 // Description of Parameter 1
++		{
++			Text [ de ] = "" ;
++			Text [ en-US ] = "The name of the data pilot field to extract.";
++		};
++		String 4 // Name of Parameter 2
++		{
++			Text [ de ] = "" ;
++			Text [ en-US ] = "Data Pilot";
++		};
++		String 5 // Description of Parameter 2
++		{
++			Text [ de ] = "" ;
++			Text [ en-US ] = "a reference to a cell or range in Data Pilot with the source data.";
++		};
++		String 6 // Name of Parameter 3
++		{
++			Text [ de ] = "" ;
++			Text [ en-US ] = "Field Name / Item";
++		};
++		String 7 // Description of Parameter 3
++		{
++			Text [ de ] = "" ;
++			Text [ en-US ] = "Field name/value pair to filter the target data.";
++		};
++	};
++
+ 	 // -=*# Resource for function HYPERLINK #*=-
+ 	Resource SC_OPCODE_HYPERLINK
+ 	{
