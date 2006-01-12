@@ -38,6 +38,7 @@
 
 #include "vbarange.hxx"
 #include "vbafont.hxx"
+#include "vbacomment.hxx"
 #include "vbainterior.hxx"
 #include "vbaarraywrapper.hxx"
 
@@ -942,6 +943,12 @@ uno::Reference< vba::XRange > SAL_CALL
 ScVbaRange::getEntireColumn() throw (uno::RuntimeException)
 {
 	return getEntireColumnOrRow( false );
+}
+
+uno::Reference< vba::XComment > SAL_CALL
+ScVbaRange::getComment() throw (css::uno::RuntimeException)
+{
+	return new ScVbaComment( m_xContext, mxRange );
 }
 
 uno::Reference< beans::XPropertySet >

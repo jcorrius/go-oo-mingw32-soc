@@ -6,6 +6,7 @@
 #include <org/openoffice/vba/XRange.hpp>
 #include <com/sun/star/table/XCellRange.hpp>
 #include <org/openoffice/vba/XFont.hpp>
+#include <org/openoffice/vba/XComment.hpp>
 #include <org/openoffice/vba/xlPasteType.hdl>
 #include <org/openoffice/vba/xlPasteSpecialOperation.hdl>
 
@@ -70,6 +71,7 @@ public:
 	virtual sal_Bool SAL_CALL getWrapText() throw (css::uno::RuntimeException);
 	virtual css::uno::Reference< oo::vba::XRange > SAL_CALL getEntireRow() throw (css::uno::RuntimeException);
 	virtual css::uno::Reference< oo::vba::XRange > SAL_CALL getEntireColumn() throw (css::uno::RuntimeException);
+	virtual css::uno::Reference< oo::vba::XComment > SAL_CALL getComment() throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL getHidden() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setHidden( const css::uno::Any& _hidden ) throw (css::uno::RuntimeException);
 	// Methods
