@@ -1,2 +1,2 @@
-EXTRA_DIST=${wildcard *.txt} README
+EXTRA_DIST=${wildcard *.txt *.sh} README
 
