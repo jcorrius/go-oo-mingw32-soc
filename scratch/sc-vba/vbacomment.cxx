@@ -60,8 +60,12 @@ ScVbaComment::getAnnotationIndex() throw (uno::RuntimeException)
 		table::CellAddress xAddress = xAnno->getPosition();
 	
 		if ( xAddress.Column == aAddress.Column && xAddress.Row == aAddress.Row && xAddress.Sheet == aAddress.Sheet )
+		{
+			OSL_TRACE("** terminating search, index is %d", aIndex );
 			break;
+		}
 	}
+	OSL_TRACE("** returning index is %d", aIndex );
 
        return aIndex;
 }
