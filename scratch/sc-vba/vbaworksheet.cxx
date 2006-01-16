@@ -10,6 +10,7 @@
 #include <com/sun/star/sheet/XCellRangeAddressable.hpp>
 #include <com/sun/star/sheet/XSheetCellRange.hpp>
 #include <com/sun/star/sheet/XSheetCellCursor.hpp>
+#include <com/sun/star/sheet/XSheetAnnotationsSupplier.hpp>
 #include <com/sun/star/sheet/XUsedAreaCursor.hpp>
 #include <com/sun/star/sheet/XSpreadsheets.hpp>
 #include <com/sun/star/sheet/XSheetPastable.hpp>
@@ -26,6 +27,7 @@
 
 #include "vbaoutline.hxx"
 #include "vbarange.hxx"
+#include "vbacomments.hxx"
 #include "vbaworksheet.hxx"
 #include "vbachartobjects.hxx"
 #include "vbapivottables.hxx"
@@ -520,8 +522,20 @@ ScVbaWorksheet::PivotTables( const uno::Any& Index ) throw (uno::RuntimeExceptio
 	if ( Index.hasValue() )
 		return xColl->Item( Index );
 	return makeAny( xColl );
-	
-		
+}
+
+uno::Any SAL_CALL
+ScVbaWorksheet::Comments( const uno::Any& Index ) throw (uno::RuntimeException)
+{
+	uno::Reference< css::sheet::XSpreadsheet > xSheet = getSheet();
+	uno::Reference< sheet::XSheetAnnotationsSupplier > xAnnosSupp( xSheet, uno::UNO_QUERY_THROW );
+	uno::Reference< sheet::XSheetAnnotations > xAnnos( xAnnosSupp->getAnnotations(), uno::UNO_QUERY_THROW );
+	uno::Reference< container::XIndexAccess > xIndexAccess( xAnnos, uno::UNO_QUERY_THROW );
+
+	uno::Reference< vba::XCollection > xColl( uno::Reference< vba::XComments > ( new ScVbaComments( m_xContext, xIndexAccess ) ), uno::UNO_QUERY_THROW );
+	if ( Index.hasValue() )
+		return xColl->Item( Index );
+	return makeAny( xColl );
 }
 
 uno::Any SAL_CALL 

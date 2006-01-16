@@ -31,6 +31,7 @@ SLOFILES= \
 		$(SLO)$/vbaapplication.obj \
 		$(SLO)$/vbarange.obj \
 		$(SLO)$/vbacomment.obj \
+		$(SLO)$/vbacomments.obj \
 		$(SLO)$/vbaworkbooks.obj \
 		$(SLO)$/vbaworksheet.obj \
 		$(SLO)$/vbaoutline.obj \

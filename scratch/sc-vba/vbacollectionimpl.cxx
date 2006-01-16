@@ -6,20 +6,23 @@ using namespace ::org::openoffice;
 
 ScVbaCollectionBaseImpl::ScVbaCollectionBaseImpl( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< container::XIndexAccess >& xIndexAccess ) throw (uno::RuntimeException) : m_xContext( xContext ), m_xIndexAccess( xIndexAccess )
 {
-	m_xNameAccess.set( xIndexAccess, uno::UNO_QUERY_THROW );
-	if ( !m_xIndexAccess.is() || !m_xNameAccess.is() )
-		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("ScVbaCollectionBaseImpl not initialised") ), uno::Reference< uno::XInterface >() );
+	m_xNameAccess.set( xIndexAccess, uno::UNO_QUERY );
 }
 
 uno::Any
 ScVbaCollectionBaseImpl::getItemByStringIndex( const rtl::OUString& sIndex ) throw (::uno::RuntimeException)
 {
+	if ( !m_xNameAccess.is() )
+		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("ScVbaCollectionBaseImpl string index access not supported by this object") ), uno::Reference< uno::XInterface >() );
+
 	return createCollectionObject( m_xNameAccess->getByName( sIndex ) );	
 }
 
 uno::Any 
 ScVbaCollectionBaseImpl::getItemByIntIndex( const sal_Int32 nIndex ) throw (uno::RuntimeException)
 {
+	if ( !m_xIndexAccess.is() )
+		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("ScVbaCollectionBaseImpl numeric index access not supported by this object") ), uno::Reference< uno::XInterface >() );
 	if ( nIndex <= 0 )
 	{
 		throw  lang::IndexOutOfBoundsException( 

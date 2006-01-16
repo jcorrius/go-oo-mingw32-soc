@@ -4,6 +4,7 @@
 #include <cppuhelper/implbase1.hxx>
 #include <com/sun/star/sheet/XSpreadsheet.hpp>
 #include <org/openoffice/vba/XWorksheet.hpp>
+#include <org/openoffice/vba/XComments.hpp>
 #include <org/openoffice/vba/XRange.hpp>
 #include <com/sun/star/lang/XEventListener.hpp>
 #include <com/sun/star/uno/XComponentContext.hpp>
@@ -76,6 +77,7 @@ public:
 
 	virtual css::uno::Any SAL_CALL Evaluate( const ::rtl::OUString& Name ) throw (css::uno::RuntimeException); 
 	virtual css::uno::Any SAL_CALL PivotTables( const css::uno::Any& Index ) throw (css::uno::RuntimeException);
+	virtual css::uno::Any SAL_CALL Comments( const css::uno::Any& Index ) throw (css::uno::RuntimeException);
 };
 
 #endif /* SC_VBA_WORKSHEET_HXX */
