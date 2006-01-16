@@ -18,6 +18,8 @@ dummy:
 IDLFILES=\
 	XApplication.idl\
 	XCollection.idl\
+	XComment.idl\
+	XComments.idl\
 	XGlobals.idl\
 	XRange.idl\
 	XWorkbook.idl\
