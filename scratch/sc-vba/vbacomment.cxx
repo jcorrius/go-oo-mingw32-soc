@@ -1,15 +1,16 @@
 #include "vbacomment.hxx"
 
 #include <org/openoffice/vba/Excel/XlCreator.hpp>
-#include <com/sun/star/table/CellAddress.hpp>
 #include <com/sun/star/sheet/XSpreadsheet.hpp>
 #include <com/sun/star/sheet/XSheetAnnotationAnchor.hpp>
-#include <com/sun/star/sheet/XSheetAnnotations.hpp>
 #include <com/sun/star/sheet/XSheetAnnotationsSupplier.hpp>
+#include <com/sun/star/sheet/XSheetCellRange.hpp>
+#include <com/sun/star/table/CellAddress.hpp>
 #include <com/sun/star/table/XCell.hpp>
 #include <com/sun/star/text/XText.hpp>
 
 #include "vbaglobals.hxx"
+#include "vbacomments.hxx"
 
 
 using namespace ::org::openoffice;
@@ -31,8 +32,48 @@ ScVbaComment::getAnnotation() throw (uno::RuntimeException)
 {
 	uno::Reference< table::XCell > xCell( mxRange->getCellByPosition(0, 0), uno::UNO_QUERY_THROW );
 	uno::Reference< sheet::XSheetAnnotationAnchor > xAnnoAnchor( xCell, uno::UNO_QUERY_THROW );
-	return xAnnoAnchor->getAnnotation();
+	return uno::Reference< sheet::XSheetAnnotation > ( xAnnoAnchor->getAnnotation(), uno::UNO_QUERY_THROW );
 }
+
+uno::Reference< sheet::XSheetAnnotations > SAL_CALL
+ScVbaComment::getAnnotations() throw (uno::RuntimeException)
+{
+	uno::Reference< sheet::XSheetCellRange > xSheetCellRange(mxRange, ::uno::UNO_QUERY_THROW );
+	uno::Reference< sheet::XSpreadsheet > xSheet = xSheetCellRange->getSpreadsheet();
+	uno::Reference< sheet::XSheetAnnotationsSupplier > xAnnosSupp( xSheet, uno::UNO_QUERY_THROW );
+
+	return uno::Reference< sheet::XSheetAnnotations > ( xAnnosSupp->getAnnotations(), uno::UNO_QUERY_THROW );
+}
+
+sal_Int32 SAL_CALL
+ScVbaComment::getAnnotationIndex() throw (uno::RuntimeException)
+{
+	uno::Reference< sheet::XSheetAnnotations > xAnnos = getAnnotations();
+	table::CellAddress aAddress = getAnnotation()->getPosition();
+
+	sal_Int32 aIndex = 0;
+	sal_Int32 aCount = xAnnos->getCount();
+
+	for ( ; aIndex < aCount ; aIndex++ )
+	{
+		uno::Reference< sheet::XSheetAnnotation > xAnno( xAnnos->getByIndex( aIndex ), uno::UNO_QUERY_THROW );
+		table::CellAddress xAddress = xAnno->getPosition();
+	
+		if ( xAddress.Column == aAddress.Column && xAddress.Row == aAddress.Row && xAddress.Sheet == aAddress.Sheet )
+			break;
+	}
+
+       return aIndex;
+}
+
+uno::Reference< vba::XComment > SAL_CALL
+ScVbaComment::getCommentByIndex( sal_Int32 Index ) throw (uno::RuntimeException)
+{
+	uno::Reference< container::XIndexAccess > xIndexAccess( getAnnotations(), uno::UNO_QUERY_THROW );
+	uno::Reference< vba::XCollection > xColl( uno::Reference< vba::XComments > ( new ScVbaComments( m_xContext, xIndexAccess ) ), uno::UNO_QUERY_THROW );
+
+	return uno::Reference< vba::XComment > ( xColl->Item( uno::makeAny( Index ) ), uno::UNO_QUERY_THROW );
+ }
 
 // public vba functions
 
@@ -88,66 +129,21 @@ ScVbaComment::setVisible( sal_Bool _visible ) throw (uno::RuntimeException)
 void SAL_CALL
 ScVbaComment::Delete() throw (uno::RuntimeException)
 {
-	uno::Reference< sheet::XSpreadsheet > xSheet( mxRange, uno::UNO_QUERY_THROW );
-	uno::Reference< sheet::XSheetAnnotationsSupplier > xAnnosSupp( xSheet, uno::UNO_QUERY_THROW );
-	uno::Reference< sheet::XSheetAnnotations > xAnnos( xAnnosSupp->getAnnotations(), uno::UNO_QUERY_THROW );
-
-	sal_Int32 aCount = xAnnos->getCount();
-	for ( sal_Int32 aIndex = 0 ; aIndex < aCount ; aIndex++ )
-	{
-		uno::Reference< sheet::XSheetAnnotation > xAnno( xAnnos->getByIndex( aIndex ), uno::UNO_QUERY );
-		table::CellAddress xAddress = xAnno->getPosition();
-		table::CellAddress aAddress = getAnnotation()->getPosition();
-
-		if ( xAddress.Column == aAddress.Column && xAddress.Row == aAddress.Row && xAddress.Sheet == aAddress.Sheet )
-			break;
-	}
-
-	xAnnos->removeByIndex( aCount );
+	getAnnotations()->removeByIndex( getAnnotationIndex() );
 }
 
 uno::Reference< vba::XComment > SAL_CALL
 ScVbaComment::Next() throw (uno::RuntimeException)
 {
-	uno::Reference< sheet::XSpreadsheet > xSheet( mxRange, uno::UNO_QUERY_THROW );
-	uno::Reference< sheet::XSheetAnnotationsSupplier > xAnnosSupp( xSheet, uno::UNO_QUERY_THROW );
-	uno::Reference< sheet::XSheetAnnotations > xAnnos( xAnnosSupp->getAnnotations(), uno::UNO_QUERY_THROW );
-
-	sal_Int32 aCount = xAnnos->getCount();
-	for ( sal_Int32 aIndex = 0 ; aIndex < aCount ; aIndex++ )
-	{
-		uno::Reference< sheet::XSheetAnnotation > xAnno( xAnnos->getByIndex( aIndex ), uno::UNO_QUERY );
-		table::CellAddress xAddress = xAnno->getPosition();
-		table::CellAddress aAddress = getAnnotation()->getPosition();
-
-		if ( xAddress.Column == aAddress.Column && xAddress.Row == aAddress.Row && xAddress.Sheet == aAddress.Sheet )
-			break;
-	}
-
-//	This is XSheetAnnotation but we want XComment, needs XComments object
-//	xAnnos->getByIndex( aIndex + 1 );
+	// index: uno = 0, vba = 1
+	return getCommentByIndex( getAnnotationIndex() + 2 );
 }
 
 uno::Reference< vba::XComment > SAL_CALL
 ScVbaComment::Previous() throw (uno::RuntimeException)
 {
-	uno::Reference< sheet::XSpreadsheet > xSheet( mxRange, uno::UNO_QUERY_THROW );
-	uno::Reference< sheet::XSheetAnnotationsSupplier > xAnnosSupp( xSheet, uno::UNO_QUERY_THROW );
-	uno::Reference< sheet::XSheetAnnotations > xAnnos( xAnnosSupp->getAnnotations(), uno::UNO_QUERY_THROW );
-
-	sal_Int32 aCount = xAnnos->getCount();
-	for ( sal_Int32 aIndex = 0 ; aIndex < aCount ; aIndex++ )
-	{
-		uno::Reference< sheet::XSheetAnnotation > xAnno( xAnnos->getByIndex( aIndex ), uno::UNO_QUERY );
-		table::CellAddress xAddress = xAnno->getPosition();
-		table::CellAddress aAddress = getAnnotation()->getPosition();
-
-		if ( xAddress.Column == aAddress.Column && xAddress.Row == aAddress.Row && xAddress.Sheet == aAddress.Sheet )
-			break;
-	}
-
-//	This is XSheetAnnotation but we want XComment, needs XComments object
-//	xAnnos->getByIndex( aIndex - 1 );
+	// index: uno = 0, vba = 1
+	return getCommentByIndex( getAnnotationIndex() );
 }
 
 rtl::OUString SAL_CALL

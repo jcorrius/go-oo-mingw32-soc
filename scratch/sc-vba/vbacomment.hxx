@@ -5,6 +5,7 @@
 
 #include <org/openoffice/vba/XComment.hpp>
 #include <org/openoffice/vba/XApplication.hpp>
+#include <com/sun/star/sheet/XSheetAnnotations.hpp>
 #include <com/sun/star/sheet/XSheetAnnotation.hpp>
 #include <com/sun/star/table/XCellRange.hpp>
 #include <com/sun/star/uno/XComponentContext.hpp>
@@ -20,7 +21,9 @@ class ScVbaComment : public ScVbaComment_BASE
 
 private:
 	css::uno::Reference< css::sheet::XSheetAnnotation > SAL_CALL getAnnotation() throw (css::uno::RuntimeException);
-
+	css::uno::Reference< css::sheet::XSheetAnnotations > SAL_CALL getAnnotations() throw (css::uno::RuntimeException);
+	sal_Int32 SAL_CALL getAnnotationIndex() throw (css::uno::RuntimeException);
+	css::uno::Reference< oo::vba::XComment > SAL_CALL getCommentByIndex( sal_Int32 Index ) throw (css::uno::RuntimeException);
 public:
     ScVbaComment( const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::table::XCellRange >& xRange ) throw ( css::lang::IllegalArgumentException );
 
