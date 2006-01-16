@@ -87,10 +87,6 @@ public:
 	::boost::numeric::ublas::matrix< std::string > getDisplayElements( size_t, size_t, bool ) const;	
 	void print( size_t = 2, size_t = 1 ) const;
 	
-	const double& getValue( size_t, size_t ) const;
-	double& getValue( size_t, size_t );
-	void setValue( size_t, size_t, double );
-	
 	Matrix getColumn( size_t );
 	void deleteColumn( size_t );
 	void deleteColumns( const std::vector<size_t>& );
@@ -103,6 +99,7 @@ public:
 	const Matrix inverse() const;
 	const Matrix trans() const;
 	double minors( size_t, size_t ) const;
+	void resize( size_t, size_t );
 
 	size_t rows() const;
 	size_t cols() const;
@@ -126,7 +123,7 @@ public:
 	Matrix& operator-=( const Matrix& );
 	Matrix& operator*=( double );
 	Matrix& operator/=( double );
-	const double& operator()( size_t i, size_t j ) const { return getValue( i, j ); }
+	const double operator()( size_t, size_t ) const;
 	double& operator()( size_t, size_t );
 	
 	bool operator==( const Matrix& ) const;

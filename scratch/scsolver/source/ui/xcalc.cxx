@@ -260,6 +260,7 @@ table::CellRangeAddress CalcInterface::getCellRangeAddress(
 	
 	Reference< sheet::XCellRangeAddressable > xCRA( xCR2, UNO_QUERY );
 	aCRAddr = xCRA->getRangeAddress();
+#ifdef DEBUG
 	sal_Int16 nSheetId = aCRAddr.Sheet;
 	sal_Int32 nSCol = aCRAddr.StartColumn;
 	sal_Int32 nSRow = aCRAddr.StartRow;
@@ -268,7 +269,7 @@ table::CellRangeAddress CalcInterface::getCellRangeAddress(
 	
 	cout << "Sheet: " << nSheetId << " (" << nSRow << ", " << nSCol << ") - (" 
 		 << nERow << ", " << nECol << ")" << endl;
-	
+#endif
 	return aCRAddr;
 }
 

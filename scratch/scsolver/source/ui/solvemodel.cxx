@@ -167,10 +167,12 @@ void SolveModelImpl::parseConstraints()
 	}
 	
 	// Set "=1" to each of the decision variable cells one at a time, and 
-	// interpret the formula result.
+	// interpret the formula result.  Also set the constraint matrix size
+	// so that it won't get resized at later time (resize is expensive).
 	
 	CellAddress aObjAddr = m_pBuilder->getObjectiveFormulaAddress();
 	vector< ConstraintAddress > aConstAddrs = m_pBuilder->getAllConstraintAddresses();
+	m_pBuilder->setConstraintMatrixSize( aConstAddrs.size(), aAddrs.size() );
 	
 	for ( pos = aAddrsBegin; pos != aAddrsEnd; ++pos )
 	{

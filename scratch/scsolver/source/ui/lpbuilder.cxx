@@ -147,6 +147,7 @@ public:
 	sal_uInt32 getConstraintId( const ConstraintAddress& );
 	void setConstraintAddress( const ConstraintAddress& );
 	std::vector< ConstraintAddress > getAllConstraintAddresses() const { return m_cnConstraintAddress; }
+	void setConstraintMatrixSize( size_t, size_t );
 	void setConstraintCoefficient( const CellAddress&, const ConstraintAddress&, double, double );
 	void clearConstraintAddresses() { m_cnConstraintAddress.clear(); }
 	numeric::opres::Equality getConstraintEquality( sal_uInt32 ) const;
@@ -256,6 +257,11 @@ sal_uInt32 LpModelBuilderImpl::getConstraintId( const ConstraintAddress& aConstA
 void LpModelBuilderImpl::setConstraintAddress( const ConstraintAddress& aItem )
 {
 	m_cnConstraintAddress.push_back( aItem );
+}
+
+void LpModelBuilderImpl::setConstraintMatrixSize( size_t nRow, size_t nCol )
+{
+	m_mxConstraint.resize( nRow, nCol );
 }
 
 void LpModelBuilderImpl::setConstraintCoefficient( 
@@ -512,6 +518,11 @@ void LpModelBuilder::setConstraintAddress( const ConstraintAddress& aItem )
 vector< ConstraintAddress > LpModelBuilder::getAllConstraintAddresses() const
 {
 	return m_pImpl->getAllConstraintAddresses();
+}
+
+void LpModelBuilder::setConstraintMatrixSize( size_t nRow, size_t nCol )
+{
+	m_pImpl->setConstraintMatrixSize( nRow, nCol );
 }
 
 void LpModelBuilder::setConstraintCoefficient( 

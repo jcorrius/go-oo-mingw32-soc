@@ -169,7 +169,7 @@ void ModelImpl::swap( ModelImpl& other ) throw()
 void ModelImpl::setCostVectorElement( unsigned long nId, double fVal )
 {
 	// Cost vector must be a row vector because the X vector is a column.
-	m_mxCost.setValue( 0, nId, fVal );
+	m_mxCost( 0, nId ) = fVal;
 }
 
 AttrBound ModelImpl::getVarBoundAttribute( unsigned long i, Bound e ) const
@@ -274,12 +274,12 @@ void ModelImpl::addConstraint( const std::vector<double>& aConst, Equality eEqua
 	for ( pos = aConst.begin(); pos != aConst.end(); ++pos )
 	{
 		unsigned long nColId = distance( aConst.begin(), pos );
-		m_mxConstraint.setValue( nRowId, nColId, *pos );
+		m_mxConstraint( nRowId, nColId ) = *pos;
 	}
 	m_eEqualities.push_back( eEqual );
 	
 	// RHS vector must be a column.
-	m_mxRHS.setValue( m_mxRHS.rows(), 0, fRHS );
+	m_mxRHS( m_mxRHS.rows(), 0 ) = fRHS;
 }
 
 void ModelImpl::setStandardConstraintMatrix( const Matrix& A, const Matrix& B )
@@ -316,7 +316,7 @@ void ModelImpl::print() const
 	bool bFirst = true;
 	for ( unsigned long j = 0; j < m_mxCost.cols(); ++j )
 	{
-		double fVal = m_mxCost.getValue( 0, j );
+		double fVal = m_mxCost( 0, j );
 		if ( fVal != 0.0 )
 		{
 			if ( bFirst )
@@ -346,7 +346,7 @@ void ModelImpl::print() const
 		for ( unsigned long j = 0; j < m_mxConstraint.cols(); ++j )
 		{
 			string s = mElements( i, j );
-			double f = m_mxConstraint.getValue( i, j );
+			double f = m_mxConstraint( i, j );
 			ostringstream osVar;
 			osVar << s << sX << j;
 			if ( f == 0.0 )
@@ -372,7 +372,7 @@ void ModelImpl::print() const
 				OSL_ASSERT( !"wrong case" );
 		}
 		
-		osLine << repeatString( " ", nColSpace ) << m_mxRHS.getValue( i, 0 );
+		osLine << repeatString( " ", nColSpace ) << m_mxRHS( i, 0 );
 		cout << osLine.str() << endl;
 	}
 	cout << repeatString( "-", 70 ) << endl;

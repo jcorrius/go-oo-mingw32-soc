@@ -96,6 +96,7 @@ public:
 	void clearConstraintAddresses();
 	void setConstraintAddress( const ConstraintAddress& );
 	std::vector< ConstraintAddress > getAllConstraintAddresses() const;
+	void setConstraintMatrixSize( size_t, size_t );
 	void setConstraintCoefficient( const table::CellAddress&, const ConstraintAddress&, double, double );
 	
 	// Temporary formula strings

@@ -35,18 +35,10 @@
 #include <exception>
 #include <iterator>
 
-#warning "No idea what's going on with noalias"
+#warning "noalias not present in boost 1.30.2"
 #undef noalias
 #define noalias(a) (a)
 
-#warning "We should re-write this to use OUString:: methods I think."
-#if 0
-#  include <boost/algorithm/string/replace.hpp>
-using namespace ::boost::algorithm;
-#else
-//#  include <boost/mpl/distance.hpp>
-//using namespace ::boost::mpl;
-#endif
 #include <boost/numeric/ublas/matrix_proxy.hpp>
 #include <boost/numeric/ublas/io.hpp>
 #include <boost/numeric/ublas/matrix_expression.hpp>
@@ -102,7 +94,7 @@ public:
 	bnu::matrix< std::string > getDisplayElements( size_t, size_t, bool ) const;	
 	void print( size_t = 2, size_t = 1 ) const;
 	
-	const double& getValue( size_t, size_t ) const;
+	const double getValue( size_t, size_t ) const;
 	double& getValue( size_t, size_t );
 	void setValue( size_t, size_t, double );
 	
@@ -119,6 +111,7 @@ public:
 	const MatrixImpl inverse() const;
 	const MatrixImpl trans() const;
 	double minors( size_t, size_t ) const;
+	void resize( size_t, size_t );
 
 	size_t rows() const { return m_aArray.size1(); }
 	size_t cols() const { return m_aArray.size2(); }
@@ -142,7 +135,7 @@ public:
 	MatrixImpl& operator-=( const MatrixImpl& );
 	MatrixImpl& operator*=( double );
 	MatrixImpl& operator/=( double );
-	const double& operator()( size_t i, size_t j ) const { return getValue( i, j ); }
+	const double operator()( size_t i, size_t j ) const { return getValue( i, j ); }
 	double& operator()( size_t, size_t );
 	
 	bool operator==( const MatrixImpl& ) const;
@@ -163,6 +156,19 @@ private:
 // Local helper functions
 
 namespace mxhelper {
+
+void print( const bnu::matrix<double>& mx )
+{
+#ifdef DEBUG
+	for ( size_t i = 0; i < mx.size1(); ++i )
+	{
+		printf( "|" );
+		for ( size_t j = 0; j < mx.size2(); ++j )
+			printf( " %f", mx( i, j ) );
+		printf( " |\n" );
+	}
+#endif
+}
 
 typedef bnu::matrix_range< bnu::matrix<double> >  MxRange;
 typedef bnu::matrix_row< bnu::matrix<double> >    MxRow;
@@ -272,7 +278,7 @@ void factorize( const bnu::matrix<double>& mxA, bnu::matrix<double>& mxL,
 	cnP.reserve( n );
 	for ( size_t i = 0; i < n; ++i )
 		cnP.push_back( i );
-	cout << n << " " << cnP.size() << endl;
+
 	// for each column k...
 	for ( size_t k = 0; k < n - 1; ++k )
 	{
@@ -287,7 +293,7 @@ void factorize( const bnu::matrix<double>& mxA, bnu::matrix<double>& mxL,
 				nSwapRowId = nRowId;
 			}
 		}
-		
+
 		if ( fMax == 0.0 )
 			throw SingularMatrix();
 			
@@ -445,14 +451,14 @@ MatrixImpl::MatrixImpl() : m_bResizable( true )
 	m_aArray = m;
 }
 
-MatrixImpl::MatrixImpl( size_t nRow, size_t nCol, bool bIdentMatrixImpl ) :
+MatrixImpl::MatrixImpl( size_t nRow, size_t nCol, bool bIdentMatrix ) :
 	m_bResizable( true )
 {	
 	bnu::matrix<double> m( nRow, nCol );
 	for ( unsigned int i = 0; i < m.size1(); ++i )
 		for ( unsigned int j = 0; j < m.size2(); ++j )
 		{
-			if ( bIdentMatrixImpl && i == j )
+			if ( bIdentMatrix && i == j )
 				m( i, j ) = 1.0;
 			else
 				m( i, j ) = 0.0;
@@ -483,7 +489,7 @@ MatrixImpl::~MatrixImpl() throw()
 
 void MatrixImpl::swap( MatrixImpl& other ) throw()
 {
-	std::swap( m_aArray, other.m_aArray );
+	m_aArray.swap( other.m_aArray );
 	std::swap( m_bResizable, other.m_bResizable );
 }
 
@@ -546,19 +552,33 @@ bnu::matrix< std::string > MatrixImpl::getDisplayElements(
 	if ( !bFormula )
 		return mxElements;
 	
-	// Process elements for formula display.
+	// Process elements for constraint formula display.
 	for ( unsigned int i = 0; i < mxElements.size1(); ++i )
 	{
 		for ( unsigned int j = 0; j < mxElements.size2(); ++j )
 		{
 			double fVal = m_aArray( i, j );
-#warning Foo Baa here - update string code ..
-#if 0
+			string sElem = mxElements( i, j );
 			if ( fVal == 1.0 )
-				replace_first( mxElements( i, j ), "1", " " );
+			{
+				string::size_type nPos = sElem.find_first_of( "1" );
+				if ( nPos != string::npos )
+				{
+					sElem[nPos] = ' ';
+					mxElements( i, j ) = sElem;
+				}
+			}
 			else if ( fVal == -1.0 )
-				replace_first( mxElements( i, j ), "-1", " -" );
-			
+			{
+				string::size_type nPos = sElem.find_first_of( "-1" );
+				if ( nPos != string::npos )
+				{
+					sElem[nPos++] = ' ';
+					sElem[nPos]   = '-';
+					mxElements( i, j ) = sElem;
+				}
+			}
+				
 			if ( j != 0 )
 			{
 				string sElem = mxElements( i, j );
@@ -568,12 +588,13 @@ bnu::matrix< std::string > MatrixImpl::getDisplayElements(
 					os << "+" << sElem.substr(1);
 				else
 				{
-					replace_first( sElem, "-", " " );
+					string::size_type nPos = sElem.find_first_of( "-", 0 );
+					if ( nPos != string::npos )
+						sElem[nPos] = ' ';
 					os << "-" << sElem.substr(1);
 				}
 				mxElements( i, j ) = os.str();
 			}
-#endif
 		}
 	}
 	return mxElements;
@@ -600,7 +621,7 @@ void MatrixImpl::print( size_t nPrec, size_t nColSpace ) const
 	cout << os.str();
 }
 
-const double& MatrixImpl::getValue( size_t nRowId, size_t nColId ) const
+const double MatrixImpl::getValue( size_t nRowId, size_t nColId ) const
 {
 	return m_aArray( nRowId, nColId );
 }
@@ -673,8 +694,6 @@ void MatrixImpl::deleteColumns( const std::vector<size_t>& cnColIds )
 
 void MatrixImpl::deleteRow( size_t nRowId )
 {
-	cout << "Delete Row: " << nRowId << endl;
-
 	if ( nRowId >= m_aArray.size1() )
 	{
 		Debug( "deleteRow" );
@@ -811,6 +830,26 @@ double MatrixImpl::minors( size_t iSkip, size_t jSkip ) const
 	}
 	m.setResizable( true );
 	return m.det();
+}
+
+void MatrixImpl::resize( size_t nRow, size_t nCol )
+{
+	
+#if 0
+	// boost 1.30.2 has a bug in resize().  Works in 1.32.0.
+	m_aArray.resize( nRow, nCol, true );
+#else
+	bnu::matrix<double, bnu::row_major, std::vector<double> > 
+		aArray( nRow, nCol );
+
+	size_t nRowSize = m_aArray.size1() < nRow ? m_aArray.size1() : nRow;
+	size_t nColSize = m_aArray.size2() < nCol ? m_aArray.size2() : nCol;
+	for ( size_t nRowId = 0; nRowId < nRowSize; ++nRowId )
+		for ( size_t nColId = 0; nColId < nColSize; ++nColId )
+			aArray( nRowId, nColId ) = m_aArray( nRowId, nColId );
+	
+	m_aArray.swap( aArray );
+#endif
 }
 
 bool MatrixImpl::empty() const
@@ -979,7 +1018,7 @@ void MatrixImpl::expandAsNeeded( size_t nRowId, size_t nColId )
 		{
 			size_t nNewRowSize = nRowId + 1 > nRowSize ? nRowId + 1 : nRowSize;
 			size_t nNewColSize = nColId + 1 > nColSize ? nColId + 1 : nColSize;
-			m_aArray.resize( nNewRowSize, nNewColSize ); // is this exception-safe?
+			resize( nNewRowSize, nNewColSize );
 		}
 	}
 }
@@ -1070,22 +1109,6 @@ void Matrix::print( size_t nPrec, size_t nColSpace ) const
 	m_pImpl->print( nPrec, nColSpace );
 }
 
-const double& Matrix::getValue( size_t nRowId, size_t nColId ) const
-{
-	return m_pImpl->getValue( nRowId, nColId );
-}
-
-double& Matrix::getValue( size_t nRowId, size_t nColId )
-{
-	return m_pImpl->getValue( nRowId, nColId );
-}
-
-void Matrix::setValue( size_t nRowId, size_t nColId, double fVal )
-{
-	m_pImpl->setValue( nRowId, nColId, fVal );
-}
-
-
 Matrix Matrix::getColumn( size_t nColId )
 {
 	return Matrix( m_pImpl->getColumn( nColId ) );
@@ -1139,6 +1162,11 @@ const Matrix Matrix::trans() const
 double Matrix::minors( size_t iSkip, size_t jSkip ) const
 {
 	return m_pImpl->minors( iSkip, jSkip );
+}
+
+void Matrix::resize( size_t nRow, size_t nCol )
+{
+	m_pImpl->resize( nRow, nCol );
 }
 
 size_t Matrix::rows() const
@@ -1238,6 +1266,11 @@ Matrix& Matrix::operator/=( double f )
 {
 	*this = *this / f;
 	return *this;
+}
+
+const double Matrix::operator()( size_t nRowId, size_t nColId ) const
+{
+	return m_pImpl->operator()( nRowId, nColId );
 }
 
 double& Matrix::operator()( size_t nRowId, size_t nColId )
