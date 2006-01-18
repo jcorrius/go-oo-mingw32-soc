@@ -1,0 +1,255 @@
+Index: sal/osl/unx/file.cxx
+===================================================================
+RCS file: /cvs/porting/sal/osl/unx/file.cxx,v
+retrieving revision 1.10
+diff -u -p -r1.10 file.cxx
+--- sal/osl/unx/file.cxx	8 Sep 2005 14:53:53 -0000	1.10
++++ sal/osl/unx/file.cxx	18 Jan 2006 14:38:41 -0000
+@@ -150,6 +150,10 @@ static const sal_Char* MOUNTTAB="/etc/mt
+ 
+ #endif
+ 
++#ifdef _DIRENT_HAVE_D_TYPE
++#include "file_impl.hxx"
++#endif
++
+ #if OSL_DEBUG_LEVEL > 1
+ 
+ 	extern void debug_ustring(rtl_uString*);
+@@ -444,8 +448,14 @@ oslFileError SAL_CALL osl_getNextDirecto
+ 	osl_systemPathMakeAbsolutePath(pDirImpl->ustrPath, ustrFileName, &ustrFilePath);
+     rtl_uString_release( ustrFileName );
+ 
++#ifdef _DIRENT_HAVE_D_TYPE
++    if(*pItem)
++	((oslDirectoryItemImpl*)(*pItem))->release();
++    *pItem = (oslDirectoryItem) new oslDirectoryItemImpl( ustrFilePath, true, pEntry->d_type );
++#else
+    /* use path as directory item */
+    *pItem = (oslDirectoryItem) ustrFilePath;
++#endif
+ 
+     return osl_File_E_None;
+ }
+@@ -474,7 +482,11 @@ oslFileError SAL_CALL osl_getDirectoryIt
+ 
+ 	if (0 == access_u(ustrSystemPath, F_OK))
+ 	{
++#ifdef _DIRENT_HAVE_D_TYPE
++		*pItem = (oslDirectoryItem) new oslDirectoryItemImpl( ustrSystemPath, false );
++#else
+ 		*pItem = (oslDirectoryItem)ustrSystemPath;
++#endif
+ 		osl_error = osl_File_E_None;
+ 	}
+ 	else
+@@ -492,12 +504,21 @@ oslFileError SAL_CALL osl_getDirectoryIt
+ 
+ oslFileError osl_acquireDirectoryItem( oslDirectoryItem Item )
+ {
++#ifdef _DIRENT_HAVE_D_TYPE
++	oslDirectoryItemImpl* pImpl = (oslDirectoryItemImpl*) Item;
++#else
+     rtl_uString* ustrFilePath = (rtl_uString *) Item;
++#endif
+ 
+     OSL_ASSERT( Item );
+ 
++#ifdef _DIRENT_HAVE_D_TYPE
++	if( pImpl )
++		pImpl->acquire();
++#else
+     if( ustrFilePath )
+         rtl_uString_acquire( ustrFilePath );
++#endif
+ 
+     return osl_File_E_None;
+ }
+@@ -508,12 +529,21 @@ oslFileError osl_acquireDirectoryItem( o
+ 
+ oslFileError osl_releaseDirectoryItem( oslDirectoryItem Item )
+ {
++#ifdef _DIRENT_HAVE_D_TYPE
++	oslDirectoryItemImpl* pImpl = (oslDirectoryItemImpl*) Item;
++#else
+     rtl_uString* ustrFilePath = (rtl_uString *) Item;
++#endif
+ 
+     OSL_ASSERT( Item );
+ 
++#ifdef _DIRENT_HAVE_D_TYPE
++	if( pImpl )
++		pImpl->release();
++#else
+     if( ustrFilePath )
+         rtl_uString_release( ustrFilePath );
++#endif
+ 
+     return osl_File_E_None;
+ }
+Index: sal/osl/unx/file_stat.cxx
+===================================================================
+RCS file: /cvs/porting/sal/osl/unx/file_stat.cxx,v
+retrieving revision 1.6
+diff -u -p -r1.6 file_stat.cxx
+--- sal/osl/unx/file_stat.cxx	8 Sep 2005 14:56:14 -0000	1.6
++++ sal/osl/unx/file_stat.cxx	18 Jan 2006 14:38:41 -0000
+@@ -45,6 +45,10 @@
+ #include <unistd.h>
+ #endif
+ 
++#ifndef _DIRENT_H
++#include <dirent.h>
++#endif
++
+ #ifndef _OSL_FILE_H_
+ #include <osl/file.h>
+ #endif
+@@ -69,6 +73,9 @@
+ #include "file_error_transl.h"
+ #endif
+ 
++#ifdef _DIRENT_HAVE_D_TYPE
++#include "file_impl.hxx"
++#endif
+ 
+ namespace /* private */
+ {
+@@ -236,9 +243,19 @@ namespace /* private */
+ 	
+ 	/* we only need to call stat or lstat if one of the 
+        following flags is set */
++#ifdef _DIRENT_HAVE_D_TYPE
++	inline bool is_stat_call_necessary(sal_uInt32 field_mask, oslDirectoryItemImpl *pImpl)
++#else
+ 	inline bool is_stat_call_necessary(sal_uInt32 field_mask)
++#endif
+ 	{
+-		return ((field_mask & osl_FileStatus_Mask_Type) ||
++		return (
++/* on linux the dirent might have d_type */
++#ifdef _DIRENT_HAVE_D_TYPE
++				((field_mask & osl_FileStatus_Mask_Type) && (!pImpl->bHasType || pImpl->DType == DT_UNKNOWN)) ||
++#else
++				(field_mask & osl_FileStatus_Mask_Type) ||
++#endif
+ 				(field_mask & osl_FileStatus_Mask_Attributes) ||
+ 				(field_mask & osl_FileStatus_Mask_CreationTime) ||
+ 				(field_mask & osl_FileStatus_Mask_AccessTime) ||
+@@ -267,7 +284,11 @@ namespace /* private */
+     	if ((NULL == Item) || (NULL == pStat))
+         	return osl_File_E_INVAL;
+ 							
++#ifdef _DIRENT_HAVE_D_TYPE
++		file_path = rtl::OUString(reinterpret_cast<rtl_uString*>(((oslDirectoryItemImpl* ) Item)->ustrFilePath));
++#else
+ 		file_path = rtl::OUString(reinterpret_cast<rtl_uString*>(Item));    
++#endif
+ 
+ 		OSL_ASSERT(file_path.getLength() > 0);
+ 		
+@@ -298,10 +319,18 @@ oslFileError SAL_CALL osl_getFileStatus(
+ #else
+ 	struct stat file_stat;
+ #endif
+-	if (is_stat_call_necessary(uFieldMask) && (0 != osl::lstat(file_path, file_stat)))
++
++#ifdef _DIRENT_HAVE_D_TYPE
++	oslDirectoryItemImpl* pImpl = (oslDirectoryItemImpl*) Item;
++	bool bStatNeeded = is_stat_call_necessary(uFieldMask, pImpl);
++#else
++	bool bStatNeeded = is_stat_call_necessary(uFieldMask);
++#endif
++
++	if (bStatNeeded && (0 != osl::lstat(file_path, file_stat)))
+     	return oslTranslateFileError(OSL_FET_ERROR, errno);
+ 	
+-	if (is_stat_call_necessary(uFieldMask))
++	if (bStatNeeded)
+ 	{
+ 		// we set all these attributes because it's cheap				
+ 		set_file_type(file_stat, pStat);
+@@ -318,6 +347,40 @@ oslFileError SAL_CALL osl_getFileStatus(
+ 				return osl_error;
+ 		}
+     }
++#ifdef _DIRENT_HAVE_D_TYPE
++    else if (uFieldMask & osl_FileStatus_Mask_Type)
++    {
++		OSL_ASSERT(pImpl->bHasType);
++
++		switch(pImpl->DType)
++		{
++		case DT_LNK:
++			pStat->eType = osl_File_Type_Link;              
++			break;
++		case DT_DIR:
++			pStat->eType = osl_File_Type_Directory;       
++			break;
++		case DT_REG:
++			pStat->eType = osl_File_Type_Regular;
++			break;
++		case DT_FIFO:
++			pStat->eType = osl_File_Type_Fifo;
++			break;
++		case DT_SOCK:
++			pStat->eType = osl_File_Type_Socket;
++			break;
++		case DT_CHR:
++		case DT_BLK:
++			pStat->eType = osl_File_Type_Special;
++			break;
++		default:
++			OSL_ASSERT(0);
++			pStat->eType = osl_File_Type_Unknown;
++		}
++
++       pStat->uValidFields |= osl_FileStatus_Mask_Type;
++	}
++#endif
+ 			
+     if (uFieldMask & osl_FileStatus_Mask_FileURL)
+     {
+Index: sal/osl/unx/file_impl.hxx
+===================================================================
+--- /dev/null	2006-01-10 21:26:33.568399000 +0100
++++ sal/osl/unx/file_impl.hxx	2006-01-17 20:05:30.000000000 +0100
+@@ -0,0 +1,38 @@
++struct oslDirectoryItemImpl
++{
++    rtl_uString* ustrFilePath;       /* holds native file name */
++	unsigned char DType;
++	bool bHasType;
++private:
++    sal_uInt32   RefCount;
++
++public:
++	oslDirectoryItemImpl( rtl_uString* _ustrFilePath, bool _bHasDType, unsigned char _DType=0 )
++	{
++		RefCount = 1;
++		bHasType = _bHasDType;
++		DType = _DType;
++		ustrFilePath = _ustrFilePath;
++	}
++
++	~oslDirectoryItemImpl()
++	{
++		if( ustrFilePath ) {
++			rtl_uString_release( ustrFilePath );
++			ustrFilePath = NULL;
++		}
++	}
++
++	void acquire()
++	{
++		RefCount ++;
++	}
++
++	void release()
++	{
++		RefCount --;
++
++		if(RefCount <= 0)
++			delete this;
++	}
++};
