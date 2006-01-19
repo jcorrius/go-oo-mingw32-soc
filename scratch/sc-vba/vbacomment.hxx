@@ -25,7 +25,7 @@ private:
 	sal_Int32 SAL_CALL getAnnotationIndex() throw (css::uno::RuntimeException);
 	css::uno::Reference< oo::vba::XComment > SAL_CALL getCommentByIndex( sal_Int32 Index ) throw (css::uno::RuntimeException);
 public:
-    ScVbaComment( const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::table::XCellRange >& xRange ) throw ( css::lang::IllegalArgumentException,  css::uno::RuntimeException );
+    ScVbaComment( const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::table::XCellRange >& xRange ) throw ( css::lang::IllegalArgumentException );
 
     virtual ~ScVbaComment() {}
 

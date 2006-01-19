@@ -992,14 +992,11 @@ ScVbaRange::getComment() throw (css::uno::RuntimeException)
 {
 	// intentional behavior to return a null object if no
 	// comment defined
-	try
-	{
-		return new ScVbaComment( m_xContext, mxRange );
-	}
-	catch( uno::Exception& e )
-	{
+	uno::Reference< vba::XComment > xComment( new ScVbaComment( m_xContext, mxRange ) );
+	if ( !xComment->Text( uno::Any(), uno::Any(), uno::Any() ).getLength() )
 		return NULL;
-	}
+	return xComment;
+	
 }
 
 uno::Reference< beans::XPropertySet >
