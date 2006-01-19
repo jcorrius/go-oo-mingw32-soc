@@ -16,13 +16,17 @@
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
 
-ScVbaComment::ScVbaComment( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< table::XCellRange >& xRange ) throw( lang::IllegalArgumentException )
+ScVbaComment::ScVbaComment( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< table::XCellRange >& xRange ) throw( lang::IllegalArgumentException, uno::RuntimeException )
 : m_xContext( xContext ), mxRange( xRange )
 {
 	if  ( !xContext.is() )
 		throw lang::IllegalArgumentException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "context is not set " ) ), uno::Reference< uno::XInterface >() , 1 );
 	if  ( !xRange.is() )
 		throw lang::IllegalArgumentException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "range is not set " ) ), uno::Reference< uno::XInterface >() , 1 );
+	uno::Reference< text::XSimpleText > xAnnoText( getAnnotation(), uno::UNO_QUERY );
+	if ( xAnnoText.is() )
+		if ( !xAnnoText->getString().getLength() )
+			throw uno::RuntimeException(  rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "No Comment for cell" ) ), uno::Reference< uno::XInterface >() );
 }
 
 // private helper functions
