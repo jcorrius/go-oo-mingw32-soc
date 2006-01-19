@@ -5,7 +5,7 @@ retrieving revision 1.50
 diff -u -p -u -r1.50 officeipcthread.cxx
 --- desktop/source/app/officeipcthread.cxx	19 Oct 2005 12:20:26 -0000	1.50
 +++ desktop/source/app/officeipcthread.cxx	6 Jan 2006 13:09:01 -0000
-@@ -54,9 +54,12 @@
+@@ -54,9 +54,13 @@
  #ifndef _UTL_CONFIGMGR_HXX_
  #include <unotools/configmgr.hxx>
  #endif
@@ -16,43 +16,325 @@ diff -u -p -u -r1.50 officeipcthread.cxx
 +#ifndef _OSL_FILE_HXX_
 +#include <osl/file.hxx>
 +#endif
++#include <officePipeHelper.hxx>
  #ifndef _RTL_DIGEST_H_
  #include <rtl/digest.h>
  #endif
-@@ -361,7 +364,36 @@ OfficeIPCThread::Status OfficeIPCThread:
+@@ -78,7 +79,6 @@
+ #include <comphelper/processfactory.hxx>
+ #include <com/sun/star/uri/XExternalUriReferenceTranslator.hpp>
+ 
+-
+ using namespace vos;
+ using namespace rtl;
+ using namespace desktop;
+@@ -112,36 +112,6 @@ namespace { struct Security : public rtl
+ ::osl::Mutex*		OfficeIPCThread::pOfficeIPCThreadMutex = 0;
+ 
+ 
+-String CreateMD5FromString( const OUString& aMsg )
+-{
+-	// PRE: aStr "file"
+-	// BACK: Str "ababab....0f" Hexcode String
+-
+-	rtlDigest handle = rtl_digest_create( rtl_Digest_AlgorithmMD5 );
+-	if ( handle > 0 )
+-	{
+-		const sal_uInt8* pData = (const sal_uInt8*)aMsg.getStr();
+-		sal_uInt32		 nSize = ( aMsg.getLength() * sizeof( sal_Unicode ));
+-		sal_uInt32		 nMD5KeyLen = rtl_digest_queryLength( handle );
+-		sal_uInt8*		 pMD5KeyBuffer = new sal_uInt8[ nMD5KeyLen ];
+-
+-		rtl_digest_init( handle, pData, nSize );
+-		rtl_digest_update( handle, pData, nSize );
+-		rtl_digest_get( handle, pMD5KeyBuffer, nMD5KeyLen );
+-		rtl_digest_destroy( handle );
+-
+-		// Create hex-value string from the MD5 value to keep the string size minimal
+-		OUStringBuffer aBuffer( nMD5KeyLen * 2 + 1 );
+-		for ( sal_uInt32 i = 0; i < nMD5KeyLen; i++ )
+-			aBuffer.append( (sal_Int32)pMD5KeyBuffer[i], 16 );
+-
+-		delete [] pMD5KeyBuffer;
+-		return aBuffer.makeStringAndClear();
+-	}
+-
+-	return String();
+-}
+-
+ class ProcessEventsClass_Impl
+ {
+ public:
+@@ -304,24 +274,15 @@ OfficeIPCThread::Status OfficeIPCThread:
+ 	if( pGlobalOfficeIPCThread )
+ 		return IPC_STATUS_OK;
+ 
+-	::rtl::OUString aUserInstallPath;
+-    ::rtl::OUString aDummy;
+-
+ 	::vos::OStartupInfo aInfo;
+ 	OfficeIPCThread* pThread = new OfficeIPCThread;
+ 
+-	pThread->maPipeIdent = OUString( RTL_CONSTASCII_USTRINGPARAM( "SingleOfficeIPC_" ) );
+-
+ 	// The name of the named pipe is created with the hashcode of the user installation directory (without /user). We have to retrieve
+ 	// this information from a unotools implementation.
+-	::utl::Bootstrap::PathStatus aLocateResult = ::utl::Bootstrap::locateUserInstallation( aUserInstallPath );
+-	if ( aLocateResult == ::utl::Bootstrap::PATH_EXISTS || aLocateResult == ::utl::Bootstrap::PATH_VALID)
+-		aDummy = aUserInstallPath;
+-	else
+-	{
+-		delete pThread;
+-		return IPC_STATUS_BOOTSTRAP_ERROR;
+-	}
++
++	const OfficePipeNameData& aData = OfficePipeHelper::get();
++	::rtl::OUString aDummy = aData.PipeNamePostfix();
++	pThread->maPipeIdent = aData.PipeNamePrefix();
+ 
+ 	// Try to  determine if we are the first office or not! This should prevent multiple
+ 	// access to the user directory !
+@@ -361,7 +322,9 @@ OfficeIPCThread::Status OfficeIPCThread:
  		aUserInstallPathHashCode = OUString( szBuffer, strlen(szBuffer), osl_getThreadTextEncoding() );
      }
  	else
+-		aUserInstallPathHashCode = CreateMD5FromString( aDummy );
 +	{
-+#ifdef UNX			
-+		// Since we mangle the UID in anyway, the home path adds nothing
-+		// but the need to parse bootstraprc => use sys install path instead.
-+		rtl::OUString aPath;
-+		aInfo.getExecutableFile( aPath );
-+		lastIndex = aPath.lastIndexOf('/');
-+		if ( lastIndex > 0 )
-+			aPath = aPath.copy( 0, lastIndex+1 );
-+
-+		osl::File::getSystemPathFromFileURL( aPath, aUserInstallPathHashCode);
-+
-+		/* Quick and simple to replicate hash */
-+		sal_uInt32 nHash = 0;
-+		if (aUserInstallPathHashCode.getLength() > 0)
-+		{
-+			rtl::OString aUTF8 = rtl::OUStringToOString( aUserInstallPathHashCode,
-+														 RTL_TEXTENCODING_UTF8 );
-+			const sal_Char *pStr = aUTF8;
-+			nHash = *pStr;
-+			for (sal_Int32 i = 1; i < aUTF8.getLength(); i++)
-+				nHash = (nHash << 5) - nHash + pStr[i];
-+		}
-+		sal_Char szBuffer[128];
-+		sprintf( szBuffer, "%d-%x", SUPD, nHash );
-+		aUserInstallPathHashCode = OUString( szBuffer, strlen(szBuffer), osl_getThreadTextEncoding() );
-+#else
- 		aUserInstallPathHashCode = CreateMD5FromString( aDummy );
-+#endif
++		aUserInstallPathHashCode = aData.PipeNamePostfix();
 +	}
  	
  
  	// Check result to create a hash code from the user install path
+Index: desktop/source/deployment/misc/dp_misc.cxx
+===================================================================
+RCS file: /cvs/framework/desktop/source/deployment/misc/dp_misc.cxx,v
+retrieving revision 1.10
+diff -u -p -r1.10 dp_misc.cxx
+--- desktop/source/deployment/misc/dp_misc.cxx	8 Sep 2005 17:23:18 -0000	1.10
++++ desktop/source/deployment/misc/dp_misc.cxx	19 Jan 2006 09:36:09 -0000
+@@ -35,6 +35,7 @@
+ 
+ #include "dp_misc.h"
+ #include "dp_interact.h"
++#include "officePipeHelper.hxx"
+ #include "rtl/uri.hxx"
+ #include "rtl/digest.h"
+ #include "rtl/random.h"
+@@ -53,6 +54,7 @@
+ 
+ using namespace ::com::sun::star;
+ using namespace ::com::sun::star::uno;
++using namespace desktop;
+ using ::rtl::OUString;
+ 
+ namespace dp_misc {
+@@ -99,53 +101,8 @@ struct OfficePipeId : public rtl::Static
+ 
+ const OUString OfficePipeId::operator () ()
+ {
+-    OUString userPath = OUSTR("${$SYSBINDIR/" SAL_CONFIGFILE("bootstrap")
+-                              ":UserInstallation}");
+-    ::rtl::Bootstrap::expandMacros( userPath );
+-    OSL_ASSERT( userPath.getLength() > 0 );
+-    
+-    // normalize path:
+-    ::osl::FileStatus status( FileStatusMask_FileURL );
+-    ::osl::DirectoryItem dirItem;
+-    if (::osl::DirectoryItem::get( userPath, dirItem )
+-        != ::osl::DirectoryItem::E_None ||
+-        dirItem.getFileStatus( status )
+-        != ::osl::DirectoryItem::E_None ||
+-        !status.isValid( FileStatusMask_FileURL ) ||
+-        ::osl::FileBase::getAbsoluteFileURL(
+-            OUString(), status.getFileURL(), userPath )
+-        != ::osl::FileBase::E_None)
+-    {
+-        throw RuntimeException(
+-            OUSTR("No valid file URL in " SAL_CONFIGFILE("bootstrap") ": ") +
+-            userPath, Reference<XInterface>() );
+-    }
+-    
+-    rtlDigest digest = rtl_digest_create( rtl_Digest_AlgorithmMD5 );
+-    if (digest <= 0) {
+-        throw RuntimeException(
+-            OUSTR("cannot get digest rtl_Digest_AlgorithmMD5!"), 0 );
+-    }
+-    
+-    sal_uInt8 const * data =
+-        reinterpret_cast<sal_uInt8 const *>(userPath.getStr());
+-    sal_Size size = (userPath.getLength() * sizeof (sal_Unicode));
+-    sal_uInt32 md5_key_len = rtl_digest_queryLength( digest );
+-    ::boost::scoped_array<sal_uInt8> md5_buf( new sal_uInt8 [ md5_key_len ] );
+-    
+-    rtl_digest_init( digest, data, static_cast<sal_uInt32>(size) );
+-    rtl_digest_update( digest, data, static_cast<sal_uInt32>(size) );
+-    rtl_digest_get( digest, md5_buf.get(), md5_key_len );
+-    rtl_digest_destroy( digest );
+-    
+-    // create hex-value string from the MD5 value to keep
+-    // the string size minimal
+-    ::rtl::OUStringBuffer buf;
+-    buf.appendAscii( RTL_CONSTASCII_STRINGPARAM("SingleOfficeIPC_") );
+-    for ( sal_uInt32 i = 0; i < md5_key_len; ++i ) {
+-        buf.append( static_cast<sal_Int32>(md5_buf[ i ]), 0x10 );
+-    }
+-    return buf.makeStringAndClear();
++	const OfficePipeNameData& aData = OfficePipeHelper::get();
++	return aData.PipeName();
+ }
+ 
+ } // anon namespace
+--- /dev/null	2006-01-03 09:47:36.312320500 +0000
++++ desktop/inc/officePipeHelper.hxx	2006-01-19 09:33:26.000000000 +0000
+@@ -0,0 +1,151 @@
++/*************************************************************************
++ *
++ *  OpenOffice.org - a multi-platform office productivity suite
++ *
++ *  $RCSfile$
++ *
++ *  $Revision$
++ *
++ *  last change: $Author$ $Date$
++ *
++ *  The Contents of this file are made available subject to
++ *  the terms of GNU Lesser General Public License Version 2.1.
++ *
++ *
++ *    GNU Lesser General Public License Version 2.1
++ *    =============================================
++ *    Copyright 2005 by Sun Microsystems, Inc.
++ *    901 San Antonio Road, Palo Alto, CA 94303, USA
++ *
++ *    This library is free software; you can redistribute it and/or
++ *    modify it under the terms of the GNU Lesser General Public
++ *    License version 2.1, as published by the Free Software Foundation.
++ *
++ *    This library is distributed in the hope that it will be useful,
++ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ *    Lesser General Public License for more details.
++ *
++ *    You should have received a copy of the GNU Lesser General Public
++ *    License along with this library; if not, write to the Free Software
++ *    Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ *    MA  02111-1307  USA
++ *
++ ************************************************************************/
++
++#ifndef _OFFICEPIPEHELPER_HXX_
++#define _OFFICEPIPEHELPER_HXX_
++#include <rtl/instance.hxx>
++#include <rtl/ustrbuf.hxx>
++#include <rtl/digest.h>
++#include <rtl/random.h>
++#include <rtl/bootstrap.hxx>
++#include <osl/file.hxx>
++#include <osl/pipe.hxx>
++#include <osl/security.hxx>
++#include <osl/thread.hxx>
++#include <osl/mutex.hxx>
++#include <vos/process.hxx>
++#include <com/sun/star/uno/RuntimeException.hpp>
++#include <string.h>
++namespace desktop
++{
++
++class OfficePipeNameData
++{
++friend class OfficePipeHelper;
++	::rtl::OUString sPipePostName;
++	::rtl::OUString sPipePrefix;
++public:
++	const ::rtl::OUString& PipeNamePrefix() const { return sPipePrefix; }
++	const ::rtl::OUString& PipeNamePostfix() const { return sPipePostName; }
++	const ::rtl::OUString PipeName() const { return sPipePrefix + sPipePostName; }
++};  
++
++struct OfficePipeHelper : public rtl::StaticWithInit<const OfficePipeNameData, OfficePipeHelper> {
++    const OfficePipeNameData operator () ();
++};
++
++const OfficePipeNameData OfficePipeHelper::operator () ()
++{
++    OfficePipeNameData aData;
++    aData.sPipePrefix = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("SingleOfficeIPC_") );
++    rtl::OUString userPath(RTL_CONSTASCII_USTRINGPARAM("${$SYSBINDIR/" SAL_CONFIGFILE("bootstrap")
++                              ":UserInstallation}") );
++    ::rtl::Bootstrap::expandMacros( userPath );
++    OSL_ASSERT( userPath.getLength() > 0 );
++    
++    // normalize path:
++    ::osl::FileStatus status( FileStatusMask_FileURL );
++    ::osl::DirectoryItem dirItem;
++    if (::osl::DirectoryItem::get( userPath, dirItem )
++        != ::osl::DirectoryItem::E_None ||
++        dirItem.getFileStatus( status )
++        != ::osl::DirectoryItem::E_None ||
++        !status.isValid( FileStatusMask_FileURL ) ||
++        ::osl::FileBase::getAbsoluteFileURL(
++            rtl::OUString(), status.getFileURL(), userPath )
++        != ::osl::FileBase::E_None)
++    {
++        throw com::sun::star::uno::RuntimeException(
++            rtl::OUString(RTL_CONSTASCII_USTRINGPARAM("No valid file URL in " SAL_CONFIGFILE("bootstrap") ": ") ) +
++            userPath, com::sun::star::uno::Reference<com::sun::star::uno::XInterface>() );
++    }
++    ::rtl::OUStringBuffer buf;
++#ifdef UNX	
++    ::vos::OStartupInfo aInfo;
++    rtl::OUString aPath;
++    aInfo.getExecutableFile( aPath );
++    sal_Int32 lastIndex = aPath.lastIndexOf('/');
++    if ( lastIndex > 0 )
++        aPath = aPath.copy( 0, lastIndex+1 );
++
++    osl::File::getSystemPathFromFileURL( aPath, userPath);
++
++    /* Quick and simple to replicate hash */
++    sal_uInt32 nHash = 0;
++    if (userPath.getLength() > 0)
++    {
++        rtl::OString aUTF8 = rtl::OUStringToOString( userPath,
++            RTL_TEXTENCODING_UTF8 );
++        const sal_Char *pStr = aUTF8;
++        nHash = *pStr;
++        for (sal_Int32 i = 1; i < aUTF8.getLength(); i++)
++            nHash = (nHash << 5) - nHash + pStr[i];
++    }
++    sal_Char szBuffer[128];
++    sprintf( szBuffer, "%d-%x", SUPD, nHash );
++    buf.append( rtl::OUString( szBuffer, strlen(szBuffer), osl_getThreadTextEncoding() ) );
++#else 
++      
++    rtlDigest digest = rtl_digest_create( rtl_Digest_AlgorithmMD5 );
++    if (digest <= 0) {
++        throw RuntimeException(
++            OUSTR("cannot get digest rtl_Digest_AlgorithmMD5!"), 0 );
++    }
++    
++    sal_uInt8 const * data =
++        reinterpret_cast<sal_uInt8 const *>(userPath.getStr());
++    sal_Size size = (userPath.getLength() * sizeof (sal_Unicode));
++    sal_uInt32 md5_key_len = rtl_digest_queryLength( digest );
++    ::boost::scoped_array<sal_uInt8> md5_buf( new sal_uInt8 [ md5_key_len ] );
++    
++    rtl_digest_init( digest, data, static_cast<sal_uInt32>(size) );
++    rtl_digest_update( digest, data, static_cast<sal_uInt32>(size) );
++    rtl_digest_get( digest, md5_buf.get(), md5_key_len );
++    rtl_digest_destroy( digest );
++    
++    // create hex-value string from the MD5 value to keep
++    // the string size minimal
++    for ( sal_uInt32 i = 0; i < md5_key_len; ++i ) {
++        buf.append( static_cast<sal_Int32>(md5_buf[ i ]), 0x10 );
++    }
++#endif
++    aData.sPipePostName =  buf.makeStringAndClear();
++    return aData;
++}
++
++    
++} // namespace desktop
++
++#endif // _OFFICEPIPEHELPER_HXX
