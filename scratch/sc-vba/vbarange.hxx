@@ -2,6 +2,8 @@
 #define SC_VBA_RANGE_HXX
 
 #include <cppuhelper/implbase1.hxx>
+#include <cppuhelper/implbase2.hxx>
+#include <com/sun/star/container/XEnumerationAccess.hpp>
 
 #include <org/openoffice/vba/XRange.hpp>
 #include <com/sun/star/table/XCellRange.hpp>
@@ -23,7 +25,7 @@
 
 class ScTableSheetsObj;
 
-typedef ::cppu::WeakImplHelper1< oo::vba::XRange > ScVbaRange_BASE;
+typedef ::cppu::WeakImplHelper2< oo::vba::XRange, css::container::XEnumerationAccess > ScVbaRange_BASE;
 class ArrayVisitor
 {
 public:
@@ -117,11 +119,23 @@ public:
 
 	// XTypeProvider
 	DECLARE_XTYPEPROVIDER()
+
+	// XEnumerationAccess
+	virtual css::uno::Reference< css::container::XEnumeration > SAL_CALL createEnumeration() throw (css::uno::RuntimeException);
+
+	// XElementAccess
+	virtual css::uno::Type SAL_CALL getElementType() throw (css::uno::RuntimeException)
+	{
+		return oo::vba::XRange::static_type(0);
+
+	}
+	virtual sal_Bool SAL_CALL hasElements() throw (css::uno::RuntimeException);
 protected:
 	// OPropertySetHelper
 	virtual ::cppu::IPropertyArrayHelper& SAL_CALL getInfoHelper();
 
 	virtual ::cppu::IPropertyArrayHelper* createArrayHelper() const;
+	
 
 };
 

@@ -45,9 +45,51 @@
 #include <comphelper/anytostring.hxx>
 
 #include "global.hxx"
+#include <vector>
 
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
+
+struct CellPos
+{
+	CellPos():m_nRow(-1), m_nCol(-1) {};
+	CellPos( sal_Int32 nRow, sal_Int32 nCol ):m_nRow(nRow), m_nCol(nCol) {};
+sal_Int32 m_nRow;
+sal_Int32 m_nCol;
+};
+
+typedef ::cppu::WeakImplHelper1< container::XEnumeration > CellsEnumeration_BASE;
+typedef vector< CellPos > vCellPos;
+
+class CellsEnumeration : public CellsEnumeration_BASE
+{
+	uno::Reference< table::XCellRange > m_xRange;
+	uno::Reference< uno::XComponentContext > m_xContext;
+	vCellPos m_CellPositions;	
+	vCellPos::const_iterator m_it; 
+public:
+	CellsEnumeration( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< table::XCellRange >& xRange ): m_xContext( xContext ), m_xRange( xRange )
+	{
+		uno::Reference< table::XColumnRowRange > xColumnRowRange(m_xRange, uno::UNO_QUERY_THROW );
+		sal_Int32 nRowCount =  xColumnRowRange->getRows()->getCount();
+		sal_Int32 nColCount = xColumnRowRange->getColumns()->getCount();
+		for ( sal_Int32 i=0; i<nRowCount; ++i )
+			for ( sal_Int32 j=0; j<nColCount; ++j )
+				m_CellPositions.push_back( CellPos( i,j ) );
+		m_it = m_CellPositions.begin();
+	}
+	virtual ::sal_Bool SAL_CALL hasMoreElements() throw (::uno::RuntimeException){ return m_it != m_CellPositions.end(); }
+
+	virtual uno::Any SAL_CALL nextElement() throw (container::NoSuchElementException, lang::WrappedTargetException, uno::RuntimeException)
+	{
+		if ( !hasMoreElements() )
+			throw container::NoSuchElementException();
+		CellPos aPos = *(m_it)++;
+		uno::Reference< table::XCellRange > xCellRange( m_xRange->getCellByPosition(  aPos.m_nCol, aPos.m_nRow ), uno::UNO_QUERY_THROW );
+		return makeAny( uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xCellRange ) ) );
+	}
+};
+
 
 const sal_Int32 RANGE_PROPERTY_ID_DFLT=1;
 // name is not defineable in IDL so no chance of a false detection of the
@@ -948,7 +990,16 @@ ScVbaRange::getEntireColumn() throw (uno::RuntimeException)
 uno::Reference< vba::XComment > SAL_CALL
 ScVbaRange::getComment() throw (css::uno::RuntimeException)
 {
-	return new ScVbaComment( m_xContext, mxRange );
+	// intentional behavior to return a null object if no
+	// comment defined
+	try
+	{
+		return new ScVbaComment( m_xContext, mxRange );
+	}
+	catch( uno::Exception& e )
+	{
+		return NULL;
+	}
 }
 
 uno::Reference< beans::XPropertySet >
@@ -996,6 +1047,25 @@ ScVbaRange::setHidden( const uno::Any& _hidden ) throw (uno::RuntimeException)
 	{
 		throw uno::RuntimeException( e.Message, uno::Reference< uno::XInterface >() );
 	}	
+}
+
+//XElementAccess
+sal_Bool SAL_CALL 
+ScVbaRange::hasElements() throw (uno::RuntimeException)
+{
+	uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, uno::UNO_QUERY );
+	if ( xColumnRowRange.is() )
+		if ( xColumnRowRange->getRows()->getCount() ||
+			xColumnRowRange->getColumns()->getCount() )
+			return sal_True;
+	return sal_False;
+}
+
+// XEnumerationAccess
+uno::Reference< container::XEnumeration > SAL_CALL 
+ScVbaRange::createEnumeration() throw (uno::RuntimeException)
+{
+	return new CellsEnumeration( m_xContext, mxRange );
 }
 
 // XInterface
