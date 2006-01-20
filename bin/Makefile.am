@@ -13,7 +13,7 @@ script_files = \
 	nothing \
 	ooconfig \
 	ooinstall \
-	ooinstalltemplate.in \
+	ootool.in \
 	ooo-wrapper.in \
 	ootouch \
 	oowintool \
