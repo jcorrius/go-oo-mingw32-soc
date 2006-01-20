@@ -198,7 +198,8 @@ void CellValueGetter::visitNode( sal_Int32 x, sal_Int32 y, const uno::Reference<
 				aValue <<= sal_False;
 	
 		}
-		aValue <<= xCell->getValue();
+		else
+			aValue <<= xCell->getValue();
 	}
 	if( eType == table::CellContentType_TEXT )
 	{
@@ -369,12 +370,8 @@ ScVbaRange::setValue( const uno::Any  &aValue  ) throw (uno::RuntimeException)
 		try
 		{
 			aConverted = xConverter->convertTo( aValue, getCppuType((uno::Sequence< uno::Sequence< uno::Any > >*)0) );
-			uno::Sequence< uno::Sequence< uno::Any > > aMatrix;
-			if ( aConverted >>= aMatrix )
-			{
-				ArrayValueSetter setter( aConverted );
-				visitArray( setter );
-			}
+			ArrayValueSetter setter( aConverted );
+			visitArray( setter );
 		}
 		catch ( uno::Exception& e )
 		{
