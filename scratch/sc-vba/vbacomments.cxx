@@ -1,6 +1,5 @@
 #include "vbacomments.hxx"
 
-#include <org/openoffice/vba/Excel/XlCreator.hpp>
 #include <com/sun/star/container/XChild.hpp>
 #include <com/sun/star/sheet/XSheetAnnotation.hpp>
 
@@ -14,6 +13,7 @@ uno::Any AnnotationToComment( const uno::Any& aSource, uno::Reference< uno::XCom
 	uno::Reference< sheet::XSheetAnnotation > xAnno( aSource, uno::UNO_QUERY_THROW );
 	uno::Reference< container::XChild > xChild( xAnno, uno::UNO_QUERY_THROW );
 	uno::Reference< table::XCellRange > xCellRange( xChild->getParent(), uno::UNO_QUERY_THROW );
+
 	return makeAny( uno::Reference< vba::XComment > ( new ScVbaComment( xContext, xCellRange ) ) );
 }
 
@@ -40,6 +40,7 @@ uno::Reference< container::XEnumeration >
 ScVbaComments::createEnumeration() throw (uno::RuntimeException)
 {
 	uno::Reference< container::XEnumerationAccess > xEnumAccess( m_xIndexAccess, uno::UNO_QUERY_THROW );
+
 	return new CommentEnumeration( m_xContext, xEnumAccess->createEnumeration() );
 }
 
@@ -54,18 +55,4 @@ ScVbaComments::getElementType() throw (uno::RuntimeException)
 {
 	return vba::XComments::static_type(0);
 }
-
-
-
-/*
-uno::Reference< vba::XWorksheet > SAL_CALL
-ScVbaComments::getParent() throw (uno::RuntimeException)
-{
-	uno::Reference< vba::XWorksheet > xWorksheet =
-		ScVbaGlobals::getGlobalsImpl( m_xContext )->getActiveSheet();
-	if ( xWorksheet.is() )
-		return xWorksheet;
-	return uno::Reference< vba::XWorksheet >(NULL);
-}
-*/
 
