@@ -120,8 +120,9 @@ CellValueSetter::visitNode( sal_Int32 i, sal_Int32 j, const uno::Reference< tabl
 bool
 CellValueSetter::processValue( const uno::Any& aValue, const uno::Reference< table::XCell >& xCell )
 {
+
 	bool isExtracted = false;
-	switch ( mTypeClass )
+	switch ( aValue.getValueTypeClass() )
 	{
 		case  uno::TypeClass_BOOLEAN:
 		{
@@ -232,14 +233,22 @@ public:
 class ArrayValueSetter : public CellValueSetter
 {
 	uno::Sequence< uno::Sequence< uno::Any > > aMatrix;
+	sal_Int32 nRowCount;
+	sal_Int32 nColCount;
 public:
 	ArrayValueSetter( const uno::Any& aValue ) : CellValueSetter( aValue )
 	{
 		aValue >>= aMatrix;
+		nRowCount = aMatrix.getLength();
+		nColCount = aMatrix[0].getLength();  
 	}
 	virtual void visitNode( sal_Int32 x, sal_Int32 y, const uno::Reference< table::XCell >& xCell )
 	{
-		processValue( aMatrix[ x ][ y ], xCell );
+		static rtl::OUString sNA = rtl::OUString::createFromAscii("#N/A"); 
+		if ( x < nRowCount && y < nColCount )
+			processValue( aMatrix[ x ][ y ], xCell );
+		else
+			processValue( uno::makeAny( sNA ), xCell );
 	}
 };
 
@@ -369,7 +378,16 @@ ScVbaRange::setValue( const uno::Any  &aValue  ) throw (uno::RuntimeException)
 		uno::Any aConverted;
 		try
 		{
-			aConverted = xConverter->convertTo( aValue, getCppuType((uno::Sequence< uno::Sequence< uno::Any > >*)0) );
+			/// test for single dimension	
+			if ( aValue.getValueTypeName().indexOf('[') ==  aValue.getValueTypeName().lastIndexOf('[') )
+			{
+				uno::Any aTmp = xConverter->convertTo( aValue, getCppuType((uno::Sequence< uno::Any >*)0) );
+				uno::Sequence< uno::Sequence< uno::Any > > aSeq(1);
+				aTmp >>= aSeq[0];
+				aConverted <<= aSeq;
+			}
+			else
+				aConverted = xConverter->convertTo( aValue, getCppuType((uno::Sequence< uno::Sequence< uno::Any > >*)0) );
 			ArrayValueSetter setter( aConverted );
 			visitArray( setter );
 		}
