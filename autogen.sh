@@ -11,6 +11,10 @@ if test "z$1" = "z--clean"; then
     exit 1;
 fi
 
+# autover=`automake --version | sed 's/^.*[      ]\([0-9.]*[a-z]*\).*$/\1/'`;
+# echo "autover: '$autover'";
+# exit 1;
+
 aclocal $ACLOCAL_FLAGS || exit 1;
 automake --gnu --add-missing --copy || exit 1;
 # intltoolize --copy --force --automake
