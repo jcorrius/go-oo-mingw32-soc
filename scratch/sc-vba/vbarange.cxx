@@ -210,7 +210,7 @@ void CellValueGetter::visitNode( sal_Int32 x, sal_Int32 y, const uno::Reference<
 	processValue( x,y,aValue );
 }
 
-class ArrayValueGetter : public CellValueGetter
+class Dim2ArrayValueGetter : public CellValueGetter
 {
 protected:
 	virtual void processValue( sal_Int32 x, sal_Int32 y, const uno::Any& aValue )
@@ -220,7 +220,7 @@ protected:
 	}
 
 public:
-	ArrayValueGetter(sal_Int32 nRowCount, sal_Int32 nColCount ):CellValueGetter() 
+	Dim2ArrayValueGetter(sal_Int32 nRowCount, sal_Int32 nColCount ):CellValueGetter() 
 	{
 		uno::Sequence< uno::Sequence< uno::Any > > aMatrix;
 		aMatrix.realloc( nRowCount );	
@@ -230,13 +230,36 @@ public:
 	}
 };
 
-class ArrayValueSetter : public CellValueSetter
+const static rtl::OUString sNA = rtl::OUString::createFromAscii("#N/A"); 
+
+class Dim1ArrayValueSetter : public CellValueSetter
+{
+	uno::Sequence< uno::Any > aMatrix;
+	sal_Int32 nColCount;
+public:
+	Dim1ArrayValueSetter( const uno::Any& aValue ) : CellValueSetter( aValue )
+	{
+		aValue >>= aMatrix;
+		nColCount = aMatrix.getLength();
+	}
+	virtual void visitNode( sal_Int32 x, sal_Int32 y, const uno::Reference< table::XCell >& xCell )
+	{
+		if ( y < nColCount )
+			processValue( aMatrix[ y ], xCell );
+		else
+			processValue( uno::makeAny( sNA ), xCell );
+	}
+};
+
+
+
+class Dim2ArrayValueSetter : public CellValueSetter
 {
 	uno::Sequence< uno::Sequence< uno::Any > > aMatrix;
 	sal_Int32 nRowCount;
 	sal_Int32 nColCount;
 public:
-	ArrayValueSetter( const uno::Any& aValue ) : CellValueSetter( aValue )
+	Dim2ArrayValueSetter( const uno::Any& aValue ) : CellValueSetter( aValue )
 	{
 		aValue >>= aMatrix;
 		nRowCount = aMatrix.getLength();
@@ -244,7 +267,6 @@ public:
 	}
 	virtual void visitNode( sal_Int32 x, sal_Int32 y, const uno::Reference< table::XCell >& xCell )
 	{
-		static rtl::OUString sNA = rtl::OUString::createFromAscii("#N/A"); 
 		if ( x < nRowCount && y < nColCount )
 			processValue( aMatrix[ x ][ y ], xCell );
 		else
@@ -362,7 +384,7 @@ ScVbaRange::getValue() throw (uno::RuntimeException)
 		return getter.getValue();
 	}
 	// multi cell range ( return array )
-	ArrayValueGetter getter( nRowCount, nColCount );
+	Dim2ArrayValueGetter getter( nRowCount, nColCount );
 	visitArray( getter );
 	return makeAny( uno::Reference< vba::XArrayWrapper >( new ScArrayWrapper( getter.getValue(), sal_False ) ) );
 
@@ -378,18 +400,20 @@ ScVbaRange::setValue( const uno::Any  &aValue  ) throw (uno::RuntimeException)
 		uno::Any aConverted;
 		try
 		{
-			/// test for single dimension	
+			// test for single dimension, could do 
+			// with a better test than this	
 			if ( aValue.getValueTypeName().indexOf('[') ==  aValue.getValueTypeName().lastIndexOf('[') )
 			{
-				uno::Any aTmp = xConverter->convertTo( aValue, getCppuType((uno::Sequence< uno::Any >*)0) );
-				uno::Sequence< uno::Sequence< uno::Any > > aSeq(1);
-				aTmp >>= aSeq[0];
-				aConverted <<= aSeq;
+				aConverted = xConverter->convertTo( aValue, getCppuType((uno::Sequence< uno::Any >*)0) );
+				Dim1ArrayValueSetter setter( aConverted );
+				visitArray( setter );
 			}
 			else
+			{
 				aConverted = xConverter->convertTo( aValue, getCppuType((uno::Sequence< uno::Sequence< uno::Any > >*)0) );
-			ArrayValueSetter setter( aConverted );
-			visitArray( setter );
+				Dim2ArrayValueSetter setter( aConverted );
+				visitArray( setter );
+			}
 		}
 		catch ( uno::Exception& e )
 		{
