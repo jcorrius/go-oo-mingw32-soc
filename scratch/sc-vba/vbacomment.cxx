@@ -162,7 +162,6 @@ ScVbaComment::Text( const uno::Any& Text, const uno::Any& Start, const uno::Any&
 
 	if ( Start.hasValue() )
 	{
-		// FIXME: works not as expected...
 		sal_Int16 nStart;
 		sal_Bool bOverwrite = sal_True;
 		Overwrite >>= bOverwrite;
@@ -173,17 +172,16 @@ ScVbaComment::Text( const uno::Any& Text, const uno::Any& Start, const uno::Any&
 
 			if ( bOverwrite )
 			{
-				xTextCursor->gotoEnd( sal_False );
-				// goLeft: nstart -1 ?!
-				xTextCursor->goLeft( sAnnoText.getLength() - nStart, sal_True );
+				xTextCursor->collapseToStart();
+				xTextCursor->gotoStart( sal_False );
+				xTextCursor->goRight( nStart - 1, sal_False );
+				xTextCursor->gotoEnd( sal_True );
 			}
 			else
 			{
-				// FIXME: why don't you move to start? (what is so special after 'Noel Power:' that it starts there? some special char?!)
+				xTextCursor->collapseToStart();
 				xTextCursor->gotoStart( sal_False );
-				// goRight: nStart + 1 ?!
-				xTextCursor->goRight( nStart, sal_False );
-				xTextCursor->goRight( sText.getLength(), sal_True );
+				xTextCursor->goRight( nStart - 1 , sal_True );
 			}
 
 			uno::Reference< text::XTextRange > xRange( xTextCursor, uno::UNO_QUERY_THROW );
