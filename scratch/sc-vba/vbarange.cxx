@@ -27,6 +27,7 @@
 #include <com/sun/star/sheet/XSpreadsheetDocument.hpp>
 #include <com/sun/star/util/XNumberFormatsSupplier.hpp>
 #include <com/sun/star/util/XNumberFormats.hpp>
+#include <com/sun/star/util/NumberFormat.hpp>
 #include <com/sun/star/util/XNumberFormatTypes.hpp>
 #include <com/sun/star/sheet/XCellRangeMovement.hpp>
 #include <com/sun/star/sheet/XCellRangeData.hpp>
@@ -49,6 +50,72 @@
 
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
+
+
+class NumFormatHelper
+{
+	uno::Reference< util::XNumberFormatsSupplier > mxSupplier;
+	uno::Reference< beans::XPropertySet > mxRangeProps;
+	uno::Reference< util::XNumberFormats > mxFormats;
+public:
+	NumFormatHelper( const uno::Reference< table::XCellRange >& xRange )
+	{
+		mxSupplier.set( getCurrentDocument(), uno::UNO_QUERY_THROW );
+		mxRangeProps.set( xRange, uno::UNO_QUERY_THROW);
+		mxFormats = mxSupplier->getNumberFormats();
+	}
+	uno::Reference< beans::XPropertySet > getNumberProps()
+	{	
+		long nIndexKey;
+		uno::Any aValue = mxRangeProps->getPropertyValue(rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("NumberFormat")));
+		aValue >>= nIndexKey;
+
+		if ( mxFormats.is() )
+			return  mxFormats->getByKey( nIndexKey );
+		return	uno::Reference< beans::XPropertySet > ();
+	}
+
+	bool isBooleanType()
+	{
+	
+		if ( getNumberFormat() & util::NumberFormat::LOGICAL )
+			return true;
+		return false;
+	}
+
+	rtl::OUString getNumberFormatString()
+	{
+		uno::Reference< beans::XPropertySet > xNumberProps( getNumberProps(), uno::UNO_QUERY_THROW );
+		::rtl::OUString aFormatString;
+		uno::Any aString = xNumberProps->getPropertyValue(rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("FormatString")));
+		aString >>= aFormatString;
+		return aFormatString;
+	}
+
+	sal_Int16 getNumberFormat()
+	{
+		uno::Reference< beans::XPropertySet > xNumberProps = getNumberProps(); 	
+		sal_Int16 nType = ::comphelper::getINT16(
+        	xNumberProps->getPropertyValue( ::rtl::OUString::createFromAscii( "Type" ) ) );
+		return nType;
+	}
+
+	bool setNumberFormat( sal_Int16 nType )
+	{
+		uno::Reference< beans::XPropertySet > xNumberProps = getNumberProps(); 	
+		lang::Locale aLocale;
+		xNumberProps->getPropertyValue( ::rtl::OUString::createFromAscii( "Locale" ) ) >>= aLocale;
+		uno::Reference<util::XNumberFormatTypes> xTypes( mxFormats, uno::UNO_QUERY );
+		if ( xTypes.is() )
+		{
+			sal_Int32 nNewIndex = xTypes->getStandardFormat( nType, aLocale );
+       		mxRangeProps->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("NumberFormat") ), uno::makeAny( nNewIndex ) );				
+			return true;
+		}
+		return false;
+	}
+
+};
 
 struct CellPos
 {
@@ -126,7 +193,7 @@ CellValueSetter::processValue( const uno::Any& aValue, const uno::Reference< tab
 	{
 		case  uno::TypeClass_BOOLEAN:
 		{
-			static ::rtl::OUString sTrue( RTL_CONSTASCII_USTRINGPARAM("=TRUE()"));
+/*			static ::rtl::OUString sTrue( RTL_CONSTASCII_USTRINGPARAM("=TRUE()"));
 			static ::rtl::OUString sFalse( RTL_CONSTASCII_USTRINGPARAM("=FALSE()"));
 			sal_Bool bState;
 			if ( aValue >>= bState 	 )
@@ -138,6 +205,19 @@ CellValueSetter::processValue( const uno::Any& aValue, const uno::Reference< tab
 			}
 			else
 				isExtracted = false;	
+*/
+			
+			sal_Bool bState;
+			if ( aValue >>= bState 	 )
+			{
+				if ( bState )
+					xCell->setValue( (double) 1 );
+				else
+					xCell->setValue( (double) 0 );
+				uno::Reference< table::XCellRange > xRange( xCell, uno::UNO_QUERY_THROW );
+				NumFormatHelper cellNumFormat( xRange );
+				cellNumFormat.setNumberFormat( util::NumberFormat::LOGICAL );
+			}
 			break;
 		}
 		case uno::TypeClass_STRING:
@@ -191,16 +271,16 @@ void CellValueGetter::visitNode( sal_Int32 x, sal_Int32 y, const uno::Reference<
 	if( eType == table::CellContentType_VALUE || eType == table::CellContentType_FORMULA )
 	{
 		if ( eType == table::CellContentType_FORMULA )
-		{
-			rtl::OUString sFormula = xCell->getFormula();
-			if ( sFormula.equals( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("=TRUE()") ) ) )
-				aValue <<= sal_True;
-			else if ( sFormula.equals( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("=FALSE()") ) ) )
-				aValue <<= sal_False;
-	
-		}
+				aValue <<= xCell->getValue();
 		else
-			aValue <<= xCell->getValue();
+		{
+			uno::Reference< table::XCellRange > xRange( xCell, uno::UNO_QUERY_THROW );
+			NumFormatHelper cellFormat( xRange );
+			if ( cellFormat.isBooleanType() )
+				aValue = uno::makeAny( ( xCell->getValue() != 0.0 ) );
+			else
+				aValue <<= xCell->getValue();
+		}
 	}
 	if( eType == table::CellContentType_TEXT )
 	{
@@ -831,17 +911,8 @@ ScVbaRange::setNumberFormat( const ::rtl::OUString &rFormat ) throw (uno::Runtim
 ::rtl::OUString
 ScVbaRange::getNumberFormat() throw (uno::RuntimeException)
 {
-	uno::Reference< util::XNumberFormatsSupplier > xSupplier( getCurrentDocument(), uno::UNO_QUERY_THROW );
-	uno::Reference< util::XNumberFormats > xFormats = xSupplier->getNumberFormats();
-	uno::Reference< beans::XPropertySet > xRangeProps( mxRange, uno::UNO_QUERY);
-	long nIndexKey;
-	uno::Any aValue = xRangeProps->getPropertyValue(rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("NumberFormat")));
-	aValue >>= nIndexKey;
-	uno::Reference< beans::XPropertySet > xNumberProps = xFormats->getByKey( nIndexKey );
-	::rtl::OUString aFormatString;
-	uno::Any aString = xNumberProps->getPropertyValue(rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("FormatString")));
-	aString >>= aFormatString;
-	return aFormatString;
+	NumFormatHelper numFormat( mxRange );
+	return numFormat.getNumberFormatString();
 }
 
 uno::Reference< vba::XRange >
