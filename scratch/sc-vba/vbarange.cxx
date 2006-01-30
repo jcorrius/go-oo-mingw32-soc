@@ -193,20 +193,6 @@ CellValueSetter::processValue( const uno::Any& aValue, const uno::Reference< tab
 	{
 		case  uno::TypeClass_BOOLEAN:
 		{
-/*			static ::rtl::OUString sTrue( RTL_CONSTASCII_USTRINGPARAM("=TRUE()"));
-			static ::rtl::OUString sFalse( RTL_CONSTASCII_USTRINGPARAM("=FALSE()"));
-			sal_Bool bState;
-			if ( aValue >>= bState 	 )
-			{
-				if ( bState )
-					xCell->setFormula( sTrue );
-				else
-					xCell->setFormula( sFalse );
-			}
-			else
-				isExtracted = false;	
-*/
-			
 			sal_Bool bState;
 			if ( aValue >>= bState 	 )
 			{
