@@ -22,7 +22,13 @@ IDLFILES=\
 	Constants.idl \
 	XlCalculation.idl \
 	XlCellType.idl \
-	XlCommentDisplayMode.idl
+	XlCommentDisplayMode.idl \
+	XlLookAt.idl \
+	XlSearchOrder.idl \
+	XlSortOrder.idl \
+	XlSortMethod.idl \
+	XlYesNoGuess.idl
+
 
 # ------------------------------------------------------------------
 
