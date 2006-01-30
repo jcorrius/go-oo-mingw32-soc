@@ -1,0 +1,193 @@
+--- xmlhelp/source/cxxhelp/provider/db.hxx.orig	2006-01-03 00:02:49.000000000 +0100
++++ xmlhelp/source/cxxhelp/provider/db.hxx	2006-01-03 00:03:16.000000000 +0100
+@@ -100,6 +100,9 @@
+ 				  db_malloc_fcn_type app_malloc, 
+ 				  db_realloc_fcn_type app_realloc,
+ 				  db_free_fcn_type app_free);
++	    int set_cachesize(u_int32_t gbytes, u_int32_t bytes, int ncache);
++	    int set_flags(u_int32_t flags, int onoff);
++	    int set_lg_bsize(u_int32_t lg_bsize);
+     };
+   
+     class Db : db_internal::Noncopyable 
+--- xmlhelp/source/cxxhelp/provider/db.cxx.orig	2006-01-03 00:02:56.000000000 +0100
++++ xmlhelp/source/cxxhelp/provider/db.cxx	2006-01-03 00:03:16.000000000 +0100
+@@ -90,6 +90,24 @@
+     int err = m_pDBENV->set_alloc(m_pDBENV,app_malloc,app_realloc,app_free);
+     return db_internal::check_error(err,"Db::set_alloc");
+ }
++
++int DbEnv::set_cachesize(u_int32_t gbytes, u_int32_t bytes, int ncache)
++{
++    int err = m_pDBENV->set_cachesize(m_pDBENV,gbytes,bytes,ncache);
++    return db_internal::check_error(err,"DbEnv::set_cachesize");
++}
++
++int DbEnv::set_flags(u_int32_t flags, int onoff)
++{
++    int err = m_pDBENV->set_flags(m_pDBENV,flags,onoff);
++    return db_internal::check_error(err,"DbEnv::set_flags");
++}
++
++int DbEnv::set_lg_bsize(u_int32_t lg_bsize)
++{
++    int err = m_pDBENV->set_lg_bsize(m_pDBENV,lg_bsize);
++    return db_internal::check_error(err,"DbEnv::set_lg_bsize");
++}
+ //----------------------------------------------------------------------------
+ 
+ int Db::set_alloc(   db_malloc_fcn_type app_malloc, 
+--- xmlhelp/source/cxxhelp/provider/urlparameter.cxx.orig	2006-01-03 00:03:10.000000000 +0100
++++ xmlhelp/source/cxxhelp/provider/urlparameter.cxx	2006-01-03 00:45:04.000000000 +0100
+@@ -370,6 +370,8 @@
+ 	Dbt key( static_cast< void* >( const_cast< sal_Char* >( keyStr.getStr() ) ),
+ 			 keyStr.getLength() );
+ 	Dbt data;
++	key.set_flags( DB_DBT_MALLOC );
++	data.set_flags( DB_DBT_MALLOC );
+ 	
+ 	int err = db->get( 0,&key,&data,0 );
+ 	
+--- xmlhelp/source/cxxhelp/provider/databases.cxx.orig	2006-01-03 09:31:45.000000000 +0100
++++ xmlhelp/source/cxxhelp/provider/databases.cxx	2006-01-03 11:17:19.000000000 +0100
+@@ -569,7 +569,30 @@
+ 	if( aPair.second && ! it->second )
+ 	{
+ 
+-		Db* table = new Db( 0,DB_CXX_NO_EXCEPTIONS );
++		u_int32_t envFlags =
++			DB_CREATE     |  // Create the environment if it does not exist
++			DB_RECOVER    |  // Run normal recovery.
++			DB_INIT_LOCK  |  // Initialize the locking subsystem
++			DB_INIT_LOG   |  // Initialize the logging subsystem
++			DB_INIT_TXN   |  // Initialize the transactional subsystem. This
++			                 // also turns on logging.
++			DB_INIT_MPOOL |  // Initialize the memory pool (in-memory cache)
++			DB_PRIVATE    |  // Region files are not backed by the filesystem.
++			                 // Instead, they are backed by heap memory.
++			DB_THREAD;       // Cause the environment to be free-threaded
++
++		DbEnv* env = new DbEnv( 0 );
++
++		// Specify in-memory logging
++		env->set_flags(DB_LOG_INMEMORY, 1);
++		// Specify the size of the in-memory log buffer.
++		env->set_lg_bsize(512 * 1024);
++		// Specify the size of the in-memory cache
++		env->set_cachesize(0,1024 * 1024,1);
++
++		env->open( NULL,envFlags,0 );
++
++		Db* table = new Db( env,0 );
+ 		
+ 		rtl::OUString fileNameOU = 
+ 			getInstallPathAsSystemPath() +
+@@ -577,9 +600,16 @@
+ 		
+ 		rtl::OString fileName( fileNameOU.getStr(),fileNameOU.getLength(),osl_getThreadTextEncoding() );
+ 		
+-		if( table->open( 0,fileName.getStr(),0,DB_BTREE,DB_RDONLY,0644 ) )
++		u_int32_t openFlags =
++			DB_THREAD           |
++			DB_READ_UNCOMMITTED |
++			DB_RDONLY           |
++			DB_AUTO_COMMIT;        // Allow auto commit
++
++		if( table->open( 0,fileName.getStr(),0,DB_BTREE,openFlags,0644 ) )
+ 		{
+ 			table->close( 0 );
++			env->close( 0 );
+ 			delete table;
+ 			table = 0;
+ 		}
+@@ -727,15 +757,17 @@
+ 	listId.realloc( id.size() );
+ 	listAnchor.realloc( id.size() );
+ 	listTitle.realloc( id.size() );
++	Dbt key,data;
++	key.set_flags( DB_DBT_MALLOC );
++	data.set_flags( DB_DBT_MALLOC );
+ 	for( sal_uInt32 i = 0; i < id.size(); ++i )
+ 	{
+ 		listId[i] = id[i];
+ 		listAnchor[i] = anchor[i];
+ 
+ 		rtl::OString idi( id[i].getStr(),id[i].getLength(),RTL_TEXTENCODING_UTF8 );		
+-		Dbt key( static_cast< void* >( const_cast< sal_Char* >( idi.getStr() ) ),
+-				 idi.getLength() );
+-		Dbt data;
++		key.set_data( static_cast< void* >( const_cast< sal_Char* >( idi.getStr() ) ) );
++		key.set_size( idi.getLength() );
+ 		if( pDb )
+ 			pDb->get( 0,&key,&data,0 );
+ 		
+@@ -745,6 +777,12 @@
+ 		rtl::OUString title = converter.getTitle();
+ 		pDatabases->replaceName( title );
+ 		listTitle[i] = title;
++
++		if( pDb )
++		{
++			key.set_flags( DB_DBT_REALLOC );
++			data.set_flags( DB_DBT_REALLOC );
++		}
+ 	}
+ }
+ 
+@@ -790,8 +828,37 @@
+                                fileNameOU.getLength(),
+                                osl_getThreadTextEncoding() );
+ 		
+-		Db table(0,DB_CXX_NO_EXCEPTIONS);
+-		if( 0 == table.open( 0,fileName.getStr(),0,DB_BTREE,DB_RDONLY,0644 ) )
++		u_int32_t envFlags =
++			DB_CREATE     |  // Create the environment if it does not exist
++			DB_RECOVER    |  // Run normal recovery.
++			DB_INIT_LOCK  |  // Initialize the locking subsystem
++			DB_INIT_LOG   |  // Initialize the logging subsystem
++			DB_INIT_TXN   |  // Initialize the transactional subsystem. This
++			                 // also turns on logging.
++			DB_INIT_MPOOL |  // Initialize the memory pool (in-memory cache)
++			DB_PRIVATE    |  // Region files are not backed by the filesystem.
++			                 // Instead, they are backed by heap memory.
++			DB_THREAD;       // Cause the environment to be free-threaded
++
++		DbEnv* env = new DbEnv( 0 );
++
++		// Specify in-memory logging
++		env->set_flags(DB_LOG_INMEMORY, 1);
++		// Specify the size of the in-memory log buffer.
++		env->set_lg_bsize(512 * 1024);
++		// Specify the size of the in-memory cache
++		env->set_cachesize(0,1024 * 1024,1);
++
++		env->open( NULL,envFlags,0 );
++
++		u_int32_t openFlags =
++			DB_THREAD           |
++			DB_READ_UNCOMMITTED |
++			DB_RDONLY           |
++			DB_AUTO_COMMIT;        // Allow auto commit
++
++		Db table( env,0 );
++		if( 0 == table.open( 0,fileName.getStr(),0,DB_BTREE,openFlags,0644 ) )
+ 		{   
+ 			std::vector<KeywordInfo::KeywordElement> aVector;
+ 			Db* idmap = getBerkeley( Database,Language );
+@@ -834,6 +901,7 @@
+             KeywordInfo* info = it->second = new KeywordInfo( aVector );
+ 		}
+ 		table.close( 0 );
++		env->close( 0 );
+ 	}
+ 	
+ 	return it->second;
+@@ -1077,6 +1145,8 @@
+ 		rtl::OString id( Id.getStr(),Id.getLength(),RTL_TEXTENCODING_UTF8 );
+ 		Dbt key( static_cast< void* >( const_cast< sal_Char* >( id.getStr() ) ),id.getLength() );
+ 		Dbt data;
++		key.set_flags( DB_DBT_MALLOC );
++		data.set_flags( DB_DBT_MALLOC );
+ 		db->get( 0,&key,&data,0 );
+ 		int len = data.get_size();
+ 		const sal_Char* ptr = static_cast<sal_Char*>( data.get_data() );
