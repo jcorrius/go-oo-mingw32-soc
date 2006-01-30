@@ -29,6 +29,7 @@
 #include <com/sun/star/util/XNumberFormats.hpp>
 #include <com/sun/star/util/NumberFormat.hpp>
 #include <com/sun/star/util/XNumberFormatTypes.hpp>
+#include <com/sun/star/util/XReplaceable.hpp>
 #include <com/sun/star/sheet/XCellRangeMovement.hpp>
 #include <com/sun/star/sheet/XCellRangeData.hpp>
 
@@ -36,6 +37,8 @@
 #include <org/openoffice/vba/xlPasteType.hpp>
 #include <org/openoffice/vba/Excel/Constants.hpp>
 #include <org/openoffice/vba/Excel/XlFindLookIn.hpp>
+#include <org/openoffice/vba/Excel/XlLookAt.hpp>
+#include <org/openoffice/vba/Excel/XlSearchOrder.hpp>
 
 #include "vbarange.hxx"
 #include "vbafont.hxx"
@@ -196,11 +199,11 @@ CellValueSetter::processValue( const uno::Any& aValue, const uno::Reference< tab
 			sal_Bool bState;
 			if ( aValue >>= bState 	 )
 			{
+				uno::Reference< table::XCellRange > xRange( xCell, uno::UNO_QUERY_THROW );
 				if ( bState )
 					xCell->setValue( (double) 1 );
 				else
 					xCell->setValue( (double) 0 );
-				uno::Reference< table::XCellRange > xRange( xCell, uno::UNO_QUERY_THROW );
 				NumFormatHelper cellNumFormat( xRange );
 				cellNumFormat.setNumberFormat( util::NumberFormat::LOGICAL );
 			}
@@ -1140,6 +1143,74 @@ ScVbaRange::setHidden( const uno::Any& _hidden ) throw (uno::RuntimeException)
 	{
 		throw uno::RuntimeException( e.Message, uno::Reference< uno::XInterface >() );
 	}	
+}
+
+::sal_Bool SAL_CALL 
+ScVbaRange::Replace( const ::rtl::OUString& What, const ::rtl::OUString& Replacement, const uno::Any& LookAt, const uno::Any& SearchOrder, const uno::Any& MatchCase, const uno::Any& MatchByte ) throw (uno::RuntimeException)
+{
+	// sanity check required params
+	if ( !What.getLength() || !Replacement.getLength() )
+		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Range::Replace, missing params" )) , uno::Reference< uno::XInterface >() );
+
+	// #TODO
+	// also this method should take/set the defaults from the find dialog
+	// but.... really thats probably not important for us
+
+	// Set up sensible defaults
+	sal_Int16 nLook =  vba::Excel::XlLookAt::xlPart;
+	sal_Int16 nSearchOrder = vba::Excel::XlSearchOrder::xlByRows;
+	sal_Bool bMatchCase = sal_False;
+
+	uno::Reference< util::XReplaceable > xReplace( mxRange, uno::UNO_QUERY );
+	if ( xReplace.is() )
+	{
+		uno::Reference< util::XReplaceDescriptor > xDescriptor =
+			xReplace->createReplaceDescriptor();
+		
+		xDescriptor->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "SearchString" ) ), uno::makeAny(What) ); 		
+		xDescriptor->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "ReplacesString" ) ), uno::makeAny(Replacement) ); 		
+		if ( LookAt.hasValue() )
+		{
+			// sets SearchWords ( true is Cell match )
+			nLook =  ::comphelper::getINT16( LookAt );
+			if ( nLook == vba::Excel::XlLookAt::xlPart )
+				xDescriptor->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "SearchWords" ) ), uno::makeAny( sal_False ) ); 	
+			else if ( nLook == vba::Excel::XlLookAt::xlWhole )
+				xDescriptor->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "SearchWords" ) ), uno::makeAny( sal_True ) ); 	
+			else
+				throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Range::Replace, illegal value for LookAt" )) , uno::Reference< uno::XInterface >() );
+
+		}
+		// sets SearchByRow ( true for Rows )
+		if ( SearchOrder.hasValue() )
+		{
+			nSearchOrder =  ::comphelper::getINT16( SearchOrder );
+			if ( nSearchOrder == vba::Excel::XlSearchOrder::xlByColumns )
+				xDescriptor->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "SearchByRows" ) ), uno::makeAny( sal_False ) ); 	
+			else if ( nSearchOrder == vba::Excel::XlSearchOrder::xlByRows )
+				xDescriptor->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "SearchByRows" ) ), uno::makeAny( sal_True ) ); 	
+			else
+				throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Range::Replace, illegal value for SearchOrder" )) , uno::Reference< uno::XInterface >() );
+			
+		}			
+		if ( MatchCase.hasValue() )
+		{
+			// SearchCaseSensitive
+			MatchCase >>= bMatchCase;	
+			xDescriptor->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "SearchCaseSensitive" ) ), uno::makeAny( bMatchCase ) ); 	
+		}			
+		// ignore MatchByte for the moment, its not supported in
+		// OOo.org afaik
+
+		uno::Reference< util::XSearchDescriptor > xSearch( xDescriptor, uno::UNO_QUERY );
+		xReplace->replaceAll( xSearch );
+	}
+	return sal_True; // always
+}
+
+void SAL_CALL
+ScVbaRange::Sort( const uno::Any& Key1, ::sal_Int16 Order1, const uno::Any& Key2, const uno::Any& Type, ::sal_Int16 Order2, const uno::Any& Key3, ::sal_Int16 Order3, ::sal_Int16 header, const uno::Any& OrderCustom, const uno::Any& MatchCase, ::sal_Int16 Orientation, ::sal_Int16 SortMethod ) throw (uno::RuntimeException)
+{
 }
 
 //XElementAccess
