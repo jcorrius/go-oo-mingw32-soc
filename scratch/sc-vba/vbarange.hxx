@@ -20,6 +20,7 @@
 #include <com/sun/star/sheet/FillDateMode.hpp>
 #include <com/sun/star/sheet/FillMode.hpp>
 #include <com/sun/star/sheet/FillDirection.hpp>
+#include <com/sun/star/sheet/XSpreadsheet.hpp>
 
 #include "vbahelper.hxx"
 
@@ -52,7 +53,7 @@ public:
 	ScVbaRange( const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::table::XCellRange >& xRange, sal_Bool bIsRows = false, sal_Bool bIsColumns = false ) throw ( css::lang::IllegalArgumentException );
 
 	virtual ~ScVbaRange() {}
-
+	static css::uno::Reference< css::table::XCellRange > getCellRangeForName( const rtl::OUString& sRangeName, const css::uno::Reference< css::sheet::XSpreadsheet >& xDoc );
     // Attributes
 	virtual css::uno::Any SAL_CALL getValue() throw (css::uno::RuntimeException);
 	virtual void   SAL_CALL setValue( const css::uno::Any& aValue ) throw ( css::uno::RuntimeException);
@@ -111,8 +112,7 @@ public:
 	virtual css::uno::Any SAL_CALL getCellRange(  ) throw (css::uno::RuntimeException);
 	virtual void SAL_CALL PasteSpecial( sal_Int16 Paste, sal_Int16 Operation, ::sal_Bool SkipBlanks, ::sal_Bool Transpose ) throw (css::uno::RuntimeException);
 	virtual ::sal_Bool SAL_CALL Replace( const ::rtl::OUString& What, const ::rtl::OUString& Replacement, const css::uno::Any& LookAt, const css::uno::Any& SearchOrder, const css::uno::Any& MatchCase, const css::uno::Any& MatchByte ) throw (css::uno::RuntimeException);
-	virtual void SAL_CALL Sort( const css::uno::Any& Key1, ::sal_Int16 Order1, const css::uno::Any& Key2, const css::uno::Any& Type, ::sal_Int16 Order2, const css::uno::Any& Key3, ::sal_Int16 Order3, ::sal_Int16 header, const css::uno::Any& OrderCustom, const css::uno::Any& MatchCase, ::sal_Int16 Orientation, ::sal_Int16 SortMethod ) throw (css::uno::RuntimeException);
-
+	virtual void SAL_CALL Sort( const css::uno::Any& Key1, const css::uno::Any& Order1, const css::uno::Any& Key2, const css::uno::Any& Type, const css::uno::Any& Order2, const css::uno::Any& Key3, const css::uno::Any& Order3, const css::uno::Any& Header, const css::uno::Any& OrderCustom, const css::uno::Any& MatchCase, const css::uno::Any& Orientation, const css::uno::Any& SortMethod ) throw (css::uno::RuntimeException);
 	// XPropertySet
 
 	virtual css::uno::Reference< css::beans::XPropertySetInfo > SAL_CALL getPropertySetInfo(  ) throw (css::uno::RuntimeException);  
