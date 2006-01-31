@@ -21,6 +21,7 @@
 #include <com/sun/star/table/XCellCursor.hpp>
 #include <com/sun/star/table/XTableRows.hpp>
 #include <com/sun/star/table/XTableColumns.hpp>
+#include <com/sun/star/table/TableSortField.hpp>
 #include <com/sun/star/util/XMergeable.hpp>
 #include <com/sun/star/uno/XComponentContext.hpp>
 #include <com/sun/star/lang/XMultiComponentFactory.hpp>
@@ -30,6 +31,7 @@
 #include <com/sun/star/util/NumberFormat.hpp>
 #include <com/sun/star/util/XNumberFormatTypes.hpp>
 #include <com/sun/star/util/XReplaceable.hpp>
+#include <com/sun/star/util/XSortable.hpp>
 #include <com/sun/star/sheet/XCellRangeMovement.hpp>
 #include <com/sun/star/sheet/XCellRangeData.hpp>
 
@@ -39,6 +41,10 @@
 #include <org/openoffice/vba/Excel/XlFindLookIn.hpp>
 #include <org/openoffice/vba/Excel/XlLookAt.hpp>
 #include <org/openoffice/vba/Excel/XlSearchOrder.hpp>
+#include <org/openoffice/vba/Excel/XlSortOrder.hpp>
+#include <org/openoffice/vba/Excel/XlYesNoGuess.hpp>
+#include <org/openoffice/vba/Excel/XlSortOrientation.hpp>
+#include <org/openoffice/vba/Excel/XlSortMethod.hpp>
 
 #include "vbarange.hxx"
 #include "vbafont.hxx"
@@ -1208,9 +1214,192 @@ ScVbaRange::Replace( const ::rtl::OUString& What, const ::rtl::OUString& Replace
 	return sal_True; // always
 }
 
-void SAL_CALL
-ScVbaRange::Sort( const uno::Any& Key1, ::sal_Int16 Order1, const uno::Any& Key2, const uno::Any& Type, ::sal_Int16 Order2, const uno::Any& Key3, ::sal_Int16 Order3, ::sal_Int16 header, const uno::Any& OrderCustom, const uno::Any& MatchCase, ::sal_Int16 Orientation, ::sal_Int16 SortMethod ) throw (uno::RuntimeException)
+uno::Reference< table::XCellRange > 
+ScVbaRange::getCellRangeForName(  const rtl::OUString& sRangeName, const uno::Reference< sheet::XSpreadsheet >& xDoc  )
 {
+	uno::Reference< table::XCellRange > xRanges( xDoc, uno::UNO_QUERY_THROW );
+	uno::Reference< table::XCellRange > xRange = xRanges->getCellRangeByName( sRangeName );
+	return xRange;	
+}
+
+uno::Reference< table::XCellRange > processKey( const uno::Any& Key, uno::Reference< table::XCellRange >& xRange )
+{
+	uno::Reference< table::XCellRange > xKey;
+	if ( Key.getValueType() == vba::XRange::static_type() )
+	{
+		uno::Reference< vba::XRange > xRange( Key, uno::UNO_QUERY_THROW );
+		xKey.set( xRange->getCellRange(), uno::UNO_QUERY_THROW );
+	}
+	else if ( Key.getValueType() == ::getCppuType( static_cast< const rtl::OUString* >(0) )  )
+			
+	{
+		rtl::OUString sRangeName = ::comphelper::getString( Key );
+		RangeHelper dRange( xRange );
+		xKey = ScVbaRange::getCellRangeForName( sRangeName,  dRange.getSpreadSheet() );
+	}
+	else
+		throw uno::RuntimeException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM("Range::Sort illegal type value for key param")), uno::Reference< uno::XInterface >() );
+	return xKey;
+}
+
+sal_Int32 findSortPropertyIndex( const uno::Sequence< beans::PropertyValue >& props,
+const rtl::OUString& sPropName ) throw( uno::RuntimeException )
+{
+	const beans::PropertyValue* pProp = props.getConstArray();
+	sal_Int32 nItems = props.getLength();
+
+	 sal_Int32 count=0;
+	for ( ; count < nItems; ++count, ++pProp )
+		if ( pProp->Name.equals( sPropName ) )
+			return count;
+	if ( count == nItems )
+		throw uno::RuntimeException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM("Range::Sort unknown sort property")), uno::Reference< uno::XInterface >() );
+	return -1; //should never reach here ( satisfy compiler )
+}
+
+void updateTableSortField( const uno::Reference< table::XCellRange >& xParentRange,
+	const uno::Reference< table::XCellRange >& xColRowKey, sal_Int16 nOrder, 
+	table::TableSortField& aTableField, sal_Bool bIsSortColumn, sal_Bool bMatchCase ) throw ( uno::RuntimeException )
+{
+		RangeHelper parentRange( xParentRange );	
+		RangeHelper colRowRange( xColRowKey );	
+
+		table::CellRangeAddress parentRangeAddress = parentRange.getCellRangeAddressable()->getRangeAddress();
+
+		table::CellRangeAddress colRowKeyAddress = colRowRange.getCellRangeAddressable()->getRangeAddress();
+
+		// make sure that upper left poing of key range is within the
+		// parent range
+		if (  colRowKeyAddress.StartColumn >= parentRangeAddress.StartColumn &&
+			colRowKeyAddress.StartColumn <= parentRangeAddress.EndColumn  &&
+			colRowKeyAddress.StartRow >= parentRangeAddress.StartRow &&
+			colRowKeyAddress.StartRow <= parentRangeAddress.EndRow  )
+		{
+			//determine col/row index
+			if ( bIsSortColumn )
+				aTableField.Field = colRowKeyAddress.StartRow;			 
+			else
+				aTableField.Field = colRowKeyAddress.StartColumn;			 
+			aTableField.IsCaseSensitive = bMatchCase;
+
+			if ( nOrder ==  vba::Excel::XlSortOrder::xlAscending ) 
+				aTableField.IsAscending = sal_True; 
+			else	
+				aTableField.IsAscending = sal_False; 
+		}
+		else
+			throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Illegal Key param" ) ), uno::Reference< uno::XInterface >() );
+
+						
+} 
+void SAL_CALL
+ScVbaRange::Sort( const uno::Any& Key1, const uno::Any& Order1, const uno::Any& Key2, const uno::Any& Type, const uno::Any& Order2, const uno::Any& Key3, const uno::Any& Order3, const uno::Any& Header, const uno::Any& OrderCustom, const uno::Any& MatchCase, const uno::Any& Orientation, const uno::Any& SortMethod ) throw (uno::RuntimeException)
+{
+	// need to refactor this into IsSingleCell() method
+	uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, uno::UNO_QUERY_THROW );
+	sal_Int32 nRowCount = xColumnRowRange->getRows()->getCount();
+	sal_Int32 nColCount = xColumnRowRange->getColumns()->getCount();
+
+	if (  nRowCount && nColCount )
+	{
+		uno::Reference< vba::XRange > xCurrent = CurrentRegion();
+		xCurrent->Sort( Key1, Order1, Key2, Type, Order2, Key3, Order3, Header, OrderCustom, MatchCase, Orientation, SortMethod );
+		return; 
+	}
+	// set up defaults
+	sal_Int16 defaultOrder = vba::Excel::XlSortOrder::xlAscending;
+
+	sal_Int16 nOrder1 = defaultOrder;
+	sal_Int16 nOrder2 = defaultOrder;
+	sal_Int16 nOrder3 = defaultOrder;
+
+	sal_Int16 nSortMethod = vba::Excel::XlSortMethod::xlPinYin;
+
+	sal_Bool bMatchCase = sal_False;
+
+
+	sal_Bool bContainsHeader = sal_False;
+	// #FIXME ignoring XlYesNoGuess::xlGuess
+	if ( Header.hasValue() )
+	{
+		sal_Int16 nHeader = ::comphelper::getINT16( Header );
+		if ( nHeader == vba::Excel::XlYesNoGuess::xlYes )
+			bContainsHeader = sal_True;
+	}
+			
+	sal_Bool bIsSortColumns=sal_False; // sort by row
+	if ( Orientation.hasValue() )
+	{
+		// Documentation says xlSortRows is default but that doesn't appear to be 
+		// the case. Also it appears that xlSortColumns is the default which 
+		// strangely enought sorts by Row
+		sal_Int16 nOrientation = ::comphelper::getINT16( Orientation );
+		if ( nOrientation == vba::Excel::XlSortOrientation::xlSortRows )
+			bIsSortColumns = sal_True;
+	}
+
+	if ( SortMethod.hasValue() )
+	{
+		nSortMethod = ::comphelper::getINT16( SortMethod );
+	}
+
+	if ( MatchCase.hasValue() )
+		MatchCase >>= bMatchCase;
+
+	if ( Order1.hasValue() )
+		nOrder1 = ::comphelper::getINT16(Order1);
+	if ( Order2.hasValue() )
+		nOrder2 = ::comphelper::getINT16(Order2);
+	if ( Order3.hasValue() )
+		nOrder3 = ::comphelper::getINT16(Order3);
+
+	uno::Reference< table::XCellRange > xKey1;	
+	uno::Reference< table::XCellRange > xKey2;	
+	uno::Reference< table::XCellRange > xKey3;	
+
+	xKey1 = processKey( Key1, mxRange );
+	if ( !xKey1.is() )
+		throw uno::RuntimeException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM("Range::Sort needs a key1 param")), uno::Reference< uno::XInterface >() );
+
+	if ( Key2.hasValue() )
+		xKey2 = processKey( Key2, mxRange );
+	if ( Key3.hasValue() )
+		xKey3 = processKey( Key3, mxRange );
+
+	uno::Reference< util::XSortable > xSort( mxRange, uno::UNO_QUERY_THROW );
+	uno::Sequence< beans::PropertyValue > sortDescriptor = xSort->createSortDescriptor();
+	sal_Int32 nTableSortFieldIndex = findSortPropertyIndex( sortDescriptor, rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("SortFields") ) );
+
+	uno::Sequence< table::TableSortField > sTableFields(1);
+	sal_Int32 nTableIndex = 0;
+	updateTableSortField(  mxRange, xKey1, nOrder1, sTableFields[ nTableIndex++ ], bIsSortColumns, bMatchCase );
+
+	if ( xKey2.is() ) 
+	{
+		sTableFields.realloc( sTableFields.getLength() + 1 );
+		updateTableSortField(  mxRange, xKey2, nOrder2, sTableFields[ nTableIndex++ ], bIsSortColumns, bMatchCase );
+	}
+	if ( xKey3.is()  ) 
+	{
+		sTableFields.realloc( sTableFields.getLength() + 1 );
+		updateTableSortField(  mxRange, xKey3, nOrder3, sTableFields[ nTableIndex++ ], bIsSortColumns, bMatchCase );
+	}
+	sortDescriptor[ nTableSortFieldIndex ].Value <<= sTableFields;
+
+	sal_Int32 nIndex = 	findSortPropertyIndex( sortDescriptor,  rtl::OUString(RTL_CONSTASCII_USTRINGPARAM("IsSortColumns")) );
+	sortDescriptor[ nIndex ].Value <<= bIsSortColumns;
+
+	nIndex = 	findSortPropertyIndex( sortDescriptor,  rtl::OUString(RTL_CONSTASCII_USTRINGPARAM("ContainsHeader")) );
+	sortDescriptor[ nIndex ].Value <<= bContainsHeader;
+
+	xSort->sort( sortDescriptor );
+
+	// #FIXME #TODO
+	// The SortMethod param is not processed ( not sure what its all about, need to
+	// research further )
+	// Header param XlYesNoGuess::xlGuess is not processed ( need to figure out how 
+	// to determine if headers are in the range )
+
 }
 
 //XElementAccess
