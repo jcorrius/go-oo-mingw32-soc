@@ -26,10 +26,11 @@
  ************************************************************************/
 
 
-#include <numeric/type.hxx>
-#include <numeric/lpbase.hxx>
-#include <numeric/lpmodel.hxx>
-#include <numeric/lpsimplex.hxx>
+#include "numeric/type.hxx"
+#include "numeric/lpbase.hxx"
+#include "numeric/lpmodel.hxx"
+#include "numeric/lpsimplex.hxx"
+#include "global.hxx"
 #include <iostream>
 #include <vector>
 #include <memory>
@@ -45,6 +46,15 @@ void printTitle( const char* title )
 	cout << line << endl;
 	cout << title << endl;
 	cout << line << endl;
+}
+
+std::vector<double> toVector( const double* array, const int size )
+{
+	std::vector<double> vec;
+	vec.reserve( size );
+	for ( int i = 0; i < size; ++i )
+		vec.push_back( array[i] );
+	return vec;
 }
 
 void testCase1()
@@ -259,34 +269,83 @@ void testCaseNiklas()
 	p->setPrecision( 2 );
 	
 	auto_ptr<BaseAlgorithm> algo1( new RevisedSimplex );
-	auto_ptr<BaseAlgorithm> algo2( new BoundedRevisedSimplex );
 	p->solve( algo1 );
-	p->solve( algo2 );
 }
 
 void testCaseLudovic()
 {
 	printTitle( "Test Case from Ludovic" );
 	auto_ptr<Model> pModel( new Model );
-    //Objective: 0.3715x_1 + 0.929x_2 + 0.011x_3 + 77.5328x_4 + 74.9694x_5 + 72.1143x_6 + 81.0941x_7 + 81.0941x_8 + 70.5025x_9 + 20.0049x_10 + 74.7238x_11 - 0.625x_12 + 0.27875x_15 + 0.187x_16 + 0.187x_17 + 0.00825x_18 + 0.011x_19 + 0.02563x_20 + 0.09x_21 + 0.05345x_22  (min)
-	double fCosts[] = {
-		0.3715, 0.929, 0.011, 77.5328, 74.9694, 72.1143, 81.0941, 81.0941, 70.5025, 20.0049,
-		74.7238, 0.625, 0, 0, 0.27875, 0.187, 0.187, 0.00825, 0.011, 0.02563,
-		0.09, 0.05345 
+
+	const double fCosts[] = {
+		0.3715, 0.929, 0.011, 77.5328, 74.9694, 72.1143, 81.0941, 81.0941,
+		70.5025, 20.0049, 74.7238, 0.625, 0, 0, 0.27875, 0.187, 0.187, 
+		0.00825, 0.011, 0.02563, 0.09, 0.05345
 	};
-	//pModel->setCostVector( fCosts );
+	
+	struct bounds
+	{
+		double lower;
+		double upper;
+	};
+	
+	const struct bounds Bounds[] = {
+		{ 0, 99999 },
+		{ 0, 99999 },
+		{ 0, 99999 },
+		{ 7675, 9210 },
+		{ 7675, 7675 },
+		{ 16885, 18420 },
+		{ 1535, 3070 },
+		{ 0, 0 },
+		{ 7675, 9210 },
+		{ 1918.75, 1918.75 },
+		{ 4605, 6140 },
+		{ 75, 100 },
+		{ 150, 250 },
+		{ 0, 100 },
+		{ 0, 150 },
+		{ 0, 550 },
+		{ 75, 75 },
+		{ 0, 99999 },
+		{ 2500, 99999 },
+		{ 1000, 2500 },
+		{ 0, 99999 },
+		{ 0, 99999 }
+	};
+
+	std::vector<double> cnCosts = toVector( fCosts, 22 );
+	pModel->setCostVector( cnCosts );
+	
+	for ( size_t i = 0; i < 22; ++i )
+	{
+		pModel->setVarBound( i, BOUND_LOWER, Bounds[i].lower );
+		pModel->setVarBound( i, BOUND_UPPER, Bounds[i].upper );
+	}
+	
+	const double fConst[] = {
+		25, 25, 1, 1535, 1535, 1535, 1535, 1535, 1535, 384, 1535,
+		25, 25, 25, 25, 25, 25, 25
+	};
+	std::vector<double> cnConst = toVector( fConst, 18 );
+	pModel->addConstraint( cnConst, GREATER_THAN_EQUAL, 65500 );
+	pModel->addConstraint( cnConst, LESS_THAN_EQUAL,    70000 );
+
+	pModel->print();
+	
+	auto_ptr<BaseAlgorithm> algo( new BoundedRevisedSimplex );
+	pModel->solve( algo );
 }
 
 int main( int argc, char** argv )
 {
-	//testCase1();
-	//testCase2();
-	testCase3();
-	//testCaseNiklas();
+// 	testCase1();
+// 	testCase2();
+// 	testCase3();
+	testCaseNiklas();
 
-	//testModel1();
-	//testCaseLudovic();
-
+// 	testModel1();
+	testCaseLudovic();
 
 	return EXIT_SUCCESS;
 }

@@ -60,7 +60,8 @@ public:
 	void print() const;
 
 	::scsolver::numeric::Matrix getCostVector() const;
-	void setCostVectorElement( unsigned long, double );
+	void setCostVectorElement( size_t, double );
+	void setCostVector( const std::vector<double>& );
 
 	double   getVarBound( unsigned long, Bound ) const;
 	void     setVarBound( unsigned long, Bound, double );

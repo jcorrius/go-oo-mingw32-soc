@@ -136,12 +136,12 @@ void baseTest()
 
 	shared_ptr<Matrix> p( new Matrix( 3, 3, true ) );
 	for ( int i = 0; i < 8; ++i )
-		p->setValue( 0, i, i );
-	p->setValue( 2, 0, -4.56 );
-	p->setValue( 2, 1, -2.3 );
-	p->setValue( 3, 3, 2.34 );
-	p->setValue( 5, 5, 567 );
-	p->setValue( 5, 7, 13.4 );
+		p->operator()( 0, i ) = i;
+	p->operator()( 2, 0 ) = -4.56;
+	p->operator()( 2, 1 ) = -2.3;
+	p->operator()( 3, 3 ) = 2.34;
+	p->operator()( 5, 5 ) = 567;
+	p->operator()( 5, 7 ) = 13.4;
 	p->print();
 	cout << endl;
 	p->deleteColumns( aCols );
@@ -152,8 +152,8 @@ void baseTest()
 	cout << endl;
 
 	Matrix m1( 4, 3, true ), m2( 3, 3, true );
-	m1.setValue( 2, 2, 10 );
-	m2.setValue( 2, 2, 2.5 );
+	m1( 2, 2 ) = 10;
+	m2( 2, 2 ) = 2.5;
 	m1.print();
 	m2.print();
 	
@@ -169,10 +169,10 @@ void baseTest()
 	}
 	
 	m1.clear();
-	m1.setValue( 0, 0, 1.2 );
-	m1.setValue( 0, 1, 3.4 );
-	m1.setValue( 0, 2, 5.0 );
-	m1.setValue( 2, 0, 23.0 );
+	m1( 0, 0 ) = 1.2;
+	m1( 0, 1 ) = 3.4;
+	m1( 0, 2 ) = 5.0;
+	m1( 2, 0 ) = 23.0;
 	cout << "m1" << endl;
 	m1.print();
 	if ( m1.isSquare() )
@@ -180,9 +180,9 @@ void baseTest()
 	cout << endl;
 	
 	m2.clear();
-	m2.setValue( 0, 0, 2.0 );
-	m2.setValue( 1, 0, 2.0 );
-	m2.setValue( 2, 0, 3.0 );
+	m2( 0, 0 ) = 2.0;
+	m2( 1, 0 ) = 2.0;
+	m2( 2, 0 ) = 3.0;
 	cout << "m2" << endl;
 	m2.print();
 	cout << endl;
@@ -193,12 +193,12 @@ void baseTest()
 	cout << endl;
 	
 	m1.clear();
-	m1.setValue( 0, 0, 1.0 );
-	m1.setValue( 1, 0, 2.3 );
-	m1.setValue( 1, 1, 3.4 );
-	m1.setValue( 2, 2, -23 );
-	m1.setValue( 2, 0, 12.0 );
-	m1.setValue( 0, 2, 2.9 );
+	m1( 0, 0 ) = 1.0;
+	m1( 1, 0 ) = 2.3;
+	m1( 1, 1 ) = 3.4;
+	m1( 2, 2 ) = -23;
+	m1( 2, 0 ) = 12.0;
+	m1( 0, 2 ) = 2.9;
 	cout << "m1" << endl;
 	m1.print();
 	

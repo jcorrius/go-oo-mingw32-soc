@@ -1291,7 +1291,8 @@ bool BoundedRevisedSimplexImpl::makeVarCombo( size_t nIdx, size_t nUpper,
 				return true;
 		}
 		
-	if ( !m_pModel->isVarBounded( nIdx, BOUND_LOWER ) && !m_pModel->isVarBounded( nIdx, BOUND_UPPER ) )
+	if ( !m_pModel->isVarBounded( nIdx, BOUND_LOWER ) &&
+		 !m_pModel->isVarBounded( nIdx, BOUND_UPPER ) )
 		if ( makeVarCombo( nIdx + 1, nUpper, aArray ) )
 			return true;
 
@@ -1306,8 +1307,10 @@ bool BoundedRevisedSimplexImpl::isSolutionFeasible( const Matrix& mxX ) const
 	for ( size_t i = 0; i < mxX.rows(); ++i )
 	{
 		double fVal = mxX( i, 0 );
-		if ( ( m_pModel->isVarBounded( i, BOUND_LOWER ) && fVal < m_pModel->getVarBound( i, BOUND_LOWER ) ) ||
-			 ( m_pModel->isVarBounded( i, BOUND_UPPER ) && fVal > m_pModel->getVarBound( i, BOUND_UPPER ) ) )
+		if ( ( m_pModel->isVarBounded( i, BOUND_LOWER ) && 
+			   fVal < m_pModel->getVarBound( i, BOUND_LOWER ) ) ||
+			 ( m_pModel->isVarBounded( i, BOUND_UPPER ) &&
+			   fVal > m_pModel->getVarBound( i, BOUND_UPPER ) ) )
 			return false;
 	}
 
@@ -1317,7 +1320,8 @@ bool BoundedRevisedSimplexImpl::isSolutionFeasible( const Matrix& mxX ) const
 	return true;
 }
 
-const Matrix BoundedRevisedSimplexImpl::solvePriceVector( const vector<size_t>& aBasicVarId,
+const Matrix BoundedRevisedSimplexImpl::solvePriceVector( 
+		const vector<size_t>& aBasicVarId,
 		const Matrix& mxAInv, const Matrix& mxC ) const
 {
 	Matrix c;

@@ -77,7 +77,8 @@ public:
 	void print() const;
 
 	Matrix getCostVector() const { return m_mxCost; }
-	void setCostVectorElement( unsigned long, double );
+	void setCostVectorElement( size_t, double );
+	void setCostVector( const std::vector<double>& );
 
 	AttrBound getVarBoundAttribute( unsigned long, Bound ) const;
 	double    getVarBound( unsigned long, Bound ) const;
@@ -166,10 +167,21 @@ void ModelImpl::swap( ModelImpl& other ) throw()
 	m_mxSolution.swap( other.m_mxSolution );
 }
 
-void ModelImpl::setCostVectorElement( unsigned long nId, double fVal )
+void ModelImpl::setCostVectorElement( size_t nId, double fVal )
 {
 	// Cost vector must be a row vector because the X vector is a column.
 	m_mxCost( 0, nId ) = fVal;
+}
+
+void ModelImpl::setCostVector( const std::vector<double>& cn )
+{
+	std::vector<double>::const_iterator it, 
+		itBeg = cn.begin(), itEnd = cn.end();
+	for ( it = itBeg; it != itEnd; ++it )
+	{
+		size_t nDist = std::distance( itBeg, it );
+		setCostVectorElement( nDist, *it );
+	}
 }
 
 AttrBound ModelImpl::getVarBoundAttribute( unsigned long i, Bound e ) const
@@ -451,7 +463,6 @@ Model::Model( const Model& other ) : m_pImpl( new ModelImpl( *other.m_pImpl.get(
 
 Model::~Model()
 {
-// 	deleteObject( m_pImpl );
 }
 
 void Model::print() const
@@ -464,9 +475,14 @@ Matrix Model::getCostVector() const
 	return m_pImpl->getCostVector();
 }
 
-void Model::setCostVectorElement( unsigned long i, double fVal )
+void Model::setCostVectorElement( size_t i, double fVal )
 {
 	m_pImpl->setCostVectorElement( i, fVal );
+}
+
+void Model::setCostVector( const std::vector<double>& cn )
+{
+	m_pImpl->setCostVector( cn );
 }
 
 /** Beware that the caller is responsible for making sure that the specified 

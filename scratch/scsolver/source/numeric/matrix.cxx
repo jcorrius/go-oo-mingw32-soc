@@ -570,11 +570,13 @@ bnu::matrix< std::string > MatrixImpl::getDisplayElements(
 			}
 			else if ( fVal == -1.0 )
 			{
-				string::size_type nPos = sElem.find_first_of( "-1" );
-				if ( nPos != string::npos )
+				// find "-1"
+				string::size_type nPos = sElem.find_first_of( "-" );
+				string::size_type nPos2 = nPos + 1;
+				if ( nPos != string::npos && nPos2 != string::npos && sElem[nPos2] == '1' )
 				{
-					sElem[nPos++] = ' ';
-					sElem[nPos]   = '-';
+					sElem[nPos]  = ' ';
+					sElem[nPos2] = '-';
 					mxElements( i, j ) = sElem;
 				}
 			}

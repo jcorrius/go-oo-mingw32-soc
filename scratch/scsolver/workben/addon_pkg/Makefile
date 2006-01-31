@@ -11,7 +11,6 @@ build: preprocess
 preprocess:
 	mkdir $(BUILDDIR) >& /dev/null || /bin/true
 	cp Makefile_build $(BUILDDIR)/Makefile
-	cp -R ../../source ./$(SRCDIR)
 
 clean:
 	rm -f *~ $(TARGET)
