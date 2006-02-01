@@ -218,9 +218,9 @@ diff -u -p -u -r1.129 file_ooo.scp
 +
 +.INCLUDE :	target.mk
 
---- /dev/null	2006-01-09 09:20:37.168436500 +0000
-+++ desktop/unx/source/start.c	2006-01-10 18:10:48.000000000 +0000
-@@ -0,0 +1,527 @@
+--- /dev/null	2006-01-22 18:47:27.000000000 +0000
++++ desktop/unx/source/start.c	2006-02-01 15:42:34.000000000 +0000
+@@ -0,0 +1,558 @@
 +#include <signal.h>
 +#include <unistd.h>
 +#include <gtk/gtk.h>
@@ -562,6 +562,30 @@ diff -u -p -u -r1.129 file_ooo.scp
 +		close (cl->clone_fd);
 +}
 +
++static void
++system_checks (void)
++{
++#ifdef LINUX
++		int fd;
++		char *recently_used;
++
++		/* FIXME: force right ownership of ~/.ooo-* as well
++		 * really all that work should be done by OO.o - not here.
++		 */
++
++		/* force right ownership on ~/.recently-used despite umask */
++		recently_used = g_strconcat (g_get_home_dir (), "/.recently-used", NULL);
++		fd = open (recently_used, O_RDWR|O_CREAT, S_IREAD|S_IWRITE);
++		if (fd >= 0)
++				close (fd);
++		g_free (recently_used);
++
++		/* check proc is mounted - lots of things fail otherwise */
++		if (!g_file_test ("/proc/version", G_FILE_TEST_EXISTS))
++				g_warning ("/proc not mounted - OO.o is unlikely to work well if at all");
++#endif
++}
++
 +static gboolean
 +fork_app (const char *app_path, GPtrArray *args, int pipe_fd,
 +		  GIOChannel **status_channel)
@@ -572,6 +596,8 @@ diff -u -p -u -r1.129 file_ooo.scp
 +		char *splash_pipe_arg;
 +		ChildClosure *cl = g_new (ChildClosure, 1);
 +		GIOChannel *status;
++
++		system_checks ();
 +
 +		args->pdata[0] = (gpointer)g_strconcat (app_path, "/soffice", NULL);
 +
@@ -612,6 +638,22 @@ diff -u -p -u -r1.129 file_ooo.scp
 +		return spawn_success;
 +}
 +
++static char *
++convert_path (const char *arg, const char *cwd_str, gboolean not_filename)
++{
++		if (arg[0] == '-' || not_filename)
++				return g_strdup (arg);
++
++		if (strstr (arg, "://")) /* is URI */
++				return g_strdup (arg);
++
++		if (arg[0] == '/') /* absolute path */
++				return g_strdup (arg);
++
++		/* prepend cwd ... */
++		return g_strconcat (cwd_str, "/", arg, NULL);
++}
++
 +static gboolean
 +arg_check (const char *arg, const char *cmp_with)
 +{
@@ -625,17 +667,22 @@ diff -u -p -u -r1.129 file_ooo.scp
 +}
 +
 +static GPtrArray *
-+setup_args (int argc, char **argv, gboolean *inhibit_splash)
++setup_args (int argc, char **argv, const char *cwd_str,
++			gboolean *inhibit_splash)
 +{
 +		int i;
 +		gboolean have_non_option = FALSE;
++		gboolean next_arg_not_filename = FALSE;
 +		GPtrArray *args = g_ptr_array_sized_new (argc + 8);
 +
 +		*inhibit_splash = FALSE;
 +		
 +		for (i = 0; i < argc; i++)
 +		{
-+				if (arg_check (argv[i], "widgets-set")) {
++				char *converted;
++
++				if (arg_check (argv[i], "widgets-set"))
++				{
 +						char *widget_env;
 +						if (i >= argc - 1)
 +								continue;
@@ -644,7 +691,12 @@ diff -u -p -u -r1.129 file_ooo.scp
 +						i++;
 +						continue;
 +				}
-+				g_ptr_array_add (args, g_strdup (argv[i]));
++				if (i)
++						converted = convert_path (argv[i], cwd_str, next_arg_not_filename);
++				else
++						converted = g_strdup (converted);
++				g_ptr_array_add (args, converted);
++
 +				if (!i)
 +						continue;
 +
@@ -655,6 +707,9 @@ diff -u -p -u -r1.129 file_ooo.scp
 +						 arg_check (argv[i], "headless") ||
 +						 arg_check (argv[i], "invisible"))
 +						*inhibit_splash = TRUE;
++
++				else if (arg_check (argv[i], "-pt"))
++						 next_arg_not_filename = TRUE;
 +		}
 +
 +		/* It's necessary to append eg. -writer for writer. */
@@ -669,30 +724,6 @@ diff -u -p -u -r1.129 file_ooo.scp
 +		}
 +
 +		return args;
-+}
-+
-+static void
-+system_checks ()
-+{
-+#ifdef LINUX
-+		int fd;
-+		char *recently_used;
-+
-+		/* FIXME: force right ownership of ~/.ooo-* as well
-+		 * really all that work should be done by OO.o - not here.
-+		 */
-+
-+		/* force right ownership on ~/.recently-used despite umask */
-+		recently_used = g_strconcat (g_get_home_dir (), "/.recently-used", NULL);
-+		fd = open (recently_used, O_RDWR|O_CREAT, S_IREAD|S_IWRITE);
-+		if (fd >= 0)
-+				close (fd);
-+		g_free (recently_used);
-+
-+		/* check proc is mounted - lots of things fail otherwise */
-+		if (!g_file_test ("/proc/version", G_FILE_TEST_EXISTS))
-+				g_warning ("/proc not mounted - OO.o is unlikely to work well if at all");
-+#endif
 +}
 +
 +int main (int argc, char **argv)
@@ -711,7 +742,7 @@ diff -u -p -u -r1.129 file_ooo.scp
 +				g_error ("can't get cwd");
 +		cwd_str[sizeof(cwd_str)-1] = '\0';
 +	
-+		args = setup_args (argc, argv, &inhibit_splash);
++		args = setup_args (argc, argv, cwd_str, &inhibit_splash);
 +
 +		app_path = get_app_path (argv[0]);
 +		if (!app_path)

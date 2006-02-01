@@ -39,7 +39,7 @@ redirect_symbols (bfd *abfd, asection *direct_sec, bfd_byte *contents,
   
   if (dynsymcount + 1 != (long) bfd_section_size (abfd, direct_sec) / 2)
     {
-      fprintf (stderr, ".direct section size mismatch %d != %d\n",
+      fprintf (stderr, ".suse.direct section size mismatch %d != %d\n",
 	       (int) dynsymcount + 1, (int) bfd_section_size (abfd, direct_sec) / 2);
       return 1;
     }
@@ -52,17 +52,17 @@ redirect_symbols (bfd *abfd, asection *direct_sec, bfd_byte *contents,
       sym_name = bfd_asymbol_name (sy[i]);
       if (match_fn (sym_name))
         {
-	  unsigned short entry;
-	  entry = bfd_get_16 (abfd, contents + i * 2);
-/*	  fprintf (stderr, "Masking 0x%x for '%s'\n", entry, sym_name); */
-	  if (entry & DT_DIRECT_VAGUE)
+		  unsigned short entry;
+		  entry = bfd_get_16 (abfd, contents + i * 2);
+/*	      fprintf (stderr, "Masking 0x%x for '%s'\n", entry, sym_name); */
+		  if (entry & DT_DIRECT_VAGUE)
             {
-	      entry &= ~DT_DIRECT_VAGUE;
-	      bfd_put_16 (abfd, entry, contents + i * 2);
-	      removed_count++;
-	    }
-	}
-//      fprintf (stderr, "Symbol '%s'\n", bfd_asymbol_name (sy[i]));
+	          entry &= ~DT_DIRECT_VAGUE;
+	          bfd_put_16 (abfd, entry, contents + i * 2);
+	          removed_count++;
+			}
+		}
+/*      fprintf (stderr, "Symbol '%s'\n", sym_name); */
     }
   free (sy + 1);
 
@@ -127,7 +127,7 @@ main (int argc, char **argv)
       return 0;
     }
 
-  if (!(direct_sec = bfd_get_section_by_name (abfd, ".direct")))
+  if (!(direct_sec = bfd_get_section_by_name (abfd, ".suse.direct")))
   {
     fprintf (stderr, "No direct section\n");
     return 0;
