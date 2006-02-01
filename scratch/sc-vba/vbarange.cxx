@@ -45,6 +45,15 @@
 #include <org/openoffice/vba/Excel/XlYesNoGuess.hpp>
 #include <org/openoffice/vba/Excel/XlSortOrientation.hpp>
 #include <org/openoffice/vba/Excel/XlSortMethod.hpp>
+#include <org/openoffice/vba/Excel//XlDirection.hpp>
+
+#include <sfx2/dispatch.hxx>
+#include <sfx2/app.hxx>
+#include <sfx2/bindings.hxx>
+#include <sfx2/request.hxx>
+#include <sfx2/viewfrm.hxx>
+#include <sfx2/itemwrapper.hxx>
+#include <sc.hrc>
 
 #include "vbarange.hxx"
 #include "vbafont.hxx"
@@ -55,6 +64,7 @@
 #include <comphelper/anytostring.hxx>
 
 #include "global.hxx"
+#include "vbaglobals.hxx"
 #include <vector>
 
 using namespace ::org::openoffice;
@@ -1402,6 +1412,76 @@ ScVbaRange::Sort( const uno::Any& Key1, const uno::Any& Order1, const uno::Any& 
 
 }
 
+uno::Reference< vba::XRange > SAL_CALL 
+ScVbaRange::End( ::sal_Int32 Direction )  throw (css::uno::RuntimeException)
+{
+	// #FIXME #TODO
+	// euch! found my orig implementation sucked, so 
+	// trying this even suckier one ( really need to use/expose code in
+	// around  ScTabView::MoveCursorArea(), thats the bit that calcutes
+	// where the cursor should go ) 
+	// Main problem with this method is the ultra hacky attempt to preserve
+	// the ActiveCell, there should be no need to go to these extreems
+	
+	// Save ActiveCell pos ( to restore later )
+	rtl::OUString sActiveCell =	ScVbaGlobals::getGlobalsImpl(
+                       m_xContext )->getApplication()->getActiveCell()->Address();
+
+	// position current cell upper left of this range
+	Cells( uno::makeAny( ( sal_Int32 )1 ), uno::makeAny( ( sal_Int32 )1 ) )->Select();
+
+	SfxViewFrame* pViewFrame = getCurrentViewFrame();
+	if ( pViewFrame )
+	{
+		SfxAllItemSet aArgs( SFX_APP()->GetPool() );
+		// Hoping this will make sure this slot is called
+		// synchronously
+		SfxBoolItem sfxAsync( SID_ASYNCHRON, sal_False );
+		aArgs.Put( sfxAsync, sfxAsync.Which() );
+		SfxDispatcher* pDispatcher = pViewFrame->GetDispatcher();
+
+		USHORT nSID = 0;
+	
+		switch( Direction )
+		{
+			case vba::Excel::XlDirection::xlDown:
+				nSID = SID_CURSORBLKDOWN;
+				break;
+			case vba::Excel::XlDirection::xlUp:
+				nSID = SID_CURSORBLKUP;
+				break;
+			case vba::Excel::XlDirection::xlToLeft:
+				nSID = SID_CURSORBLKLEFT;
+				break;
+			case vba::Excel::XlDirection::xlToRight:
+				nSID = SID_CURSORBLKRIGHT;
+				break;
+			default:
+				throw uno::RuntimeException( ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ": Invalid ColumnIndex" ) ), uno::Reference< uno::XInterface >() ); 
+		}
+		if ( pDispatcher )
+		{
+			pDispatcher->Execute( nSID, (SfxCallMode)SFX_CALLMODE_SYNCHRON, aArgs );
+		}
+	}
+
+	// result is the ActiveCell		
+	rtl::OUString sMoved =	ScVbaGlobals::getGlobalsImpl(
+                       m_xContext )->getApplication()->getActiveCell()->Address();
+
+	// restore old ActiveCell		
+	uno::Reference< vba::XRange > xOldActiveCell( ScVbaGlobals::getGlobalsImpl(
+		m_xContext )->getActiveSheet()->Range( uno::makeAny( sActiveCell ) ), uno::UNO_QUERY_THROW );
+	xOldActiveCell->Select();
+
+	uno::Reference< vba::XRange > resultCell;
+	resultCell.set( ScVbaGlobals::getGlobalsImpl(
+		m_xContext )->getActiveSheet()->Range( uno::makeAny( sMoved ) ), uno::UNO_QUERY_THROW );
+
+	// return result
+	
+	return resultCell;
+}
 //XElementAccess
 sal_Bool SAL_CALL 
 ScVbaRange::hasElements() throw (uno::RuntimeException)
