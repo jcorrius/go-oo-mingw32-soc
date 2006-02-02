@@ -131,7 +131,7 @@
  
  //=========================================================================
  
-@@ -411,6 +416,112 @@ ULONG SfxPSDateTimeProperty_Impl::Len()
+@@ -411,6 +416,111 @@ ULONG SfxPSDateTimeProperty_Impl::Len()
  
  //=========================================================================
  
@@ -161,16 +161,15 @@
 +{
 +	BitmapEx aBitmap;
 +
-+	if (!GraphicHelper::createThumb_Impl (rThumbnailMetaFile,
-+					      160, /* magic value taken from GraphicHelper::getThumbnailFormatFromGDI_Impl() */
-+					      aBitmap))
++	if (!rThumbnailMetaFile.CreateThumbnail ( 160, /* magic value taken from GraphicHelper::getThumbnailFormatFromGDI_Impl() */
++					          aBitmap))
 +	{
 +	    bHaveBitmap = sal_False;
 +	    nBitmapDataSize = 0;
 +	    return;
 +	}
 +
-+	aMemStream << aBitmap;
++	aBitmap.GetBitmap().Write( aMemStream, FALSE, FALSE );
 +	nBitmapDataSize = aMemStream.Tell ();
 +	bHaveBitmap = sal_True;
 +	//fprintf (stderr, "ThumbnailProperty::constructor wrote %ld bytes for the bitmap\n", (long) nBitmapDataSize);
@@ -280,25 +279,6 @@
  
  void SfxDocumentInfo::DeleteUserData( BOOL bUseAuthor )
  {
---- sfx2/source/doc/graphhelp.hxx	2005-09-07 13:43:17.000000000 -0500
-+++ sfx2/source/doc/graphhelp.hxx	2005-10-25 21:10:11.000000000 -0500
-@@ -52,14 +52,14 @@ class GraphicHelper
- 	static sal_Bool mergeBitmaps_Impl( const BitmapEx& rBmpEx, const BitmapEx& rOverlay,
- 				   const Rectangle& rOverlayRect, BitmapEx& rReturn );
- 
-+public:
-+
- 	static sal_Bool createThumb_Impl( const GDIMetaFile& rMtf,
- 				       sal_uInt32 nMaximumExtent,
- 				       BitmapEx& rBmpEx, 
- 				       const BitmapEx* pOverlay = NULL,
- 				       const Rectangle* pOverlayRect = NULL );
- 
--public:
--
- 	static SvMemoryStream* getFormatStrFromGDI_Impl( const GDIMetaFile* pGDIMeta, sal_uInt32 nFormat );
- 
- 	static void* getEnhMetaFileFromGDI_Impl( const GDIMetaFile* pGDIMeta );
 --- sw/source/core/doc/docnew.cxx	2005-09-08 22:13:48.000000000 -0500
 +++ sw/source/core/doc/docnew.cxx	2005-10-25 22:29:10.000000000 -0500
 @@ -873,7 +873,7 @@ void SwDoc::SetPersist( SfxObjectShell* 
@@ -379,3 +359,268 @@
          rInfo.SavePropertySet( xRootStrg );
      }
  
+--- vcl/source/gdi/gdimtf.cxx	2005-10-19 14:38:32 +02:00
++++ vcl/source/gdi/gdimtf.cxx	2006-02-02 10:51:41 +01:00
+@@ -2364,3 +2364,119 @@ SvStream& GDIMetaFile::Write( SvStream& 
+ 
+ 	return rOStm;
+ }
++
++// ------------------------------------------------------------------------
++
++BOOL GDIMetaFile::CreateThumbnail( sal_uInt32 nMaximumExtent,
++									BitmapEx& rBmpEx, 
++									const BitmapEx* pOverlay,
++									const Rectangle* pOverlayRect )
++{
++	// the implementation is provided by KA
++
++	// initialization seems to be complicated but is used to avoid rounding errors
++	VirtualDevice	aVDev;
++	const Point     aNullPt;
++	const Point     aTLPix( aVDev.LogicToPixel( aNullPt, GetPrefMapMode() ) );
++	const Point     aBRPix( aVDev.LogicToPixel( Point( GetPrefSize().Width() - 1, GetPrefSize().Height() - 1 ), GetPrefMapMode() ) );
++	Size            aDrawSize( aVDev.LogicToPixel( GetPrefSize(), GetPrefMapMode() ) );
++	Size			aSizePix( labs( aBRPix.X() - aTLPix.X() ) + 1, labs( aBRPix.Y() - aTLPix.Y() ) + 1 );
++	Point			aPosPix;
++	
++	if ( !rBmpEx.IsEmpty() )
++		rBmpEx.SetEmpty();
++
++	// determine size that has the same aspect ratio as image size and
++	// fits into the rectangle determined by nMaximumExtent
++	if ( aSizePix.Width() && aSizePix.Height()
++	  && ( aSizePix.Width() > nMaximumExtent || aSizePix.Height() > nMaximumExtent ) )
++	{
++		const Size  aOldSizePix( aSizePix );
++		double      fWH = static_cast< double >( aSizePix.Width() ) / aSizePix.Height();
++
++		if ( fWH <= 1.0 )
++		{
++			aSizePix.Width() = FRound( nMaximumExtent * fWH );
++			aSizePix.Height() = nMaximumExtent;
++		}
++		else
++		{
++			aSizePix.Width() = nMaximumExtent;
++			aSizePix.Height() = FRound(  nMaximumExtent / fWH );
++		}
++		
++		aDrawSize.Width() = FRound( ( static_cast< double >( aDrawSize.Width() ) * aSizePix.Width() ) / aOldSizePix.Width() );
++		aDrawSize.Height() = FRound( ( static_cast< double >( aDrawSize.Height() ) * aSizePix.Height() ) / aOldSizePix.Height() );
++	}
++	
++	Size 		aFullSize;
++	Point		aBackPosPix;
++	Rectangle 	aOverlayRect;
++
++	// calculate addigtional positions and sizes if an overlay image is used
++	if (  pOverlay )
++	{
++		aFullSize = Size( nMaximumExtent, nMaximumExtent );
++		aOverlayRect = Rectangle( aNullPt, aFullSize  );
++		
++		aOverlayRect.Intersection( pOverlayRect ? *pOverlayRect : Rectangle( aNullPt, pOverlay->GetSizePixel() ) );
++ 		
++		if ( !aOverlayRect.IsEmpty() )
++			aBackPosPix = Point( ( nMaximumExtent - aSizePix.Width() ) >> 1, ( nMaximumExtent - aSizePix.Height() ) >> 1 );
++		else
++			pOverlay = NULL;
++	}
++	else
++	{
++		aFullSize = aSizePix;
++		pOverlay = NULL;
++	}
++		
++	// draw image(s) into VDev and get resulting image
++	if ( aVDev.SetOutputSizePixel( aFullSize ) )
++	{
++		// draw metafile into VDev
++		WindStart();
++		Play( &aVDev, aBackPosPix, aDrawSize );
++		
++		// draw overlay if neccessary
++		if ( pOverlay )
++			aVDev.DrawBitmapEx( aOverlayRect.TopLeft(), aOverlayRect.GetSize(), *pOverlay );
++		
++		// get paint bitmap
++		Bitmap aBmp( aVDev.GetBitmap( aNullPt, aVDev.GetOutputSizePixel() ) );
++		
++		// assure that we have a true color image
++		if ( aBmp.GetBitCount() != 24 )
++			aBmp.Convert( BMP_CONVERSION_24BIT );
++			
++		// create resulting mask bitmap with metafile output set to black
++		GDIMetaFile aMonchromeMtf( GetMonochromeMtf( COL_BLACK ) );
++		aVDev.DrawWallpaper( Rectangle( aNullPt, aSizePix ), Wallpaper( Color( COL_WHITE ) ) );
++		aMonchromeMtf.WindStart();
++		aMonchromeMtf.Play( &aVDev, aBackPosPix, aDrawSize );
++		
++		// watch for overlay mask
++		if ( pOverlay  )
++		{
++			Bitmap aOverlayMergeBmp( aVDev.GetBitmap( aOverlayRect.TopLeft(), aOverlayRect.GetSize() ) );
++			
++			// create ANDed resulting mask at overlay area
++			if ( pOverlay->IsTransparent() )
++				aVDev.DrawBitmap( aOverlayRect.TopLeft(), aOverlayRect.GetSize(), pOverlay->GetMask() );
++			else
++			{
++				aVDev.SetLineColor( COL_BLACK );
++				aVDev.SetFillColor( COL_BLACK );
++				aVDev.DrawRect( aOverlayRect);
++			}			
++				
++			aOverlayMergeBmp.CombineSimple( aVDev.GetBitmap( aOverlayRect.TopLeft(), aOverlayRect.GetSize() ), BMP_COMBINE_AND );
++			aVDev.DrawBitmap( aOverlayRect.TopLeft(), aOverlayRect.GetSize(), aOverlayMergeBmp );
++		}
++		
++		rBmpEx = BitmapEx( aBmp, aVDev.GetBitmap( aNullPt, aVDev.GetOutputSizePixel() ) );
++	}
++	
++	return !rBmpEx.IsEmpty();
++}
+--- sd/source/ui/unoidl/unopage.cxx	2006-01-19 14:03:42 +01:00
++++ sd/source/ui/unoidl/unopage.cxx	2006-02-02 13:46:26 +01:00
+@@ -187,7 +187,7 @@ enum WID_PAGE
+ 	WID_PAGE_LEFT, WID_PAGE_RIGHT, WID_PAGE_TOP, WID_PAGE_BOTTOM, WID_PAGE_WIDTH,
+ 	WID_PAGE_HEIGHT, WID_PAGE_EFFECT, WID_PAGE_CHANGE, WID_PAGE_SPEED, WID_PAGE_NUMBER,
+ 	WID_PAGE_ORIENT, WID_PAGE_LAYOUT, WID_PAGE_DURATION, WID_PAGE_LDNAME, WID_PAGE_LDBITMAP,
+-	WID_PAGE_BACK, WID_PAGE_PREVIEW, WID_PAGE_VISIBLE, WID_PAGE_SOUNDFILE, WID_PAGE_BACKFULL,
++	WID_PAGE_BACK, WID_PAGE_PREVIEW, WID_PAGE_PREVIEWBITMAP, WID_PAGE_VISIBLE, WID_PAGE_SOUNDFILE, WID_PAGE_BACKFULL,
+ 	WID_PAGE_BACKVIS, WID_PAGE_BACKOBJVIS, WID_PAGE_USERATTRIBS, WID_PAGE_BOOKMARK, WID_PAGE_ISDARK,
+ 	WID_PAGE_HEADERVISIBLE, WID_PAGE_HEADERTEXT, WID_PAGE_FOOTERVISIBLE, WID_PAGE_FOOTERTEXT,
+ 	WID_PAGE_PAGENUMBERVISIBLE, WID_PAGE_DATETIMEVISIBLE, WID_PAGE_DATETIMEFIXED, 
+@@ -227,6 +227,7 @@ const SfxItemPropertyMap* ImplGetDrawPag
+ 		{ MAP_CHAR_LEN(UNO_NAME_PAGE_SPEED),			WID_PAGE_SPEED,		&::getCppuType((const presentation::AnimationSpeed*)0),	0,	0},
+ 		{ MAP_CHAR_LEN(UNO_NAME_PAGE_WIDTH),			WID_PAGE_WIDTH,		&::getCppuType((const sal_Int32*)0),			0,	0},
+ 		{ MAP_CHAR_LEN(UNO_NAME_PAGE_PREVIEW),			WID_PAGE_PREVIEW,	SEQTYPE(::getCppuType((::com::sun::star::uno::Sequence<sal_Int8>*)0)), ::com::sun::star::beans::PropertyAttribute::READONLY, 0},
++		{ MAP_CHAR_LEN(UNO_NAME_PAGE_PREVIEWBITMAP),	WID_PAGE_PREVIEWBITMAP,	SEQTYPE(::getCppuType((::com::sun::star::uno::Sequence<sal_Int8>*)0)), ::com::sun::star::beans::PropertyAttribute::READONLY, 0},
+ 		{ MAP_CHAR_LEN(UNO_NAME_PAGE_VISIBLE),			WID_PAGE_VISIBLE,	&::getBooleanCppuType(),						0, 0},
+ 		{ MAP_CHAR_LEN(UNO_NAME_OBJ_SOUNDFILE),			WID_PAGE_SOUNDFILE,	&::getCppuType((const OUString*)0),				0, 0},
+ 		{ MAP_CHAR_LEN(sUNO_Prop_IsBackgroundVisible),	WID_PAGE_BACKVIS,	&::getBooleanCppuType(),						0, 0},
+@@ -293,6 +294,7 @@ const SfxItemPropertyMap* ImplGetDrawPag
+ 		{ MAP_CHAR_LEN(UNO_NAME_PAGE_ORIENTATION),		WID_PAGE_ORIENT,	&::getCppuType((const view::PaperOrientation*)0),0,	0},
+ 		{ MAP_CHAR_LEN(UNO_NAME_PAGE_WIDTH),			WID_PAGE_WIDTH,		&::getCppuType((const sal_Int32*)0),			0,	0},
+ 		{ MAP_CHAR_LEN(UNO_NAME_PAGE_PREVIEW),			WID_PAGE_PREVIEW,	SEQTYPE(::getCppuType((::com::sun::star::uno::Sequence<sal_Int8>*)0)), ::com::sun::star::beans::PropertyAttribute::READONLY, 0},
++		{ MAP_CHAR_LEN(UNO_NAME_PAGE_PREVIEWBITMAP),	WID_PAGE_PREVIEWBITMAP,	SEQTYPE(::getCppuType((::com::sun::star::uno::Sequence<sal_Int8>*)0)), ::com::sun::star::beans::PropertyAttribute::READONLY, 0},
+ 		{ MAP_CHAR_LEN(sUNO_Prop_UserDefinedAttributes),WID_PAGE_USERATTRIBS, &::getCppuType((const Reference< ::com::sun::star::container::XNameContainer >*)0)  , 		0,     0},
+ 		{ MAP_CHAR_LEN(sUNO_Prop_BookmarkURL),			WID_PAGE_BOOKMARK,	&::getCppuType((const OUString*)0),				0,	0},
+ 		{ MAP_CHAR_LEN("IsBackgroundDark" ),			WID_PAGE_ISDARK,	&::getBooleanCppuType(),						beans::PropertyAttribute::READONLY, 0},
+@@ -1030,6 +1032,38 @@ Any SAL_CALL SdGenericDrawPage::getPrope
+ 						SvMemoryStream aDestStrm( 65535, 65535 );
+ 						ConvertGDIMetaFileToWMF( *pMetaFile, aDestStrm, NULL, NULL, sal_False );
+ 						uno::Sequence<sal_Int8> aSeq( (sal_Int8*)aDestStrm.GetData(), aDestStrm.Tell() );
++						aAny <<= aSeq;
++						delete pMetaFile;
++					}
++				}
++			}
++		}
++		break;
++
++	case WID_PAGE_PREVIEWBITMAP :
++		{
++			SdDrawDocument* pDoc = (SdDrawDocument*)GetPage()->GetModel();
++			if ( pDoc )
++			{
++				::sd::DrawDocShell* pDocShell = pDoc->GetDocSh();
++				if ( pDocShell )
++				{
++					sal_uInt16 nPgNum = 0;
++					sal_uInt16 nPageCount = pDoc->GetSdPageCount( PK_STANDARD );
++					sal_uInt16 nPageNumber = (sal_uInt16)( ( GetPage()->GetPageNum() - 1 ) >> 1 );
++					while( nPgNum < nPageCount )
++					{
++						pDoc->SetSelected( pDoc->GetSdPage( nPgNum, PK_STANDARD ), nPgNum == nPageNumber );
++						nPgNum++;
++					}
++					GDIMetaFile* pMetaFile = pDocShell->GetPreviewMetaFile();
++					BitmapEx aBitmap;
++					if ( pMetaFile && pMetaFile->CreateThumbnail( 160, /* magic value taken from GraphicHelper::getThumbnailFormatFromGDI_Impl() */
++																  aBitmap ) )
++					{
++						SvMemoryStream aMemStream;
++						aBitmap.GetBitmap().Write( aMemStream, FALSE, FALSE );
++						uno::Sequence<sal_Int8> aSeq( (sal_Int8*)aMemStream.GetData(), aMemStream.Tell() );
+ 						aAny <<= aSeq;
+ 						delete pMetaFile;
+ 					}
+--- sd/source/ui/inc/unoprnms.hxx	2005-09-09 07:59:49 +02:00
++++ sd/source/ui/inc/unoprnms.hxx	2006-01-31 09:44:55 +01:00
+@@ -54,6 +54,7 @@
+ #define UNO_NAME_PAGE_SPEED				"Speed"
+ #define UNO_NAME_PAGE_WIDTH				"Width"
+ #define UNO_NAME_PAGE_PREVIEW			"Preview"
++#define UNO_NAME_PAGE_PREVIEWBITMAP		"PreviewBitmap"
+ #define UNO_NAME_PAGE_VISIBLE			"Visible"
+ 
+ #define UNO_NAME_OBJ_BOOKMARK			"Bookmark"
+--- vcl/inc/gdimtf.hxx	2005-10-19 14:37:57 +02:00
++++ vcl/inc/gdimtf.hxx	2006-02-01 19:30:35 +01:00
+@@ -251,6 +251,8 @@ public:
+ 	// und lesen sowohl das alte wie auch das neue Format
+     friend VCL_DLLPUBLIC SvStream& operator>>( SvStream& rIStm, GDIMetaFile& rGDIMetaFile );
+     friend VCL_DLLPUBLIC SvStream& operator<<( SvStream& rOStm, const GDIMetaFile& rGDIMetaFile );
++
++	BOOL           CreateThumbnail( sal_uInt32 nMaximumExtent, BitmapEx& rBmpEx, const BitmapEx* pOverlay = NULL, const Rectangle* pOverlayRect = NULL );
+ };
+ 
+ #endif // _SV_GDIMTF_HXX
+--- sd/source/filter/eppt/eppt.cxx	2005-09-09 05:18:36 +02:00
++++ sd/source/filter/eppt/eppt.cxx	2006-02-01 18:17:44 +01:00
+@@ -468,23 +468,8 @@ sal_Bool PPTWriter::ImplCreateSummaryInf
+                     }
+                 }
+ 
+-                if ( ImplGetPageByIndex( 0, NORMAL ) && ImplGetPropertyValue( mXPagePropSet, String( RTL_CONSTASCII_USTRINGPARAM( "Preview" ) ) ) )
++                if ( ImplGetPageByIndex( 0, NORMAL ) && ImplGetPropertyValue( mXPagePropSet, String( RTL_CONSTASCII_USTRINGPARAM( "PreviewBitmap" ) ) ) )
+                 {
+-                    sal_uInt16 nWidth = 4233;
+-                    sal_uInt16 nHeight = ( (sal_uInt16)( (double)4233.0 /
+-                                                (double)maDestPageSize.Width *
+-                                                    (double)maDestPageSize.Height ) );
+-                    aPropItem.Clear();
+-                    aPropItem << (UINT32)VT_CF
+-                              << (UINT32)0;
+-
+-                    aPropItem << (sal_uInt32)0xfffffff
+-                              << (sal_uInt32)3
+-                              << (sal_uInt16)8
+-                              << nWidth
+-                              << nHeight
+-                              << (sal_uInt16)0;
+-
+                     ::com::sun::star::uno::Sequence<sal_uInt8> aSeq;
+                     aSeq = *(::com::sun::star::uno::Sequence<sal_uInt8>*)mAny.getValue();
+ 
+@@ -493,15 +478,19 @@ sal_Bool PPTWriter::ImplCreateSummaryInf
+ 
+                     if ( pAry && nAryLen )
+                     {
+-                        if ( nAryLen < 0x20000 )    // we will not generate preview pics greater than 128kb
+-                        {
+-                            aPropItem.Write( pAry, nAryLen );
+-                            sal_uInt32 nSize = aPropItem.Tell() - 8;
+-                            aPropItem.Seek( 4 );
+-                            aPropItem << nSize;
+-                            aPropSet.AddProperty( PID_PREVIEW, aPropItem );
+-                            aDInfo.AddSection( aPropSet );
+-                        }
++						aPropItem.Clear();
++						aPropItem << (sal_uInt32)VT_CF
++								  << (sal_uInt32)0            /* size - filled later */
++								  << (sal_uInt32)0xffffffff   /* windows clipboard format */
++								  << (sal_uInt32)8;           /* CF_DIB data format DIB */
++
++						aPropItem.Write( pAry, nAryLen );
++
++						sal_uInt32 nSize = aPropItem.Tell() - 8;
++						aPropItem.Seek( 4 );
++						aPropItem << nSize;
++						aPropSet.AddProperty( PID_PREVIEW, aPropItem );
++						aDInfo.AddSection( aPropSet );
+                     }
+                 }
+                 aDInfo.Write();
