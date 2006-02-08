@@ -1,4 +1,5 @@
 EXTRA_DIST=\
+	Draft.jpg \
 	openintro_redhat.bmp \
 	openabout_redhat.png \
 	openintro_suse.bmp \
