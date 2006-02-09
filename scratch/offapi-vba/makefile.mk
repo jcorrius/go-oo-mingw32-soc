@@ -46,7 +46,8 @@ IDLFILES=\
 	XPivotTables.idl \
 	XPivotTable.idl \
 	XPivotCache.idl \
-	XDialogs.idl 
+	XDialogs.idl \
+	XWindows.idl 
 
 # ------------------------------------------------------------------
 
