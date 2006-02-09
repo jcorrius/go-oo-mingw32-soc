@@ -71,6 +71,7 @@ private:
 	Matrix m_aX;
 	size_t m_nIter;
 
+	Model m_Model;
 	Matrix m_A, m_B, m_C;
 	std::vector<bool> m_aBasicVar;
 	std::vector<size_t> m_aBasicVarId;
@@ -80,6 +81,7 @@ private:
 
 	Model* getModel() const { return m_pSelf->getModel(); }
 
+	void convertVarRange( Model& ) const;
 	void runNormalInitSearch();
 	void runTwoPhaseInitSearch( const std::vector<size_t>& );
 	void printIterateHeader() const;
@@ -100,6 +102,60 @@ RevisedSimplexImpl::~RevisedSimplexImpl()
 {
 }
 
+/**
+ * Convert variable ranges into a constrant matrix.  Also
+ * extracts those variables with identical upper and lower
+ * ranges into equality constraints, which are ultimately 
+ * treated as constant values.
+ * 
+ * @param aModel
+ */
+void RevisedSimplexImpl::convertVarRange( Model& aModel ) const
+{
+	size_t nColSize = aModel.getCostVector().cols();
+	for ( size_t i = 0; i < nColSize; ++i )
+	{
+		double fLBound = 0.0, fUBound = 0.0;
+		bool bLBound = false, bUBound = false;
+		if ( aModel.isVarBounded( i, BOUND_LOWER ) )
+		{
+			fLBound = aModel.getVarBound( i, BOUND_LOWER );
+			cout << i << " lower bound: " << fLBound << endl;
+			bLBound = true;
+		}
+
+		if ( aModel.isVarBounded( i, BOUND_UPPER ) )
+		{
+			fUBound = aModel.getVarBound( i, BOUND_UPPER );
+			cout << i << " upper bound: " << fUBound << endl;
+			bUBound = true;
+		}
+
+		if ( bLBound && bUBound && fLBound == fUBound )
+		{
+			cout << "  (equal)" << endl;
+			// TODO: This variable is constant-equivalent.  
+			// Remove it from the temporary model.
+		}
+		else
+		{
+			if ( bLBound )
+			{
+				vector<double> v( nColSize );
+				v.at( i ) = 1.0;
+				aModel.addConstraint( v, GREATER_THAN_EQUAL, fLBound );
+			}
+
+			if ( bUBound )
+			{
+				vector<double> v( nColSize );
+				v.at( i ) = 1.0;
+				aModel.addConstraint( v, LESS_THAN_EQUAL, fUBound );
+			}
+		}
+	}
+}
+
 Matrix RevisedSimplexImpl::solve()
 {
 	//-------------------------------------------------------------------------
@@ -112,15 +168,16 @@ Matrix RevisedSimplexImpl::solve()
 	//     A = expanded constraint matrix
 	//     B = right hand side vector
 	//     C = expanded cost vector
-	
-	Model* pModel = getModel();
-	Matrix A( pModel->getConstraintMatrix() );
-	Matrix B( pModel->getRhsVector() );
-	Matrix C( pModel->getCostVector() );
+
+	Model aModel( *getModel() );
+	//convertVarRange( aModel );
+	Matrix A( aModel.getConstraintMatrix() );
+	Matrix B( aModel.getRhsVector() );
+	Matrix C( aModel.getCostVector() );
 
 	for ( size_t i = 0; i < A.rows(); ++i )
 	{
-		Equality eEq = pModel->getEqualityByRowId( i );
+		Equality eEq = aModel.getEqualityByRowId( i );
 		switch( eEq )
 		{
 		case LESS_THAN_EQUAL:
@@ -136,9 +193,9 @@ Matrix RevisedSimplexImpl::solve()
 			C( 0, C.cols() ) = 0;
 	}
 
-	if ( !pModel->getVarPositive() )
+	if ( !aModel.getVarPositive() )
 	{
-		if ( pModel->getVerbose() )
+		if ( aModel.getVerbose() )
 			cout << "non-positive variables are not yet supported" << endl;
 		throw ModelInfeasible();
 	}
@@ -202,7 +259,7 @@ Matrix RevisedSimplexImpl::solve()
 		}
 	}
 
-	if ( pModel->getVerbose() )
+	if ( aModel.getVerbose() )
 	{
 		cout << "A:" << endl;
 		A.print( 0 );
@@ -222,6 +279,7 @@ Matrix RevisedSimplexImpl::solve()
 	
 	m_aBasicVar = aBasicVar;
 
+	m_Model = aModel;
 	m_A = A;
 	m_B = B;
 	m_C = C;
@@ -246,13 +304,13 @@ Matrix RevisedSimplexImpl::solve()
 	m_nIter = 0;
 	while ( !iterate() );
 
-	Matrix aCost = pModel->getCostVector();
+	Matrix aCost = m_Model.getCostVector();
 	Matrix solution( aCost.cols(), 1 );
 	solution.setResizable( false );
 	for ( size_t i = 0; i < aCost.cols(); ++i )
 		solution( i, 0 ) = m_aX( i, 0 );
 	
-	if ( pModel->getVerbose() )
+	if ( m_Model.getVerbose() )
 	{
 		cout << "x = ";
 		solution.trans().print();	
@@ -269,8 +327,7 @@ Matrix RevisedSimplexImpl::solve()
 void RevisedSimplexImpl::runNormalInitSearch()
 {
 	// Two phase method NOT necessary
-	Model* pModel = getModel();
-	if ( pModel->getVerbose() )
+	if ( m_Model.getVerbose() )
 		Debug( "two phase method NOT necessary" );
 	
 	Matrix ABasic( m_A );
@@ -280,7 +337,7 @@ void RevisedSimplexImpl::runNormalInitSearch()
 		if ( !*pos )
 			aNonBasicVarId.push_back( distance( m_aBasicVar.begin(), pos ) );
 	
-	if ( pModel->getVerbose() )
+	if ( m_Model.getVerbose() )
 	{
 		cout << "aNonBasicVarId: ";
 		printElements( aNonBasicVarId );
@@ -318,8 +375,7 @@ void RevisedSimplexImpl::runTwoPhaseInitSearch( const vector<size_t>& aNonSatRow
 {
 	static const bool bDebugTwoPhase = true;
 
-	Model* pModel = getModel();
-	if ( pModel->getVerbose() )
+	if ( m_Model.getVerbose() )
 		Debug( "Entering a two-phase search for initial solution" );
 
 	Matrix A2( m_A );
@@ -408,7 +464,7 @@ void RevisedSimplexImpl::runTwoPhaseInitSearch( const vector<size_t>& aNonSatRow
 	m_aX = X;
 	m_aBasicInv = aBasicInv;
 	
-	if ( pModel->getVerbose() )
+	if ( m_Model.getVerbose() )
 		Debug( "Two-phase search found an initial solution" );
 }
 
@@ -426,7 +482,7 @@ void RevisedSimplexImpl::printIterateHeader() const
 	cout << endl;
 	
 	cout << "x(" << m_nIter << ") = ";
-	m_aX.trans().print( getModel()->getPrecision() );
+	m_aX.trans().print( m_Model.getPrecision() );
 	cout << "cx = " << (m_C*m_aX).operator()( 0, 0 ) << endl;
 	cout << line << endl;
 	
@@ -443,7 +499,7 @@ void RevisedSimplexImpl::printIterateHeader() const
 
 bool RevisedSimplexImpl::iterate()
 {
-	bool bVerbose = getModel()->getVerbose();
+	bool bVerbose = m_Model.getVerbose();
 	if ( bVerbose )
 		printIterateHeader();
 
@@ -492,7 +548,7 @@ bool RevisedSimplexImpl::iterate()
 		}			
 	}
 	
-	Goal eGoal = getModel()->getGoal();
+	Goal eGoal = m_Model.getGoal();
 	if ( ( eGoal == GOAL_MAXIMIZE && fMax <= 0.0 ) ||
 		 ( eGoal == GOAL_MINIMIZE && fMin >= 0.0 ) )
 	{
@@ -527,7 +583,7 @@ bool RevisedSimplexImpl::iterate()
 	if ( bVerbose )
 	{
 		cout << "dX[" << nEnterVarId << "] = ";
-		dX.trans().print( getModel()->getPrecision() );
+		dX.trans().print( m_Model.getPrecision() );
 	}
 
 	// Check all components of dX to make sure there is at least one negative 

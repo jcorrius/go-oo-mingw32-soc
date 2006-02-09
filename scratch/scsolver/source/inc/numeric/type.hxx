@@ -33,9 +33,15 @@ namespace scsolver { namespace numeric { namespace opres {
 
 enum Equality
 {
-	GREATER_THAN_EQUAL,		// >=
-	EQUAL,					// =
-	LESS_THAN_EQUAL			// <=
+	/** [constraint] >= [rhs]
+	 */
+	GREATER_THAN_EQUAL,
+	/** [constraint] = [rhs]
+	 */
+	EQUAL,
+	/** [constraint] <= [rhs]
+	 */
+	LESS_THAN_EQUAL
 };
 
 enum Bound

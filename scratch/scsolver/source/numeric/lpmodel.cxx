@@ -470,6 +470,11 @@ void Model::print() const
 	m_pImpl->print();
 }
 
+/** get a matrix representing a cost vector.  Note that
+ * a cost vector is a row matrix i.e. it only has one row.
+ * 
+ * @return row matrix representing a cost vector
+ */
 Matrix Model::getCostVector() const
 {
 	return m_pImpl->getCostVector();

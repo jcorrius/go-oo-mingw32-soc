@@ -90,7 +90,7 @@ Sequence< rtl::OUString > SolverImpl::getSupportedServiceNames()
 {
     return getSupportedServiceNames_SolverImpl();
 }
-   
+
 Reference< frame::XDispatch > SAL_CALL SolverImpl::queryDispatch(
     const util::URL& aURL, const ::rtl::OUString& sTargetFrameName, sal_Int32 nSearchFlags )
     throw ( RuntimeException )
@@ -270,7 +270,7 @@ extern "C"
         return ::cppu::component_writeInfoHelper(
             xMgr, xRegistry, ::scsolver::s_component_entries );
     }
-    
+
     void SAL_DLLPUBLIC_EXPORT *component_getFactory(
         sal_Char const * implName, lang::XMultiServiceFactory * xMgr,
         registry::XRegistryKey * xRegistry )

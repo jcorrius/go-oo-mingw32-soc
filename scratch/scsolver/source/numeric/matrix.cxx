@@ -1270,6 +1270,14 @@ Matrix& Matrix::operator/=( double f )
 	return *this;
 }
 
+/**
+ * read-only access to the element specified by row and column IDs.
+ * 
+ * @param nRowId row ID
+ * @param nColId column ID
+ * 
+ * @return element value
+ */
 const double Matrix::operator()( size_t nRowId, size_t nColId ) const
 {
 	return m_pImpl->operator()( nRowId, nColId );

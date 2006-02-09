@@ -288,7 +288,7 @@ void testCaseLudovic()
 		double lower;
 		double upper;
 	};
-	
+
 	const struct bounds Bounds[] = {
 		{ 0, 99999 },
 		{ 0, 99999 },
@@ -333,7 +333,8 @@ void testCaseLudovic()
 
 	pModel->print();
 	
-	auto_ptr<BaseAlgorithm> algo( new BoundedRevisedSimplex );
+	//auto_ptr<BaseAlgorithm> algo( new BoundedRevisedSimplex );
+    auto_ptr<BaseAlgorithm> algo( new RevisedSimplex );
 	pModel->solve( algo );
 }
 
