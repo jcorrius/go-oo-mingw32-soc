@@ -157,7 +157,7 @@ org::openoffice::implnPaste()
 void
 org::openoffice::implnCopy()
 {
-	ScTabViewShell* pViewShell = ScTabViewShell::GetActiveViewShell();
+	ScTabViewShell* pViewShell = getCurrentBestViewShell();
 	if ( pViewShell )
 		pViewShell->CopyToClip(NULL,false,false,true);
 }
@@ -165,7 +165,7 @@ org::openoffice::implnCopy()
 void 
 org::openoffice::implnCut()
 {
-	ScTabViewShell* pViewShell = ScTabViewShell::GetActiveViewShell();
+	ScTabViewShell* pViewShell =  getCurrentBestViewShell();
 	if ( pViewShell )
 		pViewShell->CutToClip( NULL, TRUE );
 }
@@ -177,6 +177,9 @@ void org::openoffice::implnPasteSpecial(USHORT nFlags,USHORT nFunction,sal_Bool 
 	InsCellCmd eMoveMode = INS_NONE;
 
 	ScTabViewShell* pTabViewShell = ScTabViewShell::GetActiveViewShell();
+	if ( !pTabViewShell ) 
+		// none active, try next best
+		pTabViewShell = getCurrentBestViewShell();
 	if ( pTabViewShell )
 	{
 		ScViewData* pView = pTabViewShell->GetViewData();	

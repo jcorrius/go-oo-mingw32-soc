@@ -60,7 +60,7 @@ public:
     // Methods
 	virtual void SAL_CALL Activate() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL Select() throw (css::uno::RuntimeException);
-	virtual css::uno::Reference< oo::vba::XRange > SAL_CALL Range( const css::uno::Any &rRange ) throw (css::uno::RuntimeException);
+	virtual css::uno::Reference< oo::vba::XRange > SAL_CALL Range( const css::uno::Any& Cell1, const css::uno::Any& Cell2 ) throw (css::uno::RuntimeException);
 	virtual void SAL_CALL Move( const css::uno::Any& Before, const css::uno::Any& After ) throw (css::uno::RuntimeException) ;
  	virtual void SAL_CALL Copy( const css::uno::Any& Before, const css::uno::Any& After ) throw (css::uno::RuntimeException);
 	virtual void SAL_CALL Paste( const css::uno::Any& Destination, const css::uno::Any& Link ) throw (css::uno::RuntimeException);

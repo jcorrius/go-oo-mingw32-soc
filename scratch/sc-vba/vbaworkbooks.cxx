@@ -142,8 +142,7 @@ public:
 				m_books.push_back( xNext );
 				uno::Reference< frame::XModel > xModel( xNext, uno::UNO_QUERY_THROW ); // that the spreadsheetdocument is a xmodel is a given
 				INetURLObject aURL( xModel->getURL() );
-				aURL.CutLastName();
-				namesToIndices[ aURL.GetURLPath() ] = nIndex++;
+				namesToIndices[ aURL.GetLastName() ] = nIndex++;
 			}
 		}
 			
@@ -280,10 +279,22 @@ ScVbaWorkbooks::Open( const uno::Any &aFileName ) throw (uno::RuntimeException)
 		::rtl::OUString::createFromAscii("com.sun.star.frame.Desktop"),
 		m_xContext),
 		uno::UNO_QUERY_THROW );
+		uno::Sequence< beans::PropertyValue > sProps(0);
+		static const char* csv = ".csv";
+		if (   aTempName.endsWithIgnoreAsciiCaseAsciiL( csv, strlen( csv ) ) /* is a csv file */ )
+		{
+			sProps.realloc( 1 );
+			sProps[ 0 ].Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("FilterOptions" ) );
+		
+			// #TODO #FIXME need to verify if this is a sensible default,
+			// need to find where FilterOptions are processed for the csv 
+			// filter
+			sProps[ 0 ].Value <<= rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("44,34,0,1" ) );
+		}
 	uno::Reference< lang::XComponent > xComponent = xLoader->loadComponentFromURL( aURL,
 		rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("_default") ),
 		frame::FrameSearchFlag::CREATE,
-		uno::Sequence< beans::PropertyValue >(0));
+		sProps);
 	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( xComponent, uno::UNO_QUERY_THROW );
         return getWorkbook( m_xContext, xSpreadDoc );
 }

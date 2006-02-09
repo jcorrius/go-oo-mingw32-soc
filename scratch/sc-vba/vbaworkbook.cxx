@@ -114,10 +114,25 @@ ScVbaWorkbook::Close( const uno::Any &rSaveArg, const uno::Any &rFileArg,
 	}	
 	else
 		xModifiable->setModified( false );		
+
+	uno::Reference< util::XCloseable > xCloseable( getCurrentDocument(), uno::UNO_QUERY );
+
+	if( xCloseable.is() )
+		// use close(boolean DeliverOwnership)
 	
-	rtl::OUString url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:CloseDoc"));
-	uno::Reference< frame::XModel > xModel = getModel();
-	dispatchRequests(xModel,url);
+		// The boolean parameter DeliverOwnership tells objects vetoing the close process that they may
+		// assume ownership if they object the closure by throwing a CloseVetoException
+		// Here we give up ownership. To be on the safe side, catch possible veto exception anyway.
+		xCloseable->close(sal_True);
+	// If close is not supported by this model - try to dispose it.
+	// But if the model disagree with a reset request for the modify state
+	// we shouldn't do so. Otherwhise some strange things can happen.
+	else
+	{
+		uno::Reference< lang::XComponent > xDisposable ( getCurrentDocument(), uno::UNO_QUERY );
+		if ( xDisposable.is() )
+			xDisposable->dispose();
+	}
 }
 
 void

@@ -435,24 +435,11 @@ ScVbaWorksheet::Calculate() throw (uno::RuntimeException)
 }
 
 uno::Reference< vba::XRange >
-ScVbaWorksheet::Range( const ::uno::Any &rRange ) throw (uno::RuntimeException)
+ScVbaWorksheet::Range( const ::uno::Any& Cell1, const ::uno::Any& Cell2 ) throw (uno::RuntimeException)
 {
-	rtl::OUString aStringRange;
-	rRange >>= aStringRange;
-	uno::Reference< table::XCellRange > xRanges( getSheet(), uno::UNO_QUERY_THROW );
-	OSL_TRACE("Trying to cell range by %s", rtl::OUStringToOString( 
-		aStringRange, RTL_TEXTENCODING_UTF8 ).getStr() );
-	try
-	{
-		uno::Reference< table::XCellRange > xRange = xRanges->getCellRangeByName( aStringRange );
-	}
-	catch ( uno::Exception& e )
-	{
-		OSL_TRACE("** Caught Exception with msg: %s",
-			rtl::OUStringToOString( e.Message, 
-				RTL_TEXTENCODING_UTF8 ).getStr() );
-	}
-	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xRanges->getCellRangeByName( aStringRange ) ) );
+	uno::Reference< vba::XRange > xSheetRange( new ScVbaRange( m_xContext 
+, uno::Reference< table::XCellRange >( getSheet(), uno::UNO_QUERY_THROW ) ) );
+	return xSheetRange->Range( Cell1, Cell2 );
 }
 
 void
@@ -544,8 +531,9 @@ ScVbaWorksheet::Evaluate( const ::rtl::OUString& Name ) throw (uno::RuntimeExcep
 	// #TODO Evaluate allows other things to be evaluated, e.g. functions
 	// I think ( like SIN(3) etc. ) need to investigate that
 	// named Ranges also? e.g. [MyRange] if so need a list of named ranges
+	uno::Any aVoid;
 	if ( isRangeShortCut( Name ) )
-		return uno::Any( Range( uno::Any( Name ) ) );		
+		return uno::Any( Range( uno::Any( Name ), aVoid ) );		
 	
 	return uno::Any();
 }
