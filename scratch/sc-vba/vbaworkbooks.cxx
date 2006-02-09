@@ -218,6 +218,10 @@ ScVbaWorkbooks::getElementType() throw (uno::RuntimeException)
 uno::Reference< container::XEnumeration >
 ScVbaWorkbooks::createEnumeration() throw (uno::RuntimeException)
 {
+	// #FIXME its possible the WorkBookEnumImpl here doens't reflect
+	// the state of this object ( although it should ) would be 
+	// safer to create an enumeration based on this objects state
+	// rather than one effectively based of the desktop component
 	return new WorkBookEnumImpl( m_xContext, uno::Reference< container::XEnumeration >( new SpreadSheetDocEnumImpl(m_xContext) ) );
 }
 

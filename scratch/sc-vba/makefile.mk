@@ -50,7 +50,8 @@ SLOFILES= \
 		$(SLO)$/vbadialog.obj	\
 		$(SLO)$/vbapivottable.obj \
 		$(SLO)$/vbapivotcache.obj \
-		$(SLO)$/vbapivottables.obj
+		$(SLO)$/vbapivottables.obj \
+		$(SLO)$/vbawindows.obj
  
 
 # --- Targets ------------------------------------------------------

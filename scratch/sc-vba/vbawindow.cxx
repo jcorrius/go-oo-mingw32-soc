@@ -74,7 +74,7 @@ public:
 		ScDocShell* pDocShell = (ScDocShell*)pModel->GetEmbeddedObject();
 		if ( !pDocShell )
 			throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Cannot obtain docshell" ) ), uno::Reference< uno::XInterface >() );
-		ScTabViewShell* pViewShell = getCurrentBestViewShell();
+		ScTabViewShell* pViewShell = getBestViewShell( m_xModel );
 		if ( !pViewShell )
 			throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Cannot obtain view shell" ) ), uno::Reference< uno::XInterface >() );
 			
@@ -114,7 +114,6 @@ public:
 			|| Index >= sheets.size() ) 
 			throw lang::IndexOutOfBoundsException();
 		
-		//return makeAny( uno::Reference< vba::XWorksheet > ( new ScVbaWorksheet( m_xContext, sheets[ Index ], m_xModel ) ) );
 		return makeAny( sheets[ Index ] );
 	}
 
@@ -135,7 +134,6 @@ public:
 		NameIndexHash::const_iterator it = namesToIndices.find( aName );
 		if ( it == namesToIndices.end() )
 			throw container::NoSuchElementException();
-		//return makeAny( uno::Reference< vba::XWorksheet > ( new ScVbaWorksheet( m_xContext, sheets[ it->second ], m_xModel ) ) );
 		return makeAny( sheets[ it->second ] );
 		
 	}
@@ -186,8 +184,7 @@ ScVbaWindow::Scroll( const uno::Any& Down, const uno::Any& Up, const uno::Any& T
 		rtl::OUString url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:GoUp"));
 		if ( bLargeScroll )
 			url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:GoUpBlock"));
-		uno::Reference< frame::XModel > xModel = getCurrentDocument();
-		dispatchRequests( xModel, url, args1 );
+		dispatchRequests( m_xModel, url, args1 );
 	}
 	
 	if ( totalLeft != 0 )
@@ -196,8 +193,7 @@ ScVbaWindow::Scroll( const uno::Any& Down, const uno::Any& Up, const uno::Any& T
 		rtl::OUString url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:GoLeft"));
 		if ( bLargeScroll )
 			url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "slot:")) + rtl::OUString::valueOf( (sal_Int32)SID_CURSORPAGELEFT_ );
-		uno::Reference< frame::XModel > xModel = getCurrentDocument();
-		dispatchRequests( xModel, url, args1 );
+		dispatchRequests( m_xModel, url, args1 );
 	}
 
 }
@@ -215,8 +211,8 @@ ScVbaWindow::LargeScroll( const uno::Any& Down, const uno::Any& Up, const uno::A
 uno::Any SAL_CALL 
 ScVbaWindow::SelectedSheets( const uno::Any& aIndex ) throw (uno::RuntimeException)
 {
-	uno::Reference< container::XEnumerationAccess > xEnumAccess( new SelectedSheetsEnumAccess( m_xContext, getCurrentDocument()  ) );
-	return makeAny( uno::Reference< vba::XWorksheets > ( new ScVbaWorksheets( m_xContext, xEnumAccess, getCurrentDocument() ) ) ); 	
+	uno::Reference< container::XEnumerationAccess > xEnumAccess( new SelectedSheetsEnumAccess( m_xContext, m_xModel  ) );
+	return makeAny( uno::Reference< vba::XWorksheets > ( new ScVbaWorksheets( m_xContext, xEnumAccess, m_xModel ) ) ); 	
 }
 
 void SAL_CALL 
@@ -235,4 +231,78 @@ ScVbaWindow::ScrollWorkbookTabs( const uno::Any& Sheets, const uno::Any& Positio
 			; //use position
 
 }
+uno::Reference< beans::XPropertySet >
+getPropsFromModel( const uno::Reference< frame::XModel >& xModel )
+{
+	uno::Reference< frame::XController > xController = xModel->getCurrentController();
+	if ( !xController.is() )
+		throw uno::RuntimeException( rtl::OUString(
+			RTL_CONSTASCII_USTRINGPARAM ("No controller for model") ), uno::Reference< uno::XInterface >() );	
+	return uno::Reference< beans::XPropertySet >(  xController->getFrame(), uno::UNO_QUERY );
+}
 
+
+uno::Any SAL_CALL 
+ScVbaWindow::getCaption() throw (uno::RuntimeException)
+{
+	static rtl::OUString sCrud(RTL_CONSTASCII_USTRINGPARAM(" - OpenOffice.org Calc" ) );
+	static sal_Int32 nCrudLen = sCrud.getLength();
+
+	uno::Reference< beans::XPropertySet > xProps = getPropsFromModel( m_xModel );
+	rtl::OUString sTitle;
+	xProps->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM ("Title") ) ) >>= sTitle;	
+	sal_Int32 nCrudIndex = sTitle.indexOf( sCrud );	
+	// adjust title ( by removing crud )
+	// sCrud string present
+	if ( nCrudIndex != -1 )
+	{
+		// and ends with sCrud
+		if ( ( nCrudLen + nCrudIndex ) == sTitle.getLength() )
+		{
+			sTitle = sTitle.copy( 0, nCrudIndex );
+			ScVbaWorkbook workbook( m_xContext, m_xModel );
+			rtl::OUString sName = workbook.getName();
+			// rather bizare hack to make sure the name behavior
+			// is like XL
+			// if the adjusted title == workbook name, use name
+			// if the adjusted title != workbook name but ...
+			// 	name == title + extension ( .csv, ,odt, .xls )
+			//	etc. then also use the name
+
+			if ( !sTitle.equals( sName ) )
+			{
+				static rtl::OUString sDot( RTL_CONSTASCII_USTRINGPARAM(".") );
+				// starts with title
+				sal_Int32 nTitleIndex = -1;
+				if ( sName.indexOf( sTitle ) == 0 )
+					// extention starts immediately after
+					if ( sName.match( sDot, sTitle.getLength() ) )
+						sTitle = sName;
+			}
+		}
+	}			
+	return uno::makeAny( sTitle );
+}
+
+void SAL_CALL 
+ScVbaWindow::setCaption( const uno::Any& _caption ) throw (uno::RuntimeException)
+{
+	
+	uno::Reference< beans::XPropertySet > xProps = getPropsFromModel( m_xModel );
+	xProps->setPropertyValue( rtl::OUString(
+		RTL_CONSTASCII_USTRINGPARAM ("Title") ) , _caption );	
+}
+
+void
+ScVbaWindow::Activate() throw (css::uno::RuntimeException)
+{
+	ScVbaWorkbook workbook( m_xContext, m_xModel );
+	workbook.Activate();
+}
+
+void
+ScVbaWindow::Close( const uno::Any& SaveChanges, const uno::Any& FileName, const uno::Any& RouteWorkBook ) throw (uno::RuntimeException)
+{
+	ScVbaWorkbook workbook( m_xContext, m_xModel );
+	workbook.Close(SaveChanges, FileName, RouteWorkBook );
+}

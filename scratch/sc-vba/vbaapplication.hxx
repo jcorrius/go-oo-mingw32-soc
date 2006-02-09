@@ -39,5 +39,6 @@ public:
 
 	virtual double SAL_CALL CountA( const css::uno::Any& arg1 ) throw (css::uno::RuntimeException) ;
 
+	virtual css::uno::Any SAL_CALL getWindows() throw (css::uno::RuntimeException);
 };
 #endif /* SC_VBA_APPLICATION_HXX */

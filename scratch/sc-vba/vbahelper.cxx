@@ -270,11 +270,10 @@ org::openoffice::getCurrentDocument() throw (uno::RuntimeException)
 	}
 	return xModel;
 }
- 
+
 ScTabViewShell* 
-org::openoffice::getCurrentBestViewShell()
+org::openoffice::getBestViewShell(  css::uno::Reference< css::frame::XModel>& xModel )
 {
-	uno::Reference< frame::XModel > xModel = getCurrentDocument();
 	ScModelObj* pModel = static_cast< ScModelObj* >( xModel.get() );
 	if ( pModel )
 	{
@@ -284,6 +283,13 @@ org::openoffice::getCurrentBestViewShell()
 	}
 	
 	return NULL;
+}
+
+ScTabViewShell* 
+org::openoffice::getCurrentBestViewShell()
+{ 
+	uno::Reference< frame::XModel > xModel = getCurrentDocument();
+	return getBestViewShell( xModel );
 }
 
 SfxViewFrame* 

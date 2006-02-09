@@ -12,6 +12,7 @@
 #include "vbawsfunction.hxx"
 #include "vbadialogs.hxx"
 #include "vbawindow.hxx"
+#include "vbawindows.hxx"
 
 #include "tabvwsh.hxx"
 
@@ -138,7 +139,7 @@ ScVbaApplication::Dialogs( const uno::Any &aIndex ) throw (uno::RuntimeException
 uno::Reference< vba::XWindow > SAL_CALL 
 ScVbaApplication::getActiveWindow() throw (uno::RuntimeException)
 {
-	return new ScVbaWindow( m_xContext );
+	return new ScVbaWindow( m_xContext, getCurrentDocument() );
 }
 
 uno::Any SAL_CALL 
@@ -183,4 +184,11 @@ ScVbaApplication::setCalculation( ::sal_Int32 _calculation ) throw (css::uno::Ru
 {
 	m_xCalculation = _calculation;
 }
+
+uno::Any SAL_CALL 
+ScVbaApplication::getWindows() throw (uno::RuntimeException)
+{
+	return uno::makeAny( ScVbaWindows::Windows( m_xContext ) );
+}
+
 

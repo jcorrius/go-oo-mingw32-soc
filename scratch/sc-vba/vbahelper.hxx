@@ -19,6 +19,7 @@ namespace org
 		bool isRangeShortCut( const ::rtl::OUString& sParam );
 		css::uno::Reference< css::frame::XModel >
 			getCurrentDocument() throw (css::uno::RuntimeException);
+		ScTabViewShell* getBestViewShell( css::uno::Reference< css::frame::XModel>& xModel ) ;
 		ScTabViewShell* getCurrentBestViewShell();
 		SfxViewFrame* getCurrentViewFrame();
 	}
