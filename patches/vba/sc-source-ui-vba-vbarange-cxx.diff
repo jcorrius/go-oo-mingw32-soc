@@ -1,6 +1,6 @@
---- /dev/null	2006-01-28 08:50:32.192375500 +0000
-+++ sc/source/ui/vba/vbarange.cxx	2006-02-01 12:08:11.000000000 +0000
-@@ -0,0 +1,1538 @@
+--- /dev/null	2006-02-06 09:18:05.304445000 +0000
++++ sc/source/ui/vba/vbarange.cxx	2006-02-08 18:15:32.000000000 +0000
+@@ -0,0 +1,1619 @@
 +#include <comphelper/processfactory.hxx>
 +#include <sfx2/objsh.hxx>
 +
@@ -48,7 +48,8 @@
 +#include <org/openoffice/vba/Excel/XlYesNoGuess.hpp>
 +#include <org/openoffice/vba/Excel/XlSortOrientation.hpp>
 +#include <org/openoffice/vba/Excel/XlSortMethod.hpp>
-+#include <org/openoffice/vba/Excel//XlDirection.hpp>
++#include <org/openoffice/vba/Excel/XlDirection.hpp>
++#include <org/openoffice/vba/Excel/XlSortDataOption.hpp>
 +
 +#include <sfx2/dispatch.hxx>
 +#include <sfx2/app.hxx>
@@ -57,6 +58,7 @@
 +#include <sfx2/viewfrm.hxx>
 +#include <sfx2/itemwrapper.hxx>
 +#include <sc.hrc>
++#include <unonames.hxx>
 +
 +#include "vbarange.hxx"
 +#include "vbafont.hxx"
@@ -279,7 +281,16 @@
 +	if( eType == table::CellContentType_VALUE || eType == table::CellContentType_FORMULA )
 +	{
 +		if ( eType == table::CellContentType_FORMULA )
++		{
++			double val = xCell->getValue();	
++			rtl::OUString sFormula = xCell->getFormula();
++			if ( sFormula.equals( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("=TRUE()") ) ) )
++				aValue <<= sal_True;
++			else if ( sFormula.equals( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("=FALSE()") ) ) )
++				aValue <<= sal_False;
++			else 	
 +				aValue <<= xCell->getValue();
++		}
 +		else
 +		{
 +			uno::Reference< table::XCellRange > xRange( xCell, uno::UNO_QUERY_THROW );
@@ -428,7 +439,10 @@
 +	msDftPropName = ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Value" ) );
 +	registerProperty( RANGE_PROPERTY_DFLT, RANGE_PROPERTY_ID_DFLT,
 +beans::PropertyAttribute::TRANSIENT | beans::PropertyAttribute::BOUND, &msDftPropName, ::getCppuType( &msDftPropName ) );
++}
 +
++ScVbaRange::~ScVbaRange()
++{
 +}
 +
 +uno::Reference< script::XTypeConverter >
@@ -525,19 +539,26 @@
 +					sheet::CellFlags::HARDATTR | sheet::CellFlags::FORMATTED | sheet::CellFlags::EDITATTR);
 +}
 +
++//helper ClearContent
++void
++ScVbaRange::ClearContents( sal_Int32 nFlags ) throw (uno::RuntimeException)
++{
++	uno::Reference< sheet::XSheetOperation > xSheetOperation(mxRange, uno::UNO_QUERY_THROW);
++	xSheetOperation->clearContents( nFlags );
++}
 +void
 +ScVbaRange::ClearComments() throw (uno::RuntimeException)
 +{
-+	uno::Reference< sheet::XSheetOperation > xSheetOperation(mxRange, uno::UNO_QUERY_THROW);
-+	//FIXME: STRING is not the correct type; May require special handling; clearNotes?
-+	xSheetOperation->clearContents(sheet::CellFlags::STRING);
++	ClearContents( sheet::CellFlags::ANNOTATION );
 +}
 +
 +void
 +ScVbaRange::ClearContents() throw (uno::RuntimeException)
 +{
-+	uno::Reference< sheet::XSheetOperation > xSheetOperation(mxRange, uno::UNO_QUERY_THROW);
-+	xSheetOperation->clearContents(sheet::CellFlags::VALUE | sheet::CellFlags::STRING );
++	sal_Int32 nClearFlags = ( sheet::CellFlags::VALUE |
++		sheet::CellFlags::STRING |  sheet::CellFlags::DATETIME | 
++		sheet::CellFlags::FORMULA );
++	ClearContents( nClearFlags );
 +}
 +
 +void
@@ -968,44 +989,78 @@
 +{
 +        return uno::Reference<vba::XInterior> (new ScVbaInterior ( m_xContext, mxRange));
 +}                                                                                                                             
++table::CellRangeAddress getCellRangeAddress( const uno::Any& aParam,
++const uno::Reference< table::XCellRange >& xRanges )
++{
++	uno::Reference< table::XCellRange > xRangeParam;
++	switch ( aParam.getValueTypeClass() )
++	{
++		case uno::TypeClass_STRING:
++		{
++			rtl::OUString rString;
++			aParam >>= rString;
++			xRangeParam = xRanges->getCellRangeByName( rString );
++			break;
++		}
++		case uno::TypeClass_INTERFACE:
++		{
++			uno::Reference< vba::XRange > xRange;
++			aParam >>= xRange;
++			if ( xRange.is() )
++				xRange->getCellRange() >>= xRangeParam;
++			break;
++		}
++		default:
++			throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Can't extact CellRangeAddress from type" ) ), uno::Reference< uno::XInterface >() );
++	}
++	uno::Reference< sheet::XCellRangeAddressable > xAddressable( xRangeParam, uno::UNO_QUERY_THROW );
++	return xAddressable->getRangeAddress();
++}
++
 +uno::Reference< vba::XRange >
 +ScVbaRange::Range( const uno::Any &Cell1, const uno::Any &Cell2 ) throw (uno::RuntimeException)
 +{
-+	uno::Reference< sheet::XSheetCellRange > xSheetCellRange( mxRange, uno::UNO_QUERY_THROW );
-+	uno::Reference< sheet::XSpreadsheet > xSheet = xSheetCellRange->getSpreadsheet();
-+	uno::Reference< table::XCellRange > xRanges( xSheet, uno::UNO_QUERY_THROW );
++	RangeHelper thisRange( mxRange );
++	uno::Reference< table::XCellRange > xRanges = thisRange.getCellRangeFromSheet();
 +	uno::Reference< sheet::XCellRangeAddressable > xAddressable( xRanges, uno::UNO_QUERY_THROW );
-+	uno::Reference< table::XCellRange > xReferrer = xRanges->getCellRangeByPosition( 
-+																				getColumn()-1, getRow()-1,
-+																				xAddressable->getRangeAddress().EndColumn,
-+																				xAddressable->getRangeAddress().EndRow );
-+	rtl::OUString rString;
-+	uno::Reference< vba::XRange > aRange1, aRange2;
-+	sal_Bool bIsCell1 = Cell1 >>= aRange1, bIsCell2 = Cell2 >>= aRange2;
++
++	uno::Reference< table::XCellRange > xReferrer = 
++		xRanges->getCellRangeByPosition( getColumn()-1, getRow()-1, 
++				xAddressable->getRangeAddress().EndColumn, 
++				xAddressable->getRangeAddress().EndRow );
++
++	table::CellRangeAddress  cell1, cell2;
 +	
 +	if( !Cell1.hasValue() )
 +		throw uno::RuntimeException(
 +			rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( " Invalid Argument " ) ),
 +			uno::Reference< XInterface >() );
-+	if( ( Cell1 >>= rString ) && !Cell2.hasValue() )
++
++	table::CellRangeAddress resultAddress;
++	cell1 = getCellRangeAddress( Cell1, xRanges ); 	
++
++	// Cell1 defined only
++	if ( !Cell2.hasValue() )
++		resultAddress = cell1;
++	else
 +	{
-+		uno::Reference< table::XCellRange > xRange = xRanges->getCellRangeByName( rString );
-+		uno::Reference< sheet::XCellRangeAddressable > xRefAddress( xRange, uno::UNO_QUERY_THROW );
-+		return uno::Reference< vba::XRange > ( new ScVbaRange( m_xContext, xReferrer->getCellRangeByPosition(
-+							xRefAddress->getRangeAddress().StartColumn,
-+							xRefAddress->getRangeAddress().StartRow,
-+							xRefAddress->getRangeAddress().EndColumn,
-+							xRefAddress->getRangeAddress().EndRow ) ) );
++		// Cell1 & Cell2 defined
++		// Excel seems to combine the range as the range defined by
++		// the combination of Cell1 & Cell2
++	
++		cell2 = getCellRangeAddress( Cell2, xRanges ); 	
++
++		resultAddress.StartColumn = ( cell1.StartColumn <  cell2.StartColumn ) ? cell1.StartColumn : cell2.StartColumn;
++		resultAddress.StartRow = ( cell1.StartRow <  cell2.StartRow ) ? cell1.StartRow : cell2.StartRow;
++		resultAddress.EndColumn = ( cell1.EndColumn >  cell2.EndColumn ) ? cell1.EndColumn : cell2.EndColumn;
++		resultAddress.EndRow = ( cell1.EndRow >  cell2.EndRow ) ? cell1.EndRow : cell2.EndRow;
 +	}
-+	if( bIsCell1 && bIsCell2 )
-+		return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xReferrer->getCellRangeByPosition(
-+							aRange1->getColumn() - 1, aRange1->getRow() - 1,
-+							aRange2->getColumn() - 1, aRange2->getRow() - 1 ) ) );
-+	if( bIsCell1 && !Cell2.hasValue() )
-+		return uno::Reference< vba::XRange > ( new ScVbaRange( m_xContext, xReferrer->getCellRangeByPosition(
-+							aRange1->getColumn() - 1, aRange1->getRow() - 1,
-+							aRange1->getColumn() - 1, aRange1->getRow() - 1 ) ) );
-+	return NULL;
++	return uno::Reference< vba::XRange > ( new ScVbaRange( m_xContext, 
++		xReferrer->getCellRangeByPosition(
++			resultAddress.StartColumn,
++			resultAddress.StartRow,
++			resultAddress.EndColumn,
++			resultAddress.EndRow ) ) );
 +}
 +
 +::com::sun::star::uno::Any SAL_CALL
@@ -1028,10 +1083,9 @@
 +        case vba::xlPasteType::xlPasteFormulas: 
 +		nFlags = IDF_FORMULA;break;
 +        case vba::xlPasteType::xlPasteFormulasAndNumberFormats : 
-+		nFlags = IDF_FORMULA | IDF_VALUE ;break;
 +        case vba::Excel::XlFindLookIn::xlValues: 
 +        case vba::xlPasteType::xlPasteValues: 
-+		nFlags = IDF_VALUE | IDF_SPECIAL_BOOLEAN ;break;
++		nFlags = ( IDF_VALUE | IDF_DATETIME | IDF_STRING | IDF_SPECIAL_BOOLEAN ); break;
 +        case vba::xlPasteType::xlPasteValuesAndNumberFormats:
 +		nFlags = IDF_VALUE | IDF_ATTRIB; break;
 +        case vba::xlPasteType::xlPasteColumnWidths:
@@ -1165,15 +1219,19 @@
 +}
 +
 +::sal_Bool SAL_CALL 
-+ScVbaRange::Replace( const ::rtl::OUString& What, const ::rtl::OUString& Replacement, const uno::Any& LookAt, const uno::Any& SearchOrder, const uno::Any& MatchCase, const uno::Any& MatchByte ) throw (uno::RuntimeException)
++ScVbaRange::Replace( const ::rtl::OUString& What, const ::rtl::OUString& Replacement, const uno::Any& LookAt, const uno::Any& SearchOrder, const uno::Any& MatchCase, const uno::Any& MatchByte, const uno::Any& SearchFormat, const uno::Any& ReplaceFormat  ) throw (uno::RuntimeException)
 +{
++	
 +	// sanity check required params
 +	if ( !What.getLength() || !Replacement.getLength() )
 +		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Range::Replace, missing params" )) , uno::Reference< uno::XInterface >() );
 +
-+	// #TODO
++	// #TODO #FIXME
 +	// also this method should take/set the defaults from the find dialog
-+	// but.... really thats probably not important for us
++	// thats probably not very important for us but the implied behavior is
++	// e.g. it needs to persist the options between calls
++	//
++	// #TODO #FIXME SearchFormat & ReplacesFormat are not processed
 +
 +	// Set up sensible defaults
 +	sal_Int16 nLook =  vba::Excel::XlLookAt::xlPart;
@@ -1186,37 +1244,41 @@
 +		uno::Reference< util::XReplaceDescriptor > xDescriptor =
 +			xReplace->createReplaceDescriptor();
 +		
-+		xDescriptor->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "SearchString" ) ), uno::makeAny(What) ); 		
-+		xDescriptor->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "ReplacesString" ) ), uno::makeAny(Replacement) ); 		
++		xDescriptor->setSearchString( What); 		
++		xDescriptor->setReplaceString( Replacement); 		
 +		if ( LookAt.hasValue() )
 +		{
 +			// sets SearchWords ( true is Cell match )
 +			nLook =  ::comphelper::getINT16( LookAt );
++			sal_Bool bSearchWords = sal_False;
 +			if ( nLook == vba::Excel::XlLookAt::xlPart )
-+				xDescriptor->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "SearchWords" ) ), uno::makeAny( sal_False ) ); 	
++				bSearchWords = sal_False;
 +			else if ( nLook == vba::Excel::XlLookAt::xlWhole )
-+				xDescriptor->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "SearchWords" ) ), uno::makeAny( sal_True ) ); 	
++				bSearchWords = sal_True;
 +			else
 +				throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Range::Replace, illegal value for LookAt" )) , uno::Reference< uno::XInterface >() );
 +
++			xDescriptor->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( SC_UNO_SRCHWORDS ) ), uno::makeAny( bSearchWords ) ); 	
 +		}
 +		// sets SearchByRow ( true for Rows )
 +		if ( SearchOrder.hasValue() )
 +		{
 +			nSearchOrder =  ::comphelper::getINT16( SearchOrder );
++			sal_Bool bSearchByRow = sal_False;
 +			if ( nSearchOrder == vba::Excel::XlSearchOrder::xlByColumns )
-+				xDescriptor->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "SearchByRows" ) ), uno::makeAny( sal_False ) ); 	
++				bSearchByRow = sal_False;
 +			else if ( nSearchOrder == vba::Excel::XlSearchOrder::xlByRows )
-+				xDescriptor->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "SearchByRows" ) ), uno::makeAny( sal_True ) ); 	
++				bSearchByRow = sal_False;
 +			else
 +				throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Range::Replace, illegal value for SearchOrder" )) , uno::Reference< uno::XInterface >() );
 +			
++			xDescriptor->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( SC_UNO_SRCHBYROW ) ), uno::makeAny( bSearchByRow ) ); 	
 +		}			
 +		if ( MatchCase.hasValue() )
 +		{
 +			// SearchCaseSensitive
 +			MatchCase >>= bMatchCase;	
-+			xDescriptor->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "SearchCaseSensitive" ) ), uno::makeAny( bMatchCase ) ); 	
++			xDescriptor->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( SC_UNO_SRCHCASE ) ), uno::makeAny( bMatchCase ) ); 	
 +		}			
 +		// ignore MatchByte for the moment, its not supported in
 +		// OOo.org afaik
@@ -1255,6 +1317,7 @@
 +	return xKey;
 +}
 +
++// helper method for Sort
 +sal_Int32 findSortPropertyIndex( const uno::Sequence< beans::PropertyValue >& props,
 +const rtl::OUString& sPropName ) throw( uno::RuntimeException )
 +{
@@ -1270,6 +1333,7 @@
 +	return -1; //should never reach here ( satisfy compiler )
 +}
 +
++// helper method for Sort
 +void updateTableSortField( const uno::Reference< table::XCellRange >& xParentRange,
 +	const uno::Reference< table::XCellRange >& xColRowKey, sal_Int16 nOrder, 
 +	table::TableSortField& aTableField, sal_Bool bIsSortColumn, sal_Bool bMatchCase ) throw ( uno::RuntimeException )
@@ -1306,19 +1370,35 @@
 +						
 +} 
 +void SAL_CALL
-+ScVbaRange::Sort( const uno::Any& Key1, const uno::Any& Order1, const uno::Any& Key2, const uno::Any& Type, const uno::Any& Order2, const uno::Any& Key3, const uno::Any& Order3, const uno::Any& Header, const uno::Any& OrderCustom, const uno::Any& MatchCase, const uno::Any& Orientation, const uno::Any& SortMethod ) throw (uno::RuntimeException)
++ScVbaRange::Sort( const uno::Any& Key1, const uno::Any& Order1, const uno::Any& Key2, const uno::Any& Type, const uno::Any& Order2, const uno::Any& Key3, const uno::Any& Order3, const uno::Any& Header, const uno::Any& OrderCustom, const uno::Any& MatchCase, const uno::Any& Orientation, const uno::Any& SortMethod,  const css::uno::Any& DataOption1, const css::uno::Any& DataOption2, const css::uno::Any& DataOption3  ) throw (uno::RuntimeException)
 +{
-+	// need to refactor this into IsSingleCell() method
++
++	sal_Int16 nDataOption1 = vba::Excel::XlSortDataOption::xlSortNormal;
++	sal_Int16 nDataOption2 = vba::Excel::XlSortDataOption::xlSortNormal;;
++	sal_Int16 nDataOption3 = vba::Excel::XlSortDataOption::xlSortNormal;
++
++	if ( DataOption1.hasValue() )
++		DataOption1 >>= nDataOption1;
++	if ( DataOption2.hasValue() )
++		DataOption2 >>= nDataOption2;
++	if ( DataOption3.hasValue() )
++		DataOption3 >>= nDataOption3;
++
++	// 1) #TODO #FIXME need to process DataOption[1..3] not used currently
++	// 2) #TODO #FIXME need to refactor this ( below ) into a IsSingleCell() method
 +	uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, uno::UNO_QUERY_THROW );
 +	sal_Int32 nRowCount = xColumnRowRange->getRows()->getCount();
 +	sal_Int32 nColCount = xColumnRowRange->getColumns()->getCount();
-+
-+	if (  nRowCount && nColCount )
++	
++	// 'Fraid I don't remember what I was trying to achieve here ???
++/* 
++	if (  nRowCount == 1 && nColCount == 1 )
 +	{
 +		uno::Reference< vba::XRange > xCurrent = CurrentRegion();
-+		xCurrent->Sort( Key1, Order1, Key2, Type, Order2, Key3, Order3, Header, OrderCustom, MatchCase, Orientation, SortMethod );
++		xCurrent->Sort( Key1, Order1, Key2, Type, Order2, Key3, Order3, Header, OrderCustom, MatchCase, Orientation, SortMethod, DataOption1, DataOption2, DataOption3 );
 +		return; 
 +	}
++*/
 +	// set up defaults
 +	sal_Int16 defaultOrder = vba::Excel::XlSortOrder::xlAscending;
 +
@@ -1431,7 +1511,7 @@
 +                       m_xContext )->getApplication()->getActiveCell()->Address();
 +
 +	// position current cell upper left of this range
-+	Cells( uno::makeAny( ( sal_Int32 )1 ), uno::makeAny( ( sal_Int32 )1 ) )->Select();
++	Cells( uno::makeAny( (sal_Int32) 1 ), uno::makeAny( (sal_Int32) 1 ) )->Select();
 +
 +	SfxViewFrame* pViewFrame = getCurrentViewFrame();
 +	if ( pViewFrame )
@@ -1473,13 +1553,14 @@
 +                       m_xContext )->getApplication()->getActiveCell()->Address();
 +
 +	// restore old ActiveCell		
++	uno::Any aVoid;
 +	uno::Reference< vba::XRange > xOldActiveCell( ScVbaGlobals::getGlobalsImpl(
-+		m_xContext )->getActiveSheet()->Range( uno::makeAny( sActiveCell ) ), uno::UNO_QUERY_THROW );
++		m_xContext )->getActiveSheet()->Range( uno::makeAny( sActiveCell ), aVoid ), uno::UNO_QUERY_THROW );
 +	xOldActiveCell->Select();
 +
 +	uno::Reference< vba::XRange > resultCell;
 +	resultCell.set( ScVbaGlobals::getGlobalsImpl(
-+		m_xContext )->getActiveSheet()->Range( uno::makeAny( sMoved ) ), uno::UNO_QUERY_THROW );
++		m_xContext )->getActiveSheet()->Range( uno::makeAny( sMoved ), aVoid ), uno::UNO_QUERY_THROW );
 +
 +	// return result
 +	
