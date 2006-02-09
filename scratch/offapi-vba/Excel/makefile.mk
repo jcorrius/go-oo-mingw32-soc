@@ -29,7 +29,8 @@ IDLFILES=\
 	XlSortMethod.idl \
 	XlYesNoGuess.idl \
 	XlSortOrientation.idl \
-	XlDirection.idl
+	XlDirection.idl \
+	XlSortDataOption.idl \
 
 
 # ------------------------------------------------------------------
