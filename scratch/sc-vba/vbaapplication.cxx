@@ -186,9 +186,12 @@ ScVbaApplication::setCalculation( ::sal_Int32 _calculation ) throw (css::uno::Ru
 }
 
 uno::Any SAL_CALL 
-ScVbaApplication::getWindows() throw (uno::RuntimeException)
+ScVbaApplication::Windows( const uno::Any& aIndex  ) throw (uno::RuntimeException)
 {
-	return uno::makeAny( ScVbaWindows::Windows( m_xContext ) );
+	uno::Reference< vba::XCollection >  xWindows = ScVbaWindows::Windows( m_xContext );
+	if ( aIndex.getValueTypeClass() == uno::TypeClass_VOID )
+		return uno::Any( xWindows );
+	return uno::Any( xWindows->Item( aIndex ) );	
 }
 
 
