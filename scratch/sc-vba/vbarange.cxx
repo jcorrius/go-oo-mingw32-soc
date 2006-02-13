@@ -579,6 +579,22 @@ ScVbaRange::setFormula(const ::rtl::OUString &rFormula ) throw (uno::RuntimeExce
 	setValue( uno::makeAny( rFormula ) );
 }
 
+::rtl::OUString
+ScVbaRange::getFormulaR1C1() throw (::com::sun::star::uno::RuntimeException)
+{
+	//#TODO FIXME needs its own implementation when R1C1 stuff
+	// is available
+	return getFormula();
+}
+
+void
+ScVbaRange::setFormulaR1C1(const ::rtl::OUString &rFormula ) throw (uno::RuntimeException)
+{
+	//#TODO FIXME needs its own implementation when R1C1 stuff
+	// is available
+	setFormula(  rFormula );
+}
+
 double 
 ScVbaRange::getCount() throw (uno::RuntimeException)
 {
