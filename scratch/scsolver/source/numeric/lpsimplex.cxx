@@ -51,6 +51,14 @@ typedef vector<Bound>					BoundContainer;
 typedef BoundContainer::iterator		BoundIter;
 typedef BoundContainer::const_iterator	BoundCIter;
 
+class IllegalTwoPhaseSearch : public ::std::exception
+{
+	virtual const char *what() const throw()
+	{
+		return "Illegal nested two phase search detected";
+	}
+};
+
 //---------------------------------------------------------------------------
 // RevisedSimplexImpl
 
@@ -61,9 +69,13 @@ public:
 	~RevisedSimplexImpl();
 
 	Matrix solve();
+	void setEnableTwoPhaseSearch( bool b ) { m_bTwoPhaseAllowed = b; }
+	bool isTwoPhaseSearchEnabled() { return m_bTwoPhaseAllowed; }
 
 private:
 	RevisedSimplex* m_pSelf;
+
+	bool m_bTwoPhaseAllowed;	// is two-phase initial search allowed ?
 
 	Matrix m_aBasicInv;
 	Matrix m_aUpdateMatrix;
@@ -93,6 +105,7 @@ private:
 
 
 RevisedSimplexImpl::RevisedSimplexImpl( RevisedSimplex* p ) : m_pSelf( p ),
+	m_bTwoPhaseAllowed( true ),
 	m_aBasicInv( 0, 0 ), m_aUpdateMatrix( 0, 0 ), m_aPriceVector( 0, 0 ),
 	m_aX( 0, 0 ), m_nIter( 0 )
 {
@@ -373,6 +386,9 @@ void RevisedSimplexImpl::runNormalInitSearch()
 */
 void RevisedSimplexImpl::runTwoPhaseInitSearch( const vector<size_t>& aNonSatRows )
 {
+	if ( !m_bTwoPhaseAllowed )
+		throw IllegalTwoPhaseSearch();
+		
 	static const bool bDebugTwoPhase = true;
 
 	if ( m_Model.getVerbose() )
@@ -408,6 +424,11 @@ void RevisedSimplexImpl::runTwoPhaseInitSearch( const vector<size_t>& aNonSatRow
 
 	model->setVerbose( bDebugTwoPhase );
 	auto_ptr<BaseAlgorithm> algorithm( new RevisedSimplex );
+
+	// This looks ugly, but necessary to prevent nested two-phase search during 
+	// two phase search. (TODO: find a better approach)
+	static_cast<RevisedSimplex*>(algorithm.get())->setEnableTwoPhaseSearch( false );
+
 	model->solve( algorithm );
 	Matrix Xtmp( model->getSolution() );
 
@@ -713,6 +734,10 @@ void RevisedSimplex::solve()
 	setSolution( sol );
 }
 
+void RevisedSimplex::setEnableTwoPhaseSearch( bool b )
+{
+	m_pImpl->setEnableTwoPhaseSearch( b );
+}
 
 //---------------------------------------------------------------------------
 // BoundedRevisedSimplexImpl

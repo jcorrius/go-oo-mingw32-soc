@@ -46,6 +46,8 @@ public:
 
 	virtual void solve();
 
+	void setEnableTwoPhaseSearch( bool );
+
 private:
 	std::auto_ptr<RevisedSimplexImpl> m_pImpl;
 };

@@ -267,6 +267,9 @@ void testCaseNiklas()
 	p->setVerbose( true );
 	p->print();
 	p->setPrecision( 2 );
+
+	p->setVarBound( 0, BOUND_LOWER, 10 );
+	p->setVarBound( 0, BOUND_UPPER, 10 );
 	
 	auto_ptr<BaseAlgorithm> algo1( new RevisedSimplex );
 	p->solve( algo1 );
@@ -346,7 +349,7 @@ int main( int argc, char** argv )
 	testCaseNiklas();
 
 // 	testModel1();
-	testCaseLudovic();
+	//testCaseLudovic();
 
 	return EXIT_SUCCESS;
 }

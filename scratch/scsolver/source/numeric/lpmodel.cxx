@@ -114,7 +114,7 @@ private:
 	Matrix m_mxConstraint;
 	Matrix m_mxRHS;
 
-	map< unsigned long, VarBounds > m_aVarBoundMap;
+	map<unsigned long, VarBounds> m_aVarBoundMap;
 
 	vector<Equality> m_eEqualities;
 
