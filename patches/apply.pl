@@ -130,6 +130,16 @@ sub milestone_cmp($$)
     return $a cmp $b;
 }
 
+sub same_mws($$)
+{
+    my $a = shift;
+    my $b = shift;
+    $a =~ s/-.*//;
+    $b =~ s/-.*//;
+#    print "same mws? '$a' vs '$b'\n";
+    return $a eq $b;
+}
+
 sub rules_pass($)
 {
     my $original_rule = shift;
@@ -138,16 +148,23 @@ sub rules_pass($)
     while ($rule ne '') {
 	my $lastrule = $rule;
 #	print "verify rule '$rule' vs '$tag'\n";
-	# equal to (==)
-	if ($rule =~ s/\=\=\s*(\S+)// && milestone_cmp ($tag, $1) != 0 ) { return 0; }; 
-	# less than or equal (<=)
-	if ($rule =~ s/\<=\s*(\S+)// && milestone_cmp ($tag, $1) > 0 ) { return 0; };
-	# less than (<)
-	if ($rule =~ s/\<\s*(\S+)// && milestone_cmp ($tag, $1) >= 0 ) { return 0; };
-	# greater than or equal (>=)
-	if ($rule =~ s/\>=\s*(\S+)// && milestone_cmp ($tag, $1) < 0 ) { return 0; }; 
-	# greater than (>)
-	if ($rule =~ s/\>\s*(\S+)// && milestone_cmp ($tag, $1) <= 0 ) { return 0; }; 
+
+	if ($rule =~ /[\<\=\>]+\s*(\S+)/ && !same_mws($tag, $1) ) {
+	    # ignore milestones from other MWSes
+#	    print "ignoring rule '$rule' for '$tag'\n";
+	    $rule =~ s/[\<\=\>]+\s*(\S+)//;
+	} else {
+	    # equal to (==)
+	    if ($rule =~ s/\=\=\s*(\S+)// && milestone_cmp ($tag, $1) != 0 ) { return 0; }; 
+	    # less than or equal (<=)
+	    if ($rule =~ s/\<=\s*(\S+)// && milestone_cmp ($tag, $1) > 0 ) { return 0; };
+	    # less than (<)
+	    if ($rule =~ s/\<\s*(\S+)// && milestone_cmp ($tag, $1) >= 0 ) { return 0; };
+	    # greater than or equal (>=)
+	    if ($rule =~ s/\>=\s*(\S+)// && milestone_cmp ($tag, $1) < 0 ) { return 0; }; 
+	    # greater than (>)
+	    if ($rule =~ s/\>\s*(\S+)// && milestone_cmp ($tag, $1) <= 0 ) { return 0; }; 
+	}
 
 	$rule =~ s/^\s*//;
 
