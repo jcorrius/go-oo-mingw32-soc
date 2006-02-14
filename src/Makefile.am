@@ -1,5 +1,6 @@
 EXTRA_DIST=\
 	Draft.jpg \
+	Novell.dic \
 	openintro_redhat.bmp \
 	openabout_redhat.png \
 	openintro_suse.bmp \
