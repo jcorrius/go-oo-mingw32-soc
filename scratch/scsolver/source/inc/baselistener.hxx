@@ -28,6 +28,10 @@
 #ifndef _BASELISTENER_HXX_
 #define _BASELISTENER_HXX_
 
+#ifndef _CPPU_MACROS_HXX_
+#include "cppu/macros.hxx"
+#endif
+
 #include <unoglobal.hxx>
 
 #include <cppuhelper/implbase1.hxx>
@@ -68,8 +72,8 @@ public:
 	ActionListener( BaseDialog* pDlg ) : Listener( pDlg ) {}
 	virtual ~ActionListener() throw() = 0;
 	
-	virtual void disposing( const lang::EventObject& ) throw ( RuntimeException ) {}
-	virtual void actionPerformed( const awt::ActionEvent& ) throw ( RuntimeException ) {}
+	virtual void SAL_CALL disposing( const lang::EventObject& ) throw ( RuntimeException ) {}
+	virtual void SAL_CALL actionPerformed( const awt::ActionEvent& ) throw ( RuntimeException ) {}
 };
 
 
@@ -79,8 +83,8 @@ public:
 	ItemListener( BaseDialog* pDlg ) : Listener( pDlg ) {}
 	virtual ~ItemListener() throw() = 0;
 
-	virtual void disposing( const lang::EventObject& oEvt ) throw ( RuntimeException ) {}
-	virtual void itemStateChanged( const awt::ItemEvent& oEvt ) throw ( RuntimeException ) {}
+	virtual void SAL_CALL disposing( const lang::EventObject& oEvt ) throw ( RuntimeException ) {}
+	virtual void SAL_CALL itemStateChanged( const awt::ItemEvent& oEvt ) throw ( RuntimeException ) {}
 };
 
 
@@ -90,9 +94,9 @@ public:
 	FocusListener( BaseDialog* pDlg ) : Listener( pDlg ) {}
 	virtual ~FocusListener() throw() = 0;
 	
-	virtual void focusGained( const awt::FocusEvent& ) throw( RuntimeException ) {}
-	virtual void focusLost( const awt::FocusEvent& ) throw( RuntimeException ) {}
-	virtual void disposing( const lang::EventObject& oEvt ) throw ( RuntimeException ) {}
+	virtual void SAL_CALL focusGained( const awt::FocusEvent& ) throw( RuntimeException ) {}
+	virtual void SAL_CALL focusLost( const awt::FocusEvent& ) throw( RuntimeException ) {}
+	virtual void SAL_CALL disposing( const lang::EventObject& oEvt ) throw ( RuntimeException ) {}
 };	
 
 class MouseListener : public ::cppu::WeakImplHelper1< awt::XMouseListener >, public Listener
@@ -101,12 +105,12 @@ public:
 	MouseListener( BaseDialog* pDlg ) : Listener( pDlg ) {}
 	virtual ~MouseListener() throw() = 0;
 	
-	virtual void mousePressed( const awt::MouseEvent& ) throw( RuntimeException ) {}
-	virtual void mouseReleased( const awt::MouseEvent& o) throw( RuntimeException ) {}
-	virtual void mouseEntered( const awt::MouseEvent& o) throw( RuntimeException ) {}
-	virtual void mouseExited( const awt::MouseEvent& o) throw( RuntimeException ) {}
+	virtual void SAL_CALL mousePressed( const awt::MouseEvent& ) throw( RuntimeException ) {}
+	virtual void SAL_CALL mouseReleased( const awt::MouseEvent& o) throw( RuntimeException ) {}
+	virtual void SAL_CALL mouseEntered( const awt::MouseEvent& o) throw( RuntimeException ) {}
+	virtual void SAL_CALL mouseExited( const awt::MouseEvent& o) throw( RuntimeException ) {}
 	
-	virtual void disposing( const lang::EventObject& oEvt ) throw ( RuntimeException ) {}
+	virtual void SAL_CALL disposing( const lang::EventObject& oEvt ) throw ( RuntimeException ) {}
 };
 
 

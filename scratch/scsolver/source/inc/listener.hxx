@@ -87,9 +87,9 @@ public:
 	RngSelListener( BaseDialog*, RngBtnListener*, const rtl::OUString& );
 	~RngSelListener() throw();
 	
-	virtual void disposing( const lang::EventObject& ) throw ( RuntimeException );
-	virtual void done( const sheet::RangeSelectionEvent& ) throw ( RuntimeException );
-	virtual void aborted( const sheet::RangeSelectionEvent& ) throw ( RuntimeException );
+	virtual void SAL_CALL disposing( const lang::EventObject& ) throw ( RuntimeException );
+	virtual void SAL_CALL done( const sheet::RangeSelectionEvent& ) throw ( RuntimeException );
+	virtual void SAL_CALL aborted( const sheet::RangeSelectionEvent& ) throw ( RuntimeException );
 	
 private:
 	BaseDialog* m_pDlg;
@@ -110,10 +110,10 @@ public:
 	virtual ~RngBtnListener() throw();
 
 	// XEventListener
-	virtual void disposing( const lang::EventObject& oEvt ) throw ( RuntimeException );
+	virtual void SAL_CALL disposing( const lang::EventObject& oEvt ) throw ( RuntimeException );
 
 	// XActionListener
-	virtual void actionPerformed( const awt::ActionEvent& ) throw ( RuntimeException );
+	virtual void SAL_CALL actionPerformed( const awt::ActionEvent& ) throw ( RuntimeException );
 
 	void registerRngSelListener();	
 	void setEventOwner( bool b ) { m_bEventOwner = b; }
@@ -140,10 +140,10 @@ public:
 	virtual ~SolveBtnListener() throw();
 
 	// XEventListener
-	virtual void disposing( const lang::EventObject& ) throw ( RuntimeException );
+	virtual void SAL_CALL disposing( const lang::EventObject& ) throw ( RuntimeException );
 
 	// XActionListener
-	virtual void actionPerformed( const awt::ActionEvent& ) throw ( RuntimeException );
+	virtual void SAL_CALL actionPerformed( const awt::ActionEvent& ) throw ( RuntimeException );
 
 };
 
@@ -157,10 +157,10 @@ public:
 	virtual ~CloseBtnListener() throw();
 
 	// XEventListener
-	virtual void disposing( const lang::EventObject& oEvt ) throw ( RuntimeException );
+	virtual void SAL_CALL disposing( const lang::EventObject& oEvt ) throw ( RuntimeException );
 
 	// XActionListener
-	virtual void actionPerformed( const awt::ActionEvent& ) 
+	virtual void SAL_CALL actionPerformed( const awt::ActionEvent& ) 
 		throw ( RuntimeException );
 };
 
@@ -174,10 +174,10 @@ public:
 	virtual ~SaveBtnListener() throw();
 
 	// XEventListener
-	virtual void disposing( const lang::EventObject& oEvt ) throw ( RuntimeException );
+	virtual void SAL_CALL disposing( const lang::EventObject& oEvt ) throw ( RuntimeException );
 
 	// XActionListener
-	virtual void actionPerformed( const awt::ActionEvent& ) 
+	virtual void SAL_CALL actionPerformed( const awt::ActionEvent& ) 
 		throw ( RuntimeException );
 };
 
@@ -191,10 +191,10 @@ public:
 	virtual ~LoadBtnListener() throw();
 
 	// XEventListener
-	virtual void disposing( const lang::EventObject& oEvt ) throw ( RuntimeException );
+	virtual void SAL_CALL disposing( const lang::EventObject& oEvt ) throw ( RuntimeException );
 
 	// XActionListener
-	virtual void actionPerformed( const awt::ActionEvent& ) 
+	virtual void SAL_CALL actionPerformed( const awt::ActionEvent& ) 
 		throw ( RuntimeException );
 };
 
@@ -208,10 +208,10 @@ public:
 	virtual ~ResetBtnListener() throw();
 
 	// XEventListener
-	virtual void disposing( const lang::EventObject& oEvt ) throw ( RuntimeException );
+	virtual void SAL_CALL disposing( const lang::EventObject& oEvt ) throw ( RuntimeException );
 
 	// XActionListener
-	virtual void actionPerformed( const awt::ActionEvent& ) 
+	virtual void SAL_CALL actionPerformed( const awt::ActionEvent& ) 
 		throw ( RuntimeException );
 
 private:
@@ -228,10 +228,10 @@ public:
 	virtual ~ConstEditBtnListener() throw();
 
 	// XEventListener
-	virtual void disposing( const lang::EventObject& oEvt ) throw ( RuntimeException );
+	virtual void SAL_CALL disposing( const lang::EventObject& oEvt ) throw ( RuntimeException );
 
 	// XActionListener
-	virtual void actionPerformed( const awt::ActionEvent& ) throw ( RuntimeException );
+	virtual void SAL_CALL actionPerformed( const awt::ActionEvent& ) throw ( RuntimeException );
 
 private:
 
@@ -247,9 +247,9 @@ public:
 	ConstListBoxListener( SolverDialog* );
 	virtual ~ConstListBoxListener() throw() { Debug( "ConstListBoxListener d'tor" ); }
 
-	virtual void disposing( const lang::EventObject& oEvt ) throw ( RuntimeException ) {}
+	virtual void SAL_CALL disposing( const lang::EventObject& oEvt ) throw ( RuntimeException ) {}
 	
-	virtual void itemStateChanged( const awt::ItemEvent& ) throw ( RuntimeException );
+	virtual void SAL_CALL itemStateChanged( const awt::ItemEvent& ) throw ( RuntimeException );
 		
 private:
 
@@ -265,8 +265,8 @@ public:
 	MaxRadioBtnListener( SolverDialog* pDlg );
 	virtual ~MaxRadioBtnListener() throw();
 	
-	virtual void disposing( const lang::EventObject& ) throw ( RuntimeException );
-	virtual void itemStateChanged( const awt::ItemEvent& ) throw ( RuntimeException );
+	virtual void SAL_CALL disposing( const lang::EventObject& ) throw ( RuntimeException );
+	virtual void SAL_CALL itemStateChanged( const awt::ItemEvent& ) throw ( RuntimeException );
 };
 
 
@@ -279,9 +279,9 @@ public:
 	
 	virtual rtl::OUString getListenerType() const { return ascii( "FocusListener" ); }
 	
-	virtual void disposing( const lang::EventObject& oEvt ) throw ( RuntimeException ) {}
-	virtual void focusGained( const awt::FocusEvent& ) throw( RuntimeException );
-	virtual void focusLost( const awt::FocusEvent& ) throw( RuntimeException );
+	virtual void SAL_CALL disposing( const lang::EventObject& oEvt ) throw ( RuntimeException ) {}
+	virtual void SAL_CALL focusGained( const awt::FocusEvent& ) throw( RuntimeException );
+	virtual void SAL_CALL focusLost( const awt::FocusEvent& ) throw( RuntimeException );
 	
 };
 
@@ -293,12 +293,12 @@ public:
 	WindowMouseListener( BaseDialog* );
 	virtual ~WindowMouseListener() throw();
 	
-	virtual void mousePressed( const awt::MouseEvent& ) throw( RuntimeException );
-	virtual void mouseReleased( const awt::MouseEvent& o) throw( RuntimeException ) {}
-	virtual void mouseEntered( const awt::MouseEvent& o) throw( RuntimeException ) {}
-	virtual void mouseExited( const awt::MouseEvent& o) throw( RuntimeException ) {}
+	virtual void SAL_CALL mousePressed( const awt::MouseEvent& ) throw( RuntimeException );
+	virtual void SAL_CALL mouseReleased( const awt::MouseEvent& o) throw( RuntimeException ) {}
+	virtual void SAL_CALL mouseEntered( const awt::MouseEvent& o) throw( RuntimeException ) {}
+	virtual void SAL_CALL mouseExited( const awt::MouseEvent& o) throw( RuntimeException ) {}
 	
-	virtual void disposing( const lang::EventObject& oEvt ) throw ( RuntimeException ) {}
+	virtual void SAL_CALL disposing( const lang::EventObject& oEvt ) throw ( RuntimeException ) {}
 };
 
 //--------------------------------------------------------------------------
@@ -311,10 +311,10 @@ public:
 	virtual ~OKCancelBtnListener() throw();
 
 	// XEventListener
-	virtual void disposing( const lang::EventObject& ) throw ( RuntimeException );
+	virtual void SAL_CALL disposing( const lang::EventObject& ) throw ( RuntimeException );
 
 	// XActionListener
-	virtual void actionPerformed( const awt::ActionEvent& ) throw ( RuntimeException );
+	virtual void SAL_CALL actionPerformed( const awt::ActionEvent& ) throw ( RuntimeException );
 		
 private:
 

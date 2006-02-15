@@ -35,7 +35,9 @@
 #include <exception>
 #include <iterator>
 
+#ifdef __GNUC__
 #warning "noalias not present in boost 1.30.2"
+#endif
 #undef noalias
 #define noalias(a) (a)
 

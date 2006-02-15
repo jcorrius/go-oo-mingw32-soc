@@ -99,7 +99,11 @@ double QuasiNewtonImpl::norm( const Matrix& mxX )
 		double f = mxX( i, 0 );
 		fNorm += f*f;
 	}
+#ifdef _MSC_VER
+	return ::sqrt( fNorm );
+#else
 	return std::sqrt( fNorm );
+#endif
 }
 
 double QuasiNewtonImpl::evalF( const BaseFuncObj& oF, const Matrix& mxVars, vector<double>& fVars )
