@@ -1,6 +1,6 @@
 --- /dev/null	
 +++ scsolver/source/numeric/lpsimplex.cxx	
-@@ -0,0 +1,1355 @@
+@@ -0,0 +1,1440 @@
 +/*************************************************************************
 + *
 + *  The Contents of this file are made available subject to
@@ -54,6 +54,14 @@
 +typedef BoundContainer::iterator		BoundIter;
 +typedef BoundContainer::const_iterator	BoundCIter;
 +
++class IllegalTwoPhaseSearch : public ::std::exception
++{
++	virtual const char *what() const throw()
++	{
++		return "Illegal nested two phase search detected";
++	}
++};
++
 +//---------------------------------------------------------------------------
 +// RevisedSimplexImpl
 +
@@ -64,9 +72,13 @@
 +	~RevisedSimplexImpl();
 +
 +	Matrix solve();
++	void setEnableTwoPhaseSearch( bool b ) { m_bTwoPhaseAllowed = b; }
++	bool isTwoPhaseSearchEnabled() { return m_bTwoPhaseAllowed; }
 +
 +private:
 +	RevisedSimplex* m_pSelf;
++
++	bool m_bTwoPhaseAllowed;	// is two-phase initial search allowed ?
 +
 +	Matrix m_aBasicInv;
 +	Matrix m_aUpdateMatrix;
@@ -74,6 +86,7 @@
 +	Matrix m_aX;
 +	size_t m_nIter;
 +
++	Model m_Model;
 +	Matrix m_A, m_B, m_C;
 +	std::vector<bool> m_aBasicVar;
 +	std::vector<size_t> m_aBasicVarId;
@@ -83,6 +96,7 @@
 +
 +	Model* getModel() const { return m_pSelf->getModel(); }
 +
++	void convertVarRange( Model& ) const;
 +	void runNormalInitSearch();
 +	void runTwoPhaseInitSearch( const std::vector<size_t>& );
 +	void printIterateHeader() const;
@@ -94,6 +108,7 @@
 +
 +
 +RevisedSimplexImpl::RevisedSimplexImpl( RevisedSimplex* p ) : m_pSelf( p ),
++	m_bTwoPhaseAllowed( true ),
 +	m_aBasicInv( 0, 0 ), m_aUpdateMatrix( 0, 0 ), m_aPriceVector( 0, 0 ),
 +	m_aX( 0, 0 ), m_nIter( 0 )
 +{
@@ -101,6 +116,60 @@
 +
 +RevisedSimplexImpl::~RevisedSimplexImpl()
 +{
++}
++
++/**
++ * Convert variable ranges into a constrant matrix.  Also
++ * extracts those variables with identical upper and lower
++ * ranges into equality constraints, which are ultimately 
++ * treated as constant values.
++ * 
++ * @param aModel
++ */
++void RevisedSimplexImpl::convertVarRange( Model& aModel ) const
++{
++	size_t nColSize = aModel.getCostVector().cols();
++	for ( size_t i = 0; i < nColSize; ++i )
++	{
++		double fLBound = 0.0, fUBound = 0.0;
++		bool bLBound = false, bUBound = false;
++		if ( aModel.isVarBounded( i, BOUND_LOWER ) )
++		{
++			fLBound = aModel.getVarBound( i, BOUND_LOWER );
++			cout << i << " lower bound: " << fLBound << endl;
++			bLBound = true;
++		}
++
++		if ( aModel.isVarBounded( i, BOUND_UPPER ) )
++		{
++			fUBound = aModel.getVarBound( i, BOUND_UPPER );
++			cout << i << " upper bound: " << fUBound << endl;
++			bUBound = true;
++		}
++
++		if ( bLBound && bUBound && fLBound == fUBound )
++		{
++			cout << "  (equal)" << endl;
++			// TODO: This variable is constant-equivalent.  
++			// Remove it from the temporary model.
++		}
++		else
++		{
++			if ( bLBound )
++			{
++				vector<double> v( nColSize );
++				v.at( i ) = 1.0;
++				aModel.addConstraint( v, GREATER_THAN_EQUAL, fLBound );
++			}
++
++			if ( bUBound )
++			{
++				vector<double> v( nColSize );
++				v.at( i ) = 1.0;
++				aModel.addConstraint( v, LESS_THAN_EQUAL, fUBound );
++			}
++		}
++	}
 +}
 +
 +Matrix RevisedSimplexImpl::solve()
@@ -115,15 +184,16 @@
 +	//     A = expanded constraint matrix
 +	//     B = right hand side vector
 +	//     C = expanded cost vector
-+	
-+	Model* pModel = getModel();
-+	Matrix A( pModel->getConstraintMatrix() );
-+	Matrix B( pModel->getRhsVector() );
-+	Matrix C( pModel->getCostVector() );
++
++	Model aModel( *getModel() );
++	//convertVarRange( aModel );
++	Matrix A( aModel.getConstraintMatrix() );
++	Matrix B( aModel.getRhsVector() );
++	Matrix C( aModel.getCostVector() );
 +
 +	for ( size_t i = 0; i < A.rows(); ++i )
 +	{
-+		Equality eEq = pModel->getEqualityByRowId( i );
++		Equality eEq = aModel.getEqualityByRowId( i );
 +		switch( eEq )
 +		{
 +		case LESS_THAN_EQUAL:
@@ -139,9 +209,9 @@
 +			C( 0, C.cols() ) = 0;
 +	}
 +
-+	if ( !pModel->getVarPositive() )
++	if ( !aModel.getVarPositive() )
 +	{
-+		if ( pModel->getVerbose() )
++		if ( aModel.getVerbose() )
 +			cout << "non-positive variables are not yet supported" << endl;
 +		throw ModelInfeasible();
 +	}
@@ -205,7 +275,7 @@
 +		}
 +	}
 +
-+	if ( pModel->getVerbose() )
++	if ( aModel.getVerbose() )
 +	{
 +		cout << "A:" << endl;
 +		A.print( 0 );
@@ -225,6 +295,7 @@
 +	
 +	m_aBasicVar = aBasicVar;
 +
++	m_Model = aModel;
 +	m_A = A;
 +	m_B = B;
 +	m_C = C;
@@ -249,13 +320,13 @@
 +	m_nIter = 0;
 +	while ( !iterate() );
 +
-+	Matrix aCost = pModel->getCostVector();
++	Matrix aCost = m_Model.getCostVector();
 +	Matrix solution( aCost.cols(), 1 );
 +	solution.setResizable( false );
 +	for ( size_t i = 0; i < aCost.cols(); ++i )
 +		solution( i, 0 ) = m_aX( i, 0 );
 +	
-+	if ( pModel->getVerbose() )
++	if ( m_Model.getVerbose() )
 +	{
 +		cout << "x = ";
 +		solution.trans().print();	
@@ -272,8 +343,7 @@
 +void RevisedSimplexImpl::runNormalInitSearch()
 +{
 +	// Two phase method NOT necessary
-+	Model* pModel = getModel();
-+	if ( pModel->getVerbose() )
++	if ( m_Model.getVerbose() )
 +		Debug( "two phase method NOT necessary" );
 +	
 +	Matrix ABasic( m_A );
@@ -283,7 +353,7 @@
 +		if ( !*pos )
 +			aNonBasicVarId.push_back( distance( m_aBasicVar.begin(), pos ) );
 +	
-+	if ( pModel->getVerbose() )
++	if ( m_Model.getVerbose() )
 +	{
 +		cout << "aNonBasicVarId: ";
 +		printElements( aNonBasicVarId );
@@ -319,10 +389,12 @@
 +*/
 +void RevisedSimplexImpl::runTwoPhaseInitSearch( const vector<size_t>& aNonSatRows )
 +{
++	if ( !m_bTwoPhaseAllowed )
++		throw IllegalTwoPhaseSearch();
++		
 +	static const bool bDebugTwoPhase = true;
 +
-+	Model* pModel = getModel();
-+	if ( pModel->getVerbose() )
++	if ( m_Model.getVerbose() )
 +		Debug( "Entering a two-phase search for initial solution" );
 +
 +	Matrix A2( m_A );
@@ -355,6 +427,11 @@
 +
 +	model->setVerbose( bDebugTwoPhase );
 +	auto_ptr<BaseAlgorithm> algorithm( new RevisedSimplex );
++
++	// This looks ugly, but necessary to prevent nested two-phase search during 
++	// two phase search. (TODO: find a better approach)
++	static_cast<RevisedSimplex*>(algorithm.get())->setEnableTwoPhaseSearch( false );
++
 +	model->solve( algorithm );
 +	Matrix Xtmp( model->getSolution() );
 +
@@ -411,7 +488,7 @@
 +	m_aX = X;
 +	m_aBasicInv = aBasicInv;
 +	
-+	if ( pModel->getVerbose() )
++	if ( m_Model.getVerbose() )
 +		Debug( "Two-phase search found an initial solution" );
 +}
 +
@@ -429,7 +506,7 @@
 +	cout << endl;
 +	
 +	cout << "x(" << m_nIter << ") = ";
-+	m_aX.trans().print( getModel()->getPrecision() );
++	m_aX.trans().print( m_Model.getPrecision() );
 +	cout << "cx = " << (m_C*m_aX).operator()( 0, 0 ) << endl;
 +	cout << line << endl;
 +	
@@ -446,7 +523,7 @@
 +
 +bool RevisedSimplexImpl::iterate()
 +{
-+	bool bVerbose = getModel()->getVerbose();
++	bool bVerbose = m_Model.getVerbose();
 +	if ( bVerbose )
 +		printIterateHeader();
 +
@@ -495,7 +572,7 @@
 +		}			
 +	}
 +	
-+	Goal eGoal = getModel()->getGoal();
++	Goal eGoal = m_Model.getGoal();
 +	if ( ( eGoal == GOAL_MAXIMIZE && fMax <= 0.0 ) ||
 +		 ( eGoal == GOAL_MINIMIZE && fMin >= 0.0 ) )
 +	{
@@ -530,7 +607,7 @@
 +	if ( bVerbose )
 +	{
 +		cout << "dX[" << nEnterVarId << "] = ";
-+		dX.trans().print( getModel()->getPrecision() );
++		dX.trans().print( m_Model.getPrecision() );
 +	}
 +
 +	// Check all components of dX to make sure there is at least one negative 
@@ -660,6 +737,10 @@
 +	setSolution( sol );
 +}
 +
++void RevisedSimplex::setEnableTwoPhaseSearch( bool b )
++{
++	m_pImpl->setEnableTwoPhaseSearch( b );
++}
 +
 +//---------------------------------------------------------------------------
 +// BoundedRevisedSimplexImpl
@@ -1294,7 +1375,8 @@
 +				return true;
 +		}
 +		
-+	if ( !m_pModel->isVarBounded( nIdx, BOUND_LOWER ) && !m_pModel->isVarBounded( nIdx, BOUND_UPPER ) )
++	if ( !m_pModel->isVarBounded( nIdx, BOUND_LOWER ) &&
++		 !m_pModel->isVarBounded( nIdx, BOUND_UPPER ) )
 +		if ( makeVarCombo( nIdx + 1, nUpper, aArray ) )
 +			return true;
 +
@@ -1309,8 +1391,10 @@
 +	for ( size_t i = 0; i < mxX.rows(); ++i )
 +	{
 +		double fVal = mxX( i, 0 );
-+		if ( ( m_pModel->isVarBounded( i, BOUND_LOWER ) && fVal < m_pModel->getVarBound( i, BOUND_LOWER ) ) ||
-+			 ( m_pModel->isVarBounded( i, BOUND_UPPER ) && fVal > m_pModel->getVarBound( i, BOUND_UPPER ) ) )
++		if ( ( m_pModel->isVarBounded( i, BOUND_LOWER ) && 
++			   fVal < m_pModel->getVarBound( i, BOUND_LOWER ) ) ||
++			 ( m_pModel->isVarBounded( i, BOUND_UPPER ) &&
++			   fVal > m_pModel->getVarBound( i, BOUND_UPPER ) ) )
 +			return false;
 +	}
 +
@@ -1320,7 +1404,8 @@
 +	return true;
 +}
 +
-+const Matrix BoundedRevisedSimplexImpl::solvePriceVector( const vector<size_t>& aBasicVarId,
++const Matrix BoundedRevisedSimplexImpl::solvePriceVector( 
++		const vector<size_t>& aBasicVarId,
 +		const Matrix& mxAInv, const Matrix& mxC ) const
 +{
 +	Matrix c;
