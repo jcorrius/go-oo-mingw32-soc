@@ -352,6 +352,23 @@ sub applied_patches_list
     return @patches;
 }
 
+sub check_tag {
+    my $mws_found = 0;
+    for my $oldest (split /\s/, $options{'OLDEST_SUPPORTED'}) {
+	if ( same_mws( $tag, $oldest ) ) {
+	    if ( milestone_cmp($tag, $oldest) < 0 ) {
+		die "\n\n** Error ** - Tag '$tag' " .
+		    "is too old, please use at least '$oldest'\n\n\n";
+	    }
+	    $mws_found = 1;
+	}
+    }
+    if ( ! $mws_found ) {
+	print "Warning: Nothing known about tag '$tag', " .
+	    "please update 'OLDEST_SUPPORTED'.\n";
+    }
+}
+
 sub apply_patches {
 
     my @Patches = list_patches (@distros);
@@ -361,6 +378,8 @@ sub apply_patches {
     for $opt (@required_opts) { 
         defined $options{$opt} || die "Required option $opt not defined"; 
     }
+
+    check_tag();
 
     if( ! -d $applied_patches ) {
         mkdir $applied_patches || die "Can't make directory $patch_dir: $!";
@@ -558,7 +577,7 @@ $opts = "";
 $tag = '';
 $dry_run = 0;
 $find_unused = 0;
-@required_opts = ( 'PATCHPATH' );
+@required_opts = ( 'PATCHPATH', 'OLDEST_SUPPORTED' );
 @arguments = ();
 @unfiltered_patch_list = ();
 
