@@ -328,7 +328,6 @@ void factorize( const bnu::matrix<double>& mxA, bnu::matrix<double>& mxL,
 	for ( it = itBeg; it != itEnd; ++it )
 	{
 		size_t nIdx = std::distance( itBeg, it );
-		cout << nIdx << endl;
 		P( std::distance( itBeg, it ), *it ) = 1.0;
 	}
 

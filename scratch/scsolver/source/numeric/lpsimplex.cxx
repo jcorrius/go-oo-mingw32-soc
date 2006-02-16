@@ -235,6 +235,7 @@ Matrix RevisedSimplexImpl::solve()
 			if ( A( i, j ) != 0.0 )
 				if ( bNonZeroFound )
 				{
+					// a second non-zero coefficient encountered (not good)
 					nUniqueRowSigned = -1;
 					break;
 				}
@@ -401,7 +402,7 @@ void RevisedSimplexImpl::runTwoPhaseInitSearch( const vector<size_t>& aNonSatRow
 	for ( nIter = aNonSatRows.begin(); nIter != end; ++nIter )
 	{
 		size_t nRowId = *nIter;
-		if ( m_B( nRowId, 1 ) >= 0 )
+		if ( m_B( nRowId, 0 ) >= 0 )
 			A2( nRowId, A2.cols() ) = 1;
 		else
 			A2( nRowId, A2.cols() ) = -1;
@@ -463,7 +464,6 @@ void RevisedSimplexImpl::runTwoPhaseInitSearch( const vector<size_t>& aNonSatRow
 	sort( aNonBasicVarId.begin(), aNonBasicVarId.end() );
 	cout << "aNonBasicVarId = ";
 	printElements( aNonBasicVarId, " " );
-	cout << aNonBasicVarId.size() << endl;
 
 	Matrix ABasic( m_A );
 	ABasic.print( 0 );
