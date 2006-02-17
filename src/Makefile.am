@@ -28,7 +28,7 @@ EXTRA_DIST=\
 	openabout_translateorgza.png \
 	file-bug-24.png \
 	file-bug-16.png \
-	novell-team.png \
+	go-oo-team.png \
 	evolocal.odb
 
 
