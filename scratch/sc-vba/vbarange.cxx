@@ -48,6 +48,12 @@
 #include <org/openoffice/vba/Excel/XlDirection.hpp>
 #include <org/openoffice/vba/Excel/XlSortDataOption.hpp>
 
+
+#include <scitems.hxx>
+#include <svx/srchitem.hxx>
+#include <cellsuno.hxx>
+#include <dbcolect.hxx>
+
 #include <sfx2/dispatch.hxx>
 #include <sfx2/app.hxx>
 #include <sfx2/bindings.hxx>
@@ -65,7 +71,8 @@
 
 #include <comphelper/anytostring.hxx>
 
-#include "global.hxx"
+#include <global.hxx>
+
 #include "vbaglobals.hxx"
 #include <vector>
 
@@ -1239,16 +1246,14 @@ ScVbaRange::Replace( const ::rtl::OUString& What, const ::rtl::OUString& Replace
 	if ( !What.getLength() || !Replacement.getLength() )
 		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Range::Replace, missing params" )) , uno::Reference< uno::XInterface >() );
 
-	// #TODO #FIXME
-	// also this method should take/set the defaults from the find dialog
-	// thats probably not very important for us but the implied behavior is
-	// e.g. it needs to persist the options between calls
-	//
 	// #TODO #FIXME SearchFormat & ReplacesFormat are not processed
+	// What do we do about MatchByte.. we don't seem to support that
+	const SvxSearchItem& globalSearchOptions = ScGlobal::GetSearchItem();
+	SvxSearchItem newOptions( globalSearchOptions );
 
-	// Set up sensible defaults
-	sal_Int16 nLook =  vba::Excel::XlLookAt::xlPart;
-	sal_Int16 nSearchOrder = vba::Excel::XlSearchOrder::xlByRows;
+	sal_Int16 nLook =  globalSearchOptions.GetWordOnly() ?  vba::Excel::XlLookAt::xlPart : vba::Excel::XlLookAt::xlWhole; 
+	sal_Int16 nSearchOrder = globalSearchOptions.GetRowDirection() ? vba::Excel::XlSearchOrder::xlByRows : vba::Excel::XlSearchOrder::xlByColumns;
+
 	sal_Bool bMatchCase = sal_False;
 
 	uno::Reference< util::XReplaceable > xReplace( mxRange, uno::UNO_QUERY );
@@ -1270,7 +1275,9 @@ ScVbaRange::Replace( const ::rtl::OUString& What, const ::rtl::OUString& Replace
 				bSearchWords = sal_True;
 			else
 				throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Range::Replace, illegal value for LookAt" )) , uno::Reference< uno::XInterface >() );
-
+			// set global search props ( affects the find dialog
+			// and of course the defaults for this method
+			newOptions.SetWordOnly( bSearchWords );
 			xDescriptor->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( SC_UNO_SRCHWORDS ) ), uno::makeAny( bSearchWords ) ); 	
 		}
 		// sets SearchByRow ( true for Rows )
@@ -1281,10 +1288,11 @@ ScVbaRange::Replace( const ::rtl::OUString& What, const ::rtl::OUString& Replace
 			if ( nSearchOrder == vba::Excel::XlSearchOrder::xlByColumns )
 				bSearchByRow = sal_False;
 			else if ( nSearchOrder == vba::Excel::XlSearchOrder::xlByRows )
-				bSearchByRow = sal_False;
+				bSearchByRow = sal_True;
 			else
 				throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Range::Replace, illegal value for SearchOrder" )) , uno::Reference< uno::XInterface >() );
 			
+			newOptions.SetRowDirection( bSearchByRow ); 
 			xDescriptor->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( SC_UNO_SRCHBYROW ) ), uno::makeAny( bSearchByRow ) ); 	
 		}			
 		if ( MatchCase.hasValue() )
@@ -1293,6 +1301,8 @@ ScVbaRange::Replace( const ::rtl::OUString& What, const ::rtl::OUString& Replace
 			MatchCase >>= bMatchCase;	
 			xDescriptor->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( SC_UNO_SRCHCASE ) ), uno::makeAny( bMatchCase ) ); 	
 		}			
+
+		ScGlobal::SetSearchItem( newOptions );	
 		// ignore MatchByte for the moment, its not supported in
 		// OOo.org afaik
 
@@ -1390,6 +1400,25 @@ ScVbaRange::Sort( const uno::Any& Key1, const uno::Any& Order1, const uno::Any& 
 	sal_Int16 nDataOption2 = vba::Excel::XlSortDataOption::xlSortNormal;;
 	sal_Int16 nDataOption3 = vba::Excel::XlSortDataOption::xlSortNormal;
 
+	// need the ScCellRangeObj to get docshell
+	ScCellRangeObj* pUno = static_cast<  ScCellRangeObj* >( mxRange.get() );
+	if ( !pUno )
+		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Failed to access underlying uno range object" ) ), uno::Reference< uno::XInterface >()  );
+
+	ScDocShell* pDocShell = pUno->GetDocShell();
+	if ( !pDocShell )
+		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Failed to access underlying docshell from uno range object" ) ), uno::Reference< uno::XInterface >() );
+
+	RangeHelper thisRange( mxRange );
+	table::CellRangeAddress thisRangeAddress = thisRange.getCellRangeAddressable()->getRangeAddress();
+	SCTAB nTab = thisRangeAddress.Sheet;
+	ScDocument* pDoc = pDocShell->GetDocument();
+	if ( !pDoc )
+		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Failed to access document from shell" ) ), uno::Reference< uno::XInterface >() );
+
+	ScSortParam aSortParam;
+	pDoc->GetSortParam( aSortParam, nTab );
+
 	if ( DataOption1.hasValue() )
 		DataOption1 >>= nDataOption1;
 	if ( DataOption2.hasValue() )
@@ -1402,7 +1431,7 @@ ScVbaRange::Sort( const uno::Any& Key1, const uno::Any& Order1, const uno::Any& 
 	uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, uno::UNO_QUERY_THROW );
 	sal_Int32 nRowCount = xColumnRowRange->getRows()->getCount();
 	sal_Int32 nColCount = xColumnRowRange->getColumns()->getCount();
-	
+			
 	// 'Fraid I don't remember what I was trying to achieve here ???
 /* 
 	if (  nRowCount == 1 && nColCount == 1 )
@@ -1413,51 +1442,109 @@ ScVbaRange::Sort( const uno::Any& Key1, const uno::Any& Order1, const uno::Any& 
 	}
 */
 	// set up defaults
-	sal_Int16 defaultOrder = vba::Excel::XlSortOrder::xlAscending;
 
-	sal_Int16 nOrder1 = defaultOrder;
-	sal_Int16 nOrder2 = defaultOrder;
-	sal_Int16 nOrder3 = defaultOrder;
+	sal_Int16 nOrder1 = aSortParam.bAscending[0] ? vba::Excel::XlSortOrder::xlAscending : vba::Excel::XlSortOrder::xlDescending;
+	sal_Int16 nOrder2 = aSortParam.bAscending[1] ? vba::Excel::XlSortOrder::xlAscending : vba::Excel::XlSortOrder::xlDescending;
+	sal_Int16 nOrder3 = aSortParam.bAscending[2] ? vba::Excel::XlSortOrder::xlAscending : vba::Excel::XlSortOrder::xlDescending;
 
+	sal_Int16 nCustom = aSortParam.nUserIndex;
 	sal_Int16 nSortMethod = vba::Excel::XlSortMethod::xlPinYin;
+	sal_Bool bMatchCase = aSortParam.bCaseSens;
 
-	sal_Bool bMatchCase = sal_False;
+	// seems to work opposite to expected, see below
+	sal_Int16 nOrientation = aSortParam.bByRow ?  vba::Excel::XlSortOrientation::xlSortColumns :  vba::Excel::XlSortOrientation::xlSortRows;
 
-
-	sal_Bool bContainsHeader = sal_False;
-	// #FIXME ignoring XlYesNoGuess::xlGuess
-	if ( Header.hasValue() )
-	{
-		sal_Int16 nHeader = ::comphelper::getINT16( Header );
-		if ( nHeader == vba::Excel::XlYesNoGuess::xlYes )
-			bContainsHeader = sal_True;
-	}
-			
-	sal_Bool bIsSortColumns=sal_False; // sort by row
 	if ( Orientation.hasValue() )
 	{
 		// Documentation says xlSortRows is default but that doesn't appear to be 
 		// the case. Also it appears that xlSortColumns is the default which 
 		// strangely enought sorts by Row
-		sal_Int16 nOrientation = ::comphelper::getINT16( Orientation );
+		nOrientation = ::comphelper::getINT16( Orientation );
+		// persist new option to be next calls default
 		if ( nOrientation == vba::Excel::XlSortOrientation::xlSortRows )
-			bIsSortColumns = sal_True;
+			aSortParam.bByRow = FALSE;
+		else
+			aSortParam.bByRow = TRUE;
+
 	}
+
+	sal_Bool bIsSortColumns=sal_False; // sort by row
+
+	if ( nOrientation == vba::Excel::XlSortOrientation::xlSortRows )
+		bIsSortColumns = sal_True;
+
+	sal_Int16 nHeader = aSortParam.nCompatHeader;
+	sal_Bool bContainsHeader = sal_False;
+
+	if ( Header.hasValue() )
+	{
+		nHeader = ::comphelper::getINT16( Header );
+		aSortParam.nCompatHeader = nHeader;
+	}			
+
+	if ( nHeader == vba::Excel::XlYesNoGuess::xlGuess )
+	{
+		ScDocument* pDoc = pDocShell->GetDocument();
+		if ( pDoc )
+		{
+			//CROW nStartRow, SCCOL nEndCol, SCROW nEndRow, SCTAB nTab );
+			bool bHasColHeader = pDoc->HasColHeader(  thisRangeAddress.StartColumn, thisRangeAddress.StartRow, thisRangeAddress.EndColumn, thisRangeAddress.EndRow, thisRangeAddress.Sheet );
+			bool bHasRowHeader = pDoc->HasRowHeader(  thisRangeAddress.StartColumn, thisRangeAddress.StartRow, thisRangeAddress.EndColumn, thisRangeAddress.EndRow, thisRangeAddress.Sheet );
+			if ( bHasColHeader || bHasRowHeader )
+				nHeader =  vba::Excel::XlYesNoGuess::xlYes; 
+			else
+				nHeader =  vba::Excel::XlYesNoGuess::xlNo; 
+			// save set param as default
+			aSortParam.nCompatHeader = nHeader;
+		}
+	}
+
+	if ( nHeader == vba::Excel::XlYesNoGuess::xlYes )
+		bContainsHeader = sal_True;
 
 	if ( SortMethod.hasValue() )
 	{
 		nSortMethod = ::comphelper::getINT16( SortMethod );
 	}
+	
+	if ( OrderCustom.hasValue() )
+	{
+		OrderCustom >>= nCustom;
+		--nCustom; // 0-based in OOo
+		aSortParam.nUserIndex = nCustom;
+	}
 
 	if ( MatchCase.hasValue() )
+	{
 		MatchCase >>= bMatchCase;
+		aSortParam.bCaseSens = bMatchCase;
+	}
 
 	if ( Order1.hasValue() )
+	{
 		nOrder1 = ::comphelper::getINT16(Order1);
+		if (  nOrder1 == vba::Excel::XlSortOrder::xlAscending ) 
+			aSortParam.bAscending[0]  = TRUE;
+		else
+			aSortParam.bAscending[0]  = FALSE;
+
+	}
 	if ( Order2.hasValue() )
+	{
 		nOrder2 = ::comphelper::getINT16(Order2);
+		if ( nOrder2 == vba::Excel::XlSortOrder::xlAscending ) 
+			aSortParam.bAscending[1]  = TRUE;
+		else
+			aSortParam.bAscending[1]  = FALSE;
+	}
 	if ( Order3.hasValue() )
+	{
 		nOrder3 = ::comphelper::getINT16(Order3);
+		if ( nOrder3 == vba::Excel::XlSortOrder::xlAscending ) 
+			aSortParam.bAscending[2]  = TRUE;
+		else
+			aSortParam.bAscending[2]  = FALSE;
+	}
 
 	uno::Reference< table::XCellRange > xKey1;	
 	uno::Reference< table::XCellRange > xKey2;	
@@ -1498,13 +1585,11 @@ ScVbaRange::Sort( const uno::Any& Key1, const uno::Any& Order1, const uno::Any& 
 	nIndex = 	findSortPropertyIndex( sortDescriptor,  rtl::OUString(RTL_CONSTASCII_USTRINGPARAM("ContainsHeader")) );
 	sortDescriptor[ nIndex ].Value <<= bContainsHeader;
 
+	pDoc->SetSortParam( aSortParam, nTab );
 	xSort->sort( sortDescriptor );
 
 	// #FIXME #TODO
 	// The SortMethod param is not processed ( not sure what its all about, need to
-	// research further )
-	// Header param XlYesNoGuess::xlGuess is not processed ( need to figure out how 
-	// to determine if headers are in the range )
 
 }
 

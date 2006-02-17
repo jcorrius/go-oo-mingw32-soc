@@ -20,6 +20,7 @@ namespace org
 		css::uno::Reference< css::frame::XModel >
 			getCurrentDocument() throw (css::uno::RuntimeException);
 		ScTabViewShell* getBestViewShell( css::uno::Reference< css::frame::XModel>& xModel ) ;
+		ScDocShell* getDocShell( css::uno::Reference< css::frame::XModel>& xModel ) ;
 		ScTabViewShell* getCurrentBestViewShell();
 		SfxViewFrame* getCurrentViewFrame();
 	}

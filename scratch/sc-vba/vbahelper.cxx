@@ -271,17 +271,25 @@ org::openoffice::getCurrentDocument() throw (uno::RuntimeException)
 	return xModel;
 }
 
+ScDocShell* 
+org::openoffice::getDocShell( css::uno::Reference< css::frame::XModel>& xModel ) 
+{
+	ScModelObj* pModel = static_cast< ScModelObj* >( xModel.get() );
+	ScDocShell* pDocShell = NULL;
+	if ( pModel )
+		pDocShell = (ScDocShell*)pModel->GetEmbeddedObject();
+	return pDocShell;
+
+}
+
 ScTabViewShell* 
 org::openoffice::getBestViewShell(  css::uno::Reference< css::frame::XModel>& xModel )
 {
-	ScModelObj* pModel = static_cast< ScModelObj* >( xModel.get() );
-	if ( pModel )
+	ScDocShell* pDocShell = NULL;
+	if ( ( pDocShell = getDocShell( xModel ) ) )
 	{
-		ScDocShell* pDocShell = (ScDocShell*)pModel->GetEmbeddedObject();
-		if ( pDocShell )
-			return pDocShell->GetBestViewShell();
+		return pDocShell->GetBestViewShell();
 	}
-	
 	return NULL;
 }
 
