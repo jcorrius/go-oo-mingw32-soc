@@ -24,6 +24,8 @@ EXTRA_DIST=\
 	openintro_gentoo.bmp \
 	openintro_qilinux.bmp \
 	openabout_qilinux.png \
+	openintro_ubuntu.bmp \
+	openabout_ubuntu.png \
 	openintro_translateorgza.bmp \
 	openabout_translateorgza.png \
 	file-bug-24.png \
