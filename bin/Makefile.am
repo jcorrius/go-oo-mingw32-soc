@@ -1,4 +1,5 @@
 script_files = \
+	bash-completion.in \
 	build-galleries \
 	build-ooo \
 	build-tools \
