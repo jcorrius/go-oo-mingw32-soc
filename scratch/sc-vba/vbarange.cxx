@@ -651,28 +651,28 @@ void
 ScVbaRange::FillLeft() throw (uno::RuntimeException)
 {
 	fillSeries(sheet::FillDirection_TO_LEFT, 
-		sheet::FillMode_LINEAR, sheet::FillDateMode_FILL_DATE_DAY, 0, 0x7FFFFFFF);
+		sheet::FillMode_SIMPLE, sheet::FillDateMode_FILL_DATE_DAY, 0, 0x7FFFFFFF);
 }
 
 void 
 ScVbaRange::FillRight() throw (uno::RuntimeException)
 {
 	fillSeries(sheet::FillDirection_TO_RIGHT, 
-		sheet::FillMode_LINEAR, sheet::FillDateMode_FILL_DATE_DAY, 0, 0x7FFFFFFF);
+		sheet::FillMode_SIMPLE, sheet::FillDateMode_FILL_DATE_DAY, 0, 0x7FFFFFFF);
 }
 
 void 
 ScVbaRange::FillUp() throw (uno::RuntimeException)
 {
 	fillSeries(sheet::FillDirection_TO_TOP, 
-		sheet::FillMode_LINEAR, sheet::FillDateMode_FILL_DATE_DAY, 0, 0x7FFFFFFF);
+		sheet::FillMode_SIMPLE, sheet::FillDateMode_FILL_DATE_DAY, 0, 0x7FFFFFFF);
 }
 
 void 
 ScVbaRange::FillDown() throw (uno::RuntimeException)
 {
 	fillSeries(sheet::FillDirection_TO_BOTTOM, 
-		sheet::FillMode_LINEAR, sheet::FillDateMode_FILL_DATE_DAY, 0, 0x7FFFFFFF);
+		sheet::FillMode_SIMPLE, sheet::FillDateMode_FILL_DATE_DAY, 0, 0x7FFFFFFF);
 }
 
 ::rtl::OUString
