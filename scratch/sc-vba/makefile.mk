@@ -51,7 +51,8 @@ SLOFILES= \
 		$(SLO)$/vbapivottable.obj \
 		$(SLO)$/vbapivotcache.obj \
 		$(SLO)$/vbapivottables.obj \
-		$(SLO)$/vbawindows.obj
+		$(SLO)$/vbawindows.obj \
+		$(SLO)$/vbacharacters.obj
  
 
 # --- Targets ------------------------------------------------------

@@ -34,6 +34,8 @@
 #include <com/sun/star/util/XSortable.hpp>
 #include <com/sun/star/sheet/XCellRangeMovement.hpp>
 #include <com/sun/star/sheet/XCellRangeData.hpp>
+//#include <com/sun/star/sheet/CellDeleteMode.hpp>
+#include <com/sun/star/sheet/XCellRangeMovement.hpp>
 
 #include <org/openoffice/vba/xlPasteSpecialOperation.hpp>
 #include <org/openoffice/vba/xlPasteType.hpp>
@@ -47,6 +49,7 @@
 #include <org/openoffice/vba/Excel/XlSortMethod.hpp>
 #include <org/openoffice/vba/Excel/XlDirection.hpp>
 #include <org/openoffice/vba/Excel/XlSortDataOption.hpp>
+#include <org/openoffice/vba/Excel/XlDeleteShiftDirection.hpp>
 
 
 #include <scitems.hxx>
@@ -68,6 +71,7 @@
 #include "vbacomment.hxx"
 #include "vbainterior.hxx"
 #include "vbaarraywrapper.hxx"
+#include "vbacharacters.hxx"
 
 #include <comphelper/anytostring.hxx>
 
@@ -480,15 +484,15 @@ uno::Any SAL_CALL
 ScVbaRange::getValue() throw (uno::RuntimeException)
 {
 	uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, uno::UNO_QUERY_THROW );
-	sal_Int32 nRowCount = xColumnRowRange->getRows()->getCount();
-	sal_Int32 nColCount = xColumnRowRange->getColumns()->getCount();
 	// single cell range
-	if ( nRowCount == 1 && nColCount == 1 )
+	if ( isSingleCellRange() )
 	{
 		CellValueGetter getter;
 		visitArray( getter );
 		return getter.getValue();
 	}
+	sal_Int32 nRowCount = xColumnRowRange->getRows()->getCount();
+	sal_Int32 nColCount = xColumnRowRange->getColumns()->getCount();
 	// multi cell range ( return array )
 	Dim2ArrayValueGetter getter( nRowCount, nColCount );
 	visitArray( getter );
@@ -673,15 +677,8 @@ ScVbaRange::FillDown() throw (uno::RuntimeException)
 ::rtl::OUString
 ScVbaRange::getText() throw (uno::RuntimeException)
 {
-	uno::Reference< text::XTextRange > xTextRange(mxRange, uno::UNO_QUERY_THROW );
+	uno::Reference< text::XTextRange > xTextRange(mxRange->getCellByPosition(0,0), uno::UNO_QUERY_THROW );
 	return xTextRange->getString();
-}
-
-void 
-ScVbaRange::setText( const ::rtl::OUString &rString ) throw (uno::RuntimeException)
-{
-	uno::Reference< text::XTextRange > xTextRange(mxRange, uno::UNO_QUERY_THROW );
-	xTextRange->setString( rString );
 }
 
 uno::Reference< vba::XRange >
@@ -1429,12 +1426,10 @@ ScVbaRange::Sort( const uno::Any& Key1, const uno::Any& Order1, const uno::Any& 
 	// 1) #TODO #FIXME need to process DataOption[1..3] not used currently
 	// 2) #TODO #FIXME need to refactor this ( below ) into a IsSingleCell() method
 	uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, uno::UNO_QUERY_THROW );
-	sal_Int32 nRowCount = xColumnRowRange->getRows()->getCount();
-	sal_Int32 nColCount = xColumnRowRange->getColumns()->getCount();
 			
 	// 'Fraid I don't remember what I was trying to achieve here ???
 /* 
-	if (  nRowCount == 1 && nColCount == 1 )
+	if (  isSingleCellRange() )
 	{
 		uno::Reference< vba::XRange > xCurrent = CurrentRegion();
 		xCurrent->Sort( Key1, Order1, Key2, Type, Order2, Key3, Order3, Header, OrderCustom, MatchCase, Orientation, SortMethod, DataOption1, DataOption2, DataOption3 );
@@ -1664,6 +1659,56 @@ ScVbaRange::End( ::sal_Int32 Direction )  throw (css::uno::RuntimeException)
 	
 	return resultCell;
 }
+
+bool
+ScVbaRange::isSingleCellRange()
+{
+	uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, uno::UNO_QUERY_THROW );
+	if ( xColumnRowRange->getRows()->getCount() == 1 && xColumnRowRange->getColumns()->getCount() == 1 )
+		return true;
+	return false;
+}
+
+uno::Reference< vba::XCharacters > SAL_CALL 
+ScVbaRange::characters( const uno::Any& Start, const css::uno::Any& Length ) throw (uno::RuntimeException)
+{
+	if ( !isSingleCellRange() )
+		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Can't create Characters property for multicell range ") ), uno::Reference< uno::XInterface >() );
+	uno::Reference< text::XSimpleText > xSimple(mxRange->getCellByPosition(0,0) , uno::UNO_QUERY_THROW );
+	return uno::Reference< vba::XCharacters >( new ScVbaCharacters( m_xContext, xSimple, Start, Length ) );
+}
+
+ void SAL_CALL 
+ScVbaRange::Delete( const uno::Any& Shift ) throw (uno::RuntimeException)
+{
+	sheet::CellDeleteMode mode = sheet::CellDeleteMode_NONE ; 
+	if ( Shift.hasValue() )		
+	{
+		sal_Int32 nShift;
+		Shift >>= nShift;
+		switch ( nShift )
+		{
+			case vba::Excel::XlDeleteShiftDirection::xlShiftUp:
+				mode = sheet::CellDeleteMode_UP;
+				break;
+			case vba::Excel::XlDeleteShiftDirection::xlShiftToLeft:
+				mode = sheet::CellDeleteMode_LEFT;
+				break;
+			default:
+				throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM ("Illegal paramater ") ), uno::Reference< uno::XInterface >() );
+		}
+	}
+	else
+		if ( getRow() >  getColumn() )
+			mode = sheet::CellDeleteMode_UP;
+		else
+			mode = sheet::CellDeleteMode_LEFT;
+	RangeHelper thisRange( mxRange );
+	uno::Reference< sheet::XCellRangeMovement > xCellRangeMove( thisRange.getSpreadSheet(), uno::UNO_QUERY_THROW );
+	xCellRangeMove->removeRange( thisRange.getCellRangeAddressable()->getRangeAddress(), mode ); 
+	
+}
+
 //XElementAccess
 sal_Bool SAL_CALL 
 ScVbaRange::hasElements() throw (uno::RuntimeException)
