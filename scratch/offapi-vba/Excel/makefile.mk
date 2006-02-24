@@ -31,6 +31,7 @@ IDLFILES=\
 	XlSortOrientation.idl \
 	XlDirection.idl \
 	XlSortDataOption.idl \
+	XlDeleteShiftDirection.idl
 
 
 # ------------------------------------------------------------------
