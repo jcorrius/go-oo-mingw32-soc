@@ -49,7 +49,6 @@
         virtual css::uno::Any SAL_CALL WorkBooks(const css::uno::Any& aIndex ) throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL Sheets( const css::uno::Any& aIndex ) throw (css::uno::RuntimeException);
 	virtual css::uno::Sequence< css::uno::Any > SAL_CALL getGlobals(  ) throw (css::uno::RuntimeException);
-
-
+	virtual css::uno::Any SAL_CALL Range( const css::uno::Any& Cell1, const css::uno::Any& Cell2 ) throw (css::uno::RuntimeException);
     };
 #endif // 

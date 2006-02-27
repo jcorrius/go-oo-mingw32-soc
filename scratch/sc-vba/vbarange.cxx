@@ -1005,7 +1005,8 @@ ScVbaRange::getWrapText() throw (uno::RuntimeException)
 
 uno::Reference< vba::XInterior > ScVbaRange::Interior( ) throw (uno::RuntimeException)
 {
-        return uno::Reference<vba::XInterior> (new ScVbaInterior ( m_xContext, mxRange));
+	uno::Reference< beans::XPropertySet > xProps( mxRange->getCellByPosition( 0,0 ), uno::UNO_QUERY_THROW );
+        return uno::Reference<vba::XInterior> (new ScVbaInterior ( m_xContext, xProps ));
 }                                                                                                                             
 table::CellRangeAddress getCellRangeAddress( const uno::Any& aParam,
 const uno::Reference< table::XCellRange >& xRanges )
