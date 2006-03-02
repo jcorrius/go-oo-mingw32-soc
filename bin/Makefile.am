@@ -14,6 +14,9 @@ script_files = \
 	nothing \
 	ooconfig \
 	ooinstall \
+	oosmoketest.in \
+	ootestapi.in \
+	ootesttool.in \
 	ootool.in \
 	ooo-wrapper.in \
 	ootouch \
