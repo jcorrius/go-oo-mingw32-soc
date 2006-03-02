@@ -9,6 +9,7 @@
 
 #include <com/sun/star/script/XInvocation.hpp>
 
+class ScDocument;
 
 typedef ::cppu::WeakImplHelper1< oo::vba::XInterior > ScVbaInterior_BASE;
 
@@ -16,10 +17,10 @@ class ScVbaInterior :  public ScVbaInterior_BASE
 {
 	css::uno::Reference< css::beans::XPropertySet > m_xProps;
         css::uno::Reference< css::uno::XComponentContext > m_xContext;
-
+	ScDocument* m_pScDoc;
 public:
         ScVbaInterior( const css::uno::Reference< css::uno::XComponentContext >& xContext,
-                 const css::uno::Reference< css::beans::XPropertySet >& xProps) throw ( css::lang::IllegalArgumentException);
+                 const css::uno::Reference< css::beans::XPropertySet >& xProps, ScDocument* pScDoc ) throw ( css::lang::IllegalArgumentException);
 
         virtual ~ScVbaInterior(){}
 

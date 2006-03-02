@@ -3,6 +3,7 @@
 #include <com/sun/star/table/XColumnRowRange.hpp>
 #include <com/sun/star/beans/XIntrospection.hpp>
 #include <com/sun/star/beans/XIntrospectionAccess.hpp>
+#include <com/sun/star/sheet/XFunctionAccess.hpp>
 #include <com/sun/star/sheet/XCellRangesQuery.hpp>
 #include <com/sun/star/sheet/CellFlags.hpp>
 #include <com/sun/star/reflection/XIdlMethod.hpp>
@@ -16,10 +17,11 @@
 using namespace com::sun::star;
 using namespace org::openoffice;
 
-void SAL_CALL 
-ScVbaWSFunction::dummy(  ) throw (uno::RuntimeException)
+ScVbaWSFunction::ScVbaWSFunction( css::uno::Reference< css::uno::XComponentContext >& xContext):m_xContext(xContext)
 {
+	m_xNameAccess.set(  m_xContext->getServiceManager()->createInstanceWithContext( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("com.sun.star.sheet.FunctionDescriptions") ), m_xContext ), uno::UNO_QUERY_THROW );
 }
+
 
 uno::Reference< beans::XIntrospectionAccess >
 ScVbaWSFunction::getIntrospection(void)  throw(uno::RuntimeException)
@@ -61,22 +63,42 @@ ScVbaWSFunction::invoke(const rtl::OUString& FunctionName, const uno::Sequence< 
 void SAL_CALL
 ScVbaWSFunction::setValue(const rtl::OUString& PropertyName, const uno::Any& Value) throw(beans::UnknownPropertyException, script::CannotConvertException, reflection::InvocationTargetException, uno::RuntimeException)
 {
+	throw beans::UnknownPropertyException();
 }
 
 uno::Any SAL_CALL
 ScVbaWSFunction::getValue(const rtl::OUString& PropertyName) throw(beans::UnknownPropertyException, uno::RuntimeException)
 {
-	return uno::Any();
+	throw beans::UnknownPropertyException();
 }
 
 sal_Bool SAL_CALL
 ScVbaWSFunction::hasMethod(const rtl::OUString& Name)  throw(uno::RuntimeException)
 {
-	return true;
+	sal_Bool bIsFound = sal_False;
+	try 
+	{
+		if ( m_xNameAccess->hasByName( Name ) )
+			bIsFound = sal_True;
+	}
+	catch( uno::Exception& e )
+	{
+		// failed to find name
+	}
+	return bIsFound;
 }
 
 sal_Bool SAL_CALL
 ScVbaWSFunction::hasProperty(const rtl::OUString& Name)  throw(uno::RuntimeException)
 {
-	 return false;
+	 return sal_False;
+}
+
+::rtl::OUString SAL_CALL 
+ScVbaWSFunction::getExactName( const ::rtl::OUString& aApproximateName ) throw (css::uno::RuntimeException)
+{
+	rtl::OUString sName = aApproximateName.toAsciiUpperCase();
+	if ( !hasMethod( sName ) )
+		return rtl::OUString();
+	return sName; 
 }

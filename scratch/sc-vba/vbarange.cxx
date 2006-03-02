@@ -80,9 +80,30 @@
 #include "vbaglobals.hxx"
 #include <vector>
 
+// begin test includes
+#include <com/sun/star/sheet/FunctionArgument.hpp>
+// end test includes
+
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
 
+ScDocShell* getDocShellFromRange( const uno::Reference< table::XCellRange >& xRange )
+{
+	// need the ScCellRangeObj to get docshell
+	ScCellRangeObj* pUno = static_cast<  ScCellRangeObj* >( xRange.get() );
+	if ( !pUno )
+		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Failed to access underlying uno range object" ) ), uno::Reference< uno::XInterface >()  );
+	return pUno->GetDocShell();
+}
+
+ScDocument* getDocumentFromRange( const uno::Reference< table::XCellRange >& xRange )
+{
+	ScDocShell* pDocShell = getDocShellFromRange( xRange );
+	if ( !pDocShell )
+		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Failed to access underlying docshell from uno range object" ) ), uno::Reference< uno::XInterface >() );
+	ScDocument* pDoc = pDocShell->GetDocument();
+	return pDoc;
+}
 
 class NumFormatHelper
 {
@@ -1006,7 +1027,7 @@ ScVbaRange::getWrapText() throw (uno::RuntimeException)
 uno::Reference< vba::XInterior > ScVbaRange::Interior( ) throw (uno::RuntimeException)
 {
 	uno::Reference< beans::XPropertySet > xProps( mxRange->getCellByPosition( 0,0 ), uno::UNO_QUERY_THROW );
-        return uno::Reference<vba::XInterior> (new ScVbaInterior ( m_xContext, xProps ));
+        return uno::Reference<vba::XInterior> (new ScVbaInterior ( m_xContext, xProps, getDocumentFromRange( mxRange ) ));
 }                                                                                                                             
 table::CellRangeAddress getCellRangeAddress( const uno::Any& aParam,
 const uno::Reference< table::XCellRange >& xRanges )
@@ -1399,21 +1420,13 @@ ScVbaRange::Sort( const uno::Any& Key1, const uno::Any& Order1, const uno::Any& 
 	sal_Int16 nDataOption2 = vba::Excel::XlSortDataOption::xlSortNormal;;
 	sal_Int16 nDataOption3 = vba::Excel::XlSortDataOption::xlSortNormal;
 
-	// need the ScCellRangeObj to get docshell
-	ScCellRangeObj* pUno = static_cast<  ScCellRangeObj* >( mxRange.get() );
-	if ( !pUno )
-		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Failed to access underlying uno range object" ) ), uno::Reference< uno::XInterface >()  );
-
-	ScDocShell* pDocShell = pUno->GetDocShell();
-	if ( !pDocShell )
-		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Failed to access underlying docshell from uno range object" ) ), uno::Reference< uno::XInterface >() );
+	ScDocument* pDoc = getDocumentFromRange( mxRange );
+	if ( !pDoc )
+		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Failed to access document from shell" ) ), uno::Reference< uno::XInterface >() );
 
 	RangeHelper thisRange( mxRange );
 	table::CellRangeAddress thisRangeAddress = thisRange.getCellRangeAddressable()->getRangeAddress();
 	SCTAB nTab = thisRangeAddress.Sheet;
-	ScDocument* pDoc = pDocShell->GetDocument();
-	if ( !pDoc )
-		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Failed to access document from shell" ) ), uno::Reference< uno::XInterface >() );
 
 	ScSortParam aSortParam;
 	pDoc->GetSortParam( aSortParam, nTab );
@@ -1481,19 +1494,14 @@ ScVbaRange::Sort( const uno::Any& Key1, const uno::Any& Order1, const uno::Any& 
 
 	if ( nHeader == vba::Excel::XlYesNoGuess::xlGuess )
 	{
-		ScDocument* pDoc = pDocShell->GetDocument();
-		if ( pDoc )
-		{
-			//CROW nStartRow, SCCOL nEndCol, SCROW nEndRow, SCTAB nTab );
-			bool bHasColHeader = pDoc->HasColHeader(  thisRangeAddress.StartColumn, thisRangeAddress.StartRow, thisRangeAddress.EndColumn, thisRangeAddress.EndRow, thisRangeAddress.Sheet );
-			bool bHasRowHeader = pDoc->HasRowHeader(  thisRangeAddress.StartColumn, thisRangeAddress.StartRow, thisRangeAddress.EndColumn, thisRangeAddress.EndRow, thisRangeAddress.Sheet );
-			if ( bHasColHeader || bHasRowHeader )
-				nHeader =  vba::Excel::XlYesNoGuess::xlYes; 
-			else
-				nHeader =  vba::Excel::XlYesNoGuess::xlNo; 
-			// save set param as default
-			aSortParam.nCompatHeader = nHeader;
-		}
+		bool bHasColHeader = pDoc->HasColHeader(  thisRangeAddress.StartColumn, thisRangeAddress.StartRow, thisRangeAddress.EndColumn, thisRangeAddress.EndRow, thisRangeAddress.Sheet );
+		bool bHasRowHeader = pDoc->HasRowHeader(  thisRangeAddress.StartColumn, thisRangeAddress.StartRow, thisRangeAddress.EndColumn, thisRangeAddress.EndRow, thisRangeAddress.Sheet );
+		if ( bHasColHeader || bHasRowHeader )
+			nHeader =  vba::Excel::XlYesNoGuess::xlYes; 
+		else
+			nHeader =  vba::Excel::XlYesNoGuess::xlNo; 
+		// save set param as default
+		aSortParam.nCompatHeader = nHeader;
 	}
 
 	if ( nHeader == vba::Excel::XlYesNoGuess::xlYes )

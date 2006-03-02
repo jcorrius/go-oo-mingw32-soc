@@ -12,13 +12,14 @@
 #include <cppuhelper/queryinterface.hxx>
 
 #include <svx/xtable.hxx>
+#include <document.hxx>
 
 #include "vbainterior.hxx"
 using namespace ::com::sun::star;
 using namespace ::org::openoffice;
 static const rtl::OUString BACKCOLOR( RTL_CONSTASCII_USTRINGPARAM( "CellBackColor" ) );
 
-ScVbaInterior::ScVbaInterior( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< beans::XPropertySet >&  xProps ) throw ( lang::IllegalArgumentException) : m_xContext(xContext),m_xProps(xProps)
+ScVbaInterior::ScVbaInterior( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< beans::XPropertySet >&  xProps, ScDocument* pScDoc ) throw ( lang::IllegalArgumentException) : m_xContext(xContext),m_xProps(xProps), m_pScDoc( pScDoc )
 {
 	if ( !xContext.is() )
 		throw lang::IllegalArgumentException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "context not set" ) ), uno::Reference< uno::XInterface >(), 1 ); 
@@ -52,7 +53,18 @@ ScVbaInterior::setColorIndex( const css::uno::Any& _colorindex ) throw (css::uno
 	}
 	--nIndex; // OOo indices are zero bases
 	
-	XColorTable* pColorTable = XColorTable::GetStdColorTable();	
+	//XColorTable* pColorTable = m_pScDoc ? m_pScDoc->GetColorTable() : XColorTable::GetStdColorTable();	
+
+	XColorTable* pColorTable = NULL;
+
+	if ( m_pScDoc )
+	{
+		pColorTable = m_pScDoc->GetColorTable() ;
+		OSL_TRACE("Using documents color table, num entries is %d",
+			pColorTable->Count() );
+	}
+	else
+		pColorTable = XColorTable::GetStdColorTable();	
 	XColorEntry* pEntry = NULL;
 
 	if ( nIndex < 0 || !pColorTable || ( nIndex >= pColorTable->Count() ) 

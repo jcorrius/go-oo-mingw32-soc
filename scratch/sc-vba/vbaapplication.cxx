@@ -16,8 +16,17 @@
 
 #include "tabvwsh.hxx"
 
+//start test includes
+#include <sfx2/objsh.hxx>
+#include <sfx2/app.hxx>
 
+#include <docuno.hxx>
 
+#include <basic/sbx.hxx>
+#include <basic/sbstar.hxx>
+#include <basic/sbuno.hxx>
+#include <basic/sbmeth.hxx>
+//end test includes
 
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
@@ -109,10 +118,10 @@ ScVbaApplication::Workbooks( const uno::Any& aIndex ) throw (uno::RuntimeExcepti
 	return uno::Any ( xWorkBooks->Item( aIndex ) );
 }
 
-uno::Reference< vba::XWorksheetFunction > SAL_CALL
+uno::Any SAL_CALL
 ScVbaApplication::WorksheetFunction( ) throw (::com::sun::star::uno::RuntimeException)
 {
-        return new ScVbaWSFunction(m_xContext);
+        return uno::makeAny( uno::Reference< script::XInvocation >( new ScVbaWSFunction(m_xContext) ) );
 }
 
 uno::Any SAL_CALL 
@@ -159,8 +168,7 @@ double SAL_CALL
 ScVbaApplication::CountA( const uno::Any& arg1 ) throw (uno::RuntimeException)
 {
 	double result;
-	uno::Reference< vba::XWorksheetFunction > xWksFn = WorksheetFunction();
-	uno::Reference< script::XInvocation > xInvoc( xWksFn, uno::UNO_QUERY_THROW );
+	uno::Reference< script::XInvocation > xInvoc( WorksheetFunction(), uno::UNO_QUERY_THROW );
 	if  ( xInvoc.is() )
 	{
 		static rtl::OUString FunctionName( RTL_CONSTASCII_USTRINGPARAM("CountA" ) );
@@ -192,6 +200,27 @@ ScVbaApplication::Windows( const uno::Any& aIndex  ) throw (uno::RuntimeExceptio
 	if ( aIndex.getValueTypeClass() == uno::TypeClass_VOID )
 		return uno::Any( xWindows );
 	return uno::Any( xWindows->Item( aIndex ) );	
+}
+void SAL_CALL 
+ScVbaApplication::wait( double time ) throw (css::uno::RuntimeException)
+{
+	StarBASIC* pBasic = SFX_APP()->GetBasic();
+	SFX_APP()->EnterBasicCall();
+	SbxArrayRef aArgs = new SbxArray;
+	SbxVariableRef aRef = new SbxVariable;
+	aRef->PutDouble( time );
+	aArgs->Put(  aRef, 1 );
+	SbMethod* pMeth = (SbMethod*)pBasic->GetRtl()->Find( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Wait") ), SbxCLASS_METHOD );
+	
+	if ( pMeth )
+	{
+		pMeth->SetParameters( aArgs );
+		SbxVariableRef refTemp = pMeth;
+		// forces a broadcast
+		SbxVariableRef pNew = new  SbxMethod( *((SbxMethod*)pMeth));
+	}
+	SFX_APP()->LeaveBasicCall();
+
 }
 
 
