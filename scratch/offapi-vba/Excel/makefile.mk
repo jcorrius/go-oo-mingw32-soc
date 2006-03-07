@@ -17,6 +17,7 @@ dummy:
 
 IDLFILES=\
 	XlCreator.idl \
+	XlAutoFillType.idl \
 	XlCutCopyMode.idl \
 	XlFindLookIn.idl\
 	Constants.idl \
