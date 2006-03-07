@@ -17,6 +17,7 @@
 #include <com/sun/star/beans/PropertyVetoException.hpp>
 #include <com/sun/star/util/XCloseable.hpp>
 #include <com/sun/star/lang/IndexOutOfBoundsException.hpp>
+#include <com/sun/star/document/XTypeDetection.hpp>
 
 #include <sfx2/objsh.hxx>
 #include <tools/urlobj.hxx>
@@ -31,6 +32,7 @@
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
 
+const sal_Int16 CUSTOM_CHAR = 5;
 
 typedef  std::hash_map< rtl::OUString,
 sal_Int32, ::rtl::OUStringHash,
@@ -264,6 +266,18 @@ ScVbaWorkbooks::Close() throw (uno::RuntimeException)
 	dispatchRequests(xModel,url);
 }
 
+bool 
+ScVbaWorkbooks::isTextFile( const rtl::OUString& rFileName )
+{
+	uno::Reference< document::XTypeDetection > xTypeDetect( m_xContext->getServiceManager()->createInstanceWithContext(::rtl::OUString::createFromAscii("com.sun.star.document.TypeDetection"), m_xContext), uno::UNO_QUERY_THROW );
+	uno::Sequence< beans::PropertyValue > aMediaDesc(1);
+	aMediaDesc[ 0 ].Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM ("URL" ) );
+	aMediaDesc[ 0 ].Value <<= rFileName;
+	rtl::OUString sType = xTypeDetect->queryTypeByDescriptor( aMediaDesc, sal_True );
+	const static rtl::OUString txtType( RTL_CONSTASCII_USTRINGPARAM("writer_Text" ) );
+	return sType.equals( txtType );
+}
+
 uno::Any
 ScVbaWorkbooks::Open( const rtl::OUString& rFileName, const uno::Any& UpdateLinks, const uno::Any& ReadOnly, const uno::Any& Format, const uno::Any& Password, const uno::Any& WriteResPassword, const uno::Any& IgnoreReadOnlyRecommended, const uno::Any& Origin, const uno::Any& Delimiter, const uno::Any& Editable, const uno::Any& Notify, const uno::Any& Converter, const uno::Any& AddToMru ) throw (uno::RuntimeException)
 {
@@ -284,20 +298,65 @@ ScVbaWorkbooks::Open( const rtl::OUString& rFileName, const uno::Any& UpdateLink
 	uno::Sequence< beans::PropertyValue > sProps(0);
 	static const char* csv = ".csv";
 	sal_Int32 nIndex = 0;
-	if ( rFileName.endsWithIgnoreAsciiCaseAsciiL( csv, strlen( csv ) ) /* is a csv file */ )
+
+	// A text file means it needs to be processed as a csv file	
+	if ( isTextFile( rFileName ) ) 
 	{
+		// Values for format
+		// 1 Tabs
+		// 2 Commas
+		// 3 Spaces
+		// 4 Semicolons
+		// 5 Nothing
+		// 6 Custom character (see the Delimiter argument
+		// no format means use the current delimiter
 		sProps.realloc( 1 );
 		sProps[ nIndex ].Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("FilterOptions" ) );
+		int delims[] = { 0 /*default not used*/, 9/*tab*/, 44/*comma*/, 32/*space*/, 59/*semicolon*/ };	
+		int numElems = sizeof( delims )/ sizeof( delims[0] );
+
+		static rtl::OUString sRestOfFormat( RTL_CONSTASCII_USTRINGPARAM(",34,0,1" ) );
 		
-		// #TODO #FIXME need to verify if this is a sensible default,
-		// need to find where FilterOptions are processed for the csv 
-		// filter
-		sProps[ nIndex++ ].Value <<= rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("44,34,0,1" ) );
+		rtl::OUString sFormat;
+		sal_Int16 nFormat = 0; // default indicator
+
+
+		if ( Format.hasValue() )
+		{
+			Format >>= nFormat; // val of nFormat overwritten if extracted	
+			// validate param	
+			if ( nFormat < 1 || nFormat > 6 )
+				throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Illegal value for Format" ) ), uno::Reference< uno::XInterface >() );
+		}
+
+		sal_Int16 nDelim = getCurrentDelim();
+
+		if (  nFormat > 0 && nFormat < CUSTOM_CHAR ) 
+		{
+			nDelim =  delims[ nFormat ];
+		}
+		else if ( nFormat > CUSTOM_CHAR )
+		{
+			// Need to check Delimiter param
+			if ( !Delimiter.hasValue() )
+				throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Expected value for Delimiter" ) ), uno::Reference< uno::XInterface >() );
+			rtl::OUString sStr;
+			Delimiter >>= sStr;
+			String aUniStr( sStr );
+			if ( aUniStr.Len() )
+				nDelim = aUniStr.GetChar(0);
+			else
+				throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Incorrect value for Delimiter" ) ), uno::Reference< uno::XInterface >() );
+		}
+
+		getCurrentDelim() = nDelim; //set new current
+
+		sFormat = rtl::OUString::valueOf( (sal_Int32)nDelim ) + sRestOfFormat;
+		sProps[ nIndex++ ].Value <<= sFormat;
 	}
 	if ( ReadOnly.hasValue()  )
 	{
-		sal_Bool bIsReadOnly = sal_False;
-		ReadOnly >>= bIsReadOnly;
+		sal_Bool bIsReadOnly = sal_False; ReadOnly >>= bIsReadOnly;
 		if ( bIsReadOnly )
 		{
 			static const rtl::OUString sReadOnly( RTL_CONSTASCII_USTRINGPARAM("ReadOnly") );

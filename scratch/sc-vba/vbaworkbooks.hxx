@@ -17,9 +17,9 @@ class ScVbaWorkbooks : public ScVbaWorkbooks_BASE
 {
 private:
 	css::uno::Reference< oo::vba::XGlobals > getGlobals() throw (css::uno::RuntimeException);
-	
+	bool 	isTextFile( const rtl::OUString& rString );
+	static sal_Int16& getCurrentDelim(){ static sal_Int16 nDelim = 44; return nDelim; }
 public:
-	//ScVbaWorkbooks( const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::container::XIndexAccess >& xIndexAccess );
 	ScVbaWorkbooks( const css::uno::Reference< css::uno::XComponentContext >& xContext );
 	virtual ~ScVbaWorkbooks() {}
 
