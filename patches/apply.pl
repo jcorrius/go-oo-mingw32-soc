@@ -111,7 +111,6 @@ sub select_subset ($$)
 sub canonicalize_milestone($)
 {
     my $milestone = shift;
-    $milestone =~ m/-.+$/ || return $milestone;
     $milestone =~ m/([0-9]+)$/ || return $milestone;
     my $stem = $milestone;
     my $num = $1;
