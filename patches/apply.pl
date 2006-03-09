@@ -111,6 +111,7 @@ sub select_subset ($$)
 sub canonicalize_milestone($)
 {
     my $milestone = shift;
+    $milestone =~ m/-.+$/ || return $milestone;
     $milestone =~ m/([0-9]+)$/ || return $milestone;
     my $stem = $milestone;
     my $num = $1;
@@ -149,21 +150,35 @@ sub rules_pass($)
 	my $lastrule = $rule;
 #	print "verify rule '$rule' vs '$tag'\n";
 
-	if ($rule =~ /[\<\=\>]+\s*(\S+)/ && !same_mws($tag, $1) ) {
+	if ($rule =~ /[\!\<\=\>]+\s*(\S+)/ && !same_mws($tag, $1) ) {
 	    # ignore milestones from other MWSes
 #	    print "ignoring rule '$rule' for '$tag'\n";
-	    $rule =~ s/[\<\=\>]+\s*(\S+)//;
+	    $rule =~ s/[\!\<\=\>]+\s*(\S+)//;
 	} else {
 	    # equal to (==)
-	    if ($rule =~ s/\=\=\s*(\S+)// && milestone_cmp ($tag, $1) != 0 ) { return 0; }; 
+	    if ($rule =~ s/\=\=\s*(\S+)// ) {
+		   if ( milestone_cmp ($tag, $1) != 0 ) { return 0; } 
+	    }
+	    # non-equal to (!=)
+	    elsif ($rule =~ s/\!\=\s*(\S+)// ) {
+	           if ( milestone_cmp ($tag, $1) == 0 ) { return 0; }
+	    }
 	    # less than or equal (<=)
-	    if ($rule =~ s/\<=\s*(\S+)// && milestone_cmp ($tag, $1) > 0 ) { return 0; };
+	    elsif ($rule =~ s/\<=\s*(\S+)// ) {
+	           if ( milestone_cmp ($tag, $1) > 0 ) { return 0; }
+	    }
 	    # less than (<)
-	    if ($rule =~ s/\<\s*(\S+)// && milestone_cmp ($tag, $1) >= 0 ) { return 0; };
+	    elsif ($rule =~ s/\<\s*(\S+)// ) {
+	    	   if ( milestone_cmp ($tag, $1) >= 0 ) { return 0; }
+	    }
 	    # greater than or equal (>=)
-	    if ($rule =~ s/\>=\s*(\S+)// && milestone_cmp ($tag, $1) < 0 ) { return 0; }; 
+	    elsif ($rule =~ s/\>=\s*(\S+)// ) {
+	           if ( milestone_cmp ($tag, $1) < 0 ) { return 0; }
+	    }
 	    # greater than (>)
-	    if ($rule =~ s/\>\s*(\S+)// && milestone_cmp ($tag, $1) <= 0 ) { return 0; }; 
+	    elsif ($rule =~ s/\>\s*(\S+)// ) {
+	    	   if ( milestone_cmp ($tag, $1) <= 0 ) { return 0; }
+	    }
 	}
 
 	$rule =~ s/^\s*//;
