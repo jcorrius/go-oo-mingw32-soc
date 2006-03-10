@@ -154,8 +154,50 @@
 +    }
 +}
 --- /dev/null	2005-06-05 14:44:09.000000000 +0100
-+++ scripting/source/vbaevents/eventhelper.cxx	2005-09-14 10:02:01.346708419 +0100
-@@ -0,0 +1,993 @@
++++ scripting/source/vbaevents/vbaevents.map	2005-09-14 10:02:01.346708419 +0100
+@@ -0,0 +1,10 @@
++OOO_1.1 {
++	global:
++		component_getDescriptionFunc;
++		component_getImplementationEnvironment;
++		component_getFactory;
++		component_writeInfo;
++
++	local:
++		*;
++};
+--- /dev/null	2005-06-05 14:44:09.000000000 +0100
++++ scripting/source/vbaevents/vbaevents.xml	2005-09-14 10:02:01.346708419 +0100
+@@ -0,0 +1,26 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!DOCTYPE module-description PUBLIC "-//StarOffice//DTD ComponentDescription 1.0//EN" "module-description.dtd">
++<module-description xmlns:xlink="http://www.w3.org/1999/xlink">
++
++    <module-name>vbaevents</module-name>
++    
++    <component-description>
++        <author>Noel Power </author>
++        <name>org.openoffice.vba.EventListener</name>
++        <description>Event listener to handle ooo events and to translate them to calls to basic macros ala Button_Click etc.</description>
++        <loader-name>com.sun.star.loader.SharedLibrary</loader-name>
++        <language>c++</language>
++        <status value="drafts"/>
++        <supported-service>org.openoffice.vba.EventListener</supported-service>
++        <type>com.sun.star.uno.XComponentContext</type>        
++    </component-description>
++    
++    <project-build-dependency>cppuhelper</project-build-dependency>
++    <project-build-dependency>cppu</project-build-dependency>
++    <project-build-dependency>sal</project-build-dependency>
++
++    <runtime-module-dependency>cppuhelper3$(COM)</runtime-module-dependency>
++    <runtime-module-dependency>cppu3</runtime-module-dependency>
++    <runtime-module-dependency>sal3</runtime-module-dependency>
++    
++</module-description>
+--- /dev/null	2006-03-10 11:01:46.108557750 +0000
++++ scripting/source/vbaevents/eventhelper.cxx	2006-03-09 19:32:08.000000000 +0000
+@@ -0,0 +1,998 @@
 +#include <comphelper/processfactory.hxx>
 +#include <comphelper/uno3.hxx>
 +#include <comphelper/proparrhlp.hxx>
@@ -176,6 +218,8 @@
 +
 +#include <com/sun/star/script/XLibraryContainer.hpp>
 +#include <com/sun/star/script/ScriptEventDescriptor.hpp>
++
++#include <com/sun/star/drawing/XControlShape.hpp>
 +
 +#include <com/sun/star/awt/XControl.hpp>
 +#include <com/sun/star/awt/KeyEvent.hpp>
@@ -507,17 +551,81 @@
 +class ScriptEventFactory
 +{
 +public:
-+    static Sequence< ScriptEventDescriptor > createEvents( const Reference< awt::XControl >& xControl );   
++    static Sequence< ScriptEventDescriptor > createEvents( const Reference< XInterface >& xControl, const rtl::OUString& sLibModName, const Sequence< rtl::OUString >& sMethods );   
 +    static ScriptEventFactory& instance() { static ScriptEventFactory inst; return inst; }
-+    static rtl::OUString getControlName( const Reference< awt::XControl >& xControl );
-+    static Sequence< rtl::OUString > getEventListeners( const Reference< awt::XControl >& xControl );
++    static rtl::OUString getControlName( const Reference< XInterface >& xControl );
++    static Sequence< rtl::OUString > getEventListeners( const Reference< XInterface >& xControl );
 +private:
 +    ScriptEventFactory();
 +    Reference< XComponentContext > m_xCtx;
 +};
++
 +// Helper function
 +bool
-+eventMethodToDescriptor( const ::rtl::OUString& rEventMethod, const Reference< awt::XControl >& xControl, ScriptEventDescriptor& evtDesc )
++eventMethodToDescriptors( const ::rtl::OUString& rEventMethod,  const Reference< XInterface >& xControl, const rtl::OUString& sLibModName, const Sequence< rtl::OUString >& sHandlerExts, Sequence< ScriptEventDescriptor >& evtDescs )
++{
++    // format of ControlListener is TypeName::methodname e.g.
++    // "com.sun.star.awt.XActionListener::actionPerformed" or
++    // "XActionListener::actionPerformed
++
++    ::rtl::OUString sMethodName;
++    ::rtl::OUString sTypeName;
++    sal_Int32 nDelimPos = rEventMethod.indexOf( DELIM );
++    if ( nDelimPos == -1 )
++    {
++        return false;
++    }
++    sMethodName = rEventMethod.copy( nDelimPos + DELIMLEN );
++    sTypeName = rEventMethod.copy( 0, nDelimPos );
++            
++    EventInfoHash& infos = getEventTransInfo();
++
++    // Only create an ScriptEventDescriptor for an event we can translate
++    // or emulate
++    EventInfoHash::const_iterator eventInfo_it = infos.find( sMethodName );
++    EventInfoHash::const_iterator it_end = infos.end();
++
++    // sLibModName ( could ) include the uri bits :-) from calc
++    rtl::OUString sPartialMacroName = sLibModName + rtl::OUString( RTL_CONSTASCII_USTRINGPARAM(".") ) + ScriptEventFactory::instance().getControlName(xControl);
++
++    if ( sMethodName.getLength() 
++         && sTypeName.getLength()
++         && ( infos.find( sMethodName ) != infos.end() ) )
++    {
++        std::list< TranslateInfo >::const_iterator txInfo =
++            eventInfo_it->second.begin();
++        std::list< TranslateInfo >::const_iterator txInfo_end = 
++            eventInfo_it->second.end();
++        for ( ; txInfo != txInfo_end; ++txInfo )
++        {
++            // Check if extension is support for this method, if
++            // so create an eventdescription for that
++            const rtl::OUString* pExt = sHandlerExts.getConstArray();
++            sal_Int32  nCount = sHandlerExts.getLength();
++            for ( sal_Int32 counter=0;  counter<nCount; ++counter, ++pExt )
++            {
++                if ( (*txInfo).sVBAName.equals( *pExt ) ) // handler for event
++                {
++                    sal_Int32 nIndex = evtDescs.getLength();
++	            evtDescs.realloc( evtDescs.getLength() + 1 );
++                    evtDescs[ nIndex ].ScriptCode =  sPartialMacroName + *pExt;
++                    evtDescs[ nIndex ].ListenerType = sTypeName;
++                    evtDescs[ nIndex ].EventMethod = sMethodName;
++
++                    // set this it VBAInterop, ensures that it doesn't
++                    // get persisted or shown in property editors
++                    evtDescs[ nIndex ].ScriptType = rtl::OUString::createFromAscii( "VBAInterop" );	
++                 }
++            }    
++        }
++        return true;
++    }
++    return false;
++
++}
++
++bool
++eventMethodToDescriptor( const ::rtl::OUString& rEventMethod, const Reference< XInterface >& xControl, ScriptEventDescriptor& evtDesc )
 +{
 +    // format of ControlListener is TypeName::methodname e.g.
 +    // "com.sun.star.awt.XActionListener::actionPerformed" or
@@ -567,9 +675,16 @@
 +        uno::UNO_QUERY_THROW );
 +}
 +rtl::OUString
-+ScriptEventFactory::getControlName( const Reference< awt::XControl >& xControl )
++ScriptEventFactory::getControlName( const Reference< XInterface >& rXControl )
 +{
-+    Reference< beans::XPropertySet > xProps( xControl->getModel(), UNO_QUERY );
++    Reference< XInterface > xIfModel;
++    Reference< awt::XControl > xControl( rXControl, UNO_QUERY );
++    if ( xControl.is() )
++        xIfModel = xControl->getModel();
++    else
++        xIfModel = rXControl;
++
++    Reference< beans::XPropertySet > xProps( xIfModel, UNO_QUERY );
 +    ::rtl::OUString sName;
 +    if ( xProps.is() )
 +    {
@@ -588,7 +703,7 @@
 +}
 +
 +Sequence< rtl::OUString > 
-+ScriptEventFactory::getEventListeners( const Reference< awt::XControl >& xControl )
++ScriptEventFactory::getEventListeners( const Reference< XInterface >& xControl )
 +{
 +    Reference< lang::XMultiComponentFactory > xMFac( 
 +        instance().m_xCtx->getServiceManager(), UNO_QUERY );
@@ -613,7 +728,6 @@
 +            {
 +                Type& listType = aControlListeners[ i ];
 +                rtl::OUString sFullTypeName = listType.getTypeName();
-+
 +                Sequence< ::rtl::OUString > sMeths = 
 +                    getEventMethods( listType );    
 +                sal_Int32 sMethLen = sMeths.getLength();
@@ -640,15 +754,17 @@
 +}
 +
 +Sequence< ScriptEventDescriptor > 
-+ScriptEventFactory::createEvents( const Reference< awt::XControl >& xControl )
++ScriptEventFactory::createEvents( const Reference< XInterface >& xControl, const rtl::OUString& sLibModName, const Sequence< rtl::OUString >& sHandlerExts )
 +{
 +    Sequence< rtl::OUString > aControlListeners = ScriptEventFactory::instance().getEventListeners( xControl );
 +    rtl::OUString* pSrc = aControlListeners.getArray();
 +    sal_Int32 nLength = aControlListeners.getLength();             
 +
-+    Sequence< ScriptEventDescriptor > aDest( nLength );
++    Sequence< ScriptEventDescriptor > aDest( nLength * 2 );// sensible default
 +    ScriptEventDescriptor* pDest = aDest.getArray();
 +    sal_Int32 nEvts = 0;
++
++  
 +    for ( sal_Int32 i = 0; i< nLength; ++i, ++pSrc )
 +    {
 +        // from getListeners eventName is of form
@@ -659,12 +775,16 @@
 +        ::rtl::OUString sNoNameSpaceMethod = *pSrc;
 +        if ( ( lastDotIndex = pSrc->lastIndexOf( '.' ) ) > -1 )
 +            sNoNameSpaceMethod = sNoNameSpaceMethod.copy( lastDotIndex + 1 );
-+	ScriptEventDescriptor evtDesc;
-+        if ( eventMethodToDescriptor( sNoNameSpaceMethod, xControl, evtDesc ) )
++	Sequence< ScriptEventDescriptor> evtDescs;
++        if ( eventMethodToDescriptors( sNoNameSpaceMethod, xControl, sLibModName, sHandlerExts, evtDescs ) )
 +        {
-+            *pDest = evtDesc;
-+            ++pDest;
-+            ++nEvts;
++            sal_Int32 dIndex = nEvts;
++            nEvts += evtDescs.getLength();
++            ScriptEventDescriptor* pDesc = evtDescs.getArray();
++            if ( nEvts > aDest.getLength() )
++                aDest.realloc( nEvts );// should never happen
++            for ( ; dIndex < nEvts; ++dIndex, ++pDesc )
++                aDest[ dIndex ] = *pDesc; 
 +        }
 +    }
 +    aDest.realloc( nEvts );
@@ -678,7 +798,7 @@
 +class ReadOnlyEventsNameContainer : public NameContainer_BASE
 +{
 +public:
-+    ReadOnlyEventsNameContainer( const Sequence< rtl::OUString >& eventMethods, const Reference< awt::XControl >& xControl );
++    ReadOnlyEventsNameContainer( const Sequence< rtl::OUString >& eventMethods, const Reference< XInterface >& xControl );
 +    // XNameContainer
 +
 +    virtual void SAL_CALL insertByName( const ::rtl::OUString& aName, const Any& aElement ) throw (lang::IllegalArgumentException, container::ElementExistException, lang::WrappedTargetException, RuntimeException)
@@ -716,7 +836,7 @@
 +    EventSupplierHash m_hEvents;
 +};
 +
-+ReadOnlyEventsNameContainer::ReadOnlyEventsNameContainer( const Sequence< rtl::OUString >& eventMethods, const Reference< awt::XControl >& xControl ) 
++ReadOnlyEventsNameContainer::ReadOnlyEventsNameContainer( const Sequence< rtl::OUString >& eventMethods, const Reference< XInterface >& xControl ) 
 +{
 +    const rtl::OUString* pSrc = eventMethods.getConstArray();
 +    sal_Int32 nLen = eventMethods.getLength();
@@ -766,7 +886,7 @@
 +class ReadOnlyEventsSupplier : public EventsSupplier_BASE
 +{
 +public:
-+    ReadOnlyEventsSupplier( const Sequence< ::rtl::OUString >& eventMethods, const Reference< awt::XControl >& xControl )
++    ReadOnlyEventsSupplier( const Sequence< ::rtl::OUString >& eventMethods, const Reference< XInterface >& xControl )
 +    { m_xNameContainer = new ReadOnlyEventsNameContainer( eventMethods, xControl ); }
 +    
 +    // XScriptEventSupplier
@@ -931,110 +1051,38 @@
 +
 +    if ( xObjSh.Is() )
 +    {
-+        BasicManager* pDocBasicManager =  xObjSh->GetBasicManager();
-+        Reference< XLibraryContainer > xLib( xObjSh->GetBasicContainer(), 
-+            UNO_QUERY );
-+        if ( pDocBasicManager && xLib.is() )
++        std::list< TranslateInfo > matchingMethods;
++        std::list< TranslateInfo >::const_iterator txInfo =
++            eventInfo_it->second.begin();
++        std::list< TranslateInfo >::const_iterator txInfo_end = eventInfo_it->second.end();
++        for ( ; txInfo != txInfo_end; ++txInfo )
 +        {
-+            std::list< TranslateInfo > matchingMethods;
-+            Sequence< ::rtl::OUString > aLibNames = xLib->getElementNames();
-+            sal_Int32 nLibLen = aLibNames.getLength();
-+            const ::rtl::OUString* pLibNames = aLibNames.getConstArray();
-+            for ( sal_Int32 i = 0 ; i < nLibLen ; ++i )
++            // see if we have a match for the handlerextension
++            // where ScriptCode is methodname_handlerextension 
++            rtl::OUString sTemp = evt.ScriptCode; 
++            sal_Int32 lastIndexOf_ = sTemp.lastIndexOf( '_' );
++            if ( lastIndexOf_ != -1 )
++                sTemp = sTemp.copy( lastIndexOf_ ); 
++            OSL_TRACE("*** trying to match %s with %s",
++                rtl::OUStringToOString( sTemp, RTL_TEXTENCODING_UTF8 ).getStr(),
++                rtl::OUStringToOString( (*txInfo).sVBAName, RTL_TEXTENCODING_UTF8 ).getStr() );
++            if ( sTemp.equals( (*txInfo).sVBAName ) )
 +            {
-+                // make sure library is loaded
-+                if ( xLib->hasByName( pLibNames[ i ] ) && !xLib->isLibraryLoaded( pLibNames[ i ] ) )
-+                    xLib->loadLibrary( pLibNames[ i ] );
-+                     
-+                Any aLib = xLib->getByName( pLibNames[ i ] );
-+                Reference< container::XNameContainer > xNameCont( aLib, UNO_QUERY );
-+                if ( !xNameCont.is() ) // this really is an error, flag it
-+                {
-+                    OSL_TRACE("No name container");
-+                    continue;
-+                }
-+                // get Basic for the library 
-+                StarBASIC* pBasic = pDocBasicManager->GetLib( pLibNames[ i ] );
-+                // get the module names
-+                Sequence< ::rtl::OUString > aModNames = xNameCont->getElementNames();
-+                sal_Int32 nModLen = aModNames.getLength();
-+                const ::rtl::OUString* pModNames = aModNames.getConstArray();
-+                for ( sal_Int32 y = 0 ; y < nModLen ; ++y )
-+                { 
-+                    SbModule* pModule = pBasic->FindModule( pModNames[y] );
-+                    // find the methods
-+                    SbxArray* pMethods = pModule->GetMethods();
-+                    sal_Int32 nMethLen = pMethods->Count();
-+                    for ( sal_Int32 index = 0; index < nMethLen; ++index )
-+                    {
-+                        SbMethod* pMethod = static_cast< SbMethod* >( pMethods->Get( static_cast< USHORT >( index ) ) );
-+                        
-+                        if ( pMethod )
-+                        {
-+                           std::list< TranslateInfo >::const_iterator txInfo =
-+                               eventInfo_it->second.begin();
-+                           std::list< TranslateInfo >::const_iterator txInfo_end = eventInfo_it->second.end();
-+                           for ( ; txInfo != txInfo_end; ++txInfo )
-+                           {
-+                               rtl::OUString vbaMethod = evt.ScriptCode;
-+                               vbaMethod += (*txInfo).sVBAName;
-+
-+                               vbaMethod = evt.ScriptCode.concat( (*txInfo).sVBAName );
-+                               rtl::OUString methName = pMethod->GetName();
-+                               //OSL_TRACE("comparing %s to %s",
-+                               //   rtl::OUStringToOString( methName, 
-+                               //       RTL_TEXTENCODING_UTF8 ).getStr(), 
-+                               //   rtl::OUStringToOString( vbaMethod, 
-+                               //       RTL_TEXTENCODING_UTF8 ).getStr() );
-+                               if ( methName.equals( vbaMethod ) )
-+                               {
-+                                   //OSL_TRACE("match for %s",
-+                                   //    rtl::OUStringToOString( methName, 
-+                                   //        RTL_TEXTENCODING_UTF8 ).getStr() );
-+                                   TranslateInfo firingInfo;
-+                                   firingInfo.sVBAName += pLibNames[ i ]; 
-+                                   firingInfo.sVBAName += ::rtl::OUString::createFromAscii( "." );
-+                                   firingInfo.sVBAName += pModNames[ y ]; 
-+                                   firingInfo.sVBAName += ::rtl::OUString::createFromAscii( "." );
-+                                   firingInfo.sVBAName += vbaMethod;
-+                                   firingInfo.toVBA = (*txInfo).toVBA;
-+                                   matchingMethods.push_back( firingInfo );
-+                               }
-+                           }
-+                        }
-+                    }
-+                }
-+            }
-+            std::list< TranslateInfo >::iterator it = matchingMethods.begin();
-+            std::list< TranslateInfo >::const_iterator it_end = matchingMethods.end();
-+            // set up args
-+            // !! translate arguments & emulate events where necessary 
-+
-+            for ( ; it != it_end; ++it )
-+            {
-+                //OSL_TRACE("vba eventhandler firing %s", rtl::OUStringToOString( (*it).sVBAName , RTL_TEXTENCODING_UTF8 ).getStr() );
-+                // assume that vba-like event handler exist in the document
-+                // only ( can come back to that if necessary )
++                // !! translate arguments & emulate events where necessary 
 +                Sequence< Any > aArguments;
-+                if ( (*it).toVBA )
-+                {
-+                   aArguments = (*it->toVBA)( evt.Arguments );
-+                }
++                if  ( (*txInfo).toVBA )
++                    aArguments = (*txInfo).toVBA( evt.Arguments );
 +                else
-+                {
-+                   aArguments = evt.Arguments;
-+                }
++                    aArguments = evt.Arguments;
 +                if ( aArguments.getLength() )
 +                {
-+                    const static rtl::OUString sDocLoc = 
-+                        rtl::OUString::createFromAscii( "document" );
 +                    // call basic event handlers for event
 +
 +                    static rtl::OUString part1 = rtl::OUString::createFromAscii( "vnd.sun.star.script:");
 +                    static rtl::OUString part2 = rtl::OUString::createFromAscii("?language=Basic&location=document"); 
 +
 +                    // create script url
-+                    rtl::OUString url = part1 +  (*it).sVBAName + part2;
++                    rtl::OUString url = part1 + evt.ScriptCode + part2;
 +                 
 +                    OSL_TRACE("script url = %s",
 +                        rtl::OUStringToOString( url, 
@@ -1045,12 +1093,11 @@
 +                    Sequence< sal_Int16 > aOutArgsIndex;
 +                    Sequence< Any > aOutArgs;
 +                    xObjSh->CallXScript( url,  aArguments, *pRet,
-+                                        aOutArgsIndex, aOutArgs);
-+                } 
-+            }
-+        }
++                        aOutArgsIndex, aOutArgs);
++               } 
++           }
++       }
 +    }
-+
 +}
 +
 +typedef ::cppu::WeakImplHelper1< XVBAToOOEventDescGen > VBAToOOEventDescGen_BASE;
@@ -1062,8 +1109,8 @@
 +    VBAToOOEventDescGen( const Reference< XComponentContext >& rxContext );
 +
 +    // XVBAToOOEventDescGen
-+    virtual Sequence< ScriptEventDescriptor > SAL_CALL getEventDescriptions( const Reference< awt::XControl >& control ) throw (RuntimeException);
-+    virtual Reference< XScriptEventsSupplier > SAL_CALL getEventSupplier( const Reference< awt::XControl >& xControl ) throw (::com::sun::star::uno::RuntimeException);
++    virtual Sequence< ScriptEventDescriptor > SAL_CALL getEventDescriptions( const Reference< XInterface >& control, const rtl::OUString& sLibModName, const Sequence< rtl::OUString >& sHandlerExts ) throw (RuntimeException);
++    virtual Reference< XScriptEventsSupplier > SAL_CALL getEventSupplier( const Reference< XInterface >& xControl ) throw (::com::sun::star::uno::RuntimeException);
 +private:
 +    Reference< XComponentContext > m_xContext;
 +  
@@ -1072,13 +1119,13 @@
 +VBAToOOEventDescGen::VBAToOOEventDescGen( const Reference< XComponentContext >& rxContext ):m_xContext( rxContext ) {}
 +
 +Sequence< ScriptEventDescriptor > SAL_CALL 
-+VBAToOOEventDescGen::getEventDescriptions( const Reference< awt::XControl >& xControl ) throw (RuntimeException)
++VBAToOOEventDescGen::getEventDescriptions( const Reference< XInterface >& xControl, const rtl::OUString& sLibModName, const Sequence< rtl::OUString >& sHandlerExts ) throw (RuntimeException)
 +{
-+    return ScriptEventFactory::instance().createEvents( xControl ); 
++    return ScriptEventFactory::instance().createEvents( xControl, sLibModName, sHandlerExts ); 
 +}
 +
 +Reference< XScriptEventsSupplier > SAL_CALL 
-+VBAToOOEventDescGen::getEventSupplier( const Reference< awt::XControl >& xControl ) throw (::com::sun::star::uno::RuntimeException)
++VBAToOOEventDescGen::getEventSupplier( const Reference< XInterface >& xControl ) throw (::com::sun::star::uno::RuntimeException)
 +{
 +    Reference< XScriptEventsSupplier > xSupplier = 
 +        new ReadOnlyEventsSupplier( 
@@ -1149,45 +1196,247 @@
 +        return Sequence< ::rtl::OUString >( &strName, 1 );
 +    }	
 +}
---- /dev/null	2005-06-05 14:44:09.000000000 +0100
-+++ scripting/source/vbaevents/vbaevents.map	2005-09-14 10:02:01.346708419 +0100
-@@ -0,0 +1,10 @@
-+OOO_1.1 {
-+	global:
-+		component_getDescriptionFunc;
-+		component_getImplementationEnvironment;
-+		component_getFactory;
-+		component_writeInfo;
+Index: sc/source/filter/inc/xlocx.hxx
+===================================================================
+RCS file: /cvs/sc/sc/source/filter/inc/xlocx.hxx,v
+retrieving revision 1.13
+diff -u -p -r1.13 xlocx.hxx
+--- sc/source/filter/inc/xlocx.hxx	28 Sep 2005 12:03:20 -0000	1.13
++++ sc/source/filter/inc/xlocx.hxx	10 Mar 2006 13:59:36 -0000
+@@ -46,6 +46,11 @@
+ #ifndef SC_XEROOT_HXX
+ #include "xeroot.hxx"
+ #endif
++#ifdef ENABLE_VBA
++#ifndef _COM_SUN_STAR_SCRIPT_SCRIPTEVENTDESCRIPTOR_HPP_
++#include <com/sun/star/script/ScriptEventDescriptor.hpp>
++#endif
++#endif //ENABLE_VBA
+ 
+ // 0 = Export TBX form controls, 1 = Export OCX form controls.
+ #define EXC_EXP_OCX_CTRL 0
+@@ -118,6 +123,12 @@ private:
+                             const XclImpCtrlLinkHelper& rControl ) const;
+     /** Tries to register a Basic macro for the control. */
+     void                RegisterTbxMacro( const XclImpTbxControlObj& rTbxCtrlObj );
++#ifdef ENABLE_VBA
++    void                RegisterOleMacros( const ::com::sun::star::uno::Reference< 
++                                               ::com::sun::star::awt::XControlModel >& rxModel,
++                                           const XclImpOleObj& rOcxCtrlObj );
++    void                AttachMacro( const ::com::sun::star::script::ScriptEventDescriptor& rEvent );
++#endif //ENABLE_VBA
+ 
+ private:
+     ::com::sun::star::uno::Reference< ::com::sun::star::lang::XMultiServiceFactory >
+Index: sc/source/filter/excel/xlocx.cxx
+===================================================================
+RCS file: /cvs/sc/sc/source/filter/excel/xlocx.cxx,v
+retrieving revision 1.17
+diff -u -p -r1.17 xlocx.cxx
+--- sc/source/filter/excel/xlocx.cxx	13 Jan 2006 16:58:57 -0000	1.17
++++ sc/source/filter/excel/xlocx.cxx	10 Mar 2006 13:59:48 -0000
+@@ -76,13 +76,48 @@
+ #ifndef _COM_SUN_STAR_FORM_BINDING_XLISTENTRYSOURCE_HPP_
+ #include <com/sun/star/form/binding/XListEntrySource.hpp>
+ #endif
+-#ifndef _COM_SUN_STAR_SCRIPT_SCRIPTEVENTDESCRIPTOR_HPP_
+-#include <com/sun/star/script/ScriptEventDescriptor.hpp>
+-#endif
+ #ifndef _COM_SUN_STAR_SCRIPT_XEVENTATTACHERMANAGER_HPP_
+ #include <com/sun/star/script/XEventAttacherManager.hpp>
+ #endif
+ 
++#ifdef ENABLE_VBA
++#ifndef _SB_SBSTAR_HXX
++#include <basic/sbstar.hxx>
++#endif
++#ifndef _SB_SBMOD_HXX
++#include <basic/sbmod.hxx>
++#endif
++#ifndef _SB_SBMETH_HXX
++#include <basic/sbmeth.hxx>
++#endif
++#ifndef _SBXCLASS_HXX
++#include <basic/sbx.hxx>
++#endif
++#ifndef SC_SCEXTOPT_HXX
++#include <scextopt.hxx>
++#endif
++#ifndef _COM_SUN_STAR_AWT_XCONTROL_HPP_
++#include <com/sun/star/awt/XControl.hpp>
++#endif
++#ifndef _ORG_OPENOFFICE_VBA_XVBATOOOEVENTDESCGEN_HPP_
++#include <org/openoffice/vba/XVBAToOOEventDescGen.hpp>
++#endif
++#ifndef _CPPUHELPER_BOOTSTRAP_HXX_
++#include <cppuhelper/bootstrap.hxx>
++#endif
 +
-+	local:
-+		*;
-+};
---- /dev/null	2005-06-05 14:44:09.000000000 +0100
-+++ scripting/source/vbaevents/vbaevents.xml	2005-09-14 10:02:01.346708419 +0100
-@@ -0,0 +1,26 @@
-+<?xml version="1.0" encoding="UTF-8"?>
-+<!DOCTYPE module-description PUBLIC "-//StarOffice//DTD ComponentDescription 1.0//EN" "module-description.dtd">
-+<module-description xmlns:xlink="http://www.w3.org/1999/xlink">
++using org::openoffice::vba::XVBAToOOEventDescGen;
++using com::sun::star::uno::XComponentContext;
++using com::sun::star::awt::XControl;
++using com::sun::star::uno::UNO_QUERY_THROW;
++#else
++#ifndef _COM_SUN_STAR_SCRIPT_SCRIPTEVENTDESCRIPTOR_HPP_
++#include <com/sun/star/script/ScriptEventDescriptor.hpp>
++#endif
 +
-+    <module-name>vbaevents</module-name>
-+    
-+    <component-description>
-+        <author>Noel Power </author>
-+        <name>org.openoffice.vba.EventListener</name>
-+        <description>Event listener to handle ooo events and to translate them to calls to basic macros ala Button_Click etc.</description>
-+        <loader-name>com.sun.star.loader.SharedLibrary</loader-name>
-+        <language>c++</language>
-+        <status value="drafts"/>
-+        <supported-service>org.openoffice.vba.EventListener</supported-service>
-+        <type>com.sun.star.uno.XComponentContext</type>        
-+    </component-description>
-+    
-+    <project-build-dependency>cppuhelper</project-build-dependency>
-+    <project-build-dependency>cppu</project-build-dependency>
-+    <project-build-dependency>sal</project-build-dependency>
++#endif //ENABLE_VBA
 +
-+    <runtime-module-dependency>cppuhelper3$(COM)</runtime-module-dependency>
-+    <runtime-module-dependency>cppu3</runtime-module-dependency>
-+    <runtime-module-dependency>sal3</runtime-module-dependency>
-+    
-+</module-description>
++
+ #ifndef _SFX_OBJSH_HXX
+ #include <sfx2/objsh.hxx>
+ #endif
+@@ -249,6 +284,9 @@ SdrObject* XclImpOcxConverter::CreateSdr
+                         ScfPropertySet aPropSet( xModel );
+                         if( aPropSet.Is() )
+                             rOcxCtrlObj.WriteToPropertySet( aPropSet );
++#ifdef ENABLE_VBA
++                        RegisterOleMacros( xModel, rOcxCtrlObj );
++#endif //ENABLE_VBA
+                     }
+                 }
+                 return pSdrObj;
+@@ -275,7 +313,6 @@ SdrObject* XclImpOcxConverter::CreateSdr
+             Reference< XShape > xShape;
+             // dummy size
+             ::com::sun::star::awt::Size aSize;
+-
+             // try to insert the control into the form
+             if( InsertControl( xFormComp, aSize, &xShape, TRUE ) )
+             {
+@@ -435,23 +472,114 @@ void XclImpOcxConverter::ConvertSheetLin
+ void XclImpOcxConverter::RegisterTbxMacro( const XclImpTbxControlObj& rTbxCtrlObj )
+ {
+     ScriptEventDescriptor aEvent;
++#ifdef ENABLE_VBA
++    if ( rTbxCtrlObj.FillMacroDescriptor( aEvent ) )
++        AttachMacro( aEvent );
++#else
+     if( (mnLastIndex >= 0) && rTbxCtrlObj.FillMacroDescriptor( aEvent ) )
+     {
++         Reference< XEventAttacherManager > xEventMgr( GetFormComps(), UNO_QUERY );
++         if( xEventMgr.is() )
++         {
++             try
++             {
++                xEventMgr->registerScriptEvent( mnLastIndex, aEvent );
++             }
++             catch( Exception& )
++             {
++                DBG_ERRORFILE( "XclImpOcxConverter::RegisterTbxMacro - cannot register macro" );
++             }
++         }
++    }
++#endif
++}
++#ifdef ENABLE_VBA
++void XclImpOcxConverter::AttachMacro( const ScriptEventDescriptor& rEvent )
++{
++    if( mnLastIndex >= 0 ) 
++    {
+         Reference< XEventAttacherManager > xEventMgr( GetFormComps(), UNO_QUERY );
+         if( xEventMgr.is() )
+         {
+             try
+             {
+-                xEventMgr->registerScriptEvent( mnLastIndex, aEvent );
++                xEventMgr->registerScriptEvent( mnLastIndex, rEvent );
+             }
+             catch( Exception& )
+             {
+-                DBG_ERRORFILE( "XclImpOcxConverter::RegisterTbxMacro - cannot register macro" );
++                DBG_ERRORFILE( "XclImpOcxConverter::AttachMacro - cannot attach macro" );
+             }
+         }
+     }
+ }
+ 
++void XclImpOcxConverter::RegisterOleMacros( const Reference< XControlModel > & rxModel, const XclImpOleObj& rOcxCtrlObj )
++{
++    // Need to search basic for macro's named e.g. ControlButton1_Click
++    String sSearchString = rOcxCtrlObj.GetControlName();
++    sSearchString += String::CreateFromAscii("_");
++    ScfPropertySet aPropSet( rxModel );
++ 
++    if( SfxObjectShell* pDocShell = GetDocShell() )
++        if( StarBASIC* pBasic = pDocShell->GetBasic() )
++            // Seach in the CodeName ( Module ) associated with this sheet
++            if( SbModule* pModule = dynamic_cast< SbModule* >( pBasic->Find( GetExtDocOptions().GetCodeName(rOcxCtrlObj.GetScTab() ), SbxCLASS_OBJECT ) ) )
++            {
++                Reference<XComponentContext > xContext( ::cppu::defaultBootstrap_InitialComponentContext(), UNO_QUERY_THROW ); // Fatal error anyway
++                Sequence< OUString > sHandlerExtns;
++
++                if ( SbxArray* pMethods = pModule->GetMethods() )
++                {
++                    sal_Int32 nNumMethods = pMethods->Count();
++                    for ( sal_Int32 nIndex=0; nIndex<nNumMethods; ++nIndex )
++                    {
++                        SbMethod* pMethod = dynamic_cast< SbMethod* >( pMethods->Get( static_cast< USHORT >( nIndex ) ) );
++                        OUString sMeth( pMethod->GetName() );
++                        sal_Int32 nSearchIndex = sMeth.indexOf( sSearchString );
++                        if ( nSearchIndex == 0  )
++                        {
++                            sHandlerExtns.realloc( sHandlerExtns.getLength() + 1 );
++                            sHandlerExtns[ sHandlerExtns.getLength() - 1 ] = sMeth.copy( rOcxCtrlObj.GetControlName().Len() );
++                        }
++                    }    
++                }
++                if ( sHandlerExtns.getLength() )
++                {
++                    String sLibModName = pModule->GetName();
++                    sLibModName.Insert('.',0).Insert( pModule->GetParent()->GetName(), 0 );
++                    // Use service to create bindings for this control.
++                    // Bindings are created based on the handlers found. 
++                    // Note: service just needs the extensions for the handlers 
++                    // that we found e.g.  "_Click, _Change, _GotFocus" etc.
++                    // Hopefully this service can be re-used to do the same foo
++                    // for UserForms
++                    Reference< XVBAToOOEventDescGen > xEvtDescGen( xContext->getServiceManager()->createInstanceWithContext( CREATE_OUSTRING( "org.openoffice.vba.VBAToOOEventDesc" ), xContext ), UNO_QUERY );
++
++                    Reference< XControl > xCntrl;
++                    String sServiceName;
++                    // VBAToOOEventDesc expects an XControl to introspect on
++                    // so create one ( is discarded ) 
++                    if ( aPropSet.GetStringProperty(  sServiceName, CREATE_OUSTRING( "DefaultControl" ) ) && sServiceName.Len() )
++                    {
++                        xCntrl.set( xContext->getServiceManager()->createInstanceWithContext( sServiceName , xContext), UNO_QUERY );
++                        if ( xCntrl.is() )
++                        {
++                            // also need the model ( contains the control name
++                            // as well )
++                            xCntrl->setModel( rxModel );
++                            Sequence< ScriptEventDescriptor > aDescs( xEvtDescGen->getEventDescriptions( xCntrl, sLibModName, sHandlerExtns ) );
++                            const ScriptEventDescriptor* pEvent = aDescs.getConstArray();
++                            const ScriptEventDescriptor* pEnd = pEvent + aDescs.getLength();
++                            sal_Int32 counter = 0;
++                            for ( ; pEvent < pEnd; ++pEvent )
++                                AttachMacro( *pEvent );
++                        }
++                    }
++                }
++            }
++}
++#endif //ENABLE_VBA
++
+ // ----------------------------------------------------------------------------
+ 
+ XclExpOcxConverter::XclExpOcxConverter( const XclExpRoot& rRoot ) :
+Index: sc/source/filter/excel/makefile.mk
+===================================================================
+RCS file: /cvs/sc/sc/source/filter/excel/makefile.mk,v
+retrieving revision 1.34
+diff -u -p -r1.34 makefile.mk
+--- sc/source/filter/excel/makefile.mk	8 Sep 2005 18:58:26 -0000	1.34
++++ sc/source/filter/excel/makefile.mk	10 Mar 2006 17:55:38 -0000
+@@ -50,6 +50,10 @@ PROJECTPCHSOURCE=..\pch\filt_pch
+ .INCLUDE :  sc.mk
+ .INCLUDE :  $(PRJ)$/util$/makefile.pmk
+ 
++.IF "$(ENABLE_VBA)"=="YES"
++        CDEFS+=-DENABLE_VBA
++.ENDIF
++
+ # --- Files --------------------------------------------------------
+ 
+ SLOFILES =	\
