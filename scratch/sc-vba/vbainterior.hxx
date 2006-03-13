@@ -5,6 +5,7 @@
 #include <org/openoffice/vba/XInterior.hpp>
 #include <com/sun/star/uno/XComponentContext.hpp>
 #include <com/sun/star/beans/XPropertySet.hpp>
+#include <com/sun/star/container/XIndexAccess.hpp>
 #include "vbarange.hxx"
 
 #include <com/sun/star/script/XInvocation.hpp>
@@ -18,6 +19,8 @@ class ScVbaInterior :  public ScVbaInterior_BASE
 	css::uno::Reference< css::beans::XPropertySet > m_xProps;
         css::uno::Reference< css::uno::XComponentContext > m_xContext;
 	ScDocument* m_pScDoc;
+
+        css::uno::Reference< css::container::XIndexAccess > getPalette(); 
 public:
         ScVbaInterior( const css::uno::Reference< css::uno::XComponentContext >& xContext,
                  const css::uno::Reference< css::beans::XPropertySet >& xProps, ScDocument* pScDoc ) throw ( css::lang::IllegalArgumentException);
