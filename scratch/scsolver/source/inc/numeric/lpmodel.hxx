@@ -62,6 +62,7 @@ public:
 	::scsolver::numeric::Matrix getCostVector() const;
 	void setCostVectorElement( size_t, double );
 	void setCostVector( const std::vector<double>& );
+	void deleteCostVectorElements( const std::vector<size_t> & );
 
 	double   getVarBound( unsigned long, Bound ) const;
 	void     setVarBound( unsigned long, Bound, double );
@@ -70,6 +71,9 @@ public:
 	Goal getGoal() const;
 	void setGoal( Goal );
 	
+	double getObjectiveFuncConstant() const;
+	void setObjectiveFuncConstant( double );
+
 	unsigned long getPrecision() const;
 	void       setPrecision( unsigned long );
 
@@ -79,12 +83,16 @@ public:
 	bool getVerbose() const;
 	void setVerbose( bool );
 
+	double getConstraint( size_t, size_t ) const;
 	::scsolver::numeric::Matrix getConstraintMatrix() const;
 	::scsolver::numeric::Matrix getRhsVector() const;
+	double getRhsValue( size_t ) const;
+	void setRhsValue( size_t, double );
 	std::vector<Equality> getEqualityVector() const;
 	Equality getEqualityByRowId( unsigned long ) const;
 	void addConstraint( const std::vector<double>&, Equality, double );
 	void setStandardConstraintMatrix( const ::scsolver::numeric::Matrix&, const ::scsolver::numeric::Matrix& );
+	void deleteConstraintMatrixColumns( const std::vector<size_t>& );
 	
 	void solve( BaseAlgorithm* );
 	void solve( const std::auto_ptr<BaseAlgorithm>& );

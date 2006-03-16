@@ -37,6 +37,7 @@
 #include <algorithm>
 #include <vector>
 #include <map>
+#include <list>
 #include <boost/numeric/ublas/matrix.hpp>
 
 using namespace std;
@@ -88,12 +89,24 @@ private:
 	std::vector<bool> m_aBasicVar;
 	std::vector<size_t> m_aBasicVarId;
 
+    /** permutation of variable indices */
+	std::list<size_t> m_cnPermVarIndex;
+
+	struct ConstDecVar
+	{
+		size_t Id;
+		double Value;
+	};
+	std::list<ConstDecVar> m_cnConstDecVarList;
+
 	//-----------------------------------------------------------------------
 	// Private methods
 
 	Model* getModel() const { return m_pSelf->getModel(); }
 
-	void convertVarRange( Model& ) const;
+	void convertVarRange( Model& );
+	void initializePermIndex();
+	void mapDecisionVars( Matrix& ) const;
 	void runNormalInitSearch();
 	void runTwoPhaseInitSearch( const std::vector<size_t>& );
 	void printIterateHeader() const;
@@ -118,14 +131,19 @@ RevisedSimplexImpl::~RevisedSimplexImpl()
 /**
  * Convert variable ranges into a constrant matrix.  Also
  * extracts those variables with identical upper and lower
- * ranges into equality constraints, which are ultimately 
+ * ranges into equality constraints, which are ultimately
  * treated as constant values.
  * 
- * @param aModel
+ * @param aModel object representing a model
  */
-void RevisedSimplexImpl::convertVarRange( Model& aModel ) const
+void RevisedSimplexImpl::convertVarRange( Model& aModel )
 {
 	size_t nColSize = aModel.getCostVector().cols();
+	size_t nRhsSize = aModel.getRhsVector().rows();
+	double fObjConst = 0.0;
+	std::vector<double> cnRhsConstants( nRhsSize );
+	std::vector<size_t> cnColsNuked;
+	
 	for ( size_t i = 0; i < nColSize; ++i )
 	{
 		double fLBound = 0.0, fUBound = 0.0;
@@ -146,9 +164,24 @@ void RevisedSimplexImpl::convertVarRange( Model& aModel ) const
 
 		if ( bLBound && bUBound && fLBound == fUBound )
 		{
-			cout << "  (equal)" << endl;
-			// TODO: This variable is constant-equivalent.  
-			// Remove it from the temporary model.
+			// This variable is constant-equivalent.  Remove it from 
+			// the temporary model.
+			ConstDecVar cdv;
+			cdv.Id = i;
+			cdv.Value = fLBound;
+			m_cnConstDecVarList.push_back( cdv );
+
+			double fCost = aModel.getCostVector().operator()( 0, i );
+			fObjConst -= fCost*fLBound;
+			cnColsNuked.push_back( i );
+			cout << "  (equal) fObjConstant = " << fObjConst << endl;
+			for( size_t nRow = 0; nRow < nRhsSize; ++nRow )
+			{
+				double f = aModel.getConstraint( nRow, i )*fLBound;
+				cout << "  " << f;
+				cnRhsConstants[nRow] -= f;
+				cout << ":\t" << cnRhsConstants.at( nRow ) << endl;
+			}
 		}
 		else
 		{
@@ -167,23 +200,98 @@ void RevisedSimplexImpl::convertVarRange( Model& aModel ) const
 			}
 		}
 	}
+
+	if ( cnColsNuked.size() > 0 )
+	{
+		// Delete designated columns from all affected matrices, and turn them
+		// into constant values to be added to the RHS vector and objective function.
+		// Also, remove the IDs of deleted columns from the permutation index list, 
+		// and update the constant objective value list.
+
+		aModel.deleteCostVectorElements( cnColsNuked );
+		aModel.deleteConstraintMatrixColumns( cnColsNuked );
+		for ( size_t i = 0; i < nRhsSize; ++i )
+		{
+			double fRhsVal = aModel.getRhsValue(i);
+			aModel.setRhsValue( i, fRhsVal + cnRhsConstants.at(i) );
+		}
+
+		// Actually this may not be needed since this value will not affect
+		// the solution at all.  But set this anyway.
+		aModel.setObjectiveFuncConstant( fObjConst );
+
+		vector<size_t>::iterator it,
+			itBeg = cnColsNuked.begin(), itEnd = cnColsNuked.end();
+		list<size_t>::iterator itPerm = m_cnPermVarIndex.begin();
+		size_t nPrevId = 0;
+		for ( it = itBeg; it != itEnd; ++it )
+			m_cnPermVarIndex.remove( *it );
+	}
+}
+
+/**
+ * Initialize the permutation index list.  This list is used to set the
+ * values of decision variables back to their original position in case
+ * of model reduction.
+ */
+void RevisedSimplexImpl::initializePermIndex()
+{
+	m_cnPermVarIndex.clear();
+	size_t nCostSize = getModel()->getCostVector().cols();
+	for ( size_t i = 0; i < nCostSize; ++i )
+		m_cnPermVarIndex.push_back( i );
+
+	cout << "permutation index: ";
+	printElements( m_cnPermVarIndex );
+}
+
+/**
+ * This method maps back variables that may have been repositioned as a
+ * result of model shrinkage.  It also puts the values of those constant 
+ * equivalent decision variables to their original position in the matrix.
+ * 
+ * @param solution matrix representing a solution for reduced model
+ */
+void RevisedSimplexImpl::mapDecisionVars( Matrix& solution ) const
+{
+	cout << "permutation index: ";
+	printElements( m_cnPermVarIndex );
+
+	// Map solved variables into their original position.
+	list<size_t>::const_iterator itBeg = m_cnPermVarIndex.begin(),
+		itEnd = m_cnPermVarIndex.end(), it;
+	for ( it = itBeg; it != itEnd; ++it )
+	{
+		size_t nSrcId = ::std::distance( itBeg, it );
+		size_t nDstId = *it;
+		cout << "mapped var id: " << nSrcId << " -> " << nDstId << endl;
+		solution( nDstId, 0 ) = m_aX( nSrcId, 0 );
+	}
+
+	// Insert constant variables if any
+	list<ConstDecVar>::const_iterator itCdvBeg = m_cnConstDecVarList.begin(),
+		itCdvEnd = m_cnConstDecVarList.end(), itCdv;
+	for ( itCdv = itCdvBeg; itCdv != itCdvEnd; ++itCdv )
+		solution( itCdv->Id, 0 ) = itCdv->Value;
 }
 
 Matrix RevisedSimplexImpl::solve()
 {
-	//-------------------------------------------------------------------------
+	//-----------------------------------------------------------------------
 	// Initialize
 	
-	//-------------------------------------------------------------------------
-	// Normalize the objective with use of slack variable(s), and store in the 
-	// following variables such that:
+	//-----------------------------------------------------------------------
+	// Normalize the objective with use of slack variable(s), and store in 
+	// the following variables such that:
 	//
 	//     A = expanded constraint matrix
 	//     B = right hand side vector
 	//     C = expanded cost vector
 
 	Model aModel( *getModel() );
-	//convertVarRange( aModel );
+	initializePermIndex();
+	convertVarRange( aModel );
+	aModel.print();
 	Matrix A( aModel.getConstraintMatrix() );
 	Matrix B( aModel.getRhsVector() );
 	Matrix C( aModel.getCostVector() );
@@ -318,12 +426,15 @@ Matrix RevisedSimplexImpl::solve()
 	m_nIter = 0;
 	while ( !iterate() );
 
-	Matrix aCost = m_Model.getCostVector();
-	Matrix solution( aCost.cols(), 1 );
+	// Put the solution from the modified model to the original model by using
+	// the permutation index.
+	size_t nCostSize = getModel()->getCostVector().cols(); // original cost size
+	Matrix solution( nCostSize, 1 );
 	solution.setResizable( false );
-	for ( size_t i = 0; i < aCost.cols(); ++i )
-		solution( i, 0 ) = m_aX( i, 0 );
-	
+	if( m_cnPermVarIndex.empty() )
+		throw AssertionWrong();
+
+	mapDecisionVars( solution );
 	if ( m_Model.getVerbose() )
 	{
 		cout << "x = ";
@@ -390,7 +501,7 @@ void RevisedSimplexImpl::runTwoPhaseInitSearch( const vector<size_t>& aNonSatRow
 	if ( !m_bTwoPhaseAllowed )
 		throw IllegalTwoPhaseSearch();
 		
-	static const bool bDebugTwoPhase = true;
+	static const bool bDebugTwoPhase = false;
 
 	if ( m_Model.getVerbose() )
 		Debug( "Entering a two-phase search for initial solution" );

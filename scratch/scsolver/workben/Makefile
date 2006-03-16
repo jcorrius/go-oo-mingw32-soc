@@ -1,15 +1,15 @@
 
 OBJDIR=./addon_pkg/obj
 CPP_INCLUDES=-I../source/inc
-CPP=/usr/bin/g++
+CXX=/usr/bin/g++
 CPPFLAGS=-DDEBUG -Wall -Os -mtune=pentium3
 
 simplex_test.o: simplex_test.cxx
-	$(CPP) $(CPPFLAGS) $(CPP_INCLUDES) \
+	$(CXX) $(CPPFLAGS) $(CPP_INCLUDES) \
 	-o $@ -c $<
 
 simplex_test: simplex_test.o
-	$(CPP) -o $@ simplex_test.o \
+	$(CXX) -o $@ simplex_test.o \
 	$(OBJDIR)/matrix.o \
 	$(OBJDIR)/lpbase.o \
 	$(OBJDIR)/lpmodel.o \
@@ -17,10 +17,19 @@ simplex_test: simplex_test.o
 	$(OBJDIR)/lpsimplex.o
 
 matrix_test.o: matrix_test.cxx
-	$(CPP) $(CPPFLAGS) $(CPP_INCLUDES) \
+	$(CXX) $(CPPFLAGS) $(CPP_INCLUDES) \
 	-o $@ -c $<
 
 matrix_test: matrix_test.o
-	$(CPP) -o $@ matrix_test.o \
+	$(CXX) -o $@ matrix_test.o \
+	$(OBJDIR)/matrix.o \
+	$(OBJDIR)/global.o
+
+mxref_test.o: mxref_test.cxx
+	$(CXX) $(CPPFLAGS) $(CPP_INCLUDES) \
+	-o $@ -c $<
+
+mxref_test: mxref_test.o
+	$(CXX) -o $@ mxref_test.o \
 	$(OBJDIR)/matrix.o \
 	$(OBJDIR)/global.o

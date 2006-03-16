@@ -79,6 +79,7 @@ public:
 	Matrix getCostVector() const { return m_mxCost; }
 	void setCostVectorElement( size_t, double );
 	void setCostVector( const std::vector<double>& );
+	void deleteCostVectorElements( const std::vector<size_t>& );
 
 	AttrBound getVarBoundAttribute( unsigned long, Bound ) const;
 	double    getVarBound( unsigned long, Bound ) const;
@@ -88,6 +89,9 @@ public:
 	Goal getGoal() const { return m_eGoal; }
 	void setGoal( Goal e ) { m_eGoal = e; }
 	
+	double getObjectiveFuncConstant() const { return m_fObjFuncConstant; }
+	void setObjectiveFuncConstant( double f ) { m_fObjFuncConstant = f; }
+
 	unsigned long getPrecision() const { return m_nPrecision; }
 	void       setPrecision( unsigned long n ) { m_nPrecision = n; }
 
@@ -97,12 +101,16 @@ public:
 	bool getVerbose() const { return m_bVerbose; }
 	void setVerbose( bool b ) { m_bVerbose = b; }
 
+	double getConstraint( size_t, size_t ) const;
 	Matrix getConstraintMatrix() const { return m_mxConstraint; }
 	Matrix getRhsVector() const { return m_mxRHS; }
+	double getRhsValue( size_t ) const;
+	void setRhsValue( size_t, double );
 	vector<Equality> getEqualityVector() const { return m_eEqualities; }
 	Equality getEqualityByRowId( unsigned long i ) const { return m_eEqualities.at( i ); }
 	void addConstraint( const std::vector<double>&, Equality, double );
 	void setStandardConstraintMatrix( const Matrix&, const Matrix& );
+	void deleteConstraintMatrixColumns( const std::vector<size_t>& );
 	
 	void solve( BaseAlgorithm* );
 	void solve( const std::auto_ptr<BaseAlgorithm>& );
@@ -110,9 +118,9 @@ public:
 	void setSolution( const Matrix& );
 
 private:
-	Matrix m_mxCost;
+	Matrix m_mxCost;	// row vector
 	Matrix m_mxConstraint;
-	Matrix m_mxRHS;
+	Matrix m_mxRHS;		// column vector
 
 	map<unsigned long, VarBounds> m_aVarBoundMap;
 
@@ -125,13 +133,14 @@ private:
 	bool m_bVerbose;
 
 	Matrix m_mxSolution;
-
+	double m_fObjFuncConstant;
 };
 
 
 ModelImpl::ModelImpl() : 
 	m_mxCost( 0, 0 ), m_mxConstraint( 0, 0 ), m_mxRHS( 0, 0 ),
-	m_nPrecision( 2 ), m_bVarPositive( true ), m_bVerbose( false ), m_mxSolution( 0, 0 )
+	m_nPrecision( 2 ), m_bVarPositive( true ), m_bVerbose( false ), m_mxSolution( 0, 0 ),
+	m_fObjFuncConstant( 0.0 )
 {
 }
 
@@ -182,6 +191,11 @@ void ModelImpl::setCostVector( const std::vector<double>& cn )
 		size_t nDist = std::distance( itBeg, it );
 		setCostVectorElement( nDist, *it );
 	}
+}
+
+void ModelImpl::deleteCostVectorElements( const std::vector<size_t>& cn )
+{
+	m_mxCost.deleteColumns( cn );
 }
 
 AttrBound ModelImpl::getVarBoundAttribute( unsigned long i, Bound e ) const
@@ -279,6 +293,21 @@ bool ModelImpl::isVarBounded( unsigned long i, Bound e ) const
 	return ab.Enabled;
 }
 
+double ModelImpl::getConstraint( size_t nRow, size_t nCol ) const
+{
+	return m_mxConstraint( nRow, nCol );
+}
+
+double ModelImpl::getRhsValue( size_t nId ) const
+{
+	return m_mxRHS( nId, 0 );
+}
+
+void ModelImpl::setRhsValue( size_t nId, double fVal )
+{
+	m_mxRHS( nId, 0 ) = fVal;
+}
+
 void ModelImpl::addConstraint( const std::vector<double>& aConst, Equality eEqual, double fRHS )
 {
 	unsigned long nRowId = m_mxConstraint.rows();
@@ -306,6 +335,11 @@ void ModelImpl::setStandardConstraintMatrix( const Matrix& A, const Matrix& B )
 			aConst.push_back( A( i, j ) );
 		addConstraint( aConst, EQUAL, B( i, 0 ) );
 	}
+}
+
+void ModelImpl::deleteConstraintMatrixColumns( const std::vector<size_t>& cn )
+{
+	m_mxConstraint.deleteColumns( cn );
 }
 
 void ModelImpl::print() const
@@ -490,6 +524,11 @@ void Model::setCostVector( const std::vector<double>& cn )
 	m_pImpl->setCostVector( cn );
 }
 
+void Model::deleteCostVectorElements( const std::vector<size_t>& cnColIds )
+{
+	m_pImpl->deleteCostVectorElements( cnColIds );
+}
+
 /** Beware that the caller is responsible for making sure that the specified 
 	boundary exists by calling isVarBounded(...) beforehand.
  */
@@ -516,6 +555,16 @@ Goal Model::getGoal() const
 void Model::setGoal( Goal e )
 {
 	m_pImpl->setGoal( e );
+}
+
+double Model::getObjectiveFuncConstant() const
+{
+	return m_pImpl->getObjectiveFuncConstant();
+}
+
+void Model::setObjectiveFuncConstant( double f )
+{
+	m_pImpl->setObjectiveFuncConstant( f );
 }
 
 unsigned long Model::getPrecision() const
@@ -548,6 +597,11 @@ void Model::setVerbose( bool b )
 	m_pImpl->setVerbose( b );
 }
 
+double Model::getConstraint( size_t nRow, size_t nCol ) const
+{
+	return m_pImpl->getConstraint( nRow, nCol );
+}
+
 Matrix Model::getConstraintMatrix() const
 {
 	return m_pImpl->getConstraintMatrix();
@@ -556,6 +610,16 @@ Matrix Model::getConstraintMatrix() const
 Matrix Model::getRhsVector() const
 {
 	return m_pImpl->getRhsVector();
+}
+
+double Model::getRhsValue( size_t nId ) const
+{
+	return m_pImpl->getRhsValue( nId );
+}
+
+void Model::setRhsValue( size_t nId, double fVal )
+{
+	m_pImpl->setRhsValue( nId, fVal );
 }
 
 std::vector<Equality> Model::getEqualityVector() const
@@ -576,6 +640,11 @@ void Model::addConstraint( const std::vector< double >& v, Equality e, double fR
 void Model::setStandardConstraintMatrix( const Matrix& mxConst, const Matrix& mxRhs )
 {
 	m_pImpl->setStandardConstraintMatrix( mxConst, mxRhs );
+}
+
+void Model::deleteConstraintMatrixColumns( const std::vector<size_t>& cnCols )
+{
+	m_pImpl->deleteConstraintMatrixColumns( cnCols );
 }
 
 void Model::solve( BaseAlgorithm* pAlgorithm )

@@ -142,7 +142,7 @@ void testCase3()
 	p->setCostVectorElement( 0, 7 );
 	p->setCostVectorElement( 1, 12 );
 	p->setCostVectorElement( 2, 5 );
-	p->setCostVectorElement( 3, 14 );
+	p->setCostVectorElement( 3, -14 );
 	vector<double> aConst;
 	aConst.push_back(  300 );
 	aConst.push_back(  600 );
@@ -163,12 +163,18 @@ void testCase3()
 		p->setVarBound( i, BOUND_UPPER,  10 );
 		}
 	}
-	p->setGoal( GOAL_MINIMIZE );
+	p->setVarBound( 1, BOUND_LOWER, 25 );
+	p->setVarBound( 1, BOUND_UPPER, 25 );
+	p->setVarBound( 3, BOUND_LOWER, -2 );
+	p->setVarBound( 3, BOUND_UPPER, -2 );
+
+	p->setGoal( GOAL_MAXIMIZE );
 	p->setVerbose( true );
 	p->print();
 	p->setPrecision( 2 );
 	
-	std::auto_ptr<BaseAlgorithm> algorithm( new BoundedRevisedSimplex );
+	//std::auto_ptr<BaseAlgorithm> algorithm( new BoundedRevisedSimplex );
+	std::auto_ptr<BaseAlgorithm> algorithm( new RevisedSimplex );
 	p->solve( algorithm );
 }
 
@@ -349,7 +355,7 @@ int main( int argc, char** argv )
 	testCaseNiklas();
 
 // 	testModel1();
-	//testCaseLudovic();
+	testCaseLudovic();
 
 	return EXIT_SUCCESS;
 }
