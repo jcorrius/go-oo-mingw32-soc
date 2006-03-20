@@ -1,0 +1,804 @@
+--- /dev/null	2006-03-20 09:28:16.436453250 +0000
++++ lotuswordpro/source/filter/LotusWordProImportFilter.cxx	2006-03-20 12:31:24.000000000 +0000
+@@ -0,0 +1,420 @@
++#ifndef _OSL_DIAGNOSE_H_
++#include <osl/diagnose.h>
++#endif
++#ifndef _RTL_TENCINFO_H_
++#include <rtl/tencinfo.h>
++#endif
++#ifndef _COM_SUN_STAR_LANG_XMULTISERVICEFACTORY_HPP_
++#include <com/sun/star/lang/XMultiServiceFactory.hpp>
++#endif
++#ifndef _COM_SUN_STAR_IO_XINPUTSTREAM_HPP_
++#include <com/sun/star/io/XInputStream.hpp>
++#endif
++#ifndef _COM_SUN_STAR_XML_SAX_XATTRIBUTELIST_HPP_
++#include <com/sun/star/xml/sax/XAttributeList.hpp>
++#endif
++#ifndef _COM_SUN_STAR_XML_SAX_XDOCUMENTHANDLER_HPP_
++#include <com/sun/star/xml/sax/XDocumentHandler.hpp>
++#endif
++#ifndef _COM_SUN_STAR_XML_SAX_XPARSER_HPP_
++#include <com/sun/star/xml/sax/XParser.hpp>
++#endif
++#ifndef _COM_SUN_STAR_UCB_XCOMMANDENVIRONMENT_HPP
++#include <com/sun/star/ucb/XCommandEnvironment.hpp>
++#endif
++#ifndef _COM_SUN_STAR_IO_XINPUTSTREAM_HPP_
++#include <com/sun/star/io/XInputStream.hpp>
++#endif
++#ifndef _ATTRLIST_HPP_
++#include <xmloff/attrlist.hxx>
++#endif
++#ifndef _XMLKYWD_HPP
++#include <xmloff/xmlkywd.hxx>
++#endif
++
++#ifndef _UCBHELPER_CONTENT_HXX
++#include <ucbhelper/content.hxx>
++#endif
++
++#include <tools/stream.hxx>
++
++#include "LotusWordProImportFilter.hxx"
++
++#include <vector>
++
++using namespace ::rtl;
++using rtl::OString;
++using rtl::OUStringBuffer;
++using rtl::OUString;
++using com::sun::star::uno::Sequence;
++using com::sun::star::uno::Reference;
++using com::sun::star::lang::XComponent;
++using com::sun::star::uno::Any;
++using com::sun::star::uno::UNO_QUERY;
++using com::sun::star::uno::XInterface;
++using com::sun::star::uno::Exception;
++using com::sun::star::uno::RuntimeException;
++using com::sun::star::io::XInputStream;
++using com::sun::star::lang::XMultiServiceFactory;
++using com::sun::star::beans::PropertyValue;
++using com::sun::star::document::XFilter;
++using com::sun::star::document::XExtendedFilterDetection;
++using com::sun::star::ucb::XCommandEnvironment;
++
++using com::sun::star::document::XImporter;
++using com::sun::star::xml::sax::XAttributeList;
++using com::sun::star::xml::sax::XDocumentHandler;
++using com::sun::star::xml::sax::XParser;
++
++//                                 W     o     r     d     P     r     o
++static const sal_Int8 header[] = { 0x57, 0x6f, 0x72, 0x64, 0x50, 0x72, 0x6f };
++
++const sal_Int32 MAXCHARS = 65534;
++
++ // Simple xml importer, currently the importer is very very simple
++ // it only extracts pure text from the wordpro file. Absolutely no formating
++ // information is currently imported.
++ // To reflect the current state of this importer the sax events sent 
++ // to the document handler are also the simplest possible. In addition to
++ // the the basic attributes set up for the 'office:document' element
++ // all the imported text is inserted into 'text:p' elements. 
++ // The parser extracts the pure text and creates simple a simple 'text:p'
++ // element to contain that text. In the event of the text exceeding 
++ // MAXCHARS new 'text:p' elements are created as needed 
++class SimpleXMLImporter
++{
++private:
++
++    Reference< XDocumentHandler > m_xDocHandler;
++    std::vector< OUString > m_vStringChunks;
++    SvStream& m_InputStream; 
++
++    bool CheckValidData( sal_Int8 nChar )
++    {
++        if( ( nChar >= 0x20 && nChar <= 0x7E ) && ( nChar != 0X40 ) )
++            return  true;
++        return false;				   
++    } 
++
++    void addAttribute( SvXMLAttributeList* pAttrList, const char* key, const char* val )
++    {
++        pAttrList->AddAttribute( OUString::createFromAscii( key ), OUString::createFromAscii( val ) );
++    }
++
++    void writeTextChunk( const OUString& sChunk )
++    {
++        SvXMLAttributeList *pAttrList = new SvXMLAttributeList();
++        Reference < XAttributeList > xAttrList(pAttrList);
++
++        pAttrList->AddAttribute( OUString(RTL_CONSTASCII_USTRINGPARAM("text:style-name")),  OUString(RTL_CONSTASCII_USTRINGPARAM("Standard")));
++
++        m_xDocHandler->startElement( OUString(RTL_CONSTASCII_USTRINGPARAM("text:p")), xAttrList  );
++        m_xDocHandler->characters( sChunk );
++        m_xDocHandler->endElement( OUString(RTL_CONSTASCII_USTRINGPARAM("text:p") ) );
++    }
++
++    void writeDocContentPreamble()
++    {
++        SvXMLAttributeList *pDocContentPropList = new SvXMLAttributeList();
++	Reference < XAttributeList > xDocContentList(pDocContentPropList);
++        addAttribute( pDocContentPropList, "xmlns:office", "urn:oasis:names:tc:opendocument:xmlns:office:1.0" );
++        addAttribute( pDocContentPropList, "xmlns:style", "urn:oasis:names:tc:opendocument:xmlns:style:1.0");
++        addAttribute( pDocContentPropList, "xmlns:text", "urn:oasis:names:tc:opendocument:xmlns:text:1.0" );
++        addAttribute( pDocContentPropList, "xmlns:table", "urn:oasis:names:tc:opendocument:xmlns:table:1.0" );
++        addAttribute( pDocContentPropList, "xmlns:draw", "urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" );
++        addAttribute( pDocContentPropList, "xmlns:fo", "urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" );
++        addAttribute( pDocContentPropList, "xmlns:xlink", "http://www.w3.org/1999/xlink" );
++        addAttribute( pDocContentPropList, "xmlns:dc", "http://purl.org/dc/elements/1.1/" );
++        addAttribute( pDocContentPropList, "xmlns:meta", "urn:oasis:names:tc:opendocument:xmlns:meta:1.0" );
++        addAttribute( pDocContentPropList, "xmlns:number", "urn:oasis:names:tc:opendocument:xmlns:datastyle:1.0" );
++        addAttribute( pDocContentPropList, "xmlns:svg", "urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" );
++        addAttribute( pDocContentPropList, "xmlns:chart", "urn:oasis:names:tc:opendocument:xmlns:chart:1.0" );
++        addAttribute( pDocContentPropList, "xmlns:dr3d", "urn:oasis:names:tc:opendocument:xmlns:dr3d:1.0" );
++        addAttribute( pDocContentPropList, "xmlns:math", "http://www.w3.org/1998/Math/MathML" );
++        addAttribute( pDocContentPropList, "xmlns:form", "urn:oasis:names:tc:opendocument:xmlns:form:1.0" );
++        addAttribute( pDocContentPropList, "xmlns:script", "urn:oasis:names:tc:opendocument:xmlns:script:1.0" );
++        addAttribute( pDocContentPropList, "xmlns:ooo", "http://openoffice.org/2004/office" );
++        addAttribute( pDocContentPropList, "xmlns:ooow", "http://openoffice.org/2004/writer" );
++        addAttribute( pDocContentPropList, "xmlns:oooc", "http://openoffice.org/2004/calc" );
++        addAttribute( pDocContentPropList, "xmlns:dom", "http://www.w3.org/2001/xml-events" );
++        addAttribute( pDocContentPropList, "xmlns:xforms", "http://www.w3.org/2002/xforms" );
++        addAttribute( pDocContentPropList, "xmlns:xsd", "http://www.w3.org/2001/XMLSchema");
++        addAttribute( pDocContentPropList, "xmlns:xsi", "http://www.w3.org/2001/XMLSchema-instance" );
++        addAttribute( pDocContentPropList, "office:version", "1.0");
++        m_xDocHandler->startElement(OUString(RTL_CONSTASCII_USTRINGPARAM("office:document-content" ) ), xDocContentList );
++    }
++
++    void parseDoc()
++    {
++        UINT8 nDelim, nDummy, nLen, nData;
++        UINT16 nOpcode;
++        int nCount = 0;
++        OUStringBuffer sBuf( MAXCHARS );
++        sal_Int32 nChars = 0;
++
++        while( !m_InputStream.IsEof())
++        {
++            m_InputStream >> nDelim;
++            if( nDelim == 0x40 )
++            {
++                m_InputStream >> nDummy >> nOpcode;
++                switch( nOpcode )
++                {
++                    case 0xC00B:  // Dictionary Word
++                        m_InputStream >> nLen >> nDummy;
++                        while( nLen > 0 && !m_InputStream.IsEof() )
++                        {
++                            UINT8 nChar;
++                            m_InputStream >> nChar;
++                            if( CheckValidData( nChar ) )
++                            {
++                                sBuf.appendAscii( (sal_Char*)(&nChar),1 );
++                                if ( ++nChars >=  MAXCHARS )
++                                {
++                                    m_vStringChunks.push_back( sBuf.makeStringAndClear() ); 
++                                    nChars = 0;
++                                }
++                            }
++                            nLen--;
++                        }
++                        break;
++
++                    case 0x0242:  // Non Dictionary word
++                        m_InputStream >> nData;
++                        if( nData == 0x02 )
++                        { 
++                            m_InputStream >> nLen >> nDummy;
++                            while( nLen > 0 && !m_InputStream.IsEof() )
++                            {
++                                m_InputStream >> nData;
++                                if( CheckValidData( nData ) )
++                                {
++                                    sBuf.appendAscii( (sal_Char*)(&nData),1 );
++                                    if ( ++nChars >=  MAXCHARS )
++                                    {
++                                        m_vStringChunks.push_back( sBuf.makeStringAndClear() ); 
++                                        nChars = 0;
++                                    }
++                                }
++                                nLen--;
++                            }
++                        }
++                        break;
++                }
++            }   
++        }
++        if ( nChars )
++            m_vStringChunks.push_back( sBuf.makeStringAndClear() ); 
++    }
++
++    void writeXML()
++    {
++        if ( m_vStringChunks.size() )
++        {
++            m_xDocHandler->startDocument();
++            SvXMLAttributeList *pAttrList = new SvXMLAttributeList();
++            writeDocContentPreamble(); // writes "office:document-content" elem
++            Reference < XAttributeList > xAttrList(pAttrList);
++
++            m_xDocHandler->startElement( OUString(RTL_CONSTASCII_USTRINGPARAM("office:body")), xAttrList  );
++
++            // process strings imported
++            std::vector< OUString >::const_iterator it = m_vStringChunks.begin();
++            std::vector< OUString >::const_iterator it_end = m_vStringChunks.end();
++            for ( ; it!=it_end; ++it )
++                writeTextChunk( *it );
++
++            m_xDocHandler->endElement( OUString(RTL_CONSTASCII_USTRINGPARAM("office:body") ) );
++            m_xDocHandler->endElement( OUString(RTL_CONSTASCII_USTRINGPARAM("office:document-content")));
++            m_xDocHandler->endDocument();
++        }
++    }
++public:
++
++    SimpleXMLImporter( const Reference< XDocumentHandler >&  xDocHandler, SvStream& rStream ) : m_xDocHandler( xDocHandler ), m_InputStream( rStream ) {}
++
++    void import()
++    {
++        parseDoc();
++        writeXML();
++    }
++};
++
++sal_Bool SAL_CALL LotusWordProImportFilter::importImpl( const Sequence< ::com::sun::star::beans::PropertyValue >& aDescriptor )
++	throw (RuntimeException)
++{
++	
++	sal_Int32 nLength = aDescriptor.getLength();
++	const PropertyValue * pValue = aDescriptor.getConstArray();
++	OUString sURL;
++	Reference < XInputStream > xInputStream;
++	for ( sal_Int32 i = 0 ; i < nLength; i++)
++	{
++	    if ( pValue[i].Name.equalsAsciiL ( RTL_CONSTASCII_STRINGPARAM ( "InputStream" ) ) )
++		pValue[i].Value >>= xInputStream;
++	    else if ( pValue[i].Name.equalsAsciiL ( RTL_CONSTASCII_STRINGPARAM ( "URL" ) ) )
++		pValue[i].Value >>= sURL;
++	    rtl_TextEncoding encoding = RTL_TEXTENCODING_INFO_ASCII;
++	}
++	if ( !xInputStream.is() )
++	{
++	    OSL_ASSERT( 0 );
++	    return sal_False;
++	}
++
++	OString sFileName;
++	sFileName = OUStringToOString(sURL, RTL_TEXTENCODING_INFO_ASCII);
++
++        SvFileStream inputStream( sURL, STREAM_READ );
++        if ( inputStream.IsEof() || ( inputStream.GetError() != SVSTREAM_OK ) )
++             return sal_False;
++
++	// An XML import service: what we push sax messages to..
++	OUString sXMLImportService ( RTL_CONSTASCII_USTRINGPARAM ( "com.sun.star.comp.Writer.XMLImporter" ) );
++
++	Reference< XDocumentHandler > xInternalHandler( mxMSF->createInstance( sXMLImportService ), UNO_QUERY );
++	Reference < XImporter > xImporter(xInternalHandler, UNO_QUERY);
++        xImporter->setTargetDocument(mxDoc);
++
++        SimpleXMLImporter xmlImporter( xInternalHandler, inputStream );
++        xmlImporter.import();
++         
++	return sal_True; 
++}
++
++sal_Bool SAL_CALL LotusWordProImportFilter::filter( const Sequence< ::com::sun::star::beans::PropertyValue >& aDescriptor ) 
++	throw (RuntimeException)
++{
++	return importImpl ( aDescriptor );
++}
++void SAL_CALL LotusWordProImportFilter::cancel(  ) 
++	throw (RuntimeException)
++{
++}
++
++// XImporter
++void SAL_CALL LotusWordProImportFilter::setTargetDocument( const Reference< ::com::sun::star::lang::XComponent >& xDoc )
++	throw (::com::sun::star::lang::IllegalArgumentException, RuntimeException)
++{
++	meType = FILTER_IMPORT;
++	mxDoc = xDoc;
++}
++
++// XExtendedFilterDetection
++OUString SAL_CALL LotusWordProImportFilter::detect( com::sun::star::uno::Sequence< PropertyValue >& Descriptor )
++	throw( com::sun::star::uno::RuntimeException )
++{
++
++	OUString sTypeName = OUString( RTL_CONSTASCII_USTRINGPARAM ( "" ) );
++	sal_Int32 nLength = Descriptor.getLength();
++	sal_Int32 location = nLength;
++	OUString sURL;
++	const PropertyValue * pValue = Descriptor.getConstArray();
++	Reference < XInputStream > xInputStream;
++	for ( sal_Int32 i = 0 ; i < nLength; i++)
++	{
++		if ( pValue[i].Name.equalsAsciiL ( RTL_CONSTASCII_STRINGPARAM ( "TypeName" ) ) )
++			location=i;
++		else if ( pValue[i].Name.equalsAsciiL ( RTL_CONSTASCII_STRINGPARAM ( "InputStream" ) ) )
++			pValue[i].Value >>= xInputStream;
++		else if ( pValue[i].Name.equalsAsciiL ( RTL_CONSTASCII_STRINGPARAM ( "URL" ) ) )
++			pValue[i].Value >>= sURL;
++
++	    rtl_TextEncoding encoding = RTL_TEXTENCODING_INFO_ASCII;
++	}
++
++        Reference< com::sun::star::ucb::XCommandEnvironment > xEnv;
++        if (!xInputStream.is())
++        {
++		try
++		{
++			::ucb::Content aContent(sURL, xEnv);
++	                xInputStream = aContent.openStream();
++		}
++		catch ( Exception& )
++		{
++			return ::rtl::OUString();
++		}
++		
++                if (!xInputStream.is())
++                    return ::rtl::OUString();
++        }
++
++        Sequence< ::sal_Int8 > aData;			
++        sal_Int32 nLen = sizeof( header ) / sizeof( header[0] );
++        if ( ( nLen == xInputStream->readBytes(  aData, nLen ) ) )
++            if ( memcmp( ( void* )header, (void*) aData.getConstArray(), nLen ) == 0 ) 
++                sTypeName = OUString( RTL_CONSTASCII_USTRINGPARAM ( "writer_LotusWordPro_Document" ) );
++        return sTypeName;
++}
++
++
++// XInitialization
++void SAL_CALL LotusWordProImportFilter::initialize( const Sequence< Any >& aArguments ) 
++	throw (Exception, RuntimeException)
++{
++	Sequence < PropertyValue > aAnySeq;
++	sal_Int32 nLength = aArguments.getLength();
++	if ( nLength && ( aArguments[0] >>= aAnySeq ) )
++	{
++		const PropertyValue * pValue = aAnySeq.getConstArray();
++		nLength = aAnySeq.getLength();
++		for ( sal_Int32 i = 0 ; i < nLength; i++)
++		{
++			if ( pValue[i].Name.equalsAsciiL ( RTL_CONSTASCII_STRINGPARAM ( "Type" ) ) )
++			{
++				pValue[i].Value >>= msFilterName;
++				break;
++			}
++		}
++	}
++}
++OUString LotusWordProImportFilter_getImplementationName ()
++	throw (RuntimeException)
++{
++	return OUString ( RTL_CONSTASCII_USTRINGPARAM ( "com.sun.star.comp.Writer.LotusWordProImportFilter" ) );
++}
++
++#define SERVICE_NAME1 "com.sun.star.document.ImportFilter"
++#define SERVICE_NAME2 "com.sun.star.document.ExtendedTypeDetection"
++sal_Bool SAL_CALL LotusWordProImportFilter_supportsService( const OUString& ServiceName ) 
++	throw (RuntimeException)
++{
++	return (ServiceName.equalsAsciiL( RTL_CONSTASCII_STRINGPARAM ( SERVICE_NAME1 ) ) ||
++		ServiceName.equalsAsciiL( RTL_CONSTASCII_STRINGPARAM ( SERVICE_NAME2 ) ) );
++}
++Sequence< OUString > SAL_CALL LotusWordProImportFilter_getSupportedServiceNames(  ) 
++	throw (RuntimeException)
++{
++	Sequence < OUString > aRet(2);
++//	Sequence < OUString > aRet(1);
++        OUString* pArray = aRet.getArray();
++        pArray[0] =  OUString ( RTL_CONSTASCII_USTRINGPARAM ( SERVICE_NAME1 ) );
++	pArray[1] =  OUString ( RTL_CONSTASCII_USTRINGPARAM ( SERVICE_NAME2 ) ); 
++        return aRet;
++}
++#undef SERVICE_NAME2
++#undef SERVICE_NAME1
++
++Reference< XInterface > SAL_CALL LotusWordProImportFilter_createInstance( const Reference< XMultiServiceFactory > & rSMgr)
++	throw( Exception )
++{
++	return (cppu::OWeakObject*) new LotusWordProImportFilter( rSMgr );
++}
++
++// XServiceInfo
++OUString SAL_CALL LotusWordProImportFilter::getImplementationName(  ) 
++	throw (RuntimeException)
++{
++	return LotusWordProImportFilter_getImplementationName();
++}
++sal_Bool SAL_CALL LotusWordProImportFilter::supportsService( const OUString& rServiceName ) 
++	throw (RuntimeException)
++{
++    return LotusWordProImportFilter_supportsService( rServiceName );
++}
++Sequence< OUString > SAL_CALL LotusWordProImportFilter::getSupportedServiceNames(  ) 
++	throw (RuntimeException)
++{
++    return LotusWordProImportFilter_getSupportedServiceNames();
++}
+--- /dev/null	2006-03-20 09:28:16.436453250 +0000
++++ lotuswordpro/source/filter/LotusWordProImportFilter.hxx	2006-03-20 10:10:03.000000000 +0000
+@@ -0,0 +1,104 @@
++#ifndef _WORDPERFECTIMPORTFILTER_HXX
++#define _WORDPERFECTIMPORTFILTER_HXX
++
++#ifndef _COM_SUN_STAR_DOCUMENT_XFILTER_HPP_
++#include <com/sun/star/document/XFilter.hpp>
++#endif
++#ifndef _COM_SUN_STAR_DOCUMENT_XIMPORTER_HPP_
++#include <com/sun/star/document/XImporter.hpp>
++#endif
++#ifndef _COM_SUN_STAR_DOCUMENT_XEXTENDEDFILTERDETECTION_HPP_
++#include <com/sun/star/document/XExtendedFilterDetection.hpp>
++#endif
++#ifndef _COM_SUN_STAR_LANG_XINITIALIZATION_HPP_
++#include <com/sun/star/lang/XInitialization.hpp>
++#endif
++#ifndef _COM_SUN_STAR_LANG_XSERVICEINFO_HPP_
++#include <com/sun/star/lang/XServiceInfo.hpp>
++#endif
++#ifndef _COM_SUN_STAR_XML_SAX_XDOCUMENTHANDLER_HPP_
++#include <com/sun/star/xml/sax/XDocumentHandler.hpp>
++#endif
++#ifndef _CPPUHELPER_IMPLBASE5_HXX_
++#include <cppuhelper/implbase5.hxx>
++#endif
++#include <rtl/ustrbuf.hxx>
++
++enum FilterType 
++{
++	FILTER_IMPORT,
++	FILTER_EXPORT
++};
++/* This component will be instantiated for both import or export. Whether it calls
++ * setSourceDocument or setTargetDocument determines which Impl function the filter
++ * member calls */
++class LotusWordProImportFilter : public cppu::WeakImplHelper5 
++< 
++	com::sun::star::document::XFilter,
++	com::sun::star::document::XImporter,
++	com::sun::star::document::XExtendedFilterDetection,
++	com::sun::star::lang::XInitialization,
++	com::sun::star::lang::XServiceInfo
++>
++{
++private:
++
++protected:
++	// oo.org declares
++	::com::sun::star::uno::Reference< ::com::sun::star::lang::XMultiServiceFactory > mxMSF;
++	::com::sun::star::uno::Reference< ::com::sun::star::lang::XComponent > mxDoc;
++	::rtl::OUString msFilterName;
++	::com::sun::star::uno::Reference< ::com::sun::star::xml::sax::XDocumentHandler > mxHandler;
++
++	FilterType meType;
++
++	sal_Bool SAL_CALL importImpl( const ::com::sun::star::uno::Sequence< ::com::sun::star::beans::PropertyValue >& aDescriptor ) 
++		throw (::com::sun::star::uno::RuntimeException);
++
++public:
++	LotusWordProImportFilter( const ::com::sun::star::uno::Reference< ::com::sun::star::lang::XMultiServiceFactory > &rxMSF)
++        : mxMSF( rxMSF ) {}
++	virtual ~LotusWordProImportFilter() {}
++
++	// XFilter
++        virtual sal_Bool SAL_CALL filter( const ::com::sun::star::uno::Sequence< ::com::sun::star::beans::PropertyValue >& aDescriptor ) 
++		throw (::com::sun::star::uno::RuntimeException);
++        virtual void SAL_CALL cancel(  ) 
++		throw (::com::sun::star::uno::RuntimeException);
++
++	// XImporter
++        virtual void SAL_CALL setTargetDocument( const ::com::sun::star::uno::Reference< ::com::sun::star::lang::XComponent >& xDoc ) 
++		throw (::com::sun::star::lang::IllegalArgumentException, ::com::sun::star::uno::RuntimeException);
++
++ 	//XExtendedFilterDetection
++	virtual ::rtl::OUString SAL_CALL detect( com::sun::star::uno::Sequence< com::sun::star::beans::PropertyValue >& Descriptor ) 
++		throw( com::sun::star::uno::RuntimeException );
++
++	// XInitialization
++        virtual void SAL_CALL initialize( const ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Any >& aArguments ) 
++		throw (::com::sun::star::uno::Exception, ::com::sun::star::uno::RuntimeException);
++
++	// XServiceInfo
++        virtual ::rtl::OUString SAL_CALL getImplementationName(  ) 
++		throw (::com::sun::star::uno::RuntimeException);
++        virtual sal_Bool SAL_CALL supportsService( const ::rtl::OUString& ServiceName ) 
++		throw (::com::sun::star::uno::RuntimeException);
++        virtual ::com::sun::star::uno::Sequence< ::rtl::OUString > SAL_CALL getSupportedServiceNames(  ) 
++		throw (::com::sun::star::uno::RuntimeException);
++
++};
++
++::rtl::OUString LotusWordProImportFilter_getImplementationName()
++	throw ( ::com::sun::star::uno::RuntimeException );
++
++sal_Bool SAL_CALL LotusWordProImportFilter_supportsService( const ::rtl::OUString& ServiceName ) 
++	throw ( ::com::sun::star::uno::RuntimeException );
++
++::com::sun::star::uno::Sequence< ::rtl::OUString > SAL_CALL LotusWordProImportFilter_getSupportedServiceNames(  ) 
++	throw ( ::com::sun::star::uno::RuntimeException );
++
++::com::sun::star::uno::Reference< ::com::sun::star::uno::XInterface >
++SAL_CALL LotusWordProImportFilter_createInstance( const ::com::sun::star::uno::Reference< ::com::sun::star::lang::XMultiServiceFactory > & rSMgr)
++	throw ( ::com::sun::star::uno::Exception );
++
++#endif
+diff -rNup lotusworkpro/prj/build.lst lotuswordpro/prj/build.lst
+--- lotuswordpro/prj/build.lst	1970-01-01 01:00:00.000000000 +0100
++++ lotuswordpro/prj/build.lst	2006-03-13 17:14:50.000000000 +0000
+@@ -0,0 +1,4 @@
++wp	lotuswordpro : sfx2 sot svx comphelper NULL
++wp	lotuswordpro			usr1	-	all	lwp_mkout NULL
++wp	lotuswordpro\source\filter	nmake	-	all	lwp_filter NULL
++wp	lotuswordpro\util		nmake	-	all	lwp_util lwp_filter NULL
+diff -rNup lotuswordpro/prj/d.lst lotuswordpro/prj/d.lst
+--- lotuswordpro/prj/d.lst	1970-01-01 01:00:00.000000000 +0100
++++ lotuswordpro/prj/d.lst	2004-10-08 09:48:28.000000000 +0100
+@@ -0,0 +1,3 @@
++..\%__SRC%\lib\*.so %_DEST%\lib%_EXT%\*.so
++..\%__SRC%\bin\*.dll %_DEST%\lib%_EXT%\*.dll
++..\%__SRC%\lib\*.dylib %_DEST%\lib%_EXT%\*.dylib
+diff -rNup lotuswordpro/source/filter/genericfilter.cxx lotuswordpro/source/filter/genericfilter.cxx
+--- lotuswordpro/source/filter/genericfilter.cxx	1970-01-01 01:00:00.000000000 +0100
++++ lotuswordpro/source/filter/genericfilter.cxx	2006-03-14 11:06:00.000000000 +0000
+@@ -0,0 +1,77 @@
++#include <stdio.h>
++
++#include <osl/mutex.hxx>
++#include <osl/thread.h>
++#include <cppuhelper/factory.hxx>
++
++#ifndef _COM_SUN_STAR_LANG_XSINGLESERVICEFACTORY_HPP_
++#include <com/sun/star/lang/XSingleServiceFactory.hpp>
++#endif
++
++#include "LotusWordProImportFilter.hxx"
++
++using namespace ::rtl;
++using namespace ::cppu;
++using namespace ::com::sun::star::uno;
++using namespace ::com::sun::star::lang;
++using namespace ::com::sun::star::registry;
++
++extern "C"
++{
++//==================================================================================================
++void SAL_CALL component_getImplementationEnvironment(
++	const sal_Char ** ppEnvTypeName, uno_Environment ** ppEnv )
++{
++	*ppEnvTypeName = CPPU_CURRENT_LANGUAGE_BINDING_NAME;
++}
++//==================================================================================================
++sal_Bool SAL_CALL component_writeInfo(
++	void * pServiceManager, void * pRegistryKey )
++{
++	if (pRegistryKey)
++	{
++		try
++		{
++            sal_Int32 nPos = 0;
++            Reference< XRegistryKey > xNewKey(
++				reinterpret_cast< XRegistryKey * >( pRegistryKey )->createKey( LotusWordProImportFilter_getImplementationName() ) ); 
++            xNewKey = xNewKey->createKey( OUString::createFromAscii( "/UNO/SERVICES" ) );
++			
++			const Sequence< OUString > & rSNL = LotusWordProImportFilter_getSupportedServiceNames();
++			const OUString * pArray = rSNL.getConstArray();
++			for ( nPos = rSNL.getLength(); nPos--; )
++				xNewKey->createKey( pArray[nPos] );
++
++			return sal_True;
++		}
++		catch (InvalidRegistryException &)
++		{
++			OSL_ENSURE( sal_False, "### InvalidRegistryException!" );
++		}
++	}
++	return sal_False;
++}
++//==================================================================================================
++void * SAL_CALL component_getFactory(
++	const sal_Char * pImplName, void * pServiceManager, void * pRegistryKey )
++{
++	void * pRet = 0;
++
++    OUString implName = OUString::createFromAscii( pImplName );
++	if ( pServiceManager && implName.equals(LotusWordProImportFilter_getImplementationName()) )
++	{
++		Reference< XSingleServiceFactory > xFactory( createSingleFactory(
++			reinterpret_cast< XMultiServiceFactory * >( pServiceManager ),
++			OUString::createFromAscii( pImplName ),
++			LotusWordProImportFilter_createInstance, LotusWordProImportFilter_getSupportedServiceNames() ) );
++		
++		if (xFactory.is())
++		{
++			xFactory->acquire();
++			pRet = xFactory.get();
++		}
++	}
++	
++	return pRet;
++}
++}
+diff -rNup lotuswordpro/source/filter/makefile.mk lotuswordpro/source/filter/makefile.mk
+--- lotuswordpro/source/filter/makefile.mk	1970-01-01 01:00:00.000000000 +0100
++++ lotuswordpro/source/filter/makefile.mk	2006-03-14 11:07:05.000000000 +0000
+@@ -0,0 +1,20 @@
++PRJ=..$/..
++
++PRJNAME=filter
++TARGET=filter
++ENABLE_EXCEPTIONS=true
++
++.INCLUDE :  settings.mk
++
++.IF "$(SYSTEM_LIBWPD)" == "YES"
++INCPRE+=$(LIBWPD_CFLAGS) -I..
++.ELSE
++# broken but ... necessary, internal include shafted ...
++INCPRE+=$(SOLARVER)$/$(UPD)$/$(INPATH)$/inc$/libwpd -I..
++.ENDIF
++
++SLOFILES= \
++	$(SLO)$/LotusWordProImportFilter.obj \
++	$(SLO)$/genericfilter.obj
++
++.INCLUDE :  target.mk
+diff -rNup lotuswordpro/util/lwpft.map lotuswordpro/util/lwpft.map
+--- lotuswordpro/util/lwpft.map	1970-01-01 01:00:00.000000000 +0100
++++ lotuswordpro/util/lwpft.map	2004-08-05 18:44:50.000000000 +0100
+@@ -0,0 +1,8 @@
++WPFT_1_0 {
++	global:
++		component_getImplementationEnvironment;
++		component_writeInfo;
++		component_getFactory;
++	local:
++		*;
++};
+diff -rNup lotuswordpro/util/makefile.mk lotuswordpro/util/makefile.mk
+--- lotuswordpro/util/makefile.mk	1970-01-01 01:00:00.000000000 +0100
++++ lotuswordpro/util/makefile.mk	2006-03-13 17:13:49.000000000 +0000
+@@ -0,0 +1,27 @@
++PRJ=..
++PRJNAME=lwpft
++TARGET=lwpft
++VERSION=$(UPD)
++
++.INCLUDE :  settings.mk
++
++LIB1TARGET= $(SLB)$/$(TARGET).lib
++LIB1FILES= \
++	$(SLB)$/filter.lib
++SHL1LIBS=$(LIB1TARGET) 
++SHL1STDLIBS+= \
++	$(TOOLSLIB) \
++	$(COMPHELPERLIB) \
++	$(UCBHELPERLIB) \
++	$(CPPUHELPERLIB) \
++	$(CPPULIB) \
++	$(SALLIB) \
++	$(XMLOFFLIB)
++
++SHL1TARGET = $(TARGET)$(UPD)$(DLLPOSTFIX)
++SHL1IMPLIB = i$(SHL1TARGET)
++SHL1LIBS = $(LIB1TARGET)
++SHL1VERSIONMAP=$(TARGET).map
++DEF1NAME=$(SHL1TARGET)
++
++.INCLUDE :  target.mk
+diff -urpN filter.orig/source/config/fragments/fcfg_writer.mk filter/source/config/fragments/fcfg_writer.mk
+--- filter.orig/source/config/fragments/fcfg_writer.mk	2006-03-13 16:35:22.000000000 +0000
++++ filter/source/config/fragments/fcfg_writer.mk	2006-03-15 10:03:24.000000000 +0000
+@@ -46,6 +46,7 @@ T4_WRITER = \
+     writer_StarOffice_XML_Writer \
+     $(T4_WRITER_BINFILTER) \
+     writer_WordPerfect_Document \
++    writer_LotusWordPro_Document \
+     writer_Text \
+     writer_Text_encoded \
+     writer_JustSystem_Ichitaro_10 \
+@@ -77,6 +78,7 @@ F4_WRITER = \
+ 	StarOffice_XML__Writer_ \
+ 	$(F4_WRITER_BINFILTER) \
+ 	WordPerfect \
++	LotusWordPro \
+ 	Text \
+ 	Text__encoded_ \
+ 	writer_JustSystem_Ichitaro_10 \
+diff -urpN filter.orig/source/config/fragments/filters/LotusWordPro.xcu filter/source/config/fragments/filters/LotusWordPro.xcu
+--- filter.orig/source/config/fragments/filters/LotusWordPro.xcu	1970-01-01 01:00:00.000000000 +0100
++++ filter/source/config/fragments/filters/LotusWordPro.xcu	2006-03-15 10:14:03.000000000 +0000
+@@ -0,0 +1,13 @@
++	<node oor:name="LotusWordPro" oor:op="replace">
++		<prop oor:name="Flags"><value>IMPORT ALIEN USESOPTIONS 3RDPARTYFILTER PREFERRED</value></prop>
++		<prop oor:name="UIComponent"/>
++		<prop oor:name="FilterService"><value>com.sun.star.comp.Writer.LotusWordProImportFilter</value></prop>
++		<prop oor:name="UserData"><value>WPD</value></prop>
++		<prop oor:name="UIName">
++			<value xml:lang="x-default">Lotus WordPro Document</value>
++		</prop>
++		<prop oor:name="FileFormatVersion"><value>0</value></prop>
++		<prop oor:name="Type"><value>writer_LotusWordPro_Document</value></prop>
++		<prop oor:name="TemplateName"/>
++		<prop oor:name="DocumentService"><value>com.sun.star.text.TextDocument</value></prop>
++	</node>
+diff -urpN filter.orig/source/config/fragments/types/writer_LotusWordPro_Document.xcu filter/source/config/fragments/types/writer_LotusWordPro_Document.xcu
+--- filter.orig/source/config/fragments/types/writer_LotusWordPro_Document.xcu	1970-01-01 01:00:00.000000000 +0100
++++ filter/source/config/fragments/types/writer_LotusWordPro_Document.xcu	2006-03-15 10:14:32.000000000 +0000
+@@ -0,0 +1,12 @@
++	<node oor:name="writer_LotusWordPro_Document" oor:op="replace" >
++		<prop oor:name="DetectService"><value>com.sun.star.comp.Writer.LotusWordProImportFilter</value></prop>
++		<prop oor:name="URLPattern"/>
++		<prop oor:name="Extensions"><value>lwp</value></prop>
++		<prop oor:name="MediaType"/>
++		<prop oor:name="Preferred"><value>false</value></prop>
++		<prop oor:name="PreferredFilter"><value>LotusWordPro</value></prop>
++		<prop oor:name="UIName">
++			<value>LotusWordPro Document</value>
++		</prop>
++		<prop oor:name="ClipboardFormat"/>
++	</node>
+Index: officecfg/registry/data/org/openoffice/Office/UI.xcu
+===================================================================
+RCS file: /cvs/util/officecfg/registry/data/org/openoffice/Office/UI.xcu,v
+retrieving revision 1.33
+diff -u -p -r1.33 UI.xcu
+--- officecfg/registry/data/org/openoffice/Office/UI.xcu	8 Sep 2005 14:52:04 -0000	1.33
++++ officecfg/registry/data/org/openoffice/Office/UI.xcu	15 Mar 2006 11:29:44 -0000
+@@ -44,7 +44,7 @@
+ 						<value xml:lang="en-US">Text documents</value>
+ 					</prop>
+ 					<prop oor:name="Filters">
+-                                                <value oor:separator=";">HTML (StarWriter);MS WinWord 2.x (W4W);MS WinWord 6.0;MS Word 95;MS Word 95 Vorlage;MS Word 97;MS Word 97 Vorlage;StarOffice XML (Writer);StarWriter 3.0;StarWriter 3.0 Vorlage/Template;StarWriter 4.0;StarWriter 4.0 Vorlage/Template;StarWriter 5.0;StarWriter 5.0 Vorlage/Template;writer_StarOffice_XML_Writer_Template;Text;WordPerfect;writer8;writer8_template</value>
++                                                <value oor:separator=";">HTML (StarWriter);MS WinWord 2.x (W4W);MS WinWord 6.0;MS Word 95;MS Word 95 Vorlage;MS Word 97;MS Word 97 Vorlage;StarOffice XML (Writer);StarWriter 3.0;StarWriter 3.0 Vorlage/Template;StarWriter 4.0;StarWriter 4.0 Vorlage/Template;StarWriter 5.0;StarWriter 5.0 Vorlage/Template;writer_StarOffice_XML_Writer_Template;Text;WordPerfect;writer8;writer8_template;LotusWordPro</value>
+ 					</prop>
+ 				</node>
+ 				<node oor:name="com.sun.star.sheet.SpreadsheetDocument" oor:op="replace">
+Index: scp2/source/ooo/file_library_ooo.scp
+===================================================================
+RCS file: /cvs/installation/scp2/source/ooo/file_library_ooo.scp,v
+retrieving revision 1.184.2.2
+diff -u -p -r1.184.2.2 file_library_ooo.scp
+--- scp2/source/ooo/file_library_ooo.scp	17 Feb 2006 16:52:02 -0000	1.184.2.2
++++ scp2/source/ooo/file_library_ooo.scp	15 Mar 2006 11:48:56 -0000
+@@ -1276,6 +1366,7 @@ End
+ #endif
+ 
+ STD_UNO_LIB_FILE_PATCH(gid_File_Lib_Wpft,wpft)
++STD_UNO_LIB_FILE_PATCH(gid_File_Lib_Wlwp,lwpft)
+ 
+ #if !defined(MACOSX) && ( !defined(SYSTEM_MOZILLA) && !defined(WITHOUT_MOZILLA) )
+ 
+Index: scp2/source/writer/module_writer.scp
+===================================================================
+RCS file: /cvs/installation/scp2/source/writer/module_writer.scp,v
+retrieving revision 1.14
+diff -u -p -r1.14 module_writer.scp
+--- scp2/source/writer/module_writer.scp	9 Sep 2005 01:50:00 -0000	1.14
++++ scp2/source/writer/module_writer.scp	15 Mar 2006 11:50:35 -0000
+@@ -52,6 +52,7 @@ Module gid_Module_Prg_Wrt_Bin
+     gid_File_Lib_Swd,
+     gid_File_Lib_Swui,
+     gid_File_Lib_Wpft,
++    gid_File_Lib_Wlwp,
+     gid_File_Share_Config_Sofficecfg_Writer_Menubar_Xml,
+     gid_File_Share_Config_Sofficecfg_Writerweb_Menubar_Xml,
+     gid_File_Share_Config_Sofficecfg_Writerglobal_Menubar_Xml,
+Index: sw/prj/build.lst
+===================================================================
+RCS file: /cvs/sw/sw/prj/build.lst,v
+retrieving revision 1.16
+diff -u -p -r1.16 build.lst
+--- sw/prj/build.lst	8 Nov 2005 17:14:00 -0000	1.16
++++ sw/prj/build.lst	15 Mar 2006 12:09:49 -0000
+@@ -1,4 +1,4 @@
+-sw	sw	:	connectivity OOo:writerperfect svx stoc uui sch NULL
++sw	sw	:	connectivity OOo:writerperfect OOo:lotuswordpro svx stoc uui sch NULL
+ sw	sw										usr1	-	all	sw_mkout NULL
+ sw	sw\inc									get		-	all	sw_inc NULL
+ sw	sw\prj									get		-	all	sw_prj NULL
