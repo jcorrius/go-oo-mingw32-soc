@@ -240,6 +240,92 @@ sub is_dependent_patch($$) {
     return 0;
 }
 
+sub scan_patchinfo($$)
+{
+    my $line = shift;
+    my $line_num = shift;
+    
+    my %patchinfo = ();
+    $patchinfo{'developer'}='unknown';
+
+    foreach (split(/,\s*/, $line)) {
+	if (/i([0-9]+)/) {
+	    $patchinfo{'issue'} = $1;
+	} elsif (/cws\-([_\S]+)/) {
+	    $patchinfo{'cws'} = $1;
+	} else {
+	    ($patchinfo{'developer'} eq 'unknown') || die "Syntax error at $apply_list, line $line_num, element \"$_\"\n" .
+				                          "Note that the one developer name is already defined as \"$patchinfo{'developer'}\".\n";
+	    $patchinfo{'developer'} = $_;
+	}
+    }
+    
+    return \%patchinfo;
+}
+
+sub add_developer_info
+{
+    my $temp_file = `mktemp $apply_list.XXXX`;
+    chomp $temp_file;
+
+    open (PatchListIn, "$apply_list") || die "Can't open $apply_list: $!\n";
+    open (PatchListOut, ">$temp_file") || die "Can't open $temp_file: $!\n";
+
+    # this is necessary because the later cvs call
+    my $pwd_orig = `pwd`;
+    chdir $patch_dir;
+
+    print "This command adds missing names of the responsible developers for each patch.\n\n";
+    
+    print "IMPORTANT: This command works correctly only if you call it on the ooo-build\n" .
+          "cvs snapshot (not the released one). To run this command, you need cvs access\n".
+	  "to ooo-build.\n\n";
+    
+    print "HINT: You might want to use the commands ssh-agent and ssh-add before this one.\n" .
+	  "Then you need not enter the password for each patch.\n\n\n";
+
+
+    print "Guessing developer names for patches:\n";
+
+    while (<PatchListIn>) {
+	chomp;
+	my $add_info='';
+	if (/^\s*([^\#,\s]+.diff)\s*,?\s*(.*)?$/) {
+	    my $patch_name = $1;
+	    my $rest = $2;
+	    $rest = '' unless ($rest);
+
+	    my $patchinfop = scan_patchinfo($rest, $.);
+
+	    if ($patchinfop->{'developer'} eq 'unknown' ) {
+		my $patch_file_path = find_patch_file ($patch_name);
+		$patch_file_path =~ s|$patch_dir/||;
+		print "$patch_file_path ... ";
+		my $cvs_developer = `cvs annotate -F $patch_file_path 2>/dev/null | cut -d\\( -f2 | cut -d' '   -f1 | sort | uniq -c | sort --numeric-sort | tail -n 1 | cut -c 9-`;
+		chomp $cvs_developer;
+		
+		($cvs_developer) || die "\n" .
+					"Error: The deloper name cannot be detected from cvs\n\n" .
+		                        "Hint: Try the following two commands to check the cvs output:\n" .
+					"\tcd $patch_dir\n" .
+					"\tcvs annotate -F $patch_file_path\n";
+		
+		$add_info=", $cvs_developer";
+		print "$cvs_developer\n";
+	    }
+	}	
+	print PatchListOut "$_" . "$add_info" . "\n";
+    }
+    close PatchListIn;
+    close PatchListOut;
+
+    rename ($temp_file, $apply_list) || die "Can't rename $temp_file to $apply_list: $!\n";
+    chmod (0644, $apply_list) || die "Can't chmod of $apply_list: $!\n";
+
+    chdir $pwd_orig;
+}
+
+
 sub list_patches(@) {
     my ( @distros ) = @_;
 
@@ -331,8 +417,13 @@ sub list_patches_single {
                 next;
             }
 
-	    push @unfiltered_patch_list, $_;
-
+	    /([^,\s]+)\s*,?\s*(.*)?$/;
+	    my $patch_name = $1;
+	    my $rest = $2;
+	    $rest = '' unless ($rest);
+	    
+	    $unfiltered_patch_list{$patch_name} = scan_patchinfo($rest, $.);
+	    
 	    my $set;
 	    my $match = 0;
 	    for $set (@targets) {
@@ -345,7 +436,7 @@ sub list_patches_single {
 		next;
 	    }
 
-            push @Patches, find_patch_file ($_);
+	    push @Patches, find_patch_file ($patch_name);
     }
     close (PatchList);
 
@@ -560,18 +651,54 @@ sub scan_unused($$)
     closedir($dirh);
 }
 
-sub check_for_unused ($$)
+sub check_for_unused ($)
 {
-    my $patch_dir = shift;
     my $patches = shift;
-    my %patches;
-    for my $patch (@{$patches}) {
-#	print "Check for $patch\n";
-	$patches{$patch} = 1;
-    }
 
     for my $path (get_search_paths()) {
-	scan_unused ($path, \%patches);
+	scan_unused ($path, $patches);
+    }
+}
+
+sub print_statistic_no_issue ($)
+{
+    my $patches = shift;
+
+    # key: developer
+    # value: array of patch names
+    my %noissue = ();
+
+    # find patches without any assigned issue number
+    foreach my $patch (keys %{$patches}) {
+	unless ($patches->{$patch}->{'issue'} || $patch =~ /cws\-/) {
+	    $developer = $patches->{$patch}->{'developer'};
+	    $noissue{$developer} = () unless (defined $noissue{$developer});
+	    push @ {$noissue{$developer}}, $patch;
+	}
+    }
+
+    # sort by number of issues
+    my @developers = ();
+    foreach my $developer (sort { @{$noissue{$b}} <=> @{$noissue{$a}} } keys %noissue) {
+	push @developers, $developer;
+    }
+    
+    print "List of patches without assigned an issue number per developer\n";
+    print "==============================================================\n\n";
+    foreach my $developer (@developers) {
+	print "$developer:\n";
+	print "-----------\n";
+	foreach (@{$noissue{$developer}}) {
+	    print "$_\n";
+	}
+	print "\n";
+    }
+
+    print "Number of patches without assigned an issue number per developer\n";
+    print "================================================================\n";
+    foreach my $developer (@developers) {
+	my $count = @{$noissue{$developer}};
+	print "$developer: $count\n";
     }
 }
 
@@ -579,7 +706,9 @@ sub check_for_unused ($$)
     die "Syntax:\n".
     "apply <path-to-patchdir> <src root> --tag=<src680-m90> [--distro=Debian [--distro=Binfilter [...]]] [--quiet] [--dry-run] [ patch flags ]\n" .
     "apply <path-to-patchdir> --series-to\n" .
-    "apply <path-to-patchdir> --find-unused\n";
+    "apply <path-to-patchdir> --add-developer\n" .
+    "apply <path-to-patchdir> --find-unused\n" .
+    "apply <path-to-patchdir> --statistic-no-issue\n";
 
 %options = ();
 
@@ -591,9 +720,12 @@ $opts = "";
 $tag = '';
 $dry_run = 0;
 $find_unused = 0;
+$add_developer = 0;
+$statistic = 0;
+$statistic_no_issue = 0;
 @required_opts = ( 'PATCHPATH', 'OLDEST_SUPPORTED' );
 @arguments = ();
-@unfiltered_patch_list = ();
+%unfiltered_patch_list = ();
 
 
 foreach $a (@ARGV) {
@@ -608,8 +740,13 @@ foreach $a (@ARGV) {
 	    $quiet = 1;
 	} elsif ($a =~ m/--distro=(.*)/) {
 	    push @distros, $1;
+	} elsif ($a =~ m/--add-developer/) {
+	    $add_developer = 1;
 	} elsif ($a =~ m/--find-unused/) {
 	    $find_unused = 1;
+	} elsif ($a =~ m/--statistic-no-issue/) {
+	    $statistic = 1;
+	    $statistic_no_issue = 1;
 	} elsif ($a =~ m/--tag=(.*)/) {
 	    $tag = $1;
 	} elsif ($a =~ m/--dry-run/g) {
@@ -628,13 +765,24 @@ substr ($patch_dir, 0, 1) eq '/' || die "apply.pl requires absolute paths";
 
 $apply_list = $patch_dir.'/apply';
 
-print "Execute with $opts for distro(s) '" . join( " ", @distros ) . "'\n" unless $quiet;
+print "Execute with $opts for distro(s) '" . join( " ", @distros ) . "'\n" unless ($quiet || $add_developer);
 
-if ($dry_run || $find_unused) {
+if ($dry_run || $add_developer || $find_unused || $statistic) {
     $tag = '' if ($find_unused);
+
+    my $quiet_save = $quiet;
+    $quiet = 1 if ($add_developer);
     my @Patches = list_patches (@distros);
-    if ($find_unused) {
-	check_for_unused ($patch_dir, \@unfiltered_patch_list);
+    $quiet = $quiet_save;
+
+    if ($add_developer) {
+	add_developer_info();
+    } elsif ($find_unused) {
+	check_for_unused (\%unfiltered_patch_list);
+    } elsif ($statistic) {
+	if ($statistic_no_issue) {
+	    print_statistic_no_issue (\%unfiltered_patch_list);
+	}
     } else {
 	printf "Dry-run: exiting before applying patches\n";
     }
