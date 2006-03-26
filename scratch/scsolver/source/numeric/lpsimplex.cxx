@@ -223,7 +223,6 @@ void RevisedSimplexImpl::convertVarRange( Model& aModel )
 		vector<size_t>::iterator it,
 			itBeg = cnColsNuked.begin(), itEnd = cnColsNuked.end();
 		list<size_t>::iterator itPerm = m_cnPermVarIndex.begin();
-		size_t nPrevId = 0;
 		for ( it = itBeg; it != itEnd; ++it )
 			m_cnPermVarIndex.remove( *it );
 	}
@@ -853,20 +852,6 @@ void RevisedSimplex::setEnableTwoPhaseSearch( bool b )
 //---------------------------------------------------------------------------
 // BoundedRevisedSimplexImpl
 
-struct VarBoundary
-{
-	size_t Id;
-	double Value;
-	Bound BoundType;
-};
-
-struct EnterBasicVar
-{
-	size_t Id;
-	double Price;
-	Bound BoundType;
-};
-
 class BoundedRevisedSimplexImpl
 {
 public:
@@ -876,6 +861,26 @@ public:
 	Matrix solve();
 	
 private:
+
+	/**
+	 * This structure represents a variable boundary i.e. the position
+	 * (ID) of the corresponding variable, whether it is a upper boundary
+	 * or a lower boundary, and the value of the boundary.
+	 */
+	struct VarBoundary
+	{
+		size_t Id;
+		double Value;
+		Bound BoundType;
+	};
+	
+	struct EnterBasicVar
+	{
+		size_t Id;
+		double Price;
+		Bound BoundType;
+	};
+
 	BoundedRevisedSimplex* m_pSelf;
 	
 	Matrix m_mxBasicInv;
@@ -944,6 +949,16 @@ Matrix BoundedRevisedSimplexImpl::solve()
 	m_mxB = m_pModel->getRhsVector();
 	m_mxC = m_pModel->getCostVector();
 
+	// Expand constraint matrix in case the cost vector is wider 
+	// (the cost vector and the constraint matrix is supposed to 
+	// have the same column width).
+	if ( m_mxA.cols() < m_mxC.cols() )
+	{
+		size_t nNewCol = m_mxA.cols();
+		nNewCol += m_mxC.cols() - m_mxA.cols();
+		m_mxA.resize( m_mxA.rows(), nNewCol );
+	}
+
 	const size_t nRowSizeA = m_mxA.rows();
 	for ( size_t i = 0; i < nRowSizeA; ++i )
 	{
@@ -967,10 +982,10 @@ Matrix BoundedRevisedSimplexImpl::solve()
 			m_mxC( 0, nCol ) = 0;
 		}
 	}
-	m_pModel->print();
 
 	if ( m_pModel->getVerbose() )
 	{
+		m_pModel->print();
 		cout << "A:" << endl;
 		m_mxA.print();
 		cout << "B:" << endl;
@@ -982,10 +997,8 @@ Matrix BoundedRevisedSimplexImpl::solve()
 	if ( !findInitialSolution() )
 	{
 		if ( m_pModel->getVerbose() )
-		{
 			cout << "Initial solution not found" << endl;
-			throw ModelInfeasible();
-		}
+		throw ModelInfeasible();
 	}
 	
 	if ( m_pModel->getVerbose() )
@@ -1366,6 +1379,13 @@ void BoundedRevisedSimplexImpl::updateInverseBasicMatrix( const EnterBasicVar& a
 	}
 }
 
+/**
+ * The goal of this method is to find a good feasible point to start from.
+ * Such feasible point must satisfy all variable boundaries and
+ * constraints.
+ * 
+ * @return bool
+ */
 bool BoundedRevisedSimplexImpl::findInitialSolution()
 {
 	m_pModel->print();
@@ -1382,18 +1402,28 @@ bool BoundedRevisedSimplexImpl::findInitialSolution()
 	return makeVarCombo( 0, nNumInitNonBasic, aArray );
 }
 
+/**
+ * Iterate through all decision variables and pick up boundary
+ * values to use as initial values, then check if the values are
+ * feasible.
+ * 
+ * @param nIdx
+ * @param nUpper
+ * @param aArray
+ * 
+ * @return bool returns true if a feasible initial solution is found, else
+ *         returns false.
+ */
 bool BoundedRevisedSimplexImpl::makeVarCombo( size_t nIdx, size_t nUpper, 
 		vector<VarBoundary>& aArray )
 {	
-	size_t nNumCost = m_pModel->getCostVector().cols();	// number of cost vector elements
 	vector<VarBoundary>::const_iterator iter;
 	vector<VarBoundary>::const_iterator itrEnd = aArray.end();
 	
-//     if ( nIdx == nNumCost || aArray.size() == nUpper )
 	if ( aArray.size() == nUpper )
 	{
-		// Solve the rest of the elements, and check if this initial X is feasible.  If yes,
-		// return true, if no return false.
+		// Solve the rest of the elements, and check if this initial X is feasible.  
+		// If yes, return true, if no return false.
 
 		Matrix mxX;
 		vector<size_t> aBasicVarId;
@@ -1439,12 +1469,15 @@ bool BoundedRevisedSimplexImpl::makeVarCombo( size_t nIdx, size_t nUpper,
 		mxBasA.deleteColumns( aNonBasicVarId );
 		Matrix mxBasAInv = mxBasA.inverse();
 		Matrix mxBasX = mxBasAInv * mxTmpB;
-		cout << "mxBasAInv: " << endl;
-		mxBasA.print();
-		mxBasAInv.print();
-		mxTmpB.print();
-		cout << "mxBasX: " << endl;
-		mxBasX.print();
+		if ( m_pModel->getVerbose() )
+		{
+			cout << "mxBasAInv: " << endl;
+			mxBasA.print();
+			mxBasAInv.print();
+			mxTmpB.print();
+			cout << "mxBasX: " << endl;
+			mxBasX.print();
+		}
 		
 		for ( size_t i = 0; i < mxBasX.rows(); ++i )
 			mxX( aBasicVarId.at( i ), 0 ) = mxBasX( i, 0 );
@@ -1465,36 +1498,38 @@ bool BoundedRevisedSimplexImpl::makeVarCombo( size_t nIdx, size_t nUpper,
 			m_aNonBasicVarBoundType = aNonBasicVarBoundType;
 			return true;
 		}
-		else
-			return false;
+		return false;
 	}
-	
+
+	// Check both boundaries of a variable at the current ID, and if either one
+	// is bounded, then get that value and its side and store it into the array.
 	Bound e[2] = { BOUND_LOWER, BOUND_UPPER };
 	for ( size_t i = 0; i < 2; ++i )
 		if ( m_pModel->isVarBounded( nIdx, e[i] ) )
 		{
-			vector<VarBoundary> aArray1 = aArray;
 			VarBoundary temp;
 			temp.Id = nIdx;
 			temp.Value = m_pModel->getVarBound( nIdx, e[i] );
 			temp.BoundType = e[i];
-			aArray1.push_back( temp );
-			if ( makeVarCombo( nIdx + 1, nUpper, aArray1 ) )
-				return true;
+			aArray.push_back( temp );
+			if ( m_pModel->getVerbose() )
+			{
+				cout << nIdx << " bounded at ";
+				if ( i == 0 )
+					cout << "lower end";
+				else
+					cout <<	"upper end";
+				cout << " (" << temp.Value << ")" << endl;
+			}
+			break;
 		}
 		
-	if ( !m_pModel->isVarBounded( nIdx, BOUND_LOWER ) &&
-		 !m_pModel->isVarBounded( nIdx, BOUND_UPPER ) )
-		if ( makeVarCombo( nIdx + 1, nUpper, aArray ) )
-			return true;
-
-	return false;
+	return makeVarCombo( nIdx+1, nUpper, aArray );
 }
 
 bool BoundedRevisedSimplexImpl::isSolutionFeasible( const Matrix& mxX ) const
 {
-	const size_t nNumCost = m_mxC.cols();
-	OSL_ASSERT( nNumCost == mxX.rows() );
+	OSL_ASSERT( m_mxC.cols() == mxX.rows() );
 	
 	for ( size_t i = 0; i < mxX.rows(); ++i )
 	{
