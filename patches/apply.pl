@@ -187,28 +187,27 @@ sub rules_pass($)
     return 1;
 }
 
-sub version_filter_targets($)
+sub filter_targets($)
 {
     my $tlist = shift;
     my @targets;
+    my $rules_passed;
 
-    $tlist =~ m/([^<>=]*)(.*)/;
+    $tlist =~ m/([^!<>=]*)(.*)/;
     my $rules = $2;
     my $targets = $1;
     $targets =~ s/\s*$//;
 
     @targets = split /\s*,\s*/, $targets;
+    $rules_passed = rules_pass ($rules);
 
-#    printf "Rules '$rules' targets '$targets'\n";
-
-    if (!rules_pass ($rules)) {
-#	printf "Rule '$rules' failed ['@targets']\n";
-	@targets = ();
-    } else {
+#    if ($rules_passed) {
 #	printf "Rule '$rules' passed ['@targets']\n";
-    }
+#    } else {
+#	printf "Rule '$rules' failed ['@targets']\n";
+#    }
 
-    return @targets;
+    return $rules_passed, @targets ;
 }
 
 sub patched_files($) {
@@ -240,19 +239,20 @@ sub is_dependent_patch($$) {
     return 0;
 }
 
-sub scan_patchinfo($$)
+sub scan_patchinfo($$$$)
 {
-    my $line = shift;
-    my $line_num = shift;
+    my ($line,$line_num,$section_issue,$section_owner) = @_;
     
     my %patchinfo = ();
-    $patchinfo{'developer'}='unknown';
+    $patchinfo{'issue'} = $section_issue;
+    # the developer must not be initialized to $section_owner because it helps us to catch syntax errors
+    $patchinfo{'developer'} = 'unknown';
 
     foreach (split(/,\s*/, $line)) {
-	if (/i([0-9]+)/) {
+	if (/i#([0-9]+)/) {
 	    $patchinfo{'issue'} = $1;
-	} elsif (/cws\-([_\S]+)/) {
-	    $patchinfo{'cws'} = $1;
+	} elsif (/\w+#([0-9]+)/) {
+	    # valid syntax but unknown bugzilla => ignore
 	} else {
 	    ($patchinfo{'developer'} eq 'unknown') || die "Syntax error at $apply_list, line $line_num, element \"$_\"\n" .
 				                          "Note that the one developer name is already defined as \"$patchinfo{'developer'}\".\n";
@@ -260,7 +260,30 @@ sub scan_patchinfo($$)
 	}
     }
     
+    if ($patchinfo{'developer'} eq 'unknown') {
+	$patchinfo{'developer'} = $section_owner;
+    }
+    
     return \%patchinfo;
+}
+
+sub scan_section_issue($$)
+{
+    my ($line,$line_num) = @_;
+
+    my $issue = '';
+    foreach (split(/,\s*/, $line)) {
+	if (/^i#([0-9]+)/) {
+	    ($issue) && die "Syntax error at $apply_list, line $line_num, element \"$_\"\n" .
+	                    "Note that one issue number is already defined as \"i\#$issue\".\n";
+	    $issue = $1;
+	} elsif (/\w+\#([0-9]+)/) {
+	    # valid syntax but unknown bugzilla => ignore
+	} else {
+	    die "Syntax error at $apply_list, line $line_num, element \"$_\".\n";
+	}
+    }
+    return $issue;
 }
 
 sub add_developer_info
@@ -295,7 +318,7 @@ sub add_developer_info
 	    my $rest = $2;
 	    $rest = '' unless ($rest);
 
-	    my $patchinfop = scan_patchinfo($rest, $.);
+	    my $patchinfop; # FIXME!!! = scan_patchinfo($rest, $.);
 
 	    if ($patchinfop->{'developer'} eq 'unknown' ) {
 		my $patch_file_path = find_patch_file ($patch_name);
@@ -370,10 +393,65 @@ sub list_patches_single {
     my %subsets=();
     my @selected_subsets=();
     my %referenced=();
+    my $rules_passed = 0;
+    my $section_owner = 'unknown';
+    my $section_issue = '';
     while (<PatchList>) {
-            s/\s*#.*//;
+	    # First, process # as the comment delimier only if it is the first non-blank character
+	    # It will be processed one more times after we check for all entries with patch numbers,
+	    # where '#' has another meaning
+            s/^\s*#.*//;
             chomp;
 	    s/\r//; # Win32
+
+	    # SectionIssue
+            if (/\s*SectionIssue\s*\=\>\s*(.*)$/) {
+		$section_issue = scan_section_issue($1, $.);
+#		print "New section issue => $section_issue\n";
+		next;
+	    }
+	    
+	    # patch entry
+	    if (/^\s*([^,\#\s]+.diff)\s*,?\s*(.*)?$/) {
+		my $patch_name = $1;
+		my $tmp = $2;
+		$tmp = '' unless ($tmp);
+
+#		print "Processing patch entry: $_\n";
+	    
+		$unfiltered_patch_list{$patch_name} = scan_patchinfo($tmp, $., $section_issue, $section_owner);
+
+		if (defined $unfiltered_patch_list{$patch_name}->{'targets'}) {
+		    for $set (@ {$unfiltered_patch_list{$patch_name}->{'targets'}}) {
+			unless (grep /^$set$/i, @targets) {
+			    push @ {$unfiltered_patch_list{$patch_name}->{'targets'}}, $set;
+			}
+		    }
+		} else {
+#		    print "Initial targets for patch: $patch_name: @targets\n";
+		    $unfiltered_patch_list{$patch_name}->{'targets'} = [ @targets ];
+		}
+	    
+		my $set;
+		my $match = 0;
+		if ($rules_passed) {
+		    for $set (@targets) {
+			if (grep /^$set$/i, @selected_subsets) {
+			    $match = 1;
+			}
+		    }
+		}
+		if (!$match) {
+#		    print "%subsets: @targets: skipping '$_'\n";
+		    next;
+		}
+
+		push @Patches, find_patch_file ($patch_name);
+		next;
+	    }
+
+	    # Finally, process '#' as the commnet delimiter everywhere
+            s/\s*\#.*//;
 	    s/\s*$//;
 	    s/^\s*//;
             $_ eq '' && next;
@@ -393,10 +471,21 @@ sub list_patches_single {
                 my $tmp = $1;
                 $tmp =~ s/\s+$//;
 #               print "Target: '$tmp'\n"; 
-		@targets = version_filter_targets($tmp);
+		($rules_passed, @targets) = filter_targets($tmp);
+		$section_owner = 'unknown';
+		$section_issue = '';
                 next;
             }
 
+	    # SectionOwner; it must be recognized before general options, see below
+            if (/\s*SectionOwner\s*\=\>\s*(.*)/) {
+		$section_owner = $1;
+		$section_owner = 'unknown' unless ($section_owner);
+#		print "New section owner => $section_owner\n";
+		next;
+	    }
+
+	    # General options XXX = YYY
             if (/\s*([_\S]+)\s*=\s*(.*)/) {
 		$options{$1} = $2;
 		print "$1 => $2\n" unless $quiet;
@@ -417,26 +506,7 @@ sub list_patches_single {
                 next;
             }
 
-	    /([^,\s]+)\s*,?\s*(.*)?$/;
-	    my $patch_name = $1;
-	    my $rest = $2;
-	    $rest = '' unless ($rest);
-	    
-	    $unfiltered_patch_list{$patch_name} = scan_patchinfo($rest, $.);
-	    
-	    my $set;
-	    my $match = 0;
-	    for $set (@targets) {
-		if (grep /^$set$/i, @selected_subsets) {
-		    $match = 1;
-		}
-	    }
-	    if (!$match) {
-#		print "@subsets: @targets: skipping '$_'\n";
-		next;
-	    }
-
-	    push @Patches, find_patch_file ($patch_name);
+	    die "Syntax error at $apply_list, line $.\n";
     }
     close (PatchList);
 
@@ -663,42 +733,72 @@ sub check_for_unused ($)
 sub print_statistic_no_issue ($)
 {
     my $patches = shift;
-
-    # key: developer
-    # value: array of patch names
-    my %noissue = ();
+    
+    my %developers = ();
 
     # find patches without any assigned issue number
     foreach my $patch (keys %{$patches}) {
-	unless ($patches->{$patch}->{'issue'} || $patch =~ /cws\-/) {
-	    $developer = $patches->{$patch}->{'developer'};
-	    $noissue{$developer} = () unless (defined $noissue{$developer});
-	    push @ {$noissue{$developer}}, $patch;
+    
+	next if ($patch =~ /cws\-/);
+    
+	my $developer = $patches->{$patch}->{'developer'};
+    	unless (defined $developers{$developer}) {
+	    $developers{$developer} = {};
+	    $developers{$developer}{'num_patches'} = 0;
+	    $developers{$developer}{'num_patches_no_issue'} = 0;
+	    $developers{$developer}{'targets'} = ();
+	}
+
+	my $target = $patches->{$patch}->{'targets'}->[0];
+    	unless ($developers{$developer}{'targets'}{$target}) {
+	    $developers{$developer}{'targets'}{$target} = {};
+	    $developers{$developer}{'targets'}{$target}{'num_patches'} = 0;
+	    $developers{$developer}{'targets'}{$target}{'num_patches_no_issue'} = 0;
+	}
+
+	++$developers{$developer}{'num_patches'};
+	++$developers{$developer}{'targets'}{$target}{'num_patches'};
+	
+	unless ($patches->{$patch}->{'issue'}) {
+	    ++$developers{$developer}{'num_patches_no_issue'};
+	    ++$developers{$developer}{'targets'}{$target}{'num_patches_no_issue'};
 	}
     }
 
-    # sort by number of issues
-    my @developers = ();
-    foreach my $developer (sort { @{$noissue{$b}} <=> @{$noissue{$a}} } keys %noissue) {
-	push @developers, $developer;
-    }
-    
-    print "List of patches without assigned an issue number per developer\n";
-    print "==============================================================\n\n";
-    foreach my $developer (@developers) {
-	print "$developer:\n";
-	print "-----------\n";
-	foreach (@{$noissue{$developer}}) {
-	    print "$_\n";
+    my @developers_order = ();
+	foreach my $developer (sort { $developers{$b}{'num_patches_no_issue'}/$developers{$b}{'num_patches'} <=> $developers{$a}{'num_patches_no_issue'}/$developers{$a}{'num_patches'}
+	                              ||
+				      $developers{$b}{'num_patches_no_issue'} <=> $developers{$a}{'num_patches_no_issue'}
+				    } keys %developers) {
+	my %developer_targets = ();
+	$developer_targets{'developer'} = $developer;
+	$developer_targets{'targets'} = [];
+	foreach my $target (sort { $developers{$developer}{'targets'}{$b}{'num_patches_no_issue'}/$developers{$developer}{'targets'}{$b}{'num_patches'} <=> $developers{$developer}{'targets'}{$a}{'num_patches_no_issue'}/$developers{$developer}{'targets'}{$a}{'num_patches'}
+				   ||
+				   $developers{$developer}{'targets'}{$b}{'num_patches_no_issue'} <=> $developers{$developer}{'targets'}{$a}{'num_patches_no_issue'}
+	                         } keys % {$developers{$developer}{'targets'}}) {
+	    push @{$developer_targets{'targets'}}, $target;
 	}
-	print "\n";
+#	print "Targets sorted $developer_targets{'developer'}: @{$developer_targets{'targets'}}\n";
+	push @developers_order, \%developer_targets;
     }
 
     print "Number of patches without assigned an issue number per developer\n";
     print "================================================================\n";
-    foreach my $developer (@developers) {
-	my $count = @{$noissue{$developer}};
-	print "$developer: $count\n";
+    foreach my $developer_targets (@developers_order) {
+	my $developer = $developer_targets->{'developer'};
+	# skip developes with all patches reported
+	next unless ($developers{$developer}{'num_patches_no_issue'});
+	print "$developer($developers{$developer}{'num_patches_no_issue'}/$developers{$developer}{'num_patches'}):";
+	my $target_delimiter = '';
+	foreach my $target (@ {$developer_targets->{'targets'}}) {
+	    # skip targets with all patches reported
+	    next unless ($developers{$developer}{'targets'}{$target}{'num_patches_no_issue'});
+	    print "$target_delimiter $target($developers{$developer}{'targets'}{$target}{'num_patches_no_issue'}/$developers{$developer}{'targets'}{$target}{'num_patches'})";
+	    $target_delimiter = ',';
+	}
+	print "\n";
+	print "---\n";
     }
 }
 
@@ -747,6 +847,7 @@ foreach $a (@ARGV) {
 	} elsif ($a =~ m/--statistic-no-issue/) {
 	    $statistic = 1;
 	    $statistic_no_issue = 1;
+	    $quiet = 1;
 	} elsif ($a =~ m/--tag=(.*)/) {
 	    $tag = $1;
 	} elsif ($a =~ m/--dry-run/g) {
