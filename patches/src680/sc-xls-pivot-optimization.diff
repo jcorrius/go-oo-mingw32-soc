@@ -1,0 +1,256 @@
+Index: sc/inc/dpsave.hxx
+===================================================================
+RCS file: /cvs/sc/sc/inc/dpsave.hxx,v
+retrieving revision 1.8
+diff -u -w -p -r1.8 dpsave.hxx
+--- sc/inc/dpsave.hxx	8 Sep 2005 17:35:34 -0000	1.8
++++ sc/inc/dpsave.hxx	27 Mar 2006 16:39:40 -0000
+@@ -51,6 +51,7 @@
+ #ifndef INCLUDED_SCDLLAPI_H
+ #include "scdllapi.h"
+ #endif
++#include <hash_map>
+ 
+ namespace com { namespace sun { namespace star { namespace sheet {
+     struct DataPilotFieldReference;
+@@ -119,8 +120,15 @@ private:
+     ::com::sun::star::sheet::DataPilotFieldSortInfo*  pSortInfo;            // (level)
+     ::com::sun::star::sheet::DataPilotFieldAutoShowInfo* pAutoShowInfo;     // (level)
+     ::com::sun::star::sheet::DataPilotFieldLayoutInfo* pLayoutInfo;         // (level)
+-	List		aMemberList;
+ 
++	struct MemberHashFunc : public std::unary_function< const String &, size_t >
++	{
++		size_t operator() (const String &member_name) const;
++	};
++public :
++	typedef	std::hash_map <String, ScDPSaveMember *, MemberHashFunc> MemberHash;
++private :
++	MemberHash aMembers;
+ public:
+ 							ScDPSaveDimension(const String& rName, BOOL bDataLayout);
+ 							ScDPSaveDimension(const ScDPSaveDimension& r);
+@@ -129,8 +137,8 @@ public:
+ 
+ 	BOOL		 			operator== ( const ScDPSaveDimension& r ) const;
+ 
+-    const List&             GetMembers() const { return aMemberList; }
+-	void					AddMember(ScDPSaveMember* pMember) { aMemberList.Insert(pMember, LIST_APPEND); };
++    const MemberHash&       GetMembers() const { return aMembers; }
++	void					AddMember(ScDPSaveMember* pMember) { aMembers[pMember->GetName()] = pMember; }
+ 
+ 	void					SetDupFlag(BOOL bSet)	{ bDupFlag = bSet; }
+ 	BOOL					GetDupFlag() const		{ return bDupFlag; }
+Index: sc/source/core/data/dpsave.cxx
+===================================================================
+RCS file: /cvs/sc/sc/source/core/data/dpsave.cxx,v
+retrieving revision 1.8
+diff -u -w -p -r1.8 dpsave.cxx
+--- sc/source/core/data/dpsave.cxx	8 Sep 2005 18:23:28 -0000	1.8
++++ sc/source/core/data/dpsave.cxx	27 Mar 2006 16:39:41 -0000
+@@ -214,6 +214,11 @@ void ScDPSaveMember::WriteToSource( cons
+ 
+ // -----------------------------------------------------------------------
+ 
++size_t ScDPSaveDimension::MemberHashFunc::operator()(const String & member_name) const
++{
++    return rtl_ustr_hashCode_WithLength( member_name.GetBuffer(), member_name.Len() );
++}
++
+ ScDPSaveDimension::ScDPSaveDimension(const String& rName, BOOL bDataLayout) :
+ 	aName( rName ),
+ 	bIsDataLayout( bDataLayout ),
+@@ -253,11 +258,10 @@ ScDPSaveDimension::ScDPSaveDimension(con
+ 			pSubTotalFuncs[nSub] = r.pSubTotalFuncs[nSub];
+ 	}
+ 
+-	long nCount = r.aMemberList.Count();
+-	for (long i=0; i<nCount; i++)
++	for (MemberHash::const_iterator i=r.aMembers.begin(); i != r.aMembers.end() ; i++)
+ 	{
+-		ScDPSaveMember* pNew = new ScDPSaveMember( *(ScDPSaveMember*)r.aMemberList.GetObject(i) );
+-		aMemberList.Insert( pNew, LIST_APPEND );
++		ScDPSaveMember* pNew = new ScDPSaveMember( *i->second );
++		aMembers[pNew->GetName()] = pNew;
+ 	}
+ 	if (r.pReferenceValue)
+ 		pReferenceValue = new sheet::DataPilotFieldReference( *(r.pReferenceValue) );
+@@ -318,7 +322,7 @@ ScDPSaveDimension::ScDPSaveDimension(SvS
+ 	for (i=0; i<nNewCount; i++)
+ 	{
+ 		ScDPSaveMember* pNew = new ScDPSaveMember( rStream );
+-		aMemberList.Insert( pNew, LIST_APPEND );
++		aMembers[pNew->GetName()] = pNew;
+ 	}
+ 	pReferenceValue = NULL;
+     pSortInfo = NULL;
+@@ -352,21 +356,16 @@ void ScDPSaveDimension::Store( SvStream&
+ 
+ 	rStream << (USHORT) 0;	// nExtra
+ 
+-	long nCount = aMemberList.Count();
++	long nCount = aMembers.size();
+ 	rStream << nCount;
+-	for (i=0; i<nCount; i++)
+-	{
+-		const ScDPSaveMember* pMember = (const ScDPSaveMember*)aMemberList.GetObject(i);
+-		pMember->Store( rStream );
+-	}
++	for (MemberHash::const_iterator i=aMembers.begin(); i != aMembers.end() ; i++)
++		i->second->Store( rStream );
+ }
+ 
+ ScDPSaveDimension::~ScDPSaveDimension()
+ {
+-	long nCount = aMemberList.Count();
+-	for (long i=0; i<nCount; i++)
+-		delete (ScDPSaveMember*)aMemberList.GetObject(i);
+-	aMemberList.Clear();
++	for (MemberHash::const_iterator i=aMembers.begin(); i != aMembers.end() ; i++)
++		delete i->second;
+ 	delete pReferenceValue;
+     delete pSortInfo;
+     delete pAutoShowInfo;
+@@ -397,13 +396,13 @@ BOOL ScDPSaveDimension::operator== ( con
+ 		if ( pSubTotalFuncs[i] != r.pSubTotalFuncs[i] )
+ 			return FALSE;
+ 
+-	long nCount = aMemberList.Count();
+-	if ( nCount != r.aMemberList.Count() )
++	if (aMembers.size() != r.aMembers.size() )
+ 		return FALSE;
+ 
+-	for (i=0; i<nCount; i++)
+-		if ( !( *(ScDPSaveMember*)aMemberList.GetObject(i) ==
+-				*(ScDPSaveMember*)r.aMemberList.GetObject(i) ) )
++	MemberHash::const_iterator a=aMembers.begin();
++	MemberHash::const_iterator b=r.aMembers.begin();
++	for (; a != aMembers.end() ; ++a, ++b)
++		if (!(*(a->second) == *(b->second)))
+ 			return FALSE;
+ 
+ 	return TRUE;
+@@ -551,26 +550,21 @@ const String& ScDPSaveDimension::GetCurr
+ 
+ ScDPSaveMember* ScDPSaveDimension::GetExistingMemberByName(const String& rName)
+ {
+-	long nCount = aMemberList.Count();
+-	for (long i=0; i<nCount; i++)
+-	{
+-		ScDPSaveMember* pMember = (ScDPSaveMember*)aMemberList.GetObject(i);
+-		if ( pMember->GetName() == rName )
+-			return pMember;
+-	}
++	MemberHash::const_iterator res = aMembers.find (rName);
++    if (res != aMembers.end())
++		return res->second;
+     return NULL;
+ }
+ 
+ 
+ ScDPSaveMember* ScDPSaveDimension::GetMemberByName(const String& rName)
+ {
+-	long nCount = aMemberList.Count();
+     ScDPSaveMember* pMember = GetExistingMemberByName(rName);
+     if (pMember)
+         return pMember;
+ 
+ 	ScDPSaveMember* pNew = new ScDPSaveMember( rName );
+-	aMemberList.Insert( pNew, LIST_APPEND );
++	aMembers[rName] = pNew;
+ 	return pNew;
+ }
+ 
+@@ -624,10 +618,10 @@ void ScDPSaveDimension::WriteToSource( c
+ 		}
+ 	}
+ 
+-	//	Level loop outside of aMemberList loop
++	//	Level loop outside of aMembers loop
+ 	//	because SubTotals have to be set independently of known members
+ 
+-	long nCount = aMemberList.Count();
++	long nCount = aMembers.size();
+ 
+ 	long nHierCount = 0;
+ 	uno::Reference<container::XIndexAccess> xHiers;
+@@ -725,15 +719,14 @@ void ScDPSaveDimension::WriteToSource( c
+ 					uno::Reference<container::XNameAccess> xMembers = xMembSupp->getMembers();
+ 					if ( xMembers.is() )
+ 					{
+-						for (long i=0; i<nCount; i++)
++						for (MemberHash::const_iterator i=aMembers.begin(); i != aMembers.end() ; i++)
+ 						{
+-							ScDPSaveMember* pMember = (ScDPSaveMember*)aMemberList.GetObject(i);
+-							rtl::OUString aName = pMember->GetName();
++							rtl::OUString aName = i->second->GetName();
+ 							if ( xMembers->hasByName( aName ) )
+ 							{
+ 								uno::Reference<uno::XInterface> xMemberInt = ScUnoHelpFunctions::AnyToInterface(
+ 									xMembers->getByName( aName ) );
+-								pMember->WriteToSource( xMemberInt );
++								i->second->WriteToSource( xMemberInt );
+ 							}
+ 							// missing member is no error
+ 						}
+Index: sc/source/filter/excel/xepivot.cxx
+===================================================================
+RCS file: /cvs/sc/sc/source/filter/excel/xepivot.cxx,v
+retrieving revision 1.11
+diff -u -w -p -r1.11 xepivot.cxx
+--- sc/source/filter/excel/xepivot.cxx	8 Sep 2005 19:01:27 -0000	1.11
++++ sc/source/filter/excel/xepivot.cxx	27 Mar 2006 16:39:43 -0000
+@@ -1126,16 +1126,10 @@ void XclExpPTField::SetPropertiesFromDim
+     }
+ 
+     // item properties
+-    const List& rMemList = rSaveDim.GetMembers();
+-    for( ULONG nMemIdx = 0, nMemCount = rMemList.Count(); nMemIdx < nMemCount; ++nMemIdx )
+-    {
+-        if( const ScDPSaveMember* pSaveMem = static_cast< const ScDPSaveMember* >( rMemList.GetObject( nMemIdx ) ) )
+-        {
+-
+-            if( XclExpPTItem* pItem = GetItemAcc( pSaveMem->GetName() ) )
+-                pItem->SetPropertiesFromMember( *pSaveMem );
+-        }
+-    }
++    const ScDPSaveDimension::MemberHash &rMembers = rSaveDim.GetMembers();
++    for (ScDPSaveDimension::MemberHash::const_iterator i=rMembers.begin(); i != rMembers.end() ; i++)
++		if( XclExpPTItem* pItem = GetItemAcc( i->second->GetName() ) )
++			pItem->SetPropertiesFromMember( *(i->second) );
+ }
+ 
+ void XclExpPTField::SetDataPropertiesFromDim( const ScDPSaveDimension& rSaveDim )
+Index: sc/source/filter/xml/XMLExportDataPilot.cxx
+===================================================================
+RCS file: /cvs/sc/sc/source/filter/xml/XMLExportDataPilot.cxx,v
+retrieving revision 1.22
+diff -u -w -p -r1.22 XMLExportDataPilot.cxx
+--- sc/source/filter/xml/XMLExportDataPilot.cxx	8 Sep 2005 19:54:20 -0000	1.22
++++ sc/source/filter/xml/XMLExportDataPilot.cxx	27 Mar 2006 16:39:44 -0000
+@@ -544,19 +544,18 @@ void ScXMLExportDataPilot::WriteSubTotal
+ 
+ void ScXMLExportDataPilot::WriteMembers(ScDPSaveDimension* pDim)
+ {
+-	List aMembers = pDim->GetMembers();
+-	sal_Int32 nMemberCount = aMembers.Count();
+-	if (nMemberCount > 0)
++    const ScDPSaveDimension::MemberHash &rMembers = pDim->GetMembers();
++	if (rMembers.size() > 0)
+ 	{
+ 		SvXMLElementExport aElemDPMs(rExport, XML_NAMESPACE_TABLE, XML_DATA_PILOT_MEMBERS, sal_True, sal_True);
+ 		rExport.CheckAttrList();
+-		for (sal_Int32 nMember = 0; nMember < nMemberCount; nMember++)
++		for (ScDPSaveDimension::MemberHash::const_iterator i=rMembers.begin(); i != rMembers.end() ; i++)
+ 		{
+-			rExport.AddAttribute(XML_NAMESPACE_TABLE, XML_NAME, rtl::OUString(((ScDPSaveMember*)aMembers.GetObject(nMember))->GetName()));
++			rExport.AddAttribute(XML_NAMESPACE_TABLE, XML_NAME, rtl::OUString(i->second->GetName()));
+ 			rtl::OUStringBuffer sBuffer;
+-			SvXMLUnitConverter::convertBool(sBuffer, ((ScDPSaveMember*)aMembers.GetObject(nMember))->GetIsVisible());
++			SvXMLUnitConverter::convertBool(sBuffer, i->second->GetIsVisible());
+ 			rExport.AddAttribute(XML_NAMESPACE_TABLE, XML_DISPLAY, sBuffer.makeStringAndClear());
+-			SvXMLUnitConverter::convertBool(sBuffer, ((ScDPSaveMember*)aMembers.GetObject(nMember))->GetShowDetails());
++			SvXMLUnitConverter::convertBool(sBuffer, i->second->GetShowDetails());
+ 			rExport.AddAttribute(XML_NAMESPACE_TABLE, XML_SHOW_DETAILS, sBuffer.makeStringAndClear());
+ 			SvXMLElementExport aElemDPM(rExport, XML_NAMESPACE_TABLE, XML_DATA_PILOT_MEMBER, sal_True, sal_True);
+ 			rExport.CheckAttrList();
