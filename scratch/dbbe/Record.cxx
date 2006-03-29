@@ -1,3 +1,37 @@
+/*************************************************************************
+ *
+ *  OpenOffice.org - a multi-platform office productivity suite
+ *
+ *  $RCSfile$
+ *
+ *  $Revision$
+ *
+ *  last change: $Author$ $Date$
+ *
+ *  The Contents of this file are made available subject to
+ *  the terms of GNU Lesser General Public License Version 2.1.
+ *
+ *
+ *    GNU Lesser General Public License Version 2.1
+ *    =============================================
+ *    Copyright 2005 by Sun Microsystems, Inc.
+ *    901 San Antonio Road, Palo Alto, CA 94303, USA
+ *
+ *    This library is free software; you can redistribute it and/or
+ *    modify it under the terms of the GNU Lesser General Public
+ *    License version 2.1, as published by the Free Software Foundation.
+ *
+ *    This library is distributed in the hope that it will be useful,
+ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ *    Lesser General Public License for more details.
+ *
+ *    You should have received a copy of the GNU Lesser General Public
+ *    License along with this library; if not, write to the Free Software
+ *    Foundation, Inc., 59 Temple Place, Suite 330, Boston,
+ *    MA  02111-1307  USA
+ *
+ ************************************************************************/
 #ifndef CONFIGMGR_DBBE_RECORD_HXX_
 #include "Record.hxx"
 #endif //CONFIGMGR_DBBE_RECORD_HXX_
@@ -12,6 +46,10 @@
 
 #ifndef _RTL_MEMORY_H_
 #include <rtl/memory.h>
+#endif
+
+#ifndef _OSL_ENDIAN_H_
+#include <osl/endian.h>
 #endif
 
 namespace configmgr { namespace dbbe {
@@ -33,13 +71,13 @@ namespace configmgr { namespace dbbe {
         return ret;
     }
 
-    void Record::unMarshall()
+    void Record::unMarshal()
     {
         pSubLayers= (sal_Char*)(this) + sizeof(Record);
         pBlob= (sal_Char*)(this) + sizeof(Record) + SubLayerLen();
     }
     
-    Record* Record::Marshall(size_t &size)
+    Record* Record::Marshal(size_t &size)
     {
         Record* pRecord;
                 
@@ -54,5 +92,32 @@ namespace configmgr { namespace dbbe {
         pRecord->pSubLayers= NULL;
         return pRecord;
     }
+    
+    void Record::bytesex(void)
+    {
+        //32-bit fields
+        OSL_SWAPDWORD(blobSize);
+        OSL_SWAPDWORD(numSubLayers);
+        //64-bit fields
+        OSL_SWAPDWORD(date);        
+    }
+
+    std::vector<sal_Char*> Record::listSubLayers(void)
+    {
+        std::vector<sal_Char*> ret(numSubLayers);
+        
+        sal_uInt32 i= numSubLayers;
+        sal_Char* pString= pSubLayers;
+        while (i)
+        {
+            ret.push_back(pString);
+            while (*pString)
+                pString++;
+            pString++; //kick us into the next string
+            i--;
+        }        
+        return ret;
+    }
+
 }}; //namespace
     

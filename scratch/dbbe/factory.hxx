@@ -32,65 +32,58 @@
  *    MA  02111-1307  USA
  *
  ************************************************************************/
-#ifndef CONFIGMGR_DBBE_RECORD_HXX_
-#define CONFIGMGR_DBBE_RECORD_HXX_
-
-#ifndef _SAL_TYPES_H_
-#include <sal/types.h>
-#endif //_SAL_TYPES_H_
-
-#ifndef _OSL_ENDIAN_H_
-#include <osl/endian.h>
-#endif//_OSL_ENDIAN_H_
+#ifndef CONFIGMGR_DBBE_FACTORY_HXX_
+#define CONFIGMGR_DBBE_FACTORY_HXX_
 
 #include <db_cxx.h>
 
-#include <vector>
+#include <hash_map>
+#include <algorithm>
+
+#ifndef _RTL_USTRING_HXX_
+#include "rtl/ustring.hxx"
+#endif
+
+#ifndef _COM_SUN_STAR_CONFIGURATION_BACKEND_BACKENDACCESSEXCEPTION_HPP_
+#include <com/sun/star/configuration/backend/BackendAccessException.hpp>
+#endif // _COM_SUN_STAR_CONFIGURATION_BACKEND_BACKENDACCESSEXCEPTION_HPP_
+
+
+
 
 namespace configmgr { namespace dbbe {
-
+    namespace backend= com::sun::star::configuration::backend;
 /**
-   An object representation of the database schema.
-   
-*/
-    class Record
+   This class is intended to be used with SingletonRef, as there can
+   only be one DbFactory.  This is a simple factory that give you
+   references to an opened database for a specified path
+ */
+
+    class DbFactory
     {
     public:
-        sal_Int64 date;          /** Unix Epoch */
-        sal_uInt32 blobSize;     /** XML Blob Size */
-        sal_uInt32 numSubLayers;
-        sal_Char   *pSubLayers;  /** ARGV style list */
-        sal_Char   *pBlob;        /** XML Blob */
+        /** Do nothing Constructor */
+        DbFactory();
         
+        /** Destructor will close all databases */
+        ~DbFactory();
         
-        /**
-           Fix the pointers from their marshalled invalid state 
-        */
-        void unMarshal(void);
-        
-        /**
-           Spit out a Record that is marshalled to be put in the database
-           
-           @param size, the size of the marshalled record will be written here
-        */
-        Record* Marshal(size_t &size);
-        
-        /**
-           Change order from little to big endian or vice-versa
-         */
-        void bytesex(void);
+        /** 
+            Return a reference to an open database
+            specified by path.
 
-        /**
-           Give me alist of sublayers this record has
-           
-           @return a vector containing sal_Char*'s
-         */
-        std::vector<sal_Char*> listSubLayers(void);
+            @param aPath    The path to the database file
+            @return  pointer to opened database
+        */
+        Db* getDb(rtl::OUString aPath);
         
     private:
-        size_t SubLayerLen(void);
+        typedef std::hash_map<rtl::OUString, Db*, rtl::OUStringHash> DbHash;
+        Db* openDb(const rtl::OUString& rPath) const
+            throw (backend::BackendAccessException);
+        DbHash mDbs;
     };
-    
+
 }}; //namespace
 
-#endif //CONFIGMGR_DBBE_RECORD_HXX_
+#endif //CONFIGMGR_DBBE_FACTORY_HXX_

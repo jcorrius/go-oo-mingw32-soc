@@ -4,9 +4,9 @@
 #
 #   $RCSfile: makefile.mk,v $
 #
-#   $Revision: 1.1 $
+#   $Revision: 1.2 $
 #
-#   last change: $Author: mikeleib $ $Date: 2006/03/16 00:16:53 $
+#   last change: $Author: mikeleib $ $Date: 2006/03/29 18:15:02 $
 #
 #   The Contents of this file are made available subject to
 #   the terms of GNU Lesser General Public License Version 2.1.
@@ -47,7 +47,11 @@ ENABLE_EXCEPTIONS=TRUE
 
 SLOFILES=\
 	$(SLO)$/Record.obj \
-	$(SLO)$/Layer.obj
+	$(SLO)$/Layer.obj \
+	$(SLO)$/factory.obj \
+	$(SLO)$/basestratum.obj \
+	$(SLO)$/multistratum.obj \
+	$(SLO)$/singlestratum.obj
 
 # --- Targets ----------------------------------
 

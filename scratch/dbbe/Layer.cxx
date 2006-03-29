@@ -1,3 +1,38 @@
+/*************************************************************************
+ *
+ *  OpenOffice.org - a multi-platform office productivity suite
+ *
+ *  $RCSfile$
+ *
+ *  $Revision$
+ *
+ *  last change: $Author$ $Date$
+ *
+ *  The Contents of this file are made available subject to
+ *  the terms of GNU Lesser General Public License Version 2.1.
+ *
+ *
+ *    GNU Lesser General Public License Version 2.1
+ *    =============================================
+ *    Copyright 2005 by Sun Microsystems, Inc.
+ *    901 San Antonio Road, Palo Alto, CA 94303, USA
+ *
+ *    This library is free software; you can redistribute it and/or
+ *    modify it under the terms of the GNU Lesser General Public
+ *    License version 2.1, as published by the Free Software Foundation.
+ *
+ *    This library is distributed in the hope that it will be useful,
+ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ *    Lesser General Public License for more details.
+ *
+ *    You should have received a copy of the GNU Lesser General Public
+ *    License along with this library; if not, write to the Free Software
+ *    Foundation, Inc., 59 Temple Place, Suite 330, Boston,
+ *    MA  02111-1307  USA
+ *
+ ************************************************************************/
+
 #include "Layer.hxx"
 
 #ifndef _COMPHELPER_SEQSTREAM_HXX
@@ -122,15 +157,7 @@ void BaseLayer::readData(backend::XLayer * pContext,
     Dbt key((void*)aKey.getStr(), aKey.getLength());
     
     int ret;
-    //  We use a non-elegant error method because we cannot be sure
-    //  that berkeleydb was compiled with exceptions enabled.
-    try
-    {
-        ret= aDb.get(NULL, &key, &data, 0); 
-    } catch(DbException &dbe)
-    {
-        ret= dbe.get_errno();
-    }
+    ret= aDb.get(NULL, &key, &data, 0); 
     switch(ret)
     {
         using namespace comphelper;
@@ -138,13 +165,16 @@ void BaseLayer::readData(backend::XLayer * pContext,
         case 0: //found
         {
             Record* pRecord= static_cast<Record*>(data.get_data());
-            pRecord->unMarshall();
+            pRecord->unMarshal();
+            int swap= 0; //dummy value to keep compiler from complaining
+            OSL_ASSERT(!aDb.get_byteswapped(&swap));
+            if (swap)
+                pRecord->bytesex();
             ByteSequence BS((const sal_Int8*)pRecord->pBlob, pRecord->blobSize);
             uno::Reference<io::XActiveDataSink> xAS(mLayerReader, uno::UNO_QUERY_THROW);
             uno::Reference<io::XInputStream> xStream(new SequenceInputStream(BS));
             xAS->setInputStream(xStream);
             mLayerReader->readData(xHandler);
-            //FIXME: leak?  reentrancy?
         }
         break;
             
@@ -181,32 +211,26 @@ rtl::OUString BaseLayer::getTimestamp(Db& aDatabase, rtl::OString aKey)
     Dbt key(const_cast<sal_Char*>(aKey.getStr()), aKey.getLength());
     rtl::OUString retCode;
 
-    key.set_flags(DB_DBT_PARTIAL);
-    key.set_dlen(sizeof(Record));
-    key.set_doff(0);
+    data.set_flags(DB_DBT_PARTIAL);
+    data.set_dlen(sizeof(Record));
+    data.set_doff(0);
 
     int ret;
-    //  We use a non-elegant error method because we cannot be sure
-    //  that berkeleydb was compiled with exceptions enabled.
-    try
-    {
-        ret= aDatabase.get(NULL, &key, &data, 0); 
-    } catch(DbException &dbe)
-    {
-        ret= dbe.get_errno();
-    }
+    ret= aDatabase.get(NULL, &key, &data, 0); 
+
     if (!ret)
     {
         //
         //  It is said that timestamps are up to our discretion on how they are
         //  created.  We choose to concatinate 64-bit unix epoch time and 
         //  64bit blob size
-        //
-        //  FIXME:
-        //    leaks, reentrancy
         rtl::OUStringBuffer timestamp(50);
         
         Record* pRecord= static_cast<Record*>(data.get_data());
+        int swap= 0; //dummy value to keep compiler from complaining
+        OSL_ASSERT(!aDatabase.get_byteswapped(&swap));
+        if (swap)
+            pRecord->bytesex();
         timestamp.append(pRecord->date);
         timestamp.append(static_cast<sal_Int64>(pRecord->blobSize));
         retCode= timestamp.makeStringAndClear();
@@ -236,7 +260,6 @@ uno::Reference<backend::XLayerHandler> BaseLayer::createLayerWriter()
     return uno::Reference<backend::XLayerHandler>(xWriter,uno::UNO_REF_QUERY_THROW) ;
 }
 
-//----------------------------------------------------
 Layer::Layer(
     const uno::Reference<lang::XMultiServiceFactory>& xFactory,
     Db& aDatabase,
@@ -343,31 +366,19 @@ void SAL_CALL UpdatableLayer::replaceWith(
     aRecord.pBlob= (sal_Char*)BS.getArray();
     aRecord.numSubLayers= 0;
     aRecord.pSubLayers= NULL;
-    Record* pRecord= aRecord.Marshall(aSize);
+    Record* pRecord= aRecord.Marshal(aSize);
+    int swap= 0; //dummy value to keep compiler from complaining
+    OSL_ASSERT(!aDatabase.get_byteswapped(&swap));
+    if (swap)
+        pRecord->bytesex();
     rtl::OString KeyName= getKey();
     Dbt Key(const_cast<void*>(static_cast<const void*>(KeyName.getStr())), //kludge! 
             KeyName.getLength());
     Dbt Data(pRecord, aSize);
     int ret;
-    //  We use a non-elegant error method because we cannot be sure
-    //  that berkeleydb was compiled with exceptions enabled.
-    try
-    {
-        // The berkelydb documentation is ambiguous about 
-        // inserting keys of the same name when duplicates
-        // are not enabled.  To be sure, we simply delete
-        // the key first
-        ret= aDatabase.del(NULL, &Key, 0);
-        if (!ret)
-        {
-            ret= aDatabase.put(NULL, &Key, &Data, 0);
-            if (!ret)
-                ret= aDatabase.sync(0);
-        }
-    } catch(DbException &dbe)
-    {
-        ret= dbe.get_errno();
-    }
+    ret= aDatabase.put(NULL, &Key, &Data, 0);
+    if (!ret)
+        ret= aDatabase.sync(0);
     if (ret)
     {
         rtl::OUStringBuffer sMsg(80);            
@@ -435,23 +446,6 @@ void BaseCompositeLayer::readSubLayerData(
         readEmptyLayer(xHandler);
 }
 
-#if 0
-//FIXME
-// documentation
-// headers
-// prototype
-//
-//  Note that this method assumes that keys without sublayers are of the form:
-//   namespace::config_item::
-static rtl::OUString getSubLayerName(const rtl::OString Key)
-{
-    static const rtl::OUString kSeperator(RTL_CONSTASCII_USTRINGPARAM("::"));
-    rtl::OUString OUKey= OStringToOUString(Key, RTL_TEXTENCODING_UTF8);
-    sal_Int32 lastIndex= OUKey.lastIndexOf(kSeperator);
-    rtl::OUString ret= OUKey.copy(lastIndex + kSeperator.getLength());
-}
-#endif
-
 void BaseCompositeLayer::findSubLayers(const rtl::OString& aParentKey)
 {
     Db& aDb= getDb();
@@ -460,21 +454,18 @@ void BaseCompositeLayer::findSubLayers(const rtl::OString& aParentKey)
     Dbt Data;
     
     int ret;
-    try
-    {
-        ret= aDb.get(NULL, &Key, &Data, 0);
-    }
-    catch (DbException &dbe)
-    {
-        ret= dbe.get_errno();
-    }
+    ret= aDb.get(NULL, &Key, &Data, 0);
     switch (ret)
     {
         case 0: //found
         {
             Record *pRecord= static_cast<Record*>(Data.get_data());
             OSL_ASSERT(pRecord);
-            pRecord->unMarshall();
+            pRecord->unMarshal();
+            int swap= 0; //dummy value to keep compiler from complaining
+            OSL_ASSERT(!aDb.get_byteswapped(&swap));
+            if (swap)
+                pRecord->bytesex();
             const int numSubLayers= pRecord->numSubLayers;
             mSubLayerKeys.resize(numSubLayers);
             mSubLayerIds.realloc(numSubLayers);
@@ -490,14 +481,7 @@ void BaseCompositeLayer::findSubLayers(const rtl::OString& aParentKey)
                 Key2.set_dlen(0); 
                 Dbt Data2;
                 int ret2;
-                try
-                {
-                    ret2= aDb.get(NULL, &Key2, &Data2, 0);
-                }
-                catch (DbException &dbe)
-                {
-                    ret2= dbe.get_errno();
-                }
+                ret2= aDb.get(NULL, &Key2, &Data2, 0);
                 switch (ret2)
                 {
                     case 0: //found
@@ -531,80 +515,12 @@ void BaseCompositeLayer::findSubLayers(const rtl::OString& aParentKey)
     }
 }
 
-//
-//  FIXME:
-//   I stopped 3/4 of the way through this method b/c 
-//     1) the semantics of sublayers is different, in dbbe, in that we know them by looking at the parent
-//     2) exactly how this method is used by the constructor isn't totally clear at this moment
-//
-#if 0
-void BaseCompositeLayer::fillSubLayerLists(const SubLayerKeys& aParentKeys,
-                                           const rtl::OUString& aComponent)
-{
-    SubLayerKeys::size_type const nSubLayerCount= aParentKeys.size();
-    mSubLayerIds.realloc(nSublayerCount);
-    mSubLayerKeys.resize(nSublayerCount);
-    
-    Db& aDb= getDb();
 
-    for (SubLayerKeys::size_type i = 0; i < nSublayerCount; ++i)
-    {
-        // In the original version, that is I pass in /foo/bar/baz.xcu and get back baz.xcu
-        //   or perhaps foo/bar/baz and get back baz
-        // In our version, you pass in namespace::config_item::sublayer and get back sublayer
-        mSubLayerIds[i] = getSubLayerName(aParentKeys[i]);
-        
-        Dbt Key(aParentKeys[i].getStr(), aParentKeys[i].getLength());
-        Key.set_flags(DB_DBT_PARTIAL);
-        Key.set_dlen= 1;
-        Key.set_doff= 0;
-        Dbt Data;
-        
-        int ret;
-        try
-        {
-            aDb.get(NULL, &Key, &Data, 0);
-        }
-        catch (DbException &dbe)
-        {
-            ret= dbe.get_errno();
-        }
-        switch (ret)
-        {
-            case 0: //record found
-                rtl::OUString subLayerKey
-                mSubLayerKeys[i]= 
-                break;
-                
-            case DB_NOTFOUND:
-                break;
-                
-            default:
-                break;               
-        }
-        
-        /// old stuff below
-        
-        // Let's check whether the sublayer exists for the
-        // particular component.
-        rtl::OUString subLayerFile(aSublayerDirectories[i] + aComponent) ;
-        if (FileHelper::fileExists(subLayerFile))
-        {
-            mSubLayerFiles[i] =  subLayerFile;
-        }
-        else
-            OSL_ASSERT(mSubLayerFiles[i].getLength() == 0);
-    }
-}
-#endif
-
-
-//-----------------------------------------------------------------
 CompositeLayer::CompositeLayer(
     const uno::Reference<lang::XMultiServiceFactory>& xFactory,
     Db& aDatabase,
-    const rtl::OUString& aKey)
-    : BaseCompositeLayer(xFactory, aDatabase, rtl::OString())
+    const rtl::OString& aKey)
+    : BaseCompositeLayer(xFactory, aDatabase, aKey)
 {
 }
 
@@ -638,7 +554,7 @@ void SAL_CALL CompositeLayer::readSubLayerData(
     return BaseCompositeLayer::readSubLayerData(this,xHandler,aSubLayerId);
 }
 
-//----------------------------------------------------
+
 UpdatableCompositeLayer::UpdatableCompositeLayer(
     const uno::Reference<lang::XMultiServiceFactory>& xFactory,
     Db& aDatabase,
@@ -704,31 +620,19 @@ void SAL_CALL UpdatableCompositeLayer::replaceWith(
     aRecord.pBlob= (sal_Char*)BS.getArray();
     aRecord.numSubLayers= 0;
     aRecord.pSubLayers= NULL;
-    Record* pRecord= aRecord.Marshall(aSize);
+    Record* pRecord= aRecord.Marshal(aSize);
+    int swap= 0; //dummy value to keep compiler from complaining
+    OSL_ASSERT(!aDatabase.get_byteswapped(&swap));
+    if (swap)
+        pRecord->bytesex();
     rtl::OString KeyName= getKey();
     Dbt Key(const_cast<void*>(static_cast<const void*>(KeyName.getStr())), //kludge! 
             KeyName.getLength());
     Dbt Data(pRecord, aSize);
     int ret;
-    //  We use a non-elegant error method because we cannot be sure
-    //  that berkeleydb was compiled with exceptions enabled.
-    try
-    {
-        // The berkelydb documentation is ambiguous about 
-        // inserting keys of the same name when duplicates
-        // are not enabled.  To be sure, we simply delete
-        // the key first
-        ret= aDatabase.del(NULL, &Key, 0);
-        if (!ret)
-        {
-            ret= aDatabase.put(NULL, &Key, &Data, 0);
-            if (!ret)
-                ret= aDatabase.sync(0);
-        }
-    } catch(DbException &dbe)
-    {
-        ret= dbe.get_errno();
-    }
+    ret= aDatabase.put(NULL, &Key, &Data, 0);
+    if (!ret)
+        ret= aDatabase.sync(0);
     if (ret)
     {
         rtl::OUStringBuffer sMsg(80);            
