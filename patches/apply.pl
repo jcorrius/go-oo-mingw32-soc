@@ -239,32 +239,33 @@ sub is_dependent_patch($$) {
     return 0;
 }
 
-sub scan_patchinfo($$$$)
+sub scan_patch_entry($$$$)
 {
     my ($line,$line_num,$section_issue,$section_owner) = @_;
     
-    my %patchinfo = ();
-    $patchinfo{'issue'} = $section_issue;
+    my %patch_entry = ();
+    $patch_entry{'issue'} = $section_issue;
     # the developer must not be initialized to $section_owner because it helps us to catch syntax errors
-    $patchinfo{'developer'} = 'unknown';
+    $patch_entry{'developer'} = 'unknown';
 
     foreach (split(/,\s*/, $line)) {
 	if (/i#([0-9]+)/) {
-	    $patchinfo{'issue'} = $1;
+	    # more (duplicated) issues can be fined, we take the latest one
+	    $patch_entry{'issue'} = $1;
 	} elsif (/\w+#([0-9]+)/) {
 	    # valid syntax but unknown bugzilla => ignore
 	} else {
-	    ($patchinfo{'developer'} eq 'unknown') || die "Syntax error at $apply_list, line $line_num, element \"$_\"\n" .
-				                          "Note that the one developer name is already defined as \"$patchinfo{'developer'}\".\n";
-	    $patchinfo{'developer'} = $_;
+	    ($patch_entry{'developer'} eq 'unknown') || die "Syntax error at $apply_list, line $line_num, element \"$_\"\n" .
+				                            "Note that the one developer name is already defined as \"$patch_entry{'developer'}\".\n";
+	    $patch_entry{'developer'} = $_;
 	}
     }
     
-    if ($patchinfo{'developer'} eq 'unknown') {
-	$patchinfo{'developer'} = $section_owner;
+    if ($patch_entry{'developer'} eq 'unknown') {
+	$patch_entry{'developer'} = $section_owner;
     }
     
-    return \%patchinfo;
+    return \%patch_entry;
 }
 
 sub scan_section_issue($$)
@@ -274,8 +275,7 @@ sub scan_section_issue($$)
     my $issue = '';
     foreach (split(/,\s*/, $line)) {
 	if (/^i#([0-9]+)/) {
-	    ($issue) && die "Syntax error at $apply_list, line $line_num, element \"$_\"\n" .
-	                    "Note that one issue number is already defined as \"i\#$issue\".\n";
+	    # more (duplicated) issues can be fined, we take the latest one
 	    $issue = $1;
 	} elsif (/\w+\#([0-9]+)/) {
 	    # valid syntax but unknown bugzilla => ignore
@@ -293,6 +293,8 @@ sub add_developer_info
 
     open (PatchListIn, "$apply_list") || die "Can't open $apply_list: $!\n";
     open (PatchListOut, ">$temp_file") || die "Can't open $temp_file: $!\n";
+
+    my $section_owner = 'unknown';
 
     # this is necessary because the later cvs call
     my $pwd_orig = `pwd`;
@@ -313,32 +315,53 @@ sub add_developer_info
     while (<PatchListIn>) {
 	chomp;
 	my $add_info='';
-	if (/^\s*([^\#,\s]+.diff)\s*,?\s*(.*)?$/) {
+	
+	
+        if (/^\s*#.*/) {
+	    # comment
+	} elsif (/^\s*SectionOwner\s*\=\>\s*(.*)/) {
+	    # SectionOwner
+	    $section_owner = $1;
+	    $section_owner = 'unknown' unless ($section_owner);
+#	    print "New section owner => $section_owner\n";
+	} elsif (/^\s*\[\s*(.*)\]/) {
+	    # new section
+	    $section_owner = 'unknown';
+	} elsif (/^\s*([^\#,\s]+.diff)\s*,?\s*(.*)?$/) {
+	    # patch entry
 	    my $patch_name = $1;
-	    my $rest = $2;
-	    $rest = '' unless ($rest);
+	    my $tmp = $2;
+	    $tmp = '' unless ($tmp);
 
-	    my $patchinfop; # FIXME!!! = scan_patchinfo($rest, $.);
+	    # ignore patches extracted from cws; they often have an outside developer
+	    # they are ignored in the statistic, so...
+	    unless ($patch_name =~ /cws\-/) {
 
-	    if ($patchinfop->{'developer'} eq 'unknown' ) {
-		my $patch_file_path = find_patch_file ($patch_name);
-		$patch_file_path =~ s|$patch_dir/||;
-		print "$patch_file_path ... ";
-		my $cvs_developer = `cvs annotate -F $patch_file_path 2>/dev/null | cut -d\\( -f2 | cut -d' '   -f1 | sort | uniq -c | sort --numeric-sort | tail -n 1 | cut -c 9-`;
-		chomp $cvs_developer;
+		my $patch_entryp = scan_patch_entry($tmp, $., "0", $section_owner);
+
+		if ($patch_entryp->{'developer'} eq 'unknown' ) {
+		    my $patch_file_path = find_patch_file ($patch_name);
+		    $patch_file_path =~ s|$patch_dir/||;
+		    print "$patch_file_path ... ";
+		    my $cvs_developer = `cvs annotate -F $patch_file_path 2>/dev/null | cut -d\\( -f2 | cut -d' '   -f1 | sort | uniq -c | sort --numeric-sort | tail -n 1 | cut -c 9-`;
+		    chomp $cvs_developer;
 		
-		($cvs_developer) || die "\n" .
-					"Error: The deloper name cannot be detected from cvs\n\n" .
-		                        "Hint: Try the following two commands to check the cvs output:\n" .
-					"\tcd $patch_dir\n" .
-					"\tcvs annotate -F $patch_file_path\n";
+		    ($cvs_developer) || die "\n" .
+					    "Error: The deloper name cannot be detected from cvs\n\n" .
+		                    	    "Hint: Try the following two commands to check the cvs output:\n" .
+					    "\tcd $patch_dir\n" .
+					    "\tcvs annotate -F $patch_file_path\n";
 		
-		$add_info=", $cvs_developer";
-		print "$cvs_developer\n";
+		    $add_info=", $cvs_developer";
+		    print "$cvs_developer\n";
+		}
 	    }
 	}	
 	print PatchListOut "$_" . "$add_info" . "\n";
     }
+
+    print "done\n";
+
     close PatchListIn;
     close PatchListOut;
 
@@ -396,6 +419,7 @@ sub list_patches_single {
     my $rules_passed = 0;
     my $section_owner = 'unknown';
     my $section_issue = '';
+    my $first_section_found = 0;
     while (<PatchList>) {
 	    # First, process # as the comment delimier only if it is the first non-blank character
 	    # It will be processed one more times after we check for all entries with patch numbers,
@@ -419,7 +443,7 @@ sub list_patches_single {
 
 #		print "Processing patch entry: $_\n";
 	    
-		$unfiltered_patch_list{$patch_name} = scan_patchinfo($tmp, $., $section_issue, $section_owner);
+		$unfiltered_patch_list{$patch_name} = scan_patch_entry($tmp, $., $section_issue, $section_owner);
 
 		if (defined $unfiltered_patch_list{$patch_name}->{'targets'}) {
 		    for $set (@ {$unfiltered_patch_list{$patch_name}->{'targets'}}) {
@@ -467,6 +491,7 @@ sub list_patches_single {
 		next;
 	    }
 
+	    # new section
             if (/\[\s*(.*)\]/) {
                 my $tmp = $1;
                 $tmp =~ s/\s+$//;
@@ -474,6 +499,7 @@ sub list_patches_single {
 		($rules_passed, @targets) = filter_targets($tmp);
 		$section_owner = 'unknown';
 		$section_issue = '';
+		$first_section_found = 1;
                 next;
             }
 
@@ -481,6 +507,8 @@ sub list_patches_single {
             if (/\s*SectionOwner\s*\=\>\s*(.*)/) {
 		$section_owner = $1;
 		$section_owner = 'unknown' unless ($section_owner);
+		($section_owner =~ /[\s,]+\S+/) && die "Syntax error at $apply_list, line $.\n" .
+						       "Note that that only one developer name can be defined by SectionOwner.\n";
 #		print "New section owner => $section_owner\n";
 		next;
 	    }
@@ -489,6 +517,11 @@ sub list_patches_single {
             if (/\s*([_\S]+)\s*=\s*(.*)/) {
 		$options{$1} = $2;
 		print "$1 => $2\n" unless $quiet;
+		# this rule helps to find strange syntax errors
+		($first_section_found) && die "Syntax error at $apply_list, line $.\n" .
+					      "Note that all options must be defined before the first section.\n" .
+					      "You might have misspelled the SectionOwner or SectionIssue tag, so it is not \n" .
+					      "recognized and is taken for a general option.\n";
 		next;
 	    }
 
@@ -734,6 +767,15 @@ sub print_statistic_no_issue ($)
 {
     my $patches = shift;
     
+    # info about patches from the developer point of view
+    # it is a hash, the key is the developer name, the value is:
+    #	  a hash, keys introduce perl-like structure items:
+    #	      'num_patches' 	 	... integer, total number of patches per developer
+    #	      'num_patches_no_issue' 	... integer, number of patches without any issue number per developer
+    #	      'targets' 		... a hash, the key is the target (section) name, the is value:
+    #	          a hash, keys introduce perl-like structure items:
+    #		      'num_patches' 	 	... integer, total number of patches per developer and target
+    #                 'num_patches_no_issue' 	... integer, number of patches without any issue number per developer and target
     my %developers = ();
 
     # find patches without any assigned issue number
@@ -743,38 +785,50 @@ sub print_statistic_no_issue ($)
     
 	my $developer = $patches->{$patch}->{'developer'};
     	unless (defined $developers{$developer}) {
+	    # new entry for a new developer
 	    $developers{$developer} = {};
 	    $developers{$developer}{'num_patches'} = 0;
 	    $developers{$developer}{'num_patches_no_issue'} = 0;
 	    $developers{$developer}{'targets'} = ();
 	}
 
+	# count the patch only once even if it is used in more targets,
+	# so take only the first target
 	my $target = $patches->{$patch}->{'targets'}->[0];
     	unless ($developers{$developer}{'targets'}{$target}) {
+	    # new entry for a new target (section) used by the given developer
 	    $developers{$developer}{'targets'}{$target} = {};
 	    $developers{$developer}{'targets'}{$target}{'num_patches'} = 0;
 	    $developers{$developer}{'targets'}{$target}{'num_patches_no_issue'} = 0;
 	}
 
+	# total number of patches for the given developer and target
 	++$developers{$developer}{'num_patches'};
 	++$developers{$developer}{'targets'}{$target}{'num_patches'};
 	
+	# number of patches without any assigned issue for the given developer and target
 	unless ($patches->{$patch}->{'issue'}) {
 	    ++$developers{$developer}{'num_patches_no_issue'};
 	    ++$developers{$developer}{'targets'}{$target}{'num_patches_no_issue'};
 	}
     }
 
+    # it is an array sorted by total numbers per developer, the value is:
+    #     a hash, keys introduce perl-like structure items:
+    #         'developer' ... string, developer name
+    #         'targets'   ... an array, values are sorted target names
     my @developers_order = ();
-	foreach my $developer (sort { $developers{$b}{'num_patches_no_issue'}/$developers{$b}{'num_patches'} <=> $developers{$a}{'num_patches_no_issue'}/$developers{$a}{'num_patches'}
-	                              ||
-				      $developers{$b}{'num_patches_no_issue'} <=> $developers{$a}{'num_patches_no_issue'}
-				    } keys %developers) {
+    # sort by total numbers per developer
+    foreach my $developer (sort { $developers{$b}{'num_patches_no_issue'}/$developers{$b}{'num_patches'} <=> $developers{$a}{'num_patches_no_issue'}/$developers{$a}{'num_patches'}
+	                          ||
+				  $developers{$b}{'num_patches_no_issue'} <=> $developers{$a}{'num_patches_no_issue'}
+				} keys %developers) {
 	my %developer_targets = ();
 	$developer_targets{'developer'} = $developer;
 	$developer_targets{'targets'} = [];
+	# sort by the numbers per target for each developer
 	foreach my $target (sort { $developers{$developer}{'targets'}{$b}{'num_patches_no_issue'}/$developers{$developer}{'targets'}{$b}{'num_patches'} <=> $developers{$developer}{'targets'}{$a}{'num_patches_no_issue'}/$developers{$developer}{'targets'}{$a}{'num_patches'}
-				   ||
+			           ||
 				   $developers{$developer}{'targets'}{$b}{'num_patches_no_issue'} <=> $developers{$developer}{'targets'}{$a}{'num_patches_no_issue'}
 	                         } keys % {$developers{$developer}{'targets'}}) {
 	    push @{$developer_targets{'targets'}}, $target;
@@ -825,6 +879,14 @@ $statistic = 0;
 $statistic_no_issue = 0;
 @required_opts = ( 'PATCHPATH', 'OLDEST_SUPPORTED' );
 @arguments = ();
+
+# This hash includes information about all patch entries
+# The key is the patch name, the value is:
+#     a pointer to a hash, the key is the target name where the patch belongs, the value is:
+#         a pointer to a hash, keys introduce perl-like structure items:
+#	      'issue'     ... string, the issue number that is connected with the patch
+#	      'developer' ... string, the developer the is responsible for the patch
+#	      'targets'   ... a pointer to an array, the values are names of targets where the patch is used
 %unfiltered_patch_list = ();
 
 
@@ -842,6 +904,7 @@ foreach $a (@ARGV) {
 	    push @distros, $1;
 	} elsif ($a =~ m/--add-developer/) {
 	    $add_developer = 1;
+	    $quiet = 1;
 	} elsif ($a =~ m/--find-unused/) {
 	    $find_unused = 1;
 	} elsif ($a =~ m/--statistic-no-issue/) {
@@ -866,15 +929,12 @@ substr ($patch_dir, 0, 1) eq '/' || die "apply.pl requires absolute paths";
 
 $apply_list = $patch_dir.'/apply';
 
-print "Execute with $opts for distro(s) '" . join( " ", @distros ) . "'\n" unless ($quiet || $add_developer);
+print "Execute with $opts for distro(s) '" . join( " ", @distros ) . "'\n" unless ($quiet);
 
 if ($dry_run || $add_developer || $find_unused || $statistic) {
     $tag = '' if ($find_unused);
 
-    my $quiet_save = $quiet;
-    $quiet = 1 if ($add_developer);
     my @Patches = list_patches (@distros);
-    $quiet = $quiet_save;
 
     if ($add_developer) {
 	add_developer_info();
