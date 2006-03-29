@@ -17,15 +17,96 @@ dummy:
 
 IDLFILES=\
 	Constants.idl \
+	XlApplicationInternational.idl \
+	XlApplyNamesOrder.idl \
+	XlArabicModes.idl \
+	XlArrangeStyle.idl \
+	XlArrowHeadLength.idl \
+	XlArrowHeadStyle.idl \
+	XlArrowHeadWidth.idl \
 	XlAutoFillType.idl \
+	XlAutoFilterOperator.idl \
+	XlAxisCrosses.idl \
+	XlAxisGroup.idl \
+	XlAxisType.idl \
+	XlBackground.idl \
+	XlBarShape.idl \
+	XlBordersIndex.idl \
+	XlBuildInDialog.idl \
+	XlCVError.idl \
+	XlCalculatedMemberType.idl \
 	XlCalculation.idl \
+	XlCalculationInterruptKey.idl \
+	XlCalculationState.idl \
+	XlCategoryType.idl \
+	XlCellInsertionMode.idl \
 	XlCellType.idl \
+	XlChartGallery.idl \
+	XlChartItem.idl \
+	XlChartLocation.idl \
+	XlChartPicturePlacement.idl \
+	XlChartPictureType.idl \
+	XlChartSplitType.idl \
+	XlChartType.idl \
+	XlClipboardFormat.idl \
+	XlCmdType.idl \
+	XlColorIndex.idl \
+	XlColumnDataType.idl \
+	XlCommandUnderlines.idl \
 	XlCommentDisplayMode.idl \
+	XlConsolidationFunction.idl \
+	XlCopyPictureFormat.idl \
+	XlCorruptLoad.idl \
 	XlCreator.idl \
+	XlCubeFieldType.idl \
 	XlCutCopyMode.idl \
+	XlDVAlterStyle.idl \
+	XlDVType.idl \
+	XlDataLabelPosition.idl \
+	XlDataLabelSeparator.idl \
+	XlDataLabelsType.idl \
+	XlDataSeriesDate.idl \
+	XlDataSeriesType.idl \
 	XlDeleteShiftDirection.idl \
 	XlDirection.idl \
+	XlDisplayBlanksAs.idl \
+	XlDisplayDrawingObjects.idl \
+	XlDisplayUnit.idl \
+	XlEditionFormat.idl \
+	XlEditionOptionsOption.idl \
+	XlEditionType.idl \
+	XlEnableCancelKey.idl \
+	XlEnableSelection.idl \
+	XlEndStyleCap.idl \
+	XlErrorBarDirection.idl \
+	XlErrorBarInclude.idl \
+	XlErrorBarType.idl \
+	XlErrorChecks.idl \
+	XlFileAccess.idl \
+	XlFileFormat.idl \
+	XlFillWith.idl \
+	XlFilterAction.idl \
 	XlFindLookIn.idl \
+	XlFormControl.idl \
+	XlFormatConditionOperator.idl \
+	XlFormatConditionType.idl \
+	XlFormulaLabel.idl \
+	XlHAlign.idl \
+	XlHebrewModes.idl \
+	XlHighlightChangesTime.idl \
+	XlHtmlType.idl \
+	XlIMEMode.idl \
+	XlImportDataAs.idl \
+	XlInsertFormatOrigin.idl \
+	XlInsertShiftDirection.idl \
+	XlLayoutFormType.idl \
+	XlLegendPosition.idl \
+	XlLineStyle.idl \
+	XlLink.idl \
+	XlLinkInfo.idl \
+	XlLinkInfoType.idl \
+	XlLinkStatus.idl \
+	XlLinkType.idl \
 	XlListConflict.idl \
 	XlListDataType.idl \
 	XlListObjectSourceType.idl \
