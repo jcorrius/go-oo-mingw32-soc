@@ -215,6 +215,19 @@ namespace configmgr
             return &kMultiStratumServiceInfo;
         }
 
+        //cribbed from localbe
+        const ServiceRegistrationInfo *getMultiStratumServiceInfo() 
+        { 
+            return getRegistrationInfo(&kMultiStratumServiceInfo) ; 
+        }
+
+        uno::Reference<uno::XInterface> SAL_CALL 
+        instantiateMultiStratum(const CreationContext& xContext) 
+        {
+            return *new MultiStratum(xContext) ;
+        }
+
+
     uno::Reference< backend::XLayer > SAL_CALL
     MultiStratum::getLayer( const rtl::OUString& aLayerId, const rtl::OUString& aTimestamp ) 
         throw (backend::BackendAccessException, lang::IllegalArgumentException, uno::RuntimeException)

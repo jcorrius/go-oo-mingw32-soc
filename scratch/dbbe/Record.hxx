@@ -53,6 +53,7 @@ namespace configmgr { namespace dbbe {
    An object representation of the database schema.
    
 */
+#pragma pack(push, 4)
     class Record
     {
     public:
@@ -90,7 +91,8 @@ namespace configmgr { namespace dbbe {
     private:
         size_t SubLayerLen(void);
     };
-    
+#pragma pack(pop)    
+
 }}; //namespace
 
 #endif //CONFIGMGR_DBBE_RECORD_HXX_

@@ -160,7 +160,20 @@ namespace configmgr
             }
             return xResult;
         }
-        
+
+        static const sal_Char * const kSingleStratumImplementation = 
+        "com.sun.star.comp.configuration.backend.DbSingleStratum" ;
+        static const sal_Char * const kBackendService = 
+        "com.sun.star.configuration.backend.SingleStratum" ;
+        static const sal_Char * const kLocalService = 
+        "com.sun.star.configuration.backend.DbSingleStratum" ;
+        static AsciiServiceName kServiceNames [] = { kLocalService, 0, kBackendService, 0 } ;
+        static const ServiceImplementationInfo kSingleStratumServiceInfo = { kSingleStratumImplementation, kServiceNames, kServiceNames + 2 } ;
+
+        const ServiceRegistrationInfo *getSingleStratumServiceInfo() 
+        { 
+            return getRegistrationInfo(&kSingleStratumServiceInfo) ; 
+        }
         
     }; //namespace dbbe
 }; //namespace configmr

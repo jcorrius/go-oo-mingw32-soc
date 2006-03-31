@@ -110,14 +110,10 @@ namespace configmgr
                        lang::IllegalArgumentException, uno::RuntimeException);
             
         private:
-            //
-            //  FIXME
-            //    some sort of replacement-- perhaps a <gasp> helper?
-            //virtual void getLayerDirectories(rtl::OUString& aLayerUrl, rtl::OUString& aSubLayerUrl) const;
             virtual const ServiceImplementationInfo * getServiceInfoData() const;
         } ;
                 
-    } //namespace dbbe
+    }; //namespace dbbe
 }; //namespace configmgr
 
 
