@@ -1,0 +1,142 @@
+Index: cppuhelper/source/shlib.cxx
+===================================================================
+RCS file: /cvs/udk/cppuhelper/source/shlib.cxx,v
+retrieving revision 1.22
+diff -u -p -u -r1.22 shlib.cxx
+--- cppuhelper/source/shlib.cxx	8 Sep 2005 09:29:11 -0000	1.22
++++ cppuhelper/source/shlib.cxx	3 Apr 2006 09:50:34 -0000
+@@ -272,6 +272,114 @@ static OUString makeComponentPath(
+     return out;
+ }
+ 
++#ifdef LINUX
++static bool
++lcl_isWellKnownInternal(const OString &rLibName)
++{
++	// These are loaded at startup ...
++	static const char *pLookup[] = {
++		"behelper.uno.so",
++		"configmgr2.uno.so",
++		"fsstorage.uno.so",
++		"gconfbe1.uno.so",
++		"i18npool.uno.so",
++		"introspection.uno.so",
++		"libanimcore.so",
++		"libevtatt.so",
++		"libfileacc.so",
++		"libgcc3_uno.so",
++		"liblocaledata_en.so",
++		"liblocaledata_es.so",
++		"liblocaledata_euro.so",
++		"liblocaledata_others.so",
++		"libmcnttype.so",
++		"libpackage2.so",
++		"libreg.so.3",
++		"libsrtrs1.so",
++		"libucb1.so",
++		"libucpfile1.so",
++		"libxstor.so",
++		"localebe1.uno.so",
++		"implreg.uno.so",
++		"nestedreg.uno.so",
++		"regtypeprov.uno.so",
++		"security.uno.so",
++		"servicemgr.uno.so",
++		"shlibloader.uno.so",
++		"simplereg.uno.so",
++		"typemgr.uno.so",
++		"reflection.uno.so",
++		"sax.uno.so",
++		"streams.uno.so",
++		"sysmgr1.uno.so",
++		"typeconverter.uno.so",
++		"ucpgvfs1.uno.so",
++		"uriproc.uno.so",
++		NULL
++	};
++
++	// Perhaps do some cunning binary search ?
++	for (int i = 0; pLookup[i] != NULL; i++)
++		if (!rLibName.match (pLookup[i]))
++			return true;
++
++	return false;
++}
++
++// bootstrap.cxx
++OUString const & get_this_libpath();
++
++// Amusing hack to get 40% win on linking / startup speedup:
++// Rational: we load all of OO.o's exception symbols in a signal, global
++// shlib once first of all (RTLD_GLOBAL). This allows us to load all
++// subsequent components RTLD_LOCAL, their vague linkage symbols will
++// resolve in the global scope.
++static bool
++lcl_isInternalLibrary(OUString const & rLibName, OUString const & rPath)
++{
++	if (getenv ("OOO_DISABLE_INTERNAL"))
++		return false;
++
++	bool bIsInternal = false;
++
++	// Is this an internal library ?
++	if (rPath.getLength() > 0 && rPath != get_this_libpath())
++	{
++	//	fprintf (stderr, "Lib path '%s' - not internal!\n",
++	//			 (const sal_Char *)rtl::OUStringToOString(rPath, RTL_TEXTENCODING_ASCII_US));
++		return false;
++	}
++
++	sal_Int32 nUpd = SUPD;
++	OUString aIntSuffix = OUString::valueOf(nUpd) + OUSTR("li.so");
++	if (rLibName.match (aIntSuffix))
++		bIsInternal = true;
++
++	if (!bIsInternal)
++		bIsInternal = lcl_isWellKnownInternal(
++			OUStringToOString(rLibName, RTL_TEXTENCODING_UTF8));
++
++	// If internal - load the exception type library RTLD_GLOBAL first
++	static bool bHaveLoadedExcepts = false;
++	if (bIsInternal && !bHaveLoadedExcepts)
++	{
++		rtl::OUString aExceptName = rtl::OUString::createFromAscii("libexlink") + aIntSuffix;
++		oslModule nExceptLib = osl_loadModule(aExceptName.pData, 
++											  SAL_LOADMODULE_LAZY | SAL_LOADMODULE_GLOBAL);
++		if (nExceptLib != NULL)
++			bHaveLoadedExcepts = true;
++		else
++			bIsInternal = false;
++	}
++
++//	fprintf (stderr, "Lib name '%s' %d %d\n",
++//		 (const sal_Char *)rtl::OUStringToOString(rLibName, RTL_TEXTENCODING_ASCII_US),
++//		 bIsInternal, bHaveLoadedExcepts);
++
++	return bIsInternal;
++}
++#endif
++
+ //==============================================================================
+ Reference< XInterface > SAL_CALL loadSharedLibComponentFactory(
+     OUString const & rLibName, OUString const & rPath,
+@@ -288,9 +396,17 @@ Reference< XInterface > SAL_CALL loadSha
+             aModulePath,
+             Reference< XInterface >() );
+     }
++
++	sal_Int32 nFlags = SAL_LOADMODULE_LAZY;
++#ifdef LINUX
++	if (!lcl_isInternalLibrary (rLibName, rPath))
++		nFlags |= SAL_LOADMODULE_GLOBAL;
++//  else - faster local only binding
++#else
++	nFlags |= SAL_LOADMODULE_GLOBAL;
++#endif
+     
+-    oslModule lib = osl_loadModule(
+-        aModulePath.pData, SAL_LOADMODULE_LAZY | SAL_LOADMODULE_GLOBAL );
++    oslModule lib = osl_loadModule(aModulePath.pData, nFlags);
+     if (! lib)
+     {
+         throw loader::CannotActivateFactoryException(
