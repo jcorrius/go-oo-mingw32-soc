@@ -31,6 +31,7 @@
 #include <string>
 #include <iterator>
 #include <iostream>
+#include <vector>
 
 namespace {
 
@@ -50,6 +51,14 @@ void printElements( const Container& cn, const char* sep = " " )
 	using namespace ::std;
 	copy( cn.begin(), cn.end(), ostream_iterator<typename Container::value_type>( cout, sep ) );
 	cout << endl;
+}
+
+template<typename Container, typename Type>
+std::vector<Type> toVector( const Container& cn )
+{
+	std::vector<Type> v( cn.size() );
+	copy( cn.begin(), cn.end(), back_inserter(v) );
+	return v;
 }
 
 }

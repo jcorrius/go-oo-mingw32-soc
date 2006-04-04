@@ -65,7 +65,7 @@ struct VarBounds
 	AttrBound Lower;
 };
 
-typedef map<unsigned long,VarBounds> VarBoundMap;
+typedef map<size_t,VarBounds> VarBoundMap;
 
 class ModelImpl
 {
@@ -81,10 +81,10 @@ public:
 	void setCostVector( const std::vector<double>& );
 	void deleteCostVectorElements( const std::vector<size_t>& );
 
-	AttrBound getVarBoundAttribute( unsigned long, Bound ) const;
-	double    getVarBound( unsigned long, Bound ) const;
-	void      setVarBound( unsigned long, Bound, double );
-	bool  isVarBounded( unsigned long, Bound ) const;
+	AttrBound getVarBoundAttribute( size_t, Bound ) const;
+	double    getVarBound( size_t, Bound ) const;
+	void      setVarBound( size_t, Bound, double );
+	bool  isVarBounded( size_t, Bound ) const;
 
 	Goal getGoal() const { return m_eGoal; }
 	void setGoal( Goal e ) { m_eGoal = e; }
@@ -107,7 +107,7 @@ public:
 	double getRhsValue( size_t ) const;
 	void setRhsValue( size_t, double );
 	vector<Equality> getEqualityVector() const { return m_eEqualities; }
-	Equality getEqualityByRowId( unsigned long i ) const { return m_eEqualities.at( i ); }
+	Equality getEqualityByRowId( size_t i ) const { return m_eEqualities.at( i ); }
 	void addConstraint( const std::vector<double>&, Equality, double );
 	void setStandardConstraintMatrix( const Matrix&, const Matrix& );
 	void deleteConstraintMatrixColumns( const std::vector<size_t>& );
@@ -122,7 +122,7 @@ private:
 	Matrix m_mxConstraint;
 	Matrix m_mxRHS;		// column vector
 
-	map<unsigned long, VarBounds> m_aVarBoundMap;
+	map<size_t, VarBounds> m_aVarBoundMap;
 
 	vector<Equality> m_eEqualities;
 
@@ -198,7 +198,7 @@ void ModelImpl::deleteCostVectorElements( const std::vector<size_t>& cn )
 	m_mxCost.deleteColumns( cn );
 }
 
-AttrBound ModelImpl::getVarBoundAttribute( unsigned long i, Bound e ) const
+AttrBound ModelImpl::getVarBoundAttribute( size_t i, Bound e ) const
 {
 	VarBoundMap::const_iterator pos = m_aVarBoundMap.find( i );
 	AttrBound ab;
@@ -225,7 +225,7 @@ AttrBound ModelImpl::getVarBoundAttribute( unsigned long i, Bound e ) const
 	return ab;
 }
 
-double ModelImpl::getVarBound( unsigned long i, Bound e ) const
+double ModelImpl::getVarBound( size_t i, Bound e ) const
 {
 	AttrBound ab = getVarBoundAttribute( i, e );
 	if ( ab.Enabled )
@@ -234,7 +234,7 @@ double ModelImpl::getVarBound( unsigned long i, Bound e ) const
 		throw NonBoundingException();
 }
 
-void ModelImpl::setVarBound( unsigned long i, Bound e, double fBound )
+void ModelImpl::setVarBound( size_t i, Bound e, double fBound )
 {
 	VarBoundMap::iterator pos = m_aVarBoundMap.find( i );
 	if ( pos == m_aVarBoundMap.end() )
@@ -264,7 +264,7 @@ void ModelImpl::setVarBound( unsigned long i, Bound e, double fBound )
 		default:
 			OSL_ASSERT( !"unknown boundary" );
 		}
-		m_aVarBoundMap.insert( map<unsigned long,VarBounds>::value_type( i, vb ) );
+		m_aVarBoundMap.insert( map<size_t,VarBounds>::value_type( i, vb ) );
 	}
 	else
 	{
@@ -287,7 +287,7 @@ void ModelImpl::setVarBound( unsigned long i, Bound e, double fBound )
 	}
 }
 
-bool ModelImpl::isVarBounded( unsigned long i, Bound e ) const
+bool ModelImpl::isVarBounded( size_t i, Bound e ) const
 {
 	AttrBound ab = getVarBoundAttribute( i, e );
 	return ab.Enabled;
@@ -310,11 +310,11 @@ void ModelImpl::setRhsValue( size_t nId, double fVal )
 
 void ModelImpl::addConstraint( const std::vector<double>& aConst, Equality eEqual, double fRHS )
 {
-	unsigned long nRowId = m_mxConstraint.rows();
+	size_t nRowId = m_mxConstraint.rows();
 	vector<double>::const_iterator pos;
 	for ( pos = aConst.begin(); pos != aConst.end(); ++pos )
 	{
-		unsigned long nColId = distance( aConst.begin(), pos );
+		size_t nColId = distance( aConst.begin(), pos );
 		m_mxConstraint( nRowId, nColId ) = *pos;
 	}
 	m_eEqualities.push_back( eEqual );
@@ -328,10 +328,10 @@ void ModelImpl::setStandardConstraintMatrix( const Matrix& A, const Matrix& B )
 	if ( A.rows() != B.rows() )
 		throw MatrixSizeMismatch();
 	
-	for ( unsigned long i = 0; i < A.rows(); ++i )
+	for ( size_t i = 0; i < A.rows(); ++i )
 	{
 		vector<double> aConst;
-		for ( unsigned long j = 0; j < A.cols(); ++j )
+		for ( size_t j = 0; j < A.cols(); ++j )
 			aConst.push_back( A( i, j ) );
 		addConstraint( aConst, EQUAL, B( i, 0 ) );
 	}
@@ -345,7 +345,7 @@ void ModelImpl::deleteConstraintMatrixColumns( const std::vector<size_t>& cn )
 void ModelImpl::print() const
 {
 	using namespace ::boost::numeric::ublas;
-	unsigned long nColSpace = 2;
+	size_t nColSpace = 2;
 	string sX = "x_";
 	cout << endl << repeatString( "-", 70 ) << endl;
 	string sGoal;
@@ -360,7 +360,7 @@ void ModelImpl::print() const
 	ostringstream osLine;
 	osLine << "Objective: ";
 	bool bFirst = true;
-	for ( unsigned long j = 0; j < m_mxCost.cols(); ++j )
+	for ( size_t j = 0; j < m_mxCost.cols(); ++j )
 	{
 		double fVal = m_mxCost( 0, j );
 		if ( fVal != 0.0 )
@@ -386,10 +386,10 @@ void ModelImpl::print() const
 	matrix< string > mRHS = m_mxRHS.getDisplayElements( 0, nColSpace, false );
 	
 	// Print constraints
-	for ( unsigned long i = 0; i < m_mxConstraint.rows(); ++i )
+	for ( size_t i = 0; i < m_mxConstraint.rows(); ++i )
 	{
 		osLine.str( "" );
-		for ( unsigned long j = 0; j < m_mxConstraint.cols(); ++j )
+		for ( size_t j = 0; j < m_mxConstraint.cols(); ++j )
 		{
 			string s = mElements( i, j );
 			double f = m_mxConstraint( i, j );
@@ -432,7 +432,7 @@ void ModelImpl::print() const
 	// Display variable boundaries.
 	Matrix mxCost = getCostVector(); // row vector
 	osLine.str( "" );
-	for ( unsigned long i = 0; i < mxCost.cols(); ++i )
+	for ( size_t i = 0; i < mxCost.cols(); ++i )
 	{
 		osLine << "x_" << i << ": ";
 		bool bLower = isVarBounded( i, BOUND_LOWER );
@@ -532,17 +532,17 @@ void Model::deleteCostVectorElements( const std::vector<size_t>& cnColIds )
 /** Beware that the caller is responsible for making sure that the specified 
 	boundary exists by calling isVarBounded(...) beforehand.
  */
-double Model::getVarBound( unsigned long i, Bound e ) const
+double Model::getVarBound( size_t i, Bound e ) const
 {
 	return m_pImpl->getVarBound( i, e );
 }
 
-void Model::setVarBound( unsigned long i, Bound e, double fValue )
+void Model::setVarBound( size_t i, Bound e, double fValue )
 {
 	m_pImpl->setVarBound( i, e, fValue );
 }
 
-bool Model::isVarBounded( unsigned long i, Bound e ) const
+bool Model::isVarBounded( size_t i, Bound e ) const
 {
 	return m_pImpl->isVarBounded( i, e );
 }
@@ -627,7 +627,7 @@ std::vector<Equality> Model::getEqualityVector() const
 	return m_pImpl->getEqualityVector();
 }
 
-Equality Model::getEqualityByRowId( unsigned long i ) const
+Equality Model::getEqualityByRowId( size_t i ) const
 {
 	return m_pImpl->getEqualityByRowId( i );
 }

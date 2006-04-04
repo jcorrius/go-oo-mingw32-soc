@@ -44,12 +44,18 @@ enum Equality
 	LESS_THAN_EQUAL
 };
 
+/**
+ * Upper or lower boundary for a decision variable.
+ */
 enum Bound
 {
 	BOUND_UPPER,
 	BOUND_LOWER
 };
 
+/**
+ * Goal of an optimization model.
+ */
 enum Goal
 {
 	GOAL_MINIMIZE,
