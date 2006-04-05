@@ -1182,15 +1182,13 @@ bool BoundedRevisedSimplexImpl::iterate()
 	return false;
 }
 
-/** As the function name suggests, this method determines an entering non-basic variable
-	if any.  If there is no entering non-basic, then that means an optimum solution is 
-	found, and it returns true.  Otherwise it returns false.
+/**
+ * This method determines an entering non-basic (NB) variable if any. If
+ * there is no entering non-basic, then that means an optimum solution is
+ * found, and it returns true.  Otherwise it returns false.
  */
 bool BoundedRevisedSimplexImpl::queryEnteringNBVar( EnterBasicVar& rEnterVar )
 {
-	//-------------------------------------------------------------------------
-	// Determine the entering non-basic variable
-
 	SizeTypeContainer   aEnterBasicVarId;
 	vector<EnterBasicVar> aEnterBasicVars;
 
@@ -1198,18 +1196,34 @@ bool BoundedRevisedSimplexImpl::queryEnteringNBVar( EnterBasicVar& rEnterVar )
 			itrBeg = m_aNonBasicVarId.begin(),
 			itrEnd = m_aNonBasicVarId.end();
 
+	// Go though all existing non-basic variables and build a list
+	// of them with bound type information.
 	for ( itr = itrBeg; itr != itrEnd; ++itr )
 	{
+		size_t nId = *itr;	// non-basic variable ID
+
+		// Make sure the variable is not constant equilavent.
+		if ( m_pModel->isVarBounded( nId, BOUND_LOWER ) )
+		{
+			double fBoundVal = m_pModel->getVarBound( nId, BOUND_LOWER );
+			if ( m_pModel->isVarBounded( nId, BOUND_UPPER ) && 
+				 fBoundVal == m_pModel->getVarBound( nId, BOUND_UPPER ) )
+			{
+				Debug( "queryEnteringNBVar: Constant equivalent variable found" );
+				continue;
+			}
+		}
+
 		EnterBasicVar aVar;
-		size_t id = *itr;
-		aEnterBasicVarId.push_back( id );
-		aVar.Id = id;
-		size_t i = distance( itrBeg, itr );
-		aVar.BoundType = m_aNonBasicVarBoundType.at( i );
+		aEnterBasicVarId.push_back( nId );
+		aVar.Id = nId;
+
+		aVar.BoundType = m_aNonBasicVarBoundType.at( 
+				distance( itrBeg, itr ) );
 		
 		// Evaluate pricing
-		aVar.Price = m_mxC( 0, id ) - 
-				( m_mxPriceVector*m_mxA.getColumn( id ) ).operator()( 0, 0 );
+		aVar.Price = m_mxC( 0, nId ) - 
+				( m_mxPriceVector*m_mxA.getColumn( nId ) ).operator()( 0, 0 );
 
 		if ( getModel()->getVerbose() )
 			cout << "c(" << aVar.Id << ") = " << aVar.Price << endl;
@@ -1246,8 +1260,10 @@ bool BoundedRevisedSimplexImpl::queryEnteringNBVar( EnterBasicVar& rEnterVar )
 	return false;
 }
 
-/** This methods calculates, given an entering non-basic variable, a dX, lambda, and leaving
-	non-basic variable.  It then calculates a new X from them.
+/**
+ * This methods calculates, given an entering non-basic variable, a dX,
+ * lambda, and leaving non-basic variable.  It then calculates a new X from
+ * them.
  */
 void BoundedRevisedSimplexImpl::calculateNewX( const EnterBasicVar& aEnterVar,
 		size_t& nLeaveVarId, Matrix& mxDX )
@@ -1442,7 +1458,6 @@ bool BoundedRevisedSimplexImpl::findInitialSolution()
  */
 bool BoundedRevisedSimplexImpl::buildInitialVars( vector<VarBoundary>& cnNonBasic )
 {
-	Debug( "-------------------------------------------------------" );
 	Debug( "buildInitialVars" );
 	Debug( "mxA" );
 	m_mxA.print();
@@ -1501,6 +1516,10 @@ bool BoundedRevisedSimplexImpl::buildInitialVars( vector<VarBoundary>& cnNonBasi
 	// Transfer basic variables into initial X vector.  For each variable,
 	// make sure that the value satisfies its boundary condition if it's
 	// bounded.
+
+	// TODO: Find a way to back-track if an initial basic variable does not
+	// satisfy its boundary condition.
+
 	std::list<size_t>::const_iterator itrLt, 
 		itrLtBeg = cnBasicId.begin(), itrLtEnd = cnBasicId.end();
 	for ( itrLt = itrLtBeg; itrLt != itrLtEnd; ++itrLt )
@@ -1509,9 +1528,9 @@ bool BoundedRevisedSimplexImpl::buildInitialVars( vector<VarBoundary>& cnNonBasi
 		double fBaseVal = mxBaseX( distance( itrLtBeg, itrLt ), 0 );
 
 		// check lower boundary condition
-		if ( getModel()->isVarBounded( nVarId, BOUND_LOWER ) )
+		if ( m_pModel->isVarBounded( nVarId, BOUND_LOWER ) )
 		{
-			double fBound = getModel()->getVarBound( nVarId, BOUND_LOWER );
+			double fBound = m_pModel->getVarBound( nVarId, BOUND_LOWER );
 			if ( fBaseVal < fBound )
 			{
 				cout << nVarId << " basic variable (" << fBaseVal << ") < lower bound (" 
@@ -1521,9 +1540,9 @@ bool BoundedRevisedSimplexImpl::buildInitialVars( vector<VarBoundary>& cnNonBasi
 		}
 
 		// check upper boundary condition
-		if ( getModel()->isVarBounded( nVarId, BOUND_UPPER ) )
+		if ( m_pModel->isVarBounded( nVarId, BOUND_UPPER ) )
 		{
-			double fBound = getModel()->getVarBound( nVarId, BOUND_UPPER );
+			double fBound = m_pModel->getVarBound( nVarId, BOUND_UPPER );
 			if ( fBaseVal > fBound )
 			{
 				cout << nVarId << " basic variable (" << fBaseVal << ") > upper bound (" 
@@ -1543,7 +1562,6 @@ bool BoundedRevisedSimplexImpl::buildInitialVars( vector<VarBoundary>& cnNonBasi
 	swap( m_aNonBasicVarId, cnNBColId );
 	swap( m_aNonBasicVarBoundType, cnNBBoundType );
 
-	Debug( "-------------------------------------------------------" );
 	return true;
 }
 
@@ -1584,7 +1602,7 @@ bool BoundedRevisedSimplexImpl::iterateVarBoundary( size_t nIdx, size_t nUpper,
 			if ( m_pModel->getVerbose() )
 			{
 				cout << nIdx << " bounded at ";
-				if ( i == 0 )
+				if ( e[i] == BOUND_LOWER )
 					cout << "lower end";
 				else
 					cout <<	"upper end";
