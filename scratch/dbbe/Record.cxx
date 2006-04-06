@@ -52,6 +52,10 @@
 #include <osl/endian.h>
 #endif
 
+#ifndef _OSL_FILE_HXX_
+#include <osl/file.hxx>
+#endif//_OSL_FILE_HXX_
+
 namespace configmgr { namespace dbbe {
     
     size_t Record::SubLayerLen(void)
@@ -102,7 +106,7 @@ namespace configmgr { namespace dbbe {
         OSL_SWAPDWORD(date);        
     }
 
-    std::vector<sal_Char*> Record::listSubLayers(void)
+    std::vector<sal_Char*> Record::listSubLayers(void) const
     {
         std::vector<sal_Char*> ret(numSubLayers);
         
@@ -117,6 +121,57 @@ namespace configmgr { namespace dbbe {
             i--;
         }        
         return ret;
+    }
+
+    void Record::setSubLayers(std::vector<sal_Char*>& aSubLayers)
+    {
+        std::vector<sal_Char*>::iterator it;
+        size_t len= 0;
+        for (it= aSubLayers.begin(); it != aSubLayers.end(); it++)
+        {
+            OSL_ASSERT(*it);
+            len+= strlen(*it) + 1; //one for the null
+        }
+        if (pSubLayers)
+            rtl_freeMemory(pSubLayers);
+        pSubLayers= static_cast<sal_Char*>(rtl_allocateMemory(len));
+        OSL_ASSERT(pSubLayers);
+        sal_Char* pString= pSubLayers;
+        for (it= aSubLayers.begin(); it != aSubLayers.end(); it++)
+        {
+            size_t len= strlen(*it);
+            rtl_copyMemory(pString, *it, len);
+            pString+= len + 1;
+            *pString= 0;
+            pString++;
+        }
+    }
+
+    void Record::setBlobFromFile(const rtl::OUString &aFileURL)
+    {
+        using namespace osl;
+
+        OSL_ASSERT(aFileURL.getLength()); //empty file URLs not allowed
+        
+        //get the date and type
+        DirectoryItem aItem;
+        OSL_ASSERT(DirectoryItem::get(aFileURL, aItem) == DirectoryItem::RC::E_None);
+        FileStatus aFileStatus(FileStatusMask_ModifyTime || FileStatusMask_Type);
+        OSL_ASSERT(aItem.getFileStatus(aFileStatus) == DirectoryItem::RC::E_None);
+        OSL_ASSERT(aFileStatus.getFileType() == FileStatus::Type::Regular);
+        OSL_ASSERT(aFileStatus.isValid(FileStatusMask_ModifyTime));
+        TimeValue aTimeValue= aFileStatus.getModifyTime();
+        date= aTimeValue.Seconds;
+        
+        //get the data and time
+        File aFile(aFileURL);
+        OSL_ASSERT(aFile.getSize(blobSize) == File::RC::E_None);
+        pBlob= static_cast<sal_Char*>(rtl_allocateMemory(blobSize));
+        OSL_ASSERT(pBlob);
+        sal_uInt64 aBytesToRead= blobSize;
+        while (aBytesToRead)
+            OSL_ASSERT(aFile.read(static_cast<void*>(pBlob), 
+                                  aBytesToRead, aBytesToRead) == File::RC::E_None);
     }
 
 }}; //namespace

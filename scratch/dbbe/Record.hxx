@@ -43,6 +43,10 @@
 #include <osl/endian.h>
 #endif//_OSL_ENDIAN_H_
 
+#ifndef _RTL_USTRING_HXX_
+#include <rtl/ustring.hxx>
+#endif//_RTL_USTRING_HXX_
+
 #include <db_cxx.h>
 
 #include <vector>
@@ -57,10 +61,10 @@ namespace configmgr { namespace dbbe {
     class Record
     {
     public:
-        sal_Int64 date;          /** Unix Epoch */
-        sal_uInt32 blobSize;     /** XML Blob Size */
+        sal_Int64  date;          /** Unix Epoch */
+        sal_uInt32 blobSize;      /** XML Blob Size */
         sal_uInt32 numSubLayers;
-        sal_Char   *pSubLayers;  /** ARGV style list */
+        sal_Char   *pSubLayers;   /** ARGV style list */
         sal_Char   *pBlob;        /** XML Blob */
         
         
@@ -86,7 +90,21 @@ namespace configmgr { namespace dbbe {
            
            @return a vector containing sal_Char*'s
          */
-        std::vector<sal_Char*> listSubLayers(void);
+        std::vector<sal_Char*> listSubLayers(void) const;
+
+        /**
+           Set the sublayers that this record has
+           
+           @param aSubLayers   vector<sal_Char*> of sublayers
+         */
+        void setSubLayers(std::vector<sal_Char*>& aSubLayers);
+
+        /**
+           Set the blobsize, date, and blob data
+           
+           @param aFileURL   the URL of the blob data
+         */
+        void setBlobFromFile(const rtl::OUString &aFileURL);
         
     private:
         size_t SubLayerLen(void);
