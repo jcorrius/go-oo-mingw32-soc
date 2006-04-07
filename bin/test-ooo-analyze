@@ -5,41 +5,72 @@
 
 use strict;
 
-my $verbose = 0;
+# information about tests read from .res files
+# a hashs, key is the test name (res file name), value is:
+#   a hash, the keys define a "perl like structure":
+#       'RunCount'   ... integer, defines how many times the test was started
+#       'TestCase'  ... a hash, key is the test case name, value is:
+#           a hash: keys define a "perl like structure":
+#	       'RunCount'    ...  integer
+#              'EntryType'   ...  a hash, keys define a "perl like structure":
+#                  'Error'       ...  a hash, keys define a "perl like structure":   
+#	           'Warning'     ...  -------- // -------
+#	           'Message'     ...  -------- // -------
+#	           'Assertion'   ...  -------- // -------
+#                  'QAError'     ...  -------- // -------
+#	           'AssertStack' ...  -------- // -------
+#	           'CallStack'   ...  -------- // -------
+#	               'Count'    ... integer
+#		       'EntryByID'  ...  a hash, the key is the entryId, value is
+#		           array of entry messages
+my %resData1 = ();
+my %resData2 = ();
 
-# indexes for the various types of result file entries
-my @indexes = (0,1,2,3,4,5,6,7,8);
-# indexed by types 0,1,2,3
-my @totalCounts;
-# array of hashes of hashes of arrays;
-# 1st index is message type 0,1,2,3;
-# 2nd index is resource file name
-# 3rd index is problem type
-# the value is the message
-my @logMessages;
-# array of hashes:
-# 1st index is message type 0,1,2,3;
-# 2nd index is problem type
-my @logProblems;
+# User selected sorting order is configured via the following two global
+#variables:
+my $sortStatNumDown = 1;		# numeric sorting order
+my @sortStatColumnsRequest = ();	# might be used to redefine default sorting to do it by another columns
 
-foreach my $i (@indexes) {
-    $totalCounts[$i] = 0;
-    $logMessages[$i] = {};
-    $logProblems[$i] = {};
-}
+# this global pointer is used to pass the selected sortStatColumns table to
+# the function SortStat
+my $sortStatColumnsp = 0;
 
-# User readable strigs for the various results file entries
-my @typeMessages = (
-	"Runned",
-	"Test Cases",
+# list of all entries
+# it is used to translate integer to string
+my @EntryTypeName = 
+(
+	"TestScript",
+	"TestCase",
 	"Error",
-	"Call Stack",
+	"CallStack",
 	"Message",
 	"Warning",
 	"Assertion",
-	"QA Error",
-	"Assert Stack"
-	);
+	"QAError",
+	"AssertStack"
+);
+
+# list of entries that can be part of a test case
+my @TestCaseEntries =
+(
+	"Error",
+	"CallStack",
+	"Message",
+	"Warning",
+	"Assertion",
+	"QAError",
+	"AssertStack"
+);
+
+# list of entries that are part of a test case and are important for
+# the Total counts statistic
+my @SummaryTestCaseEntries =
+(
+	"Error",
+	"Warning",
+	"QAError"
+);
+
 
 # FIXME, could this be automatized?
 my %knownIDs = (
@@ -64,220 +95,1096 @@ my %knownIDs = (
 	'22050'  => 'There is no No button at No',
 	);
 
-sub AnalyzeResFile($) {
-    my $resFile = shift;
+###################################################################
+# subroutines that are used to load the data from .res files to
+# an internal structure
+
+sub AnalyzeResFile($$) {
+
+    my ($resDatap, $resFile) = @_;
     
     open (RES_FILE, $resFile) || die "can't open $resFile for reading: $!\n";
 
     my $resFileName = $resFile;
     $resFileName =~ s/.*\///;
+    $resFileName =~ s/.res$//;
 
+#    printf "Analyzing $resFile ...\n";
 
-    printf "Analyzing $resFile ...\n" if ($verbose);
+    unless ($resDatap->{$resFileName}) {
+	$resDatap->{$resFileName} = {};
+	$resDatap->{$resFileName}{'RunCount'} = 0;
+	$resDatap->{$resFileName}{'TestCase'} = {};
+    }
 
     my $knownFileFormat = 0;
+    my $testCase = 'unknown';
 
     while (my $line = <RES_FILE>) {
-        chomp $line;              
+        chomp $line;
     
 	if ($line =~ /^File Format Version: 3/) {
 	    $knownFileFormat=1;
 	    next;
 	}
 	
-	if ($line =~ /^([0-9]);([^;]*);([^;]*);([^;]*);([^;]*);(.*)/) {
+	if ($line =~ /^([0-9]);([^;]*);([^;]*);([^;]*);([^;]*);\s*\"([^\"]*)\"/) {
 	    my $type = "$1";
 	    my $message = "$6";
 	
-	    # total counts
-	    $totalCounts[$type] += 1;
-	    
-	    # quess problem type
-	    my $problem = "unknown";
-#	    print "$message\n";
-	    if ($message =~ /\%ResId=([0-9]*)/) {
-		$problem = "$1";
+	    if ($type == 0) {
+		# test runned
+		++$resDatap->{$resFileName}{'RunCount'};
+		$testCase = 'unknown';
+	    } elsif ($type == 1) {
+		# test case runned
+		if ("$message" eq '%ResId=20002%') {
+		    $testCase = "Reading_the_files";
+		} elsif ("$message" eq '%ResId=21001%') {
+		    $testCase = "Outside_of_testcase";
+		} elsif ("$message" eq '') {
+		    # ugly entry, we want to ingnore it at all
+		    next;
+		} else {
+		    $testCase = $message;
+		    $testCase =~ s/^([^\(]+)\(.*$/$1/;	# bin parameters
+		}
+
+		unless ($resDatap->{$resFileName}{'TestCase'}{$testCase}) {
+		    $resDatap->{$resFileName}{'TestCase'}{$testCase} = {};
+
+		    $resDatap->{$resFileName}{'TestCase'}{$testCase}{'RunCount'} = 0;
+		    $resDatap->{$resFileName}{'TestCase'}{$testCase}{'EntryType'} = {};
+		    for my $entryTypeName ( @TestCaseEntries ) {
+			$resDatap->{$resFileName}{'TestCase'}{$testCase}{'EntryType'}{$entryTypeName} = {};
+			$resDatap->{$resFileName}{'TestCase'}{$testCase}{'EntryType'}{$entryTypeName}{'Count'} = 0;
+			$resDatap->{$resFileName}{'TestCase'}{$testCase}{'EntryType'}{$entryTypeName}{'EntryByID'} = {};
+		    }
+		}
+		
+		++$resDatap->{$resFileName}{'TestCase'}{$testCase}{'RunCount'};
+#		print "TestCase: $testCase\n";
+	    } elsif ( $type > 1  &&  $type <= 8 ) {
+		# a message a part of a test case
+		my $entryTypeName = $EntryTypeName[$type];
+
+		# quess problem type
+		my $entryID = "unknown";
+#	    	print "$message\n";
+		if ($message =~ /\%ResId=([0-9]*)/) {
+		    $entryID = "$1";
+		}
+		
+		# skip some special entries
+		if ($type == 5) {
+		    # skip warnings about number of warnings, erros, etc.
+		    if ( $entryID == 20014 || 
+		         $entryID == 20016 ||
+			 $entryID == 20023 ) {
+			next;
+		    }
+		}
+		
+		unless ($resDatap->{$resFileName}{'TestCase'}{$testCase}{'EntryType'}{$entryTypeName}{'EntryByID'}{$entryID}) {
+		    $resDatap->{$resFileName}{'TestCase'}{$testCase}{'EntryType'}{$entryTypeName}{'EntryByID'}{$entryID} = [];
+		}
+		push @{ $resDatap->{$resFileName}{'TestCase'}{$testCase}{'EntryType'}{$entryTypeName}{'EntryByID'}{$entryID} }, $message;
+
+		++$resDatap->{$resFileName}{'TestCase'}{$testCase}{'EntryType'}{$entryTypeName}{'Count'};
+	    } else {
+		die "Error: $resFile:$.: unknown entry\n";
 	    }
-
-	    $logProblems[$type]{$problem} = 1;
-
-	    $logMessages[$type]{$resFileName} = {} unless (defined $logMessages[$type]{$resFileName});
-	    $logMessages[$type]{$resFileName}{$problem} = [] unless (defined $logMessages[$type]{$resFileName}{$problem});
-	    push @{ $logMessages[$type]{$resFileName}{$problem} }, "$message";
-
-	    next;
+	} else {
+	    die "Error: $resFile:$.: broken file format\n";
 	}
-
-	die "Error: $resFile:$.: broken file format\n";
     }
+
+    close (RES_FILE);
 
     ($knownFileFormat) || die "Error: $resFile: Unknown file format\n";
 }
 
-# various statistics
-
-sub StatGlobal() {
-    print "=====================================================\n";
-    print "All tests summary\n";
-    print "=====================================================\n";
-
-    foreach my $i (@indexes) {
-	printf STDOUT "%-15s: $totalCounts[$i]\n", $typeMessages[$i];
+sub AnalyzeDir($$) {
+    my ($resDatap, $resDir) = @_;
+    my $resDirh;                                                                                                                              
+    
+    opendir($resDirh, $resDir) || die "Can't open $resDir: $!";
+    while (my $resFile = readdir ($resDirh)) {
+        $resFile =~ /^\./ && next;     # hidden
+        $resFile =~ /\.res$/ || next;  # non-res
+	
+#        print "Analyzing $resDir/$resFile ...\n";
+	AnalyzeResFile($resDatap, "$resDir/$resFile");
     }
-    print "\n\n\n";
-
+    closedir($resDirh);
 }
 
-sub StatOfTypeByFiles($) {
-    my $type = shift;
-    
-    print "Numbers of $typeMessages[$type] in files:\n";
-    print "------------------------------------------\n";
+########################################################################
+# The following subroutines counts/extracts a specific information
+# that is necessary in more types of statistics
 
-    foreach my $resFileName (keys %{$logMessages[$type]}) {
-	my $count = 0;
-	foreach my $problem (keys %{$logMessages[$type]{$resFileName}}) {
-	    $count += scalar @{$logMessages[$type]{$resFileName}{$problem}};
-	}
-        printf "$resFileName ($count)\n";
+sub CountTestScripts($)
+{
+    my ($resDatap) = @_;
+    my $count = 0;
+    
+    for my $testScript (keys %{$resDatap}) {
+	$count += $resDatap->{$testScript}{'RunCount'};
     }
     
-    print "\n\n";
+    return $count;
 }
 
-sub MessagesOfTypeByFiles($) {
-    my $type = shift;
-    
-    print "Messages with $typeMessages[$type] in files:\n";
-    print "---------------------------------------------------\n";
+sub CountTestCases($)
+{
+    my ($resDatap, $resFile) = @_;
+    my $count = 0;
 
-    foreach my $resFileName (keys %{$logMessages[$type]}) {
-	foreach my $problem (keys %{$logMessages[$type]{$resFileName}}) {
-	    foreach my $msg (@{ $logMessages[$type]{$resFileName}{$problem} }) {
-    		printf "$resFileName: $msg\n";
-	    }
+    for my $testScript (keys %{$resDatap}) {
+        for my $testCase (keys % {$resDatap->{$testScript}{'TestCase'}} ) {
+	    $count += $resDatap->{$testScript}{'TestCase'}{$testCase}{'RunCount'};
 	}
     }
     
-    print "\n\n";
+    return $count;
 }
 
-sub StatOfTypeByProblems($) {
-    my $type = shift;
+sub CountEntriesForEntry($$) {
+    my ($resDatap, $entryTypeName) = @_;
     
-    print "Numbers of particular $typeMessages[$type]:\n";
-    print "--------------------------------------------------------\n";
-
-    # we would want to sort results before printing
-    my @result;
-    foreach my $problem (keys %{$logProblems[$type]}) {
-	my $count = 0;
-        foreach my $resFileName (keys %{$logMessages[$type]}) {
-	    if (defined $logMessages[$type]{$resFileName}{$problem}) {
-		$count += scalar @{$logMessages[$type]{$resFileName}{$problem}};
-	    }
-	}
-
-	push @result, [$problem,$count];
+    unless (grep /^$entryTypeName$/i, @TestCaseEntries) {
+	die "Internal error: Function StatEntryIDsForEntry called with wrong parameter.\n" .
+	    "Should use of: @TestCaseEntries\n";
     }
-
-#    foreach my $resRef ( sort { $a->[1] <=> $b->[1] } @result ) {
-    foreach my $resRef ( sort { $a->[0] <=> $b->[0] } @result ) {
-	if (defined $knownIDs{$resRef->[0]}) {
-    	    printf "%03d: problem id $resRef->[0]: $knownIDs{$resRef->[0]}\n", $resRef->[1];
-	} else {
-	    printf "%03d: problem id $resRef->[0]:\n", $resRef->[1];
-	}
-    }	
-    
-    print "\n\n";
-}
-
-sub StatOfTypeAndProblemByFiles($$) {
-    my $type = shift;
-    my $problem = shift;
-    
-    print "Numbers of the $typeMessages[$type], id $problem, in files:\n";
-    print "----------------------------------------------------------------\n";
 
     my $count = 0;
-    foreach my $resFileName (keys %{$logMessages[$type]}) {
-	if (defined $logMessages[$type]{$resFileName}{$problem}) {
-	    my $count = scalar @{$logMessages[$type]{$resFileName}{$problem}};
-    	    printf "%03d: $resFileName\n", $count;
+
+    for my $testScript (keys %{$resDatap}) {
+        for my $testCase (keys % {$resDatap->{$testScript}{'TestCase'}} ) {
+	    $count += $resDatap->{$testScript}{'TestCase'}{$testCase}{'EntryType'}{$entryTypeName}{'Count'};
 	}
     }
     
-    print "\n\n";
+    return $count;
 }
 
-sub StatOfTypebyProblemsAndFiles($) {
-    my $type = shift;
+sub CountEntriesForEntryAndEntryID($$$)
+{
+    my ($resDatap, $entryTypeName, $entryID) = @_;
+    my $count = 0;
     
-    print "Numbers of particular $typeMessages[$type] types in files:\n";
-    print "===============================================================\n";
-
-    foreach my $problem (keys %{$logProblems[$type]}) {
-	StatOfTypeAndProblemByFiles($type, $problem);
+    for my $testScript (keys %{$resDatap}) {
+        for my $testCase (keys % {$resDatap->{$testScript}{'TestCase'}} ) {
+	    if ($resDatap->{$testScript}{'TestCase'}{$testCase}{'EntryType'}{$entryTypeName}{'EntryByID'}{$entryID}) {
+		$count += scalar @ {$resDatap->{$testScript}{'TestCase'}{$testCase}{'EntryType'}{$entryTypeName}{'EntryByID'}{$entryID}};
+	    }
+	}		
     }
-    print "\n\n";
+
+    return $count;
 }
 
-
-sub MessagesOfTypeAndProblemByFiles($$) {
-    my $type = shift;
-    my $problem = shift;
+sub CountEntriesForTestScriptAndEntry($$$)
+{
+    my ($resDatap, $testScript, $entryTypeName) = @_;
     
-    print "Messages with the problem id $problem of $typeMessages[$type]:\n";
-    print "----------------------------------------------------------------\n";
+    my $count = 0;
+    if ($resDatap->{$testScript}) {
+        for my $testCase (keys % {$resDatap->{$testScript}{'TestCase'}} ) {
+	    $count += $resDatap->{$testScript}{'TestCase'}{$testCase}{'EntryType'}{$entryTypeName}{'Count'};
+	}
+    }
+    return $count;
+}
 
-    foreach my $resFileName (keys %{$logMessages[$type]}) {
-	if (defined $logMessages[$type]{$resFileName}{$problem}) {
-	    foreach my $msg (@{ $logMessages[$type]{$resFileName}{$problem} }) {
-    		printf "$resFileName: $msg\n";
+sub CountEntriesForTestScriptEntryAndEntryID($$$$)
+{
+    my ($resDatap, $testScript, $entryTypeName, $entryID) = @_;
+
+    my $count = 0;
+    if ($resDatap->{$testScript}) {
+	for my $testCase (keys % {$resDatap->{$testScript}{'TestCase'}} ) {
+    	    if ($resDatap->{$testScript}{'TestCase'}{$testCase}{'EntryType'}{$entryTypeName}{'EntryByID'}{$entryID}) {
+		$count += scalar @ {$resDatap->{$testScript}{'TestCase'}{$testCase}{'EntryType'}{$entryTypeName}{'EntryByID'}{$entryID}};
+	    }
+	}
+    }		
+    return $count;
+}
+
+sub FindEntryIDsForEntry($$)
+{
+    my ($resDatap, $entryTypeName) = @_;
+    
+    my %entryIDs = ();
+    for my $testScript (keys %{$resDatap}) {
+        for my $testCase (keys % {$resDatap->{$testScript}{'TestCase'}} ) {
+	    for my $entryID ( keys % {$resDatap->{$testScript}{'TestCase'}{$testCase}{'EntryType'}{$entryTypeName}{'EntryByID'}}) {
+	        $entryIDs{$entryID} = 1;
 	    }
 	}
     }
-    
-    print "\n\n";
+    return keys %entryIDs;
 }
 
-sub MessagesOfTypeByProblemsAndFiles($) {
-    my $type = shift;
-    
-    print "Messages sorted by particular types of $typeMessages[$type]:\n";
-    print "===============================================================\n";
+########################################################################
+# The following subroutines fill the tables with particular statistics
+# about test results
 
-    foreach my $problem (keys %{$logProblems[$type]}) {
-	MessagesOfTypeAndProblemByFiles($type, $problem);
+sub ListAll($$)
+{
+    my ($resDatap, $datap) = @_;
+
+    push @{$datap}, ["TestScript", CountTestScripts($resDatap)];
+    push @{$datap}, ["TestCase",   CountTestCases($resDatap)];
+    foreach my $entry (@SummaryTestCaseEntries) {
+	push @{$datap}, [$entry, CountEntriesForEntry($resDatap, $entry)];
     }
-    print "\n\n";
+}
+
+sub ListTestScripts($$)
+{
+    my ($resDatap, $datap) = @_;
+
+    for my $testScript (keys %{$resDatap}) {
+	push @{$datap}, [$testScript];
+    }
+}
+
+sub ListTestScriptsScriptsForEntry($$$)
+{    
+    my ($resDatap, $entryTypeName, $datap) = @_;
+
+    for my $testScript (keys %{$resDatap}) {
+	my $count = CountEntriesForTestScriptAndEntry($resDatap, $testScript, $entryTypeName);
+	if ($count) {
+	    push @{$datap}, [$testScript, $count];
+	}
+    }
+}
+
+sub ListTestScriptsForEntryAndEntryID($$$$)
+{
+    my ($resDatap, $entryTypeName, $entryID, $datap) = @_;
+
+    for my $testScript (keys %{$resDatap}) {
+        my $count = CountEntriesForTestScriptEntryAndEntryID($resDatap, $testScript, $entryTypeName, $entryID);
+        if ($count) {
+	    push @{$datap}, [$testScript, $count];
+	}
+    }
+}    
+
+sub ListTestCases($$)
+{
+    my ($resDatap, $datap) = @_;
+
+    for my $testScript (keys %{$resDatap}) {
+	for my $testCase (keys % {$resDatap->{$testScript}{'TestCase'}} ) {
+	    push @{$datap}, [$testScript,$testCase];
+	}
+    }
+}
+
+sub ListTestCasesforEntry($$$)
+{
+    my ($resDatap, $entryTypeName, $datap) = @_;
+
+    for my $testScript (keys %{$resDatap}) {
+	for my $testCase (keys % {$resDatap->{$testScript}{'TestCase'}} ) {
+	    for my $entryID (keys % {$resDatap->{$testScript}{'TestCase'}{$testCase}{'EntryType'}{$entryTypeName}{'EntryByID'}} ) {
+		my $entryIDCount = scalar @ {$resDatap->{$testScript}{'TestCase'}{$testCase}{'EntryType'}{$entryTypeName}{'EntryByID'}{$entryID}};
+		push @{$datap}, [$testScript, $testCase, $entryID, $entryIDCount];
+	    }
+	}
+    }
+}
+
+sub ListEntryIDsForEntry($$$)
+{
+    my ($resDatap, $entryTypeName, $datap) = @_;
+
+    for my $entryID (FindEntryIDsForEntry($resDatap, $entryTypeName)) {
+	my $count = CountEntriesForEntryAndEntryID($resDatap, $entryTypeName, $entryID);
+	my $idNote = $knownIDs{$entryID} ? $knownIDs{$entryID} : "";
+	push @{$datap}, [$entryID, $count, $idNote];
+    }
+}
+
+########################################################################
+# The following subroutines fill the tables with particular statistics
+# about comparsion (diff) of two test results
+#
+# All of them (except ListDiffAll) return only positive values. Then they
+# are called twice with switched resData structures. This way we can get
+# information also about removed test scripts/test cases/entries.
+
+sub ListDiffAll($$$)
+{
+    my ($resDatap1, $resDatap2, $datap) = @_;
+
+    push @{$datap}, ["TestScript", CountTestScripts($resDatap2) - CountTestScripts($resDatap1)];
+    push @{$datap}, ["TestCase",   CountTestCases($resDatap2) - CountTestCases($resDatap1)];
+    foreach my $entry (@SummaryTestCaseEntries) {
+	push @{$datap}, [$entry, CountEntriesForEntry($resDatap2, $entry) - CountEntriesForEntry($resDatap1, $entry)];
+    }
+}
+
+sub ListNewTestScripts($$$$)
+{
+    # $comment is used to modify the output in case we do the inverted search
+    # for removed entries
+    my ($resDatap1, $resDatap2, $comment, $datap) = @_;
+
+    for my $testScript (keys %{$resDatap2}) {
+	unless ($resDatap1->{$testScript}) {
+	    push @{$datap}, [$testScript, $comment];
+	}
+    }
+}
+
+sub ListNewTestScriptsWithEntry($$$$$$)
+{
+    # $sign, $commentp are used to modify the output in case we do inverted
+    # search for removed entries
+    my ($resDatap1, $resDatap2, $entryTypeName, $sign, $commentp, $datap) = @_;
+
+    for my $testScript (keys %{$resDatap2}) {
+	my $count1 = CountEntriesForTestScriptAndEntry($resDatap1, $testScript, $entryTypeName);
+	my $count2 = CountEntriesForTestScriptAndEntry($resDatap2, $testScript, $entryTypeName);
+	my $countDiff = $count2 - $count1;
+	if ($countDiff > 0) {
+	    # old entry status:
+	    #	0 = test script not found in old res files
+	    #	1 = number of entries increased
+	    my $oldTestStatus = 0;
+	    if ($resDatap1->{$testScript}) {
+		$oldTestStatus = 1;
+	    }
+	
+	    push @{$datap}, [$testScript, $sign * $countDiff, $commentp->[$oldTestStatus]];
+	}
+    }
+}
+
+sub ListNewTestScriptsForEntryAndEntryID($$$$$$$)
+{
+    # $sign, $commentp are used to modify the output in case we do inverted
+    # search for removed entries
+    my ($resDatap1, $resDatap2, $entryTypeName, $entryID, $sign, $commentp, $datap) = @_;
+
+    for my $testScript (keys %{$resDatap2}) {
+        my $count1 = CountEntriesForTestScriptEntryAndEntryID($resDatap1, $testScript, $entryTypeName, $entryID);
+        my $count2 = CountEntriesForTestScriptEntryAndEntryID($resDatap2, $testScript, $entryTypeName, $entryID);
+	my $countDiff = $count2 - $count1;
+	if ($countDiff > 0) {
+	    # old entry status:
+	    #   0 = test script not found in old res files
+	    #   1 = test script found in old res files
+	    my $oldTestStatus = 0;
+    	    if ($resDatap1->{$testScript}) {
+		$oldTestStatus = 1;
+	    }
+	    push @{$datap}, [$testScript, $sign * $countDiff, $commentp->[$oldTestStatus]];
+	}
+    }
+}
+
+sub ListNewTestCases($$$$)
+{
+    # $commentp is used to modify the output in case we do inverted search for
+    # removed entries
+    my ($resDatap1, $resDatap2, $commentp, $datap) = @_;
+
+    for my $testScript (keys %{$resDatap2}) {
+	for my $testCase (keys % {$resDatap2->{$testScript}{'TestCase'}} ) {
+	    # old entry status:
+	    #   0 = test script not found in old res files
+	    #   1 = test script found in old res files
+	    my $oldTestStatus = 0;
+	    my $testCaseFound = 0;
+    	    if ($resDatap1->{$testScript}) {
+    		$oldTestStatus = 1;
+		# we must not acess 
+		if ($resDatap1->{$testScript}{'TestCase'}{$testCase}) {
+		    $testCaseFound = 1;
+		}
+	    }
+	    unless ($testCaseFound) {
+		push @{$datap}, [$testScript,$testCase, $commentp->[$oldTestStatus]];
+	    }
+	}
+    }
+}
+
+sub ListNewEntry($$$$$$)
+{
+    # $sign, $commentp are used to modify the output in case we do inverted
+    # search for removed entries
+    my ($resDatap1, $resDatap2, $entryTypeName, $sign, $commentp, $datap) = @_;
+    
+    for my $testScript (keys %{$resDatap2}) {
+	for my $testCase (keys % {$resDatap2->{$testScript}{'TestCase'}} ) {
+#	    print "Error: $testScript:$testCase:\n";
+	    for my $entryID (keys % {$resDatap2->{$testScript}{'TestCase'}{$testCase}{'EntryType'}{$entryTypeName}{'EntryByID'}} ) {
+		my $entryIDCountDiff = scalar @ {$resDatap2->{$testScript}{'TestCase'}{$testCase}{'EntryType'}{$entryTypeName}{'EntryByID'}{$entryID}};
+		# old entry status:
+		#	0 = test script not found in old res files
+		#       1 = test case not started in old res files
+		# 	2 = entryID not found in old res files
+		#	3 = number of entries increased
+		my $oldTestStatus = 0;
+		if ($resDatap1->{$testScript}) {
+		    $oldTestStatus = 1;
+		    if ($resDatap1->{$testScript}{'TestCase'}{$testCase}) {
+		        $oldTestStatus = 2;
+			if ($resDatap1->{$testScript}{'TestCase'}{$testCase}{'EntryType'}{$entryTypeName}{'EntryByID'}{$entryID}) {
+			    $oldTestStatus = 3;
+			    $entryIDCountDiff -= scalar @ {$resDatap1->{$testScript}{'TestCase'}{$testCase}{'EntryType'}{$entryTypeName}{'EntryByID'}{$entryID}};
+			}
+		    }
+		}
+		if ($entryIDCountDiff > 0) {
+		    push @{$datap}, [$testScript,$testCase,$entryID,$sign * $entryIDCountDiff,$commentp->[$oldTestStatus]];
+		}
+	    }
+	}
+    }	
+}
+
+sub ListNewEntryIDsForEntry($$$$$$)
+{
+    # $sign, $commentp are used to modify the output in case we do inverted
+    # search for removed entries
+    my ($resDatap1, $resDatap2, $entryTypeName, $sign, $commentp, $datap) = @_;
+
+    for my $entryID (FindEntryIDsForEntry($resDatap2, $entryTypeName)) {
+	my $count1 = CountEntriesForEntryAndEntryID($resDatap1, $entryTypeName, $entryID);
+	my $count2 = CountEntriesForEntryAndEntryID($resDatap2, $entryTypeName, $entryID);
+	my $countDiff = $count2 - $count1;
+	if ($countDiff > 0) {
+	    # old entry status:
+	    #   0 = entry id not found in old res files
+	    #   1 = entry id found in old res files
+	    my $oldTestStatus = 0;
+	    if ($count1) {
+		$oldTestStatus = 1;
+	    }
+	    my $idNote = $knownIDs{$entryID} ? $knownIDs{$entryID} : "";
+	    push @{$datap}, [$entryID, $sign * $countDiff, $commentp->[$oldTestStatus], $idNote];
+	}
+    }
+}
+
+###########################################################################
+# universal subroutines that are used to print the various tables
+
+sub SortStat
+{
+    my $sortStatColumnsCur = 0;
+    my $sortStatColumnsMax = scalar @ {$sortStatColumnsp};
+    my $i = 0;
+    my $result = 0;
+    
+    while (!$result && $sortStatColumnsCur < $sortStatColumnsMax) {
+        $i = $sortStatColumnsp->[$sortStatColumnsCur++];
+        if ($sortStatNumDown) {
+    	    $result = $b->[$i] <=> $a->[$i];
+	} else {
+	    $result = $a->[$i] <=> $b->[$i];
+	}
+	unless ($result) {
+	    $result = $a->[$i] cmp $b->[$i];
+	}
+    }
+    return $result;
+}
+
+sub SelectSorting($$)
+{
+    my ($datap, $sortStatColumnsDefaultp) = @_;
+    
+    if (scalar @sortStatColumnsRequest) {
+	# filtered list of columns; it does not include column indexes that
+	# are not supported by the current datap
+	my @sortStatColumnsRequestValid = ();
+	# at least one row has to be available to detect the count of columns
+	my $columnsCount = 0; 
+	if ($datap->[0]) {
+	    $columnsCount = scalar @ {$datap->[0]};
+	}
+	foreach my $column (@sortStatColumnsRequest) {
+	    if ($column >= 0 && $column < $columnsCount) {
+		push @sortStatColumnsRequestValid, $column;
+	    }
+	}
+	return \@sortStatColumnsRequestValid
+    } else {
+	# the sort order is not selected by the user, so the default one will
+	# be used and it needs not be filtered
+	return $sortStatColumnsDefaultp
+    }
+}
+
+sub PrintStat($$$$$$$)
+{
+    my ($titleFmt, $headFmt, $dataFmt, $titlep, $headp, $datap, $sortDefp) = @_;
+    
+    printf "$titleFmt\n", @{$titlep};
+    printf "------------------------------------------------------------------------------\n";
+    printf "$headFmt\n", @{$headp};
+    printf  "------------------------------------------------------------------------------\n";
+
+    $sortStatColumnsp = SelectSorting($datap, $sortDefp);
+
+    for my $linep ( sort SortStat @{$datap}) {
+	printf "$dataFmt\n", @{$linep};
+    }
+}
+
+##############################################################################
+# the following subroutines collect data for the particural statisctics,
+# defines how the output should look like and print the data
+
+sub StatAll($)
+{
+    my ($resDatap) = @_;
+
+    my $titleFmt = "%s";
+    my $headFmt  = "%-15.14s%-6s";
+    my $dataFmt  = "%-15.14s%6d";
+    
+    my @title = "All tests summary:";
+    my @head  =  ("Item", "Count");
+    my @data  = ();
+
+    my @sortDef = ();
+
+    ListAll($resDatap, \@data);
+
+    PrintStat($titleFmt, $headFmt, $dataFmt, \@title, \@head, \@data, \@sortDef);
+}
+
+sub StatTestScripts($)
+{
+    my ($resDatap) = @_;
+
+    my $titleFmt = "%s";
+    my $headFmt  = "%-20.19s";
+    my $dataFmt  = "%-20.19s";
+    
+    my @title = "List of the started test scripts:";
+    my @head  =  ("Test Script");
+    my @data  = ();
+
+    my @sortDef = (0);
+
+    ListTestScripts($resDatap, \@data);
+
+    PrintStat($titleFmt, $headFmt, $dataFmt, \@title, \@head, \@data, \@sortDef);
+}
+
+sub StatTestScriptsForEntry($$)
+{
+    my ($resDatap, $entryTypeName) = @_;
+
+    my $titleFmt = "%s";
+    my $headFmt  = "%-20.19s%-6s";
+    my $dataFmt  = "%-20.19s%6d";
+    
+    my @title = "List of the started test scripts with $entryTypeName, counts $entryTypeName:";
+    my @head  = ("Test Script", "Count");
+    my @data  = ();
+
+    my @sortDef = (1);
+
+    ListTestScriptsScriptsForEntry($resDatap, $entryTypeName, \@data);
+
+    PrintStat($titleFmt, $headFmt, $dataFmt, \@title, \@head, \@data, \@sortDef);
+}
+
+sub StatTestScriptsForEntryAndEntryID($$$)
+{
+    my ($resDatap, $entryTypeName, $entryID) = @_;
+
+    my $titleFmt = "%s";
+    my $headFmt  = "%-20.19s%-6s";
+    my $dataFmt  = "%-20.19s%6d";
+    
+    my @title = "List of test cases with $entryTypeName, id $entryID, counts this $entryTypeName:";
+    my @head  = ("Test Script", "Count");
+    my @data  = ();
+
+    my @sortDef = (1);
+
+    ListTestScriptsForEntryAndEntryID($resDatap, $entryTypeName, $entryID, \@data);
+
+    PrintStat($titleFmt, $headFmt, $dataFmt, \@title, \@head, \@data, \@sortDef);
+}
+
+sub StatTestCases($)
+{
+    my ($resDatap) = @_;
+
+    my $titleFmt = "%s";
+    my $headFmt  = "%-20.19s%-26.25s";
+    my $dataFmt  = "%-20.19s%-26.25s";
+    
+    my @title = "List of the started test cases";
+    my @head  =  ("Test Script", "Test Case");
+    my @data  = ();
+
+    my @sortDef = (0,1);
+
+    my @newTestCases = ListTestCases($resDatap, \@data);
+
+    PrintStat($titleFmt, $headFmt, $dataFmt, \@title, \@head, \@data, \@sortDef);
+}
+
+sub StatTestCasesForEntry($$) {
+    my ($resDatap, $entryTypeName) = @_;
+
+    my $titleFmt = "%s";
+    my $headFmt  = "%-20.19s%-26.25s%-10.9s%-6s";
+    my $dataFmt  = "%-20.19s%-26.25s%-10.9s%6d";
+    
+    my @title = "List of test cases with $entryTypeName, counts $entryTypeName:";
+    my @head  = ("Test Script", "Test Case", "Entry ID", "Count");
+    my @data  = ();
+
+    my @sortDef = (3,0,1,2);
+
+    my @newTestCases = ListTestCasesforEntry($resDatap, $entryTypeName, \@data);
+
+    PrintStat($titleFmt, $headFmt, $dataFmt, \@title, \@head, \@data, \@sortDef);
+}
+
+sub StatEntryIDsForEntry($$)
+{
+    my ($resDatap, $entryTypeName) = @_;
+
+
+    my $titleFmt = "%s";
+    my $headFmt  = "%-10.9s%-6s    %.60s";
+    my $dataFmt  = "%-10.9s%6d    %.60s";
+    
+    my @title = "List of $entryTypeName entry IDs:";
+    my @head  = ("Entry ID", "Count", "Entry ID explanation");
+    my @data  = ();
+
+    my @sortDef = (1);
+
+    ListEntryIDsForEntry($resDatap, $entryTypeName, \@data);
+
+    PrintStat($titleFmt, $headFmt, $dataFmt, \@title, \@head, \@data, \@sortDef);
+}
+
+############################
+# (diff)
+
+sub DiffAll($$)
+{
+    my ($resDatap1, $resDatap2) = @_;
+
+    my $titleFmt = "%s";
+    my $headFmt  = "%-15.14s%-6s";
+    my $dataFmt  = "%-15.14s%6d";
+    
+    my @title = "All tests summary (diff):\n";
+    my @head  = ("Item", "Count");
+    my @data  = ();
+
+    my @sortDef = ();
+
+    ListDiffAll($resDatap1, $resDatap2, \@data);
+
+    PrintStat($titleFmt, $headFmt, $dataFmt, \@title, \@head, \@data, \@sortDef);
+}
+
+sub DiffTestScripts($$)
+{
+    my ($resDatap1, $resDatap2) = @_;
+
+    my $titleFmt = "%s";
+    my $headFmt  = "%-20.19s%-10.9s";
+    my $dataFmt  = "%-20.19s%-10.9s";
+    
+    my @title = "List of the started test scripts (diff):";
+    my @head  = ("Test Script", "Comment");
+    my @data  = ();
+
+    my @sortDef = (0);
+
+    ListNewTestScripts($resDatap1, $resDatap2, "only new", \@data);
+    ListNewTestScripts($resDatap2, $resDatap1, "only old", \@data);
+
+    PrintStat($titleFmt, $headFmt, $dataFmt, \@title, \@head, \@data, \@sortDef);
+}
+
+sub DiffTestScriptsForEntry($$$)
+{
+    my ($resDatap1, $resDatap2, $entryTypeName) = @_;
+
+    my $titleFmt = "%s";
+    my $headFmt  = "%-20.19s%-6s%-15.14s";
+    my $dataFmt  = "%-20.19s%-6d%-15.14s";
+    
+    my @title = "List of the started test scripts with $entryTypeName, counts $entryTypeName (diff):";
+    my @head  = ("Test Script", "Count", "Comment");
+    my @data  = ();
+
+    my @sortDef = (1,0);
+
+    my @newComment = ( 
+	"only new",
+	"count changed"
+    );
+
+    my @oldComment = (
+	"only old",
+	"count changed"
+    );
+
+    ListNewTestScriptsWithEntry($resDatap1, $resDatap2, $entryTypeName, +1, \@newComment, \@data);
+    ListNewTestScriptsWithEntry($resDatap2, $resDatap1, $entryTypeName, -1, \@oldComment, \@data);
+
+    PrintStat($titleFmt, $headFmt, $dataFmt, \@title, \@head, \@data, \@sortDef);
+}
+
+sub DiffTestScriptsForEntryAndEntryID($$$$)
+{
+    my ($resDatap1, $resDatap2, $entryTypeName, $entryID) = @_;
+
+    my $titleFmt = "%s";
+    my $headFmt  = "%-20.19s%-6s%-15.14s";
+    my $dataFmt  = "%-20.19s%-6d%-15.14s";
+    
+    my @title = "List of test cases with $entryTypeName, id $entryID, counts this $entryTypeName (diff):";
+    my @head  = ("Test Script", "Count", "Comment");
+    my @data  = ();
+
+    my @sortDef = (1,0);
+
+    my @newComment = ( 
+	"new test",
+	"count changed"
+    );
+
+    my @oldComment = (
+	"skip test",
+	"count changed"
+    );
+
+    ListNewTestScriptsForEntryAndEntryID($resDatap1, $resDatap2, $entryTypeName, $entryID, +1, \@newComment, \@data);
+    ListNewTestScriptsForEntryAndEntryID($resDatap2, $resDatap1, $entryTypeName, $entryID, -1, \@oldComment, \@data);
+
+    PrintStat($titleFmt, $headFmt, $dataFmt, \@title, \@head, \@data, \@sortDef);
+}
+
+sub DiffTestCases($$)
+{
+    my ($resDatap1, $resDatap2) = @_;
+
+    my $titleFmt = "%s";
+    my $headFmt  = "%-20.19s%-26.25s%-16.15s";
+    my $dataFmt  = "%-20.19s%-26.25s%-16.15s";
+    
+    my @title = "List of the started test cases (diff):";
+    my @head  =  ("Test Script", "Test Case", "Comment");
+    my @data  = ();
+
+    my @sortDef = (2,0,1);
+
+    my @newComment = ( 
+	"only new t.scr.",
+	"only new t.case"
+    );
+
+    my @oldComment = (
+        "only old t.scr.",
+        "only old t.case",
+    );
+
+    ListNewTestCases($resDatap1, $resDatap2, \@newComment, \@data);
+    ListNewTestCases($resDatap2, $resDatap1, \@oldComment, \@data);
+
+    PrintStat($titleFmt, $headFmt, $dataFmt, \@title, \@head, \@data, \@sortDef);
+}
+
+sub DiffTestCasesForEntry($$$)
+{
+    my ($resDatap1, $resDatap2, $entryTypeName) = @_;
+
+    my $titleFmt = "%s";
+    my $headFmt  = "%-20.19s%-26.25s%-10.9s%-6s   %.40s";
+    my $dataFmt  = "%-20.19s%-26.25s%-10.9s%+6d   %.40s";
+    
+    my @title = "List of test cases with $entryTypeName, counts $entryTypeName (difference):";
+    my @head  =  ("Test Script", "Test Case", "Entry ID", "Count", "Comment");
+    my @data  = ();
+
+    my @sortDef = (3,0,1);
+
+    my @newComment = ( 
+	"only new t.scr.",
+	"only new t.case",
+	"ID only in new",
+	"count changed"
+    );
+
+    my @oldComment = ( 
+        "only old t.scr.",
+        "only old t.case",
+        "ID just in old",
+        "count changed"
+    );
+
+    ListNewEntry($resDatap1, $resDatap2, $entryTypeName, +1, \@newComment, \@data);
+    ListNewEntry($resDatap2, $resDatap1, $entryTypeName, -1, \@oldComment, \@data);
+
+    PrintStat($titleFmt, $headFmt, $dataFmt, \@title, \@head, \@data, \@sortDef);
+}
+
+sub DiffEntryIDsForEntry($$$)
+{
+    my ($resDatap1, $resDatap2, $entryTypeName) = @_;
+
+    my $titleFmt = "%s";
+    my $headFmt  = "%-10.9s%-6s    %-15.14s%.40s";
+    my $dataFmt  = "%-10.9s%6d    %-15.14s%.40s";
+    
+    my @title = "List of $entryTypeName entry IDs (diff):";
+    my @head  = ("Entry ID", "Count", "Comment", "Entry ID explanation");
+    my @data  = ();
+
+    my @sortDef = (1,0);
+
+    my @newComment = ( 
+	"only in new",
+	"count changed"
+    );
+
+    my @oldComment = (
+	"only in old",
+	"count changed"
+    );
+
+    ListNewEntryIDsForEntry($resDatap1, $resDatap2, $entryTypeName, +1, \@newComment, \@data);
+    ListNewEntryIDsForEntry($resDatap2, $resDatap1, $entryTypeName, -1, \@oldComment, \@data);
+
+    PrintStat($titleFmt, $headFmt, $dataFmt, \@title, \@head, \@data, \@sortDef);
+}
+
+########################################################################
+# help
+
+sub Usage()
+{
+    print "This tool prints statistic from .res files genereated by qatesttool\n\n" .
+    
+          "Usage:\n".
+	  "\ttest-ooo-analyze [--help] [--diff] [stat-type-sw] [--entry=<entry>]\n" .
+	  "\t[--entry-id=<id>] [--sort=[column[,column]...] [--revert] res...\n\n" .
+	
+	  "Options:\n" .
+	  "\t--help: prints this help\n\n" .
+
+	  "\t--diff: compares statistic of two test tool results. Exactly two .res\n" .
+	  "\t\tfiles or exactly two directories has to be defined by the res...\n".
+	  "\t\tparameter\n\n" .
+	  
+	  "\tstat-type-sw: defines statistic type, see below\n\n" .
+	  
+	  "\t--entry=<entry>: almost all statistics gives more detailed output if a\n" .
+	  "\t\tparticular entry is defined. The possible values are: Error,\n" .
+	  "\t\tWarning, QAError, Message, CallStack, Assertion, AssertStack.\n\n". 
+	  
+	  "\t--entry-id=<id>: filters the statistic output to count only entries\n" .
+	  "\t\twith given id. It must be used together with --entry=<entry>.\n" .
+	  "\t\tIt actually works only with --stat-test-case.\n\n" .
+	  
+	  "\t--sort=[column[,column]...: redefines the default sorting; the value\n" .
+	  "\t\tis a comma separated list of column numbers, For example, the \n" .
+	  "\t\toutput is sorted by the 1st and 2nd column with --sort=1,2.\n" .
+	  "\t--reverse: reverse the sort order of numeric values\n\n" .
+	  
+	  "\tres... :    list of res files or directories with res files\n" .
+	  "\tres1, res2: two res files or direcotries to be compared\n\n" .
+	  
+	  "Types of statistic:\n".
+	  "\t--stat-all:         statistic of total numbers (default one)\n" .
+	  "\t--stat-test-script: statictic by test scripts\n" .
+	  "\t--stat-test-case:   statictic by test cases\n" .
+	  "\t--stat-entry-id:    statictic by the given entry IDs\n";
 }
 
 
-###########################################################
-###########################################################
-#######                   MAIN                     ########
-###########################################################
-###########################################################
+#######################################################################
+#######################################################################
+# MAIN
+#######################################################################
+#######################################################################
 
+my $op = 'stat';
+my $stat_type = "all";
+my $entry = '';
+my $entryID = '';
+my @resPaths = ();
 
-foreach my $f (@ARGV) { 
-    AnalyzeResFile($f);
+foreach my $a (@ARGV) {
+    if ($a eq '--diff' ||
+	$a eq '--help') {
+	$op = $a;
+	$op =~ s/^\-\-//;
+    } elsif ($a eq '--stat-all' ||
+	     $a eq '--stat-test-script' ||
+	     $a eq '--stat-test-case' ||
+	     $a eq '--stat-entry-id') {
+	$stat_type = $a;
+	$stat_type =~ s/^\-\-stat\-//;
+    } elsif ($a =~ m/--entry=(.*)/) {
+	$entry = $1;
+	unless (grep /^$entry$/i, @TestCaseEntries) {
+	    my $tmp = join "\n\t\t", @TestCaseEntries;
+	    die "Error: unknown entry: \"$entry\". Possible values are:\n" .
+	        "\t\t$tmp\n";
+	}
+    } elsif ($a =~ m/--entry-id=(.*)/) {
+	$entryID = $1;
+    } elsif ($a =~ m/--sort=([0-9,]*)/) {
+	@sortStatColumnsRequest = split(",", $1);
+	# let the user count the columns from 1
+	for my $i (0 .. scalar @sortStatColumnsRequest) {
+	    --$sortStatColumnsRequest[$i];
+	}
+    } elsif ($a =~ m/--reverse/) {
+	$sortStatNumDown = 0;
+    } elsif (-f $a || 
+	     -d $a) {
+	push @resPaths, $a;
+    } else {
+	die "Error: Unknown parameter \"$a\", try --help.\n";
+    }
 }
-print "\n\n"  if ($verbose);
+
+#print "op = $op\n";
+#print "stat_type = $stat_type\n";
+#print "entry = $entry\n";
+#print "resPaths = @resPaths\n";
+
+# FIXME: Is there a nicer solution for this huge if/elsif/else game,
+#        so that the following check can be on a more appropriate place?
+if ($entryID && $stat_type ne 'test-script') {
+    die "Error: --entry-id is currently supported only with --stat-test-script\n";
+}
+
+if ($op eq 'help') {
+
+    Usage();
+
+} elsif ($op eq 'stat') {
+
+    # pure statisctics
+
+    (scalar @resPaths) || die "Error: No res path defined, try --help\n";
+    
+    # load .res files
+    for my $path (@resPaths) {
+	if (-f $path) {
+	    AnalyzeResFile(\%resData1, $path);
+	} elsif (-d $path) {
+	    AnalyzeDir(\%resData1, $path);
+	} else {
+	    die "Error: \"$path\" is neither directory nor file\n";
+	}
+    }
+
+    # do the selected statistic
+    if ($entry) {
+    	if ($stat_type eq 'all') {
+	    die "Sorry, this statistic does not exist. Try without the option --entry.\n";
+	} elsif ($stat_type eq 'test-script') {
+	    if ($entryID) {
+	        StatTestScriptsForEntryAndEntryID(\%resData1, $entry, $entryID);
+	    } else {	
+		StatTestScriptsForEntry(\%resData1, $entry);
+	    }
+	} elsif ($stat_type eq 'test-case') {
+	    StatTestCasesForEntry(\%resData1, $entry);
+	} elsif ($stat_type eq 'entry-id') {
+	    StatEntryIDsForEntry(\%resData1, $entry);
+	} else {
+	    die "Internal error: unknown statisitc type: $stat_type\n";
+	}
+    } else {
+    	if ($stat_type eq 'all') {
+	    StatAll(\%resData1);
+	} elsif ($stat_type eq 'test-script') {
+	    StatTestScripts(\%resData1);
+	} elsif ($stat_type eq 'test-case') {
+	    StatTestCases(\%resData1);
+	} elsif ($stat_type eq 'entry-id') {
+	    die "Error: Sorry, this statistic has not be implmented yet\n" .
+		"       Try with the --entry option\n";
+	} else {
+	    die "Internal error: unknown statisitc type: $stat_type\n";
+	}
+    }    
+
+} elsif ($op = 'diff') {
+
+    # diff of two statisctics
+
+    (scalar @resPaths == 2) || die "Error: Wrong number of paths. You must define exactly two files or\n" .
+                                    "       directories as the res1, res2 parameters.\n";
+    
+    # load .res files
+    if (-f $resPaths[0] && -f $resPaths[1] ) {
+	    AnalyzeResFile(\%resData1, $resPaths[0]);
+	    AnalyzeResFile(\%resData2, $resPaths[0]);
+    } elsif (-d $resPaths[0] && -d $resPaths[0]) {
+	    AnalyzeDir(\%resData1, $resPaths[0]);
+	    AnalyzeDir(\%resData2, $resPaths[1]);
+    } else {
+	die "Error: Wrong type of paths. This operation works only if you define exactly two files or two\n" .
+	    "       or two direcotries as the res1, res2 parameters.\n";
+    }
 
 
-# type 2 = error
-# type 5 = warning
+    # do the selected statistic
+    if ($entry) {
+    	if ($stat_type eq 'all') {
+	    die "Sorry, this statistic does not exist. Try without the option --entry.\n";
+	} elsif ($stat_type eq 'test-script') {
+	    if ($entryID) {
+	        DiffTestScriptsForEntryAndEntryID(\%resData1, \%resData2, $entry, $entryID);
+	    } else {	
+		DiffTestScriptsForEntry(\%resData1, \%resData2, $entry);
+	    }
+	} elsif ($stat_type eq 'test-case') {
+	    DiffTestCasesForEntry(\%resData1, \%resData2, $entry);
+	} elsif ($stat_type eq 'entry-id') {
+	    DiffEntryIDsForEntry(\%resData1, \%resData2, $entry);
+	} else {
+	    die "Internal error: unknown statistic type: $stat_type\n";
+	}
+    } else {
+    	if ($stat_type eq 'all') {
+	    DiffAll(\%resData1, \%resData2);
+	} elsif ($stat_type eq 'test-script') {
+	    DiffTestScripts(\%resData1, \%resData2);
+	} elsif ($stat_type eq 'test-case') {
+	    DiffTestCases(\%resData1, \%resData2);
+	} elsif ($stat_type eq 'entry-id') {
+	    die "Error: Sorry, this statistic has not be implmented yet\n" .
+		"       Try with the --entry option\n";
+	} else {
+	    die "Internal error: unknown statistic type: $stat_type\n";
+	}
+    }    
 
-StatGlobal();
-#StatOfTypeByFiles(2);
-#MessagesOfTypeByFiles(2);
-StatOfTypeByProblems(2);
-StatOfTypeByProblems(5);
-#StatOfTypebyProblemsAndFiles(2);
-#StatOfTypebyProblemsAndFiles(2);
-#StatOfTypebyProblemsAndFiles(5);
-#MessagesOfTypeByProblemsAndFiles(2);
-#MessagesOfTypeByProblemsAndFiles(5);
+} else {
+    
+    die "Internal error: unknown operation: $op\n";
+
+}
