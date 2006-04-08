@@ -1,6 +1,6 @@
 --- /dev/null	
 +++ scsolver/source/numeric/lpsimplex.cxx	
-@@ -0,0 +1,1440 @@
+@@ -0,0 +1,1686 @@
 +/*************************************************************************
 + *
 + *  The Contents of this file are made available subject to
@@ -40,7 +40,7 @@
 +#include <algorithm>
 +#include <vector>
 +#include <map>
-+#include <boost/numeric/ublas/matrix.hpp>
++#include <list>
 +
 +using namespace std;
 +	
@@ -91,12 +91,24 @@
 +	std::vector<bool> m_aBasicVar;
 +	std::vector<size_t> m_aBasicVarId;
 +
++    /** permutation of variable indices */
++	std::list<size_t> m_cnPermVarIndex;
++
++	struct ConstDecVar
++	{
++		size_t Id;
++		double Value;
++	};
++	std::list<ConstDecVar> m_cnConstDecVarList;
++
 +	//-----------------------------------------------------------------------
 +	// Private methods
 +
 +	Model* getModel() const { return m_pSelf->getModel(); }
 +
-+	void convertVarRange( Model& ) const;
++	void convertVarRange( Model& );
++	void initializePermIndex();
++	void mapDecisionVars( Matrix& ) const;
 +	void runNormalInitSearch();
 +	void runTwoPhaseInitSearch( const std::vector<size_t>& );
 +	void printIterateHeader() const;
@@ -121,14 +133,19 @@
 +/**
 + * Convert variable ranges into a constrant matrix.  Also
 + * extracts those variables with identical upper and lower
-+ * ranges into equality constraints, which are ultimately 
++ * ranges into equality constraints, which are ultimately
 + * treated as constant values.
 + * 
-+ * @param aModel
++ * @param aModel object representing a model
 + */
-+void RevisedSimplexImpl::convertVarRange( Model& aModel ) const
++void RevisedSimplexImpl::convertVarRange( Model& aModel )
 +{
 +	size_t nColSize = aModel.getCostVector().cols();
++	size_t nRhsSize = aModel.getRhsVector().rows();
++	double fObjConst = 0.0;
++	std::vector<double> cnRhsConstants( nRhsSize );
++	std::vector<size_t> cnColsNuked;
++	
 +	for ( size_t i = 0; i < nColSize; ++i )
 +	{
 +		double fLBound = 0.0, fUBound = 0.0;
@@ -149,9 +166,24 @@
 +
 +		if ( bLBound && bUBound && fLBound == fUBound )
 +		{
-+			cout << "  (equal)" << endl;
-+			// TODO: This variable is constant-equivalent.  
-+			// Remove it from the temporary model.
++			// This variable is constant-equivalent.  Remove it from 
++			// the temporary model.
++			ConstDecVar cdv;
++			cdv.Id = i;
++			cdv.Value = fLBound;
++			m_cnConstDecVarList.push_back( cdv );
++
++			double fCost = aModel.getCostVector().operator()( 0, i );
++			fObjConst -= fCost*fLBound;
++			cnColsNuked.push_back( i );
++			cout << "  (equal) fObjConstant = " << fObjConst << endl;
++			for( size_t nRow = 0; nRow < nRhsSize; ++nRow )
++			{
++				double f = aModel.getConstraint( nRow, i )*fLBound;
++				cout << "  " << f;
++				cnRhsConstants[nRow] -= f;
++				cout << ":\t" << cnRhsConstants.at( nRow ) << endl;
++			}
 +		}
 +		else
 +		{
@@ -170,23 +202,97 @@
 +			}
 +		}
 +	}
++
++	if ( cnColsNuked.size() > 0 )
++	{
++		// Delete designated columns from all affected matrices, and turn them
++		// into constant values to be added to the RHS vector and objective function.
++		// Also, remove the IDs of deleted columns from the permutation index list, 
++		// and update the constant objective value list.
++
++		aModel.deleteCostVectorElements( cnColsNuked );
++		aModel.deleteConstraintMatrixColumns( cnColsNuked );
++		for ( size_t i = 0; i < nRhsSize; ++i )
++		{
++			double fRhsVal = aModel.getRhsValue(i);
++			aModel.setRhsValue( i, fRhsVal + cnRhsConstants.at(i) );
++		}
++
++		// Actually this may not be needed since this value will not affect
++		// the solution at all.  But set this anyway.
++		aModel.setObjectiveFuncConstant( fObjConst );
++
++		vector<size_t>::iterator it,
++			itBeg = cnColsNuked.begin(), itEnd = cnColsNuked.end();
++		list<size_t>::iterator itPerm = m_cnPermVarIndex.begin();
++		for ( it = itBeg; it != itEnd; ++it )
++			m_cnPermVarIndex.remove( *it );
++	}
++}
++
++/**
++ * Initialize the permutation index list.  This list is used to set the
++ * values of decision variables back to their original position in case
++ * of model reduction.
++ */
++void RevisedSimplexImpl::initializePermIndex()
++{
++	m_cnPermVarIndex.clear();
++	size_t nCostSize = getModel()->getCostVector().cols();
++	for ( size_t i = 0; i < nCostSize; ++i )
++		m_cnPermVarIndex.push_back( i );
++
++	cout << "permutation index: ";
++	printElements( m_cnPermVarIndex );
++}
++
++/**
++ * This method maps back variables that may have been repositioned as a
++ * result of model shrinkage.  It also puts the values of those constant 
++ * equivalent decision variables to their original position in the matrix.
++ * 
++ * @param solution matrix representing a solution for reduced model
++ */
++void RevisedSimplexImpl::mapDecisionVars( Matrix& solution ) const
++{
++	cout << "permutation index: ";
++	printElements( m_cnPermVarIndex );
++
++	// Map solved variables into their original position.
++	list<size_t>::const_iterator itBeg = m_cnPermVarIndex.begin(),
++		itEnd = m_cnPermVarIndex.end(), it;
++	for ( it = itBeg; it != itEnd; ++it )
++	{
++		size_t nSrcId = ::std::distance( itBeg, it );
++		size_t nDstId = *it;
++		cout << "mapped var id: " << nSrcId << " -> " << nDstId << endl;
++		solution( nDstId, 0 ) = m_aX( nSrcId, 0 );
++	}
++
++	// Insert constant variables if any
++	list<ConstDecVar>::const_iterator itCdvBeg = m_cnConstDecVarList.begin(),
++		itCdvEnd = m_cnConstDecVarList.end(), itCdv;
++	for ( itCdv = itCdvBeg; itCdv != itCdvEnd; ++itCdv )
++		solution( itCdv->Id, 0 ) = itCdv->Value;
 +}
 +
 +Matrix RevisedSimplexImpl::solve()
 +{
-+	//-------------------------------------------------------------------------
++	//-----------------------------------------------------------------------
 +	// Initialize
 +	
-+	//-------------------------------------------------------------------------
-+	// Normalize the objective with use of slack variable(s), and store in the 
-+	// following variables such that:
++	//-----------------------------------------------------------------------
++	// Normalize the objective with use of slack variable(s), and store in 
++	// the following variables such that:
 +	//
 +	//     A = expanded constraint matrix
 +	//     B = right hand side vector
 +	//     C = expanded cost vector
 +
 +	Model aModel( *getModel() );
-+	//convertVarRange( aModel );
++	initializePermIndex();
++	convertVarRange( aModel );
++	aModel.print();
 +	Matrix A( aModel.getConstraintMatrix() );
 +	Matrix B( aModel.getRhsVector() );
 +	Matrix C( aModel.getCostVector() );
@@ -238,6 +344,7 @@
 +			if ( A( i, j ) != 0.0 )
 +				if ( bNonZeroFound )
 +				{
++					// a second non-zero coefficient encountered (not good)
 +					nUniqueRowSigned = -1;
 +					break;
 +				}
@@ -320,12 +427,15 @@
 +	m_nIter = 0;
 +	while ( !iterate() );
 +
-+	Matrix aCost = m_Model.getCostVector();
-+	Matrix solution( aCost.cols(), 1 );
++	// Put the solution from the modified model to the original model by using
++	// the permutation index.
++	size_t nCostSize = getModel()->getCostVector().cols(); // original cost size
++	Matrix solution( nCostSize, 1 );
 +	solution.setResizable( false );
-+	for ( size_t i = 0; i < aCost.cols(); ++i )
-+		solution( i, 0 ) = m_aX( i, 0 );
-+	
++	if( m_cnPermVarIndex.empty() )
++		throw AssertionWrong();
++
++	mapDecisionVars( solution );
 +	if ( m_Model.getVerbose() )
 +	{
 +		cout << "x = ";
@@ -392,7 +502,7 @@
 +	if ( !m_bTwoPhaseAllowed )
 +		throw IllegalTwoPhaseSearch();
 +		
-+	static const bool bDebugTwoPhase = true;
++	static const bool bDebugTwoPhase = false;
 +
 +	if ( m_Model.getVerbose() )
 +		Debug( "Entering a two-phase search for initial solution" );
@@ -404,7 +514,7 @@
 +	for ( nIter = aNonSatRows.begin(); nIter != end; ++nIter )
 +	{
 +		size_t nRowId = *nIter;
-+		if ( m_B( nRowId, 1 ) >= 0 )
++		if ( m_B( nRowId, 0 ) >= 0 )
 +			A2( nRowId, A2.cols() ) = 1;
 +		else
 +			A2( nRowId, A2.cols() ) = -1;
@@ -466,7 +576,6 @@
 +	sort( aNonBasicVarId.begin(), aNonBasicVarId.end() );
 +	cout << "aNonBasicVarId = ";
 +	printElements( aNonBasicVarId, " " );
-+	cout << aNonBasicVarId.size() << endl;
 +
 +	Matrix ABasic( m_A );
 +	ABasic.print( 0 );
@@ -745,19 +854,7 @@
 +//---------------------------------------------------------------------------
 +// BoundedRevisedSimplexImpl
 +
-+struct VarBoundary
-+{
-+	size_t Id;
-+	double Value;
-+	Bound BoundType;
-+};
-+
-+struct EnterBasicVar
-+{
-+	size_t Id;
-+	double Price;
-+	Bound BoundType;
-+};
++typedef std::list<size_t> SizeTypeContainer;
 +
 +class BoundedRevisedSimplexImpl
 +{
@@ -768,6 +865,26 @@
 +	Matrix solve();
 +	
 +private:
++
++	/**
++	 * This structure represents a variable boundary i.e. the position
++	 * (ID) of the corresponding variable, whether it is a upper boundary
++	 * or a lower boundary, and the value of the boundary.
++	 */
++	struct VarBoundary
++	{
++		size_t Id;
++		double Value;
++		Bound BoundType;
++	};
++	
++	struct EnterBasicVar
++	{
++		size_t Id;
++		double Price;
++		Bound BoundType;
++	};
++
 +	BoundedRevisedSimplex* m_pSelf;
 +	
 +	Matrix m_mxBasicInv;
@@ -778,8 +895,8 @@
 +
 +	Matrix m_mxA, m_mxB, m_mxC;
 +	std::vector<bool> m_aBasicVar;
-+	std::vector<size_t> m_aBasicVarId;
-+	std::vector<size_t> m_aNonBasicVarId;
++	SizeTypeContainer m_aBasicVarId;
++	SizeTypeContainer m_aNonBasicVarId;
 +	std::vector<size_t> m_aSkipBasicVarId;
 +	std::vector<Bound> m_aNonBasicVarBoundType;
 +	
@@ -788,14 +905,16 @@
 +	Model* getModel() const { return m_pSelf->getModel(); }
 +	
 +	bool findInitialSolution();
-+	bool makeVarCombo( size_t, size_t, vector<VarBoundary>& );
++	bool buildInitialVars( vector<VarBoundary>& );
++	void initialize();
++	bool iterateVarBoundary( size_t, size_t, vector<VarBoundary>& );
 +	bool isSolutionFeasible( const Matrix& ) const;
-+	const Matrix solvePriceVector( const vector<size_t>&, const Matrix&, const Matrix& ) const;
++	const Matrix solvePriceVector( const SizeTypeContainer&, const Matrix&, const Matrix& ) const;
 +	
 +	bool iterate();
-+	bool determineEnteringNonBasicVar( EnterBasicVar& );
++	bool queryEnteringNBVar( EnterBasicVar& );
 +	void calculateNewX( const EnterBasicVar&, size_t&, Matrix& );
-+	void updateNonBasicVars( const EnterBasicVar&, size_t );
++	void updateNBVars( const EnterBasicVar&, size_t );
 +	void updateInverseBasicMatrix( const EnterBasicVar&, size_t, const Matrix& );
 +	void printIterateHeader() const;
 +	bool isPriceBoundEligible( const EnterBasicVar& ) const;
@@ -815,16 +934,53 @@
 +
 +Matrix BoundedRevisedSimplexImpl::solve()
 +{
-+	//-------------------------------------------------------------------------
-+	// Initialize
++	initialize();
++
++	if ( !findInitialSolution() )
++	{
++		if ( m_pModel->getVerbose() )
++			cout << "Initial solution not found" << endl;
++		throw ModelInfeasible();
++	}
 +	
-+	//-------------------------------------------------------------------------
-+	// Normalize the objective with use of slack variable(s), and store in the 
-+	// following variables such that:
++	if ( m_pModel->getVerbose() )
++		cout << "Initial solution found" << endl;
++
++	m_mxPriceVector = solvePriceVector( m_aBasicVarId, m_mxBasicInv, m_mxC );
++
++	m_nIter = 0;
++	m_aSkipBasicVarId.clear();
++	
++	while ( !iterate() );
++	
++	Matrix mxSolution;
++	for ( size_t i = 0; i < m_pModel->getCostVector().cols(); ++i )
++		mxSolution( i, 0 ) = m_mxX( i, 0 );
++
++	if ( m_pModel->getVerbose() )
++	{
++		cout << "x = ";
++		mxSolution.trans().print();	
++	}
++
++#ifdef DEBUG
++	if ( isSolutionFeasible( mxSolution ) )
++		Debug( "Double-checked to make sure the solution is feasible" );
++	else
++		Debug( "Solution not feasible!?" );
++#endif
++
++	return mxSolution;
++}
++
++void BoundedRevisedSimplexImpl::initialize()
++{
++	// Normalize the objective with use of slack variable(s), and 
++	// store in the following variables such that:
 +	//
-+	//     A = expanded constraint matrix
-+	//     B = right hand side vector
-+	//     C = expanded cost vector
++	//  A = expanded constraint matrix
++	//  B = right hand side vector
++	//  C = expanded cost vector
 +
 +	m_mxBasicInv.clear();
 +	m_mxUpdateMatrix.clear();
@@ -835,6 +991,16 @@
 +	m_mxA = m_pModel->getConstraintMatrix();
 +	m_mxB = m_pModel->getRhsVector();
 +	m_mxC = m_pModel->getCostVector();
++
++	// Expand constraint matrix in case the cost vector is wider 
++	// (the cost vector and the constraint matrix is supposed to 
++	// have the same column width).
++	if ( m_mxA.cols() < m_mxC.cols() )
++	{
++		size_t nNewCol = m_mxA.cols();
++		nNewCol += m_mxC.cols() - m_mxA.cols();
++		m_mxA.resize( m_mxA.rows(), nNewCol );
++	}
 +
 +	const size_t nRowSizeA = m_mxA.rows();
 +	for ( size_t i = 0; i < nRowSizeA; ++i )
@@ -859,10 +1025,10 @@
 +			m_mxC( 0, nCol ) = 0;
 +		}
 +	}
-+	m_pModel->print();
 +
 +	if ( m_pModel->getVerbose() )
 +	{
++		m_pModel->print();
 +		cout << "A:" << endl;
 +		m_mxA.print();
 +		cout << "B:" << endl;
@@ -870,37 +1036,6 @@
 +		cout << "C:" << endl;
 +		m_mxC.print();
 +	}
-+
-+	if ( !findInitialSolution() )
-+	{
-+		if ( m_pModel->getVerbose() )
-+		{
-+			cout << "Initial solution not found" << endl;
-+			throw ModelInfeasible();
-+		}
-+	}
-+	
-+	if ( m_pModel->getVerbose() )
-+		cout << "Initial solution found" << endl;
-+
-+	m_mxPriceVector = solvePriceVector( m_aBasicVarId, m_mxBasicInv, m_mxC );
-+
-+	m_nIter = 0;
-+	m_aSkipBasicVarId.clear();
-+	
-+	while ( !iterate() );
-+	
-+	Matrix mxSolution;
-+	for ( size_t i = 0; i < m_pModel->getCostVector().cols(); ++i )
-+		mxSolution( i, 0 ) = m_mxX( i, 0 );
-+
-+	if ( m_pModel->getVerbose() )
-+	{
-+		cout << "x = ";
-+		mxSolution.trans().print();	
-+	}
-+
-+	return mxSolution;
 +}
 +
 +void BoundedRevisedSimplexImpl::printIterateHeader() const
@@ -921,7 +1056,7 @@
 +	printElements( m_aBasicVarId );
 +	cout << endl << endl;;
 +	
-+	vector<size_t>::const_iterator itr, 
++	SizeTypeContainer::const_iterator itr, 
 +		itrBeg = m_aNonBasicVarId.begin(),
 +		itrEnd = m_aNonBasicVarId.end();
 +	for ( itr = itrBeg; itr != itrEnd; ++itr )
@@ -1037,47 +1172,61 @@
 +		printIterateHeader();
 +
 +	EnterBasicVar aEnterVar; // Entering basic variable (ID, Price and BoundType)
-+	if ( determineEnteringNonBasicVar( aEnterVar ) )
++	if ( queryEnteringNBVar( aEnterVar ) )
 +		return true;
 +
 +	size_t nLeaveVarId;	// Leaving basic variable ID
 +	Matrix mxDX;
 +	calculateNewX( aEnterVar, nLeaveVarId, mxDX );
-+	updateNonBasicVars( aEnterVar, nLeaveVarId );
++	updateNBVars( aEnterVar, nLeaveVarId );
 +	updateInverseBasicMatrix( aEnterVar, nLeaveVarId, mxDX );
 +
 +	++m_nIter;
 +	return false;
 +}
 +
-+/** As the function name suggests, this method determines an entering non-basic variable
-+	if any.  If there is no entering non-basic, then that means an optimum solution is 
-+	found, and it returns true.  Otherwise it returns false.
++/**
++ * This method determines an entering non-basic (NB) variable if any. If
++ * there is no entering non-basic, then that means an optimum solution is
++ * found, and it returns true.  Otherwise it returns false.
 + */
-+bool BoundedRevisedSimplexImpl::determineEnteringNonBasicVar( EnterBasicVar& rEnterVar )
++bool BoundedRevisedSimplexImpl::queryEnteringNBVar( EnterBasicVar& rEnterVar )
 +{
-+	//-------------------------------------------------------------------------
-+	// Determine the entering non-basic variable
-+
-+	vector<size_t>   aEnterBasicVarId;
++	SizeTypeContainer   aEnterBasicVarId;
 +	vector<EnterBasicVar> aEnterBasicVars;
 +
-+	vector<size_t>::const_iterator itr,
++	SizeTypeContainer::const_iterator itr,
 +			itrBeg = m_aNonBasicVarId.begin(),
 +			itrEnd = m_aNonBasicVarId.end();
 +
++	// Go though all existing non-basic variables and build a list
++	// of them with bound type information.
 +	for ( itr = itrBeg; itr != itrEnd; ++itr )
 +	{
++		size_t nId = *itr;	// non-basic variable ID
++
++		// Make sure the variable is not constant equilavent.
++		if ( m_pModel->isVarBounded( nId, BOUND_LOWER ) )
++		{
++			double fBoundVal = m_pModel->getVarBound( nId, BOUND_LOWER );
++			if ( m_pModel->isVarBounded( nId, BOUND_UPPER ) && 
++				 fBoundVal == m_pModel->getVarBound( nId, BOUND_UPPER ) )
++			{
++				Debug( "queryEnteringNBVar: Constant equivalent variable found" );
++				continue;
++			}
++		}
++
 +		EnterBasicVar aVar;
-+		size_t id = *itr;
-+		aEnterBasicVarId.push_back( id );
-+		aVar.Id = id;
-+		size_t i = distance( itrBeg, itr );
-+		aVar.BoundType = m_aNonBasicVarBoundType.at( i );
++		aEnterBasicVarId.push_back( nId );
++		aVar.Id = nId;
++
++		aVar.BoundType = m_aNonBasicVarBoundType.at( 
++				distance( itrBeg, itr ) );
 +		
 +		// Evaluate pricing
-+		aVar.Price = m_mxC( 0, id ) - 
-+				( m_mxPriceVector*m_mxA.getColumn( id ) ).operator()( 0, 0 );
++		aVar.Price = m_mxC( 0, nId ) - 
++				( m_mxPriceVector*m_mxA.getColumn( nId ) ).operator()( 0, 0 );
 +
 +		if ( getModel()->getVerbose() )
 +			cout << "c(" << aVar.Id << ") = " << aVar.Price << endl;
@@ -1114,8 +1263,10 @@
 +	return false;
 +}
 +
-+/** This methods calculates, given an entering non-basic variable, a dX, lambda, and leaving
-+	non-basic variable.  It then calculates a new X from them.
++/**
++ * This methods calculates, given an entering non-basic variable, a dX,
++ * lambda, and leaving non-basic variable.  It then calculates a new X from
++ * them.
 + */
 +void BoundedRevisedSimplexImpl::calculateNewX( const EnterBasicVar& aEnterVar,
 +		size_t& nLeaveVarId, Matrix& mxDX )
@@ -1127,11 +1278,12 @@
 +	Matrix dXBasic( m_mxBasicInv*mxB );
 +
 +	Matrix dX;
-+	for ( size_t i = 0; i < dXBasic.rows(); ++i )
-+		dX( m_aBasicVarId.at( i ) , 0 ) = dXBasic( i, 0 );
++	SizeTypeContainer::const_iterator itr, 
++		itrBeg = m_aBasicVarId.begin(), itrEnd = m_aBasicVarId.end();
++	for ( itr = itrBeg; itr != itrEnd; ++itr )
++		dX( *itr, 0 ) = dXBasic( distance( itrBeg, itr ), 0 );
 +
-+	uInt32CIter itr;
-+	uInt32CIter itrBeg = m_aNonBasicVarId.begin(), itrEnd = m_aNonBasicVarId.end();
++	itrBeg = m_aNonBasicVarId.begin(), itrEnd = m_aNonBasicVarId.end();
 +	
 +	for ( itr = itrBeg; itr != itrEnd; ++itr )
 +	{
@@ -1181,13 +1333,18 @@
 +/** Given entering and leaving basic variables, update corresponding member containers 
 +	to reflect the change.
 + */
-+void BoundedRevisedSimplexImpl::updateNonBasicVars( const EnterBasicVar& aEnterVar, size_t nLeaveVarId )
++void BoundedRevisedSimplexImpl::updateNBVars( const EnterBasicVar& aEnterVar, size_t nLeaveVarId )
 +{
 +	//-------------------------------------------------------------------------
 +	// Update non-basic variable information
 +	
-+	uInt32Iter itr, itrBeg = m_aNonBasicVarId.begin(), itrEnd = m_aNonBasicVarId.end();
-+	BoundIter itr2, itr2Beg = m_aNonBasicVarBoundType.begin(), itr2End = m_aNonBasicVarBoundType.end();
++	SizeTypeContainer::iterator itr, 
++		itrBeg = m_aNonBasicVarId.begin(), 
++		itrEnd = m_aNonBasicVarId.end();
++
++	BoundIter itr2, 
++		itr2Beg = m_aNonBasicVarBoundType.begin(), 
++		itr2End = m_aNonBasicVarBoundType.end();
 +	
 +	for ( itr = itrBeg, itr2 = itr2Beg ; itr != itrEnd; ++itr, ++itr2 )
 +		if ( *itr == aEnterVar.Id )
@@ -1224,8 +1381,8 @@
 +	//-------------------------------------------------------------------------
 +	// Update the inverse matrix if the leaving variable is basic
 +	
-+	uInt32Iter itrBeg = m_aBasicVarId.begin(), itrEnd = m_aBasicVarId.end();
-+	uInt32Iter itr = find( itrBeg, itrEnd, nLeaveVarId );
++	SizeTypeContainer::iterator itrBeg = m_aBasicVarId.begin(), itrEnd = m_aBasicVarId.end();
++	SizeTypeContainer::iterator itr = find( itrBeg, itrEnd, nLeaveVarId );
 +	if ( itr != itrEnd )
 +	{
 +		*itr = aEnterVar.Id;
@@ -1233,18 +1390,19 @@
 +		OSL_ASSERT( m_mxBasicInv.isSquare() );
 +		Matrix mxE( m_mxBasicInv.rows(), m_mxBasicInv.cols(), true );
 +		double fLeaveVar = mxDX( nLeaveVarId, 0 );
-+		
-+		for ( size_t i = 0; i < mxE.rows(); ++i )
++
++		for ( SizeTypeContainer::iterator itr2 = itrBeg; 
++			  itr2 != itrEnd; ++itr2 )
 +		{
-+			size_t nId = m_aBasicVarId.at( i );
-+			double fDXVal = mxDX( nId, 0 );
-+			if ( i == nIndexLeaveVar )
++			size_t nBVarId = *itr2, nRowId = distance( itrBeg, itr2 );
++			double fDXVal = mxDX( nBVarId, 0 );
++			if ( nRowId == nIndexLeaveVar )
 +				if ( aEnterVar.BoundType == BOUND_LOWER )
-+					mxE( i, i ) = -1.0 / fLeaveVar;
++					mxE( nRowId, nRowId ) = -1.0 / fLeaveVar;
 +				else
-+					mxE( i, i ) =  1.0 / fLeaveVar; //??
++					mxE( nRowId, nRowId ) =  1.0 / fLeaveVar; //??
 +			else
-+				mxE( i, nIndexLeaveVar ) = fDXVal / fLeaveVar * (-1.0);
++				mxE( nRowId, nIndexLeaveVar ) = fDXVal / fLeaveVar * (-1.0);
 +		}
 +		
 +		if ( m_pModel->getVerbose() )
@@ -1258,6 +1416,13 @@
 +	}
 +}
 +
++/**
++ * The goal of this method is to find a good feasible point to start from.
++ * Such feasible point must satisfy all variable boundaries and
++ * constraints.
++ * 
++ * @return bool
++ */
 +bool BoundedRevisedSimplexImpl::findInitialSolution()
 +{
 +	m_pModel->print();
@@ -1271,122 +1436,203 @@
 +	}
 +
 +	vector<VarBoundary> aArray;
-+	return makeVarCombo( 0, nNumInitNonBasic, aArray );
++	return iterateVarBoundary( 0, nNumInitNonBasic, aArray );
 +}
 +
-+bool BoundedRevisedSimplexImpl::makeVarCombo( size_t nIdx, size_t nUpper, 
++/**
++ * Go through all individual elements in a given array containing initial
++ * non-basic (NB) variables with boundary values.  It is a precondition that
++ * by the time this method gets called the array already contains the exact
++ * number of bounded non-basic variables needed to start iteration.
++ * 
++ * As I go through the elements, I need to keep track of the sum of
++ * (constraint coefficient) x (NB variable value) for each constraint row
++ * as a vector (i.e. one-dimentional matrix), and subtract it from the RHS
++ * vector in the end in order to solve for a set of initial basic variables.
++ * 
++ * It may be necessary to check for its feasiblity after the values of the
++ * basic variables are computed if one or more of these basic variables
++ * happen to be bounded, otherwise no feasiblity check is necessary.
++ * 
++ * @param aArray array containing all initial non-basic variables and their
++ *               attributes.
++ * 
++ * @return bool true if intial solution is found, false otherwise.
++ */
++bool BoundedRevisedSimplexImpl::buildInitialVars( vector<VarBoundary>& cnNonBasic )
++{
++	Debug( "buildInitialVars" );
++	Debug( "mxA" );
++	m_mxA.print();
++	Debug( "mxB" );
++	m_mxB.print();
++	Debug( "mxC" );
++	m_mxC.print();
++
++	size_t nCostSize = m_mxC.cols();
++
++	std::list<size_t> cnBasicId; // permutation of basic variable IDs
++	for ( size_t i = 0; i < nCostSize; ++i )
++		cnBasicId.push_back( i );
++
++	Matrix mxInitX( nCostSize, 1 );
++
++	Debug( "All IDs: " );
++	printElements( cnBasicId );
++
++	Matrix mxLHSSum( m_mxA.rows(), 1 ); // matrix to keep track of left-hand-side sums
++	SizeTypeContainer cnNBColId;        // non-basic variable IDs
++	std::vector<Bound> cnNBBoundType;   // non-basic bound type
++	cout << "NonBasicID: ";
++
++	std::vector<VarBoundary>::const_iterator itr, 
++		itrBeg = cnNonBasic.begin(), itrEnd = cnNonBasic.end();
++	for ( itr = itrBeg; itr != itrEnd; ++itr )
++	{
++		double fNBVal = itr->Value;
++		size_t nColId = itr->Id;
++		cout << nColId << " ";
++		mxInitX( nColId, 0 ) = fNBVal;
++		cnNBBoundType.push_back( itr->BoundType );
++		cnNBColId.push_back( nColId );
++		cnBasicId.remove( nColId );
++		for ( size_t nRowId = 0; nRowId < m_mxA.rows(); ++nRowId )
++			mxLHSSum( nRowId, 0 ) += m_mxA( nRowId, nColId ) * fNBVal;
++	}
++	cout << endl;
++
++	Debug( "Basic IDs: " );
++	printElements( cnBasicId );
++
++	Matrix mxBasic( m_mxA );
++	mxBasic.deleteColumns( toVector<SizeTypeContainer, size_t>(cnNBColId) );
++
++	// Now solve for initial basic variables (mxX).
++	Matrix mxBasicInv = mxBasic.inverse();
++	Matrix mxNewRHS = m_mxB - mxLHSSum;
++	Matrix mxBaseX = mxBasicInv*mxNewRHS;
++
++	mxBasic.print();
++	mxLHSSum.print();
++	Debug( "initial basic variable:" );
++	mxBaseX.print();
++
++	// Transfer basic variables into initial X vector.  For each variable,
++	// make sure that the value satisfies its boundary condition if it's
++	// bounded.
++
++	// TODO: Find a way to back-track if an initial basic variable does not
++	// satisfy its boundary condition.
++
++	std::list<size_t>::const_iterator itrLt, 
++		itrLtBeg = cnBasicId.begin(), itrLtEnd = cnBasicId.end();
++	for ( itrLt = itrLtBeg; itrLt != itrLtEnd; ++itrLt )
++	{
++		size_t nVarId = *itrLt;
++		double fBaseVal = mxBaseX( distance( itrLtBeg, itrLt ), 0 );
++
++		// check lower boundary condition
++		if ( m_pModel->isVarBounded( nVarId, BOUND_LOWER ) )
++		{
++			double fBound = m_pModel->getVarBound( nVarId, BOUND_LOWER );
++			if ( fBaseVal < fBound )
++			{
++				cout << nVarId << " basic variable (" << fBaseVal << ") < lower bound (" 
++					 << fBound << ")" << endl;
++				return false;
++			}
++		}
++
++		// check upper boundary condition
++		if ( m_pModel->isVarBounded( nVarId, BOUND_UPPER ) )
++		{
++			double fBound = m_pModel->getVarBound( nVarId, BOUND_UPPER );
++			if ( fBaseVal > fBound )
++			{
++				cout << nVarId << " basic variable (" << fBaseVal << ") > upper bound (" 
++					 << fBound << ")" << endl;
++				return false;
++			}
++		}
++		mxInitX( nVarId, 0 ) = fBaseVal;
++	}
++
++	Debug( "initial X:" );
++	mxInitX.trans().print();
++
++	m_mxX.swap( mxInitX );
++	m_mxBasicInv.swap( mxBasicInv );
++	swap( m_aBasicVarId, cnBasicId );
++	swap( m_aNonBasicVarId, cnNBColId );
++	swap( m_aNonBasicVarBoundType, cnNBBoundType );
++
++	return true;
++}
++
++/**
++ * Iterate through all decision variables and pick up boundary
++ * values to use as initial values, then check if the values are
++ * feasible.
++ * 
++ * @param nIdx
++ * @param nUpper
++ * @param aArray
++ * 
++ * @return bool returns true if a feasible initial solution is found, else
++ *         returns false.
++ */
++bool BoundedRevisedSimplexImpl::iterateVarBoundary( size_t nIdx, size_t nUpper, 
 +		vector<VarBoundary>& aArray )
 +{	
-+	size_t nNumCost = m_pModel->getCostVector().cols();	// number of cost vector elements
-+	vector<VarBoundary>::const_iterator iter;
-+	vector<VarBoundary>::const_iterator itrEnd = aArray.end();
-+	
-+//     if ( nIdx == nNumCost || aArray.size() == nUpper )
 +	if ( aArray.size() == nUpper )
 +	{
-+		// Solve the rest of the elements, and check if this initial X is feasible.  If yes,
-+		// return true, if no return false.
-+
-+		Matrix mxX;
-+		vector<size_t> aBasicVarId;
-+		vector<size_t> aNonBasicVarId;
-+		vector<Bound> aNonBasicVarBoundType;
-+		
-+		vector<VarBoundary>::const_iterator iter;
-+		vector<VarBoundary>::const_iterator itrEnd = aArray.end();
-+		for ( iter = aArray.begin() ; iter != itrEnd; ++iter )
-+		{
-+			VarBoundary iva = *iter;
-+			aNonBasicVarId.push_back( iva.Id );
-+			aNonBasicVarBoundType.push_back( iva.BoundType );
-+			mxX( iva.Id, 0 ) = iva.Value;
-+		}
-+		
-+		for ( size_t i = 0; i < m_mxA.cols(); ++i )
-+			if ( find( aNonBasicVarId.begin(), aNonBasicVarId.end(), i ) == aNonBasicVarId.end() )
-+				aBasicVarId.push_back( i );
-+		
-+		if ( m_pModel->getVerbose() )
-+		{
-+			cout << "aBasicVarId = ";
-+			printElements( aBasicVarId );
-+			cout << "  aNonBasicVarId = ";
-+			printElements( aNonBasicVarId );
-+			cout << endl;
-+		}
-+		
-+		Matrix mxTmpA( m_mxA );
-+		mxTmpA.deleteColumns( aBasicVarId );
-+
-+		Matrix mxTmp;
-+		
-+		size_t nId = 0;
-+		for ( iter = aArray.begin(); iter != itrEnd; ++iter )
-+			mxTmp( nId++, 0 ) = (*iter).Value;
-+			
-+		Matrix mxTmpB( m_mxB );
-+		mxTmpB -= mxTmpA*mxTmp;
-+		
-+		Matrix mxBasA( m_mxA );
-+		mxBasA.deleteColumns( aNonBasicVarId );
-+		Matrix mxBasAInv = mxBasA.inverse();
-+		Matrix mxBasX = mxBasAInv * mxTmpB;
-+		cout << "mxBasAInv: " << endl;
-+		mxBasA.print();
-+		mxBasAInv.print();
-+		mxTmpB.print();
-+		cout << "mxBasX: " << endl;
-+		mxBasX.print();
-+		
-+		for ( size_t i = 0; i < mxBasX.rows(); ++i )
-+			mxX( aBasicVarId.at( i ), 0 ) = mxBasX( i, 0 );
-+			
-+		if ( m_pModel->getVerbose() )
-+		{
-+			cout << "X[0] = ";
-+			mxX.trans().print();
-+		}
-+		
-+		// Now check if the mxX is feasible.
-+		if ( isSolutionFeasible( mxX ) )
-+		{
-+			m_mxBasicInv = mxBasAInv;
-+			m_mxX = mxX;
-+			m_aBasicVarId = aBasicVarId;
-+			m_aNonBasicVarId = aNonBasicVarId;
-+			m_aNonBasicVarBoundType = aNonBasicVarBoundType;
-+			return true;
-+		}
-+		else
-+			return false;
++		cout << "array size maxed: " << aArray.size() << endl;
++		return buildInitialVars( aArray );
 +	}
-+	
-+	Bound e[2] = { BOUND_LOWER, BOUND_UPPER };
++
++	if ( nIdx > m_mxC.cols() )
++		// Not enough non-basic variables found
++		return false;
++
++	// Check both boundaries of a variable at the current ID, and if either 
++	// one is bounded, then get that value and its side and store it into 
++	// the array.
++	static const Bound e[2] = { BOUND_LOWER, BOUND_UPPER };
 +	for ( size_t i = 0; i < 2; ++i )
 +		if ( m_pModel->isVarBounded( nIdx, e[i] ) )
 +		{
-+			vector<VarBoundary> aArray1 = aArray;
++			cout << "index: a" << nIdx << "a\tarray size: " << aArray.size() << "\t";
++			if ( i == 0 )
++				cout << "lower" << endl;
++			else
++				cout << "upper" << endl;
 +			VarBoundary temp;
 +			temp.Id = nIdx;
 +			temp.Value = m_pModel->getVarBound( nIdx, e[i] );
 +			temp.BoundType = e[i];
-+			aArray1.push_back( temp );
-+			if ( makeVarCombo( nIdx + 1, nUpper, aArray1 ) )
++			aArray.push_back( temp );
++			if ( m_pModel->getVerbose() )
++			{
++				cout << nIdx << " bounded at ";
++				if ( e[i] == BOUND_LOWER )
++					cout << "lower end";
++				else
++					cout <<	"upper end";
++				cout << " (" << temp.Value << ")" << endl;
++			}
++			//break;
++			if ( iterateVarBoundary( nIdx+1, nUpper, aArray ) )
 +				return true;
++			aArray.pop_back();
 +		}
 +		
-+	if ( !m_pModel->isVarBounded( nIdx, BOUND_LOWER ) &&
-+		 !m_pModel->isVarBounded( nIdx, BOUND_UPPER ) )
-+		if ( makeVarCombo( nIdx + 1, nUpper, aArray ) )
-+			return true;
-+
++	//return iterateVarBoundary( nIdx+1, nUpper, aArray );
 +	return false;
 +}
 +
 +bool BoundedRevisedSimplexImpl::isSolutionFeasible( const Matrix& mxX ) const
 +{
-+	const size_t nNumCost = m_mxC.cols();
-+	OSL_ASSERT( nNumCost == mxX.rows() );
++	OSL_ASSERT( m_mxC.cols() == mxX.rows() );
 +	
 +	for ( size_t i = 0; i < mxX.rows(); ++i )
 +	{
@@ -1405,13 +1651,13 @@
 +}
 +
 +const Matrix BoundedRevisedSimplexImpl::solvePriceVector( 
-+		const vector<size_t>& aBasicVarId,
++		const SizeTypeContainer& aBasicVarId,
 +		const Matrix& mxAInv, const Matrix& mxC ) const
 +{
 +	Matrix c;
-+	vector<size_t>::const_iterator itr;
-+	vector<size_t>::const_iterator itrBeg = aBasicVarId.begin();
-+	vector<size_t>::const_iterator itrEnd = aBasicVarId.end();
++	SizeTypeContainer::const_iterator itr;
++	SizeTypeContainer::const_iterator itrBeg = aBasicVarId.begin();
++	SizeTypeContainer::const_iterator itrEnd = aBasicVarId.end();
 +	for ( itr = itrBeg; itr != itrEnd; ++itr )
 +	{
 +		int idx = distance( itrBeg, itr );
