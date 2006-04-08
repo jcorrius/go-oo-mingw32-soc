@@ -33,7 +33,7 @@
  *
  ************************************************************************/
 #include "minor.hxx"
-
+#include "major.hxx"
 #include "graph.hxx"
 
 #include <db_cxx.h>

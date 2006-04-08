@@ -4,9 +4,9 @@
 #
 #   $RCSfile: makefile.mk,v $
 #
-#   $Revision: 1.1 $
+#   $Revision: 1.2 $
 #
-#   last change: $Author: mikeleib $ $Date: 2006/04/06 22:36:33 $
+#   last change: $Author: mikeleib $ $Date: 2006/04/08 04:48:02 $
 #
 #   The Contents of this file are made available subject to
 #   the terms of GNU Lesser General Public License Version 2.1.
@@ -50,7 +50,8 @@ ENABLE_EXCEPTIONS=TRUE
 OBJFILES=\
 	$(OBJ)$/main.obj \
 	$(OBJ)$/minor.obj \
-	$(OBJ)$/graph.obj
+	$(OBJ)$/graph.obj \
+	$(OBJ)$/major.obj 
 
 SLOFILES=\
 	$(SLO)$/Record.obj
