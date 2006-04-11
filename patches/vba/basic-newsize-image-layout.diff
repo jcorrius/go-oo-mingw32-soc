@@ -1,0 +1,1790 @@
+diff -rup basic.orig/inc/sbmeth.hxx basic/inc/sbmeth.hxx
+--- basic.orig/inc/sbmeth.hxx	2006-03-29 14:13:20.000000000 +0100
++++ basic/inc/sbmeth.hxx	2006-04-07 08:42:18.000000000 +0100
+@@ -62,7 +62,7 @@ class SB_DLLPUBLIC SbMethod : public Sbx
+ 	SbModule* pMod;
+ 	USHORT    nDebugFlags;
+ 	USHORT	  nLine1, nLine2;
+-	USHORT	  nStart;
++	UINT32	  nStart;
+ 	BOOL	  bInvalid;
+ 	SbMethod( const String&, SbxDataType, SbModule* );
+ 	SbMethod( const SbMethod& );
+@@ -77,7 +77,7 @@ public:
+ 	SbxArray* GetLocals();
+ 	SbxArray* GetStatics();
+ 	SbModule* GetModule() 				 { return pMod; 	   }
+-	USHORT	  GetId() const				 { return nStart;	   }
++	UINT32	  GetId() const				 { return nStart;	   }
+ 	USHORT    GetDebugFlags()			 { return nDebugFlags; }
+ 	void 	  SetDebugFlags( USHORT n )  { nDebugFlags = n;    }
+ 	void 	  GetLineRange( USHORT&, USHORT& );
+diff -rup basic.orig/source/classes/image.cxx basic/source/classes/image.cxx
+--- basic.orig/source/classes/image.cxx	2005-09-29 19:38:33.000000000 +0100
++++ basic/source/classes/image.cxx	2006-04-06 16:42:00.000000000 +0100
+@@ -42,17 +42,18 @@
+ #include "sb.hxx"
+ #include <string.h>		// memset() etc
+ #include "image.hxx"
+-#include "filefmt.hxx"
+-
++#include <codegen.hxx>
+ SbiImage::SbiImage()
+ {
+ 	pStringOff = NULL;
+ 	pStrings   = NULL;
+ 	pCode  	   = NULL;
++	pLegacyPCode  	   = NULL;
+ 	nFlags	   =
+ 	nStrings   =
+ 	nStringSize=
+ 	nCodeSize  =
++	nLegacyCodeSize  =
+ 	nDimBase   = 0;
+ 	bInit	   =
+ 	bError	   = FALSE;
+@@ -70,12 +71,14 @@ void SbiImage::Clear()
+ 	delete[] pStringOff;
+ 	delete[] pStrings;
+ 	delete[] pCode;
++	ReleaseLegacyBuffer();
+ 	pStringOff = NULL;
+ 	pStrings   = NULL;
+ 	pCode  	   = NULL;
+ 	nFlags	   =
+ 	nStrings   =
+ 	nStringSize=
++	nLegacyCodeSize  = 0;
+ 	nCodeSize  = 0;
+ 	eCharSet   = gsl_getSystemTextEncoding();
+ 	nDimBase   = 0;
+@@ -121,8 +124,9 @@ void SbiCloseRecord( SvStream& r, ULONG 
+ // Falls die Versionsnummer nicht passt, werden die binaeren Teile
+ // nicht geladen, wohl aber Source, Kommentar und Name.
+ 
+-BOOL SbiImage::Load( SvStream& r )
++BOOL SbiImage::Load( SvStream& r, UINT32 nVer )
+ {
++
+ 	UINT16 nSign, nCount;
+ 	UINT32 nLen, nOff;
+ 
+@@ -144,10 +148,12 @@ BOOL SbiImage::Load( SvStream& r )
+ 		  >> nFlags >> nReserved1 >> nReserved2 >> nReserved3;
+ 		eCharSet = (CharSet) nCharSet;
+         eCharSet = GetSOLoadTextEncoding( eCharSet );
+-		bBadVer  = BOOL( nVersion != B_CURVERSION );
++		bBadVer  = BOOL( nVersion > B_CURVERSION );
+ 		nDimBase = (USHORT) lDimBase;
+ 	}
+ 
++	bool bLegacy = ( nVersion < B_EXT_IMG_VERSION );
++
+ 	ULONG nNext;
+ 	while( ( nNext = r.Tell() ) < nLast )
+ 	{
+@@ -189,8 +195,27 @@ BOOL SbiImage::Load( SvStream& r )
+ 			case B_PCODE:
+ 				if( bBadVer ) break;
+ 				pCode = new char[ nLen ];
+-				nCodeSize = (USHORT) nLen;
++				nCodeSize = nLen;
+ 				r.Read( pCode, nCodeSize );
++				if ( bLegacy )
++				{
++					ReleaseLegacyBuffer(); // release any previously held buffer
++					nLegacyCodeSize = nCodeSize;
++					pLegacyPCode = pCode;
++
++					PCodeBuffConvertor< UINT16, UINT32 > aLegacyToNew( (BYTE*)pLegacyPCode, nLegacyCodeSize );
++					aLegacyToNew.convert();
++					pCode = (char*)aLegacyToNew.GetBuffer();
++					nCodeSize = aLegacyToNew.GetSize();
++					// we don't release the legacy buffer
++					// right now, thats because the module
++					// needs it to fix up the method
++					// nStart members. When that is done
++					// the module can release the buffer
++					// or it can wait until this routine
++					// is called again or when this class						// destructs all of which will trigger
++					// release of the buffer.
++				}
+ 				break;
+ 			case B_PUBLICS:
+ 			case B_POOLDIR:
+@@ -240,16 +265,19 @@ done:
+ 	return BOOL( !bError );
+ }
+ 
+-BOOL SbiImage::Save( SvStream& r )
++BOOL SbiImage::Save( SvStream& r, UINT32 nVer )
+ {
++	bool bLegacy = ( nVer < B_EXT_IMG_VERSION );
+ 	// Erst mal der Header:
+ 	ULONG nStart = SbiOpenRecord( r, B_MODULE, 1 );
+ 	ULONG nPos;
+ 
+     eCharSet = GetSOStoreTextEncoding( eCharSet );
+-
+-	r << (INT32) B_CURVERSION
+-	  << (INT32) eCharSet
++	if ( bLegacy )
++		r << (INT32) B_LEGACYVERSION;
++	else
++		r << (INT32) B_CURVERSION;
++	r  << (INT32) eCharSet
+ 	  << (INT32) nDimBase
+ 	  << (INT16) nFlags
+ 	  << (INT16) 0
+@@ -309,7 +337,18 @@ BOOL SbiImage::Save( SvStream& r )
+ 	if( pCode && SbiGood( r ) )
+ 	{
+ 		nPos = SbiOpenRecord( r, B_PCODE, 1 );
+-		r.Write( pCode, nCodeSize );
++		if ( bLegacy )
++		{
++			UINT32 nTmpSize = 0;
++			PCodeBuffConvertor< UINT32, UINT16 > aNewToLegacy( (BYTE*)pCode, nCodeSize );
++			aNewToLegacy.convert();
++			pLegacyPCode = (char*)aNewToLegacy.GetBuffer();
++			nLegacyCodeSize = aNewToLegacy.GetSize();
++		        r.Write( pLegacyPCode, nLegacyCodeSize );
++			ReleaseLegacyBuffer();
++		}
++		else
++			r.Write( pCode, nCodeSize );
+ 		SbiCloseRecord( r, nPos );
+ 	}
+ 	// String-Pool?
+@@ -417,7 +456,7 @@ void SbiImage::AddString( const String& 
+ // und ist bereits per new angelegt. Ausserdem enthaelt er alle Integers
+ // im Big Endian-Format, kann also direkt gelesen/geschrieben werden.
+ 
+-void SbiImage::AddCode( char* p, USHORT s )
++void SbiImage::AddCode( char* p, UINT32 s )
+ {
+ 	pCode = p;
+ 	nCodeSize = s;
+@@ -481,3 +520,21 @@ const SbxObject* SbiImage::FindType (Str
+ 	return rTypes.Is() ? (SbxObject*)rTypes->Find(aTypeName,SbxCLASS_OBJECT) : NULL;
+ }
+ 
++UINT16
++SbiImage::CalcLegacyOffset( INT32 nOffset )
++{
++	return SbiCodeGen::calcLegacyOffSet( (BYTE*)pCode, nOffset ) ;
++}
++UINT32
++SbiImage::CalcNewOffset( INT16 nOffset )
++{
++	return SbiCodeGen::calcNewOffSet( (BYTE*)pLegacyPCode, nOffset ) ;
++}
++
++void 
++SbiImage::ReleaseLegacyBuffer()
++{
++	delete[] pLegacyPCode;
++	pLegacyPCode = NULL;
++	nLegacyCodeSize = 0;
++}
+diff -rup basic.orig/source/classes/sbxmod.cxx basic/source/classes/sbxmod.cxx
+--- basic.orig/source/classes/sbxmod.cxx	2006-04-03 15:13:59.000000000 +0100
++++ basic/source/classes/sbxmod.cxx	2006-04-07 08:41:53.000000000 +0100
+@@ -989,7 +990,7 @@ const BYTE* SbModule::FindNextStmnt( con
+ const BYTE* SbModule::FindNextStmnt( const BYTE* p, USHORT& nLine, USHORT& nCol, 
+ 	BOOL bFollowJumps, const SbiImage* pImg ) const
+ {
+-	USHORT nPC = (USHORT) ( p - (const BYTE*) pImage->GetCode() );
++	UINT32 nPC = (UINT32) ( p - (const BYTE*) pImage->GetCode() );
+ 	while( nPC < pImage->GetCodeSize() )
+ 	{
+ 		SbiOpcode eOp = (SbiOpcode ) ( *p++ );
+@@ -997,21 +998,24 @@ const BYTE* SbModule::FindNextStmnt( con
+ 		if( bFollowJumps && eOp == _JUMP && pImg )
+ 		{
+ 			DBG_ASSERT( pImg, "FindNextStmnt: pImg==NULL with FollowJumps option" );
+-			USHORT nOp1 = *p++; nOp1 |= *p++ << 8;
++			UINT32 nOp1 = *p++; nOp1 |= *p++ << 8;
++			nOp1 |= *p++ << 16; nOp1 |= *p++ << 24;
+ 			p = (const BYTE*) pImg->GetCode() + nOp1;
+ 		}
+ 		else if( eOp >= SbOP1_START && eOp <= SbOP1_END )
+-			p += 2, nPC += 2;
++			p += 4, nPC += 4;
+ 		else if( eOp == _STMNT )
+ 		{
+-			USHORT nl, nc;
++			UINT32 nl, nc;
+ 			nl = *p++; nl |= *p++ << 8;
++			nl |= *p++ << 16 ; nl |= *p++ << 24;
+ 			nc = *p++; nc |= *p++ << 8;
++			nc |= *p++ << 16 ; nc |= *p++ << 24;
+ 			nLine = nl; nCol = nc;
+ 			return p;
+ 		}
+ 		else if( eOp >= SbOP2_START && eOp <= SbOP2_END )
+-			p += 4, nPC += 4;
++			p += 8, nPC += 8;
+ 		else if( !( eOp >= SbOP0_START && eOp <= SbOP0_END ) )
+ 		{
+ 			StarBASIC::FatalError( SbERR_INTERNAL_ERROR );
+@@ -1119,7 +1123,13 @@ void SbModule::ClearAllBP()
+ {
+ 	delete pBreaks; pBreaks = NULL;
+ }
++/* 
++	nVer = 1 legacy type ( not supported ? )
++	nVer = 2 legacy type ( StarOffice 3.0, 4.0, 5.0 )
++	nVer = 3 current version, applicable for passwd protected
++		libraries only.
+ 
++*/
+ BOOL SbModule::LoadData( SvStream& rStrm, USHORT nVer )
+ {
+ 	Clear();
+@@ -1132,25 +1142,42 @@ BOOL SbModule::LoadData( SvStream& rStrm
+ 	if( bImage )
+ 	{
+ 		SbiImage* p = new SbiImage;
+-		if( !p->Load( rStrm ) )
++		ULONG nImageVer = B_CURVERSION; // default
++		if ( nVer <= 2 ) // loading passwrd protected lib
++			nImageVer = B_LEGACYVERSION;
++		if( !p->Load( rStrm, nImageVer ) )
+ 		{
+ 			delete p;
+ 			return FALSE;
+ 		}
++
++		// passwd protected libraries, legacy formats, 2.0.x 
++		// ( in old image format )
++		if ( nVer <= 2 )
++		{
++			for( UINT32 i = 0; i < pMethods->Count(); i++ )
++			{
++				SbMethod* pMeth = PTR_CAST(SbMethod,pMethods->Get( i ) );
++				if( pMeth )
++					//fixup method start positions
++					pMeth->nStart = p->CalcNewOffset( pMeth->nStart );
++			}
++			p->ReleaseLegacyBuffer();
++		}
+ 		aComment = p->aComment;
+ 		SetName( p->aName );
+ 		// Ist Code vorhanden?
+ 		if( p->GetCodeSize() )
+ 		{
+ 			aOUSource = p->aOUSource;
+-			// Alte Version: Image weg
+-			if( nVer == 1 )
++			// Alte Version: Image weg 
++			if( nVer == 1 ) 
+ 			{
+ 				SetSource32( p->aOUSource );
+ 				delete p;
+ 			}
+ 			else
+-				pImage = p;
++				pImage = p; 
+ 		}
+ 		else
+ 		{
+@@ -1163,6 +1190,14 @@ BOOL SbModule::LoadData( SvStream& rStrm
+ 
+ BOOL SbModule::StoreData( SvStream& rStrm ) const
+ {
++	if ( pImage )
++		for( UINT32 i = 0; i < pMethods->Count(); i++ )
++		{
++			SbMethod* pMeth = PTR_CAST(SbMethod,pMethods->Get( i ) );
++			if( pMeth )
++				//fixup method start positions
++				pMeth->nStart = pImage->CalcLegacyOffset( pMeth->nStart );
++		}
+ 	if( !SbxObject::StoreData( rStrm ) )
+ 		return FALSE;
+ 	if( pImage )
+@@ -1171,7 +1206,12 @@ BOOL SbModule::StoreData( SvStream& rStr
+ 		pImage->aComment = aComment;
+ 		pImage->aName = GetName();
+ 		rStrm << (BYTE) 1;
+-		return pImage->Save( rStrm );
++		// # PCode is saved only for legacy formats only
++		// It should be noted that it probably isn't necessary
++		// It would be better not to store the image ( more flexible with
++		// formats )
++		pImage->Save( rStrm, B_LEGACYVERSION );
++		
+ 	}
+ 	else
+ 	{
+@@ -1190,6 +1230,17 @@ BOOL SbModule::StoreBinaryData( SvStream
+     BOOL bRet = Compile();
+     if( bRet )
+     {
++		// To save new image format would break intra version
++		// compatability for the present ( 2.0.x ) version so the 
++		// extended image size enhancement is not available for password 
++		// protected libraries.
++		for( UINT32 i = 0; i < pMethods->Count(); i++ )
++		{
++			SbMethod* pMeth = PTR_CAST(SbMethod,pMethods->Get( i ) );
++			if( pMeth )
++				//fixup method start positions
++				pMeth->nStart = pImage->CalcLegacyOffset( pMeth->nStart );
++		}
+      	bRet = SbxObject::StoreData( rStrm );
+         if( bRet )
+         {
+@@ -1198,14 +1249,17 @@ BOOL SbModule::StoreBinaryData( SvStream
+ 		    pImage->aName = GetName();
+ 
+ 		    rStrm << (BYTE) 1;
+-		    bRet = pImage->Save( rStrm );
+-
++		    bRet = pImage->Save( rStrm, B_LEGACYVERSION );
++			
+ 		    pImage->aOUSource = aOUSource;
+         }
+     }
+     return bRet;
+ }
+ 
++// Called for >= OO 1.0 passwd protected libraries only
++// 
++
+ BOOL SbModule::LoadBinaryData( SvStream& rStrm )
+ {
+ 	OUString aKeepSource = aOUSource;
+@@ -1865,11 +1919,13 @@ BOOL SbMethod::LoadData( SvStream& rStrm
+ 		return FALSE;
+ 	INT16 n;
+ 	rStrm >> n;
++	INT16 nTempStart = nStart;
+ 	// nDebugFlags = n; 	// AB 16.1.96: Nicht mehr uebernehmen
+ 	if( nVer == 2 )
+-		rStrm >> nLine1 >> nLine2 >> nStart >> bInvalid;
++		rStrm >> nLine1 >> nLine2 >> nTempStart >> bInvalid;
+ 	// AB: 2.7.1996: HACK wegen 'Referenz kann nicht gesichert werden'
+ 	SetFlag( SBX_NO_MODIFY );
++	nStart = nTempStart;
+ 	return TRUE;
+ }
+
+diff -rup basic.orig/source/comp/buffer.cxx basic/source/comp/buffer.cxx
+--- basic.orig/source/comp/buffer.cxx	2005-09-29 17:17:03.000000000 +0100
++++ basic/source/comp/buffer.cxx	2006-04-04 14:06:29.000000000 +0100
+@@ -38,6 +38,8 @@
+ #include "buffer.hxx"
+ #include <string.h>
+ 
++const static UINT32 UP_LIMIT=0xFFFFFF00L;
++
+ // Der SbiBuffer wird in Inkrements von mindestens 16 Bytes erweitert.
+ // Dies ist notwendig, da viele Klassen von einer Pufferlaenge
+ // von x*16 Bytes ausgehen.
+@@ -83,7 +85,7 @@ BOOL SbiBuffer::Check( USHORT n )
+ 		USHORT nn = 0;
+ 		while( nn < n ) nn += nInc;
+ 		char* p;
+-		if( ((long) nSize + nn ) > 0xFF00L ) p = NULL;
++		if( ((long) nSize + nn ) > UP_LIMIT ) p = NULL;
+ 		else p = new char [nSize + nn];
+ 		if( !p )
+ 		{
+@@ -106,11 +108,11 @@ BOOL SbiBuffer::Check( USHORT n )
+ 
+ // Angleich des Puffers auf die uebergebene Byte-Grenze
+ 
+-void SbiBuffer::Align( short n )
++void SbiBuffer::Align( INT32 n )
+ {
+ 	if( nOff % n ) {
+-		USHORT nn =( ( nOff + n ) / n ) * n;
+-		if( nn <= 0xFF00 )
++		UINT32 nn =( ( nOff + n ) / n ) * n;
++		if( nn <= UP_LIMIT )
+ 		{
+ 			nn -= nOff;
+ 			if( Check( nn ) )
+@@ -125,13 +127,17 @@ void SbiBuffer::Align( short n )
+ 
+ // Patch einer Location
+ 
+-void SbiBuffer::Patch( USHORT off, UINT16 val )
++void SbiBuffer::Patch( UINT32 off, UINT32 val )
+ {
+-	if( ( off + sizeof( UINT16 ) ) < nOff )
++	if( ( off + sizeof( UINT32 ) ) < nOff )
+ 	{
++		UINT16 val1 = ( val & 0xFFFF );
++		UINT16 val2 = ( val >> 16 );
+ 		BYTE* p = (BYTE*) pBuf + off;
+-		*p++ = (char) ( val & 0xFF );
+-		*p   = (char) ( val >> 8 );
++		*p++ = (char) ( val1 & 0xFF );
++		*p++ = (char) ( val1 >> 8 );
++		*p++ = (char) ( val2 & 0xFF );
++		*p   = (char) ( val2 >> 8 );
+ 	}
+ }
+ 
+@@ -139,24 +145,29 @@ void SbiBuffer::Patch( USHORT off, UINT1
+ // bauen eine Kette auf. Der Anfang der Kette ist beim uebergebenen
+ // Parameter, das Ende der Kette ist 0.
+ 
+-void SbiBuffer::Chain( USHORT off )
++void SbiBuffer::Chain( UINT32 off )
+ {
+ 	if( off && pBuf )
+ 	{
+ 		BYTE *ip;
+-		USHORT i = off;
+-		USHORT val = nOff;
++		UINT32 i = off;
++		UINT32 val1 = (nOff & 0xFFFF);
++		UINT32 val2 = (nOff >> 16);
+ 		do
+ 		{
+ 			ip = (BYTE*) pBuf + i;
+-			i = ( *ip ) | ( *(ip+1) << 8 );
++			BYTE* pTmp = ip;
++             		i =  *pTmp++; i |= *pTmp++ << 8; i |= *pTmp++ << 16; i |= *pTmp++ << 24;
++
+ 			if( i >= nOff )
+ 			{
+ 				pParser->Error( SbERR_INTERNAL_ERROR, "BACKCHAIN" );
+ 				break;
+ 			}
+-			*ip++ = (char) ( val & 0xFF );
+-			*ip   = (char) ( val >> 8 );
++			*ip++ = (char) ( val1 & 0xFF );
++			*ip++ = (char) ( val1 >> 8 );
++			*ip++ = (char) ( val2 & 0xFF );
++			*ip   = (char) ( val2 >> 8 );
+ 		} while( i );
+ 	}
+ }
+@@ -197,6 +208,25 @@ BOOL SbiBuffer::operator +=( UINT16 n )
+ 	} else return FALSE;
+ }
+ 
++BOOL SbiBuffer::operator +=( UINT32 n )
++{
++	if( Check( 4 ) )
++	{
++		UINT16 n1 = ( n & 0xFFFF );
++		UINT16 n2 = ( n >> 16 );
++		if ( operator +=( n1 ) && operator +=( n2 ) )
++			return TRUE;
++		return TRUE;
++	} 
++	return FALSE;
++}
++
++BOOL SbiBuffer::operator +=( INT32 n )
++{
++	return operator +=( (UINT32) n );
++}
++
++
+ BOOL SbiBuffer::operator +=( const String& n )
+ {
+ 	USHORT l = n.Len() + 1;
+diff -rup basic.orig/source/comp/codegen.cxx basic/source/comp/codegen.cxx
+--- basic.orig/source/comp/codegen.cxx	2006-03-29 14:13:40.000000000 +0100
++++ basic/source/comp/codegen.cxx	2006-04-06 16:32:48.000000000 +0100
+@@ -50,7 +50,7 @@ SbiCodeGen::SbiCodeGen( SbModule& r, Sbi
+ 	nForLevel = 0;
+ }
+ 
+-USHORT SbiCodeGen::GetPC()
++UINT32 SbiCodeGen::GetPC()
+ {
+ 	return aCode.GetSize();
+ }
+@@ -83,7 +83,7 @@ void SbiCodeGen::GenStmnt()
+ // Die Gen-Routinen returnen den Offset des 1. Operanden,
+ // damit Jumps dort ihr Backchain versenken koennen
+ 
+-USHORT SbiCodeGen::Gen( SbiOpcode eOpcode )
++UINT32 SbiCodeGen::Gen( SbiOpcode eOpcode )
+ {
+ #ifndef PRODUCT
+ 	if( eOpcode < SbOP0_START || eOpcode > SbOP0_END )
+@@ -94,7 +94,7 @@ USHORT SbiCodeGen::Gen( SbiOpcode eOpcod
+ 	return GetPC();
+ }
+ 
+-USHORT SbiCodeGen::Gen( SbiOpcode eOpcode, UINT16 nOpnd )
++UINT32 SbiCodeGen::Gen( SbiOpcode eOpcode, UINT32 nOpnd )
+ {
+ #ifndef PRODUCT
+ 	if( eOpcode < SbOP1_START || eOpcode > SbOP1_END )
+@@ -102,12 +102,12 @@ USHORT SbiCodeGen::Gen( SbiOpcode eOpcod
+ #endif
+ 	GenStmnt();
+ 	aCode += (UINT8) eOpcode;
+-	USHORT n = GetPC();
++	UINT32 n = GetPC();
+ 	aCode += nOpnd;
+ 	return n;
+ }
+ 
+-USHORT SbiCodeGen::Gen( SbiOpcode eOpcode, UINT16 nOpnd1, UINT16 nOpnd2 )
++UINT32 SbiCodeGen::Gen( SbiOpcode eOpcode, UINT32 nOpnd1, UINT32 nOpnd2 )
+ {
+ #ifndef PRODUCT
+ 	if( eOpcode < SbOP2_START || eOpcode > SbOP2_END )
+@@ -115,7 +115,7 @@ USHORT SbiCodeGen::Gen( SbiOpcode eOpcod
+ #endif
+ 	GenStmnt();
+ 	aCode += (UINT8) eOpcode;
+-	USHORT n = GetPC();
++	UINT32 n = GetPC();
+ 	aCode += nOpnd1;
+ 	aCode += nOpnd2;
+ 	return n;
+@@ -344,3 +344,192 @@ void SbiCodeGen::Save()
+ 	rMod.EndDefinitions();
+ }
+ 
++template < class T >
++class PCodeVisitor
++{
++public:
++   virtual void start( BYTE* pStart ) = 0;
++   virtual void processOpCode0( SbiOpcode eOp ) = 0; 
++   virtual void processOpCode1( SbiOpcode eOp, T nOp1 ) = 0; 
++   virtual void processOpCode2( SbiOpcode eOp, T nOp1, T nOp2 ) = 0; 
++   virtual bool processParams() = 0;
++   virtual void end() = 0;
++};
++
++template <class T>
++class PCodeBufferWalker
++{
++private:
++	T  m_nBytes;
++	BYTE* m_pCode;
++	T readParam( BYTE*& pCode )
++	{
++		short nBytes = sizeof( T );
++		T nOp1=0;
++		for ( int i=0; i<nBytes; ++i )
++			nOp1 |= *pCode++ << ( i * 8);
++		return nOp1;
++	}
++public:
++	PCodeBufferWalker( BYTE* pCode, T nBytes ): m_pCode( pCode ), m_nBytes( nBytes )
++	{
++	}
++	void visitBuffer( PCodeVisitor< T >& visitor )
++	{
++		BYTE* pCode = m_pCode;
++		BYTE* pEnd = pCode + m_nBytes;
++		visitor.start( m_pCode );
++		T nOp1, nOp2;
++		for( ; pCode < pEnd; )
++		{
++			SbiOpcode eOp = (SbiOpcode)(*pCode++);
++			
++			if ( eOp <= SbOP0_END )
++				visitor.processOpCode0( eOp );
++			else if( eOp >= SbOP1_START && eOp <= SbOP1_END )
++			{
++				if ( visitor.processParams() )
++					nOp1 = readParam( pCode );
++				else
++					pCode += sizeof( T );
++				visitor.processOpCode1( eOp, nOp1 );
++			}
++			else if( eOp >= SbOP2_START && eOp <= SbOP2_END )
++			{
++				if ( visitor.processParams() )
++				{
++					nOp1 = readParam( pCode );
++					nOp2 = readParam( pCode );
++				}
++				else
++					pCode += ( sizeof( T ) * 2 );
++				visitor.processOpCode2( eOp, nOp1, nOp2 );
++			}	
++		}
++		visitor.end();
++	}
++};
++
++template < class T, class S >
++class OffSetAccumulator : public PCodeVisitor< T >
++{
++	T m_nNumOp0;
++	T m_nNumSingleParams;
++	T m_nNumDoubleParams;
++public:
++	
++	OffSetAccumulator() : m_nNumOp0(0), m_nNumSingleParams(0), m_nNumDoubleParams(0){}
++	virtual void start( BYTE* pStart ){}
++	virtual void processOpCode0( SbiOpcode eOp ){ ++m_nNumOp0; }
++	virtual void processOpCode1( SbiOpcode eOp, T nOp1 ){  ++m_nNumSingleParams; }
++	virtual void processOpCode2( SbiOpcode eOp, T nOp1, T nOp2 ) { ++m_nNumDoubleParams; }
++	virtual void end(){}
++	S offset() 
++	{ 
++		S result = 0 ; 
++		result = m_nNumOp0 + ( ( sizeof(S) + 1 ) * m_nNumSingleParams ) + ( (( sizeof(S) * 2 )+ 1 )  * m_nNumDoubleParams ); 
++		return result; 
++	}
++   virtual bool processParams(){ return false; }
++};
++
++
++
++template < class T, class S >
++
++class BufferTransformer : public PCodeVisitor< T >
++{
++	BYTE* m_pStart;
++	SbiBuffer m_ConvertedBuf;
++public:
++	BufferTransformer():m_pStart(NULL), m_ConvertedBuf( NULL, 1024 ) {}
++	virtual void start( BYTE* pStart ){ m_pStart = pStart; }
++	virtual void processOpCode0( SbiOpcode eOp ) 
++	{
++		m_ConvertedBuf += (UINT8)eOp;
++	}
++	virtual void processOpCode1( SbiOpcode eOp, T nOp1 )
++	{
++		m_ConvertedBuf += (UINT8)eOp;
++		switch( eOp )
++		{
++			case _JUMP:
++			case _JUMPT:
++			case _JUMPF:
++			case _GOSUB:
++			case _CASEIS:
++			case _RETURN:
++			case _ERRHDL:
++			case _TESTFOR:
++				nOp1 = convertBufferOffSet(m_pStart, nOp1);
++				break;
++			case _RESUME:
++				if ( nOp1 > 1 )
++					nOp1 = convertBufferOffSet(m_pStart, nOp1);
++				break;
++			default:
++				break; // 
++				
++		}
++		m_ConvertedBuf += (S)nOp1;
++	}
++	virtual void processOpCode2( SbiOpcode eOp, T nOp1, T nOp2 ) 
++	{
++		m_ConvertedBuf += (UINT8)eOp;
++		if ( eOp == _CASEIS )
++				if ( nOp1 )
++					nOp1  = convertBufferOffSet(m_pStart, nOp1);
++		m_ConvertedBuf += (S)nOp1;
++		m_ConvertedBuf += (S)nOp2;
++		
++	}
++	virtual bool processParams(){ return true; }
++	virtual void end() {}
++	// yeuch, careful here, you can only call
++	// GetBuffer on the returned SbiBuffer once, also
++	// you (as the caller) get to own the memory
++	SbiBuffer& buffer() 
++	{ 
++		return m_ConvertedBuf;
++	}
++	static S convertBufferOffSet( BYTE* pStart, T nOp1 )
++	{
++		PCodeBufferWalker< T > aBuff( pStart, nOp1);
++		OffSetAccumulator< T, S > aVisitor;
++		aBuff.visitBuffer( aVisitor ); 
++		return aVisitor.offset();
++	}
++};
++
++UINT32 
++SbiCodeGen::calcNewOffSet( BYTE* pCode, UINT16 nOffset )
++{
++	return BufferTransformer< UINT16, UINT32 >::convertBufferOffSet( pCode, nOffset );
++}
++
++UINT16 
++SbiCodeGen::calcLegacyOffSet( BYTE* pCode, UINT32 nOffset )
++{
++	return BufferTransformer< UINT32, UINT16 >::convertBufferOffSet( pCode, nOffset );
++}
++
++template <class T, class S>
++inline
++void
++PCodeBuffConvertor<T,S>::convert()
++{
++	PCodeBufferWalker< T > aBuf( m_pStart, m_nSize );
++	BufferTransformer< T, S > aTrnsfrmer;
++	aBuf.visitBuffer( aTrnsfrmer );	
++	m_pCnvtdBuf = (BYTE*)aTrnsfrmer.buffer().GetBuffer();
++	m_nCnvtdSize = aTrnsfrmer.buffer().GetSize();
++}
++
++void NeverRunsEver()
++{
++	// force instatiation of templates... I dunno why, but I have to do
++	// this to force instatiation of the template. Otherwise using the template
++	// in another code module results in link errors :-(
++	PCodeBuffConvertor< UINT16, UINT32 > aInst1(0,0);	
++	PCodeBuffConvertor< UINT32, UINT16 > aInst2(0,0);	
++}
+Only in basic/source/comp: codegen.cxx.orig
+diff -rup basic.orig/source/comp/dim.cxx basic/source/comp/dim.cxx
+--- basic.orig/source/comp/dim.cxx	2006-03-29 14:13:27.000000000 +0100
++++ basic/source/comp/dim.cxx	2006-04-04 14:06:29.000000000 +0100
+@@ -264,7 +264,7 @@ void SbiParser::DefVar( SbiOpcode eOp, B
+ 	SbiDimList* pDim;
+ 
+ 	// AB 9.7.97, #40689, Statics -> Modul-Initialisierung, in Sub ueberspringen
+-	USHORT nEndOfStaticLbl;
++	UINT32 nEndOfStaticLbl;
+ 	if( bStatic )
+ 	{
+ 		nEndOfStaticLbl = aGen.Gen( _JUMP, 0 );
+diff -rup basic.orig/source/comp/loops.cxx basic/source/comp/loops.cxx
+--- basic.orig/source/comp/loops.cxx	2005-09-29 19:40:22.000000000 +0100
++++ basic/source/comp/loops.cxx	2006-04-04 14:06:29.000000000 +0100
+@@ -40,7 +40,7 @@
+ 
+ void SbiParser::If()
+ {
+-	USHORT nEndLbl;
++	UINT32 nEndLbl;
+ 	SbiToken eTok;
+ 	// Ende-Tokens ignorieren:
+ 	SbiExpression aCond( this );
+@@ -52,7 +52,7 @@ void SbiParser::If()
+ 		// eingefuegt werden, damit bei ELSEIF nicht erneut die Bedingung
+ 		// ausgewertet wird. Die Tabelle nimmt alle Absprungstellen auf.
+ #define JMP_TABLE_SIZE 100
+-		USHORT pnJmpToEndLbl[JMP_TABLE_SIZE];	// 100 ELSEIFs zulaessig
++		UINT32 pnJmpToEndLbl[JMP_TABLE_SIZE];	// 100 ELSEIFs zulaessig
+ 		USHORT iJmp = 0;						// aktueller Tabellen-Index
+ 
+ 		// multiline IF
+@@ -98,7 +98,7 @@ void SbiParser::If()
+ 		if( eTok == ELSE )
+ 		{
+ 			Next();
+-			USHORT nElseLbl = nEndLbl;
++			UINT32 nElseLbl = nEndLbl;
+ 			nEndLbl = aGen.Gen( _JUMP, 0 );
+ 			aGen.BackChain( nElseLbl );
+ 			StmntBlock( ENDIF );
+@@ -129,7 +129,7 @@ void SbiParser::If()
+ 		if( eTok == ELSE )
+ 		{
+ 			Next();
+-			USHORT nElseLbl = nEndLbl;
++			UINT32 nElseLbl = nEndLbl;
+ 			nEndLbl = aGen.Gen( _JUMP, 0 );
+ 			aGen.BackChain( nElseLbl );
+ 			while( !bAbort )
+@@ -158,8 +158,8 @@ void SbiParser::NoIf()
+ 
+ void SbiParser::DoLoop()
+ {
+-	USHORT nStartLbl = aGen.GetPC();
+-	USHORT nEndChain = 0;
++	UINT32 nStartLbl = aGen.GetPC();
++	UINT32 nEndChain = 0;
+ 	OpenBlock( DO );
+ 	SbiToken eTok = Next();
+ 	if( IsEoln( eTok ) )
+@@ -186,7 +186,7 @@ void SbiParser::DoLoop()
+ 			SbiExpression aCond( this );
+ 			aCond.Gen();
+ 		}
+-		USHORT nEndLbl = aGen.Gen( eTok == UNTIL ? _JUMPT : _JUMPF, 0 );
++		UINT32 nEndLbl = aGen.Gen( eTok == UNTIL ? _JUMPT : _JUMPF, 0 );
+ 		StmntBlock( LOOP );
+ 		TestEoln();
+ 		aGen.Gen( _JUMP, nStartLbl );
+@@ -200,9 +200,9 @@ void SbiParser::DoLoop()
+ void SbiParser::While()
+ {
+ 	SbiExpression aCond( this );
+-	USHORT nStartLbl = aGen.GetPC();
++	UINT32 nStartLbl = aGen.GetPC();
+ 	aCond.Gen();
+-	USHORT nEndLbl = aGen.Gen( _JUMPF, 0 );
++	UINT32 nEndLbl = aGen.Gen( _JUMPF, 0 );
+ 	StmntBlock( WEND );
+ 	aGen.Gen( _JUMP, nStartLbl );
+ 	aGen.BackChain( nEndLbl );
+@@ -251,9 +251,9 @@ void SbiParser::For()
+ 		aGen.Gen( _INITFOR );
+ 	}
+ 
+-	USHORT nLoop = aGen.GetPC();
++	UINT32 nLoop = aGen.GetPC();
+ 	// Test durchfuehren, evtl. Stack freigeben
+-	USHORT nEndTarget = aGen.Gen( _TESTFOR, 0 );
++	UINT32 nEndTarget = aGen.Gen( _TESTFOR, 0 );
+ 	OpenBlock( FOR );
+ 	StmntBlock( NEXT );
+ 	aGen.Gen( _NEXT );
+@@ -308,7 +308,7 @@ void SbiParser::OnGoto()
+ {
+ 	SbiExpression aCond( this );
+ 	aCond.Gen();
+-	USHORT nLabelsTarget = aGen.Gen( _ONJUMP, 0 );
++	UINT32 nLabelsTarget = aGen.Gen( _ONJUMP, 0 );
+ 	SbiToken eTok = Next();
+ 	if( eTok != GOTO && eTok != GOSUB )
+ 	{
+@@ -316,13 +316,13 @@ void SbiParser::OnGoto()
+ 		eTok = GOTO;
+ 	}
+ 	// Label-Tabelle einlesen:
+-	short nLbl = 0;
++	UINT32 nLbl = 0;
+ 	do
+ 	{
+ 		SbiToken eTok2 = Next();	// Label holen
+ 		if( MayBeLabel() )
+ 		{
+-			USHORT nOff = pProc->GetLabels().Reference( aSym );
++			UINT32 nOff = pProc->GetLabels().Reference( aSym );
+ 			aGen.Gen( _JUMP, nOff );
+ 			nLbl++;
+ 		}
+@@ -342,7 +342,7 @@ void SbiParser::Goto()
+ 	Next();
+ 	if( MayBeLabel() )
+ 	{
+-		USHORT nOff = pProc->GetLabels().Reference( aSym );
++		UINT32 nOff = pProc->GetLabels().Reference( aSym );
+ 		aGen.Gen( eOp, nOff );
+ 	}
+ 	else Error( SbERR_LABEL_EXPECTED );
+@@ -355,7 +355,7 @@ void SbiParser::Return()
+ 	Next();
+ 	if( MayBeLabel() )
+ 	{
+-		USHORT nOff = pProc->GetLabels().Reference( aSym );
++		UINT32 nOff = pProc->GetLabels().Reference( aSym );
+ 		aGen.Gen( _RETURN, nOff );
+ 	}
+ 	else aGen.Gen( _RETURN, 0 );
+@@ -371,8 +371,8 @@ void SbiParser::Select()
+ 	aCase.Gen();
+ 	aGen.Gen( _CASE );
+ 	TestEoln();
+-	USHORT nNextTarget = 0;
+-	USHORT nDoneTarget = 0;
++	UINT32 nNextTarget = 0;
++	UINT32 nDoneTarget = 0;
+ 	BOOL bElse = FALSE;
+ 	// Die Cases einlesen:
+ 	while( !bAbort )
+@@ -385,7 +385,7 @@ void SbiParser::Select()
+ 			aGen.Statement();
+ 			// Jeden Case einlesen
+ 			BOOL bDone = FALSE;
+-			USHORT nTrueTarget = 0;
++			UINT32 nTrueTarget = 0;
+ 			if( Peek() == ELSE )
+ 			{
+ 				// CASE ELSE
+@@ -493,7 +493,7 @@ void SbiParser::On()
+ 					aGen.Gen( _STDERROR );
+ 				else
+ 				{
+-					USHORT nOff = pProc->GetLabels().Reference( aSym );
++					UINT32 nOff = pProc->GetLabels().Reference( aSym );
+ 					aGen.Gen( _ERRHDL, nOff );
+ 				}
+ 			}
+@@ -525,7 +525,7 @@ void SbiParser::On()
+ 
+ void SbiParser::Resume()
+ {
+-	USHORT nLbl;
++	UINT32 nLbl;
+ 
+ 	switch( Next() )
+ 	{
+diff -rup basic.orig/source/comp/parser.cxx basic/source/comp/parser.cxx
+--- basic.orig/source/comp/parser.cxx	2006-03-29 14:13:40.000000000 +0100
++++ basic/source/comp/parser.cxx	2006-04-04 14:06:29.000000000 +0100
+@@ -43,7 +43,7 @@ struct SbiParseStack {				// "Stack" fue
+ 	SbiParseStack* pNext;  			// Chain
+ 	SbiExprNode* pWithVar;			// Variable fuer WITH
+ 	SbiToken eExitTok;				// Exit-Token
+-	USHORT  nChain;					// JUMP-Chain
++	UINT32  nChain;					// JUMP-Chain
+ };
+ 
+ struct SbiStatement {
+diff -rup basic.orig/source/comp/symtbl.cxx basic/source/comp/symtbl.cxx
+--- basic.orig/source/comp/symtbl.cxx	2005-09-29 17:17:05.000000000 +0100
++++ basic/source/comp/symtbl.cxx	2006-04-04 14:06:29.000000000 +0100
+@@ -262,7 +262,7 @@ USHORT SbiSymPool::Define( const String&
+ 	return p->Define();
+ }
+ 
+-USHORT SbiSymPool::Reference( const String& rName )
++UINT32 SbiSymPool::Reference( const String& rName )
+ {
+ 	SbiSymDef* p = Find( rName );
+ 	if( !p )
+@@ -362,11 +362,11 @@ void SbiSymDef::SetType( SbxDataType t )
+ // Es wird der Wert zurueckgeliefert, der als Operand gespeichert
+ // werden soll.
+ 
+-USHORT SbiSymDef::Reference()
++UINT32 SbiSymDef::Reference()
+ {
+ 	if( !bChained )
+ 	{
+-		USHORT n = nChain;
++		UINT32 n = nChain;
+ 		nChain = pIn->pParser->aGen.GetOffset();
+ 		return n;
+ 	}
+@@ -378,7 +378,7 @@ USHORT SbiSymDef::Reference()
+ 
+ USHORT SbiSymDef::Define()
+ {
+-	USHORT n = pIn->pParser->aGen.GetPC();
++	UINT32 n = pIn->pParser->aGen.GetPC();
+ 	pIn->pParser->aGen.GenStmnt();
+ 	if( nChain ) pIn->pParser->aGen.BackChain( nChain );
+ 	nChain = n;
+diff -rup basic.orig/source/inc/buffer.hxx basic/source/inc/buffer.hxx
+--- basic.orig/source/inc/buffer.hxx	2005-09-29 17:31:37.000000000 +0100
++++ basic/source/inc/buffer.hxx	2006-04-05 19:43:52.000000000 +0100
+@@ -49,24 +49,27 @@ class SbiBuffer { 					// Code/Konstante
+ 	SbiParser* pParser;				// fuer Fehlermeldungen
+ 	char*	pBuf;					// Puffer-Pointer
+ 	char*	pCur;					// aktueller Puffer-Pointer
+-	USHORT	nOff;					// aktuelles Offset
+-	USHORT	nSize;					// aktuelle Groesse
++	UINT32	nOff;					// aktuelles Offset
++	UINT32	nSize;					// aktuelle Groesse
+ 	short	nInc;					// Inkrement
+ 	BOOL    Check( USHORT );		// Buffergroesse testen
+ public:
+ 	SbiBuffer( SbiParser*, short );	// Inkrement
+    ~SbiBuffer();
+-	void Patch( USHORT, USHORT );	// Patchen
+-	void Chain( USHORT );			// Back-Chain
+-	void Align( short );			// Alignment
++	void Patch( UINT32, UINT32 );	// Patchen
++	void Chain( UINT32 );			// Back-Chain
++	void Align( INT32 );			// Alignment
+ 	BOOL Add( const void*, USHORT );// Element anfuegen
+ 	BOOL operator += (const String&);// Basic-String speichern
+ 	BOOL operator += (INT8);		// Zeichen speichern
+ 	BOOL operator += (INT16);		// Integer speichern
+ 	BOOL operator += (UINT8);		// Zeichen speichern
+ 	BOOL operator += (UINT16);		// Integer speichern
++	BOOL operator += (UINT32);		// Integer speichern
++	BOOL operator += (INT32);		// Integer speichern
+ 	char*  GetBuffer();				// Puffer rausgeben (selbst loeschen!)
+-	USHORT GetSize()				{ return nOff; }
++	char*  GetBufferPtr(){ return pBuf; }
++	UINT32 GetSize()				{ return nOff; }
+ };
+ 
+ #endif
+diff -rup basic.orig/source/inc/codegen.hxx basic/source/inc/codegen.hxx
+--- basic.orig/source/inc/codegen.hxx	2005-09-29 17:31:37.000000000 +0100
++++ basic/source/inc/codegen.hxx	2006-04-07 08:13:58.000000000 +0100
+@@ -56,20 +56,44 @@ class SbiCodeGen { 				// Code-Erzeugung
+ public:
+ 	SbiCodeGen( SbModule&, SbiParser*, short );
+ 	SbiParser* GetParser() { return pParser; }
+-	USHORT Gen( SbiOpcode );
+-	USHORT Gen( SbiOpcode, UINT16 );
+-	USHORT Gen( SbiOpcode, UINT16, UINT16 );
+-	void Patch( USHORT o, USHORT v ){ aCode.Patch( o, v ); }
+-	void BackChain( USHORT off )	{ aCode.Chain( off );  }
++	UINT32 Gen( SbiOpcode );
++	UINT32 Gen( SbiOpcode, UINT32 );
++	UINT32 Gen( SbiOpcode, UINT32, UINT32 );
++	void Patch( UINT32 o, UINT32 v ){ aCode.Patch( o, v ); }
++	void BackChain( UINT32 off )	{ aCode.Chain( off );  }
+ 	void Statement();
+ 	void GenStmnt();			// evtl. Statement-Opcode erzeugen
+-	USHORT GetPC();
+-	USHORT GetOffset()				{ return GetPC() + 1; }
++	UINT32 GetPC();
++	UINT32 GetOffset()				{ return GetPC() + 1; }
+ 	void Save();
+ 
+ 	// #29955 for-Schleifen-Ebene pflegen
+ 	void IncForLevel( void ) { nForLevel++; }
+ 	void DecForLevel( void ) { nForLevel--; }
++
++	static UINT32 calcNewOffSet( BYTE* pCode, UINT16 nOffset );
++	static UINT16 calcLegacyOffSet( BYTE* pCode, UINT32 nOffset );
++
++};
++
++template < class T, class S >
++class PCodeBuffConvertor 
++{
++	T m_nSize; // 
++	BYTE* m_pStart;
++	BYTE* m_pCnvtdBuf;
++	S m_nCnvtdSize; // 
++
++	//  Disable usual copying symantics and bodgy default ctor
++	PCodeBuffConvertor(); 
++	PCodeBuffConvertor(const PCodeBuffConvertor& );
++	PCodeBuffConvertor& operator = ( const PCodeBuffConvertor& );
++public:
++	PCodeBuffConvertor( BYTE* pCode, T nSize ): m_pStart( pCode ), m_nSize( nSize ), m_pCnvtdBuf( NULL ), m_nCnvtdSize( 0 ){ convert(); }
++	S GetSize(){ return m_nCnvtdSize; }
++	void convert();
++	// Caller owns the buffer returned
++	BYTE* GetBuffer() { return m_pCnvtdBuf; }
+ };
+ 
+ // #111897 PARAM_INFO flags start at 0x00010000 to not
+diff -rup basic.orig/source/inc/disas.hxx basic/source/inc/disas.hxx
+--- basic.orig/source/inc/disas.hxx	2005-09-29 17:31:37.000000000 +0100
++++ basic/source/inc/disas.hxx	2006-04-04 14:06:29.000000000 +0100
+@@ -38,15 +38,15 @@
+ 
+ #include "image.hxx"
+ #include "opcodes.hxx"
+-
++// find a place for this limit ( also used in 
+ class SvStream;
+-
++#define MAX_LABELS 0x20000000L
+ class SbiDisas {
+ 	const SbiImage& rImg;
+ 	SbModule* pMod;
+-	char	 cLabels[ 8192 ];		// Bitvektor fuer Labels
+-	USHORT	 nOff;					// aktuelle Position
+-	USHORT   nPC;					// Position des Opcodes
++	char	 cLabels[ MAX_LABELS ];		// Bitvektor fuer Labels
++	UINT32	 nOff;					// aktuelle Position
++	UINT32   nPC;					// Position des Opcodes
+ 	SbiOpcode eOp;					// Opcode
+ 	USHORT   nOp1, nOp2;			// Operanden
+ 	short	 nParts;				// 1, 2 oder 3
+diff -rup basic.orig/source/inc/filefmt.hxx basic/source/inc/filefmt.hxx
+--- basic.orig/source/inc/filefmt.hxx	2005-09-29 17:31:37.000000000 +0100
++++ basic/source/inc/filefmt.hxx	2006-04-04 15:15:19.000000000 +0100
+@@ -59,7 +59,9 @@ class SvStream;
+ // Version 10: #29955 For-Schleifen-Level in Statement-PCodes generieren
+ // Version 11: #29955 Wegen Build-Inkonsistenzen Neu-Compilieren erzwingen
+ 
+-#define B_CURVERSION 0x00000011L
++#define B_LEGACYVERSION 0x00000011L
++#define B_CURVERSION 0x00000012L
++#define B_EXT_IMG_VERSION 0x00000012L
+ 
+ // Eine Datei enthaelt entweder einen Modul- oder einen Library-Record.
+ // Diese Records enthalten wiederum weitere Records. Jeder Record hat
+diff -rup basic.orig/source/inc/image.hxx basic/source/inc/image.hxx
+--- basic.orig/source/inc/image.hxx	2006-03-29 14:13:40.000000000 +0100
++++ basic/source/inc/image.hxx	2006-04-05 16:03:12.000000000 +0100
+@@ -40,6 +40,7 @@
+ #ifndef _RTL_USTRING_HXX
+ #include <rtl/ustring.hxx>
+ #endif
++#include <filefmt.hxx>
+ 
+ // Diese Klasse liest das vom Compiler erzeugte Image ein und verwaltet
+ // den Zugriff auf die einzelnen Elemente.
+@@ -54,11 +55,13 @@ class SbiImage {
+ 	UINT16*		   pStringOff;		// StringId-Offsets
+ 	sal_Unicode*   pStrings;		// StringPool
+ 	char* 		   pCode;			// Code-Image
++	char* 		   pLegacyPCode;		// Code-Image
+ 	BOOL		   bError;			// TRUE: Fehler
+ 	USHORT		   nFlags;			// Flags (s.u.)
+ 	short		   nStrings;   		// Anzahl Strings
+ 	UINT16		   nStringSize;		// Groesse des String-Puffers
+-	UINT16		   nCodeSize;		// Groesse des Code-Blocks
++	UINT32		   nCodeSize;		// Groesse des Code-Blocks
++	UINT16		   nLegacyCodeSize;		// Groesse des Code-Blocks
+ 	UINT16		   nDimBase;		// OPTION BASE-Wert
+ 	rtl_TextEncoding eCharSet;		// Zeichensatz fuer Strings
+ 									// temporaere Verwaltungs-Variable:
+@@ -67,7 +70,7 @@ class SbiImage {
+ 									// Routinen fuer Compiler:
+ 	void MakeStrings( short );		// StringPool einrichten
+ 	void AddString( const String& );// String zufuegen
+-	void AddCode( char*, USHORT );	// Codeblock dazu
++	void AddCode( char*, ULONG );	// Codeblock dazu
+ 	void AddType(SbxObject *);      // User-Type mit aufnehmen
+ 	void AddEnum(SbxObject *);      // Register enum type
+ 
+@@ -81,12 +84,12 @@ public:
+ 	SbiImage();
+    ~SbiImage();
+ 	void Clear();					// Inhalt loeschen
+-	BOOL Load( SvStream& );
+-	BOOL Save( SvStream& );
++	BOOL Load( SvStream&, UINT32 = B_CURVERSION );
++	BOOL Save( SvStream&, UINT32 = B_CURVERSION );
+ 	BOOL IsError() 					{ return bError;    }
+ 
+ 	const char* GetCode() const 	{ return pCode; 	}
+-	USHORT		GetCodeSize() const	{ return nCodeSize;	}
++	UINT32		GetCodeSize() const	{ return nCodeSize;	}
+     ::rtl::OUString& GetSource32() 	{ return aOUSource; }
+ 	USHORT		GetBase() const		{ return nDimBase;	}
+ 	String		GetString( short nId ) const;
+@@ -97,6 +100,10 @@ public:
+ 
+ 	void		SetFlag( USHORT n )	{ nFlags |= n;		}
+ 	USHORT		GetFlag( USHORT n )	const { return nFlags & n; }
++	UINT16		CalcLegacyOffset( INT32 nOffset );
++	UINT32		CalcNewOffset( INT16 nOffset );
++	void		ReleaseLegacyBuffer();
++	
+ };
+ 
+ #define	SBIMG_EXPLICIT		0x0001	// OPTION EXPLICIT ist aktiv
+diff -rup basic.orig/source/inc/parser.hxx basic/source/inc/parser.hxx
+--- basic.orig/source/inc/parser.hxx	2006-03-29 14:13:40.000000000 +0100
++++ basic/source/inc/parser.hxx	2006-04-04 14:06:29.000000000 +0100
+@@ -60,7 +60,7 @@ class SbiParser : public SbiTokenizer
+ 	SbiProcDef* pProc;				// aktuelle Prozedur
+ 	SbiExprNode*  pWithVar;			// aktuelle With-Variable
+ 	SbiToken    eEndTok;   			// das Ende-Token
+-	USHORT		nGblChain;			// Chainkette fuer globale DIMs
++	UINT32		nGblChain;			// Chainkette fuer globale DIMs
+ 	BOOL		bGblDefs; 			// TRUE globale Definitionen allgemein
+ 	BOOL		bNewGblDefs; 		// TRUE globale Definitionen vor Sub
+ 	BOOL		bSingleLineIf; 		// TRUE einzeiliges if-Statement
+diff -rup basic.orig/source/inc/runtime.hxx basic/source/inc/runtime.hxx
+--- basic.orig/source/inc/runtime.hxx	2006-03-29 14:13:40.000000000 +0100
++++ basic/source/inc/runtime.hxx	2006-04-05 14:36:26.000000000 +0100
+@@ -317,8 +317,8 @@ public:
+ class SbiRuntime
+ {
+ 	typedef void( SbiRuntime::*pStep0 )();
+-	typedef void( SbiRuntime::*pStep1 )( USHORT nOp1 );
+-	typedef void( SbiRuntime::*pStep2 )( USHORT nOp1, USHORT nOp2 );
++	typedef void( SbiRuntime::*pStep1 )( UINT32 nOp1 );
++	typedef void( SbiRuntime::*pStep2 )( UINT32 nOp1, UINT32 nOp2 );
+ 	static pStep0 aStep0[];         // Opcode-Tabelle Gruppe 0
+ 	static pStep1 aStep1[];         // Opcode-Tabelle Gruppe 1
+ 	static pStep2 aStep2[];         // Opcode-Tabelle Gruppe 2
+@@ -386,8 +386,8 @@ class SbiRuntime
+ 	}
+ 
+ 	SbxVariable* FindElement
+-	( SbxObject* pObj, USHORT nOp1, USHORT nOp2, SbError, BOOL );
+-	void SetupArgs( SbxVariable*, USHORT );
++	( SbxObject* pObj, UINT32 nOp1, UINT32 nOp2, SbError, BOOL );
++	void SetupArgs( SbxVariable*, UINT32 );
+ 	SbxVariable* CheckArray( SbxVariable* );
+ 
+ 	void PushVar( SbxVariable* );   // Variable push
+@@ -444,28 +444,28 @@ class SbiRuntime
+ 	void StepRESTART(), StepEMPTY(),    StepLEAVE();
+ 	void StepLSET(),	StepRSET(),		StepREDIMP_ERASE();
+ 	// Alle Opcodes mit einem Operanden
+-	void StepLOADNC( USHORT ),  StepLOADSC( USHORT ),   StepLOADI( USHORT );
+-	void StepARGN( USHORT ),	StepBASED( USHORT ),	StepPAD( USHORT );
+-	void StepJUMP( USHORT ),    StepJUMPT( USHORT );
+-	void StepJUMPF( USHORT ),   StepONJUMP( USHORT );
+-	void StepGOSUB( USHORT ),   StepRETURN( USHORT );
+-	void StepTESTFOR( USHORT ), StepCASETO( USHORT ),   StepERRHDL( USHORT );
+-	void StepRESUME( USHORT ),  StepSETCLASS( USHORT ),	StepTESTCLASS( USHORT ), StepLIB( USHORT );
++	void StepLOADNC( UINT32 ),  StepLOADSC( UINT32 ),   StepLOADI( UINT32 );
++	void StepARGN( UINT32 ),	StepBASED( UINT32 ),	StepPAD( UINT32 );
++	void StepJUMP( UINT32 ),    StepJUMPT( UINT32 );
++	void StepJUMPF( UINT32 ),   StepONJUMP( UINT32 );
++	void StepGOSUB( UINT32 ),   StepRETURN( UINT32 );
++	void StepTESTFOR( UINT32 ), StepCASETO( UINT32 ),   StepERRHDL( UINT32 );
++	void StepRESUME( UINT32 ),  StepSETCLASS( UINT32 ),	StepTESTCLASS( UINT32 ), StepLIB( UINT32 );
+ 	bool checkClass_Impl( const SbxVariableRef& refVal, const String& aClass, bool bRaiseErrors );
+-	void StepCLOSE( USHORT ),   StepPRCHAR( USHORT ),   StepARGTYP( USHORT );
++	void StepCLOSE( UINT32 ),   StepPRCHAR( UINT32 ),   StepARGTYP( UINT32 );
+ 	// Alle Opcodes mit zwei Operanden
+-	void StepRTL( USHORT, USHORT ),		StepPUBLIC( USHORT, USHORT );		
+-	void StepPUBLIC_Impl( USHORT, USHORT, bool bUsedForClassModule );
+-	void StepFIND( USHORT, USHORT ),    StepELEM( USHORT, USHORT );
+-	void StepGLOBAL( USHORT, USHORT ),  StepLOCAL( USHORT, USHORT );
+-	void StepPARAM( USHORT, USHORT), 	StepCREATE( USHORT, USHORT );
+-	void StepCALL( USHORT, USHORT ),    StepCALLC( USHORT, USHORT );
+-	void StepCASEIS( USHORT, USHORT ),  StepSTMNT( USHORT, USHORT );
+-	void StepOPEN( USHORT, USHORT ),	StepSTATIC( USHORT, USHORT );
+-	void StepTCREATE(USHORT,USHORT),	StepDCREATE(USHORT,USHORT);
+-	void StepGLOBAL_P( USHORT, USHORT ),StepFIND_G( USHORT, USHORT );
+-	void StepDCREATE_REDIMP(USHORT,USHORT), StepDCREATE_IMPL(USHORT,USHORT,BOOL);
+-	void StepFIND_CM( USHORT, USHORT );
++	void StepRTL( UINT32, UINT32 ),		StepPUBLIC( UINT32, UINT32 );		
++	void StepPUBLIC_Impl( UINT32, UINT32, bool bUsedForClassModule );
++	void StepFIND( UINT32, UINT32 ),    StepELEM( UINT32, UINT32 );
++	void StepGLOBAL( UINT32, UINT32 ),  StepLOCAL( UINT32, UINT32 );
++	void StepPARAM( UINT32, UINT32), 	StepCREATE( UINT32, UINT32 );
++	void StepCALL( UINT32, UINT32 ),    StepCALLC( UINT32, UINT32 );
++	void StepCASEIS( UINT32, UINT32 ),  StepSTMNT( UINT32, UINT32 );
++	void StepOPEN( UINT32, UINT32 ),	StepSTATIC( UINT32, UINT32 );
++	void StepTCREATE(UINT32,UINT32),	StepDCREATE(UINT32,UINT32);
++	void StepGLOBAL_P( UINT32, UINT32 ),StepFIND_G( UINT32, UINT32 );
++	void StepDCREATE_REDIMP(UINT32,UINT32), StepDCREATE_IMPL(UINT32,UINT32,BOOL);
++	void StepFIND_CM( UINT32, UINT32 );
+ public:
+ #ifdef ENABLE_VBA
+ 	USHORT		GetImageFlag( USHORT n ) const;
+@@ -473,10 +473,11 @@ public:
+ 	xub_StrLen  nLine,nCol1,nCol2;	// aktuelle Zeile, Spaltenbereich
+ 	SbiRuntime* pNext;               // Stack-Chain
+ 
+-	SbiRuntime( SbModule*, SbMethod*, USHORT );
++	SbiRuntime( SbModule*, SbMethod*, UINT32 );
+    ~SbiRuntime();
+ 	void Error( SbError );			// Fehler setzen, falls != 0
+ 	void FatalError( SbError );		// Fehlerbehandlung=Standard, Fehler setzen
++	void DumpPCode();
+ 	BOOL Step();                    // Einzelschritt (ein Opcode)
+ 	void Stop()     	   { bRun = FALSE;   }
+     BOOL IsRun()           { return bRun;    }
+diff -rup basic.orig/source/inc/symtbl.hxx basic/source/inc/symtbl.hxx
+--- basic.orig/source/inc/symtbl.hxx	2005-09-07 22:37:20.000000000 +0100
++++ basic/source/inc/symtbl.hxx	2006-04-04 14:06:29.000000000 +0100
+@@ -120,7 +120,7 @@ public:
+ 	SbiSymDef* First(), *Next();  		// Iteratoren
+ 
+ 	USHORT Define( const String& );		// Label definieren
+-	USHORT Reference( const String& );  // Label referenzieren
++	UINT32 Reference( const String& );  // Label referenzieren
+ 	void   CheckRefs();					// offene Referenzen suchen
+ };
+ 
+@@ -139,7 +139,7 @@ protected:
+ 	USHORT	   nTypeId;				// String-ID des Datentyps (Dim X AS Dytentyp)
+ 	USHORT	   nProcId;				// aktuelles ProcId fuer STATIC-Variable
+ 	USHORT	   nPos;				// Positions-Nummer
+-	USHORT	   nChain;				// Backchain-Kette
++	UINT32	   nChain;				// Backchain-Kette
+ 	BOOL	   bNew		: 1;		// TRUE: Dim As New...
+ 	BOOL	   bChained : 1;		// TRUE: Symbol ist in Code definiert
+ 	BOOL	   bByVal   : 1;		// TRUE: ByVal-Parameter
+@@ -160,7 +160,7 @@ public:
+ 	const String& GetName();
+ 	SbiSymScope GetScope() const;
+ 	USHORT	   GetProcId() const{ return nProcId;	}
+-	USHORT	   GetAddr() const	{ return nChain;	}
++	UINT32	   GetAddr() const	{ return nChain;	}
+ 	USHORT	   GetId() const 	{ return nId;		}
+ 	USHORT	   GetTypeId() const{ return nTypeId;	}
+ 	void 	   SetTypeId( USHORT n ) { nTypeId = n; eType = SbxOBJECT; }
+@@ -189,7 +189,7 @@ public:
+ 
+ 	SbiSymPool& GetPool();
+ 	USHORT	   Define();		// Symbol in Code definieren
+-	USHORT	   Reference();		// Symbol in Code referenzieren
++	UINT32	   Reference();		// Symbol in Code referenzieren
+ 
+ private:
+ 	SbiSymDef( const SbiSymDef& );
+diff -rup basic.orig/source/runtime/runtime.cxx basic/source/runtime/runtime.cxx
+--- basic.orig/source/runtime/runtime.cxx	2006-03-29 14:13:40.000000000 +0100
++++ basic/source/runtime/runtime.cxx	2006-04-05 20:31:09.000000000 +0100
+@@ -505,7 +613,7 @@ SbxArray* SbiInstance::GetLocals( SbMeth
+ 
+ // Achtung: pMeth kann auch NULL sein (beim Aufruf des Init-Codes)
+ 
+-SbiRuntime::SbiRuntime( SbModule* pm, SbMethod* pe, USHORT nStart )
++SbiRuntime::SbiRuntime( SbModule* pm, SbMethod* pe, UINT32 nStart )
+ 		 : pMeth( pe ), pMod( pm ), pImg( pMod->pImage ),
+ 		   rBasic( *(StarBASIC*)pm->pParent ), pInst( pINST )
+ {
+diff -rup basic.orig/source/runtime/step1.cxx basic/source/runtime/step1.cxx
+--- basic.orig/source/runtime/step1.cxx	2006-03-29 14:13:40.000000000 +0100
++++ basic/source/runtime/step1.cxx	2006-04-04 14:06:29.000000000 +0100
+@@ -52,7 +52,7 @@ bool checkUnoObjectType( SbUnoObject* re
+ 
+ // Laden einer numerischen Konstanten (+ID)
+ 
+-void SbiRuntime::StepLOADNC( USHORT nOp1 )
++void SbiRuntime::StepLOADNC( UINT32 nOp1 )
+ {
+ 	SbxVariable* p = new SbxVariable( SbxDOUBLE );
+ 
+@@ -76,7 +76,7 @@ void SbiRuntime::StepLOADNC( USHORT nOp1
+ 
+ // Laden einer Stringkonstanten (+ID)
+ 
+-void SbiRuntime::StepLOADSC( USHORT nOp1 )
++void SbiRuntime::StepLOADSC( UINT32 nOp1 )
+ {
+ 	SbxVariable* p = new SbxVariable;
+ 	p->PutString( pImg->GetString( nOp1 ) );
+@@ -85,7 +85,7 @@ void SbiRuntime::StepLOADSC( USHORT nOp1
+ 
+ // Immediate Load (+Wert)
+ 
+-void SbiRuntime::StepLOADI( USHORT nOp1 )
++void SbiRuntime::StepLOADI( UINT32 nOp1 )
+ {
+ 	SbxVariable* p = new SbxVariable;
+ 	p->PutInteger( nOp1 );
+@@ -94,7 +94,7 @@ void SbiRuntime::StepLOADI( USHORT nOp1 
+ 
+ // Speichern eines named Arguments in Argv (+Arg-Nr ab 1!)
+ 
+-void SbiRuntime::StepARGN( USHORT nOp1 )
++void SbiRuntime::StepARGN( UINT32 nOp1 )
+ {
+ 	if( !refArgv )
+ 		StarBASIC::FatalError( SbERR_INTERNAL_ERROR );
+@@ -109,7 +109,7 @@ void SbiRuntime::StepARGN( USHORT nOp1 )
+ 
+ // Konvertierung des Typs eines Arguments in Argv fuer DECLARE-Fkt. (+Typ)
+ 
+-void SbiRuntime::StepARGTYP( USHORT nOp1 )
++void SbiRuntime::StepARGTYP( UINT32 nOp1 )
+ {
+ 	if( !refArgv )
+ 		StarBASIC::FatalError( SbERR_INTERNAL_ERROR );
+@@ -154,7 +154,7 @@ void SbiRuntime::StepARGTYP( USHORT nOp1
+ 
+ // String auf feste Laenge bringen (+Laenge)
+ 
+-void SbiRuntime::StepPAD( USHORT nOp1 )
++void SbiRuntime::StepPAD( UINT32 nOp1 )
+ {
+ 	SbxVariable* p = GetTOS();
+ 	String& s = (String&)(const String&) *p;
+@@ -166,9 +166,11 @@ void SbiRuntime::StepPAD( USHORT nOp1 )
+ 
+ // Sprung (+Target)
+ 
+-void SbiRuntime::StepJUMP( USHORT nOp1 )
++void SbiRuntime::StepJUMP( UINT32 nOp1 )
+ {
+ #ifndef PRODUCT
++	// #QUESTION shouln't this be 
++	// if( (BYTE*)( nOp1+pImagGetCode() ) >= pImg->GetCodeSize() )
+ 	if( nOp1 >= pImg->GetCodeSize() )
+ 		StarBASIC::FatalError( SbERR_INTERNAL_ERROR );
+ #endif
+@@ -177,7 +179,7 @@ void SbiRuntime::StepJUMP( USHORT nOp1 )
+ 
+ // TOS auswerten, bedingter Sprung (+Target)
+ 
+-void SbiRuntime::StepJUMPT( USHORT nOp1 )
++void SbiRuntime::StepJUMPT( UINT32 nOp1 )
+ {
+ 	SbxVariableRef p = PopVar();
+ 	if( p->GetBool() )
+@@ -186,7 +188,7 @@ void SbiRuntime::StepJUMPT( USHORT nOp1 
+ 
+ // TOS auswerten, bedingter Sprung (+Target)
+ 
+-void SbiRuntime::StepJUMPF( USHORT nOp1 )
++void SbiRuntime::StepJUMPF( UINT32 nOp1 )
+ {
+ 	SbxVariableRef p = PopVar();
+ 	if( !p->GetBool() )
+@@ -201,24 +203,26 @@ void SbiRuntime::StepJUMPF( USHORT nOp1 
+ // ...
+ //Falls im Operanden 0x8000 gesetzt ist, Returnadresse pushen (ON..GOSUB)
+ 
+-void SbiRuntime::StepONJUMP( USHORT nOp1 )
++void SbiRuntime::StepONJUMP( UINT32 nOp1 )
+ {
+ 	SbxVariableRef p = PopVar();
+ 	INT16 n = p->GetInteger();
+ 	if( nOp1 & 0x8000 )
+ 	{
+ 		nOp1 &= 0x7FFF;
+-		PushGosub( pCode + 3 * nOp1 );
++		//PushGosub( pCode + 3 * nOp1 );
++		PushGosub( pCode + 5 * nOp1 );
+ 	}
+-	if( n < 1 || n > (short) nOp1 )
++	if( n < 1 || n >  nOp1 )
+ 		n = nOp1 + 1;
+-	nOp1 = (USHORT) ( (const char*) pCode - pImg->GetCode() ) + 3 * --n;
++	//nOp1 = (UINT32) ( (const char*) pCode - pImg->GetCode() ) + 3 * --n;
++	nOp1 = (UINT32) ( (const char*) pCode - pImg->GetCode() ) + 5 * --n;
+ 	StepJUMP( nOp1 );
+ }
+ 
+ // UP-Aufruf (+Target)
+ 
+-void SbiRuntime::StepGOSUB( USHORT nOp1 )
++void SbiRuntime::StepGOSUB( UINT32 nOp1 )
+ {
+ 	PushGosub( pCode );
+ 	if( nOp1 >= pImg->GetCodeSize() )
+@@ -228,7 +235,7 @@ void SbiRuntime::StepGOSUB( USHORT nOp1 
+ 
+ // UP-Return (+0 oder Target)
+ 
+-void SbiRuntime::StepRETURN( USHORT nOp1 )
++void SbiRuntime::StepRETURN( UINT32 nOp1 )
+ {
+ 	PopGosub();
+ 	if( nOp1 )
+@@ -239,7 +246,7 @@ void SbiRuntime::StepRETURN( USHORT nOp1
+ 
+ void unoToSbxValue( SbxVariable* pVar, const Any& aValue );
+ 
+-void SbiRuntime::StepTESTFOR( USHORT nOp1 )
++void SbiRuntime::StepTESTFOR( UINT32 nOp1 )
+ {
+ 	if( !pForStk )
+ 	{
+@@ -342,7 +349,7 @@ void SbiRuntime::StepTESTFOR( USHORT nOp
+ 
+ // Tos+1 <= Tos+2 <= Tos, 2xremove (+Target)
+ 
+-void SbiRuntime::StepCASETO( USHORT nOp1 )
++void SbiRuntime::StepCASETO( UINT32 nOp1 )
+ {
+ 	if( !refCaseStk || !refCaseStk->Count() )
+ 		StarBASIC::FatalError( SbERR_INTERNAL_ERROR );
+@@ -358,7 +365,7 @@ void SbiRuntime::StepCASETO( USHORT nOp1
+ 
+ // Fehler-Handler
+ 
+-void SbiRuntime::StepERRHDL( USHORT nOp1 )
++void SbiRuntime::StepERRHDL( UINT32 nOp1 )
+ {
+ 	const BYTE* p = pCode;
+ 	StepJUMP( nOp1 );
+@@ -372,7 +379,7 @@ void SbiRuntime::StepERRHDL( USHORT nOp1
+ 
+ // Resume nach Fehlern (+0=statement, 1=next or Label)
+ 
+-void SbiRuntime::StepRESUME( USHORT nOp1 )
++void SbiRuntime::StepRESUME( UINT32 nOp1 )
+ {
+ 	// AB #32714 Resume ohne Error? -> Fehler
+ 	if( !bInError )
+@@ -404,7 +411,7 @@ void SbiRuntime::StepRESUME( USHORT nOp1
+ }
+ 
+ // Kanal schliessen (+Kanal, 0=Alle)
+-void SbiRuntime::StepCLOSE( USHORT nOp1 )
++void SbiRuntime::StepCLOSE( UINT32 nOp1 )
+ {
+ 	short err;
+ 	if( !nOp1 )
+@@ -423,7 +430,7 @@ void SbiRuntime::StepCLOSE( USHORT nOp1 
+ 
+ // Zeichen ausgeben (+char)
+ 
+-void SbiRuntime::StepPRCHAR( USHORT nOp1 )
++void SbiRuntime::StepPRCHAR( UINT32 nOp1 )
+ {
+ 	ByteString s( (char) nOp1 );
+ 	pIosys->Write( s );
+@@ -513,7 +520,7 @@ bool SbiRuntime::checkClass_Impl( const 
+ 	return bOk;
+ }
+ 
+-void SbiRuntime::StepSETCLASS( USHORT nOp1 )
++void SbiRuntime::StepSETCLASS( UINT32 nOp1 )
+ {
+ 	SbxVariableRef refVal = PopVar();
+ 	SbxVariableRef refVar = PopVar();
+@@ -524,7 +531,7 @@ void SbiRuntime::StepSETCLASS( USHORT nO
+ 		StepSET_Impl( refVal, refVar );
+ }
+ 
+-void SbiRuntime::StepTESTCLASS( USHORT nOp1 )
++void SbiRuntime::StepTESTCLASS( UINT32 nOp1 )
+ {
+ 	SbxVariableRef xObjVal = PopVar();
+ 	String aClass( pImg->GetString( nOp1 ) );
+@@ -537,7 +544,7 @@ void SbiRuntime::StepTESTCLASS( USHORT n
+ 
+ // Library fuer anschliessenden Declare-Call definieren
+ 
+-void SbiRuntime::StepLIB( USHORT nOp1 )
++void SbiRuntime::StepLIB( UINT32 nOp1 )
+ {
+ 	aLibName = pImg->GetString( nOp1 );
+ }
+@@ -546,7 +553,7 @@ void SbiRuntime::StepLIB( USHORT nOp1 )
+ // Dieser Opcode wird vor DIM/REDIM-Anweisungen gepusht,
+ // wenn nur ein Index angegeben wurde.
+ 
+-void SbiRuntime::StepBASED( USHORT nOp1 )
++void SbiRuntime::StepBASED( UINT32 nOp1 )
+ {
+ 	SbxVariable* p1 = new SbxVariable;
+ 	SbxVariableRef x2 = PopVar();
+diff -rup basic.orig/source/runtime/step2.cxx basic/source/runtime/step2.cxx
+--- basic.orig/source/runtime/step2.cxx	2006-03-29 14:13:40.000000000 +0100
++++ basic/source/runtime/step2.cxx	2006-04-04 14:06:29.000000000 +0100
+@@ -66,7 +66,7 @@ Any sbxToUnoValue( SbxVariable* pVar ); 
+ // 0x8000 - Argv ist belegt
+ 
+ SbxVariable* SbiRuntime::FindElement
+-	( SbxObject* pObj, USHORT nOp1, USHORT nOp2, SbError nNotFound, BOOL bLocal )
++	( SbxObject* pObj, UINT32 nOp1, UINT32 nOp2, SbError nNotFound, BOOL bLocal )
+ {
+ 	SbxVariable* pElem = NULL;
+ 	if( !pObj )
+@@ -341,7 +341,7 @@ SbxBase* SbiRuntime::FindElementExtern( 
+ // Dabei auch die Argumente umsetzen, falls benannte Parameter
+ // verwendet wurden
+ 
+-void SbiRuntime::SetupArgs( SbxVariable* p, USHORT nOp1 )
++void SbiRuntime::SetupArgs( SbxVariable* p, UINT32 nOp1 )
+ {
+ 	if( nOp1 & 0x8000 )
+ 	{
+@@ -626,14 +626,14 @@ SbxVariable* SbiRuntime::CheckArray( Sbx
+ 
+ // Laden eines Elements aus der Runtime-Library (+StringID+Typ)
+ 
+-void SbiRuntime::StepRTL( USHORT nOp1, USHORT nOp2 )
++void SbiRuntime::StepRTL( UINT32 nOp1, UINT32 nOp2 )
+ {
+ 	PushVar( FindElement( rBasic.pRtl, nOp1, nOp2, SbERR_PROC_UNDEFINED, FALSE ) );
+ }
+ 
+ // Laden einer lokalen/globalen Variablen (+StringID+Typ)
+ 
+-void SbiRuntime::StepFIND( USHORT nOp1, USHORT nOp2 )
++void SbiRuntime::StepFIND( UINT32 nOp1, UINT32 nOp2 )
+ {
+ 	if( !refLocals )
+ 		refLocals = new SbxArray;
+@@ -641,7 +641,7 @@ void SbiRuntime::StepFIND( USHORT nOp1, 
+ }
+ 
+ // Search inside a class module (CM) to enable global search in time
+-void SbiRuntime::StepFIND_CM( USHORT nOp1, USHORT nOp2 )
++void SbiRuntime::StepFIND_CM( UINT32 nOp1, UINT32 nOp2 )
+ {
+ 	if( !refLocals )
+ 		refLocals = new SbxArray;
+@@ -657,7 +657,7 @@ void SbiRuntime::StepFIND_CM( USHORT nOp
+ // Laden eines Objekt-Elements (+StringID+Typ)
+ // Das Objekt liegt auf TOS
+ 
+-void SbiRuntime::StepELEM( USHORT nOp1, USHORT nOp2 )
++void SbiRuntime::StepELEM( UINT32 nOp1, UINT32 nOp2 )
+ {
+ 	// Liegt auf dem TOS ein Objekt?
+ 	SbxVariableRef pObjVar = PopVar();
+@@ -681,12 +681,12 @@ void SbiRuntime::StepELEM( USHORT nOp1, 
+ 
+ // Laden eines Parameters (+Offset+Typ)
+ // Wenn der Datentyp nicht stimmen sollte, eine Kopie anlegen
+-// Der Datentyp SbxEMPTY zeigt an, daá kein Parameter angegeben ist.
++// Der Datentyp SbxEMPTY zeigt an, daa kein Parameter angegeben ist.
+ // Get( 0 ) darf EMPTY sein
+ 
+-void SbiRuntime::StepPARAM( USHORT nOp1, USHORT nOp2 )
++void SbiRuntime::StepPARAM( UINT32 nOp1, UINT32 nOp2 )
+ {
+-	USHORT i = nOp1 & 0x7FFF;
++	UINT32 i = nOp1 & 0x7FFF;
+ 	SbxDataType t = (SbxDataType) nOp2;
+ 	SbxVariable* p;
+ 
+@@ -742,7 +742,7 @@ void SbiRuntime::StepPARAM( USHORT nOp1,
+ 
+ // Case-Test (+True-Target+Test-Opcode)
+ 
+-void SbiRuntime::StepCASEIS( USHORT nOp1, USHORT nOp2 )
++void SbiRuntime::StepCASEIS( UINT32 nOp1, UINT32 nOp2 )
+ {
+ 	if( !refCaseStk || !refCaseStk->Count() )
+ 		StarBASIC::FatalError( SbERR_INTERNAL_ERROR );
+@@ -758,7 +758,7 @@ void SbiRuntime::StepCASEIS( USHORT nOp1
+ // Aufruf einer DLL-Prozedur (+StringID+Typ)
+ // Auch hier zeigt das MSB des StringIDs an, dass Argv belegt ist
+ 
+-void SbiRuntime::StepCALL( USHORT nOp1, USHORT nOp2 )
++void SbiRuntime::StepCALL( UINT32 nOp1, UINT32 nOp2 )
+ {
+ 	String aName = pImg->GetString( nOp1 & 0x7FFF );
+ 	SbxArray* pArgs = NULL;
+@@ -773,7 +773,7 @@ void SbiRuntime::StepCALL( USHORT nOp1, 
+ // Aufruf einer DLL-Prozedur nach CDecl (+StringID+Typ)
+ // Auch hier zeigt das MSB des StringIDs an, dass Argv belegt ist
+ 
+-void SbiRuntime::StepCALLC( USHORT nOp1, USHORT nOp2 )
++void SbiRuntime::StepCALLC( UINT32 nOp1, UINT32 nOp2 )
+ {
+ 	String aName = pImg->GetString( nOp1 & 0x7FFF );
+ 	SbxArray* pArgs = NULL;
+@@ -788,7 +788,7 @@ void SbiRuntime::StepCALLC( USHORT nOp1,
+ 
+ // Beginn eines Statements (+Line+Col)
+ 
+-void SbiRuntime::StepSTMNT( USHORT nOp1, USHORT nOp2 )
++void SbiRuntime::StepSTMNT( UINT32 nOp1, UINT32 nOp2 )
+ {
+ 	// Wenn der Expr-Stack am Anfang einen Statements eine Variable enthaelt,
+ 	// hat ein Trottel X als Funktion aufgerufen, obwohl es eine Variable ist!
+@@ -818,7 +818,7 @@ void SbiRuntime::StepSTMNT( USHORT nOp1,
+ 		StarBASIC::FatalError( SbERR_NO_METHOD );
+ 		return;
+ 	}
+-	pStmnt = pCode - 5;
++	pStmnt = pCode - 9;
+ 	USHORT nOld = nLine;
+ 	nLine = nOp1;
+ 
+@@ -889,7 +889,7 @@ void SbiRuntime::StepSTMNT( USHORT nOp1,
+ //        Kanalnummer
+ //        Dateiname
+ 
+-void SbiRuntime::StepOPEN( USHORT nOp1, USHORT nOp2 )
++void SbiRuntime::StepOPEN( UINT32 nOp1, UINT32 nOp2 )
+ {
+ 	SbxVariableRef pName = PopVar();
+ 	SbxVariableRef pChan = PopVar();
+@@ -903,7 +903,7 @@ void SbiRuntime::StepOPEN( USHORT nOp1, 
+ 
+ // Objekt kreieren (+StringID+StringID)
+ 
+-void SbiRuntime::StepCREATE( USHORT nOp1, USHORT nOp2 )
++void SbiRuntime::StepCREATE( UINT32 nOp1, UINT32 nOp2 )
+ {
+ 	String aClass( pImg->GetString( nOp2 ) );
+ 	SbxObject *pObj = SbxBase::CreateObject( aClass );
+@@ -921,12 +921,12 @@ void SbiRuntime::StepCREATE( USHORT nOp1
+ 	}
+ }
+ 
+-void SbiRuntime::StepDCREATE( USHORT nOp1, USHORT nOp2 )
++void SbiRuntime::StepDCREATE( UINT32 nOp1, UINT32 nOp2 )
+ {
+     StepDCREATE_IMPL( nOp1, nOp2, FALSE );
+ }
+ 
+-void SbiRuntime::StepDCREATE_REDIMP( USHORT nOp1, USHORT nOp2 )
++void SbiRuntime::StepDCREATE_REDIMP( UINT32 nOp1, UINT32 nOp2 )
+ {
+     StepDCREATE_IMPL( nOp1, nOp2, TRUE );
+ }
+@@ -953,7 +953,7 @@ void implCopyDimArray_DCREATE( SbxDimArr
+ }
+ 
+ // #56204 Objekt-Array kreieren (+StringID+StringID), DCREATE == Dim-Create
+-void SbiRuntime::StepDCREATE_IMPL( USHORT nOp1, USHORT nOp2, BOOL bRedimp )
++void SbiRuntime::StepDCREATE_IMPL( UINT32 nOp1, UINT32 nOp2, BOOL bRedimp )
+ {
+ 	SbxVariableRef refVar = PopVar();
+ 
+@@ -1068,7 +1068,7 @@ void SbiRuntime::StepDCREATE_IMPL( USHOR
+ 
+ SbxObject* createUserTypeImpl( const String& rClassName );	// sb.cxx
+ 
+-void SbiRuntime::StepTCREATE( USHORT nOp1, USHORT nOp2 )
++void SbiRuntime::StepTCREATE( UINT32 nOp1, UINT32 nOp2 )
+ {
+ 	String aName( pImg->GetString( nOp1 ) );
+ 	String aClass( pImg->GetString( nOp2 ) );
+@@ -1084,7 +1084,7 @@ void SbiRuntime::StepTCREATE( USHORT nOp
+ 
+ // Einrichten einer lokalen Variablen (+StringID+Typ)
+ 
+-void SbiRuntime::StepLOCAL( USHORT nOp1, USHORT nOp2 )
++void SbiRuntime::StepLOCAL( UINT32 nOp1, UINT32 nOp2 )
+ {
+ 	if( !refLocals.Is() )
+ 		refLocals = new SbxArray;
+@@ -1100,7 +1100,7 @@ void SbiRuntime::StepLOCAL( USHORT nOp1,
+ 
+ // Einrichten einer modulglobalen Variablen (+StringID+Typ)
+ 
+-void SbiRuntime::StepPUBLIC_Impl( USHORT nOp1, USHORT nOp2, bool bUsedForClassModule )
++void SbiRuntime::StepPUBLIC_Impl( UINT32 nOp1, UINT32 nOp2, bool bUsedForClassModule )
+ {
+ 	String aName( pImg->GetString( nOp1 ) );
+ 	SbxDataType t = (SbxDataType) nOp2;
+@@ -1122,14 +1122,14 @@ void SbiRuntime::StepPUBLIC_Impl( USHORT
+ 	}
+ }
+ 
+-void SbiRuntime::StepPUBLIC( USHORT nOp1, USHORT nOp2 )
++void SbiRuntime::StepPUBLIC( UINT32 nOp1, UINT32 nOp2 )
+ {
+ 	StepPUBLIC_Impl( nOp1, nOp2, false );
+ }
+ 
+ // Einrichten einer globalen Variablen (+StringID+Typ)
+ 
+-void SbiRuntime::StepGLOBAL( USHORT nOp1, USHORT nOp2 )
++void SbiRuntime::StepGLOBAL( UINT32 nOp1, UINT32 nOp2 )
+ {
+ 	if( pImg->GetFlag( SBIMG_CLASSMODULE ) )
+ 		StepPUBLIC_Impl( nOp1, nOp2, true );
+@@ -1156,7 +1156,7 @@ void SbiRuntime::StepGLOBAL( USHORT nOp1
+ // Creates global variable that isn't reinitialised when
+ // basic is restarted, P=PERSIST (+StringID+Typ)
+ 
+-void SbiRuntime::StepGLOBAL_P( USHORT nOp1, USHORT nOp2 )
++void SbiRuntime::StepGLOBAL_P( UINT32 nOp1, UINT32 nOp2 )
+ {
+     if( pMod->pImage->bFirstInit )
+     {
+@@ -1168,7 +1168,7 @@ void SbiRuntime::StepGLOBAL_P( USHORT nO
+ // Searches for global variable, behavior depends on the fact
+ // if the variable is initialised for the first time
+ 
+-void SbiRuntime::StepFIND_G( USHORT nOp1, USHORT nOp2 )
++void SbiRuntime::StepFIND_G( UINT32 nOp1, UINT32 nOp2 )
+ {
+     if( pMod->pImage->bFirstInit )
+     {
+@@ -1190,7 +1190,7 @@ void SbiRuntime::StepFIND_G( USHORT nOp1
+ 
+ // Einrichten einer statischen Variablen (+StringID+Typ)
+ 
+-void SbiRuntime::StepSTATIC( USHORT nOp1, USHORT nOp2 )
++void SbiRuntime::StepSTATIC( UINT32 nOp1, UINT32 nOp2 )
+ {
+ 	/* AB #40689, wird nicht mehr verwendet
+ 	String aName( pImg->GetString( nOp1 ) );
+diff -rup basic.orig/source/runtime/runtime.cxx basic/source/runtime/runtime.cxx
+--- basic.orig/source/runtime/runtime.cxx	2006-03-29 14:13:40.000000000 +0100
++++ basic/source/runtime/runtime.cxx	2006-04-05 20:31:09.000000000 +0100
+@@ -671,23 +812,23 @@ BOOL SbiRuntime::Step()
+ 			if( pInst->IsReschedule() && bStaticGlobalEnableReschedule )
+ 				Application::Reschedule();
+ 		}
+-
+ 		SbiOpcode eOp = (SbiOpcode ) ( *pCode++ );
+-		USHORT nOp1, nOp2;
++		UINT32 nOp1, nOp2;
+ 		if( eOp <= SbOP0_END )
+ 		{
+ 			(this->*( aStep0[ eOp ] ) )();
+ 		}
+ 		else if( eOp >= SbOP1_START && eOp <= SbOP1_END )
+ 		{
+-			nOp1 = *pCode++; nOp1 |= *pCode++ << 8;
++			nOp1 = *pCode++; nOp1 |= *pCode++ << 8; nOp1 |= *pCode++ << 16; nOp1 |= *pCode++ << 24;
++			
+ 			(this->*( aStep1[ eOp - SbOP1_START ] ) )( nOp1 );
+ 		}
+ 		else if( eOp >= SbOP2_START && eOp <= SbOP2_END )
+ 		{
+-			nOp1 = *pCode++; nOp1 |= *pCode++ << 8;
+-			nOp2 = *pCode++; nOp2 |= *pCode++ << 8;
++			nOp1 = *pCode++; nOp1 |= *pCode++ << 8; nOp1 |= *pCode++ << 16; nOp1 |= *pCode++ << 24;
++			nOp2 = *pCode++; nOp2 |= *pCode++ << 8; nOp2 |= *pCode++ << 16; nOp2 |= *pCode++ << 24;
+ 			(this->*( aStep2[ eOp - SbOP2_START ] ) )( nOp1, nOp2 );
+ 		}
+ 		else
+ 
+
+
+
