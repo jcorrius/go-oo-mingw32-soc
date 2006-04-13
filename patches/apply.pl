@@ -254,6 +254,9 @@ sub scan_patch_entry($$$$)
 	    $patch_entry{'issue'} = $1;
 	} elsif (/\w+#([0-9]+)/) {
 	    # valid syntax but unknown bugzilla => ignore
+	} elsif (/#no-upstream/) {
+		# non upstreamable issue
+		$patch_entry{'issue'} = -1;
 	} else {
 	    ($patch_entry{'developer'} eq 'unknown') || die "Syntax error at $apply_list, line $line_num, element \"$_\"\n" .
 				                            "Note that the one developer name is already defined as \"$patch_entry{'developer'}\".\n";
