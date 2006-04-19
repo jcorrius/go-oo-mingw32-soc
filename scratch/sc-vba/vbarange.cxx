@@ -1,6 +1,7 @@
 #include <comphelper/processfactory.hxx>
 #include <sfx2/objsh.hxx>
 
+#include <com/sun/star/script/ArrayWrapper.hpp>
 #include <com/sun/star/sheet/XSheetOperation.hpp>
 #include <com/sun/star/sheet/CellFlags.hpp>
 #include <com/sun/star/table/XColumnRowRange.hpp>
@@ -70,7 +71,6 @@
 #include "vbafont.hxx"
 #include "vbacomment.hxx"
 #include "vbainterior.hxx"
-#include "vbaarraywrapper.hxx"
 #include "vbacharacters.hxx"
 
 #include <comphelper/anytostring.hxx>
@@ -517,7 +517,7 @@ ScVbaRange::getValue() throw (uno::RuntimeException)
 	// multi cell range ( return array )
 	Dim2ArrayValueGetter getter( nRowCount, nColCount );
 	visitArray( getter );
-	return makeAny( uno::Reference< vba::XArrayWrapper >( new ScArrayWrapper( getter.getValue(), sal_False ) ) );
+	return uno::makeAny( script::ArrayWrapper( sal_False, getter.getValue() ) );
 
 }
 
