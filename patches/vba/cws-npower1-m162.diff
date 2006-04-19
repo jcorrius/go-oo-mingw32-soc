@@ -473,6 +473,136 @@ diff -u -p -u -p -r1.26 -r1.26.36.2
 +{ 
 +	return pImg->GetBase();
 +}
+Index: basic/source/runtime/step2.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/runtime/step2.cxx,v
+retrieving revision 1.18
+retrieving revision 1.18.68.1
+diff -u -p -u -p -r1.18 -r1.18.68.1
+--- basic/source/runtime/step2.cxx	7 Sep 2005 21:42:41 -0000	1.18
++++ basic/source/runtime/step2.cxx	14 Apr 2006 14:48:25 -0000	1.18.68.1
+@@ -46,6 +46,7 @@
+ #include "opcodes.hxx"
+ 
+ #include <com/sun/star/container/XIndexAccess.hpp>
++#include <com/sun/star/script/XDefaultMethod.hpp>
+ #include <com/sun/star/uno/Any.hxx>
+ 
+ using namespace com::sun::star::container;
+@@ -449,50 +450,78 @@ SbxVariable* SbiRuntime::CheckArray( Sbx
+ 				{
+ 					Reference< XInterface > x = *(Reference< XInterface >*)aAny.getValue();
+ 					Reference< XIndexAccess > xIndexAccess( x, UNO_QUERY );
+-
+-					// Haben wir Index-Access?
+-					if( xIndexAccess.is() )
++					if ( !SbiRuntime::isVBAEnabled() )
+ 					{
+-						UINT32 nParamCount = (UINT32)pPar->Count() - 1;
+-						if( nParamCount != 1 )
++						// Haben wir Index-Access?
++						if( xIndexAccess.is() )
+ 						{
+-							StarBASIC::Error( SbERR_BAD_ARGUMENT );
+-							return pElem;
+-						}
++							UINT32 nParamCount = (UINT32)pPar->Count() - 1;
++							if( nParamCount != 1 )
++							{
++								StarBASIC::Error( SbERR_BAD_ARGUMENT );
++								return pElem;
++							}
+ 
+-						// Index holen
+-						INT32 nIndex = pPar->Get( 1 )->GetLong();
+-						Reference< XInterface > xRet;
+-						try
+-						{
+-							Any aAny = xIndexAccess->getByIndex( nIndex );
+-							TypeClass eType = aAny.getValueType().getTypeClass();
+-							if( eType == TypeClass_INTERFACE )
+-								xRet = *(Reference< XInterface >*)aAny.getValue();
+-						}
+-						catch (IndexOutOfBoundsException& e1)
+-						{
+-							// Bei Exception erstmal immer von Konvertierungs-Problem ausgehen
+-							StarBASIC::Error( SbERR_OUT_OF_RANGE );
+-						}
++							// Index holen
++							INT32 nIndex = pPar->Get( 1 )->GetLong();
++							Reference< XInterface > xRet;
++							try
++							{
++								Any aAny = xIndexAccess->getByIndex( nIndex );
++								TypeClass eType = aAny.getValueType().getTypeClass();
++								if( eType == TypeClass_INTERFACE )
++									xRet = *(Reference< XInterface >*)aAny.getValue();
++							}
++							catch (IndexOutOfBoundsException& e1)
++							{
++								// Bei Exception erstmal immer von Konvertierungs-Problem ausgehen
++								StarBASIC::Error( SbERR_OUT_OF_RANGE );
++							}
+ 
+-						// #57847 Immer neue Variable anlegen, sonst Fehler
+-						// durch PutObject(NULL) bei ReadOnly-Properties.
+-						pElem = new SbxVariable( SbxVARIANT );
+-						if( xRet.is() )
+-						{
+-							aAny <<= xRet;
++							// #57847 Immer neue Variable anlegen, sonst Fehler
++							// durch PutObject(NULL) bei ReadOnly-Properties.
++							pElem = new SbxVariable( SbxVARIANT );
++							if( xRet.is() )
++							{
++								aAny <<= xRet;
+ 
+-							// #67173 Kein Namen angeben, damit echter Klassen-Namen eintragen wird
+-							String aName;
+-							SbxObjectRef xWrapper = (SbxObject*)new SbUnoObject( aName, aAny );
+-							pElem->PutObject( xWrapper );
++								// #67173 Kein Namen angeben, damit echter Klassen-Namen eintragen wird
++								String aName;
++								SbxObjectRef xWrapper = (SbxObject*)new SbUnoObject( aName, aAny );
++								pElem->PutObject( xWrapper );
++							}
++							else
++							{
++								pElem->PutObject( NULL );
++							}
+ 						}
+-						else
++					}
++					else
++					{
++						rtl::OUString sDefaultMethod;
++
++						Reference< XDefaultMethod > xDfltMethod( x, UNO_QUERY );
++
++						if ( xDfltMethod.is() )
++							sDefaultMethod = xDfltMethod->getName();
++						else if( xIndexAccess.is() )
++							sDefaultMethod = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "getByIndex" ) );
++
++						if ( sDefaultMethod.getLength() )
+ 						{
+-							pElem->PutObject( NULL );
++							SbxVariable* pMeth = pUnoObj->Find( sDefaultMethod, SbxCLASS_METHOD );
++							SbxVariableRef refTemp = pMeth;
++							if ( refTemp )
++							{
++								pMeth->SetParameters( pPar );
++								SbxVariable* pNew = new SbxMethod( *(SbxMethod*)pMeth );	
++								pElem = pNew; 
++							}
++
+ 						}
+ 					}
++
++
+ 				}
+ 
+ 				// #42940, 0.Parameter zu NULL setzen, damit sich Var nicht selbst haelt
 Index: svx/source/msfilter/svxmsbas.cxx
 ===================================================================
 RCS file: /cvs/graphics/svx/source/msfilter/svxmsbas.cxx,v
@@ -562,14 +692,87 @@ diff -N udkapi/com/sun/star/script/ArrayWrapper.idl
 +#endif
 +
 +
+Index: udkapi/com/sun/star/script/XDefaultMethod.idl
+===================================================================
+RCS file: udkapi/com/sun/star/script/XDefaultMethod.idl
+diff -N udkapi/com/sun/star/script/XDefaultMethod.idl
+--- /dev/null	1 Jan 1970 00:00:00 -0000
++++ udkapi/com/sun/star/script/XDefaultMethod.idl	14 Apr 2006 13:31:35 -0000	1.1.2.1
+@@ -0,0 +1,66 @@
++/*************************************************************************
++ *
++ *  OpenOffice.org - a multi-platform office productivity suite
++ *
++ *  $RCSfile$
++ *
++ *  $Revision$
++ *
++ *  last change: $Author$ $Date$
++ *
++ *  The Contents of this file are made available subject to
++ *  the terms of GNU Lesser General Public License Version 2.1.
++ *
++ *
++ *    GNU Lesser General Public License Version 2.1
++ *    =============================================
++ *    Copyright 2005 by Sun Microsystems, Inc.
++ *    901 San Antonio Road, Palo Alto, CA 94303, USA
++ *
++ *    This library is free software; you can redistribute it and/or
++ *    modify it under the terms of the GNU Lesser General Public
++ *    License version 2.1, as published by the Free Software Foundation.
++ *
++ *    This library is distributed in the hope that it will be useful,
++ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ *    Lesser General Public License for more details.
++ *
++ *    You should have received a copy of the GNU Lesser General Public
++ *    License along with this library; if not, write to the Free Software
++ *    Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ *    MA  02111-1307  USA
++ *
++ ************************************************************************/
++
++#ifndef __com_sun_star_script_XDefaultMethod_idl__
++#define __com_sun_star_script_XDefaultMethod_idl__
++
++#ifndef __com_sun_star_uno_XInterface_idl__
++#include <com/sun/star/uno/XInterface.idl>
++#endif
++
++module com { module sun { module star { module script {
++//==============================================================================
++/** 
++    An object supporting this interface indicates to interested
++    parties or clients the name of the default method for
++    this object. Example a scripting engine could use this information
++    to support syntax like "Object( aParam(s) )" which could be expanded to
++    Object.[default-method]( aParam(s) )
++*/
++interface XDefaultMethod : ::com::sun::star::uno::XInterface
++{
++  //-----------------------------------------------------------------------
++  /**
++    Get the name of the default method
++
++    @return
++     The <atom>string</atom> name of default method
++  */
++  string getName();
++
++};
++
++};  };  };  };
++#endif
 Index: udkapi/com/sun/star/script/makefile.mk
 ===================================================================
 RCS file: /cvs/api/udkapi/com/sun/star/script/makefile.mk,v
 retrieving revision 1.10
-retrieving revision 1.10.16.2
-diff -u -p -u -p -r1.10 -r1.10.16.2
+retrieving revision 1.10.16.3
+diff -u -p -u -p -r1.10 -r1.10.16.3
 --- udkapi/com/sun/star/script/makefile.mk	9 Sep 2005 16:22:44 -0000	1.10
-+++ udkapi/com/sun/star/script/makefile.mk	13 Apr 2006 13:32:30 -0000	1.10.16.2
++++ udkapi/com/sun/star/script/makefile.mk	14 Apr 2006 13:31:13 -0000	1.10.16.3
 @@ -64,6 +64,7 @@ IDLFILES=\
  	JavaScript.idl\
  	ScriptEvent.idl\
@@ -578,3 +781,11 @@ diff -u -p -u -p -r1.10 -r1.10.16.2
  	XAllListener.idl\
  	XAllListenerAdapterService.idl\
  	XDebugging.idl\
+@@ -89,6 +90,7 @@ IDLFILES=\
+ 	XLibraryContainerPassword.idl\
+ 	XScriptEventsSupplier.idl\
+ 	XScriptEventsAttacher.idl\
++	XDefaultMethod.idl\
+ 
+ # ------------------------------------------------------------------
+ 
