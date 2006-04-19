@@ -1,0 +1,580 @@
+Index: basic/source/classes/sbunoobj.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/classes/sbunoobj.cxx,v
+retrieving revision 1.36
+retrieving revision 1.36.22.2
+diff -u -p -u -p -r1.36 -r1.36.22.2
+--- basic/source/classes/sbunoobj.cxx	31 Jan 2006 18:30:02 -0000	1.36
++++ basic/source/classes/sbunoobj.cxx	13 Apr 2006 09:10:34 -0000	1.36.22.2
+@@ -61,6 +61,7 @@
+ #include <rtl/ustrbuf.hxx>
+ #include <rtl/strbuf.hxx>
+ 
++#include <com/sun/star/script/ArrayWrapper.hpp>
+ 
+ #include <com/sun/star/uno/XComponentContext.hpp>
+ #include <com/sun/star/uno/DeploymentException.hpp>
+@@ -467,6 +468,86 @@ SbxDataType unoToSbxType( const Referenc
+     }
+ 	return eRetType;
+ }
++void unoToSbxValue( SbxVariable* pVar, const Any& aValue );
++static void implSequenceToMultiDimArray( SbxDimArray*& pArray, Sequence< sal_Int32 >& indices, Sequence< sal_Int32 >& sizes, const Any& aValue, sal_Int32& dimension, sal_Bool bIsZeroIndex )
++{
++	Type aType = aValue.getValueType();
++	TypeClass eTypeClass = aType.getTypeClass();
++
++	sal_Int32 indicesIndex = indices.getLength() -1; 
++	sal_Int32 dimCopy = dimension;
++
++	if ( eTypeClass == TypeClass_SEQUENCE )
++	{
++		Reference< XIdlClass > xIdlTargetClass = TypeToIdlClass( aType );
++		Reference< XIdlArray > xIdlArray = xIdlTargetClass->getArray();
++		sal_Int32 nLen = xIdlArray->getLen( aValue );
++		for ( sal_Int32 index = 0; index < nLen; ++index )
++		{
++			Any aElementAny = xIdlArray->get( aValue, (UINT32)index );
++			// This detects the dimension were currently processing
++			if ( dimCopy == dimension )
++			{
++				++dimCopy;
++				if ( sizes.getLength() < dimCopy )
++				{
++					sizes.realloc( sizes.getLength() + 1 );	
++					sizes[ sizes.getLength() - 1 ] = nLen;
++					indices.realloc( indices.getLength() + 1 );
++					indicesIndex = indices.getLength() - 1;
++				}
++			}
++
++			if ( bIsZeroIndex )
++				indices[ dimCopy - 1 ] = index;
++			else 
++				indices[ dimCopy - 1] = index + 1;
++
++			implSequenceToMultiDimArray( pArray, indices, sizes, aElementAny, dimCopy, bIsZeroIndex );
++		}
++		
++	}
++	else
++	{
++		if ( indices.getLength() < 1 ) 
++		{
++			// Should never ever get here ( indices.getLength()
++			// should equal number of dimensions in the array ) 
++			// And that should at least be 1 !
++			// #QUESTION is there a better error?
++			StarBASIC::Error( SbERR_INVALID_OBJECT );
++			return;
++		}
++
++		if ( !pArray )
++		{
++			SbxDataType eSbxElementType = unoToSbxType( aValue.getValueTypeClass() );
++			pArray = new SbxDimArray( eSbxElementType );
++			sal_Int32 nIndexLen = indices.getLength();
++		
++			// Dimension the array
++			for ( sal_Int32 index = 0; index < nIndexLen; ++index )
++			{
++				if ( bIsZeroIndex )
++					pArray->unoAddDim32( 0, sizes[ index ] - 1);
++				else
++					pArray->unoAddDim32( 1, sizes[ index ] );
++
++			}
++		}
++
++		if ( pArray )
++		{
++			SbxDataType eSbxElementType = unoToSbxType( aValue.getValueTypeClass() );
++			SbxVariableRef xVar = new SbxVariable( eSbxElementType );
++			unoToSbxValue( (SbxVariable*)xVar, aValue );
++
++			sal_Int32* pIndices = indices.getArray();
++			pArray->Put32( 	(SbxVariable*)xVar, pIndices );
++
++		}
++	}
++}
+ 
+ void unoToSbxValue( SbxVariable* pVar, const Any& aValue )
+ {
+@@ -499,47 +580,68 @@ void unoToSbxValue( SbxVariable* pVar, c
+ 			}
+ 		}
+ 		break;
+-
+ 		// Interfaces und Structs muessen in ein SbUnoObject gewrappt werden
+ 		case TypeClass_INTERFACE:
+ 		case TypeClass_STRUCT:
+ 		{
+ 			if( eTypeClass == TypeClass_STRUCT )
+ 			{
+-				SbiInstance* pInst = pINST;
+-				if( pInst && pInst->IsCompatibility() )
++				ArrayWrapper aWrap;
++				if ( (aValue >>= aWrap) )
+ 				{
+-					oleautomation::Date aDate;
+-					if( (aValue >>= aDate) )
++					SbxDimArray* pArray = NULL;
++					Sequence< sal_Int32 > indices;
++					Sequence< sal_Int32 > sizes;
++					sal_Int32 dimension = 0;
++					implSequenceToMultiDimArray( pArray, indices, sizes, aWrap.Array, dimension, aWrap.IsZeroIndex );
++					if ( pArray )
+ 					{
+-						pVar->PutDate( aDate.Value );
+-						break;
++						SbxDimArrayRef xArray = pArray;
++						USHORT nFlags = pVar->GetFlags();
++						pVar->ResetFlag( SBX_FIXED );
++						pVar->PutObject( (SbxDimArray*)xArray );
++						pVar->SetFlags( nFlags );
+ 					}
+ 					else
++						pVar->PutEmpty();
++					break;
++				}
++				else
++				{
++					SbiInstance* pInst = pINST;
++					if( pInst && pInst->IsCompatibility() )
+ 					{
+-						oleautomation::Decimal aDecimal;
+-						if( (aValue >>= aDecimal) )
++						oleautomation::Date aDate;
++						if( (aValue >>= aDate) )
+ 						{
+-							pVar->PutDecimal( aDecimal );
++							pVar->PutDate( aDate.Value );
+ 							break;
+ 						}
+ 						else
+ 						{
+-							oleautomation::Currency aCurrency;
+-							if( (aValue >>= aCurrency) )
++							oleautomation::Decimal aDecimal;
++							if( (aValue >>= aDecimal) )
+ 							{
+-								sal_Int64 nValue64 = aCurrency.Value;
+-								SbxINT64 aInt64;
+-								aInt64.nHigh = nValue64 >> 32;
+-								aInt64.nLow = (UINT32)( nValue64 & 0xffffffff );
+-								pVar->PutCurrency( aInt64 );
++								pVar->PutDecimal( aDecimal );
+ 								break;
+ 							}
++							else
++							{
++								oleautomation::Currency aCurrency;
++								if( (aValue >>= aCurrency) )
++								{
++									sal_Int64 nValue64 = aCurrency.Value;
++									SbxINT64 aInt64;
++									aInt64.nHigh = nValue64 >> 32;
++									aInt64.nLow = (UINT32)( nValue64 & 0xffffffff );
++									pVar->PutCurrency( aInt64 );
++									break;
++								}
++							}
+ 						}
+ 					}
+ 				}
+ 			}
+-
+ 			// SbUnoObject instanzieren
+ 			String aName;
+ 			SbUnoObject* pSbUnoObject = new SbUnoObject( aName, aValue );
+Index: basic/source/classes/sbxmod.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/classes/sbxmod.cxx,v
+retrieving revision 1.27
+retrieving revision 1.27.60.1
+diff -u -p -u -p -r1.27 -r1.27.60.1
+--- basic/source/classes/sbxmod.cxx	29 Sep 2005 18:38:55 -0000	1.27
++++ basic/source/classes/sbxmod.cxx	12 Apr 2006 11:25:07 -0000	1.27.60.1
+@@ -750,6 +750,8 @@ USHORT SbModule::Run( SbMethod* pMeth )
+ 			if( pRt->pNext )
+ 				pRt->pNext->block();
+ 			pINST->pRun = pRt;
++			if ( SbiRuntime ::isVBAEnabled() )
++				pINST->EnableCompatibility( TRUE );
+ 			while( pRt->Step() ) {}
+ 			if( pRt->pNext )
+ 				pRt->pNext->unblock();
+Index: basic/source/comp/codegen.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/comp/codegen.cxx,v
+retrieving revision 1.11
+retrieving revision 1.11.64.1
+diff -u -p -u -p -r1.11 -r1.11.64.1
+--- basic/source/comp/codegen.cxx	29 Sep 2005 16:17:04 -0000	1.11
++++ basic/source/comp/codegen.cxx	12 Apr 2006 11:25:07 -0000	1.11.64.1
+@@ -136,6 +136,8 @@ void SbiCodeGen::Save()
+ 	// OPTION EXPLICIT-Flag uebernehmen
+ 	if( pParser->bExplicit )
+ 		p->SetFlag( SBIMG_EXPLICIT );
++	if( pParser->bVBASupportOn )
++		p->SetFlag( SBIMG_VBASUPPORT );
+ 	
+ 	int nIfaceCount = 0;
+ 	if( pParser->bClassModule )
+Index: basic/source/comp/parser.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/comp/parser.cxx,v
+retrieving revision 1.13
+retrieving revision 1.13.60.1
+diff -u -p -u -p -r1.13 -r1.13.60.1
+--- basic/source/comp/parser.cxx	29 Sep 2005 16:17:04 -0000	1.13
++++ basic/source/comp/parser.cxx	12 Apr 2006 11:25:07 -0000	1.13.60.1
+@@ -150,6 +150,7 @@ SbiParser::SbiParser( StarBASIC* pb, SbM
+ 	bSingleLineIf =
+ 	bExplicit = FALSE;
+ 	bClassModule = FALSE;
++	bVBASupportOn = FALSE;
+ 	pPool	 = &aPublics;
+ 	for( short i = 0; i < 26; i++ )
+ 		eDefTypes[ i ] = SbxVARIANT;    // Kein expliziter Defaulttyp
+@@ -664,6 +665,13 @@ void SbiParser::Implements()
+ 	}
+ }
+ 
++void SbiParser::EnableCompatibility()
++{
++	if( !bCompatible )
++		AddConstants();
++	bCompatible = TRUE; 
++}
++
+ // OPTION
+ 
+ void SbiParser::Option()
+@@ -698,15 +706,25 @@ void SbiParser::Option()
+ 				default:;
+ 			} // Fall thru!
+ 		case COMPATIBLE:
+-			if( !bCompatible )
+-				AddConstants();
+-			bCompatible = TRUE; 
++			EnableCompatibility();
+ 			break;
+ 
+ 		case CLASSMODULE:
+ 			bClassModule = TRUE; 
+ 			break;
+-
++		case VBASUPPORT:
++			if( Next() == NUMBER )
++			{
++				if ( nVal == 1 || nVal == 0 )
++				{
++					bVBASupportOn = ( nVal == 1 );
++					if ( bVBASupportOn )
++						EnableCompatibility();
++					break;
++				}
++			}
++			Error( SbERR_EXPECTED, "0/1" );
++			break;
+ 		default:
+ 			Error( SbERR_BAD_OPTION, eCurTok );
+ 	}
+Index: basic/source/comp/token.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/comp/token.cxx,v
+retrieving revision 1.15
+retrieving revision 1.15.64.1
+diff -u -p -u -p -r1.15 -r1.15.64.1
+--- basic/source/comp/token.cxx	29 Sep 2005 16:35:53 -0000	1.15
++++ basic/source/comp/token.cxx	12 Apr 2006 11:25:07 -0000	1.15.64.1
+@@ -184,6 +184,7 @@ static TokenTable aTokTable_Basic [] = {
+ 	{ TYPEOF,	"TypeOf" },
+ 	{ UNTIL,	"Until" },
+ 	{ TVARIANT,	"Variant" },
++	{ VBASUPPORT,	"VbaSupport" },
+ 	{ WEND,		"Wend" },
+ 	{ WHILE,	"While" },
+ 	{ WITH,		"With" },
+Index: basic/source/inc/image.hxx
+===================================================================
+RCS file: /cvs/script/basic/source/inc/image.hxx,v
+retrieving revision 1.8
+retrieving revision 1.8.66.1
+diff -u -p -u -p -r1.8 -r1.8.66.1
+--- basic/source/inc/image.hxx	29 Sep 2005 16:31:38 -0000	1.8
++++ basic/source/inc/image.hxx	12 Apr 2006 11:25:08 -0000	1.8.66.1
+@@ -103,5 +103,6 @@ public:
+ #define	SBIMG_COMPARETEXT	0x0002	// OPTION COMPARE TEXT ist aktiv
+ #define	SBIMG_INITCODE		0x0004	// Init-Code vorhanden
+ #define	SBIMG_CLASSMODULE	0x0008	// OPTION ClassModule is active
++#define	SBIMG_VBASUPPORT	0x0020	// OPTION VBASupport is 1
+ 
+ #endif
+Index: basic/source/inc/parser.hxx
+===================================================================
+RCS file: /cvs/script/basic/source/inc/parser.hxx,v
+retrieving revision 1.8
+retrieving revision 1.8.66.1
+diff -u -p -u -p -r1.8 -r1.8.66.1
+--- basic/source/inc/parser.hxx	29 Sep 2005 16:31:38 -0000	1.8
++++ basic/source/inc/parser.hxx	12 Apr 2006 11:25:08 -0000	1.8.66.1
+@@ -77,7 +77,7 @@ class SbiParser : public SbiTokenizer
+ 	void StmntBlock( SbiToken ); 	// Statement-Block abarbeiten
+ 	void DefType( BOOL bPrivate );	// Parse type declaration
+ 	void DefEnum( BOOL bPrivate );	// Parse enum declaration
+-
++	void EnableCompatibility();	
+ public:
+ 	SbxArrayRef	  rTypeArray;		// das Type-Array
+ 	SbxArrayRef	  rEnumArray;		// Enum types
+@@ -94,6 +94,7 @@ public:
+ 	BOOL		  bText;			// OPTION COMPARE TEXT
+ 	BOOL          bExplicit; 		// TRUE: OPTION EXPLICIT
+ 	BOOL          bClassModule;		// TRUE: OPTION ClassModule
++	BOOL          bVBASupportOn;		// TRUE: OPTION VBASupport 1 otherwise default False
+ 	IfaceVector   aIfaceVector;		// Holds all interfaces implemented by a class module
+ 	SbxDataType   eDefTypes[26];	// DEFxxx-Datentypen
+ 
+Index: basic/source/inc/runtime.hxx
+===================================================================
+RCS file: /cvs/script/basic/source/inc/runtime.hxx,v
+retrieving revision 1.27
+retrieving revision 1.27.34.2
+diff -u -p -u -p -r1.27 -r1.27.34.2
+--- basic/source/inc/runtime.hxx	14 Dec 2005 14:35:36 -0000	1.27
++++ basic/source/inc/runtime.hxx	14 Apr 2006 11:03:18 -0000	1.27.34.2
+@@ -467,6 +467,8 @@ class SbiRuntime
+ 	void StepDCREATE_REDIMP(USHORT,USHORT), StepDCREATE_IMPL(USHORT,USHORT,BOOL);
+ 	void StepFIND_CM( USHORT, USHORT );
+ public:
++	USHORT		GetImageFlag( USHORT n ) const;
++	USHORT		GetBase();
+ 	xub_StrLen  nLine,nCol1,nCol2;	// aktuelle Zeile, Spaltenbereich
+ 	SbiRuntime* pNext;               // Stack-Chain
+ 
+@@ -488,6 +490,8 @@ public:
+ 	SbxArray* GetParams();
+ 
+ 	SbxBase* FindElementExtern( const String& rName );
++	static bool isVBAEnabled();
++
+ };
+ 
+ inline void checkArithmeticOverflow( double d )
+Index: basic/source/inc/token.hxx
+===================================================================
+RCS file: /cvs/script/basic/source/inc/token.hxx,v
+retrieving revision 1.8
+retrieving revision 1.8.72.1
+diff -u -p -u -p -r1.8 -r1.8.72.1
+--- basic/source/inc/token.hxx	7 Sep 2005 21:37:35 -0000	1.8
++++ basic/source/inc/token.hxx	12 Apr 2006 11:25:08 -0000	1.8.72.1
+@@ -122,6 +122,7 @@ enum SbiToken {
+ 	JS_GT, JS_GE, JS_LSHIFT, JS_RSHIFT, JS_RSHIFT_Z,
+ 	JS_PLUS, JS_MINUS, JS_MUL, JS_DIV, JS_MOD, JS_LOG_NOT, JS_BIT_NOT,
+ 	JS_INC, JS_DEC, JS_LPAREN, JS_RPAREN, JS_LINDEX, JS_RINDEX
++	, VBASUPPORT
+ };
+ 
+ #ifdef SbiTokenSHAREDTMPUNDEF
+Index: basic/source/runtime/methods1.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/runtime/methods1.cxx,v
+retrieving revision 1.24
+retrieving revision 1.24.34.1
+diff -u -p -u -p -r1.24 -r1.24.34.1
+--- basic/source/runtime/methods1.cxx	14 Dec 2005 14:36:04 -0000	1.24
++++ basic/source/runtime/methods1.cxx	14 Apr 2006 11:03:18 -0000	1.24.34.1
+@@ -590,6 +590,18 @@ RTLFUNC(FreeLibrary)
+ 	ByteString aByteDLLName( rPar.Get(1)->GetString(), gsl_getSystemTextEncoding() );
+ 	pINST->GetDllMgr()->FreeDll( aByteDLLName );
+ }
++bool IsBaseIndexOne()
++{
++	bool result = false;
++	if ( pINST )
++		if ( pINST->pRun )
++		{
++			USHORT res = pINST->pRun->GetBase();
++			if ( res )
++				result = true;
++		}	
++	return result;
++}
+ 
+ RTLFUNC(Array)
+ {
+@@ -597,14 +609,24 @@ RTLFUNC(Array)
+ 	USHORT nArraySize = rPar.Count() - 1;
+ 
+ 	// Option Base zunaechst ignorieren (kennt leider nur der Compiler)
++	bool bIncIndex = (IsBaseIndexOne() && SbiRuntime::isVBAEnabled() );
+ 	if( nArraySize )
+-		pArray->AddDim( 0, nArraySize-1 );
++		if ( bIncIndex )	
++			pArray->AddDim( 1, nArraySize );
++		else
++			pArray->AddDim( 0, nArraySize-1 );
+ 	else
+ 		pArray->unoAddDim( 0, -1 );
+ 
+ 	// Parameter ins Array uebernehmen
+ 	for( short i = 0 ; i < nArraySize ; i++ )
+-		pArray->Put( rPar.Get(i+1), &i );
++	{
++		SbxVariable* pVar = rPar.Get(i+1);
++		short index = i;
++		if ( bIncIndex )
++			++index; 
++		pArray->Put( pVar, &index );
++	}
+ 
+ 	// Array zurueckliefern
+ 	SbxVariableRef refVar = rPar.Get(0);
+Index: basic/source/runtime/runtime.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/runtime/runtime.cxx,v
+retrieving revision 1.26
+retrieving revision 1.26.36.2
+diff -u -p -u -p -r1.26 -r1.26.36.2
+--- basic/source/runtime/runtime.cxx	14 Dec 2005 14:36:16 -0000	1.26
++++ basic/source/runtime/runtime.cxx	14 Apr 2006 11:03:18 -0000	1.26.36.2
+@@ -67,6 +67,15 @@
+ // Makro MEMBER()
+ #include <macfix.hxx>
+ 
++#include <svtools/fltrcfg.hxx>
++bool SbiRuntime::isVBAEnabled()
++{
++	bool result = false;
++	SbiInstance* pInst = pINST;
++	if ( pInst && pINST->pRun )
++		result = pInst->pRun->GetImageFlag( SBIMG_VBASUPPORT );
++	return result; 
++}
+ 
+ // #91147 Global reschedule flag
+ static BOOL bStaticGlobalEnableReschedule = TRUE;
+@@ -1116,4 +1125,13 @@ void SbiRuntime::DllCall
+ 		Error( nErr );
+ 	PushVar( pRes );
+ }
+-
++USHORT
++SbiRuntime::GetImageFlag( USHORT n ) const
++{ 
++	return pImg->GetFlag( n ); 
++} 
++USHORT
++SbiRuntime::GetBase()
++{ 
++	return pImg->GetBase();
++}
+Index: svx/source/msfilter/svxmsbas.cxx
+===================================================================
+RCS file: /cvs/graphics/svx/source/msfilter/svxmsbas.cxx,v
+retrieving revision 1.15
+retrieving revision 1.15.116.1
+diff -u -p -u -p -r1.15 -r1.15.116.1
+--- svx/source/msfilter/svxmsbas.cxx	3 Feb 2006 18:30:38 -0000	1.15
++++ svx/source/msfilter/svxmsbas.cxx	13 Apr 2006 11:37:17 -0000	1.15.116.1
+@@ -346,6 +346,8 @@ BOOL SvxImportMSVBasic::ImportCode_Impl(
+                         DBG_ERRORFILE( "SvxImportMSVBasic::ImportCode_Impl - unknown module type" );
+                         break;
+                 }
++				static ::rtl::OUString sVBAOption( RTL_CONSTASCII_USTRINGPARAM( "Option VBASupport 1\n" ) ); 
++				modeTypeComment = modeTypeComment + sVBAOption;
+ 
+ 				String sModule(sBasicModule); //#i52606# no need to split Macros in 64KB blocks any more!
+ 				String sTemp;
+Index: udkapi/com/sun/star/script/ArrayWrapper.idl
+===================================================================
+RCS file: udkapi/com/sun/star/script/ArrayWrapper.idl
+diff -N udkapi/com/sun/star/script/ArrayWrapper.idl
+--- /dev/null	1 Jan 1970 00:00:00 -0000
++++ udkapi/com/sun/star/script/ArrayWrapper.idl	12 Apr 2006 11:18:20 -0000	1.1.2.1
+@@ -0,0 +1,65 @@
++/*************************************************************************
++ *
++ *  OpenOffice.org - a multi-platform office productivity suite
++ *
++ *  $RCSfile$
++ *
++ *  $Revision$
++ *
++ *  last change: $Author$ $Date$
++ *
++ *  The Contents of this file are made available subject to
++ *  the terms of GNU Lesser General Public License Version 2.1.
++ *
++ *
++ *    GNU Lesser General Public License Version 2.1
++ *    =============================================
++ *    Copyright 2005 by Sun Microsystems, Inc.
++ *    901 San Antonio Road, Palo Alto, CA 94303, USA
++ *
++ *    This library is free software; you can redistribute it and/or
++ *    modify it under the terms of the GNU Lesser General Public
++ *    License version 2.1, as published by the Free Software Foundation.
++ *
++ *    This library is distributed in the hope that it will be useful,
++ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ *    Lesser General Public License for more details.
++ *
++ *    You should have received a copy of the GNU Lesser General Public
++ *    License along with this library; if not, write to the Free Software
++ *    Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ *    MA  02111-1307  USA
++ *
++ ************************************************************************/
++
++#ifndef __com_sun_star_script_XArrayWrapper_idl__
++#define __com_sun_star_script_XArrayWrapper_idl__
++
++#ifndef __com_sun_star_uno_XInterface_idl__
++#include <com/sun/star/uno/XInterface.idl>
++#endif
++
++//=============================================================================
++/** 
++    Allows an uno array that is passed between different language boundries
++    to indicate it prefers to be represented as a multidimensional array
++    with 1/0 based indices.
++*/
++module com {  module sun {  module star { module script {
++
++//=============================================================================
++
++struct ArrayWrapper
++{
++	boolean IsZeroIndex; 
++	any Array; 
++};
++
++//=============================================================================
++
++}; }; }; };
++
++#endif
++
++
+Index: udkapi/com/sun/star/script/makefile.mk
+===================================================================
+RCS file: /cvs/api/udkapi/com/sun/star/script/makefile.mk,v
+retrieving revision 1.10
+retrieving revision 1.10.16.2
+diff -u -p -u -p -r1.10 -r1.10.16.2
+--- udkapi/com/sun/star/script/makefile.mk	9 Sep 2005 16:22:44 -0000	1.10
++++ udkapi/com/sun/star/script/makefile.mk	13 Apr 2006 13:32:30 -0000	1.10.16.2
+@@ -64,6 +64,7 @@ IDLFILES=\
+ 	JavaScript.idl\
+ 	ScriptEvent.idl\
+ 	ScriptEventDescriptor.idl\
++	ArrayWrapper.idl\
+ 	XAllListener.idl\
+ 	XAllListenerAdapterService.idl\
+ 	XDebugging.idl\
