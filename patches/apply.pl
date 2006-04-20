@@ -709,6 +709,7 @@ sub export_series {
     my @Patches = list_patches (@distros);
 
     for my $patch (@Patches) {
+	$patch =~ s/^\Q$patch_dir\E\/.\//src680\//;
 	$patch =~ s/^\Q$patch_dir\E\/..\///;
 	print "$patch -p0\n";
     }
