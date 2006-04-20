@@ -862,8 +862,8 @@ sub print_statistic_no_issue ($)
 
 (@ARGV > 1) ||
     die "Syntax:\n".
-    "apply <path-to-patchdir> <src root> --tag=<src680-m90> [--distro=Debian [--distro=Binfilter [...]]] [--quiet] [--dry-run] [ patch flags ]\n" .
-    "apply <path-to-patchdir> --series-to\n" .
+    "apply <path-to-patchdir> <src root> --tag=<src680-m90> [--distro=<Debian> [--distro=<Binfilter> [...]]] [--quiet] [--dry-run] [ patch flags ]\n" .
+    "apply <path-to-patchdir> --series-from=<Debian>\n" .
     "apply <path-to-patchdir> --add-developer\n" .
     "apply <path-to-patchdir> --find-unused\n" .
     "apply <path-to-patchdir> --statistic-no-issue\n";
