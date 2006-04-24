@@ -68,7 +68,7 @@ public:
 	RevisedSimplexImpl( RevisedSimplex* );
 	~RevisedSimplexImpl();
 
-	Matrix solve();
+	void solve();
 	void setEnableTwoPhaseSearch( bool b ) { m_bTwoPhaseAllowed = b; }
 	bool isTwoPhaseSearchEnabled() { return m_bTwoPhaseAllowed; }
 
@@ -104,8 +104,6 @@ private:
 	Model* getModel() const { return m_pSelf->getModel(); }
 
 	void convertVarRange( Model& );
-	void initializePermIndex();
-	void mapDecisionVars( Matrix& ) const;
 	void runNormalInitSearch();
 	void runTwoPhaseInitSearch( const std::vector<size_t>& );
 	void printIterateHeader() const;
@@ -128,7 +126,7 @@ RevisedSimplexImpl::~RevisedSimplexImpl()
 }
 
 /**
- * Convert variable ranges into a constrant matrix.  Also
+ * Convert variable ranges into a constraint matrix.  Also
  * extracts those variables with identical upper and lower
  * ranges into equality constraints, which are ultimately
  * treated as constant values.
@@ -138,147 +136,33 @@ RevisedSimplexImpl::~RevisedSimplexImpl()
 void RevisedSimplexImpl::convertVarRange( Model& aModel )
 {
 	size_t nColSize = aModel.getCostVector().cols();
-	size_t nRhsSize = aModel.getRhsVector().rows();
-	double fObjConst = 0.0;
-	std::vector<double> cnRhsConstants( nRhsSize );
-	std::vector<size_t> cnColsNuked;
-	
+
 	for ( size_t i = 0; i < nColSize; ++i )
 	{
-		double fLBound = 0.0, fUBound = 0.0;
-		bool bLBound = false, bUBound = false;
 		if ( aModel.isVarBounded( i, BOUND_LOWER ) )
 		{
-			fLBound = aModel.getVarBound( i, BOUND_LOWER );
+			double fLBound = aModel.getVarBound( i, BOUND_LOWER );
 			cout << i << " lower bound: " << fLBound << endl;
-			bLBound = true;
+
+			vector<double> v( nColSize );
+			v.at( i ) = 1.0;
+			aModel.addConstraint( v, GREATER_THAN_EQUAL, fLBound );
 		}
 
 		if ( aModel.isVarBounded( i, BOUND_UPPER ) )
 		{
-			fUBound = aModel.getVarBound( i, BOUND_UPPER );
+			double fUBound = aModel.getVarBound( i, BOUND_UPPER );
 			cout << i << " upper bound: " << fUBound << endl;
-			bUBound = true;
+
+			vector<double> v( nColSize );
+			v.at( i ) = 1.0;
+			aModel.addConstraint( v, LESS_THAN_EQUAL, fUBound );
 		}
-
-		if ( bLBound && bUBound && fLBound == fUBound )
-		{
-			// This variable is constant-equivalent.  Remove it from 
-			// the temporary model.
-			ConstDecVar cdv;
-			cdv.Id = i;
-			cdv.Value = fLBound;
-			m_cnConstDecVarList.push_back( cdv );
-
-			double fCost = aModel.getCostVector().operator()( 0, i );
-			fObjConst -= fCost*fLBound;
-			cnColsNuked.push_back( i );
-			cout << "  (equal) fObjConstant = " << fObjConst << endl;
-			for( size_t nRow = 0; nRow < nRhsSize; ++nRow )
-			{
-				double f = aModel.getConstraint( nRow, i )*fLBound;
-				cout << "  " << f;
-				cnRhsConstants[nRow] -= f;
-				cout << ":\t" << cnRhsConstants.at( nRow ) << endl;
-			}
-		}
-		else
-		{
-			if ( bLBound )
-			{
-				vector<double> v( nColSize );
-				v.at( i ) = 1.0;
-				aModel.addConstraint( v, GREATER_THAN_EQUAL, fLBound );
-			}
-
-			if ( bUBound )
-			{
-				vector<double> v( nColSize );
-				v.at( i ) = 1.0;
-				aModel.addConstraint( v, LESS_THAN_EQUAL, fUBound );
-			}
-		}
-	}
-
-	if ( cnColsNuked.size() > 0 )
-	{
-		// Delete designated columns from all affected matrices, and turn them
-		// into constant values to be added to the RHS vector and objective function.
-		// Also, remove the IDs of deleted columns from the permutation index list, 
-		// and update the constant objective value list.
-
-		aModel.deleteCostVectorElements( cnColsNuked );
-		aModel.deleteConstraintMatrixColumns( cnColsNuked );
-		for ( size_t i = 0; i < nRhsSize; ++i )
-		{
-			double fRhsVal = aModel.getRhsValue(i);
-			aModel.setRhsValue( i, fRhsVal + cnRhsConstants.at(i) );
-		}
-
-		// Actually this may not be needed since this value will not affect
-		// the solution at all.  But set this anyway.
-		aModel.setObjectiveFuncConstant( fObjConst );
-
-		vector<size_t>::iterator it,
-			itBeg = cnColsNuked.begin(), itEnd = cnColsNuked.end();
-		list<size_t>::iterator itPerm = m_cnPermVarIndex.begin();
-		for ( it = itBeg; it != itEnd; ++it )
-			m_cnPermVarIndex.remove( *it );
 	}
 }
 
-/**
- * Initialize the permutation index list.  This list is used to set the
- * values of decision variables back to their original position in case
- * of model reduction.
- */
-void RevisedSimplexImpl::initializePermIndex()
+void RevisedSimplexImpl::solve()
 {
-	m_cnPermVarIndex.clear();
-	size_t nCostSize = getModel()->getCostVector().cols();
-	for ( size_t i = 0; i < nCostSize; ++i )
-		m_cnPermVarIndex.push_back( i );
-
-	cout << "permutation index: ";
-	printElements( m_cnPermVarIndex );
-}
-
-/**
- * This method maps back variables that may have been repositioned as a
- * result of model shrinkage.  It also puts the values of those constant 
- * equivalent decision variables to their original position in the matrix.
- * 
- * @param solution matrix representing a solution for reduced model
- */
-void RevisedSimplexImpl::mapDecisionVars( Matrix& solution ) const
-{
-	cout << "permutation index: ";
-	printElements( m_cnPermVarIndex );
-
-	// Map solved variables into their original position.
-	list<size_t>::const_iterator itBeg = m_cnPermVarIndex.begin(),
-		itEnd = m_cnPermVarIndex.end(), it;
-	for ( it = itBeg; it != itEnd; ++it )
-	{
-		size_t nSrcId = ::std::distance( itBeg, it );
-		size_t nDstId = *it;
-		cout << "mapped var id: " << nSrcId << " -> " << nDstId << endl;
-		solution( nDstId, 0 ) = m_aX( nSrcId, 0 );
-	}
-
-	// Insert constant variables if any
-	list<ConstDecVar>::const_iterator itCdvBeg = m_cnConstDecVarList.begin(),
-		itCdvEnd = m_cnConstDecVarList.end(), itCdv;
-	for ( itCdv = itCdvBeg; itCdv != itCdvEnd; ++itCdv )
-		solution( itCdv->Id, 0 ) = itCdv->Value;
-}
-
-Matrix RevisedSimplexImpl::solve()
-{
-	//-----------------------------------------------------------------------
-	// Initialize
-	
-	//-----------------------------------------------------------------------
 	// Normalize the objective with use of slack variable(s), and store in 
 	// the following variables such that:
 	//
@@ -286,8 +170,7 @@ Matrix RevisedSimplexImpl::solve()
 	//     B = right hand side vector
 	//     C = expanded cost vector
 
-	Model aModel( *getModel() );
-	initializePermIndex();
+	Model aModel( *m_pSelf->getCanonicalModel() );
 	convertVarRange( aModel );
 	aModel.print();
 	Matrix A( aModel.getConstraintMatrix() );
@@ -424,22 +307,12 @@ Matrix RevisedSimplexImpl::solve()
 	m_nIter = 0;
 	while ( !iterate() );
 
-	// Put the solution from the modified model to the original model by using
-	// the permutation index.
-	size_t nCostSize = getModel()->getCostVector().cols(); // original cost size
-	Matrix solution( nCostSize, 1 );
-	solution.setResizable( false );
-	if( m_cnPermVarIndex.empty() )
-		throw AssertionWrong();
-
-	mapDecisionVars( solution );
+	m_pSelf->setCanonicalSolution( m_aX );
 	if ( m_Model.getVerbose() )
 	{
 		cout << "x = ";
-		solution.trans().print();	
+		m_pSelf->getSolution().trans().print();	
 	}
-	
-	return solution;
 }
 
 /** Find an initial X via normal (non two-phase) search, and set the following 
@@ -833,14 +706,13 @@ RevisedSimplex::RevisedSimplex() : BaseAlgorithm(),
 {
 }
 
-RevisedSimplex::~RevisedSimplex()
+RevisedSimplex::~RevisedSimplex() throw()
 {
 }
 
 void RevisedSimplex::solve()
 {
-	Matrix sol = m_pImpl->solve();
-	setSolution( sol );
+	m_pImpl->solve();
 }
 
 void RevisedSimplex::setEnableTwoPhaseSearch( bool b )
@@ -859,7 +731,7 @@ public:
 	BoundedRevisedSimplexImpl( BoundedRevisedSimplex* );
 	~BoundedRevisedSimplexImpl();
 	
-	Matrix solve();
+	void solve();
 	
 private:
 
@@ -929,7 +801,7 @@ BoundedRevisedSimplexImpl::~BoundedRevisedSimplexImpl()
 {
 }
 
-Matrix BoundedRevisedSimplexImpl::solve()
+void BoundedRevisedSimplexImpl::solve()
 {
 	initialize();
 
@@ -967,7 +839,7 @@ Matrix BoundedRevisedSimplexImpl::solve()
 		Debug( "Solution not feasible!?" );
 #endif
 
-	return mxSolution;
+	m_pSelf->setCanonicalSolution( mxSolution );
 }
 
 void BoundedRevisedSimplexImpl::initialize()
@@ -982,7 +854,7 @@ void BoundedRevisedSimplexImpl::initialize()
 	m_mxBasicInv.clear();
 	m_mxUpdateMatrix.clear();
 
-	auto_ptr<Model> ptr( new Model( *getModel() ) );
+	auto_ptr<Model> ptr( new Model( *m_pSelf->getCanonicalModel() ) );
 	m_pModel = ptr; // Note: transfer of ownership
 
 	m_mxA = m_pModel->getConstraintMatrix();
@@ -1477,12 +1349,13 @@ bool BoundedRevisedSimplexImpl::buildInitialVars( vector<VarBoundary>& cnNonBasi
 	Debug( "All IDs: " );
 	printElements( cnBasicId );
 
-	std::vector<VarBoundary>::const_iterator itr, 
-		itrBeg = cnNonBasic.begin(), itrEnd = cnNonBasic.end();
 	Matrix mxLHSSum( m_mxA.rows(), 1 ); // matrix to keep track of left-hand-side sums
 	SizeTypeContainer cnNBColId;        // non-basic variable IDs
 	std::vector<Bound> cnNBBoundType;   // non-basic bound type
 	cout << "NonBasicID: ";
+
+	std::vector<VarBoundary>::const_iterator itr, 
+		itrBeg = cnNonBasic.begin(), itrEnd = cnNonBasic.end();
 	for ( itr = itrBeg; itr != itrEnd; ++itr )
 	{
 		double fNBVal = itr->Value;
@@ -1581,7 +1454,10 @@ bool BoundedRevisedSimplexImpl::iterateVarBoundary( size_t nIdx, size_t nUpper,
 		vector<VarBoundary>& aArray )
 {	
 	if ( aArray.size() == nUpper )
+	{
+		cout << "array size maxed: " << aArray.size() << endl;
 		return buildInitialVars( aArray );
+	}
 
 	if ( nIdx > m_mxC.cols() )
 		// Not enough non-basic variables found
@@ -1594,6 +1470,11 @@ bool BoundedRevisedSimplexImpl::iterateVarBoundary( size_t nIdx, size_t nUpper,
 	for ( size_t i = 0; i < 2; ++i )
 		if ( m_pModel->isVarBounded( nIdx, e[i] ) )
 		{
+			cout << "index: a" << nIdx << "a\tarray size: " << aArray.size() << "\t";
+			if ( i == 0 )
+				cout << "lower" << endl;
+			else
+				cout << "upper" << endl;
 			VarBoundary temp;
 			temp.Id = nIdx;
 			temp.Value = m_pModel->getVarBound( nIdx, e[i] );
@@ -1609,9 +1490,17 @@ bool BoundedRevisedSimplexImpl::iterateVarBoundary( size_t nIdx, size_t nUpper,
 				cout << " (" << temp.Value << ")" << endl;
 			}
 			break;
+#if 0
+			if ( iterateVarBoundary( nIdx+1, nUpper, aArray ) )
+				return true;
+			aArray.pop_back();
+#endif
 		}
 		
 	return iterateVarBoundary( nIdx+1, nUpper, aArray );
+#if 0
+	return false;
+#endif
 }
 
 bool BoundedRevisedSimplexImpl::isSolutionFeasible( const Matrix& mxX ) const
@@ -1659,14 +1548,13 @@ BoundedRevisedSimplex::BoundedRevisedSimplex() : BaseAlgorithm(),
 {
 }
 
-BoundedRevisedSimplex::~BoundedRevisedSimplex()
+BoundedRevisedSimplex::~BoundedRevisedSimplex() throw()
 {
 }
 
 void BoundedRevisedSimplex::solve()
 {
-	Matrix sol = m_pImpl->solve();
-	setSolution( sol );
+	m_pImpl->solve();
 }
 
 

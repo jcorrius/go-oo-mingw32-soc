@@ -42,7 +42,7 @@ class RevisedSimplex : public BaseAlgorithm
 {
 public:
 	RevisedSimplex();
-	virtual ~RevisedSimplex();
+	virtual ~RevisedSimplex() throw();
 
 	virtual void solve();
 
@@ -57,7 +57,7 @@ class BoundedRevisedSimplex : public BaseAlgorithm
 {
 public:
 	BoundedRevisedSimplex();
-	virtual ~BoundedRevisedSimplex();
+	virtual ~BoundedRevisedSimplex() throw();
 
 	virtual void solve();
 

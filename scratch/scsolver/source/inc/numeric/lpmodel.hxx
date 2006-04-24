@@ -62,11 +62,12 @@ public:
 	::scsolver::numeric::Matrix getCostVector() const;
 	void setCostVectorElement( size_t, double );
 	void setCostVector( const std::vector<double>& );
-	void deleteCostVectorElements( const std::vector<size_t> & );
 
 	double   getVarBound( size_t, Bound ) const;
 	void     setVarBound( size_t, Bound, double );
 	bool isVarBounded( size_t, Bound ) const;
+
+	void deleteVariables( const std::vector<size_t>& );
 
 	Goal getGoal() const;
 	void setGoal( Goal );
@@ -92,7 +93,6 @@ public:
 	Equality getEqualityByRowId( size_t ) const;
 	void addConstraint( const std::vector<double>&, Equality, double );
 	void setStandardConstraintMatrix( const ::scsolver::numeric::Matrix&, const ::scsolver::numeric::Matrix& );
-	void deleteConstraintMatrixColumns( const std::vector<size_t>& );
 	
 	void solve( BaseAlgorithm* );
 	void solve( const std::auto_ptr<BaseAlgorithm>& );

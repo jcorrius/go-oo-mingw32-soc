@@ -85,6 +85,9 @@ public:
 	double    getVarBound( size_t, Bound ) const;
 	void      setVarBound( size_t, Bound, double );
 	bool  isVarBounded( size_t, Bound ) const;
+	void deleteVarRanges( const std::vector<size_t>& );
+
+	void deleteVariables( const std::vector<size_t>& );
 
 	Goal getGoal() const { return m_eGoal; }
 	void setGoal( Goal e ) { m_eGoal = e; }
@@ -122,8 +125,7 @@ private:
 	Matrix m_mxConstraint;
 	Matrix m_mxRHS;		// column vector
 
-	map<size_t, VarBounds> m_aVarBoundMap;
-
+	vector<VarBounds> m_cnVarRanges;
 	vector<Equality> m_eEqualities;
 
 	Goal m_eGoal;
@@ -148,7 +150,7 @@ ModelImpl::ModelImpl( const ModelImpl& other ) :
 	m_mxCost( other.m_mxCost ), 
 	m_mxConstraint( other.m_mxConstraint ), 
 	m_mxRHS( other.m_mxRHS ),
-	m_aVarBoundMap( other.m_aVarBoundMap ), 
+	m_cnVarRanges( other.m_cnVarRanges ),
 	m_eEqualities( other.m_eEqualities ), 
 	m_eGoal( other.m_eGoal ), 
 	m_nPrecision( other.m_nPrecision ), 
@@ -167,7 +169,7 @@ void ModelImpl::swap( ModelImpl& other ) throw()
 	m_mxCost.swap( other.m_mxCost );
 	m_mxConstraint.swap( other.m_mxConstraint );
 	m_mxRHS.swap( other.m_mxRHS );
-	std::swap( m_aVarBoundMap, other.m_aVarBoundMap );
+	std::swap( m_cnVarRanges, other.m_cnVarRanges );
 	std::swap( m_eEqualities, other.m_eEqualities );
 	std::swap( m_eGoal, other.m_eGoal );
 	std::swap( m_nPrecision, other.m_nPrecision );
@@ -200,28 +202,29 @@ void ModelImpl::deleteCostVectorElements( const std::vector<size_t>& cn )
 
 AttrBound ModelImpl::getVarBoundAttribute( size_t i, Bound e ) const
 {
-	VarBoundMap::const_iterator pos = m_aVarBoundMap.find( i );
 	AttrBound ab;
-	if ( pos == m_aVarBoundMap.end() )
+	if ( i >= m_cnVarRanges.size() )
 	{
+		// requested variable index is out of bound.
 		ab.Enabled = false;
 		ab.Value = 0.0;
 	}
 	else
 	{
-		VarBounds vb = pos->second;
+		VarBounds vb = m_cnVarRanges[i];
 		switch ( e )
 		{
-		case BOUND_UPPER:
-			ab = vb.Upper;
-			break;
 		case BOUND_LOWER:
 			ab = vb.Lower;
 			break;
+		case BOUND_UPPER:
+			ab = vb.Upper;
+			break;
 		default:
-			OSL_ASSERT( !"unknown boundary" );			
+			OSL_ASSERT( !"unknown boundary" );
 		}
 	}
+
 	return ab;
 }
 
@@ -234,56 +237,38 @@ double ModelImpl::getVarBound( size_t i, Bound e ) const
 		throw NonBoundingException();
 }
 
-void ModelImpl::setVarBound( size_t i, Bound e, double fBound )
+void ModelImpl::setVarBound( size_t nVarId, Bound e, double fBound )
 {
-	VarBoundMap::iterator pos = m_aVarBoundMap.find( i );
-	if ( pos == m_aVarBoundMap.end() )
+	size_t nSize = m_cnVarRanges.size();
+	cout << "size is " << nSize << " and request is " << nVarId << endl;
+	if ( nVarId >= nSize )
 	{
-		// First entry
-		VarBounds vb;
-		AttrBound upper;
-		AttrBound lower;
-		switch ( e )
+		// Fill the container as necessary
+		for ( size_t i = 0; i < nVarId + 1 - nSize; ++i )
 		{
-		case BOUND_UPPER:
-			upper.Enabled = true;
-			upper.Value = fBound;
-			vb.Upper = upper;
-			lower.Enabled = false;
-			lower.Value = 0.0;
-			vb.Lower = lower;
-			break;
-		case BOUND_LOWER:
-			upper.Enabled = false;
-			upper.Value = 0.0;
-			vb.Upper = upper;
-			lower.Enabled = true;
-			lower.Value = fBound;
-			vb.Lower = lower;
-			break;
-		default:
-			OSL_ASSERT( !"unknown boundary" );
+			cout << "inserting new VarBounds at " << i << endl;
+			VarBounds vb;
+			vb.Lower.Enabled = false;
+			vb.Lower.Value = 0.0;
+			vb.Upper.Enabled = false;
+			vb.Upper.Value = 0.0;
+			m_cnVarRanges.push_back( vb );
 		}
-		m_aVarBoundMap.insert( map<size_t,VarBounds>::value_type( i, vb ) );
 	}
-	else
+
+	switch ( e )
 	{
-		// Entry exists
-		VarBounds vb = pos->second;
-		switch ( e )
-		{
-		case BOUND_UPPER:
-			vb.Upper.Enabled = true;
-			vb.Upper.Value = fBound;
-			break;
-		case BOUND_LOWER:
-			vb.Lower.Enabled = true;
-			vb.Lower.Value = fBound;
-			break;
-		default:
-			OSL_ASSERT( !"unknown boundary" );
-		}
-		m_aVarBoundMap[i] = vb;
+	case BOUND_LOWER:
+
+		m_cnVarRanges[nVarId].Lower.Enabled = true;
+		m_cnVarRanges[nVarId].Lower.Value = fBound;
+		break;
+	case BOUND_UPPER:
+		m_cnVarRanges[nVarId].Upper.Enabled = true;
+		m_cnVarRanges[nVarId].Upper.Value = fBound;
+		break;
+	default:
+		OSL_ASSERT( !"unknown boundary" );
 	}
 }
 
@@ -291,6 +276,32 @@ bool ModelImpl::isVarBounded( size_t i, Bound e ) const
 {
 	AttrBound ab = getVarBoundAttribute( i, e );
 	return ab.Enabled;
+}
+
+void ModelImpl::deleteVarRanges( const std::vector<size_t>& cnVarIds )
+{
+	vector<size_t> Ids( cnVarIds );
+	::std::sort( Ids.begin(), Ids.end() );
+    vector<VarBounds>::iterator itr, 
+		itrBeg = m_cnVarRanges.begin(), itrEnd = m_cnVarRanges.end();
+
+	vector<VarBounds> cnVarRanges( m_cnVarRanges.size() );
+	for ( itr = itrBeg; itr != itrEnd; ++itr )
+	{
+		size_t nCurId = distance( itrBeg, itr );
+		if ( find( cnVarIds.begin(), cnVarIds.end(), nCurId ) == cnVarIds.end() )
+			// ID not in delete list
+			cnVarRanges.push_back( *itr );
+	}
+	m_cnVarRanges.swap( cnVarRanges );
+}
+
+void ModelImpl::deleteVariables( const std::vector<size_t>& cnVarIds )
+{
+	Debug( "deleteVariables" );
+	deleteCostVectorElements( cnVarIds );
+	deleteConstraintMatrixColumns( cnVarIds );
+	deleteVarRanges( cnVarIds );
 }
 
 double ModelImpl::getConstraint( size_t nRow, size_t nCol ) const
@@ -524,10 +535,6 @@ void Model::setCostVector( const std::vector<double>& cn )
 	m_pImpl->setCostVector( cn );
 }
 
-void Model::deleteCostVectorElements( const std::vector<size_t>& cnColIds )
-{
-	m_pImpl->deleteCostVectorElements( cnColIds );
-}
 
 /** Beware that the caller is responsible for making sure that the specified 
 	boundary exists by calling isVarBounded(...) beforehand.
@@ -545,6 +552,11 @@ void Model::setVarBound( size_t i, Bound e, double fValue )
 bool Model::isVarBounded( size_t i, Bound e ) const
 {
 	return m_pImpl->isVarBounded( i, e );
+}
+
+void Model::deleteVariables( const std::vector<size_t>& cnVarIds )
+{
+	m_pImpl->deleteVariables( cnVarIds );
 }
 
 Goal Model::getGoal() const
@@ -640,11 +652,6 @@ void Model::addConstraint( const std::vector< double >& v, Equality e, double fR
 void Model::setStandardConstraintMatrix( const Matrix& mxConst, const Matrix& mxRhs )
 {
 	m_pImpl->setStandardConstraintMatrix( mxConst, mxRhs );
-}
-
-void Model::deleteConstraintMatrixColumns( const std::vector<size_t>& cnCols )
-{
-	m_pImpl->deleteConstraintMatrixColumns( cnCols );
 }
 
 void Model::solve( BaseAlgorithm* pAlgorithm )

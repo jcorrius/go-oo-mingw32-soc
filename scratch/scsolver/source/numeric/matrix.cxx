@@ -326,10 +326,7 @@ void factorize( const bnu::matrix<double>& mxA, bnu::matrix<double>& mxL,
 
 	::std::vector<size_t>::const_iterator it, itBeg = cnP.begin(), itEnd = cnP.end();
 	for ( it = itBeg; it != itEnd; ++it )
-	{
-		size_t nIdx = std::distance( itBeg, it );
 		P( std::distance( itBeg, it ), *it ) = 1.0;
-	}
 
 	noalias( mxU ) = U;
 	noalias( mxL ) = L;
