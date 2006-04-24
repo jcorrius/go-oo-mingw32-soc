@@ -856,8 +856,19 @@ sub print_statistic_no_issue ($)
 	    $target_delimiter = ',';
 	}
 	print "\n";
-	print "---\n";
+	print "-- \n";
     }
+
+    print "Summary\n";
+    print "================================================================\n";
+    my $total_patches = 0;
+    my $total_no_issue = 0;
+    foreach my $developer (keys %developers) {
+	$total_patches += $developers{$developer}{'num_patches'};
+	$total_no_issue += $developers{$developer}{'num_patches_no_issue'};
+    }
+    print "Total patches: $total_patches\n";
+    print "Total no issue: $total_no_issue\n";
 }
 
 (@ARGV > 1) ||
