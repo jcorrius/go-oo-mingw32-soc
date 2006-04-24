@@ -226,7 +226,7 @@ rtl::OUString BaseLayer::getTimestamp(Db& aDatabase, rtl::OString aKey)
         //  64bit blob size
         rtl::OUStringBuffer timestamp(50);
         
-        Record* pRecord= static_cast<Record*>(data.get_data());
+        Record* pRecord= Record::getFromDbt(data);
         int swap= 0; //dummy value to keep compiler from complaining
         OSL_ASSERT(!aDatabase.get_byteswapped(&swap));
         if (swap)

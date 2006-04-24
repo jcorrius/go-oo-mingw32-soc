@@ -61,7 +61,7 @@ namespace configmgr { namespace dbbe {
     Db* DbFactory::getDb(rtl::OUString aPath)
     {
         //Empty paths are not allowed.
-        OSL_ASSERT(aPath.getlength());
+        OSL_ASSERT(aPath.getLength());
 
         Db* pDb= NULL;
         DbHash::iterator it;

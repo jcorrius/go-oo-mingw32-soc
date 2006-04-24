@@ -103,7 +103,7 @@ namespace configmgr
             {
                 case 0: //success
                 {
-                    Record* pRecord= static_cast<Record*>(Data.get_data());
+                    Record* pRecord= Record::getFromDbt(Data);
                     pRecord->unMarshal();
                     int swap= 0;  //dummy value to keep compiler from complaining
                     OSL_ASSERT(!aDatabase.get_byteswapped(&swap));

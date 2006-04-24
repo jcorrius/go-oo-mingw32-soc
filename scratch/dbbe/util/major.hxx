@@ -39,13 +39,16 @@
 
 #include <rtl/string.hxx>
 
-//#include <hash_set>
-//#include <hash_map>
+#include "graph.hxx"
 
-//#include <algorithm>
-//#include <functional>
+#include <db_cxx.h>
 
-//#include <db_cxx.h>
+
+// ARGHH!!!
+// our stuff must transition to OSL file URL's b/c windoze paths are \
+// osl file stuff requires absolute URL's argh.
+
+
 
 
 /**
@@ -77,6 +80,8 @@ namespace configmgr
         */
         class mangler
         {
+            // FIXME: docs
+            //  This is total foobared and needs to use OUStrings and URL's and stuff
         public:
             /** ctor */
             mangler(const char *Code);
@@ -85,14 +90,13 @@ namespace configmgr
             ~mangler();
 
             void mangle(const char *key);
-            void demangle(char *aPath);
+            void demangle(const rtl::OUString &aUrl, const rtl::OUString &aBaseURL);
             
+            const char* getKey(void) const;
+            const rtl::OUString& getFileUrl(void) const;
 
-            /** make a record from this mangler */
-            Record makeRecord();
-            
-            /** make a file from this mangler */
-            void makeFile();
+            rtl::OString getNamespace(void) const;
+            rtl::OString mangler::getNamespaceKey(void) const;
             
         private:
             /**
@@ -110,10 +114,66 @@ namespace configmgr
                                  
 
             rtl::OString key, path, file, sep, xcu;
+            rtl::OUString fileUrl;
             const char *code;
         };
 
+        /**
+           class that exposes the methods to import/export/merge
+         */
+        class repository
+        {
+        public:
+            /** ctor */
+            repository(Db &aDb, char *aDbPath);
 
+            /**
+               Import this file/directory
+               
+               @param path  file or directory
+               @param code  conversion code or NULL if using default rules
+             */
+            void importPath(const char *path, const char *code);
+
+            /**
+               merge the database file given into this one
+               
+               @param path  a database file
+             */
+            void mergeDatabase(const char *path);
+            
+
+        private:
+            Db& aDatabase;
+            const char* aDatabasePath;
+            //graph mGraph; //perhaps not necessary
+            //graph::keySet mChangeList; //perhaps not necessary
+
+            void importPathInnerLoop(const rtl::OUString &aUrl, 
+                                     const rtl::OUString &aBaseUrl, 
+                                     const char *code);
+                
+
+            /**
+               Import just this file
+               
+               @param aURL      the URL of the file to import
+               @param aBaseURL  the base URL for path conversion
+               @param code      the mangler code
+
+               @see mangler
+             */
+            void importFile(const rtl::OUString &aURL, const rtl::OUString &aBaseURL, 
+                            const char *code);
+            
+            /**
+               Guess which conversion code to use based on conventions in localbe
+               
+               @param   aRelUrl    a relative URL to look at
+               @return  a code string or NULL if it could not guess
+            */
+            const char* guessCode(const rtl::OUString& aRelUrl) const;
+        };
     };
 };
 

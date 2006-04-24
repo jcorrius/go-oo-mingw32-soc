@@ -40,6 +40,7 @@
 
 #include "../Record.hxx" //FIXME
 #include "minor.hxx"
+#include "major.hxx"
 
 //I use getopt parsing here, which is a POSIX thing
 //This is probably bad, but I just can't help myself
@@ -57,14 +58,36 @@
    SanityCheck   Perform some basic sanity checks   --done
  */
 
-void openDatabase(Db* aDatabase, const char* path, const bool open_ro, const bool create= false)
+
+void printUsage(const char* progName)
 {
-    u_int32_t open_flags= DB_THREAD;
-    OSL_ASSERT(aDatabase == NULL);
+    using namespace std;
+    
+    cerr << "Usage: " << progName << " --database=<database filename> [--code=<code>] action options" << endl;
+    cerr << "\t where actions can be one of 'import', 'stat', or 'sanity'" << endl << endl;
+    cerr << "\t options for import:" << endl << endl;
+    cerr << "\t\t import <path>" << endl;
+    cerr << "\t\t where <path> is either a path containing xcu files or " << endl;
+    cerr << "\t\t an xcu file" << endl << endl;
+    cerr << "\t\t Note that the path will be taken relative to the path" << endl;
+    cerr << "\t\t to the database file" << endl << endl;
+}
+
+void DbErrorCallback(const DbEnv *dbenv, const char *errpfx, const char *msg)
+{
+    std::cerr << "berkelyDb error \"" << msg << "\"\n"; 
+}
+
+Db* openDatabase(const char* path, const bool open_ro, const bool create= false)
+{
+    OSL_ASSERT(path);
+    OSL_ASSERT(open_ro || create);
+    u_int32_t open_flags= 0;
     const u_int32_t db_flags= DB_CXX_NO_EXCEPTIONS;
-    aDatabase= new Db(NULL, db_flags);
+    Db* aDatabase= new Db(NULL, db_flags);
     OSL_ASSERT(aDatabase);
-    OSL_ASSERT(open_ro && create);
+    OSL_VERIFY(!aDatabase->set_flags(DB_RECNO)); //FIXME
+    aDatabase->set_errcall(DbErrorCallback);
     if (open_ro)
     {
         open_flags |= DB_RDONLY;
@@ -74,34 +97,43 @@ void openDatabase(Db* aDatabase, const char* path, const bool open_ro, const boo
         open_flags |= DB_CREATE;
     }
     int ret;
-    ret= aDatabase->set_lorder(1234); //little endian
-    ret= aDatabase->open(NULL, path, NULL,  DB_BTREE, 0, open_flags);
+    OSL_VERIFY(!aDatabase->set_lorder(1234)); //little endian
+/*
+  open(DbTxn *txnid, const char *file,
+    const char *database, DBTYPE type, u_int32_t flags, int mode);
+ */
+    ret= aDatabase->open(NULL, path, 
+                         NULL, DB_BTREE, open_flags, 0);
     if (ret)
     { 
         std::cerr << "Unable to open database \"" << path << "\"" << std::endl;
+        aDatabase->err(ret, NULL);
+        std::cerr << "ret= " << ret << std::endl;
         abort();
-    }    
+    }   
+    return aDatabase;
+
 }
 
 SAL_IMPLEMENT_MAIN_WITH_ARGS(argc, argv)
 {
-
-
     Db* aDatabase= NULL;
     char *db_path= NULL;
-    bool db_ro;
+    char *code= NULL;
     int c;
 
     /* modes */
     const char* sanity_check = "sanity";
     const char* stat         = "stat";
-    
+    const char* import       = "import";
+
     while (1)
     {
         static struct option long_options[] =
             {
-                {"help",     no_argument,       0, 'h'},
+                {"help",      no_argument,       0, 'h'},
                 {"database",  required_argument, 0, 'd'},
+                {"code",      required_argument, 0, 'c'},
                 {0, 0, 0, 0}
             };
 
@@ -117,34 +149,41 @@ SAL_IMPLEMENT_MAIN_WITH_ARGS(argc, argv)
         switch (c)
         {
             case 'h':
-                puts ("option -h\n");
+                printUsage(argv[0]);                
+                exit(0);
                 break;
                 
             case 'd':
-                printf("option -d with value `%s'\n", optarg);
+                std::cerr << "Using database file \"" << optarg << "\"\n";
                 db_path= strdup(optarg);
                 OSL_ASSERT(db_path);
+                break;
+
+            case 'c':
+                printf("option -c with value '%s'\n", optarg);
+                code= strdup(optarg);
+                OSL_ASSERT(code);
                 break;
                 
             case '?':
                 /* getopt_long already printed an error message. */
                 break;
-                
+
             default:
                 abort();
         }
     }
     if (db_path == NULL)
     {
-        std::cerr << "No database file specified!" << std::endl;
+        std::cerr << "No database file specified!" << std::endl << std::endl;
+        printUsage(argv[0]);
         abort();
     }
     if (optind < argc)
     {
         if (!strcmp(argv[optind], sanity_check))
         {
-            db_ro= true;
-            openDatabase(aDatabase, db_path, db_ro);
+            aDatabase= openDatabase(db_path, true);
             if (configmgr::dbbe::SanityCheck(*aDatabase))
             {
                 std::cout << "Everything seems normal" << std::endl;
@@ -159,8 +198,7 @@ SAL_IMPLEMENT_MAIN_WITH_ARGS(argc, argv)
         }
         else if(!strcmp(argv[optind], stat))
         {
-            db_ro= true;
-            openDatabase(aDatabase, db_path, db_ro);
+            aDatabase= openDatabase(db_path, true);
             optind++;
             char* graphFile= NULL;
             if (optind < argc)
@@ -171,6 +209,22 @@ SAL_IMPLEMENT_MAIN_WITH_ARGS(argc, argv)
             exit(0);
             
         }
+        else if(!strcmp(argv[optind], import))
+        {
+            aDatabase= openDatabase(db_path, false, true);
+            configmgr::dbbe::repository aRepository(*aDatabase, db_path);
+            optind++;
+            if (optind < argc)
+            {
+                aRepository.importPath(argv[optind++], code);
+            }
+            else
+            {
+                printUsage(argv[0]);
+                abort();
+            }
+        }
+
         printf ("non-option ARGV-elements: ");
         while (optind < argc)
             printf ("%s ", argv[optind++]);

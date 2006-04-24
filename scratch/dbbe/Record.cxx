@@ -56,9 +56,19 @@
 #include <osl/file.hxx>
 #endif//_OSL_FILE_HXX_
 
+#ifndef _OSL_TIME_H_
+#include <osl/time.h>
+#endif//_OSL_TIME_H_ 
+
 namespace configmgr { namespace dbbe {
+
+    Record::Record(void)    
+    {
+        //please forgive my crusty c-programmer ways
+        memset(this, 0, sizeof(Record));
+    }        
     
-    size_t Record::SubLayerLen(void)
+    size_t Record::SubLayerLen(void) const
     {
         size_t ret= 0;
         if (numSubLayers)
@@ -81,7 +91,7 @@ namespace configmgr { namespace dbbe {
         pBlob= (sal_Char*)(this) + sizeof(Record) + SubLayerLen();
     }
     
-    Record* Record::Marshal(size_t &size)
+    Record* Record::Marshal(size_t &size) const
     {
         Record* pRecord;
                 
@@ -130,9 +140,13 @@ namespace configmgr { namespace dbbe {
         for (it= aSubLayers.begin(); it != aSubLayers.end(); it++)
         {
             OSL_ASSERT(*it);
+//            std::cerr << "it=" << *it << std::endl;
             len+= strlen(*it) + 1; //one for the null
         }
-        if (pSubLayers)
+        
+        //if this is a serialized copy, then don't try to free the memory, just overwrite it
+        if (pSubLayers && 
+            (pSubLayers != (sal_Char*)(this) + sizeof(Record)))
             rtl_freeMemory(pSubLayers);
         pSubLayers= static_cast<sal_Char*>(rtl_allocateMemory(len));
         OSL_ASSERT(pSubLayers);
@@ -155,24 +169,125 @@ namespace configmgr { namespace dbbe {
         
         //get the date and type
         DirectoryItem aItem;
-        OSL_ASSERT(DirectoryItem::get(aFileURL, aItem) == DirectoryItem::RC::E_None);
+        OSL_VERIFY(DirectoryItem::get(aFileURL, aItem) == DirectoryItem::E_None);
         FileStatus aFileStatus(FileStatusMask_ModifyTime || FileStatusMask_Type);
-        OSL_ASSERT(aItem.getFileStatus(aFileStatus) == DirectoryItem::RC::E_None);
-        OSL_ASSERT(aFileStatus.getFileType() == FileStatus::Type::Regular);
-        OSL_ASSERT(aFileStatus.isValid(FileStatusMask_ModifyTime));
+        OSL_VERIFY(aItem.getFileStatus(aFileStatus) == DirectoryItem::E_None);
+        OSL_VERIFY(aFileStatus.getFileType() == FileStatus::Regular);
+        OSL_VERIFY(aFileStatus.isValid(FileStatusMask_ModifyTime));
         TimeValue aTimeValue= aFileStatus.getModifyTime();
         date= aTimeValue.Seconds;
         
         //get the data and time
         File aFile(aFileURL);
-        OSL_ASSERT(aFile.getSize(blobSize) == File::RC::E_None);
+        OSL_VERIFY(aFile.open(OpenFlag_Read) == File::E_None);
+        sal_uInt64 aBlobSize= 0;
+        OSL_VERIFY(aFile.getSize(aBlobSize) == File::E_None);
+        blobSize= static_cast<sal_uInt32>(aBlobSize);
         pBlob= static_cast<sal_Char*>(rtl_allocateMemory(blobSize));
         OSL_ASSERT(pBlob);
+#if 1
+        //the following construct is likely incrorrect
         sal_uInt64 aBytesToRead= blobSize;
         while (aBytesToRead)
-            OSL_ASSERT(aFile.read(static_cast<void*>(pBlob), 
-                                  aBytesToRead, aBytesToRead) == File::RC::E_None);
+            OSL_VERIFY(aFile.read(static_cast<void*>(pBlob + (size_t)(blobSize - aBytesToRead)), 
+                                  aBytesToRead, aBytesToRead) == File::E_None);
+#endif
+#if 0
+        sal_uInt64 bytesLeft= 0;
+        OSL_VERIFY(aFile.read(static_cast<void*>(pBlob), blobSize, bytesLeft) == File::E_None);
+        std::cerr << "bytesLeft= " << bytesLeft << std::endl;
+        OSL_VERIFY(!bytesLeft);
+#endif
     }
+
+    void Record::setFileFromBlob(const rtl::OUString &aFileURL)
+    {
+        OSL_VERIFY(aFileURL.getLength());
+        osl::File aFile(aFileURL);
+        TimeValue aTimeValue= {static_cast<sal_uInt32>(date), 0};
+        OSL_VERIFY(osl::File::setTime(aFileURL, aTimeValue, aTimeValue, aTimeValue) == osl::File::E_None);
+        sal_uInt64 bytesLeft= 0;
+        OSL_VERIFY(aFile.write(static_cast<void*>(pBlob), blobSize, bytesLeft) == osl::File::E_None);
+        OSL_VERIFY(!bytesLeft);
+        OSL_VERIFY(aFile.sync() == osl::FileBase::E_None);
+    }
+
+    void Record::touch(void)
+    {
+        TimeValue timeval= {0, 0};
+        osl_getSystemTime(&timeval);
+        date= timeval.Seconds;
+    }
+
+    Dbt Record::getDbt(void) const
+    {
+        OSL_VERIFY(isMarshaled());
+        return Dbt((void*)this,
+                   sizeof(Record) + SubLayerLen() + blobSize);
+    }
+
+    /**
+       a simple, and not very thorough check to see if this is a marshaled Record
+     */
+    bool Record::isMarshaled(void) const 
+    {
+        if (pSubLayers == NULL && pBlob == NULL)
+            return true;
+        return false;
+    }
+
+    Record* Record::getFromDbt(const Dbt &aDbt)
+    {
+        return static_cast<Record*>(aDbt.get_data());
+    }
+    
+    sal_Bool Record::putRecord(Db& aDatabase, rtl::OString key) const
+    {
+        return putRecord(aDatabase, key.getStr());
+    }
+
+    sal_Bool Record::putRecord(Db& aDatabase, const char* key) const
+    {
+           size_t dataSize= 0;
+           Record* pRecord= Marshal(dataSize);
+           if (!pRecord)
+               return sal_False;
+           int swap= 0;
+           OSL_VERIFY(!aDatabase.get_byteswapped(&swap));
+           if (swap)
+               pRecord->bytesex();
+           Dbt Key((void*)key, strlen(key) + 1);
+           Dbt Data((void*)(pRecord), dataSize);
+           if (aDatabase.put(NULL, &Key, &Data, 0))
+               return sal_False;
+           rtl_freeMemory(pRecord);
+           return sal_True;
+    }
+
+    sal_Int32 Record::getRecord(Db& aDatabase, const rtl::OString &key, Record &aResult)
+    {
+        return getRecord(aDatabase, key.getStr(), aResult);
+    }
+
+    sal_Int32 Record::getRecord(Db& aDatabase, const char* key, Record &aResult)
+    {
+        OSL_VERIFY(key);
+        Dbt Key((void*)key, strlen(key) + 1);
+        Dbt Data;
+        sal_Int32 ret= aDatabase.get(NULL, &Key, &Data, 0);
+        if (!ret)
+        {// found
+            OSL_VERIFY(Data.get_data());
+            aResult= *(static_cast<Record*>(Data.get_data()));
+            int swap= 0;
+            OSL_VERIFY(!aDatabase.get_byteswapped(&swap));
+            if (swap)
+                aResult.bytesex();
+            aResult.unMarshal();
+        }
+        return ret;
+    }
+
 
 }}; //namespace
     

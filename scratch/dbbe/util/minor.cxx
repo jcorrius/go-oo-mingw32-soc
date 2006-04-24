@@ -130,9 +130,10 @@ namespace configmgr
             
             int ret= -1;        //garbage value to keep compiler from complaining
             u_int32_t flags= 0; //garbage value to keep compiler from complaining
+            int lorder= 0;      //garbage value to keep compiler from complaining
             
             //duplicate keys are not allowed
-            OSL_ASSERT(!aDatabase.get_flags(&flags));
+            OSL_VERIFY(!aDatabase.get_flags(&flags));
             if (flags |= DB_DUP)      
             {
                 cerr << "Database allows duplicate items!" << endl;
@@ -140,8 +141,8 @@ namespace configmgr
             }
             
             //little endian required
-            OSL_ASSERT(!aDatabase.get_lorder(&flags));
-            if (flags != 1234)
+            OSL_VERIFY(!aDatabase.get_lorder(&lorder));
+            if (lorder != 1234)
             {
                 cerr << "Database is not set to little endian!" << endl;
                 return sal_False;

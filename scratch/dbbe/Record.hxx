@@ -53,6 +53,12 @@
 
 namespace configmgr { namespace dbbe {
 
+//
+//  FIXME
+//   make marshal do the bytesex
+//
+
+
 /**
    An object representation of the database schema.
    
@@ -67,7 +73,9 @@ namespace configmgr { namespace dbbe {
         sal_Char   *pSubLayers;   /** ARGV style list */
         sal_Char   *pBlob;        /** XML Blob */
         
-        
+        /**  ctor   */
+        Record(void);
+
         /**
            Fix the pointers from their marshalled invalid state 
         */
@@ -78,7 +86,7 @@ namespace configmgr { namespace dbbe {
            
            @param size, the size of the marshalled record will be written here
         */
-        Record* Marshal(size_t &size);
+        Record* Marshal(size_t &size) const;
         
         /**
            Change order from little to big endian or vice-versa
@@ -105,9 +113,51 @@ namespace configmgr { namespace dbbe {
            @param aFileURL   the URL of the blob data
          */
         void setBlobFromFile(const rtl::OUString &aFileURL);
+
+        /**
+           Make a file from this Record
+           
+           @param aFileURL   the URL of the file you wish to write
+         */
+        void setFileFromBlob(const rtl::OUString &aFileURL);
+
+        /**
+           Set the date to now
+        */
+        void touch(void);
+
+        /**
+           Return a Dbt that points to this record
+         */
+        Dbt getDbt(void) const;
+
+        /**
+           Put this record in the database
+           Record is not expected to be serialized before hand
+           
+           @param  aDatabase  the database to stuff it in
+           @return sal_True if succesfull and sal_False otherwise
+         */
+        sal_Bool putRecord(Db& aDatabase, const char* key) const;
+        sal_Bool putRecord(Db& aDatabase, const rtl::OString key) const;
+
+        
+        /**
+           Produce an record ready to be used from a database from a key
+           
+           @param aDatabase      the database to look in
+           @param key            the key to look for
+           @param aResult[out]   the Record that will be generated if found
+           @returns              the return value that berkeleyDb returns
+         */
+        static sal_Int32 getRecord(Db& aDatabase, const char* key, Record &aResult);
+        static sal_Int32 getRecord(Db& aDatabase, const rtl::OString &key, Record &aResult);        
+
+        static Record* Record::getFromDbt(const Dbt &aDbt);
         
     private:
-        size_t SubLayerLen(void);
+        size_t SubLayerLen(void) const;
+        bool isMarshaled(void) const;
     };
 #pragma pack(pop)    
 
