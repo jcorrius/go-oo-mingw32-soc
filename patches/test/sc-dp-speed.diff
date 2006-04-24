@@ -1,0 +1,438 @@
+Index: sc/source/core/data/dptabdat.cxx
+===================================================================
+RCS file: /cvs/sc/sc/source/core/data/dptabdat.cxx,v
+retrieving revision 1.9
+diff -u -p -u -r1.9 dptabdat.cxx
+--- sc/source/core/data/dptabdat.cxx	8 Sep 2005 18:24:11 -0000	1.9
++++ sc/source/core/data/dptabdat.cxx	24 Apr 2006 19:29:25 -0000
+@@ -53,13 +53,33 @@
+ 
+ // -----------------------------------------------------------------------
+ 
+-BOOL ScDPItemData::IsCaseInsEqual( const ScDPItemData& r ) const
++void ScDPItemData::operator=( const ScDPItemData& r )
++{
++	aString = r.aString;
++	fValue = r.fValue;
++	bHasValue = r.bHasValue;
++}
++
++bool ScDPItemData::operator==( const ScDPItemData& r ) const
++{
++		return ( ( ( bHasValue && r.bHasValue ) &&
++				   fValue == r.fValue ) ||
++				 ( !bHasValue && !r.bHasValue ) ) &&
++				aString == r.aString;
++}
++
++BOOL ScDPItemData::IsCaseInsEqualVals( const String &_aString, double _fValue, BOOL _bHasValue ) const
+ {
+     //! pass Transliteration?
+ 	//!	inline?
+-	return bHasValue ? ( r.bHasValue && rtl::math::approxEqual( fValue, r.fValue ) ) :
+-					   ( !r.bHasValue &&
+-                        ScGlobal::pTransliteration->isEqual( aString, r.aString ) );
++	return bHasValue ? ( _bHasValue && rtl::math::approxEqual( fValue, _fValue ) ) :
++					   ( !_bHasValue &&
++                        ScGlobal::pTransliteration->isEqual( aString, _aString ) );
++}
++
++BOOL ScDPItemData::IsCaseInsEqual( const ScDPItemData& r ) const
++{
++	return IsCaseInsEqualVals( r.aString, r.fValue, r.bHasValue );
+ }
+ 
+ // -----------------------------------------------------------------------
+Index: sc/source/core/data/dptabres.cxx
+===================================================================
+RCS file: /cvs/sc/sc/source/core/data/dptabres.cxx,v
+retrieving revision 1.7
+diff -u -p -u -r1.7 dptabres.cxx
+--- sc/source/core/data/dptabres.cxx	8 Sep 2005 18:24:27 -0000	1.7
++++ sc/source/core/data/dptabres.cxx	24 Apr 2006 19:29:27 -0000
+@@ -47,6 +47,7 @@
+ #include <float.h>			//! Test !!!
+ 
+ #include <algorithm>
++#include <hash_map>
+ 
+ #include "dptabres.hxx"
+ #include "dptabsrc.hxx"
+@@ -2469,6 +2470,42 @@ BOOL ScDPGroupCompare::TestIncluded( con
+ 
+ // -----------------------------------------------------------------------
+ 
++struct ScDPItemDataHash
++{
++    size_t operator()(const ScDPItemData & rItem) const
++    {
++		size_t nVal;
++		if (rItem.bHasValue)
++			nVal = rItem.fValue;
++        nVal ^= rtl_ustr_hashCode_WithLength( rItem.aString.GetBuffer(),
++											  rItem.aString.Len());
++
++		return nVal;
++	}
++};
++
++class ScDPResultDimensionCache
++{
++	std::hash_map<ScDPItemData,ScDPResultMember *, ScDPItemDataHash> aCache;
++public:
++	void           Clear() { if (this) aCache.clear(); }
++	ScDPResultMember *Lookup(const ScDPItemData *pElem)
++	{
++		std::hash_map<ScDPItemData,ScDPResultMember *, ScDPItemDataHash>::const_iterator aIter;
++		aIter = aCache.find (*pElem);
++		if (aIter != aCache.end())
++			return aIter->second;
++		else
++			return NULL;
++	}
++	void Insert (const ScDPItemData *pElem, ScDPResultMember *pVal)
++	{
++		aCache[*pElem] = pVal;
++	}
++};
++
++// -----------------------------------------------------------------------
++
+ ScDPResultDimension::ScDPResultDimension( ScDPResultData* pData ) :
+ 	pResultData( pData ),
+ 	bInitialized( FALSE ),
+@@ -2479,12 +2516,14 @@ ScDPResultDimension::ScDPResultDimension
+ 	bAutoShow( FALSE ),
+ 	bAutoTopItems( FALSE ),
+ 	nAutoMeasure( 0 ),
+-	nAutoCount( 0 )
++	nAutoCount( 0 ),
++	pCache( NULL )
+ {
+ }
+ 
+ ScDPResultDimension::~ScDPResultDimension()
+ {
++	delete pCache;
+ }
+ 
+ void ScDPResultDimension::InitFrom( ScDPDimension** ppDim, ScDPLevel** ppLev, ScDPInitState& rInitState )
+@@ -2534,6 +2573,7 @@ void ScDPResultDimension::InitFrom( ScDP
+     			ScDPResultMember* pNew = new ScDPResultMember( pResultData, pThisDim,
+     											pThisLevel, pMember, FALSE );
+     			aMembers.Insert( pNew, aMembers.Count() );
++				pCache->Clear();
+ 
+                 ScDPItemData aMemberData;
+                 pMember->FillItemData( aMemberData );
+@@ -2601,6 +2641,7 @@ void ScDPResultDimension::LateInitFrom( 
+     				ScDPResultMember* pNew = new ScDPResultMember( pResultData, pThisDim,
+     												pThisLevel, pMember, FALSE );
+     				aMembers.Insert( pNew, aMembers.Count() );
++					pCache->Clear();
+                 }
+ 			}
+ 			bInitialized = TRUE;    // don't call again, even if no members were included
+@@ -2651,48 +2692,57 @@ long ScDPResultDimension::GetSize(long n
+ BOOL ScDPResultDimension::IsValidEntry( const ScDPItemData* pMembers ) const
+ {
+     // the ScDPItemData array must contain enough entries for all dimensions - this isn't checked
+-
+-	long nCount = aMembers.Count();
+-	for (long i=0; i<nCount; i++)
++	ScDPResultMember* pMember = ((ScDPResultDimension *)this)->getMember (pMembers);
++	if (!pMember)
+ 	{
+-		ScDPResultMember* pMember = aMembers[(USHORT)i];
+-		if ( bIsDataLayout || pMember->IsNamedItem( *pMembers ) )
+-		{
+-			if ( !pMember->IsValid() )
+-				return FALSE;
+-
+-			ScDPResultDimension* pChildDim = pMember->GetChildDimension();
+-			if (pChildDim)
+-				return pChildDim->IsValidEntry( pMembers + 1 );
+-			else
+-				return TRUE;
+-		}
++		DBG_ERROR("IsValidEntry: Member not found");
++		return FALSE;
+ 	}
++	if ( !pMember->IsValid() )
++		return FALSE;
+ 
+-	DBG_ERROR("IsValidEntry: Member not found");
+-	return FALSE;
++	ScDPResultDimension* pChildDim = pMember->GetChildDimension();
++	if (pChildDim)
++		return pChildDim->IsValidEntry( pMembers + 1 );
++	else
++		return TRUE;
+ }
+ 
+-void ScDPResultDimension::ProcessData( const ScDPItemData* pMembers,
+-							ScDPResultDimension* pDataDim, const ScDPItemData* pDataMembers,
+-							const ScDPValueData* pValues )
++ScDPResultMember* ScDPResultDimension::getMember (const ScDPItemData* pElem)
+ {
+-    // the ScDPItemData array must contain enough entries for all dimensions - this isn't checked
++	ScDPResultMember* pMember;
+ 
++	if (!pCache)
++		pCache = new ScDPResultDimensionCache();
++	pMember = pCache->Lookup (pElem);
++	if (pMember)
++		return pMember;
++    // the ScDPItemData array must contain enough entries for all dimensions - this isn't checked
+ 	long nCount = aMembers.Count();
+ 	for (long i=0; i<nCount; i++)
+ 	{
+-		ScDPResultMember* pMember = aMembers[(USHORT)i];
++		pMember = aMembers[(USHORT)i];
+ 
+ 		// always first member for data layout dim
+-		if ( bIsDataLayout || pMember->IsNamedItem( *pMembers ) )
+-		{
+-			pMember->ProcessData( pMembers + 1, pDataDim, pDataMembers, pValues );
+-			return;
+-		}
++		if ( bIsDataLayout || pMember->IsNamedItem( *pElem ) )
++			break;
+ 	}
++	if (!bIsDataLayout)
++		pCache->Insert (pElem, pMember);
+ 
+-	DBG_ERROR("ProcessData: Member not found");
++	return NULL;
++}
++
++void ScDPResultDimension::ProcessData( const ScDPItemData* pMembers,
++							ScDPResultDimension* pDataDim, const ScDPItemData* pDataMembers,
++							const ScDPValueData* pValues )
++{
++    // the ScDPItemData array must contain enough entries for all dimensions - this isn't checked
++	ScDPResultMember* pMember = ((ScDPResultDimension *)this)->getMember (pMembers);
++	if (pMember)
++		pMember->ProcessData( pMembers + 1, pDataDim, pDataMembers, pValues );
++	else
++		DBG_ERROR("ProcessData: Member not found");
+ }
+ 
+ void ScDPResultDimension::FillMemberResults( uno::Sequence<sheet::MemberResult>* pSequences,
+Index: sc/source/core/data/dptabsrc.cxx
+===================================================================
+RCS file: /cvs/sc/sc/source/core/data/dptabsrc.cxx,v
+retrieving revision 1.14
+diff -u -p -u -r1.14 dptabsrc.cxx
+--- sc/source/core/data/dptabsrc.cxx	7 Nov 2005 14:41:01 -0000	1.14
++++ sc/source/core/data/dptabsrc.cxx	24 Apr 2006 19:29:27 -0000
+@@ -1,3 +1,4 @@
++#include <stdio.h>
+ /*************************************************************************
+  *
+  *  OpenOffice.org - a multi-platform office productivity suite
+@@ -2426,7 +2427,17 @@ BOOL ScDPMember::IsNamedItem( const ScDP
+ 		return nComp == fValue;
+ 	}
+ 
+-	return r.IsCaseInsEqual( ScDPItemData( aName, fValue, bHasValue ) );
++#if 0
++	fprintf (stderr, "IsNamedItem '%s' (%d) %g vs ",
++			 rtl::OUStringToOString (aName, RTL_TEXTENCODING_UTF8).getStr(),
++			 bHasValue, bHasValue ? fValue : 0);
++
++	fprintf (stderr, "'%s' (%d) %g\n",
++			 rtl::OUStringToOString (r.aString, RTL_TEXTENCODING_UTF8).getStr(),
++			 r.bHasValue, r.bHasValue ? r.fValue : 0);
++#endif
++
++	return r.IsCaseInsEqualVals( aName, fValue, bHasValue );
+ }
+ 
+ sal_Int32 ScDPMember::Compare( const ScDPMember& rOther ) const
+Index: sc/inc/dpobject.hxx
+===================================================================
+RCS file: /cvs/sc/sc/inc/dpobject.hxx,v
+retrieving revision 1.11
+diff -u -p -u -r1.11 dpobject.hxx
+--- sc/inc/dpobject.hxx	28 Sep 2005 11:26:37 -0000	1.11
++++ sc/inc/dpobject.hxx	24 Apr 2006 19:30:40 -0000
+@@ -52,11 +52,14 @@
+ #include "collect.hxx"
+ #endif
+ 
++#ifndef SC_DPOUTPUT_HXX
++#include "dpoutput.hxx"
++#endif
++
+ #ifndef _COM_SUN_STAR_SHEET_XDIMENSIONSSUPPLIER_HPP_
+ #include <com/sun/star/sheet/XDimensionsSupplier.hpp>
+ #endif
+ 
+-
+ //------------------------------------------------------------------
+ 
+ 
+@@ -116,6 +119,7 @@ private:
+ 	ScDPOutput*				pOutput;
+ 	BOOL					bSettingsChanged;
+ 	BOOL					bAlive;			// FALSE if only used to hold settings
++	USHORT                                  nAutoFormatIndex;
+ 	BOOL					bAllowMove;
+ 	BOOL					bInfoValid;		// affects: nHeaderRows
+ 	long					nHeaderRows;	// page fields plus filter button
+@@ -146,6 +150,9 @@ public:
+ 	void				SetOutRange(const ScRange& rRange);
+ 	const ScRange&		GetOutRange() const		{ return aOutRange; }
+ 
++	void 			SetAutoFormatIndex (const USHORT nIndex);
++	const USHORT		GetAutoFormatIndex ()	{ if (this == NULL) return 65535; else return nAutoFormatIndex; }
++
+ 	void				SetSheetDesc(const ScSheetSourceDesc& rDesc);
+ 	void				SetImportDesc(const ScImportSourceDesc& rDesc);
+ 	void				SetServiceData(const ScDPServiceDesc& rDesc);
+@@ -173,6 +180,8 @@ public:
+     BOOL                IsDuplicated( long nDim );
+     long                GetDimCount();
+ 	void				GetPositionData( ScDPPositionData& rData, const ScAddress& rPos );
++	BOOL				GetPivotData( ScDPGetPivotDataField& rTarget, /* returns result */
++									  const std::vector< ScDPGetPivotDataField >& rFilters );
+ 	long				GetHeaderDim( const ScAddress& rPos, USHORT& rOrient );
+ 	BOOL				GetHeaderDrag( const ScAddress& rPos, BOOL bMouseLeft, BOOL bMouseTop,
+ 										long nDragDim,
+Index: sc/inc/dpoutput.hxx
+===================================================================
+RCS file: /cvs/sc/sc/inc/dpoutput.hxx,v
+retrieving revision 1.7
+diff -u -p -u -r1.7 dpoutput.hxx
+--- sc/inc/dpoutput.hxx	8 Sep 2005 17:35:15 -0000	1.7
++++ sc/inc/dpoutput.hxx	24 Apr 2006 19:30:40 -0000
+@@ -56,6 +56,10 @@
+ #include "address.hxx"
+ #endif
+ 
++#ifndef __SGI_STL_VECTOR
++#include <vector>
++#endif
++
+ class Rectangle;
+ class SvStream;
+ class ScDocument;
+@@ -77,6 +81,15 @@ struct ScDPPositionData
+ 	ScDPPositionData() { nDimension = nHierarchy = nLevel = -1; nFlags = 0; }	// invalid
+ };
+ 
++struct ScDPGetPivotDataField
++{
++	String maFieldName;
++
++	bool   mbValIsStr;
++	String maValStr;
++	double mnValNum;
++};
++
+ 
+ 
+ class ScDPOutput			//! name???
+@@ -143,6 +156,8 @@ public:
+ 	BOOL			HasError();			// range overflow or exception from source
+ 
+ 	void			GetPositionData( ScDPPositionData& rData, const ScAddress& rPos );
++	BOOL			GetPivotData( ScDPGetPivotDataField& rTarget, /* returns result */
++								  const std::vector< ScDPGetPivotDataField >& rFilters );
+ 	long			GetHeaderDim( const ScAddress& rPos, USHORT& rOrient );
+ 	BOOL			GetHeaderDrag( const ScAddress& rPos, BOOL bMouseLeft, BOOL bMouseTop,
+ 									long nDragDim,
+Index: sc/inc/dpsave.hxx
+===================================================================
+RCS file: /cvs/sc/sc/inc/dpsave.hxx,v
+retrieving revision 1.8
+diff -u -p -u -r1.8 dpsave.hxx
+--- sc/inc/dpsave.hxx	8 Sep 2005 17:35:34 -0000	1.8
++++ sc/inc/dpsave.hxx	24 Apr 2006 19:30:40 -0000
+@@ -51,6 +51,7 @@
+ #ifndef INCLUDED_SCDLLAPI_H
+ #include "scdllapi.h"
+ #endif
++#include <hash_map>
+ 
+ namespace com { namespace sun { namespace star { namespace sheet {
+     struct DataPilotFieldReference;
+@@ -119,8 +120,15 @@ private:
+     ::com::sun::star::sheet::DataPilotFieldSortInfo*  pSortInfo;            // (level)
+     ::com::sun::star::sheet::DataPilotFieldAutoShowInfo* pAutoShowInfo;     // (level)
+     ::com::sun::star::sheet::DataPilotFieldLayoutInfo* pLayoutInfo;         // (level)
+-	List		aMemberList;
+ 
++	struct MemberHashFunc : public std::unary_function< const String &, size_t >
++	{
++		size_t operator() (const String &member_name) const;
++	};
++public :
++	typedef	std::hash_map <String, ScDPSaveMember *, MemberHashFunc> MemberHash;
++private :
++	MemberHash aMembers;
+ public:
+ 							ScDPSaveDimension(const String& rName, BOOL bDataLayout);
+ 							ScDPSaveDimension(const ScDPSaveDimension& r);
+@@ -129,8 +137,8 @@ public:
+ 
+ 	BOOL		 			operator== ( const ScDPSaveDimension& r ) const;
+ 
+-    const List&             GetMembers() const { return aMemberList; }
+-	void					AddMember(ScDPSaveMember* pMember) { aMemberList.Insert(pMember, LIST_APPEND); };
++    const MemberHash&       GetMembers() const { return aMembers; }
++	void					AddMember(ScDPSaveMember* pMember) { aMembers[pMember->GetName()] = pMember; }
+ 
+ 	void					SetDupFlag(BOOL bSet)	{ bDupFlag = bSet; }
+ 	BOOL					GetDupFlag() const		{ return bDupFlag; }
+Index: sc/inc/dptabdat.hxx
+===================================================================
+RCS file: /cvs/sc/sc/inc/dptabdat.hxx,v
+retrieving revision 1.5
+diff -u -p -u -r1.5 dptabdat.hxx
+--- sc/inc/dptabdat.hxx	8 Sep 2005 17:36:18 -0000	1.5
++++ sc/inc/dptabdat.hxx	24 Apr 2006 19:30:40 -0000
+@@ -84,8 +84,12 @@ struct ScDPItemData
+ 	void		SetString( const String& rS ) { aString = rS; bHasValue = FALSE; }
+ 
+ 	BOOL		IsCaseInsEqual( const ScDPItemData& r ) const;
++	BOOL		IsCaseInsEqualVals( const String &aString, double fValue, BOOL bHasValue ) const;
++    bool operator==( const ScDPItemData& r ) const;
++    void operator=( const ScDPItemData& r );
+ };
+ 
++
+ #define SC_VALTYPE_EMPTY	0
+ #define SC_VALTYPE_VALUE	1
+ #define SC_VALTYPE_STRING	2
+Index: sc/inc/dptabres.hxx
+===================================================================
+RCS file: /cvs/sc/sc/inc/dptabres.hxx,v
+retrieving revision 1.5
+diff -u -p -u -r1.5 dptabres.hxx
+--- sc/inc/dptabres.hxx	8 Sep 2005 17:36:34 -0000	1.5
++++ sc/inc/dptabres.hxx	24 Apr 2006 19:30:41 -0000
+@@ -451,11 +451,13 @@ SV_DECL_PTRARR_DEL(ScDPDataMembers, ScDP
+ 
+ //	result dimension contains only members
+ 
++class ScDPResultDimensionCache;
+ class ScDPResultDimension
+ {
+ private:
+ 	ScDPResultData*			pResultData;
+ 	ScDPResultMembers		aMembers;
++	ScDPResultDimensionCache *pCache;
+ 	BOOL                    bInitialized;
+ 	String					aDimensionName;		//! or ptr to IntDimension?
+ 	BOOL					bIsDataLayout;		//! or ptr to IntDimension?
+@@ -468,6 +470,8 @@ private:
+ 	long                    nAutoMeasure;
+ 	long                    nAutoCount;
+ 
++	ScDPResultMember* getMember (const ScDPItemData* pElem);
++
+ public:
+ 						ScDPResultDimension( ScDPResultData* pData );
+ 						~ScDPResultDimension();
