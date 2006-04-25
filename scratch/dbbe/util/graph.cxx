@@ -96,11 +96,13 @@ namespace configmgr
                         break;
                 }
             }
-            
-            insert_iterator<keySet> diff(orphans, orphans.end());
-            set_difference(nodes.begin(), nodes.end(),
-                               children.begin(), children.end(),
-                           diff);
+		vector<sal_Char*> orphKeys; 
+             set_difference(nodes.begin(), nodes.end(),
+				children.begin(), children.end(),
+				orphKeys.begin()); 
+		for (vector<sal_Char*>::iterator v = orphKeys.begin(); v != orphKeys.end(); v++) {
+			orphans.insert(*v);
+		}
         }
             
 
