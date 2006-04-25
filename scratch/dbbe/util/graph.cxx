@@ -47,43 +47,59 @@ namespace configmgr
             using namespace std;
             
             Dbc *cursorp= NULL;
-            OSL_ASSERT(!aDatabase.cursor(NULL, &cursorp, 0));
+            OSL_VERIFY(!aDatabase.cursor(NULL, &cursorp, 0));
             OSL_ASSERT(cursorp);
             Dbt key, data;
             
             int ret= 1;
-            //the following line looks suspicious to me
-            while ((ret == cursorp->get(&key, &data, DB_NEXT)) == 0)
+            bool done= false;
+            while (!done)
             {
+                ret= cursorp->get(&key, &data, DB_NEXT);
 
-                OSL_ASSERT(key.get_data());
-                OSL_ASSERT(data.get_data());
-                
-                Record* pRecord= static_cast<Record*>(data.get_data());
-                pRecord->unMarshal();
-                int swap= 0;
-                OSL_ASSERT(!aDatabase.get_byteswapped(&swap));
-                if (swap)
-                    pRecord->bytesex();
-                
-                //stupid question:
-                //  do I need to specify Dbt's to use malloc? I don't want my pointers
-                //  to be corrupted
-                NodeHash[static_cast<sal_Char*>(key.get_data())]= *(pRecord);
-                nodes.insert(static_cast<sal_Char*>(key.get_data()));
-                vector<sal_Char*> sublayers= pRecord->listSubLayers();
-                for (vector<sal_Char*>::iterator it= sublayers.begin();
-                     it != sublayers.end();
-                     it++)
+                switch(ret)
                 {
-                    children.insert(*it);
-                    nodes.insert(*it);
-                }        
+                    case DB_NOTFOUND:
+                        done= true;
+                        break;
+                        
+                    case 0:
+                    {
+                        OSL_ASSERT(key.get_data());
+                        OSL_ASSERT(data.get_data());
+                        
+                        Record* pRecord= Record::getFromDbt(data);
+                        pRecord->unMarshal();
+                        int swap= 0;
+                        OSL_ASSERT(!aDatabase.get_byteswapped(&swap));
+                        if (swap)
+                            pRecord->bytesex();
+                        
+                        //stupid question:
+                        //  do I need to specify Dbt's to use malloc? I don't want my pointers
+                        //  to be corrupted
+                        NodeHash[static_cast<sal_Char*>(key.get_data())]= *(pRecord);
+                        nodes.insert(static_cast<sal_Char*>(key.get_data()));
+                        vector<sal_Char*> sublayers= pRecord->listSubLayers();
+                        for (vector<sal_Char*>::iterator it= sublayers.begin();
+                             it != sublayers.end();
+                             it++)
+                        {
+                            children.insert(*it);
+                            nodes.insert(*it);
+                        }        
+                    }
+                    break;
+                    
+                    default:
+                        abort();
+                        break;
+                }
             }
             
             insert_iterator<keySet> diff(orphans, orphans.end());
             set_difference(nodes.begin(), nodes.end(),
-                           children.begin(), children.end(),
+                               children.begin(), children.end(),
                            diff);
         }
             

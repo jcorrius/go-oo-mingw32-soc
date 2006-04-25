@@ -167,6 +167,10 @@ namespace configmgr { namespace dbbe {
 
         OSL_ASSERT(aFileURL.getLength()); //empty file URLs not allowed
         
+        std::cerr << "getting blob from '" << 
+            rtl::OUStringToOString(aFileURL, RTL_TEXTENCODING_UTF8).getStr()
+                  << "\n";
+
         //get the date and type
         DirectoryItem aItem;
         OSL_VERIFY(DirectoryItem::get(aFileURL, aItem) == DirectoryItem::E_None);
@@ -183,21 +187,15 @@ namespace configmgr { namespace dbbe {
         sal_uInt64 aBlobSize= 0;
         OSL_VERIFY(aFile.getSize(aBlobSize) == File::E_None);
         blobSize= static_cast<sal_uInt32>(aBlobSize);
+        std::cerr << "before\n";
         pBlob= static_cast<sal_Char*>(rtl_allocateMemory(blobSize));
+        std::cerr << "after\n";
         OSL_ASSERT(pBlob);
-#if 1
-        //the following construct is likely incrorrect
         sal_uInt64 aBytesToRead= blobSize;
         while (aBytesToRead)
             OSL_VERIFY(aFile.read(static_cast<void*>(pBlob + (size_t)(blobSize - aBytesToRead)), 
                                   aBytesToRead, aBytesToRead) == File::E_None);
-#endif
-#if 0
-        sal_uInt64 bytesLeft= 0;
-        OSL_VERIFY(aFile.read(static_cast<void*>(pBlob), blobSize, bytesLeft) == File::E_None);
-        std::cerr << "bytesLeft= " << bytesLeft << std::endl;
-        OSL_VERIFY(!bytesLeft);
-#endif
+
     }
 
     void Record::setFileFromBlob(const rtl::OUString &aFileURL)

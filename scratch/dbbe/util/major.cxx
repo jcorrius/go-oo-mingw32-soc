@@ -84,27 +84,13 @@ namespace configmgr
         {
         }
 
-//probably not needed
-#if 0
-        sal_Int32 mangler::getSegment(const rtl::OString &inString,
-                                      rtl::OString &outString,
-                                      const sal_Int32 startIndex)
-        {
-            sal_Int32 end_slash= inString.indexOf('/', startIndex);
-            OSL_ASSERT(end_slash > 0);
-            rtl::OString aTempString= inString.copy(startIndex, 
-                                                    end_slash - startIndex);
-            outString+= aTempString;
-            return end_slash + 1;
-        }
-#endif
         
         void mangler::demangle(const rtl::OUString &aUrl, const rtl::OUString &aBaseURL)
         {
-            OSL_ASSERT(aUrl.getLength());
-            OSL_ASSERT(aBaseURL.getLength());
+            OSL_VERIFY(aUrl.getLength());
+            OSL_VERIFY(aBaseURL.getLength());
             fileUrl= aUrl;
-            OSL_ASSERT(aUrl.match(aBaseURL, 0));
+            OSL_VERIFY(aUrl.match(aBaseURL, 0));
             rtl::OUString aPath= aUrl.copy(aBaseURL.getLength() + 1, 
                                            aUrl.getLength() - aBaseURL.getLength() - 1);
             rtl::OString path= rtl::OUStringToOString(aPath,  osl_getThreadTextEncoding());
@@ -124,13 +110,13 @@ namespace configmgr
                         if (c == strlen(code) - 1)
                         {//   just eat everything
                             sal_Int32 dot= path.lastIndexOf('.');
-                            OSL_ASSERT(dot > 0);
+                            OSL_VERIFY(dot > 0);
                             layer= path.copy(p, dot - p).replace('/', '.');
                         }
                         else
                         {//  keep eating up to the last slash
                             sal_Int32 last_slash= path.lastIndexOf('/');
-                            OSL_ASSERT(last_slash > p);
+                            OSL_VERIFY(last_slash > p);
                             layer= path.copy(p, last_slash - p).replace('/', '.');
                             p= last_slash + 1;
                         }
@@ -175,7 +161,7 @@ namespace configmgr
         rtl::OString mangler::getNamespace(void) const
         {
             sal_uInt32 sepIndex= key.indexOf(sep);
-            OSL_ASSERT(sepIndex > 1);
+            OSL_VERIFY(sepIndex > 1);
             return key.copy(0, sepIndex - 2);
         }
         
@@ -213,7 +199,7 @@ namespace configmgr
                 guessedCode= const_cast<char*>(code);
             }
             
-            OSL_ASSERT(guessedCode);
+            OSL_VERIFY(guessedCode);
             mangler aMangler(guessedCode);            
             aMangler.demangle(aURL, aBaseURL);
 
@@ -221,7 +207,7 @@ namespace configmgr
             {
                 Record aRecord;
                 aRecord.setBlobFromFile(aURL);
-                OSL_ASSERT(aRecord.putRecord(aDatabase, aMangler.getKey()));
+                OSL_VERIFY(aRecord.putRecord(aDatabase, aMangler.getKey()));
             }
             
             //look for parents
@@ -238,28 +224,21 @@ namespace configmgr
                     case DB_NOTFOUND:
                     {
                         Record aRecord;
-                        TimeValue timeval;
-                        OSL_ASSERT(osl_getSystemTime(&timeval));
                         aRecord.touch();
                         std::vector<sal_Char*> sublayers;
                         sublayers.push_back(const_cast<sal_Char*>(aMangler.getKey()));
                         aRecord.setSubLayers(sublayers);
-                        size_t dataSize;
-                        Record* pRecord= aRecord.Marshal(dataSize);
-                        OSL_ASSERT(!aDatabase.get_byteswapped(&swap));
-                        if (swap)
-                            pRecord->bytesex(); 
-                        OSL_ASSERT(!aDatabase.put(NULL, &Key, &Data, 0));
-                        rtl_freeMemory(pRecord);
+                        aRecord.putRecord(aDatabase, aMangler.getNamespaceKey());
                     }
                     break;
                     
                     case 0:
-                    { //found                       
+                    { //found
+                        //FIXME: don't use marshal, etc
                         Record* pRecord= Record::getFromDbt(Data);
-                        OSL_ASSERT(pRecord);
+                        OSL_VERIFY(pRecord);
                         pRecord->unMarshal();
-                        OSL_ASSERT(!aDatabase.get_byteswapped(&swap));
+                        OSL_VERIFY(!aDatabase.get_byteswapped(&swap));
                         if (swap)
                             pRecord->bytesex(); 
                         std::vector<sal_Char*> sublayers= pRecord->listSubLayers();
@@ -277,14 +256,7 @@ namespace configmgr
                         { 
                             sublayers.push_back(const_cast<sal_Char*>(aMangler.getKey()));
                             pRecord->setSubLayers(sublayers);
-                            size_t dataSize;
-                            pRecord->Marshal(dataSize);
-                            pRecord->touch();
-                            if (swap)
-                                pRecord->bytesex();
-                            Data.set_data((void*)pRecord);
-                            Data.set_size(dataSize);
-                            OSL_ASSERT(!aDatabase.put(NULL, &Data, &Key, 0));
+                            OSL_VERIFY(pRecord->putRecord(aDatabase, aMangler.getNamespaceKey()));
                         }
                     }
                     break;
@@ -297,7 +269,7 @@ namespace configmgr
                         abort();
                         break;
                 }
-                
+                OSL_VERIFY(!aDatabase.sync(0));
             }
         }
 
@@ -314,7 +286,7 @@ namespace configmgr
             //      else
             //        bring in parent from new database
             std::cerr << "Impliment me!\n";
-            OSL_ASSERT(0);
+            OSL_VERIFY(0);
         }
 
         
@@ -335,11 +307,11 @@ namespace configmgr
 //            printUString("dataString", dataString);
 //            printUString("modulesString", modulesString);
 
-            OSL_ASSERT(aRelUrl.getLength());
+            OSL_VERIFY(aRelUrl.getLength());
             sal_Int32 slash= aRelUrl.indexOf('/');
             OSL_VERIFY(slash > 0);
             OUString aSubUrl= aRelUrl.copy(0, slash);
-            OSL_ASSERT(aSubUrl.getLength());
+            OSL_VERIFY(aSubUrl.getLength());
             printUString("aSubUrl" ,aSubUrl);
             
 
@@ -370,25 +342,89 @@ namespace configmgr
             using namespace osl;
 
             //DEBUG
+            
+            static int recursecount= 0;
+            if (recursecount > 10)
+                abort();
+            else
+                recursecount++;
+            
+
             printUString("aUrl", aUrl);
             printUString("aBaseUrl", aBaseUrl);
             //END DEBUG
-
+            
+            OSL_ASSERT(aUrl.getLength());
+            OSL_ASSERT(aBaseUrl.getLength());
+            
             Directory aDir(aUrl);
             OSL_VERIFY(aDir.open() == FileBase::E_None);
             DirectoryItem aDirItem;
+            FileStatus fs(FileStatusMask_Type | FileStatusMask_FileURL);
+            while (aDir.getNextItem(aDirItem) == FileBase::E_None)
+            {
+                if (aDirItem.getFileStatus(fs) == FileBase::E_None)
+                {
+                    switch (fs.getFileType())
+                    {
+                        case FileStatus::Directory:
+                        {
+                            std::cerr << "Would recurse into ";
+                            printUString("", fs.getFileURL());
+                            importPathInnerLoop(fs.getFileURL(), aBaseUrl, code);
+                        }
+                        break;
+                        
+                        case FileStatus::Regular:
+                        {
+                            std::cerr << "Would import file ";
+                            importFile(fs.getFileURL(), aBaseUrl, code);
+                            printUString("", fs.getFileURL());
+                        }
+                        break;
+                        
+                        default:
+                            abort();
+                            break;
+
+                    
+                    }
+                }
+                else
+                {
+                    abort();
+                }
+            }
+            
+#if 0
+
+            int recurseCount= 0;
+
             Directory::RC ret= Directory::E_None;
             while (ret == Directory::E_None)
             {
                 ret = aDir.getNextItem(aDirItem); 
-                FileStatus aFileStatus(FileStatusMask_Type || FileStatusMask_FileURL);
+                FileStatus aFileStatus(FileStatusMask_Type || FileStatusMask_FileURL 
+                                       || FileStatusMask_FileName);
                 OSL_VERIFY(DirectoryItem::E_None == aDirItem.getFileStatus(aFileStatus));
                 switch(aFileStatus.getFileType())
                 {
                     case FileStatus::Directory:
-                        importPathInnerLoop(aFileStatus.getFileURL(),
+                    {
+                        rtl::OUString anItemURL= aFileStatus.getFileURL();
+                        if (anItemURL.getLength() == 0)
+                        {
+                            OSL_ASSERT(aFileStatus.getFileName().getLength());
+                            anItemURL= aUrl + aFileStatus.getFileName();
+                        }
+                        printUString("anItemURL", anItemURL);
+                        if (anItemURL.getLength() == 0)
+                            break;
+                        OSL_ASSERT(anItemURL.getLength());
+                        importPathInnerLoop(anItemURL,
                                             aBaseUrl,
                                             code);
+                    }
                         break;
                         
                     case FileStatus::Regular:
@@ -398,12 +434,12 @@ namespace configmgr
                         
                     default:
                         std::cerr << "none of the above\n";
-                        OSL_ASSERT(0); //should never happen
+                        OSL_VERIFY(0); //should never happen
                 }
-                
-             
             }
-            OSL_ASSERT(ret == Directory::E_NOENT);
+            OSL_VERIFY(ret == Directory::E_NOENT);
+#endif
+            aDir.close();
         }
 
 
@@ -424,14 +460,19 @@ namespace configmgr
                                                           DbURL) == FileBase::E_None);
             
             sal_uInt32 slash= DbURL.lastIndexOf(sep);
-            OSL_ASSERT(slash > 0);
+            OSL_VERIFY(slash > 0);
 
             OUString baseURL= DbURL.copy(0, slash);
             OUString aURL;
             OSL_VERIFY(FileBase::getFileURLFromSystemPath(
                            OUString(path, strlen(path), osl_getThreadTextEncoding()),
                            aURL) == FileBase::E_None);
+            OSL_ASSERT(aURL.getLength());
 
+            std::cerr << "from importPath:\n";
+            printUString("aURL", aURL);
+            printUString("baseURL", baseURL);
+            std::cerr << "\n";
                         
             DirectoryItem aDirItem;
             OSL_VERIFY(DirectoryItem::E_None == DirectoryItem::get(aURL, aDirItem));
@@ -449,7 +490,7 @@ namespace configmgr
                         
                     default:
                         std::cerr << "none of thasdfljk;afjke above\n";
-                        OSL_ASSERT(0); //should never happen
+                        OSL_VERIFY(0); //should never happen
                 }
         }
     };

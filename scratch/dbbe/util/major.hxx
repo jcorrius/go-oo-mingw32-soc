@@ -99,20 +99,6 @@ namespace configmgr
             rtl::OString mangler::getNamespaceKey(void) const;
             
         private:
-            /**
-               takes a path: foo/bar/baz with a start
-               index and gives you foo, bar, or baz
-               
-               @param inString   The input string
-               @param outString  The string to append to
-               @param startIndex Where to start looking from
-               @return           the index after the trailing slash
-            */            
-            sal_Int32 getSegment(const rtl::OString &inString,
-                                 rtl::OString &outString,
-                                 const sal_Int32 startIndex);
-                                 
-
             rtl::OString key, path, file, sep, xcu;
             rtl::OUString fileUrl;
             const char *code;

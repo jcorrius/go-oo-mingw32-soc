@@ -134,7 +134,7 @@ namespace configmgr
             
             //duplicate keys are not allowed
             OSL_VERIFY(!aDatabase.get_flags(&flags));
-            if (flags |= DB_DUP)      
+            if (flags & DB_DUP)      
             {
                 cerr << "Database allows duplicate items!" << endl;
                 return sal_False;
@@ -194,6 +194,10 @@ namespace configmgr
             cout << "Database Statistics" << endl;
             cout << "\t Namespaces: " << myGraph.children.size() << endl; //correct STL usage?
             cout << "\t Total Keys: " << myGraph.nodes.size() << endl; //see above
+
+            cout << "\t What follows are statistics directly from BerkelyDB" << endl;
+            OSL_VERIFY(!aDatabase.stat_print(DB_STAT_ALL));
+
             //perhaps more statistics
             if (graphFile)
             {

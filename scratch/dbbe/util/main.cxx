@@ -75,7 +75,7 @@ void printUsage(const char* progName)
 
 void DbErrorCallback(const DbEnv *dbenv, const char *errpfx, const char *msg)
 {
-    std::cerr << "berkelyDb error \"" << msg << "\"\n"; 
+    std::cerr << "berkelyDb error" << msg << std::endl; 
 }
 
 Db* openDatabase(const char* path, const bool open_ro, const bool create= false)
@@ -85,8 +85,8 @@ Db* openDatabase(const char* path, const bool open_ro, const bool create= false)
     u_int32_t open_flags= 0;
     const u_int32_t db_flags= DB_CXX_NO_EXCEPTIONS;
     Db* aDatabase= new Db(NULL, db_flags);
+
     OSL_ASSERT(aDatabase);
-    OSL_VERIFY(!aDatabase->set_flags(DB_RECNO)); //FIXME
     aDatabase->set_errcall(DbErrorCallback);
     if (open_ro)
     {
@@ -98,10 +98,6 @@ Db* openDatabase(const char* path, const bool open_ro, const bool create= false)
     }
     int ret;
     OSL_VERIFY(!aDatabase->set_lorder(1234)); //little endian
-/*
-  open(DbTxn *txnid, const char *file,
-    const char *database, DBTYPE type, u_int32_t flags, int mode);
- */
     ret= aDatabase->open(NULL, path, 
                          NULL, DB_BTREE, open_flags, 0);
     if (ret)
