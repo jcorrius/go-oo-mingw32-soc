@@ -78,7 +78,7 @@ namespace configmgr
                 OSL_ASSERT(pSubLayers);
                 sal_Char *p= pSubLayers;
                 size_t ret= 0;
-                int subs= 0;
+                sal_uInt32 subs= 0;
                 while (subs < numSubLayers)
                 {
                     if (*p == 0)
