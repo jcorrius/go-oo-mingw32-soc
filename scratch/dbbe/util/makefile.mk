@@ -4,9 +4,9 @@
 #
 #   $RCSfile: makefile.mk,v $
 #
-#   $Revision: 1.2 $
+#   $Revision: 1.3 $
 #
-#   last change: $Author: mikeleib $ $Date: 2006/04/08 04:48:02 $
+#   last change: $Author: mikeleib $ $Date: 2006/04/26 04:29:25 $
 #
 #   The Contents of this file are made available subject to
 #   the terms of GNU Lesser General Public License Version 2.1.
@@ -45,10 +45,16 @@ ENABLE_EXCEPTIONS=TRUE
 # --- Settings ----------------------------------
 
 .INCLUDE : settings.mk
+
+.IF "$(SYSTEM_DB)" == "YES"
+CFLAGS+=-DSYSTEM_DB -I$(DB_INCLUDES)
+.ENDIF
+
 # --- Files -------------------------------------
 
 OBJFILES=\
 	$(OBJ)$/main.obj \
+	$(OBJ)$/argparse.obj \
 	$(OBJ)$/minor.obj \
 	$(OBJ)$/graph.obj \
 	$(OBJ)$/major.obj 

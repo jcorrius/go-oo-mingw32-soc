@@ -62,7 +62,7 @@ namespace configmgr
                 }
         };
 
-        static void namespace_callback(const sal_Char* key, const Record& data, void* state)
+        static void namespace_callback(sal_Char* key, const Record& data, void* state)
         {
             using namespace std;
             OSL_ASSERT(state);
@@ -109,7 +109,7 @@ namespace configmgr
                 }
         };
         
-        static void uniqueness_callback(const sal_Char* key, const Record& data, void* state)
+        static void uniqueness_callback(sal_Char* key, const Record& data, void* state)
         {
             using namespace std;
 

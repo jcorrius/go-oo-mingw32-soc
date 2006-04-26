@@ -64,12 +64,16 @@ namespace configmgr
 {
     namespace dbbe 
     {
-        static void printUString(const char *name, const rtl::OUString &aString)
+        void printUString(const char *name, const rtl::OUString &aString)
         {
             using namespace std;
+            using namespace rtl;
             
             OSL_ASSERT(name);
-            cerr << name << "=\"" << rtl::OUStringToOString(aString,  osl_getThreadTextEncoding()).getStr() << "\"" << endl;
+            cerr << name << "=\"" ;
+            cerr << OUStringToOString(aString, 
+                                      osl_getThreadTextEncoding()).getStr();
+            cerr << "\"" << endl;
         }
 
         mangler::mangler(const char *Code):
@@ -343,11 +347,11 @@ namespace configmgr
 
             //DEBUG
             
-            static int recursecount= 0;
-            if (recursecount > 10)
-                abort();
-            else
-                recursecount++;
+            //static int recursecount= 0;
+            //if (recursecount > 10)
+            //    abort();
+            //else
+            //    recursecount++;
             
 
             printUString("aUrl", aUrl);
@@ -386,8 +390,6 @@ namespace configmgr
                         default:
                             abort();
                             break;
-
-                    
                     }
                 }
                 else
@@ -489,8 +491,7 @@ namespace configmgr
                         break;
                         
                     default:
-                        std::cerr << "none of thasdfljk;afjke above\n";
-                        OSL_VERIFY(0); //should never happen
+                        abort();
                 }
         }
     };

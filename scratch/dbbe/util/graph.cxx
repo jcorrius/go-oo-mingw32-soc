@@ -96,42 +96,47 @@ namespace configmgr
                         break;
                 }
             }
-		vector<sal_Char*> orphKeys; 
-             set_difference(nodes.begin(), nodes.end(),
-				children.begin(), children.end(),
-				orphKeys.begin()); 
-		for (vector<sal_Char*>::iterator v = orphKeys.begin(); v != orphKeys.end(); v++) {
-			orphans.insert(*v);
-		}
-        }
-            
+                vector<sal_Char*> orphKeys; 
 
-        void graph::descend(void callback(const sal_Char *, const Record&, void*), 
-                            nodeHash::const_iterator it,
+                set_difference(nodes.begin(), nodes.end(),
+                               children.begin(), children.end(),
+                               orphKeys.begin());
+                               
+                for (vector<sal_Char*>::iterator v = orphKeys.begin(); 
+                     v != orphKeys.end(); 
+                     v++) 
+                {
+                    orphans.insert(*v);
+                }
+        }
+        
+
+        void graph::descend(void callback(sal_Char *, const Record&, void*), 
+                            nodeHash::iterator it,
                             void *state)
         {
             using namespace std;
 
-            callback(it->first, it->second, state);
+            callback(const_cast<sal_Char*>(it->first), it->second, state);
             if (it->second.numSubLayers)
             {
                 vector<sal_Char*> sublayers= it->second.listSubLayers();
-                for (vector<sal_Char*>::const_iterator sub= sublayers.begin();
+                for (vector<sal_Char*>::iterator sub= sublayers.begin();
                      sub != sublayers.end();
                      sub++)
                 {
-                    nodeHash::const_iterator child= NodeHash.find(*sub);
+                    nodeHash::iterator child= NodeHash.find(*sub);
                     descend(callback, child, state);
                 }
             }
         }
         
-        void graph::traverse(void callback(const sal_Char *, const Record&, void*),
+        void graph::traverse(void callback(sal_Char *, const Record&, void*),
                              void* state)
         {
             using namespace std;
 
-            for (keySet::const_iterator orphan= orphans.begin();
+            for (keySet::iterator orphan= orphans.begin();
                  orphan != orphans.end();
                  orphan++)
             {
@@ -139,11 +144,11 @@ namespace configmgr
             }
         }
         
-        void graph::traverse(void callback(const sal_Char *, const Record&, void*),
-                             keySet::const_iterator it,
+        void graph::traverse(void callback(sal_Char *, const Record&, void*),
+                             keySet::iterator it,
                              void* state)
         {
-            nodeHash::const_iterator it2= NodeHash.find(*it);
+            nodeHash::iterator it2= NodeHash.find(*it);
             descend(callback, it2, state);
         }
 
@@ -152,13 +157,13 @@ namespace configmgr
             using namespace std;
 
             out << "digraph G " << endl << "{" << endl;
-            for (nodeHash::const_iterator it= NodeHash.begin();
+            for (nodeHash::iterator it= NodeHash.begin();
                  it != NodeHash.end();
                  it++)
             {
                 out << "\t\"" << it->first << "\";" << endl;
                 vector<sal_Char*> children= it->second.listSubLayers();
-                for (vector<sal_Char*>::const_iterator child= children.begin();
+                for (vector<sal_Char*>::iterator child= children.begin();
                      child != children.end();
                      child++)
                 {

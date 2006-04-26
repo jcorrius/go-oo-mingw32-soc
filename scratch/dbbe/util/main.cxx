@@ -46,6 +46,9 @@
 //This is probably bad, but I just can't help myself
 #include <getopt.h> 
 
+
+#include "argparse.hxx"
+
 /**
    Major Usages we will support
    
@@ -58,20 +61,6 @@
    SanityCheck   Perform some basic sanity checks   --done
  */
 
-
-void printUsage(const char* progName)
-{
-    using namespace std;
-    
-    cerr << "Usage: " << progName << " --database=<database filename> [--code=<code>] action options" << endl;
-    cerr << "\t where actions can be one of 'import', 'stat', or 'sanity'" << endl << endl;
-    cerr << "\t options for import:" << endl << endl;
-    cerr << "\t\t import <path>" << endl;
-    cerr << "\t\t where <path> is either a path containing xcu files or " << endl;
-    cerr << "\t\t an xcu file" << endl << endl;
-    cerr << "\t\t Note that the path will be taken relative to the path" << endl;
-    cerr << "\t\t to the database file" << endl << endl;
-}
 
 void DbErrorCallback(const DbEnv *dbenv, const char *errpfx, const char *msg)
 {
@@ -111,68 +100,82 @@ Db* openDatabase(const char* path, const bool open_ro, const bool create= false)
 
 }
 
+//FIXME: make this work
+
+
 SAL_IMPLEMENT_MAIN_WITH_ARGS(argc, argv)
 {
-    Db* aDatabase= NULL;
+    const char* summary= "[options] mode mode-options";
+    const char* footer=  
+        "modes:\n"
+        "\timport <path/file>\t\n"
+        "\tstat\n"
+        "\tsanity\n";
+    
+    /* flags */
+    bool helpFlag= false;
+    bool dbFlag= false;
+    bool codeFlag= false;
+
+    /* values */
     char *db_path= NULL;
     char *code= NULL;
-    int c;
+    
+
+    static arg args[]=
+        {
+            {
+                argName:     "help",
+                shortName:   'h',
+                optional:    true,
+                hasValue:    false,
+                flagStore:   &helpFlag,
+                valueStore:  NULL,
+                usageString: "this help"
+            },
+            {
+                argName:     "database",
+                shortName:   'd',
+                optional:    false,
+                hasValue:    true,
+                flagStore:   &dbFlag,
+                valueStore:  &db_path,
+                usageString: "Path to the database to operate on"
+            },
+            {
+                argName:     "code",
+                shortName:   'c',
+                optional:    true,
+                hasValue:    true,
+                flagStore:   &codeFlag,
+                valueStore:  &code,
+                usageString: "conversion code to use for path"
+            },
+            {0, 0, 0, 0, 0, 0}
+        };
+    argParser aParser(argc, argv, args, summary);
+    int optind= aParser.parseArgs();
+    if (helpFlag)
+    {
+        aParser.printUsage(NULL, footer);
+        exit(0);
+    }
+    if (!aParser.mandatoryOptsSet())
+    {
+        aParser.printUsage(NULL, footer);
+        abort();
+    }
+    Db* aDatabase= NULL;
 
     /* modes */
     const char* sanity_check = "sanity";
     const char* stat         = "stat";
     const char* import       = "import";
 
-    while (1)
-    {
-        static struct option long_options[] =
-            {
-                {"help",      no_argument,       0, 'h'},
-                {"database",  required_argument, 0, 'd'},
-                {"code",      required_argument, 0, 'c'},
-                {0, 0, 0, 0}
-            };
-
-        int option_index = 0;
-        
-        c = getopt_long (argc, argv, "hd:",
-                         long_options, &option_index);
-        
-        /* Detect the end of the options. */
-        if (c == -1)
-            break;
-        
-        switch (c)
-        {
-            case 'h':
-                printUsage(argv[0]);                
-                exit(0);
-                break;
-                
-            case 'd':
-                std::cerr << "Using database file \"" << optarg << "\"\n";
-                db_path= strdup(optarg);
-                OSL_ASSERT(db_path);
-                break;
-
-            case 'c':
-                printf("option -c with value '%s'\n", optarg);
-                code= strdup(optarg);
-                OSL_ASSERT(code);
-                break;
-                
-            case '?':
-                /* getopt_long already printed an error message. */
-                break;
-
-            default:
-                abort();
-        }
-    }
     if (db_path == NULL)
     {
         std::cerr << "No database file specified!" << std::endl << std::endl;
-        printUsage(argv[0]);
+        aParser.printUsage(NULL, footer);
         abort();
     }
     if (optind < argc)
@@ -213,19 +216,19 @@ SAL_IMPLEMENT_MAIN_WITH_ARGS(argc, argv)
             if (optind < argc)
             {
                 aRepository.importPath(argv[optind++], code);
+                exit(0);
             }
             else
             {
-                printUsage(argv[0]);
+                aParser.printUsage(NULL, footer);
                 abort();
             }
         }
-
-        printf ("non-option ARGV-elements: ");
-        while (optind < argc)
-            printf ("%s ", argv[optind++]);
-        putchar ('\n');
+        aParser.printUsage(NULL, footer);
+        abort();
     } 
+    aParser.printUsage(NULL, footer);
+    abort();
     
     return 0;
 }

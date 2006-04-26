@@ -59,14 +59,16 @@ namespace configmgr
 
         public:
             typedef std::hash_map<const sal_Char*, configmgr::dbbe::Record, std::hash<const sal_Char*>, eqstr> nodeHash;
-            typedef std::hash_set<const sal_Char*, std::hash<const sal_Char*>, eqstr> keySet;
+            typedef std::hash_set<sal_Char*, std::hash<sal_Char*>, eqstr> keySet;
+//            typedef std::hash_map<sal_Char*, configmgr::dbbe::Record, std::hash<sal_Char*>, eqstr> nodeHash;
+//            typedef std::hash_set<sal_Char*, std::hash<sal_Char*>, eqstr> keySet;
 
 
             graph(Db& aDatabase);
-            void traverse(void callback(const sal_Char *, const Record&, void*),
+            void traverse(void callback(sal_Char *, const Record&, void*),
                           void* state);
-            void traverse(void callback(const sal_Char *, const Record&, void*),
-                          keySet::const_iterator it,
+            void traverse(void callback(sal_Char *, const Record&, void*),
+                          keySet::iterator it,
                           void* state);
             void graphviz(std::ostream &out);
             
@@ -74,8 +76,8 @@ namespace configmgr
             nodeHash NodeHash;
         private:
             graph();
-            void descend(void callback(const sal_Char *, const Record&, void*), 
-                         nodeHash::const_iterator it,
+            void descend(void callback(sal_Char *, const Record&, void*), 
+                         nodeHash::iterator it,
                          void *state);
         };
     };
