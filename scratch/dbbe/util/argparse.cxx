@@ -36,7 +36,7 @@
 #include "argparse.hxx"
 #endif//CONFIGMGR_DBBE_UTIL_ARGPARSE_HXX_
 
-
+#include <string.h>
 #include <iostream>
 
 #include <osl/diagnose.h>

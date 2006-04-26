@@ -35,8 +35,13 @@
 #include "sal/main.h"
 #include "sal/types.h"
 
+#ifdef SYSTEM_DB
 #include <db_cxx.h>
+#else
+#include <berkeleydb/db_cxx.h>
+#endif
 #include <cstdlib>
+#include <stdlib.h>
 
 #include "../Record.hxx" //FIXME
 #include "minor.hxx"

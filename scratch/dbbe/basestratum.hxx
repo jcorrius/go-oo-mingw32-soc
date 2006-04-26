@@ -78,7 +78,7 @@
 
 #ifdef SYSTEM_DB
 #include <db_cxx.h>
-#else
+#else 
 #include <berkeleydb/db_cxx.h>
 #endif
 

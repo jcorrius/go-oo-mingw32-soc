@@ -36,8 +36,11 @@
 #include "major.hxx"
 #include "graph.hxx"
 
+#ifdef SYSTEM_DB
 #include <db_cxx.h>
-
+#else
+#include <berkeleydb/db_cxx.h>
+#endif 
 #include <string.h>
 
 #include <iostream>

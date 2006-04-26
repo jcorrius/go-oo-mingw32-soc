@@ -43,7 +43,11 @@
 #include <algorithm>
 #include <functional>
 
+#ifdef SYSTEM_DB
 #include <db_cxx.h>
+#else
+#include <berkeleydb/db_cxx.h>
+#endif
 
 /**
    This file contains the routines for the minor modes of the utility:

@@ -40,7 +40,11 @@
 #include <hash_set>
 #include <hash_map>
 #include <iostream>
+#ifdef SYSTEM_DB
 #include <db_cxx.h>
+#else
+#include <berkeleydb/db_cxx.h>
+#endif
 
 namespace configmgr 
 {

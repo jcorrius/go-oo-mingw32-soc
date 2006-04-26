@@ -85,9 +85,7 @@ cppu::IPropertyArrayHelper * SAL_CALL LayerPropertyHelper::newInfoHelper()
     using com::sun::star::beans::Property;
     using namespace com::sun::star::beans::PropertyAttribute;
 
-    Property properties[] = {};
-
-    return new cppu::OPropertyArrayHelper(properties, sizeof(properties)/sizeof(properties[0]));
+    return new cppu::OPropertyArrayHelper(NULL, 0);
 }
 
 #define MESSAGE( text ) rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "ERROR: Layer Properties: " text ) )
