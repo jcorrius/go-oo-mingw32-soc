@@ -112,7 +112,7 @@ int gimmeRand(int to, int from= 0)
 void randomString(char* string, size_t len, bool nullTerm=true)
 {
     OSL_ASSERT(string);
-    for (int i= 0; i < len; i++)
+    for (unsigned int i= 0; i < len; i++)
     {
         string[i]= rand() % (26) + 'a';
     }
