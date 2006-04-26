@@ -38,7 +38,7 @@
 
 #include <db_cxx.h>
 
-#include <strings.h>
+#include <string.h>
 
 #include <iostream>
 #include <fstream>

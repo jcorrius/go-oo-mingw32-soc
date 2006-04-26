@@ -41,8 +41,7 @@
 
 #include <osl/diagnose.h>
 
-#include <strings.h>
-
+#include <string.h>
 
 argParser::argParser(int Argc, char** Argv, arg* Args, const char* Usage):
     argc(Argc),
@@ -129,7 +128,7 @@ arg* argParser::argMatch(char *name) const
         { //long option
             if (!name[2])
                 return NULL;
-            char *equals= index(name + 2, '=');
+            char *equals= strstr(name + 2, "=");
             size_t len;
             if (equals)
             {
@@ -163,7 +162,7 @@ int argParser::parseArgs()
             *(match->flagStore)= true;
             if (match->hasValue)
             {
-                char *equals= index(argv[optind], '=');
+                char *equals= strstr(argv[optind], "=");
                 if (equals)
                 {
                     OSL_ASSERT(match->valueStore);
