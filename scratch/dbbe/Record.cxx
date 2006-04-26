@@ -73,19 +73,20 @@ namespace configmgr
         
         size_t Record::SubLayerLen(void) const
         {
+            OSL_ASSERT(pSubLayers);
+            sal_Char *p= pSubLayers;
             size_t ret= 0;
-            if (numSubLayers)
+            int subs= 0;
+            while (subs < numSubLayers)
             {
-                sal_Char *p= pSubLayers;
-                OSL_ASSERT(p);
-                for (int i= 0; i < numSubLayers; i++)
+                if (*p == 0)
                 {
-                    size_t len= strlen(p) + 1; //to include the NULL
-                    ret+= len;
-                    p+= len + 1; //to push us into the next string
+                    subs++;
                 }
+                p++;
+                ret++;
             }
-            return ret + 1;
+            return ret;
         }
         
         void Record::unMarshal()
