@@ -3,6 +3,7 @@
 #include <com/sun/star/frame/XDispatchProvider.hpp>
 #include <com/sun/star/frame/XModel.hpp>
 #include <com/sun/star/frame/XFrame.hpp>
+#include <com/sun/star/frame/XDesktop.hpp>
 #include <com/sun/star/frame/XController.hpp>
 #include <com/sun/star/uno/XComponentContext.hpp>
 #include <com/sun/star/lang/XMultiComponentFactory.hpp>
@@ -254,7 +255,16 @@ org::openoffice::getCurrentDocument() throw (uno::RuntimeException)
 		if ( sal_False == ( aModel >>= xModel ) ||
 			!xModel.is() )
 		{
-			OSL_TRACE("Failed to extract model from thisComponent ");
+			// trying last gasp try the current component
+			uno::Reference<uno::XComponentContext > xCtx( ::cppu::defaultBootstrap_InitialComponentContext(), uno::UNO_QUERY_THROW );
+			uno::Reference<lang::XMultiComponentFactory > xSMgr( xCtx->getServiceManager(), uno::UNO_QUERY_THROW );
+			uno::Reference< frame::XDesktop > xDesktop (xSMgr->createInstanceWithContext(::rtl::OUString::createFromAscii("com.sun.star.frame.Desktop"), xCtx), uno::UNO_QUERY_THROW );
+			xModel.set( xDesktop->getCurrentComponent(), uno::UNO_QUERY );
+			if ( !xModel.is() )
+			{
+				throw uno::RuntimeException( 
+					rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Can't extract model from basic ( its obviously not set yet ) therefore don't know the currently selected document") ), uno::Reference< uno::XInterface >() );
+			}
 			return xModel;
 		}
 		else
@@ -267,6 +277,11 @@ org::openoffice::getCurrentDocument() throw (uno::RuntimeException)
 	else
 	{
 		OSL_TRACE("Failed to get ThisComponent");
+		throw uno::RuntimeException( 
+			rtl::OUString( 
+				RTL_CONSTASCII_USTRINGPARAM(
+					"Can't determine the currently selected document") ),
+			uno::Reference< uno::XInterface >() );
 	}
 	return xModel;
 }
