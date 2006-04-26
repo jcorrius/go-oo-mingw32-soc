@@ -52,6 +52,7 @@
 #include <rtl/alloc.h>
 #include <rtl/memory.h>
 
+#include <time.h>
 
 #include <assert.h> //fixme
 
@@ -166,8 +167,8 @@ void testSubLayerLen()
     }    
 }
 
-bool RecordMatch(configmgr::dbbe::Record *p1,
-                 configmgr::dbbe::Record *p2)
+bool RecordMatch(const configmgr::dbbe::Record *p1,
+                 const configmgr::dbbe::Record *p2)
 {
     OSL_ASSERT(p1);
     OSL_ASSERT(p2);
@@ -207,7 +208,14 @@ void testMarshal()
         {
             cerr << "\tthe contents do not match!" << endl;
         }
+        pRecord->unMarshal();        
+        if (RecordMatch(&aRecord, pRecord))
+            cerr << "\tthe unmarshalled records match" << endl;
+        else
+            cerr << "\tthe unmasrhalled records do not match!" << endl;
+
         rtl_freeMemory(pRecord);
+        
     }
     cerr << endl;
     
@@ -232,7 +240,7 @@ void testMarshal()
         {
             cerr << "\tThe Records do not match!" << endl;
         }
-        if (!memcmp(aRecord.pBlob, pRecord+sizeof(Record), aRecord.blobSize))
+        if (!memcmp(aRecord.pBlob, (char*)pRecord+sizeof(Record), aRecord.blobSize))
         {
             cerr << "\tthe blobs match" << endl;
         }
@@ -240,6 +248,11 @@ void testMarshal()
         {
             cerr << "\tthe blobs do not match!" << endl;
         }
+        pRecord->unMarshal();        
+        if (RecordMatch(&aRecord, pRecord))
+            cerr << "\tthe unmarshalled records match" << endl;
+        else
+            cerr << "\tthe unmasrhalled records do not match!" << endl;
 
         rtl_freeMemory(pRecord);                
     }
@@ -270,7 +283,7 @@ void testMarshal()
         {
             cerr << "\tThe Records do not match!" << endl;
         }
-        if (!memcmp(aRecord.pSubLayers, pRecord+sizeof(Record), aRecord.SubLayerLen()))
+        if (!memcmp(aRecord.pSubLayers, (char*)pRecord+sizeof(Record), aRecord.SubLayerLen()))
         {
             cerr << "\tthe sublayers match" << endl;
         }
@@ -278,6 +291,11 @@ void testMarshal()
         {
             cerr << "\tthe sublayers do not match!" << endl;
         }
+        pRecord->unMarshal();        
+        if (RecordMatch(&aRecord, pRecord))
+            cerr << "\tthe unmarshalled records match" << endl;
+        else
+            cerr << "\tthe unmasrhalled records do not match!" << endl;
         
         free(aRecord.pSubLayers);
         free(pRecord);
@@ -313,7 +331,7 @@ void testMarshal()
         {
             cerr << "\tThe Records do not match!" << endl;
         }
-        if (!memcmp(aRecord.pSubLayers, pRecord+sizeof(Record), aRecord.SubLayerLen()))
+        if (!memcmp(aRecord.pSubLayers, (char*)pRecord+sizeof(Record), aRecord.SubLayerLen()))
         {
             cerr << "\tthe sublayers match" << endl;
         }
@@ -321,7 +339,7 @@ void testMarshal()
         {
             cerr << "\tthe sublayers do not match!" << endl;
         }
-        if (!memcmp(aRecord.pBlob, pRecord+sizeof(Record)+aRecord.SubLayerLen(), aRecord.SubLayerLen()))
+        if (!memcmp(aRecord.pBlob, (char*)pRecord+sizeof(Record)+aRecord.SubLayerLen(), aRecord.SubLayerLen()))
         {
             cerr << "\tthe blobs match" << endl;
         }
@@ -329,29 +347,138 @@ void testMarshal()
         {
             cerr << "\tthe blobs do not match!" << endl;
         }
-        pRecord->unMarshal();
+        if (RecordMatch(&aRecord, pRecord))
+            cerr << "\tthe marshalled records match" << endl;
+        else
+            cerr << "\tthe masrhalled records do not match!" << endl;
+        pRecord->unMarshal();        
         if (RecordMatch(&aRecord, pRecord))
             cerr << "\tthe unmarshalled records match" << endl;
         else
             cerr << "\tthe unmasrhalled records do not match!" << endl;
-      
-        
-        
+
         free(aRecord.pSubLayers);
         free(aRecord.pBlob);
         free(pRecord);
     }
 }
 
+void testSetSubLayer()
+{
+    using namespace configmgr::dbbe;
+    using namespace std;
 
+    cerr << "The trivial case of no sublayers" << endl;
+    {
+        Record aRecord;
+        aRecord.touch();
+        vector<sal_Char*> vec= aRecord.listSubLayers();
+        cerr << "\twe have been returned a vector with " << vec.size() << " elements" << endl;
+    }
+    cerr << endl;
+
+    cerr << "Set some sublayers and then read them out" << endl;
+    {
+        Record aRecord;
+        aRecord.touch();
+        int count= gimmeRand(100);
+        cerr << "\tWe will make " << count << " sublayers and add them" << endl;
+        vector<sal_Char*> vec;
+        size_t totStrSize= 0;
+        for (int i=0; i < count; i++)
+        {
+            size_t strSize= gimmeRand(100, 3);
+            totStrSize+= strSize;
+            sal_Char* str= (sal_Char*)malloc(strSize);
+            randomString(str, strSize);
+            vec.push_back(str);
+        }
+        aRecord.setSubLayers(vec);
+        assert(aRecord.pSubLayers);
+        cerr << "\tTotal size of sublayer strings is " << totStrSize << endl;
+        cerr << "\tSubLayerLen is " << aRecord.SubLayerLen() << endl;
+        cerr << "\tWe will now fetch them back out" << endl;
+        vector<sal_Char*> vec2;
+        vec2= aRecord.listSubLayers();
+        cerr << "\tThe sublayers we got back has " << vec2.size() << " elements" << endl;
+        bool match= true;
+        for (int i= 0; i < count; i++)
+        {
+            if (strcmp(vec[i], vec2[i]))
+                match= false;
+        }
+        if (match)
+            cerr << "\tThe sublayers match" << endl;
+        else
+            cerr << "\tThe sublayers do not match!" << endl;
+    }
+    cerr << endl;
+    
+    cerr << "Set some sublayers and then set some more" << endl;
+    {
+        Record aRecord;
+        aRecord.touch();
+        int count= gimmeRand(100);
+        cerr << "\tWe will make " << count << " sublayers and add them" << endl;
+        vector<sal_Char*> vec;
+        size_t totStrSize= 0;
+        for (int i=0; i < count; i++)
+        {
+            size_t strSize= gimmeRand(100, 3);
+            totStrSize+= strSize;
+            sal_Char* str= (sal_Char*)malloc(strSize);
+            randomString(str, strSize);
+            vec.push_back(str);
+        }
+        cerr << "\tTotal size of these sublayer strings is " << totStrSize << endl;   
+        aRecord.setSubLayers(vec);
+        assert(aRecord.pSubLayers);
+        cerr << "\tSubLayerLen reports " << aRecord.SubLayerLen() << endl;
+        
+        count= gimmeRand(100);
+        cerr << "\tWe will make " << count << " aditional sublayers and add them" << endl;
+        vector<sal_Char*> vec1;
+        totStrSize= 0;
+        for (int i=0; i < count; i++)
+        {
+            size_t strSize= gimmeRand(100, 3);
+            totStrSize+= strSize;
+            sal_Char* str= (sal_Char*)malloc(strSize);
+            randomString(str, strSize);
+            vec1.push_back(str);
+        }
+        cerr << "\tTotal size of these sublayer strings is " << totStrSize << endl;
+        aRecord.setSubLayers(vec1);
+        assert(aRecord.pSubLayers);
+        cerr << "\tThat corresponds to " << aRecord.numSubLayers << " sublayers in the structure" << endl;
+        cerr << "\tThat makes a new SubLayerLen of " << aRecord.SubLayerLen() << endl;
+        
+        bool match=true;
+        vector<sal_Char*> vec2= aRecord.listSubLayers();
+        cerr << "\tWe got back " << vec2.size() << " sublayers with listSubLayers" << endl;
+        for (int i= 0; i < vec2.size(); i++)
+        {
+            if (strcmp(vec1[i], vec2[i]))
+                match= false;
+        }
+        if (match)
+            cerr << "\tthe sublayers match" << endl;
+        else
+            cerr << "\tthe sublayers do not match!" << endl;
+    }
+
+}
 
 //end temp debugging stuff
 
 SAL_IMPLEMENT_MAIN_WITH_ARGS(argc, argv)
 {
+    srand(time(0));
     //testSubLayerLen(); //passed
-    testMarshal(); //passed
-    exit(0);
+    //testMarshal(); //passed
+    //testSetSubLayer(); //passed
+    
+    //exit(0);
     
 
     const char* summary= "[options] mode mode-options";

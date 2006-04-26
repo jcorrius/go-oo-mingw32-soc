@@ -100,7 +100,6 @@ namespace configmgr
             pBlob= (sal_Char*)(this) + sizeof(Record) + SubLayerLen();
         }
         
-        //this guy has problems???
         Record* Record::Marshal(size_t &size) const
         {
             Record* pRecord;
@@ -111,11 +110,11 @@ namespace configmgr
             rtl_copyMemory(pRecord, this, sizeof(Record));
             if (numSubLayers)
             {
-                rtl_copyMemory(pRecord + sizeof(Record), pSubLayers, SubLayerLen());
+                rtl_copyMemory((sal_Char*)pRecord + sizeof(Record), pSubLayers, SubLayerLen());
             }
             if (pBlob)
             {
-                rtl_copyMemory(pRecord + sizeof(Record) + SubLayerLen(), pBlob, blobSize);
+                rtl_copyMemory((sal_Char*)pRecord + sizeof(Record) + SubLayerLen(), pBlob, blobSize);
             }
             //set pointers to NULL to serve as a warning to others
             pRecord->pBlob= NULL;
@@ -134,7 +133,8 @@ namespace configmgr
         
         std::vector<sal_Char*> Record::listSubLayers(void) const
         {
-            std::vector<sal_Char*> ret(numSubLayers);
+            std::vector<sal_Char*> ret;
+            ret.reserve(SubLayerLen());
             
             sal_uInt32 i= numSubLayers;
             sal_Char* pString= pSubLayers;
@@ -149,7 +149,6 @@ namespace configmgr
             return ret;
         }
         
-//I think this has some sort of problem, I think
         void Record::setSubLayers(std::vector<sal_Char*>& aSubLayers)
         {
             std::vector<sal_Char*>::iterator it;
@@ -157,24 +156,26 @@ namespace configmgr
             for (it= aSubLayers.begin(); it != aSubLayers.end(); it++)
             {
                 OSL_ASSERT(*it);
-//            std::cerr << "it=" << *it << std::endl;
-                len+= strlen(*it) + 1; //one for the null
+                size_t strLen= strlen(*it);
+                OSL_ASSERT(strLen);
+                len+= strLen + 1; //one for the null
             }
+            numSubLayers= aSubLayers.size();
             
             //if this is a serialized copy, then don't try to free the memory, just overwrite it
             if (pSubLayers && 
                 (pSubLayers != (sal_Char*)(this) + sizeof(Record)))
-                rtl_freeMemory(pSubLayers);
+            {
+                rtl_freeMemory(pSubLayers);                
+            }
             pSubLayers= static_cast<sal_Char*>(rtl_allocateMemory(len));
             OSL_ASSERT(pSubLayers);
             sal_Char* pString= pSubLayers;
             for (it= aSubLayers.begin(); it != aSubLayers.end(); it++)
             {
-                size_t len= strlen(*it);
-                rtl_copyMemory(pString, *it, len);
-                pString+= len + 1;
-                *pString= 0;
-                pString++;
+                size_t strLen= strlen(*it) + 1;
+                rtl_copyMemory(pString, *it, strLen);
+                pString+= strLen;
             }
         }
         
