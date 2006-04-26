@@ -4,9 +4,9 @@
 #
 #   $RCSfile: makefile.mk,v $
 #
-#   $Revision: 1.3 $
+#   $Revision: 1.4 $
 #
-#   last change: $Author: mikeleib $ $Date: 2006/04/26 04:29:25 $
+#   last change: $Author: dkeskar $ $Date: 2006/04/26 18:56:36 $
 #
 #   The Contents of this file are made available subject to
 #   the terms of GNU Lesser General Public License Version 2.1.
@@ -66,7 +66,7 @@ APP1TARGET= $(TARGET)
 
 APP1OBJS= $(OBJFILES) $(SLOFILES)
 
-APP1STDLIBS= $(SALLIB) $(SALHELPERLIB) -ldb_cxx
+APP1STDLIBS= $(SALLIB) $(SALHELPERLIB) $(BERKELEYLIB)
 
 
 # --- Targets ----------------------------------
