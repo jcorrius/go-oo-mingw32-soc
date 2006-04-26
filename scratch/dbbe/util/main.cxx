@@ -153,29 +153,9 @@ void testSubLayerLen()
 
 SAL_IMPLEMENT_MAIN_WITH_ARGS(argc, argv)
 {
-    testSubLayerLen();
-    exit(0);
+//    testSubLayerLen();
+//    exit(0);
     
-
-#if 0
-    configmgr::dbbe::Record aRecord;
-    char onesub[]= "0123456789";
-    std::cerr << "strlen reports " << strlen(onesub) << std::endl;
-    onesub[3]= 0;
-    aRecord.pSubLayers= onesub;
-    aRecord.numSubLayers= 2;
-    aRecord.touch();
-    char blob[]= "foo bar baz";
-    aRecord.pBlob= blob;
-    aRecord.blobSize= strlen(blob) + 1;
-    std::cerr << "sublayerlenght = " << aRecord.SubLayerLen() << std::endl;
-    std::cerr << "sizeof(Record) = " << sizeof(configmgr::dbbe::Record) << std::endl;
-    std::cerr << "strlen(blob) + 1 = " << strlen(blob) + 1 << std::endl;
-    size_t size=0;
-    configmgr::dbbe::Record* pRecord= aRecord.Marshal(size);
-    std::cerr << "marshalled size is " << size << std::endl;
-    exit(0);
-#endif
 
     const char* summary= "[options] mode mode-options";
     const char* footer=  
@@ -197,31 +177,31 @@ SAL_IMPLEMENT_MAIN_WITH_ARGS(argc, argv)
     static arg args[]=
         {
             {
-                argName:     "help",
-                shortName:   'h',
-                optional:    true,
-                hasValue:    false,
-                flagStore:   &helpFlag,
-                valueStore:  NULL,
-                usageString: "this help"
+                "help",
+                'h',
+                true,
+                false,
+                &helpFlag,
+                NULL,
+                "this help"
             },
             {
-                argName:     "database",
-                shortName:   'd',
-                optional:    false,
-                hasValue:    true,
-                flagStore:   &dbFlag,
-                valueStore:  &db_path,
-                usageString: "Path to the database to operate on"
+                "database",
+                'd',
+                false,
+                true,
+                &dbFlag,
+                &db_path,
+                "Path to the database to operate on"
             },
             {
-                argName:     "code",
-                shortName:   'c',
-                optional:    true,
-                hasValue:    true,
-                flagStore:   &codeFlag,
-                valueStore:  &code,
-                usageString: "conversion code to use for path"
+                "code",
+                'c',
+                true,
+                true,
+                &codeFlag,
+                &code,
+                "conversion code to use for path"
             },
             {0, 0, 0, 0, 0, 0}
         };
