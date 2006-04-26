@@ -235,7 +235,7 @@ namespace configmgr
                                     const rtl::OString &aSubLayer);
        
         
-    } //namespace dbbe 
+    }; //namespace dbbe 
 }; //namespace configmgr
 
 #endif//CONFIMGR_DBBE_BASESTRATUM_HXX_
