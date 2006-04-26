@@ -42,11 +42,6 @@
 #include "minor.hxx"
 #include "major.hxx"
 
-//I use getopt parsing here, which is a POSIX thing
-//This is probably bad, but I just can't help myself
-#include <getopt.h> 
-
-
 #include "argparse.hxx"
 
 /**
