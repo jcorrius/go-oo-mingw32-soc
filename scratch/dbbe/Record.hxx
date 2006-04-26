@@ -159,11 +159,11 @@ namespace configmgr { namespace dbbe {
 
         static Record* Record::getFromDbt(const Dbt &aDbt);
         
-        //temp
-                size_t SubLayerLen(void) const;
+        //temp  Make private
+        size_t SubLayerLen(void) const;
+        size_t getSize(void) const;
 
     private:
-//        size_t SubLayerLen(void) const;
         bool isMarshaled(void) const;
     };
 #pragma pack(pop)    

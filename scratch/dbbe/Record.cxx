@@ -73,22 +73,27 @@ namespace configmgr
         
         size_t Record::SubLayerLen(void) const
         {
-            OSL_ASSERT(pSubLayers);
-            sal_Char *p= pSubLayers;
-            size_t ret= 0;
-            int subs= 0;
-            while (subs < numSubLayers)
+            if (numSubLayers)
             {
-                if (*p == 0)
+                OSL_ASSERT(pSubLayers);
+                sal_Char *p= pSubLayers;
+                size_t ret= 0;
+                int subs= 0;
+                while (subs < numSubLayers)
                 {
-                    subs++;
+                    if (*p == 0)
+                    {
+                        subs++;
+                    }
+                    p++;
+                    ret++;
                 }
-                p++;
-                ret++;
+                return ret;
             }
-            return ret;
+            OSL_ASSERT(!numSubLayers);
+            return 0;
         }
-        
+
         void Record::unMarshal()
         {
             pSubLayers= (sal_Char*)(this) + sizeof(Record);

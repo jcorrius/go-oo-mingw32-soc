@@ -49,6 +49,9 @@
 
 #include "argparse.hxx"
 
+#include <rtl/alloc.h>
+#include <rtl/memory.h>
+
 
 #include <assert.h> //fixme
 
@@ -126,6 +129,13 @@ void testSubLayerLen()
 {
     using namespace configmgr::dbbe;
     using namespace std;
+    
+    cerr << "testing the empty sublayer case" << endl;
+    {
+        Record aRecord;
+        cerr << "\tSubLayerLen() reports " << aRecord.SubLayerLen() << endl;
+    }
+    cerr << endl;
 
     cerr << "testing a single string sublayerlen" << endl;
     {
@@ -137,6 +147,7 @@ void testSubLayerLen()
         assert(aRecord.pSubLayers);
         randomString(aRecord.pSubLayers, len);
         cerr << "\tSubLayerLen() reports " << aRecord.SubLayerLen() << endl;
+        free(aRecord.pSubLayers);
     }
     cerr << endl;
     cerr << "testing multiple string sublayerlen" << endl;
@@ -151,15 +162,196 @@ void testSubLayerLen()
         cerr << "\tnumber of sublayers is " << aRecord.numSubLayers << endl;
         aRecord.pSubLayers[len/2]= 0;
         cerr << "\tSubLayerLen() reports " << aRecord.SubLayerLen() << endl;
-    }
-    
+        free(aRecord.pSubLayers);
+    }    
 }
+
+bool RecordMatch(configmgr::dbbe::Record *p1,
+                 configmgr::dbbe::Record *p2)
+{
+    OSL_ASSERT(p1);
+    OSL_ASSERT(p2);
+    if (p1->date != p2->date)
+        return false;
+    if (p1->blobSize != p2->blobSize)
+        return false;
+    if (p1->numSubLayers != p2->numSubLayers)
+        return false;
+    if (p1->pBlob && p2->pBlob)
+        if (memcmp(p1->pBlob, p2->pBlob, p1->blobSize))
+            return false;
+    if (p1->pSubLayers && p2->pSubLayers)
+        if (memcmp(p1->pSubLayers, p2->pSubLayers, p1->SubLayerLen()))
+            return false;
+    return true;
+}
+
+void testMarshal()
+{
+    using namespace configmgr::dbbe;
+    using namespace std;
+    
+    cerr << "testing the trivial Record" << endl;
+    {
+        Record aRecord;
+        aRecord.touch();
+        size_t size;
+        Record* pRecord= aRecord.Marshal(size);
+        cerr << "\tsizeof(Record) is " << sizeof(Record) << endl;
+        cerr << "\tmarshalled size is " << size << endl;
+        if (!memcmp(&aRecord, pRecord, sizeof(Record)))            
+        {
+            cerr << "\tthe contents match" << endl;
+        }
+        else
+        {
+            cerr << "\tthe contents do not match!" << endl;
+        }
+        rtl_freeMemory(pRecord);
+    }
+    cerr << endl;
+    
+    cerr << "testing a record with no sublayers" << endl;
+    {
+        Record aRecord;
+        aRecord.touch();
+        aRecord.blobSize= gimmeRand(400*1024);
+        aRecord.pBlob= (char*)malloc(aRecord.blobSize);
+        assert(aRecord.pBlob);
+        cerr << "\tusing a blob size of " << aRecord.blobSize << endl;
+        cerr << "\tthat makes a total size of " << sizeof(Record) + aRecord.blobSize << endl;
+        randomString(aRecord.pBlob, aRecord.blobSize, false);
+        size_t size;
+        Record* pRecord= aRecord.Marshal(size);
+        cerr << "\tmarshalled size is " << size << endl;
+        if (RecordMatch(&aRecord, pRecord))
+        {
+            cerr << "\tThe Records match" << endl;
+        }
+        else
+        {
+            cerr << "\tThe Records do not match!" << endl;
+        }
+        if (!memcmp(aRecord.pBlob, pRecord+sizeof(Record), aRecord.blobSize))
+        {
+            cerr << "\tthe blobs match" << endl;
+        }
+        else
+        {
+            cerr << "\tthe blobs do not match!" << endl;
+        }
+
+        rtl_freeMemory(pRecord);                
+    }
+    cerr << endl;
+
+    cerr << "testing a Record with sublayers but no blob" << endl;
+    {
+        Record aRecord;
+        aRecord.touch();
+        size_t len= gimmeRand(100);
+        cerr << "\tstring length is "<< len << endl;
+        aRecord.pSubLayers= (char*)malloc(len);
+        assert(aRecord.pSubLayers);
+        randomString(aRecord.pSubLayers, len);
+        aRecord.numSubLayers= 2;
+        cerr << "\tnumber of sublayers is " << aRecord.numSubLayers << endl;
+        aRecord.pSubLayers[len/2]= 0;
+        cerr << "\tThe total size is then " << sizeof(Record)+aRecord.SubLayerLen() << endl;
+        
+        size_t size= 0;
+        Record* pRecord= aRecord.Marshal(size);
+        cerr << "\tMarshal reports the size as " << size << endl;
+        if (RecordMatch(&aRecord, pRecord))
+        {
+            cerr << "\tThe Records match" << endl;
+        }
+        else
+        {
+            cerr << "\tThe Records do not match!" << endl;
+        }
+        if (!memcmp(aRecord.pSubLayers, pRecord+sizeof(Record), aRecord.SubLayerLen()))
+        {
+            cerr << "\tthe sublayers match" << endl;
+        }
+        else
+        {
+            cerr << "\tthe sublayers do not match!" << endl;
+        }
+        
+        free(aRecord.pSubLayers);
+        free(pRecord);
+    }
+    cerr << endl;
+
+    cerr << "testing a Record with sublayers and a blob" << endl;
+    {
+        Record aRecord;
+        aRecord.touch();
+        size_t len= gimmeRand(100);
+        cerr << "\tstring length is "<< len << endl;
+        aRecord.pSubLayers= (char*)malloc(len);
+        assert(aRecord.pSubLayers);
+        randomString(aRecord.pSubLayers, len);
+        aRecord.numSubLayers= 2;
+        cerr << "\tnumber of sublayers is " << aRecord.numSubLayers << endl;
+        aRecord.pSubLayers[len/2]= 0;
+        aRecord.blobSize= gimmeRand(400*1024);
+        aRecord.pBlob= (char*)malloc(aRecord.blobSize);
+        assert(aRecord.pBlob);
+        cerr << "\tusing a blob size of " << aRecord.blobSize << endl;
+        randomString(aRecord.pBlob, aRecord.blobSize, false);
+        cerr << "\tthe total size is then " << sizeof(Record) + aRecord.SubLayerLen() + aRecord.blobSize << endl;
+        size_t size;
+        Record *pRecord= aRecord.Marshal(size);
+        cerr << "\tMarshal reports the size as " << size << endl;
+        if (RecordMatch(&aRecord, pRecord))
+        {
+            cerr << "\tThe Records match" << endl;
+        }
+        else
+        {
+            cerr << "\tThe Records do not match!" << endl;
+        }
+        if (!memcmp(aRecord.pSubLayers, pRecord+sizeof(Record), aRecord.SubLayerLen()))
+        {
+            cerr << "\tthe sublayers match" << endl;
+        }
+        else
+        {
+            cerr << "\tthe sublayers do not match!" << endl;
+        }
+        if (!memcmp(aRecord.pBlob, pRecord+sizeof(Record)+aRecord.SubLayerLen(), aRecord.SubLayerLen()))
+        {
+            cerr << "\tthe blobs match" << endl;
+        }
+        else
+        {
+            cerr << "\tthe blobs do not match!" << endl;
+        }
+        pRecord->unMarshal();
+        if (RecordMatch(&aRecord, pRecord))
+            cerr << "\tthe unmarshalled records match" << endl;
+        else
+            cerr << "\tthe unmasrhalled records do not match!" << endl;
+      
+        
+        
+        free(aRecord.pSubLayers);
+        free(aRecord.pBlob);
+        free(pRecord);
+    }
+}
+
+
+
 //end temp debugging stuff
 
 SAL_IMPLEMENT_MAIN_WITH_ARGS(argc, argv)
 {
-//    testSubLayerLen();
-//    exit(0);
+    //testSubLayerLen(); //passed
+    testMarshal(); //passed
+    exit(0);
     
 
     const char* summary= "[options] mode mode-options";
