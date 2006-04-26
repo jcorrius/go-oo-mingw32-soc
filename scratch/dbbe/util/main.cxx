@@ -44,6 +44,11 @@
 
 #include "argparse.hxx"
 
+
+#include <assert.h> //fixme
+
+const char* errpfx="BerkeleyDB error";
+
 /**
    Major Usages we will support
    
@@ -57,11 +62,6 @@
  */
 
 
-void DbErrorCallback(const DbEnv *dbenv, const char *errpfx, const char *msg)
-{
-    std::cerr << "berkelyDb error" << msg << std::endl; 
-}
-
 Db* openDatabase(const char* path, const bool open_ro, const bool create= false)
 {
     OSL_ASSERT(path);
@@ -71,7 +71,8 @@ Db* openDatabase(const char* path, const bool open_ro, const bool create= false)
     Db* aDatabase= new Db(NULL, db_flags);
 
     OSL_ASSERT(aDatabase);
-    aDatabase->set_errcall(DbErrorCallback);
+    aDatabase->set_errpfx(errpfx);
+    aDatabase->set_error_stream(&(std::cerr));
     if (open_ro)
     {
         open_flags |= DB_RDONLY;
@@ -95,12 +96,68 @@ Db* openDatabase(const char* path, const bool open_ro, const bool create= false)
 
 }
 
-//FIXME: make this work
+//begin temp debugging stuff
+int gimmeRand(int to, int from= 0)
+{
+    double fTo= to;
+    double fFrom= from;
+    return from + (int) (fTo * (rand() / (RAND_MAX + fFrom)));
+}
 
+void randomString(char* string, size_t len, bool nullTerm=true)
+{
+    OSL_ASSERT(string);
+    for (int i= 0; i < len; i++)
+    {
+        string[i]= rand() % (26) + 'a';
+    }
+    if (nullTerm)
+    {
+        string[len - 1]= 0;
+    }
+}
+
+void testSubLayerLen()
+{
+    using namespace configmgr::dbbe;
+    using namespace std;
+
+    cerr << "testing a single string sublayerlen" << endl;
+    {
+        Record aRecord;
+        size_t len= gimmeRand(100);
+        cerr << "\tstring length is "<< len << endl;
+        aRecord.numSubLayers= 1;        
+        aRecord.pSubLayers= (char*)malloc(len);
+        assert(aRecord.pSubLayers);
+        randomString(aRecord.pSubLayers, len);
+        cerr << "\tSubLayerLen() reports " << aRecord.SubLayerLen() << endl;
+    }
+    cerr << endl;
+    cerr << "testing multiple string sublayerlen" << endl;
+    {
+        Record aRecord;
+        size_t len= gimmeRand(100);
+        cerr << "\tstring length is "<< len << endl;
+        aRecord.pSubLayers= (char*)malloc(len);
+        assert(aRecord.pSubLayers);
+        randomString(aRecord.pSubLayers, len);
+        aRecord.numSubLayers= 2;
+        cerr << "\tnumber of sublayers is " << aRecord.numSubLayers << endl;
+        aRecord.pSubLayers[len/2]= 0;
+        cerr << "\tSubLayerLen() reports " << aRecord.SubLayerLen() << endl;
+    }
+    
+}
+//end temp debugging stuff
 
 SAL_IMPLEMENT_MAIN_WITH_ARGS(argc, argv)
 {
+    testSubLayerLen();
+    exit(0);
+    
 
+#if 0
     configmgr::dbbe::Record aRecord;
     char onesub[]= "0123456789";
     std::cerr << "strlen reports " << strlen(onesub) << std::endl;
@@ -118,7 +175,7 @@ SAL_IMPLEMENT_MAIN_WITH_ARGS(argc, argv)
     configmgr::dbbe::Record* pRecord= aRecord.Marshal(size);
     std::cerr << "marshalled size is " << size << std::endl;
     exit(0);
-
+#endif
 
     const char* summary= "[options] mode mode-options";
     const char* footer=  
