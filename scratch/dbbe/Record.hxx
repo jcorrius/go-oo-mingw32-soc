@@ -47,7 +47,11 @@
 #include <rtl/ustring.hxx>
 #endif//_RTL_USTRING_HXX_
 
+#ifdef SYSTEM_DB
 #include <db_cxx.h>
+#else
+#include <berkeleydb/db_cxx.h>
+#endif
 
 #include <vector>
 
@@ -155,8 +159,11 @@ namespace configmgr { namespace dbbe {
 
         static Record* Record::getFromDbt(const Dbt &aDbt);
         
+        //temp
+                size_t SubLayerLen(void) const;
+
     private:
-        size_t SubLayerLen(void) const;
+//        size_t SubLayerLen(void) const;
         bool isMarshaled(void) const;
     };
 #pragma pack(pop)    

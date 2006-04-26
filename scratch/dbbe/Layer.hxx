@@ -35,7 +35,11 @@
 #ifndef CONFIMGR_DBBE_LAYER_HXX_
 #define CONFIMGR_DBBE_LAYER_HXX_
 
+#ifdef SYSTEM_DB
 #include <db_cxx.h>
+#else
+#include <berkeleydb/db_cxx.h>
+#endif
 
 #include <Record.hxx>
 

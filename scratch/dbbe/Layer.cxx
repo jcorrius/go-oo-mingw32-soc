@@ -152,25 +152,19 @@ void BaseLayer::readData(backend::XLayer * pContext,
 
         throw  lang::NullPointerException(sMessage,pContext);
     }
-    
-    Dbt data;
-    Dbt key((void*)aKey.getStr(), aKey.getLength());
+//static sal_Int32 getRecord(Db& aDatabase, const rtl::OString &key, Record &aResult);        
     
     int ret;
-    ret= aDb.get(NULL, &key, &data, 0); 
+    Record aRecord;
+    ret= Record::getRecord(aDb, aKey, aRecord);
+
     switch(ret)
     {
         using namespace comphelper;
         
         case 0: //found
         {
-            Record* pRecord= static_cast<Record*>(data.get_data());
-            pRecord->unMarshal();
-            int swap= 0; //dummy value to keep compiler from complaining
-            OSL_ASSERT(!aDb.get_byteswapped(&swap));
-            if (swap)
-                pRecord->bytesex();
-            ByteSequence BS((const sal_Int8*)pRecord->pBlob, pRecord->blobSize);
+            ByteSequence BS((const sal_Int8*)aRecord.pBlob, aRecord.blobSize);
             uno::Reference<io::XActiveDataSink> xAS(mLayerReader, uno::UNO_QUERY_THROW);
             uno::Reference<io::XInputStream> xStream(new SequenceInputStream(BS));
             xAS->setInputStream(xStream);

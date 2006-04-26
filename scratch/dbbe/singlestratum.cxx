@@ -37,7 +37,11 @@
 
 #include "Layer.hxx"
 
+#ifdef SYSTEM_DB
 #include <db_cxx.h>
+#else
+#include <berkeleydb/db_cxx.h>
+#endif
 
 #ifndef CONFIGMGR_API_FACTORY_HXX_
 #include "confapifactory.hxx"

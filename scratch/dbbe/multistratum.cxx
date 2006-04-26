@@ -59,7 +59,11 @@
 #include <com/sun/star/configuration/backend/InsufficientAccessRightsException.hpp>
 #endif
 
+#ifdef SYSTEM_DB
 #include <db_cxx.h>
+#else
+#include <berkeleydb/db_cxx.h>
+#endif
 
 #include "Record.hxx"
 

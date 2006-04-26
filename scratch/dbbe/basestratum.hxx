@@ -76,7 +76,11 @@
 #include <rtl/strbuf.hxx>
 #endif
 
+#ifdef SYSTEM_DB
 #include <db_cxx.h>
+#else
+#include <berkeleydb/db_cxx.h>
+#endif
 
 #include "factory.hxx"
 

@@ -60,232 +60,246 @@
 #include <osl/time.h>
 #endif//_OSL_TIME_H_ 
 
-namespace configmgr { namespace dbbe {
-
-    Record::Record(void)    
+namespace configmgr 
+{ 
+    namespace dbbe 
     {
-        //please forgive my crusty c-programmer ways
-        memset(this, 0, sizeof(Record));
-    }        
-    
-    size_t Record::SubLayerLen(void) const
-    {
-        size_t ret= 0;
-        if (numSubLayers)
+        
+        Record::Record(void)    
         {
-            sal_Char *p= pSubLayers;
-            OSL_ASSERT(p);
-            for (int i= 0; i < numSubLayers; i++)
+            //please forgive my crusty c-programmer ways
+            memset(this, 0, sizeof(Record));
+        }        
+        
+        size_t Record::SubLayerLen(void) const
+        {
+            size_t ret= 0;
+            if (numSubLayers)
             {
-                size_t len= strlen(p) + 1; //to include the NULL
-                ret+= len;
-                p+= len + 1; //to push us into the next string
+                sal_Char *p= pSubLayers;
+                OSL_ASSERT(p);
+                for (int i= 0; i < numSubLayers; i++)
+                {
+                    size_t len= strlen(p) + 1; //to include the NULL
+                    ret+= len;
+                    p+= len + 1; //to push us into the next string
+                }
+            }
+            return ret + 1;
+        }
+        
+        void Record::unMarshal()
+        {
+            pSubLayers= (sal_Char*)(this) + sizeof(Record);
+            pBlob= (sal_Char*)(this) + sizeof(Record) + SubLayerLen();
+        }
+        
+        //this guy has problems???
+        Record* Record::Marshal(size_t &size) const
+        {
+            Record* pRecord;
+            
+            size= sizeof(Record) + SubLayerLen() + blobSize;
+            pRecord= (Record*)(rtl_allocateMemory(size));
+            OSL_ASSERT(pRecord);
+            rtl_copyMemory(pRecord, this, sizeof(Record));
+            if (numSubLayers)
+            {
+                rtl_copyMemory(pRecord + sizeof(Record), pSubLayers, SubLayerLen());
+            }
+            if (pBlob)
+            {
+                rtl_copyMemory(pRecord + sizeof(Record) + SubLayerLen(), pBlob, blobSize);
+            }
+            //set pointers to NULL to serve as a warning to others
+            pRecord->pBlob= NULL;
+            pRecord->pSubLayers= NULL;
+            return pRecord;
+        }
+        
+        void Record::bytesex(void)
+        {
+            //32-bit fields
+            OSL_SWAPDWORD(blobSize);
+            OSL_SWAPDWORD(numSubLayers);
+            //64-bit fields
+            OSL_SWAPDWORD(date);        
+        }
+        
+        std::vector<sal_Char*> Record::listSubLayers(void) const
+        {
+            std::vector<sal_Char*> ret(numSubLayers);
+            
+            sal_uInt32 i= numSubLayers;
+            sal_Char* pString= pSubLayers;
+            while (i)
+            {
+                ret.push_back(pString);
+                while (*pString)
+                    pString++;
+                pString++; //kick us into the next string
+                i--;
+            }        
+            return ret;
+        }
+        
+//I think this has some sort of problem, I think
+        void Record::setSubLayers(std::vector<sal_Char*>& aSubLayers)
+        {
+            std::vector<sal_Char*>::iterator it;
+            size_t len= 0;
+            for (it= aSubLayers.begin(); it != aSubLayers.end(); it++)
+            {
+                OSL_ASSERT(*it);
+//            std::cerr << "it=" << *it << std::endl;
+                len+= strlen(*it) + 1; //one for the null
+            }
+            
+            //if this is a serialized copy, then don't try to free the memory, just overwrite it
+            if (pSubLayers && 
+                (pSubLayers != (sal_Char*)(this) + sizeof(Record)))
+                rtl_freeMemory(pSubLayers);
+            pSubLayers= static_cast<sal_Char*>(rtl_allocateMemory(len));
+            OSL_ASSERT(pSubLayers);
+            sal_Char* pString= pSubLayers;
+            for (it= aSubLayers.begin(); it != aSubLayers.end(); it++)
+            {
+                size_t len= strlen(*it);
+                rtl_copyMemory(pString, *it, len);
+                pString+= len + 1;
+                *pString= 0;
+                pString++;
             }
         }
-        return ret;
-    }
-
-    void Record::unMarshal()
-    {
-        pSubLayers= (sal_Char*)(this) + sizeof(Record);
-        pBlob= (sal_Char*)(this) + sizeof(Record) + SubLayerLen();
-    }
-    
-    Record* Record::Marshal(size_t &size) const
-    {
-        Record* pRecord;
-                
-        size= sizeof(Record) + SubLayerLen() + blobSize;
-        pRecord= (Record*)(rtl_allocateMemory(size));
-        OSL_ASSERT(pRecord);
-        rtl_copyMemory(pRecord, this, sizeof(Record));
-        rtl_copyMemory(pRecord + sizeof(Record), pSubLayers, SubLayerLen());
-        rtl_copyMemory(pRecord + sizeof(Record) + SubLayerLen(), pBlob, blobSize);
-        //set pointers to NULL to serve as a warning to others
-        pRecord->pBlob= NULL;
-        pRecord->pSubLayers= NULL;
-        return pRecord;
-    }
-    
-    void Record::bytesex(void)
-    {
-        //32-bit fields
-        OSL_SWAPDWORD(blobSize);
-        OSL_SWAPDWORD(numSubLayers);
-        //64-bit fields
-        OSL_SWAPDWORD(date);        
-    }
-
-    std::vector<sal_Char*> Record::listSubLayers(void) const
-    {
-        std::vector<sal_Char*> ret(numSubLayers);
         
-        sal_uInt32 i= numSubLayers;
-        sal_Char* pString= pSubLayers;
-        while (i)
+        void Record::setBlobFromFile(const rtl::OUString &aFileURL)
         {
-            ret.push_back(pString);
-            while (*pString)
-                pString++;
-            pString++; //kick us into the next string
-            i--;
-        }        
-        return ret;
-    }
-
-    void Record::setSubLayers(std::vector<sal_Char*>& aSubLayers)
-    {
-        std::vector<sal_Char*>::iterator it;
-        size_t len= 0;
-        for (it= aSubLayers.begin(); it != aSubLayers.end(); it++)
-        {
-            OSL_ASSERT(*it);
-//            std::cerr << "it=" << *it << std::endl;
-            len+= strlen(*it) + 1; //one for the null
+            using namespace osl;
+            
+            OSL_ASSERT(aFileURL.getLength()); //empty file URLs not allowed
+            
+            std::cerr << "getting blob from '" << 
+                rtl::OUStringToOString(aFileURL, RTL_TEXTENCODING_UTF8).getStr()
+                      << "\n";
+            
+            //get the date and type
+            DirectoryItem aItem;
+            OSL_VERIFY(DirectoryItem::get(aFileURL, aItem) == DirectoryItem::E_None);
+            FileStatus aFileStatus(FileStatusMask_ModifyTime || FileStatusMask_Type);
+            OSL_VERIFY(aItem.getFileStatus(aFileStatus) == DirectoryItem::E_None);
+            OSL_VERIFY(aFileStatus.getFileType() == FileStatus::Regular);
+            OSL_VERIFY(aFileStatus.isValid(FileStatusMask_ModifyTime));
+            TimeValue aTimeValue= aFileStatus.getModifyTime();
+            date= aTimeValue.Seconds;
+            
+            //get the data and time
+            File aFile(aFileURL);
+            OSL_VERIFY(aFile.open(OpenFlag_Read) == File::E_None);
+            sal_uInt64 aBlobSize= 0;
+            OSL_VERIFY(aFile.getSize(aBlobSize) == File::E_None);
+            blobSize= static_cast<sal_uInt32>(aBlobSize);
+            std::cerr << "before\n";
+            pBlob= static_cast<sal_Char*>(rtl_allocateMemory(blobSize));
+            std::cerr << "after\n";
+            OSL_ASSERT(pBlob);
+            sal_uInt64 aBytesRead= 0;
+            sal_uInt64 aBytesRequested= blobSize;
+            while (aBytesRequested)
+            {
+                OSL_VERIFY(aFile.read(static_cast<void*>(pBlob + (size_t)(blobSize - aBytesRequested)), 
+                                      aBytesRequested, aBytesRead) == File::E_None);
+                aBytesRequested= blobSize - aBytesRead;
+            }
+            
         }
         
-        //if this is a serialized copy, then don't try to free the memory, just overwrite it
-        if (pSubLayers && 
-            (pSubLayers != (sal_Char*)(this) + sizeof(Record)))
-            rtl_freeMemory(pSubLayers);
-        pSubLayers= static_cast<sal_Char*>(rtl_allocateMemory(len));
-        OSL_ASSERT(pSubLayers);
-        sal_Char* pString= pSubLayers;
-        for (it= aSubLayers.begin(); it != aSubLayers.end(); it++)
+        void Record::setFileFromBlob(const rtl::OUString &aFileURL)
         {
-            size_t len= strlen(*it);
-            rtl_copyMemory(pString, *it, len);
-            pString+= len + 1;
-            *pString= 0;
-            pString++;
+            OSL_VERIFY(aFileURL.getLength());
+            osl::File aFile(aFileURL);
+            TimeValue aTimeValue= {static_cast<sal_uInt32>(date), 0};
+            OSL_VERIFY(osl::File::setTime(aFileURL, aTimeValue, aTimeValue, aTimeValue) == osl::File::E_None);
+            sal_uInt64 bytesLeft= 0;
+            OSL_VERIFY(aFile.write(static_cast<void*>(pBlob), blobSize, bytesLeft) == osl::File::E_None);
+            OSL_VERIFY(!bytesLeft);
+            OSL_VERIFY(aFile.sync() == osl::FileBase::E_None);
         }
-    }
-
-    void Record::setBlobFromFile(const rtl::OUString &aFileURL)
-    {
-        using namespace osl;
-
-        OSL_ASSERT(aFileURL.getLength()); //empty file URLs not allowed
         
-        std::cerr << "getting blob from '" << 
-            rtl::OUStringToOString(aFileURL, RTL_TEXTENCODING_UTF8).getStr()
-                  << "\n";
-
-        //get the date and type
-        DirectoryItem aItem;
-        OSL_VERIFY(DirectoryItem::get(aFileURL, aItem) == DirectoryItem::E_None);
-        FileStatus aFileStatus(FileStatusMask_ModifyTime || FileStatusMask_Type);
-        OSL_VERIFY(aItem.getFileStatus(aFileStatus) == DirectoryItem::E_None);
-        OSL_VERIFY(aFileStatus.getFileType() == FileStatus::Regular);
-        OSL_VERIFY(aFileStatus.isValid(FileStatusMask_ModifyTime));
-        TimeValue aTimeValue= aFileStatus.getModifyTime();
-        date= aTimeValue.Seconds;
+        void Record::touch(void)
+        {
+            TimeValue timeval= {0, 0};
+            osl_getSystemTime(&timeval);
+            date= timeval.Seconds;
+        }
         
-        //get the data and time
-        File aFile(aFileURL);
-        OSL_VERIFY(aFile.open(OpenFlag_Read) == File::E_None);
-        sal_uInt64 aBlobSize= 0;
-        OSL_VERIFY(aFile.getSize(aBlobSize) == File::E_None);
-        blobSize= static_cast<sal_uInt32>(aBlobSize);
-        std::cerr << "before\n";
-        pBlob= static_cast<sal_Char*>(rtl_allocateMemory(blobSize));
-        std::cerr << "after\n";
-        OSL_ASSERT(pBlob);
-        sal_uInt64 aBytesToRead= blobSize;
-        while (aBytesToRead)
-            OSL_VERIFY(aFile.read(static_cast<void*>(pBlob + (size_t)(blobSize - aBytesToRead)), 
-                                  aBytesToRead, aBytesToRead) == File::E_None);
-
-    }
-
-    void Record::setFileFromBlob(const rtl::OUString &aFileURL)
-    {
-        OSL_VERIFY(aFileURL.getLength());
-        osl::File aFile(aFileURL);
-        TimeValue aTimeValue= {static_cast<sal_uInt32>(date), 0};
-        OSL_VERIFY(osl::File::setTime(aFileURL, aTimeValue, aTimeValue, aTimeValue) == osl::File::E_None);
-        sal_uInt64 bytesLeft= 0;
-        OSL_VERIFY(aFile.write(static_cast<void*>(pBlob), blobSize, bytesLeft) == osl::File::E_None);
-        OSL_VERIFY(!bytesLeft);
-        OSL_VERIFY(aFile.sync() == osl::FileBase::E_None);
-    }
-
-    void Record::touch(void)
-    {
-        TimeValue timeval= {0, 0};
-        osl_getSystemTime(&timeval);
-        date= timeval.Seconds;
-    }
-
-    Dbt Record::getDbt(void) const
-    {
-        OSL_VERIFY(isMarshaled());
-        return Dbt((void*)this,
-                   sizeof(Record) + SubLayerLen() + blobSize);
-    }
-
-    /**
-       a simple, and not very thorough check to see if this is a marshaled Record
-     */
-    bool Record::isMarshaled(void) const 
-    {
-        if (pSubLayers == NULL && pBlob == NULL)
-            return true;
-        return false;
-    }
-
-    Record* Record::getFromDbt(const Dbt &aDbt)
-    {
-        return static_cast<Record*>(aDbt.get_data());
-    }
-    
-    sal_Bool Record::putRecord(Db& aDatabase, rtl::OString key) const
-    {
-        return putRecord(aDatabase, key.getStr());
-    }
-
-    sal_Bool Record::putRecord(Db& aDatabase, const char* key) const
-    {
-           size_t dataSize= 0;
-           Record* pRecord= Marshal(dataSize);
-           if (!pRecord)
-               return sal_False;
-           int swap= 0;
-           OSL_VERIFY(!aDatabase.get_byteswapped(&swap));
-           if (swap)
-               pRecord->bytesex();
-           Dbt Key((void*)key, strlen(key) + 1);
-           Dbt Data((void*)(pRecord), dataSize);
-           if (aDatabase.put(NULL, &Key, &Data, 0))
-               return sal_False;
-           rtl_freeMemory(pRecord);
-           return sal_True;
-    }
-
-    sal_Int32 Record::getRecord(Db& aDatabase, const rtl::OString &key, Record &aResult)
-    {
-        return getRecord(aDatabase, key.getStr(), aResult);
-    }
-
-    sal_Int32 Record::getRecord(Db& aDatabase, const char* key, Record &aResult)
-    {
-        OSL_VERIFY(key);
-        Dbt Key((void*)key, strlen(key) + 1);
-        Dbt Data;
-        sal_Int32 ret= aDatabase.get(NULL, &Key, &Data, 0);
-        if (!ret)
-        {// found
-            OSL_VERIFY(Data.get_data());
-            aResult= *(static_cast<Record*>(Data.get_data()));
+        Dbt Record::getDbt(void) const
+        {
+            OSL_VERIFY(isMarshaled());
+            return Dbt((void*)this,
+                       sizeof(Record) + SubLayerLen() + blobSize);
+        }
+        
+        /**
+           a simple, and not very thorough check to see if this is a marshaled Record
+        */
+        bool Record::isMarshaled(void) const 
+        {
+            if (pSubLayers == NULL && pBlob == NULL)
+                return true;
+            return false;
+        }
+        
+        Record* Record::getFromDbt(const Dbt &aDbt)
+        {
+            return static_cast<Record*>(aDbt.get_data());
+        }
+        
+        sal_Bool Record::putRecord(Db& aDatabase, rtl::OString key) const
+        {
+            return putRecord(aDatabase, key.getStr());
+        }
+        
+        sal_Bool Record::putRecord(Db& aDatabase, const char* key) const
+        {
+            size_t dataSize= 0;
+            Record* pRecord= Marshal(dataSize);
+            if (!pRecord)
+                return sal_False;
             int swap= 0;
             OSL_VERIFY(!aDatabase.get_byteswapped(&swap));
             if (swap)
-                aResult.bytesex();
-            aResult.unMarshal();
+                pRecord->bytesex();
+            Dbt Key((void*)key, strlen(key) + 1);
+            Dbt Data((void*)(pRecord), dataSize);
+            if (aDatabase.put(NULL, &Key, &Data, 0))
+                return sal_False;
+            rtl_freeMemory(pRecord);
+            return sal_True;
         }
-        return ret;
+        
+        sal_Int32 Record::getRecord(Db& aDatabase, const rtl::OString &key, Record &aResult)
+        {
+            return getRecord(aDatabase, key.getStr(), aResult);
+        }
+        
+        sal_Int32 Record::getRecord(Db& aDatabase, const char* key, Record &aResult)
+        {
+            OSL_VERIFY(key);
+            Dbt Key((void*)key, strlen(key) + 1);
+            Dbt Data;
+            sal_Int32 ret= aDatabase.get(NULL, &Key, &Data, 0);
+            if (!ret)
+            {// found
+                OSL_VERIFY(Data.get_data());
+                aResult= *(static_cast<Record*>(Data.get_data()));
+                int swap= 0;
+                OSL_VERIFY(!aDatabase.get_byteswapped(&swap));
+                if (swap)
+                    aResult.bytesex();
+                aResult.unMarshal();
+            }
+            return ret;
+        }
     }
+}; //namespace
 
-
-}}; //namespace
-    
