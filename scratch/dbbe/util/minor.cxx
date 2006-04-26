@@ -38,6 +38,8 @@
 
 #include <db_cxx.h>
 
+#include <strings.h>
+
 #include <iostream>
 #include <fstream>
 

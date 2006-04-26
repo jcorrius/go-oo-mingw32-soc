@@ -41,6 +41,8 @@
 
 #include <osl/diagnose.h>
 
+#include <strings.h>
+
 
 argParser::argParser(int Argc, char** Argv, arg* Args, const char* Usage):
     argc(Argc),
