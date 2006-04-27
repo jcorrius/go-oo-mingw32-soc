@@ -10,6 +10,9 @@ ENABLE_EXCEPTIONS=TRUE
 
 # --- Files --------------------------------------------------------
 
+SRS1NAME = scsolver
+SRC1FILES = scsolver.src
+
 SLOFILES =  \
         $(SLO)$/basedlg.obj \
         $(SLO)$/baselistener.obj \

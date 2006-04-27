@@ -27,6 +27,9 @@ SHL1STDLIBS= \
 	$(CPPULIB) \
 	$(SALLIB)
 
+RESLIB1NAME=scsolver
+RESLIB1SRSFILES= $(SRS)/scsolver.srs
+
 # --- Targets ------------------------------------------------------------
 
 .INCLUDE :	target.mk
