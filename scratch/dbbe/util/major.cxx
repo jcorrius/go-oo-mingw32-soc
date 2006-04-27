@@ -216,15 +216,10 @@ namespace configmgr
             
             //look for parents
             {
-                Dbt Data;
-                Dbt Key((void*)aMangler.getNamespaceKey().getStr(),
-                        aMangler.getNamespaceKey().getLength());
-                int ret= aDatabase.get(NULL, &Key, &Data, 0);
-                
-                int swap= 0;
+                Record* pRecord= NULL;
+                int ret= Record::getRecord(aDatabase, aMangler.getNamespaceKey(), &(pRecord));
                 switch (ret)
                 {
-                    
                     case DB_NOTFOUND:
                     {
                         Record aRecord;
@@ -238,13 +233,6 @@ namespace configmgr
                     
                     case 0:
                     { //found
-                        //FIXME: don't use marshal, etc
-                        Record* pRecord= Record::getFromDbt(Data);
-                        OSL_VERIFY(pRecord);
-                        pRecord->unMarshal();
-                        OSL_VERIFY(!aDatabase.get_byteswapped(&swap));
-                        if (swap)
-                            pRecord->bytesex(); 
                         std::vector<sal_Char*> sublayers= pRecord->listSubLayers();
                         std::vector<sal_Char*>::iterator it;
                         for (it= sublayers.begin();

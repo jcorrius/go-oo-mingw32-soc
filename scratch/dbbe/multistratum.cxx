@@ -98,21 +98,12 @@ namespace configmgr
             aBuf.append(rtl::OUStringToOString(aComponent, RTL_TEXTENCODING_UTF8));
             rtl::OString KeyString= aBuf.makeStringAndClear();
             Db& aDatabase= getDatabase();
-            Dbt Key(const_cast<void*>(static_cast<const void*>(KeyString.getStr())), //kludge!!
-                    KeyString.getLength());
-            Dbt Data;
-            int ret;
-            ret= aDatabase.get(NULL, &Key, &Data, 0);
+            Record* pRecord= NULL;
+            int ret= Record::getRecord(aDatabase, KeyString, &(pRecord));
             switch (ret)
             {
                 case 0: //success
                 {
-                    Record* pRecord= Record::getFromDbt(Data);
-                    pRecord->unMarshal();
-                    int swap= 0;  //dummy value to keep compiler from complaining
-                    OSL_ASSERT(!aDatabase.get_byteswapped(&swap));
-                    if (swap)
-                        pRecord->bytesex();
                     std::vector<sal_Char*> aStrings= pRecord->listSubLayers();
                     std::vector<sal_Char*>::iterator it;
                     

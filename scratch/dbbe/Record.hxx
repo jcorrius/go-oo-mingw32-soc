@@ -152,14 +152,15 @@ namespace configmgr
             /**
                Produce an record ready to be used from a database from a key
            
-               @param aDatabase      the database to look in
-               @param key            the key to look for
-               @param aResult[out]   the Record that will be generated if found
-               @returns              the return value that berkeleyDb returns
+               @param aDatabase       the database to look in
+               @param key             the key to look for
+               @param ppRecord[out]   the Record that will be generated if found
+               @returns               the return value that berkeleyDb returns
             */
-            static sal_Int32 getRecord(Db& aDatabase, const char* key, Record &aResult);
-            static sal_Int32 getRecord(Db& aDatabase, const rtl::OString &key, Record &aResult);        
+            static sal_Int32 getRecord(Db& aDatabase, const char* key, Record **ppRecord, sal_Bool partial=sal_True);
+            static sal_Int32 getRecord(Db& aDatabase, const rtl::OString &key, Record **ppRecord, sal_Bool partial=sal_True);
 
+            //this is so!! useless!!
             static Record* Record::getFromDbt(const Dbt &aDbt);
         
         protected:

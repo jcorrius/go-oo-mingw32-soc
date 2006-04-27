@@ -153,8 +153,8 @@ void BaseLayer::readData(backend::XLayer * pContext,
 //static sal_Int32 getRecord(Db& aDatabase, const rtl::OString &key, Record &aResult);        
     
     int ret;
-    Record aRecord;
-    ret= Record::getRecord(aDb, aKey, aRecord);
+    Record* pRecord;
+    ret= Record::getRecord(aDb, aKey, &(pRecord));
 
     switch(ret)
     {
@@ -162,7 +162,7 @@ void BaseLayer::readData(backend::XLayer * pContext,
         
         case 0: //found
         {
-            ByteSequence BS((const sal_Int8*)aRecord.pBlob, aRecord.blobSize);
+            ByteSequence BS((const sal_Int8*)pRecord->pBlob, pRecord->blobSize);
             uno::Reference<io::XActiveDataSink> xAS(mLayerReader, uno::UNO_QUERY_THROW);
             uno::Reference<io::XInputStream> xStream(new SequenceInputStream(BS));
             xAS->setInputStream(xStream);
@@ -199,17 +199,9 @@ Db& BaseLayer::getDb(void) const
 
 rtl::OUString BaseLayer::getTimestamp(Db& aDatabase, rtl::OString aKey)
 {   
-    Dbt data;
-    Dbt key(const_cast<sal_Char*>(aKey.getStr()), aKey.getLength());
+    Record *pRecord= NULL;
+    int ret= Record::getRecord(aDatabase, aKey, &(pRecord), true);
     rtl::OUString retCode;
-
-    data.set_flags(DB_DBT_PARTIAL);
-    data.set_dlen(sizeof(Record));
-    data.set_doff(0);
-
-    int ret;
-    ret= aDatabase.get(NULL, &key, &data, 0); 
-
     if (!ret)
     {
         //
@@ -217,12 +209,6 @@ rtl::OUString BaseLayer::getTimestamp(Db& aDatabase, rtl::OString aKey)
         //  created.  We choose to concatinate 64-bit unix epoch time and 
         //  64bit blob size
         rtl::OUStringBuffer timestamp(50);
-        
-        Record* pRecord= Record::getFromDbt(data);
-        int swap= 0; //dummy value to keep compiler from complaining
-        OSL_ASSERT(!aDatabase.get_byteswapped(&swap));
-        if (swap)
-            pRecord->bytesex();
         timestamp.append(pRecord->date);
         timestamp.append(static_cast<sal_Int64>(pRecord->blobSize));
         retCode= timestamp.makeStringAndClear();
@@ -350,26 +336,14 @@ void SAL_CALL UpdatableLayer::replaceWith(
     Db& aDatabase= getDb();
     Record aRecord;
     TimeValue timeval;
-    size_t aSize;
 
     osl_getSystemTime(&timeval);
     aRecord.date= timeval.Seconds;
     aRecord.blobSize= BS.getLength();
     aRecord.pBlob= (sal_Char*)BS.getArray();
-    aRecord.numSubLayers= 0;
-    aRecord.pSubLayers= NULL;
-    Record* pRecord= aRecord.Marshal(aSize);
-    int swap= 0; //dummy value to keep compiler from complaining
-    OSL_ASSERT(!aDatabase.get_byteswapped(&swap));
-    if (swap)
-        pRecord->bytesex();
+    int ret= 0;
     rtl::OString KeyName= getKey();
-    Dbt Key(const_cast<void*>(static_cast<const void*>(KeyName.getStr())), //kludge! 
-            KeyName.getLength());
-    Dbt Data(pRecord, aSize);
-    int ret;
-    ret= aDatabase.put(NULL, &Key, &Data, 0);
-    if (!ret)
+    if (aRecord.putRecord(aDatabase, KeyName))
         ret= aDatabase.sync(0);
     if (ret)
     {
@@ -382,8 +356,6 @@ void SAL_CALL UpdatableLayer::replaceWith(
         //compiles, but will it work correctly?
         throw backend::BackendAccessException(sMsg.makeStringAndClear(), NULL, uno::Any());
     }
-    rtl_freeMemory(pRecord);
-
     // clear the output stream
     xStream.clear();
     xAS->setOutputStream(xStream);
@@ -603,27 +575,12 @@ void SAL_CALL UpdatableCompositeLayer::replaceWith(
  
     Db& aDatabase= getDb();
     Record aRecord;
-    TimeValue timeval;
-    size_t aSize;
-
-    osl_getSystemTime(&timeval);
-    aRecord.date= timeval.Seconds;
+    aRecord.touch();
     aRecord.blobSize= BS.getLength();
-    aRecord.pBlob= (sal_Char*)BS.getArray();
-    aRecord.numSubLayers= 0;
-    aRecord.pSubLayers= NULL;
-    Record* pRecord= aRecord.Marshal(aSize);
-    int swap= 0; //dummy value to keep compiler from complaining
-    OSL_ASSERT(!aDatabase.get_byteswapped(&swap));
-    if (swap)
-        pRecord->bytesex();
+    aRecord.pBlob= (sal_Char*)BS.getArray();;
     rtl::OString KeyName= getKey();
-    Dbt Key(const_cast<void*>(static_cast<const void*>(KeyName.getStr())), //kludge! 
-            KeyName.getLength());
-    Dbt Data(pRecord, aSize);
-    int ret;
-    ret= aDatabase.put(NULL, &Key, &Data, 0);
-    if (!ret)
+    int ret= 0;
+    if (aRecord.putRecord(aDatabase, KeyName))
         ret= aDatabase.sync(0);
     if (ret)
     {
@@ -636,7 +593,6 @@ void SAL_CALL UpdatableCompositeLayer::replaceWith(
         //compiles, but will it work correctly?
         throw backend::BackendAccessException(sMsg.makeStringAndClear(), NULL, uno::Any());
     }
-    rtl_freeMemory(pRecord);
 
     // clear the output stream
     xStream.clear();

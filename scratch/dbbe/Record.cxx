@@ -284,26 +284,40 @@ namespace configmgr
             return sal_True;
         }
         
-        sal_Int32 Record::getRecord(Db& aDatabase, const rtl::OString &key, Record &aResult)
+        sal_Int32 Record::getRecord(Db& aDatabase, const rtl::OString &key, Record **ppRecord, sal_Bool partial)
         {
-            return getRecord(aDatabase, key.getStr(), aResult);
+            return getRecord(aDatabase, key.getStr(), ppRecord, partial);
         }
         
-        sal_Int32 Record::getRecord(Db& aDatabase, const char* key, Record &aResult)
+        sal_Int32 Record::getRecord(Db& aDatabase, const char* key, Record **ppRecord, sal_Bool partial)
         {
-            OSL_VERIFY(key);
+            OSL_ASSERT(key);
+            OSL_ASSERT(ppRecord);
             Dbt Key((void*)key, strlen(key) + 1);
             Dbt Data;
+            if (partial)
+            {
+                Data.set_flags(DB_DBT_PARTIAL);
+                Data.set_dlen(sizeof(Record));
+                Data.set_doff(0);
+            }
             sal_Int32 ret= aDatabase.get(NULL, &Key, &Data, 0);
             if (!ret)
             {// found
-                OSL_VERIFY(Data.get_data());
-                aResult= *(static_cast<Record*>(Data.get_data()));
+                OSL_ASSERT(Data.get_data());
+                *ppRecord= static_cast<Record*>(Data.get_data());
                 int swap= 0;
                 OSL_VERIFY(!aDatabase.get_byteswapped(&swap));
                 if (swap)
-                    aResult.bytesex();
-                aResult.unMarshal();
+                    (*ppRecord)->bytesex();
+                if (!partial)
+                { //leave pointers NULL if partial record
+                    (*ppRecord)->unMarshal();
+                }
+            }
+            else
+            {
+                *ppRecord= NULL;
             }
             return ret;
         }
