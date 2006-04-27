@@ -134,11 +134,6 @@ namespace configmgr
             void touch(void);
 
             /**
-               Return a Dbt that points to this record
-            */
-            Dbt getDbt(void) const;
-
-            /**
                Put this record in the database
                Record is not expected to be serialized before hand
            

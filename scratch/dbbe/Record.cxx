@@ -239,12 +239,12 @@ namespace configmgr
             date= timeval.Seconds;
         }
         
-        Dbt Record::getDbt(void) const
-        {
-            OSL_VERIFY(isMarshaled());
-            return Dbt((void*)this,
-                       sizeof(Record) + SubLayerLen() + blobSize);
-        }
+//        Dbt Record::getDbt(void) const
+//        {
+//            OSL_VERIFY(isMarshaled());
+//            return Dbt((void*)this,
+//                       sizeof(Record) + SubLayerLen() + blobSize);
+//        }
         
         /**
            a simple, and not very thorough check to see if this is a marshaled Record

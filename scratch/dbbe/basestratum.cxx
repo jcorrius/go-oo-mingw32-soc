@@ -254,24 +254,13 @@ namespace configmgr
             throw(backend::BackendAccessException)
         {
             Db& aDatabase= getDatabase();
-            Dbt Key(const_cast<void*>(static_cast<const void*>(aKey.getStr())), //kludge!!
-                    aKey.getLength());
-            Dbt Data;
-            Data.set_flags(DB_DBT_PARTIAL);
-            Data.set_dlen(sizeof(Record));
-            Data.set_doff(0);
-
-            int ret;
-            ret= aDatabase.get(NULL, &Key, &Data, 0);
+            Record* pRecord= NULL;
+            int ret= Record::getRecord(aDatabase, aKey, &(pRecord), sal_True);
             switch (ret)
             {
                 case 0: //success
                 {
-                    Record* pRecord= static_cast<Record*>(Data.get_data());
-                    int swap= 0;  //dummy value to keep compiler from complaining
-                    OSL_ASSERT(!aDatabase.get_byteswapped(&swap));
-                    if (swap)
-                        pRecord->bytesex();
+                    OSL_ASSERT(pRecord);
                     numSubLayers= pRecord->numSubLayers;
                 }
                 break;

@@ -410,46 +410,35 @@ void BaseCompositeLayer::readSubLayerData(
         readEmptyLayer(xHandler);
 }
 
+//
+//  FIXME
+//
 void BaseCompositeLayer::findSubLayers(const rtl::OString& aParentKey)
 {
+    Record *pRecord= NULL;
     Db& aDb= getDb();
-    Dbt Key(const_cast<void*>(static_cast<const void*>(aParentKey.getStr())),
-            aParentKey.getLength());
-    Dbt Data;
-    
-    int ret;
-    ret= aDb.get(NULL, &Key, &Data, 0);
+    int ret= Record::getRecord(aDb, aParentKey, &(pRecord));
     switch (ret)
     {
         case 0: //found
         {
-            Record *pRecord= static_cast<Record*>(Data.get_data());
             OSL_ASSERT(pRecord);
-            pRecord->unMarshal();
-            int swap= 0; //dummy value to keep compiler from complaining
-            OSL_ASSERT(!aDb.get_byteswapped(&swap));
-            if (swap)
-                pRecord->bytesex();
             const int numSubLayers= pRecord->numSubLayers;
+            std::vector<sal_Char*> subLayers= pRecord->listSubLayers();
+
             mSubLayerKeys.resize(numSubLayers);
             mSubLayerIds.realloc(numSubLayers);
-            sal_Char* pString= pRecord->pSubLayers;
             for (int i= 0; i < numSubLayers; i++)
-            {
-                mSubLayerIds[i]= rtl::OUString::createFromAscii(pString);
+            {                
+                mSubLayerIds[i]= rtl::OUString::createFromAscii(subLayers[i]);
 
                 //test to see if it is there
-                Dbt Key2(pString, strlen(pString));
-                Key2.set_flags(DB_DBT_PARTIAL);
-                Key2.set_doff(0);
-                Key2.set_dlen(0); 
-                Dbt Data2;
-                int ret2;
-                ret2= aDb.get(NULL, &Key2, &Data2, 0);
+                Record *pSubLayer= NULL;
+                int ret2= Record::getRecord(aDb, subLayers[i], &(pSubLayer), true);
                 switch (ret2)
                 {
                     case 0: //found
-                        mSubLayerKeys[i]= rtl::OString(pString);
+                        mSubLayerKeys[i]= rtl::OString(subLayers[i]);
                         break;
                         
                     case DB_NOTFOUND:
@@ -463,7 +452,6 @@ void BaseCompositeLayer::findSubLayers(const rtl::OString& aParentKey)
                         OSL_ASSERT(0);
                         break;
                 }
-                pString+= strlen(pString) + 2; //push us over the null
             }
         }
         break;
