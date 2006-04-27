@@ -88,13 +88,7 @@ namespace configmgr
             */
             void unMarshal(void);
         
-            /**
-               Spit out a Record that is marshalled to be put in the database
-           
-               @param size, the size of the marshalled record will be written here
-            */
-            Record* Marshal(size_t &size) const;
-        
+                
             /**
                Change order from little to big endian or vice-versa
             */
@@ -159,8 +153,23 @@ namespace configmgr
             static Record* Record::getFromDbt(const Dbt &aDbt);
         
         protected:
+            /**
+               Spit out a Record that is marshalled to be put in the database
+               
+               @param size, the size of the marshalled record will be written here
+            */
+            Record* Marshal(size_t &size) const;
+
+            /**
+               Give the size of the sublayer strings, including their NULLs
+             */
             size_t SubLayerLen(void) const;
-            size_t getSize(void) const;
+
+            /**
+               a Simple test to see if the Record is using memory
+               allocated in one block (ie this points to a block of
+               memory that was alloc'd to include the blob or sublayers
+             */
             bool isMarshaled(void) const;
 #if OSL_DEBUG_LEVEL > 0
             friend class RecordTester;
