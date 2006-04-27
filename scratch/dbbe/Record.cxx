@@ -310,3 +310,7 @@ namespace configmgr
     }
 }; //namespace
 
+#if OSL_DEBUG_LEVEL > 0
+#include "RecordTest.cxx"
+#endif
+
