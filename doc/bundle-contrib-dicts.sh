@@ -19,9 +19,10 @@
 # instsetoo_native.)
 
 # Note that this script is not clever enough to notice that
-# pt_PT-pack.zip contains a dictionary also for pt_BR. Another quirk
-# is no_NO-pack.zip which contains dictionaries for nb_NO and nn_NO,
-# but not no_NO. Handle those manually.
+# pt_PT-pack.zip contains a dictionary also for pt_BR. Ditto for es_ES
+# and es_MX. Another quirk is no_NO-pack.zip which contains
+# dictionaries for nb_NO and nn_NO, but not no_NO. Handle those
+# manually.
 
 . bin/setup
 
