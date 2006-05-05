@@ -8,7 +8,7 @@
 #include <com/sun/star/text/XSimpleText.hpp>
 
 #include "vbahelper.hxx"
-
+#include "vbapalette.hxx"
 typedef ::cppu::WeakImplHelper1< oo::vba::XCharacters > ScVbaCharacters_BASE;
 
 class ScVbaCharacters : public ScVbaCharacters_BASE
@@ -17,10 +17,11 @@ private:
 	css::uno::Reference< css::text::XTextRange > m_xTextRange;
 	css::uno::Reference< css::text::XSimpleText > m_xSimpleText;
 	css::uno::Reference< css::uno::XComponentContext > m_xContext;
+	ScVbaPalette m_aPalette;
 	sal_Int32 nLength;
 	sal_Int32 nStart;
 public:
-	ScVbaCharacters( const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::text::XSimpleText >& xRange, const css::uno::Any& Start, const css::uno::Any& Length  ) throw ( css::lang::IllegalArgumentException );
+	ScVbaCharacters( const css::uno::Reference< css::uno::XComponentContext >& xContext,  const ScVbaPalette& dPalette, const css::uno::Reference< css::text::XSimpleText >& xRange, const css::uno::Any& Start, const css::uno::Any& Length  ) throw ( css::lang::IllegalArgumentException );
 
 	virtual ~ScVbaCharacters() {}
 	// Attributes

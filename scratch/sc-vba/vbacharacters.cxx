@@ -7,7 +7,7 @@
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
 
-ScVbaCharacters::ScVbaCharacters( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< text::XSimpleText>& xRange,const css::uno::Any& Start, const css::uno::Any& Length  ) throw ( css::lang::IllegalArgumentException ) : m_xContext( xContext ), m_xSimpleText(xRange), nLength(-1), nStart(1)
+ScVbaCharacters::ScVbaCharacters( const uno::Reference< uno::XComponentContext >& xContext, const ScVbaPalette& dPalette, const uno::Reference< text::XSimpleText>& xRange,const css::uno::Any& Start, const css::uno::Any& Length  ) throw ( css::lang::IllegalArgumentException ) : m_xContext( xContext ), m_aPalette( dPalette), m_xSimpleText(xRange), nLength(-1), nStart(1)
 {
 	Start >>= nStart;
 	if ( nStart < 1 )
@@ -23,6 +23,7 @@ ScVbaCharacters::ScVbaCharacters( const uno::Reference< uno::XComponentContext >
 	else
 		xTextCursor->goRight( nLength, sal_True );
 	m_xTextRange.set( xTextCursor, uno::UNO_QUERY_THROW );
+
 }
 
 ::rtl::OUString SAL_CALL 
@@ -57,7 +58,7 @@ uno::Reference< vba::XFont > SAL_CALL
 ScVbaCharacters::getFont() throw (css::uno::RuntimeException) 
 {
 	uno::Reference< beans::XPropertySet > xProps( m_xTextRange, uno::UNO_QUERY_THROW );
-	return uno::Reference< vba::XFont >( new ScVbaFont( xProps ) );
+	return uno::Reference< vba::XFont >( new ScVbaFont( m_aPalette, xProps ) );
 }
 void SAL_CALL 
 ScVbaCharacters::setFont( const uno::Reference< vba::XFont >& _font ) throw (css::uno::RuntimeException)

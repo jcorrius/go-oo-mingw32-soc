@@ -812,7 +812,12 @@ uno::Reference < vba::XFont >
 ScVbaRange::Font() throw (uno::RuntimeException)
 {
 	uno::Reference< beans::XPropertySet > xProps(mxRange, ::uno::UNO_QUERY );
-	return uno::Reference< vba::XFont >( new ScVbaFont( xProps ) );
+	ScDocument* pDoc = getDocumentFromRange(mxRange);
+	if ( !pDoc )
+		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Failed to access document from shell" ) ), uno::Reference< uno::XInterface >() );
+
+	ScVbaPalette aPalette( pDoc->GetDocumentShell() );	
+	return uno::Reference< vba::XFont >( new ScVbaFont( aPalette, xProps ) );
 }
                                                                                                                              
 uno::Reference< vba::XRange >
@@ -1685,7 +1690,12 @@ ScVbaRange::characters( const uno::Any& Start, const css::uno::Any& Length ) thr
 	if ( !isSingleCellRange() )
 		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Can't create Characters property for multicell range ") ), uno::Reference< uno::XInterface >() );
 	uno::Reference< text::XSimpleText > xSimple(mxRange->getCellByPosition(0,0) , uno::UNO_QUERY_THROW );
-	return uno::Reference< vba::XCharacters >( new ScVbaCharacters( m_xContext, xSimple, Start, Length ) );
+	ScDocument* pDoc = getDocumentFromRange(mxRange);
+	if ( !pDoc )
+		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Failed to access document from shell" ) ), uno::Reference< uno::XInterface >() );
+
+	ScVbaPalette aPalette( pDoc->GetDocumentShell() );
+	return uno::Reference< vba::XCharacters >( new ScVbaCharacters( m_xContext, aPalette, xSimple, Start, Length ) );
 }
 
  void SAL_CALL 

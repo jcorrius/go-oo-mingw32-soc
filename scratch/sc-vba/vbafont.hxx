@@ -6,6 +6,7 @@
 #include <org/openoffice/vba/XFont.hpp>
 #include <com/sun/star/beans/XPropertySet.hpp>
 #include "vbahelper.hxx"
+#include "vbapalette.hxx"
 
 class ScTableSheetsObj;
 
@@ -14,9 +15,9 @@ typedef  ::cppu::WeakImplHelper1< oo::vba::XFont > ScVbaFont_BASE;
 class ScVbaFont : public ScVbaFont_BASE 
 {
     css::uno::Reference< css::beans::XPropertySet > mxFont;
+    ScVbaPalette mPalette;
 public:
-	ScVbaFont( css::uno::Reference< css::beans::XPropertySet > xPropertySet ) throw ( css::uno::RuntimeException ) :
-            mxFont( xPropertySet, css::uno::UNO_QUERY_THROW ){}
+	ScVbaFont( const ScVbaPalette& dPalette, css::uno::Reference< css::beans::XPropertySet > xPropertySet ) throw ( css::uno::RuntimeException ) : mPalette( dPalette ), mxFont( xPropertySet, css::uno::UNO_QUERY_THROW ){}
 	virtual ~ScVbaFont() {}
 
 	// Attributes
@@ -32,7 +33,24 @@ public:
 	virtual sal_Bool SAL_CALL getItalic() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setName( const ::rtl::OUString &rString ) throw (css::uno::RuntimeException);
 	virtual ::rtl::OUString getName() throw (css::uno::RuntimeException);
+	virtual void SAL_CALL setSubscript( sal_Bool bValue ) throw (css::uno::RuntimeException);
+	virtual sal_Bool SAL_CALL getSubscript() throw (css::uno::RuntimeException);
+	virtual void SAL_CALL setSuperscript( sal_Bool bValue ) throw (css::uno::RuntimeException);
+	virtual sal_Bool SAL_CALL getSuperscript() throw (css::uno::RuntimeException);
+	virtual void SAL_CALL setStandardFontSize( float dValue ) throw (css::uno::RuntimeException);
+	virtual float SAL_CALL getStandardFontSize() throw (css::uno::RuntimeException);
+	virtual void SAL_CALL setStandardFont( const ::rtl::OUString &rString ) throw (css::uno::RuntimeException);
+	virtual ::rtl::OUString getStandardFont() throw (css::uno::RuntimeException);
+        virtual void setColorIndex( sal_Int32 bValue ) throw (css::uno::RuntimeException);
+        virtual sal_Int32 getColorIndex() throw (css::uno::RuntimeException);
+        virtual void setSize( float fValue ) throw (css::uno::RuntimeException);
+        virtual float getSize() throw (css::uno::RuntimeException);
+        virtual void setFontStyle( const ::rtl::OUString &rString ) throw (css::uno::RuntimeException);
+        virtual ::rtl::OUString getFontStyle() throw (css::uno::RuntimeException);
+
 };
+
+
 
 #endif /* SC_VBA_FONT_HXX */
 
