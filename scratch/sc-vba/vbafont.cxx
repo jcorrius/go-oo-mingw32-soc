@@ -3,6 +3,7 @@
 #include <com/sun/star/awt/FontUnderline.hpp>
 #include <com/sun/star/awt/FontStrikeout.hpp>
 #include <com/sun/star/awt/FontSlant.hpp>
+#include <org/openoffice/vba/Excel/Constants.hpp>
 #include "vbafont.hxx"
 
 using namespace ::org::openoffice;
