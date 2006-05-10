@@ -4,9 +4,11 @@
 #include <org/openoffice/vba/XCollection.hpp>
 #include <com/sun/star/container/XEnumerationAccess.hpp>
 #include <com/sun/star/uno/XComponentContext.hpp>
+#include <com/sun/star/script/XDefaultMethod.hpp>
 #include <com/sun/star/container/XIndexAccess.hpp>
 #include <com/sun/star/container/XNameAccess.hpp>
 
+#include <cppuhelper/implbase3.hxx>
 #include <cppuhelper/implbase2.hxx>
 #include <cppuhelper/implbase1.hxx>
 
@@ -29,8 +31,8 @@ public:
 
 
 
-typedef ::cppu::WeakImplHelper2<oo::vba::XCollection,
-css::container::XEnumerationAccess > XCollection_BASE;
+typedef ::cppu::WeakImplHelper3<oo::vba::XCollection,
+css::container::XEnumerationAccess, css::script::XDefaultMethod > XCollection_BASE;
 
 class ScVbaCollectionBaseImpl : public XCollection_BASE
 {
@@ -53,6 +55,8 @@ public:
 	virtual css::uno::Reference< oo::vba::XApplication > SAL_CALL getApplication() throw (css::uno::RuntimeException);
 
 	virtual css::uno::Any SAL_CALL Item( const css::uno::Any& Index ) throw (css::uno::RuntimeException);
+	// XDefaultMethod
+	::rtl::OUString SAL_CALL getName(  ) throw (css::uno::RuntimeException);
 
 	// XEnumerationAccess
 	virtual css::uno::Reference< css::container::XEnumeration > SAL_CALL createEnumeration() throw (css::uno::RuntimeException) = 0;	

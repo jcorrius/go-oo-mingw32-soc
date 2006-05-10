@@ -3,6 +3,7 @@
 
 #include <cppuhelper/implbase1.hxx>
 #include <cppuhelper/implbase2.hxx>
+#include <cppuhelper/implbase3.hxx>
 #include <com/sun/star/container/XEnumerationAccess.hpp>
 
 #include <org/openoffice/vba/XRange.hpp>
@@ -17,6 +18,7 @@
 #include <com/sun/star/beans/XPropertySet.hpp>
 #include <com/sun/star/beans/PropertyAttribute.hpp>
 #include <com/sun/star/script/XTypeConverter.hpp>
+#include <com/sun/star/script/XDefaultMethod.hpp>
 #include <com/sun/star/sheet/FillDateMode.hpp>
 #include <com/sun/star/sheet/FillMode.hpp>
 #include <com/sun/star/sheet/FillDirection.hpp>
@@ -26,7 +28,7 @@
 
 class ScTableSheetsObj;
 
-typedef ::cppu::WeakImplHelper2< oo::vba::XRange, css::container::XEnumerationAccess > ScVbaRange_BASE;
+typedef ::cppu::WeakImplHelper3< oo::vba::XRange, css::container::XEnumerationAccess, css::script::XDefaultMethod > ScVbaRange_BASE;
 class ArrayVisitor
 {
 public:
@@ -143,6 +145,9 @@ public:
 
 	}
 	virtual sal_Bool SAL_CALL hasElements() throw (css::uno::RuntimeException);
+	// XDefaultMethod
+	::rtl::OUString SAL_CALL getName(  ) throw (css::uno::RuntimeException);
+
 protected:
 	// OPropertySetHelper
 	virtual ::cppu::IPropertyArrayHelper& SAL_CALL getInfoHelper();

@@ -89,13 +89,13 @@ uno::Any SAL_CALL ScVbaCollectionBaseImpl::Item( const uno::Any& aIndex ) throw 
 	return getItemByStringIndex( aStringSheet );	
 }
 
-/*
-	// XEnumerationAccess
-uno::Reference< container::XEnumeration > SAL_CALL ScVbaCollectionBaseImpl::createEnumeration() throw (uno::RuntimeException)
+::rtl::OUString SAL_CALL 
+ScVbaCollectionBaseImpl::getName(  ) throw (css::uno::RuntimeException)
 {
-	return uno::Reference< container::XEnumeration > ();
+	const static rtl::OUString sName( RTL_CONSTASCII_USTRINGPARAM("Item") );
+	return sName;
 }
-*/
+
 	// XElementAccess
 
 ::sal_Bool SAL_CALL ScVbaCollectionBaseImpl::hasElements() throw (uno::RuntimeException)

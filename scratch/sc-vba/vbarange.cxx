@@ -1783,3 +1783,10 @@ ScVbaRange::getPropertySetInfo(  ) throw (uno::RuntimeException)
     uno::Reference< beans::XPropertySetInfo > xInfo( createPropertySetInfo( getInfoHelper() ) );
     return xInfo;
 }
+
+::rtl::OUString SAL_CALL 
+ScVbaRange::getName(  ) throw (css::uno::RuntimeException)
+{
+	const static rtl::OUString sName( RTL_CONSTASCII_USTRINGPARAM("Cells") );
+	return sName;
+}
