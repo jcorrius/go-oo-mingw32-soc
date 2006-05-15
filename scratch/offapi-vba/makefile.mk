@@ -48,8 +48,7 @@ IDLFILES=\
 	XPivotCache.idl \
 	XDialogs.idl \
 	XWindows.idl \
-	XCharacters.idl 
-
+	XCharacters.idl
 # ------------------------------------------------------------------
 
 .INCLUDE :  target.mk

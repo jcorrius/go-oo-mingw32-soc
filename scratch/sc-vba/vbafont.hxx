@@ -23,8 +23,8 @@ public:
 	// Attributes
 	virtual void SAL_CALL setBold( sal_Bool bValue ) throw (css::uno::RuntimeException);
 	virtual sal_Bool SAL_CALL getBold() throw (css::uno::RuntimeException);
-	virtual void SAL_CALL setUnderline( sal_Bool bValue ) throw (css::uno::RuntimeException);
-	virtual sal_Bool SAL_CALL getUnderline() throw (css::uno::RuntimeException);
+	virtual void SAL_CALL setUnderline( const css::uno::Any& aValue ) throw (css::uno::RuntimeException);
+	virtual css::uno::Any SAL_CALL getUnderline() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setStrikethrough( sal_Bool bValue ) throw (css::uno::RuntimeException);
 	virtual sal_Bool SAL_CALL getStrikethrough() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setShadow( sal_Bool bValue ) throw (css::uno::RuntimeException);
