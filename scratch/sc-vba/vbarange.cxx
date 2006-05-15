@@ -1168,12 +1168,26 @@ getPasteFormulaBits( sal_Int16 Operation)
 return nFormulaBits;
 }
 void SAL_CALL 
-ScVbaRange::PasteSpecial(sal_Int16 Paste, sal_Int16 Operation, ::sal_Bool SkipBlanks, ::sal_Bool Transpose ) throw (::com::sun::star::uno::RuntimeException) 
+ScVbaRange::PasteSpecial( const uno::Any& Paste, const uno::Any& Operation, const uno::Any& SkipBlanks, const uno::Any& Transpose ) throw (::com::sun::star::uno::RuntimeException) 
 {
-	USHORT nFlags = getPasteFlags(Paste);
-	USHORT nFormulaBits = getPasteFormulaBits(Operation);
-	implnPasteSpecial(nFlags,nFormulaBits,SkipBlanks,Transpose);
+	// set up defaults	
+	sal_Int32 nPaste = vba::xlPasteType::xlPasteAll;
+	sal_Int32 nOperation = vba::xlPasteSpecialOperation::xlPasteSpecialOperationNone;
+	sal_Bool bTranspose = sal_False;
+	sal_Bool bSkipBlanks = sal_False;
 
+	if ( Paste.hasValue() )
+		Paste >>= nPaste;
+	if ( Operation.hasValue() )
+		Operation >>= nOperation;
+	if ( SkipBlanks.hasValue() )
+		SkipBlanks >>= bSkipBlanks;
+	if ( Transpose.hasValue() )
+		Transpose >>= bTranspose;
+
+	USHORT nFlags = getPasteFlags(nPaste);
+	USHORT nFormulaBits = getPasteFormulaBits(nOperation);
+	implnPasteSpecial(nFlags,nFormulaBits,bSkipBlanks,bTranspose);
 }
 
 uno::Reference< vba::XRange > 
