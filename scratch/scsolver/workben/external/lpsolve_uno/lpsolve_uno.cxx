@@ -28,15 +28,22 @@
 
 #include "lpsolve_uno.hxx"
 #include "lp_lib.h"
+#include "org/openoffice/sc/solver/XLpModel.hpp"
+#include "com/sun/star/lang/XMultiComponentFactory.hpp"
 
 #include <iostream>
 
 using namespace ::com::sun::star::uno;
+using namespace ::org::openoffice::sc::solver;
 using namespace ::std;
 using rtl::OUString;
 
 namespace scsolver {
 
+static rtl::OUString ascii( const sal_Char* sAscii )
+{
+	return rtl::OUString::createFromAscii( sAscii );
+}
 
 static uno::Sequence< rtl::OUString > SAL_CALL getSupportedServiceNames_LpSolveImpl();
 static rtl::OUString getImplementationName_LpSolveImpl();
@@ -46,9 +53,26 @@ static Reference< uno::XInterface > SAL_CALL create_LpSolveImpl(
 
 static int demo();
 
+struct LpSolveImplData
+{
+	LpSolveImplData() :
+		CompContext( NULL ), LpModel( NULL )
+	{
+	}
+
+	~LpSolveImplData() throw()
+	{
+	}
+	
+	Reference<XComponentContext> CompContext;
+	Reference<XLpModel> LpModel;
+};
+
 LpSolveImpl::LpSolveImpl( const Reference<XComponentContext>& xContext )
+	: m_pData( new LpSolveImplData )
 {
 	cout << "c'tor called" << endl;
+	m_pData->CompContext = xContext;
 }
 
 LpSolveImpl::~LpSolveImpl() throw()
@@ -133,10 +157,55 @@ void SAL_CALL LpSolveImpl::dispatchWithNotification(
 {
 }
 
+void SAL_CALL LpSolveImpl::setModel( 
+	const Reference< org::openoffice::sc::solver::XLpModel >& xLpModel )
+	throw ( RuntimeException )
+{
+	m_pData->LpModel = xLpModel;
+}
+
+Reference< XLpModel > SAL_CALL LpSolveImpl::getModel()
+	throw ( RuntimeException )
+{
+	return m_pData->LpModel;
+}
+
 void SAL_CALL LpSolveImpl::run() throw ( RuntimeException )
 {
 	cout << "run this" << endl;
+	Reference<lang::XMultiComponentFactory> xSM = m_pData->CompContext->getServiceManager();
+	Reference<XInterface> model = xSM->createInstanceWithContext( 
+		ascii( "org.openoffice.sc.solver.TestModel" ), m_pData->CompContext );
+
 	demo();
+}
+
+void SAL_CALL LpSolveImpl::solve() throw( RuntimeException )
+{
+	if ( m_pData->LpModel == NULL )
+	{
+		cout << "model is not set" << endl;
+		return;
+	}
+
+	cout << "print model information" << endl;
+
+	Reference<XLpModel> model = m_pData->LpModel;
+	if ( model->getGoal() == Goal_MAXIMIZE )
+	{
+		cout << "let's maximize this" << endl;
+	}
+
+	if ( model->getVerbose() )
+	{
+		cout << "verbose set to on" << endl;
+	}
+
+	cout << "precision set to " << model->getPrecision() << endl;
+	if ( model->getVarPositive() )
+		cout << "variable assummed to be all positive" << endl;
+	else
+		cout << "variable not positive" << endl;
 }
 
 //---------------------------------------------------------------------------

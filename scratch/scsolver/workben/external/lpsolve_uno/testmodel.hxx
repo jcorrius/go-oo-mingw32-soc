@@ -25,9 +25,8 @@
  *
  ************************************************************************/
 
-
-#ifndef _LPSOLVE_UNO_HXX_
-#define _LPSOLVE_UNO_HXX_
+#ifndef _TESTMODEL_HXX_
+#define _TESTMODEL_HXX_
 
 #include "cppuhelper/implbase5.hxx"
 #include "cppuhelper/implementationentry.hxx"
@@ -36,12 +35,14 @@
 #include "com/sun/star/frame/XDispatchProvider.hpp"
 #include "com/sun/star/lang/XServiceInfo.hpp"
 
-#include "org/openoffice/sc/solver/XLpAlgorithm.hpp"
+#include "org/openoffice/sc/solver/XLpModel.hpp"
+#include "org/openoffice/sc/solver/Goal.hpp"
+#include "org/openoffice/sc/solver/Bound.hpp"
 
 #include <memory>
 
-#define	SERVICE_NAME		"org.openoffice.sc.solver.LpSolve"
-#define	IMPLEMENTATION_NAME	"scsolver.LpSolveImpl"
+#define	SERVICE_NAME		"org.openoffice.sc.solver.TestModel"
+#define	IMPLEMENTATION_NAME	"scsolver.TestModelImpl"
 
 using namespace ::com::sun::star;
 
@@ -51,19 +52,19 @@ namespace org { namespace openoffice { namespace sc { namespace solver {
 
 namespace scsolver {
 
-struct LpSolveImplData;
+struct TestModelData;
 
-class LpSolveImpl : public ::cppu::WeakImplHelper5<
+class TestModelImpl : public ::cppu::WeakImplHelper5<
 	lang::XInitialization,
 	lang::XServiceInfo,
 	frame::XDispatchProvider,
 	frame::XNotifyingDispatch,
-	::org::openoffice::sc::solver::XLpAlgorithm >
+	::org::openoffice::sc::solver::XLpModel >
 {
 public:
 
-	LpSolveImpl( const uno::Reference<uno::XComponentContext>& );
-	virtual ~LpSolveImpl() throw();
+	TestModelImpl( const uno::Reference<uno::XComponentContext>& );
+	virtual ~TestModelImpl() throw();
 
 	//--------------------------------------------------------------------------
 	// UNO Component Interface Methods
@@ -107,18 +108,46 @@ public:
 		const uno::Reference< frame::XDispatchResultListener >& )
 		throw ( uno::RuntimeException );
 
-	// XLpAlgorithm
-	virtual void SAL_CALL setModel( 
-		const uno::Reference<org::openoffice::sc::solver::XLpModel>& ) 
+	// XLpModel	
+	virtual void SAL_CALL print() throw ( uno::RuntimeException );
+
+	virtual void SAL_CALL setCost( sal_Int32, double ) throw ( uno::RuntimeException );
+	virtual double SAL_CALL getCost( sal_Int32 ) throw ( uno::RuntimeException );
+
+	virtual void SAL_CALL setVarBound( sal_Int32, org::openoffice::sc::solver::Bound, double )
 		throw ( uno::RuntimeException );
-	virtual SAL_CALL uno::Reference<org::openoffice::sc::solver::XLpModel> getModel()
+	virtual double SAL_CALL getVarBound( sal_Int32, org::openoffice::sc::solver::Bound )
+		throw ( uno::RuntimeException );
+	virtual sal_Bool SAL_CALL isVarBounded( sal_Int32, org::openoffice::sc::solver::Bound )
 		throw ( uno::RuntimeException );
 
-	virtual void SAL_CALL run() throw ( uno::RuntimeException );
-	virtual void SAL_CALL solve() throw ( uno::RuntimeException );
+	virtual void SAL_CALL setRhsValue( sal_Int32, double ) throw ( uno::RuntimeException );
+	virtual double SAL_CALL getRhsValue( sal_Int32 ) throw ( uno::RuntimeException );
+
+	virtual void SAL_CALL setConstraint( sal_Int32, sal_Int32, double ) throw ( uno::RuntimeException );
+	virtual double SAL_CALL getConstraint( sal_Int32, sal_Int32 ) throw ( uno::RuntimeException );
+
+	// getter & setter for attributes
+	virtual void SAL_CALL setGoal( org::openoffice::sc::solver::Goal ) throw ( uno::RuntimeException );
+	virtual org::openoffice::sc::solver::Goal SAL_CALL getGoal() throw ( uno::RuntimeException );
+
+	virtual void SAL_CALL setVerbose( sal_Bool ) throw ( uno::RuntimeException );
+	virtual sal_Bool SAL_CALL getVerbose() throw ( uno::RuntimeException );
+
+	virtual void SAL_CALL setPrecision( long ) throw ( uno::RuntimeException );
+	virtual long SAL_CALL getPrecision() throw ( uno::RuntimeException );
+
+	virtual void SAL_CALL setVarPositive( sal_Bool ) throw ( uno::RuntimeException );
+	virtual sal_Bool SAL_CALL getVarPositive() throw ( uno::RuntimeException );
+
+	virtual void SAL_CALL setDecisionVarSize( long ) throw ( uno::RuntimeException );
+	virtual long SAL_CALL getDecisionVarSize() throw ( uno::RuntimeException );
+
+	virtual void SAL_CALL setConstraintCount( long ) throw ( uno::RuntimeException );
+	virtual long SAL_CALL getConstraintCount() throw ( uno::RuntimeException );
 
 private:
-	::std::auto_ptr<LpSolveImplData> m_pData;
+	::std::auto_ptr<TestModelData> m_pData;
 };
 
 }

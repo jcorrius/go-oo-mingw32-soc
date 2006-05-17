@@ -417,7 +417,9 @@ void SolverDialog::initialize()
 	
 	addButton( 205, 10, 50, 15, ascii( "btnSolve" ), ascii( "Solve" ) );
 	addButton( 205, 30, 50, 15, ascii( "btnReset" ), ascii( "Reset" ) );
-	addButton( 205, 50, 50, 15, ascii( "btnOptions" ), ascii( "Options" ) );
+	
+	p = addButton( 205, 50, 50, 15, ascii( "btnOptions" ), ascii( "Options" ) );
+	p->setPropertyValue( "Enabled", aBool );	// disable Options button for now
 
 	addButton( 205, 90, 50, 15, ascii( "btnSave" ), ascii( "Save" ) );
 	addButton( 205, 110, 50, 15, ascii( "btnLoad" ), ascii( "Load" ) );
