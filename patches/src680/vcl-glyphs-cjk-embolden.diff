@@ -1,0 +1,229 @@
+--- vcl/source/glyphs/gcach_ftyp.hxx.m169	2006-04-19 21:56:08.000000000 +0800
++++ vcl/source/glyphs/gcach_ftyp.hxx	2006-05-18 15:59:45.000000000 +0800
+@@ -220,7 +220,9 @@
+ 
+     bool			mbArtItalic;
+     bool			mbArtBold;
+-    bool			mbUseGamma;
++    
++    //remove it because of using FT_GlyphSlot_Embolden to generate cjk bold font.
++//    bool			mbUseGamma;
+ 
+     typedef ::std::hash_map<int,int> GlyphSubstitution;
+     GlyphSubstitution           maGlyphSubstitution;
+--- vcl/source/glyphs/gcach_ftyp.cxx.m169	2006-05-17 12:48:44.000000000 +0800
++++ vcl/source/glyphs/gcach_ftyp.cxx	2006-05-18 15:51:17.000000000 +0800
+@@ -60,6 +60,7 @@
+ #include FT_TRUETYPE_TABLES_H
+ #include FT_TRUETYPE_TAGS_H
+ #include FT_TRUETYPE_IDS_H
++#include FT_SYNTHESIS_H
+ 
+ #ifndef INCLUDED_RTL_INSTANCE_HXX
+ #include <rtl/instance.hxx>
+@@ -106,31 +107,6 @@
+ #define NEXT_ULong( x )  FT_NEXT_ULONG( x )
+ #endif
+ 
+-// -----------------------------------------------------------------------
+-
+-// the gamma table makes artificial bold look better for CJK glyphs
+-static unsigned char aGammaTable[257];
+-
+-static void InitGammaTable()
+-{
+-    static const int M_MAX = 255;
+-    static const int M_X   = 128;
+-    static const int M_Y   = 208;
+-
+-    unsigned int x, a;
+-    for( x = 0; x < 256; x++)
+-    {
+-        if ( x <= M_X )
+-            a = ( x * M_Y + M_X / 2) / M_X;
+-        else
+-            a = M_Y + ( ( x - M_X ) * ( M_MAX - M_Y ) +
+-                ( M_MAX - M_X ) / 2 ) / ( M_MAX - M_X );
+-    
+-        aGammaTable[x] = (unsigned char)a;
+-    }
+-}
+-// -----------------------------------------------------------------------
+-
+ static FT_Library aLibFT = 0;
+ 
+ // #110607# enable linking with old FT versions
+@@ -491,7 +467,7 @@
+     if( pEnv )
+         nDefaultPrioAutoHint  = pEnv[0] - '0';
+ 
+-    InitGammaTable();
++//    InitGammaTable();
+ }
+ 
+ // -----------------------------------------------------------------------
+@@ -817,14 +793,9 @@
+     static const int TT_CODEPAGE_RANGE_1361 = (1L << 21); // Korean Johab
+     static const int TT_CODEPAGE_RANGES1_CJKT = 0x3F0000; // all of the above
+     const TT_OS2* pOs2 = (const TT_OS2*)FT_Get_Sfnt_Table( maFaceFT, ft_sfnt_os2 );
+-    if ((pOs2) && (pOs2->ulCodePageRange1 & TT_CODEPAGE_RANGES1_CJKT )
+-	      && rFSD.mnHeight < 20)
+-	mbUseGamma = true;
+-    else
+-	mbUseGamma = false;
+-
+-    if (mbUseGamma)
+-	mnLoadFlags |= FT_LOAD_FORCE_AUTOHINT;
++// ----------------------------------------------------------------------------------
++    if ((pOs2) && (pOs2->ulCodePageRange1 & TT_CODEPAGE_RANGES1_CJKT ))
++        mnLoadFlags |= FT_LOAD_FORCE_AUTOHINT;
+ 
+     if( (mnSin != 0) && (mnCos != 0) ) // hinting for 0/90/180/270 degrees only
+         mnLoadFlags |= FT_LOAD_NO_HINTING;
+@@ -1328,7 +1299,14 @@
+         return false;
+ 
+     FT_Glyph pGlyphFT;
+-    rc = FT_Get_Glyph( maFaceFT->glyph, &pGlyphFT );
++    if( mbArtBold )
++    {
++        FT_GlyphSlot slot = maFaceFT->glyph;
++        FT_GlyphSlot_Embolden( slot );
++        rc = FT_Get_Glyph( slot, &pGlyphFT );
++    }
++    else
++        rc = FT_Get_Glyph( maFaceFT->glyph, &pGlyphFT );
+     if( rc != FT_Err_Ok )
+         return false;
+ 
+@@ -1344,7 +1322,7 @@
+ 		aMatrix.yx = 0x6000L, aMatrix.xy = 0;
+ 	FT_Glyph_Transform( pGlyphFT, &aMatrix, NULL );
+     }
+-
++    
+     if( pGlyphFT->format != ft_glyph_format_bitmap )
+     {
+         if( pGlyphFT->format == ft_glyph_format_outline )
+@@ -1367,17 +1345,8 @@
+     const FT_Bitmap& rBitmapFT  = rBmpGlyphFT->bitmap;
+     rRawBitmap.mnHeight         = rBitmapFT.rows;
+     rRawBitmap.mnBitCount       = 1;
+-    if( mbArtBold )
+-    {
+-	rRawBitmap.mnWidth = rBitmapFT.width + 1;
+-	int nLineBytes = (rRawBitmap.mnWidth + 7) >> 3;
+-        rRawBitmap.mnScanlineSize  = (nLineBytes > rBitmapFT.pitch) ? nLineBytes : rBitmapFT.pitch;
+-    }
+-    else
+-    {
+ 	rRawBitmap.mnWidth          = rBitmapFT.width;
+ 	rRawBitmap.mnScanlineSize   = rBitmapFT.pitch;
+-    }
+ 
+     const ULONG nNeededSize = rRawBitmap.mnScanlineSize * rRawBitmap.mnHeight;
+ 
+@@ -1388,35 +1357,7 @@
+         rRawBitmap.mpBits = new unsigned char[ rRawBitmap.mnAllocated ];
+     }
+ 
+-    if( !mbArtBold )
+-    {
+ 	memcpy( rRawBitmap.mpBits, rBitmapFT.buffer, nNeededSize );
+-    }
+-    else
+-    {
+-        memset( rRawBitmap.mpBits, 0, nNeededSize );
+-	const unsigned char* pSrcLine = rBitmapFT.buffer;
+-	unsigned char* pDstLine = rRawBitmap.mpBits;
+-	for( int h = rRawBitmap.mnHeight; --h >= 0; )
+-	{
+-	    memcpy( pDstLine, pSrcLine, rBitmapFT.pitch );
+-	    pDstLine += rRawBitmap.mnScanlineSize;
+-	    pSrcLine += rBitmapFT.pitch;
+-	}
+-
+-	unsigned char* p = rRawBitmap.mpBits;
+-	for( int y=0; y < rRawBitmap.mnHeight; y++ )
+-	{
+-	    unsigned char nLastByte = 0;
+-	    for( int x=0; x < rRawBitmap.mnScanlineSize; x++ )
+-	    {
+-		unsigned char nTmp = p[x] << 7;
+-		p[x] |= (p[x] >> 1) | nLastByte;
+-		nLastByte = nTmp;
+-	    }
+-	    p += rRawBitmap.mnScanlineSize;
+-	}
+-    }
+ 
+     FT_Done_Glyph( pGlyphFT );
+ 
+@@ -1480,7 +1421,17 @@
+         return false;
+ 
+     FT_Glyph pGlyphFT;
+-    rc = FT_Get_Glyph( maFaceFT->glyph, &pGlyphFT );
++    
++    //if mbArtBold true, using freetype API FT_GlyphSlot_Embolden embolden font to generate fake bold font.
++    //but, this method still have to be improve for big cjk font. but I think this should be improve by freetype
++    if( mbArtBold )
++    {
++        FT_GlyphSlot slot = maFaceFT->glyph;
++        FT_GlyphSlot_Embolden( slot );
++        rc = FT_Get_Glyph( slot, &pGlyphFT );
++    }
++    else
++        rc = FT_Get_Glyph( maFaceFT->glyph, &pGlyphFT );
+     if( rc != FT_Err_Ok )
+         return false;
+ 
+@@ -1517,11 +1468,6 @@
+     rRawBitmap.mnWidth          = rBitmapFT.width;
+     rRawBitmap.mnBitCount       = 8;
+     rRawBitmap.mnScanlineSize   = bEmbedded ? rBitmapFT.width : rBitmapFT.pitch;
+-    if( mbArtBold )
+-    {
+-	++rRawBitmap.mnWidth;
+-        ++rRawBitmap.mnScanlineSize;
+-    }
+     rRawBitmap.mnScanlineSize = (rRawBitmap.mnScanlineSize + 3) & -4;
+ 
+     const ULONG nNeededSize = rRawBitmap.mnScanlineSize * rRawBitmap.mnHeight;
+@@ -1560,36 +1506,6 @@
+         }
+     }
+ 
+-    if( mbArtBold )
+-    {
+-	// overlay with glyph image shifted by one left pixel
+-	unsigned char* p = rRawBitmap.mpBits;
+-	for( int y=0; y < rRawBitmap.mnHeight; y++ )
+-	{
+-	    unsigned char nLastByte = 0;
+-	    for( int x=0; x < rRawBitmap.mnWidth; x++ )
+-	    {
+-	        unsigned char nTmp = p[x];
+-	        p[x] |= p[x] | nLastByte;
+-	        nLastByte = nTmp;
+-	    }
+-	    p += rRawBitmap.mnScanlineSize;
+-	}
+-    }
+-
+-    if( !bEmbedded && mbUseGamma )
+-    {
+-	unsigned char* p = rRawBitmap.mpBits;
+-	for( int y=0; y < rRawBitmap.mnHeight; y++ )
+-	{
+-	    for( int x=0; x < rRawBitmap.mnWidth; x++ )
+-	    {
+-	        p[x] = aGammaTable[ p[x] ];
+-	    }
+-	    p += rRawBitmap.mnScanlineSize;
+-	}
+-    }
+-
+     FT_Done_Glyph( pGlyphFT );
+ 
+     // special case for 0/90/180/270 degree orientation
