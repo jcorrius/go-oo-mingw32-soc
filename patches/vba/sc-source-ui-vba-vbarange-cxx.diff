@@ -1,6 +1,6 @@
 --- /dev/null	
 +++ sc/source/ui/vba/vbarange.cxx	
-@@ -0,0 +1,1921 @@
+@@ -0,0 +1,1937 @@
 +#include <comphelper/processfactory.hxx>
 +#include <sfx2/objsh.hxx>
 +
@@ -213,7 +213,7 @@
 +			throw container::NoSuchElementException();
 +		CellPos aPos = *(m_it)++;
 +		uno::Reference< table::XCellRange > xCellRange( m_xRange->getCellByPosition(  aPos.m_nCol, aPos.m_nRow ), uno::UNO_QUERY_THROW );
-+		return makeAny( uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xCellRange ) ) );
++		return uno::makeAny( uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xCellRange ) ) );
 +	}
 +};
 +
@@ -461,6 +461,35 @@
 +	}
 +	
 +};
++
++table::CellRangeAddress getCellRangeAddress( const uno::Any& aParam,
++const uno::Reference< table::XCellRange >& xRanges )
++{
++	uno::Reference< table::XCellRange > xRangeParam;
++	switch ( aParam.getValueTypeClass() )
++	{
++		case uno::TypeClass_STRING:
++		{
++			rtl::OUString rString;
++			aParam >>= rString;
++			xRangeParam = xRanges->getCellRangeByName( rString );
++			break;
++		}
++		case uno::TypeClass_INTERFACE:
++		{
++			uno::Reference< vba::XRange > xRange;
++			aParam >>= xRange;
++			if ( xRange.is() )
++				xRange->getCellRange() >>= xRangeParam;
++			break;
++		}
++		default:
++			throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Can't extact CellRangeAddress from type" ) ), uno::Reference< uno::XInterface >() );
++	}
++	uno::Reference< sheet::XCellRangeAddressable > xAddressable( xRangeParam, uno::UNO_QUERY_THROW );
++	return xAddressable->getRangeAddress();
++}
++
 +
 +ScVbaRange::ScVbaRange( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< table::XCellRange >& xRange, sal_Bool bIsRows, sal_Bool bIsColumns ) throw( lang::IllegalArgumentException )
 +:OPropertyContainer(GetBroadcastHelper())
@@ -897,20 +926,35 @@
 +uno::Reference< vba::XRange >
 +ScVbaRange::Columns( const uno::Any& aIndex ) throw (uno::RuntimeException)
 +{
-+	sal_Int32 nValue;
-+	if( !aIndex.hasValue() )
-+		return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, mxRange, false, true ) );
-+	if( aIndex >>= nValue )
++	if ( aIndex.hasValue() )
 +	{
-+		uno::Reference< sheet::XCellRangeAddressable > xAddressable( mxRange, uno::UNO_QUERY_THROW );
-+		--nValue;
-+		return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, mxRange->getCellRangeByPosition(
-+							nValue, xAddressable->getRangeAddress().StartRow,
-+							nValue, xAddressable->getRangeAddress().EndRow ), false, true ) ); 
++		uno::Reference< vba::XRange > xRange;
++		sal_Int32 nValue;
++		RangeHelper thisRange( mxRange );
++		uno::Reference< sheet::XCellRangeAddressable > xThisRangeAddress = thisRange.getCellRangeAddressable();
++		uno::Reference< table::XCellRange > xRanges = thisRange.getCellRangeFromSheet();		
++		table::CellRangeAddress thisRangeAddress = xThisRangeAddress->getRangeAddress();
++		uno::Reference< table::XCellRange > xReferrer = xRanges->getCellRangeByPosition( thisRangeAddress.StartColumn, thisRangeAddress.StartRow, MAXCOL, thisRangeAddress.EndRow );
++	
++		if ( aIndex >>= nValue )
++		{
++			--nValue;
++			// col value can expand outside this range
++			// rows however cannot
++
++                	thisRangeAddress.StartColumn = nValue;	
++                	thisRangeAddress.EndColumn = nValue;	
++		}
++		else
++		{
++			table::CellRangeAddress relAddress = getCellRangeAddress( aIndex, xRanges );
++			thisRangeAddress.StartColumn = relAddress.StartColumn;	
++                	thisRangeAddress.EndColumn = relAddress.EndColumn;	
++		}
++		return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xReferrer->getCellRangeByPosition( thisRangeAddress.StartColumn, thisRangeAddress.StartRow, thisRangeAddress.EndColumn, thisRangeAddress.EndRow ), false, true ) );
 +	}
-+	// Questionable return, I'm just copying the invalid Any::value path
-+	// above. Would seem to me that this is an internal error and 
-+	// warrants an exception thrown
++	// otherwise return this object ( e.g for columns property with no
++	// params
 +	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, mxRange, false, true ) );
 +}
 +
@@ -1042,34 +1086,6 @@
 +	uno::Reference< beans::XPropertySet > xProps( mxRange, uno::UNO_QUERY_THROW );
 +        return uno::Reference<vba::XInterior> (new ScVbaInterior ( m_xContext, xProps, getDocumentFromRange( mxRange ) ));
 +}                                                                                                                             
-+table::CellRangeAddress getCellRangeAddress( const uno::Any& aParam,
-+const uno::Reference< table::XCellRange >& xRanges )
-+{
-+	uno::Reference< table::XCellRange > xRangeParam;
-+	switch ( aParam.getValueTypeClass() )
-+	{
-+		case uno::TypeClass_STRING:
-+		{
-+			rtl::OUString rString;
-+			aParam >>= rString;
-+			xRangeParam = xRanges->getCellRangeByName( rString );
-+			break;
-+		}
-+		case uno::TypeClass_INTERFACE:
-+		{
-+			uno::Reference< vba::XRange > xRange;
-+			aParam >>= xRange;
-+			if ( xRange.is() )
-+				xRange->getCellRange() >>= xRangeParam;
-+			break;
-+		}
-+		default:
-+			throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Can't extact CellRangeAddress from type" ) ), uno::Reference< uno::XInterface >() );
-+	}
-+	uno::Reference< sheet::XCellRangeAddressable > xAddressable( xRangeParam, uno::UNO_QUERY_THROW );
-+	return xAddressable->getRangeAddress();
-+}
-+
 +uno::Reference< vba::XRange >
 +ScVbaRange::Range( const uno::Any &Cell1, const uno::Any &Cell2 ) throw (uno::RuntimeException)
 +{
