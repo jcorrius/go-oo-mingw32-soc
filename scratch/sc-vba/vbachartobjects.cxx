@@ -19,7 +19,7 @@ public:
 	virtual uno::Any SAL_CALL nextElement(  ) throw (container::NoSuchElementException, lang::WrappedTargetException, uno::RuntimeException) 
 	{ 
 		uno::Reference< table::XTableChart > xTableChart( m_xEnumeration->nextElement(), uno::UNO_QUERY_THROW );
-		return makeAny( uno::Reference< vba::XChartObject > ( new ScVbaChartObject( m_xContext, xTableChart ) ) );
+		return uno::makeAny( uno::Reference< vba::XChartObject > ( new ScVbaChartObject( m_xContext, xTableChart ) ) );
 	}
 };
 
@@ -47,6 +47,6 @@ uno::Any
 ScVbaChartObjects::createCollectionObject( const css::uno::Any& aSource )
 {	
 	uno::Reference< table::XTableChart > xTableChart( aSource, uno::UNO_QUERY_THROW );
-	return makeAny( uno::Reference< vba::XChartObject > ( new ScVbaChartObject( m_xContext, xTableChart ) ) );
+	return uno::makeAny( uno::Reference< vba::XChartObject > ( new ScVbaChartObject( m_xContext, xTableChart ) ) );
 }
 

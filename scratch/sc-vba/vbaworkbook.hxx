@@ -34,7 +34,7 @@ public:
 	virtual void SAL_CALL setSaved( sal_Bool bSave ) throw (css::uno::RuntimeException);
 
 	// Methods
-	virtual css::uno::Any Worksheets( const css::uno::Any& aIndex ) throw (css::uno::RuntimeException);
+	virtual css::uno::Any SAL_CALL Worksheets( const css::uno::Any& aIndex ) throw (css::uno::RuntimeException);
 	virtual void SAL_CALL Close( const css::uno::Any &bSaveChanges,
 								 const css::uno::Any &aFileName,
 								 const css::uno::Any &bRouteWorkbook ) throw (css::uno::RuntimeException);

@@ -23,12 +23,12 @@ public:
     // XApplication
 	virtual ::sal_Int32 SAL_CALL getCalculation() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setCalculation( ::sal_Int32 _calculation ) throw (css::uno::RuntimeException);
-	virtual css::uno::Reference< oo::vba::XRange > getSelection() throw (css::uno::RuntimeException);
-	virtual css::uno::Reference< oo::vba::XWorkbook > getActiveWorkbook() throw (css::uno::RuntimeException);
-	virtual css::uno::Reference< oo::vba::XRange > getActiveCell() throw ( css::uno::RuntimeException);
+	virtual css::uno::Reference< oo::vba::XRange > SAL_CALL getSelection() throw (css::uno::RuntimeException);
+	virtual css::uno::Reference< oo::vba::XWorkbook > SAL_CALL getActiveWorkbook() throw (css::uno::RuntimeException);
+	virtual css::uno::Reference< oo::vba::XRange > SAL_CALL getActiveCell() throw ( css::uno::RuntimeException);
  virtual css::uno::Reference< oo::vba::XWindow > SAL_CALL getActiveWindow() throw (::com::sun::star::uno::RuntimeException);
-	virtual sal_Bool getScreenUpdating() throw (css::uno::RuntimeException);
-	virtual void setScreenUpdating(sal_Bool bUpdate) throw (css::uno::RuntimeException);
+	virtual sal_Bool SAL_CALL getScreenUpdating() throw (css::uno::RuntimeException);
+	virtual void SAL_CALL setScreenUpdating(sal_Bool bUpdate) throw (css::uno::RuntimeException);
 	virtual css::uno::Reference< oo::vba::XWorkbook > SAL_CALL getThisWorkbook() throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL Workbooks( const css::uno::Any& aIndex ) throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL WorksheetFunction( ) throw (css::uno::RuntimeException);

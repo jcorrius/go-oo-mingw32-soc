@@ -10,7 +10,7 @@ using namespace ::org::openoffice;
 uno::Any DataPilotToPivotTable( const uno::Any& aSource, uno::Reference< uno::XComponentContext > & xContext )
 {
 	uno::Reference< sheet::XDataPilotTable > xTable( aSource, uno::UNO_QUERY_THROW );
-	return makeAny( uno::Reference< vba::XPivotTable > ( new ScVbaPivotTable( xContext, xTable ) ) );
+	return uno::makeAny( uno::Reference< vba::XPivotTable > ( new ScVbaPivotTable( xContext, xTable ) ) );
 }
 
 class PivotTableEnumeration : public EnumerationHelperImpl

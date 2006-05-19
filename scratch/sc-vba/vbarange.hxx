@@ -44,6 +44,7 @@ class ScVbaRange : public ScVbaRange_BASE
 	sal_Bool mbIsRows;
 	sal_Bool mbIsColumns;
 	rtl::OUString msDftPropName;
+	double getCalcColWidth() throw (css::uno::RuntimeException);
 	void visitArray( ArrayVisitor& vistor );
 	css::uno::Reference< css::script::XTypeConverter > getTypeConverter() throw (css::uno::RuntimeException);
 
@@ -85,6 +86,11 @@ public:
 	virtual css::uno::Reference< oo::vba::XComment > SAL_CALL getComment() throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL getHidden() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setHidden( const css::uno::Any& _hidden ) throw (css::uno::RuntimeException);
+	virtual css::uno::Any SAL_CALL getColumnWidth() throw (css::uno::RuntimeException);
+	virtual void SAL_CALL setColumnWidth( const css::uno::Any& _columnwidth ) throw (css::uno::RuntimeException);
+	virtual css::uno::Any SAL_CALL getWidth() throw (css::uno::RuntimeException);
+	virtual void SAL_CALL setWidth( const css::uno::Any& _width ) throw (css::uno::RuntimeException);
+
 	// Methods
 	sal_Bool IsRows() { return mbIsRows; }
 	sal_Bool IsColumns() { return mbIsColumns; }

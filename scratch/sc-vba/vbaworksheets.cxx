@@ -39,7 +39,7 @@ public:
 	virtual uno::Any SAL_CALL nextElement(  ) throw (container::NoSuchElementException, lang::WrappedTargetException, uno::RuntimeException) 
 	{ 
 		uno::Reference< sheet::XSpreadsheet > xSheet( m_xEnumeration->nextElement(), uno::UNO_QUERY_THROW );
-		return makeAny( uno::Reference< vba::XWorksheet > ( new ScVbaWorksheet( m_xContext, xSheet, m_xModel ) ) );
+		return uno::makeAny( uno::Reference< vba::XWorksheet > ( new ScVbaWorksheet( m_xContext, xSheet, m_xModel ) ) );
 	}
 
 };
@@ -75,7 +75,7 @@ uno::Any
 ScVbaWorksheets::createCollectionObject( const css::uno::Any& aSource )
 {
 	uno::Reference< sheet::XSpreadsheet > xSheet( aSource, uno::UNO_QUERY );
-	return makeAny( uno::Reference< vba::XWorksheet > ( new ScVbaWorksheet( m_xContext, xSheet, mxModel ) ) ); 
+	return uno::makeAny( uno::Reference< vba::XWorksheet > ( new ScVbaWorksheet( m_xContext, xSheet, mxModel ) ) ); 
 }
 
 // XWorksheets

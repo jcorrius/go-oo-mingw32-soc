@@ -14,7 +14,7 @@ uno::Any AnnotationToComment( const uno::Any& aSource, uno::Reference< uno::XCom
 	uno::Reference< container::XChild > xChild( xAnno, uno::UNO_QUERY_THROW );
 	uno::Reference< table::XCellRange > xCellRange( xChild->getParent(), uno::UNO_QUERY_THROW );
 
-	return makeAny( uno::Reference< vba::XComment > ( new ScVbaComment( xContext, xCellRange ) ) );
+	return uno::makeAny( uno::Reference< vba::XComment > ( new ScVbaComment( xContext, xCellRange ) ) );
 }
 
 class CommentEnumeration : public EnumerationHelperImpl

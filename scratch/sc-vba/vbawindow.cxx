@@ -53,7 +53,7 @@ public:
 		{
 			throw container::NoSuchElementException();
 		}
-		return makeAny( uno::Reference< vba::XWorksheet > ( new ScVbaWorksheet( m_xContext, *(m_it++), m_xModel ) ) );
+		return uno::makeAny( uno::Reference< vba::XWorksheet > ( new ScVbaWorksheet( m_xContext, *(m_it++), m_xModel ) ) );
 	}
 
 
@@ -114,7 +114,7 @@ public:
 			|| Index >= sheets.size() ) 
 			throw lang::IndexOutOfBoundsException();
 		
-		return makeAny( sheets[ Index ] );
+		return uno::makeAny( sheets[ Index ] );
 	}
 
 	//XElementAccess
@@ -134,7 +134,7 @@ public:
 		NameIndexHash::const_iterator it = namesToIndices.find( aName );
 		if ( it == namesToIndices.end() )
 			throw container::NoSuchElementException();
-		return makeAny( sheets[ it->second ] );
+		return uno::makeAny( sheets[ it->second ] );
 		
 	}
 
@@ -212,7 +212,7 @@ uno::Any SAL_CALL
 ScVbaWindow::SelectedSheets( const uno::Any& aIndex ) throw (uno::RuntimeException)
 {
 	uno::Reference< container::XEnumerationAccess > xEnumAccess( new SelectedSheetsEnumAccess( m_xContext, m_xModel  ) );
-	return makeAny( uno::Reference< vba::XWorksheets > ( new ScVbaWorksheets( m_xContext, xEnumAccess, m_xModel ) ) ); 	
+	return uno::makeAny( uno::Reference< vba::XWorksheets > ( new ScVbaWorksheets( m_xContext, xEnumAccess, m_xModel ) ) ); 	
 }
 
 void SAL_CALL 

@@ -44,8 +44,8 @@ public:
     // Attributes
 	virtual ::rtl::OUString SAL_CALL getName() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setName( const ::rtl::OUString &rName ) throw (css::uno::RuntimeException);
-	virtual sal_Bool getVisible() throw (css::uno::RuntimeException);
-	virtual void setVisible( sal_Bool bVisible ) throw (css::uno::RuntimeException);
+	virtual sal_Bool SAL_CALL getVisible() throw (css::uno::RuntimeException);
+	virtual void SAL_CALL setVisible( sal_Bool bVisible ) throw (css::uno::RuntimeException);
 	virtual ::sal_Int32 SAL_CALL getStandardWidth() throw (css::uno::RuntimeException);
 	virtual ::sal_Int32 SAL_CALL getStandardHeight() throw (css::uno::RuntimeException);
 	virtual ::sal_Bool SAL_CALL getProtectionMode() throw (css::uno::RuntimeException);
@@ -72,8 +72,8 @@ public:
 	virtual void SAL_CALL CheckSpelling( const css::uno::Any& CustomDictionary,const css::uno::Any& IgnoreUppercase,const css::uno::Any& AlwaysSuggest, const css::uno::Any& SpellingLang ) throw (css::uno::RuntimeException);
 	// Hacks (?)
 	virtual css::uno::Reference< oo::vba::XRange > SAL_CALL Cells( const css::uno::Any &nRow, const css::uno::Any &nCol ) throw (css::uno::RuntimeException);
-	virtual css::uno::Reference< oo::vba::XRange > Rows(const css::uno::Any& aIndex ) throw (css::uno::RuntimeException);
-	virtual css::uno::Reference< oo::vba::XRange > Columns(const css::uno::Any& aIndex ) throw (css::uno::RuntimeException);
+	virtual css::uno::Reference< oo::vba::XRange > SAL_CALL Rows(const css::uno::Any& aIndex ) throw (css::uno::RuntimeException);
+	virtual css::uno::Reference< oo::vba::XRange > SAL_CALL Columns(const css::uno::Any& aIndex ) throw (css::uno::RuntimeException);
 
 	virtual css::uno::Any SAL_CALL Evaluate( const ::rtl::OUString& Name ) throw (css::uno::RuntimeException); 
 	virtual css::uno::Any SAL_CALL PivotTables( const css::uno::Any& Index ) throw (css::uno::RuntimeException);

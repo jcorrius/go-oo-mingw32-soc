@@ -35,6 +35,10 @@
 #include <com/sun/star/util/XSortable.hpp>
 #include <com/sun/star/sheet/XCellRangeMovement.hpp>
 #include <com/sun/star/sheet/XCellRangeData.hpp>
+
+#include <com/sun/star/style/XStyleFamiliesSupplier.hpp>
+#include <com/sun/star/awt/XDevice.hpp>
+
 //#include <com/sun/star/sheet/CellDeleteMode.hpp>
 #include <com/sun/star/sheet/XCellRangeMovement.hpp>
 
@@ -206,7 +210,7 @@ public:
 			throw container::NoSuchElementException();
 		CellPos aPos = *(m_it)++;
 		uno::Reference< table::XCellRange > xCellRange( m_xRange->getCellByPosition(  aPos.m_nCol, aPos.m_nRow ), uno::UNO_QUERY_THROW );
-		return makeAny( uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xCellRange ) ) );
+		return uno::makeAny( uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xCellRange ) ) );
 	}
 };
 
@@ -216,6 +220,7 @@ const sal_Int32 RANGE_PROPERTY_ID_DFLT=1;
 // another property/method of the same name
 const ::rtl::OUString RANGE_PROPERTY_DFLT( RTL_CONSTASCII_USTRINGPARAM( "_$DefaultProp" ) );
 const ::rtl::OUString ISVISIBLE(  RTL_CONSTASCII_USTRINGPARAM( "IsVisible"));
+const ::rtl::OUString WIDTH(  RTL_CONSTASCII_USTRINGPARAM( "Width"));
 
 class CellValueSetter : public ArrayVisitor
 {
@@ -453,6 +458,35 @@ public:
 	}
 	
 };
+
+table::CellRangeAddress getCellRangeAddress( const uno::Any& aParam,
+const uno::Reference< table::XCellRange >& xRanges )
+{
+	uno::Reference< table::XCellRange > xRangeParam;
+	switch ( aParam.getValueTypeClass() )
+	{
+		case uno::TypeClass_STRING:
+		{
+			rtl::OUString rString;
+			aParam >>= rString;
+			xRangeParam = xRanges->getCellRangeByName( rString );
+			break;
+		}
+		case uno::TypeClass_INTERFACE:
+		{
+			uno::Reference< vba::XRange > xRange;
+			aParam >>= xRange;
+			if ( xRange.is() )
+				xRange->getCellRange() >>= xRangeParam;
+			break;
+		}
+		default:
+			throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Can't extact CellRangeAddress from type" ) ), uno::Reference< uno::XInterface >() );
+	}
+	uno::Reference< sheet::XCellRangeAddressable > xAddressable( xRangeParam, uno::UNO_QUERY_THROW );
+	return xAddressable->getRangeAddress();
+}
+
 
 ScVbaRange::ScVbaRange( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< table::XCellRange >& xRange, sal_Bool bIsRows, sal_Bool bIsColumns ) throw( lang::IllegalArgumentException )
 :OPropertyContainer(GetBroadcastHelper())
@@ -889,20 +923,35 @@ ScVbaRange::Rows(const uno::Any& aIndex ) throw (uno::RuntimeException)
 uno::Reference< vba::XRange >
 ScVbaRange::Columns( const uno::Any& aIndex ) throw (uno::RuntimeException)
 {
-	sal_Int32 nValue;
-	if( !aIndex.hasValue() )
-		return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, mxRange, false, true ) );
-	if( aIndex >>= nValue )
+	if ( aIndex.hasValue() )
 	{
-		uno::Reference< sheet::XCellRangeAddressable > xAddressable( mxRange, uno::UNO_QUERY_THROW );
-		--nValue;
-		return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, mxRange->getCellRangeByPosition(
-							nValue, xAddressable->getRangeAddress().StartRow,
-							nValue, xAddressable->getRangeAddress().EndRow ), false, true ) ); 
+		uno::Reference< vba::XRange > xRange;
+		sal_Int32 nValue;
+		RangeHelper thisRange( mxRange );
+		uno::Reference< sheet::XCellRangeAddressable > xThisRangeAddress = thisRange.getCellRangeAddressable();
+		uno::Reference< table::XCellRange > xRanges = thisRange.getCellRangeFromSheet();		
+		table::CellRangeAddress thisRangeAddress = xThisRangeAddress->getRangeAddress();
+		uno::Reference< table::XCellRange > xReferrer = xRanges->getCellRangeByPosition( thisRangeAddress.StartColumn, thisRangeAddress.StartRow, MAXCOL, thisRangeAddress.EndRow );
+	
+		if ( aIndex >>= nValue )
+		{
+			--nValue;
+			// col value can expand outside this range
+			// rows however cannot
+
+                	thisRangeAddress.StartColumn = nValue;	
+                	thisRangeAddress.EndColumn = nValue;	
+		}
+		else
+		{
+			table::CellRangeAddress relAddress = getCellRangeAddress( aIndex, xRanges );
+			thisRangeAddress.StartColumn = relAddress.StartColumn;	
+                	thisRangeAddress.EndColumn = relAddress.EndColumn;	
+		}
+		return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xReferrer->getCellRangeByPosition( thisRangeAddress.StartColumn, thisRangeAddress.StartRow, thisRangeAddress.EndColumn, thisRangeAddress.EndRow ), false, true ) );
 	}
-	// Questionable return, I'm just copying the invalid Any::value path
-	// above. Would seem to me that this is an internal error and 
-	// warrants an exception thrown
+	// otherwise return this object ( e.g for columns property with no
+	// params
 	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, mxRange, false, true ) );
 }
 
@@ -1034,34 +1083,6 @@ uno::Reference< vba::XInterior > ScVbaRange::Interior( ) throw (uno::RuntimeExce
 	uno::Reference< beans::XPropertySet > xProps( mxRange, uno::UNO_QUERY_THROW );
         return uno::Reference<vba::XInterior> (new ScVbaInterior ( m_xContext, xProps, getDocumentFromRange( mxRange ) ));
 }                                                                                                                             
-table::CellRangeAddress getCellRangeAddress( const uno::Any& aParam,
-const uno::Reference< table::XCellRange >& xRanges )
-{
-	uno::Reference< table::XCellRange > xRangeParam;
-	switch ( aParam.getValueTypeClass() )
-	{
-		case uno::TypeClass_STRING:
-		{
-			rtl::OUString rString;
-			aParam >>= rString;
-			xRangeParam = xRanges->getCellRangeByName( rString );
-			break;
-		}
-		case uno::TypeClass_INTERFACE:
-		{
-			uno::Reference< vba::XRange > xRange;
-			aParam >>= xRange;
-			if ( xRange.is() )
-				xRange->getCellRange() >>= xRangeParam;
-			break;
-		}
-		default:
-			throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Can't extact CellRangeAddress from type" ) ), uno::Reference< uno::XInterface >() );
-	}
-	uno::Reference< sheet::XCellRangeAddressable > xAddressable( xRangeParam, uno::UNO_QUERY_THROW );
-	return xAddressable->getRangeAddress();
-}
-
 uno::Reference< vba::XRange >
 ScVbaRange::Range( const uno::Any &Cell1, const uno::Any &Cell2 ) throw (uno::RuntimeException)
 {
@@ -1804,3 +1825,113 @@ ScVbaRange::getName(  ) throw (css::uno::RuntimeException)
 	const static rtl::OUString sName( RTL_CONSTASCII_USTRINGPARAM("Cells") );
 	return sName;
 }
+
+
+uno::Reference< awt::XDevice > 
+getDeviceFromDoc( const uno::Reference< frame::XModel >& xModel ) throw( uno::RuntimeException )
+{
+	uno::Reference< frame::XController > xController( xModel->getCurrentController(), uno::UNO_QUERY_THROW );
+	uno::Reference< frame::XFrame> xFrame( xController->getFrame(), uno::UNO_QUERY_THROW );
+	uno::Reference< awt::XDevice > xDevice( xFrame->getComponentWindow(), uno::UNO_QUERY_THROW );
+	return xDevice;
+}
+
+// returns calc internal col. width ( in 1/100 mm )
+double 
+ScVbaRange::getCalcColWidth() throw (uno::RuntimeException)
+{
+	double nWidth = 0;
+	uno::Reference< table::XColumnRowRange > xColRowRange( mxRange, uno::UNO_QUERY_THROW );			
+	uno::Reference< beans::XPropertySet > xProps( xColRowRange->getColumns(), uno::UNO_QUERY_THROW );			
+	
+	xProps->getPropertyValue( WIDTH ) >>= nWidth;
+	return nWidth;
+}
+// return Char Width in 1/100 mm
+double getDefaultCharWidth( const uno::Reference< frame::XModel >& xModel ) throw ( uno::RuntimeException )
+{
+	const static rtl::OUString sDflt( RTL_CONSTASCII_USTRINGPARAM("Default")); 
+	const static rtl::OUString sCharFontName( RTL_CONSTASCII_USTRINGPARAM("CharFontName")); 
+	const static rtl::OUString sPageStyles( RTL_CONSTASCII_USTRINGPARAM("PageStyles")); 
+	// get the font from the default style
+	uno::Reference< style::XStyleFamiliesSupplier > xStyleSupplier( xModel, uno::UNO_QUERY_THROW );
+	uno::Reference< container::XNameAccess > xNameAccess( xStyleSupplier->getStyleFamilies(), uno::UNO_QUERY_THROW );
+	uno::Reference< container::XNameAccess > xNameAccess2( xNameAccess->getByName( sPageStyles ), uno::UNO_QUERY_THROW );
+	uno::Reference< beans::XPropertySet > xProps( xNameAccess2->getByName( sDflt ), uno::UNO_QUERY_THROW );
+	rtl::OUString sFontName;
+	xProps->getPropertyValue( sCharFontName ) >>= sFontName;
+
+	uno::Reference< awt::XDevice > xDevice = getDeviceFromDoc( xModel );
+	awt::FontDescriptor aDesc;
+	aDesc.Name = sFontName;
+	uno::Reference< awt::XFont > xFont( xDevice->getFont( aDesc ), uno::UNO_QUERY_THROW );
+	double nCharPixelWidth =  xFont->getCharWidth( (sal_Int8)'0' );	
+
+	double nPixelsPerMeter = xDevice->getInfo().PixelPerMeterX;
+
+	double nCharWidth = nCharPixelWidth / nPixelsPerMeter;
+	nCharWidth = nCharWidth * (double)100 * (double)1000;
+
+	return nCharWidth;	
+}
+
+uno::Any SAL_CALL 
+ScVbaRange::getColumnWidth() throw (uno::RuntimeException)
+{
+	double dfltCharWidth = 	0;
+	ScDocShell* pShell = getDocShellFromRange( mxRange );
+	if ( pShell )
+	{
+		uno::Reference< frame::XModel > xModel = pShell->GetModel();
+		if ( xModel.is() )
+			dfltCharWidth = getCalcColWidth() / getDefaultCharWidth( xModel );
+	}
+	return uno::makeAny( dfltCharWidth );
+}
+
+void SAL_CALL 
+ScVbaRange::setColumnWidth( const uno::Any& _columnwidth ) throw (uno::RuntimeException)
+{
+	double nColWidth = 0;
+	_columnwidth >>= nColWidth;
+	ScDocShell* pShell = getDocShellFromRange( mxRange );
+	if ( pShell )
+	{
+		uno::Reference< frame::XModel > xModel = pShell->GetModel();
+		if ( xModel.is() )
+		{
+			uno::Reference< table::XColumnRowRange > xColRowRange( mxRange, uno::UNO_QUERY_THROW );			
+			uno::Reference< beans::XPropertySet > xProps( xColRowRange->getColumns(), uno::UNO_QUERY_THROW );			
+			xProps->setPropertyValue( WIDTH, uno::makeAny( sal_Int32 ( getDefaultCharWidth( xModel ) * nColWidth ) ) );
+		}
+	}
+}
+
+uno::Any SAL_CALL 
+ScVbaRange::getWidth() throw (uno::RuntimeException)
+{
+	
+	double nWidth = getCalcColWidth();
+	// Width is in 1/100 mm
+	//    * 1 point = 1/72 inch = 20 twips
+	//    * 1 inch = 72 points = 1440 twips
+	//    * 1 cm = 567 twips
+
+	// convert width to Points
+	nWidth = ( (double)((nWidth /1000 ) * 567 ) / 20 );
+	return uno::makeAny( (sal_Int32)nWidth );
+}
+
+void SAL_CALL 
+ScVbaRange::setWidth( const uno::Any& _width ) throw (css::uno::RuntimeException)
+{
+	double nWidth; // Incomming width is in points
+	_width >>= nWidth;
+	// Convert nWidth to 1/100 mm
+	nWidth = (double)( ( nWidth * 20 ) / 567 );
+	nWidth = (nWidth * 1000);
+	uno::Reference< table::XColumnRowRange > xColRowRange( mxRange, uno::UNO_QUERY_THROW );			
+	uno::Reference< beans::XPropertySet > xProps( xColRowRange->getColumns(), uno::UNO_QUERY_THROW );			
+	xProps->setPropertyValue( WIDTH , uno::makeAny( (sal_Int32)nWidth ) );
+}
+
