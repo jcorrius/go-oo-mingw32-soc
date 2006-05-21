@@ -24,10 +24,10 @@ XCUFILES = ./ProtocolHandler.xcu
 
 OBJFILES = \
 	lpsolve_uno.o \
-	testmodel.o
+	lpmodel_uno.o
 
 HEADERS = \
-	testmodel.hxx \
+	lpmodel_uno.hxx \
 	lpsolve_uno.hxx
 
 IDLFILES = \
@@ -37,7 +37,7 @@ IDLFILES = \
 	$(IDLDIR)/XLpAlgorithm.idl \
 	$(IDLDIR)/XLpModel.idl \
 	LpSolve.idl \
-	TestModel.idl
+	LpModel.idl
 	
 URDFILES = \
 	Equality.urd \
@@ -46,7 +46,7 @@ URDFILES = \
 	XLpAlgorithm.urd \
 	XLpModel.urd \
 	LpSolve.urd \
-	TestModel.urd
+	LpModel.urd
 
 all: $(TARGET).zip
 
@@ -59,12 +59,12 @@ preprocess: idlc
 	$(BINDIR)/regmerge $(TARGET).rdb /UCR $(URDFILES) && \
 	$(BINDIR)/cppumaker -BUCR -Torg.openoffice.sc.solver.XLpAlgorithm -Torg.openoffice.sc.solver.XLpModel $(BINDIR)/types.rdb $(TARGET).rdb
 
-testmodel.o: testmodel.cxx preprocess $(HEADERS)
-	$(CXX) $(CXX_DEFINES) $(CPPFLAGS) $(CXXCPP) $(CXX_SHARED_FLAGS) -o $@ -c testmodel.cxx
+lpmodel_uno.o: lpmodel_uno.cxx preprocess $(HEADERS)
+	$(CXX) $(CXX_DEFINES) $(CPPFLAGS) $(CXXCPP) $(CXX_SHARED_FLAGS) -o $@ -c lpmodel_uno.cxx
 
-testmodel.uno.so: testmodel.o
+lpmodel.uno.so: lpmodel_uno.o
 	export LD_LIBRARY_PATH=$(SLVDIR)/lib && \
-	$(CXX) -shared -Wl,-soname,$@ -o $@ -lc testmodel.o && \
+	$(CXX) -shared -Wl,-soname,$@ -o $@ -lc lpmodel_uno.o && \
 	$(BINDIR)/regcomp -register -r $(TARGET).rdb -c $@
 	
 lpsolve_uno.o: lpsolve_uno.cxx preprocess $(HEADERS)
@@ -75,14 +75,14 @@ $(TARGET).so: lpsolve_uno.o
 	$(CXX) -shared -Wl,-soname,$@ -o $@ -lc lpsolve_uno.o $(LPSOLVE_STATIC) && \
 	$(BINDIR)/regcomp -register -r $(TARGET).rdb -c $@
 
-$(TARGET).zip: $(TARGET).so testmodel.uno.so
-	zip -j $@ $(TARGET).so testmodel.uno.so $(TARGET).rdb
+$(TARGET).zip: $(TARGET).so lpmodel.uno.so
+	zip -j $@ $(TARGET).so lpmodel.uno.so $(TARGET).rdb
 
 regview:
 	$(BINDIR)/regview $(TARGET).rdb
 
 clean:
-	rm -f $(OBJFILES) $(TARGET).so testmodel.uno.so $(TARGET).zip $(TARGET).rdb \
+	rm -f $(OBJFILES) $(TARGET).so lpmodel.uno.so $(TARGET).zip $(TARGET).rdb \
 		$(URDFILES) && \
 	rm -rf com org
 

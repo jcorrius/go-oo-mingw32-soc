@@ -114,7 +114,6 @@ public:
 	virtual SAL_CALL uno::Reference<org::openoffice::sc::solver::XLpModel> getModel()
 		throw ( uno::RuntimeException );
 
-	virtual void SAL_CALL run() throw ( uno::RuntimeException );
 	virtual void SAL_CALL solve() throw ( uno::RuntimeException );
 
 private:

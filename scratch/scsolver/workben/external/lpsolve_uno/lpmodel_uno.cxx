@@ -26,13 +26,14 @@
  ************************************************************************/
 
 
-#include "testmodel.hxx"
+#include "lpmodel_uno.hxx"
 #include "osl/diagnose.h"
 
 #include "com/sun/star/uno/XComponentContext.hpp"
 
 #include "org/openoffice/sc/solver/XLpModel.hpp"
 #include "org/openoffice/sc/solver/Goal.hpp"
+#include "org/openoffice/sc/solver/Equality.hpp"
 
 #include <iostream>
 #include <vector>
@@ -49,16 +50,47 @@ using rtl::OUString;
 namespace bnu = ::boost::numeric::ublas;
 using ::std::cout;
 using ::std::endl;
+using ::std::exception;
 
 namespace scsolver {
 
 typedef bnu::matrix<double, bnu::row_major, std::vector<double> > Mx;
 
-void Debug( const char* str )
+static void Debug( const char* str )
 {
 #ifdef DEBUG
 	::std::cout << str << ::std::endl;
 #endif
+}
+
+static rtl::OUString ascii( const sal_Char* str )
+{
+	return rtl::OUString::createFromAscii( str );
+}
+
+template<typename Container>
+void printElements( const Container& cn, const char* sep = " " )
+{
+	using namespace ::std;
+	copy( cn.begin(), cn.end(), ostream_iterator<typename Container::value_type>( cout, sep ) );
+	cout << endl;
+}
+
+
+template<typename DataType>
+void ensureSize( ::std::vector<DataType>& cn, size_t size )
+{
+	using namespace std;
+
+	if ( cn.empty() || cn.size() < size )
+	{
+		vector<DataType> cnTmp( size );
+		typename vector<DataType>::iterator itr, 
+			itrBeg = cn.begin(), itrEnd = cn.end();
+		for ( itr = itrBeg; itr != itrEnd; ++itr )
+			cnTmp.at( distance( itrBeg, itr ) ) = *itr;
+		cn.swap( cnTmp );
+	}
 }
 
 static uno::Sequence< rtl::OUString > SAL_CALL getSupportedServiceNames_TestModelImpl();
@@ -67,22 +99,23 @@ static Reference< uno::XInterface > SAL_CALL create_TestModelImpl(
 	Reference< uno::XComponentContext > const & xContext )
 	SAL_THROW( () );
 
-struct TestModelData
+struct LpModelData
 {	
-	TestModelData() : 
+	LpModelData() : 
 		CompContext( NULL ),
 		Goal( org::openoffice::sc::solver::Goal_MAXIMIZE ),
 		Verbose( false ),
 		Precision( 2 ),
 		VarPositive( true ),
-		Cost( 10 ),
-		DecisionVar( 10 ),
-		RhsValue( 10 ),
-		ConstraintMatrix( 10, 10 )
+		Cost( 1 ),
+		DecisionVar( 1 ),
+		RhsValue( 1 ),
+		Equal( 1 ),
+		ConstraintMatrix( 1, 1 )
 	{
 	}
 
-	~TestModelData() throw()
+	~LpModelData() throw()
 	{
 	}
 
@@ -96,39 +129,40 @@ struct TestModelData
 	::std::vector<double> Cost;
 	::std::vector<double> DecisionVar;
 	::std::vector<double> RhsValue;
+	::std::vector<Equality> Equal;
 	Mx ConstraintMatrix;
 };
 
-TestModelImpl::TestModelImpl( const Reference<XComponentContext>& xContext )
-	: m_pData( new TestModelData )
+LpModelImpl::LpModelImpl( const Reference<XComponentContext>& xContext )
+	: m_pData( new LpModelData )
 {
 	m_pData->CompContext = xContext;
 }
 
-TestModelImpl::~TestModelImpl() throw()
+LpModelImpl::~LpModelImpl() throw()
 {
 }
 
-void TestModelImpl::initialize( const Sequence<Any>& cn ) throw ( Exception )
+void LpModelImpl::initialize( const Sequence<Any>& cn ) throw ( Exception )
 {
 }
 
-OUString TestModelImpl::getImplementationName() throw ( RuntimeException )
+OUString LpModelImpl::getImplementationName() throw ( RuntimeException )
 {
 	return OUString( RTL_CONSTASCII_USTRINGPARAM(IMPLEMENTATION_NAME) );
 }
 
-sal_Bool TestModelImpl::supportsService( const OUString& sSrvName ) throw ( RuntimeException )
+sal_Bool LpModelImpl::supportsService( const OUString& sSrvName ) throw ( RuntimeException )
 {
 	return sSrvName.equalsAsciiL( RTL_CONSTASCII_STRINGPARAM(SERVICE_NAME) );
 }
 
-Sequence<OUString> TestModelImpl::getSupportedServiceNames() throw ( RuntimeException )
+Sequence<OUString> LpModelImpl::getSupportedServiceNames() throw ( RuntimeException )
 {
 	return getSupportedServiceNames_TestModelImpl();
 }
 
-Reference< frame::XDispatch > SAL_CALL TestModelImpl::queryDispatch(
+Reference< frame::XDispatch > SAL_CALL LpModelImpl::queryDispatch(
 	const util::URL& aURL, const OUString& sTargetFrameName, sal_Int32 nSearchFlags )
 	throw ( RuntimeException )
 {   
@@ -141,7 +175,7 @@ Reference< frame::XDispatch > SAL_CALL TestModelImpl::queryDispatch(
 	return xRet;
 }
 
-Sequence< Reference< frame::XDispatch > > SAL_CALL TestModelImpl::queryDispatches(
+Sequence< Reference< frame::XDispatch > > SAL_CALL LpModelImpl::queryDispatches(
 	const Sequence< frame::DispatchDescriptor >& seqDescripts )
 	throw ( RuntimeException )
 {
@@ -158,7 +192,7 @@ Sequence< Reference< frame::XDispatch > > SAL_CALL TestModelImpl::queryDispatche
 }
 
 
-void SAL_CALL TestModelImpl::dispatch( 
+void SAL_CALL LpModelImpl::dispatch( 
 	const util::URL& aURL, const Sequence< beans::PropertyValue >& lArgs )
 	throw ( RuntimeException )
 {
@@ -167,167 +201,278 @@ void SAL_CALL TestModelImpl::dispatch(
 			print();
 }
 
-void SAL_CALL TestModelImpl::addStatusListener( 
+void SAL_CALL LpModelImpl::addStatusListener( 
 	const Reference< frame::XStatusListener >& xControl, const util::URL& aURL )
 	throw ( RuntimeException )
 {
 }
 
-void SAL_CALL TestModelImpl::removeStatusListener( 
+void SAL_CALL LpModelImpl::removeStatusListener( 
 	const Reference< frame::XStatusListener >& xControl, const util::URL& aURL )
 	throw ( RuntimeException )
 {
 }
 
-void SAL_CALL TestModelImpl::dispatchWithNotification(
+void SAL_CALL LpModelImpl::dispatchWithNotification(
 	const util::URL& aURL, const Sequence< beans::PropertyValue >& lArgs,
 	const Reference< frame::XDispatchResultListener >& xDRL )
 	throw ( RuntimeException )
 {
 }
 
-void SAL_CALL TestModelImpl::print() throw ( RuntimeException )
+void SAL_CALL LpModelImpl::print() throw ( RuntimeException )
 {
-	Debug( "print model" );
-	cout << m_pData->ConstraintMatrix << endl;
-}
-
-void SAL_CALL TestModelImpl::setCost( sal_Int32 id, double value )
-	throw ( RuntimeException )
-{
-	m_pData->Cost.at( id ) = value;
-}
-
-double SAL_CALL TestModelImpl::getCost( sal_Int32 id )
-	throw ( RuntimeException )
-{
-	return m_pData->Cost.at( id );
-}
-
-void SAL_CALL TestModelImpl::setVarBound( sal_Int32 id, Bound bound, double value )
-	throw ( RuntimeException )
-{
+	Debug( "print model ----------------------------------------" );
 	
+	cout << "cost: ";
+	printElements( m_pData->Cost );
+	cout << m_pData->ConstraintMatrix << endl;
+	cout << "rhs: ";
+	printElements( m_pData->RhsValue );
 }
 
-double SAL_CALL TestModelImpl::getVarBound( sal_Int32 id, Bound bound )
+void SAL_CALL LpModelImpl::setCost( sal_Int32 id, double value )
 	throw ( RuntimeException )
 {
+	if ( id < 0 )
+		throw RuntimeException( ascii("Negative argument not allowed"), *this );
+
+	try
+	{
+		m_pData->Cost.at( id ) = value;
+	}
+	catch ( const exception& e )
+	{
+		throw RuntimeException( ascii( "Cost array out of range" ), *this );
+	}
+}
+
+double SAL_CALL LpModelImpl::getCost( sal_Int32 id )
+	throw ( RuntimeException )
+{
+	if ( id < 0 )
+		throw RuntimeException( ascii("Negative argument not allowed"), *this );
+
+	try
+	{
+		return m_pData->Cost.at( id );
+	}
+	catch ( const exception& e )
+	{
+		throw RuntimeException( ascii( "Cost array out of range" ), *this );
+	}
+}
+
+void SAL_CALL LpModelImpl::setVarBound( sal_Int32 id, Bound bound, double value )
+	throw ( RuntimeException )
+{	
+	if ( id < 0 )
+		throw RuntimeException( ascii("Negative argument not allowed"), *this );
+}
+
+double SAL_CALL LpModelImpl::getVarBound( sal_Int32 id, Bound bound )
+	throw ( RuntimeException )
+{
+	if ( id < 0 )
+		throw RuntimeException( ascii("Negative argument not allowed"), *this );
+
 	return 0.0;
 }
 
-sal_Bool SAL_CALL TestModelImpl::isVarBounded( sal_Int32 id, Bound bound )
+sal_Bool SAL_CALL LpModelImpl::isVarBounded( sal_Int32 id, Bound bound )
 	throw ( RuntimeException )
 {
+	if ( id < 0 )
+		throw RuntimeException( ascii("Negative argument not allowed"), *this );
+
 	return false;
 }
 
-void SAL_CALL TestModelImpl::setRhsValue( sal_Int32 id, double value )
+void SAL_CALL LpModelImpl::setRhsValue( sal_Int32 id, double value )
 	throw ( RuntimeException )
-{
-	m_pData->RhsValue.at( id ) = value;
+{	
+	if ( id < 0 )
+		throw RuntimeException( ascii("Negative argument not allowed"), *this );
+
+	try
+	{
+		m_pData->RhsValue.at( id ) = value;
+	}
+	catch ( const exception& e )
+	{
+		throw RuntimeException( ascii( "Rhs array out of range" ), *this );
+	}
 }
 
-double SAL_CALL TestModelImpl::getRhsValue( sal_Int32 id )
+double SAL_CALL LpModelImpl::getRhsValue( sal_Int32 id )
 	throw ( RuntimeException )
 {
-	return m_pData->RhsValue.at( id );
+	if ( id < 0 )
+		throw RuntimeException( ascii("Negative argument not allowed"), *this );
+	try
+	{
+		return m_pData->RhsValue.at( id );
+	}
+	catch ( const exception& e )
+	{
+		throw RuntimeException( ascii( "Rhs array out of range" ), *this );
+	}
+	
 }
 
-void SAL_CALL TestModelImpl::setConstraint( sal_Int32 rowId, sal_Int32 colId, double value )
+void SAL_CALL LpModelImpl::setConstraint( sal_Int32 rowId, sal_Int32 colId, double value )
 	throw ( RuntimeException )
 {
-	m_pData->ConstraintMatrix( rowId, colId ) = value;
+	if ( rowId < 0 || colId < 0 )
+		throw RuntimeException( ascii("Negative argument not allowed"), *this );
+
+	if ( m_pData->ConstraintMatrix.size1() > static_cast<size_t>(rowId) && 
+		 m_pData->ConstraintMatrix.size2() > static_cast<size_t>(colId) )
+		m_pData->ConstraintMatrix( rowId, colId ) = value;
+	else
+		throw RuntimeException( ascii("Matrix too small"), *this );
 }
 
-double SAL_CALL TestModelImpl::getConstraint( sal_Int32 rowId, sal_Int32 colId )
+double SAL_CALL LpModelImpl::getConstraint( sal_Int32 rowId, sal_Int32 colId )
 	throw ( RuntimeException )
 {
-	return m_pData->ConstraintMatrix( rowId, colId );
+	if ( rowId < 0 || colId < 0 )
+		throw RuntimeException( ascii("Negative argument not allowed"), *this );
+
+	if ( m_pData->ConstraintMatrix.size1() > static_cast<size_t>(rowId) && 
+		 m_pData->ConstraintMatrix.size2() > static_cast<size_t>(colId) )
+		return m_pData->ConstraintMatrix( rowId, colId );
+	else
+		throw RuntimeException( ascii("Matrix too small"), *this );
 }
 
-void SAL_CALL TestModelImpl::setGoal( org::openoffice::sc::solver::Goal goal )
+void SAL_CALL LpModelImpl::setEquality( sal_Int32 rowId, Equality eq )
+	throw ( RuntimeException )
+{
+	if ( rowId < 0 )
+		throw RuntimeException( ascii("Negative argument not allowed"), *this );
+
+	try
+	{
+		m_pData->Equal.at( rowId ) = eq;
+	}
+	catch ( const exception& ex )
+	{
+		throw RuntimeException( ascii( "Equality array out of range" ), *this );
+	}
+}
+
+Equality SAL_CALL LpModelImpl::getEquality( sal_Int32 rowId )
+	throw ( RuntimeException )
+{	
+	if ( rowId < 0 )
+		throw RuntimeException( ascii("Negative argument not allowed"), *this );
+
+	try
+	{
+		return m_pData->Equal.at( rowId );
+	}
+	catch ( const exception& ex )
+	{
+		throw RuntimeException( ascii( "Equality array out of range" ), *this );
+	}
+}
+
+//-----------------------------------------------------------------
+// Attribute getters & setters start here
+
+void SAL_CALL LpModelImpl::setGoal( org::openoffice::sc::solver::Goal goal )
 	throw ( RuntimeException )
 {
 	m_pData->Goal = goal;
 }
 
-org::openoffice::sc::solver::Goal SAL_CALL TestModelImpl::getGoal()
+org::openoffice::sc::solver::Goal SAL_CALL LpModelImpl::getGoal()
 	throw ( RuntimeException )
 {
 	return m_pData->Goal;
 }
 
-void SAL_CALL TestModelImpl::setVerbose( sal_Bool b )
+void SAL_CALL LpModelImpl::setVerbose( sal_Bool b )
 	throw ( RuntimeException )
 {
 	m_pData->Verbose = b;
 }
 
-sal_Bool SAL_CALL TestModelImpl::getVerbose()
+sal_Bool SAL_CALL LpModelImpl::getVerbose()
 	throw ( RuntimeException )
 {
 	return m_pData->Verbose;
 }
 
-void SAL_CALL TestModelImpl::setPrecision( sal_Int32 prec )
+void SAL_CALL LpModelImpl::setPrecision( sal_Int32 prec )
 	throw ( RuntimeException )
 {
 	m_pData->Precision = prec;
 }
 
-long SAL_CALL TestModelImpl::getPrecision() throw ( RuntimeException )
+long SAL_CALL LpModelImpl::getPrecision() throw ( RuntimeException )
 {
 	return m_pData->Precision;
 }
 
-void SAL_CALL TestModelImpl::setVarPositive( sal_Bool b )
+void SAL_CALL LpModelImpl::setVarPositive( sal_Bool b )
 	throw ( RuntimeException )
 {
 	m_pData->VarPositive = b;
 }
 
-sal_Bool SAL_CALL TestModelImpl::getVarPositive()
+sal_Bool SAL_CALL LpModelImpl::getVarPositive()
 	throw ( RuntimeException )
 {
 	return m_pData->VarPositive;
 }
 
-void SAL_CALL TestModelImpl::setDecisionVarSize( sal_Int32 size )
+void SAL_CALL LpModelImpl::setDecisionVarSize( sal_Int32 size0 )
 	throw ( RuntimeException )
 {
-	OSL_ASSERT( size >= 0 );
-	m_pData->DecisionVar.reserve( size );
+	if ( size0 < 0 )
+		return;
+
+	size_t size = static_cast<size_t>(size0);
+	
+	ensureSize( m_pData->DecisionVar, size );
+	ensureSize( m_pData->Cost, size );
 
 	// Perform a destructive resize and resize only the column size.
-	if ( m_pData->ConstraintMatrix.size2() < static_cast<size_t>(size) )
+	if ( m_pData->ConstraintMatrix.size2() < size )
 	{
 		Mx mxTemp( m_pData->ConstraintMatrix.size1(), size );
 		m_pData->ConstraintMatrix.swap( mxTemp );
 	}
 }
 
-long SAL_CALL TestModelImpl::getDecisionVarSize()
+long SAL_CALL LpModelImpl::getDecisionVarSize()
 	throw ( RuntimeException )
 {
 	return m_pData->ConstraintMatrix.size2();
 }
 
-void SAL_CALL TestModelImpl::setConstraintCount( sal_Int32 size )
+void SAL_CALL LpModelImpl::setConstraintCount( sal_Int32 size0 )
 	throw ( RuntimeException )
 {
-	OSL_ASSERT( size > 0 );
-	m_pData->RhsValue.reserve( size );
+	if ( size0 < 0 )
+		return;
+
+	size_t size = static_cast<size_t>(size0);
+
+	ensureSize( m_pData->RhsValue, size );
+	ensureSize( m_pData->Equal, size );
 	
 	// Perform a destructive resize and resize only the row size.
-	if ( m_pData->ConstraintMatrix.size1() < static_cast<size_t>(size) )
+	if ( m_pData->ConstraintMatrix.size1() < size )
 	{
 		Mx mxTemp( size, m_pData->ConstraintMatrix.size2() );
 		m_pData->ConstraintMatrix.swap( mxTemp );
 	}
 }
 
-long SAL_CALL TestModelImpl::getConstraintCount()
+long SAL_CALL LpModelImpl::getConstraintCount()
 	throw ( RuntimeException )
 {
 	return m_pData->ConstraintMatrix.size1();
@@ -364,7 +509,7 @@ static Reference< uno::XInterface > SAL_CALL create_TestModelImpl(
 	Reference< uno::XComponentContext > const & xContext )
 	SAL_THROW( () )
 {
-	return static_cast< lang::XTypeProvider * >( new TestModelImpl( xContext ) );
+	return static_cast< lang::XTypeProvider * >( new LpModelImpl( xContext ) );
 }
 
 static struct ::cppu::ImplementationEntry s_component_entries [] =

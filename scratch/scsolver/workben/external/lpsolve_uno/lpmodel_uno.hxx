@@ -38,11 +38,12 @@
 #include "org/openoffice/sc/solver/XLpModel.hpp"
 #include "org/openoffice/sc/solver/Goal.hpp"
 #include "org/openoffice/sc/solver/Bound.hpp"
+#include "org/openoffice/sc/solver/Equality.hpp"
 
 #include <memory>
 
-#define	SERVICE_NAME		"org.openoffice.sc.solver.TestModel"
-#define	IMPLEMENTATION_NAME	"scsolver.TestModelImpl"
+#define	SERVICE_NAME		"org.openoffice.sc.solver.LpModel"
+#define	IMPLEMENTATION_NAME	"scsolver.LpModelImpl"
 
 using namespace ::com::sun::star;
 
@@ -52,9 +53,9 @@ namespace org { namespace openoffice { namespace sc { namespace solver {
 
 namespace scsolver {
 
-struct TestModelData;
+struct LpModelData;
 
-class TestModelImpl : public ::cppu::WeakImplHelper5<
+class LpModelImpl : public ::cppu::WeakImplHelper5<
 	lang::XInitialization,
 	lang::XServiceInfo,
 	frame::XDispatchProvider,
@@ -63,8 +64,8 @@ class TestModelImpl : public ::cppu::WeakImplHelper5<
 {
 public:
 
-	TestModelImpl( const uno::Reference<uno::XComponentContext>& );
-	virtual ~TestModelImpl() throw();
+	LpModelImpl( const uno::Reference<uno::XComponentContext>& );
+	virtual ~LpModelImpl() throw();
 
 	//--------------------------------------------------------------------------
 	// UNO Component Interface Methods
@@ -127,6 +128,11 @@ public:
 	virtual void SAL_CALL setConstraint( sal_Int32, sal_Int32, double ) throw ( uno::RuntimeException );
 	virtual double SAL_CALL getConstraint( sal_Int32, sal_Int32 ) throw ( uno::RuntimeException );
 
+	virtual void SAL_CALL setEquality( sal_Int32, org::openoffice::sc::solver::Equality )
+		throw ( uno::RuntimeException );
+	virtual org::openoffice::sc::solver::Equality SAL_CALL getEquality( sal_Int32 )
+		throw ( uno::RuntimeException );
+
 	// getter & setter for attributes
 	virtual void SAL_CALL setGoal( org::openoffice::sc::solver::Goal ) throw ( uno::RuntimeException );
 	virtual org::openoffice::sc::solver::Goal SAL_CALL getGoal() throw ( uno::RuntimeException );
@@ -147,7 +153,7 @@ public:
 	virtual long SAL_CALL getConstraintCount() throw ( uno::RuntimeException );
 
 private:
-	::std::auto_ptr<TestModelData> m_pData;
+	::std::auto_ptr<LpModelData> m_pData;
 };
 
 }

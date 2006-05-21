@@ -32,6 +32,8 @@
 #include "com/sun/star/lang/XMultiComponentFactory.hpp"
 
 #include <iostream>
+#include <vector>
+#include <sstream>
 
 using namespace ::com::sun::star::uno;
 using namespace ::org::openoffice::sc::solver;
@@ -39,6 +41,13 @@ using namespace ::std;
 using rtl::OUString;
 
 namespace scsolver {
+
+static void Debug( const char* str )
+{
+#ifdef DEBUG
+	::std::cout << str << ::std::endl;
+#endif
+}
 
 static rtl::OUString ascii( const sal_Char* sAscii )
 {
@@ -50,8 +59,6 @@ static rtl::OUString getImplementationName_LpSolveImpl();
 static Reference< uno::XInterface > SAL_CALL create_LpSolveImpl(
 	Reference< uno::XComponentContext > const & xContext )
 	SAL_THROW( () );
-
-static int demo();
 
 struct LpSolveImplData
 {
@@ -71,13 +78,11 @@ struct LpSolveImplData
 LpSolveImpl::LpSolveImpl( const Reference<XComponentContext>& xContext )
 	: m_pData( new LpSolveImplData )
 {
-	cout << "c'tor called" << endl;
 	m_pData->CompContext = xContext;
 }
 
 LpSolveImpl::~LpSolveImpl() throw()
 {
-	cout << "d'tor called" << endl;
 }
 
 void LpSolveImpl::initialize( const Sequence<Any>& cn ) throw ( Exception )
@@ -106,7 +111,7 @@ Reference< frame::XDispatch > SAL_CALL LpSolveImpl::queryDispatch(
 	Reference< frame::XDispatch > xRet;
 	if ( aURL.Protocol.compareToAscii( "scsolver.LpSolveImpl:" ) == 0 )
 	{
-		if ( aURL.Path.compareToAscii( "run" ) == 0 )
+		if ( aURL.Path.compareToAscii( "solve" ) == 0 )
 			xRet = this;
 	}
 	return xRet;
@@ -134,8 +139,8 @@ void SAL_CALL LpSolveImpl::dispatch(
 	throw ( RuntimeException )
 {
 	if ( aURL.Protocol.compareToAscii( "scsolver.LpSolveImpl:" ) == 0 )
-		if ( aURL.Path.compareToAscii( "run" ) == 0 )
-			run();
+		if ( aURL.Path.compareToAscii( "solve" ) == 0 )
+			solve();
 }
 
 void SAL_CALL LpSolveImpl::addStatusListener( 
@@ -170,31 +175,21 @@ Reference< XLpModel > SAL_CALL LpSolveImpl::getModel()
 	return m_pData->LpModel;
 }
 
-void SAL_CALL LpSolveImpl::run() throw ( RuntimeException )
-{
-	cout << "run this" << endl;
-	Reference<lang::XMultiComponentFactory> xSM = m_pData->CompContext->getServiceManager();
-	Reference<XInterface> model = xSM->createInstanceWithContext( 
-		ascii( "org.openoffice.sc.solver.TestModel" ), m_pData->CompContext );
-
-	demo();
-}
-
 void SAL_CALL LpSolveImpl::solve() throw( RuntimeException )
 {
+	using ::std::vector;
+
+	Debug( "solve ------------------------------------" );
+
 	if ( m_pData->LpModel == NULL )
 	{
-		cout << "model is not set" << endl;
+		Debug( "model is not set" );
 		return;
 	}
 
-	cout << "print model information" << endl;
-
 	Reference<XLpModel> model = m_pData->LpModel;
 	if ( model->getGoal() == Goal_MAXIMIZE )
-	{
 		cout << "let's maximize this" << endl;
-	}
 
 	if ( model->getVerbose() )
 	{
@@ -206,6 +201,94 @@ void SAL_CALL LpSolveImpl::solve() throw( RuntimeException )
 		cout << "variable assummed to be all positive" << endl;
 	else
 		cout << "variable not positive" << endl;
+
+	// OK - Start putting things together for lp_solve to run.
+
+	int nConstCount = model->getConstraintCount();
+	int nDecVarSize = model->getDecisionVarSize();
+
+	cout << "decision var (" << nDecVarSize << ")" << endl;
+	cout << "constraint   (" << nConstCount << ")" << endl;
+	
+	lprec *lp = make_lp( 0, nDecVarSize );
+	if ( lp == NULL )
+		throw RuntimeException( ascii("lp_solve error"), *this );
+
+	for ( int i = 1; i <= nDecVarSize; ++i )
+	{
+		::std::ostringstream os;
+		os << "x" << i;
+		set_col_name( lp, i, const_cast<char *>(os.str().c_str()) );
+	}
+
+	// map constraints
+	set_add_rowmode( lp, true );
+	vector<double> row( nConstCount );
+	vector<int> cols( nConstCount );
+	for ( int i = 0; i < nConstCount; ++i )
+		cols.at(i) = i+1;
+
+	for ( int i = 0; i < nConstCount; ++i )
+	{
+		for ( int j = 0; j < nDecVarSize; ++j )
+			row.at(j) = model->getConstraint( i, j );
+		int nEqual;
+		switch ( model->getEquality(i) )
+		{
+		case org::openoffice::sc::solver::Equality_GREATER_EQUAL:
+			nEqual = GE;
+			break;
+		case org::openoffice::sc::solver::Equality_LESS_EQUAL:
+			nEqual = LE;
+			break;
+		case org::openoffice::sc::solver::Equality_EQUAL:
+			nEqual = EQ;
+			break;
+		}
+		add_constraintex( lp, nDecVarSize, &row[0], &cols[0], nEqual,
+			model->getRhsValue(i) );
+	}
+
+	set_add_rowmode( lp, false );
+
+	// set objective function
+	for ( int i = 0; i < nDecVarSize; ++i )
+		row.at(i) = model->getCost(i);
+	set_obj_fnex( lp, nDecVarSize,  &row[0],  &cols[0] );
+
+	// set goal
+	switch ( model->getGoal() )
+	{
+	case org::openoffice::sc::solver::Goal_MAXIMIZE:
+		set_maxim(lp);
+		break;
+	case org::openoffice::sc::solver::Goal_MINIMIZE:
+		set_minim(lp);
+		break;
+	default:
+		throw RuntimeException( ascii("Unknown goal"), *this );
+	}
+
+	write_LP(lp, stdout);
+
+	set_verbose(lp, IMPORTANT);
+
+	if ( ::solve(lp) == OPTIMAL )
+	{
+		cout << "--- solution found ---" << endl;
+
+		// objective value
+		cout << "Objective value: " << get_objective(lp) << endl;
+
+		// variable values
+		get_variables(lp, &row[0]);
+		for ( int i = 0; i < nDecVarSize; ++i )
+			cout << get_col_name( lp, i + 1 ) << ": " << row[i] << endl;
+	}
+	else
+		cout << "--- solution not found ---" << endl;
+
+	delete_lp(lp);
 }
 
 //---------------------------------------------------------------------------
@@ -251,151 +334,6 @@ static struct ::cppu::ImplementationEntry s_component_entries [] =
 	},
 	{ 0, 0, 0, 0, 0, 0 }
 };
-
-static int demo()
-{
-	lprec *lp;
-	int Ncol, *colno = NULL, j, ret = 0;
-	REAL *row = NULL;
-
-	/* We will build the model row by row
-	   So we start with creating a model with 0 rows and 2 columns */
-	Ncol = 2; /* there are two variables in the model */
-	lp = make_lp(0, Ncol);
-	if (lp == NULL)
-		ret = 1; /* couldn't construct a new model... */
-
-	if (ret == 0)
-	{
-		/* let us name our variables. Not required, but can be useful for debugging */
-		set_col_name(lp, 1, "x");
-		set_col_name(lp, 2, "y");
-
-		/* create space large enough for one row */
-		colno = (int *) malloc(Ncol * sizeof(*colno));
-		row = (REAL *) malloc(Ncol * sizeof(*row));
-		if ((colno == NULL) || (row == NULL))
-			ret = 2;
-	}
-
-	if (ret == 0)
-	{
-		set_add_rowmode(lp, TRUE);	/* makes building the model faster if it is done rows by row */
-
-		/* construct first row (120 x + 210 y <= 15000) */
-		j = 0;
-
-		colno[j] = 1; /* first column */
-		row[j++] = 120;
-
-		colno[j] = 2; /* second column */
-		row[j++] = 210;
-
-		/* add the row to lpsolve */
-		if (!add_constraintex(lp, j, row, colno, LE, 15000))
-			ret = 3;
-	}
-
-	if (ret == 0)
-	{
-		/* construct second row (110 x + 30 y <= 4000) */
-		j = 0;
-
-		colno[j] = 1; /* first column */
-		row[j++] = 110;
-
-		colno[j] = 2; /* second column */
-		row[j++] = 30;
-
-		/* add the row to lpsolve */
-		if (!add_constraintex(lp, j, row, colno, LE, 4000))
-			ret = 3;
-	}
-
-	if (ret == 0)
-	{
-		/* construct third row (x + y <= 75) */
-		j = 0;
-
-		colno[j] = 1; /* first column */
-		row[j++] = 1;
-
-		colno[j] = 2; /* second column */
-		row[j++] = 1;
-
-		/* add the row to lpsolve */
-		if (!add_constraintex(lp, j, row, colno, LE, 75))
-			ret = 3;
-	}
-
-	if (ret == 0)
-	{
-		set_add_rowmode(lp, FALSE);	/* rowmode should be turned off again when done building the model */
-
-		/* set the objective function (143 x + 60 y) */
-		j = 0;
-
-		colno[j] = 1; /* first column */
-		row[j++] = 143;
-
-		colno[j] = 2; /* second column */
-		row[j++] = 60;
-
-		/* set the objective in lpsolve */
-		if (!set_obj_fnex(lp, j, row, colno))
-			ret = 4;
-	}
-
-	if (ret == 0)
-	{
-		/* set the object direction to maximize */
-		set_maxim(lp);
-
-		/* just out of curioucity, now show the model in lp format on screen */
-		/* this only works if this is a console application. If not, use write_lp and a filename */
-		write_LP(lp, stdout);
-		/* write_lp(lp, "model.lp"); */
-
-		/* I only want to see important messages on screen while solving */
-		set_verbose(lp, IMPORTANT);
-
-		/* Now let lpsolve calculate a solution */
-		ret = solve(lp);
-		if (ret == OPTIMAL)
-			ret = 0;
-		else
-			ret	= 5;
-	}
-
-	if (ret == 0)
-	{
-		/* a solution is calculated, now lets get some results */
-
-		/* objective value */
-		printf("Objective value: %f\n", get_objective(lp));
-
-		/* variable values */
-		get_variables(lp, row);
-		for (j = 0; j < Ncol; j++)
-			printf("%s: %f\n", get_col_name(lp, j + 1), row[j]);
-
-		/* we are done now */
-	}
-
-	/* free allocated memory */
-	if (row != NULL)
-		free(row);
-	if (colno != NULL)
-		free(colno);
-
-	if (lp != NULL)
-	{
-		/* clean up such that all used memory by lpsolve is freed */
-		delete_lp(lp);
-	}
-
-	return(ret);
-}
 
 }
 
