@@ -2,7 +2,7 @@
 #  MAYBE_BONOBO = bonobo
 # endif
 
-SUBDIRS = po desktop distro-configs bin patches man doc fonts stamp src templates www # $(MAYBE_BONOBO)
+SUBDIRS = po desktop distro-configs bin etc patches man doc fonts stamp src templates www # $(MAYBE_BONOBO)
 
 include $(top_srcdir)/Makefile.shared
 
