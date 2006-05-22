@@ -22,7 +22,20 @@
 # pt_PT-pack.zip contains a dictionary also for pt_BR. Ditto for es_ES
 # and es_MX. Another quirk is no_NO-pack.zip which contains
 # dictionaries for nb_NO and nn_NO, but not no_NO. Handle those
-# manually.
+# manually: Copy pt_PT-pack.zip to pt_BR-pack.zip, and copy
+# es_ES-pack.zip to es_MX-pack.zip before running this script. Also
+# rename no_NO-pack.zip to nb_NO-pack.zip and copy it to
+# nn_NO-pack.zip.
+
+# An even more difficult case is Russian. ru_RU-pack.zip contains
+# ru_RU_ye.zip and ru_RU_yo.zip. ru_RU_ye.zip then inconsistently
+# contains a dictionary for ru_RU_ie (and not ru_RU_ye). You can spell
+# Russian in two "styles" or "variants", "ye" and "yo". But in OOo's
+# dictionary.lst you can have just one DICT for "ru RU" anyway, so you
+# will have to decide which one to have spell checking for and bundle
+# that. If I understand correctly, the "ye" variant is more informal,
+# and the "yo" variant more formal, and is the one usually taught to
+# non-native speakers and in primary school.
 
 . bin/setup
 
