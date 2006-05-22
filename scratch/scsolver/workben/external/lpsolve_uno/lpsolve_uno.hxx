@@ -115,6 +115,8 @@ public:
 		throw ( uno::RuntimeException );
 
 	virtual void SAL_CALL solve() throw ( uno::RuntimeException );
+	virtual double SAL_CALL getVar( sal_Int32 ) throw ( uno::RuntimeException );
+	virtual uno::Sequence<double> SAL_CALL getVars() throw ( uno::RuntimeException );
 
 private:
 	::std::auto_ptr<LpSolveImplData> m_pData;

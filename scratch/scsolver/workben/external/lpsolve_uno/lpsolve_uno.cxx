@@ -73,6 +73,7 @@ struct LpSolveImplData
 	
 	Reference<XComponentContext> CompContext;
 	Reference<XLpModel> LpModel;
+	::std::vector<double> DecVariables;
 };
 
 LpSolveImpl::LpSolveImpl( const Reference<XComponentContext>& xContext )
@@ -282,6 +283,8 @@ void SAL_CALL LpSolveImpl::solve() throw( RuntimeException )
 
 		// variable values
 		get_variables(lp, &row[0]);
+		::std::vector<double> cnVars( row.begin(), row.end() );
+		m_pData->DecVariables.swap( cnVars );
 		for ( int i = 0; i < nDecVarSize; ++i )
 			cout << get_col_name( lp, i + 1 ) << ": " << row[i] << endl;
 	}
@@ -289,6 +292,33 @@ void SAL_CALL LpSolveImpl::solve() throw( RuntimeException )
 		cout << "--- solution not found ---" << endl;
 
 	delete_lp(lp);
+}
+
+double LpSolveImpl::getVar( sal_Int32 id ) throw ( RuntimeException )
+{
+	if ( id < 0 )
+		throw RuntimeException( ascii("Negative argument not allowed"), *this );
+
+	size_t nColId = static_cast<size_t>(id);
+	if ( m_pData->DecVariables.size() <= id )
+		throw RuntimeException( ascii("ID out of range"), *this );
+
+	return m_pData->DecVariables[id];
+}
+
+Sequence<double> LpSolveImpl::getVars() throw ( RuntimeException )
+{
+	Sequence<double> cnVars( m_pData->DecVariables.size() );
+	double* pVars = cnVars.getArray();
+	vector<double>::iterator itr, 
+		itrBeg = m_pData->DecVariables.begin(),
+		itrEnd = m_pData->DecVariables.end();
+	for ( itr = itrBeg; itr != itrEnd; ++itr )
+	{
+		size_t i = distance( itrBeg, itr );
+		pVars[i] = *itr;
+	}
+	return cnVars;
 }
 
 //---------------------------------------------------------------------------
