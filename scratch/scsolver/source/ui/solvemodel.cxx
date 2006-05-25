@@ -158,6 +158,7 @@ void SolveModelImpl::parseConstraints()
 	vector< CellAddress >::iterator aAddrsBegin = aAddrs.begin(), aAddrsEnd = aAddrs.end();
 	CalcInterface* pCalc = m_pSolverImpl->getCalcInterface();
 	for ( pos = aAddrsBegin; pos != aAddrsEnd; ++pos )
+	{
 		// Run through the decision variable cells, store their originla formulas,
 		// and set "=0" to each of these cells.
 		table::CellAddress aAddr = *pos;
