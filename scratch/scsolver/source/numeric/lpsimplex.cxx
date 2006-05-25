@@ -412,8 +412,9 @@ void RevisedSimplexImpl::runTwoPhaseInitSearch( const vector<size_t>& aNonSatRow
 	// two phase search. (TODO: find a better approach)
 	static_cast<RevisedSimplex*>(algorithm.get())->setEnableTwoPhaseSearch( false );
 
-	model->solve( algorithm );
-	Matrix Xtmp( model->getSolution() );
+	algorithm->setModel( model.get() );
+	algorithm->solve();
+	Matrix Xtmp( algorithm->getSolution() );
 
 	size_t nANumRow = m_A.rows(), nANumCol = m_A.cols(), nA2NumCol = A2.cols();
 	for ( size_t i = nANumCol; i < nA2NumCol; ++i )

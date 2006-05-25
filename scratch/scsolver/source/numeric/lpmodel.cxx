@@ -115,11 +115,6 @@ public:
 	void setStandardConstraintMatrix( const Matrix&, const Matrix& );
 	void deleteConstraintMatrixColumns( const std::vector<size_t>& );
 	
-	void solve( BaseAlgorithm* );
-	void solve( const std::auto_ptr<BaseAlgorithm>& );
-	Matrix getSolution() const { return m_mxSolution; }
-	void setSolution( const Matrix& );
-
 private:
 	Matrix m_mxCost;	// row vector
 	Matrix m_mxConstraint;
@@ -133,15 +128,13 @@ private:
 	bool m_bVarPositive;
 
 	bool m_bVerbose;
-
-	Matrix m_mxSolution;
 	double m_fObjFuncConstant;
 };
 
 
 ModelImpl::ModelImpl() : 
 	m_mxCost( 0, 0 ), m_mxConstraint( 0, 0 ), m_mxRHS( 0, 0 ),
-	m_nPrecision( 2 ), m_bVarPositive( true ), m_bVerbose( false ), m_mxSolution( 0, 0 ),
+	m_nPrecision( 2 ), m_bVarPositive( true ), m_bVerbose( false ),
 	m_fObjFuncConstant( 0.0 )
 {
 }
@@ -155,8 +148,7 @@ ModelImpl::ModelImpl( const ModelImpl& other ) :
 	m_eGoal( other.m_eGoal ), 
 	m_nPrecision( other.m_nPrecision ), 
 	m_bVarPositive( other.m_bVarPositive ), 
-	m_bVerbose( other.m_bVerbose ), 
-	m_mxSolution( other.m_mxSolution )
+	m_bVerbose( other.m_bVerbose )
 {
 }
 
@@ -175,7 +167,6 @@ void ModelImpl::swap( ModelImpl& other ) throw()
 	std::swap( m_nPrecision, other.m_nPrecision );
 	std::swap( m_bVarPositive, other.m_bVarPositive );
 	std::swap( m_bVerbose, other.m_bVerbose );
-	m_mxSolution.swap( other.m_mxSolution );
 }
 
 void ModelImpl::setCostVectorElement( size_t nId, double fVal )
@@ -476,24 +467,6 @@ void ModelImpl::print() const
 	cout << repeatString( "-", 70 ) << endl;
 }
 
-void ModelImpl::solve( BaseAlgorithm* pAlgorithm )
-{
-	pAlgorithm->solve();
-	setSolution( pAlgorithm->getSolution() );
-}
-
-void ModelImpl::solve( const std::auto_ptr<BaseAlgorithm>& pAlgorithm )
-{
-	pAlgorithm->solve();
-	setSolution( pAlgorithm->getSolution() );
-}
-
-void ModelImpl::setSolution( const Matrix& other )
-{
-	Matrix m( other );
-	m_mxSolution.swap( m );
-}
-
 
 //---------------------------------------------------------------------------
 // Model
@@ -652,28 +625,6 @@ void Model::addConstraint( const std::vector< double >& v, Equality e, double fR
 void Model::setStandardConstraintMatrix( const Matrix& mxConst, const Matrix& mxRhs )
 {
 	m_pImpl->setStandardConstraintMatrix( mxConst, mxRhs );
-}
-
-void Model::solve( BaseAlgorithm* pAlgorithm )
-{
-	pAlgorithm->setModel( this );
-	m_pImpl->solve( pAlgorithm );
-}
-
-void Model::solve( const std::auto_ptr<BaseAlgorithm>& ptr )
-{
-	ptr->setModel( this );
-	m_pImpl->solve( ptr );
-}
-
-Matrix Model::getSolution() const
-{
-	return m_pImpl->getSolution();
-}
-
-void Model::setSolution( const Matrix& mx )
-{
-	m_pImpl->setSolution( mx );
 }
 
 

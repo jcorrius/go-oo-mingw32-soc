@@ -17,6 +17,7 @@ SLOFILES =  \
         $(SLO)$/lpbase.obj \
         $(SLO)$/lpmodel.obj \
         $(SLO)$/lpsimplex.obj \
+        $(SLO)$/lpuno.obj \
         $(SLO)$/matrix.obj \
         $(SLO)$/nlpbase.obj \
         $(SLO)$/nlpmodel.obj \

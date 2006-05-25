@@ -122,9 +122,10 @@ void SolveModelImpl::solve()
 	m_bSolved = false;
 	try
 	{
-		aModel.solve( algorithm );
+		algorithm->setModel( &aModel );
+		algorithm->solve();
 		m_bSolved = true;
-		m_mxSolution = aModel.getSolution();
+		m_mxSolution = algorithm->getSolution();
 		updateCells();
 		pMainDlg->showSolutionFound();
 	}
@@ -157,7 +158,6 @@ void SolveModelImpl::parseConstraints()
 	vector< CellAddress >::iterator aAddrsBegin = aAddrs.begin(), aAddrsEnd = aAddrs.end();
 	CalcInterface* pCalc = m_pSolverImpl->getCalcInterface();
 	for ( pos = aAddrsBegin; pos != aAddrsEnd; ++pos )
-	{
 		// Run through the decision variable cells, store their originla formulas,
 		// and set "=0" to each of these cells.
 		table::CellAddress aAddr = *pos;

@@ -93,12 +93,6 @@ public:
 	Equality getEqualityByRowId( size_t ) const;
 	void addConstraint( const std::vector<double>&, Equality, double );
 	void setStandardConstraintMatrix( const ::scsolver::numeric::Matrix&, const ::scsolver::numeric::Matrix& );
-	
-	void solve( BaseAlgorithm* );
-	void solve( const std::auto_ptr<BaseAlgorithm>& );
-
-	::scsolver::numeric::Matrix getSolution() const;
-	void setSolution( const ::scsolver::numeric::Matrix& );
 
 private:
 
