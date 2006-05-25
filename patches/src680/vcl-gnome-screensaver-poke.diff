@@ -1,0 +1,201 @@
+diff -rup ../src680-m165-orig/vcl/unx/gtk/app/makefile.mk vcl/unx/gtk/app/makefile.mk
+--- ../src680-m165-orig/vcl/unx/gtk/app/makefile.mk	2005-09-09 14:36:54.000000000 +0200
++++ vcl/unx/gtk/app/makefile.mk	2006-05-25 09:22:07.000000000 +0200
+@@ -58,7 +58,7 @@ dummy:
+ 
+ .IF "$(ENABLE_GTK)" != ""
+ 
+-PKGCONFIG_MODULES=gtk+-2.0
++PKGCONFIG_MODULES=gtk+-2.0 dbus-glib-1
+ .INCLUDE : pkg_config.mk
+ 
+ SLOFILES=\
+diff -rup ../src680-m165-orig/vcl/unx/gtk/gdi/makefile.mk vcl/unx/gtk/gdi/makefile.mk
+--- ../src680-m165-orig/vcl/unx/gtk/gdi/makefile.mk	2005-09-09 14:37:10.000000000 +0200
++++ vcl/unx/gtk/gdi/makefile.mk	2006-05-25 09:22:07.000000000 +0200
+@@ -55,7 +55,7 @@ dummy:
+ 
+ .IF "$(ENABLE_GTK)" != ""
+ 
+-PKGCONFIG_MODULES=gtk+-2.0
++PKGCONFIG_MODULES=gtk+-2.0 dbus-glib-1
+ .INCLUDE : pkg_config.mk
+ 
+ SLOFILES=\
+diff -rup ../src680-m165-orig/vcl/unx/gtk/window/gtkframe.cxx vcl/unx/gtk/window/gtkframe.cxx
+--- ../src680-m165-orig/vcl/unx/gtk/window/gtkframe.cxx	2006-05-25 10:55:26.000000000 +0200
++++ vcl/unx/gtk/window/gtkframe.cxx	2006-05-25 10:38:25.000000000 +0200
+@@ -66,6 +66,8 @@
+ 
+ using namespace com::sun::star;
+ 
++#include <dbus/dbus-glib-lowlevel.h>
++
+ int GtkSalFrame::m_nFloats = 0;
+ 
+ static USHORT GetKeyModCode( guint state )
+@@ -491,6 +493,8 @@ void GtkSalFrame::InitCommon()
+     m_hBackgroundPixmap = None;
+     m_nSavedScreenSaverTimeout = 0;
+     m_nExtStyle         = 0;
++	m_nGnomeScreenSaverPokeTimeoutId = 0;
++	m_pDBusConnection   = NULL;
+ 
+     gtk_widget_set_app_paintable( GTK_WIDGET(m_pWindow), TRUE );
+     gtk_widget_set_double_buffered( GTK_WIDGET(m_pWindow), FALSE );
+@@ -1559,6 +1563,42 @@ void GtkSalFrame::setAutoLock( bool bLoc
+ 					 sizeof( nMessage ) );
+ }
+ 
++#define GS_SERVICE   "org.gnome.ScreenSaver"
++#define GS_PATH      "/org/gnome/ScreenSaver"
++#define GS_INTERFACE "org.gnome.ScreenSaver"
++
++static gboolean
++pokeGnomeScreenSaver( gpointer data )
++{
++	DBusConnection *pConnection = (DBusConnection*) data;
++	DBusMessage *pMessage;
++	DBusError    pError;
++
++	g_return_val_if_fail( pConnection != NULL, FALSE );
++
++	dbus_error_init( &pError );
++
++	pMessage = dbus_message_new_method_call (GS_SERVICE, GS_PATH, GS_INTERFACE, "Poke");
++	if( pMessage == NULL ) {
++		OSL_TRACE( "Couldn't allocate the dbus message" );
++		return FALSE;
++	}
++
++	if( !dbus_connection_send( pConnection, pMessage, NULL ) )
++		OSL_TRACE( "could not send dbus message" );
++
++	dbus_connection_flush( pConnection );
++
++	dbus_message_unref( pMessage );
++
++	if( dbus_error_is_set( &pError ) )
++	  dbus_error_free( &pError );
++
++	OSL_TRACE( "Poke message sent" );
++
++	return TRUE;
++}
++
+ void GtkSalFrame::StartPresentation( BOOL bStart )
+ {
+ 	Display *pDisplay = GDK_DISPLAY_XDISPLAY( getGdkDisplay() );
+@@ -1571,6 +1611,7 @@ void GtkSalFrame::StartPresentation( BOO
+ 					 &bPreferBlanking, &bAllowExposures );
+ 	if( bStart )
+ 	{
++		/* disable X server built-in screensaver */
+ 		if ( nTimeout )
+ 		{
+ 			m_nSavedScreenSaverTimeout = nTimeout;
+@@ -1578,14 +1619,51 @@ void GtkSalFrame::StartPresentation( BOO
+ 			XSetScreenSaver( pDisplay, 0, nInterval,
+ 							 bPreferBlanking, bAllowExposures );
+ 		}
++
++		/* setup 30 seconds timeout to poke gnome-screensaver thru DBus connection */
++		if( !m_pDBusConnection ) {
++			DBusError pDBusError;
++
++			OSL_TRACE( "trying to create dbus connection" );
++
++			dbus_error_init( &pDBusError );
++			m_pDBusConnection = dbus_bus_get( DBUS_BUS_SESSION, &pDBusError );
++
++			if( dbus_error_is_set( &pError ) )
++			  dbus_error_free( &pDBusError );
++
++			if( m_pDBusConnection ) {
++				dbus_connection_setup_with_g_main( m_pDBusConnection, NULL );
++				OSL_TRACE( "dbus connection created" );
++
++				/* poke the screensaver now so that it doesn't kick in in the first 30 seconds of slideshow */
++				pokeGnomeScreenSaver( m_pDBusConnection );
++			}
++		}
++
++		if( m_pDBusConnection )
++			m_nGnomeScreenSaverPokeTimeoutId = g_timeout_add( 30000, pokeGnomeScreenSaver, m_pDBusConnection );
+ 	}
+ 	else
+ 	{
++		/* restore X server built-in screensaver settings */
+ 		if( m_nSavedScreenSaverTimeout )
+ 			XSetScreenSaver( pDisplay, m_nSavedScreenSaverTimeout,
+ 							 nInterval, bPreferBlanking,
+ 							 bAllowExposures );
+ 		m_nSavedScreenSaverTimeout = 0;
++
++		/* remove timeout for poking gnome-screensaver */
++		if( m_nGnomeScreenSaverPokeTimeoutId ) {
++			g_source_remove( m_nGnomeScreenSaverPokeTimeoutId );
++			m_nGnomeScreenSaverPokeTimeoutId = 0;
++			OSL_TRACE( "screensaver poking timeout removed" );
++
++			dbus_connection_disconnect( m_pDBusConnection );
++			dbus_connection_unref( m_pDBusConnection );
++			m_pDBusConnection = NULL;
++			OSL_TRACE( "dbus connection disconnected and unrefed" );
++		}
+ 	}
+ }
+ 
+Only in vcl/unx/gtk/window: gtkframe.cxx~
+Only in vcl/unx/gtk/window: gtkframe.cxx.orig
+diff -rup ../src680-m165-orig/vcl/unx/gtk/window/makefile.mk vcl/unx/gtk/window/makefile.mk
+--- ../src680-m165-orig/vcl/unx/gtk/window/makefile.mk	2005-09-09 14:38:24.000000000 +0200
++++ vcl/unx/gtk/window/makefile.mk	2006-05-25 09:22:07.000000000 +0200
+@@ -58,7 +58,7 @@ dummy:
+ 
+ .IF "$(ENABLE_GTK)" != ""
+ 
+-PKGCONFIG_MODULES=gtk+-2.0
++PKGCONFIG_MODULES=gtk+-2.0 dbus-glib-1
+ .INCLUDE : pkg_config.mk
+ 
+ SLOFILES=\
+diff -rup ../src680-m165-orig/vcl/unx/inc/plugins/gtk/gtkframe.hxx vcl/unx/inc/plugins/gtk/gtkframe.hxx
+--- ../src680-m165-orig/vcl/unx/inc/plugins/gtk/gtkframe.hxx	2006-05-25 10:55:26.000000000 +0200
++++ vcl/unx/inc/plugins/gtk/gtkframe.hxx	2006-05-25 09:22:07.000000000 +0200
+@@ -46,6 +46,10 @@
+ #include <com/sun/star/uno/Reference.hxx>
+ #include <com/sun/star/accessibility/XAccessible.hdl>
+ 
++#define DBUS_API_SUBJECT_TO_CHANGE
++#include <dbus/dbus.h>
++#include <dbus/dbus-glib.h>
++
+ #ifndef _SV_SALFRAME_HXX
+ #include <salframe.hxx>
+ #endif
+@@ -201,6 +205,9 @@ class GtkSalFrame : public SalFrame
+     Size                            m_aMaxSize;
+     Size                            m_aMinSize;
+     Rectangle                       m_aRestorePosSize;    
++
++	DBusConnection                 *m_pDBusConnection;
++	guint                           m_nGnomeScreenSaverPokeTimeoutId;
+     
+     void Init( SalFrame* pParent, ULONG nStyle );
+     void Init( SystemParentData* pSysData );
+Only in vcl/unx/inc/plugins/gtk: gtkframe.hxx.orig
+Only in vcl/: unxlngi6.pro
+diff -rup ../src680-m165-orig/vcl/util/makefile.mk vcl/util/makefile.mk
+--- ../src680-m165-orig/vcl/util/makefile.mk	2006-05-25 10:55:26.000000000 +0200
++++ vcl/util/makefile.mk	2006-05-25 09:22:07.000000000 +0200
+@@ -352,7 +352,7 @@ SHL3STDLIBS=\
+ 
+ # gtk plugin
+ .IF "$(ENABLE_GTK)" != ""
+-PKGCONFIG_MODULES=gtk+-2.0 gthread-2.0
++PKGCONFIG_MODULES=gtk+-2.0 gthread-2.0 dbus-glib-1
+ .INCLUDE: pkg_config.mk
+ 
+ LIB4TARGET=$(SLB)$/igtk_plug_
+
