@@ -6,6 +6,7 @@
 #include <com/sun/star/sheet/XSpreadsheetDocument.hpp>
 #include <com/sun/star/frame/XStorable.hpp>
 #include <com/sun/star/frame/XFrame.hpp>
+#include <com/sun/star/beans/XPropertySet.hpp>
 
 #include "vbaworksheet.hxx"
 #include "vbaworksheets.hxx"
@@ -49,8 +50,24 @@ public:
 ::rtl::OUString
 ScVbaWorkbook::getName() throw (uno::RuntimeException)
 {
-	INetURLObject aURL( getModel()->getURL() );
-	return aURL.GetLastName();
+	rtl::OUString sName = getModel()->getURL();
+	if ( sName.getLength() )
+	{
+
+		INetURLObject aURL( getModel()->getURL() );
+		sName = aURL.GetLastName();
+	}
+	else
+	{
+		const static rtl::OUString sTitle( RTL_CONSTASCII_USTRINGPARAM("Title" ) );
+		// process "UntitledX - $(PRODUCTNAME)"
+		uno::Reference< frame::XFrame > xFrame( getModel()->getCurrentController()->getFrame(), uno::UNO_QUERY_THROW );
+		uno::Reference< beans::XPropertySet > xProps( xFrame, uno::UNO_QUERY_THROW );
+		xProps->getPropertyValue(sTitle ) >>= sName;
+		sal_Int32 pos = 0;
+		sName = sName.getToken(0,' ',pos);	
+	}
+	return sName;
 }
 ::rtl::OUString
 ScVbaWorkbook::getPath() throw (uno::RuntimeException)

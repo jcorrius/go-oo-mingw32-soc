@@ -109,7 +109,9 @@ public:
 	virtual css::uno::Reference< oo::vba::XRange > SAL_CALL CurrentArray() throw (css::uno::RuntimeException);
 	virtual ::rtl::OUString SAL_CALL Characters( const css::uno::Any& nIndex, const css::uno::Any& nCount ) 
 												 throw (css::uno::RuntimeException);
-	virtual ::rtl::OUString SAL_CALL Address() throw (css::uno::RuntimeException);
+
+	virtual ::rtl::OUString SAL_CALL Address( const css::uno::Any& RowAbsolute, const css::uno::Any& ColumnAbsolute, const css::uno::Any& ReferenceStyle, const css::uno::Any& External, const css::uno::Any& RelativeTo ) throw (css::uno::RuntimeException);
+
 	virtual css::uno::Reference< oo::vba::XRange > SAL_CALL Cells( const css::uno::Any &nRow, const css::uno::Any &nCol ) 
 														  throw (css::uno::RuntimeException);
 	virtual void SAL_CALL Select() throw (css::uno::RuntimeException);

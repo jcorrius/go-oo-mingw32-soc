@@ -9,7 +9,7 @@
 #include "vbaapplication.hxx"
 #include "vbaworksheet.hxx"
 #include "vbarange.hxx"
-
+#include <cppuhelper/bootstrap.hxx>
 using namespace ::com::sun::star;
 using namespace ::com::sun::star::uno;
 using namespace ::org::openoffice;
@@ -34,10 +34,17 @@ namespace vbaobj
     }
 
     uno::Reference< XInterface > SAL_CALL create(
-        Reference< XComponentContext > const & xContext )
+//        Reference< XComponentContext > const & xContext )
+        Reference< lang::XMultiServiceFactory > const & xMultiContext )
         SAL_THROW( () )
     {
-		OSL_TRACE("In create component for vbaglobals");
+	Reference< XComponentContext > xContext = ::cppu::defaultBootstrap_InitialComponentContext();
+	if ( !xContext.is() )
+	{
+		OSL_TRACE("Failed to obtain context" );	
+		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("BARRRRRRF no context")), uno::Reference< uno::XInterface >() );
+	}
+	OSL_TRACE("In create component for vbaglobals");
         return static_cast< lang::XTypeProvider * >( new ScVbaGlobals( xContext ) );
     }
 

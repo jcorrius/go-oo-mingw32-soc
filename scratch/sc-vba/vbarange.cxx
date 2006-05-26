@@ -55,6 +55,7 @@
 #include <org/openoffice/vba/Excel/XlDirection.hpp>
 #include <org/openoffice/vba/Excel/XlSortDataOption.hpp>
 #include <org/openoffice/vba/Excel/XlDeleteShiftDirection.hpp>
+#include <org/openoffice/vba/Excel/XlReferenceStyle.hpp>
 
 
 #include <scitems.hxx>
@@ -802,44 +803,57 @@ ScVbaRange::Characters(const uno::Any& Start, const uno::Any& Length) throw (uno
 }
 
 ::rtl::OUString
-ScVbaRange::Address() throw (uno::RuntimeException)
+ScVbaRange::Address(  const uno::Any& RowAbsolute, const uno::Any& ColumnAbsolute, const uno::Any& ReferenceStyle, const uno::Any& External, const uno::Any& RelativeTo ) throw (uno::RuntimeException)
 {
-	::rtl::OUString aStart, aEnd;
-	uno::Sequence< uno::Any > aAddrArray1, aAddrArray2;	
-
-	uno::Reference< lang::XMultiComponentFactory > xSMgr( m_xContext->getServiceManager(), uno::UNO_QUERY_THROW );
-
-	uno::Reference< sheet::XFunctionAccess > xFunctionAccess( 
-		xSMgr->createInstanceWithContext(::rtl::OUString::createFromAscii(
-			"com.sun.star.sheet.FunctionAccess"), m_xContext), 
-			::uno::UNO_QUERY_THROW );
-	uno::Reference< sheet::XCellRangeAddressable > xCellRangeAddressable( mxRange, ::uno::UNO_QUERY_THROW );
-	if( aAddrArray1.getLength() == 0 )
+	ScAddress::Details dDetails( ScAddress::CONV_XL_A1, 0, 0 );
+	if ( ReferenceStyle.hasValue() )
 	{
-		aAddrArray1.realloc(2);
-		uno::Any* aArray = aAddrArray1.getArray();
-		aArray[0] = ( uno::Any )( xCellRangeAddressable->getRangeAddress().StartRow + 1 );
-		aArray[1] = ( uno::Any )( xCellRangeAddressable->getRangeAddress().StartColumn + 1 );
+		sal_Int32 refStyle = vba::Excel::XlReferenceStyle::xlA1;
+		ReferenceStyle >>= refStyle;
+		if ( refStyle == vba::Excel::XlReferenceStyle::xlR1C1 )
+			dDetails = ScAddress::Details( ScAddress::CONV_XL_R1C1, 0, 0 );
 	}
-	uno::Any aString1 = xFunctionAccess->callFunction(rtl::OUString(RTL_CONSTASCII_USTRINGPARAM("ADDRESS")), aAddrArray1);
-	aString1 >>= aStart;
-
-	if( xCellRangeAddressable->getRangeAddress().StartColumn == xCellRangeAddressable->getRangeAddress().EndColumn &&
-	xCellRangeAddressable->getRangeAddress().StartRow == xCellRangeAddressable->getRangeAddress().EndRow )
-	return aStart;
-
-	String aString(aStart);
-	aStart = rtl::OUString(aString.Append((sal_Unicode)':'));
-	if( aAddrArray2.getLength() == 0 )
+	USHORT nFlags = SCA_VALID;
+	ScDocument* pDoc =  getDocumentFromRange( mxRange );
+	RangeHelper thisRange( mxRange );	
+	table::CellRangeAddress thisAddress = thisRange.getCellRangeAddressable()->getRangeAddress();
+	ScRange aRange( thisAddress.StartColumn, thisAddress.StartRow, thisAddress.Sheet, thisAddress.EndColumn, thisAddress.EndRow, thisAddress.Sheet );
+	String sRange;
+	USHORT ROW_ABSOLUTE = ( SCA_ROW_ABSOLUTE | SCA_ROW2_ABSOLUTE );
+	USHORT COL_ABSOLUTE = ( SCA_COL_ABSOLUTE | SCA_COL2_ABSOLUTE );
+	// default
+	nFlags |= ( SCA_TAB_ABSOLUTE | SCA_COL_ABSOLUTE | SCA_ROW_ABSOLUTE | SCA_TAB2_ABSOLUTE | SCA_COL2_ABSOLUTE | SCA_ROW2_ABSOLUTE );
+	if ( RowAbsolute.hasValue() )
 	{
-		aAddrArray2.realloc(2);
-		uno::Any* aArray = aAddrArray2.getArray();
-		aArray[0] = ( uno::Any )( xCellRangeAddressable->getRangeAddress().EndRow + 1 );
-		aArray[1] = ( uno::Any )( xCellRangeAddressable->getRangeAddress().EndColumn + 1 );
+		sal_Bool bVal = sal_True;
+		RowAbsolute >>= bVal;
+		if ( !bVal )
+			nFlags &= ~ROW_ABSOLUTE;
 	}
-	uno::Any aString2 = xFunctionAccess->callFunction(rtl::OUString(RTL_CONSTASCII_USTRINGPARAM("ADDRESS")), aAddrArray2);
-	aString2 >>= aEnd;
-	return aStart.concat( aEnd );
+	if ( ColumnAbsolute.hasValue() )
+	{
+		sal_Bool bVal = sal_True;
+		ColumnAbsolute >>= bVal;
+		if ( !bVal )
+			nFlags &= ~COL_ABSOLUTE;
+	}
+	sal_Bool bLocal = sal_False;
+	if ( External.hasValue() )
+	{
+		External >>= bLocal;
+		if (  bLocal )
+			nFlags |= SCA_TAB_3D;
+	}
+	if ( RelativeTo.hasValue() )
+	{
+		// #TODO should I throw an error if R1C1 is not set?
+		
+		uno::Reference< table::XCellRange > xRanges = thisRange.getCellRangeFromSheet();		
+		table::CellRangeAddress refAddress = getCellRangeAddress( RelativeTo, xRanges );
+		dDetails = ScAddress::Details( ScAddress::CONV_XL_R1C1, refAddress.StartRow, refAddress.StartColumn );
+	}
+	aRange.Format( sRange,  nFlags, pDoc, dDetails ); 
+	return sRange;
 }
 
 uno::Reference < vba::XFont >
@@ -1650,8 +1664,9 @@ ScVbaRange::End( ::sal_Int32 Direction )  throw (css::uno::RuntimeException)
 	// the ActiveCell, there should be no need to go to these extreems
 	
 	// Save ActiveCell pos ( to restore later )
+	uno::Any aDft;
 	rtl::OUString sActiveCell =	ScVbaGlobals::getGlobalsImpl(
-                       m_xContext )->getApplication()->getActiveCell()->Address();
+                       m_xContext )->getApplication()->getActiveCell()->Address(aDft, aDft, aDft, aDft, aDft );
 
 	// position current cell upper left of this range
 	Cells( uno::makeAny( (sal_Int32) 1 ), uno::makeAny( (sal_Int32) 1 ) )->Select();
@@ -1693,7 +1708,7 @@ ScVbaRange::End( ::sal_Int32 Direction )  throw (css::uno::RuntimeException)
 
 	// result is the ActiveCell		
 	rtl::OUString sMoved =	ScVbaGlobals::getGlobalsImpl(
-                       m_xContext )->getApplication()->getActiveCell()->Address();
+                       m_xContext )->getApplication()->getActiveCell()->Address(aDft, aDft, aDft, aDft, aDft );
 
 	// restore old ActiveCell		
 	uno::Any aVoid;
