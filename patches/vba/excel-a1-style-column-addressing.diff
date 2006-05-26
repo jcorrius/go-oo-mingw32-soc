@@ -1,6 +1,19 @@
---- /data4/sles/ooo-buildm165/ooo-build/build/src680-m165/sc/source/core/tool/address.cxx	2006-05-10 12:09:35.000000000 +0100
-+++ sc/source/core/tool/address.cxx	2006-05-18 18:13:58.000000000 +0100
-@@ -427,6 +427,13 @@ lcl_ConvertSingleRef( BOOL& bExternal, c
+--- sc.old/source/core/tool/address.cxx	2006-05-22 08:25:12.000000000 +0100
++++ sc/source/core/tool/address.cxx	2006-05-25 17:21:29.000000000 +0100
+@@ -42,6 +42,12 @@
+ 
+ #include "globstr.hrc"
+ 
++#include <com/sun/star/frame/XModel.hpp>
++#include <com/sun/star/beans/XPropertySet.hpp>
++#include <sfx2/objsh.hxx>
++#include <tools/urlobj.hxx>
++using namespace ::com::sun::star;
++
+ ////////////////////////////////////////////////////////////////////////////
+ const ScAddress::Details ScAddress::detailsOOOa1( CONV_OOO, 0, 0 );
+ 
+@@ -427,6 +433,13 @@ lcl_ConvertSingleRef( BOOL& bExternal, c
          if( !nBits )
              p = q;
      }
@@ -14,7 +27,7 @@
      if ( bNeedExtTab )
      {
          if ( (nRes & SCA_VALID_ROW) && (nRes & SCA_VALID_COL)
-@@ -600,6 +607,9 @@ USHORT ScRange::Parse( const String& r, 
+@@ -600,6 +613,9 @@ USHORT ScRange::Parse( const String& r, 
              aEnd = aStart;  // die Tab _muss_ gleich sein, so ist`s weniger Code
              if ( nRes2 = lcl_ConvertSingleRef( bExternal, p + nPos+ 1, pDoc, aEnd, rDetails ) )
              {
@@ -24,7 +37,7 @@
                  if ( bExternal && aStart.Tab() != aEnd.Tab() )
                      nRes2 &= ~SCA_VALID_TAB;    // #REF!
                  else
-@@ -640,6 +650,18 @@ USHORT ScRange::Parse( const String& r, 
+@@ -640,6 +656,18 @@ USHORT ScRange::Parse( const String& r, 
                              == ( SCA_TAB_ABSOLUTE | SCA_TAB_3D ))
                              && !(nRes2 & SCA_TAB_3D) )
                          nRes2 |= SCA_TAB_ABSOLUTE;
@@ -43,7 +56,7 @@
                  }
              }
              else
-@@ -661,10 +673,15 @@ USHORT ScRange::ParseAny( const String& 
+@@ -661,14 +689,102 @@ USHORT ScRange::ParseAny( const String& 
          SCA_VALID_TAB2;
      if ( (nRet & nValid) != nValid )
      {
@@ -59,8 +72,197 @@
      }
      return nRet;
  }
---- /data4/sles/ooo-buildm165/ooo-build/build/src680-m165/sc/inc/address.hxx	2006-05-10 12:09:35.000000000 +0100
-+++ sc/inc/address.hxx	2006-05-18 18:25:08.000000000 +0100
+ 
++static String 
++getFileNameFromDoc(  ScDocument* pDoc )
++{
++	String sFileName;
++	SfxObjectShell* pShell = NULL;
++	if ( pDoc && ( pShell = pDoc->GetDocumentShell() ) )
++	{
++		uno::Reference< frame::XModel > xModel( pShell->GetModel(), uno::UNO_QUERY );
++		if ( xModel.is() )
++		{
++			if ( xModel->getURL().getLength() )
++			{
++				INetURLObject aURL( xModel->getURL() );
++				sFileName = aURL.GetLastName();
++			}
++			else
++			{
++				// Got to figure out what to do here, this path will
++				// be taken if the document has not being saved yet e.g.
++				// it's psuedo name = Untitled1...N I need to find out how to
++				// access that ( title of the frame perhaps? )
++				// .. trying that
++				const static rtl::OUString sTitle( RTL_CONSTASCII_USTRINGPARAM("Title" ) );
++				// parse "UntitledX - $(PRODUCTNAME)"
++				uno::Reference< beans::XPropertySet > xProps( xModel->getCurrentController()->getFrame(), uno::UNO_QUERY );
++				if ( xProps.is() )
++				{
++					rtl::OUString sUnoName;
++					xProps->getPropertyValue(sTitle ) >>= sUnoName;
++					sal_Int32 pos = 0;
++					sUnoName = sUnoName.getToken(0,' ',pos);
++					sFileName = sUnoName;
++				}
++			}
++		}		
++	}
++	return sFileName;
++}
++
++static void 
++append_external_address( String &r, USHORT nFlags, ScDocument* pDoc, USHORT nTab, const ScAddress::Details& rDetails)
++{
++	if( nFlags & SCA_TAB_3D )
++	{
++		String aTabName;
++
++		pDoc->GetName( nTab, aTabName );
++		//  externe Referenzen (wie in ScCompiler::MakeTabStr)
++		String aDoc;
++		if ( aTabName.GetChar(0) == '\'' )
++		{   // "'Doc'#Tab"
++			xub_StrLen nPos, nLen = 1;
++			while( (nPos = aTabName.Search( '\'', nLen ))
++				!= STRING_NOTFOUND )
++			nLen = nPos + 1;
++			if ( aTabName.GetChar(nLen) == SC_COMPILER_FILE_TAB_SEP )
++			{
++				aDoc = aTabName.Copy( 0, nLen + 1 );
++				aTabName.Erase( 0, nLen + 1 );
++			}
++		}
++		ScCompiler::CheckTabQuotes( aTabName );
++	
++		if (rDetails.eConv != ScAddress::CONV_OOO) {
++			String sDocName = getFileNameFromDoc( pDoc );
++			if ( sDocName.Len() ) // ahem, what to do if there is no doc name
++			{
++				r += '[';
++				r += sDocName;
++				r += ']';
++			}
++			r += aTabName;
++			r += '!';
++		} else {
++			r += aDoc;
++			if( nFlags & SCA_TAB_ABSOLUTE )
++				r += '$';
++			r += aTabName;
++			r += '.';
++		}
++	}	
++}
++
+ static void
+ r1c1_append_c ( String &r, int num, bool is_abs,
+ 				const ScAddress::Details& rDetails )
+@@ -718,38 +834,7 @@ void ScAddress::Format( String& r, USHOR
+             return;
+         }
+ //      if( nFlags & ( SCA_TAB_ABSOLUTE | SCA_TAB_3D ) )
+-        if( nFlags & SCA_TAB_3D )
+-        {
+-            String aTabName;
+-            pDoc->GetName( nTab, aTabName );
+-
+-            //  externe Referenzen (wie in ScCompiler::MakeTabStr)
+-            String aDoc;
+-            if ( aTabName.GetChar(0) == '\'' )
+-            {   // "'Doc'#Tab"
+-                xub_StrLen nPos, nLen = 1;
+-                while( (nPos = aTabName.Search( '\'', nLen ))
+-                        != STRING_NOTFOUND )
+-                    nLen = nPos + 1;
+-                if ( aTabName.GetChar(nLen) == SC_COMPILER_FILE_TAB_SEP )
+-                {
+-                    aDoc = aTabName.Copy( 0, nLen + 1 );
+-                    aTabName.Erase( 0, nLen + 1 );
+-                }
+-            }
+-            r += aDoc;
+-            ScCompiler::CheckTabQuotes( aTabName );
+-
+-			if (rDetails.eConv != CONV_OOO) {
+-				r += aTabName;
+-				r += '!';
+-			} else {
+-            if( nFlags & SCA_TAB_ABSOLUTE )
+-                r += '$';
+-            r += aTabName;
+-            r += '.';
+-        }
+-    }
++	    append_external_address( r, nFlags, pDoc, nTab, rDetails );
+     }
+ 	switch (rDetails.eConv) {
+ 	default :
+@@ -812,22 +897,51 @@ void ScRange::Format( String& r, USHORT 
+ 
+ 	case ScAddress::CONV_XL_A1: {
+ 		BOOL bOneTab = (aStart.Tab() == aEnd.Tab());
+-
+-		pDoc = NULL;
+-		aStart.Format( r, nFlags, pDoc, rDetails );
+-		if( aStart != aEnd )
++		USHORT nTmpFlags = nFlags;
++		String aName;
++		if (  aStart.Col() == 0 && aEnd.Col() >= MAXCOLCOUNT-1 )
+ 		{
+-			String aName;
+-			nFlags = ( nFlags & SCA_VALID ) | ( ( nFlags >> 4 ) & 0x070F );
+-			aEnd.Format( aName, nFlags, pDoc, rDetails );
+-			r += ':';
+-			r += aName;
++			// if range is a full row the address is like $2 
++			// ( with no col letter )
++			nFlags &= ~SCA_VALID_COL;
++			nFlags |= ( SCA_VALID_ROW | SCA_VALID_TAB );
++			nFlags &= ~SCA_VALID; // daft Format code
++			aStart.Format( r, nFlags, pDoc, rDetails );
++			aEnd.Format( aName, nFlags, NULL, rDetails );
+ 		}
+-}
++		else if ( aStart.Row() == 0 && aEnd.Row() >= MAXROWCOUNT-1 )
++		{
++			// if range is a full column the address is like $C 
++			// ( with no row num )
++			nFlags &= ~SCA_VALID_ROW;
++			nFlags |= ( SCA_VALID_COL | SCA_VALID_TAB );
++			nFlags &= ~SCA_VALID; // daft Format code
++			aStart.Format( r, nFlags, pDoc, rDetails );
++			aEnd.Format( aName, nFlags, NULL, rDetails );
++		}
++		else
++		{
++			aStart.Format( r, nFlags, pDoc, rDetails );
++			if( aStart != aEnd )
++			{
++				pDoc = NULL;
++				nFlags = ( nFlags & SCA_VALID ) | ( ( nFlags >> 4 ) & 0x070F );
++				aEnd.Format( aName, nFlags, pDoc, rDetails );
++			}
++		}
++		if ( aName.Len() )
++		{
++				r += ':';
++				r += aName;
++		}
++	}
+ 	break;
+ 
+ 	case ScAddress::CONV_XL_R1C1:
+ #define	absrel_differ(nFlags, mask)	(((nFlags) & (mask)) ^ (((nFlags) >> 4) & (mask)))
++	
++		append_external_address( r, nFlags, pDoc, aStart.Tab(), rDetails );
++		
+ 		/* be sure to use else if so that a1:iv65535 does not vanish */
+ 		if( aStart.Col() == 0 && aEnd.Col() >= MAXCOLCOUNT-1 )
+ 		{
+--- sc.old/inc/address.hxx	2006-05-22 08:25:12.000000000 +0100
++++ sc/inc/address.hxx	2006-05-25 16:48:10.000000000 +0100
 @@ -221,6 +221,7 @@ inline bool ValidColRowTab( SCCOL nCol, 
  #define SCA_VALID_ROW       0x0100
  #define SCA_VALID_COL       0x0200
