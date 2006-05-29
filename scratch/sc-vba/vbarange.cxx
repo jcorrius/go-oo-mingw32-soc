@@ -223,14 +223,14 @@ const ::rtl::OUString RANGE_PROPERTY_DFLT( RTL_CONSTASCII_USTRINGPARAM( "_$Defau
 const ::rtl::OUString ISVISIBLE(  RTL_CONSTASCII_USTRINGPARAM( "IsVisible"));
 const ::rtl::OUString WIDTH(  RTL_CONSTASCII_USTRINGPARAM( "Width"));
 
-class CellValueSetter : public ArrayVisitor
+class CellValueSetter : public ValueSetter
 {
 protected:
 	uno::Any maValue;
 	uno::TypeClass mTypeClass;
-	bool processValue( const uno::Any& aValue,  const uno::Reference< table::XCell >& xCell );
 public:
 	CellValueSetter( const uno::Any& aValue );
+	virtual bool processValue( const uno::Any& aValue,  const uno::Reference< table::XCell >& xCell );
 	virtual void visitNode( sal_Int32 x, sal_Int32 y, const uno::Reference< table::XCell >& xCell );
 		
 };
@@ -291,15 +291,16 @@ CellValueSetter::processValue( const uno::Any& aValue, const uno::Reference< tab
 		
 }
 
-class CellValueGetter : public ArrayVisitor
+
+class CellValueGetter : public ValueGetter
 {
 protected:
 	uno::Any maValue;
 	uno::TypeClass mTypeClass;
-	virtual void processValue( sal_Int32 x, sal_Int32 y, const uno::Any& aValue );
 public:
 	CellValueGetter() {}
 	virtual void visitNode( sal_Int32 x, sal_Int32 y, const uno::Reference< table::XCell >& xCell );
+	virtual void processValue( sal_Int32 x, sal_Int32 y, const uno::Any& aValue );
 	const uno::Any& getValue() const { return maValue; }
 		
 };
@@ -344,9 +345,43 @@ void CellValueGetter::visitNode( sal_Int32 x, sal_Int32 y, const uno::Reference<
 	processValue( x,y,aValue );
 }
 
-class Dim2ArrayValueGetter : public CellValueGetter
+class CellFormulaValueSetter : public CellValueSetter
+{
+public:
+	CellFormulaValueSetter( const uno::Any& aValue ):CellValueSetter( aValue ){}
+protected:
+	bool processValue( const uno::Any& aValue, const uno::Reference< table::XCell >& xCell )
+	{
+		rtl::OUString sFormula;
+		if ( aValue >>= sFormula )
+		{
+			xCell->setFormula( sFormula );
+			return true;
+		}
+		return false;
+	}
+		
+};
+
+class CellFormulaValueGetter : public CellValueGetter
+{
+public:
+	CellFormulaValueGetter():CellValueGetter() {}
+	virtual void visitNode( sal_Int32 x, sal_Int32 y, const uno::Reference< table::XCell >& xCell )
+	{
+		uno::Any aValue;
+		aValue <<= xCell->getFormula();	
+		processValue( x,y,aValue );
+	}
+		
+};
+
+
+class Dim2ArrayValueGetter : public ArrayVisitor
 {
 protected:
+	uno::Any maValue;
+	ValueGetter& mValueGetter;
 	virtual void processValue( sal_Int32 x, sal_Int32 y, const uno::Any& aValue )
 	{
 		uno::Sequence< uno::Sequence< uno::Any > >& aMatrix = *( uno::Sequence< uno::Sequence< uno::Any > >* )( maValue.getValue() );
@@ -354,7 +389,7 @@ protected:
 	}
 
 public:
-	Dim2ArrayValueGetter(sal_Int32 nRowCount, sal_Int32 nColCount ):CellValueGetter() 
+	Dim2ArrayValueGetter(sal_Int32 nRowCount, sal_Int32 nColCount, ValueGetter& rValueGetter ): mValueGetter(rValueGetter) 
 	{
 		uno::Sequence< uno::Sequence< uno::Any > > aMatrix;
 		aMatrix.realloc( nRowCount );	
@@ -362,16 +397,25 @@ public:
 			aMatrix[index].realloc( nColCount );
 		maValue <<= aMatrix;
 	}
+	void visitNode( sal_Int32 x, sal_Int32 y, const uno::Reference< table::XCell >& xCell )
+
+	{
+		mValueGetter.visitNode( x, y, xCell );
+		processValue( x, y, mValueGetter.getValue() );
+	}
+	const uno::Any& getValue() const { return maValue; }
+
 };
 
 const static rtl::OUString sNA = rtl::OUString::createFromAscii("#N/A"); 
 
-class Dim1ArrayValueSetter : public CellValueSetter
+class Dim1ArrayValueSetter : public ArrayVisitor
 {
 	uno::Sequence< uno::Any > aMatrix;
 	sal_Int32 nColCount;
+	ValueSetter& mCellValueSetter;
 public:
-	Dim1ArrayValueSetter( const uno::Any& aValue ) : CellValueSetter( aValue )
+	Dim1ArrayValueSetter( const uno::Any& aValue, ValueSetter& rCellValueSetter ):mCellValueSetter( rCellValueSetter )
 	{
 		aValue >>= aMatrix;
 		nColCount = aMatrix.getLength();
@@ -379,32 +423,35 @@ public:
 	virtual void visitNode( sal_Int32 x, sal_Int32 y, const uno::Reference< table::XCell >& xCell )
 	{
 		if ( y < nColCount )
-			processValue( aMatrix[ y ], xCell );
+			mCellValueSetter.processValue( aMatrix[ y ], xCell );
 		else
-			processValue( uno::makeAny( sNA ), xCell );
+			mCellValueSetter.processValue( uno::makeAny( sNA ), xCell );
 	}
 };
 
 
 
-class Dim2ArrayValueSetter : public CellValueSetter
+class Dim2ArrayValueSetter : public ArrayVisitor
 {
 	uno::Sequence< uno::Sequence< uno::Any > > aMatrix;
+	ValueSetter& mCellValueSetter;
 	sal_Int32 nRowCount;
 	sal_Int32 nColCount;
 public:
-	Dim2ArrayValueSetter( const uno::Any& aValue ) : CellValueSetter( aValue )
+	Dim2ArrayValueSetter( const uno::Any& aValue, ValueSetter& rCellValueSetter ) : mCellValueSetter( rCellValueSetter )
 	{
 		aValue >>= aMatrix;
 		nRowCount = aMatrix.getLength();
 		nColCount = aMatrix[0].getLength();  
 	}
+
 	virtual void visitNode( sal_Int32 x, sal_Int32 y, const uno::Reference< table::XCell >& xCell )
 	{
 		if ( x < nRowCount && y < nColCount )
-			processValue( aMatrix[ x ][ y ], xCell );
+			mCellValueSetter.processValue( aMatrix[ x ][ y ], xCell );
 		else
-			processValue( uno::makeAny( sNA ), xCell );
+			mCellValueSetter.processValue( uno::makeAny( sNA ), xCell );
+			
 	}
 };
 
@@ -535,29 +582,35 @@ ScVbaRange::visitArray( ArrayVisitor& visitor )
 
 
 
-
-uno::Any SAL_CALL
-ScVbaRange::getValue() throw (uno::RuntimeException)
+uno::Any 
+ScVbaRange::getValue( ValueGetter& valueGetter) throw (uno::RuntimeException)
 {
 	uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, uno::UNO_QUERY_THROW );
 	// single cell range
 	if ( isSingleCellRange() )
 	{
-		CellValueGetter getter;
-		visitArray( getter );
-		return getter.getValue();
+		visitArray( valueGetter );
+		return valueGetter.getValue();
 	}
 	sal_Int32 nRowCount = xColumnRowRange->getRows()->getCount();
 	sal_Int32 nColCount = xColumnRowRange->getColumns()->getCount();
 	// multi cell range ( return array )
-	Dim2ArrayValueGetter getter( nRowCount, nColCount );
-	visitArray( getter );
-	return uno::makeAny( script::ArrayWrapper( sal_False, getter.getValue() ) );
+	Dim2ArrayValueGetter arrayGetter( nRowCount, nColCount, valueGetter );
+	visitArray( arrayGetter );
+	return uno::makeAny( script::ArrayWrapper( sal_False, arrayGetter.getValue() ) );
+}
+
+uno::Any SAL_CALL
+ScVbaRange::getValue() throw (uno::RuntimeException)
+{
+	CellValueGetter valueGetter;
+	return getValue( valueGetter );
 
 }
 
-void SAL_CALL
-ScVbaRange::setValue( const uno::Any  &aValue  ) throw (uno::RuntimeException)
+
+void 
+ScVbaRange::setValue(  const uno::Any  &aValue,  ValueSetter& valueSetter ) throw (uno::RuntimeException)
 {
 	uno::TypeClass aClass = aValue.getValueTypeClass();
 	if ( aClass == uno::TypeClass_SEQUENCE )
@@ -571,13 +624,13 @@ ScVbaRange::setValue( const uno::Any  &aValue  ) throw (uno::RuntimeException)
 			if ( aValue.getValueTypeName().indexOf('[') ==  aValue.getValueTypeName().lastIndexOf('[') )
 			{
 				aConverted = xConverter->convertTo( aValue, getCppuType((uno::Sequence< uno::Any >*)0) );
-				Dim1ArrayValueSetter setter( aConverted );
+				Dim1ArrayValueSetter setter( aConverted, valueSetter );
 				visitArray( setter );
 			}
 			else
 			{
 				aConverted = xConverter->convertTo( aValue, getCppuType((uno::Sequence< uno::Sequence< uno::Any > >*)0) );
-				Dim2ArrayValueSetter setter( aConverted );
+				Dim2ArrayValueSetter setter( aConverted, valueSetter );
 				visitArray( setter );
 			}
 		}
@@ -590,9 +643,15 @@ ScVbaRange::setValue( const uno::Any  &aValue  ) throw (uno::RuntimeException)
 	}
 	else
 	{
-		CellValueSetter setter( aValue );
-		visitArray( setter );
+		visitArray( valueSetter );
 	}
+}
+
+void SAL_CALL
+ScVbaRange::setValue( const uno::Any  &aValue ) throw (uno::RuntimeException)
+{
+	CellValueSetter valueSetter( aValue );
+	setValue( aValue, valueSetter );
 }
 
 void
@@ -633,20 +692,21 @@ ScVbaRange::ClearFormats() throw (uno::RuntimeException)
 	xSheetOperation->clearContents(sheet::CellFlags::HARDATTR | sheet::CellFlags::FORMATTED | sheet::CellFlags::EDITATTR);
 }
 
-::rtl::OUString
+uno::Any
 ScVbaRange::getFormula() throw (::com::sun::star::uno::RuntimeException)
 {
-	uno::Reference< table::XCell > xCell( mxRange->getCellByPosition( 0, 0 ), uno::UNO_QUERY_THROW );
-	return xCell->getFormula();
+	CellFormulaValueGetter valueGetter;
+	return getValue( valueGetter );
 }
 
 void
-ScVbaRange::setFormula(const ::rtl::OUString &rFormula ) throw (uno::RuntimeException)
+ScVbaRange::setFormula(const uno::Any &rFormula ) throw (uno::RuntimeException)
 {
-	setValue( uno::makeAny( rFormula ) );
+	CellFormulaValueSetter formulaValueSetter( rFormula );
+	setValue( rFormula, formulaValueSetter );
 }
 
-::rtl::OUString
+uno::Any
 ScVbaRange::getFormulaR1C1() throw (::com::sun::star::uno::RuntimeException)
 {
 	//#TODO FIXME needs its own implementation when R1C1 stuff
@@ -655,7 +715,7 @@ ScVbaRange::getFormulaR1C1() throw (::com::sun::star::uno::RuntimeException)
 }
 
 void
-ScVbaRange::setFormulaR1C1(const ::rtl::OUString &rFormula ) throw (uno::RuntimeException)
+ScVbaRange::setFormulaR1C1(const uno::Any& rFormula ) throw (uno::RuntimeException)
 {
 	//#TODO FIXME needs its own implementation when R1C1 stuff
 	// is available
