@@ -1,3 +1,57 @@
+diff -rupp /data4/sles/ooo-mLnew/ooo-build/build/ooc680-m2/basic/source/comp/parser.cxx basic/source/comp/parser.cxx
+--- /data4/sles/ooo-mLnew/ooo-build/build/ooc680-m2/basic/source/comp/parser.cxx	2006-05-22 08:25:25.000000000 +0100
++++ basic/source/comp/parser.cxx	2006-05-30 11:43:19.000000000 +0100
+@@ -605,7 +605,12 @@ void SbiParser::Set()
+ 		if( pDef->GetTypeId() )
+ 			aGen.Gen( _SETCLASS, pDef->GetTypeId() );
+ 		else
+-			aGen.Gen( _SET );
++		{
++			if ( bVBASupportOn )
++				aGen.Gen( _VBASET );		
++			else
++				aGen.Gen( _SET );
++		}
+ 	}
+ 	// aGen.Gen( _SET );
+ }
+diff -rupp /data4/sles/ooo-mLnew/ooo-build/build/ooc680-m2/basic/source/inc/opcodes.hxx basic/source/inc/opcodes.hxx
+--- /data4/sles/ooo-mLnew/ooo-build/build/ooc680-m2/basic/source/inc/opcodes.hxx	2005-09-29 17:31:38.000000000 +0100
++++ basic/source/inc/opcodes.hxx	2006-05-30 11:50:31.000000000 +0100
+@@ -98,6 +98,7 @@ enum SbiOpcode {
+ 	_RSET,              // Speichern Objekt TOS ==> TOS-1
+ 	_REDIMP_ERASE,		// Copies array to be later used by REDIM PRESERVE before erasing it
+ 	_INITFOREACH,
++	_VBASET,            // VBA-like Set
+ 	SbOP0_END,
+ 
+ 	// Alle Opcodes mit einem Operanden
+diff -rupp /data4/sles/ooo-mLnew/ooo-build/build/ooc680-m2/basic/source/inc/runtime.hxx basic/source/inc/runtime.hxx
+--- /data4/sles/ooo-mLnew/ooo-build/build/ooc680-m2/basic/source/inc/runtime.hxx	2006-05-22 08:25:25.000000000 +0100
++++ basic/source/inc/runtime.hxx	2006-05-30 14:23:17.000000000 +0100
+@@ -434,8 +434,8 @@ class SbiRuntime
+ 	void StepNOT(),     StepCAT(),      StepLIKE(),     StepIS();
+ 	void StepCLONE(),   StepOLDBASED(), StepARGC();
+ 	void StepARGV(),    StepINPUT(),	StepLINPUT(),	StepSTOP();
+-	void StepGET(),		StepSET(),	 	StepPUT(),		StepPUTC();
+-	void StepSET_Impl( SbxVariableRef& refVal, SbxVariableRef& refVar );
++	void StepGET(),		StepSET(),	StepVBASET(), 	 	StepPUT(),		StepPUTC();
++	void StepSET_Impl( SbxVariableRef& refVal, SbxVariableRef& refVar, bool bDefaultHandling = true );
+ 	void StepDIM(),     StepREDIM(),	StepREDIMP(),	StepERASE();
+ 	void StepINITFOR(), StepNEXT(),		StepERROR(),	StepINITFOREACH();
+ 	void StepCASE(),	StepENDCASE(),  StepSTDERROR();
+diff -rupp /data4/sles/ooo-mLnew/ooo-build/build/ooc680-m2/basic/source/runtime/runtime.cxx basic/source/runtime/runtime.cxx
+--- /data4/sles/ooo-mLnew/ooo-build/build/ooc680-m2/basic/source/runtime/runtime.cxx	2006-05-22 08:25:25.000000000 +0100
++++ basic/source/runtime/runtime.cxx	2006-05-30 14:45:51.000000000 +0100
+@@ -154,6 +154,7 @@ SbiRuntime::pStep0 SbiRuntime::aStep0[] 
+ 	MEMBER(SbiRuntime::StepRSET),		// Speichern Objekt TOS ==> TOS-1
+ 	MEMBER(SbiRuntime::StepREDIMP_ERASE),// Copy array object for REDIMP
+ 	MEMBER(SbiRuntime::StepINITFOREACH),// Init for each loop
++	MEMBER(SbiRuntime::StepVBASET),// vba-like set statement
+ };
+ 
+ SbiRuntime::pStep1 SbiRuntime::aStep1[] = {	// Alle Opcodes mit einem Operanden
+
 Index: basic/source/runtime/step0.cxx
 ===================================================================
 RCS file: /cvs/script/basic/source/runtime/step0.cxx,v
@@ -88,9 +142,12 @@ diff -u -p -r1.21 step0.cxx
  	if( bFlagsChanged )
  		refVar->SetFlags( n );
  }
-@@ -226,28 +284,49 @@ void SbiRuntime::StepPUT()
+@@ -224,30 +282,51 @@ void SbiRuntime::StepPUT()
+ // Speichern Objektvariable
+ // Nicht-Objekt-Variable fuehren zu Fehlern
  
- void SbiRuntime::StepSET_Impl( SbxVariableRef& refVal, SbxVariableRef& refVar )
+-void SbiRuntime::StepSET_Impl( SbxVariableRef& refVal, SbxVariableRef& refVar )
++void SbiRuntime::StepSET_Impl( SbxVariableRef& refVal, SbxVariableRef& refVar, bool bHandleDefaultProp )
  {
 +	bool bVBAInterop =  SbiRuntime::isVBAEnabled(); 
  	// #67733 Typen mit Array-Flag sind auch ok
@@ -149,57 +206,60 @@ diff -u -p -r1.21 step0.cxx
  
  		// #52896 Wenn Uno-Sequences bzw. allgemein Arrays einer als
  		// Object deklarierten Variable zugewiesen werden, kann hier
-@@ -270,8 +349,64 @@ void SbiRuntime::StepSET_Impl( SbxVariab
+@@ -270,8 +349,67 @@ void SbiRuntime::StepSET_Impl( SbxVariab
  			SbProcedureProperty* pProcProperty = PTR_CAST(SbProcedureProperty,(SbxVariable*)refVar);
  			if( pProcProperty )
  				pProcProperty->setSet( true );
 +#ifdef ENABLE_VBA
-+			// get default properties for lhs & rhs where necessary
-+			// have to be careful though where a lhs object is null
-+			// meaning a 'set something = someObject' has taken places
-+			// which means we don't want to get the default prop for the rhs
-+			SbxVariable* defaultProp = NULL;
-+			bool bLHSHasDefaultProp = false;
-+			// LHS try determine if a default prop exists
-+			if ( bVBAInterop
-+				&& ( refVar->GetType() == SbxOBJECT ) )
++			if ( bHandleDefaultProp )
 +			{
-+					SbxVariable* pDflt = getDefaultProp( refVar );
-+					if ( pDflt )
-+					{
-+						refVar = pDflt;
-+						bLHSHasDefaultProp = true;
-+					}
-+			}
-+			// RHS only get a default prop is the rhs has one
-+			if ( bVBAInterop
-+				&& ( refVal->GetType() == SbxOBJECT ) )
-+			{
-+				// check if lhs is a null object
-+				// if it is then use the object not the default property
-+				SbxObject* pObj = NULL;
-+
-+				if ( refVar->GetType() == SbxOBJECT || refVar->GetType() == SbxEMPTY ) 
++				// get default properties for lhs & rhs where necessary
++				// have to be careful though where a lhs object is null
++				// meaning a 'set something = someObject' has taken places
++				// which means we don't want to get the default prop for the rhs
++				SbxVariable* defaultProp = NULL;
++				bool bLHSHasDefaultProp = false;
++				// LHS try determine if a default prop exists
++				if ( bVBAInterop
++					&& ( refVar->GetType() == SbxOBJECT ) )
 +				{
-+					
-+					pObj = PTR_CAST(SbxObject,(SbxVariable*)refVar);
- 
-+					// calling GetObject on a SbxEMPTY variable raises
-+					// object not set errors, make sure its an Object
-+					if ( !pObj && refVar->GetType() == SbxOBJECT )
++						SbxVariable* pDflt = getDefaultProp( refVar );
++						if ( pDflt )
++						{
++							refVar = pDflt;
++							bLHSHasDefaultProp = true;
++						}
++				}
++				// RHS only get a default prop is the rhs has one
++				if ( bVBAInterop
++					&& ( refVal->GetType() == SbxOBJECT ) )
++				{
++					// check if lhs is a null object
++					// if it is then use the object not the default property
++					SbxObject* pObj = NULL;
++	
++					if ( refVar->GetType() == SbxOBJECT || refVar->GetType() == SbxEMPTY ) 
 +					{
-+						SbxBase* pObjVarObj = refVar->GetObject();
-+						pObj = PTR_CAST(SbxObject,pObjVarObj);
-+					}	
-+					SbxVariable* pDflt = NULL;
-+					if ( pObj || bLHSHasDefaultProp )
-+						// lhs is either a valid object || or has a defaultProp
-+						// e.g. ( NOT a 'set obj = anotherObj' operation )
-+						pDflt = getDefaultProp( refVal );
-+					if ( pDflt )
-+						refVal = pDflt;
-+				}		
-+			}
++					
++						pObj = PTR_CAST(SbxObject,(SbxVariable*)refVar);
+ 
++						// calling GetObject on a SbxEMPTY variable raises
++						// object not set errors, make sure its an Object
++						if ( !pObj && refVar->GetType() == SbxOBJECT )
++						{
++							SbxBase* pObjVarObj = refVar->GetObject();
++							pObj = PTR_CAST(SbxObject,pObjVarObj);
++						}	
++						SbxVariable* pDflt = NULL;
++						if ( pObj || bLHSHasDefaultProp )
++							// lhs is either a valid object || or has a defaultProp
++							// e.g. ( NOT a 'set obj = anotherObj' operation )
++							pDflt = getDefaultProp( refVal );
++						if ( pDflt )
++							refVal = pDflt;
++					}		
++				}
++			}	
 +#endif //ENABLE_VBA
 +			
  			*refVar = *refVal;
@@ -214,6 +274,23 @@ diff -u -p -r1.21 step0.cxx
  			// #67607 Uno-Structs kopieren
  			checkUnoStructCopy( refVal, refVar );
  			if( bFlagsChanged )
+@@ -288,6 +426,15 @@ void SbiRuntime::StepSET()
+ 	StepSET_Impl( refVal, refVar );
+ }
+ 
++void SbiRuntime::StepVBASET()
++{
++	SbxVariableRef refVal = PopVar();
++	SbxVariableRef refVar = PopVar();
++	// don't handle default property
++	StepSET_Impl( refVal, refVar, false );
++}
++
++
+ // JSM 07.10.95
+ void SbiRuntime::StepLSET()
+ {
+
 --- basic.orig/source/classes/sbunoobj.cxx	2005-10-06 23:48:06.000000000 +0100
 +++ basic/source/classes/sbunoobj.cxx	2005-10-10 10:25:20.000000000 +0100
 @@ -137,6 +137,56 @@
