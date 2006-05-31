@@ -25,31 +25,31 @@
  *
  ************************************************************************/
 
-#ifndef _LPUNO_HXX_
-#define _LPUNO_HXX_
+#ifndef _SCSOLVER_LPSOLVE_HXX_
+#define _SCSOLVER_LPSOLVE_HXX_
 
 #include "lpbase.hxx"
-#include "unoglobal.hxx"
 #include <memory>
 
 namespace scsolver {
 
-class CalcInterface;
-
 namespace numeric { namespace opres { namespace lp {
 
-class UnoAlgorithmImpl;
+class LpSolveImpl;
 
-class UnoAlgorithm : public BaseAlgorithm
+/**
+ * This class is a front-end for the lp_solve MILP library.
+ */
+class LpSolve : public BaseAlgorithm
 {
 public:
-	UnoAlgorithm( const rtl::OUString&, CalcInterface* );
-	virtual ~UnoAlgorithm() throw();
+	LpSolve();
+	virtual ~LpSolve() throw();
 
 	virtual void solve();
 
 private:
-	std::auto_ptr<UnoAlgorithmImpl> m_pImpl;
+	std::auto_ptr<LpSolveImpl> m_pImpl;
 };
 
 

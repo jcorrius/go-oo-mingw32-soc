@@ -28,7 +28,7 @@ typedef bnu::matrix_slice< Mx > MxSlice;
 class NonSquareMatrix : public ::std::exception {};
 
 template<typename Data>
-void printElements( const std::vector<Data>& cn, const char* sep = "" )
+static void printElements( const std::vector<Data>& cn, const char* sep = "" )
 {
 	copy( cn.begin(), cn.end(), ostream_iterator<Data>( cout, sep ) );
 	cout << endl;

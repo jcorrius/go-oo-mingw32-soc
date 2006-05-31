@@ -68,7 +68,10 @@ namespace com { namespace sun { namespace star {
 
 namespace scsolver {
 
-/** This class is the only class that interfaces with the Calc document component.
+/**
+ *  This class is the only class that interfaces with the Calc
+ *  document component.  If you want access to the service
+ *  manager, then this class is it.
  */
 class CalcInterface
 {

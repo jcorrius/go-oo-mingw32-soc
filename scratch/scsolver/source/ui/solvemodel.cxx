@@ -37,10 +37,15 @@
 #include "numeric/lpbase.hxx"
 #include "numeric/lpsimplex.hxx"
 
+#ifdef ENABLE_SCSOLVER_UNO_ALGORITHM
+#include "numeric/lpuno.hxx"
+#endif
+
 #include <memory>
 #include <exception>
 
 using namespace std;
+using namespace scsolver::numeric::opres;
 using scsolver::numeric::Matrix;
 using com::sun::star::table::CellAddress;
 
@@ -75,6 +80,8 @@ private:
 	
 	SolverImpl* getSolverImpl() const { return m_pSolverImpl; }
 
+	auto_ptr<lp::BaseAlgorithm> getLpAlgorithm() const;
+
 	void parseConstraints();
 	void resolveConstraintAddress();
 	void resolveDecisionVarAddress();
@@ -93,14 +100,37 @@ SolveModelImpl::~SolveModelImpl() throw()
 {
 }
 
+/**
+ * This method returns an algorithm object to use to solve a
+ * given LP model.  While all this method does currently is
+ * simply return the pre-selected algorithm, in future this
+ * method may be used to pick a user-selected algorithm based on
+ * his/her settings.
+ * 
+ * @return auto_ptr<lp::BaseAlgorithm>
+ */
+auto_ptr<lp::BaseAlgorithm> SolveModelImpl::getLpAlgorithm() const
+{
+#ifdef ENABLE_SCSOLVER_UNO_ALGORITHM
+	auto_ptr<lp::BaseAlgorithm> algorithm( new lp::UnoAlgorithm(
+		ascii("org.openoffice.sc.solver.LpSolve"), getSolverImpl()->getCalcInterface() ) );
+#else
+	auto_ptr<lp::BaseAlgorithm> algorithm( new lp::RevisedSimplex );
+#endif
+
+	return algorithm;
+}
+
 /** This is THE method which takes model parameters from the dialog,
 	constructs an internal representation of a model, chooses an algorithm,
 	and solves it. */
 void SolveModelImpl::solve()
 {
-	numeric::opres::Goal eGoal = m_pSolverImpl->getMainDialog()->getGoal();
+	using namespace numeric::opres;
+
+	Goal eGoal = m_pSolverImpl->getMainDialog()->getGoal();
 	SolverDialog* pMainDlg = getSolverImpl()->getMainDialog();
-	if ( eGoal == numeric::opres::GOAL_UNKNOWN )
+	if ( eGoal == GOAL_UNKNOWN )
 	{
 		Debug( "goal is not set" );
 		pMainDlg->showSolveError( ascii( "Goal is not set" ) );
@@ -114,10 +144,11 @@ void SolveModelImpl::solve()
 	resolveConstraintAddress();
 	parseConstraints();
 
-	numeric::opres::lp::Model aModel = m_pBuilder->getModel();
+	lp::Model aModel = m_pBuilder->getModel();
 	aModel.print(); // prints model to stdout
 	aModel.setPrecision( 2 );
-	auto_ptr<numeric::opres::lp::BaseAlgorithm> algorithm( new numeric::opres::lp::RevisedSimplex );
+	auto_ptr<lp::BaseAlgorithm> algorithm = getLpAlgorithm();
+
 	aModel.setVerbose( true );
 	m_bSolved = false;
 	try
@@ -129,7 +160,7 @@ void SolveModelImpl::solve()
 		updateCells();
 		pMainDlg->showSolutionFound();
 	}
-	catch( const numeric::opres::lp::ModelInfeasible& e )
+	catch( const lp::ModelInfeasible& e )
 	{
 		Debug( "model infeasible" );
 		pMainDlg->showSolutionInfeasible();

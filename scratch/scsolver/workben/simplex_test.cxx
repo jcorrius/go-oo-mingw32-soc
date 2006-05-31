@@ -87,7 +87,13 @@ void testCase1()
 	p->setPrecision( 2 );
 	
 	std::auto_ptr<BaseAlgorithm> algorithm( new RevisedSimplex );
-	p->solve( algorithm );
+	p->solve( algorithm.get() );
+
+	p->setCostVectorElement( 2, 1 );
+	p->setVarBound( 2, BOUND_LOWER, 20 );
+	p->setVarBound( 2, BOUND_UPPER, 20 );
+	p->print();
+	p->solve( algorithm.get() );
 }
 
 void testCase2()
@@ -166,15 +172,46 @@ void testCase3()
 	p->setVarBound( 1, BOUND_LOWER, 25 );
 	p->setVarBound( 1, BOUND_UPPER, 25 );
 	p->setVarBound( 3, BOUND_LOWER, -2 );
-	p->setVarBound( 3, BOUND_UPPER, -2 );
+	p->setVarBound( 3, BOUND_UPPER, 0 );
 
 	p->setGoal( GOAL_MAXIMIZE );
 	p->setVerbose( true );
 	p->print();
 	p->setPrecision( 2 );
 	
-	//std::auto_ptr<BaseAlgorithm> algorithm( new BoundedRevisedSimplex );
-	std::auto_ptr<BaseAlgorithm> algorithm( new RevisedSimplex );
+	std::auto_ptr<BaseAlgorithm> algorithm( new BoundedRevisedSimplex );
+	//std::auto_ptr<BaseAlgorithm> algorithm( new RevisedSimplex );
+	p->solve( algorithm );
+}
+
+void tcRiverPower()
+{
+	printTitle( "Example 12.2: River Power" );
+
+	auto_ptr<Model> p( new Model() );
+	p->setCostVectorElement( 0, 7 );
+	p->setCostVectorElement( 1, 12 );
+	p->setCostVectorElement( 2, 5 );
+	p->setCostVectorElement( 3, 14 );
+	vector<double> aConst;
+	aConst.push_back(  300 );
+	aConst.push_back(  600 );
+	aConst.push_back(  500 );
+	aConst.push_back( 1600 );
+	p->addConstraint( aConst, GREATER_THAN_EQUAL, 700 );
+
+	for ( size_t i = 0; i < 4; ++i )
+	{
+		p->setVarBound( i, BOUND_LOWER, 0 );
+		p->setVarBound( i, BOUND_UPPER, 1 );
+	}
+
+	p->setGoal( GOAL_MINIMIZE );
+	p->setVerbose( true );
+	p->print();
+	p->setPrecision( 2 );
+	
+	std::auto_ptr<BaseAlgorithm> algorithm( new BoundedRevisedSimplex );
 	p->solve( algorithm );
 }
 
@@ -270,18 +307,26 @@ void testCaseNiklas()
 	p->addConstraint( aConst, LESS_THAN_EQUAL, 100 );
 
 	p->setGoal( GOAL_MAXIMIZE );
-	p->setVerbose( true );
-	p->print();
+	p->setVerbose( true );	
 	p->setPrecision( 2 );
 
 	p->setVarBound( 0, BOUND_LOWER, 10 );
 	p->setVarBound( 0, BOUND_UPPER, 10 );
+
+	p->setVarBound( 4, BOUND_LOWER, 23 );
+	p->setVarBound( 4, BOUND_UPPER, 23 );
+
 	
+
 	auto_ptr<BaseAlgorithm> algo1( new RevisedSimplex );
+	auto_ptr<BaseAlgorithm> algo2( new BoundedRevisedSimplex );
+	p->print();
 	p->solve( algo1 );
+	p->print();
+	p->solve( algo2 );
 }
 
-void testCaseLudovic()
+void tcLudovic()
 {
 	printTitle( "Test Case from Ludovic" );
 	auto_ptr<Model> pModel( new Model );
@@ -339,23 +384,98 @@ void testCaseLudovic()
 	std::vector<double> cnConst = toVector( fConst, 18 );
 	pModel->addConstraint( cnConst, GREATER_THAN_EQUAL, 65500 );
 	pModel->addConstraint( cnConst, LESS_THAN_EQUAL,    70000 );
-
-	pModel->print();
+	pModel->setVerbose( true );
 	
-	//auto_ptr<BaseAlgorithm> algo( new BoundedRevisedSimplex );
-    auto_ptr<BaseAlgorithm> algo( new RevisedSimplex );
+	auto_ptr<BaseAlgorithm> algo( new BoundedRevisedSimplex );
+    //auto_ptr<BaseAlgorithm> algo( new RevisedSimplex );
 	pModel->solve( algo );
+}
+
+void tcLudovic2()
+{
+	printTitle( "Test Case from Ludovic" );
+	auto_ptr<Model> pModel( new Model );
+
+	const double fCosts[] = {
+		0.3715, 0.929, 0.011, 77.5328, 74.9694, 72.1143, 81.0941, 81.0941,
+		70.5025, 20.0049, 74.7238, 0.625, 0, 0, 0.27875, 0.187, 0.187, 
+		0.00825, 0.011, 0.02563, 0.09, 0.05345
+	};
+	
+	struct bounds
+	{
+		double lower;
+		double upper;
+	};
+
+	const struct bounds Bounds[] = {
+		{ 0, 99999 },
+		{ 0, 99999 },
+		{ 0, 99999 },
+		{ 7675, 9210 },
+		{ 7675, 7675 },
+		{ 16885, 18420 },
+		{ 1535, 3070 },
+		{ 0, 0 },
+		{ 7675, 9210 },
+		{ 1918.75, 1918.75 },
+		{ 4605, 6140 },
+		{ 75, 100 },
+		{ 150, 250 },
+		{ 0, 100 },
+		{ 0, 150 },
+		{ 0, 550 },
+		{ 75, 75 },
+		{ 0, 99999 },
+		{ 2500, 99999 },
+		{ 1000, 2500 },
+		{ 0, 99999 },
+		{ 0, 99999 }
+	};
+
+	std::vector<double> cnCosts = toVector( fCosts, 22 );
+	pModel->setCostVector( cnCosts );
+	
+	for ( size_t i = 0; i < 22; ++i )
+	{
+		pModel->setVarBound( i, BOUND_LOWER, Bounds[i].lower );
+		pModel->setVarBound( i, BOUND_UPPER, Bounds[i].upper );
+	}
+	
+	const double fConst[] = {
+		25, 25, 1, 1535, 1535, 1535, 1535, 1535, 1535, 384, 1535,
+		25, 25, 25, 25, 25, 25, 25
+	};
+	std::vector<double> cnConst = toVector( fConst, 18 );
+	pModel->addConstraint( cnConst, GREATER_THAN_EQUAL, 65500 );
+	pModel->addConstraint( cnConst, LESS_THAN_EQUAL,    70000 );
+	pModel->setVerbose( true );
+	
+	auto_ptr<BaseAlgorithm> algo( new BoundedRevisedSimplex );
+	//auto_ptr<BaseAlgorithm> algo( new RevisedSimplex );
+	pModel->solve( algo );
+
+}
+
+void testBoundedSimplex()
+{
+	//testCase3();
+	tcRiverPower();
+	tcLudovic();
 }
 
 int main( int argc, char** argv )
 {
-// 	testCase1();
-// 	testCase2();
-// 	testCase3();
-	testCaseNiklas();
-
-// 	testModel1();
-	testCaseLudovic();
+	testBoundedSimplex();
+//     testCase1();
+//     testCase2();
+//     testCase3();
+//     testCaseNiklas();
+//     testCase4();
+//
+//     testModel1();
+//     testCaseLudovic2();
+	//tcLudovic2();
 
 	return EXIT_SUCCESS;
 }

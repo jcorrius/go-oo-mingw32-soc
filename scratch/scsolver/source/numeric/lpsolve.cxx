@@ -25,37 +25,38 @@
  *
  ************************************************************************/
 
-#ifndef _LPUNO_HXX_
-#define _LPUNO_HXX_
 
-#include "lpbase.hxx"
-#include "unoglobal.hxx"
-#include <memory>
+#include "numeric/lpsolve.hxx"
 
 namespace scsolver {
 
-class CalcInterface;
-
 namespace numeric { namespace opres { namespace lp {
 
-class UnoAlgorithmImpl;
-
-class UnoAlgorithm : public BaseAlgorithm
+class LpSolveImpl
 {
 public:
-	UnoAlgorithm( const rtl::OUString&, CalcInterface* );
-	virtual ~UnoAlgorithm() throw();
+	LpSolveImpl() {}
+	~LpSolveImpl() throw() {}
 
-	virtual void solve();
-
-private:
-	std::auto_ptr<UnoAlgorithmImpl> m_pImpl;
 };
+
+LpSolve::LpSolve() : m_pImpl( new LpSolveImpl )
+{
+}
+
+LpSolve::~LpSolve() throw()
+{
+}
+
+void LpSolve::solve()
+{
+	// TODO: Implement this...
+}
+
+
+
+
 
 
 
 }}}}
-
-
-#endif
-
