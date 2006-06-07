@@ -34,6 +34,7 @@
 #include <iostream>
 #include <vector>
 #include <sstream>
+#include <stdexcept>
 
 using namespace ::com::sun::star::uno;
 using namespace ::org::openoffice::sc::solver;
@@ -224,38 +225,46 @@ void SAL_CALL LpSolveImpl::solve() throw( RuntimeException )
 
 	// map constraints
 	set_add_rowmode( lp, true );
-	vector<double> row( nConstCount );
-	vector<int> cols( nConstCount );
-	for ( int i = 0; i < nConstCount; ++i )
-		cols.at(i) = i+1;
-
-	for ( int i = 0; i < nConstCount; ++i )
+	vector<double> row( nDecVarSize );
+	vector<int> cols( nDecVarSize );
+	try
 	{
-		for ( int j = 0; j < nDecVarSize; ++j )
-			row.at(j) = model->getConstraint( i, j );
-		int nEqual;
-		switch ( model->getEquality(i) )
+		for ( int i = 0; i < nDecVarSize; ++i )
+			cols.at(i) = i+1;
+
+		for ( int i = 0; i < nConstCount; ++i )
 		{
-		case org::openoffice::sc::solver::Equality_GREATER_EQUAL:
-			nEqual = GE;
-			break;
-		case org::openoffice::sc::solver::Equality_LESS_EQUAL:
-			nEqual = LE;
-			break;
-		case org::openoffice::sc::solver::Equality_EQUAL:
-			nEqual = EQ;
-			break;
+			for ( int j = 0; j < nDecVarSize; ++j )
+				row.at(j) = model->getConstraint( i, j );
+			int nEqual;
+			switch ( model->getEquality(i) )
+			{
+			case org::openoffice::sc::solver::Equality_GREATER_EQUAL:
+				nEqual = GE;
+				break;
+			case org::openoffice::sc::solver::Equality_LESS_EQUAL:
+				nEqual = LE;
+				break;
+			case org::openoffice::sc::solver::Equality_EQUAL:
+				nEqual = EQ;
+				break;
+			}
+			add_constraintex( lp, nDecVarSize, &row[0], &cols[0], nEqual,
+							  model->getRhsValue(i) );
 		}
-		add_constraintex( lp, nDecVarSize, &row[0], &cols[0], nEqual,
-			model->getRhsValue(i) );
+
+		set_add_rowmode( lp, false );
+
+		// set objective function
+		for ( int i = 0; i < nDecVarSize; ++i )
+			row.at(i) = model->getCost(i);
+		set_obj_fnex( lp, nDecVarSize,  &row[0],  &cols[0] );
 	}
-
-	set_add_rowmode( lp, false );
-
-	// set objective function
-	for ( int i = 0; i < nDecVarSize; ++i )
-		row.at(i) = model->getCost(i);
-	set_obj_fnex( lp, nDecVarSize,  &row[0],  &cols[0] );
+	catch ( std::out_of_range& e )
+	{
+		cout << e.what() << endl;
+		throw RuntimeException( ascii(e.what()), *this );
+	}
 
 	// set goal
 	switch ( model->getGoal() )
@@ -289,7 +298,10 @@ void SAL_CALL LpSolveImpl::solve() throw( RuntimeException )
 			cout << get_col_name( lp, i + 1 ) << ": " << row[i] << endl;
 	}
 	else
+	{
 		cout << "--- solution not found ---" << endl;
+		throw RuntimeException( ascii("Solution not found"), *this );
+	}
 
 	delete_lp(lp);
 }

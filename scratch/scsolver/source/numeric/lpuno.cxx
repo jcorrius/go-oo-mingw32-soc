@@ -36,6 +36,7 @@
 #include "org/openoffice/sc/solver/XLpAlgorithm.hpp"
 #include "org/openoffice/sc/solver/Goal.hpp"
 #include "org/openoffice/sc/solver/Equality.hpp"
+#include "com/sun/star/uno/RuntimeException.hpp"
 
 #include <exception>
 
@@ -184,13 +185,20 @@ void UnoAlgorithmImpl::solve()
 
 	Reference< XLpAlgorithm > xAlgorithm( algorithm, UNO_QUERY );
 	xAlgorithm->setModel( xModel );
-	xAlgorithm->solve();
+	try
+	{
+		xAlgorithm->solve();
+	}
+	catch ( const RuntimeException& e )
+	{
+		throw lp::ModelInfeasible();
+	}
 
 	Matrix mxSol( nDecVarSize, 1 );
 	for ( size_t i = 0; i < nDecVarSize; ++i )
 		mxSol( i, 0 ) = xAlgorithm->getVar(i);
 
-    m_mxSolution.swap( mxSol );
+	m_mxSolution.swap( mxSol );
 }
 
 Matrix UnoAlgorithmImpl::getSolution() const
