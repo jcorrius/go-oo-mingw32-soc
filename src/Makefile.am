@@ -34,6 +34,8 @@ EXTRA_DIST=\
 	openabout_translateorgza.png \
 	file-bug-24.png \
 	file-bug-16.png \
+	glib-1.2.10-ooo.patch \
+	libIDL-0.6.8-ooo.patch \
 	go-oo-team.png \
 	evolocal.odb
 
