@@ -31,6 +31,7 @@
 
 #include <cppuhelper/implementationentry.hxx>
 #include <vector>
+#include <string>
 
 using namespace com::sun::star;
 
@@ -47,6 +48,29 @@ struct Global
 	static const rtl::OUString STRING_SEPARATOR;
 	static const rtl::OUString MODEL_METADATA_NAME;
 };
+
+
+/**
+ * This class is designed to be a generic exception class that
+ * can have arbitrary error message.  It consists of one ASCII
+ * message for stdout, and one OUString message which can be
+ * localized.
+ */
+class RuntimeError : public ::std::exception
+{
+public:
+	RuntimeError( const rtl::OUString& umsg );
+	RuntimeError( const ::std::string& msg, const rtl::OUString& umsg );
+	~RuntimeError() throw();
+
+	virtual const char* what() const throw();
+	virtual const rtl::OUString getMessage() const throw();
+
+private:
+	::std::string m_sMsg;
+	rtl::OUString m_sUniMsg;
+};
+
 
 }
 

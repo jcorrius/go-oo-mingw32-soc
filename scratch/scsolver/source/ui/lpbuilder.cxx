@@ -198,8 +198,8 @@ LpModelBuilderImpl::~LpModelBuilderImpl() throw()
 	return it to the caller when it's successfully created. */
 numeric::opres::lp::Model LpModelBuilderImpl::getModel()
 {
-	stripZeroCostDecisionVar();
-	stripConstConstraint();
+	//stripZeroCostDecisionVar();
+	//stripConstConstraint();
 
 	numeric::opres::lp::Model aModel;
 	

@@ -159,7 +159,7 @@ void UnoAlgorithmImpl::solve()
 		for ( size_t j = 0; j < nDecVarSize; ++j )
 			xModel->setConstraint( i, j, mxConstraint( i, j ) );
 
-		switch ( model->getEqualityByRowId(i) )
+		switch ( model->getEquality(i) )
 		{
 		case GREATER_THAN_EQUAL:
 			xModel->setEquality( i, Equality_GREATER_EQUAL );

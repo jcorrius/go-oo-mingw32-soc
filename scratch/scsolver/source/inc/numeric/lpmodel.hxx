@@ -59,6 +59,17 @@ public:
 	
 	void print() const;
 
+	size_t getDecisionVarSize() const;
+
+	/**
+     * This returns the number of constraints defined in the model,
+     * which is equivalent of the row size of the constraint matrix.
+	 * 
+     * @return size_t number of constraints
+	 */
+	size_t getConstraintCount() const;
+
+	double getCost( size_t rowid ) const;
 	::scsolver::numeric::Matrix getCostVector() const;
 	void setCostVectorElement( size_t, double );
 	void setCostVector( const std::vector<double>& );
@@ -90,7 +101,7 @@ public:
 	double getRhsValue( size_t ) const;
 	void setRhsValue( size_t, double );
 	std::vector<Equality> getEqualityVector() const;
-	Equality getEqualityByRowId( size_t ) const;
+	Equality getEquality( size_t ) const;
 	void addConstraint( const std::vector<double>&, Equality, double );
 	void setStandardConstraintMatrix( const ::scsolver::numeric::Matrix&, const ::scsolver::numeric::Matrix& );
 

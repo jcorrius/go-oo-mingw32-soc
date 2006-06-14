@@ -179,7 +179,7 @@ void RevisedSimplexImpl::solve()
 
 	for ( size_t i = 0; i < A.rows(); ++i )
 	{
-		Equality eEq = aModel.getEqualityByRowId( i );
+		Equality eEq = aModel.getEquality( i );
 		switch( eEq )
 		{
 		case LESS_THAN_EQUAL:
@@ -875,7 +875,7 @@ void BoundedRevisedSimplexImpl::initialize()
 	const size_t nRowSizeA = m_mxA.rows();
 	for ( size_t i = 0; i < nRowSizeA; ++i )
 	{
-		Equality eEq = m_pModel->getEqualityByRowId( i );
+		Equality eEq = m_pModel->getEquality( i );
 		switch( eEq )
 		{
 		case LESS_THAN_EQUAL:

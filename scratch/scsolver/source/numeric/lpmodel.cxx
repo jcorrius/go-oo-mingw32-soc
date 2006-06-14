@@ -76,6 +76,10 @@ public:
 	void swap( ModelImpl& ) throw();
 	void print() const;
 
+	size_t getDecisionVarSize() const { return m_mxCost.cols(); }
+	size_t getConstraintCount() const { return m_mxConstraint.rows(); }
+
+	double getCost( size_t rowid ) const { return m_mxCost( 0, rowid ); }
 	Matrix getCostVector() const { return m_mxCost; }
 	void setCostVectorElement( size_t, double );
 	void setCostVector( const std::vector<double>& );
@@ -488,6 +492,21 @@ void Model::print() const
 	m_pImpl->print();
 }
 
+size_t Model::getDecisionVarSize() const
+{
+	return m_pImpl->getDecisionVarSize();
+}
+
+size_t Model::getConstraintCount() const
+{
+	return m_pImpl->getConstraintCount();
+}
+
+double Model::getCost( size_t rowid ) const
+{
+	return m_pImpl->getCost( rowid );
+}
+
 /** get a matrix representing a cost vector.  Note that
  * a cost vector is a row matrix i.e. it only has one row.
  * 
@@ -612,7 +631,7 @@ std::vector<Equality> Model::getEqualityVector() const
 	return m_pImpl->getEqualityVector();
 }
 
-Equality Model::getEqualityByRowId( size_t i ) const
+Equality Model::getEquality( size_t i ) const
 {
 	return m_pImpl->getEqualityByRowId( i );
 }

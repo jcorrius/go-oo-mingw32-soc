@@ -36,6 +36,7 @@
 #include "numeric/type.hxx"
 #include "numeric/lpbase.hxx"
 #include "numeric/lpsimplex.hxx"
+#include "numeric/lpsolve.hxx"
 
 #ifdef ENABLE_SCSOLVER_UNO_ALGORITHM
 #include "numeric/lpuno.hxx"
@@ -115,7 +116,8 @@ auto_ptr<lp::BaseAlgorithm> SolveModelImpl::getLpAlgorithm() const
 	auto_ptr<lp::BaseAlgorithm> algorithm( new lp::UnoAlgorithm(
 		ascii("org.openoffice.sc.solver.LpSolve"), getSolverImpl()->getCalcInterface() ) );
 #else
-	auto_ptr<lp::BaseAlgorithm> algorithm( new lp::RevisedSimplex );
+	//auto_ptr<lp::BaseAlgorithm> algorithm( new lp::RevisedSimplex );
+	auto_ptr<lp::BaseAlgorithm> algorithm( new lp::LpSolve );
 #endif
 
 	return algorithm;
@@ -165,6 +167,12 @@ void SolveModelImpl::solve()
 		Debug( "model infeasible" );
 		pMainDlg->showSolutionInfeasible();
 	}
+	catch( const scsolver::RuntimeError& e )
+	{
+		// This error message is localizable.
+		cout << "RuntimeError: " << e.what() << endl;
+		pMainDlg->showSolveError( e.getMessage() );
+	}
 	catch( const std::exception& e )
 	{
 		cout << "standard exception: " << e.what() << endl;
@@ -190,7 +198,7 @@ void SolveModelImpl::parseConstraints()
 	CalcInterface* pCalc = m_pSolverImpl->getCalcInterface();
 	for ( pos = aAddrsBegin; pos != aAddrsEnd; ++pos )
 	{
-		// Run through the decision variable cells, store their originla formulas,
+		// Run through the decision variable cells, store their original formulas,
 		// and set "=0" to each of these cells.
 		table::CellAddress aAddr = *pos;
 		rtl::OUString sFormula = pCalc->getCellFormula( aAddr );
