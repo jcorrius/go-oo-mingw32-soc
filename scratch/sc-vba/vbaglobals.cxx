@@ -33,12 +33,26 @@ namespace vbaobj
 		return *pImplName;
     }
 
+	uno::Reference< XComponentContext > getComponentContextFromMSF( uno::Reference< lang::XMultiServiceFactory > const& xFactory )  
+	{
+		uno::Reference< XComponentContext > xContext;
+
+	        uno::Reference< beans::XPropertySet > xProps( xFactory, UNO_QUERY );
+		if (xProps.is())
+		{
+			xProps->getPropertyValue(
+			rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("DefaultContext") ) ) >>= xContext;
+		}
+		return xContext;
+	}
+
+
     uno::Reference< XInterface > SAL_CALL create(
 //        Reference< XComponentContext > const & xContext )
         Reference< lang::XMultiServiceFactory > const & xMultiContext )
         SAL_THROW( () )
     {
-	Reference< XComponentContext > xContext = ::cppu::defaultBootstrap_InitialComponentContext();
+	uno::Reference< XComponentContext > xContext = getComponentContextFromMSF( xMultiContext );
 	if ( !xContext.is() )
 	{
 		OSL_TRACE("Failed to obtain context" );	
