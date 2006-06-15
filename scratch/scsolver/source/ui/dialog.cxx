@@ -125,13 +125,13 @@ void ConstEditDialog::unregisterListeners()
 void ConstEditDialog::initialize()
 {
 	BaseDialog::initialize( static_cast<sal_Int16>(180), static_cast<sal_Int16>(55), 
-		ascii( "Constraint" ) );
+		ascii_i18n( "Constraint" ) );
 	
 	sal_Int32 nX, nY;
 	
 	nX = 5;
 	nY = 5;
-	addFixedText( nX, nY, 100, 10, ascii( "ftLeft" ), ascii( "Cell Reference" ) );
+	addFixedText( nX, nY, 100, 10, ascii( "ftLeft" ), ascii_i18n( "Cell Reference" ) );
 	nY += 10;
 	addRangeEdit( nX, nY, 70, 12, ascii( "editLeft" ), ascii( "btnLeft" ) );
 	nX += 72;
@@ -154,13 +154,13 @@ void ConstEditDialog::initialize()
 	p->setPropertyValue( "SelectedItems", aSelItems );
 	
 	nX += 27;
-	addFixedText( nX, 5, 100, 10, ascii( "ftRight" ), ascii( "Constraint" ) );
+	addFixedText( nX, 5, 100, 10, ascii( "ftRight" ), ascii_i18n( "Constraint" ) );
 	addRangeEdit( nX, nY, 70, 12, ascii( "editRight" ), ascii( "btnRight" ) );
 	
 	nX = 5;
 	nY = 35;
-	addButton( nX, nY, 50, 15, ascii( "btnOK" ), ascii( "OK" ) );	
-	addButton( nX+55, nY, 50, 15, ascii( "btnCancel" ), ascii( "Cancel" ) );	
+	addButton( nX, nY, 50, 15, ascii( "btnOK" ), ascii_i18n( "OK" ) );
+	addButton( nX+55, nY, 50, 15, ascii( "btnCancel" ), ascii_i18n( "Cancel" ) );	
 
 	registerListeners();
 }
@@ -198,7 +198,7 @@ bool ConstEditDialog::doneRangeSelection() const
 
 	if ( !isCellRangeGeometryEqual() )
 	{
-		pDlg->showSolveError( ascii( "The reference and constraint ranges do not match." ) );
+		pDlg->showSolveError( ascii_i18n( "The reference and constraint ranges do not match." ) );
 		return false;
 	}
 
@@ -371,60 +371,60 @@ SolverDialog::~SolverDialog() throw()
 void SolverDialog::initialize()
 {
 	BaseDialog::initialize( static_cast<sal_Int16>(260), static_cast<sal_Int16>(200), 
-		ascii( "Optimization Solver" ) );
+		ascii_i18n( "Optimization Solver" ) );
 
 	// START CREATING WIDGETS
 	sal_Int32 nX, nY;
 	
 	nY = 5;
-	addFixedLine( 5, nY, 195, 12, ascii( "flModel" ), ascii( "Define Model" ) );
+	addFixedLine( 5, nY, 195, 12, ascii( "flModel" ), ascii_i18n( "Define Model" ) );
 	
 	nY += 13;
-	addFixedText( 10, nY+2, 60, 12, ascii( "ftTargetCell" ), ascii( "Set target cell" ) );
+	addFixedText( 10, nY+2, 60, 12, ascii( "ftTargetCell" ), ascii_i18n( "Set target cell" ) );
 	addRangeEdit( 70, nY, 80, 12, ascii( "editTargetCell" ), ascii( "btnTargetCellRange" ) );
 
 	nY += 18;
-	addFixedText( 10, nY, 35, 12, ascii( "ftObj" ), ascii( "Goal" ) );
-	addRadioButton( 50, nY, 40, 12, ascii( "rbMax" ), ascii( "Maximize" ) );
-	addRadioButton( 95, nY, 40, 12, ascii( "rbMin" ), ascii( "Minimize" ) );
+	addFixedText( 10, nY, 35, 12, ascii( "ftObj" ), ascii_i18n( "Goal" ) );
+	addRadioButton( 50, nY, 40, 12, ascii( "rbMax" ), ascii_i18n( "Maximize" ) );
+	addRadioButton( 95, nY, 40, 12, ascii( "rbMin" ), ascii_i18n( "Minimize" ) );
 	
 	nY += 15;
-	addFixedText( 10, nY+2, 60, 12, ascii( "ftDecVars" ), ascii( "By changing cells" ) );
+	addFixedText( 10, nY+2, 60, 12, ascii( "ftDecVars" ), ascii_i18n( "By changing cells" ) );
 	addRangeEdit( 70, nY, 115, 12, ascii( "editVarCells" ), ascii( "btnRangeSelect" ) );
 	
 	nY += 20;
-	addFixedLine( 5, nY, 195, 12, ascii( "flConstraints" ), ascii( "Subject to the Constraints" ) );
+	addFixedLine( 5, nY, 195, 12, ascii( "flConstraints" ), ascii_i18n( "Subject to the Constraints" ) );
 	
 	nY += 13;
 	nX = 10;
 	addListBox( nX, nY, 130, 80, ascii( "lbConstraint" ) );
 	nX += 135;
 
-	addButton( nX, nY,    50, 15, ascii( "btnConstAdd" ), ascii( "Add" ) );
+	addButton( nX, nY,    50, 15, ascii( "btnConstAdd" ), ascii_i18n( "Add" ) );
 
 	uno::Any aBool;
 	aBool <<= static_cast<sal_Bool>(false);
 
 	apWidgetProp p = addButton( 
-		nX, nY+20, 50, 15, ascii( "btnConstChange" ), ascii( "Change" ) );
+		nX, nY+20, 50, 15, ascii( "btnConstChange" ), ascii_i18n( "Change" ) );
 
 	p->setPropertyValue( "Enabled", aBool );
 	
 	p = addButton( 
-		nX, nY+40, 50, 15, ascii( "btnConstDelete" ), ascii( "Delete" ) );
+		nX, nY+40, 50, 15, ascii( "btnConstDelete" ), ascii_i18n( "Delete" ) );
 
 	p->setPropertyValue( "Enabled", aBool );
 	
-	addButton( 205, 10, 50, 15, ascii( "btnSolve" ), ascii( "Solve" ) );
-	addButton( 205, 30, 50, 15, ascii( "btnReset" ), ascii( "Reset" ) );
+	addButton( 205, 10, 50, 15, ascii( "btnSolve" ), ascii_i18n( "Solve" ) );
+	addButton( 205, 30, 50, 15, ascii( "btnReset" ), ascii_i18n( "Reset" ) );
 	
-	p = addButton( 205, 50, 50, 15, ascii( "btnOptions" ), ascii( "Options" ) );
+	p = addButton( 205, 50, 50, 15, ascii( "btnOptions" ), ascii_i18n( "Options" ) );
 	p->setPropertyValue( "Enabled", aBool );	// disable Options button for now
 
-	addButton( 205, 90, 50, 15, ascii( "btnSave" ), ascii( "Save" ) );
-	addButton( 205, 110, 50, 15, ascii( "btnLoad" ), ascii( "Load" ) );
+	addButton( 205, 90, 50, 15, ascii( "btnSave" ), ascii_i18n( "Save" ) );
+	addButton( 205, 110, 50, 15, ascii( "btnLoad" ), ascii_i18n( "Load" ) );
 
-	addButton( 205, 180, 50, 15, ascii( "btnClose" ), ascii( "Close" ) );
+	addButton( 205, 180, 50, 15, ascii( "btnClose" ), ascii_i18n( "Close" ) );
 
 	registerListeners();
 }
@@ -509,7 +509,7 @@ void SolverDialog::setVisible( bool bVisible )
 
 		Reference< sheet::XSpreadsheet > xSheet = pCalc->getActiveSheet();
 		Reference< container::XNamed > xNamed( xSheet, UNO_QUERY );
-		printOUStr( ascii( "Current sheet is " ) + xNamed->getName() );
+		printOUStr( ascii_i18n( "Current sheet is " ) + xNamed->getName() );
 	}
 	else
 		getConstEditDialog()->setVisible( false );
@@ -811,7 +811,7 @@ void SolverDialog::showSolutionInfeasible()
 {
 	if ( m_pSolInfeasibleDlg.get() == NULL )
 		m_pSolInfeasibleDlg.reset( new MessageDialog( getSolverImpl(), 
-				ascii( "Solution could not be found" ) ) );
+				ascii_i18n( "Solution could not be found" ) ) );
 	m_pSolInfeasibleDlg->execute();
 }
 
@@ -819,7 +819,7 @@ void SolverDialog::showSolutionFound()
 {
 	if ( m_pSolFoundDlg.get() == NULL )
 		m_pSolFoundDlg.reset( new MessageDialog( getSolverImpl(), 
-				ascii( "Solution found" ) ) );
+				ascii_i18n( "Solution found" ) ) );
 	m_pSolFoundDlg->execute();
 }
 

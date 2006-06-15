@@ -55,13 +55,15 @@ static Reference< uno::XInterface > SAL_CALL create_SolverImpl(
 
 
 SolverImpl::SolverImpl( Reference< uno::XComponentContext > const & xContext ) :
-	m_pDlg( NULL ), m_pCalc( new CalcInterface( xContext ) )
+	m_pDlg( NULL ), m_pCalc( new CalcInterface( xContext ) ),
+	m_pResMgr( NULL )
 {
     Debug( "SolverImpl c'tor" );	
 }
 
 SolverImpl::~SolverImpl()
 {
+	delete m_pResMgr;
     Debug( "SolverImpl d'tor" );
 }
 
@@ -201,7 +203,35 @@ sal_Bool SolverImpl::solveModel()
 	return false;
 }
 
+void SolverImpl::initLocale()
+{
+	rtl::OString aModName( "scsolver" );
+	aModName += rtl::OString::valueOf( sal_Int32( SUPD ) );
 
+	m_pResMgr = ResMgr::CreateResMgr( aModName.getStr(), m_eLocale );
+}
+
+ResMgr& SolverImpl::getResMgr()
+{
+	if( !m_pResMgr )
+		initLocale();
+	return *m_pResMgr;
+}
+
+// XLocalizable
+
+void SAL_CALL SolverImpl::setLocale( const lang::Locale& eLocale )
+	throw(::com::sun::star::uno::RuntimeException)
+{
+	m_eLocale = eLocale;
+	initLocale();
+}
+
+lang::Locale SAL_CALL SolverImpl::getLocale()
+	throw(::com::sun::star::uno::RuntimeException)
+{
+	return m_eLocale;
+}
 
 //---------------------------------------------------------------------------
 // Component operations

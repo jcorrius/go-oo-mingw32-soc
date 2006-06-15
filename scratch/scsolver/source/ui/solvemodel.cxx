@@ -135,7 +135,7 @@ void SolveModelImpl::solve()
 	if ( eGoal == GOAL_UNKNOWN )
 	{
 		Debug( "goal is not set" );
-		pMainDlg->showSolveError( ascii( "Goal is not set" ) );
+		pMainDlg->showSolveError( ascii_i18n( "Goal is not set" ) );
 		return;
 	}
 
@@ -175,7 +175,7 @@ void SolveModelImpl::solve()
 	}
 	catch( const std::exception& e )
 	{
-		cout << "standard exception: " << e.what() << endl;
+		cout << "standard exception: " << e.what() << endl; // ascii_i18n [!?]
 		pMainDlg->showSolveError( ascii( e.what() ) );
 	}
 }

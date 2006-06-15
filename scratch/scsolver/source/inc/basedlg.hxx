@@ -29,6 +29,7 @@
 #ifndef _BASEDLG_HXX_
 #define _BASEDLG_HXX_
 
+#include <tools/resmgr.hxx>
 #include <unoglobal.hxx>
 #include <global.hxx>
 #include <memory>
@@ -137,6 +138,8 @@ public:
 	void enableWidget( const rtl::OUString&, sal_Bool = true ) const;
 	void toFront() const;
 	void execute() const;
+
+	ResMgr& getResMgr();
 
 protected:
 

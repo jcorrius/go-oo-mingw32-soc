@@ -172,6 +172,8 @@ public:
 	void saveModelToDocument();
 	void loadModelFromDocument();
 
+	ResMgr& GetResMgr();
+
 protected:
 	
 	virtual void registerListeners();

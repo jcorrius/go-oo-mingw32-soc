@@ -39,6 +39,7 @@ using namespace com::sun::star;
 namespace scsolver {
 
 void printOUStr( const rtl::OUString & );
+#define ascii_i18n ascii
 rtl::OUString ascii( const sal_Char* );
 void split( const rtl::OUString&, const rtl::OUString&, std::vector<rtl::OUString>& );
 

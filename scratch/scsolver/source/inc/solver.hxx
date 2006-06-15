@@ -29,12 +29,13 @@
 #ifndef _SOLVER_HXX_
 #define _SOLVER_HXX_
 
-
-#include <cppuhelper/implbase5.hxx>
+#include <tools/resmgr.hxx>
+#include <cppuhelper/implbase6.hxx>
 #include <com/sun/star/lang/XInitialization.hpp>
 #include <com/sun/star/frame/XNotifyingDispatch.hpp>
 #include <com/sun/star/frame/XDispatchProvider.hpp>
 #include <com/sun/star/lang/XServiceInfo.hpp>
+#include <com/sun/star/lang/XLocalizable.hpp>
 
 #include <com/sun/star/ui/dialogs/XExecutableDialog.hpp>
 
@@ -75,10 +76,11 @@ class SolverDialog;
 //--------------------------------------------------------------------------
 // SolverImpl
 
-class SolverImpl : public ::cppu::WeakImplHelper5<
+class SolverImpl : public ::cppu::WeakImplHelper6<
         ::com::sun::star::ui::dialogs::XExecutableDialog,
 		lang::XServiceInfo, lang::XInitialization,
-        frame::XDispatchProvider, frame::XNotifyingDispatch >
+        frame::XDispatchProvider, frame::XNotifyingDispatch,
+	    lang::XLocalizable>
 {
 public:
 
@@ -132,14 +134,25 @@ public:
 	virtual sal_Int16 SAL_CALL execute()
 			throw (::com::sun::star::uno::RuntimeException);
 
+	// XLocalizable
+    virtual void SAL_CALL setLocale( const com::sun::star::lang::Locale& eLocale )
+		throw(::com::sun::star::uno::RuntimeException);
+    virtual com::sun::star::lang::Locale SAL_CALL getLocale()
+		throw(::com::sun::star::uno::RuntimeException);
+
 	// The "get-pointer" methods
 	CalcInterface* getCalcInterface() const;	
 	SolverDialog* getMainDialog();
 
 	sal_Bool solveModel();
-	
+
+	ResMgr& getResMgr();
+
 private:
 
+	void initLocale();
+	ResMgr *m_pResMgr;
+	com::sun::star::lang::Locale m_eLocale;
 	::std::auto_ptr<SolverDialog> m_pDlg;
 	::std::auto_ptr<CalcInterface> m_pCalc;
 

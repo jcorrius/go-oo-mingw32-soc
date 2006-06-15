@@ -151,7 +151,7 @@ void RngBtnListener::actionPerformed( const awt::ActionEvent& oActionEvt )
 	
 		uno::Sequence< beans::PropertyValue > aProp( 3 );
 		uno::Any aValue;
-		aValue <<= ascii( "Please select a range" );
+		aValue <<= ascii_i18n( "Please select a range" );
 		aProp[0].Name = ascii( "Title" );
 		aProp[0].Value = aValue;
 		aProp[1].Name = ascii( "CloseOnMouseRelease" );

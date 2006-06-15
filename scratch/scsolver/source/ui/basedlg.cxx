@@ -258,7 +258,7 @@ apWidgetProp BaseDialogImpl::addGroupBox( sal_Int32 nX, sal_Int32 nY, sal_Int32 
 {
 	apWidgetProp p = addWidget( ascii( "com.sun.star.awt.UnoControlGroupBoxModel" ),
 			nX, nY, nW, nH, sName );
-	p->setLabel( ascii( "Group Box Label" ) );
+	p->setLabel( ascii( "Group Box Label" ) ); // dummy text
 
 	return p;
 }
@@ -528,6 +528,11 @@ void BaseDialog::initialize( sal_Int16 nW, sal_Int16 nH, const rtl::OUString& sT
 void BaseDialog::setVisibleDefault( bool b ) const
 {
 	m_pImpl->setVisibleDefault( b );
+}
+
+ResMgr& BaseDialog::getResMgr()
+{
+	return getSolverImpl()->getResMgr();
 }
 
 apWidgetProp BaseDialog::addButton( 
