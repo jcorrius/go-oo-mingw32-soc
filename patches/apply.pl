@@ -783,8 +783,13 @@ sub print_statistic_breakdown ($)
 	}
     }
     for my $set (sort keys %breakdown) {
-	print "$set\t$breakdown{$set}\n";
+	print "$set\t";
     }
+    print "\n";
+    for my $set (sort keys %breakdown) {
+	print "$breakdown{$set}\t";
+    }
+    print "\n";
 }
 
 sub print_statistic_no_issue ($)
