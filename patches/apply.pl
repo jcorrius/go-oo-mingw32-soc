@@ -775,7 +775,7 @@ sub print_statistic_breakdown ($)
     for my $patch (keys %{$patches}) {
 	my $set = find_patch_file ($patch);
 	$set =~ s|.*/(.*)/.*|\1|;
-	print "Path '$set'\n";
+#	print "Path '$set'\n";
 	if (!defined $breakdown{$set}) {
 	    $breakdown{$set} = 1;
 	} else {
