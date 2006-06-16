@@ -65,7 +65,7 @@ public:
 	~RuntimeError() throw();
 
 	virtual const char* what() const throw();
-	virtual const rtl::OUString getMessage() const throw();
+	const rtl::OUString getMessage() const throw();
 
 private:
 	::std::string m_sMsg;

@@ -193,7 +193,15 @@ sal_Bool SolverImpl::solveModel()
 	using numeric::Matrix;
 
 	std::auto_ptr<SolveModel> p( new SolveModel( this ) );
-	p->solve();
+	try
+	{
+		p->solve();
+	}
+	catch( const RuntimeError& e )
+	{
+		getMainDialog()->showSolveError( e.getMessage() );
+	}
+
 	if ( p->isSolved() )
 	{
 		Debug( "solution available" );

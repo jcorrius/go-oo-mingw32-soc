@@ -52,16 +52,33 @@ class LpModelBuilderImpl;
 class ConstraintAddress
 {
 public:
-	table::CellAddress Left;
-	table::CellAddress Right;
-	numeric::opres::Equality Equal;
-
 	ConstraintAddress();
 	ConstraintAddress( const ConstraintAddress& );
 	~ConstraintAddress() throw();
 
 	bool equals( const ConstraintAddress& ) const;
 	bool operator==( const ConstraintAddress & ) const;
+
+	table::CellAddress getLeftCellAddr() const;
+	void setLeftCellAddr( const table::CellAddress& addr );
+
+	table::CellAddress getRightCellAddr() const;
+	void setRightCellAddr( const table::CellAddress& addr );
+	double getRightCellValue() const;
+	void setRightCellValue( double value );
+	bool isRightCellNumeric() const;
+
+	numeric::opres::Equality getEquality() const;
+	void setEquality( numeric::opres::Equality eq );
+
+private:
+
+	table::CellAddress Left;
+	table::CellAddress Right;
+	numeric::opres::Equality Equal;
+
+	bool m_bIsRHSNumber;
+	double m_fRHSValue;
 };
 
 /** This class is responsible for transforming a user-defined model on 

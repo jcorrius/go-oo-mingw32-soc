@@ -29,6 +29,7 @@
 #include "solvemodel.hxx"
 #include "solver.hxx"
 #include "global.hxx"
+#include "unoglobal.hxx"
 #include "lpbuilder.hxx"
 #include "dialog.hxx"
 #include "xcalc.hxx"
@@ -59,9 +60,14 @@ class SolveModelImpl
 {
 public:
 
-	class CellGeometriesDiffer : public std::exception
+	class CellGeometriesDiffer : public RuntimeError
 	{
 	public:
+		CellGeometriesDiffer() : 
+			RuntimeError( ascii_i18n("Internal error: cell geometry") )
+		{
+		}
+
 		virtual const char* what() const throw()
 		{
 			return "Cell geometries differ (internal)";
@@ -230,8 +236,13 @@ void SolveModelImpl::parseConstraints()
 		{
 			double fValL, fValR;
 			ConstraintAddress aConstAddr = *posCA;
-			fValL = pCalc->getCellValue( aConstAddr.Left );
-			fValR = pCalc->getCellValue( aConstAddr.Right );
+			fValL = pCalc->getCellValue( aConstAddr.getLeftCellAddr() );
+
+			if ( aConstAddr.isRightCellNumeric() )
+				fValR = aConstAddr.getRightCellValue();
+			else
+				fValR = pCalc->getCellValue( aConstAddr.getRightCellAddr() );
+
 			m_pBuilder->setConstraintCoefficient( aAddr, aConstAddr, fValL, fValR );
 		}		
 		
@@ -257,8 +268,27 @@ void SolveModelImpl::parseConstraints()
 #endif
 }
 
-/** Take from the main dialog the constraint data which are given as cell 
-	references. */
+static bool lcl_isNumeric( const rtl::OUString& sVal )
+{
+	// TODO: How do we find out if sVal == '0.0' ?
+
+	printOUStr( sVal );
+	double fVal = sVal.toDouble();
+	if ( fVal == 0.0 )
+	{
+		// The value may really be zero, in which case it should
+		// return true!
+		return false;
+	}
+	else
+		return true;
+}
+
+/**
+ * Get all the constraint strings (both the LHS and RHS strings)
+ * from the main dialog, resolve their addresses into sheet,
+ * column, and row IDs, and give them to the builder.
+ */
 void SolveModelImpl::resolveConstraintAddress()
 {
 	vector< ConstraintString > aConstraint = m_pSolverImpl->getMainDialog()->getAllConstraints();
@@ -269,45 +299,71 @@ void SolveModelImpl::resolveConstraintAddress()
 	{
 		ConstraintString aConstStr = *pos;
 
-		// Expand a cell range into multiple constraints.
-
+		// Left hand side cell address
 		table::CellRangeAddress aRangeAddrL = pCalc->getCellRangeAddress( aConstStr.Left );
-		table::CellRangeAddress aRangeAddrR = pCalc->getCellRangeAddress( aConstStr.Right );
 		sal_Int16 nLSheet = aRangeAddrL.Sheet;
 		sal_Int32 nLColS  = aRangeAddrL.StartColumn;
 		sal_Int32 nLColE  = aRangeAddrL.EndColumn;
 		sal_Int32 nLRowS  = aRangeAddrL.StartRow;
 		sal_Int32 nLRowE  = aRangeAddrL.EndRow;
-		sal_Int16 nRSheet = aRangeAddrR.Sheet;
-		sal_Int32 nRColS  = aRangeAddrR.StartColumn;
-		sal_Int32 nRColE  = aRangeAddrR.EndColumn;
-		sal_Int32 nRRowS  = aRangeAddrR.StartRow;
-		sal_Int32 nRRowE  = aRangeAddrR.EndRow;
-		
-		if ( nLColE - nLColS != nRColE - nRColS || nLRowE - nLRowS != nRRowE - nRRowS )
-			throw CellGeometriesDiffer(); // This should not happen !
-			
-		for ( sal_Int32 i = 0; i <= nLColE - nLColS; ++i )
-			for ( sal_Int32 j = 0; j <= nLRowE - nLRowS; ++j )
+
+		// Right hand side cell address
+
+		// Check if the RHS string is a number.
+		if ( lcl_isNumeric(aConstStr.Right) )
+		{
+			for ( sal_Int32 i = 0; i <= nLColE - nLColS; ++i )
 			{
-				ConstraintAddress aConstAddr;
-				table::CellAddress aAddrL, aAddrR;
-				aAddrL.Sheet  = nLSheet;
-				aAddrL.Row    = nLRowS + j;
-				aAddrL.Column = nLColS + i;
+				for ( sal_Int32 j = 0; j <= nLRowE - nLRowS; ++j )
+				{
+					ConstraintAddress aConstAddr;
+					table::CellAddress aAddrL;
+					aAddrL.Sheet  = nLSheet;
+					aAddrL.Row    = nLRowS + j;
+					aAddrL.Column = nLColS + i;
+					aConstAddr.setLeftCellAddr( aAddrL );
+					aConstAddr.setEquality( aConstStr.Equal );
+					aConstAddr.setRightCellValue( aConstStr.Right.toDouble() );
 
-				aAddrR.Sheet  = nRSheet;
-				aAddrR.Row    = nRRowS + j;
-				aAddrR.Column = nRColS + i;
-
-				aConstAddr.Left  = aAddrL;
-				aConstAddr.Right = aAddrR;
-				aConstAddr.Equal = aConstStr.Equal;
-				
-				m_pBuilder->setConstraintAddress( aConstAddr );
+					m_pBuilder->setConstraintAddress( aConstAddr );
+				}
 			}
+		}
+		else
+		{
+			table::CellRangeAddress aRangeAddrR = pCalc->getCellRangeAddress( aConstStr.Right );
+			sal_Int16 nRSheet = aRangeAddrR.Sheet;
+			sal_Int32 nRColS  = aRangeAddrR.StartColumn;
+			sal_Int32 nRColE  = aRangeAddrR.EndColumn;
+			sal_Int32 nRRowS  = aRangeAddrR.StartRow;
+			sal_Int32 nRRowE  = aRangeAddrR.EndRow;
+			
+			if ( nLColE - nLColS != nRColE - nRColS || nLRowE - nLRowS != nRRowE - nRRowS )
+				throw CellGeometriesDiffer(); // This should not happen !
+
+			for ( sal_Int32 i = 0; i <= nLColE - nLColS; ++i )
+			{
+				for ( sal_Int32 j = 0; j <= nLRowE - nLRowS; ++j )
+				{
+					ConstraintAddress aConstAddr;
+					table::CellAddress aAddrL, aAddrR;
+					aAddrL.Sheet  = nLSheet;
+					aAddrL.Row    = nLRowS + j;
+					aAddrL.Column = nLColS + i;
+					aConstAddr.setLeftCellAddr( aAddrL );
+					aConstAddr.setEquality( aConstStr.Equal );
+
+					aAddrR.Sheet  = nRSheet;
+					aAddrR.Row    = nRRowS + j;
+					aAddrR.Column = nRColS + i;
+					aConstAddr.setRightCellAddr( aAddrR );
+
+					m_pBuilder->setConstraintAddress( aConstAddr );
+				}
+			}
+		}
 		
-		++pos;
+		++pos; // Move on to the next constraint.
 	}
 }
 

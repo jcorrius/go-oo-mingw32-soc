@@ -85,12 +85,14 @@ struct CellAttr
 //---------------------------------------------------------------------------
 // ConstraintAddress
 
-ConstraintAddress::ConstraintAddress()
+ConstraintAddress::ConstraintAddress() :
+	m_bIsRHSNumber( false ), m_fRHSValue( 0.0 )
 {
 }
 
 ConstraintAddress::ConstraintAddress( const ConstraintAddress& aOther ) :
-	Left( aOther.Left ), Right( aOther.Right ), Equal( aOther.Equal )
+	Left( aOther.Left ), Right( aOther.Right ), Equal( aOther.Equal ),
+	m_bIsRHSNumber( aOther.m_bIsRHSNumber ), m_fRHSValue( aOther.m_fRHSValue )
 {
 }
 
@@ -100,13 +102,28 @@ ConstraintAddress::~ConstraintAddress() throw()
 
 bool ConstraintAddress::equals( const ConstraintAddress& aOther ) const
 {
+	if ( m_bIsRHSNumber )
+	{
+		// The right-hand side cell is a number.  Don't compare the address
+		// of the right-hand side cells, but do compare their numerical
+		// values.
+		if ( aOther.Left.Sheet == Left.Sheet &&
+			 aOther.Left.Column == Left.Column &&
+			 aOther.Left.Row == Left.Row &&
+			 aOther.Equal == Equal &&
+			 aOther.m_bIsRHSNumber == m_bIsRHSNumber &&
+			 aOther.m_fRHSValue == m_fRHSValue )
+			return true;
+		return false;
+	}
+
 	if ( aOther.Left.Sheet == Left.Sheet &&
-			aOther.Left.Column == Left.Column &&
-			aOther.Left.Row == Left.Row &&
-			aOther.Right.Sheet == Right.Sheet &&
-			aOther.Right.Column == Right.Column &&
-			aOther.Right.Row == Right.Row &&
-			aOther.Equal == Equal )
+		 aOther.Left.Column == Left.Column &&
+		 aOther.Left.Row == Left.Row &&
+		 aOther.Right.Sheet == Right.Sheet &&
+		 aOther.Right.Column == Right.Column &&
+		 aOther.Right.Row == Right.Row &&
+		 aOther.Equal == Equal )
 		return true;
 	return false;
 }
@@ -115,6 +132,54 @@ bool ConstraintAddress::operator==( const ConstraintAddress& aOther ) const
 {
 	return equals( aOther );
 }
+
+table::CellAddress ConstraintAddress::getLeftCellAddr() const
+{
+	return Left;
+}
+
+void ConstraintAddress::setLeftCellAddr( const table::CellAddress& addr )
+{
+	Left = addr;
+}
+
+table::CellAddress ConstraintAddress::getRightCellAddr() const
+{
+	return Right;
+}
+
+void ConstraintAddress::setRightCellAddr( const table::CellAddress& addr )
+{
+	Right = addr;
+	m_bIsRHSNumber = false;
+}
+
+double ConstraintAddress::getRightCellValue() const
+{
+	return m_fRHSValue;
+}
+
+void ConstraintAddress::setRightCellValue( double value )
+{
+	m_fRHSValue = value;
+	m_bIsRHSNumber = true;
+}
+
+bool ConstraintAddress::isRightCellNumeric() const
+{
+	return m_bIsRHSNumber;
+}
+
+numeric::opres::Equality ConstraintAddress::getEquality() const
+{
+	return Equal;
+}
+
+void ConstraintAddress::setEquality( numeric::opres::Equality eq )
+{
+	Equal = eq;
+}
+
 
 //---------------------------------------------------------------------------
 // LpModelBuilderImpl
@@ -247,7 +312,7 @@ sal_uInt32 LpModelBuilderImpl::getConstraintId( const ConstraintAddress& aConstA
 {
 	vector< ConstraintAddress >::iterator pos;
 	for ( pos = m_cnConstraintAddress.begin(); pos != m_cnConstraintAddress.end(); ++pos )
-		if ( (*pos).equals( aConstAddr ) )
+		if ( pos->equals( aConstAddr ) )
 			return distance( m_cnConstraintAddress.begin(), pos );
 	
 	throw NoMatchingElementsFound();
@@ -286,7 +351,7 @@ void LpModelBuilderImpl::setConstraintCoefficient(
 numeric::opres::Equality LpModelBuilderImpl::getConstraintEquality( sal_uInt32 i ) const
 {
 	if ( m_cnConstraintAddress.size() > i )
-		return m_cnConstraintAddress.at( i ).Equal;
+		return m_cnConstraintAddress.at(i).getEquality();
 	return numeric::opres::EQUAL;
 }
 
