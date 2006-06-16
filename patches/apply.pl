@@ -767,6 +767,26 @@ sub check_for_unused ($)
     }
 }
 
+sub print_statistic_breakdown ($)
+{
+    my $patches = shift;
+    my %breakdown;
+
+    for my $patch (keys %{$patches}) {
+	my $set = find_patch_file ($patch);
+	$set =~ s|.*/(.*)/.*|\1|;
+	print "Path '$set'\n";
+	if (!defined $breakdown{$set}) {
+	    $breakdown{$set} = 1;
+	} else {
+	    $breakdown{$set}++;
+	}
+    }
+    for my $set (sort keys %breakdown) {
+	print "$set\t$breakdown{$set}\n";
+    }
+}
+
 sub print_statistic_no_issue ($)
 {
     my $patches = shift;
@@ -891,6 +911,7 @@ $dry_run = 0;
 $find_unused = 0;
 $add_developer = 0;
 $statistic = 0;
+$statistic_breakdown = 0;
 $statistic_no_issue = 0;
 @required_opts = ( 'PATCHPATH', 'OLDEST_SUPPORTED' );
 @arguments = ();
@@ -922,6 +943,9 @@ foreach $a (@ARGV) {
 	    $quiet = 1;
 	} elsif ($a =~ m/--find-unused/) {
 	    $find_unused = 1;
+	} elsif ($a =~ m/--statistic-breakdown/) {
+	    $statistic = 1;
+	    $statistic_breakdown = 1;
 	} elsif ($a =~ m/--statistic-no-issue/) {
 	    $statistic = 1;
 	    $statistic_no_issue = 1;
@@ -958,6 +982,8 @@ if ($dry_run || $add_developer || $find_unused || $statistic) {
     } elsif ($statistic) {
 	if ($statistic_no_issue) {
 	    print_statistic_no_issue (\%unfiltered_patch_list);
+	} elsif ($statistic_breakdown) {
+	    print_statistic_breakdown (\%unfiltered_patch_list);
 	}
     } else {
 	printf "Dry-run: exiting before applying patches\n";
