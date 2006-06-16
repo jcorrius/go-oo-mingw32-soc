@@ -20,9 +20,9 @@ EXTRA_DIST=\
 	openintro_ark.bmp \
 	openabout_ark.png \
 	openintro_fw.bmp \
-	openabout_fw.png \
+	openabout_fw.bmp \
 	openintro_fw64.bmp \
-	openabout_fw64.png \
+	openabout_fw64.bmp \
 	openintro_mandriva.bmp \
 	openabout_mandriva.png \
 	openintro_gentoo.bmp \
