@@ -119,6 +119,9 @@ public:
 	void setCellFormula( const table::CellAddress&, const rtl::OUString& ) const;
 	void setCellValue( const table::CellAddress&, double ) const;
 
+	void disableCellUpdates();
+	void enableCellUpdates();
+
 private:
 	Reference< uno::XComponentContext > m_xCC;
 	mutable Reference< lang::XMultiComponentFactory > m_xSM;

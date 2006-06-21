@@ -190,8 +190,6 @@ sal_Int16 SolverImpl::execute()
 
 sal_Bool SolverImpl::solveModel()
 {	
-	using numeric::Matrix;
-
 	std::auto_ptr<SolveModel> p( new SolveModel( this ) );
 	try
 	{

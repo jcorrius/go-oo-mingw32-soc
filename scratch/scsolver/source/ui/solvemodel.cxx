@@ -153,7 +153,9 @@ void SolveModelImpl::solve()
 	parseConstraints();
 
 	lp::Model aModel = m_pBuilder->getModel();
+#ifdef DEBUG
 	aModel.print(); // prints model to stdout
+#endif
 	aModel.setPrecision( 2 );
 	auto_ptr<lp::BaseAlgorithm> algorithm = getLpAlgorithm();
 
@@ -191,10 +193,17 @@ bool SolveModelImpl::isSolved() const
 	return m_bSolved;
 }
 
-/** Takes a raw formula string, and transform it into a starndard form of
-	linear constraint. */
+/**
+ * Transform a LP model given in the cells into the standard
+ * format.  This is done by setting the value of one of the
+ * decision variable cells to 1 and all the others to 0, and
+ * interpret the values of the objective function and constraint
+ * cells, and repeat it for every decision variable cell.
+ */
 void SolveModelImpl::parseConstraints()
 {
+	m_pSolverImpl->getCalcInterface()->disableCellUpdates();
+
 	// Create a cost vector from the decision variables.
 	
 	vector< CellAddress > aAddrs = m_pBuilder->getAllDecisionVarAddresses();
@@ -266,19 +275,19 @@ void SolveModelImpl::parseConstraints()
 		cout << aAddr.Column << ", " << aAddr.Row << " = " << f << endl;
 	}
 #endif
+
+	m_pSolverImpl->getCalcInterface()->enableCellUpdates();
 }
 
 static bool lcl_isNumeric( const rtl::OUString& sVal )
 {
-	// TODO: How do we find out if sVal == '0.0' ?
-
-	printOUStr( sVal );
 	double fVal = sVal.toDouble();
 	if ( fVal == 0.0 )
 	{
-		// The value may really be zero, in which case it should
-		// return true!
-		return false;
+		if ( sVal.indexOf( ascii("$") ) == 0 )
+			return false;
+		else
+			return true;
 	}
 	else
 		return true;

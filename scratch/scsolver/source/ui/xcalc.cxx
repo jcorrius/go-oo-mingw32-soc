@@ -309,7 +309,21 @@ rtl::OUString CalcInterface::getCellFormula( const rtl::OUString& sSheetAddr,
 	return sFormula;
 }
 
+void CalcInterface::disableCellUpdates()
+{
+	Reference< lang::XComponent > xCurComp = getCurrentComponent();
+	Reference< frame::XModel > xModel( xCurComp, UNO_QUERY );
+	if ( xModel.is() )
+		xModel->lockControllers();
+}
 
+void CalcInterface::enableCellUpdates()
+{
+	Reference< lang::XComponent > xCurComp = getCurrentComponent();
+	Reference< frame::XModel > xModel( xCurComp, UNO_QUERY );
+	if ( xModel.is() )
+		xModel->unlockControllers();
+}
 
 
 void CalcInterface::splitCellRangeAddress( const rtl::OUString& sFullAddr,
