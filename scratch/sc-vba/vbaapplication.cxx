@@ -131,9 +131,7 @@ ScVbaApplication::Evaluate( const ::rtl::OUString& Name ) throw (uno::RuntimeExc
 	// I think ( like SIN(3) etc. ) need to investigate that
 	// named Ranges also? e.g. [MyRange] if so need a list of named ranges
 	uno::Any aVoid;
-	if ( isRangeShortCut( Name ) )
-		return uno::Any( getActiveWorkbook()->getActiveSheet()->Range( uno::Any( Name ), aVoid ) );	
-	return uno::Any();
+	return uno::Any( getActiveWorkbook()->getActiveSheet()->Range( uno::Any( Name ), aVoid ) );	
 }
 
 uno::Any 
