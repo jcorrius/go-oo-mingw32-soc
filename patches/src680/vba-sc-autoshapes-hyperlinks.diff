@@ -707,3 +707,1086 @@ diff -rup /data4/sles/ooo-buildNow/ooo-build/build/ooc680-m5/sc/source/filter/ex
  
      /** Inserts the URL into a range of cells. Does not modify value or formula cells. */
      static void         InsertUrl( const XclImpRoot& rRoot, const XclRange& rXclRange, const String& rUrl );
+diff -rup /data4/sles/ooo-buildNow/ooo-build/build/ooc680-m5/xmloff/inc/shapeexport.hxx xmloff/inc/shapeexport.hxx
+--- /data4/sles/ooo-buildNow/ooo-build/build/ooc680-m5/xmloff/inc/shapeexport.hxx	2005-09-09 14:08:00.000000000 +0100
++++ xmloff/inc/shapeexport.hxx	2006-06-19 12:18:00.000000000 +0100
+@@ -70,6 +70,7 @@
+ #ifndef _COM_SUN_STAR_AWT_POINT_HPP_
+ #include <com/sun/star/awt/Point.hpp>
+ #endif
++#include <com/sun/star/beans/PropertyValue.hpp>
+ 
+ #include <map>
+ 
+@@ -224,6 +225,9 @@ private:
+ 	const rtl::OUString							msStartShape;
+ 	const rtl::OUString							msEndShape;
+ 	const rtl::OUString							msOnClick;
++	const rtl::OUString							msOnAction;
++	const rtl::OUString							msAction;
++	const rtl::OUString							msURL;
+ 	const rtl::OUString							msEventType;
+ 	const rtl::OUString							msPresentation;
+ 	const rtl::OUString							msMacroName;
+@@ -249,6 +253,7 @@ private:
+ 	SAL_DLLPRIVATE sal_Bool ImpExportPresentationAttributes( const com::sun::star::uno::Reference< com::sun::star::beans::XPropertySet >& xPropSet, const rtl::OUString& rClass );
+ 	SAL_DLLPRIVATE void ImpExportText( const com::sun::star::uno::Reference< com::sun::star::drawing::XShape >& xShape );
+ 	SAL_DLLPRIVATE void ImpExportEvents( const com::sun::star::uno::Reference< com::sun::star::drawing::XShape >& xShape );
++	SAL_DLLPRIVATE void ImpExportEvents( const com::sun::star::beans::PropertyValue* pProps, const sal_Int32 nCount );
+ 	SAL_DLLPRIVATE void ImpExportGluePoints( const com::sun::star::uno::Reference< com::sun::star::drawing::XShape >& xShape );
+ 
+ 	// single shape exporters
+diff -rup /data4/sles/ooo-buildNow/ooo-build/build/ooc680-m5/xmloff/source/draw/eventimp.cxx xmloff/source/draw/eventimp.cxx
+--- /data4/sles/ooo-buildNow/ooo-build/build/ooc680-m5/xmloff/source/draw/eventimp.cxx	2005-09-09 14:44:06.000000000 +0100
++++ xmloff/source/draw/eventimp.cxx	2006-06-19 12:19:16.000000000 +0100
+@@ -132,7 +132,10 @@ class SdXMLEventContext : public SvXMLIm
+ {
+ private:
+ 	com::sun::star::uno::Reference< com::sun::star::drawing::XShape > mxShape;
+-
++	void processPresentationEvents( const Reference< XNameReplace >& ); 
++	// Action & OnClick
++	void processShapeEvents( const Reference< XNameReplace >& ); 
++	void fillMacroEventProps( beans::PropertyValue*& ); 
+ public:
+ 	TYPEINFO();
+ 
+@@ -144,10 +147,12 @@ public:
+ 
+ 	sal_Bool mbValid;
+ 	sal_Bool mbScript;
++	sal_Bool mbShapeAction;
+ 	ClickAction meClickAction;
+ 	XMLEffect meEffect;
+ 	XMLEffectDirection meDirection;
+ 	sal_Int16 mnStartScale;
++	sal_Int16 mnPrfx;
+ 	AnimationSpeed meSpeed;
+ 	sal_Int32 mnVerb;
+ 	OUString msSoundURL;
+@@ -155,6 +160,7 @@ public:
+ 	OUString msMacroName;
+ 	OUString msBookmark;
+ 	OUString msLanguage;
++	OUString msHyperURL;
+ };
+ 
+ ///////////////////////////////////////////////////////////////////////
+@@ -207,7 +213,7 @@ XMLEventSoundContext::~XMLEventSoundCont
+ {
+ }
+ 
+-///////////////////////////////////////////////////////////////////////
++/////////HyperURL
+ 
+ TYPEINIT1( SdXMLEventContext, SvXMLImportContext );
+ 
+@@ -215,13 +221,19 @@ SdXMLEventContext::SdXMLEventContext( Sv
+ :	SvXMLImportContext(rImp, nPrfx, rLocalName),
+ 	mxShape( rxShape ), mbScript( sal_False ), meClickAction( ClickAction_NONE ),
+ 	meEffect( EK_none ), meDirection( ED_none ), mnStartScale( 100 ),
+-	meSpeed( AnimationSpeed_MEDIUM ), mnVerb(0), mbPlayFull( sal_False )
++	meSpeed( AnimationSpeed_MEDIUM ), mnVerb(0), mbPlayFull( sal_False ), mnPrfx( nPrfx ), mbShapeAction( sal_False )
+ {
+-	const OUString msXMLEventName( RTL_CONSTASCII_USTRINGPARAM( "click" ) );
++	static const OUString msXMLEventName( RTL_CONSTASCII_USTRINGPARAM( "click" ) );
++	static const OUString msXMLShapeAction( RTL_CONSTASCII_USTRINGPARAM( "action" ) );
+ 
+-	if( nPrfx == XML_NAMESPACE_PRESENTATION && IsXMLToken( rLocalName, XML_EVENT_LISTENER ) )
++	if( nPrfx == XML_NAMESPACE_PRESENTATION  && IsXMLToken( rLocalName, XML_EVENT_LISTENER ) )
++	{
++		mbValid = sal_True;
++	}
++	else if( nPrfx == XML_NAMESPACE_DRAW  && IsXMLToken( rLocalName, XML_EVENT_LISTENER ) )
+ 	{
+ 		mbValid = sal_True;
++		mbShapeAction = sal_True;
+ 	}
+ 	else if( nPrfx == XML_NAMESPACE_SCRIPT && IsXMLToken( rLocalName, XML_EVENT_LISTENER ) )
+ 	{
+@@ -288,7 +300,7 @@ SdXMLEventContext::SdXMLEventContext( Sv
+ 				sEventName = sValue;
+ 				sal_uInt16 nScriptPrefix = 
+ 					GetImport().GetNamespaceMap().GetKeyByAttrName( sValue, &sEventName );
+-				mbValid = XML_NAMESPACE_DOM == nScriptPrefix && sEventName == msXMLEventName;
++				mbValid = XML_NAMESPACE_DOM == nScriptPrefix && ( sEventName == msXMLEventName | sEventName == msXMLShapeAction );
+ 			}
+ 			else if( IsXMLToken( aAttrLocalName, XML_LANGUAGE ) )
+ 			{
+@@ -314,17 +326,20 @@ SdXMLEventContext::SdXMLEventContext( Sv
+ 			if( IsXMLToken( aAttrLocalName, XML_HREF ) )
+ 			{
+ 				if ( mbScript )
+-				{
+ 					msMacroName = sValue;
+-				}
+ 				else
+ 				{
+-					const rtl::OUString &rTmp = 
+-						rImp.GetAbsoluteReference(sValue);
+-					INetURLObject::translateToInternal( rTmp, msBookmark, 
+-						INetURLObject::WAS_ENCODED, 
+-						INetURLObject::DECODE_UNAMBIGUOUS, 
+-						RTL_TEXTENCODING_UTF8 );
++					if ( !mbShapeAction )
++					{
++						const rtl::OUString &rTmp = 
++							rImp.GetAbsoluteReference(sValue);
++						INetURLObject::translateToInternal( rTmp, msBookmark, 
++							INetURLObject::WAS_ENCODED, 
++							INetURLObject::DECODE_UNAMBIGUOUS, 
++							RTL_TEXTENCODING_UTF8 );
++					}
++					else
++						msHyperURL = sValue;	
+ 				}
+ 			}
+ 			break;
+@@ -344,31 +359,164 @@ SvXMLImportContext * SdXMLEventContext::
+ 	return new XMLEventSoundContext( GetImport(), nPrefix, rLocalName, xAttrList, this );
+ }
+ 
+-void SdXMLEventContext::EndElement()
++void  SdXMLEventContext::fillMacroEventProps( beans::PropertyValue*& pProperties)
+ {
+-	const OUString msAPIEventName( RTL_CONSTASCII_USTRINGPARAM( "OnClick" ) );
++	pProperties->Name =
++			OUString( RTL_CONSTASCII_USTRINGPARAM( "EventType" ) );
++	pProperties->Handle = -1;
++	pProperties->Value <<= OUString(
++		RTL_CONSTASCII_USTRINGPARAM("Script") );
++	pProperties->State = beans::PropertyState_DIRECT_VALUE;
++	pProperties++;
++
++	pProperties->Name = OUString(
++		RTL_CONSTASCII_USTRINGPARAM( "Script" ) );
++	pProperties->Handle = -1;
++	pProperties->Value <<= msMacroName;
++	pProperties->State = beans::PropertyState_DIRECT_VALUE;
++}
+ 
+-	if( !mbValid )
++void  SdXMLEventContext::processShapeEvents( const Reference< XNameReplace >& xEvents )
++{
++	OUString sAPIEventName;
++	if ( mbShapeAction )
++		sAPIEventName = OUString( RTL_CONSTASCII_USTRINGPARAM( "OnAction" ));
++	else if ( mbScript )
++		sAPIEventName = OUString( RTL_CONSTASCII_USTRINGPARAM( "OnClick" ));
++	else
++		return;
++	if( !xEvents->hasByName( sAPIEventName ) )
+ 		return;
+ 
+-	do
++	uno::Sequence< beans::PropertyValue > aProperties( 2 );
++	beans::PropertyValue* pProperties = aProperties.getArray();
++
++	if ( mbShapeAction )
+ 	{
+-		Reference< XEventsSupplier > xEventsSupplier( mxShape, UNO_QUERY );
+-		if( !xEventsSupplier.is() )
+-			break;
++		pProperties->Name =
++			OUString( RTL_CONSTASCII_USTRINGPARAM( "EventType" ) );
++		pProperties->Handle = -1;
++		pProperties->Value <<= OUString(
++			RTL_CONSTASCII_USTRINGPARAM("Action") );
++		pProperties->State = beans::PropertyState_DIRECT_VALUE;
++		pProperties++;
++
++		pProperties->Name = OUString(
++			RTL_CONSTASCII_USTRINGPARAM( "URL" ) );
++		pProperties->Handle = -1;
++		pProperties->Value <<= msHyperURL;
++		pProperties->State = beans::PropertyState_DIRECT_VALUE;
++	}
++	else
++		fillMacroEventProps( pProperties );
++	uno::Any aAny;
++	aAny <<= aProperties;
++	xEvents->replaceByName( sAPIEventName, aAny );
++}
++void  SdXMLEventContext::processPresentationEvents( const Reference< XNameReplace >& xEvents )
++{
++	const OUString sAPIEventName( RTL_CONSTASCII_USTRINGPARAM( "OnClick" ) );
++	if( !xEvents->hasByName( sAPIEventName ) )
++		return;
+ 
+-		Reference< XNameReplace > xEvents( xEventsSupplier->getEvents() );
+-		DBG_ASSERT( xEvents.is(), "XEventsSupplier::getEvents() returned NULL" );
+-		if( !xEvents.is() )
+-			break;
++	sal_Int32 nPropertyCount = 2;
++	switch( meClickAction )
++	{
++	case ClickAction_NONE:
++	case ClickAction_PREVPAGE:
++	case ClickAction_NEXTPAGE:
++	case ClickAction_FIRSTPAGE:
++	case ClickAction_LASTPAGE:
++	case ClickAction_INVISIBLE:
++	case ClickAction_STOPPRESENTATION:
++		break;
++	case ClickAction_PROGRAM:
++	case ClickAction_VERB:
++	case ClickAction_BOOKMARK:
++	case ClickAction_DOCUMENT:
++		nPropertyCount += 1;
++		break;
++	case ClickAction_MACRO:
++		if ( msLanguage.equalsIgnoreAsciiCaseAscii("starbasic") )
++			nPropertyCount += 1;
++		break;
+ 
+-		if( !xEvents->hasByName( msAPIEventName ) )
+-			break;
++	case ClickAction_SOUND:
++		nPropertyCount += 2;
++		break;
++
++	case ClickAction_VANISH:
++		nPropertyCount += 4;
++		break;
++	}
+ 
+-		if( mbScript )
+-			meClickAction = ClickAction_MACRO;
++	uno::Sequence< beans::PropertyValue > aProperties( nPropertyCount );
++	beans::PropertyValue* pProperties = aProperties.getArray();
++
++	if( ClickAction_MACRO == meClickAction )
++	{
++		if ( msLanguage.equalsIgnoreAsciiCaseAscii("starbasic") )
++		{
++			OUString sLibrary;
++			const OUString& rApp = GetXMLToken( XML_APPLICATION ); 
++			const OUString& rDoc = GetXMLToken( XML_DOCUMENT ); 
++			if( msMacroName.getLength() > rApp.getLength()+1 &&
++				msMacroName.copy(0,rApp.getLength()).equalsIgnoreAsciiCase( rApp ) &&
++				':' == msMacroName[rApp.getLength()] )
++			{
++				sLibrary = OUString(RTL_CONSTASCII_USTRINGPARAM("StarOffice"));
++				msMacroName = msMacroName.copy( rApp.getLength()+1 );
++			}
++			else if( msMacroName.getLength() > rDoc.getLength()+1 &&
++				msMacroName.copy(0,rDoc.getLength()).equalsIgnoreAsciiCase( rDoc ) &&
++				':' == msMacroName[rDoc.getLength()] )
++			{
++				sLibrary = rDoc;
++				msMacroName = msMacroName.copy( rDoc.getLength()+1 );
++			}
++
++			pProperties->Name = OUString( RTL_CONSTASCII_USTRINGPARAM( "EventType" ) );
++			pProperties->Handle = -1;
++			pProperties->Value <<= OUString( RTL_CONSTASCII_USTRINGPARAM("StarBasic") );
++			pProperties->State = beans::PropertyState_DIRECT_VALUE;
++			pProperties++;
++
++			pProperties->Name = OUString( RTL_CONSTASCII_USTRINGPARAM( "MacroName" ) );
++			pProperties->Handle = -1;
++			pProperties->Value <<= msMacroName;
++			pProperties->State = beans::PropertyState_DIRECT_VALUE;
++			pProperties++;
++
++			pProperties->Name = OUString( RTL_CONSTASCII_USTRINGPARAM( "Library" ) );
++			pProperties->Handle = -1;
++			pProperties->Value <<= sLibrary;
++			pProperties->State = beans::PropertyState_DIRECT_VALUE;
++		}
++		else
++			fillMacroEventProps( pProperties );
++	}
++	else
++	{
++		pProperties->Name = OUString( RTL_CONSTASCII_USTRINGPARAM( "EventType" ) );
++		pProperties->Handle = -1;
++		pProperties->Value <<= OUString( RTL_CONSTASCII_USTRINGPARAM("Presentation") );
++		pProperties->State = beans::PropertyState_DIRECT_VALUE;
++		pProperties++;
++
++		// ClickAction_BOOKMARK and ClickAction_DOCUMENT share the same xml event
++		// so check here if its realy a bookmark or maybe a document
++		if( meClickAction == ClickAction_BOOKMARK )
++		{
++			if( msBookmark.compareToAscii( "#", 1 ) != 0 )
++				meClickAction = ClickAction_DOCUMENT;
++		}
++
++		pProperties->Name = OUString( RTL_CONSTASCII_USTRINGPARAM("ClickAction") );
++		pProperties->Handle = -1;
++		pProperties->Value <<= meClickAction;
++		pProperties->State = beans::PropertyState_DIRECT_VALUE;
++		pProperties++;
+ 
+-		sal_Int32 nPropertyCount = 2;
+ 		switch( meClickAction )
+ 		{
+ 		case ClickAction_NONE:
+@@ -379,172 +527,91 @@ void SdXMLEventContext::EndElement()
+ 		case ClickAction_INVISIBLE:
+ 		case ClickAction_STOPPRESENTATION:
+ 			break;
+-		case ClickAction_PROGRAM:
+-		case ClickAction_VERB:
++
+ 		case ClickAction_BOOKMARK:
+-		case ClickAction_DOCUMENT:
+-			nPropertyCount += 1;
+-			break;
+-		case ClickAction_MACRO:
+-			if ( msLanguage.equalsIgnoreAsciiCaseAscii("starbasic") )
+-				nPropertyCount += 1;
+-			break;
++			msBookmark = msBookmark.copy(1);
+ 
+-		case ClickAction_SOUND:
+-			nPropertyCount += 2;
++			// Note: no break here!!!
++
++		case ClickAction_DOCUMENT:
++		case ClickAction_PROGRAM:
++			pProperties->Name = OUString( RTL_CONSTASCII_USTRINGPARAM("Bookmark") );
++			pProperties->Handle = -1;
++			pProperties->Value <<= msBookmark;
++			pProperties->State = beans::PropertyState_DIRECT_VALUE;
+ 			break;
+ 
+ 		case ClickAction_VANISH:
+-			nPropertyCount += 4;
+-			break;
+-		}
++			pProperties->Name = OUString( RTL_CONSTASCII_USTRINGPARAM("Effect") );
++			pProperties->Handle = -1;
++			pProperties->Value <<= ImplSdXMLgetEffect( meEffect, meDirection, mnStartScale, sal_True );
++			pProperties->State = beans::PropertyState_DIRECT_VALUE;
++			pProperties++;
+ 
+-		uno::Sequence< beans::PropertyValue > aProperties( nPropertyCount );
+-		beans::PropertyValue* pProperties = aProperties.getArray();
++			pProperties->Name = OUString( RTL_CONSTASCII_USTRINGPARAM("Speed") );
++			pProperties->Handle = -1;
++			pProperties->Value <<= meSpeed;
++			pProperties->State = beans::PropertyState_DIRECT_VALUE;
++			pProperties++;
+ 
+-		if( ClickAction_MACRO == meClickAction )
+-		{
+-			if ( msLanguage.equalsIgnoreAsciiCaseAscii("starbasic") )
+-			{
+-				OUString sLibrary;
+-				const OUString& rApp = GetXMLToken( XML_APPLICATION ); 
+-				const OUString& rDoc = GetXMLToken( XML_DOCUMENT ); 
+-				if( msMacroName.getLength() > rApp.getLength()+1 &&
+-					msMacroName.copy(0,rApp.getLength()).equalsIgnoreAsciiCase( rApp ) &&
+-					':' == msMacroName[rApp.getLength()] )
+-				{
+-					sLibrary = OUString(RTL_CONSTASCII_USTRINGPARAM("StarOffice"));
+-					msMacroName = msMacroName.copy( rApp.getLength()+1 );
+-				}
+-				else if( msMacroName.getLength() > rDoc.getLength()+1 &&
+-					msMacroName.copy(0,rDoc.getLength()).equalsIgnoreAsciiCase( rDoc ) &&
+-					':' == msMacroName[rDoc.getLength()] )
+-				{
+-					sLibrary = rDoc;
+-					msMacroName = msMacroName.copy( rDoc.getLength()+1 );
+-				}
++			// NOTE: no break here!!!
+ 
+-				pProperties->Name = OUString( RTL_CONSTASCII_USTRINGPARAM( "EventType" ) );
+-				pProperties->Handle = -1;
+-				pProperties->Value <<= OUString( RTL_CONSTASCII_USTRINGPARAM("StarBasic") );
+-				pProperties->State = beans::PropertyState_DIRECT_VALUE;
+-				pProperties++;
+-
+-				pProperties->Name = OUString( RTL_CONSTASCII_USTRINGPARAM( "MacroName" ) );
+-				pProperties->Handle = -1;
+-				pProperties->Value <<= msMacroName;
+-				pProperties->State = beans::PropertyState_DIRECT_VALUE;
+-				pProperties++;
+-
+-				pProperties->Name = OUString( RTL_CONSTASCII_USTRINGPARAM( "Library" ) );
+-				pProperties->Handle = -1;
+-				pProperties->Value <<= sLibrary;
+-				pProperties->State = beans::PropertyState_DIRECT_VALUE;
+-			}
+-			else
+-			{
+-				pProperties->Name =
+-					OUString( RTL_CONSTASCII_USTRINGPARAM( "EventType" ) );
+-				pProperties->Handle = -1;
+-				pProperties->Value <<= OUString(
+-					RTL_CONSTASCII_USTRINGPARAM("Script") );
+-				pProperties->State = beans::PropertyState_DIRECT_VALUE;
+-				pProperties++;
+-
+-				pProperties->Name = OUString(
+-					RTL_CONSTASCII_USTRINGPARAM( "Script" ) );
+-				pProperties->Handle = -1;
+-				pProperties->Value <<= msMacroName;
+-				pProperties->State = beans::PropertyState_DIRECT_VALUE;
+-			}
+-		}
+-		else
+-		{
+-			pProperties->Name = OUString( RTL_CONSTASCII_USTRINGPARAM( "EventType" ) );
++		case ClickAction_SOUND:
++			pProperties->Name = OUString( RTL_CONSTASCII_USTRINGPARAM("SoundURL") );
+ 			pProperties->Handle = -1;
+-			pProperties->Value <<= OUString( RTL_CONSTASCII_USTRINGPARAM("Presentation") );
++			pProperties->Value <<= msSoundURL;
+ 			pProperties->State = beans::PropertyState_DIRECT_VALUE;
+ 			pProperties++;
+ 
+-			// ClickAction_BOOKMARK and ClickAction_DOCUMENT share the same xml event
+-			// so check here if its realy a bookmark or maybe a document
+-			if( meClickAction == ClickAction_BOOKMARK )
+-			{
+-				if( msBookmark.compareToAscii( "#", 1 ) != 0 )
+-					meClickAction = ClickAction_DOCUMENT;
+-			}
++			pProperties->Name = OUString( RTL_CONSTASCII_USTRINGPARAM("PlayFull") );
++			pProperties->Handle = -1;
++			pProperties->Value = ::cppu::bool2any(mbPlayFull);
++			pProperties->State = beans::PropertyState_DIRECT_VALUE;
++			break;
+ 
+-			pProperties->Name = OUString( RTL_CONSTASCII_USTRINGPARAM("ClickAction") );
++		case ClickAction_VERB:
++			pProperties->Name = OUString( RTL_CONSTASCII_USTRINGPARAM("Verb") );
+ 			pProperties->Handle = -1;
+-			pProperties->Value <<= meClickAction;
++			pProperties->Value <<= mnVerb;
+ 			pProperties->State = beans::PropertyState_DIRECT_VALUE;
+-			pProperties++;
++			break;
++		}
++	}
++	uno::Any aAny;
++	aAny <<= aProperties;
++	xEvents->replaceByName( sAPIEventName, aAny );
+ 
+-			switch( meClickAction )
+-			{
+-			case ClickAction_NONE:
+-			case ClickAction_PREVPAGE:
+-			case ClickAction_NEXTPAGE:
+-			case ClickAction_FIRSTPAGE:
+-			case ClickAction_LASTPAGE:
+-			case ClickAction_INVISIBLE:
+-			case ClickAction_STOPPRESENTATION:
+-				break;
++}
++void SdXMLEventContext::EndElement()
++{
++
++	if( !mbValid )
++		return;
+ 
+-			case ClickAction_BOOKMARK:
+-				msBookmark = msBookmark.copy(1);
++	do
++	{
++		Reference< XEventsSupplier > xEventsSupplier( mxShape, UNO_QUERY );
++		if( !xEventsSupplier.is() )
++			break;
+ 
+-				// Note: no break here!!!
++		Reference< XNameReplace > xEvents( xEventsSupplier->getEvents() );
++		DBG_ASSERT( xEvents.is(), "XEventsSupplier::getEvents() returned NULL" );
++		if( !xEvents.is() )
++			break;
+ 
+-			case ClickAction_DOCUMENT:
+-			case ClickAction_PROGRAM:
+-				pProperties->Name = OUString( RTL_CONSTASCII_USTRINGPARAM("Bookmark") );
+-				pProperties->Handle = -1;
+-				pProperties->Value <<= msBookmark;
+-				pProperties->State = beans::PropertyState_DIRECT_VALUE;
++		switch( mnPrfx )
++		{
++			case XML_NAMESPACE_PRESENTATION:
++				processPresentationEvents( xEvents );	
+ 				break;
+-
+-			case ClickAction_VANISH:
+-				pProperties->Name = OUString( RTL_CONSTASCII_USTRINGPARAM("Effect") );
+-				pProperties->Handle = -1;
+-				pProperties->Value <<= ImplSdXMLgetEffect( meEffect, meDirection, mnStartScale, sal_True );
+-				pProperties->State = beans::PropertyState_DIRECT_VALUE;
+-				pProperties++;
+-
+-				pProperties->Name = OUString( RTL_CONSTASCII_USTRINGPARAM("Speed") );
+-				pProperties->Handle = -1;
+-				pProperties->Value <<= meSpeed;
+-				pProperties->State = beans::PropertyState_DIRECT_VALUE;
+-				pProperties++;
+-
+-				// NOTE: no break here!!!
+-
+-			case ClickAction_SOUND:
+-				pProperties->Name = OUString( RTL_CONSTASCII_USTRINGPARAM("SoundURL") );
+-				pProperties->Handle = -1;
+-				pProperties->Value <<= msSoundURL;
+-				pProperties->State = beans::PropertyState_DIRECT_VALUE;
+-				pProperties++;
+-
+-				pProperties->Name = OUString( RTL_CONSTASCII_USTRINGPARAM("PlayFull") );
+-				pProperties->Handle = -1;
+-				pProperties->Value = ::cppu::bool2any(mbPlayFull);
+-				pProperties->State = beans::PropertyState_DIRECT_VALUE;
++			case XML_NAMESPACE_DRAW:
++			case XML_NAMESPACE_SCRIPT:
++				processShapeEvents( xEvents );
+ 				break;
+-
+-			case ClickAction_VERB:
+-				pProperties->Name = OUString( RTL_CONSTASCII_USTRINGPARAM("Verb") );
+-				pProperties->Handle = -1;
+-				pProperties->Value <<= mnVerb;
+-				pProperties->State = beans::PropertyState_DIRECT_VALUE;
++			default:
+ 				break;
+-			}
+ 		}
+ 
+-		uno::Any aAny;
+-		aAny <<= aProperties;
+-		xEvents->replaceByName( msAPIEventName, aAny );
+-
+ 	} while(0);
+ }
+ 
+diff -rup /data4/sles/ooo-buildNow/ooo-build/build/ooc680-m5/xmloff/source/draw/shapeexport2.cxx xmloff/source/draw/shapeexport2.cxx
+--- /data4/sles/ooo-buildNow/ooo-build/build/ooc680-m5/xmloff/source/draw/shapeexport2.cxx	2006-04-26 15:10:26.000000000 +0100
++++ xmloff/source/draw/shapeexport2.cxx	2006-06-19 12:19:23.000000000 +0100
+@@ -352,274 +352,304 @@ void XMLShapeExport::ImpExportText( cons
+ #define FOUND_EVENTTYPE		0x0080
+ #define FOUND_MACRO			0x0100
+ #define FOUND_LIBRARY		0x0200
++#define FOUND_ACTION		0x0400
+ 
+-void XMLShapeExport::ImpExportEvents( const uno::Reference< drawing::XShape >& xShape )
++void XMLShapeExport::ImpExportEvents( const beans::PropertyValue* pProperties, const sal_Int32 nCount )
+ {
+-	do
++	sal_Int32 nFound = 0;
++	OUString aStrEventType;
++	presentation::ClickAction eClickAction;
++	presentation::AnimationEffect eEffect;
++	presentation::AnimationSpeed eSpeed;
++	OUString aStrSoundURL;
++	sal_Bool bPlayFull;
++	sal_Int32 nVerb;
++	OUString aStrMacro;
++	OUString aStrLibrary;
++	OUString aStrBookmark;
++	OUString aHyperURL;
++	sal_Int32 nIndex;
++	for( nIndex = 0; nIndex < nCount; nIndex++, pProperties++ )
+ 	{
+-		uno::Reference< document::XEventsSupplier > xEventsSupplier( xShape, uno::UNO_QUERY );
+-		if( !xEventsSupplier.is() )
+-			break;
++		if( ( ( nFound & FOUND_EVENTTYPE ) == 0 ) && pProperties->Name == msEventType )
++		{
++			if( pProperties->Value >>= aStrEventType )
++				nFound |= FOUND_EVENTTYPE;
++		}
++		else if( ( ( nFound & FOUND_CLICKACTION ) == 0 ) && pProperties->Name == msClickAction )
++		{
++			if( pProperties->Value >>= eClickAction )
++				nFound |= FOUND_CLICKACTION;
++		}
++		else if( ( ( nFound & FOUND_MACRO ) == 0 ) && ( pProperties->Name == msMacroName || pProperties->Name == msScript ) )
++		{
++			if( pProperties->Value >>= aStrMacro )
++				nFound |= FOUND_MACRO;
++		}
++		else if( ( ( nFound & FOUND_ACTION ) == 0 ) && ( pProperties->Name == msURL  ) )
++		{
++			if( pProperties->Value >>= aHyperURL )
++				nFound |= FOUND_ACTION;
++		}
++		else if( ( ( nFound & FOUND_LIBRARY ) == 0 ) && pProperties->Name == msLibrary )
++		{
++			if( pProperties->Value >>= aStrLibrary )
++				nFound |= FOUND_LIBRARY;
++		}
++		else if( ( ( nFound & FOUND_EFFECT ) == 0 ) && pProperties->Name == msEffect )
++		{
++			if( pProperties->Value >>= eEffect )
++				nFound |= FOUND_EFFECT;
++		}
++		else if( ( ( nFound & FOUND_BOOKMARK ) == 0 ) && pProperties->Name == msBookmark )
++		{
++			if( pProperties->Value >>= aStrBookmark )
++				nFound |= FOUND_BOOKMARK;
++		}
++		else if( ( ( nFound & FOUND_SPEED ) == 0 ) && pProperties->Name == msSpeed )
++		{
++			if( pProperties->Value >>= eSpeed )
++				nFound |= FOUND_SPEED;
++		}
++		else if( ( ( nFound & FOUND_SOUNDURL ) == 0 ) && pProperties->Name == msSoundURL )
++		{
++			if( pProperties->Value >>= aStrSoundURL )
++				nFound |= FOUND_SOUNDURL;
++		}
++		else if( ( ( nFound & FOUND_PLAYFULL ) == 0 ) && pProperties->Name == msPlayFull )
++		{
++			if( pProperties->Value >>= bPlayFull )
++				nFound |= FOUND_PLAYFULL;
++		}
++		else if( ( ( nFound & FOUND_VERB ) == 0 ) && pProperties->Name == msVerb )
++		{
++			if( pProperties->Value >>= nVerb )
++				nFound |= FOUND_VERB;
++		}
++	}
+ 
+-		uno::Reference< container::XNameReplace > xEvents( xEventsSupplier->getEvents() );
+-		DBG_ASSERT( xEvents.is(), "XEventsSupplier::getEvents() returned NULL" );
+-		if( !xEvents.is() )
+-			break;
++	if( ( nFound & FOUND_EVENTTYPE ) == 0 )
++		return;
+ 
+-		uno::Sequence< beans::PropertyValue > aProperties;
+-		if( !xEvents->hasByName( msOnClick ) )
+-			break;
++	if( aStrEventType == msPresentation )
++	{
++		if( ( nFound & FOUND_CLICKACTION ) == 0 )
++			return;
+ 
+-		if( !(xEvents->getByName( msOnClick ) >>= aProperties) )
+-			break;
++		if( eClickAction == presentation::ClickAction_NONE )
++			return;
+ 
+-		sal_Int32 nFound = 0;
+-		const beans::PropertyValue* pProperties = aProperties.getConstArray();
++		SvXMLElementExport aEventsElemt(rExport, XML_NAMESPACE_OFFICE, XML_EVENT_LISTENERS, sal_True, sal_True);
+ 
+-		OUString aStrEventType;
+-		presentation::ClickAction eClickAction;
+-		presentation::AnimationEffect eEffect;
+-		presentation::AnimationSpeed eSpeed;
+-		OUString aStrSoundURL;
+-		sal_Bool bPlayFull;
+-		sal_Int32 nVerb;
+-		OUString aStrMacro;
+-		OUString aStrLibrary;
+-		OUString aStrBookmark;
++		enum XMLTokenEnum eStrAction;
+ 
+-		const sal_Int32 nCount = aProperties.getLength();
+-		sal_Int32 nIndex;
+-		for( nIndex = 0; nIndex < nCount; nIndex++, pProperties++ )
++		switch( eClickAction )
+ 		{
+-			if( ( ( nFound & FOUND_EVENTTYPE ) == 0 ) && pProperties->Name == msEventType )
+-			{
+-				if( pProperties->Value >>= aStrEventType )
+-					nFound |= FOUND_EVENTTYPE;
+-			}
+-			else if( ( ( nFound & FOUND_CLICKACTION ) == 0 ) && pProperties->Name == msClickAction )
+-			{
+-				if( pProperties->Value >>= eClickAction )
+-					nFound |= FOUND_CLICKACTION;
+-			}
+-			else if( ( ( nFound & FOUND_MACRO ) == 0 ) && ( pProperties->Name == msMacroName || pProperties->Name == msScript ) )
+-			{
+-				if( pProperties->Value >>= aStrMacro )
+-					nFound |= FOUND_MACRO;
+-			}
+-			else if( ( ( nFound & FOUND_LIBRARY ) == 0 ) && pProperties->Name == msLibrary )
+-			{
+-				if( pProperties->Value >>= aStrLibrary )
+-					nFound |= FOUND_LIBRARY;
+-			}
+-			else if( ( ( nFound & FOUND_EFFECT ) == 0 ) && pProperties->Name == msEffect )
+-			{
+-				if( pProperties->Value >>= eEffect )
+-					nFound |= FOUND_EFFECT;
+-			}
+-			else if( ( ( nFound & FOUND_BOOKMARK ) == 0 ) && pProperties->Name == msBookmark )
+-			{
+-				if( pProperties->Value >>= aStrBookmark )
+-					nFound |= FOUND_BOOKMARK;
+-			}
+-			else if( ( ( nFound & FOUND_SPEED ) == 0 ) && pProperties->Name == msSpeed )
+-			{
+-				if( pProperties->Value >>= eSpeed )
+-					nFound |= FOUND_SPEED;
+-			}
+-			else if( ( ( nFound & FOUND_SOUNDURL ) == 0 ) && pProperties->Name == msSoundURL )
+-			{
+-				if( pProperties->Value >>= aStrSoundURL )
+-					nFound |= FOUND_SOUNDURL;
+-			}
+-			else if( ( ( nFound & FOUND_PLAYFULL ) == 0 ) && pProperties->Name == msPlayFull )
+-			{
+-				if( pProperties->Value >>= bPlayFull )
+-					nFound |= FOUND_PLAYFULL;
+-			}
+-			else if( ( ( nFound & FOUND_VERB ) == 0 ) && pProperties->Name == msVerb )
+-			{
+-				if( pProperties->Value >>= nVerb )
+-					nFound |= FOUND_VERB;
+-			}
++		case presentation::ClickAction_PREVPAGE:		eStrAction = XML_PREVIOUS_PAGE; break;
++		case presentation::ClickAction_NEXTPAGE:		eStrAction = XML_NEXT_PAGE; break;
++		case presentation::ClickAction_FIRSTPAGE:		eStrAction = XML_FIRST_PAGE; break;
++		case presentation::ClickAction_LASTPAGE:		eStrAction = XML_LAST_PAGE; break;
++		case presentation::ClickAction_INVISIBLE:		eStrAction = XML_HIDE; break;
++		case presentation::ClickAction_STOPPRESENTATION:eStrAction = XML_STOP; break;
++		case presentation::ClickAction_PROGRAM:			eStrAction = XML_EXECUTE; break;
++		case presentation::ClickAction_BOOKMARK:		eStrAction = XML_SHOW; break;
++		case presentation::ClickAction_DOCUMENT:		eStrAction = XML_SHOW; break;
++		case presentation::ClickAction_MACRO:			eStrAction = XML_EXECUTE_MACRO; break;
++		case presentation::ClickAction_VERB:			eStrAction = XML_VERB; break;
++		case presentation::ClickAction_VANISH:			eStrAction = XML_FADE_OUT; break;
++		case presentation::ClickAction_SOUND:			eStrAction = XML_SOUND; break;
++		default:
++			DBG_ERROR( "unknown presentation::ClickAction found!" );
++			eStrAction = XML_UNKNOWN;
+ 		}
+ 
+-		if( ( nFound & FOUND_EVENTTYPE ) == 0 )
+-			break;
++		OUString aEventQName(
++			rExport.GetNamespaceMap().GetQNameByKey(
++					XML_NAMESPACE_DOM, OUString( RTL_CONSTASCII_USTRINGPARAM( "click" ) ) ) );
++		rExport.AddAttribute( XML_NAMESPACE_SCRIPT, XML_EVENT_NAME, aEventQName );
++		rExport.AddAttribute( XML_NAMESPACE_PRESENTATION, XML_ACTION, eStrAction );
+ 
+-		if( aStrEventType == msPresentation )
++		if( eClickAction == presentation::ClickAction_VANISH )
+ 		{
+-			if( ( nFound & FOUND_CLICKACTION ) == 0 )
+-				break;
++			if( nFound & FOUND_EFFECT )
++			{
++				XMLEffect eKind;
++				XMLEffectDirection eDirection;
++				sal_Int16 nStartScale;
++				sal_Bool bIn;
+ 
+-			if( eClickAction == presentation::ClickAction_NONE )
+-				break;
++				SdXMLImplSetEffect( eEffect, eKind, eDirection, nStartScale, bIn );
+ 
+-			SvXMLElementExport aEventsElemt(rExport, XML_NAMESPACE_OFFICE, XML_EVENT_LISTENERS, sal_True, sal_True);
++				if( eEffect != EK_none )
++				{
++					SvXMLUnitConverter::convertEnum( msBuffer, eKind, aXML_AnimationEffect_EnumMap );
++					rExport.AddAttribute( XML_NAMESPACE_PRESENTATION, XML_EFFECT, msBuffer.makeStringAndClear() );
++				}
+ 
+-			enum XMLTokenEnum eStrAction;
++				if( eDirection != ED_none )
++				{
++					SvXMLUnitConverter::convertEnum( msBuffer, eDirection, aXML_AnimationDirection_EnumMap );
++					rExport.AddAttribute( XML_NAMESPACE_PRESENTATION, XML_DIRECTION, msBuffer.makeStringAndClear() );
++				}
+ 
+-			switch( eClickAction )
+-			{
+-			case presentation::ClickAction_PREVPAGE:		eStrAction = XML_PREVIOUS_PAGE; break;
+-			case presentation::ClickAction_NEXTPAGE:		eStrAction = XML_NEXT_PAGE; break;
+-			case presentation::ClickAction_FIRSTPAGE:		eStrAction = XML_FIRST_PAGE; break;
+-			case presentation::ClickAction_LASTPAGE:		eStrAction = XML_LAST_PAGE; break;
+-			case presentation::ClickAction_INVISIBLE:		eStrAction = XML_HIDE; break;
+-			case presentation::ClickAction_STOPPRESENTATION:eStrAction = XML_STOP; break;
+-			case presentation::ClickAction_PROGRAM:			eStrAction = XML_EXECUTE; break;
+-			case presentation::ClickAction_BOOKMARK:		eStrAction = XML_SHOW; break;
+-			case presentation::ClickAction_DOCUMENT:		eStrAction = XML_SHOW; break;
+-			case presentation::ClickAction_MACRO:			eStrAction = XML_EXECUTE_MACRO; break;
+-			case presentation::ClickAction_VERB:			eStrAction = XML_VERB; break;
+-			case presentation::ClickAction_VANISH:			eStrAction = XML_FADE_OUT; break;
+-			case presentation::ClickAction_SOUND:			eStrAction = XML_SOUND; break;
+-			default:
+-				DBG_ERROR( "unknown presentation::ClickAction found!" );
+-				eStrAction = XML_UNKNOWN;
++				if( nStartScale != -1 )
++				{
++					SvXMLUnitConverter::convertPercent( msBuffer, nStartScale );
++					rExport.AddAttribute( XML_NAMESPACE_PRESENTATION, XML_START_SCALE, msBuffer.makeStringAndClear() );
++				}
+ 			}
+ 
+-			OUString aEventQName(
+-				rExport.GetNamespaceMap().GetQNameByKey(
+-						XML_NAMESPACE_DOM, OUString( RTL_CONSTASCII_USTRINGPARAM( "click" ) ) ) );
+-			rExport.AddAttribute( XML_NAMESPACE_SCRIPT, XML_EVENT_NAME, aEventQName );
+-			rExport.AddAttribute( XML_NAMESPACE_PRESENTATION, XML_ACTION, eStrAction );
+-
+-			if( eClickAction == presentation::ClickAction_VANISH )
++			if( nFound & FOUND_SPEED && eEffect != presentation::AnimationEffect_NONE )
+ 			{
+-				if( nFound & FOUND_EFFECT )
++				if( eSpeed != presentation::AnimationSpeed_MEDIUM )
+ 				{
+-					XMLEffect eKind;
+-					XMLEffectDirection eDirection;
+-					sal_Int16 nStartScale;
+-					sal_Bool bIn;
+-
+-					SdXMLImplSetEffect( eEffect, eKind, eDirection, nStartScale, bIn );
++					SvXMLUnitConverter::convertEnum( msBuffer, eSpeed, aXML_AnimationSpeed_EnumMap );
++					rExport.AddAttribute( XML_NAMESPACE_PRESENTATION, XML_SPEED, msBuffer.makeStringAndClear() );
++				}
++			}
++		}
+ 
+-					if( eEffect != EK_none )
+-					{
+-						SvXMLUnitConverter::convertEnum( msBuffer, eKind, aXML_AnimationEffect_EnumMap );
+-						rExport.AddAttribute( XML_NAMESPACE_PRESENTATION, XML_EFFECT, msBuffer.makeStringAndClear() );
+-					}
++		if( eClickAction == presentation::ClickAction_PROGRAM ||
++			eClickAction == presentation::ClickAction_BOOKMARK ||
++			eClickAction == presentation::ClickAction_DOCUMENT )
++		{
++			if( eClickAction == presentation::ClickAction_BOOKMARK )
++				msBuffer.append( sal_Unicode('#') );
+ 
+-					if( eDirection != ED_none )
+-					{
+-						SvXMLUnitConverter::convertEnum( msBuffer, eDirection, aXML_AnimationDirection_EnumMap );
+-						rExport.AddAttribute( XML_NAMESPACE_PRESENTATION, XML_DIRECTION, msBuffer.makeStringAndClear() );
+-					}
++			msBuffer.append( aStrBookmark );
++			rExport.AddAttribute(XML_NAMESPACE_XLINK, XML_HREF, GetExport().GetRelativeReference(msBuffer.makeStringAndClear()) );
++			rExport.AddAttribute( XML_NAMESPACE_XLINK, XML_TYPE, XML_SIMPLE );
++			rExport.AddAttribute( XML_NAMESPACE_XLINK, XML_SHOW, XML_NEW );
++			rExport.AddAttribute( XML_NAMESPACE_XLINK, XML_ACTUATE, XML_ONREQUEST );
++		}
+ 
+-					if( nStartScale != -1 )
+-					{
+-						SvXMLUnitConverter::convertPercent( msBuffer, nStartScale );
+-						rExport.AddAttribute( XML_NAMESPACE_PRESENTATION, XML_START_SCALE, msBuffer.makeStringAndClear() );
+-					}
+-				}
++		if( ( nFound & FOUND_VERB ) && eClickAction == presentation::ClickAction_VERB )
++		{
++			msBuffer.append( nVerb );
++			rExport.AddAttribute(XML_NAMESPACE_PRESENTATION, XML_VERB, msBuffer.makeStringAndClear());
++		}
+ 
+-				if( nFound & FOUND_SPEED && eEffect != presentation::AnimationEffect_NONE )
+-				{
+-					if( eSpeed != presentation::AnimationSpeed_MEDIUM )
+-					{
+-						SvXMLUnitConverter::convertEnum( msBuffer, eSpeed, aXML_AnimationSpeed_EnumMap );
+-						rExport.AddAttribute( XML_NAMESPACE_PRESENTATION, XML_SPEED, msBuffer.makeStringAndClear() );
+-					}
+-				}
+-			}
++		SvXMLElementExport aEventElemt(rExport, XML_NAMESPACE_PRESENTATION, XML_EVENT_LISTENER, sal_True, sal_True);
+ 
+-			if( eClickAction == presentation::ClickAction_PROGRAM ||
+-				eClickAction == presentation::ClickAction_BOOKMARK ||
+-				eClickAction == presentation::ClickAction_DOCUMENT )
++		if( eClickAction == presentation::ClickAction_VANISH || eClickAction == presentation::ClickAction_SOUND )
++		{
++			if( ( nFound & FOUND_SOUNDURL ) && aStrSoundURL.getLength() != 0 )
+ 			{
+-				if( eClickAction == presentation::ClickAction_BOOKMARK )
+-					msBuffer.append( sal_Unicode('#') );
+-
+-				msBuffer.append( aStrBookmark );
+-				rExport.AddAttribute(XML_NAMESPACE_XLINK, XML_HREF, GetExport().GetRelativeReference(msBuffer.makeStringAndClear()) );
++				rExport.AddAttribute(XML_NAMESPACE_XLINK, XML_HREF, GetExport().GetRelativeReference(aStrSoundURL) );
+ 				rExport.AddAttribute( XML_NAMESPACE_XLINK, XML_TYPE, XML_SIMPLE );
+ 				rExport.AddAttribute( XML_NAMESPACE_XLINK, XML_SHOW, XML_NEW );
+ 				rExport.AddAttribute( XML_NAMESPACE_XLINK, XML_ACTUATE, XML_ONREQUEST );
+-			}
++				if( nFound & FOUND_PLAYFULL && bPlayFull )
++					rExport.AddAttribute( XML_NAMESPACE_PRESENTATION, XML_PLAY_FULL, XML_TRUE );
+ 
+-			if( ( nFound & FOUND_VERB ) && eClickAction == presentation::ClickAction_VERB )
+-			{
+-				msBuffer.append( nVerb );
+-				rExport.AddAttribute(XML_NAMESPACE_PRESENTATION, XML_VERB, msBuffer.makeStringAndClear());
++				SvXMLElementExport aElem( rExport, XML_NAMESPACE_PRESENTATION, XML_SOUND, sal_True, sal_True );
+ 			}
++		}
++	}
++	else if( aStrEventType == msStarBasic )
++	{
++		if( nFound & FOUND_MACRO )
++		{
++			SvXMLElementExport aEventsElemt(rExport, XML_NAMESPACE_OFFICE, XML_EVENT_LISTENERS, sal_True, sal_True);
+ 
+-			SvXMLElementExport aEventElemt(rExport, XML_NAMESPACE_PRESENTATION, XML_EVENT_LISTENER, sal_True, sal_True);
++			rExport.AddAttribute( XML_NAMESPACE_SCRIPT, XML_LANGUAGE, 
++						rExport.GetNamespaceMap().GetQNameByKey(
++						 	XML_NAMESPACE_OOO, 
++						 	OUString( RTL_CONSTASCII_USTRINGPARAM( 
++											"starbasic" ) ) ) );
++			OUString aEventQName(
++				rExport.GetNamespaceMap().GetQNameByKey(
++						XML_NAMESPACE_DOM, OUString( RTL_CONSTASCII_USTRINGPARAM( "click" ) ) ) );
++			rExport.AddAttribute( XML_NAMESPACE_SCRIPT, XML_EVENT_NAME, aEventQName );
+ 
+-			if( eClickAction == presentation::ClickAction_VANISH || eClickAction == presentation::ClickAction_SOUND )
++			if( nFound & FOUND_LIBRARY )
+ 			{
+-				if( ( nFound & FOUND_SOUNDURL ) && aStrSoundURL.getLength() != 0 )
+-				{
+-					rExport.AddAttribute(XML_NAMESPACE_XLINK, XML_HREF, GetExport().GetRelativeReference(aStrSoundURL) );
+-					rExport.AddAttribute( XML_NAMESPACE_XLINK, XML_TYPE, XML_SIMPLE );
+-					rExport.AddAttribute( XML_NAMESPACE_XLINK, XML_SHOW, XML_NEW );
+-					rExport.AddAttribute( XML_NAMESPACE_XLINK, XML_ACTUATE, XML_ONREQUEST );
+-					if( nFound & FOUND_PLAYFULL && bPlayFull )
+-						rExport.AddAttribute( XML_NAMESPACE_PRESENTATION, XML_PLAY_FULL, XML_TRUE );
+-
+-					SvXMLElementExport aElem( rExport, XML_NAMESPACE_PRESENTATION, XML_SOUND, sal_True, sal_True );
+-				}
++				const OUString& rApp = GetXMLToken( XML_APPLICATION );
++				const OUString& rDoc = GetXMLToken( XML_DOCUMENT );
++				OUString sLocation( GetXMLToken(
++					(aStrLibrary.equalsIgnoreAsciiCaseAscii("StarOffice") ||
++				 	 aStrLibrary.equalsIgnoreAsciiCaseAscii("application") ) ? XML_APPLICATION
++														   			   : XML_DOCUMENT ) );
++				OUStringBuffer sTmp( sLocation.getLength() + aStrMacro.getLength() + 1 );
++				sTmp = sLocation;
++				sTmp.append( sal_Unicode( ':' ) );
++				sTmp.append( aStrMacro );
++				rExport.AddAttribute(XML_NAMESPACE_SCRIPT, XML_MACRO_NAME,
++									 sTmp.makeStringAndClear());
+ 			}
+-			break;
++			else
++			{
++				rExport.AddAttribute( XML_NAMESPACE_SCRIPT, XML_MACRO_NAME, aStrMacro );
++			}
++
++
++			SvXMLElementExport aEventElemt(rExport, XML_NAMESPACE_SCRIPT, XML_EVENT_LISTENER, sal_True, sal_True);
+ 		}
+-		else if( aStrEventType == msStarBasic )
++	}
++	else if( aStrEventType == msScript || aStrEventType == msAction )
++	{
++		if( nFound & ( FOUND_MACRO | FOUND_ACTION ) )
+ 		{
+-			if( nFound & FOUND_MACRO )
++			SvXMLElementExport aEventsElemt(rExport, XML_NAMESPACE_OFFICE, XML_EVENT_LISTENERS, sal_True, sal_True);
++			if ( nFound & FOUND_MACRO )
+ 			{
+-				SvXMLElementExport aEventsElemt(rExport, XML_NAMESPACE_OFFICE, XML_EVENT_LISTENERS, sal_True, sal_True);
+-
+-				rExport.AddAttribute( XML_NAMESPACE_SCRIPT, XML_LANGUAGE, 
+-							rExport.GetNamespaceMap().GetQNameByKey(
+-							 	XML_NAMESPACE_OOO, 
+-							 	OUString( RTL_CONSTASCII_USTRINGPARAM( 
+-												"starbasic" ) ) ) );
++				rExport.AddAttribute( XML_NAMESPACE_SCRIPT, XML_LANGUAGE, rExport.GetNamespaceMap().GetQNameByKey(
++						 XML_NAMESPACE_OOO, GetXMLToken(XML_SCRIPT) ) );
+ 				OUString aEventQName(
+ 					rExport.GetNamespaceMap().GetQNameByKey(
+ 							XML_NAMESPACE_DOM, OUString( RTL_CONSTASCII_USTRINGPARAM( "click" ) ) ) );
+ 				rExport.AddAttribute( XML_NAMESPACE_SCRIPT, XML_EVENT_NAME, aEventQName );
+-
+-				if( nFound & FOUND_LIBRARY )
+-				{
+-					const OUString& rApp = GetXMLToken( XML_APPLICATION );
+-					const OUString& rDoc = GetXMLToken( XML_DOCUMENT );
+-					OUString sLocation( GetXMLToken(
+-						(aStrLibrary.equalsIgnoreAsciiCaseAscii("StarOffice") ||
+-					 	 aStrLibrary.equalsIgnoreAsciiCaseAscii("application") ) ? XML_APPLICATION
+-															   			   : XML_DOCUMENT ) );
+-					OUStringBuffer sTmp( sLocation.getLength() + aStrMacro.getLength() + 1 );
+-					sTmp = sLocation;
+-					sTmp.append( sal_Unicode( ':' ) );
+-					sTmp.append( aStrMacro );
+-					rExport.AddAttribute(XML_NAMESPACE_SCRIPT, XML_MACRO_NAME,
+-										 sTmp.makeStringAndClear());
+-				}
+-				else
+-				{
+-					rExport.AddAttribute( XML_NAMESPACE_SCRIPT, XML_MACRO_NAME, aStrMacro );
+-				}
+-
++				rExport.AddAttribute( XML_NAMESPACE_XLINK, XML_HREF, aStrMacro );
+ 
+ 				SvXMLElementExport aEventElemt(rExport, XML_NAMESPACE_SCRIPT, XML_EVENT_LISTENER, sal_True, sal_True);
+ 			}
+-		}
+-		else if( aStrEventType == msScript )
+-		{
+-			if( nFound & FOUND_MACRO )
++			if ( nFound & FOUND_ACTION )
+ 			{
+-				SvXMLElementExport aEventsElemt(rExport, XML_NAMESPACE_OFFICE, XML_EVENT_LISTENERS, sal_True, sal_True);
+-
+ 				rExport.AddAttribute( XML_NAMESPACE_SCRIPT, XML_LANGUAGE, rExport.GetNamespaceMap().GetQNameByKey(
+-							 XML_NAMESPACE_OOO, GetXMLToken(XML_SCRIPT) ) );
++						 XML_NAMESPACE_OOO, GetXMLToken(XML_SCRIPT) ) );
+ 				OUString aEventQName(
+ 					rExport.GetNamespaceMap().GetQNameByKey(
+-							XML_NAMESPACE_DOM, OUString( RTL_CONSTASCII_USTRINGPARAM( "click" ) ) ) );
++							XML_NAMESPACE_DOM, OUString( RTL_CONSTASCII_USTRINGPARAM( "action" ) ) ) );
+ 				rExport.AddAttribute( XML_NAMESPACE_SCRIPT, XML_EVENT_NAME, aEventQName );
+-				rExport.AddAttribute( XML_NAMESPACE_XLINK, XML_HREF, aStrMacro );
++				rExport.AddAttribute( XML_NAMESPACE_XLINK, XML_HREF, aHyperURL );
+ 
+-				SvXMLElementExport aEventElemt(rExport, XML_NAMESPACE_SCRIPT, XML_EVENT_LISTENER, sal_True, sal_True);
++				SvXMLElementExport aEventElemt(rExport, XML_NAMESPACE_DRAW, XML_EVENT_LISTENER, sal_True, sal_True);
+ 			}
+ 		}
+ 	}
++}
++
++void XMLShapeExport::ImpExportEvents( const uno::Reference< drawing::XShape >& xShape )
++{
++	do
++	{
++		uno::Reference< document::XEventsSupplier > xEventsSupplier( xShape, uno::UNO_QUERY );
++		if( !xEventsSupplier.is() )
++			break;
++
++		uno::Reference< container::XNameReplace > xEvents( xEventsSupplier->getEvents() );
++		DBG_ASSERT( xEvents.is(), "XEventsSupplier::getEvents() returned NULL" );
++		if( !xEvents.is() )
++			break;
++
++		static uno::Sequence< OUString > aEvents = xEvents->getElementNames();
++		const OUString* pEvt = aEvents.getConstArray();
++		const OUString* pEnd = aEvents.getConstArray() + aEvents.getLength();
++
++		for ( ; pEvt != pEnd; ++pEvt )
++		{
++			uno::Sequence< beans::PropertyValue > aProperties;
++			if( !xEvents->hasByName( *pEvt ) )
++				break;
++
++			if( !(xEvents->getByName( *pEvt ) >>= aProperties) )
++				break;
++			const beans::PropertyValue* pProperties = aProperties.getConstArray();
++			const sal_Int32 nCount = aProperties.getLength();
++			ImpExportEvents( pProperties, nCount );
++		}
++
++	}
+ 	while(0);
+ }
+ 
+diff -rup /data4/sles/ooo-buildNow/ooo-build/build/ooc680-m5/xmloff/source/draw/shapeexport.cxx xmloff/source/draw/shapeexport.cxx
+--- /data4/sles/ooo-buildNow/ooo-build/build/ooc680-m5/xmloff/source/draw/shapeexport.cxx	2006-03-27 11:04:25.000000000 +0100
++++ xmloff/source/draw/shapeexport.cxx	2006-06-19 12:18:00.000000000 +0100
+@@ -158,6 +158,9 @@ XMLShapeExport::XMLShapeExport(SvXMLExpo
+ 	msStartShape( RTL_CONSTASCII_USTRINGPARAM("StartShape") ),
+ 	msEndShape( RTL_CONSTASCII_USTRINGPARAM("EndShape") ),
+ 	msOnClick( RTL_CONSTASCII_USTRINGPARAM("OnClick") ),
++	msOnAction( RTL_CONSTASCII_USTRINGPARAM("OnAction") ),
++	msAction( RTL_CONSTASCII_USTRINGPARAM("Action") ),
++	msURL( RTL_CONSTASCII_USTRINGPARAM("URL") ),
+ 	msEventType( RTL_CONSTASCII_USTRINGPARAM("EventType") ),
+ 	msPresentation( RTL_CONSTASCII_USTRINGPARAM("Presentation") ),
+ 	msMacroName( RTL_CONSTASCII_USTRINGPARAM("MacroName") ),
