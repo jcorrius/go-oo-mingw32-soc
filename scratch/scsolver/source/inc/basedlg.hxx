@@ -139,7 +139,8 @@ public:
 	void toFront() const;
 	void execute() const;
 
-	ResMgr& getResMgr();
+	ResMgr* getResMgr() const;
+	rtl::OUString getResStr( int resid ) const;
 
 protected:
 

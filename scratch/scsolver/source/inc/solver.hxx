@@ -146,7 +146,8 @@ public:
 
 	sal_Bool solveModel();
 
-	ResMgr& getResMgr();
+	ResMgr* getResMgr();
+	rtl::OUString getResStr( int resid );
 
 private:
 

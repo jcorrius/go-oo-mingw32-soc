@@ -530,9 +530,14 @@ void BaseDialog::setVisibleDefault( bool b ) const
 	m_pImpl->setVisibleDefault( b );
 }
 
-ResMgr& BaseDialog::getResMgr()
+ResMgr* BaseDialog::getResMgr() const
 {
 	return getSolverImpl()->getResMgr();
+}
+
+rtl::OUString BaseDialog::getResStr( int resid ) const
+{
+	return getSolverImpl()->getResStr( resid );
 }
 
 apWidgetProp BaseDialog::addButton( 

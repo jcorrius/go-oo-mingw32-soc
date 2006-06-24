@@ -36,6 +36,8 @@
 #include <msgdlg.hxx>
 #include <rtl/ustrbuf.hxx>
 
+#include "scsolver.hrc"
+
 #include <com/sun/star/awt/PosSize.hpp>
 #include <com/sun/star/awt/XButton.hpp>
 #include <com/sun/star/awt/XControl.hpp>
@@ -125,13 +127,13 @@ void ConstEditDialog::unregisterListeners()
 void ConstEditDialog::initialize()
 {
 	BaseDialog::initialize( static_cast<sal_Int16>(180), static_cast<sal_Int16>(55), 
-		ascii_i18n( "Constraint" ) );
+		getResStr(SCSOLVER_STR_CONSTRAINTDLG_TITLE) );
 	
 	sal_Int32 nX, nY;
 	
 	nX = 5;
 	nY = 5;
-	addFixedText( nX, nY, 100, 10, ascii( "ftLeft" ), ascii_i18n( "Cell Reference" ) );
+	addFixedText( nX, nY, 100, 10, ascii( "ftLeft" ), getResStr(SCSOLVER_STR_CELL_REFERENCE) );
 	nY += 10;
 	addRangeEdit( nX, nY, 70, 12, ascii( "editLeft" ), ascii( "btnLeft" ) );
 	nX += 72;
@@ -154,13 +156,13 @@ void ConstEditDialog::initialize()
 	p->setPropertyValue( "SelectedItems", aSelItems );
 	
 	nX += 27;
-	addFixedText( nX, 5, 100, 10, ascii( "ftRight" ), ascii_i18n( "Constraint" ) );
+	addFixedText( nX, 5, 100, 10, ascii( "ftRight" ), getResStr(SCSOLVER_STR_CONSTRAINT) );
 	addRangeEdit( nX, nY, 70, 12, ascii( "editRight" ), ascii( "btnRight" ) );
 	
 	nX = 5;
 	nY = 35;
-	addButton( nX, nY, 50, 15, ascii( "btnOK" ), ascii_i18n( "OK" ) );
-	addButton( nX+55, nY, 50, 15, ascii( "btnCancel" ), ascii_i18n( "Cancel" ) );	
+	addButton( nX, nY, 50, 15, ascii( "btnOK" ), getResStr(SCSOLVER_STR_BTN_OK) );
+	addButton( nX+55, nY, 50, 15, ascii( "btnCancel" ), getResStr(SCSOLVER_STR_BTN_CANCEL) );	
 
 	registerListeners();
 }
@@ -198,7 +200,7 @@ bool ConstEditDialog::doneRangeSelection() const
 
 	if ( !isCellRangeGeometryEqual() )
 	{
-		pDlg->showSolveError( ascii_i18n( "The reference and constraint ranges do not match." ) );
+		pDlg->showSolveError( getResStr(SCSOLVER_STR_MSG_REF_CON_RANGE_MISMATCH) );
 		return false;
 	}
 
@@ -371,60 +373,60 @@ SolverDialog::~SolverDialog() throw()
 void SolverDialog::initialize()
 {
 	BaseDialog::initialize( static_cast<sal_Int16>(260), static_cast<sal_Int16>(200), 
-		ascii_i18n( "Optimization Solver" ) );
+		getResStr(SCSOLVER_STR_MAINDLG_TITLE) );
 
 	// START CREATING WIDGETS
 	sal_Int32 nX, nY;
 	
 	nY = 5;
-	addFixedLine( 5, nY, 195, 12, ascii( "flModel" ), ascii_i18n( "Define Model" ) );
+	addFixedLine( 5, nY, 195, 12, ascii( "flModel" ), getResStr(SCSOLVER_STR_DEFINE_MODEL) );
 	
 	nY += 13;
-	addFixedText( 10, nY+2, 60, 12, ascii( "ftTargetCell" ), ascii_i18n( "Set target cell" ) );
+	addFixedText( 10, nY+2, 60, 12, ascii( "ftTargetCell" ), getResStr(SCSOLVER_STR_SET_TARGET_CELL) );
 	addRangeEdit( 70, nY, 80, 12, ascii( "editTargetCell" ), ascii( "btnTargetCellRange" ) );
 
 	nY += 18;
-	addFixedText( 10, nY, 35, 12, ascii( "ftObj" ), ascii_i18n( "Goal" ) );
-	addRadioButton( 50, nY, 40, 12, ascii( "rbMax" ), ascii_i18n( "Maximize" ) );
-	addRadioButton( 95, nY, 40, 12, ascii( "rbMin" ), ascii_i18n( "Minimize" ) );
+	addFixedText( 10, nY, 35, 12, ascii( "ftObj" ), getResStr(SCSOLVER_STR_GOAL) );
+	addRadioButton( 50, nY, 40, 12, ascii( "rbMax" ), getResStr(SCSOLVER_STR_MAXIMIZE) );
+	addRadioButton( 95, nY, 40, 12, ascii( "rbMin" ), getResStr(SCSOLVER_STR_MINIMIZE) );
 	
 	nY += 15;
-	addFixedText( 10, nY+2, 60, 12, ascii( "ftDecVars" ), ascii_i18n( "By changing cells" ) );
+	addFixedText( 10, nY+2, 60, 12, ascii( "ftDecVars" ), getResStr(SCSOLVER_STR_DECISIONVAR_CELLS) );
 	addRangeEdit( 70, nY, 115, 12, ascii( "editVarCells" ), ascii( "btnRangeSelect" ) );
 	
 	nY += 20;
-	addFixedLine( 5, nY, 195, 12, ascii( "flConstraints" ), ascii_i18n( "Subject to the Constraints" ) );
+	addFixedLine( 5, nY, 195, 12, ascii( "flConstraints" ), getResStr(SCSOLVER_STR_CONSTRAINT_SEP) );
 	
 	nY += 13;
 	nX = 10;
 	addListBox( nX, nY, 130, 80, ascii( "lbConstraint" ) );
 	nX += 135;
 
-	addButton( nX, nY,    50, 15, ascii( "btnConstAdd" ), ascii_i18n( "Add" ) );
+	addButton( nX, nY,    50, 15, ascii( "btnConstAdd" ), getResStr(SCSOLVER_STR_BTN_ADD) );
 
 	uno::Any aBool;
 	aBool <<= static_cast<sal_Bool>(false);
 
 	apWidgetProp p = addButton( 
-		nX, nY+20, 50, 15, ascii( "btnConstChange" ), ascii_i18n( "Change" ) );
+		nX, nY+20, 50, 15, ascii( "btnConstChange" ), getResStr(SCSOLVER_STR_BTN_CHANGE) );
 
 	p->setPropertyValue( "Enabled", aBool );
 	
 	p = addButton( 
-		nX, nY+40, 50, 15, ascii( "btnConstDelete" ), ascii_i18n( "Delete" ) );
+		nX, nY+40, 50, 15, ascii( "btnConstDelete" ), getResStr(SCSOLVER_STR_BTN_DELETE) );
 
 	p->setPropertyValue( "Enabled", aBool );
 	
-	addButton( 205, 10, 50, 15, ascii( "btnSolve" ), ascii_i18n( "Solve" ) );
-	addButton( 205, 30, 50, 15, ascii( "btnReset" ), ascii_i18n( "Reset" ) );
+	addButton( 205, 10, 50, 15, ascii( "btnSolve" ), getResStr(SCSOLVER_STR_BTN_SOLVE) );
+	addButton( 205, 30, 50, 15, ascii( "btnReset" ), getResStr(SCSOLVER_STR_BTN_RESET) );
 	
-	p = addButton( 205, 50, 50, 15, ascii( "btnOptions" ), ascii_i18n( "Options" ) );
+	p = addButton( 205, 50, 50, 15, ascii( "btnOptions" ), getResStr(SCSOLVER_STR_BTN_OPTIONS) );
 	p->setPropertyValue( "Enabled", aBool );	// disable Options button for now
 
-	addButton( 205, 90, 50, 15, ascii( "btnSave" ), ascii_i18n( "Save" ) );
-	addButton( 205, 110, 50, 15, ascii( "btnLoad" ), ascii_i18n( "Load" ) );
+	addButton( 205, 90, 50, 15, ascii( "btnSave" ), getResStr(SCSOLVER_STR_BTN_SAVE_MODEL) );
+	addButton( 205, 110, 50, 15, ascii( "btnLoad" ), getResStr(SCSOLVER_STR_BTN_LOAD_MODEL) );
 
-	addButton( 205, 180, 50, 15, ascii( "btnClose" ), ascii_i18n( "Close" ) );
+	addButton( 205, 180, 50, 15, ascii( "btnClose" ), getResStr(SCSOLVER_STR_BTN_CLOSE) );
 
 	registerListeners();
 }
@@ -509,7 +511,7 @@ void SolverDialog::setVisible( bool bVisible )
 
 		Reference< sheet::XSpreadsheet > xSheet = pCalc->getActiveSheet();
 		Reference< container::XNamed > xNamed( xSheet, UNO_QUERY );
-		printOUStr( ascii_i18n( "Current sheet is " ) + xNamed->getName() );
+		printOUStr( ascii( "Current sheet is " ) + xNamed->getName() );
 	}
 	else
 		getConstEditDialog()->setVisible( false );
@@ -811,7 +813,7 @@ void SolverDialog::showSolutionInfeasible()
 {
 	if ( m_pSolInfeasibleDlg.get() == NULL )
 		m_pSolInfeasibleDlg.reset( new MessageDialog( getSolverImpl(), 
-				ascii_i18n( "Solution could not be found" ) ) );
+				getResStr(SCSOLVER_STR_MSG_SOLUTION_NOT_FOUND) ) );
 	m_pSolInfeasibleDlg->execute();
 }
 
@@ -819,7 +821,7 @@ void SolverDialog::showSolutionFound()
 {
 	if ( m_pSolFoundDlg.get() == NULL )
 		m_pSolFoundDlg.reset( new MessageDialog( getSolverImpl(), 
-				ascii_i18n( "Solution found" ) ) );
+				getResStr(SCSOLVER_STR_MSG_SOLUTION_FOUND) ) );
 	m_pSolFoundDlg->execute();
 }
 

@@ -217,11 +217,17 @@ void SolverImpl::initLocale()
 	m_pResMgr = ResMgr::CreateResMgr( aModName.getStr(), m_eLocale );
 }
 
-ResMgr& SolverImpl::getResMgr()
+ResMgr* SolverImpl::getResMgr()
 {
 	if( !m_pResMgr )
 		initLocale();
-	return *m_pResMgr;
+	return m_pResMgr;
+}
+
+rtl::OUString SolverImpl::getResStr( int resid )
+{
+	rtl::OUString sStr( String( ResId( resid, getResMgr() ) ) );
+	return sStr;
 }
 
 // XLocalizable
