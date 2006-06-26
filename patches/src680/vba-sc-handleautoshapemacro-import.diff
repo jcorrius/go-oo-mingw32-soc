@@ -272,13 +272,21 @@ diff -rup /data4/sles/ooo-buildNow/ooo-build/build/ooc680-m5/sc/source/filter/in
 diff -rup /data4/sles/ooo-buildNow/ooo-build/build/ooc680-m5/sc/source/ui/drawfunc/fudraw.cxx sc/source/ui/drawfunc/fudraw.cxx
 --- /data4/sles/ooo-buildNow/ooo-build/build/ooc680-m5/sc/source/ui/drawfunc/fudraw.cxx	2006-06-14 17:46:55.000000000 +0100
 +++ sc/source/ui/drawfunc/fudraw.cxx	2006-06-19 11:36:02.000000000 +0100
-@@ -866,6 +866,9 @@ void FuDraw::ForcePointer(const MouseEve
+@@ -866,6 +866,17 @@ void FuDraw::ForcePointer(const MouseEve
  		SdrObject* pObj;
  		SdrPageView* pPV;
  
 +		ScMacroInfo* pInfo = NULL;
 +		if ( pView->PickObj(aPnt, pObj, pPV, SDRSEARCH_ALSOONMASTER) )
++		{
++			if ( pObj->IsGroupObject() )
++			{
++				SdrObject* pHit = NULL;
++				if ( pView->PickObj(aMDPos, pHit, pPV, SDRSEARCH_DEEP ) )
++					pObj = pHit;
++			}
 +			pInfo = ScDrawLayer::GetMacroInfo( pObj );
++		}
  		if ( pView->IsTextEdit() )
  		{
  			pViewShell->SetActivePointer(Pointer(POINTER_TEXT));		// kann nicht sein ?
@@ -313,36 +321,56 @@ diff -rup /data4/sles/ooo-buildNow/ooo-build/build/ooc680-m5/sc/source/ui/drawfu
  
  // -----------------------------------------------------------------------
  
-@@ -189,6 +190,33 @@ BOOL __EXPORT FuSelection::MouseButtonDo
+@@ -189,6 +190,53 @@ BOOL __EXPORT FuSelection::MouseButtonDo
  			}
  			else
  			{
 +
 +				if ( !bAlt && pView->PickObj(aMDPos, pObj, pPV, SDRSEARCH_ALSOONMASTER))
 +				{
-+					ScMacroInfo* pInfo = ScDrawLayer::GetMacroInfo( pObj );
-+					if ( pInfo )
-+					{
-+						if ( pInfo->GetMacro().getLength() )
-+						{
-+							SfxObjectShell* pObjSh = SfxObjectShell::Current();
-+							if ( pObjSh && SfxApplication::IsXScriptURL( pInfo->GetMacro() ) )
-+							{
-+								uno::Any aRet;
-+								uno::Sequence< sal_Int16 > aOutArgsIndex;
-+								uno::Sequence< uno::Any > aOutArgs;
-+								uno::Sequence< uno::Any >* pInArgs =
-+									new uno::Sequence< uno::Any >(0);
-+	 							pObjSh->CallXScript( pInfo->GetMacro(),
-+									*pInArgs, aRet, aOutArgsIndex, aOutArgs);
-+								pViewShell->FakeButtonUp( pViewShell->GetViewData()->GetActivePart() );
-+								return TRUE;		// kein CaptureMouse etc.
-+	
-+							}
-+						}
-+					} 	
-+				}
 +
++					// Support for imported Excel docs
++					// Excel is of course not consistent and allows
++					// a hyperlink to be assigned for an object group
++					// and even though the hyperlink is exported in the Escher layer
++					// its never used, when dealing with a group object the link
++					// associated with the clicked object is used only
++
++					// additionally you can also select a macro in Excel for a grouped
++					// objects and this results in the macro being set for the elements
++					// in the group and no macro is exported for the group
++
++					// if a macro and hlink are defined favour the hlink
++					
++					// If a group object has no hyperlink use the hyperlink of the 
++					// object clicked 
++
++					if ( pObj->IsGroupObject() )
++					{
++						SdrObject* pHit = NULL;
++						if ( pView->PickObj(aMDPos, pHit, pPV, SDRSEARCH_DEEP ) )
++							pObj = pHit;
++					}
++
++					ScMacroInfo* pInfo = ScDrawLayer::GetMacroInfo( pObj, TRUE );
++					if ( pInfo->GetMacro().getLength() )
++					{
++						SfxObjectShell* pObjSh = SfxObjectShell::Current();
++						if ( pObjSh && SfxApplication::IsXScriptURL( pInfo->GetMacro() ) )
++						{
++							uno::Any aRet;
++							uno::Sequence< sal_Int16 > aOutArgsIndex;
++							uno::Sequence< uno::Any > aOutArgs;
++							uno::Sequence< uno::Any >* pInArgs =
++								new uno::Sequence< uno::Any >(0);
++	 						pObjSh->CallXScript( pInfo->GetMacro(),
++								*pInArgs, aRet, aOutArgsIndex, aOutArgs);
++							pViewShell->FakeButtonUp( pViewShell->GetViewData()->GetActivePart() );
++							return TRUE;		// kein CaptureMouse etc.
++	
++						}
++					}
++				}
 +
  				//	URL / ImageMap
  
@@ -692,14 +720,14 @@ diff -rup /data4/sles/ooo-buildNow/ooo-build/build/ooc680-m5/sc/source/ui/drawfu
  void ScDrawShell::ExecDrawAttr( SfxRequest& rReq )
  {
  	USHORT				nSlot		= rReq.GetSlot();
-@@ -353,8 +371,28 @@ void ScDrawShell::ExecDrawAttr( SfxReque
+@@ -353,8 +371,22 @@ void ScDrawShell::ExecDrawAttr( SfxReque
  	ScDrawView* 		pView		= pViewData->GetScDrawView();
  	SdrModel*			pDoc		= pViewData->GetDocument()->GetDrawLayer();
  
 +	const SdrMarkList& rMarkList = pView->GetMarkedObjectList();
 +	ULONG nMarkCount = rMarkList.GetMarkCount();
 +	SdrObject* pSingleSelectedObj = NULL;
-+	if ( nMarkCount = 1 )
++	if ( nMarkCount > 0 )
 +		pSingleSelectedObj = rMarkList.GetMark( 0 )->GetObj();
 +	
 +
@@ -707,12 +735,6 @@ diff -rup /data4/sles/ooo-buildNow/ooo-build/build/ooc680-m5/sc/source/ui/drawfu
  	{
 +		case SID_ASSIGNMACRO:
 +			{
-+				if ( nMarkCount >= 1 )
-+				{
-+					SdrPageView* pPV;
-+					pView->PickObj( pWin->PixelToLogic( pViewData->GetMousePosPixel() ), pSingleSelectedObj, pPV, SDRSEARCH_ALSOONMASTER);
-+
-+				}
 +				if ( pSingleSelectedObj )
 +					ExecuteMacroAssign( pSingleSelectedObj, pWin );
 +				break;	
@@ -721,7 +743,7 @@ diff -rup /data4/sles/ooo-buildNow/ooo-build/build/ooc680-m5/sc/source/ui/drawfu
  		case SID_TEXT_STANDARD:	// Harte Textattributierung loeschen
  			{
  				SfxItemSet aEmptyAttr(GetPool(), EE_ITEMS_START, EE_ITEMS_END);
-@@ -506,6 +544,46 @@ void ScDrawShell::ExecDrawAttr( SfxReque
+@@ -506,6 +544,57 @@ void ScDrawShell::ExecDrawAttr( SfxReque
  	}
  }
  
@@ -756,7 +778,18 @@ diff -rup /data4/sles/ooo-buildNow/ooo-build/build/ooc680-m5/sc/source/ui/drawfu
 +			SvxMacro* pMacro = ((SvxMacroItem*)pItem)->GetMacroTable().Get( SFX_EVENT_MOUSECLICK_OBJECT );
 +			if ( pMacro )
 +			{
-+				pInfo->SetMacro( pMacro->GetMacName() );
++				if ( pObj->IsGroupObject() )
++				{
++					SdrObjList* pOL = pObj->GetSubList();
++					ULONG nObj = pOL->GetObjCount();
++					for ( ULONG index=0; index<nObj; ++index )
++					{
++						pInfo = ScDrawLayer::GetMacroInfo( pOL->GetObj(index), TRUE );
++						pInfo->SetMacro( pMacro->GetMacName() );
++					}	
++				}
++				else
++					pInfo->SetMacro( pMacro->GetMacName() );
 +				lcl_setModified( GetObjectShell() );
 +			}
 +		}
