@@ -4,9 +4,9 @@
 #
 #   $RCSfile: makefile.mk,v $
 #
-#   $Revision: 1.1 $
+#   $Revision: 1.2 $
 #
-#   last change: $Author: kyoshida $ $Date: 2006/06/11 03:37:37 $
+#   last change: $Author: kyoshida $ $Date: 2006/07/01 22:53:09 $
 #
 #   The Contents of this file are made available subject to
 #   the terms of GNU Lesser General Public License Version 2.1.
@@ -53,8 +53,11 @@ CONFIGURE_ACTION=
 CONFIGURE_FLAGS=
 
 BUILD_DIR=lpsolve55
+.IF "$(GUI)"=="WNT"
+BUILD_ACTION=cmd /c cvc6.bat
+.ELSE
 BUILD_ACTION=sh ccc
-
+.ENDIF
 
 # --- Targets ------------------------------------------------------
 
