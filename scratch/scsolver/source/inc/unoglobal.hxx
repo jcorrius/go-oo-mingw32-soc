@@ -61,14 +61,12 @@ class RuntimeError : public ::std::exception
 {
 public:
 	RuntimeError( const rtl::OUString& umsg );
-	RuntimeError( const ::std::string& msg, const rtl::OUString& umsg );
 	~RuntimeError() throw();
 
 	virtual const char* what() const throw();
 	const rtl::OUString getMessage() const throw();
 
 private:
-	::std::string m_sMsg;
 	rtl::OUString m_sUniMsg;
 };
 

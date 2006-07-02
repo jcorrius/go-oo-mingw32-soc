@@ -36,7 +36,7 @@
 #include "numeric/lpmodel.hxx"
 #include "numeric/type.hxx"
 #include "numeric/lpbase.hxx"
-#include "numeric/lpsimplex.hxx"
+//#include "numeric/lpsimplex.hxx"
 #include "numeric/lpsolve.hxx"
 
 #ifdef ENABLE_SCSOLVER_UNO_ALGORITHM
@@ -45,6 +45,8 @@
 
 #include <memory>
 #include <exception>
+
+#include "scsolver.hrc"
 
 using namespace std;
 using namespace scsolver::numeric::opres;
@@ -59,21 +61,6 @@ namespace scsolver {
 class SolveModelImpl
 {
 public:
-
-	class CellGeometriesDiffer : public RuntimeError
-	{
-	public:
-		CellGeometriesDiffer() : 
-			RuntimeError( ascii_i18n("Internal error: cell geometry") )
-		{
-		}
-
-		virtual const char* what() const throw()
-		{
-			return "Cell geometries differ (internal)";
-		}
-	};
-
 	SolveModelImpl( SolverImpl* );
 	~SolveModelImpl() throw();
 	void solve();
@@ -348,7 +335,8 @@ void SolveModelImpl::resolveConstraintAddress()
 			sal_Int32 nRRowE  = aRangeAddrR.EndRow;
 			
 			if ( nLColE - nLColS != nRColE - nRColS || nLRowE - nLRowS != nRRowE - nRRowS )
-				throw CellGeometriesDiffer(); // This should not happen !
+				throw RuntimeError(
+					getSolverImpl()->getResStr(SCSOLVER_STR_MSG_CELL_GEOMETRIES_DIFFER) ); // This should not happen !
 
 			for ( sal_Int32 i = 0; i <= nLColE - nLColS; ++i )
 			{

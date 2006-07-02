@@ -16,12 +16,11 @@ SLOFILES =  \
         $(SLO)$/funcobj.obj \
         $(SLO)$/lpbase.obj \
         $(SLO)$/lpmodel.obj \
-        $(SLO)$/lpsimplex.obj \
         $(SLO)$/matrix.obj \
         $(SLO)$/nlpbase.obj \
         $(SLO)$/nlpmodel.obj \
         $(SLO)$/nlpqnewton.obj \
-		$(SLO)$/lpsolve.obj
+        $(SLO)$/lpsolve.obj
 
 # --- Tagets -------------------------------------------------------
 

@@ -76,12 +76,7 @@ const rtl::OUString Global::STRING_SEPARATOR = ascii( "," );
 const rtl::OUString Global::MODEL_METADATA_NAME = ascii( "us.kohei.ooo.solver:model" );
 
 RuntimeError::RuntimeError( const rtl::OUString& umsg ) :
-	m_sMsg( "runtime error" ), m_sUniMsg( umsg )
-{
-}
-
-RuntimeError::RuntimeError( const ::std::string& msg, const rtl::OUString& umsg ) :
-	m_sMsg( msg ), m_sUniMsg( umsg )
+	m_sUniMsg( umsg )
 {
 }
 
@@ -91,7 +86,8 @@ RuntimeError::~RuntimeError() throw()
 
 const char* RuntimeError::what() const throw()
 {
-	return m_sMsg.c_str();
+	rtl::OString o = OUStringToOString(m_sUniMsg, RTL_TEXTENCODING_UTF8);
+    return o.getStr();
 }
 
 const rtl::OUString RuntimeError::getMessage() const throw()
