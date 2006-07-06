@@ -226,7 +226,7 @@ ResMgr* SolverImpl::getResMgr()
 
 rtl::OUString SolverImpl::getResStr( int resid )
 {
-	rtl::OUString sStr( String( ResId( resid, getResMgr() ) ) );
+	rtl::OUString sStr = String( ResId( resid, getResMgr() ) );
 	return sStr;
 }
 
