@@ -78,6 +78,8 @@
 #include "vbainterior.hxx"
 #include "vbacharacters.hxx"
 
+#include "tabvwsh.hxx"
+
 #include <comphelper/anytostring.hxx>
 
 #include <global.hxx>
@@ -972,6 +974,68 @@ ScVbaRange::Select() throw (uno::RuntimeException)
 	uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY_THROW );
 	uno::Reference< view::XSelectionSupplier > xSelection( xModel->getCurrentController(), uno::UNO_QUERY_THROW );
 	xSelection->select( ( uno::Any )mxRange );
+}
+
+bool cellInRange( const table::CellRangeAddress& rAddr, const sal_Int32& nCol, const sal_Int32& nRow )
+{
+	if ( nCol >= rAddr.StartColumn && nCol <= rAddr.EndColumn &&
+		nRow >= rAddr.StartRow && nRow <= rAddr.EndRow )
+		return true;
+	return false;
+}
+
+void setCursor(  const sal_Int32& nCol, const sal_Int32& nRow, bool bInSel = true )
+{
+	ScTabViewShell* pShell = getCurrentBestViewShell();
+	if ( pShell )
+	{
+		if ( bInSel )
+			pShell->SetCursor( nCol, nRow );
+		else
+			pShell->MoveCursorAbs( nCol, nRow, SC_FOLLOW_NONE, FALSE, FALSE, TRUE, FALSE );
+	}
+}
+
+void
+ScVbaRange::Activate() throw (uno::RuntimeException)
+{
+	RangeHelper thisRange( mxRange );
+	uno::Reference< sheet::XCellRangeAddressable > xThisRangeAddress = thisRange.getCellRangeAddressable();
+	table::CellRangeAddress thisRangeAddress = xThisRangeAddress->getRangeAddress();
+	
+	// get current selection
+	uno::Reference< sheet::XCellRangeAddressable > xRange( getCurrentDocument()->getCurrentSelection(), ::uno::UNO_QUERY);
+
+	uno::Reference< sheet::XSheetCellRanges > xRanges( getCurrentDocument()->getCurrentSelection(), ::uno::UNO_QUERY);
+
+	if ( xRanges.is() )
+	{
+		uno::Sequence< table::CellRangeAddress > nAddrs = xRanges->getRangeAddresses();
+		for ( sal_Int32 index = 0; index < nAddrs.getLength(); ++index )
+		{
+			if ( cellInRange( nAddrs[index], thisRangeAddress.StartColumn, thisRangeAddress.StartRow ) )
+			{
+				setCursor( thisRangeAddress.StartColumn, thisRangeAddress.StartRow );
+				return;
+			}
+			
+		}
+	}	
+
+	if ( xRange.is() && cellInRange( xRange->getRangeAddress(), thisRangeAddress.StartColumn, thisRangeAddress.StartRow ) )
+		setCursor( thisRangeAddress.StartColumn, thisRangeAddress.StartRow );
+	else
+	{
+		// if this range is multi cell select the range other
+		// wise just position the cell at this single range position
+		if ( isSingleCellRange() ) 
+			// This top-leftmost cell of this Range is not in the current
+			// selection so just select this range
+			setCursor( thisRangeAddress.StartColumn, thisRangeAddress.StartRow, false  );
+		else
+			Select();
+	}
+
 }
 
 uno::Reference< vba::XRange >

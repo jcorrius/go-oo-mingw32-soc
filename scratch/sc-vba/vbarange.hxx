@@ -136,6 +136,7 @@ public:
 	virtual css::uno::Reference< oo::vba::XRange > SAL_CALL Cells( const css::uno::Any &nRow, const css::uno::Any &nCol ) 
 														  throw (css::uno::RuntimeException);
 	virtual void SAL_CALL Select() throw (css::uno::RuntimeException);
+	virtual void SAL_CALL Activate() throw (css::uno::RuntimeException);
 	virtual css::uno::Reference< oo::vba::XRange >  SAL_CALL Rows( const css::uno::Any& nIndex ) throw (css::uno::RuntimeException);
 	virtual css::uno::Reference< oo::vba::XRange >  SAL_CALL Columns( const css::uno::Any &nIndex ) throw (css::uno::RuntimeException);
 	virtual void SAL_CALL Copy( const css::uno::Any& Destination ) throw (css::uno::RuntimeException);
