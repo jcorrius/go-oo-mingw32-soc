@@ -25,67 +25,29 @@
  *
  ************************************************************************/
 
-#include <baselistener.hxx>
+#ifndef _SCSOLVER_OPTION_HXX_
+#define _SCSOLVER_OPTION_HXX_
+
+#include <memory>
 
 namespace scsolver {
 
-//---------------------------------------------------------------------------
-// Class Listener
+struct OptionDataImpl;
 
-Listener::~Listener() throw()
+class OptionData
 {
-}
+public:
+	OptionData();
+	~OptionData() throw();
 
-ActionObject::ActionObject()
-{
-}
+	void setVarPositive( bool b );
+	bool getVarPositive() const;
 
-ActionObject::~ActionObject() throw()
-{
-}
-
-void ActionObject::operator()( BaseDialog* dlg, const awt::ActionEvent& e )
-{
-}
-
-ActionListener::ActionListener( BaseDialog* pDlg ) 
-	: Listener( pDlg ), m_bActionSet( false )
-{
-}
-
-
-ActionListener::ActionListener( BaseDialog* pDlg, const ActionObject& aAction ) 
-	: Listener( pDlg ), m_bActionSet( true ), m_aAction( aAction )
-{
-}
-
-ActionListener::~ActionListener() throw()
-{
-}
-
-void SAL_CALL ActionListener::disposing( const lang::EventObject& e )
-	throw ( RuntimeException )
-{
-}
-
-void SAL_CALL ActionListener::actionPerformed( const awt::ActionEvent& e )
-	throw ( RuntimeException )
-{
-	if( m_bActionSet )
-		m_aAction( getDialog(), e );
-}
-
-ItemListener::~ItemListener() throw()
-{
-}
-
-FocusListener::~FocusListener() throw()
-{
-}
-
-MouseListener::~MouseListener() throw()
-{
-}
+private:
+	::std::auto_ptr<OptionDataImpl> m_pImpl;
+};
 
 }
 
+
+#endif

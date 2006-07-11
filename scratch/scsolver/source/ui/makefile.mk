@@ -17,6 +17,7 @@ SLOFILES =  \
         $(SLO)$/basedlg.obj \
         $(SLO)$/baselistener.obj \
         $(SLO)$/dialog.obj \
+        $(SLO)$/optiondlg.obj \
         $(SLO)$/global.obj \
         $(SLO)$/listener.obj \
         $(SLO)$/lpbuilder.obj \
@@ -24,7 +25,8 @@ SLOFILES =  \
         $(SLO)$/solvemodel.obj \
         $(SLO)$/unoglobal.obj \
         $(SLO)$/unohelper.obj \
-        $(SLO)$/xcalc.obj
+        $(SLO)$/xcalc.obj \
+	$(SLO)$/option.obj
 
 # --- Tagets -------------------------------------------------------
 

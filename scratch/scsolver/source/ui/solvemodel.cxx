@@ -33,6 +33,7 @@
 #include "lpbuilder.hxx"
 #include "dialog.hxx"
 #include "xcalc.hxx"
+#include "option.hxx"
 #include "numeric/lpmodel.hxx"
 #include "numeric/type.hxx"
 #include "numeric/lpbase.hxx"
@@ -116,18 +117,19 @@ auto_ptr<lp::BaseAlgorithm> SolveModelImpl::getLpAlgorithm() const
 	return algorithm;
 }
 
-/** This is THE method which takes model parameters from the dialog,
-	constructs an internal representation of a model, chooses an algorithm,
-	and solves it. */
+/**
+ * This is THE method which takes model parameters from the
+ * dialog, constructs an internal representation of a model,
+ * chooses an algorithm, and solves it.
+ */
 void SolveModelImpl::solve()
 {
 	using namespace numeric::opres;
 
-	Goal eGoal = m_pSolverImpl->getMainDialog()->getGoal();
 	SolverDialog* pMainDlg = getSolverImpl()->getMainDialog();
+	Goal eGoal = pMainDlg->getGoal();
 	if ( eGoal == GOAL_UNKNOWN )
 	{
-		Debug( "goal is not set" );
 		pMainDlg->showSolveError( ascii_i18n( "Goal is not set" ) );
 		return;
 	}
@@ -140,6 +142,10 @@ void SolveModelImpl::solve()
 	parseConstraints();
 
 	lp::Model aModel = m_pBuilder->getModel();
+
+	OptionData* pOption = getSolverImpl()->getOptionData();
+	aModel.setVarPositive( pOption->getVarPositive() );
+
 #ifdef DEBUG
 	aModel.print(); // prints model to stdout
 #endif

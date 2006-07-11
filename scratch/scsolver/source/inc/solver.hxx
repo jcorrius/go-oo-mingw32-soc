@@ -70,7 +70,7 @@ namespace scsolver {
 
 
 class CalcInterface;
-	
+class OptionData;
 class SolverDialog;
 
 //--------------------------------------------------------------------------
@@ -142,6 +142,7 @@ public:
 
 	// The "get-pointer" methods
 	CalcInterface* getCalcInterface() const;	
+	OptionData* getOptionData() const;
 	SolverDialog* getMainDialog();
 
 	sal_Bool solveModel();
@@ -156,7 +157,7 @@ private:
 	com::sun::star::lang::Locale m_eLocale;
 	::std::auto_ptr<SolverDialog> m_pDlg;
 	::std::auto_ptr<CalcInterface> m_pCalc;
-
+	::std::auto_ptr<OptionData> m_pOption;
 };
 
 

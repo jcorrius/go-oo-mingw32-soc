@@ -25,67 +25,67 @@
  *
  ************************************************************************/
 
-#include <baselistener.hxx>
+#include "optiondlg.hxx"
+#include "unoglobal.hxx"
+#include "global.hxx"
+#include "listener.hxx"
+
+#include "scsolver.hrc"
 
 namespace scsolver {
 
-//---------------------------------------------------------------------------
-// Class Listener
+OptionDialog::OptionDialog( SolverImpl* p ) :
+	BaseDialog( p )
+{
+	initialize();
+}
 
-Listener::~Listener() throw()
+OptionDialog::~OptionDialog() throw()
 {
 }
 
-ActionObject::ActionObject()
+void OptionDialog::initialize()
 {
+	int nWidth = 200, nHeight = 150;
+	BaseDialog::initialize( 
+		static_cast<sal_Int16>(nWidth), static_cast<sal_Int16>(nHeight), 
+		ascii_i18n("Options") );
+
+	sal_Int32 nX = 5, nY = 5, nMargin = 5;
+
+	addFixedLine( nX, nY, nWidth-nX-nMargin, 12, ascii("flOptions"), 
+				  ascii_i18n("Options") );
+
+	addButton( nWidth-55, nHeight-20, 50, 15, ascii("btnClose"), 
+			   getResStr(SCSOLVER_STR_BTN_CLOSE) );
+
+	registerListeners();
 }
 
-ActionObject::~ActionObject() throw()
+void OptionDialog::registerListeners()
 {
+	m_pCloseListener = new CloseBtnListener(this);
+	registerListener( ascii("btnClose"), m_pCloseListener );
 }
 
-void ActionObject::operator()( BaseDialog* dlg, const awt::ActionEvent& e )
+void OptionDialog::unregisterListeners() throw()
 {
+	unregisterListener( ascii("btnClose"), m_pCloseListener );
 }
 
-ActionListener::ActionListener( BaseDialog* pDlg ) 
-	: Listener( pDlg ), m_bActionSet( false )
+bool OptionDialog::doneRangeSelection() const
 {
+	return false;
 }
 
-
-ActionListener::ActionListener( BaseDialog* pDlg, const ActionObject& aAction ) 
-	: Listener( pDlg ), m_bActionSet( true ), m_aAction( aAction )
+const rtl::OUString OptionDialog::getDialogName() const
 {
+	return ascii("OptionDialog");
 }
 
-ActionListener::~ActionListener() throw()
+void OptionDialog::setVisible( bool b )
 {
-}
-
-void SAL_CALL ActionListener::disposing( const lang::EventObject& e )
-	throw ( RuntimeException )
-{
-}
-
-void SAL_CALL ActionListener::actionPerformed( const awt::ActionEvent& e )
-	throw ( RuntimeException )
-{
-	if( m_bActionSet )
-		m_aAction( getDialog(), e );
-}
-
-ItemListener::~ItemListener() throw()
-{
-}
-
-FocusListener::~FocusListener() throw()
-{
-}
-
-MouseListener::~MouseListener() throw()
-{
+	setVisibleDefault( b );
 }
 
 }
-

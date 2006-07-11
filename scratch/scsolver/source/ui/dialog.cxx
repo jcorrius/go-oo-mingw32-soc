@@ -34,6 +34,8 @@
 #include <xcalc.hxx>
 #include <unohelper.hxx>
 #include <msgdlg.hxx>
+#include "optiondlg.hxx"
+
 #include <rtl/ustrbuf.hxx>
 
 #include "scsolver.hrc"
@@ -344,6 +346,7 @@ SolverDialog::SolverDialog( SolverImpl* p )
 	: BaseDialog( p ),
 
 	m_pConstEditDialog( NULL ),
+	m_pOptionDialog( NULL ),
 	m_pSolveErrorDlg( NULL ),
 	m_pSolInfeasibleDlg( NULL ),
 	m_pSolFoundDlg( NULL ),
@@ -355,6 +358,7 @@ SolverDialog::SolverDialog( SolverImpl* p )
 	m_pSaveListener( NULL ),
 	m_pLoadListener( NULL ),
 	m_pResetListener( NULL ),
+	m_pOptionListener( NULL ),
 	m_pMaxListener( NULL ),
 	m_pConstAddListener( NULL ),
 	m_pConstChangeListener( NULL ),
@@ -421,7 +425,7 @@ void SolverDialog::initialize()
 	addButton( 205, 30, 50, 15, ascii( "btnReset" ), getResStr(SCSOLVER_STR_BTN_RESET) );
 	
 	p = addButton( 205, 50, 50, 15, ascii( "btnOptions" ), getResStr(SCSOLVER_STR_BTN_OPTIONS) );
-	p->setPropertyValue( "Enabled", aBool );	// disable Options button for now
+	//p->setPropertyValue( "Enabled", aBool );	// disable Options button for now
 
 	addButton( 205, 90, 50, 15, ascii( "btnSave" ), getResStr(SCSOLVER_STR_BTN_SAVE_MODEL) );
 	addButton( 205, 110, 50, 15, ascii( "btnLoad" ), getResStr(SCSOLVER_STR_BTN_LOAD_MODEL) );
@@ -460,6 +464,9 @@ void SolverDialog::registerListeners()
 	m_pResetListener = new ResetBtnListener( this );
 	registerListener( ascii( "btnReset" ), m_pResetListener );
 
+	m_pOptionListener = new OptionBtnListener( this );
+	registerListener( ascii( "btnOptions" ), m_pOptionListener );
+
 	m_pMaxListener = new MaxRadioBtnListener( this );
 	registerListener( ascii( "rbMax" ), m_pMaxListener );
 	
@@ -484,8 +491,6 @@ void SolverDialog::registerListeners()
 
 void SolverDialog::unregisterListeners()
 {
-	Debug( "SolverDialog::unregisterListeners" );
-	
 	// Unregistering a listener object from its associated widget causes it
 	// to be automatically destroyed, so that a manual delete of such object 
 	// is no longer necessary.
@@ -493,6 +498,10 @@ void SolverDialog::unregisterListeners()
 	unregisterListener( ascii( "btnRangeSelect" ), m_pVarCellsRngListener );
 	unregisterListener( ascii( "btnTargetCellRange" ), m_pTargetRngListener );
 	unregisterListener( ascii( "btnClose" ), m_pOKListener );
+	unregisterListener( ascii( "btnSave" ), m_pSaveListener );
+	unregisterListener( ascii( "btnLoad" ), m_pLoadListener );
+	unregisterListener( ascii( "btnReset" ), m_pResetListener );
+	unregisterListener( ascii( "btnOption" ), m_pOptionListener );
 	unregisterListener( ascii( "rbMax" ), m_pMaxListener );
 	unregisterListener( ascii( "btnConstAdd" ), m_pConstAddListener );
 	unregisterListener( ascii( "btnConstChange" ), m_pConstChangeListener );
@@ -525,6 +534,14 @@ ConstEditDialog* SolverDialog::getConstEditDialog()
 		m_pConstEditDialog.reset( new ConstEditDialog( getSolverImpl() ) );
 
 	return m_pConstEditDialog.get();
+}
+
+OptionDialog* SolverDialog::getOptionDialog()
+{
+	if( m_pOptionDialog.get() == NULL )
+		m_pOptionDialog.reset( new OptionDialog( getSolverImpl() ) );
+
+	return m_pOptionDialog.get();
 }
 
 sal_Int16 SolverDialog::getSelectedConstraintPos()

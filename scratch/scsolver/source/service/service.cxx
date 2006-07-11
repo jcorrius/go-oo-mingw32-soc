@@ -31,6 +31,7 @@
 #include <dialog.hxx>
 #include <lpbuilder.hxx>
 #include <xcalc.hxx>
+#include "option.hxx"
 #include <solvemodel.hxx>
 #include <numeric/matrix.hxx>
 
@@ -55,16 +56,15 @@ static Reference< uno::XInterface > SAL_CALL create_SolverImpl(
 
 
 SolverImpl::SolverImpl( Reference< uno::XComponentContext > const & xContext ) :
+	m_pResMgr( NULL ),
 	m_pDlg( NULL ), m_pCalc( new CalcInterface( xContext ) ),
-	m_pResMgr( NULL )
+	m_pOption( new OptionData )
 {
-    Debug( "SolverImpl c'tor" );	
 }
 
 SolverImpl::~SolverImpl()
 {
 	delete m_pResMgr;
-    Debug( "SolverImpl d'tor" );
 }
 
 //--------------------------------------------------------------------------
@@ -170,6 +170,11 @@ SolverDialog* SolverImpl::getMainDialog()
 CalcInterface* SolverImpl::getCalcInterface() const
 {
 	return m_pCalc.get();
+}
+
+OptionData* SolverImpl::getOptionData() const
+{
+	return m_pOption.get();
 }
 
 void SolverImpl::setTitle( const ::rtl::OUString& aTitle )

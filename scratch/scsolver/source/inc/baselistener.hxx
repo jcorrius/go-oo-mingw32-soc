@@ -50,8 +50,11 @@ class BaseDialog;
 //--------------------------------------------------------------------------
 // Listener Class for Dialog Widgets
 
-// All listener objects keeps a pointer to the dialog they belong to.  Such
-// pointer can be retrieved by calling getDialog().
+/**
+ *  All listener objects keeps a pointer to the dialog they
+ *  belong to.  Such pointer can be retrieved by calling
+ *  getDialog().
+ */
 class Listener
 {
 public:
@@ -65,15 +68,36 @@ private:
 	BaseDialog* m_pDlg;
 };
 
+/**
+ * Function object class to define action for ActionListener
+ * object.
+ */
+class ActionObject
+{
+public:
+	ActionObject();
+	virtual ~ActionObject() throw();
+	virtual void operator()( BaseDialog* dlg, const awt::ActionEvent& e );
+};
 
+/**
+ * Generic action listener class.  You can either derive a child
+ * class from it, or directly instantiate it with an instance of
+ * ActionObject which defines the action to be performed.
+ */
 class ActionListener : public ::cppu::WeakImplHelper1< awt::XActionListener >, public Listener
 {
 public:
-	ActionListener( BaseDialog* pDlg ) : Listener( pDlg ) {}
-	virtual ~ActionListener() throw() = 0;
+	ActionListener( BaseDialog* pDlg );
+	ActionListener( BaseDialog* pDlg, const ActionObject& aAction );
+	virtual ~ActionListener() throw();
 	
-	virtual void SAL_CALL disposing( const lang::EventObject& ) throw ( RuntimeException ) {}
-	virtual void SAL_CALL actionPerformed( const awt::ActionEvent& ) throw ( RuntimeException ) {}
+	virtual void SAL_CALL disposing( const lang::EventObject& e ) throw ( RuntimeException );
+	virtual void SAL_CALL actionPerformed( const awt::ActionEvent& e ) throw ( RuntimeException );
+
+private:
+	bool m_bActionSet:1;
+	ActionObject m_aAction;
 };
 
 

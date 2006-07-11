@@ -25,67 +25,44 @@
  *
  ************************************************************************/
 
-#include <baselistener.hxx>
+#include "option.hxx"
 
 namespace scsolver {
 
-//---------------------------------------------------------------------------
-// Class Listener
+/**
+ *  This is where the values of options settings are stored. The
+ *  default values are specified in the constructor.
+ */
+struct OptionDataImpl
+{
+	OptionDataImpl() :
+		VarPositive(true)
+	{
+	}
 
-Listener::~Listener() throw()
+	~OptionDataImpl() throw() {}
+
+	bool VarPositive:1;
+};
+
+//-----------------------------------------------------------------
+
+OptionData::OptionData() : m_pImpl( new OptionDataImpl )
 {
 }
 
-ActionObject::ActionObject()
+OptionData::~OptionData() throw()
 {
 }
 
-ActionObject::~ActionObject() throw()
+void OptionData::setVarPositive( bool b )
 {
+	m_pImpl->VarPositive = b;
 }
 
-void ActionObject::operator()( BaseDialog* dlg, const awt::ActionEvent& e )
+bool OptionData::getVarPositive() const
 {
-}
-
-ActionListener::ActionListener( BaseDialog* pDlg ) 
-	: Listener( pDlg ), m_bActionSet( false )
-{
-}
-
-
-ActionListener::ActionListener( BaseDialog* pDlg, const ActionObject& aAction ) 
-	: Listener( pDlg ), m_bActionSet( true ), m_aAction( aAction )
-{
-}
-
-ActionListener::~ActionListener() throw()
-{
-}
-
-void SAL_CALL ActionListener::disposing( const lang::EventObject& e )
-	throw ( RuntimeException )
-{
-}
-
-void SAL_CALL ActionListener::actionPerformed( const awt::ActionEvent& e )
-	throw ( RuntimeException )
-{
-	if( m_bActionSet )
-		m_aAction( getDialog(), e );
-}
-
-ItemListener::~ItemListener() throw()
-{
-}
-
-FocusListener::~FocusListener() throw()
-{
-}
-
-MouseListener::~MouseListener() throw()
-{
+	return m_pImpl->VarPositive;
 }
 
 }
-

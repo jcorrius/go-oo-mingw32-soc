@@ -25,67 +25,50 @@
  *
  ************************************************************************/
 
-#include <baselistener.hxx>
+#ifndef _SCSOLVER_OPTIONDLG_HXX_
+#define _SCSOLVER_OPTIONDLG_HXX_
+
+#include "basedlg.hxx"
 
 namespace scsolver {
 
-//---------------------------------------------------------------------------
-// Class Listener
+class CloseBtnListener;
 
-Listener::~Listener() throw()
+class OptionDialog : public BaseDialog
 {
-}
+public:
+	OptionDialog( SolverImpl* p );
+	virtual ~OptionDialog() throw();
 
-ActionObject::ActionObject()
-{
-}
+	/**
+	 * This method is called when a range selection is finished.  If
+	 * the dialog does not contain a range selection widget pair,
+	 * just leave this method empty.
+	 *
+	 * @return false for signaling to the calling function that
+	 *  the selection is invalid and should be discarded, or true if
+	 *  the selection is satisfactory.
+	 */
+	virtual bool doneRangeSelection() const;
 
-ActionObject::~ActionObject() throw()
-{
-}
+	/**
+	 * Must return a unique name that identifies its dialog type.
+	 * Should be deprecated and its use in a nested-if or switch
+	 * statement is discouraged because it is not very elegant and
+	 * non-safe.
+	 */
+	virtual const rtl::OUString getDialogName() const;
 
-void ActionObject::operator()( BaseDialog* dlg, const awt::ActionEvent& e )
-{
-}
+	virtual void setVisible( bool b );
 
-ActionListener::ActionListener( BaseDialog* pDlg ) 
-	: Listener( pDlg ), m_bActionSet( false )
-{
-}
+private:
+	void initialize();
+	void registerListeners();
+	void unregisterListeners() throw();
 
-
-ActionListener::ActionListener( BaseDialog* pDlg, const ActionObject& aAction ) 
-	: Listener( pDlg ), m_bActionSet( true ), m_aAction( aAction )
-{
-}
-
-ActionListener::~ActionListener() throw()
-{
-}
-
-void SAL_CALL ActionListener::disposing( const lang::EventObject& e )
-	throw ( RuntimeException )
-{
-}
-
-void SAL_CALL ActionListener::actionPerformed( const awt::ActionEvent& e )
-	throw ( RuntimeException )
-{
-	if( m_bActionSet )
-		m_aAction( getDialog(), e );
-}
-
-ItemListener::~ItemListener() throw()
-{
-}
-
-FocusListener::~FocusListener() throw()
-{
-}
-
-MouseListener::~MouseListener() throw()
-{
-}
+	CloseBtnListener* m_pCloseListener;
+};
 
 }
 
+#endif

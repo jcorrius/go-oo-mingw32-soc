@@ -33,6 +33,7 @@
 #include <global.hxx>
 #include <msgdlg.hxx>
 #include <xcalc.hxx>
+#include "optiondlg.hxx"
 
 #include <memory>
 #include <iostream>
@@ -74,7 +75,6 @@ RngSelListener::~RngSelListener() throw()
 
 void RngSelListener::disposing( const lang::EventObject& oEvt ) throw ( RuntimeException )
 {
-	Debug( "RngSelListener::disposing" );
 }
 	
 void RngSelListener::done( const sheet::RangeSelectionEvent& oEvt ) throw ( RuntimeException )
@@ -218,7 +218,7 @@ void SolveBtnListener::actionPerformed( const awt::ActionEvent& oEvt )
 //---------------------------------------------------------------------------
 // Class CloseBtnListener
 
-CloseBtnListener::CloseBtnListener( SolverDialog* pDlg ) : ActionListener( pDlg )
+CloseBtnListener::CloseBtnListener( BaseDialog* pDlg ) : ActionListener( pDlg )
 {
 }
 
@@ -305,6 +305,29 @@ void ResetBtnListener::actionPerformed( const awt::ActionEvent& oEvt )
 	throw ( RuntimeException )
 {
 	getDialog()->getSolverImpl()->getMainDialog()->reset();
+}
+
+//---------------------------------------------------------------------------
+
+OptionBtnListener::OptionBtnListener( SolverDialog* pDlg ) : 
+	ActionListener( pDlg )
+{
+}
+
+OptionBtnListener::~OptionBtnListener() throw()
+{
+}
+
+void OptionBtnListener::disposing( const lang::EventObject& oEvt )
+	throw ( RuntimeException )
+{
+}
+	
+void OptionBtnListener::actionPerformed( const awt::ActionEvent& oEvt )
+	throw ( RuntimeException )
+{
+	OptionDialog* pDlg = getDialog()->getSolverImpl()->getMainDialog()->getOptionDialog();
+	pDlg->setVisible(true);
 }
 
 

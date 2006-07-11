@@ -130,7 +130,6 @@ private:
 };
 
 
-
 class SolveBtnListener : public ::scsolver::ActionListener
 {
 
@@ -147,20 +146,25 @@ public:
 
 };
 
-
-class CloseBtnListener : public ::scsolver::ActionListener
+/**
+ * Generic close button listener.  You can use this class for
+ * any dialog that needs a simple "close" action.  Just pass a
+ * pointer to the target dialog to the constructor when
+ * instantiating an object, and register it with the "close"
+ * button.
+ */
+class CloseBtnListener : public ActionListener
 {
-
 public:
-	
-	CloseBtnListener( SolverDialog* pDlg );
+	CloseBtnListener( BaseDialog* pDlg );
 	virtual ~CloseBtnListener() throw();
 
 	// XEventListener
-	virtual void SAL_CALL disposing( const lang::EventObject& oEvt ) throw ( RuntimeException );
+	virtual void SAL_CALL disposing( const lang::EventObject& oEvt )
+		throw ( RuntimeException );
 
 	// XActionListener
-	virtual void SAL_CALL actionPerformed( const awt::ActionEvent& ) 
+	virtual void SAL_CALL actionPerformed( const awt::ActionEvent& )
 		throw ( RuntimeException );
 };
 
@@ -219,6 +223,24 @@ private:
 };
 
 
+class OptionBtnListener : public ::scsolver::ActionListener
+{
+public:
+	OptionBtnListener( SolverDialog* pDlg );
+	virtual ~OptionBtnListener() throw();
+
+	// XEventListener
+	virtual void SAL_CALL disposing( const lang::EventObject& oEvt ) throw ( RuntimeException );
+
+	// XActionListener
+	virtual void SAL_CALL actionPerformed( const awt::ActionEvent& oEvt ) 
+		throw ( RuntimeException );
+
+private:
+	std::auto_ptr<MessageDialog> m_pDlg;
+};
+
+
 class ConstEditBtnListener : public ::scsolver::ActionListener
 {
 	
@@ -241,7 +263,7 @@ private:
 };
 
 
-class ConstListBoxListener : public ::scsolver::ItemListener
+class ConstListBoxListener : public ItemListener
 {
 public:
 	ConstListBoxListener( SolverDialog* );
@@ -256,7 +278,7 @@ private:
 };
 
 
-class MaxRadioBtnListener : public ::scsolver::ItemListener
+class MaxRadioBtnListener : public ItemListener
 {
 private:
 	
@@ -270,7 +292,7 @@ public:
 };
 
 
-class WindowFocusListener : public ::scsolver::FocusListener
+class WindowFocusListener : public FocusListener
 {
 public:
 

@@ -78,6 +78,10 @@ void LpSolveImpl::solve()
 		ostringstream os;
 		os << "x" << i;
 		set_col_name( lp, i, const_cast<char *>(os.str().c_str()) );
+		if( model->getVarPositive() )
+			set_lowbo(lp, i, 0.0); // positive variable constraint
+		else
+			set_unbounded(lp, i);
 	}
 
 	// map constraints
@@ -93,7 +97,7 @@ void LpSolveImpl::solve()
 		{
 			for ( int j = 0; j < nDecVarSize; ++j )
 				row.at(j) = model->getConstraint( i, j );
-			int nEqual;
+			int nEqual = EQ;
 			switch ( model->getEquality(i) )
 			{
 			case GREATER_THAN_EQUAL:

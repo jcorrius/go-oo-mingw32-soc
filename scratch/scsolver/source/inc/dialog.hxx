@@ -57,6 +57,7 @@ class RngBtnListener;
 class BaseDialog;
 class WidgetProperty;
 class MessageDialog;
+class OptionDialog;
 
 class SolverDialog;
 class SolveBtnListener;
@@ -64,6 +65,7 @@ class CloseBtnListener;
 class SaveBtnListener;
 class LoadBtnListener;
 class ResetBtnListener;
+class OptionBtnListener;
 class MaxRadioBtnListener;
 class ConstEditBtnListener;
 class WindowFocusListener;
@@ -77,7 +79,7 @@ class OKCancelBtnListener;
 // Class ConstEditDialog
 
 
-class ConstEditDialog : public scsolver::BaseDialog
+class ConstEditDialog : public BaseDialog
 {
 public:
 	ConstEditDialog( SolverImpl* );
@@ -139,6 +141,7 @@ public:
 	
 
 	ConstEditDialog* getConstEditDialog();
+	OptionDialog* getOptionDialog();
 
 	sal_Int16 getSelectedConstraintPos();
 	
@@ -186,6 +189,7 @@ private:
 			const sal_Bool, const sal_uInt32 = 0 );
 
 	std::auto_ptr<ConstEditDialog> m_pConstEditDialog;
+	std::auto_ptr<OptionDialog>  m_pOptionDialog;
 	std::auto_ptr<MessageDialog> m_pSolveErrorDlg;
 	std::auto_ptr<MessageDialog> m_pSolInfeasibleDlg;
 	std::auto_ptr<MessageDialog> m_pSolFoundDlg;
@@ -199,6 +203,7 @@ private:
 	SaveBtnListener* m_pSaveListener;
 	LoadBtnListener* m_pLoadListener;
 	ResetBtnListener* m_pResetListener;
+	OptionBtnListener* m_pOptionListener;
 	MaxRadioBtnListener* m_pMaxListener;
 	ConstEditBtnListener* m_pConstAddListener;
 	ConstEditBtnListener* m_pConstChangeListener;
