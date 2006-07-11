@@ -1,0 +1,225 @@
+--- sc/source/ui/docshell/docfunc.cxx	2006-06-22 12:26:48.000000000 +0000
++++ sc/source/ui/docshell/docfunc.cxx	2006-07-03 13:11:54.000000000 +0000
+@@ -3424,7 +3424,7 @@ BOOL ScDocFunc::FillAuto( ScRange& rRang
+ 
+ //------------------------------------------------------------------------
+ 
+-BOOL ScDocFunc::MergeCells( const ScRange& rRange, BOOL bContents, BOOL bRecord, BOOL bApi )
++BOOL ScDocFunc::MergeCells( const ScRange& rRange, BOOL bContents, BOOL bRecord, BOOL bApi, BOOL bCenter )
+ {
+ 	ScDocShellModificator aModificator( rDocShell );
+ 
+@@ -3468,7 +3468,7 @@ BOOL ScDocFunc::MergeCells( const ScRang
+ 	if (bRecord)
+ 	{
+ 		ScDocument* pUndoDoc = NULL;
+-		if (bNeedContents && bContents)
++		if ( (bNeedContents && bContents) || bCenter )
+ 		{
+ 			pUndoDoc = new ScDocument( SCDOCMODE_UNDO );
+ 			pUndoDoc->InitUndo( pDoc, nTab, nTab );
+@@ -3478,17 +3478,23 @@ BOOL ScDocFunc::MergeCells( const ScRang
+ 		rDocShell.GetUndoManager()->AddUndoAction(
+ 			new ScUndoMerge( &rDocShell,
+ 							nStartCol, nStartRow, nTab,
+-							nEndCol, nEndRow, nTab, TRUE, pUndoDoc ) );
++							nEndCol, nEndRow, nTab, TRUE, pUndoDoc, bCenter) );
+ 	}
+ 
+ 	if (bNeedContents && bContents)
+ 		pDoc->DoMergeContents( nTab, nStartCol,nStartRow, nEndCol,nEndRow );
+ 	pDoc->DoMerge( nTab, nStartCol,nStartRow, nEndCol,nEndRow );
++	
++	if (bCenter)
++	{
++		pDoc->ApplyAttr( nStartCol, nStartRow, nTab, SvxHorJustifyItem( SVX_HOR_JUSTIFY_CENTER ) );
++		pDoc->ApplyAttr( nStartCol, nStartRow, nTab, SvxVerJustifyItem( SVX_VER_JUSTIFY_CENTER ) );
++	}
+ 
+ 	if ( !AdjustRowHeight( ScRange( 0,nStartRow,nTab, MAXCOL,nEndRow,nTab ) ) )
+ 		rDocShell.PostPaint( nStartCol, nStartRow, nTab,
+ 											nEndCol, nEndRow, nTab, PAINT_GRID );
+-	if (bNeedContents && bContents)
++	if ( (bNeedContents && bContents) || bCenter )
+ 		pDoc->SetDirty( rRange );
+ 	aModificator.SetDocumentModified();
+ 
+--- sc/source/ui/inc/docfunc.hxx	2006-06-22 12:26:48.000000000 +0000
++++ sc/source/ui/inc/docfunc.hxx	2006-06-30 13:10:21.000000000 +0000
+@@ -165,7 +165,7 @@ public:
+ 	BOOL			ResizeMatrix( const ScRange& rOldRange, const ScAddress& rNewEnd, BOOL bApi );
+ 
+ 	BOOL			MergeCells( const ScRange& rRange, BOOL bContents,
+-								BOOL bRecord, BOOL bApi );
++								BOOL bRecord, BOOL bApi, BOOL bCenter );
+ 	BOOL			UnmergeCells( const ScRange& rRange, BOOL bRecord, BOOL bApi );
+ 
+ 	BOOL			SetNote( const ScAddress& rPos, const ScPostIt& rNote, BOOL bApi );
+--- sc/source/ui/inc/undoblk.hxx	2006-06-22 12:26:48.000000000 +0000
++++ sc/source/ui/inc/undoblk.hxx	2006-06-30 12:54:17.000000000 +0000
+@@ -457,7 +457,8 @@ public:
+ 					ScUndoMerge( ScDocShell* pNewDocShell,
+ 								 SCCOL nStartX, SCROW nStartY, SCTAB nStartZ,
+ 								 SCCOL nEndX,   SCROW nEndY,   SCTAB nEndZ,
+-								 BOOL bNewDoMerge, ScDocument* pNewUndoDoc = NULL );
++								 BOOL bNewDoMerge, ScDocument* pNewUndoDoc = NULL,
++								 BOOL bNewCenter = FALSE );
+ 	virtual 		~ScUndoMerge();
+ 
+ 	virtual void	Undo();
+@@ -471,6 +472,7 @@ private:
+ 	ScRange			aRange;
+ 	BOOL			bDoMerge;				// Merge oder aufheben
+ 	ScDocument*		pUndoDoc;				// wenn Daten zusammengefasst
++	BOOL			bCenter;
+ 
+ 	void			DoChange( const BOOL bUndo ) const;
+ };
+--- sc/source/ui/inc/viewfunc.hxx	2006-04-07 16:27:09.000000000 +0000
++++ sc/source/ui/inc/viewfunc.hxx	2006-06-30 13:12:46.000000000 +0000
+@@ -240,7 +240,7 @@ public:
+ 	BOOL			TestMergeCells();
+ 	BOOL			TestRemoveMerge();
+ 
+-	BOOL			MergeCells( BOOL bApi, BOOL& rDoContents, BOOL bRecord = TRUE );
++	BOOL			MergeCells( BOOL bApi, BOOL& rDoContents, BOOL bRecord = TRUE, BOOL bCenter = FALSE );
+ 	BOOL			RemoveMerge( BOOL bRecord = TRUE );
+ 
+ 	void			FillSimple( FillDir eDir, BOOL bRecord = TRUE );
+--- sc/source/ui/undo/undoblk3.cxx	2006-05-02 15:51:13.000000000 +0000
++++ sc/source/ui/undo/undoblk3.cxx	2006-06-30 13:02:05.000000000 +0000
+@@ -43,6 +43,7 @@
+ // INCLUDE -------------------------------------------------------------------
+ 
+ #include "scitems.hxx"
++#include <svx/algitem.hxx>
+ #include <svx/boxitem.hxx>
+ #include <svx/srchitem.hxx>
+ #include <svx/linkmgr.hxx>
+@@ -775,13 +776,15 @@ BOOL __EXPORT ScUndoAutoFill::CanRepeat(
+ ScUndoMerge::ScUndoMerge( ScDocShell* pNewDocShell,
+ 							SCCOL nStartX, SCROW nStartY, SCTAB nStartZ,
+ 							SCCOL nEndX, SCROW nEndY, SCTAB nEndZ,
+-							BOOL bNewDoMerge, ScDocument* pNewUndoDoc )
++							BOOL bNewDoMerge, ScDocument* pNewUndoDoc,
++							BOOL bNewCenter )
+ 		//
+ 	:	ScSimpleUndo( pNewDocShell ),
+ 		//
+ 		aRange	( nStartX, nStartY, nStartZ, nEndX, nEndY, nEndZ ),
+ 		bDoMerge( bNewDoMerge ),
+-		pUndoDoc( pNewUndoDoc )
++		pUndoDoc( pNewUndoDoc ),
++		bCenter ( bNewCenter )
+ {
+ }
+ 
+@@ -828,9 +831,20 @@ void ScUndoMerge::DoChange( const BOOL b
+ 			pUndoDoc->CopyToDocument( aRange, IDF_ALL, FALSE, pDoc );
+ 		}
+ 		else
++		{
+ /*!*/		pDoc->DoMergeContents( aRange.aStart.Tab(),
+ 								   aRange.aStart.Col(), aRange.aStart.Row(),
+ 								   aRange.aEnd.Col(),   aRange.aEnd.Row()   );
++			if (bCenter)
++			{
++				pDoc->ApplyAttr( aRange.aStart.Col(), aRange.aStart.Row(),
++								 aRange.aStart.Tab(),
++								 SvxHorJustifyItem( SVX_HOR_JUSTIFY_CENTER ) );
++				pDoc->ApplyAttr( aRange.aStart.Col(), aRange.aStart.Row(),
++								 aRange.aStart.Tab(),
++								 SvxVerJustifyItem( SVX_VER_JUSTIFY_CENTER ) );
++			}
++		}
+ 
+ 	BOOL bDidPaint = FALSE;
+ 	ScTabViewShell* pViewShell = ScTabViewShell::GetActiveViewShell();
+--- sc/source/ui/unoobj/cellsuno.cxx	2006-05-05 09:47:19.000000000 +0000
++++ sc/source/ui/unoobj/cellsuno.cxx	2006-06-30 13:36:26.000000000 +0000
+@@ -5243,7 +5243,7 @@ void SAL_CALL ScCellRangeObj::merge( sal
+ 	{
+ 		ScDocFunc aFunc(*pDocSh);
+ 		if ( bMerge )
+-			aFunc.MergeCells( aRange, FALSE, TRUE, TRUE );
++			aFunc.MergeCells( aRange, FALSE, TRUE, TRUE, FALSE );
+ 		else
+ 			aFunc.UnmergeCells( aRange, TRUE, TRUE );
+ 
+--- sc/source/ui/view/cellsh3.cxx	2006-05-02 15:51:36.000000000 +0000
++++ sc/source/ui/view/cellsh3.cxx	2006-07-03 13:13:06.000000000 +0000
+@@ -779,6 +779,7 @@ void ScCellShell::Execute( SfxRequest& r
+             {
+                 // test whether to merge or to split
+                 bool bMerge = false;
++                BOOL bCenter = FALSE;
+                 switch( nSlot )
+                 {
+                     case FID_MERGE_ON:
+@@ -789,6 +790,7 @@ void ScCellShell::Execute( SfxRequest& r
+                     break;
+                     case FID_MERGE_TOGGLE:
+                     {
++                        bCenter = TRUE;
+                         SfxPoolItem* pItem = 0;
+                         if( rBindings.QueryState( nSlot, pItem ) >= SFX_ITEM_DEFAULT )
+                             bMerge = !static_cast< SfxBoolItem* >( pItem )->GetValue();
+@@ -809,7 +811,7 @@ void ScCellShell::Execute( SfxRequest& r
+                         bMoveContents = ((const SfxBoolItem*)pItem)->GetValue();
+                     }
+ 
+-                    if (pTabViewShell->MergeCells( bApi, bMoveContents ))
++                    if (pTabViewShell->MergeCells( bApi, bMoveContents, TRUE, bCenter ))
+                     {
+                         if (!bApi && bMoveContents)             // "ja" im Dialog geklickt
+                             rReq.AppendItem( SfxBoolItem( nSlot, bMoveContents ) );
+--- sc/source/ui/view/viewfun2.cxx	2006-05-02 15:53:53.000000000 +0000
++++ sc/source/ui/view/viewfun2.cxx	2006-06-30 13:13:59.000000000 +0000
+@@ -762,7 +762,7 @@ BOOL ScViewFunc::TestMergeCells()			// V
+ 
+ //----------------------------------------------------------------------------
+ 
+-BOOL ScViewFunc::MergeCells( BOOL bApi, BOOL& rDoContents, BOOL bRecord )
++BOOL ScViewFunc::MergeCells( BOOL bApi, BOOL& rDoContents, BOOL bRecord, BOOL bCenter )
+ {
+ 	//	Editable- und Verschachtelungs-Abfrage muss vorneweg sein (auch in DocFunc),
+ 	//	damit dann nicht die Inhalte-QueryBox kommt
+@@ -830,7 +830,7 @@ BOOL ScViewFunc::MergeCells( BOOL bApi, 
+ 	if (bOk)
+ 	{
+ 		HideCursor();
+-		bOk = pDocSh->GetDocFunc().MergeCells( aMarkRange, rDoContents, bRecord, bApi );
++		bOk = pDocSh->GetDocFunc().MergeCells( aMarkRange, rDoContents, bRecord, bApi, bCenter );
+ 		ShowCursor();
+ 
+ 		if (bOk)
+--- sc/uiconfig/scalc/menubar/menubar.xml	2006-06-22 12:26:48.000000000 +0000
++++ sc/uiconfig/scalc/menubar/menubar.xml	2006-07-03 13:11:34.000000000 +0000
+@@ -213,7 +213,13 @@
+                     <menu:menuitem menu:id=".uno:SheetUseR1C1"/>
+                 </menu:menupopup>
+             </menu:menu>
+-            <menu:menuitem menu:id=".uno:ToggleMergeCells"/>
++            <menu:menu menu:id=".uno:MergeCellsMenu">
++                <menu:menupopup>
++                    <menu:menuitem menu:id=".uno:ToggleMergeCells"/>
++                    <menu:menuitem menu:id=".uno:MergeCells"/>
++                    <menu:menuitem menu:id=".uno:SplitCell"/>
++                </menu:menupopup>
++            </menu:menu>
+             <menu:menuseparator/>
+             <menu:menuitem menu:id=".uno:PageFormatDialog"/>
+             <menu:menu menu:id=".uno:PrintRangesMenu">
+--- officecfg/registry/data/org/openoffice/Office/UI/CalcCommands.xcu	2006-07-03 14:43:29.000000000 +0200
++++ officecfg/registry/data/org/openoffice/Office/UI/CalcCommands.xcu	2006-07-03 16:44:14.000000000 +0200
+@@ -1009,8 +1009,8 @@
+ 			</node>
+ 			<node oor:name=".uno:ToggleMergeCells" oor:op="replace">
+ 				<prop oor:name="Label" oor:type="xs:string">
+-					<value xml:lang="de">Zellen ~verbinden</value>
+-					<value xml:lang="en-US">M~erge Cells</value>
++					<value xml:lang="de">Zellen ~verbinden und zentrieren</value>
++					<value xml:lang="en-US">M~erge and Center Cells</value>
+ 				</prop>
+ 				<prop oor:name="Properties" oor:type="xs:int">
+ 					<value>1</value>
