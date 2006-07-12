@@ -1,0 +1,172 @@
+diff -r -u /opt/OpenOffice/ooo-build-2-0-2/build/OOO_2_0_2/sch/inc/chaxis.hxx sch/inc/chaxis.hxx
+--- sch/inc/chaxis.hxx
++++ sch/inc/chaxis.hxx
+@@ -66,6 +66,7 @@
+ 
+ #include "defines.hxx"
+ #include "schattr.hxx"
++#include "adjust.hxx"
+ #include "float.h"
+ #include <math.h>
+ 
+@@ -133,6 +134,12 @@
+ 	SfxItemSet* mpTextAttr;
+ 
+ 	Rectangle maRectA,maRectB;
++	// Cache for accelerated pruning of overlapping legends
++	rtl::OUString maCommonSuffix;
++	long mnSuffixLBound;
++	long mnSuffixUBound;
++	bool DetectOverlap(const String &rString, const Point &rPos,
++					   ChartAdjust eAdj);
+ 
+ 	long mnTicks;
+ 	long mnHelpTicks;
+
+diff -r -u /opt/OpenOffice/ooo-build-2-0-2/build/OOO_2_0_2/sch/source/core/chaxis.cxx sch/source/core/chaxis.cxx
+--- sch/source/core/chaxis.cxx
++++ sch/source/core/chaxis.cxx
+@@ -241,7 +243,9 @@
+ 	mnTicks(CHAXIS_MARK_OUTER),
+ 	mnHelpTicks(0),
+ 	mbPercentCol(TRUE),
+-	mnMaxTextWidth(-1)
++	mnMaxTextWidth(-1),
++	mnSuffixLBound(0),
++	mnSuffixUBound(0)
+ {
+ 	mpAxisAttr=new SfxItemSet(mpModel->GetPool(),nAxisWhichPairs);
+ 	SetDefaults();  //attribute fuellen
+@@ -1792,6 +1796,67 @@
+ 
+ }
+ 
++bool ChartAxis::DetectOverlap(const String &rString, const Point &rPos,
++							  ChartAdjust eAdj)
++{
++	// find / refine common suffix.
++	rtl::OUString aStr( rString );
++	sal_Int32 i;
++	for (i = maCommonSuffix.getLength(); i > 0; i--)
++	{
++		if (!maCommonSuffix.compareTo(aStr, i))
++			break;
++	}
++	if (i <= 0) // no common suffix
++	{
++		maCommonSuffix = aStr;
++		mnSuffixLBound = mnSuffixUBound = 0;
++	}
++	else if (i != maCommonSuffix.getLength() ||
++		mnSuffixLBound == 0 || mnSuffixUBound == 0)
++	{ // we have a common suffix
++		// calculate miniumum bounds for common suffix
++		maCommonSuffix = rtl::OUString( maCommonSuffix.getStr(), i );
++
++		SdrRectObj *pTextObj = mpModel->CreateTextObj(CHOBJID_TEXT,rPos,
++													  maCommonSuffix,*mpTextAttr,
++													  FALSE,eAdj,mnMaxTextWidth);
++		Rectangle aRect (pTextObj->GetCurrentBoundRect());
++		delete pTextObj;
++		if (IsVertical())
++		{
++			mnSuffixLBound = rPos.Y() - aRect.Top();
++			mnSuffixUBound = aRect.Bottom() - rPos.Y();
++		}
++		else
++		{
++			mnSuffixLBound = rPos.X() - aRect.Left();
++			mnSuffixUBound = aRect.Right() - rPos.X();
++		}
++	}
++
++	// Check either just the point, or with the min bounds
++	// for the common suffix.
++	Rectangle iSect;
++	if (IsVertical())
++		iSect = Rectangle( rPos.X() - 10, rPos.Y() - mnSuffixLBound,
++						   rPos.X() + 10, rPos.Y() + mnSuffixUBound );
++	else
++		iSect = Rectangle( rPos.X() - mnSuffixLBound, rPos.Y() - 10,
++						   rPos.X() + mnSuffixUBound, rPos.Y() + 10 );
++
++	if (iSect.IsOver( maRectB ) || iSect.IsOver( maRectA ) )
++	{
++		static int nSaved = 0;
++		nSaved++;
++		if (!(nSaved % 100))
++			fprintf (stderr, "avoided lots %d foos\n", nSaved);
++		return true;
++	}
++	else
++		return false;
++}
++
+ // BM #60999# new parameter pTextColor, if using red text for negative numbers
+ void ChartAxis::CreateMarkDescr(const String& rString, long nPosition, Color *pTextColor)
+ {
+@@ -1831,7 +1913,7 @@
+ 			mbValueDown = !mbValueDown;
+ 		}
+ 		eAdj = mbSecondary ? CHADJUST_CENTER_LEFT : CHADJUST_CENTER_RIGHT;
+-        if( rString.Len() > 0 )
++		if(rString.Len() > 0 && (mbTextOverlap || DetectOverlap(rString, aPos, eAdj))
+             pText=mpModel->CreateTextObj(CHOBJID_TEXT,aPos,rString,*mpTextAttr,FALSE,eAdj,mnMaxTextWidth);
+ 	}
+ 	else //horizontal
+@@ -1848,7 +1937,7 @@
+ 			mbValueDown = !mbValueDown;
+ 		}
+ 		eAdj = mbSecondary ? CHADJUST_BOTTOM_CENTER : CHADJUST_TOP_CENTER;
+-        if( rString.Len() > 0 )
++		if(rString.Len() > 0 && (mbTextOverlap || DetectOverlap(rString, aPos, eAdj))
+             pText=mpModel->CreateTextObj(CHOBJID_TEXT,aPos,rString,*mpTextAttr,FALSE,eAdj,mnMaxTextWidth);
+ 	}
+ 
+@@ -1891,6 +1999,9 @@
+ 		}
+ 	}
+ 	//kein Textobjekt oder der Text wuerde ueberlappen
++	// FIXME: do we want millions of marks ?
++	// surely it just looks ugly & causes grief ?
++	// cf. expected behavior ... [!?]
+ 	SdrObject *pObj=CreateMarks(nPosition,mnTickLen,mnTicks);
+ 	if(pObj && mpAxisList)
+ 		mpAxisList->NbcInsertObject(pObj);
+
+
+diff -r -u /opt/OpenOffice/ooo-build-2-0-2/build/OOO_2_0_2/sch/source/core/chtmode1.cxx sch/source/core/chtmode1.cxx
+--- sch/source/core/chtmode1.cxx
++++ sch/source/core/chtmode1.cxx
+@@ -538,9 +539,30 @@
+ 		aTextAttr.Put(*pAxisAttr);
+ //		SetTextAttributes (aTextAttr);
+ 
++		String aLastDescr;
+ 		for (short i = 0; i < nCnt; i++)
+ 		{
+ 			String aDescrStr = bRowDescr ? RowText(i) : ColText(i);
++			if (aLastDescr.Len() == aDescrStr.Len())
++			{
++				// See if the only difference is some digits
++				sal_Int32 j;
++				for (j = 0; j < aLastDescr.Len(); j++)
++				{
++					sal_Unicode nOld = aLastDescr.GetChar(j);
++					sal_Unicode nNew = aDescrStr.GetChar(j);
++					if (nOld != nNew)
++					{
++						if (nOld > '9' || nNew > '9')
++							break;
++						if (nOld < '0' || nNew < '0')
++							break;
++					}
++				}
++				if (j >= aLastDescr.Len())
++					continue;
++			}
++			aLastDescr = aDescrStr;
+ 
+ 			if (eOrient == CHTXTORIENT_STACKED)
+ 				pOutliner->SetText(StackString(aDescrStr), pOutliner->GetParagraph( 0 ));
+
