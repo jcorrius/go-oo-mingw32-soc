@@ -1,0 +1,166 @@
+#!/usr/bin/perl -w
+
+my $ls_mode = 0;
+my $split_mode = 0;
+
+$type = 'unxlngi6.pro';
+$human_readable = 0;
+
+
+sub syntax()
+{
+    print "oosize [path]: generate object / code size statistics\n";
+    print "  --ls: breakdown individual directory\n";
+    print "  --split: breakdown individual file\n";
+    print "  [path]: breakdown whole built tree\n";
+    print "  --help: this message\n";
+}
+
+sub slurp_dir($)
+{
+    my $dir;
+    my $path = shift;
+    opendir ($dir, $path) || die "Can't open $path: $!";
+    my @entries;
+    while (my $name = readdir ($dir)) {
+	$name =~ /^\./ && next;
+	push @entries, $name;
+    }
+    closedir ($dir);
+    return @entries;
+}
+
+# read all file sizes into a hash
+sub collect_file_sizes($)
+{
+    my $path = shift;
+    my %sizes;
+    
+    for my $name (slurp_dir ($path)) {
+	$name =~ m/.o$/ || next;
+	my $tmp = '/tmp/foo.o';
+	`cp $path/$name $tmp`;
+	`strip $tmp`;
+	my ($dev,$ino,$mode,$nlink,$uid,$gid,$rdev,$size,
+	    $atime,$mtime,$ctime,$blksize,$blocks)
+	    = stat($tmp);
+	$name =~ s/\.o$//;
+	$sizes{$name} = $size;
+    }
+
+    return \%sizes;
+}
+
+sub accumulate_sizes($$$);
+sub accumulate_sizes($$$)
+{
+    my ($path, $dir_sizes, $obj_sizes) = @_;
+
+    for my $name (slurp_dir ($path)) {
+	$name =~ m/^$type/ && next;
+	$name eq 'CVS' && next;
+	$name eq 'workben' && next;
+	$name eq 'qa' && next;
+	$name eq 'test' && next;
+	if (-d "$path/$name") {
+	    accumulate_sizes ("$path/$name", $dir_sizes, $obj_sizes);
+	} else {
+	    if ($name =~ /^(.*)\.c(xx|)$/) {
+		my $stem = $1;
+		if (!defined $obj_sizes->{$stem}) {
+		    print "Strange no obj size for '$stem'\n";
+		} else {
+		    my $key = $path;
+		    if ($ls_mode) { $key = $key . $name; } # hack !
+		    $dir_sizes->{$key} = 0 if (!defined ($dir_sizes->{$key}));
+		    $dir_sizes->{$key} += $obj_sizes->{$stem};
+		}
+	    } else {
+#		print "Unhandled name $name\n";
+	    }
+	}
+    }
+}
+
+# main ...
+my $path;
+
+for my $arg (@ARGV) {
+    if ($arg eq '-h' || $arg eq '--help') {
+	syntax();
+	exit 0;
+    } elsif ($arg eq '--ls') {
+	$ls_mode = 1;
+    } elsif ($arg eq '--split') {
+	$split_mode = 1;
+    } else {
+	$path = $arg;
+    }
+}
+
+
+# read all toplevel dirs
+my %dir_sizes;
+
+if ($split_mode) {
+    my $fh;
+    my %sizes;
+    open ($fh, "objdump -x $path|") || die "Can't dump $path: $!";
+    while (<$fh>) {
+	m/^\s*[\d]+\s+(\S+)\s+([\d]+)\s+/ || next;
+	my ($sym, $size) = ($1, $2);
+	$sym =~ m/^\.debug/ && next;
+	$size == 0 && next;
+	$sym =~ s/^.*\.//; # remove section prefix
+	$sizes{$sym} = $size;
+    }
+    close ($fh);
+    
+    print "Symbol sizes\n";
+    for my $sym (sort { $sizes{$a} <=> $sizes{$b} } keys %sizes) {
+	print "$sym\t$sizes{$sym}\n";
+    }
+
+    exit 0;
+} elsif ($ls_mode) {
+    if (!defined $path) {
+	chomp($path = `pwd`);
+    }
+    my $module = $path;
+    while ($module ne '') {
+	-d "$module/$type" && last;
+	$module =~ s|/[^/]*$||;
+    }
+    print "Found module '$module'\n";
+    my $slodir = "$module/$type/slo";
+    my $obj_sizes = collect_file_sizes ($slodir);
+    accumulate_sizes ("$path", \%dir_sizes, $obj_sizes);
+} else {
+
+    for my $toplevel (slurp_dir($path)) {
+	my $slodir = "$path/$toplevel/$type/slo";
+	print "slodir $slodir\n";
+	-d $slodir || next;
+	my $obj_sizes = collect_file_sizes ($slodir);
+	accumulate_sizes ("$path/$toplevel", \%dir_sizes, $obj_sizes);
+    }
+}
+
+my @order;
+if ($ls_mode) {
+    print "Size breakdown\n";
+    @order = sort { $dir_sizes{$a} <=> $dir_sizes{$b} } keys %dir_sizes;
+} else {
+    print "Flat breakdown\n";
+    @order = sort keys %dir_sizes;
+}
+for my $name (@order) {
+    my $nicename = $name;
+    $nicename =~ s|^$path||;
+    my $size = $dir_sizes{$name};
+    if ($human_readable) {
+	$size = int($size/1024);
+	$size .= 'Kb';
+    }
+    print "$nicename\t$size\n";
+}
