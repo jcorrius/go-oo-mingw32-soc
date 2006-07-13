@@ -15,6 +15,7 @@
 #include <docuno.hxx>
 
 #include <basic/sbx.hxx>
+#include <basic/sbstar.hxx>
 
 #include "vbahelper.hxx"
 #include "tabvwsh.hxx"
@@ -225,7 +226,7 @@ org::openoffice::isRangeShortCut( const ::rtl::OUString& sParam )
 org::openoffice::getCurrentDocument() throw (uno::RuntimeException)
 {
 	uno::Reference< frame::XModel > xModel;
-	SbxObject* pBasic = reinterpret_cast< SbxObject* > ( SFX_APP()->GetBasic() );
+	SbxObject* pBasic = dynamic_cast< SbxObject* > ( SFX_APP()->GetBasic() );
 	SbxObject* basicChosen =  pBasic ;
 	if ( basicChosen == NULL)
 	{
@@ -289,7 +290,7 @@ org::openoffice::getCurrentDocument() throw (uno::RuntimeException)
 ScDocShell* 
 org::openoffice::getDocShell( css::uno::Reference< css::frame::XModel>& xModel ) 
 {
-	ScModelObj* pModel = static_cast< ScModelObj* >( xModel.get() );
+	ScModelObj* pModel = dynamic_cast< ScModelObj* >( xModel.get() );
 	ScDocShell* pDocShell = NULL;
 	if ( pModel )
 		pDocShell = (ScDocShell*)pModel->GetEmbeddedObject();

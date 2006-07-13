@@ -82,7 +82,7 @@ public:
 
 	bool isSingleCellRange(); 
 
-	static css::uno::Reference< css::table::XCellRange > getCellRangeForName( const rtl::OUString& sRangeName, const css::uno::Reference< css::sheet::XSpreadsheet >& xDoc );
+        static css::uno::Reference< css::table::XCellRange > getCellRangeForName( const rtl::OUString& sRangeName, const css::uno::Reference< css::sheet::XSpreadsheet >& xDoc );
     // Attributes
 	virtual css::uno::Any SAL_CALL getValue() throw (css::uno::RuntimeException);
 	virtual void   SAL_CALL setValue( const css::uno::Any& aValue ) throw ( css::uno::RuntimeException);

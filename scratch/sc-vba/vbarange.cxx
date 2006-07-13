@@ -97,7 +97,7 @@ using namespace ::com::sun::star;
 ScDocShell* getDocShellFromRange( const uno::Reference< table::XCellRange >& xRange )
 {
 	// need the ScCellRangeObj to get docshell
-	ScCellRangeObj* pUno = static_cast<  ScCellRangeObj* >( xRange.get() );
+	ScCellRangeObj* pUno = dynamic_cast<  ScCellRangeObj* >( xRange.get() );
 	if ( !pUno )
 		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Failed to access underlying uno range object" ) ), uno::Reference< uno::XInterface >()  );
 	return pUno->GetDocShell();
@@ -510,7 +510,7 @@ public:
 };
 
 table::CellRangeAddress getCellRangeAddress( const uno::Any& aParam,
-const uno::Reference< table::XCellRange >& xRanges )
+const uno::Reference< sheet::XSpreadsheet >& xDoc )
 {
 	uno::Reference< table::XCellRange > xRangeParam;
 	switch ( aParam.getValueTypeClass() )
@@ -519,7 +519,7 @@ const uno::Reference< table::XCellRange >& xRanges )
 		{
 			rtl::OUString rString;
 			aParam >>= rString;
-			xRangeParam = xRanges->getCellRangeByName( rString );
+			xRangeParam = ScVbaRange::getCellRangeForName( rString, xDoc );
 			break;
 		}
 		case uno::TypeClass_INTERFACE:
@@ -910,8 +910,7 @@ ScVbaRange::Address(  const uno::Any& RowAbsolute, const uno::Any& ColumnAbsolut
 	{
 		// #TODO should I throw an error if R1C1 is not set?
 		
-		uno::Reference< table::XCellRange > xRanges = thisRange.getCellRangeFromSheet();		
-		table::CellRangeAddress refAddress = getCellRangeAddress( RelativeTo, xRanges );
+		table::CellRangeAddress refAddress = getCellRangeAddress( RelativeTo, thisRange.getSpreadSheet() );
 		dDetails = ScAddress::Details( ScAddress::CONV_XL_R1C1, refAddress.StartRow, refAddress.StartColumn );
 	}
 	aRange.Format( sRange,  nFlags, pDoc, dDetails ); 
@@ -1082,7 +1081,7 @@ ScVbaRange::Columns( const uno::Any& aIndex ) throw (uno::RuntimeException)
 		}
 		else
 		{
-			table::CellRangeAddress relAddress = getCellRangeAddress( aIndex, xRanges );
+			table::CellRangeAddress relAddress = getCellRangeAddress( aIndex, thisRange.getSpreadSheet() );
 			thisRangeAddress.StartColumn = relAddress.StartColumn;	
                 	thisRangeAddress.EndColumn = relAddress.EndColumn;	
 		}
@@ -1241,7 +1240,7 @@ ScVbaRange::Range( const uno::Any &Cell1, const uno::Any &Cell2 ) throw (uno::Ru
 			uno::Reference< XInterface >() );
 
 	table::CellRangeAddress resultAddress;
-	cell1 = getCellRangeAddress( Cell1, xRanges ); 	
+	cell1 = getCellRangeAddress( Cell1, thisRange.getSpreadSheet() ); 	
 
 	// Cell1 defined only
 	if ( !Cell2.hasValue() )
@@ -1252,7 +1251,7 @@ ScVbaRange::Range( const uno::Any &Cell1, const uno::Any &Cell2 ) throw (uno::Ru
 		// Excel seems to combine the range as the range defined by
 		// the combination of Cell1 & Cell2
 	
-		cell2 = getCellRangeAddress( Cell2, xRanges ); 	
+		cell2 = getCellRangeAddress( Cell2, thisRange.getSpreadSheet() ); 	
 
 		resultAddress.StartColumn = ( cell1.StartColumn <  cell2.StartColumn ) ? cell1.StartColumn : cell2.StartColumn;
 		resultAddress.StartRow = ( cell1.StartRow <  cell2.StartRow ) ? cell1.StartRow : cell2.StartRow;
@@ -1514,7 +1513,12 @@ uno::Reference< table::XCellRange >
 ScVbaRange::getCellRangeForName(  const rtl::OUString& sRangeName, const uno::Reference< sheet::XSpreadsheet >& xDoc  )
 {
 	uno::Reference< table::XCellRange > xRanges( xDoc, uno::UNO_QUERY_THROW );
-	uno::Reference< table::XCellRange > xRange = xRanges->getCellRangeByName( sRangeName );
+	ScCellRangeObj* pRanges = dynamic_cast< ScCellRangeObj* >( xRanges.get() );
+	ScAddress::Details dDetails( ScAddress::CONV_XL_A1, 0, 0 );
+		
+	uno::Reference< table::XCellRange > xRange;
+	if ( pRanges )
+		xRange = pRanges->getCellRangeByName( sRangeName, dDetails );
 	return xRange;	
 }
 
