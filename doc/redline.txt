@@ -3,11 +3,17 @@ Notes on debugging redlining: from caolan.
 Delphic utterances:
 
     "redlining sort of busted in the core for many things, but on the
-     basic ww8 side, it's fairly easy: Read_CRevisionMark in ww8par4.cxx"
+     basic ww8 side, it's fairly easy:  in ww8par4.cxx"
+	-> ww8par4.cxx (Read_CRevisionMark)
+	    -> ww8par6.cxx (NewAttr) -> redlinestack::open
+		+ filter/inc/fltshell.hxx (SwFltRedLine) attr ...
+		+ filter/inc/msfilter.hxx (RedLineStack)
 
     "perhaps adding some prints to the ReadPlainChars and then
-     to sw:util::RedlineStack:: open & close might throw the
+     to sw:util::RedlineStack open & close might throw the
      problem out"
+	+ ww8par.cxx (SwWW8ImplReader::ReadPlainChars)
+	+ writerhelper.cxx (RedlineStack::open) etc.
 
     "could be a corrupt, or reading corrupt srpms property,
      sometimes there are places where we get the length of
@@ -24,8 +30,151 @@ Delphic utterances:
      encompases eg. text table text so someting might have
      gone wrong in a place like that too"
 
-     "in *theory* in *theory*, though I don't think it ever
-      happens those redline properties could appear in styles
-      and not as hard-attributes during text. No idea if we
-      ever handled that case, but that's unlikely. It'll be a
-      more prosaic out by one or something"
+    "in *theory* in *theory*, though I don't think it ever happens
+     those redline properties could appear in styles and not as
+     hard-attributes during text. No idea if we ever handled that
+     case, but that's unlikely. It'll be a more prosaic out by one or
+     something"
+
+    "the 'redline' problem is sort of the same as the 'delete a table
+     in a document if there's no content before it' problem. ie. there
+     is no place for the cursor to go so as to be able to get the
+     range over which to put redlining, same as putting the cursor
+     into eg. the last cell of a table and select as far as *outside*
+     the table into the following paragraph"
+	 "eg. new writer doc->insert table, try & delete - foo !
+			    ->return, insert table, easy to delete - baa!"
+
+
+
+** sw/inc/redlenum.hxx:
+
+enum SwRedlineType
+{
+	// die RedlineTypen gehen von 0 bis 127
+	REDLINE_INSERT, 			// Inhalt wurde eingefuegt
+	REDLINE_DELETE, 			// Inhalt wurde geloescht
+	REDLINE_FORMAT,				// Attributierung wurde angewendet
+	REDLINE_TABLE,				// TabellenStruktur wurde veraendert
+	REDLINE_FMTCOLL,			// FormatVorlage wurde veraendert (Autoformat!)
+
+	// ab 128 koennen Flags hineinverodert werden
+	REDLINE_NO_FLAG_MASK	= 0x007f,
+	REDLINE_FLAG_MASK		= 0xff80,
+	REDLINE_FORM_AUTOFMT	= 0x0080	// kann als Flag im RedlineType stehen
+
+
+*** Helpful debugging patch ***
+
+--- sw/source/filter/ww8/writerhelper.cxx
++++ sw/source/filter/ww8/writerhelper.cxx
+@@ -833,6 +833,10 @@ namespace sw
+ 
+         void RedlineStack::open(const SwPosition& rPos, const SfxPoolItem& rAttr)
+         {
++                       const SwFltRedline *pRl = static_cast<const SwFltRedline *> (&rAttr);
++                       fprintf (stderr, "RedlineStack::open type %d (%d) Auth %d (%d)\n",
++                                        pRl->eType, pRl->eTypePrev, pRl->nAutorNo, pRl->nAutorNoPrev);
++
+             ASSERT(rAttr.Which() == RES_FLTR_REDLINE, "not a redline");
+             maStack.push_back(new SwFltStackEntry(rPos,rAttr.Clone()));
+         }
+@@ -858,7 +862,12 @@ namespace sw
+                 SameOpenRedlineType(eType));
+             ASSERT(aResult != maStack.rend(), "close without open!");
+             if (aResult != maStack.rend())
++                       {
++                               const SwFltRedline *pRl = static_cast<const SwFltRedline *> ((*aResult)->pAttr);
++                               fprintf (stderr, "RedlineStack::close intype %d type %d (%d) Auth %d (%d)\n",
++                                                eType, pRl->eType, pRl->eTypePrev, pRl->nAutorNo, pRl->nAutorNoPrev);
+                 (*aResult)->SetEndPos(rPos);
++                       }
+         }
+ 
+ 
+diff -u -p -u -r1.168 ww8par.cxx
+--- sw/source/filter/ww8/ww8par.cxx
++++ sw/source/filter/ww8/ww8par.cxx
+@@ -2609,6 +2609,8 @@ bool SwWW8ImplReader::ReadPlainChars(WW8
+ 
+     if (nL2)
+     {
++               fprintf (stderr, "Text: '%s'\n",
++                                rtl::OUStringToOString (sPlainCharsBuf, RTL_TEXTENCODING_UTF8 ).getStr() );
+         AddTextToParagraph(sPlainCharsBuf);
+         rPos += nL2;
+         if (!maApos.back()) //a para end in apo doesn't count
+
+
+*** Sample output ***
+
+RedlineStack::open type 1 (0) Auth 1 (65535) /DELETE
+RedlineStack::open type 0 (0) Auth 2 (65535) /INSERT 
+Text: 'such'
+RedlineStack::close intype 0 type 0 (0) Auth 2 (65535) /INSERT
+RedlineStack::close intype 1 type 1 (0) Auth 1 (65535) /DELETE
+
+
+* During RedlineStack destruction:
+
+        RedlineStack::~RedlineStack()
+        {
+            std::sort(maStack.begin(), maStack.end(), CompareRedlines());
+            std::for_each(maStack.begin(), maStack.end(), SetInDocAndDelete(mrDoc));
+        }
+
+void SetInDocAndDelete::operator()(SwFltStackEntry *pEntry)
+     + presumably where the entries actually are inserted
+
+before sort
+type delete auth# 1 time 2006-06-21 10:42:00.00
+type insert auth# 2 time 2029-06-00 00:02:00.00
+after sort
+type delete auth# 1 time 2006-06-21 10:42:00.00
+type insert auth# 2 time 2029-06-00 00:02:00.00
+
+** Core redlining support:
+
+    + sw/source/core/doc/docredln.cxx
+
+** Most likely:
+    + date/time support broken ...
+
+
+
+** Good trick:
+
+    + Export to Office Open XML & poke:
+
+      <w:ins w:id="0" w:author="Author">
+        <w:del w:id="1" w:author="Travis Tom" w:date="2006-06-21T10:42:00Z">
+          <w:r w:rsidR="0075694B" w:rsidDel="0056141D">
+            <w:rPr>
+              <w:color w:val="000000"/>
+              <w:sz w:val="20"/>
+              <w:szCs w:val="20"/>
+            </w:rPr>
+            <w:delText>such</w:delText>
+          </w:r>
+        </w:del>
+      </w:ins>
+    </w:p>
+
+
+** code: ww8par4.cxx
+
+    pPlcxMan->HasCharSprm( bIns ? 0x6805 : 0x6864, aResult);
+    pSprmCDttmRMark = aResult.empty() ? 0 : aResult.front();
+
+-> ww8scan.cxx::HasCharSprm -> HasSprm
+    -> ww8scan.hxx: WW8SprmIter::GetAktParams
+        const BYTE* GetAktParams() const { return pAktParams; }
+
+ww8scan.hxx:
+
+struct SprmInfo
+{
+    sal_uInt16 nId;         //A ww8 sprm is hardcoded as 16bits
+    unsigned int nLen : 6;
+    unsigned int nVari : 2;
+};
