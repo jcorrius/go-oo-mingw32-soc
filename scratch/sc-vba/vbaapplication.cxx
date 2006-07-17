@@ -68,6 +68,13 @@ uno::Reference< vba::XRange >
 ScVbaApplication::getSelection() throw (uno::RuntimeException)
 {
 	uno::Reference< table::XCellRange > xRange( getCurrentDocument()->getCurrentSelection(), ::uno::UNO_QUERY);
+	if ( !xRange.is() )
+	{
+		uno::Reference< sheet::XSheetCellRangeContainer > xRanges( getCurrentDocument()->getCurrentSelection(), ::uno::UNO_QUERY);
+		if ( xRanges.is() )
+			return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xRanges ) );
+
+	}
 	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xRange ) );
 }
 

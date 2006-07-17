@@ -10,6 +10,7 @@
 #include <com/sun/star/table/XCellRange.hpp>
 #include <org/openoffice/vba/XFont.hpp>
 #include <org/openoffice/vba/XComment.hpp>
+#include <org/openoffice/vba/XCollection.hpp>
 #include <org/openoffice/vba/xlPasteType.hdl>
 #include <org/openoffice/vba/xlPasteSpecialOperation.hdl>
 
@@ -23,6 +24,7 @@
 #include <com/sun/star/sheet/FillMode.hpp>
 #include <com/sun/star/sheet/FillDirection.hpp>
 #include <com/sun/star/sheet/XSpreadsheet.hpp>
+#include <com/sun/star/sheet/XSheetCellRangeContainer.hpp>
 
 #include "vbahelper.hxx"
 
@@ -58,6 +60,7 @@ class ScVbaRange : public ScVbaRange_BASE
     ,public ::comphelper::OPropertyContainer
 
 {
+	css::uno::Reference< oo::vba::XCollection > m_Areas;
 	css::uno::Reference< css::table::XCellRange > mxRange;
 	css::uno::Reference< css::uno::XComponentContext > m_xContext;
 	sal_Bool mbIsRows;
@@ -77,6 +80,7 @@ class ScVbaRange : public ScVbaRange_BASE
 	
 public:
 	ScVbaRange( const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::table::XCellRange >& xRange, sal_Bool bIsRows = false, sal_Bool bIsColumns = false ) throw ( css::lang::IllegalArgumentException );
+	ScVbaRange( const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::sheet::XSheetCellRangeContainer >& xRanges ) throw ( css::lang::IllegalArgumentException );
 
 	virtual ~ScVbaRange();
 
@@ -111,7 +115,7 @@ public:
 	virtual void SAL_CALL setColumnWidth( const css::uno::Any& _columnwidth ) throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL getWidth() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setWidth( const css::uno::Any& _width ) throw (css::uno::RuntimeException);
-
+	virtual ::com::sun::star::uno::Any SAL_CALL getAreas() throw (::com::sun::star::uno::RuntimeException);
 	// Methods
 	sal_Bool IsRows() { return mbIsRows; }
 	sal_Bool IsColumns() { return mbIsColumns; }

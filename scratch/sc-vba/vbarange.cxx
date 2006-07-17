@@ -86,13 +86,109 @@
 
 #include "vbaglobals.hxx"
 #include <vector>
-
+#include <vbacollectionimpl.hxx>
 // begin test includes
 #include <com/sun/star/sheet/FunctionArgument.hpp>
 // end test includes
 
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
+
+
+uno::Any lcl_makeRange( uno::Reference< uno::XComponentContext >& xContext, const uno::Any aAny )
+{
+	uno::Reference< table::XCellRange > xCellRange( aAny, uno::UNO_QUERY_THROW );
+	return uno::makeAny( uno::Reference< vba::XRange >( new ScVbaRange( xContext, xCellRange ) ) );
+}
+
+class SingleRangeEnumeration : public EnumerationHelper_BASE
+{
+	uno::Reference< table::XCellRange > m_xRange;
+	uno::Reference< uno::XComponentContext > m_xContext;
+	bool bHasMore;
+public:
+
+	SingleRangeEnumeration( const uno::Reference< css::uno::XComponentContext >& xContext, const uno::Reference< table::XCellRange >& xRange ) throw ( uno::RuntimeException ) : m_xRange( xRange ), m_xContext( xContext ), bHasMore( true ) { }
+	virtual ::sal_Bool SAL_CALL hasMoreElements(  ) throw (uno::RuntimeException) { return bHasMore; }
+	virtual uno::Any SAL_CALL nextElement(  ) throw (container::NoSuchElementException, lang::WrappedTargetException, uno::RuntimeException) 
+	{
+		if ( !bHasMore )
+			throw container::NoSuchElementException();
+		bHasMore = false;
+		return lcl_makeRange( m_xContext, uno::makeAny( m_xRange ) );
+	}
+};
+
+// very simple class to pass to ScVbaCollectionBaseImpl containing
+// just one item
+typedef ::cppu::WeakImplHelper2< container::XIndexAccess, container::XEnumerationAccess > SingleRange_BASE;
+
+class SingleRangeIndexAccess : public SingleRange_BASE
+{
+private:
+	uno::Reference< table::XCellRange > m_xRange;
+	uno::Reference< uno::XComponentContext > m_xContext;
+	SingleRangeIndexAccess(); // not defined
+public:
+	SingleRangeIndexAccess( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< table::XCellRange >& xRange ):m_xRange( xRange ), m_xContext( xContext ) {}
+	// XIndexAccess
+	virtual ::sal_Int32 SAL_CALL getCount() throw (::uno::RuntimeException) { return 1; }
+	virtual uno::Any SAL_CALL getByIndex( ::sal_Int32 Index ) throw (lang::IndexOutOfBoundsException, lang::WrappedTargetException, uno::RuntimeException){ return uno::makeAny( m_xRange ); }
+        // XElementAccess
+        virtual uno::Type SAL_CALL getElementType() throw (uno::RuntimeException){ return table::XCellRange::static_type(0); }
+ 
+        virtual ::sal_Bool SAL_CALL hasElements() throw (uno::RuntimeException) { return sal_True; }
+	// XEnumerationAccess
+	virtual uno::Reference< container::XEnumeration > SAL_CALL createEnumeration() throw (uno::RuntimeException) { return new SingleRangeEnumeration( m_xContext, m_xRange ); }
+
+};
+
+
+
+class RangesEnumerationImpl : public EnumerationHelperImpl
+{
+public:
+
+	RangesEnumerationImpl( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< container::XEnumeration >& xEnumeration ) throw ( uno::RuntimeException ) : EnumerationHelperImpl( xContext, xEnumeration ) {}
+	virtual uno::Any SAL_CALL nextElement(  ) throw (container::NoSuchElementException, lang::WrappedTargetException, uno::RuntimeException) 
+	{ 
+		return lcl_makeRange( m_xContext, m_xEnumeration->nextElement() );
+	}
+};
+
+
+class ScVbaRangeAreas : public ScVbaCollectionBaseImpl
+{
+
+public:
+	ScVbaRangeAreas( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< container::XIndexAccess >& xIndexAccess ) : ScVbaCollectionBaseImpl( xContext, xIndexAccess ) {}
+
+	// XEnumerationAccess
+	virtual uno::Reference< container::XEnumeration > SAL_CALL createEnumeration() throw (uno::RuntimeException);
+
+	// XElementAccess
+	virtual uno::Type SAL_CALL getElementType() throw (uno::RuntimeException){ return vba::XRange::static_type(0); }
+
+	virtual uno::Any createCollectionObject( const uno::Any& aSource );
+};
+
+
+uno::Reference< container::XEnumeration > SAL_CALL 
+ScVbaRangeAreas::createEnumeration() throw (uno::RuntimeException)
+{
+	uno::Reference< container::XEnumerationAccess > xEnumAccess( m_xIndexAccess, uno::UNO_QUERY_THROW );
+	return new RangesEnumerationImpl( m_xContext, xEnumAccess->createEnumeration() );
+
+}
+
+uno::Any 
+ScVbaRangeAreas::createCollectionObject( const uno::Any& aSource )
+{
+	return lcl_makeRange( m_xContext, aSource );
+}
+
+
+
 
 ScDocShell* getDocShellFromRange( const uno::Reference< table::XCellRange >& xRange )
 {
@@ -549,9 +645,26 @@ ScVbaRange::ScVbaRange( const uno::Reference< uno::XComponentContext >& xContext
 		throw lang::IllegalArgumentException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "context is not set " ) ), uno::Reference< uno::XInterface >() , 1 );
 	if  ( !xRange.is() )
 		throw lang::IllegalArgumentException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "range is not set " ) ), uno::Reference< uno::XInterface >() , 1 );
+
+	uno::Reference< container::XIndexAccess > xIndex( new SingleRangeIndexAccess( m_xContext, xRange ) );
+	m_Areas = new ScVbaRangeAreas( m_xContext, xIndex );
+
 	msDftPropName = ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Value" ) );
 	registerProperty( RANGE_PROPERTY_DFLT, RANGE_PROPERTY_ID_DFLT,
 beans::PropertyAttribute::TRANSIENT | beans::PropertyAttribute::BOUND, &msDftPropName, ::getCppuType( &msDftPropName ) );
+}
+
+ScVbaRange::ScVbaRange( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< sheet::XSheetCellRangeContainer >& xRanges ) throw ( lang::IllegalArgumentException )
+:OPropertyContainer(GetBroadcastHelper()), m_xContext(xContext), mbIsRows( sal_False ), mbIsColumns( sal_False )
+
+{
+	uno::Reference< container::XIndexAccess >  xIndex( xRanges, uno::UNO_QUERY_THROW );
+	m_Areas	 = new ScVbaRangeAreas( m_xContext, xIndex );
+
+	// Some methods functions seem to operate on the first range defined
+	// but I don't want to enable the line below right now, I'd prefer the 
+	// Selection stuff to be non functional and enable it method by method
+	//m_xRange = xIndex->getByIndex( 0 ); 
 }
 
 ScVbaRange::~ScVbaRange()
@@ -1377,7 +1490,7 @@ ScVbaRange::getEntireColumn() throw (uno::RuntimeException)
 }
 
 uno::Reference< vba::XComment > SAL_CALL
-ScVbaRange::getComment() throw (css::uno::RuntimeException)
+ScVbaRange::getComment() throw (uno::RuntimeException)
 {
 	// intentional behavior to return a null object if no
 	// comment defined
@@ -1595,7 +1708,7 @@ void updateTableSortField( const uno::Reference< table::XCellRange >& xParentRan
 						
 } 
 void SAL_CALL
-ScVbaRange::Sort( const uno::Any& Key1, const uno::Any& Order1, const uno::Any& Key2, const uno::Any& Type, const uno::Any& Order2, const uno::Any& Key3, const uno::Any& Order3, const uno::Any& Header, const uno::Any& OrderCustom, const uno::Any& MatchCase, const uno::Any& Orientation, const uno::Any& SortMethod,  const css::uno::Any& DataOption1, const css::uno::Any& DataOption2, const css::uno::Any& DataOption3  ) throw (uno::RuntimeException)
+ScVbaRange::Sort( const uno::Any& Key1, const uno::Any& Order1, const uno::Any& Key2, const uno::Any& Type, const uno::Any& Order2, const uno::Any& Key3, const uno::Any& Order3, const uno::Any& Header, const uno::Any& OrderCustom, const uno::Any& MatchCase, const uno::Any& Orientation, const uno::Any& SortMethod,  const uno::Any& DataOption1, const uno::Any& DataOption2, const uno::Any& DataOption3  ) throw (uno::RuntimeException)
 {
 
 	sal_Int16 nDataOption1 = vba::Excel::XlSortDataOption::xlSortNormal;
@@ -1781,7 +1894,7 @@ ScVbaRange::Sort( const uno::Any& Key1, const uno::Any& Order1, const uno::Any& 
 }
 
 uno::Reference< vba::XRange > SAL_CALL 
-ScVbaRange::End( ::sal_Int32 Direction )  throw (css::uno::RuntimeException)
+ScVbaRange::End( ::sal_Int32 Direction )  throw (uno::RuntimeException)
 {
 	// #FIXME #TODO
 	// euch! found my orig implementation sucked, so 
@@ -1863,7 +1976,7 @@ ScVbaRange::isSingleCellRange()
 }
 
 uno::Reference< vba::XCharacters > SAL_CALL 
-ScVbaRange::characters( const uno::Any& Start, const css::uno::Any& Length ) throw (uno::RuntimeException)
+ScVbaRange::characters( const uno::Any& Start, const uno::Any& Length ) throw (uno::RuntimeException)
 {
 	if ( !isSingleCellRange() )
 		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Can't create Characters property for multicell range ") ), uno::Reference< uno::XInterface >() );
@@ -1963,7 +2076,7 @@ ScVbaRange::getPropertySetInfo(  ) throw (uno::RuntimeException)
 }
 
 ::rtl::OUString SAL_CALL 
-ScVbaRange::getName(  ) throw (css::uno::RuntimeException)
+ScVbaRange::getName(  ) throw (uno::RuntimeException)
 {
 	const static rtl::OUString sName( RTL_CONSTASCII_USTRINGPARAM("Cells") );
 	return sName;
@@ -2066,7 +2179,7 @@ ScVbaRange::getWidth() throw (uno::RuntimeException)
 }
 
 void SAL_CALL 
-ScVbaRange::setWidth( const uno::Any& _width ) throw (css::uno::RuntimeException)
+ScVbaRange::setWidth( const uno::Any& _width ) throw (uno::RuntimeException)
 {
 	double nWidth; // Incomming width is in points
 	_width >>= nWidth;
@@ -2078,3 +2191,8 @@ ScVbaRange::setWidth( const uno::Any& _width ) throw (css::uno::RuntimeException
 	xProps->setPropertyValue( WIDTH , uno::makeAny( (sal_Int32)nWidth ) );
 }
 
+uno::Any SAL_CALL 
+ScVbaRange::getAreas() throw (uno::RuntimeException)
+{
+	return uno::makeAny( m_Areas );
+}
