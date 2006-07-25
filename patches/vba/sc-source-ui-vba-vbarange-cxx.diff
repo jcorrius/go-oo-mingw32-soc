@@ -1,6 +1,6 @@
 --- /dev/null	
 +++ sc/source/ui/vba/vbarange.cxx	
-@@ -0,0 +1,2198 @@
+@@ -0,0 +1,2436 @@
 +#include <comphelper/processfactory.hxx>
 +#include <sfx2/objsh.hxx>
 +
@@ -18,6 +18,7 @@
 +#include <com/sun/star/sheet/XSpreadsheet.hpp>
 +#include <com/sun/star/sheet/XSheetCellCursor.hpp>
 +#include <com/sun/star/sheet/XArrayFormulaRange.hpp>
++#include <com/sun/star/sheet/XNamedRange.hpp>
 +#include <com/sun/star/beans/XPropertySet.hpp>
 +#include <com/sun/star/sheet/XFunctionAccess.hpp>
 +#include <com/sun/star/frame/XModel.hpp>
@@ -82,6 +83,8 @@
 +#include "vbacharacters.hxx"
 +
 +#include "tabvwsh.hxx"
++#include "rangelst.hxx"
++#include "convuno.hxx"
 +
 +#include <comphelper/anytostring.hxx>
 +
@@ -556,6 +559,66 @@
 +	}
 +};
 +
++class RangeProcessor
++{
++public:
++	virtual void process( const uno::Reference< vba::XRange >& xRange ) = 0;
++};
++
++class RangeValueProcessor : public RangeProcessor
++{
++	const uno::Any& m_aVal;
++public:
++	RangeValueProcessor( const uno::Any& rVal ):m_aVal( rVal ) {}
++	virtual void process( const uno::Reference< vba::XRange >& xRange )
++	{
++		xRange->setValue( m_aVal );
++	}
++};
++
++class RangeFormulaProcessor : public RangeProcessor
++{
++	const uno::Any& m_aVal;
++public:
++	RangeFormulaProcessor( const uno::Any& rVal ):m_aVal( rVal ) {}
++	virtual void process( const uno::Reference< vba::XRange >& xRange ) 
++	{
++		xRange->setFormula( m_aVal );
++	}
++};
++
++class RangeCountProcessor : public RangeProcessor
++{
++	double nCount;
++public:
++	RangeCountProcessor():nCount(0){}
++	virtual void process( const uno::Reference< vba::XRange >& xRange )
++	{
++		nCount = nCount + xRange->getCount();
++	}
++	double value() { return nCount; }
++};
++class AreasVisitor
++{
++private:
++	uno::Reference< vba::XCollection > m_Areas;
++public:
++	AreasVisitor( const uno::Reference< vba::XCollection >& rAreas ):m_Areas( rAreas ){} 
++	
++	void visit( RangeProcessor& processor )
++	{
++		if ( m_Areas.is() )
++		{
++			sal_Int32 nItems = m_Areas->getCount();
++			for ( sal_Int32 index=1; index <= nItems; ++index )
++			{
++				uno::Reference< vba::XRange > xRange( m_Areas->Item( uno::makeAny(index) ), uno::UNO_QUERY_THROW );
++				processor.process( xRange ); 
++			}
++		}	
++	}
++};
++
 +class RangeHelper
 +{
 +	uno::Reference< table::XCellRange > m_xCellRange;
@@ -636,6 +699,78 @@
 +	return xAddressable->getRangeAddress();
 +}
 +
++bool
++getCellRangesForAddress( const rtl::OUString& sAddress, ScDocShell* pDocSh, ScRangeList& rCellRanges, ScAddress::Convention& eConv )
++{
++	
++	ScDocument* pDoc = NULL;
++	if ( pDocSh )
++	{
++		pDoc = pDocSh->GetDocument();
++		BOOL bFound = FALSE;
++		String aString(sAddress);
++		USHORT nMask = SCA_VALID;
++		//USHORT nParse = rCellRanges.Parse( sAddress, pDoc, nMask, ScAddress::CONV_XL_A1 );
++		USHORT nParse = rCellRanges.Parse( sAddress, pDoc, nMask, eConv );
++		if ( nParse & SCA_VALID )
++		{
++			return true;
++		}
++	} 
++	return false;
++} 
++
++ScVbaRange*
++getRangeForName( const uno::Reference< uno::XComponentContext >& xContext, const rtl::OUString& sName, ScDocShell* pDocSh, table::CellRangeAddress& pAddr ) throw ( uno::RuntimeException )
++{
++	rtl::OUString sAddress = sName;
++	ScAddress::Convention eConv = ScAddress::CONV_XL_A1; 
++	// see if there is a match with a named range
++	uno::Reference< beans::XPropertySet > xProps( getCurrentDocument(), uno::UNO_QUERY_THROW );
++	uno::Reference< container::XNameAccess > xNameAccess( xProps->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("NamedRanges") ) ), uno::UNO_QUERY_THROW );
++
++	if ( xNameAccess->hasByName( sName ) )
++	{
++		uno::Reference< sheet::XNamedRange > xNamed( xNameAccess->getByName( sName ), uno::UNO_QUERY_THROW );
++		sAddress = xNamed->getContent();
++		// As the address comes from OOO, the addressing
++		// style is may not be XL_A1
++		eConv = pDocSh->GetDocument()->GetAddressConvention();
++	}	
++	ScRange refRange;	
++	ScUnoConversion::FillScRange( refRange, pAddr );
++	ScRangeList aCellRanges;
++	if ( !getCellRangesForAddress( sAddress, pDocSh, aCellRanges, eConv ) )
++		throw uno::RuntimeException();
++	for ( ScRange* pRange = aCellRanges.First() ; pRange; pRange = aCellRanges.Next() )
++	{
++		pRange->aStart.SetCol( refRange.aStart.Col() + pRange->aStart.Col() );	
++		pRange->aStart.SetRow( refRange.aStart.Row() + pRange->aStart.Row() );	
++		pRange->aStart.SetTab( refRange.aStart.Tab() );	
++		pRange->aEnd.SetCol( refRange.aStart.Col() + pRange->aEnd.Col() );	
++		pRange->aEnd.SetRow( refRange.aStart.Row() + pRange->aEnd.Row() );	
++		pRange->aEnd.SetTab( refRange.aEnd.Tab() );	
++	}	
++
++	// Single range
++	if ( aCellRanges.First() == aCellRanges.Last() )
++	{
++		uno::Reference< table::XCellRange > xRange( new ScCellRangeObj( pDocSh, *aCellRanges.First() ) );
++		return new ScVbaRange( xContext, xRange );
++	}
++	uno::Reference< sheet::XSheetCellRangeContainer > xRanges( new ScCellRangesObj( pDocSh, aCellRanges ) );
++ 	
++	return new ScVbaRange( xContext, xRanges );
++	
++}
++void
++ScVbaRange::setDfltPropHandler()
++{
++
++	msDftPropName = ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Value" ) );
++	registerProperty( RANGE_PROPERTY_DFLT, RANGE_PROPERTY_ID_DFLT,
++beans::PropertyAttribute::TRANSIENT | beans::PropertyAttribute::BOUND, &msDftPropName, ::getCppuType( &msDftPropName ) );
++}
 +
 +ScVbaRange::ScVbaRange( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< table::XCellRange >& xRange, sal_Bool bIsRows, sal_Bool bIsColumns ) throw( lang::IllegalArgumentException )
 +:OPropertyContainer(GetBroadcastHelper())
@@ -651,23 +786,22 @@
 +
 +	uno::Reference< container::XIndexAccess > xIndex( new SingleRangeIndexAccess( m_xContext, xRange ) );
 +	m_Areas = new ScVbaRangeAreas( m_xContext, xIndex );
++	setDfltPropHandler();
 +
-+	msDftPropName = ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Value" ) );
-+	registerProperty( RANGE_PROPERTY_DFLT, RANGE_PROPERTY_ID_DFLT,
-+beans::PropertyAttribute::TRANSIENT | beans::PropertyAttribute::BOUND, &msDftPropName, ::getCppuType( &msDftPropName ) );
 +}
 +
 +ScVbaRange::ScVbaRange( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< sheet::XSheetCellRangeContainer >& xRanges ) throw ( lang::IllegalArgumentException )
-+:OPropertyContainer(GetBroadcastHelper()), m_xContext(xContext), mbIsRows( sal_False ), mbIsColumns( sal_False )
++:OPropertyContainer(GetBroadcastHelper()), mxRanges( xRanges ), m_xContext(xContext), mbIsRows( sal_False ), mbIsColumns( sal_False )
 +
 +{
-+	uno::Reference< container::XIndexAccess >  xIndex( xRanges, uno::UNO_QUERY_THROW );
++	uno::Reference< container::XIndexAccess >  xIndex( mxRanges, uno::UNO_QUERY_THROW );
 +	m_Areas	 = new ScVbaRangeAreas( m_xContext, xIndex );
 +
 +	// Some methods functions seem to operate on the first range defined
 +	// but I don't want to enable the line below right now, I'd prefer the 
 +	// Selection stuff to be non functional and enable it method by method
-+	//m_xRange = xIndex->getByIndex( 0 ); 
++	//m_xRange.set( m_Areas->Item( uno::makeAny(1) ); 
++	setDfltPropHandler();
 +}
 +
 +ScVbaRange::~ScVbaRange()
@@ -721,6 +855,16 @@
 +uno::Any SAL_CALL
 +ScVbaRange::getValue() throw (uno::RuntimeException)
 +{
++	// #TODO code within the test below "if ( m_Areas.... " can be removed
++	// Test is performed only because m_xRange is NOT set to be
++	// the first range in m_Areas ( to force failure while
++	// the implementations for each method are being updated )
++	if ( m_Areas->getCount() > 1 )
++	{
++		uno::Reference< vba::XRange > xRange( getArea( 0 ), uno::UNO_QUERY_THROW );
++		return xRange->getValue();
++	}
++
 +	CellValueGetter valueGetter;
 +	return getValue( valueGetter );
 +
@@ -768,6 +912,14 @@
 +void SAL_CALL
 +ScVbaRange::setValue( const uno::Any  &aValue ) throw (uno::RuntimeException)
 +{
++	// If this is a multiple selection apply setValue over all areas
++	if ( m_Areas->getCount() > 1 )
++	{
++		AreasVisitor aVisitor( m_Areas );
++		RangeValueProcessor valueProcessor( aValue );	
++		aVisitor.visit( valueProcessor );
++		return;
++	}	
 +	CellValueSetter valueSetter( aValue );
 +	setValue( aValue, valueSetter );
 +}
@@ -813,6 +965,15 @@
 +uno::Any
 +ScVbaRange::getFormula() throw (::com::sun::star::uno::RuntimeException)
 +{
++	// #TODO code within the test below "if ( m_Areas.... " can be removed
++	// Test is performed only because m_xRange is NOT set to be
++	// the first range in m_Areas ( to force failure while
++	// the implementations for each method are being updated )
++	if ( m_Areas->getCount() > 1 )
++	{
++		uno::Reference< vba::XRange > xRange( getArea( 0 ), uno::UNO_QUERY_THROW );
++		return xRange->getFormula();
++	}
 +	CellFormulaValueGetter valueGetter;
 +	return getValue( valueGetter );
 +}
@@ -820,6 +981,14 @@
 +void
 +ScVbaRange::setFormula(const uno::Any &rFormula ) throw (uno::RuntimeException)
 +{
++	// If this is a multiple selection apply setFormula over all areas
++	if ( m_Areas->getCount() > 1 )
++	{
++		AreasVisitor aVisitor( m_Areas );
++		RangeFormulaProcessor valueProcessor( rFormula );	
++		aVisitor.visit( valueProcessor );
++		return;
++	}	
 +	CellFormulaValueSetter formulaValueSetter( rFormula );
 +	setValue( rFormula, formulaValueSetter );
 +}
@@ -843,6 +1012,14 @@
 +double 
 +ScVbaRange::getCount() throw (uno::RuntimeException)
 +{
++	// If this is a multiple selection apply setValue over all areas
++	if ( m_Areas->getCount() > 1 )
++	{
++		AreasVisitor aVisitor( m_Areas );
++		RangeCountProcessor valueProcessor;
++		aVisitor.visit( valueProcessor );
++		return valueProcessor.value();
++	}	
 +	double rowCount, colCount;
 +	uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, uno::UNO_QUERY_THROW );
 +	rowCount = xColumnRowRange->getRows()->getCount();
@@ -857,6 +1034,15 @@
 +sal_Int32 
 +ScVbaRange::getRow() throw (uno::RuntimeException)
 +{
++	// #TODO code within the test below "if ( m_Areas.... " can be removed
++	// Test is performed only because m_xRange is NOT set to be
++	// the first range in m_Areas ( to force failure while
++	// the implementations for each method are being updated )
++	if ( m_Areas->getCount() > 1 )
++	{
++		uno::Reference< vba::XRange > xRange( getArea( 0 ), uno::UNO_QUERY_THROW );
++		return xRange->getRow();
++	}
 +	uno::Reference< sheet::XCellAddressable > xCellAddressable(mxRange->getCellByPosition(0, 0), uno::UNO_QUERY_THROW );
 +	return xCellAddressable->getCellAddress().Row + 1; // Zero value indexing 
 +}	
@@ -864,6 +1050,15 @@
 +sal_Int32 
 +ScVbaRange::getColumn() throw (uno::RuntimeException)
 +{
++	// #TODO code within the test below "if ( m_Areas.... " can be removed
++	// Test is performed only because m_xRange is NOT set to be
++	// the first range in m_Areas ( to force failure while
++	// the implementations for each method are being updated )
++	if ( m_Areas->getCount() > 1 )
++	{
++		uno::Reference< vba::XRange > xRange( getArea( 0 ), uno::UNO_QUERY_THROW );
++		return xRange->getColumn();
++	}
 +	uno::Reference< sheet::XCellAddressable > xCellAddressable(mxRange->getCellByPosition(0, 0), uno::UNO_QUERY_THROW );
 +	return xCellAddressable->getCellAddress().Column + 1; // Zero value indexing
 +}
@@ -912,6 +1107,15 @@
 +::rtl::OUString
 +ScVbaRange::getText() throw (uno::RuntimeException)
 +{
++	// #TODO code within the test below "if ( m_Areas.... " can be removed
++	// Test is performed only because m_xRange is NOT set to be
++	// the first range in m_Areas ( to force failure while
++	// the implementations for each method are being updated )
++	if ( m_Areas->getCount() > 1 )
++	{
++		uno::Reference< vba::XRange > xRange( getArea( 0 ), uno::UNO_QUERY_THROW );
++		return xRange->getText();
++	}
 +	uno::Reference< text::XTextRange > xTextRange(mxRange->getCellByPosition(0,0), uno::UNO_QUERY_THROW );
 +	return xTextRange->getString();
 +}
@@ -983,6 +1187,21 @@
 +::rtl::OUString
 +ScVbaRange::Address(  const uno::Any& RowAbsolute, const uno::Any& ColumnAbsolute, const uno::Any& ReferenceStyle, const uno::Any& External, const uno::Any& RelativeTo ) throw (uno::RuntimeException)
 +{
++	if ( m_Areas->getCount() > 1 )
++	{
++		// Multi-Area Range
++		rtl::OUString sAddress;
++		uno::Reference< vba::XCollection > xCollection( m_Areas, uno::UNO_QUERY_THROW );
++		for ( sal_Int32 index = 1; index <= xCollection->getCount(); ++index )
++		{
++			uno::Reference< vba::XRange > xRange( xCollection->Item( uno::makeAny( index ) ), uno::UNO_QUERY_THROW );
++			if ( index > 1 )
++				sAddress += rtl::OUString( ',' );
++			sAddress += xRange->Address( RowAbsolute, ColumnAbsolute, ReferenceStyle, External, RelativeTo );
++		}
++		return sAddress;	
++		
++	}
 +	ScAddress::Details dDetails( ScAddress::CONV_XL_A1, 0, 0 );
 +	if ( ReferenceStyle.hasValue() )
 +	{
@@ -1088,7 +1307,10 @@
 +{
 +	uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY_THROW );
 +	uno::Reference< view::XSelectionSupplier > xSelection( xModel->getCurrentController(), uno::UNO_QUERY_THROW );
-+	xSelection->select( ( uno::Any )mxRange );
++	if ( mxRanges.is() )
++		xSelection->select( uno::makeAny( mxRanges ) );
++	else
++		xSelection->select( uno::makeAny( mxRange ) );
 +}
 +
 +bool cellInRange( const table::CellRangeAddress& rAddr, const sal_Int32& nCol, const sal_Int32& nRow )
@@ -1348,7 +1570,6 @@
 +				xAddressable->getRangeAddress().EndColumn, 
 +				xAddressable->getRangeAddress().EndRow );
 +
-+	table::CellRangeAddress  cell1, cell2;
 +	
 +	if( !Cell1.hasValue() )
 +		throw uno::RuntimeException(
@@ -1356,13 +1577,21 @@
 +			uno::Reference< XInterface >() );
 +
 +	table::CellRangeAddress resultAddress;
-+	cell1 = getCellRangeAddress( Cell1, thisRange.getSpreadSheet() ); 	
 +
 +	// Cell1 defined only
 +	if ( !Cell2.hasValue() )
-+		resultAddress = cell1;
++	{
++		rtl::OUString sName;
++		Cell1 >>= sName;
++		RangeHelper referRange( xReferrer );		
++		table::CellRangeAddress referAddress = referRange.getCellRangeAddressable()->getRangeAddress();
++		return getRangeForName( m_xContext, sName, getDocShellFromRange( mxRange ), referAddress );
++ 
++	}
 +	else
 +	{
++		table::CellRangeAddress  cell1, cell2;
++		cell1 = getCellRangeAddress( Cell1, thisRange.getSpreadSheet() ); 	
 +		// Cell1 & Cell2 defined
 +		// Excel seems to combine the range as the range defined by
 +		// the combination of Cell1 & Cell2
@@ -2198,4 +2427,13 @@
 +ScVbaRange::getAreas() throw (uno::RuntimeException)
 +{
 +	return uno::makeAny( m_Areas );
++}
++
++uno::Reference< vba::XRange >
++ScVbaRange::getArea( sal_Int32 nIndex ) throw( css::uno::RuntimeException )
++{
++	if ( !m_Areas.is() )
++		throw uno::RuntimeException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM("No areas available")), uno::Reference< uno::XInterface >() );
++	uno::Reference< vba::XRange > xRange( m_Areas->Item( uno::makeAny( ++nIndex ) ), uno::UNO_QUERY_THROW );
++	return xRange;
 +}
