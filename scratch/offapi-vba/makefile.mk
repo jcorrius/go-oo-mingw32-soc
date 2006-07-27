@@ -48,6 +48,8 @@ IDLFILES=\
 	XPivotCache.idl \
 	XDialogs.idl \
 	XWindows.idl \
+	XBorder.idl \
+	XBorders.idl \
 	XCharacters.idl
 # ------------------------------------------------------------------
 

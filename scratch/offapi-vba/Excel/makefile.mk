@@ -32,6 +32,7 @@ IDLFILES=\
 	XlBackground.idl \
 	XlBarShape.idl \
 	XlBordersIndex.idl \
+	XlBorderWeight.idl \
 	XlBuildInDialog.idl \
 	XlCVError.idl \
 	XlCalculatedMemberType.idl \
