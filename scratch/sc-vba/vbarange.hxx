@@ -61,8 +61,10 @@ class ScVbaRange : public ScVbaRange_BASE
 
 {
 	css::uno::Reference< oo::vba::XCollection > m_Areas;
+	css::uno::Reference< oo::vba::XCollection > m_Borders;
 	css::uno::Reference< css::table::XCellRange > mxRange;
 	css::uno::Reference< css::uno::XComponentContext > m_xContext;
+	css::uno::Reference< css::sheet::XSheetCellRangeContainer > mxRanges;
 	sal_Bool mbIsRows;
 	sal_Bool mbIsColumns;
 	rtl::OUString msDftPropName;
@@ -77,6 +79,8 @@ class ScVbaRange : public ScVbaRange_BASE
 	void ClearContents( sal_Int32 nFlags ) throw (css::uno::RuntimeException);
 	virtual void   setValue( const css::uno::Any& aValue, ValueSetter& setter) throw ( css::uno::RuntimeException);
 	virtual css::uno::Any getValue( ValueGetter& rValueGetter ) throw (css::uno::RuntimeException);
+	css::uno::Reference< oo::vba::XRange > getArea( sal_Int32 nIndex  ) throw( css::uno::RuntimeException );
+	void setDfltPropHandler();
 	
 public:
 	ScVbaRange( const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::table::XCellRange >& xRange, sal_Bool bIsRows = false, sal_Bool bIsColumns = false ) throw ( css::lang::IllegalArgumentException );
@@ -115,7 +119,6 @@ public:
 	virtual void SAL_CALL setColumnWidth( const css::uno::Any& _columnwidth ) throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL getWidth() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setWidth( const css::uno::Any& _width ) throw (css::uno::RuntimeException);
-	virtual ::com::sun::star::uno::Any SAL_CALL getAreas() throw (::com::sun::star::uno::RuntimeException);
 	// Methods
 	sal_Bool IsRows() { return mbIsRows; }
 	sal_Bool IsColumns() { return mbIsColumns; }
@@ -158,6 +161,8 @@ public:
 	virtual css::uno::Reference< oo::vba::XRange > SAL_CALL End( ::sal_Int32 Direction )  throw (css::uno::RuntimeException);
 	virtual css::uno::Reference< oo::vba::XCharacters > SAL_CALL characters( const css::uno::Any& Start, const css::uno::Any& Length ) throw (css::uno::RuntimeException);
 	virtual void SAL_CALL Delete( const css::uno::Any& Shift ) throw (css::uno::RuntimeException);
+	virtual css::uno::Any SAL_CALL Areas( const css::uno::Any& ) throw (css::uno::RuntimeException);
+	virtual css::uno::Any SAL_CALL Borders( const css::uno::Any& ) throw (css::uno::RuntimeException);
 
 	// XPropertySet
 
