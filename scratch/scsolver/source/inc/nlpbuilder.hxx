@@ -25,60 +25,41 @@
  *
  ************************************************************************/
 
-#ifndef _NUMERIC_OPRES_NLP_NLPMODEL_HXX_
-#define _NUMERIC_OPRES_NLP_NLPMODEL_HXX_
+#ifndef _SCSOLVER_NLPBUILDER_HXX_
+#define _SCSOLVER_NLPBUILDER_HXX_
 
-#include <numeric/matrix.hxx>
-#include <numeric/type.hxx>
 #include <memory>
-#include <boost/shared_ptr.hpp>
-#include <string>
-#include <vector>
 
-namespace scsolver { namespace numeric {
-	class BaseFuncObj;
-}}
-
-namespace scsolver { namespace numeric { namespace opres { namespace nlp {
-
-class ModelImpl;
-class BaseAlgorithm;
-
-class Model
-{
-public:
-	Model();
-	Model( const Model& );
-	~Model() throw();
-
-	void print() const;
-
-	void setPrecision( unsigned long );
-	unsigned long getPrecision() const;
-
-	void setGoal( scsolver::numeric::opres::Goal );
-	scsolver::numeric::opres::Goal getGoal() const;
-
-	void setVerbose( bool );
-	bool getVerbose() const;
-
-	::scsolver::numeric::Matrix getSolution() const;
-	void setSolution( const ::scsolver::numeric::Matrix& );
-
-	void setFuncObject( const boost::shared_ptr<BaseFuncObj>& );
-	const boost::shared_ptr<BaseFuncObj> getFuncObject() const;
-
-	void pushVar( double var );
-	const ::std::vector<double> getVars() const;
-
-	void solve( const boost::shared_ptr<BaseAlgorithm>& );
-
-private:
-	std::auto_ptr<ModelImpl> m_pImpl;
-};
-
-
+namespace com { namespace sun { namespace star { namespace table {
+	class CellAddress;
 }}}}
 
+namespace scsolver {
+
+class SolverImpl;
+
+namespace numeric { namespace opres { namespace nlp {
+	class Model;
+}}}
+
+class NlpModelBuilderImpl;
+
+class NlpModelBuilder
+{
+public:
+	NlpModelBuilder( SolverImpl* p );
+	~NlpModelBuilder() throw();
+
+	void setObjectiveFormulaAddress( ::com::sun::star::table::CellAddress addr );
+	void clearDecVarAddresses();
+	void appendDecVarAddress( ::com::sun::star::table::CellAddress addr );
+	numeric::opres::nlp::Model getModel() const;
+
+private:
+	NlpModelBuilder();
+	std::auto_ptr<NlpModelBuilderImpl> m_pImpl;
+};
+
+}
 
 #endif

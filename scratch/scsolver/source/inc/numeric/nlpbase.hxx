@@ -28,11 +28,13 @@
 #ifndef OPRES_NLP_NLPBASE_HXX_
 #define OPRES_NLP_NLPBASE_HXX_
 
-#include <numeric/matrix.hxx>
+#include "numeric/matrix.hxx"
+#include <memory>
 
 namespace scsolver { namespace numeric { namespace opres { namespace nlp {
 
 class Model;
+struct BaseAlgorithmImpl;
 
 class BaseAlgorithm
 {
@@ -42,15 +44,14 @@ public:
 
 	virtual void solve() = 0;
 
-	Model* getModel() const { return m_pModel; }
-	void setModel( Model* p ) { m_pModel = p; }
+	Model* getModel() const;
+	void setModel( Model* p );
 	
-	Matrix getSolution() const { return m_mxSolution; }
-	void setSolution( const Matrix& );
+	::scsolver::numeric::Matrix getSolution() const;
+	void setSolution( const ::scsolver::numeric::Matrix& );
 
 private:
-	Model* m_pModel;
-	Matrix m_mxSolution;
+	::std::auto_ptr<BaseAlgorithmImpl> m_pImpl;
 };
 
 }}}}

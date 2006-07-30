@@ -25,7 +25,7 @@
  *
  ************************************************************************/
 
-#include <numeric/funcobj.hxx>
+#include "numeric/funcobj.hxx"
 
 namespace scsolver { namespace numeric {
 

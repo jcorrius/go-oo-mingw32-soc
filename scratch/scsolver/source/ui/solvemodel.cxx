@@ -31,14 +31,17 @@
 #include "global.hxx"
 #include "unoglobal.hxx"
 #include "lpbuilder.hxx"
+#include "nlpbuilder.hxx"
 #include "dialog.hxx"
 #include "xcalc.hxx"
 #include "option.hxx"
 #include "numeric/lpmodel.hxx"
+#include "numeric/nlpmodel.hxx"
 #include "numeric/type.hxx"
 #include "numeric/lpbase.hxx"
 //#include "numeric/lpsimplex.hxx"
 #include "numeric/lpsolve.hxx"
+#include "numeric/nlpnewton.hxx"
 
 #ifdef ENABLE_SCSOLVER_UNO_ALGORITHM
 #include "numeric/lpuno.hxx"
@@ -46,6 +49,7 @@
 
 #include <memory>
 #include <exception>
+#include <vector>
 
 #include "scsolver.hrc"
 
@@ -62,38 +66,235 @@ namespace scsolver {
 class SolveModelImpl
 {
 public:
-	SolveModelImpl( SolverImpl* );
-	~SolveModelImpl() throw();
-	void solve();
-	bool isSolved() const;
+	SolveModelImpl( SolverImpl* p ) :
+		m_pSolverImpl(p),
+		m_bSolved(false)
+	{
+	}
+
+	~SolveModelImpl() throw()
+	{
+	}
+
+	/**
+     * This is the gateway method that calls either solveLp() or
+     * solveNlp() as appropriate.
+     * 
+     * TODO: We need to put in place a means to determine whether
+     * the user wants to (either implicitly or explicitly) solve a
+     * LP model or NLP model.
+     * 
+     * Note that the solveNlp() method is still of alpha quality and
+     * needs lots of polish.
+	 */
+	void solve()
+	{
+		solveLp();
+		//solveNlp();
+	}
+
+	/**
+     * This method takes model parameters from the dialog,
+     * constructs an internal representation of an LP model, chooses
+     * an algorithm, solves it, and in case a feasible solution is
+     * found it puts the solution back into the cells.
+	 */
+	void solveLp()
+	{
+		using namespace numeric::opres;
+
+		SolverDialog* pMainDlg = getSolverImpl()->getMainDialog();
+		Goal eGoal = pMainDlg->getGoal();
+		if ( eGoal == GOAL_UNKNOWN )
+		{
+			pMainDlg->showSolveError( ascii_i18n("Goal is not set") );
+			return;
+		}
+
+		auto_ptr<LpModelBuilder> pBuilder( new LpModelBuilder );
+		pBuilder->setGoal( eGoal );
+
+		CellAddress addr = resolveObjectiveFuncAddress();
+		pBuilder->setObjectiveFormulaAddress(addr);
+
+		pBuilder->clearDecisionVarAddresses();
+		vector<CellAddress> addrs = resolveDecisionVarAddress();
+		vector<CellAddress>::iterator it,
+			itBeg = addrs.begin(), itEnd = addrs.end();
+		for ( it = itBeg; it != itEnd; ++it )
+			pBuilder->setDecisionVarAddress(*it);
+
+		resolveConstraintAddress( pBuilder.get() );
+		parseConstraints( pBuilder.get() );
+
+		lp::Model aModel = pBuilder->getModel();
+
+		OptionData* pOption = getSolverImpl()->getOptionData();
+		aModel.setVarPositive( pOption->getVarPositive() );
+
+#ifdef DEBUG
+		aModel.print(); // prints model to stdout
+#endif
+		aModel.setPrecision( 2 );
+		auto_ptr<lp::BaseAlgorithm> algorithm = getLpAlgorithm();
+
+		aModel.setVerbose(true);
+		m_bSolved = false;
+		try
+		{
+			algorithm->setModel( &aModel );
+			algorithm->solve();
+			m_bSolved = true;
+			m_mxSolution = algorithm->getSolution();
+			updateCells( pBuilder.get() );
+			pMainDlg->showSolutionFound();
+		}
+		catch( const lp::ModelInfeasible& e )
+		{
+			Debug( "model infeasible" );
+			pMainDlg->showSolutionInfeasible();
+		}
+		catch( const scsolver::RuntimeError& e )
+		{
+			// This error message is localizable.
+			cout << "RuntimeError: " << e.what() << endl;
+			pMainDlg->showSolveError( e.getMessage() );
+		}
+		catch( const std::exception& e )
+		{
+			cout << "standard exception: " << e.what() << endl; // ascii_i18n [!?]
+			pMainDlg->showSolveError( ascii( e.what() ) );
+		}
+	}
+
+	/**
+     * Solve non-linear model.  Still work in progress.
+	 */
+	void solveNlp()
+	{
+		using namespace numeric::opres;
+
+		SolverDialog* pMainDlg = getSolverImpl()->getMainDialog();
+		Goal eGoal = pMainDlg->getGoal();
+		if ( eGoal == GOAL_UNKNOWN )
+		{
+			pMainDlg->showSolveError( ascii_i18n("Goal is not set") );
+			return;
+		}
+
+		auto_ptr<NlpModelBuilder> pBuilder( new NlpModelBuilder(m_pSolverImpl) );
+
+		CellAddress addr = resolveObjectiveFuncAddress();
+		pBuilder->setObjectiveFormulaAddress(addr);
+
+		pBuilder->clearDecVarAddresses();
+		vector<CellAddress> addrs = resolveDecisionVarAddress();
+		vector<CellAddress>::iterator it,
+			itBeg = addrs.begin(), itEnd = addrs.end();
+		for ( it = itBeg; it != itEnd; ++it )
+			pBuilder->appendDecVarAddress(*it);
+
+		nlp::Model model = pBuilder->getModel();
+		model.setGoal(eGoal);
+		model.print();
+
+		auto_ptr<nlp::BaseAlgorithm> algorithm = getNlpAlgorithm();
+		m_bSolved = false;
+		try
+		{
+			algorithm->setModel(&model);
+			algorithm->solve();
+		}
+		catch ( const ::std::exception& e )
+		{
+			pMainDlg->showSolveError( ascii_i18n("Standard exception caught") );
+		}
+	}
+
+	bool isSolved() const
+	{
+		return m_bSolved;
+	}
 
 private:
 	SolverImpl* m_pSolverImpl;
-	std::auto_ptr<LpModelBuilder> m_pBuilder;
 	bool m_bSolved;
 	Matrix m_mxSolution;
 	
-	SolverImpl* getSolverImpl() const { return m_pSolverImpl; }
+	SolverImpl* getSolverImpl() const
+	{ 
+		return m_pSolverImpl; 
+	}
 
 	auto_ptr<lp::BaseAlgorithm> getLpAlgorithm() const;
 
-	void parseConstraints();
-	void resolveConstraintAddress();
-	void resolveDecisionVarAddress();
-	void resolveObjectiveFuncAddress();	
+	auto_ptr<nlp::BaseAlgorithm> getNlpAlgorithm() const
+	{
+		auto_ptr<nlp::BaseAlgorithm> p( new nlp::QuasiNewton );
+		return p;
+	}
 
-	void updateCells();
+	void parseConstraints( LpModelBuilder* pBuilder );
+	void resolveConstraintAddress( LpModelBuilder* pBuilder );
 
+	/**
+     * Takes the string form of an objective function cell address
+     * (e.g. $'Sheet1'.$A$2), converts it into a 3D address.
+     * 
+     * @return cell address object
+	 */
+	CellAddress resolveObjectiveFuncAddress()
+	{
+		rtl::OUString sTargetCellAddr = m_pSolverImpl->getMainDialog()->getTargetCellAddress();
+		if ( !sTargetCellAddr.getLength() )
+			throw RuntimeError( ascii_i18n("Target cell address empty") );
+
+		CellAddress aAddr = m_pSolverImpl->getCalcInterface()->getCellAddress(
+			sTargetCellAddr );
+
+		return aAddr;
+	}
+
+    /**
+     * Convert a 3D cell reference (e.g. $'Sheet Name'.$B$5:$C$7)
+     * into an array of individual cell addresses. These addresses
+     * represent a series of decision variables in sequential order.
+     * 
+     * @return an array of cell addresses
+     */
+	vector<CellAddress> resolveDecisionVarAddress()
+	{
+		using com::sun::star::table::CellRangeAddress;
+	
+		rtl::OUString sAddr = m_pSolverImpl->getMainDialog()->getVarCellAddress();
+		if ( !sAddr.getLength() )
+			throw RuntimeError( ascii_i18n("Decision variable cells empty") );
+
+		CellRangeAddress aRangeAddr = m_pSolverImpl->getCalcInterface()->getCellRangeAddress(sAddr);
+		
+		// Convert address range into an array of individual cell coordinates.
+		sal_Int16 nSheetId = aRangeAddr.Sheet;
+		sal_Int32 nSCol = aRangeAddr.StartColumn, nSRow = aRangeAddr.StartRow;
+		sal_Int32 nECol = aRangeAddr.EndColumn, nERow = aRangeAddr.EndRow;
+		
+		vector<CellAddress> cn;
+		cn.reserve( (nECol-nSCol)*(nERow-nSRow) );
+		for ( sal_Int32 nCol = nSCol; nCol <= nECol; ++nCol )
+		{
+			for ( sal_Int32 nRow = nSRow; nRow <= nERow; ++nRow )
+			{
+				CellAddress addr;
+				addr.Sheet  = nSheetId;
+				addr.Column = nCol;
+				addr.Row    = nRow;
+				cn.push_back(addr);
+			}
+		}
+		return cn;
+	}
+
+	void updateCells( LpModelBuilder* pBuilder );
 };
-
-SolveModelImpl::SolveModelImpl( SolverImpl* p ) :
-		m_pSolverImpl( p ), m_pBuilder( new LpModelBuilder() ), m_bSolved( false )
-{
-}
-
-SolveModelImpl::~SolveModelImpl() throw()
-{
-}
 
 /**
  * This method returns an algorithm object to use to solve a
@@ -118,88 +319,19 @@ auto_ptr<lp::BaseAlgorithm> SolveModelImpl::getLpAlgorithm() const
 }
 
 /**
- * This is THE method which takes model parameters from the
- * dialog, constructs an internal representation of a model,
- * chooses an algorithm, and solves it.
- */
-void SolveModelImpl::solve()
-{
-	using namespace numeric::opres;
-
-	SolverDialog* pMainDlg = getSolverImpl()->getMainDialog();
-	Goal eGoal = pMainDlg->getGoal();
-	if ( eGoal == GOAL_UNKNOWN )
-	{
-		pMainDlg->showSolveError( ascii_i18n( "Goal is not set" ) );
-		return;
-	}
-
-	m_pBuilder->setGoal( eGoal );
-
-	resolveObjectiveFuncAddress();
-	resolveDecisionVarAddress();
-	resolveConstraintAddress();
-	parseConstraints();
-
-	lp::Model aModel = m_pBuilder->getModel();
-
-	OptionData* pOption = getSolverImpl()->getOptionData();
-	aModel.setVarPositive( pOption->getVarPositive() );
-
-#ifdef DEBUG
-	aModel.print(); // prints model to stdout
-#endif
-	aModel.setPrecision( 2 );
-	auto_ptr<lp::BaseAlgorithm> algorithm = getLpAlgorithm();
-
-	aModel.setVerbose( true );
-	m_bSolved = false;
-	try
-	{
-		algorithm->setModel( &aModel );
-		algorithm->solve();
-		m_bSolved = true;
-		m_mxSolution = algorithm->getSolution();
-		updateCells();
-		pMainDlg->showSolutionFound();
-	}
-	catch( const lp::ModelInfeasible& e )
-	{
-		Debug( "model infeasible" );
-		pMainDlg->showSolutionInfeasible();
-	}
-	catch( const scsolver::RuntimeError& e )
-	{
-		// This error message is localizable.
-		cout << "RuntimeError: " << e.what() << endl;
-		pMainDlg->showSolveError( e.getMessage() );
-	}
-	catch( const std::exception& e )
-	{
-		cout << "standard exception: " << e.what() << endl; // ascii_i18n [!?]
-		pMainDlg->showSolveError( ascii( e.what() ) );
-	}
-}
-
-bool SolveModelImpl::isSolved() const
-{
-	return m_bSolved;
-}
-
-/**
  * Transform a LP model given in the cells into the standard
  * format.  This is done by setting the value of one of the
  * decision variable cells to 1 and all the others to 0, and
  * interpret the values of the objective function and constraint
  * cells, and repeat it for every decision variable cell.
  */
-void SolveModelImpl::parseConstraints()
+void SolveModelImpl::parseConstraints( LpModelBuilder* pBuilder )
 {
 	m_pSolverImpl->getCalcInterface()->disableCellUpdates();
 
 	// Create a cost vector from the decision variables.
 	
-	vector< CellAddress > aAddrs = m_pBuilder->getAllDecisionVarAddresses();
+	vector< CellAddress > aAddrs = pBuilder->getAllDecisionVarAddresses();
 	vector< double > aOrigVal;
 	vector< CellAddress >::iterator pos;
 	vector< CellAddress >::iterator aAddrsBegin = aAddrs.begin(), aAddrsEnd = aAddrs.end();
@@ -210,7 +342,7 @@ void SolveModelImpl::parseConstraints()
 		// and set "=0" to each of these cells.
 		table::CellAddress aAddr = *pos;
 		rtl::OUString sFormula = pCalc->getCellFormula( aAddr );
-		m_pBuilder->setTempCellFormula( aAddr, sFormula );
+		pBuilder->setTempCellFormula( aAddr, sFormula );
 		pCalc->setCellFormula( aAddr, ascii( "=0" ) );
 	}
 	
@@ -218,9 +350,9 @@ void SolveModelImpl::parseConstraints()
 	// interpret the formula result.  Also set the constraint matrix size
 	// so that it won't get resized at later time (resize is expensive).
 	
-	CellAddress aObjAddr = m_pBuilder->getObjectiveFormulaAddress();
-	vector< ConstraintAddress > aConstAddrs = m_pBuilder->getAllConstraintAddresses();
-	m_pBuilder->setConstraintMatrixSize( aConstAddrs.size(), aAddrs.size() );
+	CellAddress aObjAddr = pBuilder->getObjectiveFormulaAddress();
+	vector< ConstraintAddress > aConstAddrs = pBuilder->getAllConstraintAddresses();
+	pBuilder->setConstraintMatrixSize( aConstAddrs.size(), aAddrs.size() );
 	
 	for ( pos = aAddrsBegin; pos != aAddrsEnd; ++pos )
 	{
@@ -228,7 +360,7 @@ void SolveModelImpl::parseConstraints()
 		pCalc->setCellFormula( aAddr, ascii( "=1" ) );
 		
 		double fVal = pCalc->getCellValue( aObjAddr );
-		m_pBuilder->setCostVector( aAddr, fVal );
+		pBuilder->setCostVector( aAddr, fVal );
 		
 		// Go through the constraints to construct constraint matrix
 		// as well as the RHS vector.
@@ -245,7 +377,7 @@ void SolveModelImpl::parseConstraints()
 			else
 				fValR = pCalc->getCellValue( aConstAddr.getRightCellAddr() );
 
-			m_pBuilder->setConstraintCoefficient( aAddr, aConstAddr, fValL, fValR );
+			pBuilder->setConstraintCoefficient( aAddr, aConstAddr, fValL, fValR );
 		}		
 		
 		pCalc->setCellFormula( aAddr, ascii( "=0" ) );
@@ -255,7 +387,7 @@ void SolveModelImpl::parseConstraints()
 	for ( pos = aAddrsBegin; pos != aAddrsEnd; ++pos )
 	{
 		table::CellAddress aAddr = *pos;
-		rtl::OUString sOrigFormula = m_pBuilder->getTempCellFormula( aAddr );
+		rtl::OUString sOrigFormula = pBuilder->getTempCellFormula( aAddr );
 		pCalc->setCellFormula( aAddr, sOrigFormula );
 	}
 
@@ -264,7 +396,7 @@ void SolveModelImpl::parseConstraints()
 	for ( pos = aAddrsBegin; pos != aAddrsEnd; ++pos )
 	{
 		table::CellAddress aAddr = *pos;
-		double f = m_pBuilder->getCostVector( aAddr );
+		double f = pBuilder->getCostVector( aAddr );
 		cout << aAddr.Column << ", " << aAddr.Row << " = " << f << endl;
 	}
 #endif
@@ -291,12 +423,12 @@ static bool lcl_isNumeric( const rtl::OUString& sVal )
  * from the main dialog, resolve their addresses into sheet,
  * column, and row IDs, and give them to the builder.
  */
-void SolveModelImpl::resolveConstraintAddress()
+void SolveModelImpl::resolveConstraintAddress( LpModelBuilder* pBuilder )
 {
 	vector< ConstraintString > aConstraint = m_pSolverImpl->getMainDialog()->getAllConstraints();
 	vector< ConstraintString >::iterator pos = aConstraint.begin(), posEnd = aConstraint.end();
 	CalcInterface* pCalc = m_pSolverImpl->getCalcInterface();
-	m_pBuilder->clearConstraintAddresses();
+	pBuilder->clearConstraintAddresses();
 	while ( pos != posEnd )
 	{
 		ConstraintString aConstStr = *pos;
@@ -327,7 +459,7 @@ void SolveModelImpl::resolveConstraintAddress()
 					aConstAddr.setEquality( aConstStr.Equal );
 					aConstAddr.setRightCellValue( aConstStr.Right.toDouble() );
 
-					m_pBuilder->setConstraintAddress( aConstAddr );
+					pBuilder->setConstraintAddress( aConstAddr );
 				}
 			}
 		}
@@ -361,7 +493,7 @@ void SolveModelImpl::resolveConstraintAddress()
 					aAddrR.Column = nRColS + i;
 					aConstAddr.setRightCellAddr( aAddrR );
 
-					m_pBuilder->setConstraintAddress( aConstAddr );
+					pBuilder->setConstraintAddress( aConstAddr );
 				}
 			}
 		}
@@ -370,60 +502,9 @@ void SolveModelImpl::resolveConstraintAddress()
 	}
 }
 
-/** Convert a 3D cell reference (e.g. $'Sheet Name'.$B$5:$C$7) into an array of
-	individual cell addresses.  These addresses represent a series of decision
-	variables in sequential order. */
-void SolveModelImpl::resolveDecisionVarAddress()
+void SolveModelImpl::updateCells( LpModelBuilder* pBuilder )
 {
-	using com::sun::star::table::CellRangeAddress;
-
-	rtl::OUString sAddr = m_pSolverImpl->getMainDialog()->getVarCellAddress();
-	if ( sAddr.getLength() > 0 )
-	{
-		CellRangeAddress aRangeAddr = m_pSolverImpl->getCalcInterface()->getCellRangeAddress( sAddr );
-		
-		// Convert address range into an array of individual cell coordinates.
-		sal_Int16 nSheetId = aRangeAddr.Sheet;
-		sal_Int32 nSCol = aRangeAddr.StartColumn, nSRow = aRangeAddr.StartRow;
-		sal_Int32 nECol = aRangeAddr.EndColumn, nERow = aRangeAddr.EndRow;
-		
-		m_pBuilder->clearDecisionVarAddresses();
-		for ( sal_Int32 nCol = nSCol; nCol <= nECol; ++nCol )
-		{
-			for ( sal_Int32 nRow = nSRow; nRow <= nERow; ++nRow )
-			{
-				CellAddress aCellAddr;
-				aCellAddr.Sheet = nSheetId;
-				aCellAddr.Column = nCol;
-				aCellAddr.Row = nRow;
-				m_pBuilder->setDecisionVarAddress( aCellAddr );
-			}
-		}
-	}
-	else
-		Debug( "Decision variable cells empty" );
-}
-
-/** Takes the string form of an objective function cell address (e.g. $'Sheet1'.$A$2),
-	converts it into a 3D address, and set it into the builder class.
- */
-void SolveModelImpl::resolveObjectiveFuncAddress()
-{
-	rtl::OUString sTargetCellAddr = m_pSolverImpl->getMainDialog()->getTargetCellAddress();
-	if ( sTargetCellAddr.getLength() > 0 )
-	{
-		CellAddress aAddr = m_pSolverImpl->getCalcInterface()->getCellAddress(
-				sTargetCellAddr );
-		
-		m_pBuilder->setObjectiveFormulaAddress( aAddr );
-	}
-	else
-		Debug( "Target cell address empty" );
-}
-
-void SolveModelImpl::updateCells()
-{
-	vector<CellAddress> cnAddrs = m_pBuilder->getAllDecisionVarAddresses();
+	vector<CellAddress> cnAddrs = pBuilder->getAllDecisionVarAddresses();
 	CalcInterface* pCalc = m_pSolverImpl->getCalcInterface();
 	OSL_ASSERT( m_mxSolution.rows() == cnAddrs.size() );
 	vector<CellAddress>::iterator it, itEnd = cnAddrs.end();

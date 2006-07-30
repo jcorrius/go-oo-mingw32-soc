@@ -25,11 +25,19 @@
  *
  ************************************************************************/
 
-#include <numeric/nlpbase.hxx>
+#include "numeric/nlpbase.hxx"
+
+using ::scsolver::numeric::Matrix;
 
 namespace scsolver { namespace numeric { namespace opres { namespace nlp {
 
-BaseAlgorithm::BaseAlgorithm() : m_pModel( NULL )
+struct BaseAlgorithmImpl
+{
+	Model* pModel;
+	Matrix Solution;
+};
+
+BaseAlgorithm::BaseAlgorithm() : m_pImpl( new BaseAlgorithmImpl )
 {
 }
 
@@ -37,10 +45,25 @@ BaseAlgorithm::~BaseAlgorithm() throw()
 {
 }
 
+Model* BaseAlgorithm::getModel() const
+{
+	return m_pImpl->pModel;
+}
+
+void BaseAlgorithm::setModel( Model* p )
+{
+	m_pImpl->pModel = p;
+}
+
+Matrix BaseAlgorithm::getSolution() const
+{
+	return m_pImpl->Solution;
+}
+
 void BaseAlgorithm::setSolution( const Matrix& other )
 {
-	Matrix m( other );
-	m_mxSolution.swap( m );
+	Matrix m(other);
+	m_pImpl->Solution.swap(m);
 }
 
 }}}}

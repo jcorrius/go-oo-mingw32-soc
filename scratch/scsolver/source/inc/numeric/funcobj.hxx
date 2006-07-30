@@ -25,21 +25,35 @@
  *
  ************************************************************************/
 
-#ifndef _NUMERIC_FUNCOBJ_HXX
-#define _NUMERIC_FUNCOBJ_HXX
+#ifndef _SCSOLVER_NUMERIC_FUNCOBJ_HXX_
+#define _SCSOLVER_NUMERIC_FUNCOBJ_HXX_
 
 #include <vector>
 #include <string>
 
 namespace scsolver { namespace numeric {
 
+/**
+ * Base class for function object to be used for NLP algorithms.
+ */
 class BaseFuncObj
 {
 public:
 	BaseFuncObj();
 	virtual ~BaseFuncObj() throw() = 0;
 
+	/**
+     * Take an array of variables and return the answer.
+	 * 
+	 * @return double
+	 */
 	virtual double operator()( const std::vector<double>& ) const = 0;
+
+	/**
+     * Return a display-friendly function string.
+	 * 
+	 * @return std::string
+	 */
 	virtual std::string getFuncString() const = 0;
 
 	double eval( const std::vector<double>& ) const;

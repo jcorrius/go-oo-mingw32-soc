@@ -37,6 +37,7 @@
 #include <exception>
 
 using namespace std;
+using namespace ::com::sun::star;
 using com::sun::star::table::CellAddress;
 using scsolver::numeric::Matrix;
 

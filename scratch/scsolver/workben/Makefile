@@ -1,8 +1,41 @@
+SRCDIR=../source
+NUMERICDIR=$(SRCDIR)/numeric
+UIDIR=$(SRCDIR)/ui
 
-OBJDIR=./addon_pkg/obj
-CPP_INCLUDES=-I../source/inc
-CXX=/usr/bin/g++
-CPPFLAGS=-DDEBUG -Wall -Os -mtune=pentium3
+#OBJDIR=./addon_pkg/obj
+#CPP_INCLUDES=-I../source/inc
+CPPFLAGS= \
+	-DDEBUG -Wall -Os -mtune=pentium3 \
+	-I$(SRCDIR)/inc
+
+all: nlptest
+
+matrix.o: $(NUMERICDIR)/matrix.cxx
+	$(CXX) $(CPPFLAGS) -o $@ -c $<
+
+nlptest.o: nlptest.cxx
+	$(CXX) $(CPPFLAGS) -o $@ -c $<
+
+global.o: $(UIDIR)/global.cxx
+	$(CXX) $(CPPFLAGS) -o $@ -c $<
+
+nlpmodel.o: $(NUMERICDIR)/nlpmodel.cxx
+	$(CXX) $(CPPFLAGS) -o $@ -c $<
+
+nlpqnewton.o: $(NUMERICDIR)/nlpqnewton.cxx
+	$(CXX) $(CPPFLAGS) -o $@ -c $<
+
+funcobj.o: $(NUMERICDIR)/funcobj.cxx
+	$(CXX) $(CPPFLAGS) -o $@ -c $<
+
+diff.o: $(NUMERICDIR)/diff.cxx
+	$(CXX) $(CPPFLAGS) -o $@ -c $<
+
+nlpbase.o: $(NUMERICDIR)/nlpbase.cxx
+	$(CXX) $(CPPFLAGS) -o $@ -c $<
+
+nlptest: matrix.o nlptest.o global.o nlpmodel.o nlpqnewton.o funcobj.o diff.o nlpbase.o
+	$(CXX) -o $@ matrix.o nlptest.o global.o nlpmodel.o nlpqnewton.o funcobj.o diff.o nlpbase.o
 
 simplex_test.o: simplex_test.cxx
 	$(CXX) $(CPPFLAGS) $(CPP_INCLUDES) \

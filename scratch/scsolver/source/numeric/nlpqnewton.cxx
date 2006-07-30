@@ -145,7 +145,8 @@ void QuasiNewtonImpl::solve()
 {
 	// Initialize relevant data members.
 	m_pModel = m_pSelf->getModel();
-	vector<double> cnVars = m_pModel->getVariable();
+	//vector<double> cnVars = m_pModel->getVariable();
+	vector<double> cnVars = m_pModel->getVars();
 	
 	vector<double>::const_iterator it, itBeg = cnVars.begin(), itEnd = cnVars.end();
 	m_mxVars.clear();
@@ -172,8 +173,7 @@ void QuasiNewtonImpl::solve()
 	m_nIter = 0;
 	bool bIterDone = false;
 	cout << setprecision( m_pModel->getPrecision() );
-	while ( !bIterDone )
-		bIterDone = runIteration();
+	while ( !runIteration() );
 
 	cout << "f(x) = " << m_fF << endl;
 }

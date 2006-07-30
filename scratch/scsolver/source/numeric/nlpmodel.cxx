@@ -28,6 +28,7 @@
 #include <numeric/nlpmodel.hxx>
 #include <numeric/nlpbase.hxx>
 #include <numeric/funcobj.hxx>
+#include "numeric/cellfuncobj.hxx"
 #include <global.hxx>
 #include <boost/shared_ptr.hpp>
 #include <vector>
@@ -65,8 +66,15 @@ public:
 	Matrix getSolution() const { return m_mxSolution; }
 	void setSolution( const Matrix& );
 
-	void setVariable( const std::vector<double>& );
-	const std::vector<double> getVariable() const;
+	void pushVar( double var )
+	{
+		m_cnVars.push_back(var);
+	}
+
+	const vector<double> getVars() const
+	{
+		return m_cnVars;
+	}
 
 	void print() const;
 
@@ -119,17 +127,6 @@ void ModelImpl::setSolution( const Matrix& other )
 {
 	Matrix m( other );
 	m_mxSolution.swap( m );
-}
-
-void ModelImpl::setVariable( const std::vector<double>& cn )
-{
-	vector<double> cnVars( cn.begin(), cn.end() );
-	swap( m_cnVars, cnVars );
-}
-
-const vector<double> ModelImpl::getVariable() const
-{
-	return m_cnVars;
 }
 
 void ModelImpl::print() const
@@ -229,14 +226,14 @@ const boost::shared_ptr<BaseFuncObj> Model::getFuncObject() const
 	return m_pImpl->getFuncObject();
 }
 
-void Model::setVariable( const std::vector<double>& cn )
+void Model::pushVar( double var )
 {
-	m_pImpl->setVariable( cn );
+	m_pImpl->pushVar(var);
 }
 
-const std::vector<double> Model::getVariable() const
+const vector<double> Model::getVars() const
 {
-	return m_pImpl->getVariable();
+	return m_pImpl->getVars();
 }
 
 void Model::solve( const boost::shared_ptr<BaseAlgorithm>& obj )

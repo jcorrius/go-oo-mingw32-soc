@@ -40,11 +40,14 @@ namespace numeric {
 class SolverImpl;
 class SolveModelImpl;
 
-/** This class oversees the actual process of solving a model, i.e.
-	constructing a model from a sheet, passing it to the backend model
-	container, and executing the algorithm to get a solution.  This 
-	class should be the only class exposed to class SolverImpl.
-*/
+/**
+ * This class oversees the actual process of solving a model,
+ * i.e. constructing a model from a sheet, passing it to the
+ * backend model container, executing the algorithm to get a
+ * solution, and (if successful) put the solution back into the
+ * sheet.  This class should be the only class exposed to class
+ * SolverImpl wrt solving action.
+ */
 class SolveModel
 {
 public:

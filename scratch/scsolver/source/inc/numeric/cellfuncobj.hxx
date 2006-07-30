@@ -25,60 +25,57 @@
  *
  ************************************************************************/
 
-#ifndef _NUMERIC_OPRES_NLP_NLPMODEL_HXX_
-#define _NUMERIC_OPRES_NLP_NLPMODEL_HXX_
+#ifndef _SCSOLVER_NUMERIC_CELLFUNCOBJ_HXX_
+#define _SCSOLVER_NUMERIC_CELLFUNCOBJ_HXX_
 
-#include <numeric/matrix.hxx>
-#include <numeric/type.hxx>
+#include "numeric/funcobj.hxx"
 #include <memory>
-#include <boost/shared_ptr.hpp>
-#include <string>
 #include <vector>
+#include <string>
 
-namespace scsolver { namespace numeric {
-	class BaseFuncObj;
-}}
+namespace com { namespace sun { namespace star { namespace table {
+	class CellAddress;
+}}}}
 
-namespace scsolver { namespace numeric { namespace opres { namespace nlp {
+namespace scsolver {
 
-class ModelImpl;
-class BaseAlgorithm;
+class CalcInterface;
 
-class Model
+namespace numeric { 
+
+struct CellFuncObjImpl;
+
+class CellFuncObj : public BaseFuncObj
 {
 public:
-	Model();
-	Model( const Model& );
-	~Model() throw();
+	CellFuncObj( ::scsolver::CalcInterface* pCalc );
+	virtual ~CellFuncObj() throw();
 
-	void print() const;
+	/**
+	 * Take an array of variables and return the answer.
+	 *
+	 * @return double
+	 */
+	virtual double operator()( const std::vector<double>& cnX ) const;
 
-	void setPrecision( unsigned long );
-	unsigned long getPrecision() const;
+	/**
+	 * Return a display-friendly function string.
+	 *
+	 * @return std::string
+	 */
+	virtual std::string getFuncString() const;
 
-	void setGoal( scsolver::numeric::opres::Goal );
-	scsolver::numeric::opres::Goal getGoal() const;
-
-	void setVerbose( bool );
-	bool getVerbose() const;
-
-	::scsolver::numeric::Matrix getSolution() const;
-	void setSolution( const ::scsolver::numeric::Matrix& );
-
-	void setFuncObject( const boost::shared_ptr<BaseFuncObj>& );
-	const boost::shared_ptr<BaseFuncObj> getFuncObject() const;
-
-	void pushVar( double var );
-	const ::std::vector<double> getVars() const;
-
-	void solve( const boost::shared_ptr<BaseAlgorithm>& );
+	void setTargetCell( const ::com::sun::star::table::CellAddress& addr );
+	void appendDecVarCell( const ::com::sun::star::table::CellAddress& addr );
+	void test();
 
 private:
-	std::auto_ptr<ModelImpl> m_pImpl;
+	CellFuncObj();
+
+	std::auto_ptr<CellFuncObjImpl> m_pImpl;
 };
 
 
-}}}}
-
+}}
 
 #endif

@@ -12,8 +12,8 @@ ENABLE_EXCEPTIONS=TRUE
 
 SLOFILES =  \
         $(SLO)$/diff.obj \
-        $(SLO)$/diff_test.obj \
         $(SLO)$/funcobj.obj \
+		$(SLO)$/cellfuncobj.obj \
         $(SLO)$/lpbase.obj \
         $(SLO)$/lpmodel.obj \
         $(SLO)$/matrix.obj \
