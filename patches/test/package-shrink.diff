@@ -2351,3 +2351,288 @@ diff -u -p -u -r1.5 zipfileaccess.cxx
                                                                                          new EncryptionData(), 
                                                                                          sal_False ) );
  
+--- /dev/null	2006-06-16 14:07:58.000000000 +0100
++++ package/source/zipapi/ZipEntry.cxx	2006-07-24 14:38:51.000000000 +0100
+@@ -0,0 +1,282 @@
++/*************************************************************************
++ *
++ *  OpenOffice.org - a multi-platform office productivity suite
++ *
++ *  $RCSfile$
++ *
++ *  $Revision$
++ *
++ *  last change: $Author$ $Date$
++ *
++ *  The Contents of this file are made available subject to
++ *  the terms of GNU Lesser General Public License Version 2.1.
++ *
++ *
++ *    GNU Lesser General Public License Version 2.1
++ *    =============================================
++ *    Copyright 2005 by Sun Microsystems, Inc.
++ *    901 San Antonio Road, Palo Alto, CA 94303, USA
++ *
++ *    This library is free software; you can redistribute it and/or
++ *    modify it under the terms of the GNU Lesser General Public
++ *    License version 2.1, as published by the Free Software Foundation.
++ *
++ *    This library is distributed in the hope that it will be useful,
++ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ *    Lesser General Public License for more details.
++ *
++ *    You should have received a copy of the GNU Lesser General Public
++ *    License along with this library; if not, write to the Free Software
++ *    Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ *    MA  02111-1307  USA
++ *
++ ************************************************************************/
++#ifndef _ZIP_FILE_HXX
++#include <ZipFile.hxx>
++#endif
++#ifndef _ZIP_ENUMERATION_HXX
++#include <ZipEnumeration.hxx>
++#endif
++#ifndef _COM_SUN_STAR_PACKAGES_ZIP_ZIPCONSTANTS_HPP_
++#include <com/sun/star/packages/zip/ZipConstants.hpp>
++#endif
++#ifndef _RTL_CIPHER_H_
++#include <rtl/cipher.h>
++#endif
++#ifndef _RTL_DIGEST_H_
++#include <rtl/digest.h>
++#endif
++/*
++#ifndef _XMEMORY_STREAM_HXX
++#include <XMemoryStream.hxx>
++#endif
++#ifndef _XFILE_STREAM_HXX
++#include <XFileStream.hxx>
++#endif
++*/
++#ifndef _XUNBUFFERED_STREAM_HXX
++#include <XUnbufferedStream.hxx>
++#endif
++#ifndef _PACKAGE_CONSTANTS_HXX_
++#include <PackageConstants.hxx>
++#endif
++#ifndef _ENCRYPTED_DATA_HEADER_HXX_
++#include <EncryptedDataHeader.hxx>
++#endif
++#ifndef _ENCRYPTION_DATA_HXX_
++#include <EncryptionData.hxx>
++#endif
++#ifndef _MEMORY_BYTE_GRABBER_HXX_
++#include <MemoryByteGrabber.hxx>
++#endif
++#ifndef _COM_SUN_STAR_LANG_XMULTISERVICEFACTORY_HPP_
++#include <com/sun/star/lang/XMultiServiceFactory.hpp>
++#endif
++#ifndef _COM_SUN_STAR_UCB_XPROGRESSHANDLER_HPP_
++#include <com/sun/star/ucb/XProgressHandler.hpp>
++#endif
++
++#ifndef _CRC32_HXX_
++#include <CRC32.hxx>
++#endif
++#include <ByteChucker.hxx>
++
++#include <string.h> // for memcpy
++#include <vector>
++
++using namespace vos;
++using namespace rtl;
++using namespace com::sun::star;
++using namespace com::sun::star::io;
++using namespace com::sun::star::uno;
++using namespace com::sun::star::ucb;
++using namespace com::sun::star::lang;
++using namespace com::sun::star::packages;
++using namespace com::sun::star::packages::zip;
++using namespace com::sun::star::packages::zip::ZipConstants;
++
++#include <hash_map>
++
++#define DO_ACCOUNTING
++
++#ifdef DO_ACCOUNTING
++struct ZipEntryHash
++{
++	size_t operator () (const ZipEntry *pEntry) const
++	{ return (size_t) pEntry; }
++};
++static std::hash_map< ZipEntry *, ZipEntry *, ZipEntryHash > aMap;
++
++static void doPrint()
++{
++	if (!(aMap.size() % 100)) {
++			fprintf (stderr, "We have %d entries:\n", aMap.size());
++			if (!(aMap.size() % 10000)) {
++//					std::hash_map< ZipEntry *, ZipEntry *, ZipEntryHash >::const_iterator aIter;
++//					for (aIter = aMap.begin(); aIter != aMap.end(); aIter++)
++//							fprintf( stderr, "\t%s\n",
++//									 (const sal_Char *)rtl::OUStringToOString( aIter->first->sName, RTL_TEXTENCODING_UTF8 ) );
++			}
++	}
++}
++#endif
++
++void ZipEntryPtr::acquire()
++{
++//	fprintf (stderr, "acquire %p (%p)\n", this, mpEntry);
++	if( mpEntry )
++		::osl_incrementInterlockedCount( &mpEntry->nCount );
++}
++
++void ZipEntryPtr::release()
++{
++//	fprintf (stderr, "release %p (%p)\n", this, mpEntry);
++	if ( mpEntry &&
++		 !::osl_decrementInterlockedCount( &mpEntry->nCount ) )
++		delete mpEntry;
++}
++
++const ZipEntryPtr &
++ZipEntryPtr::null()
++{
++	static ZipEntryPtr aNull;
++	return aNull;
++}
++
++ZipEntry::ZipEntry()
++	: nCount( 0 )
++	, nVersion( 0 )
++	, nFlag( 0 )
++	, nMethod( 0 )
++	, nTime( 0 )
++	, nCrc( 0 )
++	, nCompressedSize( 0 )
++	, nSize( 0 )
++	, nOffset( 0 )
++	, nExtraLen( 0 )
++	, aPath()
++{
++#ifdef DO_ACCOUNTING
++	aMap[this] = this;
++	doPrint();
++#endif
++}
++
++ZipEntry::ZipEntry(const ZipEntry &rEntry)
++	: nCount( 0 )
++	, nVersion( rEntry.nVersion )
++	, nFlag( rEntry.nFlag )
++	, nMethod( rEntry.nMethod )
++	, nTime( rEntry.nTime )
++	, nCrc( rEntry.nCrc )
++	, nCompressedSize( rEntry.nCompressedSize )
++	, nSize( rEntry.nSize )
++	, nOffset( rEntry.nOffset )
++	, nExtraLen( rEntry.nExtraLen )
++	, aPath( rEntry.aPath )
++{
++#ifdef DO_ACCOUNTING
++	aMap[this] = this;
++	doPrint();
++#endif
++}
++
++ZipEntry::ZipEntry(const ZipEntryPtr &xEntry)
++	: nCount( 0 )
++	, nVersion( xEntry->nVersion )
++	, nFlag( xEntry->nFlag )
++	, nMethod( xEntry->nMethod )
++	, nTime( xEntry->nTime )
++	, nCrc( xEntry->nCrc )
++	, nCompressedSize( xEntry->nCompressedSize )
++	, nSize( xEntry->nSize )
++	, nOffset( xEntry->nOffset )
++	, nExtraLen( xEntry->nExtraLen )
++	, aPath( xEntry->aPath )
++{
++#ifdef DO_ACCOUNTING
++	aMap[this] = this;
++	doPrint();
++#endif
++}
++
++ZipEntry::~ZipEntry()
++{
++#ifdef DO_ACCOUNTING
++	size_t asize = aMap.size();
++	aMap.erase (this);
++	if (aMap.size() != asize - 1)
++			fprintf (stderr, "Failed to remove an entry\n");
++//    if (!(aMap.size() % 100))
++//		fprintf (stderr, "removing entries\n");
++	doPrint();
++#endif
++}
++
++
++ZipPath::ZipPath( const rtl::OString &rName )
++{
++	setName( rName );
++}
++
++void ZipPath::setName( const rtl::OString  &rName,
++					   ZipPathShareHash *pHash )
++{
++	sal_Int32 nIdx = rName.lastIndexOf( '/' );
++	if (nIdx < 0)
++	{
++		sElem = rName;
++		sPath = rtl::OString();
++	}
++	else
++	{
++		sElem = rName.copy( nIdx );
++		sPath = rName.copy( 0, nIdx );
++	}
++
++	// Reduce string duplication
++	if( pHash ) 
++	{
++		rtl::OString &rCopy = pHash->maHash[ sPath ];
++		if (rCopy.getLength())
++		{
++			static int reuse = 0;
++			if (!(++reuse % 20))
++				fprintf (stderr, "re-use %d string from hash size (%d)\n",
++						 reuse, pHash->maHash.size());
++			sPath = rCopy;
++		}
++		else
++			rCopy = sPath;
++	}
++}
++
++void ZipPath::setName( const sal_Char *nStr, sal_Int16 nNameLen,
++					   ZipPathShareHash *pHash )
++{
++	// FIXME: could be further optimized
++	OString aTmp( nStr, nNameLen );
++	setName( aTmp, pHash );
++}
++
++rtl::OString ZipPath::getName() const
++{
++	return sPath + sElem;
++}
++
++sal_Int32 ZipPath::getNameLength() const
++{
++	return sPath.getLength() + sElem.getLength();
++}
++
++void ZipPath::writeName( ByteChucker &rStream ) const
++{
++	sal_Int32 nLen = getNameLength();
++	uno::Sequence< sal_Int8 > aName( nLen );
++	sal_uInt32 nOffset = sPath.getLength();
++	if( nOffset )
++		memcpy( aName.getArray(), sPath.getStr(), nOffset );
++	memcpy( aName.getArray() + nOffset, sElem.getStr(), sElem.getLength() );
++	rStream.writeBytes( aName );
++}
