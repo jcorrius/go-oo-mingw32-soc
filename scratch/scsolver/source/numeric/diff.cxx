@@ -220,7 +220,7 @@ double DifferentiateImpl::Tm( unsigned long m, unsigned long i )
 	{
 		return getT( m, i );
 	}
-	catch( const std::out_of_range& e )
+	catch( const std::out_of_range& )
 	{
 	}
 
