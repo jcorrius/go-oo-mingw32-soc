@@ -31,14 +31,14 @@ uno::Any
 ScVbaInterior::getColor() throw (uno::RuntimeException) 
 {
 	uno::Any aAny;
-	aAny = m_xProps->getPropertyValue( BACKCOLOR );
+	aAny = OORGBToXLRGB( m_xProps->getPropertyValue( BACKCOLOR ) );
 	return aAny;
 }
  
 void 
 ScVbaInterior::setColor( const uno::Any& _color  ) throw (uno::RuntimeException)
 {
-	m_xProps->setPropertyValue( BACKCOLOR , _color);
+	m_xProps->setPropertyValue( BACKCOLOR , XLRGBToOORGB(_color));
 }
 
 uno::Reference< container::XIndexAccess >
@@ -64,14 +64,21 @@ ScVbaInterior::setColorIndex( const css::uno::Any& _colorindex ) throw (css::uno
 	}
 	--nIndex; // OOo indices are zero bases
 	uno::Reference< container::XIndexAccess > xIndex = getPalette();
-	setColor( xIndex->getByIndex( nIndex ) );
+	// setColor expects colors in XL RGB values
+	// #FIXME this is daft we convert OO RGB val to XL RGB val and
+	// then back again to OO RGB value
+	setColor( OORGBToXLRGB(xIndex->getByIndex( nIndex )) );
 }
 
 uno::Any SAL_CALL 
 ScVbaInterior::getColorIndex() throw ( css::uno::RuntimeException )
 {
 	sal_Int32 nColor = 0;
-	getColor() >>= nColor;
+	// getColor returns Xl ColorValue, need to convert it to OO val
+	// as the palette deals with OO RGB values 
+	// #FIXME this is daft in getColor we convert OO RGB val to XL RGB val 
+	// and then back again to OO RGB value
+	XLRGBToOORGB( getColor() ) >>= nColor; 
 	uno::Reference< container::XIndexAccess > xIndex = getPalette();
 	sal_Int32 nElems = xIndex->getCount();
 	sal_Int32 nIndex = -1;

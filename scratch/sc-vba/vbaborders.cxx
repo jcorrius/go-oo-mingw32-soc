@@ -119,7 +119,7 @@ public:
 	{
 		table::BorderLine aBorderLine;
 		if ( getBorderLine( aBorderLine ) )
-			return uno::makeAny( aBorderLine.Color ); 
+			return uno::makeAny( OORGBToXLRGB( aBorderLine.Color ) ); 
 		throw uno::RuntimeException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "No Implementation available" ) ), uno::Reference< uno::XInterface >() );
 	}
 	void SAL_CALL setColor( const uno::Any& _color ) throw (uno::RuntimeException)
@@ -129,7 +129,7 @@ public:
 		table::BorderLine aBorderLine;
 		if ( getBorderLine( aBorderLine ) )
 		{
-			aBorderLine.Color = nColor;
+			aBorderLine.Color = XLRGBToOORGB( nColor );
 			setBorderLine( aBorderLine );	
 		}
 		else
@@ -139,21 +139,21 @@ public:
 	uno::Any SAL_CALL getColorIndex() throw (uno::RuntimeException)
 	{
 		sal_Int32 nColor;
-		getColor() >>= nColor;
-        uno::Reference< container::XIndexAccess > xIndex = m_Palette.getPalette();
-        sal_Int32 nElems = xIndex->getCount();
-        sal_Int32 nIndex = -1;
-        for ( sal_Int32 count=0; count<nElems; ++count )
-        {
-                sal_Int32 nPaletteColor;
-                xIndex->getByIndex( count ) >>= nPaletteColor;
-                if ( nPaletteColor == nColor )
-				{					
-						nIndex = count + 1;
-                        break;
-				}
-        }
-        return uno::makeAny(nIndex);
+		XLRGBToOORGB( getColor() ) >>= nColor;
+		uno::Reference< container::XIndexAccess > xIndex = m_Palette.getPalette();
+		sal_Int32 nElems = xIndex->getCount();
+		sal_Int32 nIndex = -1;
+		for ( sal_Int32 count=0; count<nElems; ++count )
+		{
+			sal_Int32 nPaletteColor;
+			xIndex->getByIndex( count ) >>= nPaletteColor;
+			if ( nPaletteColor == nColor )
+			{					
+				nIndex = count + 1;
+				break;
+			}
+		}
+		return uno::makeAny(nIndex);
 	}
 
 	void SAL_CALL setColorIndex( const uno::Any& _colorindex ) throw (uno::RuntimeException)
@@ -162,15 +162,13 @@ public:
 		_colorindex >>= nColor;
 		if ( nColor == vba::Excel::Constants::xlColorIndexAutomatic )
                 nColor = 1;
-		setColor( m_Palette.getPalette()->getByIndex( --nColor ) );
+		setColor( OORGBToXLRGB( m_Palette.getPalette()->getByIndex( --nColor )  ) );
 	}
 	uno::Any SAL_CALL getWeight() throw (uno::RuntimeException)
 	{
 		table::BorderLine aBorderLine;
 		if ( getBorderLine( aBorderLine ) )
 		{
-			// #TODO need to figure out the convertion between
-			// linewidths and XlBorderWeight constants
 			switch ( aBorderLine.OuterLineWidth )
 			{
 				case 0:	// Thin = default OO thickness

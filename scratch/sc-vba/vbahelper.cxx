@@ -325,3 +325,47 @@ org::openoffice::getCurrentViewFrame()
 	return NULL;
 }
 
+sal_Int32 
+org::openoffice::OORGBToXLRGB( sal_Int32 nCol )
+{
+	sal_Int32 nRed = nCol;
+	nRed &= 0x00FF0000;
+	nRed >>= 16;
+	sal_Int32 nGreen = nCol;
+	nGreen &= 0x0000FF00;
+	nGreen >>= 8;
+	sal_Int32 nBlue = nCol;
+	nBlue &= 0x000000FF;
+	sal_Int32 nRGB =  ( (nBlue << 16) | (nGreen << 8) | nRed );
+	return nRGB;
+}
+sal_Int32 
+org::openoffice::XLRGBToOORGB( sal_Int32 nCol )
+{
+	sal_Int32 nBlue = nCol;
+	nBlue &= 0x00FF0000;
+	nBlue >>= 16;
+	sal_Int32 nGreen = nCol;
+	nGreen &= 0x0000FF00;
+	nGreen >>= 8;
+	sal_Int32 nRed = nCol;
+	nRed &= 0x000000FF;
+	sal_Int32 nRGB =  ( (nRed << 16) | (nGreen << 8) | nBlue );
+	return nRGB;
+}
+uno::Any 
+org::openoffice::OORGBToXLRGB( const uno::Any& aCol )
+{
+	sal_Int32 nCol;
+	aCol >>= nCol;
+	nCol = OORGBToXLRGB( nCol );
+	return uno::makeAny( nCol );
+}
+uno::Any 
+org::openoffice::XLRGBToOORGB(  const uno::Any& aCol )
+{
+	sal_Int32 nCol;
+	aCol >>= nCol;
+	nCol = XLRGBToOORGB( nCol );
+	return uno::makeAny( nCol );
+}

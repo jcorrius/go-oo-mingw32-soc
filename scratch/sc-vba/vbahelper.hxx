@@ -23,6 +23,10 @@ namespace org
 		ScDocShell* getDocShell( css::uno::Reference< css::frame::XModel>& xModel ) ;
 		ScTabViewShell* getCurrentBestViewShell();
 		SfxViewFrame* getCurrentViewFrame();
+		sal_Int32 OORGBToXLRGB( sal_Int32 );
+		sal_Int32 XLRGBToOORGB( sal_Int32 );
+		css::uno::Any OORGBToXLRGB( const css::uno::Any& );
+		css::uno::Any XLRGBToOORGB( const css::uno::Any& );
 	}
 }
 
