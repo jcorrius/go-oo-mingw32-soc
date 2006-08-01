@@ -4,9 +4,9 @@
 #
 #   $RCSfile: makefile.mk,v $
 #
-#   $Revision: 1.1 $
+#   $Revision: 1.2 $
 #
-#   last change: $Author: rodo $ $Date: 2006/08/01 17:02:25 $
+#   last change: $Author: rodo $ $Date: 2006/08/01 18:58:22 $
 #
 #   The Contents of this file are made available subject to
 #   the terms of GNU Lesser General Public License Version 2.1.
@@ -34,37 +34,39 @@
 #*************************************************************************
 
 PRJ=..$/..
-PRJNAME=avmediawin
-TARGET=avmediawin
+PRJNAME=avmedia
+TARGET=avmediagst
 
 # --- Settings ----------------------------------
 
 .INCLUDE :  	settings.mk
 
-.IF "$(ENABLE_DIRECTX)" != ""
-
 .IF "$(verbose)"!="" || "$(VERBOSE)"!=""
 CDEFS+= -DVERBOSE
 .ENDIF
 
+PKGCONFIG_MODULES=gstreamer-0.10
+.INCLUDE: pkg_config.mk
+
 # --- Files ----------------------------------
 
+.IF "$(GUI)" == "UNX" || "$(GUI)" == "WNT"
+
 .IF "$(GUI)" == "WNT"
+CDEFS+= -DWINNT
+.ENDIF
 
 SLOFILES= \
-		$(SLO)$/winuno.obj      \
-		$(SLO)$/manager.obj     \
-		$(SLO)$/window.obj      \
-		$(SLO)$/player.obj      \
-		$(SLO)$/framegrabber.obj    
+		$(SLO)$/gstuno.obj      \
+		$(SLO)$/gstmanager.obj     \
+		$(SLO)$/gstplayer.obj
         
 
 EXCEPTIONSFILES= \
-		$(SLO)$/winuno.obj      \
-		$(SLO)$/framegrabber.obj    
+		$(SLO)$/gstuno.obj      \
 
 SHL1TARGET=$(TARGET)
-SHL1STDLIBS= $(CPPULIB) $(SALLIB) $(COMPHELPERLIB) $(CPPUHELPERLIB) $(UNOTOOLSLIB) $(TOOLSLIB) $(VCLLIB) 
+SHL1STDLIBS= $(CPPULIB) $(SALLIB) $(COMPHELPERLIB) $(CPPUHELPERLIB) $(PKGCONFIG_LIBS) $(TOOLSLIB)
 SHL1IMPLIB=i$(TARGET)
 SHL1LIBS=$(SLB)$/$(TARGET).lib
 SHL1DEF=$(MISC)$/$(SHL1TARGET).def
@@ -72,14 +74,6 @@ SHL1DEF=$(MISC)$/$(SHL1TARGET).def
 DEF1NAME=$(SHL1TARGET)
 DEF1EXPORTFILE=exports.dxp
 
-SHL1STDLIBS += strmiids.lib
-SHL1STDLIBS += ole32.lib
-SHL1STDLIBS += oleaut32.lib
-SHL1STDLIBS += gdi32.lib
-SHL1STDLIBS += ddraw.lib
-SHL1STDLIBS += dxguid.lib
-
-.ENDIF
 .ENDIF
 
 .INCLUDE :  	target.mk

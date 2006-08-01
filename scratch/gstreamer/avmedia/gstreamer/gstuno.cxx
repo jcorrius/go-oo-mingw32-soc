@@ -33,8 +33,7 @@
  *
  ************************************************************************/
 
-#include "gstcommon.hxx"
-#include "manager.hxx"
+#include "gstmanager.hxx"
 
 using namespace ::com::sun::star;
 
@@ -92,7 +91,7 @@ extern "C" void* SAL_CALL component_getFactory( const sal_Char* pImplName, void*
 	uno::Reference< lang::XSingleServiceFactory > xFactory;
 	void*									pRet = 0;
 
-	if( rtl_str_compare( pImplName, "com.sun.star.comp.media.Manager_DirectX" ) == 0 )
+	if( rtl_str_compare( pImplName, "com.sun.star.comp.media.Manager_GStreamer" ) == 0 )
 	{
 		const ::rtl::OUString aServiceName( ::rtl::OUString::createFromAscii( "com.sun.star.media.Manager_GStreamer" ) );
 

@@ -92,17 +92,19 @@ private:
     ::rtl::OUString         maURL;
     
     // Add elements and pipeline here
+#ifdef WINNT
     GMainLoop*              mpLoop;
+#endif
     GstElement*             mpPlaybin;  // the playbin is also a pipeline
     GstBin*                 mpSinkbin;
     GstElement*             mpVideoscaleFilter;
     GstElement*             mpSink;
     GstBus*                 mpBus;
 
-    sal_Bool                mbInitialized;
-    long                    mnUnmutedVolume;
+    gdouble                 mnUnmutedVolume;
     sal_Bool                mbMuted;
     sal_Bool                mbLooping;
+    sal_Bool                mbInitialized;
 
 };
 

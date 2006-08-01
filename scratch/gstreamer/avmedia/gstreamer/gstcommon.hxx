@@ -36,11 +36,10 @@
 #ifndef _GSTCOMMON_HXX
 #define _GSTCOMMON_HXX
 
+#include <gst/gst.h>
+
 #ifndef _OSL_MUTEX_HXX_
 #include <osl/mutex.hxx>
-#endif
-#ifndef __RTL_USTRING_
-#include <rtl/ustring>
 #endif
 #ifndef _DEBUG_HXX
 #include <tools/debug.hxx>
@@ -78,8 +77,6 @@
 #include <com/sun/star/awt/KeyModifier.hpp>
 #include <com/sun/star/awt/MouseButton.hpp>
 #include <com/sun/star/media/XManager.hpp>
-
-#include <gst/gst.h>
 
 #define WM_GRAPHNOTIFY (WM_USER + 567)
 

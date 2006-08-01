@@ -33,9 +33,15 @@
  *
  ************************************************************************/
 
-#include "player.hxx"
-#include "framegrabber.hxx"
-#include "window.hxx"
+#include <math.h>
+
+#ifndef __RTL_USTRING_
+#include <rtl/string.hxx>
+#endif
+
+#include "gstplayer.hxx"
+#include "gstframegrabber.hxx"
+#include "gstwindow.hxx"
 
 #define AVMEDIA_GST_PLAYER_IMPLEMENTATIONNAME "com.sun.star.comp.avmedia.Player_GStreamer"
 #define AVMEDIA_GST_PLAYER_SERVICENAME "com.sun.star.media.Player_GStreamer"
@@ -57,14 +63,15 @@ Player::Player( const uno::Reference< lang::XMultiServiceFactory >& rxMgr ) :
 {
     // Initialize GStreamer library
     int argc = 1;
-    char arguments[] = { "openoffice.org" };
+    char *arguments[] = { "openoffice.org" };
     char** argv = arguments;
+    GError* pError = NULL;
 
-    GError* pError = g_error_new( 1, 0, "Failed to initialize GStreamer" );
+    mbInitialized = gst_init_check( &argc, &argv, &pError );
 
-    mbInitialized = gst_init_check( &argc, &arguments, &pError );
-
-    g_error_free( pError );
+    if (pError != NULL)
+        // TODO: thow an exception?
+        g_error_free (pError);
 }
 
 // ------------------------------------------------------------------------------
@@ -92,10 +99,12 @@ bool Player::create( const ::rtl::OUString& rURL )
     
     if( mbInitialized )
     {
-        mpLoop = g_main_loop_new( NULL, FALSE ); 
+#ifdef WINNT
+        mpLoop = g_main_loop_new( NULL, FALSE );
+#endif
 
         mpPlaybin = gst_element_factory_make( "playbin", "player" );
-        OString ascURL = OUStringToOString( rURL, RTL_TEXTENCODING_ASCII_US );
+        rtl::OString ascURL = OUStringToOString( rURL, RTL_TEXTENCODING_ASCII_US );
         g_object_set( G_OBJECT( mpPlaybin ), "uri", ascURL.getStr() , NULL );
 
         bRet = true;
@@ -112,20 +121,29 @@ bool Player::create( const ::rtl::OUString& rURL )
 
 // ------------------------------------------------------------------------------
 
+#ifdef WINNT
+gboolean gst_bus_callback (GstBus *bus, GstMessage *message, gpointer data)
+{
+}
+#endif
+
 void SAL_CALL Player::start(  )
     throw (uno::RuntimeException)
 {
     // set the pipeline state to READY and run the loop
-    if( mbInitialized && NULL != mpPipeline )
+    if( mbInitialized && NULL != mpPlaybin )
     {
+#ifdef WINNT
         GstBus* pBus = gst_pipeline_get_bus( GST_PIPELINE( mpPlaybin ) );
         gst_bus_add_watch( pBus, gst_bus_callback, mpLoop );
         gst_object_unref( pBus );
-
+#endif
         gst_element_set_state( mpPlaybin, GST_STATE_PLAYING );
         
+#ifdef WINNT
         // TODO embed in a sal_Thread
         g_main_loop_run( mpLoop );
+#endif
     }
 }
 
@@ -135,8 +153,9 @@ void SAL_CALL Player::stop(  )
     throw (uno::RuntimeException)
 {
     // set the pipeline in PAUSED STATE
+#ifdef WINNT
     g_main_loop_quit( mpLoop );
-
+#endif
     gst_element_set_state( mpPlaybin, GST_STATE_READY );
 }
 
@@ -220,11 +239,9 @@ void SAL_CALL Player::setStopTime( double fTime )
 double SAL_CALL Player::getStopTime(  )
     throw (uno::RuntimeException)
 {
-    REFTIME aRefTime( 0.0 );
-
     // Get the time at which to stop
 
-    return aRefTime; 
+    return 0; 
 }
 
 // ------------------------------------------------------------------------------
@@ -274,15 +291,20 @@ sal_Bool SAL_CALL Player::isPlaybackLoop(  )
 void SAL_CALL Player::setMute( sal_Bool bSet )
     throw (uno::RuntimeException)
 {
+    OSL_TRACE( "set mute: %d muted: %d unmuted volume: %lf", bSet, mbMuted, mnUnmutedVolume );
+
     // change the volume to 0 or the unmuted volume
-    if( mpBA && ( mbMuted != bSet ) )
+    if(  mbMuted != bSet )
     {
         double nVolume = mnUnmutedVolume;
         if( bSet )
         {
             nVolume = 0.0;
         }
+
         g_object_set( G_OBJECT( mpPlaybin ), "volume", nVolume, NULL );
+
+        mbMuted = bSet;
     }
 }
 
@@ -299,13 +321,15 @@ sal_Bool SAL_CALL Player::isMute(  )
 void SAL_CALL Player::setVolumeDB( sal_Int16 nVolumeDB ) 
     throw (uno::RuntimeException)
 {
-    mnUnmutedVolume = ( static_cast< long >( nVolumeDB ) * 4 ) / 25;
+    mnUnmutedVolume = pow10 ( nVolumeDB / 20.0 );
+
+    OSL_TRACE( "set volume: %d gst volume: %lf", nVolumeDB, mnUnmutedVolume );
 
     // change volume
-    if( !mbMuted )
-    {
-        g_object_set( G_OBJECT( mpPlaybin ), "volume", mnUnmutedVolume );
-    }
+     if( !mbMuted )
+     {
+         g_object_set( G_OBJECT( mpPlaybin ), "volume", (gdouble) mnUnmutedVolume, NULL );
+     }
 }
 
 // ------------------------------------------------------------------------------
@@ -314,11 +338,14 @@ sal_Int16 SAL_CALL Player::getVolumeDB(  )
     throw (uno::RuntimeException)
 {
     double nGstVolume = 0.0;
+
     g_object_get( G_OBJECT( mpPlaybin ), "volume", &nGstVolume, NULL );
 
-    short nVolume = reinterpret_cast<short>( ( nGstVolume * 25 ) / 4 );
+    sal_Int16 nVolumeDB = (sal_Int16) ( 20.0*log10 ( nGstVolume ) );
 
-    return nVolume;
+    OSL_TRACE( "get volume: %d gst volume: %lf", nVolumeDB, nGstVolume );
+
+    return nVolumeDB;
 }
 
 // ------------------------------------------------------------------------------
@@ -328,15 +355,12 @@ awt::Size SAL_CALL Player::getPreferredPlayerWindowSize(  )
 {
     awt::Size aSize( 0, 0 );
     
-    if( mpBV )
-    { 
-        long nWidth = 0, nHeight = 0;
+    long nWidth = 0, nHeight = 0;
 
-        // TODO fill nWidth and nHeight with the current player size
+    // TODO fill nWidth and nHeight with the current player size
 
-        aSize.Width = nWidth;
-        aSize.Height = nHeight;
-    }
+    aSize.Width = nWidth;
+    aSize.Height = nHeight;
 
     return aSize;
 }
@@ -349,15 +373,15 @@ uno::Reference< ::media::XPlayerWindow > SAL_CALL Player::createPlayerWindow( co
     uno::Reference< ::media::XPlayerWindow >    xRet;
     awt::Size                                   aSize( getPreferredPlayerWindowSize() );
 
-    if( mpVW && aSize.Width > 0 && aSize.Height > 0 )
+    if( aSize.Width > 0 && aSize.Height > 0 )
     {
         // TODO understand what needs to change
-        ::avmedia::gstreamer::Window* pWindow = new ::avmedia::gstreamer::Window( mxMgr, *this );
+        /*::avmedia::gstreamer::Window* pWindow = new ::avmedia::gstreamer::Window( mxMgr, *this );
 
         xRet = pWindow;
 
         if( !pWindow->create( aArguments ) )
-            xRet = uno::Reference< ::media::XPlayerWindow >();
+        xRet = uno::Reference< ::media::XPlayerWindow >(); */
     }
 
     return xRet;
@@ -370,7 +394,7 @@ uno::Reference< media::XFrameGrabber > SAL_CALL Player::createFrameGrabber(  )
 {
     uno::Reference< media::XFrameGrabber > xRet;
 
-    if( maURL.getLength() > 0 )
+    /*if( maURL.getLength() > 0 )
     {
         FrameGrabber* pGrabber = new FrameGrabber( mxMgr );
         
@@ -378,7 +402,7 @@ uno::Reference< media::XFrameGrabber > SAL_CALL Player::createFrameGrabber(  )
         
         if( !pGrabber->create( maURL ) )
             xRet.clear();
-    }
+            }*/
     
     return xRet;
 }
