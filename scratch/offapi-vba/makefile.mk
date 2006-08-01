@@ -42,7 +42,6 @@ IDLFILES=\
 	XSeriesCollection.idl\
 	XSeries.idl\
 	XDialog.idl \
-	XArrayWrapper.idl \
 	XPivotTables.idl \
 	XPivotTable.idl \
 	XPivotCache.idl \
