@@ -324,6 +324,7 @@ const sal_Int32 RANGE_PROPERTY_ID_DFLT=1;
 const ::rtl::OUString RANGE_PROPERTY_DFLT( RTL_CONSTASCII_USTRINGPARAM( "_$DefaultProp" ) );
 const ::rtl::OUString ISVISIBLE(  RTL_CONSTASCII_USTRINGPARAM( "IsVisible"));
 const ::rtl::OUString WIDTH(  RTL_CONSTASCII_USTRINGPARAM( "Width"));
+const ::rtl::OUString HEIGHT(  RTL_CONSTASCII_USTRINGPARAM( "Height"));
 
 class CellValueSetter : public ValueSetter
 {
@@ -2340,15 +2341,31 @@ getDeviceFromDoc( const uno::Reference< frame::XModel >& xModel ) throw( uno::Ru
 
 // returns calc internal col. width ( in 1/100 mm )
 double 
-ScVbaRange::getCalcColWidth() throw (uno::RuntimeException)
+ScVbaRange::getCalcColWidth( const uno::Reference< beans::XPropertySet >& xProps) throw (uno::RuntimeException)
 {
 	double nWidth = 0;
-	uno::Reference< table::XColumnRowRange > xColRowRange( mxRange, uno::UNO_QUERY_THROW );			
-	uno::Reference< beans::XPropertySet > xProps( xColRowRange->getColumns(), uno::UNO_QUERY_THROW );			
-	
 	xProps->getPropertyValue( WIDTH ) >>= nWidth;
 	return nWidth;
 }
+
+// returns calc internal row. height ( in 1/100 mm )
+double
+ScVbaRange::getCalcRowHeight( const uno::Reference< beans::XPropertySet >& xProps ) throw (uno::RuntimeException)
+{
+        double nHeight = 0;
+
+        xProps->getPropertyValue( HEIGHT ) >>= nHeight;
+        // Height is in 1/100 mm
+        //    * 1 point = 1/72 inch = 20 twips
+        //    * 1 inch = 72 points = 1440 twips
+        //    * 1 cm = 567 twips
+
+        // convert height to Points
+        nHeight = ( (double)((nHeight /1000 ) * 567 ) / 20 );
+
+        return nHeight;
+}
+
 // return Char Width in 1/100 mm
 double getDefaultCharWidth( const uno::Reference< frame::XModel >& xModel ) throw ( uno::RuntimeException )
 {
@@ -2384,9 +2401,11 @@ ScVbaRange::getColumnWidth() throw (uno::RuntimeException)
 	ScDocShell* pShell = getDocShellFromRange( mxRange );
 	if ( pShell )
 	{
+		uno::Reference< table::XColumnRowRange > xColRowRange( mxRange, uno::UNO_QUERY_THROW );			
+		uno::Reference< beans::XPropertySet > xProps( xColRowRange->getColumns(), uno::UNO_QUERY_THROW ); 
 		uno::Reference< frame::XModel > xModel = pShell->GetModel();
 		if ( xModel.is() )
-			dfltCharWidth = getCalcColWidth() / getDefaultCharWidth( xModel );
+			dfltCharWidth = getCalcColWidth(xProps) / getDefaultCharWidth( xModel );
 	}
 	return uno::makeAny( dfltCharWidth );
 }
@@ -2412,29 +2431,25 @@ ScVbaRange::setColumnWidth( const uno::Any& _columnwidth ) throw (uno::RuntimeEx
 uno::Any SAL_CALL 
 ScVbaRange::getWidth() throw (uno::RuntimeException)
 {
-	
-	double nWidth = getCalcColWidth();
-	// Width is in 1/100 mm
-	//    * 1 point = 1/72 inch = 20 twips
-	//    * 1 inch = 72 points = 1440 twips
-	//    * 1 cm = 567 twips
-
-	// convert width to Points
-	nWidth = ( (double)((nWidth /1000 ) * 567 ) / 20 );
-	return uno::makeAny( (sal_Int32)nWidth );
-}
-
-void SAL_CALL 
-ScVbaRange::setWidth( const uno::Any& _width ) throw (uno::RuntimeException)
-{
-	double nWidth; // Incomming width is in points
-	_width >>= nWidth;
-	// Convert nWidth to 1/100 mm
-	nWidth = (double)( ( nWidth * 20 ) / 567 );
-	nWidth = (nWidth * 1000);
 	uno::Reference< table::XColumnRowRange > xColRowRange( mxRange, uno::UNO_QUERY_THROW );			
-	uno::Reference< beans::XPropertySet > xProps( xColRowRange->getColumns(), uno::UNO_QUERY_THROW );			
-	xProps->setPropertyValue( WIDTH , uno::makeAny( (sal_Int32)nWidth ) );
+	uno::Reference< container::XIndexAccess > xIndexAccess( xColRowRange->getColumns(), uno::UNO_QUERY_THROW ); 
+	sal_Int32 nElems = xIndexAccess->getCount();	
+	double nWidth = 0;
+	for ( sal_Int32 index=0; index<nElems; ++index )
+	{
+        	uno::Reference< beans::XPropertySet > xProps( xIndexAccess->getByIndex( index ), uno::UNO_QUERY_THROW ); 
+
+		double nTmpWidth = getCalcColWidth( xProps );
+		// Width is in 1/100 mm
+		//    * 1 point = 1/72 inch = 20 twips
+		//    * 1 inch = 72 points = 1440 twips
+		//    * 1 cm = 567 twips
+
+		// convert width to Points
+		nTmpWidth = ( (double)((nTmpWidth /1000 ) * 567 ) / 20 );
+		nWidth += nTmpWidth;
+	}
+	return uno::makeAny( nWidth );
 }
 
 uno::Any SAL_CALL 
@@ -2460,4 +2475,41 @@ ScVbaRange::Borders( const uno::Any& item ) throw( css::uno::RuntimeException )
 	if ( !item.hasValue() )
 		return uno::makeAny( m_Borders );
 	return m_Borders->Item( item );
+}
+
+uno::Any SAL_CALL 
+ScVbaRange::getRowHeight() throw (uno::RuntimeException)
+{
+	uno::Reference< table::XColumnRowRange > xColRowRange( mxRange, uno::UNO_QUERY_THROW );			
+	uno::Reference< beans::XPropertySet > xProps( xColRowRange->getRows(), uno::UNO_QUERY_THROW ); 
+	double nHeight = getCalcRowHeight(xProps);
+	return uno::makeAny( nHeight );
+}
+
+void SAL_CALL 
+ScVbaRange::setRowHeight( const uno::Any& _rowheight) throw (uno::RuntimeException)
+{
+	 double nHeight; // Incomming height is in points
+        _rowheight >>= nHeight;
+        // Convert nHeight to 1/100 mm
+        nHeight = (double)( ( nHeight * 20 ) / 567 );
+        nHeight = (nHeight * 1000);
+        uno::Reference< table::XColumnRowRange > xColRowRange( mxRange, uno::UNO_QUERY_THROW );
+        uno::Reference< beans::XPropertySet > xProps( xColRowRange->getRows(), uno::UNO_QUERY_THROW ); 
+        xProps->setPropertyValue( HEIGHT , uno::makeAny( (sal_Int32)nHeight ) );
+}
+
+uno::Any SAL_CALL 
+ScVbaRange::getHeight() throw (uno::RuntimeException)
+{
+	uno::Reference< table::XColumnRowRange > xColRowRange( mxRange, uno::UNO_QUERY_THROW );			
+	uno::Reference< container::XIndexAccess > xIndexAccess( xColRowRange->getRows(), uno::UNO_QUERY_THROW ); 
+	sal_Int32 nElems = xIndexAccess->getCount();
+	double nHeight = 0;
+	for ( sal_Int32 index=0; index<nElems; ++index )
+	{
+        	uno::Reference< beans::XPropertySet > xProps( xIndexAccess->getByIndex( index ), uno::UNO_QUERY_THROW ); 
+		nHeight += getCalcRowHeight(xProps);
+	}
+	return uno::makeAny( nHeight );
 }
