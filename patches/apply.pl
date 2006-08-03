@@ -902,7 +902,8 @@ sub print_statistic_no_issue ($)
     "apply <path-to-patchdir> --series-from=<Debian>\n" .
     "apply <path-to-patchdir> --add-developer\n" .
     "apply <path-to-patchdir> --find-unused\n" .
-    "apply <path-to-patchdir> --statistic-no-issue\n";
+    "apply <path-to-patchdir> --statistic-no-issue\n" .
+    "apply <path-to-patchdir> --statistic-breakdown\n";
 
 %options = ();
 
