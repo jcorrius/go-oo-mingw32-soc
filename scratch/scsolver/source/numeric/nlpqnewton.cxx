@@ -47,11 +47,11 @@ namespace scsolver { namespace numeric { namespace opres { namespace nlp {
 class QuasiNewtonImpl
 {
 	/**
-     * Calculate the norm of a set of variables.
-     * 
-     * @param mxX one-column matrix representing delta f(x) vector
-     * 
-     * @return double calculated norm
+	 * Calculate the norm of a set of variables.
+	 * 
+	 * @param mxX one-column matrix representing delta f(x) vector
+	 * 
+	 * @return double calculated norm
 	 */
 	static double norm( const Matrix& mxX )
 	{
@@ -110,7 +110,6 @@ public:
 	{
 		// Initialize relevant data members.
 		m_pModel = m_pSelf->getModel();
-		//vector<double> cnVars = m_pModel->getVariable();
 		vector<double> cnVars = m_pModel->getVars();
 
 		vector<double>::const_iterator it, itBeg = cnVars.begin(), itEnd = cnVars.end();
@@ -202,10 +201,10 @@ private:
 	}
 
 	/**
-     * Calculate or initialize deflection matrix (D).
+	 * Calculate or initialize deflection matrix (D).
 	 * 
-     * @return bool true if the iteration should stop, or false
-     *         otherwise.
+	 * @return bool true if the iteration should stop, or false
+	 *         otherwise.
 	 */
 	bool calcDefMatrix()
 	{
@@ -259,7 +258,7 @@ private:
 	}
 
 	/**
-     * One-dimensional search (needs improvement).
+	 * One-dimensional search (needs improvement).
 	 * 
 	 * @return double
 	 */
@@ -352,9 +351,7 @@ QuasiNewton::~QuasiNewton() throw()
 void QuasiNewton::solve()
 {
 	m_pImpl->solve();
-
 	Matrix mxSolution( 0, 0 );
-
 	setSolution( mxSolution );
 }
 
