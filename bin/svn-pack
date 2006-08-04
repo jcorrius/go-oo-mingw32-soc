@@ -2,14 +2,30 @@
 
 use File::Temp qw/ tempfile /;
 
+# if this is set - we pack all the svn pieces
+# otherwise we unpack them ...
+my $pack = 0;
+
+# if unpacking - do we copy or use hard links
+my $do_link = 0;
+
 sub syntax($)
 {
-    print <<"EOF"
+    if ($pack) {
+	print <<"EOF"
 svn-pack: <svn checkout path> [dest-archive]
     --help - show this help
 EOF
 ;
-    exit shift;
+    } else {
+	print <<"EOF"
+svn-unpack: [args] [<path> (default . )]
+    --link - use hard links instead of copies
+    --help - show this help
+EOF
+;
+    }
+    die();
 }
 
 sub slurp_dir($)
@@ -38,7 +54,7 @@ sub dump_svn_directory ($$)
     for my $line (slurp_dir ($path)) {
 	if ($toplevel) {
 	    $line eq 'text-base' && next;
-	    $line eq 'tmp' && next; # hopefully can re-create
+	    $line eq 'tmp' && next; # re-create on unpack
 	}
 	my $subpath = "$path/$line";
 	push @paths, $subpath;
@@ -58,7 +74,11 @@ sub find_svn($)
 	my $subpath = "$path/$line";
 
 	if ($line eq '.svn') {
-	    push @paths, dump_svn_directory ($subpath, 1);
+	    if ($pack) {
+		push @paths, dump_svn_directory ($subpath, 1);
+	    } else {
+		push @paths, $path;
+	    }
 
 	} elsif (-d $subpath) {
 	    push @paths, find_svn ($subpath);
@@ -68,19 +88,41 @@ sub find_svn($)
     return @paths;
 }
 
+sub make_text_base($$)
+{
+    my ($src, $dest) = @_;
+#    print "$src -> $dest\n";
+    for my $file (slurp_dir ($src)) {
+	my $from = "$src/$file";
+	-d $from && next;
+	my $to = "$dest/$file.svn-base";
+	-f $to && next;
+
+#	print "do $from -> $to\n";
+	if (!$do_link || !link ($from, $to)) {
+	    `cp -a $from $to`;
+	}
+    }
+}
+
 my $src;
 my $dest;
+
+my $app_name = $0;
+$app_name =~ s/^.*\/([^\/+])/$1/;
+$pack = $app_name eq 'svn-pack';
+
+print "packing mode\n" if ($pack);
+print "un-packing mode\n" if (!$pack);
 
 for my $arg (@ARGV) {
     if ($arg eq '--help' || $arg eq '-h') {
 	syntax (0);
-
+    } elsif ($arg eq '--link') {
+	$do_link = 1;
     } elsif (!defined $src) {
 	$src = $arg;
 	$src =~ s/\/$//;
-	$dest = $arg;
-	$dest =~ s/^.*\/([^\/*])/$1/;
-	$dest .= ".tar.gz";
     } elsif (!defined $dest) {
 	$dest = $arg;
     } else {
@@ -89,19 +131,35 @@ for my $arg (@ARGV) {
     }
 }
 
-if (!defined $src || !defined $dest) {
-    syntax(1);
-}
+$src = '.' if (!defined $src && !$pack);
 
-print "Pack $src to $dest\n";
+syntax(1) if (!defined $src);
 
 my @files = find_svn ($src);
 
-my ($fh, $filename) = tempfile( "svnpackXXXXXX" );
-for my $file (@files) {
-    print $fh "$file\n";
-}
-close ($fh);
+if ($pack) {
+    if (!defined $dest) {
+	$dest = $src;
+	$dest =~ s/^.*\/([^\/*])/$1/;
+	$dest .= "-svn.tar.gz";
+    }
+    print "Pack $src to $dest\n";
+    my ($fh, $filename) = tempfile( "svnpackXXXXXX" );
+    for my $file (@files) {
+	print $fh "$file\n";
+    }
+    close ($fh);
+    
+    print "Written file list to $filename\n";
+    `tar czf $dest -T $filename`;
 
-print "Written file list to $filename\n";
-`tar czf $dest -T $filename`;
+    unlink $filename;
+    print "done.\n";
+
+} else {
+    for my $from (@files) {
+	mkdir ("$from/.svn/tmp"); # without which svn barfs
+	mkdir ("$from/.svn/text-base");
+	make_text_base ($from, "$from/.svn/text-base");
+    }
+}
