@@ -58,6 +58,7 @@ public:
     ~Player();
 
     bool create( const ::rtl::OUString& rURL );
+    void processMessage( GstMessage *message );
 
     // XPlayer
     virtual void SAL_CALL start(  ) throw (::com::sun::star::uno::RuntimeException);
