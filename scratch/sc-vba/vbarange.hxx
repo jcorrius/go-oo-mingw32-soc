@@ -68,8 +68,8 @@ class ScVbaRange : public ScVbaRange_BASE
 	sal_Bool mbIsRows;
 	sal_Bool mbIsColumns;
 	rtl::OUString msDftPropName;
-	double getCalcColWidth( const css::uno::Reference< css::beans::XPropertySet >& ) throw (css::uno::RuntimeException);
-	double getCalcRowHeight( const css::uno::Reference< css::beans::XPropertySet >& ) throw (css::uno::RuntimeException);
+	double getCalcColWidth( const css::table::CellRangeAddress& ) throw (css::uno::RuntimeException);
+	double getCalcRowHeight( const css::table::CellRangeAddress& ) throw (css::uno::RuntimeException);
 	void visitArray( ArrayVisitor& vistor );
 	css::uno::Reference< css::script::XTypeConverter > getTypeConverter() throw (css::uno::RuntimeException);
 

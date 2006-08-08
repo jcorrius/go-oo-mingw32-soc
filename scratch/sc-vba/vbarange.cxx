@@ -63,6 +63,7 @@
 #include <svx/srchitem.hxx>
 #include <cellsuno.hxx>
 #include <dbcolect.hxx>
+#include "docfunc.hxx"
 
 #include <sfx2/dispatch.hxx>
 #include <sfx2/app.hxx>
@@ -97,8 +98,34 @@
 
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
+//    * 1 point = 1/72 inch = 20 twips
+//    * 1 inch = 72 points = 1440 twips
+//    * 1 cm = 567 twips
+double lcl_hmmToPoints( double nVal ) { return ( (double)((nVal /1000 ) * 567 ) / 20 ); }
+double lcl_pointsToHmm( double nVal ) { return (double)( ( nVal * 20 ) / 567 ) * 1000; }
+USHORT lcl_pointsToTwips( double nVal ) 
+{ 
+	nVal = nVal * 20;
+	short nTwips = nVal;
+	return nTwips;
+}
+double lcl_TwipsToPoints( USHORT nVal ) 
+{ 
+	double nPoints = nVal;
+	return nPoints / 20; 
+}
 
-
+double lcl_Round2DecPlaces( double nVal )
+{
+//	return ( (double)(long)( nVal * 100 ) )/ 100;
+	nVal  = (nVal * 100);
+	long tmp = nVal;
+	if ( ( ( nVal - tmp ) >= 0.5 ) )
+		++tmp;
+	nVal = tmp;
+	nVal = nVal/100;
+	return nVal;
+}
 uno::Any lcl_makeRange( uno::Reference< uno::XComponentContext >& xContext, const uno::Any aAny )
 {
 	uno::Reference< table::XCellRange > xCellRange( aAny, uno::UNO_QUERY_THROW );
@@ -699,7 +726,7 @@ const uno::Reference< sheet::XSpreadsheet >& xDoc )
 }
 
 bool
-getCellRangesForAddress( const rtl::OUString& sAddress, ScDocShell* pDocSh, ScRangeList& rCellRanges, ScAddress::Convention& eConv )
+getCellRangesForAddress( USHORT& rResFlags, const rtl::OUString& sAddress, ScDocShell* pDocSh, ScRangeList& rCellRanges, ScAddress::Convention& eConv )
 {
 	
 	ScDocument* pDoc = NULL;
@@ -710,8 +737,8 @@ getCellRangesForAddress( const rtl::OUString& sAddress, ScDocShell* pDocSh, ScRa
 		String aString(sAddress);
 		USHORT nMask = SCA_VALID;
 		//USHORT nParse = rCellRanges.Parse( sAddress, pDoc, nMask, ScAddress::CONV_XL_A1 );
-		USHORT nParse = rCellRanges.Parse( sAddress, pDoc, nMask, eConv );
-		if ( nParse & SCA_VALID )
+		rResFlags = rCellRanges.Parse( sAddress, pDoc, nMask, eConv );
+		if ( rResFlags & SCA_VALID )
 		{
 			return true;
 		}
@@ -739,16 +766,18 @@ getRangeForName( const uno::Reference< uno::XComponentContext >& xContext, const
 	ScRange refRange;	
 	ScUnoConversion::FillScRange( refRange, pAddr );
 	ScRangeList aCellRanges;
-	if ( !getCellRangesForAddress( sAddress, pDocSh, aCellRanges, eConv ) )
+	USHORT nFlags = 0;
+	if ( !getCellRangesForAddress( nFlags, sAddress, pDocSh, aCellRanges, eConv ) )
 		throw uno::RuntimeException();
 	for ( ScRange* pRange = aCellRanges.First() ; pRange; pRange = aCellRanges.Next() )
 	{
+		bool bTabFromReferrer = !( nFlags & SCA_TAB_3D );
 		pRange->aStart.SetCol( refRange.aStart.Col() + pRange->aStart.Col() );	
 		pRange->aStart.SetRow( refRange.aStart.Row() + pRange->aStart.Row() );	
-		pRange->aStart.SetTab( refRange.aStart.Tab() );	
+                pRange->aStart.SetTab( bTabFromReferrer ? refRange.aStart.Tab()  : pRange->aStart.Tab() );
 		pRange->aEnd.SetCol( refRange.aStart.Col() + pRange->aEnd.Col() );	
 		pRange->aEnd.SetRow( refRange.aStart.Row() + pRange->aEnd.Row() );	
-		pRange->aEnd.SetTab( refRange.aEnd.Tab() );	
+                pRange->aEnd.SetTab( bTabFromReferrer ? refRange.aEnd.Tab()  : pRange->aEnd.Tab() );
 	}	
 
 	// Single range
@@ -1207,12 +1236,19 @@ ScVbaRange::Address(  const uno::Any& RowAbsolute, const uno::Any& ColumnAbsolut
 		// Multi-Area Range
 		rtl::OUString sAddress;
 		uno::Reference< vba::XCollection > xCollection( m_Areas, uno::UNO_QUERY_THROW );
+                uno::Any aExternalCopy = External;
 		for ( sal_Int32 index = 1; index <= xCollection->getCount(); ++index )
 		{
 			uno::Reference< vba::XRange > xRange( xCollection->Item( uno::makeAny( index ) ), uno::UNO_QUERY_THROW );
 			if ( index > 1 )
+			{
 				sAddress += rtl::OUString( ',' );
-			sAddress += xRange->Address( RowAbsolute, ColumnAbsolute, ReferenceStyle, External, RelativeTo );
+                                // force external to be false
+                                // only first address should have the
+                                // document and sheet specifications
+                                aExternalCopy = uno::makeAny(sal_False);
+			}
+			sAddress += xRange->Address( RowAbsolute, ColumnAbsolute, ReferenceStyle, aExternalCopy, RelativeTo );
 		}
 		return sAddress;	
 		
@@ -2339,34 +2375,28 @@ getDeviceFromDoc( const uno::Reference< frame::XModel >& xModel ) throw( uno::Ru
 	return xDevice;
 }
 
-// returns calc internal col. width ( in 1/100 mm )
+// returns calc internal col. width ( in points )
 double 
-ScVbaRange::getCalcColWidth( const uno::Reference< beans::XPropertySet >& xProps) throw (uno::RuntimeException)
+ScVbaRange::getCalcColWidth( const table::CellRangeAddress& rAddress) throw (uno::RuntimeException)
 {
-	double nWidth = 0;
-	xProps->getPropertyValue( WIDTH ) >>= nWidth;
-	return nWidth;
+	ScDocument* pDoc = getDocumentFromRange( mxRange );
+	USHORT nWidth = pDoc->GetOriginalWidth( rAddress.StartColumn, rAddress.Sheet );
+	double nPoints = lcl_TwipsToPoints( nWidth );
+	nPoints = lcl_Round2DecPlaces( nPoints );
+	return nPoints;
 }
 
-// returns calc internal row. height ( in 1/100 mm )
 double
-ScVbaRange::getCalcRowHeight( const uno::Reference< beans::XPropertySet >& xProps ) throw (uno::RuntimeException)
+ScVbaRange::getCalcRowHeight( const table::CellRangeAddress& rAddress ) throw (uno::RuntimeException)
 {
-        double nHeight = 0;
-
-        xProps->getPropertyValue( HEIGHT ) >>= nHeight;
-        // Height is in 1/100 mm
-        //    * 1 point = 1/72 inch = 20 twips
-        //    * 1 inch = 72 points = 1440 twips
-        //    * 1 cm = 567 twips
-
-        // convert height to Points
-        nHeight = ( (double)((nHeight /1000 ) * 567 ) / 20 );
-
-        return nHeight;
+	ScDocument* pDoc = getDocumentFromRange( mxRange );
+	USHORT nWidth = pDoc->GetOriginalHeight( rAddress.StartRow, rAddress.Sheet );
+	double nPoints = lcl_TwipsToPoints( nWidth );
+	nPoints = lcl_Round2DecPlaces( nPoints );
+	return nPoints;	
 }
 
-// return Char Width in 1/100 mm
+// return Char Width in points
 double getDefaultCharWidth( const uno::Reference< frame::XModel >& xModel ) throw ( uno::RuntimeException )
 {
 	const static rtl::OUString sDflt( RTL_CONSTASCII_USTRINGPARAM("Default")); 
@@ -2387,27 +2417,28 @@ double getDefaultCharWidth( const uno::Reference< frame::XModel >& xModel ) thro
 	double nCharPixelWidth =  xFont->getCharWidth( (sal_Int8)'0' );	
 
 	double nPixelsPerMeter = xDevice->getInfo().PixelPerMeterX;
-
-	double nCharWidth = nCharPixelWidth / nPixelsPerMeter;
-	nCharWidth = nCharWidth * (double)100 * (double)1000;
-
-	return nCharWidth;	
+	double nCharWidth = nCharPixelWidth /  nPixelsPerMeter;
+	nCharWidth = nCharWidth * (double)56700;// in twips
+	return lcl_TwipsToPoints( (USHORT)nCharWidth );	
 }
 
 uno::Any SAL_CALL 
 ScVbaRange::getColumnWidth() throw (uno::RuntimeException)
 {
-	double dfltCharWidth = 	0;
+	double nColWidth = 	0;
 	ScDocShell* pShell = getDocShellFromRange( mxRange );
 	if ( pShell )
 	{
+		RangeHelper thisRange( mxRange );
+		table::CellRangeAddress thisAddress = thisRange.getCellRangeAddressable()->getRangeAddress();	
 		uno::Reference< table::XColumnRowRange > xColRowRange( mxRange, uno::UNO_QUERY_THROW );			
 		uno::Reference< beans::XPropertySet > xProps( xColRowRange->getColumns(), uno::UNO_QUERY_THROW ); 
 		uno::Reference< frame::XModel > xModel = pShell->GetModel();
 		if ( xModel.is() )
-			dfltCharWidth = getCalcColWidth(xProps) / getDefaultCharWidth( xModel );
+			nColWidth = getCalcColWidth(thisAddress) / getDefaultCharWidth( xModel );
 	}
-	return uno::makeAny( dfltCharWidth );
+	nColWidth = lcl_Round2DecPlaces( nColWidth );
+	return uno::makeAny( nColWidth );
 }
 
 void SAL_CALL 
@@ -2415,15 +2446,27 @@ ScVbaRange::setColumnWidth( const uno::Any& _columnwidth ) throw (uno::RuntimeEx
 {
 	double nColWidth = 0;
 	_columnwidth >>= nColWidth;
-	ScDocShell* pShell = getDocShellFromRange( mxRange );
-	if ( pShell )
-	{
-		uno::Reference< frame::XModel > xModel = pShell->GetModel();
-		if ( xModel.is() )
-		{
-			uno::Reference< table::XColumnRowRange > xColRowRange( mxRange, uno::UNO_QUERY_THROW );			
-			uno::Reference< beans::XPropertySet > xProps( xColRowRange->getColumns(), uno::UNO_QUERY_THROW );			
-			xProps->setPropertyValue( WIDTH, uno::makeAny( sal_Int32 ( getDefaultCharWidth( xModel ) * nColWidth ) ) );
+	nColWidth = lcl_Round2DecPlaces( nColWidth );
+        ScDocShell* pDocShell = getDocShellFromRange( mxRange );
+        if ( pDocShell )
+        {
+                uno::Reference< frame::XModel > xModel = pDocShell->GetModel();
+                if ( xModel.is() )
+                {
+
+			nColWidth = ( nColWidth * getDefaultCharWidth( xModel ) );
+			RangeHelper thisRange( mxRange );	
+			table::CellRangeAddress thisAddress = thisRange.getCellRangeAddressable()->getRangeAddress();
+			USHORT nTwips = lcl_pointsToTwips( nColWidth );
+			
+			ScDocument* pDoc = pDocShell->GetDocument();
+			ScDocFunc aFunc(*pDocShell);
+			SCCOLROW nColArr[2];
+			nColArr[0] = thisAddress.StartColumn;
+			nColArr[1] = thisAddress.EndColumn;
+			aFunc.SetWidthOrHeight( TRUE, 1, nColArr, thisAddress.Sheet, SC_SIZE_ORIGINAL,
+		                                                                        nTwips, TRUE, TRUE );		
+			
 		}
 	}
 }
@@ -2437,16 +2480,8 @@ ScVbaRange::getWidth() throw (uno::RuntimeException)
 	double nWidth = 0;
 	for ( sal_Int32 index=0; index<nElems; ++index )
 	{
-        	uno::Reference< beans::XPropertySet > xProps( xIndexAccess->getByIndex( index ), uno::UNO_QUERY_THROW ); 
-
-		double nTmpWidth = getCalcColWidth( xProps );
-		// Width is in 1/100 mm
-		//    * 1 point = 1/72 inch = 20 twips
-		//    * 1 inch = 72 points = 1440 twips
-		//    * 1 cm = 567 twips
-
-		// convert width to Points
-		nTmpWidth = ( (double)((nTmpWidth /1000 ) * 567 ) / 20 );
+		uno::Reference< sheet::XCellRangeAddressable > xAddressable( xIndexAccess->getByIndex( index ), uno::UNO_QUERY_THROW ); 
+		double nTmpWidth = getCalcColWidth( xAddressable->getRangeAddress() );
 		nWidth += nTmpWidth;
 	}
 	return uno::makeAny( nWidth );
@@ -2480,9 +2515,9 @@ ScVbaRange::Borders( const uno::Any& item ) throw( css::uno::RuntimeException )
 uno::Any SAL_CALL 
 ScVbaRange::getRowHeight() throw (uno::RuntimeException)
 {
-	uno::Reference< table::XColumnRowRange > xColRowRange( mxRange, uno::UNO_QUERY_THROW );			
-	uno::Reference< beans::XPropertySet > xProps( xColRowRange->getRows(), uno::UNO_QUERY_THROW ); 
-	double nHeight = getCalcRowHeight(xProps);
+	RangeHelper thisRange( mxRange );	
+	table::CellRangeAddress thisAddress = thisRange.getCellRangeAddressable()->getRangeAddress();
+	double nHeight = getCalcRowHeight( thisAddress );
 	return uno::makeAny( nHeight );
 }
 
@@ -2491,12 +2526,19 @@ ScVbaRange::setRowHeight( const uno::Any& _rowheight) throw (uno::RuntimeExcepti
 {
 	 double nHeight; // Incomming height is in points
         _rowheight >>= nHeight;
-        // Convert nHeight to 1/100 mm
-        nHeight = (double)( ( nHeight * 20 ) / 567 );
-        nHeight = (nHeight * 1000);
-        uno::Reference< table::XColumnRowRange > xColRowRange( mxRange, uno::UNO_QUERY_THROW );
-        uno::Reference< beans::XPropertySet > xProps( xColRowRange->getRows(), uno::UNO_QUERY_THROW ); 
-        xProps->setPropertyValue( HEIGHT , uno::makeAny( (sal_Int32)nHeight ) );
+	nHeight = lcl_Round2DecPlaces( nHeight );
+	RangeHelper thisRange( mxRange );	
+	table::CellRangeAddress thisAddress = thisRange.getCellRangeAddressable()->getRangeAddress();
+	USHORT nTwips = lcl_pointsToTwips( nHeight );
+	
+	ScDocShell* pDocShell = getDocShellFromRange( mxRange );
+	ScDocument* pDoc = pDocShell->GetDocument();
+	ScDocFunc aFunc(*pDocShell);
+	SCCOLROW nRowArr[2];
+	nRowArr[0] = thisAddress.StartRow;
+	nRowArr[1] = thisAddress.EndRow;
+	aFunc.SetWidthOrHeight( FALSE, 1, nRowArr, thisAddress.Sheet, SC_SIZE_ORIGINAL,
+                                                                        nTwips, TRUE, TRUE );		
 }
 
 uno::Any SAL_CALL 
@@ -2508,8 +2550,8 @@ ScVbaRange::getHeight() throw (uno::RuntimeException)
 	double nHeight = 0;
 	for ( sal_Int32 index=0; index<nElems; ++index )
 	{
-        	uno::Reference< beans::XPropertySet > xProps( xIndexAccess->getByIndex( index ), uno::UNO_QUERY_THROW ); 
-		nHeight += getCalcRowHeight(xProps);
+        	uno::Reference< sheet::XCellRangeAddressable > xAddressable( xIndexAccess->getByIndex( index ), uno::UNO_QUERY_THROW ); 
+		nHeight += getCalcRowHeight(xAddressable->getRangeAddress() );
 	}
 	return uno::makeAny( nHeight );
 }
