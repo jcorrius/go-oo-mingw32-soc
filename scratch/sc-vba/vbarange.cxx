@@ -80,6 +80,7 @@
 #include "vbainterior.hxx"
 #include "vbacharacters.hxx"
 #include "vbaborders.hxx"
+#include "vbaworksheet.hxx"
 
 #include "tabvwsh.hxx"
 #include "rangelst.hxx"
@@ -2554,4 +2555,12 @@ ScVbaRange::getHeight() throw (uno::RuntimeException)
 		nHeight += getCalcRowHeight(xAddressable->getRangeAddress() );
 	}
 	return uno::makeAny( nHeight );
+}
+
+uno::Reference< vba::XWorksheet >
+ScVbaRange::getWorksheet() throw (uno::RuntimeException)
+{
+	ScDocShell* pDocShell =  getDocShellFromRange(mxRange);
+	RangeHelper* rHelper = new RangeHelper(mxRange);
+        return new ScVbaWorksheet(m_xContext,rHelper->getSpreadSheet(),pDocShell->GetModel());
 }

@@ -122,6 +122,7 @@ public:
 	virtual void SAL_CALL setRowHeight( const css::uno::Any& _rowheight ) throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL getWidth() throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL getHeight() throw (css::uno::RuntimeException);
+	virtual css::uno::Reference< oo::vba::XWorksheet > SAL_CALL getWorksheet() throw (css::uno::RuntimeException);
 	// Methods
 	sal_Bool IsRows() { return mbIsRows; }
 	sal_Bool IsColumns() { return mbIsColumns; }
