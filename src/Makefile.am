@@ -7,7 +7,7 @@ EXTRA_DIST=\
 	ooobanner_nld.bmp \
 	ooobitmap_nld.bmp \
 	openintro_suse.bmp \
-	openabout_suse.png \
+	openabout_suse.bmp \
 	openintro_nld.bmp \
 	openabout_nld.bmp \
 	openintro_ark.bmp \
@@ -17,8 +17,6 @@ EXTRA_DIST=\
 	openintro_fw64.bmp \
 	openabout_fw64.bmp \
 	openintro_gentoo.bmp \
-	openintro_ubuntu.bmp \
-	openabout_ubuntu.png \
 	openintro_translateorgza.bmp \
 	openabout_translateorgza.png \
 	glib-1.2.10-ooo.patch \
