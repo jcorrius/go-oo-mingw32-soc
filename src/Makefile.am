@@ -6,8 +6,6 @@ EXTRA_DIST=\
 	nologoinstall_nld.bmp \
 	ooobanner_nld.bmp \
 	ooobitmap_nld.bmp \
-	openintro_suse.bmp \
-	openabout_suse.bmp \
 	openintro_nld.bmp \
 	openabout_nld.bmp \
 	openintro_ark.bmp \
