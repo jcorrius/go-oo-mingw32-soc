@@ -105,6 +105,86 @@ sub make_text_base($$)
     }
 }
 
+sub setup_entry()
+{
+    my %entry;
+    my @lines = ();
+
+    $entry{__lines} = \@lines;
+    $entry{kind} = '';
+    $entry{name} = '';
+    $entry{should_write} = 0;
+
+    return \%entry;
+}
+
+sub find_emit_entry($$$)
+{
+    my ($en_out, $path, $entry) = @_;
+    my $kind = $entry->{kind};
+    my $name = $entry->{name};
+    my $found = 0;
+
+    if ($kind =~ m/^file$/i) {
+	$found = -f "$path/$name";
+    } elsif ($kind =~ m/^dir$/i) {
+	$found = -d "$path/$name";
+    } else {
+	print STDERR "Unknown kind $kind on $name\n";
+    }
+    if ($found) {
+	for my $line (@{$entry->{__lines}}) {
+	    print $en_out $line;
+	}
+    } else {
+	print STDERR "entry '$name' removed\n";
+    }
+
+    return $found;
+}
+
+sub rewrite_entries($)
+{
+    my $path = shift;
+    my $entries = "$path/.svn/entries";
+    my $entries_new = "$path/.svn/entries.new";
+    my $en_in;
+    my $en_out;
+
+# not a full XML parser - relies on the 'friendly' layout of .svn/entries
+
+    open ($en_in, "$entries") || die "Can't open $entries: $!\n";
+    open ($en_out, ">$entries_new") || die "Can't open $entries_new: $!\n";
+    my $entry;
+    my $rewritten;
+    while (<$en_in>) {
+	my $line = $_;
+	if (! defined $entry) {
+	    if ($line =~ /<entry/) {
+		$entry = setup_entry();
+		push @{$entry->{__lines}}, $line;
+	    } else {
+		print $en_out $_;
+	    }
+	} else { # inside entry ...
+	    push @{$entry->{__lines}}, $line;
+	    if ($line =~ m/^\s*([\S-]+)=\"([^\"]+)\"/) {
+		$entry->{$1} = $2;
+#		print "Set '$1' to '$2'\n";
+	    }
+	    if ($line =~ m/\/>/) {
+		$rewritten = 1 if (!find_emit_entry ($en_out, $path, $entry));
+		$entry = undef;
+	    }
+	}
+    }
+    close ($en_in) || die "Failed to close $en_in: $!";
+    close ($en_out) || die "Failed to close $en_out: $!";
+
+    rename ($entries_new, $entries) if ($rewritten);
+    unlink ($entries_new) if (!$rewritten);
+}
+
 my $src;
 my $dest;
 
@@ -120,6 +200,10 @@ for my $arg (@ARGV) {
 	syntax (0);
     } elsif ($arg eq '--link') {
 	$do_link = 1;
+    } elsif ($arg eq '--force-pack') {
+	$pack = 1;
+    } elsif ($arg eq '--force-unpack') {
+	$pack = 0;
     } elsif (!defined $src) {
 	$src = $arg;
 	$src =~ s/\/$//;
@@ -161,5 +245,7 @@ if ($pack) {
 	mkdir ("$from/.svn/tmp"); # without which svn barfs
 	mkdir ("$from/.svn/text-base");
 	make_text_base ($from, "$from/.svn/text-base");
+	rewrite_entries ($from);
     }
+    `svn cleanup $src`
 }
