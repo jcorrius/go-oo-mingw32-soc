@@ -26,7 +26,7 @@
 +APP1NOSAL  = TRUE
 +APP1LIBSALCPPRT=
 +APP1CODETYPE = C
-+APP1STDLIBS = $(PKGCONFIG_LIBS) -lX11
++APP1STDLIBS = $(PKGCONFIG_LIBS) -lX11 -lsal$(DLLPOSTFIX)
 +
 +.ENDIF
 +
@@ -631,7 +631,7 @@
 +#endif // _SPLASHX_H
 --- desktop/unx/source/start.c	1970-01-01 01:00:00.000000000 +0100
 +++ desktop/unx/source/start.c	2006-08-04 15:23:28.000000000 +0200
-@@ -0,0 +1,493 @@
+@@ -0,0 +1,580 @@
 +/*************************************************************************
 + *
 + *  OpenOffice.org - a multi-platform office productivity suite
@@ -679,6 +679,8 @@
 +#include <sys/un.h>
 +#include <fcntl.h>
 +#include <stdio.h>
++
++#include <rtl/digest.h>
 +
 +#define PIPEDEFAULTPATH		"/tmp"
 +#define PIPEALTERNATEPATH	"/var/tmp"
@@ -734,15 +736,98 @@
 +}
 +
 +static char *
++get_user_installation (const char *bootstraprc)
++{
++	char *value;
++	char *user_installation = NULL;
++	GKeyFile* key_file = g_key_file_new();
++
++	// get the value of [Bootstrap]:UserInstalation 
++	if (!g_key_file_load_from_file (key_file, bootstraprc, G_KEY_FILE_NONE, NULL))
++		g_error ("unable to open %s\n", bootstraprc);
++	value = g_key_file_get_value (key_file, "Bootstrap", "UserInstallation", NULL);
++	g_key_file_free (key_file);
++
++	if (!value)
++		return NULL;
++
++	// replace $SYSUSERCONFIG with home path
++	char **split = g_strsplit (value, "$SYSUSERCONFIG", -1);
++	user_installation = g_strjoinv (getenv ("HOME"), split);
++
++	g_strfreev (split);
++	g_free (value);
++
++	// begin with file://
++	if (!g_str_has_prefix (user_installation, "file:"))
++	{
++		char *tmp = g_strconcat ("file://", user_installation, NULL);
++		g_free (user_installation);
++		user_installation = tmp;
++	}
++	
++	return user_installation;
++}
++
++static char *
++get_md5hash (const char *text)
++{
++	if (!text)
++		return NULL;
++
++	size_t length = strlen (text);
++	sal_uInt32 size = length * sizeof (gunichar2);
++	gunichar2 *uni_string = g_utf8_to_utf16 (text, strlen (text), NULL, NULL, NULL);
++
++	unsigned char *data = (unsigned char*)uni_string;
++	if (!data)
++		return NULL;
++
++	rtlDigest digest = rtl_digest_create( rtl_Digest_AlgorithmMD5 );
++	if (digest <= 0)
++		return NULL;
++
++	sal_uInt32 md5_key_len = rtl_digest_queryLength( digest );
++	sal_uInt8 *md5_buf = (sal_uInt8 *)g_new (sal_uInt8, md5_key_len);
++
++	rtl_digest_init( digest, data, size );
++	rtl_digest_update( digest, data, size );
++	rtl_digest_get( digest, md5_buf, md5_key_len );
++	rtl_digest_destroy( digest );
++
++	// create hex-value string from the MD5 value to keep
++	// the string size minimal
++	GString *str = g_string_new ("");
++	sal_uInt32 i = 0;
++	for (; i < md5_key_len; ++i)
++	{
++		char val[3];
++		snprintf (val, 3, "%x", md5_buf[i]); // sic! we ignore some of the 0's
++		g_string_append (str, val);
++	}
++
++	g_free (uni_string);
++
++	return str->str;
++}
++
++static char *
 +get_pipe_path (const char *app_path)
 +{
 +	char *pipe_path;
 +	char *real_app_path;
-+	char *terminated_path;
++	char *bootstraprc;
++	char *user_installation;
++	char *md5hash;
 +	const char *base_path;
 +
 +	real_app_path = get_real_app_path (app_path);
-+	terminated_path = g_strconcat (real_app_path, "/", NULL);
++	bootstraprc = g_strconcat (real_app_path, "/bootstraprc", NULL);
++
++	user_installation = get_user_installation (bootstraprc);
++	md5hash = get_md5hash (user_installation);
++	if (!md5hash)
++		md5hash = g_strdup ("");
 +
 +	if (access(PIPEDEFAULTPATH, R_OK|W_OK) == 0)
 +		base_path = PIPEDEFAULTPATH;
@@ -750,12 +835,14 @@
 +		base_path = PIPEALTERNATEPATH;
 +
 +	pipe_path = g_strdup_printf (
-+			"%s/OSL_PIPE_%u_SingleOfficeIPC_%d-%x", base_path, (int)getuid(),
-+			SUPD, g_str_hash (terminated_path));
++			"%s/OSL_PIPE_%u_SingleOfficeIPC_%s", base_path, (int)getuid(),
++			md5hash);
 +
-+/*	fprintf (stderr, "pipe path is '%s' from '%s'\n", pipe_path, real_app_path); */
++/*	fprintf (stderr, "pipe path is '%s' from '%s'\n", pipe_path, user_installation);*/
 +
-+	g_free (terminated_path);
++	g_free (md5hash);
++	g_free (user_installation);
++	g_free (bootstraprc);
 +	g_free (real_app_path);
 +
 +	return pipe_path;
