@@ -972,9 +972,24 @@ ScVbaRange::setValue( const uno::Any  &aValue ) throw (uno::RuntimeException)
 void
 ScVbaRange::Clear() throw (uno::RuntimeException)
 {
+	// #TODO code within the test below "if ( m_Areas.... " can be removed
+	// Test is performed only because m_xRange is NOT set to be
+	// the first range in m_Areas ( to force failure while
+	// the implementations for each method are being updated )
+	if ( m_Areas->getCount() > 1 )
+	{
+		sal_Int32 nItems = m_Areas->getCount();
+		for ( sal_Int32 index=1; index <= nItems; ++index )
+		{
+			uno::Reference< vba::XRange > xRange( m_Areas->Item( uno::makeAny(index) ), uno::UNO_QUERY_THROW );
+			xRange->Clear();
+		}
+		return;
+	}
+
 	uno::Reference< sheet::XSheetOperation > xSheetOperation(mxRange, uno::UNO_QUERY_THROW);
 	xSheetOperation->clearContents(sheet::CellFlags::VALUE | sheet::CellFlags::STRING | 
-					sheet::CellFlags::HARDATTR | sheet::CellFlags::FORMATTED | sheet::CellFlags::EDITATTR);
+					sheet::CellFlags::HARDATTR | sheet::CellFlags::FORMATTED | sheet::CellFlags::EDITATTR | sheet::CellFlags::FORMULA );
 }
 
 //helper ClearContent
@@ -1199,18 +1214,42 @@ ScVbaRange::CurrentArray() throw (uno::RuntimeException)
 	return RangeHelper::createRangeFromRange( m_xContext, helper.getCellRangeFromSheet(), xCellRangeAddressable );	
 }
 
-::rtl::OUString
+uno::Any
 ScVbaRange::getFormulaArray() throw (uno::RuntimeException)
 {
-	uno::Reference< sheet::XArrayFormulaRange > xArrayFormulaRange(mxRange, ::uno::UNO_QUERY_THROW );
-	return xArrayFormulaRange->getArrayFormula();
+	// #TODO code within the test below "if ( m_Areas.... " can be removed
+	// Test is performed only because m_xRange is NOT set to be
+	// the first range in m_Areas ( to force failure while
+	// the implementations for each method are being updated )
+	if ( m_Areas->getCount() > 1 )
+	{
+		uno::Reference< vba::XRange > xRange( getArea( 0 ), uno::UNO_QUERY_THROW );
+		return xRange->getFormulaArray();
+	}
+	
+	uno::Reference< sheet::XCellRangeFormula> xCellRangeFormula( mxRange, uno::UNO_QUERY_THROW );
+	uno::Reference< script::XTypeConverter > xConverter = getTypeConverter();
+	uno::Any aMatrix;
+	aMatrix = xConverter->convertTo( uno::makeAny( xCellRangeFormula->getFormulaArray() ) , getCppuType((uno::Sequence< uno::Sequence< uno::Any > >*)0)  ) ;
+	return aMatrix;
 }
 
 void 
-ScVbaRange::setFormulaArray(const ::rtl::OUString &rFormula) throw (uno::RuntimeException)
+ScVbaRange::setFormulaArray(const uno::Any& rFormula) throw (uno::RuntimeException)
 {
-	uno::Reference< sheet::XArrayFormulaRange > xArrayFormulaRange(mxRange, ::uno::UNO_QUERY_THROW );
-	xArrayFormulaRange->setArrayFormula( rFormula );
+	// #TODO code within the test below "if ( m_Areas.... " can be removed
+	// Test is performed only because m_xRange is NOT set to be
+	// the first range in m_Areas ( to force failure while
+	// the implementations for each method are being updated )
+	if ( m_Areas->getCount() > 1 )
+	{
+		uno::Reference< vba::XRange > xRange( getArea( 0 ), uno::UNO_QUERY_THROW );
+		return xRange->setFormulaArray( rFormula );
+	}
+	// #TODO need to distinguish between getFormula and getFormulaArray e.g. (R1C1)
+	// but for the moment its just easier to treat them the same for setting
+
+	setFormula( rFormula );
 }
 
 ::rtl::OUString

@@ -97,14 +97,14 @@ public:
 	virtual void   SAL_CALL setValue( const css::uno::Any& aValue ) throw ( css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL getFormula() throw (css::uno::RuntimeException);
 	virtual void   SAL_CALL setFormula( const css::uno::Any& rFormula ) throw (css::uno::RuntimeException);
+	virtual css::uno::Any SAL_CALL getFormulaArray() throw (css::uno::RuntimeException);
+	virtual void   SAL_CALL setFormulaArray(const css::uno::Any& rFormula) throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL getFormulaR1C1() throw (css::uno::RuntimeException);
 	virtual void   SAL_CALL setFormulaR1C1( const css::uno::Any &rFormula ) throw (css::uno::RuntimeException);
 	virtual double SAL_CALL getCount() throw (css::uno::RuntimeException);
 	virtual ::sal_Int32 SAL_CALL getRow() throw (css::uno::RuntimeException);
 	virtual ::sal_Int32 SAL_CALL getColumn() throw (css::uno::RuntimeException);
 	virtual ::rtl::OUString SAL_CALL getText() throw (css::uno::RuntimeException);
-	virtual ::rtl::OUString SAL_CALL getFormulaArray() throw (css::uno::RuntimeException);
-	virtual void   SAL_CALL setFormulaArray(const ::rtl::OUString &rFormula) throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setNumberFormat( const ::rtl::OUString &rNumberFormat ) throw (css::uno::RuntimeException);
 	virtual ::rtl::OUString SAL_CALL getNumberFormat() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setMergeCells( sal_Bool bMerge ) throw (css::uno::RuntimeException);
