@@ -972,6 +972,14 @@ ScVbaRange::setValue( const uno::Any  &aValue ) throw (uno::RuntimeException)
 void
 ScVbaRange::Clear() throw (uno::RuntimeException)
 {
+	sal_Int32 nFlags = sheet::CellFlags::VALUE | sheet::CellFlags::STRING | sheet::CellFlags::HARDATTR | sheet::CellFlags::FORMATTED | sheet::CellFlags::EDITATTR | sheet::CellFlags::FORMULA;
+	ClearContents( nFlags );
+}
+
+//helper ClearContent
+void
+ScVbaRange::ClearContents( sal_Int32 nFlags ) throw (uno::RuntimeException)
+{
 	// #TODO code within the test below "if ( m_Areas.... " can be removed
 	// Test is performed only because m_xRange is NOT set to be
 	// the first range in m_Areas ( to force failure while
@@ -982,20 +990,14 @@ ScVbaRange::Clear() throw (uno::RuntimeException)
 		for ( sal_Int32 index=1; index <= nItems; ++index )
 		{
 			uno::Reference< vba::XRange > xRange( m_Areas->Item( uno::makeAny(index) ), uno::UNO_QUERY_THROW );
-			xRange->Clear();
+			ScVbaRange* pRange = dynamic_cast< ScVbaRange* >( xRange.get() ); 
+			if ( pRange )
+				pRange->ClearContents( nFlags );	
 		}
 		return;
 	}
 
-	uno::Reference< sheet::XSheetOperation > xSheetOperation(mxRange, uno::UNO_QUERY_THROW);
-	xSheetOperation->clearContents(sheet::CellFlags::VALUE | sheet::CellFlags::STRING | 
-					sheet::CellFlags::HARDATTR | sheet::CellFlags::FORMATTED | sheet::CellFlags::EDITATTR | sheet::CellFlags::FORMULA );
-}
 
-//helper ClearContent
-void
-ScVbaRange::ClearContents( sal_Int32 nFlags ) throw (uno::RuntimeException)
-{
 	uno::Reference< sheet::XSheetOperation > xSheetOperation(mxRange, uno::UNO_QUERY_THROW);
 	xSheetOperation->clearContents( nFlags );
 }
@@ -1017,9 +1019,9 @@ ScVbaRange::ClearContents() throw (uno::RuntimeException)
 void
 ScVbaRange::ClearFormats() throw (uno::RuntimeException)
 {
-	uno::Reference< sheet::XSheetOperation > xSheetOperation(mxRange, uno::UNO_QUERY_THROW);
 	//FIXME: need to check if we need to combine sheet::CellFlags::FORMATTED
-	xSheetOperation->clearContents(sheet::CellFlags::HARDATTR | sheet::CellFlags::FORMATTED | sheet::CellFlags::EDITATTR);
+	sal_Int32 nClearFlags = sheet::CellFlags::HARDATTR | sheet::CellFlags::FORMATTED | sheet::CellFlags::EDITATTR;
+	ClearContents( nClearFlags );
 }
 
 uno::Any
