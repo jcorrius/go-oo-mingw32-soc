@@ -1,15 +1,25 @@
 desktop_in_files = ${wildcard *.desktop.in.in}
+old_gnome_files = \
+	openoffice.applications.in \
+	openoffice-extra.keys.in \
+	openoffice.keys.in
 
-all: $(desktop_in_files:.desktop.in.in=.desktop)
+all: $(desktop_in_files:.desktop.in.in=.desktop) $(old_gnome_files:.in=)
 
 clean: 
-	rm -f $(desktop_in_files:.desktop.in.in=.desktop.in) $(desktop_in_files:.desktop.in.in=.desktop)
+	rm -f $(desktop_in_files:.desktop.in.in=.desktop.in) \
+	      $(desktop_in_files:.desktop.in.in=.desktop) \
+	      $(old_gnome_files:.in=)
 
-%.desktop: %.desktop.in $(top_builddir)/intltool-merge $(wildcard $(top_srcdir)/po/*.po)
+%.desktop.in: %.desktop.in.in $(top_builddir)/intltool-merge $(wildcard $(top_srcdir)/po/*.po)
 	$(top_builddir)/intltool-merge $(top_srcdir)/po $< $@ -d -u -c $(top_builddir)/po/.intltool-merge-cache
 
+%: %.in
+	sed -e "s|\@OOO_BINSUFFIX\@|@OOO_BINSUFFIX@|" \
+	    -e "s|\@STARTUPNOTIFY\@|@STARTUPNOTIFY@|" $< > $@
+
 EXTRA_DIST=$(desktop_in_files) \
+	$(old_gnome_files) \
 	${wildcard *.png} \
-	${wildcard openoffice*in} \
 	openoffice.xml \
 	openoffice.mime
