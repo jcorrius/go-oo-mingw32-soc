@@ -105,8 +105,8 @@ public:
 	virtual ::sal_Int32 SAL_CALL getRow() throw (css::uno::RuntimeException);
 	virtual ::sal_Int32 SAL_CALL getColumn() throw (css::uno::RuntimeException);
 	virtual ::rtl::OUString SAL_CALL getText() throw (css::uno::RuntimeException);
-	virtual void SAL_CALL setNumberFormat( const ::rtl::OUString &rNumberFormat ) throw (css::uno::RuntimeException);
-	virtual ::rtl::OUString SAL_CALL getNumberFormat() throw (css::uno::RuntimeException);
+	virtual void SAL_CALL setNumberFormat( const css::uno::Any& rNumberFormat ) throw (css::uno::RuntimeException);
+	virtual css::uno::Any SAL_CALL getNumberFormat() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setMergeCells( sal_Bool bMerge ) throw (css::uno::RuntimeException);
 	virtual sal_Bool SAL_CALL getMergeCells() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setWrapText( sal_Bool bIsWrapped ) throw (css::uno::RuntimeException);

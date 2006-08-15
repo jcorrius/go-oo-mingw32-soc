@@ -273,6 +273,18 @@ public:
 
 	rtl::OUString getNumberFormatString()
 	{
+		ScCellRangeObj* pUnoCellRange = dynamic_cast<  ScCellRangeObj* >( mxRangeProps.get() );
+		if ( pUnoCellRange )
+		{
+			SfxItemSet* pDataSet = 	pUnoCellRange->GetCurrentDataSet( true );
+			SfxItemState eState = pDataSet->GetItemState( ATTR_VALUE_FORMAT, TRUE, NULL);
+			// one of the cells in the range is not like the other ;-)
+			// so return a zero length format to indicate that
+			if ( eState == SFX_ITEM_DONTCARE )
+				return rtl::OUString();
+		}
+		
+	
 		uno::Reference< beans::XPropertySet > xNumberProps( getNumberProps(), uno::UNO_QUERY_THROW );
 		::rtl::OUString aFormatString;
 		uno::Any aString = xNumberProps->getPropertyValue(rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("FormatString")));
@@ -286,6 +298,20 @@ public:
 		sal_Int16 nType = ::comphelper::getINT16(
         	xNumberProps->getPropertyValue( ::rtl::OUString::createFromAscii( "Type" ) ) );
 		return nType;
+	}
+
+	bool setNumberFormat( const  rtl::OUString& rFormat )
+	{
+		lang::Locale aLocale;
+		uno::Reference< beans::XPropertySet > xNumProps = getNumberProps(); 	
+		xNumProps->getPropertyValue( ::rtl::OUString::createFromAscii( "Locale" ) ) >>= aLocale;
+		sal_Int32 nNewIndex = mxFormats->queryKey(rFormat, aLocale, false );
+		if ( nNewIndex == -1 ) // format not defined
+		{
+			nNewIndex = mxFormats->addNew( rFormat, aLocale );
+		}
+		mxRangeProps->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("NumberFormat") ), uno::makeAny( nNewIndex ) );				
+		return true;
 	}
 
 	bool setNumberFormat( sal_Int16 nType )
@@ -1586,23 +1612,59 @@ ScVbaRange::Cut(const ::uno::Any& Destination) throw (uno::RuntimeException)
 }
                                                                                                                              
 void
-ScVbaRange::setNumberFormat( const ::rtl::OUString &rFormat ) throw (uno::RuntimeException)
+ScVbaRange::setNumberFormat( const uno::Any& aFormat ) throw (uno::RuntimeException)
 {
-	uno::Reference< util::XNumberFormatsSupplier > xSupplier(getCurrentDocument(), uno::UNO_QUERY_THROW);
-	uno::Reference< util::XNumberFormats > xFormats( xSupplier->getNumberFormats(), uno::UNO_QUERY_THROW );
-	uno::Reference< beans::XPropertySet > xRangeProps( mxRange, uno::UNO_QUERY_THROW );
-	//FIXME behaviour with different locales
-	lang::Locale pLocale = ::com::sun::star::lang::Locale();
-	long nIndexKey = xFormats->queryKey( rFormat, pLocale, false );
-	if( nIndexKey != -1 )
-		xRangeProps->setPropertyValue(rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("NumberFormat")), (uno::Any) nIndexKey );
+	rtl::OUString sFormat;
+	aFormat >>= sFormat;
+	// #TODO code within the test below "if ( m_Areas.... " can be removed
+	// Test is performed only because m_xRange is NOT set to be
+	// the first range in m_Areas ( to force failure while
+	// the implementations for each method are being updated )
+	if ( m_Areas->getCount() > 1 )
+	{
+		sal_Int32 nItems = m_Areas->getCount();
+		for ( sal_Int32 index=1; index <= nItems; ++index )
+		{
+			uno::Reference< vba::XRange > xRange( m_Areas->Item( uno::makeAny(index) ), uno::UNO_QUERY_THROW );
+			xRange->setNumberFormat( aFormat );	
+		}
+		return;
+	}
+	NumFormatHelper numFormat( mxRange );
+	numFormat.setNumberFormat( sFormat );
 }
                                                                                                                              
-::rtl::OUString
+uno::Any
 ScVbaRange::getNumberFormat() throw (uno::RuntimeException)
 {
+	// #TODO code within the test below "if ( m_Areas.... " can be removed
+	// Test is performed only because m_xRange is NOT set to be
+	// the first range in m_Areas ( to force failure while
+	// the implementations for each method are being updated )
+	if ( m_Areas->getCount() > 1 )
+	{
+		sal_Int32 nItems = m_Areas->getCount();
+		uno::Any aResult;
+		uno::Any aVoid;
+		for ( sal_Int32 index=1; index <= nItems; ++index )
+		{
+			uno::Reference< vba::XRange > xRange( m_Areas->Item( uno::makeAny(index) ), uno::UNO_QUERY_THROW );
+			// if the numberformat of one area is different to another
+			// return null
+			if ( index > 1 )
+				if ( aResult != xRange->getNumberFormat() )
+					return aVoid;
+			aResult = xRange->getNumberFormat();	
+			if ( !aResult.hasValue() ) 
+				return aVoid;
+		}
+		return aResult;
+	}
 	NumFormatHelper numFormat( mxRange );
-	return numFormat.getNumberFormatString();
+	rtl::OUString sFormat = numFormat.getNumberFormatString();
+	if ( sFormat.getLength() > 0 )
+		return uno::makeAny( sFormat );
+	return uno::Any();
 }
 
 uno::Reference< vba::XRange >
