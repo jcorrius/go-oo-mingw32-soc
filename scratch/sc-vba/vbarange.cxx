@@ -1616,10 +1616,6 @@ ScVbaRange::setNumberFormat( const uno::Any& aFormat ) throw (uno::RuntimeExcept
 {
 	rtl::OUString sFormat;
 	aFormat >>= sFormat;
-	// #TODO code within the test below "if ( m_Areas.... " can be removed
-	// Test is performed only because m_xRange is NOT set to be
-	// the first range in m_Areas ( to force failure while
-	// the implementations for each method are being updated )
 	if ( m_Areas->getCount() > 1 )
 	{
 		sal_Int32 nItems = m_Areas->getCount();
@@ -1637,15 +1633,14 @@ ScVbaRange::setNumberFormat( const uno::Any& aFormat ) throw (uno::RuntimeExcept
 uno::Any
 ScVbaRange::getNumberFormat() throw (uno::RuntimeException)
 {
-	// #TODO code within the test below "if ( m_Areas.... " can be removed
-	// Test is performed only because m_xRange is NOT set to be
-	// the first range in m_Areas ( to force failure while
-	// the implementations for each method are being updated )
+	// make sure that the object returned will give the correct
+	// result when IsNull is called
+	uno::Any aVoid = uno::makeAny( uno::Reference< uno::XInterface >() );
+
 	if ( m_Areas->getCount() > 1 )
 	{
 		sal_Int32 nItems = m_Areas->getCount();
 		uno::Any aResult;
-		uno::Any aVoid;
 		for ( sal_Int32 index=1; index <= nItems; ++index )
 		{
 			uno::Reference< vba::XRange > xRange( m_Areas->Item( uno::makeAny(index) ), uno::UNO_QUERY_THROW );
@@ -1664,7 +1659,7 @@ ScVbaRange::getNumberFormat() throw (uno::RuntimeException)
 	rtl::OUString sFormat = numFormat.getNumberFormatString();
 	if ( sFormat.getLength() > 0 )
 		return uno::makeAny( sFormat );
-	return uno::Any();
+	return aVoid;
 }
 
 uno::Reference< vba::XRange >
