@@ -99,14 +99,6 @@ public:
     virtual sal_Bool SAL_CALL supportsService( const ::rtl::OUString& ServiceName ) throw (::com::sun::star::uno::RuntimeException);
     virtual ::com::sun::star::uno::Sequence< ::rtl::OUString > SAL_CALL getSupportedServiceNames(  ) throw (::com::sun::star::uno::RuntimeException);
 
-public:
-
-    void fireMousePressedEvent( const ::com::sun::star::awt::MouseEvent& rEvt );
-    void fireMouseReleasedEvent( const ::com::sun::star::awt::MouseEvent& rEvt );
-    void fireMouseMovedEvent( const ::com::sun::star::awt::MouseEvent& rEvt );
-    void fireKeyPressedEvent( const ::com::sun::star::awt::KeyEvent& rEvt );
-    void fireKeyReleasedEvent( const ::com::sun::star::awt::KeyEvent& rEvt );
-    void fireSetFocusEvent( const ::com::sun::star::awt::FocusEvent& rEvt );
 
 private:
 
@@ -116,8 +108,6 @@ private:
     ::cppu::OMultiTypeInterfaceContainerHelper  maListeners;
     ::com::sun::star::media::ZoomLevel          meZoomLevel;
     Player&                                     mrPlayer;
-    int                                         mnFrameWnd;
-    int                                         mnParentWnd;
     int                                         mnPointerType;
 
     void                                        ImplLayoutVideoWindow();

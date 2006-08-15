@@ -43,6 +43,8 @@
 #include "gstframegrabber.hxx"
 #include "gstwindow.hxx"
 
+#include <gst/interfaces/xoverlay.h>
+
 #define AVMEDIA_GST_PLAYER_IMPLEMENTATIONNAME "com.sun.star.comp.avmedia.Player_GStreamer"
 #define AVMEDIA_GST_PLAYER_SERVICENAME "com.sun.star.media.Player_GStreamer"
 
@@ -60,7 +62,8 @@ Player::Player( const uno::Reference< lang::XMultiServiceFactory >& rxMgr ) :
     mnUnmutedVolume( 0 ),
     mbMuted( false ),
     mbLooping( false ),
-    mbInitialized( false )
+    mbInitialized( false ),
+    mnWindowID (0)
 {
     // Initialize GStreamer library
     int argc = 1;
@@ -94,7 +97,7 @@ Player::~Player()
 
 // ------------------------------------------------------------------------------
 
-gboolean gst_pipeline_bus_callback( GstBus *, GstMessage *message, gpointer data )
+static gboolean gst_pipeline_bus_callback( GstBus *, GstMessage *message, gpointer data )
 {
     Player* pPlayer = (Player *) data;
 
@@ -103,16 +106,39 @@ gboolean gst_pipeline_bus_callback( GstBus *, GstMessage *message, gpointer data
     return TRUE;
 }
 
+static GstBusSyncReply gst_pipeline_bus_sync_handler( GstBus *, GstMessage * message, gpointer data )
+{
+    Player* pPlayer = (Player *) data;
+
+    return pPlayer->processSyncMessage( message );
+}
+
 void Player::processMessage( GstMessage *message )
 {
+    //OSL_TRACE ( "gst message received: src name: %s structure type: %s",
+    //            gst_object_get_name (message->src),
+    //            message->structure ? gst_structure_get_name (message->structure) : "<none>");
+
     switch( GST_MESSAGE_TYPE( message ) ) {
     case GST_MESSAGE_EOS:
-        OSL_TRACE( "EOS, reset state to NULL" );
-        gst_element_set_state( mpPlaybin, GST_STATE_NULL );
+        //OSL_TRACE( "EOS, reset state to NULL" );
+        gst_element_set_state( mpPlaybin, GST_STATE_READY );
         break;
     default:
         break;
     }
+}
+
+GstBusSyncReply Player::processSyncMessage( GstMessage *message )
+{
+    if (message->structure) {
+        if( !strcmp( gst_structure_get_name( message->structure ), "prepare-xwindow-id" ) && mnWindowID != 0 ) {
+            gst_x_overlay_set_xwindow_id( GST_X_OVERLAY( GST_MESSAGE_SRC( message ) ), mnWindowID );
+            return GST_BUS_DROP;
+        }
+    }
+
+    return GST_BUS_PASS;
 }
 
 bool Player::create( const ::rtl::OUString& rURL )
@@ -134,7 +160,10 @@ bool Player::create( const ::rtl::OUString& rURL )
 
         pBus = gst_element_get_bus( mpPlaybin );
         gst_bus_add_watch( pBus, gst_pipeline_bus_callback, this );
+        gst_bus_set_sync_handler( pBus, gst_pipeline_bus_sync_handler, this );
         g_object_unref( pBus );
+
+        gst_element_set_state( mpPlaybin, GST_STATE_READY );
 
         bRet = true;
     }
@@ -150,29 +179,15 @@ bool Player::create( const ::rtl::OUString& rURL )
 
 // ------------------------------------------------------------------------------
 
-#ifdef WINNT
-gboolean gst_bus_callback (GstBus *bus, GstMessage *message, gpointer data)
-{
-}
-#endif
-
 void SAL_CALL Player::start(  )
     throw (uno::RuntimeException)
 {
+    //OSL_TRACE ("Player::start");
+
     // set the pipeline state to READY and run the loop
     if( mbInitialized && NULL != mpPlaybin )
     {
-#ifdef WINNT
-        GstBus* pBus = gst_pipeline_get_bus( GST_PIPELINE( mpPlaybin ) );
-        gst_bus_add_watch( pBus, gst_bus_callback, mpLoop );
-        gst_object_unref( pBus );
-#endif
         gst_element_set_state( mpPlaybin, GST_STATE_PLAYING );
-        
-#ifdef WINNT
-        // TODO embed in a sal_Thread
-        g_main_loop_run( mpLoop );
-#endif
     }
 }
 
@@ -210,7 +225,8 @@ sal_Bool SAL_CALL Player::isPlaying()
 double SAL_CALL Player::getDuration(  )
     throw (uno::RuntimeException)
 {
-    double duration = 0.0;
+    // slideshow checks for non-zero duration, so cheat here
+    double duration = 1.0;
 
     if( mpPlaybin ) {
         GstFormat format = GST_FORMAT_TIME;
@@ -240,7 +256,7 @@ void SAL_CALL Player::setMediaTime( double fTime )
                           GST_SEEK_TYPE_NONE, 0 );
 
 
-        OSL_TRACE( "seek to: %lld ns original: %lf s", gst_position, fTime );
+        //OSL_TRACE( "seek to: %lld ns original: %lf s", gst_position, fTime );
     }
 }
 
@@ -409,23 +425,27 @@ awt::Size SAL_CALL Player::getPreferredPlayerWindowSize(  )
 
 // ------------------------------------------------------------------------------
 
-uno::Reference< ::media::XPlayerWindow > SAL_CALL Player::createPlayerWindow( const uno::Sequence< uno::Any >& aArguments )
+uno::Reference< ::media::XPlayerWindow > SAL_CALL Player::createPlayerWindow( const uno::Sequence< uno::Any >& rArguments )
     throw (uno::RuntimeException)
 {
     uno::Reference< ::media::XPlayerWindow >    xRet;
     awt::Size                                   aSize( getPreferredPlayerWindowSize() );
 
-    OSL_TRACE( "Player::createPlayerWindow" );
+    OSL_TRACE( "Player::createPlayerWindow %d %d", aSize.Width, aSize.Height );
 
     if( aSize.Width > 0 && aSize.Height > 0 )
     {
-        // TODO understand what needs to change
-        /*::avmedia::gstreamer::Window* pWindow = new ::avmedia::gstreamer::Window( mxMgr, *this );
+        ::avmedia::gstreamer::Window* pWindow = new ::avmedia::gstreamer::Window( mxMgr, *this );
 
         xRet = pWindow;
 
-        if( !pWindow->create( aArguments ) )
-        xRet = uno::Reference< ::media::XPlayerWindow >(); */
+        if( rArguments.getLength() > 2 ) {
+            rArguments[ 2 ] >>= mnWindowID;
+            OSL_TRACE( "window ID: %ld", mnWindowID );
+        }
+
+        //if( !pWindow->create( aArguments ) )
+        //xRet = uno::Reference< ::media::XPlayerWindow >();
     }
 
     return xRet;

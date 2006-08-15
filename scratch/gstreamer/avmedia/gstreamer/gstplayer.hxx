@@ -59,6 +59,7 @@ public:
 
     bool create( const ::rtl::OUString& rURL );
     void processMessage( GstMessage *message );
+    GstBusSyncReply processSyncMessage( GstMessage *message );
 
     // XPlayer
     virtual void SAL_CALL start(  ) throw (::com::sun::star::uno::RuntimeException);
@@ -107,6 +108,7 @@ private:
     sal_Bool                mbLooping;
     sal_Bool                mbInitialized;
 
+    long                    mnWindowID;
 };
 
 } // namespace gstreamer
