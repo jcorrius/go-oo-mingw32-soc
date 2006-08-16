@@ -109,6 +109,7 @@ private:
     sal_Bool                mbInitialized;
 
     long                    mnWindowID;
+    gint64                  mnDuration;
 };
 
 } // namespace gstreamer

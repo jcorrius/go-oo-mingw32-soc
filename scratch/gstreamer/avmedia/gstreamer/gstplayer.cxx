@@ -63,7 +63,8 @@ Player::Player( const uno::Reference< lang::XMultiServiceFactory >& rxMgr ) :
     mbMuted( false ),
     mbLooping( false ),
     mbInitialized( false ),
-    mnWindowID (0)
+    mnWindowID (0),
+    mnDuration (0)
 {
     // Initialize GStreamer library
     int argc = 1;
@@ -124,6 +125,28 @@ void Player::processMessage( GstMessage *message )
         //OSL_TRACE( "EOS, reset state to NULL" );
         gst_element_set_state( mpPlaybin, GST_STATE_READY );
         break;
+    case GST_MESSAGE_STATE_CHANGED:
+        if( message->src == GST_OBJECT( mpPlaybin ) ) {
+            GstState newstate, pendingstate;
+
+            gst_message_parse_state_changed (message, NULL, &newstate, &pendingstate);
+
+            //OSL_TRACE( "state change received, new state %d", newstate );
+            if( newstate == GST_STATE_PAUSED &&
+                pendingstate == GST_STATE_VOID_PENDING ) {
+                
+                //OSL_TRACE( "change to paused received" );
+
+                if( mnDuration == 0) {
+                    GstFormat format = GST_FORMAT_TIME;
+                    gint64 gst_duration = 0L;
+
+                    if( gst_element_query_duration( mpPlaybin, &format, &gst_duration) && format == GST_FORMAT_TIME && gst_duration > 0L )
+                        mnDuration = gst_duration;
+                }
+            }
+        }
+        break;
     default:
         break;
     }
@@ -150,9 +173,6 @@ bool Player::create( const ::rtl::OUString& rURL )
     if( mbInitialized )
     {
         GstBus *pBus;
-#ifdef WINNT
-        mpLoop = g_main_loop_new( NULL, FALSE );
-#endif
 
         mpPlaybin = gst_element_factory_make( "playbin", "player" );
         rtl::OString ascURL = OUStringToOString( rURL, RTL_TEXTENCODING_ASCII_US );
@@ -163,7 +183,7 @@ bool Player::create( const ::rtl::OUString& rURL )
         gst_bus_set_sync_handler( pBus, gst_pipeline_bus_sync_handler, this );
         g_object_unref( pBus );
 
-        gst_element_set_state( mpPlaybin, GST_STATE_READY );
+        gst_element_set_state( mpPlaybin, GST_STATE_PAUSED );
 
         bRet = true;
     }
@@ -197,9 +217,6 @@ void SAL_CALL Player::stop(  )
     throw (uno::RuntimeException)
 {
     // set the pipeline in PAUSED STATE
-#ifdef WINNT
-    g_main_loop_quit( mpLoop );
-#endif
     if( mpPlaybin )
         gst_element_set_state( mpPlaybin, GST_STATE_PAUSED );
 }
@@ -211,7 +228,7 @@ sal_Bool SAL_CALL Player::isPlaying()
 {
     bool            bRet = false;
 
-    // return whether the pipeline is in READY STATE or not
+    // return whether the pipeline is in PLAYING STATE or not
     if( mbInitialized && mpPlaybin )
     {
         bRet = GST_STATE_PLAYING == GST_STATE( mpPlaybin );
@@ -226,14 +243,10 @@ double SAL_CALL Player::getDuration(  )
     throw (uno::RuntimeException)
 {
     // slideshow checks for non-zero duration, so cheat here
-    double duration = 1.0;
+    double duration = 0.01;
 
-    if( mpPlaybin ) {
-        GstFormat format = GST_FORMAT_TIME;
-        gint64 gst_duration = 0L;
-
-        if (gst_element_query_duration( mpPlaybin, &format, &gst_duration) && format == GST_FORMAT_TIME && gst_duration > 0L)
-            duration = gst_duration / 1E9;
+    if( mpPlaybin && mnDuration > 0 ) {
+        duration = mnDuration / 1E9;
 
         //OSL_TRACE( "gst duration: %lld ns duration: %lf s", gst_duration, duration );
     }
