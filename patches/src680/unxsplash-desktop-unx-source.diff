@@ -1,5 +1,5 @@
---- desktop/unx/source/makefile.mk	1970-01-01 01:00:00.000000000 +0100
-+++ desktop/unx/source/makefile.mk	2006-08-04 15:20:29.000000000 +0200
+--- /dev/null	2006-06-16 15:54:00.000000000 +0200
++++ desktop/unx/source/makefile.mk	2006-08-18 16:31:10.000000000 +0200
 @@ -0,0 +1,32 @@
 +PRJ=..$/..
 +PRJNAME=desktop
@@ -33,9 +33,9 @@
 +# --- Targets ------------------------------------------------------
 +
 +.INCLUDE :	target.mk
---- desktop/unx/source/splashx.c	1970-01-01 01:00:00.000000000 +0100
-+++ desktop/unx/source/splashx.c	2006-08-04 15:20:29.000000000 +0200
-@@ -0,0 +1,532 @@
+--- /dev/null	2006-06-16 15:54:00.000000000 +0200
++++ desktop/unx/source/splashx.c	2006-08-18 16:12:34.000000000 +0200
+@@ -0,0 +1,570 @@
 +/*************************************************************************
 + *
 + *  OpenOffice.org - a multi-platform office productivity suite
@@ -85,6 +85,10 @@
 +
 +#include "splashx.h"
 +
++typedef struct {
++	unsigned char b, g, r;
++} color_t;
++
 +#define WINDOW_WIDTH  440
 +#define WINDOW_HEIGHT 299
 +
@@ -104,9 +108,19 @@
 +static Window win;
 +static GC gc;
 +
-+typedef struct {
-+	unsigned char b, g, r;
-+} color_t;
++// Progress bar values
++// taken from desktop/source/splash/splash.cxx
++static int tlx = 212;
++static int tly = 216;
++static int barwidth = 263;
++static int barheight = 8;
++static int barspace = PROGRESS_BARSPACE;
++static color_t barcol = { 18, 202, 157 };
++static color_t framecol = { 0xD3, 0xD3, 0xD3 };
++
++static XColor barcolor;
++static XColor framecolor;
++
 +static color_t *bitmap = NULL;
 +
 +#define BMP_HEADER_LEN 14
@@ -174,17 +188,51 @@
 +	if ( bitmap == NULL )
 +		LOAD_FAILURE( "Cannot allocate memory for the data.\n" );
 +
-+	int y;
-+	size_t line_size = width * 3;
-+	color_t *line = bitmap + ( height - 1 ) * width;
-+	for ( y = height; y > 0; --y, line -= width )
-+	{
-+		if ( read( fd, line, line_size ) != line_size )
-+			LOAD_FAILURE( "Cannot read the bitmap data.\n" );
-+	}
++	if ( read( fd, bitmap, bitmap_size ) != bitmap_size )
++		LOAD_FAILURE( "Cannot read the bitmap data.\n" );
 +
 +	close( fd );
 +	return 1;
++}
++
++static void setup_color( int val[3], color_t *col )
++{
++	if ( val[0] < 0 || val[1] < 0 || val[2] < 0 )
++		return;
++
++#define CONVERT_COLOR(from,to) if (from < 0) to = 0; else if (from > 255) to = 255; else to = from;
++	CONVERT_COLOR (val[0], col->r);
++	CONVERT_COLOR (val[1], col->g);
++	CONVERT_COLOR (val[2], col->b);
++#undef CONVERT_COLOR
++}
++
++// setup
++void splash_setup( int barc[3], int framec[3], int posx, int posy, int w, int h )
++{
++	if ( width <= 500)
++	{
++		barwidth  = width - (2 * PROGRESS_XOFFSET);
++		barheight = 6;
++		tlx = PROGRESS_XOFFSET;
++		tly = height - PROGRESS_YOFFSET;
++
++		barcol.r = 0;
++		barcol.g = 0;
++		barcol.b = 128;
++	}
++
++	if ( posx >= 0 )
++		tlx = posx;
++	if ( posy >= 0 )
++		tly = posy;
++	if ( w >= 0 )
++		barwidth = w;
++	if ( h >= 0 )
++		barheight = h;
++
++	setup_color( barc, &barcol );
++	setup_color( framec, &framecol );
 +}
 +
 +// Universal shift: bits >= 0 - left, otherwise right
@@ -263,8 +311,9 @@
 +
 +		// The following dithers & converts the color_t color to one
 +		// acceptable for the visual
-+#define COPY_IN_OUT( code ) \
++#define COPY_IN_OUT( pix_size, code ) \
 +		{ \
++			out += pix_size * width * ( height - 1 ); \
 +			int x, y; \
 +			for ( y = 0; y < height; ++y ) \
 +			{ \
@@ -289,6 +338,7 @@
 +						( SHIFT( blue, blue_shift ) & blue_mask ); \
 +					code \
 +				} \
++				out -= 2 * pix_size * width; \
 +			} \
 +		}
 +
@@ -298,9 +348,9 @@
 +		if ( bpp == 32 )
 +		{
 +			if ( machine_byte_order == byte_order )
-+				COPY_IN_OUT( *( (uint32_t *)out ) = (uint32_t)pixel; out += 4; )
++				COPY_IN_OUT( 4, *( (uint32_t *)out ) = (uint32_t)pixel; out += 4; )
 +			else
-+				COPY_IN_OUT( uint32_t tmp = pixel;
++				COPY_IN_OUT( 4, uint32_t tmp = pixel;
 +							 *( (uint8_t *)out     ) = *( (uint8_t *)(&tmp) + 3 );
 +							 *( (uint8_t *)out + 1 ) = *( (uint8_t *)(&tmp) + 2 );
 +							 *( (uint8_t *)out + 2 ) = *( (uint8_t *)(&tmp) + 1 );
@@ -310,15 +360,15 @@
 +		else if ( bpp == 24 )
 +		{
 +			if ( machine_byte_order == byte_order && byte_order == LSBFirst )
-+				COPY_IN_OUT( *( (color_t *)out ) = *( (color_t *)( &pixel ) ); out += 3; )
++				COPY_IN_OUT( 3, *( (color_t *)out ) = *( (color_t *)( &pixel ) ); out += 3; )
 +			if ( machine_byte_order == byte_order && byte_order == MSBFirst )
-+				COPY_IN_OUT( uint32_t tmp = pixel;
++				COPY_IN_OUT( 3, uint32_t tmp = pixel;
 +							 *( (uint8_t *)out     ) = *( (uint8_t *)(&tmp) + 1 );
 +							 *( (uint8_t *)out + 1 ) = *( (uint8_t *)(&tmp) + 2 );
 +							 *( (uint8_t *)out + 2 ) = *( (uint8_t *)(&tmp) + 3 );
 +							 out += 3; )
 +			else
-+				COPY_IN_OUT( uint32_t tmp = pixel;
++				COPY_IN_OUT( 3, uint32_t tmp = pixel;
 +							 *( (uint8_t *)out     ) = *( (uint8_t *)(&tmp) + 3 );
 +							 *( (uint8_t *)out + 1 ) = *( (uint8_t *)(&tmp) + 2 );
 +							 *( (uint8_t *)out + 2 ) = *( (uint8_t *)(&tmp) + 1 );
@@ -327,16 +377,16 @@
 +		else if ( bpp == 16 )
 +		{
 +			if ( machine_byte_order == byte_order )
-+				COPY_IN_OUT( *( (uint16_t *)out ) = (uint16_t)pixel; out += 2; )
++				COPY_IN_OUT( 2, *( (uint16_t *)out ) = (uint16_t)pixel; out += 2; )
 +			else
-+				COPY_IN_OUT( uint16_t tmp = pixel;
++				COPY_IN_OUT( 2, uint16_t tmp = pixel;
 +							 *( (uint8_t *)out     ) = *( (uint8_t *)(&tmp) + 1 );
 +							 *( (uint8_t *)out + 1 ) = *( (uint8_t *)(&tmp)     );
 +							 out += 2; );
 +		}
 +		else if ( bpp == 8 )
 +		{
-+			COPY_IN_OUT( *( (uint8_t *)out ) = (uint8_t)pixel; ++out; )
++			COPY_IN_OUT( 1, *( (uint8_t *)out ) = (uint8_t)pixel; ++out; )
 +		}
 +		else
 +		{
@@ -463,7 +513,14 @@
 +
 +	XSetWindowColormap( display, win, color_map );
 +
-+	// FIXME Do we want an own colormap for 8bpp displays?
++	// setup colors
++#define FILL_COLOR(xcol,col) xcol.red = 256*col.r; xcol.green = 256*col.g; xcol.blue = 256*col.b;
++	FILL_COLOR( barcolor, barcol );
++	FILL_COLOR( framecolor, framecol );
++#undef FILL_COLOR
++
++	XAllocColor( display, color_map, &barcolor);
++	XAllocColor( display, color_map, &framecolor);
 +
 +	// not resizable, no decorations, etc.
 +	unsigned long value_mask = 0;
@@ -514,25 +571,6 @@
 +// Draw the progress
 +void splash_draw_progress( int progress )
 +{
-+	// values taken from desktop/source/splash/splash.cxx
-+	static int tlx = 212;
-+	static int tly = 216;
-+	static int barwidth = 263;
-+	static int barheight = 8;
-+	static int barspace = PROGRESS_BARSPACE;
-+	static int initialized = 0;
-+	if ( !initialized )
-+	{
-+		if ( width <= 500)
-+		{
-+			barwidth  = width - (2 * PROGRESS_XOFFSET);
-+			barheight = 6;
-+			tlx = PROGRESS_XOFFSET;
-+			tly = height - PROGRESS_YOFFSET;
-+		}
-+		initialized = 1;
-+	}
-+
 +	// sanity
 +	if ( progress < 0 )
 +		progress = 0;
@@ -545,13 +583,13 @@
 +		length = 0;
 +
 +	// border
-+	XSetForeground( display, gc, WhitePixel( display, screen ) );
++	XSetForeground( display, gc, framecolor.pixel );
 +	XDrawRectangle( display, win, gc,
 +			tlx, tly,
 +			barwidth, barheight );
 +
 +	// progress bar
-+	XSetForeground( display, gc, WhitePixel( display, screen ) );
++	XSetForeground( display, gc, barcolor.pixel );
 +	XFillRectangle( display, win, gc,
 +			tlx + barspace, tly + barspace,
 +			length + 1, barheight - 2*barspace + 1 );
@@ -568,9 +606,9 @@
 +	free( bitmap );
 +	bitmap = NULL;
 +}
---- desktop/unx/source/splashx.h	1970-01-01 01:00:00.000000000 +0100
-+++ desktop/unx/source/splashx.h	2006-08-04 15:20:29.000000000 +0200
-@@ -0,0 +1,58 @@
+--- /dev/null	2006-06-16 15:54:00.000000000 +0200
++++ desktop/unx/source/splashx.h	2006-08-18 16:39:42.000000000 +0200
+@@ -0,0 +1,71 @@
 +/*************************************************************************
 + *
 + *  OpenOffice.org - a multi-platform office productivity suite
@@ -609,6 +647,10 @@
 +#ifndef _SPLASHX_H
 +#define _SPLASHX_H
 +
++#ifdef __cplusplus
++extern "C" {
++#endif
++
 +// Load the specified Windows 24bit BMP we can have as a background of the
 +// splash.
 +// 
@@ -617,6 +659,11 @@
 +// 
 +// Return: 1 - success, 0 - failure (non-existing, etc.)
 +int splash_load_bmp( char *filename );
++
++// Init some of the values
++// If not called, the defaults are used
++// barc, framec - colors, posx, posy - position, w, h - size
++void splash_setup( int barc[3], int framec[3], int posx, int posy, int w, int h );
 +
 +// Create the splash window
 +// Return: 1 - success, 0 - failure
@@ -628,10 +675,14 @@
 +// Update the progress bar
 +void splash_draw_progress( int progress );
 +
++#ifdef __cplusplus
++} // extern "C"
++#endif
++
 +#endif // _SPLASHX_H
---- desktop/unx/source/start.c	1970-01-01 01:00:00.000000000 +0100
-+++ desktop/unx/source/start.c	2006-08-04 15:23:28.000000000 +0200
-@@ -0,0 +1,580 @@
+--- /dev/null	2006-06-16 15:54:00.000000000 +0200
++++ desktop/unx/source/start.c	2006-08-18 16:31:10.000000000 +0200
+@@ -0,0 +1,641 @@
 +/*************************************************************************
 + *
 + *  OpenOffice.org - a multi-platform office productivity suite
@@ -681,6 +732,8 @@
 +#include <stdio.h>
 +
 +#include <rtl/digest.h>
++
++#include "splashx.h"
 +
 +#define PIPEDEFAULTPATH		"/tmp"
 +#define PIPEALTERNATEPATH	"/var/tmp"
@@ -961,6 +1014,68 @@
 +}
 +
 +static void
++get_key_file_value (int *array, int size, GKeyFile *key_file, const char *key)
++{
++	char *value = g_key_file_get_value (key_file, "Bootstrap", key, NULL);
++	if (!value)
++		return;
++	
++	char **valuev = g_strsplit (value, ",", 0);
++	if (!valuev)
++	{
++		g_free (value);
++		return;
++	}
++
++	int i = 0;
++	gboolean finish = FALSE;
++	for (; i < size; ++i)
++	{
++		if (!finish && valuev[i])
++			array[i] = atoi (valuev[i]);
++		else
++		{
++			finish = TRUE;
++			array[i] = -1;
++		}
++	}
++
++	g_free (valuev);
++	g_free (value);
++}
++
++static void
++load_splash_defaults (const char *path, gboolean *inhibit_splash)
++{
++	char *settings = g_strconcat (path, "/sofficerc", NULL);
++	GKeyFile* key_file = g_key_file_new();
++
++	// get the value of [Bootstrap]:UserInstalation 
++	if (!g_key_file_load_from_file (key_file, settings, G_KEY_FILE_NONE, NULL))
++		return;
++
++	int logo[1] = {-1},
++	    bar[3] = {-1, -1, -1},
++	    frame[3] = {-1, -1, -1},
++	    pos[2] = {-1, -1},
++	    size[2] = {-1, -1};
++
++	get_key_file_value (logo, 1, key_file, "Logo");
++	get_key_file_value (bar, 3, key_file, "ProgressBarColor");
++	get_key_file_value (frame, 3, key_file, "ProgressFrameColor");
++	get_key_file_value (pos, 2, key_file, "ProgressPosition");
++	get_key_file_value (size, 2, key_file, "ProgressSize");
++
++	if (logo[0] == 0)
++		*inhibit_splash = TRUE;
++
++	splash_setup (bar, frame, pos[0], pos[1], size[0], size[1] );
++
++	g_key_file_free (key_file);
++	g_free (settings);
++}
++
++static void
 +show_splash (GIOChannel *status_channel)
 +{
 +	StatusClosure cl;
@@ -1175,8 +1290,6 @@
 +	if (!app_path)
 +		g_error ("Pathalogical failure: can't read app link\n");
 +
-+	load_splash_image (app_path);
-+
 +	pipe_path = get_pipe_path (app_path);
 +
 +	if ((fd = connect_pipe (pipe_path)) >= 0)
@@ -1188,19 +1301,18 @@
 +
 +	if (!sent_args)
 +	{
-+		if (!inhibit_splash)
-+		{
-+			if (splash_create_window (argc, argv))
-+				splash_draw_progress (0);
-+			else
-+				inhibit_splash = TRUE;
-+		}
-+
 +		if (! fork_app (app_path, args, fd, &status_channel))
 +			return 1;
 +
 +		if (!inhibit_splash)
 +		{
++			load_splash_image (app_path);
++			load_splash_defaults (app_path, &inhibit_splash);
++		}
++
++		if (!inhibit_splash && splash_create_window (argc, argv))
++		{
++			splash_draw_progress (0);
 +			show_splash (status_channel);
 +			splash_close_window ();
 +		}
