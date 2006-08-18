@@ -1929,6 +1929,18 @@ ScVbaRange::getEntireColumn() throw (uno::RuntimeException)
 	return getEntireColumnOrRow();
 }
 
+uno::Reference< vba::XComment > SAL_CALL 
+ScVbaRange::AddComment( const uno::Any& Text ) throw (uno::RuntimeException)
+{
+	uno::Reference< vba::XComment > xComment( new ScVbaComment( m_xContext, mxRange ) );
+	// if you don't pass a valid text or if there is already a comment
+	// associated with the range then return NULL
+	if ( !xComment->Text( Text, uno::Any(), uno::Any() ).getLength() 
+	||   xComment->Text( uno::Any(), uno::Any(), uno::Any() ).getLength() )
+		return NULL;
+	return xComment;
+}
+
 uno::Reference< vba::XComment > SAL_CALL
 ScVbaRange::getComment() throw (uno::RuntimeException)
 {
@@ -1956,6 +1968,13 @@ getRowOrColumnProps( const uno::Reference< table::XCellRange >& xCellRange, bool
 uno::Any SAL_CALL 
 ScVbaRange::getHidden() throw (uno::RuntimeException)
 {
+	// if multi-area result is the result of the 
+	// first area
+	if ( m_Areas->getCount() > 1 )
+	{
+		uno::Reference< vba::XRange > xRange( m_Areas->Item( uno::makeAny(sal_Int32(1)) ), uno::UNO_QUERY_THROW );
+		return xRange->getHidden();	
+	}
 	bool bIsVisible = false;
 	try
 	{
@@ -1973,6 +1992,17 @@ ScVbaRange::getHidden() throw (uno::RuntimeException)
 void SAL_CALL 
 ScVbaRange::setHidden( const uno::Any& _hidden ) throw (uno::RuntimeException)
 {
+	if ( m_Areas->getCount() > 1 )
+	{
+		sal_Int32 nItems = m_Areas->getCount();
+		for ( sal_Int32 index=1; index <= nItems; ++index )
+		{
+			uno::Reference< vba::XRange > xRange( m_Areas->Item( uno::makeAny(index) ), uno::UNO_QUERY_THROW );
+			xRange->setHidden( _hidden );	
+		}
+		return;
+	}
+
 	sal_Bool bHidden;
 	if ( !(_hidden >>= bHidden) )
 		throw uno::RuntimeException( ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Failed to extract param for Hidden property" ) ), uno::Reference< uno::XInterface >() ); 

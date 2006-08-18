@@ -126,6 +126,7 @@ public:
 	// Methods
 	sal_Bool IsRows() { return mbIsRows; }
 	sal_Bool IsColumns() { return mbIsColumns; }
+	virtual css::uno::Reference< oo::vba::XComment > SAL_CALL AddComment( const css::uno::Any& Text ) throw (css::uno::RuntimeException);
 	virtual void SAL_CALL Clear() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL ClearComments() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL ClearContents() throw (css::uno::RuntimeException);
