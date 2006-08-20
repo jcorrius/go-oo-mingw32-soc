@@ -25,56 +25,26 @@
  *
  ************************************************************************/
 
-#include "option.hxx"
+#include <memory>
 
 namespace scsolver {
 
-/**
- *  This is where the values of options settings are stored. The
- *  default values are specified in the constructor.
- */
-struct OptionDataImpl
+class TimerImpl;
+
+class Timer
 {
-	OptionDataImpl() :
-		VarPositive(true),
-		ModelType(OPTMODELTYPE_LP)
-	{
-	}
+public:
+	Timer( double duration );
+	~Timer() throw();
 
-	~OptionDataImpl() throw() {}
+	void init();
+	bool isTimedOut() const;
 
-	bool VarPositive:1;
-	OptModelType ModelType;
+private:
+	Timer(); // disabled
+
+	::std::auto_ptr<TimerImpl> m_pImpl;
 };
 
-//-----------------------------------------------------------------
-
-OptionData::OptionData() : m_pImpl( new OptionDataImpl )
-{
 }
 
-OptionData::~OptionData() throw()
-{
-}
-
-void OptionData::setVarPositive( bool b )
-{
-	m_pImpl->VarPositive = b;
-}
-
-bool OptionData::getVarPositive() const
-{
-	return m_pImpl->VarPositive;
-}
-
-void OptionData::setModelType( OptModelType type )
-{
-	m_pImpl->ModelType = type;
-}
-
-OptModelType OptionData::getModelType() const
-{
-	return m_pImpl->ModelType;
-}
-
-}

@@ -73,7 +73,7 @@ RngSelListener::~RngSelListener() throw()
 {
 }
 
-void RngSelListener::disposing( const lang::EventObject& oEvt ) throw ( RuntimeException )
+void RngSelListener::disposing( const lang::EventObject& ) throw ( RuntimeException )
 {
 }
 	
@@ -99,7 +99,7 @@ void RngSelListener::done( const sheet::RangeSelectionEvent& oEvt ) throw ( Runt
 	}
 }
 
-void RngSelListener::aborted( const sheet::RangeSelectionEvent& oEvt ) throw ( RuntimeException )
+void RngSelListener::aborted( const sheet::RangeSelectionEvent& ) throw ( RuntimeException )
 {
 	m_pDlg->setVisible( true );
 }
@@ -137,7 +137,7 @@ RngBtnListener::~RngBtnListener() throw()
 		Debug( "m_xRngSel == NULL!" );
 }
 
-void RngBtnListener::disposing( const lang::EventObject& oEvt )
+void RngBtnListener::disposing( const lang::EventObject& )
 		throw ( RuntimeException )
 {
 }
@@ -203,12 +203,12 @@ SolveBtnListener::~SolveBtnListener() throw()
 {
 }
 
-void SolveBtnListener::disposing( const lang::EventObject& oEvt )
+void SolveBtnListener::disposing( const lang::EventObject& )
 	throw ( RuntimeException )
 {
 }
 
-void SolveBtnListener::actionPerformed( const awt::ActionEvent& oEvt )
+void SolveBtnListener::actionPerformed( const awt::ActionEvent& )
 	throw ( RuntimeException )
 {
 	getDialog()->getSolverImpl()->solveModel();
@@ -226,12 +226,12 @@ CloseBtnListener::~CloseBtnListener() throw()
 {
 }
 
-void CloseBtnListener::disposing( const lang::EventObject& oEvt )
+void CloseBtnListener::disposing( const lang::EventObject& )
 	throw ( RuntimeException )
 {
 }
 	
-void CloseBtnListener::actionPerformed( const awt::ActionEvent& oEvt )
+void CloseBtnListener::actionPerformed( const awt::ActionEvent& )
 	throw ( RuntimeException )
 {
 	getDialog()->setVisible( false );
@@ -249,12 +249,12 @@ SaveBtnListener::~SaveBtnListener() throw()
 {
 }
 
-void SaveBtnListener::disposing( const lang::EventObject& oEvt )
+void SaveBtnListener::disposing( const lang::EventObject& )
 	throw ( RuntimeException )
 {
 }
 	
-void SaveBtnListener::actionPerformed( const awt::ActionEvent& oEvt )
+void SaveBtnListener::actionPerformed( const awt::ActionEvent& )
 	throw ( RuntimeException )
 {
 	getDialog()->getSolverImpl()->getMainDialog()->saveModelToDocument();
@@ -272,12 +272,12 @@ LoadBtnListener::~LoadBtnListener() throw()
 {
 }
 
-void LoadBtnListener::disposing( const lang::EventObject& oEvt )
+void LoadBtnListener::disposing( const lang::EventObject& )
 	throw ( RuntimeException )
 {
 }
 	
-void LoadBtnListener::actionPerformed( const awt::ActionEvent& oEvt )
+void LoadBtnListener::actionPerformed( const awt::ActionEvent& )
 	throw ( RuntimeException )
 {
 	getDialog()->getSolverImpl()->getMainDialog()->loadModelFromDocument();
@@ -296,12 +296,12 @@ ResetBtnListener::~ResetBtnListener() throw()
 {
 }
 
-void ResetBtnListener::disposing( const lang::EventObject& oEvt )
+void ResetBtnListener::disposing( const lang::EventObject& )
 	throw ( RuntimeException )
 {
 }
 	
-void ResetBtnListener::actionPerformed( const awt::ActionEvent& oEvt )
+void ResetBtnListener::actionPerformed( const awt::ActionEvent& )
 	throw ( RuntimeException )
 {
 	getDialog()->getSolverImpl()->getMainDialog()->reset();
@@ -318,15 +318,17 @@ OptionBtnListener::~OptionBtnListener() throw()
 {
 }
 
-void OptionBtnListener::disposing( const lang::EventObject& oEvt )
+void OptionBtnListener::disposing( const lang::EventObject& )
 	throw ( RuntimeException )
 {
 }
 	
-void OptionBtnListener::actionPerformed( const awt::ActionEvent& oEvt )
+void OptionBtnListener::actionPerformed( const awt::ActionEvent& )
 	throw ( RuntimeException )
 {
-	OptionDialog* pDlg = getDialog()->getSolverImpl()->getMainDialog()->getOptionDialog();
+	SolverImpl* p = getDialog()->getSolverImpl();
+	OptionDialog* pDlg = p->getMainDialog()->getOptionDialog();
+	pDlg->setModelType( p->getOptionData()->getModelType() );
 	pDlg->setVisible(true);
 }
 
@@ -344,12 +346,12 @@ ConstEditBtnListener::~ConstEditBtnListener() throw()
 {
 }
 
-void ConstEditBtnListener::disposing( const lang::EventObject& oEvt )
+void ConstEditBtnListener::disposing( const lang::EventObject& )
 	throw ( RuntimeException )
 {
 }
 	
-void ConstEditBtnListener::actionPerformed( const awt::ActionEvent& oEvt )
+void ConstEditBtnListener::actionPerformed( const awt::ActionEvent& )
 	throw ( RuntimeException )
 {
 	BaseDialog* pDlg = getDialog();
@@ -417,7 +419,7 @@ ConstListBoxListener::ConstListBoxListener( SolverDialog* pDlg ) : ItemListener(
 {
 }
 
-void ConstListBoxListener::itemStateChanged( const awt::ItemEvent& oEvt )
+void ConstListBoxListener::itemStateChanged( const awt::ItemEvent& )
 	throw ( RuntimeException )
 {
 	Debug( "ConstListBoxListener::itemStateChanged" );
@@ -438,12 +440,12 @@ MaxRadioBtnListener::~MaxRadioBtnListener() throw()
 {
 }
 
-void MaxRadioBtnListener::disposing( const lang::EventObject& oEvt ) 
+void MaxRadioBtnListener::disposing( const lang::EventObject& ) 
 		throw ( RuntimeException )
 {
 }
 
-void MaxRadioBtnListener::itemStateChanged( const awt::ItemEvent& oEvt )
+void MaxRadioBtnListener::itemStateChanged( const awt::ItemEvent& )
 	throw ( RuntimeException )
 {
 	Debug( "MaxRadioBtnListener::itemStateChanged" );
@@ -455,12 +457,12 @@ WindowFocusListener::WindowFocusListener( BaseDialog* pDlg ) : FocusListener( pD
 {
 }
 
-void WindowFocusListener::focusGained( const awt::FocusEvent& oEvt ) throw( RuntimeException )
+void WindowFocusListener::focusGained( const awt::FocusEvent& ) throw( RuntimeException )
 {
 	Debug( "focusGained" );
 }
 
-void WindowFocusListener::focusLost( const awt::FocusEvent& oEvt ) throw( RuntimeException )
+void WindowFocusListener::focusLost( const awt::FocusEvent& ) throw( RuntimeException )
 {
 	Debug( "focusLost" );
 }
@@ -474,7 +476,7 @@ WindowMouseListener::~WindowMouseListener() throw()
 {
 }
 
-void WindowMouseListener::mousePressed( const awt::MouseEvent& oEvt ) 
+void WindowMouseListener::mousePressed( const awt::MouseEvent& ) 
 	throw( RuntimeException )
 {
 	Debug( "mousePressed" );
@@ -491,13 +493,13 @@ OKCancelBtnListener::~OKCancelBtnListener() throw()
 {
 }
 
-void OKCancelBtnListener::disposing( const lang::EventObject& oEvt )
+void OKCancelBtnListener::disposing( const lang::EventObject& )
 	throw ( RuntimeException )
 {
 	Debug( "CancelBtnListener::disposing" );
 }
 
-void OKCancelBtnListener::actionPerformed( const awt::ActionEvent& oEvt )
+void OKCancelBtnListener::actionPerformed( const awt::ActionEvent& )
 	throw ( RuntimeException )
 {	
 	ConstEditDialog* pDlg = getDialog()->getSolverImpl()->getMainDialog()->getConstEditDialog();

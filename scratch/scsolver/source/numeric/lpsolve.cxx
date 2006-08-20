@@ -28,6 +28,7 @@
 
 #include "numeric/lpsolve.hxx"
 #include "numeric/lpmodel.hxx"
+#include "numeric/exception.hxx"
 #include "unoglobal.hxx"
 #include "global.hxx"
 #include "numeric/type.hxx"
@@ -36,6 +37,8 @@
 #include <string>
 #include <memory>
 #include <iostream>
+
+using namespace ::scsolver::numeric::opres;
 
 namespace scsolver {
 

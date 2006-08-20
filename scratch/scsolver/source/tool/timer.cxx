@@ -25,56 +25,78 @@
  *
  ************************************************************************/
 
-#include "option.hxx"
+#include "tool/timer.hxx"
+#include <sys/time.h>
+#include <stdio.h>
 
 namespace scsolver {
 
-/**
- *  This is where the values of options settings are stored. The
- *  default values are specified in the constructor.
- */
-struct OptionDataImpl
+class TimerImpl
 {
-	OptionDataImpl() :
-		VarPositive(true),
-		ModelType(OPTMODELTYPE_LP)
+public:
+	TimerImpl( double duration ) :
+		m_fDuration(duration)
 	{
 	}
 
-	~OptionDataImpl() throw() {}
+	~TimerImpl() throw()
+	{
+	}
 
-	bool VarPositive:1;
-	OptModelType ModelType;
+	void init()
+	{
+		m_fCurTime = getTime();
+	}
+
+	bool isTimedOut()
+	{
+		return (getTime() - m_fCurTime) > m_fDuration;
+	}
+
+private:
+
+	/**
+     * Get current time in seconds.
+	 * 
+     * @return double current time in seconds
+	 */
+	double getTime()
+	{
+		timeval tv;
+		gettimeofday(&tv, NULL);
+		return tv.tv_sec + tv.tv_usec / 1000000.0;
+	}
+
+	double m_fDuration;
+	double m_fCurTime;
 };
 
 //-----------------------------------------------------------------
 
-OptionData::OptionData() : m_pImpl( new OptionDataImpl )
+/*
+Timer::Timer()
+{
+	// disabled
+}
+*/
+
+Timer::Timer( double duration ) :
+	m_pImpl( new TimerImpl(duration) )
 {
 }
 
-OptionData::~OptionData() throw()
+Timer::~Timer() throw()
 {
 }
 
-void OptionData::setVarPositive( bool b )
+void Timer::init()
 {
-	m_pImpl->VarPositive = b;
+	m_pImpl->init();
 }
 
-bool OptionData::getVarPositive() const
+bool Timer::isTimedOut() const
 {
-	return m_pImpl->VarPositive;
-}
-
-void OptionData::setModelType( OptModelType type )
-{
-	m_pImpl->ModelType = type;
-}
-
-OptModelType OptionData::getModelType() const
-{
-	return m_pImpl->ModelType;
+	return m_pImpl->isTimedOut();
 }
 
 }

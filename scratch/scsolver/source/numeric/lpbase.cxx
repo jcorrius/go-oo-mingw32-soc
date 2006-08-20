@@ -37,20 +37,6 @@ using namespace std;
 
 namespace scsolver { namespace numeric { namespace opres { namespace lp {
 
-const char* ConstraintError::what() const throw()
-{
-	return "Constraint error";
-}
-
-const char* AssertionWrong::what() const throw()
-{
-	return "Wrong assertion! (tell Kohei immediately)";
-}
-
-const char* ModelInfeasible::what() const throw()
-{
-	return "Model infeasible";
-}
 
 class BaseAlgorithmImpl
 {

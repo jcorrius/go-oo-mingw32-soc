@@ -39,6 +39,7 @@
 #include "numeric/nlpmodel.hxx"
 #include "numeric/type.hxx"
 #include "numeric/lpbase.hxx"
+#include "numeric/exception.hxx"
 //#include "numeric/lpsimplex.hxx"
 #include "numeric/lpsolve.hxx"
 #include "numeric/nlpnewton.hxx"
@@ -78,19 +79,25 @@ public:
 
 	/**
      * This is the gateway method that calls either solveLp() or
-     * solveNlp() as appropriate.
-     * 
-     * TODO: We need to put in place a means to determine whether
-     * the user wants to (either implicitly or explicitly) solve a
-     * LP model or NLP model.
-     * 
-     * Note that the solveNlp() method is still of alpha quality and
-     * needs lots of polish.
+     * solveNlp() as appropriate based on the corresponding option
+     * setting.
 	 */
 	void solve()
 	{
-		solveLp();
-		//solveNlp();
+		OptModelType type = getSolverImpl()->getOptionData()->getModelType();
+		switch (type)
+		{
+		case OPTMODELTYPE_LP:
+		case OPTMODELTYPE_MILP:
+			solveLp();
+			break;
+		case OPTMODELTYPE_NLP:
+		case OPTMODELTYPE_MINLP:
+			solveNlp();
+			break;
+		default:
+			break;
+		}
 	}
 
 	/**
@@ -149,7 +156,7 @@ public:
 			updateCells( pBuilder.get() );
 			pMainDlg->showSolutionFound();
 		}
-		catch( const lp::ModelInfeasible& e )
+		catch( const ModelInfeasible& e )
 		{
 			Debug( "model infeasible" );
 			pMainDlg->showSolutionInfeasible();
@@ -204,10 +211,27 @@ public:
 		{
 			algorithm->setModel(&model);
 			algorithm->solve();
+			m_bSolved = true;
+			pMainDlg->showSolutionFound();
 		}
-		catch ( const ::std::exception& e )
+		catch ( const IterationTimedOut& )
 		{
-			pMainDlg->showSolveError( ascii_i18n("Standard exception caught") );
+			pMainDlg->showSolveError(
+				getSolverImpl()->getResStr(SCSOLVER_STR_MSG_ITERATION_TIMED_OUT) );
+		}
+		catch ( const MaxIterationReached& )
+		{
+			pMainDlg->showSolveError(
+				getSolverImpl()->getResStr(SCSOLVER_STR_MSG_MAX_ITERATION_REACHED) );
+		}
+		catch ( const RuntimeError& e )
+		{
+			pMainDlg->showSolveError( e.getMessage() );
+		}
+		catch ( const ::std::exception& )
+		{
+			pMainDlg->showSolveError(
+				getSolverImpl()->getResStr(SCSOLVER_STR_MSG_STD_EXCEPTION_CAUGHT) );
 		}
 	}
 

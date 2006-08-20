@@ -14,7 +14,8 @@ TARGET=scsolver
 DLLPRE=
 LIB1TARGET= $(SLB)$/$(TARGET).uno.lib
 LIB1FILES=	$(SLB)$/numeric.lib	\
-		$(SLB)$/service.lib		\
+		$(SLB)$/service.lib	\
+		$(SLB)$/tool.lib	\
 		$(SLB)$/ui.lib
 
 SHL1TARGET= $(TARGET).uno

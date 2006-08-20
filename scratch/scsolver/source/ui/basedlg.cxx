@@ -101,7 +101,16 @@ public:
 	
 	apWidgetProp addRadioButton( sal_Int32, sal_Int32, sal_Int32, sal_Int32, 
 		const rtl::OUString &, const rtl::OUString & );
-		
+
+	apWidgetProp addCheckBox( sal_Int32 x, sal_Int32 y, sal_Int32 w, sal_Int32 h,
+		const rtl::OUString& name, const rtl::OUString& label )
+	{
+		apWidgetProp p = addWidget( 
+			ascii("com.sun.star.awt.UnoControlCheckBoxModel"), x, y, w, h, name );
+		p->setLabel(label);
+		return p;
+	}
+
 	apWidgetProp addRangeEdit( sal_Int32, sal_Int32, sal_Int32, sal_Int32,
 		const rtl::OUString &, const rtl::OUString & );
 		
@@ -595,6 +604,12 @@ apWidgetProp BaseDialog::addRadioButton( sal_Int32 nX, sal_Int32 nY, sal_Int32 n
 	const rtl::OUString& sName, const rtl::OUString& sLabel )
 {
 	return m_pImpl->addRadioButton( nX, nY, nW, nH, sName, sLabel );
+}
+
+apWidgetProp BaseDialog::addCheckBox( sal_Int32 x, sal_Int32 y, sal_Int32 w, sal_Int32 h,
+	const rtl::OUString& name, const rtl::OUString& label )
+{
+	return m_pImpl->addCheckBox(x, y, w, h, name, label);
 }
 
 apWidgetProp BaseDialog::addRangeEdit( sal_Int32 nX, sal_Int32 nY, sal_Int32 nW, sal_Int32 nH,

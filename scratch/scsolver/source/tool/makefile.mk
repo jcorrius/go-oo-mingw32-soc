@@ -2,7 +2,7 @@ EXTERNAL_WARNINGS_NOT_ERRORS := TRUE
 
 PRJ=..$/..
 PRJNAME=scsolver
-TARGET=numeric
+TARGET=tool
 ENABLE_EXCEPTIONS=TRUE
 
 # --- Settings -----------------------------------------------------
@@ -13,17 +13,7 @@ ENABLE_EXCEPTIONS=TRUE
 # --- Files --------------------------------------------------------
 
 SLOFILES =  \
-	$(SLO)$/diff.obj \
-	$(SLO)$/funcobj.obj \
-	$(SLO)$/cellfuncobj.obj \
-	$(SLO)$/lpbase.obj \
-	$(SLO)$/lpmodel.obj \
-	$(SLO)$/matrix.obj \
-	$(SLO)$/nlpbase.obj \
-	$(SLO)$/nlpmodel.obj \
-	$(SLO)$/nlpqnewton.obj \
-	$(SLO)$/lpsolve.obj \
-	$(SLO)$/exception.obj
+        $(SLO)$/timer.obj
 
 # --- Tagets -------------------------------------------------------
 

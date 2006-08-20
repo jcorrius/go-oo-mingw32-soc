@@ -26,9 +26,11 @@
  ************************************************************************/
 
 #include "numeric/nlpnewton.hxx"
+#include "numeric/exception.hxx"
 #include "numeric/diff.hxx"
 #include "numeric/nlpmodel.hxx"
 #include "numeric/funcobj.hxx"
+#include "tool/timer.hxx"
 #include "global.hxx"
 
 #include <boost/shared_ptr.hpp>
@@ -37,6 +39,7 @@
 #include <iomanip>
 #include <cmath>
 
+using namespace scsolver::numeric::opres;
 using scsolver::numeric::Matrix;
 using scsolver::numeric::Differentiate;
 using boost::shared_ptr;
@@ -135,9 +138,10 @@ public:
 		m_pDiff->setFuncObject( m_pFuncObj );
 
 		m_nIter = 0;
-		bool bIterDone = false;
 		cout << setprecision( m_pModel->getPrecision() );
-		while ( !runIteration() );
+		::scsolver::Timer mytimer(5); // set timer to 5 sec
+		mytimer.init();
+		while ( !runIteration(mytimer) );
 
 		cout << "f(x) = " << m_fF << endl;
 	}
@@ -262,7 +266,7 @@ private:
 	 * 
 	 * @return double
 	 */
-	double runLinearSearch()
+	double runLinearSearch( const ::scsolver::Timer& timer )
 	{
 		// m_mxVars  : Original X
 		// m_mxdVars : dX
@@ -270,14 +274,16 @@ private:
 
 		double fInterval = 0.1;
 		double fLambda = 0.0;
-	// 	double fTolerance = m_fTolerance;
 
 		Matrix mxVarsOriginal = m_mxVars.clone();
 
 		double fF = m_fF;
 
-		while ( true )
+		for ( size_t i = 0; i < 500000; ++i )
 		{
+			if ( timer.isTimedOut() )
+				throw IterationTimedOut();
+
 			// Inspect two points
 			Matrix mxVars = mxVarsOriginal + m_mxdVars * ( fLambda + fInterval );
 			double fF1 = QuasiNewtonImpl::evalF( *m_pFuncObj, mxVars );
@@ -299,12 +305,16 @@ private:
 			else
 				fInterval /= 2.0;
 		}
-		assert( !"logic error" );
+		throw MaxIterationReached();
 	}
 
-	bool runIteration()
+	bool runIteration( const ::scsolver::Timer& timer )
 	{
-		Debug( "runIteration" );
+		if ( timer.isTimedOut() )
+			throw IterationTimedOut();
+
+		if ( m_nIter > 500 )
+			throw MaxIterationReached();
 
 		if ( m_pModel->getVerbose() )
 		{
@@ -321,7 +331,7 @@ private:
 		if ( calcDefMatrix() )
 			return true;
 
-		double fLambda = runLinearSearch();
+		double fLambda = runLinearSearch(timer);
 		if ( m_pModel->getVerbose() )
 			cout << "lambda = " << fLambda << endl;
 

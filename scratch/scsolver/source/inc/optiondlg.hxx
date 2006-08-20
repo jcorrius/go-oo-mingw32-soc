@@ -29,9 +29,13 @@
 #define _SCSOLVER_OPTIONDLG_HXX_
 
 #include "basedlg.hxx"
+#include "option.hxx"
+
+#include <memory>
 
 namespace scsolver {
 
+class ActionObject;
 class CloseBtnListener;
 
 class OptionDialog : public BaseDialog
@@ -61,11 +65,18 @@ public:
 
 	virtual void setVisible( bool b );
 
+	OptModelType getModelType() const;
+	void setModelType( OptModelType type );
+
+
 private:
 	void initialize();
 	void registerListeners();
 	void unregisterListeners() throw();
 
+	::std::auto_ptr<ActionObject> m_pActionOK;
+
+	ActionListener* m_pOKListener;
 	CloseBtnListener* m_pCloseListener;
 };
 

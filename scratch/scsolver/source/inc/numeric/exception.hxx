@@ -25,56 +25,44 @@
  *
  ************************************************************************/
 
-#include "option.hxx"
+#ifndef _SCSOLVER_NUMERIC_EXCEPTION_HXX_
+#define _SCSOLVER_NUMERIC_EXCEPTION_HXX_
 
-namespace scsolver {
+#include <exception>
 
-/**
- *  This is where the values of options settings are stored. The
- *  default values are specified in the constructor.
- */
-struct OptionDataImpl
+namespace scsolver { namespace numeric { namespace opres {
+
+class ConstraintError : public std::exception
 {
-	OptionDataImpl() :
-		VarPositive(true),
-		ModelType(OPTMODELTYPE_LP)
-	{
-	}
-
-	~OptionDataImpl() throw() {}
-
-	bool VarPositive:1;
-	OptModelType ModelType;
+public:
+	virtual const char* what() const throw();
 };
 
-//-----------------------------------------------------------------
-
-OptionData::OptionData() : m_pImpl( new OptionDataImpl )
+class AssertionWrong : public std::exception
 {
-}
+public:
+	virtual const char* what() const throw();
+};
 
-OptionData::~OptionData() throw()
+class ModelInfeasible : public std::exception
 {
-}
+public:
+	virtual const char* what() const throw();
+};
 
-void OptionData::setVarPositive( bool b )
+class MaxIterationReached : public std::exception
 {
-	m_pImpl->VarPositive = b;
-}
+public:
+	virtual const char* what() const throw();
+};
 
-bool OptionData::getVarPositive() const
+class IterationTimedOut : public std::exception
 {
-	return m_pImpl->VarPositive;
-}
+public:
+	virtual const char* what() const throw();
+};
 
-void OptionData::setModelType( OptModelType type )
-{
-	m_pImpl->ModelType = type;
-}
+}}}
 
-OptModelType OptionData::getModelType() const
-{
-	return m_pImpl->ModelType;
-}
 
-}
+#endif

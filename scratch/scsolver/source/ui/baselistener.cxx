@@ -44,18 +44,14 @@ ActionObject::~ActionObject() throw()
 {
 }
 
-void ActionObject::operator()( BaseDialog* dlg, const awt::ActionEvent& e )
-{
-}
-
 ActionListener::ActionListener( BaseDialog* pDlg ) 
-	: Listener( pDlg ), m_bActionSet( false )
+	: Listener(pDlg), m_pAction(NULL)
 {
 }
 
 
-ActionListener::ActionListener( BaseDialog* pDlg, const ActionObject& aAction ) 
-	: Listener( pDlg ), m_bActionSet( true ), m_aAction( aAction )
+ActionListener::ActionListener( BaseDialog* pDlg, ActionObject* pAction ) 
+	: Listener(pDlg), m_pAction(pAction)
 {
 }
 
@@ -71,8 +67,8 @@ void SAL_CALL ActionListener::disposing( const lang::EventObject& e )
 void SAL_CALL ActionListener::actionPerformed( const awt::ActionEvent& e )
 	throw ( RuntimeException )
 {
-	if( m_bActionSet )
-		m_aAction( getDialog(), e );
+	if( m_pAction )
+		m_pAction->execute( getDialog(), e );
 }
 
 ItemListener::~ItemListener() throw()

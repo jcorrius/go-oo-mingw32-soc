@@ -37,23 +37,6 @@ namespace scsolver { namespace numeric { namespace opres { namespace lp {
 class Model;
 class BaseAlgorithmImpl;
 
-class ConstraintError : public std::exception
-{
-public:
-	virtual const char* what() const throw();
-};
-
-class AssertionWrong : public std::exception
-{
-public:
-	virtual const char* what() const throw();
-};
-
-class ModelInfeasible : public std::exception
-{
-public:
-	virtual const char* what() const throw();
-};
 
 class BaseAlgorithm
 {

@@ -269,7 +269,7 @@ public:
 	ConstListBoxListener( SolverDialog* );
 	virtual ~ConstListBoxListener() throw() { Debug( "ConstListBoxListener d'tor" ); }
 
-	virtual void SAL_CALL disposing( const lang::EventObject& oEvt ) throw ( RuntimeException ) {}
+	virtual void SAL_CALL disposing( const lang::EventObject& ) throw ( RuntimeException ) {}
 	
 	virtual void SAL_CALL itemStateChanged( const awt::ItemEvent& ) throw ( RuntimeException );
 		
@@ -301,7 +301,7 @@ public:
 	
 	virtual rtl::OUString getListenerType() const { return ascii( "FocusListener" ); }
 	
-	virtual void SAL_CALL disposing( const lang::EventObject& oEvt ) throw ( RuntimeException ) {}
+	virtual void SAL_CALL disposing( const lang::EventObject& ) throw ( RuntimeException ) {}
 	virtual void SAL_CALL focusGained( const awt::FocusEvent& ) throw( RuntimeException );
 	virtual void SAL_CALL focusLost( const awt::FocusEvent& ) throw( RuntimeException );
 	
@@ -316,11 +316,11 @@ public:
 	virtual ~WindowMouseListener() throw();
 	
 	virtual void SAL_CALL mousePressed( const awt::MouseEvent& ) throw( RuntimeException );
-	virtual void SAL_CALL mouseReleased( const awt::MouseEvent& o) throw( RuntimeException ) {}
-	virtual void SAL_CALL mouseEntered( const awt::MouseEvent& o) throw( RuntimeException ) {}
-	virtual void SAL_CALL mouseExited( const awt::MouseEvent& o) throw( RuntimeException ) {}
+	virtual void SAL_CALL mouseReleased( const awt::MouseEvent& ) throw( RuntimeException ) {}
+	virtual void SAL_CALL mouseEntered( const awt::MouseEvent& ) throw( RuntimeException ) {}
+	virtual void SAL_CALL mouseExited( const awt::MouseEvent& ) throw( RuntimeException ) {}
 	
-	virtual void SAL_CALL disposing( const lang::EventObject& oEvt ) throw ( RuntimeException ) {}
+	virtual void SAL_CALL disposing( const lang::EventObject& ) throw ( RuntimeException ) {}
 };
 
 //--------------------------------------------------------------------------

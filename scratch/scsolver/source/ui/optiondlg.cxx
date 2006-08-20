@@ -29,13 +29,43 @@
 #include "unoglobal.hxx"
 #include "global.hxx"
 #include "listener.hxx"
+#include "solver.hxx"
+
+#include "com/sun/star/awt/XCheckBox.hpp"
 
 #include "scsolver.hrc"
 
+using namespace ::com::sun::star;
+using namespace ::com::sun::star::uno;
+
 namespace scsolver {
 
+/**
+ * This class defines the action to be performed when the OK
+ * button in the Option dialog is pressed.
+ */
+class OptionDlgOKAction : public ActionObject
+{
+public:
+	OptionDlgOKAction()
+	{
+	}
+
+	virtual ~OptionDlgOKAction() throw()
+	{
+	}
+
+	virtual void execute( BaseDialog *dlg, const awt::ActionEvent &e )
+	{
+		OptionDialog* p = static_cast<OptionDialog*>(dlg);
+		p->setVisible(false);
+		p->getSolverImpl()->getOptionData()->setModelType( p->getModelType() );
+	}
+};
+
 OptionDialog::OptionDialog( SolverImpl* p ) :
-	BaseDialog( p )
+	BaseDialog( p ),
+	m_pActionOK( new OptionDlgOKAction )
 {
 	initialize();
 }
@@ -55,22 +85,31 @@ void OptionDialog::initialize()
 
 	addFixedLine( nX, nY, nWidth-nX-nMargin, 12, ascii("flOptions"), 
 				  ascii_i18n("Options") );
+	nY += 13;
+	addCheckBox( nX, nY+2, nWidth-nX-nMargin, 12, ascii("cbLinear"),
+				 ascii_i18n("Assume linear model") );
 
-	addButton( nWidth-55, nHeight-20, 50, 15, ascii("btnClose"), 
-			   getResStr(SCSOLVER_STR_BTN_CLOSE) );
+	addButton( nWidth-110, nHeight-20, 50, 15, ascii("btnOK"), 
+			   getResStr(SCSOLVER_STR_BTN_OK) );
+
+	addButton( nWidth-55, nHeight-20, 50, 15, ascii("btnCancel"), 
+			   getResStr(SCSOLVER_STR_BTN_CANCEL) );
 
 	registerListeners();
 }
 
 void OptionDialog::registerListeners()
 {
+	m_pOKListener = new ActionListener( this, m_pActionOK.get() );
+	registerListener( ascii("btnOK"), m_pOKListener );
+
 	m_pCloseListener = new CloseBtnListener(this);
-	registerListener( ascii("btnClose"), m_pCloseListener );
+	registerListener( ascii("btnCancel"), m_pCloseListener );
 }
 
 void OptionDialog::unregisterListeners() throw()
 {
-	unregisterListener( ascii("btnClose"), m_pCloseListener );
+	unregisterListener( ascii("btnCancel"), m_pCloseListener );
 }
 
 bool OptionDialog::doneRangeSelection() const
@@ -86,6 +125,24 @@ const rtl::OUString OptionDialog::getDialogName() const
 void OptionDialog::setVisible( bool b )
 {
 	setVisibleDefault( b );
+}
+
+OptModelType OptionDialog::getModelType() const
+{
+	Reference<uno::XInterface> oWgt = getWidgetByName( ascii("cbLinear") );
+	Reference<awt::XCheckBox> xCB( oWgt, UNO_QUERY );
+
+	return xCB->getState() ? OPTMODELTYPE_LP : OPTMODELTYPE_NLP;
+}
+
+void OptionDialog::setModelType( OptModelType type )
+{
+	Reference<uno::XInterface> oWgt = getWidgetByName( ascii("cbLinear") );
+	Reference<awt::XCheckBox> xCB( oWgt, UNO_QUERY );
+	if ( type == OPTMODELTYPE_LP || type == OPTMODELTYPE_MILP )
+		xCB->setState(1);
+	else
+		xCB->setState(0);
 }
 
 }

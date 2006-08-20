@@ -32,6 +32,14 @@
 
 namespace scsolver {
 
+enum OptModelType
+{
+	OPTMODELTYPE_LP,
+	OPTMODELTYPE_MILP,
+	OPTMODELTYPE_NLP,
+	OPTMODELTYPE_MINLP
+};
+
 struct OptionDataImpl;
 
 class OptionData
@@ -42,6 +50,9 @@ public:
 
 	void setVarPositive( bool b );
 	bool getVarPositive() const;
+
+	void setModelType( OptModelType type );
+	OptModelType getModelType() const;
 
 private:
 	::std::auto_ptr<OptionDataImpl> m_pImpl;

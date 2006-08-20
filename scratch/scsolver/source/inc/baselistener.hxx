@@ -69,35 +69,35 @@ private:
 };
 
 /**
- * Function object class to define action for ActionListener
- * object.
+ * This class defines action for ActionListener object.
  */
 class ActionObject
 {
 public:
 	ActionObject();
-	virtual ~ActionObject() throw();
-	virtual void operator()( BaseDialog* dlg, const awt::ActionEvent& e );
+	virtual ~ActionObject() throw() = 0;
+	virtual void execute( BaseDialog* dlg, const awt::ActionEvent& e ) = 0;
 };
 
 /**
  * Generic action listener class.  You can either derive a child
  * class from it, or directly instantiate it with an instance of
- * ActionObject which defines the action to be performed.
+ * ActionObject which defines the action to be performed.  If an
+ * instance of ActionObject is passed as a pointer, the memory
+ * of that instance must be managed by the calling function.
  */
 class ActionListener : public ::cppu::WeakImplHelper1< awt::XActionListener >, public Listener
 {
 public:
 	ActionListener( BaseDialog* pDlg );
-	ActionListener( BaseDialog* pDlg, const ActionObject& aAction );
+	ActionListener( BaseDialog* pDlg, ActionObject* pAction );
 	virtual ~ActionListener() throw();
 	
 	virtual void SAL_CALL disposing( const lang::EventObject& e ) throw ( RuntimeException );
 	virtual void SAL_CALL actionPerformed( const awt::ActionEvent& e ) throw ( RuntimeException );
 
 private:
-	bool m_bActionSet:1;
-	ActionObject m_aAction;
+	ActionObject* m_pAction;
 };
 
 
@@ -107,8 +107,8 @@ public:
 	ItemListener( BaseDialog* pDlg ) : Listener( pDlg ) {}
 	virtual ~ItemListener() throw() = 0;
 
-	virtual void SAL_CALL disposing( const lang::EventObject& oEvt ) throw ( RuntimeException ) {}
-	virtual void SAL_CALL itemStateChanged( const awt::ItemEvent& oEvt ) throw ( RuntimeException ) {}
+	virtual void SAL_CALL disposing( const lang::EventObject& ) throw ( RuntimeException ) {}
+	virtual void SAL_CALL itemStateChanged( const awt::ItemEvent& ) throw ( RuntimeException ) {}
 };
 
 
@@ -120,7 +120,7 @@ public:
 	
 	virtual void SAL_CALL focusGained( const awt::FocusEvent& ) throw( RuntimeException ) {}
 	virtual void SAL_CALL focusLost( const awt::FocusEvent& ) throw( RuntimeException ) {}
-	virtual void SAL_CALL disposing( const lang::EventObject& oEvt ) throw ( RuntimeException ) {}
+	virtual void SAL_CALL disposing( const lang::EventObject& ) throw ( RuntimeException ) {}
 };	
 
 class MouseListener : public ::cppu::WeakImplHelper1< awt::XMouseListener >, public Listener
@@ -130,11 +130,11 @@ public:
 	virtual ~MouseListener() throw() = 0;
 	
 	virtual void SAL_CALL mousePressed( const awt::MouseEvent& ) throw( RuntimeException ) {}
-	virtual void SAL_CALL mouseReleased( const awt::MouseEvent& o) throw( RuntimeException ) {}
-	virtual void SAL_CALL mouseEntered( const awt::MouseEvent& o) throw( RuntimeException ) {}
-	virtual void SAL_CALL mouseExited( const awt::MouseEvent& o) throw( RuntimeException ) {}
+	virtual void SAL_CALL mouseReleased( const awt::MouseEvent& ) throw( RuntimeException ) {}
+	virtual void SAL_CALL mouseEntered( const awt::MouseEvent& ) throw( RuntimeException ) {}
+	virtual void SAL_CALL mouseExited( const awt::MouseEvent& ) throw( RuntimeException ) {}
 	
-	virtual void SAL_CALL disposing( const lang::EventObject& oEvt ) throw ( RuntimeException ) {}
+	virtual void SAL_CALL disposing( const lang::EventObject& ) throw ( RuntimeException ) {}
 };
 
 

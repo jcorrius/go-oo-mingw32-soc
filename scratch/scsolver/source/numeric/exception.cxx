@@ -25,56 +25,34 @@
  *
  ************************************************************************/
 
-#include "option.hxx"
+#include "numeric/exception.hxx"
 
-namespace scsolver {
+namespace scsolver { namespace numeric { namespace opres {
 
-/**
- *  This is where the values of options settings are stored. The
- *  default values are specified in the constructor.
- */
-struct OptionDataImpl
+
+const char* ConstraintError::what() const throw()
 {
-	OptionDataImpl() :
-		VarPositive(true),
-		ModelType(OPTMODELTYPE_LP)
-	{
-	}
-
-	~OptionDataImpl() throw() {}
-
-	bool VarPositive:1;
-	OptModelType ModelType;
-};
-
-//-----------------------------------------------------------------
-
-OptionData::OptionData() : m_pImpl( new OptionDataImpl )
-{
+	return "Constraint error";
 }
 
-OptionData::~OptionData() throw()
+const char* AssertionWrong::what() const throw()
 {
+	return "Wrong assertion! (tell Kohei immediately)";
 }
 
-void OptionData::setVarPositive( bool b )
+const char* ModelInfeasible::what() const throw()
 {
-	m_pImpl->VarPositive = b;
+	return "Model infeasible";
 }
 
-bool OptionData::getVarPositive() const
+const char* MaxIterationReached::what() const throw()
 {
-	return m_pImpl->VarPositive;
+	return "Maximum iteration reached";
 }
 
-void OptionData::setModelType( OptModelType type )
+const char* IterationTimedOut::what() const throw()
 {
-	m_pImpl->ModelType = type;
+	return "Iteration timed out";
 }
 
-OptModelType OptionData::getModelType() const
-{
-	return m_pImpl->ModelType;
-}
-
-}
+}}}

@@ -118,6 +118,9 @@ public:
 	
 	apWidgetProp addRadioButton( sal_Int32, sal_Int32, sal_Int32, sal_Int32, 
 			const rtl::OUString &, const rtl::OUString & );
+
+	apWidgetProp addCheckBox( sal_Int32 x, sal_Int32 y, sal_Int32 w, sal_Int32 h,
+			const rtl::OUString& name, const rtl::OUString& label );
 		
 	apWidgetProp addRangeEdit( sal_Int32, sal_Int32, sal_Int32, sal_Int32,
 			const rtl::OUString &, const rtl::OUString & );
