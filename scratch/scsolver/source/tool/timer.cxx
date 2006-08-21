@@ -26,7 +26,11 @@
  ************************************************************************/
 
 #include "tool/timer.hxx"
+#ifndef _WIN32
 #include <sys/time.h>
+#else
+#include <windows.h>
+#endif
 #include <stdio.h>
 
 namespace scsolver {
@@ -62,9 +66,22 @@ private:
 	 */
 	double getTime()
 	{
+#ifndef _WIN32
 		timeval tv;
 		gettimeofday(&tv, NULL);
 		return tv.tv_sec + tv.tv_usec / 1000000.0;
+#else
+		FILETIME ft;
+		__int64 *time64 = (__int64 *) &ft;
+
+		GetSystemTimeAsFileTime (&ft);
+
+		/* Convert from 100s of nanoseconds since 1601-01-01
+		 * to seconds since the Unix epoch.
+		 */
+		*time64 -= 116444736000000000i64;
+		return *time64 / 10000000.0;
+#endif
 	}
 
 	double m_fDuration;
