@@ -1200,6 +1200,20 @@ ScVbaRange::HasFormula() throw (uno::RuntimeException)
 void
 ScVbaRange::fillSeries( sheet::FillDirection nFillDirection, sheet::FillMode nFillMode, sheet::FillDateMode nFillDateMode, double fStep, double fEndValue ) throw( uno::RuntimeException )
 {
+	if ( m_Areas->getCount() > 1 )
+	{
+		// Multi-Area Range
+		uno::Reference< vba::XCollection > xCollection( m_Areas, uno::UNO_QUERY_THROW );
+		for ( sal_Int32 index = 1; index <= xCollection->getCount(); ++index )
+		{
+			uno::Reference< vba::XRange > xRange( xCollection->Item( uno::makeAny( index ) ), uno::UNO_QUERY_THROW );
+			ScVbaRange* pThisRange = dynamic_cast< ScVbaRange* >( xRange.get() );
+			pThisRange->fillSeries( nFillDirection, nFillMode, nFillDateMode, fStep, fEndValue );
+				
+		}
+		return;	
+	}
+	
 	uno::Reference< sheet::XCellSeries > xCellSeries(mxRange, uno::UNO_QUERY_THROW );
 	xCellSeries->fillSeries( nFillDirection, nFillMode, nFillDateMode, fStep, fEndValue );
 }
