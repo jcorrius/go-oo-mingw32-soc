@@ -36,6 +36,7 @@
 #include <com/sun/star/util/XSortable.hpp>
 #include <com/sun/star/sheet/XCellRangeMovement.hpp>
 #include <com/sun/star/sheet/XCellRangeData.hpp>
+#include <com/sun/star/sheet/FormulaResult.hpp>
 
 #include <com/sun/star/style/XStyleFamiliesSupplier.hpp>
 #include <com/sun/star/awt/XDevice.hpp>
@@ -1156,11 +1157,45 @@ ScVbaRange::getColumn() throw (uno::RuntimeException)
 	return xCellAddressable->getCellAddress().Column + 1; // Zero value indexing
 }
 
-sal_Bool
+uno::Any
 ScVbaRange::HasFormula() throw (uno::RuntimeException)
 {
-	uno::Reference< table::XCell > xCell( mxRange->getCellByPosition(0, 0), uno::UNO_QUERY_THROW );
-	return( xCell->getType() == table::CellContentType_FORMULA );
+	if ( m_Areas->getCount() > 1 )
+	{
+		sal_Int32 nItems = m_Areas->getCount();
+		uno::Any aResult = aNULL;
+		for ( sal_Int32 index=1; index <= nItems; ++index )
+		{
+			uno::Reference< vba::XRange > xRange( m_Areas->Item( uno::makeAny(index) ), uno::UNO_QUERY_THROW );
+			// if the HasFormula for any area is different to another
+			// return null
+			if ( index > 1 )
+				if ( aResult != xRange->HasFormula() )
+					return aNULL;
+			aResult = xRange->HasFormula();	
+			if ( aNULL == aResult ) 
+				return aNULL;
+		}
+		return aResult;
+	}
+
+	ScCellRangesBase* pThisRanges = dynamic_cast< ScCellRangesBase * > ( mxRange.get() );
+	if ( pThisRanges )
+	{
+		uno::Reference<sheet::XSheetCellRanges>  xRanges( pThisRanges->queryFormulaCells( ( sheet::FormulaResult::ERROR | sheet::FormulaResult::VALUE |  sheet::FormulaResult::STRING ) ), uno::UNO_QUERY_THROW );
+		ScCellRangesBase* pFormulaRanges = dynamic_cast< ScCellRangesBase * > ( xRanges.get() );
+		// check if there are no formula cell, return false
+		if ( pFormulaRanges->GetRangeList().Count() == 0 ) 
+			return uno::makeAny(sal_False);
+		
+		// chech if there are holes (where some cells are not formulas)
+		// or returned range is not equal to this range	 
+		if ( ( pFormulaRanges->GetRangeList().Count() > 1 ) 
+		|| ( pFormulaRanges->GetRangeList().GetObject(0)->aStart != pThisRanges->GetRangeList().GetObject(0)->aStart ) 
+		|| ( pFormulaRanges->GetRangeList().GetObject(0)->aEnd != pThisRanges->GetRangeList().GetObject(0)->aEnd ) )
+			return aNULL; // should return aNULL;
+	}
+	return uno::makeAny( sal_True );
 }
 void
 ScVbaRange::fillSeries( sheet::FillDirection nFillDirection, sheet::FillMode nFillMode, sheet::FillDateMode nFillDateMode, double fStep, double fEndValue ) throw( uno::RuntimeException )

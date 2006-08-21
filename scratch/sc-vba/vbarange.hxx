@@ -131,7 +131,7 @@ public:
 	virtual void SAL_CALL ClearComments() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL ClearContents() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL ClearFormats() throw (css::uno::RuntimeException);
-	virtual sal_Bool SAL_CALL HasFormula() throw (css::uno::RuntimeException);
+	virtual css::uno::Any SAL_CALL HasFormula() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL FillLeft() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL FillRight() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL FillUp() throw (css::uno::RuntimeException);
