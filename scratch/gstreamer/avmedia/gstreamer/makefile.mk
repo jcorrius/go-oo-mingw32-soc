@@ -4,9 +4,9 @@
 #
 #   $RCSfile: makefile.mk,v $
 #
-#   $Revision: 1.3 $
+#   $Revision: 1.4 $
 #
-#   last change: $Author: rodo $ $Date: 2006/08/15 17:14:21 $
+#   last change: $Author: tml $ $Date: 2006/08/21 13:43:05 $
 #
 #   The Contents of this file are made available subject to
 #   the terms of GNU Lesser General Public License Version 2.1.
@@ -40,6 +40,8 @@ TARGET=avmediagst
 # --- Settings ----------------------------------
 
 .INCLUDE :  	settings.mk
+
+.IF "$(ENABLE_GSTREAMER)" == "TRUE"
 
 .IF "$(verbose)"!="" || "$(VERBOSE)"!=""
 CDEFS+= -DVERBOSE
@@ -75,6 +77,8 @@ SHL1DEF=$(MISC)$/$(SHL1TARGET).def
 
 DEF1NAME=$(SHL1TARGET)
 DEF1EXPORTFILE=exports.dxp
+
+.ENDIF
 
 .ENDIF
 
