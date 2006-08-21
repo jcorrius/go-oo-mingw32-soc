@@ -1268,15 +1268,49 @@ ScVbaRange::Offset( const ::uno::Any &nRowOff, const uno::Any &nColOff ) throw (
 	sal_Int32 nRowOffset = 0, nColOffset = 0;
 	sal_Bool bIsRowOffset = ( nRowOff >>= nRowOffset );
 	sal_Bool bIsColumnOffset = ( nColOff >>= nColOffset );
+	ScCellRangesBase* pUnoRangesBase = getCellRangesBase();
 
-	RangeHelper helper( mxRange );
+	ScRangeList aCellRanges = pUnoRangesBase->GetRangeList();
+	
 
-	return RangeHelper::createRangeFromRange( m_xContext, helper.getCellRangeFromSheet(), helper.getCellRangeAddressable(), nColOffset, nRowOffset, nColOffset, nRowOffset );	
+	for ( ScRange* pRange = aCellRanges.First() ; pRange; pRange = aCellRanges.Next() )
+	{
+		if ( bIsColumnOffset )
+		{
+			pRange->aStart.SetCol( pRange->aStart.Col() + nColOffset );
+			pRange->aEnd.SetCol( pRange->aEnd.Col() + nColOffset );
+		}
+		if ( bIsRowOffset )
+		{
+			pRange->aStart.SetRow( pRange->aStart.Row() + nRowOffset );
+			pRange->aEnd.SetRow( pRange->aEnd.Row() + nRowOffset );
+		}
+	}
+
+	if ( aCellRanges.Count() > 1 ) // Multi-Area
+	{
+		uno::Reference< sheet::XSheetCellRangeContainer > xRanges( new ScCellRangesObj( pUnoRangesBase->GetDocShell(), aCellRanges ) );
+		
+		return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xRanges ) );
+	}
+	// normal range
+	uno::Reference< table::XCellRange > xRange( new ScCellRangeObj( pUnoRangesBase->GetDocShell(), *aCellRanges.First() ) );
+	return new ScVbaRange( m_xContext, xRange  );
 }
 
 uno::Reference< vba::XRange >
 ScVbaRange::CurrentRegion() throw (uno::RuntimeException)
 {
+	// #TODO code within the test below "if ( m_Areas.... " can be removed
+	// Test is performed only because m_xRange is NOT set to be
+	// the first range in m_Areas ( to force failure while
+	// the implementations for each method are being updated )
+	if ( m_Areas->getCount() > 1 )
+	{
+		uno::Reference< vba::XRange > xRange( getArea( 0 ), uno::UNO_QUERY_THROW );
+		return xRange->CurrentRegion();
+	}
+	
 	RangeHelper helper( mxRange );
 	uno::Reference< sheet::XSheetCellCursor > xSheetCellCursor = 
 		helper.getSheetCellCursor();
@@ -1930,19 +1964,10 @@ ScVbaRange::PasteSpecial( const uno::Any& Paste, const uno::Any& Operation, cons
 uno::Reference< vba::XRange > 
 ScVbaRange::getEntireColumnOrRow( bool bColumn ) throw (uno::RuntimeException)
 {
-	ScCellRangesBase* pUnoRangesBase = NULL;
-	if ( mxRanges.is() )
-		pUnoRangesBase = dynamic_cast< ScCellRangesBase* >( mxRanges.get() );
-	else if ( mxRange.is() )
-		pUnoRangesBase = dynamic_cast< ScCellRangesBase* >( mxRange.get() );
-	else
-		throw uno::RuntimeException( rtl::OUString::createFromAscii("General Error creating range - Unknown" ), uno::Reference< uno::XInterface >() );
-	ScRangeList aCellRanges;
-	if ( pUnoRangesBase )	
-		// copy the range list
-		aCellRanges = pUnoRangesBase->GetRangeList(); 
-	else
-		throw uno::RuntimeException( rtl::OUString::createFromAscii("General Error creating range - Unknown" ), uno::Reference< uno::XInterface >() );
+	ScCellRangesBase* pUnoRangesBase = getCellRangesBase();
+	// copy the range list
+	ScRangeList aCellRanges = pUnoRangesBase->GetRangeList(); 
+
 	for ( ScRange* pRange = aCellRanges.First() ; pRange; pRange = aCellRanges.Next() )
 	{
 		if ( bColumn ) 
@@ -2798,4 +2823,17 @@ ScVbaRange::getWorksheet() throw (uno::RuntimeException)
 	ScDocShell* pDocShell =  getDocShellFromRange(mxRange);
 	RangeHelper* rHelper = new RangeHelper(mxRange);
         return new ScVbaWorksheet(m_xContext,rHelper->getSpreadSheet(),pDocShell->GetModel());
+}
+
+ScCellRangesBase*
+ScVbaRange::getCellRangesBase() throw( uno::RuntimeException )
+{
+	ScCellRangesBase* pUnoRangesBase = NULL;
+	if ( mxRanges.is() )
+		pUnoRangesBase = dynamic_cast< ScCellRangesBase* >( mxRanges.get() );
+	else if ( mxRange.is() )
+		pUnoRangesBase = dynamic_cast< ScCellRangesBase* >( mxRange.get() );
+	else
+		throw uno::RuntimeException( rtl::OUString::createFromAscii("General Error creating range - Unknown" ), uno::Reference< uno::XInterface >() );
+	return pUnoRangesBase;
 }

@@ -29,7 +29,7 @@
 #include "vbahelper.hxx"
 
 class ScTableSheetsObj;
-
+class ScCellRangesBase;
 typedef ::cppu::WeakImplHelper3< oo::vba::XRange, css::container::XEnumerationAccess, css::script::XDefaultMethod > ScVbaRange_BASE;
 class ArrayVisitor
 {
@@ -82,7 +82,7 @@ class ScVbaRange : public ScVbaRange_BASE
 	virtual css::uno::Any getValue( ValueGetter& rValueGetter ) throw (css::uno::RuntimeException);
 	css::uno::Reference< oo::vba::XRange > getArea( sal_Int32 nIndex  ) throw( css::uno::RuntimeException );
 	void setDfltPropHandler();
-	
+	ScCellRangesBase* getCellRangesBase() throw ( css::uno::RuntimeException );
 public:
 	ScVbaRange( const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::table::XCellRange >& xRange, sal_Bool bIsRows = false, sal_Bool bIsColumns = true ) throw ( css::lang::IllegalArgumentException );
 	ScVbaRange( const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::sheet::XSheetCellRangeContainer >& xRanges, sal_Bool bIsRows = false, sal_Bool bIsColumns = false ) throw ( css::lang::IllegalArgumentException );
