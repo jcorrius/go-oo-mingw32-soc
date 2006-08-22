@@ -2149,7 +2149,15 @@ ScVbaRange::setHidden( const uno::Any& _hidden ) throw (uno::RuntimeException)
 ::sal_Bool SAL_CALL 
 ScVbaRange::Replace( const ::rtl::OUString& What, const ::rtl::OUString& Replacement, const uno::Any& LookAt, const uno::Any& SearchOrder, const uno::Any& MatchCase, const uno::Any& MatchByte, const uno::Any& SearchFormat, const uno::Any& ReplaceFormat  ) throw (uno::RuntimeException)
 {
-	
+	if ( m_Areas->getCount() > 1 )
+	{
+		for ( sal_Int32 index = 1; index <= m_Areas->getCount(); ++index )
+		{
+			uno::Reference< vba::XRange > xRange( m_Areas->Item( uno::makeAny( index ) ), uno::UNO_QUERY_THROW );
+			xRange->Replace( What, Replacement,  LookAt, SearchOrder, MatchCase, MatchByte, SearchFormat, ReplaceFormat );
+		}
+		return sal_True; // seems to return true always ( or at least I haven't found the trick of 
+	}	
 	// sanity check required params
 	if ( !What.getLength() || !Replacement.getLength() )
 		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Range::Replace, missing params" )) , uno::Reference< uno::XInterface >() );
@@ -2308,6 +2316,8 @@ void updateTableSortField( const uno::Reference< table::XCellRange >& xParentRan
 void SAL_CALL
 ScVbaRange::Sort( const uno::Any& Key1, const uno::Any& Order1, const uno::Any& Key2, const uno::Any& Type, const uno::Any& Order2, const uno::Any& Key3, const uno::Any& Order3, const uno::Any& Header, const uno::Any& OrderCustom, const uno::Any& MatchCase, const uno::Any& Orientation, const uno::Any& SortMethod,  const uno::Any& DataOption1, const uno::Any& DataOption2, const uno::Any& DataOption3  ) throw (uno::RuntimeException)
 {
+	if ( m_Areas->getCount() > 1 )
+		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("That command cannot be used on multiple selections" ) ), uno::Reference< uno::XInterface >() );
 
 	sal_Int16 nDataOption1 = vba::Excel::XlSortDataOption::xlSortNormal;
 	sal_Int16 nDataOption2 = vba::Excel::XlSortDataOption::xlSortNormal;;
@@ -2494,6 +2504,13 @@ ScVbaRange::Sort( const uno::Any& Key1, const uno::Any& Order1, const uno::Any& 
 uno::Reference< vba::XRange > SAL_CALL 
 ScVbaRange::End( ::sal_Int32 Direction )  throw (uno::RuntimeException)
 {
+	if ( m_Areas->getCount() > 1 )
+	{
+		uno::Reference< vba::XRange > xRange( getArea( 0 ), uno::UNO_QUERY_THROW );
+		return xRange->End( Direction );
+	}
+
+	
 	// #FIXME #TODO
 	// euch! found my orig implementation sucked, so 
 	// trying this even suckier one ( really need to use/expose code in
@@ -2590,6 +2607,17 @@ ScVbaRange::characters( const uno::Any& Start, const uno::Any& Length ) throw (u
  void SAL_CALL 
 ScVbaRange::Delete( const uno::Any& Shift ) throw (uno::RuntimeException)
 {
+	
+	if ( m_Areas->getCount() > 1 )
+	{
+		sal_Int32 nItems = m_Areas->getCount();
+		for ( sal_Int32 index=1; index <= nItems; ++index )
+		{
+			uno::Reference< vba::XRange > xRange( m_Areas->Item( uno::makeAny(index) ), uno::UNO_QUERY_THROW );
+			xRange->Delete( Shift );	
+		}
+		return;
+	}
 	sheet::CellDeleteMode mode = sheet::CellDeleteMode_NONE ; 
 	if ( Shift.hasValue() )		
 	{
