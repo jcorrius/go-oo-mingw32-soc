@@ -1322,6 +1322,15 @@ ScVbaRange::CurrentRegion() throw (uno::RuntimeException)
 uno::Reference< vba::XRange >
 ScVbaRange::CurrentArray() throw (uno::RuntimeException)
 {
+	// #TODO code within the test below "if ( m_Areas.... " can be removed
+	// Test is performed only because m_xRange is NOT set to be
+	// the first range in m_Areas ( to force failure while
+	// the implementations for each method are being updated )
+	if ( m_Areas->getCount() > 1 )
+	{
+		uno::Reference< vba::XRange > xRange( getArea( 0 ), uno::UNO_QUERY_THROW );
+		return xRange->CurrentArray();
+	}
 	RangeHelper helper( mxRange );
 	uno::Reference< sheet::XSheetCellCursor > xSheetCellCursor = 
 		helper.getSheetCellCursor();
@@ -1371,6 +1380,16 @@ ScVbaRange::setFormulaArray(const uno::Any& rFormula) throw (uno::RuntimeExcepti
 ::rtl::OUString
 ScVbaRange::Characters(const uno::Any& Start, const uno::Any& Length) throw (uno::RuntimeException)
 {
+	// #TODO code within the test below "if ( m_Areas.... " can be removed
+	// Test is performed only because m_xRange is NOT set to be
+	// the first range in m_Areas ( to force failure while
+	// the implementations for each method are being updated )
+	if ( m_Areas->getCount() > 1 )
+	{
+		uno::Reference< vba::XRange > xRange( getArea( 0 ), uno::UNO_QUERY_THROW );
+		return xRange->Characters( Start, Length );
+	}
+
 	long nIndex, nCount;
 	::rtl::OUString rString;
 	uno::Reference< text::XTextRange > xTextRange(mxRange, ::uno::UNO_QUERY_THROW );
@@ -1474,6 +1493,16 @@ ScVbaRange::Font() throw (uno::RuntimeException)
 uno::Reference< vba::XRange >
 ScVbaRange::Cells( const uno::Any &nRowIndex, const uno::Any &nColumnIndex ) throw(uno::RuntimeException)
 {
+	// #TODO code within the test below "if ( m_Areas.... " can be removed
+	// Test is performed only because m_xRange is NOT set to be
+	// the first range in m_Areas ( to force failure while
+	// the implementations for each method are being updated )
+	if ( m_Areas->getCount() > 1 )
+	{
+		uno::Reference< vba::XRange > xRange( getArea( 0 ), uno::UNO_QUERY_THROW );
+		return xRange->Cells( nRowIndex, nColumnIndex );
+	}
+
 	long nRow = 0, nColumn = 0;
 	sal_Bool bIsIndex = nRowIndex >>= nRow, bIsColumnIndex = nColumnIndex >>= nColumn;
                                                                                                                        
@@ -1585,6 +1614,16 @@ ScVbaRange::Activate() throw (uno::RuntimeException)
 uno::Reference< vba::XRange >
 ScVbaRange::Rows(const uno::Any& aIndex ) throw (uno::RuntimeException)
 {
+	// #TODO code within the test below "if ( m_Areas.... " can be removed
+	// Test is performed only because m_xRange is NOT set to be
+	// the first range in m_Areas ( to force failure while
+	// the implementations for each method are being updated )
+	if ( m_Areas->getCount() > 1 )
+	{
+		uno::Reference< vba::XRange > xRange( getArea( 0 ), uno::UNO_QUERY_THROW );
+		return xRange->Rows( aIndex );
+	}
+	
 	sal_Int32 nValue;
 	if( !aIndex.hasValue() )
 		return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, mxRange, true ) );
@@ -1605,6 +1644,15 @@ ScVbaRange::Rows(const uno::Any& aIndex ) throw (uno::RuntimeException)
 uno::Reference< vba::XRange >
 ScVbaRange::Columns( const uno::Any& aIndex ) throw (uno::RuntimeException)
 {
+	// #TODO code within the test below "if ( m_Areas.... " can be removed
+	// Test is performed only because m_xRange is NOT set to be
+	// the first range in m_Areas ( to force failure while
+	// the implementations for each method are being updated )
+	if ( m_Areas->getCount() > 1 )
+	{
+		uno::Reference< vba::XRange > xRange( getArea( 0 ), uno::UNO_QUERY_THROW );
+		return xRange->Columns( aIndex );
+	}
 	if ( aIndex.hasValue() )
 	{
 		uno::Reference< vba::XRange > xRange;
@@ -1655,6 +1703,8 @@ ScVbaRange::getMergeCells() throw (uno::RuntimeException)
 void
 ScVbaRange::Copy(const ::uno::Any& Destination) throw (uno::RuntimeException)
 {
+	if ( m_Areas->getCount() > 1 )
+		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("That command cannot be used on multiple selections" ) ), uno::Reference< uno::XInterface >() );
 	if ( Destination.hasValue() )
 	{
 		uno::Reference< vba::XRange > xRange( Destination, uno::UNO_QUERY_THROW );
@@ -1680,6 +1730,8 @@ ScVbaRange::Copy(const ::uno::Any& Destination) throw (uno::RuntimeException)
 void
 ScVbaRange::Cut(const ::uno::Any& Destination) throw (uno::RuntimeException)
 {
+	if ( m_Areas->getCount() > 1 )
+		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("That command cannot be used on multiple selections" ) ), uno::Reference< uno::XInterface >() );
 	if (Destination.hasValue())
 	{
 		uno::Reference< vba::XRange > xRange( Destination, uno::UNO_QUERY_THROW );
@@ -1755,12 +1807,12 @@ ScVbaRange::Resize( const uno::Any &RowSize, const uno::Any &ColumnSize ) throw 
 	uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, ::uno::UNO_QUERY_THROW);
 	uno::Reference< sheet::XSheetCellRange > xSheetRange(mxRange, ::uno::UNO_QUERY_THROW);
 	uno::Reference< sheet::XSheetCellCursor > xCursor( xSheetRange->getSpreadsheet()->createCursorByRange(xSheetRange), ::uno::UNO_QUERY_THROW );
-	if( !nRowSize || !nColumnSize )
-		throw lang::IndexOutOfBoundsException();
+
 	if( !bIsRowChanged )
 		nRowSize = xColumnRowRange->getRows()->getCount();
 	if( !bIsColumnChanged )
 		nColumnSize = xColumnRowRange->getColumns()->getCount();
+
 	xCursor->collapseToSize( nColumnSize, nRowSize );
 	uno::Reference< sheet::XCellRangeAddressable > xCellRangeAddressable(xCursor, ::uno::UNO_QUERY_THROW );
 	uno::Reference< table::XCellRange > xRange( xSheetRange->getSpreadsheet(), ::uno::UNO_QUERY_THROW );
@@ -1941,6 +1993,8 @@ return nFormulaBits;
 void SAL_CALL 
 ScVbaRange::PasteSpecial( const uno::Any& Paste, const uno::Any& Operation, const uno::Any& SkipBlanks, const uno::Any& Transpose ) throw (::com::sun::star::uno::RuntimeException) 
 {
+	if ( m_Areas->getCount() > 1 )
+		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("That command cannot be used on multiple selections" ) ), uno::Reference< uno::XInterface >() );
 	// set up defaults	
 	sal_Int32 nPaste = vba::xlPasteType::xlPasteAll;
 	sal_Int32 nOperation = vba::xlPasteSpecialOperation::xlPasteSpecialOperationNone;
