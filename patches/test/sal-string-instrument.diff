@@ -1,0 +1,327 @@
+Index: sal/rtl/source/makefile.mk
+===================================================================
+RCS file: /cvs/porting/sal/rtl/source/makefile.mk,v
+retrieving revision 1.25
+diff -u -p -u -r1.25 makefile.mk
+--- sal/rtl/source/makefile.mk	20 Jun 2006 04:30:12 -0000	1.25
++++ sal/rtl/source/makefile.mk	23 Aug 2006 10:24:47 -0000
+@@ -48,6 +48,8 @@ PROJECTPCHSOURCE=cont_pch
+ 
+ .INCLUDE :  settings.mk
+ 
++CFLAGS+=`pkg-config --cflags glib-2.0`
++
+ .IF "$(ALLOC)" == "SYS_ALLOC" || "$(ALLOC)" == "TCMALLOC"
+ CDEFS+= -DFORCE_SYSALLOC
+ .ENDIF
+Index: sal/rtl/source/string.c
+===================================================================
+RCS file: /cvs/porting/sal/rtl/source/string.c,v
+retrieving revision 1.14
+diff -u -p -u -r1.14 string.c
+--- sal/rtl/source/string.c	4 May 2006 15:14:41 -0000	1.14
++++ sal/rtl/source/string.c	23 Aug 2006 10:24:47 -0000
+@@ -254,6 +254,7 @@ sal_Bool SAL_CALL rtl_impl_convertUStrin
+                     nLength--;
+                 }
+                 while ( nLength );
++				IMPL_ACCOUNT_STRING_NEW( *pTarget );
+                 return sal_True;
+             }
+ 
+@@ -330,6 +331,9 @@ sal_Bool SAL_CALL rtl_impl_convertUStrin
+         if ( pTemp && !nDestBytes )
+             rtl_string_new( pTarget );
+     }
++
++	IMPL_ACCOUNT_STRING_NEW( *pTarget );
++
+     return sal_True;
+ }
+ 
+@@ -352,3 +356,4 @@ sal_Bool SAL_CALL rtl_convertUStringToSt
+     return rtl_impl_convertUStringToString(pTarget, pSource, nLength, nEncoding,
+                                            nFlags, sal_True);
+ }
++
+Index: sal/rtl/source/strtmpl.c
+===================================================================
+RCS file: /cvs/porting/sal/rtl/source/strtmpl.c,v
+retrieving revision 1.22
+diff -u -p -u -r1.22 strtmpl.c
+--- sal/rtl/source/strtmpl.c	20 Jun 2006 04:30:39 -0000	1.22
++++ sal/rtl/source/strtmpl.c	23 Aug 2006 10:24:47 -0000
+@@ -1,3 +1,5 @@
++#include <glib/ghash.h>
++
+ /*************************************************************************
+  *
+  *  OpenOffice.org - a multi-platform office productivity suite
+@@ -53,6 +55,68 @@ inline void rtl_str_ImplCopy( IMPL_RTL_S
+ }
+ */
+ 
++#if 1
++#include <stdio.h>
++#define IMPL_VAR(a) IMPL_RTL_STRINGNAME(a)
++GHashTable *IMPL_VAR(strhash) = NULL;
++long IMPL_VAR(threshold) = 0;
++
++static void
++dumpString (gpointer key, gpointer value, gpointer user_data)
++{
++	IMPL_RTL_STRINGDATA *pStr = (IMPL_RTL_STRINGDATA *) key;
++	int i;
++	for (i = 0; i < pStr->length; i++)
++		fprintf (stderr, "%c", pStr->buffer[i]);
++	fprintf (stderr, "\n");
++}
++
++static void
++doInit()
++{
++	if (IMPL_VAR(strhash))
++		return;
++	IMPL_VAR(strhash) = g_hash_table_new (NULL, NULL);
++	if (getenv("SAL_STR_COUNT"))
++		IMPL_VAR(threshold) = atoi (getenv("SAL_STR_COUNT"));
++}
++
++static void
++checkDump()
++{
++	if (!IMPL_VAR(threshold))
++		fprintf (stderr, "hash size %d\n", g_hash_table_size (IMPL_VAR(strhash)));
++	else
++	{
++		static int doneIt = 0;
++		if (!doneIt && g_hash_table_size (IMPL_VAR(strhash)) >= IMPL_VAR(threshold))
++		{
++			doneIt++;
++			fprintf (stderr, "hash size %d\n", g_hash_table_size (IMPL_VAR(strhash)));
++			g_hash_table_foreach (IMPL_VAR(strhash), dumpString, NULL);
++		}
++	}
++}
++
++#define IMPL_ACCOUNT_STRING_NEW(str) \
++	do { \
++		doInit(); \
++		g_hash_table_insert (IMPL_VAR(strhash), str, str); \
++		checkDump(); \
++	} while(0)
++
++#define IMPL_ACCOUNT_STRING_ALLOC(ptr, len)
++
++#define IMPL_ACCOUNT_STRING_DELETE(str) \
++	do { \
++		g_hash_table_remove (IMPL_VAR(strhash), str); \
++	} while (0)
++
++#else
++#define IMPL_ACCOUNT_STRING_NEW(str)
++#define IMPL_ACCOUNT_STRING_DELETE(str)
++#endif
++
+ #define rtl_str_ImplCopy( _pDest, _pSrc, _nCount )                  \
+ {                                                                   \
+     IMPL_RTL_STRCODE*       __mm_pDest      = _pDest;               \
+@@ -991,6 +1055,7 @@ static IMPL_RTL_STRINGDATA* IMPL_RTL_STR
+         pData->length = nLen;
+         pData->buffer[nLen] = 0;
+     }
++	IMPL_ACCOUNT_STRING_ALLOC(pData, nLen);
+     return pData;
+ }
+ 
+@@ -1046,11 +1111,13 @@ void SAL_CALL IMPL_RTL_STRINGNAME( relea
+     if ( pThis->refCount == 1 )
+     {
+         OSL_ENSURE( pThis != &IMPL_RTL_EMPTYSTRING, "static empty string: refCount < 1" );
++		IMPL_ACCOUNT_STRING_DELETE( pThis );
+         rtl_freeMemory( pThis );
+     }
+     else if ( !osl_decrementInterlockedCount( &(pThis->refCount) ) )
+     {
+         OSL_ENSURE( IMPL_RTL_EMPTYSTRING.refCount >= 1, "static empty string: refCount < 1" );
++		IMPL_ACCOUNT_STRING_DELETE( pThis );
+         rtl_freeMemory( pThis );
+     }
+ }
+@@ -1063,6 +1130,9 @@ void SAL_CALL IMPL_RTL_STRINGNAME( new )
+         IMPL_RTL_STRINGNAME( release )( *ppThis );
+ 
+     *ppThis = &IMPL_RTL_EMPTYSTRING;
++
++	IMPL_ACCOUNT_STRING_NEW( *ppThis );
++
+     IMPL_RTL_AQUIRE( *ppThis );
+ }
+ 
+@@ -1091,6 +1161,8 @@ void SAL_CALL IMPL_RTL_STRINGNAME( new_W
+         }
+         }
+     }
++
++	IMPL_ACCOUNT_STRING_NEW( *ppThis );
+ }
+ 
+ /* ----------------------------------------------------------------------- */
+@@ -1114,6 +1186,8 @@ void SAL_CALL IMPL_RTL_STRINGNAME( newFr
+     /* must be done at least, if pStr == *ppThis */
+     if ( pOrg )
+         IMPL_RTL_STRINGNAME( release )( pOrg );
++
++	IMPL_ACCOUNT_STRING_NEW( *ppThis );
+ }
+ 
+ /* ----------------------------------------------------------------------- */
+@@ -1153,6 +1227,8 @@ void SAL_CALL IMPL_RTL_STRINGNAME( newFr
+     }
+     while ( *pCharStr );
+ 
++	IMPL_ACCOUNT_STRING_NEW( *ppThis );
++
+     /* must be done at least, if pCharStr == *ppThis */
+     if ( pOrg )
+         IMPL_RTL_STRINGNAME( release )( pOrg );
+@@ -1177,6 +1253,8 @@ void SAL_CALL IMPL_RTL_STRINGNAME( newFr
+     OSL_ASSERT(*ppThis != NULL);
+     rtl_str_ImplCopy( (*ppThis)->buffer, pCharStr, nLen );
+ 
++	IMPL_ACCOUNT_STRING_NEW( *ppThis );
++
+     /* must be done at least, if pCharStr == *ppThis */
+     if ( pOrg )
+         IMPL_RTL_STRINGNAME( release )( pOrg );
+@@ -1236,6 +1314,8 @@ void SAL_CALL IMPL_RTL_STRINGNAME( newCo
+         rtl_str_ImplCopy( pTempStr->buffer, pLeft->buffer, pLeft->length );
+         rtl_str_ImplCopy( pTempStr->buffer+pLeft->length, pRight->buffer, pRight->length );
+         *ppThis = pTempStr;
++
++		IMPL_ACCOUNT_STRING_NEW( *ppThis );
+     }
+ 
+     /* must be done at least, if left or right == *ppThis */
+@@ -1277,7 +1357,10 @@ void SAL_CALL IMPL_RTL_STRINGNAME( newRe
+             if ( !pNewSubStr )
+                 IMPL_RTL_STRINGNAME( new )( ppThis );
+             else
++			{
+                 IMPL_RTL_STRINGNAME( assign )( ppThis, pNewSubStr );
++				IMPL_ACCOUNT_STRING_NEW( *ppThis );
++			}
+             return;
+         }
+     }
+@@ -1286,6 +1369,7 @@ void SAL_CALL IMPL_RTL_STRINGNAME( newRe
+     if ( !nCount && (!pNewSubStr || !pNewSubStr->length) )
+     {
+         IMPL_RTL_STRINGNAME( assign )( ppThis, pStr );
++		IMPL_ACCOUNT_STRING_NEW( *ppThis );
+         return;
+     }
+ 
+@@ -1315,6 +1399,8 @@ void SAL_CALL IMPL_RTL_STRINGNAME( newRe
+     }
+     rtl_str_ImplCopy( pBuffer, pStr->buffer+nIndex+nCount, pStr->length-nIndex-nCount );
+ 
++	IMPL_ACCOUNT_STRING_NEW( *ppThis );
++
+     /* must be done at least, if pStr or pNewSubStr == *ppThis */
+     if ( pOrg )
+         IMPL_RTL_STRINGNAME( release )( pOrg );
+@@ -1375,6 +1461,8 @@ void SAL_CALL IMPL_RTL_STRINGNAME( newRe
+         IMPL_RTL_AQUIRE( pStr );
+     }
+ 
++	IMPL_ACCOUNT_STRING_NEW( *ppThis );
++
+     /* must be done at least, if pStr == *ppThis */
+     if ( pOrg )
+         IMPL_RTL_STRINGNAME( release )( pOrg );
+@@ -1435,6 +1523,8 @@ void SAL_CALL IMPL_RTL_STRINGNAME( newTo
+         IMPL_RTL_AQUIRE( pStr );
+     }
+ 
++	IMPL_ACCOUNT_STRING_NEW( *ppThis );
++
+     /* must be done at least, if pStr == *ppThis */
+     if ( pOrg )
+         IMPL_RTL_STRINGNAME( release )( pOrg );
+@@ -1495,6 +1585,8 @@ void SAL_CALL IMPL_RTL_STRINGNAME( newTo
+         IMPL_RTL_AQUIRE( pStr );
+     }
+ 
++	IMPL_ACCOUNT_STRING_NEW( *ppThis );
++
+     /* must be done at least, if pStr == *ppThis */
+     if ( pOrg )
+         IMPL_RTL_STRINGNAME( release )( pOrg );
+@@ -1535,6 +1627,8 @@ void SAL_CALL IMPL_RTL_STRINGNAME( newTr
+             rtl_str_ImplCopy( (*ppThis)->buffer, pStr->buffer+nPreSpaces, nLen );
+     }
+ 
++	IMPL_ACCOUNT_STRING_NEW( *ppThis );
++
+     /* must be done at least, if pStr == *ppThis */
+     if ( pOrg )
+         IMPL_RTL_STRINGNAME( release )( pOrg );
+Index: sal/rtl/source/ustring.c
+===================================================================
+RCS file: /cvs/porting/sal/rtl/source/ustring.c,v
+retrieving revision 1.22
+diff -u -p -u -r1.22 ustring.c
+--- sal/rtl/source/ustring.c	4 May 2006 15:15:15 -0000	1.22
++++ sal/rtl/source/ustring.c	23 Aug 2006 10:24:47 -0000
+@@ -89,6 +89,9 @@ static rtl_uString aImplEmpty_rtl_uStrin
+ 
+ #include "strtmpl.c"
+ 
++volatile long IMPL_VAR(nCount) = 0;
++volatile long IMPL_VAR(nSize) = 0;
++
+ sal_Int32 SAL_CALL rtl_ustr_valueOfFloat(sal_Unicode * pStr, float f)
+ {
+     rtl_uString * pResult = NULL;
+@@ -432,6 +435,8 @@ void SAL_CALL rtl_uString_newFromAscii( 
+             pCharStr++;
+         }
+         while ( *pCharStr );
++
++		IMPL_ACCOUNT_STRING_NEW( *ppThis );
+     }
+ }
+ 
+@@ -547,6 +552,7 @@ void SAL_CALL rtl_string2UString( rtl_uS
+                         nLen--;
+                     }
+                     while ( nLen );
++					IMPL_ACCOUNT_STRING_NEW( *ppThis );
+                     return;
+                 }
+             }
+@@ -611,4 +617,8 @@ void SAL_CALL rtl_string2UString( rtl_uS
+                 rtl_uString_new( ppThis );
+         }
+     }
++	IMPL_ACCOUNT_STRING_NEW( *ppThis );
+ }
++
++#if 0
++#endif
+Index: sal/util/makefile.mk
+===================================================================
+RCS file: /cvs/porting/sal/util/makefile.mk,v
+retrieving revision 1.39
+diff -u -p -u -r1.39 makefile.mk
+--- sal/util/makefile.mk	7 Apr 2006 08:07:35 -0000	1.39
++++ sal/util/makefile.mk	23 Aug 2006 10:25:11 -0000
+@@ -164,6 +164,7 @@ SHL1STDLIBS+=-lpam
+ .IF "$(CRYPT_LINK)" == "YES"
+ SHL1STDLIBS+=-lcrypt
+ .ENDIF
++SHL1STDLIBS+=`pkg-config --libs glib-2.0`
+ .ENDIF
+ 
+ SHL1LIBS+=$(SLB)$/$(TARGET).lib
