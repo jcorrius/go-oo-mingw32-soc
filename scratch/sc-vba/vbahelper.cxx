@@ -28,7 +28,19 @@ void unoToSbxValue( SbxVariable* pVar, const uno::Any& aValue );
 
 uno::Any sbxToUnoValue( SbxVariable* pVar );
 
+
+namespace org
+{
+namespace openoffice
+{
+
 const ::rtl::OUString REPLACE_CELLS_WARNING(  RTL_CONSTASCII_USTRINGPARAM( "ReplaceCellsWarning"));
+const uno::Any&
+aNULL()
+{
+ 	static  uno::Any aNULLL = uno::makeAny( uno::Reference< uno::XInterface >() );
+	return aNULLL;
+}
 
 class PasteCellsWarningReseter
 {
@@ -73,8 +85,9 @@ public:
 		}
 	}
 };
+
 void
-org::openoffice::dispatchRequests (uno::Reference< frame::XModel>& xModel,rtl::OUString & aUrl, uno::Sequence< beans::PropertyValue >& sProps ) 
+dispatchRequests (uno::Reference< frame::XModel>& xModel,rtl::OUString & aUrl, uno::Sequence< beans::PropertyValue >& sProps ) 
 {
 
 	util::URL  url ;
@@ -136,7 +149,7 @@ org::openoffice::dispatchRequests (uno::Reference< frame::XModel>& xModel,rtl::O
 }
 
 void
-org::openoffice::dispatchRequests (uno::Reference< frame::XModel>& xModel,rtl::OUString & aUrl) 
+dispatchRequests (uno::Reference< frame::XModel>& xModel,rtl::OUString & aUrl) 
 {
 	uno::Sequence<beans::PropertyValue> dispatchProps;
 	dispatchRequests( xModel, aUrl, dispatchProps );
@@ -144,7 +157,7 @@ org::openoffice::dispatchRequests (uno::Reference< frame::XModel>& xModel,rtl::O
 
 
 void
-org::openoffice::implnPaste()
+implnPaste()
 {
 	PasteCellsWarningReseter resetWarningBox;
 	ScTabViewShell* pViewShell = ScTabViewShell::GetActiveViewShell();
@@ -157,7 +170,7 @@ org::openoffice::implnPaste()
 
 
 void
-org::openoffice::implnCopy()
+implnCopy()
 {
 	ScTabViewShell* pViewShell = getCurrentBestViewShell();
 	if ( pViewShell )
@@ -165,14 +178,14 @@ org::openoffice::implnCopy()
 }
 
 void 
-org::openoffice::implnCut()
+implnCut()
 {
 	ScTabViewShell* pViewShell =  getCurrentBestViewShell();
 	if ( pViewShell )
 		pViewShell->CutToClip( NULL, TRUE );
 }
 
-void org::openoffice::implnPasteSpecial(USHORT nFlags,USHORT nFunction,sal_Bool bSkipEmpty, sal_Bool bTranspose)
+void implnPasteSpecial(USHORT nFlags,USHORT nFunction,sal_Bool bSkipEmpty, sal_Bool bTranspose)
 {
 	PasteCellsWarningReseter resetWarningBox;
 	sal_Bool bAsLink(sal_False), bOtherDoc(sal_False);
@@ -207,7 +220,7 @@ void org::openoffice::implnPasteSpecial(USHORT nFlags,USHORT nFunction,sal_Bool 
 }
 
 bool
-org::openoffice::isRangeShortCut( const ::rtl::OUString& sParam )
+isRangeShortCut( const ::rtl::OUString& sParam )
 {
         // for a ShortCutRange param, I'd expect the first letter to be
         //[A-Z] and the last letter to be a digit 0-9 e.g A10, [A1:A10] etc.
@@ -223,7 +236,7 @@ org::openoffice::isRangeShortCut( const ::rtl::OUString& sParam )
 }
 
  uno::Reference< frame::XModel > 
-org::openoffice::getCurrentDocument() throw (uno::RuntimeException)
+getCurrentDocument() throw (uno::RuntimeException)
 {
 	uno::Reference< frame::XModel > xModel;
 	SbxObject* pBasic = dynamic_cast< SbxObject* > ( SFX_APP()->GetBasic() );
@@ -288,7 +301,7 @@ org::openoffice::getCurrentDocument() throw (uno::RuntimeException)
 }
 
 ScDocShell* 
-org::openoffice::getDocShell( css::uno::Reference< css::frame::XModel>& xModel ) 
+getDocShell( css::uno::Reference< css::frame::XModel>& xModel ) 
 {
 	ScModelObj* pModel = dynamic_cast< ScModelObj* >( xModel.get() );
 	ScDocShell* pDocShell = NULL;
@@ -299,7 +312,7 @@ org::openoffice::getDocShell( css::uno::Reference< css::frame::XModel>& xModel )
 }
 
 ScTabViewShell* 
-org::openoffice::getBestViewShell(  css::uno::Reference< css::frame::XModel>& xModel )
+getBestViewShell(  css::uno::Reference< css::frame::XModel>& xModel )
 {
 	ScDocShell* pDocShell = NULL;
 	if ( ( pDocShell = getDocShell( xModel ) ) )
@@ -310,14 +323,14 @@ org::openoffice::getBestViewShell(  css::uno::Reference< css::frame::XModel>& xM
 }
 
 ScTabViewShell* 
-org::openoffice::getCurrentBestViewShell()
+getCurrentBestViewShell()
 { 
 	uno::Reference< frame::XModel > xModel = getCurrentDocument();
 	return getBestViewShell( xModel );
 }
 
 SfxViewFrame* 
-org::openoffice::getCurrentViewFrame()
+getCurrentViewFrame()
 {
 	ScTabViewShell* pViewShell = getCurrentBestViewShell();	
 	if ( pViewShell )
@@ -326,7 +339,7 @@ org::openoffice::getCurrentViewFrame()
 }
 
 sal_Int32 
-org::openoffice::OORGBToXLRGB( sal_Int32 nCol )
+OORGBToXLRGB( sal_Int32 nCol )
 {
 	sal_Int32 nRed = nCol;
 	nRed &= 0x00FF0000;
@@ -340,7 +353,7 @@ org::openoffice::OORGBToXLRGB( sal_Int32 nCol )
 	return nRGB;
 }
 sal_Int32 
-org::openoffice::XLRGBToOORGB( sal_Int32 nCol )
+XLRGBToOORGB( sal_Int32 nCol )
 {
 	sal_Int32 nBlue = nCol;
 	nBlue &= 0x00FF0000;
@@ -354,7 +367,7 @@ org::openoffice::XLRGBToOORGB( sal_Int32 nCol )
 	return nRGB;
 }
 uno::Any 
-org::openoffice::OORGBToXLRGB( const uno::Any& aCol )
+ORGBToXLRGB( const uno::Any& aCol )
 {
 	sal_Int32 nCol;
 	aCol >>= nCol;
@@ -362,10 +375,13 @@ org::openoffice::OORGBToXLRGB( const uno::Any& aCol )
 	return uno::makeAny( nCol );
 }
 uno::Any 
-org::openoffice::XLRGBToOORGB(  const uno::Any& aCol )
+XLRGBToOORGB(  const uno::Any& aCol )
 {
 	sal_Int32 nCol;
 	aCol >>= nCol;
 	nCol = XLRGBToOORGB( nCol );
 	return uno::makeAny( nCol );
+}
+
+}
 }

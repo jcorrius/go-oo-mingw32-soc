@@ -101,11 +101,6 @@
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
 
-// provide a NULL object that can be passed as variant so that the object when
-// passed to IsNull will return true. aNULL contains an empty object 
-// reference
-const static uno::Any aNULL = uno::makeAny( uno::Reference< uno::XInterface >() );
-
 //    * 1 point = 1/72 inch = 20 twips
 //    * 1 inch = 72 points = 1440 twips
 //    * 1 cm = 567 twips
@@ -1163,7 +1158,7 @@ ScVbaRange::HasFormula() throw (uno::RuntimeException)
 	if ( m_Areas->getCount() > 1 )
 	{
 		sal_Int32 nItems = m_Areas->getCount();
-		uno::Any aResult = aNULL;
+		uno::Any aResult = aNULL();
 		for ( sal_Int32 index=1; index <= nItems; ++index )
 		{
 			uno::Reference< vba::XRange > xRange( m_Areas->Item( uno::makeAny(index) ), uno::UNO_QUERY_THROW );
@@ -1171,10 +1166,10 @@ ScVbaRange::HasFormula() throw (uno::RuntimeException)
 			// return null
 			if ( index > 1 )
 				if ( aResult != xRange->HasFormula() )
-					return aNULL;
+					return aNULL();
 			aResult = xRange->HasFormula();	
-			if ( aNULL == aResult ) 
-				return aNULL;
+			if ( aNULL() == aResult ) 
+				return aNULL();
 		}
 		return aResult;
 	}
@@ -1193,7 +1188,7 @@ ScVbaRange::HasFormula() throw (uno::RuntimeException)
 		if ( ( pFormulaRanges->GetRangeList().Count() > 1 ) 
 		|| ( pFormulaRanges->GetRangeList().GetObject(0)->aStart != pThisRanges->GetRangeList().GetObject(0)->aStart ) 
 		|| ( pFormulaRanges->GetRangeList().GetObject(0)->aEnd != pThisRanges->GetRangeList().GetObject(0)->aEnd ) )
-			return aNULL; // should return aNULL;
+			return aNULL(); // should return aNULL;
 	}
 	return uno::makeAny( sal_True );
 }
@@ -1777,7 +1772,7 @@ ScVbaRange::getNumberFormat() throw (uno::RuntimeException)
 	if ( m_Areas->getCount() > 1 )
 	{
 		sal_Int32 nItems = m_Areas->getCount();
-		uno::Any aResult = aNULL;
+		uno::Any aResult = aNULL();
 		for ( sal_Int32 index=1; index <= nItems; ++index )
 		{
 			uno::Reference< vba::XRange > xRange( m_Areas->Item( uno::makeAny(index) ), uno::UNO_QUERY_THROW );
@@ -1785,10 +1780,10 @@ ScVbaRange::getNumberFormat() throw (uno::RuntimeException)
 			// return null
 			if ( index > 1 )
 				if ( aResult != xRange->getNumberFormat() )
-					return aNULL;
+					return aNULL();
 			aResult = xRange->getNumberFormat();	
-			if ( aNULL == aResult ) 
-				return aNULL;
+			if ( aNULL() == aResult ) 
+				return aNULL();
 		}
 		return aResult;
 	}
@@ -1796,7 +1791,7 @@ ScVbaRange::getNumberFormat() throw (uno::RuntimeException)
 	rtl::OUString sFormat = numFormat.getNumberFormatString();
 	if ( sFormat.getLength() > 0 )
 		return uno::makeAny( sFormat );
-	return aNULL;
+	return aNULL();
 }
 
 uno::Reference< vba::XRange >
@@ -1854,7 +1849,7 @@ ScVbaRange::getWrapText() throw (uno::RuntimeException)
 			uno::Reference< vba::XRange > xRange( m_Areas->Item( uno::makeAny(index) ), uno::UNO_QUERY_THROW );
 			if ( index > 1 )
 				if ( aResult != xRange->getWrapText() )
-					return aNULL;
+					return aNULL();
 			aResult = xRange->getWrapText(); 
 		}
 		return aResult;
@@ -1864,7 +1859,7 @@ ScVbaRange::getWrapText() throw (uno::RuntimeException)
 	SfxItemSet* pDataSet = 	pUnoCellRange->GetCurrentDataSet( true );
 	SfxItemState eState = pDataSet->GetItemState( ATTR_LINEBREAK, TRUE, NULL);
 	if ( eState == SFX_ITEM_DONTCARE )
-		return aNULL;
+		return aNULL();
 	//OSL_TRACE(" ** IsWrappedText good is %s", (eState == SFX_ITEM_DEFAULT) ? "default" : "itemset" );
 	
 	sal_Bool bWrapped = false;
