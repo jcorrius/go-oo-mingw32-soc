@@ -367,7 +367,7 @@ XLRGBToOORGB( sal_Int32 nCol )
 	return nRGB;
 }
 uno::Any 
-ORGBToXLRGB( const uno::Any& aCol )
+OORGBToXLRGB( const uno::Any& aCol )
 {
 	sal_Int32 nCol;
 	aCol >>= nCol;
