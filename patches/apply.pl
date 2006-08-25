@@ -318,8 +318,7 @@ sub add_developer_info
     while (<PatchListIn>) {
 	chomp;
 	my $add_info='';
-	
-	
+
         if (/^\s*#.*/) {
 	    # comment
 	} elsif (/^\s*SectionOwner\s*\=\>\s*(.*)/) {
@@ -338,7 +337,7 @@ sub add_developer_info
 
 	    # ignore patches extracted from cws; they often have an outside developer
 	    # they are ignored in the statistic, so...
-	    unless ($patch_name =~ /cws\-/) {
+	    unless ($patch_name =~ m/^cws\-/) {
 
 		my $patch_entryp = scan_patch_entry($tmp, $., "0", $section_owner);
 
@@ -813,6 +812,8 @@ sub print_statistic_no_issue ($)
 	next if ($patch =~ /cws\-/);
     
 	my $developer = $patches->{$patch}->{'developer'};
+	defined $developer && $developer =~ /^cws\-/ && next;
+
     	unless (defined $developers{$developer}) {
 	    # new entry for a new developer
 	    $developers{$developer} = {};
