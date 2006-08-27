@@ -32,6 +32,7 @@
 #include <vector>
 #include <sstream>
 #include <iostream>
+#include <stdio.h>
 
 using namespace std;
 using com::sun::star::table::CellAddress;
