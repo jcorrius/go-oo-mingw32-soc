@@ -6,6 +6,7 @@
 #include <org/openoffice/vba/Excel/Constants.hpp>
 #include <org/openoffice/vba/Excel/XlUnderlineStyle.hpp>
 #include "vbafont.hxx"
+#include "scitems.hxx"
 
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
@@ -99,6 +100,9 @@ ScVbaFont::setSize( const uno::Any& aValue ) throw( uno::RuntimeException )
 uno::Any
 ScVbaFont::getSize() throw ( uno::RuntimeException )
 {
+	if ( mpDataSet )
+		if (  mpDataSet->GetItemState( ATTR_FONT_HEIGHT, TRUE, NULL) == SFX_ITEM_DONTCARE )
+			return aNULL();
         return mxFont->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "CharHeight" ) ) );
 }
 
@@ -118,6 +122,10 @@ ScVbaFont::setColorIndex( const uno::Any& aValue ) throw( uno::RuntimeException 
 uno::Any
 ScVbaFont::getColorIndex() throw ( uno::RuntimeException )
 {
+	if ( mpDataSet )
+		if (  mpDataSet->GetItemState( ATTR_FONT_COLOR, TRUE, NULL) == SFX_ITEM_DONTCARE )
+			return aNULL();
+
 //XXX
         sal_Int32 nColor = -1;
         uno::Any aValue= mxFont->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "CharColor" ) ) );
@@ -211,6 +219,10 @@ ScVbaFont::setBold( const uno::Any& aValue ) throw( uno::RuntimeException )
 uno::Any
 ScVbaFont::getBold() throw ( uno::RuntimeException )
 {
+	if ( mpDataSet )
+		if (  mpDataSet->GetItemState( ATTR_FONT_WEIGHT, TRUE, NULL) == SFX_ITEM_DONTCARE )
+			return aNULL();
+
 	double fValue;
 	 mxFont->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "CharWeight" ) ) ) >>= fValue;
 	return uno::makeAny( fValue == awt::FontWeight::BOLD );
@@ -253,6 +265,10 @@ ScVbaFont::setUnderline( const uno::Any& aValue ) throw ( uno::RuntimeException 
 uno::Any
 ScVbaFont::getUnderline() throw ( uno::RuntimeException )
 {
+	if ( mpDataSet )
+		if (  mpDataSet->GetItemState( ATTR_FONT_UNDERLINE, TRUE, NULL) == SFX_ITEM_DONTCARE )
+			return aNULL();
+
 	sal_Int32 nValue = awt::FontUnderline::NONE;
 	mxFont->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "CharUnderline" ) ) ) >>= nValue;
 	switch ( nValue )
@@ -287,6 +303,9 @@ ScVbaFont::setStrikethrough( const uno::Any& aValue ) throw ( uno::RuntimeExcept
 uno::Any
 ScVbaFont::getStrikethrough() throw ( uno::RuntimeException )
 {
+	if ( mpDataSet )
+		if (  mpDataSet->GetItemState( ATTR_FONT_CROSSEDOUT, TRUE, NULL) == SFX_ITEM_DONTCARE )
+			return aNULL();
 	short nValue = 0;
 	mxFont->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "CharStrikeout" ) ) ) >>= nValue;
 	return uno::Any( nValue == awt::FontStrikeout::SINGLE );
@@ -301,6 +320,9 @@ ScVbaFont::setShadow( const uno::Any& aValue ) throw ( uno::RuntimeException )
 uno::Any
 ScVbaFont::getShadow() throw (uno::RuntimeException)
 {
+	if ( mpDataSet )
+		if (  mpDataSet->GetItemState( ATTR_FONT_SHADOWED, TRUE, NULL) == SFX_ITEM_DONTCARE )
+			return aNULL();
 	return mxFont->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "CharShadowed" ) ) );
 }
 
@@ -318,6 +340,10 @@ ScVbaFont::setItalic( const uno::Any& aValue ) throw ( uno::RuntimeException )
 uno::Any
 ScVbaFont::getItalic() throw ( uno::RuntimeException )
 {
+	if ( mpDataSet )
+		if (  mpDataSet->GetItemState( ATTR_FONT_POSTURE, TRUE, NULL) == SFX_ITEM_DONTCARE )
+			return aNULL();
+
 	short nValue = 0;  
 	mxFont->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "CharPosture" ) ) ) >>= nValue;
 	return uno::makeAny( nValue == awt::FontSlant_ITALIC );
@@ -334,5 +360,8 @@ ScVbaFont::setName( const uno::Any& aValue ) throw ( uno::RuntimeException )
 uno::Any
 ScVbaFont::getName() throw ( uno::RuntimeException )
 {
+	if ( mpDataSet )
+		if (  mpDataSet->GetItemState( ATTR_FONT, TRUE, NULL) == SFX_ITEM_DONTCARE )
+			return aNULL();
 	return mxFont->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "CharFontName" ) ) );
 }

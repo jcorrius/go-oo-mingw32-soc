@@ -83,6 +83,8 @@ class ScVbaRange : public ScVbaRange_BASE
 	css::uno::Reference< oo::vba::XRange > getArea( sal_Int32 nIndex  ) throw( css::uno::RuntimeException );
 	void setDfltPropHandler();
 	ScCellRangesBase* getCellRangesBase() throw ( css::uno::RuntimeException );
+	SfxItemSet* getCurrentDataSet( )  throw ( css::uno::RuntimeException );
+
 public:
 	ScVbaRange( const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::table::XCellRange >& xRange, sal_Bool bIsRows = false, sal_Bool bIsColumns = true ) throw ( css::lang::IllegalArgumentException );
 	ScVbaRange( const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::sheet::XSheetCellRangeContainer >& xRanges, sal_Bool bIsRows = false, sal_Bool bIsColumns = false ) throw ( css::lang::IllegalArgumentException );

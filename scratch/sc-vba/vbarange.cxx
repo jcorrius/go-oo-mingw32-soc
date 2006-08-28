@@ -134,6 +134,16 @@ uno::Any lcl_makeRange( uno::Reference< uno::XComponentContext >& xContext, cons
 	return uno::makeAny( uno::Reference< vba::XRange >( new ScVbaRange( xContext, xCellRange ) ) );
 }
 
+SfxItemSet*  ScVbaRange::getCurrentDataSet( ) throw ( uno::RuntimeException )
+{
+	ScCellRangeObj* pUnoCellRange = dynamic_cast< ScCellRangeObj* >( mxRange.get() );
+	SfxItemSet* pDataSet = 	pUnoCellRange->GetCurrentDataSet( true );
+	
+	if ( !pDataSet )
+		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Can't access Itemset for range" ) ), uno::Reference< uno::XInterface >() );
+	return pDataSet;	
+}
+
 class SingleRangeEnumeration : public EnumerationHelper_BASE
 {
 	uno::Reference< table::XCellRange > m_xRange;
@@ -1482,7 +1492,7 @@ ScVbaRange::Font() throw (uno::RuntimeException)
 		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Failed to access document from shell" ) ), uno::Reference< uno::XInterface >() );
 
 	ScVbaPalette aPalette( pDoc->GetDocumentShell() );	
-	return uno::Reference< vba::XFont >( new ScVbaFont( aPalette, xProps ) );
+	return uno::Reference< vba::XFont >( new ScVbaFont( aPalette, xProps, getCurrentDataSet() ) );
 }
                                                                                                                              
 uno::Reference< vba::XRange >
@@ -1855,8 +1865,8 @@ ScVbaRange::getWrapText() throw (uno::RuntimeException)
 		return aResult;
 	}
 
-	ScCellRangeObj* pUnoCellRange = dynamic_cast<  ScCellRangeObj* >( mxRange.get() );
-	SfxItemSet* pDataSet = 	pUnoCellRange->GetCurrentDataSet( true );
+	SfxItemSet* pDataSet = getCurrentDataSet();
+	
 	SfxItemState eState = pDataSet->GetItemState( ATTR_LINEBREAK, TRUE, NULL);
 	if ( eState == SFX_ITEM_DONTCARE )
 		return aNULL();
