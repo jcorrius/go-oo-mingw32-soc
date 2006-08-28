@@ -18,8 +18,7 @@ class ScVbaFont : public ScVbaFont_BASE
     ScVbaPalette mPalette;
     SfxItemSet* mpDataSet;
 public:
-	ScVbaFont( const ScVbaPalette& dPalette, css::uno::Reference< css::beans::XPropertySet > xPropertySet ) throw ( css::uno::RuntimeException ) : mPalette( dPalette ), mxFont( xPropertySet, css::uno::UNO_QUERY_THROW ), mpDataSet( NULL ){}
-	ScVbaFont( const ScVbaPalette& dPalette, css::uno::Reference< css::beans::XPropertySet > xPropertySet, SfxItemSet* pDataSet ) throw ( css::uno::RuntimeException );
+	ScVbaFont( const ScVbaPalette& dPalette, css::uno::Reference< css::beans::XPropertySet > xPropertySet, SfxItemSet* pDataSet = NULL ) throw ( css::uno::RuntimeException );
 	virtual ~ScVbaFont() {}
 
 	// Attributes
