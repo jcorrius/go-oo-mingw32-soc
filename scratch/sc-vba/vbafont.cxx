@@ -113,7 +113,7 @@ ScVbaFont::setColorIndex( const uno::Any& aValue ) throw( uno::RuntimeException 
 	aValue >>= lValue;
 	// #TODO #FIXME is behavior random or just default, maybe it depends
 	// on the parent object ( which we don't really take care of right now
-	if ( lValue == vba::Excel::Constants::xlColorIndexAutomatic )
+	if ( !lValue || lValue == vba::Excel::Constants::xlColorIndexAutomatic )
 		lValue = 1;
 	mxFont->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "CharColor" ) ), ( uno::Any )mPalette.getPalette()->getByIndex( --lValue ) );
 } 

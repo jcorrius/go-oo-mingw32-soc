@@ -57,11 +57,8 @@ ScVbaInterior::setColorIndex( const css::uno::Any& _colorindex ) throw (css::uno
 	// #FIXME  xlColorIndexAutomatic & xlColorIndexNone are not really
 	// handled properly here
 	
-	if ( nIndex && ( ( nIndex == vba::Excel::Constants::xlColorIndexAutomatic ) || ( nIndex == vba::Excel::Constants::xlColorIndexNone ) ) )
-	{
-		setColor( uno::makeAny( (sal_Int32)-1 ) ); // default
-		return;
-	}
+	if ( !nIndex || ( nIndex == vba::Excel::Constants::xlColorIndexAutomatic ) || ( nIndex == vba::Excel::Constants::xlColorIndexNone )  )
+		nIndex = 1;
 	--nIndex; // OOo indices are zero bases
 	uno::Reference< container::XIndexAccess > xIndex = getPalette();
 	// setColor expects colors in XL RGB values
