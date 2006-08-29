@@ -10,6 +10,7 @@ script_files = \
 	install-dict.in \
 	install-dictionaries \
 	java-set-classpath.in \
+	make-win32-iso \
 	nothing \
 	ooconfig \
 	ooinstall \
