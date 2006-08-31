@@ -2303,9 +2303,9 @@ void updateTableSortField( const uno::Reference< table::XCellRange >& xParentRan
 		{
 			//determine col/row index
 			if ( bIsSortColumn )
-				aTableField.Field = colRowKeyAddress.StartRow;			 
+				aTableField.Field = colRowKeyAddress.StartRow - parentRangeAddress.StartRow;			 
 			else
-				aTableField.Field = colRowKeyAddress.StartColumn;			 
+				aTableField.Field = colRowKeyAddress.StartColumn - parentRangeAddress.StartColumn;			 
 			aTableField.IsCaseSensitive = bMatchCase;
 
 			if ( nOrder ==  vba::Excel::XlSortOrder::xlAscending ) 
