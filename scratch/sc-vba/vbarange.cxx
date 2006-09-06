@@ -735,7 +735,7 @@ public:
 	
 };
 
-table::CellRangeAddress getCellRangeAddress( const uno::Any& aParam,
+static table::CellRangeAddress getCellRangeAddress( const uno::Any& aParam,
 const uno::Reference< sheet::XSpreadsheet >& xDoc )
 {
 	uno::Reference< table::XCellRange > xRangeParam;
@@ -775,7 +775,7 @@ getCellRangesForAddress( USHORT& rResFlags, const rtl::OUString& sAddress, ScDoc
 		String aString(sAddress);
 		USHORT nMask = SCA_VALID;
 		//USHORT nParse = rCellRanges.Parse( sAddress, pDoc, nMask, ScAddress::CONV_XL_A1 );
-		rResFlags = rCellRanges.Parse( sAddress, pDoc, nMask, eConv );
+		rResFlags = rCellRanges.Parse( sAddress, pDoc, nMask, eConv, 0 );
 		if ( rResFlags & SCA_VALID )
 		{
 			return true;
@@ -1470,7 +1470,7 @@ ScVbaRange::Address(  const uno::Any& RowAbsolute, const uno::Any& ColumnAbsolut
 	{
 		External >>= bLocal;
 		if (  bLocal )
-			nFlags |= SCA_TAB_3D;
+			nFlags |= SCA_TAB_3D | SCA_FORCE_DOC;
 	}
 	if ( RelativeTo.hasValue() )
 	{
@@ -1630,15 +1630,31 @@ ScVbaRange::Rows(const uno::Any& aIndex ) throw (uno::RuntimeException)
 	}
 	
 	sal_Int32 nValue;
-	if( !aIndex.hasValue() )
-		return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, mxRange, true ) );
-	if( aIndex >>= nValue )
+	rtl::OUString sAddress;
+	if( aIndex.hasValue() )
 	{
 		uno::Reference< sheet::XCellRangeAddressable > xAddressable( mxRange, uno::UNO_QUERY );
-		--nValue;
+		table::CellRangeAddress aAddress = xAddressable->getRangeAddress();
+		if( aIndex >>= nValue )
+		{
+			aAddress.StartRow = --nValue;
+			aAddress.EndRow = nValue;
+		}
+	
+		else if ( aIndex >>= sAddress ) 
+		{
+			ScAddress::Details dDetails( ScAddress::CONV_XL_A1, 0, 0 );
+			ScRange aRange;
+			aRange.ParseRows( sAddress, getDocumentFromRange( mxRange ), dDetails );
+			aAddress.StartRow = aRange.aStart.Row();
+			aAddress.EndRow = aRange.aEnd.Row();
+		}
+		else
+			throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Illegal param" ) ), uno::Reference< uno::XInterface >() );
+
 		return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, mxRange->getCellRangeByPosition(
-						xAddressable->getRangeAddress().StartColumn, nValue,
-						xAddressable->getRangeAddress().EndColumn, nValue ), true ) ); 	
+						aAddress.StartColumn, aAddress.StartRow,
+						aAddress.EndColumn, aAddress.EndRow ), true ) 	); 	
 	}
 	// Questionable return, I'm just copying the invalid Any::value path
 	// above. Would seem to me that this is an internal error and 
@@ -1662,6 +1678,7 @@ ScVbaRange::Columns( const uno::Any& aIndex ) throw (uno::RuntimeException)
 	{
 		uno::Reference< vba::XRange > xRange;
 		sal_Int32 nValue;
+		rtl::OUString sAddress;
 		RangeHelper thisRange( mxRange );
 		uno::Reference< sheet::XCellRangeAddressable > xThisRangeAddress = thisRange.getCellRangeAddressable();
 		uno::Reference< table::XCellRange > xRanges = thisRange.getCellRangeFromSheet();		
@@ -1674,15 +1691,19 @@ ScVbaRange::Columns( const uno::Any& aIndex ) throw (uno::RuntimeException)
 			// col value can expand outside this range
 			// rows however cannot
 
-                	thisRangeAddress.StartColumn = nValue;	
-                	thisRangeAddress.EndColumn = nValue;	
+			thisRangeAddress.StartColumn = nValue;	
+			thisRangeAddress.EndColumn = nValue;	
+		}
+		else if ( aIndex >>= sAddress )
+		{
+			ScAddress::Details dDetails( ScAddress::CONV_XL_A1, 0, 0 );
+			ScRange aRange;
+			aRange.ParseCols( sAddress, getDocumentFromRange( mxRange ), dDetails );
+			thisRangeAddress.StartColumn = aRange.aStart.Col();
+			thisRangeAddress.EndColumn = aRange.aEnd.Col();
 		}
 		else
-		{
-			table::CellRangeAddress relAddress = getCellRangeAddress( aIndex, thisRange.getSpreadSheet() );
-			thisRangeAddress.StartColumn = relAddress.StartColumn;	
-                	thisRangeAddress.EndColumn = relAddress.EndColumn;	
-		}
+			throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Illegal param" ) ), uno::Reference< uno::XInterface >() );
 		return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xReferrer->getCellRangeByPosition( thisRangeAddress.StartColumn, thisRangeAddress.StartRow, thisRangeAddress.EndColumn, thisRangeAddress.EndRow ), false, true ) );
 	}
 	// otherwise return this object ( e.g for columns property with no
