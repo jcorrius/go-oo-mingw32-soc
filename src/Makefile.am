@@ -3,6 +3,7 @@ EXTRA_DIST=\
 	Novell.dic \
 	Ubuntu.dic \
 	banner_nld.bmp \
+	mono-ooo.pc.in \
 	nologoinstall_nld.bmp \
 	ooobanner_nld.bmp \
 	ooobitmap_nld.bmp \

@@ -9,6 +9,7 @@ script_files = \
 	help-font-munge \
 	install-dict.in \
 	install-dictionaries \
+	install-mono \
 	java-set-classpath.in \
 	make-win32-iso \
 	nothing \
