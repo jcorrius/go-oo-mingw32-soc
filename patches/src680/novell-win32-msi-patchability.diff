@@ -1,0 +1,177 @@
++++ solenv/bin/modules/installer/windows/file.pm
+--- solenv/bin/modules/installer/windows/file.pm
+@@ -35,6 +35,10 @@
+ 
+ package installer::windows::file;
+ 
++use Win32::API;
++
++$Win32::API::DEBUG = 0;
++
+ use installer::existence;
+ use installer::exiter;
+ use installer::files;
+@@ -285,6 +285,15 @@
+ 	if ( $allvariables->{'USE_FILEVERSION'} )
+ 	{
+ 		if ( ! $allvariables->{'LIBRARYVERSION'} ) { installer::exiter::exit_program("ERROR: USE_FILEVERSION is set, but not LIBRARYVERSION", "get_fileversion"); } 
+-		$fileversion = $allvariables->{'LIBRARYVERSION'} . "\." . $installer::globals::buildid;
++		my @libversion = ($allvariables->{'LIBRARYVERSION'} =~ /^(\d+)\.(\d+)\.(\d+)$/);
++		$fileversion = $libversion[0] . '.' . ($libversion[1]*100 + $libversion[2]) . '.' . $installer::globals::buildid;
++		if ( $fileref->{'patchlevel'} )
++		{
++			$fileversion .= '.' . $fileref->{'patchlevel'};
++		}
++		else
++		{
++			$fileversion .= '.0';
++		}
+ 	}
+ 		
+@@ -320,6 +320,22 @@
+ 	return $language;	
+ }
+ 
++############################################
++# cygpath -w workalike
++############################################
++
++sub my_cygpath
++{
++	my $posixpath = shift;
++
++	return "$1:/$2" if $posixpath =~ m!^/cygdrive/(.)/(.*)$!;
++	my $oneline = "calling cygpath for $posixpath";
++	push(@installer::globals::logfileinfo, $infoline);
++	my $retval = qx{cygpath -w "$posixpath"};
++	chomp $retval;
++	return $retval;
++}
++
+ ############################################
+ # Creating the file File.idt dynamically
+ ############################################
+@@ -340,6 +340,9 @@
+ 
+ 	installer::logger::include_timestamp_into_logfile("Performance Info: File Table start");
+ 	
++	my $msigetfilehash = Win32::API->new ('msi', 'MsiGetFileHashA', 'PIP', 'I');
++	my $hashinfo = pack ("l5", 20);
++
+ 	# Structure of the files table:
+ 	# File Component_ FileName FileSize Version Language Attributes Sequence
+ 	# In this function, all components are created.
+@@ -350,6 +350,7 @@
+ 
+ 	my @allfiles = ();
+ 	my @filetable = ();
++	my @filehashtable = ();
+ 	my %allfilecomponents = ();
+ 	my $counter = 0;
+ 	
+@@ -358,6 +358,7 @@
+ 	# my @shortnames = ();
+ 	my %shortnames = ();	
+ 
+ 	installer::windows::idtglobal::write_idt_header(\@filetable, "file");
++	installer::windows::idtglobal::write_idt_header(\@filehashtable, "filehash");
+ 	
+ 	for ( my $i = 0; $i <= $#{$filesref}; $i++ )
+@@ -411,6 +411,27 @@
+ 
+ 		push(@allfiles, $onefile);
+ 		
++		if ($file{'File'} !~ /\.(dll|exe)$/i)
++		{
++			my $path = my_cygpath ($onefile->{'sourcepath'});
++			my $rc = $msigetfilehash->Call ($path, 0, $hashinfo);
++			if ($rc == 0)
++			{
++				my @i = unpack ('x[l]l4', $hashinfo);
++				$oneline = $file{'File'} . "\t" .
++					"0" . "\t" .
++					$i[0] . "\t" .
++					$i[1] . "\t" .
++					$i[2] . "\t" .
++					$i[3] . "\n";
++				push (@filehashtable, $oneline);
++			}
++			else
++			{
++				$infoline = 'MsiGetFileHashA failed on ' . $path;
++				push(@installer::globals::logfileinfo, $infoline);
++			}
++		}
+ 		# Saving the sequence number in a hash with uniquefilename as key.
+ 		# This is used for better performance in "save_packorder"
+ 		$installer::globals::uniquefilenamesequence{$onefile->{'uniquename'}} = $onefile->{'sequencenumber'};
+@@ -424,6 +424,11 @@
+ 	push(@installer::globals::logfileinfo, $infoline);
+ 
+ 	installer::logger::include_timestamp_into_logfile("Performance Info: File Table end");
+ 	
++	my $filehashtablename = $basedir . $installer::globals::separator . "MsiFileHash.idt";
++	installer::files::save_file($filehashtablename ,\@filehashtable);
++	$infoline = "\nCreated idt file: $filehashtablename\n"; 
++	push(@installer::globals::logfileinfo, $infoline);
++
+ 	return \@allfiles;
+ }
+dummy line to avoid confusing diff-mode
++++ solenv/bin/modules/installer/windows/idtglobal.pm
+--- solenv/bin/modules/installer/windows/idtglobal.pm
+@@ -359,6 +359,16 @@
+ 		push(@{$idtref}, $oneline);
+ 	}
+ 
++	if ( $definestring eq "filehash" )
++	{
++		$oneline = "File_\tOptions\tHashPart1\tHashPart2\tHashPart3\tHashPart4\n";
++		push(@{$idtref}, $oneline);
++		$oneline = "s72\ti2\ti4\ti4\ti4\ti4\n";
++		push(@{$idtref}, $oneline);
++		$oneline = "MsiFileHash\tFile_\n";
++		push(@{$idtref}, $oneline);
++	}
++
+ 	if ( $definestring eq "directory" )
+ 	{
+ 		$oneline = "Directory\tDirectory_Parent\tDefaultDir\n";
+dummy line to avoid confusing diff-mode
++++ solenv/bin/modules/installer/windows/msiglobal.pm
+--- solenv/bin/modules/installer/windows/msiglobal.pm
+@@ -1479,9 +1479,9 @@
+ 	
+ 	# ProductCode has to be specified in each language
+ 
+-	# my $searchstring = "PRODUCTCODE";
+-	# my $codeblock = installer::windows::idtglobal::get_language_block_from_language_file($searchstring, $codefile);
+-	# $installer::globals::productcode = installer::windows::idtglobal::get_code_from_code_block($codeblock, $onelanguage);
++	my $searchstring = "PRODUCTCODE";
++	my $codeblock = installer::windows::idtglobal::get_language_block_from_language_file($searchstring, $codefile);
++	$installer::globals::productcode = installer::windows::idtglobal::get_code_from_code_block($codeblock, $onelanguage);
+ 
+ 	if ( $installer::globals::patch ) # patch upgrade codes are defined in soffice.lst
+ 	{
+@@ -1505,18 +1505,11 @@
+ 	# if (( $installer::globals::productcode eq "" ) && ( ! $isopensource )) { installer::exiter::exit_program("ERROR: ProductCode for language $onelanguage not defined in $installer::globals::codefilename !", "set_global_code_variables"); }
+ 	if ( $installer::globals::upgradecode eq "" ) { installer::exiter::exit_program("ERROR: UpgradeCode not defined in $installer::globals::codefilename !", "set_global_code_variables"); }	
+ 
+-	# $infoline = "Setting ProductCode to: $installer::globals::productcode \n";
+-	# push( @installer::globals::logfileinfo, $infoline);
++	$infoline = "Setting ProductCode to: $installer::globals::productcode \n";
++	push( @installer::globals::logfileinfo, $infoline);
+ 	$infoline = "Setting UpgradeCode to: $installer::globals::upgradecode \n";
+ 	push( @installer::globals::logfileinfo, $infoline);
+ 	
+-	my $guidref = get_guid_list(1, 1);	# only one GUID shall be generated
+-
+-	${$guidref}[0] =~ s/\s*$//;		# removing ending spaces
+-
+-	$installer::globals::productcode = "\{" . ${$guidref}[0] . "\}";
+-	$infoline = "Setting ProductCode to: $installer::globals::productcode \n";
+-	push( @installer::globals::logfileinfo, $infoline);
+ 
+ 	# Adding both variables into the variables array 
+ 
+dummy line to avoid confusing diff-mode
