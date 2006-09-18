@@ -58,7 +58,7 @@ ScVbaInterior::setColorIndex( const css::uno::Any& _colorindex ) throw (css::uno
 	// handled properly here
 	
 	if ( !nIndex || ( nIndex == vba::Excel::Constants::xlColorIndexAutomatic ) || ( nIndex == vba::Excel::Constants::xlColorIndexNone )  )
-		nIndex = 1;
+		nIndex = 2; // default is white ( this maybe will probably break, e.g. we may at some stage need to know what this interior is,  a cell or something else and then pick a default colour based on that )
 	--nIndex; // OOo indices are zero bases
 	uno::Reference< container::XIndexAccess > xIndex = getPalette();
 	// setColor expects colors in XL RGB values

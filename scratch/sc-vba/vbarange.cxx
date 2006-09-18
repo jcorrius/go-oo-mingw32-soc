@@ -128,6 +128,7 @@ double lcl_Round2DecPlaces( double nVal )
 	nVal = nVal/100;
 	return nVal;
 }
+
 uno::Any lcl_makeRange( uno::Reference< uno::XComponentContext >& xContext, const uno::Any aAny )
 {
 	uno::Reference< table::XCellRange > xCellRange( aAny, uno::UNO_QUERY_THROW );
@@ -1957,11 +1958,16 @@ ScVbaRange::Range( const uno::Any &Cell1, const uno::Any &Cell2 ) throw (uno::Ru
 			resultAddress.EndRow ) ) );
 }
 
+// Allow access to underlying openoffice uno api ( useful for debugging
+// with openoffice basic ) 
 ::com::sun::star::uno::Any SAL_CALL
 ScVbaRange::getCellRange(  ) throw (::com::sun::star::uno::RuntimeException)
 {
 	uno::Any aAny;
-	aAny <<= mxRange;
+	if ( mxRanges.is() )
+		aAny <<= mxRanges;
+	else if ( mxRange.is() )
+		aAny <<= mxRange;
 	return aAny;
 }
 
