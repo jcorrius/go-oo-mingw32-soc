@@ -1,0 +1,338 @@
+diff -rup /data4/sles/ooo-build-m180/ooo-build/build/ood680-m1/sc/source/ui/docshell/docsh.cxx sc/source/ui/docshell/docsh.cxx
+--- /data4/sles/ooo-build-m180/ooo-build/build/ood680-m1/sc/source/ui/docshell/docsh.cxx	2006-07-21 14:37:27.000000000 +0100
++++ sc/source/ui/docshell/docsh.cxx	2006-09-06 18:21:59.000000000 +0100
+@@ -148,6 +148,11 @@
+ #include <rtl/logfile.hxx>
+ #endif
+ 
++#include <basic/basmgr.hxx>
++#include <basic/sbmod.hxx>
++#include <basic/sbmeth.hxx>
++#include <basic/sbx.hxx>
++
+ using namespace com::sun::star;
+ 
+ // STATIC DATA -----------------------------------------------------------
+@@ -190,6 +195,185 @@ static const sal_Char __FAR_DATA pFilter
+ #define ScDocShell
+ #include "scslots.hxx"
+ 
++const static String sLibrary( RTL_CONSTASCII_USTRINGPARAM("Standard"));
++const static String sModule( RTL_CONSTASCII_USTRINGPARAM("ThisWorkbook"));
++
++const static rtl::OUString sUrlPart0 = rtl::OUString::createFromAscii( "vnd.sun.star.script:");
++const static rtl::OUString sUrlPart1 = rtl::OUString::createFromAscii( "vnd.sun.star.script:Standard.ThisWorkbook.");
++const static rtl::OUString sUrlPart2 = rtl::OUString::createFromAscii( "?language=Basic&location=document"); 
++
++// Treat the args as possible inouts ( convertion at bottom of method )
++bool executeWorkBookMacro( SfxObjectShell* pShell, const String& sMacroName, uno::Sequence< uno::Any >& aArgs, uno::Any& aRet )
++{
++	rtl::OUString sUrl = sUrlPart1.concat( sMacroName ).concat( sUrlPart2 );
++	 
++	uno::Sequence< sal_Int16 > aOutArgsIndex;
++	uno::Sequence< uno::Any > aOutArgs;
++	ErrCode nErr = pShell->CallXScript( sUrl,  aArgs, aRet,
++			aOutArgsIndex, aOutArgs, false );
++
++	// Script Executed?
++	if ( nErr != ERRCODE_NONE )
++		return false;
++
++	sal_Bool bResult = sal_False;
++	sal_Int32 nLen = aOutArgs.getLength();
++	// convert any out params to seem like they were inouts
++	if ( nLen )
++	{
++		for ( sal_Int32 index=0; index < nLen; ++index )
++		{
++			sal_Int32 nOutIndex = aOutArgsIndex[ index ];
++			aArgs[ nOutIndex ] = aOutArgs[ nOutIndex ];
++		}
++
++	}
++	return true;
++}
++String docMacroExists( SfxObjectShell* pShell, 
++const String& sMod, const String& sMacro )
++{
++	String sFullName;	
++	// would use the script provider to see if the macro exists but
++	// called at this stage tdoc content handler stuff is not set up
++	// so it fails
++
++	BasicManager* pBasicMgr = pShell-> GetBasicManager();
++	if ( pBasicMgr )
++	{
++		StarBASIC* pBasic = pBasicMgr->GetLib( sLibrary );
++		if ( !pBasic )
++		{
++			USHORT nId = pBasicMgr->GetLibId( sLibrary );
++			pBasicMgr->LoadLib( nId );
++			pBasic = pBasicMgr->GetLib( sLibrary );
++		}
++		if ( pBasic )
++		{
++			if ( sMod.Len() ) // we wish to find the macro is a specific module
++			{
++				SbModule* pModule = pBasic->FindModule( sMod );
++				if ( pModule )
++				{
++					SbxArray* pMethods = pModule->GetMethods();
++					if ( pMethods )
++					{
++						SbMethod* pMethod = static_cast< SbMethod* >( pMethods->Find( sMacro, SbxCLASS_METHOD ) );
++						if ( pMethod )
++						{
++							sFullName = sMacro;
++							sFullName.Insert( '.', 0 ).Insert( sMod, 0 ).Insert( '.', 0 ).Insert( sLibrary, 0 );
++						}
++					}
++				}
++			}
++			else if( SbMethod* pMethod = dynamic_cast< SbMethod* >( pBasic->Find( sMacro, SbxCLASS_METHOD ) ) )
++			{
++					if( SbModule* pModule = pMethod->GetModule() )
++					{
++						sFullName = sMacro;
++						sFullName.Insert( '.', 0 ).Insert( pModule->GetName(), 0).Insert( '.', 0 ).Insert( sLibrary, 0 );
++					}
++			}		
++				
++		}
++	}
++	return sFullName;
++}
++
++bool workBookMacroExist( SfxObjectShell* pShell, const String& sMacro )
++{
++	bool result = false;
++	return  docMacroExists( pShell, sModule, sMacro ).Len() > 0;
++}
++
++bool processDocBeforeCloseMacro( SfxObjectShell* pShell )
++{
++	
++	uno::Any aRet;
++	uno::Sequence< uno::Any > aArgs( 1 );
++	bool bCancel = sal_False;
++	aArgs[ 0 ] <<= bCancel;
++	const static String sBeforeClose( RTL_CONSTASCII_USTRINGPARAM("Workbook_BeforeClose") );
++	if ( !executeWorkBookMacro( pShell, sBeforeClose, aArgs, aRet ) )
++		return false;
++	aArgs[ 0 ] >>= bCancel;
++	return bCancel;
++}
++
++bool addOpenDocEvent( const uno::Reference< container::XNameReplace >& xEvts, const rtl::OUString& sOpenMacro )
++{
++	bool result = false;
++	const rtl::OUString sUrl = sUrlPart0.concat( sOpenMacro ).concat( sUrlPart2 );
++	const static rtl::OUString sEvtType( RTL_CONSTASCII_USTRINGPARAM("EventType") );
++	const static rtl::OUString sScript( RTL_CONSTASCII_USTRINGPARAM("Script") );
++	const static rtl::OUString sEvt( RTL_CONSTASCII_USTRINGPARAM("OnLoad") );
++	if ( xEvts.is() )
++	{
++		uno::Sequence< beans::PropertyValue > aEvents;
++		xEvts->getByName( sEvt ) >>= aEvents;
++		uno::Sequence< beans::PropertyValue > aOpenEvt( 2 );
++		aOpenEvt[ 0 ].Name = sEvtType;
++		aOpenEvt[ 0 ].Value = uno::makeAny(sScript);
++		aOpenEvt[ 1 ].Name = sScript;
++		aOpenEvt[ 1 ].Value = uno::makeAny(sUrl);
++		sal_Int32 nPos = aEvents.getLength();
++
++		sal_Int32 nNewSize = aEvents.getLength() + aOpenEvt.getLength();
++		if ( nNewSize > aEvents.getLength() )
++			aEvents.realloc( nNewSize );
++
++		for ( sal_Int32 nIndex = nPos, nCpyIndex = 0; nIndex<nNewSize; nIndex++, nCpyIndex++ )
++			aEvents[ nIndex ] = aOpenEvt[ nCpyIndex ];	
++			
++		uno::Any aParam = uno::makeAny( aEvents );
++
++		xEvts->replaceByName( sEvt, aParam ); 
++		result = true;
++	}
++	return result;
++}
++
++bool processDocOpenMacro( SfxObjectShell* pShell )
++{
++	bool result = false;
++	// no point adding a handler for unless it exists
++	// probably worth just doing this on import of xl document
++	
++		
++	// Urk due to async nature, re-enterency and other horrors of the load
++	// process, its seems the most sensible thing is to hook into the 
++	// document event broadcaster
++	const static rtl::OUString sOpenMacro( RTL_CONSTASCII_USTRINGPARAM("Workbook_Open") );
++	const static rtl::OUString sAuto_OpenMacro( RTL_CONSTASCII_USTRINGPARAM("auto_open") );
++
++	uno::Reference< document::XEventsSupplier > xEvtSupplier( pShell->GetModel(), uno::UNO_QUERY );
++	String sNull;
++
++	if ( xEvtSupplier.is() )
++	{
++		uno::Reference< container::XNameReplace > xEvts( xEvtSupplier->getEvents(), uno::UNO_QUERY );	
++		String sFullOpen = docMacroExists( pShell, sNull, sOpenMacro );
++		if ( sFullOpen.Len() > 0 )
++		{
++				if ( !addOpenDocEvent( xEvts, sFullOpen ) )
++					return false;
++		}
++	// deep sigh, you can only specify one event binding not multiple ones, thats crap
++/*
++		String sFullAuto = docMacroExists( pShell, sNull, sAuto_OpenMacro );
++		if ( sFullAuto.Len() > 0 )
++		{
++				if ( !addOpenDocEvent( xEvts, sFullAuto ) )
++					return false;
++		}
++*/
++		result = true;
++
++	}
++	return result;
++}
++
+ 
+ SFX_IMPL_INTERFACE(ScDocShell,SfxObjectShell, ScResId(SCSTR_DOCSHELL))
+ {
+@@ -682,7 +866,6 @@ BOOL ScDocShell::SaveXML( SfxMedium* pMe
+ BOOL __EXPORT ScDocShell::Load( SfxMedium& rMedium )
+ {
+ 	RTL_LOGFILE_CONTEXT_AUTHOR ( aLog, "sc", "nn93723", "ScDocShell::Load" );
+-
+ 	ScRefreshTimerProtector( aDocument.GetRefreshTimerControlAddress() );
+ 
+ 	//	only the latin script language is loaded
+@@ -725,6 +908,10 @@ BOOL __EXPORT ScDocShell::Load( SfxMediu
+ 		aDocument.InvalidateTableArea();
+ 
+ 	bIsEmpty = FALSE;
++
++	// Handler for open workbook event
++	processDocOpenMacro( this );
++
+ 	FinishedLoading( SFX_LOADED_MAINDOCUMENT | SFX_LOADED_IMAGES );
+ 	return bRet;
+ }
+@@ -807,7 +994,7 @@ BOOL __EXPORT ScDocShell::ConvertFrom( S
+ 	ScRefreshTimerProtector( aDocument.GetRefreshTimerControlAddress() );
+ 
+ 	GetUndoManager()->Clear();
+-
++	
+ 	// ob nach dem Import optimale Spaltenbreiten gesetzt werden sollen
+ 	BOOL bSetColWidths = FALSE;
+ 	BOOL bSetSimpleTextColWidths = FALSE;
+@@ -828,6 +1015,7 @@ BOOL __EXPORT ScDocShell::ConvertFrom( S
+     nCanUpdate = pUpdateDocItem ? pUpdateDocItem->GetValue() : com::sun::star::document::UpdateDocMode::NO_UPDATE;
+ 
+     const SfxFilter* pFilter = rMedium.GetFilter();
++						
+ 	if (pFilter)
+ 	{
+ 		String aFltName = pFilter->GetFilterName();
+@@ -1242,6 +1430,10 @@ BOOL __EXPORT ScDocShell::ConvertFrom( S
+ 		if ( bSetRowHeights )
+ 			UpdateAllRowHeights();		// with vdev or printer, depending on configuration
+ 	}
++
++	// Handler for open workbook event
++	processDocOpenMacro( this );
++
+ 	FinishedLoading( SFX_LOADED_MAINDOCUMENT | SFX_LOADED_IMAGES );
+ 
+ 	// #73762# invalidate eventually temporary table areas
+@@ -2016,7 +2208,6 @@ BOOL __EXPORT ScDocShell::SaveCompleted(
+     return SfxObjectShell::SaveCompleted( xStor );
+ }
+ 
+-
+ BOOL __EXPORT ScDocShell::DoSaveCompleted( SfxMedium * pNewStor )
+ {
+ 	BOOL bRet = SfxObjectShell::DoSaveCompleted( pNewStor );
+@@ -2053,6 +2244,11 @@ USHORT __EXPORT ScDocShell::PrepareClose
+ 
+ 	DoEnterHandler();
+ 
++	// start handler for possible veto from DocBefore_Close
++	if ( !IsInPrepareClose() && processDocBeforeCloseMacro( this ) )
++		return sal_False;
++	// end handler code
++
+ 	USHORT nRet = SfxObjectShell::PrepareClose( bUI, bForBrowsing );
+ 	if (nRet == TRUE)						// TRUE = schliessen
+ 		aDocument.DisableIdle(TRUE);		// nicht mehr drin rumpfuschen !!!
+diff -rup /data4/sles/ooo-build-m180/ooo-build/build/ood680-m1/sc/source/ui/view/tabview5.cxx sc/source/ui/view/tabview5.cxx
+--- /data4/sles/ooo-build-m180/ooo-build/build/ood680-m1/sc/source/ui/view/tabview5.cxx	2006-07-21 16:10:17.000000000 +0100
++++ sc/source/ui/view/tabview5.cxx	2006-09-08 13:59:24.000000000 +0100
+@@ -70,6 +70,7 @@
+ #include "seltrans.hxx"
+ #include "scmod.hxx"
+ #include "AccessibilityHints.hxx"
++#include "scextopt.hxx"
+ 
+ 
+ // STATIC DATA -----------------------------------------------------------
+@@ -338,6 +339,27 @@ void ScTabView::TabChanged()
+ 		aViewData.GetViewShell()->BroadcastAccessibility(aAccHint);
+ 	}
+ 	aViewData.GetDocument()->BroadcastUno( SfxSimpleHint( SC_HINT_TABLECHANGED ) );
++	ScExtDocOptions* pExtOptions = aViewData.GetDocument()->GetExtDocOptions();
++	String sSheetModuleName;
++	aViewData.GetDocument()->GetName( aViewData.GetTabNo(), sSheetModuleName);
++	// Use code name if that exists
++	if ( pExtOptions )
++		sSheetModuleName = pExtOptions->GetCodeName( aViewData. GetTabNo() );
++	static String sUrl( RTL_CONSTASCII_USTRINGPARAM("vnd.sun.star.script:Standard") );
++	static String sUrl2( RTL_CONSTASCII_USTRINGPARAM("?language=Basic&location=document") );
++	static String sSheetActivateScript( RTL_CONSTASCII_USTRINGPARAM("Worksheet_Activate") );
++	String sMacroUrl = sSheetActivateScript;
++	sMacroUrl.Insert( '.', 0 ).Insert( sSheetModuleName, 0 ).Insert( '.', 0 ).Insert( sUrl, 0 );
++	sMacroUrl +=  sUrl2;
++	com::sun::star::uno::Sequence< sal_Int16 > aOutArgsIndex;
++	com::sun::star::uno::Sequence< com::sun::star::uno::Any > aOutArgs;
++	com::sun::star::uno::Sequence< com::sun::star::uno::Any > aArgs;
++	com::sun::star::uno::Any aRet;
++	
++	aViewData.GetSfxDocShell()->CallXScript( sMacroUrl,  aArgs, aRet,
++			aOutArgsIndex, aOutArgs, false );
++
++		
+ }
+ 
+ void ScTabView::UpdateLayerLocks()
+--- /data4/sles/ooo-mLnew/ooo-build/build/ooc680-m2/sfx2/inc/objsh.hxx	2006-05-02 17:01:46.000000000 +0100
++++ sfx2/inc/objsh.hxx	2006-06-02 13:29:01.000000000 +0100
+@@ -427,7 +427,7 @@ public:
+         ::com::sun::star::uno::Any& aRet,
+         ::com::sun::star::uno::Sequence< sal_Int16 >& aOutParamIndex,
+         ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Any >&
+-            aOutParam);
++            aOutParam, bool bRaiseErr = true );
+ 
+     BOOL                        DoMacroQuery( const String& rScriptType );
+     void                        AdjustMacroMode( const String& rScriptType );
+--- /data4/sles/ooo-mLnew/ooo-build/build/ooc680-m2/sfx2/source/doc/objmisc.cxx	2006-05-22 08:25:06.000000000 +0100
++++ sfx2/source/doc/objmisc.cxx	2006-06-02 13:29:02.000000000 +0100
+@@ -1396,7 +1396,7 @@ ErrCode SfxObjectShell::CallXScript( con
+         ::com::sun::star::uno::Any& aRet,
+         ::com::sun::star::uno::Sequence< sal_Int16 >& aOutParamIndex,
+         ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Any >&
+-            aOutParam)
++            aOutParam, bool bRaiseError )
+ {
+     OSL_TRACE( "in CallXScript" );
+ 	ErrCode nErr = ERRCODE_NONE;
+@@ -1470,7 +1470,7 @@ ErrCode SfxObjectShell::CallXScript( con
+         nErr = ERRCODE_BASIC_INTERNAL_ERROR;
+     }
+ 
+-	if ( bCaughtException )
++	if ( bCaughtException && bRaiseError )
+ 	{
+ 		SfxAbstractDialogFactory* pFact = SfxAbstractDialogFactory::Create();
+ 
