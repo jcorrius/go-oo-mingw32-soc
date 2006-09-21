@@ -49,7 +49,8 @@ IDLFILES=\
 	XWindows.idl \
 	XBorder.idl \
 	XBorders.idl \
-	XCharacters.idl
+	XCharacters.idl \
+	XComboBox.idl
 # ------------------------------------------------------------------
 
 .INCLUDE :  target.mk
