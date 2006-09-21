@@ -52,7 +52,8 @@ SLOFILES= \
 		$(SLO)$/vbawindows.obj \
 		$(SLO)$/vbapalette.obj \
 		$(SLO)$/vbaborders.obj \
-		$(SLO)$/vbacharacters.obj
+		$(SLO)$/vbacharacters.obj \
+		$(SLO)$/vbacombobox.obj
  
 
 # --- Targets ------------------------------------------------------

@@ -72,7 +72,7 @@ ScVbaWorksheets::createEnumeration() throw (uno::RuntimeException)
 }
 
 uno::Any
-ScVbaWorksheets::createCollectionObject( const css::uno::Any& aSource )
+ScVbaWorksheets::createCollectionObject( const uno::Any& aSource )
 {
 	uno::Reference< sheet::XSpreadsheet > xSheet( aSource, uno::UNO_QUERY );
 	return uno::makeAny( uno::Reference< vba::XWorksheet > ( new ScVbaWorksheet( m_xContext, xSheet, mxModel ) ) ); 
@@ -220,7 +220,7 @@ ScVbaWorksheets::PrintOut( const uno::Any& From, const uno::Any& To, const uno::
 	}
 	
 	// #FIXME #TODO
-	// 1 Preview ( does such a thing in OO.org? )
+	// 1 Preview ( does such a thing exist in OO.org? )
 	// 2 ActivePrinter ( how/can we switch a printer via API? )
 	// 3 PrintToFile ( ms behaviour if this option is specified but no 
 	//   filename supplied 'PrToFileName' then the user will be prompted )
@@ -230,8 +230,8 @@ ScVbaWorksheets::PrintOut( const uno::Any& From, const uno::Any& To, const uno::
 	//   should be able to disable that via configuration for the duration
 	//   of this method
 }
-css::uno::Any SAL_CALL 
-ScVbaWorksheets::getVisible() throw (css::uno::RuntimeException)
+uno::Any SAL_CALL 
+ScVbaWorksheets::getVisible() throw (uno::RuntimeException)
 {
 	sal_Bool bVisible = sal_True;
 	uno::Reference< container::XEnumeration > xEnum( createEnumeration(), uno::UNO_QUERY_THROW );
@@ -248,7 +248,7 @@ ScVbaWorksheets::getVisible() throw (css::uno::RuntimeException)
 }
 
 void SAL_CALL 
-ScVbaWorksheets::setVisible( const css::uno::Any& _visible ) throw (css::uno::RuntimeException)
+ScVbaWorksheets::setVisible( const uno::Any& _visible ) throw (uno::RuntimeException)
 {
 	sal_Bool bState;
 	if ( _visible >>= bState )
@@ -272,4 +272,5 @@ ScVbaWorksheets::getItemByStringIndex( const rtl::OUString& sIndex ) throw (uno:
 	ScDocument::ConvertToValidTabName( sScIndex, '_' );
 	return ScVbaCollectionBaseImpl::getItemByStringIndex( sScIndex );
 }
+
 
