@@ -30,6 +30,8 @@ public:
  virtual css::uno::Reference< oo::vba::XWorksheet > SAL_CALL getActiveSheet() throw (::com::sun::star::uno::RuntimeException);
 	virtual sal_Bool SAL_CALL getScreenUpdating() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setScreenUpdating(sal_Bool bUpdate) throw (css::uno::RuntimeException);
+	virtual sal_Bool SAL_CALL getDisplayStatusBar() throw (css::uno::RuntimeException);
+	virtual void SAL_CALL setDisplayStatusBar(sal_Bool bDisplayStatusBar) throw (css::uno::RuntimeException);
 	virtual css::uno::Reference< oo::vba::XWorkbook > SAL_CALL getThisWorkbook() throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL Workbooks( const css::uno::Any& aIndex ) throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL Worksheets( const css::uno::Any& aIndex ) throw (css::uno::RuntimeException);
@@ -38,11 +40,14 @@ public:
 	virtual css::uno::Any SAL_CALL Dialogs( const css::uno::Any& DialogIndex ) throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL getCutCopyMode() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setCutCopyMode( const css::uno::Any& _cutcopymode ) throw (css::uno::RuntimeException);
+	virtual css::uno::Any SAL_CALL getStatusBar() throw (css::uno::RuntimeException);
+	virtual void SAL_CALL setStatusBar( const css::uno::Any& _statusbar ) throw (css::uno::RuntimeException);
 
 	virtual double SAL_CALL CountA( const css::uno::Any& arg1 ) throw (css::uno::RuntimeException) ;
 
 	virtual css::uno::Any SAL_CALL Windows( const css::uno::Any& aIndex ) throw (css::uno::RuntimeException);
 	virtual void SAL_CALL wait( double time ) throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL Range( const css::uno::Any& Cell1, const css::uno::Any& Cell2 ) throw (css::uno::RuntimeException);
+	virtual void SAL_CALL GoTo( const css::uno::Any& Reference, const css::uno::Any& Scroll ) throw (css::uno::RuntimeException);
 };
 #endif /* SC_VBA_APPLICATION_HXX */

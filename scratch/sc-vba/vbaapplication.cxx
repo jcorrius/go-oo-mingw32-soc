@@ -4,6 +4,9 @@
 #include<com/sun/star/view/XSelectionSupplier.hpp>
 #include<org/openoffice/vba/Excel/XlCalculation.hpp>
 #include <com/sun/star/sheet/XCellRangeReferrer.hpp>
+#include <com/sun/star/frame/XLayoutManager.hpp>
+#include <com/sun/star/task/XStatusIndicatorSupplier.hpp>
+#include <com/sun/star/task/XStatusIndicator.hpp>
 
 #include "vbaapplication.hxx"
 #include "vbaworkbooks.hxx"
@@ -15,7 +18,6 @@
 #include "vbawindow.hxx"
 #include "vbawindows.hxx"
 #include "vbaglobals.hxx"
-
 #include "tabvwsh.hxx"
 
 //start test includes
@@ -114,6 +116,48 @@ ScVbaApplication::setScreenUpdating(sal_Bool bUpdate) throw (uno::RuntimeExcepti
 		xModel->lockControllers();
 }
 
+sal_Bool
+ScVbaApplication::getDisplayStatusBar() throw (uno::RuntimeException)
+{
+	uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY_THROW );
+    uno::Reference< frame::XFrame > xFrame( xModel->getCurrentController()->getFrame(), uno::UNO_QUERY_THROW );
+    uno::Reference< beans::XPropertySet > xProps( xFrame, uno::UNO_QUERY_THROW );
+
+    if( xProps.is() ){
+        uno::Reference< frame::XLayoutManager > xLayoutManager( xProps->getPropertyValue( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM("LayoutManager")) ), uno::UNO_QUERY_THROW );
+        rtl::OUString url(RTL_CONSTASCII_USTRINGPARAM( "private:resource/statusbar/statusbar" ));
+        if( xLayoutManager.is() && xLayoutManager->isElementVisible( url ) ){
+            return sal_True;
+        }
+    }
+    return sal_False;
+}
+
+void
+ScVbaApplication::setDisplayStatusBar(sal_Bool bDisplayStatusBar) throw (uno::RuntimeException)
+{
+	uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY_THROW );
+    uno::Reference< frame::XFrame > xFrame( xModel->getCurrentController()->getFrame(), uno::UNO_QUERY_THROW );
+    uno::Reference< beans::XPropertySet > xProps( xFrame, uno::UNO_QUERY_THROW );
+
+    if( xProps.is() ){
+        uno::Reference< frame::XLayoutManager > xLayoutManager( xProps->getPropertyValue( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM("LayoutManager")) ), uno::UNO_QUERY_THROW );
+        rtl::OUString url(RTL_CONSTASCII_USTRINGPARAM( "private:resource/statusbar/statusbar" ));
+        if( xLayoutManager.is() ){
+            if( bDisplayStatusBar && !xLayoutManager->isElementVisible( url ) ){
+                if( !xLayoutManager->showElement( url ) )
+                    xLayoutManager->createElement( url );
+                return;
+            }
+            else if( !bDisplayStatusBar && xLayoutManager->isElementVisible( url ) ){
+                xLayoutManager->hideElement( url ); 
+                return;
+            }
+        }
+    }
+    return;
+}
+
 uno::Any SAL_CALL
 ScVbaApplication::Workbooks( const uno::Any& aIndex ) throw (uno::RuntimeException)
 {
@@ -187,6 +231,45 @@ ScVbaApplication::setCutCopyMode( const uno::Any& _cutcopymode ) throw (uno::Run
 {
 	//# FIXME TODO, implementation
 }
+
+uno::Any SAL_CALL
+ScVbaApplication::getStatusBar() throw (uno::RuntimeException)
+{
+	uno::Any result;
+    if( getDisplayStatusBar() )
+	    result <<= sal_False;
+    else
+        result <<= sal_True;
+	return result;
+}
+
+void SAL_CALL 
+ScVbaApplication::setStatusBar( const uno::Any& _statusbar ) throw (uno::RuntimeException)
+{
+    rtl::OUString sText;
+    sal_Bool bDefault;
+	uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY_THROW );
+    uno::Reference< task::XStatusIndicatorSupplier > xStatusIndicatorSupplier( xModel->getCurrentController(), uno::UNO_QUERY_THROW );
+    uno::Reference< task::XStatusIndicator > xStatusIndicator( xStatusIndicatorSupplier->getStatusIndicator(), uno::UNO_QUERY_THROW );
+    if( _statusbar >>= sText )
+    {
+        setDisplayStatusBar( sal_True );
+        //xStatusIndicator->start( sText, 100 );
+        xStatusIndicator->setText( sText );
+    }
+    else if( _statusbar >>= bDefault )
+    {
+        if( bDefault == sal_False )
+        {
+            xStatusIndicator->end();
+            setDisplayStatusBar( sal_True );
+        }
+    }
+    else
+        throw uno::RuntimeException( rtl::OUString::createFromAscii( "Invalid prarameter. It should be a string or False" ),
+            uno::Reference< uno::XInterface >() );
+}
+
 double SAL_CALL 
 ScVbaApplication::CountA( const uno::Any& arg1 ) throw (uno::RuntimeException)
 {
@@ -318,4 +401,53 @@ ScVbaApplication::getActiveSheet() throw (uno::RuntimeException)
     }
     return result;
 	
+}
+
+/*******************************************************************************
+ *  In msdn: 
+ *  Reference   Optional Variant. The destination. Can be a Range 
+ *  object, a string that contains a cell reference in R1C1-style notation,
+ *  or a string that contains a Visual Basic procedure name.
+ *  Scroll   Optional Variant. True to scrol, False to not scroll through 
+ *  the window. The default is False.
+ *  Parser is split to three parts, Range, R1C1 string and procedure name.
+ *  by test excel, it seems Scroll no effect. ??? 
+*******************************************************************************/
+void SAL_CALL 
+ScVbaApplication::GoTo( const uno::Any& Reference, const uno::Any& Scroll ) throw (uno::RuntimeException)
+{
+    //test Scroll is a boolean
+    sal_Bool bScroll;
+    if(!( Scroll >>= bScroll ))
+    {
+        throw uno::RuntimeException( rtl::OUString::createFromAscii( "sencond parameter should be boolean" ),
+                    uno::Reference< uno::XInterface >() );
+    }
+    //R1C1-style string or a string of procedure name.
+    rtl::OUString sRangeName;
+    if( Reference >>= sRangeName )
+    {
+        //TODO
+        //R1C1-style
+        //procedure name
+        printf("\nGoTo excute string\n");
+        return;
+    }
+    uno::Reference< vba::XRange > xRange;
+    if( Reference >>= xRange )
+    {
+        uno::Reference< vba::XRange > xVbaRange( Reference, uno::UNO_QUERY );
+        if ( xVbaRange.is() )
+        {
+            //TODO bScroll should be using, In this time, it doesenot have effection
+            if( bScroll )
+                xVbaRange->Select();
+            else
+                xVbaRange->Activate();
+        }
+        printf("\nGoTo excute range\n");
+        return;
+    }
+    throw uno::RuntimeException( rtl::OUString::createFromAscii( "invalid reference or name" ),
+            uno::Reference< uno::XInterface >() );
 }
