@@ -1,0 +1,404 @@
+Only in sc/inc: address.hxx~
+diff -u -r -x 'unxlng*' /opt/OpenOffice/HEAD/build/ood680-m4/sc/inc/cell.hxx sc/inc/cell.hxx
+--- /opt/OpenOffice/HEAD/build/ood680-m4/sc/inc/cell.hxx	2006-09-22 15:39:57.000000000 +0100
++++ sc/inc/cell.hxx	2006-09-23 21:38:35.000000000 +0100
+@@ -279,6 +279,9 @@
+                         SCITP_CLOSE_ITERATION_CIRCLE
+                     };
+ 	void			InterpretTail( ScInterpretTailParameter );
++	void            DoEnglishCompile( rtl::OUStringBuffer &rBuffer,
++									  const ScAddress &rPos,
++									  BOOL bCompileXML ) const;
+ 
+ public:
+ 
+Only in sc/inc: cell.hxx~
+diff -u -r -x 'unxlng*' /opt/OpenOffice/HEAD/build/ood680-m4/sc/source/core/data/cell2.cxx sc/source/core/data/cell2.cxx
+--- /opt/OpenOffice/HEAD/build/ood680-m4/sc/source/core/data/cell2.cxx	2006-09-22 15:39:59.000000000 +0100
++++ sc/source/core/data/cell2.cxx	2006-09-25 16:50:40.000000000 +0100
+@@ -245,59 +245,41 @@
+ void ScFormulaCell::GetEnglishFormula( String& rFormula, BOOL bCompileXML,
+ 									   ScAddress::Convention conv ) const
+ {
+-    //! mit GetFormula zusammenfassen !!!
+-
+-    if( pCode->GetError() && !pCode->GetLen() )
+-    {
+-        rFormula = ScGlobal::GetErrorString( pCode->GetError() ); return;
+-    }
+-    else if( cMatrixFlag == MM_REFERENCE )
+-    {
+-        // Referenz auf eine andere Zelle, die eine Matrixformel enthaelt
+-        pCode->Reset();
+-        ScToken* p = pCode->GetNextReferenceRPN();
+-        if( p )
+-        {
+-            ScBaseCell* pCell;
+-            SingleRefData& rRef = p->GetSingleRef();
+-            rRef.CalcAbsIfRel( aPos );
+-            if ( rRef.Valid() )
+-                pCell = pDocument->GetCell( ScAddress( rRef.nCol,
+-                    rRef.nRow, rRef.nTab ) );
+-            else
+-                pCell = NULL;
+-            if (pCell && pCell->GetCellType() == CELLTYPE_FORMULA)
+-            {
+-                ((ScFormulaCell*)pCell)->GetEnglishFormula(rFormula, bCompileXML, conv);
+-                return;
+-            }
+-            else
+-            {
+-                ScCompiler aComp( pDocument, aPos, *pCode );
+-                aComp.SetCompileEnglish( TRUE );
+-                aComp.SetCompileXML( bCompileXML );
+-                aComp.CreateStringFromTokenArray( rFormula );
+-            }
+-        }
+-        else
+-        {
+-            DBG_ERROR("ScFormulaCell::GetEnglishFormula: Keine Matrix");
+-        }
+-    }
+-    else
+-    {
+-        ScCompiler aComp( pDocument, aPos, *pCode );
+-        aComp.SetCompileEnglish( TRUE );
+-        aComp.SetCompileXML( bCompileXML );
+-        aComp.CreateStringFromTokenArray( rFormula );
+-    }
++	rtl::OUStringBuffer rBuffer( rFormula );
++	GetEnglishFormula( rBuffer, bCompileXML, conv );
++	rFormula = rBuffer;
++}
++
++static bool HasMissing( ScTokenArray *pCode );
++static ScTokenArray *ReWriteMissingForSXW( ScTokenArray *pCode );
++
++void ScFormulaCell::DoEnglishCompile( rtl::OUStringBuffer &rBuffer,
++									  const ScAddress &rPos, 
++									  BOOL bCompileXML ) const
++{
++	ScTokenArray *pCompileCode = pCode;
++	if (bCompileXML)
++	{
++		 /* Scan pCode [ token array ! ] for missing args &
++			re-write if present */
++		if ( HasMissing( pCode ) )
++			pCompileCode = ReWriteMissingForSXW( pCode );
++	}
++
++	ScCompiler aComp( pDocument, rPos, *pCompileCode );
++	aComp.SetCompileEnglish( TRUE );
++	aComp.SetCompileXML( bCompileXML );
++	aComp.CreateStringFromTokenArray( rBuffer );
++	if( bCompileXML )
++	{
++		rtl::OUStringBuffer aTmp( rBuffer );
++		fprintf( stderr, "English '%s'\n",
++				 rtl::OUStringToOString( aTmp.makeStringAndClear(),
++										 RTL_TEXTENCODING_UTF8 ).getStr() );
++	}
+ 
+-    rFormula.Insert( '=',0 );
+-    if( cMatrixFlag )
+-    {
+-        rFormula.Insert('{', 0);
+-        rFormula += '}';
+-    }
++	if ( pCompileCode != pCode )
++		delete pCompileCode;
+ }
+ 
+ void ScFormulaCell::GetEnglishFormula( rtl::OUStringBuffer& rBuffer, BOOL bCompileXML,
+@@ -330,12 +312,7 @@
+                 return;
+             }
+             else
+-            {
+-                ScCompiler aComp( pDocument, aPos, *pCode );
+-                aComp.SetCompileEnglish( TRUE );
+-                aComp.SetCompileXML( bCompileXML );
+-                aComp.CreateStringFromTokenArray( rBuffer );
+-            }
++				DoEnglishCompile( rBuffer, aPos, bCompileXML );
+         }
+         else
+         {
+@@ -343,12 +320,7 @@
+         }
+     }
+     else
+-    {
+-        ScCompiler aComp( pDocument, aPos, *pCode );
+-        aComp.SetCompileEnglish( TRUE );
+-        aComp.SetCompileXML( bCompileXML );
+-        aComp.CreateStringFromTokenArray( rBuffer );
+-    }
++		DoEnglishCompile( rBuffer, aPos, bCompileXML );
+ 
+     sal_Unicode ch('=');
+     rBuffer.insert( 0, &ch, 1 );
+@@ -1557,4 +1529,224 @@
+ 
+ 
+ 
++// ---- Move me to a more sensible place ----
++
++
++static void DumpTokArr( ScTokenArray *pCode )
++{
++	fprintf (stderr, "HasMissing: ");
++	for ( ScToken *pCur = pCode->First(); pCur; pCur = pCode->Next() )
++		fprintf( stderr, "t%d,o%d ",
++				 pCur->GetType(), pCur->GetOpCode() );
++	fprintf (stderr, "\n");
++}
++
++static bool HasMissing( ScTokenArray *pCode )
++{
++	for ( ScToken *pCur = pCode->First(); pCur; pCur = pCode->Next() )
++		if (pCur->GetOpCode() == ocMissing)
++			return true;
++	return false;
++}
++
++#if 0
++/*
++ * FIXME: can we handle 'add-in' functions too ?
++ */
++static struct {
++	OpCodeEnum eOp;
++	int        nArg;
++	double     nValue;
++} aFnDescr[] = {
++
++/*
++ *    Alphabetically sorted by English name: should
++ * be sorted by ocIdx. Do we need a 'function' callback
++ * for exotic cases ?
++ */
++
++
++	{ ocFixed,    1, 2.0 },
++	{ ocKapz,     4, 0.0 }, // PPMT
++	{ ocZinsZ,    4, 0.0 }, // IPMT
++	{ ocBetaDist, 3, 0.0 },
++	{ ocBetaInv,  3, 0.0 },
++	{ ocZW,       3, 0.0 }, // FV
++	{ ocRMZ,      3, 0.0 }, // PMT
++	{ ocZins,     3, 0.0 }, // RATE
++};
++const int nFnDescrElements = sizeof (aFnDescr) / sizeof (aFnDescr[0]);
++
++/*
++ * Finds a default value for an argument that can be
++ * ommitted within an argument list, ie. a non-trailing
++ * argument.
++ * @eOp: function opcode
++ * @nArg: 0 offset index to argumnt
++ * @pFound: (optional) whether a default was found, 
++ */
++double ScFnDescription::getDefault( OpCodeEnum eOp, int nArg, bool *bFound )
++{
++	/* Poorly performing 1st pass */
++	for (int i = 0; i < nFnDescrElements; i++)
++	{
++		if ( aFnDescr[i].eOp == eOp &&
++			 aFnDescr[i].nArg == nArg )
++		{
++			*bFound = true;
++			return aFnDescr[i].nValue;
++		}
++	}
++
++	*bFound = false;
++	return 0.0;
++}
++#endif
++
++struct MissingContext {
++		ScToken *pFunc;
++		int      nCurArg;
++};
++
++#define DEFAULT_ARG(arr,n,d) \
++		if (rCtx.nCurArg == (n)) \
++		{ \
++			(arr)->AddDouble( d ); \
++			return true; \
++		}
++
++static bool AddMissingExternal( const MissingContext &rCtx, ScTokenArray *pNewArr )
++{
++	const String &rName = rCtx.pFunc->GetExternal();
++
++	// initial (fast) check:
++	sal_Unicode nLastChar = rName.GetChar( rName.Len() - 1);
++	if ( nLastChar != 't' && nLastChar != 'm' )
++		return false;
++
++	if (rName.EqualsIgnoreCaseAscii(
++			"com.sun.star.sheet.addin.Analysis.getAccrint" ))
++	{
++		DEFAULT_ARG( pNewArr, 4, 1000.0 );
++	}
++	if (rName.EqualsIgnoreCaseAscii(
++			"com.sun.star.sheet.addin.Analysis.getAccrintm" ))
++	{
++		DEFAULT_ARG( pNewArr, 3, 1000.0 );
++	}
++// FIXME: when we implement EUROCONVERT
++#if 0
++	if (rName.EqualsIgnoreCaseAscii( "EUROCONVERT" ))
++		DEFAULT_ARG( pNewArr, 3, 0.0 );
++#endif
++}
++
++static bool AddMissing( const MissingContext &rCtx,
++						ScTokenArray *pNewArr )
++{
++	if ( !rCtx.pFunc )
++		return false;
++
++	switch ( rCtx.pFunc->GetOpCode() ) 
++	{
++	case ocFixed:
++		DEFAULT_ARG( pNewArr, 1, 2.0 );
++		break;
++	case ocBetaDist:
++	case ocBetaInv:
++	case ocRMZ:  // PMT 
++		DEFAULT_ARG( pNewArr, 3, 0.0 );
++		break;
++	case ocZinsZ: // IPMT
++	case ocKapz:  // PPMT
++		DEFAULT_ARG( pNewArr, 4, 0.0 );
++		break;
++	case ocBW: // PV
++	case ocZW: // FV
++		DEFAULT_ARG( pNewArr, 2, 0.0 ); // pmt
++		DEFAULT_ARG( pNewArr, 3, 0.0 ); // [fp]v
++		break;
++	case ocZins: // RATE
++		DEFAULT_ARG( pNewArr, 1, 0.0 ); // pmt
++		DEFAULT_ARG( pNewArr, 3, 0.0 ); // fv
++		DEFAULT_ARG( pNewArr, 4, 0.0 ); // type
++		break;
++	case ocExternal:
++		return AddMissingExternal( rCtx, pNewArr );
++		break;
++
++	// --- more complex cases ---
++
++	case ocOffset:
++		// FIXME: rather tough.
++		// if arg 3 (height) ommitted, export arg1 (rows)
++		break;
++	case ocAdress:
++		// FIXME - should we adjust 'ADDRESS_XL(?)' at this point?
++		// (arg 4 -> 'TRUE' ? [ or no arg. 4 ;-] )
++		break;
++	default:
++		break;
++	}
++
++	return false;
++}
++
++static void AddMoreArgs( const MissingContext &rCtx,
++						 ScTokenArray *pNewArr )
++{
++	if ( !rCtx.pFunc )
++		return;
++
++	// Log
++	if ( rCtx.pFunc->GetOpCode() == ocLog &&
++		 rCtx.nCurArg < 1 )
++		pNewArr->AddDouble( 10.0 );
++}
++
++#undef EXPECT
++
++static ScTokenArray *ReWriteMissingForSXW( ScTokenArray *pCode )
++{
++	MissingContext aCtx[ pCode->GetLen() ];
++	int nFn = -1;
++
++	ScTokenArray *pNewArr = new ScTokenArray();
++
++	for ( ScToken *pCur = pCode->First(); pCur;
++		  pCur = pCode->NextNoSpaces() )
++	{
++		bool bAdd = true;
++		switch ( pCur->GetOpCode() )
++		{
++			case ocOpen:
++				aCtx[ ++nFn ].pFunc = pCode->PeekPrevNoSpaces();
++				aCtx[ nFn ].nCurArg = 0;
++				break;
++			case ocClose:
++				AddMoreArgs( aCtx[ nFn ], pNewArr );
++				--nFn;
++				break;
++			case ocSep:
++				aCtx[ nFn ].nCurArg++;
++				break;
++			case ocMissing:
++			{
++				fprintf( stderr, "Missing arg %d on fn t%d,o%d\n",
++						 aCtx[ nFn ].nCurArg, 
++						 aCtx[ nFn ].pFunc->GetType(),
++						 aCtx[ nFn ].pFunc->GetOpCode() );
++				// FIXME: if we didn't know about this, should we
++				// simply elide it [ a var-arg case ? ]
++				bAdd = !AddMissing( aCtx[ nFn ], pNewArr );
++				break;
++			}
++			default:
++				break;
++		}
++		if ( bAdd )
++			pNewArr->AddToken( *pCur );
++	}
+ 
++	return pNewArr;
++}
+Only in sc/source/core/data: cell2.cxx~
+diff -u -r -x 'unxlng*' /opt/OpenOffice/HEAD/build/ood680-m4/sc/source/core/tool/compiler.cxx sc/source/core/tool/compiler.cxx
+--- /opt/OpenOffice/HEAD/build/ood680-m4/sc/source/core/tool/compiler.cxx	2006-09-22 15:39:59.000000000 +0100
++++ sc/source/core/tool/compiler.cxx	2006-09-22 21:45:12.000000000 +0100
+@@ -3117,6 +3117,10 @@
+             SetError( errParameterExpected );
+         }
+         else if ( eOp == ocMissing )
++		{
++			fprintf (stderr, "Ignoring ocMissing in 'Factor'\n");
++		}
++#if 0
+         {   // #84460# May occur if imported from Xcl.
+             // The real value for missing parameters depends on the function
+             // where it is used, interpreter would have to handle this.
+@@ -3125,6 +3129,7 @@
+             // Xcl import should map missings to values if possible.
+             SetError( errParameterExpected );
+         }
++#endif
+         else if ( eOp == ocSep )
+         {   // Subsequent ocSep
+             SetError( errParameterExpected );
+@@ -4426,10 +4431,13 @@
+             rBuffer.append(aAddIn);
+         }
+             break;
++        case svMissing:
++			fprintf (stderr, "svMissing in output to string\n");
++			break;
++
+         case svByte:
+         case svJump:
+         case svFAP:
+-        case svMissing:
+             break;      // Opcodes
+         default:
+             DBG_ERROR("ScCompiler:: GetStringFromToken errUnknownVariable");
+Only in sc/source/core/tool: compiler.cxx~
