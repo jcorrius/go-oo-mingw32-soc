@@ -62,20 +62,6 @@
                      ~BasicManager();
  
  	void			SetStorageName( const String& rName )	{ maStorageName = rName; }
---- basic.bak/source/comp/dim.cxx	2006-09-18 09:58:54.000000000 +0100
-+++ basic/source/comp/dim.cxx	2006-09-26 14:36:18.000000000 +0100
-@@ -197,7 +197,10 @@ void SbiParser::DefVar( SbiOpcode eOp, B
- 	if( eCurTok == PUBLIC || eCurTok == GLOBAL )
-     {
- 		bSwitchPool = TRUE;		// im richtigen Moment auf globalen Pool schalten
--    	if( eCurTok == GLOBAL )
-+
-+	// behavior in VBA is that a module scope variable's lifetime is 
-+	// tied to the document. e.g. a module scope variable is global
-+    	if( eCurTok == GLOBAL || ( GetBasic()->IsDocBasic() && bVBASupportOn && !pProc ) )
-             bPersistantGlobal = TRUE;
-     }
- 	// PRIVATE ist Synonym fuer DIM
 --- basic.bak/source/basmgr/basmgr.cxx	2006-06-19 18:38:25.000000000 +0100
 +++ basic/source/basmgr/basmgr.cxx	2006-09-26 11:52:18.000000000 +0100
 @@ -677,7 +677,7 @@ void BasicLibInfo::CalcRelStorageName( c
@@ -134,3 +120,78 @@
  	}
  
  	// Basic container
+--- basic.bak/source/comp/dim.cxx	2006-09-18 09:58:54.000000000 +0100
++++ basic/source/comp/dim.cxx	2006-09-26 17:25:17.000000000 +0100
+@@ -197,9 +197,15 @@ void SbiParser::DefVar( SbiOpcode eOp, B
+ 	if( eCurTok == PUBLIC || eCurTok == GLOBAL )
+     {
+ 		bSwitchPool = TRUE;		// im richtigen Moment auf globalen Pool schalten
++
+     	if( eCurTok == GLOBAL )
+             bPersistantGlobal = TRUE;
+     }
++	// behavior in VBA is that a module scope variable's lifetime is 
++	// tied to the document. e.g. a module scope variable is global
++   	if(  GetBasic()->IsDocBasic() && bVBASupportOn && !pProc ) 
++		bPersistantGlobal = TRUE;
++
+ 	// PRIVATE ist Synonym fuer DIM
+ 	// _CONST_?
+ 	BOOL bConst = FALSE;
+@@ -331,7 +337,7 @@ void SbiParser::DefVar( SbiOpcode eOp, B
+ 			{
+ 				case SbGLOBAL:	eOp2 = bPersistantGlobal ? _GLOBAL_P : _GLOBAL; 
+                                 goto global;
+-				case SbPUBLIC:	eOp2 = _PUBLIC;
++				case SbPUBLIC:	eOp2 = bPersistantGlobal ? _PUBLIC_P : _PUBLIC ;
+ 								// AB 9.7.97, #40689, kein eigener Opcode mehr
+ 								/*
+ 								if( bStatic )
+--- basic.bak/source/inc/runtime.hxx	2006-09-18 09:58:54.000000000 +0100
++++ basic/source/inc/runtime.hxx	2006-09-26 17:29:02.000000000 +0100
+@@ -460,7 +460,7 @@ class SbiRuntime
+ 	bool checkClass_Impl( const SbxVariableRef& refVal, const String& aClass, bool bRaiseErrors );
+ 	void StepCLOSE( UINT32 ),   StepPRCHAR( UINT32 ),   StepARGTYP( UINT32 );
+ 	// Alle Opcodes mit zwei Operanden
+-	void StepRTL( UINT32, UINT32 ),		StepPUBLIC( UINT32, UINT32 );		
++	void StepRTL( UINT32, UINT32 ),		StepPUBLIC( UINT32, UINT32 ), StepPUBLIC_P( UINT32, UINT32 ) ;		
+ 	void StepPUBLIC_Impl( UINT32, UINT32, bool bUsedForClassModule );
+ 	void StepFIND( UINT32, UINT32 ),    StepELEM( UINT32, UINT32 );
+ 	void StepGLOBAL( UINT32, UINT32 ),  StepLOCAL( UINT32, UINT32 );
+--- basic.bak/source/runtime/runtime.cxx	2006-09-18 09:58:54.000000000 +0100
++++ basic/source/runtime/runtime.cxx	2006-09-26 17:27:22.000000000 +0100
+@@ -210,6 +210,7 @@ SbiRuntime::pStep2 SbiRuntime::aStep2[] 
+ 	MEMBER(SbiRuntime::StepFIND_G),    	// Sucht globale Variable mit Spezialbehandlung wegen _GLOBAL_P
+ 	MEMBER(SbiRuntime::StepDCREATE_REDIMP), // Objekt-Array redimensionieren (+StringID+StringID)
+ 	MEMBER(SbiRuntime::StepFIND_CM),    // Search inside a class module (CM) to enable global search in time
++	MEMBER(SbiRuntime::StepPUBLIC_P),    // Search inside a class module (CM) to enable global search in time
+ };
+ 
+ 
+--- basic.bak/source/runtime/step2.cxx	2006-09-18 09:58:54.000000000 +0100
++++ basic/source/runtime/step2.cxx	2006-09-26 17:25:08.000000000 +0100
+@@ -1081,6 +1081,14 @@ void SbiRuntime::StepPUBLIC( UINT32 nOp1
+ 	StepPUBLIC_Impl( nOp1, nOp2, false );
+ }
+ 
++void SbiRuntime::StepPUBLIC_P( UINT32 nOp1, UINT32 nOp2 )
++{
++    // Creates module variable that isn't reinitialised when
++    // between invocations ( for VBASupport & document basic only )
++    if( pMod->pImage->bFirstInit )
++	StepPUBLIC( nOp1, nOp2 );
++}
++
+ // Einrichten einer globalen Variablen (+StringID+Typ)
+ 
+ void SbiRuntime::StepGLOBAL( UINT32 nOp1, UINT32 nOp2 )
+--- basic.bak/source/inc/opcodes.hxx	2006-09-18 09:58:54.000000000 +0100
++++ basic/source/inc/opcodes.hxx	2006-09-26 17:25:46.000000000 +0100
+@@ -165,6 +165,7 @@ enum SbiOpcode {
+ 	_FIND_G,        	// Sucht globale Variable mit Spezialbehandlung wegen _GLOBAL_P
+     _DCREATE_REDIMP,	// Objekt-Array redimensionieren (+StringId+StringID)
+ 	_FIND_CM,        	// Search inside a class module (CM) to enable global search in time
++	_PUBLIC_P, 			//  Module global Variable (persisted between calls)(+StringID+Typ)
+ 	SbOP2_END
+ 
+ };
