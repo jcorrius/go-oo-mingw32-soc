@@ -1,0 +1,196 @@
+--- psprint/inc/psprint/fontmanager.hxx.old	2006-09-27 15:13:55.728388000 +0200
++++ psprint/inc/psprint/fontmanager.hxx	2006-09-27 15:14:55.788388000 +0200
+@@ -729,7 +729,7 @@
+      */
+     bool matchFont( FastPrintFontInfo& rInfo, const com::sun::star::lang::Locale& rLocale );
+ 
+-    String Substitute(const std::vector<String> &rNames, const std::vector<sal_Unicode> &rGlyphs, 
++    String Substitute(const std::vector<String> &rNames, std::vector<sal_Unicode> &rGlyphs, 
+         const ByteString &rLangAttrib, italic::type eItalic, weight::type eWeight, 
+         width::type eWidth, pitch::type ePitch) const;
+     bool hasFontconfig() const { return m_bFontconfigSuccess; }
+--- psprint/source/fontmanager/fontconfig.cxx.old	2006-09-27 15:13:55.748388000 +0200
++++ psprint/source/fontmanager/fontconfig.cxx	2006-09-27 15:14:55.788388000 +0200
+@@ -95,9 +95,12 @@
+     FcFontSet*		(*m_pFcFontSetCreate)();
+     FcCharSet*                (*m_pFcCharSetCreate)();
+     FcBool                    (*m_pFcCharSetAddChar)(FcCharSet *, FcChar32);
++    FcBool          (*m_pFcCharSetHasChar)(FcCharSet *, FcChar32);
++    void            (*m_pFcCharSetDestroy)(FcCharSet*);
+     void			(*m_pFcFontSetDestroy)(FcFontSet*);
+     FcBool			(*m_pFcFontSetAdd)(FcFontSet*,FcPattern*);
+     void            (*m_pFcPatternReference)(FcPattern*);
++    FcResult        (*m_pFcPatternGetCharSet)(const FcPattern*,const char*,int,FcCharSet**);
+     FcResult		(*m_pFcPatternGetString)(const FcPattern*,const char*,int,FcChar8**);
+     FcResult		(*m_pFcPatternGetInteger)(const FcPattern*,const char*,int,int*);
+     FcResult		(*m_pFcPatternGetDouble)(const FcPattern*,const char*,int,double*);
+@@ -166,6 +169,12 @@
+     FcBool FcCharSetAddChar(FcCharSet *fcs, FcChar32 ucs4)
+     { return m_pFcCharSetAddChar(fcs, ucs4); }
+ 
++    FcBool FcCharSetHasChar(FcCharSet *fcs, FcChar32 ucs4)
++    { return m_pFcCharSetHasChar(fcs, ucs4); }
++
++    void FcCharSetDestroy( FcCharSet* pSet )
++    { m_pFcCharSetDestroy( pSet );}
++
+     void FcFontSetDestroy( FcFontSet* pSet )
+     { m_pFcFontSetDestroy( pSet );}
+ 
+@@ -175,6 +184,9 @@
+     void FcPatternReference( FcPattern* pPattern )
+     { m_pFcPatternReference( pPattern ); }
+ 
++    FcResult FcPatternGetCharSet( const FcPattern* pPattern, const char* object, int n, FcCharSet** s )
++    { return m_pFcPatternGetCharSet( pPattern, object, n, s ); }
++
+     FcResult FcPatternGetString( const FcPattern* pPattern, const char* object, int n, FcChar8** s )
+     { return m_pFcPatternGetString( pPattern, object, n, s ); }
+ 
+@@ -257,12 +269,18 @@
+         loadSymbol( "FcCharSetCreate" );
+     m_pFcCharSetAddChar = (FcBool(*)(FcCharSet*, FcChar32))
+         loadSymbol( "FcCharSetAddChar" );
++    m_pFcCharSetHasChar = (FcBool(*)(FcCharSet*, FcChar32))
++        loadSymbol( "FcCharSetHasChar" );
++    m_pFcCharSetDestroy = (void(*)(FcCharSet*))
++        loadSymbol( "FcCharSetDestroy" );
+     m_pFcFontSetDestroy = (void(*)(FcFontSet*))
+         loadSymbol( "FcFontSetDestroy" );
+     m_pFcFontSetAdd = (FcBool(*)(FcFontSet*,FcPattern*))
+         loadSymbol( "FcFontSetAdd" );
+     m_pFcPatternReference = (void(*)(FcPattern*))
+         loadSymbol( "FcPatternReference" );
++    m_pFcPatternGetCharSet = (FcResult(*)(const FcPattern*,const char*,int,FcCharSet**))
++        loadSymbol( "FcPatternGetCharSet" );
+     m_pFcPatternGetString = (FcResult(*)(const FcPattern*,const char*,int,FcChar8**))
+         loadSymbol( "FcPatternGetString" );
+     m_pFcPatternGetInteger = (FcResult(*)(const FcPattern*,const char*,int,int*))
+@@ -298,9 +316,12 @@
+             m_pFcFontSetCreate				&&
+             m_pFcCharSetCreate				&&
+             m_pFcCharSetAddChar 			&&
++            m_pFcCharSetHasChar             &&
++            m_pFcCharSetDestroy             &&
+             m_pFcFontSetDestroy				&&
+             m_pFcFontSetAdd					&&
+             m_pFcPatternReference           &&
++			m_pFcPatternGetCharSet			&&
+             m_pFcPatternGetString			&&
+             m_pFcPatternGetInteger			&&
+             m_pFcPatternGetDouble			&&
+@@ -679,7 +700,7 @@
+ #endif
+ }
+ 
+-String PrintFontManager::Substitute(const std::vector<String> &rNames, const std::vector<sal_Unicode> &rGlyphs,
++String PrintFontManager::Substitute(const std::vector<String> &rNames, std::vector<sal_Unicode> &rGlyphs,
+         const ByteString &rLangAttrib, italic::type eItalic, weight::type eWeight,
+         width::type eWidth, pitch::type ePitch) const
+ {
+@@ -746,6 +767,24 @@
+             FcResult eFileRes = rWrapper.FcPatternGetString( pSet->fonts[0], FC_FAMILY, 0, &family );
+             if( eFileRes == FcResultMatch )
+                 aName = String( (sal_Char*)family, RTL_TEXTENCODING_UTF8 );
++
++            if (!rGlyphs.empty() )
++            {
++		std::vector<sal_Unicode> aGlyphs;
++                FcCharSet *unicodes;
++                if (rWrapper.FcPatternGetCharSet(pSet->fonts[0], FC_CHARSET, 0, &unicodes) == FcResultMatch)
++                {
++                    std::vector<sal_Unicode>::iterator aGlyphEnd = rGlyphs.end();
++                    for (std::vector<sal_Unicode>::iterator aGlyphIter = rGlyphs.begin();
++                        aGlyphIter != aGlyphEnd; ++aGlyphIter)
++                    {
++                            if (rWrapper.FcCharSetHasChar( unicodes, (FcChar32)*aGlyphIter ))
++				aGlyphs.push_back(*aGlyphIter);
++                    }
++                }
++		rGlyphs.swap(aGlyphs);
++            }
++
+         }
+     }
+     rWrapper.FcFontSetDestroy( pSet );
+--- vcl/source/gdi/outdev3.cxx.old	2006-09-27 15:13:55.768388000 +0200
++++ vcl/source/gdi/outdev3.cxx	2006-09-27 15:14:55.798388000 +0200
+@@ -2652,7 +2652,7 @@
+ 
+ // -----------------------------------------------------------------------
+ 
+-String GetFcSubstitute(const ImplFontSelectData &rFontSelData, sal_Unicode *pMissingGlyphs=0, int nMissingGlyphs=0)
++String GetFcSubstitute(const ImplFontSelectData &rFontSelData, std::vector<sal_Unicode> &rGlyphs)
+ {
+     std::vector<String> aNames;
+     if( rFontSelData.GetFamilyName().Len() )
+@@ -2667,10 +2667,6 @@
+         while (nIndex != STRING_NOTFOUND);
+     }
+ 
+-    std::vector<sal_Unicode> aGlyphs;
+-    for (int i=0; i < nMissingGlyphs; ++i)
+-	aGlyphs.push_back(pMissingGlyphs[i]);
+-
+     ByteString aLangAttrib = MsLangId::convertLanguageToIsoByteString( rFontSelData.meLanguage );
+ 
+     psp::italic::type eItalic = psp::italic::Unknown;
+@@ -2737,7 +2733,7 @@
+     }
+ 
+     const psp::PrintFontManager& rMgr = psp::PrintFontManager::get();
+-    return rMgr.Substitute(aNames, aGlyphs, aLangAttrib, eItalic, eWeight, eWidth, ePitch);
++    return rMgr.Substitute(aNames, rGlyphs, aLangAttrib, eItalic, eWeight, eWidth, ePitch);
+ }
+ 
+ // -----------------------------------------------------------------------
+@@ -2752,7 +2748,8 @@
+         ||  0 == rFontSelData.maSearchName.CompareIgnoreCaseToAscii( "opensymbol", 10) )
+         return 0;
+ 
+-    String aName(GetFcSubstitute(rFontSelData));
++    std::vector<sal_Unicode> aDummy;
++    String aName(GetFcSubstitute(rFontSelData, aDummy));
+     if (!aName.Len())
+         return 0;
+ 
+@@ -3174,17 +3171,21 @@
+         cached = true;
+     }
+ 
++    std::vector<sal_Unicode> aGlyphs;
++    for (int i=0; i < nMissingUnicodes; ++i)
++        aGlyphs.push_back(pMissingUnicodes[i]);
++
+     // Try cached fallbacks first
+-    if ( !symbolFont && (nMissingUnicodes > 0) )
++    if ( !symbolFont && !aGlyphs.empty() )
+     {
+-        aSelData.maSearchName = pOrigFontEntry->GetFallbackForUnicode( pMissingUnicodes[0] );
++        aSelData.maSearchName = pOrigFontEntry->GetFallbackForUnicode( aGlyphs[0] );
+         if ( aSelData.maSearchName.Len() )
+             cached = true;
+     }
+ 
+     if ( !cached )
+     {
+-        String aName(GetFcSubstitute( aSelData, pMissingUnicodes, nMissingUnicodes ));
++        String aName(GetFcSubstitute( aSelData, aGlyphs ));
+       if (aName.Len())
+             aSelData.maSearchName = aName;
+     }
+@@ -3224,10 +3225,11 @@
+     // Cache the fallback font for each of the missing Unicode chars
+     if ( !symbolFont && aSelData.maSearchName.Len() )
+     {
+-        for ( int i = 0; i < nMissingUnicodes; i++ )
++        std::vector<sal_Unicode>::const_iterator aEnd = aGlyphs.end();
++        for (std::vector<sal_Unicode>::const_iterator aI = aGlyphs.begin(); aI != aEnd; ++aI)
+         {
+-            if ( ! pOrigFontEntry->GetFallbackForUnicode(pMissingUnicodes[i]).Len() )
+-                pOrigFontEntry->AddFallbackForUnicode( pMissingUnicodes[i], aSelData.maSearchName );
++            if (!pOrigFontEntry->GetFallbackForUnicode(*aI).Len())
++                pOrigFontEntry->AddFallbackForUnicode(*aI, aSelData.maSearchName);
+         }
+     }
+ 

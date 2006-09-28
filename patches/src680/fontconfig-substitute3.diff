@@ -1,0 +1,199 @@
+--- vcl/inc/outdev.h.old	2006-09-27 15:13:55.758388000 +0200
++++ vcl/inc/outdev.h	2006-09-27 15:15:16.668388000 +0200
+@@ -213,8 +213,7 @@
+                              const Font& rFont, const Size& rSize, ImplFontSubstEntry* pDevSpecific );
+     ImplFontEntry*      GetFallback( ImplDevFontList* pFontList,
+                                      const Font& rFont, const Size& rSize,
+-                                     int nFallbackLevel, sal_Unicode *pMissingUnicodes,
+-                                     int nMissingUnicodes );
++                                     int nFallbackLevel, std::vector<sal_Unicode> &rMissingGlyphs );
+     void                Release( ImplFontEntry* );
+     void                Invalidate();
+ };
+--- vcl/inc/sallayout.hxx.old	2006-06-09 14:17:44.000000000 +0200
++++ vcl/inc/sallayout.hxx	2006-09-27 15:15:16.668388000 +0200
+@@ -101,6 +101,7 @@
+     bool    GetRun( int* nMinRunPos, int* nEndRunPos, bool* bRTL ) const;
+     bool    GetNextPos( int* nCharPos, bool* bRTL );
+     bool    PosIsInRun( int nCharPos ) const;
++    bool    PosIsInAnyRun( int nCharPos ) const;
+ };
+ 
+ // -----------------
+--- vcl/source/gdi/outdev3.cxx.old	2006-09-27 15:14:55.798388000 +0200
++++ vcl/source/gdi/outdev3.cxx	2006-09-27 15:15:16.668388000 +0200
+@@ -3134,7 +3134,7 @@
+ 
+ ImplFontEntry* ImplFontCache::GetFallback( ImplDevFontList* pFontList,
+      const Font& rOrigFont, const Size& rSize, int nFallbackLevel,
+-     sal_Unicode *pMissingUnicodes, int nMissingUnicodes )
++     std::vector<sal_Unicode> &rMissingGlyphs )
+ {
+     ImplFontEntry*      pFallbackFont = NULL;
+     bool                cached = false;
+@@ -3171,14 +3171,12 @@
+         cached = true;
+     }
+ 
+-    std::vector<sal_Unicode> aGlyphs;
+-    for (int i=0; i < nMissingUnicodes; ++i)
+-        aGlyphs.push_back(pMissingUnicodes[i]);
++    std::vector<sal_Unicode> aGlyphs(rMissingGlyphs);
+ 
+     // Try cached fallbacks first
+-    if ( !symbolFont && !aGlyphs.empty() )
++    if ( !symbolFont && !rMissingGlyphs.empty() )
+     {
+-        aSelData.maSearchName = pOrigFontEntry->GetFallbackForUnicode( aGlyphs[0] );
++        aSelData.maSearchName = pOrigFontEntry->GetFallbackForUnicode( rMissingGlyphs[0] );
+         if ( aSelData.maSearchName.Len() )
+             cached = true;
+     }
+@@ -3186,10 +3184,26 @@
+     if ( !cached )
+     {
+         String aName(GetFcSubstitute( aSelData, aGlyphs ));
+-      if (aName.Len())
++        if (aName.Len())
+             aSelData.maSearchName = aName;
+     }
+ 
++    if (!rMissingGlyphs.empty())
++    {
++        std::vector<sal_Unicode>::const_iterator aEnd = aGlyphs.end();
++        for (std::vector<sal_Unicode>::const_iterator aI = aGlyphs.begin(); aI != aEnd; ++aI)
++        {
++            std::vector<sal_Unicode>::iterator aNewEnd = 
++                std::remove(rMissingGlyphs.begin(), rMissingGlyphs.end(), *aI);
++            if (aNewEnd != rMissingGlyphs.end())
++                rMissingGlyphs.erase(aNewEnd);
++            //In this case only the first missing symbol has been taken into account and is
++            //known safe to replace
++            if (cached || symbolFont)
++                break;
++        }
++    }
++
+     // Check our font instance cache first, if not found then
+     // add this ImplFontSelectData to the cache along with its ImplFontEntry
+     FontInstanceList::const_iterator it = maFontInstanceList.find( aSelData );
+@@ -6263,14 +6277,9 @@
+ #endif
+     int nCharPos = -1;
+     bool bRTL = false;
+-    sal_Unicode *pMissingUnicodes = new sal_Unicode[8];
+-    int nMissingUnicodes = 0;
+-
+-    for( int i=0; i<8 && rLayoutArgs.GetNextPos( &nCharPos, &bRTL); ++i )
+-    {
+-        pMissingUnicodes[i] = rLayoutArgs.mpStr[ nCharPos ];
+-        nMissingUnicodes++;
+-    }
++    std::vector<sal_Unicode> aGlyphs;
++    while (rLayoutArgs.GetNextPos( &nCharPos, &bRTL))
++        aGlyphs.push_back(rLayoutArgs.mpStr[ nCharPos ]);
+     rLayoutArgs.ResetPos();
+ 
+     ImplFontSelectData aFontSelData = mpFontEntry->maFontSelData;
+@@ -6288,8 +6297,7 @@
+     {
+         // find a font family suited for glyph fallback
+         ImplFontEntry* pFallbackFont = mpFontCache->GetFallback( mpFontList,
+-            maFont, aFontSize, nFallbackLevel-nDevSpecificFallback,
+-            (nMissingUnicodes ? pMissingUnicodes : NULL), nMissingUnicodes );
++            maFont, aFontSize, nFallbackLevel-nDevSpecificFallback, aGlyphs );
+         if( !pFallbackFont )
+             break;
+ 
+@@ -6341,8 +6349,6 @@
+             break;
+     }
+ 
+-    delete[] pMissingUnicodes;
+-
+     if( pMultiSalLayout && pMultiSalLayout->LayoutText( rLayoutArgs ) )
+         pSalLayout = pMultiSalLayout;
+ 
+--- vcl/source/gdi/sallayout.cxx.old	2006-08-10 19:23:11.000000000 +0200
++++ vcl/source/gdi/sallayout.cxx	2006-09-27 15:15:16.678388000 +0200
+@@ -453,6 +453,27 @@
+     return true;
+ }
+ 
++bool ImplLayoutRuns::PosIsInAnyRun( int nCharPos ) const
++{
++    bool bRet = false;
++    int nRunIndex = mnRunIndex;
++
++    ImplLayoutRuns *pThis = const_cast<ImplLayoutRuns*>(this);
++
++    pThis->ResetPos();
++
++    for (int i = 0; i < maRuns.size(); i+=2)
++    {
++        if ((bRet = PosIsInRun( nCharPos )))
++            break;
++        pThis->NextRun();
++    }
++
++    pThis->mnRunIndex = nRunIndex;
++    return bRet;
++}
++
++
+ // -----------------------------------------------------------------------
+ 
+ bool ImplLayoutRuns::GetNextPos( int* nCharPos, bool* bRightToLeft )
+@@ -1690,7 +1711,7 @@
+     {
+         // find best fallback level
+         for( n = 0; n < nLevel; ++n )
+-            if( nValid[n] && !maFallbackRuns[n].PosIsInRun( nActiveCharPos ) )
++            if( nValid[n] && !maFallbackRuns[n].PosIsInAnyRun( nActiveCharPos ) )
+                 // fallback level n wins when it requested no further fallback
+                 break;
+         int nFBLevel = n;
+@@ -1712,7 +1733,10 @@
+         if( n > 0 )
+         {
+             // drop the NotDef glyphs in the base layout run if a fallback run exists
+-            while( maFallbackRuns[ n-1 ].PosIsInRun( nCharPos[0] ) )
++            while ( 
++                    (maFallbackRuns[ n-1 ].PosIsInRun( nCharPos[0] ) ) &&
++                    (!maFallbackRuns[ n ].PosIsInAnyRun( nCharPos[0] ) )
++                  )
+             {
+                 mpLayouts[0]->DropGlyph( nStartOld[0] );
+                 nStartOld[0] = nStartNew[0];
+@@ -1732,6 +1756,7 @@
+ 
+             // proceed to next glyph
+             nStartOld[n] = nStartNew[n];
++            int nOrigCharPos = nCharPos[n];
+             nValid[n] = mpLayouts[n]->GetNextGlyphs( 1, &nDummy, aPos,
+                 nStartNew[n], &nGlyphAdv[n], &nCharPos[n] );
+ 
+@@ -1744,6 +1769,23 @@
+                 break;
+             }
+ 
++            //If the next character is one which belongs to the next level, then we
++            //are finished here for now, and we'll pick up after the next level has
++            //been processed
++            if ((n+1 < nLevel) && (std::abs(nCharPos[n] - nOrigCharPos)))
++            {
++                if (nOrigCharPos < nCharPos[n])
++                {
++                    if (nCharPos[n+1] > nOrigCharPos && (nCharPos[n+1] < nCharPos[n]))
++                        break;
++                }
++                else if (nOrigCharPos < nCharPos[n])
++                {
++                    if (nCharPos[n+1] > nCharPos[n] && (nCharPos[n+1] < nOrigCharPos))
++                        break;
++                }
++            }
++
+             // break at end of layout run
+             if( n > 0 )
+             {
