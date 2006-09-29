@@ -1,6 +1,8 @@
 --- canvas/prj/build.lst
 +++ canvas/prj/build.lst
-@@ -0,7 +1,7 @@
+@@ -0,8 +1,8 @@
+-uc	canvas	:	javaunohelper comphelper cppuhelper offuh unoil tools goodies vcl AGG:agg basegfx NULL
++uc	canvas	:	javaunohelper comphelper cppuhelper offuh unoil tools goodies vcl AGG:agg basegfx CAIRO:cairo NULL
  uc	canvas											 usr1	-	all	uc_mkout NULL
  uc	canvas\source\tools								 nmake	-	all uc_tools NULL
  uc	canvas\source\vcl								 nmake	-	all	uc_vcl uc_tools NULL
@@ -20,6 +22,27 @@ dummy line to avoid confusing diff-mode
  
  .IF "$(SYSTEM_CAIRO)" == "YES"
  CFLAGS+=$(CAIRO_CFLAGS)
+@@ -108,11 +108,20 @@
+ 
+ SHL1STDLIBS= $(CPPULIB) $(SALLIB) $(VCLLIB) $(COMPHELPERLIB) $(CPPUHELPERLIB) $(BASEGFXLIB) $(CANVASTOOLSLIB) $(TOOLSLIB)
+ 
++.IF "$(GUI)"=="UNX"
+ .IF "$(SYSTEM_CAIRO)" == "YES"
+ SHL1STDLIBS+= $(CAIRO_LIBS) -lX11 -lXrender
+ .ELSE
+ SHL1STDLIBS+= -lcairo -lX11 -lXrender
+ .ENDIF
++.ELSE
++.IF "$(GUI)"=="WNT"
++#We build cairo and pixman as separate (static) libs as I couldn't be
++#bothered to dig into the obscure makefile.mk stuff enough to combine
++#them into one as is normally done.
++SHL1STDLIBS+= cairo.lib pixman.lib gdi32.lib
++.ENDIF
++.ENDIF
+ 
+ SHL1IMPLIB=i$(TARGET)
+ SHL1LIBS=$(SLB)$/$(TARGET).lib
 @@ -127,7 +127,6 @@
  DEF1NAME=$(SHL1TARGET)
  DEF1EXPORTFILE=exports.dxp
@@ -28,4 +51,403 @@ dummy line to avoid confusing diff-mode
  
  # ==========================================================================
  
+dummy line to avoid confusing diff-mode
+--- canvas/source/cairo/cairo_cairo.hxx
++++ canvas/source/cairo/cairo_cairo.hxx
+@@ -1,6 +1,8 @@
+ #ifndef _CAIROCANVAS_CAIRO_HXX
+ #define _CAIROCANVAS_CAIRO_HXX
+ 
++#include <stdio.h>
++
+ namespace cairo {
+ 
+ #include <cairo.h>
+@@ -15,8 +15,12 @@
+ 
+ 	class Surface {
+ 		const void* mpSysData;
++#ifdef CAIRO_HAS_XLIB_SURFACE
+ 		void* mpDisplay;
+ 		long mhDrawable;
+ 		void *mpRenderFormat;
++#elif defined (CAIRO_HAS_WIN32_SURFACE)
++		int mnDepth;
++#endif
+ 		int mnRefCount;
+ 		bool mbFreePixmap;
+@@ -23,9 +23,15 @@
+ 	public:
+ 		cairo_surface_t* mpSurface;
+ 
++#ifdef CAIRO_HAS_XLIB_SURFACE
+ 		Surface( const void* pSysData, void* pDisplay, long hDrawable, void* pRenderFormat, cairo_surface_t* pSurface )
++#elif defined (CAIRO_HAS_WIN32_SURFACE)
++		Surface( const void* pSysData, cairo_surface_t* pSurface )
++#endif
+ 			: mpSysData( pSysData ),
++#ifdef CAIRO_HAS_XLIB_SURFACE
+ 			  mpDisplay( pDisplay ),
+ 			  mhDrawable( hDrawable ),
+ 			  mpRenderFormat( pRenderFormat ),
++#endif
+ 			  mpSurface( pSurface ),
+@@ -36,10 +36,14 @@
+ 
+ 		Surface( cairo_surface_t* pSurface )
+ 			: mpSurface( pSurface ),
++#ifdef CAIRO_HAS_XLIB_SURFACE
+ 			  mpDisplay( NULL ),
+ 			  mhDrawable( 0 ),
++#endif
+ 			  mpSysData( NULL ),
++#ifdef CAIRO_HAS_XLIB_SURFACE
+ 			  mpRenderFormat( NULL ),
++#endif
+ 			  mbFreePixmap( false ),
+ 			  mnRefCount( 1 )
+ 		{
+@@ -82,15 +82,17 @@
+ 
+ 		Surface* getSimilar( Content aContent, int width, int height );
+ 
++#ifdef CAIRO_HAS_XLIB_SURFACE
+ 		long getPixmap()
+ 		{
+ 			return mhDrawable;
+ 		}
+ 
+ 		void* getRenderFormat()
+ 		{
+ 			return mpRenderFormat;
+ 		}
++#endif
+ 
+ 		// use only for surfaces made on X Drawables
+ 		void Resize( int width, int height );
+dummy line to avoid confusing diff-mode
+--- canvas/source/cairo/cairo_helper.hxx
++++ canvas/source/cairo/cairo_helper.hxx
+@@ -1,10 +1,22 @@
++#ifdef CAIRO_HAS_XLIB_SURFACE
+ int   cairoHelperGetDefaultScreen( void* display );
+ void* cairoHelperGetGlitzDrawable( const void* pSysData, int width, int height );
+ void* cairoHelperGetGlitzSurface( const void* pSysData, void *drawable, int x, int y, int width, int height );
++#endif
+ void* cairoHelperGetSurface( const void* pSysData, int x, int y, int width, int height );
++#ifdef CAIRO_HAS_WIN32_SURFACE
++void  cairoHelperFinishSurface( const void* pSysData, void* pSurface);
++#endif
+ void  cairoHelperFlush( const void* pSysData );
+ void* cairoHelperGetSurface( const void* pSysData, const void *pBmpData, int width, int height );
++#ifdef CAIRO_HAS_XLIB_SURFACE
+ void* cairoHelperGetDisplay( const void* pSysData );
+ long  cairoHelperGetWindow( const void* pSysData );
++#endif
++#ifdef CAIRO_HAS_WIN32_SURFACE
++void* cairoHelperGetWindow( const void* pSysData );
++#endif
++#ifdef CAIRO_HAS_XLIB_SURFACE
+ void* cairoHelperGetVisual( const void* pSysData );
+ int   cairoHelperGetDepth( const void* pSysData );
++#endif
+dummy line to avoid confusing diff-mode
+--- canvas/source/cairo/cairo_cairo.cxx
++++ canvas/source/cairo/cairo_cairo.cxx
+@@ -1,21 +1,31 @@
++#ifndef WNT
+ #include <X11/extensions/Xrender.h>
+ #include <X11/Xlib.h>
++#endif
+ #include "cairo_cairo.hxx"
+ #include "cairo_helper.hxx"
+ 
+ namespace cairo
+ {
+ 
++#ifdef CAIRO_HAS_XLIB_SURFACE
+ #include <cairo-xlib.h>
+ #include <cairo-xlib-xrender.h>
++#elif defined (CAIRO_HAS_WIN32_SURFACE)
++#include <tools/prewin.h>
++#include <cairo-win32.h>
++#include <tools/postwin.h>
++#endif
+  
+ 	Surface::Surface( const void* pSysData, int x, int y, int width, int height )
+ 		: mnRefCount( 1 ),
+ 		  mpSysData( pSysData ),
+ 		  mbFreePixmap( false )
+ 	{
+ 		mpSurface = (cairo_surface_t*) cairoHelperGetSurface( pSysData, x, y, width, height );
++#ifdef CAIRO_HAS_XLIB_SURFACE
+ 		mpDisplay = (Display*) cairoHelperGetDisplay( pSysData );
+ 		mhDrawable = cairoHelperGetWindow( pSysData );
++#endif
+ 	}
+ 
+@@ -25,7 +25,9 @@
+ 		  mbFreePixmap( false )
+ 	{
+ 		mpSurface = (cairo_surface_t*) cairoHelperGetSurface( pSysData, pBmpData, width, height );
++#ifdef CAIRO_HAS_XLIB_SURFACE
+ 		mpDisplay = (Display*) cairoHelperGetDisplay( pSysData );
+ 		mhDrawable = cairoHelperGetWindow( pSysData );
++#endif
+ 	}
+ 
+@@ -38,54 +38,93 @@
+ 			mpSurface = NULL;
+ 		}
++#ifdef CAIRO_HAS_XLIB_SURFACE
+ 		if( mbFreePixmap && mhDrawable )
+ 			XFreePixmap( (Display*) mpDisplay, mhDrawable );
++#endif
+ 	}
+ 
+ 	Surface* Surface::getSimilar( Content aContent, int width, int height )
+ 	{
++#ifdef CAIRO_HAS_XLIB_SURFACE
+ 		Pixmap hPixmap;
++#endif
+ 
++#ifdef CAIRO_HAS_XLIB_SURFACE
+ 		if( mpSysData && mpDisplay && mhDrawable ) {
+ 			XRenderPictFormat *pFormat;
+ 			int	nFormat;
++#elif defined (CAIRO_HAS_WIN32_SURFACE)
++		if( mpSysData ) {
++			Format	nFormat;
++#endif
+ 
+ 			switch (aContent) {
+ 			case CAIRO_CONTENT_ALPHA:
++#ifdef CAIRO_HAS_XLIB_SURFACE
+ 				nFormat = PictStandardA8;
++#elif defined (CAIRO_HAS_WIN32_SURFACE)
++				nFormat = CAIRO_FORMAT_A8;
++				mnDepth = 8;
++#endif
+ 				break;
+ 			case CAIRO_CONTENT_COLOR:
++#ifdef CAIRO_HAS_XLIB_SURFACE
+ 				nFormat = PictStandardRGB24;
++#elif defined (CAIRO_HAS_WIN32_SURFACE)
++				nFormat = CAIRO_FORMAT_RGB24;
++				mnDepth = 24;
++#endif
+ 				break;
+ 			case CAIRO_CONTENT_COLOR_ALPHA:
+ 			default:
++#ifdef CAIRO_HAS_XLIB_SURFACE
+ 				nFormat = PictStandardARGB32;
++#elif defined (CAIRO_HAS_WIN32_SURFACE)
++				nFormat = CAIRO_FORMAT_ARGB32;
++				mnDepth = 32;
++#endif
+ 				break;
+ 			}
+ 
++#ifdef CAIRO_HAS_XLIB_SURFACE
+ 			pFormat = XRenderFindStandardFormat( (Display*) mpDisplay, nFormat );
+ 			hPixmap = XCreatePixmap( (Display*) mpDisplay, cairoHelperGetWindow( mpSysData ),
+ 									 width > 0 ? width : 1, height > 0 ? height : 1,
+ 									 pFormat->depth );
+ 
+ 			return new Surface( mpSysData, mpDisplay, (long) hPixmap, pFormat,
+ 								cairo_xlib_surface_create_with_xrender_format( (Display*) mpDisplay, hPixmap,
+ 																			   DefaultScreenOfDisplay( (Display *) mpDisplay ),
+ 																			   pFormat, width, height ) );
++#elif defined (CAIRO_HAS_WIN32_SURFACE)
++			return new Surface( mpSysData, cairo_win32_surface_create_with_dib( nFormat, width, height ) );
++#endif
+ 		} else
++#ifdef CAIRO_HAS_XLIB_SURFACE
+ 			return new Surface( mpSysData, mpDisplay, 0, NULL, cairo_surface_create_similar( mpSurface, aContent, width, height ) );
++#elif defined (CAIRO_HAS_WIN32_SURFACE)
++			return new Surface( mpSysData, NULL, cairo_surface_create_similar( mpSurface, aContent, width, height ) );
++#endif
+ 	}
+ 
+ 	void
+ 	Surface::Resize( int width, int height )
+ 	{
++#ifdef CAIRO_HAS_XLIB_SURFACE
+ 		cairo_xlib_surface_set_size( mpSurface, width, height );
++#elif defined (CAIRO_HAS_WIN32_SURFACE)
++#endif
+ 	}
+ 
+ 	int
+ 	Surface::getDepth()
+ 	{
++#ifdef CAIRO_HAS_XLIB_SURFACE
+ 		if( mpRenderFormat )
+ 			return ( ( XRenderPictFormat * ) mpRenderFormat )->depth;
++#elif defined (CAIRO_HAS_WIN32_SURFACE)
++			return mnDepth;
++#endif
+ 
+ 		return -1;
+ 	}
+dummy line to avoid confusing diff-mode
+--- canvas/source/cairo/cairo_canvashelper.cxx
++++ canvas/source/cairo/cairo_canvashelper.cxx
+@@ -73,6 +73,7 @@
+ 
+ using namespace ::cairo;
+ using namespace ::com::sun::star;
++using namespace ::rtl::math;
+ 
+ namespace cairocanvas
+ {
+dummy line to avoid confusing diff-mode
+--- canvas/source/cairo/cairo_canvashelper_text.cxx
++++ canvas/source/cairo/cairo_canvashelper_text.cxx
+@@ -37,6 +37,11 @@
+ #include <canvas/canvastools.hxx>
+ 
+ #include <vcl/virdev.hxx>
++#ifdef WNT
++#include <tools/prewin.h>
++#include <windows.h> 
++#include <tools/postwin.h>
++#endif
+ #include <vcl/sysdata.hxx>
+ #include <vcl/metric.hxx>
+ #include <vcl/canvastools.hxx>
+@@ -87,8 +87,12 @@
+ 		SystemGraphicsData aSystemGraphicsData;
+ 
+ 		aSystemGraphicsData.nSize = sizeof(SystemGraphicsData);
++#ifdef CAIRO_HAS_XLIB_SURFACE
+ 		aSystemGraphicsData.hDrawable = pSurface->getPixmap();
+ 		aSystemGraphicsData.pRenderFormat = pSurface->getRenderFormat();
++#elif defined (CAIRO_HAS_WIN32_SURFACE)
++		aSystemGraphicsData.hDC = (HDC) pSurface->getPixmap();
++#endif
+ 
+ 		return new VirtualDevice( &aSystemGraphicsData, pSurface->getDepth() );
+ 	}
+@@ -129,7 +129,7 @@
+ 			io_rVCLFont.SetHeight( ::basegfx::fround(nFontHeight * aScale.getY()) );
+ 		}
+ 
+-		io_rVCLFont.SetOrientation( static_cast< short >( ::basegfx::fround(-fmod(nRotate, 2*M_PI)*(1800.0/M_PI)) ) );
++		io_rVCLFont.SetOrientation( static_cast< short >( ::basegfx::fround(-fmod(nRotate, 2*F_PI)*(1800.0/F_PI)) ) );
+ 
+ 		// TODO(F2): Missing functionality in VCL: shearing
+ 		o_rPoint.X() = ::basegfx::fround(aTranslate.getX());
+dummy line to avoid confusing diff-mode
+--- canvas/source/cairo/cairo_helper.cxx
++++ canvas/source/cairo/cairo_helper.cxx
+@@ -1,17 +1,30 @@
++#include <cairo.h>
++
++#ifdef CAIRO_HAS_WIN32_SURFACE
++#include <tools/prewin.h>
++#include <windows.h> 
++#include <tools/postwin.h>
++#endif
++
+ #ifndef _SV_SYSDATA_HXX
+ #include <vcl/sysdata.hxx>
+ #endif
+ 
+ #ifndef _SV_BITMAP_HXX
+ #include <vcl/bitmap.hxx>
+ #endif
+ 
+ namespace cairo {
++#ifdef CAIRO_HAS_XLIB_SURFACE
+ #include <X11/Xlib.h>
+ #include <X11/Xutil.h>
+ 
+-#include <cairo.h>
+ #include <cairo-xlib.h>
++#endif
+ 
++#ifdef CAIRO_HAS_WIN32_SURFACE
++#include <cairo-win32.h>
++#endif
++
+ #ifdef CAIRO_HAS_GLITZ_SURFACE
+ #include <GL/glx.h>
+@@ -39,6 +39,8 @@
+ 
+ //#define OOO_CANVAS_GLITZ 1
+ 
++#ifdef CAIRO_HAS_XLIB_SURFACE
++
+ int cairoHelperGetDefaultScreen( void* display )
+ {
+     return DefaultScreen( ( (Display *) display ) );
+@@ -106,6 +106,8 @@
+ #endif
+     return NULL;
+ }
+ 
++#endif
++
+ void*
+ cairoHelperGetSurface( const void* pSysDataVoid, int x, int y, int width, int height )
+@@ -134,10 +134,15 @@
+ #endif
+ #endif
+     if( !pSurface ) {
++#ifdef CAIRO_HAS_XLIB_SURFACE
+ 	pSurface=cairo_xlib_surface_create( (Display*) pSysData->pDisplay,
+ 					    pSysData->aWindow,
+ 					    (Visual*) pSysData->pVisual,
+ 					    width + x, height + y );
++#elif defined (CAIRO_HAS_WIN32_SURFACE)
++	HDC hDC = GetDC( pSysData->hWnd );
++	pSurface=cairo_win32_surface_create( hDC );
++#endif
+ 	cairo_surface_set_device_offset( pSurface, x, y );
+     }
+ 
+@@ -150,10 +150,23 @@
+     return pSurface;
+ }
+ 
++#ifdef CAIRO_HAS_WIN32_SURFACE
++
++void
++cairoHelperFinishSurface( const void* pSysDataVoid, void* pSurfaceVoid)
++{
++	const SystemEnvData* pSysData = (const SystemEnvData*) pSysDataVoid;
++	cairo_surface_t* pSurface = (cairo_surface_t*) pSurfaceVoid;
++
++	
++}
++#endif
++
+ void
+ cairoHelperFlush( const void* pSysDataVoid )
+ {
+ 	const SystemEnvData* pSysData = (const SystemEnvData*) pSysDataVoid;
++#ifdef CAIRO_HAS_XLIB_SURFACE
+ #ifdef OOO_CANVAS_GLITZ
+  #ifdef CAIRO_HAS_GLITZ_SURFACE
+      glXWaitGL();
+@@ -161,6 +161,7 @@
+ #else
+     XSync( (Display*) pSysData->pDisplay, false );
+ #endif
++#endif
+ }
+ 
+ void*
+dummy line to avoid confusing diff-mode
+--- canvas/source/cairo/cairo_spritehelper.cxx
++++ canvas/source/cairo/cairo_spritehelper.cxx
+@@ -59,6 +59,7 @@
+ 
+ using namespace ::cairo;
+ using namespace ::com::sun::star;
++using namespace ::rtl::math;
+ 
+ namespace cairocanvas
+ {
 dummy line to avoid confusing diff-mode
