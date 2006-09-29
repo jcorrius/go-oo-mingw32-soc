@@ -42,6 +42,8 @@ public:
 	virtual void SAL_CALL setCutCopyMode( const css::uno::Any& _cutcopymode ) throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL getStatusBar() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setStatusBar( const css::uno::Any& _statusbar ) throw (css::uno::RuntimeException);
+	virtual ::sal_Int32 SAL_CALL getCursor() throw (css::uno::RuntimeException);
+	virtual void SAL_CALL setCursor( ::sal_Int32 _cursor ) throw (css::uno::RuntimeException);
 
 	virtual double SAL_CALL CountA( const css::uno::Any& arg1 ) throw (css::uno::RuntimeException) ;
 

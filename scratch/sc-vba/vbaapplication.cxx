@@ -1,3 +1,4 @@
+#include <stdio.h>
 
 
 #include<com/sun/star/sheet/XSpreadsheetView.hpp>
@@ -7,6 +8,7 @@
 #include <com/sun/star/frame/XLayoutManager.hpp>
 #include <com/sun/star/task/XStatusIndicatorSupplier.hpp>
 #include <com/sun/star/task/XStatusIndicator.hpp>
+#include <org/openoffice/vba/Excel/XlMousePointer.hpp>
 
 #include "vbaapplication.hxx"
 #include "vbaworkbooks.hxx"
@@ -23,6 +25,9 @@
 //start test includes
 #include <sfx2/objsh.hxx>
 #include <sfx2/app.hxx>
+
+#include <toolkit/awt/vclxwindow.hxx>
+#include <toolkit/helper/vclunohelper.hxx>
 
 #include <docuno.hxx>
 
@@ -450,4 +455,52 @@ ScVbaApplication::GoTo( const uno::Any& Reference, const uno::Any& Scroll ) thro
     }
     throw uno::RuntimeException( rtl::OUString::createFromAscii( "invalid reference or name" ),
             uno::Reference< uno::XInterface >() );
+}
+
+sal_Int32 SAL_CALL
+ScVbaApplication::getCursor() throw (uno::RuntimeException)
+{
+    SfxViewShell* pView = SfxViewShell::Current();
+    if( pView ){
+        //printf("\nget Cursor...%d\n", pView->GetWindow()->GetSystemWindow()->GetPointer().GetStyle());
+        //return pView->GetWindow()->GetPointer().GetStyle();
+        return pView->GetWindow()->GetSystemWindow()->GetPointer().GetStyle();
+    }
+    return vba::Excel::XlMousePointer::xlDefault;
+}
+
+void SAL_CALL 
+ScVbaApplication::setCursor( sal_Int32 _cursor ) throw (uno::RuntimeException)
+{
+    SfxViewShell* pView;// = SfxViewShell::Current();
+    pView = SfxViewShell::GetFirst();
+    switch( _cursor )
+    {
+        case vba::Excel::XlMousePointer::xlNorthwestArrow:
+        case vba::Excel::XlMousePointer::xlWait:
+        case vba::Excel::XlMousePointer::xlIBeam:
+            while( pView ){
+                const Pointer& rPointer( _cursor );
+                //It will set the edit window, toobar and statusbar's mouse pointer.
+                pView->GetWindow()->GetSystemWindow()->SetPointer( rPointer );
+                pView->GetWindow()->GetSystemWindow()->EnableChildPointerOverwrite( sal_True );
+                //It only set the edit window's mouse pointer
+                //pView->GetWindow()->SetPointer( rPointer );
+                //pView->GetWindow()->EnableChildPointerOverwrite( sal_True );
+                //printf("\nset Cursor...%d\n", pView->GetWindow()->GetType()/*GetPointer().GetStyle()*/);
+                pView = SfxViewShell::GetNext( *pView );
+            }
+            break;
+        case vba::Excel::XlMousePointer::xlDefault:
+            while( pView ){
+                const Pointer& rPointer( 0 );
+                pView->GetWindow()->GetSystemWindow()->SetPointer( rPointer );
+                pView->GetWindow()->GetSystemWindow()->EnableChildPointerOverwrite( sal_False );
+                pView = SfxViewShell::GetNext( *pView );
+            }
+            break;
+        default:
+            throw uno::RuntimeException( rtl::OUString( 
+                RTL_CONSTASCII_USTRINGPARAM("Unknown value for Cursor pointer")), uno::Reference< uno::XInterface >() );
+    }
 }
