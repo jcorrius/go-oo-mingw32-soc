@@ -244,3 +244,308 @@ File /opt/OpenOffice/OOO_2_0_2/configmgr/source/api2/notifierimpl.hxx:213 void c
 File /opt/OpenOffice/OOO_2_0_2/configmgr/source/api2/apitreeimplobj.cxx:584 bool configmgr::configapi::ApiTreeImpl::implDisposeTree(const configmgr::memory::Accessor&)
 File /opt/OpenOffice/OOO_2_0_2/configmgr/source/api2/apitreeimplobj.cxx:473 bool configmgr::configapi::ApiTreeImpl::isAlive() const
 Error: File /opt/OpenOffice/OOO_2_0_2/configmgr/source/api2/apitreeimplobj.cxx, Line 533
+
+** configmgr-lesslock.diff
+
+    + analysing what's really going on...
+    + SegmentHeap
+	[ concurrent access possible ? ]
+
+    + class Segment {
+	    SegmentHeap m_heap;
+	    ...
+      };
+
+    + class SegmentHeap : Noncopyable
+
+ource/inc/datalock.hxx:49:             virtual void acquireReadAccess() = 0;
+source/inc/segment.hxx:91:            void const * acquireReadAccess() const 
+source/inc/segment.hxx:93:                this->lock().acquireReadAccess();
+source/data/updateaccessor.cxx:78:                base = m_segment->acquireReadAccess();
+source/data/simpleheap.cxx:179:            virtual void acquireReadAccess() { m_mutex.acquire(); }
+source/data/accessor.cxx:58:            void const * base = m_segment ? m_segment->acquireReadAccess() : NULL;
+
+source/inc/datalock.hxx:52:             virtual void acquireWriteAccess() = 0;          
+source/inc/segment.hxx:80:            Heap& acquireWriteAccess()       
+source/inc/segment.hxx:82:                this->lock().acquireWriteAccess(); 
+
+on a segment:
+source/data/updateaccessor.cxx:57:            m_heap = (m_segment) ? &m_segment->acquireWriteAccess() : 0;
+source/data/simpleheap.cxx:182:            virtual void acquireWriteAccess() { m_mutex.acquire(); }     
+
+
++ datalock.hxx: DataLock (typedef'd to Lock)
+
+   
+it *seems* that 'isValidAddress'
+    + burns 25% of time with debug build - is this
+      the use of all this book-keeping state ?
+
+    + SimpleCheckingHeapManager:
+	+ only 2 instances (static):
+	    + cacheHeap()
+	    + localHeap()
+
+    + Question:
+	+ is the batch freeing of a 'Heap' relied on ?
+
+* Strategy:
+    + rip out the custom allocator crud ...
+    + [ totally unnecessary ]
+	+ Address - hunt/destroy (?)
+    + hoist any 'Heap' stuff up as a 'shared lock' class (?)
+	+ if it's used ...
+        + Heap used for batch freeing too (!?) [urgh]
+
+    + write a test tool ? [ for performance ]
+	+ [ automated regression tests ? ]
+
+TODO:
+    + remove 'realloc' - never called in anger ?
+    + 'anydata' should be an UNO type [ surely ... ]
+
+    + calls to 'allocate'
+
+source/data/sequence.cxx:131:    Sequence aResult = _anAllocator.allocate(nTotalSize);
+source/data/sequence.cxx:209:    OSL_ENSURE(_pSeqData, "ERROR: Trying to allocate from a NULL sequence");
+source/data/sequence.cxx:312:    _anAllocator.deallocate(_aSeq);
+source/data/sequence.cxx:321:    _anAllocator.deallocate(_aSeq);
+
+source/data/anydata.cxx:234:            Address aStorage = _anAllocator.allocate( sizeof nValue );
+source/data/anydata.cxx:245:            Address aStorage = _anAllocator.allocate( sizeof dValue );
+source/data/anydata.cxx:260:        OSL_ENSURE( false, "Trying to allocate void value" );
+source/data/anydata.cxx:405:        _anAllocator.deallocate(_aData.longValue);
+source/data/anydata.cxx:409:        _anAllocator.deallocate(_aData.doubleValue);
+
+source/tree/builddata.cxx:646:    Address aBaseAddress = _anUpdater.allocator().allocate(nFragmentSize);
+source/tree/builddata.cxx:1201:    allocator().deallocate( _aBaseAddress.addressValue() );
+source/tree/node.cxx:242:    Address aData = _anAllocator.allocate(sizeof(SetNodeTemplateData));
+source/tree/node.cxx:281:    _anAllocator.deallocate(_aTemplateData);
+
+chains to heap:
+source/data/updateaccessor.cxx:112:            return m_heap ? m_heap->allocate(_sz) : Allocator::Address();
+source/data/updateaccessor.cxx:119:            if (m_heap) m_heap->deallocate(_addr);
+
+
+Supposed leaks: 5 items:
+
+#0  configmgr::memory::SimpleCheckingHeapManager::destroyHeap (this=0xa3e3d990, _aHeap=0x8132148)
+    at /data/OpenOffice/ood680-m4/configmgr/source/data/simpleheap.cxx:354
+#1  0xa3d6ae0d in ~Heap (this=0x8131cdc) at /data/OpenOffice/ood680-m4/configmgr/source/data/heap.cxx:78
+#2  0xa3d6b175 in ~SegmentHeap (this=0x8131cd8) at /data/OpenOffice/ood680-m4/configmgr/source/data/segmentheap.cxx:58
+#3  0xa3be96f3 in ~Segment (this=0x8131cd8) at ../inc/segment.hxx:56
+#4  0xa3be98f3 in ~CacheLine (this=0x8131cd0) at /data/OpenOffice/ood680-m4/configmgr/source/treecache/cacheline.hxx:75
+#5  0xa3bd79b1 in salhelper::SimpleReferenceObject::release (this=0x8131cd0)
+    at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/salhelper/simplereferenceobject.hxx:98
+#6  0xa3be4df0 in rtl::Reference<configmgr::CacheLine>::set (this=0x81302dc, pBody=0x8140d50)
+    at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/rtl/ref.hxx:125
+#7  0xa3be4e10 in rtl::Reference<configmgr::CacheLine>::operator= (this=0x81302dc, handle=@0xbfe36150)
+    at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/rtl/ref.hxx:136
+#8  0xa3be6853 in configmgr::CacheData::internalAddModule (this=0x810fb70, _aName=@0xbfe361e4, _aModule=@0xbfe36150)
+    at /data/OpenOffice/ood680-m4/configmgr/source/treecache/cachedata.cxx:166
+#9  0xa3be3382 in configmgr::TemplateCacheData::implNewCacheLine (this=0x810fb70, _aModule=@0xbfe361e4)
+    at /data/OpenOffice/ood680-m4/configmgr/source/treecache/cachedata.cxx:443
+#10 0xa3be33fc in configmgr::TemplateCacheData::createDataSegment (this=0x810fb70, _aModule=@0xbfe361e4)
+    at /data/OpenOffice/ood680-m4/configmgr/source/treecache/cachedata.cxx:396
+#11 0xa3bedaca in configmgr::backend::CacheController::addTemplates (this=0x810fb38, _aComponentInstance=@0xbfe3628c)
+    at /data/OpenOffice/ood680-m4/configmgr/source/treecache/cachecontroller.cxx:565
+#12 0xa3bf0c7b in configmgr::backend::CacheController::loadComponent (this=0x810fb38, _aRequest=@0xbfe36314)
+    at /data/OpenOffice/ood680-m4/configmgr/source/treecache/cachecontroller.cxx:462
+#13 0xa3bf924a in configmgr::TreeManager::requestSubtree (this=0x810fe00, aSubtreePath=@0xbfe3645c, _aOptions=@0xbfe364cc)
+    at /data/OpenOffice/ood680-m4/configmgr/source/treecache/treemanager.cxx:344
+#14 0xa3d0b981 in configmgr::OProviderImpl::requestSubtree (this=0x80eca30, aSubtreePath=@0xbfe3645c, _aOptions=@0xbfe364cc)
+    at /data/OpenOffice/ood680-m4/configmgr/source/api2/providerimpl.cxx:428
+#15 0xa3d0c152 in configmgr::OProviderImpl::buildReadAccess (this=0x80eca30, _rAccessor=@0xbfe364e4, _aOptions=@0xbfe364cc, nMinLevels=-1)
+    at /data/OpenOffice/ood680-m4/configmgr/source/api2/providerimpl.cxx:581
+#16 0xa3d11b6d in configmgr::OConfigurationProviderImpl::createReadAccess (this=0x80eca30, aArgs=@0xbfe36574)
+    at /data/OpenOffice/ood680-m4/configmgr/source/api2/confproviderimpl2.cxx:108
+#17 0xa3d0edee in configmgr::OConfigurationProvider::createInstanceWithArguments (this=0x80ec2b0, aServiceSpecifier=@0xbfe36584, aArguments=@0xbfe36574)
+    at /data/OpenOffice/ood680-m4/configmgr/source/api2/confprovider2.cxx:364
+
+Leaked: 5 items
+
+#0  configmgr::memory::SimpleCheckingHeapManager::destroyHeap (this=0xa3e3d990, _aHeap=0x8558618)
+    at /data/OpenOffice/ood680-m4/configmgr/source/data/simpleheap.cxx:354
+#1  0xa3d6ae0d in ~Heap (this=0x856751c) at /data/OpenOffice/ood680-m4/configmgr/source/data/heap.cxx:78
+#2  0xa3d6b175 in ~SegmentHeap (this=0x8567518) at /data/OpenOffice/ood680-m4/configmgr/source/data/segmentheap.cxx:58
+#3  0xa3be96f3 in ~Segment (this=0x8567518) at ../inc/segment.hxx:56
+#4  0xa3be98f3 in ~CacheLine (this=0x8567510) at /data/OpenOffice/ood680-m4/configmgr/source/treecache/cacheline.hxx:75
+#5  0xa3bd79b1 in salhelper::SimpleReferenceObject::release (this=0x8567510)
+    at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/salhelper/simplereferenceobject.hxx:98
+#6  0xa3be4df0 in rtl::Reference<configmgr::CacheLine>::set (this=0x81e351c, pBody=0x85ee688)
+    at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/rtl/ref.hxx:125
+#7  0xa3be4e10 in rtl::Reference<configmgr::CacheLine>::operator= (this=0x81e351c, handle=@0xbfe351e0)
+    at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/rtl/ref.hxx:136
+#8  0xa3be6853 in configmgr::CacheData::internalAddModule (this=0x810fb70, _aName=@0xbfe35274, _aModule=@0xbfe351e0)
+    at /data/OpenOffice/ood680-m4/configmgr/source/treecache/cachedata.cxx:166
+#9  0xa3be3382 in configmgr::TemplateCacheData::implNewCacheLine (this=0x810fb70, _aModule=@0xbfe35274)
+    at /data/OpenOffice/ood680-m4/configmgr/source/treecache/cachedata.cxx:443
+#10 0xa3be33fc in configmgr::TemplateCacheData::createDataSegment (this=0x810fb70, _aModule=@0xbfe35274)
+    at /data/OpenOffice/ood680-m4/configmgr/source/treecache/cachedata.cxx:396
+#11 0xa3bedaca in configmgr::backend::CacheController::addTemplates (this=0x810fb38, _aComponentInstance=@0xbfe3531c)
+    at /data/OpenOffice/ood680-m4/configmgr/source/treecache/cachecontroller.cxx:565
+#12 0xa3bf0c7b in configmgr::backend::CacheController::loadComponent (this=0x810fb38, _aRequest=@0xbfe353a4)
+    at /data/OpenOffice/ood680-m4/configmgr/source/treecache/cachecontroller.cxx:462
+#13 0xa3bf924a in configmgr::TreeManager::requestSubtree (this=0x810fe00, aSubtreePath=@0xbfe354ec, _aOptions=@0xbfe3555c)
+    at /data/OpenOffice/ood680-m4/configmgr/source/treecache/treemanager.cxx:344
+#14 0xa3d0b981 in configmgr::OProviderImpl::requestSubtree (this=0x80eca30, aSubtreePath=@0xbfe354ec, _aOptions=@0xbfe3555c)
+    at /data/OpenOffice/ood680-m4/configmgr/source/api2/providerimpl.cxx:428
+#15 0xa3d0bd8a in configmgr::OProviderImpl::buildUpdateAccess (this=0x80eca30, _rAccessor=@0xbfe35574, _aOptions=@0xbfe3555c, nMinLevels=-1)
+    at /data/OpenOffice/ood680-m4/configmgr/source/api2/providerimpl.cxx:623
+#16 0xa3d11963 in configmgr::OConfigurationProviderImpl::createUpdateAccess (this=0x80eca30, aArgs=@0xbfe356b8)
+    at /data/OpenOffice/ood680-m4/configmgr/source/api2/confproviderimpl2.cxx:140
+#17 0xa3d0edee in configmgr::OConfigurationProvider::createInstanceWithArguments (this=0x80ec2b0, aServiceSpecifier=@0xbfe356bc, aArguments=@0xbfe356b8)
+    at /data/OpenOffice/ood680-m4/configmgr/source/api2/confprovider2.cxx:364
+#18 0xa229f6a4 in filter::config::FilterCache::impl_createConfigAccess (this=0x8541478, sRoot=@0xbfe35718, bReadOnly=0 '\0', bLocalesMode=1 '\001')
+    at /opt/OpenOffice/ood680-m4/filter/source/config/cache/filtercache.cxx:1061
+#19 0xa22a56e5 in filter::config::FilterCache::impl_openConfig (this=0x8541478, eProvider=filter::config::FilterCache::E_PROVIDER_OTHERS)
+    at /opt/OpenOffice/ood680-m4/filter/source/config/cache/filtercache.cxx:958
+#20 0xa22a6cc1 in filter::config::FilterCache::impl_load (this=0x8541478, eRequiredState=filter::config::FilterCache::E_CONTAINS_FRAMELOADERS)
+    at /opt/OpenOffice/ood680-m4/filter/source/config/cache/filtercache.cxx:1548
+#21 0xa22a8bd5 in filter::config::FilterCache::load (this=0x8541478, eRequired=filter::config::FilterCache::E_CONTAINS_FRAMELOADERS, bByThread=0 '\0')
+    at /opt/OpenOffice/ood680-m4/filter/source/config/cache/filtercache.cxx:332
+#22 0xa2291b5d in filter::config::BaseContainer::impl_loadOnDemand (this=0x85d7ae0)
+    at /opt/OpenOffice/ood680-m4/filter/source/config/cache/basecontainer.cxx:158
+#23 0xa2292522 in filter::config::BaseContainer::createSubSetEnumerationByProperties (this=0x85d7ae0, lProperties=@0xbfe359a8)
+    at /opt/OpenOffice/ood680-m4/filter/source/config/cache/basecontainer.cxx:527
+
+leaked: 30 items.
+
+#0  configmgr::memory::SimpleCheckingHeapManager::destroyHeap (this=0xa3e3d990, _aHeap=0x828a2a8)
+    at /data/OpenOffice/ood680-m4/configmgr/source/data/simpleheap.cxx:354
+#1  0xa3d6ae0d in ~Heap (this=0x8280f94) at /data/OpenOffice/ood680-m4/configmgr/source/data/heap.cxx:78
+#2  0xa3d6b175 in ~SegmentHeap (this=0x8280f90) at /data/OpenOffice/ood680-m4/configmgr/source/data/segmentheap.cxx:58
+#3  0xa3be96f3 in ~Segment (this=0x8280f90) at ../inc/segment.hxx:56
+#4  0xa3be9737 in ~CacheLine (this=0x8280f88) at /data/OpenOffice/ood680-m4/configmgr/source/treecache/cacheline.hxx:75
+#5  0xa3be97f2 in ~ExtendedCacheLine (this=0x8280f88) at /data/OpenOffice/ood680-m4/configmgr/source/treecache/cacheline.hxx:151
+#6  0xa3bd79b1 in salhelper::SimpleReferenceObject::release (this=0x8280f88)
+    at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/salhelper/simplereferenceobject.hxx:98
+#7  0xa3bd79d4 in ~Reference (this=0x81cc75c) at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/rtl/ref.hxx:111
+#8  0xa3be0f93 in ~pair (this=0x81cc758) at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/stl/stl/_pair.h:37
+#9  0xa3be0fe3 in _STL::_Destroy<_STL::pair<configmgr::configuration::Name const, rtl::Reference<configmgr::CacheLine> > > (__pointer=0x81cc758)
+    at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/stl/stl/_construct.h:67
+#10 0xa3be10e8 in _STL::_Rb_tree<configmgr::configuration::Name, _STL::pair<configmgr::configuration::Name const, rtl::Reference<configmgr::CacheLine> >, _STL::_Select1st<_STL::pair<configmgr::configuration::Name const, rtl::Reference<configmgr::CacheLine> > >, _STL::less<configmgr::configuration::Name>, _STL::allocator<_STL::pair<configmgr::configuration::Name const, rtl::Reference<configmgr::CacheLine> > > >::_M_erase (this=0x80d7d40, __x=0x81cc748)
+    at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/stl/stl/_tree.c:637
+#11 0xa3be10ca in _STL::_Rb_tree<configmgr::configuration::Name, _STL::pair<configmgr::configuration::Name const, rtl::Reference<configmgr::CacheLine> >, _STL::_Select1st<_STL::pair<configmgr::configuration::Name const, rtl::Reference<configmgr::CacheLine> > >, _STL::less<configmgr::configuration::Name>, _STL::allocator<_STL::pair<configmgr::configuration::Name const, rtl::Reference<configmgr::CacheLine> > > >::_M_erase (this=0x80d7d40, __x=0x81cca30)
+    at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/stl/stl/_tree.c:635
+#12 0xa3be10ca in _STL::_Rb_tree<configmgr::configuration::Name, _STL::pair<configmgr::configuration::Name const, rtl::Reference<configmgr::CacheLine> >, _STL::_Select1st<_STL::pair<configmgr::configuration::Name const, rtl::Reference<configmgr::CacheLine> > >, _STL::less<configmgr::configuration::Name>, _STL::allocator<_STL::pair<configmgr::configuration::Name const, rtl::Reference<configmgr::CacheLine> > > >::_M_erase (this=0x80d7d40, __x=0x81c0858)
+    at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/stl/stl/_tree.c:635
+#13 0xa3be10ca in _STL::_Rb_tree<configmgr::configuration::Name, _STL::pair<configmgr::configuration::Name const, rtl::Reference<configmgr::CacheLine> >, _STL::_Select1st<_STL::pair<configmgr::configuration::Name const, rtl::Reference<configmgr::CacheLine> > >, _STL::less<configmgr::configuration::Name>, _STL::allocator<_STL::pair<configmgr::configuration::Name const, rtl::Reference<configmgr::CacheLine> > > >::_M_erase (this=0x80d7d40, __x=0x8134a88)
+    at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/stl/stl/_tree.c:635
+#14 0xa3be10ca in _STL::_Rb_tree<configmgr::configuration::Name, _STL::pair<configmgr::configuration::Name const, rtl::Reference<configmgr::CacheLine> >, _STL::_Select1st<_STL::pair<configmgr::configuration::Name const, rtl::Reference<configmgr::CacheLine> > >, _STL::less<configmgr::configuration::Name>, _STL::allocator<_STL::pair<configmgr::configuration::Name const, rtl::Reference<configmgr::CacheLine> > > >::_M_erase (this=0x80d7d40, __x=0x81f04c0)
+    at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/stl/stl/_tree.c:635
+#15 0xa3be114e in _STL::_Rb_tree<configmgr::configuration::Name, _STL::pair<configmgr::configuration::Name const, rtl::Reference<configmgr::CacheLine> >, _STL::_Select1st<_STL::pair<configmgr::configuration::Name const, rtl::Reference<configmgr::CacheLine> > >, _STL::less<configmgr::configuration::Name>, _STL::allocator<_STL::pair<configmgr::configuration::Name const, rtl::Reference<configmgr::CacheLine> > > >::clear (this=0x80d7d40)
+    at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/stl/stl/_tree.h:447
+#16 0xa3be5682 in ~_Rb_tree (this=0x80d7d40) at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/stl/stl/_tree.h:341
+#17 0xa3be56d3 in ~map (this=0x80d7d40) at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/stl/stl/_map.h:44
+#18 0xa3be324b in ~CacheData (this=0x80d7d3c) at /data/OpenOffice/ood680-m4/configmgr/source/treecache/cachedata.cxx:136
+#19 0xa3be21db in ~ExtendedCacheData (this=0x80d7d3c) at /data/OpenOffice/ood680-m4/configmgr/source/treecache/cachedata.hxx:174
+#20 0xa3bde965 in ~CacheLoadingAccess (this=0x80d7d30) at /data/OpenOffice/ood680-m4/configmgr/source/treecache/cacheaccess.cxx:220
+#21 0xa3bd79b1 in salhelper::SimpleReferenceObject::release (this=0x80d7d30)
+    at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/salhelper/simplereferenceobject.hxx:98
+#22 0xa3bd7a9c in ~Reference (this=0x811044c) at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/rtl/ref.hxx:111
+#23 0xa3bf37f3 in ~pair (this=0x8110438) at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/stl/stl/_pair.h:37
+#24 0xa3bf3843 in _STL::_Destroy<_STL::pair<configmgr::RequestOptions const, rtl::Reference<configmgr::CacheLoadingAccess> > > (__pointer=0x8110438)
+    at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/stl/stl/_construct.h:67
+#25 0xa3bf3894 in _STL::_Rb_tree<configmgr::RequestOptions, _STL::pair<configmgr::RequestOptions const, rtl::Reference<configmgr::CacheLoadingAccess> >, _STL::_Select1st<_STL::pair<configmgr::RequestOptions const, rtl::Reference<configmgr::CacheLoadingAccess> > >, configmgr::lessRequestOptions, _STL::allocator<_STL::pair<configmgr::RequestOptions const, rtl::Reference<configmgr::CacheLoadingAccess> > > >::_M_erase (this=0xbfe36414, __x=0x8110428)
+    at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/stl/stl/_tree.c:637
+#26 0xa3bf3876 in _STL::_Rb_tree<configmgr::RequestOptions, _STL::pair<configmgr::RequestOptions const, rtl::Reference<configmgr::CacheLoadingAccess> >, _STL::_Select1st<_STL::pair<configmgr::RequestOptions const, rtl::Reference<configmgr::CacheLoadingAccess> > >, configmgr::lessRequestOptions, _STL::allocator<_STL::pair<configmgr::RequestOptions const, rtl::Reference<configmgr::CacheLoadingAccess> > > >::_M_erase (this=0xbfe36414, __x=0x82900d8)
+
+leaked 100's of items:
+
+#0  configmgr::memory::SimpleCheckingHeapManager::destroyHeap (this=0xa3e3d990, _aHeap=0x81c6bd0)
+    at /data/OpenOffice/ood680-m4/configmgr/source/data/simpleheap.cxx:354
+#1  0xa3d6ae0d in ~Heap (this=0x81456b4) at /data/OpenOffice/ood680-m4/configmgr/source/data/heap.cxx:78
+#2  0xa3d6b175 in ~SegmentHeap (this=0x81456b0) at /data/OpenOffice/ood680-m4/configmgr/source/data/segmentheap.cxx:58
+#3  0xa3be96f3 in ~Segment (this=0x81456b0) at ../inc/segment.hxx:56
+#4  0xa3be9737 in ~CacheLine (this=0x81456a8) at /data/OpenOffice/ood680-m4/configmgr/source/treecache/cacheline.hxx:75
+#5  0xa3be97f2 in ~ExtendedCacheLine (this=0x81456a8) at /data/OpenOffice/ood680-m4/configmgr/source/treecache/cacheline.hxx:151
+#6  0xa3bd79b1 in salhelper::SimpleReferenceObject::release (this=0x81456a8)
+    at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/salhelper/simplereferenceobject.hxx:98
+#7  0xa3bd79d4 in ~Reference (this=0x81c086c) at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/rtl/ref.hxx:111
+#8  0xa3be0f93 in ~pair (this=0x81c0868) at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/stl/stl/_pair.h:37
+#9  0xa3be0fe3 in _STL::_Destroy<_STL::pair<configmgr::configuration::Name const, rtl::Reference<configmgr::CacheLine> > > (__pointer=0x81c0868)
+    at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/stl/stl/_construct.h:67
+#10 0xa3be10e8 in _STL::_Rb_tree<configmgr::configuration::Name, _STL::pair<configmgr::configuration::Name const, rtl::Reference<configmgr::CacheLine> >, _STL::_Select1st<_STL::pair<configmgr::configuration::Name const, rtl::Reference<configmgr::CacheLine> > >, _STL::less<configmgr::configuration::Name>, _STL::allocator<_STL::pair<configmgr::configuration::Name const, rtl::Reference<configmgr::CacheLine> > > >::_M_erase (this=0x80d7d40, __x=0x81c0858)
+    at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/stl/stl/_tree.c:637
+#11 0xa3be10ca in _STL::_Rb_tree<configmgr::configuration::Name, _STL::pair<configmgr::configuration::Name const, rtl::Reference<configmgr::CacheLine> >, _STL::_Select1st<_STL::pair<configmgr::configuration::Name const, rtl::Reference<configmgr::CacheLine> > >, _STL::less<configmgr::configuration::Name>, _STL::allocator<_STL::pair<configmgr::configuration::Name const, rtl::Reference<configmgr::CacheLine> > > >::_M_erase (this=0x80d7d40, __x=0x8134a88)
+    at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/stl/stl/_tree.c:635
+#12 0xa3be10ca in _STL::_Rb_tree<configmgr::configuration::Name, _STL::pair<configmgr::configuration::Name const, rtl::Reference<configmgr::CacheLine> >, _STL::_Select1st<_STL::pair<configmgr::configuration::Name const, rtl::Reference<configmgr::CacheLine> > >, _STL::less<configmgr::configuration::Name>, _STL::allocator<_STL::pair<configmgr::configuration::Name const, rtl::Reference<configmgr::CacheLine> > > >::_M_erase (this=0x80d7d40, __x=0x81f04c0)
+    at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/stl/stl/_tree.c:635
+#13 0xa3be114e in _STL::_Rb_tree<configmgr::configuration::Name, _STL::pair<configmgr::configuration::Name const, rtl::Reference<configmgr::CacheLine> >, _STL::_Select1st<_STL::pair<configmgr::configuration::Name const, rtl::Reference<configmgr::CacheLine> > >, _STL::less<configmgr::configuration::Name>, _STL::allocator<_STL::pair<configmgr::configuration::Name const, rtl::Reference<configmgr::CacheLine> > > >::clear (this=0x80d7d40)
+    at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/stl/stl/_tree.h:447
+#14 0xa3be5682 in ~_Rb_tree (this=0x80d7d40) at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/stl/stl/_tree.h:341
+#15 0xa3be56d3 in ~map (this=0x80d7d40) at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/stl/stl/_map.h:44
+#16 0xa3be324b in ~CacheData (this=0x80d7d3c) at /data/OpenOffice/ood680-m4/configmgr/source/treecache/cachedata.cxx:136
+#17 0xa3be21db in ~ExtendedCacheData (this=0x80d7d3c) at /data/OpenOffice/ood680-m4/configmgr/source/treecache/cachedata.hxx:174
+#18 0xa3bde965 in ~CacheLoadingAccess (this=0x80d7d30) at /data/OpenOffice/ood680-m4/configmgr/source/treecache/cacheaccess.cxx:220
+#19 0xa3bd79b1 in salhelper::SimpleReferenceObject::release (this=0x80d7d30)
+    at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/salhelper/simplereferenceobject.hxx:98
+#20 0xa3bd7a9c in ~Reference (this=0x811044c) at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/rtl/ref.hxx:111
+#21 0xa3bf37f3 in ~pair (this=0x8110438) at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/stl/stl/_pair.h:37
+#22 0xa3bf3843 in _STL::_Destroy<_STL::pair<configmgr::RequestOptions const, rtl::Reference<configmgr::CacheLoadingAccess> > > (__pointer=0x8110438)
+    at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/stl/stl/_construct.h:67
+#23 0xa3bf3894 in _STL::_Rb_tree<configmgr::RequestOptions, _STL::pair<configmgr::RequestOptions const, rtl::Reference<configmgr::CacheLoadingAccess> >, _STL::_Select1st<_STL::pair<configmgr::RequestOptions const, rtl::Reference<configmgr::CacheLoadingAccess> > >, configmgr::lessRequestOptions, _STL::allocator<_STL::pair<configmgr::RequestOptions const, rtl::Reference<configmgr::CacheLoadingAccess> > > >::_M_erase (this=0xbfe36414, __x=0x8110428)
+    at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/stl/stl/_tree.c:637
+#24 0xa3bf3876 in _STL::_Rb_tree<configmgr::RequestOptions, _STL::pair<configmgr::RequestOptions const, rtl::Reference<configmgr::CacheLoadingAccess> >, _STL::_Select1st<_STL::pair<configmgr::RequestOptions const, rtl::Reference<configmgr::CacheLoadingAccess> > >, configmgr::lessRequestOptions, _STL::allocator<_STL::pair<configmgr::RequestOptions const, rtl::Reference<configmgr::CacheLoadingAccess> > > >::_M_erase (this=0xbfe36414, __x=0x82900d8)
+    at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/stl/stl/_tree.c:635
+#25 0xa3bf38fa in _STL::_Rb_tree<configmgr::RequestOptions, _STL::pair<configmgr::RequestOptions const, rtl::Reference<configmgr::CacheLoadingAccess> >, _STL::_Select1st<_STL::pair<configmgr::RequestOptions const, rtl::Reference<configmgr::CacheLoadingAccess> > >, configmgr::lessRequestOptions, _STL::allocator<_STL::pair<configmgr::RequestOptions const, rtl::Reference<configmgr::CacheLoadingAccess> > > >::clear (this=0xbfe36414)
+    at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/stl/stl/_tree.h:447
+#26 0xa3bf39c7 in _STL::map<configmgr::RequestOptions, rtl::Reference<configmgr::CacheLoadingAccess>, configmgr::lessRequestOptions, _STL::allocator<_STL::pair<configmgr::RequestOptions const, rtl::Reference<configmgr::CacheLoadingAccess> > > >::clear (this=0xbfe36414)
+    at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/stl/stl/_map.h:191
+#27 0xa3beeadb in configmgr::backend::CacheController::disposeAll (this=0x810fb38, _bFlushRemainingUpdates=true)
+    at /data/OpenOffice/ood680-m4/configmgr/source/treecache/cachecontroller.cxx:182
+#28 0xa3beeb83 in configmgr::backend::CacheController::dispose (this=0x810fb38)
+    at /data/OpenOffice/ood680-m4/configmgr/source/treecache/cachecontroller.cxx:197
+#29 0xa3bf7536 in configmgr::TreeManager::disposeBackendCache (this=0x810fe00) at /data/OpenOffice/ood680-m4/configmgr/source/treecache/treemanager.cxx:287
+#30 0xa3bfae8c in configmgr::TreeManager::dispose (this=0x810fe00) at /data/OpenOffice/ood680-m4/configmgr/source/treecache/treemanager.cxx:138
+#31 0xa3d0c81e in configmgr::OProviderImpl::dispose (this=0x80eca30) at /data/OpenOffice/ood680-m4/configmgr/source/api2/providerimpl.cxx:379
+#32 0xa3d0ef51 in configmgr::OConfigurationProvider::disposing (this=0x80ec2b0) at /data/OpenOffice/ood680-m4/configmgr/source/api2/confprovider2.cxx:339
+#33 0xb765c2a5 in cppu::WeakComponentImplHelperBase::dispose () from ./libuno_cppuhelpergcc3.so.3
+#34 0xa3bc5407 in cppu::WeakComponentImplHelper1<com::sun::star::lang::XServiceInfo>::dispose (this=0x80ec2b0)
+    at /opt/OpenOffice/ood680-m4/solver/680/unxlngi6.pro/inc/cppuhelper/compbase1.hxx:91
+#35 0xa3d0730a in configmgr::OProvider::disposing (this=0x80ec2b0) at /data/OpenOffice/ood680-m4/configmgr/source/api2/provider.cxx:218
+#36 0xa3d0898a in configmgr::OProviderDisposingListener::disposing (this=0x80e75a8, rEvt=@0xbfe36684)
+    at /data/OpenOffice/ood680-m4/configmgr/source/api2/provider.cxx:95
+#37 0xb7663f1a in cppu::OInterfaceContainerHelper::disposeAndClear () from ./libuno_cppuhelpergcc3.so.3
+#38 0xb76640f6 in cppu::OMultiTypeInterfaceContainerHelper::disposeAndClear () from ./libuno_cppuhelpergcc3.so.3
+#39 0xb765c29a in cppu::WeakComponentImplHelperBase::dispose () from ./libuno_cppuhelpergcc3.so.3
+#40 0xb766d24f in cppu::WeakComponentImplHelper2<com::sun::star::uno::XComponentContext, com::sun::star::container::XNameContainer>::dispose ()
+   from ./libuno_cppuhelpergcc3.so.3
+#41 0x08074d9e in desktop::Desktop::DestroyApplicationServiceManager ()
+#42 0x0806716a in desktop::Desktop::DeInit ()
+#43 0xb7d4ed90 in DeInitVCL () from ./libvcl680li.so
+#44 0xb7d4f28a in ImplSVMain () from ./libvcl680li.so
+#45 0xb7d4f2f3 in SVMain () from ./libvcl680li.so
+#46 0x08064641 in sal_main ()
+#47 0xb6e7087c in __libc_start_main (main=0x8064664 <main>, argc=2, ubp_av=0xbfe36834, init=0x807fb50 <__libc_csu_init>, fini=0x807fb40 <__libc_csu_fini>, 
+    rtld_fini=0xb7f90550 <_dl_fini>, stack_end=0xbfe3682c) at libc-start.c:231
+#48 0x08064571 in _start ()
+
+
+Binning the 'source/treecache' directory gives:
+
+../unxlngi6.pro/slo/providerimpl.o: In function `configmgr::OProviderImpl::initSession(configmgr::ContextReader const&)':
+/data/OpenOffice/ood680-m4/configmgr/source/api2/providerimpl.cxx:233: undefined reference to `configmgr::CacheFactory::instance()'
+/data/OpenOffice/ood680-m4/configmgr/source/api2/providerimpl.cxx:233: undefined reference to `configmgr::CacheFactory::createCacheManager(com::sun::star::uno::Reference<com::sun::star::uno::XComponentContext> const&)'
+../unxlngi6.pro/slo/providerimpl.o: In function `configmgr::OProviderImpl::dispose()':
+/data/OpenOffice/ood680-m4/configmgr/source/api2/providerimpl.cxx:379: undefined reference to `configmgr::TreeManager::dispose()'
+collect2: ld returned 1 exit status
+
+	  + All goes through the treemanager.hxx interface [simple]
+
+** TODO:
+    + move 'createHeapLock' etc. into 'segment.cxx [ only caller ]'
+	+ via createLock ...
+    + remove 'Segment'
+
+
++ Binned 'SegmentID' (string) in error ...
+    + re-instate that - it's what anchors us ...
+    + also the CacheLine thing ...
+	+ axed 'SegmentAddress' in error [?!]
+    + unwind a chunk of that ...
+	+ // we need 'SegmentId' 'id' - it's a string,
+	+ but not 'base' (?) ...
+
+    + salvage what we can from the code ...

@@ -1,0 +1,1501 @@
+diff -x '*~' -u -r -x 'unxlng*' /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/data/anydata.cxx configmgr/source/data/anydata.cxx
+--- /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/data/anydata.cxx	2006-06-20 00:22:20.000000000 +0100
++++ configmgr/source/data/anydata.cxx	2006-10-03 12:19:46.000000000 +0100
+@@ -231,7 +231,7 @@
+             sal_Int64 nValue;
+             OSL_VERIFY(_aAny >>= nValue);
+ 
+-            Address aStorage = _anAllocator.allocate( sizeof nValue );
++            Address aStorage = Address (new sal_uInt8[ sizeof nValue ]);
+             *static_cast<sal_Int64*>( _anAllocator.access(aStorage) ) = nValue;
+             aResult.longValue = aStorage;
+         }
+@@ -242,7 +242,7 @@
+             double dValue;
+             OSL_VERIFY(_aAny >>= dValue);
+ 
+-            Address aStorage = _anAllocator.allocate( sizeof dValue );
++            Address aStorage = Address (new sal_uInt8[ sizeof dValue ]);
+             *static_cast<double*>( _anAllocator.access(aStorage) ) = dValue;
+             aResult.doubleValue = aStorage;
+         }
+@@ -402,11 +402,11 @@
+ 
+         // free memory for oversized values
+     case Type::value_long:
+-        _anAllocator.deallocate(_aData.longValue);
++        delete[] (sal_uInt8 *)_aData.longValue;
+         break;
+ 
+     case Type::value_double:
+-        _anAllocator.deallocate(_aData.doubleValue);
++        delete[] (sal_uInt8 *)_aData.doubleValue;
+         break;
+ 
+     case Type::value_binary:
+Only in configmgr/source/data: anydata.cxx.rej
+diff -x '*~' -u -r -x 'unxlng*' /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/data/heap.cxx configmgr/source/data/heap.cxx
+--- /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/data/heap.cxx	2005-09-08 04:39:13.000000000 +0100
++++ configmgr/source/data/heap.cxx	2006-10-03 16:32:27.000000000 +0100
+@@ -49,48 +49,35 @@
+     // -------------------------------------------------------------------------
+         const Heap::Size c_nDefaultSize = 4096;
+     // -------------------------------------------------------------------------
+-        Heap::Heap(HeapManager& _impl)
+-        : m_impl(_impl)
+-        , m_heap(_impl.createHeap(c_nDefaultSize))
+-        , m_size(c_nDefaultSize)
++        Heap::Heap()
+         {
+         }
+     // -------------------------------------------------------------------------
+ 
+-        Heap::Heap(HeapManager& _impl, Size _nInitialSize)
+-        : m_impl(_impl)
+-        , m_heap(_impl.createHeap(_nInitialSize))
+-        , m_size(_nInitialSize)
++        Heap::Heap(HeapId const &)
+         {
+         }
+     // -------------------------------------------------------------------------
+ 
+-        Heap::Heap(HeapManager& _impl, HeapId const & _anId)
+-        : m_impl(_impl)
+-        , m_size(0)
+-        {
+-            m_heap = _impl.attachHeap(_anId,m_size);
+-        }
+-    // -------------------------------------------------------------------------
+-
+         Heap::~Heap()
+         {
+-            m_impl.destroyHeap(m_heap);
+         }
+-    // -------------------------------------------------------------------------
+ 
+-        Heap::Size Heap::grow(Size _nReqSize) // returns the (possibly new) base
++        class SimpleHeapLock : public DataLock
+         {
+-            Size nNewSize = m_impl.growHeap(m_heap, _nReqSize);
+-
+-            if (nNewSize)
+-            {
+-                OSL_ENSURE(nNewSize >= _nReqSize, "Error: Heapmanager returns invalid size from grow method");
+-                m_size = nNewSize;
+-            }
+-
+-            return nNewSize;
+-        }
++            osl::Mutex m_mutex;
++        public:   
++            virtual void acquireReadAccess() { m_mutex.acquire(); }
++            virtual void releaseReadAccess() { m_mutex.release(); }
++
++            virtual void acquireWriteAccess() { m_mutex.acquire(); }     
++            virtual void releaseWriteAccess() { m_mutex.release(); }
++        };
++
++		Heap::Lock *Heap::createLock()
++			{ return new SimpleHeapLock(); }
++		void Heap::destroyLock(Heap::Lock * _pLock)
++			{ delete (SimpleHeapLock *)_pLock; }
+     // -------------------------------------------------------------------------
+     }
+ // -----------------------------------------------------------------------------	
+Only in configmgr/source/data: heap.cxx.rej
+diff -x '*~' -u -r -x 'unxlng*' /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/data/segmentheap.cxx configmgr/source/data/segmentheap.cxx
+--- /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/data/segmentheap.cxx	2005-09-08 04:39:41.000000000 +0100
++++ configmgr/source/data/segmentheap.cxx	2006-10-03 12:19:46.000000000 +0100
+@@ -65,39 +65,6 @@
+ 
+             OSL_ENSURE(m_lock,"Could not create heap lock");
+         }
+-    // -------------------------------------------------------------------------
+-
+-        Heap::Address SegmentHeap::allocateMore(Size _sz)
+-        {
+-            Size nCurSize = m_heap.size();
+-
+-            OSL_ENSURE(_sz <= c_nMaxHeapSize,"Cannot allocate: Allocation request too large");
+-            if (_sz > c_nMaxHeapSize) return 0;
+-
+-            Size nCurSizeLimit = (c_nMaxHeapSize-_sz)/c_nGrowFactor;
+-            OSL_ENSURE(nCurSize < nCurSizeLimit,"Allocation will reach heap limit");
+-
+-            Size nNewSize = (nCurSize < nCurSizeLimit ) 
+-                                ? nCurSize * c_nGrowFactor + _sz 
+-                                : c_nMaxHeapSize;
+-
+-            if (m_heap.grow(nNewSize))
+-            {
+-                m_base = m_heap.base();
+-
+-                Address aResult = m_heap.allocate(_sz);
+-
+-                OSL_ENSURE(aResult,"Cannot allocate even after growing heap");
+-
+-                return aResult;
+-            }
+-            else
+-            {
+-                OSL_ENSURE(false,"Cannot allocate: Heap could not be grown");
+-                return 0;
+-            }
+-        }
+-    // -------------------------------------------------------------------------
+     }
+ // -----------------------------------------------------------------------------	
+ } // namespace configmgr
+Only in configmgr/source/data: segmentheap.cxx.rej
+diff -x '*~' -u -r -x 'unxlng*' /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/data/sequence.cxx configmgr/source/data/sequence.cxx
+--- /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/data/sequence.cxx	2006-06-20 00:22:33.000000000 +0100
++++ configmgr/source/data/sequence.cxx	2006-10-03 12:19:46.000000000 +0100
+@@ -128,7 +128,7 @@
+ {
+     sal_uInt32 nTotalSize = implGetHeaderSize(_nElemSize) + _nElements * _nElemSize;
+ 
+-    Sequence aResult = _anAllocator.allocate(nTotalSize);
++    Sequence aResult = (Sequence) (new sal_uInt8[nTotalSize]);
+ 
+     implGetSize(_anAllocator,aResult) = _nElements;
+ 
+@@ -309,7 +309,7 @@
+ 
+     freeSeqData(_anAllocator,_aSeq + nHeaderSize, _aElementType, implGetSize(_anAllocator,_aSeq));
+ 
+-    _anAllocator.deallocate(_aSeq);
++    delete[] (sal_uInt8 *)_aSeq;
+ }
+ 
+ //-----------------------------------------------------------------------------	
+@@ -318,7 +318,7 @@
+     OSL_ENSURE(_aSeq, "ERROR: Trying to free a NULL sequence");
+     if (_aSeq == 0) return;
+ 
+-    _anAllocator.deallocate(_aSeq);
++    delete[] (sal_uInt8 *)_aSeq;
+ }
+ 
+ //-----------------------------------------------------------------------------	
+Only in configmgr/source/data: sequence.cxx.rej
+diff -x '*~' -u -r -x 'unxlng*' /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/data/simpleheap.cxx configmgr/source/data/simpleheap.cxx
+--- /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/data/simpleheap.cxx	2006-06-20 00:22:46.000000000 +0100
++++ configmgr/source/data/simpleheap.cxx	2006-10-03 16:33:03.000000000 +0100
+@@ -1,3 +1,4 @@
++#include <stdio.h>
+ /*************************************************************************
+  *
+  *  OpenOffice.org - a multi-platform office productivity suite
+@@ -54,418 +55,3 @@
+ #include <map>
+ #define INCLUDED_MAP
+ #endif
+-
+-#ifdef _MSC_VER
+-#pragma warning( disable : 4355 )
+-#endif
+-
+-// -----------------------------------------------------------------------------	
+-namespace configmgr
+-{
+-// -----------------------------------------------------------------------------	
+-    namespace memory
+-    {
+-    // -------------------------------------------------------------------------
+-        extern HeapManager & localHeap();
+-    // -------------------------------------------------------------------------
+-        struct OrderByHeapId
+-        {
+-            typedef HeapManager::HeapIdParam HeapIdParam;
+-
+-            bool operator()(HeapIdParam lhs, HeapIdParam rhs) const 
+-            {
+-                return lhs.compareTo(rhs) < 0;
+-            }
+-        };
+-    // -------------------------------------------------------------------------
+-        struct HeapSet
+-        {
+-            typedef HeapManager::HeapIdParam    HeapIdParam;
+-            typedef HeapManager::HeapId         HeapId;
+-            typedef HeapManager::Handle         Heap;
+-
+-            typedef std::map<HeapId,Heap,OrderByHeapId> Map;
+-
+-            HeapSet(HeapManager & _mgr) : m_mgr(_mgr) {}
+-
+-            Heap add(Heap _aHeap) { return m_heaps[m_mgr.id(_aHeap)] = _aHeap; }
+-            void remove(Heap _aHeap) { m_heaps.erase(m_mgr.id(_aHeap)); }
+-
+-            Heap heap(HeapIdParam _anId) const 
+-            {
+-                Map::const_iterator it = m_heaps.find(_anId);
+-                return it != m_heaps.end() ? it->second : NULL;
+-            }
+-        private:
+-            HeapManager &   m_mgr;
+-            Map             m_heaps;
+-        };
+-    // -------------------------------------------------------------------------
+-        class SimpleHeapManagerBase : public HeapManager
+-        {
+-            static void * ptr(Address _address) { return reinterpret_cast<void*>(_address); }
+-            static Address address(void * _ptr) { return reinterpret_cast<Address>(_ptr); }
+-            // if this static assertion breaks, a less simple heap manager is needed (-> 64 bit ports)
+-            static char address_can_hold_any_pointer[sizeof(Address) - sizeof(void*) + 1];
+-
+-            virtual void *  base(Handle _aHeap);
+-        protected: 
+-            SimpleHeapManagerBase() : m_heaps( *(HeapManager*)this) {}
+-            virtual ~SimpleHeapManagerBase() {}
+-
+-            Handle  addHeap(Handle _aHeap)      { return m_heaps.add(_aHeap);   }
+-            void    removeHeap(Handle _aHeap)   { m_heaps.remove(_aHeap);       }
+-
+-            Handle  findHeap( HeapId _anId )    
+-            { 
+-                osl::MutexGuard aGuard(m_mutex); 
+-                return m_heaps.heap(_anId);  
+-            }
+-
+-            osl::Mutex & getHeapListMutex()     { return m_mutex; }
+-        protected:      
+-            Address allocateMemory(Size _sz);
+-            Address reallocateMemory(Address _p, Size _sz);
+-            void    deallocateMemory(Address _p);
+-
+-        protected:      
+-            virtual Lock *  createHeapLock(Handle _aHeap);
+-            virtual void    destroyHeapLock(Handle _aHeap, Lock * _pLock);
+-
+-        private:
+-            osl::Mutex  m_mutex;
+-            HeapSet     m_heaps;
+-        };
+-    // -------------------------------------------------------------------------
+-        class SimpleCheckingHeapManager : public SimpleHeapManagerBase
+-        {
+-            struct HeapData
+-            {
+-                HeapId      id;
+-                
+-                oslInterlockedCount  refs;
+-
+-                Size        requested;
+-                Size        allocated;
+-
+-                Size available() const { return requested-allocated; }
+-
+-                typedef std::map<Address, Size> Map;
+-                Map allocations;
+-            };
+-
+-            static HeapData * heap(Handle _handle) { return reinterpret_cast<HeapData*>(_handle); }
+-            static Handle handle(HeapData * _data) { return reinterpret_cast<Handle>(_data); }
+-
+-            static void makeNewId(HeapData * _data);
+-       public:      
+-            virtual Handle createHeap(Size _sInitialSize);
+-            virtual Handle attachHeap(HeapIdParam  _anId, Size & _rInitialSize);
+-            virtual Size   growHeap(Handle _aHeap, Size _sNewSize);
+-            virtual void   destroyHeap(Handle _aHeap);
+-
+-            virtual HeapId  id(Handle _aHeap);
+-
+-            virtual Address allocate(Handle _aHeap, Size _sNewSize);
+-            virtual Address reallocate(Handle _aHeap, Address _aOldAddress, Size _sNewSize);
+-            virtual void    deallocate(Handle _aHeap, Address _aAddress);
+-            virtual bool    didAllocate(Handle _aHeap, Address _aAddress);
+-        };
+-    // -------------------------------------------------------------------------
+-        class SimpleHeapLock : public DataLock
+-        {
+-            osl::Mutex m_mutex;
+-        public:   
+-            virtual void acquireReadAccess() { m_mutex.acquire(); }
+-            virtual void releaseReadAccess() { m_mutex.release(); }
+-
+-            virtual void acquireWriteAccess() { m_mutex.acquire(); }     
+-            virtual void releaseWriteAccess() { m_mutex.release(); }
+-        };
+-    // -------------------------------------------------------------------------
+-    // -------------------------------------------------------------------------
+-        HeapManager & cacheHeap()
+-        {
+-            static SimpleCheckingHeapManager aInstance;
+-            return aInstance;
+-        }
+-    // -------------------------------------------------------------------------
+-        HeapManager & localHeap()
+-        {
+-            static SimpleCheckingHeapManager aInstance;
+-            return aInstance;
+-        }
+-    // -------------------------------------------------------------------------
+-    // -------------------------------------------------------------------------
+-
+-        HeapManager::Address SimpleHeapManagerBase::allocateMemory(Size _sz)
+-        {
+-            void * p = ::rtl_allocateMemory(_sz);
+-
+-            OSL_ENSURE(p,"Could not allocate: std::malloc failed");
+-
+-            return address(p);
+-        }
+-    // -------------------------------------------------------------------------
+-
+-        HeapManager::Address SimpleHeapManagerBase::reallocateMemory(Address _p, Size _sz)
+-        {
+-            void * pOld = ptr(_p);
+-
+-            void * pNew = ::rtl_reallocateMemory(pOld,_sz);
+-
+-            OSL_ENSURE(pNew,"Could not reallocate: std::realloc failed");
+-
+-            return address(pNew);
+-        }
+-    // -------------------------------------------------------------------------
+-
+-        void SimpleHeapManagerBase::deallocateMemory(Address _p)
+-        {
+-            void * p = ptr(_p);
+-
+-            ::rtl_freeMemory(p); 
+-        }
+-    // -------------------------------------------------------------------------
+-
+-        void *  SimpleHeapManagerBase::base(Handle /*_aHeap*/)
+-        {
+-            return NULL;
+-        }
+-    // -------------------------------------------------------------------------
+-
+-        DataLock *  SimpleHeapManagerBase::createHeapLock(Handle )
+-        {
+-            return new SimpleHeapLock();
+-        }
+-    // -------------------------------------------------------------------------
+-
+-        void SimpleHeapManagerBase::destroyHeapLock(Handle , DataLock * _pLock)
+-        {
+-            if (SimpleHeapLock* pMyLock = /*dynamic_*/ static_cast<SimpleHeapLock*>(_pLock))
+-            {
+-                delete pMyLock;
+-            }
+-        }
+-    // -------------------------------------------------------------------------
+-    // -------------------------------------------------------------------------
+-
+-        void SimpleCheckingHeapManager::makeNewId(HeapData * _data)
+-        {
+-            OSL_PRECOND( _data, "Internal Error: NULL data");
+-
+-            sal_Int64 nData = reinterpret_cast<sal_Int64>(_data);
+-
+-            HeapId aNewId = HeapId::valueOf(nData,16);
+-
+-            _data->id = aNewId;
+-        }
+-    // -------------------------------------------------------------------------
+-
+-        HeapManager::HeapId SimpleCheckingHeapManager::id(Handle _aHeap)
+-        {
+-            if (_aHeap == 0) return HeapId();
+-
+-            HeapData * data = heap(_aHeap);
+-
+-            return data->id;
+-        }
+-    // -------------------------------------------------------------------------
+-
+-        HeapManager::Handle SimpleCheckingHeapManager::createHeap(Size _sInitialSize)
+-        {
+-            // need to have 4-byte pointers for this implementation
+-            OSL_ASSERT(sizeof(void *) == sizeof(Address));
+-
+-            HeapData * pHeap = new HeapData();
+-
+-            pHeap->refs      = 1;
+-
+-            pHeap->requested = _sInitialSize;
+-            pHeap->allocated = 0;
+-
+-            osl::MutexGuard aGuard( getHeapListMutex() );
+-
+-            makeNewId( pHeap );
+-
+-            OSL_ENSURE( ! findHeap(pHeap->id), "Internal Error: New heap id already registered");
+-
+-            return addHeap(handle(pHeap) );
+-        }
+-    // -------------------------------------------------------------------------
+-
+-        HeapManager::Handle SimpleCheckingHeapManager::attachHeap(HeapIdParam  _anId, Size & _rInitialSize)
+-        {
+-            osl::MutexGuard aGuard( getHeapListMutex() );
+-
+-            Handle aHeap = findHeap(_anId);
+-
+-            OSL_ENSURE( aHeap, "Error: No such Heap");
+-
+-            if (aHeap != 0)
+-            {
+-                HeapData * data = heap(aHeap);
+-
+-                OSL_ENSURE( data->id == _anId, "Internal error: Inconsistent heap id");
+-
+-                _rInitialSize = data->requested;
+-             
+-                ++data->refs;
+-            }
+-            else
+-                _rInitialSize = 0;
+-
+-            return aHeap;
+-        }
+-    // -------------------------------------------------------------------------
+-
+-        HeapManager::Size   SimpleCheckingHeapManager::growHeap(Handle _aHeap, Size _sNewSize)
+-        {
+-            OSL_PRECOND( _aHeap, "Error: NULL data");
+-
+-            HeapData * data = heap(_aHeap);
+-
+-            OSL_ENSURE( findHeap(data->id) == _aHeap, "Internal error: Inconsistent heap id");
+-
+-            if (data->requested < _sNewSize) data->requested = _sNewSize; 
+-
+-            return data->requested;
+-        }
+-    // -------------------------------------------------------------------------
+-
+-        void   SimpleCheckingHeapManager::destroyHeap(Handle _aHeap)
+-        {
+-            OSL_PRECOND( _aHeap, "Error: NULL data");
+-
+-            HeapData * data = heap(_aHeap);
+-
+-            osl::MutexGuard aGuard( getHeapListMutex() );
+-
+-            if (0 == --data->refs)
+-            {
+-                OSL_ENSURE( findHeap(data->id) == _aHeap, "Internal error: Inconsistent heap id");
+-
+-    //            OSL_ENSURE(data->allocations.empty(), "Memory leaks found");
+-                for (HeapData::Map::iterator it = data->allocations.begin();
+-                     it != data->allocations.end();
+-                     ++it)
+-                {
+-                    deallocateMemory(it->first);
+-                    data->allocated -= it->second;
+-
+-                }
+-                OSL_ENSURE(data->allocated == 0, "Memory tracking error detected");
+-
+-                removeHeap(_aHeap);
+-
+-                delete data;
+-            }
+-        }
+-    // -------------------------------------------------------------------------
+-
+-        bool SimpleCheckingHeapManager::didAllocate(Handle _aHeap, Address _aAddress)
+-        {
+-            OSL_PRECOND( _aHeap, "Error: NULL data");
+-            OSL_PRECOND( _aAddress, "Warning: checking NULL address - will fail");
+-
+-            HeapData * data = heap(_aHeap);
+-
+-            OSL_ENSURE( findHeap(data->id) == _aHeap, "Internal error: Inconsistent heap id");
+-
+-            /* Condition is:
+-                    allocationAddress <= _aAddress &&
+-                    _aAddress <= allocationAddress + allocationSize
+-               (<= to allow past-the-end pointer)
+-            */
+-
+-            HeapData::Map::iterator it = data->allocations.upper_bound(_aAddress);
+-
+-            if (it == data->allocations.begin()) 
+-                return false;
+-
+-            --it; // Now it is the last iterator that is less than or equal to _aAddress
+-
+-            OSL_ASSERT( it->first <= _aAddress ); // first part of condition handled by map
+-
+-            return _aAddress <= it->first + it->second;
+-        }
+-    // -------------------------------------------------------------------------
+-
+-        HeapManager::Address SimpleCheckingHeapManager::allocate(Handle _aHeap, Size _nSize)
+-        {
+-            OSL_PRECOND( _aHeap, "Error: NULL data");
+-
+-            HeapData * data = heap(_aHeap);
+-
+-            OSL_ENSURE( findHeap(data->id) == _aHeap, "Internal error: Inconsistent heap id");
+-
+-            if (_nSize > data->available()) 
+-                return 0;
+-
+-            Address p = allocateMemory(_nSize);
+-            if (p)
+-            {
+-                data->allocations[p] = _nSize;
+-                data->allocated += _nSize;
+-            }
+-            return p;
+-        }
+-    // -------------------------------------------------------------------------
+-
+-        HeapManager::Address SimpleCheckingHeapManager::reallocate(Handle _aHeap, Address _aOld, Size _nNewSize)
+-        {
+-            if (_aOld == 0) return allocate(_aHeap,_nNewSize);
+-
+-            OSL_PRECOND( _aHeap, "Error: NULL data");
+-
+-            HeapData * data = heap(_aHeap);
+-
+-            OSL_ENSURE( findHeap(data->id) == _aHeap, "Internal error: Inconsistent heap id");
+-
+-            OSL_ENSURE( data->allocations.count(_aOld), "Error: pointer being reallocated is not from this data");
+-
+-            Size nOldSize = data->allocations[_aOld];
+-
+-            if (nOldSize >= _nNewSize) 
+-                return _aOld;
+-
+-            if (_nNewSize-nOldSize > data->available()) 
+-                return 0;
+-
+-            Address aNew = reallocateMemory(_aOld,_nNewSize);
+-            if (aNew)
+-            {
+-                if (aNew != _aOld) data->allocations.erase(_aOld);
+-
+-                data->allocations[aNew] = _nNewSize;
+-                data->allocated += _nNewSize - nOldSize;
+-            }
+-
+-            return aNew;
+-        }
+-    // -------------------------------------------------------------------------
+-
+-        void SimpleCheckingHeapManager::deallocate(Handle _aHeap, Address _p)
+-        {
+-            OSL_PRECOND( _aHeap, "Error: NULL data");
+-            OSL_PRECOND( _p, "Error: Trying to free NULL address");
+-
+-            HeapData * data = heap(_aHeap);
+-
+-            OSL_ENSURE( findHeap(data->id) == _aHeap, "Internal error: Inconsistent heap id");
+-
+-            OSL_ENSURE( data->allocations.count(_p), "Error: pointer being freed is not from this data");
+-
+-            Size freed = data->allocations[_p];
+-            data->allocated -= freed;
+-            data->allocations.erase(_p);
+-
+-            deallocateMemory(_p);
+-        }
+-    // -------------------------------------------------------------------------
+-    // -------------------------------------------------------------------------
+-    }
+-// -----------------------------------------------------------------------------	
+-} // namespace configmgr
+-
+-
+Only in configmgr/source/data: simpleheap.cxx.rej
+diff -x '*~' -u -r -x 'unxlng*' /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/data/updateaccessor.cxx configmgr/source/data/updateaccessor.cxx
+--- /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/data/updateaccessor.cxx	2005-09-08 04:40:43.000000000 +0100
++++ configmgr/source/data/updateaccessor.cxx	2006-10-03 12:19:46.000000000 +0100
+@@ -104,62 +104,6 @@
+         {
+             return static_cast<char *>(m_heap ? m_heap->base() : NULL);
+         }
+-
+-    // -------------------------------------------------------------------------
+-        Allocator::Address Allocator::allocate(Size _sz) const
+-        {
+-            OSL_ENSURE(m_heap,"Cannot allocate: Invalid heap");
+-            return m_heap ? m_heap->allocate(_sz) : Allocator::Address();
+-        }
+-
+-    // -------------------------------------------------------------------------
+-        void Allocator::deallocate(Address _addr) const
+-        {
+-            OSL_ENSURE(m_heap,"Cannot deallocate: Invalid heap");
+-            if (m_heap) m_heap->deallocate(_addr);
+-        }
+-
+-    // -------------------------------------------------------------------------
+-
+-    #if OSL_DEBUG_LEVEL > 0
+-        void * UpdateAccessor::resolve(AddressType _p) const
+-        {
+-            OSL_ENSURE( !_p.is() || m_segment->isValidAddress(_p.value()), "Address does not belong to this segment");
+-            return _p.is() ? heap_base() + _p.value() : NULL;
+-        }
+-
+-        Pointer  UpdateAccessor::reduce(void const * _p) const
+-        {
+-            if (_p)
+-            {
+-                Pointer::RawAddress addr = static_cast<char const *>(_p) - heap_base();
+-                OSL_ENSURE( m_segment->isValidAddress(addr), "Pointer does not belong to this segment");
+-                return Pointer(addr);
+-            }
+-            else
+-                return Pointer();
+-        }
+-
+-        void * Allocator::access(Address _addr) const
+-        {
+-            OSL_ENSURE( !_addr || m_heap->isValidAddress(_addr), "Address does not belong to this segment");
+-            return _addr ? heap_base() + _addr : NULL;
+-        }
+-
+-
+-        Allocator::Address  Allocator::address(void const * _p) const
+-        {
+-            if (_p)
+-            {
+-                Address addr = static_cast<char const *>(_p) - heap_base();
+-                OSL_ENSURE( m_heap->isValidAddress(addr), "Pointer does not belong to this segment");
+-                return addr;
+-            }
+-            else
+-                return 0;
+-        }
+-  #endif // OSL_DEBUG_LEVEL
+-
+     // -------------------------------------------------------------------------
+     }
+ // -----------------------------------------------------------------------------
+Only in configmgr/source/data: updateaccessor.cxx.rej
+diff -x '*~' -u -r -x 'unxlng*' /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/inc/heapfactory.hxx configmgr/source/inc/heapfactory.hxx
+--- /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/inc/heapfactory.hxx	2005-09-08 04:48:33.000000000 +0100
++++ configmgr/source/inc/heapfactory.hxx	2006-10-03 16:29:52.000000000 +0100
+@@ -36,21 +36,5 @@
+ #ifndef CONFIGMGR_HEAPFACTORY_HXX
+ #define CONFIGMGR_HEAPFACTORY_HXX
+ 
+-namespace configmgr
+-{
+-// -----------------------------------------------------------------------------	
+-    namespace memory
+-    {
+-    // -------------------------------------------------------------------------	
+-        class HeapManager;
+-
+-        HeapManager & localHeap();
+-        HeapManager & cacheHeap();
+-
+-    // -------------------------------------------------------------------------	
+-    }
+-// -----------------------------------------------------------------------------	
+-} // namespace configmgr
+-
+ #endif // CONFIGMGR_HEAPFACTORY_HXX
+ 
+diff -x '*~' -u -r -x 'unxlng*' /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/inc/heap.hxx configmgr/source/inc/heap.hxx
+--- /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/inc/heap.hxx	2005-12-28 17:29:58.000000000 +0000
++++ configmgr/source/inc/heap.hxx	2006-10-03 16:42:37.000000000 +0100
+@@ -54,37 +54,23 @@
+     // -------------------------------------------------------------------------
+         class Heap : Noncopyable
+         {
+-            HeapManager       & m_impl;
+-            HeapManager::Handle m_heap;
+-            HeapManager::Size   m_size;
+         public:
+-            typedef HeapManager::Lock        Lock;
+-            typedef HeapManager::Size        Size;
+-            typedef HeapManager::HeapId      HeapId;
+-            typedef HeapManager::HeapIdParam HeapIdParam;
+-            typedef HeapManager::Address     Address;
++            typedef DataLock                Lock;
++            typedef memory::HeapSize        Size;
++            typedef rtl::OString            HeapId;
++            typedef rtl::OString const     &HeapIdParam;
++            typedef memory::Address         Address;
+ 
+-            Heap(HeapManager& _impl);
+-            Heap(HeapManager& _impl, Size _nInitialSize);
+-            Heap(HeapManager& _impl, HeapIdParam _anId);
++            Heap();
++            Heap(HeapIdParam _anId);
+             ~Heap();
+ 
+-            Size    size() const { return m_size; }
++            void *  base() const   { return NULL; }
++			HeapId  id()   const   { return rtl::OString(); }
+ 
+-            Size    grow(Size _nReqSize); 
+-
+-            void *  base() const   { return m_impl.base(m_heap); }
+-            HeapId  id()   const   { return m_impl.id(m_heap); }
+-
+-            Address allocate(Size _sNewSize)    { return m_impl.allocate(m_heap, _sNewSize); }
+-            Address reallocate(Address _aOldAddress, Size _sNewSize)    
+-            { return m_impl.reallocate(m_heap, _aOldAddress, _sNewSize); }
+-            void    deallocate(Address _aAddress)    { m_impl.deallocate(m_heap, _aAddress); }
+-            bool    didAllocate(Address _aAddress) const 
+-            { return m_impl.didAllocate(m_heap, _aAddress); }
+-
+-            Lock *  createLock()                { return m_impl.createHeapLock(m_heap); }
+-            void    destroyLock(Lock * _pLock)  { m_impl.destroyHeapLock(m_heap,_pLock); }
++			// Amazingly - these create new locks
++            Lock *  createLock();
++            void    destroyLock(Lock * _pLock);
+         };
+     // -------------------------------------------------------------------------	
+     }
+Only in configmgr/source/inc: heap.hxx.rej
+diff -x '*~' -u -r -x 'unxlng*' /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/inc/heapmanager.hxx configmgr/source/inc/heapmanager.hxx
+--- /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/inc/heapmanager.hxx	2005-12-28 17:30:19.000000000 +0000
++++ configmgr/source/inc/heapmanager.hxx	2006-10-03 16:26:25.000000000 +0100
+@@ -50,45 +50,7 @@
+ #include <rtl/string.hxx>
+ #endif
+ 
+-namespace configmgr
+-{
+-// -----------------------------------------------------------------------------	
+-    namespace memory
+-    {
+-    // -------------------------------------------------------------------------
+-        class HeapManager
+-        {
+-        public:
+-            typedef struct Opaque_ * Handle;
+-
+-            typedef memory::HeapSize    Size;
+-            typedef memory::Address     Address;
+-            typedef rtl::OString        HeapId;
+-            typedef rtl::OString const & HeapIdParam;
+-
+-        //    virtual HeapId newHeapId() = 0;
+-            virtual Handle createHeap(/*HeapIdParam _anId, */Size _sInitialSize) = 0;
+-            virtual Handle attachHeap(HeapIdParam _anId, Size & _rInitialSize) = 0;
+-            virtual Size   growHeap(Handle _aHeap, Size _sNewSize) = 0;
+-            virtual void   destroyHeap(Handle _aHeap) = 0;
+-
+-            virtual void *  base(Handle _aHeap) = 0;
+-            virtual HeapId  id(Handle _aHeap) = 0;
+-
+-            virtual Address allocate(Handle _aHeap, Size _sNewSize) = 0;
+-            virtual Address reallocate(Handle _aHeap, Address _aOldAddress, Size _sNewSize) = 0;
+-            virtual void    deallocate(Handle _aHeap, Address _aAddress) = 0;
+-            virtual bool    didAllocate(Handle _aHeap, Address _aAddress) = 0;
+-
+-            typedef DataLock Lock;
+-
+-            virtual Lock *  createHeapLock(Handle _aHeap) = 0;
+-            virtual void    destroyHeapLock(Handle _aHeap, Lock * _pLock) = 0;
+-        };
+-    // -------------------------------------------------------------------------
+-    }
+-// -----------------------------------------------------------------------------	
+-} // namespace configmgr
++#include <osl/mutex.hxx>
+ 
+ #endif // CONFIGMGR_DATAHEAPMANAGER_HXX
+ 
+Only in configmgr/source/inc: heapmanager.hxx.rej
+diff -x '*~' -u -r -x 'unxlng*' /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/inc/segmentheap.hxx configmgr/source/inc/segmentheap.hxx
+--- /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/inc/segmentheap.hxx	2005-09-08 04:55:20.000000000 +0100
++++ configmgr/source/inc/segmentheap.hxx	2006-10-03 16:28:47.000000000 +0100
+@@ -51,13 +51,13 @@
+     // -------------------------------------------------------------------------	
+         class SegmentHeap : Noncopyable
+         {
+-            friend class Segment;
++			friend class Segment;
+             typedef Heap::Lock Lock;
+ 
+-            Heap   m_heap;
+-            void * m_base;
+-            Lock * m_lock;
++			Heap  m_heap;
++			void *m_base;
+ 
++            Lock * m_lock;
+             Lock & lock() const { return *m_lock; }
+         public:
+             typedef Heap::HeapId        HeapId;
+@@ -65,16 +65,12 @@
+             typedef Heap::Size          Size;
+             typedef Heap::Address       Address;
+             
+-            SegmentHeap(HeapManager & _rImpl)
+-            : m_heap(_rImpl)
++            SegmentHeap()
++            : m_heap()
+             { init(); }
+ 
+-            SegmentHeap(HeapManager & _rImpl, Size _aInitialSize)
+-            : m_heap(_rImpl,_aInitialSize)
+-            { init(); }
+-
+-            SegmentHeap(HeapManager & _rImpl, HeapIdParam _anId)
+-            : m_heap(_rImpl,_anId)
++            SegmentHeap(HeapIdParam _anId)
++            : m_heap(_anId)
+             { init(); }
+ 
+             ~SegmentHeap();
+@@ -83,26 +79,12 @@
+             void*   base() const { return m_base; }
+             HeapId  id() const { return m_heap.id(); }
+ 
+-            Address allocate(Size _sz) 
+-            {
+-                Address aResult = m_heap.allocate(_sz);
+-                if (!aResult)
+-                    aResult = this->allocateMore(_sz);
+-                return aResult;
+-            }
+-
+-            void deallocate(Address _addr) 
+-            { 
+-                m_heap.deallocate(_addr); 
+-            }
+-
+-            bool isValidAddress(Address _addr) const
++            inline bool isValidAddress(Address) const
+             { 
+-                return m_heap.didAllocate(_addr); 
++				return true;
+             }
+         private:
+             void init();
+-            Address allocateMore(Size _sz);
+         };
+     // -------------------------------------------------------------------------	
+     }
+diff -x '*~' -u -r -x 'unxlng*' /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/inc/segment.hxx configmgr/source/inc/segment.hxx
+--- /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/inc/segment.hxx	2005-09-08 04:55:04.000000000 +0100
++++ configmgr/source/inc/segment.hxx	2006-10-03 16:30:59.000000000 +0100
+@@ -61,14 +61,11 @@
+             typedef rtl::OString    Id;
+ 
+         public:
+-            explicit Segment(HeapManager & _aHeapImpl) 
+-            : m_heap(_aHeapImpl) {}
++            explicit Segment() 
++            : m_heap() {}
+ 
+-            explicit Segment(HeapManager & _aHeapImpl, Heap::Size _aInitialSize) 
+-            : m_heap(_aHeapImpl,_aInitialSize) {}
+-
+-            explicit Segment(HeapManager & _aHeapImpl, Id const & _anId) 
+-            : m_heap(_aHeapImpl,_anId) {}
++            explicit Segment(Id const & _anId) 
++            : m_heap(_anId) {}
+ 
+             Id getId() const { return m_heap.id(); }
+ 
+diff -x '*~' -u -r -x 'unxlng*' /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/inc/treemanager.hxx configmgr/source/inc/treemanager.hxx
+--- /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/inc/treemanager.hxx	2005-09-08 04:59:42.000000000 +0100
++++ configmgr/source/inc/treemanager.hxx	2006-10-03 16:30:16.000000000 +0100
+@@ -104,12 +104,10 @@
+ 		/** ctor
+ 		*/
+         explicit
+-        TreeManager(BackendCacheRef const & _xBackend, memory::HeapManager & _rCacheHeapManager);
++        TreeManager(BackendCacheRef const & _xBackend);
+ 
+ 		// disposing the cache before destroying		
+ 		void dispose();
+-		
+-        memory::HeapManager & getCacheHeapManager() const;
+ 
+ 		// ITreeManager
+         virtual memory::Segment* getDataSegment(AbsolutePath const& _rAccessor, 
+diff -x '*~' -u -r -x 'unxlng*' /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/inc/updateaccessor.hxx configmgr/source/inc/updateaccessor.hxx
+--- /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/inc/updateaccessor.hxx	2005-12-28 17:31:29.000000000 +0000
++++ configmgr/source/inc/updateaccessor.hxx	2006-10-03 12:19:56.000000000 +0100
+@@ -64,9 +64,6 @@
+             typedef memory::Address Address;
+             typedef memory::HeapSize Size;
+ 
+-            Address allocate(Size _sz) const;
+-            void deallocate(Address _addr) const;
+-
+             void *      access(Address _addr) const;
+             Address     address(void const * _p) const;
+ 
+@@ -114,7 +111,6 @@
+         };
+     // -------------------------------------------------------------------------
+ 
+-  #if OSL_DEBUG_LEVEL == 0
+         inline
+         void * UpdateAccessor::resolve(AddressType _p) const
+         { return _p.is() ? heap_base() + _p.value() : NULL; }
+@@ -122,9 +118,7 @@
+         inline
+         Pointer  UpdateAccessor::reduce(void const * _p) const
+         { return _p ? Pointer(static_cast<char const *>(_p) - heap_base()) : Pointer(); }
+-  #endif // OSL_DEBUG_LEVEL
+ 
+-  #if OSL_DEBUG_LEVEL == 0
+         inline
+         void * Allocator::access(Address _addr) const
+         { return _addr ? heap_base() + _addr : NULL; }
+@@ -132,8 +126,6 @@
+         inline
+         Allocator::Address  Allocator::address(void const * _p) const
+         { return _p ? (static_cast<char const *>(_p) - heap_base()) : 0; }
+-  #endif // OSL_DEBUG_LEVEL
+-
+     // -------------------------------------------------------------------------
+     }
+ // -----------------------------------------------------------------------------
+diff -x '*~' -u -r -x 'unxlng*' /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/tree/builddata.cxx configmgr/source/tree/builddata.cxx
+--- /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/tree/builddata.cxx	2006-09-29 15:44:58.000000000 +0100
++++ configmgr/source/tree/builddata.cxx	2006-10-03 12:19:56.000000000 +0100
+@@ -643,7 +643,7 @@
+ 
+     OSL_ASSERT(nFragmentSize >= sizeof m_header + m_header.count*sizeof(Node));
+ 
+-    Address aBaseAddress = _anUpdater.allocator().allocate(nFragmentSize);
++    Address aBaseAddress = Address(new sal_uInt8[ nFragmentSize ]);
+ 
+     TreeAddress aResult = TreeAddress( memory::Pointer(aBaseAddress) );
+ 
+@@ -1198,7 +1198,7 @@
+         destroyNode( addressOfNodeAt(_aBaseAddress,i) );
+     }
+ 
+-    allocator().deallocate( _aBaseAddress.addressValue() );
++    delete [] (sal_uInt8 *) _aBaseAddress.addressValue();
+ 
+     return TreeAddress( Pointer(aNext) );
+ }
+diff -x '*~' -u -r -x 'unxlng*' /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/tree/node.cxx configmgr/source/tree/node.cxx
+--- /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/tree/node.cxx	2006-09-29 15:44:58.000000000 +0100
++++ configmgr/source/tree/node.cxx	2006-10-03 12:19:57.000000000 +0100
+@@ -239,7 +239,7 @@
+ 								   const rtl::OUString &rName,
+ 								   const rtl::OUString &rModule)
+ {
+-    Address aData = _anAllocator.allocate(sizeof(SetNodeTemplateData));
++    Address aData = Address(new sal_uInt8 [sizeof(SetNodeTemplateData)]);
+ 
+     if (aData)
+     {
+@@ -278,7 +278,7 @@
+     freeName(_anAllocator,pData->name);
+     freeName(_anAllocator,pData->module);
+ 
+-    _anAllocator.deallocate(_aTemplateData);
++    delete[] (sal_uInt8 *) _aTemplateData;
+ }
+ 
+ //-----------------------------------------------------------------------------
+diff -x '*~' -u -r -x 'unxlng*' /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/tree/treesegment.cxx configmgr/source/tree/treesegment.cxx
+--- /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/tree/treesegment.cxx	2005-09-08 05:20:50.000000000 +0100
++++ configmgr/source/tree/treesegment.cxx	2006-10-03 16:31:46.000000000 +0100
+@@ -78,7 +78,7 @@
+ // -----------------------------------------------------------------------------	
+ struct TreeSegment::Impl : salhelper::SimpleReferenceObject
+ {
+-    Impl() : data( memory::localHeap() ), base() {}
++    Impl() : data(), base() {}
+     ~Impl();
+ 
+     memory::Segment     data;
+diff -x '*~' -u -r -x 'unxlng*' /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/treecache/cacheaccess.cxx configmgr/source/treecache/cacheaccess.cxx
+--- /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/treecache/cacheaccess.cxx	2005-09-08 05:21:33.000000000 +0100
++++ configmgr/source/treecache/cacheaccess.cxx	2006-10-03 16:34:57.000000000 +0100
+@@ -59,10 +59,8 @@
+ 
+ // -------------------------------------------------------------------------
+ 
+-CacheClientAccess::CacheClientAccess(memory::HeapManager & _rHeapManager,
+-                                     ConfigChangeBroadcastHelper *  _pBroadcastHelper)
++CacheClientAccess::CacheClientAccess(ConfigChangeBroadcastHelper *  _pBroadcastHelper)
+ : m_aMutex()
+-, m_aData(_rHeapManager)
+ , m_pBroadcastHelper( _pBroadcastHelper )
+ {
+ }
+@@ -207,9 +205,8 @@
+ // -------------------------------------------------------------------------
+ // -------------------------------------------------------------------------
+ 
+-CacheLoadingAccess::CacheLoadingAccess(memory::HeapManager & _rHeapManager)
++CacheLoadingAccess::CacheLoadingAccess()
+ : m_aMutex()
+-, m_aData(_rHeapManager)
+ , m_aDeadModules()
+ {
+ }
+diff -x '*~' -u -r -x 'unxlng*' /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/treecache/cacheaccess.hxx configmgr/source/treecache/cacheaccess.hxx
+--- /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/treecache/cacheaccess.hxx	2005-09-08 05:21:46.000000000 +0100
++++ configmgr/source/treecache/cacheaccess.hxx	2006-10-03 16:34:40.000000000 +0100
+@@ -82,8 +82,7 @@
+ 		ConfigChangeBroadcastHelper* m_pBroadcastHelper;
+ 	public:
+         explicit
+-		CacheClientAccess(memory::HeapManager & _rHeapManager,
+-                          ConfigChangeBroadcastHelper* _pBroadcastHelper);
++		CacheClientAccess(ConfigChangeBroadcastHelper* _pBroadcastHelper);
+ 
+ 		~CacheClientAccess();
+ 		
+@@ -148,7 +147,7 @@
+ 		DeadModuleList		m_aDeadModules;			/// list of nodes which are registered for throwing away
+ 	public:
+         explicit
+-		CacheLoadingAccess(memory::HeapManager & _rHeapManager);
++		CacheLoadingAccess();
+ 		~CacheLoadingAccess();
+ 		
+         /// gets a data segment reference for the given path if exists
+diff -x '*~' -u -r -x 'unxlng*' /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/treecache/cachecontroller.cxx configmgr/source/treecache/cachecontroller.cxx
+--- /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/treecache/cachecontroller.cxx	2006-06-20 00:31:07.000000000 +0100
++++ configmgr/source/treecache/cachecontroller.cxx	2006-10-03 16:35:31.000000000 +0100
+@@ -144,7 +144,7 @@
+     CacheRef aResult = m_aCacheList.get(_aOptions);
+     if (!aResult.is())
+     {
+-        CacheRef aNewCache( new Cache(getCacheHeapManager()) );
++        CacheRef aNewCache( new Cache() );
+         aResult = m_aCacheList.insert(_aOptions,aNewCache);
+     }
+     return aResult;
+@@ -152,12 +152,6 @@
+ 
+ // -------------------------------------------------------------------------
+ 
+-memory::HeapManager & CacheController::getCacheHeapManager() const
+-{
+-    return m_aTemplates.getHeapManager();
+-}
+-// -------------------------------------------------------------------------
+-
+ // disposing
+ // -------------------------------------------------------------------------
+ void CacheController::disposeAll(bool _bFlushRemainingUpdates)
+@@ -340,12 +334,11 @@
+ 
+ // -------------------------------------------------------------------------
+ CacheController::CacheController(BackendRef const & _xBackend, 
+-								 memory::HeapManager & _rCacheHeapManager,
+ 								 const uno::Reference<uno::XComponentContext>& xContext)
+ : m_aNotifier()
+ , m_xBackend(_xBackend)
+ , m_aCacheList()
+-, m_aTemplates(_rCacheHeapManager)
++, m_aTemplates()
+ , m_pDisposer()
+ , m_pCacheWriter()
+ , m_bDisposing(false)
+diff -x '*~' -u -r -x 'unxlng*' /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/treecache/cachecontroller.hxx configmgr/source/treecache/cachecontroller.hxx
+--- /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/treecache/cachecontroller.hxx	2005-09-08 05:22:14.000000000 +0100
++++ configmgr/source/treecache/cachecontroller.hxx	2006-10-03 16:35:12.000000000 +0100
+@@ -96,7 +96,6 @@
+ 		*/
+         explicit
+         CacheController(BackendRef const & _xBackend, 
+-						memory::HeapManager & _rCacheHeapManager,
+ 						const uno::Reference<uno::XComponentContext>& xContext);
+ 
+     // ICachedDataProvider implementation
+@@ -309,8 +308,6 @@
+ 	protected:
+ 		// ref counted, that's why no public dtor
+ 		~CacheController();
+-
+-        memory::HeapManager & getCacheHeapManager() const;
+     // implementation 
+     private:
+         typedef CacheLoadingAccess      Cache;
+diff -x '*~' -u -r -x 'unxlng*' /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/treecache/cachedata.cxx configmgr/source/treecache/cachedata.cxx
+--- /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/treecache/cachedata.cxx	2005-09-08 05:22:31.000000000 +0100
++++ configmgr/source/treecache/cachedata.cxx	2006-10-03 16:36:36.000000000 +0100
+@@ -124,8 +124,7 @@
+ 
+ // -----------------------------------------------------------------------------
+ 	
+-	CacheData::CacheData(memory::HeapManager & _rHeapManager)
+-    : m_rHeapManager(_rHeapManager)
++	CacheData::CacheData()
+ 	{
+ 	}
+ // -----------------------------------------------------------------------------
+@@ -172,7 +171,7 @@
+ 
+     CacheLineRef CacheData::internalAttachModule(const memory::SegmentAddress & _aLocation, const ModuleName& _aName) CFG_UNO_THROW_RTE(  )
+ 	{
+-        CacheLineRef aNewModule = doCreateAttachedModule(this->internalHeapManager(), _aLocation,_aName);
++        CacheLineRef aNewModule = doCreateAttachedModule(_aLocation,_aName);
+ 
+ 		internalAddModule( _aName, aNewModule );
+ 		
+@@ -189,9 +188,9 @@
+     }
+ // -------------------------------------------------------------------------
+ 
+-    CacheLineRef CacheData::doCreateAttachedModule(memory::HeapManager & _rHeapManager, const memory::SegmentAddress & _aLocation, const ModuleName& _aName) CFG_UNO_THROW_RTE(  )
++    CacheLineRef CacheData::doCreateAttachedModule(const memory::SegmentAddress & _aLocation, const ModuleName& _aName) CFG_UNO_THROW_RTE(  )
+     {
+-        return CacheLine::createAttached( _aName, _rHeapManager, _aLocation ); 
++        return CacheLine::createAttached( _aName, _aLocation ); 
+     }
+ // -----------------------------------------------------------------------------
+ 
+@@ -426,10 +425,10 @@
+ 	}
+ // -----------------------------------------------------------------------------
+ 
+-    CacheLineRef TemplateCacheData::doCreateAttachedModule(memory::HeapManager & _rHeapManager, const memory::SegmentAddress & _aLocation, const ModuleName& _aName) CFG_UNO_THROW_RTE(  )
++    CacheLineRef TemplateCacheData::doCreateAttachedModule(const memory::SegmentAddress & _aLocation, const ModuleName& _aName) CFG_UNO_THROW_RTE(  )
+     {
+         CacheLineRef aNewModule = 
+-            CacheLine::createAttached(_aName, _rHeapManager, _aLocation);
++            CacheLine::createAttached(_aName, _aLocation);
+ 
+         return aNewModule.get();
+     }
+@@ -437,8 +436,7 @@
+ 
+ 	CacheLineRef TemplateCacheData::implNewCacheLine(const ModuleName& _aModule) CFG_UNO_THROW_RTE(  )
+ 	{
+-        CacheLineRef aNewModule = 
+-            CacheLine::createNew(_aModule, this->internalHeapManager());
++        CacheLineRef aNewModule = CacheLine::createNew(_aModule);
+ 
+ 		internalAddModule( _aModule, aNewModule.get() );
+ 
+@@ -456,10 +454,10 @@
+ 
+ // -----------------------------------------------------------------------------
+ 
+-    CacheLineRef ExtendedCacheData::doCreateAttachedModule(memory::HeapManager & _rHeapManager, const memory::SegmentAddress & _aLocation, const ModuleName& _aName) CFG_UNO_THROW_RTE(  )
++    CacheLineRef ExtendedCacheData::doCreateAttachedModule(const memory::SegmentAddress & _aLocation, const ModuleName& _aName) CFG_UNO_THROW_RTE(  )
+     {
+         ExtendedCacheLineRef aNewModule = 
+-            ExtendedCacheLine::createAttached(_aName, _rHeapManager, _aLocation);
++            ExtendedCacheLine::createAttached(_aName, _aLocation);
+ 
+         return CacheLineRef( aNewModule.get() );
+     }
+@@ -467,8 +465,7 @@
+ 
+ 	ExtendedCacheLineRef ExtendedCacheData::implNewCacheLine(const ModuleName& _aModule) CFG_UNO_THROW_RTE(  )
+ 	{
+-        ExtendedCacheLineRef aNewModule = 
+-            ExtendedCacheLine::createNew(_aModule, this->internalHeapManager());
++        ExtendedCacheLineRef aNewModule = ExtendedCacheLine::createNew(_aModule);
+ 
+ 		internalAddModule( _aModule, aNewModule.get() );
+ 
+diff -x '*~' -u -r -x 'unxlng*' /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/treecache/cachedata.hxx configmgr/source/treecache/cachedata.hxx
+--- /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/treecache/cachedata.hxx	2005-09-08 05:22:46.000000000 +0100
++++ configmgr/source/treecache/cachedata.hxx	2006-10-03 16:34:25.000000000 +0100
+@@ -75,7 +75,7 @@
+         typedef CacheLine::Path     Path;
+         typedef CacheLine::Name     ModuleName;
+ 	public:
+-		CacheData(memory::HeapManager & _rHeapManager);
++		CacheData();
+ 		virtual ~CacheData();
+ 
+ 		/// retrieve the module tree name for the given path
+@@ -120,9 +120,8 @@
+         typedef std::map<ModuleName, ModuleRef> ModuleList;
+ 		ModuleList& accessModuleList() { return m_aModules; }
+ 
+-        memory::HeapManager & getHeapManager() const { return m_rHeapManager; }
+ 	protected:
+-        virtual ModuleRef doCreateAttachedModule(memory::HeapManager & _rHeapManager, const memory::SegmentAddress & _aLocation, const ModuleName& _aName) CFG_UNO_THROW_RTE(  );
++        virtual ModuleRef doCreateAttachedModule(const memory::SegmentAddress & _aLocation, const ModuleName& _aName) CFG_UNO_THROW_RTE(  );
+ 
+         data::TreeAddress internalGetPartialTree(memory::Accessor const & _aAccessor, Path const & _aPath ) const;
+ 		data::NodeAddress internalGetNode(memory::Accessor const & _aAccessor, const Path& _rPath) const;
+@@ -133,11 +132,8 @@
+ 		ModuleRef internalGetModule(const ModuleName& _aName) const;
+ 		ModuleRef internalGetModule(const Path& _aLocation) const;
+ 
+-        memory::HeapManager & internalHeapManager() { return m_rHeapManager; }
+ 	private:
+ 		ModuleList m_aModules;
+-
+-        memory::HeapManager & m_rHeapManager;
+ 	};
+ ////////////////////////////////////////////////////////////////////////////////
+ 	/** A collection of CacheLines for templates
+@@ -146,8 +142,7 @@
+     class TemplateCacheData : public CacheData	
+ 	{
+ 	public:
+-		TemplateCacheData(memory::HeapManager & _rHeapManager)
+-        : CacheData(_rHeapManager)
++		TemplateCacheData() : CacheData()
+         {
+         }
+ 
+@@ -162,7 +157,7 @@
+                                        ) CFG_UNO_THROW_RTE();
+ 
+ 	private:
+-        virtual ModuleRef doCreateAttachedModule(memory::HeapManager & _rHeapManager, const memory::SegmentAddress & _aLocation, const ModuleName& _aName) CFG_UNO_THROW_RTE(  );
++        virtual ModuleRef doCreateAttachedModule(const memory::SegmentAddress & _aLocation, const ModuleName& _aName) CFG_UNO_THROW_RTE(  );
+ 
+ 		CacheLineRef implNewCacheLine(ModuleName const & _aModule) CFG_UNO_THROW_RTE(  );
+ 	};
+@@ -173,8 +168,7 @@
+     class ExtendedCacheData : public CacheData	
+ 	{
+ 	public:
+-		ExtendedCacheData(memory::HeapManager & _rHeapManager)
+-        : CacheData(_rHeapManager)
++		ExtendedCacheData() : CacheData()
+         {
+         }
+ 
+@@ -200,7 +194,7 @@
+ 		/// remove and return pending changes for the given component
+ 		std::auto_ptr<SubtreeChange> releasePending(ModuleName const & _aModule) CFG_UNO_THROW_RTE(  );
+ 	private:
+-        virtual ModuleRef doCreateAttachedModule(memory::HeapManager & _rHeapManager, const memory::SegmentAddress & _aLocation, const ModuleName& _aName) CFG_UNO_THROW_RTE(  );
++        virtual ModuleRef doCreateAttachedModule(const memory::SegmentAddress & _aLocation, const ModuleName& _aName) CFG_UNO_THROW_RTE(  );
+ 
+ 		ExtendedCacheLineRef implNewCacheLine(ModuleName const & _aModule) CFG_UNO_THROW_RTE(  );
+ 
+diff -x '*~' -u -r -x 'unxlng*' /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/treecache/cachefactory.cxx configmgr/source/treecache/cachefactory.cxx
+--- /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/treecache/cachefactory.cxx	2005-09-08 05:23:00.000000000 +0100
++++ configmgr/source/treecache/cachefactory.cxx	2006-10-03 16:36:53.000000000 +0100
+@@ -63,12 +63,10 @@
+ 
+         if (_xBackend.is())
+         {
+-            memory::HeapManager & rHeap = memory::cacheHeap();
+-
+             rtl::Reference< backend::ICachedDataProvider > xLoader
+-                = new backend::CacheController(_xBackend.get(),rHeap, _xContext);
++                = new backend::CacheController(_xBackend.get(), _xContext);
+ 
+-            xCache.set( new TreeManager(xLoader.get(),rHeap) );
++            xCache.set( new TreeManager(xLoader.get()) );
+         }
+ 
+         return xCache;
+diff -x '*~' -u -r -x 'unxlng*' /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/treecache/cacheline.cxx configmgr/source/treecache/cacheline.cxx
+--- /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/treecache/cacheline.cxx	2005-09-08 05:23:13.000000000 +0100
++++ configmgr/source/treecache/cacheline.cxx	2006-10-03 16:38:39.000000000 +0100
+@@ -77,8 +77,8 @@
+ 
+ // -----------------------------------------------------------------------------	
+ 
+-    CacheLine::CacheLine(Name const & _aModuleName, memory::HeapManager & _rHeapImpl)
+-    : m_storage(_rHeapImpl  )
++    CacheLine::CacheLine(Name const & _aModuleName)
++    : m_storage()
+     , m_base()
+     , m_name(_aModuleName)
+     , m_nDataRefs(0)
+@@ -86,9 +86,9 @@
+ 	}
+ // -----------------------------------------------------------------------------	
+ 	
+-    CacheLine::CacheLine(Name const & _aModuleName, memory::HeapManager & _rHeapImpl, 
++    CacheLine::CacheLine(Name const & _aModuleName, 
+                             memory::SegmentAddress const & _aSegment)
+-    : m_storage(_rHeapImpl,_aSegment.id)
++    : m_storage(_aSegment.id)
+     , m_base( memory::Pointer(_aSegment.base) )
+     , m_name(_aModuleName)
+     , m_nDataRefs(0)
+@@ -117,7 +117,6 @@
+ // -----------------------------------------------------------------------------
+    
+     CacheLineRef CacheLine::createAttached( Name const & _aModuleName, 
+-                                            memory::HeapManager & _rHeapImpl, 
+                                             memory::SegmentAddress const & _aSegment
+                                           ) CFG_UNO_THROW_RTE(  )
+ 	{
+@@ -132,14 +131,13 @@
+ 			return NULL;
+ 		}
+ 
+-		CacheLineRef xResult = new CacheLine(_aModuleName,_rHeapImpl,_aSegment);
++		CacheLineRef xResult = new CacheLine(_aModuleName,_aSegment);
+ 
+ 		return xResult;
+ 	}
+ // -----------------------------------------------------------------------------
+  
+-    CacheLineRef CacheLine::createNew(  Name const & _aModuleName, 
+-                                        memory::HeapManager & _rHeapImpl
++    CacheLineRef CacheLine::createNew(  Name const & _aModuleName
+                                       ) CFG_UNO_THROW_RTE(  )
+ 	{
+ 		if (_aModuleName.isEmpty())
+@@ -148,7 +146,7 @@
+ 			return NULL;
+ 		}
+ 
+-		CacheLineRef xResult = new CacheLine(_aModuleName,_rHeapImpl);
++		CacheLineRef xResult = new CacheLine(_aModuleName);
+ 
+ 		return xResult;
+ 	}
+@@ -251,17 +249,17 @@
+ // -----------------------------------------------------------------------------	
+ // -----------------------------------------------------------------------------	
+ 
+-    ExtendedCacheLine::ExtendedCacheLine(Name const & _aModuleName, memory::HeapManager & _rHeapImpl)
+-    : CacheLine(_aModuleName,_rHeapImpl)
++    ExtendedCacheLine::ExtendedCacheLine(Name const & _aModuleName)
++    : CacheLine(_aModuleName)
+     , m_pPending()
+ 	{
+ 	}
+ 
+ // -----------------------------------------------------------------------------	
+ 
+-    ExtendedCacheLine::ExtendedCacheLine(Name const & _aModuleName, memory::HeapManager & _rHeapImpl, 
++    ExtendedCacheLine::ExtendedCacheLine(Name const & _aModuleName,
+                                             memory::SegmentAddress const & _aSegment)
+-    : CacheLine(_aModuleName,_rHeapImpl,_aSegment)
++    : CacheLine(_aModuleName,_aSegment)
+     , m_pPending()
+ 	{
+ 	}
+@@ -269,7 +267,6 @@
+ // -----------------------------------------------------------------------------
+   
+     ExtendedCacheLineRef ExtendedCacheLine::createAttached( Name const & _aModuleName, 
+-                                                            memory::HeapManager & _rHeapImpl, 
+                                                             memory::SegmentAddress const & _aSegment
+                                                           ) CFG_UNO_THROW_RTE(  )
+ 	{
+@@ -284,14 +281,13 @@
+ 			return NULL;
+ 		}
+ 
+-		ExtendedCacheLineRef xResult = new ExtendedCacheLine(_aModuleName,_rHeapImpl,_aSegment);
++		ExtendedCacheLineRef xResult = new ExtendedCacheLine(_aModuleName,_aSegment);
+ 
+ 		return xResult;
+ 	}
+ // -----------------------------------------------------------------------------
+  
+-    ExtendedCacheLineRef ExtendedCacheLine::createNew(  Name const & _aModuleName, 
+-                                                        memory::HeapManager & _rHeapImpl
++ExtendedCacheLineRef ExtendedCacheLine::createNew(  Name const & _aModuleName
+                                                       ) CFG_UNO_THROW_RTE(  )
+ 	{
+ 		if (_aModuleName.isEmpty())
+@@ -300,7 +296,7 @@
+ 			return NULL;
+ 		}
+ 
+-		ExtendedCacheLineRef xResult = new ExtendedCacheLine(_aModuleName,_rHeapImpl);
++		ExtendedCacheLineRef xResult = new ExtendedCacheLine(_aModuleName);
+ 
+ 		return xResult;
+ 	}
+diff -x '*~' -u -r -x 'unxlng*' /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/treecache/cacheline.hxx configmgr/source/treecache/cacheline.hxx
+--- /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/treecache/cacheline.hxx	2005-09-08 05:23:30.000000000 +0100
++++ configmgr/source/treecache/cacheline.hxx	2006-10-03 16:32:50.000000000 +0100
+@@ -81,11 +81,11 @@
+ 
+         // create a new CacheLine for the given component name
+         static rtl::Reference<CacheLine> 
+-            createNew( Name const & _aModuleName, memory::HeapManager & _rHeapImpl ); 
++            createNew( Name const & _aModuleName ); 
+        
+         // create a new CacheLine attached to the given memory location
+         static rtl::Reference<CacheLine> 
+-            createAttached( Name const & _aModuleName, memory::HeapManager & _rHeapImpl, 
++            createAttached( Name const & _aModuleName, 
+                             memory::SegmentAddress const & _aLocation ); 
+        
+         memory::Segment * getDataSegment();
+@@ -123,12 +123,12 @@
+     protected:
+         // create a new CacheLine attached to the given memory location
+         explicit 
+-        CacheLine( Name const & _aModuleName, memory::HeapManager & _rHeapImpl, 
++        CacheLine( Name const & _aModuleName,
+                     memory::SegmentAddress const & _aLocation ); 
+        
+         // create a new empty CacheLine for the given component name
+         explicit 
+-        CacheLine( Name const & _aModuleName, memory::HeapManager & _rHeapImpl ); 
++        CacheLine( Name const & _aModuleName );
+ 
+         data::NodeAccess internalGetNode(memory::Accessor const & _anAccessor, Path const & _rPath) const;
+ 
+@@ -152,11 +152,11 @@
+ 	public:
+         // create a new CacheLine for the given component name
+         static rtl::Reference<ExtendedCacheLine> 
+-            createNew( Name const & _aModuleName, memory::HeapManager & _rHeapImpl ); 
++            createNew( Name const & _aModuleName ); 
+        
+         // create a new CacheLine attached to the given memory location
+         static rtl::Reference<ExtendedCacheLine> 
+-            createAttached( Name const & _aModuleName, memory::HeapManager & _rHeapImpl, 
++            createAttached( Name const & _aModuleName,
+                             memory::SegmentAddress const & _aLocation ); 
+        
+     // management of pending changes
+@@ -168,11 +168,11 @@
+     private:
+         // create a new empty CacheLine for the given component name
+         explicit 
+-        ExtendedCacheLine( Name const & _aModuleName, memory::HeapManager & _rHeapImpl );
++        ExtendedCacheLine( Name const & _aModuleName );
+         
+         // create a new CacheLine attached to the given memory location
+         explicit 
+-        ExtendedCacheLine( Name const & _aModuleName, memory::HeapManager & _rHeapImpl, 
++        ExtendedCacheLine( Name const & _aModuleName, 
+                             memory::SegmentAddress const & _aLocation ); 
+ 
+     private:
+diff -x '*~' -u -r -x 'unxlng*' /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/treecache/treemanager.cxx configmgr/source/treecache/treemanager.cxx
+--- /opt/OpenOffice/HEAD/build/ood680-m4/configmgr/source/treecache/treemanager.cxx	2006-06-20 00:31:44.000000000 +0100
++++ configmgr/source/treecache/treemanager.cxx	2006-10-03 16:39:16.000000000 +0100
+@@ -238,10 +238,10 @@
+ 
+ 
+ // -------------------------------------------------------------------------
+-TreeManager::TreeManager(BackendCacheRef const & _xBackend, memory::HeapManager & _rCacheHeapManager) 
++TreeManager::TreeManager(BackendCacheRef const & _xBackend) 
+ : m_xCacheController(_xBackend)
+ , m_aCacheList()
+-, m_aTemplates(new CacheData(_rCacheHeapManager))
++, m_aTemplates(new CacheData())
+ , m_bEnableAsync(true)
+ {
+     OSL_PRECOND(_xBackend.is(),"Trying to create a TreeManager without a backend");
+@@ -290,12 +290,6 @@
+ 
+ // -------------------------------------------------------------------------
+ 
+-memory::HeapManager & TreeManager::getCacheHeapManager() const
+-{
+-    return m_aTemplates.get()->getHeapManager();
+-}
+-// -------------------------------------------------------------------------
+-
+ TreeManager::CacheRef TreeManager::getCacheAlways(RequestOptions const & _aOptions)
+ {
+     osl::MutexGuard aGuard( m_aCacheList.mutex() );
+@@ -303,7 +297,7 @@
+     CacheRef aResult = m_aCacheList.get(_aOptions);
+     if (!aResult.is())
+     {
+-        CacheRef aNewCache( new Cache(getCacheHeapManager(), ConfigChangeBroadcaster::newBroadcastHelper()) );
++        CacheRef aNewCache( new Cache(ConfigChangeBroadcaster::newBroadcastHelper()) );
+         aResult = m_aCacheList.insert(_aOptions,aNewCache);
+     }
+     return aResult;
