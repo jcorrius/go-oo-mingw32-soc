@@ -24,6 +24,7 @@
 
 //start test includes
 #include <sfx2/objsh.hxx>
+#include <sfx2/viewfrm.hxx>
 #include <sfx2/app.hxx>
 
 #include <toolkit/awt/vclxwindow.hxx>
@@ -240,12 +241,7 @@ ScVbaApplication::setCutCopyMode( const uno::Any& _cutcopymode ) throw (uno::Run
 uno::Any SAL_CALL
 ScVbaApplication::getStatusBar() throw (uno::RuntimeException)
 {
-	uno::Any result;
-    if( getDisplayStatusBar() )
-	    result <<= sal_False;
-    else
-        result <<= sal_True;
-	return result;
+	return uno::makeAny( !getDisplayStatusBar() );
 }
 
 void SAL_CALL 
@@ -259,8 +255,8 @@ ScVbaApplication::setStatusBar( const uno::Any& _statusbar ) throw (uno::Runtime
     if( _statusbar >>= sText )
     {
         setDisplayStatusBar( sal_True );
-        //xStatusIndicator->start( sText, 100 );
-        xStatusIndicator->setText( sText );
+        xStatusIndicator->start( sText, 100 );
+        //xStatusIndicator->setText( sText );
     }
     else if( _statusbar >>= bDefault )
     {
@@ -460,47 +456,63 @@ ScVbaApplication::GoTo( const uno::Any& Reference, const uno::Any& Scroll ) thro
 sal_Int32 SAL_CALL
 ScVbaApplication::getCursor() throw (uno::RuntimeException)
 {
-    SfxViewShell* pView = SfxViewShell::Current();
-    if( pView ){
-        //printf("\nget Cursor...%d\n", pView->GetWindow()->GetSystemWindow()->GetPointer().GetStyle());
-        //return pView->GetWindow()->GetPointer().GetStyle();
-        return pView->GetWindow()->GetSystemWindow()->GetPointer().GetStyle();
+	SfxObjectShell* pObject = SfxObjectShell::GetWorkingDocument();//Current();
+    SfxViewFrame* pFrame = SfxViewFrame::GetFirst( pObject );
+    sal_Int32 result = pFrame->GetFrame()->GetWindow().GetSystemWindow()->GetPointer().GetStyle();
+    
+    switch( result )
+    {
+        case POINTER_ARROW:
+            return vba::Excel::XlMousePointer::xlNorthwestArrow;
+        case POINTER_NULL:
+            return vba::Excel::XlMousePointer::xlDefault;
+        case POINTER_WAIT:
+            return vba::Excel::XlMousePointer::xlWait;
+        case POINTER_TEXT:
+            return vba::Excel::XlMousePointer::xlIBeam;
+        default:
+            return vba::Excel::XlMousePointer::xlDefault;
     }
-    return vba::Excel::XlMousePointer::xlDefault;
 }
 
 void SAL_CALL 
 ScVbaApplication::setCursor( sal_Int32 _cursor ) throw (uno::RuntimeException)
 {
-    SfxViewShell* pView;// = SfxViewShell::Current();
-    pView = SfxViewShell::GetFirst();
-    switch( _cursor )
+    SfxObjectShell* pObject = SfxObjectShell::GetWorkingDocument();
+    for( SfxViewFrame* pFrame = SfxViewFrame::GetFirst( pObject ); pFrame; pFrame = SfxViewFrame::GetNext( *pFrame, pObject ) )
     {
-        case vba::Excel::XlMousePointer::xlNorthwestArrow:
-        case vba::Excel::XlMousePointer::xlWait:
-        case vba::Excel::XlMousePointer::xlIBeam:
-            while( pView ){
+        switch( _cursor )
+        {
+            case vba::Excel::XlMousePointer::xlNorthwestArrow:
+            {
+                const Pointer& rPointer( POINTER_ARROW );
+                pFrame->GetFrame()->GetWindow().GetSystemWindow()->SetPointer( rPointer );
+                pFrame->GetFrame()->GetWindow().GetSystemWindow()->EnableChildPointerOverwrite( sal_False );
+                break;
+            }
+            case vba::Excel::XlMousePointer::xlWait:
+            case vba::Excel::XlMousePointer::xlIBeam:
+            {
                 const Pointer& rPointer( _cursor );
                 //It will set the edit window, toobar and statusbar's mouse pointer.
-                pView->GetWindow()->GetSystemWindow()->SetPointer( rPointer );
-                pView->GetWindow()->GetSystemWindow()->EnableChildPointerOverwrite( sal_True );
+                pFrame->GetFrame()->GetWindow().GetSystemWindow()->SetPointer( rPointer );
+                pFrame->GetFrame()->GetWindow().GetSystemWindow()->EnableChildPointerOverwrite( sal_True );
                 //It only set the edit window's mouse pointer
-                //pView->GetWindow()->SetPointer( rPointer );
-                //pView->GetWindow()->EnableChildPointerOverwrite( sal_True );
-                //printf("\nset Cursor...%d\n", pView->GetWindow()->GetType()/*GetPointer().GetStyle()*/);
-                pView = SfxViewShell::GetNext( *pView );
+                //pFrame->GetFrame()->GetWindow().SetPointer( rPointer );
+                //pFrame->GetFrame()->GetWindow().EnableChildPointerOverwrite( sal_True );
+                //printf("\nset Cursor...%d\n", pFrame->GetFrame()->GetWindow().GetType());
+                break;
             }
-            break;
-        case vba::Excel::XlMousePointer::xlDefault:
-            while( pView ){
-                const Pointer& rPointer( 0 );
-                pView->GetWindow()->GetSystemWindow()->SetPointer( rPointer );
-                pView->GetWindow()->GetSystemWindow()->EnableChildPointerOverwrite( sal_False );
-                pView = SfxViewShell::GetNext( *pView );
+            case vba::Excel::XlMousePointer::xlDefault:
+            {
+                const Pointer& rPointer( POINTER_NULL );
+                pFrame->GetFrame()->GetWindow().GetSystemWindow()->SetPointer( rPointer );
+                pFrame->GetFrame()->GetWindow().GetSystemWindow()->EnableChildPointerOverwrite( sal_False );
+                break;
             }
-            break;
-        default:
-            throw uno::RuntimeException( rtl::OUString( 
-                RTL_CONSTASCII_USTRINGPARAM("Unknown value for Cursor pointer")), uno::Reference< uno::XInterface >() );
-    }
+            default:
+                throw uno::RuntimeException( rtl::OUString( 
+                        RTL_CONSTASCII_USTRINGPARAM("Unknown value for Cursor pointer")), uno::Reference< uno::XInterface >() );
+        }
+	}
 }
