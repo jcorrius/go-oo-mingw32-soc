@@ -2729,7 +2729,7 @@ ScVbaRange::createArrayHelper(  ) const
 uno::Reference< beans::XPropertySetInfo > 
 ScVbaRange::getPropertySetInfo(  ) throw (uno::RuntimeException)
 {
-    uno::Reference< beans::XPropertySetInfo > xInfo( createPropertySetInfo( getInfoHelper() ) );
+    static uno::Reference< beans::XPropertySetInfo > xInfo( createPropertySetInfo( getInfoHelper() ) );
     return xInfo;
 }
 
