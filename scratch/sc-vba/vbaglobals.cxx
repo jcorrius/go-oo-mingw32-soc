@@ -184,7 +184,12 @@ ScVbaGlobals::getGlobals(  ) throw (::uno::RuntimeException)
 
 	uno::Reference< vba::XWorkbook > xWorkbook = mxApplication->getActiveWorkbook();
 	if( xWorkbook.is() )
+	{
 		maGlobals[ nMax++ ] <<= xWorkbook;
+		uno::Reference< vba::XWorksheet > xWorksheet = xWorkbook->getActiveSheet();
+		if( xWorksheet.is() )
+			maGlobals[ nMax++ ] <<= xWorksheet;
+	}
 	maGlobals.realloc( nMax );
 	return maGlobals;
 }
