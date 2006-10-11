@@ -29,6 +29,11 @@
 #include <com/sun/star/form/FormComponentType.hpp>
 #include <tools/string.hxx>
 
+#include <svx/svdouno.hxx>
+
+#include "cellsuno.hxx"
+#include "drwlayer.hxx"
+
 #include "vbaoutline.hxx"
 #include "vbarange.hxx"
 #include "vbacomments.hxx"
@@ -564,26 +569,32 @@ ScVbaWorksheet::setValue( const ::rtl::OUString& aPropertyName, const uno::Any& 
 uno::Any SAL_CALL 
 ScVbaWorksheet::getValue( const ::rtl::OUString& aPropertyName ) throw (beans::UnknownPropertyException, uno::RuntimeException)
 {
-	OSL_TRACE("ScVbaWorksheet::getValue( %s )", 
-		rtl::OUStringToOString( aPropertyName, RTL_TEXTENCODING_UTF8 ).getStr() );
 	uno::Any aProp = getControl( aPropertyName );
 	if ( !aProp.hasValue() )
 		throw beans::UnknownPropertyException(); // unsupported operation
+	// #TODO we need a factory here when we support
+	// more control types
+	sal_Int32 nClassId = -1;	
+	uno::Reference< beans::XPropertySet > xProps( aProp, uno::UNO_QUERY_THROW );	
+	const static rtl::OUString sClassId( RTL_CONSTASCII_USTRINGPARAM("ClassId") );
+	xProps->getPropertyValue( sClassId ) >>= nClassId;
+	if ( nClassId == form::FormComponentType::COMBOBOX )
+	{
+		uno::Reference< vba::XComboBox > xCbx( new ScVbaComboBox( m_xContext, xProps ) ); 
+		return uno::makeAny( xCbx );
+	}
+
 	return aProp;
 }
 
 ::sal_Bool SAL_CALL 
 ScVbaWorksheet::hasMethod( const ::rtl::OUString& aName ) throw (uno::RuntimeException)
 {
-	//OSL_TRACE("ScVbaWorksheet::hasMethod( %s )", 
-	//	rtl::OUStringToOString( aName, RTL_TEXTENCODING_UTF8 ).getStr() );
 	return sal_False;
 }
 ::sal_Bool SAL_CALL 
 ScVbaWorksheet::hasProperty( const ::rtl::OUString& aName ) throw (uno::RuntimeException)
 {
-	//OSL_TRACE("ScVbaWorksheet::hasProperty( %s )", 
-	//	rtl::OUStringToOString( aName, RTL_TEXTENCODING_UTF8 ).getStr() );
 	if ( getControl( aName ).hasValue() )
 		return sal_True;
 	return sal_False;
@@ -591,29 +602,41 @@ ScVbaWorksheet::hasProperty( const ::rtl::OUString& aName ) throw (uno::RuntimeE
 uno::Any 
 ScVbaWorksheet::getControl( const ::rtl::OUString& sName )
 {
-	uno::Reference< drawing::XDrawPageSupplier > xDrwSup( getSheet(), uno::UNO_QUERY_THROW );
-	uno::Reference< container::XIndexAccess > xIndexAcc( xDrwSup->getDrawPage(), uno::UNO_QUERY_THROW );
-	sal_Int32 nCount = xIndexAcc->getCount();
-	for ( sal_Int32 index=0; index < nCount; ++index )
+	ScDocShell* pShell = NULL;
+	uno::Reference< sheet::XScenarioEnhanced > xIf( getSheet(), uno::UNO_QUERY_THROW );
+	ScTableSheetObj* pTab= static_cast< ScTableSheetObj* >( xIf.get() );
+	if ( pTab && ( pShell = pTab->GetDocShell() ) )
 	{
-		uno::Reference< drawing::XControlShape > xCntrlShape( xIndexAcc->getByIndex( index ), uno::UNO_QUERY_THROW );
-		uno::Reference< container::XNamed > xNamed( xCntrlShape->getControl(), uno::UNO_QUERY_THROW );
-		if (  sName.equalsIgnoreAsciiCase( xNamed->getName() ) )
+		ScDrawLayer* pDrawLayer = pShell->MakeDrawLayer();
+		SCTAB nTab = 0;
+		// make GetTab_Impl() public or this class a friend
+		const ScRangeList& rRanges = pTab->GetRangeList();
+		const ScRange* pFirst = rRanges.GetObject(0);
+		if (pFirst)
+			nTab = pFirst->aStart.Tab();
+
+		SdrPage* pPage = pDrawLayer->GetPage(static_cast<sal_uInt16>(nTab));
+		if ( pPage )
 		{
-			// #TODO we need a factory here when we support
-			// more control types
-			sal_Int32 nClassId = -1;	
-			uno::Reference< beans::XPropertySet > xProps( xNamed, uno::UNO_QUERY_THROW );	
-			const static rtl::OUString sClassId( RTL_CONSTASCII_USTRINGPARAM("ClassId") );
-			xProps->getPropertyValue( sClassId ) >>= nClassId;
-			if ( nClassId == form::FormComponentType::COMBOBOX )
+			ULONG nCount = pPage->GetObjCount(); 
+			for ( ULONG index=0; index<nCount; ++index )
 			{
-				uno::Reference< vba::XComboBox > xCbx( new ScVbaComboBox( m_xContext, xProps ) ); 
-				return uno::makeAny( xCbx );
+				SdrObject* pObj = pPage->GetObj( index );
+				if ( pObj )
+				{
+					
+					SdrUnoObj* pUnoObj = PTR_CAST(SdrUnoObj, pObj);
+					if ( pUnoObj )
+					{
+						uno::Reference< container::XNamed > xNamed( pUnoObj->GetUnoControlModel(), uno::UNO_QUERY_THROW );
+						if ( sName.equals( xNamed->getName() ) )
+							return uno::makeAny( xNamed );
+					}
+				}
 			}
-			
 		}
-	}	
+	}
+
 	return uno::Any();
 }
 
