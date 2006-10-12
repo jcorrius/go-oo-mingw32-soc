@@ -11,6 +11,8 @@
 #include <com/sun/star/text/XTextRange.hpp>
 #include <com/sun/star/sheet/XCellRangeAddressable.hpp>
 #include <com/sun/star/table/CellRangeAddress.hpp>
+#include <com/sun/star/sheet/XSpreadsheetView.hpp>
+#include <com/sun/star/sheet/XCellRangeReferrer.hpp>
 #include <com/sun/star/sheet/XSheetCellRange.hpp>
 #include <com/sun/star/sheet/XSpreadsheet.hpp>
 #include <com/sun/star/sheet/XSheetCellCursor.hpp>
@@ -808,16 +810,18 @@ getRangeForName( const uno::Reference< uno::XComponentContext >& xContext, const
 	USHORT nFlags = 0;
 	if ( !getCellRangesForAddress( nFlags, sAddress, pDocSh, aCellRanges, eConv ) )
 		throw uno::RuntimeException();
+
+	bool bTabFromReferrer = !( nFlags & SCA_TAB_3D );
+
 	for ( ScRange* pRange = aCellRanges.First() ; pRange; pRange = aCellRanges.Next() )
 	{
-		bool bTabFromReferrer = !( nFlags & SCA_TAB_3D );
-		pRange->aStart.SetCol( refRange.aStart.Col() + pRange->aStart.Col() );	
-		pRange->aStart.SetRow( refRange.aStart.Row() + pRange->aStart.Row() );	
+		pRange->aStart.SetCol( refRange.aStart.Col() + pRange->aStart.Col() );
+		pRange->aStart.SetRow( refRange.aStart.Row() + pRange->aStart.Row() );
                 pRange->aStart.SetTab( bTabFromReferrer ? refRange.aStart.Tab()  : pRange->aStart.Tab() );
-		pRange->aEnd.SetCol( refRange.aStart.Col() + pRange->aEnd.Col() );	
-		pRange->aEnd.SetRow( refRange.aStart.Row() + pRange->aEnd.Row() );	
+		pRange->aEnd.SetCol( refRange.aStart.Col() + pRange->aEnd.Col() );
+		pRange->aEnd.SetRow( refRange.aStart.Row() + pRange->aEnd.Row() );
                 pRange->aEnd.SetTab( bTabFromReferrer ? refRange.aEnd.Tab()  : pRange->aEnd.Tab() );
-	}	
+	}
 
 	// Single range
 	if ( aCellRanges.First() == aCellRanges.Last() )
@@ -1908,6 +1912,12 @@ uno::Reference< vba::XInterior > ScVbaRange::Interior( ) throw (uno::RuntimeExce
 uno::Reference< vba::XRange >
 ScVbaRange::Range( const uno::Any &Cell1, const uno::Any &Cell2 ) throw (uno::RuntimeException)
 {
+    return Range( Cell1, Cell2, false );
+}
+uno::Reference< vba::XRange >
+ScVbaRange::Range( const uno::Any &Cell1, const uno::Any &Cell2, bool bForceUseInpuRangeTab ) throw (uno::RuntimeException)
+
+{
 	RangeHelper thisRange( mxRange );
 	uno::Reference< table::XCellRange > xRanges = thisRange.getCellRangeFromSheet();
 	uno::Reference< sheet::XCellRangeAddressable > xAddressable( xRanges, uno::UNO_QUERY_THROW );
@@ -1925,6 +1935,7 @@ ScVbaRange::Range( const uno::Any &Cell1, const uno::Any &Cell2 ) throw (uno::Ru
 
 	table::CellRangeAddress resultAddress;
 
+	ScRange aRange;
 	// Cell1 defined only
 	if ( !Cell2.hasValue() )
 	{
@@ -1949,13 +1960,16 @@ ScVbaRange::Range( const uno::Any &Cell1, const uno::Any &Cell2 ) throw (uno::Ru
 		resultAddress.StartRow = ( cell1.StartRow <  cell2.StartRow ) ? cell1.StartRow : cell2.StartRow;
 		resultAddress.EndColumn = ( cell1.EndColumn >  cell2.EndColumn ) ? cell1.EndColumn : cell2.EndColumn;
 		resultAddress.EndRow = ( cell1.EndRow >  cell2.EndRow ) ? cell1.EndRow : cell2.EndRow;
+		if ( bForceUseInpuRangeTab )
+		{
+			if ( cell1.Sheet != cell2.Sheet )
+				throw uno::RuntimeException();
+			resultAddress.Sheet = cell1.Sheet;
+		}
+		ScUnoConversion::FillScRange( aRange, resultAddress );
 	}
-	return uno::Reference< vba::XRange > ( new ScVbaRange( m_xContext, 
-		xReferrer->getCellRangeByPosition(
-			resultAddress.StartColumn,
-			resultAddress.StartRow,
-			resultAddress.EndColumn,
-			resultAddress.EndRow ) ) );
+	uno::Reference< table::XCellRange > xCellRange( new ScCellRangeObj( getDocShellFromRange( mxRange ), aRange )  );
+	return uno::Reference< vba::XRange > ( new ScVbaRange( m_xContext, xCellRange )  );
 }
 
 // Allow access to underlying openoffice uno api ( useful for debugging
@@ -2951,3 +2965,57 @@ ScVbaRange::getCellRangesBase() throw( uno::RuntimeException )
 		throw uno::RuntimeException( rtl::OUString::createFromAscii("General Error creating range - Unknown" ), uno::Reference< uno::XInterface >() );
 	return pUnoRangesBase;
 }
+
+// #TODO remove this ugly application processing
+// Process an application Range request e.g. 'Range("a1,b2,a4:b6")
+uno::Reference< vba::XRange >
+ScVbaRange::ApplicationRange( const uno::Reference< uno::XComponentContext >& xContext, const css::uno::Any &Cell1, const css::uno::Any &Cell2 ) throw (css::uno::RuntimeException)
+{
+	// Althought the documentation seems clear that Range without a 
+	// qualifier then its a shortcut for ActiveSheet.Range
+	// however, similarly Application.Range is apparently also a 
+	// shortcut for ActiveSheet.Range
+	// The is however a subtle behavioural difference I've come across 
+	// wrt to named ranges.
+	// If a named range "test" exists { Sheet1!$A1 } and the active sheet
+	// is Sheet2 then the following will fail
+	// msgbox ActiveSheet.Range("test").Address ' failes
+	// msgbox WorkSheets("Sheet2").Range("test").Address
+	// but !!!
+	// msgbox Range("test").Address ' works
+	// msgbox Application.Range("test").Address ' works
+
+	// Single param Range 
+	rtl::OUString sRangeName;
+	Cell1 >>= sRangeName;
+	if ( Cell1.hasValue() && !Cell2.hasValue() && sRangeName.getLength() )
+	{
+		const static rtl::OUString sNamedRanges( RTL_CONSTASCII_USTRINGPARAM("NamedRanges"));
+		uno::Reference< beans::XPropertySet > xPropSet( getCurrentDocument(), uno::UNO_QUERY_THROW );
+		
+		uno::Reference< container::XNameAccess > xNamed( xPropSet->getPropertyValue( sNamedRanges ), uno::UNO_QUERY_THROW );
+		uno::Reference< sheet::XCellRangeReferrer > xReferrer;
+		try
+		{
+			xReferrer.set ( xNamed->getByName( sRangeName ), uno::UNO_QUERY );
+		}
+		catch( uno::Exception& e )
+		{
+			// do nothing
+		}
+		if ( xReferrer.is() )
+		{
+			uno::Reference< table::XCellRange > xRange = xReferrer->getReferredCells();
+			if ( xRange.is() )
+			{
+				uno::Reference< vba::XRange > xVbRange =  new  ScVbaRange( xContext, xRange );
+				return xVbRange;
+			}
+		}
+	}
+	uno::Reference< sheet::XSpreadsheetView > xView( getCurrentDocument()->getCurrentController(), uno::UNO_QUERY );
+	uno::Reference< table::XCellRange > xSheetRange( xView->getActiveSheet(), uno::UNO_QUERY_THROW ); 
+	ScVbaRange xVbSheetRange( xContext, xSheetRange );
+	return xVbSheetRange.Range( Cell1, Cell2, true ); 
+}
+

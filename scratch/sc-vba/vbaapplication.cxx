@@ -375,8 +375,8 @@ ScVbaApplication::Range( const uno::Any& Cell1, const uno::Any& Cell2 ) throw (u
 			}
 		}
 	}
-
-	return uno::makeAny( getActiveSheet()->Range( Cell1, Cell2 ) ); 
+	uno::Reference< vba::XRange > xVbRange;
+	return uno::makeAny( ScVbaRange::ApplicationRange( m_xContext, Cell1, Cell2 ) ); 
 }
 
 uno::Reference< vba::XWorksheet > SAL_CALL 
