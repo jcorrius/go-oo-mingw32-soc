@@ -239,14 +239,7 @@ ScVbaRangeAreas::createCollectionObject( const uno::Any& aSource )
 ScDocShell* getDocShellFromRange( const uno::Reference< table::XCellRange >& xRange )
 {
 	// need the ScCellRangeObj to get docshell
-	ScCellRangeObj* pUno = NULL;
-	uno::Reference< table::XColumnRowRange > xRowRange( xRange, uno::UNO_QUERY );;  // CellRange
-	uno::Reference< sheet::XScenarioEnhanced > xScenario( xRange, uno::UNO_QUERY ); // sheetRange
-	if ( xScenario.is() )
-		// why can't I do a static cast here
-		pUno = dynamic_cast<  ScCellRangeObj* >( xScenario.get() );
-	else if ( xRowRange.is() )
-		pUno = static_cast<  ScCellRangeObj* >( xRowRange.get() );
+	ScCellRangeObj* pUno = static_cast<  ScCellRangeObj* >( xRange.get() );
 			
 	if ( !pUno )
 		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Failed to access underlying uno range object" ) ), uno::Reference< uno::XInterface >()  );
