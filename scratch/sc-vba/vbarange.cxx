@@ -239,7 +239,15 @@ ScVbaRangeAreas::createCollectionObject( const uno::Any& aSource )
 ScDocShell* getDocShellFromRange( const uno::Reference< table::XCellRange >& xRange )
 {
 	// need the ScCellRangeObj to get docshell
-	ScCellRangeObj* pUno = dynamic_cast<  ScCellRangeObj* >( xRange.get() );
+	ScCellRangeObj* pUno = NULL;
+	uno::Reference< table::XColumnRowRange > xRowRange( xRange, uno::UNO_QUERY );;  // CellRange
+	uno::Reference< sheet::XScenarioEnhanced > xScenario( xRange, uno::UNO_QUERY ); // sheetRange
+	if ( xScenario.is() )
+		// why can't I do a static cast here
+		pUno = dynamic_cast<  ScCellRangeObj* >( xScenario.get() );
+	else if ( xRowRange.is() )
+		pUno = static_cast<  ScCellRangeObj* >( xRowRange.get() );
+			
 	if ( !pUno )
 		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Failed to access underlying uno range object" ) ), uno::Reference< uno::XInterface >()  );
 	return pUno->GetDocShell();
@@ -1926,6 +1934,8 @@ ScVbaRange::Range( const uno::Any &Cell1, const uno::Any &Cell2, bool bForceUseI
 		xRanges->getCellRangeByPosition( getColumn()-1, getRow()-1, 
 				xAddressable->getRangeAddress().EndColumn, 
 				xAddressable->getRangeAddress().EndRow );
+	// xAddressable now for this range	
+	xAddressable.set( xReferrer, uno::UNO_QUERY_THROW );
 
 	
 	if( !Cell1.hasValue() )
@@ -1934,6 +1944,7 @@ ScVbaRange::Range( const uno::Any &Cell1, const uno::Any &Cell2, bool bForceUseI
 			uno::Reference< XInterface >() );
 
 	table::CellRangeAddress resultAddress;
+	table::CellRangeAddress parentRangeAddress = xAddressable->getRangeAddress();
 
 	ScRange aRange;
 	// Cell1 defined only
@@ -1962,14 +1973,47 @@ ScVbaRange::Range( const uno::Any &Cell1, const uno::Any &Cell2, bool bForceUseI
 		resultAddress.EndRow = ( cell1.EndRow >  cell2.EndRow ) ? cell1.EndRow : cell2.EndRow;
 		if ( bForceUseInpuRangeTab )
 		{
+			// this is a call from Application.Range( x,y )
+			// its possiblefor x or y to specify a different sheet from
+			// the current or active on ( but they must be the same )
 			if ( cell1.Sheet != cell2.Sheet )
 				throw uno::RuntimeException();
-			resultAddress.Sheet = cell1.Sheet;
+			parentRangeAddress.Sheet = cell1.Sheet;
+		}
+		else
+		{
+			// this is not a call from Application.Range( x,y )
+			// if a different sheet from this range is specified it's
+			// an error
+			if ( parentRangeAddress.Sheet != cell1.Sheet 
+			|| parentRangeAddress.Sheet != cell2.Sheet 
+			)
+				throw uno::RuntimeException();
+
 		}
 		ScUnoConversion::FillScRange( aRange, resultAddress );
 	}
-	uno::Reference< table::XCellRange > xCellRange( new ScCellRangeObj( getDocShellFromRange( mxRange ), aRange )  );
+	ScRange parentAddress;
+	ScUnoConversion::FillScRange( parentAddress, parentRangeAddress);	
+	uno::Reference< table::XCellRange > xCellRange;
+	if ( aRange.aStart.Col() >= 0 && aRange.aStart.Row() >= 0 && aRange.aEnd.Col() >= 0 && aRange.aEnd.Row() >= 0 )
+	{
+		sal_Int32 nStartX = parentAddress.aStart.Col() + aRange.aStart.Col();
+		sal_Int32 nStartY = parentAddress.aStart.Row() + aRange.aStart.Row();
+		sal_Int32 nEndX = parentAddress.aStart.Col() + aRange.aEnd.Col();
+		sal_Int32 nEndY = parentAddress.aStart.Row() + aRange.aEnd.Row();
+
+		if ( nStartX <= nEndX && nEndX <= parentAddress.aEnd.Col() &&
+			 nStartY <= nEndY && nEndY <= parentAddress.aEnd.Row() )
+		{
+			ScRange aNew( (SCCOL)nStartX, (SCROW)nStartY, parentAddress.aStart.Tab(),
+						  (SCCOL)nEndX, (SCROW)nEndY, parentAddress.aEnd.Tab() );
+			xCellRange = new ScCellRangeObj( getDocShellFromRange( mxRange ), aNew );
+		}
+	}
+		
 	return uno::Reference< vba::XRange > ( new ScVbaRange( m_xContext, xCellRange )  );
+
 }
 
 // Allow access to underlying openoffice uno api ( useful for debugging
@@ -3015,7 +3059,8 @@ ScVbaRange::ApplicationRange( const uno::Reference< uno::XComponentContext >& xC
 	}
 	uno::Reference< sheet::XSpreadsheetView > xView( getCurrentDocument()->getCurrentController(), uno::UNO_QUERY );
 	uno::Reference< table::XCellRange > xSheetRange( xView->getActiveSheet(), uno::UNO_QUERY_THROW ); 
-	ScVbaRange xVbSheetRange( xContext, xSheetRange );
-	return xVbSheetRange.Range( Cell1, Cell2, true ); 
+	ScVbaRange* pRange = new ScVbaRange( xContext, xSheetRange );
+	uno::Reference< vba::XRange > xVbSheetRange( pRange );
+	return pRange->Range( Cell1, Cell2, true ); 
 }
 
