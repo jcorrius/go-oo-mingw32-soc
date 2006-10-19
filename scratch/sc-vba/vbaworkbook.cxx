@@ -132,7 +132,7 @@ ScVbaWorkbook::Close( const uno::Any &rSaveArg, const uno::Any &rFileArg,
 	else
 		xModifiable->setModified( false );		
 
-	uno::Reference< util::XCloseable > xCloseable( getCurrentDocument(), uno::UNO_QUERY );
+	uno::Reference< util::XCloseable > xCloseable( getModel(), uno::UNO_QUERY );
 
 	if( xCloseable.is() )
 		// use close(boolean DeliverOwnership)
