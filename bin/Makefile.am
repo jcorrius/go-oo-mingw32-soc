@@ -19,7 +19,6 @@ script_files = \
 	ootestapi.in \
 	ootesttool.in \
 	ootool.in \
-	ooo-wrapper.in \
 	ootouch \
 	oowintool \
 	openoffice-xlate-lang \
