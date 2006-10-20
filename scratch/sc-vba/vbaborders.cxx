@@ -61,10 +61,16 @@ private:
 				aTableBorder.IsRightLineValid = sal_True;
 				aTableBorder.RightLine = rBorderLine;
 				break;
+			case XlBordersIndex::xlInsideVertical:
+				aTableBorder.IsVerticalLineValid = sal_True;
+				aTableBorder.VerticalLine = rBorderLine;
+				break;
+			case XlBordersIndex::xlInsideHorizontal:
+				aTableBorder.IsHorizontalLineValid = sal_True;
+				aTableBorder.HorizontalLine = rBorderLine;
+				break;
 			case XlBordersIndex::xlDiagonalDown:
 			case XlBordersIndex::xlDiagonalUp:
-			case XlBordersIndex::xlInsideVertical:
-			case XlBordersIndex::xlInsideHorizontal:
 				// #TODO have to ignore at the momement, would be
 				// nice to investigate what we can do here
 				break; 
@@ -98,10 +104,17 @@ private:
 				if ( aTableBorder.IsRightLineValid )
 					rBorderLine = aTableBorder.RightLine;
 				break;
+			case XlBordersIndex::xlInsideVertical:
+                if ( aTableBorder.IsVerticalLineValid )
+                    rBorderLine = aTableBorder.VerticalLine;
+				break;
+			case XlBordersIndex::xlInsideHorizontal:
+                if ( aTableBorder.IsHorizontalLineValid )
+                    rBorderLine = aTableBorder.HorizontalLine;
+				break;
+
 			case XlBordersIndex::xlDiagonalDown:
 			case XlBordersIndex::xlDiagonalUp:
-			case XlBordersIndex::xlInsideVertical:
-			case XlBordersIndex::xlInsideHorizontal:
 				// #TODO have to ignore at the momement, would be
 				// nice to investigate what we can do here
 				break; 
@@ -222,10 +235,34 @@ public:
 		// always return xlContinuous;
 		return uno::makeAny( XlLineStyle::xlContinuous );
 	}
-	void SAL_CALL setLineStyle( const uno::Any& /*_linestyle*/ ) throw (uno::RuntimeException) 
+	void SAL_CALL setLineStyle( const uno::Any& _linestyle ) throw (uno::RuntimeException) 
 	{
 		// Urk no choice but to silently ignore we don't support this attribute
 		// #TODO would be nice to support the excel line styles
+        sal_Int32 nLineStyle;
+        _linestyle >>= nLineStyle;
+        table::BorderLine aBorderLine;
+		if ( getBorderLine( aBorderLine ) )
+		{
+			switch ( nLineStyle )
+			{
+                case XlLineStyle::xlContinuous:
+                case XlLineStyle::xlDash:
+                case XlLineStyle::xlDashDot:
+                case XlLineStyle::xlDashDotDot:
+                case XlLineStyle::xlDot:
+                case XlLineStyle::xlDouble:
+                case XlLineStyle::xlLineStyleNone:
+                case XlLineStyle::xlSlantDashDot:
+                    break;
+                default:
+                    throw uno::RuntimeException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "Bad param" ) ), uno::Reference< uno::XInterface >() );
+                    break;
+            }
+			setBorderLine( aBorderLine );
+        }
+		else
+            throw uno::RuntimeException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "Method failed" ) ), uno::Reference< uno::XInterface >() );
 	}
 };
 
@@ -334,33 +371,62 @@ ScVbaBorders::getItemByIntIndex( const sal_Int32 nIndex )  throw (uno::RuntimeEx
 
 uno::Any SAL_CALL ScVbaBorders::getColor() throw (uno::RuntimeException)
 {
+    printf("\nGet Borders Color...%d\n", getCount());
 	throw uno::RuntimeException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "No Implementation available" ) ), uno::Reference< uno::XInterface >() );
 }
 void SAL_CALL ScVbaBorders::setColor( const uno::Any& _color ) throw (uno::RuntimeException)
 {
+    printf("\nSet Borders Color...%d\n", getCount());
 	throw uno::RuntimeException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "No Implementation available" ) ), uno::Reference< uno::XInterface >() );
 }
 uno::Any SAL_CALL ScVbaBorders::getColorIndex() throw (uno::RuntimeException)
 {
+    printf("\nGet Borders ColorIndex...%d\n", getCount());
 	throw uno::RuntimeException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "No Implementation available" ) ), uno::Reference< uno::XInterface >() );
 }
 void SAL_CALL ScVbaBorders::setColorIndex( const uno::Any& _colorindex ) throw (uno::RuntimeException)
 {
+    printf("\nSet Borders ColorIndex...%d\n", getCount());
 	throw uno::RuntimeException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "No Implementation available" ) ), uno::Reference< uno::XInterface >() );
 }
 uno::Any SAL_CALL ScVbaBorders::getLineStyle() throw (uno::RuntimeException)
 {
-	throw uno::RuntimeException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "No Implementation available" ) ), uno::Reference< uno::XInterface >() );
+     //TODO if OOo support
+	//throw uno::RuntimeException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "No Implementation available" ) ), uno::Reference< uno::XInterface >() );
 }
 void SAL_CALL ScVbaBorders::setLineStyle( const uno::Any& _linestyle ) throw (uno::RuntimeException)
 {
-	throw uno::RuntimeException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "No Implementation available" ) ), uno::Reference< uno::XInterface >() );
+    sal_Int32 count = getCount();
+    for( sal_Int32 i = 0; i < count ; i++ )
+    {
+        uno::Reference< XBorder > xBorder( getItemByIntIndex( supportedIndexTable[i] ), uno::UNO_QUERY_THROW );
+        xBorder->setLineStyle( _linestyle );
+    }
 }
 uno::Any SAL_CALL ScVbaBorders::getWeight() throw (uno::RuntimeException)
 {
-	throw uno::RuntimeException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "No Implementation available" ) ), uno::Reference< uno::XInterface >() );
+    sal_Int32 count = getCount();
+    uno::Any weight;
+    for( sal_Int32 i = 0; i < count ; i++ )
+    {
+        if( XlBordersIndex::xlDiagonalDown != supportedIndexTable[i] && XlBordersIndex::xlDiagonalUp != supportedIndexTable[i] )
+        {
+            uno::Reference< XBorder > xBorder( getItemByIntIndex( supportedIndexTable[i] ), uno::UNO_QUERY_THROW );
+            if( weight.hasValue() && weight != xBorder->getWeight() )
+                throw uno::RuntimeException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "Error number 94, Incorrect using NULL" ) ), 
+                        uno::Reference< uno::XInterface >() );
+            else if ( !weight.hasValue()  )
+                weight = xBorder->getWeight();
+        }
+    }
+    return  weight;
 }
 void SAL_CALL ScVbaBorders::setWeight( const uno::Any& _weight ) throw (uno::RuntimeException) 
 {
-	throw uno::RuntimeException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "No Implementation available" ) ), uno::Reference< uno::XInterface >() );
+    sal_Int32 count = getCount();
+    for( sal_Int32 i = 0; i < count ; i++ )
+    {
+        uno::Reference< XBorder > xBorder( getItemByIntIndex( supportedIndexTable[i] ), uno::UNO_QUERY_THROW );
+        xBorder->setWeight( _weight );
+    }
 }
