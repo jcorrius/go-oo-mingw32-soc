@@ -4,15 +4,20 @@
 #include <com/sun/star/sheet/XSpreadsheetDocument.hpp>
 #include <com/sun/star/sheet/XSpreadsheet.hpp>
 #include <com/sun/star/container/XNamed.hpp>
+#include <org/openoffice/vba/Excel/XlWindowState.hpp>
+#include <org/openoffice/vba/Excel/Constants.hpp>
 
 #include <docsh.hxx>
 #include <tabvwsh.hxx>
 #include <docuno.hxx>
 #include <sc.hrc>
 #include <hash_map>
+#include <sfx2/viewfrm.hxx>
+#include <sfx2/topfrm.hxx>
 
 using namespace ::com::sun::star;
 using namespace ::org::openoffice;
+using namespace ::org::openoffice::vba::Excel::XlWindowState;
 
 typedef  std::hash_map< rtl::OUString,
 SCTAB, ::rtl::OUStringHash,
@@ -162,6 +167,10 @@ public:
 void  
 ScVbaWindow::Scroll( const uno::Any& Down, const uno::Any& Up, const uno::Any& ToRight, const uno::Any& ToLeft, bool bLargeScroll ) throw (uno::RuntimeException)
 {
+	ScTabViewShell* pViewShell = getBestViewShell( m_xModel );	
+	if ( !pViewShell )
+	    return;
+	
 	sal_Int16 down = 0;	
 	sal_Int16 up = 0;	
 	sal_Int16 toRight = 0;	
@@ -180,20 +189,16 @@ ScVbaWindow::Scroll( const uno::Any& Down, const uno::Any& Up, const uno::Any& T
 	
 	if ( totalUp != 0 )
 	{
-		args1[0].Value <<= totalUp;
-		rtl::OUString url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:GoUp"));
-		if ( bLargeScroll )
-			url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:GoUpBlock"));
-		dispatchRequests( m_xModel, url, args1 );
+		if (bLargeScroll)
+		    totalUp *= pViewShell->GetViewData()->VisibleCellsY( SC_SPLIT_BOTTOM );
+		pViewShell->ScrollLines(0, -totalUp);
 	}
 	
 	if ( totalLeft != 0 )
 	{
-		args1[0].Value <<= totalLeft;
-		rtl::OUString url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:GoLeft"));
-		if ( bLargeScroll )
-			url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "slot:")) + rtl::OUString::valueOf( (sal_Int32)SID_CURSORPAGELEFT_ );
-		dispatchRequests( m_xModel, url, args1 );
+		if (bLargeScroll)
+		    totalLeft *= pViewShell->GetViewData()->VisibleCellsX( SC_SPLIT_LEFT );
+		pViewShell->ScrollLines(-totalLeft, 0);
 	}
 
 }
@@ -291,6 +296,108 @@ ScVbaWindow::setCaption( const uno::Any& _caption ) throw (uno::RuntimeException
 	uno::Reference< beans::XPropertySet > xProps = getPropsFromModel( m_xModel );
 	xProps->setPropertyValue( rtl::OUString(
 		RTL_CONSTASCII_USTRINGPARAM ("Title") ) , _caption );	
+}
+
+uno::Any SAL_CALL 
+ScVbaWindow::getScrollRow() throw (uno::RuntimeException)
+{	
+    sal_Int32 nValue = 0;
+    ScTabViewShell* pViewShell = getBestViewShell( m_xModel );	
+	if ( pViewShell )
+	{
+	    ScSplitPos eWhich = pViewShell->GetViewData()->GetActivePart();
+	    nValue = pViewShell->GetViewData()->GetPosY(WhichV(eWhich));
+	}
+    
+    return uno::makeAny( nValue + 1);
+}
+
+void SAL_CALL 
+ScVbaWindow::setScrollRow( const uno::Any& _scrollrow ) throw (uno::RuntimeException)
+{
+	ScTabViewShell* pViewShell = getBestViewShell( m_xModel );	
+	if ( pViewShell )
+	{
+		sal_Int32 scrollRow = 0;	
+	    _scrollrow >>= scrollRow;
+	    ScSplitPos eWhich = pViewShell->GetViewData()->GetActivePart();
+	    sal_Int32 nOldValue = pViewShell->GetViewData()->GetPosY(WhichV(eWhich)) + 1;
+		pViewShell->ScrollLines(0, scrollRow - nOldValue);
+	}
+}
+
+uno::Any SAL_CALL 
+ScVbaWindow::getScrollColumn() throw (uno::RuntimeException)
+{	
+    sal_Int32 nValue = 0;
+    ScTabViewShell* pViewShell = getBestViewShell( m_xModel );	
+	if ( pViewShell )
+	{
+	    ScSplitPos eWhich = pViewShell->GetViewData()->GetActivePart();
+	    nValue = pViewShell->GetViewData()->GetPosX(WhichH(eWhich));
+	}
+    
+    return uno::makeAny( nValue + 1);
+}
+
+void SAL_CALL 
+ScVbaWindow::setScrollColumn( const uno::Any& _scrollcolumn ) throw (uno::RuntimeException)
+{
+	ScTabViewShell* pViewShell = getBestViewShell( m_xModel );	
+	if ( pViewShell )
+	{
+		sal_Int32 scrollColumn = 0;	
+	    _scrollcolumn >>= scrollColumn;
+	    ScSplitPos eWhich = pViewShell->GetViewData()->GetActivePart();
+	    sal_Int32 nOldValue = pViewShell->GetViewData()->GetPosX(WhichH(eWhich)) + 1;
+		pViewShell->ScrollLines(scrollColumn - nOldValue, 0);
+	}
+}
+
+uno::Any SAL_CALL 
+ScVbaWindow::getWindowState() throw (uno::RuntimeException)
+{	
+    sal_Int32 nwindowState = xlNormal;
+    ScTabViewShell* pViewShell = getBestViewShell( m_xModel );	
+    SfxViewFrame* pViewFrame = pViewShell -> GetViewFrame();
+	SfxTopViewFrame *pTop= PTR_CAST( SfxTopViewFrame, pViewFrame -> GetTopViewFrame() );
+	if ( pTop )
+    {
+        WorkWindow* pWork = (WorkWindow*) pTop->GetTopFrame_Impl()->GetTopWindow_Impl();
+        if ( pWork )
+        {
+            if ( pWork -> IsMaximized())
+                nwindowState = xlMaximized;
+            else if (pWork -> IsMinimized())
+                nwindowState = xlMinimized;
+        }
+    }
+    return uno::makeAny( nwindowState );
+}
+
+void SAL_CALL 
+ScVbaWindow::setWindowState( const uno::Any& _windowstate ) throw (uno::RuntimeException)
+{
+	sal_Int32 nwindowState = xlMaximized;
+	_windowstate >>= nwindowState;
+	ScTabViewShell* pViewShell = getBestViewShell( m_xModel );	
+	SfxViewFrame* pViewFrame = pViewShell -> GetViewFrame();
+	SfxTopViewFrame *pTop= PTR_CAST( SfxTopViewFrame, pViewFrame -> GetTopViewFrame() );
+	if ( pTop )
+    {
+        WorkWindow* pWork = (WorkWindow*) pTop->GetTopFrame_Impl()->GetTopWindow_Impl();
+        if ( pWork )
+        {
+            if ( nwindowState == xlMaximized)
+                pWork -> Maximize();
+            else if (nwindowState == xlMinimized)
+                pWork -> Minimize();
+            else if (nwindowState == xlNormal)
+                pWork -> Restore();
+            else
+                throw uno::RuntimeException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "Invalid Parameter" ) ), uno::Reference< uno::XInterface >() );
+        }
+    }
 }
 
 void
