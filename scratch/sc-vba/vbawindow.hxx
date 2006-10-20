@@ -20,6 +20,12 @@ public:
 	// XWindow
 	virtual void SAL_CALL setCaption( const css::uno::Any& _caption ) throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL getCaption() throw (css::uno::RuntimeException);
+    virtual css::uno::Any SAL_CALL getScrollRow() throw (css::uno::RuntimeException) ;
+    virtual void SAL_CALL setScrollRow( const css::uno::Any& _scrollrow ) throw (css::uno::RuntimeException) ;
+    virtual css::uno::Any SAL_CALL getScrollColumn() throw (css::uno::RuntimeException) ;
+    virtual void SAL_CALL setScrollColumn( const css::uno::Any& _scrollcolumn ) throw (css::uno::RuntimeException) ;
+    virtual css::uno::Any SAL_CALL getWindowState() throw (css::uno::RuntimeException);
+    virtual void SAL_CALL setWindowState( const css::uno::Any& _windowstate ) throw (css::uno::RuntimeException);
 
 	// Methods
 	virtual void SAL_CALL SmallScroll( const css::uno::Any& Down, const css::uno::Any& Up, const css::uno::Any& ToRight, const css::uno::Any& ToLeft ) throw (css::uno::RuntimeException);
