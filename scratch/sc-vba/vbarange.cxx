@@ -60,6 +60,7 @@
 #include <org/openoffice/vba/Excel/XlSortDataOption.hpp>
 #include <org/openoffice/vba/Excel/XlDeleteShiftDirection.hpp>
 #include <org/openoffice/vba/Excel/XlReferenceStyle.hpp>
+#include <org/openoffice/vba/Excel/XlBordersIndex.hpp>
 
 
 #include <scitems.hxx>
@@ -101,6 +102,7 @@
 // end test includes
 
 using namespace ::org::openoffice;
+using namespace ::org::openoffice::vba::Excel;
 using namespace ::com::sun::star;
 
 //    * 1 point = 1/72 inch = 20 twips
@@ -108,6 +110,9 @@ using namespace ::com::sun::star;
 //    * 1 cm = 567 twips
 double lcl_hmmToPoints( double nVal ) { return ( (double)((nVal /1000 ) * 567 ) / 20 ); }
 double lcl_pointsToHmm( double nVal ) { return (double)( ( nVal * 20 ) / 567 ) * 1000; }
+
+static const sal_Int16 supportedIndexTable[] = {  XlBordersIndex::xlEdgeLeft, XlBordersIndex::xlEdgeTop, XlBordersIndex::xlEdgeBottom, XlBordersIndex::xlEdgeRight, XlBordersIndex::xlDiagonalDown, XlBordersIndex::xlDiagonalUp, XlBordersIndex::xlInsideVertical, XlBordersIndex::xlInsideHorizontal };
+
 USHORT lcl_pointsToTwips( double nVal ) 
 { 
 	nVal = nVal * static_cast<double>(20);
@@ -2936,6 +2941,53 @@ ScVbaRange::Borders( const uno::Any& item ) throw( css::uno::RuntimeException )
 	if ( !item.hasValue() )
 		return uno::makeAny( m_Borders );
 	return m_Borders->Item( item );
+}
+
+uno::Any SAL_CALL
+ScVbaRange::BorderAround( const css::uno::Any& LineStyle, const css::uno::Any& Weight,
+                const css::uno::Any& ColorIndex, const css::uno::Any& Color ) throw (css::uno::RuntimeException)
+{
+    sal_Int32 nCount = m_Borders->getCount();
+    uno::Reference< vba::XBorders > xBorders( m_Borders, uno::UNO_QUERY_THROW);
+    for( sal_Int32 i = 0; i < nCount; i++ )
+    {
+        const sal_Int32 nLineType = supportedIndexTable[i];
+        switch( nLineType )
+        {
+            case XlBordersIndex::xlEdgeLeft:
+            case XlBordersIndex::xlEdgeTop:
+            case XlBordersIndex::xlEdgeBottom:
+            case XlBordersIndex::xlEdgeRight:
+            {
+                uno::Reference< vba::XBorder > xBorder( m_Borders->Item( uno::makeAny( nLineType ) ), uno::UNO_QUERY_THROW );
+                if( LineStyle.hasValue() )
+                {
+                    xBorder->setLineStyle( LineStyle );
+                }
+                if( Weight.hasValue() )
+                {
+                    xBorder->setWeight( Weight );
+                }
+                if( ColorIndex.hasValue() )
+                {
+                    xBorder->setColorIndex( ColorIndex );
+                }
+                if( Color.hasValue() )
+                {
+                    xBorder->setColor( Color );
+                }
+                break;
+            }
+            case XlBordersIndex::xlInsideVertical:
+            case XlBordersIndex::xlInsideHorizontal:
+            case XlBordersIndex::xlDiagonalDown:
+            case XlBordersIndex::xlDiagonalUp:
+                break;
+            default:
+                return uno::makeAny( sal_False );
+        }
+    }
+    return uno::makeAny( sal_True );
 }
 
 uno::Any SAL_CALL 

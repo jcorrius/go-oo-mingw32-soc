@@ -170,6 +170,8 @@ public:
 	virtual void SAL_CALL Delete( const css::uno::Any& Shift ) throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL Areas( const css::uno::Any& ) throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL Borders( const css::uno::Any& ) throw (css::uno::RuntimeException);
+	virtual css::uno::Any SAL_CALL BorderAround( const css::uno::Any& LineStyle, 
+                const css::uno::Any& Weight, const css::uno::Any& ColorIndex, const css::uno::Any& Color ) throw (css::uno::RuntimeException);
 
 	// XPropertySet
 

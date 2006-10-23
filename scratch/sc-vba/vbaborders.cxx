@@ -371,28 +371,62 @@ ScVbaBorders::getItemByIntIndex( const sal_Int32 nIndex )  throw (uno::RuntimeEx
 
 uno::Any SAL_CALL ScVbaBorders::getColor() throw (uno::RuntimeException)
 {
-    printf("\nGet Borders Color...%d\n", getCount());
-	throw uno::RuntimeException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "No Implementation available" ) ), uno::Reference< uno::XInterface >() );
+    sal_Int32 count = getCount();
+    uno::Any color;
+    for( sal_Int32 i = 0; i < count ; i++ )
+    {
+        if( XlBordersIndex::xlDiagonalDown != supportedIndexTable[i] && XlBordersIndex::xlDiagonalUp != supportedIndexTable[i] )
+        {
+            uno::Reference< XBorder > xBorder( getItemByIntIndex( supportedIndexTable[i] ), uno::UNO_QUERY_THROW );
+            if( color.hasValue() && color != xBorder->getColor() )
+                throw uno::RuntimeException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "Error number 94, Incorrect using NULL" ) ), 
+                        uno::Reference< uno::XInterface >() );
+            else if ( !color.hasValue()  )
+                color = xBorder->getColor();
+        }
+    }
+    return  color;
 }
 void SAL_CALL ScVbaBorders::setColor( const uno::Any& _color ) throw (uno::RuntimeException)
 {
-    printf("\nSet Borders Color...%d\n", getCount());
-	throw uno::RuntimeException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "No Implementation available" ) ), uno::Reference< uno::XInterface >() );
+    sal_Int32 count = getCount();
+    for( sal_Int32 i = 0; i < count ; i++ )
+    {
+        uno::Reference< XBorder > xBorder( getItemByIntIndex( supportedIndexTable[i] ), uno::UNO_QUERY_THROW );
+        xBorder->setColor( _color );
+    }
 }
 uno::Any SAL_CALL ScVbaBorders::getColorIndex() throw (uno::RuntimeException)
 {
-    printf("\nGet Borders ColorIndex...%d\n", getCount());
-	throw uno::RuntimeException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "No Implementation available" ) ), uno::Reference< uno::XInterface >() );
+    sal_Int32 count = getCount();
+    uno::Any colorindex;
+    for( sal_Int32 i = 0; i < count ; i++ )
+    {
+        if( XlBordersIndex::xlDiagonalDown != supportedIndexTable[i] && XlBordersIndex::xlDiagonalUp != supportedIndexTable[i] )
+        {
+            uno::Reference< XBorder > xBorder( getItemByIntIndex( supportedIndexTable[i] ), uno::UNO_QUERY_THROW );
+            if( colorindex.hasValue() && colorindex != xBorder->getColor() )
+                throw uno::RuntimeException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "Error number 94, Incorrect using NULL" ) ), 
+                        uno::Reference< uno::XInterface >() );
+            else if ( !colorindex.hasValue() )
+                colorindex = xBorder->getColor();
+        }
+    }
+    return  colorindex;
 }
 void SAL_CALL ScVbaBorders::setColorIndex( const uno::Any& _colorindex ) throw (uno::RuntimeException)
 {
-    printf("\nSet Borders ColorIndex...%d\n", getCount());
-	throw uno::RuntimeException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "No Implementation available" ) ), uno::Reference< uno::XInterface >() );
+    sal_Int32 count = getCount();
+    for( sal_Int32 i = 0; i < count ; i++ )
+    {
+        uno::Reference< XBorder > xBorder( getItemByIntIndex( supportedIndexTable[i] ), uno::UNO_QUERY_THROW );
+        xBorder->setColorIndex( _colorindex );
+    }
 }
 uno::Any SAL_CALL ScVbaBorders::getLineStyle() throw (uno::RuntimeException)
 {
      //TODO if OOo support
-	//throw uno::RuntimeException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "No Implementation available" ) ), uno::Reference< uno::XInterface >() );
+	throw uno::RuntimeException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "No Implementation available" ) ), uno::Reference< uno::XInterface >() );
 }
 void SAL_CALL ScVbaBorders::setLineStyle( const uno::Any& _linestyle ) throw (uno::RuntimeException)
 {
