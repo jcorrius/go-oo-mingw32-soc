@@ -2,6 +2,7 @@
 
 
 #include<com/sun/star/sheet/XSpreadsheetView.hpp>
+#include <com/sun/star/sheet/XSpreadsheets.hpp>
 #include<com/sun/star/view/XSelectionSupplier.hpp>
 #include<org/openoffice/vba/Excel/XlCalculation.hpp>
 #include <com/sun/star/sheet/XCellRangeReferrer.hpp>
@@ -386,10 +387,38 @@ ScVbaApplication::GoTo( const uno::Any& Reference, const uno::Any& Scroll ) thro
     rtl::OUString sRangeName;
     if( Reference >>= sRangeName )
     {
-        //TODO
-        //R1C1-style
-        //procedure name
-        printf("\nGoTo excute string\n");
+        //R1C1-style and procedure name
+        uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY_THROW );
+        ScDocShell* pShell = getDocShell( xModel );
+        pShell->GetDocument()->SetAddressConvention( ScAddress::CONV_XL_R1C1 );
+        {//using R1C1 style and set back to default.
+        uno::Reference< sheet::XSpreadsheetView > xSpreadsheet(
+                xModel->getCurrentController(), uno::UNO_QUERY_THROW );
+        uno::Reference< sheet::XSpreadsheet > xDoc = xSpreadsheet->getActiveSheet();
+        try
+        {
+            uno::Reference< table::XCellRange > xRange = ScVbaRange::getCellRangeForName( sRangeName, xDoc );
+            ScVbaRange* pRange = new ScVbaRange( m_xContext, xRange );
+            uno::Reference< vba::XRange > xVbSheetRange( pRange );
+            if( bScroll )
+                xVbSheetRange->Select();
+            else
+                xVbSheetRange->Activate();
+        }
+        catch( uno::RuntimeException )
+        {
+            pShell->GetDocument()->SetAddressConvention( ScAddress::CONV_XL_A1 );
+            //maybe this should be a procedure name
+            //TODO for procedure name
+            //browse::XBrowseNodeFactory is a singlton. OUString::createFromAscii( "/singletons/com.sun.star.script.browse.theBrowseNodeFactory")
+            //and the createView( browse::BrowseNodeFactoryViewTypes::MACROSELECTOR ) to get a root browse::XBrowseNode.
+            //for query XInvocation interface.
+            //but how to directly get the XInvocation?
+            throw uno::RuntimeException( rtl::OUString::createFromAscii( "invalid reference for range name, it should be R1C1 or procedure name" ),
+                    uno::Reference< uno::XInterface >() );
+        }
+        }
+        pShell->GetDocument()->SetAddressConvention( ScAddress::CONV_XL_A1 );
         return;
     }
     uno::Reference< vba::XRange > xRange;
@@ -404,7 +433,6 @@ ScVbaApplication::GoTo( const uno::Any& Reference, const uno::Any& Scroll ) thro
             else
                 xVbaRange->Activate();
         }
-        printf("\nGoTo excute range\n");
         return;
     }
     throw uno::RuntimeException( rtl::OUString::createFromAscii( "invalid reference or name" ),

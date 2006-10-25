@@ -381,8 +381,7 @@ uno::Any SAL_CALL ScVbaBorders::getColor() throw (uno::RuntimeException)
             if( color.hasValue() )
             {
                 if( color != xBorder->getColor() )
-                    throw uno::RuntimeException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "Error number 94, Incorrect using NULL" ) ), 
-                            uno::Reference< uno::XInterface >() );
+                    return uno::makeAny( uno::Reference< uno::XInterface >() );
             }
             else
                 color = xBorder->getColor();
@@ -411,8 +410,7 @@ uno::Any SAL_CALL ScVbaBorders::getColorIndex() throw (uno::RuntimeException)
             if( nColorIndex.hasValue() )
             {
                 if( nColorIndex != xBorder->getColorIndex() )
-                    throw uno::RuntimeException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "Error number 94, Incorrect using NULL" ) ), 
-                            uno::Reference< uno::XInterface >() );
+                    return uno::makeAny( uno::Reference< uno::XInterface >() );
             }
             else
                 nColorIndex = xBorder->getColorIndex();
@@ -455,8 +453,7 @@ uno::Any SAL_CALL ScVbaBorders::getWeight() throw (uno::RuntimeException)
             if( weight.hasValue() )
             {
                 if( weight != xBorder->getWeight() )
-                    throw uno::RuntimeException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "Error number 94, Incorrect using NULL" ) ), 
-                            uno::Reference< uno::XInterface >() );
+                    return uno::makeAny( uno::Reference< uno::XInterface >() );
             }
             else
                 weight = xBorder->getWeight();
