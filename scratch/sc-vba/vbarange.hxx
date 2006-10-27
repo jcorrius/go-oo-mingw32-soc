@@ -1,9 +1,7 @@
 #ifndef SC_VBA_RANGE_HXX
 #define SC_VBA_RANGE_HXX
 
-#include <cppuhelper/implbase1.hxx>
-#include <cppuhelper/implbase2.hxx>
-#include <cppuhelper/implbase3.hxx>
+#include <cppuhelper/implbase4.hxx>
 #include <com/sun/star/container/XEnumerationAccess.hpp>
 
 #include <org/openoffice/vba/XRange.hpp>
@@ -20,6 +18,7 @@
 #include <com/sun/star/beans/PropertyAttribute.hpp>
 #include <com/sun/star/script/XTypeConverter.hpp>
 #include <com/sun/star/script/XDefaultMethod.hpp>
+#include <com/sun/star/script/XDefaultProperty.hpp>
 #include <com/sun/star/sheet/FillDateMode.hpp>
 #include <com/sun/star/sheet/FillMode.hpp>
 #include <com/sun/star/sheet/FillDirection.hpp>
@@ -30,7 +29,7 @@
 
 class ScTableSheetsObj;
 class ScCellRangesBase;
-typedef ::cppu::WeakImplHelper3< oo::vba::XRange, css::container::XEnumerationAccess, css::script::XDefaultMethod > ScVbaRange_BASE;
+typedef ::cppu::WeakImplHelper4< oo::vba::XRange, css::container::XEnumerationAccess, css::script::XDefaultMethod, css::script::XDefaultProperty > ScVbaRange_BASE;
 class ArrayVisitor
 {
 public:
@@ -194,7 +193,10 @@ public:
 	}
 	virtual sal_Bool SAL_CALL hasElements() throw (css::uno::RuntimeException);
 	// XDefaultMethod
-	::rtl::OUString SAL_CALL getName(  ) throw (css::uno::RuntimeException);
+	::rtl::OUString SAL_CALL getDefaultMethodName(  ) throw (css::uno::RuntimeException);
+        // XDefaultProperty
+        ::rtl::OUString SAL_CALL getDefaultPropertyName(  ) throw (css::uno::RuntimeException) { return ::rtl::OUString::createFromAscii("Value"); }
+
 
 // #TODO completely rewrite ScVbaRange, its become a hackfest
 // it needs to be closer to ScCellRangeBase in that the underlying

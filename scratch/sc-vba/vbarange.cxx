@@ -2796,7 +2796,7 @@ ScVbaRange::getPropertySetInfo(  ) throw (uno::RuntimeException)
 }
 
 ::rtl::OUString SAL_CALL 
-ScVbaRange::getName(  ) throw (uno::RuntimeException)
+ScVbaRange::getDefaultMethodName(  ) throw (uno::RuntimeException)
 {
 	const static rtl::OUString sName( RTL_CONSTASCII_USTRINGPARAM("Cells") );
 	return sName;

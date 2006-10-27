@@ -56,7 +56,7 @@ public:
 
 	virtual css::uno::Any SAL_CALL Item( const css::uno::Any& Index ) throw (css::uno::RuntimeException);
 	// XDefaultMethod
-	::rtl::OUString SAL_CALL getName(  ) throw (css::uno::RuntimeException);
+	::rtl::OUString SAL_CALL getDefaultMethodName(  ) throw (css::uno::RuntimeException);
 
 	// XEnumerationAccess
 	virtual css::uno::Reference< css::container::XEnumeration > SAL_CALL createEnumeration() throw (css::uno::RuntimeException) = 0;	

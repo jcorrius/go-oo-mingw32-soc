@@ -90,7 +90,7 @@ uno::Any SAL_CALL ScVbaCollectionBaseImpl::Item( const uno::Any& aIndex ) throw 
 }
 
 ::rtl::OUString SAL_CALL 
-ScVbaCollectionBaseImpl::getName(  ) throw (css::uno::RuntimeException)
+ScVbaCollectionBaseImpl::getDefaultMethodName(  ) throw (css::uno::RuntimeException)
 {
 	const static rtl::OUString sName( RTL_CONSTASCII_USTRINGPARAM("Item") );
 	return sName;

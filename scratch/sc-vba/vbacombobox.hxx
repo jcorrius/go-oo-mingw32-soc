@@ -1,8 +1,9 @@
 #ifndef SC_VBA_COMBOBOX_HXX
 #define SC_VBA_COMBOBOX_HXX
-#include <cppuhelper/implbase1.hxx>
+#include <cppuhelper/implbase2.hxx>
 #include <com/sun/star/uno/XComponentContext.hpp>
 #include <com/sun/star/beans/XPropertySet.hpp>
+#include <com/sun/star/script/XDefaultProperty.hpp>
 #include <org/openoffice/vba/XComboBox.hpp>
 #include <comphelper/proparrhlp.hxx>
 #include <comphelper/propertycontainer.hxx>
@@ -10,8 +11,9 @@
 
 #include "vbahelper.hxx"
 
-typedef ::cppu::WeakImplHelper1<oo::vba::XComboBox > ComboBoxImpl_BASE;
-
+typedef ::cppu::WeakImplHelper2<oo::vba::XComboBox, css::script::XDefaultProperty > ComboBoxImpl_BASE;
+// for the moment its preferable for default value behaviour to
+// be provided by both old an new mechanisms
 class ScVbaComboBox : public ComboBoxImpl_BASE
     ,public ::comphelper::OMutexAndBroadcastHelper
     ,public ::comphelper::OPropertyContainer
@@ -46,6 +48,10 @@ public:
 
 	// XTypeProvider
 	DECLARE_XTYPEPROVIDER()
+
+	// XDefaultProperty
+        ::rtl::OUString SAL_CALL getDefaultPropertyName(  ) throw (css::uno::RuntimeException) { return ::rtl::OUString::createFromAscii("Value"); }
+
 
 protected:
 	// OPropertySetHelper
