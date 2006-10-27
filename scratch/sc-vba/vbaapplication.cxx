@@ -318,7 +318,7 @@ ScVbaApplication::wait( double time ) throw (css::uno::RuntimeException)
 	SbxVariableRef aRef = new SbxVariable;
 	aRef->PutDouble( time );
 	aArgs->Put(  aRef, 1 );
-	SbMethod* pMeth = (SbMethod*)pBasic->GetRtl()->Find( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Wait") ), SbxCLASS_METHOD );
+	SbMethod* pMeth = (SbMethod*)pBasic->GetRtl()->Find( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("WaitUntil") ), SbxCLASS_METHOD );
 	
 	if ( pMeth )
 	{
