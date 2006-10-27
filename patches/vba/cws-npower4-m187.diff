@@ -1,0 +1,858 @@
+Index: basic/inc/sbxobj.hxx
+===================================================================
+RCS file: /cvs/script/basic/inc/sbxobj.hxx,v
+retrieving revision 1.4
+retrieving revision 1.4.44.1
+diff -u -p -u -p -r1.4 -r1.4.44.1
+--- basic/inc/sbxobj.hxx	19 Jun 2006 17:31:51 -0000	1.4
++++ basic/inc/sbxobj.hxx	18 Oct 2006 20:29:16 -0000	1.4.44.1
+@@ -64,6 +64,7 @@ protected:
+ 	SbxArrayRef  pObjs;				// Objekte
+ 	SbxProperty* pDfltProp;			// Default-Property
+ 	String       aClassName;        // Klassenname
++	String       aDfltPropName;
+ 	virtual BOOL LoadData( SvStream&, USHORT );
+ 	virtual BOOL StoreData( SvStream& ) const;
+ 	virtual ~SbxObject();
+@@ -83,7 +84,7 @@ public:
+ 	const String& GetClassName() const { return aClassName; }
+ 	void		  SetClassName( const String &rNew ) { aClassName = rNew; }
+ 	// Default-Property
+-	SbxProperty* GetDfltProperty() const { return pDfltProp; }
++	SbxProperty* GetDfltProperty();
+ 	void SetDfltProperty( const String& r );
+ 	void SetDfltProperty( SbxProperty* );
+ 	// Suchen eines Elements
+Index: basic/source/classes/sb.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/classes/sb.cxx,v
+retrieving revision 1.29
+retrieving revision 1.29.12.3
+diff -u -p -u -p -r1.29 -r1.29.12.3
+Index: basic/source/classes/sbunoobj.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/classes/sbunoobj.cxx,v
+retrieving revision 1.42
+retrieving revision 1.42.12.3
+diff -u -p -u -p -r1.42 -r1.42.12.3
+--- basic/source/classes/sbunoobj.cxx	17 Sep 2006 10:00:34 -0000	1.42
++++ basic/source/classes/sbunoobj.cxx	20 Oct 2006 15:41:23 -0000	1.42.12.3
+@@ -76,6 +76,7 @@
+ #include <com/sun/star/script/XAllListener.hpp>
+ #include <com/sun/star/script/XInvocationAdapterFactory.hpp>
+ #include <com/sun/star/script/XTypeConverter.hpp>
++#include <com/sun/star/script/XDefaultProperty.hpp>
+ #include <com/sun/star/container/XNameAccess.hpp>
+ #include <com/sun/star/container/XHierarchicalNameAccess.hpp>
+ #include <com/sun/star/reflection/XIdlArray.hpp>
+@@ -130,6 +131,39 @@ static String aIllegalArgumentExceptionN
+     ( RTL_CONSTASCII_USTRINGPARAM("com.sun.star.lang.IllegalArgumentException" ) );
+ static OUString aSeqLevelStr( RTL_CONSTASCII_USTRINGPARAM("[]") );
+ 
++// Gets the default property for an uno object. Note: There is some 
++// redirection built in. The property name specifies the name
++// of the default property.
++
++bool SbUnoObject::getDefaultPropName( SbUnoObject* pUnoObj, String& sDfltProp )
++{
++	bool result = false;
++	Reference< XDefaultProperty> xDefaultProp( pUnoObj->maTmpUnoObj, UNO_QUERY );
++	if ( xDefaultProp.is() )
++	{
++		sDfltProp = xDefaultProp->getDefaultPropertyName();
++		if ( sDfltProp.Len() )
++			result = true;
++	}
++	return result;
++}
++
++SbxVariable* getDefaultProp( SbxVariable* pRef )
++{
++	SbxVariable* pDefaultProp = NULL;		
++	SbxObject* pObj = PTR_CAST(SbxObject,(SbxVariable*) pRef);
++	if ( !pObj )
++	{
++		SbxBase* pObjVarObj = pRef->GetObject();
++		pObj = PTR_CAST(SbxObject,pObjVarObj);
++	}	
++	if ( pObj && pObj->ISA(SbUnoObject) )
++	{
++		SbUnoObject* pUnoObj = PTR_CAST(SbUnoObject,(SbxObject*)pObj);	
++		pDefaultProp = pUnoObj->GetDfltProperty();
++	}
++	return pDefaultProp;
++}
+ 
+ Reference< XComponentContext > getComponentContext_Impl( void )
+ {
+@@ -649,6 +683,13 @@ void unoToSbxValue( SbxVariable* pVar, c
+ 			// SbUnoObject instanzieren
+ 			String aName;
+ 			SbUnoObject* pSbUnoObject = new SbUnoObject( aName, aValue );
++			if ( SbiRuntime::isVBAEnabled() )
++			{
++				String sDfltPropName;
++		
++				if ( SbUnoObject::getDefaultPropName( pSbUnoObject, sDfltPropName ) )
++						pSbUnoObject->SetDfltProperty( sDfltPropName );
++			}
+ 			SbxObjectRef xWrapper = (SbxObject*)pSbUnoObject;
+ 
+ 			// #51475 Wenn das Objekt ungueltig ist null liefern
+Index: basic/source/comp/parser.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/comp/parser.cxx,v
+retrieving revision 1.17
+retrieving revision 1.17.10.1
+diff -u -p -u -p -r1.17 -r1.17.10.1
+--- basic/source/comp/parser.cxx	17 Sep 2006 10:03:03 -0000	1.17
++++ basic/source/comp/parser.cxx	18 Oct 2006 20:29:17 -0000	1.17.10.1
+@@ -603,10 +603,20 @@ void SbiParser::Set()
+ 		SbiExpression aExpr( this );
+ 		aLvalue.Gen();
+ 		aExpr.Gen();
++		// Its a good idea to distinguish between
++		// set someting = another & 
++		// someting = another  
++		// ( its necessary for vba objects where set is object
++		// specific and also doesn't involve processing default params )
+ 		if( pDef->GetTypeId() )
+ 			aGen.Gen( _SETCLASS, pDef->GetTypeId() );
+ 		else
+-			aGen.Gen( _SET );
++		{
++			if ( bVBASupportOn )
++				aGen.Gen( _VBASET );
++			else
++				aGen.Gen( _SET );
++		}
+ 	}
+ 	// aGen.Gen( _SET );
+ }
+Index: basic/source/inc/opcodes.hxx
+===================================================================
+RCS file: /cvs/script/basic/source/inc/opcodes.hxx,v
+retrieving revision 1.10
+retrieving revision 1.10.78.1
+diff -u -p -u -p -r1.10 -r1.10.78.1
+--- basic/source/inc/opcodes.hxx	29 Sep 2005 16:31:38 -0000	1.10
++++ basic/source/inc/opcodes.hxx	18 Oct 2006 20:29:17 -0000	1.10.78.1
+@@ -98,6 +98,7 @@ enum SbiOpcode {
+ 	_RSET,              // Speichern Objekt TOS ==> TOS-1
+ 	_REDIMP_ERASE,		// Copies array to be later used by REDIM PRESERVE before erasing it
+ 	_INITFOREACH,
++	_VBASET,            // VBA-like Set
+ 	SbOP0_END,
+ 
+ 	// Alle Opcodes mit einem Operanden
+@@ -131,7 +132,6 @@ enum SbiOpcode {
+ 	_BASED,          	// TOS wird um BASE erhoeht, BASE davor gepusht (+base)
+ 	// Typanpassung im Argv
+ 	_ARGTYP,          	// Letzten Parameter in Argv konvertieren (+Typ)
+-
+ 	SbOP1_END,
+ 
+ 	// Alle Opcodes mit zwei Operanden
+Index: basic/source/inc/runtime.hxx
+===================================================================
+RCS file: /cvs/script/basic/source/inc/runtime.hxx,v
+retrieving revision 1.30
+retrieving revision 1.30.42.3
+diff -u -p -u -p -r1.30 -r1.30.42.3
+--- basic/source/inc/runtime.hxx	19 Jun 2006 17:44:06 -0000	1.30
++++ basic/source/inc/runtime.hxx	26 Oct 2006 13:21:29 -0000	1.30.42.3
+@@ -438,8 +438,8 @@ class SbiRuntime
+ 	void StepNOT(),     StepCAT(),      StepLIKE(),     StepIS();
+ 	void StepCLONE(),   StepOLDBASED(), StepARGC();
+ 	void StepARGV(),    StepINPUT(),	StepLINPUT(),	StepSTOP();
+-	void StepGET(),		StepSET(),	 	StepPUT(),		StepPUTC();
+-	void StepSET_Impl( SbxVariableRef& refVal, SbxVariableRef& refVar );
++	void StepGET(),		StepSET(),	StepVBASET(), 	StepPUT(),		StepPUTC();
++	void StepSET_Impl( SbxVariableRef& refVal, SbxVariableRef& refVar, bool bDefaultHandling = false );
+ 	void StepDIM(),     StepREDIM(),	StepREDIMP(),	StepERASE();
+ 	void StepINITFOR(), StepNEXT(),		StepERROR(),	StepINITFOREACH();
+ 	void StepCASE(),	StepENDCASE(),  StepSTDERROR();
+Index: basic/source/inc/sbunoobj.hxx
+===================================================================
+RCS file: /cvs/script/basic/source/inc/sbunoobj.hxx,v
+retrieving revision 1.15
+retrieving revision 1.15.44.1
+diff -u -p -u -p -r1.15 -r1.15.44.1
+--- basic/source/inc/sbunoobj.hxx	19 Jun 2006 17:44:31 -0000	1.15
++++ basic/source/inc/sbunoobj.hxx	18 Oct 2006 20:29:18 -0000	1.15.44.1
+@@ -96,6 +96,7 @@ class SbUnoObject: public SbxObject
+ 	void implCreateAll( void );
+ 
+ public:
++	static bool getDefaultPropName( SbUnoObject* pUnoObj, String& sDfltProp );
+ 	TYPEINFO();
+ 	SbUnoObject( const String& aName_, const Any& aUnoObj_ );
+ 	~SbUnoObject();
+Index: basic/source/runtime/methods.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/runtime/methods.cxx,v
+retrieving revision 1.71
+retrieving revision 1.66.14.4
+diff -u -p -u -p -r1.71 -r1.66.14.4
+--- basic/source/runtime/methods.cxx	17 Sep 2006 10:05:16 -0000	1.71
++++ basic/source/runtime/methods.cxx	18 Oct 2006 15:46:54 -0000	1.66.14.4
+@@ -2069,13 +2069,8 @@ RTLFUNC(Second)
+ 	}
+ }
+ 
+-// Date Now(void)
+-
+-RTLFUNC(Now)
++double Now_Impl()
+ {
+-    (void)pBasic;
+-    (void)bWrite;
+-    
+ 	Date aDate;
+ 	Time aTime;
+ 	double aSerial = (double)GetDayDiff( aDate );
+@@ -2085,7 +2080,16 @@ RTLFUNC(Now)
+ 	nSeconds += aTime.GetSec();
+ 	double nDays = ((double)nSeconds) / (double)(24.0*3600.0);
+ 	aSerial += nDays;
+-	rPar.Get(0)->PutDate( aSerial );
++	return aSerial;
++}
++
++// Date Now(void)
++
++RTLFUNC(Now)
++{
++    	(void)pBasic;
++    	(void)bWrite;
++	rPar.Get(0)->PutDate( Now_Impl() );
+ }
+ 
+ // Date Time(void)
+Index: basic/source/runtime/methods1.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/runtime/methods1.cxx,v
+retrieving revision 1.29
+retrieving revision 1.25.12.3
+diff -u -p -u -p -r1.29 -r1.25.12.3
+--- basic/source/runtime/methods1.cxx	17 Sep 2006 10:05:29 -0000	1.29
++++ basic/source/runtime/methods1.cxx	25 Oct 2006 12:02:07 -0000	1.25.12.3
+@@ -521,18 +521,25 @@ RTLFUNC(Switch)
+ 	rPar.Get(0)->PutNull();
+ }
+ 
+-
+-RTLFUNC(Wait)
++//i#64882# Common wait impl for existing Wait and new WaitUntil
++// rtl functions
++void Wait_Impl( bool bDurationBased, SbxArray& rPar )
+ {
+-    (void)pBasic;
+-    (void)bWrite;
+-    
+ 	if( rPar.Count() != 2 )
+ 	{
+ 		StarBASIC::Error( SbERR_BAD_ARGUMENT );
+ 		return;
+ 	}
+-	long nWait = rPar.Get(1)->GetLong();
++	long nWait = 0;
++	if ( bDurationBased )
++	{
++		double dWait = rPar.Get(1)->GetDouble();
++		double dNow = Now_Impl();
++	 	double dSecs = (double)( ( dWait - dNow ) * (double)( 24.0*3600.0) );
++		nWait = (long)( dSecs * 1000 ); // wait in thousands of sec
++	}
++	else
++		nWait = rPar.Get(1)->GetLong();
+ 	if( nWait < 0 )
+ 	{
+ 		StarBASIC::Error( SbERR_BAD_ARGUMENT );
+@@ -544,6 +551,23 @@ RTLFUNC(Wait)
+     aTimer.Start();
+     while ( aTimer.IsActive() )
+         Application::Yield();
++}
++
++//i#64882#
++RTLFUNC(Wait)
++{
++	(void)pBasic;
++	(void)bWrite;
++	Wait_Impl( false, rPar );
++}
++
++//i#64882# add new WaitUntil ( for application.wait )
++// share wait_impl with 'normal' oobasic wait
++RTLFUNC(WaitUntil)
++{
++	(void)pBasic;
++	(void)bWrite;
++	Wait_Impl( true, rPar );
+ }
+ 
+ RTLFUNC(GetGUIVersion)
+Index: basic/source/runtime/rtlproto.hxx
+===================================================================
+RCS file: /cvs/script/basic/source/runtime/rtlproto.hxx,v
+retrieving revision 1.14
+retrieving revision 1.14.86.2
+diff -u -p -u -p -r1.14 -r1.14.86.2
+--- basic/source/runtime/rtlproto.hxx	7 Sep 2005 21:40:58 -0000	1.14
++++ basic/source/runtime/rtlproto.hxx	25 Oct 2006 12:02:07 -0000	1.14.86.2
+@@ -301,6 +301,9 @@ extern RTLFUNC(Blue);
+ 
+ extern RTLFUNC(Switch);
+ extern RTLFUNC(Wait);
++//i#64882# add new WaitUntil
++extern RTLFUNC(WaitUntil);
++
+ extern RTLFUNC(GetGUIVersion);
+ extern RTLFUNC(Choose);
+ extern RTLFUNC(Trim);
+@@ -346,3 +349,5 @@ extern RTLFUNC(CompatibilityMode);
+ extern RTLFUNC(CDec);
+ 
+ 
++extern double Now_Impl();
++extern void Wait_Impl( bool bDurationBased, SbxArray& rPar );
+Index: basic/source/runtime/runtime.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/runtime/runtime.cxx,v
+retrieving revision 1.30
+retrieving revision 1.30.10.1
+diff -u -p -u -p -r1.30 -r1.30.10.1
+--- basic/source/runtime/runtime.cxx	17 Sep 2006 10:05:55 -0000	1.30
++++ basic/source/runtime/runtime.cxx	18 Oct 2006 20:29:18 -0000	1.30.10.1
+@@ -155,6 +155,7 @@ SbiRuntime::pStep0 SbiRuntime::aStep0[] 
+ 	MEMBER(SbiRuntime::StepRSET),		// Speichern Objekt TOS ==> TOS-1
+ 	MEMBER(SbiRuntime::StepREDIMP_ERASE),// Copy array object for REDIMP
+ 	MEMBER(SbiRuntime::StepINITFOREACH),// Init for each loop
++	MEMBER(SbiRuntime::StepVBASET),// vba-like set statement
+ };
+ 
+ SbiRuntime::pStep1 SbiRuntime::aStep1[] = {	// Alle Opcodes mit einem Operanden
+Index: basic/source/runtime/stdobj.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/runtime/stdobj.cxx,v
+retrieving revision 1.20
+retrieving revision 1.20.12.1
+diff -u -p -u -p -r1.20 -r1.20.12.1
+--- basic/source/runtime/stdobj.cxx	17 Sep 2006 10:06:10 -0000	1.20
++++ basic/source/runtime/stdobj.cxx	25 Oct 2006 12:02:07 -0000	1.20.12.1
+@@ -593,6 +593,9 @@ static Methods aMethods[] = {
+ 
+ { "Wait",        	SbxNULL,      1 | _FUNCTION, RTLNAME(Wait),0            },
+   { "Milliseconds", SbxLONG, 0,NULL,0 },
++//#i64882#
++{ "WaitUntil",          SbxNULL,      1 | _FUNCTION, RTLNAME(WaitUntil),0      },
++  { "Date", SbxDOUBLE, 0,NULL,0 },
+ { "Weekday",        SbxINTEGER,   2 | _FUNCTION, RTLNAME(Weekday),0         },
+   { "Date",         SbxDATE, 0,NULL,0 },
+   { "Firstdayofweek", SbxINTEGER, _OPT, NULL,0 },
+Index: basic/source/runtime/step0.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/runtime/step0.cxx,v
+retrieving revision 1.24
+retrieving revision 1.24.12.2
+diff -u -p -u -p -r1.24 -r1.24.12.2
+--- basic/source/runtime/step0.cxx	17 Sep 2006 10:06:35 -0000	1.24
++++ basic/source/runtime/step0.cxx	25 Oct 2006 16:29:05 -0000	1.24.12.2
+@@ -53,6 +53,8 @@
+ 
+ #include <algorithm>
+ 
++SbxVariable* getDefaultProp( SbxVariable* pRef );
++
+ void SbiRuntime::StepNOP()
+ {}
+ 
+@@ -61,6 +63,36 @@ void SbiRuntime::StepArith( SbxOperator 
+ 	SbxVariableRef p1 = PopVar();
+ 	TOSMakeTemp();
+ 	SbxVariable* p2 = GetTOS();
++
++	bool bVBAInterop =  SbiRuntime::isVBAEnabled(); 
++
++	// This could & should be moved to the MakeTempTOS() method in runtime.cxx
++	// In the code which this is cut'npaste from there is a check for a ref
++	// count != 1 based on which the copy of the SbxVariable is done.
++	// see orig code in MakeTempTOS ( and I'm not sure what the significance,
++	// of that is )
++	// here we alway seem to have a refcount of 1. Also it seems that
++	// MakeTempTOS is called for other operation, so I hold off for now
++	// until I have a better idea
++	if ( bVBAInterop
++		&& ( p2->GetType() == SbxOBJECT || p2->GetType() == SbxVARIANT )
++	)
++	{
++		SbxVariable* pDflt = getDefaultProp( p2 );
++		if ( pDflt )
++		{
++			pDflt->Broadcast( SBX_HINT_DATAWANTED );
++			// replacing new p2 on stack causes object pointed by 
++			// pDft->pParent to be deleted, when p2->Compute() is
++			// called below pParent is accessed ( but its deleted )
++			// so set it to NULL now
++			pDflt->SetParent( NULL );  
++			p2 = new SbxVariable( *pDflt );
++			p2->SetFlag( SBX_READWRITE );
++			refExprStk->Put( p2, nExprLvl - 1 );
++		}
++	}
++
+ 	p2->ResetFlag( SBX_FIXED );
+ 	p2->Compute( eOp, *p1 );
+ 
+@@ -212,9 +244,34 @@ void SbiRuntime::StepPUT()
+ 		n = refVar->GetFlags();
+ 		refVar->SetFlag( SBX_WRITE );
+ 	}
++	bool bVBAInterop =  SbiRuntime::isVBAEnabled(); 
++
++	// if left side arg is an object or variant and right handside isn't 
++	// either an object or a variant then try and see if a default 
++	// property exists.
++	// to use e.g. Range{"A1") = 34
++	// could equate to Range("A1").Value = 34 
++	if ( bVBAInterop )
++	{
++		if ( refVar->GetType() == SbxOBJECT  ) 
++		{
++			SbxVariable* pDflt = getDefaultProp( refVar );
++			if ( pDflt )
++				refVar = pDflt;
++		}
++		if (  refVal->GetType() == SbxOBJECT  ) 
++		{
++			SbxVariable* pDflt = getDefaultProp( refVal );
++			if ( pDflt )
++				refVal = pDflt;
++		}
++	}
++
+ 	*refVar = *refVal;
++	// lhs is a property who's value is currently null
++	if ( !bVBAInterop || ( bVBAInterop && refVar->GetType() != SbxEMPTY ) )
+ 	// #67607 Uno-Structs kopieren
+-	checkUnoStructCopy( refVal, refVar );
++		checkUnoStructCopy( refVal, refVar );
+ 	if( bFlagsChanged )
+ 		refVar->SetFlags( n );
+ }
+@@ -223,29 +280,43 @@ void SbiRuntime::StepPUT()
+ // Speichern Objektvariable
+ // Nicht-Objekt-Variable fuehren zu Fehlern
+ 
+-void SbiRuntime::StepSET_Impl( SbxVariableRef& refVal, SbxVariableRef& refVar )
++void SbiRuntime::StepSET_Impl( SbxVariableRef& refVal, SbxVariableRef& refVar, bool bHandleDefaultProp )
+ {
+ 	// #67733 Typen mit Array-Flag sind auch ok
+ 	SbxDataType eValType = refVal->GetType();
+ 	SbxDataType eVarType = refVar->GetType();
+-	if( (eValType != SbxOBJECT && eValType != SbxEMPTY && !(eValType & SbxARRAY)) ||
+-		(eVarType != SbxOBJECT && eVarType != SbxEMPTY && !(eVarType & SbxARRAY) ) )
++        if( (eValType != SbxOBJECT 
++			&& eValType != SbxEMPTY 
++// seems like when using the default method its possible for objects
++// to be empty ( no broadcast has taken place yet ) or the actual value is
++
++			&& !bHandleDefaultProp
++			&& !(eValType & SbxARRAY)) ||
++            (eVarType != SbxOBJECT 
++			&& eVarType != SbxEMPTY 
++			&& !bHandleDefaultProp
++			&& !(eVarType & SbxARRAY) ) )
+ 	{
+ 		Error( SbERR_INVALID_USAGE_OBJECT );
+ 	}
+ 	else
+ 	{
+-		// Auf refVal GetObject fuer Collections ausloesen
+-		SbxBase* pObjVarObj = refVal->GetObject();
+-		if( pObjVarObj )
++		// Getting in here causes problems with objects with default properties
++		// if they are SbxEMPTY I guess
++		if ( !bHandleDefaultProp || ( bHandleDefaultProp && refVal->GetType() == SbxOBJECT ) )
+ 		{
+-			SbxVariableRef refObjVal = PTR_CAST(SbxObject,pObjVarObj);
++		// Auf refVal GetObject fuer Collections ausloesen
++			SbxBase* pObjVarObj = refVal->GetObject();
++			if( pObjVarObj )
++			{
++				SbxVariableRef refObjVal = PTR_CAST(SbxObject,pObjVarObj);
+ 
+-			// #67733 Typen mit Array-Flag sind auch ok
+-			if( refObjVal )
+-				refVal = refObjVal;
+-			else if( !(eValType & SbxARRAY) )
+-				refVal = NULL;
++				// #67733 Typen mit Array-Flag sind auch ok
++				if( refObjVal )
++					refVal = refObjVal;
++				else if( !(eValType & SbxARRAY) )
++					refVal = NULL;
++			}
+ 		}
+ 
+ 		// #52896 Wenn Uno-Sequences bzw. allgemein Arrays einer als
+@@ -270,9 +341,57 @@ void SbiRuntime::StepSET_Impl( SbxVariab
+ 			if( pProcProperty )
+ 				pProcProperty->setSet( true );
+ 
++			if ( bHandleDefaultProp )
++			{
++				// get default properties for lhs & rhs where necessary
++				SbxVariable* defaultProp = NULL;
++				bool bLHSHasDefaultProp = false;
++				// LHS try determine if a default prop exists
++				if ( refVar->GetType() == SbxOBJECT )
++				{
++					SbxVariable* pDflt = getDefaultProp( refVar );
++					if ( pDflt )
++					{
++						refVar = pDflt;
++						bLHSHasDefaultProp = true;
++					}
++				}
++				// RHS only get a default prop is the rhs has one
++				if (  refVal->GetType() == SbxOBJECT )
++				{
++					// check if lhs is a null object
++					// if it is then use the object not the default property
++					SbxObject* pObj = NULL;
++	
++					
++					pObj = PTR_CAST(SbxObject,(SbxVariable*)refVar);
++
++					// calling GetObject on a SbxEMPTY variable raises
++					// object not set errors, make sure its an Object
++					if ( !pObj && refVar->GetType() == SbxOBJECT )
++					{
++						SbxBase* pObjVarObj = refVar->GetObject();
++						pObj = PTR_CAST(SbxObject,pObjVarObj);
++					}	
++					SbxVariable* pDflt = NULL;
++					if ( pObj || bLHSHasDefaultProp )
++						// lhs is either a valid object || or has a defaultProp
++						pDflt = getDefaultProp( refVal );
++					if ( pDflt )
++						refVal = pDflt;
++				}
++			}	
++			
+ 			*refVar = *refVal;
++
++			// lhs is a property who's value is currently (Empty e.g. no broadcast yet)
++			// in this case if there is a default prop involved the value of the 
++			// default property may infact be void so the type will also be SbxEMPTY
++			// in this case we do not want to call checkUnoStructCopy 'cause that will
++			// cause an error also
++			if ( !bHandleDefaultProp || ( bHandleDefaultProp && ( refVar->GetType() != SbxEMPTY ) ) )
+ 			// #67607 Uno-Structs kopieren
+-			checkUnoStructCopy( refVal, refVar );
++				checkUnoStructCopy( refVal, refVar );
+ 			if( bFlagsChanged )
+ 				refVar->SetFlags( n );
+ 		}
+@@ -283,9 +402,17 @@ void SbiRuntime::StepSET()
+ {
+ 	SbxVariableRef refVal = PopVar();
+ 	SbxVariableRef refVar = PopVar();
++	StepSET_Impl( refVal, refVar, SbiRuntime::isVBAEnabled() ); // this is really assigment
++}
+ 
+-	StepSET_Impl( refVal, refVar );
++void SbiRuntime::StepVBASET()
++{
++	SbxVariableRef refVal = PopVar();
++	SbxVariableRef refVar = PopVar();
++	// don't handle default property
++	StepSET_Impl( refVal, refVar, false ); // set obj = something
+ }
++
+ 
+ // JSM 07.10.95
+ void SbiRuntime::StepLSET()
+Index: basic/source/runtime/step2.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/runtime/step2.cxx,v
+retrieving revision 1.22
+retrieving revision 1.22.10.5
+diff -u -p -u -p -r1.22 -r1.22.10.5
+--- basic/source/runtime/step2.cxx	17 Sep 2006 10:07:02 -0000	1.22
++++ basic/source/runtime/step2.cxx	26 Oct 2006 08:34:36 -0000	1.22.10.5
+@@ -52,6 +52,54 @@
+ using namespace com::sun::star::container;
+ using namespace com::sun::star::lang;
+ 
++const static String aThisComponent( RTL_CONSTASCII_USTRINGPARAM("ThisComponent") );
++const static String aVBAHook( RTL_CONSTASCII_USTRINGPARAM( "VBAGlobals" ) );
++//  i#i68894# 
++SbxArray* getVBAGlobals( StarBASIC* pSBasic )
++{
++	SbxVariableRef pThisComp = pSBasic->Find( aThisComponent, SbxCLASS_OBJECT );
++	static SbxArrayRef pArray;
++	static bool isInitialised = false;
++	if ( isInitialised )
++		return pArray;
++	
++	if (pThisComp && pThisComp->IsObject())
++	{
++		SbxObject *pObj = static_cast<SbxObject *>(pThisComp->GetObject());
++		SbxVariable *vba;
++		if ((vba = pObj->Find( aVBAHook, SbxCLASS_DONTCARE/* SbxCLASS_PROPERTY */ ) ) &&
++			(vba->GetType() & SbxARRAY))
++		{
++			pArray = static_cast<SbxArray *>(vba->GetObject());
++			isInitialised = true;
++			return pArray;
++		}
++	}
++	return NULL;
++}
++
++//  i#i68894# 
++SbxVariable* VBAFind( const String& rName, SbxClassType t, StarBASIC* pBasic )
++{
++	if( rName == aThisComponent )
++		return NULL;
++
++	SbxArray *pVBAGlobals = getVBAGlobals( pBasic );
++	for (USHORT i = 0; pVBAGlobals && i < pVBAGlobals->Count(); i++)
++	{
++		SbxVariable *pElem = pVBAGlobals->Get( i );
++		if (!pElem || !pElem->IsObject())
++			continue;
++		SbxObject *pVba = static_cast<SbxObject *>(pElem->GetObject());
++		SbxVariable *pVbaVar;
++		if( pVba && (pVbaVar = pVba->Find( rName, t ) ) )
++		{
++			return pVbaVar;
++		}
++	}
++	return NULL;
++
++}
+ 
+ // Suchen eines Elements
+ // Die Bits im String-ID:
+@@ -60,6 +108,9 @@ using namespace com::sun::star::lang;
+ SbxVariable* SbiRuntime::FindElement
+ 	( SbxObject* pObj, USHORT nOp1, USHORT nOp2, SbError nNotFound, BOOL bLocal )
+ {
++	
++	bool bIsVBAInterOp = SbiRuntime::isVBAEnabled(); 
++
+ 	SbxVariable* pElem = NULL;
+ 	if( !pObj )
+ 	{
+@@ -97,15 +148,29 @@ SbxVariable* SbiRuntime::FindElement
+ 			// Ist es ein globaler Uno-Bezeichner?
+ 			if( bLocal && !pElem )
+ 			{
+-				// #72382 VORSICHT! Liefert jetzt wegen unbekannten
+-				// Modulen IMMER ein Ergebnis!
+-				SbxVariable* pUnoClass = findUnoClass( aName );
+-				if( pUnoClass )
+-				{
+-					pElem = new SbxVariable( t );
+-					SbxValues aRes( SbxOBJECT );
+-					aRes.pObj = pUnoClass;
+-					pElem->SbxVariable::Put( aRes );
++				bool bSetName = true; // preserve normal behaviour
++
++				// i#i68894# if VBAInterOp favour searching vba globals 
++				// over searching for uno classess
++				if ( bIsVBAInterOp )
++				{
++					// Try Find in VBA symbols space
++					pElem = VBAFind( aName, SbxCLASS_DONTCARE, &rBasic );
++					if ( pElem )
++						bSetName = false; // don't overwrite uno name
++				}
++				else
++				{				
++					// #72382 VORSICHT! Liefert jetzt wegen unbekannten
++					// Modulen IMMER ein Ergebnis!
++					SbxVariable* pUnoClass = findUnoClass( aName );
++					if( pUnoClass )
++					{
++						pElem = new SbxVariable( t );
++						SbxValues aRes( SbxOBJECT );
++						aRes.pObj = pUnoClass;
++						pElem->SbxVariable::Put( aRes );
++					}
+ 				}
+ 
+ 				// #62939 Wenn eine Uno-Klasse gefunden wurde, muss
+@@ -120,7 +185,8 @@ SbxVariable* SbiRuntime::FindElement
+ 
+ 					// #72382 Lokal speichern, sonst werden alle implizit
+ 					// deklarierten Vars automatisch global !
+-					pElem->SetName( aName );
++					if ( bSetName )
++						pElem->SetName( aName );
+ 					refLocals->Put( pElem, refLocals->Count() );
+ 				}
+ 			}
+@@ -503,7 +569,7 @@ SbxVariable* SbiRuntime::CheckArray( Sbx
+ 						Reference< XDefaultMethod > xDfltMethod( x, UNO_QUERY );
+ 
+ 						if ( xDfltMethod.is() )
+-							sDefaultMethod = xDfltMethod->getName();
++							sDefaultMethod = xDfltMethod->getDefaultMethodName();
+ 						else if( xIndexAccess.is() )
+ 							sDefaultMethod = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "getByIndex" ) );
+ 
+Index: basic/source/sbx/sbxobj.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/sbx/sbxobj.cxx,v
+retrieving revision 1.6
+retrieving revision 1.6.12.1
+diff -u -p -u -p -r1.6 -r1.6.12.1
+--- basic/source/sbx/sbxobj.cxx	17 Sep 2006 10:11:04 -0000	1.6
++++ basic/source/sbx/sbxobj.cxx	18 Oct 2006 20:29:19 -0000	1.6.12.1
+@@ -320,16 +320,21 @@ BOOL SbxObject::Call( const XubString& r
+ 	return FALSE;
+ }
+ 
+-void SbxObject::SetDfltProperty( const XubString& rName )
++SbxProperty* SbxObject::GetDfltProperty() 
+ {
+-	if( rName.Len() )
++	if ( !pDfltProp && aDfltPropName.Len() )
+ 	{
+-		pDfltProp = (SbxProperty*) Find( rName, SbxCLASS_PROPERTY );
++		pDfltProp = (SbxProperty*) Find( aDfltPropName, SbxCLASS_PROPERTY );
+ 		if( !pDfltProp )
+-			pDfltProp = (SbxProperty*) Make( rName, SbxCLASS_PROPERTY, SbxVARIANT );
++			pDfltProp = (SbxProperty*) Make( aDfltPropName, SbxCLASS_PROPERTY, SbxVARIANT );
+ 	}
+-	else
+-		pDfltProp = NULL;
++	return pDfltProp;
++}
++void SbxObject::SetDfltProperty( const XubString& rName )
++{
++	if ( rName != aDfltPropName )
++		pDfltProp = NULL; 
++	aDfltPropName = rName;
+ 	SetModified( TRUE );
+ }
+ 
+Index: udkapi/com/sun/star/script/XDefaultMethod.idl
+===================================================================
+RCS file: /cvs/api/udkapi/com/sun/star/script/XDefaultMethod.idl,v
+retrieving revision 1.2
+retrieving revision 1.2.20.1
+diff -u -p -u -p -r1.2 -r1.2.20.1
+--- udkapi/com/sun/star/script/XDefaultMethod.idl	5 May 2006 10:14:57 -0000	1.2
++++ udkapi/com/sun/star/script/XDefaultMethod.idl	17 Oct 2006 11:02:09 -0000	1.2.20.1
+@@ -62,7 +62,7 @@ interface XDefaultMethod : ::com::sun::s
+     @return
+      The <atom>string</atom> name of default method
+   */
+-  string getName();
++  string getDefaultMethodName();
+ 
+ };
+ 
+Index: udkapi/com/sun/star/script/XDefaultProperty.idl
+===================================================================
+RCS file: udkapi/com/sun/star/script/XDefaultProperty.idl
+diff -N udkapi/com/sun/star/script/XDefaultProperty.idl
+--- /dev/null	1 Jan 1970 00:00:00 -0000
++++ udkapi/com/sun/star/script/XDefaultProperty.idl	17 Oct 2006 11:03:38 -0000	1.1.2.1
+@@ -0,0 +1,74 @@
++/*************************************************************************
++ *
++ *  OpenOffice.org - a multi-platform office productivity suite
++ *
++ *  $RCSfile$
++ *
++ *  $Revision$
++ *
++ *  last change: $Author$ $Date$
++ *
++ *  The Contents of this file are made available subject to
++ *  the terms of GNU Lesser General Public License Version 2.1.
++ *
++ *
++ *    GNU Lesser General Public License Version 2.1
++ *    =============================================
++ *    Copyright 2005 by Sun Microsystems, Inc.
++ *    901 San Antonio Road, Palo Alto, CA 94303, USA
++ *
++ *    This library is free software; you can redistribute it and/or
++ *    modify it under the terms of the GNU Lesser General Public
++ *    License version 2.1, as published by the Free Software Foundation.
++ *
++ *    This library is distributed in the hope that it will be useful,
++ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ *    Lesser General Public License for more details.
++ *
++ *    You should have received a copy of the GNU Lesser General Public
++ *    License along with this library; if not, write to the Free Software
++ *    Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ *    MA  02111-1307  USA
++ *
++ ************************************************************************/
++
++#ifndef __com_sun_star_script_XDefaultProperty_idl__
++#define __com_sun_star_script_XDefaultProperty_idl__
++
++#ifndef __com_sun_star_uno_XInterface_idl__
++#include <com/sun/star/uno/XInterface.idl>
++#endif
++
++module com { module sun { module star { module script {
++//==============================================================================
++/** 
++    An object supporting this interface indicates to interested
++    parties or clients the name of the default propery for
++    this object. 
++    <p>For example where ExampleObject is an instance of an Object that 
++    supports this interface which returns the default property name 
++    "Value".A scripting engine could use this information to support 
++    syntax like <p>ExampleObject = "foo"</p> 
++    which would be equivalent to writing 
++    <p>ExampleObject.Value = "foo"</p>
++    or
++    <p>bar = ExampleObject</p>
++    which would be equivalent to writing 
++    <p>bar = ExampleObject.Value</p>
++*/
++interface XDefaultProperty : ::com::sun::star::uno::XInterface
++{
++  //-----------------------------------------------------------------------
++  /**
++    Returns the name of the default property
++
++    @return
++     The <atom>string</atom> name of default property
++  */
++  string getDefaultPropertyName();
++
++};
++
++};  };  };  };
++#endif
+Index: udkapi/com/sun/star/script/makefile.mk
+===================================================================
+RCS file: /cvs/api/udkapi/com/sun/star/script/makefile.mk,v
+retrieving revision 1.12
+retrieving revision 1.12.20.1
+diff -u -p -u -p -r1.12 -r1.12.20.1
+--- udkapi/com/sun/star/script/makefile.mk	5 May 2006 10:15:08 -0000	1.12
++++ udkapi/com/sun/star/script/makefile.mk	17 Oct 2006 11:03:38 -0000	1.12.20.1
+@@ -88,6 +88,7 @@ IDLFILES=\
+ 	XScriptEventsSupplier.idl\
+ 	XScriptEventsAttacher.idl\
+ 	XDefaultMethod.idl\
++	XDefaultProperty.idl\
+ 
+ # ------------------------------------------------------------------
+ 
