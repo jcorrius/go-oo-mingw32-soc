@@ -260,63 +260,78 @@ diff -rup vcl/unx/source/app/sm.cxx vcl/unx/source/app/sm.cxx
          ICEConnectionObserver::unlock();
      }
  }
-diff -rup framework/inc/services/sessionlistener.hxx framework/inc/services/sessionlistener.hxx
---- framework/inc/services/sessionlistener.hxx	2006-01-19 18:50:05.000000000 +0100
-+++ framework/inc/services/sessionlistener.hxx	2006-02-20 18:00:46.000000000 +0100
-@@ -180,16 +180,12 @@ class SessionListener :   // interfaces
-         css::uno::Reference< css::lang::XMultiServiceFactory > m_cfgProv;
+diff -rup offapi/com/sun/star/frame/XSessionManagerClient.idl offapi/com/sun/star/frame/XSessionManagerClient.idl
+--- offapi/com/sun/star/frame/XSessionManagerClient.idl	2005-09-08 03:25:36.000000000 +0200
++++ offapi/com/sun/star/frame/XSessionManagerClient.idl	2006-02-20 17:09:58.000000000 +0100
+@@ -88,7 +88,7 @@ module com {  module sun {  module star 
  
-         void _doInteraction(const rtl::OUString& title, const rtl::OUString& url, sal_Bool bc, sal_Bool* save, sal_Bool* cancel);
--        sal_Bool _cancelShutdown();
--        sal_Bool _requestInteraction();
--        void _finishInteraction();
-+        void _requestInteraction();
-+        void _finishInteraction( bool bCancelShutdown );
-+	    void _saveAutorecovery();
+         @see XSessionManagerListener
+         */
+-        [oneway] void interactionDone( [in] XSessionManagerListener xListener );
++        [oneway] void interactionDone( [in] XSessionManagerListener xListener, [in] boolean bCancelShutdown );
  
-         SessionList_t m_sessionList;
+         /** saveDone signals that a listener has processed a save request
  
--        // interaction+shutdown handling
--        oslCondition* _pcInteract;
--        oslCondition* _pcCancelShutdown;
+@@ -98,14 +98,6 @@ module com {  module sun {  module star 
+         @see XSessionManagerListener
+         */
+         [oneway] void saveDone( [in] XSessionManagerListener xListener );
 -
+-        /** Call cancelShutdown to try to cancel a desktop shutdown in progress
+-
+-        @returns
+-        <TRUE/> if shutdown was canceled,
+-        <FALSE/> else.
+-        */
+-        boolean cancelShutdown();
+     };
+ 
+ }; }; }; };
+diff -rup framework-m188/inc/services/sessionlistener.hxx framework/inc/services/sessionlistener.hxx
+--- framework-m188/inc/services/sessionlistener.hxx	2006-10-31 13:13:27.000000000 +0100
++++ framework/inc/services/sessionlistener.hxx	2006-10-31 18:14:09.000000000 +0100
+@@ -161,6 +161,10 @@ class SessionListener :   // interfaces
+ 
+         css::uno::Reference< css::frame::XSessionManagerClient > m_rSessionManager;
+ 
++        void _requestInteraction();
++        void _finishInteraction( sal_Bool bCancelShutdown );
++        void _saveAutorecovery( sal_Bool bSessionSave );
++
          // restore handling
-         oslCondition m_cRestoreDone;
          sal_Bool m_bRestored;
-diff -rup framework/source/services/sessionlistener.cxx framework/source/services/sessionlistener.cxx
---- framework/source/services/sessionlistener.cxx	2006-01-20 13:41:53.000000000 +0100
-+++ framework/source/services/sessionlistener.cxx	2006-02-20 18:00:23.000000000 +0100
-@@ -154,8 +154,6 @@ SessionListener::SessionListener(const c
-         : ThreadHelpBase      (&Application::GetSolarMutex())
-         , OWeakObject         (                             )
-         , m_xSMGR             (xSMGR                        )
--        , _pcInteract( NULL )
--        , _pcCancelShutdown( NULL )
-         , m_cRestoreDone(osl_createCondition())
-         , m_bRestored( false )
- {   
-@@ -255,38 +253,46 @@ sal_Bool SAL_CALL SessionListener::doRes
+  
+diff -rup framework-m188/source/services/sessionlistener.cxx framework/source/services/sessionlistener.cxx
+--- framework-m188/source/services/sessionlistener.cxx	2006-10-31 13:13:29.000000000 +0100
++++ framework/source/services/sessionlistener.cxx	2006-11-01 13:08:26.000000000 +0100
+@@ -249,38 +249,50 @@ sal_Bool SAL_CALL SessionListener::doRes
      return m_bRestored;
  }
  
-+void SessionListener::_saveAutorecovery()
++void SessionListener::_saveAutorecovery( sal_Bool bSessionSave )
 +{
 +	sal_Bool bDispatched = sal_False;
 +	ResetableGuard aGuard(m_aLock);    
 +	try 
 +		{
++                        // ON session save
 +			// xd create SERVICENAME_AUTORECOVERY -> XDispatch
 +			// xd->dispatch("vnd.sun.star.autorecovery:/doSessionSave, async=true
 +			// on stop event m_rSessionManager->saveDone(this);
++                        // ON autosave ( bSessionSave == false)
++			// xd->dispatch("vnd.sun.star.autorecovery:/doAutoSave, async=false
 +
 +			Reference< XDispatch > xDispatch(m_xSMGR->createInstance(SERVICENAME_AUTORECOVERY), UNO_QUERY_THROW);
 +			Reference< XURLTransformer > xURLTransformer(m_xSMGR->createInstance(SERVICENAME_URLTRANSFORMER), UNO_QUERY_THROW);
 +			URL aURL;
-+			aURL.Complete = OUString::createFromAscii("vnd.sun.star.autorecovery:/doSessionSave");
++			aURL.Complete = OUString::createFromAscii(bSessionSave
++                                                                  ? "vnd.sun.star.autorecovery:/doSessionSave"
++                                                                  : "vnd.sun.star.autorecovery:/doAutoSave");
 +			xURLTransformer->parseStrict(aURL);
-+			xDispatch->addStatusListener(this, aURL);
++                        if( bSessionSave )
++                            xDispatch->addStatusListener(this, aURL);
 +			Sequence< PropertyValue > args(1);
-+			args[0] = PropertyValue(OUString::createFromAscii("DispatchAsynchron"),-1,makeAny(sal_True),PropertyState_DIRECT_VALUE);
++			args[0] = PropertyValue(OUString::createFromAscii("DispatchAsynchron"),-1,makeAny(bSessionSave),PropertyState_DIRECT_VALUE);
 +			xDispatch->dispatch(aURL, args);
 +			bDispatched = sal_True;
 +			// on stop event set call m_rSessionManager->saveDone(this);            
@@ -324,7 +339,7 @@ diff -rup framework/source/services/sessionlistener.cxx framework/source/service
 +			OString aMsg = OUStringToOString(e.Message, RTL_TEXTENCODING_UTF8);
 +			OSL_ENSURE(sal_False, aMsg.getStr());
 +			// save failed, but tell manager to go on if we havent yet dispatched the request
-+			if (m_rSessionManager.is() && !bDispatched)
++			if (m_rSessionManager.is() && !bDispatched && bSessionSave)
 +				m_rSessionManager->saveDone(this);
 +		}
 +}
@@ -361,24 +376,21 @@ diff -rup framework/source/services/sessionlistener.cxx framework/source/service
 -            if (m_rSessionManager.is() && !bDispatched)
 -                m_rSessionManager->saveDone(this);
 -        }
-+		if (bCancelable) {
++                _saveAutorecovery( !bCancelable );
++		if (bCancelable)
 +			_requestInteraction();
-+		} else {
-+			_saveAutorecovery();
-+		}
      }
      // we don't have anything to do so tell the session manager we're done
      else if( m_rSessionManager.is() )
-@@ -298,58 +304,38 @@ void SAL_CALL SessionListener::doSave( s
+@@ -289,12 +301,32 @@ void SAL_CALL SessionListener::doSave( s
  
     
  
 -void SAL_CALL SessionListener::approveInteraction( sal_Bool /*bInteractionGranted*/ )
 +void SAL_CALL SessionListener::approveInteraction( sal_Bool bInteractionGranted )
      throw (RuntimeException)
- {
--    if (_pcInteract != NULL)
--        osl_setCondition(*_pcInteract);
+-{}
++{
 +	if( bInteractionGranted ) {
 +		bool bExit = GetpApp()->QueryExit();
 +
@@ -387,84 +399,21 @@ diff -rup framework/source/services/sessionlistener.cxx framework/source/service
 +    
 +		_finishInteraction( !bExit );
 +	} else
-+		_saveAutorecovery();
- }
++		_saveAutorecovery( sal_True );
++}
  
  void SessionListener::shutdownCanceled()
      throw (RuntimeException)
- {
--    if (_pcCancelShutdown != NULL)
--        osl_setCondition(*_pcCancelShutdown);
- }
+ {}
  
--
--
- void SessionListener::_doInteraction(
-         const OUString& /*title*/, const OUString& /*url*/, sal_Bool /*bCanceable*/, sal_Bool* /*save*/, sal_Bool* /*cancel*/)
- {
- }
- 
--sal_Bool SessionListener::_cancelShutdown()
 +void SessionListener::_requestInteraction()
- {
--    oslCondition c = osl_createCondition();
--    _pcCancelShutdown = &c;
--    TimeValue t;
--    t.Seconds = 5;
--    t.Nanosec = 0;
--    m_rSessionManager->cancelShutdown();
--    sal_Bool b = osl_waitCondition(c, &t);
--    _pcCancelShutdown = NULL;
--    osl_destroyCondition(c);
--    return b;
--}
--
--sal_Bool SessionListener::_requestInteraction()
--{
--    oslCondition c = osl_createCondition();
--    _pcInteract = &c;
--    TimeValue t;
--    t.Seconds = 5;
--    t.Nanosec = 0;
-     m_rSessionManager->queryInteraction(Reference<XSessionManagerListener>(this));
--    sal_Bool b = osl_waitCondition(c, &t);
--    _pcInteract = NULL;
--    osl_destroyCondition(c);
--    return b;
- }
- 
--void SessionListener::_finishInteraction()
-+void SessionListener::_finishInteraction( bool bCancelShutdown )
- {
--    m_rSessionManager->interactionDone(Reference< XSessionManagerListener >(this));
++{
++    m_rSessionManager->queryInteraction(Reference<XSessionManagerListener>(this));
++}
++  
++void SessionListener::_finishInteraction( sal_Bool bCancelShutdown )
++{
 +    m_rSessionManager->interactionDone(Reference< XSessionManagerListener >(this), bCancelShutdown );
++}
++
  }
- 
- }
-diff -rup offapi/com/sun/star/frame/XSessionManagerClient.idl offapi/com/sun/star/frame/XSessionManagerClient.idl
---- offapi/com/sun/star/frame/XSessionManagerClient.idl	2005-09-08 03:25:36.000000000 +0200
-+++ offapi/com/sun/star/frame/XSessionManagerClient.idl	2006-02-20 17:09:58.000000000 +0100
-@@ -88,7 +88,7 @@ module com {  module sun {  module star 
- 
-         @see XSessionManagerListener
-         */
--        [oneway] void interactionDone( [in] XSessionManagerListener xListener );
-+        [oneway] void interactionDone( [in] XSessionManagerListener xListener, [in] boolean bCancelShutdown );
- 
-         /** saveDone signals that a listener has processed a save request
- 
-@@ -98,14 +98,6 @@ module com {  module sun {  module star 
-         @see XSessionManagerListener
-         */
-         [oneway] void saveDone( [in] XSessionManagerListener xListener );
--
--        /** Call cancelShutdown to try to cancel a desktop shutdown in progress
--
--        @returns
--        <TRUE/> if shutdown was canceled,
--        <FALSE/> else.
--        */
--        boolean cancelShutdown();
-     };
- 
- }; }; }; };
