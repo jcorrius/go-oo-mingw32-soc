@@ -1,26 +1,142 @@
---- psprint/source/fontmanager/fontconfig.cxx	2006-11-03 17:19:11.000000000 +0800
-+++ psprint/source/fontmanager/fontconfig.cxx	2006-11-02 18:19:13.000000000 +0800
-@@ -417,8 +417,21 @@ bool PrintFontManager::initFontconfig()
-     FontCfgWrapper& rWrapper = FontCfgWrapper::get();
-     if( ! rWrapper.isValid() )
-         return false;
--
--    FcFontSet* pFSet = rWrapper.getFontSet();
-+    FcConfig* pConfig = rWrapper.getDefConfig();
-+    FcObjectSet* pOSet = rWrapper.FcObjectSetBuild( FC_FAMILY,
-+                                                    FC_STYLE,
-+                                                    FC_SLANT,
-+                                                    FC_WEIGHT,
-+                                                    FC_SPACING,
-+                                                    FC_FILE,
-+                                                    FC_OUTLINE,
-+                                                    FC_INDEX,
-+                                                    FC_EMBEDDED_BITMAP,
-+                                                    FC_ANTIALIAS,
-+                                                    (void *) NULL );
-+    FcPattern* pPattern = rWrapper.FcPatternCreate();
-+    FcFontSet* pFSet = rWrapper.FcFontList( pConfig, pPattern, pOSet );
-+//    FcFontSet* pFSet = rWrapper.getFontSet();
+diff -u -r psprint/inc/psprint/fontmanager.hxx psprint/inc/psprint/fontmanager.hxx
+--- openoffice.org.orig/psprint/inc/psprint/fontmanager.hxx	2006-11-03 13:23:14.000000000 +0000
++++ openoffice.org/psprint/inc/psprint/fontmanager.hxx	2006-11-06 08:41:56.000000000 +0000
+@@ -451,6 +451,8 @@
+     std::hash_multimap< sal_Unicode, sal_uInt8 >	m_aUnicodeToAdobecode;
+     std::hash_multimap< sal_uInt8, sal_Unicode >	m_aAdobecodeToUnicode;
  
-     if( pFSet )
-     {
++    std::hash_map< rtl::OString, rtl::OString, rtl::OStringHash > m_aFontconfigNameToLocalized;
++
+     mutable FontCache*							m_pFontCache;
+     bool m_bFontconfigSuccess;
+         
+diff -u -r psprint/source/fontmanager/fontconfig.cxx psprint/source/fontmanager/fontconfig.cxx
+--- openoffice.org.orig/psprint/source/fontmanager/fontconfig.cxx	2006-11-03 13:23:14.000000000 +0000
++++ openoffice.org/psprint/source/fontmanager/fontconfig.cxx	2006-11-06 08:46:55.000000000 +0000
+@@ -75,6 +75,15 @@
+ #ifndef _RTL_USTRBUF_HXX
+ #include <rtl/ustrbuf.hxx>
+ #endif
++#ifndef _OSL_PROCESS_H_
++#include <osl/process.h>
++#endif
++#ifndef _RTL_LOCALE_HXX_
++#include <rtl/locale.hxx>
++#endif
++#include <utility>
++#include <algorithm>
++
+ 
+ using namespace psp;
+ using namespace osl;
+@@ -412,6 +421,84 @@
+ #define FC_EMBEDDED_BITMAP "embeddedbitmap"
+ #endif
+ 
++namespace
++{
++    typedef std::pair<FcChar8*, FcChar8*> lang_and_family;
++
++    class localizedsorter
++    {
++            rtl::OLocale maLoc;
++        public:
++            localizedsorter(rtl_Locale* pLoc) : maLoc(pLoc) {}
++            FcChar8* bestname(const std::vector<lang_and_family> &families);
++    };
++
++    FcChar8* localizedsorter::bestname(const std::vector<lang_and_family> &families)
++    {
++        FcChar8* candidate = families.begin()->second;
++        rtl::OString sLangMatch(rtl::OUStringToOString(maLoc.getLanguage().toAsciiLowerCase(), RTL_TEXTENCODING_UTF8));
++        rtl::OString sFullMatch = sLangMatch;
++        sFullMatch += OString('-');
++        sFullMatch += rtl::OUStringToOString(maLoc.getCountry().toAsciiLowerCase(), RTL_TEXTENCODING_UTF8);
++
++        std::vector<lang_and_family>::const_iterator aEnd = families.end();
++        for (std::vector<lang_and_family>::const_iterator aIter = families.begin(); aIter != aEnd; ++aIter)
++        {
++            const char *pLang = (const char*)aIter->first;
++            //perfect
++            if (strcmp(pLang, sFullMatch.getStr()) == 0)
++            {
++                candidate = aIter->second;
++                break;
++            }
++            else if (strcmp(pLang, sLangMatch.getStr()) == 0)
++                candidate = aIter->second;
++        }
++
++        return candidate;
++    }
++
++
++    FcResult lcl_FamilyFromPattern(FontCfgWrapper& rWrapper, FcPattern* pPattern, FcChar8 **family, 
++        std::hash_map< rtl::OString, rtl::OString, rtl::OStringHash > &aFontconfigNameToLocalized)
++    {
++	FcChar8 *origfamily;
++        FcResult eFamilyRes	= rWrapper.FcPatternGetString( pPattern, FC_FAMILY, 0, &origfamily );
++        *family = origfamily;
++
++        if( eFamilyRes == FcResultMatch)
++        {
++            FcChar8* familylang = NULL;
++            if (rWrapper.FcPatternGetString( pPattern, FC_FAMILYLANG, 0, &familylang ) == FcResultMatch)
++            {
++                std::vector< lang_and_family > lang_and_families;
++                lang_and_families.push_back(lang_and_family(familylang, *family));
++                int k = 1;
++                while (1)
++                {
++                    if (rWrapper.FcPatternGetString( pPattern, FC_FAMILYLANG, k, &familylang ) != FcResultMatch)
++                        break;
++                    if (rWrapper.FcPatternGetString( pPattern, FC_FAMILY, k, family ) != FcResultMatch)
++                        break;
++                    lang_and_families.push_back(lang_and_family(familylang, *family));
++                    ++k;
++                }
++
++                //possible to-do, sort by UILocale instead of process locale
++                rtl_Locale* pLoc;
++                osl_getProcessLocale(&pLoc);
++                localizedsorter aSorter(pLoc);
++                *family = aSorter.bestname(lang_and_families);
++		if (strcmp((const char*)origfamily, (const char*)(*family)) != 0)
++		    aFontconfigNameToLocalized[OString((const char*)origfamily)] = OString((const char*)(*family));
++            }
++        }
++
++        return eFamilyRes;
++    }
++}
++
++
+ /*
+  * PrintFontManager::initFontconfig
+  */
+@@ -443,7 +530,7 @@
+             FcBool outline = false;
+             
+             FcResult eFileRes	      = rWrapper.FcPatternGetString( pFSet->fonts[i], FC_FILE, 0, &file );
+-            FcResult eFamilyRes	      = rWrapper.FcPatternGetString( pFSet->fonts[i], FC_FAMILY, 0, &family );
++            FcResult eFamilyRes       = lcl_FamilyFromPattern(rWrapper, pFSet->fonts[i], &family, m_aFontconfigNameToLocalized );
+             FcResult eStyleRes	      = rWrapper.FcPatternGetString( pFSet->fonts[i], FC_STYLE, 0, &style );
+             FcResult eSlantRes	      = rWrapper.FcPatternGetInteger( pFSet->fonts[i], FC_SLANT, 0, &slant );
+             FcResult eWeightRes	      = rWrapper.FcPatternGetInteger( pFSet->fonts[i], FC_WEIGHT, 0, &weight );
+@@ -763,8 +850,15 @@
+             //extract the closest match
+             FcChar8* family = NULL;
+             FcResult eFileRes = rWrapper.FcPatternGetString( pSet->fonts[0], FC_FAMILY, 0, &family );
++
+             if( eFileRes == FcResultMatch )
+-                aName = String( (sal_Char*)family, RTL_TEXTENCODING_UTF8 );
++            {
++                OString sFamily((sal_Char*)family);
++                std::hash_map< rtl::OString, rtl::OString, rtl::OStringHash >::const_iterator aI = m_aFontconfigNameToLocalized.find(sFamily);
++                if (aI != m_aFontconfigNameToLocalized.end())
++                    sFamily = aI->second;
++                aName = String( sFamily.getStr(), RTL_TEXTENCODING_UTF8 );
++            }
+ 
+             if (!rGlyphs.empty() )
+             {
