@@ -275,7 +275,7 @@ ScVbaApplication::setStatusBar( const uno::Any& _statusbar ) throw (uno::Runtime
 double SAL_CALL 
 ScVbaApplication::CountA( const uno::Any& arg1 ) throw (uno::RuntimeException)
 {
-	double result;
+	double result = 0;
 	uno::Reference< script::XInvocation > xInvoc( WorksheetFunction(), uno::UNO_QUERY_THROW );
 	if  ( xInvoc.is() )
 	{
@@ -479,7 +479,7 @@ ScVbaApplication::setCursor( sal_Int32 _cursor ) throw (uno::RuntimeException)
             case vba::Excel::XlMousePointer::xlWait:
             case vba::Excel::XlMousePointer::xlIBeam:
             {
-                const Pointer& rPointer( _cursor );
+                const Pointer& rPointer( static_cast< PointerStyle >( _cursor ) );
                 //It will set the edit window, toobar and statusbar's mouse pointer.
                 pFrame->GetFrame()->GetWindow().GetSystemWindow()->SetPointer( rPointer );
                 pFrame->GetFrame()->GetWindow().GetSystemWindow()->EnableChildPointerOverwrite( sal_True );

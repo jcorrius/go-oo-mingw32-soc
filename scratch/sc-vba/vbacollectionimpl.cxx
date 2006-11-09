@@ -56,7 +56,8 @@ ScVbaCollectionBaseImpl::getParent() throw (uno::RuntimeException)
 
 ::sal_Int32 SAL_CALL ScVbaCollectionBaseImpl::getCreator() throw (uno::RuntimeException)
 {
-	SC_VBA_STUB();
+	// #TODO #FIXE some sort of implementation
+	//SC_VBA_STUB();
 	return 0;
 }
 uno::Reference< vba::XApplication > SAL_CALL ScVbaCollectionBaseImpl::getApplication() throw (uno::RuntimeException)

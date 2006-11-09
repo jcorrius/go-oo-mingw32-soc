@@ -47,8 +47,8 @@
 #define DOESNOTEXIST -1
 using namespace com::sun::star;
 using namespace org::openoffice;
-static sal_Int16 
-nameExists( uno::Reference <sheet::XSpreadsheetDocument>& xSpreadDoc, ::rtl::OUString & name) throw ( lang::IllegalArgumentException )
+static bool 
+nameExists( uno::Reference <sheet::XSpreadsheetDocument>& xSpreadDoc, ::rtl::OUString & name, SCTAB& nTab ) throw ( lang::IllegalArgumentException )
 {
 	if (!xSpreadDoc.is())
 		throw lang::IllegalArgumentException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "nameExists() xSpreadDoc is null" ) ), uno::Reference< uno::XInterface  >(), 1 );	
@@ -56,18 +56,19 @@ nameExists( uno::Reference <sheet::XSpreadsheetDocument>& xSpreadDoc, ::rtl::OUS
 	uno::Reference <container::XIndexAccess> xIndex( xSheets, uno::UNO_QUERY );
 	if ( xIndex.is() )
 	{
-		sal_Int32  nCount = xIndex->getCount();
-		for (sal_Int32 i=0; i < nCount; i++)
+		SCTAB  nCount = static_cast< SCTAB >( xIndex->getCount() );
+		for (SCTAB i=0; i < nCount; i++)
 		{
 			uno::Reference< sheet::XSpreadsheet > xSheet(xIndex->getByIndex(i), uno::UNO_QUERY);
 			uno::Reference< container::XNamed > xNamed( xSheet, uno::UNO_QUERY_THROW );
 			if (xNamed->getName() == name)
 			{
-				return i;
+				nTab = i;
+				return true;
 			}
 		}
 	}
-	return DOESNOTEXIST;
+	return false;
 }
 
 static void getNewSpreadsheetName (rtl::OUString &aNewName, rtl::OUString aOldName, uno::Reference <sheet::XSpreadsheetDocument>& xSpreadDoc )
@@ -76,9 +77,9 @@ static void getNewSpreadsheetName (rtl::OUString &aNewName, rtl::OUString aOldNa
 		throw lang::IllegalArgumentException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "getNewSpreadsheetName() xSpreadDoc is null" ) ), uno::Reference< uno::XInterface  >(), 1 );	
 	static rtl::OUString aUnderScre( RTL_CONSTASCII_USTRINGPARAM( "_" ) );
 	int currentNum =2;
-	aNewName = aOldName + aUnderScre+
-					String::CreateFromInt32(currentNum) ;
-	while ( nameExists(xSpreadDoc,aNewName) != DOESNOTEXIST )
+	aNewName = aOldName + aUnderScre+ String::CreateFromInt32(currentNum) ;
+	SCTAB nTab = 0;
+	while ( nameExists(xSpreadDoc,aNewName, nTab ) )
 	{
 		aNewName = aOldName + aUnderScre +
 		String::CreateFromInt32(++currentNum) ;
@@ -139,10 +140,10 @@ openNewDoc(rtl::OUString aSheetName )
 		}
 		xModel.set(xSpreadDoc,uno::UNO_QUERY_THROW);
 	}
-	catch ( ::cppu::BootstrapException & e )    
+	catch ( ::cppu::BootstrapException & /*e*/ )    
 	{
 	}
-	catch ( uno::Exception & e )
+	catch ( uno::Exception & /*e*/ )
 	{
 	}
 	return xModel;
@@ -282,23 +283,14 @@ ScVbaWorksheet::Move( const uno::Any& Before, const uno::Any& After ) throw (uno
 	}
 
 	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( getModel(), uno::UNO_QUERY_THROW );
-	sal_Int32 nDest = DOESNOTEXIST;
-	sal_Bool bAfter = false;
-	if (Before >>= xSheet )
+	SCTAB nDest = 0;
+	aSheetName = xSheet->getName();
+	bool bSheetExists = nameExists (xSpreadDoc, aSheetName, nDest);
+	if ( bSheetExists )
 	{
-		aSheetName = xSheet->getName();
-		nDest = nameExists (xSpreadDoc, aSheetName);
-	}
-	else if (After >>= xSheet)
-	{
-		aSheetName = xSheet->getName();
-		nDest = nameExists (xSpreadDoc, aSheetName);
-		bAfter =true;
-	}
-
-	if (nDest != DOESNOTEXIST)
-	{
-		if (bAfter)  nDest++;
+		sal_Bool bAfter = After.hasValue();
+		if (bAfter)  
+			nDest++;
 		uno::Reference<sheet::XSpreadsheets> xSheets = xSpreadDoc->getSheets();
 		xSheets->moveByName(aCurrSheetName,nDest);
 	}
@@ -328,23 +320,15 @@ ScVbaWorksheet::Copy( const uno::Any& Before, const uno::Any& After ) throw (uno
 	}
 
 	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( getModel(), uno::UNO_QUERY );
-	sal_Int32 nDest = DOESNOTEXIST;
-	sal_Bool bAfter = false;
-	if (Before >>= xSheet )
-	{
-		aSheetName = xSheet->getName();
-		nDest = nameExists (xSpreadDoc, aSheetName);
-	}
-	else if (After >>= xSheet)
-	{
-		aSheetName = xSheet->getName();
-		nDest = nameExists (xSpreadDoc, aSheetName);
-		bAfter =true;
-	}
+	SCTAB nDest = 0;
+	aSheetName = xSheet->getName();
+	bool bSheetExists = nameExists (xSpreadDoc, aSheetName, nDest );
 
-	if (nDest != DOESNOTEXIST)
+	if ( bSheetExists )
 	{
-		if(bAfter)  nDest++;
+		sal_Bool bAfter = After.hasValue();
+		if(bAfter)
+			  nDest++;
 		uno::Reference<sheet::XSpreadsheets> xSheets = xSpreadDoc->getSheets();
 		getNewSpreadsheetName(aSheetName,aCurrSheetName,xSpreadDoc);
 		xSheets->copyByName(aCurrSheetName,aSheetName,nDest);
@@ -369,7 +353,8 @@ ScVbaWorksheet::Delete() throw (uno::RuntimeException)
 	rtl::OUString aSheetName = getName();
 	if ( xSpreadDoc.is() )
 	{
-		if (!nameExists(xSpreadDoc, aSheetName)) 
+		SCTAB nTab = 0;
+		if (!nameExists(xSpreadDoc, aSheetName, nTab )) 
 		{
 			return;
 		}
@@ -380,30 +365,27 @@ ScVbaWorksheet::Delete() throw (uno::RuntimeException)
 }
 
 uno::Reference< vba::XWorksheet >
-ScVbaWorksheet::getSheetAtOffset(int offset) throw (uno::RuntimeException)
+ScVbaWorksheet::getSheetAtOffset(SCTAB offset) throw (uno::RuntimeException)
 {
 	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( getModel(), uno::UNO_QUERY_THROW );
 	uno::Reference <sheet::XSpreadsheets> xSheets( xSpreadDoc->getSheets(), uno::UNO_QUERY_THROW );
 	uno::Reference <container::XIndexAccess> xIndex( xSheets, uno::UNO_QUERY_THROW );
 
 	rtl::OUString aName = getName();
-	sal_Int16 nIdx = nameExists (xSpreadDoc, aName);
-	if (nIdx >= 0)
-		nIdx += offset;
+	SCTAB nIdx = 0;
+	bool bSheetExists = nameExists (xSpreadDoc, aName, nIdx );
 
-	if (nIdx < 0 || nIdx >= xIndex->getCount()) // TESTME - throw ?
-		return uno::Reference< vba::XWorksheet >();
-	else
-	{
-		uno::Reference< sheet::XSpreadsheet > xSheet(xIndex->getByIndex(nIdx), uno::UNO_QUERY_THROW);
-		return new ScVbaWorksheet (m_xContext, xSheet, getModel());
-	}
+	if ( !bSheetExists )
+		return uno::Reference< vba::XWorksheet >(); 
+	nIdx = nIdx + offset;
+	uno::Reference< sheet::XSpreadsheet > xSheet(xIndex->getByIndex(nIdx), uno::UNO_QUERY_THROW);
+	return new ScVbaWorksheet (m_xContext, xSheet, getModel());
 }
 
 uno::Reference< vba::XWorksheet >
 ScVbaWorksheet::getNext() throw (uno::RuntimeException)
 {
-	return getSheetAtOffset(1);
+	return getSheetAtOffset(static_cast<SCTAB>(1));
 }
 
 uno::Reference< vba::XWorksheet >
@@ -599,10 +581,12 @@ ScVbaWorksheet::hasProperty( const ::rtl::OUString& aName ) throw (uno::RuntimeE
 uno::Any 
 ScVbaWorksheet::getControl( const ::rtl::OUString& sName )
 {
-	ScDocShell* pShell = NULL;
 	uno::Reference< sheet::XScenarioEnhanced > xIf( getSheet(), uno::UNO_QUERY_THROW );
 	ScTableSheetObj* pTab= static_cast< ScTableSheetObj* >( xIf.get() );
-	if ( pTab && ( pShell = pTab->GetDocShell() ) )
+	ScDocShell* pShell = NULL;
+	if ( pTab ) 
+		pShell = pTab->GetDocShell();
+	if ( pShell )
 	{
 		ScDrawLayer* pDrawLayer = pShell->MakeDrawLayer();
 		SCTAB nTab = 0;

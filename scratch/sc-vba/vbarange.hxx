@@ -34,6 +34,7 @@ class ArrayVisitor
 {
 public:
 	virtual void visitNode( sal_Int32 x, sal_Int32 y, const css::uno::Reference< css::table::XCell >& xCell ) = 0;
+	virtual	~ArrayVisitor(){}
 };
 
 class ValueSetter : public ArrayVisitor

@@ -85,7 +85,7 @@ public:
 			
 		SCTAB nTabCount = pDocShell->GetDocument()->GetTableCount();
 		uno::Sequence<sal_Int32> aSheets( nTabCount );
-		sal_Int32 nIndex = 0;
+		SCTAB nIndex = 0;
 		const ScMarkData& rMarkData = pViewShell->GetViewData()->GetMarkData();
 		sheets.reserve( nTabCount );
 		uno::Reference <sheet::XSpreadsheetDocument> xSpreadSheet( m_xModel, uno::UNO_QUERY_THROW );
@@ -184,20 +184,20 @@ ScVbaWindow::Scroll( const uno::Any& Down, const uno::Any& Up, const uno::Any& T
 	args1[1].Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Sel" ) );
 	args1[1].Value <<= false;
 	
-	sal_Int16 totalUp = up - down;
-	sal_Int16 totalLeft = toLeft - toRight;
+	SCROW totalUp = up - down;
+	SCCOL totalLeft = toLeft - toRight;
 	
 	if ( totalUp != 0 )
 	{
 		if (bLargeScroll)
-		    totalUp *= pViewShell->GetViewData()->VisibleCellsY( SC_SPLIT_BOTTOM );
+		    totalUp = totalUp * pViewShell->GetViewData()->VisibleCellsY( SC_SPLIT_BOTTOM );
 		pViewShell->ScrollLines(0, -totalUp);
 	}
 	
 	if ( totalLeft != 0 )
 	{
 		if (bLargeScroll)
-		    totalLeft *= pViewShell->GetViewData()->VisibleCellsX( SC_SPLIT_LEFT );
+		    totalLeft = totalLeft * pViewShell->GetViewData()->VisibleCellsX( SC_SPLIT_LEFT );
 		pViewShell->ScrollLines(-totalLeft, 0);
 	}
 
@@ -227,19 +227,22 @@ ScVbaWindow::SelectedSheets( const uno::Any& aIndex ) throw (uno::RuntimeExcepti
 }
 
 void SAL_CALL 
-ScVbaWindow::ScrollWorkbookTabs( const uno::Any& Sheets, const uno::Any& Position ) throw (uno::RuntimeException)
+ScVbaWindow::ScrollWorkbookTabs( const uno::Any& /*Sheets*/, const uno::Any& /*Position*/ ) throw (uno::RuntimeException)
 {
-	sal_Int32 nSheets = 0;
-	sal_Int32 nPosition = 0;
-	sal_Bool bSheets = ( Sheets >>= nSheets );
-	sal_Bool bPosition = ( Position >>= nPosition );
 // #TODO #FIXME need some implementation to scroll through the tabs
 // but where is this done?
+/*
+	sal_Int32 nSheets = 0;
+	sal_Int32 nPosition = 0;
+	throw uno::RuntimeException( rtl::OUString::createFromAscii("No Implemented" ), uno::Reference< uno::XInterface >() ); 
+	sal_Bool bSheets = ( Sheets >>= nSheets );
+	sal_Bool bPosition = ( Position >>= nPosition );
 	if ( bSheets || bPosition ) // at least one param specified
 		if ( bSheets )
 			;// use sheets
 		else if ( bPosition )
 			; //use position
+*/
 
 }
 uno::Reference< beans::XPropertySet >

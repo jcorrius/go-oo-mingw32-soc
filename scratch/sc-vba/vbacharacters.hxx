@@ -18,8 +18,8 @@ private:
 	css::uno::Reference< css::text::XSimpleText > m_xSimpleText;
 	css::uno::Reference< css::uno::XComponentContext > m_xContext;
 	ScVbaPalette m_aPalette;
-	sal_Int32 nLength;
-	sal_Int32 nStart;
+	sal_Int16 nLength;
+	sal_Int16 nStart;
 public:
 	ScVbaCharacters( const css::uno::Reference< css::uno::XComponentContext >& xContext,  const ScVbaPalette& dPalette, const css::uno::Reference< css::text::XSimpleText >& xRange, const css::uno::Any& Start, const css::uno::Any& Length  ) throw ( css::lang::IllegalArgumentException );
 

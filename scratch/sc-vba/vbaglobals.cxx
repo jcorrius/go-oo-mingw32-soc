@@ -55,7 +55,7 @@ namespace vbaobj
 	if ( !xContext.is() )
 	{
 		OSL_TRACE("Failed to obtain context" );	
-		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("BARRRRRRF no context")), uno::Reference< uno::XInterface >() );
+		return uno::Reference< uno::XInterface >(NULL);
 	}
 	OSL_TRACE("In create component for vbaglobals");
         return static_cast< lang::XTypeProvider * >( new ScVbaGlobals( xContext ) );

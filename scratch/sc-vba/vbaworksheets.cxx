@@ -88,11 +88,11 @@ ScVbaWorksheets::Add( const uno::Any& Before, const uno::Any& After,
 	
 	rtl::OUString aStringSheet;
 	sal_Bool bBefore(sal_True);
-	sal_Int32 nSheetIndex = 0;
-	sal_Int32 nNewSheets = 1, nType = 0;
+	SCTAB nSheetIndex = 0;
+	SCTAB nNewSheets = 1, nType = 0;
 	Count >>= nNewSheets;
 	Type >>= nType;
-	sal_Int32 nCount = 0;
+	SCTAB nCount = 0;
 	Before >>= aStringSheet;
 	if (!aStringSheet.getLength())
 	{
@@ -105,8 +105,8 @@ ScVbaWorksheets::Add( const uno::Any& Before, const uno::Any& After,
 			m_xContext )->getApplication()->getActiveWorkbook()->getActiveSheet()->getName();
 		bBefore = sal_True;
 	}
-		nCount = m_xIndexAccess->getCount();
-		for (sal_Int32 i=0; i < nCount; i++)
+		nCount = static_cast< SCTAB >( m_xIndexAccess->getCount() );
+		for (SCTAB i=0; i < nCount; i++)
 		{
 			uno::Reference< sheet::XSpreadsheet > xSheet(m_xIndexAccess->getByIndex(i), uno::UNO_QUERY);
 			uno::Reference< container::XNamed > xNamed( xSheet, uno::UNO_QUERY_THROW );
@@ -120,10 +120,10 @@ ScVbaWorksheets::Add( const uno::Any& Before, const uno::Any& After,
 	if(!bBefore)
 		nSheetIndex++;
 
-	sal_Int32 nSheetName = nCount + 1L;
+	SCTAB nSheetName = nCount + 1L;
 	String aStringBase( RTL_CONSTASCII_USTRINGPARAM("Sheet") );				
 	uno::Any result;
-	for (sal_Int32 i=0; i < nNewSheets; i++, nSheetName++)
+	for (SCTAB i=0; i < nNewSheets; i++, nSheetName++)
 	{
 		String aStringName = aStringBase;
 		aStringName += String::CreateFromInt32(nSheetName);

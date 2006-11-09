@@ -55,7 +55,8 @@ ScVbaDialogs::getApplication() throw (uno::RuntimeException)
 ::sal_Int32
 ScVbaDialogs::getCount() throw (uno::RuntimeException)
 {
-	SC_VBA_STUB();
+	//#TODO #FIXEME
+	//SC_VBA_STUB();
 	return 0;
 }
 

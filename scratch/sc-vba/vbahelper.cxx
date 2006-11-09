@@ -69,7 +69,8 @@ private:
 public:
 	PasteCellsWarningReseter() throw ( uno::RuntimeException )
 	{
-		if ( bInitialWarningState = getReplaceCellsWarning() );
+		bInitialWarningState = getReplaceCellsWarning();
+		if ( bInitialWarningState )
 			setReplaceCellsWarning( false );
 	}
 	~PasteCellsWarningReseter()
@@ -81,7 +82,7 @@ public:
 			{
 				setReplaceCellsWarning( true ); 
 			}
-			catch ( uno::Exception& e ){}
+			catch ( uno::Exception& /*e*/ ){}
 		}
 	}
 };
@@ -116,11 +117,11 @@ dispatchRequests (uno::Reference< frame::XModel>& xModel,rtl::OUString & aUrl, u
 			return;
 		xParser->parseStrict (url);
 	}
-	catch ( ::cppu::BootstrapException & e )
+	catch ( ::cppu::BootstrapException & /*e*/ )
 	{
 		return ;
 	}
-	catch ( uno::Exception & e )
+	catch ( uno::Exception & /*e*/ )
 	{
 		return ;
 	}
@@ -198,8 +199,8 @@ void implnPasteSpecial(USHORT nFlags,USHORT nFunction,sal_Bool bSkipEmpty, sal_B
 	if ( pTabViewShell )
 	{
 		ScViewData* pView = pTabViewShell->GetViewData();	
-		Window* pWin = NULL;
-		if ( pView && ( pWin = pView->GetActiveWin() ) )
+		Window* pWin = ( pView != NULL ) ? pView->GetActiveWin() : NULL;
+		if ( pView && pWin )
 		{
 			if ( bAsLink && bOtherDoc )
 				pTabViewShell->PasteFromSystem(0);//SOT_FORMATSTR_ID_LINK
@@ -314,11 +315,9 @@ getDocShell( css::uno::Reference< css::frame::XModel>& xModel )
 ScTabViewShell* 
 getBestViewShell(  css::uno::Reference< css::frame::XModel>& xModel )
 {
-	ScDocShell* pDocShell = NULL;
-	if ( ( pDocShell = getDocShell( xModel ) ) )
-	{
+	ScDocShell* pDocShell = getDocShell( xModel );
+	if ( pDocShell )
 		return pDocShell->GetBestViewShell();
-	}
 	return NULL;
 }
 

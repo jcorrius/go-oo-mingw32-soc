@@ -22,7 +22,7 @@ class ScVbaWorksheet : public ::cppu::WeakImplHelper2<oo::vba::XWorksheet, css::
 	css::uno::Reference< css::frame::XModel > mxModel;
 	css::uno::Reference< oo::vba::XChartObjects > mxCharts;
 		
-	css::uno::Reference< oo::vba::XWorksheet > getSheetAtOffset(int offset) throw (css::uno::RuntimeException);
+	css::uno::Reference< oo::vba::XWorksheet > getSheetAtOffset(SCTAB offset) throw (css::uno::RuntimeException);
 	css::uno::Reference< oo::vba::XRange > getSheetRange() throw (css::uno::RuntimeException);
 
 	css::uno::Any getControl( const rtl::OUString& sName );
