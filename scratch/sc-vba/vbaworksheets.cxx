@@ -153,7 +153,7 @@ ScVbaWorksheets::isSelectedSheets()
 }
 
 void SAL_CALL 
-ScVbaWorksheets::PrintOut( const uno::Any& From, const uno::Any& To, const uno::Any& Copies, const uno::Any& Preview, const uno::Any& ActivePrinter, const uno::Any& PrintToFile, const uno::Any& Collate, const uno::Any& PrToFileName ) throw (uno::RuntimeException)
+ScVbaWorksheets::PrintOut( const uno::Any& From, const uno::Any& To, const uno::Any& Copies, const uno::Any& /*Preview*/, const uno::Any& /*ActivePrinter*/, const uno::Any& /*PrintToFile*/, const uno::Any& Collate, const uno::Any& PrToFileName ) throw (uno::RuntimeException)
 {
 	sal_Int32 nTo = 0;
 	sal_Int32 nFrom = 0;

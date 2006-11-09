@@ -36,7 +36,7 @@ ScVbaDialogs::getParent() throw (uno::RuntimeException)
 ::sal_Int32
 ScVbaDialogs::getCreator() throw (uno::RuntimeException)
 {
-	SC_VBA_STUB();
+	// #FIXME #TODO
 	return 0;
 }
 uno::Reference< vba::XApplication >

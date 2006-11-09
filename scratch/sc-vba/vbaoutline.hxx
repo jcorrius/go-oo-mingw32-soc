@@ -11,8 +11,8 @@ typedef ::cppu::WeakImplHelper1< oo::vba::XOutline > ScVbaOutline_BASE;
 
 class ScVbaOutline :  public ScVbaOutline_BASE 
 {
-	css::uno::Reference< css::sheet::XSheetOutline > mxOutline;
 	css::uno::Reference< css::uno::XComponentContext > m_xContext;
+	css::uno::Reference< css::sheet::XSheetOutline > mxOutline;
 public:
 	ScVbaOutline( css::uno::Reference< css::uno::XComponentContext >& xContext,
 		 css::uno::Reference<css::sheet::XSheetOutline> outline):m_xContext(xContext),mxOutline(outline)

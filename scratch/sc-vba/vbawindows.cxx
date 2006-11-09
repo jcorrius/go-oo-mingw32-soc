@@ -44,7 +44,6 @@ public:
 		uno::Reference< frame::XDesktop > xDesktop
 			(xSMgr->createInstanceWithContext(::rtl::OUString::createFromAscii("com.sun.star.frame.Desktop"), m_xContext), uno::UNO_QUERY_THROW );
 		uno::Reference< container::XEnumeration > mxComponents = xDesktop->getComponents()->createEnumeration();
-		sal_Int32 nIndex=0;
 		while( mxComponents->hasMoreElements() )
 		{
 			uno::Reference< sheet::XSpreadsheetDocument > xNext( mxComponents->nextElement(), uno::UNO_QUERY );
@@ -124,7 +123,7 @@ public:
 	virtual uno::Any SAL_CALL getByIndex( ::sal_Int32 Index ) throw ( lang::IndexOutOfBoundsException, lang::WrappedTargetException, uno::RuntimeException) 
 	{ 
 		if ( Index < 0 
-			|| Index >= m_windows.size() ) 
+			|| static_cast< Components::size_type >( Index ) >= m_windows.size() ) 
 			throw lang::IndexOutOfBoundsException();
 		return makeAny( m_windows[ Index ] ); // returns xspreadsheetdoc
 	}
@@ -201,7 +200,7 @@ ScVbaWindows::Windows( const css::uno::Reference< css::uno::XComponentContext >&
 }
 
 void SAL_CALL 
-ScVbaWindows::Arrange( ::sal_Int32 ArrangeStyle, const uno::Any& ActiveWorkbook, const uno::Any& SyncHorizontal, const uno::Any& SyncVertical ) throw (uno::RuntimeException)
+ScVbaWindows::Arrange( ::sal_Int32 /*ArrangeStyle*/, const uno::Any& /*ActiveWorkbook*/, const uno::Any& /*SyncHorizontal*/, const uno::Any& /*SyncVertical*/ ) throw (uno::RuntimeException)
 {
 	//#TODO #FIXME see what can be done for an implementation here
 }

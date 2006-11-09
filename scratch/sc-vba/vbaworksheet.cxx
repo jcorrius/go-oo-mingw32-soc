@@ -119,17 +119,10 @@ openNewDoc(rtl::OUString aSheetName )
 	uno::Reference<frame::XModel> xModel;
 	try
 	{
-		uno::Reference<uno::XComponentContext > xContext(  ::cppu::defaultBootstrap_InitialComponentContext());
-		if ( !xContext.is() )
-		{
-			return xModel;
-		}
+		uno::Reference<uno::XComponentContext > xContext(  ::cppu::defaultBootstrap_InitialComponentContext(), uno::UNO_QUERY_THROW );
 		uno::Reference<lang::XMultiComponentFactory > xServiceManager(
-										xContext->getServiceManager() );
-		if ( !xServiceManager.is() )
-		{
-			return xModel;
-		}
+										xContext->getServiceManager(), uno::UNO_QUERY_THROW );
+
 		uno::Reference <frame::XComponentLoader > xComponentLoader(
 						xServiceManager->createInstanceWithContext(
 						rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "com.sun.star.frame.Desktop" ) ),
@@ -144,17 +137,15 @@ openNewDoc(rtl::OUString aSheetName )
 		{
 			removeAllSheets(xSpreadDoc,aSheetName);
 		}
-		uno::Reference<frame::XModel> xModel(xSpreadDoc,uno::UNO_QUERY_THROW);
-		return xModel;
+		xModel.set(xSpreadDoc,uno::UNO_QUERY_THROW);
 	}
 	catch ( ::cppu::BootstrapException & e )    
 	{
-		return xModel;
 	}
 	catch ( uno::Exception & e )
 	{
-		return xModel;
 	}
+	return xModel;
 }
 
 
@@ -360,9 +351,11 @@ ScVbaWorksheet::Copy( const uno::Any& Before, const uno::Any& After ) throw (uno
 	}
 }
 
+
 void 
-ScVbaWorksheet::Paste( const uno::Any& Destination, const uno::Any& Link ) throw (uno::RuntimeException)
+ScVbaWorksheet::Paste( const uno::Any& Destination, const uno::Any& /*Link*/ ) throw (uno::RuntimeException)
 {
+	// #TODO# #FIXME# Link is not used
 	uno::Reference<vba::XRange> xRange( Destination, uno::UNO_QUERY );
 	if ( xRange.is() )
 		xRange->Select();
@@ -419,9 +412,12 @@ ScVbaWorksheet::getPrevious() throw (uno::RuntimeException)
 	return getSheetAtOffset(-1);
 }
 
+
 void
-ScVbaWorksheet::Protect( const uno::Any& Password, const uno::Any& DrawingObjects, const uno::Any& Contents, const uno::Any& Scenarios, const uno::Any& UserInterfaceOnly ) throw (uno::RuntimeException)
+ScVbaWorksheet::Protect( const uno::Any& Password, const uno::Any& /*DrawingObjects*/, const uno::Any& /*Contents*/, const uno::Any& /*Scenarios*/, const uno::Any& /*UserInterfaceOnly*/ ) throw (uno::RuntimeException)
 {
+	// #TODO# #FIXME# is there anything we can do witht the unused param
+	// can the implementation use anything else here
 	uno::Reference<util::XProtectable > xProtectable(getSheet(), uno::UNO_QUERY_THROW);
 	::rtl::OUString aPasswd;
 	Password >>= aPasswd;
@@ -453,8 +449,9 @@ ScVbaWorksheet::Range( const ::uno::Any& Cell1, const ::uno::Any& Cell2 ) throw 
 }
 
 void
-ScVbaWorksheet::CheckSpelling( const uno::Any& CustomDictionary,const uno::Any& IgnoreUppercase,const uno::Any& AlwaysSuggest, const uno::Any& SpellingLang ) throw (uno::RuntimeException)
+ScVbaWorksheet::CheckSpelling( const uno::Any& /*CustomDictionary*/,const uno::Any& /*IgnoreUppercase*/,const uno::Any& /*AlwaysSuggest*/, const uno::Any& /*SpellingLang*/ ) throw (uno::RuntimeException)
 {
+	// #TODO# #FIXME# unused params above, can we do anything with those
 	rtl::OUString url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:SpellDialog"));
 	uno::Reference< frame::XModel > xModel( getModel() );
 	dispatchRequests(xModel,url);
@@ -553,7 +550,7 @@ ScVbaWorksheet::getIntrospection(  ) throw (uno::RuntimeException)
 }
 
 uno::Any SAL_CALL 
-ScVbaWorksheet::invoke( const ::rtl::OUString& aFunctionName, const uno::Sequence< uno::Any >& aParams, uno::Sequence< ::sal_Int16 >& aOutParamIndex, uno::Sequence< uno::Any >& aOutParam ) throw (lang::IllegalArgumentException, script::CannotConvertException, reflection::InvocationTargetException, uno::RuntimeException)
+ScVbaWorksheet::invoke( const ::rtl::OUString& aFunctionName, const uno::Sequence< uno::Any >& /*aParams*/, uno::Sequence< ::sal_Int16 >& /*aOutParamIndex*/, uno::Sequence< uno::Any >& /*aOutParam*/ ) throw (lang::IllegalArgumentException, script::CannotConvertException, reflection::InvocationTargetException, uno::RuntimeException)
 {
 	OSL_TRACE("** ScVbaWorksheet::invoke( %s ), will barf",
 		rtl::OUStringToOString( aFunctionName, RTL_TEXTENCODING_UTF8 ).getStr() );
@@ -562,7 +559,7 @@ ScVbaWorksheet::invoke( const ::rtl::OUString& aFunctionName, const uno::Sequenc
 }
 
 void SAL_CALL 
-ScVbaWorksheet::setValue( const ::rtl::OUString& aPropertyName, const uno::Any& aValue ) throw (beans::UnknownPropertyException, script::CannotConvertException, reflection::InvocationTargetException, uno::RuntimeException)
+ScVbaWorksheet::setValue( const ::rtl::OUString& /*aPropertyName*/, const uno::Any& /*aValue*/ ) throw (beans::UnknownPropertyException, script::CannotConvertException, reflection::InvocationTargetException, uno::RuntimeException)
 {
 	throw uno::RuntimeException(); // unsupported operation
 }
@@ -588,7 +585,7 @@ ScVbaWorksheet::getValue( const ::rtl::OUString& aPropertyName ) throw (beans::U
 }
 
 ::sal_Bool SAL_CALL 
-ScVbaWorksheet::hasMethod( const ::rtl::OUString& aName ) throw (uno::RuntimeException)
+ScVbaWorksheet::hasMethod( const ::rtl::OUString& /*aName*/ ) throw (uno::RuntimeException)
 {
 	return sal_False;
 }

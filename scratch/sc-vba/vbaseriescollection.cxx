@@ -18,8 +18,9 @@ ScVbaSeriesCollection::getCount() throw (uno::RuntimeException)
 }
 
 uno::Any
-ScVbaSeriesCollection::Item( const uno::Any& aIndex ) throw (uno::RuntimeException)
+ScVbaSeriesCollection::Item( const uno::Any& /*aIndex*/ ) throw (uno::RuntimeException)
 {
+	// #TODO #FIXME some implementation would be nice !!
 	return uno::Any();
 }
 
@@ -63,7 +64,7 @@ ScVbaSeriesCollection::getParent() throw (uno::RuntimeException)
 sal_Int32 SAL_CALL 
 ScVbaSeriesCollection::getCreator() throw (uno::RuntimeException)
 {
-	SC_VBA_STUB();
+	// #TODO# #FIXME# implementation?
 	return 0;
 }
 

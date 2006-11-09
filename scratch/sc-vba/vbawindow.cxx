@@ -39,8 +39,8 @@ class SelectedSheetsEnum : public Enumeration_BASE
 {
 public:
 	uno::Reference< uno::XComponentContext > m_xContext;
-	uno::Reference< frame::XModel > m_xModel;
 	Sheets m_sheets;
+	uno::Reference< frame::XModel > m_xModel;
 	Sheets::const_iterator m_it;
 
 	SelectedSheetsEnum( const uno::Reference< uno::XComponentContext >& xContext, const Sheets& sheets, const uno::Reference< frame::XModel >& xModel ) throw ( uno::RuntimeException ) :  m_xContext( xContext ), m_sheets( sheets ), m_xModel( xModel )
@@ -115,8 +115,8 @@ public:
 	}
 	virtual uno::Any SAL_CALL getByIndex( ::sal_Int32 Index ) throw ( lang::IndexOutOfBoundsException, lang::WrappedTargetException, uno::RuntimeException) 
 	{ 
-		if ( Index < 0 
-			|| Index >= sheets.size() ) 
+		if ( Index < 0
+		|| static_cast< Sheets::size_type >( Index ) >= sheets.size() ) 
 			throw lang::IndexOutOfBoundsException();
 		
 		return uno::makeAny( sheets[ Index ] );
@@ -217,7 +217,13 @@ uno::Any SAL_CALL
 ScVbaWindow::SelectedSheets( const uno::Any& aIndex ) throw (uno::RuntimeException)
 {
 	uno::Reference< container::XEnumerationAccess > xEnumAccess( new SelectedSheetsEnumAccess( m_xContext, m_xModel  ) );
-	return uno::makeAny( uno::Reference< vba::XWorksheets > ( new ScVbaWorksheets( m_xContext, xEnumAccess, m_xModel ) ) ); 	
+	uno::Reference< vba::XWorksheets > xSheets(  new ScVbaWorksheets( m_xContext, xEnumAccess, m_xModel ) );
+	if ( aIndex.hasValue() )
+	{
+		uno::Reference< vba::XCollection > xColl( xSheets, uno::UNO_QUERY_THROW );
+		return xColl->Item( aIndex );	
+	}
+	return uno::makeAny( xSheets ); 	
 }
 
 void SAL_CALL 
@@ -278,7 +284,6 @@ ScVbaWindow::getCaption() throw (uno::RuntimeException)
 			{
 				static rtl::OUString sDot( RTL_CONSTASCII_USTRINGPARAM(".") );
 				// starts with title
-				sal_Int32 nTitleIndex = -1;
 				if ( sName.indexOf( sTitle ) == 0 )
 					// extention starts immediately after
 					if ( sName.match( sDot, sTitle.getLength() ) )

@@ -34,7 +34,7 @@ const sal_Int8 SUBSCRIPTHEIGHT = 58;
 // specifies a hight of normal font 
 const short NORMALHEIGHT = 100; 
 
-ScVbaFont::ScVbaFont( const ScVbaPalette& dPalette, uno::Reference< beans::XPropertySet > xPropertySet, SfxItemSet* pDataSet  ) throw ( uno::RuntimeException ) : mPalette( dPalette ), mxFont( xPropertySet, css::uno::UNO_QUERY_THROW ), mpDataSet( pDataSet )
+ScVbaFont::ScVbaFont( const ScVbaPalette& dPalette, uno::Reference< beans::XPropertySet > xPropertySet, SfxItemSet* pDataSet  ) throw ( uno::RuntimeException ) : mxFont( xPropertySet, css::uno::UNO_QUERY_THROW ), mPalette( dPalette ),  mpDataSet( pDataSet )
 {
 }
 
@@ -148,9 +148,9 @@ ScVbaFont::getColorIndex() throw ( uno::RuntimeException )
 
 //////////////////////////////////////////////////////////////////////////////////////////
 void 
-ScVbaFont::setStandardFontSize( const uno::Any& aValue ) throw( uno::RuntimeException )
+ScVbaFont::setStandardFontSize( const uno::Any& /*aValue*/ ) throw( uno::RuntimeException )
 {
-//XXX
+//XXX #TODO# #FIXME#
 	//mxFont->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "CharSize" ) ), ( uno::Any )fValue );
 	throw uno::RuntimeException(
 		rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("setStandardFontSize not supported") ), uno::Reference< uno::XInterface >() );
@@ -160,7 +160,7 @@ ScVbaFont::setStandardFontSize( const uno::Any& aValue ) throw( uno::RuntimeExce
 uno::Any
 ScVbaFont::getStandardFontSize() throw ( uno::RuntimeException )
 {
-//XXX
+//XXX #TODO# #FIXME#
 	throw uno::RuntimeException(
 		rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("getStandardFontSize not supported") ), uno::Reference< uno::XInterface >() );
 	return uno::Any();
@@ -168,9 +168,9 @@ ScVbaFont::getStandardFontSize() throw ( uno::RuntimeException )
 
 
 void 
-ScVbaFont::setStandardFont( const uno::Any& aValue ) throw( uno::RuntimeException )
+ScVbaFont::setStandardFont( const uno::Any& /*aValue*/ ) throw( uno::RuntimeException )
 {
-//XXX
+//XXX #TODO# #FIXME#
 	throw uno::RuntimeException(
 		rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("setStandardFont not supported") ), uno::Reference< uno::XInterface >() );
 } 
@@ -179,16 +179,16 @@ ScVbaFont::setStandardFont( const uno::Any& aValue ) throw( uno::RuntimeExceptio
 uno::Any
 ScVbaFont::getStandardFont() throw ( uno::RuntimeException )
 {
-//XXX
+//XXX #TODO# #FIXME#
 	throw uno::RuntimeException(
 		rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("getStandardFont not supported") ), uno::Reference< uno::XInterface >() );
 	return uno::Any();
 }
 
 void 
-ScVbaFont::setFontStyle( const uno::Any& aValue ) throw( uno::RuntimeException )
+ScVbaFont::setFontStyle( const uno::Any& /*aValue*/ ) throw( uno::RuntimeException )
 {
-//XXX
+//XXX #TODO# #FIXME#
 	//mxFont->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "CharSize" ) ), ( uno::Any )aValue );
 	throw uno::RuntimeException(
 		rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("setFontStyle not supported") ), uno::Reference< uno::XInterface >() );

@@ -47,7 +47,7 @@ ScVbaDialog::getParent() throw (uno::RuntimeException)
 ::sal_Int32
 ScVbaDialog::getCreator() throw (uno::RuntimeException)
 {
-	SC_VBA_STUB();
+	// #TODO #FIXME
 	return 0;
 }
 uno::Reference< vba::XApplication >
@@ -92,12 +92,12 @@ static const rtl::OUString aStringList[]=
 	rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:AutoFormat" ) )	
 };
 
-const sal_Int32 nSize = sizeof( aStringList ) / sizeof( aStringList[ 0 ] );
+const sal_Int32 nDialogSize = sizeof( aStringList ) / sizeof( aStringList[ 0 ] );
 
 rtl::OUString 
 ScVbaDialog::mapIndexToName( sal_Int32 nIndex )
 {
-	if( nIndex < nSize )
+	if( nIndex < nDialogSize )
 		return aStringList[ nIndex ];
 	return rtl::OUString();
 }

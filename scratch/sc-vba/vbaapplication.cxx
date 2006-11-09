@@ -234,7 +234,7 @@ ScVbaApplication::getCutCopyMode() throw (uno::RuntimeException)
 	return result;
 }
 void SAL_CALL 
-ScVbaApplication::setCutCopyMode( const uno::Any& _cutcopymode ) throw (uno::RuntimeException)
+ScVbaApplication::setCutCopyMode( const uno::Any& /*_cutcopymode*/ ) throw (uno::RuntimeException)
 {
 	//# FIXME TODO, implementation
 }

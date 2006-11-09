@@ -17,7 +17,7 @@ using namespace ::org::openoffice;
 using namespace ::com::sun::star;
 
 ScVbaComment::ScVbaComment( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< table::XCellRange >& xRange ) throw( lang::IllegalArgumentException )
-: m_xContext( xContext ), mxRange( xRange )
+: mxRange( xRange ), m_xContext( xContext )
 {
 	if  ( !xContext.is() )
 		throw lang::IllegalArgumentException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "context is not set " ) ), uno::Reference< uno::XInterface >() , 1 );
@@ -99,8 +99,9 @@ ScVbaComment::getAuthor() throw (uno::RuntimeException)
 }
 
 void SAL_CALL
-ScVbaComment::setAuthor( const rtl::OUString& _author ) throw (uno::RuntimeException)
+ScVbaComment::setAuthor( const rtl::OUString& /*_author*/ ) throw (uno::RuntimeException)
 {
+	// #TODO #FIXME  implementation needed
 }
 
 sal_Int32 SAL_CALL
@@ -152,21 +153,21 @@ ScVbaComment::Previous() throw (uno::RuntimeException)
 }
 
 rtl::OUString SAL_CALL
-ScVbaComment::Text( const uno::Any& Text, const uno::Any& Start, const uno::Any& Overwrite ) throw (uno::RuntimeException)
+ScVbaComment::Text( const uno::Any& aText, const uno::Any& aStart, const uno::Any& Overwrite ) throw (uno::RuntimeException)
 {
 	rtl::OUString sText;
-	Text >>= sText;
+	aText >>= sText;
 
 	uno::Reference< text::XSimpleText > xAnnoText( getAnnotation(), uno::UNO_QUERY_THROW );
 	rtl::OUString sAnnoText = xAnnoText->getString();
 
-	if ( Start.hasValue() )
+	if ( aStart.hasValue() )
 	{
 		sal_Int16 nStart;
 		sal_Bool bOverwrite = sal_True;
 		Overwrite >>= bOverwrite;
 
-		if ( Start >>= nStart )
+		if ( aStart >>= nStart )
 		{
 			uno::Reference< text::XTextCursor > xTextCursor( xAnnoText->createTextCursor(), uno::UNO_QUERY_THROW );
 
@@ -190,7 +191,7 @@ ScVbaComment::Text( const uno::Any& Text, const uno::Any& Start, const uno::Any&
 		else
 			throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "ScVbaComment::Text - bad Start value " ) ), uno::Reference< uno::XInterface >() );
 	}
-	else if ( Text.hasValue() )
+	else if ( aText.hasValue() )
 		xAnnoText->setString( sText );
 
 	return sAnnoText;

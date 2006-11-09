@@ -77,7 +77,6 @@ public:
 		uno::Reference< frame::XDesktop > xDesktop
 			(xSMgr->createInstanceWithContext(::rtl::OUString::createFromAscii("com.sun.star.frame.Desktop"), m_xContext), uno::UNO_QUERY_THROW );
 		uno::Reference< container::XEnumeration > mxComponents = xDesktop->getComponents()->createEnumeration();
-		sal_Int32 nIndex=0;
 		while( mxComponents->hasMoreElements() )
 		{
 			uno::Reference< sheet::XSpreadsheetDocument > xNext( mxComponents->nextElement(), uno::UNO_QUERY );
@@ -163,7 +162,7 @@ public:
 	virtual uno::Any SAL_CALL getByIndex( ::sal_Int32 Index ) throw ( lang::IndexOutOfBoundsException, lang::WrappedTargetException, uno::RuntimeException) 
 	{ 
 		if ( Index < 0 
-			|| Index >= m_books.size() ) 
+			|| static_cast< WorkBooks::size_type >(Index) >= m_books.size() ) 
 			throw lang::IndexOutOfBoundsException();
 		return makeAny( m_books[ Index ] ); // returns xspreadsheetdoc
 	}
@@ -278,8 +277,9 @@ ScVbaWorkbooks::isTextFile( const rtl::OUString& rFileName )
 	return sType.equals( txtType );
 }
 
+// #TODO# #FIXME# can any of the unused params below be used?
 uno::Any
-ScVbaWorkbooks::Open( const rtl::OUString& rFileName, const uno::Any& UpdateLinks, const uno::Any& ReadOnly, const uno::Any& Format, const uno::Any& Password, const uno::Any& WriteResPassword, const uno::Any& IgnoreReadOnlyRecommended, const uno::Any& Origin, const uno::Any& Delimiter, const uno::Any& Editable, const uno::Any& Notify, const uno::Any& Converter, const uno::Any& AddToMru ) throw (uno::RuntimeException)
+ScVbaWorkbooks::Open( const rtl::OUString& rFileName, const uno::Any& /*UpdateLinks*/, const uno::Any& ReadOnly, const uno::Any& Format, const uno::Any& /*Password*/, const uno::Any& /*WriteResPassword*/, const uno::Any& /*IgnoreReadOnlyRecommended*/, const uno::Any& /*Origin*/, const uno::Any& Delimiter, const uno::Any& /*Editable*/, const uno::Any& /*Notify*/, const uno::Any& /*Converter*/, const uno::Any& /*AddToMru*/ ) throw (uno::RuntimeException)
 {
 	rtl::OUString aURL(rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("file://") ));
 	aURL += rFileName;
@@ -296,7 +296,6 @@ ScVbaWorkbooks::Open( const rtl::OUString& rFileName, const uno::Any& UpdateLink
 		m_xContext),
 		uno::UNO_QUERY_THROW );
 	uno::Sequence< beans::PropertyValue > sProps(0);
-	static const char* csv = ".csv";
 	sal_Int32 nIndex = 0;
 
 	// A text file means it needs to be processed as a csv file	
@@ -313,8 +312,6 @@ ScVbaWorkbooks::Open( const rtl::OUString& rFileName, const uno::Any& UpdateLink
 		sProps.realloc( 1 );
 		sProps[ nIndex ].Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("FilterOptions" ) );
 		int delims[] = { 0 /*default not used*/, 9/*tab*/, 44/*comma*/, 32/*space*/, 59/*semicolon*/ };	
-		int numElems = sizeof( delims )/ sizeof( delims[0] );
-
 		static rtl::OUString sRestOfFormat( RTL_CONSTASCII_USTRINGPARAM(",34,0,1" ) );
 		
 		rtl::OUString sFormat;
