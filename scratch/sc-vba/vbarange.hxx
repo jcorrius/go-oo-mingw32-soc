@@ -125,6 +125,8 @@ public:
 	virtual css::uno::Any SAL_CALL getWidth() throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL getHeight() throw (css::uno::RuntimeException);
 	virtual css::uno::Reference< oo::vba::XWorksheet > SAL_CALL getWorksheet() throw (css::uno::RuntimeException);
+	virtual css::uno::Any SAL_CALL getPageBreak() throw (css::uno::RuntimeException);
+	virtual void SAL_CALL setPageBreak( const css::uno::Any& _pagebreak ) throw (css::uno::RuntimeException);
 	// Methods
 	sal_Bool IsRows() { return mbIsRows; }
 	sal_Bool IsColumns() { return mbIsColumns; }
