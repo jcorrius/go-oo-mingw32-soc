@@ -61,7 +61,7 @@
 #include <org/openoffice/vba/Excel/XlDeleteShiftDirection.hpp>
 #include <org/openoffice/vba/Excel/XlReferenceStyle.hpp>
 #include <org/openoffice/vba/Excel/XlBordersIndex.hpp>
-
+#include <org/openoffice/vba/Excel/XlPageBreak.hpp>
 
 #include <scitems.hxx>
 #include <svx/srchitem.hxx>
@@ -3025,6 +3025,73 @@ ScVbaRange::setRowHeight( const uno::Any& _rowheight) throw (uno::RuntimeExcepti
 	nRowArr[1] = thisAddress.EndRow;
 	aFunc.SetWidthOrHeight( FALSE, 1, nRowArr, thisAddress.Sheet, SC_SIZE_ORIGINAL,
                                                                         nTwips, TRUE, TRUE );		
+}
+
+uno::Any SAL_CALL 
+ScVbaRange::getPageBreak() throw (uno::RuntimeException)
+{
+	sal_Int32 nPageBreak = XlPageBreak::XlPageBreakNone;
+	ScDocShell* pShell = getDocShellFromRange( mxRange );
+	if ( pShell )
+	{
+		RangeHelper thisRange( mxRange );
+		table::CellRangeAddress thisAddress = thisRange.getCellRangeAddressable()->getRangeAddress();
+		BOOL bColumn = FALSE;
+		
+		if (thisAddress.StartRow==0)
+		    bColumn = TRUE;
+		
+		uno::Reference< frame::XModel > xModel = pShell->GetModel();
+		if ( xModel.is() )
+		{
+	        ScDocument* pDoc =  getDocumentFromRange( mxRange );
+	        
+			BYTE nFlag = 0;
+			if ( !bColumn )
+			    nFlag = pDoc -> GetRowFlags(thisAddress.StartRow, thisAddress.Sheet);
+			else
+			    nFlag = pDoc -> GetColFlags(thisAddress.StartColumn, thisAddress.Sheet);
+			    
+			if ( nFlag & CR_PAGEBREAK)
+			    nPageBreak = XlPageBreak::XlPageBreakAutomatic;
+			    
+			if ( nFlag & CR_MANUALBREAK)
+			    nPageBreak = XlPageBreak::XlPageBreakManual;
+		}		
+	}
+
+	return uno::makeAny( nPageBreak );
+}
+
+void SAL_CALL 
+ScVbaRange::setPageBreak( const uno::Any& _pagebreak) throw (uno::RuntimeException)
+{
+	sal_Int32 nPageBreak; 
+    _pagebreak >>= nPageBreak;
+		
+	ScDocShell* pShell = getDocShellFromRange( mxRange );
+	if ( pShell )
+	{
+		RangeHelper thisRange( mxRange );
+		table::CellRangeAddress thisAddress = thisRange.getCellRangeAddressable()->getRangeAddress();
+		if ((thisAddress.StartColumn==0) && (thisAddress.StartRow==0))
+		    return;
+		BOOL bColumn = FALSE;
+		
+		if (thisAddress.StartRow==0)
+		    bColumn = TRUE;
+		
+		ScAddress aAddr( thisAddress.StartColumn, thisAddress.StartRow, thisAddress.Sheet );	
+		uno::Reference< frame::XModel > xModel = pShell->GetModel();
+		if ( xModel.is() )
+		{
+			ScTabViewShell* pViewShell = getBestViewShell( xModel );
+			if ( nPageBreak == XlPageBreak::XlPageBreakManual )
+			    pViewShell->InsertPageBreak( bColumn, TRUE, &aAddr);
+			else if ( nPageBreak == XlPageBreak::XlPageBreakNone )
+			    pViewShell->DeletePageBreak( bColumn, TRUE, &aAddr);
+		}
+	}
 }
 
 uno::Any SAL_CALL 
