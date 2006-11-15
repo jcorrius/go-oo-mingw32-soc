@@ -11,6 +11,7 @@
 #include "vbaworksheet.hxx"
 #include "vbaworksheets.hxx"
 #include "vbaworkbook.hxx"
+#include "vbawindows.hxx"
 #include "vbahelper.hxx"
 
 #include <stdio.h>
@@ -101,7 +102,14 @@ ScVbaWorkbook::Worksheets( const uno::Any& aIndex ) throw (uno::RuntimeException
 	}
 	return uno::Any( xWorkSheets->Item( aIndex ) );
 }
-
+uno::Any SAL_CALL
+ScVbaWorkbook::Windows( const uno::Any& aIndex ) throw (uno::RuntimeException)
+{
+	uno::Reference< vba::XCollection >  xWindows = ScVbaWindows::Windows( m_xContext );
+	if ( aIndex.getValueTypeClass() == uno::TypeClass_VOID )
+		return uno::Any( xWindows );
+	return uno::Any( xWindows->Item( aIndex ) );
+}
 void
 ScVbaWorkbook::Close( const uno::Any &rSaveArg, const uno::Any &rFileArg,
 					  const uno::Any &rRouteArg ) throw (uno::RuntimeException)
