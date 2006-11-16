@@ -1,0 +1,216 @@
+diff -pur sc.orig/source/ui/docshell/docsh.cxx sc/source/ui/docshell/docsh.cxx
+--- sc.orig/source/ui/docshell/docsh.cxx	2006-11-15 18:58:41.000000000 +0100
++++ sc/source/ui/docshell/docsh.cxx	2006-11-16 18:21:12.000000000 +0100
+@@ -1445,22 +1445,38 @@ BOOL __EXPORT ScDocShell::ConvertFrom( S
+ 	return bRet;
+ }
+ 
++void ScDocShell::BeforeSaving( SfxMedium* pMedium )
++{
++	ScRefreshTimerProtector( aDocument.GetRefreshTimerControlAddress() );
++
++	// Don't call DoEnterHandler here (doesn't work with AutoSave),
++	// it's already in ExecuteSave
++
++	ScChartListenerCollection* pCharts = aDocument.GetChartListenerCollection();
++	if (pCharts)
++		pCharts->UpdateDirtyCharts();					// Charts, die noch upgedated werden muessen
++	if (pAutoStyleList)
++		pAutoStyleList->ExecuteAllNow();				// Vorlagen-Timeouts jetzt ausfuehren
++	if (GetCreateMode()== SFX_CREATE_MODE_STANDARD)
++		SfxObjectShell::SetVisArea( Rectangle() );     // normal bearbeitet -> keine VisArea
++
++	// Shared worksheet
++	if ( /*shared worksheet*/ true && pMedium )
++	{
++		fprintf( stderr, "Shared worksheet...\n" );
++
++		// FIXME ExecuteChangeProtectionDialog()
++
++		SfxMedium *pMed = new SfxMedium( pMedium->GetName(), STREAM_STD_READ, FALSE /* TODO the other params as well? */ );
++		CompareOrMergeOtherDocument( pMed, false ); // FIXME we will probably have to implement our modal version of the changes dialog :-(
++	}
++}
+ 
+ BOOL __EXPORT ScDocShell::Save()
+ {
+ 	RTL_LOGFILE_CONTEXT_AUTHOR ( aLog, "sc", "nn93723", "ScDocShell::Save" );
+ 
+-	ScRefreshTimerProtector( aDocument.GetRefreshTimerControlAddress() );
+-
+-	//	DoEnterHandler hier nicht (wegen AutoSave), ist im ExecuteSave
+-
+-	ScChartListenerCollection* pCharts = aDocument.GetChartListenerCollection();
+-	if (pCharts)
+-		pCharts->UpdateDirtyCharts();					// Charts, die noch upgedated werden muessen
+-	if (pAutoStyleList)
+-		pAutoStyleList->ExecuteAllNow();				// Vorlagen-Timeouts jetzt ausfuehren
+-	if (GetCreateMode()== SFX_CREATE_MODE_STANDARD)
+-        SfxObjectShell::SetVisArea( Rectangle() );     // normal bearbeitet -> keine VisArea
++	BeforeSaving( GetMedium() );
+ 
+ 	//	wait cursor is handled with progress bar
+     BOOL bRet = SfxObjectShell::Save();
+@@ -1474,17 +1490,7 @@ BOOL __EXPORT ScDocShell::SaveAs( SfxMed
+ {
+ 	RTL_LOGFILE_CONTEXT_AUTHOR ( aLog, "sc", "nn93723", "ScDocShell::SaveAs" );
+ 
+-	ScRefreshTimerProtector( aDocument.GetRefreshTimerControlAddress() );
+-
+-	//	DoEnterHandler hier nicht (wegen AutoSave), ist im ExecuteSave
+-
+-	ScChartListenerCollection* pCharts = aDocument.GetChartListenerCollection();
+-	if (pCharts)
+-		pCharts->UpdateDirtyCharts();					// Charts, die noch upgedated werden muessen
+-	if (pAutoStyleList)
+-		pAutoStyleList->ExecuteAllNow();				// Vorlagen-Timeouts jetzt ausfuehren
+-	if (GetCreateMode()== SFX_CREATE_MODE_STANDARD)
+-        SfxObjectShell::SetVisArea( Rectangle() );     // normal bearbeitet -> keine VisArea
++	BeforeSaving( &rMedium );
+ 
+ 	//	wait cursor is handled with progress bar
+     BOOL bRet = SfxObjectShell::SaveAs( rMedium );
+diff -pur sc.orig/source/ui/docshell/docsh4.cxx sc/source/ui/docshell/docsh4.cxx
+--- sc.orig/source/ui/docshell/docsh4.cxx	2006-07-21 15:39:56.000000000 +0200
++++ sc/source/ui/docshell/docsh4.cxx	2006-11-16 15:15:54.000000000 +0100
+@@ -180,6 +180,58 @@ BOOL ScDocShell::GetTabParam( const SfxI
+ }
+ 
+ //------------------------------------------------------------------
++bool ScDocShell::CompareOrMergeOtherDocument( SfxMedium* pMedium, bool bCompare )
++{
++	bool bRet = false;
++
++	if ( pMedium )		// nun wirklich ausfuehren...
++	{
++		SfxErrorContext aEc( ERRCTX_SFX_OPENDOC, pMedium->GetName() );
++
++		ScDocShell* pOtherDocSh = new ScDocShell;
++		SfxObjectShellRef aDocShTablesRef = pOtherDocSh;
++		pOtherDocSh->DoLoad( pMedium );
++		ULONG nErr = pOtherDocSh->GetErrorCode();
++		if (nErr)
++			ErrorHandler::HandleError( nErr );			// auch Warnings
++
++		if ( !pOtherDocSh->GetError() )					// nur Errors
++		{
++			BOOL bHadTrack = ( aDocument.GetChangeTrack() != NULL );
++
++			if ( bCompare )
++				CompareDocument( *pOtherDocSh->GetDocument() );
++			else
++				MergeDocument( *pOtherDocSh->GetDocument() );
++
++			//	show "accept changes" dialog
++			//! get view for this document!
++
++			SfxViewFrame* pViewFrm = SfxViewFrame::Current();
++			if (pViewFrm)
++				pViewFrm->ShowChildWindow(ScAcceptChgDlgWrapper::GetChildWindowId(),TRUE); //@51669
++			SfxBindings* pBindings = GetViewBindings();
++			if (pBindings)
++				pBindings->Invalidate(FID_CHG_ACCEPT);
++
++			bRet = true;
++
++			if (!bHadTrack)			//	neu eingeschaltet -> auch anzeigen
++			{
++				ScChangeViewSettings* pOldSet = aDocument.GetChangeViewSettings();
++				if ( !pOldSet || !pOldSet->ShowChanges() )
++				{
++					ScChangeViewSettings aChangeViewSet;
++					aChangeViewSet.SetShowChanges(TRUE);
++					aDocument.SetChangeViewSettings(aChangeViewSet);
++				}
++			}
++		}
++		pOtherDocSh->DoClose();		// delete passiert mit der Ref
++	}
++
++	return bRet;
++}
+ 
+ void ScDocShell::Execute( SfxRequest& rReq )
+ {
+@@ -832,52 +884,12 @@ void ScDocShell::Execute( SfxRequest& rR
+ 					}
+ 				}
+ 
+-				if ( pMed )		// nun wirklich ausfuehren...
+-				{
+-					SfxErrorContext aEc( ERRCTX_SFX_OPENDOC, pMed->GetName() );
+-
+-					ScDocShell* pOtherDocSh = new ScDocShell;
+-                    SfxObjectShellRef aDocShTablesRef = pOtherDocSh;
+-					pOtherDocSh->DoLoad( pMed );
+-					ULONG nErr = pOtherDocSh->GetErrorCode();
+-					if (nErr)
+-						ErrorHandler::HandleError( nErr );			// auch Warnings
+-
+-					if ( !pOtherDocSh->GetError() )					// nur Errors
+-					{
+-						BOOL bHadTrack = ( aDocument.GetChangeTrack() != NULL );
+-
+-						if ( nSlot == SID_DOCUMENT_COMPARE )
+-							CompareDocument( *pOtherDocSh->GetDocument() );
+-						else
+-							MergeDocument( *pOtherDocSh->GetDocument() );
+-
+-						//	show "accept changes" dialog
+-						//! get view for this document!
+-
+-						SfxViewFrame* pViewFrm = SfxViewFrame::Current();
+-						if (pViewFrm)
+-							pViewFrm->ShowChildWindow(ScAcceptChgDlgWrapper::GetChildWindowId(),TRUE); //@51669
+-						SfxBindings* pBindings = GetViewBindings();
+-						if (pBindings)
+-							pBindings->Invalidate(FID_CHG_ACCEPT);
+-
+-						rReq.SetReturnValue( SfxInt32Item( nSlot, 0 ) );		//! ???????
+-						rReq.Done();
+-
+-						if (!bHadTrack)			//	neu eingeschaltet -> auch anzeigen
+-						{
+-							ScChangeViewSettings* pOldSet = aDocument.GetChangeViewSettings();
+-							if ( !pOldSet || !pOldSet->ShowChanges() )
+-							{
+-								ScChangeViewSettings aChangeViewSet;
+-								aChangeViewSet.SetShowChanges(TRUE);
+-								aDocument.SetChangeViewSettings(aChangeViewSet);
+-							}
+-						}
+-					}
+-					pOtherDocSh->DoClose();		// delete passiert mit der Ref
+-				}
++				// Do the compare or merge
++				if ( CompareOrMergeOtherDocument( pMed, nSlot == SID_DOCUMENT_COMPARE ) )
++				{
++					rReq.SetReturnValue( SfxInt32Item( nSlot, 0 ) );		//! ???????
++					rReq.Done();
++				}
+ 			}
+ 			break;
+ 
+diff -pur sc.orig/source/ui/inc/docsh.hxx sc/source/ui/inc/docsh.hxx
+--- sc.orig/source/ui/inc/docsh.hxx	2006-05-04 17:03:46.000000000 +0200
++++ sc/source/ui/inc/docsh.hxx	2006-11-16 15:14:04.000000000 +0100
+@@ -150,6 +150,8 @@ class SC_DLLPUBLIC ScDocShell: public Sf
+ 	SC_DLLPRIVATE void			InitOptions();
+ 	SC_DLLPRIVATE void			ResetDrawObjectShell();
+ 
++	SC_DLLPRIVATE void			BeforeSaving( SfxMedium* pMedium );
++
+ 	SC_DLLPRIVATE BOOL			GetTabParam( const SfxItemSet* pArgs, USHORT nId, SCTAB& rTab );
+     //BOOL            LoadCalc( SotStorage* pStor );
+     //BOOL            SaveCalc( SotStorage* pStor );
+@@ -174,6 +176,10 @@ class SC_DLLPUBLIC ScDocShell: public Sf
+ 	SC_DLLPRIVATE void			LockDocument_Impl(USHORT nNew);
+ 	SC_DLLPRIVATE void			UnlockDocument_Impl(USHORT nNew);
+ 
++	// bCompare: true => Compare, false => Merge
++	// return:   true on success
++	SC_DLLPRIVATE bool			CompareOrMergeOtherDocument( SfxMedium* pMedium, bool bCompare );
++
+ protected:
+ 
+ 	virtual void SFX_NOTIFY( SfxBroadcaster& rBC, const TypeId& rBCType,
