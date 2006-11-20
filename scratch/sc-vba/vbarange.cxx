@@ -2319,15 +2319,11 @@ ScVbaRange::Replace( const ::rtl::OUString& What, const ::rtl::OUString& Replace
 }
 
 uno::Reference< table::XCellRange > 
-ScVbaRange::getCellRangeForName(  const rtl::OUString& sRangeName, const uno::Reference< sheet::XSpreadsheet >& xDoc  )
+ScVbaRange::getCellRangeForName(  const rtl::OUString& sRangeName, const uno::Reference< sheet::XSpreadsheet >& xDoc, ScAddress::Convention aConv )
 {
 	uno::Reference< table::XCellRange > xRanges( xDoc, uno::UNO_QUERY_THROW );
 	ScCellRangeObj* pRanges = dynamic_cast< ScCellRangeObj* >( xRanges.get() );
-    ScAddress::Convention eConv = ScAddress::CONV_XL_A1;     // see if there is a match with a named range
-
-    uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY_THROW );
-    ScDocShell* pDocSh = getDocShell( xModel );
-    eConv = pDocSh->GetDocument()->GetAddressConvention();
+    ScAddress::Convention eConv = aConv;//ScAddress::CONV_XL_A1;   the default. 
 
 	ScAddress::Details dDetails( eConv, 0, 0 );
 		

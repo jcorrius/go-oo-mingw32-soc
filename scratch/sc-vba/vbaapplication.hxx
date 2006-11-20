@@ -50,6 +50,6 @@ public:
 	virtual css::uno::Any SAL_CALL Windows( const css::uno::Any& aIndex ) throw (css::uno::RuntimeException);
 	virtual void SAL_CALL wait( double time ) throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL Range( const css::uno::Any& Cell1, const css::uno::Any& Cell2 ) throw (css::uno::RuntimeException);
-	virtual void SAL_CALL GoTo( const css::uno::Any& Reference, const css::uno::Any& Scroll ) throw (css::uno::RuntimeException);
+	virtual void SAL_CALL GoTo( const css::uno::Any& Reference, const sal_Bool Scroll = sal_False) throw (css::uno::RuntimeException);
 };
 #endif /* SC_VBA_APPLICATION_HXX */

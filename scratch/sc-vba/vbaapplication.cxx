@@ -374,30 +374,23 @@ ScVbaApplication::getActiveSheet() throw (uno::RuntimeException)
  *  by test excel, it seems Scroll no effect. ??? 
 *******************************************************************************/
 void SAL_CALL 
-ScVbaApplication::GoTo( const uno::Any& Reference, const uno::Any& Scroll ) throw (uno::RuntimeException)
+ScVbaApplication::GoTo( const uno::Any& Reference, const sal_Bool Scroll ) throw (uno::RuntimeException)
 {
     //test Scroll is a boolean
     sal_Bool bScroll;
-    if(!( Scroll >>= bScroll ))
-    {
-        throw uno::RuntimeException( rtl::OUString::createFromAscii( "sencond parameter should be boolean" ),
-                    uno::Reference< uno::XInterface >() );
-    }
+    bScroll = Scroll;
     //R1C1-style string or a string of procedure name.
     rtl::OUString sRangeName;
     if( Reference >>= sRangeName )
     {
-        //R1C1-style and procedure name
         uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY_THROW );
         ScDocShell* pShell = getDocShell( xModel );
-        pShell->GetDocument()->SetAddressConvention( ScAddress::CONV_XL_R1C1 );
-        {//using R1C1 style and set back to default.
         uno::Reference< sheet::XSpreadsheetView > xSpreadsheet(
                 xModel->getCurrentController(), uno::UNO_QUERY_THROW );
         uno::Reference< sheet::XSpreadsheet > xDoc = xSpreadsheet->getActiveSheet();
         try
         {
-            uno::Reference< table::XCellRange > xRange = ScVbaRange::getCellRangeForName( sRangeName, xDoc );
+            uno::Reference< table::XCellRange > xRange = ScVbaRange::getCellRangeForName( sRangeName, xDoc, ScAddress::CONV_XL_R1C1 );
             ScVbaRange* pRange = new ScVbaRange( m_xContext, xRange );
             uno::Reference< vba::XRange > xVbSheetRange( pRange );
             if( bScroll )
@@ -407,18 +400,15 @@ ScVbaApplication::GoTo( const uno::Any& Reference, const uno::Any& Scroll ) thro
         }
         catch( uno::RuntimeException )
         {
-            pShell->GetDocument()->SetAddressConvention( ScAddress::CONV_XL_A1 );
             //maybe this should be a procedure name
             //TODO for procedure name
             //browse::XBrowseNodeFactory is a singlton. OUString::createFromAscii( "/singletons/com.sun.star.script.browse.theBrowseNodeFactory")
             //and the createView( browse::BrowseNodeFactoryViewTypes::MACROSELECTOR ) to get a root browse::XBrowseNode.
             //for query XInvocation interface.
             //but how to directly get the XInvocation?
-            throw uno::RuntimeException( rtl::OUString::createFromAscii( "invalid reference for range name, it should be R1C1 or procedure name" ),
+            throw uno::RuntimeException( rtl::OUString::createFromAscii( "invalid reference for range name, it should be procedure name" ),
                     uno::Reference< uno::XInterface >() );
         }
-        }
-        pShell->GetDocument()->SetAddressConvention( ScAddress::CONV_XL_A1 );
         return;
     }
     uno::Reference< vba::XRange > xRange;
