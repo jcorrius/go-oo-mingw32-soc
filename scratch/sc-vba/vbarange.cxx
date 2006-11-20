@@ -1523,39 +1523,33 @@ ScVbaRange::Cells( const uno::Any &nRowIndex, const uno::Any &nColumnIndex ) thr
 		return xRange->Cells( nRowIndex, nColumnIndex );
 	}
 
-	long nRow = 0, nColumn = 0;
+	sal_Int32 nRow = 0, nColumn = 0;
 	sal_Bool bIsIndex = nRowIndex >>= nRow, bIsColumnIndex = nColumnIndex >>= nColumn;
                                                                                                                        
-	uno::Reference< sheet::XSheetCellRange > xSheetCellRange(mxRange, ::uno::UNO_QUERY_THROW );
-	uno::Reference< sheet::XSpreadsheet > xSheet = xSheetCellRange->getSpreadsheet();
-	uno::Reference< table::XCellRange > xRange(xSheet, uno::UNO_QUERY_THROW );
-	uno::Reference< sheet::XCellRangeAddressable > xAddressable( xRange, uno::UNO_QUERY_THROW );
-	uno::Reference< table::XCellRange > xRangeReference = xRange->getCellRangeByPosition(
-																	getColumn()-1, getRow()-1,
-																	xAddressable->getRangeAddress().EndColumn,
-																	xAddressable->getRangeAddress().EndRow );
+	RangeHelper thisRange( mxRange );
+	table::CellRangeAddress thisRangeAddress =  thisRange.getCellRangeAddressable()->getRangeAddress();
+	uno::Reference< table::XCellRange > xSheetRange = thisRange.getCellRangeFromSheet();
 	if( !bIsIndex && !bIsColumnIndex ) // .Cells
 		return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, mxRange ) );
-	if( !nRow )
-			throw uno::RuntimeException(
-										::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ": Invalid RowIndex ") ),
-										uno::Reference< XInterface >() );
+
+	sal_Int32 nIndex = --nRow;
 	if( bIsIndex && !bIsColumnIndex ) // .Cells(n)
 	{
-		int nIndex = --nRow;
 		uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, ::uno::UNO_QUERY_THROW);
-		int nColCount = xColumnRowRange->getColumns()->getCount();
-		nRow = nIndex / nColCount;
+		sal_Int32 nColCount = xColumnRowRange->getColumns()->getCount();
+
+		if ( !nIndex || nIndex < 0 )
+			nRow = 0;
+		else
+			nRow = nIndex / nColCount;
 		nColumn = nIndex % nColCount;
-		return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xRangeReference->getCellRangeByPosition( 
-																	nColumn, nRow, nColumn, nRow ) ) );
 	}
-	if( !nColumn )
-		throw uno::RuntimeException(
-					::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ": Invalid ColumnIndex" ) ),
-					uno::Reference< XInterface >() );
-	--nRow, --nColumn;
-	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xRangeReference->getCellRangeByPosition( nColumn, nRow,                                        nColumn, nRow ) ) );
+	else
+		--nColumn;
+	nRow = nRow + thisRangeAddress.StartRow;
+	nColumn =  nColumn + thisRangeAddress.StartColumn;	
+
+	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xSheetRange->getCellRangeByPosition( nColumn, nRow,                                        nColumn, nRow ) ) );
 }
 
 void
