@@ -50,7 +50,8 @@ IDLFILES=\
 	XBorder.idl \
 	XBorders.idl \
 	XCharacters.idl \
-	XComboBox.idl
+	XComboBox.idl \
+	XErrObject.idl
 # ------------------------------------------------------------------
 
 .INCLUDE :  target.mk
