@@ -22,6 +22,7 @@
 #include "vbawindows.hxx"
 #include "vbaglobals.hxx"
 #include "tabvwsh.hxx"
+#include "gridwin.hxx"
 
 //start test includes
 #include <sfx2/objsh.hxx>
@@ -384,19 +385,35 @@ ScVbaApplication::GoTo( const uno::Any& Reference, const sal_Bool Scroll ) throw
     if( Reference >>= sRangeName )
     {
         uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY_THROW );
-        ScDocShell* pShell = getDocShell( xModel );
         uno::Reference< sheet::XSpreadsheetView > xSpreadsheet(
                 xModel->getCurrentController(), uno::UNO_QUERY_THROW );
         uno::Reference< sheet::XSpreadsheet > xDoc = xSpreadsheet->getActiveSheet();
+
+        ScTabViewShell* pShell = getCurrentBestViewShell();
+        ScGridWindow* gridWindow = (ScGridWindow*)pShell->GetWindow(); 
         try
         {
             uno::Reference< table::XCellRange > xRange = ScVbaRange::getCellRangeForName( sRangeName, xDoc, ScAddress::CONV_XL_R1C1 );
             ScVbaRange* pRange = new ScVbaRange( m_xContext, xRange );
-            uno::Reference< vba::XRange > xVbSheetRange( pRange );
+            uno::Reference< vba::XRange > xVbaSheetRange( pRange );
             if( bScroll )
-                xVbSheetRange->Select();
+            {
+                xVbaSheetRange->Select();
+                uno::Reference< vba::XWindow >  xWindow = getActiveWindow();
+                ScSplitPos eWhich = pShell->GetViewData()->GetActivePart();
+                sal_Int32 nValueX = pShell->GetViewData()->GetPosX(WhichH(eWhich));
+                sal_Int32 nValueY = pShell->GetViewData()->GetPosY(WhichV(eWhich));
+                xWindow->SmallScroll( uno::makeAny( (sal_Int16)(xVbaSheetRange->getRow() - 1) ), 
+                         uno::makeAny( (sal_Int16)nValueY ),
+                         uno::makeAny( (sal_Int16)(xVbaSheetRange->getColumn() - 1)  ), 
+                         uno::makeAny( (sal_Int16)nValueX ) );
+                gridWindow->GrabFocus();
+            }
             else
-                xVbSheetRange->Activate();
+            {
+                xVbaSheetRange->Select();
+                gridWindow->GrabFocus();
+            }
         }
         catch( uno::RuntimeException )
         {
@@ -415,13 +432,29 @@ ScVbaApplication::GoTo( const uno::Any& Reference, const sal_Bool Scroll ) throw
     if( Reference >>= xRange )
     {
         uno::Reference< vba::XRange > xVbaRange( Reference, uno::UNO_QUERY );
+        ScTabViewShell* pShell = getCurrentBestViewShell();
+        ScGridWindow* gridWindow = (ScGridWindow*)pShell->GetWindow(); 
         if ( xVbaRange.is() )
         {
             //TODO bScroll should be using, In this time, it doesenot have effection
             if( bScroll )
+            {
                 xVbaRange->Select();
+                uno::Reference< vba::XWindow >  xWindow = getActiveWindow();
+                ScSplitPos eWhich = pShell->GetViewData()->GetActivePart();
+                sal_Int32 nValueX = pShell->GetViewData()->GetPosX(WhichH(eWhich));
+                sal_Int32 nValueY = pShell->GetViewData()->GetPosY(WhichV(eWhich));
+                xWindow->SmallScroll( uno::makeAny( (sal_Int16)(xVbaRange->getRow() - 1) ), 
+                         uno::makeAny( (sal_Int16)nValueY ),
+                         uno::makeAny( (sal_Int16)(xVbaRange->getColumn() - 1)  ), 
+                         uno::makeAny( (sal_Int16)nValueX ) );
+                gridWindow->GrabFocus();
+            }
             else
-                xVbaRange->Activate();
+            {
+                xVbaRange->Select();
+                gridWindow->GrabFocus();
+            }
         }
         return;
     }
