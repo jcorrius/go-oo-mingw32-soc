@@ -375,12 +375,24 @@ ScVbaApplication::getActiveSheet() throw (uno::RuntimeException)
  *  by test excel, it seems Scroll no effect. ??? 
 *******************************************************************************/
 void SAL_CALL 
-ScVbaApplication::GoTo( const uno::Any& Reference, const sal_Bool Scroll ) throw (uno::RuntimeException)
+ScVbaApplication::GoTo( const uno::Any& Reference, const uno::Any& Scroll ) throw (uno::RuntimeException)
 {
     //test Scroll is a boolean
-    sal_Bool bScroll;
-    bScroll = Scroll;
+    sal_Bool bScroll = sal_False;
     //R1C1-style string or a string of procedure name.
+    
+    if( Scroll.hasValue() )
+    {
+        sal_Bool aScroll;
+        if( Scroll >>= aScroll )
+        {
+            bScroll = aScroll;
+        }
+        else
+            throw uno::RuntimeException( rtl::OUString::createFromAscii( "sencond parameter should be boolean" ),
+                    uno::Reference< uno::XInterface >() );
+    }
+
     rtl::OUString sRangeName;
     if( Reference >>= sRangeName )
     {
