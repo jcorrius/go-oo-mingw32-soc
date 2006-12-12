@@ -80,6 +80,8 @@ class ScVbaRange : public ScVbaRange_BASE
 	void ClearContents( sal_Int32 nFlags ) throw (css::uno::RuntimeException);
 	virtual void   setValue( const css::uno::Any& aValue, ValueSetter& setter) throw ( css::uno::RuntimeException);
 	virtual css::uno::Any getValue( ValueGetter& rValueGetter ) throw (css::uno::RuntimeException);
+	virtual css::uno::Any getFormulaValue( ScAddress::Convention ) throw (css::uno::RuntimeException);
+	virtual void   setFormulaValue( const css::uno::Any& aValue, ScAddress::Convention ) throw ( css::uno::RuntimeException);
 	css::uno::Reference< oo::vba::XRange > getArea( sal_Int32 nIndex  ) throw( css::uno::RuntimeException );
 	void setDfltPropHandler();
 	ScCellRangesBase* getCellRangesBase() throw ( css::uno::RuntimeException );

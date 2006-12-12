@@ -89,6 +89,7 @@
 #include "tabvwsh.hxx"
 #include "rangelst.hxx"
 #include "convuno.hxx"
+#include "compiler.hxx"
 
 #include <comphelper/anytostring.hxx>
 
@@ -400,10 +401,11 @@ public:
 const sal_Int32 RANGE_PROPERTY_ID_DFLT=1;
 // name is not defineable in IDL so no chance of a false detection of the
 // another property/method of the same name
-const ::rtl::OUString RANGE_PROPERTY_DFLT( RTL_CONSTASCII_USTRINGPARAM( "_$DefaultProp" ) );
-const ::rtl::OUString ISVISIBLE(  RTL_CONSTASCII_USTRINGPARAM( "IsVisible"));
-const ::rtl::OUString WIDTH(  RTL_CONSTASCII_USTRINGPARAM( "Width"));
-const ::rtl::OUString HEIGHT(  RTL_CONSTASCII_USTRINGPARAM( "Height"));
+const static ::rtl::OUString RANGE_PROPERTY_DFLT( RTL_CONSTASCII_USTRINGPARAM( "_$DefaultProp" ) );
+const static ::rtl::OUString ISVISIBLE(  RTL_CONSTASCII_USTRINGPARAM( "IsVisible"));
+const static ::rtl::OUString WIDTH(  RTL_CONSTASCII_USTRINGPARAM( "Width"));
+const static ::rtl::OUString HEIGHT(  RTL_CONSTASCII_USTRINGPARAM( "Height"));
+const static rtl::OUString EQUALS( RTL_CONSTASCII_USTRINGPARAM("=") );
 
 class CellValueSetter : public ValueSetter
 {
@@ -528,14 +530,36 @@ void CellValueGetter::visitNode( sal_Int32 x, sal_Int32 y, const uno::Reference<
 
 class CellFormulaValueSetter : public CellValueSetter
 {
+private:
+	ScDocument*  m_pDoc;
+	ScAddress::Convention m_eConv;
 public:
-	CellFormulaValueSetter( const uno::Any& aValue ):CellValueSetter( aValue ){}
+	CellFormulaValueSetter( const uno::Any& aValue, ScDocument* pDoc, ScAddress::Convention eConv  ):CellValueSetter( aValue ),  m_pDoc( pDoc ), m_eConv( eConv ){}
 protected:
 	bool processValue( const uno::Any& aValue, const uno::Reference< table::XCell >& xCell )
 	{
 		rtl::OUString sFormula;
 		if ( aValue >>= sFormula )
 		{
+			// get current convention
+			ScAddress::Convention eConv = m_pDoc->GetAddressConvention();
+			if ( eConv != m_eConv )	
+			{
+				ScCellRangesBase* pUnoRangesBase = dynamic_cast< ScCellRangesBase* >( xCell.get() );
+				if ( pUnoRangesBase )
+				{
+					ScRangeList aCellRanges = pUnoRangesBase->GetRangeList();	
+					ScCompiler aCompiler( m_pDoc, aCellRanges.First()->aStart );
+					// compile the string in the format passed in
+					aCompiler.CompileString( sFormula, m_eConv );
+					// set desired convention to that of the document
+					aCompiler.SetRefConvention( eConv );
+					String sConverted;
+					aCompiler.CreateStringFromTokenArray(sConverted);
+					sFormula = EQUALS + sConverted;
+				}
+			}
+
 			xCell->setFormula( sFormula );
 			return true;
 		}
@@ -546,12 +570,32 @@ protected:
 
 class CellFormulaValueGetter : public CellValueGetter
 {
+private:
+	ScDocument*  m_pDoc;
+	ScAddress::Convention m_eConv;
 public:
-	CellFormulaValueGetter():CellValueGetter() {}
+	CellFormulaValueGetter(ScDocument* pDoc, ScAddress::Convention eConv ) : CellValueGetter( ), m_pDoc( pDoc ), m_eConv( eConv ) {}
 	virtual void visitNode( sal_Int32 x, sal_Int32 y, const uno::Reference< table::XCell >& xCell )
 	{
 		uno::Any aValue;
 		aValue <<= xCell->getFormula();	
+		// get current convention
+		ScAddress::Convention eConv = m_pDoc->GetAddressConvention();
+		rtl::OUString sVal;
+		aValue >>= sVal;
+		ScCellRangesBase* pUnoRangesBase = dynamic_cast< ScCellRangesBase* >( xCell.get() );
+		if ( pUnoRangesBase )
+		{
+			ScRangeList aCellRanges = pUnoRangesBase->GetRangeList();	
+			ScCompiler aCompiler( m_pDoc, aCellRanges.First()->aStart );
+			aCompiler.CompileString( sVal,  ScAddress::CONV_OOO );
+			// set desired convention
+			aCompiler.SetRefConvention( m_eConv );
+			String sConverted;
+			aCompiler.CreateStringFromTokenArray(sConverted);
+			rtl::OUString sOUString = sConverted;
+			aValue <<= sOUString;
+		}
 		processValue( x,y,aValue );
 	}
 		
@@ -1075,8 +1119,23 @@ ScVbaRange::ClearFormats() throw (uno::RuntimeException)
 	ClearContents( nClearFlags );
 }
 
-uno::Any
-ScVbaRange::getFormula() throw (::com::sun::star::uno::RuntimeException)
+void
+ScVbaRange::setFormulaValue( const uno::Any& rFormula, ScAddress::Convention eConv ) throw (uno::RuntimeException)
+{
+	// If this is a multiple selection apply setFormula over all areas
+	if ( m_Areas->getCount() > 1 )
+	{
+		AreasVisitor aVisitor( m_Areas );
+		RangeFormulaProcessor valueProcessor( rFormula );	
+		aVisitor.visit( valueProcessor );
+		return;
+	}	
+	CellFormulaValueSetter formulaValueSetter( rFormula, getDocumentFromRange( mxRange ), eConv );
+	setValue( rFormula, formulaValueSetter );
+}
+
+uno::Any 
+ScVbaRange::getFormulaValue( ScAddress::Convention eConv) throw (uno::RuntimeException)
 {
 	// #TODO code within the test below "if ( m_Areas.... " can be removed
 	// Test is performed only because m_xRange is NOT set to be
@@ -1087,39 +1146,33 @@ ScVbaRange::getFormula() throw (::com::sun::star::uno::RuntimeException)
 		uno::Reference< vba::XRange > xRange( getArea( 0 ), uno::UNO_QUERY_THROW );
 		return xRange->getFormula();
 	}
-	CellFormulaValueGetter valueGetter;
+	CellFormulaValueGetter valueGetter( getDocumentFromRange( mxRange ), eConv );
 	return getValue( valueGetter );
+		
 }
 
 void
 ScVbaRange::setFormula(const uno::Any &rFormula ) throw (uno::RuntimeException)
 {
-	// If this is a multiple selection apply setFormula over all areas
-	if ( m_Areas->getCount() > 1 )
-	{
-		AreasVisitor aVisitor( m_Areas );
-		RangeFormulaProcessor valueProcessor( rFormula );	
-		aVisitor.visit( valueProcessor );
-		return;
-	}	
-	CellFormulaValueSetter formulaValueSetter( rFormula );
-	setValue( rFormula, formulaValueSetter );
+	setFormulaValue( rFormula, ScAddress::CONV_XL_A1 );;
 }
 
 uno::Any
 ScVbaRange::getFormulaR1C1() throw (::com::sun::star::uno::RuntimeException)
 {
-	//#TODO FIXME needs its own implementation when R1C1 stuff
-	// is available
-	return getFormula();
+	return getFormulaValue( ScAddress::CONV_XL_R1C1 );
 }
 
 void
 ScVbaRange::setFormulaR1C1(const uno::Any& rFormula ) throw (uno::RuntimeException)
 {
-	//#TODO FIXME needs its own implementation when R1C1 stuff
-	// is available
-	setFormula(  rFormula );
+	setFormulaValue( rFormula, ScAddress::CONV_XL_R1C1 );
+}
+
+uno::Any
+ScVbaRange::getFormula() throw (::com::sun::star::uno::RuntimeException)
+{
+	return getFormulaValue( ScAddress::CONV_XL_A1 );
 }
 
 double 
@@ -1652,7 +1705,7 @@ ScVbaRange::Rows(const uno::Any& aIndex ) throw (uno::RuntimeException)
 	
 		else if ( aIndex >>= sAddress ) 
 		{
-			ScAddress::Details dDetails( ScAddress::CONV_XL_A1, 0, 0 );
+				ScAddress::Details dDetails( ScAddress::CONV_XL_A1, 0, 0 );
 			ScRange aRange;
 			aRange.ParseRows( sAddress, getDocumentFromRange( mxRange ), dDetails );
 			aAddress.StartRow = aRange.aStart.Row();
