@@ -1,1 +1,0 @@
-EXTRA_DIST=OpenSymbol.sfd opens___.ttf package
