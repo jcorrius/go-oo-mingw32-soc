@@ -176,6 +176,10 @@ public:
 	virtual css::uno::Any SAL_CALL Borders( const css::uno::Any& ) throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL BorderAround( const css::uno::Any& LineStyle, 
                 const css::uno::Any& Weight, const css::uno::Any& ColorIndex, const css::uno::Any& Color ) throw (css::uno::RuntimeException);
+    virtual void SAL_CALL TextToColumns( const css::uno::Any& Destination, const css::uno::Any& DataType, const css::uno::Any& TextQualifier,
+                const css::uno::Any& ConsecutinveDelimiter, const css::uno::Any& Tab, const css::uno::Any& Semicolon, const css::uno::Any& Comma, 
+                const css::uno::Any& Space, const css::uno::Any& Other, const css::uno::Any& OtherChar, const css::uno::Any& FieldInfo,
+                const css::uno::Any& DecimalSeparator, const css::uno::Any& ThousandsSeparator, const css::uno::Any& TrailingMinusNumbers ) throw (css::uno::RuntimeException);
 
 	// XPropertySet
 

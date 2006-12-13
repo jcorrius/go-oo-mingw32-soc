@@ -62,6 +62,8 @@
 #include <org/openoffice/vba/Excel/XlReferenceStyle.hpp>
 #include <org/openoffice/vba/Excel/XlBordersIndex.hpp>
 #include <org/openoffice/vba/Excel/XlPageBreak.hpp>
+#include <org/openoffice/vba/Excel/XlTextParsingType.hpp>
+#include <org/openoffice/vba/Excel/XlTextQualifier.hpp>
 
 #include <scitems.hxx>
 #include <svx/srchitem.hxx>
@@ -3225,5 +3227,133 @@ ScVbaRange::ApplicationRange( const uno::Reference< uno::XComponentContext >& xC
 	ScVbaRange* pRange = new ScVbaRange( xContext, xSheetRange );
 	uno::Reference< vba::XRange > xVbSheetRange( pRange );
 	return pRange->Range( Cell1, Cell2, true ); 
+}
+
+
+/***************************************************************************************
+ * interface for text: 
+ * com.sun.star.text.XText, com.sun.star.table.XCell, com.sun.star.container.XEnumerationAccess
+ * com.sun.star.text.XTextRange, 
+ * the main problem is to recognize the numeric and date, which assosiate with DecimalSeparator, ThousandsSeparator, 
+ * TrailingMinusNumbers and FieldInfo.
+***************************************************************************************/
+void SAL_CALL
+ScVbaRange::TextToColumns( const css::uno::Any& Destination, const css::uno::Any& DataType, const css::uno::Any& TextQualifier,
+        const css::uno::Any& ConsecutinveDelimiter, const css::uno::Any& Tab, const css::uno::Any& Semicolon, const css::uno::Any& Comma,
+        const css::uno::Any& Space, const css::uno::Any& Other, const css::uno::Any& OtherChar, const css::uno::Any& FieldInfo,
+        const css::uno::Any& DecimalSeparator, const css::uno::Any& ThousandsSeparator, const css::uno::Any& TrailingMinusNumbers  ) throw (css::uno::RuntimeException)
+{
+    OSL_TRACE("nJust for test\n");
+    uno::Reference< vba::XRange > xRange;
+    if( Destination.hasValue() )
+    {
+        if( !( Destination >>= xRange ) )
+            throw uno::RuntimeException( rtl::OUString::createFromAscii( "Destination parameter should be a range" ),
+                    uno::Reference< uno::XInterface >() );
+        OSL_TRACE("set range\n");
+    }
+    else
+    {
+        //set as current
+        xRange = this;
+        OSL_TRACE("set range as himself\n");
+    }
+
+   sal_Int16 xlTextParsingType = vba::Excel::XlTextParsingType::xlDelimited;
+    if ( DataType.hasValue() )
+    {
+        if( !( DataType >>= xlTextParsingType ) )
+            throw uno::RuntimeException( rtl::OUString::createFromAscii( "DataType parameter should be a short" ),
+                    uno::Reference< uno::XInterface >() );
+        OSL_TRACE("set Datatype\n" );
+    }
+    sal_Bool bDilimited = ( xlTextParsingType == vba::Excel::XlTextParsingType::xlDelimited );
+
+    sal_Int16 xlTextQualifier = vba::Excel::XlTextQualifier::xlTextQualifierDoubleQuote; 
+    if( TextQualifier.hasValue() )
+    {
+        if( !( TextQualifier >>= xlTextQualifier ))
+             throw uno::RuntimeException( rtl::OUString::createFromAscii( "TextQualifier parameter should be a short" ),
+                    uno::Reference< uno::XInterface >() );
+        OSL_TRACE("set TextQualifier\n");
+    }
+
+    sal_Bool bConsecutinveDelimiter = sal_False;
+    if( ConsecutinveDelimiter.hasValue() )
+    {
+        if( !( ConsecutinveDelimiter >>= bConsecutinveDelimiter ) )
+            throw uno::RuntimeException( rtl::OUString::createFromAscii( "ConsecutinveDelimiter parameter should be a boolean" ),
+                    uno::Reference< uno::XInterface >() );
+        OSL_TRACE("set ConsecutinveDelimiter\n");
+    }
+
+    sal_Bool bTab = sal_False;
+    if( Tab.hasValue() && bDilimited )
+    {
+        if( !( Tab >>= bTab ) )
+            throw uno::RuntimeException( rtl::OUString::createFromAscii( "Tab parameter should be a boolean" ),
+                    uno::Reference< uno::XInterface >() );
+        OSL_TRACE("set Tab\n");
+    }
+
+    sal_Bool bSemicolon = sal_False;
+    if( Semicolon.hasValue() && bDilimited )
+    {
+        if( !( Semicolon >>= bSemicolon ) )
+            throw uno::RuntimeException( rtl::OUString::createFromAscii( "Semicolon parameter should be a boolean" ),
+                    uno::Reference< uno::XInterface >() );
+        OSL_TRACE("set Semicolon\n");
+    }
+    sal_Bool bComma = sal_False;
+    if( Comma.hasValue() && bDilimited )
+    {
+        if( !( Comma >>= bComma ) )
+            throw uno::RuntimeException( rtl::OUString::createFromAscii( "Comma parameter should be a boolean" ),
+                    uno::Reference< uno::XInterface >() );
+        OSL_TRACE("set Comma\n");
+    }
+    sal_Bool bSpace = sal_False;
+    if( Space.hasValue() && bDilimited )
+    {
+        if( !( Space >>= bSpace ) )
+            throw uno::RuntimeException( rtl::OUString::createFromAscii( "Space parameter should be a boolean" ),
+                    uno::Reference< uno::XInterface >() );
+        OSL_TRACE("set Space\n");
+    }
+    sal_Bool bOther = sal_False;
+    rtl::OUString sOtherChar;
+    if( Other.hasValue() && bDilimited )
+    {
+        if( Other >>= bOther )
+        {
+            if( OtherChar.hasValue() )
+                if( !( OtherChar >>= sOtherChar ) )
+                    throw uno::RuntimeException( rtl::OUString::createFromAscii( "OtherChar parameter should be a String" ),
+                        uno::Reference< uno::XInterface >() );
+        OSL_TRACE("set OtherChar\n" );
+        }
+     else if( bOther )
+            throw uno::RuntimeException( rtl::OUString::createFromAscii( "Other parameter should be a True" ),
+                    uno::Reference< uno::XInterface >() );
+    }
+ //TODO* FieldInfo   Optional Variant. An array containing parse information for the individual columns of data. The interpretation depends on the value of DataType. When the data is delimited, this argument is an array of two-element arrays, with each two-element array specifying the conversion options for a particular column. The first element is the column number (1-based), and the second element is one of the xlColumnDataType  constants specifying how the column is parsed.
+
+    rtl::OUString sDecimalSeparator;
+    if( DecimalSeparator.hasValue() )
+    {
+        if( !( DecimalSeparator >>= sDecimalSeparator ) )
+            throw uno::RuntimeException( rtl::OUString::createFromAscii( "DecimalSeparator parameter should be a String" ),
+                uno::Reference< uno::XInterface >() );
+        OSL_TRACE("set DecimalSeparator\n" );
+    }
+    rtl::OUString sThousandsSeparator;
+    if( ThousandsSeparator.hasValue() )
+    {
+        if( !( ThousandsSeparator >>= sThousandsSeparator ) )
+            throw uno::RuntimeException( rtl::OUString::createFromAscii( "ThousandsSeparator parameter should be a String" ),
+                uno::Reference< uno::XInterface >() );
+        OSL_TRACE("set ThousandsSpeparator\n" );
+    }
+ //TODO* TrailingMinusNumbers  Optional Variant. Numbers that begin with a minus character.
 }
 
