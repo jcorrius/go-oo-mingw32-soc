@@ -1,6 +1,25 @@
 + to debug:
     ENVCFGFLAGS="-me -tiwepd" ./soffice.bin -writer
 
+** Urgh:
+    + It -seems- the leaks I'm tracing are -real- but not the
+      underlying leak :-)
+	+ [ just another leak ... ]
+
+** CacheLine
+    + just a 'chunk' of data ...
+	+ TreeAccessor
+	    + class to unwind contents of data ...
+	    + data::freeTree ... (?)
+	treeaccessor.hxx (TreeAccessor::freeTree)
+        data::TreeAddress getModuleRootAddress( ) const { return m_base; }
+
+	grep '  addr' /tmp/log3  | wc -l
+	3839
+
+	+ builddata.cxx (destroyTree) etc. ...
+
+
 ** understand the treecache
     + grep -R '"cache' source
 	+ shows the entry points [!]
@@ -27,12 +46,37 @@
 		+ clientRelease / clientAcquire
 		+ CacheLineClientRef - under-used & bogus internal ref.
 	+ reference++:
-		+ acquireModule, acquireNode, addTemplates, addComponentData
+		+ acquireModule, acquireNode, insertDefaults,
+		  addTemplates, addComponentData
 	+ reference--
 		+ releaseModule, 'releasePending' !?, 
 	+ Horrific:
 		+ acquireModule -> opaque 'address', with no
 		  auto-ref-counting semantics.
+
++ cachecontroller.cxx: [!]
+    * Each 'loadComponent' call must have a 'freeComponent' call...
+	+ we have 69 'loading component'
+	+ and only 43 'releasing module's ... [urk]
+
++ peeling back to:
+    + treemanager.cxx (requestSubtree):
+	+ each 'request for subtree' must have matching
+    + treemanager.cxx (releaseSubtree):
+	+ 'releasing subtree'
+**	+ Odd ! - these seem to pair up perfectly ... **
+	+ 'aCache->releasenode(...) ?
+	+ aCache == CacheClientAccess ...
+
+Leaking 4 trees total (61)
+[0001] info (004698):      Discarding CacheData (Still holding 4 module trees)
+  entry 'org.openoffice.Office.TypeDetection' (0x82a8d40)
+  entry 'org.openoffice.TypeDetection.Filter' (0x82f7588)
+  entry 'org.openoffice.TypeDetection.Misc' (0x855da80)
+  entry 'org.openoffice.TypeDetection.Types' (0x82a9ff8)
+
+	+ -apparently- both setup with 'addComponentData'
+		+ is it a hierarchical thing ?
 
 
 * Do what Joerg suggests at the bottom:
@@ -672,3 +716,74 @@ Configmgr comments:
 
 ** bin that code
 
+>>       My 1 remaining concern is that (perhaps) the 'Free a whole Segment'
+>> thing is actually relied upon, but I suspect if so, it's symptomatic of
+>> a leak somewhere ;-) [ at least now we can detect leaks more easily,
+>> since we don't hold pointers to all allocated blocks ;-].
+>> 
+>
+>Of course if there was a concious reliance on that feature it wasn't
+>really a leak. It may well be the case that discarding an expired
+>cache segment or a 'detached set element' segment - after inserting
+>it, when disposing it or when the entire view goes away (the latter
+>two should be similar) - does not bother to iterate the data
+>structures within to release individual pieces.
+
+
+
+** freeTree problem:
+
+==4473== Invalid read of size 4
+==4473==    at 0x29631DC9: configmgr::sharable::NodeInfo::getName() const (node.cxx:85)
+==4473==    by 0x29631E0C: configmgr::sharable::Node::getName() const (node.cxx:422)
+==4473==    by 0x294A776D: configmgr::data::NodeAccess::getName() const (nodeaccess.hxx:88)
+==4473==    by 0x294A5D28: configmgr::CacheLine::internalGetNode(configmgr::memory::Accessor const&, configmgr::configuration::AbsolutePath const&) const (cacheline.cxx:208)
+==4473==    by 0x294A5F4F: configmgr::CacheLine::getNode(configmgr::memory::Accessor const&, configmgr::configuration::AbsolutePath const&) const (cacheline.cxx:222)
+==4473==    by 0x294A0CF3: configmgr::CacheData::internalGetNode(configmgr::memory::Accessor const&, configmgr::configuration::AbsolutePath const&) const (cachedata.cxx:289)
+==4473==    by 0x294A11DF: configmgr::CacheData::acquireNode(configmgr::memory::Accessor const&, configmgr::configuration::AbsolutePath const&) (cachedata.cxx:325)
+==4473==    by 0x2949C4AA: configmgr::CacheClientAccess::acquireNode(configmgr::memory::Accessor const&, configmgr::configuration::AbsolutePath const&) (cacheaccess.cxx:138)
+==4473==    by 0x294B7396: configmgr::TreeManager::requestSubtree(configmgr::configuration::AbsolutePath const&, configmgr::RequestOptions const&) (treemanager.cxx:374)
+==4473==    by 0x295C9658: configmgr::OProviderImpl::requestSubtree(configmgr::configuration::AbsolutePath const&, configmgr::RequestOptions const&) (providerimpl.cxx:431)
+==4473==    by 0x295C9A61: configmgr::OProviderImpl::buildUpdateAccess(rtl::OUString const&, configmgr::RequestOptions const&, long) (providerimpl.cxx:626)
+==4473==    by 0x295CF63A: configmgr::OConfigurationProviderImpl::createUpdateAccess(com::sun::star::uno::Sequence<com::sun::star::uno::Any> const&) (confproviderimpl2.cxx:143)
+==4473==    by 0x295CCAC5: configmgr::OConfigurationProvider::createInstanceWithArguments(rtl::OUString const&, com::sun::star::uno::Sequence<com::sun::star::uno::Any> const&) (confprovider2.cxx:367)
+==4473==    by 0x807D727: desktop::LanguageSelection::getConfigAccess(char const*, unsigned char) (in /opt/HHInstall/program/soffice.bin)
+==4473==    by 0x807E438: desktop::LanguageSelection::prepareLanguage() (in /opt/HHInstall/program/soffice.bin)
+==4473==    by 0x806B0E8: desktop::Desktop::Init() (in /opt/HHInstall/program/soffice.bin)
+==4473==    by 0x40B1D46: InitVCL(com::sun::star::uno::Reference<com::sun::star::lang::XMultiServiceFactory> const&) (in /data/OpenOffice/ooe680-m2/vcl/unxlngi6.pro/lib/libvcl680li.so)
+==4473==    by 0x40B1EA3: ImplSVMain() (in /data/OpenOffice/ooe680-m2/vcl/unxlngi6.pro/lib/libvcl680li.so)
+==4473==    by 0x40B1FB0: SVMain() (in /data/OpenOffice/ooe680-m2/vcl/unxlngi6.pro/lib/libvcl680li.so)
+==4473==    by 0x80644F0: sal_main (in /opt/HHInstall/program/soffice.bin)
+==4473==    by 0x506987B: (below main) (libc-start.c:231)
+
+==4473==  Address 0x298F3320 is 16 bytes inside a block of size 96 free'd
+==4473==    at 0x4020FB0: free (vg_replace_malloc.c:233)
+==4473==    by 0x49D3926: rtl_freeMemory (in /opt/HHInstall/program/libuno_sal.so.3)
+==4473==    by 0x29623EFA: configmgr::memory::SimpleHeapManagerBase::deallocateMemory(unsigned long) (simpleheap.cxx:231)
+==4473==    by 0x296240F5: configmgr::memory::SimpleCheckingHeapManager::deallocate(configmgr::memory::Opaque_*, unsigned long) (simpleheap.cxx:471)
+==4473==    by 0x2962C9BB: configmgr::memory::Heap::deallocate(unsigned long) (heap.hxx:82)
+==4473==    by 0x2962C9DC: configmgr::memory::SegmentHeap::deallocate(unsigned long) (segmentheap.hxx:96)
+==4473==    by 0x2962C6D4: configmgr::memory::Allocator::deallocate(unsigned long) const (updateaccessor.cxx:122)
+==4473==    by 0x2962D114: configmgr::data::DataTreeCleanup::destroyTree(configmgr::data::TreeAddress) (builddata.cxx:1207)
+==4473==    by 0x2962D30E: configmgr::data::destroyTree(configmgr::memory::UpdateAccessor&, configmgr::data::TreeAddress) (builddata.cxx:480)
+==4473==    by 0x29635177: configmgr::data::TreeAccessor::freeTree(configmgr::memory::UpdateAccessor&, configmgr::data::TreeAddress) (treeaccessor.cxx:80)
+==4473==    by 0x294A631B: configmgr::CacheLine::~CacheLine() (cacheline.cxx:108)
+==4473==    by 0x294948D0: salhelper::SimpleReferenceObject::release() (simplereferenceobject.hxx:98)
+==4473==    by 0x294948F3: rtl::Reference<configmgr::CacheLine>::~Reference() (ref.hxx:111)
+==4473==    by 0x294A09C5: configmgr::CacheData::releaseModule(configmgr::configuration::Name const&, bool) (cachedata.cxx:410)
+==4473==    by 0x2949C1BA: configmgr::CacheClientAccess::releaseNode(configmgr::configuration::AbsolutePath const&) (cacheaccess.cxx:157)
+==4473==    by 0x294B5758: configmgr::TreeManager::releaseSubtree(configmgr::configuration::AbsolutePath const&, configmgr::RequestOptions const&) (treemanager.cxx:580)
+==4473==    by 0x295CA3E0: configmgr::OProviderImpl::releaseSubtree(configmgr::configuration::AbsolutePath const&, configmgr::RequestOptions const&) (providerimpl.cxx:467)
+==4473==    by 0x295E920F: configmgr::configapi::ApiRootTreeImpl::releaseData() (apitreeimplobj.cxx:833)
+==4473==    by 0x295EAF73: configmgr::configapi::ApiRootTreeImpl::disposeTree() (apitreeimplobj.cxx:568)
+==4473==    by 0x295E82EB: configmgr::configapi::RootElement::disposeTree() (apitreeaccess.cxx:129)
+==4473==    by 0x295F9008: configmgr::configapi::implDisposeObject(configmgr::configapi::NodeAccess&, configmgr::configapi::RootElement&) (elementimpl.cxx:393)
+==4473==    by 0x295F722B: configmgr::BasicRootElement::release() (elementaccess.cxx:92)
+==4473==    by 0x295FC2EA: configmgr::ORootElementGroupInfo::release() (groupobjects.cxx:302)
+==4473==    by 0x807E3DA: desktop::LanguageSelection::prepareLanguage() (in /opt/HHInstall/program/soffice.bin)
+==4473==    by 0x806B0E8: desktop::Desktop::Init() (in /opt/HHInstall/program/soffice.bin)
+==4473==    by 0x40B1D46: InitVCL(com::sun::star::uno::Reference<com::sun::star::lang::XMultiServiceFactory> const&) (in /data/OpenOffice/ooe680-m2/vcl/unxlngi6.pro/lib/libvcl680li.so)
+==4473==    by 0x40B1EA3: ImplSVMain() (in /data/OpenOffice/ooe680-m2/vcl/unxlngi6.pro/lib/libvcl680li.so)
+==4473==    by 0x40B1FB0: SVMain() (in /data/OpenOffice/ooe680-m2/vcl/unxlngi6.pro/lib/libvcl680li.so)
+==4473==    by 0x80644F0: sal_main (in /opt/HHInstall/program/soffice.bin)
+==4473==    by 0x506987B: (below main) (libc-start.c:231)
