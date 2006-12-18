@@ -39,6 +39,9 @@
 #include <com/sun/star/sheet/XCellRangeMovement.hpp>
 #include <com/sun/star/sheet/XCellRangeData.hpp>
 #include <com/sun/star/sheet/FormulaResult.hpp>
+#include <com/sun/star/sheet/TableFilterField.hpp>
+#include <com/sun/star/sheet/XSheetFilterable.hpp>
+#include <com/sun/star/sheet/FilterConnection.hpp>
 
 #include <com/sun/star/style/XStyleFamiliesSupplier.hpp>
 #include <com/sun/star/awt/XDevice.hpp>
@@ -59,9 +62,11 @@
 #include <org/openoffice/vba/Excel/XlDirection.hpp>
 #include <org/openoffice/vba/Excel/XlSortDataOption.hpp>
 #include <org/openoffice/vba/Excel/XlDeleteShiftDirection.hpp>
+#include <org/openoffice/vba/Excel/XlInsertShiftDirection.hpp>
 #include <org/openoffice/vba/Excel/XlReferenceStyle.hpp>
 #include <org/openoffice/vba/Excel/XlBordersIndex.hpp>
 #include <org/openoffice/vba/Excel/XlPageBreak.hpp>
+#include <org/openoffice/vba/Excel/XlAutoFilterOperator.hpp>
 #include <org/openoffice/vba/Excel/XlTextParsingType.hpp>
 #include <org/openoffice/vba/Excel/XlTextQualifier.hpp>
 
@@ -78,6 +83,7 @@
 #include <sfx2/viewfrm.hxx>
 #include <sfx2/itemwrapper.hxx>
 #include <sc.hrc>
+#include <globstr.hrc>
 #include <unonames.hxx>
 
 #include "vbarange.hxx"
@@ -92,7 +98,9 @@
 #include "rangelst.hxx"
 #include "convuno.hxx"
 #include "compiler.hxx"
-
+#include "attrib.hxx"
+#include "undodat.hxx"
+#include "dbdocfun.hxx"
 #include <comphelper/anytostring.hxx>
 
 #include <global.hxx>
@@ -408,6 +416,7 @@ const static ::rtl::OUString ISVISIBLE(  RTL_CONSTASCII_USTRINGPARAM( "IsVisible
 const static ::rtl::OUString WIDTH(  RTL_CONSTASCII_USTRINGPARAM( "Width"));
 const static ::rtl::OUString HEIGHT(  RTL_CONSTASCII_USTRINGPARAM( "Height"));
 const static rtl::OUString EQUALS( RTL_CONSTASCII_USTRINGPARAM("=") );
+const static rtl::OUString CONTS_HEADER( RTL_CONSTASCII_USTRINGPARAM("ContainsHeader" ));
 
 class CellValueSetter : public ValueSetter
 {
@@ -581,8 +590,6 @@ public:
 	{
 		uno::Any aValue;
 		aValue <<= xCell->getFormula();	
-		// get current convention
-		ScAddress::Convention eConv = m_pDoc->GetAddressConvention();
 		rtl::OUString sVal;
 		aValue >>= sVal;
 		ScCellRangesBase* pUnoRangesBase = dynamic_cast< ScCellRangesBase* >( xCell.get() );
@@ -2633,7 +2640,7 @@ ScVbaRange::Sort( const uno::Any& Key1, const uno::Any& Order1, const uno::Any& 
 	sal_Int32 nIndex = 	findSortPropertyIndex( sortDescriptor,  rtl::OUString(RTL_CONSTASCII_USTRINGPARAM("IsSortColumns")) );
 	sortDescriptor[ nIndex ].Value <<= bIsSortColumns;
 
-	nIndex = 	findSortPropertyIndex( sortDescriptor,  rtl::OUString(RTL_CONSTASCII_USTRINGPARAM("ContainsHeader")) );
+	nIndex = 	findSortPropertyIndex( sortDescriptor, CONTS_HEADER );
 	sortDescriptor[ nIndex ].Value <<= bContainsHeader;
 
 	pDoc->SetSortParam( aSortParam, nTab );
@@ -3229,6 +3236,225 @@ ScVbaRange::ApplicationRange( const uno::Reference< uno::XComponentContext >& xC
 	return pRange->Range( Cell1, Cell2, true ); 
 }
 
+
+void SAL_CALL 
+ScVbaRange::AutoFilter( const uno::Any& Field, const uno::Any& Criteria1, const uno::Any& Operator, const uno::Any& /*Criteria2*/, const uno::Any& VisibleDropDown ) throw (uno::RuntimeException)
+{
+	// #TODO We could probably hook into the autofilter stuff better
+	// or at least seperate the code in dbfunc so it could be shared
+	// currently a cut'n'paste fest exists below :-(
+
+	ScTabViewShell* pTabViewShell = getCurrentBestViewShell();
+	ScDocument* pDoc =  getDocumentFromRange( mxRange );
+	ScDocShell* pDocSh = getDocShellFromRange( mxRange );	
+	ScDocShellModificator aModificator( *pDocSh );
+	bool bHasAuto = true;	
+	RangeHelper thisRange( mxRange );	
+	table::CellRangeAddress thisAddress = thisRange.getCellRangeAddressable()->getRangeAddress();
+
+	ScRange aRange;	
+	ScUnoConversion::FillScRange( aRange, thisAddress );
+	ScDBData* pDBData = pDocSh->GetDBData( aRange, SC_DB_MAKE, TRUE );
+	ScQueryParam aParam;
+	pDBData->GetQueryParam( aParam );
+	SCROW  nRow = aParam.nRow1;
+	SCTAB  nTab = aRange.aStart.Tab();
+	INT16   nFlag;
+
+	for (SCROW nCol=aParam.nCol1; nCol<=aParam.nCol2 && bHasAuto; nCol++)
+	{
+		nFlag = ((ScMergeFlagAttr*) pDoc->GetAttr( nCol, nRow, nTab, ATTR_MERGE_FLAG ))->GetValue();
+
+		if ( (nFlag & SC_MF_AUTO) == 0 )
+			bHasAuto = false;
+	}	
+
+	OSL_TRACE("Auto is set ? %s", bHasAuto ? "true" : "false" );
+
+	// for the moment we only process first Criteria1	
+		
+	sal_Int32 nField = 0; // *IS* 1 based
+	rtl::OUString sCriteria1;
+	sal_Int32 nOperator = vba::Excel::XlAutoFilterOperator::xlAnd; 
+
+
+	
+	sal_Bool bVisible = sal_True;
+	bool  bChangeDropDown = false;
+	VisibleDropDown >>= bVisible;
+
+	if ( bVisible == bHasAuto ) // dropdown is displayed/notdisplayed as
+								// required
+		bVisible = sal_False;
+	else
+		bChangeDropDown = true;	
+
+	sheet::FilterOperator nOp = sheet::FilterOperator_EQUAL;		
+	sheet::FilterConnection nConn = sheet::FilterConnection_AND;		
+	double nCriteria1 = 0;
+
+	bool bHasCritValue = Criteria1.hasValue();
+	bool bCritHasNumericValue = sal_False;
+	if ( bHasCritValue )
+		bCritHasNumericValue = ( Criteria1 >>= nCriteria1 );
+
+	if ( ( Field >>= nField ) 
+	||   Criteria1.hasValue()
+	||   ( Operator >>= nOperator )
+	||   VisibleDropDown.hasValue()
+	)
+	{
+		Criteria1 >>= sCriteria1;
+		uno::Reference< sheet::XSheetFilterable > xFilt( mxRange, uno::UNO_QUERY_THROW );
+		uno::Reference< sheet::XSheetFilterDescriptor > xDesc = xFilt->createFilterDescriptor( sal_True );
+		uno::Sequence< sheet::TableFilterField > sTabFilts = xDesc->getFilterFields();
+		sTabFilts.realloc( 1 );
+		sTabFilts[0].IsNumeric = bCritHasNumericValue;
+		OSL_TRACE("No filt fields is %d", sTabFilts.getLength() );
+
+		if ( bHasCritValue && sCriteria1.getLength() )
+		{
+			if ( sCriteria1.equals( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("=") ) ) )
+				nOp = sheet::FilterOperator_EMPTY;
+			else if ( sCriteria1.equals( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("<>") ) ) )
+				nOp = sheet::FilterOperator_NOT_EMPTY;	
+			else
+				nOp = sheet::FilterOperator_EQUAL;
+		}
+
+		if ( Operator.hasValue() )
+		{
+			// if its a bottom/top Ten(Percent/Value) and there
+			// is no value specified for critera1 set it to 10
+			if ( !bCritHasNumericValue && !sCriteria1.getLength() && ( nOperator != vba::Excel::XlAutoFilterOperator::xlOr ) && ( nOperator != vba::Excel::XlAutoFilterOperator::xlAnd ) )
+			{
+				nCriteria1 = 10;
+				sTabFilts[0].IsNumeric = sal_True;	
+			}
+			switch ( nOperator )
+			{
+				case vba::Excel::XlAutoFilterOperator::xlBottom10Items:
+					nOp = sheet::FilterOperator_BOTTOM_VALUES;
+					break;
+				case vba::Excel::XlAutoFilterOperator::xlBottom10Percent:
+					nOp = sheet::FilterOperator_BOTTOM_PERCENT;
+					break;
+				case vba::Excel::XlAutoFilterOperator::xlTop10Items:
+					nOp = sheet::FilterOperator_TOP_VALUES;
+					break;
+				case vba::Excel::XlAutoFilterOperator::xlTop10Percent:
+					nOp = sheet::FilterOperator_TOP_PERCENT;
+					break;
+				case vba::Excel::XlAutoFilterOperator::xlOr:
+					nConn = sheet::FilterConnection_OR;		
+				case vba::Excel::XlAutoFilterOperator::xlAnd:
+					nConn = sheet::FilterConnection_AND;		
+				default:
+					throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("UnknownOption") ), uno::Reference< uno::XInterface >() );
+					
+			}	
+
+		}		
+		sTabFilts[0].Connection = nConn;	
+		if ( nField > 0 )
+			sTabFilts[0].Field = (nField - 1);	
+		else
+			sTabFilts[0].Field = 0;	
+		sTabFilts[0].Operator = nOp;	
+		if(	sTabFilts[0].IsNumeric )
+			sTabFilts[0].NumericValue = nCriteria1;	
+		else
+			sTabFilts[0].StringValue = sCriteria1;	
+
+		xDesc->setFilterFields( sTabFilts );
+		uno::Reference< beans::XPropertySet > xProps( xDesc, uno::UNO_QUERY_THROW );
+		xProps->setPropertyValue( CONTS_HEADER, uno::makeAny( sal_True ) );
+		xFilt->filter( xDesc );
+	
+	}
+	else 
+		bChangeDropDown = true;	
+	// enable drop down
+	if ( bChangeDropDown )
+	{
+		ScRange aTmpRange;
+		pDBData->GetArea( aTmpRange );
+		for (SCCOL nCol=aParam.nCol1; nCol<=aParam.nCol2; nCol++)
+		{
+			nFlag = ((ScMergeFlagAttr*) pDoc->GetAttr( nCol, nRow, nTab, ATTR_MERGE_FLAG ))->GetValue();
+			if ( bVisible )
+				pDoc->ApplyAttr( nCol, nRow, nTab, ScMergeFlagAttr( nFlag | SC_MF_AUTO ) );
+			else
+				pDoc->ApplyAttr( nCol, nRow, nTab, ScMergeFlagAttr( nFlag &~ SC_MF_AUTO ) );
+		}
+		if ( !bVisible )
+		{
+			SCSIZE nEC = aParam.GetEntryCount();
+			for (SCSIZE i=0; i<nEC; i++)
+				aParam.GetEntry(i).bDoQuery = FALSE;
+			aParam.bDuplicate = TRUE;
+			ScDBDocFunc aDBDocFunc( *pDocSh );
+			aDBDocFunc.Query( nTab, aParam, &aTmpRange, TRUE, FALSE );
+		}
+		pDocSh->PostPaint( aParam.nCol1, nRow, nTab, aParam.nCol2, nRow, nTab, PAINT_GRID );	
+	}		
+}
+void SAL_CALL 
+ScVbaRange::Insert( const uno::Any& Shift, const uno::Any& /*CopyOrigin*/ ) throw (uno::RuntimeException)
+{
+	// It appears ( from the web ) that the undocumented CopyOrigin
+	// param should contain member of enum XlInsertFormatOrigin
+	// which can have values xlFormatFromLeftOrAbove or xlFormatFromRightOrBelow
+	// #TODO investigate resultant behaviour using these constants
+	// currently just processing Shift
+
+	sheet::CellInsertMode mode = sheet::CellInsertMode_NONE; 
+	if ( Shift.hasValue() )
+	{
+		sal_Int32 nShift;
+		Shift >>= nShift;
+		switch ( nShift )
+		{
+			case vba::Excel::XlInsertShiftDirection::xlShiftToRight:
+				mode = sheet::CellInsertMode_RIGHT;
+				break;
+			case vba::Excel::XlInsertShiftDirection::xlShiftDown:
+				mode = sheet::CellInsertMode_DOWN;
+				break;
+			default:
+				throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM ("Illegal paramater ") ), uno::Reference< uno::XInterface >() );
+		}
+	}
+	else 
+	{
+		if ( getRow() >=  getColumn() )
+			mode = sheet::CellInsertMode_DOWN;
+		else
+			mode = sheet::CellInsertMode_RIGHT;
+	}
+	RangeHelper thisRange( mxRange );
+	uno::Reference< sheet::XCellRangeMovement > xCellRangeMove( thisRange.getSpreadSheet(), uno::UNO_QUERY_THROW );	
+	xCellRangeMove->insertCells( thisRange.getCellRangeAddressable()->getRangeAddress(), mode );
+}
+
+void SAL_CALL
+ScVbaRange::Autofit() throw (uno::RuntimeException)
+{
+        ScDocShell* pDocShell = getDocShellFromRange( mxRange );
+        if ( pDocShell )
+        {
+			RangeHelper thisRange( mxRange );	
+			table::CellRangeAddress thisAddress = thisRange.getCellRangeAddressable()->getRangeAddress();
+			
+			ScDocFunc aFunc(*pDocShell);
+			SCCOLROW nColArr[2];
+			nColArr[0] = thisAddress.StartColumn;
+			nColArr[1] = thisAddress.EndColumn;
+			aFunc.SetWidthOrHeight( TRUE, 1, nColArr, thisAddress.Sheet, SC_SIZE_OPTIMAL,
+		                                                                        0, TRUE, TRUE );		
+			
+	}	
+}
 
 /***************************************************************************************
  * interface for text: 
