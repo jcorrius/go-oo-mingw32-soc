@@ -63,6 +63,7 @@ IDLFILES=\
 	XlCutCopyMode.idl \
 	XlDVAlterStyle.idl \
 	XlDVType.idl \
+	XlDVAlertStyle.idl \
 	XlDataLabelPosition.idl \
 	XlDataLabelSeparator.idl \
 	XlDataLabelsType.idl \

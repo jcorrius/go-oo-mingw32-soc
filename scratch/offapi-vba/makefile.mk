@@ -51,7 +51,8 @@ IDLFILES=\
 	XBorders.idl \
 	XCharacters.idl \
 	XComboBox.idl \
-	XErrObject.idl
+	XErrObject.idl \
+	XValidation.idl
 # ------------------------------------------------------------------
 
 .INCLUDE :  target.mk
