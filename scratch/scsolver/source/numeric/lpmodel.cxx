@@ -105,6 +105,16 @@ public:
 	bool getVarPositive() const { return m_bVarPositive; }
 	void setVarPositive( bool b ) { m_bVarPositive = b; }
 
+	bool getVarInteger() const
+	{
+		return m_bVarInteger;
+	}
+
+	void setVarInteger( bool b )
+	{
+		m_bVarInteger =  b;
+	}
+
 	bool getVerbose() const { return m_bVerbose; }
 	void setVerbose( bool b ) { m_bVerbose = b; }
 
@@ -130,6 +140,7 @@ private:
 	Goal m_eGoal;
 	unsigned long m_nPrecision;
 	bool m_bVarPositive;
+	bool m_bVarInteger;
 
 	bool m_bVerbose;
 	double m_fObjFuncConstant;
@@ -170,6 +181,7 @@ void ModelImpl::swap( ModelImpl& other ) throw()
 	std::swap( m_eGoal, other.m_eGoal );
 	std::swap( m_nPrecision, other.m_nPrecision );
 	std::swap( m_bVarPositive, other.m_bVarPositive );
+	std::swap( m_bVarInteger, other.m_bVarInteger );
 	std::swap( m_bVerbose, other.m_bVerbose );
 }
 
@@ -589,6 +601,16 @@ bool Model::getVarPositive() const
 void Model::setVarPositive( bool b )
 {
 	m_pImpl->setVarPositive( b );
+}
+
+bool Model::getVarInteger() const
+{
+	return m_pImpl->getVarInteger();
+}
+
+void Model::setVarInteger( bool b )
+{
+	m_pImpl->setVarInteger( b );
 }
 
 bool Model::getVerbose() const

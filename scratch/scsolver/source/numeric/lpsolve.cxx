@@ -37,6 +37,7 @@
 #include <string>
 #include <memory>
 #include <iostream>
+#include <stdio.h>
 
 using namespace ::scsolver::numeric::opres;
 
@@ -69,8 +70,10 @@ void LpSolveImpl::solve()
 	size_t nDecVarSize = model->getDecisionVarSize();
 	size_t nConstCount = model->getConstraintCount();
 
-	cout << "decision var (" << nDecVarSize << ")" << endl;
-	cout << "constraint   (" << nConstCount << ")" << endl;
+#if SCSOLVER_DEBUG	
+	printf("decision var (%d)\n", nDecVarSize);
+	printf("constraint   (%d)\n", nConstCount);
+#endif	
 
 	lprec* lp = make_lp(0, nDecVarSize);
 	if ( lp == NULL )
@@ -78,13 +81,14 @@ void LpSolveImpl::solve()
 
 	for ( int i = 1; i <= nDecVarSize; ++i )
 	{
-		ostringstream os;
-		os << "x" << i;
-		set_col_name( lp, i, const_cast<char *>(os.str().c_str()) );
 		if( model->getVarPositive() )
 			set_lowbo(lp, i, 0.0); // positive variable constraint
 		else
 			set_unbounded(lp, i);
+		if ( model->getVarInteger() )
+			set_int(lp, i, 1);
+		else
+			set_int(lp, i, 0);
 	}
 
 	// map constraints
@@ -121,7 +125,12 @@ void LpSolveImpl::solve()
 
 		// set objective function
 		for ( int i = 0; i < nDecVarSize; ++i )
+		{
+#if SCSOLVER_DEBUG
+			printf("var %d = %f\n", i+1, model->getCost(i));
+#endif
 			row.at(i) = model->getCost(i);
+		}
 		set_obj_fnex( lp, nDecVarSize,  &row[0],  &cols[0] );
 	}
 	catch ( std::out_of_range& e )
@@ -152,9 +161,6 @@ void LpSolveImpl::solve()
 	if ( ::solve(lp) == OPTIMAL )
 	{
 		// solution found
-
-		// objective value
-		cout << "Objective value: " << get_objective(lp) << endl;
 
 		// variable values
 		get_variables(lp, &row[0]);

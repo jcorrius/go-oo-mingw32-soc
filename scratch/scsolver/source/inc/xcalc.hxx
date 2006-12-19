@@ -119,8 +119,10 @@ public:
 	void setCellFormula( const table::CellAddress&, const rtl::OUString& ) const;
 	void setCellValue( const table::CellAddress&, double ) const;
 
-	void disableCellUpdates();
-	void enableCellUpdates();
+	void disableCellUpdates() const;
+	void enableCellUpdates() const;
+
+	void addMenuItem() const;
 
 private:
 	Reference< uno::XComponentContext > m_xCC;

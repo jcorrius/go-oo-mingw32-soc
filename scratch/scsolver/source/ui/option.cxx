@@ -37,6 +37,7 @@ struct OptionDataImpl
 {
 	OptionDataImpl() :
 		VarPositive(true),
+		VarInteger(false),
 		ModelType(OPTMODELTYPE_LP)
 	{
 	}
@@ -44,6 +45,7 @@ struct OptionDataImpl
 	~OptionDataImpl() throw() {}
 
 	bool VarPositive:1;
+	bool VarInteger:1;
 	OptModelType ModelType;
 };
 
@@ -65,6 +67,16 @@ void OptionData::setVarPositive( bool b )
 bool OptionData::getVarPositive() const
 {
 	return m_pImpl->VarPositive;
+}
+
+void OptionData::setVarInteger( bool b )
+{
+	m_pImpl->VarInteger = b;
+}
+
+bool OptionData::getVarInteger() const
+{
+	return m_pImpl->VarInteger;
 }
 
 void OptionData::setModelType( OptModelType type )

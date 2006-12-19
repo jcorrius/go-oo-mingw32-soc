@@ -62,8 +62,11 @@ public:
 
 	::com::sun::star::table::CellAddress getRightCellAddr() const;
 	void setRightCellAddr( const ::com::sun::star::table::CellAddress& addr );
+	double getLeftCellValue() const;
 	double getRightCellValue() const;
+	void setLeftCellValue( double value );
 	void setRightCellValue( double value );
+	bool isLeftCellNumeric() const;
 	bool isRightCellNumeric() const;
 
 	numeric::opres::Equality getEquality() const;
@@ -75,7 +78,9 @@ private:
 	::com::sun::star::table::CellAddress Right;
 	numeric::opres::Equality Equal;
 
-	bool m_bIsRHSNumber;
+	bool m_bIsLHSNumber:1;
+	bool m_bIsRHSNumber:1;
+	double m_fLHSValue;
 	double m_fRHSValue;
 };
 

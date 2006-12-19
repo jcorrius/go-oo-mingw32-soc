@@ -51,6 +51,9 @@ public:
 	void setVarPositive( bool b );
 	bool getVarPositive() const;
 
+	void setVarInteger( bool b );
+	bool getVarInteger() const;
+
 	void setModelType( OptModelType type );
 	OptModelType getModelType() const;
 

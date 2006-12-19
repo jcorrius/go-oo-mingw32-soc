@@ -87,13 +87,17 @@ struct CellAttr
 // ConstraintAddress
 
 ConstraintAddress::ConstraintAddress() :
-	m_bIsRHSNumber( false ), m_fRHSValue( 0.0 )
+	m_bIsLHSNumber(false),
+	m_bIsRHSNumber(false),
+	m_fLHSValue(0.0),
+	m_fRHSValue(0.0)
 {
 }
 
 ConstraintAddress::ConstraintAddress( const ConstraintAddress& aOther ) :
 	Left( aOther.Left ), Right( aOther.Right ), Equal( aOther.Equal ),
-	m_bIsRHSNumber( aOther.m_bIsRHSNumber ), m_fRHSValue( aOther.m_fRHSValue )
+	m_bIsLHSNumber( aOther.m_bIsLHSNumber ), m_bIsRHSNumber( aOther.m_bIsRHSNumber ),
+	m_fLHSValue( aOther.m_fLHSValue ), m_fRHSValue( aOther.m_fRHSValue )
 {
 }
 
@@ -103,30 +107,32 @@ ConstraintAddress::~ConstraintAddress() throw()
 
 bool ConstraintAddress::equals( const ConstraintAddress& aOther ) const
 {
-	if ( m_bIsRHSNumber )
+	if (m_bIsLHSNumber)
 	{
-		// The right-hand side cell is a number.  Don't compare the address
-		// of the right-hand side cells, but do compare their numerical
-		// values.
-		if ( aOther.Left.Sheet == Left.Sheet &&
-			 aOther.Left.Column == Left.Column &&
-			 aOther.Left.Row == Left.Row &&
-			 aOther.Equal == Equal &&
-			 aOther.m_bIsRHSNumber == m_bIsRHSNumber &&
-			 aOther.m_fRHSValue == m_fRHSValue )
-			return true;
-		return false;
+		if (!aOther.m_bIsLHSNumber || aOther.m_fLHSValue != m_fLHSValue)
+			return false;
+	}
+	else
+	{
+		// LHS is not a number.  Compare the cell addresses.
+		if (aOther.m_bIsLHSNumber || aOther.Left.Sheet != Left.Sheet ||
+			aOther.Left.Column != Left.Column || aOther.Left.Row != Left.Row)
+			return false;
 	}
 
-	if ( aOther.Left.Sheet == Left.Sheet &&
-		 aOther.Left.Column == Left.Column &&
-		 aOther.Left.Row == Left.Row &&
-		 aOther.Right.Sheet == Right.Sheet &&
-		 aOther.Right.Column == Right.Column &&
-		 aOther.Right.Row == Right.Row &&
-		 aOther.Equal == Equal )
-		return true;
-	return false;
+	if (m_bIsRHSNumber)
+	{
+		if (!aOther.m_bIsRHSNumber || aOther.m_fRHSValue != m_fRHSValue)
+			return false;
+	}
+	else
+	{
+		// RHS is not a number.  Compare the cell addresses.
+		if (aOther.m_bIsRHSNumber || aOther.Right.Sheet != Right.Sheet ||
+			aOther.Right.Column != Right.Column || aOther.Right.Row != Right.Row)
+			return false;
+	}
+	return true;
 }
 
 bool ConstraintAddress::operator==( const ConstraintAddress& aOther ) const
@@ -142,6 +148,7 @@ table::CellAddress ConstraintAddress::getLeftCellAddr() const
 void ConstraintAddress::setLeftCellAddr( const table::CellAddress& addr )
 {
 	Left = addr;
+	m_bIsLHSNumber = false;
 }
 
 table::CellAddress ConstraintAddress::getRightCellAddr() const
@@ -155,15 +162,31 @@ void ConstraintAddress::setRightCellAddr( const table::CellAddress& addr )
 	m_bIsRHSNumber = false;
 }
 
+double ConstraintAddress::getLeftCellValue() const
+{
+	return m_fLHSValue;
+}
+
 double ConstraintAddress::getRightCellValue() const
 {
 	return m_fRHSValue;
+}
+
+void ConstraintAddress::setLeftCellValue( double value )
+{
+	m_fLHSValue = value;
+	m_bIsLHSNumber = true;
 }
 
 void ConstraintAddress::setRightCellValue( double value )
 {
 	m_fRHSValue = value;
 	m_bIsRHSNumber = true;
+}
+
+bool ConstraintAddress::isLeftCellNumeric() const
+{
+	return m_bIsLHSNumber;
 }
 
 bool ConstraintAddress::isRightCellNumeric() const

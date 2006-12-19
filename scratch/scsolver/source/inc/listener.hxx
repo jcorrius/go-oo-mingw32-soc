@@ -267,7 +267,7 @@ class ConstListBoxListener : public ItemListener
 {
 public:
 	ConstListBoxListener( SolverDialog* );
-	virtual ~ConstListBoxListener() throw() { Debug( "ConstListBoxListener d'tor" ); }
+	virtual ~ConstListBoxListener() throw() {}
 
 	virtual void SAL_CALL disposing( const lang::EventObject& ) throw ( RuntimeException ) {}
 	

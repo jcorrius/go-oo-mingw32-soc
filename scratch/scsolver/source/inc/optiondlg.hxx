@@ -38,6 +38,8 @@ namespace scsolver {
 class ActionObject;
 class CloseBtnListener;
 
+struct OptionDialogImpl;
+
 class OptionDialog : public BaseDialog
 {
 public:
@@ -54,6 +56,8 @@ public:
 	 *  the selection is satisfactory.
 	 */
 	virtual bool doneRangeSelection() const;
+
+	virtual void close();
 
 	/**
 	 * Must return a unique name that identifies its dialog type.
@@ -74,10 +78,7 @@ private:
 	void registerListeners();
 	void unregisterListeners() throw();
 
-	::std::auto_ptr<ActionObject> m_pActionOK;
-
-	ActionListener* m_pOKListener;
-	CloseBtnListener* m_pCloseListener;
+	::std::auto_ptr<OptionDialogImpl> m_pImpl;
 };
 
 }

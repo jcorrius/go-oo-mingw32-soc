@@ -58,6 +58,25 @@ using uno::Any;
 
 namespace scsolver {
 
+/**
+ * Dump all service names supported by this widget and
+ * terminate. This function is for debug purposes only, and
+ * should never be reached under normal circumstances.
+ */
+void lcl_dumpServiceNames( const Reference< uno::XInterface >& oWgt )
+{
+#if SCSOLVER_DEBUG
+	if (oWgt == NULL)
+		return;
+	Reference< lang::XServiceInfo > xSN( oWgt, UNO_QUERY );
+	Sequence< rtl::OUString > sSN = xSN->getSupportedServiceNames();
+	for ( int nIdx = 0; nIdx < sSN.getLength(); ++nIdx )
+		printOUStr( sSN[nIdx] );
+
+	OSL_ASSERT( !"No appropriate widget type got picked up!" );
+#endif
+}
+
 //--------------------------------------------------------------------------
 // BaseDialogImpl
 
@@ -119,8 +138,15 @@ public:
 
 	template<typename ListenerT>
 	void registerListener( ListenerT* );
+
 	template<typename ListenerT>
 	void registerListener( const rtl::OUString &, ListenerT* );
+
+	void registerListener( TopWindowListener* p )
+	{
+		Reference<awt::XTopWindow> xTW(getDialog(), UNO_QUERY);
+		xTW->addTopWindowListener(p);
+	}
 
 	void registerListener( const Reference< uno::XInterface >&, ActionListener* );
 	void registerListener( const Reference< uno::XInterface >&, ItemListener* );
@@ -129,6 +155,7 @@ public:
 
 	template<typename ListenerT>
 	void unregisterListener( ListenerT* );
+
 	template<typename ListenerT>
 	void unregisterListener( const rtl::OUString &, ListenerT* );
 
@@ -136,6 +163,17 @@ public:
 	void unregisterListener( const Reference< uno::XInterface >&, ItemListener* );
 	void unregisterListener( const Reference< uno::XInterface >&, FocusListener* );
 	void unregisterListener( const Reference< uno::XInterface >&, MouseListener* );
+
+	void unregisterListener( const Reference<uno::XInterface>& oWgt, TopWindowListener* p )
+	{
+		Reference<awt::XTopWindow> xWnd(oWgt, UNO_QUERY);
+		if ( xWnd.is() )
+		{
+			xWnd->removeTopWindowListener( p );
+			return;
+		}
+		lcl_dumpServiceNames( oWgt );
+	}
 
 private:
 
@@ -177,25 +215,32 @@ void BaseDialogImpl::initialize( sal_Int16 nW, sal_Int16 nH, const rtl::OUString
     xCtrl->setModel( xCtrlModel );
 	
 	Reference< beans::XPropertySet > xPS( m_oDlgModel, UNO_QUERY );
-	uno::Any aWidth, aHeight, aTitle;
+	uno::Any aWidth, aHeight, aTitle, aCloseable;
 	aWidth <<= nW;
 	aHeight <<= nH;
 	aTitle <<= sTitle;
+	aCloseable <<= static_cast<sal_Bool>(true);
 	xPS->setPropertyValue( ascii( "Width" ), aWidth );
 	xPS->setPropertyValue( ascii( "Height" ), aHeight );
 	xPS->setPropertyValue( ascii( "Title" ), aTitle );
+	xPS->setPropertyValue( ascii("Closeable"), aCloseable );
 }
 
 void BaseDialogImpl::setVisibleDefault( bool bVisible )
 {
 	Reference< awt::XWindow > xWnd( m_oDlg, UNO_QUERY );
-	if ( bVisible && m_bHasClosed )
-		xWnd->setPosSize( m_aRect.X, m_aRect.Y, m_aRect.Width, m_aRect.Height, awt::PosSize::POS );
-	xWnd->setVisible( bVisible );
-	if ( bVisible )
-		xWnd->setFocus();
+	if ( xWnd.is() )
+	{
+		if ( bVisible && m_bHasClosed )
+			xWnd->setPosSize( m_aRect.X, m_aRect.Y, m_aRect.Width, m_aRect.Height, awt::PosSize::POS );
+		xWnd->setVisible( bVisible );
+		if ( bVisible )
+			xWnd->setFocus();
+		else
+			m_bHasClosed = true;
+	}
 	else
-		m_bHasClosed = true;
+		Debug("xWnd is NULL!");
 }
 
 apWidgetProp BaseDialogImpl::addButton( 
@@ -353,20 +398,6 @@ void BaseDialogImpl::registerListener( const rtl::OUString& sName, ListenerT* p 
 	registerListener( getWidgetByName( sName ), p );
 }
 
-/** Dump all service names supported by this widget and terminate.  This 
-	function is for debug purposes only, and should never be reached under
-	normal circumstances. */
-void lcl_dumpServiceNames( const Reference< uno::XInterface >& oWgt )
-{
-#ifdef DEBUG
-	Reference< lang::XServiceInfo > xSN( oWgt, UNO_QUERY );
-	Sequence< rtl::OUString > sSN = xSN->getSupportedServiceNames();
-	for ( int nIdx = 0; nIdx < sSN.getLength(); ++nIdx )
-		printOUStr( sSN[nIdx] );
-
-	OSL_ASSERT( !"No appropriate widget type got picked up!" );
-#endif
-}
 
 void BaseDialogImpl::registerListener( const Reference< uno::XInterface >& oWgt, ActionListener* p )
 {
@@ -434,7 +465,13 @@ void BaseDialogImpl::unregisterListener( ListenerT* p )
 template<typename ListenerT>
 void BaseDialogImpl::unregisterListener( const rtl::OUString& sName, ListenerT* p )
 {
-	unregisterListener( getWidgetByName( sName ), p );
+	Reference<uno::XInterface> oWgt = getWidgetByName(sName);
+	if (oWgt == NULL)
+	{
+		printOUStr(ascii("warning: widget named ") + sName + ascii(" does not exist, thus cannot be unregistered."));
+		return;
+	}
+	unregisterListener(oWgt, p);
 }
 
 void BaseDialogImpl::unregisterListener( const Reference< uno::XInterface >& oWgt, ActionListener* p )
@@ -508,14 +545,10 @@ void BaseDialogImpl::toFront()
 
 void BaseDialogImpl::execute()
 {
-	Debug( "execute" );
-
 	setVisibleDefault( true );
 	toFront();
 	Reference< awt::XDialog > xDlg( m_oDlg, UNO_QUERY );
 	sal_Int16 r = xDlg->execute();
-
-	Debug( "done" );
 }
 
 //--------------------------------------------------------------------------
@@ -618,6 +651,11 @@ apWidgetProp BaseDialog::addRangeEdit( sal_Int32 nX, sal_Int32 nY, sal_Int32 nW,
 	return m_pImpl->addRangeEdit( nX, nY, nW, nH, sEditName, sBtnName );
 }
 
+void BaseDialog::registerListener( TopWindowListener* p ) const
+{
+	m_pImpl->registerListener(p);
+}
+
 void BaseDialog::registerListener( FocusListener* p ) const
 {
 	m_pImpl->registerListener( p );
@@ -636,6 +674,11 @@ void BaseDialog::registerListener( const rtl::OUString& sName, ActionListener* p
 void BaseDialog::registerListener( const rtl::OUString& sName, ItemListener* p ) const
 {
 	m_pImpl->registerListener( sName, p );
+}
+
+void BaseDialog::unregisterListener( TopWindowListener* p ) const
+{
+	m_pImpl->unregisterListener(p);
 }
 
 void BaseDialog::unregisterListener( FocusListener* p ) const

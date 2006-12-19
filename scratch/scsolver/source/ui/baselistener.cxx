@@ -25,14 +25,23 @@
  *
  ************************************************************************/
 
-#include <baselistener.hxx>
+#include "baselistener.hxx"
+#include "basedlg.hxx"
+#include <stdio.h>
 
 namespace scsolver {
 
-//---------------------------------------------------------------------------
-// Class Listener
-
 Listener::~Listener() throw()
+{
+}
+
+//-----------------------------------------------------------------
+
+SimpleActionObject::SimpleActionObject()
+{
+}
+
+SimpleActionObject::~SimpleActionObject() throw()
 {
 }
 
@@ -81,6 +90,85 @@ FocusListener::~FocusListener() throw()
 
 MouseListener::~MouseListener() throw()
 {
+}
+
+//-----------------------------------------------------------------
+
+class TopWindowListenerImpl
+{
+public:
+	TopWindowListenerImpl() :
+		pCloseAction(NULL)
+	{
+	}
+
+	~TopWindowListenerImpl() throw()
+	{
+	}
+
+	SimpleActionObject* pCloseAction;
+};
+
+TopWindowListener::TopWindowListener( BaseDialog* pDlg ) :
+	Listener(pDlg),
+	m_pImpl( new TopWindowListenerImpl )
+{
+}
+
+TopWindowListener::~TopWindowListener() throw()
+{
+}
+
+void SAL_CALL TopWindowListener::windowOpened( const lang::EventObject& )
+		throw(RuntimeException)
+{
+}
+
+void SAL_CALL TopWindowListener::windowClosing( const lang::EventObject& e )
+		throw(RuntimeException)
+{
+	BaseDialog* p = getDialog();
+	if (m_pImpl->pCloseAction == NULL)
+	{
+		p->setVisible(false);
+		return;
+	}
+	m_pImpl->pCloseAction->execute( getDialog() );
+}
+
+void SAL_CALL TopWindowListener::windowClosed( const lang::EventObject& )
+		throw (RuntimeException)
+{
+}
+
+void SAL_CALL TopWindowListener::windowMinimized( const lang::EventObject& )
+		throw (RuntimeException)
+{
+}
+
+void SAL_CALL TopWindowListener::windowNormalized( const lang::EventObject& )
+		throw (RuntimeException)
+{
+}
+
+void SAL_CALL TopWindowListener::windowActivated( const lang::EventObject& )
+		throw (RuntimeException)
+{
+}
+
+void SAL_CALL TopWindowListener::windowDeactivated( const lang::EventObject& )
+		throw (RuntimeException)
+{
+}
+
+void SAL_CALL TopWindowListener::disposing( const lang::EventObject& )
+		throw (RuntimeException)
+{
+}
+
+void TopWindowListener::setActionClosing( SimpleActionObject* p )
+{
+	m_pImpl->pCloseAction = p;
 }
 
 }

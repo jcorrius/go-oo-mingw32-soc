@@ -31,19 +31,13 @@
 #include <string>
 #include <iterator>
 #include <iostream>
-#include <vector>
+
+#define SCSOLVER_DEBUG 1
 
 namespace {
 
 //---------------------------------------------------------------------------
 // Function templates (need to be implemented in header)
-
-template<typename T>
-void deleteObject( T& p )
-{
-	delete p;
-	p = NULL;
-}
 
 template<typename Container>
 void printElements( const Container& cn, const char* sep = " " )
@@ -53,19 +47,16 @@ void printElements( const Container& cn, const char* sep = " " )
 	cout << endl;
 }
 
-template<typename Container, typename Type>
-std::vector<Type> toVector( const Container& cn )
-{
-	std::vector<Type> v( cn.size() );
-	copy( cn.begin(), cn.end(), back_inserter(v) );
-	return v;
-}
-
 }
 
 namespace scsolver {
 
-void Debug( const char* );
+/**
+ * Outputs debug message when SCSOLVER_DEBUG is defined.
+ * 
+ * @param s      message to output
+ */
+void Debug( const char* s );
 std::string repeatString( const char*, unsigned long );
 
 }

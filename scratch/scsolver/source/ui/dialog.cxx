@@ -49,22 +49,17 @@
 #include <com/sun/star/awt/XRadioButton.hpp>
 #include <com/sun/star/awt/XTextComponent.hpp>
 #include <com/sun/star/awt/XWindow.hpp>
-
 #include <com/sun/star/beans/XPropertySet.hpp>
 #include <com/sun/star/container/XNameContainer.hpp>
 #include <com/sun/star/container/XNamed.hpp>
-
 #include <com/sun/star/frame/XDispatchProvider.hpp>
 #include <com/sun/star/frame/XModel.hpp>
 #include <com/sun/star/frame/XNotifyingDispatch.hpp>
-
 #include <com/sun/star/lang/XInitialization.hpp>
 #include <com/sun/star/lang/XMultiComponentFactory.hpp>
 #include <com/sun/star/lang/XServiceInfo.hpp>
 #include <com/sun/star/lang/XServiceName.hpp>
-
 #include <com/sun/star/sheet/XRangeSelection.hpp>
-
 #include <com/sun/star/uno/XComponentContext.hpp>
 
 #include <iostream>
@@ -76,17 +71,30 @@ using ::com::sun::star::uno::Reference;
 
 namespace scsolver {
 
-//---------------------------------------------------------------------------
-// class ConstDialog Definitions
+/**
+ * Function object that defines action when a window close event
+ * is received (typically when the user clicks the "x" button on
+ * the title bar).
+ */
+class ConstDlgCloseAction : public SimpleActionObject
+{
+public:
+	virtual void execute(BaseDialog *dlg)
+	{
+		dlg->close();
+	}
+};
 
-ConstEditDialog::ConstEditDialog( SolverImpl* p )
-	: BaseDialog( p ),
-	m_bIsChangeMode( false ),
-	m_nConstraintId( 0 ),
-	m_pOKListener( NULL ),
-	m_pCancelListener( NULL ),
-	m_pLeftRngListener( NULL ),
-	m_pRightRngListener( NULL )
+ConstEditDialog::ConstEditDialog( SolverImpl* p ) :
+	BaseDialog(p),
+	m_bIsChangeMode(false),
+	m_nConstraintId(0),
+	m_pOKListener(NULL),
+	m_pCancelListener(NULL),
+	m_pLeftRngListener(NULL),
+	m_pRightRngListener(NULL),
+	m_pTopWindowListener(NULL),
+	m_pCloseAction( new ConstDlgCloseAction )
 {
 	initialize();
 }
@@ -116,6 +124,10 @@ void ConstEditDialog::registerListeners()
 	m_pRightRngListener = new RngBtnListener( this, xRngSel, ascii( "editRight" ) );
 	m_pRightRngListener->setSingleCell( true );
 	registerListener( ascii( "btnRight" ), m_pRightRngListener );
+
+	m_pTopWindowListener = new TopWindowListener(this);
+	m_pTopWindowListener->setActionClosing(m_pCloseAction);
+	registerListener(m_pTopWindowListener);
 }
 
 void ConstEditDialog::unregisterListeners()
@@ -124,6 +136,7 @@ void ConstEditDialog::unregisterListeners()
 	unregisterListener( ascii( "btnCancel" ), m_pCancelListener );
 	unregisterListener( ascii( "btnLeft" ), m_pLeftRngListener );
 	unregisterListener( ascii( "btnRight" ), m_pRightRngListener );
+	unregisterListener(m_pTopWindowListener);
 }
 
 void ConstEditDialog::initialize()
@@ -207,6 +220,12 @@ bool ConstEditDialog::doneRangeSelection() const
 	}
 
 	return true;
+}
+
+void ConstEditDialog::close()
+{
+	reset();
+	setVisible(false);
 }
 
 rtl::OUString ConstEditDialog::getLeftCellReference()
@@ -338,9 +357,19 @@ bool ConstEditDialog::isCellRangeGeometryEqual() const
 	return true;
 }
 
+//-----------------------------------------------------------------
 
-//---------------------------------------------------------------------------
-// class SolverDialog Definitions
+/**
+ * Defines action when a window close event is received.
+ */
+class SolverDlgCloseAction : public SimpleActionObject
+{
+public:
+	virtual void execute(BaseDialog *dlg)
+	{
+		dlg->close();
+	}
+};
 
 SolverDialog::SolverDialog( SolverImpl* p )
 	: BaseDialog( p ),
@@ -350,9 +379,9 @@ SolverDialog::SolverDialog( SolverImpl* p )
 	m_pSolveErrorDlg( NULL ),
 	m_pSolInfeasibleDlg( NULL ),
 	m_pSolFoundDlg( NULL ),
+	m_pTopWindowListener(NULL),
 	m_pTargetRngListener( NULL ),
 	m_pVarCellsRngListener( NULL ),
-	m_pWindowMouseListener( NULL ),
 	m_pSolveListener( NULL ),
 	m_pOKListener( NULL ),
 	m_pSaveListener( NULL ),
@@ -363,8 +392,8 @@ SolverDialog::SolverDialog( SolverImpl* p )
 	m_pConstAddListener( NULL ),
 	m_pConstChangeListener( NULL ),
 	m_pConstDeleteListener( NULL ),
-	m_pWindowFocusListener( NULL ),
-	m_pConstListBoxListener( NULL )
+	m_pConstListBoxListener( NULL ),
+	m_pCloseAction( new SolverDlgCloseAction )
 {
 	initialize();
 }
@@ -425,7 +454,6 @@ void SolverDialog::initialize()
 	addButton( 205, 30, 50, 15, ascii( "btnReset" ), getResStr(SCSOLVER_STR_BTN_RESET) );
 	
 	p = addButton( 205, 50, 50, 15, ascii( "btnOptions" ), getResStr(SCSOLVER_STR_BTN_OPTIONS) );
-	//p->setPropertyValue( "Enabled", aBool );	// disable Options button for now
 
 	addButton( 205, 90, 50, 15, ascii( "btnSave" ), getResStr(SCSOLVER_STR_BTN_SAVE_MODEL) );
 	addButton( 205, 110, 50, 15, ascii( "btnLoad" ), getResStr(SCSOLVER_STR_BTN_LOAD_MODEL) );
@@ -482,11 +510,9 @@ void SolverDialog::registerListeners()
 	m_pConstListBoxListener = new ConstListBoxListener( this );
 	registerListener( ascii( "lbConstraint" ), m_pConstListBoxListener );
 	
-	m_pWindowFocusListener = new WindowFocusListener( this );
-	registerListener( m_pWindowFocusListener );
-
-	m_pWindowMouseListener = new WindowMouseListener( this );
-	registerListener( m_pWindowMouseListener );
+	m_pTopWindowListener = new TopWindowListener(this);
+	m_pTopWindowListener->setActionClosing(m_pCloseAction);
+	registerListener(m_pTopWindowListener);
 }
 
 void SolverDialog::unregisterListeners()
@@ -501,14 +527,13 @@ void SolverDialog::unregisterListeners()
 	unregisterListener( ascii( "btnSave" ), m_pSaveListener );
 	unregisterListener( ascii( "btnLoad" ), m_pLoadListener );
 	unregisterListener( ascii( "btnReset" ), m_pResetListener );
-	unregisterListener( ascii( "btnOption" ), m_pOptionListener );
+	unregisterListener( ascii( "btnOptions" ), m_pOptionListener );
 	unregisterListener( ascii( "rbMax" ), m_pMaxListener );
 	unregisterListener( ascii( "btnConstAdd" ), m_pConstAddListener );
 	unregisterListener( ascii( "btnConstChange" ), m_pConstChangeListener );
 	unregisterListener( ascii( "btnConstDelete" ), m_pConstDeleteListener );
 	unregisterListener( ascii( "lbConstraint" ), m_pConstListBoxListener );
-	unregisterListener( m_pWindowFocusListener );
-	unregisterListener( m_pWindowMouseListener );
+	unregisterListener(m_pTopWindowListener);
 }
 
 void SolverDialog::setVisible( bool bVisible )
@@ -526,6 +551,14 @@ void SolverDialog::setVisible( bool bVisible )
 		getConstEditDialog()->setVisible( false );
 
 	setVisibleDefault( bVisible );
+}
+
+void SolverDialog::close()
+{
+	getConstEditDialog()->reset();
+	getConstEditDialog()->setVisible(false);
+	getOptionDialog()->setVisible(false);
+	setVisible(false);
 }
 
 ConstEditDialog* SolverDialog::getConstEditDialog()
@@ -959,6 +992,18 @@ void SolverDialog::loadModelFromDocument()
 	}
 }
 
-//---------------------------------------------------------------------------
+void SolverDialog::updateWidgets()
+{
+	if ( getSelectedConstraintPos() < 0 )
+	{
+		enableWidget(ascii("btnConstChange"), false);
+		enableWidget(ascii("btnConstDelete"), false);
+	}
+	else
+	{
+		enableWidget(ascii("btnConstChange"), true);
+		enableWidget(ascii("btnConstDelete"), true);
+	}
+}
 
 }

@@ -29,18 +29,15 @@
 #include <sstream>
 #include <stdio.h>
 
+using namespace std;
+
 namespace scsolver {
 
-
-/**
- * Outputs debug message when the DEBUG is defined.
- * 
- * @param s      message to output
- */
 void Debug( const char* s )
 {
-#ifdef DEBUG
-	std::cout << s << std::endl;
+#if SCSOLVER_DEBUG
+	fprintf(stdout, "%s\n", s);
+	fflush(stdout);
 #endif
 }
 

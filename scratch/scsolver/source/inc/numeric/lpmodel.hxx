@@ -92,6 +92,9 @@ public:
 	bool getVarPositive() const;
 	void setVarPositive( bool );
 
+	bool getVarInteger() const;
+	void setVarInteger( bool b );
+
 	bool getVerbose() const;
 	void setVerbose( bool );
 

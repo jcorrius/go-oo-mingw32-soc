@@ -43,6 +43,7 @@ public:
 	virtual const rtl::OUString getDialogName() const { return ascii( "MessageDialog" ); }
 	virtual void setVisible( bool );
 	virtual bool doneRangeSelection() const { return true; }
+	virtual void close();
 
 	void setMessage( const rtl::OUString& );
 	void initialize();

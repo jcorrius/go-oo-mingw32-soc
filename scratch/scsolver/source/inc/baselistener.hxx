@@ -32,13 +32,16 @@
 #include "cppu/macros.hxx"
 #endif
 
-#include <unoglobal.hxx>
+#include "unoglobal.hxx"
 
 #include <cppuhelper/implbase1.hxx>
 #include <com/sun/star/awt/XActionListener.hpp>
 #include <com/sun/star/awt/XItemListener.hpp>
 #include <com/sun/star/awt/XFocusListener.hpp>
 #include <com/sun/star/awt/XMouseListener.hpp>
+#include <com/sun/star/awt/XTopWindowListener.hpp>
+
+#include <memory>
 
 using namespace ::com::sun::star;
 using namespace ::com::sun::star::uno;
@@ -66,6 +69,14 @@ protected:
 	
 private:
 	BaseDialog* m_pDlg;
+};
+
+class SimpleActionObject
+{
+public:
+	SimpleActionObject();
+	virtual ~SimpleActionObject() throw() = 0;
+	virtual void execute( BaseDialog* dlg ) = 0;
 };
 
 /**
@@ -99,7 +110,6 @@ public:
 private:
 	ActionObject* m_pAction;
 };
-
 
 class ItemListener : public ::cppu::WeakImplHelper1< awt::XItemListener >, public Listener
 {
@@ -137,6 +147,43 @@ public:
 	virtual void SAL_CALL disposing( const lang::EventObject& ) throw ( RuntimeException ) {}
 };
 
+class TopWindowListenerImpl;
+
+class TopWindowListener : public ::cppu::WeakImplHelper1<awt::XTopWindowListener>, public Listener
+{
+public:
+	TopWindowListener( BaseDialog* pDlg );
+	virtual ~TopWindowListener() throw();
+
+	virtual void SAL_CALL windowOpened( const ::com::sun::star::lang::EventObject& e )
+			throw (RuntimeException);
+
+	virtual void SAL_CALL windowClosing( const ::com::sun::star::lang::EventObject& e )
+			throw (RuntimeException);
+
+	virtual void SAL_CALL windowClosed( const ::com::sun::star::lang::EventObject& e )
+			throw (RuntimeException);
+
+	virtual void SAL_CALL windowMinimized( const ::com::sun::star::lang::EventObject& e )
+			throw (RuntimeException);
+
+	virtual void SAL_CALL windowNormalized( const ::com::sun::star::lang::EventObject& e )
+			throw (RuntimeException);
+
+	virtual void SAL_CALL windowActivated( const ::com::sun::star::lang::EventObject& e )
+			throw (RuntimeException);
+
+	virtual void SAL_CALL windowDeactivated( const ::com::sun::star::lang::EventObject& e )
+			throw (RuntimeException);
+
+	virtual void SAL_CALL disposing( const ::com::sun::star::lang::EventObject& e )
+			throw (RuntimeException);
+
+	void setActionClosing( SimpleActionObject* p );
+
+private:
+	::std::auto_ptr<TopWindowListenerImpl> m_pImpl;
+};
 
 }
 

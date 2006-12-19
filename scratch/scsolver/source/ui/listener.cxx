@@ -101,7 +101,13 @@ void RngSelListener::done( const sheet::RangeSelectionEvent& oEvt ) throw ( Runt
 
 void RngSelListener::aborted( const sheet::RangeSelectionEvent& ) throw ( RuntimeException )
 {
-	m_pDlg->setVisible( true );
+	Debug("RngSelListener::aborted");
+	if (m_pBtn->isEventOwner())
+	{
+		m_pDlg->doneRangeSelection();
+		m_pDlg->setVisible( true );
+		m_pBtn->setEventOwner(false);
+	}
 }
 
 
@@ -126,8 +132,6 @@ RngBtnListener::~RngBtnListener() throw()
 {
 	if ( m_xRngSel.is() )
 	{
-		Debug( "removing selection listener" );
-		
 		// It appears that by explicitly removing the selection listener
 		// its instance is automatically delete'd, which means a manual delete 
 		// of the listener after the line below will cause a crash.
@@ -147,8 +151,6 @@ void RngBtnListener::actionPerformed( const awt::ActionEvent& oActionEvt )
 {
 	if ( m_xRngSel != NULL )
 	{
-		Debug( "Do range selection" );
-	
 		uno::Sequence< beans::PropertyValue > aProp( 3 );
 		uno::Any aValue;
 		aValue <<= ascii_i18n( "Please select a range" );
@@ -181,8 +183,6 @@ void RngBtnListener::registerRngSelListener()
 {
 	if ( m_pRngSelListener == NULL && m_xRngSel != NULL )
 	{
-		Debug( "Register range selection listener" );
-		
 		m_pRngSelListener = new RngSelListener( getDialog(), this, m_sEditName );
 		m_xRngSel->addRangeSelectionListener( m_pRngSelListener );
 	}
@@ -234,7 +234,7 @@ void CloseBtnListener::disposing( const lang::EventObject& )
 void CloseBtnListener::actionPerformed( const awt::ActionEvent& )
 	throw ( RuntimeException )
 {
-	getDialog()->setVisible( false );
+	getDialog()->close();
 }
 
 
@@ -366,10 +366,17 @@ void ConstEditBtnListener::actionPerformed( const awt::ActionEvent& )
 				ConstEditDialog* pCE = pMainDlg->getConstEditDialog();
 				if ( pCE != NULL )
 				{
+					// We need to show the dialog first then set the values, or
+					// the equality combo box does not show proper item in first
+					// invocation.
+					pCE->setVisible( true );
 					if ( eType == CONST_CHANGE )
 					{
 						// Set the selected constraint to the dialog.
-						sal_uInt32 nSel = pMainDlg->getSelectedConstraintPos();
+						sal_Int16 nSel = pMainDlg->getSelectedConstraintPos();
+						if (nSel < 0)
+							// No item is selected.
+							return;
 						
 						rtl::OUString sLeft, sRight;
 						Equality eEq;
@@ -386,8 +393,6 @@ void ConstEditBtnListener::actionPerformed( const awt::ActionEvent& )
 						OSL_ASSERT( eType == CONST_ADD );
 						pCE->setChangeMode( false );
 					}
-					
-					pCE->setVisible( true );
 				}
 				else
 					OSL_ASSERT( !"ConstEditDialog is NULL" );
@@ -400,9 +405,10 @@ void ConstEditBtnListener::actionPerformed( const awt::ActionEvent& )
 				// "Delete" buttons.
 			
 				sal_Int16 nSel = pMainDlg->getSelectedConstraintPos();
+				if (nSel < 0)
+					// No item selected.
+					return;
 				pMainDlg->removeConstraint( nSel );
-				pMainDlg->enableWidget( ascii( "btnConstChange" ), false );
-				pMainDlg->enableWidget( ascii( "btnConstDelete" ), false );
 			}
 			break;
 	
@@ -410,6 +416,7 @@ void ConstEditBtnListener::actionPerformed( const awt::ActionEvent& )
 			OSL_ASSERT( !"Wrong button type!" );
 			break;
 	}
+	pMainDlg->updateWidgets();
 }
 
 //---------------------------------------------------------------------------
@@ -422,8 +429,6 @@ ConstListBoxListener::ConstListBoxListener( SolverDialog* pDlg ) : ItemListener(
 void ConstListBoxListener::itemStateChanged( const awt::ItemEvent& )
 	throw ( RuntimeException )
 {
-	Debug( "ConstListBoxListener::itemStateChanged" );
-	
 	getDialog()->enableWidget( ascii( "btnConstChange" ) );
 	getDialog()->enableWidget( ascii( "btnConstDelete" ) );
 }
@@ -448,7 +453,6 @@ void MaxRadioBtnListener::disposing( const lang::EventObject& )
 void MaxRadioBtnListener::itemStateChanged( const awt::ItemEvent& )
 	throw ( RuntimeException )
 {
-	Debug( "MaxRadioBtnListener::itemStateChanged" );
 }
 
 
@@ -479,7 +483,6 @@ WindowMouseListener::~WindowMouseListener() throw()
 void WindowMouseListener::mousePressed( const awt::MouseEvent& ) 
 	throw( RuntimeException )
 {
-	Debug( "mousePressed" );
 }
 
 
@@ -496,18 +499,16 @@ OKCancelBtnListener::~OKCancelBtnListener() throw()
 void OKCancelBtnListener::disposing( const lang::EventObject& )
 	throw ( RuntimeException )
 {
-	Debug( "CancelBtnListener::disposing" );
 }
 
 void OKCancelBtnListener::actionPerformed( const awt::ActionEvent& )
 	throw ( RuntimeException )
 {	
-	ConstEditDialog* pDlg = getDialog()->getSolverImpl()->getMainDialog()->getConstEditDialog();
+	SolverDialog* pMainDlg = getDialog()->getSolverImpl()->getMainDialog();
+	ConstEditDialog* pDlg = pMainDlg->getConstEditDialog();
 	
 	if ( m_sMode.equals( ascii ( "OK" ) ) )
 	{
-		Debug( "OK pressed" );
-		
 		rtl::OUString  sLeft = pDlg->getLeftCellReference();
 		rtl::OUString sRight = pDlg->getRightCellReference();
 		Equality         eEq = pDlg->getEquality();
@@ -520,11 +521,14 @@ void OKCancelBtnListener::actionPerformed( const awt::ActionEvent& )
 			pMainDlg->setConstraint( sLeft, sRight, eEq );
 	}
 	
+#if 0	
 	if ( m_sMode.equals( ascii( "Cancel" ) ) )
 		Debug( "Cancel pressed" );
+#endif	
 
 	pDlg->setVisible( false );
 	pDlg->reset();
+	pMainDlg->updateWidgets();
 }
 
 

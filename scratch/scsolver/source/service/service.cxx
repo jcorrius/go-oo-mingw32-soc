@@ -72,7 +72,6 @@ SolverImpl::~SolverImpl()
 
 void SolverImpl::initialize( const Sequence< Any >& aArgs ) throw( Exception )
 {
-    Debug( "SolverImpl::initialize" );
 }
 
 rtl::OUString SolverImpl::getImplementationName()
@@ -97,8 +96,6 @@ Reference< frame::XDispatch > SAL_CALL SolverImpl::queryDispatch(
     const util::URL& aURL, const ::rtl::OUString& sTargetFrameName, sal_Int32 nSearchFlags )
     throw ( RuntimeException )
 {
-    Debug( "SolverImpl::queryDispatch" );
-    
     Reference< frame::XDispatch > xRet;
     if ( aURL.Protocol.compareToAscii( "scsolver.SolverImpl:" ) == 0 )
     {
@@ -126,8 +123,6 @@ void SAL_CALL SolverImpl::dispatch(
     const util::URL& aURL, const Sequence< beans::PropertyValue >& lArgs )
     throw ( RuntimeException )
 {
-    Debug( "SolverImpl::dispatch" );
-
     if ( aURL.Protocol.compareToAscii( "scsolver.SolverImpl:" ) == 0 )
     {
         if ( aURL.Path.compareToAscii( "execute" ) == 0 )
@@ -141,14 +136,12 @@ void SAL_CALL SolverImpl::addStatusListener(
     const Reference< frame::XStatusListener >& xControl, const util::URL& aURL )
     throw ( RuntimeException )
 {
-    Debug( "SolverImpl::addStatusListener" );
 }
 
 void SAL_CALL SolverImpl::removeStatusListener( 
     const Reference< frame::XStatusListener >& xControl, const util::URL& aURL )
     throw ( RuntimeException )
 {
-    Debug( "SolverImpl::removeStatusListener" );
 }
 
 void SAL_CALL SolverImpl::dispatchWithNotification(
@@ -156,7 +149,6 @@ void SAL_CALL SolverImpl::dispatchWithNotification(
     const Reference< frame::XDispatchResultListener >& xDRL )
     throw ( RuntimeException )
 {
-    Debug( "SolverImpl::dispatchWithNotification" );
 }
 
 SolverDialog* SolverImpl::getMainDialog()
@@ -180,21 +172,19 @@ OptionData* SolverImpl::getOptionData() const
 void SolverImpl::setTitle( const ::rtl::OUString& aTitle )
 		throw (uno::RuntimeException)
 {
-    Debug( "SolverImpl::setTitle - unimplemented ..." );
 }
 
 sal_Int16 SolverImpl::execute()
 		throw (::com::sun::star::uno::RuntimeException)
 {
-    Debug( "SolverImpl::executeDialog" );
-	
 	getMainDialog()->setVisible( true );
-
 	return 0;
 }
 
 sal_Bool SolverImpl::solveModel()
 {	
+	Debug("solveModel --------------------------------------------------------");
+
 	std::auto_ptr<SolveModel> p( new SolveModel( this ) );
 	try
 	{
@@ -281,7 +271,6 @@ static Reference< uno::XInterface > SAL_CALL create_SolverImpl(
     Reference< uno::XComponentContext > const & xContext )
     SAL_THROW( () )
 {
-	Debug ("Create Solver");
     return static_cast< lang::XTypeProvider * >( new SolverImpl( xContext ) );
 }
 

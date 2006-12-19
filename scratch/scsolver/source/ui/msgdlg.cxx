@@ -49,6 +49,11 @@ void MessageDialog::setVisible( bool bVisible )
 	setVisibleDefault( bVisible );
 }
 
+void MessageDialog::close()
+{
+	setVisible(false);
+}
+
 void MessageDialog::setMessage( const rtl::OUString& sMsg )
 {
 	m_sMessage = sMsg;

@@ -31,7 +31,6 @@
 #else
 #include <windows.h>
 #endif
-#include <stdio.h>
 
 namespace scsolver {
 
