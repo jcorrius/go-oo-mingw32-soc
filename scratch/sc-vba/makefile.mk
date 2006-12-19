@@ -53,7 +53,8 @@ SLOFILES= \
 		$(SLO)$/vbapalette.obj \
 		$(SLO)$/vbaborders.obj \
 		$(SLO)$/vbacharacters.obj \
-		$(SLO)$/vbacombobox.obj
+		$(SLO)$/vbacombobox.obj \
+		$(SLO)$/vbavalidation.obj
  
 
 # --- Targets ------------------------------------------------------
