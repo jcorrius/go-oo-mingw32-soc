@@ -1,6 +1,6 @@
 --- /dev/null	
 +++ scsolver/source/ui/xcalc.cxx	
-@@ -0,0 +1,338 @@
+@@ -0,0 +1,450 @@
 +/*************************************************************************
 + *
 + *  The Contents of this file are made available subject to
@@ -29,11 +29,12 @@
 + ************************************************************************/
 +
 +
-+#include <xcalc.hxx>
-+#include <global.hxx>
-+#include <unoglobal.hxx>
++#include "xcalc.hxx"
++#include "global.hxx"
++#include "unoglobal.hxx"
 +
 +#include <com/sun/star/beans/XPropertyContainer.hpp>
++#include <com/sun/star/beans/XProperty.hpp>
 +#include <com/sun/star/beans/XPropertySet.hpp>
 +#include <com/sun/star/beans/XPropertySetInfo.hpp>
 +#include <com/sun/star/beans/PropertyAttribute.hpp>
@@ -57,6 +58,9 @@
 +#include <com/sun/star/table/XCellRange.hpp>
 +
 +#include <com/sun/star/uno/XComponentContext.hpp>
++#include <com/sun/star/ui/XModuleUIConfigurationManagerSupplier.hpp>
++#include <com/sun/star/ui/XUIConfigurationManager.hpp>
++#include <com/sun/star/ui/XUIConfigurationPersistence.hpp>
 +
 +#include <iostream>
 +
@@ -64,8 +68,7 @@
 +using namespace ::com::sun::star::sheet;
 +using namespace std;
 +
-+namespace scsolver {
-+	
++namespace scsolver {	
 +
 +CalcInterface::CalcInterface( const Reference< uno::XComponentContext >& xCC ) :
 +	m_xCC( xCC ), m_xSM( NULL ), m_xCurComp( NULL )
@@ -312,7 +315,7 @@
 +	return sFormula;
 +}
 +
-+void CalcInterface::disableCellUpdates()
++void CalcInterface::disableCellUpdates() const
 +{
 +	Reference< lang::XComponent > xCurComp = getCurrentComponent();
 +	Reference< frame::XModel > xModel( xCurComp, UNO_QUERY );
@@ -320,7 +323,7 @@
 +		xModel->lockControllers();
 +}
 +
-+void CalcInterface::enableCellUpdates()
++void CalcInterface::enableCellUpdates() const
 +{
 +	Reference< lang::XComponent > xCurComp = getCurrentComponent();
 +	Reference< frame::XModel > xModel( xCurComp, UNO_QUERY );
@@ -337,5 +340,114 @@
 +	sCellAddr = sFullAddr.copy( nIdDot + 1 );
 +}
 +
++#if 0
++int getCommandID(const Reference<container::XIndexAccess>& items, 
++				 const rtl::OUString& command)
++{
++	for (int i = 0; i < items->getCount(); ++i)
++	{
++		uno::Any any = items->getByIndex(i);
++		uno::Sequence<beans::PropertyValue> menus;
++		any >>= menus;
++		for (int j = 0; j < menus.getLength(); ++j)
++		{
++			beans::PropertyValue prop = menus[j];
++			if ( prop.Name.equals( ascii("CommandURL") ) )
++			{
++				uno::Any anyTemp = prop.Value;
++				rtl::OUString foo;
++				anyTemp >>= foo;
++				if ( foo.equals(command) )
++					return i;
++			}
++		}
++	}
++	return -1;
++}
++
++void CalcInterface::addMenuItem() const
++{
++	using uno::Any;
++
++	Reference< uno::XInterface > aUIMgr = getServiceManager()->createInstanceWithContext(
++		ascii("com.sun.star.ui.ModuleUIConfigurationManagerSupplier"), m_xCC );
++
++	if ( !aUIMgr.is() )
++	{
++		fprintf(stderr, "UI ConfigMgr Supplier not found\n");
++		return;
++	}
++
++	Reference< ui::XModuleUIConfigurationManagerSupplier > xUIMgrSup( aUIMgr, UNO_QUERY );
++	Reference< ui::XUIConfigurationManager > xUIMgr = xUIMgrSup->getUIConfigurationManager(
++		ascii("com.sun.star.sheet.SpreadsheetDocument") );
++	Reference< container::XIndexAccess > settings = xUIMgr->getSettings(
++		ascii("private:resource/menubar/menubar"), true );
++
++	// Search for the Tools menu item.
++	int nToolID = getCommandID(settings, ascii(".uno:ToolsMenu"));
++	if (nToolID == -1)
++		return;
++
++	// Tools menu has a property named ItemDescriptorContainer, which stores
++	// menu items.
++	Any anyTemp = settings->getByIndex(nToolID);
++	uno::Sequence<beans::PropertyValue> props;
++	anyTemp >>= props;
++	for (int i = 0; i < props.getLength(); ++i)
++	{
++		beans::PropertyValue prop = props[i];
++		if ( prop.Name.equals( ascii("ItemDescriptorContainer") ) )
++		{
++			anyTemp = prop.Value;
++			Reference<container::XIndexAccess> xIA(anyTemp, UNO_QUERY);
++			if (!xIA.is())
++			{
++				printf("index access failed\n");
++				return;
++			}
++
++			int nGoalSeekID = getCommandID(xIA, ascii(".uno:GoalSeekDialog"));
++			if (nGoalSeekID > -1)
++				printf("goal seek menu found\n");
++
++			int nNewComID = getCommandID(xIA, ascii("macro:///Standard.Module1.Test()"));
++			if (nNewComID < 0)
++			{
++				// Command not found.  Add the new menu item.
++				uno::Sequence<beans::PropertyValue> newmenu(3);
++				newmenu[0].Name = ascii("CommandURL");
++				anyTemp <<= ascii("macro:///Standard.Module1.Test()");
++				newmenu[0].Value = anyTemp;
++				newmenu[1].Name = ascii("Label");
++				anyTemp <<= ascii("New Menu Test...");
++				newmenu[1].Value = anyTemp;
++				sal_Int16 foo = 0;
++				anyTemp <<= foo;
++				newmenu[2].Name = ascii("Type");
++				newmenu[2].Value = anyTemp;
++				Reference<container::XIndexContainer> xIC(xIA, UNO_QUERY);
++				if (!xIC.is())
++				{
++					fprintf(stderr, "xIC not found\n");
++					return;
++				}
++				anyTemp <<= newmenu;
++				xIC->insertByIndex(nGoalSeekID+1, anyTemp);
++				xUIMgr->replaceSettings(ascii("private:resource/menubar/menubar"), settings);
++				Reference<ui::XUIConfigurationPersistence> xUIPers(xUIMgr, UNO_QUERY);
++				if (!xUIPers.is())
++				{
++					fprintf(stderr, "xUIPers not found\n");
++					return;
++				}
++				xUIPers->store();
++			}
++
++			break;
++		}
++	}
++}
++#endif
 +
 +}

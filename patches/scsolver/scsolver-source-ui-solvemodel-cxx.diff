@@ -1,6 +1,6 @@
 --- /dev/null	
 +++ scsolver/source/ui/solvemodel.cxx	
-@@ -0,0 +1,568 @@
+@@ -0,0 +1,740 @@
 +/*************************************************************************
 + *
 + *  The Contents of this file are made available subject to
@@ -54,6 +54,7 @@
 +#include <memory>
 +#include <exception>
 +#include <vector>
++#include <map>
 +
 +#include "scsolver.hrc"
 +
@@ -64,8 +65,122 @@
 +
 +namespace scsolver {
 +
-+//---------------------------------------------------------------------------
-+// SolveModelImpl
++typedef struct {
++	short sheet;
++	long  column;
++	long  row;
++} cell_address_t;
++
++/**
++ * Store the constant term by cell address.  The constant term
++ * in a given cell is the value remaining even after the values
++ * of all decision variables are set to zero.
++ */
++class ConstantTermStorage
++{
++public:
++	ConstantTermStorage() {}
++	~ConstantTermStorage() throw() {}
++
++	void setValue(const CellAddress& addr, double value)
++	{
++		size_t key = 0;
++		bool isNewKey = false;
++		getKeyFromAddress(addr, key, isNewKey);
++		if (isNewKey)
++			m_List.insert( map<size_t,double>::value_type(key, value) );
++#ifdef SCSOLVER_DEBUG
++		else
++		{
++			// Make sure the value is identical.
++			if (m_List[key] != value)
++				throw AssertionWrong();
++		}
++#endif
++	}
++
++	double getValue(const CellAddress& addr)
++	{
++		size_t key = 0;
++		bool isNewKey = false;
++		getKeyFromAddress(addr, key, isNewKey);
++		if (isNewKey)
++		{
++			// This should never happen, because we are just querying the 
++			// existing value associated with a specified address.
++			throw ConstraintError();
++		}
++		return m_List[key];
++	}
++
++private:
++	map<size_t, double> m_List;
++	vector<cell_address_t> m_AddrKeys;
++
++	/**
++	 * Given a set of sheet, column and row IDs, return a single
++	 * number that is unique to that number set.  In other words,
++	 * this method always returns identical number when the same
++	 * cell address is given.
++	 * 
++	 * @param addr cell address
++	 * @param key (reference) unique number for the cell address
++	 * @param isNewKey (reference) true is the cell address is new
++	 */
++	void getKeyFromAddress(const CellAddress& addr, size_t& key, bool& isNewKey)
++	{
++		cell_address_t cell;
++		cell.sheet = addr.Sheet;
++		cell.column = addr.Column;
++		cell.row = addr.Row;
++		vector<cell_address_t>::iterator it, 
++			itBeg = m_AddrKeys.begin(), itEnd = m_AddrKeys.end();
++
++		for (it = itBeg; it != itEnd; ++it)
++		{
++			if (cell.sheet == it->sheet && cell.column == it->column && cell.row == it->row)
++			{
++				// Match found.
++				key = distance(itBeg, it);
++				isNewKey = false;
++				return;
++			}
++		}
++
++		// Match not found.
++		m_AddrKeys.push_back(cell);
++		key = m_AddrKeys.size() - 1;
++		isNewKey = true;
++		return;
++	}
++};
++
++/**
++ * Used only to safely switch off cell updates.  Declare a local
++ * variable of this class type at the beginning of a block where
++ * the cell updates should be disabled.  It automatically
++ * re-enables cell updates when the variable goes out of scope.
++ */
++class CellUpdateSwitch
++{
++public:
++	CellUpdateSwitch(CalcInterface* p) :
++		m_pCalc(p)
++	{
++		p->disableCellUpdates();
++	}
++
++	~CellUpdateSwitch() throw()
++	{
++		m_pCalc->enableCellUpdates();
++	}
++
++private:
++	CellUpdateSwitch();              // disabled
++	void* operator new(size_t size); // disabled
++
++	CalcInterface* m_pCalc;
++};
 +
 +class SolveModelImpl
 +{
@@ -81,9 +196,9 @@
 +	}
 +
 +	/**
-+     * This is the gateway method that calls either solveLp() or
-+     * solveNlp() as appropriate based on the corresponding option
-+     * setting.
++	 * This is the gateway method that calls either solveLp() or
++	 * solveNlp() as appropriate based on the corresponding option
++	 * setting.
 +	 */
 +	void solve()
 +	{
@@ -104,10 +219,10 @@
 +	}
 +
 +	/**
-+     * This method takes model parameters from the dialog,
-+     * constructs an internal representation of an LP model, chooses
-+     * an algorithm, solves it, and in case a feasible solution is
-+     * found it puts the solution back into the cells.
++	 * This method takes model parameters from the dialog,
++	 * constructs an internal representation of an LP model, chooses
++	 * an algorithm, solves it, and in case a feasible solution is
++	 * found it puts the solution back into the cells.
 +	 */
 +	void solveLp()
 +	{
@@ -117,7 +232,8 @@
 +		Goal eGoal = pMainDlg->getGoal();
 +		if ( eGoal == GOAL_UNKNOWN )
 +		{
-+			pMainDlg->showSolveError( ascii_i18n("Goal is not set") );
++			pMainDlg->showSolveError( 
++				pMainDlg->getResStr(SCSOLVER_STR_MSG_GOAL_NOT_SET) );
 +			return;
 +		}
 +
@@ -141,8 +257,9 @@
 +
 +		OptionData* pOption = getSolverImpl()->getOptionData();
 +		aModel.setVarPositive( pOption->getVarPositive() );
++		aModel.setVarInteger( pOption->getVarInteger() );
 +
-+#ifdef DEBUG
++#ifdef SCSOLVER_DEBUG
 +		aModel.print(); // prints model to stdout
 +#endif
 +		aModel.setPrecision( 2 );
@@ -167,18 +284,18 @@
 +		catch( const scsolver::RuntimeError& e )
 +		{
 +			// This error message is localizable.
-+			cout << "RuntimeError: " << e.what() << endl;
 +			pMainDlg->showSolveError( e.getMessage() );
 +		}
 +		catch( const std::exception& e )
 +		{
-+			cout << "standard exception: " << e.what() << endl; // ascii_i18n [!?]
-+			pMainDlg->showSolveError( ascii( e.what() ) );
++			// standard exception.  should rarely happen.
++			pMainDlg->showSolveError(
++				pMainDlg->getResStr(SCSOLVER_STR_MSG_STD_EXCEPTION_CAUGHT) );
 +		}
 +	}
 +
 +	/**
-+     * Solve non-linear model.  Still work in progress.
++	 * Solve non-linear model.  Still work in progress.
 +	 */
 +	void solveNlp()
 +	{
@@ -261,14 +378,128 @@
 +		return p;
 +	}
 +
-+	void parseConstraints( LpModelBuilder* pBuilder );
++	/**
++	 * Transform a LP model given in the cells into the standard
++	 * format.  This is done by setting the value of one of the
++	 * decision variable cells to 1 and all the others to 0, and
++	 * interpret the values of the objective function and constraint
++	 * cells, and repeat it for every decision variable cell.
++	 */
++	void parseConstraints( LpModelBuilder* pBuilder )
++	{
++		CellUpdateSwitch aCellUpdate( m_pSolverImpl->getCalcInterface() );
++
++		// Create a cost vector from the decision variables.
++
++		vector<CellAddress> aAddrs = pBuilder->getAllDecisionVarAddresses();
++		vector<double> aOrigVal;
++		vector<CellAddress>::iterator pos;
++		vector<CellAddress>::iterator aAddrsBegin = aAddrs.begin(), aAddrsEnd = aAddrs.end();
++		CalcInterface* pCalc = m_pSolverImpl->getCalcInterface();
++		for ( pos = aAddrsBegin; pos != aAddrsEnd; ++pos )
++		{
++			// Run through the decision variable cells, store their original formulas,
++			// and set "=0" to each of these cells.
++			table::CellAddress aAddr = *pos;
++			rtl::OUString sFormula = pCalc->getCellFormula( aAddr );
++			pBuilder->setTempCellFormula( aAddr, sFormula );
++			pCalc->setCellFormula( aAddr, ascii("=0") );
++		}
++
++		// At this point, all decision variables are set to zero.  Go
++		// throuth all constraint cells, and store their current value
++		// as its constant term for later use.
++		vector<ConstraintAddress> aConstAddrs = pBuilder->getAllConstraintAddresses();
++		vector<ConstraintAddress>::iterator posCA, posCAEnd = aConstAddrs.end();
++		ConstantTermStorage cnConstTerm;
++		for (posCA = aConstAddrs.begin(); posCA != posCAEnd; ++posCA)
++		{
++			if ( !posCA->isLeftCellNumeric() )
++			{
++				double fValL = pCalc->getCellValue( posCA->getLeftCellAddr() );
++				cnConstTerm.setValue(posCA->getLeftCellAddr(), fValL);
++			}
++			if ( !posCA->isRightCellNumeric() )
++			{
++				double fValR = pCalc->getCellValue( posCA->getRightCellAddr() );
++				cnConstTerm.setValue(posCA->getRightCellAddr(), fValR);
++			}
++		}		
++
++		// Set "=1" to each of the decision variable cells one at a time, and 
++		// interpret the formula result.  Also set the constraint matrix size
++		// so that it won't get resized at later time (resize is expensive).
++
++		CellAddress aObjAddr = pBuilder->getObjectiveFormulaAddress();
++		
++		pBuilder->setConstraintMatrixSize( aConstAddrs.size(), aAddrs.size() );
++
++		for ( pos = aAddrsBegin; pos != aAddrsEnd; ++pos )
++		{
++			table::CellAddress aAddr = *pos;
++			pCalc->setCellFormula( aAddr, ascii("=1") );
++
++			double fVal = pCalc->getCellValue( aObjAddr );
++			pBuilder->setCostVector( aAddr, fVal );
++
++			// Go through the constraints to construct constraint matrix
++			// as well as the RHS vector.
++
++			for ( posCA = aConstAddrs.begin(); posCA != posCAEnd; ++posCA )
++			{
++				double fValL = 0.0, fConstValL = 0.0;
++				if ( posCA->isLeftCellNumeric() )
++					fConstValL = posCA->getLeftCellValue();
++				else
++				{
++					fValL = pCalc->getCellValue( posCA->getLeftCellAddr() );
++					// Subtract the LHS constant term from the LHS value.
++					fConstValL = cnConstTerm.getValue( posCA->getLeftCellAddr() );
++					fValL -= fConstValL;
++				}
++
++				double fValR = 0.0, fConstValR = 0.0;
++				if ( posCA->isRightCellNumeric() )
++					fConstValR = posCA->getRightCellValue();
++				else
++				{
++					fValR = pCalc->getCellValue( posCA->getRightCellAddr() );
++					fConstValR = cnConstTerm.getValue( posCA->getRightCellAddr() );
++					fValL -= fValR - fConstValR;
++				}
++				pBuilder->setConstraintCoefficient( aAddr, *posCA, fValL, fConstValR-fConstValL );
++			}		
++
++			pCalc->setCellFormula( aAddr, ascii("=0") );
++		}
++
++		// Restore the original formulas to the decision variable cells.
++		for ( pos = aAddrsBegin; pos != aAddrsEnd; ++pos )
++		{
++			table::CellAddress aAddr = *pos;
++			rtl::OUString sOrigFormula = pBuilder->getTempCellFormula( aAddr );
++			pCalc->setCellFormula( aAddr, sOrigFormula );
++		}
++
++#if SCSOLVER_DEBUG
++		// Check to ensure the model has the right cost vector.
++		for ( pos = aAddrsBegin; pos != aAddrsEnd; ++pos )
++		{
++			table::CellAddress aAddr = *pos;
++			double f = pBuilder->getCostVector( aAddr );
++			cout << aAddr.Column << ", " << aAddr.Row << " = " << f << endl;
++			cout.flush();
++		}
++#endif
++	}
++
 +	void resolveConstraintAddress( LpModelBuilder* pBuilder );
 +
 +	/**
-+     * Takes the string form of an objective function cell address
-+     * (e.g. $'Sheet1'.$A$2), converts it into a 3D address.
-+     * 
-+     * @return cell address object
++	 * Takes the string form of an objective function cell address
++	 * (e.g. $'Sheet1'.$A$2), converts it into a 3D address.
++	 * 
++	 * @return cell address object
 +	 */
 +	CellAddress resolveObjectiveFuncAddress()
 +	{
@@ -282,13 +513,13 @@
 +		return aAddr;
 +	}
 +
-+    /**
-+     * Convert a 3D cell reference (e.g. $'Sheet Name'.$B$5:$C$7)
-+     * into an array of individual cell addresses. These addresses
-+     * represent a series of decision variables in sequential order.
-+     * 
-+     * @return an array of cell addresses
-+     */
++	/**
++	 * Convert a 3D cell reference (e.g. $'Sheet Name'.$B$5:$C$7)
++	 * into an array of individual cell addresses. These addresses
++	 * represent a series of decision variables in sequential order.
++	 * 
++	 * @return an array of cell addresses
++	 */
 +	vector<CellAddress> resolveDecisionVarAddress()
 +	{
 +		using com::sun::star::table::CellRangeAddress;
@@ -345,92 +576,6 @@
 +	return algorithm;
 +}
 +
-+/**
-+ * Transform a LP model given in the cells into the standard
-+ * format.  This is done by setting the value of one of the
-+ * decision variable cells to 1 and all the others to 0, and
-+ * interpret the values of the objective function and constraint
-+ * cells, and repeat it for every decision variable cell.
-+ */
-+void SolveModelImpl::parseConstraints( LpModelBuilder* pBuilder )
-+{
-+	m_pSolverImpl->getCalcInterface()->disableCellUpdates();
-+
-+	// Create a cost vector from the decision variables.
-+	
-+	vector< CellAddress > aAddrs = pBuilder->getAllDecisionVarAddresses();
-+	vector< double > aOrigVal;
-+	vector< CellAddress >::iterator pos;
-+	vector< CellAddress >::iterator aAddrsBegin = aAddrs.begin(), aAddrsEnd = aAddrs.end();
-+	CalcInterface* pCalc = m_pSolverImpl->getCalcInterface();
-+	for ( pos = aAddrsBegin; pos != aAddrsEnd; ++pos )
-+	{
-+		// Run through the decision variable cells, store their original formulas,
-+		// and set "=0" to each of these cells.
-+		table::CellAddress aAddr = *pos;
-+		rtl::OUString sFormula = pCalc->getCellFormula( aAddr );
-+		pBuilder->setTempCellFormula( aAddr, sFormula );
-+		pCalc->setCellFormula( aAddr, ascii( "=0" ) );
-+	}
-+	
-+	// Set "=1" to each of the decision variable cells one at a time, and 
-+	// interpret the formula result.  Also set the constraint matrix size
-+	// so that it won't get resized at later time (resize is expensive).
-+	
-+	CellAddress aObjAddr = pBuilder->getObjectiveFormulaAddress();
-+	vector< ConstraintAddress > aConstAddrs = pBuilder->getAllConstraintAddresses();
-+	pBuilder->setConstraintMatrixSize( aConstAddrs.size(), aAddrs.size() );
-+	
-+	for ( pos = aAddrsBegin; pos != aAddrsEnd; ++pos )
-+	{
-+		table::CellAddress aAddr = *pos;
-+		pCalc->setCellFormula( aAddr, ascii( "=1" ) );
-+		
-+		double fVal = pCalc->getCellValue( aObjAddr );
-+		pBuilder->setCostVector( aAddr, fVal );
-+		
-+		// Go through the constraints to construct constraint matrix
-+		// as well as the RHS vector.
-+		
-+		vector< ConstraintAddress >::iterator posCA;
-+		for ( posCA = aConstAddrs.begin(); posCA != aConstAddrs.end(); ++posCA )
-+		{
-+			double fValL, fValR;
-+			ConstraintAddress aConstAddr = *posCA;
-+			fValL = pCalc->getCellValue( aConstAddr.getLeftCellAddr() );
-+
-+			if ( aConstAddr.isRightCellNumeric() )
-+				fValR = aConstAddr.getRightCellValue();
-+			else
-+				fValR = pCalc->getCellValue( aConstAddr.getRightCellAddr() );
-+
-+			pBuilder->setConstraintCoefficient( aAddr, aConstAddr, fValL, fValR );
-+		}		
-+		
-+		pCalc->setCellFormula( aAddr, ascii( "=0" ) );
-+	}
-+	
-+	// Restore the original formulas to the decision variable cells.
-+	for ( pos = aAddrsBegin; pos != aAddrsEnd; ++pos )
-+	{
-+		table::CellAddress aAddr = *pos;
-+		rtl::OUString sOrigFormula = pBuilder->getTempCellFormula( aAddr );
-+		pCalc->setCellFormula( aAddr, sOrigFormula );
-+	}
-+
-+#ifdef DEBUG
-+	// Check to ensure the model has the right cost vector.
-+	for ( pos = aAddrsBegin; pos != aAddrsEnd; ++pos )
-+	{
-+		table::CellAddress aAddr = *pos;
-+		double f = pBuilder->getCostVector( aAddr );
-+		cout << aAddr.Column << ", " << aAddr.Row << " = " << f << endl;
-+	}
-+#endif
-+
-+	m_pSolverImpl->getCalcInterface()->enableCellUpdates();
-+}
-+
 +static bool lcl_isNumeric( const rtl::OUString& sVal )
 +{
 +	double fVal = sVal.toDouble();
@@ -453,12 +598,21 @@
 +void SolveModelImpl::resolveConstraintAddress( LpModelBuilder* pBuilder )
 +{
 +	vector< ConstraintString > aConstraint = m_pSolverImpl->getMainDialog()->getAllConstraints();
-+	vector< ConstraintString >::iterator pos = aConstraint.begin(), posEnd = aConstraint.end();
++	vector< ConstraintString >::const_iterator pos = aConstraint.begin(), posEnd = aConstraint.end();
 +	CalcInterface* pCalc = m_pSolverImpl->getCalcInterface();
 +	pBuilder->clearConstraintAddresses();
-+	while ( pos != posEnd )
++
++	for ( ; pos != posEnd; ++pos)
 +	{
 +		ConstraintString aConstStr = *pos;
++		bool bLHSNumeric = lcl_isNumeric(aConstStr.Left);
++		bool bRHSNumeric = lcl_isNumeric(aConstStr.Right);
++
++		if (bLHSNumeric && bRHSNumeric)
++		{
++			Debug("Both LHS and RHS values are numeric.  Skipping...");
++			continue;
++		}
 +
 +		// Left hand side cell address
 +		table::CellRangeAddress aRangeAddrL = pCalc->getCellRangeAddress( aConstStr.Left );
@@ -469,10 +623,36 @@
 +		sal_Int32 nLRowE  = aRangeAddrL.EndRow;
 +
 +		// Right hand side cell address
++		table::CellRangeAddress aRangeAddrR = pCalc->getCellRangeAddress( aConstStr.Right );
++		sal_Int16 nRSheet = aRangeAddrR.Sheet;
++		sal_Int32 nRColS  = aRangeAddrR.StartColumn;
++		sal_Int32 nRColE  = aRangeAddrR.EndColumn;
++		sal_Int32 nRRowS  = aRangeAddrR.StartRow;
++		sal_Int32 nRRowE  = aRangeAddrR.EndRow;
 +
-+		// Check if the RHS string is a number.
-+		if ( lcl_isNumeric(aConstStr.Right) )
++		if (bLHSNumeric)
 +		{
++			// Only the right hand side is cell reference.
++			for ( sal_Int32 i = 0; i <= nRColE - nRColS; ++i )
++			{
++				for ( sal_Int32 j = 0; j <= nRRowE - nRRowS; ++j )
++				{
++					ConstraintAddress aConstAddr;
++					table::CellAddress aAddrR;
++					aAddrR.Sheet  = nRSheet;
++					aAddrR.Row    = nRRowS + j;
++					aAddrR.Column = nRColS + i;
++					aConstAddr.setRightCellAddr( aAddrR );
++					aConstAddr.setEquality( aConstStr.Equal );
++					aConstAddr.setLeftCellValue( aConstStr.Left.toDouble() );
++
++					pBuilder->setConstraintAddress( aConstAddr );
++				}
++			}
++		}
++		else if (bRHSNumeric)
++		{
++			// Only the left hand side is cell reference.
 +			for ( sal_Int32 i = 0; i <= nLColE - nLColS; ++i )
 +			{
 +				for ( sal_Int32 j = 0; j <= nLRowE - nLRowS; ++j )
@@ -492,13 +672,7 @@
 +		}
 +		else
 +		{
-+			table::CellRangeAddress aRangeAddrR = pCalc->getCellRangeAddress( aConstStr.Right );
-+			sal_Int16 nRSheet = aRangeAddrR.Sheet;
-+			sal_Int32 nRColS  = aRangeAddrR.StartColumn;
-+			sal_Int32 nRColE  = aRangeAddrR.EndColumn;
-+			sal_Int32 nRRowS  = aRangeAddrR.StartRow;
-+			sal_Int32 nRRowE  = aRangeAddrR.EndRow;
-+			
++			// Both sides are cell reference.
 +			if ( nLColE - nLColS != nRColE - nRColS || nLRowE - nLRowS != nRRowE - nRRowS )
 +				throw RuntimeError(
 +					getSolverImpl()->getResStr(SCSOLVER_STR_MSG_CELL_GEOMETRIES_DIFFER) ); // This should not happen !
@@ -524,8 +698,6 @@
 +				}
 +			}
 +		}
-+		
-+		++pos; // Move on to the next constraint.
 +	}
 +}
 +
