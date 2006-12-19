@@ -68,6 +68,7 @@ class ScVbaRange : public ScVbaRange_BASE
 	sal_Bool mbIsRows;
 	sal_Bool mbIsColumns;
 	rtl::OUString msDftPropName;
+	css::uno::Reference< oo::vba::XValidation > m_xValidation;
 	double getCalcColWidth( const css::table::CellRangeAddress& ) throw (css::uno::RuntimeException);
 	double getCalcRowHeight( const css::table::CellRangeAddress& ) throw (css::uno::RuntimeException);
 	void visitArray( ArrayVisitor& vistor );
@@ -129,6 +130,8 @@ public:
 	virtual css::uno::Reference< oo::vba::XWorksheet > SAL_CALL getWorksheet() throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL getPageBreak() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setPageBreak( const css::uno::Any& _pagebreak ) throw (css::uno::RuntimeException);
+	virtual css::uno::Reference< oo::vba::XValidation > SAL_CALL getValidation() throw (css::uno::RuntimeException);
+
 	// Methods
 	sal_Bool IsRows() { return mbIsRows; }
 	sal_Bool IsColumns() { return mbIsColumns; }

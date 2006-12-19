@@ -93,6 +93,7 @@
 #include "vbacharacters.hxx"
 #include "vbaborders.hxx"
 #include "vbaworksheet.hxx"
+#include "vbavalidation.hxx"
 
 #include "tabvwsh.hxx"
 #include "rangelst.hxx"
@@ -3583,3 +3584,10 @@ ScVbaRange::TextToColumns( const css::uno::Any& Destination, const css::uno::Any
  //TODO* TrailingMinusNumbers  Optional Variant. Numbers that begin with a minus character.
 }
 
+css::uno::Reference< vba::XValidation > SAL_CALL 
+ScVbaRange::getValidation() throw (css::uno::RuntimeException)
+{
+	if ( !m_xValidation.is() )	
+		m_xValidation = new ScVbaValidation( m_xContext, mxRange );
+	return m_xValidation;
+}
