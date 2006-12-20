@@ -1,0 +1,178 @@
+#!/usr/bin/perl -w
+eval 'exec /usr/bin/perl -S $0 ${1+"$@"}'
+    if 0; #$running_under_some_shell
+
+sub usage() {
+    print "strip-guards /path/to/sources
+
+Changes
+
+#ifdef _BLAH_
+#include <blah.hxx>
+#endif
+
+to simple
+
+#include <blah.hxx>
+
+in .c and .cxx files if the _BLAH_ guard exists in the .hxx file.\n";
+    exit 1;
+}
+
+use File::Find();
+
+%includes = ();
+
+sub guard_name($)
+{
+    my ( $include_fname ) = @_;
+
+    if ( !open( $IN, $include_fname ) ) {
+        die "Couldn't open $include_fname";
+    }
+    while ( my $line = <$IN> ) {
+        if ( $line =~ /^#ifndef\s*([^\s\/]*)/ ) {
+            my $guard = $1;
+            if ( defined ( $line = <$IN> ) ) {
+                if ( ( $line =~ /^#define\s*([^\s\/]*)/ ) && ( $guard eq $1 ) )
+                {
+                    close $IN;
+                    return $guard;
+                }
+                else {
+                    last;
+                }
+            }
+        }
+    }
+    close $IN;
+
+    return "";
+}
+
+sub guards_include($$)
+{
+    my ( $guard, $include ) = @_;
+
+    if ( $include =~ /\.hpp$/ ) {
+        my $inc = "_" . $include . "_";
+        $inc =~ tr(./a-z)(__A-Z/);
+        if ( $inc eq $guard ) {
+            return 1;
+        }
+    }
+
+    my $should_be = $includes{$guard};
+    if ( defined( $should_be ) ) {
+        my $inc = $include;
+        $inc =~ s/.*[\/\\]//;
+        if ( $inc eq $should_be ) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+sub strip_file($$)
+{
+    my ( $in, $out ) = @_;
+    if ( !open( $IN, $in ) ) {
+        die "Couldn't open $in";
+    }
+    if ( !open( $OUT, '>', $out ) ) {
+        die "Couldn't open $out";
+    }
+
+    while ( my $line = <$IN> ) {
+        my $buffer = $line;
+        my $ok = 1;
+
+        if ( $line =~ /^$/ ) {
+            if ( defined( $line = <$IN> ) ) {
+                $buffer .= $line;
+            }
+            else {
+                $ok = 0;
+            }
+        }
+        if ( $ok && ( $line =~ /^#ifndef\s*([^\s\/]*)/ ) ) {
+            if ( defined( $line = <$IN> ) ) {
+                $buffer .= $line;
+            }
+            else {
+                $ok = 0;
+            }
+
+            my $guard = $1;
+            if ( $ok && ( $line =~ /^#include\s*["<]([^">]*)/ ) ) {
+                my $include_line = $line;
+                my $include = $1;
+
+                if ( defined( $line = <$IN> ) ) {
+                    $buffer .= $line;
+                }
+                else {
+                    $ok = 0;
+                }
+
+                if ( $ok && ( $line =~ /^#endif/ ) && guards_include( $guard, $include ) ) {
+                    print $OUT $include_line;
+                }
+                else {
+                    $ok = 0;
+                }
+            }
+            else {
+                $ok = 0;
+            }
+        }
+        else {
+            $ok = 0;
+        }
+
+        if ( !$ok ) {
+            print $OUT $buffer;
+        }
+    }
+
+    close $OUT;
+    close $IN;
+}
+
+sub find_guards
+{
+    if ( /^.*\.h\z/s || /^.*\.hxx\z/s ) {
+        my $guard = guard_name( $_ );
+        if ( $guard ne "" ) {
+            my $inc = $_;
+            $inc =~ s/.*\///;
+            if ( defined( $includes{$guard} ) && ( $includes{$guard} ne $inc ) ) {
+                print STDERR "Warning: Redefinition of guard '$guard' in '$_' (first definition in '$includes{$guard}'\n";
+            }
+            $includes{$guard} = $inc;
+            print STDERR "guard: $guard ($inc)\n";
+        }
+    }
+}
+
+sub strip_guards
+{
+    if ( /^.*\.c\z/s || /^.*\.cxx\z/s ) {
+        if ( rename( $_, "$_.strip-guards-orig" ) ) {
+            print STDERR "stripping $_\n";
+            strip_file( "$_.strip-guards-orig", $_ );
+        }
+    }
+}
+
+#
+# main()
+#
+my $path = shift( @ARGV );
+if ( !defined( $path ) ) {
+    usage();
+}
+
+File::Find::find( {wanted => \&find_guards}, $path );
+File::Find::find( {wanted => \&strip_guards}, $path );
