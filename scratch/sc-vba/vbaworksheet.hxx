@@ -26,6 +26,7 @@ class ScVbaWorksheet : public ::cppu::WeakImplHelper2<oo::vba::XWorksheet, css::
 	css::uno::Reference< oo::vba::XRange > getSheetRange() throw (css::uno::RuntimeException);
 
 	css::uno::Any getControl( const rtl::OUString& sName );
+	css::uno::Any getControlShape( const rtl::OUString& sName );
 protected:
 
 	virtual css::uno::Reference< css::frame::XModel > getModel()

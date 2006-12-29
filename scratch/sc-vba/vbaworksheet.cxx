@@ -548,7 +548,8 @@ ScVbaWorksheet::setValue( const ::rtl::OUString& /*aPropertyName*/, const uno::A
 uno::Any SAL_CALL 
 ScVbaWorksheet::getValue( const ::rtl::OUString& aPropertyName ) throw (beans::UnknownPropertyException, uno::RuntimeException)
 {
-	uno::Any aProp = getControl( aPropertyName );
+/*	uno::Any aProp = getControl( aPropertyName );
+
 	if ( !aProp.hasValue() )
 		throw beans::UnknownPropertyException(); // unsupported operation
 	// #TODO we need a factory here when we support
@@ -557,13 +558,19 @@ ScVbaWorksheet::getValue( const ::rtl::OUString& aPropertyName ) throw (beans::U
 	uno::Reference< beans::XPropertySet > xProps( aProp, uno::UNO_QUERY_THROW );	
 	const static rtl::OUString sClassId( RTL_CONSTASCII_USTRINGPARAM("ClassId") );
 	xProps->getPropertyValue( sClassId ) >>= nClassId;
+    ScVbaControlFactory controlFactory( m_xContext, xProps, xControlShape );
+    uno::Reference< vba::XControl > xControl( controlFactory.createControl( nClassId ) );
 	if ( nClassId == form::FormComponentType::COMBOBOX )
 	{
 		uno::Reference< vba::XComboBox > xCbx( new ScVbaComboBox( m_xContext, xProps ) ); 
 		return uno::makeAny( xCbx );
 	}
-
-	return aProp;
+*/
+    uno::Reference< drawing::XControlShape > xControlShape( getControlShape( aPropertyName ), uno::UNO_QUERY_THROW );
+    ScVbaControlFactory controlFactory( m_xContext, xControlShape );
+    uno::Reference< vba::XControl > xControl( controlFactory.createControl() );
+	return uno::makeAny( xControl );
+//	return aProp;
 }
 
 ::sal_Bool SAL_CALL 
@@ -621,6 +628,28 @@ ScVbaWorksheet::getControl( const ::rtl::OUString& sName )
 	return uno::Any();
 }
 
+uno::Any
+ScVbaWorksheet::getControlShape( const ::rtl::OUString& sName )
+{
+	uno::Reference< sheet::XScenarioEnhanced > xIf( getSheet(), uno::UNO_QUERY_THROW );
+    uno::Reference< sheet::XSpreadsheet > xSpreadsheet( getSheet(), uno::UNO_QUERY_THROW );
+    uno::Reference< drawing::XDrawPageSupplier > xDrawPageSupplier( xSpreadsheet, uno::UNO_QUERY_THROW );
+    uno::Reference< drawing::XDrawPage > xDrawPage( xDrawPageSupplier->getDrawPage(), uno::UNO_QUERY_THROW );
+    uno::Reference< container::XIndexAccess > xIndexAccess( xDrawPage, uno::UNO_QUERY_THROW );
+    sal_uInt16 nCount = xIndexAccess->getCount();
+    for( int index = 0; index < nCount; index++ )
+    {
+        uno::Any aUnoObj =  xIndexAccess->getByIndex( index );
+        uno::Reference< drawing::XControlShape > xControlShape( aUnoObj, uno::UNO_QUERY_THROW );
+        uno::Reference< awt::XControlModel > xControlModel( xControlShape->getControl() );
+        uno::Reference< container::XNamed > xNamed( xControlModel, uno::UNO_QUERY_THROW );
+        if( sName.equals( xNamed->getName() ))
+        {
+            return aUnoObj;
+        }
 
+    }
+    return uno::Any();
+}
 
 
