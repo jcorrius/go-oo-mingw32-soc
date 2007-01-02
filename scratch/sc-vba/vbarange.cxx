@@ -1618,12 +1618,16 @@ ScVbaRange::Cells( const uno::Any &nRowIndex, const uno::Any &nColumnIndex ) thr
 void
 ScVbaRange::Select() throw (uno::RuntimeException)
 {
-	uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY_THROW );
-	uno::Reference< view::XSelectionSupplier > xSelection( xModel->getCurrentController(), uno::UNO_QUERY_THROW );
-	if ( mxRanges.is() )
-		xSelection->select( uno::makeAny( mxRanges ) );
-	else
-		xSelection->select( uno::makeAny( mxRange ) );
+	ScDocShell* pShell = getDocShellFromRange( mxRange );
+	if ( pShell )
+	{
+		uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY_THROW );
+		uno::Reference< view::XSelectionSupplier > xSelection( xModel->getCurrentController(), uno::UNO_QUERY_THROW );
+		if ( mxRanges.is() )
+			xSelection->select( uno::makeAny( mxRanges ) );
+		else
+			xSelection->select( uno::makeAny( mxRange ) );
+	}
 }
 
 bool cellInRange( const table::CellRangeAddress& rAddr, const sal_Int32& nCol, const sal_Int32& nRow )
@@ -3245,7 +3249,6 @@ ScVbaRange::AutoFilter( const uno::Any& Field, const uno::Any& Criteria1, const 
 	// or at least seperate the code in dbfunc so it could be shared
 	// currently a cut'n'paste fest exists below :-(
 
-	ScTabViewShell* pTabViewShell = getCurrentBestViewShell();
 	ScDocument* pDoc =  getDocumentFromRange( mxRange );
 	ScDocShell* pDocSh = getDocShellFromRange( mxRange );	
 	ScDocShellModificator aModificator( *pDocSh );
@@ -3467,8 +3470,8 @@ ScVbaRange::Autofit() throw (uno::RuntimeException)
 void SAL_CALL
 ScVbaRange::TextToColumns( const css::uno::Any& Destination, const css::uno::Any& DataType, const css::uno::Any& TextQualifier,
         const css::uno::Any& ConsecutinveDelimiter, const css::uno::Any& Tab, const css::uno::Any& Semicolon, const css::uno::Any& Comma,
-        const css::uno::Any& Space, const css::uno::Any& Other, const css::uno::Any& OtherChar, const css::uno::Any& FieldInfo,
-        const css::uno::Any& DecimalSeparator, const css::uno::Any& ThousandsSeparator, const css::uno::Any& TrailingMinusNumbers  ) throw (css::uno::RuntimeException)
+        const css::uno::Any& Space, const css::uno::Any& Other, const css::uno::Any& OtherChar, const css::uno::Any& /*FieldInfo*/,
+        const css::uno::Any& DecimalSeparator, const css::uno::Any& ThousandsSeparator, const css::uno::Any& /*TrailingMinusNumbers*/  ) throw (css::uno::RuntimeException)
 {
     OSL_TRACE("nJust for test\n");
     uno::Reference< vba::XRange > xRange;
@@ -3590,4 +3593,20 @@ ScVbaRange::getValidation() throw (css::uno::RuntimeException)
 	if ( !m_xValidation.is() )	
 		m_xValidation = new ScVbaValidation( m_xContext, mxRange );
 	return m_xValidation;
+}
+
+void SAL_CALL 
+ScVbaRange::PrintOut( const uno::Any& From, const uno::Any& To, const uno::Any& Copies, const uno::Any& Preview, const uno::Any& ActivePrinter, const uno::Any& PrintToFile, const uno::Any& Collate, const uno::Any& PrToFileName ) throw (uno::RuntimeException)
+{
+	ScDocShell* pShell = getDocShellFromRange( mxRange );
+	if ( pShell )
+	{
+		// Hack select this range in order to print it, restore
+		// previous selection afterwards
+		uno::Reference< vba::XRange > oldSelection( ScVbaGlobals::getGlobalsImpl( m_xContext )->getApplication()->getSelection() );
+		Selection();
+		uno::Reference< frame::XModel > xModel = pShell->GetModel();
+		PrintOutHelper( From, To, Copies, Preview, ActivePrinter, PrintToFile, Collate, PrToFileName, xModel, sal_True );
+		oldSelection->Select();
+	}
 }
