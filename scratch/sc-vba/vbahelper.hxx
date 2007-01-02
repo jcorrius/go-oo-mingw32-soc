@@ -31,6 +31,7 @@ namespace org
 		// the object when passed to IsNull will return true. aNULL 
 		// contains an empty object reference
 		const css::uno::Any& aNULL();
+		void PrintOutHelper( const css::uno::Any& From, const css::uno::Any& To, const css::uno::Any& Copies, const css::uno::Any& Preview, const css::uno::Any& ActivePrinter, const css::uno::Any& PrintToFile, const css::uno::Any& Collate, const css::uno::Any& PrToFileName, css::uno::Reference< css::frame::XModel >& xModel, sal_Bool bSelection  );
 	}
 }
 
