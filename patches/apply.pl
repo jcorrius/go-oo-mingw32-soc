@@ -716,6 +716,8 @@ sub export_series {
 
 sub is_old_patch_version()
 {
+    return 0 if $^O =~ /cygwin/i;
+
     my $Patch;
     my $ver_line;
     my $is_old = 1;
