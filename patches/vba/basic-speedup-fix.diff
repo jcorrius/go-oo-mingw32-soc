@@ -1,0 +1,554 @@
+diff -rup basic/source/classes/sbxmod.cxx basic/source/classes/sbxmod.cxx
+--- basic/source/classes/sbxmod.cxx	2007-01-02 17:08:45.000000000 +0000
++++ basic/source/classes/sbxmod.cxx	2007-01-02 13:01:06.000000000 +0000
+@@ -769,7 +769,10 @@ USHORT SbModule::Run( SbMethod* pMeth )
+ 				pRt->pNext->block();
+ 			pINST->pRun = pRt;
+ 			if ( SbiRuntime ::isVBAEnabled() )
++			{
+ 				pINST->EnableCompatibility( TRUE );
++				pRt->SetVBAEnabled( true );
++			}
+ 			while( pRt->Step() ) {}
+ 			if( pRt->pNext )
+ 				pRt->pNext->unblock();
+diff -rup basic/source/inc/runtime.hxx basic/source/inc/runtime.hxx
+--- basic/source/inc/runtime.hxx	2007-01-02 17:08:45.000000000 +0000
++++ basic/source/inc/runtime.hxx	2007-01-02 16:29:59.000000000 +0000
+@@ -61,6 +61,7 @@
+ #endif
+ 
+ #include <vector>
++#include <hash_map>
+ #ifndef _COM_SUN_STAR_LANG_XCOMPONENT_HPP_
+ #include <com/sun/star/lang/XComponent.hpp>
+ #endif
+@@ -77,6 +78,8 @@ using namespace com::sun::star::lang;
+ using namespace com::sun::star::container;
+ 
+ 
++typedef std::hash_map< UINT32, UINT32 >  LocalOpIndexHash;
++
+ // Define activates old file implementation
+ // (only in non UCB case)
+ // #define _OLD_FILE_IMPL
+@@ -352,6 +355,7 @@ class SbiRuntime
+ 	String		  aLibName;			// Lib-Name fuer Declare-Call
+ 	SbxArrayRef   refParams;        // aktuelle Prozedur-Parameter
+ 	SbxArrayRef   refLocals;        // lokale Variable
++	LocalOpIndexHash localIndex;
+ 	SbxArrayRef   refArgv;          // aktueller Argv
+ 	// AB, 28.3.2000 #74254, Ein refSaveObj reicht nicht! Neu: pRefSaveList (s.u.)
+ 	//SbxVariableRef refSaveObj;      // #56368 Bei StepElem Referenz sichern
+@@ -360,6 +364,7 @@ class SbiRuntime
+ 	BOOL          bError;           // TRUE: Fehler behandeln
+ 	BOOL          bInError;         // TRUE: in einem Fehler-Handler
+ 	BOOL          bBlocked;         // TRUE: blocked by next call level, #i48868
++	BOOL          bVBAEnabled;            
+ 	USHORT		  nFlags;			// Debugging-Flags
+ 	SbError		  nError;           // letzter Fehler
+ 	USHORT		  nOps;				// Opcode-Zaehler
+@@ -474,6 +479,7 @@ class SbiRuntime
+ 	void StepDCREATE_REDIMP(UINT32,UINT32), StepDCREATE_IMPL(UINT32,UINT32);
+ 	void StepFIND_CM( UINT32, UINT32 );
+ public:
++	void          SetVBAEnabled( bool bEnabled ) { bVBAEnabled = bEnabled; };            
+ 	USHORT		GetImageFlag( USHORT n ) const;
+ 	USHORT		GetBase();
+ 	xub_StrLen  nLine,nCol1,nCol2;	// aktuelle Zeile, Spaltenbereich
+diff -rup basic/source/runtime/runtime.cxx basic/source/runtime/runtime.cxx
+--- basic/source/runtime/runtime.cxx	2007-01-02 17:08:45.000000000 +0000
++++ basic/source/runtime/runtime.cxx	2007-01-02 13:01:06.000000000 +0000
+@@ -542,6 +542,7 @@ SbiRuntime::SbiRuntime( SbModule* pm, Sb
+ #endif
+ 	pRefSaveList = NULL;
+ 	pItemStoreList = NULL;
++	bVBAEnabled = isVBAEnabled();
+ }
+ 
+ SbiRuntime::~SbiRuntime()
+@@ -810,7 +811,7 @@ void SbiRuntime::Error( SbError n )
+ 	if( n )
+ 	{
+ 		nError = n;
+-		if ( isVBAEnabled() )
++		if ( bVBAEnabled )
+ 		{
+ 			String aMsg = pInst->GetErrorMsg();
+ 			// If a message is defined use that ( in preference to
+diff -rup basic/source/runtime/step0.cxx basic/source/runtime/step0.cxx
+--- basic/source/runtime/step0.cxx	2007-01-02 17:08:45.000000000 +0000
++++ basic/source/runtime/step0.cxx	2007-01-02 13:01:06.000000000 +0000
+@@ -72,7 +72,6 @@ void SbiRuntime::StepArith( SbxOperator 
+ 	TOSMakeTemp();
+ 	SbxVariable* p2 = GetTOS();
+ 
+-	bool bVBAInterop =  SbiRuntime::isVBAEnabled(); 
+ 
+ 	// This could & should be moved to the MakeTempTOS() method in runtime.cxx
+ 	// In the code which this is cut'npaste from there is a check for a ref
+@@ -82,7 +81,7 @@ void SbiRuntime::StepArith( SbxOperator 
+ 	// here we alway seem to have a refcount of 1. Also it seems that
+ 	// MakeTempTOS is called for other operation, so I hold off for now
+ 	// until I have a better idea
+-	if ( bVBAInterop
++	if ( bVBAEnabled
+ 		&& ( p2->GetType() == SbxOBJECT || p2->GetType() == SbxVARIANT )
+ 	)
+ 	{
+@@ -252,14 +251,13 @@ void SbiRuntime::StepPUT()
+ 		n = refVar->GetFlags();
+ 		refVar->SetFlag( SBX_WRITE );
+ 	}
+-	bool bVBAInterop =  SbiRuntime::isVBAEnabled(); 
+ 
+ 	// if left side arg is an object or variant and right handside isn't 
+ 	// either an object or a variant then try and see if a default 
+ 	// property exists.
+ 	// to use e.g. Range{"A1") = 34
+ 	// could equate to Range("A1").Value = 34 
+-	if ( bVBAInterop )
++	if ( bVBAEnabled )
+ 	{
+ 		if ( refVar->GetType() == SbxOBJECT  ) 
+ 		{
+@@ -277,7 +275,7 @@ void SbiRuntime::StepPUT()
+ 
+ 	*refVar = *refVal;
+ 	// lhs is a property who's value is currently null
+-	if ( !bVBAInterop || ( bVBAInterop && refVar->GetType() != SbxEMPTY ) )
++	if ( !bVBAEnabled || ( bVBAEnabled && refVar->GetType() != SbxEMPTY ) )
+ 	// #67607 Uno-Structs kopieren
+ 		checkUnoStructCopy( refVal, refVar );
+ 	if( bFlagsChanged )
+@@ -410,7 +408,7 @@ void SbiRuntime::StepSET()
+ {
+ 	SbxVariableRef refVal = PopVar();
+ 	SbxVariableRef refVar = PopVar();
+-	StepSET_Impl( refVal, refVar, SbiRuntime::isVBAEnabled() ); // this is really assigment
++	StepSET_Impl( refVal, refVar, bVBAEnabled ); // this is really assigment
+ }
+ 
+ void SbiRuntime::StepVBASET()
+diff -rup basic/source/runtime/step1.cxx basic/source/runtime/step1.cxx
+--- basic/source/runtime/step1.cxx	2007-01-02 17:08:45.000000000 +0000
++++ basic/source/runtime/step1.cxx	2007-01-02 13:01:06.000000000 +0000
+@@ -486,7 +486,7 @@ bool SbiRuntime::checkClass_Impl( const 
+ 					Error( SbERR_INVALID_USAGE_OBJECT );
+ 				bOk = false;
+ #else	
+-				if ( SbiRuntime::isVBAEnabled() && pObj->IsA( TYPE(SbUnoObject) ) )
++				if ( bVBAEnabled && pObj->IsA( TYPE(SbUnoObject) ) )
+ 				{
+ 					SbUnoObject* pUnoObj = PTR_CAST(SbUnoObject,pObj);
+ 					bOk = checkUnoObjectType( pUnoObj, aClass );
+@@ -508,7 +508,7 @@ bool SbiRuntime::checkClass_Impl( const 
+ 	}
+ 	else
+ 	{
+-		if ( !SbiRuntime::isVBAEnabled() )
++		if ( !bVBAEnabled )
+ 		{
+ 			if( bRaiseErrors )
+ 				Error( SbERR_NEEDS_OBJECT );
+diff -rup basic/source/runtime/step2.cxx basic/source/runtime/step2.cxx
+--- basic/source/runtime/step2.cxx	2007-01-02 17:08:45.000000000 +0000
++++ basic/source/runtime/step2.cxx	2007-01-02 16:40:37.000000000 +0000
+@@ -111,7 +111,6 @@ SbxVariable* SbiRuntime::FindElement
+ 	( SbxObject* pObj, UINT32 nOp1, UINT32 nOp2, SbError nNotFound, BOOL bLocal )
+ {
+ 	
+-	bool bIsVBAInterOp = SbiRuntime::isVBAEnabled(); 
+ 
+ 	SbxVariable* pElem = NULL;
+ 	if( !pObj )
+@@ -123,196 +122,208 @@ SbxVariable* SbiRuntime::FindElement
+ 	{
+ 		BOOL bFatalError = FALSE;
+ 		SbxDataType t = (SbxDataType) nOp2;
+-		String aName( pImg->GetString( nOp1 & 0x7FFF ) );
+-#ifdef ENABLE_VBA	
+-		bool bIsVBAInterOp = SbiRuntime::isVBAEnabled(); 
+-		// Hacky capture of Evaluate [] syntax
+-		// this should be tackled I feel at the pcode level
+-		if ( bIsVBAInterOp && aName.Search('[') == 0 ) 
+-		{
+-			// emulate pcode here
+-			StepARGC();
+-			// psuedo StepLOADSC
+-			String sArg = aName.Copy( 1, aName.Len() - 2 );
+-			SbxVariable* p = new SbxVariable;
+-			p->PutString( sArg );
+-			PushVar( p );
+-			//
+-			StepARGV();
+-			nOp1 = nOp1 | 0x8000; // indicate params are present
+-			aName = String::CreateFromAscii("Evaluate");
+-		}
+-#endif //ENABLE_VBA
++		UINT32 nOp1Index = ( nOp1 & 0x7FFF );
+ 
+-		if( bLocal )
+-			pElem = refLocals->Find( aName, SbxCLASS_DONTCARE );
+-		if( !pElem )
++		if ( bLocal )
+ 		{
+-			// Die RTL brauchen wir nicht mehr zu durchsuchen!
+-			BOOL bSave = rBasic.bNoRtl;
+-			rBasic.bNoRtl = TRUE;
+-			pElem = pObj->Find( aName, SbxCLASS_DONTCARE );
++			LocalOpIndexHash::iterator it = localIndex.find( nOp1Index );
++			if ( it != localIndex.end() )
++				pElem = refLocals->Get( it->second );
+ 
+-			// #110004, #112015: Make private really private
+-			if( bLocal && pElem )	// Local as flag for global search
++		}
++		if ( !pElem )
++		{		
++			String aName( pImg->GetString( nOp1Index ) );
++			// Hacky capture of Evaluate [] syntax
++			// this should be tackled I feel at the pcode level
++			if ( bVBAEnabled && aName.Search('[') == 0 ) 
+ 			{
+-				if( pElem->IsSet( SBX_PRIVATE ) )
+-				{
+-					SbiInstance* pInst_ = pINST;
+-					if( pInst_ && pInst_->IsCompatibility() && pObj != pElem->GetParent() )
+-						pElem = NULL;	// Found but in wrong module!
+-
+-					// Interfaces: Use SBX_EXTFOUND
+-				}
++				// emulate pcode here
++				StepARGC();
++				// psuedo StepLOADSC
++				String sArg = aName.Copy( 1, aName.Len() - 2 );
++				SbxVariable* p = new SbxVariable;
++				p->PutString( sArg );
++				PushVar( p );
++				//
++				StepARGV();
++				nOp1 = nOp1 | 0x8000; // indicate params are present
++				aName = String::CreateFromAscii("Evaluate");
+ 			}
+-			rBasic.bNoRtl = bSave;
+ 
+-			// Ist es ein globaler Uno-Bezeichner?
+-			if( bLocal && !pElem )
++			if( bLocal )
++				pElem = refLocals->Find( aName, SbxCLASS_DONTCARE );
++			if( !pElem )
+ 			{
+-				bool bSetName = true; // preserve normal behaviour
++				// Die RTL brauchen wir nicht mehr zu durchsuchen!
++				BOOL bSave = rBasic.bNoRtl;
++				rBasic.bNoRtl = TRUE;
++				pElem = pObj->Find( aName, SbxCLASS_DONTCARE );
+ 
+-				// i#i68894# if VBAInterOp favour searching vba globals 
+-				// over searching for uno classess
+-				if ( bIsVBAInterOp )
++				// #110004, #112015: Make private really private
++				if( bLocal && pElem )	// Local as flag for global search
+ 				{
+-					// Try Find in VBA symbols space
+-					pElem = VBAFind( aName, SbxCLASS_DONTCARE, &rBasic );
+-					if ( pElem )
+-						bSetName = false; // don't overwrite uno name
+-					if ( !pElem )
+-						pElem = getVBAConstant( aName );
++					if( pElem->IsSet( SBX_PRIVATE ) )
++					{
++						SbiInstance* pInst_ = pINST;
++						if( pInst_ && pInst_->IsCompatibility() && pObj != pElem->GetParent() )
++							pElem = NULL;	// Found but in wrong module!
++
++						// Interfaces: Use SBX_EXTFOUND
++					}
+ 				}
+-				else
+-				{				
+-					// #72382 VORSICHT! Liefert jetzt wegen unbekannten
+-					// Modulen IMMER ein Ergebnis!
+-					SbxVariable* pUnoClass = findUnoClass( aName );
+-					if( pUnoClass )
++				rBasic.bNoRtl = bSave;
++
++				// Ist es ein globaler Uno-Bezeichner?
++				if( bLocal && !pElem )
++				{
++					bool bSetName = true; // preserve normal behaviour
++
++					// i#i68894# if VBAInterOp favour searching vba globals 
++					// over searching for uno classess
++					if ( bVBAEnabled )
+ 					{
+-						pElem = new SbxVariable( t );
+-						SbxValues aRes( SbxOBJECT );
+-						aRes.pObj = pUnoClass;
+-						pElem->SbxVariable::Put( aRes );
++						// Try Find in VBA symbols space
++						pElem = VBAFind( aName, SbxCLASS_DONTCARE, &rBasic );
++						if ( pElem )
++							bSetName = false; // don't overwrite uno name
++						if ( !pElem )
++							pElem = getVBAConstant( aName );
++					}
++					else
++					{				
++						// #72382 VORSICHT! Liefert jetzt wegen unbekannten
++						// Modulen IMMER ein Ergebnis!
++						SbxVariable* pUnoClass = findUnoClass( aName );
++						if( pUnoClass )
++						{
++							pElem = new SbxVariable( t );
++							SbxValues aRes( SbxOBJECT );
++							aRes.pObj = pUnoClass;
++							pElem->SbxVariable::Put( aRes );
++						}
++					}
++	
++					// #62939 Wenn eine Uno-Klasse gefunden wurde, muss
++					// das Wrapper-Objekt gehalten werden, da sonst auch
++					// die Uno-Klasse, z.B. "stardiv" immer wieder neu
++					// aus der Registry gelesen werden muss
++					if( pElem )
++					{
++						// #63774 Darf nicht mit gespeichert werden!!!
++						pElem->SetFlag( SBX_DONTSTORE );
++						pElem->SetFlag( SBX_NO_MODIFY);
++	
++						// #72382 Lokal speichern, sonst werden alle implizit
++						// deklarierten Vars automatisch global !
++						if ( bSetName )
++							pElem->SetName( aName );
++						refLocals->Put( pElem, refLocals->Count() );
++						localIndex[ nOp1Index ] = ( refLocals->Count() - 1 );
++
+ 					}
+ 				}
+ 
+-				// #62939 Wenn eine Uno-Klasse gefunden wurde, muss
+-				// das Wrapper-Objekt gehalten werden, da sonst auch
+-				// die Uno-Klasse, z.B. "stardiv" immer wieder neu
+-				// aus der Registry gelesen werden muss
+-				if( pElem )
++				if( !pElem )
+ 				{
+-					// #63774 Darf nicht mit gespeichert werden!!!
+-					pElem->SetFlag( SBX_DONTSTORE );
+-					pElem->SetFlag( SBX_NO_MODIFY);
+-
+-					// #72382 Lokal speichern, sonst werden alle implizit
+-					// deklarierten Vars automatisch global !
+-					if ( bSetName )
++					// Nicht da und nicht im Objekt?
++					// Hat das Ding Parameter, nicht einrichten!
++					if( nOp1 & 0x8000 )
++						bFatalError = TRUE;
++						// ALT: StarBASIC::FatalError( nNotFound );
++	
++					// Sonst, falls keine Parameter sind, anderen Error Code verwenden
++					if( !bLocal || pImg->GetFlag( SBIMG_EXPLICIT ) )
++					{
++						// #39108 Bei explizit und als ELEM immer ein Fatal Error
++						bFatalError = TRUE;
++	
++						// Falls keine Parameter sind, anderen Error Code verwenden
++						if( !( nOp1 & 0x8000 ) && nNotFound == SbERR_PROC_UNDEFINED )
++							nNotFound = SbERR_VAR_UNDEFINED;
++					}
++					if( bFatalError )
++					{
++						// #39108 Statt FatalError zu setzen, Dummy-Variable liefern
++						if( !xDummyVar.Is() )
++							xDummyVar = new SbxVariable( SbxVARIANT );
++						pElem = xDummyVar;
++	
++						// Parameter von Hand loeschen
++						ClearArgvStack();
++	
++						// Normalen Error setzen
++						Error( nNotFound );
++					}
++					else
++					{
++						// Sonst Variable neu anlegen
++						pElem = new SbxVariable( t );
++						if( t != SbxVARIANT )
++							pElem->SetFlag( SBX_FIXED );
+ 						pElem->SetName( aName );
+-					refLocals->Put( pElem, refLocals->Count() );
++						refLocals->Put( pElem, refLocals->Count() );
++						localIndex[ nOp1Index ] = ( refLocals->Count() - 1 );
++					}
+ 				}
+ 			}
+-
+-			if( !pElem )
++			// #39108 Args koennen schon geloescht sein!
++			if( !bFatalError )
++				SetupArgs( pElem, nOp1 );
++			// Ein bestimmter Call-Type wurde gewuenscht, daher muessen
++			// wir hier den Typ setzen und das Ding anfassen, um den
++			// korrekten Returnwert zu erhalten!
++			if( pElem->IsA( TYPE(SbxMethod) ) )
+ 			{
+-				// Nicht da und nicht im Objekt?
+-				// Hat das Ding Parameter, nicht einrichten!
+-				if( nOp1 & 0x8000 )
+-					bFatalError = TRUE;
+-					// ALT: StarBASIC::FatalError( nNotFound );
+-
+-				// Sonst, falls keine Parameter sind, anderen Error Code verwenden
+-				if( !bLocal || pImg->GetFlag( SBIMG_EXPLICIT ) )
++				// Soll der Typ konvertiert werden?
++				SbxDataType t2 = pElem->GetType();
++				BOOL bSet = FALSE;
++				if( !( pElem->GetFlags() & SBX_FIXED ) )
+ 				{
+-					// #39108 Bei explizit und als ELEM immer ein Fatal Error
+-					bFatalError = TRUE;
+-
+-					// Falls keine Parameter sind, anderen Error Code verwenden
+-					if( !( nOp1 & 0x8000 ) && nNotFound == SbERR_PROC_UNDEFINED )
+-						nNotFound = SbERR_VAR_UNDEFINED;
++					if( t != SbxVARIANT && t != t2 &&
++						t >= SbxINTEGER && t <= SbxSTRING )
++						pElem->SetType( t ), bSet = TRUE;
+ 				}
+-				if( bFatalError )
+-				{
+-					// #39108 Statt FatalError zu setzen, Dummy-Variable liefern
+-					if( !xDummyVar.Is() )
+-						xDummyVar = new SbxVariable( SbxVARIANT );
+-					pElem = xDummyVar;
+-
+-					// Parameter von Hand loeschen
+-					ClearArgvStack();
++				// pElem auf eine Ref zuweisen, um ggf. eine Temp-Var zu loeschen
++				SbxVariableRef refTemp = pElem;
++	
++				// Moegliche Reste vom letzten Aufruf der SbxMethod beseitigen
++				// Vorher Schreiben freigeben, damit kein Error gesetzt wird.
++				USHORT nSavFlags = pElem->GetFlags();
++				pElem->SetFlag( SBX_READWRITE | SBX_NO_BROADCAST );
++				pElem->SbxValue::Clear();
++				pElem->SetFlags( nSavFlags );
++	
++				// Erst nach dem Setzen anfassen, da z.B. LEFT()
++				// den Unterschied zwischen Left$() und Left() kennen muss
++	
++				// AB 12.8.96: Da in PopVar() die Parameter von Methoden weggehauen
++				// werden, muessen wir hier explizit eine neue SbxMethod anlegen
++				SbxVariable* pNew = new SbxMethod( *((SbxMethod*)pElem) ); // das ist der Call!
++				//ALT: SbxVariable* pNew = new SbxVariable( *pElem ); // das ist der Call!
++	
++				pElem->SetParameters(0); // sonst bleibt Ref auf sich selbst
++				pNew->SetFlag( SBX_READWRITE );
+ 
+-					// Normalen Error setzen
+-					Error( nNotFound );
+-				}
+-				else
+-				{
+-					// Sonst Variable neu anlegen
+-					pElem = new SbxVariable( t );
+-					if( t != SbxVARIANT )
+-						pElem->SetFlag( SBX_FIXED );
+-					pElem->SetName( aName );
+-					refLocals->Put( pElem, refLocals->Count() );
+-				}
++				// den Datentypen zuruecksetzen?
++				if( bSet )
++					pElem->SetType( t2 );
++				pElem = pNew;
+ 			}
+-		}
+-		// #39108 Args koennen schon geloescht sein!
+-		if( !bFatalError )
+-			SetupArgs( pElem, nOp1 );
+-		// Ein bestimmter Call-Type wurde gewuenscht, daher muessen
+-		// wir hier den Typ setzen und das Ding anfassen, um den
+-		// korrekten Returnwert zu erhalten!
+-		if( pElem->IsA( TYPE(SbxMethod) ) )
+-		{
+-			// Soll der Typ konvertiert werden?
+-			SbxDataType t2 = pElem->GetType();
+-			BOOL bSet = FALSE;
+-			if( !( pElem->GetFlags() & SBX_FIXED ) )
++			// Index-Access bei UnoObjekten beruecksichtigen
++			/*
++			else if( pElem->ISA(SbUnoProperty) )
+ 			{
+-				if( t != SbxVARIANT && t != t2 &&
+-					t >= SbxINTEGER && t <= SbxSTRING )
+-					pElem->SetType( t ), bSet = TRUE;
++				// pElem auf eine Ref zuweisen, um ggf. eine Temp-Var zu loeschen
++				SbxVariableRef refTemp = pElem;
++	
++				// Variable kopieren und dabei den Notify aufloesen
++				SbxVariable* pNew = new SbxVariable( *((SbxVariable*)pElem) ); // das ist der Call!
++				pElem->SetParameters( NULL ); // sonst bleibt Ref auf sich selbst
++				pElem = pNew;
+ 			}
+-			// pElem auf eine Ref zuweisen, um ggf. eine Temp-Var zu loeschen
+-			SbxVariableRef refTemp = pElem;
+-
+-			// Moegliche Reste vom letzten Aufruf der SbxMethod beseitigen
+-			// Vorher Schreiben freigeben, damit kein Error gesetzt wird.
+-			USHORT nSavFlags = pElem->GetFlags();
+-			pElem->SetFlag( SBX_READWRITE | SBX_NO_BROADCAST );
+-			pElem->SbxValue::Clear();
+-			pElem->SetFlags( nSavFlags );
+-
+-			// Erst nach dem Setzen anfassen, da z.B. LEFT()
+-			// den Unterschied zwischen Left$() und Left() kennen muss
+-
+-			// AB 12.8.96: Da in PopVar() die Parameter von Methoden weggehauen
+-			// werden, muessen wir hier explizit eine neue SbxMethod anlegen
+-			SbxVariable* pNew = new SbxMethod( *((SbxMethod*)pElem) ); // das ist der Call!
+-			//ALT: SbxVariable* pNew = new SbxVariable( *pElem ); // das ist der Call!
+-
+-			pElem->SetParameters(0); // sonst bleibt Ref auf sich selbst
+-			pNew->SetFlag( SBX_READWRITE );
+-
+-			// den Datentypen zuruecksetzen?
+-			if( bSet )
+-				pElem->SetType( t2 );
+-			pElem = pNew;
+-		}
+-		// Index-Access bei UnoObjekten beruecksichtigen
+-		/*
+-		else if( pElem->ISA(SbUnoProperty) )
+-		{
+-			// pElem auf eine Ref zuweisen, um ggf. eine Temp-Var zu loeschen
+-			SbxVariableRef refTemp = pElem;
+-
+-			// Variable kopieren und dabei den Notify aufloesen
+-			SbxVariable* pNew = new SbxVariable( *((SbxVariable*)pElem) ); // das ist der Call!
+-			pElem->SetParameters( NULL ); // sonst bleibt Ref auf sich selbst
+-			pElem = pNew;
++			*/
+ 		}
+-		*/
+ 	}
+ 	return CheckArray( pElem );
+ }
+@@ -543,7 +556,7 @@ SbxVariable* SbiRuntime::CheckArray( Sbx
+                     {
+                         Reference< XInterface > x = *(Reference< XInterface >*)aAny.getValue();
+                         Reference< XIndexAccess > xIndexAccess( x, UNO_QUERY );
+-                        if ( !SbiRuntime::isVBAEnabled() )
++                        if ( !bVBAEnabled )
+                         {
+                             // Haben wir Index-Access?
+                             if( xIndexAccess.is() )
+@@ -1111,6 +1124,7 @@ void SbiRuntime::StepLOCAL( UINT32 nOp1,
+ 		SbxVariable* p = new SbxVariable( t );
+ 		p->SetName( aName );
+ 		refLocals->Put( p, refLocals->Count() );
++		localIndex[ nOp1 ] = ( refLocals->Count() - 1 );
+ 	}
+ }
+ 
