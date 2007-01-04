@@ -7,6 +7,7 @@ EXTRA_DIST=\
 	nologoinstall_nld.bmp \
 	ooobanner_nld.bmp \
 	ooobitmap_nld.bmp \
+	ooonologointro.bmp \
 	openintro_nld.bmp \
 	openabout_nld.bmp \
 	openintro_ark.bmp \
@@ -22,5 +23,3 @@ EXTRA_DIST=\
 	libIDL-0.6.8-ooo.patch \
 	go-oo-team.png \
 	evolocal.odb
-
-
