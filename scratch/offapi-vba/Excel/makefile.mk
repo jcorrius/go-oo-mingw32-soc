@@ -210,7 +210,8 @@ IDLFILES=\
 	XlXmlExportResult.idl \
 	XlXmlImportResult.idl \
 	XlXmlLoadOption.idl \
-	XlYesNoGuess.idl
+	XlYesNoGuess.idl \
+	VBA.idl
 
 # ------------------------------------------------------------------
 
