@@ -594,7 +594,8 @@ public:
 		rtl::OUString sVal;
 		aValue >>= sVal;
 		ScCellRangesBase* pUnoRangesBase = dynamic_cast< ScCellRangesBase* >( xCell.get() );
-		if ( pUnoRangesBase )
+		if ( ( xCell->getType() == table::CellContentType_FORMULA ) &&
+			pUnoRangesBase )
 		{
 			ScRangeList aCellRanges = pUnoRangesBase->GetRangeList();	
 			ScCompiler aCompiler( m_pDoc, aCellRanges.First()->aStart );
@@ -603,9 +604,10 @@ public:
 			aCompiler.SetRefConvention( m_eConv );
 			String sConverted;
 			aCompiler.CreateStringFromTokenArray(sConverted);
-			rtl::OUString sOUString = sConverted;
-			aValue <<= sOUString;
+			sVal = EQUALS + sConverted;
+			aValue <<= sVal;
 		}
+
 		processValue( x,y,aValue );
 	}
 		
@@ -1164,7 +1166,9 @@ ScVbaRange::getFormulaValue( ScAddress::Convention eConv) throw (uno::RuntimeExc
 void
 ScVbaRange::setFormula(const uno::Any &rFormula ) throw (uno::RuntimeException)
 {
-	setFormulaValue( rFormula, ScAddress::CONV_XL_A1 );;
+	// #FIXME converting "=$a$1" e.g. CONV_XL_A1 -> CONV_OOO                        	// results in "=$a$1:a1", temporalily disable conversion
+	//setFormulaValue( rFormula, ScAddress::CONV_XL_A1 );;
+	setFormulaValue( rFormula, ScAddress::CONV_OOO );;
 }
 
 uno::Any
