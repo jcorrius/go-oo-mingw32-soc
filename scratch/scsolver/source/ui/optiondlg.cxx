@@ -60,7 +60,10 @@ public:
 	{
 		OptionDialog* p = static_cast<OptionDialog*>(dlg);
 		p->setVisible(false);
-		p->getSolverImpl()->getOptionData()->setModelType( p->getModelType() );
+        OptionData* pOption = p->getSolverImpl()->getOptionData();
+        pOption->setModelType(p->getModelType());
+        pOption->setVarPositive(p->isVarPositive());
+        pOption->setVarInteger(p->isVarInteger());
 	}
 };
 
@@ -117,6 +120,14 @@ void OptionDialog::initialize()
 	nY += 13;
 	addCheckBox( nX, nY+2, nWidth-nX-nMargin, 12, ascii("cbLinear"),
 				 getResStr(SCSOLVER_STR_OPTION_ASSUME_LINEAR) );
+
+    nY += 13;
+	addCheckBox( nX, nY+2, nWidth-nX-nMargin, 12, ascii("cbPositiveValue"),
+                 getResStr(SCSOLVER_STR_OPTION_VAR_POSITIVE) );
+
+    nY += 13;
+	addCheckBox( nX, nY+2, nWidth-nX-nMargin, 12, ascii("cbIntegerValue"),
+                 getResStr(SCSOLVER_STR_OPTION_VAR_INTEGER) );
 
 	addButton( nWidth-110, nHeight-20, 50, 15, ascii("btnOK"), 
 			   getResStr(SCSOLVER_STR_BTN_OK) );
@@ -185,6 +196,34 @@ void OptionDialog::setModelType( OptModelType type )
 		xCB->setState(1);
 	else
 		xCB->setState(0);
+}
+
+bool OptionDialog::isVarPositive() const
+{
+    Reference<uno::XInterface> oWgt = getWidgetByName( ascii("cbPositiveValue") );
+    Reference<awt::XCheckBox> xCB( oWgt, UNO_QUERY );
+    return xCB->getState();
+}
+
+void OptionDialog::setVarPositive(bool b)
+{
+    Reference<uno::XInterface> oWgt = getWidgetByName( ascii("cbPositiveValue") );
+    Reference<awt::XCheckBox> xCB( oWgt, UNO_QUERY );
+    xCB->setState(b);
+}
+
+bool OptionDialog::isVarInteger() const
+{
+    Reference<uno::XInterface> oWgt = getWidgetByName( ascii("cbIntegerValue") );
+    Reference<awt::XCheckBox> xCB( oWgt, UNO_QUERY );
+    return xCB->getState();
+}
+
+void OptionDialog::setVarInteger(bool b)
+{
+    Reference<uno::XInterface> oWgt = getWidgetByName( ascii("cbIntegerValue") );
+    Reference<awt::XCheckBox> xCB( oWgt, UNO_QUERY );
+    xCB->setState(b);
 }
 
 }

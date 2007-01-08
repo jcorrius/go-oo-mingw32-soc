@@ -72,6 +72,11 @@ public:
 	OptModelType getModelType() const;
 	void setModelType( OptModelType type );
 
+    bool isVarPositive() const;
+    void setVarPositive(bool b);
+
+    bool isVarInteger() const;
+    void setVarInteger(bool b);
 
 private:
 	void initialize();
