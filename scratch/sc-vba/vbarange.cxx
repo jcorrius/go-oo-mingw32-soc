@@ -67,6 +67,7 @@
 #include <org/openoffice/vba/Excel/XlBordersIndex.hpp>
 #include <org/openoffice/vba/Excel/XlPageBreak.hpp>
 #include <org/openoffice/vba/Excel/XlAutoFilterOperator.hpp>
+#include <org/openoffice/vba/Excel/XlAutoFillType.hpp>
 #include <org/openoffice/vba/Excel/XlTextParsingType.hpp>
 #include <org/openoffice/vba/Excel/XlTextQualifier.hpp>
 
@@ -3613,4 +3614,112 @@ ScVbaRange::PrintOut( const uno::Any& From, const uno::Any& To, const uno::Any& 
 		PrintOutHelper( From, To, Copies, Preview, ActivePrinter, PrintToFile, Collate, PrToFileName, xModel, sal_True );
 		oldSelection->Select();
 	}
+}
+
+void SAL_CALL
+ScVbaRange::AutoFill(  const uno::Reference< vba::XRange >& Destination, const uno::Any& Type ) throw (uno::RuntimeException) 
+{
+	uno::Reference< vba::XRange > xDest( Destination, uno::UNO_QUERY_THROW );
+	ScVbaRange* pRange = dynamic_cast< ScVbaRange* >( xDest.get() );
+	RangeHelper destRangeHelper( pRange->mxRange );
+	table::CellRangeAddress destAddress = destRangeHelper.getCellRangeAddressable()->getRangeAddress();	
+	
+	RangeHelper thisRange( mxRange );
+	table::CellRangeAddress thisAddress = thisRange.getCellRangeAddressable()->getRangeAddress();	
+	ScRange sourceRange;
+	ScRange destRange;
+
+	ScUnoConversion::FillScRange( destRange, destAddress );	
+	ScUnoConversion::FillScRange( sourceRange, thisAddress );
+	
+	
+	// source is valid
+	if (  !sourceRange.In( destRange ) )
+		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "source not in destination" ) ), uno::Reference< uno::XInterface >() );
+
+	FillDir eDir = FILL_TO_BOTTOM;
+	double fStep = 1.0;
+	// default to include the number of Rows in the source range;
+	ULONG nCount = ( sourceRange.aEnd.Row() - sourceRange.aStart.Row() ) + 1;
+	if ( sourceRange != destRange )
+	{
+		// Find direction of fill, vertical or horizontal
+		if ( sourceRange.aStart == destRange.aStart )
+		{
+			if ( sourceRange.aEnd.Row() == destRange.aEnd.Row() )
+				eDir = FILL_TO_RIGHT;			
+			else if ( sourceRange.aEnd.Col() == destRange.aEnd.Col() )
+				eDir = FILL_TO_BOTTOM;
+		}
+
+		else if ( sourceRange.aEnd == destRange.aEnd ) 
+		{
+			if ( sourceRange.aStart.Col() == destRange.aStart.Col() )
+			{
+				eDir = FILL_TO_TOP;			
+				fStep = -fStep;
+			}
+			else if ( sourceRange.aStart.Row() == destRange.aStart.Row() )
+			{
+				eDir = FILL_TO_LEFT;			
+				fStep = -fStep;
+			}
+		}
+
+		if ( eDir == FILL_TO_LEFT || eDir == FILL_TO_RIGHT )
+			nCount = ( sourceRange.aEnd.Col() - sourceRange.aStart.Col() ) + 1;
+
+		
+	}	
+	ScDocShell* pDocSh= getDocShellFromRange( mxRange );
+
+	FillCmd eCmd = FILL_AUTO;
+	FillDateCmd eDateCmd = FILL_DAY;	
+
+	double fEndValue =  MAXDOUBLE;
+
+	if ( Type.hasValue() )
+	{
+		sal_Int16 nFillType = vba::Excel::XlAutoFillType::xlFillDefault; 	
+		Type >>= nFillType;
+		switch ( nFillType )
+		{
+			case vba::Excel::XlAutoFillType::xlFillCopy:
+				eCmd = 	FILL_SIMPLE;
+				fStep = 0.0;
+				break;
+			case vba::Excel::XlAutoFillType::xlFillDays:
+				eCmd = FILL_DATE;
+				break;
+			case vba::Excel::XlAutoFillType::xlFillDefault:
+				break; 
+			case vba::Excel::XlAutoFillType::xlFillMonths:
+				eCmd = FILL_DATE;
+				eDateCmd = FILL_MONTH;
+				break;
+			case vba::Excel::XlAutoFillType::xlFillWeekdays:
+				eCmd = FILL_DATE;
+				eDateCmd = FILL_WEEKDAY;
+				break;
+			case vba::Excel::XlAutoFillType::xlFillYears:
+				eCmd = FILL_DATE;
+				eDateCmd = FILL_YEAR;
+				break;
+			case vba::Excel::XlAutoFillType::xlGrowthTrend:
+				eCmd = FILL_GROWTH;
+				break;
+			case vba::Excel::XlAutoFillType::xlLinearTrend:
+				eCmd = FILL_LINEAR;
+				break;
+			case vba::Excel::XlAutoFillType::xlFillFormats:
+			case vba::Excel::XlAutoFillType::xlFillSeries:
+			case vba::Excel::XlAutoFillType::xlFillValues:
+			default:
+				eCmd = 	FILL_SIMPLE;
+				break;
+		}	
+	}
+	ScDocFunc aFunc(*pDocSh);
+	aFunc.FillAuto( destRange, NULL, eDir, eCmd, eDateCmd,
+								nCount, fStep, fEndValue, TRUE, TRUE );
 }

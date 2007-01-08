@@ -188,6 +188,7 @@ public:
 	virtual void SAL_CALL Insert( const css::uno::Any& Shift, const css::uno::Any& CopyOrigin ) throw (css::uno::RuntimeException);
 	virtual void SAL_CALL Autofit() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL PrintOut( const css::uno::Any& From, const css::uno::Any& To, const css::uno::Any& Copies, const css::uno::Any& Preview, const css::uno::Any& ActivePrinter, const css::uno::Any& PrintToFile, const css::uno::Any& Collate, const css::uno::Any& PrToFileName ) throw (css::uno::RuntimeException);
+	virtual void SAL_CALL AutoFill( const css::uno::Reference< oo::vba::XRange >& Destination, const css::uno::Any& Type ) throw (css::uno::RuntimeException) ;
 	// XPropertySet
 
 	virtual css::uno::Reference< css::beans::XPropertySetInfo > SAL_CALL getPropertySetInfo(  ) throw (css::uno::RuntimeException);  
