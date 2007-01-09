@@ -50,6 +50,7 @@ IDLFILES=\
 	XBorder.idl \
 	XBorders.idl \
 	XCharacters.idl \
+	XControl.idl \
 	XComboBox.idl \
 	XErrObject.idl \
 	XValidation.idl
