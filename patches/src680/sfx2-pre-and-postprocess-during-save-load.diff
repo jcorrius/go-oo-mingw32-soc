@@ -1,11 +1,11 @@
-Index: objstor.cxx
+Index: sfx2/source/doc/objstor.cxx
 ===================================================================
 RCS file: /cvs/framework/sfx2/source/doc/objstor.cxx,v
-retrieving revision 1.181
-diff -u -p -r1.181 objstor.cxx
---- sfx2/source/doc/objstor.cxx	4 Aug 2006 14:23:30 -0000	1.181
-+++ sfx2/source/doc/objstor.cxx	16 Nov 2006 13:47:18 -0000
-@@ -39,6 +39,9 @@
+retrieving revision 1.184
+diff -u -r1.184 objstor.cxx
+--- sfx2/source/doc/objstor.cxx	12 Oct 2006 15:55:53 -0000	1.184
++++ sfx2/source/doc/objstor.cxx	9 Jan 2007 07:06:06 -0000
+@@ -42,6 +42,9 @@
  #ifndef _SFXENUMITEM_HXX //autogen
  #include <svtools/eitem.hxx>
  #endif
@@ -15,164 +15,58 @@ diff -u -p -r1.181 objstor.cxx
  #ifndef _SFXSTRITEM_HXX //autogen
  #include <svtools/stritem.hxx>
  #endif
-@@ -200,6 +203,10 @@
+@@ -203,6 +206,9 @@
  #include <vcl/bitmapex.hxx>
  #include <svtools/embedhlp.hxx>
  #include <rtl/logfile.hxx>
 +#include <com/sun/star/util/XMacroExpander.hpp>
 +#include <osl/file.hxx>
-+#include <malloc.h>
 +#include <osl/process.h>
  
  #include "app.hxx"
  #include "objsh.hxx"
-@@ -832,7 +839,88 @@ sal_Bool SfxObjectShell::DoLoad( SfxMedi
-         	{
-             	pImp->nLoadedFlags = 0;
- 				pImp->bModelInitialized = sal_False;
--            	bOk = xStorage.is() && LoadOwnFormat( *pMed );
-+				String aUserData=pFilter->GetUserData();
-+				// check whether a prepocessing step is requested in the configuration
-+				int pos=aUserData.Search(::rtl::OUString::createFromAscii("Preprocess=<").getStr(), 0);
-+				int end=aUserData.Search( '>', pos+12);
-+				if (pos!=STRING_NOTFOUND && end!=STRING_NOTFOUND) {
-+					// setup status bar
-+					SfxItemSet *pSet = pMed->GetItemSet();
-+					const SfxUnoAnyItem *pItem=NULL;
-+					SfxItemState ret=pSet->GetItemState( SID_PROGRESS_STATUSBAR_CONTROL, TRUE, (const SfxPoolItem**)&pItem);
-+					Reference< ::com::sun::star::task::XStatusIndicator > xStatusIndicator;
-+					if (ret==SFX_ITEM_SET && pItem!=NULL)
-+					{
-+						pItem->GetValue() >>= xStatusIndicator;
-+						if (xStatusIndicator.is()) {
-+							xStatusIndicator->start(::rtl::OUString::createFromAscii("Preprocessing ")+rtl::OUString(String(aUserData, pos+12, end-(pos+12))), 1);
-+							xStatusIndicator->setValue(1);
-+						}
-+					}
-+					// create a copy
-+					SfxMedium myMed(*pMed, sal_True);
-+
-+					// get macro expansion
-+					uno::Reference< XMultiServiceFactory> xMS(::comphelper::getProcessServiceFactory(), UNO_QUERY);
-+					uno::Reference< beans::XPropertySet >  xProps(xMS, UNO_QUERY);
-+					uno::Reference< XComponentContext > xContext(xProps->getPropertyValue(rtl::OUString::createFromAscii("DefaultContext")), UNO_QUERY);
-+					uno::Reference< util::XMacroExpander > xExpander(xContext->getValueByName(::rtl::OUString::createFromAscii("/singletons/com.sun.star.util.theMacroExpander")), UNO_QUERY);					
-+
-+					// parse preprocessing arguments
-+					String aAppName(aUserData, pos+12, end-(pos+12));
-+					int c=aAppName.GetQuotedTokenCount('\"',',');
-+					rtl_uString **args=(rtl_uString **)alloca(c*sizeof(rtl_uString*));
-+					for(int i=0;i<c;i++) {
-+						String aArg=aAppName.GetQuotedToken(i,'\"',',');
-+						if (aArg.EqualsIgnoreCaseAscii("vnd.sun.star.expand:", 0, 20)) {
-+							rtl::OUString argStr(aArg.GetBuffer()+20);
-+							aArg=xExpander->expandMacros(argStr);
-+							rtl::OUString ret;
-+							osl::FileBase::getSystemPathFromFileURL(aArg, ret);
-+							aArg=ret;
-+						} else if (aArg.EqualsIgnoreCaseAscii("%source%", 0, 8)) {
-+							aArg=::rtl::OUString(pMed->GetPhysicalName());
-+						} else if (aArg.EqualsIgnoreCaseAscii("%target%", 0, 8)) {
-+							aArg=::rtl::OUString(myMed.GetPhysicalName());
-+						}
-+						rtl::OUString s(aArg);
-+						args[i]=rtl::OUString(aArg).pData;
-+						rtl_uString_acquire(args[i]);
-+					}
-+
-+					// invoke processing step
-+					oslProcess pProcess=NULL;
-+					oslProcessError error=osl_executeProcess(
-+						args[0],
-+						args+1,
-+						c-1,
-+						/*osl_Process_NORMAL*/ osl_Process_HIDDEN,
-+						0,
-+						NULL,
-+						NULL,
-+						0,
-+						&pProcess	
-+						);	
-+
-+					error = osl_joinProcess( pProcess );
-+					oslProcessInfo aProcessInfo;
-+					aProcessInfo.Size= sizeof(aProcessInfo);
-+					error = osl_getProcessInfo( pProcess, osl_Process_EXITCODE, &aProcessInfo );
-+					osl_freeProcessHandle(pProcess);
-+
-+					for(int i=0;i<c;i++) {
-+						rtl_uString_release(args[i]);
-+					}
-+					// clear status bar
-+					if (xStatusIndicator.is()) {
-+						xStatusIndicator->end();
-+					}
-+					
-+					// load from copy
-+					bOk = xStorage.is() && LoadOwnFormat( myMed );
-+				} else {
-+            		bOk = xStorage.is() && LoadOwnFormat( *pMed );
-+				}
-             	if ( bOk )
-             	{
- 					SfxDocumentInfo& rDocInfo = GetDocInfo();
-@@ -1769,6 +1857,92 @@ sal_Bool SfxObjectShell::SaveTo_Impl
-         }
-     }
+@@ -248,6 +254,79 @@
  
-+	String aUserData=pFilter->GetUserData();
-+	// check whether a postprocessing step is requested in the configuration
-+	int pos=aUserData.Search(::rtl::OUString::createFromAscii("Postprocess=<").getStr(), 0);
-+	int end=aUserData.Search( '>', pos+13);
-+	if (pos!=STRING_NOTFOUND && end!=STRING_NOTFOUND) {
-+		// setup status bar
-+		SfxItemSet *pSet = rMedium.GetItemSet();
-+		const SfxUnoAnyItem *pItem=NULL;
-+		SfxItemState ret=pSet->GetItemState( SID_PROGRESS_STATUSBAR_CONTROL, TRUE, (const SfxPoolItem**)&pItem);
-+		Reference< ::com::sun::star::task::XStatusIndicator > xStatusIndicator;
-+		if (ret==SFX_ITEM_SET && pItem!=NULL)
-+		{
-+			pItem->GetValue() >>= xStatusIndicator;
-+			if (xStatusIndicator.is()) {
-+				xStatusIndicator->start(::rtl::OUString::createFromAscii("Postprocessing ")+rtl::OUString(String(aUserData, pos+13, end-(pos+13))), 1);
-+				xStatusIndicator->setValue(1);
-+			}
-+		}
-+		
-+		// create copy
-+		::rtl::OUString aTmpVersionURL = CreateTempCopyOfStorage_Impl( rMedium.GetStorage() );
-+		rMedium.Close();		
+ namespace css = ::com::sun::star;
+ 
 +
++static sal_Bool invokeExternalApp(String aAppName, ::rtl::OUString sourceParam, ::rtl::OUString targetParam)
++{
++		static const char EXPAND_WILDCARD_CONST[] ="vnd.sun.star.expand:";
++		static const char SOURCE_WILDCARD_CONST[]="%source%";
++		static const char TARGET_WILDCARD_CONST[]="%target%";
 +		// get macro expansion
 +		uno::Reference< XMultiServiceFactory> xMS(::comphelper::getProcessServiceFactory(), UNO_QUERY);
 +		uno::Reference< beans::XPropertySet >  xProps(xMS, UNO_QUERY);
 +		uno::Reference< XComponentContext > xContext(xProps->getPropertyValue(rtl::OUString::createFromAscii("DefaultContext")), UNO_QUERY);
-+		uno::Reference< util::XMacroExpander > xExpander(xContext->getValueByName(::rtl::OUString::createFromAscii("/singletons/com.sun.star.util.theMacroExpander")), UNO_QUERY);					
++		uno::Reference< util::XMacroExpander > xExpander(xContext->getValueByName(::rtl::OUString::createFromAscii("/singletons/com.sun.star.util.theMacroExpander")), UNO_QUERY);
 +
 +		// parse preprocessing arguments
-+		String aAppName(aUserData, pos+13, end-(pos+13));
 +		int c=aAppName.GetQuotedTokenCount('\"',',');
-+		rtl_uString **args=(rtl_uString **)alloca(c*sizeof(rtl_uString*));
++		if (c<1) return sal_False;
++		rtl_uString **args=new rtl_uString*[c];
 +		for(int i=0;i<c;i++) {
 +			String aArg=aAppName.GetQuotedToken(i,'\"',',');
-+			if (aArg.EqualsIgnoreCaseAscii("vnd.sun.star.expand:", 0, 20)) {
-+				rtl::OUString argStr(aArg.GetBuffer()+20);
++			if (aArg.EqualsIgnoreCaseAscii(EXPAND_WILDCARD_CONST, 0, strlen(EXPAND_WILDCARD_CONST))) {
++				rtl::OUString argStr(aArg.GetBuffer()+strlen(EXPAND_WILDCARD_CONST));
 +				aArg=xExpander->expandMacros(argStr);
-+				rtl::OUString ret;
-+				osl::FileBase::getSystemPathFromFileURL(aArg, ret);
-+				aArg=ret;
-+			} else if (aArg.EqualsIgnoreCaseAscii("%source%", 0, 8)) {
-+				::rtl::OUString tmpFile;
-+				osl::FileBase::getSystemPathFromFileURL(aTmpVersionURL, tmpFile);
-+				aArg=tmpFile;
-+			} else if (aArg.EqualsIgnoreCaseAscii("%target%", 0, 8)) {
-+				aArg=::rtl::OUString(rMedium.GetPhysicalName());
++			} else if (aArg.EqualsIgnoreCaseAscii(SOURCE_WILDCARD_CONST, 0, strlen(SOURCE_WILDCARD_CONST))) {
++				aArg=sourceParam;
++			} else if (aArg.EqualsIgnoreCaseAscii(TARGET_WILDCARD_CONST, 0, strlen(TARGET_WILDCARD_CONST))) {
++				aArg=targetParam;
 +			}
-+			rtl::OUString s(aArg);
 +			args[i]=rtl::OUString(aArg).pData;
 +			rtl_uString_acquire(args[i]);
 +		}
 +
++		sal_Bool bOk=sal_False;
++
++#ifndef NDEBUG
++		for (int p=0;p<c;p++) {
++		    rtl::OString aOString = ::rtl::OUStringToOString (args[p], RTL_TEXTENCODING_UTF8);
++		    printf("args[%i]=\"%s\"\n", p, aOString.getStr());
++		}
++#endif
 +		// invoke processing step
 +		oslProcess pProcess=NULL;
 +		oslProcessError error=osl_executeProcess(
@@ -187,25 +81,186 @@ diff -u -p -r1.181 objstor.cxx
 +			&pProcess	
 +			);	
 +
-+		error = osl_joinProcess( pProcess );
-+		oslProcessInfo aProcessInfo;
-+		aProcessInfo.Size= sizeof(aProcessInfo);
-+		error = osl_getProcessInfo( pProcess, osl_Process_EXITCODE, &aProcessInfo );
++		if (error==osl_Process_E_None) {
++			error = osl_joinProcess( pProcess );
++			if (error==osl_Process_E_None) {
++				oslProcessInfo aProcessInfo;
++				aProcessInfo.Size = sizeof(aProcessInfo);
++				error = osl_getProcessInfo( pProcess, osl_Process_EXITCODE, &aProcessInfo );
++				if (error==osl_Process_E_None && aProcessInfo.Code == 0) {
++					bOk=sal_True;
++				}
++			}
++		}
 +		osl_freeProcessHandle(pProcess);
 +
 +		for(int i=0;i<c;i++) {
 +			rtl_uString_release(args[i]);
 +		}
++		delete[] args;
++		return bOk;
++}
 +
-+		rMedium.ReOpen();
-+		::utl::UCBContentHelper::Kill( aTmpVersionURL );
 +
-+		// clear status bar
-+		if (xStatusIndicator.is()) {
-+			xStatusIndicator->end();
-+		}
+ //=========================================================================
+ void impl_addToModelCollection(const css::uno::Reference< css::frame::XModel >& xModel)
+ {
+@@ -836,7 +915,57 @@
+         	{
+             	pImp->nLoadedFlags = 0;
+ 				pImp->bModelInitialized = sal_False;
+-            	bOk = xStorage.is() && LoadOwnFormat( *pMed );
++				String aUserData=pFilter->GetUserData();
++				// check whether a prepocessing step is requested in the configuration
++				static const char PREPROCESS_CONST[]="Preprocess=<";
++				int pos=aUserData.Search(::rtl::OUString::createFromAscii(PREPROCESS_CONST).getStr(), 0);
++				int end=aUserData.Search( '>', pos+strlen(PREPROCESS_CONST));
++				if (pos!=STRING_NOTFOUND && end!=STRING_NOTFOUND) {
++					String aAppName(aUserData, pos+strlen(PREPROCESS_CONST), end-(pos+strlen(PREPROCESS_CONST)));
 +
-+	}
- 	return bOk;
++					// setup status bar
++					SfxItemSet *pSet = pMed->GetItemSet();
++					const SfxUnoAnyItem *pItem=NULL;
++					SfxItemState ret=pSet->GetItemState( SID_PROGRESS_STATUSBAR_CONTROL, TRUE, (const SfxPoolItem**)&pItem);
++					uno::Reference< ::com::sun::star::task::XStatusIndicator > xStatusIndicator;
++					if (ret==SFX_ITEM_SET && pItem!=NULL)
++					{
++						pItem->GetValue() >>= xStatusIndicator;
++						if (xStatusIndicator.is()) {
++							xStatusIndicator->start(::rtl::OUString::createFromAscii("Preprocessing ")+rtl::OUString(aAppName), 1);
++							xStatusIndicator->setValue(1);
++						}
++					}
++					// create a copy
++//					SfxMedium myMed(*pMed, sal_True);
++					SfxMedium myMed(*pMed, sal_False);
++					::utl::TempFile aTempFile;
++					myMed.SetName(aTempFile.GetURL(), sal_True);
++					myMed.SetPhysicalName_Impl(aTempFile.GetFileName());
++					myMed.ResetError();
++					myMed.CloseStorage();
++					myMed.CloseInStream();
++					myMed.SetTemporary(sal_True);
++
++					bOk = invokeExternalApp(aAppName, ::rtl::OUString(pMed->GetPhysicalName()), ::rtl::OUString(myMed.GetPhysicalName()));
++
++					// clear status bar
++					if (xStatusIndicator.is()) {
++						xStatusIndicator->end();
++					}
++					
++					// load from copy
++					if (bOk) {
++						bOk = xStorage.is() && LoadOwnFormat( myMed );
++
++					} else {
++						// We process only errors from invokeExternalApp at this point
++						// The errors from the above LoadOwnFormat are processed later
++						SetError( ERRCODE_IO_CANTREAD );
++					}
++				} else {
++            		bOk = xStorage.is() && LoadOwnFormat( *pMed );
++				}
+             	if ( bOk )
+             	{
+ 					SfxDocumentInfo& rDocInfo = GetDocInfo();
+@@ -1216,6 +1345,7 @@
+ 
  }
  
++
+ //-------------------------------------------------------------------------
+ 
+ sal_Bool SfxObjectShell::SaveTo_Impl
+@@ -1657,7 +1787,7 @@
+         // transfer data to its destinated location
+ 		// the medium commits the storage or the stream it is based on
+         RegisterTransfer( rMedium );
+-        bOk = rMedium.Commit();
++//        bOk = rMedium.Commit();
+ 
+         if ( bOk && bScriptSignatureIsCopied )
+         {
+@@ -1695,7 +1825,7 @@
+ 							if ( xTransact.is() )
+ 								xTransact->commit();
+ 
+-        					bOk = rMedium.Commit();
++//        					bOk = rMedium.Commit();
+ 						}
+ 					}
+ 				}
+@@ -1706,6 +1836,64 @@
+ 			}
+ 		}
+ 
++	if (bOk) {
++		String aUserData=pFilter->GetUserData();
++		// check whether a postprocessing step is requested in the configuration
++		static const char POSTPROCESS_CONST[]="Postprocess=<";
++		int pos=aUserData.Search(::rtl::OUString::createFromAscii(POSTPROCESS_CONST).getStr(), 0);
++		int end=aUserData.Search( '>', pos+strlen(POSTPROCESS_CONST));
++		if (pos!=STRING_NOTFOUND && end!=STRING_NOTFOUND) {
++			String aAppName(aUserData, pos+strlen(POSTPROCESS_CONST), end-(pos+strlen(POSTPROCESS_CONST)));
++
++			// setup status bar
++			SfxItemSet *pSet = rMedium.GetItemSet();
++			const SfxUnoAnyItem *pItem=NULL;
++			SfxItemState ret=pSet->GetItemState( SID_PROGRESS_STATUSBAR_CONTROL, TRUE, (const SfxPoolItem**)&pItem);
++			uno::Reference< ::com::sun::star::task::XStatusIndicator > xStatusIndicator;
++			if (ret==SFX_ITEM_SET && pItem!=NULL)
++			{
++				pItem->GetValue() >>= xStatusIndicator;
++				if (xStatusIndicator.is()) {
++					xStatusIndicator->start(::rtl::OUString::createFromAscii("Postprocessing ")+rtl::OUString(aAppName), 1);
++					xStatusIndicator->setValue(1);
++				}
++			}
++			
++			// create copy
++			::rtl::OUString aTmpVersionURL = CreateTempCopyOfStorage_Impl( rMedium.GetStorage() );
++			rMedium.CloseAndRelease();
++
++			rtl::OUString aSourceFile;
++			osl::FileBase::getSystemPathFromFileURL(aTmpVersionURL, aSourceFile);
++			String aTargetFile(rMedium.GetPhysicalName());
++
++			// remove the current target file after it was copied
++			// the postprocess might crash and the unprocessed file would confuse users
++			String aTargetFileURL;
++			::utl::LocalFileHelper::ConvertPhysicalNameToURL( aTargetFile, aTargetFileURL );
++			osl_removeFile(::rtl::OUString(aTargetFileURL).pData);
++
++			bOk=invokeExternalApp(aAppName, aSourceFile, aTargetFile);
++
++			if (bOk)
++				// it does not make sense to reopen the file if it was not saved correctly
++				rMedium.ReOpen();
++
++			::utl::UCBContentHelper::Kill( aTmpVersionURL );
++
++			// clear status bar
++			if (xStatusIndicator.is()) {
++				xStatusIndicator->end();
++			}
++
++		}
++	}
++
++	if (bOk) {
++	    bOk = rMedium.Commit();
++	}
++
++
+         if ( bOk )
+ 		{
+             // if the target medium is an alien format and the "old" medium was an own format and the "old" medium
+@@ -1736,7 +1924,7 @@
+ 			if ( bNeedsDisconnectionOnFail )
+ 				ConnectTmpStorage_Impl( pImp->m_xDocStorage, NULL );
+ 		}
+-	}
++    }
+ 
+     // unlock user interface
+     Lock_Impl( this, sal_False );
