@@ -53,7 +53,6 @@ SLOFILES= \
 		$(SLO)$/vbapalette.obj \
 		$(SLO)$/vbaborders.obj \
 		$(SLO)$/vbacharacters.obj \
-		$(SLO)$/vbacontrol.obj \
 		$(SLO)$/vbacombobox.obj \
 		$(SLO)$/vbacontrol.obj \
 		$(SLO)$/vbavalidation.obj
