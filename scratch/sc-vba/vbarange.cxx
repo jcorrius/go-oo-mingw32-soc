@@ -3636,42 +3636,57 @@ ScVbaRange::AutoFill(  const uno::Reference< vba::XRange >& Destination, const u
 	
 	
 	// source is valid
-	if (  !sourceRange.In( destRange ) )
-		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "source not in destination" ) ), uno::Reference< uno::XInterface >() );
+//	if (  !sourceRange.In( destRange ) )
+//		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "source not in destination" ) ), uno::Reference< uno::XInterface >() );
 
 	FillDir eDir = FILL_TO_BOTTOM;
 	double fStep = 1.0;
+
+	ScRange aRange( destRange );
+	ScRange aSourceRange( destRange );
+
 	// default to include the number of Rows in the source range;
-	ULONG nCount = ( sourceRange.aEnd.Row() - sourceRange.aStart.Row() ) + 1;
+	SCCOLROW nSourceCount = ( sourceRange.aEnd.Row() - sourceRange.aStart.Row() ) + 1;
+	SCCOLROW nCount = 0;	
+
 	if ( sourceRange != destRange )
 	{
 		// Find direction of fill, vertical or horizontal
 		if ( sourceRange.aStart == destRange.aStart )
 		{
 			if ( sourceRange.aEnd.Row() == destRange.aEnd.Row() )
+			{
+				nSourceCount = ( sourceRange.aEnd.Col() - sourceRange.aStart.Col() + 1 );
+				aSourceRange.aEnd.SetCol( static_cast<SCCOL>( aSourceRange.aStart.Col() + nSourceCount - 1 ) );
 				eDir = FILL_TO_RIGHT;			
+				nCount = aRange.aEnd.Col() - aSourceRange.aEnd.Col();
+			}
 			else if ( sourceRange.aEnd.Col() == destRange.aEnd.Col() )
+			{
+				aSourceRange.aEnd.SetRow( static_cast<SCROW>( aSourceRange.aStart.Row() + nSourceCount ) - 1 );
+				nCount = aRange.aEnd.Row() - aSourceRange.aEnd.Row();
 				eDir = FILL_TO_BOTTOM;
+			}
 		}
 
-		else if ( sourceRange.aEnd == destRange.aEnd ) 
+		else if ( aSourceRange.aEnd == destRange.aEnd ) 
 		{
 			if ( sourceRange.aStart.Col() == destRange.aStart.Col() )
 			{
+				aSourceRange.aStart.SetRow( static_cast<SCROW>( aSourceRange.aEnd.Row() - nSourceCount + 1 ) );
+				nCount = aSourceRange.aStart.Row() - aRange.aStart.Row();
 				eDir = FILL_TO_TOP;			
 				fStep = -fStep;
 			}
 			else if ( sourceRange.aStart.Row() == destRange.aStart.Row() )
 			{
+				nSourceCount = ( sourceRange.aEnd.Col() - sourceRange.aStart.Col() ) + 1;
+				aSourceRange.aStart.SetCol( static_cast<SCCOL>( aSourceRange.aEnd.Col() - nSourceCount + 1 ) );
+				nCount = aSourceRange.aStart.Col() - aRange.aStart.Col();
 				eDir = FILL_TO_LEFT;			
 				fStep = -fStep;
 			}
 		}
-
-		if ( eDir == FILL_TO_LEFT || eDir == FILL_TO_RIGHT )
-			nCount = ( sourceRange.aEnd.Col() - sourceRange.aStart.Col() ) + 1;
-
-		
 	}	
 	ScDocShell* pDocSh= getDocShellFromRange( mxRange );
 
@@ -3693,8 +3708,6 @@ ScVbaRange::AutoFill(  const uno::Reference< vba::XRange >& Destination, const u
 			case vba::Excel::XlAutoFillType::xlFillDays:
 				eCmd = FILL_DATE;
 				break;
-			case vba::Excel::XlAutoFillType::xlFillDefault:
-				break; 
 			case vba::Excel::XlAutoFillType::xlFillMonths:
 				eCmd = FILL_DATE;
 				eDateCmd = FILL_MONTH;
@@ -3710,18 +3723,21 @@ ScVbaRange::AutoFill(  const uno::Reference< vba::XRange >& Destination, const u
 			case vba::Excel::XlAutoFillType::xlGrowthTrend:
 				eCmd = FILL_GROWTH;
 				break;
+			case vba::Excel::XlAutoFillType::xlFillFormats:
+				throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "xlFillFormat not supported for AutoFill" ) ), uno::Reference< uno::XInterface >() );
+				break;
+			case vba::Excel::XlAutoFillType::xlFillValues:
+			case vba::Excel::XlAutoFillType::xlFillSeries:
 			case vba::Excel::XlAutoFillType::xlLinearTrend:
 				eCmd = FILL_LINEAR;
 				break;
-			case vba::Excel::XlAutoFillType::xlFillFormats:
-			case vba::Excel::XlAutoFillType::xlFillSeries:
-			case vba::Excel::XlAutoFillType::xlFillValues:
+			case vba::Excel::XlAutoFillType::xlFillDefault:
 			default:
-				eCmd = 	FILL_SIMPLE;
+				eCmd = 	FILL_AUTO;
 				break;
 		}	
 	}
 	ScDocFunc aFunc(*pDocSh);
-	aFunc.FillAuto( destRange, NULL, eDir, eCmd, eDateCmd,
+	aFunc.FillAuto( aSourceRange, NULL, eDir, eCmd, eDateCmd,
 								nCount, fStep, fEndValue, TRUE, TRUE );
 }
