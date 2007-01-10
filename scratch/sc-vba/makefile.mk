@@ -55,6 +55,7 @@ SLOFILES= \
 		$(SLO)$/vbacharacters.obj \
 		$(SLO)$/vbacontrol.obj \
 		$(SLO)$/vbacombobox.obj \
+		$(SLO)$/vbacontrol.obj \
 		$(SLO)$/vbavalidation.obj
  
 

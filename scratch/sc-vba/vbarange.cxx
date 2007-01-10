@@ -261,9 +261,8 @@ ScVbaRangeAreas::createCollectionObject( const uno::Any& aSource )
 
 ScDocShell* getDocShellFromRange( const uno::Reference< table::XCellRange >& xRange )
 {
-	// need the ScCellRangeObj to get docshell
-	ScCellRangeObj* pUno = static_cast<  ScCellRangeObj* >( xRange.get() );
-			
+	// need the ScCellRangesBase to get docshell
+	ScCellRangesBase* pUno= dynamic_cast< ScCellRangesBase* >( xRange.get() );
 	if ( !pUno )
 		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Failed to access underlying uno range object" ) ), uno::Reference< uno::XInterface >()  );
 	return pUno->GetDocShell();
@@ -1623,7 +1622,10 @@ ScVbaRange::Cells( const uno::Any &nRowIndex, const uno::Any &nColumnIndex ) thr
 void
 ScVbaRange::Select() throw (uno::RuntimeException)
 {
-	ScDocShell* pShell = getDocShellFromRange( mxRange );
+	ScCellRangesBase* pUnoRangesBase = getCellRangesBase();
+	if ( !pUnoRangesBase )
+		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Failed to access underlying uno range object" ) ), uno::Reference< uno::XInterface >()  );
+	ScDocShell* pShell = pUnoRangesBase->GetDocShell();
 	if ( pShell )
 	{
 		uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY_THROW );

@@ -22,6 +22,7 @@
 #include "vbahelper.hxx"
 #include "tabvwsh.hxx"
 #include "transobj.hxx"
+#include "scmod.hxx"
 
 using namespace ::com::sun::star;
 using namespace ::org::openoffice;
@@ -36,6 +37,20 @@ namespace org
 namespace openoffice
 {
 
+// helper method to determine if the view ( calc ) is in print-preview mode
+bool isInPrintPreview( SfxViewFrame* pView )
+{
+	sal_uInt16 nViewNo = SID_VIEWSHELL1 - SID_VIEWSHELL0;
+	if ( pView->GetObjectShell()->GetFactory().GetViewFactoryCount() >
+nViewNo && !pView->GetObjectShell()->IsInPlaceActive() )
+	{
+		SfxViewFactory &rViewFactory =
+			pView->GetObjectShell()->GetFactory().GetViewFactory(nViewNo);
+		if (  pView->GetCurViewId() == rViewFactory.GetOrdinal() )
+			return true;	
+	}
+	return false;
+}
 const ::rtl::OUString REPLACE_CELLS_WARNING(  RTL_CONSTASCII_USTRINGPARAM( "ReplaceCellsWarning"));
 const uno::Any&
 aNULL()
@@ -384,16 +399,18 @@ XLRGBToOORGB(  const uno::Any& aCol )
 	return uno::makeAny( nCol );
 }
 
-void PrintOutHelper( const uno::Any& From, const uno::Any& To, const uno::Any& Copies, const uno::Any& /*Preview*/, const uno::Any& /*ActivePrinter*/, const uno::Any& /*PrintToFile*/, const uno::Any& Collate, const uno::Any& PrToFileName, css::uno::Reference< frame::XModel >& xModel, sal_Bool bUseSelection  )
+void PrintOutHelper( const uno::Any& From, const uno::Any& To, const uno::Any& Copies, const uno::Any& Preview, const uno::Any& /*ActivePrinter*/, const uno::Any& /*PrintToFile*/, const uno::Any& Collate, const uno::Any& PrToFileName, css::uno::Reference< frame::XModel >& xModel, sal_Bool bUseSelection  )
 {
 	sal_Int32 nTo = 0;
 	sal_Int32 nFrom = 0;
 	sal_Int16 nCopies = 1;
+	sal_Bool bPreview = sal_False;
 	sal_Bool bCollate = sal_False;
 	sal_Bool bSelection = bUseSelection;
 	From >>= nFrom;
 	To >>= nTo;
 	Copies >>= nCopies;
+	Preview >>= bPreview;
 	if ( nCopies > 1 ) // Collate only useful when more that 1 copy
 		Collate >>= bCollate;
 
@@ -443,7 +460,18 @@ void PrintOutHelper( const uno::Any& From, const uno::Any& To, const uno::Any& C
 
 		if ( pDispatcher )
 		{
-			pDispatcher->Execute( (USHORT)SID_PRINTDOC, (SfxCallMode)SFX_CALLMODE_SYNCHRON, aArgs );
+			if ( bPreview )
+			{
+				if ( !pViewFrame->GetFrame()->IsInPlace() ) 	
+				{
+					SC_MOD()->InputEnterHandler();
+					pViewFrame->GetDispatcher()->Execute( SID_VIEWSHELL1, SFX_CALLMODE_SYNCHRON );
+					while ( isInPrintPreview( pViewFrame ) )
+						Application::Yield();
+				}
+			}
+			else
+				pDispatcher->Execute( (USHORT)SID_PRINTDOC, (SfxCallMode)SFX_CALLMODE_SYNCHRON, aArgs );
 		}
 			
 	}
