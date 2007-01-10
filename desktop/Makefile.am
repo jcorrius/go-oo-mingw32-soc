@@ -1,4 +1,7 @@
+SUBDIRS=16x16 22x22 24x24 32x32 48x48 scalable
+
 desktop_in_files = ${wildcard *.desktop.in.in}
+
 old_gnome_files = \
 	openoffice.applications.in \
 	openoffice-extra.keys.in \
