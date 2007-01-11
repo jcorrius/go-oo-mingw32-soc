@@ -1,6 +1,6 @@
 --- /dev/null	
 +++ sc/source/ui/vba/vbarange.cxx	
-@@ -0,0 +1,3616 @@
+@@ -0,0 +1,3743 @@
 +#include <comphelper/processfactory.hxx>
 +#include <sfx2/objsh.hxx>
 +
@@ -70,6 +70,7 @@
 +#include <org/openoffice/vba/Excel/XlBordersIndex.hpp>
 +#include <org/openoffice/vba/Excel/XlPageBreak.hpp>
 +#include <org/openoffice/vba/Excel/XlAutoFilterOperator.hpp>
++#include <org/openoffice/vba/Excel/XlAutoFillType.hpp>
 +#include <org/openoffice/vba/Excel/XlTextParsingType.hpp>
 +#include <org/openoffice/vba/Excel/XlTextQualifier.hpp>
 +
@@ -263,9 +264,8 @@
 +
 +ScDocShell* getDocShellFromRange( const uno::Reference< table::XCellRange >& xRange )
 +{
-+	// need the ScCellRangeObj to get docshell
-+	ScCellRangeObj* pUno = static_cast<  ScCellRangeObj* >( xRange.get() );
-+			
++	// need the ScCellRangesBase to get docshell
++	ScCellRangesBase* pUno= dynamic_cast< ScCellRangesBase* >( xRange.get() );
 +	if ( !pUno )
 +		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Failed to access underlying uno range object" ) ), uno::Reference< uno::XInterface >()  );
 +	return pUno->GetDocShell();
@@ -1625,7 +1625,10 @@
 +void
 +ScVbaRange::Select() throw (uno::RuntimeException)
 +{
-+	ScDocShell* pShell = getDocShellFromRange( mxRange );
++	ScCellRangesBase* pUnoRangesBase = getCellRangesBase();
++	if ( !pUnoRangesBase )
++		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Failed to access underlying uno range object" ) ), uno::Reference< uno::XInterface >()  );
++	ScDocShell* pShell = pUnoRangesBase->GetDocShell();
 +	if ( pShell )
 +	{
 +		uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY_THROW );
@@ -3616,4 +3619,128 @@
 +		PrintOutHelper( From, To, Copies, Preview, ActivePrinter, PrintToFile, Collate, PrToFileName, xModel, sal_True );
 +		oldSelection->Select();
 +	}
++}
++
++void SAL_CALL
++ScVbaRange::AutoFill(  const uno::Reference< vba::XRange >& Destination, const uno::Any& Type ) throw (uno::RuntimeException) 
++{
++	uno::Reference< vba::XRange > xDest( Destination, uno::UNO_QUERY_THROW );
++	ScVbaRange* pRange = dynamic_cast< ScVbaRange* >( xDest.get() );
++	RangeHelper destRangeHelper( pRange->mxRange );
++	table::CellRangeAddress destAddress = destRangeHelper.getCellRangeAddressable()->getRangeAddress();	
++	
++	RangeHelper thisRange( mxRange );
++	table::CellRangeAddress thisAddress = thisRange.getCellRangeAddressable()->getRangeAddress();	
++	ScRange sourceRange;
++	ScRange destRange;
++
++	ScUnoConversion::FillScRange( destRange, destAddress );	
++	ScUnoConversion::FillScRange( sourceRange, thisAddress );
++	
++	
++	// source is valid
++//	if (  !sourceRange.In( destRange ) )
++//		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "source not in destination" ) ), uno::Reference< uno::XInterface >() );
++
++	FillDir eDir = FILL_TO_BOTTOM;
++	double fStep = 1.0;
++
++	ScRange aRange( destRange );
++	ScRange aSourceRange( destRange );
++
++	// default to include the number of Rows in the source range;
++	SCCOLROW nSourceCount = ( sourceRange.aEnd.Row() - sourceRange.aStart.Row() ) + 1;
++	SCCOLROW nCount = 0;	
++
++	if ( sourceRange != destRange )
++	{
++		// Find direction of fill, vertical or horizontal
++		if ( sourceRange.aStart == destRange.aStart )
++		{
++			if ( sourceRange.aEnd.Row() == destRange.aEnd.Row() )
++			{
++				nSourceCount = ( sourceRange.aEnd.Col() - sourceRange.aStart.Col() + 1 );
++				aSourceRange.aEnd.SetCol( static_cast<SCCOL>( aSourceRange.aStart.Col() + nSourceCount - 1 ) );
++				eDir = FILL_TO_RIGHT;			
++				nCount = aRange.aEnd.Col() - aSourceRange.aEnd.Col();
++			}
++			else if ( sourceRange.aEnd.Col() == destRange.aEnd.Col() )
++			{
++				aSourceRange.aEnd.SetRow( static_cast<SCROW>( aSourceRange.aStart.Row() + nSourceCount ) - 1 );
++				nCount = aRange.aEnd.Row() - aSourceRange.aEnd.Row();
++				eDir = FILL_TO_BOTTOM;
++			}
++		}
++
++		else if ( aSourceRange.aEnd == destRange.aEnd ) 
++		{
++			if ( sourceRange.aStart.Col() == destRange.aStart.Col() )
++			{
++				aSourceRange.aStart.SetRow( static_cast<SCROW>( aSourceRange.aEnd.Row() - nSourceCount + 1 ) );
++				nCount = aSourceRange.aStart.Row() - aRange.aStart.Row();
++				eDir = FILL_TO_TOP;			
++				fStep = -fStep;
++			}
++			else if ( sourceRange.aStart.Row() == destRange.aStart.Row() )
++			{
++				nSourceCount = ( sourceRange.aEnd.Col() - sourceRange.aStart.Col() ) + 1;
++				aSourceRange.aStart.SetCol( static_cast<SCCOL>( aSourceRange.aEnd.Col() - nSourceCount + 1 ) );
++				nCount = aSourceRange.aStart.Col() - aRange.aStart.Col();
++				eDir = FILL_TO_LEFT;			
++				fStep = -fStep;
++			}
++		}
++	}	
++	ScDocShell* pDocSh= getDocShellFromRange( mxRange );
++
++	FillCmd eCmd = FILL_AUTO;
++	FillDateCmd eDateCmd = FILL_DAY;	
++
++	double fEndValue =  MAXDOUBLE;
++
++	if ( Type.hasValue() )
++	{
++		sal_Int16 nFillType = vba::Excel::XlAutoFillType::xlFillDefault; 	
++		Type >>= nFillType;
++		switch ( nFillType )
++		{
++			case vba::Excel::XlAutoFillType::xlFillCopy:
++				eCmd = 	FILL_SIMPLE;
++				fStep = 0.0;
++				break;
++			case vba::Excel::XlAutoFillType::xlFillDays:
++				eCmd = FILL_DATE;
++				break;
++			case vba::Excel::XlAutoFillType::xlFillMonths:
++				eCmd = FILL_DATE;
++				eDateCmd = FILL_MONTH;
++				break;
++			case vba::Excel::XlAutoFillType::xlFillWeekdays:
++				eCmd = FILL_DATE;
++				eDateCmd = FILL_WEEKDAY;
++				break;
++			case vba::Excel::XlAutoFillType::xlFillYears:
++				eCmd = FILL_DATE;
++				eDateCmd = FILL_YEAR;
++				break;
++			case vba::Excel::XlAutoFillType::xlGrowthTrend:
++				eCmd = FILL_GROWTH;
++				break;
++			case vba::Excel::XlAutoFillType::xlFillFormats:
++				throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "xlFillFormat not supported for AutoFill" ) ), uno::Reference< uno::XInterface >() );
++				break;
++			case vba::Excel::XlAutoFillType::xlFillValues:
++			case vba::Excel::XlAutoFillType::xlFillSeries:
++			case vba::Excel::XlAutoFillType::xlLinearTrend:
++				eCmd = FILL_LINEAR;
++				break;
++			case vba::Excel::XlAutoFillType::xlFillDefault:
++			default:
++				eCmd = 	FILL_AUTO;
++				break;
++		}	
++	}
++	ScDocFunc aFunc(*pDocSh);
++	aFunc.FillAuto( aSourceRange, NULL, eDir, eCmd, eDateCmd,
++								nCount, fStep, fEndValue, TRUE, TRUE );
 +}
