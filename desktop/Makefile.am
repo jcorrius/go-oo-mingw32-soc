@@ -19,7 +19,8 @@ clean:
 
 %: %.in
 	sed -e "s|\@OOO_BINSUFFIX\@|@OOO_BINSUFFIX@|" \
-	    -e "s|\@STARTUPNOTIFY\@|@STARTUPNOTIFY@|" $< > $@
+	    -e "s|\@STARTUPNOTIFY\@|@STARTUPNOTIFY@|" \
+	    -e "s|\@ADD_OPENXML_WORD_MIME\@|@ADD_OPENXML_WORD_MIME@|" $< > $@
 
 EXTRA_DIST=$(desktop_in_files) \
 	$(old_gnome_files) \
