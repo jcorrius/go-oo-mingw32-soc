@@ -90,6 +90,11 @@ ScVbaWorkbook::getActiveSheet() throw (uno::RuntimeException)
 	return new ActiveSheet( m_xContext );
 }
 uno::Any SAL_CALL
+ScVbaWorkbook::Sheets( const uno::Any& aIndex ) throw (uno::RuntimeException)
+{
+	return Worksheets( aIndex );
+}
+uno::Any SAL_CALL
 ScVbaWorkbook::Worksheets( const uno::Any& aIndex ) throw (uno::RuntimeException)
 {
 	uno::Reference< frame::XModel > xModel( getModel() );	
