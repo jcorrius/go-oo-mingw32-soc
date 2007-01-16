@@ -40,6 +40,7 @@ public:
 	virtual css::uno::Any SAL_CALL Dialogs( const css::uno::Any& DialogIndex ) throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL getCutCopyMode() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setCutCopyMode( const css::uno::Any& _cutcopymode ) throw (css::uno::RuntimeException);
+	virtual ::rtl::OUString SAL_CALL getVersion() throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL getStatusBar() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setStatusBar( const css::uno::Any& _statusbar ) throw (css::uno::RuntimeException);
 	virtual ::sal_Int32 SAL_CALL getCursor() throw (css::uno::RuntimeException);

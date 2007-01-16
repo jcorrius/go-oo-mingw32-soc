@@ -43,6 +43,8 @@
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
 
+#define EXCELVERSION "11.0"
+
 class ActiveWorkbook : public ScVbaWorkbook
 {
 protected:
@@ -234,6 +236,13 @@ ScVbaApplication::getCutCopyMode() throw (uno::RuntimeException)
 	result <<= sal_False;
 	return result;
 }
+
+::rtl::OUString
+ScVbaApplication::getVersion() throw (uno::RuntimeException)
+{
+	return rtl::OUString(RTL_CONSTASCII_USTRINGPARAM(EXCELVERSION));
+}
+
 void SAL_CALL 
 ScVbaApplication::setCutCopyMode( const uno::Any& /*_cutcopymode*/ ) throw (uno::RuntimeException)
 {
