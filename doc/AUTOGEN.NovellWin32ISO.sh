@@ -1,0 +1,1 @@
+./autogen.sh --with-distro=NovellWin32ISO --with-lang="af ar be-BY bg br ca cs da de el en-GB es et fi fr gu-IN he hi-IN hr hu it ja ko lt mk nb nl nn pl pt-BR pt ru sv tr zh-CN zh-TW" --with-poor-help-localizations="af ar be-BY bg ca el en-GB fi gu-IN hi-IN hr lt mk nb nn pt tr" --enable-cairo
