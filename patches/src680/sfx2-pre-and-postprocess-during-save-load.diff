@@ -1,11 +1,6 @@
-Index: sfx2/source/doc/objstor.cxx
-===================================================================
-RCS file: /cvs/framework/sfx2/source/doc/objstor.cxx,v
-retrieving revision 1.184
-diff -u -r1.184 objstor.cxx
---- sfx2/source/doc/objstor.cxx	12 Oct 2006 15:55:53 -0000	1.184
-+++ sfx2/source/doc/objstor.cxx	9 Jan 2007 07:06:06 -0000
-@@ -42,6 +42,9 @@
+--- sfx2/source/doc/objstor.cxx	2007-01-17 16:22:57.000000000 +0100
++++ -	2007-01-17 16:26:55.700201000 +0100
+@@ -39,6 +39,9 @@
  #ifndef _SFXENUMITEM_HXX //autogen
  #include <svtools/eitem.hxx>
  #endif
@@ -15,7 +10,7 @@ diff -u -r1.184 objstor.cxx
  #ifndef _SFXSTRITEM_HXX //autogen
  #include <svtools/stritem.hxx>
  #endif
-@@ -203,6 +206,9 @@
+@@ -200,6 +203,9 @@
  #include <vcl/bitmapex.hxx>
  #include <svtools/embedhlp.hxx>
  #include <rtl/logfile.hxx>
@@ -25,12 +20,47 @@ diff -u -r1.184 objstor.cxx
  
  #include "app.hxx"
  #include "objsh.hxx"
-@@ -248,6 +254,79 @@
+@@ -227,6 +233,7 @@
+ #include "viewfrm.hxx"
+ #include "graphhelp.hxx"
+ #include "modsizeexceeded.hxx"
++#include "osl/thread.hxx"
+ 
+ #include "../appl/app.hrc"
+ 
+@@ -246,6 +253,125 @@
  
  namespace css = ::com::sun::star;
  
++class StatusThread : public osl::Thread
++{
++    oslFileHandle m_handle;
 +
-+static sal_Bool invokeExternalApp(String aAppName, ::rtl::OUString sourceParam, ::rtl::OUString targetParam)
++public:
++    int volatile progressTicks;
++
++    StatusThread(oslFileHandle handle) :
++	osl::Thread(), m_handle(handle), progressTicks(0)
++	{	    
++	}
++
++
++    virtual void SAL_CALL run() {
++	sal_uInt64 nRead;
++	char buf[1024];
++	for(;;) {
++	    oslFileError err=osl_readFile(m_handle, buf, sizeof(buf)-1, &nRead);
++	    if (err!=osl_File_E_None || nRead<=0) {
++		break;
++	    }
++	    buf[nRead]=0;
++	    progressTicks++;
++	}
++    }
++    
++};
++
++static sal_Bool invokeExternalApp(String aAppName, ::rtl::OUString sourceParam, ::rtl::OUString targetParam, uno::Reference< ::com::sun::star::task::XStatusIndicator > xStatusIndicator)
 +{
 +		static const char EXPAND_WILDCARD_CONST[] ="vnd.sun.star.expand:";
 +		static const char SOURCE_WILDCARD_CONST[]="%source%";
@@ -69,7 +99,8 @@ diff -u -r1.184 objstor.cxx
 +#endif
 +		// invoke processing step
 +		oslProcess pProcess=NULL;
-+		oslProcessError error=osl_executeProcess(
++		oslFileHandle handle=NULL;
++		oslProcessError error=osl_executeProcess_WithRedirectedIO(
 +			args[0],
 +			args+1,
 +			c-1,
@@ -78,11 +109,29 @@ diff -u -r1.184 objstor.cxx
 +			NULL,
 +			NULL,
 +			0,
-+			&pProcess	
++			&pProcess,
++			NULL,
++			&handle,
++			NULL
 +			);	
 +
 +		if (error==osl_Process_E_None) {
-+			error = osl_joinProcess( pProcess );
++		    static const int MAXBARTICKS=1000;
++		        StatusThread statusThread(handle);
++			statusThread.create();
++			if (xStatusIndicator.is()) {
++			    xStatusIndicator->start(::rtl::OUString::createFromAscii("waiting for external application..."), MAXBARTICKS);
++			}
++			do {
++			    TimeValue wait = {1, 0};
++			    error=osl_joinProcessWithTimeout( pProcess, &wait);
++			    if (xStatusIndicator.is()) {
++				xStatusIndicator->setValue(statusThread.progressTicks%MAXBARTICKS);
++			    }
++			} while (error==osl_Process_E_TimedOut);
++			if (xStatusIndicator.is()) {
++			    xStatusIndicator->end();
++			}
 +			if (error==osl_Process_E_None) {
 +				oslProcessInfo aProcessInfo;
 +				aProcessInfo.Size = sizeof(aProcessInfo);
@@ -105,7 +154,7 @@ diff -u -r1.184 objstor.cxx
  //=========================================================================
  void impl_addToModelCollection(const css::uno::Reference< css::frame::XModel >& xModel)
  {
-@@ -836,7 +915,57 @@
+@@ -833,7 +959,48 @@
          	{
              	pImp->nLoadedFlags = 0;
  				pImp->bModelInitialized = sal_False;
@@ -126,10 +175,6 @@ diff -u -r1.184 objstor.cxx
 +					if (ret==SFX_ITEM_SET && pItem!=NULL)
 +					{
 +						pItem->GetValue() >>= xStatusIndicator;
-+						if (xStatusIndicator.is()) {
-+							xStatusIndicator->start(::rtl::OUString::createFromAscii("Preprocessing ")+rtl::OUString(aAppName), 1);
-+							xStatusIndicator->setValue(1);
-+						}
 +					}
 +					// create a copy
 +//					SfxMedium myMed(*pMed, sal_True);
@@ -142,13 +187,8 @@ diff -u -r1.184 objstor.cxx
 +					myMed.CloseInStream();
 +					myMed.SetTemporary(sal_True);
 +
-+					bOk = invokeExternalApp(aAppName, ::rtl::OUString(pMed->GetPhysicalName()), ::rtl::OUString(myMed.GetPhysicalName()));
++					bOk = invokeExternalApp(aAppName, ::rtl::OUString(pMed->GetPhysicalName()), ::rtl::OUString(myMed.GetPhysicalName()), xStatusIndicator);
 +
-+					// clear status bar
-+					if (xStatusIndicator.is()) {
-+						xStatusIndicator->end();
-+					}
-+					
 +					// load from copy
 +					if (bOk) {
 +						bOk = xStorage.is() && LoadOwnFormat( myMed );
@@ -164,7 +204,7 @@ diff -u -r1.184 objstor.cxx
              	if ( bOk )
              	{
  					SfxDocumentInfo& rDocInfo = GetDocInfo();
-@@ -1216,6 +1345,7 @@
+@@ -1213,6 +1380,7 @@
  
  }
  
@@ -172,7 +212,7 @@ diff -u -r1.184 objstor.cxx
  //-------------------------------------------------------------------------
  
  sal_Bool SfxObjectShell::SaveTo_Impl
-@@ -1657,7 +1787,7 @@
+@@ -1659,7 +1827,7 @@
          // transfer data to its destinated location
  		// the medium commits the storage or the stream it is based on
          RegisterTransfer( rMedium );
@@ -181,7 +221,7 @@ diff -u -r1.184 objstor.cxx
  
          if ( bOk && bScriptSignatureIsCopied )
          {
-@@ -1695,7 +1825,7 @@
+@@ -1697,7 +1865,7 @@
  							if ( xTransact.is() )
  								xTransact->commit();
  
@@ -190,7 +230,7 @@ diff -u -r1.184 objstor.cxx
  						}
  					}
  				}
-@@ -1706,6 +1836,64 @@
+@@ -1708,6 +1876,55 @@
  			}
  		}
  
@@ -211,10 +251,6 @@ diff -u -r1.184 objstor.cxx
 +			if (ret==SFX_ITEM_SET && pItem!=NULL)
 +			{
 +				pItem->GetValue() >>= xStatusIndicator;
-+				if (xStatusIndicator.is()) {
-+					xStatusIndicator->start(::rtl::OUString::createFromAscii("Postprocessing ")+rtl::OUString(aAppName), 1);
-+					xStatusIndicator->setValue(1);
-+				}
 +			}
 +			
 +			// create copy
@@ -231,18 +267,13 @@ diff -u -r1.184 objstor.cxx
 +			::utl::LocalFileHelper::ConvertPhysicalNameToURL( aTargetFile, aTargetFileURL );
 +			osl_removeFile(::rtl::OUString(aTargetFileURL).pData);
 +
-+			bOk=invokeExternalApp(aAppName, aSourceFile, aTargetFile);
++			bOk=invokeExternalApp(aAppName, aSourceFile, aTargetFile, xStatusIndicator);
 +
 +			if (bOk)
 +				// it does not make sense to reopen the file if it was not saved correctly
 +				rMedium.ReOpen();
 +
 +			::utl::UCBContentHelper::Kill( aTmpVersionURL );
-+
-+			// clear status bar
-+			if (xStatusIndicator.is()) {
-+				xStatusIndicator->end();
-+			}
 +
 +		}
 +	}
@@ -255,7 +286,7 @@ diff -u -r1.184 objstor.cxx
          if ( bOk )
  		{
              // if the target medium is an alien format and the "old" medium was an own format and the "old" medium
-@@ -1736,7 +1924,7 @@
+@@ -1738,7 +1955,7 @@
  			if ( bNeedsDisconnectionOnFail )
  				ConnectTmpStorage_Impl( pImp->m_xDocStorage, NULL );
  		}
