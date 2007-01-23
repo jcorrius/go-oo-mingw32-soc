@@ -12,12 +12,12 @@
 #include "vbacontrol.hxx"
 #include "vbahelper.hxx"
 
-//typedef cppu::ImplInheritanceHelper2<ScVbaControl, oo::vba::XComboBox, css::script::XDefaultProperty > ComboBoxImpl_BASE;
-typedef ::cppu::WeakImplHelper2< oo::vba::XComboBox, css::script::XDefaultProperty > ComboBoxImpl_BASE;
+typedef cppu::ImplInheritanceHelper2<ScVbaControl, oo::vba::XComboBox, css::script::XDefaultProperty > ComboBoxImpl_BASE;
+//typedef ::cppu::WeakImplHelper2< oo::vba::XComboBox, css::script::XDefaultProperty > ComboBoxImpl_BASE;
 // for the moment its preferable for default value behaviour to
 // be provided by both old an new mechanisms
 class ScVbaComboBox : public ComboBoxImpl_BASE
-    ,public ScVbaControl
+//    ,public ScVbaControl
     ,public ::comphelper::OPropertyContainer
 {		
 
@@ -41,14 +41,6 @@ public:
 	virtual void SAL_CALL setValue( const css::uno::Any& _value ) throw (css::uno::RuntimeException);
 	virtual ::rtl::OUString SAL_CALL getText() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setText( const ::rtl::OUString& _text ) throw (css::uno::RuntimeException);
-    //XControl Attributes
-    virtual sal_Bool SAL_CALL getEnabled() throw (css::uno::RuntimeException);
-    virtual void SAL_CALL setEnabled( sal_Bool _enabled ) throw (css::uno::RuntimeException);
-    virtual sal_Bool SAL_CALL getVisible() throw (css::uno::RuntimeException);
-    virtual void SAL_CALL setVisible( sal_Bool _visible ) throw (css::uno::RuntimeException);
-    virtual css::uno::Any SAL_CALL getSize() throw (css::uno::RuntimeException);
-    virtual void SAL_CALL setSize( const css::uno::Any& _size ) throw (css::uno::RuntimeException);
-
 
 	// Methods
 	virtual void SAL_CALL AddItem( const css::uno::Any& pvargItem, const css::uno::Any& pvargIndex ) throw (css::uno::RuntimeException);

@@ -4,6 +4,7 @@
 #include <com/sun/star/drawing/XShape.hpp>
 #include <com/sun/star/frame/XModel.hpp>
 #include <com/sun/star/view/XControlAccess.hpp>
+#include <com/sun/star/container/XChild.hpp>
 
 #include"vbacontrol.hxx"
 #include"vbacombobox.hxx"
@@ -16,41 +17,79 @@ using namespace org::openoffice;
 ScVbaControl::ScVbaControl( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< ::drawing::XControlShape >& xControlShape ) : m_xContext( xContext ), m_xControlShape( xControlShape )
 {
     //init m_xProps
-    uno::Reference< awt::XControlModel > xControlModel( xControlShape->getControl(), css::uno::UNO_QUERY_THROW );
-    uno::Reference< beans::XPropertySet > xProps( xControlModel, css::uno::UNO_QUERY_THROW );
-    m_xProps = xProps;
+    uno::Reference< awt::XControlModel > xControlModel( xControlShape->getControl(), uno::UNO_QUERY_THROW );
+    uno::Reference< beans::XPropertySet > xProps( xControlModel, uno::UNO_QUERY_THROW );
+    m_xProps.set( xProps, uno::UNO_QUERY_THROW );
     //init m_xWindowPeer
-    css::uno::Reference< css::frame::XModel > xModel = getCurrentDocument();
-    css::uno::Reference< css::view::XControlAccess > xControlAccess( xModel->getCurrentController(), css::uno::UNO_QUERY_THROW );
+    uno::Reference< container::XChild > xChild( xControlModel, uno::UNO_QUERY_THROW );
+    xChild.set( xChild->getParent(), uno::UNO_QUERY_THROW );
+    xChild.set( xChild->getParent(), uno::UNO_QUERY_THROW );
+    uno::Reference< frame::XModel > xModel( xChild->getParent(), uno::UNO_QUERY_THROW );
+    uno::Reference< view::XControlAccess > xControlAccess( xModel->getCurrentController(), uno::UNO_QUERY_THROW );
     m_xWindowPeer = xControlAccess->getControl( xControlModel )->getPeer();
 }
 
 ScVbaControl::ScVbaControl( const uno::Reference< uno::XComponentContext >& xContext, 
         const uno::Reference< beans::XPropertySet >& xProps, 
-        const css::uno::Reference< css::drawing::XControlShape > xControlShape ) : m_xContext( xContext ), 
+        const uno::Reference< drawing::XControlShape > xControlShape ) : m_xContext( xContext ), 
         m_xProps( xProps ), m_xControlShape( xControlShape )
 {
     // grab the default value property name
-    //m_xProps->getPropertyValue( CONTROLSOURCEPROP ) >>= sSourceName;
-    //setDfltPropHandler();
-    css::uno::Reference< css::awt::XControlModel > xControlModel( m_xProps, css::uno::UNO_QUERY_THROW );
-    css::uno::Reference< css::frame::XModel > xModel = getCurrentDocument();
-    css::uno::Reference< css::view::XControlAccess > xControlAccess( xModel->getCurrentController(), css::uno::UNO_QUERY_THROW );
+    uno::Reference< awt::XControlModel > xControlModel( m_xProps, uno::UNO_QUERY_THROW );
+    uno::Reference< container::XChild > xChild( xControlModel, uno::UNO_QUERY_THROW );
+    xChild.set( xChild->getParent(), uno::UNO_QUERY_THROW );
+    xChild.set( xChild->getParent(), uno::UNO_QUERY_THROW );
+    uno::Reference< frame::XModel > xModel( xChild->getParent(), uno::UNO_QUERY_THROW );
+    uno::Reference< view::XControlAccess > xControlAccess( xModel->getCurrentController(), uno::UNO_QUERY_THROW );
     m_xWindowPeer = xControlAccess->getControl( xControlModel )->getPeer();
 
     // XShapeDescriptor
         
 }
 
+void ScVbaControl::SetControl( const uno::Reference< uno::XComponentContext > xContext, const uno::Reference< ::drawing::XControlShape > xControlShape )
+{
+    m_xContext.set( xContext, uno::UNO_QUERY_THROW );
+    m_xControlShape.set( xControlShape, uno::UNO_QUERY_THROW );
+    //init m_xProps
+    uno::Reference< awt::XControlModel > xControlModel( xControlShape->getControl(), uno::UNO_QUERY_THROW );
+    uno::Reference< beans::XPropertySet > xProps( xControlModel, uno::UNO_QUERY_THROW );
+    m_xProps = xProps;
+    //init m_xWindowPeer
+    uno::Reference< container::XChild > xChild( xControlModel, uno::UNO_QUERY_THROW );
+    xChild.set( xChild->getParent(), uno::UNO_QUERY_THROW );
+    xChild.set( xChild->getParent(), uno::UNO_QUERY_THROW );
+    uno::Reference< frame::XModel > xModel( xChild->getParent(), uno::UNO_QUERY_THROW );
+    uno::Reference< view::XControlAccess > xControlAccess( xModel->getCurrentController(), uno::UNO_QUERY_THROW );
+    m_xWindowPeer = xControlAccess->getControl( xControlModel )->getPeer();
+}
+
+void ScVbaControl::SetControl( const uno::Reference< uno::XComponentContext > xContext, 
+        const uno::Reference< beans::XPropertySet > xProps, 
+        const uno::Reference< drawing::XControlShape > xControlShape )
+{
+    m_xContext.set( xContext, uno::UNO_QUERY_THROW );
+    m_xProps.set( xProps, uno::UNO_QUERY_THROW );
+    m_xControlShape.set( xControlShape, uno::UNO_QUERY_THROW );
+    // grab the default value property name
+    uno::Reference< awt::XControlModel > xControlModel( m_xProps, uno::UNO_QUERY_THROW );
+    uno::Reference< container::XChild > xChild( xControlModel, uno::UNO_QUERY_THROW );
+    xChild.set( xChild->getParent(), uno::UNO_QUERY_THROW );
+    xChild.set( xChild->getParent(), uno::UNO_QUERY_THROW );
+    uno::Reference< frame::XModel > xModel( xChild->getParent(), uno::UNO_QUERY_THROW );
+    uno::Reference< view::XControlAccess > xControlAccess( xModel->getCurrentController(), uno::UNO_QUERY_THROW );
+    m_xWindowPeer = xControlAccess->getControl( xControlModel )->getPeer();
+}
+
 /*
 void
-ScVbaControl::Init( const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::beans::XPropertySet >& xProps )
+ScVbaControl::Init( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< beans::XPropertySet >& xProps )
 {
     m_xContext = xContext;
     m_xProps = xProps;
 }
 */
-sal_Bool SAL_CALL ScVbaControl::getEnabled() throw (css::uno::RuntimeException)
+sal_Bool SAL_CALL ScVbaControl::getEnabled() throw (uno::RuntimeException)
 {
     uno::Any aValue = m_xProps->getPropertyValue
             (rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Enabled" ) ) );
@@ -59,7 +98,7 @@ sal_Bool SAL_CALL ScVbaControl::getEnabled() throw (css::uno::RuntimeException)
     return bRet;
 }
 
-void SAL_CALL ScVbaControl::setEnabled( sal_Bool bVisible ) throw (css::uno::RuntimeException)
+void SAL_CALL ScVbaControl::setEnabled( sal_Bool bVisible ) throw (uno::RuntimeException)
 {
     uno::Any aValue( bVisible );
     m_xProps->setPropertyValue
@@ -67,27 +106,27 @@ void SAL_CALL ScVbaControl::setEnabled( sal_Bool bVisible ) throw (css::uno::Run
 
 }
 
-sal_Bool SAL_CALL ScVbaControl::getVisible() throw (css::uno::RuntimeException)
+sal_Bool SAL_CALL ScVbaControl::getVisible() throw (uno::RuntimeException)
 {
-    css::uno::Reference< css::awt::XWindow2 > xWindow2( m_xWindowPeer, css::uno::UNO_QUERY_THROW );
+    uno::Reference< awt::XWindow2 > xWindow2( m_xWindowPeer, uno::UNO_QUERY_THROW );
     return xWindow2->isVisible();
 }
 
-void SAL_CALL ScVbaControl::setVisible( sal_Bool bVisible ) throw (css::uno::RuntimeException)
+void SAL_CALL ScVbaControl::setVisible( sal_Bool bVisible ) throw (uno::RuntimeException)
 {
-    css::uno::Reference< css::awt::XWindow2 > xWindow2( m_xWindowPeer, css::uno::UNO_QUERY_THROW );
+    uno::Reference< awt::XWindow2 > xWindow2( m_xWindowPeer, uno::UNO_QUERY_THROW );
     xWindow2->setVisible( bVisible );
 }
-uno::Any SAL_CALL ScVbaControl::getSize() throw (css::uno::RuntimeException)
+uno::Any SAL_CALL ScVbaControl::getSize() throw (uno::RuntimeException)
 {
-    uno::Reference< drawing::XShape > xShape( m_xControlShape, css::uno::UNO_QUERY_THROW );
+    uno::Reference< drawing::XShape > xShape( m_xControlShape, uno::UNO_QUERY_THROW );
     return uno::makeAny(  xShape->getSize() );
 }
-void SAL_CALL ScVbaControl::setSize( const uno::Any& _size ) throw (css::uno::RuntimeException)
+void SAL_CALL ScVbaControl::setSize( const uno::Any& _size ) throw (uno::RuntimeException)
 {
     awt::Size aSize;
     _size >>= aSize;
-    uno::Reference< drawing::XShape > xShape( m_xControlShape, css::uno::UNO_QUERY_THROW );
+    uno::Reference< drawing::XShape > xShape( m_xControlShape, uno::UNO_QUERY_THROW );
     xShape->setSize( aSize );
 }
 
@@ -96,12 +135,12 @@ void SAL_CALL ScVbaControl::setSize( const uno::Any& _size ) throw (css::uno::Ru
 
 ScVbaControlFactory::ScVbaControlFactory( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< drawing::XControlShape >& xControlShape ): m_xContext( xContext ), m_xControlShape( xControlShape )
 {
-    uno::Reference< awt::XControlModel > xControlModel( xControlShape->getControl(), css::uno::UNO_QUERY_THROW );
-    uno::Reference< beans::XPropertySet > xProps( xControlModel, css::uno::UNO_QUERY_THROW );
-    m_xProps = xProps;
+    uno::Reference< awt::XControlModel > xControlModel( xControlShape->getControl(), uno::UNO_QUERY_THROW );
+    uno::Reference< beans::XPropertySet > xProps( xControlModel, uno::UNO_QUERY_THROW );
+    m_xProps.set( xProps, uno::UNO_QUERY_THROW );
 }
 
-ScVbaControlFactory::ScVbaControlFactory( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< beans::XPropertySet >& xProps, const css::uno::Reference< css::drawing::XControlShape > xControlShape ): m_xContext( xContext ), m_xProps( xProps ), m_xControlShape( xControlShape )
+ScVbaControlFactory::ScVbaControlFactory( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< beans::XPropertySet >& xProps, const uno::Reference< drawing::XControlShape > xControlShape ): m_xContext( xContext ), m_xProps( xProps ), m_xControlShape( xControlShape )
 {
 }
 

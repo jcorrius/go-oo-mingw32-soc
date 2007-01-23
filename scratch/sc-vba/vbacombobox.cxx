@@ -13,14 +13,14 @@ const sal_Int32 RANGE_PROPERTY_ID_DFLT=1;
 // another property/method of the same name
 const ::rtl::OUString RANGE_PROPERTY_DFLT( RTL_CONSTASCII_USTRINGPARAM( "_$DefaultProp" ) );
 
-ScVbaComboBox::ScVbaComboBox( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< css::drawing::XControlShape >& xControlShape ) : ScVbaControl( xContext, xControlShape ),  OPropertyContainer(GetBroadcastHelper())
+ScVbaComboBox::ScVbaComboBox( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< css::drawing::XControlShape >& xControlShape ) : ComboBoxImpl_BASE( xContext, xControlShape ), OPropertyContainer(GetBroadcastHelper())
 {
 	// grab the default value property name
 	m_xProps->getPropertyValue( CONTROLSOURCEPROP ) >>= sSourceName;
 	setDfltPropHandler();
 }
 
-ScVbaComboBox::ScVbaComboBox( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< beans::XPropertySet >& xProps, const css::uno::Reference< css::drawing::XControlShape > xControlShape ) : ScVbaControl( xContext, xProps, xControlShape ),  OPropertyContainer(GetBroadcastHelper())
+ScVbaComboBox::ScVbaComboBox( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< beans::XPropertySet >& xProps, const css::uno::Reference< css::drawing::XControlShape > xControlShape ) : ComboBoxImpl_BASE( xContext, xProps, xControlShape ), OPropertyContainer(GetBroadcastHelper())
 {
 	m_xProps->getPropertyValue( CONTROLSOURCEPROP ) >>= sSourceName;
 	setDfltPropHandler();
@@ -53,40 +53,6 @@ ScVbaComboBox::setText( const ::rtl::OUString& _text ) throw (uno::RuntimeExcept
 {
 	setValue( uno::makeAny( _text ) ); // seems the same
 }
-
-// XControl Attributes
-sal_Bool SAL_CALL
-ScVbaComboBox::getVisible() throw (css::uno::RuntimeException)
-{
-    return ScVbaControl::getVisible();
-}
-
-void SAL_CALL
-ScVbaComboBox::setVisible( sal_Bool _visible ) throw (css::uno::RuntimeException)
-{
-    ScVbaControl::setVisible( _visible );
-}
-
-sal_Bool SAL_CALL
-ScVbaComboBox::getEnabled() throw (css::uno::RuntimeException)
-{
-    return ScVbaControl::getEnabled();
-}
-
-void SAL_CALL
-ScVbaComboBox::setEnabled( sal_Bool _visible ) throw (css::uno::RuntimeException)
-{
-    ScVbaControl::setEnabled( _visible );
-}
-
-uno::Any SAL_CALL ScVbaComboBox::getSize() throw (css::uno::RuntimeException)
-{
-    return ScVbaControl::getSize();
-}
-void SAL_CALL ScVbaComboBox::setSize( const uno::Any& _size ) throw (css::uno::RuntimeException) 
-{
-    ScVbaControl::setSize( _size );
-} 
 
 // Methods
 void SAL_CALL 

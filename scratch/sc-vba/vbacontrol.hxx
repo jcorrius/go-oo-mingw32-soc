@@ -24,13 +24,20 @@ protected:
     css::uno::Reference< css::uno::XComponentContext > m_xContext;
     css::uno::Reference< css::beans::XPropertySet > m_xProps;
     css::uno::Reference< css::drawing::XControlShape > m_xControlShape;
+protected:
+    ScVbaControl(){ m_xContext = 0; m_xProps = 0; m_xControlShape = 0; }
+    void SetControl( const css::uno::Reference< css::uno::XComponentContext > xContext, 
+                const css::uno::Reference< css::drawing::XControlShape > xControlShape );
+    void SetControl( const css::uno::Reference< css::uno::XComponentContext > xContext, 
+                const css::uno::Reference< css::beans::XPropertySet > xProps,
+                const css::uno::Reference< css::drawing::XControlShape > xControlShape );
 public:
     ScVbaControl( const css::uno::Reference< css::uno::XComponentContext >& xContext, 
                     const css::uno::Reference< css::drawing::XControlShape >& xControlShape );
     ScVbaControl( const css::uno::Reference< css::uno::XComponentContext >& xContext, 
                     const css::uno::Reference< css::beans::XPropertySet >& xProps,
                     const css::uno::Reference< css::drawing::XControlShape > xControlShape );
-    // Attribute
+    // XControl
     virtual sal_Bool SAL_CALL getEnabled() throw (css::uno::RuntimeException);
     virtual void SAL_CALL setEnabled( sal_Bool _enabled ) throw (css::uno::RuntimeException);
     virtual sal_Bool SAL_CALL getVisible() throw (css::uno::RuntimeException);

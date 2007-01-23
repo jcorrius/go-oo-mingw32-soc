@@ -41,6 +41,8 @@
 #include "vbachartobjects.hxx"
 #include "vbapivottables.hxx"
 #include "vbacombobox.hxx"
+#include "vbaoleobject.hxx"
+#include "vbaoleobjects.hxx"
 
 #define STANDARDWIDTH 2267 
 #define STANDARDHEIGHT 427
@@ -514,6 +516,25 @@ ScVbaWorksheet::Comments( const uno::Any& Index ) throw (uno::RuntimeException)
 	return makeAny( xColl );
 }
 
+uno::Any SAL_CALL
+ScVbaWorksheet::OLEObjects( const uno::Any& Index ) throw (uno::RuntimeException)
+{
+    ScVbaOLEObjects* aOleObjects;
+    uno::Reference< sheet::XSpreadsheet > xSpreadsheet( getSheet(), uno::UNO_QUERY_THROW );
+    uno::Reference< drawing::XDrawPageSupplier > xDrawPageSupplier( xSpreadsheet, uno::UNO_QUERY_THROW );
+    uno::Reference< drawing::XDrawPage > xDrawPage( xDrawPageSupplier->getDrawPage(), uno::UNO_QUERY_THROW );
+    uno::Reference< container::XIndexAccess > xIndexAccess( xDrawPage, uno::UNO_QUERY_THROW );
+    aOleObjects = new ScVbaOLEObjects( m_xContext, xIndexAccess );
+
+    if( Index.hasValue() )
+    {
+            return aOleObjects->Item( Index );
+    }
+    else
+    {
+        return makeAny( uno::Reference< vba::XOLEObjects> ( aOleObjects ) );
+    }
+}
 uno::Any SAL_CALL 
 ScVbaWorksheet::Evaluate( const ::rtl::OUString& Name ) throw (uno::RuntimeException)
 {
@@ -631,7 +652,7 @@ ScVbaWorksheet::getControl( const ::rtl::OUString& sName )
 uno::Any
 ScVbaWorksheet::getControlShape( const ::rtl::OUString& sName )
 {
-	uno::Reference< sheet::XScenarioEnhanced > xIf( getSheet(), uno::UNO_QUERY_THROW );
+	//uno::Reference< sheet::XScenarioEnhanced > xIf( getSheet(), uno::UNO_QUERY_THROW );
     uno::Reference< sheet::XSpreadsheet > xSpreadsheet( getSheet(), uno::UNO_QUERY_THROW );
     uno::Reference< drawing::XDrawPageSupplier > xDrawPageSupplier( xSpreadsheet, uno::UNO_QUERY_THROW );
     uno::Reference< drawing::XDrawPage > xDrawPage( xDrawPageSupplier->getDrawPage(), uno::UNO_QUERY_THROW );
