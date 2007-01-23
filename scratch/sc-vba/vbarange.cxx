@@ -18,6 +18,7 @@
 #include <com/sun/star/sheet/XSheetCellCursor.hpp>
 #include <com/sun/star/sheet/XArrayFormulaRange.hpp>
 #include <com/sun/star/sheet/XNamedRange.hpp>
+#include <com/sun/star/sheet/XPrintAreas.hpp>
 #include <com/sun/star/beans/XPropertySet.hpp>
 #include <com/sun/star/sheet/XFunctionAccess.hpp>
 #include <com/sun/star/frame/XModel.hpp>
@@ -3605,16 +3606,34 @@ ScVbaRange::getValidation() throw (css::uno::RuntimeException)
 void SAL_CALL 
 ScVbaRange::PrintOut( const uno::Any& From, const uno::Any& To, const uno::Any& Copies, const uno::Any& Preview, const uno::Any& ActivePrinter, const uno::Any& PrintToFile, const uno::Any& Collate, const uno::Any& PrToFileName ) throw (uno::RuntimeException)
 {
-	ScDocShell* pShell = getDocShellFromRange( mxRange );
+	ScDocShell* pShell = NULL;
+
+	sal_Int32 nItems = m_Areas->getCount();
+	uno::Sequence< 	table::CellRangeAddress > printAreas( nItems );
+	uno::Reference< sheet::XPrintAreas > xPrintAreas;
+	for ( sal_Int32 index=1; index <= nItems; ++index )
+	{
+		uno::Reference< vba::XRange > xRange( m_Areas->Item( uno::makeAny(index) ), uno::UNO_QUERY_THROW );
+
+		RangeHelper thisRange( xRange->getCellRange() );
+		table::CellRangeAddress rangeAddress = thisRange.getCellRangeAddressable()->getRangeAddress();
+		if ( index == 1 )
+		{
+			ScVbaRange* pRange = dynamic_cast< ScVbaRange* >( xRange.get() ); 
+			// initialise the doc shell and the printareas
+			pShell = getDocShellFromRange( pRange->mxRange );
+			xPrintAreas.set( thisRange.getSpreadSheet(), uno::UNO_QUERY_THROW );
+		}
+		printAreas[ index - 1 ] = rangeAddress;
+	}
 	if ( pShell )
 	{
-		// Hack select this range in order to print it, restore
-		// previous selection afterwards
-		uno::Reference< vba::XRange > oldSelection( ScVbaGlobals::getGlobalsImpl( m_xContext )->getApplication()->getSelection() );
-		Selection();
-		uno::Reference< frame::XModel > xModel = pShell->GetModel();
-		PrintOutHelper( From, To, Copies, Preview, ActivePrinter, PrintToFile, Collate, PrToFileName, xModel, sal_True );
-		oldSelection->Select();
+		if ( xPrintAreas.is() )
+		{
+			xPrintAreas->setPrintAreas( printAreas );
+			uno::Reference< frame::XModel > xModel = pShell->GetModel();
+			PrintOutHelper( From, To, Copies, Preview, ActivePrinter, PrintToFile, Collate, PrToFileName, xModel, sal_True );
+		}
 	}
 }
 
