@@ -55,7 +55,9 @@ SLOFILES= \
 		$(SLO)$/vbacharacters.obj \
 		$(SLO)$/vbacombobox.obj \
 		$(SLO)$/vbacontrol.obj \
-		$(SLO)$/vbavalidation.obj
+		$(SLO)$/vbavalidation.obj \
+		$(SLO)$/vbaoleobject.obj \
+		$(SLO)$/vbaoleobjects.obj
  
 
 # --- Targets ------------------------------------------------------
