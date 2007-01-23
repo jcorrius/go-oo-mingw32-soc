@@ -53,7 +53,9 @@ IDLFILES=\
 	XControl.idl \
 	XComboBox.idl \
 	XErrObject.idl \
-	XValidation.idl
+	XValidation.idl \
+    XOLEObject.idl \
+    XOLEObjects.idl
 # ------------------------------------------------------------------
 
 .INCLUDE :  target.mk
