@@ -9,6 +9,7 @@
 #include"vbacontrol.hxx"
 #include"vbacombobox.hxx"
 #include "vbabutton.hxx"
+#include "vbalabel.hxx"
 
 
 using namespace com::sun::star;
@@ -169,6 +170,8 @@ ScVbaControl* ScVbaControlFactory::createControl()  throw (uno::RuntimeException
             return new ScVbaComboBox( m_xContext, m_xControlShape );
         case form::FormComponentType::COMMANDBUTTON:
             return new ScVbaButton( m_xContext, m_xControlShape );
+        case form::FormComponentType::FIXEDTEXT:
+            return new ScVbaLabel( m_xContext, m_xControlShape );
         default:
             throw uno::RuntimeException( rtl::OUString::createFromAscii(
                     "Donot surpport this Control Type." ), uno::Reference< uno::XInterface >() );
