@@ -8,6 +8,8 @@
 
 #include"vbacontrol.hxx"
 #include"vbacombobox.hxx"
+#include "vbabutton.hxx"
+
 
 using namespace com::sun::star;
 using namespace org::openoffice;
@@ -165,6 +167,8 @@ ScVbaControl* ScVbaControlFactory::createControl()  throw (uno::RuntimeException
     {
         case form::FormComponentType::COMBOBOX:
             return new ScVbaComboBox( m_xContext, m_xControlShape );
+        case form::FormComponentType::COMMANDBUTTON:
+            return new ScVbaButton( m_xContext, m_xControlShape );
         default:
             throw uno::RuntimeException( rtl::OUString::createFromAscii(
                     "Donot surpport this Control Type." ), uno::Reference< uno::XInterface >() );

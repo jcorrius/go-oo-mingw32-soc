@@ -55,7 +55,8 @@ IDLFILES=\
 	XErrObject.idl \
 	XValidation.idl \
     XOLEObject.idl \
-    XOLEObjects.idl
+    XOLEObjects.idl \
+    XButton.idl
 # ------------------------------------------------------------------
 
 .INCLUDE :  target.mk
