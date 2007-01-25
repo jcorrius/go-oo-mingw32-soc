@@ -16,18 +16,22 @@ ScVbaTextBox::ScVbaTextBox( const uno::Reference< uno::XComponentContext >& xCon
 }
 
 // Attributes
+//getString() will cause some imfo lose.
 rtl::OUString SAL_CALL 
 ScVbaTextBox::getText() throw (css::uno::RuntimeException)
 {
-    uno::Reference< text::XTextRange > xTextRange( m_xProps, uno::UNO_QUERY_THROW );
-    return xTextRange->getString();
+    uno::Any aValue = m_xProps->getPropertyValue
+            (rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Text" ) ) );
+    rtl::OUString sString;
+    aValue >>= sString;
+    return sString;
 }
 
 void SAL_CALL 
 ScVbaTextBox::setText( const rtl::OUString& _text ) throw (css::uno::RuntimeException)
 {
     uno::Reference< text::XTextRange > xTextRange( m_xProps, uno::UNO_QUERY_THROW );
-    return xTextRange->setString( _text );
+    xTextRange->setString( _text );
 }
 
 sal_Int32 SAL_CALL 
