@@ -57,7 +57,8 @@ IDLFILES=\
     XOLEObject.idl \
     XOLEObjects.idl \
     XButton.idl \
-    XLable.idl
+    XLabel.idl \
+    XTextBox.idl
 # ------------------------------------------------------------------
 
 .INCLUDE :  target.mk
