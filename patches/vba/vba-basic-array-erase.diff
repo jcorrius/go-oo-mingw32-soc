@@ -1,6 +1,7 @@
---- basic/inc/sbx.hxx	2006-10-09 09:57:23.000000000 +0100
-+++ basic/inc/sbx.hxx	2006-10-13 11:10:27.000000000 +0100
-@@ -269,6 +269,7 @@ class SB_DLLPUBLIC SbxDimArray : public 
+diff -upr /data4/sles/ooo-build-SVN-Latest/ooo-build/build/OOE680_m6/basic/inc/sbx.hxx basic/inc/sbx.hxx
+--- /data4/sles/ooo-build-SVN-Latest/ooo-build/build/OOE680_m6/basic/inc/sbx.hxx	2006-12-01 17:51:41.000000000 +0000
++++ basic/inc/sbx.hxx	2007-01-25 14:58:39.000000000 +0000
+@@ -265,6 +265,7 @@ class SbxDimArray : public SbxArray
  	SbxDim* pFirst, *pLast;         // Links fuer Dimension-Tabelle
  	short   nDim;                   // Anzahl Dimensionen
  	void   AddDimImpl32( INT32, INT32, BOOL bAllowSize0 );
@@ -8,7 +9,7 @@
  protected:
  	USHORT  Offset( const short* );
  	UINT32  Offset32( const INT32* );
-@@ -308,6 +309,8 @@ public:
+@@ -304,6 +305,8 @@ public:
  	void   AddDim32( INT32, INT32 );
  	void   unoAddDim32( INT32, INT32 );
  	BOOL   GetDim32( INT32, INT32&, INT32& ) const;
@@ -17,51 +18,10 @@
  };
  
  #endif
-dummy line to avoid confusing diff-mode
---- basic/source/sbx/sbxarray.cxx	2006-06-19 18:48:50.000000000 +0100
-+++ basic/source/sbx/sbxarray.cxx	2006-10-13 11:07:20.000000000 +0100
-@@ -590,7 +590,7 @@ void SbxArray::PutDirect( SbxVariable* p
- //
- //////////////////////////////////////////////////////////////////////////
- 
--SbxDimArray::SbxDimArray( SbxDataType t ) : SbxArray( t )
-+SbxDimArray::SbxDimArray( SbxDataType t ) : SbxArray( t ), mbHasFixedSize( false )
- {
- 	pFirst = pLast = NULL;
- 	nDim = 0;
-@@ -615,6 +615,7 @@ SbxDimArray& SbxDimArray::operator=( con
- 			AddDim32( p->nLbound, p->nUbound );
- 			p = p->pNext;
- 		}
-+		this->mbHasFixedSize = rArray.mbHasFixedSize;
- 	}
- 	return *this;
- }
---- basic/source/runtime/step0.cxx	2006-10-09 16:37:40.000000000 +0100
-+++ basic/source/runtime/step0.cxx	2006-10-13 11:37:03.000000000 +0100
-@@ -49,6 +49,13 @@
- #include <com/sun/star/uno/Any.hxx>
- 
- #include <algorithm>
-+#include <slist>
-+
-+struct aDim
-+{
-+	INT32 lb;
-+	INT32 ub;
-+};
- 
- SbxVariable* getDefaultProp( SbxVariable* pRef );
- 
-@@ -506,7 +513,6 @@ void SbiRuntime::StepDIM()
- 	SbxVariableRef refVar = PopVar();
- 	DimImpl( refVar );
- }
--
- // #56204 DIM-Funktionalitaet in Hilfsmethode auslagern (step0.cxx)
- void SbiRuntime::DimImpl( SbxVariableRef refVar )
- {
-@@ -529,6 +535,8 @@ void SbiRuntime::DimImpl( SbxVariableRef
+diff -upr /data4/sles/ooo-build-SVN-Latest/ooo-build/build/OOE680_m6/basic/source/runtime/step0.cxx basic/source/runtime/step0.cxx
+--- /data4/sles/ooo-build-SVN-Latest/ooo-build/build/OOE680_m6/basic/source/runtime/step0.cxx	2007-01-25 09:10:45.000000000 +0000
++++ basic/source/runtime/step0.cxx	2007-01-25 14:58:39.000000000 +0000
+@@ -524,6 +524,8 @@ void SbiRuntime::DimImpl( SbxVariableRef
  				if( ub < lb )
  					Error( SbERR_OUT_OF_RANGE ), ub = lb;
  				pArray->AddDim32( lb, ub );
@@ -70,56 +30,71 @@ dummy line to avoid confusing diff-mode
  			}
  		}
  		else
-@@ -713,11 +721,47 @@ void SbiRuntime::StepERASE()
- 		// Typ hart auf den Array-Typ setzen, da eine Variable mit Array
- 		// SbxOBJECT ist. Bei REDIM entsteht dann ein SbxOBJECT-Array und
- 		// der ursruengliche Typ geht verloren -> Laufzeitfehler
+@@ -702,17 +704,28 @@ void SbiRuntime::StepERASE()
+ 	SbxDataType eType = refVar->GetType();
+ 	if( eType & SbxARRAY )
+ 	{
+-		// AB 2.4.1996
+-		// Arrays haben bei Erase nach VB ein recht komplexes Verhalten. Hier
+-		// werden zunaechst nur die Typ-Probleme bei REDIM (#26295) beseitigt:
+-		// Typ hart auf den Array-Typ setzen, da eine Variable mit Array
+-		// SbxOBJECT ist. Bei REDIM entsteht dann ein SbxOBJECT-Array und
+-		// der ursruengliche Typ geht verloren -> Laufzeitfehler
 -		USHORT nSavFlags = refVar->GetFlags();
 -		refVar->ResetFlag( SBX_FIXED );
 -		refVar->SetType( SbxDataType(eType & 0x0FFF) );
 -		refVar->SetFlags( nSavFlags );
 -		refVar->Clear();
-+		//if( SbiRuntime::isVBAEnabled() )
-+		bool bCompat = ( pINST && pINST->IsCompatibility() );
-+		bool bErase = !bCompat; // default = true if compatibiltiy is off
-+		if( bCompat )
++		SbxBase* pElemObj = refVar->GetObject();
++		SbxDimArray* pDimArray = PTR_CAST(SbxDimArray,pElemObj);
++		bool bClearValues = true;
++		if( pDimArray )
 +		{
-+			SbxBase* pElemObj = refVar->GetObject();
-+			SbxDimArray* pDimArray = PTR_CAST(SbxDimArray,pElemObj);
-+			if( pDimArray )
++			if ( pDimArray->hasFixedSize() )
 +			{
-+				if ( pDimArray->hasFixedSize() )
-+				{
-+					INT32 nDims = pDimArray->GetDims();
-+					std::slist< aDim > vDims;
-+					std::slist< aDim >::iterator back = vDims.previous(vDims.end());
-+					for ( INT32 index=1; index<=nDims; ++index )
-+					{
-+						aDim dim;
-+						if ( pDimArray->GetDim32( index, dim.lb, dim.ub ) )
-+							back = vDims.insert_after( back, dim );
-+					}
-+					// Clear all Value(s) and dims
-+					pDimArray->Clear();
-+					std::slist< aDim >::iterator pIt = vDims.begin();;
-+					std::slist< aDim >::iterator pEnd = vDims.end();;
-+					for ( ; pIt != pEnd; ++pIt )
-+						pDimArray->AddDim32( pIt->lb, pIt->ub );
-+				}
-+				else
-+					bErase = true;	
++				// Clear all Value(s)
++				pDimArray->SbxArray::Clear();
++				bClearValues = false;
 +			}
 +			else
-+				bErase = true;	
++				pDimArray->Clear(); // clear Dims
 +		}
-+		if ( bErase )
++		if ( bClearValues )
 +		{
-+			USHORT nSavFlags = refVar->GetFlags();
-+			refVar->ResetFlag( SBX_FIXED );
-+			refVar->SetType( SbxDataType(eType & 0x0FFF) );
-+			refVar->SetFlags( nSavFlags );
-+			refVar->Clear();
-+		}
++			SbxArray* pArray = PTR_CAST(SbxArray,pElemObj);
++			if ( pArray )
++				pArray->Clear();
++		}	
++		
++
  	}
  	else
  	if( refVar->IsFixed() )
+--- /data4/sles/ooo-build-SVN-Latest/ooo-build/build/OOE680_m6/basic/source/sbx/sbxarray.cxx	2006-12-01 17:51:42.000000000 +0000
++++ basic/source/sbx/sbxarray.cxx	2007-01-25 16:41:50.000000000 +0000
+@@ -593,7 +593,7 @@ void SbxArray::PutDirect( SbxVariable* p
+ //
+ //////////////////////////////////////////////////////////////////////////
+ 
+-SbxDimArray::SbxDimArray( SbxDataType t ) : SbxArray( t )
++SbxDimArray::SbxDimArray( SbxDataType t ) : SbxArray( t ), mbHasFixedSize( false )
+ {
+ 	pFirst = pLast = NULL;
+ 	nDim = 0;
+@@ -618,6 +618,7 @@ SbxDimArray& SbxDimArray::operator=( con
+ 			AddDim32( p->nLbound, p->nUbound );
+ 			p = p->pNext;
+ 		}
++		this->mbHasFixedSize = rArray.mbHasFixedSize;
+ 	}
+ 	return *this;
+ }
+@@ -793,7 +794,7 @@ void SbxDimArray::Put32( SbxVariable* p,
+ 
+ UINT32 SbxDimArray::Offset32( SbxArray* pPar )
+ {
+-	if( nDim == 0 || !pPar )
++	if( nDim == 0 || !pPar || nDim != ( pPar->Count() - 1 ) )
+ 	{
+ 		SetError( SbxERR_BOUNDS ); return 0;
+ 	}
