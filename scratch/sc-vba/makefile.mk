@@ -59,7 +59,8 @@ SLOFILES= \
 		$(SLO)$/vbaoleobject.obj \
 		$(SLO)$/vbaoleobjects.obj \
 		$(SLO)$/vbabutton.obj \
-		$(SLO)$/vbalabel.obj
+		$(SLO)$/vbalabel.obj \
+		$(SLO)$/vbatextbox.obj
  
 
 # --- Targets ------------------------------------------------------
