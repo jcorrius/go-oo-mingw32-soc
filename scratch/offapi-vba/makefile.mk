@@ -59,7 +59,9 @@ IDLFILES=\
     XButton.idl \
     XLabel.idl \
     XTextBox.idl \
-    XRadioButton.idl
+    XRadioButton.idl \
+    XListBox.idl \
+    XPropValue.idl
 # ------------------------------------------------------------------
 
 .INCLUDE :  target.mk

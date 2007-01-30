@@ -12,6 +12,7 @@
 #include "vbalabel.hxx"
 #include "vbatextbox.hxx"
 #include "vbaradiobutton.hxx"
+#include "vbalistbox.hxx"
 
 
 using namespace com::sun::star;
@@ -94,6 +95,7 @@ ScVbaControl::Init( const uno::Reference< uno::XComponentContext >& xContext, co
     m_xProps = xProps;
 }
 */
+//In design model has different behavior
 sal_Bool SAL_CALL ScVbaControl::getEnabled() throw (uno::RuntimeException)
 {
     uno::Any aValue = m_xProps->getPropertyValue
@@ -155,6 +157,16 @@ ScVbaControl* ScVbaControlFactory::createControl( const sal_Int16 nClassId )  th
     {
         case form::FormComponentType::COMBOBOX:
             return new ScVbaComboBox( m_xContext, m_xProps, m_xControlShape );
+        case form::FormComponentType::COMMANDBUTTON:
+            return new ScVbaButton( m_xContext, m_xControlShape );
+        case form::FormComponentType::FIXEDTEXT:
+            return new ScVbaLabel( m_xContext, m_xControlShape );
+        case form::FormComponentType::TEXTFIELD:
+            return new ScVbaTextBox( m_xContext, m_xControlShape );
+        case form::FormComponentType::RADIOBUTTON:
+            return new ScVbaRadioButton( m_xContext, m_xControlShape );
+        case form::FormComponentType::LISTBOX:
+            return new ScVbaListBox( m_xContext, m_xControlShape );
         default:
             throw uno::RuntimeException( rtl::OUString::createFromAscii(
                     "Donot surpport this Control Type." ), uno::Reference< uno::XInterface >() );
@@ -178,6 +190,8 @@ ScVbaControl* ScVbaControlFactory::createControl()  throw (uno::RuntimeException
             return new ScVbaTextBox( m_xContext, m_xControlShape );
         case form::FormComponentType::RADIOBUTTON:
             return new ScVbaRadioButton( m_xContext, m_xControlShape );
+        case form::FormComponentType::LISTBOX:
+            return new ScVbaListBox( m_xContext, m_xControlShape );
         default:
             throw uno::RuntimeException( rtl::OUString::createFromAscii(
                     "Donot surpport this Control Type." ), uno::Reference< uno::XInterface >() );
