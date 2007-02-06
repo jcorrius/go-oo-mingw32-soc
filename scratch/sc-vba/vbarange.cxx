@@ -180,7 +180,7 @@ public:
 		if ( !bHasMore )
 			throw container::NoSuchElementException();
 		bHasMore = false;
-		return lcl_makeRange( m_xContext, uno::makeAny( m_xRange ) );
+		return uno::makeAny( m_xRange );
 	}
 };
 
