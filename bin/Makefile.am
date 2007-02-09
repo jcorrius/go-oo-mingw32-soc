@@ -1,4 +1,5 @@
 script_files = \
+	a2az.pl \
 	bash-completion.in \
 	build-galleries \
 	build-ooo \
