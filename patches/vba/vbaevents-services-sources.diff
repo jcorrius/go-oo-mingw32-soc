@@ -1226,22 +1226,23 @@
  
  // 0 = Export TBX form controls, 1 = Export OCX form controls.
  #define EXC_EXP_OCX_CTRL 0
-@@ -118,6 +123,12 @@ private:
-                             const XclImpCtrlLinkHelper& rControl ) const;
+@@ -114,6 +114,12 @@ private:
+                             const Rectangle& rAnchorRect ) const;
      /** Tries to register a Basic macro for the control. */
      void                RegisterTbxMacro( const XclImpTbxControlObj& rTbxCtrlObj );
 +#ifdef ENABLE_VBA
 +    void                RegisterOleMacros( const ::com::sun::star::uno::Reference< 
 +                                               ::com::sun::star::awt::XControlModel >& rxModel,
-+                                           const XclImpOleObj& rOcxCtrlObj );
++                                           const XclImpOleObj& rOcxCtrlObj, SdrObject* pSdrObj );
 +    void                AttachMacro( const ::com::sun::star::script::ScriptEventDescriptor& rEvent );
 +#endif //ENABLE_VBA
  
  private:
-     ::com::sun::star::uno::Reference< ::com::sun::star::lang::XMultiServiceFactory >
---- /data4/sles/ooo-build-HEAD/ooo-build/build/src680-m175/sc/source/filter/excel/xlocx.cxx	2006-07-31 17:59:05.000000000 +0100
-+++ sc/source/filter/excel/xlocx.cxx	2006-07-31 18:15:02.000000000 +0100
-@@ -76,13 +76,48 @@
+     SotStorageStreamRef mxStrm;             /// The 'Ctls' stream in the Excel file.
+diff -rup sc.orig/source/filter/excel/xlocx.cxx sc/source/filter/excel/xlocx.cxx
+--- sc.orig/source/filter/excel/xlocx.cxx	2007-02-13 20:32:54.000000000 +0000
++++ sc/source/filter/excel/xlocx.cxx	2007-02-13 20:49:55.000000000 +0000
+@@ -58,13 +58,49 @@
  #ifndef _COM_SUN_STAR_FORM_XFORMCOMPONENT_HPP_
  #include <com/sun/star/form/XFormComponent.hpp>
  #endif
@@ -1277,6 +1278,7 @@
 +#ifndef _CPPUHELPER_BOOTSTRAP_HXX_
 +#include <cppuhelper/bootstrap.hxx>
 +#endif
++#include <sfx2/objsh.hxx>
 +
 +using org::openoffice::vba::XVBAToOOEventDescGen;
 +using com::sun::star::uno::XComponentContext;
@@ -1293,17 +1295,18 @@
  #ifndef _SVDPAGE_HXX
  #include <svx/svdpage.hxx>
  #endif
-@@ -249,6 +284,9 @@ SdrObject* XclImpOcxConverter::CreateSdr
+@@ -178,6 +213,10 @@ SdrObject* XclImpOcxConverter::CreateSdr
              // reads from mxStrm into xShape, inserts the control model into the form of the sheet
              if( ReadOCXExcelKludgeStream( mxStrm, &xShape, TRUE ) )
                  pSdrObj = FinalizeSdrObject( rOcxCtrlObj, xShape, rAnchorRect );
 +#ifdef ENABLE_VBA
-+            RegisterOleMacros( xModel, rOcxCtrlObj );
++            Reference< XControlModel > xModel = XclControlObjHelper::GetModelFromShape( xShape );
++            RegisterOleMacros( xModel, rOcxCtrlObj, pSdrObj );
 +#endif //ENABLE_VBA
          }
          catch( Exception& )
          {
-@@ -435,23 +472,119 @@ void XclImpOcxConverter::ConvertSheetLin
+@@ -273,22 +311,125 @@ SdrObject* XclImpOcxConverter::FinalizeS
  void XclImpOcxConverter::RegisterTbxMacro( const XclImpTbxControlObj& rTbxCtrlObj )
  {
      ScriptEventDescriptor aEvent;
@@ -1345,86 +1348,92 @@
              {
 -                DBG_ERRORFILE( "XclImpOcxConverter::RegisterTbxMacro - cannot register macro" );
 +                DBG_ERRORFILE( "XclImpOcxConverter::AttachMacro - cannot attach macro" );
++            }
++        }
++    }
++}
++
++void XclImpOcxConverter::RegisterOleMacros( const Reference< XControlModel > & rxModel, const XclImpOleObj& rOcxCtrlObj, SdrObject* pSdrObj  )
++{
++    if ( pSdrObj && rxModel.is() )
++    {
++        // Need to search basic for macro's named e.g. ControlButton1_Click
++        OUString sSearchString = pSdrObj->GetName();
++        sSearchString += OUString::createFromAscii("_");
++        ScfPropertySet aPropSet( rxModel );
++ 
++        if( SfxObjectShell* pDocShell = GetDocShell() )
++        {
++            if( StarBASIC* pBasic = pDocShell->GetBasic() )
++            {
++                // Seach in the CodeName ( Module ) associated with this sheet
++                if( SbModule* pModule = dynamic_cast< SbModule* >( pBasic->Find( GetExtDocOptions().GetCodeName(rOcxCtrlObj.GetScTab() ), SbxCLASS_OBJECT ) ) )
++                {
++                    Reference<XComponentContext > xContext( ::cppu::defaultBootstrap_InitialComponentContext(), UNO_QUERY_THROW ); // Fatal error anyway
++                    if ( SbxArray* pMethods = pModule->GetMethods() )
++                    {
++                        sal_Int32 nNumMethods = pMethods->Count();
++                        String sLibModName = pModule->GetName();
++                        sLibModName.Insert('.',0).Insert( pModule->GetParent()->GetName(), 0 );
++                        // Use service to create bindings for this control.
++                        // Bindings are created based on the handlers found. 
++                        // Note: service just needs the extensions for the handlers 
++                        // that we found e.g.  "_Click, _Change, _GotFocus" etc.
++                        // Hopefully this service can be re-used to do the same foo
++                        // for UserForms
++                        Reference< XVBAToOOEventDescGen > xEvtDescGen( xContext->getServiceManager()->createInstanceWithContext( CREATE_OUSTRING( "org.openoffice.vba.VBAToOOEventDesc" ), xContext ), UNO_QUERY );
++    
++                        Reference< XControl > xCntrl;
++                        String sServiceName;
++                        // VBAToOOEventDesc expects an XControl to introspect on
++                        // so create one ( is discarded ) 
++                        if ( aPropSet.GetStringProperty(  sServiceName, CREATE_OUSTRING( "DefaultControl" ) ) && sServiceName.Len() )
++                        {
++                            xCntrl.set( xContext->getServiceManager()->createInstanceWithContext( sServiceName , xContext), UNO_QUERY );
++                            if ( xCntrl.is() )
++                            {
++                                // also need the model ( contains the control name
++                                // as well )
++                                xCntrl->setModel( rxModel );
++                            }
++                        }
++                        for ( sal_Int32 nIndex=0; nIndex<nNumMethods; ++nIndex )
++                        {
++                            SbMethod* pMethod = dynamic_cast< SbMethod* >( pMethods->Get( static_cast< USHORT >( nIndex ) ) );
++                            OUString sMeth( pMethod->GetName() );
++    			// The name of the method and the name of the
++    			// control may match in a case insensitive way
++                            sal_Int32 nSearchIndex = sMeth.toAsciiUpperCase().indexOf( sSearchString.toAsciiUpperCase() );
++                            if ( nSearchIndex == 0  )
++                            {
++                                Sequence< OUString > sHandlerExtns(1);
++                                sHandlerExtns[ 0 ] = sMeth.copy( pSdrObj->GetName().Len() );
++                                OUString sMacroName = sMeth.copy( 0, pSdrObj->GetName().Len() );
++                                Sequence< ScriptEventDescriptor > aDescs( xEvtDescGen->getEventDescriptions( xCntrl, sLibModName, sHandlerExtns ) );
++                                if ( aDescs.getLength() )
++                                {
++                                    ScriptEventDescriptor* pEvent = aDescs.getArray();
++                                    ScriptEventDescriptor* pEnd = pEvent + aDescs.getLength();
++                                    sal_Int32 counter = 0;
++                                    for ( ; pEvent < pEnd; ++pEvent )
++                                    {
++                                        const static OUString sMacro( RTL_CONSTASCII_USTRINGPARAM("$macro"));
++                                        pEvent->ScriptCode = pEvent->ScriptCode.replaceAt( pEvent->ScriptCode.indexOf( sMacro ), sMacro.getLength(), sMacroName );
++                                        AttachMacro( *pEvent );
++                                    }
++                                }
++                            }
++                        }    
++                    }
++                }
              }
          }
      }
  }
- 
-+void XclImpOcxConverter::RegisterOleMacros( const Reference< XControlModel > & rxModel, const XclImpOleObj& rOcxCtrlObj )
-+{
-+    // Need to search basic for macro's named e.g. ControlButton1_Click
-+    OUString sSearchString = rOcxCtrlObj.GetControlName();
-+    sSearchString += OUString::createFromAscii("_");
-+    ScfPropertySet aPropSet( rxModel );
-+ 
-+    if( SfxObjectShell* pDocShell = GetDocShell() )
-+        if( StarBASIC* pBasic = pDocShell->GetBasic() )
-+            // Seach in the CodeName ( Module ) associated with this sheet
-+            if( SbModule* pModule = dynamic_cast< SbModule* >( pBasic->Find( GetExtDocOptions().GetCodeName(rOcxCtrlObj.GetScTab() ), SbxCLASS_OBJECT ) ) )
-+            {
-+                Reference<XComponentContext > xContext( ::cppu::defaultBootstrap_InitialComponentContext(), UNO_QUERY_THROW ); // Fatal error anyway
-+                if ( SbxArray* pMethods = pModule->GetMethods() )
-+                {
-+                    sal_Int32 nNumMethods = pMethods->Count();
-+                    String sLibModName = pModule->GetName();
-+                    sLibModName.Insert('.',0).Insert( pModule->GetParent()->GetName(), 0 );
-+                    // Use service to create bindings for this control.
-+                    // Bindings are created based on the handlers found. 
-+                    // Note: service just needs the extensions for the handlers 
-+                    // that we found e.g.  "_Click, _Change, _GotFocus" etc.
-+                    // Hopefully this service can be re-used to do the same foo
-+                    // for UserForms
-+                    Reference< XVBAToOOEventDescGen > xEvtDescGen( xContext->getServiceManager()->createInstanceWithContext( CREATE_OUSTRING( "org.openoffice.vba.VBAToOOEventDesc" ), xContext ), UNO_QUERY );
-+
-+                    Reference< XControl > xCntrl;
-+                    String sServiceName;
-+                    // VBAToOOEventDesc expects an XControl to introspect on
-+                    // so create one ( is discarded ) 
-+                    if ( aPropSet.GetStringProperty(  sServiceName, CREATE_OUSTRING( "DefaultControl" ) ) && sServiceName.Len() )
-+                    {
-+                        xCntrl.set( xContext->getServiceManager()->createInstanceWithContext( sServiceName , xContext), UNO_QUERY );
-+                        if ( xCntrl.is() )
-+                        {
-+                            // also need the model ( contains the control name
-+                            // as well )
-+                            xCntrl->setModel( rxModel );
-+                        }
-+                    }
-+                    for ( sal_Int32 nIndex=0; nIndex<nNumMethods; ++nIndex )
-+                    {
-+                        SbMethod* pMethod = dynamic_cast< SbMethod* >( pMethods->Get( static_cast< USHORT >( nIndex ) ) );
-+                        OUString sMeth( pMethod->GetName() );
-+			// The name of the method and the name of the
-+			// control may match in a case insensitive way
-+                        sal_Int32 nSearchIndex = sMeth.toAsciiUpperCase().indexOf( sSearchString.toAsciiUpperCase() );
-+                        if ( nSearchIndex == 0  )
-+                        {
-+                            Sequence< OUString > sHandlerExtns(1);
-+                            sHandlerExtns[ 0 ] = sMeth.copy( rOcxCtrlObj.GetControlName().Len() );
-+                            OUString sMacroName = sMeth.copy( 0, rOcxCtrlObj.GetControlName().Len() );
-+                            Sequence< ScriptEventDescriptor > aDescs( xEvtDescGen->getEventDescriptions( xCntrl, sLibModName, sHandlerExtns ) );
-+                            if ( aDescs.getLength() )
-+                            {
-+                                ScriptEventDescriptor* pEvent = aDescs.getArray();
-+                                ScriptEventDescriptor* pEnd = pEvent + aDescs.getLength();
-+                                sal_Int32 counter = 0;
-+                                for ( ; pEvent < pEnd; ++pEvent )
-+                                {
-+                                    const static OUString sMacro( RTL_CONSTASCII_USTRINGPARAM("$macro"));
-+                                    pEvent->ScriptCode = pEvent->ScriptCode.replaceAt( pEvent->ScriptCode.indexOf( sMacro ), sMacro.getLength(), sMacroName );
-+                                    AttachMacro( *pEvent );
-+                                }
-+                            }
-+                        }
-+                    }    
-+                }
-+            }
-+}
 +#endif //ENABLE_VBA
-+
+ 
  // ----------------------------------------------------------------------------
  
- XclExpOcxConverter::XclExpOcxConverter( const XclExpRoot& rRoot ) :
 Index: sc/source/filter/excel/makefile.mk
 ===================================================================
 RCS file: /cvs/sc/sc/source/filter/excel/makefile.mk,v
