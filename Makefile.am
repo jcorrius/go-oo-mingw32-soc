@@ -17,7 +17,8 @@ EXTRA_DIST = \
 	intltool-extract.in	\
 	ChangeLog-to-1.3.0	\
 	ChangeLog-to-1.9.0	\
-	ChangeLog-to-2.0.0
+	ChangeLog-to-2.0.0	\
+	ChangeLog-to-2.2
 
 ACLOCAL_AMFLAGS = -I m4
 
