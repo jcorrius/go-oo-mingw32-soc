@@ -4,10 +4,10 @@
 #include <com/sun/star/uno/XComponentContext.hpp>
 #include <com/sun/star/sheet/XDataPilotTable.hpp>
 
-#include <org/openoffice/vba/XPivotCache.hpp>
+#include <org/openoffice/excel/XPivotCache.hpp>
 #include "vbahelper.hxx"
 
-typedef ::cppu::WeakImplHelper1<oo::vba::XPivotCache > PivotCacheImpl_BASE;
+typedef ::cppu::WeakImplHelper1<oo::excel::XPivotCache > PivotCacheImpl_BASE;
 
 class ScVbaPivotCache : public PivotCacheImpl_BASE
 {		

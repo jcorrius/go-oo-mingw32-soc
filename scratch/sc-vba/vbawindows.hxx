@@ -2,7 +2,7 @@
 #define SC_VBA_WINDOWS_HXX
 
 #include <cppuhelper/implbase1.hxx>
-#include <org/openoffice/vba/XWindows.hpp>
+#include <org/openoffice/excel/XWindows.hpp>
 
 #include <com/sun/star/uno/XComponentContext.hpp>
  
@@ -10,7 +10,7 @@
 #include "vbacollectionimpl.hxx"
 
 
-typedef ::cppu::ImplInheritanceHelper1< ScVbaCollectionBaseImpl, oo::vba::XWindows > ScVbaWindows_BASE;
+typedef ::cppu::ImplInheritanceHelper1< ScVbaCollectionBaseImpl, oo::excel::XWindows > ScVbaWindows_BASE;
 
 class ScVbaWindows : public ScVbaWindows_BASE
 {

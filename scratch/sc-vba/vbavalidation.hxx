@@ -2,11 +2,11 @@
 #define SC_VBA_VALIDATION_HXX
 #include <cppuhelper/implbase1.hxx>
 #include <com/sun/star/uno/XComponentContext.hpp>
-#include <org/openoffice/vba/XValidation.hpp>
+#include <org/openoffice/excel/XValidation.hpp>
 #include <com/sun/star/table/XCellRange.hpp>
 #include "vbahelper.hxx"
 
-typedef ::cppu::WeakImplHelper1<oo::vba::XValidation > ValidationImpl_BASE;
+typedef ::cppu::WeakImplHelper1<oo::excel::XValidation > ValidationImpl_BASE;
 
 class ScVbaValidation : public ValidationImpl_BASE
 {		

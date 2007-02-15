@@ -51,7 +51,7 @@ getWorkbook( uno::Reference< uno::XComponentContext >& xContext, const uno::Refe
 		return uno::Any();
 
 	ScVbaWorkbook *pWb = new ScVbaWorkbook( xContext, xModel );
-	return uno::Any( uno::Reference< vba::XWorkbook > (pWb) );
+	return uno::Any( uno::Reference< excel::XWorkbook > (pWb) );
 }
 
 
@@ -214,7 +214,7 @@ ScVbaWorkbooks::ScVbaWorkbooks( const uno::Reference< css::uno::XComponentContex
 uno::Type
 ScVbaWorkbooks::getElementType() throw (uno::RuntimeException)
 {
-	return vba::XWorkbook::static_type(0);
+	return excel::XWorkbook::static_type(0);
 }
 uno::Reference< container::XEnumeration >
 ScVbaWorkbooks::createEnumeration() throw (uno::RuntimeException)

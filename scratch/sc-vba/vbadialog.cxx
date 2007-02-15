@@ -2,7 +2,7 @@
 
 #include <com/sun/star/lang/XMultiComponentFactory.hpp>
 #include <com/sun/star/frame/XModel.hpp>
-#include <org/openoffice/vba/XApplication.hpp>
+#include <org/openoffice/excel/XApplication.hpp>
 
 #include <tools/string.hxx>
 
@@ -11,7 +11,6 @@
 #include "vbaglobals.hxx"
 
 using namespace ::org::openoffice;
-using namespace ::org::openoffice::vba;
 using namespace ::com::sun::star;
 
 // fails silently
@@ -35,7 +34,7 @@ uno::Any
 ScVbaDialog::getParent() throw (uno::RuntimeException)
 {
 	uno::Reference< vba::XGlobals > xGlobals = ScVbaGlobals::getGlobalsImpl( m_xContext );
-	uno::Reference< vba::XApplication > xApplication = xGlobals->getApplication();
+	uno::Reference< excel::XApplication > xApplication = xGlobals->getApplication();
 	if ( !xApplication.is() )
 	{
 		throw uno::RuntimeException(
@@ -50,10 +49,10 @@ ScVbaDialog::getCreator() throw (uno::RuntimeException)
 	// #TODO #FIXME
 	return 0;
 }
-uno::Reference< vba::XApplication >
+uno::Reference< excel::XApplication >
 ScVbaDialog::getApplication() throw (uno::RuntimeException)
 {
-	uno::Reference< vba::XApplication > xApplication =  ScVbaGlobals::getGlobalsImpl( m_xContext )->getApplication();
+	uno::Reference< excel::XApplication > xApplication =  ScVbaGlobals::getGlobalsImpl( m_xContext )->getApplication();
 	if ( !xApplication.is() )
 	{
 		throw uno::RuntimeException(

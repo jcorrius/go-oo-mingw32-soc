@@ -1,6 +1,6 @@
 #ifndef SC_VBA_CHARTOBJECTS_HXX
 #define SC_VBA_CHARTOBJECTS_HXX
-#include <org/openoffice/vba/XChartObjects.hpp>
+#include <org/openoffice/excel/XChartObjects.hpp>
 #include <cppuhelper/implbase1.hxx>
 #include <com/sun/star/uno/XComponentContext.hpp>
 #include <com/sun/star/table/XTableCharts.hpp>
@@ -9,7 +9,7 @@
 #include "vbahelper.hxx"
 
 
-typedef ::cppu::ImplInheritanceHelper1< ScVbaCollectionBaseImpl, oo::vba::XChartObjects > ChartObjects_BASE;
+typedef ::cppu::ImplInheritanceHelper1< ScVbaCollectionBaseImpl, oo::excel::XChartObjects > ChartObjects_BASE;
 
 class ScVbaChartObjects : public ChartObjects_BASE
 {		

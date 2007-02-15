@@ -22,7 +22,7 @@ ScVbaChartObject::getName() throw (css::uno::RuntimeException)
 
 
 
-uno::Reference< vba::XChart > SAL_CALL 
+uno::Reference< excel::XChart > SAL_CALL 
 ScVbaChartObject::getChart() throw (css::uno::RuntimeException)
 {
 	uno::Reference< document::XEmbeddedObjectSupplier > xEmbed( m_xTableChart, uno::UNO_QUERY_THROW );

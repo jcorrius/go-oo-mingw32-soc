@@ -9,7 +9,7 @@ ScVbaPivotTable::ScVbaPivotTable( const uno::Reference< uno::XComponentContext >
 {
 }
 
-uno::Reference< vba::XPivotCache >
+uno::Reference< excel::XPivotCache >
 ScVbaPivotTable::PivotCache() throw (uno::RuntimeException)
 {
 	return new ScVbaPivotCache( m_xContext, m_xTable );

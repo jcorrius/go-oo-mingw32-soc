@@ -1,13 +1,13 @@
 #ifndef SC_VBA_LABEL_HXX
 #define SC_VBA_LABEL_HXX
 #include <cppuhelper/implbase1.hxx>
-#include <org/openoffice/vba/XLabel.hpp>
+#include <org/openoffice/msforms/XLabel.hpp>
 #include <comphelper/propertycontainer.hxx>
 
 #include "vbacontrol.hxx"
 #include "vbahelper.hxx"
 
-typedef cppu::ImplInheritanceHelper1< ScVbaControl, oo::vba::XLabel > LabelImpl_BASE;
+typedef cppu::ImplInheritanceHelper1< ScVbaControl, oo::msforms::XLabel > LabelImpl_BASE;
 
 class ScVbaLabel : public LabelImpl_BASE
     ,public ::comphelper::OPropertyContainer

@@ -44,9 +44,9 @@ uno::Any SAL_CALL
 ScVbaCollectionBaseImpl::getParent() throw (uno::RuntimeException)
 {
 	// #TODO #FIXME investigate whether this makes sense
-	uno::Reference< vba::XApplication > xApplication =
+	uno::Reference< excel::XApplication > xApplication =
 		ScVbaGlobals::getGlobalsImpl( m_xContext )->getApplication();
-	uno::Reference< vba::XWorkbook > xWorkbook;
+	uno::Reference< excel::XWorkbook > xWorkbook;
 	if ( xApplication.is() )
 	{
 		xWorkbook = xApplication->getActiveWorkbook();
@@ -60,10 +60,10 @@ ScVbaCollectionBaseImpl::getParent() throw (uno::RuntimeException)
 	//SC_VBA_STUB();
 	return 0;
 }
-uno::Reference< vba::XApplication > SAL_CALL ScVbaCollectionBaseImpl::getApplication() throw (uno::RuntimeException)
+uno::Reference< excel::XApplication > SAL_CALL ScVbaCollectionBaseImpl::getApplication() throw (uno::RuntimeException)
 {
 	// #TODO #FIXME investigate whether this makes sense
-	uno::Reference< vba::XApplication > xApplication =
+	uno::Reference< excel::XApplication > xApplication =
 		ScVbaGlobals::getGlobalsImpl( m_xContext )->getApplication();
 	return  xApplication;
 }

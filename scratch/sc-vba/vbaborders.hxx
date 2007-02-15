@@ -2,7 +2,7 @@
 #define SC_VBA_BORDERS_HXX
 
 #include <cppuhelper/implbase1.hxx>
-#include <org/openoffice/vba/XBorders.hpp>
+#include <org/openoffice/excel/XBorders.hpp>
 
 #include <com/sun/star/uno/XComponentContext.hpp>
 #include <com/sun/star/table/XCellRange.hpp>
@@ -12,7 +12,7 @@
 #include "vbacollectionimpl.hxx"
 
 
-typedef ::cppu::ImplInheritanceHelper1< ScVbaCollectionBaseImpl, oo::vba::XBorders > ScVbaBorders_BASE;
+typedef ::cppu::ImplInheritanceHelper1< ScVbaCollectionBaseImpl, oo::excel::XBorders > ScVbaBorders_BASE;
 
 class ScVbaPalette;
 class ScVbaBorders : public ScVbaBorders_BASE

@@ -17,7 +17,7 @@ sal_Int32, ::rtl::OUStringHash,
 uno::Any ComponentToWindow( const uno::Any& aSource, uno::Reference< uno::XComponentContext > & xContext )
 {
 	uno::Reference< frame::XModel > xModel( aSource, uno::UNO_QUERY_THROW );
-	uno::Reference< vba::XWindow > xWin( new ScVbaWindow( xContext,xModel ) );
+	uno::Reference< excel::XWindow > xWin( new ScVbaWindow( xContext,xModel ) );
 	return uno::makeAny( xWin );
 }
 
@@ -188,7 +188,7 @@ ScVbaWindows::createCollectionObject( const css::uno::Any& aSource )
 uno::Type 
 ScVbaWindows::getElementType() throw (uno::RuntimeException)
 {
-	return vba::XWindows::static_type(0);
+	return excel::XWindows::static_type(0);
 }
 
 uno::Reference< vba::XCollection >

@@ -45,7 +45,7 @@ ScVbaWSFunction::invoke(const rtl::OUString& FunctionName, const uno::Sequence< 
 
 	for (int i=0; i < Params.getLength();i++) 
 	{
-		uno::Reference<vba::XRange> myRange( aArray[ i ], uno::UNO_QUERY );
+		uno::Reference<excel::XRange> myRange( aArray[ i ], uno::UNO_QUERY );
 		if ( myRange.is() ) 
 		{
 			aArrayTemp[i] = myRange->getCellRange();

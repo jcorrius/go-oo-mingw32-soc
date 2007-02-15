@@ -52,7 +52,7 @@ public:
 	virtual ::sal_Int32 SAL_CALL getCount() throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL getParent() throw (css::uno::RuntimeException);
 	virtual ::sal_Int32 SAL_CALL getCreator() throw (css::uno::RuntimeException);
-	virtual css::uno::Reference< oo::vba::XApplication > SAL_CALL getApplication() throw (css::uno::RuntimeException);
+	virtual css::uno::Reference< oo::excel::XApplication > SAL_CALL getApplication() throw (css::uno::RuntimeException);
 
 	virtual css::uno::Any SAL_CALL Item( const css::uno::Any& Index ) throw (css::uno::RuntimeException);
 	// XDefaultMethod

@@ -3,13 +3,13 @@
 
 #include <cppuhelper/implbase1.hxx>
 
-#include <org/openoffice/vba/XComments.hpp>
+#include <org/openoffice/excel/XComments.hpp>
 
 #include "vbahelper.hxx"
 #include "vbacollectionimpl.hxx"
 #include "vbacomment.hxx"
 
-typedef ::cppu::ImplInheritanceHelper1< ScVbaCollectionBaseImpl, oo::vba::XComments > ScVbaComments_BASE;
+typedef ::cppu::ImplInheritanceHelper1< ScVbaCollectionBaseImpl, oo::excel::XComments > ScVbaComments_BASE;
 
 class ScVbaComments : public ScVbaComments_BASE
 {

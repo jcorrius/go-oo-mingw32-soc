@@ -1,12 +1,12 @@
 #include "vbaseriescollection.hxx"
-#include <org/openoffice/vba/XSeries.hpp>
+#include <org/openoffice/excel/XSeries.hpp>
 
 #include "vbaglobals.hxx"
 
 using namespace ::com::sun::star;
 using namespace ::org::openoffice;
 
-uno::Reference< oo::vba::XApplication > 
+uno::Reference< oo::excel::XApplication > 
 ScVbaSeriesCollection::getApplication() throw (uno::RuntimeException)
 {
 	return ScVbaGlobals::getGlobalsImpl( m_xContext )->getApplication();
@@ -38,7 +38,7 @@ ScVbaSeriesCollection::createEnumeration() throw (uno::RuntimeException)
 uno::Type 
 ScVbaSeriesCollection::getElementType() throw (uno::RuntimeException)
 {
-	return vba::XSeries::static_type(0);
+	return excel::XSeries::static_type(0);
 }
 ::sal_Bool
 ScVbaSeriesCollection::hasElements() throw (uno::RuntimeException)
@@ -51,9 +51,9 @@ ScVbaSeriesCollection::hasElements() throw (uno::RuntimeException)
 uno::Any SAL_CALL 
 ScVbaSeriesCollection::getParent() throw (uno::RuntimeException)
 {
-	uno::Reference< vba::XApplication > xApplication =
+	uno::Reference< excel::XApplication > xApplication =
 		getApplication();
-	uno::Reference< vba::XWorkbook > xWorkbook;
+	uno::Reference< excel::XWorkbook > xWorkbook;
 	if ( xApplication.is() )
 	{
 		xWorkbook = xApplication->getActiveWorkbook();

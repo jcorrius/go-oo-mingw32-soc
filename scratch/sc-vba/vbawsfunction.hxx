@@ -2,7 +2,7 @@
 #define SC_VBA_INTERIOR_HXX
 
 #include <cppuhelper/implbase2.hxx>
-#include <org/openoffice/vba/XWorksheetFunction.hpp>
+#include <org/openoffice/excel/XWorksheetFunction.hpp>
 #include <com/sun/star/uno/XComponentContext.hpp>
 #include "vbarange.hxx"
 

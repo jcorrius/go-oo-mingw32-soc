@@ -24,8 +24,8 @@ namespace vbaobj
 
 	Sequence< ::rtl::OUString > SAL_CALL getSupportedServiceNames();
 
-	Reference<XInterface> SAL_CALL create(
-		Sequence<Any> const &, Reference<XComponentContext> const & );
+//	Reference<XInterface> SAL_CALL create(
+//		Sequence<Any> const &, Reference<XComponentContext> const & );
 } // end namespace vbaobj
 
 

@@ -84,7 +84,7 @@ ScVbaWorkbook::getFullName() throw (uno::RuntimeException)
 	INetURLObject aURL( getModel()->getURL() );
 	return aURL.GetURLPath();
 }
-uno::Reference< vba::XWorksheet >
+uno::Reference< excel::XWorksheet >
 ScVbaWorkbook::getActiveSheet() throw (uno::RuntimeException)
 {
 	return new ActiveSheet( m_xContext );
@@ -100,7 +100,7 @@ ScVbaWorkbook::Worksheets( const uno::Any& aIndex ) throw (uno::RuntimeException
 	uno::Reference< frame::XModel > xModel( getModel() );	
 	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( xModel, uno::UNO_QUERY_THROW );
 	uno::Reference<sheet::XSpreadsheets > xSheets( xSpreadDoc->getSheets(), uno::UNO_QUERY_THROW );
-	uno::Reference< vba::XCollection > xWorkSheets( uno::Reference< vba::XWorksheets >( new ScVbaWorksheets(m_xContext, xSheets, xModel ) ), uno::UNO_QUERY_THROW );
+	uno::Reference< vba::XCollection > xWorkSheets( uno::Reference< excel::XWorksheets >( new ScVbaWorksheets(m_xContext, xSheets, xModel ) ), uno::UNO_QUERY_THROW );
 	if (  aIndex.getValueTypeClass() == uno::TypeClass_VOID )
 	{
 		return uno::Any( xWorkSheets );	

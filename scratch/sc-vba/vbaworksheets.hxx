@@ -3,7 +3,7 @@
 
 #include <cppuhelper/implbase1.hxx>
 
-#include <org/openoffice/vba/XWorksheets.hpp>
+#include <org/openoffice/excel/XWorksheets.hpp>
 #include <com/sun/star/sheet/XSpreadsheets.hpp>
 #include <com/sun/star/container/XEnumerationAccess.hpp>
 #include <com/sun/star/uno/XComponentContext.hpp>
@@ -15,7 +15,7 @@
 class ScModelObj;
 
 
-typedef ::cppu::ImplInheritanceHelper1< ScVbaCollectionBaseImpl, oo::vba::XWorksheets > ScVbaWorksheets_BASE;
+typedef ::cppu::ImplInheritanceHelper1< ScVbaCollectionBaseImpl, oo::excel::XWorksheets > ScVbaWorksheets_BASE;
 
 class ScVbaWorksheets : public ScVbaWorksheets_BASE
 {

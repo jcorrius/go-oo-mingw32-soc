@@ -1,13 +1,13 @@
 #ifndef SC_VBA_RADIOBUTTON_HXX
 #define SC_VBA_RADIOBUTTON_HXX
 #include <cppuhelper/implbase1.hxx>
-#include <org/openoffice/vba/XRadioButton.hpp>
+#include <org/openoffice/msforms/XRadioButton.hpp>
 #include <comphelper/propertycontainer.hxx>
 
 #include "vbacontrol.hxx"
 #include "vbahelper.hxx"
 
-typedef cppu::ImplInheritanceHelper1< ScVbaControl, oo::vba::XRadioButton > RadioButtonImpl_BASE;
+typedef cppu::ImplInheritanceHelper1< ScVbaControl, oo::msforms::XRadioButton > RadioButtonImpl_BASE;
 
 class ScVbaRadioButton : public RadioButtonImpl_BASE
     ,public ::comphelper::OPropertyContainer

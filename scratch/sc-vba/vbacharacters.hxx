@@ -3,13 +3,13 @@
 
 #include <cppuhelper/implbase1.hxx>
 
-#include <org/openoffice/vba/XCharacters.hpp>
+#include <org/openoffice/excel/XCharacters.hpp>
 #include <com/sun/star/uno/XComponentContext.hpp>
 #include <com/sun/star/text/XSimpleText.hpp>
 
 #include "vbahelper.hxx"
 #include "vbapalette.hxx"
-typedef ::cppu::WeakImplHelper1< oo::vba::XCharacters > ScVbaCharacters_BASE;
+typedef ::cppu::WeakImplHelper1< oo::excel::XCharacters > ScVbaCharacters_BASE;
 
 class ScVbaCharacters : public ScVbaCharacters_BASE
 {
@@ -30,8 +30,8 @@ public:
 	virtual ::sal_Int32 SAL_CALL getCount() throw (css::uno::RuntimeException);
 	virtual ::rtl::OUString SAL_CALL getText() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setText( const ::rtl::OUString& _text ) throw (css::uno::RuntimeException);
-	virtual css::uno::Reference< oo::vba::XFont > SAL_CALL getFont() throw (css::uno::RuntimeException);
-	virtual void SAL_CALL setFont( const css::uno::Reference< oo::vba::XFont >& _font ) throw (css::uno::RuntimeException);
+	virtual css::uno::Reference< oo::excel::XFont > SAL_CALL getFont() throw (css::uno::RuntimeException);
+	virtual void SAL_CALL setFont( const css::uno::Reference< oo::excel::XFont >& _font ) throw (css::uno::RuntimeException);
 
 	// Methods
 	virtual void SAL_CALL Insert( const ::rtl::OUString& String ) throw (css::uno::RuntimeException);

@@ -3,14 +3,14 @@
 
 #include <cppuhelper/implbase1.hxx>
 
-#include <org/openoffice/vba/XFont.hpp>
+#include <org/openoffice/excel/XFont.hpp>
 #include <com/sun/star/beans/XPropertySet.hpp>
 #include "vbahelper.hxx"
 #include "vbapalette.hxx"
 
 class ScTableSheetsObj;
 
-typedef  ::cppu::WeakImplHelper1< oo::vba::XFont > ScVbaFont_BASE;
+typedef  ::cppu::WeakImplHelper1< oo::excel::XFont > ScVbaFont_BASE;
 
 class ScVbaFont : public ScVbaFont_BASE 
 {

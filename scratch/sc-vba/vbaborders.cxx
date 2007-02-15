@@ -1,10 +1,10 @@
 #include "vbaborders.hxx"
 
 #include <cppuhelper/implbase3.hxx>
-#include <org/openoffice/vba/Excel/XlBordersIndex.hpp>
-#include <org/openoffice/vba/Excel/XlBorderWeight.hpp>
-#include <org/openoffice/vba/Excel/XlLineStyle.hpp>
-#include <org/openoffice/vba/Excel/Constants.hpp>
+#include <org/openoffice/excel/XlBordersIndex.hpp>
+#include <org/openoffice/excel/XlBorderWeight.hpp>
+#include <org/openoffice/excel/XlLineStyle.hpp>
+#include <org/openoffice/excel/XlColorIndex.hpp>
 #include <com/sun/star/beans/XPropertySet.hpp>
 #include <com/sun/star/table/TableBorder.hpp>
 
@@ -12,11 +12,11 @@
 
 using namespace ::com::sun::star;
 using namespace ::org::openoffice;
-using namespace ::org::openoffice::vba::Excel;
+using namespace ::org::openoffice::excel;
 
 
 typedef ::cppu::WeakImplHelper1<container::XIndexAccess > RangeBorders_Base;
-typedef ::cppu::WeakImplHelper1<vba::XBorder > ScVbaBorder_Base;
+typedef ::cppu::WeakImplHelper1<excel::XBorder > ScVbaBorder_Base;
 
 // #TODO sort these indexes to match the order in which Excel iterates over the
 // borders, the enumeration will match the order in this list
@@ -173,7 +173,7 @@ public:
 	{
 		sal_Int32 nColor;
 		_colorindex >>= nColor;
-		if ( !nColor || nColor == vba::Excel::Constants::xlColorIndexAutomatic )
+		if ( !nColor || nColor == XlColorIndex::xlColorIndexAutomatic )
 			nColor = 1;
 		setColor( OORGBToXLRGB( m_Palette.getPalette()->getByIndex( --nColor )  ) );
 	}
@@ -301,13 +301,13 @@ public:
 		if ( nIndex >= 0 && nIndex < getCount() )
 		{
 			uno::Reference< beans::XPropertySet > xProps( m_xRange, uno::UNO_QUERY_THROW );
-			return uno::makeAny( uno::Reference< vba::XBorder >( new ScVbaBorder( xProps, m_xContext, supportedIndexTable[ nIndex ], m_Palette )) );
+			return uno::makeAny( uno::Reference< excel::XBorder >( new ScVbaBorder( xProps, m_xContext, supportedIndexTable[ nIndex ], m_Palette )) );
 		}
 		throw lang::IndexOutOfBoundsException();
 	}
 	virtual uno::Type SAL_CALL getElementType(  ) throw (uno::RuntimeException)
 	{
-		return  vba::XBorder::static_type(0);
+		return  excel::XBorder::static_type(0);
 	}
 	virtual ::sal_Bool SAL_CALL hasElements(  ) throw (uno::RuntimeException)
 	{
@@ -359,7 +359,7 @@ ScVbaBorders::createCollectionObject( const css::uno::Any& aSource )
 uno::Type 
 ScVbaBorders::getElementType() throw (uno::RuntimeException)
 {
-	return vba::XBorders::static_type(0);
+	return excel::XBorders::static_type(0);
 }
 
 uno::Any

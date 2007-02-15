@@ -3,8 +3,8 @@
 #include <com/sun/star/awt/FontUnderline.hpp>
 #include <com/sun/star/awt/FontStrikeout.hpp>
 #include <com/sun/star/awt/FontSlant.hpp>
-#include <org/openoffice/vba/Excel/Constants.hpp>
-#include <org/openoffice/vba/Excel/XlUnderlineStyle.hpp>
+#include <org/openoffice/excel/XlColorIndex.hpp>
+#include <org/openoffice/excel/XlUnderlineStyle.hpp>
 #include "vbafont.hxx"
 #include "scitems.hxx"
 
@@ -113,7 +113,7 @@ ScVbaFont::setColorIndex( const uno::Any& aValue ) throw( uno::RuntimeException 
 	aValue >>= lValue;
 	// #TODO #FIXME is behavior random or just default, maybe it depends
 	// on the parent object ( which we don't really take care of right now
-	if ( !lValue || lValue == vba::Excel::Constants::xlColorIndexAutomatic )
+	if ( !lValue || lValue == excel::XlColorIndex::xlColorIndexAutomatic )
 		lValue = 1;
 	mxFont->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "CharColor" ) ), ( uno::Any )mPalette.getPalette()->getByIndex( --lValue ) );
 } 
@@ -232,7 +232,7 @@ void
 ScVbaFont::setUnderline( const uno::Any& aValue ) throw ( uno::RuntimeException )
 {
 	// default
-	sal_Int32 nValue = vba::Excel::XlUnderlineStyle::xlUnderlineStyleNone;
+	sal_Int32 nValue = excel::XlUnderlineStyle::xlUnderlineStyleNone;
 	aValue >>= nValue;
 	switch ( nValue )
 	{
@@ -243,15 +243,15 @@ ScVbaFont::setUnderline( const uno::Any& aValue ) throw ( uno::RuntimeException 
 // So, here at the moment we are similarly silently converting 
 // xlUnderlineStyleSingleAccounting to xlUnderlineStyleSingle.
 
-		case vba::Excel::XlUnderlineStyle::xlUnderlineStyleNone:
+		case excel::XlUnderlineStyle::xlUnderlineStyleNone:
 			nValue = awt::FontUnderline::NONE;
 			break;
-		case vba::Excel::XlUnderlineStyle::xlUnderlineStyleSingle:
-		case vba::Excel::XlUnderlineStyle::xlUnderlineStyleSingleAccounting:
+		case excel::XlUnderlineStyle::xlUnderlineStyleSingle:
+		case excel::XlUnderlineStyle::xlUnderlineStyleSingleAccounting:
 			nValue = awt::FontUnderline::SINGLE;
 			break;
-		case vba::Excel::XlUnderlineStyle::xlUnderlineStyleDouble:
-		case vba::Excel::XlUnderlineStyle::xlUnderlineStyleDoubleAccounting:
+		case excel::XlUnderlineStyle::xlUnderlineStyleDouble:
+		case excel::XlUnderlineStyle::xlUnderlineStyleDoubleAccounting:
 			nValue = awt::FontUnderline::DOUBLE;
 			break;
 		default:
@@ -274,13 +274,13 @@ ScVbaFont::getUnderline() throw ( uno::RuntimeException )
 	switch ( nValue )
 	{
 		case  awt::FontUnderline::DOUBLE:
-			nValue = vba::Excel::XlUnderlineStyle::xlUnderlineStyleDouble;
+			nValue = excel::XlUnderlineStyle::xlUnderlineStyleDouble;
 			break;
 		case  awt::FontUnderline::SINGLE:
-			nValue = vba::Excel::XlUnderlineStyle::xlUnderlineStyleSingle;
+			nValue = excel::XlUnderlineStyle::xlUnderlineStyleSingle;
 			break;
 		case  awt::FontUnderline::NONE:
-			nValue = vba::Excel::XlUnderlineStyle::xlUnderlineStyleNone;
+			nValue = excel::XlUnderlineStyle::xlUnderlineStyleNone;
 			break;
 		default:
 			throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Unknown value retrieved for Underline") ), uno::Reference< uno::XInterface >() );

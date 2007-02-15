@@ -1,13 +1,13 @@
 #ifndef SC_VBA_BUTTON_HXX
 #define SC_VBA_BUTTON_HXX
 #include <cppuhelper/implbase1.hxx>
-#include <org/openoffice/vba/XButton.hpp>
+#include <org/openoffice/msforms/XButton.hpp>
 #include <comphelper/propertycontainer.hxx>
 
 #include "vbacontrol.hxx"
 #include "vbahelper.hxx"
 
-typedef cppu::ImplInheritanceHelper1< ScVbaControl, oo::vba::XButton > ButtonImpl_BASE;
+typedef cppu::ImplInheritanceHelper1< ScVbaControl, oo::msforms::XButton > ButtonImpl_BASE;
 
 class ScVbaButton : public ButtonImpl_BASE
     ,public ::comphelper::OPropertyContainer

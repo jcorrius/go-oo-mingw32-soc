@@ -54,14 +54,14 @@ ScVbaCharacters::setText( const ::rtl::OUString& _text ) throw (css::uno::Runtim
 {
 	setCaption( _text );
 }
-uno::Reference< vba::XFont > SAL_CALL 
+uno::Reference< excel::XFont > SAL_CALL 
 ScVbaCharacters::getFont() throw (css::uno::RuntimeException) 
 {
 	uno::Reference< beans::XPropertySet > xProps( m_xTextRange, uno::UNO_QUERY_THROW );
-	return uno::Reference< vba::XFont >( new ScVbaFont( m_aPalette, xProps ) );
+	return uno::Reference< excel::XFont >( new ScVbaFont( m_aPalette, xProps ) );
 }
 void SAL_CALL 
-ScVbaCharacters::setFont( const uno::Reference< vba::XFont >& /*_font*/ ) throw (css::uno::RuntimeException)
+ScVbaCharacters::setFont( const uno::Reference< excel::XFont >& /*_font*/ ) throw (css::uno::RuntimeException)
 {
 	// #TODO #FIXME needs implementation, or can't be done?
 	throw uno::RuntimeException( ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Not Implemented") ), uno::Reference< XInterface >() );

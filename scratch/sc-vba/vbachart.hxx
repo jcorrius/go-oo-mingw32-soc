@@ -3,10 +3,10 @@
 #include <cppuhelper/implbase1.hxx>
 #include <com/sun/star/uno/XComponentContext.hpp>
 #include <com/sun/star/chart/XChartDocument.hpp>
-#include <org/openoffice/vba/XChart.hpp>
+#include <org/openoffice/excel/XChart.hpp>
 #include "vbahelper.hxx"
 
-typedef ::cppu::WeakImplHelper1<oo::vba::XChart > ChartImpl_BASE;
+typedef ::cppu::WeakImplHelper1<oo::excel::XChart > ChartImpl_BASE;
 
 class ScVbaChart : public ChartImpl_BASE
 {		

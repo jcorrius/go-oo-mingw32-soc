@@ -1,13 +1,13 @@
 #ifndef SC_VBA_TEXTBOX_HXX
 #define SC_VBA_TEXTBOX_HXX
 #include <cppuhelper/implbase1.hxx>
-#include <org/openoffice/vba/XTextBox.hpp>
+#include <org/openoffice/msforms/XTextBox.hpp>
 #include <comphelper/propertycontainer.hxx>
 
 #include "vbacontrol.hxx"
 #include "vbahelper.hxx"
 
-typedef cppu::ImplInheritanceHelper1< ScVbaControl, oo::vba::XTextBox > TextBoxImpl_BASE;
+typedef cppu::ImplInheritanceHelper1< ScVbaControl, oo::msforms::XTextBox > TextBoxImpl_BASE;
 
 class ScVbaTextBox : public TextBoxImpl_BASE
     ,public ::comphelper::OPropertyContainer

@@ -321,7 +321,8 @@ getCurrentDocument() throw (uno::RuntimeException)
 ScDocShell* 
 getDocShell( css::uno::Reference< css::frame::XModel>& xModel ) 
 {
-	ScModelObj* pModel = dynamic_cast< ScModelObj* >( xModel.get() );
+	uno::Reference< uno::XInterface > xIf( xModel, uno::UNO_QUERY_THROW );
+	ScModelObj* pModel = dynamic_cast< ScModelObj* >( xIf.get() );
 	ScDocShell* pDocShell = NULL;
 	if ( pModel )
 		pDocShell = (ScDocShell*)pModel->GetEmbeddedObject();

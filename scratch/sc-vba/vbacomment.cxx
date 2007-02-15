@@ -1,6 +1,6 @@
 #include "vbacomment.hxx"
 
-#include <org/openoffice/vba/Excel/XlCreator.hpp>
+#include <org/openoffice/excel/XlCreator.hpp>
 #include <com/sun/star/sheet/XSpreadsheet.hpp>
 #include <com/sun/star/sheet/XSheetAnnotationAnchor.hpp>
 #include <com/sun/star/sheet/XSheetAnnotationsSupplier.hpp>
@@ -71,25 +71,25 @@ ScVbaComment::getAnnotationIndex() throw (uno::RuntimeException)
        return aIndex;
 }
 
-uno::Reference< vba::XComment > SAL_CALL
+uno::Reference< excel::XComment > SAL_CALL
 ScVbaComment::getCommentByIndex( sal_Int32 Index ) throw (uno::RuntimeException)
 {
 	uno::Reference< container::XIndexAccess > xIndexAccess( getAnnotations(), uno::UNO_QUERY_THROW );
-	uno::Reference< vba::XCollection > xColl( uno::Reference< vba::XComments > ( new ScVbaComments( m_xContext, xIndexAccess ) ), uno::UNO_QUERY_THROW );
+	uno::Reference< vba::XCollection > xColl( uno::Reference< excel::XComments > ( new ScVbaComments( m_xContext, xIndexAccess ) ), uno::UNO_QUERY_THROW );
 
-	return uno::Reference< vba::XComment > ( xColl->Item( uno::makeAny( Index ) ), uno::UNO_QUERY_THROW );
+	return uno::Reference< excel::XComment > ( xColl->Item( uno::makeAny( Index ) ), uno::UNO_QUERY_THROW );
  }
 
 // public vba functions
 
-uno::Reference< vba::XApplication > SAL_CALL
+uno::Reference< excel::XApplication > SAL_CALL
 ScVbaComment::getApplication() throw (uno::RuntimeException)
 {
-	uno::Reference< vba::XApplication > xApplication =
+	uno::Reference< excel::XApplication > xApplication =
 		ScVbaGlobals::getGlobalsImpl( m_xContext )->getApplication();
 	if ( xApplication.is() )
 		return xApplication;
-	return uno::Reference< vba::XApplication >(NULL);
+	return uno::Reference< excel::XApplication >(NULL);
 }
 
 rtl::OUString SAL_CALL
@@ -107,17 +107,17 @@ ScVbaComment::setAuthor( const rtl::OUString& /*_author*/ ) throw (uno::RuntimeE
 sal_Int32 SAL_CALL
 ScVbaComment::getCreator() throw (uno::RuntimeException)
 {
-	return vba::Excel::XlCreator::xlCreatorCode;
+	return excel::XlCreator::xlCreatorCode;
 }
 
-uno::Reference< vba::XRange > SAL_CALL
+uno::Reference< excel::XRange > SAL_CALL
 ScVbaComment::getParent() throw (uno::RuntimeException)
 {
-	uno::Reference< vba::XApplication > xApplication =
+	uno::Reference< excel::XApplication > xApplication =
 		ScVbaGlobals::getGlobalsImpl( m_xContext )->getApplication();
 	if ( xApplication.is() )
 		return xApplication->getActiveCell();
-	return uno::Reference< vba::XRange >(NULL);
+	return uno::Reference< excel::XRange >(NULL);
 }
 
 sal_Bool SAL_CALL
@@ -138,14 +138,14 @@ ScVbaComment::Delete() throw (uno::RuntimeException)
 	getAnnotations()->removeByIndex( getAnnotationIndex() );
 }
 
-uno::Reference< vba::XComment > SAL_CALL
+uno::Reference< excel::XComment > SAL_CALL
 ScVbaComment::Next() throw (uno::RuntimeException)
 {
 	// index: uno = 0, vba = 1
 	return getCommentByIndex( getAnnotationIndex() + 2 );
 }
 
-uno::Reference< vba::XComment > SAL_CALL
+uno::Reference< excel::XComment > SAL_CALL
 ScVbaComment::Previous() throw (uno::RuntimeException)
 {
 	// index: uno = 0, vba = 1

@@ -1,14 +1,14 @@
 #ifndef SC_VBA_WINDOW_HXX
 #define SC_VBA_WINDOW_HXX
 #include <cppuhelper/implbase1.hxx>
-#include <org/openoffice/vba/XWindow.hpp>
+#include <org/openoffice/excel/XWindow.hpp>
 #include <com/sun/star/uno/XComponentContext.hpp>
 #include <com/sun/star/frame/XModel.hpp>
 
 #include "vbahelper.hxx"
 #include "vbaworkbook.hxx"
 
-typedef ::cppu::WeakImplHelper1<oo::vba::XWindow > WindowImpl_BASE;
+typedef ::cppu::WeakImplHelper1<oo::excel::XWindow > WindowImpl_BASE;
 
 class ScVbaWindow : public WindowImpl_BASE
 {		

@@ -47,11 +47,9 @@ namespace vbaobj
 
 
     uno::Reference< XInterface > SAL_CALL create(
-//        Reference< XComponentContext > const & xContext )
-        Reference< lang::XMultiServiceFactory > const & xMultiContext )
+        Reference< XComponentContext > const & xContext )
         SAL_THROW( () )
     {
-	uno::Reference< XComponentContext > xContext = getComponentContextFromMSF( xMultiContext );
 	if ( !xContext.is() )
 	{
 		OSL_TRACE("Failed to obtain context" );	
@@ -76,7 +74,7 @@ ScVbaGlobals::ScVbaGlobals( const Reference< XComponentContext >& rxContext )
         :m_xContext( rxContext )
 {
 //	OSL_TRACE("ScVbaGlobals::ScVbaGlobals()");
-	mxApplication = uno::Reference< vba::XApplication > ( new ScVbaApplication( m_xContext) );
+	mxApplication = uno::Reference< excel::XApplication > ( new ScVbaApplication( m_xContext) );
 }
 
 ScVbaGlobals::~ScVbaGlobals()
@@ -129,18 +127,18 @@ Sequence< ::rtl::OUString > ScVbaGlobals::getSupportedServiceNames(  ) throw (Ru
 // =============================================================================
 // XGlobals
 // =============================================================================
-uno::Reference<vba::XApplication >
+uno::Reference<excel::XApplication >
 ScVbaGlobals::getApplication() throw (uno::RuntimeException)
 {
 //	OSL_TRACE("In ScVbaGlobals::getApplication");	
     return mxApplication;
 }
 
-uno::Reference< vba::XWorkbook > SAL_CALL 
+uno::Reference< excel::XWorkbook > SAL_CALL 
 ScVbaGlobals::getActiveWorkbook() throw (uno::RuntimeException)
 {
 //	OSL_TRACE("In ScVbaGlobals::getActiveWorkbook");	
-    uno::Reference< vba::XWorkbook > xWorkbook( mxApplication->getActiveWorkbook(), uno::UNO_QUERY);
+    uno::Reference< excel::XWorkbook > xWorkbook( mxApplication->getActiveWorkbook(), uno::UNO_QUERY);
     if ( xWorkbook.is() )
     {
         return xWorkbook;    
@@ -151,7 +149,7 @@ ScVbaGlobals::getActiveWorkbook() throw (uno::RuntimeException)
 }
 
 
-uno::Reference< vba::XWorksheet > SAL_CALL 
+uno::Reference< excel::XWorksheet > SAL_CALL 
 ScVbaGlobals::getActiveSheet() throw (uno::RuntimeException)
 {
     return mxApplication->getActiveSheet();
@@ -182,11 +180,11 @@ ScVbaGlobals::getGlobals(  ) throw (::uno::RuntimeException)
 	maGlobals[ nMax++ ] <<= ScVbaGlobals::getGlobalsImpl(m_xContext);
 	maGlobals[ nMax++ ] <<= mxApplication;
 
-	uno::Reference< vba::XWorkbook > xWorkbook = mxApplication->getActiveWorkbook();
+	uno::Reference< excel::XWorkbook > xWorkbook = mxApplication->getActiveWorkbook();
 	if( xWorkbook.is() )
 	{
 		maGlobals[ nMax++ ] <<= xWorkbook;
-		uno::Reference< vba::XWorksheet > xWorksheet = xWorkbook->getActiveSheet();
+		uno::Reference< excel::XWorksheet > xWorksheet = xWorkbook->getActiveSheet();
 		if( xWorksheet.is() )
 			maGlobals[ nMax++ ] <<= xWorksheet;
 	}

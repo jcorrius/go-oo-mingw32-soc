@@ -4,7 +4,7 @@
 #include <com/sun/star/uno/XComponentContext.hpp>
 #include <com/sun/star/beans/XPropertySet.hpp>
 #include <com/sun/star/script/XDefaultProperty.hpp>
-#include <org/openoffice/vba/XComboBox.hpp>
+#include <org/openoffice/msforms/XComboBox.hpp>
 #include <comphelper/proparrhlp.hxx>
 #include <comphelper/propertycontainer.hxx>
 #include <com/sun/star/beans/PropertyAttribute.hpp>
@@ -12,8 +12,8 @@
 #include "vbacontrol.hxx"
 #include "vbahelper.hxx"
 
-typedef cppu::ImplInheritanceHelper2<ScVbaControl, oo::vba::XComboBox, css::script::XDefaultProperty > ComboBoxImpl_BASE;
-//typedef ::cppu::WeakImplHelper2< oo::vba::XComboBox, css::script::XDefaultProperty > ComboBoxImpl_BASE;
+typedef cppu::ImplInheritanceHelper2<ScVbaControl, oo::msforms::XComboBox, css::script::XDefaultProperty > ComboBoxImpl_BASE;
+//typedef ::cppu::WeakImplHelper2< oo::msforms::XComboBox, css::script::XDefaultProperty > ComboBoxImpl_BASE;
 // for the moment its preferable for default value behaviour to
 // be provided by both old an new mechanisms
 class ScVbaComboBox : public ComboBoxImpl_BASE

@@ -2,7 +2,7 @@
 #define SC_VBA_INTERIOR_HXX
 
 #include <cppuhelper/implbase1.hxx>
-#include <org/openoffice/vba/XInterior.hpp>
+#include <org/openoffice/excel/XInterior.hpp>
 #include <com/sun/star/uno/XComponentContext.hpp>
 #include <com/sun/star/beans/XPropertySet.hpp>
 #include <com/sun/star/container/XIndexAccess.hpp>
@@ -12,7 +12,7 @@
 
 class ScDocument;
 
-typedef ::cppu::WeakImplHelper1< oo::vba::XInterior > ScVbaInterior_BASE;
+typedef ::cppu::WeakImplHelper1< oo::excel::XInterior > ScVbaInterior_BASE;
 
 class ScVbaInterior :  public ScVbaInterior_BASE
 {

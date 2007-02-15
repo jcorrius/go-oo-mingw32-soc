@@ -2,8 +2,8 @@
 
 #include <com/sun/star/lang/XMultiComponentFactory.hpp>
 #include <com/sun/star/frame/XModel.hpp>
-#include <org/openoffice/vba/XApplication.hpp>
-#include <org/openoffice/vba/XDialog.hpp>
+#include <org/openoffice/excel/XApplication.hpp>
+#include <org/openoffice/excel/XDialog.hpp>
 
 #include <tools/string.hxx>
 
@@ -24,7 +24,7 @@ uno::Any
 ScVbaDialogs::getParent() throw (uno::RuntimeException)
 {
 	uno::Reference< vba::XGlobals > xGlobals = ScVbaGlobals::getGlobalsImpl( m_xContext );
-	uno::Reference< vba::XApplication > xApplication = xGlobals->getApplication();
+	uno::Reference< excel::XApplication > xApplication = xGlobals->getApplication();
 	if ( !xApplication.is() )
 	{
 		throw uno::RuntimeException(
@@ -39,10 +39,10 @@ ScVbaDialogs::getCreator() throw (uno::RuntimeException)
 	// #FIXME #TODO
 	return 0;
 }
-uno::Reference< vba::XApplication >
+uno::Reference< excel::XApplication >
 ScVbaDialogs::getApplication() throw (uno::RuntimeException)
 {
-	uno::Reference< vba::XApplication > xApplication =  ScVbaGlobals::getGlobalsImpl( m_xContext )->getApplication();
+	uno::Reference< excel::XApplication > xApplication =  ScVbaGlobals::getGlobalsImpl( m_xContext )->getApplication();
 	if ( !xApplication.is() )
 	{
 		throw uno::RuntimeException(
@@ -65,6 +65,6 @@ ScVbaDialogs::Item( const uno::Any &aItem ) throw (uno::RuntimeException)
 {
 	sal_Int32 nIndex;
 	aItem >>= nIndex;
-	uno::Reference< vba::XDialog > aDialog( new ScVbaDialog( nIndex, m_xContext ) );
+	uno::Reference< excel::XDialog > aDialog( new ScVbaDialog( nIndex, m_xContext ) );
 	return uno::Any( aDialog );
 }

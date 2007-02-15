@@ -19,7 +19,7 @@
 #include <com/sun/star/lang/IndexOutOfBoundsException.hpp>
 #include <com/sun/star/beans/XPropertySet.hpp>
 
-#include <org/openoffice/vba/XApplication.hpp>
+#include <org/openoffice/excel/XApplication.hpp>
 #include <tools/string.hxx>
 
 #include "vbaglobals.hxx"
@@ -39,7 +39,7 @@ public:
 	virtual uno::Any SAL_CALL nextElement(  ) throw (container::NoSuchElementException, lang::WrappedTargetException, uno::RuntimeException) 
 	{ 
 		uno::Reference< sheet::XSpreadsheet > xSheet( m_xEnumeration->nextElement(), uno::UNO_QUERY_THROW );
-		return uno::makeAny( uno::Reference< vba::XWorksheet > ( new ScVbaWorksheet( m_xContext, xSheet, m_xModel ) ) );
+		return uno::makeAny( uno::Reference< excel::XWorksheet > ( new ScVbaWorksheet( m_xContext, xSheet, m_xModel ) ) );
 	}
 
 };
@@ -56,7 +56,7 @@ ScVbaWorksheets::ScVbaWorksheets( const uno::Reference< ::com::sun::star::uno::X
 uno::Type 
 ScVbaWorksheets::getElementType() throw (uno::RuntimeException)
 {
-	return vba::XWorksheet::static_type(0);
+	return excel::XWorksheet::static_type(0);
 }
 
 uno::Reference< container::XEnumeration >
@@ -75,7 +75,7 @@ uno::Any
 ScVbaWorksheets::createCollectionObject( const uno::Any& aSource )
 {
 	uno::Reference< sheet::XSpreadsheet > xSheet( aSource, uno::UNO_QUERY );
-	return uno::makeAny( uno::Reference< vba::XWorksheet > ( new ScVbaWorksheet( m_xContext, xSheet, mxModel ) ) ); 
+	return uno::makeAny( uno::Reference< excel::XWorksheet > ( new ScVbaWorksheet( m_xContext, xSheet, mxModel ) ) ); 
 }
 
 // XWorksheets
@@ -180,7 +180,7 @@ ScVbaWorksheets::getVisible() throw (uno::RuntimeException)
 	uno::Reference< container::XEnumeration > xEnum( createEnumeration(), uno::UNO_QUERY_THROW );
 	while ( xEnum->hasMoreElements() )
 	{
-		uno::Reference< vba::XWorksheet > xSheet( xEnum->nextElement(), uno::UNO_QUERY_THROW );
+		uno::Reference< excel::XWorksheet > xSheet( xEnum->nextElement(), uno::UNO_QUERY_THROW );
 		if ( xSheet->getVisible() == sal_False )
 		{
 				bVisible = sal_False;
@@ -199,7 +199,7 @@ ScVbaWorksheets::setVisible( const uno::Any& _visible ) throw (uno::RuntimeExcep
 		uno::Reference< container::XEnumeration > xEnum( createEnumeration(), uno::UNO_QUERY_THROW );
 		while ( xEnum->hasMoreElements() )
 		{
-			uno::Reference< vba::XWorksheet > xSheet( xEnum->nextElement(), uno::UNO_QUERY_THROW );
+			uno::Reference< excel::XWorksheet > xSheet( xEnum->nextElement(), uno::UNO_QUERY_THROW );
 			xSheet->setVisible( bState );
 		}
 	}

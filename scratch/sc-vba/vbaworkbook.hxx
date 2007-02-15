@@ -4,12 +4,12 @@
 #include <cppuhelper/implbase1.hxx>
 
 #include <com/sun/star/frame/XModel.hpp>
-#include <org/openoffice/vba/XWorkbook.hpp>
+#include <org/openoffice/excel/XWorkbook.hpp>
 #include "vbahelper.hxx"
 
 class ScModelObj;
 
-typedef ::cppu::WeakImplHelper1< oo::vba::XWorkbook > ScVbaWorkbook_BASE;
+typedef ::cppu::WeakImplHelper1< oo::excel::XWorkbook > ScVbaWorkbook_BASE;
 
 class ScVbaWorkbook : public ScVbaWorkbook_BASE
 {
@@ -29,7 +29,7 @@ public:
 	virtual ::rtl::OUString SAL_CALL getPath() throw (css::uno::RuntimeException);
 	virtual ::rtl::OUString SAL_CALL getFullName() throw (css::uno::RuntimeException);
 	virtual ::sal_Bool SAL_CALL getProtectStructure() throw (css::uno::RuntimeException);
-	virtual css::uno::Reference< oo::vba::XWorksheet > SAL_CALL getActiveSheet() throw (css::uno::RuntimeException);
+	virtual css::uno::Reference< oo::excel::XWorksheet > SAL_CALL getActiveSheet() throw (css::uno::RuntimeException);
 	virtual sal_Bool SAL_CALL getSaved() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setSaved( sal_Bool bSave ) throw (css::uno::RuntimeException);
 

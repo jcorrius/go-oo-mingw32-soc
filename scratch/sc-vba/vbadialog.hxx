@@ -5,13 +5,13 @@
 
 #include <com/sun/star/uno/XComponentContext.hpp>
 #include <org/openoffice/vba/XGlobals.hpp>
-#include <org/openoffice/vba/XApplication.hpp>
-#include <org/openoffice/vba/XDialog.hpp>
+#include <org/openoffice/excel/XApplication.hpp>
+#include <org/openoffice/excel/XDialog.hpp>
  
 #include "vbahelper.hxx"
 #include "vbadialog.hxx"
 
-typedef ::cppu::WeakImplHelper1< oo::vba::XDialog > ScVbaDialog_BASE;
+typedef ::cppu::WeakImplHelper1< oo::excel::XDialog > ScVbaDialog_BASE;
 
 class ScVbaDialog : public ScVbaDialog_BASE
 {
@@ -24,7 +24,7 @@ public:
 	virtual ~ScVbaDialog() {}
 
 	// Attributes
-	virtual css::uno::Reference< oo::vba::XApplication > SAL_CALL getApplication() throw (css::uno::RuntimeException);
+	virtual css::uno::Reference< oo::excel::XApplication > SAL_CALL getApplication() throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL getParent() throw (css::uno::RuntimeException);
 	virtual sal_Int32 SAL_CALL getCreator() throw(css::uno::RuntimeException);
 	// Methods

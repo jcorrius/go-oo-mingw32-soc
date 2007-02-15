@@ -1,13 +1,13 @@
 #ifndef SC_VBA_SERIESCOLLECTION_HXX
 #define SC_VBA_SERIESCOLLECTION_HXX
-#include <org/openoffice/vba/XSeriesCollection.hpp>
+#include <org/openoffice/excel/XSeriesCollection.hpp>
 #include <cppuhelper/implbase2.hxx>
 #include <com/sun/star/uno/XComponentContext.hpp>
 #include <com/sun/star/container/XEnumerationAccess.hpp>
 
 #include "vbahelper.hxx"
 
-typedef ::cppu::WeakImplHelper2<oo::vba::XSeriesCollection,
+typedef ::cppu::WeakImplHelper2<oo::excel::XSeriesCollection,
 css::container::XEnumerationAccess > SeriesCollectionImpl_BASE;
 
 class ScVbaSeriesCollection : public SeriesCollectionImpl_BASE
@@ -20,7 +20,7 @@ public:
 	virtual ::sal_Int32 SAL_CALL getCount() throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL getParent() throw (css::uno::RuntimeException);
 	virtual ::sal_Int32 SAL_CALL getCreator() throw (css::uno::RuntimeException);
-	virtual css::uno::Reference< oo::vba::XApplication > SAL_CALL getApplication() throw (css::uno::RuntimeException);
+	virtual css::uno::Reference< oo::excel::XApplication > SAL_CALL getApplication() throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL Item( const css::uno::Any& Index ) throw (css::uno::RuntimeException);
 
 	// XEnumerationAccess

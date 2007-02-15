@@ -7,21 +7,25 @@ dummy:
         @echo "not building vba..."
 .ENDIF
 
-NO_BSYMBOLIC=	TRUE
+
+NO_BSYMBOLIC=   TRUE
 ENABLE_EXCEPTIONS=TRUE
-COMP1TYPELIST=$(TARGET)
-COMPRDB=$(SOLARBINDIR)$/types.rdb
 
 # --- Settings -----------------------------------------------------
 
-#.INCLUDE :  svpre.mk
 .INCLUDE :  settings.mk
 .INCLUDE :  sv.mk
 DLLPRE =
 
-# ------------------------------------------------------------------
+ALLTAR : \
+        $(MISC)$/$(TARGET).don \
+        $(SLOTARGET)
 
-#.INCLUDE :  ..$/cppumaker.mk
+$(MISC)$/$(TARGET).don : $(SOLARBINDIR)$/oovbaapi.rdb
+        +$(CPPUMAKER) -O$(OUT)$/inc -BUCR $(SOLARBINDIR)$/oovbaapi.rdb -X$(SOLARBINDIR)$/types.rdb && echo > $@
+        echo $@
+
+# ------------------------------------------------------------------
 
 SLOFILES= \
 		$(SLO)$/vbaglobals.obj \
@@ -54,8 +58,8 @@ SLOFILES= \
 		$(SLO)$/vbaborders.obj \
 		$(SLO)$/vbacharacters.obj \
 		$(SLO)$/vbacombobox.obj \
-		$(SLO)$/vbacontrol.obj \
 		$(SLO)$/vbavalidation.obj \
+		$(SLO)$/vbacontrol.obj \
 		$(SLO)$/vbaoleobject.obj \
 		$(SLO)$/vbaoleobjects.obj \
 		$(SLO)$/vbabutton.obj \
@@ -63,7 +67,8 @@ SLOFILES= \
 		$(SLO)$/vbatextbox.obj \
 		$(SLO)$/vbaradiobutton.obj \
 		$(SLO)$/vbalistbox.obj \
-		$(SLO)$/vbapropvalue.obj
+		$(SLO)$/vbapropvalue.obj \
+		$(SLO)$/service.obj \
  
 
 # --- Targets ------------------------------------------------------

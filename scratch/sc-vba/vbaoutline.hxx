@@ -3,11 +3,11 @@
 
 #include <com/sun/star/sheet/XSheetOutline.hpp>
 #include <cppuhelper/implbase1.hxx>
-#include <org/openoffice/vba/XOutline.hpp>
+#include <org/openoffice/excel/XOutline.hpp>
 #include <com/sun/star/uno/XComponentContext.hpp>
 #include "vbahelper.hxx"
 
-typedef ::cppu::WeakImplHelper1< oo::vba::XOutline > ScVbaOutline_BASE;
+typedef ::cppu::WeakImplHelper1< oo::excel::XOutline > ScVbaOutline_BASE;
 
 class ScVbaOutline :  public ScVbaOutline_BASE 
 {

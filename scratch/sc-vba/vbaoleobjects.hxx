@@ -2,12 +2,12 @@
 #define SC_VBA_OLEOBJECTS_HXX
 
 #include <cppuhelper/implbase1.hxx>
-#include <org/openoffice/vba/XOLEObjects.hpp>
+#include <org/openoffice/excel/XOLEObjects.hpp>
 
 #include "vbacollectionimpl.hxx"
 #include "vbahelper.hxx"
 
-typedef ::cppu::ImplInheritanceHelper1< ScVbaCollectionBaseImpl, oo::vba::XOLEObjects > OLEObjectsImpl_BASE;
+typedef ::cppu::ImplInheritanceHelper1< ScVbaCollectionBaseImpl, oo::excel::XOLEObjects > OLEObjectsImpl_BASE;
 
 class ScVbaOLEObjects : public OLEObjectsImpl_BASE
 {

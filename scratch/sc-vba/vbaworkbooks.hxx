@@ -4,14 +4,14 @@
 
 #include "vbacollectionimpl.hxx"
 #include <org/openoffice/vba/XGlobals.hpp>
-#include <org/openoffice/vba/XWorkbooks.hpp>
+#include <org/openoffice/excel/XWorkbooks.hpp>
 #include <com/sun/star/container/XEnumerationAccess.hpp>
 #include "vbahelper.hxx"
 
 
 class ScModelObj;
 
-typedef ::cppu::ImplInheritanceHelper1< ScVbaCollectionBaseImpl, oo::vba::XWorkbooks > ScVbaWorkbooks_BASE;
+typedef ::cppu::ImplInheritanceHelper1< ScVbaCollectionBaseImpl, oo::excel::XWorkbooks > ScVbaWorkbooks_BASE;
 
 class ScVbaWorkbooks : public ScVbaWorkbooks_BASE
 {

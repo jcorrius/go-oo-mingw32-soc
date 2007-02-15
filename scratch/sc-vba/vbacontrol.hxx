@@ -9,11 +9,11 @@
 #include <com/sun/star/script/XDefaultProperty.hpp>
 #include <com/sun/star/drawing/XControlShape.hpp>
 #include <com/sun/star/awt/XWindowPeer.hpp>
-#include <org/openoffice/vba/XControl.hpp>
+#include <org/openoffice/msforms/XControl.hpp>
 
 #include "vbahelper.hxx"
 
-typedef ::cppu::WeakImplHelper1< oo::vba::XControl > ControlImpl_BASE;
+typedef ::cppu::WeakImplHelper1< oo::msforms::XControl > ControlImpl_BASE;
 
 class ScVbaControl : public ControlImpl_BASE
     ,public ::comphelper::OMutexAndBroadcastHelper

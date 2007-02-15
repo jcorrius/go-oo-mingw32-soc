@@ -6,7 +6,7 @@
 #include <com/sun/star/reflection/XIdlMethod.hpp>
 #include <com/sun/star/beans/MethodConcept.hpp>
 
-#include <org/openoffice/vba/Excel/Constants.hpp>
+#include <org/openoffice/excel/XlColorIndex.hpp>
 
 #include <comphelper/processfactory.hxx>
 #include <cppuhelper/queryinterface.hxx>
@@ -57,7 +57,7 @@ ScVbaInterior::setColorIndex( const css::uno::Any& _colorindex ) throw (css::uno
 	// #FIXME  xlColorIndexAutomatic & xlColorIndexNone are not really
 	// handled properly here
 	
-	if ( !nIndex || ( nIndex == vba::Excel::Constants::xlColorIndexAutomatic ) || ( nIndex == vba::Excel::Constants::xlColorIndexNone )  )
+	if ( !nIndex || ( nIndex == excel::XlColorIndex::xlColorIndexAutomatic ) || ( nIndex == excel::XlColorIndex::xlColorIndexNone )  )
 		nIndex = 2; // default is white ( this maybe will probably break, e.g. we may at some stage need to know what this interior is,  a cell or something else and then pick a default colour based on that )
 	--nIndex; // OOo indices are zero bases
 	uno::Reference< container::XIndexAccess > xIndex = getPalette();

@@ -4,7 +4,7 @@
 #include <com/sun/star/uno/XComponentContext.hpp>
 #include <com/sun/star/beans/XPropertySet.hpp>
 #include <com/sun/star/script/XDefaultProperty.hpp>
-#include <org/openoffice/vba/XListBox.hpp>
+#include <org/openoffice/msforms/XListBox.hpp>
 #include <comphelper/proparrhlp.hxx>
 #include <comphelper/propertycontainer.hxx>
 #include <com/sun/star/beans/PropertyAttribute.hpp>
@@ -13,7 +13,7 @@
 #include "vbapropvalue.hxx"
 #include "vbahelper.hxx"
 
-typedef cppu::ImplInheritanceHelper2<ScVbaControl, oo::vba::XListBox, css::script::XDefaultProperty > ListBoxImpl_BASE;
+typedef cppu::ImplInheritanceHelper2<ScVbaControl, oo::msforms::XListBox, css::script::XDefaultProperty > ListBoxImpl_BASE;
 // for the moment its preferable for default value behaviour to
 // be provided by both old an new mechanisms
 class ScVbaListBox : public ListBoxImpl_BASE

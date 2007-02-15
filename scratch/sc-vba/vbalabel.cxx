@@ -1,4 +1,4 @@
-#include "vbabutton.hxx"
+#include "vbalabel.hxx"
 #include <vector>
 
 using namespace com::sun::star;

@@ -4,8 +4,8 @@
 #include <com/sun/star/sheet/XSpreadsheetDocument.hpp>
 #include <com/sun/star/sheet/XSpreadsheet.hpp>
 #include <com/sun/star/container/XNamed.hpp>
-#include <org/openoffice/vba/Excel/XlWindowState.hpp>
-#include <org/openoffice/vba/Excel/Constants.hpp>
+#include <org/openoffice/excel/XlWindowState.hpp>
+#include <org/openoffice/excel/Constants.hpp>
 
 #include <docsh.hxx>
 #include <tabvwsh.hxx>
@@ -17,7 +17,7 @@
 
 using namespace ::com::sun::star;
 using namespace ::org::openoffice;
-using namespace ::org::openoffice::vba::Excel::XlWindowState;
+using namespace ::org::openoffice::excel::XlWindowState;
 
 typedef  std::hash_map< rtl::OUString,
 SCTAB, ::rtl::OUStringHash,
@@ -58,7 +58,7 @@ public:
 		{
 			throw container::NoSuchElementException();
 		}
-		return uno::makeAny( uno::Reference< vba::XWorksheet > ( new ScVbaWorksheet( m_xContext, *(m_it++), m_xModel ) ) );
+		return uno::makeAny( uno::Reference< excel::XWorksheet > ( new ScVbaWorksheet( m_xContext, *(m_it++), m_xModel ) ) );
 	}
 
 
@@ -125,7 +125,7 @@ public:
 	//XElementAccess
 	virtual uno::Type SAL_CALL getElementType(  ) throw (uno::RuntimeException)
 	{ 
-		return vba::XWorksheet::static_type(0); 
+		return excel::XWorksheet::static_type(0); 
 	}
 
 	virtual ::sal_Bool SAL_CALL hasElements(  ) throw (uno::RuntimeException) 
@@ -217,7 +217,7 @@ uno::Any SAL_CALL
 ScVbaWindow::SelectedSheets( const uno::Any& aIndex ) throw (uno::RuntimeException)
 {
 	uno::Reference< container::XEnumerationAccess > xEnumAccess( new SelectedSheetsEnumAccess( m_xContext, m_xModel  ) );
-	uno::Reference< vba::XWorksheets > xSheets(  new ScVbaWorksheets( m_xContext, xEnumAccess, m_xModel ) );
+	uno::Reference< excel::XWorksheets > xSheets(  new ScVbaWorksheets( m_xContext, xEnumAccess, m_xModel ) );
 	if ( aIndex.hasValue() )
 	{
 		uno::Reference< vba::XCollection > xColl( xSheets, uno::UNO_QUERY_THROW );

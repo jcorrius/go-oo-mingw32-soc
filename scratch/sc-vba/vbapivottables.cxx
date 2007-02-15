@@ -1,7 +1,7 @@
 #include "vbapivottables.hxx"
 #include "vbapivottable.hxx"
 #include <com/sun/star/sheet/XDataPilotTable.hpp>
-#include <org/openoffice/vba/XPivotTable.hpp>
+#include <org/openoffice/excel/XPivotTable.hpp>
 
 
 using namespace ::com::sun::star;
@@ -10,7 +10,7 @@ using namespace ::org::openoffice;
 uno::Any DataPilotToPivotTable( const uno::Any& aSource, uno::Reference< uno::XComponentContext > & xContext )
 {
 	uno::Reference< sheet::XDataPilotTable > xTable( aSource, uno::UNO_QUERY_THROW );
-	return uno::makeAny( uno::Reference< vba::XPivotTable > ( new ScVbaPivotTable( xContext, xTable ) ) );
+	return uno::makeAny( uno::Reference< excel::XPivotTable > ( new ScVbaPivotTable( xContext, xTable ) ) );
 }
 
 class PivotTableEnumeration : public EnumerationHelperImpl
@@ -45,5 +45,5 @@ ScVbaPivotTables::createCollectionObject( const css::uno::Any& aSource )
 uno::Type 
 ScVbaPivotTables::getElementType() throw (uno::RuntimeException)
 {
-	return vba::XPivotTables::static_type(0);
+	return excel::XPivotTables::static_type(0);
 }

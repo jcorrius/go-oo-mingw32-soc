@@ -4,12 +4,12 @@
 #include<com/sun/star/sheet/XSpreadsheetView.hpp>
 #include <com/sun/star/sheet/XSpreadsheets.hpp>
 #include<com/sun/star/view/XSelectionSupplier.hpp>
-#include<org/openoffice/vba/Excel/XlCalculation.hpp>
+#include<org/openoffice/excel/XlCalculation.hpp>
 #include <com/sun/star/sheet/XCellRangeReferrer.hpp>
 #include <com/sun/star/frame/XLayoutManager.hpp>
 #include <com/sun/star/task/XStatusIndicatorSupplier.hpp>
 #include <com/sun/star/task/XStatusIndicator.hpp>
-#include <org/openoffice/vba/Excel/XlMousePointer.hpp>
+#include <org/openoffice/excel/XlMousePointer.hpp>
 
 #include "vbaapplication.hxx"
 #include "vbaworkbooks.hxx"
@@ -56,7 +56,7 @@ public:
 	ActiveWorkbook( uno::Reference< uno::XComponentContext >& xContext) : ScVbaWorkbook(  xContext ){}
 };
 
-ScVbaApplication::ScVbaApplication( uno::Reference<uno::XComponentContext >& xContext ): m_xContext( xContext ), m_xCalculation( vba::Excel::XlCalculation::xlCalculationAutomatic )
+ScVbaApplication::ScVbaApplication( uno::Reference<uno::XComponentContext >& xContext ): m_xContext( xContext ), m_xCalculation( excel::XlCalculation::xlCalculationAutomatic )
 {
 }
 
@@ -65,18 +65,18 @@ ScVbaApplication::~ScVbaApplication()
 }
 
 
-uno::Reference< vba::XWorkbook >
+uno::Reference< excel::XWorkbook >
 ScVbaApplication::getActiveWorkbook() throw (uno::RuntimeException)
 {
 	return new ActiveWorkbook( m_xContext ); 
 }
-uno::Reference< oo::vba::XWorkbook > SAL_CALL 
+uno::Reference< excel::XWorkbook > SAL_CALL 
 ScVbaApplication::getThisWorkbook() throw (uno::RuntimeException)
 {
 	return getActiveWorkbook();
 }
 
-uno::Reference< vba::XRange >
+uno::Reference< excel::XRange >
 ScVbaApplication::getSelection() throw (uno::RuntimeException)
 {
 	uno::Reference< table::XCellRange > xRange( getCurrentDocument()->getCurrentSelection(), ::uno::UNO_QUERY);
@@ -84,13 +84,13 @@ ScVbaApplication::getSelection() throw (uno::RuntimeException)
 	{
 		uno::Reference< sheet::XSheetCellRangeContainer > xRanges( getCurrentDocument()->getCurrentSelection(), ::uno::UNO_QUERY);
 		if ( xRanges.is() )
-			return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xRanges ) );
+			return uno::Reference< excel::XRange >( new ScVbaRange( m_xContext, xRanges ) );
 
 	}
-	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xRange ) );
+	return uno::Reference< excel::XRange >( new ScVbaRange( m_xContext, xRange ) );
 }
 
-uno::Reference< vba::XRange >
+uno::Reference< excel::XRange >
 ScVbaApplication::getActiveCell() throw (uno::RuntimeException )
 {
 	uno::Reference< sheet::XSpreadsheetView > xView( getCurrentDocument()->getCurrentController(), uno::UNO_QUERY_THROW );
@@ -105,7 +105,7 @@ ScVbaApplication::getActiveCell() throw (uno::RuntimeException )
 	sal_Int32 nCursorX = pTabView->GetCurX();
 	sal_Int32 nCursorY = pTabView->GetCurY();
 
-	return uno::Reference< vba::XRange >( new ScVbaRange( m_xContext, xRange->getCellRangeByPosition( nCursorX, nCursorY, 
+	return uno::Reference< excel::XRange >( new ScVbaRange( m_xContext, xRange->getCellRangeByPosition( nCursorX, nCursorY, 
 										nCursorX, nCursorY ) ) ); 
 }
 
@@ -184,7 +184,7 @@ ScVbaApplication::Workbooks( const uno::Any& aIndex ) throw (uno::RuntimeExcepti
 uno::Any SAL_CALL
 ScVbaApplication::Worksheets( const uno::Any& aIndex ) throw (uno::RuntimeException)
 {
-    uno::Reference< vba::XWorkbook > xWorkbook( getActiveWorkbook(), uno::UNO_QUERY );
+    uno::Reference< excel::XWorkbook > xWorkbook( getActiveWorkbook(), uno::UNO_QUERY );
         uno::Any result;
     if ( xWorkbook.is() )
         result  = xWorkbook->Worksheets( aIndex );
@@ -216,13 +216,13 @@ ScVbaApplication::Evaluate( const ::rtl::OUString& Name ) throw (uno::RuntimeExc
 uno::Any 
 ScVbaApplication::Dialogs( const uno::Any &aIndex ) throw (uno::RuntimeException)
 {
-	uno::Reference< vba::XDialogs > xDialogs( new ScVbaDialogs( m_xContext ) );
+	uno::Reference< excel::XDialogs > xDialogs( new ScVbaDialogs( m_xContext ) );
 	if( !aIndex.hasValue() )
 		return uno::Any( xDialogs );
 	return uno::Any( xDialogs->Item( aIndex ) );
 }
 
-uno::Reference< vba::XWindow > SAL_CALL 
+uno::Reference< excel::XWindow > SAL_CALL 
 ScVbaApplication::getActiveWindow() throw (uno::RuntimeException)
 {
 	return new ScVbaWindow( m_xContext, getCurrentDocument() );
@@ -344,18 +344,18 @@ ScVbaApplication::wait( double time ) throw (css::uno::RuntimeException)
 uno::Any SAL_CALL 
 ScVbaApplication::Range( const uno::Any& Cell1, const uno::Any& Cell2 ) throw (uno::RuntimeException)
 {
-	uno::Reference< vba::XRange > xVbRange = ScVbaRange::ApplicationRange( m_xContext, Cell1, Cell2 ); 
+	uno::Reference< excel::XRange > xVbRange = ScVbaRange::ApplicationRange( m_xContext, Cell1, Cell2 ); 
 	return uno::makeAny( xVbRange ); 
 }
 
-uno::Reference< vba::XWorksheet > SAL_CALL 
+uno::Reference< excel::XWorksheet > SAL_CALL 
 ScVbaApplication::getActiveSheet() throw (uno::RuntimeException)
 {
-    uno::Reference< vba::XWorksheet > result;
-    uno::Reference< vba::XWorkbook > xWorkbook( getActiveWorkbook(), uno::UNO_QUERY );
+    uno::Reference< excel::XWorksheet > result;
+    uno::Reference< excel::XWorkbook > xWorkbook( getActiveWorkbook(), uno::UNO_QUERY );
     if ( xWorkbook.is() )
     {
-        uno::Reference< vba::XWorksheet > xWorksheet( 
+        uno::Reference< excel::XWorksheet > xWorksheet( 
             xWorkbook->getActiveSheet(), uno::UNO_QUERY );
         if ( xWorksheet.is() )
         {
@@ -416,11 +416,11 @@ ScVbaApplication::GoTo( const uno::Any& Reference, const uno::Any& Scroll ) thro
         {
             uno::Reference< table::XCellRange > xRange = ScVbaRange::getCellRangeForName( sRangeName, xDoc, ScAddress::CONV_XL_R1C1 );
             ScVbaRange* pRange = new ScVbaRange( m_xContext, xRange );
-            uno::Reference< vba::XRange > xVbaSheetRange( pRange );
+            uno::Reference< excel::XRange > xVbaSheetRange( pRange );
             if( bScroll )
             {
                 xVbaSheetRange->Select();
-                uno::Reference< vba::XWindow >  xWindow = getActiveWindow();
+                uno::Reference< excel::XWindow >  xWindow = getActiveWindow();
                 ScSplitPos eWhich = pShell->GetViewData()->GetActivePart();
                 sal_Int32 nValueX = pShell->GetViewData()->GetPosX(WhichH(eWhich));
                 sal_Int32 nValueY = pShell->GetViewData()->GetPosY(WhichV(eWhich));
@@ -449,10 +449,10 @@ ScVbaApplication::GoTo( const uno::Any& Reference, const uno::Any& Scroll ) thro
         }
         return;
     }
-    uno::Reference< vba::XRange > xRange;
+    uno::Reference< excel::XRange > xRange;
     if( Reference >>= xRange )
     {
-        uno::Reference< vba::XRange > xVbaRange( Reference, uno::UNO_QUERY );
+        uno::Reference< excel::XRange > xVbaRange( Reference, uno::UNO_QUERY );
         ScTabViewShell* pShell = getCurrentBestViewShell();
         ScGridWindow* gridWindow = (ScGridWindow*)pShell->GetWindow(); 
         if ( xVbaRange.is() )
@@ -461,7 +461,7 @@ ScVbaApplication::GoTo( const uno::Any& Reference, const uno::Any& Scroll ) thro
             if( bScroll )
             {
                 xVbaRange->Select();
-                uno::Reference< vba::XWindow >  xWindow = getActiveWindow();
+                uno::Reference< excel::XWindow >  xWindow = getActiveWindow();
                 ScSplitPos eWhich = pShell->GetViewData()->GetActivePart();
                 sal_Int32 nValueX = pShell->GetViewData()->GetPosX(WhichH(eWhich));
                 sal_Int32 nValueY = pShell->GetViewData()->GetPosY(WhichV(eWhich));
@@ -493,15 +493,15 @@ ScVbaApplication::getCursor() throw (uno::RuntimeException)
     switch( result )
     {
         case POINTER_ARROW:
-            return vba::Excel::XlMousePointer::xlNorthwestArrow;
+            return excel::XlMousePointer::xlNorthwestArrow;
         case POINTER_NULL:
-            return vba::Excel::XlMousePointer::xlDefault;
+            return excel::XlMousePointer::xlDefault;
         case POINTER_WAIT:
-            return vba::Excel::XlMousePointer::xlWait;
+            return excel::XlMousePointer::xlWait;
         case POINTER_TEXT:
-            return vba::Excel::XlMousePointer::xlIBeam;
+            return excel::XlMousePointer::xlIBeam;
         default:
-            return vba::Excel::XlMousePointer::xlDefault;
+            return excel::XlMousePointer::xlDefault;
     }
 }
 
@@ -513,15 +513,15 @@ ScVbaApplication::setCursor( sal_Int32 _cursor ) throw (uno::RuntimeException)
     {
         switch( _cursor )
         {
-            case vba::Excel::XlMousePointer::xlNorthwestArrow:
+            case excel::XlMousePointer::xlNorthwestArrow:
             {
                 const Pointer& rPointer( POINTER_ARROW );
                 pFrame->GetFrame()->GetWindow().GetSystemWindow()->SetPointer( rPointer );
                 pFrame->GetFrame()->GetWindow().GetSystemWindow()->EnableChildPointerOverwrite( sal_False );
                 break;
             }
-            case vba::Excel::XlMousePointer::xlWait:
-            case vba::Excel::XlMousePointer::xlIBeam:
+            case excel::XlMousePointer::xlWait:
+            case excel::XlMousePointer::xlIBeam:
             {
                 const Pointer& rPointer( static_cast< PointerStyle >( _cursor ) );
                 //It will set the edit window, toobar and statusbar's mouse pointer.
@@ -533,7 +533,7 @@ ScVbaApplication::setCursor( sal_Int32 _cursor ) throw (uno::RuntimeException)
                 //printf("\nset Cursor...%d\n", pFrame->GetFrame()->GetWindow().GetType());
                 break;
             }
-            case vba::Excel::XlMousePointer::xlDefault:
+            case excel::XlMousePointer::xlDefault:
             {
                 const Pointer& rPointer( POINTER_NULL );
                 pFrame->GetFrame()->GetWindow().GetSystemWindow()->SetPointer( rPointer );

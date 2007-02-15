@@ -3,14 +3,13 @@
 #include <com/sun/star/sheet/ValidationType.hpp>
 #include <com/sun/star/sheet/ValidationAlertStyle.hpp>
 #include <com/sun/star/beans/XPropertySet.hpp>
-#include <org/openoffice/vba/Excel/XlDVType.hpp>
-#include <org/openoffice/vba/Excel/XlFormatConditionOperator.hpp>
-#include <org/openoffice/vba/Excel/XlDVAlertStyle.hpp>
+#include <org/openoffice/excel/XlDVType.hpp>
+#include <org/openoffice/excel/XlFormatConditionOperator.hpp>
+#include <org/openoffice/excel/XlDVAlertStyle.hpp>
 
 #include "unonames.hxx"
 
 using namespace ::org::openoffice;
-using namespace ::org::openoffice::vba::Excel;
 using namespace ::com::sun::star;
 
 const static rtl::OUString VALIDATION( RTL_CONSTASCII_USTRINGPARAM( SC_UNONAME_VALIDAT ) );
@@ -221,7 +220,7 @@ ScVbaValidation::Add( const uno::Any& Type, const uno::Any& AlertStyle, const un
 	Formula2 >>= sFormula2;
 	switch ( nType )
 	{
-		case vba::Excel::XlDVType::xlValidateList:
+		case excel::XlDVType::xlValidateList:
 			{
 				// for validate list 
 				// at least formula1 is required
@@ -238,20 +237,20 @@ ScVbaValidation::Add( const uno::Any& Type, const uno::Any& AlertStyle, const un
 	}
 
 	sheet::ValidationAlertStyle eStyle = sheet::ValidationAlertStyle_STOP;	
-	sal_Int32 nVbaAlertStyle = vba::Excel::XlDVAlertStyle::xlValidAlertStop;
+	sal_Int32 nVbaAlertStyle = excel::XlDVAlertStyle::xlValidAlertStop;
 	if ( AlertStyle.hasValue() && ( AlertStyle >>= nVbaAlertStyle ) )
 	{
 		switch( nVbaAlertStyle )
 		{
-			case vba::Excel::XlDVAlertStyle::xlValidAlertStop:
+			case excel::XlDVAlertStyle::xlValidAlertStop:
 				// yes I know it's already defaulted but safer to assume
 				// someone propbably could change the code above
 				eStyle = sheet::ValidationAlertStyle_STOP; 
 				break;	
-			case vba::Excel::XlDVAlertStyle::xlValidAlertWarning:
+			case excel::XlDVAlertStyle::xlValidAlertWarning:
 				eStyle = sheet::ValidationAlertStyle_WARNING; 
 				break;	
-			case vba::Excel::XlDVAlertStyle::xlValidAlertInformation:
+			case excel::XlDVAlertStyle::xlValidAlertInformation:
 				eStyle = sheet::ValidationAlertStyle_INFO; 
 				break;	
 			default:

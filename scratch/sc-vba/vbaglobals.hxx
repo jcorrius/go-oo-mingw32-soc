@@ -22,7 +22,7 @@
     {
     private:
             css::uno::Reference< css::uno::XComponentContext > m_xContext;
-            css::uno::Reference< oo::vba::XApplication > mxApplication;
+            css::uno::Reference< oo::excel::XApplication > mxApplication;
     public:
 	
         ScVbaGlobals(
@@ -41,10 +41,10 @@
 
         // XGlobals
         virtual css::uno::Reference<
-                        oo::vba::XApplication > SAL_CALL getApplication()
+                        oo::excel::XApplication > SAL_CALL getApplication()
                         throw (css::uno::RuntimeException);
-        virtual css::uno::Reference< oo::vba::XWorkbook > SAL_CALL getActiveWorkbook() throw (css::uno::RuntimeException);
-        virtual css::uno::Reference< oo::vba::XWorksheet > SAL_CALL getActiveSheet() throw (css::uno::RuntimeException);
+        virtual css::uno::Reference< oo::excel::XWorkbook > SAL_CALL getActiveWorkbook() throw (css::uno::RuntimeException);
+        virtual css::uno::Reference< oo::excel::XWorksheet > SAL_CALL getActiveSheet() throw (css::uno::RuntimeException);
         virtual css::uno::Any SAL_CALL WorkSheets(const css::uno::Any& aIndex ) throw (css::uno::RuntimeException);
         virtual css::uno::Any SAL_CALL WorkBooks(const css::uno::Any& aIndex ) throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL Sheets( const css::uno::Any& aIndex ) throw (css::uno::RuntimeException);

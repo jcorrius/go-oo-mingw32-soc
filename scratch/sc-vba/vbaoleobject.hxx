@@ -4,11 +4,11 @@
 #include <cppuhelper/implbase1.hxx>
 #include <com/sun/star/drawing/XControlShape.hpp>
 #include <com/sun/star/awt/XWindowPeer.hpp>
-#include <org/openoffice/vba/XOLEObject.hpp>
+#include <org/openoffice/excel/XOLEObject.hpp>
 
 #include "vbahelper.hxx"
 
-typedef ::cppu::WeakImplHelper1< oo::vba::XOLEObject > OLEObjectImpl_BASE;
+typedef ::cppu::WeakImplHelper1< oo::excel::XOLEObject > OLEObjectImpl_BASE;
 
 class ScVbaOLEObject : public OLEObjectImpl_BASE
 {

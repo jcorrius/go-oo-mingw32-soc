@@ -3,7 +3,7 @@
 
 #include <cppuhelper/implbase1.hxx>
 
-#include <org/openoffice/vba/XPivotTables.hpp>
+#include <org/openoffice/excel/XPivotTables.hpp>
 #include <com/sun/star/container/XEnumerationAccess.hpp>
 #include <com/sun/star/uno/XComponentContext.hpp>
  
@@ -11,7 +11,7 @@
 #include "vbacollectionimpl.hxx"
 
 
-typedef ::cppu::ImplInheritanceHelper1< ScVbaCollectionBaseImpl, oo::vba::XPivotTables > ScVbaPivotTables_BASE;
+typedef ::cppu::ImplInheritanceHelper1< ScVbaCollectionBaseImpl, oo::excel::XPivotTables > ScVbaPivotTables_BASE;
 
 class ScVbaPivotTables : public ScVbaPivotTables_BASE
 {

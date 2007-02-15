@@ -2,7 +2,7 @@
 #include <com/sun/star/container/XEnumerationAccess.hpp>
 #include <com/sun/star/drawing/XControlShape.hpp>
 #include <com/sun/star/container/XNamed.hpp>
-#include <org/openoffice/vba/XOLEObject.hpp>
+#include <org/openoffice/excel/XOLEObject.hpp>
 
 #include "vbaoleobject.hxx"
 #include "vbaoleobjects.hxx"
@@ -27,7 +27,7 @@ ScVbaOLEObjects::createCollectionObject( const css::uno::Any& aSource )
     if( aSource.hasValue() )
     {
         uno::Reference< drawing::XControlShape > xControlShape( aSource, uno::UNO_QUERY_THROW );
-        return makeAny( uno::Reference< oo::vba::XOLEObject >( new ScVbaOLEObject( m_xContext, xControlShape ) ) );
+        return makeAny( uno::Reference< oo::excel::XOLEObject >( new ScVbaOLEObject( m_xContext, xControlShape ) ) );
     }
     return uno::Any();
 }
@@ -62,6 +62,6 @@ ScVbaOLEObjects::getItemByStringIndex( const rtl::OUString& sIndex ) throw (uno:
 uno::Type
 ScVbaOLEObjects::getElementType() throw (uno::RuntimeException)
 {
-    return org::openoffice::vba::XOLEObjects::static_type(0);
+    return org::openoffice::excel::XOLEObjects::static_type(0);
 }
 
