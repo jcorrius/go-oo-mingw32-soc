@@ -269,9 +269,6 @@ class UnoHelper
                       "regtypeprov.uno" SAL_DLLEXTENSION "!"),
                 Reference< XInterface >() );
         }
-
-
-        fprintf (stdout, "UnoHelper created\n");
     }
 
     void AddMandatoryRegistry (char *registry)
@@ -354,7 +351,6 @@ class UnoHelper
 
     ~UnoHelper ()
     {
-        fprintf (stdout, "UnoHelper deleted\n");
     }
 };
 

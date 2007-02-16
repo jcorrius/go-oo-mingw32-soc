@@ -158,14 +158,14 @@ class TypeEmitter : IDisposable
     Assembly TypeResolveHandler (object o, ResolveEventArgs args)
     {
 		Type ret = mModuleBuilder.GetType (args.Name, false);
-		Console.WriteLine ("mModuleBuilder.GetType yields {0}", ret);
+		//Console.WriteLine ("mModuleBuilder.GetType yields {0}", ret);
 
 		if (ret is TypeBuilder) {
 			TypeBuilder tb = ret as TypeBuilder;
-			Console.WriteLine ("{0} is type builder", tb);
+			//Console.WriteLine ("{0} is type builder", tb);
 			if (tb.IsCreated ()) {
 				ret = tb.CreateType ();
-				Console.WriteLine ("resolving to created {0} {1}", ret, tb);
+				//Console.WriteLine ("resolving to created {0} {1}", ret, tb);
 			}
 		}
 
@@ -176,7 +176,7 @@ class TypeEmitter : IDisposable
 		}
 
 		if (ret == null && mExtraAssemblies != null) {
-			Console.WriteLine ("assemblies {0}", mExtraAssemblies);
+			//Console.WriteLine ("assemblies {0}", mExtraAssemblies);
 			foreach (Assembly assembly in mExtraAssemblies) {
 				ret = assembly.GetType (args.Name, false);
 				if (ret != null) {
@@ -187,7 +187,7 @@ class TypeEmitter : IDisposable
 					break;
 				}
 			}
-			Console.WriteLine ("done {0}", ret);
+			//Console.WriteLine ("done {0}", ret);
 		}
 
 		if (ret != null)
@@ -199,19 +199,19 @@ class TypeEmitter : IDisposable
     Type GetType (string name, bool throwExc)
     {
 		Type ret = mModuleBuilder.GetType (name, false);
-		Console.WriteLine ("mModuleBuilder.GetType yields {0}", ret);
+		//Console.WriteLine ("mModuleBuilder.GetType yields {0}", ret);
 
 		if (ret is TypeBuilder) {
 			TypeBuilder tb = ret as TypeBuilder;
-			Console.WriteLine ("{0} is type builder", tb);
+			//Console.WriteLine ("{0} is type builder", tb);
 			if (tb.IsCreated ()) {
 				ret = tb.CreateType ();
-				Console.WriteLine ("resolving to created {0} {1}", ret, tb);
+				//Console.WriteLine ("resolving to created {0} {1}", ret, tb);
 			}
 		}
 
 		if (ret == null) {
-			Console.WriteLine ("looking name {0}", name);
+			//Console.WriteLine ("looking name {0}", name);
 			IFaceEntry entry = mIncompleteIFaces [name] as IFaceEntry;
 			if (entry != null)
 				ret = entry.mTypeBuilder;
@@ -288,10 +288,10 @@ class TypeEmitter : IDisposable
 
     public Type GetType (UnoXInterfaceTypeDescription xtd)
     {
-	Console.WriteLine ("get iface {0}", xtd.Name);
+		//Console.WriteLine ("get iface {0}", xtd.Name);
 
-	if (String.Compare (xtd.Name, "com.sun.star.uno.XInterface") == 0) {
-	    return typeof (object);
+		if (String.Compare (xtd.Name, "com.sun.star.uno.XInterface") == 0) {
+			return typeof (object);
 	}
 
 	string name = "unoidl." + xtd.Name;
@@ -299,7 +299,7 @@ class TypeEmitter : IDisposable
 	Type ret = GetType (name, false /* no exc */);
 
 	if (ret == null) {
-	    Console.WriteLine ("creating name {0}", name);
+	    //Console.WriteLine ("creating name {0}", name);
 	    TypeBuilder typeBuilder;
         
 	    TypeAttributes attr = TypeAttributes.Public |
@@ -327,10 +327,10 @@ class TypeEmitter : IDisposable
 
 		typeBuilder = mModuleBuilder.DefineType (name, attr, null, baseInterfaces);
 	    } else {
-		System.Console.WriteLine ("warning: IDL interface {0} is not derived from " +
-					  "com.sun.star.uno.XInterface!", name);
-		
-		typeBuilder = mModuleBuilder.DefineType (name, attr);
+			System.Console.WriteLine ("warning: IDL interface {0} is not derived from " +
+									  "com.sun.star.uno.XInterface!", name);
+			
+			typeBuilder = mModuleBuilder.DefineType (name, attr);
 	    }
 
 	    // insert to be completed
@@ -448,7 +448,7 @@ class TypeEmitter : IDisposable
 
     public Type GetType (UnoXServiceTypeDescription xtd)
     {
-		Console.WriteLine ("get service {0}", xtd.Name);
+		// Console.WriteLine ("get service {0}", xtd.Name);
 
 		if (!xtd.IsSingleInterfaceBased)
 			return null;
@@ -623,14 +623,14 @@ class TypeEmitter : IDisposable
 		for (;dims-- > 0;)
 			buf.Append (Constants.Brackets);
 
-		Console.WriteLine ("MapUnoTypeName {0} => {1}", typeName, buf.ToString ());
+		// Console.WriteLine ("MapUnoTypeName {0} => {1}", typeName, buf.ToString ());
 
 		return buf.ToString();
     }
 
     public Type GetType (UnoXCompoundTypeDescription xtd)
     {
-		Console.WriteLine ("get compound type {0}", xtd.Name);
+		// Console.WriteLine ("get compound type {0}", xtd.Name);
 
 		if (xtd.TypeClass == UnoTypeClass.Exception) {
 			if (xtd.Name.Equals ("com.sun.star.uno.Exception"))
@@ -652,7 +652,7 @@ class TypeEmitter : IDisposable
 		UnoXStructTypeDescription xsd = xtd as UnoXStructTypeDescription;
 
 		if (ret == null) {
-			Console.WriteLine ("create compound type {0}", name);
+			// Console.WriteLine ("create compound type {0}", name);
 			UnoXTypeDescription baseTD = xtd.BaseType;
 			Type baseType = baseTD != null ? GetType (baseTD) : typeof (object);
 			CustomAttributeBuilder attrBuilder;
@@ -800,7 +800,7 @@ class TypeEmitter : IDisposable
 			ILGenerator code = ctorBuilder.GetILGenerator ();
 
 			code.Emit (OpCodes.Ldarg_0);
-			Console.WriteLine ("baseType: {0}", baseType);
+			// Console.WriteLine ("baseType: {0}", baseType);
 			code.Emit (OpCodes.Call, baseTypeEntry == null ? baseType.GetConstructor (new Type [0]) : baseTypeEntry.mDefaultConstructor);
 
 			// default initialize members
@@ -876,18 +876,18 @@ class TypeEmitter : IDisposable
 
 			// new entry
 			mGeneratedStructs.Add (name, entry);
-			Console.WriteLine ("added entry to mGeneratedStructs: {0}", name);
-			if (baseTD != null)
-				Console.WriteLine ("baseTD: {0}", baseTD.Name, GetType (baseTD).Name);
+			//Console.WriteLine ("added entry to mGeneratedStructs: {0}", name);
+			//if (baseTD != null)
+			//Console.WriteLine ("baseTD: {0}", baseTD.Name, GetType (baseTD).Name);
 			ret = typeBuilder.CreateType ();
 		}
 	
 		// In case of an instantiated polymorphic struct we want to return a 
 		// uno.PolymorphicType (inherits Type) rather then Type.
 		if (xsd != null && xsd.TypeArguments > 0) {
-			Console.WriteLine ("polymorphic struct: call uno.PolymorphicType.GetType ({0}, {1})", ret, xtd.Name);
+			//Console.WriteLine ("polymorphic struct: call uno.PolymorphicType.GetType ({0}, {1})", ret, xtd.Name);
 			ret = uno.PolymorphicType.GetType (ret, MapUnoTypeName (xtd.Name));
-			Console.WriteLine ("polymorphic struct: {0} ({1})", ret, xtd.Name);
+			//Console.WriteLine ("polymorphic struct: {0} ({1})", ret, xtd.Name);
 		}
 
 		return ret;
@@ -895,7 +895,7 @@ class TypeEmitter : IDisposable
 
     public Type GetType (UnoXConstantTypeDescription xtd)
     {
-		Console.WriteLine ("get constant type {0}", xtd.Name);
+		//Console.WriteLine ("get constant type {0}", xtd.Name);
 
 		string name = "unoidl." + xtd.Name;
 
@@ -927,7 +927,7 @@ class TypeEmitter : IDisposable
 
     public Type GetType (UnoXConstantsTypeDescription xtd)
     {
-		Console.WriteLine ("get constants type {0}", xtd.Name);
+		//Console.WriteLine ("get constants type {0}", xtd.Name);
 
 		string name = "unoidl." + xtd.Name;
 
@@ -962,12 +962,12 @@ class TypeEmitter : IDisposable
 
     public Type GetType (UnoXSingletonTypeDescription xtd)
     {
-		Console.WriteLine ("get singleton {0}", xtd.Name);
+		//Console.WriteLine ("get singleton {0}", xtd.Name);
 
 		if (!xtd.IsInterfaceBased)
 			return null;
 
-		Console.WriteLine ("singleton {0} is interface based", xtd.Name);
+		//Console.WriteLine ("singleton {0} is interface based", xtd.Name);
 
 		string name = "unoidl." + xtd.Name;
 
@@ -1056,7 +1056,7 @@ class TypeEmitter : IDisposable
 			return GetType (xtd as UnoXSingletonTypeDescription);
 		default:
 			// fixme, use double for unfinished types
-			Console.WriteLine ("warning: unfinished type reached: {0}", xtd.Name);
+			//Console.WriteLine ("warning: unfinished type reached: {0}", xtd.Name);
 			return typeof (void);
 		}
 
@@ -1131,7 +1131,7 @@ class TypeEmitter : IDisposable
 					Type[] pTypes = new Type [method.Parameters];
 					int j;
 
-					Console.WriteLine ("method {0}.{1}", entry.mTypeBuilder.FullName, method.MemberName);
+					//Console.WriteLine ("method {0}.{1}", entry.mTypeBuilder.FullName, method.MemberName);
 
 					// first determine all types
 					for (j = 0; j < method.Parameters; j ++) {
@@ -1164,16 +1164,16 @@ class TypeEmitter : IDisposable
 					}
 
 					if (method.ReturnsStruct) {
-						Console.WriteLine ("returns struct");
+						//Console.WriteLine ("returns struct");
 
 						UnoXStructTypeDescription std = method.ReturnType as UnoXStructTypeDescription;
 						Type[] ats = new Type [std.TypeArguments];
 
-						Console.WriteLine ("type arguments: {0}", std.TypeArguments);
+						//Console.WriteLine ("type arguments: {0}", std.TypeArguments);
 
 						for (j = 0; j < std.TypeArguments; j ++) {
 							ats [j] = GetType (std.TypeArgument (j));
-							Console.WriteLine ("ats [{0}] = {1}", j, ats [j]);
+							//Console.WriteLine ("ats [{0}] = {1}", j, ats [j]);
 						}
 
 						object[] atso = { ats };
@@ -1205,7 +1205,7 @@ class TypeEmitter : IDisposable
 					const MethodAttributes propMethodAttr = methodAttr | MethodAttributes.SpecialName;
 
 					Type attrType = GetType (attribute.Type);
-					Console.WriteLine ("attribute {2} type: {0} => {1}", attribute.Type, attrType, attribute.Name);
+					//Console.WriteLine ("attribute {2} type: {0} => {1}", attribute.Type, attrType, attribute.Name);
 					Type[] parameters = new Type [0];
 
 					PropertyBuilder propBuilder = entry.mTypeBuilder.DefineProperty (attribute.MemberName, PropertyAttributes.None, attrType, parameters);
@@ -1232,7 +1232,7 @@ class TypeEmitter : IDisposable
 						parameters = new Type [1];
 						parameters [0] = attrType;
 						//parameters [0] = null;
-						Console.WriteLine ("setter parameters: {0} ({1})", parameters, parameters [0]);
+						//Console.WriteLine ("setter parameters: {0} ({1})", parameters, parameters [0]);
 						methodBuilder = entry.mTypeBuilder.DefineMethod ("set_" + attribute.MemberName,
 																		 propMethodAttr, typeof (void), parameters);
 						methodBuilder.DefineParameter (1, ParameterAttributes.In, "value");
@@ -1252,7 +1252,7 @@ class TypeEmitter : IDisposable
 
 			mIncompleteIFaces.Remove (entry.mTypeBuilder.FullName);
 
-			Console.WriteLine ("completed {0}", entry.mTypeBuilder.FullName);
+			//Console.WriteLine ("completed {0}", entry.mTypeBuilder.FullName);
 
 			return entry.mTypeBuilder.CreateType ();
     }
@@ -1643,7 +1643,7 @@ class TypeEmitter : IDisposable
 
 				// add to the string the Exception.Message
 				ilGen.Emit (OpCodes.Ldloc, localException);
-				Console.WriteLine ("get message property of type: {0}", typeUnoException);
+				//Console.WriteLine ("get message property of type: {0}", typeUnoException);
 				ilGen.Emit (OpCodes.Callvirt, typeUnoException.GetProperty ("Message").GetGetMethod ());
 				Type[] concatParams = { typeof (string), typeof (string)};
 				ilGen.Emit (OpCodes.Call, typeof (string).GetMethod ("Concat", concatParams));
@@ -1681,7 +1681,7 @@ class TypeEmitter : IDisposable
  		if (mConfig.mVerbose)
  			Console.WriteLine("> emitting service type {0}", "unoidl." + entry.mType.Name);
 
-		Console.WriteLine ("completed service {0}", entry.mTypeBuilder.FullName);
+		//Console.WriteLine ("completed service {0}", entry.mTypeBuilder.FullName);
 
 		return entry.mTypeBuilder.CreateType ();
 	}
@@ -1763,7 +1763,7 @@ class TypeEmitter : IDisposable
 
 		mIncompleteSingletons.Remove (entry.mTypeBuilder.FullName);
 
-		Console.WriteLine ("completed singleton {0}", entry.mTypeBuilder.FullName);
+		//Console.WriteLine ("completed singleton {0}", entry.mTypeBuilder.FullName);
 
 		return entry.mTypeBuilder.CreateType ();
 	}
@@ -1879,7 +1879,7 @@ class CliMaker
 // 			mOutputDir = System.IO.Path.CurrentDirectory;
 // 		idx = mOutputFile.LastIndexOf (".dll");
 // 		mName = mOutputFile.Substring (0, idx);
-		Console.WriteLine ("file {0}\ndir  {1}\nname {2}", mOutputFile, mOutputDir, mName);
+		//Console.WriteLine ("file {0}\ndir  {1}\nname {2}", mOutputFile, mOutputDir, mName);
 
         // setup assembly info: xxx todo set more? e.g. avoid strong versioning
         AssemblyName assemblyName = new AssemblyName();
