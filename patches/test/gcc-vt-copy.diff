@@ -1,0 +1,315 @@
+--- /usr/src/packages/BUILD/gcc-4.1.0/gcc/cp/class.c	2006-02-18 12:05:01.000000000 +0000
++++ gcc/cp/class.c	2007-02-15 18:58:41.000000000 +0000
+@@ -114,6 +114,8 @@
+    declaration order.  */
+ VEC(tree,gc) *local_classes;
+ 
++static void dump_slot_relocs (tree t, tree slot_relocs);
++
+ static tree get_vfield_name (tree);
+ static void finish_struct_anon (tree);
+ static tree get_vtable_name (tree);
+@@ -138,7 +140,7 @@
+ 						    bool, tree);
+ static tree build_simple_base_path (tree expr, tree binfo);
+ static tree build_vtbl_ref_1 (tree, tree);
+-static tree build_vtbl_initializer (tree, tree, tree, tree, int *);
++static tree build_vtbl_initializer (tree, tree, tree, tree, int *, tree *);
+ static int count_fields (tree);
+ static int add_fields_to_record_type (tree, struct sorted_fields_type*, int);
+ static void check_bitfield_decl (tree);
+@@ -181,9 +183,9 @@
+ 					   tree, tree, splay_tree);
+ static tree end_of_class (tree, int);
+ static bool layout_empty_base (tree, tree, splay_tree);
+-static void accumulate_vtbl_inits (tree, tree, tree, tree, tree);
++static void accumulate_vtbl_inits (tree, tree, tree, tree, tree, tree *);
+ static tree dfs_accumulate_vtbl_inits (tree, tree, tree, tree,
+-					       tree);
++					       tree, tree *);
+ static void build_rtti_vtbl_entries (tree, vtbl_init_data *);
+ static void build_vcall_and_vbase_vtbl_entries (tree, vtbl_init_data *);
+ static void clone_constructors_and_destructors (tree);
+@@ -6659,23 +6661,26 @@
+   tree list;
+   tree vbase;
+ 
++  tree slot_relocs = NULL_TREE;
+   /* We lay out the primary and secondary vtables in one contiguous
+      vtable.  The primary vtable is first, followed by the non-virtual
+      secondary vtables in inheritance graph order.  */
+   list = build_tree_list (BINFO_VTABLE (TYPE_BINFO (t)), NULL_TREE);
+   accumulate_vtbl_inits (TYPE_BINFO (t), TYPE_BINFO (t),
+-			 TYPE_BINFO (t), t, list);
++			 TYPE_BINFO (t), t, list, &slot_relocs);
+ 
+   /* Then come the virtual bases, also in inheritance graph order.  */
+   for (vbase = TYPE_BINFO (t); vbase; vbase = TREE_CHAIN (vbase))
+     {
+       if (!BINFO_VIRTUAL_P (vbase))
+ 	continue;
+-      accumulate_vtbl_inits (vbase, vbase, TYPE_BINFO (t), t, list);
++      accumulate_vtbl_inits (vbase, vbase, TYPE_BINFO (t), t, list, &slot_relocs);
+     }
+ 
+   if (BINFO_VTABLE (TYPE_BINFO (t)))
+     initialize_vtable (TYPE_BINFO (t), TREE_VALUE (list));
++  
++  dump_slot_relocs (t, slot_relocs);
+ }
+ 
+ /* Initialize the vtable for BINFO with the INITS.  */
+@@ -6957,6 +6962,7 @@
+   tree inits;
+   tree id;
+   tree vbase;
++  tree slot_relocs;
+ 
+   /* See if we've already created this construction vtable group.  */
+   id = mangle_ctor_vtbl_for_type (t, binfo);
+@@ -6970,8 +6976,9 @@
+   vtbl = build_vtable (t, id, ptr_type_node);
+   DECL_CONSTRUCTION_VTABLE_P (vtbl) = 1;
+   list = build_tree_list (vtbl, NULL_TREE);
++  slot_relocs = NULL_TREE;
+   accumulate_vtbl_inits (binfo, TYPE_BINFO (TREE_TYPE (binfo)),
+-			 binfo, t, list);
++			 binfo, t, list, &slot_relocs);
+ 
+   /* Add the vtables for each of our virtual bases using the vbase in T
+      binfo.  */
+@@ -6985,7 +6992,7 @@
+ 	continue;
+       b = copied_binfo (vbase, binfo);
+ 
+-      accumulate_vtbl_inits (b, vbase, binfo, t, list);
++      accumulate_vtbl_inits (b, vbase, binfo, t, list, &slot_relocs);
+     }
+   inits = TREE_VALUE (list);
+ 
+@@ -6998,6 +7005,8 @@
+   CLASSTYPE_VTABLES (t) = chainon (CLASSTYPE_VTABLES (t), vtbl);
+   initialize_artificial_var (vtbl, inits);
+   dump_vtable (t, binfo, vtbl);
++
++  dump_slot_relocs (t, slot_relocs);
+ }
+ 
+ /* Add the vtbl initializers for BINFO (and its bases other than
+@@ -7015,7 +7024,8 @@
+ 		       tree orig_binfo,
+ 		       tree rtti_binfo,
+ 		       tree t,
+-		       tree inits)
++		       tree inits,
++                       tree *slot_relocs)
+ {
+   int i;
+   tree base_binfo;
+@@ -7038,7 +7048,7 @@
+   TREE_VALUE (inits)
+     = chainon (TREE_VALUE (inits),
+ 	       dfs_accumulate_vtbl_inits (binfo, orig_binfo,
+-					  rtti_binfo, t, inits));
++					  rtti_binfo, t, inits, slot_relocs));
+ 
+   /* Walk the BINFO and its bases.  We walk in preorder so that as we
+      initialize each vtable we can figure out at what offset the
+@@ -7053,7 +7063,7 @@
+       accumulate_vtbl_inits (base_binfo,
+ 			     BINFO_BASE_BINFO (orig_binfo, i),
+ 			     rtti_binfo, t,
+-			     inits);
++			     inits, slot_relocs);
+     }
+ }
+ 
+@@ -7065,7 +7075,8 @@
+ 			   tree orig_binfo,
+ 			   tree rtti_binfo,
+ 			   tree t,
+-			   tree l)
++			   tree l,
++                           tree *slot_relocs)
+ {
+   tree inits = NULL_TREE;
+   tree vtbl = NULL_TREE;
+@@ -7132,7 +7143,7 @@
+ 
+       /* Compute the initializer for this vtable.  */
+       inits = build_vtbl_initializer (binfo, orig_binfo, t, rtti_binfo,
+-				      &non_fn_entries);
++				      &non_fn_entries, slot_relocs);
+ 
+       /* Figure out the position to which the VPTR should point.  */
+       vtbl = TREE_PURPOSE (l);
+@@ -7160,6 +7171,59 @@
+   return inits;
+ }
+ 
++tree vtable_slot_copies;
++
++static void
++queue_vtable_slot_copy (tree dest_binfo,
++                        tree src_fn, int idx)
++{
++    /* Cannot construct offsets as yet, since we prolly don't
++       have valid DECL_VINDEXs yet, so push vtable/fn pairs (?)
++       Can we use the 'BINFO_TYPE' to extract the vtable ? */
++    fprintf (stderr, "\tcopy from: ");
++    fprintf (stderr, ":%s ",
++             expr_as_string (src_fn, TFF_PLAIN_IDENTIFIER));
++    fprintf (stderr, "[ %s ] to ",
++             expr_as_string (DECL_VINDEX (src_fn), TFF_PLAIN_IDENTIFIER));
++    fprintf (stderr, "%s",
++             type_as_string (dest_binfo, TFF_PLAIN_IDENTIFIER));
++    fprintf (stderr, "[ %d ]\n", idx);
++
++/*    vtable_slot_copies = tree_cons (src_slot, dest_slot,
++      vtable_slot_copies); */
++}
++
++static void
++dump_slot_relocs (tree t, tree slot_relocs)
++{
++  tree st;
++  fprintf (stderr, "Copy data for '%s'\n",
++           type_as_string (t, TFF_PLAIN_IDENTIFIER));
++
++  for (st = slot_relocs; st; st = TREE_CHAIN(st)) 
++    {
++        tree orig_binfo = TREE_PURPOSE(st);
++        tree init_list = TREE_VALUE(st);
++        tree v;
++        fprintf (stderr, "\tfrom %s (%d) entries\n",
++                 type_as_string (orig_binfo, TFF_PLAIN_IDENTIFIER),
++                 list_length (init_list));
++        for (v = init_list; v; v = TREE_CHAIN(v)) 
++          {
++            if (!TREE_VALUE(v))
++                fprintf (stderr, "\t\tNULL\n");
++            else
++              {
++                tree fn = TREE_VALUE(v);
++                fprintf (stderr, "\t\t%s ",
++                         expr_as_string (fn, TFF_PLAIN_IDENTIFIER));
++                fprintf (stderr, "[ %s ]\n",
++                         expr_as_string (DECL_VINDEX (fn), TFF_PLAIN_IDENTIFIER));
++              }
++          }
++    }
++}
++
+ static GTY(()) tree abort_fndecl_addr;
+ 
+ /* Construct the initializer for BINFO's virtual function table.  BINFO
+@@ -7190,10 +7254,12 @@
+ 			tree orig_binfo,
+ 			tree t,
+ 			tree rtti_binfo,
+-			int* non_fn_entries_p)
++			int* non_fn_entries_p,
++                        tree *slot_relocs)
+ {
+   tree v, b;
+   tree vfun_inits;
++  tree slot_reloc_data;
+   vtbl_init_data vid;
+   unsigned ix;
+   tree vbinfo;
+@@ -7252,12 +7318,27 @@
+   /* Go through all the ordinary virtual functions, building up
+      initializers.  */
+   vfun_inits = NULL_TREE;
++  slot_reloc_data = NULL_TREE;
++  // Build a list of bits to copy later [?] ...
++  // add 1 entry per vfunc_init ... (!?)
++  // have tree nodes that contain:
++  // <orig_binfo> (source to copy from ?)
++  //      <fn> [ DECL_VINDEX(fn) == offset ] || NULL for no copy ...
++  // Generate dest offsets later for copying ...
++  // cf. gcc/bitmap.h
++  fprintf (stderr, "Init vtable:\n");
++  fprintf (stderr, " (%s)\n",
++           type_as_string (t, TFF_PLAIN_IDENTIFIER));
++  fprintf (stderr, " (%s)",
++           type_as_string (binfo, TFF_PLAIN_IDENTIFIER));
+   for (v = BINFO_VIRTUALS (orig_binfo); v; v = TREE_CHAIN (v))
+     {
+       tree delta;
+       tree vcall_index;
+       tree fn, fn_original;
+       tree init = NULL_TREE;
++      tree slot_fn = NULL_TREE;
++      tree first_overrider = NULL_TREE;
+ 
+       fn = BV_FN (v);
+       fn_original = fn;
+@@ -7287,7 +7368,10 @@
+ 	{
+ 	  /* We found a defn before a lost primary; go ahead as normal.  */
+ 	  if (look_for_overrides_here (BINFO_TYPE (b), fn_original))
+-	    break;
++           {
++             first_overrider = TYPE_BINFO (BINFO_TYPE (b));
++             break;
++           }
+ 
+ 	  /* The nearest definition is from a lost primary; clear the
+ 	     slot.  */
+@@ -7305,6 +7389,9 @@
+ 	  delta = BV_DELTA (v);
+ 	  vcall_index = BV_VCALL_INDEX (v);
+ 
++          fprintf (stderr, "Vfn: %s\n",
++                   expr_as_string (fn, TFF_PLAIN_IDENTIFIER));
++
+ 	  gcc_assert (TREE_CODE (delta) == INTEGER_CST);
+ 	  gcc_assert (TREE_CODE (fn) == FUNCTION_DECL);
+ 
+@@ -7325,9 +7412,21 @@
+ 		  if (!DECL_NAME (fn))
+ 		    finish_thunk (fn);
+ 		}
+-	      /* Take the address of the function, considering it to be of an
+-		 appropriate generic type.  */
+-	      init = build1 (ADDR_EXPR, vfunc_ptr_type_node, fn);
++             else if (slot_relocs &&
++                      first_overrider && BINFO_TYPE (first_overrider) != t)
++               {
++                 // accumulate information about overriding 
++                 gcc_assert (BINFO_VTABLE (first_overrider));
++                 queue_vtable_slot_copy (binfo, fn, list_length(vfun_inits));
++                 slot_fn = fn;
++               }
++
++              if (!init)
++                {
++	          /* Take the address of the function, considering it to be of an
++		     appropriate generic type.  */
++	          init = build1 (ADDR_EXPR, vfunc_ptr_type_node, fn);
++                }
+ 	    }
+ 	}
+ 
+@@ -7352,8 +7451,20 @@
+ 	}
+       else
+ 	vfun_inits = tree_cons (NULL_TREE, init, vfun_inits);
++
++      if (slot_relocs)
++      {
++        // FIXME track if they're all NULL ... (?)
++        slot_reloc_data = tree_cons (NULL_TREE, slot_fn, slot_reloc_data);
++      }
+     }
+ 
++  if (slot_relocs)
++  {
++      slot_reloc_data = nreverse (slot_reloc_data);
++      *slot_relocs = tree_cons (orig_binfo, slot_reloc_data, *slot_relocs);
++  }
++
+   /* The initializers for virtual functions were built up in reverse
+      order; straighten them out now.  */
+   vfun_inits = nreverse (vfun_inits);
