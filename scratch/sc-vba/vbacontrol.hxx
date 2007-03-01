@@ -18,8 +18,10 @@ typedef ::cppu::WeakImplHelper1< oo::msforms::XControl > ControlImpl_BASE;
 class ScVbaControl : public ControlImpl_BASE
     ,public ::comphelper::OMutexAndBroadcastHelper
 {
+/* this will cause error when the sheet is invisible.
 private:
     css::uno::Reference< css::awt::XWindowPeer > m_xWindowPeer;
+*/
 protected:
     css::uno::Reference< css::uno::XComponentContext > m_xContext;
     css::uno::Reference< css::beans::XPropertySet > m_xProps;
