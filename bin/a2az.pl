@@ -40,6 +40,7 @@ while( <FILE1>){
                    s/([ 	~">][Aa]) \$\[officename\]/$1z \$\[officename\]/g;
                    s/([ 	~">][Aa]) \\<emph\\>\$\[officename\]/$1z \\<emph\\>\$\[officename\]/g;
                    s/([ 	~">][Aa]) \[ProductName\]/$1z \[ProductName\]/g;
+                   s/\\nA %PRODUCTNAME/\\nAz %PRODUCTNAME/g;
               }
             };
          }
