@@ -4,35 +4,40 @@
 #include <com/sun/star/view/XControlAccess.hpp>
 #include <com/sun/star/container/XChild.hpp>
 #include <com/sun/star/drawing/XShape.hpp>
+#include <com/sun/star/beans/XPropertySet.hpp>
 
 #include "vbaoleobject.hxx"
 
 using namespace com::sun::star;
+using namespace org::openoffice;
 
-
-sal_Int32 pt2mm( double pt ) //1/100mm
+uno::Reference< css::awt::XWindowPeer >
+ScVbaOLEObject::getWindowPeer( const uno::Reference< ::drawing::XControlShape >& xControlShape ) throw (uno::RuntimeException)
 {
-    return (sal_Int32)pt * 0.352778;
+    uno::Reference< awt::XControlModel > xControlModel( xControlShape->getControl(), uno::UNO_QUERY_THROW );
+    //init m_xWindowPeer
+    uno::Reference< container::XChild > xChild( xControlModel, uno::UNO_QUERY_THROW );
+    xChild.set( xChild->getParent(), uno::UNO_QUERY_THROW );
+    xChild.set( xChild->getParent(), uno::UNO_QUERY_THROW );
+    uno::Reference< frame::XModel > xModel( xChild->getParent(), uno::UNO_QUERY_THROW );
+    uno::Reference< view::XControlAccess > xControlAccess( xModel->getCurrentController(), uno::UNO_QUERY_THROW );
+    uno::Reference< awt::XControl > xControl;
+    try
+    {
+        xControl.set( xControlAccess->getControl( xControlModel ), uno::UNO_QUERY );
+    }
+    catch( uno::Exception )
+    {
+        throw uno::RuntimeException( rtl::OUString::createFromAscii( "The Control does not exsit" ),
+                uno::Reference< uno::XInterface >() );
+    }
+    return xControl->getPeer();
 }
-
-double mm2pt( sal_Int32 mm )
-{
-    return mm * 2.8345;
-}
-
 
 ScVbaOLEObject::ScVbaOLEObject( const uno::Reference< uno::XComponentContext >& xContext,
             css::uno::Reference< css::drawing::XControlShape > xControlShape )
 : m_xContext( xContext ), m_xControlShape( xControlShape )
 {
-    //init m_xWindowPeer
-    uno::Reference< awt::XControlModel > xControlModel( xControlShape->getControl(), css::uno::UNO_QUERY_THROW );
-    uno::Reference< container::XChild > xChild( xControlModel, uno::UNO_QUERY_THROW );
-    xChild.set( xChild->getParent(), uno::UNO_QUERY_THROW );
-    xChild.set( xChild->getParent(), uno::UNO_QUERY_THROW );
-    css::uno::Reference< css::frame::XModel > xModel( xChild->getParent(), uno::UNO_QUERY_THROW );
-    css::uno::Reference< css::view::XControlAccess > xControlAccess( xModel->getCurrentController(), css::uno::UNO_QUERY_THROW );
-    m_xWindowPeer = xControlAccess->getControl( xControlModel )->getPeer();
 }
 
 uno::Reference< uno::XInterface > SAL_CALL 
@@ -44,28 +49,34 @@ ScVbaOLEObject::getObject() throw (uno::RuntimeException)
 sal_Bool SAL_CALL 
 ScVbaOLEObject::getEnabled() throw (uno::RuntimeException)
 {
-    uno::Reference< css::awt::XWindow2 > xWindow2( m_xWindowPeer, css::uno::UNO_QUERY_THROW );
-    return xWindow2->isEnabled();
+    uno::Reference< beans::XPropertySet > xProps( m_xControlShape, uno::UNO_QUERY_THROW );
+    uno::Any aValue = xProps->getPropertyValue
+            (rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Enabled" ) ) );
+    sal_Bool bRet = false;
+    aValue >>= bRet;
+    return bRet;
 }
 
 void SAL_CALL 
 ScVbaOLEObject::setEnabled( sal_Bool _enabled ) throw (uno::RuntimeException)
 {
-    uno::Reference< css::awt::XWindow2 > xWindow2( m_xWindowPeer, css::uno::UNO_QUERY_THROW );
-    xWindow2->setEnable( _enabled );
+    uno::Reference< beans::XPropertySet > xProps( m_xControlShape, uno::UNO_QUERY_THROW );
+    uno::Any aValue( _enabled );
+    xProps->setPropertyValue
+            (rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Enabled" ) ), aValue);
 }
 
 sal_Bool SAL_CALL 
 ScVbaOLEObject::getVisible() throw (uno::RuntimeException)
 {
-    uno::Reference< css::awt::XWindow2 > xWindow2( m_xWindowPeer, css::uno::UNO_QUERY_THROW );
+    uno::Reference< css::awt::XWindow2 > xWindow2( getWindowPeer( m_xControlShape ), css::uno::UNO_QUERY_THROW );
     return xWindow2->isVisible();
 }
 
 void SAL_CALL 
 ScVbaOLEObject::setVisible( sal_Bool _visible ) throw (uno::RuntimeException)
 {
-    uno::Reference< css::awt::XWindow2 > xWindow2( m_xWindowPeer, css::uno::UNO_QUERY_THROW );
+    uno::Reference< css::awt::XWindow2 > xWindow2( getWindowPeer( m_xControlShape ), css::uno::UNO_QUERY_THROW );
     xWindow2->setVisible( _visible );
 }
 

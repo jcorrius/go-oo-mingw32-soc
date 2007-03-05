@@ -12,7 +12,7 @@ typedef ::cppu::WeakImplHelper1< oo::excel::XOLEObject > OLEObjectImpl_BASE;
 
 class ScVbaOLEObject : public OLEObjectImpl_BASE
 {
-    css::uno::Reference< css::awt::XWindowPeer > m_xWindowPeer;
+    css::uno::Reference< css::awt::XWindowPeer > getWindowPeer( const css::uno::Reference< css::drawing::XControlShape >& xControlShape ) throw (css::uno::RuntimeException);
 protected:
     css::uno::Reference< css::uno::XComponentContext > m_xContext;
     css::uno::Reference< css::drawing::XControlShape > m_xControlShape;

@@ -22,6 +22,7 @@ class ScVbaControl : public ControlImpl_BASE
 private:
     css::uno::Reference< css::awt::XWindowPeer > m_xWindowPeer;
 */
+    css::uno::Reference< css::awt::XWindowPeer > getWindowPeer( const css::uno::Reference< css::drawing::XControlShape >& xControlShape ) throw (css::uno::RuntimeException);
 protected:
     css::uno::Reference< css::uno::XComponentContext > m_xContext;
     css::uno::Reference< css::beans::XPropertySet > m_xProps;
@@ -44,8 +45,10 @@ public:
     virtual void SAL_CALL setEnabled( sal_Bool _enabled ) throw (css::uno::RuntimeException);
     virtual sal_Bool SAL_CALL getVisible() throw (css::uno::RuntimeException);
     virtual void SAL_CALL setVisible( sal_Bool _visible ) throw (css::uno::RuntimeException);
-    virtual css::uno::Any SAL_CALL getSize() throw (css::uno::RuntimeException);
-    virtual void SAL_CALL setSize( const css::uno::Any& _size ) throw (css::uno::RuntimeException);
+    virtual double SAL_CALL getHeight() throw (css::uno::RuntimeException);
+    virtual void SAL_CALL setHeight( const double _height ) throw (css::uno::RuntimeException);
+    virtual double SAL_CALL getWidth() throw (css::uno::RuntimeException);
+    virtual void SAL_CALL setWidth( const double _width ) throw (css::uno::RuntimeException);
     //virtual ~ScVbaControl();
 };
 

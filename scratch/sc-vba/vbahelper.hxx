@@ -25,6 +25,8 @@ namespace org
 		SfxViewFrame* getCurrentViewFrame();
 		sal_Int32 OORGBToXLRGB( sal_Int32 );
 		sal_Int32 XLRGBToOORGB( sal_Int32 );
+        sal_Int32 pt2mm( double pt ); //1/100mm
+        double mm2pt( sal_Int32 mm );
 		css::uno::Any OORGBToXLRGB( const css::uno::Any& );
 		css::uno::Any XLRGBToOORGB( const css::uno::Any& );
 		// provide a NULL object that can be passed as variant so that 

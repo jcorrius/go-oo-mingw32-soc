@@ -20,7 +20,7 @@ using namespace com::sun::star;
 using namespace org::openoffice;
 
 uno::Reference< css::awt::XWindowPeer > 
-getWindowPeer( const uno::Reference< ::drawing::XControlShape >& xControlShape ) throw (uno::RuntimeException)
+ScVbaControl::getWindowPeer( const uno::Reference< ::drawing::XControlShape >& xControlShape ) throw (uno::RuntimeException)
 {
     uno::Reference< awt::XControlModel > xControlModel( xControlShape->getControl(), uno::UNO_QUERY_THROW );
     //init m_xWindowPeer 
@@ -115,16 +115,29 @@ void SAL_CALL ScVbaControl::setVisible( sal_Bool bVisible ) throw (uno::RuntimeE
     uno::Reference< awt::XWindow2 > xWindow2( getWindowPeer( m_xControlShape ), uno::UNO_QUERY_THROW );
     xWindow2->setVisible( bVisible );
 }
-uno::Any SAL_CALL ScVbaControl::getSize() throw (uno::RuntimeException)
+double SAL_CALL ScVbaControl::getHeight() throw (uno::RuntimeException)
 {
     uno::Reference< drawing::XShape > xShape( m_xControlShape, uno::UNO_QUERY_THROW );
-    return uno::makeAny(  xShape->getSize() );
+    return mm2pt( xShape->getSize().Height ) / 100;
 }
-void SAL_CALL ScVbaControl::setSize( const uno::Any& _size ) throw (uno::RuntimeException)
+void SAL_CALL ScVbaControl::setHeight( const double _height ) throw (uno::RuntimeException)
 {
-    awt::Size aSize;
-    _size >>= aSize;
     uno::Reference< drawing::XShape > xShape( m_xControlShape, uno::UNO_QUERY_THROW );
+    awt::Size aSize( xShape->getSize() );
+    aSize.Height = pt2mm( _height ) * 100;
+    xShape->setSize( aSize );
+}
+
+double SAL_CALL ScVbaControl::getWidth() throw (uno::RuntimeException)
+{
+    uno::Reference< drawing::XShape > xShape( m_xControlShape, uno::UNO_QUERY_THROW );
+    return mm2pt( xShape->getSize().Width ) / 100;
+}
+void SAL_CALL ScVbaControl::setWidth( const double _width ) throw (uno::RuntimeException)
+{
+    uno::Reference< drawing::XShape > xShape( m_xControlShape, uno::UNO_QUERY_THROW );
+    awt::Size aSize( xShape->getSize() );
+    aSize.Width = pt2mm( _width ) * 100;
     xShape->setSize( aSize );
 }
 
