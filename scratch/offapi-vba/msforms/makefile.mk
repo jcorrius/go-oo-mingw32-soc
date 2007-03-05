@@ -23,7 +23,7 @@ IDLFILES=\
 	XLabel.idl \
 	XTextBox.idl \
 	XRadioButton.idl \
-	XListBox.idl \
+	XListBox.idl 
 
 # ------------------------------------------------------------------
 
