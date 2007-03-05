@@ -1,3 +1,37 @@
+/*************************************************************************
+ *
+ *  OpenOffice.org - a multi-platform office productivity suite
+ *
+ *  $RCSfile$
+ *
+ *  $Revision$
+ *
+ *  last change: $Author$ $Date$
+ *
+ *  The Contents of this file are made available subject to
+ *  the terms of GNU Lesser General Public License Version 2.1.
+ *
+ *
+ *    GNU Lesser General Public License Version 2.1
+ *    =============================================
+ *    Copyright 2005 by Sun Microsystems, Inc.
+ *    901 San Antonio Road, Palo Alto, CA 94303, USA
+ *
+ *    This library is free software; you can redistribute it and/or
+ *    modify it under the terms of the GNU Lesser General Public
+ *    License version 2.1, as published by the Free Software Foundation.
+ *
+ *    This library is distributed in the hope that it will be useful,
+ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ *    Lesser General Public License for more details.
+ *
+ *    You should have received a copy of the GNU Lesser General Public
+ *    License along with this library; if not, write to the Free Software
+ *    Foundation, Inc., 59 Temple Place, Suite 330, Boston,
+ *    MA  02111-1307  USA
+ *
+ ************************************************************************/
 #include <comphelper/processfactory.hxx>
 
 #include <cppuhelper/implbase1.hxx>
@@ -28,7 +62,7 @@
 #include "vbahelper.hxx"
 
 #include <hash_map>
-
+#include <osl/file.hxx>
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
 
@@ -274,16 +308,16 @@ ScVbaWorkbooks::isTextFile( const rtl::OUString& rFileName )
 	aMediaDesc[ 0 ].Value <<= rFileName;
 	rtl::OUString sType = xTypeDetect->queryTypeByDescriptor( aMediaDesc, sal_True );
 	const static rtl::OUString txtType( RTL_CONSTASCII_USTRINGPARAM("writer_Text" ) );
-	return sType.equals( txtType );
+	const static rtl::OUString csvType( RTL_CONSTASCII_USTRINGPARAM("calc_Text_txt_csv_StarCalc" ) );
+	return sType.equals( txtType ) || sType.equals( csvType );
 }
 
 // #TODO# #FIXME# can any of the unused params below be used?
 uno::Any
 ScVbaWorkbooks::Open( const rtl::OUString& rFileName, const uno::Any& /*UpdateLinks*/, const uno::Any& ReadOnly, const uno::Any& Format, const uno::Any& /*Password*/, const uno::Any& /*WriteResPassword*/, const uno::Any& /*IgnoreReadOnlyRecommended*/, const uno::Any& /*Origin*/, const uno::Any& Delimiter, const uno::Any& /*Editable*/, const uno::Any& /*Notify*/, const uno::Any& /*Converter*/, const uno::Any& /*AddToMru*/ ) throw (uno::RuntimeException)
 {
-	rtl::OUString aURL(rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("file://") ));
-	aURL += rFileName;
-
+        rtl::OUString aURL;
+        osl::FileBase::getFileURLFromSystemPath( rFileName, aURL );
 	uno::Reference< lang::XMultiComponentFactory > xSMgr(
         	m_xContext->getServiceManager(), uno::UNO_QUERY_THROW );
 
@@ -299,7 +333,7 @@ ScVbaWorkbooks::Open( const rtl::OUString& rFileName, const uno::Any& /*UpdateLi
 	sal_Int32 nIndex = 0;
 
 	// A text file means it needs to be processed as a csv file	
-	if ( isTextFile( rFileName ) ) 
+	if ( isTextFile( aURL ) ) 
 	{
 		// Values for format
 		// 1 Tabs

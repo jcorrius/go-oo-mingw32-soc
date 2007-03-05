@@ -59,16 +59,16 @@ SLOFILES= \
 		$(SLO)$/vbacharacters.obj \
 		$(SLO)$/vbacombobox.obj \
 		$(SLO)$/vbavalidation.obj \
-		$(SLO)$/vbacontrol.obj \
-		$(SLO)$/vbaoleobject.obj \
-		$(SLO)$/vbaoleobjects.obj \
-		$(SLO)$/vbabutton.obj \
-		$(SLO)$/vbalabel.obj \
-		$(SLO)$/vbatextbox.obj \
-		$(SLO)$/vbaradiobutton.obj \
-		$(SLO)$/vbalistbox.obj \
-		$(SLO)$/vbapropvalue.obj \
-		$(SLO)$/service.obj \
+                $(SLO)$/vbacontrol.obj \
+                $(SLO)$/vbaoleobject.obj \
+                $(SLO)$/vbaoleobjects.obj \
+                $(SLO)$/vbabutton.obj \
+                $(SLO)$/vbalabel.obj \
+                $(SLO)$/vbatextbox.obj \
+                $(SLO)$/vbaradiobutton.obj \
+                $(SLO)$/vbalistbox.obj \
+                $(SLO)$/vbapropvalue.obj \
+		$(SLO)$/service.obj
  
 
 # --- Targets ------------------------------------------------------

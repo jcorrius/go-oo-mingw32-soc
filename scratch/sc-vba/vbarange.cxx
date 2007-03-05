@@ -1,3 +1,37 @@
+/*************************************************************************
+ *
+ *  OpenOffice.org - a multi-platform office productivity suite
+ *
+ *  $RCSfile$
+ *
+ *  $Revision$
+ *
+ *  last change: $Author$ $Date$
+ *
+ *  The Contents of this file are made available subject to
+ *  the terms of GNU Lesser General Public License Version 2.1.
+ *
+ *
+ *    GNU Lesser General Public License Version 2.1
+ *    =============================================
+ *    Copyright 2005 by Sun Microsystems, Inc.
+ *    901 San Antonio Road, Palo Alto, CA 94303, USA
+ *
+ *    This library is free software; you can redistribute it and/or
+ *    modify it under the terms of the GNU Lesser General Public
+ *    License version 2.1, as published by the Free Software Foundation.
+ *
+ *    This library is distributed in the hope that it will be useful,
+ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ *    Lesser General Public License for more details.
+ *
+ *    You should have received a copy of the GNU Lesser General Public
+ *    License along with this library; if not, write to the Free Software
+ *    Foundation, Inc., 59 Temple Place, Suite 330, Boston,
+ *    MA  02111-1307  USA
+ *
+ ************************************************************************/
 #include <comphelper/processfactory.hxx>
 #include <sfx2/objsh.hxx>
 
@@ -3119,7 +3153,7 @@ ScVbaRange::getPageBreak() throw (uno::RuntimeException)
 			if ( !bColumn )
 			    nFlag = pDoc -> GetRowFlags(thisAddress.StartRow, thisAddress.Sheet);
 			else
-			    nFlag = pDoc -> GetColFlags(thisAddress.StartColumn, thisAddress.Sheet);
+			    nFlag = pDoc -> GetColFlags(static_cast<SCCOL>(thisAddress.StartColumn), thisAddress.Sheet);
 			    
 			if ( nFlag & CR_PAGEBREAK)
 			    nPageBreak = excel::XlPageBreak::XlPageBreakAutomatic;
@@ -3150,7 +3184,7 @@ ScVbaRange::setPageBreak( const uno::Any& _pagebreak) throw (uno::RuntimeExcepti
 		if (thisAddress.StartRow==0)
 		    bColumn = TRUE;
 		
-		ScAddress aAddr( thisAddress.StartColumn, thisAddress.StartRow, thisAddress.Sheet );	
+		ScAddress aAddr( static_cast<SCCOL>(thisAddress.StartColumn), thisAddress.StartRow, thisAddress.Sheet );	
 		uno::Reference< frame::XModel > xModel = pShell->GetModel();
 		if ( xModel.is() )
 		{
@@ -3270,7 +3304,7 @@ ScVbaRange::AutoFilter( const uno::Any& Field, const uno::Any& Criteria1, const 
 	ScDocument* pDoc =  getDocumentFromRange( mxRange );
 	ScDocShell* pDocSh = getDocShellFromRange( mxRange );	
 	ScDocShellModificator aModificator( *pDocSh );
-	bool bHasAuto = true;	
+	sal_Bool bHasAuto = sal_True;	
 	RangeHelper thisRange( mxRange );	
 	table::CellRangeAddress thisAddress = thisRange.getCellRangeAddressable()->getRangeAddress();
 
@@ -3283,12 +3317,12 @@ ScVbaRange::AutoFilter( const uno::Any& Field, const uno::Any& Criteria1, const 
 	SCTAB  nTab = aRange.aStart.Tab();
 	INT16   nFlag;
 
-	for (SCROW nCol=aParam.nCol1; nCol<=aParam.nCol2 && bHasAuto; nCol++)
+	for (SCCOL nCol=aParam.nCol1; nCol<=aParam.nCol2 && ( bHasAuto == sal_True ); nCol++)
 	{
 		nFlag = ((ScMergeFlagAttr*) pDoc->GetAttr( nCol, nRow, nTab, ATTR_MERGE_FLAG ))->GetValue();
 
 		if ( (nFlag & SC_MF_AUTO) == 0 )
-			bHasAuto = false;
+			bHasAuto = sal_False;
 	}	
 
 	OSL_TRACE("Auto is set ? %s", bHasAuto ? "true" : "false" );
@@ -3767,6 +3801,6 @@ ScVbaRange::AutoFill(  const uno::Reference< excel::XRange >& Destination, const
 		}	
 	}
 	ScDocFunc aFunc(*pDocSh);
-	aFunc.FillAuto( aSourceRange, NULL, eDir, eCmd, eDateCmd,
-								nCount, fStep, fEndValue, TRUE, TRUE );
+		aFunc.FillAuto( aSourceRange, NULL, eDir, eCmd, eDateCmd,
+									nCount, fStep, fEndValue, TRUE, TRUE );
 }
