@@ -141,6 +141,40 @@ void SAL_CALL ScVbaControl::setWidth( const double _width ) throw (uno::RuntimeE
     xShape->setSize( aSize );
 }
 
+double SAL_CALL
+ScVbaControl::getLeft() throw (uno::RuntimeException)
+{
+    uno::Reference< drawing::XShape > xShape( m_xControlShape, uno::UNO_QUERY_THROW );
+    return mm2pt( xShape->getPosition().X / 100 );
+}
+
+void SAL_CALL
+ScVbaControl::setLeft( double _left ) throw (uno::RuntimeException)
+{
+    awt::Point oldPosition;
+    uno::Reference< drawing::XShape > xShape( m_xControlShape, uno::UNO_QUERY_THROW );
+    oldPosition = xShape->getPosition();
+    oldPosition.X = pt2mm( _left ) * 100;
+    xShape->setPosition( oldPosition );
+
+}
+
+double SAL_CALL
+ScVbaControl::getTop() throw (uno::RuntimeException)
+{
+    uno::Reference< drawing::XShape > xShape( m_xControlShape, uno::UNO_QUERY_THROW );
+    return mm2pt( xShape->getPosition().Y / 100 );
+}
+
+void SAL_CALL
+ScVbaControl::setTop( double _top ) throw (uno::RuntimeException)
+{
+    awt::Point oldPosition;
+    uno::Reference< drawing::XShape > xShape( m_xControlShape, uno::UNO_QUERY_THROW );
+    oldPosition = xShape->getPosition();
+    oldPosition.Y = pt2mm( _top ) * 100;;
+    xShape->setPosition( oldPosition );
+}
 
 //ScVbaControlFactory
 
