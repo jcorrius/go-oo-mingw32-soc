@@ -2,6 +2,7 @@
 #include <com/sun/star/awt/XControlModel.hpp>
 #include <com/sun/star/awt/XControl.hpp>
 #include <com/sun/star/awt/XWindow2.hpp>
+#include <com/sun/star/lang/XEventListener.hpp>
 #include <com/sun/star/drawing/XShape.hpp>
 #include <com/sun/star/frame/XModel.hpp>
 #include <com/sun/star/view/XControlAccess.hpp>
@@ -42,6 +43,35 @@ ScVbaControl::getWindowPeer( const uno::Reference< ::drawing::XControlShape >& x
     return xControl->getPeer();
 }
 
+//ScVbaControlListener
+class ScVbaControlListener: public cppu::WeakImplHelper1< lang::XEventListener >
+{
+private:
+    ScVbaControl *pControl;
+public:
+    ScVbaControlListener( ScVbaControl *pTmpControl );
+    virtual ~ScVbaControlListener();
+    virtual void SAL_CALL disposing( const lang::EventObject& rEventObject ) throw( uno::RuntimeException );
+};
+
+ScVbaControlListener::ScVbaControlListener( ScVbaControl *pTmpControl ): pControl( pTmpControl )
+{
+}
+
+ScVbaControlListener::~ScVbaControlListener()
+{
+}
+
+void SAL_CALL
+ScVbaControlListener::disposing( const lang::EventObject& ) throw( uno::RuntimeException )
+{
+    if( pControl )
+    {
+        pControl->removeResouce();
+        pControl = NULL;
+    }
+}
+
 //ScVbaControl
 
 ScVbaControl::ScVbaControl( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< ::drawing::XControlShape >& xControlShape ) : m_xContext( xContext ), m_xControlShape( xControlShape )
@@ -50,17 +80,39 @@ ScVbaControl::ScVbaControl( const uno::Reference< uno::XComponentContext >& xCon
     uno::Reference< awt::XControlModel > xControlModel( xControlShape->getControl(), uno::UNO_QUERY_THROW );
     uno::Reference< beans::XPropertySet > xProps( xControlModel, uno::UNO_QUERY_THROW );
     m_xProps.set( xProps, uno::UNO_QUERY_THROW );
+    //add listener
+    m_xEventListener.set( new ScVbaControlListener( this ) );
+    uno::Reference< lang::XComponent > xComponent( m_xControlShape, uno::UNO_QUERY_THROW );
+    xComponent->addEventListener( m_xEventListener );
 }
+
+ScVbaControl::~ScVbaControl()
+{
+}
+
+void ScVbaControl::removeResouce() throw( uno::RuntimeException )
+{
+    uno::Reference< lang::XComponent > xComponent( m_xControlShape, uno::UNO_QUERY_THROW );
+    xComponent->removeEventListener( m_xEventListener );
+    m_xControlShape = NULL;
+    m_xProps = NULL;
+}
+
 
 ScVbaControl::ScVbaControl( const uno::Reference< uno::XComponentContext >& xContext, 
         const uno::Reference< beans::XPropertySet >& xProps, 
         const uno::Reference< drawing::XControlShape > xControlShape ) : m_xContext( xContext ), 
         m_xProps( xProps ), m_xControlShape( xControlShape )
 {
+    m_xEventListener.set( new ScVbaControlListener( this ) );
+    uno::Reference< lang::XComponent > xComponent( m_xControlShape, uno::UNO_QUERY_THROW );
+    xComponent->addEventListener( m_xEventListener );
 }
 
 void ScVbaControl::SetControl( const uno::Reference< uno::XComponentContext > xContext, const uno::Reference< ::drawing::XControlShape > xControlShape )
 {
+    m_xEventListener.set( new ScVbaControlListener( this ) );
+    uno::Reference< lang::XComponent > xComponent( m_xControlShape, uno::UNO_QUERY_THROW );
     m_xContext.set( xContext, uno::UNO_QUERY_THROW );
     m_xControlShape.set( xControlShape, uno::UNO_QUERY_THROW );
     //init m_xProps
@@ -73,19 +125,13 @@ void ScVbaControl::SetControl( const uno::Reference< uno::XComponentContext > xC
         const uno::Reference< beans::XPropertySet > xProps, 
         const uno::Reference< drawing::XControlShape > xControlShape )
 {
+    m_xEventListener.set( new ScVbaControlListener( this ) );
+    uno::Reference< lang::XComponent > xComponent( m_xControlShape, uno::UNO_QUERY_THROW );
     m_xContext.set( xContext, uno::UNO_QUERY_THROW );
     m_xProps.set( xProps, uno::UNO_QUERY_THROW );
     m_xControlShape.set( xControlShape, uno::UNO_QUERY_THROW );
 }
 
-/*
-void
-ScVbaControl::Init( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< beans::XPropertySet >& xProps )
-{
-    m_xContext = xContext;
-    m_xProps = xProps;
-}
-*/
 //In design model has different behavior
 sal_Bool SAL_CALL ScVbaControl::getEnabled() throw (uno::RuntimeException)
 {

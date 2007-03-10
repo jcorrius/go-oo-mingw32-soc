@@ -22,7 +22,9 @@ class ScVbaControl : public ControlImpl_BASE
 private:
     css::uno::Reference< css::awt::XWindowPeer > m_xWindowPeer;
 */
+private:
     css::uno::Reference< css::awt::XWindowPeer > getWindowPeer( const css::uno::Reference< css::drawing::XControlShape >& xControlShape ) throw (css::uno::RuntimeException);
+    com::sun::star::uno::Reference< com::sun::star::lang::XEventListener > m_xEventListener;
 protected:
     css::uno::Reference< css::uno::XComponentContext > m_xContext;
     css::uno::Reference< css::beans::XPropertySet > m_xProps;
@@ -40,6 +42,7 @@ public:
     ScVbaControl( const css::uno::Reference< css::uno::XComponentContext >& xContext, 
                     const css::uno::Reference< css::beans::XPropertySet >& xProps,
                     const css::uno::Reference< css::drawing::XControlShape > xControlShape );
+    virtual ~ScVbaControl();
     // XControl
     virtual sal_Bool SAL_CALL getEnabled() throw (css::uno::RuntimeException);
     virtual void SAL_CALL setEnabled( sal_Bool _enabled ) throw (css::uno::RuntimeException);
@@ -53,7 +56,9 @@ public:
     virtual void SAL_CALL setLeft( double _left ) throw (css::uno::RuntimeException);
     virtual double SAL_CALL getTop() throw (css::uno::RuntimeException);
     virtual void SAL_CALL setTop( double _top ) throw (css::uno::RuntimeException);
-    //virtual ~ScVbaControl();
+
+    //remove resouce because org.openoffice.excel.XControl is a wrapper of com.sun.star.drawing.XControlShape
+    virtual void removeResouce() throw( css::uno::RuntimeException );
 };
 
 
