@@ -1,37 +1,3 @@
-/*************************************************************************
- *
- *  OpenOffice.org - a multi-platform office productivity suite
- *
- *  $RCSfile$
- *
- *  $Revision$
- *
- *  last change: $Author$ $Date$
- *
- *  The Contents of this file are made available subject to
- *  the terms of GNU Lesser General Public License Version 2.1.
- *
- *
- *    GNU Lesser General Public License Version 2.1
- *    =============================================
- *    Copyright 2005 by Sun Microsystems, Inc.
- *    901 San Antonio Road, Palo Alto, CA 94303, USA
- *
- *    This library is free software; you can redistribute it and/or
- *    modify it under the terms of the GNU Lesser General Public
- *    License version 2.1, as published by the Free Software Foundation.
- *
- *    This library is distributed in the hope that it will be useful,
- *    but WITHOUT ANY WARRANTY; without even the implied warranty of
- *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *    Lesser General Public License for more details.
- *
- *    You should have received a copy of the GNU Lesser General Public
- *    License along with this library; if not, write to the Free Software
- *    Foundation, Inc., 59 Temple Place, Suite 330, Boston,
- *    MA  02111-1307  USA
- *
- ************************************************************************/
 #include "vbawindow.hxx"
 #include "vbaworksheets.hxx"
 #include "vbaworksheet.hxx"
@@ -197,7 +163,22 @@ public:
 
 };
 
+ScVbaWindow::ScVbaWindow( const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::frame::XModel >& xModel ) : m_xContext(xContext), m_xModel( xModel )
+{
+    uno::Reference< frame::XController > xController( xModel->getCurrentController(), uno::UNO_QUERY_THROW );
+    m_xViewPane.set( xController, uno::UNO_QUERY_THROW );
+    m_xPane.set( ActivePane(), uno::UNO_QUERY_THROW );
+}
 
+void  
+ScVbaWindow::Scroll( const uno::Any& Down, const uno::Any& Up, const uno::Any& ToRight, const uno::Any& ToLeft, bool bLargeScroll ) throw (uno::RuntimeException)
+{
+    if( bLargeScroll )
+        m_xPane->LargeScroll( Down, Up, ToRight, ToLeft );
+    else
+        m_xPane->SmallScroll( Down, Up, ToRight, ToLeft );
+}
+/*
 void  
 ScVbaWindow::Scroll( const uno::Any& Down, const uno::Any& Up, const uno::Any& ToRight, const uno::Any& ToLeft, bool bLargeScroll ) throw (uno::RuntimeException)
 {
@@ -236,6 +217,7 @@ ScVbaWindow::Scroll( const uno::Any& Down, const uno::Any& Up, const uno::Any& T
 	}
 
 }
+*/
 void SAL_CALL 
 ScVbaWindow::SmallScroll( const uno::Any& Down, const uno::Any& Up, const uno::Any& ToRight, const uno::Any& ToLeft ) throw (uno::RuntimeException)
 {
