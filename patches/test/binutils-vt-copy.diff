@@ -537,3 +537,574 @@ Only in binutils-2.16.91.0.5/bfd: tekhex.lo
 Only in binutils-2.16.91.0.5/bfd: tekhex.o
 Only in binutils-2.16.91.0.5/bfd: trad-core.lo
 Only in binutils-2.16.91.0.5/bfd: trad-core.o
+--- /dev/null	2007-02-04 17:14:05.000000000 +0000
++++ binutils-2.16.91.0.5/bfd/elf-vtreloc.c	2007-03-15 11:02:28.000000000 +0000
+@@ -0,0 +1,543 @@
++#include "bfd.h"
++#include "sysdep.h"
++#include "bfdlink.h"
++#include "libbfd.h"
++#define ARCH_SIZE 0
++#include "elf-bfd.h"
++#include "safe-ctype.h"
++#include "libiberty.h"
++
++typedef struct _CopyEntry CopyEntry;
++
++typedef struct {
++    bfd       *abfd;
++    CopyEntry *sorted;
++    CopyEntry *unsorted;
++} VtRelocs;
++
++struct _CopyEntry {
++    struct elf_link_hash_entry *src;
++    bfd_vma                     src_offset;
++    struct elf_link_hash_entry *dest;
++    bfd_vma                     dest_offset;
++    bfd_vma                     bitmask;
++
++    /* chain */
++    CopyEntry *next;
++};
++
++static void
++prepend (CopyEntry **list, CopyEntry *p)
++{
++    p->next = *list;
++    *list = p;
++}
++
++static int
++copy_entry_equal (const CopyEntry *a, const CopyEntry *b)
++{
++    return (a->src == b->src &&
++            a->src_offset == b->src_offset &&
++            a->dest == b->dest &&
++            a->dest_offset == b->dest_offset &&
++            a->bitmask == b->bitmask);
++}
++
++/*
++ * FIXME - should be a hash lookup / something fast.
++ */
++static CopyEntry *
++find_with_dest (CopyEntry *list,
++                struct elf_link_hash_entry *e)
++{
++    while (list)
++      {
++        if (list->dest == e)
++          break;
++        list = list->next;
++      }
++    return list;
++}
++
++static CopyEntry *
++find_equal_entry (CopyEntry *list, CopyEntry *e)
++{
++  while (list)
++    {
++      if (copy_entry_equal (list, e))
++        break;
++      list = list->next;
++    }
++  return list;
++}
++
++/*
++ * Transfer from unsorted -> sorted.
++ * NB. simple-minded algorithm, N^3 with degenerate case
++ */
++static void
++sort_relocs (VtRelocs *vtr)
++{
++    CopyEntry *p;
++    CopyEntry *pending;
++    CopyEntry *next;
++
++    fprintf (stderr, "Sorting ...");
++    do
++      {
++        pending = NULL;
++        
++        for (p = vtr->unsorted; p; p = next)
++          {
++            next = p->next;
++            if (!find_with_dest (vtr->unsorted, p->src))
++            {
++              /* FIXME: sorting by offset, to ensure as
++                 good as possible contiguous access will
++                 require a more complex node structure:
++                 with aggregation per 'dest', and
++                 internal sorting within that */
++              prepend (&vtr->sorted, p);
++            }
++            else
++              prepend (&pending, p);
++          }
++        vtr->unsorted = pending;
++      }
++    while (pending);
++    fprintf (stderr, " done\n");
++}
++
++static void
++check_reloc (Elf_Internal_Rela *rel, int type_mask)
++{
++  if ((rel->r_info & type_mask) != STT_OBJECT)
++      fprintf (stderr, "broken vtreloc type\n");
++  if (rel->r_addend != 0)
++      fprintf (stderr, "unexpected reloc addend\n");
++}
++
++static void
++print_rel (const char *type, 
++           struct elf_link_hash_entry *target)
++{
++  fprintf (stderr, "%s '%s' %d %d %d %d i:%ld\n",
++           type, target->root.root.string,
++           target->ref_regular, target->def_regular,
++           target->ref_dynamic, target->def_dynamic,
++           target->dynindx);
++}
++
++static void
++add_reloc (VtRelocs *vtr,
++           bfd      *inputobj,
++           Elf_Internal_Rela *src_rel,
++           Elf_Internal_Rela *dest_rel,
++           unsigned char     *data)
++{
++  unsigned r_sym_shift;
++  unsigned r_type_mask;
++  unsigned incr;
++  unsigned symidx;
++  const struct elf_backend_data *bed;
++  struct elf_link_hash_entry *dest, *src;
++  Elf_Internal_Shdr *hdr;
++  CopyEntry *e;
++
++  hdr = &elf_tdata (inputobj)->symtab_hdr;
++  bed = get_elf_backend_data (inputobj);
++  if (bed->s->arch_size == 32)
++    {
++      r_type_mask = 0xff;
++      r_sym_shift = 8;
++      incr = 4;
++    }
++  else
++    {
++      r_type_mask = 0xffffffff;
++      r_sym_shift = 32;
++      incr = 8;
++    }
++
++  check_reloc (src_rel, r_type_mask);
++  check_reloc (dest_rel, r_type_mask);
++
++  symidx = (dest_rel->r_info >> r_sym_shift) - hdr->sh_info;
++  dest = elf_sym_hashes (inputobj) [symidx];
++
++  /* Eliminate relocs to no longer present internal vtables. */
++  if (!dest->def_regular)
++    {
++      print_rel ("Abandoning dest", dest);
++      fprintf (stderr, "Ref count %ld %ld dynindx %d\n",
++               dest->got.refcount, dest->plt.refcount,
++               (int) dest->dynindx);
++      /* unref the symbol somehow (!?) */
++      return;
++    }
++
++  /* Consider: should we eliminate all internal -> internal
++     copies ? it's possible we are more space / time
++     efficient - so no for now. */
++
++  symidx = (src_rel->r_info >> r_sym_shift) - hdr->sh_info;
++  src = elf_sym_hashes (inputobj) [symidx];
++
++  print_rel ("Src", src);
++  print_rel ("Dst", dest);
++
++  e = bfd_zalloc (vtr->abfd, sizeof (CopyEntry));
++
++  e->src = src;
++  e->dest = dest;
++
++  if (dest_rel->r_offset - src_rel->r_offset != bed->s->arch_size / 8)
++      fprintf (stderr, "Mis-paired vtrelocs\n");
++
++  e->src_offset = bfd_get (bed->s->arch_size, inputobj, data);
++  data += incr;
++  e->dest_offset = bfd_get (bed->s->arch_size, inputobj, data);
++  data += incr;
++  e->bitmask = bfd_get (bed->s->arch_size, inputobj, data);
++
++  /* Simple minded dupliates elision */
++  if (find_equal_entry (vtr->unsorted, e))
++    bfd_release (vtr->abfd, e);          
++  else
++    {
++      prepend (&vtr->unsorted, e);  
++
++      fprintf (stderr, "Copy: '%s'+%d -> '%s'+%d (0x%x)\n",
++               e->src->root.root.string,
++               (int)e->src_offset,
++               e->dest->root.root.string,
++               (int)e->dest_offset,
++               (int)e->bitmask);
++    }
++}
++
++static VtRelocs *global_vtr;
++
++bfd_boolean _bfd_elf_vtreloc_accumulate (bfd *output_bfd,
++                                         struct bfd_link_info *info)
++{
++  bfd *dynobj;
++  dynobj = elf_hash_table (info)->dynobj;
++  if (info->vtreloc)
++    { // .vtrelocs
++      bfd_size_type sec_size = 0;
++      asection *vtreloc_sec;
++      asection *vtrelrel;
++      bfd *inputobj;
++      VtRelocs *vtr;
++      Elf_Internal_Rela last_rela;
++      bfd_size_type num_relocs;
++
++      vtr = bfd_zalloc (output_bfd, sizeof (VtRelocs));
++      vtr->abfd = output_bfd;
++      global_vtr = vtr;
++
++      /* FIXME: we need to elide relocs that turn out
++         to be purely internal:
++         eg. internal -> internal copy src / dest,
++         others are less troublesome - though removing
++         empty ones would be nice (?).
++         We want to trap every -named- reloc ...
++      */
++      for (inputobj = info->input_bfds;
++	   inputobj;
++	   inputobj = inputobj->link_next)
++	{
++	  asection *s;
++          struct bfd_elf_section_data *es; /* elf-bfd.h */
++          unsigned i;
++          Elf_Internal_Rela *relocs, *p;
++          unsigned char *sec_data;
++	  long storage_needed;
++	  asymbol **symtab;
++	  long number_of_symbols;
++	  const struct elf_backend_data *bed = get_elf_backend_data (inputobj);
++
++	  if (inputobj->flags & (DYNAMIC | BFD_LINKER_CREATED))
++	    continue;
++	  s = bfd_get_section_by_name (inputobj, ".vtrelocs");
++          if (!s)
++            continue;
++	  /* XXX Hmm, this seems to generate many NONE relocs, probably from
++	     the original relocs to this section.  Perhaps discard them
++	     earlier.  */
++	  s->flags |= SEC_EXCLUDE;
++          es = elf_section_data (s);
++          if (!es)
++            continue;
++
++          if (!s->reloc_count)
++            continue;
++
++          fprintf (stderr, "Relocs: size %d, count %d contents %p\n",
++                   (int)es->rel_hdr.sh_size, es->rel_count,
++                   s->contents);
++          
++
++          /* Can't find this info anywhere else for some reason: */
++          p = relocs = _bfd_elf_link_read_relocs (inputobj, s, NULL, NULL,
++                                                  info->keep_memory);
++
++	  /* Experimental stuff to get at the BFD relocs (translated back
++	     from the real ELF relocs.  */
++	  storage_needed = bfd_get_symtab_upper_bound (inputobj);
++	  if (storage_needed <= 0)
++	    return FALSE;
++	  symtab = xmalloc (storage_needed);
++	  number_of_symbols = bfd_canonicalize_symtab (inputobj, symtab);
++	  if (number_of_symbols < 0)
++	    return FALSE;
++
++	  if (! bed->s->slurp_reloc_table (inputobj, s, symtab, FALSE))
++	    return FALSE;
++          
++	  /* Now inputobj->relocation will contain BFD relocs.  */
++
++          sec_data = bfd_malloc (es->this_hdr.sh_size);
++          
++          /* Slurp the data */
++          if (bfd_seek (inputobj, es->this_hdr.sh_offset, SEEK_SET) != 0)
++            return FALSE;
++          if (bfd_bread (sec_data, es->this_hdr.sh_size, inputobj) != es->this_hdr.sh_size)
++            return FALSE;
++
++          if (es->this_hdr.sh_size % s->reloc_count != 0)
++              fprintf (stderr, "ERROR: mismatching vtreloc sec & reloc count\n");
++
++          /* Assumes an even number of relocs sorted by address ... */
++          for (i = 0; i < s->reloc_count / 2; i++)
++          {
++              unsigned int entry_size;
++              entry_size = (get_elf_backend_data (inputobj)->s->arch_size / 8) * 3;
++              
++	      last_rela = *p;
++              add_reloc (vtr, inputobj, p, p + 1,
++                         sec_data + i * entry_size);
++              p+=2;
++          }
++          free (sec_data);
++          if (es->relocs != relocs)
++              free (relocs);
++        }
++      /* So - we need to sort these guys as we work out the sizes */
++      /* We need to generate an internal list of XYZ type 
++           + eliminate all external -> external work ... 
++           + add all external -> internal copies to 'sorted' list
++              + [ fool-proof GC roots ]
++           + add other symbols to 'pending' list.
++           + read / generate src: [symbol + offset, dest: sym + offset, bitmask data]
++      */
++      sort_relocs (vtr);
++      num_relocs = 0;
++      sec_size = 0;
++      {
++        CopyEntry *e;
++	for (e = vtr->sorted; e; e = e->next)
++	  {
++	    sec_size += 3;  /* Word entries.  */
++	    num_relocs += 2;
++	  }
++      }
++      /*
++         Finally:
++           + build new custom section
++           + emit new relocations for it ...
++      */
++      
++      vtreloc_sec = bfd_get_section_by_name (dynobj, ".suse.vtrelocs");
++      if (vtreloc_sec)
++        {
++	  bfd_size_type rel_size;
++	  bfd_size_type size;
++	  const struct elf_backend_data *bed = get_elf_backend_data (dynobj);
++	  vtrelrel = bfd_get_section_by_name (dynobj, ".rel.suse.vtrelocs");
++	  if (!vtrelrel)
++	    return FALSE;
++
++          {
++              unsigned int entry_size;
++              entry_size = (bed->s->arch_size / 8);
++              /* + 1 for null termination */
++              vtreloc_sec->size = (sec_size + 1) * entry_size;
++              vtreloc_sec->contents = bfd_zalloc (dynobj, vtreloc_sec->size);
++          }
++
++	  rel_size = bed->s->sizeof_rel;
++	  if (bed->default_use_rela_p)
++	    {
++	      rel_size = bed->s->sizeof_rela;
++	    }
++
++	  size = rel_size * num_relocs;
++	  fprintf (stderr, "Need %ld bytes of relocs rel-size %ld\n",
++                   size, rel_size);
++	  vtrelrel->size = size;
++        }
++      else
++        fprintf (stderr, "Horrendous error ! - no .suse.vtrelocs\n");
++
++    }
++  else
++    {
++      asection *vtreloc_sec;
++      fprintf (stderr, "TESTME: exclude .vtrelocs if none present\n");
++      vtreloc_sec = bfd_get_section_by_name (dynobj, ".vtrelocs");
++      if (vtreloc_sec)
++        vtreloc_sec->flags |= SEC_EXCLUDE;
++    }
++  return TRUE;
++}
++
++static void
++generate_reloc (bfd                        *dynobj,
++                struct elf_link_hash_entry *target,
++                asection                   *vtreloc_sec,
++                asection                   *vtrelrel,
++                bfd_vma                     num_entry,
++                int                         is_dest,
++                bfd_size_type              *adjust_relative)
++{
++    bfd_size_type sym_idx, rel_size;
++    reloc_howto_type *howto;
++    void (*swap_out) (bfd *, const Elf_Internal_Rela *, bfd_byte *);
++    bfd_byte *loc;
++    Elf_Internal_Rela outrel;
++    const struct elf_backend_data *bed;
++
++    bed = get_elf_backend_data (dynobj);
++
++    rel_size = bed->s->sizeof_rel;
++    swap_out = bed->s->swap_reloc_out;
++    if (bed->default_use_rela_p)
++    {
++        rel_size = bed->s->sizeof_rela;
++        swap_out = bed->s->swap_reloca_out;
++    }
++
++    /* XXX: unwind this goodness etc. */
++    while (target->root.type == bfd_link_hash_indirect
++           || target->root.type == bfd_link_hash_warning)
++      target = (struct elf_link_hash_entry *) target->root.u.i.link;
++
++    fprintf (stderr, "Reloc '%s' %d %d %d %d i:%ld ",
++             target->root.root.string,
++             target->ref_regular, target->def_regular,
++             target->ref_dynamic, target->def_dynamic,
++             target->dynindx);
++    if (is_dest /* force relative */ || target->dynindx <= 0)
++      fprintf (stderr, "'%s' vma 0x%lx offset %ld output off %ld\n",
++               target->root.u.def.section->name,
++               target->root.u.def.section->output_section->vma,
++               target->root.u.def.value,
++               target->root.u.def.section->output_offset);
++    else
++      fprintf (stderr, "\n");
++
++    /* XXX: RELOC64 too */
++    if (is_dest /* force relative */ || target->dynindx <= 0)
++      { /* do a relative reloc ... */
++        howto = bfd_reloc_type_lookup (dynobj, BFD_RELOC_386_RELATIVE);
++        sym_idx = 0;
++        BFD_ASSERT (target->root.type == bfd_link_hash_defweak);
++        *adjust_relative = (target->root.u.def.section->output_section->vma +
++                            target->root.u.def.section->output_offset);
++      }
++    else
++      {
++        howto = bfd_reloc_type_lookup (dynobj, BFD_RELOC_32);
++        sym_idx = target->dynindx;
++        *adjust_relative = 0;
++      }
++
++    /* generate relocation */
++    outrel.r_offset = vtreloc_sec->output_section->vma;
++    outrel.r_offset += num_entry * 3 * 4; // XXX: 4 ?
++    if (is_dest) outrel.r_offset += 4; // XXX: 4
++    outrel.r_info = ELF32_R_INFO (sym_idx, howto->type);
++    outrel.r_addend = 0;
++
++    loc = vtrelrel->contents + (vtrelrel->reloc_count++ * rel_size);
++    swap_out (dynobj, &outrel, loc);
++}
++
++bfd_boolean _bfd_elf_vtreloc_fill (bfd *output_bfd,
++                                   struct bfd_link_info *info)
++{
++  bfd *dynobj;
++  dynobj = elf_hash_table (info)->dynobj;
++
++  fprintf (stderr, "Foo: generate .suse.vtrelocs relocs\n");
++
++  if (info->vtreloc)
++    {
++      asection *vtreloc_sec;
++      asection *vtrelrel;
++
++      vtreloc_sec = bfd_get_section_by_name (dynobj, ".suse.vtrelocs");
++      if (vtreloc_sec)
++        {
++	  CopyEntry *e;
++	  bfd_size_type entries, adjust_relative, entry_size;
++	  const struct elf_backend_data *bed = get_elf_backend_data (dynobj);
++          bfd_byte *data;
++
++          entry_size = (bed->s->arch_size / 8);
++
++	  vtrelrel = bfd_get_section_by_name (dynobj, ".rel.suse.vtrelocs");
++	  if (!vtrelrel)
++	    return FALSE;
++	  if (!vtrelrel->contents)
++	    {
++	      fprintf (stderr, "Nothing allocated for relocs\n");
++	      return FALSE;
++	    }
++
++	  BFD_ASSERT (vtreloc_sec->output_offset == 0);
++	  entries = 0;
++	  vtrelrel->reloc_count = 0;
++          data = vtreloc_sec->contents;
++	  for (e = global_vtr->sorted; e; e = e->next)
++	    {
++	      /* Source */
++              generate_reloc (output_bfd, e->src, vtreloc_sec, vtrelrel,
++                              entries, FALSE, &adjust_relative);
++              bfd_put(bed->s->arch_size, output_bfd,
++                      e->src_offset + adjust_relative, data);
++              data += entry_size;
++
++              /* Dest */
++              generate_reloc (output_bfd, e->dest, vtreloc_sec, vtrelrel,
++                              entries, TRUE, &adjust_relative);
++              bfd_put(bed->s->arch_size, output_bfd,
++                      e->dest_offset + adjust_relative, data);
++              data += entry_size;
++
++              bfd_put(bed->s->arch_size, dynobj, e->bitmask, data);
++              data += entry_size;
++
++              entries++;
++            }
++          BFD_ASSERT (vtrelrel->reloc_count * (bed->default_use_rela_p ? bed->s->sizeof_rela : bed->s->sizeof_rel)
++                      == vtrelrel->size);
++        }
++      else
++        fprintf (stderr, "Horrendous error ! - no .suse.vtrelocs\n");
++    }
++  else
++    {
++      asection *vtreloc_sec;
++      fprintf (stderr, "TESTME: exclude .vtrelocs if none present\n");
++      vtreloc_sec = bfd_get_section_by_name (dynobj, ".suse.vtrelocs");
++      if (vtreloc_sec)
++        vtreloc_sec->flags |= SEC_EXCLUDE;
++      vtreloc_sec = bfd_get_section_by_name (dynobj, ".rel.suse.vtrelocs");
++      if (vtreloc_sec)
++        vtreloc_sec->flags |= SEC_EXCLUDE;
++    }
++  return TRUE;
++}
+diff -u -r /usr/src/packages/BUILD/binutils-2.16.91.0.5/include/bfdlink.h binutils-2.16.91.0.5/include/bfdlink.h
+--- /usr/src/packages/BUILD/binutils-2.16.91.0.5/include/bfdlink.h	2007-02-16 17:15:13.000000000 +0000
++++ binutils-2.16.91.0.5/include/bfdlink.h	2007-03-12 11:10:17.000000000 +0000
+@@ -297,6 +297,10 @@
+   /* TRUE if the new ELF dynamic tags are enabled. */
+   unsigned int new_dtags: 1;
+ 
++  /* TRUE if we want to produce copy-based vtable relocation
++     data. This saves both space and time.  */
++  unsigned int vtreloc: 1;
++
+   /* TRUE if non-PLT relocs should be merged into one reloc section
+      and sorted so that relocs against the same symbol come together.  */
+   unsigned int combreloc: 1;
+diff -u -r /usr/src/packages/BUILD/binutils-2.16.91.0.5/include/elf/common.h binutils-2.16.91.0.5/include/elf/common.h
+--- /usr/src/packages/BUILD/binutils-2.16.91.0.5/include/elf/common.h	2007-02-16 17:15:13.000000000 +0000
++++ binutils-2.16.91.0.5/include/elf/common.h	2007-03-12 11:10:17.000000000 +0000
+@@ -608,6 +608,7 @@
+ #define DT_SUSE_LO 0x6cbdd030
+ #define DT_SUSE_HASHVALS DT_SUSE_LO
+ #define DT_SUSE_DIRECT DT_SUSE_LO + 1
++#define DT_SUSE_VTRELOC DT_SUSE_LO + 2
+ #define DT_SUSE_HI 0x6cbdd040
+ 
+ /* Values used in DT_FEATURE .dynamic entry.  */
