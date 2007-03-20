@@ -244,6 +244,7 @@ OBJ_IDLFILES=XApplication.idl\
 	XOLEObject.idl\
 	XOLEObjects.idl\
 	XPane.idl\
+	Range.idl\
 
 
 IDLFILES+=$(CONST_IDLFILES)

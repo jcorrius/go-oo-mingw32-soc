@@ -23,6 +23,8 @@ IDLFILES=\
 	XCollection.idl\
 	XVBAToOOEventDescGen.idl\
 	XPropValue.idl\
+	XHelperInterface.idl\
+	Globals.idl\
 
 # ------------------------------------------------------------------
 
