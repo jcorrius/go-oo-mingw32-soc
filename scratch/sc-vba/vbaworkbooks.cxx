@@ -83,8 +83,8 @@ getWorkbook( uno::Reference< uno::XComponentContext >& xContext, const uno::Refe
 	uno::Reference< frame::XModel > xModel( xDoc, uno::UNO_QUERY );
 	if( !xModel.is() )
 		return uno::Any();
-
-	ScVbaWorkbook *pWb = new ScVbaWorkbook( xContext, xModel );
+	
+	ScVbaWorkbook *pWb = new ScVbaWorkbook(  uno::Reference< vba::XHelperInterface >( ScVbaGlobals::getGlobalsImpl( xContext )->getApplication(), uno::UNO_QUERY_THROW ), xContext, xModel );
 	return uno::Any( uno::Reference< excel::XWorkbook > (pWb) );
 }
 
@@ -241,7 +241,7 @@ public:
 
 };
 
-ScVbaWorkbooks::ScVbaWorkbooks( const uno::Reference< css::uno::XComponentContext >& xContext ) : ScVbaWorkbooks_BASE( xContext, uno::Reference< container::XIndexAccess >( new WorkBooksAccessImpl( xContext ) ) )
+ScVbaWorkbooks::ScVbaWorkbooks( const uno::Reference< vba::XHelperInterface >& xParent, const uno::Reference< css::uno::XComponentContext >& xContext ) : ScVbaWorkbooks_BASE( xParent, xContext, uno::Reference< container::XIndexAccess >( new WorkBooksAccessImpl( xContext ) ) )
 {
 }
 // XEnumerationAccess
@@ -405,4 +405,21 @@ ScVbaWorkbooks::Open( const rtl::OUString& rFileName, const uno::Any& /*UpdateLi
 	return getWorkbook( m_xContext, xSpreadDoc );
 }
 
+rtl::OUString& 
+ScVbaWorkbooks::getServiceImplName()
+{
+	static rtl::OUString sImplName( RTL_CONSTASCII_USTRINGPARAM("ScVbaWorkbooks") );
+	return sImplName;
+}
 
+css::uno::Sequence<rtl::OUString> 
+ScVbaWorkbooks::getServiceNames()
+{
+	static uno::Sequence< rtl::OUString > sNames;
+	if ( sNames.getLength() == 0 )
+	{
+		sNames.realloc( 1 );
+		sNames[0] = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("org.openoffice.excel.Workbooks") );
+	}
+	return sNames;
+}

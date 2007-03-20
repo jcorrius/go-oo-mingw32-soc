@@ -38,21 +38,23 @@
 #include <com/sun/star/uno/XComponentContext.hpp>
 #include <com/sun/star/table/XTableChart.hpp>
 #include <org/openoffice/excel/XChartObject.hpp>
-#include "vbahelper.hxx"
+#include "vbahelperinterface.hxx"
 
-typedef ::cppu::WeakImplHelper1<oo::excel::XChartObject > ChartObjectImpl_BASE;
+typedef InheritedHelperInterfaceImpl1<oo::excel::XChartObject > ChartObjectImpl_BASE;
 
 class ScVbaChartObject : public ChartObjectImpl_BASE
 {		
 
-	css::uno::Reference< css::uno::XComponentContext > m_xContext;
 	css::uno::Reference< css::table::XTableChart  > m_xTableChart;
 public:
-	ScVbaChartObject( const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::table::XTableChart >& xTableChart ) : m_xContext(xContext), m_xTableChart( xTableChart ) {}
+	ScVbaChartObject( const css::uno::Reference< oo::vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::table::XTableChart >& xTableChart ) : ChartObjectImpl_BASE( xParent, xContext ), m_xTableChart( xTableChart ) {}
 	virtual ::rtl::OUString SAL_CALL getName() throw (css::uno::RuntimeException);
 	virtual css::uno::Reference< oo::excel::XChart > SAL_CALL getChart() throw (css::uno::RuntimeException);
 	
 	virtual css::uno::Any SAL_CALL test(  ) throw (css::uno::RuntimeException); 
+	// XHelperInterface
+	virtual rtl::OUString& getServiceImplName();
+	virtual css::uno::Sequence<rtl::OUString> getServiceNames();
 };
 
 #endif //SC_VBA_WINDOW_HXX

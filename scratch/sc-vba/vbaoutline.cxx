@@ -52,3 +52,22 @@ ScVbaOutline::ShowLevels( const uno::Any& RowLevels, const uno::Any& ColumnLevel
 		}
 	}
 }
+
+rtl::OUString& 
+ScVbaOutline::getServiceImplName()
+{
+	static rtl::OUString sImplName( RTL_CONSTASCII_USTRINGPARAM("ScVbaOutline") );
+	return sImplName;
+}
+
+uno::Sequence< rtl::OUString > 
+ScVbaOutline::getServiceNames()
+{
+	static uno::Sequence< rtl::OUString > aServiceNames;
+	if ( aServiceNames.getLength() == 0 )
+	{
+		aServiceNames.realloc( 1 );
+		aServiceNames[ 0 ] = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("org.openoffice.excel.Outline" ) );
+	}
+	return aServiceNames;
+}

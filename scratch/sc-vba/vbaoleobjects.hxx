@@ -7,14 +7,16 @@
 #include "vbacollectionimpl.hxx"
 #include "vbahelper.hxx"
 
-typedef ::cppu::ImplInheritanceHelper1< ScVbaCollectionBaseImpl, oo::excel::XOLEObjects > OLEObjectsImpl_BASE;
+typedef CollTestImplHelper< oo::excel::XOLEObjects > OLEObjectsImpl_BASE;
 
 class ScVbaOLEObjects : public OLEObjectsImpl_BASE
 {
 protected:
     virtual css::uno::Any getItemByStringIndex( const rtl::OUString& sIndex ) throw (css::uno::RuntimeException);
+	virtual rtl::OUString& getServiceImplName();
+	virtual css::uno::Sequence<rtl::OUString> getServiceNames();
 public:
-    ScVbaOLEObjects( const css::uno::Reference< css::uno::XComponentContext >& xContext, 
+    ScVbaOLEObjects( const css::uno::Reference< oo::vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, 
                     const css::uno::Reference< css::container::XIndexAccess >& xIndexAccess );
 
     // XEnumerationAccess

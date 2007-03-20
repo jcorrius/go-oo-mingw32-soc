@@ -434,17 +434,6 @@ XLRGBToOORGB(  const uno::Any& aCol )
 	return uno::makeAny( nCol );
 }
 
-sal_Int32 pt2mm( double pt ) //1/100mm
-{
-    return (sal_Int32)pt * 0.352778;
-}
-
-double mm2pt( sal_Int32 mm )
-{
-    return mm * 2.8345;
-}
-
-
 void PrintOutHelper( const uno::Any& From, const uno::Any& To, const uno::Any& Copies, const uno::Any& Preview, const uno::Any& /*ActivePrinter*/, const uno::Any& /*PrintToFile*/, const uno::Any& Collate, const uno::Any& PrToFileName, css::uno::Reference< frame::XModel >& xModel, sal_Bool bUseSelection  )
 {
 	sal_Int32 nTo = 0;

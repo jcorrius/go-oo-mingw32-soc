@@ -53,10 +53,8 @@ using namespace ::com::sun::star;
 using namespace ::org::openoffice;
 static const rtl::OUString BACKCOLOR( RTL_CONSTASCII_USTRINGPARAM( "CellBackColor" ) );
 
-ScVbaInterior::ScVbaInterior( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< beans::XPropertySet >&  xProps, ScDocument* pScDoc ) throw ( lang::IllegalArgumentException) : m_xProps(xProps), m_xContext(xContext), m_pScDoc( pScDoc )
+ScVbaInterior::ScVbaInterior( const uno::Reference< vba::XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< beans::XPropertySet >&  xProps, ScDocument* pScDoc ) throw ( lang::IllegalArgumentException) : ScVbaInterior_BASE( xParent, xContext ), m_xProps(xProps), m_pScDoc( pScDoc )
 {
-	if ( !xContext.is() )
-		throw lang::IllegalArgumentException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "context not set" ) ), uno::Reference< uno::XInterface >(), 1 ); 
 	if ( !m_xProps.is() )
 		throw lang::IllegalArgumentException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "properties") ), uno::Reference< uno::XInterface >(), 2 ); 
 }
@@ -126,4 +124,22 @@ ScVbaInterior::getColorIndex() throw ( css::uno::RuntimeException )
 	return uno::makeAny( nIndex );
 }
 
+rtl::OUString& 
+ScVbaInterior::getServiceImplName()
+{
+	static rtl::OUString sImplName( RTL_CONSTASCII_USTRINGPARAM("ScVbaInterior") );
+	return sImplName;
+}
+
+uno::Sequence< rtl::OUString > 
+ScVbaInterior::getServiceNames()
+{
+	static uno::Sequence< rtl::OUString > aServiceNames;
+	if ( aServiceNames.getLength() == 0 )
+	{
+		aServiceNames.realloc( 1 );
+		aServiceNames[ 0 ] = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("org.openoffice.excel.Interior" ) );
+	}
+	return aServiceNames;
+}
 

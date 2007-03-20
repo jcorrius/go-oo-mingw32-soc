@@ -8,10 +8,11 @@
 #include "vbaoleobjects.hxx"
 
 using namespace com::sun::star;
+using namespace org::openoffice;
 
-ScVbaOLEObjects::ScVbaOLEObjects( const uno::Reference< uno::XComponentContext >& xContext,
+ScVbaOLEObjects::ScVbaOLEObjects( const uno::Reference< vba::XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext,
                 const css::uno::Reference< css::container::XIndexAccess >& xIndexAccess )
-            : OLEObjectsImpl_BASE( xContext, xIndexAccess )
+            : OLEObjectsImpl_BASE( xParent, xContext, xIndexAccess )
 {
 }
 uno::Reference< container::XEnumeration >
@@ -27,7 +28,8 @@ ScVbaOLEObjects::createCollectionObject( const css::uno::Any& aSource )
     if( aSource.hasValue() )
     {
         uno::Reference< drawing::XControlShape > xControlShape( aSource, uno::UNO_QUERY_THROW );
-        return makeAny( uno::Reference< oo::excel::XOLEObject >( new ScVbaOLEObject( m_xContext, xControlShape ) ) );
+	// parent of OLEObject is the same parent as the collection ( e.g. the sheet )
+        return makeAny( uno::Reference< oo::excel::XOLEObject >( new ScVbaOLEObject( getParent(), m_xContext, xControlShape ) ) );
     }
     return uno::Any();
 }
@@ -37,7 +39,7 @@ ScVbaOLEObjects::getItemByStringIndex( const rtl::OUString& sIndex ) throw (uno:
 {
     try
     {
-        return ScVbaCollectionBaseImpl::getItemByStringIndex( sIndex );
+        return OLEObjectsImpl_BASE::getItemByStringIndex( sIndex );
     }
     catch( uno::RuntimeException )
     {
@@ -64,4 +66,21 @@ ScVbaOLEObjects::getElementType() throw (uno::RuntimeException)
 {
     return org::openoffice::excel::XOLEObjects::static_type(0);
 }
+rtl::OUString& 
+ScVbaOLEObjects::getServiceImplName()
+{
+	static rtl::OUString sImplName( RTL_CONSTASCII_USTRINGPARAM("ScVbaOLEObjects") );
+	return sImplName;
+}
 
+uno::Sequence< rtl::OUString > 
+ScVbaOLEObjects::getServiceNames()
+{
+	static uno::Sequence< rtl::OUString > aServiceNames;
+	if ( aServiceNames.getLength() == 0 )
+	{
+		aServiceNames.realloc( 1 );
+		aServiceNames[ 0 ] = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("org.openoffice.excel.OLEObjects" ) );
+	}
+	return aServiceNames;
+}

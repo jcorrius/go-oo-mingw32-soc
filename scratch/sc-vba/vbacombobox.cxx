@@ -42,22 +42,15 @@ using namespace org::openoffice;
 const static rtl::OUString CONTROLSOURCEPROP( RTL_CONSTASCII_USTRINGPARAM("DataFieldProperty") );
 const static rtl::OUString ITEMS( RTL_CONSTASCII_USTRINGPARAM("StringItemList") );
 
-const sal_Int32 RANGE_PROPERTY_ID_DFLT=1;
-// name is not defineable in IDL so no chance of a false detection of the
-// another property/method of the same name
-const ::rtl::OUString RANGE_PROPERTY_DFLT( RTL_CONSTASCII_USTRINGPARAM( "_$DefaultProp" ) );
-
-ScVbaComboBox::ScVbaComboBox( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< css::drawing::XControlShape >& xControlShape ) : ComboBoxImpl_BASE( xContext, xControlShape ), OPropertyContainer(GetBroadcastHelper())
+ScVbaComboBox::ScVbaComboBox( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< css::drawing::XControlShape >& xControlShape ) : ComboBoxImpl_BASE( xContext, xControlShape )
 {
 	// grab the default value property name
 	m_xProps->getPropertyValue( CONTROLSOURCEPROP ) >>= sSourceName;
-	setDfltPropHandler();
 }
 
-ScVbaComboBox::ScVbaComboBox( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< beans::XPropertySet >& xProps, const css::uno::Reference< css::drawing::XControlShape > xControlShape ) : ComboBoxImpl_BASE( xContext, xProps, xControlShape ), OPropertyContainer(GetBroadcastHelper())
+ScVbaComboBox::ScVbaComboBox( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< beans::XPropertySet >& xPropSet, const css::uno::Reference< css::drawing::XControlShape > xControlShape ) : ComboBoxImpl_BASE( xContext, xPropSet, xControlShape )
 {
 	m_xProps->getPropertyValue( CONTROLSOURCEPROP ) >>= sSourceName;
-	setDfltPropHandler();
 }
 
 
@@ -92,6 +85,7 @@ ScVbaComboBox::setText( const ::rtl::OUString& _text ) throw (uno::RuntimeExcept
 void SAL_CALL 
 ScVbaComboBox::AddItem( const uno::Any& pvargItem, const uno::Any& pvargIndex ) throw (uno::RuntimeException)
 {
+
 	if ( pvargItem.hasValue()  )
 	{
 		uno::Sequence< rtl::OUString > sList;
@@ -148,52 +142,6 @@ ScVbaComboBox::AddItem( const uno::Any& pvargItem, const uno::Any& pvargIndex ) 
 void SAL_CALL 
 ScVbaComboBox::Clear(  ) throw (uno::RuntimeException)
 {
-		setValue( uno::makeAny( rtl::OUString() ) );
-		m_xProps->setPropertyValue( ITEMS, uno::makeAny( uno::Sequence< rtl::OUString >() ) );
+	setValue( uno::makeAny( rtl::OUString() ) );
+	m_xProps->setPropertyValue( ITEMS, uno::makeAny( uno::Sequence< rtl::OUString >() ) );
 }
-
-// XInterface
-
-IMPLEMENT_FORWARD_XINTERFACE2( ScVbaComboBox, ComboBoxImpl_BASE, OPropertyContainer )
-
-// XTypeProvider
-
-IMPLEMENT_FORWARD_XTYPEPROVIDER2( ScVbaComboBox, ComboBoxImpl_BASE, OPropertyContainer )
-
-// OPropertySetHelper
-
-::cppu::IPropertyArrayHelper& 
-ScVbaComboBox::getInfoHelper(  )
-{
-    static ::cppu::IPropertyArrayHelper* sProps = 0;
-    if ( !sProps )
-        sProps = createArrayHelper();
-    return *sProps;
-}
-
-
-::cppu::IPropertyArrayHelper* 
-ScVbaComboBox::createArrayHelper(  ) const
-{
-    uno::Sequence< beans::Property > aProps;
-    describeProperties( aProps );
-    return new ::cppu::OPropertyArrayHelper( aProps );
-}
-
-// XPropertySet
-uno::Reference< beans::XPropertySetInfo > 
-ScVbaComboBox::getPropertySetInfo(  ) throw (uno::RuntimeException)
-{
-    static uno::Reference< beans::XPropertySetInfo > xInfo( createPropertySetInfo( getInfoHelper() ) );
-    return xInfo;
-}
-
-void
-ScVbaComboBox::setDfltPropHandler()
-{
-
-	msDftPropName = ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Value" ) );
-	registerProperty( RANGE_PROPERTY_DFLT, RANGE_PROPERTY_ID_DFLT,
-beans::PropertyAttribute::TRANSIENT | beans::PropertyAttribute::BOUND, &msDftPropName, ::getCppuType( &msDftPropName ) );
-}
-

@@ -59,11 +59,13 @@
 #include <com/sun/star/sheet/XSpreadsheet.hpp>
 #include <com/sun/star/sheet/XSheetCellRangeContainer.hpp>
 
-#include "vbahelper.hxx"
+#include "vbahelperinterface.hxx"
 
 class ScTableSheetsObj;
 class ScCellRangesBase;
-typedef ::cppu::WeakImplHelper4< oo::excel::XRange, css::container::XEnumerationAccess, css::script::XDefaultMethod, css::script::XDefaultProperty > ScVbaRange_BASE;
+
+typedef InheritedHelperInterfaceImpl1< oo::excel::XRange >  ScVbaRange_BASE;
+
 class ArrayVisitor
 {
 public:
@@ -90,18 +92,13 @@ public:
 
 
 class ScVbaRange : public ScVbaRange_BASE
-    ,public ::comphelper::OMutexAndBroadcastHelper
-    ,public ::comphelper::OPropertyContainer
-
 {
 	css::uno::Reference< oo::vba::XCollection > m_Areas;
 	css::uno::Reference< oo::vba::XCollection > m_Borders;
 	css::uno::Reference< css::table::XCellRange > mxRange;
-	css::uno::Reference< css::uno::XComponentContext > m_xContext;
 	css::uno::Reference< css::sheet::XSheetCellRangeContainer > mxRanges;
 	sal_Bool mbIsRows;
 	sal_Bool mbIsColumns;
-	rtl::OUString msDftPropName;
 	css::uno::Reference< oo::excel::XValidation > m_xValidation;
 	double getCalcColWidth( const css::table::CellRangeAddress& ) throw (css::uno::RuntimeException);
 	double getCalcRowHeight( const css::table::CellRangeAddress& ) throw (css::uno::RuntimeException);
@@ -118,13 +115,14 @@ class ScVbaRange : public ScVbaRange_BASE
 	virtual css::uno::Any getFormulaValue( ScAddress::Convention ) throw (css::uno::RuntimeException);
 	virtual void   setFormulaValue( const css::uno::Any& aValue, ScAddress::Convention ) throw ( css::uno::RuntimeException);
 	css::uno::Reference< oo::excel::XRange > getArea( sal_Int32 nIndex  ) throw( css::uno::RuntimeException );
-	void setDfltPropHandler();
 	ScCellRangesBase* getCellRangesBase() throw ( css::uno::RuntimeException );
 	SfxItemSet* getCurrentDataSet( )  throw ( css::uno::RuntimeException );
-
+	css::uno::Reference< oo::vba::XCollection >& getBorders();
 public:
-	ScVbaRange( const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::table::XCellRange >& xRange, sal_Bool bIsRows = false, sal_Bool bIsColumns = false ) throw ( css::lang::IllegalArgumentException );
-	ScVbaRange( const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::sheet::XSheetCellRangeContainer >& xRanges, sal_Bool bIsRows = false, sal_Bool bIsColumns = false ) throw ( css::lang::IllegalArgumentException );
+	ScVbaRange( const css::uno::Reference< oo::vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::table::XCellRange >& xRange, sal_Bool bIsRows = false, sal_Bool bIsColumns = false ) throw ( css::lang::IllegalArgumentException );
+	ScVbaRange( const css::uno::Reference< oo::vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::sheet::XSheetCellRangeContainer >& xRanges, sal_Bool bIsRows = false, sal_Bool bIsColumns = false ) throw ( css::lang::IllegalArgumentException );
+	ScVbaRange( css::uno::Sequence< css::uno::Any > const& aArgs, css::uno::Reference< css::uno::XComponentContext >const& xContext );
+;
 
 	virtual ~ScVbaRange();
 
@@ -223,16 +221,6 @@ public:
 	virtual void SAL_CALL Autofit() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL PrintOut( const css::uno::Any& From, const css::uno::Any& To, const css::uno::Any& Copies, const css::uno::Any& Preview, const css::uno::Any& ActivePrinter, const css::uno::Any& PrintToFile, const css::uno::Any& Collate, const css::uno::Any& PrToFileName ) throw (css::uno::RuntimeException);
 	virtual void SAL_CALL AutoFill( const css::uno::Reference< oo::excel::XRange >& Destination, const css::uno::Any& Type ) throw (css::uno::RuntimeException) ;
-	// XPropertySet
-
-	virtual css::uno::Reference< css::beans::XPropertySetInfo > SAL_CALL getPropertySetInfo(  ) throw (css::uno::RuntimeException);  
-
-	// XInterface
-	DECLARE_XINTERFACE()
-
-	// XTypeProvider
-	DECLARE_XTYPEPROVIDER()
-
 	// XEnumerationAccess
 	virtual css::uno::Reference< css::container::XEnumeration > SAL_CALL createEnumeration() throw (css::uno::RuntimeException);
 
@@ -257,13 +245,9 @@ public:
 //     * object should be a lightweight as possible
 //     * we shouldn't need hacks like this below
 	static css::uno::Reference< oo::excel::XRange > ApplicationRange( const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Any &Cell1, const css::uno::Any &Cell2 ) throw (css::uno::RuntimeException);
-
-protected:
-	// OPropertySetHelper
-	virtual ::cppu::IPropertyArrayHelper& SAL_CALL getInfoHelper();
-
-	virtual ::cppu::IPropertyArrayHelper* createArrayHelper() const;
-
+	// XHelperInterface
+	virtual rtl::OUString& getServiceImplName();
+	virtual css::uno::Sequence<rtl::OUString> getServiceNames();
 };
 #endif /* SC_VBA_RANGE_HXX */
 

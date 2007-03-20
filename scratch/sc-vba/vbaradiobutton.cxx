@@ -7,12 +7,8 @@ using namespace org::openoffice;
 
 const static rtl::OUString LABEL( RTL_CONSTASCII_USTRINGPARAM("Label") );
 const static rtl::OUString STATE( RTL_CONSTASCII_USTRINGPARAM("State") );
-// name is not defineable in IDL so no chance of a false detection of the
-// another property/method of the same name
-
-ScVbaRadioButton::ScVbaRadioButton( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< css::drawing::XControlShape >& xControlShape ) : RadioButtonImpl_BASE( xContext, xControlShape ), OPropertyContainer(GetBroadcastHelper())
+ScVbaRadioButton::ScVbaRadioButton( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< css::drawing::XControlShape >& xControlShape ) : RadioButtonImpl_BASE( xContext, xControlShape )
 {
-	// grab the default value property name
 }
 
 // Attributes
@@ -49,40 +45,3 @@ ScVbaRadioButton::setValue( sal_Bool _value ) throw (css::uno::RuntimeException)
         nValue = 1;
     m_xProps->setPropertyValue( STATE, uno::makeAny( nValue ) );
 }
-
-// XInterface
-
-IMPLEMENT_FORWARD_XINTERFACE2( ScVbaRadioButton, RadioButtonImpl_BASE, OPropertyContainer )
-
-// XTypeProvider
-
-IMPLEMENT_FORWARD_XTYPEPROVIDER2( ScVbaRadioButton, RadioButtonImpl_BASE, OPropertyContainer )
-
-// OPropertySetHelper
-
-::cppu::IPropertyArrayHelper& 
-ScVbaRadioButton::getInfoHelper(  )
-{
-    static ::cppu::IPropertyArrayHelper* sProps = 0;
-    if ( !sProps )
-        sProps = createArrayHelper();
-    return *sProps;
-}
-
-
-::cppu::IPropertyArrayHelper* 
-ScVbaRadioButton::createArrayHelper(  ) const
-{
-    uno::Sequence< beans::Property > aProps;
-    describeProperties( aProps );
-    return new ::cppu::OPropertyArrayHelper( aProps );
-}
-
-// XPropertySet
-uno::Reference< beans::XPropertySetInfo > 
-ScVbaRadioButton::getPropertySetInfo(  ) throw (uno::RuntimeException)
-{
-    static uno::Reference< beans::XPropertySetInfo > xInfo( createPropertySetInfo( getInfoHelper() ) );
-    return xInfo;
-}
-

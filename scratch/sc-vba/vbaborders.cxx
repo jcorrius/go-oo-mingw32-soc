@@ -50,7 +50,7 @@ using namespace ::org::openoffice::excel;
 
 
 typedef ::cppu::WeakImplHelper1<container::XIndexAccess > RangeBorders_Base;
-typedef ::cppu::WeakImplHelper1<excel::XBorder > ScVbaBorder_Base;
+typedef InheritedHelperInterfaceImpl1<excel::XBorder > ScVbaBorder_Base;
 
 // #TODO sort these indexes to match the order in which Excel iterates over the
 // borders, the enumeration will match the order in this list
@@ -68,7 +68,6 @@ class ScVbaBorder : public ScVbaBorder_Base
 {
 private:
 	uno::Reference< beans::XPropertySet > m_xProps;
-	uno::Reference< uno::XComponentContext > m_xContext;
 	sal_Int32 m_LineType;	
 	ScVbaPalette m_Palette;
 	bool setBorderLine( table::BorderLine& rBorderLine )
@@ -158,8 +157,24 @@ private:
 		return true;
 	}	
 	ScVbaBorder(); // no impl
+protected: 
+	virtual rtl::OUString& getServiceImplName()
+	{
+		static rtl::OUString sImplName( RTL_CONSTASCII_USTRINGPARAM("ScVbaBorder") );
+	return sImplName;		
+	}
+	virtual css::uno::Sequence<rtl::OUString> getServiceNames()
+	{
+		static uno::Sequence< rtl::OUString > aServiceNames;
+		if ( aServiceNames.getLength() == 0 )
+		{
+			aServiceNames.realloc( 1 );
+			aServiceNames[ 0 ] = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("org.openoffice.excel.Border" ) );
+		}
+		return aServiceNames;		
+	}
 public:
-	ScVbaBorder( const uno::Reference< beans::XPropertySet > & xProps, const uno::Reference< uno::XComponentContext >& xContext, sal_Int32 lineType, ScVbaPalette& rPalette) : m_xProps( xProps ), m_xContext( xContext ), m_LineType( lineType ), m_Palette( rPalette ) {}  	
+	ScVbaBorder( const uno::Reference< beans::XPropertySet > & xProps, const uno::Reference< uno::XComponentContext >& xContext, sal_Int32 lineType, ScVbaPalette& rPalette) : ScVbaBorder_Base( uno::Reference< vba::XHelperInterface >( xProps, uno::UNO_QUERY ), xContext ), m_xProps( xProps ), m_LineType( lineType ), m_Palette( rPalette ) {}  	
 
 	// XBorder
 	uno::Any SAL_CALL getColor() throw (uno::RuntimeException)
@@ -374,7 +389,7 @@ public:
 	}
 };
 
-ScVbaBorders::ScVbaBorders( const uno::Reference< uno::XComponentContext > & xContext, const uno::Reference< table::XCellRange >& xRange, ScVbaPalette& rPalette  ):  ScVbaBorders_BASE( xContext, rangeToBorderIndexAccess( xRange ,xContext, rPalette ) ) 
+ScVbaBorders::ScVbaBorders( const uno::Reference< vba::XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext > & xContext, const uno::Reference< table::XCellRange >& xRange, ScVbaPalette& rPalette  ):  ScVbaBorders_BASE( xParent, xContext, rangeToBorderIndexAccess( xRange ,xContext, rPalette ) ) 
 {
 }
 
@@ -503,4 +518,24 @@ void SAL_CALL ScVbaBorders::setWeight( const uno::Any& _weight ) throw (uno::Run
         uno::Reference< XBorder > xBorder( getItemByIntIndex( supportedIndexTable[i] ), uno::UNO_QUERY_THROW );
         xBorder->setWeight( _weight );
     }
+}
+
+
+rtl::OUString& 
+ScVbaBorders::getServiceImplName()
+{
+	static rtl::OUString sImplName( RTL_CONSTASCII_USTRINGPARAM("ScVbaBorders") );
+	return sImplName;
+}
+
+uno::Sequence< rtl::OUString > 
+ScVbaBorders::getServiceNames()
+{
+	static uno::Sequence< rtl::OUString > aServiceNames;
+	if ( aServiceNames.getLength() == 0 )
+	{
+		aServiceNames.realloc( 1 );
+		aServiceNames[ 0 ] = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("org.openoffice.excel.Borders" ) );
+	}
+	return aServiceNames;
 }

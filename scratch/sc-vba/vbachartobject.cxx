@@ -65,8 +65,8 @@ ScVbaChartObject::getChart() throw (css::uno::RuntimeException)
 	// #TODO check with vba to see whether its valid to return a 
 	// null object for the Chart property. atm, we throw ( i.e. if in
 	// doubt... throw ) 
-	
-	return new ScVbaChart( m_xContext, xChart );
+	// #FIXME need to findout what the correct parent is here 	
+	return new ScVbaChart( uno::Reference< vba::XHelperInterface >(), mxContext, xChart );
 }
 /*
 #include<cppuhelper/implbase1.hxx>
@@ -105,4 +105,21 @@ ScVbaChartObject::test()throw (css::uno::RuntimeException)
 	return uno::Any();
 }
 
+rtl::OUString& 
+ScVbaChartObject::getServiceImplName()
+{
+	static rtl::OUString sImplName( RTL_CONSTASCII_USTRINGPARAM("ScVbaChartObject") );
+	return sImplName;
+}
 
+uno::Sequence< rtl::OUString > 
+ScVbaChartObject::getServiceNames()
+{
+	static uno::Sequence< rtl::OUString > aServiceNames;
+	if ( aServiceNames.getLength() == 0 )
+	{
+		aServiceNames.realloc( 1 );
+		aServiceNames[ 0 ] = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("org.openoffice.excel.ChartObject" ) );
+	}
+	return aServiceNames;
+}

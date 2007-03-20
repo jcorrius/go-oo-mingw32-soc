@@ -20,6 +20,9 @@
 using namespace com::sun::star;
 using namespace org::openoffice;
 
+sal_Int32 pt2mm( double pt );
+double mm2pt( sal_Int32 mm );
+
 uno::Reference< css::awt::XWindowPeer > 
 ScVbaControl::getWindowPeer( const uno::Reference< ::drawing::XControlShape >& xControlShape ) throw (uno::RuntimeException)
 {

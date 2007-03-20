@@ -35,28 +35,26 @@
 #ifndef SC_VBA_INTERIOR_HXX
 #define SC_VBA_INTERIOR_HXX
 
-#include <cppuhelper/implbase1.hxx>
 #include <org/openoffice/excel/XInterior.hpp>
 #include <com/sun/star/uno/XComponentContext.hpp>
 #include <com/sun/star/beans/XPropertySet.hpp>
 #include <com/sun/star/container/XIndexAccess.hpp>
-#include "vbarange.hxx"
 
 #include <com/sun/star/script/XInvocation.hpp>
+#include "vbahelperinterface.hxx"
 
 class ScDocument;
 
-typedef ::cppu::WeakImplHelper1< oo::excel::XInterior > ScVbaInterior_BASE;
+typedef InheritedHelperInterfaceImpl1< oo::excel::XInterior > ScVbaInterior_BASE;
 
 class ScVbaInterior :  public ScVbaInterior_BASE
 {
 	css::uno::Reference< css::beans::XPropertySet > m_xProps;
-        css::uno::Reference< css::uno::XComponentContext > m_xContext;
 	ScDocument* m_pScDoc;
 
         css::uno::Reference< css::container::XIndexAccess > getPalette(); 
 public:
-        ScVbaInterior( const css::uno::Reference< css::uno::XComponentContext >& xContext,
+        ScVbaInterior( const css::uno::Reference< oo::vba::XHelperInterface >& xParent,  const css::uno::Reference< css::uno::XComponentContext >& xContext,
                  const css::uno::Reference< css::beans::XPropertySet >& xProps, ScDocument* pScDoc ) throw ( css::lang::IllegalArgumentException);
 
         virtual ~ScVbaInterior(){}
@@ -66,6 +64,9 @@ public:
 
 	virtual css::uno::Any SAL_CALL getColorIndex() throw ( css::uno::RuntimeException);
 	virtual void SAL_CALL setColorIndex( const css::uno::Any& _colorindex ) throw ( css::uno::RuntimeException );
+	//XHelperInterface
+	virtual rtl::OUString& getServiceImplName();
+	virtual css::uno::Sequence<rtl::OUString> getServiceNames();
 };
 #endif
 

@@ -47,11 +47,12 @@
 #include <org/openoffice/excel/XOutline.hpp>
 #include <org/openoffice/excel/XChartObjects.hpp>
 
-#include "vbahelper.hxx"
+#include "vbahelperinterface.hxx"
 
-class ScVbaWorksheet : public ::cppu::WeakImplHelper2<oo::excel::XWorksheet, css::script::XInvocation > 
+typedef InheritedHelperInterfaceImpl1< oo::excel::XWorksheet >  WorksheetImpl_BASE;
+
+class ScVbaWorksheet : public WorksheetImpl_BASE
 {
-	css::uno::Reference< css::uno::XComponentContext > m_xContext;
 	css::uno::Reference< css::sheet::XSpreadsheet > mxSheet;
 	css::uno::Reference< css::frame::XModel > mxModel;
 	css::uno::Reference< oo::excel::XChartObjects > mxCharts;
@@ -67,9 +68,10 @@ protected:
 	{ return mxModel; }
 	virtual css::uno::Reference< css::sheet::XSpreadsheet > getSheet()
 	{ return mxSheet; }
-	ScVbaWorksheet( const css::uno::Reference< css::uno::XComponentContext >& xContext );
+
+	ScVbaWorksheet( const css::uno::Reference< oo::vba::XHelperInterface >& xParent,  const css::uno::Reference< css::uno::XComponentContext >& xContext );
 public:
-	ScVbaWorksheet( 
+	ScVbaWorksheet( const css::uno::Reference< oo::vba::XHelperInterface >& xParent,
 		const css::uno::Reference< css::uno::XComponentContext >& xContext,
 		const css::uno::Reference< css::sheet::XSpreadsheet >& xSheet, 
 		const css::uno::Reference< css::frame::XModel >& xModel )throw (css::uno::RuntimeException)  ;
@@ -124,6 +126,9 @@ public:
 	virtual css::uno::Any SAL_CALL getValue( const ::rtl::OUString& aPropertyName ) throw (css::beans::UnknownPropertyException, css::uno::RuntimeException);
 	virtual ::sal_Bool SAL_CALL hasMethod( const ::rtl::OUString& aName ) throw (css::uno::RuntimeException);
 	virtual ::sal_Bool SAL_CALL hasProperty( const ::rtl::OUString& aName ) throw (css::uno::RuntimeException);
+	// XHelperInterface
+	virtual rtl::OUString& getServiceImplName();
+	virtual css::uno::Sequence<rtl::OUString> getServiceNames();	
 };
 
 #endif /* SC_VBA_WORKSHEET_HXX */

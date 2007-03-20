@@ -1,6 +1,41 @@
+/*************************************************************************
+ *
+ *  OpenOffice.org - a multi-platform office productivity suite
+ *
+ *  $RCSfile$
+ *
+ *  $Revision$
+ *
+ *  last change: $Author$ $Date$
+ *
+ *  The Contents of this file are made available subject to
+ *  the terms of GNU Lesser General Public License Version 2.1.
+ *
+ *
+ *    GNU Lesser General Public License Version 2.1
+ *    =============================================
+ *    Copyright 2005 by Sun Microsystems, Inc.
+ *    901 San Antonio Road, Palo Alto, CA 94303, USA
+ *
+ *    This library is free software; you can redistribute it and/or
+ *    modify it under the terms of the GNU Lesser General Public
+ *    License version 2.1, as published by the Free Software Foundation.
+ *
+ *    This library is distributed in the hope that it will be useful,
+ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ *    Lesser General Public License for more details.
+ *
+ *    You should have received a copy of the GNU Lesser General Public
+ *    License along with this library; if not, write to the Free Software
+ *    Foundation, Inc., 59 Temple Place, Suite 330, Boston,
+ *    MA  02111-1307  USA
+ *
+ ************************************************************************/
 #include "vbawindow.hxx"
 #include "vbaworksheets.hxx"
 #include "vbaworksheet.hxx"
+#include "vbapane.hxx"
 #include <com/sun/star/sheet/XSpreadsheetDocument.hpp>
 #include <com/sun/star/sheet/XSpreadsheet.hpp>
 #include <com/sun/star/container/XNamed.hpp>
@@ -58,7 +93,8 @@ public:
 		{
 			throw container::NoSuchElementException();
 		}
-		return uno::makeAny( uno::Reference< excel::XWorksheet > ( new ScVbaWorksheet( m_xContext, *(m_it++), m_xModel ) ) );
+		// #FIXME needs ThisWorkbook as parent
+		return uno::makeAny( uno::Reference< excel::XWorksheet > ( new ScVbaWorksheet( uno::Reference< vba::XHelperInterface >(), m_xContext, *(m_it++), m_xModel ) ) );
 	}
 
 
@@ -163,61 +199,22 @@ public:
 
 };
 
-ScVbaWindow::ScVbaWindow( const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::frame::XModel >& xModel ) : m_xContext(xContext), m_xModel( xModel )
+ScVbaWindow::ScVbaWindow( const uno::Reference< vba::XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< frame::XModel >& xModel ) : WindowImpl_BASE( xParent, xContext ), m_xModel( xModel ) 
 {
-    uno::Reference< frame::XController > xController( xModel->getCurrentController(), uno::UNO_QUERY_THROW );
-    m_xViewPane.set( xController, uno::UNO_QUERY_THROW );
-    m_xPane.set( ActivePane(), uno::UNO_QUERY_THROW );
+	uno::Reference< frame::XController > xController( xModel->getCurrentController(), uno::UNO_QUERY_THROW );
+	m_xViewPane.set( xController, uno::UNO_QUERY_THROW );
+	m_xPane.set( ActivePane(), uno::UNO_QUERY_THROW );
 }
+
 
 void  
 ScVbaWindow::Scroll( const uno::Any& Down, const uno::Any& Up, const uno::Any& ToRight, const uno::Any& ToLeft, bool bLargeScroll ) throw (uno::RuntimeException)
 {
-    if( bLargeScroll )
-        m_xPane->LargeScroll( Down, Up, ToRight, ToLeft );
-    else
-        m_xPane->SmallScroll( Down, Up, ToRight, ToLeft );
+	if( bLargeScroll )
+		m_xPane->LargeScroll( Down, Up, ToRight, ToLeft );
+	else
+		m_xPane->SmallScroll( Down, Up, ToRight, ToLeft );
 }
-/*
-void  
-ScVbaWindow::Scroll( const uno::Any& Down, const uno::Any& Up, const uno::Any& ToRight, const uno::Any& ToLeft, bool bLargeScroll ) throw (uno::RuntimeException)
-{
-	ScTabViewShell* pViewShell = getBestViewShell( m_xModel );	
-	if ( !pViewShell )
-	    return;
-	
-	sal_Int16 down = 0;	
-	sal_Int16 up = 0;	
-	sal_Int16 toRight = 0;	
-	sal_Int16 toLeft = 0;	
-	Down >>= down;
-	Up >>= up;
-	ToRight >>= toRight;
-	ToLeft >>= toLeft;
-	uno::Sequence< beans::PropertyValue > args1(2);
-	args1[0].Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "By" ) );
-	args1[1].Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Sel" ) );
-	args1[1].Value <<= false;
-	
-	SCROW totalUp = up - down;
-	SCCOL totalLeft = toLeft - toRight;
-	
-	if ( totalUp != 0 )
-	{
-		if (bLargeScroll)
-		    totalUp = totalUp * pViewShell->GetViewData()->VisibleCellsY( SC_SPLIT_BOTTOM );
-		pViewShell->ScrollLines(0, -totalUp);
-	}
-	
-	if ( totalLeft != 0 )
-	{
-		if (bLargeScroll)
-		    totalLeft = totalLeft * pViewShell->GetViewData()->VisibleCellsX( SC_SPLIT_LEFT );
-		pViewShell->ScrollLines(-totalLeft, 0);
-	}
-
-}
-*/
 void SAL_CALL 
 ScVbaWindow::SmallScroll( const uno::Any& Down, const uno::Any& Up, const uno::Any& ToRight, const uno::Any& ToLeft ) throw (uno::RuntimeException)
 {
@@ -232,8 +229,9 @@ ScVbaWindow::LargeScroll( const uno::Any& Down, const uno::Any& Up, const uno::A
 uno::Any SAL_CALL 
 ScVbaWindow::SelectedSheets( const uno::Any& aIndex ) throw (uno::RuntimeException)
 {
-	uno::Reference< container::XEnumerationAccess > xEnumAccess( new SelectedSheetsEnumAccess( m_xContext, m_xModel  ) );
-	uno::Reference< excel::XWorksheets > xSheets(  new ScVbaWorksheets( m_xContext, xEnumAccess, m_xModel ) );
+	uno::Reference< container::XEnumerationAccess > xEnumAccess( new SelectedSheetsEnumAccess( mxContext, m_xModel  ) );
+	// #FIXME needs a workbook as a parent
+	uno::Reference< excel::XWorksheets > xSheets(  new ScVbaWorksheets( uno::Reference< vba::XHelperInterface >(), mxContext, xEnumAccess, m_xModel ) );
 	if ( aIndex.hasValue() )
 	{
 		uno::Reference< vba::XCollection > xColl( xSheets, uno::UNO_QUERY_THROW );
@@ -290,7 +288,7 @@ ScVbaWindow::getCaption() throw (uno::RuntimeException)
 		if ( ( nCrudLen + nCrudIndex ) == sTitle.getLength() )
 		{
 			sTitle = sTitle.copy( 0, nCrudIndex );
-			ScVbaWorkbook workbook( m_xContext, m_xModel );
+			ScVbaWorkbook workbook( uno::Reference< vba::XHelperInterface >( ScVbaGlobals::getGlobalsImpl( mxContext )->getApplication(), uno::UNO_QUERY_THROW ), mxContext, m_xModel );
 			rtl::OUString sName = workbook.getName();
 			// rather bizare hack to make sure the name behavior
 			// is like XL
@@ -427,13 +425,39 @@ ScVbaWindow::setWindowState( const uno::Any& _windowstate ) throw (uno::RuntimeE
 void
 ScVbaWindow::Activate() throw (css::uno::RuntimeException)
 {
-	ScVbaWorkbook workbook( m_xContext, m_xModel );
+	ScVbaWorkbook workbook( uno::Reference< vba::XHelperInterface >( ScVbaGlobals::getGlobalsImpl( mxContext )->getApplication(), uno::UNO_QUERY_THROW ), mxContext, m_xModel );
+
 	workbook.Activate();
 }
 
 void
 ScVbaWindow::Close( const uno::Any& SaveChanges, const uno::Any& FileName, const uno::Any& RouteWorkBook ) throw (uno::RuntimeException)
 {
-	ScVbaWorkbook workbook( m_xContext, m_xModel );
+	ScVbaWorkbook workbook( uno::Reference< vba::XHelperInterface >( ScVbaGlobals::getGlobalsImpl( mxContext )->getApplication(), uno::UNO_QUERY_THROW ), mxContext, m_xModel );
 	workbook.Close(SaveChanges, FileName, RouteWorkBook );
+}
+
+uno::Reference< excel::XPane > 
+ScVbaWindow::ActivePane() 
+{ 
+	return new ScVbaPane( mxContext, m_xViewPane ); 
+}
+
+rtl::OUString& 
+ScVbaWindow::getServiceImplName()
+{
+	static rtl::OUString sImplName( RTL_CONSTASCII_USTRINGPARAM("ScVbaWindow") );
+	return sImplName;
+}
+
+uno::Sequence< rtl::OUString > 
+ScVbaWindow::getServiceNames()
+{
+	static uno::Sequence< rtl::OUString > aServiceNames;
+	if ( aServiceNames.getLength() == 0 )
+	{
+		aServiceNames.realloc( 1 );
+		aServiceNames[ 0 ] = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("org.openoffice.excel.Window" ) );
+	}
+	return aServiceNames;
 }

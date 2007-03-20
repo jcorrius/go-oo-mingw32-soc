@@ -53,7 +53,8 @@ public:
 	virtual uno::Any SAL_CALL nextElement(  ) throw (container::NoSuchElementException, lang::WrappedTargetException, uno::RuntimeException) 
 	{ 
 		uno::Reference< table::XTableChart > xTableChart( m_xEnumeration->nextElement(), uno::UNO_QUERY_THROW );
-		return uno::makeAny( uno::Reference< excel::XChartObject > ( new ScVbaChartObject( m_xContext, xTableChart ) ) );
+		// #FIXME what is the correct parent object
+		return uno::makeAny( uno::Reference< excel::XChartObject > ( new ScVbaChartObject(  uno::Reference< vba::XHelperInterface >(), m_xContext, xTableChart ) ) );
 	}
 };
 
@@ -81,6 +82,28 @@ uno::Any
 ScVbaChartObjects::createCollectionObject( const css::uno::Any& aSource )
 {	
 	uno::Reference< table::XTableChart > xTableChart( aSource, uno::UNO_QUERY_THROW );
-	return uno::makeAny( uno::Reference< excel::XChartObject > ( new ScVbaChartObject( m_xContext, xTableChart ) ) );
+	//#FIXME needs correct parent object ( this? )
+	return uno::makeAny( uno::Reference< excel::XChartObject > ( new ScVbaChartObject( uno::Reference< vba::XHelperInterface >(), m_xContext, xTableChart ) ) );
 }
+
+rtl::OUString& 
+ScVbaChartObjects::getServiceImplName()
+{
+	static rtl::OUString sImplName( RTL_CONSTASCII_USTRINGPARAM("ScVbaChartObjects") );
+	return sImplName;
+}
+
+css::uno::Sequence<rtl::OUString> 
+ScVbaChartObjects::getServiceNames()
+{
+	static uno::Sequence< rtl::OUString > sNames;
+	if ( sNames.getLength() == 0 )
+	{
+		sNames.realloc( 1 );
+		sNames[0] = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("org.openoffice.excel.ChartObjects") );
+	}
+	return sNames;
+}
+
+
 

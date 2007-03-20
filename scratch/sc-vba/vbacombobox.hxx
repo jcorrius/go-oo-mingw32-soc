@@ -47,12 +47,7 @@
 #include "vbahelper.hxx"
 
 typedef cppu::ImplInheritanceHelper2<ScVbaControl, oo::msforms::XComboBox, css::script::XDefaultProperty > ComboBoxImpl_BASE;
-//typedef ::cppu::WeakImplHelper2< oo::msforms::XComboBox, css::script::XDefaultProperty > ComboBoxImpl_BASE;
-// for the moment its preferable for default value behaviour to
-// be provided by both old an new mechanisms
 class ScVbaComboBox : public ComboBoxImpl_BASE
-//    ,public ScVbaControl
-    ,public ::comphelper::OPropertyContainer
 {		
 
 	//css::uno::Reference< css::uno::XComponentContext > m_xContext;
@@ -60,7 +55,6 @@ class ScVbaComboBox : public ComboBoxImpl_BASE
 	rtl::OUString sSourceName; 
 	rtl::OUString msDftPropName;
 
-	void setDfltPropHandler();
 	
 public:
 	ScVbaComboBox( const css::uno::Reference< css::uno::XComponentContext >& xContext, 
@@ -80,26 +74,8 @@ public:
 	virtual void SAL_CALL AddItem( const css::uno::Any& pvargItem, const css::uno::Any& pvargIndex ) throw (css::uno::RuntimeException);
 	virtual void SAL_CALL Clear(  ) throw (css::uno::RuntimeException);
 
-	// XPropertySet
-
-	virtual css::uno::Reference< css::beans::XPropertySetInfo > SAL_CALL getPropertySetInfo(  ) throw (css::uno::RuntimeException);  
-
-	// XInterface
-	DECLARE_XINTERFACE()
-
-	// XTypeProvider
-	DECLARE_XTYPEPROVIDER()
-
 	// XDefaultProperty
         ::rtl::OUString SAL_CALL getDefaultPropertyName(  ) throw (css::uno::RuntimeException) { return ::rtl::OUString::createFromAscii("Value"); }
-
-
-protected:
-	// OPropertySetHelper
-	virtual ::cppu::IPropertyArrayHelper& SAL_CALL getInfoHelper();
-
-	virtual ::cppu::IPropertyArrayHelper* createArrayHelper() const;
-
 };
 
 #endif //

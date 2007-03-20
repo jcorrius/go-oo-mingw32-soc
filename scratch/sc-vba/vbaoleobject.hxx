@@ -6,18 +6,19 @@
 #include <com/sun/star/awt/XWindowPeer.hpp>
 #include <org/openoffice/excel/XOLEObject.hpp>
 
-#include "vbahelper.hxx"
+#include "vbahelperinterface.hxx"
 
-typedef ::cppu::WeakImplHelper1< oo::excel::XOLEObject > OLEObjectImpl_BASE;
+typedef InheritedHelperInterfaceImpl1< oo::excel::XOLEObject > OLEObjectImpl_BASE;
 
 class ScVbaOLEObject : public OLEObjectImpl_BASE
 {
-    css::uno::Reference< css::awt::XWindowPeer > getWindowPeer( const css::uno::Reference< css::drawing::XControlShape >& xControlShape ) throw (css::uno::RuntimeException);
+    css::uno::Reference< css::awt::XWindowPeer > m_xWindowPeer;
 protected:
-    css::uno::Reference< css::uno::XComponentContext > m_xContext;
     css::uno::Reference< css::drawing::XControlShape > m_xControlShape;
+	virtual rtl::OUString& getServiceImplName();
+	virtual css::uno::Sequence<rtl::OUString> getServiceNames();
 public:
-    ScVbaOLEObject( const css::uno::Reference< css::uno::XComponentContext >& xContext,
+    ScVbaOLEObject( const css::uno::Reference< oo::vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext,
             css::uno::Reference< css::drawing::XControlShape > xControlShape );
 
     // XOLEObject Attributes

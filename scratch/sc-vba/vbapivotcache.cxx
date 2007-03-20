@@ -38,7 +38,7 @@
 using namespace ::com::sun::star;
 using namespace ::org::openoffice;
 
-ScVbaPivotCache::ScVbaPivotCache( const uno::Reference< uno::XComponentContext >& xContext,  const uno::Reference< sheet::XDataPilotTable >& xTable ) : m_xContext( xContext ), m_xTable( xTable )
+ScVbaPivotCache::ScVbaPivotCache( const uno::Reference< vba::XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext,  const uno::Reference< sheet::XDataPilotTable >& xTable ) : PivotCacheImpl_BASE( xParent, xContext ), m_xTable( xTable )
 {
 }
 
@@ -46,5 +46,23 @@ void SAL_CALL
 ScVbaPivotCache::Refresh() throw (css::uno::RuntimeException)
 {
 	m_xTable->refresh();
+}
+rtl::OUString& 
+ScVbaPivotCache::getServiceImplName()
+{
+	static rtl::OUString sImplName( RTL_CONSTASCII_USTRINGPARAM("ScVbaPivotCache") );
+	return sImplName;
+}
+
+uno::Sequence< rtl::OUString > 
+ScVbaPivotCache::getServiceNames()
+{
+	static uno::Sequence< rtl::OUString > aServiceNames;
+	if ( aServiceNames.getLength() == 0 )
+	{
+		aServiceNames.realloc( 1 );
+		aServiceNames[ 0 ] = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("org.openoffice.excel.PivotCache" ) );
+	}
+	return aServiceNames;
 }
 

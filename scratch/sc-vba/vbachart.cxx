@@ -61,3 +61,22 @@ ScVbaChart::SeriesCollection(const uno::Any&) throw (uno::RuntimeException)
 	return uno::Any();
 }
 
+rtl::OUString& 
+ScVbaChart::getServiceImplName()
+{
+	static rtl::OUString sImplName( RTL_CONSTASCII_USTRINGPARAM("ScVbaChart") );
+	return sImplName;
+}
+
+uno::Sequence< rtl::OUString > 
+ScVbaChart::getServiceNames()
+{
+	static uno::Sequence< rtl::OUString > aServiceNames;
+	if ( aServiceNames.getLength() == 0 )
+	{
+		aServiceNames.realloc( 1 );
+		aServiceNames[ 0 ] = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("org.openoffice.excel.Chart" ) );
+	}
+	return aServiceNames;
+}
+

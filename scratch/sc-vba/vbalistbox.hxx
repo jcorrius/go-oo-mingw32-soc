@@ -2,11 +2,8 @@
 #define SC_VBA_LISTBOX_HXX
 #include <cppuhelper/implbase2.hxx>
 #include <com/sun/star/uno/XComponentContext.hpp>
-#include <com/sun/star/beans/XPropertySet.hpp>
 #include <com/sun/star/script/XDefaultProperty.hpp>
 #include <org/openoffice/msforms/XListBox.hpp>
-#include <comphelper/proparrhlp.hxx>
-#include <comphelper/propertycontainer.hxx>
 #include <com/sun/star/beans/PropertyAttribute.hpp>
 
 #include "vbacontrol.hxx"
@@ -14,21 +11,13 @@
 #include "vbahelper.hxx"
 
 typedef cppu::ImplInheritanceHelper2<ScVbaControl, oo::msforms::XListBox, css::script::XDefaultProperty > ListBoxImpl_BASE;
-// for the moment its preferable for default value behaviour to
-// be provided by both old an new mechanisms
 class ScVbaListBox : public ListBoxImpl_BASE
     ,public PropListener
-    ,public ::comphelper::OPropertyContainer
 {		
-
-	//css::uno::Reference< css::uno::XComponentContext > m_xContext;
-	//css::uno::Reference< css::beans::XPropertySet > m_xProps;
 	rtl::OUString sSourceName; 
 	rtl::OUString msDftPropName;
 
     sal_Int32 m_nIndex;
-
-	void setDfltPropHandler();
 	
 public:
 	ScVbaListBox( const css::uno::Reference< css::uno::XComponentContext >& xContext, 
@@ -51,15 +40,6 @@ public:
 	virtual void SAL_CALL AddItem( const css::uno::Any& pvargItem, const css::uno::Any& pvargIndex ) throw (css::uno::RuntimeException);
 	virtual void SAL_CALL Clear(  ) throw (css::uno::RuntimeException);
 
-	// XPropertySet
-
-	virtual css::uno::Reference< css::beans::XPropertySetInfo > SAL_CALL getPropertySetInfo(  ) throw (css::uno::RuntimeException);  
-
-	// XInterface
-	DECLARE_XINTERFACE()
-
-	// XTypeProvider
-	DECLARE_XTYPEPROVIDER()
 
 	// XDefaultProperty
     rtl::OUString SAL_CALL getDefaultPropertyName(  ) throw (css::uno::RuntimeException) { return ::rtl::OUString::createFromAscii("Value"); }
@@ -68,12 +48,6 @@ public:
     virtual void setValueEvent( const css::uno::Any& value );
     virtual css::uno::Any getValueEvent();
 
-
-protected:
-	// OPropertySetHelper
-	virtual ::cppu::IPropertyArrayHelper& SAL_CALL getInfoHelper();
-
-	virtual ::cppu::IPropertyArrayHelper* createArrayHelper() const;
 
 };
 
