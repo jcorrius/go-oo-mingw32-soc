@@ -47,7 +47,6 @@ SLOFILES= \
 		$(SLO)$/vbachartobject.obj\
 		$(SLO)$/vbachartobjects.obj\
 		$(SLO)$/vbaseriescollection.obj\
-		$(SLO)$/vbacollectionimpl.obj\
 		$(SLO)$/vbadialogs.obj \
 		$(SLO)$/vbadialog.obj	\
 		$(SLO)$/vbapivottable.obj \
