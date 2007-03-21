@@ -1,10 +1,11 @@
 --- /dev/null	
-+++ sc/source/ui/vba/vbacontrol.cxx	
-@@ -0,0 +1,190 @@
++++ sc/source/ui/vba//vbacontrol.cxx
+@@ -0,0 +1,286 @@
 +#include <com/sun/star/form/FormComponentType.hpp>
 +#include <com/sun/star/awt/XControlModel.hpp>
 +#include <com/sun/star/awt/XControl.hpp>
 +#include <com/sun/star/awt/XWindow2.hpp>
++#include <com/sun/star/lang/XEventListener.hpp>
 +#include <com/sun/star/drawing/XShape.hpp>
 +#include <com/sun/star/frame/XModel.hpp>
 +#include <com/sun/star/view/XControlAccess.hpp>
@@ -22,8 +23,11 @@
 +using namespace com::sun::star;
 +using namespace org::openoffice;
 +
++sal_Int32 pt2mm( double pt );
++double mm2pt( sal_Int32 mm );
++
 +uno::Reference< css::awt::XWindowPeer > 
-+getWindowPeer( const uno::Reference< ::drawing::XControlShape >& xControlShape ) throw (uno::RuntimeException)
++ScVbaControl::getWindowPeer( const uno::Reference< ::drawing::XControlShape >& xControlShape ) throw (uno::RuntimeException)
 +{
 +    uno::Reference< awt::XControlModel > xControlModel( xControlShape->getControl(), uno::UNO_QUERY_THROW );
 +    //init m_xWindowPeer 
@@ -45,6 +49,35 @@
 +    return xControl->getPeer();
 +}
 +
++//ScVbaControlListener
++class ScVbaControlListener: public cppu::WeakImplHelper1< lang::XEventListener >
++{
++private:
++    ScVbaControl *pControl;
++public:
++    ScVbaControlListener( ScVbaControl *pTmpControl );
++    virtual ~ScVbaControlListener();
++    virtual void SAL_CALL disposing( const lang::EventObject& rEventObject ) throw( uno::RuntimeException );
++};
++
++ScVbaControlListener::ScVbaControlListener( ScVbaControl *pTmpControl ): pControl( pTmpControl )
++{
++}
++
++ScVbaControlListener::~ScVbaControlListener()
++{
++}
++
++void SAL_CALL
++ScVbaControlListener::disposing( const lang::EventObject& ) throw( uno::RuntimeException )
++{
++    if( pControl )
++    {
++        pControl->removeResouce();
++        pControl = NULL;
++    }
++}
++
 +//ScVbaControl
 +
 +ScVbaControl::ScVbaControl( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< ::drawing::XControlShape >& xControlShape ) : m_xContext( xContext ), m_xControlShape( xControlShape )
@@ -53,17 +86,39 @@
 +    uno::Reference< awt::XControlModel > xControlModel( xControlShape->getControl(), uno::UNO_QUERY_THROW );
 +    uno::Reference< beans::XPropertySet > xProps( xControlModel, uno::UNO_QUERY_THROW );
 +    m_xProps.set( xProps, uno::UNO_QUERY_THROW );
++    //add listener
++    m_xEventListener.set( new ScVbaControlListener( this ) );
++    uno::Reference< lang::XComponent > xComponent( m_xControlShape, uno::UNO_QUERY_THROW );
++    xComponent->addEventListener( m_xEventListener );
 +}
++
++ScVbaControl::~ScVbaControl()
++{
++}
++
++void ScVbaControl::removeResouce() throw( uno::RuntimeException )
++{
++    uno::Reference< lang::XComponent > xComponent( m_xControlShape, uno::UNO_QUERY_THROW );
++    xComponent->removeEventListener( m_xEventListener );
++    m_xControlShape = NULL;
++    m_xProps = NULL;
++}
++
 +
 +ScVbaControl::ScVbaControl( const uno::Reference< uno::XComponentContext >& xContext, 
 +        const uno::Reference< beans::XPropertySet >& xProps, 
 +        const uno::Reference< drawing::XControlShape > xControlShape ) : m_xContext( xContext ), 
 +        m_xProps( xProps ), m_xControlShape( xControlShape )
 +{
++    m_xEventListener.set( new ScVbaControlListener( this ) );
++    uno::Reference< lang::XComponent > xComponent( m_xControlShape, uno::UNO_QUERY_THROW );
++    xComponent->addEventListener( m_xEventListener );
 +}
 +
 +void ScVbaControl::SetControl( const uno::Reference< uno::XComponentContext > xContext, const uno::Reference< ::drawing::XControlShape > xControlShape )
 +{
++    m_xEventListener.set( new ScVbaControlListener( this ) );
++    uno::Reference< lang::XComponent > xComponent( m_xControlShape, uno::UNO_QUERY_THROW );
 +    m_xContext.set( xContext, uno::UNO_QUERY_THROW );
 +    m_xControlShape.set( xControlShape, uno::UNO_QUERY_THROW );
 +    //init m_xProps
@@ -76,19 +131,13 @@
 +        const uno::Reference< beans::XPropertySet > xProps, 
 +        const uno::Reference< drawing::XControlShape > xControlShape )
 +{
++    m_xEventListener.set( new ScVbaControlListener( this ) );
++    uno::Reference< lang::XComponent > xComponent( m_xControlShape, uno::UNO_QUERY_THROW );
 +    m_xContext.set( xContext, uno::UNO_QUERY_THROW );
 +    m_xProps.set( xProps, uno::UNO_QUERY_THROW );
 +    m_xControlShape.set( xControlShape, uno::UNO_QUERY_THROW );
 +}
 +
-+/*
-+void
-+ScVbaControl::Init( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< beans::XPropertySet >& xProps )
-+{
-+    m_xContext = xContext;
-+    m_xProps = xProps;
-+}
-+*/
 +//In design model has different behavior
 +sal_Bool SAL_CALL ScVbaControl::getEnabled() throw (uno::RuntimeException)
 +{
@@ -118,19 +167,66 @@
 +    uno::Reference< awt::XWindow2 > xWindow2( getWindowPeer( m_xControlShape ), uno::UNO_QUERY_THROW );
 +    xWindow2->setVisible( bVisible );
 +}
-+uno::Any SAL_CALL ScVbaControl::getSize() throw (uno::RuntimeException)
++double SAL_CALL ScVbaControl::getHeight() throw (uno::RuntimeException)
 +{
 +    uno::Reference< drawing::XShape > xShape( m_xControlShape, uno::UNO_QUERY_THROW );
-+    return uno::makeAny(  xShape->getSize() );
++    return mm2pt( xShape->getSize().Height ) / 100;
 +}
-+void SAL_CALL ScVbaControl::setSize( const uno::Any& _size ) throw (uno::RuntimeException)
++void SAL_CALL ScVbaControl::setHeight( const double _height ) throw (uno::RuntimeException)
 +{
-+    awt::Size aSize;
-+    _size >>= aSize;
 +    uno::Reference< drawing::XShape > xShape( m_xControlShape, uno::UNO_QUERY_THROW );
++    awt::Size aSize( xShape->getSize() );
++    aSize.Height = pt2mm( _height ) * 100;
 +    xShape->setSize( aSize );
 +}
 +
++double SAL_CALL ScVbaControl::getWidth() throw (uno::RuntimeException)
++{
++    uno::Reference< drawing::XShape > xShape( m_xControlShape, uno::UNO_QUERY_THROW );
++    return mm2pt( xShape->getSize().Width ) / 100;
++}
++void SAL_CALL ScVbaControl::setWidth( const double _width ) throw (uno::RuntimeException)
++{
++    uno::Reference< drawing::XShape > xShape( m_xControlShape, uno::UNO_QUERY_THROW );
++    awt::Size aSize( xShape->getSize() );
++    aSize.Width = pt2mm( _width ) * 100;
++    xShape->setSize( aSize );
++}
++
++double SAL_CALL
++ScVbaControl::getLeft() throw (uno::RuntimeException)
++{
++    uno::Reference< drawing::XShape > xShape( m_xControlShape, uno::UNO_QUERY_THROW );
++    return mm2pt( xShape->getPosition().X / 100 );
++}
++
++void SAL_CALL
++ScVbaControl::setLeft( double _left ) throw (uno::RuntimeException)
++{
++    awt::Point oldPosition;
++    uno::Reference< drawing::XShape > xShape( m_xControlShape, uno::UNO_QUERY_THROW );
++    oldPosition = xShape->getPosition();
++    oldPosition.X = pt2mm( _left ) * 100;
++    xShape->setPosition( oldPosition );
++
++}
++
++double SAL_CALL
++ScVbaControl::getTop() throw (uno::RuntimeException)
++{
++    uno::Reference< drawing::XShape > xShape( m_xControlShape, uno::UNO_QUERY_THROW );
++    return mm2pt( xShape->getPosition().Y / 100 );
++}
++
++void SAL_CALL
++ScVbaControl::setTop( double _top ) throw (uno::RuntimeException)
++{
++    awt::Point oldPosition;
++    uno::Reference< drawing::XShape > xShape( m_xControlShape, uno::UNO_QUERY_THROW );
++    oldPosition = xShape->getPosition();
++    oldPosition.Y = pt2mm( _top ) * 100;;
++    xShape->setPosition( oldPosition );
++}
 +
 +//ScVbaControlFactory
 +
