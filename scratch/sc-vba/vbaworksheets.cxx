@@ -103,14 +103,14 @@ ScVbaWorksheets::createEnumeration() throw (uno::RuntimeException)
 		return xAccess->createEnumeration(); 
 	}
 	uno::Reference< container::XEnumerationAccess > xEnumAccess( m_xSheets, uno::UNO_QUERY_THROW );
-	return new SheetsEnumeration( this, m_xContext, xEnumAccess->createEnumeration(), mxModel );
+	return new SheetsEnumeration( this, mxContext, xEnumAccess->createEnumeration(), mxModel );
 }
 
 uno::Any
 ScVbaWorksheets::createCollectionObject( const uno::Any& aSource )
 {
 	uno::Reference< sheet::XSpreadsheet > xSheet( aSource, uno::UNO_QUERY );
-	return uno::makeAny( uno::Reference< excel::XWorksheet > ( new ScVbaWorksheet( uno::Reference< vba::XHelperInterface >( getParent(), uno::UNO_QUERY_THROW ), m_xContext, xSheet, mxModel ) ) );
+	return uno::makeAny( uno::Reference< excel::XWorksheet > ( new ScVbaWorksheet( uno::Reference< vba::XHelperInterface >( getParent(), uno::UNO_QUERY_THROW ), mxContext, xSheet, mxModel ) ) );
 }
 
 // XWorksheets
@@ -137,7 +137,7 @@ ScVbaWorksheets::Add( const uno::Any& Before, const uno::Any& After,
 	if (!aStringSheet.getLength())
 	{
 		aStringSheet = ScVbaGlobals::getGlobalsImpl( 
-			m_xContext )->getApplication()->getActiveWorkbook()->getActiveSheet()->getName();
+			mxContext )->getApplication()->getActiveWorkbook()->getActiveSheet()->getName();
 		bBefore = sal_True;
 	}
 		nCount = static_cast< SCTAB >( m_xIndexAccess->getCount() );

@@ -66,7 +66,7 @@ uno::Reference< container::XEnumeration >
 ScVbaChartObjects::createEnumeration() throw (uno::RuntimeException)
 {
 	css::uno::Reference< container::XEnumerationAccess > xEnumAccess( m_xTableCharts, uno::UNO_QUERY_THROW );
-	return new ChartObjectEnumerationImpl( m_xContext, xEnumAccess->createEnumeration() );
+	return new ChartObjectEnumerationImpl( mxContext, xEnumAccess->createEnumeration() );
 }
 
 // XElementAccess
@@ -83,7 +83,7 @@ ScVbaChartObjects::createCollectionObject( const css::uno::Any& aSource )
 {	
 	uno::Reference< table::XTableChart > xTableChart( aSource, uno::UNO_QUERY_THROW );
 	//#FIXME needs correct parent object ( this? )
-	return uno::makeAny( uno::Reference< excel::XChartObject > ( new ScVbaChartObject( uno::Reference< vba::XHelperInterface >(), m_xContext, xTableChart ) ) );
+	return uno::makeAny( uno::Reference< excel::XChartObject > ( new ScVbaChartObject( uno::Reference< vba::XHelperInterface >(), mxContext, xTableChart ) ) );
 }
 
 rtl::OUString& 

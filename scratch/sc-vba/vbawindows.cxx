@@ -217,13 +217,13 @@ ScVbaWindows::ScVbaWindows( const uno::Reference< oo::vba::XHelperInterface >& x
 uno::Reference< container::XEnumeration >
 ScVbaWindows::createEnumeration() throw (uno::RuntimeException)
 {
-	return new WindowEnumImpl( m_xContext );
+	return new WindowEnumImpl( mxContext );
 }
 
 uno::Any
 ScVbaWindows::createCollectionObject( const css::uno::Any& aSource )
 {
-	return ComponentToWindow( aSource,  m_xContext );
+	return ComponentToWindow( aSource,  mxContext );
 }
 
 uno::Type 

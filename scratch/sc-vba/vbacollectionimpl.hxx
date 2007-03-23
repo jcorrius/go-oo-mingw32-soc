@@ -68,12 +68,10 @@ public:
 
 // including a HelperInterface implementation
 template< typename Ifc1 >
-class ScVbaCollectionBase : public Ifc1
+class ScVbaCollectionBase : public InheritedHelperInterfaceImpl< Ifc1 >
 {
+typedef InheritedHelperInterfaceImpl< Ifc1 > BaseColBase;
 protected:
-	css::uno::Reference< css::uno::XComponentContext > m_xContext;
-	css::uno::WeakReference< oo::vba::XHelperInterface > m_xParent;
-
 	css::uno::Reference< css::container::XIndexAccess > m_xIndexAccess;
 	css::uno::Reference< css::container::XNameAccess > m_xNameAccess;
 
@@ -82,7 +80,7 @@ protected:
 	virtual css::uno::Any getItemByIntIndex( const sal_Int32 nIndex ) throw (css::uno::RuntimeException);
 
 public:
-	inline ScVbaCollectionBase( const css::uno::Reference< oo::vba::XHelperInterface >& xParent,   const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::container::XIndexAccess >& xIndexAccess ) : m_xContext(xContext), m_xParent(xParent), m_xIndexAccess( xIndexAccess ){ m_xNameAccess.set(m_xIndexAccess, css::uno::UNO_QUERY); }
+	inline ScVbaCollectionBase( const css::uno::Reference< oo::vba::XHelperInterface >& xParent,   const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::container::XIndexAccess >& xIndexAccess ) : BaseColBase( xParent, xContext ), m_xIndexAccess( xIndexAccess ){ m_xNameAccess.set(m_xIndexAccess, css::uno::UNO_QUERY); }
 	//XCollection
 	virtual ::sal_Int32 SAL_CALL getCount() throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL Item( const css::uno::Any& Index ) throw (css::uno::RuntimeException);
@@ -98,30 +96,6 @@ public:
 	virtual ::sal_Bool SAL_CALL hasElements() throw (css::uno::RuntimeException);
 
 	virtual css::uno::Any createCollectionObject( const css::uno::Any& aSource ) = 0;
-	// XHelperInterface
-	virtual ::sal_Int32 SAL_CALL getCreator() throw (css::script::BasicErrorException, css::uno::RuntimeException) 
-	{ 
-		return 0x53756E4F; 
-	};
-
-	virtual css::uno::Reference< oo::vba::XHelperInterface > SAL_CALL getParent(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException) 
-	{ 
-		return  m_xParent; 
-	}
-	
-	virtual css::uno::Any SAL_CALL Application(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException) 
-	{ 
-		css::uno::Reference< oo::excel::XApplication > xApplication =
-			ScVbaGlobals::getGlobalsImpl( m_xContext )->getApplication();
-		return css::uno::makeAny( xApplication );
-	}
-
-	// XServiceInfo Methods
-	virtual ::rtl::OUString SAL_CALL getImplementationName(  ) throw (css::uno::RuntimeException) { return getServiceImplName(); }
-	virtual ::sal_Bool SAL_CALL supportsService( const ::rtl::OUString& ServiceName ) throw (css::uno::RuntimeException) { return supportServiceHelper( *this, ServiceName ); }
-	virtual css::uno::Sequence< ::rtl::OUString > SAL_CALL getSupportedServiceNames(  ) throw (css::uno::RuntimeException) { return getSupportedServiceNamesHelper( *this ); }
-	virtual rtl::OUString& getServiceImplName() = 0;
-	virtual css::uno::Sequence<rtl::OUString> getServiceNames() = 0;
 };
 
 template <typename Ifc1>

@@ -293,14 +293,14 @@ uno::Reference< container::XEnumeration > SAL_CALL
 ScVbaRangeAreas::createEnumeration() throw (uno::RuntimeException)
 {
 	uno::Reference< container::XEnumerationAccess > xEnumAccess( m_xIndexAccess, uno::UNO_QUERY_THROW );
-	return new RangesEnumerationImpl( m_xContext, xEnumAccess->createEnumeration() );
+	return new RangesEnumerationImpl( mxContext, xEnumAccess->createEnumeration() );
 
 }
 
 uno::Any 
 ScVbaRangeAreas::createCollectionObject( const uno::Any& aSource )
 {
-	return lcl_makeRange( m_xContext, aSource );
+	return lcl_makeRange( mxContext, aSource );
 }
 
 
@@ -1001,7 +1001,6 @@ ScVbaRange::ScVbaRange( const uno::Reference< vba::XHelperInterface >& xParent, 
 
 ScVbaRange::~ScVbaRange()
 {
-	OSL_TRACE("ScVbaRange::~ScVbaRange() 0x%x", this );
 }
 
 uno::Reference< vba::XCollection >& ScVbaRange::getBorders()

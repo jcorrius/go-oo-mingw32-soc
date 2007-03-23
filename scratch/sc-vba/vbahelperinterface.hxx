@@ -68,27 +68,6 @@
 //
 const ::rtl::OUString sHelperServiceName( RTL_CONSTASCII_USTRINGPARAM( "org.openoffice.vba.HelperServiceBase" ) );
 
-// template functions to be shared with Service helper classes
-
-template< typename Ifc1 >
-sal_Bool supportServiceHelper( Ifc1& helperIf, const ::rtl::OUString& ServiceName )
-{
-	css::uno::Sequence< rtl::OUString > sServices = helperIf.getSupportedServiceNames();
-	const rtl::OUString* pStart = sServices.getConstArray();
-	const rtl::OUString* pEnd = pStart + sServices.getLength();
-	for ( ; pStart != pEnd ; ++pStart )
-		if ( (*pStart).equals( ServiceName ) )
-			return sal_True;
-	return sal_False;			
-}
-
-template< typename Ifc1 >
-css::uno::Sequence< ::rtl::OUString > getSupportedServiceNamesHelper( Ifc1& helperIf )
-{
-	css::uno::Sequence< rtl::OUString > aNames = helperIf.getServiceNames();;
-	return aNames;
-}
-
 template< typename Ifc1 >
 class InheritedHelperInterfaceImpl : public Ifc1
 {
@@ -113,8 +92,21 @@ public:
 
 	// XServiceInfo Methods
 	virtual ::rtl::OUString SAL_CALL getImplementationName(  ) throw (css::uno::RuntimeException) { return getServiceImplName(); }
-	virtual ::sal_Bool SAL_CALL supportsService( const ::rtl::OUString& ServiceName ) throw (css::uno::RuntimeException) { return supportServiceHelper( *this, ServiceName ); }
-	virtual css::uno::Sequence< ::rtl::OUString > SAL_CALL getSupportedServiceNames(  ) throw (css::uno::RuntimeException) { return getSupportedServiceNamesHelper( *this ); }
+	virtual ::sal_Bool SAL_CALL supportsService( const ::rtl::OUString& ServiceName ) throw (css::uno::RuntimeException) 
+	{ 
+		css::uno::Sequence< rtl::OUString > sServices = getSupportedServiceNames();
+		const rtl::OUString* pStart = sServices.getConstArray();
+		const rtl::OUString* pEnd = pStart + sServices.getLength();
+		for ( ; pStart != pEnd ; ++pStart )
+			if ( (*pStart).equals( ServiceName ) )
+				return sal_True;
+		return sal_False;	
+	}
+	virtual css::uno::Sequence< ::rtl::OUString > SAL_CALL getSupportedServiceNames(  ) throw (css::uno::RuntimeException) 
+	{ 
+		css::uno::Sequence< rtl::OUString > aNames = getServiceNames();;
+		return aNames;
+	}
  };
 
 template< typename Ifc1 >

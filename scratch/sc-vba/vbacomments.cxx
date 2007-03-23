@@ -76,13 +76,13 @@ ScVbaComments::createEnumeration() throw (uno::RuntimeException)
 {
 	uno::Reference< container::XEnumerationAccess > xEnumAccess( m_xIndexAccess, uno::UNO_QUERY_THROW );
 
-	return new CommentEnumeration( m_xContext, xEnumAccess->createEnumeration() );
+	return new CommentEnumeration( mxContext, xEnumAccess->createEnumeration() );
 }
 
 uno::Any
 ScVbaComments::createCollectionObject( const css::uno::Any& aSource )
 {
-	return AnnotationToComment( aSource,  m_xContext );
+	return AnnotationToComment( aSource,  mxContext );
 }
 
 uno::Type 
