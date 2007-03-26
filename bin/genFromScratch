@@ -1,0 +1,194 @@
+#!/usr/bin/perl -w
+use File::Basename;
+use File::stat;
+use File::Copy;
+sub usage() {
+    print "Usage: genFromScratch dest_dir base_dir scratch_dir [ -R | file1 file2 ]\n";
+    print "Turn a set of files in scratch dir a set of patches (diffed against base_dir).\n";
+}
+
+if ( ! ( $dest = shift @ARGV ) ) {
+    print STDERR "No destination specified!\n";
+    usage();
+    exit 1;
+}
+
+if ( ! ( $base = shift @ARGV ) ) {
+    print STDERR "No base dir to compare against specified!\n";
+    usage();
+    exit 1;
+}
+
+if ( ! ( $scratch = shift @ARGV ) ) {
+    print STDERR "No scratch dir to compare against specified!\n";
+    usage();
+    exit 1;
+}
+
+print STDOUT "base dir assigned to $base\n";
+
+if ($dest eq '-h' || $dest eq '--help') {
+    usage();
+    exit 0;
+}
+
+sub gen_diff($)
+{
+    my $afterSlash = $a;
+    $afterSlash =~ s#$scratch##;
+    $afterSlash =~ s#/##;
+    my $scratch = dirname($a);
+    my $fileInBase =  "$base/$afterSlash";
+    my $patch = lc ($fileInBase);
+    $patch =~ s/\/\//\//g;
+    $patch =~ s/\//-/g;
+    $patch =~ s/\./-/g;
+    $patch .= '.diff';
+    my $isNewFile = 0;
+    my $diffNeeded = 0;
+    my $binDir = dirname($0);
+    my $cvsclean = "$binDir/cvsclean.alt"; 
+    if ( ! -f $fileInBase ) {
+        $isNewFile  = 1;
+        print "patch (/dev/null) file for $fileInBase needs to be created\n"; 
+    }
+    else {
+   	my $tmpFile = "/tmp/gen_diff"; 
+        my $status = system("diff -up $fileInBase $a |  $cvsclean > $tmpFile");
+        my $info = stat($tmpFile) or die "no $tmpFile: $!";
+        if ( ($status >>=8) == 0 &&  ( $info->size > 0)  ) {
+           $diffNeeded = 1; 
+           print "diff needed for $fileInBase\n";
+               
+
+        }
+    }
+    if ( $isNewFile || $diffNeeded ) {
+         
+        my $ppipe;
+        my $output;
+           my $oldPatchExists = 0;
+           my $tmpPatchName;
+
+        local $SIG{PIPE} = sub { die "spooler pipe broke" };
+        if ( $isNewFile ) {
+            open ($ppipe, "diff --new-file -u /dev/null $a |") || die "Can't diff: $!";
+        }
+        else {
+           # must unapply $dest/$patch first ( if it exists )           
+           if ( -f "$dest/$patch" ) {
+               $oldPatchExists = 1;
+               # copy old patchfile
+               $tmpPatchName = "$dest/$patch.orig";
+               copy("$dest/$patch",$tmpPatchName) || die "Can't rename $dest/$patch to $tmpPatchName: $!";
+               print "$dest/$patch exists, testing unapply\n" ;
+               my $cmd = "( patch -R -l -p0 --dry-run   -d .  ) < $tmpPatchName";               
+               print "$cmd\n";
+               system ($cmd) && die "Testing patch $tmpPatchName failed.";
+               print "$dest/$patch unapply....\n" ;
+               $cmd = "( patch -R -l -p0  -d . ) < $tmpPatchName";
+               system ($cmd) && die "unapply $tmpPatchName failed.";
+               print "unapply done for $tmpPatchName\n" ;
+           }
+
+           # before regenerating the patch the old one must be backed up
+           # regenate patch 
+           # re-apply backedup patch
+           open ($ppipe, "diff -up $fileInBase $a |  $cvsclean  |") || die "Can't diff: $!";
+           print "diff done for $fileInBase $a \n";
+        }
+        open ($output, ">$dest/$patch") || die "Can't create patch: $!";
+        while (<$ppipe>) {
+            s/^([\-\+]{3}\s+[\S\d_\-\.]+\s+).*/$1/;
+            s#$scratch.*#$base/$afterSlash#;
+            print $output $_;
+        }
+           if ( $oldPatchExists ) {
+               print "$dest/$patch re-apply....\n" ;
+               $cmd = "( patch -l -p0  -d  . > /dev/null  ) < $tmpPatchName";
+               system ($cmd) && die "re-apply $tmpPatchName failed.";
+               unlink ($tmpPatchName)
+           }
+        close ($output) || die "Can't close diff: $!";
+        close ($ppipe); # odd ... || die "Can't close patch pipe: $! $?";
+    }
+}
+
+sub filter_crud($)
+{
+    my $a = shift;
+
+    $a =~ /~$/ && return;
+    $a =~ /\#$/ && return;
+    $a =~ /\.orig$/ && return;
+    $a =~ /unxlng.*\.pro$/ && return;
+    $a =~ /.swp$/ && return;
+    $a =~ /POSITION/ && return;
+    $a =~ /ReadMe/ && return;
+    $a =~ /.tmp$/ && return;
+    $a =~ /\.svn/ && return;
+    $a eq 'CVS' && return;
+    $a eq '.' && return;
+    $a eq '..' && return;
+
+    return $a;
+}
+
+sub slurp_dir($);
+
+sub slurp_dir($)
+{
+    my $dir = shift;
+    my ($dirhandle, $fname);
+    my @files = ();
+
+    opendir ($dirhandle, $dir) || die "Can't open $dir";
+    while ($fname = readdir ($dirhandle)) {
+	$fname = filter_crud($fname);
+	defined $fname || next;
+	if (-d "$dir/$fname") {
+	    push @files, slurp_dir("$dir/$fname");
+	} else {
+	    push @files, "$dir/$fname";
+	}
+    }
+    closedir ($dirhandle);
+
+    return @files;
+}
+
+my @files = ();
+my $recurse = 0;
+
+for $a (@ARGV) {
+    printf "processing $a\n";
+    if ($a eq '-h' || $a eq '--help') {
+	usage();
+	exit 0;
+
+    } elsif ($a eq '-R' || $a eq '-r') {
+	$recurse = 1;
+    }
+    if ($recurse) {
+        $a = $scratch;     
+    }
+        
+    $a = filter_crud($a);
+    defined $a || next;
+    if (-d $a) {
+        if ($recurse) {
+            push @files, slurp_dir($a);
+        } 
+        else {
+            print "skipping dir '$a'\n";
+        }
+    }
+    else {
+            push @files, $a;
+    }
+
+}
+
+for $a (@files) {
+    gen_diff ($a);
+}
