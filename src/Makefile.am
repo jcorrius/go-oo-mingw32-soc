@@ -19,6 +19,8 @@ EXTRA_DIST=\
 	openintro_gentoo.bmp \
 	openintro_translateorgza.bmp \
 	openabout_translateorgza.png \
+        openintro_pld.bmp \
+        openabout_pld.bmp \
 	glib-1.2.10-ooo.patch \
 	libIDL-0.6.8-ooo.patch \
 	go-oo-team.png \
