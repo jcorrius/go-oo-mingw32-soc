@@ -1,5 +1,5 @@
---- ucb/source/ucp/gvfs/content.cxx	2006-09-17 15:54:16.000000000 +0200
-+++ ucb/source/ucp/gvfs/content.cxx	2007-03-19 19:06:21.000000000 +0100
+--- ucb/source/ucp/gvfs/content.cxx	2007-03-26 13:35:09.000000000 +0200
++++ ucb/source/ucp/gvfs/content.cxx	2007-03-26 18:01:57.000000000 +0200
 @@ -60,6 +60,9 @@
  #ifndef _COM_SUN_STAR_IO_XOUTPUTSTREAM_HPP_
  #include <com/sun/star/io/XOutputStream.hpp>
@@ -10,53 +10,102 @@
  #ifndef _COM_SUN_STAR_LANG_ILLEGALACCESSEXCEPTION_HPP_
  #include <com/sun/star/lang/IllegalAccessException.hpp>
  #endif
-@@ -1036,13 +1039,16 @@ void Content::insert(
- 	::rtl::OString aURI = getOURI();
+@@ -90,6 +93,9 @@
+ #ifndef _COM_SUN_STAR_UCB_INTERACTIVENETWORKWRITEEXCEPTION_HPP_
+ #include <com/sun/star/ucb/InteractiveNetworkWriteException.hpp>
+ #endif
++#ifndef _COM_SUN_STAR_UCB_IOERRORCODE_HPP_
++#include <com/sun/star/ucb/IOErrorCode.hpp>
++#endif
+ #ifndef _COM_SUN_STAR_UCB_NAMECLASH_HPP_
+ #include <com/sun/star/ucb/NameClash.hpp>
+ #endif
+@@ -204,7 +210,8 @@ Content::Content(
+   throw ( star::ucb::ContentCreationException )
+ 	: ContentImplHelper( rxSMgr, pProvider, Identifier ),
+ 	  m_pProvider( pProvider ),
+-	  m_bTransient( sal_False )
++	  m_bTransient( sal_False ),
++	  m_bForceReadOnly( sal_False )
+ {
+ 	CLEAR_INFO (&m_info);
+ #ifdef DEBUG
+@@ -221,7 +228,8 @@ Content::Content( const ::com::sun::star
+ 	throw ( ::com::sun::star::ucb::ContentCreationException )
+ 	: ContentImplHelper( rxSMgr, pProvider, Identifier ),
+ 	  m_pProvider( pProvider ),
+-	  m_bTransient( sal_True )
++	  m_bTransient( sal_True ),
++	  m_bForceReadOnly( sal_False )
+ {
+ 	CLEAR_INFO (&m_info);
  
- 	result = GNOME_VFS_OK;
-+	bool bLock = false;
+@@ -699,7 +707,9 @@ uno::Reference< sdbc::XRow > Content::ge
+ 		}
+ 
+ 		else if (rProp.Name.equalsAsciiL( RTL_CONSTASCII_STRINGPARAM( "IsReadOnly" ) ) ) {
+-			if (m_info.valid_fields & GNOME_VFS_FILE_INFO_FIELDS_PERMISSIONS) {
++			if ( m_bForceReadOnly )
++				xRow->appendBoolean( rProp, sal_True );
++			else if (m_info.valid_fields & GNOME_VFS_FILE_INFO_FIELDS_PERMISSIONS) {
+ 				bool read_only = true;
+ 
+ 				if (m_info.uid == getuid () &&
+@@ -1039,10 +1049,12 @@ void Content::insert(
  	if ( bReplaceExisting ) {
  		Authentication aAuth( xEnv );
  		result = gnome_vfs_open( &handle, (const sal_Char *)aURI,
- 					 GNOME_VFS_OPEN_WRITE );
+-					 GNOME_VFS_OPEN_WRITE );
++					 (GnomeVFSOpenMode)(GNOME_VFS_OPEN_WRITE | GNOME_VFS_OPEN_LOCKED) );
  	}
  
 -	if ( result != GNOME_VFS_OK ) {
-+	if ( result == GNOME_VFS_OK )
-+		bLock = true;
-+	else {
++	if ( result == GNOME_VFS_ERROR_LOCKED )
++		throwLocked( xEnv );
++	else if ( result != GNOME_VFS_OK ) {
  		int perm;
  		Authentication aAuth( xEnv );
  
-@@ -1053,7 +1059,9 @@ void Content::insert(
- 			( &handle, (const sal_Char *)aURI, GNOME_VFS_OPEN_WRITE, TRUE, perm );
+@@ -1050,10 +1062,13 @@ void Content::insert(
+ 			 ( GNOME_VFS_PERM_GROUP_WRITE | GNOME_VFS_PERM_GROUP_READ ) );
+ 
+ 		result = gnome_vfs_create
+-			( &handle, (const sal_Char *)aURI, GNOME_VFS_OPEN_WRITE, TRUE, perm );
++			( &handle, (const sal_Char *)aURI,
++			  (GnomeVFSOpenMode)(GNOME_VFS_OPEN_WRITE | GNOME_VFS_OPEN_LOCKED), TRUE, perm );
  	}
  
 -	if( result != GNOME_VFS_OK )
-+	if ( result == GNOME_VFS_OK )
-+		bLock = true;
-+	else
++	if ( result == GNOME_VFS_ERROR_LOCKED )
++		throwLocked( xEnv );
++	else if ( result != GNOME_VFS_OK )
  		cancelCommandExecution( result, xEnv, sal_True );
  
  	if ( !xInputStream.is() ) {
-@@ -1063,7 +1071,7 @@ void Content::insert(
+@@ -1362,6 +1377,22 @@ void Content::cancelCommandExecution(
+     // Unreachable
+ }
  
- 	} else { // copy it over
- 		uno::Reference < io::XOutputStream > xOutput =
--			new gvfs::Stream( handle, &m_info );
-+			new gvfs::Stream( handle, &m_info, xEnv, bLock );
- 
- 		copyData( xInputStream, xOutput );
- 	}
-@@ -1512,37 +1520,40 @@ Content::createTempStream( const ::com::
- 	if (result != GNOME_VFS_OK)
- 		cancelCommandExecution( result, xEnv );
- 
--	uno::Reference < io::XInputStream > pStream = new ::gvfs::Stream( handle, &m_info );
-+	uno::Reference < io::XInputStream > pStream = new ::gvfs::Stream( handle, &m_info, xEnv );
- 	copyData( pStream, xTempOut );
- 
- 	return uno::Reference < io::XInputStream > ( xTempOut, uno::UNO_QUERY );
++void Content::throwLocked( const uno::Reference< star::ucb::XCommandEnvironment > & xEnv)
++	throw( uno::Exception )
++{
++#ifdef DEBUG
++	g_warning( "File locked, throwing IOErrorCode_LOCKING_VIOLATION" );
++#endif
++
++	m_bForceReadOnly = sal_True;
++
++	ucbhelper::cancelCommandExecution( star::ucb::IOErrorCode_LOCKING_VIOLATION,
++			uno::Sequence< uno::Any >( 0 ), // FIXME more info about the file
++			xEnv,
++			rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "an error occured during file opening" ) ),
++			this );
++}
++
+ uno::Sequence< beans::Property > Content::getProperties(
+     const uno::Reference< com::sun::star::ucb::XCommandEnvironment > & /*xEnv*/ )
+ {
+@@ -1521,48 +1552,53 @@ Content::createTempStream( const ::com::
  }
  
  ::com::sun::star::uno::Reference<
@@ -88,18 +137,23 @@
 -		  (GnomeVFSOpenMode) (GNOME_VFS_OPEN_READ | GNOME_VFS_OPEN_RANDOM ) );
 +	int nOpenMode = (GNOME_VFS_OPEN_READ | GNOME_VFS_OPEN_RANDOM);
 +	if ( bReadWrite )
-+		nOpenMode |= GNOME_VFS_OPEN_WRITE;
++		nOpenMode |= (GNOME_VFS_OPEN_WRITE | GNOME_VFS_OPEN_LOCKED);
 +
 +	result = gnome_vfs_open( &handle, (const sal_Char *)aURI, (GnomeVFSOpenMode) nOpenMode );
  	
  	if (result == GNOME_VFS_ERROR_INVALID_OPEN_MODE ||
  	    result == GNOME_VFS_ERROR_NOT_SUPPORTED)
 -		return createTempStream( xEnv );
+-	
+-	if (result != GNOME_VFS_OK)
 +		return xStream;
- 	
- 	if (result != GNOME_VFS_OK)
++
++	if (result == GNOME_VFS_ERROR_LOCKED )
++		throwLocked( xEnv );
++	else if (result != GNOME_VFS_OK)
  		cancelCommandExecution( result, xEnv );
-@@ -1551,16 +1562,16 @@ Content::createInputStream( const ::com:
+ 
+ 	// Try a seek just to make sure it's Random access: some lie.
  	result = gnome_vfs_seek( handle, GNOME_VFS_SEEK_START, 0);
  	if (result == GNOME_VFS_ERROR_NOT_SUPPORTED) {
  		gnome_vfs_close( handle );
@@ -112,14 +166,14 @@
  
  	if (handle != NULL)
 -		xIn = new ::gvfs::Stream( handle, &m_info );
-+		xStream = new ::gvfs::Stream( handle, &m_info, xEnv, bReadWrite ); // lock if writing
++		xStream = new ::gvfs::Stream( handle, &m_info );
  
 -	return xIn;
 +	return xStream;
  }
  
  sal_Bool
-@@ -1570,24 +1581,46 @@ Content::feedSink( uno::Reference< ::com
+@@ -1572,25 +1608,53 @@ Content::feedSink( uno::Reference< ::com
  	if ( !aSink.is() )
  		return sal_False;
  
@@ -146,7 +200,9 @@
 +			xIn = createTempStream( xEnv );
 +		if ( !xIn.is() )
 +			return sal_False;
++
  		copyData( xIn, xOut );
++		return sal_True;
 +	}
  
 +	uno::Reference< io::XActiveDataSink > xDataSink( aSink, uno::UNO_QUERY );
@@ -160,9 +216,11 @@
 +			xIn = createTempStream( xEnv );
 +		if ( !xIn.is() )
 +			return sal_False;
++
  		xDataSink->setInputStream( xIn );
++		return sal_True;
 +	}
- 
++
 +	uno::Reference< io::XActiveDataStreamer > xDataStreamer( aSink, uno::UNO_QUERY );
 +	if ( xDataStreamer.is() )
 +	{
@@ -172,14 +230,18 @@
 +		uno::Reference< io::XStream > xStream = createStream( xEnv, true );
 +		if ( !xStream.is() )
 +			return sal_False;
+ 
+-	return sal_True;
 +		xDataStreamer->setStream( xStream );
++		return sal_True;
 +	}
 +	
- 	return sal_True;
++	return sal_False;
  }
  
---- ucb/source/ucp/gvfs/content.hxx	2006-06-20 07:27:02.000000000 +0200
-+++ ucb/source/ucp/gvfs/content.hxx	2007-03-19 17:57:54.000000000 +0100
+ extern "C" {
+--- ucb/source/ucp/gvfs/content.hxx	2007-03-26 13:35:09.000000000 +0200
++++ ucb/source/ucp/gvfs/content.hxx	2007-03-26 18:51:44.000000000 +0200
 @@ -65,6 +65,7 @@ namespace com { namespace sun { namespac
  namespace com { namespace sun { namespace star { namespace io {
  	class XInputStream;
@@ -188,7 +250,15 @@
  } } } }
  
  namespace com { namespace sun { namespace star { namespace sdbc {
-@@ -182,9 +183,10 @@ private:
+@@ -108,6 +109,7 @@ private:
+ 	ContentProvider  *m_pProvider;  // No need for a ref, base class holds object
+ 	sal_Bool          m_bTransient; // A non-existant (as yet) item
+ 	GnomeVFSFileInfo  m_info;       // cached status information
++	sal_Bool          m_bForceReadOnly; // behave as read-only
+ 
+ 	// Internal helpers
+ 	void                       queryChildren   ( ContentRefList& rChildren );
+@@ -182,9 +184,10 @@ private:
  					com::sun::star::ucb::XCommandEnvironment >& xEnv )
  		throw( ::com::sun::star::uno::Exception );
  	::com::sun::star::uno::Reference<
@@ -202,8 +272,18 @@
  		throw( ::com::sun::star::uno::Exception );
         	sal_Bool feedSink( ::com::sun::star::uno::Reference<
  				::com::sun::star::uno::XInterface> aSink,
---- ucb/source/ucp/gvfs/makefile.mk	2005-09-09 17:43:39.000000000 +0200
-+++ ucb/source/ucp/gvfs/makefile.mk	2007-03-19 17:45:34.000000000 +0100
+@@ -200,6 +203,9 @@ private:
+ 				    sal_Bool bWrite = sal_False )
+ 		throw( ::com::sun::star::uno::Exception );
+ 
++	void throwLocked(const ::com::sun::star::uno::Reference< com::sun::star::ucb::XCommandEnvironment > & xEnv)
++		throw( ::com::sun::star::uno::Exception );
++
+ 
+ public:
+ 	// Non-interface bits
+--- ucb/source/ucp/gvfs/makefile.mk	2007-03-26 13:35:09.000000000 +0200
++++ ucb/source/ucp/gvfs/makefile.mk	2007-03-23 15:06:26.000000000 +0100
 @@ -61,6 +61,10 @@ CFLAGS+=-gdwarf-2
  PKGCONFIG_LIBS!:=-Wl,--export-dynamic $(PKGCONFIG_LIBS:s/ -llinc//:s/ -lbonobo-activation//:s/ -lgconf-2//:s/ -lORBit-2//:s/ -lIDL-2//:s/ -lgmodule-2.0//:s/ -lgobject-2.0//:s/ -lgthread-2.0//)
  .ENDIF          # "$(OS)" == "LINUX"
@@ -215,157 +295,3 @@
  # no "lib" prefix
  DLLPRE =
  
---- ucb/source/ucp/gvfs/stream.cxx	2007-03-13 13:34:32.000000000 +0100
-+++ ucb/source/ucp/gvfs/stream.cxx	2007-03-19 19:15:15.000000000 +0100
-@@ -44,28 +44,49 @@
- #include <com/sun/star/ucb/InteractiveAugmentedIOException.hpp>
- #endif
- 
-+#ifndef _UCBHELPER_CANCELCOMMANDEXECUTION_HXX_
-+#include <ucbhelper/cancelcommandexecution.hxx>
-+#endif
-+#ifndef _COM_SUN_STAR_UCB_INTERACTIVEBADTRANSFRERURLEXCEPTION_HPP_
-+#include <com/sun/star/ucb/InteractiveBadTransferURLException.hpp>
-+#endif
-+
- #include <libgnomevfs/gnome-vfs-ops.h>
- 
- using namespace cppu;
- using namespace rtl;
-+using namespace com::sun::star;
- using namespace com::sun::star::io;
- using namespace com::sun::star::uno;
- using namespace com::sun::star::ucb;
- using namespace gvfs;
- 
- Stream::Stream( GnomeVFSHandle         *handle,
--		const GnomeVFSFileInfo *aInfo ) :
-+		const GnomeVFSFileInfo *aInfo,
-+		const uno::Reference< ucb::XCommandEnvironment >& xEnv,
-+		bool bLock ) :
-+	m_handle (handle),
- 	m_eof (sal_False),
- 	m_bInputStreamCalled( sal_False ),
--	m_bOutputStreamCalled( sal_False )
-+	m_bOutputStreamCalled( sal_False ),
-+	m_bLocked (sal_False)
- {
--	m_handle = handle;
- 	gnome_vfs_file_info_copy (&m_info, aInfo);
-+	if (bLock)
-+		lock (xEnv);
-+
-+#ifdef DEBUG
-+	g_warning ("Stream::Stream(); handle == %p, locked == %s\n", handle, m_bLocked? "true": "false");
-+#endif
- }
- 
- Stream::~Stream( void )
- {
-+#ifdef DEBUG
-+	g_warning ("Stream::~Stream()");
-+#endif
- 	if (m_handle) {
-+		unlock();
- 		gnome_vfs_close (m_handle);
- 		m_handle = NULL;
- 	}
-@@ -332,6 +353,7 @@ void Stream::closeStream( void )
- 	       ::com::sun::star::uno::RuntimeException )
- {
- 	if (m_handle) {
-+		unlock();
- 		gnome_vfs_close (m_handle);
- 		m_handle = NULL;
- 	} else
-@@ -354,3 +376,42 @@ void Stream::throwOnError( GnomeVFSResul
- 		throw IOException( aMsg, static_cast< cppu::OWeakObject * >( this ) );
- 	}
- }
-+
-+void Stream::lock( const uno::Reference< ucb::XCommandEnvironment >& xEnv )
-+{
-+	GnomeVFSResult result = gnome_vfs_file_control( m_handle, "lock", NULL );
-+	if ( result == GNOME_VFS_ERROR_LOCKED )
-+	{
-+#ifdef DEBUG
-+		g_warning( "LOCKING: file (%p) not locked, got GNOME_VFS_ERROR_LOCKED", m_handle );
-+#endif
-+		m_bLocked = sal_False;
-+		gnome_vfs_close( m_handle );
-+		m_handle = NULL;
-+
-+		ucbhelper::cancelCommandExecution
-+			( uno::makeAny
-+			  ( ucb::InteractiveBadTransferURLException
-+				( rtl::OUString::createFromAscii( "File locked." ), // FIXME maybe we have a better exception to throw?
-+				  static_cast< cppu::OWeakObject * >( this ) ) ),
-+			  xEnv );
-+	}
-+	else
-+		m_bLocked = sal_True;
-+
-+#ifdef DEBUG
-+	g_warning( "LOCKING: file (%p) locked\n", m_handle );
-+#endif
-+}
-+
-+void Stream::unlock()
-+{
-+	if ( m_handle && m_bLocked )
-+	{
-+		gnome_vfs_file_control( m_handle, "unlock", NULL );
-+		m_bLocked = sal_False;
-+#ifdef DEBUG
-+		g_warning( "LOCKING: file (%p) unlocked", m_handle );
-+#endif
-+	}
-+}
---- ucb/source/ucp/gvfs/stream.hxx	2006-06-20 07:28:09.000000000 +0200
-+++ ucb/source/ucp/gvfs/stream.hxx	2007-03-19 19:01:49.000000000 +0100
-@@ -61,6 +61,10 @@
- #include <com/sun/star/io/XSeekable.hpp>
- #endif
- 
-+#ifndef _COM_SUN_STAR_UCB_XCOMMANDENVIRONMENT_HPP_
-+#include <com/sun/star/ucb/XCommandEnvironment.hpp>
-+#endif
-+
- #include <libgnomevfs/gnome-vfs-handle.h>
- 
- namespace gvfs
-@@ -80,6 +84,7 @@ private:
- 	sal_Bool         m_eof;
- 	sal_Bool         m_bInputStreamCalled;
- 	sal_Bool         m_bOutputStreamCalled;
-+	sal_Bool         m_bLocked;
- 
- 	void throwOnError( GnomeVFSResult result )
- 		throw( ::com::sun::star::io::NotConnectedException,
-@@ -93,8 +98,10 @@ private:
- 		       ::com::sun::star::uno::RuntimeException );
- 
- public:
--	Stream ( GnomeVFSHandle         *handle,
--		 const GnomeVFSFileInfo *aInfo );
-+	Stream ( GnomeVFSHandle *handle,
-+		 const GnomeVFSFileInfo *aInfo,
-+		 const com::sun::star::uno::Reference< com::sun::star::ucb::XCommandEnvironment >& xEnv,
-+		 bool bLock = false );
- 	virtual ~Stream();
- 	
- 	// XInterface
-@@ -184,6 +191,13 @@ public:
- 	virtual void SAL_CALL truncate( void )
- 		throw( com::sun::star::io::IOException,
- 		       com::sun::star::uno::RuntimeException );
-+
-+private:
-+	// lock the handle
-+	void lock( const com::sun::star::uno::Reference< com::sun::star::ucb::XCommandEnvironment >& xEnv );
-+
-+	// unlock
-+	void unlock();
- };
- 
- } // namespace gvfs
