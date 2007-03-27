@@ -28,7 +28,7 @@ ScVbaShapes::createCollectionObject( const css::uno::Any& aSource )
     if( aSource.hasValue() )
     {
         uno::Reference< drawing::XShape > xShape( aSource, uno::UNO_QUERY_THROW );
-        return uno::makeAny( uno::Reference< msform::XShape >( new ScVbaShape( getParent(), m_xContext, xShape ) ) );
+        return uno::makeAny( uno::Reference< msform::XShape >( new ScVbaShape( getParent(), mxContext, xShape ) ) );
     }
     return uno::Any();
 }
@@ -104,19 +104,19 @@ ScVbaShapes::Range( const uno::Any& shapes ) throw (css::uno::RuntimeException)
         uno::Sequence< rtl::OUString > sArray;
         if( shapes >>= nIndex )
         {
-            return uno::Reference< msform::XShapeRange >( new ScVbaShapeRange( getParent(), m_xContext, getShapeByIndex( nIndex ), m_xDrawPage ) );
+            return uno::Reference< msform::XShapeRange >( new ScVbaShapeRange( getParent(), mxContext, getShapeByIndex( nIndex ), m_xDrawPage ) );
         }
         else if( shapes >>= sIndex )
         {
-            return uno::Reference< msform::XShapeRange >( new ScVbaShapeRange( getParent(), m_xContext, getShapeByName( sIndex ), m_xDrawPage ) );
+            return uno::Reference< msform::XShapeRange >( new ScVbaShapeRange( getParent(), mxContext, getShapeByName( sIndex ), m_xDrawPage ) );
         }
         else if( shapes >>= nArray )
         {
-            return uno::Reference< msform::XShapeRange >( new ScVbaShapeRange( getParent(), m_xContext, getShapesByIndex( nArray ), m_xDrawPage ) );
+            return uno::Reference< msform::XShapeRange >( new ScVbaShapeRange( getParent(), mxContext, getShapesByIndex( nArray ), m_xDrawPage ) );
         }
         else if( shapes >>= sArray )
         {
-            return uno::Reference< msform::XShapeRange >( new ScVbaShapeRange( getParent(), m_xContext, getShapesByNames( sArray ), m_xDrawPage ) );
+            return uno::Reference< msform::XShapeRange >( new ScVbaShapeRange( getParent(), mxContext, getShapesByNames( sArray ), m_xDrawPage ) );
         }
         else 
         {
@@ -132,7 +132,7 @@ ScVbaShapes::Range( const uno::Any& shapes ) throw (css::uno::RuntimeException)
 uno::Reference< drawing::XShapes>
 ScVbaShapes::getEmptyShapesCollection() throw (uno::RuntimeException)
 {
-    uno::Reference< lang::XMultiServiceFactory > xMSF( m_xContext->getServiceManager(), uno::UNO_QUERY_THROW );
+    uno::Reference< lang::XMultiServiceFactory > xMSF( mxContext->getServiceManager(), uno::UNO_QUERY_THROW );
     uno::Reference< uno::XInterface > xInterface = xMSF->createInstance( rtl::OUString::createFromAscii( "com.sun.star.drawing.ShapeCollection" ) );
     uno::Reference< drawing::XShapes > xShapes( xInterface, uno::UNO_QUERY_THROW );
     return xShapes;
