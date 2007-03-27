@@ -77,6 +77,7 @@
 #include "vbacombobox.hxx"
 #include "vbaoleobject.hxx"
 #include "vbaoleobjects.hxx"
+#include "vbashapes.hxx"
 
 #define STANDARDWIDTH 2267 
 #define STANDARDHEIGHT 427
@@ -568,6 +569,16 @@ ScVbaWorksheet::OLEObjects( const uno::Any& Index ) throw (uno::RuntimeException
     {
         return makeAny( uno::Reference< excel::XOLEObjects> ( aOleObjects ) );
     }
+}
+uno::Any SAL_CALL
+ScVbaWorksheet::Shapes() throw (uno::RuntimeException)
+{
+    uno::Reference< sheet::XSpreadsheet > xSpreadsheet( getSheet(), uno::UNO_QUERY_THROW );
+    uno::Reference< drawing::XDrawPageSupplier > xDrawPageSupplier( xSpreadsheet, uno::UNO_QUERY_THROW );
+    uno::Reference< drawing::XShapes > xShapes( xDrawPageSupplier->getDrawPage(), uno::UNO_QUERY_THROW );
+    uno::Reference< container::XIndexAccess > xIndexAccess( xShapes, uno::UNO_QUERY_THROW );
+
+    return makeAny( uno::Reference< msform::XShapes> ( new ScVbaShapes( this, mxContext, xIndexAccess ) ) );
 }
 uno::Any SAL_CALL 
 ScVbaWorksheet::Evaluate( const ::rtl::OUString& Name ) throw (uno::RuntimeException)

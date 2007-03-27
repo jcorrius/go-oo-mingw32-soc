@@ -118,6 +118,7 @@ public:
 	virtual css::uno::Any SAL_CALL Comments( const css::uno::Any& Index ) throw (css::uno::RuntimeException);
 
 	virtual css::uno::Any SAL_CALL OLEObjects( const css::uno::Any& Index ) throw (css::uno::RuntimeException);
+	virtual css::uno::Any SAL_CALL Shapes() throw (css::uno::RuntimeException);
 
 	// XInvocation
 	virtual css::uno::Reference< css::beans::XIntrospectionAccess > SAL_CALL getIntrospection(  ) throw (css::uno::RuntimeException);

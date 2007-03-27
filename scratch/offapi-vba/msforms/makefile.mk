@@ -23,6 +23,9 @@ IDLFILES=\
 	XLabel.idl \
 	XTextBox.idl \
 	XRadioButton.idl \
+	XShape.idl \
+	XShapes.idl \
+	XShapeRange.idl \
 	XListBox.idl 
 
 # ------------------------------------------------------------------

@@ -68,6 +68,10 @@ SLOFILES= \
                 $(SLO)$/vbalistbox.obj \
                 $(SLO)$/vbapropvalue.obj \
                 $(SLO)$/vbapane.obj \
+                $(SLO)$/vbashape.obj \
+                $(SLO)$/vbashapes.obj \
+                $(SLO)$/vbashaperange.obj \
+                $(SLO)$/vbatextframe.obj \
 		$(SLO)$/service.obj \
  
 
