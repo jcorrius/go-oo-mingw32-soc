@@ -63,6 +63,9 @@ namespace org
 		sal_Int32 XLRGBToOORGB( sal_Int32 );
 		css::uno::Any OORGBToXLRGB( const css::uno::Any& );
 		css::uno::Any XLRGBToOORGB( const css::uno::Any& );
+        //size converter
+        double hundredthsMillimeterToPoints( sal_Int32 mm );
+        sal_Int32 pointsToHundredthsMillimeter( double points );
 		// provide a NULL object that can be passed as variant so that 
 		// the object when passed to IsNull will return true. aNULL 
 		// contains an empty object reference

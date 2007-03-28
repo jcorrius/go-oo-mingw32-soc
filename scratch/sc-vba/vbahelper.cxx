@@ -434,6 +434,18 @@ XLRGBToOORGB(  const uno::Any& aCol )
 	return uno::makeAny( nCol );
 }
 
+double hundredthsMillimeterToPoints( sal_Int32 mm )
+{
+    double points = (double)(mm / 35.27778);
+    return points;
+}
+
+sal_Int32 pointsToHundredthsMillimeter( double points )
+{
+    sal_Int32 mm = (sal_Int32)(points * 35.27778);
+    return mm;
+}
+
 void PrintOutHelper( const uno::Any& From, const uno::Any& To, const uno::Any& Copies, const uno::Any& Preview, const uno::Any& /*ActivePrinter*/, const uno::Any& /*PrintToFile*/, const uno::Any& Collate, const uno::Any& PrToFileName, css::uno::Reference< frame::XModel >& xModel, sal_Bool bUseSelection  )
 {
 	sal_Int32 nTo = 0;
