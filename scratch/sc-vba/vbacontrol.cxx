@@ -169,7 +169,7 @@ double SAL_CALL ScVbaControl::getHeight() throw (uno::RuntimeException)
     uno::Reference< drawing::XShape > xShape( m_xControlShape, uno::UNO_QUERY_THROW );
     return mm2pt( xShape->getSize().Height ) / 100;
 }
-void SAL_CALL ScVbaControl::setHeight( const double _height ) throw (uno::RuntimeException)
+void SAL_CALL ScVbaControl::setHeight( double _height ) throw (uno::RuntimeException)
 {
     uno::Reference< drawing::XShape > xShape( m_xControlShape, uno::UNO_QUERY_THROW );
     awt::Size aSize( xShape->getSize() );
@@ -182,7 +182,7 @@ double SAL_CALL ScVbaControl::getWidth() throw (uno::RuntimeException)
     uno::Reference< drawing::XShape > xShape( m_xControlShape, uno::UNO_QUERY_THROW );
     return mm2pt( xShape->getSize().Width ) / 100;
 }
-void SAL_CALL ScVbaControl::setWidth( const double _width ) throw (uno::RuntimeException)
+void SAL_CALL ScVbaControl::setWidth( double _width ) throw (uno::RuntimeException)
 {
     uno::Reference< drawing::XShape > xShape( m_xControlShape, uno::UNO_QUERY_THROW );
     awt::Size aSize( xShape->getSize() );

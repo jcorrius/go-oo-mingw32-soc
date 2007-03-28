@@ -49,9 +49,9 @@ public:
     virtual sal_Bool SAL_CALL getVisible() throw (css::uno::RuntimeException);
     virtual void SAL_CALL setVisible( sal_Bool _visible ) throw (css::uno::RuntimeException);
     virtual double SAL_CALL getHeight() throw (css::uno::RuntimeException);
-    virtual void SAL_CALL setHeight( const double _height ) throw (css::uno::RuntimeException);
+    virtual void SAL_CALL setHeight( double _height ) throw (css::uno::RuntimeException);
     virtual double SAL_CALL getWidth() throw (css::uno::RuntimeException);
-    virtual void SAL_CALL setWidth( const double _width ) throw (css::uno::RuntimeException);
+    virtual void SAL_CALL setWidth( double _width ) throw (css::uno::RuntimeException);
     virtual double SAL_CALL getLeft() throw (css::uno::RuntimeException);
     virtual void SAL_CALL setLeft( double _left ) throw (css::uno::RuntimeException);
     virtual double SAL_CALL getTop() throw (css::uno::RuntimeException);
