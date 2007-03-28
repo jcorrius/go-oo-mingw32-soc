@@ -41,7 +41,7 @@
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
 
-ScVbaCharacters::ScVbaCharacters( const uno::Reference< vba::XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext, const ScVbaPalette& dPalette, const uno::Reference< text::XSimpleText>& xRange,const css::uno::Any& Start, const css::uno::Any& Length  ) throw ( css::lang::IllegalArgumentException ) : ScVbaCharacters_BASE( xParent, xContext ), m_xSimpleText(xRange), m_aPalette( dPalette),  nLength(-1), nStart(1)
+ScVbaCharacters::ScVbaCharacters( const uno::Reference< vba::XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext, const ScVbaPalette& dPalette, const uno::Reference< text::XSimpleText>& xRange,const css::uno::Any& Start, const css::uno::Any& Length, sal_Bool Replace  ) throw ( css::lang::IllegalArgumentException ) : ScVbaCharacters_BASE( xParent, xContext ), m_xSimpleText(xRange), m_aPalette( dPalette),  nLength(-1), nStart(1), bReplace( Replace )
 {
 	Start >>= nStart;
 	if ( nStart < 1 )
@@ -106,7 +106,7 @@ ScVbaCharacters::setFont( const uno::Reference< excel::XFont >& /*_font*/ ) thro
 void SAL_CALL 
 ScVbaCharacters::Insert( const ::rtl::OUString& String ) throw (css::uno::RuntimeException)
 {
-	m_xSimpleText->insertString( m_xTextRange, String, sal_False );
+	m_xSimpleText->insertString( m_xTextRange, String, bReplace );
 }
 
 void SAL_CALL 

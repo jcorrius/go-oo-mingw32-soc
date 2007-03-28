@@ -1,6 +1,7 @@
 #ifndef SC_VBA_TEXTFRAME_HXX
 #define SC_VBA_TEXTFRAME_HXX
 #include <com/sun/star/drawing/XShape.hpp>
+#include <com/sun/star/beans/XPropertySet.hpp>
 #include <org/openoffice/excel/XCharacters.hpp>
 #include <org/openoffice/excel/XTextFrame.hpp>
 
@@ -14,6 +15,13 @@ class ScVbaTextFrame : public ScVbaTextFrame_BASE
 private:
     css::uno::Reference< oo::excel::XCharacters > m_xCharacters;
     css::uno::Reference< css::drawing::XShape > m_xShape;
+    css::uno::Reference< css::beans::XPropertySet > m_xPropertySet;
+protected:
+    virtual rtl::OUString& getServiceImplName();
+    virtual css::uno::Sequence<rtl::OUString> getServiceNames();
+    virtual void setAsMSObehavior();
+    sal_Int32 getMargin( rtl::OUString sMarginType );
+    void setMargin( rtl::OUString sMarginType, float fMargin );
 public:
     ScVbaTextFrame( const css::uno::Reference< oo::vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext , css::uno::Reference< css::drawing::XShape > xShape);
     virtual ~ScVbaTextFrame() {}
