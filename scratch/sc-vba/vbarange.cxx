@@ -602,7 +602,8 @@ protected:
 		{
 			// get current convention
 			ScAddress::Convention eConv = m_pDoc->GetAddressConvention();
-			if ( eConv != m_eConv )	
+			// only convert/compile 'real' formulas
+			if ( eConv != m_eConv && ( sFormula.trim().indexOf('=') == 0 ) )	
 			{
 				uno::Reference< uno::XInterface > xIf( xCell, uno::UNO_QUERY_THROW );
 				ScCellRangesBase* pUnoRangesBase = dynamic_cast< ScCellRangesBase* >( xIf.get() );
