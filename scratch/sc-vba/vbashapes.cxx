@@ -28,7 +28,7 @@ ScVbaShapes::createCollectionObject( const css::uno::Any& aSource )
     if( aSource.hasValue() )
     {
         uno::Reference< drawing::XShape > xShape( aSource, uno::UNO_QUERY_THROW );
-        return uno::makeAny( uno::Reference< msform::XShape >( new ScVbaShape( getParent(), mxContext, xShape ) ) );
+        return uno::makeAny( uno::Reference< msform::XShape >( new ScVbaShape( getParent(), mxContext, xShape, m_xShapes ) ) );
     }
     return uno::Any();
 }

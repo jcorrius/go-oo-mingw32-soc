@@ -211,6 +211,7 @@ CONST_IDLFILES=\
 	XlXmlExportResult.idl \
 	XlXmlImportResult.idl \
 	XlXmlLoadOption.idl \
+	XlMsoZOrderCmd.idl \
 	XlYesNoGuess.idl\
 
 OBJ_IDLFILES=XApplication.idl\

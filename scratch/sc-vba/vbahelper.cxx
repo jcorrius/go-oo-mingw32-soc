@@ -53,6 +53,7 @@
 #include <basic/sbx.hxx>
 #include <basic/sbstar.hxx>
 
+#include <math.h>
 #include "vbahelper.hxx"
 #include "tabvwsh.hxx"
 #include "transobj.hxx"
@@ -437,12 +438,16 @@ XLRGBToOORGB(  const uno::Any& aCol )
 double hundredthsMillimeterToPoints( sal_Int32 mm )
 {
     double points = (double)(mm / 35.27778);
+    points = points * 100;
+    sal_Int32 nHundred = static_cast<sal_Int32>( round( points ) );
+    points = static_cast<double>( nHundred );
+    points /= 100;
     return points;
 }
 
 sal_Int32 pointsToHundredthsMillimeter( double points )
 {
-    sal_Int32 mm = (sal_Int32)(points * 35.27778);
+    sal_Int32 mm = static_cast<sal_Int32>(points * 35.27778);
     return mm;
 }
 

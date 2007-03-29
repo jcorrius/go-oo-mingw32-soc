@@ -26,7 +26,7 @@ ScVbaShapeRange::Group() throw (uno::RuntimeException)
     uno::Reference< drawing::XShapeGrouper > xShapeGrouper( m_xDrawPage, uno::UNO_QUERY_THROW );
     uno::Reference< drawing::XShapeGroup > xShapeGroup( xShapeGrouper->group( m_xShapes ), uno::UNO_QUERY_THROW );
     uno::Reference< drawing::XShape > xShape( xShapeGroup, uno::UNO_QUERY_THROW );
-    return uno::Reference< msform::XShape >( new ScVbaShape( getParent(), mxContext, xShape ) );
+    return uno::Reference< msform::XShape >( new ScVbaShape( getParent(), mxContext, xShape, m_xShapes ) );
 }
 sal_Int32 SAL_CALL 
 ScVbaShapeRange::Count(  ) throw (uno::RuntimeException)
