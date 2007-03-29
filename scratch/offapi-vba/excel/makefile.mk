@@ -212,6 +212,7 @@ CONST_IDLFILES=\
 	XlXmlImportResult.idl \
 	XlXmlLoadOption.idl \
 	XlMsoZOrderCmd.idl \
+	XlMsoShapeType.idl \
 	XlYesNoGuess.idl\
 
 OBJ_IDLFILES=XApplication.idl\
