@@ -462,7 +462,16 @@ ScVbaApplication::GoTo( const uno::Any& Reference, const uno::Any& Scroll ) thro
         ScGridWindow* gridWindow = (ScGridWindow*)pShell->GetWindow(); 
         try
         {
-            uno::Reference< table::XCellRange > xRange = ScVbaRange::getCellRangeForName( sRangeName, xDoc, ScAddress::CONV_XL_R1C1 );
+            uno::Reference< beans::XPropertySet > xProps( getCurrentDocument(), uno::UNO_QUERY_THROW );
+            uno::Reference< container::XNameAccess > xNameAccess( xProps->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("NamedRanges") ) ), uno::UNO_QUERY_THROW );
+            sal_Bool isNamedReference = xNameAccess->hasByName( sRangeName ); 
+            uno::Reference< table::XCellRange > xRange;
+
+            if ( isNamedReference )
+                xRange = ScVbaRange::getCellRangeForName( sRangeName, xDoc );
+            else
+                xRange = ScVbaRange::getCellRangeForName( sRangeName, xDoc, ScAddress::CONV_XL_R1C1 );
+
             ScVbaRange* pRange = new ScVbaRange( this, mxContext, xRange );
             uno::Reference< excel::XRange > xVbaSheetRange( pRange );
             if( bScroll )
