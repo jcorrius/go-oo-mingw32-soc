@@ -1,0 +1,185 @@
+--- vcl/inc/settings.hxx.old	2007-03-27 21:54:56.000000000 +0200
++++ vcl/inc/settings.hxx	2007-03-28 18:41:16.000000000 +0200
+@@ -448,6 +448,7 @@ private:
+     ULONG                           mnUseFlatBorders;
+     long                            mnMinThumbSize;
+     ULONG                           mnSymbolsStyle;
++    ULONG                           mnPreferredSymbolsStyle;
+     USHORT                          mnSkipDisabledInMenus;
+ };
+ 
+@@ -529,6 +530,7 @@ private:
+ #define STYLE_SYMBOLS_INDUSTRIAL	((ULONG)3)
+ #define STYLE_SYMBOLS_CRYSTAL		((ULONG)4)
+ #define STYLE_SYMBOLS_TANGO		((ULONG)5)
++#define STYLE_SYMBOLS_THEMES_MAX	((ULONG)5)
+ 
+ #define STYLE_CURSOR_NOBLINKTIME    ((ULONG)0xFFFFFFFF)
+ 
+@@ -933,6 +935,13 @@ public:
+     									{ CopyData(); mpData->mnSymbolsStyle = nStyle; }
+     ULONG							GetSymbolsStyle() const
+     									{ return mpData->mnSymbolsStyle; }
++
++    void							SetPreferredSymbolsStyle( ULONG nStyle )
++    									{ CopyData(); mpData->mnPreferredSymbolsStyle = nStyle; }
++    void							SetPreferredSymbolsStyleName( const ::rtl::OUString &rName );
++    ULONG							GetPreferredSymbolsStyle() const
++    									{ return mpData->mnPreferredSymbolsStyle; }
++
+     ULONG							GetCurrentSymbolsStyle() const;
+ 
+     void							SetSymbolsStyleName( const ::rtl::OUString &rName )
+--- vcl/source/app/settings.cxx.old	2007-03-27 21:54:56.000000000 +0200
++++ vcl/source/app/settings.cxx	2007-03-28 20:48:59.000000000 +0200
+@@ -474,6 +474,7 @@ ImplStyleData::ImplStyleData()
+     mnAutoMnemonic				= 1;
+     mnToolbarIconSize			= STYLE_TOOLBAR_ICONSIZE_UNKNOWN;
+     mnSymbolsStyle				= STYLE_SYMBOLS_AUTO;
++    mnPreferredSymbolsStyle			= STYLE_SYMBOLS_AUTO;
+ 
+     SetStandardStyles();
+ }
+@@ -575,6 +576,7 @@ ImplStyleData::ImplStyleData( const Impl
+     mnSkipDisabledInMenus		= rData.mnSkipDisabledInMenus;
+     mnToolbarIconSize			= rData.mnToolbarIconSize;
+     mnSymbolsStyle				= rData.mnSymbolsStyle;
++    mnPreferredSymbolsStyle			= rData.mnPreferredSymbolsStyle;
+ }
+ 
+ // -----------------------------------------------------------------------
+@@ -760,28 +762,59 @@ ULONG StyleSettings::ImplNameToSymbolsSt
+ 
+ // -----------------------------------------------------------------------
+ 
++/**
++	The preferred style name can be read from the desktop setting. We
++	need to find the closest theme name registered in OOo. Therefore
++	we check if any registered style name is a case-insensitive
++	substring of the preferred style name.
++*/
++void StyleSettings::SetPreferredSymbolsStyleName( const ::rtl::OUString &rName )
++{
++	if ( rName.getLength() > 0 )
++	{
++		::rtl::OUString rNameLowCase( rName.toAsciiLowerCase() );
++
++		for( sal_Int32 n = 0; n <= STYLE_SYMBOLS_THEMES_MAX; n++ )
++			if ( rNameLowCase.indexOf( ImplSymbolsStyleToName( n ) ) != -1 )
++				SetPreferredSymbolsStyle( n );
++	}
++}
++
++// -----------------------------------------------------------------------
++
+ ULONG StyleSettings::GetCurrentSymbolsStyle() const
+ {
++	// style selected in Tools -> Options... -> OpenOffice.org -> View
+ 	ULONG nStyle = GetSymbolsStyle();
+ 
+ 	if ( nStyle == STYLE_SYMBOLS_AUTO )
+ 	{
+-		static bool sbDesktopChecked = false;
+-		static ULONG snDesktopStyle = STYLE_SYMBOLS_DEFAULT;
+-
+-		if ( !sbDesktopChecked )
++		// the preferred style can be read from the desktop setting by the desktop native widgets modules
++		ULONG nPreferredStyle = GetPreferredSymbolsStyle();
++		
++		if ( nPreferredStyle == STYLE_SYMBOLS_AUTO )
+ 		{
+-			const ::rtl::OUString &rDesktopEnvironment = Application::GetDesktopEnvironment();
++		
++			// use a hardcoded desktop-specific fallback if no preferred style has been detected
++			static bool sbFallbackDesktopChecked = false;
++			static ULONG snFallbackDesktopStyle = STYLE_SYMBOLS_DEFAULT;
+ 
+-			if( rDesktopEnvironment.equalsIgnoreAsciiCaseAscii( "gnome" ) )
+-				snDesktopStyle = STYLE_SYMBOLS_INDUSTRIAL;
+-			else if( rDesktopEnvironment.equalsIgnoreAsciiCaseAscii( "kde" ) )
+-				snDesktopStyle = STYLE_SYMBOLS_CRYSTAL;
++			if ( !sbFallbackDesktopChecked )
++			{
++				const ::rtl::OUString &rDesktopEnvironment = Application::GetDesktopEnvironment();
++
++				if( rDesktopEnvironment.equalsIgnoreAsciiCaseAscii( "gnome" ) )
++					snFallbackDesktopStyle = STYLE_SYMBOLS_TANGO;
++				else if( rDesktopEnvironment.equalsIgnoreAsciiCaseAscii( "kde" ) )
++					snFallbackDesktopStyle = STYLE_SYMBOLS_CRYSTAL;
++
++				sbFallbackDesktopChecked = true;
++			}
+ 
+-			sbDesktopChecked = true;
++			nPreferredStyle = snFallbackDesktopStyle;
+ 		}
+ 
+-		nStyle = GetHighContrastMode()? STYLE_SYMBOLS_HICONTRAST: snDesktopStyle;
++		nStyle = GetHighContrastMode()? STYLE_SYMBOLS_HICONTRAST: nPreferredStyle;
+ 	}
+ 
+ 	return nStyle;
+--- vcl/unx/gtk/gdi/salnativewidgets-gtk.cxx.old	2007-03-27 21:54:53.000000000 +0200
++++ vcl/unx/gtk/gdi/salnativewidgets-gtk.cxx	2007-03-28 20:16:42.000000000 +0200
+@@ -3180,6 +3180,12 @@ void GtkSalGraphics::updateSettings( All
+     aStyleSet.SetScrollBarSize( slider_width + 2*trough_border );
+     aStyleSet.SetMinThumbSize( min_slider_length - magic );
+ 
++    // preferred icon style
++    gchar* pIconThemeName = NULL;
++    g_object_get( gtk_settings_get_default(), "gtk-icon-theme-name", &pIconThemeName, (char *)NULL );
++    aStyleSet.SetPreferredSymbolsStyleName( OUString::createFromAscii(pIconThemeName) );
++    g_free (pIconThemeName);
++
+     //  FIXME: need some way of fetching toolbar icon size.
+ //	aStyleSet.SetToolbarIconSize( STYLE_TOOLBAR_ICONSIZE_SMALL );
+ 
+--- vcl/unx/kde/salnativewidgets-kde.cxx.old	2006-10-13 10:33:36.000000000 +0200
++++ vcl/unx/kde/salnativewidgets-kde.cxx	2007-03-28 20:04:09.000000000 +0200
+@@ -1718,6 +1718,13 @@ static Color toColor( const QColor &rCol
+     return Color( rColor.red(), rColor.green(), rColor.blue() );
+ }
+ 
++/** Helper function to read untranslated text entry from KConfig configuration repository.
++*/
++static OUString readEntryUntranslated( KConfig *pConfig, const char *pKey )
++{
++    return OUString::createFromAscii( pConfig->readEntryUntranslated( pKey ).ascii() );
++}
++
+ /** Helper function to read color from KConfig configuration repository.
+ */
+ static Color readColor( KConfig *pConfig, const char *pKey )
+@@ -1862,6 +1869,12 @@ void KDESalFrame::UpdateSettings( AllSet
+             aStyleSettings.SetTitleFont( aFont );
+ 			bSetTitleFont = true;
+         }
++
++        pConfig->setGroup( "Icons" );
++
++        pKey = "Theme";
++        if ( pConfig->hasKey( pKey ) )
++            aStyleSettings.SetPreferredSymbolsStyleName( readEntryUntranslated( pConfig, pKey ) );
+     }
+ 
+     // General settings
+--- officecfg/registry/schema/org/openoffice/Office/Common.xcs.old	2007-03-15 16:55:37.000000000 +0100
++++ officecfg/registry/schema/org/openoffice/Office/Common.xcs	2007-03-19 13:18:00.000000000 +0100
+@@ -5175,7 +5175,7 @@ Dymamic border coloring means that when 
+ 					</enumeration>
+ 					<enumeration oor:value="industrial">
+ 						<info>
+-							<desc>Industrial - the Gnome default theme</desc>
++							<desc>Industrial</desc>
+ 						</info>
+ 					</enumeration>
+ 					<enumeration oor:value="crystal">
+@@ -5185,7 +5185,7 @@ Dymamic border coloring means that when 
+ 					</enumeration>
+ 					<enumeration oor:value="tango">
+ 						<info>
+-							<desc>Tango</desc>
++							<desc>Tango - the Gnome default theme</desc>
+ 						</info>
+ 					</enumeration>
+ 				</constraints>
