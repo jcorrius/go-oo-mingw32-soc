@@ -91,6 +91,11 @@ ScVbaControl::ScVbaControl( const uno::Reference< uno::XComponentContext >& xCon
 
 ScVbaControl::~ScVbaControl()
 {
+    if( m_xControlShape.is() )
+    {
+        uno::Reference< lang::XComponent > xComponent( m_xControlShape, uno::UNO_QUERY_THROW );
+        xComponent->removeEventListener( m_xEventListener );
+    }
 }
 
 void ScVbaControl::removeResouce() throw( uno::RuntimeException )
