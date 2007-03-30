@@ -1755,97 +1755,94 @@ ScVbaRange::Activate() throw (uno::RuntimeException)
 uno::Reference< excel::XRange >
 ScVbaRange::Rows(const uno::Any& aIndex ) throw (uno::RuntimeException)
 {
-	// #TODO code within the test below "if ( m_Areas.... " can be removed
-	// Test is performed only because m_xRange is NOT set to be
-	// the first range in m_Areas ( to force failure while
-	// the implementations for each method are being updated )
-	if ( m_Areas->getCount() > 1 )
-	{
-		uno::Reference< excel::XRange > xRange( getArea( 0 ), uno::UNO_QUERY_THROW );
-		return xRange->Rows( aIndex );
-	}
-	
+	SCROW nStartRow = 0;
+	SCROW nEndRow = 0;
+
 	sal_Int32 nValue;
 	rtl::OUString sAddress;
-	if( aIndex.hasValue() )
+
+	if ( aIndex.hasValue() )
 	{
-		uno::Reference< sheet::XCellRangeAddressable > xAddressable( mxRange, uno::UNO_QUERY );
-		table::CellRangeAddress aAddress = xAddressable->getRangeAddress();
+		ScCellRangesBase* pUnoRangesBase = getCellRangesBase();
+		ScRangeList aCellRanges = pUnoRangesBase->GetRangeList();
+
+		ScRange aRange = *aCellRanges.First();
 		if( aIndex >>= nValue )
 		{
-			aAddress.StartRow = --nValue;
-			aAddress.EndRow = nValue;
+			aRange.aStart.SetRow( aRange.aStart.Row() + --nValue );
+			aRange.aEnd.SetRow( aRange.aStart.Row() );
 		}
-	
+		
 		else if ( aIndex >>= sAddress ) 
 		{
-				ScAddress::Details dDetails( ScAddress::CONV_XL_A1, 0, 0 );
-			ScRange aRange;
-			aRange.ParseRows( sAddress, getDocumentFromRange( mxRange ), dDetails );
-			aAddress.StartRow = aRange.aStart.Row();
-			aAddress.EndRow = aRange.aEnd.Row();
+			ScAddress::Details dDetails( ScAddress::CONV_XL_A1, 0, 0 );
+			ScRange tmpRange;
+			tmpRange.ParseRows( sAddress, getDocumentFromRange( mxRange ), dDetails );
+			nStartRow = tmpRange.aStart.Row();
+			nEndRow = tmpRange.aEnd.Row();
+
+			aRange.aStart.SetRow( aRange.aStart.Row() + nStartRow );
+			aRange.aEnd.SetRow( aRange.aStart.Row() + ( nEndRow  - nStartRow ));
+			
 		}
 		else
 			throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Illegal param" ) ), uno::Reference< uno::XInterface >() );
-
-		return new ScVbaRange( getParent(), mxContext, mxRange->getCellRangeByPosition(
-						aAddress.StartColumn, aAddress.StartRow,
-						aAddress.EndColumn, aAddress.EndRow ), true ); 	
+		
+		if ( aRange.aStart.Row() < 0 || aRange.aEnd.Row() < 0 )
+			throw uno::RuntimeException( rtl::OUString::createFromAscii("Internal failure, illegal param"), uno::Reference< uno::XInterface >() );
+		// return a normal range ( even for multi-selection
+		uno::Reference< table::XCellRange > xRange( new ScCellRangeObj( pUnoRangesBase->GetDocShell(), aRange ) );
+		return new ScVbaRange( getParent(), mxContext, xRange  );
 	}
-	// Questionable return, I'm just copying the invalid Any::value path
-	// above. Would seem to me that this is an internal error and 
-	// warrants an exception thrown
+	// Rows() - no params
 	return new ScVbaRange(  getParent(), mxContext, mxRange, true );
 }	
 
 uno::Reference< excel::XRange >
-ScVbaRange::Columns( const uno::Any& aIndex ) throw (uno::RuntimeException)
+ScVbaRange::Columns(const uno::Any& aIndex ) throw (uno::RuntimeException)
 {
-	// #TODO code within the test below "if ( m_Areas.... " can be removed
-	// Test is performed only because m_xRange is NOT set to be
-	// the first range in m_Areas ( to force failure while
-	// the implementations for each method are being updated )
-	if ( m_Areas->getCount() > 1 )
-	{
-		uno::Reference< excel::XRange > xRange( getArea( 0 ), uno::UNO_QUERY_THROW );
-		return xRange->Columns( aIndex );
-	}
+	SCCOL nStartCol = 0;
+	SCCOL nEndCol = 0;
+
+	sal_Int32 nValue;
+	rtl::OUString sAddress;
+
 	if ( aIndex.hasValue() )
 	{
-		uno::Reference< excel::XRange > xRange;
-		sal_Int32 nValue;
-		rtl::OUString sAddress;
-		RangeHelper thisRange( mxRange );
-		uno::Reference< sheet::XCellRangeAddressable > xThisRangeAddress = thisRange.getCellRangeAddressable();
-		uno::Reference< table::XCellRange > xRanges = thisRange.getCellRangeFromSheet();		
-		table::CellRangeAddress thisRangeAddress = xThisRangeAddress->getRangeAddress();
-		uno::Reference< table::XCellRange > xReferrer = xRanges->getCellRangeByPosition( thisRangeAddress.StartColumn, thisRangeAddress.StartRow, MAXCOL, thisRangeAddress.EndRow );
-	
-		if ( aIndex >>= nValue )
-		{
-			--nValue;
-			// col value can expand outside this range
-			// rows however cannot
+		ScCellRangesBase* pUnoRangesBase = getCellRangesBase();
+		ScRangeList aCellRanges = pUnoRangesBase->GetRangeList();
 
-			thisRangeAddress.StartColumn = nValue;	
-			thisRangeAddress.EndColumn = nValue;	
+		ScRange aRange = *aCellRanges.First();
+		if( aIndex >>= nValue )
+		{
+			aRange.aStart.SetCol( aRange.aStart.Col() + --nValue );
+			aRange.aEnd.SetCol( aRange.aStart.Col() );
 		}
-		else if ( aIndex >>= sAddress )
+		
+		else if ( aIndex >>= sAddress ) 
 		{
 			ScAddress::Details dDetails( ScAddress::CONV_XL_A1, 0, 0 );
-			ScRange aRange;
-			aRange.ParseCols( sAddress, getDocumentFromRange( mxRange ), dDetails );
-			thisRangeAddress.StartColumn = aRange.aStart.Col();
-			thisRangeAddress.EndColumn = aRange.aEnd.Col();
+			ScRange tmpRange;
+			tmpRange.ParseCols( sAddress, getDocumentFromRange( mxRange ), dDetails );
+			nStartCol = tmpRange.aStart.Col();
+			nEndCol = tmpRange.aEnd.Col();
+
+			aRange.aStart.SetCol( aRange.aStart.Col() + nStartCol );
+			aRange.aEnd.SetCol( aRange.aStart.Col() + ( nEndCol  - nStartCol ));
+			
 		}
 		else
 			throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Illegal param" ) ), uno::Reference< uno::XInterface >() );
-		return new ScVbaRange( getParent(), mxContext, xReferrer->getCellRangeByPosition( thisRangeAddress.StartColumn, thisRangeAddress.StartRow, thisRangeAddress.EndColumn, thisRangeAddress.EndRow ), false, true );
+		
+		if ( aRange.aStart.Col() < 0 || aRange.aEnd.Col() < 0 )
+			throw uno::RuntimeException( rtl::OUString::createFromAscii("Internal failure, illegal param"), uno::Reference< uno::XInterface >() );
+		// return a normal range ( even for multi-selection
+		uno::Reference< table::XCellRange > xRange( new ScCellRangeObj( pUnoRangesBase->GetDocShell(), aRange ) );
+		return new ScVbaRange( getParent(), mxContext, xRange  );
 	}
-	// otherwise return this object ( e.g for columns property with no
-	// params
-	return new ScVbaRange( getParent(), mxContext, mxRange, false, true );
-}
+	// Columns() - no params
+	return new ScVbaRange(  getParent(), mxContext, mxRange, true );
+}	
 
 void
 ScVbaRange::setMergeCells( sal_Bool bIsMerged ) throw (uno::RuntimeException)
