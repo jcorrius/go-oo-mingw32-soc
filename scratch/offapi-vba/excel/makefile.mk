@@ -213,6 +213,7 @@ CONST_IDLFILES=\
 	XlXmlLoadOption.idl \
 	XlMsoZOrderCmd.idl \
 	XlMsoShapeType.idl \
+	XlMsoLineDashStyle.idl \
 	XlMsoScaleFrom.idl \
 	XlYesNoGuess.idl\
 
