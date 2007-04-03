@@ -215,6 +215,7 @@ CONST_IDLFILES=\
 	XlMsoShapeType.idl \
 	XlMsoLineDashStyle.idl \
 	XlMsoScaleFrom.idl \
+	XlMsoArrowheadStyle.idl \
 	XlYesNoGuess.idl\
 
 OBJ_IDLFILES=XApplication.idl\
