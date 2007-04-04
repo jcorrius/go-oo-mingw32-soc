@@ -36,6 +36,7 @@
 #define SC_VBA_CHART_HXX
 #include <cppuhelper/implbase1.hxx>
 #include <com/sun/star/uno/XComponentContext.hpp>
+#include <com/sun/star/table/XTableChart.hpp>
 #include <com/sun/star/chart/XChartDocument.hpp>
 #include <org/openoffice/excel/XChart.hpp>
 #include "vbahelperinterface.hxx"
@@ -44,12 +45,41 @@ typedef InheritedHelperInterfaceImpl1<oo::excel::XChart > ChartImpl_BASE;
 
 class ScVbaChart : public ChartImpl_BASE
 {		
+	css::uno::Reference< css::chart::XChartDocument > mxChartDocument;
+	css::uno::Reference< css::table::XTableChart > mxTableChart;
+	css::uno::Reference< css::beans::XPropertySet > mxDiagramPropertySet;
+	css::uno::Reference< css::beans::XPropertySet > mxChartPropertySet;
+	css::uno::Sequence< rtl::OUString > getDefaultSeriesDescriptions( sal_Int32 nCount );
+	void setDefaultChartType()throw ( css::script::BasicErrorException ) ;
+	void setDiagram( const rtl::OUString& _sDiagramType) throw( css::script::BasicErrorException );
+	bool is3D() throw ( css::uno::RuntimeException );
+	bool isStacked() throw ( css::uno::RuntimeException );
+	bool is100PercentStacked() throw ( css::uno::RuntimeException );
+	sal_Int32 getStackedType( sal_Int32 _nStacked, sal_Int32 _n100PercentStacked, sal_Int32 _nUnStacked ) throw ( css::uno::RuntimeException );
+	sal_Int32 getSolidType(sal_Int32 _nDeep, sal_Int32 _nVertiStacked, sal_Int32 _nVerti100PercentStacked, sal_Int32 _nVertiUnStacked, sal_Int32 _nHoriStacked, sal_Int32 _nHori100PercentStacked, sal_Int32 _nHoriUnStacked) throw ( css::script::BasicErrorException );
+	sal_Int32 getStockUpDownValue(sal_Int32 _nUpDown, sal_Int32 _nNotUpDown) throw (css::script::BasicErrorException);
+	bool hasMarkers() throw ( css::script::BasicErrorException );
+	sal_Int32 getMarkerType(sal_Int32 _nWithMarkers, sal_Int32 _nWithoutMarkers) throw ( css::script::BasicErrorException ); 
 
-	css::uno::Reference< css::chart::XChartDocument > m_xChartDoc;
 public:
-	ScVbaChart( const css::uno::Reference< oo::vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::chart::XChartDocument >& xChartDoc ) : ChartImpl_BASE( xParent, xContext ), m_xChartDoc( xChartDoc ) {}
+	ScVbaChart( const css::uno::Reference< oo::vba::XHelperInterface >& _xParent, const css::uno::Reference< css::uno::XComponentContext >& _xContext, const css::uno::Reference< css::lang::XComponent >& _xChartComponent, const css::uno::Reference< css::table::XTableChart >& _xTableChart );
+	
+	// Methods
 	virtual ::rtl::OUString SAL_CALL getName() throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL SeriesCollection(const css::uno::Any&) throw (css::uno::RuntimeException);
+	virtual ::sal_Int32 SAL_CALL getChartType() throw ( css::uno::RuntimeException, css::script::BasicErrorException);
+	virtual void SAL_CALL setChartType( ::sal_Int32 _charttype ) throw ( css::uno::RuntimeException, css::script::BasicErrorException);
+	virtual void SAL_CALL Activate(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException); 
+	virtual void SAL_CALL setSourceData( const css::uno::Reference< ::org::openoffice::excel::XRange >& range, const css::uno::Any& PlotBy ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual ::sal_Int32 SAL_CALL Location(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual ::sal_Int32 SAL_CALL getLocation(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual void SAL_CALL setLocation( ::sal_Int32 where, const css::uno::Any& Name ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual ::sal_Bool SAL_CALL getHasTitle(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual void SAL_CALL setHasTitle( ::sal_Bool bTitle ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual ::sal_Bool SAL_CALL getHasLegend(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual void SAL_CALL setHasLegend( ::sal_Bool bLegend ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual void SAL_CALL setPlotBy( ::sal_Int32 xlRowCol ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual ::sal_Int32 SAL_CALL getPlotBy(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
 	// XHelperInterface
 	virtual rtl::OUString& getServiceImplName();
 	virtual css::uno::Sequence<rtl::OUString> getServiceNames();
