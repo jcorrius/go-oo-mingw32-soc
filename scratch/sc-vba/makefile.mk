@@ -70,6 +70,7 @@ SLOFILES= \
                 $(SLO)$/vbapane.obj \
                 $(SLO)$/vbashape.obj \
                 $(SLO)$/vbashapes.obj \
+                $(SLO)$/vbalineformat.obj \
                 $(SLO)$/vbashaperange.obj \
                 $(SLO)$/vbatextframe.obj \
 		$(SLO)$/service.obj \

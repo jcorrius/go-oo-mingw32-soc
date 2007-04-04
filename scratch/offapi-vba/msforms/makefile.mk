@@ -25,6 +25,7 @@ IDLFILES=\
 	XRadioButton.idl \
 	XShape.idl \
 	XShapes.idl \
+	XLineFormat.idl \
 	XShapeRange.idl \
 	XListBox.idl 
 
