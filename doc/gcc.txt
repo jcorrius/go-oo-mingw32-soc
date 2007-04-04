@@ -639,6 +639,8 @@ Most of the action is here:
 		+ load_symbols [ end ]
 		    + ... ->
 elflink.c		+ "bfd_elf_link_add_symbols"
+			+ all symbols end up in:
+			    + elf_link_add_object_symbols
 			    ** hack here ! **
 	    + ldemul_after_open
 	    + ldctor_build_sets [ .ctor handling ? ]
@@ -647,3 +649,389 @@ elflink.c		+ "bfd_elf_link_add_symbols"
 		    + including relocation count etc. ? [!]
 
  -> ldwrite.c:577
+
+** elf_link_add_object:
+    + we can detect & start to accumulate
+      information on relocs
+	+ but we need all symbols in-place
+	  first (surely) ?
+
+    + bfdlink.h (bfd_link_info)
+	+ input_bfds -> link_next list ...
+	    + we have to 'size' sections
+	      later (surely)
+
+
+    + bfd_elf_size_dynamic_sections ...
+	+ Need to do the calcl here
+	    + while walking over the
+	      input_bfds ... [! :-]
+
+
+** TODO:
+    + remove vtreloc cmdline ...
+    + Can we set SEC_MERGE on the gcc version section ?
+      [!?] (.comment?)
+
+    + the data we need to do the relocs -
+      is fetched with (?) elfcode.h (elf_slurp_reloc_table)
+	+ nah - our relocs are somewhere else ...
+
+
+Interesting fn: for generating linker sourced relocs:
+
+static bfd_boolean
+elf_reloc_link_order (bfd *output_bfd,
+		      struct bfd_link_info *info,
+		      asection *output_section,
+		      struct bfd_link_order *link_order)
+
+** Where are the relocations ?
+   + how do we get at them ?
+
+** FIXME:
+   + what about re-writing these tables when
+     they are in-use [!]
+	+ inevitably some of the symbols will be 'vague' (?)
+	+ [ we can easily check the value of the relocs vs.
+	    our own section address / size
+	    [ if we're in glibc ... ] ]
+
+
+** FIXME:
+    + problem 1: emitting our own reloc
+    + problem 2: removing existing relocs ! ;-)
+
+
+** Strategy:
+    + generate a new / bogus section in the Input (!?)
+	+ pack it full of relocs (?)
+	+ copy it to the output (?)
+
+* look at linker maps [!]
+
+* consider other sections ?
+    + .rel.plt ? - how does it get built ?
+    + .dynsym
+	+ copy relocs from in -> out (?)
+	+ _bfd_elf_link_output_relocs [ Called from Where !? ]
+		+ from elflink.c (elf_link_input_bfd)
+		    called via (elf_backend_emit_relocs)
+	    + this is just building the binary rel section...
+	    + can we just do this ourselves for
+	      our custom section at the end ?
+	    + just call bed->swap_reloc_out [ a lot ourselves ]
+	    + have some custom logic ... [ and a custom offset ]
+	+ that will let us build a .vtrelocs section ourselves.
+	+ input_section->output_section ...
+	    + rels ?
+
+    + then we just need to start killing relocations in other
+      sections :-) ... [ easier ? ] swap_in/out etc.
+
+* Keep track of external & internal relocs [!?]
+    + [hmm]
+
+asection->output_section
+    + _bfd_elf_link_size_reloc_section ...
+	+ pad them out ? [...]
+    + [ symbols? ]
+
+** FIXME:
+    + how does the init_list stuff get relocated !?
+    + how does it get NULL terminated ?
+	+ can we use a similar mechanism ?
+    + can we just update the linker file & let it
+      copy / aggregate the sections in ?
+	+ [ No ? ] we have to re-write the
+	  relocations (?) - dupliate inits ?
+	  [ same problem ? ]
+
+    + Where do we calculate how many external
+      relocations we need ?
+	+ we must calculate this for all modules [!]
+
+    + eelf_i386.c - Very complicated linker scripts ... (?)
+
+<micha> Right normally relocations are only created by the assembler.
+<micha> Well, not only, though.  Also by the ELF link editor of
+course.  But that directly generates ELF relocations, not BFD relocs.
+<micha> <Bother>, I'll have competency one-2-ones with my team in 10
+minutes, must prepare ...
+
+    + .got.plt : has a -load- of custom relocations ?
+	+ or are they done by glibc automagically ?
+
+
+[ Micha ]
+
+I tried this since some hours now (adding relocations), and nearly 
+succeeded...
+
+Couple things:
+1) the c++ patch outputs the three entries in the opposite order (the list 
+   you build for initialization will be walked from the back, because 
+   there is somewhere an nreverse() call on that list), I've changed the 
+   binutils part for me, instead of correction the C++ part to the 
+   documented format
+
+2) there were a couple mixups in naming the sections .suse.vtrelocs 
+   section (sometimes missing the plural 's')
+
+Anyway, as you can see in the patch (attached) I was trying hard to not 
+only add the new section (no problem), but also generating relocations for 
+it.  Getting the storage for those relocs (I tried to only emit ELF relocs 
+directly, not going over the generic BFD routines) is no problem, filling 
+it with relocs is also not so much a problem (on has to adjust the symbol 
+indices from the incoming relocs to the final symbol indices of the 
+output).
+
+So, with that being merely work, I tried to simply add _one_ hard coded 
+relocation into a clean .suse.vtrelocs section.  For that one has to first 
+set the ->relocs member (of the elf specific section data) to an array of 
+ELF relocs.  But then it's not yet used, one has to remove the 
+~SEC_LINKER_CREATED flag too (and set SEC_RELOC).  Otherwise 
+elf_link_input_bfd() will ignore that section.
+
+[A note: all those artificial sections generated by the linker will 
+conceptually be generated as if coming from the first input file BFD, 
+_not_ directly in the output_bfd, and by that then also be linked into the 
+output file.  That object file (the first with certain properties) is 
+stored elf_hash_table (info)->dynobj all the time.]
+
+Unfortunately the above is not enough.  Such input section containing 
+relocation entries will be processed by elf_xxx_relocate_section().  The 
+relocs of such section which have to be copied to the output file (in 
+possibly mangled form) will be stored in another artificial section (i.e. 
+hanging off of ->dynobj).  But these sections also have to be created 
+first, normally done in check_relocs (goes over a whole section plus 
+relocs and decides if such output section holding reloc copies needs to be 
+created).
+
+Unfortunately check_relocs is not prepared to handle generated sections, 
+only sections really coming from an input file.  First problem is already 
+with the name.  As ".suse.vtrelocs" was not in the original input file 
+(crti.o in most cases) it will have no corresponding ELF section header, 
+and also no name in the ELF string table.  That already prevents 
+generation of a ".rel.suse.vtrelocs" section (see 
+elf32-i386.c:...check_relocs, the handinling of 'sreloc').  With a hack I 
+can generate that section anyway, but then the next problem surfaces.
+
+Because, if such section then is generated, it won't have any output 
+section corresponding to it.  All other such "fake" .rel.* sections 
+(generated for copying over dynamic relocs) will have .rel.dyn as output 
+section assigned.  That assignment unfortunately seems to be done in 
+generic linker code, right after reading in the input files, hence 
+sections generated afterwards (at least not these .rel section, which seem 
+to be special somehow).
+
+So, we can also generate that ".rel.suse.vtrelocs" section in parallel to 
+the .suse.vtrelocs section itself.  That it will get stored into the 
+output file as separate .rel.suse.vtrelocs section (i.e. not joined with 
+.rel.dyn, one can fix that with an entry in the linker script).
+
+And so, finally, we have a new section .suse.vtrelocs, with relocations 
+against it.  Something doesn't yet seem to be right with the contents of 
+thsoe relocs, but it's a start.
+
+I'm too tired to continue poking for today, though :)
+
+[ /Micha ]
+
+... Foo ...
+
+Crash with section name !? == '-2' ...
+    + [hmm]:
+	+ need it to be something else ?
+
+'elf_fake_sections' ? ...
+
+
+
+<micha> Paste of my log:
+<micha> [17:46:26] >micha< my testcase was just two files of the same content:
+<micha> [17:46:52] >micha< struct A {
+<micha> [17:46:52] >micha<   virtual void f(void);
+<micha> [17:46:52] >micha<   virtual void g(void);
+<micha> [17:46:53] >micha<   virtual void h(void);
+<micha> [17:46:53] >micha< };
+<micha> [17:46:54] >micha< struct B : public A {
+<micha> [17:46:54] >micha<   virtual void g(void);
+<micha> [17:46:55] >micha< };
+<micha> [17:47:10] [michael_] ah ok :-)
+<micha> [17:47:26] [michael_] so - I don't see the section getting output;
+<micha> [17:47:36] >micha< Compiled without -fPIC to asm, copied the asm file, changed the __vtbl_something symbol (as it's global to not clash), and linking with -shared -o -t.so.
+<micha> [17:47:50] [michael_] ah - ok ;_)
+<micha> [17:47:59] >micha< Relevant details of readelf -e t.so:
+<micha> [17:48:03]  michael_ is linking to an unshared binary - perhaps that is the problem.
+<micha> [17:48:07] >micha<   [ 6] .rel.dyn          REL             000003d4 0003d4 000050 08   A  2   0  4
+<micha> [17:48:07] >micha<   [ 7] .rel.plt          REL             00000424 000424 000010 08   A  2   9  4
+<micha> [17:48:13] >micha<   [12] .suse.vtrelocs    PROGBITS        000005a0 0005a0 000030 00   A  0   0  4
+<micha> [17:48:25] >micha< And readelf -r:
+<micha> [17:48:31] >micha< 000016d8  00000008 R_386_RELATIVE
+<micha> [17:48:31] >micha< 000016dc  00000008 R_386_RELATIVE
+<micha> [17:48:31] >micha< 00000b40  00001701 R_386_32          00000000   __gmon_start__
+<micha> [17:48:32] >micha< 000016c0  00001706 R_386_GLOB_DAT    00000000   __gmon_start__
+<micha> [17:48:44] >micha< The relocation to 00000b40 is the new one.
+
+
+
+output_section ? - creation ? 
+    + 1 assignment: _bfd_elf_link_just_syms ...
+...
+
+elflink.c:
+	  /* Set the output_section field so that lang_add_section
+	     does not create a lang_input_section structure for this
+	     section.  Since there might be a symbol in the section
+	     being discarded, we must retain a pointer to the section
+	     which we are really going to use.  */
+	  sec->output_section = bfd_abs_section_ptr;
+	  sec->kept_section = l->sec;
+
+
+** To setup sh_name correctly:
+	+ we need to call 'elf_fake_sections' earlier ...
+	+ [ when we know we will need the section ? ]
+
+#0  elf_fake_sections (abfd=0x810f160, asect=0x8110620, failedptrarg=0xbfae99c4) at elf.c:2657
+#1  0x080702e9 in bfd_map_over_sections (abfd=0x810f160, operation=0x8086b70 <elf_fake_sections>, user_storage=0xbfae99c4) at section.c:1226
+#2  0x08089408 in _bfd_elf_compute_section_file_positions (abfd=0x810f160, link_info=0x8103e60) at elf.c:3464
+#3  0x08092ce2 in bfd_elf_final_link (abfd=0x810f160, info=0x8103e60) at elflink.c:8392
+#4  0x0805d07a in ldwrite () at ldwrite.c:557
+#5  0x0805c6df in main (argc=0, argv=0x19) at .././ld/ldmain.c:469
+
+
+** Looking up the string name - just doesn't work ...
+    + crashes: no string table etc.
+
+#0  _bfd_elf_strtab_add (tab=0x0, str=0x80f6446 ".rel.suse.vtrelocs", copy=0) at elf-strtab.c:155
+#1  0x08086bbc in elf_fake_sections (abfd=0x8117510, asect=0x8119c44, failedptrarg=0xbfed8718) at elf.c:2675
+#2  0x0809dea4 in _bfd_elf_vtreloc_accumulate (output_bfd=0x810f160, info=0x8103e20) at elf-vtreloc.c:322
+#3  0x0809769e in bfd_elf_size_dynamic_sections (output_bfd=0x810f160, soname=0x0, rpath=0x0, filter_shlib=0x0, auxiliary_filters=0x0, info=0x8103e20, 
+    sinterpptr=0xbfed8868, verdefs=0x0) at elflink.c:5231
+#4  0x0806343c in gldelf_i386_before_allocation () at eelf_i386.c:1030
+#5  0x080587b1 in lang_process () at ldlang.c:5474
+#6  0x0805c6c3 in main (argc=0, argv=0x19) at .././ld/ldmain.c:460
+
+
+** So - where does:
+
+  this_hdr->sh_name = (unsigned int) _bfd_elf_strtab_add (elf_shstrtab (abfd),
+							  asect->name, FALSE);
+#define elf_shstrtab(bfd)	(elf_tdata(bfd) -> strtab_ptr)
+
+	+ start working ?
+
+    /* prep headers will not be called for a bit -
+       this defeats a section naming assertion in the backend code,
+       that is not experienced with faked sections */
+ {
+     struct elf_strtab_hash *orig_ptr;
+     orig_ptr = elf_shstrtab (dynobj);
+     elf_shstrtab (dynobj) = _bfd_elf_strtab_init ();
+     
+
+     elf_section_data (vtreloc_sec)->rel_hdr.sh_name =
+         (unsigned int) _bfd_elf_strtab_add (elf_shstrtab (dynobj),
+                                             ".rel.suse.vtrelocs", FALSE);
+ {
+     const char *check;
+     unsigned int strndx = elf_elfheader (dynobj)->e_shstrndx;
+     unsigned int shnam = elf_section_data (vtreloc_sec)->rel_hdr.sh_name;
+     check = bfd_elf_string_from_elf_section (dynobj, strndx, shnam);
+     fprintf (stderr, "Check '%s'\n", check);
+ }
+#endif
+
+elflink.c: link_add_symbols
+    -> calls check_relocs ...
+
+
+** If we do this ourself:
+    + have to manage the dynsym table ourselves.
+    + have to manage the reloc table sizes ourself etc. ...
+	+ £"$"£$"£4ing all done in the backend specific code.
+
+Longer term:
+    + re-write to use glibc ... [ nurgh - so, so bad ... ]
+	+ no hackish mprotect nasties (etc.)
+	+ move VTables from .got -> .data [!?]
+    + re-write sorting algorithm to be:
+	a) fast,
+	b) sort by address, to ensure linear src/dest walks.
+
+TODO:
+    + 64bit testing
+	+ bitmasks: 32 vs. 64bit (etc.)
+    + patch review
+    + catch & eliminate fixups of remote
+      vtables: need to do a range/bound check on
+      all of .data [! :-] (useful for the mprotect too (?) ...)
+	+ read the glibc mprotect code
+    + *Or* - emit each one as R_386_RELATIVE [etc.]
+	+ is this a 'BFD_RELOC_.._PCREL ?
+	+ also need a RELOC_32 and RELOC_64 [!] ...
+    + fix detection of incoming things ...
+
+To test size savings:
+    + need to be able to turn off vtable relocation :-) [!] ....
+	+ insert 0xdeadbeef instead ?
+    + Send patches to the Matzster ...
+
+    + 'static' storage definition ...
+	+ gets GC'd by the compiler [somehow]
+
+    + most of the size savings - ephemeral ...
+	+ swallowed - since symbols are still emitted [!]
+	+ (gack)
+
+    Call some methods in the tests: do some arithmetic to validate the
+result etc. ...
+
+TODO:
+    + undo some of the cunning that makes it call virtual
+      functions directly in many cases (!?) - gives excessive
+      symbol churn.
+
+    + Test size savings with 'tests' ...
+
+    + mail Micha ...
+	+ http://go-oo.org/~michael/tests.tar.bz2
+
+real-world: VCL:
+
+Copy: 0xb7f5376c -> 0xb5e66bec, (0x3)
+Copy: 0xb7f53a0c -> 0xb5e66b8c, (0x33ff9)
+Copy: 0xb7f5b908 -> 0xb5e66b28, (0x67ffb)
+Copy: 0xb7f56430 -> 0xb5e671b0, (0x7ffffff)
+Copy: 0xb7f563b0 -> 0xb5e67130, (0xffffffff)
+Copy: 0xb5e671b0 -> 0xb5e67090, (0x7ffffff)
+Copy: 0xb5e67130 -> 0xb5e67010, (0xffbfffff)
+
+
+* Strongly suspect copies of data:
+
+08094348  w   DO .bss   000000f8    _ZTV8OKButton
+
+    ** URGH - this is in .bss
+	+ it is *copied* wholesale from elsewhere
+	    + *before* the linker has a go & =>
+	    + we're screwed, we have to do this in glibc ... [!]
+		+ ugh ...
+	+ or are we (!?) ;-)
+	+ 'COPY' relocs ... [!?]
+
+    ** HAH!
+	+ we can install a signal handler (perhaps)
+	    + take a fault ...
+	+ then (somehow)?
+	    + process relocations [hmm]
+
+    ** Interaction between:
+	+ glibc-2.4/sysdeps/i386/dl-machine.h
+from	  + dl-reloc.c (_dl_relocate_object)
+from	    + rtld.c - hmm ...
+
+    ** Create a test that we know fails:
+	+ copying vtable foo ... into main object ...
