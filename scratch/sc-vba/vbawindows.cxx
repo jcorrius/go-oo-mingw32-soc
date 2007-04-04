@@ -142,7 +142,7 @@ public:
 			{
 				m_windows.push_back( xNext );
 				uno::Reference< frame::XModel > xModel( xNext, uno::UNO_QUERY_THROW ); // that the spreadsheetdocument is a xmodel is a given
-				ScVbaWindow window( lcl_createWorkbookHIParent( xModel, m_xContext ), m_xContext, xModel );
+				ScVbaWindow window( uno::Reference< vba::XHelperInterface >(),  m_xContext, xModel );
 				rtl::OUString sCaption;
 				window.getCaption() >>= sCaption;
 				namesToIndices[ sCaption ] = nIndex++;
