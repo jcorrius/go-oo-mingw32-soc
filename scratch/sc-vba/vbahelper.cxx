@@ -72,6 +72,8 @@ namespace org
 namespace openoffice
 {
 
+const double Millimeter::factor =  35.27778;
+
 // helper method to determine if the view ( calc ) is in print-preview mode
 bool isInPrintPreview( SfxViewFrame* pView )
 {
@@ -540,5 +542,55 @@ void PrintOutHelper( const uno::Any& From, const uno::Any& To, const uno::Any& C
 	//   of this method
 }
 
+rtl::OUString 
+ContainerUtilities::getUniqueName( const uno::Sequence< ::rtl::OUString >&  _slist, const rtl::OUString& _sElementName, const ::rtl::OUString& _sSuffixSeparator)
+{
+	return getUniqueName(_slist, _sElementName, _sSuffixSeparator, sal_Int32(2));
 }
+
+rtl::OUString 
+ContainerUtilities::getUniqueName( const uno::Sequence< rtl::OUString >& _slist, const rtl::OUString _sElementName, const rtl::OUString& _sSuffixSeparator, sal_Int32 _nStartSuffix)
+{
+	sal_Int32 a = _nStartSuffix;
+	rtl::OUString scompname = _sElementName;
+	bool bElementexists = true;
+	sal_Int32 nLen = _slist.getLength();
+	if ( nLen == 0 )
+		return _sElementName;
+
+	while (bElementexists == true) 
+	{
+		for (sal_Int32 i = 0; i < nLen; i++)
+		{
+			if (FieldInList(_slist, scompname) == -1)
+			{
+				return scompname;
+			}
+		}
+		scompname = _sElementName + _sSuffixSeparator + rtl::OUString::valueOf( a++ );
+	}
+	return rtl::OUString();
 }
+
+sal_Int32 
+ContainerUtilities::FieldInList( const uno::Sequence< rtl::OUString >& SearchList, const rtl::OUString& SearchString )
+{
+	sal_Int32 FieldLen = SearchList.getLength();
+	sal_Int32 retvalue = -1;
+	for (sal_Int32 i = 0; i < FieldLen; i++) 
+	{
+		// I wonder why comparing lexicographically is done
+		// when its a match is whats interesting?
+		//if (SearchList[i].compareTo(SearchString) == 0) 
+		if ( SearchList[i].equals( SearchString ) ) 
+		{
+			retvalue = i;
+			break;
+		}
+	}
+	return retvalue;
+
+}
+
+} // openoffice
+} //org
