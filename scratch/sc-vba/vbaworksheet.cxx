@@ -513,7 +513,9 @@ ScVbaWorksheet::ChartObjects( const uno::Any& Index ) throw (uno::RuntimeExcepti
 	{
 		uno::Reference< table::XTableChartsSupplier > xChartSupplier( getSheet(), uno::UNO_QUERY_THROW );
 		uno::Reference< table::XTableCharts > xTableCharts = xChartSupplier->getCharts();
-		mxCharts = new ScVbaChartObjects(  this, mxContext, xTableCharts );
+		
+		uno::Reference< drawing::XDrawPageSupplier > xDrawPageSupplier( mxSheet, uno::UNO_QUERY_THROW );
+		mxCharts = new ScVbaChartObjects(  this, mxContext, xTableCharts, xDrawPageSupplier );
 	}
 	if ( Index.hasValue() )
 	{
