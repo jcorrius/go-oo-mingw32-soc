@@ -20,13 +20,13 @@ ScVbaShapeRange::Select(  ) throw (uno::RuntimeException)
     xSelectSupp->select( uno::makeAny( m_xShapes ) );
 }
 
-uno::Reference< msform::XShape > SAL_CALL 
+uno::Reference< msforms::XShape > SAL_CALL 
 ScVbaShapeRange::Group() throw (uno::RuntimeException)
 {
     uno::Reference< drawing::XShapeGrouper > xShapeGrouper( m_xDrawPage, uno::UNO_QUERY_THROW );
     uno::Reference< drawing::XShapeGroup > xShapeGroup( xShapeGrouper->group( m_xShapes ), uno::UNO_QUERY_THROW );
     uno::Reference< drawing::XShape > xShape( xShapeGroup, uno::UNO_QUERY_THROW );
-    return uno::Reference< msform::XShape >( new ScVbaShape( getParent(), mxContext, xShape, m_xShapes, office::MsoShapeType::msoGroup ) );
+    return uno::Reference< msforms::XShape >( new ScVbaShape( getParent(), mxContext, xShape, m_xShapes, office::MsoShapeType::msoGroup ) );
 }
 sal_Int32 SAL_CALL 
 ScVbaShapeRange::Count(  ) throw (uno::RuntimeException)

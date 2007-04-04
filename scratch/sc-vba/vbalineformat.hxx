@@ -2,10 +2,10 @@
 #define SC_VBA_XLINEFORMAT_HXX
 
 #include <com/sun/star/drawing/XShape.hpp>
-#include <org/openoffice/msform/XLineFormat.hpp>
+#include <org/openoffice/msforms/XLineFormat.hpp>
 #include "vbahelperinterface.hxx"
 
-typedef InheritedHelperInterfaceImpl1< oo::msform::XLineFormat > ScVbaLineFormat_BASE;
+typedef InheritedHelperInterfaceImpl1< oo::msforms::XLineFormat > ScVbaLineFormat_BASE;
 
 class ScVbaLineFormat : public ScVbaLineFormat_BASE
 {

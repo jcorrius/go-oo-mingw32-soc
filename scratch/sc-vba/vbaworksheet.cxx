@@ -578,7 +578,7 @@ ScVbaWorksheet::Shapes() throw (uno::RuntimeException)
     uno::Reference< drawing::XShapes > xShapes( xDrawPageSupplier->getDrawPage(), uno::UNO_QUERY_THROW );
     uno::Reference< container::XIndexAccess > xIndexAccess( xShapes, uno::UNO_QUERY_THROW );
 
-    return makeAny( uno::Reference< msform::XShapes> ( new ScVbaShapes( this, mxContext, xIndexAccess ) ) );
+    return makeAny( uno::Reference< msforms::XShapes> ( new ScVbaShapes( this, mxContext, xIndexAccess ) ) );
 }
 uno::Any SAL_CALL 
 ScVbaWorksheet::Evaluate( const ::rtl::OUString& Name ) throw (uno::RuntimeException)

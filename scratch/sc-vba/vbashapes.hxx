@@ -4,13 +4,13 @@
 #include <com/sun/star/drawing/XShapes.hpp>
 #include <com/sun/star/drawing/XDrawPage.hpp>
 #include <com/sun/star/container/XIndexAccess.hpp>
-#include <org/openoffice/msform/XShapes.hpp>
+#include <org/openoffice/msforms/XShapes.hpp>
 
 #include "vbahelperinterface.hxx"
 
 #include "vbacollectionimpl.hxx"
 
-typedef CollTestImplHelper< oo::msform::XShapes > ScVbaShapes_BASE;
+typedef CollTestImplHelper< oo::msforms::XShapes > ScVbaShapes_BASE;
 
 class ScVbaShapes : public ScVbaShapes_BASE
 {
@@ -39,7 +39,7 @@ public:
     virtual css::uno::Any SAL_CALL Item( const css::uno::Any& NameOrIndex ) throw (css::uno::RuntimeException);
     virtual sal_Int32 SAL_CALL Count() throw (css::uno::RuntimeException);
     virtual void SAL_CALL SelectAll() throw (css::uno::RuntimeException);
-    virtual css::uno::Reference< oo::msform::XShapeRange > SAL_CALL Range( const css::uno::Any& shapes ) throw (css::uno::RuntimeException);
+    virtual css::uno::Reference< oo::msforms::XShapeRange > SAL_CALL Range( const css::uno::Any& shapes ) throw (css::uno::RuntimeException);
 };
 
 #endif//SC_VBA_SHAPES_HXX

@@ -1,6 +1,6 @@
 #include <com/sun/star/container/XNamed.hpp>
 #include <com/sun/star/view/XSelectionSupplier.hpp>
-#include <org/openoffice/msform/XShapeRange.hpp>
+#include <org/openoffice/msforms/XShapeRange.hpp>
 
 #include "vbashapes.hxx"
 #include "vbashape.hxx"
@@ -28,7 +28,7 @@ ScVbaShapes::createCollectionObject( const css::uno::Any& aSource )
     if( aSource.hasValue() )
     {
         uno::Reference< drawing::XShape > xShape( aSource, uno::UNO_QUERY_THROW );
-        return uno::makeAny( uno::Reference< msform::XShape >( new ScVbaShape( getParent(), mxContext, xShape, m_xShapes, ScVbaShape::getType( xShape ) ) ) );
+        return uno::makeAny( uno::Reference< msforms::XShape >( new ScVbaShape( getParent(), mxContext, xShape, m_xShapes, ScVbaShape::getType( xShape ) ) ) );
     }
     return uno::Any();
 }
@@ -57,7 +57,7 @@ ScVbaShapes::getItemByStringIndex( const rtl::OUString& sIndex ) throw (uno::Run
 uno::Type
 ScVbaShapes::getElementType() throw (uno::RuntimeException)
 {
-    return org::openoffice::msform::XShapes::static_type(0);
+    return org::openoffice::msforms::XShapes::static_type(0);
 }
 rtl::OUString& 
 ScVbaShapes::getServiceImplName()
@@ -91,12 +91,12 @@ ScVbaShapes::Count(  ) throw (css::uno::RuntimeException)
     return getCount();
 }
 
-uno::Reference< msform::XShapeRange > SAL_CALL 
+uno::Reference< msforms::XShapeRange > SAL_CALL 
 ScVbaShapes::Range( const uno::Any& shapes ) throw (css::uno::RuntimeException)
 {
     if( shapes.hasValue() )
     {
-        uno::Reference< msform::XShapeRange > xShapeRange;
+        uno::Reference< msforms::XShapeRange > xShapeRange;
         uno::Reference< drawing::XShapes > xShapes;
         sal_Int32 nIndex;
         rtl::OUString sIndex;
@@ -104,19 +104,19 @@ ScVbaShapes::Range( const uno::Any& shapes ) throw (css::uno::RuntimeException)
         uno::Sequence< rtl::OUString > sArray;
         if( shapes >>= nIndex )
         {
-            return uno::Reference< msform::XShapeRange >( new ScVbaShapeRange( getParent(), mxContext, getShapeByIndex( nIndex ), m_xDrawPage ) );
+            return uno::Reference< msforms::XShapeRange >( new ScVbaShapeRange( getParent(), mxContext, getShapeByIndex( nIndex ), m_xDrawPage ) );
         }
         else if( shapes >>= sIndex )
         {
-            return uno::Reference< msform::XShapeRange >( new ScVbaShapeRange( getParent(), mxContext, getShapeByName( sIndex ), m_xDrawPage ) );
+            return uno::Reference< msforms::XShapeRange >( new ScVbaShapeRange( getParent(), mxContext, getShapeByName( sIndex ), m_xDrawPage ) );
         }
         else if( shapes >>= nArray )
         {
-            return uno::Reference< msform::XShapeRange >( new ScVbaShapeRange( getParent(), mxContext, getShapesByIndex( nArray ), m_xDrawPage ) );
+            return uno::Reference< msforms::XShapeRange >( new ScVbaShapeRange( getParent(), mxContext, getShapesByIndex( nArray ), m_xDrawPage ) );
         }
         else if( shapes >>= sArray )
         {
-            return uno::Reference< msform::XShapeRange >( new ScVbaShapeRange( getParent(), mxContext, getShapesByNames( sArray ), m_xDrawPage ) );
+            return uno::Reference< msforms::XShapeRange >( new ScVbaShapeRange( getParent(), mxContext, getShapesByNames( sArray ), m_xDrawPage ) );
         }
         else 
         {

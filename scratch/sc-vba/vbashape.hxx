@@ -5,11 +5,11 @@
 #include <com/sun/star/drawing/XShape.hpp>
 #include <com/sun/star/drawing/XShapes.hpp>
 #include <com/sun/star/beans/XPropertySet.hpp>
-#include <org/openoffice/msform/XShape.hpp>
+#include <org/openoffice/msforms/XShape.hpp>
 
 #include "vbahelperinterface.hxx"
 
-typedef InheritedHelperInterfaceImpl1< oo::msform::XShape > ScVbaShape_BASE;
+typedef InheritedHelperInterfaceImpl1< oo::msforms::XShape > ScVbaShape_BASE;
 
 class ScVbaShape : public ScVbaShape_BASE
 {
@@ -56,6 +56,6 @@ public:
     virtual void SAL_CALL ScaleWidth( double Factor, sal_Bool RelativeToOriginalSize, sal_Int32 Scale ) throw (css::uno::RuntimeException);
     // Replace??
     virtual void SAL_CALL Select( const css::uno::Any& Replace ) throw (css::uno::RuntimeException);
-    virtual css::uno::Reference< oo::msform::XLineFormat > SAL_CALL getLine() throw (css::uno::RuntimeException);
+    virtual css::uno::Reference< oo::msforms::XLineFormat > SAL_CALL getLine() throw (css::uno::RuntimeException);
 };
 #endif//SC_VBA_SHAPE_HXX

@@ -2,12 +2,12 @@
 #define SC_VBA_SHAPERANGE_HXX
 
 #include <com/sun/star/drawing/XShapes.hpp>
-#include <org/openoffice/msform/XShapeRange.hpp>
+#include <org/openoffice/msforms/XShapeRange.hpp>
 
 #include "vbahelperinterface.hxx"
 #include "vbahelper.hxx"
 
-typedef InheritedHelperInterfaceImpl1< oo::msform::XShapeRange > ScVbaShapeRange_BASE;
+typedef InheritedHelperInterfaceImpl1< oo::msforms::XShapeRange > ScVbaShapeRange_BASE;
 
 class ScVbaShapeRange : public ScVbaShapeRange_BASE
 {
@@ -23,7 +23,7 @@ public:
 
     // Methods
     virtual void SAL_CALL Select(  ) throw (css::uno::RuntimeException);
-    virtual css::uno::Reference< ::org::openoffice::msform::XShape > SAL_CALL Group() throw (css::uno::RuntimeException);
+    virtual css::uno::Reference< ::org::openoffice::msforms::XShape > SAL_CALL Group() throw (css::uno::RuntimeException);
     virtual sal_Int32 SAL_CALL Count(  ) throw (css::uno::RuntimeException);
 };
 

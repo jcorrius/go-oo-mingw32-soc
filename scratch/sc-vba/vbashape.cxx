@@ -304,10 +304,10 @@ ScVbaShape::Select( const uno::Any& Replace ) throw ( uno::RuntimeException )
     xSelectSupp->select( uno::makeAny( m_xShape ) );
 }
 
-uno::Reference< msform::XLineFormat > SAL_CALL 
+uno::Reference< msforms::XLineFormat > SAL_CALL 
 ScVbaShape::getLine() throw (uno::RuntimeException)
 {
-    return uno::Reference< msform::XLineFormat >( new ScVbaLineFormat( this, mxContext, m_xShape ) );
+    return uno::Reference< msforms::XLineFormat >( new ScVbaLineFormat( this, mxContext, m_xShape ) );
 }
 
 rtl::OUString& 
