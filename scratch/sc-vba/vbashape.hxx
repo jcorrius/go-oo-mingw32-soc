@@ -6,6 +6,7 @@
 #include <com/sun/star/drawing/XShapes.hpp>
 #include <com/sun/star/beans/XPropertySet.hpp>
 #include <org/openoffice/msforms/XShape.hpp>
+#include <org/openoffice/msforms/XLineFormat.hpp>
 
 #include "vbahelperinterface.hxx"
 
