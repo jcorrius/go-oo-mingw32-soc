@@ -304,9 +304,8 @@ ScVbaRangeAreas::createCollectionObject( const uno::Any& aSource )
 }
 
 
-
-
-ScDocShell* getDocShellFromRange( const uno::Reference< table::XCellRange >& xRange )
+ScDocShell* 
+getDocShellFromRange( const uno::Reference< table::XCellRange >& xRange )
 {
 	// need the ScCellRangesBase to get docshell
 	uno::Reference< uno::XInterface > xIf( xRange, uno::UNO_QUERY_THROW );
@@ -316,13 +315,27 @@ ScDocShell* getDocShellFromRange( const uno::Reference< table::XCellRange >& xRa
 	return pUno->GetDocShell();
 }
 
-ScDocument* getDocumentFromRange( const uno::Reference< table::XCellRange >& xRange )
+ScDocument* 
+getDocumentFromRange( const uno::Reference< table::XCellRange >& xRange )
 {
 	ScDocShell* pDocShell = getDocShellFromRange( xRange );
 	if ( !pDocShell )
 		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Failed to access underlying docshell from uno range object" ) ), uno::Reference< uno::XInterface >() );
 	ScDocument* pDoc = pDocShell->GetDocument();
 	return pDoc;
+}
+
+
+ScDocument* 
+ScVbaRange::getScDocument()
+{
+	return getDocumentFromRange( mxRange );
+}
+
+ScDocShell* 
+ScVbaRange::getScDocShell()
+{
+	return getDocShellFromRange( mxRange );
 }
 
 class NumFormatHelper
@@ -909,7 +922,7 @@ getRangeForName( const uno::Reference< uno::XComponentContext >& xContext, const
 	rtl::OUString sAddress = sName;
 	ScAddress::Convention eConv = ScAddress::CONV_XL_A1; 
 	// see if there is a match with a named range
-	uno::Reference< beans::XPropertySet > xProps( getCurrentDocument(), uno::UNO_QUERY_THROW );
+	uno::Reference< beans::XPropertySet > xProps( pDocSh->GetModel(), uno::UNO_QUERY_THROW );
 	uno::Reference< container::XNameAccess > xNameAccess( xProps->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("NamedRanges") ) ), uno::UNO_QUERY_THROW );
 
 	if ( xNameAccess->hasByName( sName ) )
@@ -1196,7 +1209,7 @@ ScVbaRange::setFormulaValue( const uno::Any& rFormula, ScAddress::Convention eCo
 		aVisitor.visit( valueProcessor );
 		return;
 	}	
-	CellFormulaValueSetter formulaValueSetter( rFormula, getDocumentFromRange( mxRange ), eConv );
+	CellFormulaValueSetter formulaValueSetter( rFormula, getScDocument(), eConv );
 	setValue( rFormula, formulaValueSetter );
 }
 
@@ -1212,7 +1225,7 @@ ScVbaRange::getFormulaValue( ScAddress::Convention eConv) throw (uno::RuntimeExc
 		uno::Reference< excel::XRange > xRange( getArea( 0 ), uno::UNO_QUERY_THROW );
 		return xRange->getFormula();
 	}
-	CellFormulaValueGetter valueGetter( getDocumentFromRange( mxRange ), eConv );
+	CellFormulaValueGetter valueGetter( getScDocument(), eConv );
 	return getValue( valueGetter );
 		
 }
@@ -1783,7 +1796,6 @@ ScVbaRange::Rows(const uno::Any& aIndex ) throw (uno::RuntimeException)
 
 			aRange.aStart.SetRow( aRange.aStart.Row() + nStartRow );
 			aRange.aEnd.SetRow( aRange.aStart.Row() + ( nEndRow  - nStartRow ));
-			
 		}
 		else
 			throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Illegal param" ) ), uno::Reference< uno::XInterface >() );
@@ -1829,7 +1841,6 @@ ScVbaRange::Columns(const uno::Any& aIndex ) throw (uno::RuntimeException)
 
 			aRange.aStart.SetCol( aRange.aStart.Col() + nStartCol );
 			aRange.aEnd.SetCol( aRange.aStart.Col() + ( nEndCol  - nStartCol ));
-			
 		}
 		else
 			throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Illegal param" ) ), uno::Reference< uno::XInterface >() );
@@ -2033,7 +2044,7 @@ ScVbaRange::getWrapText() throw (uno::RuntimeException)
 uno::Reference< excel::XInterior > ScVbaRange::Interior( ) throw (uno::RuntimeException)
 {
 	uno::Reference< beans::XPropertySet > xProps( mxRange, uno::UNO_QUERY_THROW );
-        return new ScVbaInterior ( this, mxContext, xProps, getDocumentFromRange( mxRange ) );
+        return new ScVbaInterior ( this, mxContext, xProps, getScDocument() );
 }                                                                                                                             
 uno::Reference< excel::XRange >
 ScVbaRange::Range( const uno::Any &Cell1, const uno::Any &Cell2 ) throw (uno::RuntimeException)
@@ -2072,7 +2083,7 @@ ScVbaRange::Range( const uno::Any &Cell1, const uno::Any &Cell2, bool bForceUseI
 		Cell1 >>= sName;
 		RangeHelper referRange( xReferrer );		
 		table::CellRangeAddress referAddress = referRange.getCellRangeAddressable()->getRangeAddress();
-		return getRangeForName( mxContext, sName, getDocShellFromRange( mxRange ), referAddress );
+		return getRangeForName( mxContext, sName, getScDocShell(), referAddress );
  
 	}
 	else
@@ -2126,7 +2137,7 @@ ScVbaRange::Range( const uno::Any &Cell1, const uno::Any &Cell2, bool bForceUseI
 		{
 			ScRange aNew( (SCCOL)nStartX, (SCROW)nStartY, parentAddress.aStart.Tab(),
 						  (SCCOL)nEndX, (SCROW)nEndY, parentAddress.aEnd.Tab() );
-			xCellRange = new ScCellRangeObj( getDocShellFromRange( mxRange ), aNew );
+			xCellRange = new ScCellRangeObj( getScDocShell(), aNew );
 		}
 	}
 		
@@ -2535,7 +2546,7 @@ ScVbaRange::Sort( const uno::Any& Key1, const uno::Any& Order1, const uno::Any& 
 	sal_Int16 nDataOption2 = excel::XlSortDataOption::xlSortNormal;;
 	sal_Int16 nDataOption3 = excel::XlSortDataOption::xlSortNormal;
 
-	ScDocument* pDoc = getDocumentFromRange( mxRange );
+	ScDocument* pDoc = getScDocument();
 	if ( !pDoc )
 		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Failed to access document from shell" ) ), uno::Reference< uno::XInterface >() );
 
@@ -2900,7 +2911,7 @@ getDeviceFromDoc( const uno::Reference< frame::XModel >& xModel ) throw( uno::Ru
 double 
 ScVbaRange::getCalcColWidth( const table::CellRangeAddress& rAddress) throw (uno::RuntimeException)
 {
-	ScDocument* pDoc = getDocumentFromRange( mxRange );
+	ScDocument* pDoc = getScDocument();
 	USHORT nWidth = pDoc->GetOriginalWidth( static_cast< SCCOL >( rAddress.StartColumn ), static_cast< SCTAB >( rAddress.Sheet ) );
 	double nPoints = lcl_TwipsToPoints( nWidth );
 	nPoints = lcl_Round2DecPlaces( nPoints );
@@ -2947,7 +2958,7 @@ uno::Any SAL_CALL
 ScVbaRange::getColumnWidth() throw (uno::RuntimeException)
 {
 	double nColWidth = 	0;
-	ScDocShell* pShell = getDocShellFromRange( mxRange );
+	ScDocShell* pShell = getScDocShell();
 	if ( pShell )
 	{
 		RangeHelper thisRange( mxRange );
@@ -2968,7 +2979,7 @@ ScVbaRange::setColumnWidth( const uno::Any& _columnwidth ) throw (uno::RuntimeEx
 	double nColWidth = 0;
 	_columnwidth >>= nColWidth;
 	nColWidth = lcl_Round2DecPlaces( nColWidth );
-        ScDocShell* pDocShell = getDocShellFromRange( mxRange );
+        ScDocShell* pDocShell = getScDocShell();
         if ( pDocShell )
         {
                 uno::Reference< frame::XModel > xModel = pDocShell->GetModel();
