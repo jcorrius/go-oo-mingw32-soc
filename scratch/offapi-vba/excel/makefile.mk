@@ -211,11 +211,6 @@ CONST_IDLFILES=\
 	XlXmlExportResult.idl \
 	XlXmlImportResult.idl \
 	XlXmlLoadOption.idl \
-	XlMsoZOrderCmd.idl \
-	XlMsoShapeType.idl \
-	XlMsoLineDashStyle.idl \
-	XlMsoScaleFrom.idl \
-	XlMsoArrowheadStyle.idl \
 	XlYesNoGuess.idl\
 
 OBJ_IDLFILES=XApplication.idl\
