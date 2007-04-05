@@ -21,6 +21,8 @@ CONST_IDLFILES=\
 	MsoLineDashStyle.idl \
 	MsoScaleFrom.idl \
 	MsoShapeType.idl \
+	MsoArrowheadLength.idl \
+	MsoArrowheadWidth.idl \
 	MsoZOrderCmd.idl \
 
 
