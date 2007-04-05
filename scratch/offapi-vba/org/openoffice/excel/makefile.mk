@@ -229,6 +229,7 @@ OBJ_IDLFILES=XApplication.idl\
 	XChartObject.idl\
 	XChartObjects.idl\
 	XChart.idl\
+	XCharts.idl\
 	XSeriesCollection.idl\
 	XSeries.idl\
 	XDialog.idl \
@@ -245,6 +246,9 @@ OBJ_IDLFILES=XApplication.idl\
 	XOLEObjects.idl\
 	XPane.idl\
 	XTextFrame.idl\
+	XTitle.idl\
+	XChartTitle.idl\
+	XDataLabel.idl\
 	Range.idl\
 
 
