@@ -249,6 +249,7 @@ OBJ_IDLFILES=XApplication.idl\
 	XTitle.idl\
 	XChartTitle.idl\
 	XDataLabel.idl\
+	XDataLabels.idl\
 	Range.idl\
 
 
