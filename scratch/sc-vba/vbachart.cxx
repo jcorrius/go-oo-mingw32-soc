@@ -49,6 +49,7 @@
 #include <basic/sberrors.hxx>
 #include "vbachartobject.hxx"
 #include "vbarange.hxx"
+#include "vbacharttitle.hxx"
 
 using namespace ::com::sun::star;
 using namespace ::org::openoffice;
@@ -721,7 +722,7 @@ ScVbaChart::getLocation() throw (css::script::BasicErrorException, css::uno::Run
 }
 
 void SAL_CALL 
-ScVbaChart::setLocation( ::sal_Int32 where, const css::uno::Any& Name ) throw (script::BasicErrorException, uno::RuntimeException)
+ScVbaChart::setLocation( ::sal_Int32 /*where*/, const css::uno::Any& /*Name*/ ) throw (script::BasicErrorException, uno::RuntimeException)
 {
 	// Helper api just stubs out the code <shrug>
 	// #TODO come back and make sense out of this	
@@ -865,6 +866,13 @@ ScVbaChart::setHasLegend( ::sal_Bool bLegend ) throw (script::BasicErrorExceptio
 	}
 }
 
+uno::Reference< excel::XChartTitle > SAL_CALL 
+ScVbaChart::getChartTitle(  ) throw (script::BasicErrorException, uno::RuntimeException)
+{
+	uno::Reference< drawing::XShape > xTitleShape = mxChartDocument->getTitle();
+	// #TODO check parent
+	return new ScVbaChartTitle(this, mxContext, xTitleShape);		
+}
 
 bool
 ScVbaChart::is3D() throw ( uno::RuntimeException )
@@ -995,6 +1003,149 @@ ScVbaChart::getMarkerType(sal_Int32 _nWithMarkers, sal_Int32 _nWithoutMarkers) t
 	if (hasMarkers())
 		return _nWithMarkers;
 	return _nWithoutMarkers;
+}
+
+void 
+ScVbaChart::assignDiagramAttributes()
+{
+	xAxisXSupplier.set( mxDiagramPropertySet, uno::UNO_QUERY_THROW );
+	xAxisYSupplier.set( mxDiagramPropertySet, uno::UNO_QUERY_THROW );
+	xAxisZSupplier.set( mxDiagramPropertySet, uno::UNO_QUERY_THROW );
+	xTwoAxisXSupplier.set( mxDiagramPropertySet, uno::UNO_QUERY_THROW );
+	xTwoAxisYSupplier.set( mxDiagramPropertySet, uno::UNO_QUERY_THROW );
+}
+
+bool
+ScVbaChart::isSeriesIndexValid(sal_Int32 _seriesindex) throw( script::BasicErrorException )
+{
+	bool bret = false;
+	try
+	{
+		uno::Reference< chart::XChartDataArray > xChartDataArray( mxChartDocument->getData(), uno::UNO_QUERY_THROW );
+		//        dblValues = xChartDataArray.getData();
+		//TODO I guess we have to differentiate between XlRowCol
+		if ( !xChartDataArray.is() )
+		{
+			if (getPlotBy() == xlRows)
+			{
+				if ((_seriesindex < xChartDataArray->getRowDescriptions().getLength() ) && (_seriesindex >= 0))
+					bret = true;
+			}
+			else
+			{
+				if ((_seriesindex < xChartDataArray->getColumnDescriptions().getLength() ) && (_seriesindex >= 0))
+					bret = true;
+			}
+		}
+	} 
+	catch (uno::Exception& e) 
+	{
+		throw script::BasicErrorException( rtl::OUString(), uno::Reference< uno::XInterface >(), SbERR_METHOD_FAILED, rtl::OUString() );
+	}
+	if (!bret)
+	{
+		throw script::BasicErrorException( rtl::OUString(), uno::Reference< uno::XInterface >(), SbERR_OUT_OF_RANGE, rtl::OUString() );
+	}
+	return bret;
+}
+
+bool
+ScVbaChart::areIndicesValid( sal_Int32 _seriesindex, sal_Int32 _valindex) throw ( css::script::BasicErrorException )
+{
+	if (isSeriesIndexValid(_seriesindex))
+	{
+		uno::Reference< chart::XChartDataArray > xChartDataArray( mxChartDocument->getData(), uno::UNO_QUERY_THROW );
+		dblValues = xChartDataArray->getData();
+		return (_valindex < dblValues[_seriesindex].getLength() );
+        }
+	return false;
+}
+
+sal_Int32
+ScVbaChart::getSeriesIndex(rtl::OUString _sseriesname) throw ( script::BasicErrorException )
+{
+	uno::Reference< chart::XChartDataArray > xChartDataArray( mxChartDocument->getData(), uno::UNO_QUERY_THROW );
+	if (getPlotBy() == xlRows)
+		return ContainerUtilities::FieldInList(xChartDataArray->getRowDescriptions(), _sseriesname);
+	return ContainerUtilities::FieldInList(xChartDataArray->getColumnDescriptions(), _sseriesname);
+}
+void
+ScVbaChart::setSeriesName(sal_Int32 _index, rtl::OUString _sname) throw ( script::BasicErrorException )
+{
+	uno::Reference< chart::XChartDataArray > xChartDataArray( mxChartDocument->getData(), uno::UNO_QUERY_THROW );
+	if (isSeriesIndexValid(_index))
+	{
+		uno::Sequence< rtl::OUString > sDescriptions = xChartDataArray->getColumnDescriptions();
+		sDescriptions[_index] = _sname;
+		xChartDataArray->setColumnDescriptions(sDescriptions);
+	}
+}
+
+sal_Int32 
+ScVbaChart::getSeriesCount() throw ( script::BasicErrorException )
+{		
+	uno::Reference< chart::XChartDataArray > xChartDataArray( mxChartDocument->getData(), uno::UNO_QUERY_THROW );
+
+	if (getPlotBy() == xlRows)
+		return xChartDataArray->getRowDescriptions().getLength();
+	return xChartDataArray->getColumnDescriptions().getLength();
+
+}
+
+rtl::OUString
+ScVbaChart::getSeriesName(sal_Int32 _index) throw ( script::BasicErrorException )
+{
+	uno::Reference< chart::XChartDataArray > xChartDataArray( mxChartDocument->getData(), uno::UNO_QUERY_THROW );
+        uno::Sequence< rtl::OUString > sDescriptions;
+	rtl::OUString sName;
+	if (isSeriesIndexValid(_index))
+	{
+		if (getPlotBy() == xlRows)
+			sDescriptions = xChartDataArray->getRowDescriptions();
+		else
+			sDescriptions = xChartDataArray->getColumnDescriptions();
+		sName =  sDescriptions[_index];
+        }
+        return sName;	
+}
+
+double 
+ScVbaChart::getValue(sal_Int32 _seriesindex, sal_Int32 _valindex) throw ( script::BasicErrorException )
+{
+	double result = -1.0;
+	if (areIndicesValid(_seriesindex, _valindex))
+	{
+		if (getPlotBy() == xlRows)
+			result =  dblValues[_seriesindex][_valindex];
+		else
+			result =  dblValues[_valindex][_seriesindex];
+	}
+	return result;
+}
+
+sal_Int32 
+ScVbaChart::getValuesCount(sal_Int32 _seriesIndex) throw ( script::BasicErrorException )
+{
+	sal_Int32 nCount = 0;
+	uno::Reference< chart::XChartDataArray > xChartDataArray( mxChartDocument->getData(), uno::UNO_QUERY_THROW );
+	if (isSeriesIndexValid(_seriesIndex))
+	{
+		dblValues = xChartDataArray->getData();
+		if (getPlotBy() == xlRows)
+			nCount = dblValues[_seriesIndex].getLength();
+		else
+			nCount =  dblValues.getLength();
+	}
+	return nCount;	
+}
+
+
+uno::Reference< excel::XDataLabels > 
+ScVbaChart::DataLabels( const uno::Reference< oo::excel::XSeries > _oSeries ) throw ( css::script::BasicErrorException )
+{
+	if ( true )
+		throw script::BasicErrorException( rtl::OUString(), uno::Reference< uno::XInterface >(), SbERR_METHOD_FAILED, rtl::OUString() );
+	return uno::Reference< excel::XDataLabels > ();
 }
 
 rtl::OUString&

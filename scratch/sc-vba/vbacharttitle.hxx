@@ -32,23 +32,23 @@
  *    MA  02111-1307  USA
  *
  ************************************************************************/
-#ifndef SC_VBAPALETTE_HXX
-#define SC_VBAPALETTE_HXX
+#ifndef SC_VBA_CHARTTITLE_HXX
+#define SC_VBA_CHARTTITLE_HXX
+#include "vbatitle.hxx"
+#include <cppuhelper/implbase1.hxx>
+#include <org/openoffice/excel/XChartTitle.hpp>
 
-#include "vbahelper.hxx"
-#include <document.hxx>
-#include <com/sun/star/container/XIndexAccess.hpp>
+using namespace ::org::openoffice;
+using namespace ::com::sun::star;
 
-class ScVbaPalette
+typedef TitleImpl< cppu::WeakImplHelper1< oo::excel::XChartTitle > > ChartTitleBase;
+
+class ScVbaChartTitle : public ChartTitleBase
 {
-private:
-	SfxObjectShell* m_pShell;
 public:
-	ScVbaPalette(  SfxObjectShell* pShell = NULL ) : m_pShell( pShell ){}
-	// if no palette available e.g. because the document doesn't have a 
-	// palette defined then a default palette will be returned.
-	css::uno::Reference< css::container::XIndexAccess > getPalette();
+	ScVbaChartTitle( const css::uno::Reference< oo::vba::XHelperInterface >& xParent,   const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::drawing::XShape >& _xTitleShape );
+	// XHelperInterface
+	virtual rtl::OUString& getServiceImplName();
+	virtual css::uno::Sequence<rtl::OUString> getServiceNames();
 };
-
-#endif //SC_VBAPALETTE_HXX
-
+#endif

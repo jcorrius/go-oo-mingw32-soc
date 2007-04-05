@@ -73,6 +73,8 @@ SLOFILES= \
                 $(SLO)$/vbalineformat.obj \
                 $(SLO)$/vbashaperange.obj \
                 $(SLO)$/vbatextframe.obj \
+                $(SLO)$/vbacharttitle.obj \
+                $(SLO)$/vbacharts.obj \
 		$(SLO)$/service.obj \
  
 

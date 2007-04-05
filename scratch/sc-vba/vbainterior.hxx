@@ -55,7 +55,7 @@ class ScVbaInterior :  public ScVbaInterior_BASE
         css::uno::Reference< css::container::XIndexAccess > getPalette(); 
 public:
         ScVbaInterior( const css::uno::Reference< oo::vba::XHelperInterface >& xParent,  const css::uno::Reference< css::uno::XComponentContext >& xContext,
-                 const css::uno::Reference< css::beans::XPropertySet >& xProps, ScDocument* pScDoc ) throw ( css::lang::IllegalArgumentException);
+                 const css::uno::Reference< css::beans::XPropertySet >& xProps, ScDocument* pScDoc = NULL) throw ( css::lang::IllegalArgumentException);
 
         virtual ~ScVbaInterior(){}
 

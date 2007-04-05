@@ -76,6 +76,8 @@ ScVbaInterior::setColor( const uno::Any& _color  ) throw (uno::RuntimeException)
 uno::Reference< container::XIndexAccess >
 ScVbaInterior::getPalette()
 {
+	if ( !m_pScDoc ) 
+		throw uno::RuntimeException();
 	SfxObjectShell* pShell = m_pScDoc->GetDocumentShell();
 	ScVbaPalette aPalette( pShell );	
 	return aPalette.getPalette();	

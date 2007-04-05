@@ -38,7 +38,14 @@
 #include <com/sun/star/uno/XComponentContext.hpp>
 #include <com/sun/star/table/XTableChart.hpp>
 #include <com/sun/star/chart/XChartDocument.hpp>
+#include <com/sun/star/chart/XAxisXSupplier.hpp>
+#include <com/sun/star/chart/XAxisYSupplier.hpp>
+#include <com/sun/star/chart/XAxisZSupplier.hpp>
+#include <com/sun/star/chart/XTwoAxisXSupplier.hpp>
+#include <com/sun/star/chart/XTwoAxisYSupplier.hpp>
 #include <org/openoffice/excel/XChart.hpp>
+#include <org/openoffice/excel/XDataLabel.hpp>
+#include <org/openoffice/excel/XSeries.hpp>
 #include "vbahelperinterface.hxx"
 
 typedef InheritedHelperInterfaceImpl1<oo::excel::XChart > ChartImpl_BASE;
@@ -49,7 +56,14 @@ class ScVbaChart : public ChartImpl_BASE
 	css::uno::Reference< css::table::XTableChart > mxTableChart;
 	css::uno::Reference< css::beans::XPropertySet > mxDiagramPropertySet;
 	css::uno::Reference< css::beans::XPropertySet > mxChartPropertySet;
+	css::uno::Reference< css::chart::XAxisXSupplier > xAxisXSupplier;
+	css::uno::Reference< css::chart::XAxisYSupplier> xAxisYSupplier;
+	css::uno::Reference< css::chart::XAxisZSupplier > xAxisZSupplier;
+	css::uno::Reference< css::chart::XTwoAxisXSupplier > xTwoAxisXSupplier;
+	css::uno::Reference< css::chart::XTwoAxisYSupplier > xTwoAxisYSupplier;
+
 	css::uno::Sequence< rtl::OUString > getDefaultSeriesDescriptions( sal_Int32 nCount );
+	css::uno::Sequence< css::uno::Sequence< double > > dblValues;
 	void setDefaultChartType()throw ( css::script::BasicErrorException ) ;
 	void setDiagram( const rtl::OUString& _sDiagramType) throw( css::script::BasicErrorException );
 	bool is3D() throw ( css::uno::RuntimeException );
@@ -60,10 +74,21 @@ class ScVbaChart : public ChartImpl_BASE
 	sal_Int32 getStockUpDownValue(sal_Int32 _nUpDown, sal_Int32 _nNotUpDown) throw (css::script::BasicErrorException);
 	bool hasMarkers() throw ( css::script::BasicErrorException );
 	sal_Int32 getMarkerType(sal_Int32 _nWithMarkers, sal_Int32 _nWithoutMarkers) throw ( css::script::BasicErrorException ); 
-
+	void assignDiagramAttributes();
+	void setDefaultSeriesDescriptionLabels(){}
 public:
 	ScVbaChart( const css::uno::Reference< oo::vba::XHelperInterface >& _xParent, const css::uno::Reference< css::uno::XComponentContext >& _xContext, const css::uno::Reference< css::lang::XComponent >& _xChartComponent, const css::uno::Reference< css::table::XTableChart >& _xTableChart );
-	
+
+	// Non-interface
+	bool isSeriesIndexValid(sal_Int32 _seriesindex) throw( css::script::BasicErrorException );
+	bool areIndicesValid(sal_Int32 _seriesindex, sal_Int32 _valindex) throw ( css::script::BasicErrorException );
+	void setSeriesName(sal_Int32 _index, rtl::OUString _sname) throw ( css::script::BasicErrorException );
+	sal_Int32 getSeriesIndex(rtl::OUString _sseriesname) throw ( css::script::BasicErrorException );
+	sal_Int32 getSeriesCount() throw ( css::script::BasicErrorException );
+	rtl::OUString getSeriesName(sal_Int32 _index) throw ( css::script::BasicErrorException );
+	double getValue(sal_Int32 _seriesIndex, sal_Int32 _valindex) throw ( css::script::BasicErrorException );
+	sal_Int32 getValuesCount(sal_Int32 _seriesIndex) throw ( css::script::BasicErrorException );
+	css::uno::Reference< oo::excel::XDataLabels > DataLabels( const css::uno::Reference< oo::excel::XSeries > _oSeries ) throw ( css::script::BasicErrorException );
 	// Methods
 	virtual ::rtl::OUString SAL_CALL getName() throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL SeriesCollection(const css::uno::Any&) throw (css::uno::RuntimeException);
@@ -80,6 +105,7 @@ public:
 	virtual void SAL_CALL setHasLegend( ::sal_Bool bLegend ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
 	virtual void SAL_CALL setPlotBy( ::sal_Int32 xlRowCol ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
 	virtual ::sal_Int32 SAL_CALL getPlotBy(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual css::uno::Reference< oo::excel::XChartTitle > SAL_CALL getChartTitle(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
 	// XHelperInterface
 	virtual rtl::OUString& getServiceImplName();
 	virtual css::uno::Sequence<rtl::OUString> getServiceNames();
