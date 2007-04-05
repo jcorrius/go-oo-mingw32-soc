@@ -63,7 +63,8 @@ ScVbaCharts::getActiveChart() throw (script::BasicErrorException, uno::RuntimeEx
 	return xActiveChart;
 }
 
-uno::Reference< container::XEnumeration > SAL_CALL createEnumeration() throw (uno::RuntimeException)
+uno::Reference< container::XEnumeration > SAL_CALL 
+ScVbaCharts::createEnumeration() throw (uno::RuntimeException)
 {
 	// #FIXME not implemented
 	if ( true )

@@ -57,7 +57,7 @@ public:
 	// XEnumerationAccess
 	virtual css::uno::Reference< css::container::XEnumeration > SAL_CALL createEnumeration() throw (css::uno::RuntimeException);
 	// XElementAccess
-	virtual css::uno::Type SAL_CALL getElementType() throw (css::uno::RuntimeException);
+	virtual css::uno::Type SAL_CALL getElementType() throw (css::uno::RuntimeException) { return oo::excel::XChart::static_type(0); }
 	// ScVbaCollectionBaseImpl	
 	virtual css::uno::Any createCollectionObject( const css::uno::Any& aSource ); 
 	// Charts_BASE or HelperInterface
