@@ -44,7 +44,7 @@
 #include <com/sun/star/chart/XTwoAxisXSupplier.hpp>
 #include <com/sun/star/chart/XTwoAxisYSupplier.hpp>
 #include <org/openoffice/excel/XChart.hpp>
-#include <org/openoffice/excel/XDataLabel.hpp>
+#include <org/openoffice/excel/XDataLabels.hpp>
 #include <org/openoffice/excel/XSeries.hpp>
 #include "vbahelperinterface.hxx"
 
