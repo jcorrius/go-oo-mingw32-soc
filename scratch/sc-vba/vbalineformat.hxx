@@ -2,6 +2,7 @@
 #define SC_VBA_XLINEFORMAT_HXX
 
 #include <com/sun/star/drawing/XShape.hpp>
+#include <com/sun/star/beans/XPropertySet.hpp>
 #include <org/openoffice/msforms/XLineFormat.hpp>
 #include "vbahelperinterface.hxx"
 
@@ -11,9 +12,12 @@ class ScVbaLineFormat : public ScVbaLineFormat_BASE
 {
 private:
     css::uno::Reference< css::drawing::XShape > m_xShape;
+    css::uno::Reference< css::beans::XPropertySet > m_xPropertySet;
 protected:
     virtual rtl::OUString& getServiceImplName();
     virtual css::uno::Sequence<rtl::OUString> getServiceNames();
+    sal_Int32 convertLineStartEndNameToArrowheadStyle( rtl::OUString sLineName );
+    rtl::OUString convertArrowheadStyleToLineStartEndName( sal_Int32 nArrowheadStyle ) throw (css::uno::RuntimeException);
 public:
     ScVbaLineFormat( const css::uno::Reference< oo::vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::drawing::XShape > xShape );
 

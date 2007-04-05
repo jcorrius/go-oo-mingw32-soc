@@ -1,6 +1,7 @@
 #include<org/openoffice/office/MsoZOrderCmd.hpp>
 #include<org/openoffice/office/MsoScaleFrom.hpp>
 #include<com/sun/star/container/XNamed.hpp>
+#include<com/sun/star/drawing/ConnectorType.hpp>
 
 #include "vbashape.hxx"
 #include "vbatextframe.hxx"
@@ -36,7 +37,17 @@ ScVbaShape::getType( const css::uno::Reference< drawing::XShape > xShape ) throw
         return office::MsoShapeType::msoChart;
     // Art characters office::MsoShapeType::msoTextEffect, in OOo corresponding to "com.sun.star.drawing.CustomShape"
     else if( sShapeType.equals( rtl::OUString::createFromAscii( "com.sun.star.drawing.ConnectorShape" ) ) )
-        return office::MsoShapeType::msoLine;
+    {
+        enum drawing::ConnectorType connectorType;
+        uno::Reference< beans::XPropertySet > xPropertySet( xShape, uno::UNO_QUERY_THROW );
+        xPropertySet->getPropertyValue( rtl::OUString::createFromAscii("EdgeKind")) >>= connectorType;
+        if( connectorType == drawing::ConnectorType_CURVE )
+            return office::MsoShapeType::msoFreeform;
+        else if( connectorType == drawing::ConnectorType_LINE )
+            return office::MsoShapeType::msoLine;
+        else 
+            return office::MsoShapeType::msoAutoShape;
+    }
     else if( sShapeType.equals( rtl::OUString::createFromAscii( "com.sun.star.drawing.LineShape" ) ) )
         return office::MsoShapeType::msoLine;
     else if( sShapeType.equals( rtl::OUString::createFromAscii( "com.sun.star.drawing.CustomShape" ) ) )
