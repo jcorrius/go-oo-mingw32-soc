@@ -31,7 +31,7 @@ sal_Int32 ScVbaTextFrame::getMargin( rtl::OUString sMarginType )
 
 void ScVbaTextFrame::setMargin( rtl::OUString sMarginType, float fMargin )
 {
-    sal_Int32 nMargin = pointsToHundredthsMillimeter( fMargin );
+    sal_Int32 nMargin = Millimeter::getInHundredthsOfOneMillimeter( fMargin );
     m_xPropertySet->setPropertyValue( sMarginType, uno::makeAny( nMargin ) );
 }
 
@@ -59,7 +59,7 @@ float SAL_CALL
 ScVbaTextFrame::getMarginBottom() throw (uno::RuntimeException)
 {
     sal_Int32 nMargin = getMargin( rtl::OUString::createFromAscii( "TextLowerDistance" ) );
-    float fMargin = (float)hundredthsMillimeterToPoints( nMargin );
+    float fMargin = (float)Millimeter::getInPoints( nMargin );
     return fMargin;
 }
 
@@ -73,7 +73,7 @@ float SAL_CALL
 ScVbaTextFrame::getMarginTop() throw (uno::RuntimeException)
 {
     sal_Int32 nMargin = getMargin( rtl::OUString::createFromAscii( "TextUpperDistance" ) );
-    float fMargin = (float)hundredthsMillimeterToPoints( nMargin );
+    float fMargin = (float)Millimeter::getInPoints( nMargin );
     return fMargin;
 }
 
@@ -87,7 +87,7 @@ float SAL_CALL
 ScVbaTextFrame::getMarginLeft() throw (uno::RuntimeException)
 {
     sal_Int32 nMargin = getMargin( rtl::OUString::createFromAscii( "TextLeftDistance" ) );
-    float fMargin = (float)hundredthsMillimeterToPoints( nMargin );
+    float fMargin = (float)Millimeter::getInPoints( nMargin );
     return fMargin;
 }
 
@@ -101,7 +101,7 @@ float SAL_CALL
 ScVbaTextFrame::getMarginRight() throw (uno::RuntimeException)
 {
     sal_Int32 nMargin = getMargin( rtl::OUString::createFromAscii( "TextRightDistance" ) );
-    float fMargin = (float)hundredthsMillimeterToPoints( nMargin );
+    float fMargin = (float)Millimeter::getInPoints( nMargin );
     return fMargin;
 }
 

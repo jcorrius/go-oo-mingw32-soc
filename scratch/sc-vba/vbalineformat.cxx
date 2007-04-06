@@ -1,6 +1,9 @@
 #include <org/openoffice/office/MsoArrowheadStyle.hpp>
 #include <org/openoffice/office/MsoArrowheadLength.hpp>
 #include <org/openoffice/office/MsoArrowheadWidth.hpp>
+#include <org/openoffice/office/MsoLineDashStyle.hpp>
+#include <com/sun/star/drawing/LineStyle.hpp>
+#include <com/sun/star/drawing/LineDash.hpp>
 #include "vbalineformat.hxx"
 
 using namespace org::openoffice;
@@ -9,6 +12,14 @@ using namespace com::sun::star;
 ScVbaLineFormat::ScVbaLineFormat( const uno::Reference< oo::vba::XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< drawing::XShape > xShape ) : ScVbaLineFormat_BASE( xParent, xContext ), m_xShape( xShape ) 
 {
     m_xPropertySet.set( xShape, uno::UNO_QUERY_THROW );
+    m_nLineDashStyle = office::MsoLineDashStyle::msoLineSolid;
+    m_nLineWeight = 1;
+}
+
+sal_Int32
+ScVbaLineFormat::calculateArrowheadSize()
+{
+    return 0;
 }
 
 sal_Int32
@@ -132,6 +143,161 @@ void SAL_CALL
 ScVbaLineFormat::setBeginArrowheadWidth( sal_Int32 _beginarrowheadwidth ) throw (uno::RuntimeException)
 {
     throw uno::RuntimeException( rtl::OUString::createFromAscii("Property 'EndArrowheadWidth' is not supported."), uno::Reference< uno::XInterface >() );
+}
+
+sal_Int32 SAL_CALL 
+ScVbaLineFormat::getEndArrowheadStylel() throw (uno::RuntimeException)
+{
+    return 0;
+}
+
+void SAL_CALL 
+ScVbaLineFormat::setEndArrowheadStylel( sal_Int32 _endarrowheadstylel ) throw (uno::RuntimeException)
+{
+}
+
+sal_Int32 SAL_CALL 
+ScVbaLineFormat::getEndArrowheadLength() throw (uno::RuntimeException)
+{
+    throw uno::RuntimeException( rtl::OUString::createFromAscii("Property 'EndArrowheadWidth' is not supported."), uno::Reference< uno::XInterface >() );
+}
+
+void SAL_CALL 
+ScVbaLineFormat::setEndArrowheadLength( sal_Int32 _endarrowheadlength ) throw (uno::RuntimeException)
+{
+    throw uno::RuntimeException( rtl::OUString::createFromAscii("Property 'EndArrowheadWidth' is not supported."), uno::Reference< uno::XInterface >() );
+}
+
+sal_Int32 SAL_CALL 
+ScVbaLineFormat::getEndArrowheadWidth() throw (uno::RuntimeException)
+{
+    throw uno::RuntimeException( rtl::OUString::createFromAscii("Property 'EndArrowheadWidth' is not supported."), uno::Reference< uno::XInterface >() );
+}
+
+void SAL_CALL 
+ScVbaLineFormat::setEndArrowheadWidth( sal_Int32 _endarrowheadwidth ) throw (uno::RuntimeException)
+{
+    throw uno::RuntimeException( rtl::OUString::createFromAscii("Property 'EndArrowheadWidth' is not supported."), uno::Reference< uno::XInterface >() );
+}
+
+double SAL_CALL 
+ScVbaLineFormat::getWeight() throw (uno::RuntimeException)
+{
+    sal_Int32 nLineWidth;
+    m_xPropertySet->getPropertyValue( rtl::OUString::createFromAscii( "LineWidth") ) >>= nLineWidth;
+    double dLineWidth = Millimeter::getInPoints( nLineWidth );
+    return dLineWidth;
+}
+
+void SAL_CALL 
+ScVbaLineFormat::setWeight( double _weight ) throw (uno::RuntimeException)
+{
+    if( _weight < 0 )
+        throw uno::RuntimeException( rtl::OUString::createFromAscii("Parameter: Must be positv."), uno::Reference< uno::XInterface >() );
+    if( _weight == 0 )
+        _weight = 0.5;
+        
+    sal_Int32 nLineWidth = Millimeter::getInHundredthsOfOneMillimeter( _weight );
+    m_xPropertySet->setPropertyValue( rtl::OUString::createFromAscii( "LineWidth" ), uno::makeAny( nLineWidth ) );
+}
+
+sal_Bool SAL_CALL 
+ScVbaLineFormat::getVisible() throw (uno::RuntimeException)
+{
+    return sal_True;
+}
+
+void SAL_CALL 
+ScVbaLineFormat::setVisible( sal_Bool _visible ) throw (uno::RuntimeException)
+{
+}
+
+double SAL_CALL 
+ScVbaLineFormat::getTransparency() throw (uno::RuntimeException)
+{
+    return double(0);
+}
+
+void SAL_CALL 
+ScVbaLineFormat::setTransparency( double _transparency ) throw (uno::RuntimeException)
+{
+}
+
+sal_Int16 SAL_CALL 
+ScVbaLineFormat::getStyle() throw (uno::RuntimeException)
+{
+    return sal_Int16(0);
+}
+
+void SAL_CALL 
+ScVbaLineFormat::setStyle( sal_Int16 _style ) throw (uno::RuntimeException)
+{
+}
+
+sal_Int32 SAL_CALL 
+ScVbaLineFormat::getDashStyle() throw (uno::RuntimeException)
+{
+    sal_Int32 m_nLineDashStyle;
+    enum drawing::LineStyle eLineStyle;
+    //LineStyle integer in Xray
+    m_xPropertySet->getPropertyValue( rtl::OUString::createFromAscii( "LineStyle" ) ) >>= eLineStyle;
+    if( eLineStyle = drawing::LineStyle_SOLID )
+        m_nLineDashStyle = office::MsoLineDashStyle::msoLineSolid;
+    else
+    {
+        drawing::LineDash aLineDash;
+        m_xPropertySet->getPropertyValue( rtl::OUString::createFromAscii( "LineDash" ) ) >>= aLineDash;
+        if( aLineDash.Dots == 0 )
+        {
+            //LineDash
+            //LineLongDash
+            m_nLineDashStyle = office::MsoLineDashStyle::msoLineDash;
+            if( aLineDash.Distance > 0 && ( aLineDash.DashLen / aLineDash.Distance > 1 ) )
+            {
+                m_nLineDashStyle = office::MsoLineDashStyle::msoLineLongDash;
+            }
+        }
+        else if( aLineDash.Dots == 1 )
+        {
+            // LineDashDot
+            // LineLongDashDot
+            // LineSquareDot
+            // LineRoundDot ! not supported
+            m_nLineDashStyle = office::MsoLineDashStyle::msoLineDashDot;
+            if( aLineDash.Dashes == 0 )
+            {
+                m_nLineDashStyle = office::MsoLineDashStyle::msoLineSquareDot;
+            }
+            else
+            {
+                if( aLineDash.Distance > 0 && ( aLineDash.DashLen / aLineDash.Distance > 1 ) )
+                {
+                    m_nLineDashStyle = office::MsoLineDashStyle::msoLineLongDashDot;
+                }
+            }
+        }
+        else if( aLineDash.Dots == 2 )
+        {
+            // LineDashDotDot
+            m_nLineDashStyle = office::MsoLineDashStyle::msoLineDashDotDot;
+        }
+    }
+
+    return m_nLineDashStyle;
+}
+
+void SAL_CALL 
+ScVbaLineFormat::setDashStyle( sal_Int32 _dashstyle ) throw (uno::RuntimeException)
+{
+    m_nLineDashStyle = _dashstyle;
+    if( _dashstyle == office::MsoLineDashStyle::msoLineSolid )
+    {
+        m_xPropertySet->setPropertyValue( rtl::OUString::createFromAscii( "LineStyle" ), uno::makeAny( drawing::LineStyle_SOLID  ));
+    }
+    else
+    {
+        m_xPropertySet->setPropertyValue( rtl::OUString::createFromAscii( "LineStyle" ), uno::makeAny( drawing::LineStyle_DASH ) );
+    }
 }
 
 

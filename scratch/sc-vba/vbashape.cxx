@@ -76,35 +76,35 @@ ScVbaShape::setName( const rtl::OUString& _name ) throw (uno::RuntimeException)
 double SAL_CALL 
 ScVbaShape::getHeight() throw (uno::RuntimeException)
 {
-    return hundredthsMillimeterToPoints( m_xShape->getSize().Height );
+    return Millimeter::getInPoints( m_xShape->getSize().Height );
 }
 
 void SAL_CALL 
 ScVbaShape::setHeight( double _height ) throw (uno::RuntimeException)
 {
     awt::Size aSize( m_xShape->getSize() );
-    aSize.Height = pointsToHundredthsMillimeter( _height );
+    aSize.Height = Millimeter::getInHundredthsOfOneMillimeter( _height );
     m_xShape->setSize( aSize );
 }
 
 double SAL_CALL 
 ScVbaShape::getWidth() throw (uno::RuntimeException)
 {
-    return hundredthsMillimeterToPoints( m_xShape->getSize().Width );
+    return Millimeter::getInPoints( m_xShape->getSize().Width );
 }
 
 void SAL_CALL 
 ScVbaShape::setWidth( double _width ) throw (uno::RuntimeException)
 {
     awt::Size aSize( m_xShape->getSize() );
-    aSize.Width = pointsToHundredthsMillimeter( _width );
+    aSize.Width = Millimeter::getInHundredthsOfOneMillimeter( _width );
     m_xShape->setSize( aSize );
 }
 
 double SAL_CALL 
 ScVbaShape::getLeft() throw (uno::RuntimeException)
 {
-    return hundredthsMillimeterToPoints( m_xShape->getPosition().X );
+    return Millimeter::getInPoints( m_xShape->getPosition().X );
 }
 
 void SAL_CALL 
@@ -112,14 +112,14 @@ ScVbaShape::setLeft( double _left ) throw (uno::RuntimeException)
 {
     awt::Point oldPosition;
     oldPosition = m_xShape->getPosition();
-    oldPosition.X = pointsToHundredthsMillimeter( _left );
+    oldPosition.X = Millimeter::getInHundredthsOfOneMillimeter( _left );
     m_xShape->setPosition( oldPosition );
 }
 
 double SAL_CALL 
 ScVbaShape::getTop() throw (uno::RuntimeException)
 {
-    return hundredthsMillimeterToPoints( m_xShape->getPosition().Y );
+    return Millimeter::getInPoints( m_xShape->getPosition().Y );
 }
 
 void SAL_CALL 
@@ -127,7 +127,7 @@ ScVbaShape::setTop( double _top ) throw (uno::RuntimeException)
 {
     awt::Point oldPosition;
     oldPosition = m_xShape->getPosition();
-    oldPosition.Y = pointsToHundredthsMillimeter( _top );
+    oldPosition.Y = Millimeter::getInHundredthsOfOneMillimeter( _top );
     m_xShape->setPosition( oldPosition );
 }
 
