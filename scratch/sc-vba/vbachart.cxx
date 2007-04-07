@@ -44,6 +44,7 @@
 #include <com/sun/star/chart/ChartSymbolType.hpp>
 #include <com/sun/star/chart/ChartSolidType.hpp>
 #include <com/sun/star/chart/ChartDataRowSource.hpp>
+#include <com/sun/star/chart/ChartDataCaption.hpp>
 #include <org/openoffice/excel/XlChartType.hpp>
 #include <org/openoffice/excel/XlRowCol.hpp>
 #include <basic/sberrors.hxx>
@@ -73,6 +74,7 @@ const rtl::OUString STACKED( RTL_CONSTASCII_USTRINGPARAM("Stacked") );
 const rtl::OUString DIM3D( RTL_CONSTASCII_USTRINGPARAM("Dim3D") );
 const rtl::OUString HASMAINTITLE( RTL_CONSTASCII_USTRINGPARAM("HasMainTitle") );
 const rtl::OUString HASLEGEND( RTL_CONSTASCII_USTRINGPARAM("HasLegend") );
+const rtl::OUString DATACAPTION( RTL_CONSTASCII_USTRINGPARAM("DataCaption") );
 
 ScVbaChart::ScVbaChart( const css::uno::Reference< oo::vba::XHelperInterface >& _xParent, const css::uno::Reference< css::uno::XComponentContext >& _xContext, const css::uno::Reference< css::lang::XComponent >& _xChartComponent, const css::uno::Reference< css::table::XTableChart >& _xTableChart ) : ChartImpl_BASE( _xParent, _xContext ), mxTableChart( _xTableChart )
 {
@@ -874,6 +876,19 @@ ScVbaChart::getChartTitle(  ) throw (script::BasicErrorException, uno::RuntimeEx
 	return new ScVbaChartTitle(this, mxContext, xTitleShape);		
 }
 
+uno::Any SAL_CALL 
+ScVbaChart::Axes( const uno::Any& Type, const uno::Any& AxisGroup ) throw (script::BasicErrorException, uno::RuntimeException)
+{
+	if ( !Type.hasValue() )
+	{
+		// return ScVbaAxes collection of Axis
+	}
+	else
+	{
+		//ScVbaAxes xAxes;
+		//xAxes.item( Type, AxisGroup );
+	}
+}
 bool
 ScVbaChart::is3D() throw ( uno::RuntimeException )
 {
@@ -1141,11 +1156,45 @@ ScVbaChart::getValuesCount(sal_Int32 _seriesIndex) throw ( script::BasicErrorExc
 
 
 uno::Reference< excel::XDataLabels > 
-ScVbaChart::DataLabels( const uno::Reference< oo::excel::XSeries > _oSeries ) throw ( css::script::BasicErrorException )
+ScVbaChart::DataLabels( const uno::Reference< oo::excel::XSeries > /*_oSeries*/ ) throw ( css::script::BasicErrorException )
 {
 	if ( true )
 		throw script::BasicErrorException( rtl::OUString(), uno::Reference< uno::XInterface >(), SbERR_METHOD_FAILED, rtl::OUString() );
+	// #TODO #FIXE provide implementation
 	return uno::Reference< excel::XDataLabels > ();
+}
+
+bool 
+ScVbaChart::getHasDataCaption( const uno::Reference< css::beans::XPropertySet >& _xPropertySet )throw ( script::BasicErrorException )
+{
+	bool bResult = false;
+	try
+	{
+		sal_Int32 nChartDataCaption = 0;
+		_xPropertySet->getPropertyValue(DATACAPTION) >>= nChartDataCaption;
+		bResult = (nChartDataCaption != chart::ChartDataCaption::NONE);
+	} 
+	catch (uno::Exception& e) 
+	{
+		throw script::BasicErrorException( rtl::OUString(), uno::Reference< uno::XInterface >(), SbERR_METHOD_FAILED, rtl::OUString() );
+	}
+	return bResult;
+}
+
+void 
+ScVbaChart::setHasDataCaption( const uno::Reference< beans::XPropertySet >& _xPropertySet, bool _bHasDataLabels )throw ( script::BasicErrorException )
+{
+	try
+	{
+		if ( _bHasDataLabels )
+			_xPropertySet->setPropertyValue(DATACAPTION, uno::makeAny ( chart::ChartDataCaption::VALUE) );
+		else
+			_xPropertySet->setPropertyValue(DATACAPTION, uno::makeAny ( chart::ChartDataCaption::NONE) );
+	} 
+	catch (uno::Exception& e) 
+	{
+		throw script::BasicErrorException( rtl::OUString(), uno::Reference< uno::XInterface >(), SbERR_METHOD_FAILED, rtl::OUString() );
+	}
 }
 
 rtl::OUString&
