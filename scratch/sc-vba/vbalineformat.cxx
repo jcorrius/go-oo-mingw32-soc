@@ -404,7 +404,7 @@ ScVbaLineFormat::BackColor() throw (uno::RuntimeException)
 uno::Reference< msforms::XColorFormat > SAL_CALL
 ScVbaLineFormat::ForeColor() throw (uno::RuntimeException)
 {
-    return uno::Reference< msforms::XColorFormat >( new ScVbaColorFormat( getParent(), mxContext, this, m_xShape, ::ColorFormatType::LINEFORMAT_BACKCOLOR ) );
+    return uno::Reference< msforms::XColorFormat >( new ScVbaColorFormat( getParent(), mxContext, this, m_xShape, ::ColorFormatType::LINEFORMAT_FORECOLOR ) );
 }
 
 
