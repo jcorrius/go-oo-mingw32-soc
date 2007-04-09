@@ -69,8 +69,10 @@ SLOFILES= \
                 $(SLO)$/vbapropvalue.obj \
                 $(SLO)$/vbapane.obj \
                 $(SLO)$/vbashape.obj \
+                $(SLO)$/vbacolorformat.obj \
                 $(SLO)$/vbashapes.obj \
                 $(SLO)$/vbalineformat.obj \
+                $(SLO)$/vbafillformat.obj \
                 $(SLO)$/vbashaperange.obj \
                 $(SLO)$/vbatextframe.obj \
                 $(SLO)$/vbacharttitle.obj \

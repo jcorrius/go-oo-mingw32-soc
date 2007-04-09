@@ -5,6 +5,7 @@
 #include <com/sun/star/drawing/LineStyle.hpp>
 #include <com/sun/star/drawing/LineDash.hpp>
 #include "vbalineformat.hxx"
+#include "vbacolorformat.hxx"
 
 using namespace org::openoffice;
 using namespace com::sun::star;
@@ -196,52 +197,86 @@ ScVbaLineFormat::setWeight( double _weight ) throw (uno::RuntimeException)
         throw uno::RuntimeException( rtl::OUString::createFromAscii("Parameter: Must be positv."), uno::Reference< uno::XInterface >() );
     if( _weight == 0 )
         _weight = 0.5;
+    m_nLineWeight = _weight;
+    Millimeter aMillimeter;
+    aMillimeter.setInPoints( _weight );
         
-    sal_Int32 nLineWidth = Millimeter::getInHundredthsOfOneMillimeter( _weight );
+    sal_Int32 nLineWidth = static_cast<sal_Int32>( aMillimeter.getInHundredthsOfOneMillimeter() );
     m_xPropertySet->setPropertyValue( rtl::OUString::createFromAscii( "LineWidth" ), uno::makeAny( nLineWidth ) );
+    setDashStyle( m_nLineDashStyle );
 }
 
 sal_Bool SAL_CALL 
 ScVbaLineFormat::getVisible() throw (uno::RuntimeException)
 {
+    drawing::LineStyle aLineStyle;
+    m_xPropertySet->getPropertyValue( rtl::OUString::createFromAscii( "LineStyle" ) ) >>= aLineStyle;
+    if( aLineStyle == drawing::LineStyle_NONE )
+    {
+        return sal_False;
+    }
     return sal_True;
 }
 
 void SAL_CALL 
 ScVbaLineFormat::setVisible( sal_Bool _visible ) throw (uno::RuntimeException)
 {
+    drawing::LineStyle aLineStyle;
+    m_xPropertySet->getPropertyValue( rtl::OUString::createFromAscii( "LineStyle" ) ) >>= aLineStyle;
+    if( !_visible )
+    {
+        aLineStyle = drawing::LineStyle_NONE;
+        m_xPropertySet->setPropertyValue( rtl::OUString::createFromAscii( "LineStyle" ), uno::makeAny( aLineStyle ) );
+    }
+    else
+    {
+        if( aLineStyle == drawing::LineStyle_NONE )
+        {
+            setDashStyle( m_nLineDashStyle );
+        }
+    }
 }
 
 double SAL_CALL 
 ScVbaLineFormat::getTransparency() throw (uno::RuntimeException)
 {
-    return double(0);
+    sal_Int16 nTransparency = 0;
+    m_xPropertySet->getPropertyValue( rtl::OUString::createFromAscii( "LineTransparence" ) ) >>= nTransparency;
+    double fTransparency = static_cast<double>( nTransparency );
+    return fTransparency / 100;
 }
 
 void SAL_CALL 
 ScVbaLineFormat::setTransparency( double _transparency ) throw (uno::RuntimeException)
 {
+    sal_Int16 nTransparency = static_cast<sal_Int16>( _transparency * 100 );
+    m_xPropertySet->setPropertyValue( rtl::OUString::createFromAscii( "LineTransparence" ), uno::makeAny( nTransparency ) );
 }
 
 sal_Int16 SAL_CALL 
 ScVbaLineFormat::getStyle() throw (uno::RuntimeException)
 {
+    //OpenOffice.org only supports one LineStyle (other than the DashStyles)
+    //Therefore we can only return the SingleLine
     return sal_Int16(0);
 }
 
 void SAL_CALL 
 ScVbaLineFormat::setStyle( sal_Int16 _style ) throw (uno::RuntimeException)
 {
+    //OpenOffice.org only supports one LineStyle (other than the DashStyles)
+    //Therefore we do not set the LineStyle, because it maybe is already set
+    //to Dashed or Single Line. Setting the 'Visible' or 'DashStyle' properties
+    //will be done with the according methods.
 }
 
 sal_Int32 SAL_CALL 
 ScVbaLineFormat::getDashStyle() throw (uno::RuntimeException)
 {
-    sal_Int32 m_nLineDashStyle;
-    enum drawing::LineStyle eLineStyle;
+    drawing::LineStyle eLineStyle;
     //LineStyle integer in Xray
     m_xPropertySet->getPropertyValue( rtl::OUString::createFromAscii( "LineStyle" ) ) >>= eLineStyle;
-    if( eLineStyle = drawing::LineStyle_SOLID )
+    if( eLineStyle == drawing::LineStyle_SOLID )
         m_nLineDashStyle = office::MsoLineDashStyle::msoLineSolid;
     else
     {
@@ -297,7 +332,79 @@ ScVbaLineFormat::setDashStyle( sal_Int32 _dashstyle ) throw (uno::RuntimeExcepti
     else
     {
         m_xPropertySet->setPropertyValue( rtl::OUString::createFromAscii( "LineStyle" ), uno::makeAny( drawing::LineStyle_DASH ) );
+        drawing::LineDash  *pLineDash = new drawing::LineDash();
+        Millimeter aMillimeter( m_nLineWeight );
+        sal_Int32 nPixel = static_cast< sal_Int32 >( aMillimeter.getInHundredthsOfOneMillimeter() );
+        switch( _dashstyle )
+        {
+        case office::MsoLineDashStyle::msoLineDashDot:
+            pLineDash->Dots = 1;
+            pLineDash->DotLen = nPixel;
+            pLineDash->Dashes = 1;
+            pLineDash->DashLen = 5 * nPixel;
+            pLineDash->Distance = 4 * nPixel;
+            break;
+        case office::MsoLineDashStyle::msoLineLongDashDot:
+            pLineDash->Dots = 1;
+            pLineDash->DotLen = nPixel;
+            pLineDash->Dashes = 1;
+            pLineDash->DashLen = 10 * nPixel;
+            pLineDash->Distance = 4 * nPixel;
+            break;
+        case office::MsoLineDashStyle::msoLineDash:
+            pLineDash->Dots = 0;
+            pLineDash->DotLen = 0;
+            pLineDash->Dashes = 1;
+            pLineDash->DashLen = 6 * nPixel;
+            pLineDash->Distance = 4 * nPixel;
+            break;
+        case office::MsoLineDashStyle::msoLineDashDotDot:
+            pLineDash->Dots = 2;
+            pLineDash->DotLen = nPixel;
+            pLineDash->Dashes = 1;
+            pLineDash->DashLen = 10 * nPixel;
+            pLineDash->Distance = 3 * nPixel;
+            break;
+        case office::MsoLineDashStyle::msoLineLongDash:
+            pLineDash->Dots = 0;
+            pLineDash->DotLen = 0;
+            pLineDash->Dashes = 1;
+            pLineDash->DashLen = 10 * nPixel;
+            pLineDash->Distance = 4 * nPixel;
+            break;
+        case office::MsoLineDashStyle::msoLineSquareDot:
+            pLineDash->Dots = 1;
+            pLineDash->DotLen = nPixel;
+            pLineDash->Dashes = 0;
+            pLineDash->DashLen = 0;
+            pLineDash->Distance = nPixel;
+            break;
+        case office::MsoLineDashStyle::msoLineRoundDot:
+            pLineDash->Dots = 1;
+            pLineDash->DotLen = nPixel;
+            pLineDash->Dashes = 0;
+            pLineDash->DashLen = 0;
+            pLineDash->Distance = nPixel;
+            break;
+        default:
+            throw uno::RuntimeException( rtl::OUString::createFromAscii("this MsoLineDashStyle is not supported."), uno::Reference< uno::XInterface >() );
+            break; 
+        }
+        m_xPropertySet->setPropertyValue( rtl::OUString::createFromAscii( "LineDash" ), uno::makeAny( *pLineDash ) );
     }
+}
+
+// Methods
+uno::Reference< msforms::XColorFormat > SAL_CALL
+ScVbaLineFormat::BackColor() throw (uno::RuntimeException)
+{
+    return uno::Reference< msforms::XColorFormat >( new ScVbaColorFormat( getParent(), mxContext, this, m_xShape, ::ColorFormatType::LINEFORMAT_BACKCOLOR ) );
+}
+
+uno::Reference< msforms::XColorFormat > SAL_CALL
+ScVbaLineFormat::ForeColor() throw (uno::RuntimeException)
+{
+    return uno::Reference< msforms::XColorFormat >( new ScVbaColorFormat( getParent(), mxContext, this, m_xShape, ::ColorFormatType::LINEFORMAT_BACKCOLOR ) );
 }
 
 

@@ -47,6 +47,10 @@ public:
     virtual void SAL_CALL setStyle( sal_Int16 _style ) throw (css::uno::RuntimeException);
     virtual sal_Int32 SAL_CALL getDashStyle() throw (css::uno::RuntimeException);
     virtual void SAL_CALL setDashStyle( sal_Int32 _dashstyle ) throw (css::uno::RuntimeException);
+
+    // Methods
+    virtual css::uno::Reference< oo::msforms::XColorFormat > SAL_CALL BackColor() throw (css::uno::RuntimeException);
+    virtual css::uno::Reference< oo::msforms::XColorFormat > SAL_CALL ForeColor() throw (css::uno::RuntimeException);
 };
 
 #endif//SC_VBA_XLINEFORMAT_HXX
