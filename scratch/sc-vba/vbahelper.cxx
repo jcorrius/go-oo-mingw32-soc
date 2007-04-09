@@ -52,6 +52,7 @@
 
 #include <basic/sbx.hxx>
 #include <basic/sbstar.hxx>
+#include <rtl/math.hxx>
 
 #include <math.h>
 #include "vbahelper.hxx"
@@ -515,13 +516,12 @@ void PrintOutHelper( const uno::Any& From, const uno::Any& To, const uno::Any& C
 	}
 	
 	// #FIXME #TODO
-	// 1 Preview ( does such a thing exist in OO.org? )
-	// 2 ActivePrinter ( how/can we switch a printer via API? )
-	// 3 PrintToFile ( ms behaviour if this option is specified but no 
+	// 1 ActivePrinter ( how/can we switch a printer via API? )
+	// 2 PrintToFile ( ms behaviour if this option is specified but no 
 	//   filename supplied 'PrToFileName' then the user will be prompted )
-	// 4 Need to check behaviour of Selected sheets with range ( e.g. From & To
+	// 3 Need to check behaviour of Selected sheets with range ( e.g. From & To
 	//    values ) in oOO these options are mutually exclusive
-	// 5 There is a pop up to do with transparent objects in the print source
+	// 4 There is a pop up to do with transparent objects in the print source
 	//   should be able to disable that via configuration for the duration
 	//   of this method
 }
