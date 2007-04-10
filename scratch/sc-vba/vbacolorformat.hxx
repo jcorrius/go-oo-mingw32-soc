@@ -19,6 +19,59 @@ public:
     const static sal_Int16 THREEDFORMAT_EXTRUSIONCOLOR = 5;
 };
 
+struct MsoColorIndizes
+{
+    const static sal_Int32 HAPICOLOR_BLACK = 0;
+    const static sal_Int32 HAPICOLOR_WITHE = 16777215;
+    const static sal_Int32 HAPICOLOR_RED = 16711680;
+    const static sal_Int32 HAPICOLOR_BRIGHTGREEN = 65280;
+    const static sal_Int32 HAPICOLOR_BLUE = 255;
+    const static sal_Int32 HAPICOLOR_YELLOW = 16776960;
+    const static sal_Int32 HAPICOLOR_PINK = 16711935;
+    const static sal_Int32 HAPICOLOR_TURQUOISE = 65535;
+    const static sal_Int32 HAPICOLOR_DARKRED = 8388608;
+    const static sal_Int32 HAPICOLOR_GREEN = 32768;
+    const static sal_Int32 HAPICOLOR_DARKBLUE = 128;
+    const static sal_Int32 HAPICOLOR_DARKYELLOW = 8421376;
+    const static sal_Int32 HAPICOLOR_VIOLET = 8388736;
+    const static sal_Int32 HAPICOLOR_TEAL = 32896;
+    const static sal_Int32 HAPICOLOR_GRAY_25_PERCENT = 12632256;
+    const static sal_Int32 HAPICOLOR_GRAY_50_PERCENT = 8421504;
+    const static sal_Int32 HAPICOLOR_PERIWINCKLE = 10066431;
+    const static sal_Int32 HAPICOLOR_PLUM = 10040166;
+    const static sal_Int32 HAPICOLOR_IVORY = 16777164;
+    const static sal_Int32 HAPICOLOR_LIGHTTURQUOISE = 13434879;
+    const static sal_Int32 HAPICOLOR_DARKPRUPLE = 6684774;
+    const static sal_Int32 HAPICOLOR_CORAL = 16744576;
+    const static sal_Int32 HAPICOLOR_OCEANBLUE = 26316;
+    const static sal_Int32 HAPICOLOR_ICEBLUE = 13421823;
+    const static sal_Int32 HAPICOLOR_SKYBLUE = 52479;
+    const static sal_Int32 HAPICOLOR_LIGHTGREEN = 13434828;
+    const static sal_Int32 HAPICOLOR_LIGHTYELLOW = 16777113;
+    const static sal_Int32 HAPICOLOR_PALEBLUE = 10079487;
+    const static sal_Int32 HAPICOLOR_ROSE = 16751052;
+    const static sal_Int32 HAPICOLOR_LAVENDER = 13408767;
+    const static sal_Int32 HAPICOLOR_TAN = 16764057;
+    const static sal_Int32 HAPICOLOR_LIGHTBLUE = 3368703;
+    const static sal_Int32 HAPICOLOR_AQUA = 3394764;
+    const static sal_Int32 HAPICOLOR_LIME = 10079232;
+    const static sal_Int32 HAPICOLOR_GOLD = 16763904;
+    const static sal_Int32 HAPICOLOR_LIGHTORANGE = 16750848;
+    const static sal_Int32 HAPICOLOR_ORANGE = 16737792;
+    const static sal_Int32 HAPICOLOR_BLUEGRAY = 6710937;
+    const static sal_Int32 HAPICOLOR_GRAY_40_PERCENT = 9868950;
+    const static sal_Int32 HAPICOLOR_DARKTEAL = 13158;
+    const static sal_Int32 HAPICOLOR_SEAGREEN = 3381606;
+    const static sal_Int32 HAPICOLOR_NONAME = 13056;
+    const static sal_Int32 HAPICOLOR_OLIVEGREEN = 3355392;
+    const static sal_Int32 HAPICOLOR_BROWN = 10040064;
+    const static sal_Int32 HAPICOLOR_INDIGO = 3355545;
+    const static sal_Int32 HAPICOLOR_GRAY_80_PERCENT = 3355443;
+
+    const static sal_Int32 getColorIndex( sal_Int32 nIndex );
+    
+};
+
 class ScVbaColorFormat : public ScVbaColorFormat_BASE
 {
 private:

@@ -5,6 +5,23 @@
 using namespace org::openoffice;
 using namespace com::sun::star;
 
+const sal_Int32
+MsoColorIndizes::getColorIndex( sal_Int32 nIndex )
+{
+    const static sal_Int32 COLORINDIZES[56] =
+    {   HAPICOLOR_BLACK, HAPICOLOR_WITHE, HAPICOLOR_RED, HAPICOLOR_BRIGHTGREEN, HAPICOLOR_BLUE, HAPICOLOR_YELLOW, HAPICOLOR_PINK,
+        HAPICOLOR_TURQUOISE, HAPICOLOR_DARKRED, HAPICOLOR_GREEN, HAPICOLOR_DARKBLUE, HAPICOLOR_DARKYELLOW, HAPICOLOR_VIOLET,
+        HAPICOLOR_TEAL, HAPICOLOR_GRAY_25_PERCENT, HAPICOLOR_GRAY_50_PERCENT, HAPICOLOR_PERIWINCKLE, HAPICOLOR_PLUM,
+        HAPICOLOR_IVORY, HAPICOLOR_LIGHTTURQUOISE, HAPICOLOR_DARKPRUPLE, HAPICOLOR_CORAL, HAPICOLOR_OCEANBLUE, HAPICOLOR_ICEBLUE,
+        HAPICOLOR_GREEN, HAPICOLOR_PINK, HAPICOLOR_YELLOW, HAPICOLOR_TURQUOISE, HAPICOLOR_VIOLET, HAPICOLOR_DARKRED, HAPICOLOR_TEAL,
+        HAPICOLOR_BLUE, HAPICOLOR_SKYBLUE, HAPICOLOR_LIGHTTURQUOISE, HAPICOLOR_LIGHTGREEN, HAPICOLOR_LIGHTYELLOW, HAPICOLOR_PALEBLUE,
+        HAPICOLOR_ROSE, HAPICOLOR_LAVENDER, HAPICOLOR_TAN, HAPICOLOR_LIGHTBLUE, HAPICOLOR_AQUA, HAPICOLOR_LIME, HAPICOLOR_GOLD,
+        HAPICOLOR_LIGHTORANGE, HAPICOLOR_ORANGE, HAPICOLOR_BLUEGRAY, HAPICOLOR_GRAY_40_PERCENT, HAPICOLOR_DARKTEAL,
+        HAPICOLOR_SEAGREEN, HAPICOLOR_NONAME, HAPICOLOR_OLIVEGREEN, HAPICOLOR_BROWN, HAPICOLOR_PLUM, HAPICOLOR_INDIGO,
+        HAPICOLOR_GRAY_80_PERCENT
+    };
+    return COLORINDIZES[nIndex];
+}
 ScVbaColorFormat::ScVbaColorFormat( const uno::Reference< vba::XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< vba::XHelperInterface > xInternalParent, const uno::Reference< drawing::XShape > xShape, const sal_Int16 nColorFormatType ) : ScVbaColorFormat_BASE( xParent, xContext ), m_xInternalParent( xInternalParent ), m_xShape( xShape ), m_nColorFormatType( nColorFormatType )
 {
     m_xPropertySet.set( xShape, uno::UNO_QUERY_THROW );
@@ -68,7 +85,6 @@ ScVbaColorFormat::setRGB( sal_Int32 _rgb ) throw (uno::RuntimeException)
         m_xPropertySet->setPropertyValue( rtl::OUString::createFromAscii( "FillColor" ), uno::makeAny( _rgb ) );
         if( m_pFillFormat )
         {
-            //TODO
             m_pFillFormat->setForeColorAndInternalStyle(nRGB);
         }
         break;
@@ -76,7 +92,6 @@ ScVbaColorFormat::setRGB( sal_Int32 _rgb ) throw (uno::RuntimeException)
         m_nFillFormatBackColor = nRGB;
         if( m_pFillFormat )
         {
-            //TODO
             m_pFillFormat->setForeColorAndInternalStyle(nRGB);
         }
         break;
@@ -92,9 +107,8 @@ ScVbaColorFormat::getSchemeColor() throw (uno::RuntimeException)
     sal_Int32 i;
     for( i = 0; i < 56; i++ )
     {
-        //TODO
-        //if( nColor == com.sun.star.helper.calc.WorkbookImpl.getColorAtIndex(i) )
-        //    break; 
+        if( nColor == MsoColorIndizes::getColorIndex(i) )
+            break; 
     }
     if( i == 56 )
     {
@@ -106,9 +120,8 @@ ScVbaColorFormat::getSchemeColor() throw (uno::RuntimeException)
 void SAL_CALL 
 ScVbaColorFormat::setSchemeColor( sal_Int32 _schemecolor ) throw (uno::RuntimeException)
 {
-    //TODO
-    //sal_Int32 nColor = com.sun.star.helper.calc.WorkbookImpl.getColorAtIndex( _schemecolor );
-    //setRGB( com.sun.star.helper.calc.CalcHelper.swapFirstAndThirdByte( nColor ) );
+    sal_Int32 nColor = MsoColorIndizes::getColorIndex( _schemecolor );
+    setRGB( OORGBToXLRGB( nColor ) );
 }
 
 
