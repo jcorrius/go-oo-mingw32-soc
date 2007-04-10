@@ -45,6 +45,8 @@ public:
     virtual sal_Int32 SAL_CALL getType() throw (css::uno::RuntimeException);
     virtual double SAL_CALL getRotation() throw (css::uno::RuntimeException);
     virtual void SAL_CALL setRotation( double _rotation ) throw (css::uno::RuntimeException);
+    virtual css::uno::Reference< oo::msforms::XLineFormat > SAL_CALL getLine() throw (css::uno::RuntimeException);
+    virtual css::uno::Reference< oo::msforms::XFillFormat > SAL_CALL getFill() throw (css::uno::RuntimeException);
 
     // Methods
     virtual css::uno::Reference< oo::excel::XTextFrame > SAL_CALL TextFrame(  ) throw (css::uno::RuntimeException);
@@ -57,6 +59,5 @@ public:
     virtual void SAL_CALL ScaleWidth( double Factor, sal_Bool RelativeToOriginalSize, sal_Int32 Scale ) throw (css::uno::RuntimeException);
     // Replace??
     virtual void SAL_CALL Select( const css::uno::Any& Replace ) throw (css::uno::RuntimeException);
-    virtual css::uno::Reference< oo::msforms::XLineFormat > SAL_CALL getLine() throw (css::uno::RuntimeException);
 };
 #endif//SC_VBA_SHAPE_HXX

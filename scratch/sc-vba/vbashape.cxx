@@ -6,6 +6,7 @@
 #include "vbashape.hxx"
 #include "vbatextframe.hxx"
 #include "vbalineformat.hxx"
+#include "vbafillformat.hxx"
 
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
@@ -318,7 +319,14 @@ ScVbaShape::Select( const uno::Any& Replace ) throw ( uno::RuntimeException )
 uno::Reference< msforms::XLineFormat > SAL_CALL 
 ScVbaShape::getLine() throw (uno::RuntimeException)
 {
+    // TODO should ongly return line
     return uno::Reference< msforms::XLineFormat >( new ScVbaLineFormat( this, mxContext, m_xShape ) );
+}
+
+uno::Reference< msforms::XFillFormat > SAL_CALL
+ScVbaShape::getFill() throw (uno::RuntimeException)
+{
+    return uno::Reference< msforms::XFillFormat >( new ScVbaFillFormat( this, mxContext, m_xShape ) );
 }
 
 rtl::OUString& 
