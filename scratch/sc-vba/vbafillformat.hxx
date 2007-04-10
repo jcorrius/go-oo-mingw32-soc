@@ -13,12 +13,13 @@ class ScVbaFillFormat : public ScVbaFillFormat_BASE
 private:
     css::uno::Reference< css::drawing::XShape > m_xShape;
     css::uno::Reference< css::beans::XPropertySet > m_xPropertySet;
+    css::uno::Reference< oo::msforms::XColorFormat > m_xColorFormat;
     css::drawing::FillStyle m_nFillStyle;
     sal_Int32 m_nForeColor;
     sal_Int32 m_nBackColor;
+    sal_Int16 m_nGradientAngle;
 private:
     void setFillStyle( css::drawing::FillStyle nFillStyle ) throw (css::uno::RuntimeException);
-    void setForeColorAndInternalStyle( sal_Int32 nForeColor ) throw (css::uno::RuntimeException);
 protected:
     virtual rtl::OUString& getServiceImplName();
     virtual css::uno::Sequence<rtl::OUString> getServiceNames();
@@ -26,6 +27,7 @@ protected:
 public:
     ScVbaFillFormat( const css::uno::Reference< oo::vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::drawing::XShape > xShape );
 
+    void setForeColorAndInternalStyle( sal_Int32 nForeColor ) throw (css::uno::RuntimeException);
     // Attributes
     virtual sal_Bool SAL_CALL getVisible() throw (css::uno::RuntimeException);
     virtual void SAL_CALL setVisible( sal_Bool _visible ) throw (css::uno::RuntimeException);

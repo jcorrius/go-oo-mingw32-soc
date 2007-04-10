@@ -3,7 +3,9 @@
 
 #include <com/sun/star/drawing/XShape.hpp>
 #include <org/openoffice/msforms/XColorFormat.hpp>
+#include <org/openoffice/msforms/XFillFormat.hpp>
 #include "vbahelperinterface.hxx"
+#include "vbafillformat.hxx"
 
 typedef InheritedHelperInterfaceImpl1< oo::msforms::XColorFormat > ScVbaColorFormat_BASE;
 
@@ -20,9 +22,10 @@ public:
 class ScVbaColorFormat : public ScVbaColorFormat_BASE
 {
 private:
+    css::uno::Reference< oo::vba::XHelperInterface > m_xInternalParent;
     css::uno::Reference< css::drawing::XShape > m_xShape;
     css::uno::Reference< css::beans::XPropertySet > m_xPropertySet;
-    css::uno::Reference< oo::vba::XHelperInterface > m_xInternalParent;
+    ScVbaFillFormat *m_pFillFormat;
     sal_Int16 m_nColorFormatType;
     sal_Int32 m_nFillFormatBackColor;
 protected:

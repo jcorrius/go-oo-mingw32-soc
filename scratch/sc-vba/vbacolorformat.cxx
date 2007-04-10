@@ -1,23 +1,21 @@
 #include <com/sun/star/beans/XPropertySet.hpp>
-#include <org/openoffice/msforms/XFillFormat.hpp>
 #include <org/openoffice/msforms/XLineFormat.hpp>
 #include "vbacolorformat.hxx"
 
 using namespace org::openoffice;
 using namespace com::sun::star;
 
-ScVbaColorFormat::ScVbaColorFormat( const uno::Reference< vba::XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< vba::XHelperInterface > xInternalParent, const uno::Reference< drawing::XShape > xShape, const sal_Int16 nColorFormatType ) : ScVbaColorFormat_BASE( xParent, xContext ), m_xShape( xShape ), m_nColorFormatType( nColorFormatType )
+ScVbaColorFormat::ScVbaColorFormat( const uno::Reference< vba::XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< vba::XHelperInterface > xInternalParent, const uno::Reference< drawing::XShape > xShape, const sal_Int16 nColorFormatType ) : ScVbaColorFormat_BASE( xParent, xContext ), m_xInternalParent( xInternalParent ), m_xShape( xShape ), m_nColorFormatType( nColorFormatType )
 {
     m_xPropertySet.set( xShape, uno::UNO_QUERY_THROW );
     m_nFillFormatBackColor = 0;
     try
     {
-        uno::Reference< msforms::XFillFormat > xFillFormat( xInternalParent, uno::UNO_QUERY_THROW );
-        m_xInternalParent.set( xFillFormat, uno::UNO_QUERY );
+        uno::Reference< oo::msforms::XFillFormat > xFillFormat( xInternalParent, uno::UNO_QUERY_THROW );
+        m_pFillFormat = ( ScVbaFillFormat* )( xFillFormat.get() );
     }catch ( uno::RuntimeException  e )
     {
-        uno::Reference< msforms::XLineFormat > xLineFormat( xInternalParent, uno::UNO_QUERY_THROW );
-        m_xInternalParent.set( xLineFormat, uno::UNO_QUERY );
+        m_pFillFormat = NULL;
     }
 }
 
@@ -68,18 +66,18 @@ ScVbaColorFormat::setRGB( sal_Int32 _rgb ) throw (uno::RuntimeException)
         break;
     case ColorFormatType::FILLFORMAT_FORECOLOR:
         m_xPropertySet->setPropertyValue( rtl::OUString::createFromAscii( "FillColor" ), uno::makeAny( _rgb ) );
-        if( sal_True )
+        if( m_pFillFormat )
         {
             //TODO
-            //aFillFormatImpl.setForeColorAndInternalStyle(nRGB);
+            m_pFillFormat->setForeColorAndInternalStyle(nRGB);
         }
         break;
     case ColorFormatType::FILLFORMAT_BACKCOLOR:
         m_nFillFormatBackColor = nRGB;
-        if( sal_True )
+        if( m_pFillFormat )
         {
             //TODO
-            //aFillFormatImpl.setForeColorAndInternalStyle(nRGB);
+            m_pFillFormat->setForeColorAndInternalStyle(nRGB);
         }
         break;
     default:    
