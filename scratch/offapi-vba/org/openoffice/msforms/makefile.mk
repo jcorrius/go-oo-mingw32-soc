@@ -28,6 +28,7 @@ IDLFILES=\
 	XLineFormat.idl \
 	XColorFormat.idl \
 	XFillFormat.idl \
+	XPictureFormat.idl \
 	XShapeRange.idl \
 	XListBox.idl 
 
