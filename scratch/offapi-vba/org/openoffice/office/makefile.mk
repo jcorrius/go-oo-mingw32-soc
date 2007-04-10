@@ -23,6 +23,7 @@ CONST_IDLFILES=\
 	MsoShapeType.idl \
 	MsoArrowheadLength.idl \
 	MsoArrowheadWidth.idl \
+	MsoGradientStyle.idl \
 	MsoZOrderCmd.idl \
 
 
