@@ -7,6 +7,7 @@
 #include "vbatextframe.hxx"
 #include "vbalineformat.hxx"
 #include "vbafillformat.hxx"
+#include "vbapictureformat.hxx"
 
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
@@ -178,6 +179,25 @@ ScVbaShape::setRotation( double _rotation ) throw (uno::RuntimeException)
     m_xPropertySet->setPropertyValue( rtl::OUString::createFromAscii( "RotateAngle" ), uno::makeAny( 36000 - nRotation * 100 ) );
 }
 
+uno::Reference< msforms::XLineFormat > SAL_CALL 
+ScVbaShape::getLine() throw (uno::RuntimeException)
+{
+    // TODO should ongly return line
+    return uno::Reference< msforms::XLineFormat >( new ScVbaLineFormat( this, mxContext, m_xShape ) );
+}
+
+uno::Reference< msforms::XFillFormat > SAL_CALL
+ScVbaShape::getFill() throw (uno::RuntimeException)
+{
+    return uno::Reference< msforms::XFillFormat >( new ScVbaFillFormat( this, mxContext, m_xShape ) );
+}
+
+uno::Reference<  msforms::XPictureFormat > SAL_CALL
+ScVbaShape::getPictureFormat() throw (uno::RuntimeException)
+{
+    return uno::Reference< msforms::XPictureFormat >( new ScVbaPictureFormat( this, mxContext, m_xShape ) );
+}
+
 // Methods
 uno::Reference< excel::XTextFrame > SAL_CALL 
 ScVbaShape::TextFrame() throw (uno::RuntimeException)
@@ -314,19 +334,6 @@ ScVbaShape::Select( const uno::Any& Replace ) throw ( uno::RuntimeException )
     uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY_THROW );
     uno::Reference< view::XSelectionSupplier > xSelectSupp( xModel->getCurrentController(), uno::UNO_QUERY_THROW );
     xSelectSupp->select( uno::makeAny( m_xShape ) );
-}
-
-uno::Reference< msforms::XLineFormat > SAL_CALL 
-ScVbaShape::getLine() throw (uno::RuntimeException)
-{
-    // TODO should ongly return line
-    return uno::Reference< msforms::XLineFormat >( new ScVbaLineFormat( this, mxContext, m_xShape ) );
-}
-
-uno::Reference< msforms::XFillFormat > SAL_CALL
-ScVbaShape::getFill() throw (uno::RuntimeException)
-{
-    return uno::Reference< msforms::XFillFormat >( new ScVbaFillFormat( this, mxContext, m_xShape ) );
 }
 
 rtl::OUString& 

@@ -47,6 +47,7 @@ public:
     virtual void SAL_CALL setRotation( double _rotation ) throw (css::uno::RuntimeException);
     virtual css::uno::Reference< oo::msforms::XLineFormat > SAL_CALL getLine() throw (css::uno::RuntimeException);
     virtual css::uno::Reference< oo::msforms::XFillFormat > SAL_CALL getFill() throw (css::uno::RuntimeException);
+    virtual css::uno::Reference< oo::msforms::XPictureFormat > SAL_CALL getPictureFormat() throw (css::uno::RuntimeException);
 
     // Methods
     virtual css::uno::Reference< oo::excel::XTextFrame > SAL_CALL TextFrame(  ) throw (css::uno::RuntimeException);
