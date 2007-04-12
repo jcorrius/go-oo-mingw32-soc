@@ -3,13 +3,58 @@
 #include "vbalistbox.hxx"
 #include "vbapropvalue.hxx"
 #include <vector>
+#include <comphelper/anytostring.hxx>
 
 using namespace com::sun::star;
 using namespace org::openoffice;
 
-
 const static rtl::OUString CONTROLSOURCEPROP( RTL_CONSTASCII_USTRINGPARAM("DataFieldProperty") );
 const static rtl::OUString ITEMS( RTL_CONSTASCII_USTRINGPARAM("StringItemList") );
+
+rtl::OUString lcl_getAnyAsString( const uno::Any& pvargItem ) throw ( uno::RuntimeException )
+{
+	uno::Type aType = pvargItem.getValueType();
+	uno::TypeClass eTypeClass = aType.getTypeClass();
+	rtl::OUString sString;
+	switch ( eTypeClass )
+	{
+		case uno::TypeClass_BOOLEAN:
+		{
+			sal_Bool bBool = sal_False;
+			pvargItem >>= bBool;
+			sString = rtl::OUString::valueOf( bBool );
+			break;
+		}
+		case uno::TypeClass_STRING:
+			pvargItem >>= sString;
+			break;
+		case uno::TypeClass_FLOAT:
+			float aFloat;
+			pvargItem >>= aFloat;
+			sString = rtl::OUString::valueOf( aFloat );
+			break;
+		case uno::TypeClass_DOUBLE:
+			double aDouble;
+			pvargItem >>= aDouble;
+			sString = rtl::OUString::valueOf( aDouble );
+			break;
+		case uno::TypeClass_SHORT:
+		case uno::TypeClass_LONG:
+			sal_Int32 aNum;
+			pvargItem >>= aNum;
+			sString = rtl::OUString::valueOf( aNum );
+			break;
+
+		case uno::TypeClass_HYPER:
+			sal_Int64 aHyper;
+			pvargItem >>= aHyper;
+			sString = rtl::OUString::valueOf( aHyper );
+			break;
+		default:
+       			throw uno::RuntimeException( rtl::OUString::createFromAscii( "Invalid type, can't convert" ), uno::Reference< uno::XInterface >() );
+	}
+	return sString;
+}
 
 ScVbaListBox::ScVbaListBox( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< css::drawing::XControlShape >& xControlShape ) : ListBoxImpl_BASE( xContext, xControlShape )
 {
@@ -27,7 +72,7 @@ ScVbaListBox::ScVbaListBox( const uno::Reference< uno::XComponentContext >& xCon
 uno::Any SAL_CALL 
 ScVbaListBox::getValue() throw (uno::RuntimeException)
 {
-    if( !getMultiSelect() )
+    if( getMultiSelect() )
         throw uno::RuntimeException( rtl::OUString::createFromAscii(
                     "Attribute use invalid." ), uno::Reference< uno::XInterface >() );
     uno::Reference< form::validation::XValidatableFormComponent > xValidatableFormComponent( m_xProps, uno::UNO_QUERY_THROW );
@@ -37,11 +82,12 @@ ScVbaListBox::getValue() throw (uno::RuntimeException)
 void SAL_CALL 
 ScVbaListBox::setValue( const uno::Any& _value ) throw (uno::RuntimeException)
 {
-    if( !getMultiSelect() )
+    if( getMultiSelect() )
+    {	
         throw uno::RuntimeException( rtl::OUString::createFromAscii(
                     "Attribute use invalid." ), uno::Reference< uno::XInterface >() );
-    rtl::OUString sValue;
-    _value >>= sValue;
+    }
+    rtl::OUString sValue = lcl_getAnyAsString( _value );
     uno::Sequence< rtl::OUString > sList;
     m_xProps->getPropertyValue( ITEMS ) >>= sList;
     uno::Sequence< sal_Int16 > nList;
@@ -145,8 +191,7 @@ ScVbaListBox::AddItem( const uno::Any& pvargItem, const uno::Any& pvargIndex ) t
 		if ( pvargIndex.hasValue() )
 			pvargIndex >>= nIndex;
 
-		rtl::OUString sString;
-		pvargItem >>= sString;
+		rtl::OUString sString = lcl_getAnyAsString( pvargItem );
 
 		// if no index specified or item is to be appended to end of 
 		// list just realloc the array and set the last item
@@ -191,7 +236,8 @@ ScVbaListBox::AddItem( const uno::Any& pvargItem, const uno::Any& pvargIndex ) t
 void SAL_CALL 
 ScVbaListBox::Clear(  ) throw (uno::RuntimeException)
 {
-	setValue( uno::makeAny( sal_Int16() ) );
+	// urk, setValue doesn't seem to work !!
+	//setValue( uno::makeAny( sal_Int16() ) );
 	m_xProps->setPropertyValue( ITEMS, uno::makeAny( uno::Sequence< rtl::OUString >() ) );
 }
 //PropListener
@@ -203,8 +249,6 @@ ScVbaListBox::setValueEvent( const uno::Any& value )
         throw uno::RuntimeException( rtl::OUString::createFromAscii(
                     "Invalid type\n. need boolean." ), uno::Reference< uno::XInterface >() );
     uno::Sequence< sal_Int16 > nList;
-        throw uno::RuntimeException( rtl::OUString::createFromAscii(
-                    "Invalid Object" ), uno::Reference< uno::XInterface >() );
     m_xProps->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "SelectedItems" ) ) ) >>= nList;
     sal_Int32 nLength = nList.getLength();
     sal_Int32 nIndex = m_nIndex;
