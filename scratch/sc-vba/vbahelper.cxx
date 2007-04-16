@@ -526,6 +526,53 @@ void PrintOutHelper( const uno::Any& From, const uno::Any& To, const uno::Any& C
 	//   of this method
 }
 
+rtl::OUString getAnyAsString( const uno::Any& pvargItem ) throw ( uno::RuntimeException )
+{
+	uno::Type aType = pvargItem.getValueType();
+	uno::TypeClass eTypeClass = aType.getTypeClass();
+	rtl::OUString sString;
+	switch ( eTypeClass )
+	{
+		case uno::TypeClass_BOOLEAN:
+		{
+			sal_Bool bBool = sal_False;
+			pvargItem >>= bBool;
+			sString = rtl::OUString::valueOf( bBool );
+			break;
+		}
+		case uno::TypeClass_STRING:
+			pvargItem >>= sString;
+			break;
+		case uno::TypeClass_FLOAT:
+			float aFloat;
+			pvargItem >>= aFloat;
+			sString = rtl::OUString::valueOf( aFloat );
+			break;
+		case uno::TypeClass_DOUBLE:
+			double aDouble;
+			pvargItem >>= aDouble;
+			sString = rtl::OUString::valueOf( aDouble );
+			break;
+		case uno::TypeClass_SHORT:
+		case uno::TypeClass_LONG:
+		case uno::TypeClass_BYTE:
+			sal_Int32 aNum;
+			pvargItem >>= aNum;
+			sString = rtl::OUString::valueOf( aNum );
+			break;
+
+		case uno::TypeClass_HYPER:
+			sal_Int64 aHyper;
+			pvargItem >>= aHyper;
+			sString = rtl::OUString::valueOf( aHyper );
+			break;
+		default:
+       			throw uno::RuntimeException( rtl::OUString::createFromAscii( "Invalid type, can't convert" ), uno::Reference< uno::XInterface >() );
+	}
+	return sString;
+}
+
+
 rtl::OUString 
 ContainerUtilities::getUniqueName( const uno::Sequence< ::rtl::OUString >&  _slist, const rtl::OUString& _sElementName, const ::rtl::OUString& _sSuffixSeparator)
 {

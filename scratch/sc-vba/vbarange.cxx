@@ -39,6 +39,7 @@
 #include <sfx2/objsh.hxx>
 
 #include <com/sun/star/script/ArrayWrapper.hpp>
+#include <com/sun/star/sheet/XGoalSeek.hpp>
 #include <com/sun/star/sheet/XSheetOperation.hpp>
 #include <com/sun/star/sheet/CellFlags.hpp>
 #include <com/sun/star/table/XColumnRowRange.hpp>
@@ -48,6 +49,7 @@
 #include <com/sun/star/text/XTextRange.hpp>
 #include <com/sun/star/sheet/XCellRangeAddressable.hpp>
 #include <com/sun/star/table/CellRangeAddress.hpp>
+#include <com/sun/star/table/CellAddress.hpp>
 #include <com/sun/star/sheet/XSpreadsheetView.hpp>
 #include <com/sun/star/sheet/XCellRangeReferrer.hpp>
 #include <com/sun/star/sheet/XSheetCellRange.hpp>
@@ -3793,6 +3795,32 @@ ScVbaRange::AutoFill(  const uno::Reference< excel::XRange >& Destination, const
 	ScDocFunc aFunc(*pDocSh);
 		aFunc.FillAuto( aSourceRange, NULL, eDir, eCmd, eDateCmd,
 									nCount, fStep, fEndValue, TRUE, TRUE );
+}
+#include <comphelper/anytostring.hxx>
+sal_Bool SAL_CALL
+ScVbaRange::GoalSeek( const uno::Any& Goal, const uno::Reference< excel::XRange >& ChangingCell ) throw (uno::RuntimeException)
+{
+	// #TODO #FIXME total guess here at a tolerance
+	const static double Tolerance = 0.001;	
+	ScDocShell* pDocShell = getScDocShell();
+	ScVbaRange* pRange = static_cast< ScVbaRange* >( ChangingCell.get() );
+	if ( pDocShell && pRange )
+	{
+		uno::Reference< sheet::XGoalSeek > xGoalSeek(  pDocShell->GetModel(), uno::UNO_QUERY_THROW );
+		RangeHelper thisRange( mxRange );
+		table::CellRangeAddress thisAddress = thisRange.getCellRangeAddressable()->getRangeAddress();
+		RangeHelper changingCellRange( pRange->mxRange );
+		table::CellRangeAddress changingCellAddr = changingCellRange.getCellRangeAddressable()->getRangeAddress();
+		rtl::OUString sGoal = getAnyAsString( Goal );
+		table::CellAddress thisCell( thisAddress.Sheet, thisAddress.StartColumn, thisAddress.StartRow );
+		table::CellAddress changingCell( changingCellAddr.Sheet, changingCellAddr.StartColumn, changingCellAddr.StartRow );
+		sheet::GoalResult res = xGoalSeek->seekGoal( thisCell, changingCell, sGoal );
+		if ( res.Divergence > Tolerance )
+			return sal_False;
+		ChangingCell->setValue( uno::makeAny( res.Result ) );
+		return sal_True;
+	}
+	return sal_False;
 }
 
 rtl::OUString& 

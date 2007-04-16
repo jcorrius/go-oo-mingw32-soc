@@ -247,6 +247,7 @@ public:
 //     * object should be a lightweight as possible
 //     * we shouldn't need hacks like this below
 	static css::uno::Reference< oo::excel::XRange > ApplicationRange( const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Any &Cell1, const css::uno::Any &Cell2 ) throw (css::uno::RuntimeException);
+	virtual sal_Bool SAL_CALL GoalSeek( const css::uno::Any& Goal, const css::uno::Reference< oo::excel::XRange >& ChangingCell ) throw (css::uno::RuntimeException);
 	// XHelperInterface
 	virtual rtl::OUString& getServiceImplName();
 	virtual css::uno::Sequence<rtl::OUString> getServiceNames();

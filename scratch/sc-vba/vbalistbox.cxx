@@ -11,50 +11,6 @@ using namespace org::openoffice;
 const static rtl::OUString CONTROLSOURCEPROP( RTL_CONSTASCII_USTRINGPARAM("DataFieldProperty") );
 const static rtl::OUString ITEMS( RTL_CONSTASCII_USTRINGPARAM("StringItemList") );
 
-rtl::OUString lcl_getAnyAsString( const uno::Any& pvargItem ) throw ( uno::RuntimeException )
-{
-	uno::Type aType = pvargItem.getValueType();
-	uno::TypeClass eTypeClass = aType.getTypeClass();
-	rtl::OUString sString;
-	switch ( eTypeClass )
-	{
-		case uno::TypeClass_BOOLEAN:
-		{
-			sal_Bool bBool = sal_False;
-			pvargItem >>= bBool;
-			sString = rtl::OUString::valueOf( bBool );
-			break;
-		}
-		case uno::TypeClass_STRING:
-			pvargItem >>= sString;
-			break;
-		case uno::TypeClass_FLOAT:
-			float aFloat;
-			pvargItem >>= aFloat;
-			sString = rtl::OUString::valueOf( aFloat );
-			break;
-		case uno::TypeClass_DOUBLE:
-			double aDouble;
-			pvargItem >>= aDouble;
-			sString = rtl::OUString::valueOf( aDouble );
-			break;
-		case uno::TypeClass_SHORT:
-		case uno::TypeClass_LONG:
-			sal_Int32 aNum;
-			pvargItem >>= aNum;
-			sString = rtl::OUString::valueOf( aNum );
-			break;
-
-		case uno::TypeClass_HYPER:
-			sal_Int64 aHyper;
-			pvargItem >>= aHyper;
-			sString = rtl::OUString::valueOf( aHyper );
-			break;
-		default:
-       			throw uno::RuntimeException( rtl::OUString::createFromAscii( "Invalid type, can't convert" ), uno::Reference< uno::XInterface >() );
-	}
-	return sString;
-}
 
 ScVbaListBox::ScVbaListBox( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< css::drawing::XControlShape >& xControlShape ) : ListBoxImpl_BASE( xContext, xControlShape )
 {
@@ -87,7 +43,7 @@ ScVbaListBox::setValue( const uno::Any& _value ) throw (uno::RuntimeException)
         throw uno::RuntimeException( rtl::OUString::createFromAscii(
                     "Attribute use invalid." ), uno::Reference< uno::XInterface >() );
     }
-    rtl::OUString sValue = lcl_getAnyAsString( _value );
+    rtl::OUString sValue = getAnyAsString( _value );
     uno::Sequence< rtl::OUString > sList;
     m_xProps->getPropertyValue( ITEMS ) >>= sList;
     uno::Sequence< sal_Int16 > nList;
@@ -191,7 +147,7 @@ ScVbaListBox::AddItem( const uno::Any& pvargItem, const uno::Any& pvargIndex ) t
 		if ( pvargIndex.hasValue() )
 			pvargIndex >>= nIndex;
 
-		rtl::OUString sString = lcl_getAnyAsString( pvargItem );
+		rtl::OUString sString = getAnyAsString( pvargItem );
 
 		// if no index specified or item is to be appended to end of 
 		// list just realloc the array and set the last item
