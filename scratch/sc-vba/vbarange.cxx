@@ -3800,9 +3800,8 @@ ScVbaRange::AutoFill(  const uno::Reference< excel::XRange >& Destination, const
 sal_Bool SAL_CALL
 ScVbaRange::GoalSeek( const uno::Any& Goal, const uno::Reference< excel::XRange >& ChangingCell ) throw (uno::RuntimeException)
 {
-	// #TODO #FIXME total guess here at a tolerance
-	const static double Tolerance = 0.001;	
 	ScDocShell* pDocShell = getScDocShell();
+	sal_Bool bRes = sal_True;
 	ScVbaRange* pRange = static_cast< ScVbaRange* >( ChangingCell.get() );
 	if ( pDocShell && pRange )
 	{
@@ -3815,12 +3814,17 @@ ScVbaRange::GoalSeek( const uno::Any& Goal, const uno::Reference< excel::XRange 
 		table::CellAddress thisCell( thisAddress.Sheet, thisAddress.StartColumn, thisAddress.StartRow );
 		table::CellAddress changingCell( changingCellAddr.Sheet, changingCellAddr.StartColumn, changingCellAddr.StartRow );
 		sheet::GoalResult res = xGoalSeek->seekGoal( thisCell, changingCell, sGoal );
-		if ( res.Divergence > Tolerance )
-			return sal_False;
 		ChangingCell->setValue( uno::makeAny( res.Result ) );
-		return sal_True;
+		
+		// openoffice behaves differently, result is 0 if the divergence is too great
+                // but... if it detects 0 is the value it requires then it will use that
+		// e.g. divergence & result both = 0.0 does NOT mean there is an error
+		if ( ( res.Divergence != 0.0 ) && ( res.Result == 0.0 ) )
+			bRes = sal_False;
 	}
-	return sal_False;
+	else
+		bRes = sal_False;
+	return bRes;
 }
 
 rtl::OUString& 
