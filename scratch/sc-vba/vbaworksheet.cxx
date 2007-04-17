@@ -418,7 +418,7 @@ ScVbaWorksheet::getSheetAtOffset(SCTAB offset) throw (uno::RuntimeException)
 	nIdx = nIdx + offset;
 	uno::Reference< sheet::XSpreadsheet > xSheet(xIndex->getByIndex(nIdx), uno::UNO_QUERY_THROW);
 	// parent will be the parent of 'this' worksheet
-	return new ScVbaWorksheet ( uno::Reference< vba::XHelperInterface >( getParent(), uno::UNO_QUERY ), mxContext, xSheet, getModel());
+	return new ScVbaWorksheet (getParent(), mxContext, xSheet, getModel());
 }
 
 uno::Reference< excel::XWorksheet >
