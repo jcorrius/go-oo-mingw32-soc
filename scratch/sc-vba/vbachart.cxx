@@ -877,7 +877,7 @@ ScVbaChart::getChartTitle(  ) throw (script::BasicErrorException, uno::RuntimeEx
 }
 
 uno::Any SAL_CALL 
-ScVbaChart::Axes( const uno::Any& Type, const uno::Any& AxisGroup ) throw (script::BasicErrorException, uno::RuntimeException)
+ScVbaChart::Axes( const uno::Any& Type, const uno::Any& /*AxisGroup*/ ) throw (script::BasicErrorException, uno::RuntimeException)
 {
 	if ( !Type.hasValue() )
 	{
@@ -888,6 +888,8 @@ ScVbaChart::Axes( const uno::Any& Type, const uno::Any& AxisGroup ) throw (scrip
 		//ScVbaAxes xAxes;
 		//xAxes.item( Type, AxisGroup );
 	}
+	// #FIXME I'm not implemented yet
+	return uno::Any();
 }
 bool
 ScVbaChart::is3D() throw ( uno::RuntimeException )

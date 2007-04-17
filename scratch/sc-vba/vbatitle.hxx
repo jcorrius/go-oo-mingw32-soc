@@ -99,6 +99,7 @@ public:
 		{
 			throw css::script::BasicErrorException( rtl::OUString(), css::uno::Reference< css::uno::XInterface >(), SbERR_METHOD_FAILED, rtl::OUString() );
 		}
+		return sText;
 	}
 
 	css::uno::Reference< oo::excel::XCharacters > SAL_CALL Characters(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException)
