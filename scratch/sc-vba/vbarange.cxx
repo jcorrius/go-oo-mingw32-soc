@@ -2729,8 +2729,6 @@ ScVbaRange::Sort( const uno::Any& Key1, const uno::Any& Order1, const uno::Any& 
 uno::Reference< excel::XRange > SAL_CALL 
 ScVbaRange::End( ::sal_Int32 Direction )  throw (uno::RuntimeException)
 {
-	return excel::Range::createRangeFromXCellRange( mxContext, uno::Reference< vba::XHelperInterface >(), mxRange );
-
 	if ( m_Areas->getCount() > 1 )
 	{
 		uno::Reference< excel::XRange > xRange( getArea( 0 ), uno::UNO_QUERY_THROW );
