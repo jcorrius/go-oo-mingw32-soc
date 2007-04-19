@@ -145,7 +145,7 @@ public:
 			aSize.Height = Millimeter::getInHundredthsOfOneMillimeter(_fheight);
 			xShape->setSize(aSize);
 		}
-		catch ( css::uno::Exception& e)
+		catch ( css::uno::Exception& /*e*/)
 		{
 			throw css::script::BasicErrorException( rtl::OUString(), css::uno::Reference< css::uno::XInterface >(), SbERR_METHOD_FAILED, rtl::OUString() );
     		}
@@ -165,7 +165,7 @@ public:
 			aSize.Width = Millimeter::getInHundredthsOfOneMillimeter(_fWidth);
 			xShape->setSize(aSize);
 		}
-		catch (css::uno::Exception& e)
+		catch (css::uno::Exception& /*e*/)
 		{
 			throw css::script::BasicErrorException( rtl::OUString(), css::uno::Reference< css::uno::XInterface >(), SbERR_METHOD_FAILED, rtl::OUString() );
 		}

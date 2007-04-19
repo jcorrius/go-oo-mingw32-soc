@@ -2,8 +2,6 @@
 #define SC_VBA_CONTROL_HXX
 
 #include <cppuhelper/implbase1.hxx>
-#include <comphelper/proparrhlp.hxx>
-#include <comphelper/propertycontainer.hxx>
 #include <com/sun/star/beans/XPropertySet.hpp>
 #include <com/sun/star/uno/XComponentContext.hpp>
 #include <com/sun/star/script/XDefaultProperty.hpp>
@@ -16,7 +14,6 @@
 typedef ::cppu::WeakImplHelper1< oo::msforms::XControl > ControlImpl_BASE;
 
 class ScVbaControl : public ControlImpl_BASE
-    ,public ::comphelper::OMutexAndBroadcastHelper
 {
 /* this will cause error when the sheet is invisible.
 private:

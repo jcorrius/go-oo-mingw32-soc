@@ -80,7 +80,7 @@ protected:
 	virtual css::uno::Any getItemByIntIndex( const sal_Int32 nIndex ) throw (css::uno::RuntimeException);
 
 public:
-	inline ScVbaCollectionBase( const css::uno::Reference< oo::vba::XHelperInterface >& xParent,   const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::container::XIndexAccess >& xIndexAccess ) : BaseColBase( xParent, xContext ), m_xIndexAccess( xIndexAccess ){ m_xNameAccess.set(m_xIndexAccess, css::uno::UNO_QUERY); }
+	ScVbaCollectionBase( const css::uno::Reference< oo::vba::XHelperInterface >& xParent,   const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::container::XIndexAccess >& xIndexAccess ) : BaseColBase( xParent, xContext ), m_xIndexAccess( xIndexAccess ){ m_xNameAccess.set(m_xIndexAccess, css::uno::UNO_QUERY); }
 	//XCollection
 	virtual ::sal_Int32 SAL_CALL getCount() throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL Item( const css::uno::Any& Index ) throw (css::uno::RuntimeException);
@@ -99,7 +99,7 @@ public:
 };
 
 template <typename Ifc1>
-inline css::uno::Any
+css::uno::Any
 ScVbaCollectionBase<Ifc1>::getItemByStringIndex( const rtl::OUString& sIndex ) throw (css::uno::RuntimeException)
 {
 	if ( !m_xNameAccess.is() )
@@ -109,7 +109,7 @@ ScVbaCollectionBase<Ifc1>::getItemByStringIndex( const rtl::OUString& sIndex ) t
 }
 
 template <typename Ifc1>
-inline css::uno::Any 
+css::uno::Any 
 ScVbaCollectionBase<Ifc1>::getItemByIntIndex( const sal_Int32 nIndex ) throw (css::uno::RuntimeException)
 {
 	if ( !m_xIndexAccess.is() )
@@ -127,13 +127,13 @@ ScVbaCollectionBase<Ifc1>::getItemByIntIndex( const sal_Int32 nIndex ) throw (cs
 
 template <typename Ifc1>
 ::sal_Int32 SAL_CALL 
-inline ScVbaCollectionBase<Ifc1>::getCount() throw (css::uno::RuntimeException)
+ScVbaCollectionBase<Ifc1>::getCount() throw (css::uno::RuntimeException)
 {
 	return m_xIndexAccess->getCount();
 }
 
 template <typename Ifc1>
-inline css::uno::Any SAL_CALL ScVbaCollectionBase<Ifc1>::Item( const css::uno::Any& aIndex ) throw (css::uno::RuntimeException)
+css::uno::Any SAL_CALL ScVbaCollectionBase<Ifc1>::Item( const css::uno::Any& aIndex ) throw (css::uno::RuntimeException)
 {
 	if ( aIndex.getValueTypeClass() != css::uno::TypeClass_STRING )
 	{
@@ -156,7 +156,7 @@ inline css::uno::Any SAL_CALL ScVbaCollectionBase<Ifc1>::Item( const css::uno::A
 }
 
 template <typename Ifc1>
-inline ::rtl::OUString SAL_CALL 
+::rtl::OUString SAL_CALL 
 ScVbaCollectionBase<Ifc1>::getDefaultMethodName(  ) throw (css::uno::RuntimeException)
 {
 	const static rtl::OUString sName( RTL_CONSTASCII_USTRINGPARAM("Item") );
@@ -166,7 +166,7 @@ ScVbaCollectionBase<Ifc1>::getDefaultMethodName(  ) throw (css::uno::RuntimeExce
 	// XElementAccess
 
 template <typename Ifc1>
-inline ::sal_Bool SAL_CALL ScVbaCollectionBase<Ifc1>::hasElements() throw (css::uno::RuntimeException)
+::sal_Bool SAL_CALL ScVbaCollectionBase<Ifc1>::hasElements() throw (css::uno::RuntimeException)
 {
 	return ( m_xIndexAccess->getCount() > 0 );
 }
@@ -180,7 +180,7 @@ typedef ScVbaCollectionBase< XCollection_InterfacesBASE > CollImplBase1;
 class ScVbaCollectionBaseImpl : public CollImplBase1
 {
 public:
-	inline ScVbaCollectionBaseImpl( const css::uno::Reference< oo::vba::XHelperInterface > xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::container::XIndexAccess >& xIndexAccess ) throw( css::uno::RuntimeException ) : CollImplBase1( xParent, xContext, xIndexAccess){}
+	ScVbaCollectionBaseImpl( const css::uno::Reference< oo::vba::XHelperInterface > xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::container::XIndexAccess >& xIndexAccess ) throw( css::uno::RuntimeException ) : CollImplBase1( xParent, xContext, xIndexAccess){}
 
 };
 
@@ -190,7 +190,7 @@ class CollTestImplHelper :  public ScVbaCollectionBase< ::cppu::WeakImplHelper1<
 typedef ScVbaCollectionBase< ::cppu::WeakImplHelper1< Ifc >  > ImplBase1;
 
 public:
-	inline CollTestImplHelper( const css::uno::Reference< oo::vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext,  const css::uno::Reference< css::container::XIndexAccess >& xIndexAccess ) throw( css::uno::RuntimeException ) : ImplBase1( xParent, xContext, xIndexAccess ) {}
+	CollTestImplHelper( const css::uno::Reference< oo::vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext,  const css::uno::Reference< css::container::XIndexAccess >& xIndexAccess ) throw( css::uno::RuntimeException ) : ImplBase1( xParent, xContext, xIndexAccess ) {}
 };
 
 
