@@ -523,7 +523,7 @@ ScVbaWorksheet::ChartObjects( const uno::Any& Index ) throw (uno::RuntimeExcepti
 		return xColl->Item( Index );
 	}
 	else
-		return makeAny( mxCharts );
+		return uno::makeAny( mxCharts );
 	
 }
 
@@ -537,7 +537,7 @@ ScVbaWorksheet::PivotTables( const uno::Any& Index ) throw (uno::RuntimeExceptio
 	uno::Reference< vba::XCollection > xColl(  new ScVbaPivotTables( this, mxContext, xIndexAccess ) );
 	if ( Index.hasValue() )
 		return xColl->Item( Index );
-	return makeAny( xColl );
+	return uno::makeAny( xColl );
 }
 
 uno::Any SAL_CALL
@@ -550,7 +550,7 @@ ScVbaWorksheet::Comments( const uno::Any& Index ) throw (uno::RuntimeException)
 	uno::Reference< vba::XCollection > xColl(  new ScVbaComments( this, mxContext, xIndexAccess ) );
 	if ( Index.hasValue() )
 		return xColl->Item( Index );
-	return makeAny( xColl );
+	return uno::makeAny( xColl );
 }
 
 uno::Any SAL_CALL
@@ -569,7 +569,7 @@ ScVbaWorksheet::OLEObjects( const uno::Any& Index ) throw (uno::RuntimeException
     }
     else
     {
-        return makeAny( uno::Reference< excel::XOLEObjects> ( aOleObjects ) );
+        return uno::makeAny( uno::Reference< excel::XOLEObjects> ( aOleObjects ) );
     }
 }
 uno::Any SAL_CALL
@@ -580,7 +580,7 @@ ScVbaWorksheet::Shapes() throw (uno::RuntimeException)
     uno::Reference< drawing::XShapes > xShapes( xDrawPageSupplier->getDrawPage(), uno::UNO_QUERY_THROW );
     uno::Reference< container::XIndexAccess > xIndexAccess( xShapes, uno::UNO_QUERY_THROW );
 
-    return makeAny( uno::Reference< msforms::XShapes> ( new ScVbaShapes( this, mxContext, xIndexAccess ) ) );
+    return uno::makeAny( uno::Reference< msforms::XShapes> ( new ScVbaShapes( this, mxContext, xIndexAccess ) ) );
 }
 uno::Any SAL_CALL 
 ScVbaWorksheet::Evaluate( const ::rtl::OUString& Name ) throw (uno::RuntimeException)
