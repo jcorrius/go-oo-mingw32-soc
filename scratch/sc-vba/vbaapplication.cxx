@@ -211,7 +211,7 @@ ScVbaApplication::Workbooks( const uno::Any& aIndex ) throw (uno::RuntimeExcepti
 	    return uno::Any( xWorkBooks );
 	}
 
-	return uno::Any ( xWorkBooks->Item( aIndex ) );
+	return uno::Any ( xWorkBooks->Item( aIndex, uno::Any() ) );
 }
 
 uno::Any SAL_CALL
@@ -365,7 +365,7 @@ ScVbaApplication::Windows( const uno::Any& aIndex  ) throw (uno::RuntimeExceptio
 	uno::Reference< vba::XCollection >  xWindows = ScVbaWindows::Windows( mxContext );
 	if ( aIndex.getValueTypeClass() == uno::TypeClass_VOID )
 		return uno::Any( xWindows );
-	return uno::Any( xWindows->Item( aIndex ) );	
+	return uno::Any( xWindows->Item( aIndex, uno::Any() ) );	
 }
 void SAL_CALL 
 ScVbaApplication::wait( double time ) throw (css::uno::RuntimeException)

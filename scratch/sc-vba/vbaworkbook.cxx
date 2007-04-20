@@ -139,7 +139,7 @@ ScVbaWorkbook::Worksheets( const uno::Any& aIndex ) throw (uno::RuntimeException
 	{
 		return uno::Any( xWorkSheets );	
 	}
-	return uno::Any( xWorkSheets->Item( aIndex ) );
+	return uno::Any( xWorkSheets->Item( aIndex, uno::Any() ) );
 }
 uno::Any SAL_CALL
 ScVbaWorkbook::Windows( const uno::Any& aIndex ) throw (uno::RuntimeException)
@@ -147,7 +147,7 @@ ScVbaWorkbook::Windows( const uno::Any& aIndex ) throw (uno::RuntimeException)
 	uno::Reference< vba::XCollection >  xWindows = ScVbaWindows::Windows( mxContext );
 	if ( aIndex.getValueTypeClass() == uno::TypeClass_VOID )
 		return uno::Any( xWindows );
-	return uno::Any( xWindows->Item( aIndex ) );
+	return uno::Any( xWindows->Item( aIndex, uno::Any() ) );
 }
 void
 ScVbaWorkbook::Close( const uno::Any &rSaveArg, const uno::Any &rFileArg,

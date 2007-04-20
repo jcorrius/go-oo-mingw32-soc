@@ -82,7 +82,7 @@ ScVbaShapes::getServiceNames()
 uno::Any SAL_CALL 
 ScVbaShapes::Item( const css::uno::Any& NameOrIndex ) throw (css::uno::RuntimeException)
 {
-    return ScVbaShapes_BASE::Item( NameOrIndex );
+    return ScVbaShapes_BASE::Item( NameOrIndex, uno::Any() );
 }
 
 sal_Int32 SAL_CALL 

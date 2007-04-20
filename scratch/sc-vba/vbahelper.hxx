@@ -210,6 +210,27 @@ public:
 
 	static sal_Int32 FieldInList( const css::uno::Sequence< rtl::OUString >& SearchList, const rtl::OUString& SearchString );
 };
+
+// really just a a place holder to ease the porting pain
+class DebugHelper
+{
+public:
+	static void exception( const rtl::OUString&  DetailedMessage, const css::uno::Exception& ex,  int err, const rtl::OUString& /*additionalArgument*/ ) throw( css::script::BasicErrorException )
+	{
+		// #TODO #FIXME ( do we want to support additionalArg here )
+		throw css::script::BasicErrorException( DetailedMessage.concat( rtl::OUString::createFromAscii(" ") ).concat( ex.Message ), css::uno::Reference< css::uno::XInterface >(), err, rtl::OUString() );
+	}
+
+	static void exception( int err,  const rtl::OUString& additionalArgument ) throw( css::script::BasicErrorException )
+	{
+		exception( rtl::OUString(), css::uno::Exception(), err, additionalArgument );
+	}
+
+	static void exception( css::uno::Exception& ex ) throw( css::script::BasicErrorException )
+	{
+		exception( rtl::OUString(), ex, SbERR_INTERNAL_ERROR, rtl::OUString() );
+	}
+};
 	} // openoffice
 } // org
 

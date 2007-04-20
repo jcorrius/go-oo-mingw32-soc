@@ -235,7 +235,7 @@ ScVbaWindow::SelectedSheets( const uno::Any& aIndex ) throw (uno::RuntimeExcepti
 	if ( aIndex.hasValue() )
 	{
 		uno::Reference< vba::XCollection > xColl( xSheets, uno::UNO_QUERY_THROW );
-		return xColl->Item( aIndex );	
+		return xColl->Item( aIndex, uno::Any() );	
 	}
 	return uno::makeAny( xSheets ); 	
 }

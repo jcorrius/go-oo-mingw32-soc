@@ -52,6 +52,8 @@ typedef InheritedHelperInterfaceImpl1<oo::excel::XChart > ChartImpl_BASE;
 
 class ScVbaChart : public ChartImpl_BASE
 {		
+friend class ScVbaAxis;
+
 	css::uno::Reference< css::chart::XChartDocument > mxChartDocument;
 	css::uno::Reference< css::table::XTableChart > mxTableChart;
 	css::uno::Reference< css::beans::XPropertySet > mxDiagramPropertySet;
@@ -66,7 +68,6 @@ class ScVbaChart : public ChartImpl_BASE
 	css::uno::Sequence< css::uno::Sequence< double > > dblValues;
 	void setDefaultChartType()throw ( css::script::BasicErrorException ) ;
 	void setDiagram( const rtl::OUString& _sDiagramType) throw( css::script::BasicErrorException );
-	bool is3D() throw ( css::uno::RuntimeException );
 	bool isStacked() throw ( css::uno::RuntimeException );
 	bool is100PercentStacked() throw ( css::uno::RuntimeException );
 	sal_Int32 getStackedType( sal_Int32 _nStacked, sal_Int32 _n100PercentStacked, sal_Int32 _nUnStacked ) throw ( css::uno::RuntimeException );
@@ -80,6 +81,7 @@ public:
 	ScVbaChart( const css::uno::Reference< oo::vba::XHelperInterface >& _xParent, const css::uno::Reference< css::uno::XComponentContext >& _xContext, const css::uno::Reference< css::lang::XComponent >& _xChartComponent, const css::uno::Reference< css::table::XTableChart >& _xTableChart );
 
 	// Non-interface
+	css::uno::Reference< css::beans::XPropertySet > xDiagramPropertySet() { return mxDiagramPropertySet; }
 	bool isSeriesIndexValid(sal_Int32 _seriesindex) throw( css::script::BasicErrorException );
 	bool areIndicesValid(sal_Int32 _seriesindex, sal_Int32 _valindex) throw ( css::script::BasicErrorException );
 	void setSeriesName(sal_Int32 _index, rtl::OUString _sname) throw ( css::script::BasicErrorException );
@@ -91,7 +93,8 @@ public:
 	css::uno::Reference< oo::excel::XDataLabels > DataLabels( const css::uno::Reference< oo::excel::XSeries > _oSeries ) throw ( css::script::BasicErrorException );
 	bool getHasDataCaption( const css::uno::Reference< css::beans::XPropertySet >& _xPropertySet )throw ( css::script::BasicErrorException );
 	void setHasDataCaption( const css::uno::Reference< css::beans::XPropertySet >& _xPropertySet, bool _bHasDataLabels )throw ( css::script::BasicErrorException );
-
+	bool is3D() throw ( css::uno::RuntimeException );
+	css::uno::Reference< css::beans::XPropertySet > getAxisPropertySet(sal_Int32 _nAxisType, sal_Int32 _nAxisGroup) throw ( css::script::BasicErrorException );
 	// Methods
 	virtual ::rtl::OUString SAL_CALL getName() throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL SeriesCollection(const css::uno::Any&) throw (css::uno::RuntimeException);

@@ -1,5 +1,8 @@
 #include "vbacharttitle.hxx"
 
+using namespace ::org::openoffice;
+using namespace ::com::sun::star;
+
 ScVbaChartTitle::ScVbaChartTitle( const uno::Reference< vba::XHelperInterface >& xParent,  const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< drawing::XShape >& _xTitleShape ) :  ChartTitleBase( xParent, xContext, _xTitleShape )
 {
 }

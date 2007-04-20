@@ -83,7 +83,7 @@ public:
 	ScVbaCollectionBase( const css::uno::Reference< oo::vba::XHelperInterface >& xParent,   const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::container::XIndexAccess >& xIndexAccess ) : BaseColBase( xParent, xContext ), m_xIndexAccess( xIndexAccess ){ m_xNameAccess.set(m_xIndexAccess, css::uno::UNO_QUERY); }
 	//XCollection
 	virtual ::sal_Int32 SAL_CALL getCount() throw (css::uno::RuntimeException);
-	virtual css::uno::Any SAL_CALL Item( const css::uno::Any& Index ) throw (css::uno::RuntimeException);
+	virtual css::uno::Any SAL_CALL Item( const css::uno::Any& Index1, const css::uno::Any& Index2 ) throw (css::uno::RuntimeException);
 	// XDefaultMethod
 	::rtl::OUString SAL_CALL getDefaultMethodName(  ) throw (css::uno::RuntimeException);
 
@@ -133,7 +133,7 @@ ScVbaCollectionBase<Ifc1>::getCount() throw (css::uno::RuntimeException)
 }
 
 template <typename Ifc1>
-css::uno::Any SAL_CALL ScVbaCollectionBase<Ifc1>::Item( const css::uno::Any& aIndex ) throw (css::uno::RuntimeException)
+css::uno::Any SAL_CALL ScVbaCollectionBase<Ifc1>::Item( const css::uno::Any& aIndex, const css::uno::Any& /*not processed in this base class*/ ) throw (css::uno::RuntimeException)
 {
 	if ( aIndex.getValueTypeClass() != css::uno::TypeClass_STRING )
 	{

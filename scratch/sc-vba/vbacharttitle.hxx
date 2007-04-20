@@ -38,8 +38,6 @@
 #include <cppuhelper/implbase1.hxx>
 #include <org/openoffice/excel/XChartTitle.hpp>
 
-using namespace ::org::openoffice;
-using namespace ::com::sun::star;
 
 typedef TitleImpl< cppu::WeakImplHelper1< oo::excel::XChartTitle > > ChartTitleBase;
 

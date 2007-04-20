@@ -520,7 +520,7 @@ ScVbaWorksheet::ChartObjects( const uno::Any& Index ) throw (uno::RuntimeExcepti
 	if ( Index.hasValue() )
 	{
 		uno::Reference< vba::XCollection > xColl( mxCharts, uno::UNO_QUERY_THROW );
-		return xColl->Item( Index );
+		return xColl->Item( Index, uno::Any() );
 	}
 	else
 		return uno::makeAny( mxCharts );
@@ -536,7 +536,7 @@ ScVbaWorksheet::PivotTables( const uno::Any& Index ) throw (uno::RuntimeExceptio
 
 	uno::Reference< vba::XCollection > xColl(  new ScVbaPivotTables( this, mxContext, xIndexAccess ) );
 	if ( Index.hasValue() )
-		return xColl->Item( Index );
+		return xColl->Item( Index, uno::Any() );
 	return uno::makeAny( xColl );
 }
 
@@ -549,7 +549,7 @@ ScVbaWorksheet::Comments( const uno::Any& Index ) throw (uno::RuntimeException)
 	uno::Reference< container::XIndexAccess > xIndexAccess( xAnnos, uno::UNO_QUERY_THROW );
 	uno::Reference< vba::XCollection > xColl(  new ScVbaComments( this, mxContext, xIndexAccess ) );
 	if ( Index.hasValue() )
-		return xColl->Item( Index );
+		return xColl->Item( Index, uno::Any() );
 	return uno::makeAny( xColl );
 }
 
@@ -565,7 +565,7 @@ ScVbaWorksheet::OLEObjects( const uno::Any& Index ) throw (uno::RuntimeException
 
     if( Index.hasValue() )
     {
-            return aOleObjects->Item( Index );
+            return aOleObjects->Item( Index, uno::Any() );
     }
     else
     {

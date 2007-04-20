@@ -78,6 +78,9 @@ SLOFILES= \
                 $(SLO)$/vbatextframe.obj \
                 $(SLO)$/vbacharttitle.obj \
                 $(SLO)$/vbacharts.obj \
+                $(SLO)$/vbaaxistitle.obj \
+                $(SLO)$/vbaaxes.obj \
+                $(SLO)$/vbaaxis.obj \
 		$(SLO)$/service.obj \
  
 

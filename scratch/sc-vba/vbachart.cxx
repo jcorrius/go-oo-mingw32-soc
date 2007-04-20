@@ -47,15 +47,21 @@
 #include <com/sun/star/chart/ChartDataCaption.hpp>
 #include <org/openoffice/excel/XlChartType.hpp>
 #include <org/openoffice/excel/XlRowCol.hpp>
+#include <org/openoffice/excel/XlAxisType.hpp>
+#include <org/openoffice/excel/XlAxisGroup.hpp>
+
 #include <basic/sberrors.hxx>
 #include "vbachartobject.hxx"
 #include "vbarange.hxx"
 #include "vbacharttitle.hxx"
+#include "vbaaxes.hxx"
 
 using namespace ::com::sun::star;
 using namespace ::org::openoffice;
 using namespace ::org::openoffice::excel::XlChartType;
 using namespace ::org::openoffice::excel::XlRowCol;
+using namespace ::org::openoffice::excel::XlAxisType;
+using namespace ::org::openoffice::excel::XlAxisGroup;
 
 const rtl::OUString CHART_NAME( RTL_CONSTASCII_USTRINGPARAM("Name") );
 // #TODO move this constant to vbaseries.[ch]xx ( when it exists )
@@ -877,19 +883,13 @@ ScVbaChart::getChartTitle(  ) throw (script::BasicErrorException, uno::RuntimeEx
 }
 
 uno::Any SAL_CALL 
-ScVbaChart::Axes( const uno::Any& Type, const uno::Any& /*AxisGroup*/ ) throw (script::BasicErrorException, uno::RuntimeException)
+ScVbaChart::Axes( const uno::Any& Type, const uno::Any& AxisGroup ) throw (script::BasicErrorException, uno::RuntimeException)
 {
+	// mmm chart probably is the parent, #TODO check parent
+	uno::Reference< excel::XAxes > xAxes = new ScVbaAxes( this, mxContext, this );
 	if ( !Type.hasValue() )
-	{
-		// return ScVbaAxes collection of Axis
-	}
-	else
-	{
-		//ScVbaAxes xAxes;
-		//xAxes.item( Type, AxisGroup );
-	}
-	// #FIXME I'm not implemented yet
-	return uno::Any();
+		return uno::makeAny( xAxes );
+	return xAxes->Item( Type, AxisGroup );
 }
 bool
 ScVbaChart::is3D() throw ( uno::RuntimeException )
@@ -1198,6 +1198,44 @@ ScVbaChart::setHasDataCaption( const uno::Reference< beans::XPropertySet >& _xPr
 		throw script::BasicErrorException( rtl::OUString(), uno::Reference< uno::XInterface >(), SbERR_METHOD_FAILED, rtl::OUString() );
 	}
 }
+
+uno::Reference< beans::XPropertySet > 
+ScVbaChart::getAxisPropertySet(sal_Int32 _nAxisType, sal_Int32 _nAxisGroup) throw ( script::BasicErrorException )
+{
+	assignDiagramAttributes();
+	uno::Reference< beans::XPropertySet > xAxisProps;
+	switch(_nAxisType)
+	{
+		case xlCategory:
+			if (_nAxisGroup == xlPrimary)
+			{
+				xAxisProps = xAxisXSupplier->getXAxis();
+			}
+			else if (_nAxisGroup == xlSecondary)
+			{
+				xAxisProps = xTwoAxisXSupplier->getSecondaryXAxis();
+			}
+			break;
+		case xlSeriesAxis:
+//                if (_nAxisGroup == xlPrimary){
+			xAxisProps = xAxisZSupplier->getZAxis();
+			break;
+//                }
+//                else if (_nAxisGroup == xlSecondary){
+ //                   return xTwoAxisXSupplier.getSecondaryZAxis();
+ //               }
+		case xlValue:
+			if (_nAxisGroup == xlPrimary)
+				xAxisProps = xAxisYSupplier->getYAxis();
+			else if (_nAxisGroup == xlSecondary)
+				xAxisProps = xTwoAxisYSupplier->getSecondaryYAxis();
+			break;
+		default:
+			return xAxisProps;	
+		}
+	return xAxisProps;
+}
+
 
 rtl::OUString&
 ScVbaChart::getServiceImplName()
