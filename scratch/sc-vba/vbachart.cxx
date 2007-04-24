@@ -627,6 +627,16 @@ ScVbaChart::setSourceData( const css::uno::Reference< ::org::openoffice::excel::
 			_aPlotBy >>= nVal;
 			setPlotBy( nVal );
 		}
+		else
+		{
+			sal_Int32 nRows =  mSingleRangeAddress.EndRow - mSingleRangeAddress.StartRow;
+			sal_Int32 nCols = mSingleRangeAddress.EndColumn - mSingleRangeAddress.StartColumn;
+			// AutoDetect emulation
+			if ( nRows > nCols )
+				setPlotBy( xlColumns );
+			else if ( nRows <= nCols )
+				setPlotBy( xlRows );
+		}
 	}
 	catch (uno::Exception& e)
 	{
@@ -705,7 +715,8 @@ ScVbaChart::setDiagram( const rtl::OUString& _sDiagramType ) throw( script::Basi
 {
 	try
 	{
-		uno::Reference< chart::XDiagram > xDiagram( mxContext->getServiceManager()->createInstanceWithContext( _sDiagramType, mxContext ), uno::UNO_QUERY_THROW );
+		uno::Reference< lang::XMultiServiceFactory > xMSF( mxChartDocument, uno::UNO_QUERY_THROW );
+		uno::Reference< chart::XDiagram > xDiagram( xMSF->createInstance( _sDiagramType ), uno::UNO_QUERY_THROW  );
 		mxChartDocument->setDiagram( xDiagram );
 		mxDiagramPropertySet.set( xDiagram, uno::UNO_QUERY_THROW );
 	}

@@ -44,6 +44,7 @@
 #include "vbachartobjects.hxx"
 #include "vbachartobject.hxx"
 #include "vbaglobals.hxx"
+#include "cellsuno.hxx"
 #include <vector>
 #include <basic/sberrors.hxx>
 
@@ -85,9 +86,19 @@ ScVbaChartObjects::getChartObjectNames() throw( css::script::BasicErrorException
 	uno::Sequence< rtl::OUString > sChartNames;
 	try
 	{
-		uno::Reference< sheet::XSpreadsheetDocument > xSpreadsheetDocument( xDrawPageSupplier, uno::UNO_QUERY_THROW );
+		// c++ hackery
+		uno::Reference< uno::XInterface > xIf( xDrawPageSupplier, uno::UNO_QUERY_THROW );
+		ScCellRangesBase* pUno= dynamic_cast< ScCellRangesBase* >( xIf.get() );
+		ScDocShell* pDocShell = NULL;
+		if ( !pUno )
+			throw uno::RuntimeException( rtl::OUString::createFromAscii("Failed to obtain the impl class from the drawpage"), uno::Reference< uno::XInterface >() );
+		pDocShell = pUno->GetDocShell();	
+		if ( !pDocShell )
+			throw uno::RuntimeException( rtl::OUString::createFromAscii("Failed to obtain the docshell implclass"), uno::Reference< uno::XInterface >() );
+			
+		uno::Reference< sheet::XSpreadsheetDocument > xSpreadsheetDocument( pDocShell->GetModel(), uno::UNO_QUERY_THROW );
 		uno::Reference< sheet::XSpreadsheets > xSpreadsheets = xSpreadsheetDocument->getSheets();
-        std::vector< rtl::OUString > aChartNamesVector;
+		std::vector< rtl::OUString > aChartNamesVector;
 
 		uno::Sequence< rtl::OUString > sSheetNames = xSpreadsheets->getElementNames();
 		sal_Int32 nItems = sSheetNames.getLength();
@@ -101,7 +112,7 @@ ScVbaChartObjects::getChartObjectNames() throw( css::script::BasicErrorException
 		}
 		sChartNames.realloc( aChartNamesVector.size() );
 		std::vector< rtl::OUString > ::const_iterator it = aChartNamesVector.begin();
-		std::vector< rtl::OUString > ::const_iterator it_end = aChartNamesVector.begin();
+		std::vector< rtl::OUString > ::const_iterator it_end = aChartNamesVector.end();
 		for ( sal_Int32 index = 0 ; it != it_end; ++it, ++index )
 			sChartNames[index] = *it;
 	} 
@@ -133,6 +144,7 @@ ScVbaChartObjects::Add( double _nX, double _nY, double _nWidth, double _nHeight 
 	} 
 	catch ( uno::Exception& ex) 
 	{
+		OSL_TRACE("AddItem caught exception ->%s", rtl::OUStringToOString( ex.Message, RTL_TEXTENCODING_UTF8 ).getStr() );
 	}
 	return aNULL();
 }
