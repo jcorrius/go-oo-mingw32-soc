@@ -110,7 +110,7 @@ uno::Any
 ScVbaWorksheets::createCollectionObject( const uno::Any& aSource )
 {
 	uno::Reference< sheet::XSpreadsheet > xSheet( aSource, uno::UNO_QUERY );
-	return uno::makeAny( uno::Reference< excel::XWorksheet > ( new ScVbaWorksheet( uno::Reference< vba::XHelperInterface >( getParent(), uno::UNO_QUERY_THROW ), mxContext, xSheet, mxModel ) ) );
+	return uno::makeAny( uno::Reference< excel::XWorksheet > ( new ScVbaWorksheet( getParent(), mxContext, xSheet, mxModel ) ) );
 }
 
 // XWorksheets
