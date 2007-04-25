@@ -70,6 +70,7 @@ ScVbaAxis::isValueAxis() throw( script::BasicErrorException )
 
 ScVbaAxis::ScVbaAxis( const uno::Reference< vba::XHelperInterface >& xParent,const uno::Reference< uno::XComponentContext > & xContext, const uno::Reference< beans::XPropertySet >& _xPropertySet, sal_Int32 _nType, sal_Int32 _nGroup  ) : ScVbaAxis_BASE( xParent, xContext ), mxPropertySet( _xPropertySet ), mnType( _nType ), mnGroup( _nGroup ), bCrossesAreCustomized( sal_False ) 
 {
+	oShapeHelper.reset( new ShapeHelper( uno::Reference< drawing::XShape >( mxPropertySet, uno::UNO_QUERY ) ) );
 	moChartParent.set( xParent, uno::UNO_QUERY_THROW  );
 	setType(_nType);
 	setCrosses(xlAxisCrossesAutomatic);	
@@ -237,7 +238,7 @@ ScVbaAxis::setType( ::sal_Int32 _nType ) throw (script::BasicErrorException, uno
 ::sal_Int32 SAL_CALL 
 ScVbaAxis::getType(  ) throw (script::BasicErrorException, uno::RuntimeException)
 {
-	return -1;
+	return mnType;
 }
 
 void SAL_CALL 
@@ -619,6 +620,41 @@ ScVbaAxis::getScaleType(  ) throw (script::BasicErrorException, uno::RuntimeExce
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString());
 	}
 	return nScaleType;
+}
+
+double SAL_CALL 
+ScVbaAxis::getHeight(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException)
+{
+	return oShapeHelper->getHeight();
+}
+
+void SAL_CALL ScVbaAxis::setHeight( double height ) throw (css::script::BasicErrorException, css::uno::RuntimeException)
+{
+	oShapeHelper->setHeight( height );
+}
+double SAL_CALL ScVbaAxis::getWidth(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException)
+{
+	return oShapeHelper->getWidth( );
+}
+void SAL_CALL ScVbaAxis::setWidth( double width ) throw (css::script::BasicErrorException, css::uno::RuntimeException)
+{
+	oShapeHelper->setWidth( width );
+}
+double SAL_CALL ScVbaAxis::getTop(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException)
+{
+	return oShapeHelper->getTop( );
+}
+void SAL_CALL ScVbaAxis::setTop( double top ) throw (css::script::BasicErrorException, css::uno::RuntimeException)
+{
+	oShapeHelper->setTop( top );
+}
+double SAL_CALL ScVbaAxis::getLeft(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException)
+{
+	return oShapeHelper->getLeft( );
+}
+void SAL_CALL ScVbaAxis::setLeft( double left ) throw (css::script::BasicErrorException, css::uno::RuntimeException)
+{
+	oShapeHelper->setLeft( left );
 }
 
 rtl::OUString& 

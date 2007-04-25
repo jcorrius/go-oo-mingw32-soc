@@ -51,6 +51,7 @@ class ScVbaAxis : public ScVbaAxis_BASE
 	sal_Bool bCrossesAreCustomized; 
 	ScVbaChart* getChartPtr() throw( css::uno::RuntimeException );
 	sal_Bool isValueAxis() throw( css::script::BasicErrorException );
+	std::auto_ptr<oo::ShapeHelper> oShapeHelper;
 	
 public:
 	ScVbaAxis( const css::uno::Reference< oo::vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext > & xContext, const css::uno::Reference< css::beans::XPropertySet >& _xPropertySet, sal_Int32 _nType, sal_Int32 _nGroup );
@@ -88,6 +89,15 @@ public:
 	virtual ::sal_Int32 SAL_CALL getAxisGroup(  ) throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setScaleType( ::sal_Int32 ScaleType ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
 	virtual ::sal_Int32 SAL_CALL getScaleType(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual double SAL_CALL getHeight(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual void SAL_CALL setHeight( double height ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual double SAL_CALL getWidth(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual void SAL_CALL setWidth( double width ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual double SAL_CALL getTop(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual void SAL_CALL setTop( double top ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual double SAL_CALL getLeft(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual void SAL_CALL setLeft( double left ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+
 	// XHelperInterface
 	virtual rtl::OUString& getServiceImplName();
 	virtual css::uno::Sequence<rtl::OUString> getServiceNames();

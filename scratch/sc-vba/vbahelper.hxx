@@ -129,7 +129,11 @@ class ShapeHelper
 protected:
 	css::uno::Reference< css::drawing::XShape > xShape;
 public:
-	ShapeHelper( const css::uno::Reference< css::drawing::XShape >& _xShape) : xShape( _xShape ){}
+	ShapeHelper( const css::uno::Reference< css::drawing::XShape >& _xShape) throw (css::script::BasicErrorException ) : xShape( _xShape )
+	{ 
+		if( !xShape.is() ) 
+			throw css::uno::RuntimeException( rtl::OUString::createFromAscii("No valid shape for helper"), css::uno::Reference< css::uno::XInterface >() );
+	}
     
 	double getHeight()
 	{
