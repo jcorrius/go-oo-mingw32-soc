@@ -1,0 +1,327 @@
+Index: svx/source/msfilter/makefile.mk
+===================================================================
+RCS file: /cvs/graphics/svx/source/msfilter/makefile.mk,v
+retrieving revision 1.11
+diff -u -p -u -r1.11 makefile.mk
+--- svx/source/msfilter/makefile.mk	24 Apr 2003 13:26:39 -0000	1.11
++++ svx/source/msfilter/makefile.mk	29 Mar 2004 08:26:31 -0000
+@@ -79,6 +79,7 @@ SLOFILES=\
+ 	$(SLO)$/msdffimp.obj	\
+ 	$(SLO)$/msoleexp.obj	\
+ 	$(SLO)$/msvbasic.obj	\
++	$(SLO)$/msvbasicdir.obj	\
+ 	$(SLO)$/msashape.obj	\
+ 	$(SLO)$/svxmsbas.obj	\
+ 	$(SLO)$/msocximex.obj	\
+Index: svx/source/msfilter/svxmsbas.cxx
+===================================================================
+RCS file: /cvs/graphics/svx/source/msfilter/svxmsbas.cxx,v
+retrieving revision 1.4
+diff -u -p -u -r1.4 svxmsbas.cxx
+--- svx/source/msfilter/svxmsbas.cxx	15 Apr 2003 08:47:59 -0000	1.4
++++ svx/source/msfilter/svxmsbas.cxx	29 Mar 2004 08:26:39 -0000
+@@ -61,7 +61,7 @@
+ #include <svxmsbas.hxx>
+ #endif
+ #ifndef _MSVBASIC_HXX
+-#include <msvbasic.hxx>
++#include <msvbasicdir.hxx>
+ #endif
+ #ifndef _MSOCXIMEX_HXX
+ #include <msocximex.hxx>
+@@ -277,182 +277,44 @@ BOOL SvxImportMSVBasic::CopyStorage_Impl
+ 	return bValidStg;
+ }
+ 
++BOOL
++SvxImportMSVBasic::GetVBAStorage(const String &rStorageName,
++								 const String &rSubStorageName,
++								 SvStorageRef &rProject,
++								 SvStorageRef &rVBA,
++								 bool bCreate)
++{
++	ULONG nFlags = STREAM_READWRITE | STREAM_SHARE_DENYALL;
++
++	if( !bCreate )
++			nFlags |= STREAM_NOCREATE;
++
++	rProject = xRoot->OpenSotStorage( rStorageName, nFlags );
++	if( rProject.Is() && SVSTREAM_OK == rProject->GetError() )
++	{
++		rVBA = rProject->OpenSotStorage( rSubStorageName, nFlags );
++		if( rVBA.Is() && SVSTREAM_OK == rVBA->GetError() )
++			return true;
++		else
++			DBG_WARNING("No Visual Basic in Storage");
++	}
++	else
++		DBG_WARNING("No Macros Storage");
++
++	return false;
++}
+ BOOL SvxImportMSVBasic::ImportCode_Impl( const String& rStorageName,
+ 										const String &rSubStorageName,
+ 										BOOL bAsComment, BOOL bStripped )
+ {
+-	BOOL bRet = FALSE;
+-	bAsComment = FALSE;
+-	VBA_Impl aVBA( *xRoot, bAsComment );
+-	if( aVBA.Open(rStorageName,rSubStorageName) )
++	bool bRet = false;
++	SvStorageRef xProject, xVBA;
++	if( GetVBAStorage( rStorageName, rSubStorageName, xProject, xVBA, false ) )
+ 	{
+-		SFX_APP()->EnterBasicCall();
+-        Reference<XLibraryContainer> xLibContainer = rDocSh.GetBasicContainer();
+-		DBG_ASSERT( xLibContainer.is(), "No BasicContainer!" );
+-
+-        UINT16 nStreamCount = aVBA.GetNoStreams();
+-		Reference<XNameContainer> xLib;
+-        if( xLibContainer.is() && nStreamCount )
+-        {
+-            String aLibName( RTL_CONSTASCII_USTRINGPARAM( "Standard" ) );
+-		    if( !xLibContainer->hasByName( aLibName ) )
+-			    xLibContainer->createLibrary( aLibName );
+-
+-            Any aLibAny = xLibContainer->getByName( aLibName );
+-		    aLibAny >>= xLib;
+-        }
+-		if( xLib.is() )
+-		{
+-			for( UINT16 i=0; i<nStreamCount;i++)
+-			{
+-				StringArray aDecompressed = aVBA.Decompress(i);
+-#if 0
+-/*  DR 2005-08-11 #124850# Do not filter special characters from module name.
+-    Just put the original module name and let the Basic interpreter deal with
+-    it. Needed for roundtrip...
+- */
+-				ByteString sByteBasic(aVBA.GetStreamName(i),
+-					RTL_TEXTENCODING_ASCII_US,
+-						(RTL_UNICODETOTEXT_FLAGS_UNDEFINED_UNDERLINE|
+-						RTL_UNICODETOTEXT_FLAGS_INVALID_UNDERLINE |
+-						RTL_UNICODETOTEXT_FLAGS_PRIVATE_MAPTO0 |
+-						RTL_UNICODETOTEXT_FLAGS_NOCOMPOSITE)
+-				);
+-
+-				const String sBasicModule(sByteBasic,
+-					RTL_TEXTENCODING_ASCII_US);
+-#else
+-                const String &sBasicModule = aVBA.GetStreamName( i);
+-#endif
+-                /* #117718# expose information regarding type of Module
+-                * Class, Form or plain 'ould VBA module with a REM statment
+-                * at the top of the module. Mapping of Module Name
+-                * to type is performed in  VBA_Impl::Open() method,
+-                * ( msvbasic.cxx ) by examining the PROJECT stream.
+-                */
+-
+-                // using name from aVBA.GetStreamName
+-                // because the encoding of the same returned
+-                // is the same as the encoding for the names
+-                // that are keys in the map used by GetModuleType method
+-                const String &sOrigVBAModName = aVBA.GetStreamName( i );
+-                ModuleType mType = aVBA.GetModuleType( sOrigVBAModName );
+-
+-                rtl::OUString sClassRem( RTL_CONSTASCII_USTRINGPARAM( "Rem Attribute VBA_ModuleType=" ) );
+-
+-                rtl::OUString modeTypeComment;
+-
+-                switch( mType )
+-                {
+-                    case Class:
+-                        modeTypeComment = sClassRem +
+-                            ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "VBAClassModule\n" ) );
+-                        break;
+-                    case Form:
+-                        modeTypeComment = sClassRem +
+-                            ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "VBAFormModule\n" ) );
+-                        break;
+-                    case Document:
+-                        modeTypeComment = sClassRem +
+-                            ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "VBADocumentModule\n" ) );
+-                        break;
+-                    case Normal:
+-                        modeTypeComment = sClassRem +
+-                            ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "VBAModule\n" ) );
+-                        break;
+-                    case Unknown:
+-                        modeTypeComment = sClassRem +
+-                            ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "VBAUnknown\n" ) );
+-                        break;
+-                    default:
+-                        DBG_ERRORFILE( "SvxImportMSVBasic::ImportCode_Impl - unknown module type" );
+-                        break;
+-                }
+-				static ::rtl::OUString sVBAOption( RTL_CONSTASCII_USTRINGPARAM( "Option VBASupport 1\n" ) ); 
+-				static ::rtl::OUString sClassOption( RTL_CONSTASCII_USTRINGPARAM( "Option ClassModule\n" ) ); 
+-				if ( !bAsComment )
+-				{
+-					modeTypeComment = modeTypeComment + sVBAOption;
+-					if ( mType == Class )
+-						modeTypeComment = modeTypeComment + sClassOption;
+-
+-				}
+-
+-				String sModule(sBasicModule); //#i52606# no need to split Macros in 64KB blocks any more!
+-				String sTemp;
+-				if (bAsComment)
+-				{
+-					sTemp+=String(RTL_CONSTASCII_USTRINGPARAM( "Sub " ));
+-					String sMunge(sModule);
+-					//Streams can have spaces in them, but modulenames
+-					//cannot !
+-					sMunge.SearchAndReplaceAll(' ','_');
+-
+-					sTemp += sMunge;
+-					sTemp.AppendAscii("\n");
+-				};
+-	            ::rtl::OUString aSource(sTemp);
+-
+-				for(ULONG j=0;j<aDecompressed.GetSize();j++)
+-				{
+-					if (bStripped)
+-					{
+-                        String *pStr = aDecompressed.Get(j);
+-                        bool bMac = true;
+-                        xub_StrLen nBegin = pStr->Search('\x0D');
+-                        if ((STRING_NOTFOUND != nBegin) && (pStr->Len() > 1) && (pStr->GetChar(nBegin+1) == '\x0A'))
+-                            bMac = false;
+-
+-                        const char cLineEnd = bMac ? '\x0D' : '\x0A';
+-                        const String sAttribute(String::CreateFromAscii(
+-                            bAsComment ? "Rem Attribute" : "Attribute"));
+-						nBegin = 0;
+-						while (STRING_NOTFOUND != (nBegin =	pStr->Search(sAttribute, nBegin)))
+-						{
+-                            if ((nBegin) && pStr->GetChar(nBegin-1) != cLineEnd)
+-							{
+-                                // npower #i63766# Need to skip instances of Attribute
+-								// that are NOT Attribute statements
+-								nBegin = nBegin + sAttribute.Len();
+-                                continue;
+-							}
+-							xub_StrLen nEnd = pStr->Search(cLineEnd ,nBegin);
+-                            // DR #i26521# catch STRING_NOTFOUND, will loop endless otherwise
+-                            if( nEnd == STRING_NOTFOUND )
+-                                pStr->Erase();
+-                            else
+-                                pStr->Erase(nBegin, (nEnd-nBegin)+1);
+-						}
+-					}
+-					if( aDecompressed.Get(j)->Len() )
+-					{
+-			            aSource+=::rtl::OUString( *aDecompressed.Get(j) );
+-					}
+-
+-				}
+-				if (bAsComment)
+-				{
+-						aSource += rtl::OUString::createFromAscii("\nEnd Sub");
+-				}
+-				::rtl::OUString aModName( sModule );
+-				if ( aSource.getLength() )
+-				{
+-					aSource = modeTypeComment + aSource;
+-
+-					Any aSourceAny;
+-					aSourceAny <<= aSource;
+-					if( xLib->hasByName( aModName ) )
+-						xLib->replaceByName( aModName, aSourceAny );
+-					else
+-						xLib->insertByName( aModName, aSourceAny );
+-				}                                
+-
+-				bRet = true;
+-			}
+-		}
+-		SFX_APP()->LeaveBasicCall();
++		VBADir aVBA( xProject, xVBA );
++		bRet = aVBA.readBasic( rDocSh, bAsComment, bStripped );
+ 	}
+ 	return bRet;
+ }
+ 
+ ULONG SvxImportMSVBasic::SaveOrDelMSVBAStorage( BOOL bSaveInto,
+@@ -468,20 +329,51 @@ ULONG SvxImportMSVBasic::SaveOrDelMSVBAS
+ 		xVBAStg = 0;
+ 		if( bSaveInto )
+ 		{
++			bool bWroteCopy = false;
++			// Why enterbasic call?
++			SFX_APP()->EnterBasicCall();
++
+ 			BasicManager *pBasicMan = rDocSh.GetBasicManager();
++				bool bIsModified = pBasicMan && pBasicMan->IsBasicModified();
++			SFX_APP()->LeaveBasicCall();
++			if( !bIsModified )
++			{
++				OSL_TRACE("Error - probably bogus unmodified state ..." );
++			}
+ 			if( pBasicMan && pBasicMan->IsBasicModified() )
+ 				nRet = ERRCODE_SVX_MODIFIED_VBASIC_STORAGE;
+-
+-            SotStorageRef xSrc = SotStorage::OpenOLEStorage( xSrcRoot, aDstStgName, STREAM_STD_READ );
+-            SotStorageRef xDst = xRoot->OpenSotStorage( rStorageName, STREAM_READWRITE | STREAM_TRUNC );
+-            xSrc->CopyTo( xDst );
+-            xDst->Commit();
+-            ErrCode nError = xDst->GetError();
+-            if ( nError == ERRCODE_NONE )
+-                nError = xSrc->GetError();
+-            if ( nError != ERRCODE_NONE )
+-                xRoot->SetError( nError );
+-		}
++#if 0
++			if( !bIsModified )
++			{
++	            SotStorageRef xSrc = SotStorage::OpenOLEStorage( xSrcRoot, aDstStgName, STREAM_STD_READ );
++	            SotStorageRef xDst = xRoot->OpenSotStorage( rStorageName, STREAM_READWRITE | STREAM_TRUNC );
++	            xSrc->CopyTo( xDst );
++	            xDst->Commit();
++	            ErrCode nError = xDst->GetError();
++	            if ( nError == ERRCODE_NONE )
++	                nError = xSrc->GetError();
++	            if ( nError != ERRCODE_NONE )
++	                xRoot->SetError( nError );
++			}
++#endif
++			if( !bWroteCopy )
++			{
++				OSL_TRACE("Crazy VBA writing hack !" );
++				SvStorageRef xProject, xVBA;
++				if( GetVBAStorage( // HACK:
++					rtl::OUString::createFromAscii( "_VBA_PROJECT_CUR" ),
++					rtl::OUString::createFromAscii( "VBA" ),
++					xProject, xVBA, true ) )
++				{
++					VBADir aDir( xProject, xVBA );
++					aDir.writeBasic( rDocSh );
++				}
++				else
++				{
++					OSL_TRACE( "Failed to create VBA storage" );
++				}
++			}
++		}
+ 	}
+ 
+ 	return nRet;
+Index: svx/inc/svxmsbas.hxx
+===================================================================
+RCS file: /cvs/graphics/svx/inc/svxmsbas.hxx,v
+retrieving revision 1.1.1.1
+diff -u -p -u -r1.1.1.1 svxmsbas.hxx
+--- svx/inc/svxmsbas.hxx	18 Sep 2000 17:01:01 -0000	1.1.1.1
++++ svx/inc/svxmsbas.hxx	29 Mar 2004 08:31:03 -0000
+@@ -118,6 +118,11 @@ private:
+ 	BOOL bImport;
+ 	BOOL bCopy;
+ 
++	SVX_DLLPRIVATE BOOL GetVBAStorage(const String& rStorageName,
++					   const String &rSubStorageName,
++					   SvStorageRef &rProject,
++					   SvStorageRef &rVBA,
++					   bool  bCreate);
+ 	SVX_DLLPRIVATE BOOL ImportCode_Impl( const String& rStorageName,
+ 						  const String &rSubStorageName,
+ 						  BOOL bAsComment, BOOL bStripped);
