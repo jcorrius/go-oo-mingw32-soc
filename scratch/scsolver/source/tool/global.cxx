@@ -25,28 +25,23 @@
  *
  ************************************************************************/
 
-
-#ifndef _SUPPL_HXX_
-#define _SUPPL_HXX_
-
-#ifndef TESTCASE
-#include <cppuhelper/implementationentry.hxx>
-#include <global.hxx>
-#endif
-
-#ifdef TESTCASE
-#include <string>
-#include <vector>
+#include "tool/global.hxx"
 #include <sstream>
-#include <iostream>
+#include <stdio.h>
 
-typedef long sal_Int32;
-typedef unsigned long sal_uInt32;
-typedef char sal_Char;
+using namespace std;
 
-namespace {
+namespace scsolver {
 
-std::string repeatString( const sal_Char* str, unsigned int nNum )
+void Debug( const char* s )
+{
+#if SCSOLVER_DEBUG
+	fprintf(stdout, "%s\n", s);
+	fflush(stdout);
+#endif
+}
+
+std::string repeatString( const char* str, unsigned long nNum )
 {
 	std::ostringstream os;
 	for ( unsigned int i = 0; i < nNum; ++i )
@@ -54,18 +49,4 @@ std::string repeatString( const sal_Char* str, unsigned int nNum )
 	return os.str();
 }
 
-template<typename T>
-void printVector( const std::vector<T>& a )
-{
-	sal_uInt32 size = a.size();
-	if ( size > 0 )
-		for ( sal_uInt32 i = 0; i < size; ++i )
-			std::cout << a.at( i ) << " ";
-	else
-		std::cout << "[empty] ";
 }
-
-}
-#endif
-
-#endif
