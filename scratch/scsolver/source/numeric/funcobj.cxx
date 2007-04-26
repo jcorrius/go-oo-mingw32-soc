@@ -40,9 +40,4 @@ BaseFuncObj::~BaseFuncObj() throw()
 {
 }
 
-double BaseFuncObj::eval( const std::vector<double>& cnX ) const
-{
-	return operator()( cnX );
-}
-
 }}

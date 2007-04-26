@@ -123,8 +123,8 @@ public:
 	Matrix& operator-=( const Matrix& );
 	Matrix& operator*=( double );
 	Matrix& operator/=( double );
-	const double operator()( size_t, size_t ) const;
-	double& operator()( size_t, size_t );
+	const double operator()( size_t row, size_t col ) const;
+	double& operator()( size_t row, size_t col );
 	
 	bool operator==( const Matrix& ) const;
 	bool operator!=( const Matrix& ) const;

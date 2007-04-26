@@ -25,9 +25,9 @@
  *
  ************************************************************************/
 
-#include <numeric/diff.hxx>
-#include <numeric/funcobj.hxx>
-#include <global.hxx>
+#include "numeric/diff.hxx"
+#include "numeric/funcobj.hxx"
+#include "tool/global.hxx"
 #include <iostream>
 #include <stdexcept>
 #include <cmath>
@@ -39,10 +39,11 @@ namespace scsolver { namespace numeric {
 //---------------------------------------------------------------------------
 // Implementation
 
-/** Algorithm derived from Chapter 4.2 (p.93) of
-
-	A First Course In Numerical Analysis 2nd ed. 
-	by Anthony Ralston and Philip Rabinowitz
+/** 
+    Algorithm derived from Chapter 4.2 (p.93) of
+ 
+    "A First Course In Numerical Analysis 2nd ed. by Anthony
+    Ralston and Philip Rabinowitz"
  */
 class DifferentiateImpl
 {
@@ -56,7 +57,12 @@ public:
 	void setSecondOrder( bool );
 	void setVariables( const vector<double>& );
 	void setVarIndex( unsigned long );
-	void setFuncObject( const boost::shared_ptr<BaseFuncObj>& );
+
+    void setFuncObject(BaseFuncObj* p)
+    {
+    	m_pFuncObj = p;
+    	setDirty();
+    }
 
 	double run();
 
@@ -64,7 +70,7 @@ private:
 	unsigned long m_nPrec;
 	unsigned long m_nVarIndex;
 	bool m_bSecondOrder;
-	boost::shared_ptr<BaseFuncObj> m_pFuncObj;
+    BaseFuncObj* m_pFuncObj;
 
 	vector<double> m_cnX;
 	vector<double> m_cnH;
@@ -85,7 +91,8 @@ double DifferentiateImpl::OMEGA = 2.0;
 DifferentiateImpl::DifferentiateImpl() : 
 	m_nPrec( 2 ), 
 	m_nVarIndex( 0 ), 
-	m_bSecondOrder( false )
+	m_bSecondOrder( false ),
+    m_pFuncObj(NULL)
 {
 }
 
@@ -117,12 +124,6 @@ void DifferentiateImpl::setVarIndex( unsigned long n )
 		m_nVarIndex = n;
 		setDirty();
 	}
-}
-
-void DifferentiateImpl::setFuncObject( const boost::shared_ptr<BaseFuncObj>& p )
-{
-	m_pFuncObj = p;
-	setDirty();
 }
 
 void DifferentiateImpl::initialize()
@@ -185,19 +186,24 @@ double DifferentiateImpl::T0( unsigned long i )
 	if ( m_bSecondOrder )
 	{
 		cnX.at( m_nVarIndex ) = fXOrig + fH;
-		fVal = m_pFuncObj->eval( cnX );
+        m_pFuncObj->setVars(cnX);
+        fVal = m_pFuncObj->eval();
 		cnX.at( m_nVarIndex ) = fXOrig;
-		fVal -= 2.0*m_pFuncObj->eval( cnX );
+        m_pFuncObj->setVars(cnX);
+		fVal -= 2.0*m_pFuncObj->eval();
 		cnX.at( m_nVarIndex ) = fXOrig - fH;
-		fVal += m_pFuncObj->eval( cnX );
+        m_pFuncObj->setVars(cnX);
+		fVal += m_pFuncObj->eval();
 		fVal /= fH*fH;
 	}
 	else
 	{
 		cnX.at( m_nVarIndex ) = fXOrig + fH;
-		fVal = m_pFuncObj->eval( cnX );
+        m_pFuncObj->setVars(cnX);
+		fVal = m_pFuncObj->eval();
 		cnX.at( m_nVarIndex ) = fXOrig - fH;
-		fVal -= m_pFuncObj->eval( cnX );
+        m_pFuncObj->setVars(cnX);
+		fVal -= m_pFuncObj->eval();
 		fVal /= 2.0*fH;
 	}
 	setT( 0, i, fVal );
@@ -237,7 +243,7 @@ double DifferentiateImpl::Tm( unsigned long m, unsigned long i )
 
 double DifferentiateImpl::run()
 {
-	if ( m_pFuncObj.get() == NULL )
+	if ( m_pFuncObj == NULL )
 		throw FuncObjectNotSet();
 
 	cout << m_pFuncObj->getFuncString() << endl;
@@ -300,7 +306,7 @@ void Differentiate::setVarIndex( unsigned long nIndex )
 	m_pImpl->setVarIndex( nIndex );
 }
 
-void Differentiate::setFuncObject( const boost::shared_ptr<BaseFuncObj>& p )
+void Differentiate::setFuncObject(BaseFuncObj* p)
 {
 	m_pImpl->setFuncObject( p );
 }

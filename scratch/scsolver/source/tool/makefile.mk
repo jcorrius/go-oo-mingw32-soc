@@ -13,7 +13,8 @@ ENABLE_EXCEPTIONS=TRUE
 # --- Files --------------------------------------------------------
 
 SLOFILES =  \
-        $(SLO)$/timer.obj
+        $(SLO)$/timer.obj \
+        $(SLO)$/global.obj
 
 # --- Tagets -------------------------------------------------------
 

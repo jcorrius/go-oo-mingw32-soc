@@ -28,18 +28,16 @@
 #ifndef _NUMERIC_OPRES_NLP_NLPMODEL_HXX_
 #define _NUMERIC_OPRES_NLP_NLPMODEL_HXX_
 
-#include <numeric/matrix.hxx>
-#include <numeric/type.hxx>
+#include "numeric/type.hxx"
 #include <memory>
-#include <boost/shared_ptr.hpp>
 #include <string>
 #include <vector>
 
 namespace scsolver { namespace numeric {
-	class BaseFuncObj;
+    class BaseFuncObj;
 }}
 
-namespace scsolver { namespace numeric { namespace opres { namespace nlp {
+namespace scsolver { namespace numeric { namespace nlp {
 
 class ModelImpl;
 class BaseAlgorithm;
@@ -47,38 +45,135 @@ class BaseAlgorithm;
 class Model
 {
 public:
-	Model();
-	Model( const Model& );
-	~Model() throw();
+    Model();
+    Model( const Model& );
+    ~Model() throw();
 
-	void print() const;
+    /**
+     * Print model information to standard output.
+     */
+    void print() const;
 
-	void setPrecision( unsigned long );
-	unsigned long getPrecision() const;
+    /**
+     * Set desired precision for optimized solution. 
+     *  
+     * @param n desired precision
+     */
+    void setPrecision(unsigned long n);
 
-	void setGoal( scsolver::numeric::opres::Goal );
-	scsolver::numeric::opres::Goal getGoal() const;
+    /**
+     * Get current desired precision.
+     * 
+     * @return unsigned long desired precision.
+     */
+    unsigned long getPrecision() const;
 
-	void setVerbose( bool );
-	bool getVerbose() const;
+    /**
+     * Set optimization goal. 
+     *  
+     * @param goal
+     */
+    void setGoal(scsolver::numeric::Goal goal);
 
-	::scsolver::numeric::Matrix getSolution() const;
-	void setSolution( const ::scsolver::numeric::Matrix& );
+    /**
+     * Get current optimization goal.
+     * 
+     * @return scsolver::numeric::Goal
+     */
+    scsolver::numeric::Goal getGoal() const;
 
-	void setFuncObject( const boost::shared_ptr<BaseFuncObj>& );
-	const boost::shared_ptr<BaseFuncObj> getFuncObject() const;
+    /**
+     * Control whether or not to produce verbose output to standard output during 
+     * optimization run. 
+     *  
+     * @param b flag to control verbose ouput
+     */
+    void setVerbose(bool b);
 
-	void pushVar( double var );
-	const ::std::vector<double> getVars() const;
+    /**
+     * Get the current verbose setting.
+     * 
+     * @return bool verbose setting flag
+     */
+    bool getVerbose() const;
 
-	void solve( const boost::shared_ptr<BaseAlgorithm>& );
+    /**
+     * Set a pointer to the function object to be used that represents the 
+     * objective function in a model.  Note that <b>this model class does NOT 
+     * manage the life cycle of the function object passed to this function</b>; it
+     * is the responsibility of the calling function to ensure that the instance 
+     * of the function object gets deleted after the optimization code has run. 
+     *  
+     * @param pFuncObj pointer to function object.
+     */
+    void setFuncObject(BaseFuncObj* pFuncObj);
+
+    /**
+     * Get a pointer to the current function object.
+     * 
+     * @return BaseFuncObj* pointer to current function object.
+     */
+    BaseFuncObj* getFuncObject() const;
+
+    /**
+     * Push a variable to the end of variable list.  Calling this method will 
+     * increase the number of variables by one. 
+     *  
+     * @param var variable value
+     */
+    void pushVar( double var );
+
+    /**
+     * Get all variables that are currently in the model as an array. 
+     *  
+     * @return const::std::vector<double>
+     */
+    void getVars( ::std::vector<double>& vars ) const;
+
+    /**
+     * Get the boundary value of a variable specified by the index.  Note 
+     * especially that the caller needs to ensure that the bounardy specified is
+     * actually bounded by calling isVarBounded(). Calling this function for an 
+     * unbounded boundary leads to an undefined behavior.
+     * 
+     * @param index index value for the variable (0-based).
+     * @param bound BOUND_UPPER or BOUND_LOWER for upper and lower bounds, 
+     *              respectrively.
+     * 
+     * @return double boundary value
+     */
+    double getVarBound( size_t index, Bound bound ) const;
+
+    /**
+     * Set boundary value for a boundary specified by variable index and side 
+     * (either upper or lower).  Setting a boundary value by calling this method 
+     * will cause isVarBounded() for this boundary to return true.
+     *  
+     * @param index index value for the variable (0-based)
+     * @param bound BOUND_UPPER or BOUND_LOWER for upper and lower bounds, 
+     *              respectively.
+     * @param value boundary value to be set.
+     */
+    void setVarBound( size_t index, Bound bound, double value );
+
+    /**
+     * Check whether or not the specified boundary for a specified variable is 
+     * bounded. 
+     *  
+     * @param index variable index (0-based)
+     * @param bound BOUND_UPPER or BOUND_LOWER for upper and lower bounds, 
+     *              respectively.
+     * 
+     * @return bool true if bounded, or false otherwise.
+     */
+    bool isVarBounded( size_t index, Bound bound ) const;
 
 private:
-	std::auto_ptr<ModelImpl> m_pImpl;
+    std::auto_ptr<ModelImpl> m_pImpl;
 };
 
 
-}}}}
+}}}
 
 
 #endif

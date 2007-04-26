@@ -28,7 +28,7 @@
  
 #include "solvemodel.hxx"
 #include "solver.hxx"
-#include "global.hxx"
+#include "tool/global.hxx"
 #include "unoglobal.hxx"
 #include "lpbuilder.hxx"
 #include "nlpbuilder.hxx"
@@ -43,7 +43,7 @@
 //#include "numeric/lpsimplex.hxx"
 #include "numeric/lpsolve.hxx"
 #include "numeric/nlpnewton.hxx"
-
+#include "numeric/cellfuncobj.hxx"
 #ifdef ENABLE_SCSOLVER_UNO_ALGORITHM
 #include "numeric/lpuno.hxx"
 #endif
@@ -56,7 +56,7 @@
 #include "scsolver.hrc"
 
 using namespace std;
-using namespace scsolver::numeric::opres;
+using namespace scsolver::numeric;
 using scsolver::numeric::Matrix;
 using com::sun::star::table::CellAddress;
 
@@ -223,7 +223,7 @@ public:
 	 */
 	void solveLp()
 	{
-		using namespace numeric::opres;
+		using namespace numeric;
 
 		SolverDialog* pMainDlg = getSolverImpl()->getMainDialog();
 		Goal eGoal = pMainDlg->getGoal();
@@ -296,7 +296,7 @@ public:
 	 */
 	void solveNlp()
 	{
-		using namespace numeric::opres;
+		using namespace numeric;
 
 		SolverDialog* pMainDlg = getSolverImpl()->getMainDialog();
 		Goal eGoal = pMainDlg->getGoal();
@@ -306,21 +306,23 @@ public:
 			return;
 		}
 
-		auto_ptr<NlpModelBuilder> pBuilder( new NlpModelBuilder(m_pSolverImpl) );
+        auto_ptr<numeric::CellFuncObj> pFuncObj(
+            new numeric::CellFuncObj(m_pSolverImpl->getCalcInterface()) );
+        CellAddress addr = resolveObjectiveFuncAddress();
 
-		CellAddress addr = resolveObjectiveFuncAddress();
-		pBuilder->setObjectiveFormulaAddress(addr);
+        // Build the model by using the builder.
+        NlpModelBuilder builder(m_pSolverImpl);
+        builder.setFuncObj(pFuncObj.get());
+        builder.setObjectiveFormulaAddress(addr);
+        builder.clearDecVarAddresses();
+        vector<CellAddress> addrs = resolveDecisionVarAddress();
+        vector<CellAddress>::iterator it, itBeg = addrs.begin(), itEnd = addrs.end();
+        for ( it = itBeg; it != itEnd; ++it )
+            builder.appendDecVarAddress(*it);
 
-		pBuilder->clearDecVarAddresses();
-		vector<CellAddress> addrs = resolveDecisionVarAddress();
-		vector<CellAddress>::iterator it,
-			itBeg = addrs.begin(), itEnd = addrs.end();
-		for ( it = itBeg; it != itEnd; ++it )
-			pBuilder->appendDecVarAddress(*it);
-
-		nlp::Model model = pBuilder->getModel();
-		model.setGoal(eGoal);
-		model.print();
+        nlp::Model model = builder.getModel();
+        model.setGoal(eGoal);
+        model.print();
 
 		auto_ptr<nlp::BaseAlgorithm> algorithm = getNlpAlgorithm();
 		m_bSolved = false;

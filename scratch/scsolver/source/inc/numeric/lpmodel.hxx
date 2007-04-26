@@ -39,7 +39,7 @@ class Matrix;
 
 }}
 
-namespace scsolver { namespace numeric { namespace opres { namespace lp {
+namespace scsolver { namespace numeric { namespace lp {
 
 
 class BaseAlgorithm;
@@ -114,7 +114,7 @@ private:
 };
 
 
-}}}}
+}}}
 
 
 #endif

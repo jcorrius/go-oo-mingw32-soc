@@ -37,9 +37,9 @@
 
 namespace scsolver {
 
-namespace numeric { namespace opres { namespace lp {
+namespace numeric { namespace lp {
 	class Model;
-}}}
+}}
 
 class LpModelBuilderImpl;
 
@@ -69,14 +69,14 @@ public:
 	bool isLeftCellNumeric() const;
 	bool isRightCellNumeric() const;
 
-	numeric::opres::Equality getEquality() const;
-	void setEquality( numeric::opres::Equality eq );
+	numeric::Equality getEquality() const;
+	void setEquality( numeric::Equality eq );
 
 private:
 
 	::com::sun::star::table::CellAddress Left;
 	::com::sun::star::table::CellAddress Right;
-	numeric::opres::Equality Equal;
+	numeric::Equality Equal;
 
 	bool m_bIsLHSNumber:1;
 	bool m_bIsRHSNumber:1;
@@ -93,11 +93,11 @@ public:
 	LpModelBuilder();
 	~LpModelBuilder();
 
-	numeric::opres::lp::Model getModel();
+	numeric::lp::Model getModel();
 
 	// Optimization objective
-	numeric::opres::Goal getGoal() const;
-	void setGoal( numeric::opres::Goal );
+	numeric::Goal getGoal() const;
+	void setGoal( numeric::Goal );
 
 	// Objective Formula
 	const ::com::sun::star::table::CellAddress getObjectiveFormulaAddress() const;

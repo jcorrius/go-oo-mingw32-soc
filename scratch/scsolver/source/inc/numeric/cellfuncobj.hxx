@@ -51,12 +51,13 @@ public:
 	CellFuncObj( ::scsolver::CalcInterface* pCalc );
 	virtual ~CellFuncObj() throw();
 
-	/**
-	 * Take an array of variables and return the answer.
-	 *
-	 * @return double
-	 */
-	virtual double operator()( const std::vector<double>& cnX ) const;
+    virtual const ::std::vector<double>& getVars() const;
+
+    virtual void setVars(const std::vector<double>& vars);
+
+    virtual void setVar(size_t index,  double var);
+
+    virtual double eval();
 
 	/**
 	 * Return a display-friendly function string.
@@ -67,7 +68,6 @@ public:
 
 	void setTargetCell( const ::com::sun::star::table::CellAddress& addr );
 	void appendDecVarCell( const ::com::sun::star::table::CellAddress& addr );
-	void test();
 
 private:
 	CellFuncObj();

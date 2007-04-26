@@ -34,11 +34,11 @@
 #include "com/sun/star/table/CellAddress.hpp"
 
 #include <list>
-#include <boost/shared_ptr.hpp>
 #include <stdio.h>
 
 using std::list;
-using scsolver::numeric::opres::nlp::Model;
+using scsolver::numeric::nlp::Model;
+using scsolver::numeric::CellFuncObj;
 using com::sun::star::table::CellAddress;
 
 namespace scsolver {
@@ -47,7 +47,8 @@ class NlpModelBuilderImpl
 {
 public:
 	NlpModelBuilderImpl( SolverImpl* p ) :
-		m_pSolverImpl(p)
+		m_pSolverImpl(p),
+        m_pFuncObj(NULL)
 	{
 	}
 
@@ -57,25 +58,23 @@ public:
 
 	Model getModel()
 	{
-		using ::boost::shared_ptr;
-
-		shared_ptr<numeric::CellFuncObj> pFuncObj(
-			new numeric::CellFuncObj(m_pSolverImpl->getCalcInterface()) );
-		pFuncObj->setTargetCell(m_ObjFormAddr);
-
-		list<CellAddress>::iterator it,
-			itBeg = m_cnDecVarAddr.begin(),
-			itEnd = m_cnDecVarAddr.end();
-
 		Model model;
-		model.setFuncObject(pFuncObj);
-		CalcInterface* pCalc = m_pSolverImpl->getCalcInterface();
-		for (it = itBeg; it != itEnd; ++it)
-		{
-			model.pushVar(pCalc->getCellValue(*it));
-			pFuncObj->appendDecVarCell(*it);
-		}
-		model.print();
+
+        if (m_pFuncObj)
+        {
+            m_pFuncObj->setTargetCell(m_ObjFormAddr);
+            model.setFuncObject(m_pFuncObj);
+            CalcInterface* pCalc = m_pSolverImpl->getCalcInterface();
+            list<CellAddress>::iterator it,
+                itBeg = m_cnDecVarAddr.begin(),
+                itEnd = m_cnDecVarAddr.end();
+            for (it = itBeg; it != itEnd; ++it)
+            {
+                model.pushVar(pCalc->getCellValue(*it));
+                m_pFuncObj->appendDecVarCell(*it);
+            }
+            model.print();
+        }
 
 		return model;
 	}
@@ -95,10 +94,16 @@ public:
 		m_cnDecVarAddr.push_back(addr);
 	}
 
+    void setFuncObj(CellFuncObj* p)
+    {
+        m_pFuncObj = p;
+    }
+
 private:
 	SolverImpl* m_pSolverImpl;
 	CellAddress m_ObjFormAddr;
 	list<CellAddress> m_cnDecVarAddr;
+    CellFuncObj* m_pFuncObj;
 };
 
 //-----------------------------------------------------------------
@@ -112,6 +117,11 @@ NlpModelBuilder::NlpModelBuilder( SolverImpl* p ) :
 NlpModelBuilder::~NlpModelBuilder() throw()
 {
 	fprintf( stderr, "NlpModelBuilder dtor\n" );
+}
+
+void NlpModelBuilder::setFuncObj(CellFuncObj* p)
+{
+    m_pImpl->setFuncObj(p);
 }
 
 void NlpModelBuilder::setObjectiveFormulaAddress( CellAddress addr )

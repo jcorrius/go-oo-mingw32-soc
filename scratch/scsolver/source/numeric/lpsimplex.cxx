@@ -27,9 +27,9 @@
 
 #include <osl/diagnose.h>
 
-#include <numeric/lpsimplex.hxx>
-#include <numeric/lpmodel.hxx>
-#include <global.hxx>
+#include "numeric/lpsimplex.hxx"
+#include "numeric/lpmodel.hxx"
+#include "tool/global.hxx"
 
 #include <memory>
 #include <iostream>
@@ -41,7 +41,7 @@
 
 using namespace std;
 	
-namespace scsolver { namespace numeric { namespace opres { namespace lp {
+namespace scsolver { namespace numeric { namespace lp {
 
 typedef vector<size_t>				uInt32Container;
 typedef uInt32Container::iterator		uInt32Iter;

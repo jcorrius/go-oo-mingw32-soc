@@ -27,10 +27,10 @@
 
 #include <osl/diagnose.h>
 
-#include <numeric/lpmodel.hxx>
-#include <numeric/lpbase.hxx>
-#include <numeric/matrix.hxx>
-#include <global.hxx>
+#include "numeric/lpmodel.hxx"
+#include "numeric/lpbase.hxx"
+#include "numeric/matrix.hxx"
+#include "tool/global.hxx"
 
 #include <iostream>
 #include <sstream>
@@ -42,7 +42,7 @@
 using namespace std;
 using ::scsolver::numeric::Matrix;
 
-namespace scsolver { namespace numeric { namespace opres { namespace lp {
+namespace scsolver { namespace numeric { namespace lp {
 
 class NonBoundingException : public std::exception
 {
@@ -669,7 +669,7 @@ void Model::setStandardConstraintMatrix( const Matrix& mxConst, const Matrix& mx
 }
 
 
-}}}}
+}}}
 
 
 

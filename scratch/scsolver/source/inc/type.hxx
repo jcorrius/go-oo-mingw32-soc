@@ -48,7 +48,7 @@ class ConstraintString
 public:
 	rtl::OUString Left;
 	rtl::OUString Right;
-	scsolver::numeric::opres::Equality Equal;
+	scsolver::numeric::Equality Equal;
 };
 
 }

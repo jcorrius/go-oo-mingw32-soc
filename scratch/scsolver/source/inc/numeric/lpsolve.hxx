@@ -33,7 +33,7 @@
 
 namespace scsolver {
 
-namespace numeric { namespace opres { namespace lp {
+namespace numeric { namespace lp {
 
 class LpSolveImpl;
 
@@ -54,7 +54,7 @@ private:
 
 
 
-}}}}
+}}}
 
 
 #endif

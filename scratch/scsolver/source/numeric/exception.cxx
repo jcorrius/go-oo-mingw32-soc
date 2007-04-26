@@ -27,7 +27,7 @@
 
 #include "numeric/exception.hxx"
 
-namespace scsolver { namespace numeric { namespace opres {
+namespace scsolver { namespace numeric {
 
 
 const char* ConstraintError::what() const throw()
@@ -55,4 +55,9 @@ const char* IterationTimedOut::what() const throw()
 	return "Iteration timed out";
 }
 
-}}}
+const char* UnboundedException::what() const throw()
+{
+    return "Unbounded exception";
+}
+
+}}

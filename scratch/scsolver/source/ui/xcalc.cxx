@@ -27,7 +27,7 @@
 
 
 #include "xcalc.hxx"
-#include "global.hxx"
+#include "tool/global.hxx"
 #include "unoglobal.hxx"
 
 #include <com/sun/star/beans/XPropertyContainer.hpp>

@@ -31,12 +31,14 @@
 #include <numeric/nlpbase.hxx>
 #include <memory>
 
-namespace scsolver { namespace numeric { namespace opres { namespace nlp {
+namespace scsolver { namespace numeric { namespace nlp {
 
 class QuasiNewtonImpl;
 
 class QuasiNewton : public BaseAlgorithm
 {
+    friend class QuasiNewtonImpl;
+
 public:
 	QuasiNewton();
 	virtual ~QuasiNewton() throw();
@@ -48,7 +50,7 @@ private:
 };
 
 
-}}}}
+}}}
 
 
 #endif

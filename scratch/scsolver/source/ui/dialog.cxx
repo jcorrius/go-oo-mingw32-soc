@@ -26,14 +26,14 @@
  ************************************************************************/
 
 
-#include <dialog.hxx>
-#include <global.hxx>
-#include <unoglobal.hxx>
-#include <solver.hxx>
-#include <listener.hxx>
-#include <xcalc.hxx>
-#include <unohelper.hxx>
-#include <msgdlg.hxx>
+#include "dialog.hxx"
+#include "tool/global.hxx"
+#include "unoglobal.hxx"
+#include "solver.hxx"
+#include "listener.hxx"
+#include "xcalc.hxx"
+#include "unohelper.hxx"
+#include "msgdlg.hxx"
 #include "optiondlg.hxx"
 
 #include <rtl/ustrbuf.hxx>
@@ -66,7 +66,6 @@
 
 using namespace std;
 using namespace ::scsolver::numeric;
-using namespace ::scsolver::numeric::opres;
 using ::com::sun::star::uno::Reference;
 
 namespace scsolver {
@@ -918,13 +917,13 @@ void SolverDialog::saveModelToDocument()
 		sb.append( Global::STRING_SEPARATOR );
 		switch ( it->Equal )
 		{
-		case numeric::opres::EQUAL:
+		case numeric::EQUAL:
 			sb.append( ascii( "=" ) );
 			break;
-		case numeric::opres::GREATER_THAN_EQUAL:
+		case numeric::GREATER_THAN_EQUAL:
 			sb.append( ascii( ">=" ) );
 			break;
-		case numeric::opres::LESS_THAN_EQUAL:
+		case numeric::LESS_THAN_EQUAL:
 			sb.append( ascii( "<=" ) );
 			break;
 		default:
@@ -978,7 +977,7 @@ void SolverDialog::loadModelFromDocument()
 			OUString sEqual = *it++;
 			OSL_ASSERT( it != itEnd );
 			OUString sRight = *it;
-			numeric::opres::Equality eEq;
+			numeric::Equality eEq;
 			if ( sEqual.equals( ascii( ">=" ) ) )
 				eEq = GREATER_THAN_EQUAL;
 			else if ( sEqual.equals( ascii( "<=" ) ) )

@@ -39,24 +39,23 @@ namespace scsolver { namespace numeric {
 class BaseFuncObj
 {
 public:
-	BaseFuncObj();
-	virtual ~BaseFuncObj() throw() = 0;
+    BaseFuncObj();
+    virtual ~BaseFuncObj() throw() = 0;
 
-	/**
-     * Take an array of variables and return the answer.
-	 * 
-	 * @return double
-	 */
-	virtual double operator()( const std::vector<double>& ) const = 0;
+    virtual const ::std::vector<double>& getVars() const = 0;
 
-	/**
+    virtual void setVars(const ::std::vector<double>& vars) = 0;
+
+    virtual void setVar(size_t index,  double var) = 0;
+
+    virtual double eval() = 0;
+
+    /**
      * Return a display-friendly function string.
-	 * 
-	 * @return std::string
-	 */
-	virtual std::string getFuncString() const = 0;
-
-	double eval( const std::vector<double>& ) const;
+     * 
+     * @return std::string
+     **/
+    virtual std::string getFuncString() const = 0;
 };
 
 }}

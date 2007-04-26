@@ -38,9 +38,15 @@ namespace scsolver {
 
 class SolverImpl;
 
-namespace numeric { namespace opres { namespace nlp {
+namespace numeric { 
+
+    class CellFuncObj;
+
+namespace nlp {
+
 	class Model;
-}}}
+
+}}
 
 class NlpModelBuilderImpl;
 
@@ -50,10 +56,11 @@ public:
 	NlpModelBuilder( SolverImpl* p );
 	~NlpModelBuilder() throw();
 
+    void setFuncObj(scsolver::numeric::CellFuncObj* p);
 	void setObjectiveFormulaAddress( ::com::sun::star::table::CellAddress addr );
 	void clearDecVarAddresses();
 	void appendDecVarAddress( ::com::sun::star::table::CellAddress addr );
-	numeric::opres::nlp::Model getModel() const;
+	numeric::nlp::Model getModel() const;
 
 private:
 	NlpModelBuilder();

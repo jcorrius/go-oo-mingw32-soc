@@ -30,8 +30,9 @@
 #include "numeric/diff.hxx"
 #include "numeric/nlpmodel.hxx"
 #include "numeric/funcobj.hxx"
+#include "numeric/matrix.hxx"
 #include "tool/timer.hxx"
-#include "global.hxx"
+#include "tool/global.hxx"
 
 #include <boost/shared_ptr.hpp>
 #include <memory>
@@ -39,13 +40,13 @@
 #include <iomanip>
 #include <cmath>
 
-using namespace scsolver::numeric::opres;
+using namespace scsolver::numeric;
 using scsolver::numeric::Matrix;
 using scsolver::numeric::Differentiate;
 using boost::shared_ptr;
 using namespace std;
 
-namespace scsolver { namespace numeric { namespace opres { namespace nlp {
+namespace scsolver { namespace numeric { namespace nlp {
 
 class QuasiNewtonImpl
 {
@@ -71,17 +72,18 @@ class QuasiNewtonImpl
 #endif
 	}
 
-	static double evalF( const BaseFuncObj& oF, const Matrix& mxVars, vector<double>& fVars )
+	static double evalF( BaseFuncObj& oF, const Matrix& mxVars, vector<double>& fVars )
 	{
 		size_t nRows = mxVars.rows();
 		fVars.reserve( nRows );
 		for ( size_t i = 0; i < nRows; ++i )
 			fVars.push_back( mxVars( i, 0 ) );
 
-		return oF.eval( fVars );
+        oF.setVars(fVars);
+        return oF.eval();
 	}
 
-	static double evalF( const BaseFuncObj& oF, const Matrix& mxVars )
+	static double evalF( BaseFuncObj& oF, const Matrix& mxVars )
 	{
 		vector<double> fVars;
 		return evalF( oF, mxVars, fVars );
@@ -113,7 +115,8 @@ public:
 	{
 		// Initialize relevant data members.
 		m_pModel = m_pSelf->getModel();
-		vector<double> cnVars = m_pModel->getVars();
+		vector<double> cnVars;
+        m_pModel->getVars(cnVars);
 
 		vector<double>::const_iterator it, itBeg = cnVars.begin(), itEnd = cnVars.end();
 		m_mxVars.clear();
@@ -142,7 +145,7 @@ public:
 		::scsolver::Timer mytimer(5); // set timer to 5 sec
 		mytimer.init();
 		while ( !runIteration(mytimer) );
-
+        
 		cout << "f(x) = " << m_fF << endl;
 	}
 
@@ -153,7 +156,7 @@ private:
 	// These data members are expected to be initialized at start of 'void solve()' call.
 	unsigned long m_nIter;
 	Model* m_pModel;
-	Matrix m_mxVars;
+	Matrix m_mxVars;      // variable matrix is single-column.
 	Matrix m_mxdVars;
 	Matrix m_mxVarsOld;
 	Matrix m_mxdF;
@@ -165,7 +168,7 @@ private:
 	double m_fNorm;
 	double m_fTolerance;
 
-	boost::shared_ptr<BaseFuncObj> m_pFuncObj;
+    BaseFuncObj* m_pFuncObj;
 
 	bool evaluateFunc()
 	{
@@ -326,10 +329,10 @@ private:
 		}
 
 		if ( evaluateFunc() )
-			return true;
+            return true;
 
 		if ( calcDefMatrix() )
-			return true;
+            return true;
 
 		double fLambda = runLinearSearch(timer);
 		if ( m_pModel->getVerbose() )
@@ -361,9 +364,7 @@ QuasiNewton::~QuasiNewton() throw()
 void QuasiNewton::solve()
 {
 	m_pImpl->solve();
-	Matrix mxSolution( 0, 0 );
-	setSolution( mxSolution );
 }
 
-}}}}
+}}}
 

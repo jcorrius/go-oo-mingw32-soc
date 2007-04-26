@@ -26,13 +26,13 @@
  ************************************************************************/
 
 
-#include <listener.hxx>
-#include <solver.hxx>
-#include <dialog.hxx>
-#include <unoglobal.hxx>
-#include <global.hxx>
-#include <msgdlg.hxx>
-#include <xcalc.hxx>
+#include "listener.hxx"
+#include "solver.hxx"
+#include "dialog.hxx"
+#include "unoglobal.hxx"
+#include "tool/global.hxx"
+#include "msgdlg.hxx"
+#include "xcalc.hxx"
 #include "optiondlg.hxx"
 
 #include <memory>

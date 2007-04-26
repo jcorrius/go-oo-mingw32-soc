@@ -28,13 +28,15 @@
 #ifndef OPRES_NLP_NLPBASE_HXX_
 #define OPRES_NLP_NLPBASE_HXX_
 
-#include "numeric/matrix.hxx"
+#include <vector>
 #include <memory>
 
-namespace scsolver { namespace numeric { namespace opres { namespace nlp {
+namespace scsolver { namespace numeric {
+
+namespace nlp {
 
 class Model;
-struct BaseAlgorithmImpl;
+class BaseAlgorithmImpl;
 
 class BaseAlgorithm
 {
@@ -42,19 +44,41 @@ public:
 	BaseAlgorithm();
 	virtual ~BaseAlgorithm() throw() = 0;
 
+    /**
+     * Call this method to solve for optimized solution.
+     */
 	virtual void solve() = 0;
 
+    /**
+     * Set NLP model to be optimized.  <b>Note that this class does NOT manage the
+     * life cycle of this model instance;</b> it is the responsibility of the 
+     * calling function to ensure that it gets deleted after the optimization code 
+     * has run. 
+     *  
+     * @param model pointer to NLP model.
+     */
+	void setModel( Model* model );
+
+    /**
+     * Get the optimized solution.  Call this method after solve() returns.
+     * 
+     * @return ::std::vector<double> optimized solution
+     */
+	const ::std::vector<double>& getSolution() const;
+
+protected:
+    /**
+     * Get current NLP model.
+     * 
+     * @return Model* pointer to current model.
+     */
 	Model* getModel() const;
-	void setModel( Model* p );
-	
-	::scsolver::numeric::Matrix getSolution() const;
-	void setSolution( const ::scsolver::numeric::Matrix& );
 
 private:
 	::std::auto_ptr<BaseAlgorithmImpl> m_pImpl;
 };
 
-}}}}
+}}}
 
 
 #endif

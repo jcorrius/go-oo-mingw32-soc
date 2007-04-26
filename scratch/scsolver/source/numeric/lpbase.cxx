@@ -26,16 +26,16 @@
  ************************************************************************/
 
 
-#include <numeric/lpbase.hxx>
-#include <numeric/lpmodel.hxx>
+#include "numeric/lpbase.hxx"
+#include "numeric/lpmodel.hxx"
 #include <list>
 #include <vector>
 #include <cstddef>
-#include <global.hxx>
+#include "tool/global.hxx"
 
 using namespace std;
 
-namespace scsolver { namespace numeric { namespace opres { namespace lp {
+namespace scsolver { namespace numeric { namespace lp {
 
 
 class BaseAlgorithmImpl
@@ -266,4 +266,4 @@ void BaseAlgorithm::setCanonicalSolution( const Matrix& mx )
 	m_pImpl->setCanonicalSolution( mx );
 }
 
-}}}}
+}}}

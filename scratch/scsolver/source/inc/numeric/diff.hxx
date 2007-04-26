@@ -49,7 +49,7 @@ public:
 	void setSecondOrder( bool );
 	void setVariables( const std::vector<double>& );
 	void setVarIndex( unsigned long );
-	void setFuncObject( const boost::shared_ptr<BaseFuncObj>& );
+	void setFuncObject(BaseFuncObj* pFuncObj);
 	double run();
 
 private:

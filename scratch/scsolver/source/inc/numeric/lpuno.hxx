@@ -36,7 +36,7 @@ namespace scsolver {
 
 class CalcInterface;
 
-namespace numeric { namespace opres { namespace lp {
+namespace numeric { namespace lp {
 
 class UnoAlgorithmImpl;
 
@@ -54,7 +54,7 @@ private:
 
 
 
-}}}}
+}}}
 
 
 #endif

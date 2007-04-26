@@ -29,10 +29,9 @@
 #ifndef _LISTENER_HXX_
 #define _LISTENER_HXX_
 
-#include <global.hxx>
-#include <unoglobal.hxx>
-#include <type.hxx>
-#include <baselistener.hxx>
+#include "unoglobal.hxx"
+#include "type.hxx"
+#include "baselistener.hxx"
 
 #include <cppuhelper/implbase1.hxx>
 #include <com/sun/star/sheet/XRangeSelectionListener.hpp>

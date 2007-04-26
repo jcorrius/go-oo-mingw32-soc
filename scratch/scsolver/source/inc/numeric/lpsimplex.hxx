@@ -32,7 +32,7 @@
 #include "lpbase.hxx"
 #include <memory>
 
-namespace scsolver { namespace numeric { namespace opres { namespace lp {
+namespace scsolver { namespace numeric { namespace lp {
 
 class Model;
 class RevisedSimplexImpl;
@@ -66,7 +66,7 @@ private:
 };
 
 
-}}}}
+}}}
 
 
 #endif

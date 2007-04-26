@@ -26,14 +26,14 @@
  ************************************************************************/
 
 
-#include <solver.hxx>
-#include <global.hxx>
-#include <dialog.hxx>
-#include <lpbuilder.hxx>
-#include <xcalc.hxx>
+#include "solver.hxx"
+#include "tool/global.hxx"
+#include "dialog.hxx"
+#include "lpbuilder.hxx"
+#include "xcalc.hxx"
 #include "option.hxx"
-#include <solvemodel.hxx>
-#include <numeric/matrix.hxx>
+#include "solvemodel.hxx"
+#include "numeric/matrix.hxx"
 
 #include "cppuhelper/implementationentry.hxx"
 #include "com/sun/star/lang/XComponent.hpp"

@@ -27,7 +27,7 @@
 
 #include "optiondlg.hxx"
 #include "unoglobal.hxx"
-#include "global.hxx"
+#include "tool/global.hxx"
 #include "listener.hxx"
 #include "solver.hxx"
 

@@ -29,7 +29,7 @@
 #ifndef _NUMERIC_TYPE_HXX_
 #define _NUMERIC_TYPE_HXX_
 
-namespace scsolver { namespace numeric { namespace opres {
+namespace scsolver { namespace numeric {
 
 enum Equality
 {
@@ -63,6 +63,6 @@ enum Goal
 	GOAL_UNKNOWN
 };
 
-}}}
+}}
 
 #endif

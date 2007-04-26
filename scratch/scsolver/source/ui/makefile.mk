@@ -20,7 +20,6 @@ SLOFILES =  \
 	$(SLO)$/baselistener.obj \
 	$(SLO)$/dialog.obj \
 	$(SLO)$/optiondlg.obj \
-	$(SLO)$/global.obj \
 	$(SLO)$/listener.obj \
 	$(SLO)$/lpbuilder.obj \
 	$(SLO)$/nlpbuilder.obj \

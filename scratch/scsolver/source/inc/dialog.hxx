@@ -39,8 +39,8 @@
 
 using namespace ::com::sun::star;
 using namespace ::com::sun::star::uno;
-using scsolver::numeric::opres::Equality;
-using scsolver::numeric::opres::Goal;
+using scsolver::numeric::Equality;
+using scsolver::numeric::Goal;
 
 namespace com { namespace sun { namespace star { namespace awt {
 

@@ -30,7 +30,7 @@
 
 #include <exception>
 
-namespace scsolver { namespace numeric { namespace opres {
+namespace scsolver { namespace numeric {
 
 class ConstraintError : public std::exception
 {
@@ -62,7 +62,17 @@ public:
 	virtual const char* what() const throw();
 };
 
-}}}
+/**
+ * This exception is thrown when the caller attempts to retrieve a boundary
+ * value of a decision variable when it's not bounded.
+ */
+class UnboundedException : public std::exception
+{
+public:
+    virtual const char * what() const throw();
+};
+
+}}
 
 
 #endif

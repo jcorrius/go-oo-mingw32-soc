@@ -141,7 +141,7 @@ public:
 		throw(::com::sun::star::uno::RuntimeException);
 
 	// The "get-pointer" methods
-	CalcInterface* getCalcInterface() const;	
+	CalcInterface* getCalcInterface() const;
 	OptionData* getOptionData() const;
 	SolverDialog* getMainDialog();
 

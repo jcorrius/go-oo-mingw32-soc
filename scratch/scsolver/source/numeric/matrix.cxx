@@ -26,8 +26,8 @@
  ************************************************************************/
 
 
-#include <numeric/matrix.hxx>
-#include <global.hxx>
+#include "numeric/matrix.hxx"
+#include "tool/global.hxx"
 #include <iostream>
 #include <iomanip>
 #include <string>
@@ -1271,19 +1271,19 @@ Matrix& Matrix::operator/=( double f )
 /**
  * read-only access to the element specified by row and column IDs.
  * 
- * @param nRowId row ID
- * @param nColId column ID
+ * @param row row ID
+ * @param col column ID
  * 
  * @return element value
  */
-const double Matrix::operator()( size_t nRowId, size_t nColId ) const
+const double Matrix::operator()( size_t row, size_t col ) const
 {
-	return m_pImpl->operator()( nRowId, nColId );
+	return m_pImpl->operator()( row, col );
 }
 
-double& Matrix::operator()( size_t nRowId, size_t nColId )
+double& Matrix::operator()( size_t row, size_t col )
 {
-	return m_pImpl->operator()( nRowId, nColId );
+	return m_pImpl->operator()( row, col );
 }
 
 bool Matrix::operator==( const Matrix& other ) const

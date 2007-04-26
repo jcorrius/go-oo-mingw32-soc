@@ -29,7 +29,7 @@
 #include "numeric/lpmodel.hxx"
 #include "numeric/matrix.hxx"
 #include "xcalc.hxx"
-#include "global.hxx"
+#include "tool/global.hxx"
 #include "unoglobal.hxx"
 
 #include "org/openoffice/sc/solver/XLpModel.hpp"
@@ -42,7 +42,7 @@
 
 using namespace ::com::sun::star::uno;
 
-namespace scsolver { namespace numeric { namespace opres { namespace lp {
+namespace scsolver { namespace numeric { namespace lp {
 
 class UnoServiceNotFound : public ::std::exception
 {
@@ -121,7 +121,7 @@ void UnoAlgorithmImpl::solve()
 
 	Reference< XLpModel > xModel( svModel, UNO_QUERY );
 
-	numeric::opres::lp::Model* model = getModel();
+	numeric::lp::Model* model = getModel();
 
 	// Map LP model properties into XLpModel.
 

@@ -32,7 +32,7 @@
 #include <numeric/matrix.hxx>
 #include <memory>
 
-namespace scsolver { namespace numeric { namespace opres { namespace lp {
+namespace scsolver { namespace numeric { namespace lp {
 
 class Model;
 class BaseAlgorithmImpl;
@@ -78,6 +78,6 @@ private:
 	::std::auto_ptr<BaseAlgorithmImpl> m_pImpl;
 };
 
-}}}}
+}}}
 
 #endif

@@ -31,7 +31,6 @@
 
 #include <tools/resmgr.hxx>
 #include <unoglobal.hxx>
-#include <global.hxx>
 #include <memory>
 #include <com/sun/star/awt/PushButtonType.hpp>
 

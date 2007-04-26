@@ -65,22 +65,36 @@ CellFuncObj::~CellFuncObj() throw()
 {
 }
 
-double CellFuncObj::operator()( const vector<double>& cnX ) const
+const vector<double>& CellFuncObj::getVars() const
 {
-	if( cnX.size() != m_pImpl->DecVarCells.size() )
-		fprintf( stderr, "CellFuncObj: warning - values and cells have different sizes\n" );
+    // Does absolutely nothing....
+    vector<double> tmp;
+    return tmp;
+}
 
-	vector<CellAddress>::const_iterator it, 
-		itBeg = m_pImpl->DecVarCells.begin(), 
-		itEnd = m_pImpl->DecVarCells.end();
+void CellFuncObj::setVars(const vector<double>& vars)
+{
+	vector<CellAddress>::const_iterator itr, 
+		itrBeg = m_pImpl->DecVarCells.begin(), 
+		itrEnd = m_pImpl->DecVarCells.end();
 
-	vector<double>::const_iterator itX,
-		itXBeg = cnX.begin(),
-		itXEnd = cnX.end();
+    vector<double>::const_iterator itrVar,
+        itrVarBeg = vars.begin(), itrVarEnd = vars.end();
 
-	for( it = itBeg, itX = itXBeg; it != itEnd && itX != itXEnd; ++it, ++itX )
-		m_pImpl->pCalc->setCellValue( *it, *itX );
+    for (itr = itrBeg, itrVar = itrVarBeg; itr != itrEnd && itrVar != itrVarEnd; ++itr, ++itrVar)
+        m_pImpl->pCalc->setCellValue(*itr, *itrVar);
+}
 
+void CellFuncObj::setVar(size_t index, double var)
+{
+    if ( index >= m_pImpl->DecVarCells.size() )
+        return;
+
+    m_pImpl->pCalc->setCellValue( m_pImpl->DecVarCells.at(index), var);
+}
+
+double CellFuncObj::eval()
+{
 	return m_pImpl->pCalc->getCellValue( m_pImpl->TargetCell );
 }
 
@@ -103,18 +117,6 @@ void CellFuncObj::setTargetCell( const CellAddress& addr )
 void CellFuncObj::appendDecVarCell( const CellAddress& addr )
 {
 	m_pImpl->DecVarCells.push_back(addr);
-}
-
-void CellFuncObj::test()
-{
-	CalcInterface* p = m_pImpl->pCalc;
-	p->setCellFormula( m_pImpl->TargetCell, ascii("I got it") );
-
-	vector<CellAddress>::iterator it,
-		itBeg = m_pImpl->DecVarCells.begin(),
-		itEnd = m_pImpl->DecVarCells.end();
-	for ( it = itBeg; it != itEnd; ++it )
-		p->setCellFormula( *it, ascii("dec var") );
 }
 
 }}

@@ -30,7 +30,7 @@
 #include "numeric/lpmodel.hxx"
 #include "numeric/exception.hxx"
 #include "unoglobal.hxx"
-#include "global.hxx"
+#include "tool/global.hxx"
 #include "numeric/type.hxx"
 #include "lpsolve/lp_lib.h"
 
@@ -39,11 +39,11 @@
 #include <iostream>
 #include <stdio.h>
 
-using namespace ::scsolver::numeric::opres;
+using namespace ::scsolver::numeric;
 
 namespace scsolver {
 
-namespace numeric { namespace opres { namespace lp {
+namespace numeric { namespace lp {
 
 class LpSolveImpl
 {
@@ -198,4 +198,4 @@ void LpSolve::solve()
 
 
 
-}}}}
+}}}
