@@ -64,7 +64,7 @@ public:
 	 *
 	 * @return std::string
 	 */
-	virtual std::string getFuncString() const;
+	virtual const std::string getFuncString() const;
 
 	void setTargetCell( const ::com::sun::star::table::CellAddress& addr );
 	void appendDecVarCell( const ::com::sun::star::table::CellAddress& addr );

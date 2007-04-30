@@ -55,7 +55,7 @@ public:
      * 
      * @return std::string
      **/
-    virtual std::string getFuncString() const = 0;
+    virtual const std::string getFuncString() const = 0;
 };
 
 }}

@@ -28,7 +28,6 @@
 #include "numeric/nlpmodel.hxx"
 #include "numeric/nlpbase.hxx"
 #include "numeric/funcobj.hxx"
-#include "numeric/cellfuncobj.hxx"
 #include "numeric/exception.hxx"
 #include "tool/global.hxx"
 #include <vector>

@@ -98,7 +98,7 @@ double CellFuncObj::eval()
 	return m_pImpl->pCalc->getCellValue( m_pImpl->TargetCell );
 }
 
-std::string CellFuncObj::getFuncString() const
+const std::string CellFuncObj::getFuncString() const
 {
 	ostringstream os;
 	int sheet = m_pImpl->TargetCell.Sheet;
