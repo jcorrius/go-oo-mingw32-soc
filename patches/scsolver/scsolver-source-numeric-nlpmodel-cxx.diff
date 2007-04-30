@@ -1,6 +1,6 @@
 --- /dev/null	
 +++ scsolver/source/numeric/nlpmodel.cxx	
-@@ -0,0 +1,245 @@
+@@ -0,0 +1,314 @@
 +/*************************************************************************
 + *
 + *  The Contents of this file are made available subject to
@@ -28,22 +28,41 @@
 + *
 + ************************************************************************/
 +
-+#include <numeric/nlpmodel.hxx>
-+#include <numeric/nlpbase.hxx>
-+#include <numeric/funcobj.hxx>
-+#include "numeric/cellfuncobj.hxx"
-+#include <global.hxx>
-+#include <boost/shared_ptr.hpp>
++#include "numeric/nlpmodel.hxx"
++#include "numeric/nlpbase.hxx"
++#include "numeric/funcobj.hxx"
++#include "numeric/exception.hxx"
++#include "tool/global.hxx"
 +#include <vector>
 +#include <iostream>
 +
 +using namespace ::scsolver::numeric;
 +using namespace std;
 +
-+namespace scsolver { namespace numeric { namespace opres { namespace nlp {
++namespace scsolver { namespace numeric { namespace nlp {
 +
 +//---------------------------------------------------------------------------
 +// IMPLEMENTATION
++
++/** Decision variable data structure */
++struct DecVar
++{
++    double Value;
++
++    bool   UpperBoundEnabled;
++    double UpperBoundValue;
++
++    bool   LowerBoundEnabled;
++    double LowerBoundValue;
++
++    DecVar() :
++        Value(0.0),
++        UpperBoundEnabled(false), 
++        UpperBoundValue(0.0),
++        LowerBoundEnabled(false), 
++        LowerBoundValue(0.0)
++    {}
++};
 +
 +class ModelImpl
 +{
@@ -55,51 +74,95 @@
 +	void setPrecision( unsigned long n ) { m_nPrec = n; }
 +	unsigned long getPrecision() const { return m_nPrec; }
 +
-+	void setGoal( opres::Goal e ) { m_eGoal = e; }
-+	opres::Goal getGoal() const { return m_eGoal; }
++	void setGoal( Goal e ) { m_eGoal = e; }
++	Goal getGoal() const { return m_eGoal; }
 +
 +	void setVerbose( bool b ) { m_bVerbose = b; }
 +	bool getVerbose() const { return m_bVerbose; }
 +
-+	void setFuncObject( const boost::shared_ptr<BaseFuncObj>& );
-+	boost::shared_ptr<BaseFuncObj> getFuncObject() const { return m_pFuncObj; }
++	void setFuncObject(BaseFuncObj* pFuncObj);
++	BaseFuncObj* getFuncObject() const { return m_pFuncObj; }
 +
-+	void solve( const boost::shared_ptr<BaseAlgorithm>& );
-+
-+	Matrix getSolution() const { return m_mxSolution; }
-+	void setSolution( const Matrix& );
-+
-+	void pushVar( double var )
++	void pushVar( double value )
 +	{
++        DecVar var;
++        var.Value = value;
 +		m_cnVars.push_back(var);
 +	}
 +
-+	const vector<double> getVars() const
++	void getVars( vector<double>& vars ) const
 +	{
-+		return m_cnVars;
++        size_t n = m_cnVars.size();
++        vector<double> tmp;
++        tmp.reserve(n);
++		vector<DecVar>::const_iterator itr = m_cnVars.begin(), itrEnd = m_cnVars.end();
++        for (; itr != itrEnd; ++itr)
++            tmp.push_back(itr->Value);
++        vars.swap(tmp);
 +	}
++
++    double getVarBound( size_t index, Bound bound ) const
++    {
++        switch (bound)
++        {
++        case BOUND_LOWER:
++            if ( !m_cnVars.at(index).LowerBoundEnabled )
++                throw UnboundedException();
++            return m_cnVars.at(index).LowerBoundValue;
++        case BOUND_UPPER:
++            if ( !m_cnVars.at(index).UpperBoundEnabled )
++                throw UnboundedException();
++            return m_cnVars.at(index).UpperBoundValue;
++        }
++        return 0.0;
++    }
++
++    void setVarBound( size_t index, Bound bound, double value )
++    {
++        switch (bound)
++        {
++        case BOUND_LOWER:
++            m_cnVars.at(index).LowerBoundValue = value;
++            m_cnVars.at(index).LowerBoundEnabled = true;
++            break;
++        case BOUND_UPPER:
++            m_cnVars.at(index).UpperBoundValue = value;
++            m_cnVars.at(index).UpperBoundEnabled = true;
++            break;
++        }
++    }
++
++    bool isVarBounded( size_t index, Bound bound ) const
++    {
++        switch (bound)
++        {
++        case BOUND_LOWER:
++            return m_cnVars.at(index).LowerBoundEnabled;
++        case BOUND_UPPER:
++            return m_cnVars.at(index).UpperBoundEnabled;
++        }
++        throw AssertionWrong();
++        return false;
++    }
 +
 +	void print() const;
 +
 +private:
 +	Model* m_pSelf;
 +	unsigned long m_nPrec;
-+	opres::Goal m_eGoal;
-+	bool m_bFuncObjSet;
++	Goal m_eGoal;
 +	bool m_bVerbose;
-+	Matrix m_mxSolution;
-+	std::vector<double> m_cnVars;
++	vector<DecVar> m_cnVars;
 +
-+	boost::shared_ptr<BaseFuncObj> m_pFuncObj;
++    BaseFuncObj* m_pFuncObj;
 +};
 +
 +ModelImpl::ModelImpl( Model* p ) : 
 +	m_pSelf( p ),
 +	m_nPrec( 9 ), 
-+	m_eGoal( opres::GOAL_UNKNOWN ), 
-+	m_bFuncObjSet( false ), 
-+	m_bVerbose( false ), 
-+	m_mxSolution( 0, 0 )
++	m_eGoal( GOAL_UNKNOWN ), 
++	m_bVerbose( false ),
++    m_pFuncObj(NULL)
 +{
 +}
 +
@@ -113,50 +176,56 @@
 +{
 +}
 +
-+void ModelImpl::setFuncObject( const boost::shared_ptr<BaseFuncObj>& obj )
++void ModelImpl::setFuncObject(BaseFuncObj* pFuncObj)
 +{
-+	m_pFuncObj = obj;
-+	m_bFuncObjSet = true;
-+}
-+
-+void ModelImpl::solve( const boost::shared_ptr<BaseAlgorithm>& pAlgorithm )
-+{
-+	pAlgorithm->setModel( m_pSelf );
-+	pAlgorithm->solve();
-+	setSolution( pAlgorithm->getSolution() );
-+}
-+
-+void ModelImpl::setSolution( const Matrix& other )
-+{
-+	Matrix m( other );
-+	m_mxSolution.swap( m );
++	m_pFuncObj = pFuncObj;
 +}
 +
 +void ModelImpl::print() const
 +{
-+	cout << repeatString( "-", 70 ) << endl;
++    FILE* fs = stdout;
 +
-+	cout << "objective: ";
-+	if ( m_bFuncObjSet )
-+		cout << m_pFuncObj->getFuncString() << endl;
++    // Objective function and goal.
++    fprintf(fs, "--------------------------------------------------------------------\n");
++    fprintf(fs, "objective: ");
++	if (m_pFuncObj)
++        fprintf(fs, "%s\n", m_pFuncObj->getFuncString().c_str());
 +	else
-+		cout << "objective function not set!" << endl;
++        fprintf(fs, "object function not set!\n");
 +
-+	cout << "goal: ";
++    fprintf(fs, "goal: ");
 +	switch ( m_eGoal )
 +	{
-+	case opres::GOAL_MAXIMIZE:
-+		cout << "maximize";
++    case GOAL_MAXIMIZE:
++        fprintf(fs, "maximize");
 +		break;
-+	case opres::GOAL_MINIMIZE:
-+		cout << "minimize";
++    case GOAL_MINIMIZE:
++        fprintf(fs, "minimize");
 +		break;
-+	default:
-+		cout << "unknown";
++    default:
++        fprintf(fs, "unknown");
 +	}
-+	cout << endl;
++    fprintf(fs, "\n");
++    fprintf(fs, "--------------------------------------------------------------------\n");
 +
-+	cout << repeatString( "-", 70 ) << endl;
++    size_t n = m_cnVars.size();
++    for (size_t i = 0; i < n; ++i)
++    {
++        const DecVar& var = m_cnVars.at(i);
++        fprintf(fs, "var %d: ", i);
++        if (var.LowerBoundEnabled)
++            fprintf(fs, "%.2f", var.LowerBoundValue);
++        else 
++            fprintf(fs, "[unbounded]");
++        fprintf(fs, " - ");
++
++        if (var.UpperBoundEnabled)
++            fprintf(fs, "%.2f", var.UpperBoundValue);
++        else
++            fprintf(fs, "[unbounded]");
++        fprintf(fs, "\n");
++    }
++    fflush(fs);
 +}
 +
 +//---------------------------------------------------------------------------
@@ -189,12 +258,12 @@
 +	return m_pImpl->getPrecision();
 +}
 +
-+void Model::setGoal( opres::Goal e )
++void Model::setGoal( Goal e )
 +{
 +	m_pImpl->setGoal( e );
 +}
 +
-+opres::Goal Model::getGoal() const
++Goal Model::getGoal() const
 +{
 +	return m_pImpl->getGoal();
 +}
@@ -209,22 +278,12 @@
 +	return m_pImpl->getVerbose();
 +}
 +
-+Matrix Model::getSolution() const
++void Model::setFuncObject(BaseFuncObj* pFuncObj)
 +{
-+	return m_pImpl->getSolution();
++	m_pImpl->setFuncObject(pFuncObj);
 +}
 +
-+void Model::setSolution( const Matrix& mx )
-+{
-+	m_pImpl->setSolution( mx );
-+}
-+
-+void Model::setFuncObject( const boost::shared_ptr<BaseFuncObj>& obj )
-+{
-+	m_pImpl->setFuncObject( obj );
-+}
-+
-+const boost::shared_ptr<BaseFuncObj> Model::getFuncObject() const
++BaseFuncObj* Model::getFuncObject() const
 +{
 +	return m_pImpl->getFuncObject();
 +}
@@ -234,15 +293,25 @@
 +	m_pImpl->pushVar(var);
 +}
 +
-+const vector<double> Model::getVars() const
++void Model::getVars( vector<double>& vars ) const
 +{
-+	return m_pImpl->getVars();
++	m_pImpl->getVars(vars);
 +}
 +
-+void Model::solve( const boost::shared_ptr<BaseAlgorithm>& obj )
++double Model::getVarBound( size_t index, Bound bound ) const
 +{
-+	m_pImpl->solve( obj );
++    return m_pImpl->getVarBound(index, bound);
 +}
 +
-+}}}}
++void Model::setVarBound( size_t index, Bound bound, double value )
++{
++    m_pImpl->setVarBound(index, bound, value);
++}
++
++bool Model::isVarBounded( size_t index, Bound bound ) const
++{
++    return m_pImpl->isVarBounded(index, bound);
++}
++
++}}}
 +
