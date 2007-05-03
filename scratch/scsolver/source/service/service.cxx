@@ -221,8 +221,11 @@ ResMgr* SolverImpl::getResMgr()
 
 rtl::OUString SolverImpl::getResStr( int resid )
 {
-	rtl::OUString sStr = String( ResId( resid, getResMgr() ) );
-	return sStr;
+   	ResMgr *pResMgr = getResMgr();
+	if ( pResMgr )
+		return rtl::OUString( String( ResId( resid, *getResMgr() ) ) );
+	
+	return rtl::OUString();
 }
 
 // XLocalizable
