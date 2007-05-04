@@ -70,7 +70,7 @@ SolverImpl::~SolverImpl()
 //--------------------------------------------------------------------------
 // UNO Component Interface Methods
 
-void SolverImpl::initialize( const Sequence< Any >& aArgs ) throw( Exception )
+void SolverImpl::initialize( const Sequence< Any >& /*aArgs*/ ) throw( Exception )
 {
 }
 
@@ -93,7 +93,7 @@ Sequence< rtl::OUString > SolverImpl::getSupportedServiceNames()
 }
 
 Reference< frame::XDispatch > SAL_CALL SolverImpl::queryDispatch(
-    const util::URL& aURL, const ::rtl::OUString& sTargetFrameName, sal_Int32 nSearchFlags )
+    const util::URL& aURL, const ::rtl::OUString& /*sTargetFrameName*/, sal_Int32 /*nSearchFlags*/ )
     throw ( RuntimeException )
 {
     Reference< frame::XDispatch > xRet;
@@ -120,7 +120,7 @@ Sequence< Reference< frame::XDispatch > > SAL_CALL SolverImpl::queryDispatches(
 }
 
 void SAL_CALL SolverImpl::dispatch( 
-    const util::URL& aURL, const Sequence< beans::PropertyValue >& lArgs )
+    const util::URL& aURL, const Sequence< beans::PropertyValue >& /*lArgs*/ )
     throw ( RuntimeException )
 {
     if ( aURL.Protocol.compareToAscii( "scsolver.SolverImpl:" ) == 0 )
@@ -133,20 +133,20 @@ void SAL_CALL SolverImpl::dispatch(
 }
 
 void SAL_CALL SolverImpl::addStatusListener( 
-    const Reference< frame::XStatusListener >& xControl, const util::URL& aURL )
+    const Reference< frame::XStatusListener >& /*xControl*/, const util::URL& /*aURL*/ )
     throw ( RuntimeException )
 {
 }
 
 void SAL_CALL SolverImpl::removeStatusListener( 
-    const Reference< frame::XStatusListener >& xControl, const util::URL& aURL )
+    const Reference< frame::XStatusListener >& /*xControl*/, const util::URL& /*aURL*/ )
     throw ( RuntimeException )
 {
 }
 
 void SAL_CALL SolverImpl::dispatchWithNotification(
-    const util::URL& aURL, const Sequence< beans::PropertyValue >& lArgs,
-    const Reference< frame::XDispatchResultListener >& xDRL )
+    const util::URL& /*aURL*/, const Sequence< beans::PropertyValue >& /*lArgs*/,
+    const Reference< frame::XDispatchResultListener >& /*xDRL*/ )
     throw ( RuntimeException )
 {
 }
@@ -169,7 +169,7 @@ OptionData* SolverImpl::getOptionData() const
 	return m_pOption.get();
 }
 
-void SolverImpl::setTitle( const ::rtl::OUString& aTitle )
+void SolverImpl::setTitle( const ::rtl::OUString& /*aTitle*/ )
 		throw (uno::RuntimeException)
 {
 }
@@ -298,7 +298,7 @@ static struct ::cppu::ImplementationEntry s_component_entries [] =
 extern "C"
 {
     void SAL_DLLPUBLIC_EXPORT component_getImplementationEnvironment(
-        sal_Char const ** ppEnvTypeName, uno_Environment ** ppEnv )
+        sal_Char const ** ppEnvTypeName, uno_Environment ** /*ppEnv*/ )
     {
         *ppEnvTypeName = CPPU_CURRENT_LANGUAGE_BINDING_NAME;
     }
