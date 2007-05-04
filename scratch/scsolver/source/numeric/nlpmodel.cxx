@@ -33,6 +33,8 @@
 #include <vector>
 #include <iostream>
 
+#include <stdio.h>
+
 using namespace ::scsolver::numeric;
 using namespace std;
 
