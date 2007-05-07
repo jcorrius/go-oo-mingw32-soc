@@ -134,8 +134,8 @@ sub same_mws($$)
 {
     my $a = shift;
     my $b = shift;
-    $a =~ s/-.*//;
-    $b =~ s/-.*//;
+    $a =~ s/[-_].*//;
+    $b =~ s/[-_].*//;
 #    print "same mws? '$a' vs '$b'\n";
     return $a eq $b;
 }
