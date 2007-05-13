@@ -2,7 +2,7 @@
  *
  *  OpenOffice.org - a multi-platform office productivity suite
  *
- *  $RCSfile: XFilter.idl,v $
+ *  $RCSfile$
  *
  *  $Revision$
  *

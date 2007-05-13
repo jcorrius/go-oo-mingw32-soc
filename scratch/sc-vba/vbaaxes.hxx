@@ -4,9 +4,9 @@
  *
  *  $RCSfile$
  *
- *  $Revision: 9032 $
+ *  $Revision$
  *
- *  last change: $Author: noelpwer $ $Date: 2007-03-20 12:48:05 +0000 (Tue, 20 Mar 2007) $
+ *  last change: $Author$ $Date$
  *
  *  The Contents of this file are made available subject to
  *  the terms of GNU Lesser General Public License Version 2.1.

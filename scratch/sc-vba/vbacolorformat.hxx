@@ -2,11 +2,11 @@
  *
  *  OpenOffice.org - a multi-platform office productivity suite
  *
- *  $RCSfile: XFilter.idl,v $
+ *  $RCSfile$
  *
- *  $Revision: 1.1 $
+ *  $Revision$
  *
- *  last change: $Author: jsc $ $Date: 2007/02/09 07:09:23 $
+ *  last change: $Author$ $Date$
  *
  *  The Contents of this file are made available subject to
  *  the terms of GNU Lesser General Public License Version 2.1.
