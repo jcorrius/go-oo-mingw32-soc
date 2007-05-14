@@ -3121,7 +3121,7 @@ ScVbaRange::setRowHeight( const uno::Any& _rowheight) throw (uno::RuntimeExcepti
 uno::Any SAL_CALL 
 ScVbaRange::getPageBreak() throw (uno::RuntimeException)
 {
-	sal_Int32 nPageBreak = excel::XlPageBreak::XlPageBreakNone;
+	sal_Int32 nPageBreak = excel::XlPageBreak::xlPageBreakNone;
 	ScDocShell* pShell = getDocShellFromRange( mxRange );
 	if ( pShell )
 	{
@@ -3144,10 +3144,10 @@ ScVbaRange::getPageBreak() throw (uno::RuntimeException)
 			    nFlag = pDoc -> GetColFlags(static_cast<SCCOL>(thisAddress.StartColumn), thisAddress.Sheet);
 			    
 			if ( nFlag & CR_PAGEBREAK)
-			    nPageBreak = excel::XlPageBreak::XlPageBreakAutomatic;
+			    nPageBreak = excel::XlPageBreak::xlPageBreakAutomatic;
 			    
 			if ( nFlag & CR_MANUALBREAK)
-			    nPageBreak = excel::XlPageBreak::XlPageBreakManual;
+			    nPageBreak = excel::XlPageBreak::xlPageBreakManual;
 		}		
 	}
 
@@ -3177,9 +3177,9 @@ ScVbaRange::setPageBreak( const uno::Any& _pagebreak) throw (uno::RuntimeExcepti
 		if ( xModel.is() )
 		{
 			ScTabViewShell* pViewShell = getBestViewShell( xModel );
-			if ( nPageBreak == excel::XlPageBreak::XlPageBreakManual )
+			if ( nPageBreak == excel::XlPageBreak::xlPageBreakManual )
 			    pViewShell->InsertPageBreak( bColumn, TRUE, &aAddr);
-			else if ( nPageBreak == excel::XlPageBreak::XlPageBreakNone )
+			else if ( nPageBreak == excel::XlPageBreak::xlPageBreakNone )
 			    pViewShell->DeletePageBreak( bColumn, TRUE, &aAddr);
 		}
 	}

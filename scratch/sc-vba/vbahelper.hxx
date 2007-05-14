@@ -42,8 +42,8 @@
 #include <docsh.hxx>
 #include <basic/sberrors.hxx>
 
-#define css com::sun::star
-#define oo org::openoffice
+namespace css = ::com::sun::star;
+
 namespace org 
 {
 	namespace openoffice 
@@ -237,6 +237,8 @@ public:
 };
 	} // openoffice
 } // org
+
+namespace oo = org::openoffice;
 
 #ifdef DEBUG
 #  define SC_VBA_FIXME(a) OSL_TRACE( a )
