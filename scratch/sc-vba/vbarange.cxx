@@ -3794,7 +3794,6 @@ ScVbaRange::AutoFill(  const uno::Reference< excel::XRange >& Destination, const
 		aFunc.FillAuto( aSourceRange, NULL, eDir, eCmd, eDateCmd,
 									nCount, fStep, fEndValue, TRUE, TRUE );
 }
-#include <comphelper/anytostring.hxx>
 sal_Bool SAL_CALL
 ScVbaRange::GoalSeek( const uno::Any& Goal, const uno::Reference< excel::XRange >& ChangingCell ) throw (uno::RuntimeException)
 {
