@@ -32,32 +32,24 @@
 #     MA  02111-1307  USA
 #
 #*************************************************************************
-PRJ=../..$/..
 
-PRJNAME=
+PRJ=..$/..$/..
+
+PRJNAME=sc
 TARGET=vbaobj
-.IF "$(ENABLE_VBA)"!="YES"
-dummy:
-        @echo "not building vba..."
-.ENDIF
-
-
-NO_BSYMBOLIC=   TRUE
 ENABLE_EXCEPTIONS=TRUE
 
 # --- Settings -----------------------------------------------------
 
 .INCLUDE :  settings.mk
-.INCLUDE :  sv.mk
 DLLPRE =
 
-ALLTAR : \
-        $(MISC)$/$(TARGET).don \
-        $(SLOTARGET)
+.IF "$(ENABLE_VBA)"!="YES"
+dummy:
+        @echo "not building vba..."
+.ENDIF
 
-$(MISC)$/$(TARGET).don : $(SOLARBINDIR)$/oovbaapi.rdb
-        +$(CPPUMAKER) -O$(OUT)$/inc -BUCR $(SOLARBINDIR)$/oovbaapi.rdb -X$(SOLARBINDIR)$/types.rdb && echo > $@
-        echo $@
+INCPRE=$(INCCOM)$/$(TARGET)
 
 # ------------------------------------------------------------------
 
@@ -121,3 +113,13 @@ SLOFILES= \
 # --- Targets ------------------------------------------------------
 
 .INCLUDE :	target.mk
+
+ALLTAR : \
+        $(MISC)$/$(TARGET).don \
+
+$(SLOFILES) : $(MISC)$/$(TARGET).don
+
+$(MISC)$/$(TARGET).don : $(SOLARBINDIR)$/oovbaapi.rdb
+        +$(CPPUMAKER) -O$(INCCOM)$/$(TARGET) -BUCR $(SOLARBINDIR)$/oovbaapi.rdb -X$(SOLARBINDIR)$/types.rdb && echo > $@
+        echo $@
+
