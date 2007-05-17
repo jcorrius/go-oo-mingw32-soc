@@ -35,12 +35,12 @@
 #ifndef SC_VBA_HELPER_HXX
 #define SC_VBA_HELPER_HXX
 
-#include <cppuhelper/implbase1.hxx>
-#include <com/sun/star/frame/XModel.hpp>
 #include <com/sun/star/drawing/XShape.hpp>
 #include <com/sun/star/script/BasicErrorException.hpp>
-#include <docsh.hxx>
 #include <basic/sberrors.hxx>
+#include <cppuhelper/implbase1.hxx>
+#include <com/sun/star/frame/XModel.hpp>
+#include <docsh.hxx>
 
 namespace css = ::com::sun::star;
 
@@ -237,6 +237,8 @@ public:
 };
 	} // openoffice
 } // org
+
+namespace oo = org::openoffice;
 
 namespace oo = org::openoffice;
 
