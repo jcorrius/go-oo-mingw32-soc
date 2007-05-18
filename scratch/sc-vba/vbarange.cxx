@@ -159,7 +159,7 @@
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
 
-
+const rtl::OUString STR_ERRORMESSAGE_APPLIESTOSINGLERANGEONLY( RTL_CONSTASCII_USTRINGPARAM("The command you chose cannot be performed with multiple selections.\nSelect a single range and click the command again") );
 
 //    * 1 point = 1/72 inch = 20 twips
 //    * 1 inch = 72 points = 1440 twips
@@ -3203,10 +3203,17 @@ ScVbaRange::getHeight() throw (uno::RuntimeException)
 uno::Reference< excel::XWorksheet >
 ScVbaRange::getWorksheet() throw (uno::RuntimeException)
 {
-	ScDocShell* pDocShell =  getDocShellFromRange(mxRange);
-	RangeHelper* rHelper = new RangeHelper(mxRange);
-	// parent should be Thisworkbook
-        return new ScVbaWorksheet( uno::Reference< vba::XHelperInterface >(), mxContext,rHelper->getSpreadSheet(),pDocShell->GetModel());
+	// #TODO #FIXME parent should always be set up ( currently thats not
+	// the case )
+	uno::Reference< excel::XWorksheet > xSheet( getParent(), uno::UNO_QUERY );
+	if ( !xSheet.is() )
+	{
+		ScDocShell* pDocShell =  getDocShellFromRange(mxRange);
+		RangeHelper rHelper(mxRange);
+		// parent should be Thisworkbook
+        	xSheet.set( new ScVbaWorksheet( uno::Reference< vba::XHelperInterface >(), mxContext,rHelper.getSpreadSheet(),pDocShell->GetModel()) );
+	}	
+	return xSheet;
 }
 
 ScCellRangesBase*
@@ -3822,6 +3829,56 @@ ScVbaRange::GoalSeek( const uno::Any& Goal, const uno::Reference< excel::XRange 
 	else
 		bRes = sal_False;
 	return bRes;
+}
+
+void
+ScVbaRange::Calculate(  ) throw (script::BasicErrorException, uno::RuntimeException)
+{
+	getWorksheet()->Calculate();
+}
+
+uno::Reference< excel::XRange > SAL_CALL 
+ScVbaRange::Item( const uno::Any& row, const uno::Any& column ) throw (script::BasicErrorException, uno::RuntimeException)
+{
+	return Cells( row, column );	
+}
+
+void
+ScVbaRange::AutoOutline(  ) throw (script::BasicErrorException, uno::RuntimeException)
+{
+	// #TODO #FIXME needs to check for summary row/col ( whatever they are )
+	// not valid for multi Area Addresses
+	if ( m_Areas->getCount() )
+		DebugHelper::exception(SbERR_METHOD_FAILED, STR_ERRORMESSAGE_APPLIESTOSINGLERANGEONLY); 			
+	// So needs to either span an entire Row or a just be a single cell 
+	// ( that contains a summary RowColumn )
+	RangeHelper thisRange( mxRange );
+	table::CellRangeAddress thisAddress = thisRange.getCellRangeAddressable()->getRangeAddress();
+
+	if  ( thisAddress.EndRow != MAXROW )
+		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString());
+
+	uno::Reference< sheet::XSheetOutline > xSheetOutline( thisRange.getSpreadSheet(), uno::UNO_QUERY_THROW );
+        xSheetOutline->autoOutline( thisAddress );	
+}
+
+void SAL_CALL
+ScVbaRange:: ClearOutline(  ) throw (script::BasicErrorException, uno::RuntimeException)
+{
+	if ( m_Areas->getCount() > 1 )
+	{
+		sal_Int32 nItems = m_Areas->getCount();
+		for ( sal_Int32 index=1; index <= nItems; ++index )
+		{
+			uno::Reference< excel::XRange > xRange( m_Areas->Item( uno::makeAny(index), uno::Any() ), uno::UNO_QUERY_THROW );
+			xRange->ClearOutline();	
+		}
+		return;
+	}
+	RangeHelper thisRange( mxRange );
+	table::CellRangeAddress thisAddress = thisRange.getCellRangeAddressable()->getRangeAddress();
+	uno::Reference< sheet::XSheetOutline > xSheetOutline( thisRange.getSpreadSheet(), uno::UNO_QUERY_THROW );
+        xSheetOutline->clearOutline();	
 }
 
 rtl::OUString& 

@@ -223,6 +223,10 @@ public:
 	virtual void SAL_CALL Autofit() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL PrintOut( const css::uno::Any& From, const css::uno::Any& To, const css::uno::Any& Copies, const css::uno::Any& Preview, const css::uno::Any& ActivePrinter, const css::uno::Any& PrintToFile, const css::uno::Any& Collate, const css::uno::Any& PrToFileName ) throw (css::uno::RuntimeException);
 	virtual void SAL_CALL AutoFill( const css::uno::Reference< oo::excel::XRange >& Destination, const css::uno::Any& Type ) throw (css::uno::RuntimeException) ;
+	 void SAL_CALL Calculate(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException); 
+	virtual void SAL_CALL AutoOutline(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual css::uno::Reference< oo::excel::XRange > SAL_CALL Item( const ::css::uno::Any& row, const css::uno::Any& column ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual void SAL_CALL ClearOutline(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
 	// XEnumerationAccess
 	virtual css::uno::Reference< css::container::XEnumeration > SAL_CALL createEnumeration() throw (css::uno::RuntimeException);
 
