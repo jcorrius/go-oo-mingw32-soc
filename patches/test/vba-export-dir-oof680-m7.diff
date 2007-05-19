@@ -1,6 +1,6 @@
---- /dev/null	
-+++ svx/source/msfilter/msvbasicdir.cxx	
-@@ -0,0 +1,1042 @@
+--- /dev/null	2007-05-04 11:54:36.000000000 +0100
++++ svx/source/msfilter/msvbasicdir.cxx	2007-05-09 21:01:09.000000000 +0100
+@@ -0,0 +1,1086 @@
 +#include <string.h> 	// memset(), ...
 +#ifndef UNX
 +#include <io.h> 		// access()
@@ -29,6 +29,7 @@
 +
 +#include <com/sun/star/container/XNameContainer.hpp>
 +#include <com/sun/star/script/XLibraryContainer.hpp>
++#include <fstream>
 +using namespace com::sun::star::container;
 +using namespace com::sun::star::script;
 +using namespace com::sun::star::uno;
@@ -58,7 +59,7 @@
 +struct CompressBuffer {
 +	// buffer for match making
 +	UINT8 mpBuffer[ nWINDOWLEN ];
-+	sal_uInt32 mnLength;
++	sal_Int32 mnLength;
 +
 +	// output buffering
 +	SvStream   *mpOutput;
@@ -121,10 +122,10 @@
 +	}
 +
 +	sal_Int32 /* Unbelievably slow, but ... */
-+	findMatch (sal_uInt32 nPos, sal_uInt32 &rnLen)
++	findMatch (sal_Int32 nPos, sal_Int32 &rnLen)
 +	{
-+		sal_uInt32 i;
-+		sal_uInt32 max_match = (1 << getShift( nPos ) ) - 1;
++		sal_Int32 i;
++		sal_Int32 max_match = (1 << getShift( nPos ) ) - 1;
 +
 +		/* FIXME: the MS impl. does different to a linear search here
 +		   and is not very good at this either; is happy to get much
@@ -133,10 +134,9 @@
 +		   / later matches of equivalent length with no predictability
 +		   ( hashing ? ).
 +		*/
-+		//for (i = nPos - 1; i >= 0; i--)
-+		for (i = nPos - 1; i != 0; i--)
++		for (i = nPos - 1; i >= 0; i--)
 +		{
-+			sal_uInt32 j;
++			sal_Int32 j;
 +
 +			for (j = 0; j < mnLength - nPos && j < nPos; j++)
 +				if (mpBuffer[nPos + j] != mpBuffer[i + j])
@@ -164,7 +164,7 @@
 +static void
 +compressBlock( CompressBuffer &rBuffer )
 +{
-+	sal_uInt32 nPos, nMatchLen;
++	sal_Int32 nPos, nMatchLen;
 +	int   nMatchPos;
 +
 +	for (nPos = 0; nPos < rBuffer.mnLength;)
@@ -343,6 +343,7 @@
 +{
 +	const sal_Unicode cLineEnd = bIsMac ? '\x0D' : '\x0A';
 +	const rtl::OUString sAttribute( OUString::createFromAscii( "Attribute" ) );
++	OSL_TRACE("** Before strip %s", rtl::OUStringToOString( rVBA, RTL_TEXTENCODING_UTF8 ).getStr() );
 +	while( rVBA.indexOf( sAttribute ) == 0 )
 +	{
 +		sal_Int32 nEnd = rVBA.indexOf( cLineEnd );
@@ -350,6 +351,7 @@
 +	 		break;
 +		rVBA = rVBA.copy( nEnd + 1 );
 +	}
++	OSL_TRACE("** After strip %s", rtl::OUStringToOString( rVBA, RTL_TEXTENCODING_UTF8 ).getStr() );
 +}
 +
 +static void
@@ -381,7 +383,7 @@
 +struct DirTokenizer {
 +	SvStream *mpStream;
 +	sal_uInt16    mnToken;
-+	sal_uInt32    mnLength;
++	sal_Int32    mnLength;
 +	sal_uInt32    mnConsumed;
 +	bool	  mnbEof;
 +
@@ -572,6 +574,11 @@
 +	}
 +};
 +
++VBADir::VBADir( SvStorageRef &xProjectStorage, SvStorageRef &xStorage, const vecModuleTypes& rModTypes  ) :
++		mxStorage( xStorage ), mxProjectStorage( xProjectStorage ), modTypes( rModTypes )
++{
++}
++
 +VBADir::VBADir( SvStorageRef &xProjectStorage, SvStorageRef &xStorage ) :
 +		mxStorage( xStorage ), mxProjectStorage( xProjectStorage )
 +{
@@ -599,6 +606,14 @@
 +	}
 +
 +	SvMemoryStream *pPlain = MSLZSS::decompressAsStream( xDir, 0 );
++	std::ofstream aOut("/home/npower/dir.out", std::ios::out );
++	sal_uInt8 aChar;
++	while (  !pPlain->IsEof() )
++	{
++		*pPlain >> aChar;
++		aOut << aChar;
++	}
++	pPlain->Seek(0);
 +	if( !pPlain )
 +	{
 +		DBG_WARNING( "Failed to decompress 'dir' stream" );
@@ -776,7 +791,7 @@
 +	}
 +
 +	void
-+	writeModule( const OUString &rName, const OUString &/*rSource*/, bool bDocument = false )
++	writeModule( const OUString &rName, ModuleType rType = Normal )
 +	{
 +		writeUStringPair( VBA_DIR_STR_USER_NAME,
 +						  VBA_DIR_USTR_USER_NAME, rName );
@@ -788,25 +803,33 @@
 +		writeLong( VBA_DIR_LONG_VBA_OFFSET, 0x10 );
 +		writeLong( VBA_DIR_LONG_UNKNOWN_0x1e, 0x0 );
 +		writeShort( VBA_DIR_SHORT_UNKNOWN_0x2c, 0x3672 ); // Concerning ...
-+		if( bDocument )
-+			writeFlag( VBA_DIR_FLAG_DOCUMENT );
-+		else
-+		    writeFlag( VBA_DIR_FLAG_MACRO );
++		switch ( rType )
++		{
++			case Document:
++			case Form:
++				writeFlag( VBA_DIR_FLAG_DOCUMENT );
++				break;
++			case Class: 
++				writeFlag( VBA_DIR_CLASS_MODULE );
++				break;
++			case Normal: 
++		    	writeFlag( VBA_DIR_FLAG_MACRO );
++				break;
++			case Unknown:
++				DBG_WARNING( "Unknown module type" );
++		}
 +		writeFlag( VBA_DIR_OBJECT_END );
 +	}
 +
 +	void
-+	writeHack()
-+	{ // a hack - these are the hard-coded names from the 'CODENAME'
-+	  // records in the Excel stream.
-+		OUString aName = rtl::OUString::createFromAscii( "ThisWorkbook" );
-+		writeModule( aName, aName, true );
-+		aName = rtl::OUString::createFromAscii( "Sheet1" );
-+		writeModule( aName, aName, true );
-+		aName = rtl::OUString::createFromAscii( "Sheet2" );
-+		writeModule( aName, aName, true );
-+		aName = rtl::OUString::createFromAscii( "Sheet3" );
-+		writeModule( aName, aName, true );
++	writeModules( const vecModuleTypes& rModTypes )
++	{ 
++		// a hack - these are the hard-coded names from the 'CODENAME'
++		// records in the Excel stream.
++		vecModuleTypes::const_iterator it = rModTypes.begin();
++		vecModuleTypes::const_iterator it_end = rModTypes.end();
++		for ( ; it != it_end; ++it )
++			writeModule( it->first, it->second );
 +	}
 +};
 +
@@ -845,15 +868,30 @@
 +		mxProject->Write( (const sal_Char *) sOutput, sOutput.getLength() );
 +	}
 +
-+	void writeModule( const OUString &rName, bool bDocument = false )
++	void writeModule( const OUString &rName, ModuleType rType = Normal )
 +	{
 +		OString sName = OUStringToOString( rName, RTL_TEXTENCODING_MS_1252 );
-+		if( bDocument )
-+		    writeString( "Document=" );
-+		else
-+		    writeString( "Module=" );
++		OSL_TRACE("writeModeule %s, type %d", sName.getStr(), rType );
++		switch( rType )
++		{
++			case Document:
++		    	writeString( "Document=" );
++				break;
++			case Normal:
++		    	writeString( "Module=" );
++				break;
++			case Class:
++		    	writeString( "Class=" );
++				break;
++			case Form:
++		    	writeString( "BaseClass=" );
++				break;
++			case Unknown:
++		    	writeString( "Module=" );
++				break;
++		}
 +		writeString( sName );
-+		if( bDocument )
++		if( rType == Document )
 +		    writeString( "/&H00000000" );
 +		writeString( "\n" );
 +		mxProjectWm->Write( (const sal_Char *) sName, sName.getLength() );
@@ -867,23 +905,12 @@
 +		writeString("ID=\"{33C90A8B-9E30-406E-BC0F-D2863F9025D7}\"\n");
 +	}
 +
-+	void writeModules( Sequence<OUString> &rNames )
++	void writeModules( const vecModuleTypes& rModTypes )
 +	{
-+		int i;
-+		for (i = 0; i < rNames.getLength(); i++)
-+			writeModule( rNames[i] );
-+	}
-+
-+	void writeHack()
-+	{
-+		OUString aName = rtl::OUString::createFromAscii( "ThisWorkbook" );
-+		writeModule( aName, true );
-+		aName = rtl::OUString::createFromAscii( "Sheet1" );
-+		writeModule( aName, true );
-+		aName = rtl::OUString::createFromAscii( "Sheet2" );
-+		writeModule( aName, true );
-+		aName = rtl::OUString::createFromAscii( "Sheet3" );
-+		writeModule( aName, true );
++		vecModuleTypes::const_iterator it = rModTypes.begin();
++		vecModuleTypes::const_iterator it_end = rModTypes.end();
++		for ( ; it != it_end; ++it )
++			writeModule( it->first, it->second );
 +	}
 +
 +	void writeEnd()
@@ -896,46 +923,59 @@
 +};
 +
 +void
-+VBADir::writeModule( const OUString &rName, const OUString &rSource )
++VBADir::writeModule( const OUString &rName, const OUString &rSource, ModuleType rType = Normal)
 +{
 +	SvStorageStreamRef xStream;
 +	xStream = mxStorage->OpenSotStream( rName, STREAM_STD_WRITE );
-+
++		
 +	OString sSource = OUStringToOString( rSource, RTL_TEXTENCODING_MS_1252 );
 +	UINT8 aData[16] = { 0, };
 +	xStream->Write( aData, 16 );
 +
-+	OString sAttribute = "Attribute VB_Name = \"" + OUStringToOString( rName, RTL_TEXTENCODING_MS_1252 ) + "\"\r\n";
-+	sSource = sAttribute + sSource;
++	OString sAttribute;
++	if ( rType == Normal )
++		sAttribute = sAttribute + "Attribute VB_Name = \"" + OUStringToOString( rName, RTL_TEXTENCODING_MS_1252 ) + "\"";
++	else if ( rType == Document )
++	{
++		// #FIXME wacky hack, this will become an issue also for
++		// word :-( possible we need another enum to handle this 
++		// special document module type
++		if ( rName.equals(  OUString::createFromAscii( "ThisWorkbook" ) ) )
++		{
++			sAttribute = "Attribute VB_Base = \"0{00020819-0000-0000-C000-000000000046}\"";
++		}
++		else
++		{
++			sAttribute = "Attribute VB_Base = \"0{00020820-0000-0000-C000-000000000046}\"";
++		}
++
++	}
++	else if ( rType == Class )
++	{
++			sAttribute = "Attribute VB_Base = \"0{FCFB3D2A-A0FA-1068-A738-08002B3371B5}\"";
++/*
++			sAttribute = sAttribute + "\r\nAttribute VB_GlobalNameSpace = False";
++			sAttribute = sAttribute + "\r\nAttribute VB_Creatable = False";
++			sAttribute = sAttribute + "\r\nAttribute VB_PredeclaredId = False";
++			sAttribute = sAttribute + "\r\nAttribute VB_Exposed = False";
++			sAttribute = sAttribute + "\r\nAttribute VB_TemplateDerived = False";
++			sAttribute = sAttribute + "\r\nAttribute VB_Customizable = False";
++*/
++	}
++	else if ( rType == Form )
++	{
++			sAttribute = "Attribute VB_Base = \"0{6FE35EE2-F5D3-4FD9-BBB2-A3253B2C0650}{D22BB890-287D-42D9-85E8-F98E3EB8559C}\"";
++	}
++
++
++		
++	sSource = sAttribute + "\r\n" + sSource;
++	OSL_TRACE("***************************");
++	OSL_TRACE("source for %s", OUStringToOString( rName, RTL_TEXTENCODING_UTF8 ).getStr() );
++	OSL_TRACE("->START\n%s<-END", sSource.getStr() );
++	
 +
 +	MSLZSS::compressString( xStream, sSource );
-+}
-+
-+static void
-+writeHackStreams( SvStorageRef xStorage)
-+{
-+	SvStorageStreamRef xStream;
-+
-+	xStream = xStorage->OpenSotStream( OUString::createFromAscii( "ThisWorkbook"),
-+										STREAM_STD_WRITE );
-+	UINT8 aData[16] = { 0, };
-+	xStream->Write( aData, 16 );
-+	MSLZSS::compressString( xStream, "Attribute VB_Base = \"0{00020819-0000-0000-C000-000000000046}\"" );
-+
-+	xStream = xStorage->OpenSotStream( OUString::createFromAscii( "Sheet1"),
-+										STREAM_STD_WRITE );
-+	xStream->Write( aData, 16 );
-+	MSLZSS::compressString( xStream, "Attribute VB_Base = \"0{00020820-0000-0000-C000-000000000046}\"" );
-+
-+	xStream = xStorage->OpenSotStream( OUString::createFromAscii( "Sheet2"),
-+										STREAM_STD_WRITE );
-+	xStream->Write( aData, 16 );
-+	MSLZSS::compressString( xStream, "Attribute VB_Base = \"0{00020820-0000-0000-C000-000000000046}\"" );
-+
-+	xStream = xStorage->OpenSotStream( OUString::createFromAscii( "Sheet3"),
-+										STREAM_STD_WRITE );
-+	xStream->Write( aData, 16 );
-+	MSLZSS::compressString( xStream, "Attribute VB_Base = \"0{00020820-0000-0000-C000-000000000046}\"" );
 +}
 +
 +bool
@@ -989,31 +1029,35 @@
 +	{
 +		Sequence< OUString > aProjects;
 +		aProjects = xLib->getElementNames();
++		OSL_TRACE("******* aProjects has %d entries", aProjects.getLength() );
 +		int nHack = 4;
 +
-+		if (nHack)
-+				aProject.writeHack();
-+		aProject.writeModules( aProjects );
++		//if (nHack)
++		//		aProject.writeHack();
++		aProject.writeModules( modTypes );		
 +
-+		if (nHack) {
-+				aDir.writeModuleCount( aProjects.getLength() + nHack );
-+				aDir.writeHack();
-+				writeHackStreams( mxStorage );
-+		}
++		aDir.writeModuleCount(  modTypes.size() ? modTypes.size() : aProjects.getLength() );
 +
-+		for( int i = 0; i < aProjects.getLength(); i++ )
++		// really this is write modules	
++		aDir.writeModules( modTypes );
++
++		vecModuleTypes::iterator it = modTypes.begin();
++		vecModuleTypes::iterator it_end = modTypes.end();
++		for ( ; it != it_end; ++it )
 +		{
 +			Any aSourceAny;
 +			OUString sSource;
-+			OUString &rName = aProjects[i];
-+
-+			aSourceAny = xLib->getByName( rName );
-+			aSourceAny >>= sSource;
-+			if( sSource.getLength() >= 0 )
++			// its possible that e.g. sheet1..3 have no code therefore they don't exist in openoffice, ditto for ThisWorkbook
++			try
 +			{
-+				writeModule( rName, sSource );
-+				aDir.writeModule( rName, sSource );
++				aSourceAny = xLib->getByName( it->first );
++				aSourceAny >>= sSource;
 +			}
++			catch( com::sun::star::uno::Exception& e )
++			{
++			}
++			if( sSource.getLength() >= 0 )
++				writeModule( it->first, sSource, it->second );
 +		}
 +	}
 +	else
@@ -1043,9 +1087,9 @@
 +
 +	return bRet;
 +}
---- /dev/null	
-+++ svx/source/msfilter/msvbasicdir.hxx	
-@@ -0,0 +1,81 @@
+--- /dev/null	2007-05-04 11:54:36.000000000 +0100
++++ svx/source/msfilter/msvbasicdir.hxx	2007-05-08 12:23:39.000000000 +0100
+@@ -0,0 +1,82 @@
 +#ifndef _MSVBASICDIR_HXX
 +#define _MSVBASICDIR_HXX
 +
@@ -1064,7 +1108,7 @@
 +#ifndef __SGI_STL_VECTOR
 +#include <vector>
 +#endif
-+
++#include "svxmsbas.hxx"
 +namespace MSLZSS {
 +	void	        compressString( SvStream *pStream, const rtl::OString &rString );
 +	void	        compressStream( SvStream *pStream, SvStream *pInStream );
@@ -1096,6 +1140,7 @@
 +#define VBA_DIR_LONG_UNKNOWN_0x1e	0x1e
 +#define VBA_DIR_FLAG_MACRO			0x21
 +#define VBA_DIR_FLAG_DOCUMENT		0x22
++#define VBA_DIR_CLASS_MODULE		0x28
 +#define VBA_DIR_SHORT_UNKNOWN_0x2c	0x2c
 +#define VBA_DIR_OBJECT_END			0x2b
 +#define VBA_DIR_LONG_VBA_OFFSET		0x31
@@ -1112,12 +1157,12 @@
 +private:
 +	SvStorageRef mxStorage;
 +	SvStorageRef mxProjectStorage;
-+
++	vecModuleTypes modTypes;						  
 +	void deleteSRPs();
 +	void clobberProject();
-+	void writeModule( const rtl::OUString &rName, const rtl::OUString &rSource );
-+						  
++	void writeModule( const rtl::OUString &rName, const rtl::OUString &rSource, ModuleType rType );
 +public:
++	VBADir( SvStorageRef &xProjectStorage, SvStorageRef &xStorage, const vecModuleTypes& rModTypes );
 +	VBADir( SvStorageRef &xProjectStorage, SvStorageRef &xStorage );
 +	~VBADir();
 +
