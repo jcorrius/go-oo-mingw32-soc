@@ -82,6 +82,7 @@
 #include <com/sun/star/sheet/TableFilterField.hpp>
 #include <com/sun/star/sheet/XSheetFilterable.hpp>
 #include <com/sun/star/sheet/FilterConnection.hpp>
+#include <com/sun/star/util/CellProtection.hpp>
 
 #include <com/sun/star/style/XStyleFamiliesSupplier.hpp>
 #include <com/sun/star/awt/XDevice.hpp>
@@ -143,6 +144,7 @@
 #include "attrib.hxx"
 #include "undodat.hxx"
 #include "dbdocfun.hxx"
+#include "patattr.hxx"
 #include <comphelper/anytostring.hxx>
 
 #include <global.hxx>
@@ -3643,6 +3645,27 @@ ScVbaRange::getValidation() throw (css::uno::RuntimeException)
 		m_xValidation = new ScVbaValidation( this, mxContext, mxRange );
 	return m_xValidation;
 }
+
+uno::Any ScVbaRange::getFormulaHidden() throw (css::uno::RuntimeException)
+{
+	SfxItemSet* pDataSet = getCurrentDataSet();
+	const ScProtectionAttr& rProtAttr = (const ScProtectionAttr &)
+		pDataSet->Get(ATTR_PROTECTION, TRUE);
+	SfxItemState eState = pDataSet->GetItemState(ATTR_PROTECTION, TRUE, NULL);
+	if(eState == SFX_ITEM_DONTCARE)
+		return aNULL();
+	return uno::makeAny(rProtAttr.GetHideFormula());
+
+}
+void ScVbaRange::setFormulaHidden(const uno::Any& Hidden) throw (css::uno::RuntimeException)
+{
+	uno::Reference< beans::XPropertySet > xProps(mxRange, ::uno::UNO_QUERY_THROW);
+	util::CellProtection rCellAttr;
+	xProps->getPropertyValue(rtl::OUString(RTL_CONSTASCII_USTRINGPARAM(SC_UNONAME_CELLPRO))) >>= rCellAttr;
+	Hidden >>= rCellAttr.IsFormulaHidden;
+	xProps->setPropertyValue(rtl::OUString( RTL_CONSTASCII_USTRINGPARAM(SC_UNONAME_CELLPRO)), uno::makeAny(rCellAttr));
+}
+
 
 void SAL_CALL 
 ScVbaRange::PrintOut( const uno::Any& From, const uno::Any& To, const uno::Any& Copies, const uno::Any& Preview, const uno::Any& ActivePrinter, const uno::Any& PrintToFile, const uno::Any& Collate, const uno::Any& PrToFileName ) throw (uno::RuntimeException)

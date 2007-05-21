@@ -165,6 +165,8 @@ public:
 	virtual css::uno::Any SAL_CALL getPageBreak() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setPageBreak( const css::uno::Any& _pagebreak ) throw (css::uno::RuntimeException);
 	virtual css::uno::Reference< oo::excel::XValidation > SAL_CALL getValidation() throw (css::uno::RuntimeException);
+	virtual css::uno::Any SAL_CALL getFormulaHidden() throw (css::uno::RuntimeException);
+	virtual void SAL_CALL setFormulaHidden(const css::uno::Any& aHidden) throw (css::uno::RuntimeException);	
 
 	// Methods
 	sal_Bool IsRows() { return mbIsRows; }
