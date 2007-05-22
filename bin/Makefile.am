@@ -4,6 +4,7 @@ script_files = \
 	build-galleries \
 	build-ooo \
 	build-tools \
+	cvs-tags-normalize \
 	font-munge \
 	fix-deps \
 	generate-bash-completion \
