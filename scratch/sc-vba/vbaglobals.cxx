@@ -163,7 +163,7 @@ namespace sdecl = comphelper::service_decl;
 sdecl::class_<ScVbaGlobals, sdecl::with_args<false> > serviceImpl;
 extern sdecl::ServiceDecl const serviceDecl(
     serviceImpl,
-    "org.openoffice.vba.Globals",
+    "ScVbaGlobals",
     "org.openoffice.vba.Globals" );
 }
 
