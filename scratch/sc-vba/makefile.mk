@@ -107,6 +107,8 @@ SLOFILES= \
                 $(SLO)$/vbaaxistitle.obj \
                 $(SLO)$/vbaaxes.obj \
                 $(SLO)$/vbaaxis.obj \
+                $(SLO)$/vbaformat.obj \
+                $(SLO)$/vbastyle.obj \
 		$(SLO)$/service.obj \
  
 

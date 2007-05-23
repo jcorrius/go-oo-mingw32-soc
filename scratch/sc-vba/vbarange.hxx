@@ -118,6 +118,7 @@ class ScVbaRange : public ScVbaRange_BASE
 	ScCellRangesBase* getCellRangesBase() throw ( css::uno::RuntimeException );
 	SfxItemSet* getCurrentDataSet( )  throw ( css::uno::RuntimeException );
 	css::uno::Reference< oo::vba::XCollection >& getBorders();
+	void groupUnGroup( bool bUnGroup = false ) throw ( css::script::BasicErrorException, css::uno::RuntimeException );
 public:
 	ScVbaRange( const css::uno::Reference< oo::vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::table::XCellRange >& xRange, sal_Bool bIsRows = false, sal_Bool bIsColumns = false ) throw ( css::lang::IllegalArgumentException );
 	ScVbaRange( const css::uno::Reference< oo::vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::sheet::XSheetCellRangeContainer >& xRanges, sal_Bool bIsRows = false, sal_Bool bIsColumns = false ) throw ( css::lang::IllegalArgumentException );
@@ -229,6 +230,12 @@ public:
 	virtual void SAL_CALL AutoOutline(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
 	virtual css::uno::Reference< oo::excel::XRange > SAL_CALL Item( const ::css::uno::Any& row, const css::uno::Any& column ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
 	virtual void SAL_CALL ClearOutline(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual void SAL_CALL Ungroup(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual void SAL_CALL Group(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual void SAL_CALL Merge( const css::uno::Any& Across ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual void SAL_CALL UnMerge(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual css::uno::Any SAL_CALL getStyle() throw (css::uno::RuntimeException);
+	virtual void SAL_CALL setStyle( const css::uno::Any& _style ) throw (css::uno::RuntimeException);
 	// XEnumerationAccess
 	virtual css::uno::Reference< css::container::XEnumeration > SAL_CALL createEnumeration() throw (css::uno::RuntimeException);
 

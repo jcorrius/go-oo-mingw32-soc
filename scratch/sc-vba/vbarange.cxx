@@ -150,6 +150,7 @@
 #include <global.hxx>
 
 #include "vbaglobals.hxx"
+#include "vbastyle.hxx"
 #include <vector>
 #include <vbacollectionimpl.hxx>
 // begin test includes
@@ -162,6 +163,7 @@ using namespace ::org::openoffice;
 using namespace ::com::sun::star;
 
 const rtl::OUString STR_ERRORMESSAGE_APPLIESTOSINGLERANGEONLY( RTL_CONSTASCII_USTRINGPARAM("The command you chose cannot be performed with multiple selections.\nSelect a single range and click the command again") );
+const rtl::OUString CELLSTYLE( RTL_CONSTASCII_USTRINGPARAM("CellStyle") );
 
 //    * 1 point = 1/72 inch = 20 twips
 //    * 1 inch = 72 points = 1440 twips
@@ -3875,14 +3877,19 @@ ScVbaRange::AutoOutline(  ) throw (script::BasicErrorException, uno::RuntimeExce
 		DebugHelper::exception(SbERR_METHOD_FAILED, STR_ERRORMESSAGE_APPLIESTOSINGLERANGEONLY); 			
 	// So needs to either span an entire Row or a just be a single cell 
 	// ( that contains a summary RowColumn )
+	// also the Single cell cause doesn't seem to be handled specially in 
+	// this code ( ported from the helperapi RangeImpl.java, 
+	// RangeRowsImpl.java, RangesImpl.java, RangeSingleCellImpl.java
 	RangeHelper thisRange( mxRange );
 	table::CellRangeAddress thisAddress = thisRange.getCellRangeAddressable()->getRangeAddress();
 
-	if  ( thisAddress.EndRow != MAXROW )
+	if ( isSingleCellRange() || mbIsRows )
+	{
+		uno::Reference< sheet::XSheetOutline > xSheetOutline( thisRange.getSpreadSheet(), uno::UNO_QUERY_THROW );
+       		 xSheetOutline->autoOutline( thisAddress );	
+	}
+	else
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString());
-
-	uno::Reference< sheet::XSheetOutline > xSheetOutline( thisRange.getSpreadSheet(), uno::UNO_QUERY_THROW );
-        xSheetOutline->autoOutline( thisAddress );	
 }
 
 void SAL_CALL
@@ -3904,6 +3911,102 @@ ScVbaRange:: ClearOutline(  ) throw (script::BasicErrorException, uno::RuntimeEx
         xSheetOutline->clearOutline();	
 }
 
+void 
+ScVbaRange::groupUnGroup( bool bUnGroup ) throw ( script::BasicErrorException, uno::RuntimeException )
+{
+	if ( m_Areas->getCount() > 1 )
+		 DebugHelper::exception(SbERR_METHOD_FAILED, STR_ERRORMESSAGE_APPLIESTOSINGLERANGEONLY);
+	table::TableOrientation nOrient = table::TableOrientation_ROWS;
+	if ( mbIsColumns )
+		nOrient = table::TableOrientation_COLUMNS;
+	RangeHelper thisRange( mxRange );
+	table::CellRangeAddress thisAddress = thisRange.getCellRangeAddressable()->getRangeAddress();
+	uno::Reference< sheet::XSheetOutline > xSheetOutline( thisRange.getSpreadSheet(), uno::UNO_QUERY_THROW );
+	if ( bUnGroup )
+	        xSheetOutline->ungroup( thisAddress, nOrient );
+	else
+	        xSheetOutline->group( thisAddress, nOrient );
+}
+
+void SAL_CALL 
+ScVbaRange::Group(  ) throw (script::BasicErrorException, uno::RuntimeException)
+{
+	groupUnGroup();	
+}
+void SAL_CALL 
+ScVbaRange::Ungroup(  ) throw (script::BasicErrorException, uno::RuntimeException)
+{
+	groupUnGroup(true);	
+}
+
+void lcl_mergeCellsOfRange( const uno::Reference< table::XCellRange >& xCellRange, sal_Bool _bMerge = sal_True ) throw ( uno::RuntimeException )
+{
+        uno::Reference< util::XMergeable > xMergeable( xCellRange, uno::UNO_QUERY_THROW );
+        xMergeable->merge(_bMerge);            
+}
+void SAL_CALL 
+ScVbaRange::Merge( const uno::Any& Across ) throw (script::BasicErrorException, uno::RuntimeException)
+{
+	if ( m_Areas->getCount() > 1 )
+	{
+		sal_Int32 nItems = m_Areas->getCount();
+		for ( sal_Int32 index=1; index <= nItems; ++index )
+		{
+			uno::Reference< excel::XRange > xRange( m_Areas->Item( uno::makeAny(index), uno::Any() ), uno::UNO_QUERY_THROW );
+			xRange->Merge(Across);	
+		}
+		return;
+	}
+	uno::Reference< table::XCellRange > oCellRange;	
+	sal_Bool bAcross = sal_False;
+	Across >>= bAcross;
+	if ( !bAcross )
+		lcl_mergeCellsOfRange( mxRange );
+	else
+	{
+		uno::Reference< excel::XRange > oRangeRowsImpl = Rows( uno::Any() );
+		// #TODO #FIXME this seems incredibly lame, this can't be right
+		for (sal_Int32 i=1; i <= oRangeRowsImpl->getCount();i++)
+		{
+               		oRangeRowsImpl->Cells( uno::makeAny( i ), uno::Any() )->Merge( uno::makeAny( sal_False ) );
+           	}
+	}
+}
+
+void SAL_CALL 
+ScVbaRange::UnMerge(  ) throw (script::BasicErrorException, uno::RuntimeException)
+{
+	if ( m_Areas->getCount() > 1 )
+	{
+		sal_Int32 nItems = m_Areas->getCount();
+		for ( sal_Int32 index=1; index <= nItems; ++index )
+		{
+			uno::Reference< excel::XRange > xRange( m_Areas->Item( uno::makeAny(index), uno::Any() ), uno::UNO_QUERY_THROW );
+			xRange->UnMerge();	
+		}
+		return;
+	}
+	lcl_mergeCellsOfRange( mxRange, sal_False);
+}
+
+uno::Any SAL_CALL 
+ScVbaRange::getStyle() throw (uno::RuntimeException)
+{
+	uno::Reference< beans::XPropertySet > xProps( mxRange, uno::UNO_QUERY_THROW );
+	rtl::OUString sStyleName;
+	ScDocShell* pShell = getScDocShell();
+	uno::Reference< frame::XModel > xModel( pShell->GetModel() ); 
+	uno::Reference< excel::XStyle > xStyle = new ScVbaStyle( this, mxContext,  sStyleName, xModel );
+	return uno::makeAny( xStyle );
+}
+void SAL_CALL 
+ScVbaRange::setStyle( const uno::Any& _style ) throw (uno::RuntimeException)
+{
+	uno::Reference< beans::XPropertySet > xProps( mxRange, uno::UNO_QUERY_THROW );
+	uno::Reference< excel::XStyle > xStyle;
+	_style >>= xStyle;
+	xProps->setPropertyValue(CELLSTYLE, uno::makeAny(xStyle->getName()));
+}
 rtl::OUString& 
 ScVbaRange::getServiceImplName()
 {
