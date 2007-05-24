@@ -119,6 +119,10 @@ class ScVbaRange : public ScVbaRange_BASE
 	SfxItemSet* getCurrentDataSet( )  throw ( css::uno::RuntimeException );
 	css::uno::Reference< oo::vba::XCollection >& getBorders();
 	void groupUnGroup( bool bUnGroup = false ) throw ( css::script::BasicErrorException, css::uno::RuntimeException );
+	css::uno::Reference< oo::excel::XRange > PreviousNext( bool bIsPrevious );
+	css::uno::Reference< oo::excel::XRange > SpecialCellsImpl( sal_Int32 nType, const css::uno::Any& _oValue) throw ( css::script::BasicErrorException );
+
+		
 public:
 	ScVbaRange( const css::uno::Reference< oo::vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::table::XCellRange >& xRange, sal_Bool bIsRows = false, sal_Bool bIsColumns = false ) throw ( css::lang::IllegalArgumentException );
 	ScVbaRange( const css::uno::Reference< oo::vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::sheet::XSheetCellRangeContainer >& xRanges, sal_Bool bIsRows = false, sal_Bool bIsColumns = false ) throw ( css::lang::IllegalArgumentException );
@@ -162,6 +166,9 @@ public:
 	virtual void SAL_CALL setRowHeight( const css::uno::Any& _rowheight ) throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL getWidth() throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL getHeight() throw (css::uno::RuntimeException);
+	virtual css::uno::Any SAL_CALL getTop() throw (css::uno::RuntimeException);
+	virtual css::uno::Any SAL_CALL getLeft() throw (css::uno::RuntimeException);
+	
 	virtual css::uno::Reference< oo::excel::XWorksheet > SAL_CALL getWorksheet() throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL getPageBreak() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setPageBreak( const css::uno::Any& _pagebreak ) throw (css::uno::RuntimeException);
@@ -236,6 +243,8 @@ public:
 	virtual void SAL_CALL UnMerge(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL getStyle() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setStyle( const css::uno::Any& _style ) throw (css::uno::RuntimeException);
+	virtual css::uno::Reference< oo::excel::XRange > SAL_CALL Next() throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual css::uno::Reference< oo::excel::XRange > SAL_CALL Previous() throw (css::script::BasicErrorException, css::uno::RuntimeException);
 	// XEnumerationAccess
 	virtual css::uno::Reference< css::container::XEnumeration > SAL_CALL createEnumeration() throw (css::uno::RuntimeException);
 
@@ -261,6 +270,7 @@ public:
 //     * we shouldn't need hacks like this below
 	static css::uno::Reference< oo::excel::XRange > ApplicationRange( const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Any &Cell1, const css::uno::Any &Cell2 ) throw (css::uno::RuntimeException);
 	virtual sal_Bool SAL_CALL GoalSeek( const css::uno::Any& Goal, const css::uno::Reference< oo::excel::XRange >& ChangingCell ) throw (css::uno::RuntimeException);
+	virtual css::uno::Reference< oo::excel::XRange > SpecialCells( const css::uno::Any& _oType, const css::uno::Any& _oValue) throw ( css::script::BasicErrorException );  
 	// XHelperInterface
 	virtual rtl::OUString& getServiceImplName();
 	virtual css::uno::Sequence<rtl::OUString> getServiceNames();
