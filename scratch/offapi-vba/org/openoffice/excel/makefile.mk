@@ -90,6 +90,8 @@ IDLFILES= XApplication.idl\
 	XAxes.idl\
 	XAxis.idl\
 	XAxisTitle.idl\
+	XStyle.idl \
+	XFormat.idl \
 	Range.idl\
 
 
