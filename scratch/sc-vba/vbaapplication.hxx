@@ -58,7 +58,7 @@ public:
 	// XApplication
 	virtual ::sal_Int32 SAL_CALL getCalculation() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setCalculation( ::sal_Int32 _calculation ) throw (css::uno::RuntimeException);
-	virtual css::uno::Reference< oo::excel::XRange > SAL_CALL getSelection() throw (css::uno::RuntimeException);
+	virtual css::uno::Any SAL_CALL getSelection() throw (css::uno::RuntimeException);
 	virtual css::uno::Reference< oo::excel::XWorkbook > SAL_CALL getActiveWorkbook() throw (css::uno::RuntimeException);
 	virtual css::uno::Reference< oo::excel::XRange > SAL_CALL getActiveCell() throw ( css::uno::RuntimeException);
  virtual css::uno::Reference< oo::excel::XWindow > SAL_CALL getActiveWindow() throw (::com::sun::star::uno::RuntimeException);

@@ -38,6 +38,7 @@
 #include<com/sun/star/sheet/XSpreadsheetView.hpp>
 #include <com/sun/star/sheet/XSpreadsheets.hpp>
 #include<com/sun/star/view/XSelectionSupplier.hpp>
+#include <com/sun/star/lang/XServiceInfo.hpp>
 #include<org/openoffice/excel/XlCalculation.hpp>
 #include <com/sun/star/sheet/XCellRangeReferrer.hpp>
 #include <com/sun/star/frame/XLayoutManager.hpp>
@@ -57,6 +58,7 @@
 #include "vbaglobals.hxx"
 #include "tabvwsh.hxx"
 #include "gridwin.hxx"
+#include "vbashape.hxx"
 
 //start test includes
 #include <sfx2/objsh.hxx>
@@ -110,18 +112,35 @@ ScVbaApplication::getThisWorkbook() throw (uno::RuntimeException)
 	return getActiveWorkbook();
 }
 
-uno::Reference< excel::XRange >
+uno::Any SAL_CALL
 ScVbaApplication::getSelection() throw (uno::RuntimeException)
 {
-	uno::Reference< table::XCellRange > xRange( getCurrentDocument()->getCurrentSelection(), ::uno::UNO_QUERY);
-	if ( !xRange.is() )
-	{
-		uno::Reference< sheet::XSheetCellRangeContainer > xRanges( getCurrentDocument()->getCurrentSelection(), ::uno::UNO_QUERY);
-		if ( xRanges.is() )
-			return uno::Reference< excel::XRange >( new ScVbaRange( this, mxContext, xRanges ) );
+    uno::Reference< lang::XServiceInfo > xServiceInfo( getCurrentDocument()->getCurrentSelection(), uno::UNO_QUERY_THROW );
+    rtl::OUString sImpementaionName = xServiceInfo->getImplementationName();
+    if( sImpementaionName.equalsIgnoreAsciiCaseAscii("com.sun.star.drawing.SvxShapeCollection") )
+    {
+        uno::Reference< drawing::XShapes > xShapes( getCurrentDocument()->getCurrentSelection(), uno::UNO_QUERY_THROW );
+        uno::Reference< container::XIndexAccess > xIndexAccess( xShapes, uno::UNO_QUERY_THROW );
+        uno::Reference< drawing::XShape > xShape( xIndexAccess->getByIndex(0), uno::UNO_QUERY_THROW );
+        return uno::makeAny( uno::Reference< msforms::XShape >(new ScVbaShape( this, mxContext, xShape, xShapes, ScVbaShape::getType( xShape ) ) ) );
+    }
+    else if( xServiceInfo->supportsService( rtl::OUString::createFromAscii("com.sun.star.sheet.SheetCellRange")) ||
+             xServiceInfo->supportsService( rtl::OUString::createFromAscii("com.sun.star.sheet.SheetCellRanges")))
+    {
+	    uno::Reference< table::XCellRange > xRange( getCurrentDocument()->getCurrentSelection(), ::uno::UNO_QUERY);
+	    if ( !xRange.is() )
+	    {
+		    uno::Reference< sheet::XSheetCellRangeContainer > xRanges( getCurrentDocument()->getCurrentSelection(), ::uno::UNO_QUERY);
+		    if ( xRanges.is() )
+			    return uno::makeAny( uno::Reference< excel::XRange >( new ScVbaRange( this, mxContext, xRanges ) ) );
 
-	}
-	return new ScVbaRange( this, mxContext, xRange );
+	    }
+	    return uno::makeAny( uno::Reference< excel::XRange >(new ScVbaRange( this, mxContext, xRange ) ) );
+    }
+    else
+    {
+        throw uno::RuntimeException( sImpementaionName + rtl::OUString::createFromAscii(" donot be surpported"), uno::Reference< uno::XInterface >() );
+    }
 }
 
 uno::Reference< excel::XRange >

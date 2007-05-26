@@ -1,41 +1,15 @@
-/*************************************************************************
- *
- *  OpenOffice.org - a multi-platform office productivity suite
- *
- *  $RCSfile$
- *
- *  $Revision$
- *
- *  last change: $Author$ $Date$
- *
- *  The Contents of this file are made available subject to
- *  the terms of GNU Lesser General Public License Version 2.1.
- *
- *
- *    GNU Lesser General Public License Version 2.1
- *    =============================================
- *    Copyright 2005 by Sun Microsystems, Inc.
- *    901 San Antonio Road, Palo Alto, CA 94303, USA
- *
- *    This library is free software; you can redistribute it and/or
- *    modify it under the terms of the GNU Lesser General Public
- *    License version 2.1, as published by the Free Software Foundation.
- *
- *    This library is distributed in the hope that it will be useful,
- *    but WITHOUT ANY WARRANTY; without even the implied warranty of
- *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *    Lesser General Public License for more details.
- *
- *    You should have received a copy of the GNU Lesser General Public
- *    License along with this library; if not, write to the Free Software
- *    Foundation, Inc., 59 Temple Place, Suite 330, Boston,
- *    MA  02111-1307  USA
- *
- ************************************************************************/
 #include<org/openoffice/office/MsoZOrderCmd.hpp>
 #include<org/openoffice/office/MsoScaleFrom.hpp>
 #include<com/sun/star/container/XNamed.hpp>
 #include<com/sun/star/drawing/ConnectorType.hpp>
+#include <com/sun/star/lang/XEventListener.hpp>
+#include<com/sun/star/drawing/XDrawPagesSupplier.hpp>
+#include<com/sun/star/drawing/XDrawPages.hpp>
+
+#include <vos/mutex.hxx>
+#include <vcl/svapp.hxx>
+#include <svx/unopage.hxx>
+#include <svx/unoshape.hxx>
 
 #include "vbashape.hxx"
 #include "vbatextframe.hxx"
@@ -45,14 +19,72 @@
 
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
+using namespace ::vos;
+
+//ScVbaShapeListener
+class ScVbaShapeListener: public cppu::WeakImplHelper1< lang::XEventListener >
+{
+private:
+    ScVbaShape *m_pShape;
+public:
+    ScVbaShapeListener( ScVbaShape *pShape );
+    virtual ~ScVbaShapeListener();
+    virtual void SAL_CALL disposing( const lang::EventObject& rEventObject ) throw( uno::RuntimeException );
+};
+
+ScVbaShapeListener::ScVbaShapeListener( ScVbaShape *pShape ): m_pShape( pShape )
+{
+}
+
+ScVbaShapeListener::~ScVbaShapeListener()
+{
+}
+
+void SAL_CALL
+ScVbaShapeListener::disposing( const lang::EventObject& ) throw( uno::RuntimeException )
+{
+    if( m_pShape )
+    {
+        m_pShape->removeResource();
+        m_pShape = NULL;
+    }
+}
 
 ScVbaShape::ScVbaShape( const uno::Reference< vba::XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< drawing::XShape > xShape, const uno::Reference< drawing::XShapes > xShapes, sal_Int32 nType ) throw( lang::IllegalArgumentException ) : ScVbaShape_BASE( xParent, xContext ), m_xShape( xShape ), m_xShapes( xShapes ), m_nType( nType )
 {
     m_xPropertySet.set( m_xShape, uno::UNO_QUERY_THROW );
+    // add listener
+    m_xEventListener.set( new ScVbaShapeListener( this ) );
+    m_xComponent.set( m_xShape, uno::UNO_QUERY_THROW );
+    m_xComponent->addEventListener( m_xEventListener );
 }
 
 ScVbaShape::ScVbaShape( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< drawing::XShape > xShape ) throw( lang::IllegalArgumentException ) : ScVbaShape_BASE( uno::Reference< vba::XHelperInterface >(), xContext ), m_xShape( xShape )
 {
+    // add listener
+    m_xEventListener.set( new ScVbaShapeListener( this ) );
+    m_xComponent.set( m_xShape, uno::UNO_QUERY_THROW );
+    m_xComponent->addEventListener( m_xEventListener );
+}
+
+ScVbaShape::~ScVbaShape()
+{
+    if( m_xShape.is() )
+    {
+        m_xComponent->removeEventListener( m_xEventListener );
+    }
+    m_xShapes = NULL;
+    m_xEventListener = NULL;
+}
+
+void
+ScVbaShape::removeResource() throw( uno::RuntimeException )
+{
+    if( m_xComponent.is() )
+        m_xComponent->removeEventListener( m_xEventListener );
+    m_xComponent = NULL;
+    m_xShape = NULL;
+    m_xPropertySet = NULL;
 }
 
 sal_Int32 
@@ -242,7 +274,18 @@ ScVbaShape::TextFrame() throw (uno::RuntimeException)
 void SAL_CALL 
 ScVbaShape::Delete() throw (uno::RuntimeException)
 {
+    OGuard aGuard( Application::GetSolarMutex() );
     m_xShapes->remove( m_xShape );
+    SvxShape* pShape = SvxShape::getImplementation( m_xShape );
+    if( pShape )
+    {
+        pShape->dispose();
+        removeResource();
+    }
+    else
+    {
+        removeResource();
+    }
 }
 
 void SAL_CALL 
