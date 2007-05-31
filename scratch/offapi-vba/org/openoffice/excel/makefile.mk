@@ -91,7 +91,10 @@ IDLFILES= XApplication.idl\
 	XAxis.idl\
 	XAxisTitle.idl\
 	XStyle.idl \
+	XStyles.idl \
 	XFormat.idl \
+	XFormatCondition.idl \
+	XFormatConditions.idl \
 	Range.idl\
 
 
