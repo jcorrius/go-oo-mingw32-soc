@@ -32,11 +32,6 @@
  *    MA  02111-1307  USA
  *
  ************************************************************************/
-/*
-#ifndef SC_VBA_FORMAT_CXX
-#define SC_VBA_FORMAT_CXX
-#endif
-*/
 #include "vbaformat.hxx"
 #include <org/openoffice/excel/XStyle.hpp>
 #include <org/openoffice/excel/XlVAlign.hpp>
@@ -342,12 +337,17 @@ ScVbaFormat<Ifc1>::getWrapText(  ) throw (script::BasicErrorException, uno::Runt
 }
 
 template< typename Ifc1 >
-uno::Reference< excel::XBorders > SAL_CALL 
-ScVbaFormat<Ifc1>::Borders(  ) throw (script::BasicErrorException, uno::RuntimeException )
+uno::Any SAL_CALL 
+ScVbaFormat<Ifc1>::Borders( const uno::Any& Index ) throw (script::BasicErrorException, uno::RuntimeException )
 {
-	ScVbaPalette aPalette( getDocShell( mxModel ) );
-			
-	return new ScVbaBorders( thisHelperIface(), ScVbaFormat_BASE::mxContext, uno::Reference< table::XCellRange >( mxPropertySet, uno::UNO_QUERY_THROW ), aPalette );
+	ScVbaPalette aPalette( getDocShell( mxModel ) );	
+	uno::Reference< vba::XCollection > xColl =  new ScVbaBorders( thisHelperIface(), ScVbaFormat_BASE::mxContext, uno::Reference< table::XCellRange >( mxPropertySet, uno::UNO_QUERY_THROW ), aPalette );
+
+	if ( Index.hasValue() )
+	{ 
+		return xColl->Item( Index, uno::Any() );
+	}		
+	return uno::makeAny( xColl );
 }
 
 template< typename Ifc1 >
@@ -780,5 +780,6 @@ ScVbaFormat<Ifc1>::getServiceNames()
 }
 
 template class ScVbaFormat< excel::XStyle >;
+template class ScVbaFormat< excel::XRange >;
 
 

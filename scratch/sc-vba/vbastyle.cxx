@@ -41,15 +41,24 @@ using namespace ::com::sun::star;
 
 static rtl::OUString DISPLAYNAME( RTL_CONSTASCII_USTRINGPARAM("DisplayName") );
 
-uno::Reference< beans::XPropertySet > 
-lcl_getStyleProps( const rtl::OUString& sStyleName, const uno::Reference< frame::XModel >& xModel ) throw ( script::BasicErrorException, uno::RuntimeException )
+
+
+uno::Reference< container::XNameAccess > 
+ScVbaStyle::getStylesNameContainer( const uno::Reference< frame::XModel >& xModel ) throw ( uno::RuntimeException )
 {
 	uno::Reference< style::XStyleFamiliesSupplier > xStyleSupplier( xModel, uno::UNO_QUERY_THROW);
 	uno::Reference< container::XNameAccess > xStylesAccess( xStyleSupplier->getStyleFamilies()->getByName( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "CellStyles" ) ) ), uno::UNO_QUERY_THROW );
+	return xStylesAccess;
+}
+
+uno::Reference< beans::XPropertySet > 
+lcl_getStyleProps( const rtl::OUString& sStyleName, const uno::Reference< frame::XModel >& xModel ) throw ( script::BasicErrorException, uno::RuntimeException )
+{
 	
-	uno::Reference< beans::XPropertySet > xStyleProps( xStylesAccess->getByName( sStyleName ), uno::UNO_QUERY_THROW );	
+	uno::Reference< beans::XPropertySet > xStyleProps( ScVbaStyle::getStylesNameContainer( xModel )->getByName( sStyleName ), uno::UNO_QUERY_THROW );	
 	return xStyleProps;
 }
+
 
 void ScVbaStyle::initialise() throw ( uno::RuntimeException )
 {
@@ -63,13 +72,20 @@ void ScVbaStyle::initialise() throw ( uno::RuntimeException )
 	mxStyle.set( mxPropertySet, uno::UNO_QUERY_THROW );
 	
 	uno::Reference< style::XStyleFamiliesSupplier > xStyleSupplier( mxModel, uno::UNO_QUERY_THROW );
-	mxStyleFamilyNameContainer.set( xStyleSupplier->getStyleFamilies()->getByName( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "CellStyles" ) ) ), uno::UNO_QUERY_THROW );
+	mxStyleFamilyNameContainer.set(  ScVbaStyle::getStylesNameContainer( mxModel ), uno::UNO_QUERY_THROW );
 
 }
 
 ScVbaStyle::ScVbaStyle( const uno::Reference< oo::vba::XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext > & xContext, const rtl::OUString& sStyleName, const uno::Reference< frame::XModel >& _xModel ) throw ( script::BasicErrorException, uno::RuntimeException ) :  ScVbaStyle_BASE( xParent, xContext, lcl_getStyleProps( sStyleName, _xModel ), _xModel, false )
 {
-	initialise();
+	try
+	{
+		initialise();
+	}
+	catch (uno::Exception& e)
+	{
+		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString());
+	}
 }
 
 ScVbaStyle::ScVbaStyle( const uno::Reference< vba::XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext > & xContext, const uno::Reference< beans::XPropertySet >& _xPropertySet, const uno::Reference< frame::XModel >& _xModel ) throw ( script::BasicErrorException, uno::RuntimeException ) : ScVbaStyle_BASE( xParent, xContext, _xPropertySet, _xModel, false )

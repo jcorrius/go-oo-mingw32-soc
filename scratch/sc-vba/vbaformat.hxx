@@ -46,9 +46,6 @@
 #include <com/sun/star/beans/XPropertyState.hpp>
 #include "vbahelperinterface.hxx"
 
-class Dummy
-{
-};
 template< typename Ifc1 >
 class ScVbaFormat : public InheritedHelperInterfaceImpl1< Ifc1 >
 {
@@ -79,7 +76,7 @@ public:
 	 void setAddIndent( const css::uno::Any& _BAddIndent) throw( css::script::BasicErrorException ) { _BAddIndent >>= mbAddIndent; }
 	 css::uno::Any getAddIndent() throw( css::script::BasicErrorException ) { return css::uno::makeAny( mbAddIndent ); }
     	// Interface Methods
-	virtual css::uno::Reference< ::org::openoffice::excel::XBorders > SAL_CALL Borders(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException);;
+	virtual css::uno::Any SAL_CALL Borders( const css::uno::Any& Index ) throw (css::script::BasicErrorException, css::uno::RuntimeException);;
 	virtual css::uno::Reference< ::org::openoffice::excel::XFont > SAL_CALL Font(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException);;
 	virtual css::uno::Reference< ::org::openoffice::excel::XInterior > SAL_CALL Interior(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException);;
 	virtual void SAL_CALL setNumberFormat( const css::uno::Any& NumberFormat ) throw (css::script::BasicErrorException, css::uno::RuntimeException);;

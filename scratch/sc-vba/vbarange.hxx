@@ -59,12 +59,14 @@
 #include <com/sun/star/sheet/XSpreadsheet.hpp>
 #include <com/sun/star/sheet/XSheetCellRangeContainer.hpp>
 
-#include "vbahelperinterface.hxx"
+//#include "vbahelperinterface.hxx"
+#include "vbaformat.hxx"
 
 class ScTableSheetsObj;
 class ScCellRangesBase;
 
-typedef InheritedHelperInterfaceImpl1< oo::excel::XRange >  ScVbaRange_BASE;
+//typedef InheritedHelperInterfaceImpl1< oo::excel::XRange >  ScVbaRange_BASE;
+typedef ScVbaFormat< oo::excel::XRange > ScVbaRange_BASE;
 
 class ArrayVisitor
 {
@@ -132,7 +134,7 @@ public:
 	ScDocShell* getScDocShell();
 
 	virtual ~ScVbaRange();
-
+	virtual css::uno::Reference< oo::vba::XHelperInterface > thisHelperIface() { return this; }
 	bool isSingleCellRange(); 
 
         static css::uno::Reference< css::table::XCellRange > getCellRangeForName( const rtl::OUString& sRangeName, const css::uno::Reference< css::sheet::XSpreadsheet >& xDoc, ScAddress::Convention eConv = ScAddress::CONV_XL_A1 );
@@ -149,12 +151,12 @@ public:
 	virtual ::sal_Int32 SAL_CALL getRow() throw (css::uno::RuntimeException);
 	virtual ::sal_Int32 SAL_CALL getColumn() throw (css::uno::RuntimeException);
 	virtual ::rtl::OUString SAL_CALL getText() throw (css::uno::RuntimeException);
-	virtual void SAL_CALL setNumberFormat( const css::uno::Any& rNumberFormat ) throw (css::uno::RuntimeException);
-	virtual css::uno::Any SAL_CALL getNumberFormat() throw (css::uno::RuntimeException);
-	virtual void SAL_CALL setMergeCells( sal_Bool bMerge ) throw (css::uno::RuntimeException);
-	virtual sal_Bool SAL_CALL getMergeCells() throw (css::uno::RuntimeException);
-	virtual void SAL_CALL setWrapText( const css::uno::Any& bIsWrapped ) throw (css::uno::RuntimeException);
-	virtual css::uno::Any SAL_CALL getWrapText() throw (css::uno::RuntimeException);
+	virtual void SAL_CALL setNumberFormat( const css::uno::Any& rNumberFormat ) throw ( css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual css::uno::Any SAL_CALL getNumberFormat() throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual void SAL_CALL setMergeCells( const css::uno::Any& bMerge ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual css::uno::Any SAL_CALL getMergeCells() throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual void SAL_CALL setWrapText( const css::uno::Any& bIsWrapped ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual css::uno::Any SAL_CALL getWrapText() throw (css::script::BasicErrorException, css::uno::RuntimeException);
 	virtual css::uno::Reference< oo::excel::XRange > SAL_CALL getEntireRow() throw (css::uno::RuntimeException);
 	virtual css::uno::Reference< oo::excel::XRange > SAL_CALL getEntireColumn() throw (css::uno::RuntimeException);
 	virtual css::uno::Reference< oo::excel::XComment > SAL_CALL getComment() throw (css::uno::RuntimeException);
@@ -173,8 +175,8 @@ public:
 	virtual css::uno::Any SAL_CALL getPageBreak() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setPageBreak( const css::uno::Any& _pagebreak ) throw (css::uno::RuntimeException);
 	virtual css::uno::Reference< oo::excel::XValidation > SAL_CALL getValidation() throw (css::uno::RuntimeException);
-	virtual css::uno::Any SAL_CALL getFormulaHidden() throw (css::uno::RuntimeException);
-	virtual void SAL_CALL setFormulaHidden(const css::uno::Any& aHidden) throw (css::uno::RuntimeException);	
+	virtual css::uno::Any SAL_CALL getFormulaHidden() throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual void SAL_CALL setFormulaHidden(const css::uno::Any& aHidden) throw (css::script::BasicErrorException, css::uno::RuntimeException);	
 
 	// Methods
 	sal_Bool IsRows() { return mbIsRows; }
@@ -208,8 +210,8 @@ public:
 	virtual void SAL_CALL Cut( const css::uno::Any& Destination ) throw (css::uno::RuntimeException);
 	virtual css::uno::Reference< oo::excel::XRange > SAL_CALL Resize( const css::uno::Any& RowSize, const css::uno::Any& ColumnSize ) 
 														   throw (css::uno::RuntimeException);
-	virtual css::uno::Reference< oo::excel::XFont > SAL_CALL Font() throw (css::uno::RuntimeException);
-	virtual css::uno::Reference< oo::excel::XInterior > SAL_CALL Interior(  ) throw (css::uno::RuntimeException) ;
+	virtual css::uno::Reference< oo::excel::XFont > SAL_CALL Font() throw ( css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual css::uno::Reference< oo::excel::XInterior > SAL_CALL Interior(  ) throw ( css::script::BasicErrorException, css::uno::RuntimeException) ;
 	virtual css::uno::Reference< oo::excel::XRange > SAL_CALL Range( const css::uno::Any &Cell1, const css::uno::Any &Cell2 ) throw (css::uno::RuntimeException);
 	virtual css::uno::Reference< oo::excel::XRange > Range( const css::uno::Any &Cell1, const css::uno::Any &Cell2, bool bForceUseInpuRangeTab ) throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL getCellRange(  ) throw (css::uno::RuntimeException);
@@ -220,7 +222,7 @@ public:
 	virtual css::uno::Reference< oo::excel::XCharacters > SAL_CALL characters( const css::uno::Any& Start, const css::uno::Any& Length ) throw (css::uno::RuntimeException);
 	virtual void SAL_CALL Delete( const css::uno::Any& Shift ) throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL Areas( const css::uno::Any& ) throw (css::uno::RuntimeException);
-	virtual css::uno::Any SAL_CALL Borders( const css::uno::Any& ) throw (css::uno::RuntimeException);
+	virtual css::uno::Any SAL_CALL Borders( const css::uno::Any& ) throw ( css::script::BasicErrorException, css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL BorderAround( const css::uno::Any& LineStyle, 
                 const css::uno::Any& Weight, const css::uno::Any& ColorIndex, const css::uno::Any& Color ) throw (css::uno::RuntimeException);
     virtual void SAL_CALL TextToColumns( const css::uno::Any& Destination, const css::uno::Any& DataType, const css::uno::Any& TextQualifier,
@@ -245,9 +247,10 @@ public:
 	virtual void SAL_CALL setStyle( const css::uno::Any& _style ) throw (css::uno::RuntimeException);
 	virtual css::uno::Reference< oo::excel::XRange > SAL_CALL Next() throw (css::script::BasicErrorException, css::uno::RuntimeException);
 	virtual css::uno::Reference< oo::excel::XRange > SAL_CALL Previous() throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual void SAL_CALL RemoveSubtotal(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual void SAL_CALL Subtotal( ::sal_Int32 GroupBy, ::sal_Int32 Function, const css::uno::Sequence< ::sal_Int32 >& TotalList, const css::uno::Any& Replace, const css::uno::Any& PageBreaks, const css::uno::Any& SummaryBelowData ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
 	// XEnumerationAccess
 	virtual css::uno::Reference< css::container::XEnumeration > SAL_CALL createEnumeration() throw (css::uno::RuntimeException);
-
 	// XElementAccess
 	virtual css::uno::Type SAL_CALL getElementType() throw (css::uno::RuntimeException)
 	{

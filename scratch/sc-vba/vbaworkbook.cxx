@@ -46,6 +46,7 @@
 #include "vbaworksheets.hxx"
 #include "vbaworkbook.hxx"
 #include "vbawindows.hxx"
+#include "vbastyles.hxx"
 #include "vbahelper.hxx"
 #include <osl/file.hxx>
 #include <stdio.h>
@@ -264,6 +265,18 @@ ScVbaWorkbook::Activate() throw (uno::RuntimeException)
 	uno::Reference< frame::XFrame > xFrame( getModel()->getCurrentController()->getFrame(), uno::UNO_QUERY_THROW );
 	xFrame->activate();
 }	
+
+css::uno::Any SAL_CALL 
+ScVbaWorkbook::Styles( const::uno::Any& Item ) throw (uno::RuntimeException)
+{
+	// quick look and Styles object doesn't seem to have a valid parent
+	// or a least the object browser just shows an object that has no 
+	// variables ( therefore... leave as NULL for now ) 
+	uno::Reference< vba::XCollection > dStyles = new ScVbaStyles( uno::Reference< vba::XHelperInterface >(), mxContext, getModel() );
+	if ( Item.hasValue() )
+		return dStyles->Item( Item, uno::Any() );
+	return uno::makeAny( dStyles );
+}
 
 rtl::OUString& 
 ScVbaWorkbook::getServiceImplName()

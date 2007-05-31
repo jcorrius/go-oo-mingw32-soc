@@ -108,7 +108,11 @@ SLOFILES= \
                 $(SLO)$/vbaaxes.obj \
                 $(SLO)$/vbaaxis.obj \
                 $(SLO)$/vbaformat.obj \
+                $(SLO)$/vbacondition.obj \
+                $(SLO)$/vbaformatcondition.obj \
+                $(SLO)$/vbaformatconditions.obj \
                 $(SLO)$/vbastyle.obj \
+                $(SLO)$/vbastyles.obj \
 		$(SLO)$/service.obj \
  
 
