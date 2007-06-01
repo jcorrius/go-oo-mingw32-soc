@@ -9,7 +9,6 @@ include $(top_srcdir)/Makefile.shared
 EXTRA_DIST = \
 	emacs.el		\
 	MAINTAINERS		\
-	HACKING			\
 	download.in		\
 	Makefile.shared		\
 	intltool-merge.in	\
