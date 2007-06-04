@@ -68,8 +68,8 @@ CellFuncObj::~CellFuncObj() throw()
 const vector<double>& CellFuncObj::getVars() const
 {
     // Does absolutely nothing....
-    vector<double> tmp;
-    return tmp;
+    vector<double> fake;
+    return fake;
 }
 
 void CellFuncObj::setVars(const vector<double>& vars)
