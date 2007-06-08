@@ -41,6 +41,7 @@
 #include <com/sun/star/lang/XServiceInfo.hpp>
 #include<org/openoffice/excel/XlCalculation.hpp>
 #include <com/sun/star/sheet/XCellRangeReferrer.hpp>
+#include <com/sun/star/sheet/XCalculatable.hpp>
 #include <com/sun/star/frame/XLayoutManager.hpp>
 #include <com/sun/star/task/XStatusIndicatorSupplier.hpp>
 #include <com/sun/star/task/XStatusIndicator.hpp>
@@ -60,6 +61,8 @@
 #include "gridwin.hxx"
 #include "vbashape.hxx"
 
+#include <osl/file.hxx>
+
 //start test includes
 #include <sfx2/objsh.hxx>
 #include <sfx2/viewfrm.hxx>
@@ -78,6 +81,13 @@
 
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
+
+// #TODO is this defined somewhere else?
+#if ( defined UNX ) || ( defined OS2 ) //unix
+#define FILE_PATH_SEPERATOR "/"
+#else // windows
+#define FILE_PATH_SEPERATOR "\\"
+#endif 
 
 #define EXCELVERSION "11.0"
 
@@ -99,6 +109,7 @@ ScVbaApplication::ScVbaApplication( uno::Reference<uno::XComponentContext >& xCo
 ScVbaApplication::~ScVbaApplication()
 {
 }
+	
 
 
 uno::Reference< excel::XWorkbook >
@@ -353,7 +364,7 @@ ScVbaApplication::CountA( const uno::Any& arg1 ) throw (uno::RuntimeException)
 }
 
 ::sal_Int32 SAL_CALL 
-ScVbaApplication::getCalculation() throw (css::uno::RuntimeException)
+ScVbaApplication::getCalculation() throw (uno::RuntimeException)
 {
 	uno::Reference<sheet::XCalculatable> xCalc(getCurrentDocument(), uno::UNO_QUERY_THROW);
 	if(xCalc->isAutomaticCalculationEnabled())
@@ -363,7 +374,7 @@ ScVbaApplication::getCalculation() throw (css::uno::RuntimeException)
 }
 
 void SAL_CALL 
-ScVbaApplication::setCalculation( ::sal_Int32 _calculation ) throw (css::uno::RuntimeException)
+ScVbaApplication::setCalculation( ::sal_Int32 _calculation ) throw (uno::RuntimeException)
 {
 	uno::Reference< sheet::XCalculatable > xCalc(getCurrentDocument(), uno::UNO_QUERY_THROW);
 	switch(_calculation)
@@ -387,7 +398,7 @@ ScVbaApplication::Windows( const uno::Any& aIndex  ) throw (uno::RuntimeExceptio
 	return uno::Any( xWindows->Item( aIndex, uno::Any() ) );	
 }
 void SAL_CALL 
-ScVbaApplication::wait( double time ) throw (css::uno::RuntimeException)
+ScVbaApplication::wait( double time ) throw (uno::RuntimeException)
 {
 	StarBASIC* pBasic = SFX_APP()->GetBasic();
 	SFX_APP()->EnterBasicCall();
@@ -622,6 +633,185 @@ ScVbaApplication::setCursor( sal_Int32 _cursor ) throw (uno::RuntimeException)
         }
 	}
 }
+
+// #TODO perhaps we should switch the return type depending of the filter 
+// type, e.g. return Calc for Calc and Excel if its an imported doc
+rtl::OUString SAL_CALL
+ScVbaApplication::getName() throw (uno::RuntimeException)
+{
+	static rtl::OUString appName( RTL_CONSTASCII_USTRINGPARAM("Microsoft Excel" ) );
+	return appName;
+}
+
+// #TODO #FIXME get/setDisplayAlerts are just stub impl 
+void SAL_CALL
+ScVbaApplication::setDisplayAlerts(sal_Bool /*displayAlerts*/) throw (uno::RuntimeException)
+{
+}
+
+sal_Bool SAL_CALL
+ScVbaApplication::getDisplayAlerts() throw (uno::RuntimeException)
+{
+	return sal_True;
+}
+void SAL_CALL
+ScVbaApplication::Calculate() throw(  script::BasicErrorException , uno::RuntimeException )
+{
+	uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY_THROW );
+	uno::Reference< sheet::XCalculatable > xCalculatable( getCurrentDocument(), uno::UNO_QUERY_THROW );
+	xCalculatable->calculateAll();
+}
+
+uno::Reference< beans::XPropertySet > lcl_getPathSettingsService( const uno::Reference< uno::XComponentContext >& xContext ) throw ( uno::RuntimeException )
+{
+	static uno::Reference< beans::XPropertySet >  xPathSettings;
+	if ( !xPathSettings.is() )
+	{
+		uno::Reference< lang::XMultiComponentFactory > xSMgr( xContext->getServiceManager(), uno::UNO_QUERY_THROW );
+		xPathSettings.set( xSMgr->createInstanceWithContext(::rtl::OUString::createFromAscii("com.sun.star.util.PathSettings"), xContext), uno::UNO_QUERY_THROW );
+	}
+	return xPathSettings;
+}
+rtl::OUString ScVbaApplication::getOfficePath( const rtl::OUString& _sPathType ) throw ( uno::RuntimeException )
+{
+	rtl::OUString sRetPath;
+	uno::Reference< beans::XPropertySet > xProps = lcl_getPathSettingsService( mxContext );
+	try
+	{
+		rtl::OUString sUrl;
+	 	xProps->getPropertyValue( _sPathType ) >>= sUrl;
+
+		// if its a list of paths then use the last one
+		sal_Int32 nIndex =  sUrl.lastIndexOf( ';' ) ;
+		if ( nIndex > 0 )
+			sUrl = sUrl.copy( nIndex + 1 ); 	
+		::osl::File::getSystemPathFromFileURL( sUrl, sRetPath );
+	}
+	catch (uno::Exception& e)
+	{
+		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString());    
+	}		
+	return sRetPath;
+}
+void SAL_CALL 
+ScVbaApplication::setDefaultFilePath( const ::rtl::OUString& DefaultFilePath ) throw (script::BasicErrorException, uno::RuntimeException)
+{
+	uno::Reference< beans::XPropertySet > xProps = lcl_getPathSettingsService( mxContext );
+	rtl::OUString aURL;
+	osl::FileBase::getFileURLFromSystemPath( DefaultFilePath, aURL );
+	xProps->setPropertyValue(  rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Work")), uno::makeAny( aURL ) );
+
+	
+}
+
+::rtl::OUString SAL_CALL 
+ScVbaApplication::getDefaultFilePath(  ) throw (script::BasicErrorException, uno::RuntimeException)
+{
+	return getOfficePath( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Work")));
+}
+
+::rtl::OUString SAL_CALL 
+ScVbaApplication::LibraryPath(  ) throw (script::BasicErrorException, uno::RuntimeException)
+{
+	return getOfficePath( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Basic")));
+}
+
+::rtl::OUString SAL_CALL 
+ScVbaApplication::TemplatesPath(  ) throw (script::BasicErrorException, uno::RuntimeException)
+{
+	return getOfficePath( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Template")));
+}
+
+::rtl::OUString SAL_CALL 
+ScVbaApplication::PathSeparator(  ) throw (script::BasicErrorException, uno::RuntimeException)
+{
+	static rtl::OUString sPathSep( RTL_CONSTASCII_USTRINGPARAM( FILE_PATH_SEPERATOR ) );
+	return sPathSep;
+}
+
+uno::Reference< excel::XRange > SAL_CALL 
+ScVbaApplication::Intersect( const uno::Reference< excel::XRange >& Arg1, const uno::Reference< excel::XRange >& Arg2, const uno::Any& Arg3, const uno::Any& Arg4, const uno::Any& Arg5, const uno::Any& Arg6, const uno::Any& Arg7, const uno::Any& Arg8, const uno::Any& Arg9, const uno::Any& Arg10, const uno::Any& Arg11, const uno::Any& Arg12, const uno::Any& Arg13, const uno::Any& Arg14, const uno::Any& Arg15, const uno::Any& Arg16, const uno::Any& Arg17, const uno::Any& Arg18, const uno::Any& Arg19, const uno::Any& Arg20, const uno::Any& Arg21, const uno::Any& Arg22, const uno::Any& Arg23, const uno::Any& Arg24, const uno::Any& Arg25, const uno::Any& Arg26, const uno::Any& Arg27, const uno::Any& Arg28, const uno::Any& Arg29, const uno::Any& Arg30 ) throw (script::BasicErrorException, uno::RuntimeException)
+{
+	std::vector< uno::Reference< excel::XRange > > vRanges;
+	if ( !Arg1.is() || !Arg2.is() )
+		DebugHelper::exception(SbERR_BAD_PARAMETER, rtl::OUString() );
+
+	vRanges.push_back( Arg1 );
+	vRanges.push_back( Arg2 );
+
+	if ( Arg3.hasValue() )
+		vRanges.push_back( uno::Reference< excel::XRange >( Arg3, uno::UNO_QUERY_THROW ) );
+	if ( Arg4.hasValue() )
+		vRanges.push_back( uno::Reference< excel::XRange >( Arg4, uno::UNO_QUERY_THROW ) );
+	if ( Arg5.hasValue() )
+		vRanges.push_back( uno::Reference< excel::XRange >( Arg5, uno::UNO_QUERY_THROW ) );
+	if ( Arg6.hasValue() )
+		vRanges.push_back( uno::Reference< excel::XRange >( Arg6, uno::UNO_QUERY_THROW ) );
+	if ( Arg7.hasValue() )
+		vRanges.push_back( uno::Reference< excel::XRange >( Arg7, uno::UNO_QUERY_THROW ) );
+	if ( Arg8.hasValue() )
+		vRanges.push_back( uno::Reference< excel::XRange >( Arg8, uno::UNO_QUERY_THROW ) );
+	if ( Arg9.hasValue() )
+		vRanges.push_back( uno::Reference< excel::XRange >( Arg9, uno::UNO_QUERY_THROW ) );
+	if ( Arg10.hasValue() )
+		vRanges.push_back( uno::Reference< excel::XRange >( Arg10, uno::UNO_QUERY_THROW ) );
+	if ( Arg11.hasValue() )
+		vRanges.push_back( uno::Reference< excel::XRange >( Arg11, uno::UNO_QUERY_THROW ) );
+	if ( Arg12.hasValue() )
+		vRanges.push_back( uno::Reference< excel::XRange >( Arg12, uno::UNO_QUERY_THROW ) );
+	if ( Arg13.hasValue() )
+		vRanges.push_back( uno::Reference< excel::XRange >( Arg13, uno::UNO_QUERY_THROW ) );
+	if ( Arg14.hasValue() )
+		vRanges.push_back( uno::Reference< excel::XRange >( Arg14, uno::UNO_QUERY_THROW ) );
+	if ( Arg15.hasValue() )
+		vRanges.push_back( uno::Reference< excel::XRange >( Arg15, uno::UNO_QUERY_THROW ) );
+	if ( Arg16.hasValue() )
+		vRanges.push_back( uno::Reference< excel::XRange >( Arg16, uno::UNO_QUERY_THROW ) );
+	if ( Arg17.hasValue() )
+		vRanges.push_back( uno::Reference< excel::XRange >( Arg17, uno::UNO_QUERY_THROW ) );
+	if ( Arg18.hasValue() )
+		vRanges.push_back( uno::Reference< excel::XRange >( Arg18, uno::UNO_QUERY_THROW ) );
+	if ( Arg19.hasValue() )
+		vRanges.push_back( uno::Reference< excel::XRange >( Arg19, uno::UNO_QUERY_THROW ) );
+	if ( Arg20.hasValue() )
+		vRanges.push_back( uno::Reference< excel::XRange >( Arg20, uno::UNO_QUERY_THROW ) );
+	if ( Arg21.hasValue() )
+		vRanges.push_back( uno::Reference< excel::XRange >( Arg21, uno::UNO_QUERY_THROW ) );
+	if ( Arg22.hasValue() )
+		vRanges.push_back( uno::Reference< excel::XRange >( Arg22, uno::UNO_QUERY_THROW ) );
+	if ( Arg23.hasValue() )
+		vRanges.push_back( uno::Reference< excel::XRange >( Arg23, uno::UNO_QUERY_THROW ) );
+	if ( Arg24.hasValue() )
+		vRanges.push_back( uno::Reference< excel::XRange >( Arg24, uno::UNO_QUERY_THROW ) );
+	if ( Arg25.hasValue() )
+		vRanges.push_back( uno::Reference< excel::XRange >( Arg25, uno::UNO_QUERY_THROW ) );
+	if ( Arg26.hasValue() )
+		vRanges.push_back( uno::Reference< excel::XRange >( Arg26, uno::UNO_QUERY_THROW ) );
+	if ( Arg27.hasValue() )
+		vRanges.push_back( uno::Reference< excel::XRange >( Arg27, uno::UNO_QUERY_THROW ) );
+	if ( Arg28.hasValue() )
+		vRanges.push_back( uno::Reference< excel::XRange >( Arg28, uno::UNO_QUERY_THROW ) );
+	if ( Arg29.hasValue() )
+		vRanges.push_back( uno::Reference< excel::XRange >( Arg29, uno::UNO_QUERY_THROW ) );
+	if ( Arg30.hasValue() )
+		vRanges.push_back( uno::Reference< excel::XRange >( Arg30, uno::UNO_QUERY_THROW ) );
+
+	std::vector< uno::Reference< excel::XRange > >::iterator it = vRanges.begin();
+	std::vector< uno::Reference< excel::XRange > >::iterator it_end = vRanges.end();
+
+	uno::Reference< excel::XRange > xRefRange( *it );
+	++it;
+	for ( ; it != it_end; ++it )
+	{
+		ScVbaRange* pRange = dynamic_cast< ScVbaRange * >( xRefRange.get());
+		if ( pRange )
+			xRefRange = pRange->intersect( *it );
+		if ( !xRefRange.is() )
+			return uno::Reference< excel::XRange >();
+	}
+	return xRefRange;
+}
+
 rtl::OUString& 
 ScVbaApplication::getServiceImplName()
 {

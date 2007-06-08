@@ -622,6 +622,88 @@ ContainerUtilities::FieldInList( const uno::Sequence< rtl::OUString >& SearchLis
 	return retvalue;
 
 }
+bool NeedEsc(sal_Unicode cCode)
+{
+	String sEsc(RTL_CONSTASCII_USTRINGPARAM(".^$+\\|{}()"));
+	return (STRING_NOTFOUND != sEsc.Search(cCode));
+}
+
+rtl::OUString VBAToRegexp(const rtl::OUString &rIn)
+{
+	rtl::OUStringBuffer sResult;
+	const sal_Unicode *start = rIn.getStr();
+	const sal_Unicode *end = start + rIn.getLength();
+
+	int seenright = 0;
+
+	sResult.append(static_cast<sal_Unicode>('^'));
+
+	while (start < end) 
+	{
+		switch (*start)
+		{
+			case '?':
+				sResult.append(static_cast<sal_Unicode>('.'));
+				start++;
+				break;
+			case '*':
+				sResult.append(rtl::OUString(RTL_CONSTASCII_USTRINGPARAM(".*")));
+				start++;
+				break;
+			case '#':
+				sResult.append(rtl::OUString(RTL_CONSTASCII_USTRINGPARAM("[0-9]")));
+				start++;
+				break;
+			case '~':
+				sResult.append(static_cast<sal_Unicode>('\\'));
+				sResult.append(*(++start));
+				start++;
+				break;
+				// dump the ~ and escape the next characture
+			case ']':
+				sResult.append(static_cast<sal_Unicode>('\\'));
+				sResult.append(*start++);
+				break;
+			case '[':
+				sResult.append(*start++);
+				seenright = 0;
+				while (start < end && !seenright)
+				{
+					switch (*start)
+					{
+						case '[':
+						case '?':
+						case '*':
+						sResult.append(static_cast<sal_Unicode>('\\'));
+						sResult.append(*start);
+							break;
+						case ']':
+						sResult.append(*start);
+							seenright = 1;
+							break;
+						case '!':
+							sResult.append(static_cast<sal_Unicode>('^'));
+							break;
+						default:
+						if (NeedEsc(*start))
+							sResult.append(static_cast<sal_Unicode>('\\'));
+						sResult.append(*start);
+							break;
+					}
+					start++;
+				}
+				break;
+			default:
+				if (NeedEsc(*start))
+					sResult.append(static_cast<sal_Unicode>('\\'));
+				sResult.append(*start++);
+		}
+	}
+
+	sResult.append(static_cast<sal_Unicode>('$'));
+
+	return sResult.makeStringAndClear( );
+}
 
 } // openoffice
 } //org

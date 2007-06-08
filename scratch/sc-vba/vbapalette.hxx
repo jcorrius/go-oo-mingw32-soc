@@ -48,6 +48,7 @@ public:
 	// if no palette available e.g. because the document doesn't have a 
 	// palette defined then a default palette will be returned.
 	css::uno::Reference< css::container::XIndexAccess > getPalette();
+	static css::uno::Reference< css::container::XIndexAccess > getDefaultPalette();
 };
 
 #endif //SC_VBAPALETTE_HXX

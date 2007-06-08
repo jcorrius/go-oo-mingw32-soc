@@ -266,6 +266,10 @@ ScVbaValidation::Add( const uno::Any& Type, const uno::Any& AlertStyle, const un
 				// #TODO need to correct the ';' delimited formula on get/set
 				break;
 			}
+		case excel::XlDVType::xlValidateWholeNumber:
+			nValType = sheet::ValidationType_WHOLE;
+			xProps->setPropertyValue( STYPE, uno::makeAny(nValType ));	
+			break;		
 		default:
 			throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "unsupported operation..." ) ), uno::Reference< uno::XInterface >() );
 	}

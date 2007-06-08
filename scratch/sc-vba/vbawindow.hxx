@@ -72,6 +72,8 @@ public:
 	virtual void SAL_CALL ScrollWorkbookTabs( const css::uno::Any& Sheets, const css::uno::Any& Position ) throw (css::uno::RuntimeException);
 	virtual void SAL_CALL Activate(  ) throw (css::uno::RuntimeException);
 	virtual void SAL_CALL Close( const css::uno::Any& SaveChanges, const css::uno::Any& FileName, const css::uno::Any& RouteWorkBook ) throw (css::uno::RuntimeException);
+	 virtual css::uno::Reference< oo::excel::XRange > SAL_CALL ActiveCell(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException); 
+	 virtual css::uno::Any SAL_CALL Selection(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException); 
 	// XHelperInterface
 	virtual rtl::OUString& getServiceImplName();
 	virtual css::uno::Sequence<rtl::OUString> getServiceNames();

@@ -443,6 +443,18 @@ ScVbaWindow::ActivePane()
 	return new ScVbaPane( mxContext, m_xViewPane ); 
 }
 
+uno::Reference< excel::XRange > SAL_CALL 
+ScVbaWindow::ActiveCell(  ) throw (script::BasicErrorException, uno::RuntimeException)
+{
+	return ScVbaGlobals::getGlobalsImpl( mxContext )->getApplication()->getActiveCell();
+}
+
+uno::Any SAL_CALL 
+ScVbaWindow::Selection(  ) throw (script::BasicErrorException, uno::RuntimeException)
+{
+	return ScVbaGlobals::getGlobalsImpl( mxContext )->getApplication()->getSelection();
+}
+
 rtl::OUString& 
 ScVbaWindow::getServiceImplName()
 {

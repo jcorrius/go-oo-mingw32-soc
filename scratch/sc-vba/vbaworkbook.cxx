@@ -41,6 +41,7 @@
 #include <com/sun/star/frame/XStorable.hpp>
 #include <com/sun/star/frame/XFrame.hpp>
 #include <com/sun/star/beans/XPropertySet.hpp>
+#include <org/openoffice/excel/XlFileFormat.hpp>
 
 #include "vbaworksheet.hxx"
 #include "vbaworksheets.hxx"
@@ -48,6 +49,7 @@
 #include "vbawindows.hxx"
 #include "vbastyles.hxx"
 #include "vbahelper.hxx"
+#include "vbapalette.hxx"
 #include <osl/file.hxx>
 #include <stdio.h>
 
@@ -82,6 +84,125 @@ public:
 		
 };
 
+uno::Sequence< sal_Int32 > ScVbaWorkbook::ColorData;
+
+void ScVbaWorkbook::initColorData( const uno::Sequence< sal_Int32 >& sColors )
+{
+		const sal_Int32* pSource = sColors.getConstArray();
+		sal_Int32* pDest = ColorData.getArray();
+		const sal_Int32* pEnd = pSource + sColors.getLength();
+		for ( ; pSource != pEnd; ++pSource, ++pDest )
+			*pDest = *pSource;
+}
+
+
+void SAL_CALL 
+ScVbaWorkbook::ResetColors(  ) throw (::script::BasicErrorException, ::uno::RuntimeException)
+{
+		uno::Reference< container::XIndexAccess > xIndexAccess( ScVbaPalette::getDefaultPalette(), uno::UNO_QUERY_THROW );
+		sal_Int32 nLen = xIndexAccess->getCount();
+		ColorData.realloc( nLen );
+	
+		uno::Sequence< sal_Int32 > dDefaultColors( nLen );
+		sal_Int32* pDest = dDefaultColors.getArray();
+		for ( sal_Int32 index=0; index < nLen; ++pDest, ++index )
+			xIndexAccess->getByIndex( index )  >>= (*pDest);
+		initColorData( dDefaultColors );
+}
+
+::uno::Any SAL_CALL 
+ScVbaWorkbook::Colors( const ::uno::Any& Index ) throw (::script::BasicErrorException, ::uno::RuntimeException)
+{
+	uno::Any aRet;
+	if ( Index.getValue() )
+	{
+		sal_Int32 nIndex = 0;
+		Index >>= nIndex;
+		aRet = uno::makeAny( XLRGBToOORGB( ColorData[ --nIndex ] ) );			
+	}
+	else
+		aRet = uno::makeAny( ColorData );
+	return aRet;
+}
+
+::sal_Int32 SAL_CALL 
+ScVbaWorkbook::FileFormat(  ) throw (::script::BasicErrorException, ::uno::RuntimeException)
+{
+        sal_Int32 aFileFormat = 0;
+        rtl::OUString aFilterName;
+        uno::Sequence< beans::PropertyValue > aArgs = getModel()->getArgs();
+
+		// #FIXME - seems suspect should we not walk through the properties
+		// to find the FilterName
+        if (aArgs[0].Name.equalsAscii( "FilterName")) {
+            aArgs[0].Value >>= aFilterName;
+        } else {
+           aArgs[1].Value >>= aFilterName;
+        }
+
+        if (aFilterName.equalsAscii("Text - txt - csv (StarCalc)")) {
+            aFileFormat = excel::XlFileFormat::xlCSV; //xlFileFormat.
+        }
+
+        if (aFilterName.equalsAscii("DBF")) {
+            aFileFormat = excel::XlFileFormat::xlDBF4;
+        }
+
+        if (aFilterName.equalsAscii("DIF")) {
+            aFileFormat = excel::XlFileFormat::xlDIF;
+        }
+
+        if (aFilterName.equalsAscii("Lotus")) {
+            aFileFormat = excel::XlFileFormat::xlWK3;
+        }
+
+        if (aFilterName.equalsAscii("MS Excel 4.0")) {
+            aFileFormat = excel::XlFileFormat::xlExcel4Workbook;
+        }
+
+        if (aFilterName.equalsAscii("MS Excel 5.0/95")) {
+            aFileFormat = excel::XlFileFormat::xlExcel5;
+        }
+
+        if (aFilterName.equalsAscii("MS Excel 97")) {
+            aFileFormat = excel::XlFileFormat::xlExcel9795;
+        }
+
+        if (aFilterName.equalsAscii("HTML (StarCalc)")) {
+            aFileFormat = excel::XlFileFormat::xlHtml;
+        }
+
+        if (aFilterName.equalsAscii("calc_StarOffice_XML_Calc_Template")) {
+            aFileFormat = excel::XlFileFormat::xlTemplate;
+        }
+
+        if (aFilterName.equalsAscii("StarOffice XML (Calc)")) {
+            aFileFormat = excel::XlFileFormat::xlWorkbookNormal;
+        }
+        if (aFilterName.equalsAscii("calc8")) {
+            aFileFormat = excel::XlFileFormat::xlWorkbookNormal;
+        }
+
+        return aFileFormat;
+}
+
+ScVbaWorkbook::ScVbaWorkbook( 	const css::uno::Reference< oo::vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext) :ScVbaWorkbook_BASE( xParent, xContext ), mxModel(NULL)
+{
+	//#FIXME this persists the color data per office instance and
+	// not per workbook instance, need to hook the data into XModel
+	// ( e.g. we already store the imported palette in there )
+	// so we should,
+	// a) make the class that does that a service
+	// b) make that service implement XIndexContainer
+	if ( !ColorData.getLength() )
+		ResetColors();
+}
+
+ScVbaWorkbook::ScVbaWorkbook( 	const css::uno::Reference< oo::vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, css::uno::Reference< css::frame::XModel > xModel ) : ScVbaWorkbook_BASE( xParent, xContext ),  mxModel( xModel ) 
+{ 
+	if ( !ColorData.getLength() )
+		ResetColors();
+}
 
 ::rtl::OUString
 ScVbaWorkbook::getName() throw (uno::RuntimeException)

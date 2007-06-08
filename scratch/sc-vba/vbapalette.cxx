@@ -91,6 +91,12 @@ public:
 };
 
 uno::Reference< container::XIndexAccess >
+ScVbaPalette::getDefaultPalette()
+{
+	return new DefaultPalette();
+}
+
+uno::Reference< container::XIndexAccess >
 ScVbaPalette::getPalette()
 {
 	uno::Reference< container::XIndexAccess > xIndex;

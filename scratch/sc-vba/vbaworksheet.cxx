@@ -720,11 +720,24 @@ ScVbaWorksheet::getControlShape( const ::rtl::OUString& sName )
     return uno::Any();
 }
 
+
 rtl::OUString& 
 ScVbaWorksheet::getServiceImplName()
 {
 	static rtl::OUString sImplName( RTL_CONSTASCII_USTRINGPARAM("ScVbaWorksheet") );
 	return sImplName;
+}
+void SAL_CALL 
+ScVbaWorksheet::setEnableCalculation( ::sal_Bool bEnableCalculation ) throw ( script::BasicErrorException, uno::RuntimeException)
+{
+	uno::Reference <sheet::XCalculatable> xCalculatable(getModel(), uno::UNO_QUERY_THROW);
+        xCalculatable->enableAutomaticCalculation( bEnableCalculation);	
+}
+::sal_Bool SAL_CALL 
+ScVbaWorksheet::getEnableCalculation(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException)
+{
+	uno::Reference <sheet::XCalculatable> xCalculatable(getModel(), uno::UNO_QUERY_THROW);
+	return xCalculatable->isAutomaticCalculationEnabled();
 }
 
 uno::Sequence< rtl::OUString > 

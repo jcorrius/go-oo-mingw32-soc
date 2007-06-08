@@ -123,7 +123,6 @@ class ScVbaRange : public ScVbaRange_BASE
 	void groupUnGroup( bool bUnGroup = false ) throw ( css::script::BasicErrorException, css::uno::RuntimeException );
 	css::uno::Reference< oo::excel::XRange > PreviousNext( bool bIsPrevious );
 	css::uno::Reference< oo::excel::XRange > SpecialCellsImpl( sal_Int32 nType, const css::uno::Any& _oValue) throw ( css::script::BasicErrorException );
-
 		
 public:
 	ScVbaRange( const css::uno::Reference< oo::vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::table::XCellRange >& xRange, sal_Bool bIsRows = false, sal_Bool bIsColumns = false ) throw ( css::lang::IllegalArgumentException );
@@ -136,7 +135,7 @@ public:
 	virtual ~ScVbaRange();
 	virtual css::uno::Reference< oo::vba::XHelperInterface > thisHelperIface() { return this; }
 	bool isSingleCellRange(); 
-
+	css::uno::Reference< oo::excel::XRange > intersect( const css::uno::Reference< oo::excel::XRange >& xRange ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
         static css::uno::Reference< css::table::XCellRange > getCellRangeForName( const rtl::OUString& sRangeName, const css::uno::Reference< css::sheet::XSpreadsheet >& xDoc, ScAddress::Convention eConv = ScAddress::CONV_XL_A1 );
     // Attributes
 	virtual css::uno::Any SAL_CALL getValue() throw (css::uno::RuntimeException);
@@ -147,7 +146,7 @@ public:
 	virtual void   SAL_CALL setFormulaArray(const css::uno::Any& rFormula) throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL getFormulaR1C1() throw (css::uno::RuntimeException);
 	virtual void   SAL_CALL setFormulaR1C1( const css::uno::Any &rFormula ) throw (css::uno::RuntimeException);
-	virtual double SAL_CALL getCount() throw (css::uno::RuntimeException);
+	virtual ::sal_Int32 SAL_CALL getCount() throw (css::uno::RuntimeException);
 	virtual ::sal_Int32 SAL_CALL getRow() throw (css::uno::RuntimeException);
 	virtual ::sal_Int32 SAL_CALL getColumn() throw (css::uno::RuntimeException);
 	virtual ::rtl::OUString SAL_CALL getText() throw (css::uno::RuntimeException);
@@ -177,7 +176,6 @@ public:
 	virtual css::uno::Reference< oo::excel::XValidation > SAL_CALL getValidation() throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL getFormulaHidden() throw (css::script::BasicErrorException, css::uno::RuntimeException);
 	virtual void SAL_CALL setFormulaHidden(const css::uno::Any& aHidden) throw (css::script::BasicErrorException, css::uno::RuntimeException);	
-
 	// Methods
 	sal_Bool IsRows() { return mbIsRows; }
 	sal_Bool IsColumns() { return mbIsColumns; }

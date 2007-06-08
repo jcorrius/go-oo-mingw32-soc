@@ -46,13 +46,15 @@ typedef InheritedHelperInterfaceImpl1< oo::excel::XWorkbook > ScVbaWorkbook_BASE
 class ScVbaWorkbook : public ScVbaWorkbook_BASE
 {
 	css::uno::Reference< css::frame::XModel > mxModel;
+	static css::uno::Sequence< sal_Int32 > ColorData;
+	void initColorData( const css::uno::Sequence< sal_Int32 >& sColors );
 protected:
 
 	virtual css::uno::Reference< css::frame::XModel >  getModel() { return mxModel; }
-	ScVbaWorkbook( 	const css::uno::Reference< oo::vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext) :ScVbaWorkbook_BASE( xParent, xContext ), mxModel(NULL){}
+	ScVbaWorkbook( 	const css::uno::Reference< oo::vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext);
 public:
 	ScVbaWorkbook( 	const css::uno::Reference< oo::vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext,
-			css::uno::Reference< css::frame::XModel > xModel ) : ScVbaWorkbook_BASE( xParent, xContext ),  mxModel( xModel ) {}
+			css::uno::Reference< css::frame::XModel > xModel );
 	virtual ~ScVbaWorkbook() {}
 
     // Attributes
@@ -77,6 +79,9 @@ public:
 	virtual void SAL_CALL Activate() throw (css::uno::RuntimeException);
 
 	virtual css::uno::Any SAL_CALL Styles( const css::uno::Any& Item ) throw (css::uno::RuntimeException);
+	virtual void SAL_CALL ResetColors(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual css::uno::Any SAL_CALL Colors( const css::uno::Any& Index ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual ::sal_Int32 SAL_CALL FileFormat(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
 	// XHelperInterface
 	virtual rtl::OUString& getServiceImplName();
 	virtual css::uno::Sequence<rtl::OUString> getServiceNames();
