@@ -1122,14 +1122,14 @@ bnu::matrix< std::string > Matrix::getDisplayElements(
     return mxElements;
 }
 
-void Matrix::print( size_t nPrec, size_t nColSpace ) const
+void Matrix::print(size_t prec, size_t colspace) const
 {
     using std::string;
     using std::ostringstream;
 
     // Print to stdout
     ostringstream os;
-    const bnu::matrix< string > mElements = getDisplayElements( nPrec, nColSpace, false );
+    const bnu::matrix< string > mElements = getDisplayElements(prec, colspace, false);
     for ( unsigned int i = 0; i < mElements.size1(); ++i )
     {
         os << "|";
@@ -1138,7 +1138,7 @@ void Matrix::print( size_t nPrec, size_t nColSpace ) const
             std::string s = mElements( i, j );
             os << s;
         }
-        os << repeatString( " ", nColSpace ) << "|" << endl;
+        os << repeatString( " ", colspace ) << "|" << endl;
     }
     cout << os.str();
 }

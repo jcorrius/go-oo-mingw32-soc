@@ -23,7 +23,8 @@ SLOFILES =  \
 	$(SLO)$/nlpmodel.obj \
 	$(SLO)$/nlpqnewton.obj \
 	$(SLO)$/lpsolve.obj \
-	$(SLO)$/exception.obj
+	$(SLO)$/exception.obj \
+	$(SLO)$/lineareqn.obj
 
 # --- Tagets -------------------------------------------------------
 

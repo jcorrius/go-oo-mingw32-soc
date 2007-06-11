@@ -7,7 +7,8 @@ CPPFLAGS=-I$(PRJ)/source/inc
 CXXFLAGS=-Wall -Os
 
 TESTFILES = \
-	matrix
+	matrix \
+	polyeqnsolver
 
 build: $(TESTFILES)
 
@@ -22,6 +23,15 @@ matrix_test.o: $(NUMERIC_PATH)/matrix_test.cxx
 
 matrix: matrix.o matrix_test.o global.o
 	$(CXX) -o $@ matrix.o matrix_test.o global.o
+
+polyeqnsolver.o: $(NUMERIC_PATH)/polyeqnsolver.cxx
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ -c $<
+
+polyeqnsolver_test.o: $(NUMERIC_PATH)/polyeqnsolver_test.cxx
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ -c $<
+
+polyeqnsolver: polyeqnsolver.o polyeqnsolver_test.o matrix.o global.o
+	$(CXX) -o $@ polyeqnsolver.o polyeqnsolver_test.o matrix.o global.o
 
 clean:
 	rm -f *.o $(TESTFILES)

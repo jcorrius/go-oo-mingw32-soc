@@ -21,7 +21,7 @@
  *    You should have received a copy of the GNU Lesser General Public
  *    License along with this library; if not, write to the Free Software
  *    Foundation, Inc., 59 Temple Place, Suite 330, Boston,
- *    MA  02111-1307  USAKohei\u3055\u3093\u306esolver\u306f\u3069\u3046\u306a\u3063\u3066\u307e\u3059\u304b\u3002
+ *    MA  02111-1307  USA
  *
  ************************************************************************/
 

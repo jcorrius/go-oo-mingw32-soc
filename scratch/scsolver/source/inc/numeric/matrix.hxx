@@ -26,8 +26,8 @@
  ************************************************************************/
 
 
-#ifndef _MATRIX_HXX_
-#define _MATRIX_HXX_
+#ifndef _SCSOLVER_NUMERIC_MATRIX_HXX_
+#define _SCSOLVER_NUMERIC_MATRIX_HXX_
 
 #include <boost/numeric/ublas/matrix.hpp>
 #include <vector>
@@ -95,7 +95,14 @@ public:
     double& getValue(size_t row, size_t col);
     void setValue(size_t row, size_t col, double val);
     ::boost::numeric::ublas::matrix< ::std::string > getDisplayElements(int prec, size_t colspace, bool formula) const;    
-    void print( size_t = 2, size_t = 1 ) const;
+
+    /**
+     * Print the content of a matrix in to standard output. 
+     *  
+     * @param prec desired precision
+     * @param colspace desired column space for each column.
+     */
+    void print(size_t prec = 2, size_t colspace = 1) const;
     
     Matrix getColumn(size_t col);
     Matrix getRow(size_t row);
@@ -105,9 +112,6 @@ public:
     void deleteRow( size_t );
     void deleteRows( const std::vector<size_t>& );
     
-    const Matrix adj() const;
-    double cofactor( size_t, size_t ) const;
-
     /**
      * This method calculates the determinant of a square matrix. 
      * It throws a NonSquareMatrix exception of the matrix being 
@@ -158,7 +162,8 @@ public:
     bool operator!=( const Matrix& ) const;
     
 private:
-
+    const Matrix adj() const;
+    double cofactor( size_t, size_t ) const;
     void maybeExpand(size_t row, size_t col);
     void throwIfEmpty() const;
 
