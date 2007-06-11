@@ -649,8 +649,14 @@ ScVbaWorksheet::hasMethod( const ::rtl::OUString& /*aName*/ ) throw (uno::Runtim
 ::sal_Bool SAL_CALL 
 ScVbaWorksheet::hasProperty( const ::rtl::OUString& aName ) throw (uno::RuntimeException)
 {
-	if ( getControl( aName ).hasValue() )
-		return sal_True;
+	try
+	{
+		if ( getControl( aName ).hasValue() )
+			return sal_True;
+	}
+	catch( uno::Exception& e )
+	{
+	}
 	return sal_False;
 }
 uno::Any 
