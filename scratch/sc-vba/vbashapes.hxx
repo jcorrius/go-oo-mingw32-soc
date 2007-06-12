@@ -51,6 +51,7 @@ class ScVbaShapes : public ScVbaShapes_BASE
 private: 
     css::uno::Reference< css::drawing::XShapes > m_xShapes;
     css::uno::Reference< css::drawing::XDrawPage > m_xDrawPage;
+    sal_Int32 m_nNewShapeCount;
 protected:
     virtual css::uno::Any getItemByStringIndex( const rtl::OUString& sIndex ) throw (css::uno::RuntimeException);
 	virtual rtl::OUString& getServiceImplName();
@@ -61,8 +62,15 @@ protected:
     virtual css::uno::Reference< css::drawing::XShapes > getShapeByIndex( sal_Int32  nIndex ) throw (css::uno::RuntimeException);
     virtual css::uno::Reference< css::drawing::XShapes > getShapesByNames( css::uno::Sequence< rtl::OUString > sArray ) throw (css::uno::RuntimeException);
     virtual css::uno::Reference< css::drawing::XShapes > getShapesByIndex( css::uno::Sequence< sal_Int16 > nArray ) throw (css::uno::RuntimeException);
+    css::uno::Reference< css::drawing::XShape > createShape( rtl::OUString service ) throw (css::uno::RuntimeException);
+    css::uno::Any AddRectangle( sal_Int32 startX, sal_Int32 startY, sal_Int32 nLineWidth, sal_Int32 nLineHeight, css::uno::Any aRange ) throw (css::uno::RuntimeException);
+    css::uno::Any AddEllipse( sal_Int32 startX, sal_Int32 startY, sal_Int32 nLineWidth, sal_Int32 nLineHeight, css::uno::Any aRange ) throw (css::uno::RuntimeException);
+    rtl::OUString createName( rtl::OUString sName );
+    css::awt::Point calculateTopLeftMargin( css::uno::Reference< oo::vba::XHelperInterface > xDocument );
 public:
     ScVbaShapes( const css::uno::Reference< oo::vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::container::XIndexAccess > xShapes );
+    static void setDefaultShapeProperties( css::uno::Reference< css::drawing::XShape > xShape ) throw (css::uno::RuntimeException);
+    static void setShape_NameProperty( css::uno::Reference< css::drawing::XShape > xShape, rtl::OUString sName );
     //XEnumerationAccess
     virtual css::uno::Type SAL_CALL getElementType() throw (css::uno::RuntimeException);
     virtual css::uno::Reference< css::container::XEnumeration > SAL_CALL createEnumeration() throw (css::uno::RuntimeException);
@@ -74,6 +82,9 @@ public:
     virtual sal_Int32 SAL_CALL Count() throw (css::uno::RuntimeException);
     virtual void SAL_CALL SelectAll() throw (css::uno::RuntimeException);
     virtual css::uno::Reference< oo::msforms::XShapeRange > SAL_CALL Range( const css::uno::Any& shapes ) throw (css::uno::RuntimeException);
+    //helper::calc
+    virtual css::uno::Any SAL_CALL AddLine( sal_Int32 StartX, sal_Int32 StartY, sal_Int32 endX, sal_Int32 endY ) throw (css::uno::RuntimeException);
+    virtual css::uno::Any SAL_CALL AddShape( sal_Int32 ShapeType, sal_Int32 StartX, sal_Int32 StartY, sal_Int32 endX, sal_Int32 endY ) throw (css::uno::RuntimeException);
 };
 
 #endif//SC_VBA_SHAPES_HXX

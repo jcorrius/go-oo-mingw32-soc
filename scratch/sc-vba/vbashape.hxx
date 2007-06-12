@@ -21,6 +21,7 @@ private:
     css::uno::Reference< css::lang::XEventListener > m_xEventListener;
     css::uno::Reference< css::lang::XComponent > m_xComponent;
     sal_Int32 m_nType;
+    css::uno::Any m_aRange;
 protected:
 	virtual rtl::OUString& getServiceImplName();
 	virtual css::uno::Sequence<rtl::OUString> getServiceNames();
@@ -29,6 +30,8 @@ public:
     ScVbaShape( const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::drawing::XShape > xShape ) throw ( css::lang::IllegalArgumentException );
     virtual ~ScVbaShape();
     virtual void removeResource() throw( css::uno::RuntimeException );
+    css::uno::Any getRange() { return m_aRange; };
+    void setRange( css::uno::Any aRange ) { m_aRange = aRange; };
 
     static sal_Int32 getType( const css::uno::Reference< css::drawing::XShape > xShape ) throw (css::uno::RuntimeException);
 
