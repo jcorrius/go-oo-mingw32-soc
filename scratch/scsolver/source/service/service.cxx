@@ -206,10 +206,12 @@ sal_Bool SolverImpl::solveModel()
 
 void SolverImpl::initLocale()
 {
+#ifndef SCSOLVER_UNO_COMPONENT
 	rtl::OString aModName( "scsolver" );
 	aModName += rtl::OString::valueOf( sal_Int32( SUPD ) );
 
 	m_pResMgr = ResMgr::CreateResMgr( aModName.getStr(), m_eLocale );
+#endif
 }
 
 ResMgr* SolverImpl::getResMgr()
@@ -225,7 +227,7 @@ rtl::OUString SolverImpl::getResStr( int resid )
 	if ( pResMgr )
 		return rtl::OUString( String( ResId( resid, *getResMgr() ) ) );
 	
-	return rtl::OUString();
+	return rtl::OUString::createFromAscii("Test");
 }
 
 // XLocalizable

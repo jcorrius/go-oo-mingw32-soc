@@ -34,6 +34,16 @@
 
 #define SCSOLVER_DEBUG 1
 
+#ifdef SCSOLVER_UNO_COMPONENT
+
+#ifndef OSL_ASSERT
+#define OSL_ASSERT assert
+#endif
+
+#else
+#include <osl/diagnose.h>
+#endif
+
 namespace {
 
 //---------------------------------------------------------------------------

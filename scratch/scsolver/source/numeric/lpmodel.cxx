@@ -25,7 +25,6 @@
  *
  ************************************************************************/
 
-#include <osl/diagnose.h>
 
 #include "numeric/lpmodel.hxx"
 #include "numeric/lpbase.hxx"

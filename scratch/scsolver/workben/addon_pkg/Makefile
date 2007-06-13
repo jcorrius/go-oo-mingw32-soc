@@ -1,25 +1,26 @@
 TARGET=scsolver.uno
 
-BASEDIR=../..
-SRCDIR=$(BASEDIR)/source
-SLVDIR=../../../solver/680/unxlngi6.pro
-IDLDIR=$(BASEDIR)/idl/org/openoffice/sc/solver
+SCSOLVERDIR=../..
+SRCDIR=$(SCSOLVERDIR)/source
+OOOBASEDIR=$(SCSOLVERDIR)/../../build/current
+SLVDIR=$(OOOBASEDIR)/solver/680/unxlngi6.pro
 
 DEBUG=
 LDFLAGS= -lsal -lcppuhelpergcc3 -lcppu -lstlport_gcc $(DEBUG)
-CXXCPP=-I$(SLVDIR)/inc -I$(SRCDIR)/inc -I.
-CXX_DEFINES=-DUNX -DGCC -DLINUX -DCPPU_ENV=gcc3 -DHAVE_GCC_VISIBILITY_FEATURE
+CXXCPP=-I$(SLVDIR)/inc -I$(SLVDIR)/inc/offuh -I$(SRCDIR)/inc -I.
+CXX_DEFINES= \
+	-DUNX -DGCC -DLINUX -DCPPU_ENV=gcc3 -DHAVE_GCC_VISIBILITY_FEATURE \
+	-DSCSOLVER_UNO_COMPONENT
+
 CXX_SHARED_FLAGS=-fPIC -fno-common -export-dynamic -fvisibility=hidden
-
-#LIBLPSOLVE=$(SLVDIR)/lib/liblpsolve55.a
-#CXX_SHARED_FLAGS=-fPIC -fno-common -export-dynamic
-
-LIBLPSOLVE=../external/lp_solve_5.5/lpsolve55/liblpsolve55.a
-
+LIBLPSOLVE=$(SLVDIR)/lib/liblpsolve55.a
 CPPFLAGS=-DDEBUG -Wall -Os -mtune=pentium3
 
 BINDIR=$(SLVDIR)/bin
 OBJDIR=./obj
+SRVDIR=$(SRCDIR)/service
+UIDIR=$(SRCDIR)/ui
+TOOLDIR=$(SRCDIR)/tool
 
 HEADER= \
 	$(SRCDIR)/inc/tool/timer.hxx \
@@ -56,48 +57,50 @@ HEADER= \
 	$(SRCDIR)/inc/nlpbuilder.hxx
 
 OBJFILES= \
-	$(OBJDIR)/matrix.o \
-	$(OBJDIR)/lpbase.o \
-	$(OBJDIR)/lpmodel.o \
-	$(OBJDIR)/lpsimplex.o \
-	$(OBJDIR)/lpsolve.o \
-	$(OBJDIR)/nlpqnewton.o \
-	$(OBJDIR)/nlpbase.o \
-	$(OBJDIR)/nlpmodel.o \
-	$(OBJDIR)/diff.o \
-	$(OBJDIR)/funcobj.o \
-	$(OBJDIR)/service.o \
+	$(OBJDIR)/optiondlg.o \
 	$(OBJDIR)/basedlg.o \
+	$(OBJDIR)/unoglobal.o \
+	$(OBJDIR)/xcalc.o \
+	$(OBJDIR)/option.o \
 	$(OBJDIR)/baselistener.o \
 	$(OBJDIR)/dialog.o \
-	$(OBJDIR)/global.o \
-	$(OBJDIR)/listener.o \
 	$(OBJDIR)/lpbuilder.o \
+	$(OBJDIR)/listener.o \
+	$(OBJDIR)/unohelper.o \
 	$(OBJDIR)/msgdlg.o \
 	$(OBJDIR)/solvemodel.o \
-	$(OBJDIR)/unoglobal.o \
-	$(OBJDIR)/unohelper.o \
-	$(OBJDIR)/xcalc.o	
+	$(OBJDIR)/nlpbuilder.o \
+	$(OBJDIR)/timer.o \
+	$(OBJDIR)/global.o \
+	$(OBJDIR)/service.o
+
+NUMERIC_OBJFILES = \
+	$(OBJDIR)/diff.o \
+	$(OBJDIR)/exception.o \
+	$(OBJDIR)/matrix.o \
+	$(OBJDIR)/funcobj.o \
+	$(OBJDIR)/lpsolve.o \
+	$(OBJDIR)/lpbase.o \
+	$(OBJDIR)/lpmodel.o \
+	$(OBJDIR)/cellfuncobj.o \
+	$(OBJDIR)/nlpmodel.o \
+	$(OBJDIR)/nlpbase.o \
+	$(OBJDIR)/nlpqnewton.o
 
 XCUFILES = Addons.xcu ProtocolHandler.xcu
 
-all: $(OBJFILES)
+all: pre $(TARGET).zip
 
-#all: $(TARGET).zip
-
-idlc:
-	export LD_LIBRARY_PATH=$(SLVDIR)/lib && \
-	$(BINDIR)/idlc -O. -I$(SLVDIR)/idl -I$(BASEDIR)/idl $(IDLFILES)
-
-preprocess: idlc
-	export LD_LIBRARY_PATH=$(SLVDIR)/lib && \
-	$(BINDIR)/regmerge $(TARGET).rdb /UCR $(URDFILES) && \
-	$(BINDIR)/cppumaker -BUCR -Torg.openoffice.sc.solver.XLpAlgorithm -Torg.openoffice.sc.solver.XLpModel $(BINDIR)/types.rdb $(TARGET).rdb
+pre:
+	mkdir $(OBJDIR) 2> /dev/null || /bin/true
 
 #----------------------------------------------------------------------------
-# Numeric
+# numeric
 
 NUMDIR=$(SRCDIR)/numeric
+
+$(OBJDIR)/numeric.a: pre $(NUMERIC_OBJFILES)
+	$(AR) r $@ $(NUMERIC_OBJFILES)
 
 $(OBJDIR)/funcobj.o: $(HEADER) $(NUMDIR)/funcobj.cxx
 	$(CXX) $(CPPFLAGS) $(CXXCPP) $(CXX_DEFINES) $(CPP_LIBS) \
@@ -119,11 +122,15 @@ $(OBJDIR)/lpmodel.o: $(HEADER) $(NUMDIR)/lpmodel.cxx
 	$(CXX) $(CPPFLAGS) $(CXXCPP) $(CXX_DEFINES) $(CPP_LIBS) \
 	-o $@ $(CXX_SHARED_FLAGS) -c $(NUMDIR)/lpmodel.cxx
 
+$(OBJDIR)/cellfuncobj.o: $(HEADER) $(NUMDIR)/cellfuncobj.cxx
+	$(CXX) $(CPPFLAGS) $(CXXCPP) $(CXX_DEFINES) $(CPP_LIBS) \
+	-o $@ $(CXX_SHARED_FLAGS) -c $(NUMDIR)/cellfuncobj.cxx
+
 $(OBJDIR)/lpsimplex.o: $(HEADER) $(NUMDIR)/lpsimplex.cxx
 	$(CXX) $(CPPFLAGS) $(CXXCPP) $(CXX_DEFINES) $(CPP_LIBS) \
 	-o $@ $(CXX_SHARED_FLAGS) -c $(NUMDIR)/lpsimplex.cxx
 
-$(OBJDIR)/lpsolve.o: preprocess $(HEADER) $(NUMDIR)/lpsolve.cxx
+$(OBJDIR)/lpsolve.o: $(HEADER) $(NUMDIR)/lpsolve.cxx
 	$(CXX) $(CPPFLAGS) $(CXXCPP) $(CXX_DEFINES) $(CPP_LIBS) \
 	-o $@ $(CXX_SHARED_FLAGS) -c $(NUMDIR)/lpsolve.cxx
 
@@ -139,21 +146,19 @@ $(OBJDIR)/nlpqnewton.o: $(HEADER) $(NUMDIR)/nlpqnewton.cxx
 	$(CXX) $(CPPFLAGS) $(CXXCPP) $(CXX_DEFINES) $(CPP_LIBS) \
 	-o $@ $(CXX_SHARED_FLAGS) -c $(NUMDIR)/nlpqnewton.cxx
 
+$(OBJDIR)/exception.o: $(HEADER) $(NUMDIR)/exception.cxx
+	$(CXX) $(CPPFLAGS) $(CXXCPP) $(CXX_DEFINES) $(CPP_LIBS) \
+	-o $@ $(CXX_SHARED_FLAGS) -c $(NUMDIR)/exception.cxx
+
+$(OBJDIR)/scsolver.a: pre $(OBJFILES)
+	$(AR) r $@ $(OBJFILES)
 
 #----------------------------------------------------------------------------
-# Service
-
-SRVDIR=$(SRCDIR)/service
+# scsolver
 
 $(OBJDIR)/service.o: $(HEADER) $(SRVDIR)/service.cxx
 	$(CXX) $(CPPFLAGS) $(CXXCPP) $(CXX_DEFINES) $(CPP_LIBS) \
 	-o $@ $(CXX_SHARED_FLAGS) -c $(SRVDIR)/service.cxx
-
-
-#----------------------------------------------------------------------------
-# UI
-
-UIDIR=$(SRCDIR)/ui
 
 $(OBJDIR)/basedlg.o: $(HEADER) $(UIDIR)/basedlg.cxx
 	$(CXX) $(CPPFLAGS) $(CXXCPP) $(CXX_DEFINES) $(CPP_LIBS) \
@@ -167,9 +172,17 @@ $(OBJDIR)/dialog.o: $(HEADER) $(UIDIR)/dialog.cxx
 	$(CXX) $(CPPFLAGS) $(CXXCPP) $(CXX_DEFINES) $(CPP_LIBS) \
 	-o $@ $(CXX_SHARED_FLAGS) -c $(UIDIR)/dialog.cxx
 
-$(OBJDIR)/global.o: $(HEADER) $(UIDIR)/global.cxx
+$(OBJDIR)/optiondlg.o: $(HEADER) $(UIDIR)/optiondlg.cxx
 	$(CXX) $(CPPFLAGS) $(CXXCPP) $(CXX_DEFINES) $(CPP_LIBS) \
-	-o $@ $(CXX_SHARED_FLAGS) -c $(UIDIR)/global.cxx
+	-o $@ $(CXX_SHARED_FLAGS) -c $(UIDIR)/optiondlg.cxx
+
+$(OBJDIR)/option.o: $(HEADER) $(UIDIR)/option.cxx
+	$(CXX) $(CPPFLAGS) $(CXXCPP) $(CXX_DEFINES) $(CPP_LIBS) \
+	-o $@ $(CXX_SHARED_FLAGS) -c $(UIDIR)/option.cxx
+
+$(OBJDIR)/global.o: $(HEADER) $(TOOLDIR)/global.cxx
+	$(CXX) $(CPPFLAGS) $(CXXCPP) $(CXX_DEFINES) $(CPP_LIBS) \
+	-o $@ $(CXX_SHARED_FLAGS) -c $(TOOLDIR)/global.cxx
 
 $(OBJDIR)/listener.o: $(HEADER) $(UIDIR)/listener.cxx
 	$(CXX) $(CPPFLAGS) $(CXXCPP) $(CXX_DEFINES) $(CPP_LIBS) \
@@ -178,6 +191,10 @@ $(OBJDIR)/listener.o: $(HEADER) $(UIDIR)/listener.cxx
 $(OBJDIR)/lpbuilder.o: $(HEADER) $(UIDIR)/lpbuilder.cxx
 	$(CXX) $(CPPFLAGS) $(CXXCPP) $(CXX_DEFINES) $(CPP_LIBS) \
 	-o $@ $(CXX_SHARED_FLAGS) -c $(UIDIR)/lpbuilder.cxx
+
+$(OBJDIR)/nlpbuilder.o: $(HEADER) $(UIDIR)/nlpbuilder.cxx
+	$(CXX) $(CPPFLAGS) $(CXXCPP) $(CXX_DEFINES) $(CPP_LIBS) \
+	-o $@ $(CXX_SHARED_FLAGS) -c $(UIDIR)/nlpbuilder.cxx
 
 $(OBJDIR)/msgdlg.o: $(HEADER) $(UIDIR)/msgdlg.cxx
 	$(CXX) $(CPPFLAGS) $(CXXCPP) $(CXX_DEFINES) $(CPP_LIBS) \
@@ -199,24 +216,27 @@ $(OBJDIR)/xcalc.o: $(HEADER) $(UIDIR)/xcalc.cxx
 	$(CXX) $(CPPFLAGS) $(CXXCPP) $(CXX_DEFINES) $(CPP_LIBS) \
 	-o $@ $(CXX_SHARED_FLAGS) -c $(UIDIR)/xcalc.cxx
 
+$(OBJDIR)/timer.o: $(HEADER) $(TOOLDIR)/timer.cxx
+	$(CXX) $(CPPFLAGS) $(CXXCPP) $(CXX_DEFINES) $(CPP_LIBS) \
+	-o $@ $(CXX_SHARED_FLAGS) -c $(TOOLDIR)/timer.cxx
 
 #----------------------------------------------------------------------------
 # Misc
 
-$(TARGET).zip: $(TARGET).so
-	zip -j $@ $< $(TARGET).rdb $(XCUFILES)
+$(TARGET).zip: pre $(OBJDIR)/$(TARGET).so
+	zip -j $@ $< $(OBJDIR)/$(TARGET).rdb $(XCUFILES)
 
-$(TARGET).so: $(OBJFILES)
+$(OBJDIR)/$(TARGET).so: $(NUMERIC_OBJFILES) $(OBJFILES)
 	export LD_LIBRARY_PATH=$(SLVDIR)/lib && \
-	$(CXX) -shared -Wl,-soname,$@ -o $@ -lc $(OBJFILES) $(LIBLPSOLVE) && \
- 	$(BINDIR)/regcomp -register -r $(TARGET).rdb -c $@
+	$(CXX) -shared -Wl,-soname,$@ -o $@ -lc $(NUMERIC_OBJFILES) $(OBJFILES) && \
+ 	$(BINDIR)/regcomp -register -r $(OBJDIR)/$(TARGET).rdb -c $@
 
 regview:
 	$(BINDIR)/regview $(TARGET).rdb
 
 clean:
-	rm -f $(OBJFILES)
+	rm -rf $(OBJDIR)
 	
 distclean: clean
-	rm -f $(TARGET).* *~ 
+	rm -f $(TARGET).zip
 
