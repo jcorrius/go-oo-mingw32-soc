@@ -1,6 +1,11 @@
 --- tools/source/generic/fract.cxx	2006-09-27 12:50:16.000000000 +0200
-+++ tools/source/generic/fract.cxx	2007-06-13 01:59:10.000000000 +0200
-@@ -517,7 +517,6 @@ Fraction& Fraction::operator /= ( const 
++++ tools/source/generic/fract.cxx	2007-06-13 15:28:43.000000000 +0200
+@@ -513,11 +513,10 @@ Fraction& Fraction::operator /= ( const 
+ |*
+ |*    Beschreibung      FRACT.SDW
+ |*    Ersterstellung    JOE 17.09.95
+-|*    Letzte Aenderung  JOE 17.09.95
++|*    Letzte Aenderung  kendy 2007-06-13
  |*
  *************************************************************************/
  
@@ -8,56 +13,95 @@
  // Fehlerbehaftetes Kuerzen einer Fraction.
  // nSignificantBits gibt an, wieviele signifikante Binaerstellen
  // in Zaehler/Nenner mindestens erhalten bleiben sollen.
-@@ -528,6 +527,29 @@ Fraction& Fraction::operator /= ( const 
+@@ -528,61 +527,93 @@ Fraction& Fraction::operator /= ( const 
  // = ca.  1.007812499
  // Nach ReduceInaccurate( 8 ) wird daraus 1/1.
  
-+static int NumberOfBits( unsigned long nNum )
+-void Fraction::ReduceInaccurate( unsigned nSignificantBits )
++const char clz_table[32] =
+ {
+-    if ( !nNumerator || !nDenominator )
+-        return;
++    32,  1, 23,  2, 29, 24, 14,  3,
++    30, 27, 25, 18, 20, 15, 10,  4,
++    31, 22, 28, 13, 26, 17, 19,  9,
++    21, 12, 16,  8, 11,  7,  6,  5
++};
++
++static int impl_NumberOfBits( unsigned long nNum )
 +{
++    sal_uInt32 nConst = 0x7DCD629;
++
 +    if ( nNum == 0 )
 +        return 0;
-+
-+    // get it to form like 0000001111111111b
-+#if SAL_TYPES_SIZEOFLONG == 8
-+    nNum |= ( nNum >> 32 );
-+#endif
-+    nNum |= ( nNum >> 16 );
-+    nNum |= ( nNum >>  8 );
-+    nNum |= ( nNum >>  4 );
-+    nNum |= ( nNum >>  2 );
-+
-+    // TODO replace with a lookup in a table
-+    // (constant algorithm - it's possible ;-))
-+    int nCount = 0;
-+    for ( ; nNum > 0; ++nCount )
-+        nNum >>= 1;
-+
-+    return nCount;
-+}
-+
- void Fraction::ReduceInaccurate( unsigned nSignificantBits )
- {
-     if ( !nNumerator || !nDenominator )
-@@ -536,36 +558,29 @@ void Fraction::ReduceInaccurate( unsigne
-     // Zaehler und Nenner auf den Stack fuer schnelleren Zugriff
-     unsigned long nMul;
-     unsigned long nDiv;
+ 
+-    // Zaehler und Nenner auf den Stack fuer schnelleren Zugriff
+-    unsigned long nMul;
+-    unsigned long nDiv;
 -    BOOL   bNeg;
-+    sal_Bool bNeg;
-     if ( nNumerator >= 0 )
+-    if ( nNumerator >= 0 )
++    // Get it to form like 0000001111111111b
++    nNum |= ( nNum >>  1 );
++    nNum |= ( nNum >>  2 );
++    nNum |= ( nNum >>  4 );
++    nNum |= ( nNum >>  8 );
++    nNum |= ( nNum >> 16 );
++
++    sal_uInt32 nNumber;
++    int nBonus = 0;
++
++#if SAL_TYPES_SIZEOFLONG == 4
++    nNumber = nNum;
++#elif SAL_TYPES_SIZEOFLONG == 8
++    nNum |= ( nNum >> 32 );
++
++    if ( nNum & 0x80000000 )
      {
-         nMul = (unsigned long)nNumerator;
+-        nMul = (unsigned long)nNumerator;
 -        bNeg = FALSE;
-+        bNeg = sal_False;
++        nNumber = sal_uInt32( nNum >> 32 );
++        nBonus = 32;
++
++        if ( nNumber == 0 )
++            return 32;
      }
      else
-     {
-         nMul = (unsigned long)(-nNumerator);
+-    {
+-        nMul = (unsigned long)(-nNumerator);
 -        bNeg = TRUE;
-+        bNeg = sal_True;
-     }
+-    }
 -    nDiv=(unsigned long)nDenominator;
-+    nDiv = (unsigned long)nDenominator;
++        nNumber = sal_uInt32( nNum & 0xFFFFFFFF );
++#else
++#error "Unknown size of long!"
++#endif
++
++    // De facto shift of nConst using multiplication
++    nNumber = nConst + ( nConst * nNumber );
++
++    // 5-bit window indexes the result
++    return ( clz_table[nNumber >> 27] ) + nBonus;
++}
++
++void Fraction::ReduceInaccurate( unsigned nSignificantBits )
++{
++    if ( !nNumerator || !nDenominator )
++        return;
++
++    // Count with unsigned longs only
++    sal_Bool bNeg = ( nNumerator < 0 );
++    unsigned long nMul = (unsigned long)( bNeg? -nNumerator: nNumerator );
++    unsigned long nDiv = (unsigned long)( nDenominator );
++
++    // How much bits can we lose?
++    int nMulBitsToLose = Max( ( impl_NumberOfBits( nMul ) - int( nSignificantBits ) ), 0 );
++    int nDivBitsToLose = Max( ( impl_NumberOfBits( nDiv ) - int( nSignificantBits ) ), 0 );
++
++    int nToLose = Min( nMulBitsToLose, nDivBitsToLose );
++
++    // Remove the bits
++    nMul >>= nToLose;
++    nDiv >>= nToLose;
  
 -    unsigned long a=nMul; unsigned nMulZ=0; // Fuehrende Nullen zaehlen
 -    while (a<0x00800000) { nMulZ+=8; a<<=8; }
@@ -76,25 +120,18 @@
 -    int nWeg=Min(nMulWeg,nDivWeg);
 -    nMul>>=nWeg;
 -    nDiv>>=nWeg;
-+    // How much bits can we lose?
-+    int nMulBitsToLose = Max( ( NumberOfBits( nMul ) - int( nSignificantBits ) ), 0 );
-+    int nDivBitsToLose = Max( ( NumberOfBits( nDiv ) - int( nSignificantBits ) ), 0 );
-+
-+    int nToLose = Min( nMulBitsToLose, nDivBitsToLose );
-+
-+    // Remove the bits
-+    nMul >>= nToLose;
-+    nDiv >>= nToLose;
-+    
      if ( !nMul || !nDiv )
      {
-         DBG_ERROR( "Oups, beim kuerzen einer Fraction hat sich Joe verrechnet." );
-@@ -573,12 +588,13 @@ void Fraction::ReduceInaccurate( unsigne
+-        DBG_ERROR( "Oups, beim kuerzen einer Fraction hat sich Joe verrechnet." );
++        // Return without reduction
++        DBG_ERROR( "Oops, we reduced too much..." );
+         return;
      }
  
-     // Nun noch kuerzen ueber GGT
+-    // Nun noch kuerzen ueber GGT
 -    long n1=GetGGT( nMul, nDiv );
 -    if ( n1!=1 )
++    // Reduce
 +    long n1 = GetGGT( nMul, nDiv );
 +    if ( n1 != 1 )
      {
@@ -103,7 +140,12 @@
 +        nMul /= n1;
 +        nDiv /= n1;
      }
+-    if ( !bNeg )
+-        nNumerator = (long)nMul;
+-    else
+-        nNumerator = -(long)nMul;
 +
-     if ( !bNeg )
-         nNumerator = (long)nMul;
-     else
++    nNumerator = bNeg? -long( nMul ): long( nMul );
+     nDenominator = nDiv;
+ }
+ 
