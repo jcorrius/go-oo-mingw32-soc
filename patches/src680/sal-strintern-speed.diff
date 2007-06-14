@@ -1,0 +1,240 @@
+Index: sal/rtl/source/hash.cxx
+===================================================================
+RCS file: /cvs/porting/sal/rtl/source/hash.cxx,v
+retrieving revision 1.3
+diff -u -r1.3 hash.cxx
+--- sal/rtl/source/hash.cxx	19 Apr 2007 11:56:36 -0000	1.3
++++ sal/rtl/source/hash.cxx	14 Jun 2007 15:28:41 -0000
+@@ -1,3 +1,4 @@
++#include <stdio.h>
+ /*************************************************************************
+  *
+  *  OpenOffice.org - a multi-platform office productivity suite
+@@ -34,15 +35,17 @@
+  ************************************************************************/
+ 
+ // MARKER(update_precomp.py): autogen include statement, do not remove
+-#include "precompiled_sal.hxx"
+-
+-#ifndef INCLUDED_RTL_ALLOCATOR_HXX
+-#include "rtl/allocator.hxx"
+-#endif
++// #include "precompiled_sal.hxx"
+ 
+ #include "hash.h"
+ #include "strimp.h"
++#include <osl/diagnose.h>
+ 
++#if 0
++
++#ifndef INCLUDED_RTL_ALLOCATOR_HXX
++#include "rtl/allocator.hxx"
++#endif
+ 
+ #include <hash_set>
+ 
+@@ -121,3 +124,204 @@
+ {
+     pHash->erase(pString);
+ }
++
++#else
++
++// --------------------------- start here ---------------------------
++
++struct StringHashTableImpl {
++    sal_uInt32    nEntries;
++    sal_uInt32    nSize;
++    rtl_uString **pData;
++};
++
++// Better / smaller / faster hash set ....
++
++// TODO: add bottom bit-set list terminator to string list
++
++static sal_uInt32
++getNextSize (sal_uInt32 nSize)
++{
++    return nSize * 2;
++}
++
++static sal_uInt32
++hashString (rtl_uString *pString)
++{
++    return (sal_uInt32) rtl_ustr_hashCode_WithLength (pString->buffer,
++                                                      pString->length);
++}
++
++StringHashTable *
++rtl_str_hash_new (sal_uInt32 nSize)
++{
++    StringHashTable *pHash = (StringHashTable *)malloc (sizeof (StringHashTable));
++
++    pHash->nEntries = 0;
++    pHash->nSize = getNextSize (nSize);
++    pHash->pData = (rtl_uString **) calloc (sizeof (rtl_uString *), pHash->nSize);
++
++    return pHash;
++}
++
++static void
++rtl_str_hash_insert_nonequal (StringHashTable   *pHash,
++                              rtl_uString       *pString)
++{
++    sal_uInt32  nHash = hashString (pString);
++    sal_uInt32  n;
++    rtl_uString *pHashStr;
++
++    n = nHash % pHash->nSize;
++    while ((pHashStr = pHash->pData[n]) != NULL) {
++        n++;
++        if (n >= pHash->nSize)
++            n = 0;
++    }
++    pHash->pData[n] = pString;
++}
++
++static void
++rtl_str_hash_resize (StringHashTable  *pHash,
++                     sal_uInt32        nNewSize)
++{
++    sal_uInt32 i;
++    StringHashTable *pNewHash;
++
++    OSL_ASSERT (nNewSize > pHash->nEntries);
++//    fprintf (stderr, "Newsize %d entries %d\n",
++//             (int)nNewSize, (int)pHash->nEntries);
++    
++    pNewHash = rtl_str_hash_new (nNewSize);
++
++    for (i = 0; i < pHash->nSize; i++)
++    {
++        if (pHash->pData[i] != NULL)
++            rtl_str_hash_insert_nonequal (pNewHash, pHash->pData[i]);
++    }
++    pNewHash->nEntries = pHash->nEntries;
++    free (pHash->pData);
++    *pHash = *pNewHash;
++    pNewHash->pData = NULL;
++    rtl_str_hash_free (pNewHash);
++//    fprintf (stderr, "resize hash to %d\n", (int)nNewSize);
++}
++
++void
++rtl_str_hash_free (StringHashTable *pHash)
++{
++    if (!pHash)
++        return;
++    if (pHash->pData)
++        free (pHash->pData);
++    free (pHash);
++}
++
++static int
++compareEqual (rtl_uString *pStringA, rtl_uString *pStringB)
++{
++    if (pStringA == pStringB)
++        return 1;
++    if (pStringA->length != pStringB->length)
++        return 0;
++    return !rtl_ustr_compare_WithLength( pStringA->buffer, pStringA->length,
++                                         pStringB->buffer, pStringB->length);
++}
++
++rtl_uString *
++rtl_str_hash_intern (StringHashTable   *pHash,
++                     rtl_uString       *pString,
++                     int                can_return)
++{
++    sal_uInt32  nHash = hashString (pString);
++    sal_uInt32  n;
++    rtl_uString *pHashStr;
++
++    // Should we resize ?
++    if (pHash->nEntries >= pHash->nSize/2)
++        rtl_str_hash_resize (pHash, getNextSize(pHash->nSize));
++
++    n = nHash % pHash->nSize;
++    while ((pHashStr = pHash->pData[n]) != NULL) {
++        if (compareEqual (pHashStr, pString))
++        {
++            rtl_uString_acquire (pHashStr);
++            return pHashStr;
++        }
++        n++;
++        if (n >= pHash->nSize)
++            n = 0;
++    }
++
++    if (!can_return)
++    {
++        rtl_uString *pCopy = NULL;
++        rtl_uString_newFromString( &pCopy, pString );
++        pString = pCopy;
++        if (!pString)
++            return NULL;
++    }
++
++    if (!SAL_STRING_IS_STATIC (pString))
++        pString->refCount |= SAL_STRING_INTERN_FLAG;
++    pHash->pData[n] = pString;
++    pHash->nEntries++;
++
++//    fprintf (stderr, "hash insert %d\n", pHash->nEntries);
++
++    return pString;
++}
++
++void
++rtl_str_hash_remove (StringHashTable   *pHash,
++                     rtl_uString       *pString)
++{
++    sal_uInt32   n;
++    sal_uInt32   nHash = hashString (pString);
++    rtl_uString *pHashStr;
++
++    n = nHash % pHash->nSize;
++    while ((pHashStr = pHash->pData[n]) != NULL) {
++        if (compareEqual (pHashStr, pString))
++            break;
++        n++;
++        if (n >= pHash->nSize)
++            n = 0;
++    }
++    OSL_ASSERT (pHash->pData[n] != 0);
++    if (pHash->pData[n] == NULL)
++    {
++        fprintf (stderr, "hash remove non-existent entity\n");
++        return;
++    }
++    pHash->pData[n++] = NULL;
++    pHash->nEntries--;
++
++//    fprintf (stderr, "hash remove %d\n", pHash->nEntries);
++
++    while ((pHashStr = pHash->pData[n]) != NULL) {
++        pHash->pData[n] = NULL;
++        // FIXME: rather unsophisticated and N^2 in chain-length
++        rtl_str_hash_insert_nonequal (pHash, pHashStr);
++        n++;
++        if (n >= pHash->nSize)
++            n = 0;
++    }
++    // FIXME: Should we down-size ?
++}
++
++// FIXME - add bottom-bit set to terminate list ...
++
++#endif
++
++// TODO:
++//    consider bucket overlaps:
++//    a a b a a b [ how do we terminate ? ] - just run until the 0 ?
++//    -- any terminator behaves the same ? --
++//    non-null inserts:
++//    3 scenarios: insert & removal & lookup ;-)
++//    insert: [a a ~a  ] -> [a a a ~b]
++//    insert: [a ~a ] -> [ a a ~b ] - ie. merged chains - un-merging ?
++//    [ how do we un-merge ? - re-hashing strings ? ]
++//    if we collide with another chain: need to de-terminate it ?
++
