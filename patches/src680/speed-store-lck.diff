@@ -1,0 +1,94 @@
+diff -u -r ../HEAD/build/src680-m211/store/source/filelckb.cxx store/source/filelckb.cxx
+--- store/source/filelckb.cxx	2007-06-11 11:57:42.000000000 +0100
++++ store/source/filelckb.cxx	2007-06-15 11:43:34.000000000 +0100
+@@ -332,6 +332,8 @@
+ 	 */
+ 	bool isValid (void) const { return (m_hFile != 0); }
+ 
++    bool isWriteable() { return m_bWriteable; }
++
+ 	/** Operation.
+ 	 */
+ 	storeError close (void);
+@@ -630,9 +632,16 @@
+ 	rnDone = 0;
+ 
+ 	// Acquire exclusive access.
+-	osl::MutexGuard aGuard (m_aMutex);
+ 	if (m_pImpl->isValid())
+-		return m_pImpl->readAt (nOffset, pBuffer, nBytes, rnDone);
++    {
++        bool bLock = m_pImpl->isWriteable();
++        if (bLock)
++            m_aMutex.acquire();
++        storeError nErr = m_pImpl->readAt (nOffset, pBuffer, nBytes, rnDone);
++        if (bLock)
++            m_aMutex.release();
++        return nErr;
++    }
+ 	else
+ 		return store_E_InvalidHandle;
+ }
+Only in store/source: filelckb.cxx~
+diff -u -r store/source/storbase.cxx store/source/storbase.cxx
+--- store/source/storbase.cxx	2007-06-11 11:57:42.000000000 +0100
++++ store/source/storbase.cxx	2007-06-15 12:17:13.000000000 +0100
+@@ -1754,13 +1754,14 @@
+  */
+ storeError OStorePageBIOS::load (OStorePageObject& rPage)
+ {
+-	// Acquire exclusive access.
+-	osl::MutexGuard aGuard (m_aMutex);
+-
+ 	// Check precond.
+ 	if (!m_xLockBytes.is())
+ 		return store_E_InvalidAccess;
+ 
++    bool bLock = m_bWriteable;
++    if (bLock) // Acquire exclusive access.
++        m_aMutex.acquire();
++
+ 	// Save PageDescriptor.
+ 	OStorePageData       &rData = rPage.getData();
+ 	OStorePageDescriptor  aDescr (rData.PageHeader ().m_aDescr);
+@@ -1771,7 +1772,7 @@
+ 	{
+ 		// Restore PageDescriptor.
+ 		rData.PageHeader ().m_aDescr = aDescr;
+-		return eErrCode;
++        goto err;
+ 	}
+ 
+ 	// Verify page.
+@@ -1780,7 +1781,7 @@
+ 	{
+ 		// Restore PageDescriptor.
+ 		rData.PageHeader ().m_aDescr = aDescr;
+-		return eErrCode;
++        goto err;
+ 	}
+ 
+ #ifdef OSL_BIGENDIAN
+@@ -1791,13 +1792,20 @@
+ 	// Verify PageDescriptor.
+ 	if (!((aDescr == rData.PageHeader ().m_aDescr) ||
+ 		  (aDescr <= rData.PageHeader ().m_aDescr)    ))
+-		return store_E_InvalidAccess;
++    {
++		eErrCode = store_E_InvalidAccess;
++        goto err;
++    }
+ 
+ 	// Mark page as clean.
+ 	rPage.clean();
+ 
+ 	// Done.
+-	return store_E_None;
++    eErrCode = store_E_None;
++ err:
++    if (bLock) // Release exclusive access.
++        m_aMutex.release();
++    return eErrCode;
+ }
+ 
+ /*
