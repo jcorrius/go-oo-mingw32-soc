@@ -117,7 +117,7 @@ $(OBJDIR)/diff.o: $(HEADER) $(NUMDIR)/diff.cxx
 $(OBJDIR)/lpbase.o: $(HEADER) $(NUMDIR)/lpbase.cxx
 	$(CXX) $(CPPFLAGS) $(CXXCPP) $(CXX_DEFINES) $(CPP_LIBS) \
 	-o $@ $(CXX_SHARED_FLAGS) -c $(NUMDIR)/lpbase.cxx
-	
+
 $(OBJDIR)/lpmodel.o: $(HEADER) $(NUMDIR)/lpmodel.cxx
 	$(CXX) $(CPPFLAGS) $(CXXCPP) $(CXX_DEFINES) $(CPP_LIBS) \
 	-o $@ $(CXX_SHARED_FLAGS) -c $(NUMDIR)/lpmodel.cxx
@@ -236,7 +236,7 @@ regview:
 
 clean:
 	rm -rf $(OBJDIR)
-	
+
 distclean: clean
 	rm -f $(TARGET).zip
 

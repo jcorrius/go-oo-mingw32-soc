@@ -34,6 +34,12 @@ namespace scsolver { namespace numeric {
 
 class Matrix;
 
+class NotEnoughDataPoints : public std::exception 
+{
+public:
+    virtual const char* what() const throw();
+};
+
 struct DataPoint
 {
     double X;
@@ -54,6 +60,8 @@ public:
 
     void addDataPoint(double x, double y);
     const Matrix solve();
+    void clear();
+    size_t size() const;
 
 private:
     ::std::list<DataPoint> m_DataPoints;

@@ -3,7 +3,7 @@ PRJ=../..
 SOURCE_PATH=$(PRJ)/source
 NUMERIC_PATH=$(SOURCE_PATH)/numeric
 
-CPPFLAGS=-I$(PRJ)/source/inc
+CPPFLAGS=-I$(PRJ)/source/inc -DSCSOLVER_UNITTEST
 CXXFLAGS=-Wall -Os
 
 TESTFILES = \

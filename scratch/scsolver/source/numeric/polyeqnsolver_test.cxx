@@ -33,6 +33,8 @@
 using namespace ::scsolver::numeric;
 using namespace ::std;
 
+class TestFailed {};
+
 class PolyEqnSolverTest : public PolyEqnSolver
 {
 public:
@@ -53,6 +55,20 @@ public:
         sol.trans().print(5);
         verifySolution(sol);
         return sol;
+    }
+
+    void clear()
+    {
+        PolyEqnSolver::clear();
+        size_t n = PolyEqnSolver::size();
+        if (n != 0)
+        {
+            fprintf(stdout, "PolyEqnSolverTest::clear: data point size is not zero.\n");fflush(stdout);
+            throw TestFailed();
+        }
+
+        // Don't forget to clear this too.
+        m_DataPoints.clear();
     }
 
 private:
@@ -81,17 +97,67 @@ private:
         if (!deltaCount)
             printf("solution verified\n");
         else
+        {
             printf("delta count = %d\n", deltaCount);
+            throw TestFailed();
+        }
     }
 
     list<DataPoint> m_DataPoints;
 };
 
-int main()
+void runTest()
 {
     PolyEqnSolverTest polySolver;
     polySolver.addDataPoint(1.0, 32.0);
     polySolver.addDataPoint(5.0, 2.0);
     polySolver.addDataPoint(9.0, 10.0);
     polySolver.solve();
+
+    polySolver.clear();
+    polySolver.addDataPoint(0.0, 2.0);
+    polySolver.addDataPoint(2.0, 6.0);
+    polySolver.solve();
+
+    try
+    {
+        polySolver.clear();
+        polySolver.solve();
+        throw TestFailed();
+    }
+    catch( const NotEnoughDataPoints& )
+    {
+        printf("NotEnoughDataPoints exception caught on zero data point (expected).\n");
+    }
+
+    try
+    {
+        polySolver.clear();
+        polySolver.addDataPoint(1.0, 1.0);
+        polySolver.solve();
+        throw TestFailed();
+    }
+    catch( const NotEnoughDataPoints& )
+    {
+        printf("NotEnoughDataPoints exception caught on 1 data point (expected).\n");
+    }
+}
+
+int main()
+{
+    try
+    {
+        runTest();
+    }
+    catch ( const TestFailed& )
+    {
+        printf("***************************\n");
+        printf("*    UNIT TEST FAILED...  *\n");
+        printf("***************************\n");
+        return 1;
+    }
+
+    printf("***************************\n");
+    printf("*    UNIT TEST PASSED!!!  *\n");
+    printf("***************************\n");
 }

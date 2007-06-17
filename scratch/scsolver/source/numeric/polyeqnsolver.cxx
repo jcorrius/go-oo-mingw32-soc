@@ -33,6 +33,11 @@ using namespace std;
 
 namespace scsolver { namespace numeric {
 
+const char* NotEnoughDataPoints::what() const throw()
+{
+    return "not enough data points to solve a polynomial equation (minimum of 2 required)";
+}
+
 DataPoint::DataPoint(double x, double y) :
     X(x), Y(y)
 {
@@ -58,7 +63,7 @@ const Matrix PolyEqnSolver::solve()
     if (nDPSize < 2)
     {
         // We need at least 2 data points to form a polynomial equation.
-        throw MatrixSizeMismatch();
+        throw NotEnoughDataPoints();
     }
 
     Matrix mxRight(nDPSize, nDPSize), mxLeft(nDPSize, 1);
@@ -75,6 +80,16 @@ const Matrix PolyEqnSolver::solve()
     }
 
     return mxRight.inverse() * mxLeft;
+}
+
+void PolyEqnSolver::clear()
+{
+    m_DataPoints.clear();
+}
+
+size_t PolyEqnSolver::size() const
+{
+    return m_DataPoints.size();
 }
 
 }}

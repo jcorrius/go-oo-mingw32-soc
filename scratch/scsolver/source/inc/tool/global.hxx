@@ -34,7 +34,7 @@
 
 #define SCSOLVER_DEBUG 1
 
-#ifdef SCSOLVER_UNO_COMPONENT
+#if defined(SCSOLVER_UNO_COMPONENT) || defined(SCSOLVER_UNITTEST)
 
 #ifndef OSL_ASSERT
 #define OSL_ASSERT assert
