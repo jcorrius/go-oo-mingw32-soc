@@ -92,4 +92,16 @@ size_t PolyEqnSolver::size() const
     return m_DataPoints.size();
 }
 
+//--------------------------------------------------------------------
+
+void getQuadraticPeak(double& x, double& y, const Matrix& coef)
+{
+    // coef = (c, b, a)
+    double a = coef(2, 0);
+    double b = coef(1, 0);
+    double c = coef(0, 0);
+    x = b / (-2.0*a);
+    y = x * x * a + x * b + c;
+}
+
 }}

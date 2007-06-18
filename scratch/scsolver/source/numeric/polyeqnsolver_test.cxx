@@ -28,6 +28,7 @@
 #include "numeric/polyeqnsolver.hxx"
 #include "numeric/matrix.hxx"
 #include <list>
+#include <cmath>
 #include <stdio.h>
 
 using namespace ::scsolver::numeric;
@@ -48,8 +49,14 @@ public:
 
     const Matrix solve()
     {
-        fprintf(stdout, "PolyEqnSolverTest::solve: --------------------\n");fflush(stdout);
+        fprintf(stdout, "PolyEqnSolverTest::solve: ------------------------------\n");
         Matrix sol = PolyEqnSolver::solve();
+
+        if (sol.cols() != 1)
+        {
+            printf("solution must be a single-column matrix.\n");
+            throw TestFailed();
+        }
 
         printf("solution = ");
         sol.trans().print(5);
@@ -63,7 +70,7 @@ public:
         size_t n = PolyEqnSolver::size();
         if (n != 0)
         {
-            fprintf(stdout, "PolyEqnSolverTest::clear: data point size is not zero.\n");fflush(stdout);
+            fprintf(stdout, "PolyEqnSolverTest::clear: data point size is not zero.\n");
             throw TestFailed();
         }
 
@@ -143,11 +150,103 @@ void runTest()
     }
 }
 
+//--------------------------------------------------------------------
+
+class QuadPeakTest
+{
+public:
+    QuadPeakTest()
+    {
+    }
+
+    void set(double a, double b, double c)
+    {
+        m_A = a;
+        m_B = b;
+        m_C = c;
+        Matrix coef(3, 1);
+        coef(0, 0) = m_C;
+        coef(1, 0) = m_B;
+        coef(2, 0) = m_A;
+        getQuadraticPeak(m_X, m_Y, coef);
+        verifyQuadPeak();
+    }
+
+    void print() const
+    {
+        printf("f(x) = %g x^2 ", m_A);
+        if (m_B >= 0.0)
+            printf("+ ");
+        else
+            printf("- ");
+        printf("%g x ", fabs(m_B));
+        if (m_C >= 0.0)
+            printf("+ ");
+        else
+            printf("- ");
+        printf("%g : f(x) peaks at (%g, %g)\n", m_C, m_X, m_Y);
+    }
+
+private:
+
+    double eval(double x) const
+    {
+        return x*x*m_A + x*m_B + m_C;
+    }
+
+    void verifyQuadPeak()
+    {
+        static const double step = 1.0;
+        static const int count = 10;
+
+        double lambda = step;
+        for (int i = 0; i < count; ++i)
+        {
+            double left  = eval(m_X - lambda);
+            double right = eval(m_X + lambda);
+            double delta = fabs(left - right);
+            //printf("  f(%.2f) = %.3f  f(%.2f) = %.3f  (delta = %.4f)\n", m_X - lambda, left, m_X + lambda, right, delta);
+            if (delta/left > 0.00000000000005)
+            {
+                printf("  delta is not zero (%.20f)\n", delta/left);
+                throw TestFailed();
+            }
+
+            lambda += step;
+        }
+        fprintf(stdout, "QuadPeakTest::verifyQuadPeak: verified\n");fflush(stdout);
+    }
+
+    double m_A; // coefficient of the x^2 term
+    double m_B; // coefficient of the x^1 term
+    double m_C; // coefficient of the x^0 term (constant)
+
+    double m_X;
+    double m_Y;
+};
+
+void runQuadPeakTest()
+{
+    QuadPeakTest qpt;
+    for (int a = -8; a < 9; ++a)
+    {
+        for (int b = -4; b < 5; ++b)
+        {
+            for (int c = -10; c < 11; ++c)
+            {
+                qpt.set(a, b, c);
+                qpt.print();
+            }
+        }
+    }
+}
+
 int main()
 {
     try
     {
         runTest();
+        runQuadPeakTest();
     }
     catch ( const TestFailed& )
     {
