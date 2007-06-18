@@ -8,7 +8,8 @@ CXXFLAGS=-Wall -Os
 
 TESTFILES = \
 	matrix \
-	polyeqnsolver
+	polyeqnsolver \
+	quadfitlinesearch
 
 build: $(TESTFILES)
 
@@ -32,6 +33,15 @@ polyeqnsolver_test.o: $(NUMERIC_PATH)/polyeqnsolver_test.cxx
 
 polyeqnsolver: polyeqnsolver.o polyeqnsolver_test.o matrix.o global.o
 	$(CXX) -o $@ polyeqnsolver.o polyeqnsolver_test.o matrix.o global.o
+
+quadfitlinesearch.o: $(NUMERIC_PATH)/quadfitlinesearch.cxx
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ -c $<
+
+quadfitlinesearch_test.o: $(NUMERIC_PATH)/quadfitlinesearch_test.cxx
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ -c $<
+
+quadfitlinesearch: quadfitlinesearch.o quadfitlinesearch_test.o matrix.o global.o
+	$(CXX) -o $@ quadfitlinesearch.o quadfitlinesearch_test.o matrix.o global.o
 
 clean:
 	rm -f *.o $(TESTFILES)
