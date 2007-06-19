@@ -238,9 +238,13 @@ uno::Reference< excel::XRange > lcl_makeXRangeFromSheetCellRanges( const uno::Re
 
 SfxItemSet*  ScVbaRange::getCurrentDataSet( ) throw ( uno::RuntimeException )
 {
-	uno::Reference< uno::XInterface > xIf( mxRange, uno::UNO_QUERY_THROW );
+	uno::Reference< uno::XInterface > xIf;
+	if ( mxRanges.is() )
+		xIf.set( mxRanges, uno::UNO_QUERY_THROW );
+	else 
+		xIf.set( mxRange, uno::UNO_QUERY_THROW );
 	ScCellRangeObj* pUnoCellRange = dynamic_cast< ScCellRangeObj* >( xIf.get() );
-	SfxItemSet* pDataSet = 	pUnoCellRange->GetCurrentDataSet( true );
+	SfxItemSet* pDataSet = 	pUnoCellRange ? pUnoCellRange->GetCurrentDataSet( true ) : NULL ;
 	
 	if ( !pDataSet )
 		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Can't access Itemset for range" ) ), uno::Reference< uno::XInterface >() );
@@ -1734,12 +1738,24 @@ uno::Reference < excel::XFont >
 ScVbaRange::Font() throw ( script::BasicErrorException, uno::RuntimeException)
 {
 	uno::Reference< beans::XPropertySet > xProps(mxRange, ::uno::UNO_QUERY );
-	ScDocument* pDoc = getDocumentFromRange(mxRange);
+	ScDocument* pDoc = getScDocument();
+	if ( mxRange.is() )
+		xProps.set(mxRange, ::uno::UNO_QUERY );
+	else if ( mxRanges.is() )
+		xProps.set(mxRanges, ::uno::UNO_QUERY );
 	if ( !pDoc )
 		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Failed to access document from shell" ) ), uno::Reference< uno::XInterface >() );
 
 	ScVbaPalette aPalette( pDoc->GetDocumentShell() );	
-	return  new ScVbaFont( this, mxContext, aPalette, xProps, getCurrentDataSet() );
+	SfxItemSet* pSet = NULL;
+	try
+	{
+		pSet = getCurrentDataSet();
+	}
+	catch( uno::Exception& ) 
+	{
+	}
+	return  new ScVbaFont( this, mxContext, aPalette, xProps, pSet );
 }
                                                                                                                              
 uno::Reference< excel::XRange >
@@ -2539,9 +2555,7 @@ ScVbaRange::Replace( const ::rtl::OUString& What, const ::rtl::OUString& Replace
 	// sanity check required params
 	if ( !What.getLength() /*|| !Replacement.getLength()*/ )
 		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Range::Replace, missing params" )) , uno::Reference< uno::XInterface >() );
-	OSL_TRACE("*** search expression b4 = %s", rtl::OUStringToOString( What, RTL_TEXTENCODING_UTF8 ).getStr() );
 	rtl::OUString sWhat = VBAToRegexp( What);
-	OSL_TRACE("*** search expression after = %s", rtl::OUStringToOString( sWhat, RTL_TEXTENCODING_UTF8 ).getStr() );
 	// #TODO #FIXME SearchFormat & ReplacesFormat are not processed
 	// What do we do about MatchByte.. we don't seem to support that
 	const SvxSearchItem& globalSearchOptions = ScGlobal::GetSearchItem();
@@ -3431,26 +3445,37 @@ ScVbaRange::getHeight() throw (uno::RuntimeException)
 	return uno::makeAny( nHeight );
 }
 
-awt::Point lcl_getPosition( const uno::Reference< table::XCellRange >& xRange )
+awt::Point 
+ScVbaRange::getPosition() throw ( uno::RuntimeException )
 {
         awt::Point aPoint;
-		uno::Reference< beans::XPropertySet > xProps( xRange, uno::UNO_QUERY_THROW );
-		xProps->getPropertyValue(POSITION) >>= aPoint;
-		return aPoint;
+	uno::Reference< beans::XPropertySet > xProps;
+	if ( mxRange.is() )
+		xProps.set( mxRange, uno::UNO_QUERY_THROW );
+	else
+		xProps.set( mxRanges, uno::UNO_QUERY_THROW );
+	xProps->getPropertyValue(POSITION) >>= aPoint;
+	return aPoint;
 }
 uno::Any SAL_CALL 
 ScVbaRange::getLeft() throw (uno::RuntimeException)
 {
-        awt::Point aPoint = lcl_getPosition( mxRange );
-		return uno::makeAny( lcl_hmmToPoints( aPoint.X ) );
+	// helperapi returns the first ranges left ( and top below )
+	if ( m_Areas->getCount() > 1 )
+		return getArea( 0 )->getLeft();
+        awt::Point aPoint = getPosition();
+	return uno::makeAny( lcl_hmmToPoints( aPoint.X ) );
 }
 
 
 uno::Any SAL_CALL 
 ScVbaRange::getTop() throw (uno::RuntimeException)
-{
-        awt::Point aPoint=lcl_getPosition( mxRange );
-		return uno::makeAny( lcl_hmmToPoints( aPoint.Y ) );
+{		
+	// helperapi returns the first ranges top
+	if ( m_Areas->getCount() > 1 )
+		return getArea( 0 )->getTop();
+        awt::Point aPoint= getPosition();
+	return uno::makeAny( lcl_hmmToPoints( aPoint.Y ) );
 }
 
 uno::Reference< excel::XWorksheet >

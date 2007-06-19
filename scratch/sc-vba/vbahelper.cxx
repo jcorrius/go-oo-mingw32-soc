@@ -628,15 +628,15 @@ bool NeedEsc(sal_Unicode cCode)
 	return (STRING_NOTFOUND != sEsc.Search(cCode));
 }
 
-rtl::OUString VBAToRegexp(const rtl::OUString &rIn)
+rtl::OUString VBAToRegexp(const rtl::OUString &rIn, bool bForLike )
 {
 	rtl::OUStringBuffer sResult;
 	const sal_Unicode *start = rIn.getStr();
 	const sal_Unicode *end = start + rIn.getLength();
 
 	int seenright = 0;
-
-	sResult.append(static_cast<sal_Unicode>('^'));
+	if ( bForLike )
+		sResult.append(static_cast<sal_Unicode>('^'));
 
 	while (start < end) 
 	{
@@ -700,7 +700,8 @@ rtl::OUString VBAToRegexp(const rtl::OUString &rIn)
 		}
 	}
 
-	sResult.append(static_cast<sal_Unicode>('$'));
+	if ( bForLike )
+		sResult.append(static_cast<sal_Unicode>('$'));
 
 	return sResult.makeStringAndClear( );
 }

@@ -82,6 +82,8 @@ public:
     virtual void SAL_CALL setSuperscript( const css::uno::Any& _superscript ) throw (css::uno::RuntimeException);
     virtual css::uno::Any SAL_CALL getName() throw (css::uno::RuntimeException);
     virtual void SAL_CALL setName( const css::uno::Any& _name ) throw (css::uno::RuntimeException);
+    virtual css::uno::Any SAL_CALL getColor() throw (css::uno::RuntimeException) ;
+    virtual void SAL_CALL setColor( const css::uno::Any& _color ) throw (css::uno::RuntimeException) ;
     // XHelperInterface
     virtual rtl::OUString& getServiceImplName();
     virtual css::uno::Sequence<rtl::OUString> getServiceNames();
