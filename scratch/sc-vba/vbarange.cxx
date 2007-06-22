@@ -3311,19 +3311,21 @@ ScVbaRange::getRowHeight() throw (uno::RuntimeException)
 	// range is different from any other then return NULL
 	RangeHelper thisRange( mxRange );	
 	table::CellRangeAddress thisAddress = thisRange.getCellRangeAddressable()->getRangeAddress();
+	
 	sal_Int32 nStartRow = thisAddress.StartRow;
 	sal_Int32 nEndRow = thisAddress.EndRow;
-	double nHeight = 0.0;
+	double nHeight = getCalcRowHeight( thisAddress );
 	// #TODO probably possible to use the SfxItemSet ( and see if
 	//  SFX_ITEM_DONTCARE is set ) to improve performance
-	for ( sal_Int32 nRow = nStartRow ; nRow <= nEndRow; ++nRow )
+	if ( mbIsRows ) 
 	{
-		thisAddress.StartRow = nRow;
-		double nCurHeight = getCalcRowHeight( thisAddress );
-		if ( nRow == nStartRow ) 
-			nHeight =  nCurHeight;
-		if ( nHeight != nCurHeight )
-			return aNULL();
+		for ( sal_Int32 nRow = nStartRow ; nRow <= nEndRow; ++nRow )
+		{
+			thisAddress.StartRow = nRow;
+			double nCurHeight = getCalcRowHeight( thisAddress );
+			if ( nHeight != nCurHeight )
+				return aNULL();
+		}
 	}
 	return uno::makeAny( nHeight );
 }
