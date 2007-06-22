@@ -33,7 +33,7 @@
 #
 #*************************************************************************
 
-PRJ=..$/..$/..$/
+PRJ=..$/..$/..$/..$/
 PRJNAME=sc
 TARGET=testvba
 
@@ -42,6 +42,11 @@ TARGET=testvba
 .IF "$(SOLAR_JAVA)"!=""
 ALLTAR : ANTBUILD  
 
-UNITTEST : $(LOCAL_COMMON_OUT)$/class/TestVBA.class
-	$(PERL) launchTest.pl $(LOCAL_COMMON_OUT)$/class $(OFFICEPATH) $(TESTDOCUMENT) $(OUTPUTDIR)
+TESTDOCUMENT=..$/TestDocuments
+OUTPUTDIR:=..$/$(TARGET)/Logs
+#UNITTEST : $(LOCAL_COMMON_OUT)$/class/TestVBA.class
+UNITTEST : ALLTAR
+	@@-$(MKDIR) $(OUTPUTDIR)
+	$(PERL) launchTest.pl $(LOCAL_COMMON_OUT)$/class $(TESTDOCUMENT) $(OUTPUTDIR)
+
 .ENDIF

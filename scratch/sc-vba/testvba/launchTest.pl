@@ -36,16 +36,18 @@
 use File::Basename;
 
 my $test_class = shift || die 'must provide a ext name';
+my $TESTDOCUMENT = shift || die 'must provide a path to testdocument dirs';
+my $OUTPUTDIR = shift || die 'must provide an output path to deposit logs in';
 
 die "can't access TestClass $test_class/TestVBA.class" unless -f "$test_class/TestVBA.class"; 
-die "can't access officepath \$OFFICEPATH" unless -d $ENV{OFFICEPATH}; 
-die "can't access testdocument \$TESTDOCUMENT" unless -d $ENV{TESTDOCUMENT}; 
-die "testdocument not of the correct structure $ENV{TESTDOCUMENT}/logs/excel" unless -d "$ENV{TESTDOCUMENT}/logs/excel"; 
-die "can't access output dir \$OUTPUTDIR" unless -d $ENV{OUTPUTDIR}; 
+die "can't access officepath env variable \$OFFICEPATH" unless -d $ENV{OFFICEPATH}; 
+die "can't access testdocuments" unless -d $TESTDOCUMENT; 
+die "testdocument not of the correct structure $TESTDOCUMENT/logs/excel" unless -d "$TESTDOCUMENT/logs/excel"; 
+die "can't access output dir" unless -d $OUTPUTDIR; 
 
 
 my $officeclasspath = "$ENV{OFFICEPATH}/program/classes/"; 
 my $classpath = "$officeclasspath/jurt.jar:$officeclasspath/unoil.jar:$officeclasspath/jut.jar:$officeclasspath/juh.jar:$officeclasspath/java_uno.jar:$officeclasspath/ridl.jar:$test_class:$ENV{CLASSPATH}";
 $ENV{CLASSPATH}=$classpath;
 print "classpath $ENV{CLASSPATH}\n";
-my $status = system("java -classpath $ENV{CLASSPATH} TestVBA $ENV{TESTDOCUMENT} $ENV{OUTPUTDIR}" );
+my $status = system("java -classpath $ENV{CLASSPATH} TestVBA $TESTDOCUMENT $OUTPUTDIR" );
