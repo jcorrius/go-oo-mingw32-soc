@@ -1,0 +1,573 @@
+diff -rup /data4/patchCheckBuild/ooo-build/build/src680-m211/basic/inc/basic/sbdef.hxx basic/inc/basic/sbdef.hxx
+--- /data4/patchCheckBuild/ooo-build/build/src680-m211/basic/inc/basic/sbdef.hxx	2007-04-11 13:51:38.000000000 +0100
++++ basic/inc/basic/sbdef.hxx	2007-06-12 11:21:35.000000000 +0100
+@@ -100,6 +100,7 @@ void setBasicWatchMode( bool bOn );
+ 
+ #define SBXID_BASIC			0x6273			// sb: StarBASIC
+ #define	SBXID_BASICMOD		0x6d62			// bm: StarBASIC-Modul
++#define	SBXID_DOCUMENTMOD	0x6d63			// Special document Module
+ #define SBXID_BASICPROP		0x7262			// pr: StarBASIC-Property
+ #define	SBXID_BASICMETHOD	0x6d65          // me: StarBASIC-Methode
+ #define	SBXID_JSCRIPTMOD	0x6a62			// jm: JavaScript-Modul
+diff -rup /data4/patchCheckBuild/ooo-build/build/src680-m211/basic/inc/basic/sbstar.hxx basic/inc/basic/sbstar.hxx
+--- /data4/patchCheckBuild/ooo-build/build/src680-m211/basic/inc/basic/sbstar.hxx	2007-06-21 23:28:02.000000000 +0100
++++ basic/inc/basic/sbstar.hxx	2007-06-13 16:26:38.000000000 +0100
+@@ -94,6 +94,8 @@ private:
+ 	virtual BOOL LoadData( SvStream&, USHORT );
+ 	virtual BOOL StoreData( SvStream& ) const;
+ 
++	SbxArrayRef pVBAArray; 
++	SbxArray* getVBAGlobals( );
+ protected:
+ 
+ 	virtual	BOOL  	ErrorHdl();
+@@ -124,7 +126,7 @@ public:
+ 
+ 	// Compiler-Interface
+ 	SbModule*   	MakeModule( const String& rName, const String& rSrc );
+-    SbModule*   	MakeModule32( const String& rName, const ::rtl::OUString& rSrc );
++    SbModule*   	MakeModule32( const String& rName, const ::rtl::OUString& rSrc, UINT16 nSbxId = SBXID_BASICMOD);
+ 	BOOL			Compile( SbModule* );
+ 	BOOL 			Disassemble( SbModule*, String& rText );
+ 	static void 	Stop();
+@@ -190,7 +192,7 @@ public:
+ 	void 			SetBreakHdl( const Link& r ) { aBreakHdl = r; }
+ 
+     SbxArrayRef		getUnoListeners( void );
+-
++	SbxVariable* VBAFind( const String& rName, SbxClassType t );
+ 	static SbxBase*	FindSBXInCurrentScope( const String& rName );
+ 	static SbxVariable*	FindVarInCurrentScopy
+ 					( const String& rName, USHORT& rStatus );
+diff -rup /data4/patchCheckBuild/ooo-build/build/src680-m211/basic/source/basmgr/basmgr.cxx basic/source/basmgr/basmgr.cxx
+--- /data4/patchCheckBuild/ooo-build/build/src680-m211/basic/source/basmgr/basmgr.cxx	2007-06-21 23:28:02.000000000 +0100
++++ basic/source/basmgr/basmgr.cxx	2007-06-15 00:07:55.000000000 +0100
+@@ -86,6 +86,7 @@
+ #include "sbintern.hxx"
+ #include <sb.hrc>
+ 
++#include <com/sun/star/beans/StringPair.hpp>
+ 
+ #define LIB_SEP			0x01
+ #define LIBINFO_SEP		0x02
+@@ -105,6 +106,7 @@
+ 
+ #include <cppuhelper/implbase1.hxx>
+ 
++using namespace com::sun::star::beans;
+ using namespace com::sun::star::container;
+ using namespace com::sun::star::uno;
+ using namespace com::sun::star::lang;
+@@ -279,9 +281,21 @@ void BasMgrContainerListenerImpl::addLib
+ 		{
+ 			OUString aModuleName = pNames[ j ];
+ 			Any aElement = xLibNameAccess->getByName( aModuleName );
++			StringPair sPair;
+ 			OUString aMod;
+-			aElement >>= aMod;
+-			pLib->MakeModule32( aModuleName, aMod );
++			OUString aModType;
++			if ( aElement >>= sPair )
++			{
++				aModType = sPair.First;
++				aMod = sPair.Second;
++				OSL_TRACE("#1 - aMod");
++				pLib->MakeModule32( aModuleName, aMod, SBXID_DOCUMENTMOD );
++			}
++			else
++			{
++				aElement >>= aMod;
++				pLib->MakeModule32( aModuleName, aMod );
++			}
+ 		}
+ 	}
+ 
+@@ -318,8 +332,17 @@ void SAL_CALL BasMgrContainerListenerImp
+ 	}
+ 	else
+ 	{
++		StringPair sPair;
+ 		OUString aMod;
+-		Event.Element >>= aMod;
++		OUString aModType;
++
++		if ( Event.Element >>= sPair )
++		{
++			aModType = sPair.First;
++			aMod = sPair.Second;
++		}
++		else
++			Event.Element >>= aMod;
+ 
+ 		StarBASIC* pLib = mpMgr->GetLib( maLibName );
+ 		DBG_ASSERT( pLib, "BasMgrContainerListenerImpl::elementInserted: Unknown lib!");
+@@ -328,7 +351,12 @@ void SAL_CALL BasMgrContainerListenerImp
+     		SbModule* pMod = pLib->FindModule( aName );
+             if( !pMod )
+             {
+-			    pLib->MakeModule32( aName, aMod );
++				if ( aModType.getLength() && aModType.equalsAscii( "Document" ) )
++				{
++			    	pLib->MakeModule32( aName, aMod, SBXID_DOCUMENTMOD );
++				}
++				else
++			    	pLib->MakeModule32( aName, aMod );
+ 			    pLib->SetModified( FALSE );
+             }
+ 		}
+diff -rup /data4/patchCheckBuild/ooo-build/build/src680-m211/basic/source/classes/sb.cxx basic/source/classes/sb.cxx
+--- /data4/patchCheckBuild/ooo-build/build/src680-m211/basic/source/classes/sb.cxx	2007-06-21 23:28:04.000000000 +0100
++++ basic/source/classes/sb.cxx	2007-06-13 20:54:19.000000000 +0100
+@@ -66,6 +66,7 @@
+ #include "sbunoobj.hxx"
+ #include "sbjsmeth.hxx"
+ #include "sbjsmod.hxx"
++#include "sbdocmod.hxx"
+ #include "sbintern.hxx"
+ #include "disas.hxx"
+ #include "runtime.hxx"
+@@ -78,6 +79,10 @@
+ #ifndef _VOS_MUTEX_HXX_
+ #include <vos/mutex.hxx>
+ #endif
++#include <com/sun/star/beans/XPropertySet.hpp>
++#include <comphelper/processfactory.hxx>
++using namespace com::sun::star::uno;
++using namespace com::sun::star::beans;
+ 
+ // #pragma SW_SEGMENT_CLASS( SBASIC, SBASIC_CODE )
+ 
+@@ -767,9 +772,15 @@ SbModule* StarBASIC::MakeModule( const S
+ 	return MakeModule32( rName, rSrc );
+ }
+ 
+-SbModule* StarBASIC::MakeModule32( const String& rName, const ::rtl::OUString& rSrc )
++SbModule* StarBASIC::MakeModule32( const String& rName, const ::rtl::OUString& rSrc, UINT16 nSbxId )
+ {
+-	SbModule* p = new SbModule( rName );
++	SbModule* p = NULL;
++
++	if ( nSbxId == SBXID_DOCUMENTMOD)
++		p = new SbDocModule( rName, this );	
++	else
++		p = new SbModule( rName );
++
+ 	p->SetSource32( rSrc );
+ 	p->SetParent( this );
+ 	pModules->Insert( p, pModules->Count() );
+@@ -931,6 +942,12 @@ SbxVariable* StarBASIC::Find( const Stri
+ 		if( pRes )
+ 			pRes->SetFlag( SBX_EXTFOUND );
+ 	}
++/*
++	// Hack for helperapi
++	bool bVBA = SbiRuntime::isVBAEnabled()
++	if ( bVBA && !bDocBasic )
++		return NULL;
++*/
+ 	// Module durchsuchen
+ 	if( !pRes )
+ 	  for( USHORT i = 0; i < pModules->Count(); i++ )
+@@ -1491,6 +1508,65 @@ BOOL StarBASIC::LoadOldModules( SvStream
+ 	return FALSE;
+ }
+ 
++const static String aThisComponent( RTL_CONSTASCII_USTRINGPARAM("ThisComponent") );
++const static String aVBAHook( RTL_CONSTASCII_USTRINGPARAM( "VBAGlobals" ) );
++//  i#i68894# 
++SbxArray* 
++StarBASIC::getVBAGlobals( )
++{
++	if ( !bDocBasic )
++		return NULL; // VBA only valid for Document basic 
++
++	if ( pVBAArray )
++		return pVBAArray;
++
++	Reference < XComponentContext > xCtx;
++	Reference < XPropertySet > xProps(
++
++	::comphelper::getProcessServiceFactory(), UNO_QUERY_THROW );
++
++	Reference< XMultiComponentFactory > xSMgr( xProps, UNO_QUERY_THROW );
++
++	xCtx.set( xProps->getPropertyValue( rtl::OUString( 
++		RTL_CONSTASCII_USTRINGPARAM( "DefaultContext" ))), 
++			UNO_QUERY_THROW );
++	SbUnoObject* dGlobs = new SbUnoObject( aVBAHook , makeAny( xSMgr->createInstanceWithContext( ::rtl::OUString::createFromAscii( "org.openoffice.vba.Globals"), xCtx ) ));
++	Insert( dGlobs );
++
++	SbxVariable *vba = dGlobs->Find( String( RTL_CONSTASCII_USTRINGPARAM("getGlobals") ) , SbxCLASS_DONTCARE );
++
++	if ( vba )
++	{
++		pVBAArray = static_cast<SbxArray *>(vba->GetObject());
++		return pVBAArray;
++	}
++	return NULL;
++}
++
++//  i#i68894# 
++SbxVariable* 
++StarBASIC::VBAFind( const String& rName, SbxClassType t )
++{
++	if( rName == aThisComponent )
++		return NULL;
++
++	SbxArray *pVBAGlobals = getVBAGlobals( );
++	for (USHORT i = 0; pVBAGlobals && i < pVBAGlobals->Count(); i++)
++	{
++		SbxVariable *pElem = pVBAGlobals->Get( i );
++		if (!pElem || !pElem->IsObject())
++			continue;
++		SbxObject *pVba = static_cast<SbxObject *>(pElem->GetObject());
++		SbxVariable *pVbaVar = pVba ? pVba->Find( rName, t ) : NULL;
++		if( pVbaVar )
++		{
++			return pVbaVar;
++		}
++	}
++	return NULL;
++
++}
++
+ 
+ //========================================================================
+ // #118116 Implementation Collection object
+diff -rup /data4/patchCheckBuild/ooo-build/build/src680-m211/basic/source/classes/sbxmod.cxx basic/source/classes/sbxmod.cxx
+--- /data4/patchCheckBuild/ooo-build/build/src680-m211/basic/source/classes/sbxmod.cxx	2007-06-21 23:28:04.000000000 +0100
++++ basic/source/classes/sbxmod.cxx	2007-06-15 00:17:29.000000000 +0100
+@@ -54,6 +54,7 @@
+ #include "sb.hxx"
+ #include <sbjsmeth.hxx>
+ #include "sbjsmod.hxx"
++#include "sbdocmod.hxx"
+ #include "sbintern.hxx"
+ #include "image.hxx"
+ #include "opcodes.hxx"
+@@ -79,7 +80,6 @@
+ #endif
+ 
+ #include <stdio.h>
+-
+ static const String sThisWorkbook( RTL_CONSTASCII_USTRINGPARAM("ThisWorkbook"));
+ 
+ TYPEINIT1(SbModule,SbxObject)
+@@ -88,6 +88,7 @@ TYPEINIT1(SbProperty,SbxProperty)
+ TYPEINIT1(SbProcedureProperty,SbxProperty)
+ TYPEINIT1(SbJScriptModule,SbModule)
+ TYPEINIT1(SbJScriptMethod,SbMethod)
++TYPEINIT1(SbDocModule,SbModule)
+ 
+ SV_DECL_VARARR(SbiBreakpoints,USHORT,4,4)
+ SV_IMPL_VARARR(SbiBreakpoints,USHORT)
+@@ -1877,7 +1878,79 @@ void SyntaxHighlighter::getHighlightPort
+ 	m_pSimpleTokenizer->getHighlightPortions( nLine, rLine, portions );
+ }
+ 
++#include <org/openoffice/vba/XGlobals.hpp>
++#include <com/sun/star/beans/XPropertySet.hpp>
++#include <comphelper/processfactory.hxx>
++com::sun::star::uno::Reference< org::openoffice::vba::XGlobals > getVBAGlob()
++{
++	com::sun::star::uno::Reference < com::sun::star::uno::XComponentContext > xCtx;
++	com::sun::star::uno::Reference < com::sun::star::beans::XPropertySet > xProps( ::comphelper::getProcessServiceFactory(), com::sun::star::uno::UNO_QUERY_THROW );
++
++	com::sun::star::uno::Reference< com::sun::star::lang::XMultiComponentFactory > xSMgr( xProps, com::sun::star::uno::UNO_QUERY_THROW );
++
++	xCtx.set( xProps->getPropertyValue( rtl::OUString( 
++		RTL_CONSTASCII_USTRINGPARAM( "DefaultContext" ))), 
++			com::sun::star::uno::UNO_QUERY_THROW );
++	com::sun::star::uno::Reference< org::openoffice::vba::XGlobals > xGlobs( xSMgr->createInstanceWithContext( ::rtl::OUString::createFromAscii( "org.openoffice.vba.Globals"), xCtx ), com::sun::star::uno::UNO_QUERY_THROW );
++	return xGlobs;
++}
++/////////////////////////////////////////////////////////////////////////
++// Implementation SbJScriptModule (Basic-Modul fuer JavaScript-Sourcen)
++SbDocModule::SbDocModule( const String& rName, StarBASIC* pBasic )
++	:SbModule( rName ), pDocObject( NULL )
++{
++	// uno vba object needs to be passed somewhere externally ( probably to NameContainer ) when creating the module
++		
++	com::sun::star::uno::Reference< org::openoffice::vba::XGlobals > xGlobs = getVBAGlob();
++
++	if ( !rName.EqualsAscii("ThisWorkbook")  )
++	{
++		rtl::OUString ouStrName = rName;
++		OSL_TRACE("Creating sheet object module %s", rtl::OUStringToOString(  ouStrName, RTL_TEXTENCODING_UTF8 ).getStr() );
++		pDocObject = new SbUnoObject( rName, xGlobs->WorkSheets( com::sun::star::uno::makeAny( ouStrName ) ) );
++	}
++	else
++	{
++		// need a factory method ( in idl ) to create the Worksheet
++		// thisWorkbook ( actually this is the key object )
++	}
++}
++/*
++BOOL SbDocModule::LoadData( SvStream&, USHORT )
++{
++	return FALSE;
++}
+ 
++BOOL SbDocModule::StoreData( SvStream& ) const
++{
++	return FALSE;
++}
++*/
++SbxVariable* 
++SbDocModule::Find( const XubString& rName, SbxClassType t )
++{
++	OSL_TRACE("SbObjectModule find for %s", rtl::OUStringToOString(  rName, RTL_TEXTENCODING_UTF8 ).getStr() );
++	SbxVariable* pVar = SbModule::Find( rName, t );
++	if ( !pVar )
++	{
++		OSL_TRACE("Not found in derived module " );
++		if ( !pVar && pDocObject)
++		{
++			pVar = pDocObject->Find( rName, t );
++			// make private
++			if ( pVar )
++			{
++				OSL_TRACE("found in uno (psuedo-base) object" );
++				pVar->SetFlag( SBX_PRIVATE );
++			}
++			else
++				OSL_TRACE("NOT found in uno (psuedo-base) object" );
++		}
++	}
++	else
++		OSL_TRACE("! found in (normal) module " );
++	return pVar;
++}
+ /////////////////////////////////////////////////////////////////////////
+ // Implementation SbJScriptModule (Basic-Modul fuer JavaScript-Sourcen)
+ SbJScriptModule::SbJScriptModule( const String& rName )
+Only in basic/source/inc: sbdocmod.hxx
+diff -rup /data4/patchCheckBuild/ooo-build/build/src680-m211/basic/source/runtime/step2.cxx basic/source/runtime/step2.cxx
+--- /data4/patchCheckBuild/ooo-build/build/src680-m211/basic/source/runtime/step2.cxx	2007-06-21 23:28:02.000000000 +0100
++++ basic/source/runtime/step2.cxx	2007-06-14 23:28:20.000000000 +0100
+@@ -56,57 +56,6 @@ using namespace com::sun::star::lang;
+ 
+ SbxVariable* getVBAConstant( const String& rName );
+ 
+-const static String aThisComponent( RTL_CONSTASCII_USTRINGPARAM("ThisComponent") );
+-const static String aVBAHook( RTL_CONSTASCII_USTRINGPARAM( "VBAGlobals" ) );
+-//  i#i68894# 
+-SbxArray* getVBAGlobals( )
+-{
+-	static SbxArrayRef pArray;
+-	static bool isInitialised = false;
+-	if ( isInitialised )
+-		return pArray;
+-	Reference < XComponentContext > xCtx;
+-	Reference < XPropertySet > xProps(
+-	::comphelper::getProcessServiceFactory(), UNO_QUERY_THROW );
+-	xCtx.set( xProps->getPropertyValue( rtl::OUString( 
+-		RTL_CONSTASCII_USTRINGPARAM( "DefaultContext" ))), 
+-			UNO_QUERY_THROW );
+-	SbUnoObject dGlobs( String( RTL_CONSTASCII_USTRINGPARAM("ExcelGlobals") ), xCtx->getValueByName( ::rtl::OUString::createFromAscii( "/singletons/org.openoffice.vba.theGlobals") ) );
+-
+-	SbxVariable *vba = dGlobs.Find( String( RTL_CONSTASCII_USTRINGPARAM("getGlobals") ) , SbxCLASS_DONTCARE );
+-
+-	if ( vba )
+-	{
+-		pArray = static_cast<SbxArray *>(vba->GetObject());
+-		isInitialised = true;
+-		return pArray;
+-	}
+-	return NULL;
+-}
+-
+-//  i#i68894# 
+-SbxVariable* VBAFind( const String& rName, SbxClassType t )
+-{
+-	if( rName == aThisComponent )
+-		return NULL;
+-
+-	SbxArray *pVBAGlobals = getVBAGlobals( );
+-	for (USHORT i = 0; pVBAGlobals && i < pVBAGlobals->Count(); i++)
+-	{
+-		SbxVariable *pElem = pVBAGlobals->Get( i );
+-		if (!pElem || !pElem->IsObject())
+-			continue;
+-		SbxObject *pVba = static_cast<SbxObject *>(pElem->GetObject());
+-		SbxVariable *pVbaVar = pVba ? pVba->Find( rName, t ) : NULL;
+-		if( pVbaVar )
+-		{
+-			return pVbaVar;
+-		}
+-	}
+-	return NULL;
+-
+-}
+-
+ // Suchen eines Elements
+ // Die Bits im String-ID:
+ // 0x8000 - Argv ist belegt
+@@ -126,6 +75,7 @@ SbxVariable* SbiRuntime::FindElement
+ 		BOOL bFatalError = FALSE;
+ 		SbxDataType t = (SbxDataType) nOp2;
+ 		String aName( pImg->GetString( static_cast<short>( nOp1 & 0x7FFF ) ) );
++		OSL_TRACE("FindElement %s, bLocal %d", rtl::OUStringToOString( aName, RTL_TEXTENCODING_UTF8 ).getStr(), bLocal );
+ 		bool bIsVBAInterOp = SbiRuntime::isVBAEnabled(); 
+ 		// Hacky capture of Evaluate [] syntax
+ 		// this should be tackled I feel at the pcode level
+@@ -177,7 +127,7 @@ SbxVariable* SbiRuntime::FindElement
+ 				if ( bVBAEnabled )
+ 				{
+ 					// Try Find in VBA symbols space
+-					pElem = VBAFind( aName, SbxCLASS_DONTCARE );
++					pElem = rBasic.VBAFind( aName, SbxCLASS_DONTCARE );
+ 					if ( pElem )
+ 						bSetName = false; // don't overwrite uno name
+ 					else
+diff -rup /data4/patchCheckBuild/ooo-build/build/src680-m211/basic/source/uno/namecont.cxx basic/source/uno/namecont.cxx
+--- /data4/patchCheckBuild/ooo-build/build/src680-m211/basic/source/uno/namecont.cxx	2007-03-15 15:39:18.000000000 +0000
++++ basic/source/uno/namecont.cxx	2007-06-12 16:09:25.000000000 +0100
+@@ -134,8 +134,10 @@
+ #ifndef _CPPUHELPER_EXC_HLP_HXX_
+ #include <cppuhelper/exc_hlp.hxx>
+ #endif
++#include <com/sun/star/beans/StringPair.hpp>
+ #include "sbmod.hxx"
+ 
++#include <comphelper/anytostring.hxx>
+ 
+ namespace basic
+ {
+@@ -213,10 +215,9 @@ void NameContainer::replaceByName( const
+ 	throw(IllegalArgumentException, NoSuchElementException, WrappedTargetException, RuntimeException)
+ {
+ 	Type aAnyType = aElement.getValueType();
+-	if( mType != aAnyType )
++	if( mType != aAnyType && aAnyType != getCppuType( static_cast< StringPair* >( NULL ) ) )
+ 		throw IllegalArgumentException();
+-
+-	NameContainerNameMap::iterator aIt = mHashMap.find( aName );
++NameContainerNameMap::iterator aIt = mHashMap.find( aName );
+ 	if( aIt == mHashMap.end() )
+ 	{
+ 		throw NoSuchElementException();
+@@ -255,7 +256,7 @@ void NameContainer::insertByName( const 
+ 	throw(IllegalArgumentException, ElementExistException, WrappedTargetException, RuntimeException)
+ {
+ 	Type aAnyType = aElement.getValueType();
+-	if( mType != aAnyType )
++	if( mType != aAnyType && aAnyType != getCppuType( static_cast< StringPair* >( NULL ) ) )
+ 		throw IllegalArgumentException();
+ 
+ 	NameContainerNameMap::iterator aIt = mHashMap.find( aName );
+--- /dev/null	2007-05-04 11:54:36.000000000 +0100
++++ basic/source/inc/sbdocmod.hxx	2007-06-15 00:16:48.000000000 +0100
+@@ -0,0 +1,60 @@
++/*************************************************************************
++ *
++ *  OpenOffice.org - a multi-platform office productivity suite
++ *
++ *  $RCSfile: sbjsmod.hxx,v $
++ *
++ *  $Revision: 1.4 $
++ *
++ *  last change: $Author: hr $ $Date: 2005/09/29 16:31:39 $
++ *
++ *  The Contents of this file are made available subject to
++ *  the terms of GNU Lesser General Public License Version 2.1.
++ *
++ *
++ *    GNU Lesser General Public License Version 2.1
++ *    =============================================
++ *    Copyright 2005 by Sun Microsystems, Inc.
++ *    901 San Antonio Road, Palo Alto, CA 94303, USA
++ *
++ *    This library is free software; you can redistribute it and/or
++ *    modify it under the terms of the GNU Lesser General Public
++ *    License version 2.1, as published by the Free Software Foundation.
++ *
++ *    This library is distributed in the hope that it will be useful,
++ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ *    Lesser General Public License for more details.
++ *
++ *    You should have received a copy of the GNU Lesser General Public
++ *    License along with this library; if not, write to the Free Software
++ *    Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ *    MA  02111-1307  USA
++ *
++ ************************************************************************/
++
++#ifndef _SB_DOCMOD_HXX
++#define _SB_DOCMOD_HXX
++
++#include <sbmod.hxx>
++
++// Basic-Modul fuer JavaScript-Sourcen.
++// Alle Basic-spezifischen Methoden muessen virtuell ueberladen und deaktiviert
++// werden. Die Unterscheidung von normalen Modulen erfolgt uebr RTTI.
++
++class SbDocModule : public SbModule
++{
++	//virtual BOOL LoadData( SvStream&, USHORT );
++	//virtual BOOL StoreData( SvStream& ) const;
++	SbxObjectRef pDocObject;
++public:
++	//SBX_DECL_PERSIST_NODATA(SBXCR_SBX,SBXID_DOCUMENTMOD,1);
++	TYPEINFO();
++	SbDocModule( const String&, StarBASIC* pBasic );		// DURCHREICHEN
++	virtual SbxVariable* Find( const XubString& rName, SbxClassType t );
++};
++
++#endif
++
++
++
+diff -rup /data4/patchCheckBuild/ooo-build/build/src680-m211/svx/source/msfilter/svxmsbas.cxx svx/source/msfilter/svxmsbas.cxx
+--- /data4/patchCheckBuild/ooo-build/build/src680-m211/svx/source/msfilter/svxmsbas.cxx	2007-06-21 23:28:02.000000000 +0100
++++ svx/source/msfilter/svxmsbas.cxx	2007-06-12 00:12:15.000000000 +0100
+@@ -88,6 +88,7 @@ using namespace com::sun::star::awt;
+ 
+ #include <com/sun/star/container/XNameContainer.hpp>
+ #include <com/sun/star/script/XLibraryContainer.hpp>
++#include <com/sun/star/beans/StringPair.hpp>
+ using namespace com::sun::star::container;
+ using namespace com::sun::star::script;
+ using namespace com::sun::star::uno;
+@@ -341,7 +342,7 @@ BOOL SvxImportMSVBasic::ImportCode_Impl(
+                 rtl::OUString sClassRem( RTL_CONSTASCII_USTRINGPARAM( "Rem Attribute VBA_ModuleType=" ) );
+ 
+                 rtl::OUString modeTypeComment;
+-
++		beans::StringPair sPair;
+                 switch( mType )
+                 {
+                     case Class:
+@@ -375,6 +376,8 @@ BOOL SvxImportMSVBasic::ImportCode_Impl(
+ 					modeTypeComment = modeTypeComment + sVBAOption;
+ 					if ( mType == Class )
+ 						modeTypeComment = modeTypeComment + sClassOption;
++					else if ( mType == Document )
++						sPair.First = rtl::OUString::createFromAscii( "Document" );
+ 
+ 				}
+ 
+@@ -435,12 +438,21 @@ BOOL SvxImportMSVBasic::ImportCode_Impl(
+ 						aSource += rtl::OUString::createFromAscii("\nEnd Sub");
+ 				}
+ 				::rtl::OUString aModName( sModule );
++
++
+ 				if ( aSource.getLength() )
+ 				{
+ 					aSource = modeTypeComment + aSource;
+ 
+ 					Any aSourceAny;
+-					aSourceAny <<= aSource;
++					if ( sPair.First.getLength() )
++					{
++						sPair.Second = aSource;	
++						aSourceAny <<= sPair;
++					}
++					else	
++						aSourceAny <<= aSource;
++
+ 					if( xLib->hasByName( aModName ) )
+ 						xLib->replaceByName( aModName, aSourceAny );
+ 					else
