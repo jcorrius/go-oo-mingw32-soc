@@ -75,14 +75,25 @@ build the syntax tree.
 """
 
     def __init__ (self, chars):
+        self.parentLexer = None
         self.chars = chars
         self.bufsize = len(self.chars)
+
+        # Properties that can be copied.
         self.debug = False
         self.debugMacro = False
         self.includeDirs = {}
         self.expandHeaders = True
-        self.parentLexer = None
         self.stopOnHeader = False
+
+    def copyProperties (self, other):
+        """Copy properties from another instance of SrcLexer."""
+
+        self.debug = other.debug
+        self.debugMacro = other.debugMacro
+        self.includeDirs = other.includeDirs
+        self.expandHeaders = other.expandHeaders
+        self.stopOnHeader = other.stopOnHeader
 
     def init (self):
         self.firstNonBlank = ''
@@ -242,8 +253,8 @@ build the syntax tree.
             buf = buf[pos:]
         
         mclexer = SrcLexer(buf)
-        mclexer.stopOnHeader = self.stopOnHeader
-        mclexer.includeDirs = self.includeDirs
+        mclexer.copyProperties(self)
+        mclexer.parentLexer = self
         mclexer.expandHeaders = False
         mclexer.tokenize()
         tokens = mclexer.getTokens()
@@ -260,39 +271,42 @@ build the syntax tree.
 
 
     def __getMacroInclude (self, buf):
+
+        # Strip excess string if any.
         pos = buf.find(' ')
         if pos >= 0:
             buf = buf[:pos]
+        headerSub = removeHeaderQuotes(buf)
+
+        if not self.expandHeaders:
+            # We don't want to expand headers.  Bail out.
+            if self.debug:
+                output("%s ignored\n", headerSub)
+            return
 
         defines = {}
+        headerPath = None
+        for includeDir in self.includeDirs.keys():
+            hpath = includeDir + '/' + headerSub
+            if os.path.isfile(hpath):
+                headerPath = hpath
+                break
 
-        if self.expandHeaders:
-            headerSub = removeHeaderQuotes(buf)
-            headerPath = None
-            for includeDir in self.includeDirs.keys():
-                hpath = includeDir + '/' + headerSub
-                if os.path.isfile(hpath):
-                    headerPath = hpath
-                    break
-
-            if headerPath == None:
-                error(headerSub + " not found\n", self.stopOnHeader)
-                return
-            else:
-                if self.debug:
-                    output("%s found\n"%headerPath)
-                chars = open(headerPath, 'r').read()
-                mclexer = SrcLexer(chars)
-                mclexer.stopOnHeader = self.stopOnHeader
-                mclexer.parentLexer = self
-                mclexer.includeDirs = self.includeDirs
-                mclexer.expandHeaders = False
-                mclexer.debug = self.debug
-                mclexer.debugMacro = self.debugMacro
-                mclexer.tokenize()
-                headerDefines = mclexer.getDefines()
-                for key in headerDefines.keys():
-                    defines[key] = headerDefines[key]
+        if headerPath == None:
+            error("included header file " + headerSub + " not found\n", self.stopOnHeader)
+            return
+        else:
+            if self.debug:
+                output("%s found\n"%headerPath)
+            chars = open(headerPath, 'r').read()
+            mclexer = SrcLexer(chars)
+            mclexer.copyProperties(self)
+            mclexer.parentLexer = self
+            mclexer.expandHeaders = False
+            mclexer.tokenize()
+            headerDefines = mclexer.getDefines()
+            for key in headerDefines.keys():
+                defines[key] = headerDefines[key]
 
         if self.debug:
             output("defines found in header:\n")
