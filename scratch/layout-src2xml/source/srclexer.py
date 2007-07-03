@@ -16,6 +16,7 @@ class BOF(Exception):
     def str (self):
         return "beginning of file"
 
+
 def removeHeaderQuotes (orig):
     if len(orig) <= 2:
         return orig
@@ -66,6 +67,13 @@ def dumpTokens (tokens, toError=False):
     else:
         sys.stdout.write(chars)
 
+
+class HeaderData(object):
+    def __init__ (self):
+        self.defines = {}
+        self.tokens = []
+
+
 class SrcLexer(object):
     """Lexicographical analyzer for .src format.
 
@@ -73,26 +81,36 @@ The role of a lexer is to parse the source file and break it into
 appropriate tokens.  Such tokens are later passed to a parser to
 build the syntax tree.
 """
+    headerCache = {}
 
-    def __init__ (self, chars):
+    VISIBLE = 0
+    INVISIBLE_PRE = 1
+    INVISIBLE_POST = 2
+
+    def __init__ (self, chars, filepath = None):
+        self.filepath = filepath
         self.parentLexer = None
         self.chars = chars
         self.bufsize = len(self.chars)
 
         # Properties that can be copied.
+        self.headerList = {}
         self.debug = False
         self.debugMacro = False
         self.includeDirs = {}
         self.expandHeaders = True
+        self.inMacroDefine = False
         self.stopOnHeader = False
 
     def copyProperties (self, other):
         """Copy properties from another instance of SrcLexer."""
 
+        self.headerList = other.headerList
         self.debug = other.debug
         self.debugMacro = other.debugMacro
-        self.includeDirs = other.includeDirs
+        self.includeDirs = other.includeDirs.copy()
         self.expandHeaders = other.expandHeaders
+        self.inMacroDefine = other.inMacroDefine
         self.stopOnHeader = other.stopOnHeader
 
     def init (self):
@@ -100,6 +118,7 @@ build the syntax tree.
         self.token = ''
         self.tokens = []
         self.defines = {}
+        self.visibilityStack = []
 
     def getTokens (self):
         return self.tokens
@@ -133,6 +152,14 @@ build the syntax tree.
             break
         return i
 
+    def isCodeVisible (self):
+        if len(self.visibilityStack) == 0:
+            return True
+        for item in self.visibilityStack:
+            if item != SrcLexer.VISIBLE:
+                return False
+        return True
+        
     def tokenize (self):
         self.init()
 
@@ -143,13 +170,15 @@ build the syntax tree.
             if self.firstNonBlank == '' and not c in [' ', "\n", "\t"]:
                 # Store the first non-blank in a line.
                 self.firstNonBlank = c
+            elif c == "\n":
+                self.firstNonBlank = ''
 
-            if c == '/':
+            if c == '#':
+                i = self.pound(i)
+            elif c == '/':
                 i = self.slash(i)
             elif c == "\n":
                 i = self.lineBreak(i)
-            elif c == '#':
-                i = self.pound(i)
             elif c == '"':
                 i = self.doubleQuote(i)
             elif c in [' ', "\t"]:
@@ -157,7 +186,7 @@ build the syntax tree.
             elif c in ";()[]{}<>,=+-*":
                 # Any outstanding single-character token.
                 i = self.anyToken(i, c)
-            else:
+            elif self.isCodeVisible():
                 self.token += c
 
             try:
@@ -169,11 +198,12 @@ build the syntax tree.
             self.tokens.append(self.token)
 
         if self.parentLexer == None and self.debug:
-            output("all defines found:\n")
+            output("-"*68 + "\n")
+            output("All defines found in this translation unit:\n")
             keys = self.defines.keys()
             keys.sort()
             for key in keys:
-                output("  %s\n"%key)
+                output("@ %s\n"%key)
 
     def dumpTokens (self, toError=False):
         dumpTokens(self.tokens, toError)
@@ -189,18 +219,28 @@ build the syntax tree.
     # character handlers
 
     def blank (self, i):
+        if not self.isCodeVisible():
+            return i
+
         self.maybeAddToken()
         return i
 
 
     def pound (self, i):
 
+        if self.inMacroDefine:
+            return i
+
         if not self.firstNonBlank == '#':
             return i
 
+        self.maybeAddToken()
         # We are in preprocessing mode.
 
+        # Get the macro command name '#<command> .....'
+
         command, define, buf = '', '', ''
+        firstNonBlank = False
         while True:
             try:
                 i = self.nextPos(i)
@@ -212,29 +252,97 @@ build the syntax tree.
                 break
 
             if c == "\n":
+                if len(buf) > 0 and len(command) == 0:
+                    command = buf
                 i = self.prevPos(i)
                 break
-            elif c in [' ', "\t"] and len(buf) > 0:
+            elif c in [' ', "\t"]:
+                if not firstNonBlank:
+                    # Ignore any leading blanks after the '#'.
+                    continue
+
                 if len(command) == 0:
                     command = buf
                     buf = ''
                 else:
                     buf += ' '
+            elif c == '(':
+                if len(buf) > 0 and len(command) == 0:
+                    command = buf
+                buf += c
             else:
+                if not firstNonBlank:
+                    firstNonBlank = True
                 buf += c
 
-        # Use another instance of lexer to tokinize the content of the 
-        # preprocessor macro.
-
         if command == 'define':
-            self.__getMacroDefine(buf)
+            self.handleMacroDefine(buf)
         elif command == 'include':
-            self.__getMacroInclude(buf)
+            self.handleMacroInclude(buf)
+        elif command == 'ifdef':
+            defineName = buf.strip()
+            if self.defines.has_key(defineName):
+                self.visibilityStack.append(SrcLexer.VISIBLE)
+            else:
+                self.visibilityStack.append(SrcLexer.INVISIBLE_PRE)
+
+        elif command == 'ifndef':
+            defineName = buf.strip()
+            if self.defines.has_key(defineName):
+                self.visibilityStack.append(SrcLexer.INVISIBLE_PRE)
+            else:
+                self.visibilityStack.append(SrcLexer.VISIBLE)
+
+        elif command == 'if':
+            if self.evalCodeVisibility(buf):
+                self.visibilityStack.append(SrcLexer.VISIBLE)
+            else:
+                self.visibilityStack.append(SrcLexer.INVISIBLE_PRE)
+
+        elif command == 'elif':
+            if len(self.visibilityStack) == 0:
+                raise AssertWrong
+
+            if self.visibilityStack[-1] == SrcLexer.VISIBLE:
+                self.visibilityStack[-1] = SrcLexer.INVISIBLE_POST
+            elif self.visibilityStack[-1] == SrcLexer.INVISIBLE_PRE:
+                # Evaluate only if the current visibility is false.
+                if self.evalCodeVisibility(buf):
+                    self.visibilityStack[-1] = SrcLexer.VISIBLE
+
+        elif command == 'else':
+            if len(self.visibilityStack) == 0:
+                raise AssertWrong
+
+            if self.visibilityStack[-1] == SrcLexer.VISIBLE:
+                self.visibilityStack[-1] = SrcLexer.INVISIBLE_POST
+            if self.visibilityStack[-1] == SrcLexer.INVISIBLE_PRE:
+                self.visibilityStack[-1] = SrcLexer.VISIBLE
+
+        elif command == 'endif':
+            if len(self.visibilityStack) == 0:
+                raise AssertWrong
+            self.visibilityStack.pop()
+
+        elif command == 'undef':
+            pass
+        elif command in ['error', 'pragma']:
+            pass
+        else:
+            print "'%s' '%s'"%(command, buf)
+            print self.filepath
+            sys.exit(0)
 
         return i
 
 
-    def __getMacroDefine (self, buf):
+    def evalCodeVisibility (self, buf):
+        try:
+            return eval(buf)
+        except:
+            return True
+        
+    def handleMacroDefine (self, buf):
 
         mparser = macroparser.MacroParser(buf)
         mparser.debug = self.debugMacro
@@ -242,35 +350,8 @@ build the syntax tree.
         macro = mparser.getMacro()
         if not macro == None:
             self.defines[macro.name] = macro
-        return
 
-        pos = buf.find(' ')
-        name = buf
-        if pos < 0:
-            name = buf
-        else:
-            name = buf[:pos]
-            buf = buf[pos:]
-        
-        mclexer = SrcLexer(buf)
-        mclexer.copyProperties(self)
-        mclexer.parentLexer = self
-        mclexer.expandHeaders = False
-        mclexer.tokenize()
-        tokens = mclexer.getTokens()
-        if len(tokens) > 0:
-            macro = Macro(name)
-            macro.tokens = tokens
-            self.defines[name] = macro
-
-        if self.debug:
-            error("-"*68 + "\n")
-            error('#' + command + ' ' + name + "\n")
-            mclexer.dumpTokens(True)
-            error("end of define\n")
-
-
-    def __getMacroInclude (self, buf):
+    def handleMacroInclude (self, buf):
 
         # Strip excess string if any.
         pos = buf.find(' ')
@@ -281,43 +362,68 @@ build the syntax tree.
         if not self.expandHeaders:
             # We don't want to expand headers.  Bail out.
             if self.debug:
-                output("%s ignored\n", headerSub)
+                output("%s ignored\n"%headerSub)
             return
 
         defines = {}
         headerPath = None
         for includeDir in self.includeDirs.keys():
             hpath = includeDir + '/' + headerSub
-            if os.path.isfile(hpath):
+            if os.path.isfile(hpath) and hpath != self.filepath:
                 headerPath = hpath
                 break
 
         if headerPath == None:
             error("included header file " + headerSub + " not found\n", self.stopOnHeader)
             return
-        else:
+        
+        if self.debug:
+            output("%s found\n"%headerPath)
+
+        if self.headerList.has_key(headerPath):
             if self.debug:
-                output("%s found\n"%headerPath)
-            chars = open(headerPath, 'r').read()
-            mclexer = SrcLexer(chars)
-            mclexer.copyProperties(self)
-            mclexer.parentLexer = self
-            mclexer.expandHeaders = False
-            mclexer.tokenize()
-            headerDefines = mclexer.getDefines()
-            for key in headerDefines.keys():
-                defines[key] = headerDefines[key]
+                output("%s already included\n"%headerPath)
+            return
+
+        if SrcLexer.headerCache.has_key(headerPath):
+            if self.debug:
+                output("%s in cache\n"%headerPath)
+            for key in SrcLexer.headerCache[headerPath].defines.keys():
+                self.defines[key] = SrcLexer.headerCache[headerPath].defines[key]
+            return
+
+        chars = open(headerPath, 'r').read()
+        mclexer = SrcLexer(chars, headerPath)
+        mclexer.copyProperties(self)
+        mclexer.parentLexer = self
+        mclexer.tokenize()
+        hdrData = HeaderData()
+        hdrData.tokens = mclexer.getTokens()
+        headerDefines = mclexer.getDefines()
+        for key in headerDefines.keys():
+            defines[key] = headerDefines[key]
+            hdrData.defines[key] = headerDefines[key]
+
+        self.headerList[headerPath] = True
+        SrcLexer.headerCache[headerPath] = hdrData
+
+        # Update the list of headers that have already been expaneded.
+        for key in mclexer.headerList.keys():
+            self.headerList[key] = True
 
         if self.debug:
-            output("defines found in header:\n")
+            output("defines found in header %s:\n"%headerSub)
             for key in defines.keys():
-                output("  %s\n"%key)
+                output("  '%s'\n"%key)
 
         for key in defines.keys():
             self.defines[key] = defines[key]
 
 
     def slash (self, i):
+        if not self.isCodeVisible():
+            return i
+
         if i < self.bufsize - 1 and self.chars[i+1] == '/':
             # Parse line comment.
             line = ''
@@ -345,14 +451,19 @@ build the syntax tree.
 
 
     def lineBreak (self, i):
-
         self.firstNonBlank = ''
+        if not self.isCodeVisible():
+            return i
+
         self.maybeAddToken()
 
         return i
 
 
     def doubleQuote (self, i):
+        if not self.isCodeVisible():
+            return i
+
         literal = ''
         i += 1
         while i < self.bufsize:
@@ -367,6 +478,9 @@ build the syntax tree.
 
 
     def anyToken (self, i, token):
+        if not self.isCodeVisible():
+            return i
+
         self.maybeAddToken()
         self.token = token
         self.maybeAddToken()

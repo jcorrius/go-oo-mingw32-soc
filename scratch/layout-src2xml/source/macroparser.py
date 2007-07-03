@@ -100,6 +100,7 @@ character is the open paren.
             # tokinize it using lexer.
             mclexer = srclexer.SrcLexer(content)
             mclexer.expandHeaders = False
+            mclexer.inMacroDefine = True
             mclexer.tokenize()
             self.macro.tokens = mclexer.getTokens()
             if self.debug:
@@ -119,7 +120,8 @@ character is the open paren.
         n = len(macro.tokens)
         if n == 0:
             return False
-        elif macro.name.startswith('SID_') or macro.name.startswith('RID_'):
+        elif len(macro.name) > 4 and macro.name[1:4] == 'ID_':
+            # We don't want to expand macros like HID_, SID_, WID_, etc.
             return False
         return True
 

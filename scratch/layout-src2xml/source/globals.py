@@ -15,6 +15,21 @@ def output (msg):
     sys.stdout.write(msg)
 
 
+def cloneList (list):
+    newlist = []
+    for item in list:
+        newlist.append(item)
+    return newlist
+
+
+def cloneDict (dict):
+    newdict = []
+    for key in dict.keys():
+        newdict[key] = dict[key]
+
+    return newdict
+
+
 def removeQuote (text):
     """Remove quotes from a literal.
 """

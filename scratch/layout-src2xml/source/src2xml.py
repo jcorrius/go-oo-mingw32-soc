@@ -35,18 +35,19 @@ def convert (filepath, params):
 
     params.includeDirs[os.path.dirname(fullpath)] = True
     chars = open(fullpath, 'r').read()
-    lexer = SrcLexer(chars)
+    lexer = SrcLexer(chars, fullpath)
     lexer.expandHeaders = not params.ignoreHeaders
     lexer.includeDirs = params.includeDirs
     lexer.stopOnHeader = params.stopOnHeader
     lexer.debugMacro = params.debugMacro
+#     lexer.debug = True
     if params.debugLexer:
         lexer.debug = True
         lexer.tokenize()
-        error("-"*68 + "\n")
-        error("** token dump\n")
-        lexer.dumpTokens(True)
-        error("** end of token dump\n")
+        output("-"*68 + "\n")
+        output("** token dump\n")
+        lexer.dumpTokens()
+        output("** end of token dump\n")
         return
 
     # Tokenize it using lexer

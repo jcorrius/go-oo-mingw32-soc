@@ -2,12 +2,6 @@ import sys
 from globals import *
 import srclexer
 
-def cloneList (list):
-    newlist = []
-    for item in list:
-        newlist.append(item)
-    return newlist
-
 
 def transName (name):
     """Translate a mixed-casing name to dash-separated name.
