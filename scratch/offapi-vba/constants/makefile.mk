@@ -62,7 +62,7 @@ $(UCR)$/constant_types.rdb : constant_types.rdb
 
 $(MISC)$/%.done : %.api
     @echo Parsing $?
-    +java -cp $(MYCLASSPATH) -Xbootclasspath/p:$(MYCLASSPATH)\
+    +$(JAVAINTERPRETER) -cp $(MYCLASSPATH) -Xbootclasspath/p:$(MYCLASSPATH)\
     org.apache.xalan.xslt.Process -v -xsl oovbaconsts.xsl -param IDL_DIRECTORY $(MISC)$/idl/ -in $?
     $(TOUCH) $@
 
