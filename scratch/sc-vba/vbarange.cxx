@@ -4332,7 +4332,7 @@ ScVbaRange::setStyle( const uno::Any& _style ) throw (uno::RuntimeException)
 	xProps->setPropertyValue(CELLSTYLE, uno::makeAny(xStyle->getName()));
 }
 
-uno::Reference< excel::XRange > SAL_CALL 
+uno::Reference< excel::XRange >
 ScVbaRange::PreviousNext( bool bIsPrevious )
 { 
 	ScMarkData markedRange;
@@ -4383,7 +4383,7 @@ ScVbaRange::Previous() throw (script::BasicErrorException, uno::RuntimeException
 	return PreviousNext( true );
 }
 
-uno::Reference< excel::XRange > 
+uno::Reference< excel::XRange > SAL_CALL
 ScVbaRange::SpecialCells( const uno::Any& _oType, const uno::Any& _oValue) throw ( script::BasicErrorException )
 {
 	bool bIsSingleCell = isSingleCellRange(); 

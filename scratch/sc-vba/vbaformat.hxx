@@ -73,8 +73,8 @@ public:
 	virtual ~ScVbaFormat() {}
 	virtual css::uno::Reference< oo::vba::XHelperInterface > thisHelperIface() = 0; 
 	css::uno::Reference< css::lang::XServiceInfo > getXServiceInfo() { return mxServiceInfo; }
-	 void setAddIndent( const css::uno::Any& _BAddIndent) throw( css::uno::RuntimeException ) { _BAddIndent >>= mbAddIndent; }
-	 css::uno::Any getAddIndent() throw( css::uno::RuntimeException ) { return css::uno::makeAny( mbAddIndent ); }
+	 void SAL_CALL setAddIndent( const css::uno::Any& _BAddIndent) throw( css::uno::RuntimeException ) { _BAddIndent >>= mbAddIndent; }
+	 css::uno::Any SAL_CALL getAddIndent() throw( css::uno::RuntimeException ) { return css::uno::makeAny( mbAddIndent ); }
     	// Interface Methods
 	virtual css::uno::Any SAL_CALL Borders( const css::uno::Any& Index ) throw (css::script::BasicErrorException, css::uno::RuntimeException);;
 	virtual css::uno::Reference< ::org::openoffice::excel::XFont > SAL_CALL Font(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException);;

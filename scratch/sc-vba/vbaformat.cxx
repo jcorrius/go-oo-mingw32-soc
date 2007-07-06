@@ -507,7 +507,7 @@ ScVbaFormat<Ifc1>::getIndentLevel(  ) throw (script::BasicErrorException, uno::R
 		{
 			sal_Int16 IndentLevel = 0;
 			if ( ( mxPropertySet->getPropertyValue(PARAINDENT) >>= IndentLevel  ) )
-				NRetIndentLevel = uno::makeAny( sal_Int32( round(static_cast<double>( IndentLevel ) / 352.8)) );
+				NRetIndentLevel = uno::makeAny( sal_Int32( rtl::math::round(static_cast<double>( IndentLevel ) / 352.8)) );
 			else 
 				NRetIndentLevel = uno::makeAny( sal_Int32(0) );
 		}	    
