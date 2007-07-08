@@ -9,8 +9,8 @@ from twisted.internet import defer
 from buildbot import interfaces
 from buildbot.twcompat import implements
 from buildbot.status import base, mail
-from buildbot.status.builder import SUCCESS, WARNINGS
-import zlib, bz2, base64, time, StringIO, gzip
+from buildbot.status.builder import SUCCESS, WARNINGS, SKIPPED
+import zlib, bz2, base64, time, StringIO, gzip, re
 
 class OOTinderboxMailNotifier(tinderbox.TinderboxMailNotifier):
       def __init__(self, fromaddr, extraRecipients,
@@ -48,8 +48,14 @@ class OOTinderboxMailNotifier(tinderbox.TinderboxMailNotifier):
             elif results == WARNINGS:
                   res = "testfailed"
                   text += res
+            elif results == SKIPPED:
+                  res = "fold"
+                  text += res
             else:
-                  res += "busted"
+                  if re.match(r'slave lost', build.getText()):
+                        res = "fold"
+                  else:
+                        res = "busted"
                   text += res
 
             text += "\n";
@@ -65,7 +71,8 @@ class OOTinderboxMailNotifier(tinderbox.TinderboxMailNotifier):
                   text += "%s END\n" % t
             # if the build finished...
             else:
-#                  text += "TinderboxPrint: <a href=\"http://termite.go-oo.org:8081/~mikeleib/%s-%s-install_set.zip\">Install Set</a>\n" % (build.getProperty("buildername"), build.getProperty("buildnumber"))
+                  if (build.getProperty("install_set")) and (results == SUCCESS):
+                        text += "TinderboxPrint: <a href=\"http://termite.go-oo.org:8081/~mikeleib/%s-%s-install_set.zip\">Install Set</a>\n" % (build.getProperty("buildername"), build.getProperty("buildnumber"))
 
                   # logs will always be appended
                   tinderboxLogs = ""
