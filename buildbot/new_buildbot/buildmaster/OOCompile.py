@@ -2,8 +2,9 @@ import os
 from buildbot.steps.shell import ShellCommand
 from buildbot.slave.registry import registerSlaveCommand
 from buildbot.process.buildstep import LoggedRemoteCommand
-# begin hackery
-class OOCompile(ShellCommand):
+from OOShell import OOShellCommand
+
+class OOCompile(OOShellCommand):
       def createSummary(self, log):
         try:
             logFileName = self.step_status.logs[0].getFilename()
@@ -39,6 +40,16 @@ class OOCompile(ShellCommand):
         except:
             #log.msg("Exception: Cannot open logFile")
             print "cannot execute createSummary after OOCompile"
- 
+
+      def getText(self, cmd, results):
+          cb = ["Clean Build"]
+          ticked = self.getProperty('check_box')
+          if ticked == 'on':
+                cb.append('Yes')
+          else:
+                cb.append('No')
+          return cb
+    
       def __init__(self, **kwargs):
           ShellCommand.__init__(self, **kwargs)   # always upcall!
+          
