@@ -4,6 +4,10 @@ import com.sun.star.script.provider.*;
 import com.sun.star.beans.XPropertySet;
 import com.sun.star.uno.AnyConverter;
 import java.io.File;
+import java.io.InputStream;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.OutputStream;
 public class TestVBA
 {
 private com.sun.star.lang.XMultiComponentFactory xMCF = null;
@@ -79,19 +83,20 @@ public void traverse( File fileDirectory )
                         xCompLoader.loadComponentFromURL(
                             sUrl, "_blank", 0, propertyValues);
                     String logFileURL = getLogLocation();
-                    java.net.URL logURL = new java.net.URL( logFileURL );
+                    java.net.URI logURI = new java.net.URI( logFileURL );
+                    java.net.URL logURL = logURI.toURL();
                     try
                     {
                         XScriptProviderSupplier xSupplier =
                             (XScriptProviderSupplier)UnoRuntime.queryInterface(
                                 XScriptProviderSupplier.class, oDoc ); 
-			System.out.println("URL says path for " + logFileURL + " is " + logURL.getPath() );
-			File logFile = new File( logURL.getPath() );
+			File logFile = new File( logURI );
                         if ( logFile.exists() )
                         {
                             if ( !logFile.delete() )
                                  throw new java.lang.RuntimeException("failed to delete " + logFileURL );
                         }
+
                         XScriptProvider xProv = xSupplier.getScriptProvider();
                         XScript xScript = xProv.getScript("vnd.sun.star.script:Standard.TestMacros.Main?language=Basic&location=document");
                         System.out.println("Got script for doc " + entries[ i ] );
@@ -102,13 +107,14 @@ public void traverse( File fileDirectory )
                         num[0] = new short[0];
 
                     	xScript.invoke(new Object[0], num, out); 
-			logFile = new File( logURL.getPath() ); 
+
+			logFile = new File( logURI ); 
                        	System.out.println( "fileName is " + entries[ i ].getName().substring(0,  entries[ i ].getName().lastIndexOf( ".xls" ) ) );
                         File newLoc = new File( outDir,  entries[ i ].getName().substring(0,  entries[ i ].getName().lastIndexOf( ".xls" ) ) + ".log" );
 			System.out.println("Moving logfile to " + newLoc.getAbsolutePath() );
-			logFile.renameTo( newLoc );
+			boolean ret = logFile.renameTo( newLoc );
            
-			System.out.println("Have run script ");
+			System.out.println("Have run and move of log file worked = " + ret );
                     }
                     catch ( Exception ex )
                     {

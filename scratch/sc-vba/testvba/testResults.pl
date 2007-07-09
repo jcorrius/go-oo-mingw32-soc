@@ -3,28 +3,33 @@
 use File::Basename;
 use File::stat;
 use File::Copy;
+my $binDir = dirname($0);
+my $timestampclean= "$binDir/timestampsClean.pl";
 #sub gen_diff($)
+
 sub testLog
 {
-   my $passed = 1;
+   # 2 No Log to compare against
+   # 1 Log passed 
+   # 0 Log failed
+   my $result = 1;
    my $testfile = shift;
    my $dirtocheck = shift;
    my $filename = basename($testfile);
    $filename = "$logdir/$filename"; 
    if ( -f $filename )  {
       my $tmpFile = "/tmp/gen_diff"; 
-      my $status = system("diff -up $testfile $filename |  $cvsclean > $tmpFile");
+      my $status = system("diff -up $testfile $filename |  $timestampclean > $tmpFile");
       my $info = stat($tmpFile) or die "no $tmpFile: $!";
       if ( ($status >>=8) == 0 &&  ( $info->size > 0)  ) {
-         $passed = 0; 
+         $result = 0; 
       }
    }
    else
    {
-      $passed = 0;
+      $result = 1;
    }
-   print "result $passed\n";
-   return $passed;
+   return $result;
 }
 
 if ( ! ( $logdir = shift @ARGV ) ) {
@@ -40,7 +45,8 @@ if ( ! ( $testlogdir = shift @ARGV ) ) {
 }
 
 print "logdir $logdir\n";
-print "logdir $testlogdir\n";
+print "testlogdir $testlogdir\n";
+$testlogdir = "$testlogdir/logs/ooo";
 sub filter_crud($)
 {
     my $a = shift;
@@ -49,6 +55,7 @@ sub filter_crud($)
     $a =~ /\#$/ && return;
     $a =~ /\.orig$/ && return;
     $a =~ /unxlng.*\.pro$/ && return;
+    $a =~ /wntmsc.*\.pro$/ && return;
     $a =~ /.swp$/ && return;
     $a =~ /POSITION/ && return;
     $a =~ /ReadMe/ && return;
@@ -72,9 +79,10 @@ sub slurp_dir($)
     while ($fname = readdir ($dirhandle)) {
 	$fname = filter_crud($fname);
 	defined $fname || next;
-	if (-d "$dir/$fname") {
-	    push @files, slurp_dir("$dir/$fname");
-	} else {
+#	if (-d "$dir/$fname") {
+#	    push @files, slurp_dir("$dir/$fname");
+#	} else 
+        {
 	    push @files, "$dir/$fname";
 	}
     }
@@ -89,15 +97,40 @@ if (-d $testlogdir) {
 
 my $processed = 0;
 my $passed = 0;
+my @passedTests=();
+my @skippedTests=();
+my @failedTests=();
+
+my $failureCmd="";
 for $a (@files) {
    $processed++;
-   if ( testLog( $a, $logdir ) == 0 ) {
-      print "Test document for $a \t \t failed.\n";
+   my $testcase = $a;  
+   $testcase =~ s/\.log/\.xls/;
+   my $result = testLog( $a, $logdir );
+   if ( $result == 0 ) {
+      push @failedTests, basename($testcase);
+      if ( $failureCmd eq "" ) { $failureCmd = " diff -up $a $logdir "; }
    }
+   elsif ( $result == 2 ) {
+      #print "skipped $a\n";
+      push @skippedTests, $testcase;
+   } 
    else {
       $passed++;
-      print "Test document for $a \t \t passed. \n"; 
+      push @passedTests, $testcase;
+      #print "Test document for $a \t \t passed. \n"; 
    } 
 }
-print "processed \t $processed documents\n";
-print "\t \t $passed tests passed\n";
+my $compared=@passedTests+@failedTests;
+my $skip = @skippedTests;
+print "skipped $skip test-cases(s)\n";
+print "compared $compared test-case documents\n";
+print "\t \t $passed tests $@passedTests\n";
+if ( @failedTests > 0 ) {
+   print "the following test-case documents failed, please examine the logs manually\n";
+   
+   for $a (@failedTests) {
+      print "\t$a\n";
+   }
+   print "e.g. $failureCmd\n"
+}
