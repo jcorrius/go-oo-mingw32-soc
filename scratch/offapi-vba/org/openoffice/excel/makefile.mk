@@ -96,6 +96,8 @@ IDLFILES= XApplication.idl\
 	XFormatCondition.idl \
 	XFormatConditions.idl \
 	Range.idl\
+	XName.idl\
+	XNames.idl \
 
 
 # ------------------------------------------------------------------

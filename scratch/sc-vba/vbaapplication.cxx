@@ -46,6 +46,7 @@
 #include <com/sun/star/task/XStatusIndicatorSupplier.hpp>
 #include <com/sun/star/task/XStatusIndicator.hpp>
 #include <org/openoffice/excel/XlMousePointer.hpp>
+#include <com/sun/star/sheet/XNamedRanges.hpp>
 
 #include "vbaapplication.hxx"
 #include "vbaworkbooks.hxx"
@@ -59,6 +60,7 @@
 #include "vbaglobals.hxx"
 #include "tabvwsh.hxx"
 #include "gridwin.hxx"
+#include "vbanames.hxx"
 #include "vbashape.hxx"
 
 #include <osl/file.hxx>
@@ -425,6 +427,16 @@ ScVbaApplication::Range( const uno::Any& Cell1, const uno::Any& Cell2 ) throw (u
 	uno::Reference< excel::XRange > xVbRange = ScVbaRange::ApplicationRange( mxContext, Cell1, Cell2 ); 
 	return uno::makeAny( xVbRange ); 
 }
+
+uno::Any SAL_CALL
+ScVbaApplication::Names( ) throw ( uno::RuntimeException )
+{
+    uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY_THROW );
+    uno::Reference< sheet::XNamedRanges > xNamedRanges( getActiveSheet() , uno::UNO_QUERY_THROW );
+    css::uno::Reference< excel::XNames > xNames ( new ScVbaNames( this , mxContext , xNamedRanges , xModel ) );
+        return uno::makeAny( xNames );
+}
+
 
 uno::Reference< excel::XWorksheet > SAL_CALL 
 ScVbaApplication::getActiveSheet() throw (uno::RuntimeException)

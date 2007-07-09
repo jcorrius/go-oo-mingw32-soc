@@ -52,6 +52,8 @@
 #include "vbapalette.hxx"
 #include <osl/file.hxx>
 #include <stdio.h>
+#include "vbanames.hxx"  // Amelia Wang
+#include "nameuno.hxx"
 
 // Much of the impl. for the equivalend UNO module is
 // sc/source/ui/unoobj/docuno.cxx, viewuno.cxx
@@ -397,6 +399,21 @@ ScVbaWorkbook::Styles( const::uno::Any& Item ) throw (uno::RuntimeException)
 	if ( Item.hasValue() )
 		return dStyles->Item( Item, uno::Any() );
 	return uno::makeAny( dStyles );
+}
+
+// Amelia Wang
+uno::Any SAL_CALL
+ScVbaWorkbook::Names( ) throw (uno::RuntimeException)
+{
+	uno::Reference< frame::XModel > xModel( getModel() );
+	ScDocShell * pDocShell = ( ScDocShell* )SfxObjectShell::GetWorkingDocument();
+	if ( !pDocShell )
+		throw uno::RuntimeException(::rtl::OUString(
+                                RTL_CONSTASCII_USTRINGPARAM( "Cann't recognise the 'Names' interface. ") ),
+                                uno::Reference< XInterface >() );
+	uno::Reference< sheet::XNamedRanges > xNamedRanges( new ScNamedRangesObj( pDocShell ) );
+	uno::Reference< vba::XCollection > xNames( new ScVbaNames( this , mxContext , xNamedRanges , xModel ));
+	return uno::Any( xNames );
 }
 
 rtl::OUString& 

@@ -157,6 +157,12 @@ ScVbaGlobals::Range( const uno::Any& Cell1, const uno::Any& Cell2 ) throw (uno::
 	return getApplication()->Range( Cell1, Cell2 );
 }
 
+uno::Any SAL_CALL
+ScVbaGlobals::Names( ) throw ( uno::RuntimeException )
+{
+	return getApplication()->Names();
+}
+
 namespace globals
 {
 namespace sdecl = comphelper::service_decl;
@@ -166,5 +172,4 @@ extern sdecl::ServiceDecl const serviceDecl(
     "ScVbaGlobals",
     "org.openoffice.vba.Globals" );
 }
-
 
