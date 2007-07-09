@@ -46,7 +46,6 @@ if ( ! ( $testlogdir = shift @ARGV ) ) {
 
 print "logdir $logdir\n";
 print "testlogdir $testlogdir\n";
-$testlogdir = "$testlogdir/logs/ooo";
 sub filter_crud($)
 {
     my $a = shift;

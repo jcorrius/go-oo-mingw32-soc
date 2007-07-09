@@ -40,9 +40,15 @@ TARGET=testvba
 .INCLUDE : ant.mk
 
 .IF "$(SOLAR_JAVA)"!=""
+
 ALLTAR : PROCESSRESULTS
 
-TESTDOCUMENT=..$/TestDocuments
+.IF "$(GUI)"=="UNX" || "$(GUI)"=="MAC"
+TESTDOCUMENT=..$/TestDocuments$/logs$/unix
+.ELSE
+TESTDOCUMENT=..$/TestDocuments$/logs$/win
+.ENDIF
+
 OUTPUTDIR:=..$/$(TARGET)$/Logs
 ANT_FLAGS+=-Dtest.documents=$(TESTDOCUMENT)
 ANT_FLAGS+=-Dtest.out=$(OUTPUTDIR)
