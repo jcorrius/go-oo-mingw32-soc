@@ -17,9 +17,11 @@ sub testLog
    my $dirtocheck = shift;
    my $filename = basename($testfile);
    $filename = "$logdir/$filename"; 
+   #print "about to diff $testfile $filename\n";
    if ( -f $filename )  {
+      #print "diffing\n";
       my $tmpFile = "/tmp/gen_diff"; 
-      my $status = system("diff -up $testfile $filename |  $timestampclean > $tmpFile");
+      my $status = system("diff -U 0 -p $testfile $filename |  $timestampclean > $tmpFile");
       my $info = stat($tmpFile) or die "no $tmpFile: $!";
       if ( ($status >>=8) == 0 &&  ( $info->size > 0)  ) {
          $result = 0; 
@@ -29,6 +31,7 @@ sub testLog
    {
       $result = 1;
    }
+   #print "diff result = $result\n";
    return $result;
 }
 

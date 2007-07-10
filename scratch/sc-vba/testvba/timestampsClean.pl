@@ -70,9 +70,8 @@ output_lines(\@lines);
 
 my $fragstocount = 0;
 if ( $detectedSomeGuff ) {
-   $fragstocount = 1;
+   $fragstocount = 2;
 }
-
 if ($frag_count > $fragstocount) {
   print @output_buffer;
 }

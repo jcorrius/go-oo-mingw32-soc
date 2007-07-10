@@ -43,18 +43,19 @@ TARGET=testvba
 
 ALLTAR : PROCESSRESULTS
 
+TESTDOCUMENTS=..$/TestDocuments
 .IF "$(GUI)"=="UNX" || "$(GUI)"=="MAC"
-TESTDOCUMENT=..$/TestDocuments$/logs$/unix
+TESTDOCUMENTLOGS=$(TESTDOCUMENTS)$/logs$/unix
 .ELSE
-TESTDOCUMENT=..$/TestDocuments$/logs$/win
+TESTDOCUMENTLOGS=$(TESTDOCUMENTS)$/logs$/win
 .ENDIF
 
 OUTPUTDIR:=..$/$(TARGET)$/Logs
-ANT_FLAGS+=-Dtest.documents=$(TESTDOCUMENT)
+ANT_FLAGS+=-Dtest.documents=$(TESTDOCUMENTS)
 ANT_FLAGS+=-Dtest.out=$(OUTPUTDIR)
 ANT_FLAGS+=-Dtest.officepath=$(OFFICEPATH)
 #UNITTEST : $(LOCAL_COMMON_OUT)$/class/TestVBA.class
 PROCESSRESULTS : ANTBUILD
-	$(PERL) testResults.pl  $(OUTPUTDIR) $(TESTDOCUMENT)
+	$(PERL) testResults.pl  $(OUTPUTDIR) $(TESTDOCUMENTLOGS)
 
 .ENDIF
