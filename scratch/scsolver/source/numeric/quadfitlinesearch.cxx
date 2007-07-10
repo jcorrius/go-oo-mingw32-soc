@@ -26,15 +26,31 @@
  ************************************************************************/
 
 #include "numeric/quadfitlinesearch.hxx"
+#include "numeric/funcobj.hxx"
+
+#include <stdio.h>
 
 namespace scsolver { namespace numeric {
 
-QuadFitLineSearch::QuadFitLineSearch()
+QuadFitLineSearch::QuadFitLineSearch(const SingleVarFuncObj* pFuncObj) :
+    m_pFuncObj(pFuncObj),
+    m_eGoal(QuadFitLineSearch::MINIMIZE)
 {
 }
 
 QuadFitLineSearch::~QuadFitLineSearch() throw()
 {
+}
+
+void QuadFitLineSearch::setGoal(QuadFitLineSearch::Goal goal)
+{
+    m_eGoal = goal;
+}
+
+void QuadFitLineSearch::solve()
+{
+    printf("%s\n", m_pFuncObj->getFuncString().c_str());
+
 }
 
 }}

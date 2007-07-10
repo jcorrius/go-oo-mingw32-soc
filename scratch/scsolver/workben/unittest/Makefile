@@ -4,7 +4,7 @@ SOURCE_PATH=$(PRJ)/source
 NUMERIC_PATH=$(SOURCE_PATH)/numeric
 
 CPPFLAGS=-I$(PRJ)/source/inc -DSCSOLVER_UNITTEST
-CXXFLAGS=-Wall -Os
+CXXFLAGS=-Wall -O0 -g
 
 TESTFILES = \
 	matrix \
@@ -19,11 +19,14 @@ global.o: $(SOURCE_PATH)/tool/global.cxx
 matrix.o: $(NUMERIC_PATH)/matrix.cxx
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ -c $<
 
-matrix_test.o: $(NUMERIC_PATH)/matrix_test.cxx
+funcobj.o: $(NUMERIC_PATH)/funcobj.cxx
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ -c $<
 
 matrix: matrix.o matrix_test.o global.o
 	$(CXX) -o $@ matrix.o matrix_test.o global.o
+
+matrix_test.o: $(NUMERIC_PATH)/matrix_test.cxx
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ -c $<
 
 polyeqnsolver.o: $(NUMERIC_PATH)/polyeqnsolver.cxx
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ -c $<
@@ -40,8 +43,8 @@ quadfitlinesearch.o: $(NUMERIC_PATH)/quadfitlinesearch.cxx
 quadfitlinesearch_test.o: $(NUMERIC_PATH)/quadfitlinesearch_test.cxx
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ -c $<
 
-quadfitlinesearch: quadfitlinesearch.o quadfitlinesearch_test.o matrix.o global.o
-	$(CXX) -o $@ quadfitlinesearch.o quadfitlinesearch_test.o matrix.o global.o
+quadfitlinesearch: quadfitlinesearch.o quadfitlinesearch_test.o matrix.o global.o funcobj.o
+	$(CXX) -o $@ quadfitlinesearch.o quadfitlinesearch_test.o matrix.o global.o funcobj.o
 
 clean:
 	rm -f *.o $(TESTFILES)

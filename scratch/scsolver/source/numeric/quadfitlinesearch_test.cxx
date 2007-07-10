@@ -26,10 +26,47 @@
  ************************************************************************/
 
 #include "numeric/quadfitlinesearch.hxx"
+#include "numeric/funcobj.hxx"
+#include <memory>
+#include <string>
 
 using namespace ::scsolver::numeric;
+using namespace ::std;
+
+class TestFunc1 : public SingleVarFuncObj
+{
+public:
+    TestFunc1()
+    {
+    }
+
+    virtual ~TestFunc1() throw()
+    {
+    }
+
+    virtual double eval(double var) const
+    {
+        return (var - 2.0)*(var*2.0 + 5.0) + 10.0;
+    }
+
+    /**
+     * Return a display-friendly function string (e.g. x^3 + 2*x^2 + 4).
+     */
+    virtual const string getFuncString() const
+    {
+        return string("(x - 2) * (2x + 5) + 10");
+    }
+};
+
+void run()
+{
+    auto_ptr<SingleVarFuncObj> pFuncObj(new TestFunc1);
+    QuadFitLineSearch qfSearch(pFuncObj.get());
+    qfSearch.setGoal(QuadFitLineSearch::MINIMIZE);
+    qfSearch.solve();
+}
 
 int main()
 {
-
+    run();
 }

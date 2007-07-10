@@ -30,11 +30,27 @@
 
 namespace scsolver { namespace numeric {
 
+class SingleVarFuncObj;
+
 class QuadFitLineSearch
 {
 public:
-    QuadFitLineSearch();
+    enum Goal
+    {
+        MAXIMIZE,
+        MINIMIZE
+    };
+
+    explicit QuadFitLineSearch(const SingleVarFuncObj* pFuncObj);
     ~QuadFitLineSearch() throw();
+
+    void setGoal(QuadFitLineSearch::Goal goal);
+
+    void solve();
+
+private:
+    const SingleVarFuncObj* m_pFuncObj;
+    QuadFitLineSearch::Goal m_eGoal;
 };
 
 }}

@@ -40,4 +40,14 @@ BaseFuncObj::~BaseFuncObj() throw()
 {
 }
 
+// --------------------------------------------------------------------------
+
+SingleVarFuncObj::SingleVarFuncObj()
+{
+}
+
+SingleVarFuncObj::~SingleVarFuncObj() throw()
+{
+}
+
 }}

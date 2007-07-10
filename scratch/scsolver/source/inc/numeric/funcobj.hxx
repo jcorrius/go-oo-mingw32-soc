@@ -46,17 +46,36 @@ public:
 
     virtual void setVars(const ::std::vector<double>& vars) = 0;
 
-    virtual void setVar(size_t index,  double var) = 0;
+    virtual void setVar(size_t index, double var) = 0;
 
     virtual double eval() = 0;
 
     /**
-     * Return a display-friendly function string.
-     * 
-     * @return std::string
-     **/
+     * Return a display-friendly function string. 
+     */
     virtual const std::string getFuncString() const = 0;
 };
+
+// --------------------------------------------------------------------------
+
+/** 
+ * Non-linear function object that only has one variable.  Used for a
+ * line-search algorithm.
+ */
+class SingleVarFuncObj
+{
+public:
+    SingleVarFuncObj();
+    virtual ~SingleVarFuncObj() throw() = 0;
+
+    virtual double eval(double var) const = 0;
+
+    /** 
+     * Return a display-friendly function string (e.g. x^3 + 2*x^2 + 4). 
+     */
+    virtual const ::std::string getFuncString() const = 0;
+};
+
 
 }}
 
