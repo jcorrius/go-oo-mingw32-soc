@@ -84,7 +84,7 @@ public:
     virtual css::uno::Reference< oo::msforms::XShapeRange > SAL_CALL Range( const css::uno::Any& shapes ) throw (css::uno::RuntimeException);
     //helper::calc
     virtual css::uno::Any SAL_CALL AddLine( sal_Int32 StartX, sal_Int32 StartY, sal_Int32 endX, sal_Int32 endY ) throw (css::uno::RuntimeException);
-    virtual css::uno::Any SAL_CALL AddShape( sal_Int32 ShapeType, sal_Int32 StartX, sal_Int32 StartY, sal_Int32 endX, sal_Int32 endY ) throw (css::uno::RuntimeException);
+    virtual css::uno::Any SAL_CALL AddShape( sal_Int32 _nType, sal_Int32 _nLeft, sal_Int32 _nTop, sal_Int32 _nWidth, sal_Int32 _nHeight ) throw (css::uno::RuntimeException);
 };
 
 #endif//SC_VBA_SHAPES_HXX

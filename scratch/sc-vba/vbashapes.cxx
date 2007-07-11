@@ -36,6 +36,7 @@
 #include <com/sun/star/view/XSelectionSupplier.hpp>
 #include <com/sun/star/text/WrapTextMode.hpp>
 #include <org/openoffice/msforms/XShapeRange.hpp>
+#include <org/openoffice/office/MsoAutoShapeType.hpp>
 
 #include "vbashapes.hxx"
 #include "vbashape.hxx"
@@ -329,19 +330,84 @@ ScVbaShapes::AddEllipse( sal_Int32 startX, sal_Int32 startY, sal_Int32 nLineWidt
     m_xShapes->add( xShape );
 
     awt::Point aMovePositionIfRange( 0, 0 );
-    return uno::Any();
+    //TODO helperapi using a writer document
+    /*
+    XDocument xDocument = (XDocument)getParent();
+    if (AnyConverter.isVoid(_aRange))
+    {
+        _aRange = xDocument.Range(new Integer(0), new Integer(1));
+        // Top&Left in Word is Top&Left of the paper and not the writeable area.
+        aMovePositionIfRange = calculateTopLeftMargin((HelperInterfaceAdaptor)xDocument);
+    }
+
+    setShape_AnchorTypeAndRangeProperty(xShape, _aRange);
+    */
+    rtl::OUString name = createName( rtl::OUString::createFromAscii( "Oval" ));
+    setDefaultShapeProperties(xShape);
+    setShape_NameProperty(xShape, name);
+
+    awt::Point position;
+    position.X = nXPos - aMovePositionIfRange.X;
+    position.Y = nYPos - aMovePositionIfRange.Y;
+    xShape->setPosition(position);
+
+    awt::Size size;
+    size.Height = nHeight;
+    size.Width = nWidth;
+    xShape->setSize(size);
+
+    ScVbaShape *pScVbaShape = new ScVbaShape( getParent(), mxContext, xShape, m_xShapes, ScVbaShape::getType( xShape ) );
+    pScVbaShape->setRange( aRange ); 
+    return uno::makeAny( uno::Reference< msforms::XShape > ( pScVbaShape ) );
 }
 
 //helpeapi calc
 uno::Any SAL_CALL
 ScVbaShapes::AddLine( sal_Int32 StartX, sal_Int32 StartY, sal_Int32 endX, sal_Int32 endY ) throw (uno::RuntimeException)
 {
-    return uno::Any();
+    sal_Int32 nLineWidth = endX - StartX;
+    sal_Int32 nLineHeight = endY - StartY;
+
+    sal_Int32 nHeight = Millimeter::getInHundredthsOfOneMillimeter( nLineHeight );
+    sal_Int32 nWidth = Millimeter::getInHundredthsOfOneMillimeter( nLineWidth );
+    sal_Int32 nXPos = Millimeter::getInHundredthsOfOneMillimeter( StartX );
+    sal_Int32 nYPos = Millimeter::getInHundredthsOfOneMillimeter( StartY );
+    
+    uno::Reference< drawing::XShape > xShape( createShape( rtl::OUString::createFromAscii("com.sun.star.drawing.LineShape") ), uno::UNO_QUERY_THROW );
+    m_xShapes->add( xShape );
+
+    awt::Point aMovePositionIfRange( 0, 0 );
+    
+    rtl::OUString name = createName( rtl::OUString::createFromAscii( "Line" ) );
+    setDefaultShapeProperties(xShape);
+    setShape_NameProperty(xShape, name);
+
+    awt::Point position;
+    position.X = nXPos - aMovePositionIfRange.X;
+    position.Y = nYPos - aMovePositionIfRange.Y;
+    xShape->setPosition(position);
+
+    awt::Size size;
+    size.Height = nHeight;
+    size.Width = nWidth;
+    xShape->setSize(size);
+
+    ScVbaShape *pScVbaShape = new ScVbaShape( getParent(), mxContext, xShape, m_xShapes, ScVbaShape::getType( xShape ) );
+    return uno::makeAny( uno::Reference< msforms::XShape > ( pScVbaShape ) );
 }
 
 uno::Any SAL_CALL
-ScVbaShapes::AddShape( sal_Int32 ShapeType, sal_Int32 StartX, sal_Int32 StartY, sal_Int32 endX, sal_Int32 endY ) throw (uno::RuntimeException)
+ScVbaShapes::AddShape( sal_Int32 _nType, sal_Int32 _nLeft, sal_Int32 _nTop, sal_Int32 _nWidth, sal_Int32 _nHeight ) throw (uno::RuntimeException)
 {
+    uno::Any _aAnchor;
+    if (_nType == office::MsoAutoShapeType::msoShapeRectangle)
+    {
+        return AddRectangle(_nLeft, _nTop, _nWidth, _nHeight, _aAnchor);
+    }
+    else if (_nType == office::MsoAutoShapeType::msoShapeOval)
+    {
+        return AddEllipse(_nLeft, _nTop, _nWidth, _nHeight, _aAnchor);
+    }
     return uno::Any();
 }
 
@@ -351,8 +417,9 @@ ScVbaShapes::setDefaultShapeProperties( uno::Reference< drawing::XShape > xShape
     uno::Reference< beans::XPropertySet > xPropertySet( xShape, uno::UNO_QUERY_THROW );
     xPropertySet->setPropertyValue( rtl::OUString::createFromAscii( "FillStyle" ), uno::makeAny( rtl::OUString::createFromAscii( "SOLID" ) ) );
     xPropertySet->setPropertyValue( rtl::OUString::createFromAscii( "FillColor"), uno::makeAny( sal_Int32(0xFFFFFF) )  );
-    xPropertySet->setPropertyValue( rtl::OUString::createFromAscii( "TextWrap"), uno::makeAny( text::WrapTextMode_THROUGHT )  );
-    xPropertySet->setPropertyValue( rtl::OUString::createFromAscii( "Opaque"), uno::makeAny( sal_True )  );
+    xPropertySet->setPropertyValue( rtl::OUString::createFromAscii( "TextWordWrap"), uno::makeAny( text::WrapTextMode_THROUGHT )  );
+    //not find in OOo2.3
+    //xPropertySet->setPropertyValue( rtl::OUString::createFromAscii( "Opaque"), uno::makeAny( sal_True )  );
 }
 
 void

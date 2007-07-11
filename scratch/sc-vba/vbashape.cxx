@@ -152,7 +152,8 @@ ScVbaShape::getType( const css::uno::Reference< drawing::XShape > xShape ) throw
     }
     else if( sShapeType.equals( rtl::OUString::createFromAscii( "com.sun.star.drawing.LineShape" ) ) )
         return office::MsoShapeType::msoLine;
-    else if( sShapeType.equals( rtl::OUString::createFromAscii( "com.sun.star.drawing.CustomShape" ) ) )
+    else if( sShapeType.equals( rtl::OUString::createFromAscii( "com.sun.star.drawing.CustomShape" ) ) ||
+            sShapeType.equals( rtl::OUString::createFromAscii( "com.sun.star.drawing.RectangleShape") ) )
         return office::MsoShapeType::msoAutoShape;
     else
         throw uno::RuntimeException( rtl::OUString::createFromAscii( "the shape type do not be surppored: " ) + sShapeType, uno::Reference< uno::XInterface >() );
