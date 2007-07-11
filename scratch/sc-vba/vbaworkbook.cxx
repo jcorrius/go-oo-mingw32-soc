@@ -382,6 +382,7 @@ ScVbaWorkbook::Save() throw (uno::RuntimeException)
 	dispatchRequests(xModel,url);
 }
 
+void
 ScVbaWorkbook::SaveCopyAs( const uno::Any& Filename ) throw ( uno::RuntimeException)
 {
 	rtl::OUString sFileName;
