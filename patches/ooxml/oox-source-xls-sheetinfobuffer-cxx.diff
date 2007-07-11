@@ -1,0 +1,218 @@
+--- /dev/null	
++++ oox/source/xls/sheetinfobuffer.cxx	
+@@ -0,0 +1,215 @@
++/*************************************************************************
++ *
++ *  OpenOffice.org - a multi-platform office productivity suite
++ *
++ *  $RCSfile: sheetinfobuffer.cxx,v $
++ *
++ *  $Revision: 1.1.2.6 $
++ *
++ *  last change: $Author: dr $ $Date: 2007/06/11 09:09:36 $
++ *
++ *  The Contents of this file are made available subject to
++ *  the terms of GNU Lesser General Public License Version 2.1.
++ *
++ *
++ *    GNU Lesser General Public License Version 2.1
++ *    =============================================
++ *    Copyright 2005 by Sun Microsystems, Inc.
++ *    901 San Antonio Road, Palo Alto, CA 94303, USA
++ *
++ *    This library is free software; you can redistribute it and/or
++ *    modify it under the terms of the GNU Lesser General Public
++ *    License version 2.1, as published by the Free Software Foundation.
++ *
++ *    This library is distributed in the hope that it will be useful,
++ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ *    Lesser General Public License for more details.
++ *
++ *    You should have received a copy of the GNU Lesser General Public
++ *    License along with this library; if not, write to the Free Software
++ *    Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ *    MA  02111-1307  USA
++ *
++ ************************************************************************/
++
++#include "oox/xls/sheetinfobuffer.hxx"
++#include <rtl/ustrbuf.hxx>
++#include <com/sun/star/container/XIndexAccess.hpp>
++#include <com/sun/star/container/XNamed.hpp>
++#include <com/sun/star/lang/XMultiServiceFactory.hpp>
++#include <com/sun/star/i18n/XCharacterClassification.hpp>
++#include <com/sun/star/i18n/KParseTokens.hpp>
++#include <com/sun/star/i18n/KParseType.hpp>
++#include <com/sun/star/sheet/XSpreadsheetDocument.hpp>
++#include <com/sun/star/sheet/XSpreadsheet.hpp>
++#include <comphelper/processfactory.hxx>
++#include "oox/xls/contexthelper.hxx"
++#include "oox/xls/biffinputstream.hxx"
++
++using ::rtl::OUString;
++using ::rtl::OUStringBuffer;
++using ::com::sun::star::uno::Reference;
++using ::com::sun::star::uno::Exception;
++using ::com::sun::star::uno::UNO_QUERY;
++using ::com::sun::star::uno::UNO_QUERY_THROW;
++using ::com::sun::star::container::XIndexAccess;
++using ::com::sun::star::container::XNamed;
++using ::com::sun::star::lang::Locale;
++using ::com::sun::star::lang::XMultiServiceFactory;
++using ::com::sun::star::i18n::XCharacterClassification;
++using ::com::sun::star::i18n::ParseResult;
++using ::com::sun::star::sheet::XSpreadsheetDocument;
++using ::com::sun::star::sheet::XSpreadsheets;
++using ::com::sun::star::sheet::XSpreadsheet;
++using ::oox::core::AttributeList;
++
++namespace oox {
++namespace xls {
++
++// ============================================================================
++
++const sal_uInt16 BIFF_BOUNDSHEET_HIDDEN     = 0x0001;
++const sal_uInt16 BIFF_BOUNDSHEET_VERYHIDDEN = 0x0002;
++const sal_uInt16 BIFF_BOUNDSHEET_ANY_HIDDEN = BIFF_BOUNDSHEET_HIDDEN | BIFF_BOUNDSHEET_VERYHIDDEN;
++
++// ============================================================================
++
++OoxSheetInfo::OoxSheetInfo()
++{
++}
++
++// ============================================================================
++
++namespace {
++
++OUString lclConvertToValidSheetName(
++    const Reference< XCharacterClassification >& rxCharClass,
++    const OUString& rOrigName, sal_Unicode cReplaceChar )
++{
++    using namespace ::com::sun::star::i18n::KParseTokens;
++    using namespace ::com::sun::star::i18n::KParseType;
++
++    OUStringBuffer aConvName = rOrigName;
++    Locale aLocale( CREATE_OUSTRING( "en" ), CREATE_OUSTRING( "US" ), OUString() );
++    sal_Int32 nStartFlags = ANY_LETTER_OR_NUMBER | ASC_UNDERSCORE;
++    sal_Int32 nContFlags = nStartFlags;
++    OUString aStartChars;
++    OUString aContChars( sal_Unicode( ' ' ) );
++    sal_Int32 nStartPos = 0;
++    while( nStartPos < aConvName.getLength() )
++    {
++        ParseResult aRes = rxCharClass->parsePredefinedToken(
++            IDENTNAME, rOrigName, nStartPos, aLocale, nStartFlags, aStartChars, nContFlags, aContChars );
++        if( aRes.EndPos < aConvName.getLength() )
++        {
++            aConvName.setCharAt( aRes.EndPos, cReplaceChar );
++            nStartFlags = nContFlags;
++            aStartChars = aContChars;
++        }
++        nStartPos = aRes.EndPos + 1;
++    }
++    return aConvName.makeStringAndClear();
++}
++
++} // namespace
++
++// ----------------------------------------------------------------------------
++
++SheetInfoBuffer::SheetInfoBuffer( const GlobalDataHelper& rGlobalData ) :
++    GlobalDataHelper( rGlobalData )
++{
++}
++
++void SheetInfoBuffer::importSheet( const AttributeList& rAttribs )
++{
++    maSheetInfos.resize( maSheetInfos.size() + 1 );
++    maSheetInfos.back().reset( new OoxSheetInfo );
++    OoxSheetInfo& rSheetInfo = *maSheetInfos.back();
++    rSheetInfo.maId = rAttribs.getString( R_TOKEN( id ) );
++    rSheetInfo.maName = rAttribs.getString( XML_name );
++}
++
++void SheetInfoBuffer::importBoundSheet( BiffInputStream& rStrm )
++{
++    sal_uInt16 nFlags = 0;
++    if( getBiff() >= BIFF5 )
++    {
++        rStrm.ignore( 4 );
++        rStrm >> nFlags;
++    }
++
++    maSheetInfos.resize( maSheetInfos.size() + 1 );
++    maSheetInfos.back().reset( new OoxSheetInfo );
++    OoxSheetInfo& rSheetInfo = *maSheetInfos.back();
++
++    rSheetInfo.maName = (getBiff() == BIFF8) ?
++        rStrm.readUniString( rStrm.readuInt8() ) :
++        rStrm.readByteString( false, getTextEncoding() );
++
++    rSheetInfo.mbVisible = !getFlag( nFlags, BIFF_BOUNDSHEET_ANY_HIDDEN );
++}
++
++void SheetInfoBuffer::finalizeImport()
++{
++    // character classification service for conversion to valid sheet names
++    Reference< XMultiServiceFactory > xFactory = ::comphelper::getProcessServiceFactory();
++    Reference< XCharacterClassification > xCharClass( xFactory->createInstance(
++        CREATE_OUSTRING( "com.sun.star.i18n.CharacterClassification" ) ), UNO_QUERY );
++
++    // create sheets in document and set sheet names
++    Reference< XSpreadsheets > xSheets( getDocument()->getSheets(), UNO_QUERY );
++    Reference< XIndexAccess > xSheetsIA( xSheets, UNO_QUERY );
++    if( xCharClass.is() && xSheets.is() && xSheetsIA.is() )
++    {
++        sal_Int16 nSheet = 0;
++        for( SheetInfoVec::iterator aIt = maSheetInfos.begin(), aEnd = maSheetInfos.end(); aIt != aEnd; ++aIt, ++nSheet )
++        {
++            OoxSheetInfo& rSheetInfo = **aIt;
++
++            // insert a new sheet or rename (the already existing) first sheet
++            rSheetInfo.maFinalName = lclConvertToValidSheetName( xCharClass, rSheetInfo.maName, '_' );
++            if( rSheetInfo.maFinalName.getLength() > 0 )
++            {
++                try
++                {
++                    if( nSheet < xSheetsIA->getCount() )
++                    {
++                        Reference< XNamed > xSheetName( xSheetsIA->getByIndex( nSheet ), UNO_QUERY_THROW );
++                        xSheetName->setName( rSheetInfo.maFinalName );
++                    }
++                    else
++                    {
++                        xSheets->insertNewByName( rSheetInfo.maFinalName, nSheet );
++                    }
++                }
++                catch( Exception& )
++                {
++                    OSL_ENSURE( false, "WorkbookFragment::endDocument - cannot insert or rename worksheet" );
++                }
++            }
++        }
++    }
++}
++
++OUString SheetInfoBuffer::getSheetId( sal_Int32 nSheet ) const
++{
++    OUString aId;
++    if( const OoxSheetInfo* pInfo = maSheetInfos.get( nSheet ).get() )
++        aId = pInfo->maId;
++    return aId;
++}
++
++OUString SheetInfoBuffer::getFinalSheetName( sal_Int32 nSheet ) const
++{
++    OUString aName;
++    if( const OoxSheetInfo* pInfo = maSheetInfos.get( nSheet ).get() )
++        aName = pInfo->maFinalName;
++    return aName;
++}
++
++// ============================================================================
++
++} // namespace xls
++} // namespace oox
++

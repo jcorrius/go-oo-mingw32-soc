@@ -1,0 +1,1741 @@
+--- /dev/null	
++++ oox/source/xls/formulaparser.cxx	
+@@ -0,0 +1,1738 @@
++/*************************************************************************
++ *
++ *  OpenOffice.org - a multi-platform office productivity suite
++ *
++ *  $RCSfile: formulaparser.cxx,v $
++ *
++ *  $Revision: 1.1.2.24 $
++ *
++ *  last change: $Author: dr $ $Date: 2007/07/10 14:58:52 $
++ *
++ *  The Contents of this file are made available subject to
++ *  the terms of GNU Lesser General Public License Version 2.1.
++ *
++ *
++ *    GNU Lesser General Public License Version 2.1
++ *    =============================================
++ *    Copyright 2005 by Sun Microsystems, Inc.
++ *    901 San Antonio Road, Palo Alto, CA 94303, USA
++ *
++ *    This library is free software; you can redistribute it and/or
++ *    modify it under the terms of the GNU Lesser General Public
++ *    License version 2.1, as published by the Free Software Foundation.
++ *
++ *    This library is distributed in the hope that it will be useful,
++ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ *    Lesser General Public License for more details.
++ *
++ *    You should have received a copy of the GNU Lesser General Public
++ *    License along with this library; if not, write to the Free Software
++ *    Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ *    MA  02111-1307  USA
++ *
++ ************************************************************************/
++
++#include "oox/xls/formulaparser.hxx"
++#include <com/sun/star/sheet/OpCode.hpp>
++#include <com/sun/star/sheet/FormulaToken.hpp>
++#include <com/sun/star/sheet/ReferenceFlags.hpp>
++#include <com/sun/star/sheet/SingleReference.hpp>
++#include <com/sun/star/sheet/ComplexReference.hpp>
++#include <com/sun/star/sheet/XFormulaParser.hpp>
++#include <com/sun/star/sheet/XFormulaTokens.hpp>
++#include <com/sun/star/sheet/XArrayFormulaTokens.hpp>
++#include "oox/core/containerhelper.hxx"
++#include "oox/core/wrappedpropertyset.hxx"
++#include "oox/xls/biffinputstream.hxx"
++#include "oox/xls/addressconverter.hxx"
++#include "oox/xls/defnamesbuffer.hxx"
++
++using ::rtl::OUString;
++using ::com::sun::star::uno::Any;
++using ::com::sun::star::uno::Reference;
++using ::com::sun::star::uno::Sequence;
++using ::com::sun::star::uno::Exception;
++using ::com::sun::star::uno::UNO_QUERY;
++using ::com::sun::star::uno::UNO_QUERY_THROW;
++using ::com::sun::star::lang::XMultiServiceFactory;
++using ::com::sun::star::table::CellAddress;
++using ::com::sun::star::table::CellRangeAddress;
++using ::com::sun::star::sheet::SingleReference;
++using ::com::sun::star::sheet::ComplexReference;
++using ::com::sun::star::sheet::XFormulaParser;
++using ::com::sun::star::sheet::XFormulaTokens;
++using ::com::sun::star::sheet::XArrayFormulaTokens;
++using ::oox::core::ContainerHelper;
++using ::oox::core::WrappedPropertySet;
++using namespace ::com::sun::star::sheet::OpCode;
++using namespace ::com::sun::star::sheet::ReferenceFlags;
++
++namespace oox {
++namespace xls {
++
++// ============================================================================
++
++FormulaContext::~FormulaContext()
++{
++}
++
++// ----------------------------------------------------------------------------
++
++NameFormulaContext::NameFormulaContext( const Reference< XFormulaTokens >& rxTokens ) :
++    mxTokens( rxTokens )
++{
++    OSL_ENSURE( mxTokens.is(), "NameFormulaContext::NameFormulaContext - missing XFormulaTokens interface" );
++}
++
++bool NameFormulaContext::setBaseAddress( CellAddress& rBaseAddress ) const
++{
++    rBaseAddress.Sheet = 0;
++    rBaseAddress.Column = 0;
++    rBaseAddress.Row = 0;
++    return false;
++}
++
++void NameFormulaContext::setTokens( const ApiTokenSequence& rTokens ) const
++{
++    mxTokens->setTokens( rTokens );
++}
++
++// ----------------------------------------------------------------------------
++
++CellFormulaContext::CellFormulaContext(
++        const Reference< XFormulaTokens >& rxTokens, const CellAddress& rCellPos ) :
++    NameFormulaContext( rxTokens ),
++    maCellPos( rCellPos )
++{
++}
++
++bool CellFormulaContext::setBaseAddress( CellAddress& rBaseAddress ) const
++{
++    rBaseAddress = maCellPos;
++    return true;
++}
++
++// ----------------------------------------------------------------------------
++
++ArrayFormulaContext::ArrayFormulaContext(
++        const Reference< XArrayFormulaTokens >& rxTokens, const CellRangeAddress& rArrayRange ) :
++    mxTokens( rxTokens ),
++    maArrayRange( rArrayRange )
++{
++    OSL_ENSURE( mxTokens.is(), "ArrayFormulaContext::ArrayFormulaContext - missing XArrayFormulaTokens interface" );
++}
++
++bool ArrayFormulaContext::setBaseAddress( CellAddress& rBaseAddress ) const
++{
++    rBaseAddress = CellAddress( maArrayRange.Sheet, maArrayRange.StartColumn, maArrayRange.StartRow );
++    return true;
++}
++
++void ArrayFormulaContext::setTokens( const ApiTokenSequence& rTokens ) const
++{
++    mxTokens->setArrayTokens( rTokens );
++}
++
++// Token sequence finalizer ===================================================
++
++namespace {
++
++bool lclIsEmptyParameter( const ApiToken* pToken, const ApiToken* pTokenEnd )
++{
++    while( (pToken < pTokenEnd) && (pToken->OpCode == OPCODE_SPACES) ) ++pToken;
++    if( (pToken < pTokenEnd) && (pToken->OpCode == OPCODE_MISSING) ) ++pToken;
++    while( (pToken < pTokenEnd) && (pToken->OpCode == OPCODE_SPACES) ) ++pToken;
++    return pToken == pTokenEnd;
++}
++
++const ApiToken* lclSkipParentheses( const ApiToken* pToken, const ApiToken* pTokenEnd )
++{
++    // skip tokens between OPCODE_OPEN and OPCODE_CLOSE
++    OSL_ENSURE( (pToken < pTokenEnd) && (pToken->OpCode == OPCODE_OPEN), "lclSkipParentheses - OPCODE_OPEN expected" );
++    ++pToken;
++    while( (pToken < pTokenEnd) && (pToken->OpCode != OPCODE_CLOSE) )
++    {
++        if( pToken->OpCode == OPCODE_OPEN )
++            pToken = lclSkipParentheses( pToken, pTokenEnd );
++        else
++            ++pToken;
++    }
++    // skip the OPCODE_CLOSE token
++    OSL_ENSURE( ((pToken < pTokenEnd) && (pToken->OpCode == OPCODE_CLOSE)) || ((pTokenEnd - 1)->OpCode == OPCODE_BAD), "lclSkipParentheses - OPCODE_CLOSE expected" );
++    return (pToken < pTokenEnd) ? (pToken + 1) : pTokenEnd;
++}
++
++// ----------------------------------------------------------------------------
++
++class TokenSequenceFinalizer
++{
++public:
++    explicit            TokenSequenceFinalizer(
++                            const FunctionProvider& rFuncProvider,
++                            const ApiTokenSequence& rTokens );
++
++    ApiTokenSequence    finalizeTokens();
++
++private:
++    typedef ::std::vector< const ApiToken* > ParameterPosVec;
++
++    void                processTokens(
++                            const ApiToken* pToken,
++                            const ApiToken* pTokenEnd );
++
++    const ApiToken*     processParameters(
++                            const FunctionInfo& rFuncInfo,
++                            const ApiToken* pToken,
++                            const ApiToken* pTokenEnd );
++
++    const ApiToken*     findParameters(
++                            ParameterPosVec& rParams,
++                            const ApiToken* pToken,
++                            const ApiToken* pTokenEnd ) const;
++
++    void                appendCalcOnlyParameter(
++                            const FunctionInfo& rFuncInfo,
++                            size_t nParam );
++
++    void                appendToken( const ApiToken& rToken );
++    Any&                appendToken( sal_Int32 nOpCode );
++
++private:
++    typedef ::std::vector< ApiToken > ApiTokenVec;
++
++    const FunctionProvider& mrFuncProvider;
++    const ApiTokenSequence& mrOldTokens;
++    ApiTokenVec         maNewTokens;
++};
++
++// ----------------------------------------------------------------------------
++
++TokenSequenceFinalizer::TokenSequenceFinalizer(
++        const FunctionProvider& rFuncProvider, const ApiTokenSequence& rTokens ) :
++    mrFuncProvider( rFuncProvider ),
++    mrOldTokens( rTokens )
++{
++}
++
++ApiTokenSequence TokenSequenceFinalizer::finalizeTokens()
++{
++    sal_Int32 nLen = mrOldTokens.getLength();
++    if( (nLen > 0) && maNewTokens.empty() )
++    {
++        maNewTokens.reserve( static_cast< size_t >( nLen + 16 ) );
++        const ApiToken* pToken = mrOldTokens.getConstArray();
++        processTokens( pToken, pToken + nLen );
++    }
++    return ContainerHelper::vectorToSequence( maNewTokens );
++}
++
++void TokenSequenceFinalizer::processTokens( const ApiToken* pToken, const ApiToken* pTokenEnd )
++{
++    while( pToken < pTokenEnd )
++    {
++        // push the current token into the vector
++        appendToken( *pToken );
++        // try to process a function, otherwise go to next token
++        if( const FunctionInfo* pFuncInfo = mrFuncProvider.getFuncInfoFromApiOpCode( pToken->OpCode ) )
++            pToken = processParameters( *pFuncInfo, pToken + 1, pTokenEnd );
++        else
++            ++pToken;
++    }
++}
++
++const ApiToken* TokenSequenceFinalizer::processParameters(
++        const FunctionInfo& rFuncInfo, const ApiToken* pToken, const ApiToken* pTokenEnd )
++{
++    // process a function, if an OPCODE_OPEN token is following
++    OSL_ENSURE( (pToken < pTokenEnd) && (pToken->OpCode == OPCODE_OPEN), "TokenSequenceFinalizer::processParameters - OPCODE_OPEN expected" );
++    if( (pToken < pTokenEnd) && (pToken->OpCode == OPCODE_OPEN) )
++    {
++        // append the OPCODE_OPEN token to the vector
++        appendToken( OPCODE_OPEN );
++
++        // store positions of OPCODE_OPEN, parameter separators, and OPCODE_CLOSE
++        ParameterPosVec aParams;
++        pToken = findParameters( aParams, pToken, pTokenEnd );
++        OSL_ENSURE( aParams.size() >= 2, "TokenSequenceFinalizer::processParameters - missing tokens" );
++        size_t nParamCount = aParams.size() - 1;
++        // empty pair of parentheses -> function call without parameters
++        if( (nParamCount == 1) && lclIsEmptyParameter( aParams[ 0 ] + 1, aParams[ 1 ] ) )
++            nParamCount = 0;
++
++        // process all parameters
++        ParameterPosVec::const_iterator aPosIt = aParams.begin();
++        FuncInfoParamClassIterator aClassIt( rFuncInfo );
++        size_t nLastValidSize = maNewTokens.size();
++        size_t nLastValidCount = 0;
++        for( size_t nParam = 0; nParam < nParamCount; ++nParam, ++aPosIt, ++aClassIt )
++        {
++            // add embedded Calc-only parameters
++            if( aClassIt.isCalcOnlyParam() )
++            {
++                appendCalcOnlyParameter( rFuncInfo, nParam );
++                while( aClassIt.isCalcOnlyParam() ) ++aClassIt;
++            }
++
++            const ApiToken* pParamBegin = *aPosIt + 1;
++            const ApiToken* pParamEnd = *(aPosIt + 1);
++            bool bIsEmpty = lclIsEmptyParameter( pParamBegin, pParamEnd );
++
++            // skip Excel-only parameters
++            if( !aClassIt.isExcelOnlyParam() )
++            {
++                // replace empty second and third parameter in IF function with zeros
++                if( (rFuncInfo.mnApiOpCode == OPCODE_IF) && ((nParam == 1) || (nParam == 2)) && bIsEmpty )
++                {
++                    appendToken( OPCODE_PUSH ) <<= static_cast< double >( 0.0 );
++                    bIsEmpty = false;
++                }
++                else
++                {
++                    // process all tokens of the parameter
++                    processTokens( pParamBegin, pParamEnd );
++                }
++                // append parameter separator token
++                appendToken( OPCODE_SEP );
++            }
++
++            /*  #84453# Update size of new token sequence with valid parameters
++                to be able to remove trailing optional empty parameters. */
++            if( !bIsEmpty || (nParam < rFuncInfo.mnMinParamCount) )
++            {
++                nLastValidSize = maNewTokens.size();
++                nLastValidCount = nParam + 1;
++            }
++        }
++
++        // #84453# remove trailing optional empty parameters
++        maNewTokens.resize( nLastValidSize );
++
++        // add trailing Calc-only parameters
++        if( aClassIt.isCalcOnlyParam() )
++            appendCalcOnlyParameter( rFuncInfo, nLastValidCount );
++
++        // remove last parameter separator token
++        if( maNewTokens.back().OpCode == OPCODE_SEP )
++            maNewTokens.resize( maNewTokens.size() - 1 );
++
++        /*  Append the OPCODE_CLOSE token to the vector, but only if there is
++            no OPCODE_BAD token at the end, this token already contains the
++            trailing closing parentheses. */
++        if( (pTokenEnd - 1)->OpCode != OPCODE_BAD )
++            appendToken( OPCODE_CLOSE );
++    }
++
++    return pToken;
++}
++
++const ApiToken* TokenSequenceFinalizer::findParameters( ParameterPosVec& rParams,
++        const ApiToken* pToken, const ApiToken* pTokenEnd ) const
++{
++    // push position of OPCODE_OPEN
++    OSL_ENSURE( (pToken < pTokenEnd) && (pToken->OpCode == OPCODE_OPEN), "TokenSequenceFinalizer::findParameters - OPCODE_OPEN expected" );
++    rParams.push_back( pToken++ );
++
++    // find positions of parameter separators
++    while( (pToken < pTokenEnd) && (pToken->OpCode != OPCODE_CLOSE) )
++    {
++        if( pToken->OpCode == OPCODE_OPEN )
++            pToken = lclSkipParentheses( pToken, pTokenEnd );
++        else if( pToken->OpCode == OPCODE_SEP )
++            rParams.push_back( pToken++ );
++        else
++            ++pToken;
++    }
++
++    // push position of OPCODE_CLOSE
++    OSL_ENSURE( ((pToken < pTokenEnd) && (pToken->OpCode == OPCODE_CLOSE)) || ((pTokenEnd - 1)->OpCode == OPCODE_BAD), "TokenSequenceFinalizer::findParameters - OPCODE_CLOSE expected" );
++    rParams.push_back( pToken );
++    return (pToken < pTokenEnd) ? (pToken + 1) : pTokenEnd;
++}
++
++void TokenSequenceFinalizer::appendCalcOnlyParameter( const FunctionInfo& rFuncInfo, size_t nParam )
++{
++    (void)nParam;   // prevent 'unused' warning
++    switch( rFuncInfo.mnApiOpCode )
++    {
++        case OPCODE_FLOOR:
++        case OPCODE_CEIL:
++            OSL_ENSURE( nParam == 2, "TokenSequenceFinalizer::appendCalcOnlyParameter - unexpected parameter index" );
++            appendToken( OPCODE_PUSH ) <<= static_cast< double >( 1.0 );
++            appendToken( OPCODE_SEP );
++        break;
++    }
++}
++
++void TokenSequenceFinalizer::appendToken( const ApiToken& rToken )
++{
++    maNewTokens.push_back( rToken );
++}
++
++Any& TokenSequenceFinalizer::appendToken( sal_Int32 nOpCode )
++{
++    maNewTokens.resize( maNewTokens.size() + 1 );
++    maNewTokens.back().OpCode = nOpCode;
++    return maNewTokens.back().Data;
++}
++
++} // namespace
++
++// parser implementation base =================================================
++
++class FormulaParserImpl : public GlobalDataHelper
++{
++public:
++    explicit            FormulaParserImpl( const GlobalDataHelper& rGlobalData );
++
++    /** Converts an XML formula string. */
++    virtual void        importOoxFormula(
++                            const FormulaContext& rContext,
++                            const OUString& rFormulaString );
++
++    /** Imports and converts a BIFF token array from the passed stream. */
++    virtual void        importBiffFormula(
++                            const FormulaContext& rContext,
++                            BiffInputStream& rStrm, sal_uInt16 nFmlaSize );
++
++    /** Finalizes the passed token array after import (e.g. adjusts function
++        parameters) and sets the formula at the passed interface. */
++    void                finalizeImport(
++                            const FormulaContext& rContext,
++                            const ApiTokenSequence& rTokens );
++
++protected:
++    /** Sets the base address, if extant. */
++    void                setBaseAddress( const FormulaContext& rContext );
++
++    /** Returns the function provider. */
++    inline const FunctionProvider& getFunctionProvider() const { return maFuncProvider; }
++    /** Returns the base address for the current formula. */
++    inline const CellAddress& getBaseAddress() const { return maBaseAddress; }
++    /** Returns true, if a base address exists for the formula . */
++    inline bool         hasBaseAddress() const { return mbHasBaseAddress; }
++
++private:
++    FunctionProvider    maFuncProvider;
++    CellAddress         maBaseAddress;
++    bool                mbHasBaseAddress;
++};
++
++// ----------------------------------------------------------------------------
++
++FormulaParserImpl::FormulaParserImpl( const GlobalDataHelper& rGlobalData ) :
++    GlobalDataHelper( rGlobalData ),
++    maFuncProvider( rGlobalData ),
++    mbHasBaseAddress( false )
++{
++}
++
++void FormulaParserImpl::importOoxFormula( const FormulaContext& /*rContext*/,
++        const OUString& /*rFormulaString*/ )
++{
++    OSL_ENSURE( false, "FormulaParserImpl::importOoxFormula - not implemented" );
++}
++
++void FormulaParserImpl::importBiffFormula( const FormulaContext& /*rContext*/,
++        BiffInputStream& /*rStrm*/, sal_uInt16 /*nFmlaSize*/ )
++{
++    OSL_ENSURE( false, "FormulaParserImpl::importBiffFormula - not implemented" );
++}
++
++void FormulaParserImpl::finalizeImport( const FormulaContext& rContext, const ApiTokenSequence& rTokens )
++{
++    TokenSequenceFinalizer aFinalizer( maFuncProvider, rTokens );
++    rContext.setTokens( aFinalizer.finalizeTokens() );
++}
++
++void FormulaParserImpl::setBaseAddress(  const FormulaContext& rContext )
++{
++    mbHasBaseAddress = rContext.setBaseAddress( maBaseAddress );
++}
++
++// OOX parser implementation ==================================================
++
++class OoxFormulaParserImpl : public FormulaParserImpl
++{
++public:
++    explicit            OoxFormulaParserImpl( const GlobalDataHelper& rGlobalData );
++
++    virtual void        importOoxFormula(
++                            const FormulaContext& rContext,
++                            const OUString& rFormulaString );
++
++private:
++    Reference< XFormulaParser > mxParser;
++    WrappedPropertySet  maParserProps;
++    const OUString      maRefPosProp;
++};
++
++// ----------------------------------------------------------------------------
++
++OoxFormulaParserImpl::OoxFormulaParserImpl( const GlobalDataHelper& rGlobalData ) :
++    FormulaParserImpl( rGlobalData ),
++    maRefPosProp( CREATE_OUSTRING( "ReferencePosition" ) )
++{
++    try
++    {
++        Reference< XMultiServiceFactory > xFactory( getDocument(), UNO_QUERY_THROW );
++        mxParser.set( xFactory->createInstance( CREATE_OUSTRING( "com.sun.star.sheet.FormulaParser" ) ), UNO_QUERY_THROW );
++    }
++    catch( Exception& )
++    {
++    }
++    OSL_ENSURE( mxParser.is(), "OoxFormulaParserImpl::OoxFormulaParserImpl - cannot create formula parser" );
++    maParserProps.set( mxParser );
++    maParserProps.setProperty( CREATE_OUSTRING( "CompileEnglish" ), true );
++    maParserProps.setProperty( CREATE_OUSTRING( "R1C1Notation" ), false );
++    maParserProps.setProperty( CREATE_OUSTRING( "Compatibility3DNotation" ), true );
++    maParserProps.setProperty( CREATE_OUSTRING( "IgnoreLeadingSpaces" ), false );
++    maParserProps.setProperty( CREATE_OUSTRING( "ParameterSeparator" ), OUString( sal_Unicode( ',' ) ) );
++}
++
++void OoxFormulaParserImpl::importOoxFormula(
++        const FormulaContext& rContext, const OUString& rFormulaString )
++{
++    if( mxParser.is() )
++    {
++        setBaseAddress( rContext );
++        maParserProps.setProperty( maRefPosProp, getBaseAddress() );
++        finalizeImport( rContext, mxParser->parseFormula( rFormulaString ) );
++    }
++}
++
++// BIFF parser implementation =================================================
++
++namespace {
++
++/** A 2D formula cell reference struct with relative flags. */
++struct BiffSingleRef2d
++{
++    sal_Int32           mnCol;              /// Column index.
++    sal_Int32           mnRow;              /// Row index.
++    bool                mbColRel;           /// True = relative column reference.
++    bool                mbRowRel;           /// True = relative row reference.
++
++    explicit            BiffSingleRef2d();
++
++    void                readBiff2Data( BiffInputStream& rStrm, bool bRelativeAsOffset );
++    void                readBiff8Data( BiffInputStream& rStrm, bool bRelativeAsOffset );
++
++    void                setBiff2Data( sal_uInt8 nCol, sal_uInt16 nRow, bool bRelativeAsOffset );
++    void                setBiff8Data( sal_uInt16 nCol, sal_uInt16 nRow, bool bRelativeAsOffset );
++};
++
++BiffSingleRef2d::BiffSingleRef2d() :
++    mnCol( 0 ),
++    mnRow( 0 ),
++    mbColRel( false ),
++    mbRowRel( false )
++{
++}
++
++void BiffSingleRef2d::readBiff2Data( BiffInputStream& rStrm, bool bRelativeAsOffset )
++{
++    sal_uInt16 nRow;
++    sal_uInt8 nCol;
++    rStrm >> nRow >> nCol;
++    setBiff2Data( nCol, nRow, bRelativeAsOffset );
++}
++
++void BiffSingleRef2d::readBiff8Data( BiffInputStream& rStrm, bool bRelativeAsOffset )
++{
++    sal_uInt16 nRow, nCol;
++    rStrm >> nRow >> nCol;
++    setBiff8Data( nCol, nRow, bRelativeAsOffset );
++}
++
++void BiffSingleRef2d::setBiff2Data( sal_uInt8 nCol, sal_uInt16 nRow, bool bRelativeAsOffset )
++{
++    mnCol = nCol;
++    mnRow = nRow & BIFF_TOK_REF_ROWMASK;
++    mbColRel = getFlag( nRow, BIFF_TOK_REF_COLREL );
++    mbRowRel = getFlag( nRow, BIFF_TOK_REF_ROWREL );
++    if( bRelativeAsOffset && (mnRow > (BIFF_TOK_REF_ROWMASK >> 1)) )
++        mnRow -= (BIFF_TOK_REF_ROWMASK + 1);
++}
++
++void BiffSingleRef2d::setBiff8Data( sal_uInt16 nCol, sal_uInt16 nRow, bool bRelativeAsOffset )
++{
++    mnCol = nCol & BIFF_TOK_REF_COLMASK;
++    mnRow = nRow;
++    mbColRel = getFlag( nCol, BIFF_TOK_REF_COLREL );
++    mbRowRel = getFlag( nCol, BIFF_TOK_REF_ROWREL );
++    if( bRelativeAsOffset && (mnCol > (BIFF_TOK_REF_COLMASK >> 1)) )
++        mnCol -= (BIFF_TOK_REF_COLMASK + 1);
++}
++
++// ----------------------------------------------------------------------------
++
++/** A 2D formula cell range reference struct with relative flags. */
++struct BiffComplexRef2d
++{
++    BiffSingleRef2d     maRef1;             /// Start (top-left) cell address.
++    BiffSingleRef2d     maRef2;             /// End (bottom-right) cell address.
++
++    void                readBiff2Data( BiffInputStream& rStrm, bool bRelativeAsOffset );
++    void                readBiff8Data( BiffInputStream& rStrm, bool bRelativeAsOffset );
++};
++
++void BiffComplexRef2d::readBiff2Data( BiffInputStream& rStrm, bool bRelativeAsOffset )
++{
++    sal_uInt16 nRow1, nRow2;
++    sal_uInt8 nCol1, nCol2;
++    rStrm >> nRow1 >> nRow2 >> nCol1 >> nCol2;
++    maRef1.setBiff2Data( nCol1, nRow1, bRelativeAsOffset );
++    maRef2.setBiff2Data( nCol2, nRow2, bRelativeAsOffset );
++}
++
++void BiffComplexRef2d::readBiff8Data( BiffInputStream& rStrm, bool bRelativeAsOffset )
++{
++    sal_uInt16 nRow1, nRow2, nCol1, nCol2;
++    rStrm >> nRow1 >> nRow2 >> nCol1 >> nCol2;
++    maRef1.setBiff8Data( nCol1, nRow1, bRelativeAsOffset );
++    maRef2.setBiff8Data( nCol2, nRow2, bRelativeAsOffset );
++}
++
++// ----------------------------------------------------------------------------
++
++/** A 2D formula natural language reference struct with relative flag. */
++struct BiffNlrRef2d
++{
++    sal_Int32           mnCol;              /// Column index.
++    sal_Int32           mnRow;              /// Row index.
++    bool                mbRel;              /// True = relative column/row reference.
++
++    explicit            BiffNlrRef2d();
++
++    void                readBiff8Data( BiffInputStream& rStrm );
++};
++
++BiffNlrRef2d::BiffNlrRef2d() :
++    mnCol( 0 ),
++    mnRow( 0 ),
++    mbRel( false )
++{
++}
++
++void BiffNlrRef2d::readBiff8Data( BiffInputStream& rStrm )
++{
++    sal_uInt16 nRow, nCol;
++    rStrm >> nRow >> nCol;
++    mnCol = nCol & BIFF_TOK_NLR_MASK;
++    mnRow = nRow;
++    mbRel = getFlag( nCol, BIFF_TOK_NLR_REL );
++}
++
++} // namespace
++
++// ----------------------------------------------------------------------------
++
++class BiffFormulaParserImpl : public FormulaParserImpl
++{
++public:
++    explicit            BiffFormulaParserImpl( const GlobalDataHelper& rGlobalData );
++
++    virtual void        importBiffFormula(
++                            const FormulaContext& rContext,
++                            BiffInputStream& rStrm, sal_uInt16 nFmlaSize );
++
++private:
++    // import token contents and create API formula token ---------------------
++
++    bool                importTokenNotAvailable( BiffInputStream& rStrm );
++    bool                importRefTokenNotAvailable( BiffInputStream& rStrm, bool bRelativeAsOffset );
++    bool                importStrToken2( BiffInputStream& rStrm );
++    bool                importStrToken8( BiffInputStream& rStrm );
++    bool                importNlrToken( BiffInputStream& rStrm );
++    bool                importAttrToken( BiffInputStream& rStrm );
++    bool                importSpaceToken3( BiffInputStream& rStrm );
++    bool                importSpaceToken4( BiffInputStream& rStrm );
++    bool                importArrayToken( BiffInputStream& rStrm );
++    bool                importNameToken( BiffInputStream& rStrm );
++    bool                importRefToken2( BiffInputStream& rStrm, bool bRelativeAsOffset );
++    bool                importRefToken8( BiffInputStream& rStrm, bool bRelativeAsOffset );
++    bool                importAreaToken2( BiffInputStream& rStrm, bool bRelativeAsOffset );
++    bool                importAreaToken8( BiffInputStream& rStrm, bool bRelativeAsOffset );
++    bool                importRefErrToken( BiffInputStream& rStrm );
++    bool                importAreaErrToken( BiffInputStream& rStrm );
++    bool                importRef3dToken5( BiffInputStream& rStrm, bool bRelativeAsOffset );
++    bool                importRef3dToken8( BiffInputStream& rStrm, bool bRelativeAsOffset );
++    bool                importArea3dToken5( BiffInputStream& rStrm, bool bRelativeAsOffset );
++    bool                importArea3dToken8( BiffInputStream& rStrm, bool bRelativeAsOffset );
++    bool                importRefErr3dToken5( BiffInputStream& rStrm );
++    bool                importRefErr3dToken8( BiffInputStream& rStrm );
++    bool                importAreaErr3dToken5( BiffInputStream& rStrm );
++    bool                importAreaErr3dToken8( BiffInputStream& rStrm );
++    bool                importFuncToken2( BiffInputStream& rStrm );
++    bool                importFuncToken4( BiffInputStream& rStrm );
++    bool                importFuncVarToken2( BiffInputStream& rStrm );
++    bool                importFuncVarToken4( BiffInputStream& rStrm );
++    bool                importFuncCEToken( BiffInputStream& rStrm );
++
++    bool                importNlrRefToken( BiffInputStream& rStrm, bool bRow );
++    bool                importNlrRangeToken( BiffInputStream& rStrm );
++    bool                importNlrErrToken( BiffInputStream& rStrm, sal_uInt16 nIgnore );
++
++    // push API operand or operator -------------------------------------------
++
++    bool                pushOperandToken( sal_Int32 nOpCode, sal_Int32 nSpaces );
++    template< typename Type >
++    bool                pushValueOperandToken( const Type& rValue, sal_Int32 nOpCode, sal_Int32 nSpaces );
++    bool                pushParenthesesOperandToken( sal_Int32 nLeadingSpaces, sal_Int32 nClosingSpaces );
++    bool                pushUnaryPreOperatorToken( sal_Int32 nOpCode, sal_Int32 nSpaces );
++    bool                pushUnaryPostOperatorToken( sal_Int32 nOpCode, sal_Int32 nSpaces );
++    bool                pushBinaryOperatorToken( sal_Int32 nOpCode, sal_Int32 nSpaces );
++    bool                pushParenthesesOperatorToken( sal_Int32 nLeadingSpaces, sal_Int32 nClosingSpaces );
++
++    bool                pushOperand( sal_Int32 nOpCode );
++    template< typename Type >
++    bool                pushValueOperand( const Type& rValue, sal_Int32 nOpCode = OPCODE_PUSH );
++    bool                pushParenthesesOperand();
++    bool                pushDelAddressOperand();
++    bool                pushDelRangeOperand();
++    bool                pushUnaryPreOperator( sal_Int32 nOpCode );
++    bool                pushUnaryPostOperator( sal_Int32 nOpCode );
++    bool                pushBinaryOperator( sal_Int32 nOpCode );
++    bool                pushRangeOperator();
++    bool                pushParenthesesOperator();
++    bool                pushFunctionOperator( sal_Int32 nOpCode, size_t nParamCount );
++
++    size_t              getOperandSize( size_t nOpCountFromEnd, size_t nOpIndex );
++    void                pushOperandSize( size_t nSize );
++    size_t              popOperandSize();
++
++    ApiToken&           getOperandToken( size_t nOpCountFromEnd, size_t nOpIndex );
++    void                removeOperand( size_t nOpCountFromEnd, size_t nOpIndex );
++    void                removeLastOperands( size_t nOpCountFromEnd );
++
++    Any&                appendRawToken( sal_Int32 nOpCode );
++    Any&                insertRawToken( sal_Int32 nOpCode, size_t nIndexFromEnd );
++
++    size_t              appendSpacesToken( sal_Int32 nSpaces );
++    size_t              insertSpacesToken( sal_Int32 nSpaces, size_t nIndexFromEnd );
++    bool                resetSpaces();
++
++    // convert BIFF token and push API operand or operator --------------------
++
++    bool                pushBiffBool( sal_uInt8 nValue );
++    bool                pushBiffError( sal_uInt8 nErrorCode );
++    bool                pushBiffSingleRef( const BiffSingleRef2d& rBiffRef, bool bRelativeAsOffset );
++    bool                pushBiffComplexRef( const BiffComplexRef2d& rBiffRef, bool bRelativeAsOffset );
++    bool                pushBiffNlrRef( const BiffNlrRef2d& rBiffRef, bool bRow );
++    bool                pushBiffNlrRange( const BiffNlrRef2d& rBiffRef, const BiffRange& rRange );
++    bool                pushBiffName( sal_uInt16 nNameId );
++    bool                pushBiffFunction( const FunctionInfo& rFuncInfo, sal_uInt8 nParamCount );
++    bool                pushBiffFunction( sal_uInt16 nFuncId );
++    bool                pushBiffFunction( sal_uInt16 nFuncId, sal_uInt8 nParamCount );
++
++    sal_Int32           readRefId5( BiffInputStream& rStrm );
++    sal_Int32           readRefId8( BiffInputStream& rStrm );
++
++    void                convertSingleRefSheet( SingleReference& orApiRef ) const;
++    void                convertSingleRef( SingleReference& orApiRef, const BiffSingleRef2d& rBiffRef, bool bRelativeAsOffset ) const;
++    void                convertDeletedSingleRef( SingleReference& orRef ) const;
++
++    // ------------------------------------------------------------------------
++private:
++    typedef ::std::vector< ApiToken >   ApiTokenVec;
++    typedef ::std::vector< size_t >     SizeTypeVec;
++    typedef bool (BiffFormulaParserImpl::*ImportOperandFunc)( BiffInputStream& );
++    typedef bool (BiffFormulaParserImpl::*ImportRefOperandFunc)( BiffInputStream&, bool );
++
++    sal_uInt16          mnMaxCol;
++    sal_uInt16          mnMaxRow;
++    ApiTokenVec         maTokenStorage;
++    SizeTypeVec         maTokenIndexes;
++    SizeTypeVec         maOperandSizeStack;
++    ImportOperandFunc   mpImportStrToken;
++    ImportOperandFunc   mpImportSpaceToken;
++    ImportOperandFunc   mpImportNlrToken;
++    ImportRefOperandFunc mpImportRefToken;
++    ImportRefOperandFunc mpImportAreaToken;
++    ImportRefOperandFunc mpImportRef3dToken;
++    ImportRefOperandFunc mpImportArea3dToken;
++    ImportOperandFunc   mpImportRefErr3dToken;
++    ImportOperandFunc   mpImportAreaErr3dToken;
++    ImportOperandFunc   mpImportFuncToken;
++    ImportOperandFunc   mpImportFuncVarToken;
++    ImportOperandFunc   mpImportFuncCEToken;
++    sal_Int32           mnLeadingSpaces;
++    sal_Int32           mnClosingSpaces;
++    sal_uInt16          mnAttrDataSize;
++    sal_uInt16          mnArraySize;
++    sal_uInt16          mnNameSize;
++    sal_uInt16          mnMemAreaSize;
++    sal_uInt16          mnMemFuncSize;
++    sal_uInt16          mnRefErrSize;
++    sal_uInt16          mnAreaErrSize;
++};
++
++// ----------------------------------------------------------------------------
++
++BiffFormulaParserImpl::BiffFormulaParserImpl( const GlobalDataHelper& rGlobalData ) :
++    FormulaParserImpl( rGlobalData ),
++    mnMaxCol( static_cast< sal_uInt16 >( rGlobalData.getAddressConverter().getMaxAddress().Column ) ),
++    mnMaxRow( static_cast< sal_uInt16 >( rGlobalData.getAddressConverter().getMaxAddress().Row ) ),
++    mnLeadingSpaces( 0 ),
++    mnClosingSpaces( 0 )
++{
++    maTokenStorage.reserve( BIFF_TOKARR_MAXLEN );
++    maTokenIndexes.reserve( BIFF_TOKARR_MAXLEN );
++    maOperandSizeStack.reserve( 256 );
++
++    switch( getBiff() )
++    {
++        case BIFF2:
++            mpImportStrToken = &BiffFormulaParserImpl::importStrToken2;
++            mpImportSpaceToken = &BiffFormulaParserImpl::importTokenNotAvailable;
++            mpImportNlrToken = &BiffFormulaParserImpl::importTokenNotAvailable;
++            mpImportRefToken = &BiffFormulaParserImpl::importRefToken2;
++            mpImportAreaToken = &BiffFormulaParserImpl::importAreaToken2;
++            mpImportRef3dToken = &BiffFormulaParserImpl::importRefTokenNotAvailable;
++            mpImportArea3dToken = &BiffFormulaParserImpl::importRefTokenNotAvailable;
++            mpImportRefErr3dToken = &BiffFormulaParserImpl::importTokenNotAvailable;
++            mpImportAreaErr3dToken = &BiffFormulaParserImpl::importTokenNotAvailable;
++            mpImportFuncToken = &BiffFormulaParserImpl::importFuncToken2;
++            mpImportFuncVarToken = &BiffFormulaParserImpl::importFuncVarToken2;
++            mpImportFuncCEToken = &BiffFormulaParserImpl::importFuncCEToken;
++            mnAttrDataSize = 1;
++            mnArraySize = 6;
++            mnNameSize = 5;
++            mnMemAreaSize = 4;
++            mnMemFuncSize = 1;
++            mnRefErrSize = 3;
++            mnAreaErrSize = 6;
++        break;
++        case BIFF3:
++            mpImportStrToken = &BiffFormulaParserImpl::importStrToken2;
++            mpImportNlrToken = &BiffFormulaParserImpl::importTokenNotAvailable;
++            mpImportRefToken = &BiffFormulaParserImpl::importRefToken2;
++            mpImportAreaToken = &BiffFormulaParserImpl::importAreaToken2;
++            mpImportRef3dToken = &BiffFormulaParserImpl::importRefTokenNotAvailable;
++            mpImportArea3dToken = &BiffFormulaParserImpl::importRefTokenNotAvailable;
++            mpImportRefErr3dToken = &BiffFormulaParserImpl::importTokenNotAvailable;
++            mpImportAreaErr3dToken = &BiffFormulaParserImpl::importTokenNotAvailable;
++            mpImportFuncToken = &BiffFormulaParserImpl::importFuncToken2;
++            mpImportFuncVarToken = &BiffFormulaParserImpl::importFuncVarToken2;
++            mpImportFuncCEToken = &BiffFormulaParserImpl::importFuncCEToken;
++            mpImportSpaceToken = &BiffFormulaParserImpl::importSpaceToken3;
++            mnAttrDataSize = 2;
++            mnArraySize = 7;
++            mnNameSize = 8;
++            mnMemAreaSize = 6;
++            mnMemFuncSize = 2;
++            mnRefErrSize = 3;
++            mnAreaErrSize = 6;
++        break;
++        case BIFF4:
++            mpImportStrToken = &BiffFormulaParserImpl::importStrToken2;
++            mpImportSpaceToken = &BiffFormulaParserImpl::importSpaceToken4;
++            mpImportNlrToken = &BiffFormulaParserImpl::importTokenNotAvailable;
++            mpImportRefToken = &BiffFormulaParserImpl::importRefToken2;
++            mpImportAreaToken = &BiffFormulaParserImpl::importAreaToken2;
++            mpImportRef3dToken = &BiffFormulaParserImpl::importRefTokenNotAvailable;
++            mpImportArea3dToken = &BiffFormulaParserImpl::importRefTokenNotAvailable;
++            mpImportRefErr3dToken = &BiffFormulaParserImpl::importTokenNotAvailable;
++            mpImportAreaErr3dToken = &BiffFormulaParserImpl::importTokenNotAvailable;
++            mpImportFuncToken = &BiffFormulaParserImpl::importFuncToken4;
++            mpImportFuncVarToken = &BiffFormulaParserImpl::importFuncVarToken4;
++            mpImportFuncCEToken = &BiffFormulaParserImpl::importTokenNotAvailable;
++            mnAttrDataSize = 2;
++            mnArraySize = 7;
++            mnNameSize = 8;
++            mnMemAreaSize = 6;
++            mnMemFuncSize = 2;
++            mnRefErrSize = 3;
++            mnAreaErrSize = 6;
++        break;
++        case BIFF5:
++            mpImportStrToken = &BiffFormulaParserImpl::importStrToken2;
++            mpImportSpaceToken = &BiffFormulaParserImpl::importSpaceToken4;
++            mpImportNlrToken = &BiffFormulaParserImpl::importTokenNotAvailable;
++            mpImportRefToken = &BiffFormulaParserImpl::importRefToken2;
++            mpImportAreaToken = &BiffFormulaParserImpl::importAreaToken2;
++            mpImportRef3dToken = &BiffFormulaParserImpl::importRef3dToken5;
++            mpImportArea3dToken = &BiffFormulaParserImpl::importArea3dToken5;
++            mpImportRefErr3dToken = &BiffFormulaParserImpl::importRefErr3dToken5;
++            mpImportAreaErr3dToken = &BiffFormulaParserImpl::importAreaErr3dToken5;
++            mpImportFuncToken = &BiffFormulaParserImpl::importFuncToken4;
++            mpImportFuncVarToken = &BiffFormulaParserImpl::importFuncVarToken4;
++            mpImportFuncCEToken = &BiffFormulaParserImpl::importTokenNotAvailable;
++            mnAttrDataSize = 2;
++            mnArraySize = 7;
++            mnNameSize = 12;
++            mnMemAreaSize = 6;
++            mnMemFuncSize = 2;
++            mnRefErrSize = 3;
++            mnAreaErrSize = 6;
++        break;
++        case BIFF8:
++            mpImportStrToken = &BiffFormulaParserImpl::importStrToken8;
++            mpImportSpaceToken = &BiffFormulaParserImpl::importSpaceToken4;
++            mpImportNlrToken = &BiffFormulaParserImpl::importNlrToken;
++            mpImportRefToken = &BiffFormulaParserImpl::importRefToken8;
++            mpImportAreaToken = &BiffFormulaParserImpl::importAreaToken8;
++            mpImportRef3dToken = &BiffFormulaParserImpl::importRef3dToken8;
++            mpImportArea3dToken = &BiffFormulaParserImpl::importArea3dToken8;
++            mpImportRefErr3dToken = &BiffFormulaParserImpl::importRefErr3dToken8;
++            mpImportAreaErr3dToken = &BiffFormulaParserImpl::importAreaErr3dToken8;
++            mpImportFuncToken = &BiffFormulaParserImpl::importFuncToken4;
++            mpImportFuncVarToken = &BiffFormulaParserImpl::importFuncVarToken4;
++            mpImportFuncCEToken = &BiffFormulaParserImpl::importTokenNotAvailable;
++            mnAttrDataSize = 2;
++            mnArraySize = 7;
++            mnNameSize = 2;
++            mnMemAreaSize = 6;
++            mnMemFuncSize = 2;
++            mnRefErrSize = 4;
++            mnAreaErrSize = 8;
++        break;
++        case BIFF_UNKNOWN: break;
++    }
++}
++
++void BiffFormulaParserImpl::importBiffFormula( const FormulaContext& rContext,
++        BiffInputStream& rStrm, sal_uInt16 nFmlaSize )
++{
++    setBaseAddress( rContext );
++    maTokenStorage.clear();
++    maTokenIndexes.clear();
++    maOperandSizeStack.clear();
++    resetSpaces();
++
++    sal_uInt32 nEndPos = rStrm.getRecPos() + nFmlaSize;
++    bool bRelativeAsOffset = !hasBaseAddress();
++
++    bool bOk = true;
++    while( bOk && rStrm.isValid() && (rStrm.getRecPos() < nEndPos) )
++    {
++        sal_uInt8 nTokenId;
++        rStrm >> nTokenId;
++        sal_uInt8 nTokenClass = nTokenId & BIFF_TOKCLASS_MASK;
++        sal_uInt8 nBaseId = nTokenId & BIFF_TOKID_MASK;
++
++        if( nTokenClass == BIFF_TOKCLASS_NONE )
++        {
++            // base tokens
++            switch( nBaseId )
++            {
++                case BIFF_TOKID_EXP:        bOk = false;
++                case BIFF_TOKID_TBL:        bOk = false;
++                case BIFF_TOKID_ADD:        bOk = pushBinaryOperator( OPCODE_ADD );                 break;
++                case BIFF_TOKID_SUB:        bOk = pushBinaryOperator( OPCODE_SUB );                 break;
++                case BIFF_TOKID_MUL:        bOk = pushBinaryOperator( OPCODE_MUL );                 break;
++                case BIFF_TOKID_DIV:        bOk = pushBinaryOperator( OPCODE_DIV );                 break;
++                case BIFF_TOKID_POWER:      bOk = pushBinaryOperator( OPCODE_POW );                 break;
++                case BIFF_TOKID_CONCAT:     bOk = pushBinaryOperator( OPCODE_AMPERSAND );           break;
++                case BIFF_TOKID_LT:         bOk = pushBinaryOperator( OPCODE_LESS );                break;
++                case BIFF_TOKID_LE:         bOk = pushBinaryOperator( OPCODE_LESS_EQUAL );          break;
++                case BIFF_TOKID_EQ:         bOk = pushBinaryOperator( OPCODE_EQUAL );               break;
++                case BIFF_TOKID_GE:         bOk = pushBinaryOperator( OPCODE_GREATER_EQUAL );       break;
++                case BIFF_TOKID_GT:         bOk = pushBinaryOperator( OPCODE_GREATER );             break;
++                case BIFF_TOKID_NE:         bOk = pushBinaryOperator( OPCODE_NOT_EQUAL );           break;
++                case BIFF_TOKID_ISECT:      bOk = pushBinaryOperator( OPCODE_INTERSECT );           break;
++                case BIFF_TOKID_LIST:       bOk = pushBinaryOperator( OPCODE_SEP );                 break;  // OPCODE_UNION does not work
++                case BIFF_TOKID_RANGE:      bOk = pushRangeOperator();                              break;  // #i48496# needs extra processing
++                case BIFF_TOKID_UPLUS:      bOk = pushUnaryPreOperator( OPCODE_ADD );               break;
++                case BIFF_TOKID_UMINUS:     bOk = pushUnaryPreOperator( OPCODE_NEG_SUB );           break;
++                case BIFF_TOKID_PERCENT:    bOk = pushUnaryPostOperator( OPCODE_PERCENT_SIGN );     break;
++                case BIFF_TOKID_PAREN:      bOk = pushParenthesesOperator();                        break;
++                case BIFF_TOKID_MISSARG:    bOk = pushOperand( OPCODE_MISSING );                    break;
++                case BIFF_TOKID_STR:        bOk = (this->*mpImportStrToken)( rStrm );               break;
++                case BIFF_TOKID_NLR:        bOk = (this->*mpImportNlrToken)( rStrm );               break;
++                case BIFF_TOKID_ATTR:       bOk = importAttrToken( rStrm );                         break;
++//                case BIFF_TOKID_SHEET:
++//                case BIFF_TOKID_ENDSHEET:
++                case BIFF_TOKID_ERR:        bOk = pushBiffError( rStrm.readuInt8() );               break;
++                case BIFF_TOKID_BOOL:       bOk = pushBiffBool( rStrm.readuInt8() );                break;
++                case BIFF_TOKID_INT:        bOk = pushValueOperand< double >( rStrm.readuInt16() ); break;
++                case BIFF_TOKID_NUM:        bOk = pushValueOperand( rStrm.readDouble() );           break;
++                default: bOk = false;
++            }
++        }
++        else
++        {
++            // classified tokens
++            switch( nBaseId )
++            {
++                case BIFF_TOKID_ARRAY:      bOk = importArrayToken( rStrm );                                break;
++                case BIFF_TOKID_FUNC:       bOk = (this->*mpImportFuncToken)( rStrm );                      break;
++                case BIFF_TOKID_FUNCVAR:    bOk = (this->*mpImportFuncVarToken)( rStrm );                   break;
++                case BIFF_TOKID_NAME:       bOk = importNameToken( rStrm );                                 break;
++                case BIFF_TOKID_REF:        bOk = (this->*mpImportRefToken)( rStrm, false );                break;
++                case BIFF_TOKID_AREA:       bOk = (this->*mpImportAreaToken)( rStrm, false );               break;
++                case BIFF_TOKID_MEMAREA:    rStrm.ignore( mnMemAreaSize );                                  break;
++                case BIFF_TOKID_MEMERR:     rStrm.ignore( mnMemAreaSize );                                  break;
++                case BIFF_TOKID_MEMNOMEM:   rStrm.ignore( mnMemAreaSize );                                  break;
++                case BIFF_TOKID_MEMFUNC:    rStrm.ignore( mnMemFuncSize );                                  break;
++                case BIFF_TOKID_REFERR:     bOk = importRefErrToken( rStrm );                               break;
++                case BIFF_TOKID_AREAERR:    bOk = importAreaErrToken( rStrm );                              break;
++                case BIFF_TOKID_REFN:       bOk = (this->*mpImportRefToken)( rStrm, true );                 break;
++                case BIFF_TOKID_AREAN:      bOk = (this->*mpImportAreaToken)( rStrm, true );                break;
++                case BIFF_TOKID_MEMAREAN:   rStrm.ignore( mnMemFuncSize );                                  break;
++                case BIFF_TOKID_MEMNOMEMN:  rStrm.ignore( mnMemFuncSize );                                  break;
++                case BIFF_TOKID_FUNCCE:     bOk = (this->*mpImportFuncCEToken)( rStrm );                    break;
++//                case BIFF_TOKID_NAMEX:
++                case BIFF_TOKID_REF3D:      bOk = (this->*mpImportRef3dToken)( rStrm, bRelativeAsOffset );  break;
++                case BIFF_TOKID_AREA3D:     bOk = (this->*mpImportArea3dToken)( rStrm, bRelativeAsOffset ); break;
++                case BIFF_TOKID_REFERR3D:   bOk = (this->*mpImportRefErr3dToken)( rStrm );                  break;
++                case BIFF_TOKID_AREAERR3D:  bOk = (this->*mpImportAreaErr3dToken)( rStrm );                 break;
++                default: bOk = false;
++            }
++        }
++    }
++    if( bOk )
++        bOk = rStrm.getRecPos() == nEndPos;
++    rStrm.seek( nEndPos );
++
++    // build and finalize the token sequence
++    if( bOk )
++    {
++        ApiTokenSequence aTokens( static_cast< sal_Int32 >( maTokenIndexes.size() ) );
++        ApiToken* pToken = aTokens.getArray();
++        for( SizeTypeVec::const_iterator aIt = maTokenIndexes.begin(), aEnd = maTokenIndexes.end(); aIt != aEnd; ++aIt, ++pToken )
++            *pToken = maTokenStorage[ *aIt ];
++        finalizeImport( rContext, aTokens );
++    }
++}
++
++// import token contents and create API formula token -------------------------
++
++bool BiffFormulaParserImpl::importTokenNotAvailable( BiffInputStream& )
++{
++    // dummy function for pointer-to-member-function
++    return false;
++}
++
++bool BiffFormulaParserImpl::importRefTokenNotAvailable( BiffInputStream&, bool )
++{
++    // dummy function for pointer-to-member-function
++    return false;
++}
++
++bool BiffFormulaParserImpl::importStrToken2( BiffInputStream& rStrm )
++{
++    return pushValueOperand( rStrm.readByteString( false, getTextEncoding() ) );
++}
++
++bool BiffFormulaParserImpl::importStrToken8( BiffInputStream& rStrm )
++{
++    // read flags field for empty strings also
++    return pushValueOperand( rStrm.readUniString( rStrm.readuInt8() ) );
++}
++
++bool BiffFormulaParserImpl::importNlrToken( BiffInputStream& rStrm )
++{
++    bool bOk = true;
++    sal_uInt8 nNlrType;
++    rStrm >> nNlrType;
++    switch( nNlrType )
++    {
++        case BIFF_TOK_NLR_ERR:      bOk = importNlrErrToken( rStrm, 4 );        break;
++        case BIFF_TOK_NLR_ROWR:     bOk = importNlrRefToken( rStrm, true );     break;
++        case BIFF_TOK_NLR_COLR:     bOk = importNlrRefToken( rStrm, false );    break;
++        case BIFF_TOK_NLR_ROWV:     bOk = importNlrRefToken( rStrm, true );     break;
++        case BIFF_TOK_NLR_COLV:     bOk = importNlrRefToken( rStrm, false );    break;
++        case BIFF_TOK_NLR_RANGE:    bOk = importNlrRangeToken( rStrm );         break;
++        case BIFF_TOK_NLR_SRANGE:   bOk = importNlrErrToken( rStrm, 13 );       break;
++        case BIFF_TOK_NLR_SROWR:    bOk = importNlrErrToken( rStrm, 4 );        break;
++        case BIFF_TOK_NLR_SCOLR:    bOk = importNlrErrToken( rStrm, 4 );        break;
++        case BIFF_TOK_NLR_SROWV:    bOk = importNlrErrToken( rStrm, 4 );        break;
++        case BIFF_TOK_NLR_SCOLV:    bOk = importNlrErrToken( rStrm, 4 );        break;
++        case BIFF_TOK_NLR_RANGEERR: bOk = importNlrErrToken( rStrm, 13 );       break;
++        case BIFF_TOK_NLR_SXNAME:   bOk = importNlrErrToken( rStrm, 4 );        break;
++        default:                    bOk = false;
++    }
++    return bOk;
++}
++
++bool BiffFormulaParserImpl::importAttrToken( BiffInputStream& rStrm )
++{
++    bool bOk = true;
++    sal_uInt8 nType;
++    rStrm >> nType;
++    switch( nType )
++    {
++        case BIFF_TOK_ATTR_VOLATILE:
++        case BIFF_TOK_ATTR_IF:
++        case BIFF_TOK_ATTR_SKIP:
++        case BIFF_TOK_ATTR_ASSIGN:
++            rStrm.ignore( mnAttrDataSize );
++        break;
++        case BIFF_TOK_ATTR_CHOOSE:
++            rStrm.ignore( mnAttrDataSize * (1 + ((getBiff() == BIFF2) ? rStrm.readuInt8() : rStrm.readuInt16())) );
++        break;
++        case BIFF_TOK_ATTR_SUM:
++            rStrm.ignore( mnAttrDataSize );
++            bOk = pushFunctionOperator( OPCODE_SUM, 1 );
++        break;
++        case BIFF_TOK_ATTR_SPACE:
++        case BIFF_TOK_ATTR_SPACE_VOLATILE:
++            bOk = (this->*mpImportSpaceToken)( rStrm );
++        break;
++        default:
++            bOk = false;
++    }
++    return bOk;
++}
++
++bool BiffFormulaParserImpl::importSpaceToken3( BiffInputStream& rStrm )
++{
++    rStrm.ignore( 2 );
++    return true;
++}
++
++bool BiffFormulaParserImpl::importSpaceToken4( BiffInputStream& rStrm )
++{
++    sal_uInt8 nType, nCount;
++    rStrm >> nType >> nCount;
++    switch( nType )
++    {
++        case BIFF_TOK_ATTR_SPACE_SP:
++        case BIFF_TOK_ATTR_SPACE_BR:
++        case BIFF_TOK_ATTR_SPACE_SP_OPEN:
++        case BIFF_TOK_ATTR_SPACE_BR_OPEN:
++            mnLeadingSpaces += nCount;
++        break;
++        case BIFF_TOK_ATTR_SPACE_SP_CLOSE:
++        case BIFF_TOK_ATTR_SPACE_BR_CLOSE:
++            mnClosingSpaces += nCount;
++        break;
++    }
++    return true;
++}
++
++bool BiffFormulaParserImpl::importArrayToken( BiffInputStream& rStrm )
++{
++    rStrm.ignore( mnArraySize );
++    return pushBiffError( BIFF_ERR_NA );
++}
++
++bool BiffFormulaParserImpl::importNameToken( BiffInputStream& rStrm )
++{
++    sal_uInt16 nNameId;
++    rStrm >> nNameId;
++    rStrm.ignore( mnNameSize );
++    return pushBiffName( nNameId );
++}
++
++bool BiffFormulaParserImpl::importRefToken2( BiffInputStream& rStrm, bool bRelativeAsOffset )
++{
++    BiffSingleRef2d aRef;
++    aRef.readBiff2Data( rStrm, bRelativeAsOffset );
++    return pushBiffSingleRef( aRef, bRelativeAsOffset );
++}
++
++bool BiffFormulaParserImpl::importRefToken8( BiffInputStream& rStrm, bool bRelativeAsOffset )
++{
++    BiffSingleRef2d aRef;
++    aRef.readBiff8Data( rStrm, bRelativeAsOffset );
++    return pushBiffSingleRef( aRef, bRelativeAsOffset );
++}
++
++bool BiffFormulaParserImpl::importAreaToken2( BiffInputStream& rStrm, bool bRelativeAsOffset )
++{
++    BiffComplexRef2d aRef;
++    aRef.readBiff2Data( rStrm, bRelativeAsOffset );
++    return pushBiffComplexRef( aRef, bRelativeAsOffset );
++}
++
++bool BiffFormulaParserImpl::importAreaToken8( BiffInputStream& rStrm, bool bRelativeAsOffset )
++{
++    BiffComplexRef2d aRef;
++    aRef.readBiff8Data( rStrm, bRelativeAsOffset );
++    return pushBiffComplexRef( aRef, bRelativeAsOffset );
++}
++
++bool BiffFormulaParserImpl::importRefErrToken( BiffInputStream& rStrm )
++{
++    rStrm.ignore( mnRefErrSize );
++    return pushDelAddressOperand();
++}
++
++bool BiffFormulaParserImpl::importAreaErrToken( BiffInputStream& rStrm )
++{
++    rStrm.ignore( mnAreaErrSize );
++    return pushDelRangeOperand();
++}
++
++bool BiffFormulaParserImpl::importRef3dToken5( BiffInputStream& rStrm, bool bRelativeAsOffset )
++{
++    (void)rStrm;
++    (void)bRelativeAsOffset;
++    return false;
++}
++
++bool BiffFormulaParserImpl::importRef3dToken8( BiffInputStream& rStrm, bool bRelativeAsOffset )
++{
++    (void)rStrm;
++    (void)bRelativeAsOffset;
++    return false;
++}
++
++bool BiffFormulaParserImpl::importArea3dToken5( BiffInputStream& rStrm, bool bRelativeAsOffset )
++{
++    (void)rStrm;
++    (void)bRelativeAsOffset;
++    return false;
++}
++
++bool BiffFormulaParserImpl::importArea3dToken8( BiffInputStream& rStrm, bool bRelativeAsOffset )
++{
++    (void)rStrm;
++    (void)bRelativeAsOffset;
++    return false;
++}
++
++bool BiffFormulaParserImpl::importRefErr3dToken5( BiffInputStream& rStrm )
++{
++    (void)rStrm;
++    return false;
++}
++
++bool BiffFormulaParserImpl::importRefErr3dToken8( BiffInputStream& rStrm )
++{
++    (void)rStrm;
++    return false;
++}
++
++bool BiffFormulaParserImpl::importAreaErr3dToken5( BiffInputStream& rStrm )
++{
++    (void)rStrm;
++    return false;
++}
++
++bool BiffFormulaParserImpl::importAreaErr3dToken8( BiffInputStream& rStrm )
++{
++    (void)rStrm;
++    return false;
++}
++
++bool BiffFormulaParserImpl::importFuncToken2( BiffInputStream& rStrm )
++{
++    sal_uInt8 nFuncId;
++    rStrm >> nFuncId;
++    return pushBiffFunction( nFuncId );
++}
++
++bool BiffFormulaParserImpl::importFuncToken4( BiffInputStream& rStrm )
++{
++    sal_uInt16 nFuncId;
++    rStrm >> nFuncId;
++    return pushBiffFunction( nFuncId );
++}
++
++bool BiffFormulaParserImpl::importFuncVarToken2( BiffInputStream& rStrm )
++{
++    sal_uInt8 nParamCount, nFuncId;
++    rStrm >> nParamCount >> nFuncId;
++    return pushBiffFunction( nFuncId, nParamCount );
++}
++
++bool BiffFormulaParserImpl::importFuncVarToken4( BiffInputStream& rStrm )
++{
++    sal_uInt8 nParamCount;
++    sal_uInt16 nFuncId;
++    rStrm >> nParamCount >> nFuncId;
++    return pushBiffFunction( nFuncId, nParamCount & BIFF_TOK_FUNCVAR_COUNTMASK );
++}
++
++bool BiffFormulaParserImpl::importFuncCEToken( BiffInputStream& rStrm )
++{
++    rStrm.ignore( 2 );
++    return pushBiffError( BIFF_ERR_NA );
++}
++
++bool BiffFormulaParserImpl::importNlrRefToken( BiffInputStream& rStrm, bool bRow )
++{
++    BiffNlrRef2d aRef;
++    aRef.readBiff8Data( rStrm );
++    return pushBiffNlrRef( aRef, bRow );
++}
++
++bool BiffFormulaParserImpl::importNlrRangeToken( BiffInputStream& rStrm )
++{
++    BiffNlrRef2d aRef;
++    aRef.readBiff8Data( rStrm );
++    rStrm.ignore( 1 );
++    BiffRange aRange;
++    rStrm >> aRange;
++    return pushBiffNlrRange( aRef, aRange );
++}
++
++bool BiffFormulaParserImpl::importNlrErrToken( BiffInputStream& rStrm, sal_uInt16 nIgnore )
++{
++    rStrm.ignore( nIgnore );
++    return pushBiffError( BIFF_ERR_NAME );
++}
++
++// push API operand or operator -----------------------------------------------
++
++bool BiffFormulaParserImpl::pushOperandToken( sal_Int32 nOpCode, sal_Int32 nSpaces )
++{
++    size_t nSpacesSize = appendSpacesToken( nSpaces );
++    appendRawToken( nOpCode );
++    pushOperandSize( nSpacesSize + 1 );
++    return true;
++}
++
++template< typename Type >
++bool BiffFormulaParserImpl::pushValueOperandToken( const Type& rValue, sal_Int32 nOpCode, sal_Int32 nSpaces )
++{
++    size_t nSpacesSize = appendSpacesToken( nSpaces );
++    appendRawToken( nOpCode ) <<= rValue;
++    pushOperandSize( nSpacesSize + 1 );
++    return true;
++}
++
++bool BiffFormulaParserImpl::pushParenthesesOperandToken( sal_Int32 nLeadingSpaces, sal_Int32 nClosingSpaces )
++{
++    size_t nSpacesSize = appendSpacesToken( nLeadingSpaces );
++    appendRawToken( OPCODE_OPEN );
++    nSpacesSize += appendSpacesToken( nClosingSpaces );
++    appendRawToken( OPCODE_CLOSE );
++    pushOperandSize( nSpacesSize + 2 );
++    return true;
++}
++
++bool BiffFormulaParserImpl::pushUnaryPreOperatorToken( sal_Int32 nOpCode, sal_Int32 nSpaces )
++{
++    bool bOk = maOperandSizeStack.size() >= 1;
++    if( bOk )
++    {
++        size_t nOpSize = popOperandSize();
++        size_t nSpacesSize = insertSpacesToken( nSpaces, nOpSize );
++        insertRawToken( nOpCode, nOpSize );
++        pushOperandSize( nOpSize + nSpacesSize + 1 );
++    }
++    return bOk;
++}
++
++bool BiffFormulaParserImpl::pushUnaryPostOperatorToken( sal_Int32 nOpCode, sal_Int32 nSpaces )
++{
++    bool bOk = maOperandSizeStack.size() >= 1;
++    if( bOk )
++    {
++        size_t nOpSize = popOperandSize();
++        size_t nSpacesSize = appendSpacesToken( nSpaces );
++        appendRawToken( nOpCode );
++        pushOperandSize( nOpSize + nSpacesSize + 1 );
++    }
++    return bOk;
++}
++
++bool BiffFormulaParserImpl::pushBinaryOperatorToken( sal_Int32 nOpCode, sal_Int32 nSpaces )
++{
++    bool bOk = maOperandSizeStack.size() >= 2;
++    if( bOk )
++    {
++        size_t nOp2Size = popOperandSize();
++        size_t nOp1Size = popOperandSize();
++        size_t nSpacesSize = insertSpacesToken( nSpaces, nOp2Size );
++        insertRawToken( nOpCode, nOp2Size );
++        pushOperandSize( nOp1Size + nSpacesSize + 1 + nOp2Size );
++    }
++    return bOk;
++}
++
++bool BiffFormulaParserImpl::pushParenthesesOperatorToken( sal_Int32 nLeadingSpaces, sal_Int32 nClosingSpaces )
++{
++    bool bOk = !maOperandSizeStack.empty();
++    if( bOk )
++    {
++        size_t nOpSize = popOperandSize();
++        size_t nSpacesSize = insertSpacesToken( nLeadingSpaces, nOpSize );
++        insertRawToken( OPCODE_OPEN, nOpSize );
++        nSpacesSize += appendSpacesToken( nClosingSpaces );
++        appendRawToken( OPCODE_CLOSE );
++        pushOperandSize( nOpSize + nSpacesSize + 2 );
++    }
++    return bOk;
++}
++
++bool BiffFormulaParserImpl::pushOperand( sal_Int32 nOpCode )
++{
++    return pushOperandToken( nOpCode, mnLeadingSpaces ) && resetSpaces();
++}
++
++template< typename Type >
++bool BiffFormulaParserImpl::pushValueOperand( const Type& rValue, sal_Int32 nOpCode )
++{
++    return pushValueOperandToken( rValue, nOpCode, mnLeadingSpaces ) && resetSpaces();
++}
++
++bool BiffFormulaParserImpl::pushParenthesesOperand()
++{
++    return pushParenthesesOperandToken( mnLeadingSpaces, mnClosingSpaces ) && resetSpaces();
++}
++
++bool BiffFormulaParserImpl::pushDelAddressOperand()
++{
++    SingleReference aRef;
++    convertDeletedSingleRef( aRef );
++    return pushValueOperand( aRef );
++}
++
++bool BiffFormulaParserImpl::pushDelRangeOperand()
++{
++    ComplexReference aRef;
++    convertDeletedSingleRef( aRef.Reference1 );
++    convertDeletedSingleRef( aRef.Reference2 );
++    return pushValueOperand( aRef );
++}
++
++bool BiffFormulaParserImpl::pushUnaryPreOperator( sal_Int32 nOpCode )
++{
++    return pushUnaryPreOperatorToken( nOpCode, mnLeadingSpaces ) && resetSpaces();
++}
++
++bool BiffFormulaParserImpl::pushUnaryPostOperator( sal_Int32 nOpCode )
++{
++    return pushUnaryPostOperatorToken( nOpCode, mnLeadingSpaces ) && resetSpaces();
++}
++
++bool BiffFormulaParserImpl::pushBinaryOperator( sal_Int32 nOpCode )
++{
++    return pushBinaryOperatorToken( nOpCode, mnLeadingSpaces ) && resetSpaces();
++}
++
++bool BiffFormulaParserImpl::pushRangeOperator()
++{
++    // #i48496# try to convert the term SingleRef:SingleRef to a ComplexReference
++    bool bOk = maOperandSizeStack.size() >= 2;
++    if( bOk )
++    {
++        bool bConvertedToRange = false;
++        if( (getOperandSize( 2, 0 ) == 1) && (getOperandSize( 2, 1 ) == 1) )
++        {
++            ApiToken& rOp1 = getOperandToken( 2, 0 );
++            ApiToken& rOp2 = getOperandToken( 2, 1 );
++            if( (rOp1.OpCode == OPCODE_PUSH) && (rOp2.OpCode == OPCODE_PUSH) )
++            {
++                SingleReference aRef1, aRef2;
++                if( (rOp1.Data >>= aRef1) && (rOp2.Data >>= aRef2) )
++                {
++                    removeLastOperands( 2 );
++                    bOk = pushValueOperand( ComplexReference( aRef1, aRef2 ) );
++                    bConvertedToRange = true;
++                }
++            }
++        }
++        if( !bConvertedToRange )
++            bOk = pushBinaryOperator( OPCODE_RANGE );
++    }
++    return bOk;
++}
++
++bool BiffFormulaParserImpl::pushParenthesesOperator()
++{
++    return pushParenthesesOperatorToken( mnLeadingSpaces, mnClosingSpaces ) && resetSpaces();
++}
++
++bool BiffFormulaParserImpl::pushFunctionOperator( sal_Int32 nOpCode, size_t nParamCount )
++{
++    bool bOk = nParamCount <= maOperandSizeStack.size();
++
++    // convert all parameters on stack to a single operand separated with OPCODE_SEP
++    for( size_t nParam = 1; bOk && (nParam < nParamCount); ++nParam )
++        bOk = pushBinaryOperatorToken( OPCODE_SEP, 0 );
++
++    // add function parentheses and function name
++    return bOk &&
++        ((nParamCount > 0) ? pushParenthesesOperatorToken( 0, mnClosingSpaces ) : pushParenthesesOperandToken( 0, mnClosingSpaces )) &&
++        pushUnaryPreOperatorToken( nOpCode, mnLeadingSpaces ) && resetSpaces();
++}
++
++size_t BiffFormulaParserImpl::getOperandSize( size_t nOpCountFromEnd, size_t nOpIndex )
++{
++    OSL_ENSURE( (nOpIndex < nOpCountFromEnd) && (nOpCountFromEnd <= maOperandSizeStack.size()),
++        "BiffFormulaParserImpl::getOperandSize - invalid parameters" );
++    return maOperandSizeStack[ maOperandSizeStack.size() - nOpCountFromEnd + nOpIndex ];
++}
++
++void BiffFormulaParserImpl::pushOperandSize( size_t nSize )
++{
++    maOperandSizeStack.push_back( nSize );
++}
++
++size_t BiffFormulaParserImpl::popOperandSize()
++{
++    OSL_ENSURE( !maOperandSizeStack.empty(), "BiffFormulaParserImpl::popOperandSize - invalid call" );
++    size_t nOpSize = maOperandSizeStack.back();
++    maOperandSizeStack.pop_back();
++    return nOpSize;
++}
++
++ApiToken& BiffFormulaParserImpl::getOperandToken( size_t nOpCountFromEnd, size_t nOpIndex )
++{
++    OSL_ENSURE( (nOpIndex < nOpCountFromEnd) && (nOpCountFromEnd <= maOperandSizeStack.size()),
++        "BiffFormulaParserImpl::getOperandToken - invalid parameters" );
++    SizeTypeVec::const_iterator aIndexIt = maTokenIndexes.end();
++    for( SizeTypeVec::const_iterator aEnd = maOperandSizeStack.end(), aIt = aEnd - nOpCountFromEnd + nOpIndex; aIt != aEnd; ++aIt )
++        aIndexIt -= *aIt;
++    return maTokenStorage[ *aIndexIt ];
++}
++
++void BiffFormulaParserImpl::removeOperand( size_t nOpCountFromEnd, size_t nOpIndex )
++{
++    OSL_ENSURE( (nOpIndex < nOpCountFromEnd) && (nOpCountFromEnd <= maOperandSizeStack.size()),
++        "BiffFormulaParserImpl::removeOperand - invalid parameters" );
++    // remove indexes into token storage, but do not touch storage itself
++    SizeTypeVec::iterator aSizeEnd = maOperandSizeStack.end();
++    SizeTypeVec::iterator aSizeIt = aSizeEnd - nOpCountFromEnd + nOpIndex;
++    size_t nRemainingSize = 0;
++    for( SizeTypeVec::iterator aIt = aSizeIt + 1; aIt != aSizeEnd; ++aIt )
++        nRemainingSize += *aIt;
++    maTokenIndexes.erase( maTokenIndexes.end() - nRemainingSize - *aSizeIt, maTokenIndexes.end() - nRemainingSize );
++    maOperandSizeStack.erase( aSizeIt );
++}
++
++void BiffFormulaParserImpl::removeLastOperands( size_t nOpCountFromEnd )
++{
++    for( size_t nOpIndex = 0; nOpIndex < nOpCountFromEnd; ++nOpIndex )
++        removeOperand( 1, 0 );
++}
++
++Any& BiffFormulaParserImpl::appendRawToken( sal_Int32 nOpCode )
++{
++    size_t nTokenIndex = maTokenStorage.size();
++    maTokenStorage.resize( nTokenIndex + 1 );
++    maTokenStorage.back().OpCode = nOpCode;
++    maTokenIndexes.push_back( nTokenIndex );
++    return maTokenStorage.back().Data;
++}
++
++Any& BiffFormulaParserImpl::insertRawToken( sal_Int32 nOpCode, size_t nIndexFromEnd )
++{
++    size_t nTokenIndex = maTokenStorage.size();
++    maTokenStorage.resize( nTokenIndex + 1 );
++    maTokenStorage.back().OpCode = nOpCode;
++    maTokenIndexes.insert( maTokenIndexes.end() - nIndexFromEnd, nTokenIndex );
++    return maTokenStorage.back().Data;
++}
++
++size_t BiffFormulaParserImpl::appendSpacesToken( sal_Int32 nSpaces )
++{
++    if( nSpaces > 0 )
++    {
++        appendRawToken( OPCODE_SPACES ) <<= nSpaces;
++        return 1;
++    }
++    return 0;
++}
++
++size_t BiffFormulaParserImpl::insertSpacesToken( sal_Int32 nSpaces, size_t nIndexFromEnd )
++{
++    if( nSpaces > 0 )
++    {
++        insertRawToken( OPCODE_SPACES, nIndexFromEnd ) <<= nSpaces;
++        return 1;
++    }
++    return 0;
++}
++
++bool BiffFormulaParserImpl::resetSpaces()
++{
++    mnLeadingSpaces = mnClosingSpaces = 0;
++    return true;
++}
++
++// convert BIFF token and push API operand or operator ------------------------
++
++bool BiffFormulaParserImpl::pushBiffBool( sal_uInt8 nValue )
++{
++    return pushFunctionOperator( (nValue == BIFF_TOK_BOOL_FALSE) ? OPCODE_FALSE : OPCODE_TRUE, 0 );
++}
++
++bool BiffFormulaParserImpl::pushBiffError( sal_uInt8 nErrorCode )
++{
++    switch( nErrorCode )
++    {
++        case BIFF_ERR_NULL:     return pushDelAddressOperand();
++        case BIFF_ERR_DIV0:     return pushFunctionOperator( OPCODE_NO_VALUE, 0 );
++        case BIFF_ERR_VALUE:    return pushFunctionOperator( OPCODE_NO_VALUE, 0 );
++        case BIFF_ERR_REF:      return pushDelAddressOperand();
++        case BIFF_ERR_NAME:     return pushFunctionOperator( OPCODE_NO_NAME, 0 );
++        case BIFF_ERR_NUM:      return pushFunctionOperator( OPCODE_NO_VALUE, 0 );
++        case BIFF_ERR_NA:       return pushFunctionOperator( OPCODE_NO_VALUE, 0 );
++    }
++    return pushFunctionOperator( OPCODE_NO_VALUE, 0 );
++}
++
++bool BiffFormulaParserImpl::pushBiffSingleRef( const BiffSingleRef2d& rBiffRef, bool bRelativeAsOffset )
++{
++    SingleReference aApiRef;
++    convertSingleRef( aApiRef, rBiffRef, bRelativeAsOffset );
++    return pushValueOperand( aApiRef );
++}
++
++bool BiffFormulaParserImpl::pushBiffComplexRef( const BiffComplexRef2d& rBiffRef, bool bRelativeAsOffset )
++{
++    ComplexReference aApiRef;
++    convertSingleRef( aApiRef.Reference1, rBiffRef.maRef1, bRelativeAsOffset );
++    convertSingleRef( aApiRef.Reference2, rBiffRef.maRef2, bRelativeAsOffset );
++    return pushValueOperand( aApiRef );
++}
++
++bool BiffFormulaParserImpl::pushBiffNlrRef( const BiffNlrRef2d& rBiffRef, bool bRow )
++{
++    BiffSingleRef2d aBiffRef;
++    aBiffRef.mnCol = rBiffRef.mnCol;
++    aBiffRef.mnRow = rBiffRef.mnRow;
++    aBiffRef.mbColRel = !bRow;
++    aBiffRef.mbRowRel = bRow;
++    SingleReference aApiRef;
++    convertSingleRef( aApiRef, aBiffRef, false );
++    return pushValueOperand( aApiRef, OPCODE_COL_ROW_NAME );
++}
++
++bool BiffFormulaParserImpl::pushBiffNlrRange( const BiffNlrRef2d& rBiffRef, const BiffRange& rBiffRange )
++{
++    BiffSingleRef2d aBiffRef;
++    aBiffRef.mnCol = rBiffRef.mnCol;
++    aBiffRef.mnRow = rBiffRef.mnRow;
++    aBiffRef.mbColRel = (rBiffRef.mnCol == rBiffRange.maFirst.mnCol) && (rBiffRange.maFirst.mnCol == rBiffRange.maLast.mnCol);
++    aBiffRef.mbRowRel = (rBiffRef.mnRow == rBiffRange.maFirst.mnRow) && (rBiffRange.maFirst.mnRow == rBiffRange.maLast.mnRow);
++    SingleReference aApiRef;
++    convertSingleRef( aApiRef, aBiffRef, false );
++    return pushValueOperand( aApiRef, OPCODE_COL_ROW_NAME );
++}
++
++bool BiffFormulaParserImpl::pushBiffName( sal_uInt16 nNameId )
++{
++    if( const DefinedName* pDefName = getDefinedNames().getByBiffIndex( nNameId ).get() )
++    {
++        sal_Int32 nApiIndex = pDefName->getApiIndex();
++        if( nApiIndex >= 0 )
++            return pushValueOperand( nApiIndex, OPCODE_NAME );
++    }
++    return pushBiffError( BIFF_ERR_NAME );
++}
++
++bool BiffFormulaParserImpl::pushBiffFunction( const FunctionInfo& rFuncInfo, sal_uInt8 nParamCount )
++{
++    /*  #i70925# if there are not enough tokens available on token stack, do
++        not exit with error, but reduce parameter count. */
++    size_t nRealParamCount = ::std::min< size_t >( maOperandSizeStack.size(), nParamCount );
++    return pushFunctionOperator( rFuncInfo.mnApiOpCode, nRealParamCount );
++}
++
++bool BiffFormulaParserImpl::pushBiffFunction( sal_uInt16 nFuncId )
++{
++    if( const FunctionInfo* pFuncInfo = getFunctionProvider().getFuncInfoFromBiffFuncId( nFuncId ) )
++        if( pFuncInfo->mnMinParamCount == pFuncInfo->mnMaxParamCount )
++            return pushBiffFunction( *pFuncInfo, pFuncInfo->mnMinParamCount );
++    return pushFunctionOperator( OPCODE_NO_NAME, 0 );
++}
++
++bool BiffFormulaParserImpl::pushBiffFunction( sal_uInt16 nFuncId, sal_uInt8 nParamCount )
++{
++    if( const FunctionInfo* pFuncInfo = getFunctionProvider().getFuncInfoFromBiffFuncId( nFuncId ) )
++        return pushBiffFunction( *pFuncInfo, nParamCount );
++    return pushFunctionOperator( OPCODE_NO_NAME, nParamCount );
++}
++
++void BiffFormulaParserImpl::convertSingleRefSheet( SingleReference& orApiRef ) const
++{
++    // #i10184# absolute sheet index needed for relative references in shared formulas
++    orApiRef.Flags |= SHEET_RELATIVE;
++    orApiRef.Sheet = getBaseAddress().Sheet;
++    orApiRef.RelativeSheet = 0;
++}
++
++void BiffFormulaParserImpl::convertSingleRef( SingleReference& orApiRef, const BiffSingleRef2d& rBiffRef, bool bRelativeAsOffset ) const
++{
++    orApiRef.Flags = 0;
++    // sheet index and sheet flags
++    convertSingleRefSheet( orApiRef );
++    // column/row indexes and flags
++    setFlag( orApiRef.Flags, COLUMN_RELATIVE, rBiffRef.mbColRel );
++    setFlag( orApiRef.Flags, ROW_RELATIVE, rBiffRef.mbRowRel );
++    (rBiffRef.mbColRel ? orApiRef.RelativeColumn : orApiRef.Column) = rBiffRef.mnCol;
++    (rBiffRef.mbRowRel ? orApiRef.RelativeRow : orApiRef.Row) = rBiffRef.mnRow;
++    // convert absolute BIFF indexes to relative offsets used in API
++    if( !bRelativeAsOffset )
++    {
++        if( rBiffRef.mbColRel )
++            orApiRef.RelativeColumn -= getBaseAddress().Column;
++        if( rBiffRef.mbRowRel )
++            orApiRef.RelativeRow -= getBaseAddress().Row;
++    }
++}
++
++void BiffFormulaParserImpl::convertDeletedSingleRef( SingleReference& orApiRef ) const
++{
++    orApiRef.Flags = 0;
++    // sheet index and sheet flags
++    convertSingleRefSheet( orApiRef );
++    // column/row indexes and flags
++    orApiRef.Column = 0;
++    orApiRef.Row = 0;
++    orApiRef.Flags |= COLUMN_DELETED | ROW_DELETED;
++}
++
++// ============================================================================
++
++FormulaParser::FormulaParser( const GlobalDataHelper& rGlobalData ) :
++    FormulaProcessorBase( rGlobalData )
++{
++    switch( getFilterType() )
++    {
++        case FILTER_OOX:    mxImpl.reset( new OoxFormulaParserImpl( rGlobalData ) );    break;
++        case FILTER_BIFF:   mxImpl.reset( new BiffFormulaParserImpl( rGlobalData ) );   break;
++        case FILTER_UNKNOWN: break;
++    }
++}
++
++FormulaParser::~FormulaParser()
++{
++}
++
++void FormulaParser::importFormula( const FormulaContext& rContext, const OUString& rFormulaString ) const
++{
++    mxImpl->importOoxFormula( rContext, rFormulaString );
++}
++
++void FormulaParser::importFormula( const FormulaContext& rContext, BiffInputStream& rStrm, sal_uInt16 nFmlaSize ) const
++{
++    mxImpl->importBiffFormula( rContext, rStrm, nFmlaSize );
++}
++
++void FormulaParser::importFormula( const FormulaContext& rContext, BiffInputStream& rStrm ) const
++{
++    sal_uInt16 nFmlaSize = (getBiff() == BIFF2) ? rStrm.readuInt8() : rStrm.readuInt16();
++    mxImpl->importBiffFormula( rContext, rStrm, nFmlaSize );
++}
++
++void FormulaParser::convertErrorToFormula( const FormulaContext& rContext, sal_uInt8 nErrorCode ) const
++{
++    ApiTokenSequence aTokens;
++    switch( nErrorCode )
++    {
++        case BIFF_ERR_NULL:
++        case BIFF_ERR_REF:
++            aTokens.realloc( 1 );
++            aTokens[ 0 ].OpCode = OPCODE_PUSH;
++            aTokens[ 0 ].Data <<= SingleReference( 0, 0, 0, 0, 0, 0, COLUMN_DELETED | ROW_DELETED | SHEET_RELATIVE );
++        break;
++        case BIFF_ERR_NAME:
++            aTokens.realloc( 3 );
++            aTokens[ 0 ].OpCode = OPCODE_NO_NAME;
++            aTokens[ 1 ].OpCode = OPCODE_OPEN;
++            aTokens[ 2 ].OpCode = OPCODE_CLOSE;
++        break;
++        default:
++            aTokens.realloc( 3 );
++            aTokens[ 0 ].OpCode = OPCODE_NO_VALUE;
++            aTokens[ 1 ].OpCode = OPCODE_OPEN;
++            aTokens[ 2 ].OpCode = OPCODE_CLOSE;
++    }
++    mxImpl->finalizeImport( rContext, aTokens );
++}
++
++// ============================================================================
++
++} // namespace xls
++} // namespace oox
++
