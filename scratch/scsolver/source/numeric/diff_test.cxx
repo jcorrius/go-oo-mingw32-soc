@@ -25,54 +25,100 @@
  *
  ************************************************************************/
 
-#include <numeric/diff.hxx>
-#include <numeric/funcobj.hxx>
+#include "numeric/diff.hxx"
+#include "numeric/funcobj.hxx"
 #include <vector>
 #include <string>
 #include <iostream>
-#include <boost/shared_ptr.hpp>
+#include <memory>
 
 using namespace std;
 using namespace scsolver::numeric;
-using namespace boost;
 
 class TestFunc : public BaseFuncObj
 {
 public:
-	virtual string getFuncString() const
+
+    virtual ~TestFunc() throw()
+    {
+    }
+
+	virtual const string getFuncString() const
 	{
-		string s( "f(x) = 2x^2 + 5x" );
-		return s;
+		return string("f(x) = 2x^2 + 5x");
 	}
 
-	virtual double operator()( const std::vector<double>& cnX ) const
-	{
-		double x = cnX.at( 0 );
+    virtual const vector<double>& getVars() const
+    {
+        static const vector<double> tmp;
+        return tmp;
+    }
+
+    virtual void setVars(const vector<double>& vars)
+    {
+        vector<double> tmp(vars);
+        m_Vars.swap(tmp);
+    }
+
+    virtual void setVar(size_t index, double var)
+    {
+        m_Vars.at(index) = var;
+    }
+
+    virtual double eval()
+    {
+		double x = m_Vars.at( 0 );
 		return 2.0*x*x + 5.0*x;
-	}
+    }
+
+private:
+    vector<double> m_Vars;
 };
 
 class TestFunc2 : public BaseFuncObj
 {
 public:
-	virtual string getFuncString() const
+    virtual ~TestFunc2() throw()
+    {
+    }
+
+	virtual const string getFuncString() const
 	{
-		string s( "f(x) = 2x^3 + 5x^2 - 2x" );
-		return s;
+		return string("f(x) = 2x^3 + 5x^2 - 2x");
 	}
 
-	virtual double operator()( const std::vector<double>& cnX ) const
+	virtual double eval()
 	{
-		double x = cnX.at( 0 );
+		double x = m_Vars.at( 0 );
 		return 2.0*x*x*x + 5.0*x*x - 2.0*x;
 	}
+
+    virtual const vector<double>& getVars() const
+    {
+        static const vector<double> tmp;
+        return tmp;
+    }
+
+    virtual void setVars(const vector<double>& vars)
+    {
+        vector<double> tmp(vars);
+        m_Vars.swap(tmp);
+    }
+
+    virtual void setVar(size_t index, double var)
+    {
+        m_Vars.at(index) = var;
+    }
+
+private:
+    vector<double> m_Vars;
 };
 
-void test( const shared_ptr<BaseFuncObj>& pF )
+void test(BaseFuncObj* pF)
 {
 	vector<double> cnX;
 	cnX.push_back( 1.0 );
-	shared_ptr<Differentiate> pDiff( new Differentiate );
+	auto_ptr<Differentiate> pDiff( new Differentiate );
 	pDiff->setVariables( cnX );
 	pDiff->setPrecision( 5 );
 	pDiff->setFuncObject( pF );
@@ -85,12 +131,10 @@ void test( const shared_ptr<BaseFuncObj>& pF )
 
 int main()
 {
-// 	TestFunc oF;
-	shared_ptr<TestFunc> pF( new TestFunc );
-	test( pF );
-	shared_ptr<TestFunc2> pF2( new TestFunc2 );
-// 	TestFunc2 oF2;
-	test( pF2 );
+	auto_ptr<TestFunc> pF( new TestFunc );
+	test(pF.get());
+	auto_ptr<TestFunc2> pF2( new TestFunc2 );
+	test(pF2.get());
 }
 
 

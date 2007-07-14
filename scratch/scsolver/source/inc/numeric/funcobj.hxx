@@ -69,6 +69,7 @@ public:
     virtual ~SingleVarFuncObj() throw() = 0;
 
     virtual double eval(double var) const = 0;
+    double operator()(double var) const;
 
     /** 
      * Return a display-friendly function string (e.g. x^3 + 2*x^2 + 4). 

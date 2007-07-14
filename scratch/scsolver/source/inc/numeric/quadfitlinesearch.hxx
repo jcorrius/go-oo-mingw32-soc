@@ -35,7 +35,7 @@ class SingleVarFuncObj;
 class QuadFitLineSearch
 {
 public:
-    enum Goal
+    enum GoalType
     {
         MAXIMIZE,
         MINIMIZE
@@ -44,13 +44,13 @@ public:
     explicit QuadFitLineSearch(const SingleVarFuncObj* pFuncObj);
     ~QuadFitLineSearch() throw();
 
-    void setGoal(QuadFitLineSearch::Goal goal);
+    void setGoal(QuadFitLineSearch::GoalType goal);
 
-    void solve();
+    bool solve();
 
 private:
     const SingleVarFuncObj* m_pFuncObj;
-    QuadFitLineSearch::Goal m_eGoal;
+    QuadFitLineSearch::GoalType m_eGoal;
 };
 
 }}

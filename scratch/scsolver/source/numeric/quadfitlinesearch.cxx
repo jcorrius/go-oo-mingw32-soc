@@ -27,10 +27,66 @@
 
 #include "numeric/quadfitlinesearch.hxx"
 #include "numeric/funcobj.hxx"
+#include "numeric/polyeqnsolver.hxx"
+#include "numeric/matrix.hxx"
+#include "numeric/diff.hxx"
 
 #include <stdio.h>
 
 namespace scsolver { namespace numeric {
+
+struct SearchData
+{
+    double P1;
+    double P2;
+    double P3;
+
+    QuadFitLineSearch::GoalType Goal;
+    const SingleVarFuncObj& Func;
+
+    explicit SearchData(const SingleVarFuncObj& func) :
+        Func(func)
+    {
+    }
+};
+
+bool iterate(SearchData& data)
+{
+    // Given three points, 
+    return false;
+}
+
+void evalStepLength(const SingleVarFuncObj& F, double step)
+{
+    double e = 0.2;
+    Differentiate diff;
+    diff.setFuncObject(&F);
+//     double f = F(0.0) + step*e*
+}
+
+/**
+ * Find an initial set of points (P1, P2 and P3 in this order from left to 
+ * right) such that P1 > P2 and P2 < P3.
+ *  
+ * @param data
+ * 
+ * @return bool true if successful, or false otherwise.
+ */
+bool findInitialPoints(SearchData& data)
+{
+    fprintf(stdout, "numeric::lclFindInitialPoints: \n");fflush(stdout);
+
+    // First, find an acceptable step length.
+    double step = 0.1;
+
+    data.P1 = 0.0;
+
+    double f = data.Func(1.0);
+    exit(0);
+    return false;
+}
+
+// --------------------------------------------------------------------------
 
 QuadFitLineSearch::QuadFitLineSearch(const SingleVarFuncObj* pFuncObj) :
     m_pFuncObj(pFuncObj),
@@ -42,15 +98,43 @@ QuadFitLineSearch::~QuadFitLineSearch() throw()
 {
 }
 
-void QuadFitLineSearch::setGoal(QuadFitLineSearch::Goal goal)
+void QuadFitLineSearch::setGoal(QuadFitLineSearch::GoalType goal)
 {
     m_eGoal = goal;
 }
 
-void QuadFitLineSearch::solve()
+bool QuadFitLineSearch::solve()
 {
     printf("%s\n", m_pFuncObj->getFuncString().c_str());
 
+    if ( !m_pFuncObj )
+        return false;
+
+    SearchData data(*m_pFuncObj);
+    data.Goal = m_eGoal;
+
+    // 1.  Find three points such that the 2nd point be the lowest.
+    // 2.  Find the quadratic function that passes through all three points.
+    // 3.  Find the minimizer point of that quadratic function.
+    // 4.  Replace one of the three points with the minimizer point based on some conditions.
+    // 5.  Terminate when P1 - P3 < e.
+    findInitialPoints(data);
+    
+    // Solve the quadratic function.
+    PolyEqnSolver eqnSolver;
+    eqnSolver.addDataPoint(data.P1, m_pFuncObj->eval(data.P1));
+    eqnSolver.addDataPoint(data.P2, m_pFuncObj->eval(data.P2));
+    eqnSolver.addDataPoint(data.P3, m_pFuncObj->eval(data.P3));
+    Matrix sol = eqnSolver.solve();
+    sol.print();
+    double x, y;
+
+    // Get the peak of that quad function.
+    getQuadraticPeak(x, y, sol);
+    fprintf(stdout, "QuadFitLineSearch::solve: peak at (%g, %g)\n", x, y);
+    fflush(stdout);
+
+    return true;
 }
 
 }}

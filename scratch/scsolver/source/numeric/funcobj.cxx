@@ -50,4 +50,9 @@ SingleVarFuncObj::~SingleVarFuncObj() throw()
 {
 }
 
+double SingleVarFuncObj::operator()(double var) const
+{
+    return eval(var);
+}
+
 }}
