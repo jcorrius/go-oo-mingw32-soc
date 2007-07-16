@@ -84,7 +84,7 @@ public:
 	virtual void SAL_CALL ResetColors(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL Colors( const css::uno::Any& Index ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
 	virtual ::sal_Int32 SAL_CALL FileFormat(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
-	virtual void SAL_CALL SaveCopyAs( const css::uno::Any& Filename ) throw ( css::uno::RuntimeException);
+	virtual void SAL_CALL SaveCopyAs( const rtl::OUString& Filename ) throw ( css::uno::RuntimeException);
 	// XHelperInterface
 	virtual rtl::OUString& getServiceImplName();
 	virtual css::uno::Sequence<rtl::OUString> getServiceNames();
