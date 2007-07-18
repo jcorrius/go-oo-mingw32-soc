@@ -12,24 +12,36 @@ sub testLog
    # 2 No Log to compare against
    # 1 Log passed 
    # 0 Log failed
-   my $result = 1;
+   my $result = 0;
    my $testfile = shift;
    my $dirtocheck = shift;
    my $filename = basename($testfile);
    $filename = "$logdir/$filename"; 
-   #print "about to diff $testfile $filename\n";
+   print "about to diff $testfile $filename\n";
    if ( -f $filename )  {
       #print "diffing\n";
       my $tmpFile = "/tmp/gen_diff"; 
       my $status = system("diff -U 0 -p $testfile $filename |  $timestampclean > $tmpFile");
       my $info = stat($tmpFile) or die "no $tmpFile: $!";
-      if ( ($status >>=8) == 0 &&  ( $info->size > 0)  ) {
-         $result = 0; 
+      if ( ($status >>=8) == 0 &&  ( $info->size == 0)  ) {
+         print "diff worked size is 0\n";
+         $result = 1; 
+      }
+      elsif ( ($status >>=8) == 0 &&  ( $info->size > 0)  ) 
+      {
+         print "diff worked size > 0\n";
+         $result = 0;
+      }
+      else
+      {
+         print "diff failed size > 0\n";
+         $result = 0;
       }
    }
    else
    {
-      $result = 1;
+      print "not file > 0\n";
+      $result = 2;
    }
    #print "diff result = $result\n";
    return $result;
