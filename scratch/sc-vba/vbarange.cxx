@@ -39,6 +39,8 @@
 #include <sfx2/objsh.hxx>
 
 #include <com/sun/star/script/ArrayWrapper.hpp>
+#include <com/sun/star/sheet/XDatabaseRange.hpp>
+#include <com/sun/star/sheet/XDatabaseRanges.hpp>
 #include <com/sun/star/sheet/XGoalSeek.hpp>
 #include <com/sun/star/sheet/XSheetOperation.hpp>
 #include <com/sun/star/sheet/CellFlags.hpp>
@@ -554,6 +556,11 @@ const static ::rtl::OUString WIDTH(  RTL_CONSTASCII_USTRINGPARAM( "Width"));
 const static ::rtl::OUString HEIGHT(  RTL_CONSTASCII_USTRINGPARAM( "Height"));
 const static ::rtl::OUString POSITION(  RTL_CONSTASCII_USTRINGPARAM( "Position"));
 const static rtl::OUString EQUALS( RTL_CONSTASCII_USTRINGPARAM("=") );
+const static rtl::OUString NOTEQUALS( RTL_CONSTASCII_USTRINGPARAM("<>") );
+const static rtl::OUString GREATERTHAN( RTL_CONSTASCII_USTRINGPARAM(">") );
+const static rtl::OUString GREATERTHANEQUALS( RTL_CONSTASCII_USTRINGPARAM(">=") );
+const static rtl::OUString LESSTHAN( RTL_CONSTASCII_USTRINGPARAM("<") );
+const static rtl::OUString LESSTHANEQUALS( RTL_CONSTASCII_USTRINGPARAM("<=") );
 const static rtl::OUString CONTS_HEADER( RTL_CONSTASCII_USTRINGPARAM("ContainsHeader" ));
 const static rtl::OUString INSERTPAGEBREAKS( RTL_CONSTASCII_USTRINGPARAM("InsertPageBreaks" ));
 const static rtl::OUString STR_ERRORMESSAGE_APPLIESTOSINGLERANGEONLY( RTL_CONSTASCII_USTRINGPARAM("The command you chose cannot be performed with multiple selections.\nSelect a single range and click the command again") );
@@ -656,13 +663,28 @@ void CellValueGetter::visitNode( sal_Int32 x, sal_Int32 y, const uno::Reference<
 	{
 		if ( eType == table::CellContentType_FORMULA )
 		{
+				
 			rtl::OUString sFormula = xCell->getFormula();
 			if ( sFormula.equals( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("=TRUE()") ) ) )
 				aValue <<= sal_True;
 			else if ( sFormula.equals( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("=FALSE()") ) ) )
 				aValue <<= sal_False;
 			else 	
-				aValue <<= xCell->getValue();
+			{
+				uno::Reference< beans::XPropertySet > xProp( xCell, uno::UNO_QUERY_THROW );
+				
+				table::CellContentType eFormulaType = table::CellContentType_VALUE;
+				// some formulas give textual results
+				xProp->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("FormulaResultType" ) ) ) >>= eFormulaType;
+
+				if ( eFormulaType == table::CellContentType_TEXT )
+				{
+					uno::Reference< text::XTextRange > xTextRange(xCell, ::uno::UNO_QUERY_THROW);
+					aValue <<= xTextRange->getString();
+				}
+				else	
+					aValue <<= xCell->getValue();
+			}
 		}
 		else
 		{
@@ -3577,45 +3599,282 @@ ScVbaRange::ApplicationRange( const uno::Reference< uno::XComponentContext >& xC
 	return pRange->Range( Cell1, Cell2, true ); 
 }
 
+uno::Reference< sheet::XDatabaseRanges > 
+lcl_GetDataBaseRanges( ScDocShell* pShell ) throw ( uno::RuntimeException )
+{
+	uno::Reference< frame::XModel > xModel;
+	if ( pShell )
+		xModel.set( pShell->GetModel(), uno::UNO_QUERY_THROW );
+	uno::Reference< beans::XPropertySet > xModelProps( xModel, uno::UNO_QUERY_THROW );
+	uno::Reference< sheet::XDatabaseRanges > xDBRanges( xModelProps->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("DatabaseRanges") ) ), uno::UNO_QUERY_THROW );
+	return xDBRanges;	
+}
+// returns the XDatabaseRange for the autofilter on sheet (nSheet)
+// also populates sName with the name of range
+uno::Reference< sheet::XDatabaseRange > 
+lcl_GetAutoFiltRange( ScDocShell* pShell, sal_Int16 nSheet, rtl::OUString& sName )
+{
+	uno::Reference< container::XIndexAccess > xIndexAccess( lcl_GetDataBaseRanges( pShell ), uno::UNO_QUERY_THROW );
+	uno::Reference< sheet::XDatabaseRange > xDataBaseRange;
+	table::CellRangeAddress dbAddress;
+	for ( sal_Int32 index=0; index < xIndexAccess->getCount(); ++index )
+	{
+		uno::Reference< sheet::XDatabaseRange > xDBRange( xIndexAccess->getByIndex( index ), uno::UNO_QUERY_THROW );
+		uno::Reference< container::XNamed > xNamed( xDBRange, uno::UNO_QUERY_THROW ); 
+		// autofilters work weirdly with openoffice, unnamed is the default 
+		// named range which is used to create an autofilter, but
+		// its also possible that another name could be used
+		//     this also causes problems when an autofilter is created on
+		//     another sheet
+		// ( but.. you can use any named range )
+		dbAddress = xDBRange->getDataArea();
+		if ( dbAddress.Sheet == nSheet )
+		{
+			sal_Bool bHasAuto = sal_False;
+			uno::Reference< beans::XPropertySet > xProps( xDBRange, uno::UNO_QUERY_THROW );
+			xProps->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("AutoFilter") ) ) >>= bHasAuto;
+			if ( bHasAuto )
+			{
+				sName = xNamed->getName();	
+				xDataBaseRange=xDBRange;
+				break;
+			}
+		}
+	}
+	return xDataBaseRange;
+} 
+
+// Helper functions for AutoFilter
+ScDBData* lcl_GetDBData_Impl( ScDocShell* pDocShell, sal_Int16 nSheet )
+{
+	rtl::OUString sName;
+	lcl_GetAutoFiltRange( pDocShell, nSheet, sName );
+	OSL_TRACE("lcl_GetDBData_Impl got autofilter range %s for sheet %d",
+		rtl::OUStringToOString( sName, RTL_TEXTENCODING_UTF8 ).getStr() , nSheet );
+	ScDBData* pRet = NULL;
+	if (pDocShell)
+	{
+		ScDBCollection* pNames = pDocShell->GetDocument()->GetDBCollection();
+		if (pNames)
+		{
+			USHORT nPos = 0;
+			if (pNames->SearchName( sName , nPos ))
+				pRet = (*pNames)[nPos];
+		}
+	}
+	return pRet;
+}
+
+void lcl_SelectAll( ScDocShell* pDocShell, ScQueryParam& aParam )
+{
+	ScViewData* pViewData = pDocShell->GetViewData();
+	if ( pViewData )
+	{
+		OSL_TRACE("Pushing out SelectAll query");
+		pViewData->GetView()->Query( aParam, NULL, TRUE );
+	}
+}
+
+ScQueryParam lcl_GetQueryParam( ScDocShell* pDocShell, sal_Int16 nSheet )
+{
+	ScDBData* pDBData = lcl_GetDBData_Impl( pDocShell, nSheet );	
+	ScQueryParam aParam;	
+	if (pDBData)
+	{
+		pDBData->GetQueryParam( aParam );
+	}
+	return aParam;
+}
+
+void lcl_SetAllQueryForField( ScQueryParam& aParam, sal_Int32 nField )
+{
+	bool bFound = false;
+	SCSIZE i = 0;
+	for (; i<MAXQUERY && !bFound; i++)
+	{
+		ScQueryEntry& rEntry = aParam.GetEntry(i);
+		if ( rEntry.nField == nField)
+		{
+			OSL_TRACE("found at pos %d", i );
+			bFound = true;
+		}
+	}
+	if ( bFound )
+	{
+		OSL_TRACE("field %d to delete at pos %d", nField, ( i - 1 ) );
+		aParam.DeleteQuery(--i);
+	}
+}
+
+
+void lcl_SetAllQueryForField( ScDocShell* pDocShell, sal_Int16 nField, sal_Int16 nSheet )
+{
+	ScQueryParam aParam = lcl_GetQueryParam( pDocShell, nSheet );
+	lcl_SetAllQueryForField( aParam, nField );
+	lcl_SelectAll( pDocShell, aParam );
+}
+
+// Modifies sCriteria, and nOp depending on the value of sCriteria
+void lcl_setTableFieldsFromCriteria( rtl::OUString& sCriteria1, uno::Reference< beans::XPropertySet >& xDescProps, sheet::TableFilterField& rFilterField )
+{
+	// #TODO make this more efficient and cycle through 
+	// sCriteria1 character by character to pick up <,<>,=, * etc.
+	// right now I am more concerned with just getting it to work right
+
+	sCriteria1 = sCriteria1.trim();
+	// table of translation of criteria text to FilterOperators
+	// <>searchtext - NOT_EQUAL
+	//  =searchtext - EQUAL
+	//  *searchtext - startwith
+	//  <>*searchtext - doesn't startwith
+	//  *searchtext* - contains
+	//  <>*searchtext* - doesn't contain
+	// [>|>=|<=|...]searchtext for GREATER_value, GREATER_EQUAL_value etc.
+	sal_Int32 nPos = 0;
+	bool bIsNumeric = false;
+	if ( ( nPos = sCriteria1.indexOf( EQUALS ) ) == 0 )
+	{
+		if ( sCriteria1.getLength() == EQUALS.getLength() )
+			rFilterField.Operator = sheet::FilterOperator_EMPTY;
+		else
+		{
+			rFilterField.Operator = sheet::FilterOperator_EQUAL;
+			sCriteria1 = sCriteria1.copy( EQUALS.getLength() );
+			sCriteria1 = VBAToRegexp( sCriteria1 );	
+			// UseRegularExpressions 
+			if ( xDescProps.is() )
+				xDescProps->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "UseRegularExpressions" ) ), uno::Any( sal_True ) );
+		}
+
+	}
+	else if ( ( nPos = sCriteria1.indexOf( NOTEQUALS ) ) == 0 ) 
+	{
+		if ( sCriteria1.getLength() == NOTEQUALS.getLength() )
+			rFilterField.Operator = sheet::FilterOperator_NOT_EMPTY;	
+		else
+		{
+			rFilterField.Operator = sheet::FilterOperator_NOT_EQUAL;
+			sCriteria1 = sCriteria1.copy( NOTEQUALS.getLength() );
+			sCriteria1 = VBAToRegexp( sCriteria1 );	
+			// UseRegularExpressions 
+			if ( xDescProps.is() )
+				xDescProps->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "UseRegularExpressions" ) ), uno::Any( sal_True ) );
+		}
+	}	
+	else if ( ( nPos = sCriteria1.indexOf( GREATERTHAN ) ) == 0 ) 
+	{
+		bIsNumeric = true;
+		if ( ( nPos = sCriteria1.indexOf( GREATERTHANEQUALS ) ) == 0 )
+		{
+			sCriteria1 = sCriteria1.copy( GREATERTHANEQUALS.getLength() );
+			rFilterField.Operator = sheet::FilterOperator_GREATER_EQUAL;
+		}
+		else
+		{
+			sCriteria1 = sCriteria1.copy( GREATERTHAN.getLength() );
+			rFilterField.Operator = sheet::FilterOperator_GREATER;
+		}
+
+	}
+	else if ( ( nPos = sCriteria1.indexOf( LESSTHAN ) ) == 0 ) 
+	{
+		bIsNumeric = true;
+		if ( ( nPos = sCriteria1.indexOf( LESSTHANEQUALS ) ) == 0 )
+		{
+			sCriteria1 = sCriteria1.copy( LESSTHANEQUALS.getLength() );
+			rFilterField.Operator = sheet::FilterOperator_LESS_EQUAL;
+		}
+		else
+		{
+			sCriteria1 = sCriteria1.copy( LESSTHAN.getLength() );
+			rFilterField.Operator = sheet::FilterOperator_LESS;
+		}
+
+	}
+	else
+		rFilterField.Operator = sheet::FilterOperator_EQUAL;
+
+	if ( bIsNumeric )
+	{
+		rFilterField.IsNumeric= sal_True;
+		rFilterField.NumericValue = sCriteria1.toDouble();
+	}
+	rFilterField.StringValue = sCriteria1;	
+}
 
 void SAL_CALL 
-ScVbaRange::AutoFilter( const uno::Any& Field, const uno::Any& Criteria1, const uno::Any& Operator, const uno::Any& /*Criteria2*/, const uno::Any& VisibleDropDown ) throw (uno::RuntimeException)
+ScVbaRange::AutoFilter( const uno::Any& Field, const uno::Any& Criteria1, const uno::Any& Operator, const uno::Any& Criteria2, const uno::Any& VisibleDropDown ) throw (uno::RuntimeException)
 {
-	// #TODO We could probably hook into the autofilter stuff better
-	// or at least seperate the code in dbfunc so it could be shared
-	// currently a cut'n'paste fest exists below :-(
-
-	ScDocument* pDoc =  getDocumentFromRange( mxRange );
-	ScDocShell* pDocSh = getDocShellFromRange( mxRange );	
-	ScDocShellModificator aModificator( *pDocSh );
-	sal_Bool bHasAuto = sal_True;	
+	// Is there an existing autofilter	
 	RangeHelper thisRange( mxRange );	
 	table::CellRangeAddress thisAddress = thisRange.getCellRangeAddressable()->getRangeAddress();
+	sal_Int16 nSheet = thisAddress.Sheet;
+	ScDocShell* pShell = getScDocShell();
+	sal_Bool bHasAuto = sal_False;	
+	rtl::OUString sAutofiltRangeName;
+	uno::Reference< sheet::XDatabaseRange > xDataBaseRange = lcl_GetAutoFiltRange( pShell, nSheet, sAutofiltRangeName );
+	if ( xDataBaseRange.is() )
+		bHasAuto = true;	
 
-	ScRange aRange;	
-	ScUnoConversion::FillScRange( aRange, thisAddress );
-	ScDBData* pDBData = pDocSh->GetDBData( aRange, SC_DB_MAKE, TRUE );
-	ScQueryParam aParam;
-	pDBData->GetQueryParam( aParam );
-	SCROW  nRow = aParam.nRow1;
-	SCTAB  nTab = aRange.aStart.Tab();
-	INT16   nFlag;
-
-	for (SCCOL nCol=aParam.nCol1; nCol<=aParam.nCol2 && ( bHasAuto == sal_True ); nCol++)
+	uno::Reference< table::XCellRange > xFilterRange;
+	if ( !bHasAuto )
 	{
-		nFlag = ((ScMergeFlagAttr*) pDoc->GetAttr( nCol, nRow, nTab, ATTR_MERGE_FLAG ))->GetValue();
+		if (  m_Areas->getCount() > 1 )
+			throw uno::RuntimeException( STR_ERRORMESSAGE_APPLIESTOSINGLERANGEONLY, uno::Reference< uno::XInterface >() );
 
-		if ( (nFlag & SC_MF_AUTO) == 0 )
-			bHasAuto = sal_False;
-	}	
+		table::CellRangeAddress autoFiltAddress; 
+		//CurrentRegion()
+		if ( isSingleCellRange() )
+		{
+			uno::Reference< excel::XRange > xCurrent( CurrentRegion() );
+			if ( xCurrent.is() )
+			{
+				ScVbaRange* pRange = dynamic_cast< ScVbaRange* >( xCurrent.get() );
+				if ( pRange->isSingleCellRange() )
+					throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Can't create AutoFilter") ), uno::Reference< uno::XInterface >() );
+				if ( pRange )
+				{
+					RangeHelper currentRegion( pRange->mxRange );
+					autoFiltAddress = currentRegion.getCellRangeAddressable()->getRangeAddress();
+				}
+			}
+		} 
+		else // multi-cell range
+		{
+			RangeHelper multiCellRange( mxRange );
+			autoFiltAddress = multiCellRange.getCellRangeAddressable()->getRangeAddress();
+		}
 
-	// for the moment we only process first Criteria1	
+		uno::Reference< sheet::XDatabaseRanges > xDBRanges = lcl_GetDataBaseRanges( pShell );
+		if ( xDBRanges.is() )
+		{
+			rtl::OUString sGenName( RTL_CONSTASCII_USTRINGPARAM("VBA_Autofilter_") );
+			sGenName += rtl::OUString::valueOf( static_cast< sal_Int32 >( nSheet ) );
+			OSL_TRACE("Going to add new autofilter range.. name %s",
+				rtl::OUStringToOString( sGenName, RTL_TEXTENCODING_UTF8 ).getStr() , nSheet );
+			if ( !xDBRanges->hasByName( sGenName ) )
+				xDBRanges->addNewByName(  sGenName, autoFiltAddress );
+			xDataBaseRange.set( xDBRanges->getByName(  sGenName ), uno::UNO_QUERY_THROW );
+		}
+		if ( !xDataBaseRange.is() )
+			throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Failed to find the autofilter placeholder range" ) ), uno::Reference< uno::XInterface >() );		
+
+		uno::Reference< beans::XPropertySet > xDBRangeProps( xDataBaseRange, uno::UNO_QUERY_THROW );
+		// set autofilt
+		xDBRangeProps->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("AutoFilter") ), uno::Any(sal_True) ); 
+		// set header
+		uno::Reference< beans::XPropertySet > xFiltProps( xDataBaseRange->getFilterDescriptor(), uno::UNO_QUERY_THROW );
+		sal_Bool bHasColHeader = sal_False;
+		ScDocument* pDoc = pShell ? pShell->GetDocument() : NULL;
 		
+		bHasColHeader = pDoc->HasColHeader(  static_cast< SCCOL >( autoFiltAddress.StartColumn ), static_cast< SCROW >( autoFiltAddress.StartRow ), static_cast< SCCOL >( autoFiltAddress.EndColumn ), static_cast< SCROW >( autoFiltAddress.EndRow ), static_cast< SCTAB >( autoFiltAddress.Sheet ) ) ? sal_True : sal_False;
+		xFiltProps->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("ContainsHeader") ), uno::Any( bHasColHeader ) );	
+	}
+
+
 	sal_Int32 nField = 0; // *IS* 1 based
 	rtl::OUString sCriteria1;
-	sal_Int32 nOperator = excel::XlAutoFilterOperator::xlAnd; 
-
-
+	sal_Int32 nOperator = excel::XlAutoFilterOperator::xlAnd;
 	
 	sal_Bool bVisible = sal_True;
 	bool  bChangeDropDown = false;
@@ -3626,117 +3885,149 @@ ScVbaRange::AutoFilter( const uno::Any& Field, const uno::Any& Criteria1, const 
 		bVisible = sal_False;
 	else
 		bChangeDropDown = true;	
-
-	sheet::FilterOperator nOp = sheet::FilterOperator_EQUAL;		
 	sheet::FilterConnection nConn = sheet::FilterConnection_AND;		
 	double nCriteria1 = 0;
 
 	bool bHasCritValue = Criteria1.hasValue();
-	bool bCritHasNumericValue = sal_False;
+	bool bCritHasNumericValue = sal_False; // not sure if a numeric criteria is possible
 	if ( bHasCritValue )
 		bCritHasNumericValue = ( Criteria1 >>= nCriteria1 );
 
-	if ( ( Field >>= nField ) 
-	||   Criteria1.hasValue()
-	||   ( Operator >>= nOperator )
-	||   VisibleDropDown.hasValue()
-	)
+	if (  !Field.hasValue() && ( Criteria1.hasValue() || Operator.hasValue() || Criteria2.hasValue() ) ) 
+		throw uno::RuntimeException();
+	// Use the normal uno api, sometimes e.g. when you want to use ALL as the filter
+	// we can't use refresh as the uno interface doesn't have a concept of ALL
+	// in this case we just call the core calc functionality - 
+	bool bAll = false;;
+	if ( ( Field >>= nField )  )
 	{
-		Criteria1 >>= sCriteria1;
-		uno::Reference< sheet::XSheetFilterable > xFilt( mxRange, uno::UNO_QUERY_THROW );
-		uno::Reference< sheet::XSheetFilterDescriptor > xDesc = xFilt->createFilterDescriptor( sal_True );
-		uno::Sequence< sheet::TableFilterField > sTabFilts = xDesc->getFilterFields();
-		sTabFilts.realloc( 1 );
-		sTabFilts[0].IsNumeric = bCritHasNumericValue;
-		OSL_TRACE("No filt fields is %d", sTabFilts.getLength() );
-
-		if ( bHasCritValue && sCriteria1.getLength() )
-		{
-			if ( sCriteria1.equals( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("=") ) ) )
-				nOp = sheet::FilterOperator_EMPTY;
-			else if ( sCriteria1.equals( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("<>") ) ) )
-				nOp = sheet::FilterOperator_NOT_EMPTY;	
-			else
-				nOp = sheet::FilterOperator_EQUAL;
+		uno::Sequence< sheet::TableFilterField > sTabFilts;
+		uno::Reference< sheet::XSheetFilterDescriptor > xDesc = xDataBaseRange->getFilterDescriptor();
+		uno::Reference< beans::XPropertySet > xDescProps( xDesc, uno::UNO_QUERY_THROW );
+		if ( Criteria1.hasValue() )
+		{ 
+			sTabFilts.realloc( 1 );
+			sTabFilts[0].Operator = sheet::FilterOperator_EQUAL;// sensible default
+			if ( !bCritHasNumericValue )
+			{ 
+				Criteria1 >>= sCriteria1;
+				sTabFilts[0].IsNumeric = bCritHasNumericValue;
+				if ( bHasCritValue && sCriteria1.getLength() )
+					lcl_setTableFieldsFromCriteria( sCriteria1, xDescProps, sTabFilts[0]  );
+				else
+					bAll = true;
+			}
+			else // numeric
+			{
+				sTabFilts[0].IsNumeric = sal_True;
+				sTabFilts[0].NumericValue = nCriteria1;
+			}
 		}
-
-		if ( Operator.hasValue() )
+		else // no value specified
+			bAll = true;
+		// not sure what the relationship between Criteria1 and Operator is,
+		// e.g. can you have a Operator without a Criteria ? in openoffice it 	
+		if ( Operator.hasValue()  && ( Operator >>= nOperator ) )
 		{
 			// if its a bottom/top Ten(Percent/Value) and there
 			// is no value specified for critera1 set it to 10
 			if ( !bCritHasNumericValue && !sCriteria1.getLength() && ( nOperator != excel::XlAutoFilterOperator::xlOr ) && ( nOperator != excel::XlAutoFilterOperator::xlAnd ) )
 			{
-				nCriteria1 = 10;
 				sTabFilts[0].IsNumeric = sal_True;	
+				sTabFilts[0].NumericValue = 10;	
+				bAll = false;
 			}
 			switch ( nOperator )
 			{
 				case excel::XlAutoFilterOperator::xlBottom10Items:
-					nOp = sheet::FilterOperator_BOTTOM_VALUES;
+					sTabFilts[0].Operator = sheet::FilterOperator_BOTTOM_VALUES;
 					break;
 				case excel::XlAutoFilterOperator::xlBottom10Percent:
-					nOp = sheet::FilterOperator_BOTTOM_PERCENT;
+					sTabFilts[0].Operator = sheet::FilterOperator_BOTTOM_PERCENT;
 					break;
 				case excel::XlAutoFilterOperator::xlTop10Items:
-					nOp = sheet::FilterOperator_TOP_VALUES;
+					sTabFilts[0].Operator = sheet::FilterOperator_TOP_VALUES;
 					break;
 				case excel::XlAutoFilterOperator::xlTop10Percent:
-					nOp = sheet::FilterOperator_TOP_PERCENT;
+					sTabFilts[0].Operator = sheet::FilterOperator_TOP_PERCENT;
 					break;
 				case excel::XlAutoFilterOperator::xlOr:
-					nConn = sheet::FilterConnection_OR;		
+					nConn = sheet::FilterConnection_OR;
+					break;
 				case excel::XlAutoFilterOperator::xlAnd:
-					nConn = sheet::FilterConnection_AND;		
+					nConn = sheet::FilterConnection_AND;
+					break;
 				default:
 					throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("UnknownOption") ), uno::Reference< uno::XInterface >() );
 					
 			}	
 
 		}		
-		sTabFilts[0].Connection = nConn;	
-		if ( nField > 0 )
+		if ( !bAll )
+		{
+			sTabFilts[0].Connection = sheet::FilterConnection_AND;	
 			sTabFilts[0].Field = (nField - 1);	
-		else
-			sTabFilts[0].Field = 0;	
-		sTabFilts[0].Operator = nOp;	
-		if(	sTabFilts[0].IsNumeric )
-			sTabFilts[0].NumericValue = nCriteria1;	
-		else
-			sTabFilts[0].StringValue = sCriteria1;	
+
+			rtl::OUString sCriteria2;
+			if ( Criteria2.hasValue() ) // there is a Criteria2
+			{
+				sTabFilts.realloc(2);
+				sTabFilts[1].Field = sTabFilts[0].Field;
+				sTabFilts[1].Connection = nConn;	
+
+				if ( Criteria2 >>= sCriteria2 )
+				{
+					if ( sCriteria2.getLength() > 0 )
+					{
+						uno::Reference< beans::XPropertySet > xProps;
+						lcl_setTableFieldsFromCriteria( sCriteria2, xProps,  sTabFilts[1] );
+						sTabFilts[1].IsNumeric = sal_False;
+					}
+				}
+				else // numeric
+				{
+					Criteria2 >>= sTabFilts[1].NumericValue;
+					sTabFilts[1].IsNumeric = sal_True;
+					sTabFilts[1].Operator = sheet::FilterOperator_EQUAL;
+				}
+			}
+		}
 
 		xDesc->setFilterFields( sTabFilts );
-		uno::Reference< beans::XPropertySet > xProps( xDesc, uno::UNO_QUERY_THROW );
-		xProps->setPropertyValue( CONTS_HEADER, uno::makeAny( sal_True ) );
-		xFilt->filter( xDesc );
-	
+		if ( !bAll )
+		{
+			xDataBaseRange->refresh();
+		}
+		else
+			// was 0 based now seems to be 1 
+			lcl_SetAllQueryForField( pShell, nField, nSheet );
 	}
 	else 
-		bChangeDropDown = true;	
-	// enable drop down
-	if ( bChangeDropDown )
 	{
-		ScRange aTmpRange;
-		pDBData->GetArea( aTmpRange );
-		for (SCCOL nCol=aParam.nCol1; nCol<=aParam.nCol2; nCol++)
+		// this is just to toggle autofilter on and off ( not to be confused with 
+		// a VisibleDropDown option combined with a field, in that case just the 
+		// button should be disabled ) - currently we don't support that
+		bChangeDropDown = true;	
+		uno::Reference< beans::XPropertySet > xDBRangeProps( xDataBaseRange, uno::UNO_QUERY_THROW );
+		if ( bHasAuto )
 		{
-			nFlag = ((ScMergeFlagAttr*) pDoc->GetAttr( nCol, nRow, nTab, ATTR_MERGE_FLAG ))->GetValue();
-			if ( bVisible )
-				pDoc->ApplyAttr( nCol, nRow, nTab, ScMergeFlagAttr( nFlag | SC_MF_AUTO ) );
-			else
-				pDoc->ApplyAttr( nCol, nRow, nTab, ScMergeFlagAttr( nFlag &~ SC_MF_AUTO ) );
+			// find the any field with the query and select all
+			ScQueryParam aParam = lcl_GetQueryParam( pShell, nSheet );
+			SCSIZE i = 0;
+			for (; i<MAXQUERY; i++)
+			{
+				ScQueryEntry& rEntry = aParam.GetEntry(i);
+				if ( rEntry.bDoQuery )
+					lcl_SetAllQueryForField( pShell, rEntry.nField, nSheet );
+			}
+			// remove exising filters
+			xDataBaseRange->getFilterDescriptor()->setFilterFields( uno::Sequence< sheet::TableFilterField >() );
 		}
-		if ( !bVisible )
-		{
-			SCSIZE nEC = aParam.GetEntryCount();
-			for (SCSIZE i=0; i<nEC; i++)
-				aParam.GetEntry(i).bDoQuery = FALSE;
-			aParam.bDuplicate = TRUE;
-			ScDBDocFunc aDBDocFunc( *pDocSh );
-			aDBDocFunc.Query( nTab, aParam, &aTmpRange, TRUE, FALSE );
-		}
-		pDocSh->PostPaint( aParam.nCol1, nRow, nTab, aParam.nCol2, nRow, nTab, PAINT_GRID );	
-	}		
+		xDBRangeProps->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("AutoFilter") ), uno::Any(!bHasAuto) );
+
+	}
 }
+
 void SAL_CALL 
 ScVbaRange::Insert( const uno::Any& Shift, const uno::Any& /*CopyOrigin*/ ) throw (uno::RuntimeException)
 {
