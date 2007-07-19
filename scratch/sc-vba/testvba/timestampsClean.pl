@@ -13,6 +13,7 @@ sub pure_guff($)
   {
     my $line = pop @lines;
     if ($line =~ m/Test run started :/ ||
+	$line =~ m/ITEM Assertion OK/ ||
 	$line =~ m/Test run finished :/) {
       $contains_guff = '1';
     } elsif ($line =~ m/^[\+\-][^\-\+]/) {
@@ -24,7 +25,7 @@ sub pure_guff($)
     $contains_guff = '';
   }
   elsif ( $contains_guff ) {
-	$detectedSomeGuff = 1;
+	$detectedSomeGuff++;
   }
 #  print "contains guff: $contains_guff\n";
   return $contains_guff;
@@ -63,15 +64,10 @@ while (<>) {
 }
 output_lines(\@lines);
 
-# basically if the two files compared
-# have the values for the rcid type info
-# then the first diff is ignored.
-# hence fragstocount is set to 1 if there is any guff ( rcid head bits )
-
-my $fragstocount = 0;
-if ( $detectedSomeGuff ) {
-   $fragstocount = 2;
-}
-if ($frag_count > $fragstocount) {
+# $detectedSomeGuff contains the skipped hunks that contain acceptable diff
+# e.g. a timestamp or an OK assertion that contains different content 
+# like perhaps a path
+#print "frag_count = $frag_count fragstocount = $fragstocount detectedSomeGuff = $detectedSomeGuff \n";
+if ($frag_count > $detectedSomeGuff) {
   print @output_buffer;
 }
