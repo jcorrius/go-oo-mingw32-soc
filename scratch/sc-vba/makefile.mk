@@ -2,11 +2,11 @@
 #
 #   OpenOffice.org - a multi-platform office productivity suite
 #
-#   $RCSfile$
+#   $RCSfile: makefile.mk,v $
 #
-#   $Revision$
+#   $Revision: 1.4 $
 #
-#   last change: $Author$ $Date$
+#   last change: $Author: rt $ $Date: 2007/04/27 09:25:06 $
 #
 #   The Contents of this file are made available subject to
 #   the terms of GNU Lesser General Public License Version 2.1.
@@ -48,7 +48,7 @@ DLLPRE =
 dummy:
         @echo "not building vba..."
 .ENDIF
-
+CDEFS+=-DVBA_OOBUILD_HACK
 INCPRE=$(INCCOM)$/$(TARGET)
 
 # ------------------------------------------------------------------

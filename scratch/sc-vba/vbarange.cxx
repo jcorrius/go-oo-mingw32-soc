@@ -2,7 +2,7 @@
  *
  *  OpenOffice.org - a multi-platform office productivity suite
  *
- *  $RCSfile$
+ *  $RCSfile: vbarange.cxx,v $
  *
  *  $Revision$
  *
@@ -2348,8 +2348,11 @@ getPasteFlags (sal_Int32 Paste)
 		nFlags = IDF_FORMULA;break;
         case excel::XlPasteType::xlPasteFormulasAndNumberFormats : 
         case excel::XlPasteType::xlPasteValues: 
+#ifdef VBA_OOBUILD_HACK
 		nFlags = ( IDF_VALUE | IDF_DATETIME | IDF_STRING | IDF_SPECIAL_BOOLEAN ); break;
+#else
 		nFlags = ( IDF_VALUE | IDF_DATETIME | IDF_STRING ); break;
+#endif
         case excel::XlPasteType::xlPasteValuesAndNumberFormats:
 		nFlags = IDF_VALUE | IDF_ATTRIB; break;
         case excel::XlPasteType::xlPasteColumnWidths:
@@ -2749,10 +2752,11 @@ ScVbaRange::Sort( const uno::Any& Key1, const uno::Any& Order1, const uno::Any& 
 
 	RangeHelper thisRange( mxRange );
 	table::CellRangeAddress thisRangeAddress = thisRange.getCellRangeAddressable()->getRangeAddress();
-	SCTAB nTab = thisRangeAddress.Sheet;
-
 	ScSortParam aSortParam;
+#ifdef VBA_OOBUILD_HACK
+	SCTAB nTab = thisRangeAddress.Sheet;
 	pDoc->GetSortParam( aSortParam, nTab );
+#endif
 
 	if ( DataOption1.hasValue() )
 		DataOption1 >>= nDataOption1;
@@ -2805,14 +2809,18 @@ ScVbaRange::Sort( const uno::Any& Key1, const uno::Any& Order1, const uno::Any& 
 
 	if ( nOrientation == excel::XlSortOrientation::xlSortRows )
 		bIsSortColumns = sal_True;
-
-	sal_Int16 nHeader = aSortParam.nCompatHeader;
+	sal_Int16 nHeader = 0;
+#ifdef VBA_OOBUILD_HACK
+	nHeader = aSortParam.nCompatHeader;
+#endif
 	sal_Bool bContainsHeader = sal_False;
 
 	if ( Header.hasValue() )
 	{
 		nHeader = ::comphelper::getINT16( Header );
+#ifdef VBA_OOBUILD_HACK
 		aSortParam.nCompatHeader = nHeader;
+#endif
 	}			
 
 	if ( nHeader == excel::XlYesNoGuess::xlGuess )
@@ -2823,8 +2831,9 @@ ScVbaRange::Sort( const uno::Any& Key1, const uno::Any& Order1, const uno::Any& 
 			nHeader =  excel::XlYesNoGuess::xlYes; 
 		else
 			nHeader =  excel::XlYesNoGuess::xlNo; 
-		// save set param as default
+#ifdef VBA_OOBUILD_HACK 
 		aSortParam.nCompatHeader = nHeader;
+#endif
 	}
 
 	if ( nHeader == excel::XlYesNoGuess::xlYes )
@@ -2913,7 +2922,9 @@ ScVbaRange::Sort( const uno::Any& Key1, const uno::Any& Order1, const uno::Any& 
 	nIndex = 	findSortPropertyIndex( sortDescriptor, CONTS_HEADER );
 	sortDescriptor[ nIndex ].Value <<= bContainsHeader;
 
+#ifdef VBA_OOBUILD_HACK
 	pDoc->SetSortParam( aSortParam, nTab );
+#endif
 	xSort->sort( sortDescriptor );
 
 	// #FIXME #TODO
@@ -4416,8 +4427,9 @@ ScVbaRange::AutoFill(  const uno::Reference< excel::XRange >& Destination, const
 		}	
 	}
 	ScDocFunc aFunc(*pDocSh);
-		aFunc.FillAuto( aSourceRange, NULL, eDir, eCmd, eDateCmd,
-									nCount, fStep, fEndValue, TRUE, TRUE );
+#ifdef VBA_OOBUILD_HACK
+	aFunc.FillAuto( aSourceRange, NULL, eDir, eCmd, eDateCmd, nCount, fStep, fEndValue, TRUE, TRUE );
+#endif
 }
 sal_Bool SAL_CALL
 ScVbaRange::GoalSeek( const uno::Any& Goal, const uno::Reference< excel::XRange >& ChangingCell ) throw (uno::RuntimeException)
