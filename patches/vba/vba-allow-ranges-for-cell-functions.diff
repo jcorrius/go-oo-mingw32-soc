@@ -1,0 +1,145 @@
+--- sc/source/core/tool/interpr4.cxx	2007-07-19 14:30:42.000000000 +0100
++++ sc/source/core/tool/interpr4.cxx	2007-07-20 14:56:12.000000000 +0100
+@@ -41,10 +41,12 @@
+ #include <sfx2/app.hxx>
+ #include <sfx2/docfile.hxx>
+ #include <sfx2/objsh.hxx>
++#include <sfx2/docfilt.hxx>
+ #include <basic/sbmeth.hxx>
+ #include <basic/sbmod.hxx>
+ #include <basic/sbstar.hxx>
+ #include <basic/sbx.hxx>
++#include <basic/sbuno.hxx>
+ #include <svtools/zforlist.hxx>
+ #include <tools/urlobj.hxx>
+ #include <stdlib.h>
+@@ -57,6 +59,7 @@
+ #include <functional>
+ 
+ #include <com/sun/star/table/XCellRange.hpp>
++#include <comphelper/processfactory.hxx>
+ 
+ #include "interpre.hxx"
+ #include "global.hxx"
+@@ -2309,7 +2313,37 @@ void ScInterpreter::ScMissing()
+ 	PushTempToken( new ScMissingToken );
+ }
+ 
+-
++bool
++lcl_setVBARange( ScRange& aRange, ScDocument* pDok, SbxVariable* pPar )
++{
++	bool bOk = false;
++	try
++	{
++		uno::Reference< uno::XInterface > xVBARange;
++		uno::Reference< lang::XMultiComponentFactory > xSMgr( ::comphelper::getProcessServiceFactory(), uno::UNO_QUERY_THROW );
++		uno::Reference< beans::XPropertySet > xProps( xSMgr, uno::UNO_QUERY_THROW );
++		uno::Reference< uno::XComponentContext > xCtx( xProps->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "DefaultContext" ))), uno::UNO_QUERY_THROW );
++		uno::Reference<table::XCellRange> xCellRange = ScCellRangeObj::CreateRangeFromDoc( pDok, aRange );
++		// hmm probably better not to have to include the vba generated headers
++		// here, but... if they ever become always available certainly the
++		// line below is more coder friendly
++		//xRange = org::openoffice::excel::Range::createRangeFromXCellRange( xCtx , uno::Reference< org::openoffice::vba::XHelperInterface >(), xCellRange );	
++		uno::Sequence< uno::Any > aArgs(2);
++		aArgs[0] = uno::Any( uno::Reference< uno::XInterface >() ); // dummy parent
++		aArgs[1] = uno::Any( xCellRange );
++		xVBARange = xSMgr->createInstanceWithArgumentsAndContext( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("org.openoffice.excel.Range") ), aArgs, xCtx  );
++		if ( xVBARange.is() )
++		{
++			String sDummy;
++			SbxObjectRef aObj = GetSbUnoObject( sDummy, uno::Any( xVBARange ) );
++			bOk = pPar->PutObject( aObj );
++		}
++	}
++	catch( uno::Exception& )
++	{
++	}
++	return bOk;
++}
+ void ScInterpreter::ScMacro()
+ {
+ 	SbxBase::ResetError();
+@@ -2355,8 +2389,19 @@ void ScInterpreter::ScMacro()
+ 	aMacroStr += '.';
+ 	aMacroStr += pMethod->GetName();
+ 	String aBasicStr;
++	bool bUseVBAObjects = false;
+ 	if (pObject->GetParent())
++	{
+ 		aBasicStr = pObject->GetParent()->GetName();	// Dokumentenbasic
++		const SfxFilter* pFilter = NULL;
++		SfxMedium* pMedium = pDok->GetDocumentShell()->GetMedium();
++		if ( pMedium )
++			pFilter = pMedium->GetFilter();
++		// It would be better if there was some way to check if this Module
++		// was a VBA compatible one, but.. currently there is no way to do that
++		if ( pFilter && pFilter->IsAlienFormat() && pFilter->GetDefaultExtension() == String( RTL_CONSTASCII_USTRINGPARAM("*.xls") ) )
++			bUseVBAObjects = true; 
++	}
+ 	else
+ 		aBasicStr = SFX_APP()->GetName();				// Applikationsbasic
+ 
+@@ -2380,7 +2425,13 @@ void ScInterpreter::ScMacro()
+ 			{
+ 				ScAddress aAdr;
+ 				PopSingleRef( aAdr );
+-				bOk = SetSbxVariable( pPar, aAdr );
++				if ( bUseVBAObjects )
++				{
++					ScRange aRange( aAdr );
++					bOk = lcl_setVBARange( aRange, pDok, pPar );
++				}
++				else
++					bOk = SetSbxVariable( pPar, aAdr );
+ 			}
+ 			break;
+ 			case svDoubleRef:
+@@ -2399,24 +2450,32 @@ void ScInterpreter::ScMacro()
+ 				}
+ 				else
+ 				{
+-					SbxDimArrayRef refArray = new SbxDimArray;
+-					refArray->AddDim32( 1, nRow2 - nRow1 + 1 );
+-					refArray->AddDim32( 1, nCol2 - nCol1 + 1 );
+-					ScAddress aAdr( nCol1, nRow1, nTab1 );
+-					for( SCROW nRow = nRow1; bOk && nRow <= nRow2; nRow++ )
++					if ( bUseVBAObjects )
+ 					{
+-						aAdr.SetRow( nRow );
+-						INT32 nIdx[ 2 ];
+-						nIdx[ 0 ] = nRow-nRow1+1;
+-						for( SCCOL nCol = nCol1; bOk && nCol <= nCol2; nCol++ )
+-						{
+-							aAdr.SetCol( nCol );
+-							nIdx[ 1 ] = nCol-nCol1+1;
+-							SbxVariable* p = refArray->Get32( nIdx );
+-							bOk = SetSbxVariable( p, aAdr );
++						ScRange aRange( nCol1, nRow1, nTab1, nCol2, nRow2, nTab2 );
++						bOk = lcl_setVBARange( aRange, pDok, pPar );
++					}
++					else
++					{
++						SbxDimArrayRef refArray = new SbxDimArray;
++						refArray->AddDim32( 1, nRow2 - nRow1 + 1 );
++						refArray->AddDim32( 1, nCol2 - nCol1 + 1 );
++						ScAddress aAdr( nCol1, nRow1, nTab1 );
++						for( SCROW nRow = nRow1; bOk && nRow <= nRow2; nRow++ )
++						{
++							aAdr.SetRow( nRow );
++							INT32 nIdx[ 2 ];
++							nIdx[ 0 ] = nRow-nRow1+1;
++							for( SCCOL nCol = nCol1; bOk && nCol <= nCol2; nCol++ )
++							{
++								aAdr.SetCol( nCol );
++								nIdx[ 1 ] = nCol-nCol1+1;
++								SbxVariable* p = refArray->Get32( nIdx );
++								bOk = SetSbxVariable( p, aAdr );
++							}
+ 						}
++						pPar->PutObject( refArray );
+ 					}
+-					pPar->PutObject( refArray );
+ 				}
+ 			}
+ 			break;
