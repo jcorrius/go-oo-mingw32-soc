@@ -1100,14 +1100,41 @@ lcl_setupBorders( const uno::Reference< excel::XRange >& xParentRange, const uno
 	return borders;
 }
 
-// THIS CTOR will fail currently, ScVbaFormat needs to be less strict 
-// about the XModel
-ScVbaRange::ScVbaRange( uno::Sequence< uno::Any> const & args,
-    uno::Reference< uno::XComponentContext> const & xContext ) : ScVbaRange_BASE( uno::Reference< vba::XHelperInterface >(), xContext, uno::Reference< beans::XPropertySet >(), uno::Reference< frame::XModel >(), true )
+
+uno::Reference< beans::XPropertySet >
+lcl_getPropertiesFromArgs( uno::Sequence< uno::Any > const & args ) throw ( lang::IllegalArgumentException )
 {
-	uno::Reference< vba::XHelperInterface > xParent;
-	comphelper::unwrapArgs( args, xParent, mxRange ); 
-	mxParent = xParent;
+	boost::optional< uno::Reference< vba::XHelperInterface >  >xParent;
+	uno::Reference< table::XCellRange > xRange;
+	comphelper::unwrapArgs( args, xParent, xRange ); 
+	uno::Reference< beans::XPropertySet > xProps( xRange, uno::UNO_QUERY );
+	if ( !xProps.is() )
+		throw lang::IllegalArgumentException();
+	return xProps;
+}
+
+uno::Reference< frame::XModel > 
+lcl_getModelFromArgs( uno::Sequence< uno::Any > const& args ) throw ( lang::IllegalArgumentException )
+{
+	boost::optional< uno::Reference< vba::XHelperInterface >  >xParent;
+	uno::Reference< table::XCellRange > xRange;
+	comphelper::unwrapArgs( args, xParent, xRange ); 
+	return getModelFromRange( xRange );	
+}
+
+uno::Reference< vba::XHelperInterface > 
+lcl_getParentFromArgs( uno::Sequence< uno::Any > const& args ) throw ( lang::IllegalArgumentException )
+{
+	boost::optional< uno::Reference< vba::XHelperInterface >  >xParent;
+	uno::Reference< table::XCellRange > xRange;
+	comphelper::unwrapArgs( args, xParent, xRange ); 
+	return *xParent;
+}
+
+ScVbaRange::ScVbaRange( uno::Sequence< uno::Any> const & args,
+    uno::Reference< uno::XComponentContext> const & xContext )  throw ( lang::IllegalArgumentException ) : ScVbaRange_BASE( lcl_getParentFromArgs( args ), xContext, lcl_getPropertiesFromArgs( args ), lcl_getModelFromArgs( args ), true ), mbIsRows( sal_False ), mbIsColumns( sal_False )
+{
+	mxRange.set( mxPropertySet, uno::UNO_QUERY_THROW );
 	uno::Reference< container::XIndexAccess > xIndex( new SingleRangeIndexAccess( mxContext, mxRange ) );
 	m_Areas = new ScVbaRangeAreas( mxContext, xIndex, mbIsRows, mbIsColumns );
 }
