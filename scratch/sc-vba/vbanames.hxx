@@ -4,9 +4,9 @@
  *
  *  $RCSfile: vbanames.hxx,v $
  *
- *  $Revision: 1.0 $
+ *  $Revision: 1.1.2.2 $
  *
- *  last change: $Author: amelia $ $Date: 2007/05/29 16:10:40 $
+ *  last change: $Author: npower $ $Date: 2007/07/23 11:47:24 $
  *
  *  The Contents of this file are made available subject to
  *  the terms of GNU Lesser General Public License Version 2.1.
@@ -48,8 +48,6 @@ class ScVbaNames : public ScVbaNames_BASE
 	css::uno::Reference< css::frame::XModel > mxModel;
 	css::uno::Reference< css::sheet::XNamedRanges > mxNames;
 	
-	ScDocument * m_pDoc;
-
 protected:
 	virtual css::uno::Reference< css::frame::XModel >  getModel() { return mxModel; }
 

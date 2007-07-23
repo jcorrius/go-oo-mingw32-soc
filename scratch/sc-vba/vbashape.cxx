@@ -2,11 +2,11 @@
  *
  *  OpenOffice.org - a multi-platform office productivity suite
  *
- *  $RCSfile$
+ *  $RCSfile: vbashape.cxx,v $
  *
- *  $Revision$
+ *  $Revision: 1.1.2.4 $
  *
- *  last change: $Author$ $Date$
+ *  last change: $Author: npower $ $Date: 2007/07/23 11:47:24 $
  *
  *  The Contents of this file are made available subject to
  *  the terms of GNU Lesser General Public License Version 2.1.
@@ -242,7 +242,7 @@ ScVbaShape::getVisible() throw (uno::RuntimeException)
 }
 
 void SAL_CALL 
-ScVbaShape::setVisible( sal_Bool _visible ) throw (uno::RuntimeException)
+ScVbaShape::setVisible( sal_Bool /*_visible*/ ) throw (uno::RuntimeException)
 {
     //UNO Shapes are always visible
 }
@@ -250,7 +250,7 @@ ScVbaShape::setVisible( sal_Bool _visible ) throw (uno::RuntimeException)
 sal_Int32 SAL_CALL 
 ScVbaShape::getZOrderPosition() throw (uno::RuntimeException)
 {
-    sal_Int32 nZOrderPosition;
+    sal_Int32 nZOrderPosition = 0;
     uno::Any aZOrderPosition =  m_xPropertySet->getPropertyValue( rtl::OUString::createFromAscii( "ZOrder" ) );
     aZOrderPosition >>= nZOrderPosition;
     return nZOrderPosition + 1;
@@ -265,8 +265,8 @@ ScVbaShape::getType() throw (uno::RuntimeException)
 double SAL_CALL 
 ScVbaShape::getRotation() throw (uno::RuntimeException)
 {
-    double dRotation;
-    sal_Int32 nRotation;
+    double dRotation = 0;
+    sal_Int32 nRotation = 0;
     m_xPropertySet->getPropertyValue( rtl::OUString::createFromAscii( "RotateAngle" ) ) >>= nRotation;
     dRotation = static_cast< double >( ( 36000 - nRotation )/100 );
     return dRotation;
@@ -383,7 +383,7 @@ ScVbaShape::IncrementTop( double Increment ) throw (uno::RuntimeException)
 }
 
 void SAL_CALL 
-ScVbaShape::ScaleHeight( double Factor, sal_Bool RelativeToOriginalSize, sal_Int32 Scale ) throw (uno::RuntimeException)
+ScVbaShape::ScaleHeight( double Factor, sal_Bool /*RelativeToOriginalSize*/, sal_Int32 Scale ) throw (uno::RuntimeException)
 {
     double nHeight = getHeight();
     double nNewHeight = nHeight * Factor;
@@ -412,7 +412,7 @@ ScVbaShape::ScaleHeight( double Factor, sal_Bool RelativeToOriginalSize, sal_Int
 }
 
 void SAL_CALL 
-ScVbaShape::ScaleWidth( double Factor, sal_Bool RelativeToOriginalSize, sal_Int32 Scale ) throw (uno::RuntimeException)
+ScVbaShape::ScaleWidth( double Factor, sal_Bool /*RelativeToOriginalSize*/, sal_Int32 Scale ) throw (uno::RuntimeException)
 {
     double nWidth = getWidth();
     double nNewWidth = nWidth * Factor;
@@ -441,7 +441,7 @@ ScVbaShape::ScaleWidth( double Factor, sal_Bool RelativeToOriginalSize, sal_Int3
 }
 
 void SAL_CALL
-ScVbaShape::Select( const uno::Any& Replace ) throw ( uno::RuntimeException )
+ScVbaShape::Select( const uno::Any& /*Replace*/ ) throw ( uno::RuntimeException )
 {
     uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY_THROW );
     uno::Reference< view::XSelectionSupplier > xSelectSupp( xModel->getCurrentController(), uno::UNO_QUERY_THROW );

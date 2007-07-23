@@ -744,6 +744,7 @@ ScVbaFormat<Ifc1>::initializeNumberFormats() throw ( script::BasicErrorException
 {
 	if ( !xNumberFormats.is() )
 	{
+		mxNumberFormatsSupplier.set( mxModel, uno::UNO_QUERY_THROW ); 
 		xNumberFormats = mxNumberFormatsSupplier->getNumberFormats();
 		xNumberFormatTypes.set( xNumberFormats, uno::UNO_QUERY ); // _THROW?
 	}

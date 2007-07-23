@@ -2,11 +2,11 @@
  *
  *  OpenOffice.org - a multi-platform office productivity suite
  *
- *  $RCSfile$
+ *  $RCSfile: vbatextframe.cxx,v $
  *
- *  $Revision$
+ *  $Revision: 1.1.2.4 $
  *
- *  last change: $Author$ $Date$
+ *  last change: $Author: npower $ $Date: 2007/07/23 11:47:24 $
  *
  *  The Contents of this file are made available subject to
  *  the terms of GNU Lesser General Public License Version 2.1.
@@ -57,7 +57,7 @@ ScVbaTextFrame::setAsMSObehavior()
 
 sal_Int32 ScVbaTextFrame::getMargin( rtl::OUString sMarginType )
 {
-    sal_Int32 nMargin;
+    sal_Int32 nMargin = 0;
     uno::Any aMargin = m_xPropertySet->getPropertyValue( sMarginType );
     aMargin >>= nMargin;
     return nMargin;

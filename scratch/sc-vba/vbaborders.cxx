@@ -2,7 +2,7 @@
  *
  *  OpenOffice.org - a multi-platform office productivity suite
  *
- *  $RCSfile$
+ *  $RCSfile: vbaborders.cxx,v $
  *
  *  $Revision$
  *
@@ -187,7 +187,7 @@ public:
 	}
 	void SAL_CALL setColor( const uno::Any& _color ) throw (uno::RuntimeException)
 	{
-		sal_Int32 nColor;
+		sal_Int32 nColor = 0;
 		_color >>= nColor;
 		table::BorderLine aBorderLine;
 		if ( getBorderLine( aBorderLine ) )
@@ -201,14 +201,14 @@ public:
 
 	uno::Any SAL_CALL getColorIndex() throw (uno::RuntimeException)
 	{
-		sal_Int32 nColor;
+		sal_Int32 nColor = 0;
 		XLRGBToOORGB( getColor() ) >>= nColor;
 		uno::Reference< container::XIndexAccess > xIndex = m_Palette.getPalette();
 		sal_Int32 nElems = xIndex->getCount();
 		sal_Int32 nIndex = -1;
 		for ( sal_Int32 count=0; count<nElems; ++count )
 		{
-			sal_Int32 nPaletteColor;
+			sal_Int32 nPaletteColor = 0;
 			xIndex->getByIndex( count ) >>= nPaletteColor;
 			if ( nPaletteColor == nColor )
 			{					
@@ -221,7 +221,7 @@ public:
 
 	void SAL_CALL setColorIndex( const uno::Any& _colorindex ) throw (uno::RuntimeException)
 	{
-		sal_Int32 nColor;
+		sal_Int32 nColor = 0;
 		_colorindex >>= nColor;
 		if ( !nColor || nColor == XlColorIndex::xlColorIndexAutomatic )
 			nColor = 1;
@@ -251,7 +251,7 @@ public:
 	}
 	void SAL_CALL setWeight( const uno::Any& _weight ) throw (uno::RuntimeException)
 	{
-		sal_Int32 nWeight;
+		sal_Int32 nWeight = 0;
 		_weight >>= nWeight;
 		table::BorderLine aBorderLine;
 		if ( getBorderLine( aBorderLine ) )
@@ -289,7 +289,7 @@ public:
 	{
 		// Urk no choice but to silently ignore we don't support this attribute
 		// #TODO would be nice to support the excel line styles
-        sal_Int32 nLineStyle;
+        sal_Int32 nLineStyle = 0;
         _linestyle >>= nLineStyle;
         table::BorderLine aBorderLine;
 		if ( getBorderLine( aBorderLine ) )

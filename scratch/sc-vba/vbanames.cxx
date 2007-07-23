@@ -4,9 +4,9 @@
  *
  *  $RCSfile: vbanames.cxx,v $
  *
- *  $Revision: 1.0 $
+ *  $Revision: 1.1.2.2 $
  *
- *  last change: $Author: amelia $ $Date: 2007/05/29 16:10:40 $
+ *  last change: $Author: npower $ $Date: 2007/07/23 11:47:24 $
  *
  *  The Contents of this file are made available subject to
  *  the terms of GNU Lesser General Public License Version 2.1.
@@ -53,8 +53,8 @@ using namespace ::com::sun::star;
 class NamesEnumeration : public EnumerationHelperImpl
 {
 	uno::Reference< frame::XModel > m_xModel;
-	uno::Reference< sheet::XNamedRanges > m_xNames;
 	uno::WeakReference< vba::XHelperInterface > m_xParent;
+	uno::Reference< sheet::XNamedRanges > m_xNames;
 public:
 	NamesEnumeration( const uno::Reference< vba::XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< container::XEnumeration >& xEnumeration,  const uno::Reference< frame::XModel >& xModel , const uno::Reference< sheet::XNamedRanges >& xNames ) throw ( uno::RuntimeException ) : EnumerationHelperImpl( xContext, xEnumeration ), m_xModel( xModel ), m_xParent( xParent ), m_xNames( xNames ) {}
 
@@ -91,26 +91,25 @@ ScVbaNames::getScDocument()
 	ScViewData* pViewData = pTabViewShell->GetViewData();
 	if ( !pViewData )
 		throw uno::RuntimeException( rtl::OUString::createFromAscii("No ViewData available"), uno::Reference< uno::XInterface >() );
-	m_pDoc = pViewData->GetDocument();
+	return pViewData->GetDocument();
 }
 
 css::uno::Any
 ScVbaNames::Add( const css::uno::Any& Name ,
                                         const css::uno::Any& RefersTo,
-                                        const css::uno::Any& Visible,
-                                        const css::uno::Any& MacroType,
-                                        const css::uno::Any& ShoutcutKey,
-                                        const css::uno::Any& Category,
+                                        const css::uno::Any& /*Visible*/,
+                                        const css::uno::Any& /*MacroType*/,
+                                        const css::uno::Any& /*ShoutcutKey*/,
+                                        const css::uno::Any& /*Category*/,
                                         const css::uno::Any& NameLocal,
-                                        const css::uno::Any& RefersToLocal,
-                                        const css::uno::Any& CategoryLocal,
+                                        const css::uno::Any& /*RefersToLocal*/,
+                                        const css::uno::Any& /*CategoryLocal*/,
                                         const css::uno::Any& RefersToR1C1,
                                         const css::uno::Any& RefersToR1C1Local ) throw (css::uno::RuntimeException)
 {
 	
 	rtl::OUString sName;
 	uno::Reference< excel::XRange > xRange;
-	ScDocument * pDoc = getScDocument();
 	if ( Name.hasValue() )
 		Name >>= sName;
 	else if ( NameLocal.hasValue() )

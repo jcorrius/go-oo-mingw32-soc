@@ -48,7 +48,7 @@ DLLPRE =
 dummy:
         @echo "not building vba..."
 .ENDIF
-CDEFS+=-DVBA_OOBUILD_HACK
+ 
 INCPRE=$(INCCOM)$/$(TARGET)
 
 # ------------------------------------------------------------------

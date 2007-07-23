@@ -2,7 +2,7 @@
  *
  *  OpenOffice.org - a multi-platform office productivity suite
  *
- *  $RCSfile$
+ *  $RCSfile: vbachart.cxx,v $
  *
  *  $Revision$
  *
@@ -623,7 +623,7 @@ ScVbaChart::setSourceData( const css::uno::Reference< ::org::openoffice::excel::
 
 		if ( _aPlotBy.hasValue() )
 		{
-			sal_Int32 nVal;
+			sal_Int32 nVal = 0;
 			_aPlotBy >>= nVal;
 			setPlotBy( nVal );
 		}

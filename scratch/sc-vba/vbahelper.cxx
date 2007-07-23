@@ -2,7 +2,7 @@
  *
  *  OpenOffice.org - a multi-platform office productivity suite
  *
- *  $RCSfile$
+ *  $RCSfile: vbahelper.cxx,v $
  *
  *  $Revision$
  *
@@ -544,28 +544,36 @@ rtl::OUString getAnyAsString( const uno::Any& pvargItem ) throw ( uno::RuntimeEx
 			pvargItem >>= sString;
 			break;
 		case uno::TypeClass_FLOAT:
-			float aFloat;
-			pvargItem >>= aFloat;
-			sString = rtl::OUString::valueOf( aFloat );
-			break;
+			{
+				float aFloat = 0;
+				pvargItem >>= aFloat;
+				sString = rtl::OUString::valueOf( aFloat );
+				break;
+			}
 		case uno::TypeClass_DOUBLE:
-			double aDouble;
-			pvargItem >>= aDouble;
-			sString = rtl::OUString::valueOf( aDouble );
-			break;
+			{
+				double aDouble = 0;
+				pvargItem >>= aDouble;
+				sString = rtl::OUString::valueOf( aDouble );
+				break;
+			}
 		case uno::TypeClass_SHORT:
 		case uno::TypeClass_LONG:
 		case uno::TypeClass_BYTE:
-			sal_Int32 aNum;
-			pvargItem >>= aNum;
-			sString = rtl::OUString::valueOf( aNum );
-			break;
+			{
+				sal_Int32 aNum = 0;
+				pvargItem >>= aNum;
+				sString = rtl::OUString::valueOf( aNum );
+				break;
+			}
 
 		case uno::TypeClass_HYPER:
-			sal_Int64 aHyper;
-			pvargItem >>= aHyper;
-			sString = rtl::OUString::valueOf( aHyper );
-			break;
+			{
+				sal_Int64 aHyper = 0;
+				pvargItem >>= aHyper;
+				sString = rtl::OUString::valueOf( aHyper );
+				break;
+			}
 		default:
        			throw uno::RuntimeException( rtl::OUString::createFromAscii( "Invalid type, can't convert" ), uno::Reference< uno::XInterface >() );
 	}

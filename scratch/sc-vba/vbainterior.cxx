@@ -2,7 +2,7 @@
  *
  *  OpenOffice.org - a multi-platform office productivity suite
  *
- *  $RCSfile$
+ *  $RCSfile: vbainterior.cxx,v $
  *
  *  $Revision$
  *
@@ -115,7 +115,7 @@ ScVbaInterior::getColorIndex() throw ( css::uno::RuntimeException )
 	sal_Int32 nIndex = -1;
 	for ( sal_Int32 count=0; count<nElems; ++count )
        	{
-		sal_Int32 nPaletteColor;
+		sal_Int32 nPaletteColor = 0;
 		xIndex->getByIndex( count ) >>= nPaletteColor;
 		if ( nPaletteColor == nColor )
 		{

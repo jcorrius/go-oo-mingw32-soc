@@ -4,9 +4,9 @@
  *
  *  $RCSfile: vbaname.cxx,v $
  *
- *  $Revision: 1.0 $
+ *  $Revision: 1.1.2.2 $
  *
- *  last change: $Author: amelia $ $Date: 2007/05/29 16:10:40 $
+ *  last change: $Author: npower $ $Date: 2007/07/23 11:47:24 $
  *
  *  The Contents of this file are made available subject to
  *  the terms of GNU Lesser General Public License Version 2.1.
@@ -56,8 +56,8 @@ ScVbaName::ScVbaName(const css::uno::Reference< oo::vba::XHelperInterface >& xPa
 			const css::uno::Reference< css::frame::XModel >& xModel ):
 			NameImpl_BASE(  xParent , xContext ), 
 			mxModel( xModel ),
-			mxNames( xNames ),
-			mxNamedRange( xName )
+			mxNamedRange( xName ),
+			mxNames( xNames )
 {
 }
 
@@ -69,19 +69,6 @@ css::uno::Reference< oo::excel::XWorksheet >
 ScVbaName::getWorkSheet() throw (css::uno::RuntimeException)
 {
 	return ScVbaGlobals::getGlobalsImpl( mxContext )->getActiveSheet();
-}
-
-ScDocument *
-ScVbaName::getScDocument()
-{
-	uno::Reference< frame::XModel > xModel( getModel() , uno::UNO_QUERY_THROW );
-	ScTabViewShell * pTabViewShell = getBestViewShell( xModel );
-	if ( !pTabViewShell )
-		throw uno::RuntimeException( rtl::OUString::createFromAscii("No ViewShell available"), uno::Reference< uno::XInterface >() );
-	ScViewData* pViewData = pTabViewShell->GetViewData();
-	if ( !pViewData )
-		throw uno::RuntimeException( rtl::OUString::createFromAscii("No ViewData available"), uno::Reference< uno::XInterface >() );
-	m_pDoc = pViewData->GetDocument();
 }
 
 ::rtl::OUString
@@ -119,9 +106,8 @@ ScVbaName::getVisible() throw (css::uno::RuntimeException)
 }
 
 void
-ScVbaName::setVisible( sal_Bool bVisible ) throw (css::uno::RuntimeException)
+ScVbaName::setVisible( sal_Bool /*bVisible*/ ) throw (css::uno::RuntimeException)
 {
-	
 }
 
 ::rtl::OUString
@@ -216,7 +202,7 @@ ScVbaName::getRefersToRange() throw (css::uno::RuntimeException)
 }
 
 void
-ScVbaName::setRefersToRange( const css::uno::Reference< oo::excel::XRange > rRange ) throw (css::uno::RuntimeException)
+ScVbaName::setRefersToRange( const css::uno::Reference< oo::excel::XRange > /*rRange*/ ) throw (css::uno::RuntimeException)
 {
 }
 

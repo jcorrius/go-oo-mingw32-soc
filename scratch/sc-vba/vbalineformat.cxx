@@ -2,11 +2,11 @@
  *
  *  OpenOffice.org - a multi-platform office productivity suite
  *
- *  $RCSfile$
+ *  $RCSfile: vbalineformat.cxx,v $
  *
- *  $Revision$
+ *  $Revision: 1.1.2.5 $
  *
- *  last change: $Author$ $Date$
+ *  last change: $Author: npower $ $Date: 2007/07/23 14:46:00 $
  *
  *  The Contents of this file are made available subject to
  *  the terms of GNU Lesser General Public License Version 2.1.
@@ -163,7 +163,7 @@ ScVbaLineFormat::getBeginArrowheadLength() throw (uno::RuntimeException)
 }
 
 void SAL_CALL 
-ScVbaLineFormat::setBeginArrowheadLength( sal_Int32 _beginarrowheadlength ) throw (uno::RuntimeException)
+ScVbaLineFormat::setBeginArrowheadLength( sal_Int32 /*_beginarrowheadlength*/ ) throw (uno::RuntimeException)
 {
     throw uno::RuntimeException( rtl::OUString::createFromAscii("Property 'EndArrowheadWidth' is not supported."), uno::Reference< uno::XInterface >() );
 }
@@ -175,7 +175,7 @@ ScVbaLineFormat::getBeginArrowheadWidth() throw (uno::RuntimeException)
 }
 
 void SAL_CALL 
-ScVbaLineFormat::setBeginArrowheadWidth( sal_Int32 _beginarrowheadwidth ) throw (uno::RuntimeException)
+ScVbaLineFormat::setBeginArrowheadWidth( sal_Int32 /*_beginarrowheadwidth*/ ) throw (uno::RuntimeException)
 {
     throw uno::RuntimeException( rtl::OUString::createFromAscii("Property 'EndArrowheadWidth' is not supported."), uno::Reference< uno::XInterface >() );
 }
@@ -187,7 +187,7 @@ ScVbaLineFormat::getEndArrowheadStylel() throw (uno::RuntimeException)
 }
 
 void SAL_CALL 
-ScVbaLineFormat::setEndArrowheadStylel( sal_Int32 _endarrowheadstylel ) throw (uno::RuntimeException)
+ScVbaLineFormat::setEndArrowheadStylel( sal_Int32 /*_endarrowheadstylel*/ ) throw (uno::RuntimeException)
 {
 }
 
@@ -198,7 +198,7 @@ ScVbaLineFormat::getEndArrowheadLength() throw (uno::RuntimeException)
 }
 
 void SAL_CALL 
-ScVbaLineFormat::setEndArrowheadLength( sal_Int32 _endarrowheadlength ) throw (uno::RuntimeException)
+ScVbaLineFormat::setEndArrowheadLength( sal_Int32 /*_endarrowheadlength*/ ) throw (uno::RuntimeException)
 {
     throw uno::RuntimeException( rtl::OUString::createFromAscii("Property 'EndArrowheadWidth' is not supported."), uno::Reference< uno::XInterface >() );
 }
@@ -210,7 +210,7 @@ ScVbaLineFormat::getEndArrowheadWidth() throw (uno::RuntimeException)
 }
 
 void SAL_CALL 
-ScVbaLineFormat::setEndArrowheadWidth( sal_Int32 _endarrowheadwidth ) throw (uno::RuntimeException)
+ScVbaLineFormat::setEndArrowheadWidth( sal_Int32 /*_endarrowheadwidth*/ ) throw (uno::RuntimeException)
 {
     throw uno::RuntimeException( rtl::OUString::createFromAscii("Property 'EndArrowheadWidth' is not supported."), uno::Reference< uno::XInterface >() );
 }
@@ -218,7 +218,7 @@ ScVbaLineFormat::setEndArrowheadWidth( sal_Int32 _endarrowheadwidth ) throw (uno
 double SAL_CALL 
 ScVbaLineFormat::getWeight() throw (uno::RuntimeException)
 {
-    sal_Int32 nLineWidth;
+    sal_Int32 nLineWidth=0;
     m_xPropertySet->getPropertyValue( rtl::OUString::createFromAscii( "LineWidth") ) >>= nLineWidth;
     double dLineWidth = Millimeter::getInPoints( nLineWidth );
     return dLineWidth;
@@ -296,7 +296,7 @@ ScVbaLineFormat::getStyle() throw (uno::RuntimeException)
 }
 
 void SAL_CALL 
-ScVbaLineFormat::setStyle( sal_Int16 _style ) throw (uno::RuntimeException)
+ScVbaLineFormat::setStyle( sal_Int16 /*_style */) throw (uno::RuntimeException)
 {
     //OpenOffice.org only supports one LineStyle (other than the DashStyles)
     //Therefore we do not set the LineStyle, because it maybe is already set

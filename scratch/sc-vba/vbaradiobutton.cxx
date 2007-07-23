@@ -2,11 +2,11 @@
  *
  *  OpenOffice.org - a multi-platform office productivity suite
  *
- *  $RCSfile$
+ *  $RCSfile: vbaradiobutton.cxx,v $
  *
- *  $Revision$
+ *  $Revision: 1.1.2.4 $
  *
- *  last change: $Author$ $Date$
+ *  last change: $Author: npower $ $Date: 2007/07/23 11:47:24 $
  *
  *  The Contents of this file are made available subject to
  *  the terms of GNU Lesser General Public License Version 2.1.
@@ -64,7 +64,7 @@ sal_Bool SAL_CALL
 ScVbaRadioButton::getValue() throw (css::uno::RuntimeException)
 {
     sal_Bool bValue = sal_False;
-    sal_Int16 nValue;
+    sal_Int16 nValue = -1;
     m_xProps->getPropertyValue( STATE ) >>= nValue;
     if( nValue != 0 )
         bValue = sal_True;

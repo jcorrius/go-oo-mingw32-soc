@@ -2,11 +2,11 @@
  *
  *  OpenOffice.org - a multi-platform office productivity suite
  *
- *  $RCSfile$
+ *  $RCSfile: vbafillformat.cxx,v $
  *
- *  $Revision$
+ *  $Revision: 1.1.2.4 $
  *
- *  last change: $Author$ $Date$
+ *  last change: $Author: npower $ $Date: 2007/07/23 11:47:24 $
  *
  *  The Contents of this file are made available subject to
  *  the terms of GNU Lesser General Public License Version 2.1.
@@ -145,7 +145,7 @@ ScVbaFillFormat::Solid() throw (uno::RuntimeException)
 }
 
 void SAL_CALL 
-ScVbaFillFormat::TwoColorGradient( sal_Int32 style, sal_Int32 variant ) throw (uno::RuntimeException)
+ScVbaFillFormat::TwoColorGradient( sal_Int32 style, sal_Int32 /*variant*/ ) throw (uno::RuntimeException)
 {
     if( style == office::MsoGradientStyle::msoGradientHorizontal )
     {

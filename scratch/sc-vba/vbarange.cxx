@@ -430,7 +430,7 @@ public:
 	}
 	uno::Reference< beans::XPropertySet > getNumberProps()
 	{	
-		long nIndexKey;
+		long nIndexKey = 0;
 		uno::Any aValue = mxRangeProps->getPropertyValue(rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("NumberFormat")));
 		aValue >>= nIndexKey;
 
@@ -1100,41 +1100,14 @@ lcl_setupBorders( const uno::Reference< excel::XRange >& xParentRange, const uno
 	return borders;
 }
 
-
-uno::Reference< beans::XPropertySet >
-lcl_getPropertiesFromArgs( uno::Sequence< uno::Any > const & args ) throw ( lang::IllegalArgumentException )
-{
-	boost::optional< uno::Reference< vba::XHelperInterface >  >xParent;
-	uno::Reference< table::XCellRange > xRange;
-	comphelper::unwrapArgs( args, xParent, xRange ); 
-	uno::Reference< beans::XPropertySet > xProps( xRange, uno::UNO_QUERY );
-	if ( !xProps.is() )
-		throw lang::IllegalArgumentException();
-	return xProps;
-}
-
-uno::Reference< frame::XModel > 
-lcl_getModelFromArgs( uno::Sequence< uno::Any > const& args ) throw ( lang::IllegalArgumentException )
-{
-	boost::optional< uno::Reference< vba::XHelperInterface >  >xParent;
-	uno::Reference< table::XCellRange > xRange;
-	comphelper::unwrapArgs( args, xParent, xRange ); 
-	return getModelFromRange( xRange );	
-}
-
-uno::Reference< vba::XHelperInterface > 
-lcl_getParentFromArgs( uno::Sequence< uno::Any > const& args ) throw ( lang::IllegalArgumentException )
-{
-	boost::optional< uno::Reference< vba::XHelperInterface >  >xParent;
-	uno::Reference< table::XCellRange > xRange;
-	comphelper::unwrapArgs( args, xParent, xRange ); 
-	return *xParent;
-}
-
+// THIS CTOR will fail currently, ScVbaFormat needs to be less strict 
+// about the XModel
 ScVbaRange::ScVbaRange( uno::Sequence< uno::Any> const & args,
-    uno::Reference< uno::XComponentContext> const & xContext )  throw ( lang::IllegalArgumentException ) : ScVbaRange_BASE( lcl_getParentFromArgs( args ), xContext, lcl_getPropertiesFromArgs( args ), lcl_getModelFromArgs( args ), true ), mbIsRows( sal_False ), mbIsColumns( sal_False )
+    uno::Reference< uno::XComponentContext> const & xContext ) : ScVbaRange_BASE( uno::Reference< vba::XHelperInterface >(), xContext, uno::Reference< beans::XPropertySet >(), uno::Reference< frame::XModel >(), true )
 {
-	mxRange.set( mxPropertySet, uno::UNO_QUERY_THROW );
+	uno::Reference< vba::XHelperInterface > xParent;
+	comphelper::unwrapArgs( args, xParent, mxRange ); 
+	mxParent = xParent;
 	uno::Reference< container::XIndexAccess > xIndex( new SingleRangeIndexAccess( mxContext, mxRange ) );
 	m_Areas = new ScVbaRangeAreas( mxContext, xIndex, mbIsRows, mbIsColumns );
 }
@@ -1695,7 +1668,7 @@ ScVbaRange::Characters(const uno::Any& Start, const uno::Any& Length) throw (uno
 		return xRange->Characters( Start, Length );
 	}
 
-	long nIndex, nCount;
+	long nIndex = 0, nCount = 0;
 	::rtl::OUString rString;
 	uno::Reference< text::XTextRange > xTextRange(mxRange, ::uno::UNO_QUERY_THROW );
 	rString = xTextRange->getString();
@@ -2167,7 +2140,7 @@ ScVbaRange::getNumberFormat() throw ( script::BasicErrorException, uno::RuntimeE
 uno::Reference< excel::XRange >
 ScVbaRange::Resize( const uno::Any &RowSize, const uno::Any &ColumnSize ) throw (uno::RuntimeException)
 {
-	long nRowSize, nColumnSize;
+	long nRowSize = 0, nColumnSize = 0;
 	sal_Bool bIsRowChanged = ( RowSize >>= nRowSize ), bIsColumnChanged = ( ColumnSize >>= nColumnSize );
 	uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, ::uno::UNO_QUERY_THROW);
 	uno::Reference< sheet::XSheetCellRange > xSheetRange(mxRange, ::uno::UNO_QUERY_THROW);
@@ -3079,7 +3052,7 @@ ScVbaRange::Delete( const uno::Any& Shift ) throw (uno::RuntimeException)
 	sheet::CellDeleteMode mode = sheet::CellDeleteMode_NONE ; 
 	if ( Shift.hasValue() )		
 	{
-		sal_Int32 nShift;
+		sal_Int32 nShift = 0;
 		Shift >>= nShift;
 		switch ( nShift )
 		{
@@ -3403,7 +3376,7 @@ ScVbaRange::setRowHeight( const uno::Any& _rowheight) throw (uno::RuntimeExcepti
 		}
 		return;
 	}
-	 double nHeight; // Incomming height is in points
+	double nHeight = 0; // Incomming height is in points
         _rowheight >>= nHeight;
 	nHeight = lcl_Round2DecPlaces( nHeight );
 	RangeHelper thisRange( mxRange );	
@@ -3458,7 +3431,7 @@ ScVbaRange::getPageBreak() throw (uno::RuntimeException)
 void SAL_CALL 
 ScVbaRange::setPageBreak( const uno::Any& _pagebreak) throw (uno::RuntimeException)
 {
-	sal_Int32 nPageBreak; 
+	sal_Int32 nPageBreak = 0; 
     _pagebreak >>= nPageBreak;
 		
 	ScDocShell* pShell = getDocShellFromRange( mxRange );
@@ -4078,7 +4051,7 @@ ScVbaRange::Insert( const uno::Any& Shift, const uno::Any& /*CopyOrigin*/ ) thro
 	sheet::CellInsertMode mode = sheet::CellInsertMode_NONE; 
 	if ( Shift.hasValue() )
 	{
-		sal_Int32 nShift;
+		sal_Int32 nShift = 0;
 		Shift >>= nShift;
 		switch ( nShift )
 		{
@@ -4409,7 +4382,9 @@ ScVbaRange::AutoFill(  const uno::Reference< excel::XRange >& Destination, const
 	FillCmd eCmd = FILL_AUTO;
 	FillDateCmd eDateCmd = FILL_DAY;	
 
+#ifdef VBA_OOBUILD_HACK
 	double fEndValue =  MAXDOUBLE;
+#endif
 
 	if ( Type.hasValue() )
 	{

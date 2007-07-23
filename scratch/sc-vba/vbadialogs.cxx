@@ -2,7 +2,7 @@
  *
  *  OpenOffice.org - a multi-platform office productivity suite
  *
- *  $RCSfile$
+ *  $RCSfile: vbadialogs.cxx,v $
  *
  *  $Revision$
  *
@@ -65,7 +65,7 @@ ScVbaDialogs::getCount() throw (uno::RuntimeException)
 uno::Any
 ScVbaDialogs::Item( const uno::Any &aItem ) throw (uno::RuntimeException)
 {
-	sal_Int32 nIndex;
+	sal_Int32 nIndex = 0;
 	aItem >>= nIndex;
 	uno::Reference< excel::XDialog > aDialog( new ScVbaDialog( uno::Reference< vba::XHelperInterface >( ScVbaGlobals::getGlobalsImpl( mxContext )->getApplication(), uno::UNO_QUERY_THROW ), nIndex, mxContext ) );
 	return uno::Any( aDialog );
