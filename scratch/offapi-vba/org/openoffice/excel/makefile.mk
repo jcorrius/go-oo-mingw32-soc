@@ -98,6 +98,8 @@ IDLFILES= XApplication.idl\
 	Range.idl\
 	XName.idl\
 	XNames.idl \
+	Workbook.idl \
+	Worksheet.idl \
 
 
 # ------------------------------------------------------------------
