@@ -50,10 +50,20 @@ namespace  range
 {
 extern sdecl::ServiceDecl const serviceDecl;
 }
+namespace  workbook
+{
+extern sdecl::ServiceDecl const serviceDecl;
+}
+namespace  worksheet
+{
+extern sdecl::ServiceDecl const serviceDecl;
+}
 namespace globals
 {
 extern sdecl::ServiceDecl const serviceDecl;
 }
+
+
 
 extern "C"
 {
@@ -71,7 +81,7 @@ extern "C"
 
 	// Component registration
         if ( component_writeInfoHelper( pServiceManager, pRegistryKey, 
-		range::serviceDecl, globals::serviceDecl ) )
+		range::serviceDecl, workbook::serviceDecl, worksheet::serviceDecl, globals::serviceDecl ) )
 		{
 			// Singleton registration
 			try
@@ -99,7 +109,7 @@ extern "C"
     {
 		OSL_TRACE("In component_getFactory for %s", pImplName );
 	void* pRet =  component_getFactoryHelper(
-        	pImplName, pServiceManager, pRegistryKey, range::serviceDecl, globals::serviceDecl );
+        	pImplName, pServiceManager, pRegistryKey, range::serviceDecl, workbook::serviceDecl, worksheet::serviceDecl, globals::serviceDecl );
 	OSL_TRACE("Ret is 0x%x", pRet);
 	return pRet;
     }

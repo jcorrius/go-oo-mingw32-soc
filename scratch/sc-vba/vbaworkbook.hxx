@@ -48,6 +48,7 @@ class ScVbaWorkbook : public ScVbaWorkbook_BASE
 	css::uno::Reference< css::frame::XModel > mxModel;
 	static css::uno::Sequence< sal_Int32 > ColorData;
 	void initColorData( const css::uno::Sequence< sal_Int32 >& sColors );
+	void init();
 protected:
 
 	virtual css::uno::Reference< css::frame::XModel >  getModel() { return mxModel; }
@@ -55,6 +56,7 @@ protected:
 public:
 	ScVbaWorkbook( 	const css::uno::Reference< oo::vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext,
 			css::uno::Reference< css::frame::XModel > xModel );
+	ScVbaWorkbook( 	css::uno::Sequence< css::uno::Any > const& aArgs, css::uno::Reference< css::uno::XComponentContext >const& xContext );
 	virtual ~ScVbaWorkbook() {}
 
     // Attributes
