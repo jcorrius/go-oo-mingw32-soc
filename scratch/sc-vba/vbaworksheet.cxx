@@ -210,8 +210,8 @@ ScVbaWorksheet::ScVbaWorksheet( uno::Sequence< uno::Any> const & args,
     uno::Reference< uno::XComponentContext> const & xContext ) throw ( lang::IllegalArgumentException ) :  WorksheetImpl_BASE( worksheet::lcl_getParentFromArgs( args ), xContext ), mxModel( worksheet::lcl_getModelFromArgs( args ) )
 {
 	rtl::OUString sSheetName = worksheet::lcl_getSheetNameFromArgs( args );
-	uno::Reference< beans::XPropertySet > xProps( mxModel, uno::UNO_QUERY_THROW );
-	uno::Reference< container::XNameAccess > xNameAccess( xProps->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Sheets" ) ) ), uno::UNO_QUERY_THROW );			
+	uno::Reference< sheet::XSpreadsheetDocument > xSpreadDoc( mxModel, uno::UNO_QUERY_THROW );
+	uno::Reference< container::XNameAccess > xNameAccess( xSpreadDoc->getSheets(), uno::UNO_QUERY_THROW );			
 	mxSheet.set( xNameAccess->getByName( sSheetName ), uno::UNO_QUERY_THROW );
 }
 
