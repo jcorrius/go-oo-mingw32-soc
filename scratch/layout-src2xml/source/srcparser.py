@@ -2,6 +2,10 @@ import sys
 from globals import *
 import srclexer
 
+# simple name translation map
+postTransMap = {"ok-button": "okbutton", 
+                "cancel-button": "cancelbutton",
+                "help-button": "helpbutton"}
 
 def transName (name):
     """Translate a mixed-casing name to dash-separated name.
@@ -33,6 +37,10 @@ Translate a mixed-casing name (e.g. MyLongName) to a dash-separated name
             newname += '-'
         newname += part.lower()
 
+    # special-case mapping ...
+    if postTransMap.has_key(newname):
+        newname = postTransMap[newname]
+
     return newname
 
 
@@ -44,6 +52,7 @@ Examples of translated values include TRUE -> true, FALSE -> false.
     if value.lower() in ["true", "false"]:
         value = value.lower()
     return value
+
 
 def renameAttribute (name, elemName):
 
