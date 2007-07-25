@@ -307,9 +307,10 @@ handler.
                 i = self.parsePosAttr(i)
             elif name == 'size':
                 i = self.parseSizeAttr(i)
-            elif len(self.tokenBuf) == 1:
+            elif len (self.tokenBuf) == 1:
                 # Simple value
                 value = transValue(self.tokenBuf[0])
+                
                 elem.setAttr(name, value)
 
             if not self.stmtData.leftScope == None and self.stmtData.leftScope < scope:
