@@ -1992,7 +1992,7 @@ ScVbaRange::Columns(const uno::Any& aIndex ) throw (uno::RuntimeException)
 	SCCOL nStartCol = 0;
 	SCCOL nEndCol = 0;
 
-	sal_Int32 nValue;
+	sal_Int32 nValue = 0;
 	rtl::OUString sAddress;
 
 	ScCellRangesBase* pUnoRangesBase = getCellRangesBase();
