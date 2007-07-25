@@ -7,7 +7,14 @@ from boxer import Boxer
 from globals import *
 
 def usage (quitAfter=True):
-    print "usage: ..."
+    msg = """usage: src2xml.py [options] file1 file2 ....
+
+Options:
+
+TODO: to be worked on.  Meanwhile, please read README.
+
+"""
+    print msg
     if quitAfter:
         sys.exit(1)
 

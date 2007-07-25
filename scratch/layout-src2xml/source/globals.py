@@ -109,17 +109,9 @@ class Element(Node):
     def getAttr (self, name):
         return self.attrs[name]
 
-    # TODO: all manner of evil special cases ...
-    def renameAttribute(self, name):
-        if self.name == "metric-field":
-            if name == "spin-size":
-                return "value-step"
-        return name;
-
     def setAttr (self, name, value):
         if type(value) == type(0):
             value = "%d"%value
-        name = self.renameAttribute(name)
         self.attrs[name] = removeQuote(value)
         return
 

@@ -451,7 +451,6 @@ build the syntax tree.
 
 
     def lineBreak (self, i):
-        self.firstNonBlank = ''
         if not self.isCodeVisible():
             return i
 

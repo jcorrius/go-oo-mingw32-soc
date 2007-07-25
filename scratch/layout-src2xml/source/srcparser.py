@@ -45,6 +45,14 @@ Examples of translated values include TRUE -> true, FALSE -> false.
         value = value.lower()
     return value
 
+def renameAttribute (name, elemName):
+
+    # TODO: all manner of evil special cases ...
+    if elemName == 'metric-field' and name == 'spin-size':
+        return 'step-size'
+
+    return name
+
 
 class Statement(object):
     """Container to hold information for a single statement.
@@ -310,7 +318,7 @@ handler.
             elif len (self.tokenBuf) == 1:
                 # Simple value
                 value = transValue(self.tokenBuf[0])
-                
+                name = renameAttribute(name, elem.name)
                 elem.setAttr(name, value)
 
             if not self.stmtData.leftScope == None and self.stmtData.leftScope < scope:
