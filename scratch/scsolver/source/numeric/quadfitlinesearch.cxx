@@ -32,6 +32,9 @@
 #include "numeric/diff.hxx"
 
 #include <stdio.h>
+#include <memory>
+
+using namespace std;
 
 namespace scsolver { namespace numeric {
 
@@ -42,10 +45,10 @@ struct SearchData
     double P3;
 
     QuadFitLineSearch::GoalType Goal;
-    const SingleVarFuncObj& Func;
+    SingleVarFuncObj* pFunc;
 
-    explicit SearchData(const SingleVarFuncObj& func) :
-        Func(func)
+    explicit SearchData(SingleVarFuncObj* p) :
+        pFunc(p)
     {
     }
 };
@@ -56,12 +59,15 @@ bool iterate(SearchData& data)
     return false;
 }
 
-void evalStepLength(const SingleVarFuncObj& F, double step)
+void evalStepLength(SingleVarFuncObj* pFunc, double step)
 {
     double e = 0.2;
+    auto_ptr<BaseFuncObj> pBaseFunc(pFunc->toBaseFuncObj());
+
     NumericalDiffer diff;
-    diff.setFuncObject(&F);
-//     double f = F(0.0) + step*e*
+    diff.setFuncObject(pBaseFunc.get());
+
+    // TODO: to be continued ...
 }
 
 /**
@@ -78,17 +84,19 @@ bool findInitialPoints(SearchData& data)
 
     // First, find an acceptable step length.
     double step = 0.1;
+    evalStepLength(data.pFunc, step);
 
     data.P1 = 0.0;
 
-    double f = data.Func(1.0);
+    data.pFunc->setVar(1.0);
+    double f = data.pFunc->eval();
     exit(0);
     return false;
 }
 
 // --------------------------------------------------------------------------
 
-QuadFitLineSearch::QuadFitLineSearch(const SingleVarFuncObj* pFuncObj) :
+QuadFitLineSearch::QuadFitLineSearch(SingleVarFuncObj* pFuncObj) :
     mpFuncObj(pFuncObj),
     m_eGoal(QuadFitLineSearch::MINIMIZE)
 {
@@ -110,7 +118,7 @@ bool QuadFitLineSearch::solve()
 
     printf("%s\n", mpFuncObj->getFuncString().c_str());
 
-    SearchData data(*mpFuncObj);
+    SearchData data(mpFuncObj);
     data.Goal = m_eGoal;
 
     // 1.  Find three points such that the 2nd point be the lowest.
@@ -122,9 +130,12 @@ bool QuadFitLineSearch::solve()
     
     // Solve the quadratic function.
     PolyEqnSolver eqnSolver;
-    eqnSolver.addDataPoint(data.P1, mpFuncObj->eval(data.P1));
-    eqnSolver.addDataPoint(data.P2, mpFuncObj->eval(data.P2));
-    eqnSolver.addDataPoint(data.P3, mpFuncObj->eval(data.P3));
+    mpFuncObj->setVar(data.P1);
+    eqnSolver.addDataPoint(data.P1, mpFuncObj->eval());
+    mpFuncObj->setVar(data.P2);
+    eqnSolver.addDataPoint(data.P2, mpFuncObj->eval());
+    mpFuncObj->setVar(data.P3);
+    eqnSolver.addDataPoint(data.P3, mpFuncObj->eval());
     Matrix sol = eqnSolver.solve();
     sol.print();
     double x, y;

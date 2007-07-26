@@ -41,7 +41,7 @@ public:
         MINIMIZE
     };
 
-    explicit QuadFitLineSearch(const SingleVarFuncObj* pFuncObj);
+    explicit QuadFitLineSearch(SingleVarFuncObj* pFuncObj);
     ~QuadFitLineSearch() throw();
 
     void setGoal(QuadFitLineSearch::GoalType goal);
@@ -49,7 +49,7 @@ public:
     bool solve();
 
 private:
-    const SingleVarFuncObj* mpFuncObj;
+    SingleVarFuncObj* mpFuncObj;
     QuadFitLineSearch::GoalType m_eGoal;
 };
 

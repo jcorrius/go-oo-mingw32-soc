@@ -43,11 +43,8 @@ public:
     virtual ~BaseFuncObj() throw() = 0;
 
     virtual const ::std::vector<double>& getVars() const = 0;
-
     virtual void setVars(const ::std::vector<double>& vars) = 0;
-
     virtual void setVar(size_t index, double var) = 0;
-
     virtual double eval() = 0;
 
     /**
@@ -68,13 +65,27 @@ public:
     SingleVarFuncObj();
     virtual ~SingleVarFuncObj() throw() = 0;
 
-    virtual double eval(double var) const = 0;
-    double operator()(double var) const;
+    virtual void setVar(double var) = 0;
+    virtual double getVar() const = 0;
+    virtual double eval() const = 0;
 
     /** 
      * Return a display-friendly function string (e.g. x^3 + 2*x^2 + 4). 
      */
     virtual const ::std::string getFuncString() const = 0;
+
+    double operator()(double var);
+
+    /**
+     * Return a new instance of type BaseFuncObj that wraps this SingleVarFuncObj 
+     * instance inside. Note that the lifetime of the returned instance must not 
+     * go beyond that of the parent class instance.  In the object returned by 
+     * this method, the only variable is at the index position of 0.
+     * 
+     * @return BaseFuncObj* newly instantiated BaseFuncObj instance.  The caller 
+     *         is responsible for managing its lifetime.
+     */
+    BaseFuncObj* toBaseFuncObj();
 };
 
 

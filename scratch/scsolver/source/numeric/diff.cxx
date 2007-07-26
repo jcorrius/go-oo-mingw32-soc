@@ -133,37 +133,31 @@ double NumericalDiffer::getT( unsigned long m, unsigned long i )
 
 double NumericalDiffer::T0( unsigned long i )
 {
-	vector<double> cnX( m_cnX );
-
-	double fXOrig = cnX.at( m_nVarIndex );
+	double fXOrig = m_cnX.at(m_nVarIndex);
 	double fVal = 0.0;
-	double fH = m_cnH.at( i );
+	double fH = m_cnH.at(i);
+    m_pFuncObj->setVars(m_cnX);
 
-	if ( m_bSecondOrder )
+	if (m_bSecondOrder)
 	{
-		cnX.at( m_nVarIndex ) = fXOrig + fH;
-        m_pFuncObj->setVars(cnX);
+        m_pFuncObj->setVar(m_nVarIndex, fXOrig + fH);
         fVal = m_pFuncObj->eval();
-		cnX.at( m_nVarIndex ) = fXOrig;
-        m_pFuncObj->setVars(cnX);
+        m_pFuncObj->setVar(m_nVarIndex, fXOrig);
 		fVal -= 2.0*m_pFuncObj->eval();
-		cnX.at( m_nVarIndex ) = fXOrig - fH;
-        m_pFuncObj->setVars(cnX);
+        m_pFuncObj->setVar(m_nVarIndex, fXOrig - fH);
 		fVal += m_pFuncObj->eval();
 		fVal /= fH*fH;
 	}
 	else
 	{
-		cnX.at( m_nVarIndex ) = fXOrig + fH;
-        m_pFuncObj->setVars(cnX);
+        m_pFuncObj->setVar(m_nVarIndex, fXOrig + fH);
 		fVal = m_pFuncObj->eval();
-		cnX.at( m_nVarIndex ) = fXOrig - fH;
-        m_pFuncObj->setVars(cnX);
+        m_pFuncObj->setVar(m_nVarIndex, fXOrig - fH);
 		fVal -= m_pFuncObj->eval();
 		fVal /= 2.0*fH;
 	}
-	setT( 0, i, fVal );
 
+	setT(0, i, fVal);
 	return fVal;
 }
 

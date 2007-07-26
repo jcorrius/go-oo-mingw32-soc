@@ -44,9 +44,19 @@ public:
     {
     }
 
-    virtual double eval(double var) const
+    virtual void setVar(double var)
     {
-        return (var - 2.0)*(var*2.0 + 5.0) + 10.0;
+        mVar = var;
+    }
+
+    virtual double getVar() const
+    {
+        return mVar;
+    }
+
+    virtual double eval() const
+    {
+        return (mVar - 2.0)*(mVar*2.0 + 5.0) + 10.0;
     }
 
     /**
@@ -56,6 +66,8 @@ public:
     {
         return string("(x - 2) * (2x + 5) + 10");
     }
+private:
+    double mVar;
 };
 
 void run()

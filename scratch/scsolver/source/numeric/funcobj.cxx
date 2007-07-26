@@ -26,6 +26,10 @@
  ************************************************************************/
 
 #include "numeric/funcobj.hxx"
+#include <vector>
+#include <string>
+
+using namespace std;
 
 namespace scsolver { namespace numeric {
 
@@ -42,6 +46,62 @@ BaseFuncObj::~BaseFuncObj() throw()
 
 // --------------------------------------------------------------------------
 
+/**
+ * Class that wraps an instance of class SinglVarFuncObj in case one needs to 
+ * pass the instance as type BaseFuncObj.  The lifetime of this class instance 
+ * must end before the enclosed class instance.
+ */
+class SingleBaseFuncObj : public BaseFuncObj
+{
+public:
+    explicit SingleBaseFuncObj(SingleVarFuncObj* pFuncObj) :
+        mpFuncObj(pFuncObj)
+    {
+        mVars.push_back(pFuncObj->getVar());
+    }
+
+    virtual ~SingleBaseFuncObj() throw()
+    {
+    }
+
+    virtual double eval()
+    {
+        return mpFuncObj->eval();
+    }
+
+    virtual const string getFuncString() const
+    {
+        return mpFuncObj->getFuncString();
+    }
+
+    virtual const vector<double> & getVars() const
+    {
+        return mVars;
+    }
+
+    virtual void setVar(size_t index, double var)
+    {
+        if (index != 0)
+            return;
+
+        mpFuncObj->setVar(var);
+        mVars[0] = var;
+    }
+
+    virtual void setVars(const::std::vector<double> &vars)
+    {
+        if ( vars.empty() )
+            return;
+
+        mpFuncObj->setVar(vars[0]);
+        mVars[0] = vars[0];
+    }
+
+private:
+    SingleVarFuncObj* mpFuncObj;
+    vector<double> mVars;
+};
+
 SingleVarFuncObj::SingleVarFuncObj()
 {
 }
@@ -50,9 +110,15 @@ SingleVarFuncObj::~SingleVarFuncObj() throw()
 {
 }
 
-double SingleVarFuncObj::operator()(double var) const
+double SingleVarFuncObj::operator()(double var)
 {
-    return eval(var);
+    setVar(var);
+    return eval();
+}
+
+BaseFuncObj* SingleVarFuncObj::toBaseFuncObj()
+{
+    return new SingleBaseFuncObj(this);
 }
 
 }}

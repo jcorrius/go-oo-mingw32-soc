@@ -50,8 +50,8 @@ quadfitlinesearch.o: $(NUMERIC_PATH)/quadfitlinesearch.cxx
 quadfitlinesearch_test.o: $(NUMERIC_PATH)/quadfitlinesearch_test.cxx
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ -c $<
 
-quadfitlinesearch: quadfitlinesearch.o quadfitlinesearch_test.o polyeqnsolver.o matrix.o global.o funcobj.o
-	$(CXX) -o $@ quadfitlinesearch.o quadfitlinesearch_test.o polyeqnsolver.o matrix.o global.o funcobj.o
+quadfitlinesearch: quadfitlinesearch.o quadfitlinesearch_test.o polyeqnsolver.o matrix.o global.o funcobj.o diff.o
+	$(CXX) -o $@ quadfitlinesearch.o quadfitlinesearch_test.o polyeqnsolver.o matrix.o global.o funcobj.o diff.o
 
 diff: diff_test.o diff.o funcobj.o
 	$(CXX) -o $@ diff_test.o diff.o funcobj.o
