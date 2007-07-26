@@ -42,7 +42,7 @@
 
 using namespace scsolver::numeric;
 using scsolver::numeric::Matrix;
-using scsolver::numeric::Differentiate;
+using scsolver::numeric::NumericalDiffer;
 using boost::shared_ptr;
 using namespace std;
 
@@ -92,7 +92,7 @@ class QuasiNewtonImpl
 public:
 	QuasiNewtonImpl( QuasiNewton* p ) :
 		m_pSelf(p),
-		m_pDiff(new Differentiate()),
+		m_pDiff(new NumericalDiffer()),
 		m_nIter(0),
 		m_pModel(NULL),
 		m_mxVars(0, 0),
@@ -151,7 +151,7 @@ public:
 
 private:
 	QuasiNewton* m_pSelf;
-	boost::shared_ptr<Differentiate> m_pDiff;
+	boost::shared_ptr<NumericalDiffer> m_pDiff;
 
 	// These data members are expected to be initialized at start of 'void solve()' call.
 	unsigned long m_nIter;

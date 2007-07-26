@@ -548,7 +548,7 @@ void BaseDialogImpl::execute()
 	setVisibleDefault( true );
 	toFront();
 	Reference< awt::XDialog > xDlg( m_oDlg, UNO_QUERY );
-	sal_Int16 r = xDlg->execute();
+	xDlg->execute();
 }
 
 //--------------------------------------------------------------------------

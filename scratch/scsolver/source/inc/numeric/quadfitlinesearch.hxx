@@ -49,7 +49,7 @@ public:
     bool solve();
 
 private:
-    const SingleVarFuncObj* m_pFuncObj;
+    const SingleVarFuncObj* mpFuncObj;
     QuadFitLineSearch::GoalType m_eGoal;
 };
 

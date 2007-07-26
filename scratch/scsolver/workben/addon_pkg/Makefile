@@ -14,7 +14,7 @@ CXX_DEFINES= \
 
 CXX_SHARED_FLAGS=-fPIC -fno-common -export-dynamic -fvisibility=hidden
 LIBLPSOLVE=$(SLVDIR)/lib/liblpsolve55.a
-CPPFLAGS=-DDEBUG -Wall -Os -mtune=pentium3
+CPPFLAGS=-DDEBUG -Wall -Wno-non-virtual-dtor -Wno-strict-aliasing -Os -mtune=pentium3
 
 BINDIR=$(SLVDIR)/bin
 OBJDIR=./obj

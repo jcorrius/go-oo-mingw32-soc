@@ -59,7 +59,7 @@ bool iterate(SearchData& data)
 void evalStepLength(const SingleVarFuncObj& F, double step)
 {
     double e = 0.2;
-    Differentiate diff;
+    NumericalDiffer diff;
     diff.setFuncObject(&F);
 //     double f = F(0.0) + step*e*
 }
@@ -89,7 +89,7 @@ bool findInitialPoints(SearchData& data)
 // --------------------------------------------------------------------------
 
 QuadFitLineSearch::QuadFitLineSearch(const SingleVarFuncObj* pFuncObj) :
-    m_pFuncObj(pFuncObj),
+    mpFuncObj(pFuncObj),
     m_eGoal(QuadFitLineSearch::MINIMIZE)
 {
 }
@@ -105,12 +105,12 @@ void QuadFitLineSearch::setGoal(QuadFitLineSearch::GoalType goal)
 
 bool QuadFitLineSearch::solve()
 {
-    printf("%s\n", m_pFuncObj->getFuncString().c_str());
-
-    if ( !m_pFuncObj )
+    if ( !mpFuncObj )
         return false;
 
-    SearchData data(*m_pFuncObj);
+    printf("%s\n", mpFuncObj->getFuncString().c_str());
+
+    SearchData data(*mpFuncObj);
     data.Goal = m_eGoal;
 
     // 1.  Find three points such that the 2nd point be the lowest.
@@ -122,9 +122,9 @@ bool QuadFitLineSearch::solve()
     
     // Solve the quadratic function.
     PolyEqnSolver eqnSolver;
-    eqnSolver.addDataPoint(data.P1, m_pFuncObj->eval(data.P1));
-    eqnSolver.addDataPoint(data.P2, m_pFuncObj->eval(data.P2));
-    eqnSolver.addDataPoint(data.P3, m_pFuncObj->eval(data.P3));
+    eqnSolver.addDataPoint(data.P1, mpFuncObj->eval(data.P1));
+    eqnSolver.addDataPoint(data.P2, mpFuncObj->eval(data.P2));
+    eqnSolver.addDataPoint(data.P3, mpFuncObj->eval(data.P3));
     Matrix sol = eqnSolver.solve();
     sol.print();
     double x, y;

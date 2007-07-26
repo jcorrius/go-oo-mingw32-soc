@@ -36,59 +36,9 @@ using namespace std;
 
 namespace scsolver { namespace numeric {
 
-//---------------------------------------------------------------------------
-// Implementation
+const double NumericalDiffer::OMEGA = 2.0;
 
-/** 
-    Algorithm derived from Chapter 4.2 (p.93) of
- 
-    "A First Course In Numerical Analysis 2nd ed. by Anthony
-    Ralston and Philip Rabinowitz"
- */
-class DifferentiateImpl
-{
-	static double OMEGA;
-
-public:
-	DifferentiateImpl();
-	~DifferentiateImpl() throw();
-
-	void setPrecision( unsigned long );
-	void setSecondOrder( bool );
-	void setVariables( const vector<double>& );
-	void setVarIndex( unsigned long );
-
-    void setFuncObject(BaseFuncObj* p)
-    {
-    	m_pFuncObj = p;
-    	setDirty();
-    }
-
-	double run();
-
-private:
-	unsigned long m_nPrec;
-	unsigned long m_nVarIndex;
-	bool m_bSecondOrder;
-    BaseFuncObj* m_pFuncObj;
-
-	vector<double> m_cnX;
-	vector<double> m_cnH;
-	vector< vector<double> > m_cnT;
-
-	void initialize();
-	void setDirty();
-	void appendNewH();
-	void setT( unsigned long, unsigned long, double );
-	double getT( unsigned long, unsigned long );
-	double T0( unsigned long );
-	double Tm();
-	double Tm( unsigned long, unsigned long = 0 );
-};
-
-double DifferentiateImpl::OMEGA = 2.0;
-
-DifferentiateImpl::DifferentiateImpl() : 
+NumericalDiffer::NumericalDiffer() : 
 	m_nPrec( 2 ), 
 	m_nVarIndex( 0 ), 
 	m_bSecondOrder( false ),
@@ -96,28 +46,28 @@ DifferentiateImpl::DifferentiateImpl() :
 {
 }
 
-DifferentiateImpl::~DifferentiateImpl() throw()
+NumericalDiffer::~NumericalDiffer() throw()
 {
 }
 
-void DifferentiateImpl::setPrecision( unsigned long n )
+void NumericalDiffer::setPrecision( unsigned long n )
 {
 	m_nPrec = n;
 }
 
-void DifferentiateImpl::setSecondOrder( bool b )
+void NumericalDiffer::setSecondOrder( bool b )
 {
 	m_bSecondOrder = b;
 	setDirty();
 }
 
-void DifferentiateImpl::setVariables( const vector<double>& cnX )
+void NumericalDiffer::setVariables( const vector<double>& cnX )
 {
 	m_cnX = cnX;
 	setDirty();
 }
 
-void DifferentiateImpl::setVarIndex( unsigned long n )
+void NumericalDiffer::setVarIndex( unsigned long n )
 {
 	if ( m_nVarIndex != n )
 	{
@@ -126,7 +76,13 @@ void DifferentiateImpl::setVarIndex( unsigned long n )
 	}
 }
 
-void DifferentiateImpl::initialize()
+void NumericalDiffer::setFuncObject(BaseFuncObj* p)
+{
+    m_pFuncObj = p;
+    setDirty();
+}
+
+void NumericalDiffer::initialize()
 {
 	const double fInitH = 0.0512;
 	m_cnH.clear();
@@ -134,17 +90,17 @@ void DifferentiateImpl::initialize()
 	m_cnH.push_back( fInitH / 3.0 * 2.0 );
 }
 
-void DifferentiateImpl::setDirty()
+void NumericalDiffer::setDirty()
 {
 	m_cnT.clear();
 }
 
-void DifferentiateImpl::appendNewH()
+void NumericalDiffer::appendNewH()
 {
 	m_cnH.push_back( m_cnH.at( m_cnH.size() - 2 ) / 2.0 );
 }
 
-void DifferentiateImpl::setT( unsigned long m, unsigned long i, double fVal )
+void NumericalDiffer::setT( unsigned long m, unsigned long i, double fVal )
 {
 	size_t nTSize = m_cnT.size();
 	if ( nTSize < m + 1 )
@@ -163,7 +119,7 @@ void DifferentiateImpl::setT( unsigned long m, unsigned long i, double fVal )
 	cnRow.at( i ) = fVal;
 }
 
-double DifferentiateImpl::getT( unsigned long m, unsigned long i )
+double NumericalDiffer::getT( unsigned long m, unsigned long i )
 {
 	if ( m_cnT.empty() || m_cnT.size() - 1 < m )
 		throw std::out_of_range( "" );
@@ -175,7 +131,7 @@ double DifferentiateImpl::getT( unsigned long m, unsigned long i )
 	return cnRow.at( i );
 }
 
-double DifferentiateImpl::T0( unsigned long i )
+double NumericalDiffer::T0( unsigned long i )
 {
 	vector<double> cnX( m_cnX );
 
@@ -211,13 +167,13 @@ double DifferentiateImpl::T0( unsigned long i )
 	return fVal;
 }
 
-double DifferentiateImpl::Tm()
+double NumericalDiffer::Tm()
 {
 	unsigned long m = m_cnH.size() - 1;
 	return Tm( m );
 }
 
-double DifferentiateImpl::Tm( unsigned long m, unsigned long i )
+double NumericalDiffer::Tm( unsigned long m, unsigned long i )
 {
 	if ( m_cnH.empty() )
 		throw exception();
@@ -235,13 +191,13 @@ double DifferentiateImpl::Tm( unsigned long m, unsigned long i )
 
 	double fT1 = Tm( m-1, i+1 );
 	double fT2 = Tm( m-1, i );
-	double fVal = fT1 + ( fT1 - fT2 ) / ( pow( m_cnH.at( i )/m_cnH.at( i+m ), DifferentiateImpl::OMEGA ) - 1 );
+	double fVal = fT1 + ( fT1 - fT2 ) / ( pow( m_cnH.at( i )/m_cnH.at( i+m ), NumericalDiffer::OMEGA ) - 1 );
 	setT( m, i, fVal );
 
 	return fVal;
 }
 
-double DifferentiateImpl::run()
+double NumericalDiffer::run()
 {
 	if ( m_pFuncObj == NULL )
 		throw FuncObjectNotSet();
@@ -267,53 +223,6 @@ double DifferentiateImpl::run()
 	throw std::exception();
 
 	return 0.0;
-}
-
-//---------------------------------------------------------------------------
-// Public Interface
-
-Differentiate::Differentiate() : m_pImpl( new DifferentiateImpl )
-{
-}
-
-Differentiate::~Differentiate() throw()
-{
-}
-
-void Differentiate::setPrecision( unsigned long n )
-{
-	m_pImpl->setPrecision( n );
-}
-
-void Differentiate::setSecondOrder( bool b )
-{
-	m_pImpl->setSecondOrder( b );
-}
-
-void Differentiate::setVariables( const vector<double>& cnX )
-{
-	m_pImpl->setVariables( cnX );
-}
-
-/** Set an variable index with respect of which to differentiate.  For example,
-	an index of 0 will differentiate with respect to the first variable, and an
-	index of 1 will with respect to the second, and so on.
-
-	@param nIndex variable index
- */
-void Differentiate::setVarIndex( unsigned long nIndex )
-{
-	m_pImpl->setVarIndex( nIndex );
-}
-
-void Differentiate::setFuncObject(BaseFuncObj* p)
-{
-	m_pImpl->setFuncObject( p );
-}
-
-double Differentiate::run()
-{
-	return m_pImpl->run();
 }
 
 }}

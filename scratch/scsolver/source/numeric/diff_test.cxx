@@ -167,7 +167,7 @@ void test(BaseTestFunc* pF)
         cout << " x = " << var << endl;
         vector<double> cnX;
         cnX.push_back(var);
-        auto_ptr<Differentiate> pDiff( new Differentiate );
+        auto_ptr<NumericalDiffer> pDiff( new NumericalDiffer );
         pDiff->setVariables( cnX );
         pDiff->setPrecision(5);
         pDiff->setFuncObject(pF);
