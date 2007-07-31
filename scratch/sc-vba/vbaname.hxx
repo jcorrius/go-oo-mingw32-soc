@@ -2,11 +2,11 @@
  *
  *  OpenOffice.org - a multi-platform office productivity suite
  *
- *  $RCSfile: vbaname.hxx,v $
+ *  $RCSfile$
  *
- *  $Revision: 1.0 $
+ *  $Revision$
  *
- *  last change: $Author: amelia $ $Date: 2007/05/29 16:10:40 $
+ *  last change: $Author$ $Date$
  *
  *  The Contents of this file are made available subject to
  *  the terms of GNU Lesser General Public License Version 2.1.
@@ -58,8 +58,6 @@ protected:
 public:
 	ScVbaName( const css::uno::Reference< oo::vba::XHelperInterface >& xParent,  const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::sheet::XNamedRange >& xName , const css::uno::Reference< css::sheet::XNamedRanges >& xNames , const css::uno::Reference< css::frame::XModel >& xModel );
 	virtual ~ScVbaName();
-
-	ScDocument* getScDocument();
 
 	// Attributes
 	virtual ::rtl::OUString SAL_CALL getName() throw (css::uno::RuntimeException);

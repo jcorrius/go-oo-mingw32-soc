@@ -50,7 +50,7 @@ dummy:
 .ENDIF
  
 INCPRE=$(INCCOM)$/$(TARGET)
-
+CDEFS+=-DVBA_OOBUILD_HACK
 # ------------------------------------------------------------------
 
 SLOFILES= \
