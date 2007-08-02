@@ -1,0 +1,120 @@
+--- svx/source/msfilter/svxmsbas.cxx	2007-07-18 14:00:50.000000000 +0800
++++ svx/source/msfilter/svxmsbas.cxx	2007-08-02 10:53:49.000000000 +0800
+@@ -370,12 +370,14 @@
+                 }
+ 				static ::rtl::OUString sVBAOption( RTL_CONSTASCII_USTRINGPARAM( "Option VBASupport 1\n" ) ); 
+ 				static ::rtl::OUString sClassOption( RTL_CONSTASCII_USTRINGPARAM( "Option ClassModule\n" ) ); 
++				static ::rtl::OUString sObjectOption( RTL_CONSTASCII_USTRINGPARAM( "Option VBADocumentModule\n" ) ); 
+ 				if ( !bAsComment )
+ 				{
+ 					modeTypeComment = modeTypeComment + sVBAOption;
+ 					if ( mType == Class )
+ 						modeTypeComment = modeTypeComment + sClassOption;
+-
++                    if ( mType == Document )
++                        modeTypeComment = modeTypeComment + sObjectOption;
+ 				}
+ 
+ 				String sModule(sBasicModule); //#i52606# no need to split Macros in 64KB blocks any more!
+@@ -435,7 +437,7 @@
+ 						aSource += rtl::OUString::createFromAscii("\nEnd Sub");
+ 				}
+ 				::rtl::OUString aModName( sModule );
+-				if ( aSource.getLength() )
++				//if ( aSource.getLength() )
+ 				{
+ 					aSource = modeTypeComment + aSource;
+ 
+--- basic/source/inc/image.hxx	2007-07-31 13:18:08.000000000 +0800
++++ basic/source/inc/image.hxx	2007-07-31 18:17:40.000000000 +0800
+@@ -115,5 +115,6 @@
+ #define	SBIMG_INITCODE		0x0004	// Init-Code vorhanden
+ #define	SBIMG_CLASSMODULE	0x0008	// OPTION ClassModule is active
+ #define	SBIMG_VBASUPPORT	0x0020	// OPTION VBASupport is 1
++#define	SBIMG_VBADOCUMENT	0x0040	// OPTION VBADocumentModule is 1
+ 
+ #endif
+--- basic/source/inc/token.hxx	2007-07-31 10:43:58.000000000 +0800
++++ basic/source/inc/token.hxx	2007-07-31 16:32:00.000000000 +0800
+@@ -122,7 +122,7 @@
+ 	JS_GT, JS_GE, JS_LSHIFT, JS_RSHIFT, JS_RSHIFT_Z,
+ 	JS_PLUS, JS_MINUS, JS_MUL, JS_DIV, JS_MOD, JS_LOG_NOT, JS_BIT_NOT,
+ 	JS_INC, JS_DEC, JS_LPAREN, JS_RPAREN, JS_LINDEX, JS_RINDEX
+-	, VBASUPPORT
++	, VBASUPPORT, VBADOCUMENT
+ };
+ 
+ #ifdef SbiTokenSHAREDTMPUNDEF
+--- basic/source/comp/token.cxx	2007-07-31 10:41:30.000000000 +0800
++++ basic/source/comp/token.cxx	2007-07-31 16:29:55.000000000 +0800
+@@ -190,6 +190,7 @@
+ 	{ TYPEOF,	"TypeOf" },
+ 	{ UNTIL,	"Until" },
+ 	{ TVARIANT,	"Variant" },
++    { VBADOCUMENT,   "VBADocumentModule"},
+ 	{ VBASUPPORT,	"VbaSupport" },
+ 	{ WEND,		"Wend" },
+ 	{ WHILE,	"While" },
+--- basic/source/comp/parser.cxx	2007-07-31 10:47:01.000000000 +0800
++++ basic/source/comp/parser.cxx	2007-07-31 17:08:58.000000000 +0800
+@@ -773,6 +773,10 @@
+ 			}
+ 			Error( SbERR_EXPECTED, "0/1" );
+ 			break;
++        case VBADOCUMENT:
++            if( bVBASupportOn ) //??
++                bVBAObjectModule = TRUE;
++			break;
+ 		default:
+ 			Error( SbERR_BAD_OPTION, eCurTok );
+ 	}
+--- basic/source/inc/scanner.hxx	2007-07-31 10:49:21.000000000 +0800
++++ basic/source/inc/scanner.hxx	2007-07-31 13:32:29.000000000 +0800
+@@ -80,7 +80,8 @@
+ 	BOOL   bError;						// TRUE: Fehler generieren
+ 	BOOL   bUsedForHilite;				// TRUE: Nutzung fuer Highlighting
+ 	BOOL   bCompatible; 				// TRUE: OPTION Compatibl
+-	BOOL   bVBASupportOn;				// TRUE: OPTION VBASupport 1 otherwise default False
++    BOOL   bVBASupportOn;				// TRUE: OPTION VBASupport 1 otherwise default False
++	BOOL   bVBAObjectModule;			// TRUE: OPTION bVBAObjectModule default False
+ 	BOOL   bPrevLineExtentsComment;		// TRUE: Previous line is comment and ends on "... _"
+ 
+ 	void   GenError( SbError );
+--- basic/source/comp/scanner.cxx	2007-07-31 10:51:41.000000000 +0800
++++ basic/source/comp/scanner.cxx	2007-07-31 17:07:41.000000000 +0800
+@@ -78,6 +78,7 @@
+ 	bUsedForHilite =
+ 	bCompatible = 
+ 	bVBASupportOn = 
++	bVBAObjectModule =
+ 	bPrevLineExtentsComment = FALSE;
+ 	bHash    =
+ 	bErrors  = TRUE;
+--- basic/source/runtime/step2.cxx	2007-08-02 11:06:32.000000000 +0800
++++ basic/source/runtime/step2.cxx	2007-08-01 17:04:30.000000000 +0800
+@@ -112,6 +112,11 @@
+ 
+ }
+ 
++SbxVariable* VBAFindObjectModule( const String& rName, SbxClassType t )
++{
++    return VBAFind( rName, t );
++}
++
+ // Suchen eines Elements
+ // Die Bits im String-ID:
+ // 0x8000 - Argv ist belegt
+@@ -156,7 +161,12 @@
+ 			// Die RTL brauchen wir nicht mehr zu durchsuchen!
+ 			BOOL bSave = rBasic.bNoRtl;
+ 			rBasic.bNoRtl = TRUE;
+-			pElem = pObj->Find( aName, SbxCLASS_DONTCARE );
++            // Jiao Jianhua
++            // search Object Module first
++            if( bVBAEnabled )
++                pElem = VBAFindObjectModule( aName, SbxCLASS_DONTCARE );
++            if( !pElem )
++			    pElem = pObj->Find( aName, SbxCLASS_DONTCARE );
+ 
+ 			// #110004, #112015: Make private really private
+ 			if( bLocal && pElem )	// Local as flag for global search
