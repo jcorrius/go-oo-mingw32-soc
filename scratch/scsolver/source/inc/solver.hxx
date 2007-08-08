@@ -29,7 +29,6 @@
 #ifndef _SOLVER_HXX_
 #define _SOLVER_HXX_
 
-#include <tools/resmgr.hxx>
 #include <cppuhelper/implbase6.hxx>
 #include <com/sun/star/lang/XInitialization.hpp>
 #include <com/sun/star/frame/XNotifyingDispatch.hpp>
@@ -42,6 +41,12 @@
 #include "type.hxx"
 #include <vector>
 #include <memory>
+
+#ifdef SCSOLVER_UNO_COMPONENT
+class ResMgr;
+#else
+#include <tools/resmgr.hxx>
+#endif
 
 #define	SERVICE_NAME		"org.openoffice.sc.solver.Solver"
 #define	IMPLEMENTATION_NAME	"scsolver.SolverImpl"

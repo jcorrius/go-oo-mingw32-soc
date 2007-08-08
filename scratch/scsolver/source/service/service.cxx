@@ -41,6 +41,14 @@
 
 #include <memory>
 
+#ifdef SCSOLVER_UNO_COMPONENT
+
+class ResMgr
+{
+};
+
+#endif
+
 using namespace std;
 
 namespace scsolver {
@@ -223,10 +231,11 @@ ResMgr* SolverImpl::getResMgr()
 
 rtl::OUString SolverImpl::getResStr( int resid )
 {
+#ifndef SCSOLVER_UNO_COMPONENT
    	ResMgr *pResMgr = getResMgr();
 	if ( pResMgr )
 		return rtl::OUString( String( ResId( resid, *getResMgr() ) ) );
-	
+#endif
 	return rtl::OUString::createFromAscii("Test");
 }
 

@@ -29,10 +29,15 @@
 #ifndef _BASEDLG_HXX_
 #define _BASEDLG_HXX_
 
-#include <tools/resmgr.hxx>
 #include <unoglobal.hxx>
 #include <memory>
 #include <com/sun/star/awt/PushButtonType.hpp>
+
+#ifdef SCSOLVER_UNO_COMPONENT
+class ResMgr;
+#else
+#include <tools/resmgr.hxx>
+#endif
 
 using namespace com::sun::star;
 using uno::Reference;
