@@ -93,7 +93,7 @@ ScVbaShapes::getItemByStringIndex( const rtl::OUString& sIndex ) throw (uno::Run
 uno::Type
 ScVbaShapes::getElementType() throw (uno::RuntimeException)
 {
-    return org::openoffice::msforms::XShapes::static_type(0);
+    return org::openoffice::msforms::XShape::static_type(0);
 }
 rtl::OUString& 
 ScVbaShapes::getServiceImplName()
@@ -114,18 +114,6 @@ ScVbaShapes::getServiceNames()
 	return aServiceNames;
 }
 
-//Method
-uno::Any SAL_CALL 
-ScVbaShapes::Item( const css::uno::Any& NameOrIndex ) throw (css::uno::RuntimeException)
-{
-    return ScVbaShapes_BASE::Item( NameOrIndex, uno::Any() );
-}
-
-sal_Int32 SAL_CALL 
-ScVbaShapes::Count(  ) throw (css::uno::RuntimeException)
-{
-    return getCount();
-}
 
 uno::Reference< msforms::XShapeRange > SAL_CALL 
 ScVbaShapes::Range( const uno::Any& shapes ) throw (css::uno::RuntimeException)

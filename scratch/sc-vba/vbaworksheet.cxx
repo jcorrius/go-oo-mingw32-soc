@@ -592,14 +592,17 @@ ScVbaWorksheet::OLEObjects( const uno::Any& Index ) throw (uno::RuntimeException
     }
 }
 uno::Any SAL_CALL
-ScVbaWorksheet::Shapes() throw (uno::RuntimeException)
+ScVbaWorksheet::Shapes( const uno::Any& aIndex ) throw (uno::RuntimeException)
 {
     uno::Reference< sheet::XSpreadsheet > xSpreadsheet( getSheet(), uno::UNO_QUERY_THROW );
     uno::Reference< drawing::XDrawPageSupplier > xDrawPageSupplier( xSpreadsheet, uno::UNO_QUERY_THROW );
     uno::Reference< drawing::XShapes > xShapes( xDrawPageSupplier->getDrawPage(), uno::UNO_QUERY_THROW );
     uno::Reference< container::XIndexAccess > xIndexAccess( xShapes, uno::UNO_QUERY_THROW );
 
-    return uno::makeAny( uno::Reference< msforms::XShapes> ( new ScVbaShapes( this, mxContext, xIndexAccess ) ) );
+   uno::Reference< msforms::XShapes> xVbaShapes( new ScVbaShapes( this, mxContext, xIndexAccess ) );
+   if ( aIndex.hasValue() )
+      return xVbaShapes->Item( aIndex, uno::Any() ); 
+   return uno::makeAny( xVbaShapes );
 }
 uno::Any SAL_CALL 
 ScVbaWorksheet::Evaluate( const ::rtl::OUString& Name ) throw (uno::RuntimeException)

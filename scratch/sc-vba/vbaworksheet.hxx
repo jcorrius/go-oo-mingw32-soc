@@ -121,7 +121,7 @@ public:
 	virtual css::uno::Any SAL_CALL Comments( const css::uno::Any& Index ) throw (css::uno::RuntimeException);
 
 	virtual css::uno::Any SAL_CALL OLEObjects( const css::uno::Any& Index ) throw (css::uno::RuntimeException);
-	virtual css::uno::Any SAL_CALL Shapes() throw (css::uno::RuntimeException);
+	virtual css::uno::Any SAL_CALL Shapes( const css::uno::Any& aIndex ) throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setEnableCalculation( ::sal_Bool EnableCalculation ) throw ( css::script::BasicErrorException, css::uno::RuntimeException);
 	virtual ::sal_Bool SAL_CALL getEnableCalculation(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException); 
 	// XInvocation

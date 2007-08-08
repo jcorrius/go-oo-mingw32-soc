@@ -77,9 +77,6 @@ public:
 
     // ScVbaCollectionBaseImpl
     virtual css::uno::Any createCollectionObject( const css::uno::Any& aSource );
-    // Methods
-    virtual css::uno::Any SAL_CALL Item( const css::uno::Any& NameOrIndex ) throw (css::uno::RuntimeException);
-    virtual sal_Int32 SAL_CALL Count() throw (css::uno::RuntimeException);
     virtual void SAL_CALL SelectAll() throw (css::uno::RuntimeException);
     virtual css::uno::Reference< oo::msforms::XShapeRange > SAL_CALL Range( const css::uno::Any& shapes ) throw (css::uno::RuntimeException);
     //helper::calc

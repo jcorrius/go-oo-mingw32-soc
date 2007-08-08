@@ -98,7 +98,7 @@ ScVbaOLEObjects::getItemByStringIndex( const rtl::OUString& sIndex ) throw (uno:
 uno::Type
 ScVbaOLEObjects::getElementType() throw (uno::RuntimeException)
 {
-    return org::openoffice::excel::XOLEObjects::static_type(0);
+    return org::openoffice::excel::XOLEObject::static_type(0);
 }
 rtl::OUString& 
 ScVbaOLEObjects::getServiceImplName()

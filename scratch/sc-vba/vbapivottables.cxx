@@ -79,7 +79,7 @@ ScVbaPivotTables::createCollectionObject( const css::uno::Any& aSource )
 uno::Type 
 ScVbaPivotTables::getElementType() throw (uno::RuntimeException)
 {
-	return excel::XPivotTables::static_type(0);
+	return excel::XPivotTable::static_type(0);
 }
 
 rtl::OUString& 
