@@ -45,6 +45,31 @@
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
 
+class EnumWrapper : public EnumerationHelper_BASE
+{
+
+        uno::Reference<msforms::XShapes > m_xParent;
+        uno::Reference<container::XIndexAccess > m_xIndexAccess;
+        sal_Int32 nIndex;
+public:
+        EnumWrapper( const uno::Reference< msforms::XShapes >& xParent,  const uno::Reference< container::XIndexAccess >& xIndexAccess ) : m_xParent( xParent ), m_xIndexAccess( xIndexAccess ), nIndex( 0 ) {}
+        virtual ::sal_Bool SAL_CALL hasMoreElements(  ) throw (uno::RuntimeException)
+        {
+                return ( nIndex < m_xIndexAccess->getCount() );
+        }
+
+        virtual uno::Any SAL_CALL nextElement(  ) throw (container::NoSuchElementException, lang::WrappedTargetException, uno::RuntimeException)
+        {
+                if ( nIndex < m_xIndexAccess->getCount() )
+		{
+			ScVbaShapes* pShapes = dynamic_cast< ScVbaShapes* >(m_xParent.get());
+			if ( pShapes )
+                        	return pShapes->createCollectionObject(  m_xIndexAccess->getByIndex( nIndex++ ) );
+		}
+                throw container::NoSuchElementException();
+        }
+};
+
 ScVbaShapes::ScVbaShapes( const css::uno::Reference< oo::vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::container::XIndexAccess > xShapes ): ScVbaShapes_BASE( xParent, xContext, xShapes ), m_nNewShapeCount(0)
 {
     m_xShapes.set( xShapes, uno::UNO_QUERY_THROW );
@@ -54,8 +79,7 @@ ScVbaShapes::ScVbaShapes( const css::uno::Reference< oo::vba::XHelperInterface >
 uno::Reference< container::XEnumeration >
 ScVbaShapes::createEnumeration() throw (uno::RuntimeException)
 {
-    uno::Reference< container::XEnumerationAccess > xEnumAccess( m_xIndexAccess, uno::UNO_QUERY_THROW );
-    return xEnumAccess->createEnumeration();
+    return new EnumWrapper( this,  m_xIndexAccess );
 }
 
 uno::Any

@@ -44,16 +44,89 @@
 using namespace com::sun::star;
 using namespace org::openoffice;
 
+typedef ::cppu::WeakImplHelper1< container::XIndexAccess > XIndexAccess_BASE;
+
+class IndexAccessWrapper : public XIndexAccess_BASE
+{
+typedef std::vector< uno::Reference< drawing::XControlShape > > OLEObjects;
+	OLEObjects vObjects;
+public:
+        IndexAccessWrapper(  const uno::Reference< container::XIndexAccess >& xIndexAccess ) 
+	{
+		sal_Int32 nLen = xIndexAccess->getCount();
+		for ( sal_Int32 index = 0; index < nLen; ++index )
+		{
+        		uno::Reference< drawing::XControlShape > xControlShape( xIndexAccess->getByIndex( index), uno::UNO_QUERY);
+			if ( xControlShape.is() )
+				vObjects.push_back( xControlShape );
+		}
+	}
+
+	virtual ::sal_Int32 SAL_CALL getCount() throw (uno::RuntimeException)
+	{
+		return vObjects.size();
+	}
+
+	virtual uno::Any SAL_CALL getByIndex( ::sal_Int32 Index ) throw (lang::IndexOutOfBoundsException, lang::WrappedTargetException, uno::RuntimeException)
+	{
+		if ( Index < 0 || Index >= getCount() )
+			throw lang::IndexOutOfBoundsException();
+		return uno::makeAny( vObjects[ Index ] ); 
+	}
+
+	    // Methods XElementAcess
+        virtual uno::Type SAL_CALL getElementType() throw (uno::RuntimeException)
+        {
+            return drawing::XControlShape::static_type(0);
+        }
+
+        virtual ::sal_Bool SAL_CALL hasElements() throw (uno::RuntimeException)
+        {
+            return ( getCount() > 0 );
+        }
+
+};
+
+class EnumWrapper : public EnumerationHelper_BASE
+{
+
+        uno::Reference<vba::XHelperInterface > m_xParent;
+        uno::Reference<uno::XComponentContext > m_xContext;
+        uno::Reference<container::XIndexAccess > m_xIndexAccess;
+        sal_Int32 nIndex;
+public:
+        EnumWrapper(  const uno::Reference< vba::XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext, uno::Reference< container::XIndexAccess >& xIndexAccess ) :  m_xParent( xParent ), m_xContext( xContext), m_xIndexAccess( xIndexAccess ), nIndex( 0 ) {}
+
+        virtual ::sal_Bool SAL_CALL hasMoreElements(  ) throw (uno::RuntimeException)
+        {
+                return ( nIndex < m_xIndexAccess->getCount() );
+        }
+
+        virtual uno::Any SAL_CALL nextElement(  ) throw (container::NoSuchElementException, lang::WrappedTargetException, uno::RuntimeException)
+        {
+                if ( nIndex < m_xIndexAccess->getCount() )
+		{
+			uno::Reference< drawing::XControlShape > xControlShape (  m_xIndexAccess->getByIndex( nIndex++ ), uno::UNO_QUERY_THROW );
+        		return uno::makeAny( uno::Reference< oo::excel::XOLEObject >( new ScVbaOLEObject( m_xParent, m_xContext, xControlShape ) ) );
+		}
+                throw container::NoSuchElementException();
+        }
+};
+
+uno::Reference< container::XIndexAccess > oleObjectIndexWrapper( const uno::Reference< container::XIndexAccess >& xIndexAccess )
+{
+	return new IndexAccessWrapper( xIndexAccess );
+}
+
 ScVbaOLEObjects::ScVbaOLEObjects( const uno::Reference< vba::XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext,
                 const css::uno::Reference< css::container::XIndexAccess >& xIndexAccess )
-            : OLEObjectsImpl_BASE( xParent, xContext, xIndexAccess )
+            : OLEObjectsImpl_BASE( xParent, xContext, oleObjectIndexWrapper( xIndexAccess  ) )
 {
 }
 uno::Reference< container::XEnumeration >
 ScVbaOLEObjects::createEnumeration() throw (uno::RuntimeException)
 {
-    uno::Reference< container::XEnumerationAccess > xEnumAccess( m_xIndexAccess, uno::UNO_QUERY_THROW );
-    return xEnumAccess->createEnumeration();
+    return new EnumWrapper( getParent(), mxContext, m_xIndexAccess );
 }
 
 uno::Any
