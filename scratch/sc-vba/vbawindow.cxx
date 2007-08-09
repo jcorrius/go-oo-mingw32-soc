@@ -385,7 +385,7 @@ ScVbaWindow::getWindowState() throw (uno::RuntimeException)
 	SfxTopViewFrame *pTop= PTR_CAST( SfxTopViewFrame, pViewFrame -> GetTopViewFrame() );
 	if ( pTop )
     {
-        WorkWindow* pWork = (WorkWindow*) pTop->GetTopFrame_Impl()->GetTopWindow_Impl();
+        WorkWindow* pWork = (WorkWindow*) pTop->GetTopFrame_Impl()->GetSystemWindow();
         if ( pWork )
         {
             if ( pWork -> IsMaximized())
@@ -407,7 +407,7 @@ ScVbaWindow::setWindowState( const uno::Any& _windowstate ) throw (uno::RuntimeE
 	SfxTopViewFrame *pTop= PTR_CAST( SfxTopViewFrame, pViewFrame -> GetTopViewFrame() );
 	if ( pTop )
     {
-        WorkWindow* pWork = (WorkWindow*) pTop->GetTopFrame_Impl()->GetTopWindow_Impl();
+        WorkWindow* pWork = (WorkWindow*) pTop->GetTopFrame_Impl()->GetSystemWindow();
         if ( pWork )
         {
             if ( nwindowState == xlMaximized)

@@ -80,7 +80,7 @@ public:
 	virtual void SAL_CALL setRefersToRange( const css::uno::Reference< oo::excel::XRange > xRange ) throw (css::uno::RuntimeException);
 
 	// Methods
-	virtual void Delete() throw (css::uno::RuntimeException);
+	virtual void SAL_CALL Delete() throw (css::uno::RuntimeException);
 
 	// XHelperInterface
 	virtual rtl::OUString& getServiceImplName();
