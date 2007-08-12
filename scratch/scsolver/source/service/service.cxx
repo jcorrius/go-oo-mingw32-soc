@@ -43,6 +43,8 @@
 
 #ifdef SCSOLVER_UNO_COMPONENT
 
+#include "res/resource.hxx"
+
 class ResMgr
 {
 };
@@ -50,6 +52,7 @@ class ResMgr
 #endif
 
 using namespace std;
+using ::rtl::OUString;
 
 namespace scsolver {
 
@@ -231,12 +234,13 @@ ResMgr* SolverImpl::getResMgr()
 
 rtl::OUString SolverImpl::getResStr( int resid )
 {
-#ifndef SCSOLVER_UNO_COMPONENT
+#ifdef SCSOLVER_UNO_COMPONENT
+	return getLocaleStr(resid);
+#else
    	ResMgr *pResMgr = getResMgr();
 	if ( pResMgr )
-		return rtl::OUString( String( ResId( resid, *getResMgr() ) ) );
+        return rtl::OUString( String( ResId( resid, *getResMgr() ) ) );
 #endif
-	return rtl::OUString::createFromAscii("Test");
 }
 
 // XLocalizable

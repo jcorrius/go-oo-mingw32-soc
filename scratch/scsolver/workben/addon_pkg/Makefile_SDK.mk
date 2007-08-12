@@ -1,5 +1,6 @@
 TARGET=scsolver.uno
 
+SCSOLVER_LANG=en-US
 SDKDIR=$(HOME)/ooo/install/SRC680_m224_sdk
 OOODIR=$(HOME)/ooo/install/SRC680_m224
 
@@ -87,6 +88,9 @@ NUMERIC_OBJFILES = \
 	$(OBJDIR)/nlpmodel.o \
 	$(OBJDIR)/nlpbase.o \
 	$(OBJDIR)/nlpqnewton.o
+
+MISC_OBJFILES = \
+	$(OBJDIR)/resource.o
 
 XCUFILES = Addons.xcu ProtocolHandler.xcu
 
@@ -222,7 +226,14 @@ $(OBJDIR)/timer.o: $(HEADER) $(TOOLDIR)/timer.cxx
 	-o $@ $(CXX_SHARED_FLAGS) -c $(TOOLDIR)/timer.cxx
 
 #----------------------------------------------------------------------------
-# Misc
+# addon only
+
+$(OBJDIR)/resource.o: res/resource.hxx res/$(SCSOLVER_LANG).cxx
+	$(CXX) $(CPPFLAGS) $(CXXCPP) $(CXX_DEFINES) $(CPP_LIBS) \
+	-o $@ $(CXX_SHARED_FLAGS) -c res/$(SCSOLVER_LANG).cxx
+
+#----------------------------------------------------------------------------
+# misc
 
 $(OBJDIR)/unoheaders:
 	export LD_LIBRARY_PATH=$(OOODIR)/program && \
@@ -232,9 +243,9 @@ $(OBJDIR)/unoheaders:
 $(TARGET).zip: pre $(OBJDIR)/$(TARGET).so
 	zip -j $@ $(OBJDIR)/$(TARGET).so $(OBJDIR)/$(TARGET).rdb $(XCUFILES)
 
-$(OBJDIR)/$(TARGET).so: $(NUMERIC_OBJFILES) $(OBJFILES)
+$(OBJDIR)/$(TARGET).so: $(NUMERIC_OBJFILES) $(OBJFILES) $(MISC_OBJFILES)
 	export LD_LIBRARY_PATH=$(OOODIR)/program && \
-	$(CXX) -shared -Wl,-soname,$@ -o $@ -lc $(NUMERIC_OBJFILES) $(OBJFILES) && \
+	$(CXX) -shared -Wl,-soname,$@ -o $@ -lc $(NUMERIC_OBJFILES) $(OBJFILES) $(MISC_OBJFILES) && \
  	$(BINDIR)/regcomp -register -r $(OBJDIR)/$(TARGET).rdb -c $@
 
 regview:
