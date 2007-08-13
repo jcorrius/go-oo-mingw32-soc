@@ -51,7 +51,9 @@ class ScVbaWorkbooks : public ScVbaWorkbooks_BASE
 {
 private:
 	css::uno::Reference< oo::vba::XGlobals > getGlobals() throw (css::uno::RuntimeException);
+	rtl::OUString 	getFileFilterType( const rtl::OUString& rString );
 	bool 	isTextFile( const rtl::OUString& rString );
+	bool 	isSpreadSheetFile( const rtl::OUString& rString );
 	static sal_Int16& getCurrentDelim(){ static sal_Int16 nDelim = 44; return nDelim; }
 public:
 	ScVbaWorkbooks( const css::uno::Reference< oo::vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext );

@@ -52,6 +52,8 @@
 #include <com/sun/star/util/XCloseable.hpp>
 #include <com/sun/star/lang/IndexOutOfBoundsException.hpp>
 #include <com/sun/star/document/XTypeDetection.hpp>
+#include <com/sun/star/uri/XUriReference.hpp>
+#include <com/sun/star/uri/XUriReferenceFactory.hpp>
 
 #include <sfx2/objsh.hxx>
 #include <tools/urlobj.hxx>
@@ -300,24 +302,56 @@ ScVbaWorkbooks::Close() throw (uno::RuntimeException)
 }
 
 bool 
-ScVbaWorkbooks::isTextFile( const rtl::OUString& rFileName )
+ScVbaWorkbooks::isTextFile( const rtl::OUString& sType )
+{
+	// will return true if the file is
+	// a) a variant of a text file
+	// b) a csv file
+	// c) unknown 
+	// returning true basically means treat this like a csv file
+	const static rtl::OUString txtType( RTL_CONSTASCII_USTRINGPARAM("writer_Text" ) );
+	const static rtl::OUString csvType( RTL_CONSTASCII_USTRINGPARAM("calc_Text_txt_csv_StarCalc" ) );
+	const static rtl::OUString encodedTxtType( RTL_CONSTASCII_USTRINGPARAM("writer_Text_encoded" ) );
+	return sType.equals( txtType ) || sType.equals( csvType ) || ( sType.getLength() == 0 ) || sType.equals( encodedTxtType );
+}
+
+bool 
+ScVbaWorkbooks::isSpreadSheetFile( const rtl::OUString& sType )
+{
+	// include calc_QPro etc. ? ( not for the moment anyway )
+	if ( sType.indexOf( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("calc_MS"))) == 0 
+	|| sType.indexOf( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("calc8"))) == 0 
+	|| sType.indexOf( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("calc_StarOffice"))) == 0 )
+		return true;
+	return false;
+}
+
+rtl::OUString 
+ScVbaWorkbooks::getFileFilterType( const rtl::OUString& rFileName )
 {
 	uno::Reference< document::XTypeDetection > xTypeDetect( mxContext->getServiceManager()->createInstanceWithContext(::rtl::OUString::createFromAscii("com.sun.star.document.TypeDetection"), mxContext), uno::UNO_QUERY_THROW );
 	uno::Sequence< beans::PropertyValue > aMediaDesc(1);
 	aMediaDesc[ 0 ].Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM ("URL" ) );
 	aMediaDesc[ 0 ].Value <<= rFileName;
 	rtl::OUString sType = xTypeDetect->queryTypeByDescriptor( aMediaDesc, sal_True );
-	const static rtl::OUString txtType( RTL_CONSTASCII_USTRINGPARAM("writer_Text" ) );
-	const static rtl::OUString csvType( RTL_CONSTASCII_USTRINGPARAM("calc_Text_txt_csv_StarCalc" ) );
-	return sType.equals( txtType ) || sType.equals( csvType );
+	return sType;
 }
 
 // #TODO# #FIXME# can any of the unused params below be used?
 uno::Any
 ScVbaWorkbooks::Open( const rtl::OUString& rFileName, const uno::Any& /*UpdateLinks*/, const uno::Any& ReadOnly, const uno::Any& Format, const uno::Any& /*Password*/, const uno::Any& /*WriteResPassword*/, const uno::Any& /*IgnoreReadOnlyRecommended*/, const uno::Any& /*Origin*/, const uno::Any& Delimiter, const uno::Any& /*Editable*/, const uno::Any& /*Notify*/, const uno::Any& /*Converter*/, const uno::Any& /*AddToMru*/ ) throw (uno::RuntimeException)
 {
+	// we need to detect if this is a URL, if not then assume its a file path
         rtl::OUString aURL;
-        osl::FileBase::getFileURLFromSystemPath( rFileName, aURL );
+	uno::Reference< uri::XUriReferenceFactory > xFac ( mxContext->getServiceManager()->createInstanceWithContext( rtl::OUString::createFromAscii( "com.sun.star.uri.UriReferenceFactory"), mxContext ) , uno::UNO_QUERY_THROW );
+	uno::Reference<  uri::XUriReference > uriRef( xFac->parse( rFileName ), uno::UNO_QUERY );
+	if ( uriRef.is() )
+	{
+		if ( uriRef->getScheme().getLength() ) // already a 'proper' url
+			aURL = rFileName;
+		else
+        		osl::FileBase::getFileURLFromSystemPath( rFileName, aURL );
+	}	
 	uno::Reference< lang::XMultiComponentFactory > xSMgr(
         	mxContext->getServiceManager(), uno::UNO_QUERY_THROW );
 
@@ -331,9 +365,10 @@ ScVbaWorkbooks::Open( const rtl::OUString& rFileName, const uno::Any& /*UpdateLi
 		uno::UNO_QUERY_THROW );
 	uno::Sequence< beans::PropertyValue > sProps(0);
 	sal_Int32 nIndex = 0;
-
+	
+	rtl::OUString sType = getFileFilterType( aURL );
 	// A text file means it needs to be processed as a csv file	
-	if ( isTextFile( aURL ) ) 
+	if ( isTextFile( sType ) ) 
 	{
 		// Values for format
 		// 1 Tabs
@@ -343,7 +378,7 @@ ScVbaWorkbooks::Open( const rtl::OUString& rFileName, const uno::Any& /*UpdateLi
 		// 5 Nothing
 		// 6 Custom character (see the Delimiter argument
 		// no format means use the current delimiter
-		sProps.realloc( 1 );
+		sProps.realloc( 3 );
 		sProps[ nIndex ].Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("FilterOptions" ) );
 		sal_Int16 delims[] = { 0 /*default not used*/, 9/*tab*/, 44/*comma*/, 32/*space*/, 59/*semicolon*/ };	
 		static rtl::OUString sRestOfFormat( RTL_CONSTASCII_USTRINGPARAM(",34,0,1" ) );
@@ -384,7 +419,16 @@ ScVbaWorkbooks::Open( const rtl::OUString& rFileName, const uno::Any& /*UpdateLi
 
 		sFormat = rtl::OUString::valueOf( (sal_Int32)nDelim ) + sRestOfFormat;
 		sProps[ nIndex++ ].Value <<= sFormat;
+		sProps[ nIndex ].Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("FilterName") );
+		sProps[ nIndex++ ].Value <<= rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Text - txt - csv (StarCalc)") );
+		// Ensure WORKAROUND_CSV_TXT_BUG_i60158 gets called in typedetection.cxx so
+		// csv is forced for deep detected 'writerxxx' types
+		sProps[ nIndex ].Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("DocumentService") );
+		sProps[ nIndex ].Value <<= rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("com.sun.star.sheet.SpreadsheetDocument") );
 	}
+	else if ( !isSpreadSheetFile( sType ) )
+		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Bad Format")), uno::Reference< uno::XInterface >() );
+	
 	if ( ReadOnly.hasValue()  )
 	{
 		sal_Bool bIsReadOnly = sal_False; ReadOnly >>= bIsReadOnly;
