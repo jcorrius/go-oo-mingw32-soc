@@ -27,10 +27,10 @@ AC_SUBST(SCSOLVERDIR)
 OBJDIR=./obj
 AC_SUBST(OBJDIR)
 
-OOO_INSTALL_PATH=$with_ooo
+OOO_INSTALL_PATH=$(echo $with_ooo | sed -e 's/^~/$(HOME)/g')
 AC_SUBST(OOO_INSTALL_PATH)
 
-OOO_SDK_PATH=$with_ooo_sdk
+OOO_SDK_PATH=$(echo $with_ooo_sdk | sed -e 's/^~/$(HOME)/g')
 AC_SUBST(OOO_SDK_PATH)
 
 BINDIR=$OOO_SDK_PATH/linux/bin
@@ -39,8 +39,7 @@ AC_SUBST(BINDIR)
 UNO_INCLUDE=-I$OOO_SDK_PATH/include
 AC_SUBST(UNO_INCLUDE)
 
-LIBLPSOLVE_PATH=$(echo $with_lpsolve | sed -e 's/^\.\///g')
-LIBLPSOLVE_PATH=$(pwd)/$LIBLPSOLVE_PATH
+LIBLPSOLVE_PATH=$(echo $with_lpsolve | sed -e 's/^~/$(HOME)/g')
 AC_SUBST(LIBLPSOLVE_PATH)
 
 LIBLPSOLVE_ARCHIVE_PATH=$LIBLPSOLVE_PATH/lpsolve55/liblpsolve55.a
