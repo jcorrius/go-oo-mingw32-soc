@@ -1,44 +1,38 @@
+== HOW TO COMPILE SCSOLVER UNO PACKAGE ==
 
-== HOW TO COMPILE UNO PACKAGE ==
+To compile the separate UNO package named scsolver.uno.zip that can be 
+installed on a version of OO.o that doesn't have the Solver pre-installed, 
+follow these steps.  
 
+1. First, you need to have OO.o itself installed somewhere on your system, and
+   the version of OO.o SDK compatible with your OO.o installation.
 
-=== scsolver.uno.zip ===
+2. Download, unpack and build the lp_solve library in a separate directory.  
+   You can download the lp_solve 5.5.0.10 package from our mirror.  To do it, 
+   run these commands in this order:
 
-To compile a separate UNO package named scsolver.uno.zip, which can be 
-installed on a version of OO.o that doesn't have this Solver 
-pre-installed, follow these steps.  
+   wget http://download.go-oo.org/SRC680/lp_solve_5.5.0.10_source.tar.gz
+   tar xvf lp_solve_5.5.0.10_source.tar.gz
+   cd lp_solve_5.5/lpsolve55
+   sh ccc
 
-1.  You need to compile the normal build process for the entire 
-application in order to populate the global outout directory with all 
-necessary headers and libraries.  The global output directory is located 
-at 
+3. Now, change directory into workben/addon_pkg, and create and run configure.
 
-  <basedir>/solver/680/unxlngi6.pro
+   cd workben/addon_pkg
+   ./autogen.sh
+   ./configure \
+       --with-ooo=/path/to/ooo/install \
+       --with-ooo-sdk=/path/to/ooo/sdk \
+       --with-lpsolve=/path/to/lpsolve
 
-where the directory name "unxlngi6.pro" may be different depending upon 
-platforms and target architecture.  
+4. If all goes well, simply run make to build scsolver.uno.zip.
 
-2.  Move into scsolver/workben/addon_pkg and type 'make'.  If all goes 
-well, you should see a file named scsolver.uno.zip sitting in that same 
-directory.
+   make
 
+5. At this point, you can launch OO.o Calc and manually install this package
+   from GUI, or you can do this from the command line:
 
-=== lpsolve.uno.zip ===
+   make install
 
-To compile lpsolve.uno.zip, you need to first download lpsolve 5.5 source 
-package, place it in 
+   this will execute the 'unopkg add' command to register scsolver.uno.zip.
 
-  scsolver/workben/external/
-
-and unpack it.  The source package is available from 
-http://sourceforge.net/projects/lpsolve.  Upon unpacking, a new directory 
-named lp_solve_5.5 will be created with all source files under it.  Go 
-ahead and build its static and dynamic libraries by 
-
-  cd lp_solve_5.5/lpsolve55
-  sh ccc
-
-This will build liblpsolve55.a and liblpsolve55.so in that directory.
-
-Now, go back up to scsolver/workben/external, and move into lpsolve_uno 
-directory.  Then simply type make to build lpsolve.uno.zip.
