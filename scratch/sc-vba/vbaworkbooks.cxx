@@ -343,7 +343,9 @@ ScVbaWorkbooks::Open( const rtl::OUString& rFileName, const uno::Any& /*UpdateLi
 {
 	// we need to detect if this is a URL, if not then assume its a file path
         rtl::OUString aURL;
-	uno::Reference< uri::XUriReferenceFactory > xFac ( mxContext->getServiceManager()->createInstanceWithContext( rtl::OUString::createFromAscii( "com.sun.star.uri.UriReferenceFactory"), mxContext ) , uno::UNO_QUERY_THROW );
+	uno::Reference< lang::XMultiComponentFactory > xSMgr(
+        	mxContext->getServiceManager(), uno::UNO_QUERY_THROW );
+	uno::Reference< uri::XUriReferenceFactory > xFac ( xSMgr->createInstanceWithContext( rtl::OUString::createFromAscii( "com.sun.star.uri.UriReferenceFactory"), mxContext ) , uno::UNO_QUERY_THROW );
 	uno::Reference<  uri::XUriReference > uriRef( xFac->parse( rFileName ), uno::UNO_QUERY );
 	if ( uriRef.is() )
 	{
@@ -352,8 +354,6 @@ ScVbaWorkbooks::Open( const rtl::OUString& rFileName, const uno::Any& /*UpdateLi
 		else
         		osl::FileBase::getFileURLFromSystemPath( rFileName, aURL );
 	}	
-	uno::Reference< lang::XMultiComponentFactory > xSMgr(
-        	mxContext->getServiceManager(), uno::UNO_QUERY_THROW );
 
 	uno::Reference< frame::XDesktop > xDesktop
 		(xSMgr->createInstanceWithContext(::rtl::OUString::createFromAscii("com.sun.star.frame.Desktop")                    , mxContext),
