@@ -53,13 +53,25 @@ main (int argc, char **argv)
   buffer = malloc (version_info_size);
 
   if (!GetFileVersionInfo (argv[1], 0, version_info_size, buffer))
-    exit (1);
+    {
+      if (update_version)
+	fprintf (stderr, "GetFileVersionInfo() failed, file probably lacks a version resource block.\n");
+      exit (1);
+    }
 
   if (!VerQueryValue (buffer, "\\", (LPVOID*) &fixed_file_info, &fixed_file_info_len))
-    exit (1);
+    {
+      if (update_version)
+	fprintf (stderr, "VerQueryValue() failed.\n");
+      exit (1);
+    }
 
   if (fixed_file_info_len < sizeof (*fixed_file_info))
-    exit (1);
+    {
+      if (update_version)
+	fprintf (stderr, "Too small size VS_FIXEDFILEINFO.\n");
+      exit (1);
+    }
 
   if (update_version)
     {
