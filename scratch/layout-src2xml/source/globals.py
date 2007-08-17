@@ -76,6 +76,7 @@ class Element(Node):
         Node.__init__(self)
         self.name = name
         self.parent = None
+#        print "name: " + self.name - stats ...
 
         # The following attributes are copied when 'clone'ed.
         self.rid = rid
@@ -113,6 +114,7 @@ class Element(Node):
         if type(value) == type(0):
             value = "%d"%value
         self.attrs[name] = removeQuote(value)
+#        print "attr: " + self.name + "." + name - stats ...
         return
 
     def clone (self, elem):
