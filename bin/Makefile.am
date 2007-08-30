@@ -13,6 +13,7 @@ script_files = \
 	install-dictionaries \
 	install-mono \
 	java-set-classpath.in \
+	localize-ooo \
 	make-win32-iso \
 	nothing \
 	ooconfig \
