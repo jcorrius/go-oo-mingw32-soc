@@ -1,0 +1,183 @@
+Index: desktop/source/pagein/pagein.c
+===================================================================
+RCS file: /cvs/framework/desktop/source/pagein/pagein.c,v
+retrieving revision 1.4
+diff -u -p -u -r1.4 pagein.c
+--- desktop/source/pagein/pagein.c	21 Nov 2006 17:29:36 -0000	1.4
++++ desktop/source/pagein/pagein.c	31 Aug 2007 15:51:04 -0000
+@@ -39,6 +39,22 @@
+ #include <errno.h>
+ #include <stdio.h>
+ #include <string.h>
++#include <stdlib.h>
++#include <sys/types.h>
++#include <dirent.h>
++
++int verbosity = 0;
++
++typedef struct {
++    char *name;
++    ino_t inode;
++} FileEntry;
++
++typedef struct {
++    FileEntry *data;
++    long       len;
++    long       alloc;
++} Files;
+ 
+ /* do_pagein */
+ static int do_pagein (const char * filename, size_t * size)
+@@ -56,20 +72,42 @@ static int do_pagein (const char * filen
+ 	}
+ 
+ 	if (size)
+-	{
+-		*size = image.m_size;
+-	}
+-
++		*size += image.m_size;
++    
+ cleanup_and_leave:
+ 	file_image_close (&image);
+ 	return (result);
+ }
+ 
++static void queue_pagein (Files *files, const char * filename)
++{
++    if (files->alloc <= files->len) {
++        files->alloc = files->alloc ? files->alloc * 2 : 16;
++        files->data = realloc (files->data, sizeof (FileEntry) * files->alloc);
++    }
++    files->data[files->len].name = strdup (filename);
++    files->data[files->len].inode = 0;
++    files->len++;
++}
++
++static int compare_inode (const void *ap, const void *bp)
++{
++    ino_t a = ((FileEntry *)ap)->inode;
++    ino_t b = ((FileEntry *)bp)->inode;
++    if (a == b)
++        return 0;
++    if (a > b)
++        return 1;
++    else
++        return -1;
++}
++
+ /* main */
+-int  main (int argc, char **argv)
++int main (int argc, char **argv)
+ {
+-	int    i, v = 0;
+-	size_t nfiles = 0, nbytes = 0;
++	int i;
++    size_t total_bytes = 0;
++    Files files = { NULL, 0, 0 };
+ 
+ 	if (argc < 2)
+ 	{
+@@ -82,8 +120,7 @@ int  main (int argc, char **argv)
+ 
+ 	for (i = 1; i < argc; i++)
+ 	{
+-		FILE   * fp = 0;
+-		size_t   k  = 0;
++		FILE *fp = NULL;
+ 
+ 		if (argv[i][0] == '-')
+ 		{
+@@ -93,8 +130,8 @@ int  main (int argc, char **argv)
+ 			{
+ 				case 'v':
+ 					/* verbosity level */
+-					for (v += 1, j += 1; argv[i][j]; j++)
+-						v += (argv[i][j] == 'v');
++					for (verbosity += 1, j += 1; argv[i][j]; j++)
++						verbosity += (argv[i][j] == 'v');
+ 					break;
+ 				case 'L':
+ 					/* search path */
+@@ -119,18 +156,12 @@ int  main (int argc, char **argv)
+ 				fprintf (stderr, "fopen: %s\n", strerror(errno));
+ 				continue;
+ 			}
++            if (verbosity > 1)
++                fprintf (stderr, "read names from '%s'\n", argv[i]);
+ 			while (fgets (path, sizeof(path), fp) != 0)
+ 			{
+-				path[strlen(path) - 1] = '\0', k = 0;
+-				if (do_pagein (path, &k) == 0)
+-				{
+-					/* accumulate total size */
+-					nbytes += k;
+-				}
+-
+-				if (v >= 2)
+-					fprintf (stderr, "pagein(\"%s\") = %d bytes\n", path, (int) k);
+-				nfiles += 1;
++				path[strlen(path) - 1] = '\0';
++				queue_pagein (&files, path);
+ 			}
+ 			fclose (fp);
+ 		}
+@@ -139,19 +170,46 @@ int  main (int argc, char **argv)
+ 			if (fp != 0)
+ 				fclose (fp);
+ 
+-			if (do_pagein (argv[i], &k) == 0)
+-			{
+-				/* accumulate total size */
+-				nbytes += k;
+-			}
+-
+-			if (v >= 2)
+-				fprintf (stderr, "pagein(\"%s\") = %d bytes\n", argv[i], (int) k);
+-			nfiles += 1;
++			queue_pagein (&files, argv[i]);
+ 		}
+ 	}
+ 
+-	if (v >= 1)
+-		fprintf (stderr, "Total: %d files (%d bytes)\n", (int) nfiles, (int) nbytes);
+-	return (0);
++    if (files.len > 0)
++    {
++        DIR *dir = opendir (".");
++        struct dirent *item;
++
++        /* Read inode data */
++        while ((item = readdir (dir)) != NULL)
++        {
++            for (i = 0; i < files.len; i++)
++            {
++                if (!strcmp (files.data[i].name, item->d_name))
++                {   /* XSI ext'n ? */
++                    files.data[i].inode = item->d_ino;
++                    break;
++                }
++            }
++        }
++
++        /* sort by inode - good proxy for on-disk location */
++        qsort (files.data, files.len, sizeof (FileEntry), compare_inode);
++
++        if (verbosity > 0)
++        {
++            fprintf (stderr, "sorted files:\n");
++            for (i = 0; i < files.len; i++)
++                fprintf (stderr, "\t(0x%.8ld) '%s'\n",
++                         (long)files.data[i].inode, files.data[i].name);
++        }
++    }
++
++    for (i = 0; i < files.len; i++)
++        do_pagein (files.data[i].name, &total_bytes);
++
++    if (verbosity >= 1)
++        fprintf (stderr, "Total: %d files (%d bytes)\n",
++                 (int) files.len, (int) total_bytes);
++
++	return 0;
+ }
