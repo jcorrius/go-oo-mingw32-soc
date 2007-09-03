@@ -45,6 +45,7 @@
 #include <com/sun/star/beans/XPropertySet.hpp>
 #include <org/openoffice/excel/XlFileFormat.hpp>
 
+#include "scextopt.hxx"
 #include "vbaworksheet.hxx"
 #include "vbaworksheets.hxx"
 #include "vbaworkbook.hxx"
@@ -469,6 +470,31 @@ ScVbaWorkbook::getServiceNames()
 	}
 	return aServiceNames;
 }
+ScDocument*
+ScVbaWorkbook::getScDocument() throw ( uno::RuntimeException )
+{
+	ScDocShell * pDocShell = ( ScDocShell* )SfxObjectShell::GetWorkingDocument();
+	if ( !pDocShell )
+		throw uno::RuntimeException(::rtl::OUString(
+                                RTL_CONSTASCII_USTRINGPARAM( "Cann't get ScDocShell. ") ),
+                                uno::Reference< XInterface >() );
+    return pDocShell->GetDocument();
+}
+
+::rtl::OUString SAL_CALL
+ScVbaWorkbook::getCodeName() throw (css::uno::RuntimeException)
+{
+    ScDocument* pDoc = getScDocument();
+    ScExtDocOptions* pExtOptions = pDoc->GetExtDocOptions();
+    ScExtDocSettings pExtSettings = pExtOptions->GetDocSettings();
+    ::rtl::OUString sGlobCodeName = pExtSettings.maGlobCodeName;
+    return sGlobCodeName;
+}
+void SAL_CALL
+ScVbaWorkbook::setCodeName( const ::rtl::OUString& sGlobCodeName ) throw (css::uno::RuntimeException)
+{
+}
+
 namespace workbook
 {
 uno::Reference< vba::XHelperInterface >

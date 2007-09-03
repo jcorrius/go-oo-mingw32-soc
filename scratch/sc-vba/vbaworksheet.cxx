@@ -69,6 +69,7 @@
 #include "cellsuno.hxx"
 #include "drwlayer.hxx"
 
+#include "scextopt.hxx"
 #include "vbaoutline.hxx"
 #include "vbarange.hxx"
 #include "vbacomments.hxx"
@@ -779,6 +780,42 @@ ScVbaWorksheet::getServiceNames()
 	}
 	return aServiceNames;
 }
+
+ScDocument*
+ScVbaWorksheet::getScDocument() throw ( uno::RuntimeException )
+{
+	ScDocShell * pDocShell = ( ScDocShell* )SfxObjectShell::GetWorkingDocument();
+	if ( !pDocShell )
+		throw uno::RuntimeException(::rtl::OUString(
+                                RTL_CONSTASCII_USTRINGPARAM( "Can't get ScDocShell. ") ),
+                                uno::Reference< XInterface >() );
+    return pDocShell->GetDocument();
+}
+
+rtl::OUString SAL_CALL
+ScVbaWorksheet::getCodeName() throw (css::uno::RuntimeException)
+{
+    uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( getModel(), uno::UNO_QUERY_THROW );
+    SCTAB nTab = 0;
+    rtl::OUString aSheetName = getName();
+    bool bSheetExists = nameExists (xSpreadDoc, aSheetName, nTab);
+    if ( bSheetExists )
+    {
+        ScDocument* pDoc = getScDocument();
+        ScExtDocOptions* pExtOptions = pDoc->GetExtDocOptions();
+        rtl::OUString sCodeName = pExtOptions->GetCodeName( nTab );
+        return sCodeName;
+    }
+    else
+		throw uno::RuntimeException(::rtl::OUString(
+                                RTL_CONSTASCII_USTRINGPARAM( "Sheet Name does not exist. ") ),
+                                uno::Reference< XInterface >() );
+}
+void SAL_CALL
+ScVbaWorksheet::setCodeName( const rtl::OUString& sCodeName ) throw (css::uno::RuntimeException)
+{
+}
+
 namespace worksheet
 {
 

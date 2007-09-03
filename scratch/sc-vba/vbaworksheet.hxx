@@ -72,6 +72,7 @@ protected:
 	{ return mxSheet; }
 
 	ScVbaWorksheet( const css::uno::Reference< oo::vba::XHelperInterface >& xParent,  const css::uno::Reference< css::uno::XComponentContext >& xContext );
+    ScDocument* getScDocument() throw (css::uno::RuntimeException);
 public:
 	ScVbaWorksheet( const css::uno::Reference< oo::vba::XHelperInterface >& xParent,
 		const css::uno::Reference< css::uno::XComponentContext >& xContext,
@@ -131,6 +132,9 @@ public:
 	virtual css::uno::Any SAL_CALL getValue( const ::rtl::OUString& aPropertyName ) throw (css::beans::UnknownPropertyException, css::uno::RuntimeException);
 	virtual ::sal_Bool SAL_CALL hasMethod( const ::rtl::OUString& aName ) throw (css::uno::RuntimeException);
 	virtual ::sal_Bool SAL_CALL hasProperty( const ::rtl::OUString& aName ) throw (css::uno::RuntimeException);
+    // CodeName
+    virtual rtl::OUString SAL_CALL getCodeName() throw (css::uno::RuntimeException);
+    virtual void SAL_CALL setCodeName( const rtl::OUString& sCodeName ) throw (css::uno::RuntimeException);
 	// XHelperInterface
 	virtual rtl::OUString& getServiceImplName();
 	virtual css::uno::Sequence<rtl::OUString> getServiceNames();	
