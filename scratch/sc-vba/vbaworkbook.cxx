@@ -493,6 +493,10 @@ ScVbaWorkbook::getCodeName() throw (css::uno::RuntimeException)
 void SAL_CALL
 ScVbaWorkbook::setCodeName( const ::rtl::OUString& sGlobCodeName ) throw (css::uno::RuntimeException)
 {
+    ScDocument* pDoc = getScDocument();
+    ScExtDocOptions* pExtOptions = pDoc->GetExtDocOptions();
+    ScExtDocSettings pExtSettings = pExtOptions->GetDocSettings();
+    pExtSettings.maGlobCodeName = sGlobCodeName;
 }
 
 namespace workbook

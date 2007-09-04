@@ -814,6 +814,20 @@ ScVbaWorksheet::getCodeName() throw (css::uno::RuntimeException)
 void SAL_CALL
 ScVbaWorksheet::setCodeName( const rtl::OUString& sCodeName ) throw (css::uno::RuntimeException)
 {
+    uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( getModel(), uno::UNO_QUERY_THROW );
+    SCTAB nTab = 0;
+    rtl::OUString aSheetName = getName();
+    bool bSheetExists = nameExists (xSpreadDoc, aSheetName, nTab);
+    if ( bSheetExists )
+    {
+        ScDocument* pDoc = getScDocument();
+        ScExtDocOptions* pExtOptions = pDoc->GetExtDocOptions();
+        pExtOptions->SetCodeName( sCodeName, nTab );
+    }
+    else
+               throw uno::RuntimeException(::rtl::OUString(
+                                RTL_CONSTASCII_USTRINGPARAM( "Sheet Name does not exist. ") ),
+                                uno::Reference< XInterface >() );
 }
 
 namespace worksheet
