@@ -53,7 +53,6 @@
 #include <com/sun/star/sheet/XCellAddressable.hpp>
 #include <com/sun/star/sheet/XSheetOutline.hpp>
 #include <com/sun/star/sheet/XDataPilotTablesSupplier.hpp>
-#include <cppuhelper/bootstrap.hxx>
 #include <com/sun/star/util/XURLTransformer.hpp>
 #include <com/sun/star/frame/XDispatchProvider.hpp>
 #include <com/sun/star/frame/XComponentLoader.hpp>
@@ -62,6 +61,9 @@
 #include <com/sun/star/drawing/XDrawPageSupplier.hpp>
 #include <com/sun/star/drawing/XControlShape.hpp>
 #include <com/sun/star/form/FormComponentType.hpp>
+
+#include <comphelper/processfactory.hxx>
+
 #include <tools/string.hxx>
 
 #include <svx/svdouno.hxx>
@@ -159,7 +161,8 @@ openNewDoc(rtl::OUString aSheetName )
 	uno::Reference<frame::XModel> xModel;
 	try
 	{
-		uno::Reference<uno::XComponentContext > xContext(  ::cppu::defaultBootstrap_InitialComponentContext(), uno::UNO_QUERY_THROW );
+		uno::Reference< beans::XPropertySet > xProps( ::comphelper::getProcessServiceFactory(), uno::UNO_QUERY_THROW );	
+		uno::Reference< uno::XComponentContext > xContext(  xProps->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "DefaultContext" ))), uno::UNO_QUERY_THROW );
 		uno::Reference<lang::XMultiComponentFactory > xServiceManager(
 										xContext->getServiceManager(), uno::UNO_QUERY_THROW );
 
@@ -178,9 +181,6 @@ openNewDoc(rtl::OUString aSheetName )
 			removeAllSheets(xSpreadDoc,aSheetName);
 		}
 		xModel.set(xSpreadDoc,uno::UNO_QUERY_THROW);
-	}
-	catch ( ::cppu::BootstrapException & /*e*/ )    
-	{
 	}
 	catch ( uno::Exception & /*e*/ )
 	{

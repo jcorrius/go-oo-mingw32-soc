@@ -511,10 +511,11 @@ public:
 
 struct CellPos
 {
-	CellPos():m_nRow(-1), m_nCol(-1) {};
-	CellPos( sal_Int32 nRow, sal_Int32 nCol ):m_nRow(nRow), m_nCol(nCol) {};
+	CellPos():m_nRow(-1), m_nCol(-1), m_nArea(0) {};
+	CellPos( sal_Int32 nRow, sal_Int32 nCol, sal_Int32 nArea ):m_nRow(nRow), m_nCol(nCol), m_nArea( nArea ) {};
 sal_Int32 m_nRow;
 sal_Int32 m_nCol;
+sal_Int32 m_nArea;
 };
 
 typedef ::cppu::WeakImplHelper1< container::XEnumeration > CellsEnumeration_BASE;
@@ -523,18 +524,42 @@ typedef vector< CellPos > vCellPos;
 class CellsEnumeration : public CellsEnumeration_BASE
 {
 	uno::Reference< uno::XComponentContext > mxContext;
-	uno::Reference< table::XCellRange > m_xRange;
+	uno::Reference< vba::XCollection > m_xAreas;
 	vCellPos m_CellPositions;	
 	vCellPos::const_iterator m_it; 
-public:
-	CellsEnumeration( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< table::XCellRange >& xRange ): mxContext( xContext ), m_xRange( xRange )
+	uno::Reference< table::XCellRange > getArea( sal_Int32 nVBAIndex ) throw ( uno::RuntimeException )
 	{
-		uno::Reference< table::XColumnRowRange > xColumnRowRange(m_xRange, uno::UNO_QUERY_THROW );
+		if ( nVBAIndex < 1 || nVBAIndex > m_xAreas->getCount() )
+			throw uno::RuntimeException();
+		uno::Reference< excel::XRange > xRange( m_xAreas->Item( uno::makeAny(nVBAIndex), uno::Any() ), uno::UNO_QUERY_THROW );
+		ScVbaRange* pRange = dynamic_cast< ScVbaRange* >( xRange.get() ); 
+		uno::Reference< table::XCellRange > xCellRange;
+		if ( !pRange )
+			throw uno::RuntimeException();
+		xCellRange.set( pRange->getCellRange(), uno::UNO_QUERY_THROW );;
+		return xCellRange;
+		
+	}
+        void populateArea( sal_Int32 nVBAIndex )
+	{
+		uno::Reference< table::XCellRange > xRange = getArea( nVBAIndex );
+		uno::Reference< table::XColumnRowRange > xColumnRowRange(xRange, uno::UNO_QUERY_THROW );
 		sal_Int32 nRowCount =  xColumnRowRange->getRows()->getCount();
 		sal_Int32 nColCount = xColumnRowRange->getColumns()->getCount();
 		for ( sal_Int32 i=0; i<nRowCount; ++i )
+		{
 			for ( sal_Int32 j=0; j<nColCount; ++j )
-				m_CellPositions.push_back( CellPos( i,j ) );
+				m_CellPositions.push_back( CellPos( i,j,nVBAIndex ) );
+		}
+	}
+public:
+	CellsEnumeration( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< vba::XCollection >& xAreas ): mxContext( xContext ), m_xAreas( xAreas )
+	{
+		sal_Int32 nItems = m_xAreas->getCount();
+		for ( sal_Int32 index=1; index <= nItems; ++index )
+		{
+        		populateArea( index );
+		}
 		m_it = m_CellPositions.begin();
 	}
 	virtual ::sal_Bool SAL_CALL hasMoreElements() throw (::uno::RuntimeException){ return m_it != m_CellPositions.end(); }
@@ -544,9 +569,12 @@ public:
 		if ( !hasMoreElements() )
 			throw container::NoSuchElementException();
 		CellPos aPos = *(m_it)++;
-		uno::Reference< table::XCellRange > xCellRange( m_xRange->getCellByPosition(  aPos.m_nCol, aPos.m_nRow ), uno::UNO_QUERY_THROW );
+		
+		uno::Reference< table::XCellRange > xRangeArea = getArea( aPos.m_nArea );
+		uno::Reference< table::XCellRange > xCellRange( xRangeArea->getCellByPosition(  aPos.m_nCol, aPos.m_nRow ), uno::UNO_QUERY_THROW );
 		// #FIXME need proper (WorkSheet) parent
 		return uno::makeAny( uno::Reference< excel::XRange >( new ScVbaRange( uno::Reference< vba::XHelperInterface >(), mxContext, xCellRange ) ) );
+
 	}
 };
 
@@ -3120,7 +3148,7 @@ ScVbaRange::hasElements() throw (uno::RuntimeException)
 uno::Reference< container::XEnumeration > SAL_CALL 
 ScVbaRange::createEnumeration() throw (uno::RuntimeException)
 {
-	return new CellsEnumeration( mxContext, mxRange );
+	return new CellsEnumeration( mxContext, m_Areas );
 }
 
 ::rtl::OUString SAL_CALL 
