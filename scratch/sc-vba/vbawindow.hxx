@@ -56,6 +56,8 @@ public:
 	ScVbaWindow( const css::uno::Reference< oo::vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::frame::XModel >& xModel );
  	css::uno::Reference< oo::excel::XPane > ActivePane();
 	// XWindow
+	virtual ::sal_Bool SAL_CALL getDisplayGridlines() throw (css::uno::RuntimeException);
+	virtual void SAL_CALL setDisplayGridlines( ::sal_Bool _displaygridlines ) throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setCaption( const css::uno::Any& _caption ) throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL getCaption() throw (css::uno::RuntimeException);
     virtual css::uno::Any SAL_CALL getScrollRow() throw (css::uno::RuntimeException) ;

@@ -53,7 +53,7 @@
 using namespace ::com::sun::star;
 using namespace ::org::openoffice;
 using namespace ::org::openoffice::excel::XlWindowState;
-
+#define SHOWGRID "ShowGrid"
 typedef  std::hash_map< rtl::OUString,
 SCTAB, ::rtl::OUStringHash,
 ::std::equal_to< ::rtl::OUString > > NameIndexHash;
@@ -455,6 +455,24 @@ ScVbaWindow::Selection(  ) throw (script::BasicErrorException, uno::RuntimeExcep
 	return ScVbaGlobals::getGlobalsImpl( mxContext )->getApplication()->getSelection();
 }
 
+::sal_Bool SAL_CALL 
+ScVbaWindow::getDisplayGridlines() throw (uno::RuntimeException)
+{
+	uno::Reference< beans::XPropertySet > xProps( m_xModel->getCurrentController(), uno::UNO_QUERY_THROW );
+	rtl::OUString sName( RTL_CONSTASCII_USTRINGPARAM( SHOWGRID ) );
+	sal_Bool bGrid = sal_True;
+	xProps->getPropertyValue( sName ) >>= bGrid;
+	return bGrid;	
+}
+
+
+void SAL_CALL 
+ScVbaWindow::setDisplayGridlines( ::sal_Bool _displaygridlines ) throw (uno::RuntimeException)
+{
+	uno::Reference< beans::XPropertySet > xProps( m_xModel->getCurrentController(), uno::UNO_QUERY_THROW );
+	rtl::OUString sName( RTL_CONSTASCII_USTRINGPARAM( SHOWGRID ) );
+	xProps->setPropertyValue( sName, uno::makeAny( _displaygridlines ));
+}
 rtl::OUString& 
 ScVbaWindow::getServiceImplName()
 {
