@@ -53,7 +53,6 @@ protected:
 
 	virtual css::uno::Reference< css::frame::XModel >  getModel() { return mxModel; }
 	ScVbaWorkbook( 	const css::uno::Reference< oo::vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext);
-    ScDocument* getScDocument() throw ( css::uno::RuntimeException );
 public:
 	ScVbaWorkbook( 	const css::uno::Reference< oo::vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext,
 			css::uno::Reference< css::frame::XModel > xModel );

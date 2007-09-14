@@ -72,7 +72,6 @@ protected:
 	{ return mxSheet; }
 
 	ScVbaWorksheet( const css::uno::Reference< oo::vba::XHelperInterface >& xParent,  const css::uno::Reference< css::uno::XComponentContext >& xContext );
-    ScDocument* getScDocument() throw (css::uno::RuntimeException);
 public:
 	ScVbaWorksheet( const css::uno::Reference< oo::vba::XHelperInterface >& xParent,
 		const css::uno::Reference< css::uno::XComponentContext >& xContext,

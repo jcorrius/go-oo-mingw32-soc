@@ -781,17 +781,6 @@ ScVbaWorksheet::getServiceNames()
 	return aServiceNames;
 }
 
-ScDocument*
-ScVbaWorksheet::getScDocument() throw ( uno::RuntimeException )
-{
-	ScDocShell * pDocShell = ( ScDocShell* )SfxObjectShell::GetWorkingDocument();
-	if ( !pDocShell )
-		throw uno::RuntimeException(::rtl::OUString(
-                                RTL_CONSTASCII_USTRINGPARAM( "Can't get ScDocShell. ") ),
-                                uno::Reference< XInterface >() );
-    return pDocShell->GetDocument();
-}
-
 rtl::OUString SAL_CALL
 ScVbaWorksheet::getCodeName() throw (css::uno::RuntimeException)
 {
@@ -801,7 +790,8 @@ ScVbaWorksheet::getCodeName() throw (css::uno::RuntimeException)
     bool bSheetExists = nameExists (xSpreadDoc, aSheetName, nTab);
     if ( bSheetExists )
     {
-        ScDocument* pDoc = getScDocument();
+        uno::Reference< frame::XModel > xModel( getModel(), uno::UNO_QUERY_THROW );
+        ScDocument* pDoc = getDocShell( xModel )->GetDocument();
         ScExtDocOptions* pExtOptions = pDoc->GetExtDocOptions();
         rtl::OUString sCodeName = pExtOptions->GetCodeName( nTab );
         return sCodeName;
@@ -820,7 +810,8 @@ ScVbaWorksheet::setCodeName( const rtl::OUString& sCodeName ) throw (css::uno::R
     bool bSheetExists = nameExists (xSpreadDoc, aSheetName, nTab);
     if ( bSheetExists )
     {
-        ScDocument* pDoc = getScDocument();
+        uno::Reference< frame::XModel > xModel( getModel(), uno::UNO_QUERY_THROW );
+        ScDocument* pDoc = getDocShell( xModel )->GetDocument();
         ScExtDocOptions* pExtOptions = pDoc->GetExtDocOptions();
         pExtOptions->SetCodeName( sCodeName, nTab );
     }

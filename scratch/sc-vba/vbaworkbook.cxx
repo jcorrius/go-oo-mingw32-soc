@@ -470,21 +470,12 @@ ScVbaWorkbook::getServiceNames()
 	}
 	return aServiceNames;
 }
-ScDocument*
-ScVbaWorkbook::getScDocument() throw ( uno::RuntimeException )
-{
-	ScDocShell * pDocShell = ( ScDocShell* )SfxObjectShell::GetWorkingDocument();
-	if ( !pDocShell )
-		throw uno::RuntimeException(::rtl::OUString(
-                                RTL_CONSTASCII_USTRINGPARAM( "Cann't get ScDocShell. ") ),
-                                uno::Reference< XInterface >() );
-    return pDocShell->GetDocument();
-}
 
 ::rtl::OUString SAL_CALL
 ScVbaWorkbook::getCodeName() throw (css::uno::RuntimeException)
 {
-    ScDocument* pDoc = getScDocument();
+    uno::Reference< frame::XModel > xModel( getModel(), uno::UNO_QUERY_THROW );
+    ScDocument* pDoc = getDocShell( xModel )->GetDocument();
     ScExtDocOptions* pExtOptions = pDoc->GetExtDocOptions();
     ScExtDocSettings pExtSettings = pExtOptions->GetDocSettings();
     ::rtl::OUString sGlobCodeName = pExtSettings.maGlobCodeName;
@@ -493,7 +484,8 @@ ScVbaWorkbook::getCodeName() throw (css::uno::RuntimeException)
 void SAL_CALL
 ScVbaWorkbook::setCodeName( const ::rtl::OUString& sGlobCodeName ) throw (css::uno::RuntimeException)
 {
-    ScDocument* pDoc = getScDocument();
+    uno::Reference< frame::XModel > xModel( getModel(), uno::UNO_QUERY_THROW );
+    ScDocument* pDoc = getDocShell( xModel )->GetDocument();
     ScExtDocOptions* pExtOptions = pDoc->GetExtDocOptions();
     ScExtDocSettings pExtSettings = pExtOptions->GetDocSettings();
     pExtSettings.maGlobCodeName = sGlobCodeName;
