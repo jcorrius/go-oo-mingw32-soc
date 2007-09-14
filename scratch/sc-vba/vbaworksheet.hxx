@@ -66,11 +66,6 @@ class ScVbaWorksheet : public WorksheetImpl_BASE
 	css::uno::Any getControlShape( const rtl::OUString& sName );
 protected:
 
-	virtual css::uno::Reference< css::frame::XModel > getModel()
-	{ return mxModel; }
-	virtual css::uno::Reference< css::sheet::XSpreadsheet > getSheet()
-	{ return mxSheet; }
-
 	ScVbaWorksheet( const css::uno::Reference< oo::vba::XHelperInterface >& xParent,  const css::uno::Reference< css::uno::XComponentContext >& xContext );
 public:
 	ScVbaWorksheet( const css::uno::Reference< oo::vba::XHelperInterface >& xParent,
@@ -81,6 +76,10 @@ public:
 
 	virtual ~ScVbaWorksheet() {}
 
+	virtual css::uno::Reference< css::frame::XModel > getModel()
+	{ return mxModel; }
+	virtual css::uno::Reference< css::sheet::XSpreadsheet > getSheet()
+	{ return mxSheet; }
 
     // Attributes
 	virtual ::rtl::OUString SAL_CALL getName() throw (css::uno::RuntimeException);

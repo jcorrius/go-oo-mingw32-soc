@@ -1205,13 +1205,6 @@ uno::Reference< vba::XCollection >& ScVbaRange::getBorders()
 	return m_Borders;
 }
 
-uno::Reference< script::XTypeConverter >
-ScVbaRange::getTypeConverter() throw (uno::RuntimeException)
-{
-	static uno::Reference< script::XTypeConverter > xTypeConv( mxContext->getServiceManager()->createInstanceWithContext( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("com.sun.star.script.Converter") ), mxContext ), uno::UNO_QUERY_THROW );
-	return xTypeConv;
-}
-
 void
 ScVbaRange::visitArray( ArrayVisitor& visitor )
 {
@@ -1274,7 +1267,7 @@ ScVbaRange::setValue(  const uno::Any  &aValue,  ValueSetter& valueSetter ) thro
 	uno::TypeClass aClass = aValue.getValueTypeClass();
 	if ( aClass == uno::TypeClass_SEQUENCE )
 	{
-		uno::Reference< script::XTypeConverter > xConverter = getTypeConverter();
+		uno::Reference< script::XTypeConverter > xConverter = getTypeConverter( mxContext );
 		uno::Any aConverted;
 		try
 		{
@@ -1686,7 +1679,7 @@ ScVbaRange::getFormulaArray() throw (uno::RuntimeException)
 	}
 	
 	uno::Reference< sheet::XCellRangeFormula> xCellRangeFormula( mxRange, uno::UNO_QUERY_THROW );
-	uno::Reference< script::XTypeConverter > xConverter = getTypeConverter();
+	uno::Reference< script::XTypeConverter > xConverter = getTypeConverter( mxContext );
 	uno::Any aMatrix;
 	aMatrix = xConverter->convertTo( uno::makeAny( xCellRangeFormula->getFormulaArray() ) , getCppuType((uno::Sequence< uno::Sequence< uno::Any > >*)0)  ) ;
 	return aMatrix;

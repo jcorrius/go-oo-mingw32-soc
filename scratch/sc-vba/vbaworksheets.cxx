@@ -79,7 +79,7 @@ public:
 
 };
 
-ScVbaWorksheets::ScVbaWorksheets( const uno::Reference< vba::XHelperInterface >& xParent, const uno::Reference< ::com::sun::star::uno::XComponentContext > & xContext, const uno::Reference< sheet::XSpreadsheets >& xSheets, const uno::Reference< frame::XModel >& xModel ): ScVbaWorksheets_BASE( xParent, xContext, uno::Reference< container::XIndexAccess >( xSheets, uno::UNO_QUERY ) ), mxModel( xModel ), m_xSheets( xSheets ) 
+ScVbaWorksheets::ScVbaWorksheets( const uno::Reference< vba::XHelperInterface >& xParent, const uno::Reference< ::com::sun::star::uno::XComponentContext > & xContext, const uno::Reference< container::XIndexAccess >& xSheets, const uno::Reference< frame::XModel >& xModel ): ScVbaWorksheets_BASE( xParent, xContext,  xSheets ), mxModel( xModel ), m_xSheets( uno::Reference< sheet::XSpreadsheets >( xSheets, uno::UNO_QUERY ) ) 
 {
 }
 

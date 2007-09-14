@@ -77,6 +77,12 @@ namespace openoffice
 
 const double Millimeter::factor =  35.27778;
 
+uno::Reference< script::XTypeConverter >
+getTypeConverter( const uno::Reference< uno::XComponentContext >& xContext ) throw (uno::RuntimeException)
+{
+	static uno::Reference< script::XTypeConverter > xTypeConv( xContext->getServiceManager()->createInstanceWithContext( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("com.sun.star.script.Converter") ), xContext ), uno::UNO_QUERY_THROW );
+	return xTypeConv;
+}
 // helper method to determine if the view ( calc ) is in print-preview mode
 bool isInPrintPreview( SfxViewFrame* pView )
 {
