@@ -66,6 +66,12 @@
 
 #include <tools/string.hxx>
 
+//zhangyun showdataform
+#include <sfx2/sfxdlg.hxx>
+#include <scabstdlg.hxx>
+#include <tabvwsh.hxx>
+#include <scitems.hxx>
+
 #include <svx/svdouno.hxx>
 
 #include "cellsuno.hxx"
@@ -604,6 +610,25 @@ ScVbaWorksheet::Shapes( const uno::Any& aIndex ) throw (uno::RuntimeException)
    if ( aIndex.hasValue() )
       return xVbaShapes->Item( aIndex, uno::Any() ); 
    return uno::makeAny( xVbaShapes );
+//zhangyun showdataform
+uno::Any SAL_CALL
+ScVbaWorksheet::ShowDataForm( ) throw (uno::RuntimeException)
+{
+	uno::Reference< frame::XModel > xModel( getModel(), uno::UNO_QUERY_THROW );
+	ScTabViewShell* pTabViewShell = getBestViewShell( xModel );
+
+	ScAbstractDialogFactory* pFact = ScAbstractDialogFactory::Create();
+	DBG_ASSERT(pFact, "ScAbstractFactory create fail!");//CHINA001
+
+	AbstractScDataFormDlg* pDlg = pFact->CreateScDataFormDlg( pTabViewShell->GetDialogParent(),RID_SCDLG_DATAFORM, pTabViewShell);
+	DBG_ASSERT(pDlg, "Dialog create fail!");//CHINA001
+
+	pDlg->Execute();
+
+	return uno::Any();
+}
+//end
+
 }
 uno::Any SAL_CALL 
 ScVbaWorksheet::Evaluate( const ::rtl::OUString& Name ) throw (uno::RuntimeException)
