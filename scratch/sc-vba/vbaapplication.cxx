@@ -840,6 +840,11 @@ ScVbaApplication::Volatile( const uno::Any& aVolatile )  throw ( uno::RuntimeExc
 		setCalculation(  excel::XlCalculation::xlCalculationAutomatic );
 }
 
+void SAL_CALL
+ScVbaApplication::DoEvents() throw ( uno::RuntimeException )
+{
+}
+
 rtl::OUString& 
 ScVbaApplication::getServiceImplName()
 {
