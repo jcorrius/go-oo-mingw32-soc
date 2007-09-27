@@ -610,6 +610,8 @@ ScVbaWorksheet::Shapes( const uno::Any& aIndex ) throw (uno::RuntimeException)
    if ( aIndex.hasValue() )
       return xVbaShapes->Item( aIndex, uno::Any() ); 
    return uno::makeAny( xVbaShapes );
+}
+
 //zhangyun showdataform
 uno::Any SAL_CALL
 ScVbaWorksheet::ShowDataForm( ) throw (uno::RuntimeException)
@@ -629,7 +631,6 @@ ScVbaWorksheet::ShowDataForm( ) throw (uno::RuntimeException)
 }
 //end
 
-}
 uno::Any SAL_CALL 
 ScVbaWorksheet::Evaluate( const ::rtl::OUString& Name ) throw (uno::RuntimeException)
 {
@@ -845,6 +846,14 @@ ScVbaWorksheet::setCodeName( const rtl::OUString& sCodeName ) throw (css::uno::R
                                 RTL_CONSTASCII_USTRINGPARAM( "Sheet Name does not exist. ") ),
                                 uno::Reference< XInterface >() );
 }
+
+sal_Int16
+ScVbaWorksheet::getSheetID() throw (uno::RuntimeException)
+{
+	uno::Reference< sheet::XCellRangeAddressable > xAddressable( mxSheet, uno::UNO_QUERY_THROW );
+	return xAddressable->getRangeAddress().Sheet;
+}
+
 
 namespace worksheet
 {

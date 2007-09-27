@@ -446,7 +446,11 @@ ScVbaWorkbooks::Open( const rtl::OUString& rFileName, const uno::Any& /*UpdateLi
 		frame::FrameSearchFlag::CREATE,
 		sProps);
 	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( xComponent, uno::UNO_QUERY_THROW );
-	return getWorkbook( mxContext, xSpreadDoc );
+	uno::Any aRet = getWorkbook( mxContext, xSpreadDoc );
+	uno::Reference< excel::XWorkbook > xWBook( aRet, uno::UNO_QUERY );
+	if ( xWBook.is() )
+		xWBook->Activate();
+	return aRet;
 }
 
 rtl::OUString& 

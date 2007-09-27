@@ -135,6 +135,8 @@ public:
     // CodeName
     virtual rtl::OUString SAL_CALL getCodeName() throw (css::uno::RuntimeException);
     virtual void SAL_CALL setCodeName( const rtl::OUString& sCodeName ) throw (css::uno::RuntimeException);
+    sal_Int16 getSheetID() throw (css::uno::RuntimeException);
+
 	// XHelperInterface
 	virtual rtl::OUString& getServiceImplName();
 	virtual css::uno::Sequence<rtl::OUString> getServiceNames();	
