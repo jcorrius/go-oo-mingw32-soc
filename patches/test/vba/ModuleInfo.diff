@@ -126,7 +126,7 @@
  # ------------------------------------------------------------------
  
 --- svx/source/msfilter/svxmsbas.cxx.bak	2007-09-18 14:13:40.000000000 +0800
-+++ svx/source/msfilter/svxmsbas.cxx	2007-09-26 17:30:22.000000000 +0800
++++ svx/source/msfilter/svxmsbas.cxx	2007-09-27 11:55:05.000000000 +0800
 @@ -88,6 +88,7 @@ using namespace com::sun::star::awt;
  
  #include <com/sun/star/container/XNameContainer.hpp>
@@ -135,41 +135,39 @@
  using namespace com::sun::star::container;
  using namespace com::sun::star::script;
  using namespace com::sun::star::uno;
-@@ -303,6 +304,16 @@ BOOL SvxImportMSVBasic::ImportCode_Impl(
-         }
- 		if( xLib.is() )
- 		{
-+            Reference< XNameAccess> xVBAObjects;
-+            Reference< XMultiServiceFactory> xSF(rDocSh.GetModel(), UNO_QUERY);
-+            if ( xSF.is() )
-+            {
-+                try
-+                {
-+                    xVBAObjects.set( xSF->createInstance( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "org.openoffice.vba.VBAObjectModuleObjects"))), UNO_QUERY);
-+                }
-+                catch( Exception& ) { }
-+            }
- 			for( UINT16 i=0; i<nStreamCount;i++)
- 			{
- 				StringArray aDecompressed = aVBA.Decompress(i);
-@@ -435,12 +446,22 @@ BOOL SvxImportMSVBasic::ImportCode_Impl(
+@@ -435,12 +436,37 @@ BOOL SvxImportMSVBasic::ImportCode_Impl(
  						aSource += rtl::OUString::createFromAscii("\nEnd Sub");
  				}
  				::rtl::OUString aModName( sModule );
 -				if ( aSource.getLength() )
 +				//if ( aSource.getLength() )
  				{
++                    Reference< script::XObjectProvider > xVBAObjectProvider;
++                    if( mType == Document )
++                    {
++                        Reference< XMultiServiceFactory> xSF(rDocSh.GetModel(), UNO_QUERY);
++                        if ( xSF.is() )
++                        {
++                            try
++                            {
++                                uno::Sequence< uno::Any > aArgs(1);
++                                aArgs[0] = uno::Any( aModName );
++                                    xVBAObjectProvider.set( xSF->createInstanceWithArguments( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "org.openoffice.vba.VBAObjectModuleObjectProvider")), aArgs), UNO_QUERY );
++                            }
++                            catch( Exception& ) { }
++                        }
++                    }
  					aSource = modeTypeComment + aSource;
  
  					Any aSourceAny;
 -					aSourceAny <<= aSource;
-+                    if ( xVBAObjects.is() && mType == Document )
++                    if ( xVBAObjectProvider.is() && mType == Document )
 +                    {
 +                        script::ModuleInfo sModuleInfo;
 +                        sModuleInfo.ModuleName = aModName;
 +                        sModuleInfo.ModuleSource = aSource;
 +                        sModuleInfo.ModuleType == Document;
-+                        xVBAObjects->getByName( aModName ) >>= sModuleInfo.ModuleObjectProvider;
++                        sModuleInfo.ModuleObjectProvider.set( xVBAObjectProvider, UNO_QUERY );
 +                        aSourceAny <<= sModuleInfo;
 +                    }
 +                    else
@@ -178,39 +176,48 @@
  						xLib->replaceByName( aModName, aSourceAny );
  					else
 --- sc/inc/servuno.hxx.bak	2007-09-18 14:17:18.000000000 +0800
-+++ sc/inc/servuno.hxx	2007-09-18 14:18:17.000000000 +0800
++++ sc/inc/servuno.hxx	2007-09-27 10:46:46.000000000 +0800
 @@ -103,7 +103,8 @@ class ScDocShell;
  #define SC_SERVICE_FORMULAPARS  38
  #define SC_SERVICE_OPCODEMAPPER 39
  
 -#define SC_SERVICE_COUNT        40
-+#define SC_SERVICE_VBAOBJECTS   40
++#define SC_SERVICE_VBAOBJECTPROVIDER   40
 +#define SC_SERVICE_COUNT        41
  #define SC_SERVICE_INVALID		USHRT_MAX
  
  
 --- sc/source/ui/unoobj/servuno.cxx.bak	2007-09-18 14:18:43.000000000 +0800
-+++ sc/source/ui/unoobj/servuno.cxx	2007-09-25 16:24:08.000000000 +0800
-@@ -77,8 +77,119 @@
++++ sc/source/ui/unoobj/servuno.cxx	2007-09-27 14:41:23.000000000 +0800
+@@ -77,8 +77,88 @@
  #include <svx/xmlgrhlp.hxx>
  #endif
  
 +#include "scextopt.hxx"
 +#include <com/sun/star/script/XObjectProvider.hpp>
 +#include <comphelper/processfactory.hxx>
-+#include <org/openoffice/vba/XGlobals.hpp>
-+#include <org/openoffice/excel/XWorksheets.hpp>
 +
  using namespace ::com::sun::star;
-+using namespace ::org::openoffice;
  
-+class ScVbaObjectProvider : public ::cppu::WeakImplHelper1< script::XObjectProvider >
++class ScVbaObjectProvider : public ::cppu::WeakImplHelper2< script::XObjectProvider, lang::XInitialization >
 +{
 +    ScDocShell* mpDocShell;
 +    uno::Any aObj;
 +    String msName;
 +public:
 +    ScVbaObjectProvider( const rtl::OUString& sName, ScDocShell* pDocShell ) : mpDocShell( pDocShell ), msName(sName) {}
++    ScVbaObjectProvider( ScDocShell* pDocShell ) : mpDocShell( pDocShell ) {}
++    virtual void SAL_CALL initialize( const uno::Sequence< uno::Any >& aArguments ) throw (uno::Exception, uno::RuntimeException)
++    {
++        OSL_TRACE("ScVbaObjectProvider::initialize ");
++        if(aArguments.getLength() != 1)
++        {
++            throw lang::IllegalArgumentException(rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("give a string instanciating this component!") ), static_cast< script::XObjectProvider * >(this), 0 );
++        }
++        rtl::OUString sName;
++        aArguments[0] >>= sName;
++        msName = sName;
++    }
 +    virtual uno::Any SAL_CALL getObject() throw (uno::RuntimeException)
 +    {
 +        if ( !aObj.hasValue() )
@@ -219,122 +226,82 @@
 +            uno::Reference<beans::XPropertySet> xProps(xSF, uno::UNO_QUERY);
 +            if( xProps.is() )
 +            {
-+                //uno::Reference<uno::XComponentContext> xContext;
-+                //xProps->getPropertyValue( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM("DefaultContext")) ) >>= xContext;
++                ScDocument* pDoc = mpDocShell->GetDocument();
++                ScExtDocOptions* pExtOptions = pDoc->GetExtDocOptions();
++                ScExtDocSettings pExtSettings = pExtOptions->GetDocSettings();
++                String sGlobCodeName = pExtSettings.maGlobCodeName;
++                uno::Reference< uno::XInterface > xIf;
++
 +                uno::Sequence< uno::Any > aArgs(2);
 +                aArgs[0] = uno::Any( uno::Reference< uno::XInterface >() );
 +                aArgs[1] = uno::Any( mpDocShell->GetModel() );
-+                uno::Reference< uno::XInterface > xIf = xSF->createInstanceWithArguments(  rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("org.openoffice.excel.Workbook") ), aArgs );
-+                uno::Reference< excel::XWorkbook > xWorkbook( xIf, uno::UNO_QUERY );
-+                if( xWorkbook.is() )
++                uno::Reference< uno::XInterface > xWorkbook( xSF->createInstanceWithArguments(  rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("org.openoffice.excel.Workbook") ), aArgs ), uno::UNO_QUERY );
++                if( sGlobCodeName == msName )
 +                {
-+                    String sGlobCodeName = xWorkbook->getCodeName();
-+                    if ( sGlobCodeName == msName )
++                    xIf.set( xWorkbook, uno::UNO_QUERY );
++                }
++                 else
++                 {
++                    String sCodeName;
++                    SCTAB nCount = pExtOptions->GetCodeNameCount();
++                    for( SCTAB i = 0; i < nCount; i++ )
 +                    {
-+                        OSL_TRACE("globcodename is %s", rtl::OUStringToOString(  sGlobCodeName, RTL_TEXTENCODING_UTF8 ).getStr() );
-+                        aObj <<= xWorkbook;
-+                    }
-+                    else
-+                    {
-+                        com::sun::star::uno::Any aIndex;
-+                        com::sun::star::uno::Reference< org::openoffice::excel::XWorksheets > xWorksheets( xWorkbook->Sheets( aIndex ), com::sun::star::uno::UNO_QUERY_THROW );
-+                        sal_Int32 nCount = xWorksheets->getCount();
-+                        for ( sal_Int32 i = 1; i <= nCount; i++ )
++                        sCodeName = pExtOptions->GetCodeName( i );
++                        if( sCodeName == msName )
 +                        {
-+                            com::sun::star::uno::Reference< org::openoffice::excel::XWorksheet > xWorksheet( xWorkbook->Sheets( com::sun::star::uno::makeAny( i ) ), com::sun::star::uno::UNO_QUERY_THROW );
-+                            String sCodeName = xWorksheet->getCodeName();
-+                            if ( sCodeName == msName )
++                            String sSheetName;
++                            if( pDoc->GetName( i, sSheetName ) )
 +                            {
-+                                OSL_TRACE("sheet %s 's codename is %s", rtl::OUStringToOString(  xWorksheet->getName(), RTL_TEXTENCODING_UTF8 ).getStr(), rtl::OUStringToOString(  sCodeName, RTL_TEXTENCODING_UTF8 ).getStr() );
-+                                aObj <<= xWorksheet;
++                            uno::Reference< frame::XModel > xModel( mpDocShell->GetModel() );
++                            uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( xModel, uno::UNO_QUERY_THROW );
++                            uno::Reference<sheet::XSpreadsheets > xSheets( xSpreadDoc->getSheets(), uno::UNO_QUERY_THROW );
++                            uno::Reference< container::XIndexAccess > xIndexAccess( xSheets, uno::UNO_QUERY_THROW );
++                            uno::Reference< sheet::XSpreadsheet > xSheet( xIndexAccess->getByIndex( i ), uno::UNO_QUERY_THROW );
++                            uno::Sequence< uno::Any > aArgs(3);
++                            aArgs[0] = uno::Any( xWorkbook );
++                            aArgs[1] = uno::Any( xModel );
++                            aArgs[2] = uno::Any( rtl::OUString( sSheetName ) );
++                            xIf.set( xSF->createInstanceWithArguments(  rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("org.openoffice.excel.Worksheet") ), aArgs ), uno::UNO_QUERY );
 +                            }
-+
 +                        }
 +                    }
-+                }
++                 }
++                 if( xIf.is() )
++                 {
++                    aObj <<= xIf;
++                 }
 +            }
 +        }
 +        return aObj;
 +    }
 +};
-+class ScVbaObjects : public ::cppu::WeakImplHelper2< container::XNameAccess, lang::XInitialization >
-+{
-+    ScDocShell* mpDocShell;
-+    uno::Sequence< rtl::OUString > maCodeNames;
-+public:
-+    ScVbaObjects( ScDocShell* pDocShell ):mpDocShell( pDocShell ) { maCodeNames = uno::Sequence< rtl::OUString >(0); }
-+    // XNameAccess
-+    virtual uno::Any SAL_CALL getByName( const ::rtl::OUString& sName ) throw (container::NoSuchElementException, lang::WrappedTargetException, uno::RuntimeException)
-+    {
-+        //if ( !hasByName( sName ) )
-+        //    throw ::com::sun::star::container::NoSuchElementException();
-+        return uno::makeAny( uno::Reference< script::XObjectProvider > ( new ScVbaObjectProvider( sName, mpDocShell ) ));
-+    }
-+    virtual uno::Sequence< ::rtl::OUString > SAL_CALL getElementNames() throw (uno::RuntimeException)
-+    {
-+        return maCodeNames;
-+    }
-+    virtual ::sal_Bool SAL_CALL hasByName( const ::rtl::OUString& aName ) throw (::com::sun::star::uno::RuntimeException)
-+    {
-+        if( hasElements() )
-+        {
-+            SCTAB  nCount = maCodeNames.getLength();
-+            for( SCTAB i = 0; i < nCount; i++ )
-+            {
-+                if( maCodeNames[i] == aName )
-+                    return sal_True;
-+            }
-+        }
-+        return sal_False;
-+    }
-+    virtual ::com::sun::star::uno::Type SAL_CALL getElementType(  ) throw (uno::RuntimeException) { return script::XObjectProvider::static_type(0); }
-+    virtual ::sal_Bool SAL_CALL hasElements(  ) throw (uno::RuntimeException)
-+    {
-+        return maCodeNames.hasElements();
-+    }
-+    // XInitialization
-+    virtual void SAL_CALL initialize( const uno::Sequence< uno::Any >& aArguments ) throw (uno::Exception, uno::RuntimeException)
-+    {
-+        ScDocument* pDoc = mpDocShell->GetDocument();
-+        ScExtDocOptions* pExtOptions = pDoc->GetExtDocOptions();
-+        SCTAB  nCount = pExtOptions->GetCodeNameCount();
-+        if( !maCodeNames.hasElements() )
-+        {
-+            maCodeNames.realloc( nCount );
-+        }
-+        for( SCTAB i = 0; i < nCount; i++ )
-+        {
-+            maCodeNames[i] = pExtOptions->GetCodeName(i);
-+        }
-+    }
-+};
  
  //------------------------------------------------------------------------
  
-@@ -128,7 +239,8 @@ static const sal_Char* __FAR_DATA aProvN
+@@ -128,7 +208,8 @@ static const sal_Char* __FAR_DATA aProvN
  
          SC_SERVICENAME_CHDATAPROV,                  // SC_SERVICE_CHDATAPROV
          SC_SERVICENAME_FORMULAPARS,                 // SC_SERVICE_FORMULAPARS
 -        SC_SERVICENAME_OPCODEMAPPER                 // SC_SERVICE_OPCODEMAPPER
 +        SC_SERVICENAME_OPCODEMAPPER,                 // SC_SERVICE_OPCODEMAPPER
-+        "org.openoffice.vba.VBAObjectModuleObjects",// SC_SERVICE_VBAOBJECTS
++        "org.openoffice.vba.VBAObjectModuleObjectProvider",// SC_SERVICE_VBAOBJECTPROVIDER
  	};
  
  //
-@@ -180,6 +292,7 @@ static const sal_Char* __FAR_DATA aOldNa
+@@ -180,6 +261,7 @@ static const sal_Char* __FAR_DATA aOldNa
          "",                                         // SC_SERVICE_SHEETDOCSET
          "",                                         // SC_SERVICE_CHDATAPROV
          "",                                         // SC_SERVICE_FORMULAPARS
-+        "",                                         // SC_SERVICE_VBAOBJECTS
++        "",                                         // SC_SERVICE_VBAOBJECTPROVIDER
          ""                                          // SC_SERVICE_OPCODEMAPPER
  	};
  
-@@ -373,6 +486,8 @@ uno::Reference<uno::XInterface> ScServic
+@@ -373,6 +455,8 @@ uno::Reference<uno::XInterface> ScServic
          case SC_SERVICE_OPCODEMAPPER:
              xRet.set(static_cast<sheet::XFormulaOpCodeMapper*>(new ScFormulaOpCodeMapperObj));
              break;
-+        case SC_SERVICE_VBAOBJECTS:
-+            xRet.set(static_cast<container::XNameAccess*>(new ScVbaObjects( pDocShell )));
++        case SC_SERVICE_VBAOBJECTPROVIDER:
++            xRet.set(static_cast<script::XObjectProvider*>(new ScVbaObjectProvider( pDocShell )));
  	}
  	return xRet;
  }
@@ -389,8 +356,8 @@
      }
  
 --- /dev/null	2006-11-25 20:17:37.000000000 +0800
-+++ basic/inc/basic/sbobjmod.hxx	2007-09-24 00:54:07.000000000 +0800
-@@ -0,0 +1,68 @@
++++ basic/inc/basic/sbobjmod.hxx	2007-09-27 14:44:52.000000000 +0800
+@@ -0,0 +1,67 @@
 +/*************************************************************************
 + *
 + *  OpenOffice.org - a multi-platform office productivity suite
@@ -442,7 +409,6 @@
 +protected:
 +	//virtual ~SbObjModule();
 +    void InitObject( const XubString& rName );
-+    void InitObject( );
 +public:
 +    TYPEINFO();
 +	SBX_DECL_PERSIST_NODATA(SBXCR_SBX,SBXID_DOCUMENTMOD,2);
@@ -470,7 +436,7 @@
  ..\inc\basic\sbmeth.hxx %_DEST%\inc%_EXT%\basic\sbmeth.hxx
  ..\inc\basic\sbprop.hxx %_DEST%\inc%_EXT%\basic\sbprop.hxx
 --- basic/source/classes/sbxmod.cxx.bak	2007-09-19 10:52:19.000000000 +0800
-+++ basic/source/classes/sbxmod.cxx	2007-09-24 01:11:43.000000000 +0800
++++ basic/source/classes/sbxmod.cxx	2007-09-27 14:45:56.000000000 +0800
 @@ -62,6 +62,8 @@
  #include "sbunoobj.hxx"
  #include <basic/hilight.hxx>
@@ -488,7 +454,7 @@
  
  SV_DECL_VARARR(SbiBreakpoints,USHORT,4,4)
  SV_IMPL_VARARR(SbiBreakpoints,USHORT)
-@@ -1903,6 +1906,66 @@ void SyntaxHighlighter::getHighlightPort
+@@ -1903,6 +1906,63 @@ void SyntaxHighlighter::getHighlightPort
  	m_pSimpleTokenizer->getHighlightPortions( nLine, rLine, portions );
  }
  
@@ -502,14 +468,16 @@
 +SbxVariable*
 +SbObjModule::GetObject()
 +{
-+    return Find( GetName(), SbxCLASS_DONTCARE );
++    if( !pDocObject )
++        InitObject( GetName() );
++    return pDocObject;
 +}
 +SbxVariable*
 +SbObjModule::Find( const XubString& rName, SbxClassType t )
 +{
 +    OSL_TRACE("SbObjectModule find for %s", rtl::OUStringToOString(  rName, RTL_TEXTENCODING_UTF8 ).getStr() );
 +    if ( !pDocObject )
-+        InitObject( );
++        InitObject( GetName() );
 +    OSL_TRACE("!!!!try to find in derived module " );
 +    SbxVariable* pVar = NULL;
 +    if ( !pVar && pDocObject)
@@ -529,11 +497,6 @@
 +        OSL_TRACE("! found in (normal) module " );
 +    }
 +    return pVar;
-+}
-+void
-+SbObjModule::InitObject()
-+{
-+    InitObject( GetName() );
 +}
 +void
 +SbObjModule::InitObject( const XubString& rName )
