@@ -38,6 +38,7 @@
 #include <com/sun/star/drawing/XShape.hpp>
 #include <com/sun/star/script/BasicErrorException.hpp>
 #include <com/sun/star/script/XTypeConverter.hpp>
+#include <com/sun/star/lang/IllegalArgumentException.hpp>
 
 #include <basic/sberrors.hxx>
 #include <cppuhelper/implbase1.hxx>
@@ -50,6 +51,16 @@ namespace org
 {
 	namespace openoffice 
 	{
+		template < class T > 
+		css::uno::Reference< T > getXSomethingFromArgs( css::uno::Sequence< css::uno::Any > const & args, sal_Int32 nPos, bool bCanBeNull = true ) throw (css::lang::IllegalArgumentException)
+		{
+			if ( args.getLength() < ( nPos + 1) )
+				throw css::lang::IllegalArgumentException();
+			css::uno::Reference< T > aSomething( args[ nPos ], css::uno::UNO_QUERY );
+			if ( !bCanBeNull && !aSomething.is() )
+				throw css::lang::IllegalArgumentException();
+			return aSomething;
+		}
 		css::uno::Reference< css::script::XTypeConverter > getTypeConverter( const css::uno::Reference< css::uno::XComponentContext >& xContext ) throw (css::uno::RuntimeException);
 
 		void dispatchRequests (css::uno::Reference< css::frame::XModel>& xModel,rtl::OUString & aUrl) ;

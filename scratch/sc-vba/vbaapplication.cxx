@@ -829,6 +829,8 @@ ScVbaApplication::Volatile( const uno::Any& aVolatile )  throw ( uno::RuntimeExc
 {
 	sal_Bool bVolatile = sal_True;
 	aVolatile >>= bVolatile;
+	if ( true ) // getCalculation tries to get the active doc which... will barf ( on document load )
+		return; 
 	if ( bVolatile )
 		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Volatile - not supported" ) ), uno::Reference< uno::XInterface >() );
 	// bVoloatile is false - currently this only would make sense if 

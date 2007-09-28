@@ -1128,39 +1128,8 @@ lcl_setupBorders( const uno::Reference< excel::XRange >& xParentRange, const uno
 	return borders;
 }
 
-
-uno::Reference< beans::XPropertySet >
-lcl_getPropertiesFromArgs( uno::Sequence< uno::Any > const & args ) throw ( lang::IllegalArgumentException )
-{
-	boost::optional< uno::Reference< vba::XHelperInterface >  >xParent;
-	uno::Reference< table::XCellRange > xRange;
-	comphelper::unwrapArgs( args, xParent, xRange ); 
-	uno::Reference< beans::XPropertySet > xProps( xRange, uno::UNO_QUERY );
-	if ( !xProps.is() )
-		throw lang::IllegalArgumentException();
-	return xProps;
-}
-
-uno::Reference< frame::XModel > 
-lcl_getModelFromArgs( uno::Sequence< uno::Any > const& args ) throw ( lang::IllegalArgumentException )
-{
-	boost::optional< uno::Reference< vba::XHelperInterface >  >xParent;
-	uno::Reference< table::XCellRange > xRange;
-	comphelper::unwrapArgs( args, xParent, xRange ); 
-	return getModelFromRange( xRange );	
-}
-
-uno::Reference< vba::XHelperInterface > 
-lcl_getParentFromArgs( uno::Sequence< uno::Any > const& args ) throw ( lang::IllegalArgumentException )
-{
-	boost::optional< uno::Reference< vba::XHelperInterface >  >xParent;
-	uno::Reference< table::XCellRange > xRange;
-	comphelper::unwrapArgs( args, xParent, xRange ); 
-	return *xParent;
-}
-
 ScVbaRange::ScVbaRange( uno::Sequence< uno::Any> const & args,
-    uno::Reference< uno::XComponentContext> const & xContext )  throw ( lang::IllegalArgumentException ) : ScVbaRange_BASE( lcl_getParentFromArgs( args ), xContext, lcl_getPropertiesFromArgs( args ), lcl_getModelFromArgs( args ), true ), mbIsRows( sal_False ), mbIsColumns( sal_False )
+    uno::Reference< uno::XComponentContext> const & xContext )  throw ( lang::IllegalArgumentException ) : ScVbaRange_BASE( getXSomethingFromArgs< vba::XHelperInterface >( args, 0 ), xContext, getXSomethingFromArgs< beans::XPropertySet >( args, 1, false ), getModelFromRange( getXSomethingFromArgs< table::XCellRange >( args, 1 ) ), true ), mbIsRows( sal_False ), mbIsColumns( sal_False )
 {
 	mxRange.set( mxPropertySet, uno::UNO_QUERY_THROW );
 	uno::Reference< container::XIndexAccess > xIndex( new SingleRangeIndexAccess( mxContext, mxRange ) );

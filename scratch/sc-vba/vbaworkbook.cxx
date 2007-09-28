@@ -64,15 +64,6 @@
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
 
-namespace workbook
-{
-uno::Reference< vba::XHelperInterface >
-lcl_getParentFromArgs( uno::Sequence< uno::Any > const& args ) throw ( lang::IllegalArgumentException );
-uno::Reference< frame::XModel > 
-lcl_getModelFromArgs( uno::Sequence< uno::Any > const& args ) throw ( lang::IllegalArgumentException );
-};
-
-
 class ActiveSheet : public ScVbaWorksheet
 {
 protected:
@@ -223,7 +214,7 @@ ScVbaWorkbook::ScVbaWorkbook( 	const css::uno::Reference< oo::vba::XHelperInterf
 }
 
 ScVbaWorkbook::ScVbaWorkbook( uno::Sequence< uno::Any> const & args,
-    uno::Reference< uno::XComponentContext> const & xContext ) : ScVbaWorkbook_BASE( workbook::lcl_getParentFromArgs( args ), xContext ),  mxModel( workbook::lcl_getModelFromArgs( args ) ) 
+    uno::Reference< uno::XComponentContext> const & xContext ) : ScVbaWorkbook_BASE( getXSomethingFromArgs< vba::XHelperInterface >( args, 0 ), xContext ),  mxModel( getXSomethingFromArgs< frame::XModel >( args, 1 ) ) 
 
 {
 	init();
@@ -497,23 +488,6 @@ ScVbaWorkbook::setCodeName( const ::rtl::OUString& sGlobCodeName ) throw (css::u
 
 namespace workbook
 {
-uno::Reference< vba::XHelperInterface >
-lcl_getParentFromArgs( uno::Sequence< uno::Any > const& args ) throw ( lang::IllegalArgumentException )
-{
-        boost::optional< uno::Reference< vba::XHelperInterface >  >xParent;
-        uno::Reference< frame::XModel > xModel;
-        comphelper::unwrapArgs( args, xParent, xModel );
-        return *xParent;
-}
-
-uno::Reference< frame::XModel > 
-lcl_getModelFromArgs( uno::Sequence< uno::Any > const& args ) throw ( lang::IllegalArgumentException )
-{
-        boost::optional< uno::Reference< vba::XHelperInterface >  >xParent;
-        uno::Reference< frame::XModel > xModel;
-        comphelper::unwrapArgs( args, xParent, xModel );
-        return xModel;
-}
 namespace sdecl = comphelper::service_decl;
 sdecl::vba_service_class_<ScVbaWorkbook, sdecl::with_args<true> > serviceImpl;
 extern sdecl::ServiceDecl const serviceDecl(

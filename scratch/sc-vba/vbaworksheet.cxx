@@ -194,16 +194,6 @@ openNewDoc(rtl::OUString aSheetName )
 	return xModel;
 }
 
-namespace worksheet 
-{
-uno::Reference< vba::XHelperInterface >
-lcl_getParentFromArgs( uno::Sequence< uno::Any > const& args ) throw ( lang::IllegalArgumentException );
-rtl::OUString
-lcl_getSheetNameFromArgs( uno::Sequence< uno::Any > const& args ) throw ( lang::IllegalArgumentException );
-uno::Reference< frame::XModel > 
-lcl_getModelFromArgs( uno::Sequence< uno::Any > const& args ) throw ( lang::IllegalArgumentException );
-};
-
 ScVbaWorksheet::ScVbaWorksheet( const uno::Reference< vba::XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext ) : WorksheetImpl_BASE( xParent, xContext )
 {
 }
@@ -214,9 +204,14 @@ ScVbaWorksheet::ScVbaWorksheet(const uno::Reference< vba::XHelperInterface >& xP
 }
 
 ScVbaWorksheet::ScVbaWorksheet( uno::Sequence< uno::Any> const & args,
-    uno::Reference< uno::XComponentContext> const & xContext ) throw ( lang::IllegalArgumentException ) :  WorksheetImpl_BASE( worksheet::lcl_getParentFromArgs( args ), xContext ), mxModel( worksheet::lcl_getModelFromArgs( args ) )
+    uno::Reference< uno::XComponentContext> const & xContext ) throw ( lang::IllegalArgumentException ) :  WorksheetImpl_BASE( getXSomethingFromArgs< vba::XHelperInterface >( args, 0 ), xContext ), mxModel( getXSomethingFromArgs< frame::XModel >( args, 1 ) )
 {
-	rtl::OUString sSheetName = worksheet::lcl_getSheetNameFromArgs( args );
+	if ( args.getLength() < 2 )
+		throw lang::IllegalArgumentException();
+
+	rtl::OUString sSheetName;
+	args[2] >>= sSheetName;
+
 	uno::Reference< sheet::XSpreadsheetDocument > xSpreadDoc( mxModel, uno::UNO_QUERY_THROW );
 	uno::Reference< container::XNameAccess > xNameAccess( xSpreadDoc->getSheets(), uno::UNO_QUERY_THROW );			
 	mxSheet.set( xNameAccess->getByName( sSheetName ), uno::UNO_QUERY_THROW );
@@ -857,37 +852,6 @@ ScVbaWorksheet::getSheetID() throw (uno::RuntimeException)
 
 namespace worksheet
 {
-
-uno::Reference< vba::XHelperInterface >
-lcl_getParentFromArgs( uno::Sequence< uno::Any > const& args ) throw ( lang::IllegalArgumentException )
-{
-        boost::optional< uno::Reference< vba::XHelperInterface >  >xParent;
-        uno::Reference< frame::XModel > xModel;
-	rtl::OUString sSheetName;
-        comphelper::unwrapArgs( args, xParent, xModel, sSheetName );
-        return *xParent;
-}
-
-rtl::OUString
-lcl_getSheetNameFromArgs( uno::Sequence< uno::Any > const& args ) throw ( lang::IllegalArgumentException )
-{
-        boost::optional< uno::Reference< vba::XHelperInterface >  >xParent;
-        uno::Reference< frame::XModel > xModel;
-	rtl::OUString sSheetName;
-        comphelper::unwrapArgs( args, xParent, xModel, sSheetName );
-        return sSheetName;
-}
-
-uno::Reference< frame::XModel > 
-lcl_getModelFromArgs( uno::Sequence< uno::Any > const& args ) throw ( lang::IllegalArgumentException )
-{
-        boost::optional< uno::Reference< vba::XHelperInterface >  >xParent;
-        uno::Reference< frame::XModel > xModel;
-	rtl::OUString sSheetName;
-        comphelper::unwrapArgs( args, xParent, xModel, sSheetName );
-        return xModel;
-}
-
 namespace sdecl = comphelper::service_decl;
 sdecl::vba_service_class_<ScVbaWorksheet, sdecl::with_args<true> > serviceImpl;
 extern sdecl::ServiceDecl const serviceDecl(
