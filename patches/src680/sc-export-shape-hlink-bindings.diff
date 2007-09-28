@@ -25,37 +25,46 @@ diff -rup sc/source/filter/excel/xecontent.cxx sc/source/filter/excel/xecontent.
 diff -rup sc/source/filter/excel/xlocx.cxx sc/source/filter/excel/xlocx.cxx
 --- sc/source/filter/excel/xlocx.cxx	2007-08-30 16:42:48.000000000 +0100
 +++ sc/source/filter/excel/xlocx.cxx	2007-08-30 16:41:24.000000000 +0100
-@@ -117,6 +117,8 @@ using com::sun::star::uno::UNO_QUERY_THR
+@@ -117,6 +117,10 @@ using com::sun::star::uno::UNO_QUERY_THR
  #ifndef SC_XEESCHER_HXX
  #include "xeescher.hxx"
  #endif
 +#include "xecontent.hxx"
 +#include <svx/flditem.hxx>
++#include "userdat.hxx"
++#include "drwlayer.hxx"
  
  using ::rtl::OUString;
  using ::com::sun::star::uno::Reference;
-@@ -554,3 +556,26 @@ ShapeInteractionHelper::CreateShapeObj(const X
+@@ -554,3 +556,33 @@ ShapeInteractionHelper::CreateShapeObj(const X
  {
      return new XclExpShapeObj( rRoot, xShape );
  }
 +void
-+ShapeInteractionHelper::PopulateShapeHyperInfo(const XclExpRoot& rRoot, const Reference< XShape >& xShape, EscherExHostAppData& rHostAppData )
++ShapeInteractionHelper::PopulateShapeInteractionInfo(const XclExpRoot& rRoot, const Reference< XShape >& xShape, EscherExHostAppData& rHostAppData )
 +{
 +   try
 +   {
-+      String sHyperLink;
-+      ScfPropertySet aPropSet( xShape );
-+      if ( aPropSet.GetStringProperty(  sHyperLink, CREATE_OUSTRING( "Hyperlink" ) ) && sHyperLink.Len() )
++      SvMemoryStream* pMemStrm = NULL;
++      OUString sHyperLink;
++      OUString sMacro;
++      if ( ScMacroInfo* pInfo = ScDrawLayer::GetMacroInfo( ::GetSdrObjectFromXShape( xShape ) ) )
 +      {
-+         SvMemoryStream* pMemStrm = new SvMemoryStream();
++         sHyperLink = pInfo->GetHlink();      
++         sMacro = pInfo->GetMacro();
++      }
++      if (  sHyperLink.getLength() > 0 )
++      {
++         pMemStrm = new SvMemoryStream();
 +         XclExpStream tmpStream( *pMemStrm, rRoot );
 +         ScAddress dummyAddress;
 +         SvxURLField aUrlField;
 +         aUrlField.SetURL( sHyperLink );
 +         XclExpHyperlink hExpHlink( rRoot, aUrlField, dummyAddress );
 +         hExpHlink.WriteEmbeddedData( tmpStream );
-+         rHostAppData.SetHyperlinkRecord( pMemStrm );
 +      }
++      if ( ( sHyperLink.getLength() > 0 ) || ( sMacro.getLength() > 0 ) )
++          rHostAppData.SetInteractionInfo( new InteractionInfo( pMemStrm, true ) );
 +   }
 +   catch( Exception& )
 +   {
@@ -86,7 +95,7 @@ diff -rup sc/source/filter/inc/xlocx.hxx sc/source/filter/inc/xlocx.hxx
  public:
     static XclExpShapeObj* CreateShapeObj(const XclExpRoot& rRoot, const ::com::sun::star::uno::Reference<
                              ::com::sun::star::drawing::XShape >& xShape );
-+   static void PopulateShapeHyperInfo( const XclExpRoot& rRoot, const ::com::sun::star::uno::Reference< ::com::sun::star::drawing::XShape >& xShape, EscherExHostAppData& rHostAppData );
++   static void PopulateShapeInteractionInfo( const XclExpRoot& rRoot, const ::com::sun::star::uno::Reference< ::com::sun::star::drawing::XShape >& xShape, EscherExHostAppData& rHostAppData );
  };
  // ============================================================================
  
@@ -98,7 +107,7 @@ diff -rup sc/source/filter/xcl97/xcl97esc.cxx sc/source/filter/xcl97/xcl97esc.cx
              // #i12190# do not ignore callouts (do not filter by object type ID)
              //pCurrXclObj = new XclObjAny( rRoot );   // just a metafile
              pCurrXclObj = ShapeInteractionHelper::CreateShapeObj( rRoot, rShape );
-+            ShapeInteractionHelper::PopulateShapeHyperInfo( rRoot, rShape, *pCurrAppData );	
++            ShapeInteractionHelper::PopulateShapeInteractionInfo( rRoot, rShape, *pCurrAppData );	
          }
  	}
  	if ( pCurrXclObj )
@@ -106,56 +115,89 @@ diff -rup sc/source/filter/xcl97/xcl97esc.cxx sc/source/filter/xcl97/xcl97esc.cx
  		delete pCurrAppData->GetClientAnchor();
  //		delete pCurrAppData->GetClientData();
  		delete pCurrAppData->GetClientTextbox();
-+		delete pCurrAppData->GetHyperlinkRecord();
++		delete pCurrAppData->GetInteractionInfo();
  		delete pCurrAppData;
  	}
  }
-diff -rup svx/inc/svx/escherex.hxx svx/inc/svx/escherex.hxx
---- svx/inc/svx/escherex.hxx	2007-05-22 16:15:37.000000000 +0100
-+++ svx/inc/svx/escherex.hxx	2007-08-30 16:12:27.000000000 +0100
-@@ -1289,14 +1289,17 @@ private:
+diff -rup svx/source/msfilter/eschesdo.cxx svx/source/msfilter/eschesdo.cxx
+--- svx/source/msfilter/eschesdo.cxx	2007-06-27 19:33:27.000000000 +0100
++++ svx/source/msfilter/eschesdo.cxx	2007-08-30 16:16:48.000000000 +0100
+@@ -314,6 +314,19 @@ UINT32 ImplEESdrWriter::ImplWriteShape( 
+         // #i51348# shape name
+         if( aShapeName.Len() > 0 )
+             aPropOpt.AddOpt( ESCHER_Prop_wzName, aShapeName );
++        if ( InteractionInfo* pInteraction = mpHostAppData->GetInteractionInfo() )
++		{
++			const std::auto_ptr< SvMemoryStream >& pMemStrm = pInteraction->getHyperlinkRecord();
++			if ( pMemStrm.get() )
++			{
++				pMemStrm->ObjectOwnsMemory( FALSE );
++				sal_uInt8* pBuf = (sal_uInt8*) pMemStrm->GetData();
++				sal_uInt32 nSize = pMemStrm->Seek( STREAM_SEEK_TO_END );
++				aPropOpt.AddOpt( ESCHER_Prop_pihlShape, sal_False, nSize, pBuf, nSize );;       
++			}
++			if ( pInteraction->hasInteraction() )
++				aPropOpt.AddOpt( ESCHER_Prop_fPrint, 0x00080008 );       
++        }
+ 
+ 		if ( rObj.GetType().EqualsAscii( "drawing.Custom" ) )
+ 		{
+--- svx/inc/svx/escherex.hxx.b4	2007-09-27 15:42:25.000000000 +0100
++++ svx/inc/svx/escherex.hxx	2007-09-27 15:55:52.000000000 +0100
+@@ -77,7 +77,7 @@
+ #ifndef INCLUDED_SVXDLLAPI_H
+ #include "svx/svxdllapi.h"
+ #endif
+-
++#include <memory>
+ 		/*Record Name       FBT-Value   Instance                  Contents                                                          Wrd Exl PPt Ver*/
+ // In der Mickysoft-Doku heissen die msofbt... statt ESCHER_...
+ #define ESCHER_DggContainer      0xF000 /*                           per-document data 
+@@ -1273,6 +1273,19 @@ public:
+ 									const Rectangle& rRect ) = 0;
+ };
+ 
++class InteractionInfo
++{
++	bool 			mbHasInteraction;
++	std::auto_ptr<SvMemoryStream>		mpHyperlinkRecord;
++	InteractionInfo();
++public:
++	InteractionInfo( SvMemoryStream* pStream, bool bInteraction ) : mbHasInteraction( bInteraction )
++	{
++		mpHyperlinkRecord.reset( pStream );
++	}
++	bool	hasInteraction() { return mbHasInteraction; }
++	const std::auto_ptr< SvMemoryStream >&	getHyperlinkRecord() { return mpHyperlinkRecord; }
++};
+ 
+ class EscherExHostAppData
+ {
+@@ -1280,14 +1298,17 @@ private:
  		EscherExClientAnchor_Base*	pClientAnchor;
  		EscherExClientRecord_Base*	pClientData;
  		EscherExClientRecord_Base*	pClientTextbox;
-+		SvMemoryStream*			pHyperlinkRecord;
++		InteractionInfo*		pInteractionInfo;
  		// ignore single shape if entire pages are written
  		BOOL						bDontWriteShape;
  
  public:
  		EscherExHostAppData() : pClientAnchor(0), pClientData(0),
 -								pClientTextbox(0), bDontWriteShape(FALSE)
-+								pClientTextbox(0), pHyperlinkRecord(0), bDontWriteShape(FALSE)
++								pClientTextbox(0), pInteractionInfo(0), bDontWriteShape(FALSE)
  		{}
  
-+		void SetHyperlinkRecord( SvMemoryStream* p )
-+			{ pHyperlinkRecord = p; }
++		void SetInteractionInfo( InteractionInfo* p )
++			{ pInteractionInfo = p; }
  		void SetClientAnchor( EscherExClientAnchor_Base* p )
  			{ pClientAnchor = p; }
  		void SetClientData( EscherExClientRecord_Base* p )
-@@ -1305,6 +1308,8 @@ public:
+@@ -1296,6 +1317,8 @@ public:
  			{ pClientTextbox = p; }
  		void SetDontWriteShape( BOOL b )
  			{ bDontWriteShape = b; }
-+		SvMemoryStream* GetHyperlinkRecord() const
-+			{ return pHyperlinkRecord; }
++		InteractionInfo* GetInteractionInfo() const
++			{ return pInteractionInfo; }
  		EscherExClientAnchor_Base* GetClientAnchor() const
  			{ return pClientAnchor; }
  		EscherExClientRecord_Base* GetClientData() const
-diff -rup svx/source/msfilter/eschesdo.cxx svx/source/msfilter/eschesdo.cxx
---- svx/source/msfilter/eschesdo.cxx	2007-06-27 19:33:27.000000000 +0100
-+++ svx/source/msfilter/eschesdo.cxx	2007-08-30 16:16:48.000000000 +0100
-@@ -314,6 +314,14 @@ UINT32 ImplEESdrWriter::ImplWriteShape( 
-         // #i51348# shape name
-         if( aShapeName.Len() > 0 )
-             aPropOpt.AddOpt( ESCHER_Prop_wzName, aShapeName );
-+        if ( SvMemoryStream* pMemStrm = mpHostAppData->GetHyperlinkRecord() )
-+        {
-+            pMemStrm->ObjectOwnsMemory( FALSE );
-+            sal_uInt8* pBuf = (sal_uInt8*) pMemStrm->GetData();
-+            sal_uInt32 nSize = pMemStrm->Seek( STREAM_SEEK_TO_END );
-+            aPropOpt.AddOpt( ESCHER_Prop_pihlShape, sal_False, nSize, pBuf, nSize );
-+            aPropOpt.AddOpt( ESCHER_Prop_fPrint, 0x00080008 );       
-+        }
- 
- 		if ( rObj.GetType().EqualsAscii( "drawing.Custom" ) )
- 		{
