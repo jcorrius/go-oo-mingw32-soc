@@ -1,0 +1,100 @@
+#!/usr/bin/perl -w
+
+# Show inactive issues
+
+use File::Temp qw(:mktemp);
+#use Date::Calc qw(Delta_Days);
+use Date::Parse;
+
+sub usage()
+{
+    print STDERR "inactivity\n";
+    print STDERR "Shows inactive issues; sorts by ooo-build vs. up-stream.\n";
+    print STDERR "Error: cannot find patches/src680/apply";
+    exit 1;
+}
+
+@ooobuilders = ( 'bero', 'flr', 'geki', 'hub', 'jayant_madavi',
+    'jianhuajiao', 'jodygoldberg', 'kendy', 'kohei', 'mmeeks',
+    'npower', 'pmladek', 'radekdoulik', 'rene' );
+
+sub output(%)
+{
+    my (%what) = @_;
+
+    printf "%6s  %5s (%10s) %-15s %s\n", "IZ#", "Days", "Date   ", "Owner", "Summary";
+    foreach $bug ( sort { $what{$a}{'date'} cmp $what{$b}{'date'} } keys( %what ) ) {
+        my $date = $what{$bug}{'date'};
+
+        my ($sec, $min, $hour, $mday, $mon, $year, $wday, $yday, $isdst) = localtime();
+        my ($sec2, $min2, $hour2, $mday2, $mon2, $year2, $wday2, $yday2, $isdst2) = localtime( str2time( $date ) );
+
+        my $numdays = ( $year - $year2 ) * 365 + $yday - $yday2; # does not count leap years, but... ;-)
+
+        printf "%6s: %5d (%10s) %-15s %s\n", $bug, $numdays, $date, $what{$bug}{'owner'}, $what{$bug}{'summary'};
+    }
+}
+
+my %tmp_all_issues;
+open APPLY, "patches/src680/apply" || die "Cannot open patches/src680/apply\n";
+while ( <APPLY> ) {
+    if ( /i#([0-9]+)/ ) {
+        $tmp_all_issues{$1} = 1;
+    }
+}
+close APPLY;
+
+my $all_issues = join( ',', keys( %tmp_all_issues ) );
+
+my $cookiejar = mktemp( "/tmp/inactivityXXXXXX" );
+system( "curl -c $cookiejar http://www.openoffice.org/issues/buglist.cgi?issue_id=$all_issues > /dev/null" );
+    
+my ($bug_id, $bug_date, $bug_owner, $bug_status, $bug_resolution, $bug_summary);
+my (%ooobuild, %upstream, %resolved);
+open RESULT, "curl -b $cookiejar http://www.openoffice.org/issues/colchange.cgi -d 'rememberedquery=issue_id=$all_issues' -d 'column_changeddate=1&column_owner=1&column_status=1&column_resolution=1&column_summary=1' |";
+while( <RESULT> ) {
+    chomp;
+    if ( /<a href="show_bug.cgi\?id=[0-9]*">([0-9]*)<\/a>/ ) {
+        $bug_id = $1;
+    }
+    elsif ( /<span class="changeddate">([^<]*)<\/span>/ ) {
+        $bug_date = $1;
+    }
+    elsif ( /<span class="owner">([^<]*)<\/span>/ ) {
+        $bug_owner = $1;
+    }
+    elsif ( /<span class="status">([^<]*)<\/span>/ ) {
+        $bug_status = $1;
+    }
+    elsif ( /<span class="resolution">([^<]*)<\/span>/ ) {
+        $bug_resolution = $1;
+    }
+    elsif ( /<span class="summary">([^<]*)<\/span>/ ) {
+        $bug_summary = $1;
+        if ( $bug_status eq "RESOLV" || $bug_status eq "VERIFI" || $bug_status eq "CLOSED" ) {
+            $resolved{$bug_id} = { "date" => $bug_date, "owner" => $bug_owner, "summary" => $bug_summary };
+            next;
+        }
+        my $is_ooobuilder = 0;
+        foreach $ooobuilder ( @ooobuilders ) {
+            if ( $ooobuilder eq $bug_owner ) {
+                $ooobuild{$bug_id} = { "date" => $bug_date, "owner" => $bug_owner, "summary" => $bug_summary };
+                $is_ooobuilder = 1;
+                next;
+            }
+        }
+        if ( !$is_ooobuilder ) {
+            $upstream{$bug_id} = { "date" => $bug_date, "owner" => $bug_owner, "summary" => $bug_summary };
+        }
+    }
+}
+close RESULT;
+
+print "\n===== assigned to ooo-builders =====\n\n";
+output( %ooobuild );
+
+print "\n===== assigned to up-stream =====\n\n";
+output( %upstream );
+
+print "\n===== resolved/verified/closed, but still in ooo-build =====\n\n";
+output( %resolved );
