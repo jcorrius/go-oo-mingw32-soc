@@ -58,6 +58,10 @@ public:
 	// XWindow
 	virtual ::sal_Bool SAL_CALL getDisplayGridlines() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setDisplayGridlines( ::sal_Bool _displaygridlines ) throw (css::uno::RuntimeException);
+	virtual ::sal_Bool SAL_CALL getDisplayVerticalScrollBar() throw (css::uno::RuntimeException);
+	virtual void SAL_CALL setDisplayVerticalScrollBar( ::sal_Bool _displayverticalscrollbar ) throw (css::uno::RuntimeException);
+	virtual ::sal_Bool SAL_CALL getDisplayHorizontalScrollBar() throw (css::uno::RuntimeException);
+	virtual void SAL_CALL setDisplayHorizontalScrollBar( ::sal_Bool _displayhorizontalscrollbar ) throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setCaption( const css::uno::Any& _caption ) throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL getCaption() throw (css::uno::RuntimeException);
     virtual css::uno::Any SAL_CALL getScrollRow() throw (css::uno::RuntimeException) ;

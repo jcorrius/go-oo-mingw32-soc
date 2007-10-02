@@ -54,6 +54,10 @@ using namespace ::com::sun::star;
 using namespace ::org::openoffice;
 using namespace ::org::openoffice::excel::XlWindowState;
 #define SHOWGRID "ShowGrid"
+
+#define HASVERTSCROLLBAR "HasVerticalScrollBar"
+#define HASHORIZSCROLLBAR "HasHorizontalScrollBar"
+
 typedef  std::hash_map< rtl::OUString,
 SCTAB, ::rtl::OUStringHash,
 ::std::equal_to< ::rtl::OUString > > NameIndexHash;
@@ -465,7 +469,6 @@ ScVbaWindow::getDisplayGridlines() throw (uno::RuntimeException)
 	return bGrid;	
 }
 
-
 void SAL_CALL 
 ScVbaWindow::setDisplayGridlines( ::sal_Bool _displaygridlines ) throw (uno::RuntimeException)
 {
@@ -473,6 +476,43 @@ ScVbaWindow::setDisplayGridlines( ::sal_Bool _displaygridlines ) throw (uno::Run
 	rtl::OUString sName( RTL_CONSTASCII_USTRINGPARAM( SHOWGRID ) );
 	xProps->setPropertyValue( sName, uno::makeAny( _displaygridlines ));
 }
+
+::sal_Bool SAL_CALL 
+ScVbaWindow::getDisplayVerticalScrollBar() throw (css::uno::RuntimeException)
+{
+	uno::Reference< beans::XPropertySet > xProps( m_xModel->getCurrentController(), uno::UNO_QUERY_THROW );
+	rtl::OUString sName( RTL_CONSTASCII_USTRINGPARAM( HASVERTSCROLLBAR ) );
+	sal_Bool bScroll = sal_True;
+	xProps->getPropertyValue( sName ) >>= bScroll;
+	return bScroll;	
+}
+
+void SAL_CALL 
+ScVbaWindow::setDisplayVerticalScrollBar( ::sal_Bool _displayverticalscrollbar ) throw (css::uno::RuntimeException)
+{
+	uno::Reference< beans::XPropertySet > xProps( m_xModel->getCurrentController(), uno::UNO_QUERY_THROW );
+	rtl::OUString sName( RTL_CONSTASCII_USTRINGPARAM( HASVERTSCROLLBAR ) );
+	xProps->setPropertyValue( sName, uno::makeAny( _displayverticalscrollbar ));
+}
+
+::sal_Bool SAL_CALL 
+ScVbaWindow::getDisplayHorizontalScrollBar() throw (css::uno::RuntimeException)
+{
+	uno::Reference< beans::XPropertySet > xProps( m_xModel->getCurrentController(), uno::UNO_QUERY_THROW );
+	rtl::OUString sName( RTL_CONSTASCII_USTRINGPARAM( HASHORIZSCROLLBAR ) );
+	sal_Bool bScroll = sal_True;
+	xProps->getPropertyValue( sName ) >>= bScroll;
+	return bScroll;	
+}
+
+void SAL_CALL 
+ScVbaWindow::setDisplayHorizontalScrollBar( ::sal_Bool _displayhorizontalscrollbar ) throw (css::uno::RuntimeException)
+{
+	uno::Reference< beans::XPropertySet > xProps( m_xModel->getCurrentController(), uno::UNO_QUERY_THROW );
+	rtl::OUString sName( RTL_CONSTASCII_USTRINGPARAM( HASHORIZSCROLLBAR ) );
+	xProps->setPropertyValue( sName, uno::makeAny( _displayhorizontalscrollbar ));
+}
+
 rtl::OUString& 
 ScVbaWindow::getServiceImplName()
 {

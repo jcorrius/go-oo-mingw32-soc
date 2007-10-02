@@ -62,10 +62,11 @@
 #include "gridwin.hxx"
 #include "vbanames.hxx"
 #include "vbashape.hxx"
+#include "sc.hrc"
 
 #include <osl/file.hxx>
 
-//start test includes
+#include <sfx2/request.hxx>
 #include <sfx2/objsh.hxx>
 #include <sfx2/viewfrm.hxx>
 #include <sfx2/app.hxx>
@@ -79,7 +80,6 @@
 #include <basic/sbstar.hxx>
 #include <basic/sbuno.hxx>
 #include <basic/sbmeth.hxx>
-//end test includes
 
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
@@ -845,6 +845,38 @@ ScVbaApplication::Volatile( const uno::Any& aVolatile )  throw ( uno::RuntimeExc
 void SAL_CALL
 ScVbaApplication::DoEvents() throw ( uno::RuntimeException )
 {
+}
+
+::sal_Bool SAL_CALL 
+ScVbaApplication::getDisplayFormulaBar() throw ( css::uno::RuntimeException )
+{
+	sal_Bool bRes = sal_False;
+	ScTabViewShell* pViewShell = getCurrentBestViewShell();
+	if ( pViewShell )
+	{
+		SfxBoolItem sfxFormBar( FID_TOGGLEINPUTLINE);
+		SfxAllItemSet reqList(  SFX_APP()->GetPool() );
+		reqList.Put( sfxFormBar );
+
+		pViewShell->GetState( reqList );
+		const SfxPoolItem *pItem=0;
+		if ( reqList.GetItemState( FID_TOGGLEINPUTLINE, sal_False, &pItem ) == SFX_ITEM_SET )
+			bRes =   ((SfxBoolItem*)pItem)->GetValue();
+	}
+	return bRes;
+}
+
+void SAL_CALL 
+ScVbaApplication::setDisplayFormulaBar( ::sal_Bool _displayformulabar ) throw ( css::uno::RuntimeException )
+{
+	ScTabViewShell* pViewShell = getCurrentBestViewShell();
+	if ( pViewShell )
+	{
+		SfxBoolItem sfxFormBar( FID_TOGGLEINPUTLINE, _displayformulabar);
+		SfxAllItemSet reqList(  SFX_APP()->GetPool() );
+		SfxRequest aReq( FID_TOGGLEINPUTLINE, 0, reqList );
+		pViewShell->Execute( aReq );
+	}	
 }
 
 rtl::OUString& 
