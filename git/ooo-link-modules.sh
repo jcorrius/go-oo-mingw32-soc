@@ -33,7 +33,7 @@ function linkdir() {
 mkdir -p "$LINKDIR"
 mkdir "$LINKDIR/tmp"
 
-cp -a "../$MODULESDIR/CVSROOT" "$LINKDIR/CVSROOT"
+cp -a "$MODULESDIR/CVSROOT" "$LINKDIR/"
 
 MODULES="$LINKDIR/CVSROOT/modules.save"
 mv "$LINKDIR/CVSROOT/modules" "$MODULES"
