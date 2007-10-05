@@ -1,7 +1,6 @@
 #! /bin/bash
 
 MODULESDIR="cvsup"
-MODULES="$MODULESDIR/CVSROOT/modules"
 LINKDIR="ooo"
 
 [ -d "$LINKDIR" ] && { echo "$LINKDIR already exists" ; exit 1 ; }
@@ -31,13 +30,16 @@ function linkdir() {
     done
 }
 
-ONLY="`grep '^OpenOffice2 -a' "$MODULES" | sed 's/^OpenOffice2 -a //'`"
-ONLY=" $ONLY "
-
 mkdir -p "$LINKDIR"
 mkdir "$LINKDIR/tmp"
 
-ln -s "../$MODULESDIR/CVSROOT" "$LINKDIR/CVSROOT"
+cp -a "../$MODULESDIR/CVSROOT" "$LINKDIR/CVSROOT"
+
+MODULES="$LINKDIR/CVSROOT/modules.save"
+mv "$LINKDIR/CVSROOT/modules" "$MODULES"
+
+ONLY="`grep '^OpenOffice2 -a' "$MODULES" | sed 's/^OpenOffice2 -a //'`"
+ONLY=" $ONLY "
 
 # link everything to openoffice.org subdir
 echo "Linking modules"
