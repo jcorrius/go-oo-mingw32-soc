@@ -1,0 +1,437 @@
+--- git-1.4.3.1/git-cvsimport.perl	2006-10-21 05:12:36.000000000 +0200
++++ git-cvsimport.rcs	2007-02-05 10:34:52.000000000 +0100
+@@ -1,4 +1,5 @@
+ #!/usr/bin/perl -w
++use lib (split(/:/, $ENV{GITPERLLIB} || "/usr/lib/perl5/site_perl/5.8.8"));
+ 
+ # This tool is copyright (c) 2005, Matthias Urlichs.
+ # It is released under the Gnu Public License, version 2.
+@@ -123,7 +124,7 @@ if ($#ARGV == 0) {
+ 
+ our @mergerx = ();
+ if ($opt_m) {
+-	@mergerx = ( qr/\W(?:from|of|merge|merging|merged) (\w+)/i );
++	@mergerx = ( qr/\W(?:from|of|merge|merging|merged) ([\w-]+)/i );
+ }
+ if ($opt_M) {
+ 	push (@mergerx, qr/$opt_M/);
+@@ -132,266 +133,8 @@ if ($opt_M) {
+ select(STDERR); $|=1; select(STDOUT);
+ 
+ 
+-package CVSconn;
+-# Basic CVS dialog.
+-# We're only interested in connecting and downloading, so ...
+-
+-use File::Spec;
+-use File::Temp qw(tempfile);
+-use POSIX qw(strftime dup2);
+-
+-sub new {
+-	my($what,$repo,$subdir) = @_;
+-	$what=ref($what) if ref($what);
+-
+-	my $self = {};
+-	$self->{'buffer'} = "";
+-	bless($self,$what);
+-
+-	$repo =~ s#/+$##;
+-	$self->{'fullrep'} = $repo;
+-	$self->conn();
+-
+-	$self->{'subdir'} = $subdir;
+-	$self->{'lines'} = undef;
+-
+-	return $self;
+-}
+-
+-sub conn {
+-	my $self = shift;
+-	my $repo = $self->{'fullrep'};
+-	if($repo =~ s/^:pserver:(?:(.*?)(?::(.*?))?@)?([^:\/]*)(?::(\d*))?//) {
+-		my($user,$pass,$serv,$port) = ($1,$2,$3,$4);
+-		$user="anonymous" unless defined $user;
+-		my $rr2 = "-";
+-		unless($port) {
+-			$rr2 = ":pserver:$user\@$serv:$repo";
+-			$port=2401;
+-		}
+-		my $rr = ":pserver:$user\@$serv:$port$repo";
+-
+-		unless($pass) {
+-			open(H,$ENV{'HOME'}."/.cvspass") and do {
+-				# :pserver:cvs@mea.tmt.tele.fi:/cvsroot/zmailer Ah<Z
+-				while(<H>) {
+-					chomp;
+-					s/^\/\d+\s+//;
+-					my ($w,$p) = split(/\s/,$_,2);
+-					if($w eq $rr or $w eq $rr2) {
+-						$pass = $p;
+-						last;
+-					}
+-				}
+-			};
+-		}
+-		$pass="A" unless $pass;
+-
+-		my $s = IO::Socket::INET->new(PeerHost => $serv, PeerPort => $port);
+-		die "Socket to $serv: $!\n" unless defined $s;
+-		$s->write("BEGIN AUTH REQUEST\n$repo\n$user\n$pass\nEND AUTH REQUEST\n")
+-			or die "Write to $serv: $!\n";
+-		$s->flush();
+-
+-		my $rep = <$s>;
+-
+-		if($rep ne "I LOVE YOU\n") {
+-			$rep="<unknown>" unless $rep;
+-			die "AuthReply: $rep\n";
+-		}
+-		$self->{'socketo'} = $s;
+-		$self->{'socketi'} = $s;
+-	} else { # local or ext: Fork off our own cvs server.
+-		my $pr = IO::Pipe->new();
+-		my $pw = IO::Pipe->new();
+-		my $pid = fork();
+-		die "Fork: $!\n" unless defined $pid;
+-		my $cvs = 'cvs';
+-		$cvs = $ENV{CVS_SERVER} if exists $ENV{CVS_SERVER};
+-		my $rsh = 'rsh';
+-		$rsh = $ENV{CVS_RSH} if exists $ENV{CVS_RSH};
+-
+-		my @cvs = ($cvs, 'server');
+-		my ($local, $user, $host);
+-		$local = $repo =~ s/:local://;
+-		if (!$local) {
+-		    $repo =~ s/:ext://;
+-		    $local = !($repo =~ s/^(?:([^\@:]+)\@)?([^:]+)://);
+-		    ($user, $host) = ($1, $2);
+-		}
+-		if (!$local) {
+-		    if ($user) {
+-			unshift @cvs, $rsh, '-l', $user, $host;
+-		    } else {
+-			unshift @cvs, $rsh, $host;
+-		    }
+-		}
+-
+-		unless($pid) {
+-			$pr->writer();
+-			$pw->reader();
+-			dup2($pw->fileno(),0);
+-			dup2($pr->fileno(),1);
+-			$pr->close();
+-			$pw->close();
+-			exec(@cvs);
+-		}
+-		$pw->writer();
+-		$pr->reader();
+-		$self->{'socketo'} = $pw;
+-		$self->{'socketi'} = $pr;
+-	}
+-	$self->{'socketo'}->write("Root $repo\n");
+-
+-	# Trial and error says that this probably is the minimum set
+-	$self->{'socketo'}->write("Valid-responses ok error Valid-requests Mode M Mbinary E Checked-in Created Updated Merged Removed\n");
+-
+-	$self->{'socketo'}->write("valid-requests\n");
+-	$self->{'socketo'}->flush();
+-
+-	chomp(my $rep=$self->readline());
+-	if($rep !~ s/^Valid-requests\s*//) {
+-		$rep="<unknown>" unless $rep;
+-		die "Expected Valid-requests from server, but got: $rep\n";
+-	}
+-	chomp(my $res=$self->readline());
+-	die "validReply: $res\n" if $res ne "ok";
+-
+-	$self->{'socketo'}->write("UseUnchanged\n") if $rep =~ /\bUseUnchanged\b/;
+-	$self->{'repo'} = $repo;
+-}
+-
+-sub readline {
+-	my($self) = @_;
+-	return $self->{'socketi'}->getline();
+-}
+-
+-sub _file {
+-	# Request a file with a given revision.
+-	# Trial and error says this is a good way to do it. :-/
+-	my($self,$fn,$rev) = @_;
+-	$self->{'socketo'}->write("Argument -N\n") or return undef;
+-	$self->{'socketo'}->write("Argument -P\n") or return undef;
+-	# -kk: Linus' version doesn't use it - defaults to off
+-	if ($opt_k) {
+-	    $self->{'socketo'}->write("Argument -kk\n") or return undef;
+-	}
+-	$self->{'socketo'}->write("Argument -r\n") or return undef;
+-	$self->{'socketo'}->write("Argument $rev\n") or return undef;
+-	$self->{'socketo'}->write("Argument --\n") or return undef;
+-	$self->{'socketo'}->write("Argument $self->{'subdir'}/$fn\n") or return undef;
+-	$self->{'socketo'}->write("Directory .\n") or return undef;
+-	$self->{'socketo'}->write("$self->{'repo'}\n") or return undef;
+-	# $self->{'socketo'}->write("Sticky T1.0\n") or return undef;
+-	$self->{'socketo'}->write("co\n") or return undef;
+-	$self->{'socketo'}->flush() or return undef;
+-	$self->{'lines'} = 0;
+-	return 1;
+-}
+-sub _line {
+-	# Read a line from the server.
+-	# ... except that 'line' may be an entire file. ;-)
+-	my($self, $fh) = @_;
+-	die "Not in lines" unless defined $self->{'lines'};
+-
+-	my $line;
+-	my $res=0;
+-	while(defined($line = $self->readline())) {
+-		# M U gnupg-cvs-rep/AUTHORS
+-		# Updated gnupg-cvs-rep/
+-		# /daten/src/rsync/gnupg-cvs-rep/AUTHORS
+-		# /AUTHORS/1.1///T1.1
+-		# u=rw,g=rw,o=rw
+-		# 0
+-		# ok
+-
+-		if($line =~ s/^(?:Created|Updated) //) {
+-			$line = $self->readline(); # path
+-			$line = $self->readline(); # Entries line
+-			my $mode = $self->readline(); chomp $mode;
+-			$self->{'mode'} = $mode;
+-			defined (my $cnt = $self->readline())
+-				or die "EOF from server after 'Changed'\n";
+-			chomp $cnt;
+-			die "Duh: Filesize $cnt" if $cnt !~ /^\d+$/;
+-			$line="";
+-			$res = $self->_fetchfile($fh, $cnt);
+-		} elsif($line =~ s/^ //) {
+-			print $fh $line;
+-			$res += length($line);
+-		} elsif($line =~ /^M\b/) {
+-			# output, do nothing
+-		} elsif($line =~ /^Mbinary\b/) {
+-			my $cnt;
+-			die "EOF from server after 'Mbinary'" unless defined ($cnt = $self->readline());
+-			chomp $cnt;
+-			die "Duh: Mbinary $cnt" if $cnt !~ /^\d+$/ or $cnt<1;
+-			$line="";
+-			$res += $self->_fetchfile($fh, $cnt);
+-		} else {
+-			chomp $line;
+-			if($line eq "ok") {
+-				# print STDERR "S: ok (".length($res).")\n";
+-				return $res;
+-			} elsif($line =~ s/^E //) {
+-				# print STDERR "S: $line\n";
+-			} elsif($line =~ /^(Remove-entry|Removed) /i) {
+-				$line = $self->readline(); # filename
+-				$line = $self->readline(); # OK
+-				chomp $line;
+-				die "Unknown: $line" if $line ne "ok";
+-				return -1;
+-			} else {
+-				die "Unknown: $line\n";
+-			}
+-		}
+-	}
+-	return undef;
+-}
+-sub file {
+-	my($self,$fn,$rev) = @_;
+-	my $res;
+-
+-	my ($fh, $name) = tempfile('gitcvs.XXXXXX', 
+-		    DIR => File::Spec->tmpdir(), UNLINK => 1);
+-
+-	$self->_file($fn,$rev) and $res = $self->_line($fh);
+-
+-	if (!defined $res) {
+-	    print STDERR "Server has gone away while fetching $fn $rev, retrying...\n";
+-	    truncate $fh, 0;
+-	    $self->conn();
+-	    $self->_file($fn,$rev) or die "No file command send";
+-	    $res = $self->_line($fh);
+-	    die "Retry failed" unless defined $res;
+-	}
+-	close ($fh);
+-
+-	return ($name, $res);
+-}
+-sub _fetchfile {
+-	my ($self, $fh, $cnt) = @_;
+-	my $res = 0;
+-	my $bufsize = 1024 * 1024;
+-	while($cnt) {
+-	    if ($bufsize > $cnt) {
+-		$bufsize = $cnt;
+-	    }
+-	    my $buf;
+-	    my $num = $self->{'socketi'}->read($buf,$bufsize);
+-	    die "Server: Filesize $cnt: $num: $!\n" if not defined $num or $num<=0;
+-	    print $fh $buf;
+-	    $res += $num;
+-	    $cnt -= $num;
+-	}
+-	return $res;
+-}
+-
+-
+ package main;
+ 
+-my $cvs = CVSconn->new($opt_d, $cvs_tree);
+-
+ 
+ sub pdate($) {
+ 	my($d) = @_;
+@@ -401,30 +144,6 @@ sub pdate($) {
+ 	return timegm($6||0,$5,$4,$3,$2-1,$y);
+ }
+ 
+-sub pmode($) {
+-	my($mode) = @_;
+-	my $m = 0;
+-	my $mm = 0;
+-	my $um = 0;
+-	for my $x(split(//,$mode)) {
+-		if($x eq ",") {
+-			$m |= $mm&$um;
+-			$mm = 0;
+-			$um = 0;
+-		} elsif($x eq "u") { $um |= 0700;
+-		} elsif($x eq "g") { $um |= 0070;
+-		} elsif($x eq "o") { $um |= 0007;
+-		} elsif($x eq "r") { $mm |= 0444;
+-		} elsif($x eq "w") { $mm |= 0222;
+-		} elsif($x eq "x") { $mm |= 0111;
+-		} elsif($x eq "=") { # do nothing
+-		} else { die "Unknown mode: $mode\n";
+-		}
+-	}
+-	$m |= $mm&$um;
+-	return $m;
+-}
+-
+ sub getwd() {
+ 	my $pwd = `pwd`;
+ 	chomp $pwd;
+@@ -609,6 +328,9 @@ my(@old,@new,@skipped,%ignorebranch);
+ # commits that cvsps cannot place anywhere...
+ $ignorebranch{'#CVSPS_NO_BRANCH'} = 1;
+ 
++# ooo specific
++$ignorebranch{'ausetestcwswarumgehtunderscorenicht'} = 1;
++
+ sub commit {
+ 	if ($branch eq $opt_o && !$index{branch} && !get_headref($branch, $git_dir)) {
+ 	    # looks like an initial commit
+@@ -661,6 +383,12 @@ sub commit {
+ 	my $pid = open2(my $commit_read, my $commit_write,
+ 		'git-commit-tree', $tree, @commit_args);
+ 
++	# ooo specific: revert the order of lines in the 'INTEGRATION' logs
++	if ($logmsg =~ /^INTEGRATION:/) {
++	    $logmsg = join("\n", reverse(split(/\n/,$logmsg)));
++	}
++	$logmsg =~ s/^\n+//;
++
+ 	# compatibility with git2cvs
+ 	substr($logmsg,32767) = "" if length($logmsg) > 32767;
+ 	$logmsg =~ s/[\s\n]+\z//;
+@@ -693,6 +421,14 @@ sub commit {
+ 		$xtag =~ tr/_/\./ if ( $opt_u );
+ 		$xtag =~ s/[\/]/$opt_s/g;
+ 		
++		# ooo specific
++		if ( -f "$git_dir/refs/heads/$xtag" ) {
++			print STDERR "Ignoring tag '$xtag', already exists as a branch.\n";
++		}
++		elsif ( -f "$git_dir/refs/tags/$xtag" ) {
++			print STDERR "Ignoring tag '$xtag', already exists.\n";
++		}
++		else {
+ 		my $pid = open2($in, $out, 'git-mktag');
+ 		print $out "object $cid\n".
+ 		    "type commit\n".
+@@ -719,6 +455,7 @@ sub commit {
+ 			or die "Cannot write tag $xtag: $!\n";
+ 
+ 		print "Created tag '$xtag' on '$branch'\n" if $opt_v;
++		}
+ 	}
+ };
+ 
+@@ -751,10 +488,16 @@ while(<CVS>) {
+ 		} else {
+ 		    $author_name = $author_email = $_;
+ 		}
++                # ooo specific
++                if ( !($author_email =~ /@/) ) {
++                    $author_email .= '@openoffice.org';
++                }
+ 		$state = 4;
+ 	} elsif($state == 4 and s/^Branch:\s+//) {
+ 		s/\s+$//;
+ 		s/[\/]/$opt_s/g;
++		# ooo specific
++		s/cws_...6.._//;
+ 		$branch = $_;
+ 		$state = 5;
+ 	} elsif($state == 5 and s/^Ancestor branch:\s+//) {
+@@ -768,6 +511,9 @@ while(<CVS>) {
+ 		redo;
+ 	} elsif($state == 6 and s/^Tag:\s+//) {
+ 		s/\s+$//;
++		# ooo specific
++		s/CWS_...6.._(.*)_ANCHOR/$1/;
++		s/jimmac02/jimmac02_tag/;
+ 		if($_ eq "(none)") {
+ 			$tag = undef;
+ 		} else {
+@@ -835,8 +581,23 @@ while(<CVS>) {
+ 		    next;
+ 		}
+ 		print "Fetching $fn   v $rev\n" if $opt_v;
+-		my ($tmpname, $size) = $cvs->file($fn,$rev);
+-		if($size == -1) {
++		#my ($tmpname, $size) = $cvs->file($fn,$rev);
++		my $rcs_fname = "$opt_d/$cvs_tree/$fn,v";
++		if (! -e $rcs_fname ) {
++			$rcs_fname =~ s#/([^/]*)$#/Attic/$1#;
++		}
++		my ($tmpname,$revision) = split('\n', `co -r$rev -kk "$rcs_fname" 2>&1`);
++		if ( !($tmpname =~ s/^.*  -->  // ) ) {
++			die "Cannot get revision using 'co -r$rev -kk \"$rcs_fname\"'";
++		}
++		my ($dev,$ino,$mode,$nlink,$uid,$gid,$rdev,$size,
++			$atime,$mtime,$ctime,$blksize,$blocks) = lstat("$tmpname");
++		# ooo specific - removes leading \t's
++		if ( $tmpname =~ "\.[ch]\$" || $tmpname =~ "\.[ch]xx\$" || $tmpname =~ "\.mk\$" || $tmpname =~ "\.src\$" )
++		{
++			system("sed -i ':loop; s/^\\(\\t*\\)\\t/\\1    /; t loop' '$tmpname'");
++		}
++		if( ($revision =~ /absent/) || ($revision =~ /no revisions present/) ) {
+ 			push(@old,$fn);
+ 			print "Drop $fn\n" if $opt_v;
+ 		} else {
+@@ -850,10 +611,10 @@ while(<CVS>) {
+ 			my $sha = <$F>;
+ 			chomp $sha;
+ 			close $F;
+-			my $mode = pmode($cvs->{'mode'});
+-			push(@new,[$mode, $sha, $fn]); # may be resurrected!
++			#my $mode = pmode($cvs->{'mode'});
++			push(@new,[($mode & 0777), $sha, $fn]); # may be resurrected!
+ 		}
+-		unlink($tmpname);
++		unlink($tmpname) if (defined($tmpname));
+ 	} elsif($state == 9 and /^\s+(.+?):\d+(?:\.\d+)+->(\d+(?:\.\d+)+)\(DEAD\)\s*$/) {
+ 		my $fn = $1;
+ 		$fn =~ s#^/+##;
+@@ -867,7 +628,7 @@ while(<CVS>) {
+ 			last;
+ 		}
+ 		commit();
+-		if (($commitcount & 1023) == 0) {
++		if (($commitcount & 2047) == 0) {
+ 			system("git repack -a -d");
+ 		}
+ 		$state = 1;
