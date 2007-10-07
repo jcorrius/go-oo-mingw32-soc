@@ -110,13 +110,13 @@ ScVbaColorFormat::setRGB( sal_Int32 _rgb ) throw (uno::RuntimeException)
     switch( m_nColorFormatType )
     {
     case ColorFormatType::LINEFORMAT_FORECOLOR:
-        m_xPropertySet->setPropertyValue( rtl::OUString::createFromAscii( "LineColor" ), uno::makeAny( _rgb ) );
+        m_xPropertySet->setPropertyValue( rtl::OUString::createFromAscii( "LineColor" ), uno::makeAny( nRGB ) );
         break;
     case ColorFormatType::LINEFORMAT_BACKCOLOR:
         // TODO BackColor not supported
         break;
     case ColorFormatType::FILLFORMAT_FORECOLOR:
-        m_xPropertySet->setPropertyValue( rtl::OUString::createFromAscii( "FillColor" ), uno::makeAny( _rgb ) );
+        m_xPropertySet->setPropertyValue( rtl::OUString::createFromAscii( "FillColor" ), uno::makeAny( nRGB ) );
         if( m_pFillFormat )
         {
             m_pFillFormat->setForeColorAndInternalStyle(nRGB);

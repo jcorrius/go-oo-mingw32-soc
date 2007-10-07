@@ -55,70 +55,75 @@ using namespace ::org::openoffice;
 using namespace ::com::sun::star;
 using namespace ::vos;
 
-//ScVbaShapeListener
-class ScVbaShapeListener: public cppu::WeakImplHelper1< lang::XEventListener >
-{
-private:
-    ScVbaShape *m_pShape;
-public:
-    ScVbaShapeListener( ScVbaShape *pShape );
-    virtual ~ScVbaShapeListener();
-    virtual void SAL_CALL disposing( const lang::EventObject& rEventObject ) throw( uno::RuntimeException );
-};
-
-ScVbaShapeListener::ScVbaShapeListener( ScVbaShape *pShape ): m_pShape( pShape )
-{
-}
-
-ScVbaShapeListener::~ScVbaShapeListener()
-{
-}
-
-void SAL_CALL
-ScVbaShapeListener::disposing( const lang::EventObject& ) throw( uno::RuntimeException )
-{
-    if( m_pShape )
-    {
-        m_pShape->removeResource();
-        m_pShape = NULL;
-    }
-}
-
 ScVbaShape::ScVbaShape( const uno::Reference< vba::XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< drawing::XShape > xShape, const uno::Reference< drawing::XShapes > xShapes, sal_Int32 nType ) throw( lang::IllegalArgumentException ) : ScVbaShape_BASE( xParent, xContext ), m_xShape( xShape ), m_xShapes( xShapes ), m_nType( nType )
 {
     m_xPropertySet.set( m_xShape, uno::UNO_QUERY_THROW );
-    // add listener
-    m_xEventListener.set( new ScVbaShapeListener( this ) );
-    m_xComponent.set( m_xShape, uno::UNO_QUERY_THROW );
-    m_xComponent->addEventListener( m_xEventListener );
+    addListeners();
 }
 
 ScVbaShape::ScVbaShape( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< drawing::XShape > xShape ) throw( lang::IllegalArgumentException ) : ScVbaShape_BASE( uno::Reference< vba::XHelperInterface >(), xContext ), m_xShape( xShape )
 {
     // add listener
-    m_xEventListener.set( new ScVbaShapeListener( this ) );
-    m_xComponent.set( m_xShape, uno::UNO_QUERY_THROW );
-    m_xComponent->addEventListener( m_xEventListener );
+    addListeners();
 }
 
 ScVbaShape::~ScVbaShape()
-{
-    if( m_xShape.is() )
+{ 
+    // dtor must never ever throw
+    try
     {
-        m_xComponent->removeEventListener( m_xEventListener );
+        removeShapeListener();
+        removeShapesListener();
     }
-    m_xShapes = NULL;
-    m_xEventListener = NULL;
+    catch( uno::Exception& )
+    {
+    }    
+}
+
+void SAL_CALL 
+ScVbaShape::disposing( const lang::EventObject& rEventObject ) throw( uno::RuntimeException )
+{
+    uno::Reference< drawing::XShapes > xShapes( rEventObject.Source, uno::UNO_QUERY );
+    uno::Reference< drawing::XShape > xShape( rEventObject.Source, uno::UNO_QUERY );
+    if ( xShapes.is() )
+        removeShapesListener();
+    if ( xShape.is() )
+        removeShapeListener();
+}
+
+
+void ScVbaShape::addListeners()
+{
+    uno::Reference< lang::XComponent > xComponent( m_xShape, uno::UNO_QUERY );
+    if ( xComponent.is() )
+    	xComponent->addEventListener( this );
+
+    xComponent.set( m_xShapes, uno::UNO_QUERY );
+    if ( xComponent.is() )
+    	xComponent->addEventListener( this );
 }
 
 void
-ScVbaShape::removeResource() throw( uno::RuntimeException )
+ScVbaShape::removeShapeListener() throw( uno::RuntimeException )
 {
-    if( m_xComponent.is() )
-        m_xComponent->removeEventListener( m_xEventListener );
-    m_xComponent = NULL;
+    if( m_xShape.is() )
+    {
+        uno::Reference< lang::XComponent > xComponent( m_xShape, uno::UNO_QUERY_THROW );
+        xComponent->removeEventListener( this );
+    }
     m_xShape = NULL;
     m_xPropertySet = NULL;
+}
+
+void
+ScVbaShape::removeShapesListener() throw( uno::RuntimeException )
+{
+    if( m_xShapes.is() )
+    {
+        uno::Reference< lang::XComponent > xComponent( m_xShapes, uno::UNO_QUERY_THROW );
+        xComponent->removeEventListener( this );
+    }
+    m_xShapes = NULL;
 }
 
 sal_Int32 
@@ -311,16 +316,6 @@ ScVbaShape::Delete() throw (uno::RuntimeException)
 {
     OGuard aGuard( Application::GetSolarMutex() );
     m_xShapes->remove( m_xShape );
-    SvxShape* pShape = SvxShape::getImplementation( m_xShape );
-    if( pShape )
-    {
-        pShape->dispose();
-        removeResource();
-    }
-    else
-    {
-        removeResource();
-    }
 }
 
 void SAL_CALL 
@@ -446,6 +441,30 @@ ScVbaShape::Select( const uno::Any& /*Replace*/ ) throw ( uno::RuntimeException 
     uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY_THROW );
     uno::Reference< view::XSelectionSupplier > xSelectSupp( xModel->getCurrentController(), uno::UNO_QUERY_THROW );
     xSelectSupp->select( uno::makeAny( m_xShape ) );
+}
+
+// This method should not be part of Shape, what we reall need to do is...
+// dynamically create the appropriate objects e.g. TextBox, Oval, Picture etc. 
+// ( e.g. the ones that really do have ShapeRange as an attribute )
+#include "vbashaperange.hxx"
+
+uno::Any SAL_CALL 
+ScVbaShape::ShapeRange( const uno::Any& index ) throw ( uno::RuntimeException )
+{
+	// perhaps we should store a reference to the Shapes Collection 
+	// in this class
+	// but anyway this method should not even be in this class
+	// #TODO not sure what the parent of the Shapes collection should be
+	
+	XNamedObjectCollectionHelper< drawing::XShape >::XNamedVec aVec;
+	aVec.push_back( m_xShape );
+	uno::Reference< container::XIndexAccess > xIndexAccess( new XNamedObjectCollectionHelper< drawing::XShape >( aVec ) );
+	uno::Reference< container::XChild > xChild( m_xShape, uno::UNO_QUERY_THROW );	
+	// #FIXME for want of a better parent, setting this
+	uno::Reference< msforms::XShapeRange > xShapeRange( new ScVbaShapeRange( mxParent, mxContext, xIndexAccess,  uno::Reference< drawing::XDrawPage >( xChild->getParent(), uno::UNO_QUERY_THROW ) ) );
+	if ( index.hasValue() )
+		return xShapeRange->Item( index, uno::Any() );
+	return uno::makeAny( xShapeRange );
 }
 
 rtl::OUString& 

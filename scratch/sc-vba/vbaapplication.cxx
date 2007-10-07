@@ -870,7 +870,7 @@ void SAL_CALL
 ScVbaApplication::setDisplayFormulaBar( ::sal_Bool _displayformulabar ) throw ( css::uno::RuntimeException )
 {
 	ScTabViewShell* pViewShell = getCurrentBestViewShell();
-	if ( pViewShell )
+	if ( pViewShell && ( _displayformulabar !=  getDisplayFormulaBar() ) )
 	{
 		SfxBoolItem sfxFormBar( FID_TOGGLEINPUTLINE, _displayformulabar);
 		SfxAllItemSet reqList(  SFX_APP()->GetPool() );
