@@ -138,24 +138,39 @@ sal_Int32 SAL_CALL
 ScVbaColorFormat::getSchemeColor() throw (uno::RuntimeException)
 {
     sal_Int32 nColor = getRGB();
-    sal_Int32 i;
-    for( i = 0; i < 56; i++ )
+    // #TODO I guess the number of elements is determined by the correct scheme
+    // the implementation here seems to be a rehash of color index ( which seems to be a 
+    // different thing ) - I would guess we need to know/import etc. the correct color scheme
+    // or at least find out a little more
+    sal_Int32 i = 0;
+    for( ; i < 56; i++ )
     {
         if( nColor == MsoColorIndizes::getColorIndex(i) )
-            break; 
+	   break;
     }
+
+    if( i == 56 ) // this is most likely an error condition
+        --i;
+    return i; 
+    // #TODO figure out what craziness is this, 
+    // the 56 colors seems incorrect, as in default XL ( 2003 ) there are 80 colors
+/*
     if( i == 56 )
     {
         i = -2;
     }
+
     return ( i + 2 );
+*/
 }
 
 void SAL_CALL 
 ScVbaColorFormat::setSchemeColor( sal_Int32 _schemecolor ) throw (uno::RuntimeException)
 {
+    // the table is 0 based
     sal_Int32 nColor = MsoColorIndizes::getColorIndex( _schemecolor );
-    setRGB( OORGBToXLRGB( nColor ) );
+    // nColor is already xl RGB
+    setRGB( nColor );
 }
 
 
