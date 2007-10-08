@@ -15,7 +15,7 @@ echo -n "Creating "
 for I in `( cd "$CVS_PATH" ; echo * )` ; do
     [ "$I" = "CVSROOT" ] && continue
 
-    if [ "$COUNT" -lt "6" ] ; then
+    if [ "$COUNT" -lt "3" ] ; then
 	COUNT=$(( $COUNT + 1 ))
     else
 	echo "..."
