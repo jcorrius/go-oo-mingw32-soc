@@ -51,7 +51,12 @@ while read A R ; do
     fi
     [ "$ONLY" != "${ONLY/ $A /XYZ}" ] && ln -s "../../$MODULESDIR/$R" "$LINKDIR/tmp/$A"
 done < "$MODULES"
+
+# not in the alias
 ln -s "../../xml/oox" "$LINKDIR/tmp/oox"
+
+# not needed
+rm -f "$LINKDIR/tmp/rvpapi"
 
 # move the modules according to ooo-link-modules.list
 grep -v "^#" ooo-link-modules.list | while read MOD ; do
