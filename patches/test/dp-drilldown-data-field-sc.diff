@@ -1,3 +1,730 @@
+? sc/output.log
+? sc/sc.vpj
+? sc/inc/dpcachetable.hxx
+? sc/source/core/data/dpcachetable.cxx
+Index: sc/inc/dpobject.hxx
+===================================================================
+RCS file: /cvs/sc/sc/inc/dpobject.hxx,v
+retrieving revision 1.12
+diff -u -b -I $Revision.*$ -I $Author.*$ -r1.12 dpobject.hxx
+--- sc/inc/dpobject.hxx	27 Jun 2007 13:41:57 -0000	1.12
++++ sc/inc/dpobject.hxx	8 Oct 2007 15:33:22 -0000
+@@ -78,7 +78,7 @@
+ class StrCollection;
+ class TypedStrCollection;
+ struct PivotField;
+-
++class ScDPCacheTable;
+ 
+ struct ScDPServiceDesc
+ {
+@@ -223,6 +223,8 @@
+ 	BOOL				RefsEqual( const ScDPObject& r ) const;
+ 	void				WriteRefsTo( ScDPObject& r ) const;
+ 
++    void                GetDrillDownData(const ScAddress& rPos, ScDPCacheTable& rTableData);
++
+ 	// apply drop-down attribute, initialize nHeaderRows, without accessing the source
+ 	// (button attribute must be present)
+ 	void				RefreshAfterLoad();
+Index: sc/inc/dpoutput.hxx
+===================================================================
+RCS file: /cvs/sc/sc/inc/dpoutput.hxx,v
+retrieving revision 1.8
+diff -u -b -I $Revision.*$ -I $Author.*$ -r1.8 dpoutput.hxx
+--- sc/inc/dpoutput.hxx	27 Jun 2007 13:42:13 -0000	1.8
++++ sc/inc/dpoutput.hxx	8 Oct 2007 15:33:22 -0000
+@@ -60,6 +60,7 @@
+ #include "address.hxx"
+ #endif
+ 
++#include "dpcachetable.hxx"
+ #include <vector>
+ 
+ class Rectangle;
+@@ -166,6 +167,11 @@
+ 	BOOL			HasError();			// range overflow or exception from source
+ 
+ 	void			GetPositionData( ScDPPositionData& rData, const ScAddress& rPos );
++
++    /** Get filtering criteria based on the position of the cell within data
++        field region. */
++    bool            GetDataFieldPositionData(::std::vector<ScDPCacheTable::Filter>& rFilters, const ScAddress& rPos);
++
+     BOOL            GetPivotData( ScDPGetPivotDataField& rTarget, /* returns result */
+                                   const std::vector< ScDPGetPivotDataField >& rFilters );
+ 	long			GetHeaderDim( const ScAddress& rPos, USHORT& rOrient );
+Index: sc/inc/dpsdbtab.hxx
+===================================================================
+RCS file: /cvs/sc/sc/inc/dpsdbtab.hxx,v
+retrieving revision 1.3
+diff -u -b -I $Revision.*$ -I $Author.*$ -r1.3 dpsdbtab.hxx
+--- sc/inc/dpsdbtab.hxx	8 Sep 2005 17:35:48 -0000	1.3
++++ sc/inc/dpsdbtab.hxx	8 Oct 2007 15:33:22 -0000
+@@ -50,6 +50,10 @@
+ #include "dptabdat.hxx"
+ #endif
+ 
++#include <vector>
++
++class ScDPCacheTable;
++
+ // --------------------------------------------------------------------
+ //
+ //	implementation of ScDPTableData with database data
+@@ -94,6 +98,11 @@
+ 	virtual void					DisposeData();
+ 	virtual void					SetEmptyFlags( BOOL bIgnoreEmptyRows, BOOL bRepeatIfEmpty );
+ 
++    virtual void                    CreateCacheTable(const ::std::vector<ScDPDimension*>& rPageDims);
++    virtual void                    GetDrillDownData(const ::std::vector<ScDPCacheTable::Filter>& rFilters, 
++                                                     ScDPCacheTable& rData);
++    virtual sal_Int32               GetFieldIndex(const String& rStr);
++
+ 	virtual void					ResetIterator();
+ 	virtual BOOL					GetNextRow( const ScDPTableIteratorParam& rParam );
+ };
+Index: sc/inc/dpshttab.hxx
+===================================================================
+RCS file: /cvs/sc/sc/inc/dpshttab.hxx,v
+retrieving revision 1.4
+diff -u -b -I $Revision.*$ -I $Author.*$ -r1.4 dpshttab.hxx
+--- sc/inc/dpshttab.hxx	8 Sep 2005 17:36:03 -0000	1.4
++++ sc/inc/dpshttab.hxx	8 Oct 2007 15:33:22 -0000
+@@ -48,6 +48,9 @@
+ #include "address.hxx"
+ #endif
+ 
++#include <vector>
++
++class ScDPDimension;
+ 
+ // --------------------------------------------------------------------
+ //
+@@ -70,7 +73,6 @@
+ {
+ private:
+ 	ScSheetDPData_Impl* pImpl;
+-    BOOL* pSpecial;
+ 
+ public:
+ 					ScSheetDPData( ScDocument* pD, const ScSheetSourceDesc& rDesc );
+@@ -85,6 +87,10 @@
+ 	virtual void					DisposeData();
+ 	virtual void					SetEmptyFlags( BOOL bIgnoreEmptyRows, BOOL bRepeatIfEmpty );
+ 
++    virtual void                    CreateCacheTable(const ::std::vector<ScDPDimension*>& rPageDims);
++    virtual void                    GetDrillDownData(const ::std::vector<ScDPCacheTable::Filter>& rFilters, ScDPCacheTable& rData);
++    virtual sal_Int32               GetFieldIndex(const String& rStr);
++
+ 	virtual void					ResetIterator();
+ 	virtual BOOL					GetNextRow( const ScDPTableIteratorParam& rParam );
+ };
+Index: sc/inc/dptabdat.hxx
+===================================================================
+RCS file: /cvs/sc/sc/inc/dptabdat.hxx,v
+retrieving revision 1.6
+diff -u -b -I $Revision.*$ -I $Author.*$ -r1.6 dptabdat.hxx
+--- sc/inc/dptabdat.hxx	25 Jan 2007 11:03:15 -0000	1.6
++++ sc/inc/dptabdat.hxx	8 Oct 2007 15:33:22 -0000
+@@ -40,11 +40,16 @@
+ #include "address.hxx"
+ #endif
+ 
++#include "dpoutput.hxx"
++
+ #ifndef _STRING_HXX
+ #include <tools/string.hxx>
+ #endif
+ 
++#include <vector>
++
+ class TypedStrCollection;
++class ScDPDimension;
+ 
+ // -----------------------------------------------------------------------
+ 
+@@ -110,16 +115,16 @@
+ {
+ 	//	all pointers are just copied
+ 
+-	SCSIZE			nColCount;
++	SCSIZE			nColCount;      // # column fields
+ 	const long*		pCols;
+ 	ScDPItemData*	pColData;
+-	SCSIZE			nRowCount;
++	SCSIZE			nRowCount;      // # row fields
+ 	const long*		pRows;
+ 	ScDPItemData*	pRowData;
+-	SCSIZE			nPageCount;
++	SCSIZE			nPageCount;     // # page fields
+ 	const long*		pPages;
+ 	ScDPItemData*	pPageData;
+-	SCSIZE			nDatCount;
++	SCSIZE			nDatCount;      // # data fields
+ 	const long*		pDats;
+ 	ScDPValueData*	pValues;
+ 
+@@ -155,6 +160,10 @@
+ 	virtual void					DisposeData() = 0;
+ 	virtual void					SetEmptyFlags( BOOL bIgnoreEmptyRows, BOOL bRepeatIfEmpty ) = 0;
+ 
++    virtual void                    CreateCacheTable(const ::std::vector<ScDPDimension*>& rPageDims);
++    virtual void                    GetDrillDownData(const ::std::vector<ScDPCacheTable::Filter>& rFilters, ScDPCacheTable& rTableData);
++    virtual sal_Int32               GetFieldIndex(const String& rStr);
++
+ 	virtual void					ResetIterator() = 0;
+ 	virtual BOOL					GetNextRow( const ScDPTableIteratorParam& rParam ) = 0;
+ 
+Index: sc/inc/dptabsrc.hxx
+===================================================================
+RCS file: /cvs/sc/sc/inc/dptabsrc.hxx,v
+retrieving revision 1.8
+diff -u -b -I $Revision.*$ -I $Author.*$ -r1.8 dptabsrc.hxx
+--- sc/inc/dptabsrc.hxx	25 Jan 2007 11:03:43 -0000	1.8
++++ sc/inc/dptabsrc.hxx	8 Oct 2007 15:33:22 -0000
+@@ -358,7 +358,7 @@
+ {
+ private:
+ 	ScDPSource*			pSource;
+-	long				nDim;
++	long				nDim;               // dimension index (== column ID)
+ 	ScDPHierarchies*	pHierarchies;
+ 	long				nUsedHier;
+ 	USHORT				nFunction;			// enum GeneralFunction
+Index: sc/source/core/data/dpgroup.cxx
+===================================================================
+RCS file: /cvs/sc/sc/source/core/data/dpgroup.cxx,v
+retrieving revision 1.7
+diff -u -b -I $Revision.*$ -I $Author.*$ -r1.7 dpgroup.cxx
+--- sc/source/core/data/dpgroup.cxx	27 Feb 2007 12:03:31 -0000	1.7
++++ sc/source/core/data/dpgroup.cxx	8 Oct 2007 15:33:22 -0000
+@@ -51,6 +51,7 @@
+ #include "collect.hxx"
+ #include "global.hxx"
+ #include "document.hxx"
++#include "dpcachetable.hxx"
+ 
+ #ifndef _COM_SUN_STAR_SHEET_DATAPILOTFIELDGROUPBY_HPP_
+ #include <com/sun/star/sheet/DataPilotFieldGroupBy.hpp>
+Index: sc/source/core/data/dpobject.cxx
+===================================================================
+RCS file: /cvs/sc/sc/source/core/data/dpobject.cxx,v
+retrieving revision 1.21
+diff -u -b -I $Revision.*$ -I $Author.*$ -r1.21 dpobject.cxx
+--- sc/source/core/data/dpobject.cxx	27 Jun 2007 13:43:19 -0000	1.21
++++ sc/source/core/data/dpobject.cxx	8 Oct 2007 15:33:23 -0000
+@@ -73,7 +73,10 @@
+ #include <tools/debug.hxx>
+ #include <svtools/zforlist.hxx>		// IsNumberFormat
+ 
++#include <vector>
++
+ using namespace com::sun::star;
++using ::std::vector;
+ 
+ // -----------------------------------------------------------------------
+ 
+@@ -601,6 +604,20 @@
+ 		r.SetSheetDesc( *pSheetDesc );
+ }
+ 
++void ScDPObject::GetDrillDownData(const ScAddress& rPos, ScDPCacheTable& rTableData)
++{
++    CreateOutput();
++
++    vector<ScDPCacheTable::Filter> aFilters;
++    if ( !pOutput->GetDataFieldPositionData(aFilters, rPos) )
++        return;
++
++    // TODO: We need to change the UNO API.
++    ScDPSource* pSource = static_cast<ScDPSource*>(xSource.get());
++    ScDPTableData* pData = pSource->GetData();
++    pData->GetDrillDownData(aFilters, rTableData);
++}
++
+ BOOL ScDPObject::IsDimNameInUse( const String& rName ) const
+ {
+ 	if ( xSource.is() )
+Index: sc/source/core/data/dpoutput.cxx
+===================================================================
+RCS file: /cvs/sc/sc/source/core/data/dpoutput.cxx,v
+retrieving revision 1.15
+diff -u -b -I $Revision.*$ -I $Author.*$ -r1.15 dpoutput.cxx
+--- sc/source/core/data/dpoutput.cxx	27 Jun 2007 13:43:33 -0000	1.15
++++ sc/source/core/data/dpoutput.cxx	8 Oct 2007 15:33:23 -0000
+@@ -48,6 +48,8 @@
+ #include <unotools/transliterationwrapper.hxx>
+ 
+ #include "dpoutput.hxx"
++#include "dptabsrc.hxx"
++#include "dpcachetable.hxx"
+ #include "document.hxx"
+ #include "patattr.hxx"
+ #include "docpool.hxx"
+@@ -73,7 +75,10 @@
+ #include <com/sun/star/sheet/GeneralFunction.hpp>
+ #include <com/sun/star/container/XNamed.hpp>
+ 
++#include <vector>
++
+ using namespace com::sun::star;
++using ::std::vector;
+ 
+ // -----------------------------------------------------------------------
+ 
+@@ -995,6 +1000,72 @@
+ 	}
+ }
+ 
++bool ScDPOutput::GetDataFieldPositionData(vector<ScDPCacheTable::Filter>& rFilters, const ScAddress& rPos)
++{
++    SCCOL nCol = rPos.Col();
++    SCROW nRow = rPos.Row();
++    SCTAB nTab = rPos.Tab();
++    if ( nTab != aStartPos.Tab() )
++        return false;                                     // wrong sheet
++
++    CalcSizes();
++
++    // test for data area.
++    if (nCol < nDataStartCol || nCol > nTabEndCol || nRow < nDataStartRow || nRow > nTabEndRow)
++    {
++        // Cell is outside the data field area.
++        return false;
++    }
++
++    ScDPSource* pSource = static_cast<ScDPSource*>(xSource.get());
++    ScDPTableData* pData = pSource->GetData();
++
++    // column fields
++    for (SCCOL nColField = 0; nColField < nColFieldCount; ++nColField)
++    {
++        ScDPCacheTable::Filter aFilter;
++        aFilter.mnFieldIndex = pData->GetFieldIndex(pColFields[nColField].aCaption);
++
++        const uno::Sequence<sheet::MemberResult> rSequence = pColFields[nColField].aResult;
++        long nThisColCount = rSequence.getLength();
++        const sheet::MemberResult* pArray = rSequence.getConstArray();
++
++        DBG_ASSERT(nDataStartCol + nThisColCount - 1 == nTabEndCol, "ScDPOutput::GetDataFieldCellData: error in geometric assumption");
++
++        long nItem = nCol - nDataStartCol;
++                //	get origin of "continue" fields
++        while ( nItem > 0 && (pArray[nItem].Flags & sheet::MemberResultFlags::CONTINUE) )
++            --nItem;
++
++        aFilter.mnMatchStrId = ScDPCacheTable::getStringId(pArray[nItem].Name);
++        if (pArray[nItem].Name.getLength() > 0 && !pArray[nItem].Name.equalsAscii("Total"))
++            rFilters.push_back(aFilter);
++    }
++
++    // row fields
++    for (SCROW nRowField = 0; nRowField < nRowFieldCount; ++nRowField)
++    {
++        ScDPCacheTable::Filter aFilter;
++        aFilter.mnFieldIndex = pData->GetFieldIndex(pRowFields[nRowField].aCaption);
++
++        const uno::Sequence<sheet::MemberResult> rSequence = pRowFields[nRowField].aResult;
++        long nThisRowCount = rSequence.getLength();
++        const sheet::MemberResult* pArray = rSequence.getConstArray();
++
++        DBG_ASSERT(nDataStartRow + nThisRowCount - 1 == nTabEndRow, "ScDPOutput::GetDataFieldCellData: error in geometric assumption");
++
++        long nItem = nRow - nDataStartRow;
++			//	get origin of "continue" fields
++        while ( nItem > 0 && (pArray[nItem].Flags & sheet::MemberResultFlags::CONTINUE) )
++            --nItem;
++
++        aFilter.mnMatchStrId = ScDPCacheTable::getStringId(pArray[nItem].Name);
++        if (pArray[nItem].Name.getLength() > 0 && !pArray[nItem].Name.equalsAscii("Total"))
++            rFilters.push_back(aFilter);
++    }
++    return true;
++}
++
+ //
+ //  helper functions for ScDPOutput::GetPivotData
+ //
+Index: sc/source/core/data/dpsdbtab.cxx
+===================================================================
+RCS file: /cvs/sc/sc/source/core/data/dpsdbtab.cxx,v
+retrieving revision 1.12
+diff -u -b -I $Revision.*$ -I $Author.*$ -r1.12 dpsdbtab.cxx
+--- sc/source/core/data/dpsdbtab.cxx	27 Feb 2007 12:04:37 -0000	1.12
++++ sc/source/core/data/dpsdbtab.cxx	8 Oct 2007 15:33:23 -0000
+@@ -60,8 +60,12 @@
+ #include "collect.hxx"
+ #include "global.hxx"
+ #include "globstr.hrc"
++#include "dpcachetable.hxx"
+ 
++using ::std::vector;
+ using namespace com::sun::star;
++using ::com::sun::star::uno::Reference;
++using ::com::sun::star::uno::UNO_QUERY;
+ 
+ #define SC_SERVICE_ROWSET			"com.sun.star.sdb.RowSet"
+ #define SC_SERVICE_INTHANDLER		"com.sun.star.sdb.InteractionHandler"
+@@ -87,6 +91,8 @@
+ 	sal_Int32*			pTypes;
+ 	SvNumberFormatter*	pFormatter;
+ 
++    ScDPCacheTable      aCacheTable;
++
+ 	ScDatabaseDPData_Impl() {}
+ };
+ 
+@@ -500,6 +506,25 @@
+ 	//!	disable flags
+ }
+ 
++void ScDatabaseDPData::CreateCacheTable(const vector<ScDPDimension*>& rPageDims)
++{
++    // Get null date.
++    if (!pImpl->pFormatter)
++        pImpl->pFormatter = new SvNumberFormatter(pImpl->xServiceManager, ScGlobal::eLnge);
++
++    pImpl->aCacheTable.fillTable(pImpl->xRowSet, *pImpl->pFormatter->GetNullDate(), rPageDims);
++}
++
++void ScDatabaseDPData::GetDrillDownData(const vector<ScDPCacheTable::Filter>& rFilters, ScDPCacheTable& rData)
++{
++    pImpl->aCacheTable.filterTable(rFilters, rData);
++}
++
++sal_Int32 ScDatabaseDPData::GetFieldIndex(const String& rStr)
++{
++    return pImpl->aCacheTable.getFieldIndex(rStr);
++}
++
+ void ScDatabaseDPData::ResetIterator()
+ {
+ 	try
+Index: sc/source/core/data/dpshttab.cxx
+===================================================================
+RCS file: /cvs/sc/sc/source/core/data/dpshttab.cxx,v
+retrieving revision 1.9
+diff -u -b -I $Revision.*$ -I $Author.*$ -r1.9 dpshttab.cxx
+--- sc/source/core/data/dpshttab.cxx	27 Feb 2007 12:04:49 -0000	1.9
++++ sc/source/core/data/dpshttab.cxx	8 Oct 2007 15:33:23 -0000
+@@ -47,8 +47,13 @@
+ #include "document.hxx"
+ #include "collect.hxx"
+ #include "cell.hxx"
++#include "dpcachetable.hxx"
+ #include "globstr.hrc"
+ 
++#include <vector>
++
++using ::std::vector;
++
+ // -----------------------------------------------------------------------
+ 
+ class ScSheetDPData_Impl
+@@ -57,20 +62,25 @@
+ 	ScDocument*		pDoc;
+ 	ScRange			aRange;
+ 	ScQueryParam	aQuery;
+-	long			nColCount;
++    BOOL*           pSpecial;           // to flag special handling of query parameters in ValidQuery.
++	long			nColCount;          // number of columns
+ 	BOOL			bIgnoreEmptyRows;
+ 	BOOL			bRepeatIfEmpty;
+-	TypedStrCollection**	ppStrings;
++	TypedStrCollection**	ppStrings;  // array of unique column entries.
+ 	BOOL*			pDateDim;
+ 	SCROW			nNextRow;		// for iterator, within range
+ 
+-	ScSheetDPData_Impl() {}
++    ScDPCacheTable  aCacheTable;
++
++	ScSheetDPData_Impl() :
++        pSpecial(NULL)
++    {
++    }
+ };
+ 
+ // -----------------------------------------------------------------------
+ 
+ ScSheetDPData::ScSheetDPData( ScDocument* pD, const ScSheetSourceDesc& rDesc )
+-    : pSpecial(NULL)
+ {
+ 	long nCount = rDesc.aSourceRange.aEnd.Col() - rDesc.aSourceRange.aStart.Col() + 1;
+ 	pImpl = new ScSheetDPData_Impl;
+@@ -88,18 +98,18 @@
+ 	pImpl->nNextRow = pImpl->aRange.aStart.Row() + 1;
+ 
+     SCSIZE nEntryCount(pImpl->aQuery.GetEntryCount());
+-    pSpecial = new BOOL[nEntryCount];
++    pImpl->pSpecial = new BOOL[nEntryCount];
+     for (SCSIZE j = 0; j < nEntryCount; ++j )
+     {
+         ScQueryEntry& rEntry = pImpl->aQuery.GetEntry(j);
+         if (rEntry.bDoQuery)
+         {
+-            pSpecial[j] = false;
++            pImpl->pSpecial[j] = false;
+             if (!rEntry.bQueryByString)
+             {
+                 if (*rEntry.pStr == EMPTY_STRING &&
+                    ((rEntry.nVal == SC_EMPTYFIELDS) || (rEntry.nVal == SC_NONEMPTYFIELDS)))
+-                    pSpecial[j] = true;
++                    pImpl->pSpecial[j] = true;
+             }
+             else
+             {
+@@ -118,8 +128,8 @@
+ 		delete pImpl->ppStrings[i];
+ 	delete[] pImpl->ppStrings;
+ 	delete[] pImpl->pDateDim;
++    delete[] pImpl->pSpecial;
+ 	delete pImpl;
+-    delete[] pSpecial;
+ }
+ 
+ void ScSheetDPData::DisposeData()
+@@ -172,7 +182,7 @@
+ 				//	ignore empty member (if it's not the first row)
+ 			}
+ 			else if ( lcl_HasQuery(pImpl->aQuery) &&
+-						!pImpl->pDoc->ValidQuery( nRow, nDocTab, pImpl->aQuery, pSpecial ) )
++						!pImpl->pDoc->ValidQuery( nRow, nDocTab, pImpl->aQuery, pImpl->pSpecial ) )
+ 			{
+ 				//	this row is filtered out
+ 			}
+@@ -295,8 +305,30 @@
+ 	pImpl->bRepeatIfEmpty   = bRepeatIfEmpty;
+ }
+ 
++void ScSheetDPData::CreateCacheTable(const vector<ScDPDimension*>& rPageDims)
++{
++    // Scan and store the data from the source range.
++    pImpl->aCacheTable.fillTable(pImpl->pDoc, pImpl->aRange, pImpl->aQuery, pImpl->pSpecial, rPageDims);
++}
++
++void ScSheetDPData::GetDrillDownData(const vector<ScDPCacheTable::Filter>& rFilters,
++                                     ScDPCacheTable& rData)
++{
++    sal_Int32 nRowSize = pImpl->aCacheTable.getRowSize();
++    if (!nRowSize)
++        return;
++
++    pImpl->aCacheTable.filterTable(rFilters, rData);
++}
++
++sal_Int32 ScSheetDPData::GetFieldIndex(const String& rStr)
++{
++    return pImpl->aCacheTable.getFieldIndex(rStr);
++}
++
+ void ScSheetDPData::ResetIterator()
+ {
++    // skipping the header row.
+ 	pImpl->nNextRow = pImpl->aRange.aStart.Row() + 1;
+ }
+ 
+@@ -348,7 +380,7 @@
+ 		}
+ 
+ 		bFilteredOut = ( lcl_HasQuery(pImpl->aQuery) && 
+-				!pImpl->pDoc->ValidQuery( pImpl->nNextRow, nDocTab, pImpl->aQuery, pSpecial ) );
++				!pImpl->pDoc->ValidQuery( pImpl->nNextRow, nDocTab, pImpl->aQuery, pImpl->pSpecial ) );
+ 		if ( bFilteredOut )
+ 		{
+ 			++pImpl->nNextRow;
+@@ -360,6 +392,7 @@
+ 
+ 	//!	use more efficient iterators
+ 
++    // Populate column field information.
+ 	for (i=0; i<rParam.nColCount; i++)
+ 	{
+ 		long nDim = rParam.pCols[i];
+@@ -371,6 +404,7 @@
+ 									pImpl->bRepeatIfEmpty, nFirstDataRow );
+ 	}
+ 
++    // Populate row field information.
+ 	for (i=0; i<rParam.nRowCount; i++)
+ 	{
+ 		long nDim = rParam.pRows[i];
+@@ -382,6 +416,7 @@
+ 									pImpl->bRepeatIfEmpty, nFirstDataRow );
+ 	}
+ 
++    // Populate page dimension information from the sheet.
+ 	for (i=0; i<rParam.nPageCount; i++)
+ 	{
+ 		long nDim = rParam.pPages[i];
+@@ -393,6 +428,7 @@
+ 									pImpl->bRepeatIfEmpty, nFirstDataRow );
+ 	}
+ 
++    // Populate data dimension information from the row.
+ 	for (i=0; i<rParam.nDatCount; i++)
+ 	{
+ 		long nDim = rParam.pDats[i];
+Index: sc/source/core/data/dptabdat.cxx
+===================================================================
+RCS file: /cvs/sc/sc/source/core/data/dptabdat.cxx,v
+retrieving revision 1.12
+diff -u -b -I $Revision.*$ -I $Author.*$ -r1.12 dptabdat.cxx
+--- sc/source/core/data/dptabdat.cxx	27 Feb 2007 12:05:02 -0000	1.12
++++ sc/source/core/data/dptabdat.cxx	8 Oct 2007 15:33:23 -0000
+@@ -53,6 +53,8 @@
+ #include "dptabdat.hxx"
+ #include "global.hxx"
+ 
++using ::std::vector;
++
+ // -----------------------------------------------------------------------
+ 
+ BOOL ScDPItemData::IsCaseInsEqual( const ScDPItemData& r ) const
+@@ -193,6 +195,20 @@
+ 	return nRet;
+ }
+ 
++void ScDPTableData::CreateCacheTable(const vector<ScDPDimension*>& rPageDims)
++{
++    fprintf(stdout, "ScDPTableData::CreateCacheTable: \n");fflush(stdout);
++}
++
++void ScDPTableData::GetDrillDownData(const vector<ScDPCacheTable::Filter>& rFilters, ScDPCacheTable& rTableData)
++{
++}
++
++sal_Int32 ScDPTableData::GetFieldIndex(const String& rStr)
++{
++    return -1;
++}
++
+ UINT32 ScDPTableData::GetNumberFormat(long)
+ {
+ 	return 0;			// default format
+Index: sc/source/core/data/dptabsrc.cxx
+===================================================================
+RCS file: /cvs/sc/sc/source/core/data/dptabsrc.cxx,v
+retrieving revision 1.20
+diff -u -b -I $Revision.*$ -I $Author.*$ -r1.20 dptabsrc.cxx
+--- sc/source/core/data/dptabsrc.cxx	27 Sep 2007 13:52:51 -0000	1.20
++++ sc/source/core/data/dptabsrc.cxx	8 Oct 2007 15:33:24 -0000
+@@ -41,6 +41,7 @@
+ // INCLUDE ---------------------------------------------------------------
+ 
+ #include <algorithm>
++#include <vector>
+ 
+ #include <tools/debug.hxx>
+ #include <rtl/math.hxx>
+@@ -72,6 +73,7 @@
+ #endif
+ 
+ using namespace com::sun::star;
++using ::std::vector;
+ 
+ // -----------------------------------------------------------------------
+ 
+@@ -798,6 +800,15 @@
+ 						nDataDimCount,   nDataSrcCols,   aValues );
+ 
+ 			pData->ResetIterator();
++            vector<ScDPDimension*> aPageDims;
++            aPageDims.reserve(nPageDimCount);
++            for (i = 0; i < nPageDimCount; ++i)
++            {
++                ScDPDimension* pDim = GetDimensionsObject()->getByIndex( nPageDims[i] );
++                if (pDim)
++                    aPageDims.push_back(pDim);
++            }
++            pData->CreateCacheTable(aPageDims);
+ 			while ( pData->GetNextRow( aIterPar ) )
+ 			{
+ 				// test page fields ----------------------------
+Index: sc/source/core/data/makefile.mk
+===================================================================
+RCS file: /cvs/sc/sc/source/core/data/makefile.mk,v
+retrieving revision 1.21
+diff -u -b -I $Revision.*$ -I $Author.*$ -r1.21 makefile.mk
+--- sc/source/core/data/makefile.mk	27 Feb 2007 12:06:42 -0000	1.21
++++ sc/source/core/data/makefile.mk	8 Oct 2007 15:33:24 -0000
+@@ -77,6 +77,7 @@
+ 	$(SLO)$/documen8.obj \
+ 	$(SLO)$/documen9.obj \
+ 	$(SLO)$/document.obj \
++        $(SLO)$/dpcachetable.obj \
+         $(SLO)$/dpdimsave.obj \
+         $(SLO)$/dpgroup.obj \
+ 	$(SLO)$/dpobject.obj \
+@@ -131,6 +132,7 @@
+ 	$(SLO)$/documen5.obj \
+ 	$(SLO)$/documen6.obj \
+ 	$(SLO)$/documen9.obj \
++        $(SLO)$/dpcachetable.obj \
+ 	$(SLO)$/dpsdbtab.obj \
+ 	$(SLO)$/dpobject.obj \
+ 	$(SLO)$/dpoutput.obj \
+Index: sc/source/ui/view/gridwin.cxx
+===================================================================
+RCS file: /cvs/sc/sc/source/ui/view/gridwin.cxx,v
+retrieving revision 1.85
+diff -u -b -I $Revision.*$ -I $Author.*$ -r1.85 gridwin.cxx
+--- sc/source/ui/view/gridwin.cxx	27 Sep 2007 13:56:11 -0000	1.85
++++ sc/source/ui/view/gridwin.cxx	8 Oct 2007 15:33:25 -0000
+@@ -2032,7 +2032,52 @@
+                 }
+ 			}
+ 			else
+-				Sound::Beep();		// nothing to expand/collapse
++            {
++                // Check if the data area is double-clicked.
++                ScDPCacheTable aArrayData;
++                pDPObj->GetDrillDownData(aCellPos, aArrayData);
++                if ( aArrayData.empty() )
++                {
++                    ::Sound::Beep();
++                }
++                else
++                {
++                    ScTabViewShell* pViewShell = pViewData->GetViewShell();
++                    String aNewTabName;
++                    pViewData->GetDocument()->CreateValidTabName(aNewTabName);
++                    SCTAB nNewTab = pViewData->GetTabNo();
++                    if ( pViewShell->InsertTable(aNewTabName, nNewTab, false) )
++                    {
++                        sal_Int32 nRowSize = aArrayData.getRowSize();
++                        sal_Int32 nColSize = aArrayData.getColSize();
++
++                        // header row
++                        for (sal_Int32 nCol = 0; nCol < nColSize; ++nCol)
++                        {
++                            const String* pHeaderStr = aArrayData.getFieldName(nCol);
++                            if (pHeaderStr)
++                                pDoc->SetString(nCol, 0, nNewTab, *pHeaderStr);
++                        }
++                        
++                        // data rows
++                        for (sal_Int32 nRow = 0; nRow < nRowSize; ++nRow)
++                        {
++                            for (sal_Int32 nCol = 0; nCol < nColSize; ++nCol)
++                            {
++                                const ScDPCacheTable::Cell* pCell = aArrayData.getCell(nCol, nRow);
++                                if (pCell->mbNumeric)
++                                    pDoc->SetValue(nCol, nRow+1, nNewTab, pCell->mfValue);
++                                else
++                                {
++                                    const String* pStr = ScDPCacheTable::getString(pCell->mnStrId);
++                                    if (pStr)
++                                        pDoc->SetString(nCol, nRow+1, nNewTab, *pStr);
++                                }
++                            }
++                        }
++                    }
++                }
++            }
+ 
+ 			return;
+ 		}
 --- /dev/null	2007-05-04 06:54:36.000000000 -0400
 +++ sc/inc/dpcachetable.hxx	2007-10-05 12:21:22.000000000 -0400
 @@ -0,0 +1,157 @@
