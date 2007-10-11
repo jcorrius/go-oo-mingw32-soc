@@ -273,16 +273,15 @@ ScVbaShape::getRotation() throw (uno::RuntimeException)
     double dRotation = 0;
     sal_Int32 nRotation = 0;
     m_xPropertySet->getPropertyValue( rtl::OUString::createFromAscii( "RotateAngle" ) ) >>= nRotation;
-    dRotation = static_cast< double >( ( 36000 - nRotation )/100 );
+    dRotation = static_cast< double >( nRotation /100 );
     return dRotation;
 }
 
 void SAL_CALL 
 ScVbaShape::setRotation( double _rotation ) throw (uno::RuntimeException)
 {
-    sal_Int32 nRotation = static_cast < sal_Int32 > ( _rotation );
-    nRotation = nRotation % 360;
-    m_xPropertySet->setPropertyValue( rtl::OUString::createFromAscii( "RotateAngle" ), uno::makeAny( 36000 - nRotation * 100 ) );
+    sal_Int32 nRotation = static_cast < sal_Int32 > ( _rotation * 100 );
+    m_xPropertySet->setPropertyValue( rtl::OUString::createFromAscii( "RotateAngle" ), uno::makeAny( nRotation ) );
 }
 
 uno::Reference< msforms::XLineFormat > SAL_CALL 

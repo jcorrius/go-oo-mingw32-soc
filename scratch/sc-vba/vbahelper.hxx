@@ -127,15 +127,15 @@ public:
 		return m_nMillimeter * 2.834645669; // 72 / 25.4mm
 	}    
 
-	static int getInHundredthsOfOneMillimeter(double points)
+	static sal_Int32 getInHundredthsOfOneMillimeter(double points)
 	{
-		int mm = static_cast<int>(double(points * factor));
+		sal_Int32 mm = static_cast<sal_Int32>(points * factor);
 		return mm;
 	}
     
 	static double getInPoints(int _hmm)
 	{
-		float points = static_cast<float>(double(_hmm / factor));
+		double points = double( static_cast<double>(_hmm) / factor);
 		return points;
 	}
 };

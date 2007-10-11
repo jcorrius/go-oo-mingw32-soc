@@ -41,13 +41,13 @@
 using namespace ::org::openoffice;
 using namespace ::com::sun::star;
 
-class VbShapeEnumHelper : public EnumerationHelper_BASE
+class VbShapeRangeEnumHelper : public EnumerationHelper_BASE
 {
         uno::Reference< vba::XCollection > m_xParent;
         uno::Reference<container::XIndexAccess > m_xIndexAccess;
         sal_Int32 nIndex;
 public:
-	VbShapeEnumHelper( const uno::Reference< vba::XCollection >& xParent,  const uno::Reference< container::XIndexAccess >& xIndexAccess ) : m_xParent( xParent ), m_xIndexAccess( xIndexAccess ), nIndex( 0 ) {}
+	VbShapeRangeEnumHelper( const uno::Reference< vba::XCollection >& xParent,  const uno::Reference< container::XIndexAccess >& xIndexAccess ) : m_xParent( xParent ), m_xIndexAccess( xIndexAccess ), nIndex( 0 ) {}
         virtual ::sal_Bool SAL_CALL hasMoreElements(  ) throw (uno::RuntimeException)
         {
                 return ( nIndex < m_xIndexAccess->getCount() );
@@ -142,7 +142,7 @@ ScVbaShapeRange::getElementType() throw (uno::RuntimeException)
 uno::Reference< container::XEnumeration > SAL_CALL 
 ScVbaShapeRange::createEnumeration() throw (uno::RuntimeException)
 {
-	return new VbShapeEnumHelper( this, m_xIndexAccess );
+	return new VbShapeRangeEnumHelper( this, m_xIndexAccess );
 }
 
 uno::Any

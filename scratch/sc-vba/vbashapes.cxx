@@ -171,6 +171,8 @@ ScVbaShapes::getShapesByArrayIndices( const uno::Any& Index  ) throw (uno::Runti
 uno::Any SAL_CALL 
 ScVbaShapes::Item( const uno::Any& Index, const uno::Any& Index2 ) throw (uno::RuntimeException)
 {
+	// I don't think we need to support Array of indices for shapes	
+/*
 	if ( Index.getValueTypeClass() == uno::TypeClass_SEQUENCE )
 	{
 		uno::Reference< container::XIndexAccess > xIndexAccess( getShapesByArrayIndices( Index ) );
@@ -178,6 +180,7 @@ ScVbaShapes::Item( const uno::Any& Index, const uno::Any& Index2 ) throw (uno::R
 		uno::Reference< vba::XCollection > xShapesCollection(  new ScVbaShapes( this->getParent(), mxContext, xIndexAccess ) );
 		return uno::makeAny( xShapesCollection );
 	}
+*/
 	return 	ScVbaShapes_BASE::Item( Index, Index2 );
 }
 
