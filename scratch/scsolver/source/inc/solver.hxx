@@ -77,27 +77,30 @@ namespace scsolver {
 class CalcInterface;
 class OptionData;
 class SolverDialog;
+class StringResMgr;
 
 //--------------------------------------------------------------------------
 // SolverImpl
 
 class SolverImpl : public ::cppu::WeakImplHelper6<
-        ::com::sun::star::ui::dialogs::XExecutableDialog,
-		lang::XServiceInfo, lang::XInitialization,
-        frame::XDispatchProvider, frame::XNotifyingDispatch,
-	    lang::XLocalizable>
+    ::com::sun::star::ui::dialogs::XExecutableDialog,
+    ::com::sun::star::lang::XServiceInfo, 
+    ::com::sun::star::lang::XInitialization,
+    ::com::sun::star::frame::XDispatchProvider,
+    ::com::sun::star::frame::XNotifyingDispatch,
+    ::com::sun::star::lang::XLocalizable >
 {
 public:
 
-    SolverImpl( Reference< uno::XComponentContext > const & );
+    SolverImpl(const Reference< ::com::sun::star::uno::XComponentContext >& xContext);
     ~SolverImpl();
 
-	//--------------------------------------------------------------------------
-	// UNO Component Interface Methods
+    //--------------------------------------------------------------------------
+    // UNO Component Interface Methods
 
     // XInitialization
     virtual void SAL_CALL initialize( const Sequence< Any >& aArgs )
-        throw ( Exception );
+        throw (::com::sun::star::uno::Exception);
 
     // XServiceInfo
     virtual rtl::OUString SAL_CALL getImplementationName()
@@ -159,10 +162,11 @@ private:
 
 	void initLocale();
 	ResMgr *m_pResMgr;
-	com::sun::star::lang::Locale m_eLocale;
-	::std::auto_ptr<SolverDialog> m_pDlg;
-	::std::auto_ptr<CalcInterface> m_pCalc;
-	::std::auto_ptr<OptionData> m_pOption;
+    com::sun::star::lang::Locale    m_eLocale;
+    ::std::auto_ptr<SolverDialog>   m_pDlg;
+    ::std::auto_ptr<CalcInterface>  m_pCalc;
+    ::std::auto_ptr<OptionData>     m_pOption;
+    ::std::auto_ptr<StringResMgr>   m_pStringResMgr;
 };
 
 

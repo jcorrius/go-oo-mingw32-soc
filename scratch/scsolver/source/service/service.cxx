@@ -32,6 +32,7 @@
 #include "lpbuilder.hxx"
 #include "xcalc.hxx"
 #include "option.hxx"
+#include "resmgr.hxx"
 #include "solvemodel.hxx"
 #include "numeric/matrix.hxx"
 
@@ -40,6 +41,8 @@
 #include "com/sun/star/frame/XDispatch.hpp"
 
 #include <memory>
+
+#include <stdio.h>
 
 #ifdef SCSOLVER_UNO_COMPONENT
 
@@ -68,8 +71,10 @@ static Reference< uno::XInterface > SAL_CALL create_SolverImpl(
 
 SolverImpl::SolverImpl( Reference< uno::XComponentContext > const & xContext ) :
 	m_pResMgr( NULL ),
-	m_pDlg( NULL ), m_pCalc( new CalcInterface( xContext ) ),
-	m_pOption( new OptionData )
+	m_pDlg( NULL ), 
+    m_pCalc(new CalcInterface(xContext)),
+	m_pOption(new OptionData),
+    m_pStringResMgr(new StringResMgr(m_pCalc.get()))
 {
 }
 
@@ -188,6 +193,8 @@ void SolverImpl::setTitle( const ::rtl::OUString& /*aTitle*/ )
 sal_Int16 SolverImpl::execute()
 		throw (::com::sun::star::uno::RuntimeException)
 {
+//  m_pStringResMgr->test();
+
 	getMainDialog()->setVisible( true );
 	return 0;
 }
@@ -248,6 +255,7 @@ rtl::OUString SolverImpl::getResStr( int resid )
 void SAL_CALL SolverImpl::setLocale( const lang::Locale& eLocale )
 	throw(::com::sun::star::uno::RuntimeException)
 {
+    fprintf(stdout, "SolverImpl::setLocale: \n");fflush(stdout);
 	m_eLocale = eLocale;
 	initLocale();
 }

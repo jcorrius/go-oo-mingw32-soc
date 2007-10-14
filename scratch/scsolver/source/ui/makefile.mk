@@ -24,6 +24,7 @@ SLOFILES =  \
 	$(SLO)$/lpbuilder.obj \
 	$(SLO)$/nlpbuilder.obj \
 	$(SLO)$/msgdlg.obj \
+	$(SLO)$/resmgr.obj \
 	$(SLO)$/solvemodel.obj \
 	$(SLO)$/unoglobal.obj \
 	$(SLO)$/unohelper.obj \
