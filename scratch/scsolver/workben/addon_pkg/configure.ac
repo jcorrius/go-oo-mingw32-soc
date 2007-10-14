@@ -27,10 +27,34 @@ AC_SUBST(SCSOLVERDIR)
 OBJDIR=./obj
 AC_SUBST(OBJDIR)
 
-OOO_INSTALL_PATH=$(echo $with_ooo | sed -e 's/^~/$(HOME)/g')
+OOO_INSTALL_PATH=$with_ooo
+AC_MSG_CHECKING([checking OO.o installation])
+if test -f "$OOO_INSTALL_PATH/program/soffice.bin"; then
+   HAVE_OOO_INSTALL=yes
+   AC_MSG_RESULT([found])
+else
+   HAVE_OOO_INSTALL=no
+   AC_MSG_RESULT([not found])
+fi
+if test "z$HAVE_OOO_INSTALL" != "zyes"; then
+   AC_MSG_ERROR(The OO.o installation is not found.)
+fi
 AC_SUBST(OOO_INSTALL_PATH)
 
-OOO_SDK_PATH=$(echo $with_ooo_sdk | sed -e 's/^~/$(HOME)/g')
+OOO_SDK_PATH=$with_ooo_sdk
+AC_LANG_CPLUSPLUS
+AC_MSG_CHECKING([checking OO.o SDK])
+if test -f "$OOO_SDK_PATH/include/cppuhelper/implementationentry.hxx"; then
+   HAVE_OOO_SDK=yes
+   AC_MSG_RESULT([found])
+else
+   HAVE_OOO_SDK=no
+   AC_MSG_RESULT([not found])
+fi
+
+if test "z$HAVE_OOO_SDK" != "zyes"; then
+   AC_MSG_ERROR(The OO.o SDK path is not correct.  Adjust the path and try again.)
+fi
 AC_SUBST(OOO_SDK_PATH)
 
 BINDIR=$OOO_SDK_PATH/linux/bin
@@ -39,7 +63,12 @@ AC_SUBST(BINDIR)
 UNO_INCLUDE=-I$OOO_SDK_PATH/include
 AC_SUBST(UNO_INCLUDE)
 
-LIBLPSOLVE_PATH=$(echo $with_lpsolve | sed -e 's/^~/$(HOME)/g')
+LIBLPSOLVE_PATH=$with_lpsolve
+AC_LANG_C
+AC_CHECK_HEADER($LIBLPSOLVE_PATH/lp_lib.h, have_lpsolve=true, have_lpsolve=false)
+if ! $have_lpsolve; then
+   AC_MSG_ERROR(lpsolve path not correct)
+fi
 AC_SUBST(LIBLPSOLVE_PATH)
 
 LIBLPSOLVE_ARCHIVE_PATH=$LIBLPSOLVE_PATH/lpsolve55/liblpsolve55.a
