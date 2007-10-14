@@ -193,7 +193,9 @@ void SolverImpl::setTitle( const ::rtl::OUString& /*aTitle*/ )
 sal_Int16 SolverImpl::execute()
 		throw (::com::sun::star::uno::RuntimeException)
 {
-//  m_pStringResMgr->test();
+#ifdef SCSOLVER_UNO_COMPONENT
+    m_pStringResMgr->loadStrings();
+#endif
 
 	getMainDialog()->setVisible( true );
 	return 0;

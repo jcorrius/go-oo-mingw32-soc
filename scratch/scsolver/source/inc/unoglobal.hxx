@@ -40,7 +40,9 @@ namespace scsolver {
 
 void printOUStr( const rtl::OUString & );
 #define ascii_i18n ascii
-rtl::OUString ascii( const sal_Char* );
+const ::rtl::OUString ascii(const sal_Char* text);
+const ::com::sun::star::uno::Any asciiAny(const sal_Char* text);
+
 void split( const rtl::OUString&, const rtl::OUString&, std::vector<rtl::OUString>& );
 
 

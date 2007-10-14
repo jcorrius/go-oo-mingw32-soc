@@ -40,7 +40,22 @@ public:
     StringResMgr(CalcInterface* pCalc);
     ~StringResMgr();
 
-    void test();
+    /** 
+     * Load locale strings from embedded translation file based on current
+     * system locale.
+     */
+    void loadStrings();
+
+    /** 
+     * Get current system locale. 
+     * 
+     * @return const::rtl::OUString current system locale, or empty string if 
+     *         it is unknown.
+     */
+    const ::rtl::OUString getSystemLocale() const;
+
+private:
+    void parseStream(const ::com::sun::star::uno::Sequence<sal_Int8>& bytes);
 
 private:
     CalcInterface* mpCalc;

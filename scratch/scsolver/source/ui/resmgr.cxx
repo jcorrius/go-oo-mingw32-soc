@@ -28,20 +28,26 @@
 #include "resmgr.hxx"
 #include "xcalc.hxx"
 #include "unoglobal.hxx"
+#include "tool/global.hxx"
 #include "solver.hxx"
 
 #include "rtl/ustrbuf.hxx"
 
+#include <com/sun/star/beans/PropertyValue.hpp>
+#include <com/sun/star/container/XNameAccess.hpp>
 #include <com/sun/star/lang/XMultiComponentFactory.hpp>
 #include <com/sun/star/deployment/PackageInformationProvider.hpp>
 #include <com/sun/star/deployment/XPackageInformationProvider.hpp>
 #include <com/sun/star/ucb/XSimpleFileAccess.hpp>
 #include <com/sun/star/io/XInputStream.hpp>
 
+#include <vector>
 #include <stdio.h>
 
 using namespace ::com::sun::star;
+using namespace ::std;
 
+using ::com::sun::star::uno::Any;
 using ::com::sun::star::uno::UNO_QUERY;
 using ::com::sun::star::uno::UNO_QUERY_THROW;
 using ::com::sun::star::uno::Reference;
@@ -65,14 +71,21 @@ StringResMgr::~StringResMgr()
 {
 }
 
-void StringResMgr::test()
+void StringResMgr::loadStrings()
 {
     Reference<XPackageInformationProvider> xPkgInfo = PackageInformationProvider::get(
         mpCalc->getComponentContext() );
 
-    OUStringBuffer aPkgRoot( xPkgInfo->getPackageLocation( ascii("org.go-oo.CalcSolver") ) );
-    aPkgRoot.appendAscii("/translation/en-US.txt");
-    OUString filePath = aPkgRoot.makeStringAndClear();
+    OUString localeName = getSystemLocale();
+    if (!localeName.getLength())
+        // falls back to en-US in case the system locale is unknown.
+        localeName = ascii("en-US");
+
+    OUStringBuffer filePathBuf( xPkgInfo->getPackageLocation(ascii("org.go-oo.CalcSolver")) );
+    filePathBuf.appendAscii("/translation/");
+    filePathBuf.append(localeName);
+    filePathBuf.appendAscii(".txt");
+    OUString filePath = filePathBuf.makeStringAndClear();
 
     Reference<lang::XMultiComponentFactory> xFactory = mpCalc->getServiceManager();
 
@@ -86,26 +99,79 @@ void StringResMgr::test()
         return;
 
     if (!xFileAccess->exists(filePath))
-    {
-        fprintf(stdout, "StringResMgr::test: file does not exist.\n");fflush(stdout);
+        // file does not exist.
         return;
-    }
-
-    sal_Int32 fileSize = xFileAccess->getSize(filePath);
-    fprintf(stdout, "StringResMgr::test: '%s' exists (%ld bytes).\n",
-            OUStringToOString(filePath, RTL_TEXTENCODING_UTF8).getStr(),
-            fileSize);fflush(stdout);
 
     Reference<XInputStream> xInStrm = xFileAccess->openFileRead(filePath);
     if (!xInStrm.is())
+        // The input stream is empty.  Bail out.
         return;
 
+    sal_Int32 fileSize = xFileAccess->getSize(filePath);
     Sequence<sal_Int8> bytes;
     xInStrm->readBytes(bytes, fileSize);
+    parseStream(bytes);
+}
 
+const OUString StringResMgr::getSystemLocale() const
+{
+    Reference<lang::XMultiComponentFactory> xFactory = mpCalc->getServiceManager();
+
+    try
+    {
+        Reference<lang::XMultiServiceFactory> xConfig(
+            xFactory->createInstanceWithContext(
+                ascii("com.sun.star.configuration.ConfigurationProvider"),
+                mpCalc->getComponentContext() ),
+            UNO_QUERY_THROW );
+    
+        beans::PropertyValue prop;
+        prop.Name = ascii("nodepath");
+        prop.Value = asciiAny("/org.openoffice.Setup/L10N");
+        Any any;
+        any <<= prop;
+        Sequence<Any> props(1);
+        props[0] = any;
+        Reference<container::XNameAccess> xNA(
+            xConfig->createInstanceWithArguments(
+                ascii("com.sun.star.configuration.ConfigurationAccess"), props),
+            UNO_QUERY_THROW );
+    
+        any = xNA->getByName(ascii("ooLocale"));
+        OUString localeName;
+        if (any >>= localeName)
+            // successfully obtained the system locale name!
+            return localeName;
+    }
+    catch (const Exception&)
+    {
+        Debug("exception caught during locale query.");
+    }
+
+    return OUString();
+}
+
+void StringResMgr::parseStream(const Sequence<sal_Int8>& bytes)
+{
+    vector<sal_Char> buf;
+    sal_Int32 fileSize = bytes.getLength();
     for (sal_Int32 i = 0; i < fileSize; ++i)
-        fprintf(stdout, "0x%.2x", bytes[i]);
-    fprintf(stdout, "\n");
+    {
+        if (bytes[i] == 0x0a)
+        {
+            if (!buf.empty())
+            {
+                const sal_Char* p = &buf[0];
+                OUString line(p, buf.size(), RTL_TEXTENCODING_UTF8);
+                buf.clear();
+                fprintf(stdout, "'%s'\n",
+                        OUStringToOString(line, RTL_TEXTENCODING_UTF8).getStr());
+            }
+        }
+        else
+            buf.push_back(bytes[i]);
+    }
+    fflush(stdout);
 }
 
 }

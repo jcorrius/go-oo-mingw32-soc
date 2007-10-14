@@ -30,6 +30,7 @@
 #include <com/sun/star/lang/XServiceInfo.hpp>
 #include <com/sun/star/table/CellAddress.hpp>
 
+using ::com::sun::star::uno::Any;
 
 namespace scsolver {
 
@@ -39,9 +40,16 @@ void printOUStr( const rtl::OUString & ou )
     std::cout << o.getStr() << std::endl;
 }
 
-rtl::OUString ascii( const sal_Char* sAscii )
+const ::rtl::OUString ascii(const sal_Char* text)
 {
-	return rtl::OUString::createFromAscii( sAscii );
+	return rtl::OUString::createFromAscii(text);
+}
+
+const Any asciiAny(const sal_Char* text)
+{
+    Any any;
+    any <<= ascii(text);
+    return any;
 }
 
 /** Splits a string into a list of string elements separated by a specified
