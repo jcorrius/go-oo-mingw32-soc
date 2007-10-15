@@ -29,6 +29,16 @@
 #define _SCSOLVER_UI_RESMGR_HXX_
 
 #include <com/sun/star/uno/XComponentContext.hpp>
+#include <com/sun/star/resource/XStringResourceManager.hpp>
+#include "rtl/ustring.hxx"
+
+#include <vector>
+
+namespace com { namespace sun { namespace star { 
+    namespace lang {
+        struct Locale;
+    }
+}}}
 
 namespace scsolver {
 
@@ -37,6 +47,12 @@ class CalcInterface;
 class StringResMgr
 {
 public:
+    struct Entry
+    {
+        ::rtl::OUString Name;
+        ::rtl::OUString Value;
+    };
+
     StringResMgr(CalcInterface* pCalc);
     ~StringResMgr();
 
@@ -55,10 +71,41 @@ public:
     const ::rtl::OUString getSystemLocale() const;
 
 private:
+    void init();
+    void loadStrings(const ::rtl::OUString& dialogName, const ::com::sun::star::lang::Locale& locale);
+    void parsePropertiesStream(const ::com::sun::star::uno::Sequence<sal_Int8>& bytes,
+                               ::std::vector<Entry>& rEntries);
     void parseStream(const ::com::sun::star::uno::Sequence<sal_Int8>& bytes);
 
 private:
+    ::com::sun::star::uno::Reference< ::com::sun::star::resource::XStringResourceManager >
+        mxStrResMgr;
     CalcInterface* mpCalc;
+    ::rtl::OUString msBaseTransDirPath;
+};
+
+// ---------------------------------------------------------------------------
+
+class PropStreamParser
+{
+public:
+
+    PropStreamParser(const ::com::sun::star::uno::Sequence<sal_Int8>& bytes);
+    ~PropStreamParser();
+
+    void parse();
+    void getEntries(::std::vector<StringResMgr::Entry>& rEntries) const;
+
+private:
+    PropStreamParser();
+
+    void advanceToLinefeed(sal_Int32& i) const;
+    void purgeBuffer(::rtl::OUString& rValue, ::std::vector<sal_Char>& rBuf) const;
+    void pushEntry(const ::rtl::OUString& name, const ::rtl::OUString& value);
+
+private:
+    const ::com::sun::star::uno::Sequence<sal_Int8>& mrBytes;
+    ::std::vector<StringResMgr::Entry> mEntries;
 };
 
 

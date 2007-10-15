@@ -35,6 +35,7 @@
 
 #include <com/sun/star/beans/PropertyValue.hpp>
 #include <com/sun/star/container/XNameAccess.hpp>
+#include <com/sun/star/lang/Locale.hpp>
 #include <com/sun/star/lang/XMultiComponentFactory.hpp>
 #include <com/sun/star/deployment/PackageInformationProvider.hpp>
 #include <com/sun/star/deployment/XPackageInformationProvider.hpp>
@@ -73,16 +74,14 @@ StringResMgr::~StringResMgr()
 
 void StringResMgr::loadStrings()
 {
-    Reference<XPackageInformationProvider> xPkgInfo = PackageInformationProvider::get(
-        mpCalc->getComponentContext() );
+    init();
 
     OUString localeName = getSystemLocale();
     if (!localeName.getLength())
         // falls back to en-US in case the system locale is unknown.
         localeName = ascii("en-US");
 
-    OUStringBuffer filePathBuf( xPkgInfo->getPackageLocation(ascii("org.go-oo.CalcSolver")) );
-    filePathBuf.appendAscii("/translation/");
+    OUStringBuffer filePathBuf(msBaseTransDirPath);
     filePathBuf.append(localeName);
     filePathBuf.appendAscii(".txt");
     OUString filePath = filePathBuf.makeStringAndClear();
@@ -111,6 +110,28 @@ void StringResMgr::loadStrings()
     Sequence<sal_Int8> bytes;
     xInStrm->readBytes(bytes, fileSize);
     parseStream(bytes);
+
+    lang::Locale en_US;
+    en_US.Language = ascii("en");
+    en_US.Country = ascii("US");
+    en_US.Variant = ascii("");
+    loadStrings(ascii("SolverDialog"), en_US);
+
+    lang::Locale ja_JP;
+    ja_JP.Language = ascii("ja");
+    ja_JP.Country = ascii("JP");
+    ja_JP.Variant = ascii("");
+    loadStrings(ascii("SolverDialog"), ja_JP);
+
+    Sequence<OUString> resids = mxStrResMgr->getResourceIDs();
+    for (sal_Int32 i = 0; i < resids.getLength(); ++i)
+    {
+        fprintf(stdout, "StringResMgr::loadStrings: id = '%s'\n",
+                OUStringToOString(resids[i], RTL_TEXTENCODING_UTF8).getStr());fflush(stdout);
+        OUString str = mxStrResMgr->resolveString(resids[i]);
+        fprintf(stdout, "StringResMgr::loadStrings: str = '%s'\n",
+                OUStringToOString(str, RTL_TEXTENCODING_UTF8).getStr());fflush(stdout);
+    }
 }
 
 const OUString StringResMgr::getSystemLocale() const
@@ -151,6 +172,127 @@ const OUString StringResMgr::getSystemLocale() const
     return OUString();
 }
 
+void StringResMgr::init()
+{
+    fprintf(stdout, "StringResMgr::init: --begins\n");fflush(stdout);
+
+    // Get the base directory path where the translation files are stored.
+
+    Reference<XPackageInformationProvider> xPkgInfo = PackageInformationProvider::get(
+        mpCalc->getComponentContext() );
+
+    OUStringBuffer filePathBuf( xPkgInfo->getPackageLocation(ascii("org.go-oo.CalcSolver")) );
+    filePathBuf.appendAscii("/translation/");
+    msBaseTransDirPath = filePathBuf.makeStringAndClear();
+
+    // Initialize the UNO string resource manager.
+
+    Reference<lang::XMultiComponentFactory> xFactory = mpCalc->getServiceManager();
+
+    mxStrResMgr.set(
+        xFactory->createInstanceWithContext( 
+            ascii("com.sun.star.resource.StringResource"),
+            mpCalc->getComponentContext() ), 
+        UNO_QUERY );
+
+    if (!mxStrResMgr.is())
+        return;
+
+#if 0    
+    lang::Locale en_US;
+    en_US.Language = ascii("en");
+    en_US.Country = ascii("US");
+    en_US.Variant = ascii("");
+    mxStrResMgr->newLocale(en_US);
+    mxStrResMgr->setDefaultLocale(en_US);
+    mxStrResMgr->setCurrentLocale(en_US, false);
+    mxStrResMgr->setString( ascii("foo"), ascii("I am foo") );
+
+    OUString foo = mxStrResMgr->resolveString( ascii("foo") );
+    fprintf(stdout, "StringResMgr::init: foo = '%s'\n",
+            OUStringToOString(foo, RTL_TEXTENCODING_UTF8).getStr());fflush(stdout);
+#endif    
+}
+
+void StringResMgr::loadStrings(const OUString& dialogName, const lang::Locale& locale)
+{
+    // Construct the file path.
+
+    OUStringBuffer buf(msBaseTransDirPath);
+    buf.append(dialogName);
+    do
+    {
+        // language
+        if (!locale.Language.getLength())
+            break;
+        buf.appendAscii("_");
+        buf.append(locale.Language);
+
+        // country
+        if (!locale.Country.getLength())
+            break;
+        buf.appendAscii("_");
+        buf.append(locale.Country);
+
+        // variant
+        if (!locale.Variant.getLength())
+            break;
+        buf.appendAscii("_");
+        buf.append(locale.Variant);
+    }
+    while (false);
+
+    buf.appendAscii(".properties");
+    OUString filePath = buf.makeStringAndClear();
+    fprintf(stdout, "StringResMgr::loadStrings: %s\n",
+            OUStringToOString(filePath, RTL_TEXTENCODING_UTF8).getStr());
+
+
+    Reference<lang::XMultiComponentFactory> xFactory = mpCalc->getServiceManager();
+
+    Reference<ucb::XSimpleFileAccess> xFileAccess(
+        xFactory->createInstanceWithContext( 
+            ascii("com.sun.star.ucb.SimpleFileAccess"),
+            mpCalc->getComponentContext() ), 
+        UNO_QUERY );
+
+    if (!xFileAccess.is())
+        return;
+
+    if (!xFileAccess->exists(filePath))
+        // file does not exist.
+        return;
+
+    Reference<XInputStream> xInStrm = xFileAccess->openFileRead(filePath);
+    if (!xInStrm.is())
+        // The input stream is empty.  Bail out.
+        return;
+
+    sal_Int32 fileSize = xFileAccess->getSize(filePath);
+    Sequence<sal_Int8> bytes;
+    xInStrm->readBytes(bytes, fileSize);
+    vector<Entry> entries;
+    parsePropertiesStream(bytes, entries);
+    mxStrResMgr->newLocale(locale);
+    vector<Entry>::const_iterator itr = entries.begin(), itrEnd = entries.end();
+    for (; itr != itrEnd; ++itr)
+    {
+        fprintf(stdout, "StringResMgr::loadStrings: '%s' = '%s'\n",
+                OUStringToOString(itr->Name, RTL_TEXTENCODING_UTF8).getStr(),
+                OUStringToOString(itr->Value, RTL_TEXTENCODING_UTF8).getStr());fflush(stdout);
+        mxStrResMgr->setString(itr->Name, itr->Value);
+    }
+}
+
+void StringResMgr::parsePropertiesStream(const Sequence<sal_Int8>& bytes, 
+                                         vector<Entry>& rEntries)
+{
+    PropStreamParser parser(bytes);
+    parser.parse();
+    parser.getEntries(rEntries);
+    
+}
+
 void StringResMgr::parseStream(const Sequence<sal_Int8>& bytes)
 {
     vector<sal_Char> buf;
@@ -172,6 +314,89 @@ void StringResMgr::parseStream(const Sequence<sal_Int8>& bytes)
             buf.push_back(bytes[i]);
     }
     fflush(stdout);
+}
+
+// ---------------------------------------------------------------------------
+
+PropStreamParser::PropStreamParser(const Sequence<sal_Int8>& bytes) :
+    mrBytes(bytes)
+{
+}
+
+PropStreamParser::~PropStreamParser()
+{
+}
+
+void PropStreamParser::parse()
+{
+    sal_Int32 size = mrBytes.getLength();
+    vector<sal_Char> buf;
+    OUString name, value;
+    buf.reserve(80);
+    bool inRHS = false;
+    for (sal_Int32 i = 0; i < size; ++i)
+    {
+        switch (mrBytes[i])
+        {
+            case 0x23: // '#'
+                advanceToLinefeed(i);
+            case 0x0a: // linefeed
+                purgeBuffer(value, buf);
+                pushEntry(name, value);
+                inRHS = false;
+            break;
+            case 0x3D: // '='
+                if (inRHS)
+                {
+                    buf.push_back(mrBytes[i]);
+                    break;
+                }
+                inRHS = true;
+                purgeBuffer(name, buf);
+            break;
+            default:
+                buf.push_back(mrBytes[i]);
+            break;
+        }
+    }
+}
+
+void PropStreamParser::getEntries(vector<StringResMgr::Entry>& rEntries) const
+{
+    vector<StringResMgr::Entry> entries(mEntries.begin(), mEntries.end());
+    rEntries.swap(entries);
+}
+
+void PropStreamParser::advanceToLinefeed(sal_Int32& i) const
+{
+    sal_Int32 size = mrBytes.getLength();
+    for (; i < size; ++i)
+        if (mrBytes[i] == 0x0a)
+            return;
+}
+
+void PropStreamParser::purgeBuffer(OUString& rValue, vector<sal_Char>& rBuf) const
+{
+    if (rBuf.empty())
+        rValue = OUString();
+    else
+    {
+        const sal_Char* p = &rBuf[0];
+        OUString _value(p, rBuf.size(), RTL_TEXTENCODING_UTF8);
+        rBuf.clear();
+        rValue = _value;
+    }
+}
+
+void PropStreamParser::pushEntry(const OUString& name, const OUString& value)
+{
+    if (!name.getLength())
+        return;
+
+    StringResMgr::Entry entry;
+    entry.Name = name.trim();
+    entry.Value = value.trim();
+    mEntries.push_back(entry);
 }
 
 }
