@@ -186,6 +186,9 @@ public static  void  main( String[] args )
             TestVBA inst = new TestVBA( xContext, xMCF, xCompLoader, outDir );
             inst.traverse( testDir );            
             System.out.println("Log dir is " + inst.getLogLocation() );
+            disposeObject( xCompLoader, "Component Loader" );
+            disposeObject( oDesktop, "Desktop" );
+            disposeObject( xMCF, "MultiComponent factory" );
         
 	}
 	catch( Exception e )
@@ -194,5 +197,26 @@ public static  void  main( String[] args )
 		System.out.println(e);
 	}	
 	System.exit(0);
+}
+
+public static void disposeObject( Object thing, String message )
+{
+        com.sun.star.lang.XComponent xComp =
+            (com.sun.star.lang.XComponent)UnoRuntime.queryInterface(
+                com.sun.star.lang.XComponent.class, thing );
+        if ( xComp != null )
+        {
+            try
+            {
+                System.out.println("disposing " + message );
+                xComp.dispose();
+                System.out.println("disposed " + message + " !!");
+            }
+            catch ( Exception e )
+            {
+                System.out.println("caught exception disposing " + message );
+                System.out.println("e.message" );
+            }
+        }
 }
 }
