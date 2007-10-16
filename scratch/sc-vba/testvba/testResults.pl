@@ -17,30 +17,30 @@ sub testLog
    my $dirtocheck = shift;
    my $filename = basename($testfile);
    $filename = "$logdir/$filename"; 
-   print "about to diff $testfile $filename\n";
+   print "processing $testfile $filename\n";
    if ( -f $filename )  {
       #print "diffing\n";
       my $tmpFile = "/tmp/gen_diff"; 
       my $status = system("diff -U 0 -p $testfile $filename |  $timestampclean > $tmpFile");
       my $info = stat($tmpFile) or die "no $tmpFile: $!";
       if ( ($status >>=8) == 0 &&  ( $info->size == 0)  ) {
-         print "diff worked size is 0\n";
+         #print "diff worked size is 0\n";
          $result = 1; 
       }
       elsif ( ($status >>=8) == 0 &&  ( $info->size > 0)  ) 
       {
-         print "diff worked size > 0\n";
+         #print "diff worked size > 0\n";
          $result = 0;
       }
       else
       {
-         print "diff failed size > 0\n";
+         #print "diff failed size > 0\n";
          $result = 0;
       }
    }
    else
    {
-      print "not file > 0\n";
+      #print "not file > 0\n";
       $result = 2;
    }
    #print "diff result = $result\n";
@@ -59,6 +59,18 @@ if ( ! ( $testlogdir = shift @ARGV ) ) {
     exit 1;
 }
 
+if ( !(-d $logdir ) ) {
+   print STDERR "No output directory $logdir, attempting to create it!\n";
+   if ( !( mkdir $logdir) ) {
+       print STDERR "failed to create output directory $logdir\n";
+       exit 1;
+   }
+}
+if ( !(-d $testlogdir ) ) {
+   print STDERR "the directory containing the logfiles to compare against \"$logdir\" does not exist\n";
+    usage();
+    exit 1;
+}
 print "logdir $logdir\n";
 print "testlogdir $testlogdir\n";
 sub filter_crud($)
