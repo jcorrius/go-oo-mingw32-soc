@@ -2,7 +2,7 @@
  *
  *  OpenOffice.org - a multi-platform office productivity suite
  *
- *  $RCSfile$
+ *  $RCSfile: vbacomment.cxx,v $
  *
  *  $Revision$
  *
@@ -170,7 +170,7 @@ ScVbaComment::Text( const uno::Any& aText, const uno::Any& aStart, const uno::An
 
 	if ( aStart.hasValue() )
 	{
-		sal_Int16 nStart;
+		sal_Int16 nStart = 0;
 		sal_Bool bOverwrite = sal_True;
 		Overwrite >>= bOverwrite;
 

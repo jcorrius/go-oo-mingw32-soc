@@ -2,7 +2,7 @@
  *
  *  OpenOffice.org - a multi-platform office productivity suite
  *
- *  $RCSfile$
+ *  $RCSfile: vbaapplication.cxx,v $
  *
  *  $Revision$
  *
@@ -325,7 +325,7 @@ void SAL_CALL
 ScVbaApplication::setStatusBar( const uno::Any& _statusbar ) throw (uno::RuntimeException)
 {
     rtl::OUString sText;
-    sal_Bool bDefault;
+    sal_Bool bDefault = sal_False;
 	uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY_THROW );
     uno::Reference< task::XStatusIndicatorSupplier > xStatusIndicatorSupplier( xModel->getCurrentController(), uno::UNO_QUERY_THROW );
     uno::Reference< task::XStatusIndicator > xStatusIndicator( xStatusIndicatorSupplier->getStatusIndicator(), uno::UNO_QUERY_THROW );
@@ -482,7 +482,7 @@ ScVbaApplication::GoTo( const uno::Any& Reference, const uno::Any& Scroll ) thro
     
     if( Scroll.hasValue() )
     {
-        sal_Bool aScroll;
+        sal_Bool aScroll = sal_False;
         if( Scroll >>= aScroll )
         {
             bScroll = aScroll;

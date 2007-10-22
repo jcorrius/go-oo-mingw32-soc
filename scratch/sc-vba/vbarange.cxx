@@ -625,7 +625,7 @@ CellValueSetter::processValue( const uno::Any& aValue, const uno::Reference< tab
 	{
 		case  uno::TypeClass_BOOLEAN:
 		{
-			sal_Bool bState;
+			sal_Bool bState = sal_False;
 			if ( aValue >>= bState 	 )
 			{
 				uno::Reference< table::XCellRange > xRange( xCell, uno::UNO_QUERY_THROW );
@@ -652,7 +652,7 @@ CellValueSetter::processValue( const uno::Any& aValue, const uno::Reference< tab
 		}
 		default:
 		{
-			double nDouble;
+			double nDouble = 0.0;
 			if ( aValue >>= nDouble )
 				xCell->setValue( nDouble );
 			else
@@ -1935,7 +1935,7 @@ ScVbaRange::Rows(const uno::Any& aIndex ) throw (uno::RuntimeException)
 	SCROW nStartRow = 0;
 	SCROW nEndRow = 0;
 
-	sal_Int32 nValue;
+	sal_Int32 nValue = 0;
 	rtl::OUString sAddress;
 
 	if ( aIndex.hasValue() )
@@ -1991,7 +1991,7 @@ ScVbaRange::Columns(const uno::Any& aIndex ) throw (uno::RuntimeException)
 	ScRange aRange = *aCellRanges.First();
 	if ( aIndex.hasValue() )
 	{
-		if( aIndex >>= nValue )
+		if ( aIndex >>= nValue )
 		{
 			aRange.aStart.SetCol( aRange.aStart.Col() + --nValue );
 			aRange.aEnd.SetCol( aRange.aStart.Col() );

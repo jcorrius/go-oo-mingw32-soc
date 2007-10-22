@@ -265,8 +265,8 @@ ScVbaFont::getBold() throw ( uno::RuntimeException )
 		if (  mpDataSet->GetItemState( ATTR_FONT_WEIGHT, TRUE, NULL) == SFX_ITEM_DONTCARE )
 			return aNULL();
 
-	double fValue = 0;
-	 mxFont->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "CharWeight" ) ) ) >>= fValue;
+	double fValue = 0.0;
+	mxFont->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "CharWeight" ) ) ) >>= fValue;
 	return uno::makeAny( fValue == awt::FontWeight::BOLD );
 }
 

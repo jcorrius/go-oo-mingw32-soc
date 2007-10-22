@@ -2,7 +2,7 @@
  *
  *  OpenOffice.org - a multi-platform office productivity suite
  *
- *  $RCSfile$
+ *  $RCSfile: vbaworksheet.cxx,v $
  *
  *  $Revision$
  *
@@ -607,10 +607,10 @@ ScVbaWorksheet::Shapes( const uno::Any& aIndex ) throw (uno::RuntimeException)
    return uno::makeAny( xVbaShapes );
 }
 
-//zhangyun showdataform
-uno::Any SAL_CALL
+void SAL_CALL
 ScVbaWorksheet::ShowDataForm( ) throw (uno::RuntimeException)
 {
+#ifdef VBA_OOBUILD_HACK 
 	uno::Reference< frame::XModel > xModel( getModel(), uno::UNO_QUERY_THROW );
 	ScTabViewShell* pTabViewShell = getBestViewShell( xModel );
 
@@ -621,10 +621,10 @@ ScVbaWorksheet::ShowDataForm( ) throw (uno::RuntimeException)
 	DBG_ASSERT(pDlg, "Dialog create fail!");//CHINA001
 
 	pDlg->Execute();
-
-	return uno::Any();
+#else
+	throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Not implemented") ), uno::Reference< uno::XInterface >() );
+#endif
 }
-//end
 
 uno::Any SAL_CALL 
 ScVbaWorksheet::Evaluate( const ::rtl::OUString& Name ) throw (uno::RuntimeException)
@@ -805,6 +805,7 @@ ScVbaWorksheet::getServiceNames()
 rtl::OUString SAL_CALL
 ScVbaWorksheet::getCodeName() throw (css::uno::RuntimeException)
 {
+#ifdef VBA_OOBUILD_HACK 
     uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( getModel(), uno::UNO_QUERY_THROW );
     SCTAB nTab = 0;
     rtl::OUString aSheetName = getName();
@@ -821,7 +822,11 @@ ScVbaWorksheet::getCodeName() throw (css::uno::RuntimeException)
 		throw uno::RuntimeException(::rtl::OUString(
                                 RTL_CONSTASCII_USTRINGPARAM( "Sheet Name does not exist. ") ),
                                 uno::Reference< XInterface >() );
+#else
+	throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Not implemented") ), uno::Reference< uno::XInterface >() );
+#endif
 }
+#ifdef VBA_OOBUILD_HACK 
 void SAL_CALL
 ScVbaWorksheet::setCodeName( const rtl::OUString& sCodeName ) throw (css::uno::RuntimeException)
 {
@@ -840,6 +845,12 @@ ScVbaWorksheet::setCodeName( const rtl::OUString& sCodeName ) throw (css::uno::R
                throw uno::RuntimeException(::rtl::OUString(
                                 RTL_CONSTASCII_USTRINGPARAM( "Sheet Name does not exist. ") ),
                                 uno::Reference< XInterface >() );
+#else
+void SAL_CALL
+ScVbaWorksheet::setCodeName( const rtl::OUString& ) throw (css::uno::RuntimeException)
+{
+	throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Not implemented") ), uno::Reference< uno::XInterface >() );
+#endif
 }
 
 sal_Int16

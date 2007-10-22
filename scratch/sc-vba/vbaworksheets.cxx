@@ -2,7 +2,7 @@
  *
  *  OpenOffice.org - a multi-platform office productivity suite
  *
- *  $RCSfile$
+ *  $RCSfile: vbaworksheets.cxx,v $
  *
  *  $Revision$
  *
@@ -323,7 +323,7 @@ ScVbaWorksheets::getVisible() throw (uno::RuntimeException)
 void SAL_CALL 
 ScVbaWorksheets::setVisible( const uno::Any& _visible ) throw (uno::RuntimeException)
 {
-	sal_Bool bState;
+	sal_Bool bState = sal_False;
 	if ( _visible >>= bState )
 	{
 		uno::Reference< container::XEnumeration > xEnum( createEnumeration(), uno::UNO_QUERY_THROW );
