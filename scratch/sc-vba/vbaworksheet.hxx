@@ -2,7 +2,7 @@
  *
  *  OpenOffice.org - a multi-platform office productivity suite
  *
- *  $RCSfile$
+ *  $RCSfile: vbaworksheet.hxx,v $
  *
  *  $Revision$
  *
@@ -123,7 +123,7 @@ public:
 	virtual css::uno::Any SAL_CALL Shapes( const css::uno::Any& aIndex ) throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setEnableCalculation( ::sal_Bool EnableCalculation ) throw ( css::script::BasicErrorException, css::uno::RuntimeException);
 	virtual ::sal_Bool SAL_CALL getEnableCalculation(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException); 
-	virtual css::uno::Any SAL_CALL ShowDataForm(  ) throw (css::uno::RuntimeException);
+	virtual void SAL_CALL ShowDataForm(  ) throw (css::uno::RuntimeException);
 	// XInvocation
 	virtual css::uno::Reference< css::beans::XIntrospectionAccess > SAL_CALL getIntrospection(  ) throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL invoke( const ::rtl::OUString& aFunctionName, const css::uno::Sequence< css::uno::Any >& aParams, css::uno::Sequence< ::sal_Int16 >& aOutParamIndex, css::uno::Sequence< css::uno::Any >& aOutParam ) throw (css::lang::IllegalArgumentException, css::script::CannotConvertException, css::reflection::InvocationTargetException, css::uno::RuntimeException);
