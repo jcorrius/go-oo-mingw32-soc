@@ -65,6 +65,7 @@
 using namespace ::com::sun::star;
 using namespace ::org::openoffice;
 
+#define POINTTO100THMILLIMETERFACTOR 35.27778
 void unoToSbxValue( SbxVariable* pVar, const uno::Any& aValue );
 
 uno::Any sbxToUnoValue( SbxVariable* pVar );
@@ -720,6 +721,31 @@ rtl::OUString VBAToRegexp(const rtl::OUString &rIn, bool bForLike )
 		sResult.append(static_cast<sal_Unicode>('$'));
 
 	return sResult.makeStringAndClear( );
+}
+
+double getPixelTo100thMillimeterConversionFactor( css::uno::Reference< css::awt::XDevice >& xDevice, sal_Bool bVertical)
+{
+	double fConvertFactor = 1.0;
+	if( bVertical )
+	{
+		fConvertFactor = xDevice->getInfo().PixelPerMeterY/100000;
+	}
+	else
+	{
+		fConvertFactor = xDevice->getInfo().PixelPerMeterX/100000;	
+	}
+	return fConvertFactor;
+}
+
+double PointsToPixels( css::uno::Reference< css::awt::XDevice >& xDevice, double fPoints, sal_Bool bVertical)
+{
+	double fConvertFactor = getPixelTo100thMillimeterConversionFactor( xDevice, bVertical );
+	return fPoints * POINTTO100THMILLIMETERFACTOR * fConvertFactor;
+}
+double PixelsToPoints( css::uno::Reference< css::awt::XDevice >& xDevice, double fPixels, sal_Bool bVertical)
+{
+	double fConvertFactor = getPixelTo100thMillimeterConversionFactor( xDevice, bVertical );
+	return (fPixels/fConvertFactor)/POINTTO100THMILLIMETERFACTOR;
 }
 
 } // openoffice

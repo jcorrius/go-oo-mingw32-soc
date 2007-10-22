@@ -39,7 +39,7 @@
 #include <com/sun/star/script/BasicErrorException.hpp>
 #include <com/sun/star/script/XTypeConverter.hpp>
 #include <com/sun/star/lang/IllegalArgumentException.hpp>
-
+#include <com/sun/star/awt/XDevice.hpp>
 #include <basic/sberrors.hxx>
 #include <cppuhelper/implbase1.hxx>
 #include <com/sun/star/frame/XModel.hpp>
@@ -88,6 +88,9 @@ namespace org
 
 		rtl::OUString getAnyAsString( const css::uno::Any& pvargItem ) throw ( css::uno::RuntimeException );
 		rtl::OUString VBAToRegexp(const rtl::OUString &rIn, bool bForLike = false); // needs to be in an uno service ( already this code is duplicated in basic )
+	double getPixelTo100thMillimeterConversionFactor( css::uno::Reference< css::awt::XDevice >& xDevice, sal_Bool bVertical);
+	double PointsToPixels( css::uno::Reference< css::awt::XDevice >& xDevice, double fPoints, sal_Bool bVertical);
+	double PixelsToPoints( css::uno::Reference< css::awt::XDevice >& xDevice, double fPoints, sal_Bool bVertical);
 
 class Millimeter
 {
