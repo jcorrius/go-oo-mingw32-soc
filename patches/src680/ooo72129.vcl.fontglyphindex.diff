@@ -1,33 +1,100 @@
---- vcl/source/glyphs/gcach_ftyp.cxx.old	2007-04-03 10:43:44.857291182 +0200
-+++ vcl/source/glyphs/gcach_ftyp.cxx	2007-04-04 10:55:25.851189855 +0200
-@@ -60,6 +60,8 @@
- #include FT_TRUETYPE_TABLES_H
- #include FT_TRUETYPE_TAGS_H
- #include FT_TRUETYPE_IDS_H
-+#include <fontconfig/fontconfig.h>
-+#include <fontconfig/fcfreetype.h>
+diff -u -r1.145 gcach_ftyp.cxx
+--- vcl/source/glyphs/gcach_ftyp.cxx	31 Jul 2007 16:09:17 -0000	1.145
++++ vcl/source/glyphs/gcach_ftyp.cxx	22 Aug 2007 10:35:26 -0000
+@@ -97,6 +97,9 @@
+     #include <io.h>
+     #define strncasecmp strnicmp
+ #endif
++#if defined(UNX) && !defined(MACOSX)
++#include <psprint/fontmanager.hxx>
++#endif
  
- #ifndef FT_RENDER_MODE_MONO  // happens in the MACOSX build
-     #define FT_RENDER_MODE_MONO ft_render_mode_mono
-@@ -1199,6 +1201,10 @@
+ #include <vcl/svapp.hxx>
+ #include <vcl/settings.hxx>
+@@ -1187,6 +1187,11 @@
              // check if symbol aliasing helps
              if( (aChar <= 0x00FF) && mpFontInfo->IsSymbolFont() )
                  nGlyphIndex = FT_Get_Char_Index( maFaceFT, aChar | 0xF000 );
-+
-+	    // Finally try the postscript name table
-+	    if (!nGlyphIndex)
-+		nGlyphIndex = FcFreeTypeCharIndex( maFaceFT, aChar );
++#if defined(UNX) && !defined(MACOSX)
++            // Finally try the postscript name table
++            if (!nGlyphIndex)
++                nGlyphIndex = psp::PrintFontManager::get().FreeTypeCharIndex( maFaceFT, aChar );
++#endif
          }
          mpFontInfo->CacheGlyphIndex( aChar, nGlyphIndex );
      }
---- vcl/util/makefile.mk.old	2007-04-03 10:43:34.917141237 +0200
-+++ vcl/util/makefile.mk	2007-04-04 10:56:10.381861590 +0200
-@@ -183,7 +183,7 @@
+--- psprint/source/fontmanager/makefile.mk	2007-10-23 15:58:05.000000000 +0200
++++ psprint/source/fontmanager/makefile.mk	2007-10-23 16:00:36.000000000 +0200
+@@ -49,6 +49,12 @@
+ CDEFS += -DENABLE_FONTCONFIG
+ .ENDIF
  
- .IF "$(USE_BUILTIN_RASTERIZER)"!=""
-     LIB1FILES +=    $(SLB)$/glyphs.lib
--    SHL1STDLIBS+=   $(FREETYPELIB)
-+    SHL1STDLIBS+=   $(FREETYPELIB) -lfontconfig
- .ENDIF # USE_BUILTIN_RASTERIZER
++.IF "$(SYSTEM_FREETYPE)" == "YES"
++CFLAGS+= $(FREETYPE_CFLAGS)
++.ELSE
++INCPRE+=$(SOLARVER)$/$(UPD)$/$(INPATH)$/inc
++.ENDIF
++
+ # --- Files --------------------------------------------------------
  
- SHL1LIBS=   $(LIB1TARGET)
+ .IF "$(GUIBASE)"=="aqua"
+--- psprint/inc/psprint/fontmanager.hxx	20 Jun 2007 10:07:18 -0000	1.33
++++ psprint/inc/psprint/fontmanager.hxx	22 Aug 2007 10:26:46 -0000
+@@ -767,6 +767,8 @@
+      */
+     bool matchFont( FastPrintFontInfo& rInfo, const com::sun::star::lang::Locale& rLocale );
+     FontConfigHints getFontConfigHints(const FastPrintFontInfo& rInfo, int nSize);
++
++    int FreeTypeCharIndex( void *pFace, sal_uInt32 aChar );
+ 
+     String Substitute(const std::vector<String> &rNames, std::vector<sal_Unicode> &rGlyphs, 
+         const ByteString &rLangAttrib, italic::type eItalic, weight::type eWeight, 
+--- psprint/source/fontmanager/fontconfig.cxx	24 Oct 2006 15:06:22 -0000	1.24
++++ psprint/source/fontmanager/fontconfig.cxx	22 Aug 2007 10:26:50 -0000
+@@ -38,6 +38,7 @@
+ 
+ #ifdef ENABLE_FONTCONFIG
+ #include <fontconfig/fontconfig.h>
++#include <fontconfig/fcfreetype.h>
+ // be compatible with fontconfig 2.2.0 release
+ #ifndef FC_WEIGHT_BOOK
+ #define FC_WEIGHT_BOOK 75
+@@ -104,6 +105,7 @@
+     FcBool			(*m_pFcConfigSubstitute)(FcConfig*,FcPattern*,FcMatchKind);
+     FcBool			(*m_pFcPatternAddInteger)(FcPattern*,const char*,int);
+     FcBool			(*m_pFcPatternAddString)(FcPattern*,const char*,const FcChar8*);
++    FT_UInt         (*m_pFcFreeTypeCharIndex)(FT_Face,FcChar32);
+ 
+     oslGenericFunction loadSymbol( const char* );
+ 
+@@ -229,6 +231,8 @@
+     { return m_pFcPatternAddBool( pPattern, pObject, nValue ); }
+     FcBool FcPatternAddCharSet(FcPattern* pPattern,const char* pObject,const FcCharSet*pCharSet)
+     { return m_pFcPatternAddCharSet(pPattern,pObject,pCharSet); }
++    FT_UInt FcFreeTypeCharIndex( FT_Face face, FcChar32 ucs4 )
++    { return m_pFcFreeTypeCharIndex ? m_pFcFreeTypeCharIndex( face, ucs4 ) : 0; }
+ };
+ 
+ oslGenericFunction FontCfgWrapper::loadSymbol( const char* pSymbol )
+@@ -252,6 +256,8 @@
+         loadSymbol( "FcPatternAddInteger" );
+     m_pFcPatternAddString = (FcBool(*)(FcPattern*,const char*,const FcChar8*))
+         loadSymbol( "FcPatternAddString" );
++    m_pFcFreeTypeCharIndex = (FT_UInt(*)(FT_Face,FcChar32))
++        loadSymbol( "FcFreeTypeCharIndex" );
+ 
+     if( ! (
+             m_pFcInit						&&
+@@ -563,6 +569,12 @@
+     FontCfgWrapper::release();
+ }
+ 
++int PrintFontManager::FreeTypeCharIndex( void *pFace, sal_uInt32 aChar )
++{
++    FontCfgWrapper& rWrapper = FontCfgWrapper::get();
++    return rWrapper.isValid() ? rWrapper.FcFreeTypeCharIndex( (FT_Face)pFace, aChar ) : 0;
++}
++
+ bool PrintFontManager::matchFont( FastPrintFontInfo& rInfo, const com::sun::star::lang::Locale& rLocale )
+ {
+ #ifdef ENABLE_FONTCONFIG
