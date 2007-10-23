@@ -9,18 +9,20 @@ chmod a+x solenv/bin/gccinstlib.pl
 while read F ; do
     D=`dirname "$F"`
     B=`basename "$F"`
-    if [ "${F%/*}" = "." ] ; then
+    if [ "${F:0:1}" = "/" ] ; then
         echo "$F" >> ".gitignore"
     else
         [ -d "$D" ] && echo "$B" >> "$D/.gitignore"
     fi
 done << EOF
-./Linux*Env.Set*
-./bootstrap
-./makefile.mk
+/applied_patches
+/Linux*Env.Set*
+/bootstrap
+/makefile.mk
 unxlng*.pro
 localize.sdf
-./solver
+/solver
+*.orig
 config_office/autom4te.cache/
 config_office/config.log
 config_office/config.parms
