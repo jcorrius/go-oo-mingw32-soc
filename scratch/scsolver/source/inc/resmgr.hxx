@@ -57,31 +57,50 @@ public:
     ~StringResMgr();
 
     /** 
+     * Get current system locale. 
+     * 
+     * @return const ::rtl::OUString current system locale, or empty string if
+     *         it is unknown.
+     */
+    const ::rtl::OUString getSystemLocaleString() const;
+
+    const ::com::sun::star::lang::Locale getSystemLocale() const;
+
+    /** 
+     * Get a localized string from a numeric resource ID.  Internally this 
+     * method maps the numeric resource ID with an associated string resource 
+     * name. 
+     * 
+     * @param resid resource ID
+     * 
+     * @return ::rtl::OUString
+     */
+    const ::rtl::OUString getLocaleStr(int resid);
+
+    const ::rtl::OUString getLocaleStr(const ::rtl::OUString& resName);
+
+private:
+    void init();
+
+    ::rtl::OUString getResNameByID(int resid);
+
+    /** 
      * Load locale strings from embedded translation file based on current
      * system locale.
      */
     void loadStrings();
 
-    /** 
-     * Get current system locale. 
-     * 
-     * @return const::rtl::OUString current system locale, or empty string if 
-     *         it is unknown.
-     */
-    const ::rtl::OUString getSystemLocale() const;
-
-private:
-    void init();
     void loadStrings(const ::rtl::OUString& dialogName, const ::com::sun::star::lang::Locale& locale);
+
     void parsePropertiesStream(const ::com::sun::star::uno::Sequence<sal_Int8>& bytes,
                                ::std::vector<Entry>& rEntries);
-    void parseStream(const ::com::sun::star::uno::Sequence<sal_Int8>& bytes);
-
 private:
     ::com::sun::star::uno::Reference< ::com::sun::star::resource::XStringResourceManager >
         mxStrResMgr;
     CalcInterface* mpCalc;
     ::rtl::OUString msBaseTransDirPath;
+    ::std::vector< ::rtl::OUString > mResNameMapper;
+    bool mbStringLoaded:1;
 };
 
 // ---------------------------------------------------------------------------

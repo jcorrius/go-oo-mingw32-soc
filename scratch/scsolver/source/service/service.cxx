@@ -193,10 +193,6 @@ void SolverImpl::setTitle( const ::rtl::OUString& /*aTitle*/ )
 sal_Int16 SolverImpl::execute()
 		throw (::com::sun::star::uno::RuntimeException)
 {
-#ifdef SCSOLVER_UNO_COMPONENT
-    m_pStringResMgr->loadStrings();
-#endif
-
 	getMainDialog()->setVisible( true );
 	return 0;
 }
@@ -244,7 +240,7 @@ ResMgr* SolverImpl::getResMgr()
 rtl::OUString SolverImpl::getResStr( int resid )
 {
 #ifdef SCSOLVER_UNO_COMPONENT
-	return getLocaleStr(resid);
+    return m_pStringResMgr->getLocaleStr(resid);
 #else
    	ResMgr *pResMgr = getResMgr();
 	if ( pResMgr )

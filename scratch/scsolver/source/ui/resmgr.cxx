@@ -30,6 +30,7 @@
 #include "unoglobal.hxx"
 #include "tool/global.hxx"
 #include "solver.hxx"
+#include "scsolver.hrc"
 
 #include "rtl/ustrbuf.hxx"
 
@@ -57,6 +58,7 @@ using ::com::sun::star::uno::XComponentContext;
 using ::com::sun::star::deployment::PackageInformationProvider;
 using ::com::sun::star::deployment::XPackageInformationProvider;
 using ::com::sun::star::io::XInputStream;
+using ::com::sun::star::resource::MissingResourceException;
 
 using ::rtl::OUString;
 using ::rtl::OUStringBuffer;
@@ -64,7 +66,8 @@ using ::rtl::OUStringBuffer;
 namespace scsolver {
 
 StringResMgr::StringResMgr(CalcInterface* pCalc) :
-    mpCalc(pCalc)
+    mpCalc(pCalc),
+    mbStringLoaded(false)
 {
 }
 
@@ -75,41 +78,6 @@ StringResMgr::~StringResMgr()
 void StringResMgr::loadStrings()
 {
     init();
-
-    OUString localeName = getSystemLocale();
-    if (!localeName.getLength())
-        // falls back to en-US in case the system locale is unknown.
-        localeName = ascii("en-US");
-
-    OUStringBuffer filePathBuf(msBaseTransDirPath);
-    filePathBuf.append(localeName);
-    filePathBuf.appendAscii(".txt");
-    OUString filePath = filePathBuf.makeStringAndClear();
-
-    Reference<lang::XMultiComponentFactory> xFactory = mpCalc->getServiceManager();
-
-    Reference<ucb::XSimpleFileAccess> xFileAccess(
-        xFactory->createInstanceWithContext( 
-            ascii("com.sun.star.ucb.SimpleFileAccess"),
-            mpCalc->getComponentContext() ), 
-        UNO_QUERY );
-
-    if (!xFileAccess.is())
-        return;
-
-    if (!xFileAccess->exists(filePath))
-        // file does not exist.
-        return;
-
-    Reference<XInputStream> xInStrm = xFileAccess->openFileRead(filePath);
-    if (!xInStrm.is())
-        // The input stream is empty.  Bail out.
-        return;
-
-    sal_Int32 fileSize = xFileAccess->getSize(filePath);
-    Sequence<sal_Int8> bytes;
-    xInStrm->readBytes(bytes, fileSize);
-    parseStream(bytes);
 
     lang::Locale en_US;
     en_US.Language = ascii("en");
@@ -132,9 +100,10 @@ void StringResMgr::loadStrings()
         fprintf(stdout, "StringResMgr::loadStrings: str = '%s'\n",
                 OUStringToOString(str, RTL_TEXTENCODING_UTF8).getStr());fflush(stdout);
     }
+    mxStrResMgr->setDefaultLocale(en_US);
 }
 
-const OUString StringResMgr::getSystemLocale() const
+const OUString StringResMgr::getSystemLocaleString() const
 {
     Reference<lang::XMultiComponentFactory> xFactory = mpCalc->getServiceManager();
 
@@ -172,10 +141,69 @@ const OUString StringResMgr::getSystemLocale() const
     return OUString();
 }
 
+const lang::Locale StringResMgr::getSystemLocale() const
+{
+    lang::Locale locale;
+
+    OUString localeStr = getSystemLocaleString();
+    sal_Int32 n = localeStr.getLength();
+    const sal_Unicode* chars = localeStr.getStr();
+    OUStringBuffer buf;
+    for (sal_Int32 i = 0; i < n; ++i)
+    {
+        if (i == 2)
+            // Ignore the 3rd character ('_').
+            continue;
+
+        const sal_Unicode c = chars[i];
+        buf.append(c);
+        if (i == 1)
+            locale.Language = buf.makeStringAndClear();
+        else if (i == 4)
+        {
+            locale.Country = buf.makeStringAndClear();
+            break;
+        }
+    }
+
+    fprintf(stdout, "StringResMgr::getSystemLocale: language = '%s'  country = '%s'\n",
+            OUStringToOString(locale.Language, RTL_TEXTENCODING_UTF8).getStr(),
+            OUStringToOString(locale.Country, RTL_TEXTENCODING_UTF8).getStr());fflush(stdout);
+
+    return locale;
+}
+
+const OUString StringResMgr::getLocaleStr(int resid)
+{
+    return getLocaleStr(getResNameByID(resid));
+}
+
+const OUString StringResMgr::getLocaleStr(const OUString& resName)
+{
+    if (!mbStringLoaded)
+    {
+        loadStrings();
+        mbStringLoaded = true;
+    }
+
+    if (!mxStrResMgr.is() || !resName.getLength())
+        return ascii("(empty)");
+
+    mxStrResMgr->setCurrentLocale(getSystemLocale(), true);
+
+    try
+    {
+        return mxStrResMgr->resolveString(resName);
+    }
+    catch (const MissingResourceException&)
+    {
+    }
+
+    return ascii("(missing)");
+}
+
 void StringResMgr::init()
 {
-    fprintf(stdout, "StringResMgr::init: --begins\n");fflush(stdout);
-
     // Get the base directory path where the translation files are stored.
 
     Reference<XPackageInformationProvider> xPkgInfo = PackageInformationProvider::get(
@@ -197,21 +225,57 @@ void StringResMgr::init()
 
     if (!mxStrResMgr.is())
         return;
+}
 
-#if 0    
-    lang::Locale en_US;
-    en_US.Language = ascii("en");
-    en_US.Country = ascii("US");
-    en_US.Variant = ascii("");
-    mxStrResMgr->newLocale(en_US);
-    mxStrResMgr->setDefaultLocale(en_US);
-    mxStrResMgr->setCurrentLocale(en_US, false);
-    mxStrResMgr->setString( ascii("foo"), ascii("I am foo") );
+OUString StringResMgr::getResNameByID(int resid)
+{
+    static const OUString resNameList[] = {
+        // SCSOLVER_STR_MAINDLG_TITLE
+        ascii("1.SolverDialog.Title"),
+        // SCSOLVER_STR_DEFINE_MODEL
+        ascii("3.SolverDialog.flModel.Label"),
+        // SCSOLVER_STR_SET_TARGET_CELL
+        ascii("5.SolverDialog.ftTargetCell.Label"),
+        // SCSOLVER_STR_GOAL
+        ascii("7.SolverDialog.ftObj.Label"),
+        // SCSOLVER_STR_MAXIMIZE
+        ascii("9.SolverDialog.rbMax.Label"),
+        // SCSOLVER_STR_MINIMIZE
+        ascii("11.SolverDialog.rbMin.Label")
+        // SCSOLVER_STR_DECISIONVAR_CELLS
+        // SCSOLVER_STR_CONSTRAINT_SEP
+        // SCSOLVER_STR_CONSTRAINTDLG_TITLE
+        // SCSOLVER_STR_CELL_REFERENCE
+        // SCSOLVER_STR_CONSTRAINT
+        // SCSOLVER_STR_BTN_OK
+        // SCSOLVER_STR_BTN_CANCEL
+        // SCSOLVER_STR_MSG_REF_CON_RANGE_MISMATCH
+        // SCSOLVER_STR_BTN_ADD
+        // SCSOLVER_STR_BTN_CHANGE
+        // SCSOLVER_STR_BTN_DELETE
+        // SCSOLVER_STR_BTN_SOLVE
+        // SCSOLVER_STR_BTN_RESET
+        // SCSOLVER_STR_BTN_OPTIONS
+        // SCSOLVER_STR_BTN_SAVE_MODEL
+        // SCSOLVER_STR_BTN_LOAD_MODEL
+        // SCSOLVER_STR_BTN_CLOSE
+        // SCSOLVER_STR_MSG_SOLUTION_NOT_FOUND
+        // SCSOLVER_STR_MSG_SOLUTION_FOUND
+        // SCSOLVER_STR_MSG_CELL_GEOMETRIES_DIFFER
+        // SCSOLVER_STR_MSG_MAX_ITERATION_REACHED
+        // SCSOLVER_STR_MSG_STD_EXCEPTION_CAUGHT
+        // SCSOLVER_STR_MSG_ITERATION_TIMED_OUT
+        // SCSOLVER_STR_MSG_GOAL_NOT_SET
+        // SCSOLVER_STR_OPTIONDLG_TITLE
+        // SCSOLVER_STR_OPTION_ASSUME_LINEAR
+        // SCSOLVER_STR_OPTION_VAR_POSITIVE
+        // SCSOLVER_STR_OPTION_VAR_INTEGER
+    };
 
-    OUString foo = mxStrResMgr->resolveString( ascii("foo") );
-    fprintf(stdout, "StringResMgr::init: foo = '%s'\n",
-            OUStringToOString(foo, RTL_TEXTENCODING_UTF8).getStr());fflush(stdout);
-#endif    
+    if (resid - SCSOLVER_RES_START >= sizeof(resNameList)/sizeof(resNameList[0]))
+        return ascii("");
+
+    return resNameList[resid - SCSOLVER_RES_START];
 }
 
 void StringResMgr::loadStrings(const OUString& dialogName, const lang::Locale& locale)
@@ -274,6 +338,7 @@ void StringResMgr::loadStrings(const OUString& dialogName, const lang::Locale& l
     vector<Entry> entries;
     parsePropertiesStream(bytes, entries);
     mxStrResMgr->newLocale(locale);
+    mxStrResMgr->setCurrentLocale(locale, false);
     vector<Entry>::const_iterator itr = entries.begin(), itrEnd = entries.end();
     for (; itr != itrEnd; ++itr)
     {
@@ -291,29 +356,6 @@ void StringResMgr::parsePropertiesStream(const Sequence<sal_Int8>& bytes,
     parser.parse();
     parser.getEntries(rEntries);
     
-}
-
-void StringResMgr::parseStream(const Sequence<sal_Int8>& bytes)
-{
-    vector<sal_Char> buf;
-    sal_Int32 fileSize = bytes.getLength();
-    for (sal_Int32 i = 0; i < fileSize; ++i)
-    {
-        if (bytes[i] == 0x0a)
-        {
-            if (!buf.empty())
-            {
-                const sal_Char* p = &buf[0];
-                OUString line(p, buf.size(), RTL_TEXTENCODING_UTF8);
-                buf.clear();
-                fprintf(stdout, "'%s'\n",
-                        OUStringToOString(line, RTL_TEXTENCODING_UTF8).getStr());
-            }
-        }
-        else
-            buf.push_back(bytes[i]);
-    }
-    fflush(stdout);
 }
 
 // ---------------------------------------------------------------------------
@@ -344,6 +386,7 @@ void PropStreamParser::parse()
                 purgeBuffer(value, buf);
                 pushEntry(name, value);
                 inRHS = false;
+                name = OUString();
             break;
             case 0x3D: // '='
                 if (inRHS)
