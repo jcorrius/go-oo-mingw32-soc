@@ -1,0 +1,281 @@
+? basic/wntmsci10.pro
+Index: basic/inc/basic/sbmeth.hxx
+===================================================================
+RCS file: /cvs/script/basic/inc/basic/sbmeth.hxx,v
+retrieving revision 1.2
+diff -u -p -r1.2 sbmeth.hxx
+--- basic/inc/basic/sbmeth.hxx	11 Apr 2007 12:52:00 -0000	1.2
++++ basic/inc/basic/sbmeth.hxx	25 Oct 2007 14:25:12 -0000
+@@ -58,7 +58,7 @@ class SbMethod : public SbxMethod
+ 	friend class SbIfaceMapperMethod;
+ 
+ 	SbMethodImpl* mpSbMethodImpl;			// Impl data
+-
++	SbxArrayRef refStatics;
+ 	SbModule* pMod;
+ 	USHORT    nDebugFlags;
+ 	USHORT	  nLine1, nLine2;
+@@ -76,6 +76,7 @@ public:
+ 	virtual SbxInfo* GetInfo();
+ 	SbxArray* GetLocals();
+ 	SbxArray* GetStatics();
++	void      ClearStatics();
+ 	SbModule* GetModule() 				 { return pMod; 	   }
+ 	UINT32	  GetId() const				 { return nStart;	   }
+ 	USHORT    GetDebugFlags()			 { return nDebugFlags; }
+diff -u -p -r1.41 sbxmod.cxx
+--- basic/source/classes/sbxmod.cxx	20 Sep 2007 15:54:35 -0000	1.41
++++ basic/source/classes/sbxmod.cxx	25 Oct 2007 14:25:25 -0000
+@@ -1969,10 +1974,17 @@ SbxArray* SbMethod::GetLocals()
+ 		return NULL;
+ }
+ 
++void SbMethod::ClearStatics()
++{
++	refStatics = NULL;
++	
++}
+ SbxArray* SbMethod::GetStatics()
+ {
+-	DBG_ERROR( "SbMethod::GetStatics() invalid, AB fragen" )
+-	return NULL;
++	
++	if ( !refStatics.Is() )
++		refStatics = new SbxArray;
++	return refStatics;
+ }
+ 
+ BOOL SbMethod::LoadData( SvStream& rStrm, USHORT nVer )
+Index: basic/source/comp/dim.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/comp/dim.cxx,v
+retrieving revision 1.28
+diff -u -p -r1.28 dim.cxx
+--- basic/source/comp/dim.cxx	30 Aug 2007 09:59:44 -0000	1.28
++++ basic/source/comp/dim.cxx	25 Oct 2007 14:25:27 -0000
+@@ -53,7 +53,7 @@ SbiSymDef* SbiParser::VarDecl( SbiDimLis
+ 	if( Peek() == LPAREN )
+ 		pDim = new SbiDimList( this );
+ 	pDef->SetType( t );
+-	if( bStatic )
++	if( !bVBASupportOn && bStatic )
+ 		pDef->SetStatic();
+ 	TypeDecl( *pDef );
+ 	if( !ppDim && pDim )
+@@ -186,7 +186,10 @@ void SbiParser::TypeDecl( SbiSymDef& rDe
+ 
+ void SbiParser::Dim()
+ {
+-	DefVar( _DIM, FALSE );
++	if ( pProc )
++		DefVar( _DIM, pProc->IsStatic() );
++	else
++		DefVar( _DIM, FALSE );
+ }
+ 
+ void SbiParser::DefVar( SbiOpcode eOp, BOOL bStatic )
+@@ -272,7 +275,7 @@ void SbiParser::DefVar( SbiOpcode eOp, B
+ 
+ 	// AB 9.7.97, #40689, Statics -> Modul-Initialisierung, in Sub ueberspringen
+ 	UINT32 nEndOfStaticLbl = 0;
+-	if( bStatic )
++	if( !bVBASupportOn && bStatic )
+ 	{
+ 		nEndOfStaticLbl = aGen.Gen( _JUMP, 0 );
+ 		aGen.Statement();	// bei static hier nachholen
+@@ -340,13 +343,11 @@ void SbiParser::DefVar( SbiOpcode eOp, B
+                                 goto global;
+ 				case SbPUBLIC:	eOp2 = bPersistantGlobal ? _PUBLIC_P : _PUBLIC;
+ 								// AB 9.7.97, #40689, kein eigener Opcode mehr
+-								/*
+-								if( bStatic )
++								if( bVBASupportOn && bStatic )
+ 								{
+ 									eOp2 = _STATIC;
+ 									break;
+ 								}
+-								*/
+ 				global:			aGen.BackChain( nGblChain );
+ 								nGblChain = 0;
+ 								bGblDefs = bNewGblDefs = TRUE;
+@@ -484,7 +485,7 @@ void SbiParser::DefVar( SbiOpcode eOp, B
+ 	}
+ 
+ 	// AB 9.7.97, #40689, Sprung ueber Statics-Deklaration abschliessen
+-	if( bStatic )
++	if( !bVBASupportOn && bStatic )
+ 	{
+ 		// globalen Chain pflegen
+ 		nGblChain = aGen.Gen( _JUMP, 0 );
+@@ -501,7 +502,10 @@ void SbiParser::DefVar( SbiOpcode eOp, B
+ 
+ void SbiParser::ReDim()
+ {
+-	DefVar( _REDIM, FALSE );
++	if ( pProc )
++		DefVar( _REDIM, pProc->IsStatic() );
++	else
++		DefVar( _REDIM, FALSE );
+ }
+ 
+ // ERASE array, ...
+@@ -1006,10 +1010,11 @@ void SbiParser::DefProc( BOOL bStatic, B
+ 		pProc->GetLocals().SetParent( &pProc->GetParams() );
+ 		pPool = &pProc->GetLocals();
+ 	}
++	else if ( bVBASupportOn )
++		pProc->SetStatic( TRUE );
+ 	else
+-	{
+ 		Error( SbERR_NOT_IMPLEMENTED ); // STATIC SUB ...
+-	}
++
+ 
+ 	pProc->Define();
+ 	OpenBlock( eExit );
+Index: basic/source/comp/sbcomp.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/comp/sbcomp.cxx,v
+retrieving revision 1.14
+diff -u -p -r1.14 sbcomp.cxx
+--- basic/source/comp/sbcomp.cxx	27 Jun 2007 14:20:58 -0000	1.14
++++ basic/source/comp/sbcomp.cxx	25 Oct 2007 14:25:30 -0000
+@@ -142,6 +142,13 @@ BOOL SbModule::Compile()
+ 	if( bRet )
+ 	{
+ 		pBasic->ClearAllModuleVars();
++		// clear all method statics
++		for( USHORT i = 0; i < pMethods->Count(); i++ )
++		{
++			SbMethod* p = PTR_CAST(SbMethod,pMethods->Get( i ) );
++			if( p )
++				p->ClearStatics();
++		}
+ 
+ 		// #i31510 Init other libs only if Basic isn't running
+ 		if( pINST == NULL )
+Index: basic/source/inc/runtime.hxx
+===================================================================
+RCS file: /cvs/script/basic/source/inc/runtime.hxx,v
+retrieving revision 1.35
+diff -u -p -r1.35 runtime.hxx
+--- basic/source/inc/runtime.hxx	30 Aug 2007 10:01:05 -0000	1.35
++++ basic/source/inc/runtime.hxx	25 Oct 2007 14:25:33 -0000
+@@ -331,6 +331,7 @@ class SbiRuntime
+ 	SbiInstance*   pInst;			// aktiver Thread
+ 	SbModule*	  pMod;				// aktuelles Modul
+ 	SbMethod* 	  pMeth;			// Methoden-Instanz
++	SbMethod* 	  pRealMeth;
+ 	SbiIoSystem*   pIosys;			// I/O-System
+ 	const SbiImage* pImg;           // Code-Image
+ 	SbxArrayRef   refExprStk;       // expression stack
+Index: basic/source/inc/symtbl.hxx
+===================================================================
+RCS file: /cvs/script/basic/source/inc/symtbl.hxx,v
+retrieving revision 1.11
+diff -u -p -r1.11 symtbl.hxx
+--- basic/source/inc/symtbl.hxx	27 Jun 2007 14:24:09 -0000	1.11
++++ basic/source/inc/symtbl.hxx	25 Oct 2007 14:25:33 -0000
+@@ -207,6 +207,7 @@ class SbiProcDef : public SbiSymDef {	//
+ 	BOOL   bCdecl  : 1;				// TRUE: CDECL angegeben
+ 	BOOL   bPublic : 1;				// TRUE: proc ist PUBLIC
+ 	BOOL   mbProcDecl : 1;			// TRUE: instanciated by SbiParser::ProcDecl
++	BOOL   bStatic : 1;				// TRUE:
+ public:
+ 	SbiProcDef( SbiParser*, const String&, BOOL bProcDecl=false );
+ 	virtual ~SbiProcDef();
+@@ -219,6 +220,8 @@ public:
+ 	String& GetAlias() 		  		{ return aAlias;   }
+ 	void SetPublic( BOOL b )		{ bPublic = b;	   }
+ 	BOOL IsPublic() const			{ return bPublic;  }
++	void SetStatic( BOOL b )		{ bStatic = b;	   }
++	BOOL IsStatic() const			{ return bStatic;  }
+ 	void SetCdecl( BOOL b = TRUE) 	{ bCdecl = b;      }
+ 	BOOL IsCdecl() const			{ return bCdecl;   }
+ 	BOOL IsUsedForProcDecl() const	{ return mbProcDecl; }
+Index: basic/source/runtime/runtime.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/runtime/runtime.cxx,v
+retrieving revision 1.36
+diff -u -p -r1.36 runtime.cxx
+--- basic/source/runtime/runtime.cxx	30 Aug 2007 10:01:29 -0000	1.36
++++ basic/source/runtime/runtime.cxx	25 Oct 2007 14:25:43 -0000
+@@ -506,7 +506,7 @@ SbxArray* SbiInstance::GetLocals( SbMeth
+ 
+ SbiRuntime::SbiRuntime( SbModule* pm, SbMethod* pe, UINT32 nStart )
+ 		 : rBasic( *(StarBASIC*)pm->pParent ), pInst( pINST ), 
+-		   pMod( pm ), pMeth( pe ), pImg( pMod->pImage ), m_nLastTime(0)
++		   pMod( pm ), pMeth( pe ), pRealMeth(0), pImg( pMod->pImage ), m_nLastTime(0)
+ {
+ 	nFlags	  = pe ? pe->GetDebugFlags() : 0;
+ 	pIosys	  = pInst->pIosys;
+@@ -542,6 +542,10 @@ SbiRuntime::SbiRuntime( SbModule* pm, Sb
+ 	pRefSaveList = NULL;
+ 	pItemStoreList = NULL;
+ 	bVBAEnabled = isVBAEnabled();
++        SbxVariable* p = pMod->Find( pMeth->GetName(), SbxCLASS_METHOD  );
++        SbMethod* pMethod= p ? PTR_CAST(SbMethod,p) : NULL;
++        if ( pMethod )
++		pRealMeth = pMethod;
+ }
+ 
+ SbiRuntime::~SbiRuntime()
+Index: basic/source/runtime/step2.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/runtime/step2.cxx,v
+retrieving revision 1.32
+diff -u -p -r1.32 step2.cxx
+--- basic/source/runtime/step2.cxx	30 Aug 2007 10:09:56 -0000	1.32
++++ basic/source/runtime/step2.cxx	25 Oct 2007 14:25:48 -0000
+@@ -156,7 +156,22 @@ SbxVariable* SbiRuntime::FindElement
+ 		}
+ 
+ 		if( bLocal )
+-			pElem = refLocals->Find( aName, SbxCLASS_DONTCARE );
++		{
++			// static look-up could be smarter, generated pcode could/should
++			// decide
++			if ( bVBAEnabled )
++			{	
++				SbxVariable* p = pMod->Find( pMeth->GetName(), SbxCLASS_METHOD  );	
++				SbMethod* pMethod= p ? PTR_CAST(SbMethod,p) : NULL;
++				if ( pMethod )
++				{
++					SbxArray* pStatics = pMethod->GetStatics();
++					pElem = pStatics->Find( aName, SbxCLASS_DONTCARE );
++				}
++			}
++			if ( !pElem )
++				pElem = refLocals->Find( aName, SbxCLASS_DONTCARE );
++		}
+ 		if( !pElem )
+ 		{
+ 			// Die RTL brauchen wir nicht mehr zu durchsuchen!
+@@ -1222,15 +1237,20 @@ void SbiRuntime::StepFIND_G( UINT32 nOp1
+ 
+ void SbiRuntime::StepSTATIC( UINT32 nOp1, UINT32 nOp2 )
+ {
+-    (void)nOp1;
+-    (void)nOp2;
+-	/* AB #40689, wird nicht mehr verwendet
+ 	String aName( pImg->GetString( nOp1 ) );
+ 	SbxDataType t = (SbxDataType) nOp2;
+-	SbxVariable* p = new SbxVariable( t );
+-	p->SetName( aName );
+-	pInst -> GetStatics()->Put( p, pInst->GetStatics()->Count() );
+-	*/
++	OSL_TRACE("pMeth is 0x%x pRealMeth is  0x%x ", pMeth, pRealMeth );
++	if ( pRealMeth )
++	{
++		SbxArray* pStatics = pRealMeth->GetStatics();
++		if( pStatics && ( pStatics->Find( aName, SbxCLASS_DONTCARE ) == NULL ) ) 
++		{
++			SbxDataType t = (SbxDataType) nOp2;
++			SbxVariable* p = new SbxVariable( t );
++			p->SetName( aName );
++			pStatics->Put( p, pStatics->Count() );
++		}
++	}
+ }
+ 
+ 
