@@ -258,8 +258,6 @@ public:
 
 namespace oo = org::openoffice;
 
-namespace oo = org::openoffice;
-
 #ifdef DEBUG
 #  define SC_VBA_FIXME(a) OSL_TRACE( a )
 #  define SC_VBA_STUB() SC_VBA_FIXME(( "%s - stubbed\n", __FUNCTION__ ))

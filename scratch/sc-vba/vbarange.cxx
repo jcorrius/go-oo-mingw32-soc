@@ -1000,34 +1000,6 @@ public:
 	
 };
 
-static table::CellRangeAddress getCellRangeAddress( const uno::Any& aParam,
-const uno::Reference< sheet::XSpreadsheet >& xDoc )
-{
-	uno::Reference< table::XCellRange > xRangeParam;
-	switch ( aParam.getValueTypeClass() )
-	{
-		case uno::TypeClass_STRING:
-		{
-			rtl::OUString rString;
-			aParam >>= rString;
-			xRangeParam = ScVbaRange::getCellRangeForName( rString, xDoc );
-			break;
-		}
-		case uno::TypeClass_INTERFACE:
-		{
-			uno::Reference< excel::XRange > xRange;
-			aParam >>= xRange;
-			if ( xRange.is() )
-				xRange->getCellRange() >>= xRangeParam;
-			break;
-		}
-		default:
-			throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Can't extact CellRangeAddress from type" ) ), uno::Reference< uno::XInterface >() );
-	}
-	uno::Reference< sheet::XCellRangeAddressable > xAddressable( xRangeParam, uno::UNO_QUERY_THROW );
-	return xAddressable->getRangeAddress();
-}
-
 bool
 getCellRangesForAddress( USHORT& rResFlags, const rtl::OUString& sAddress, ScDocShell* pDocSh, ScRangeList& rCellRanges, ScAddress::Convention& eConv )
 {
@@ -1048,15 +1020,12 @@ getCellRangesForAddress( USHORT& rResFlags, const rtl::OUString& sAddress, ScDoc
 	return false;
 } 
 
-ScVbaRange*
-getRangeForName( const uno::Reference< uno::XComponentContext >& xContext, const rtl::OUString& sName, ScDocShell* pDocSh, table::CellRangeAddress& pAddr ) throw ( uno::RuntimeException )
+bool getScRangeListForAddress( const rtl::OUString& sName, ScDocShell* pDocSh, ScRange& refRange, ScRangeList& aCellRanges, ScAddress::Convention aConv = ScAddress::CONV_XL_A1 ) throw ( uno::RuntimeException )
 {
-	ScAddress::Convention eConv = ScAddress::CONV_XL_A1; 
 	// see if there is a match with a named range
 	uno::Reference< beans::XPropertySet > xProps( pDocSh->GetModel(), uno::UNO_QUERY_THROW );
 	uno::Reference< container::XNameAccess > xNameAccess( xProps->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("NamedRanges") ) ), uno::UNO_QUERY_THROW );
 	// Strangly enough you can have Range( "namedRange1, namedRange2, etc," )	
-	ScRangeList aCellRanges;
 	// loop around each ',' seperated name
 	std::vector< rtl::OUString > vNames;
 	sal_Int32 nIndex = 0;
@@ -1073,6 +1042,8 @@ getRangeForName( const uno::Reference< uno::XComponentContext >& xContext, const
 	std::vector< rtl::OUString >::iterator it_end = vNames.end(); 
 	for ( ; it != it_end; ++it )
 	{
+		
+		ScAddress::Convention eConv = aConv; 
 		// spaces are illegal ( but the user of course can enter them )
 		rtl::OUString sAddress = (*it).trim();
 		if ( xNameAccess->hasByName( sAddress ) )
@@ -1083,11 +1054,10 @@ getRangeForName( const uno::Reference< uno::XComponentContext >& xContext, const
 			// style is may not be XL_A1
 			eConv = pDocSh->GetDocument()->GetAddressConvention();
 		}	
-		ScRange refRange;	
-		ScUnoConversion::FillScRange( refRange, pAddr );
+
 		USHORT nFlags = 0;
 		if ( !getCellRangesForAddress( nFlags, sAddress, pDocSh, aCellRanges, eConv ) )
-			throw uno::RuntimeException();
+			return false;
 	
 		bool bTabFromReferrer = !( nFlags & SCA_TAB_3D );
 
@@ -1101,7 +1071,18 @@ getRangeForName( const uno::Reference< uno::XComponentContext >& xContext, const
 			pRange->aEnd.SetTab( bTabFromReferrer ? refRange.aEnd.Tab()  : pRange->aEnd.Tab() );
 		}
 	}
+	return true;
+}
 
+
+ScVbaRange*
+getRangeForName( const uno::Reference< uno::XComponentContext >& xContext, const rtl::OUString& sName, ScDocShell* pDocSh, table::CellRangeAddress& pAddr, ScAddress::Convention eConv = ScAddress::CONV_XL_A1 ) throw ( uno::RuntimeException )
+{
+	ScRangeList aCellRanges;
+	ScRange refRange;
+	ScUnoConversion::FillScRange( refRange, pAddr );
+	if ( !getScRangeListForAddress ( sName, pDocSh, refRange, aCellRanges, eConv ) ) 
+		throw uno::RuntimeException();
 	// Single range
 	if ( aCellRanges.First() == aCellRanges.Last() )
 	{
@@ -1113,7 +1094,51 @@ getRangeForName( const uno::Reference< uno::XComponentContext >& xContext, const
  	
 	// #FIXME need proper (WorkSheet) parent
 	return new ScVbaRange( uno::Reference< vba::XHelperInterface >(), xContext, xRanges );
-	
+}
+
+css::uno::Reference< excel::XRange >
+ScVbaRange::getRangeObjectForName( const uno::Reference< uno::XComponentContext >& xContext, const rtl::OUString& sRangeName, ScDocShell* pDocSh, ScAddress::Convention eConv ) throw ( uno::RuntimeException )
+{
+	table::CellRangeAddress refAddr;
+	return getRangeForName( xContext, sRangeName, pDocSh, refAddr, eConv );
+}
+
+
+table::CellRangeAddress getCellRangeAddressForVBARange( const uno::Any& aParam, ScDocShell* pDocSh,  ScAddress::Convention aConv = ScAddress::CONV_XL_A1) throw ( uno::RuntimeException )
+{
+	uno::Reference< table::XCellRange > xRangeParam;
+	switch ( aParam.getValueTypeClass() )
+	{
+		case uno::TypeClass_STRING:
+		{
+			rtl::OUString rString;
+			aParam >>= rString;
+			ScRangeList aCellRanges;
+			ScRange refRange;
+			if ( getScRangeListForAddress ( rString, pDocSh, refRange, aCellRanges, aConv ) ) 			
+			{
+				if ( aCellRanges.First() == aCellRanges.Last() )
+				{
+					table::CellRangeAddress aRangeAddress;
+					ScUnoConversion::FillApiRange( aRangeAddress, *aCellRanges.First() );
+					return aRangeAddress;
+				}
+			}
+		}
+		case uno::TypeClass_INTERFACE:
+		{
+			uno::Reference< excel::XRange > xRange;
+			aParam >>= xRange;
+			if ( xRange.is() )
+				xRange->getCellRange() >>= xRangeParam;
+			break;
+		}
+		default:
+			throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Can't extact CellRangeAddress from type" ) ), uno::Reference< uno::XInterface >() );
+	}
+	uno::Reference< sheet::XCellRangeAddressable > xAddressable( xRangeParam, uno::UNO_QUERY_THROW );
+	return xAddressable->getRangeAddress();
+
 }
 
 uno::Reference< vba::XCollection >
@@ -1732,7 +1757,9 @@ ScVbaRange::Address(  const uno::Any& RowAbsolute, const uno::Any& ColumnAbsolut
 			dDetails = ScAddress::Details( ScAddress::CONV_XL_R1C1, 0, 0 );
 	}
 	USHORT nFlags = SCA_VALID;
-	ScDocument* pDoc =  getDocumentFromRange( mxRange );
+	ScDocShell* pDocShell =  getScDocShell();
+	ScDocument* pDoc =  pDocShell->GetDocument();
+
 	RangeHelper thisRange( mxRange );	
 	table::CellRangeAddress thisAddress = thisRange.getCellRangeAddressable()->getRangeAddress();
 	ScRange aRange( static_cast< SCCOL >( thisAddress.StartColumn ), static_cast< SCROW >( thisAddress.StartRow ), static_cast< SCTAB >( thisAddress.Sheet ), static_cast< SCCOL >( thisAddress.EndColumn ), static_cast< SCROW >( thisAddress.EndRow ), static_cast< SCTAB >( thisAddress.Sheet ) );
@@ -1766,7 +1793,7 @@ ScVbaRange::Address(  const uno::Any& RowAbsolute, const uno::Any& ColumnAbsolut
 	{
 		// #TODO should I throw an error if R1C1 is not set?
 		
-		table::CellRangeAddress refAddress = getCellRangeAddress( RelativeTo, thisRange.getSpreadSheet() );
+		table::CellRangeAddress refAddress = getCellRangeAddressForVBARange( RelativeTo, pDocShell );
 		dDetails = ScAddress::Details( ScAddress::CONV_XL_R1C1, static_cast< SCROW >( refAddress.StartRow ), static_cast< SCCOL >( refAddress.StartColumn ) );
 	}
 	aRange.Format( sRange,  nFlags, pDoc, dDetails ); 
@@ -2284,12 +2311,12 @@ ScVbaRange::Range( const uno::Any &Cell1, const uno::Any &Cell2, bool bForceUseI
 	else
 	{
 		table::CellRangeAddress  cell1, cell2;
-		cell1 = getCellRangeAddress( Cell1, thisRange.getSpreadSheet() ); 	
+		cell1 = getCellRangeAddressForVBARange( Cell1, getScDocShell() ); 	
 		// Cell1 & Cell2 defined
 		// Excel seems to combine the range as the range defined by
 		// the combination of Cell1 & Cell2
 	
-		cell2 = getCellRangeAddress( Cell2, thisRange.getSpreadSheet() ); 	
+		cell2 = getCellRangeAddressForVBARange( Cell2, getScDocShell() ); 	
 
 		resultAddress.StartColumn = ( cell1.StartColumn <  cell2.StartColumn ) ? cell1.StartColumn : cell2.StartColumn;
 		resultAddress.StartRow = ( cell1.StartRow <  cell2.StartRow ) ? cell1.StartRow : cell2.StartRow;
@@ -2664,38 +2691,26 @@ ScVbaRange::Replace( const ::rtl::OUString& What, const ::rtl::OUString& Replace
 	return sal_True; // always
 }
 
-uno::Reference< table::XCellRange > 
-ScVbaRange::getCellRangeForName(  const rtl::OUString& sRangeName, const uno::Reference< sheet::XSpreadsheet >& xDoc, ScAddress::Convention aConv )
+uno::Reference< table::XCellRange > processKey( const uno::Any& Key, uno::Reference<  uno::XComponentContext >& xContext, ScDocShell* pDocSh )
 {
-	uno::Reference< uno::XInterface > xRanges( xDoc, uno::UNO_QUERY_THROW );
-	ScCellRangeObj* pRanges = dynamic_cast< ScCellRangeObj* >( xRanges.get() );
-    ScAddress::Convention eConv = aConv;//ScAddress::CONV_XL_A1;   the default. 
-
-	ScAddress::Details dDetails( eConv, 0, 0 );
-		
-	uno::Reference< table::XCellRange > xRange;
-	if ( pRanges )
-		xRange = pRanges->getCellRangeByName( sRangeName, dDetails );
-	return xRange;	
-}
-
-uno::Reference< table::XCellRange > processKey( const uno::Any& Key, uno::Reference< table::XCellRange >& xRange )
-{
-	uno::Reference< table::XCellRange > xKey;
+	uno::Reference< excel::XRange > xKeyRange;
 	if ( Key.getValueType() == excel::XRange::static_type() )
 	{
-		uno::Reference< excel::XRange > xKeyRange( Key, uno::UNO_QUERY_THROW );
-		xKey.set( xKeyRange->getCellRange(), uno::UNO_QUERY_THROW );
+		xKeyRange.set( Key, uno::UNO_QUERY_THROW );
 	}
 	else if ( Key.getValueType() == ::getCppuType( static_cast< const rtl::OUString* >(0) )  )
 			
 	{
 		rtl::OUString sRangeName = ::comphelper::getString( Key );
-		RangeHelper dRange( xRange );
-		xKey = ScVbaRange::getCellRangeForName( sRangeName,  dRange.getSpreadSheet() );
+		table::CellRangeAddress  aRefAddr;
+		if ( !pDocSh )
+			throw uno::RuntimeException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM("Range::Sort no docshell to calculate key param")), uno::Reference< uno::XInterface >() );
+		xKeyRange = getRangeForName( xContext, sRangeName, pDocSh, aRefAddr ); 
 	}
 	else
 		throw uno::RuntimeException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM("Range::Sort illegal type value for key param")), uno::Reference< uno::XInterface >() );
+	uno::Reference< table::XCellRange > xKey;
+	xKey.set( xKeyRange->getCellRange(), uno::UNO_QUERY_THROW );
 	return xKey;
 }
 
@@ -2903,15 +2918,15 @@ ScVbaRange::Sort( const uno::Any& Key1, const uno::Any& Order1, const uno::Any& 
 	uno::Reference< table::XCellRange > xKey1;	
 	uno::Reference< table::XCellRange > xKey2;	
 	uno::Reference< table::XCellRange > xKey3;	
-
-	xKey1 = processKey( Key1, mxRange );
+	ScDocShell* pDocShell = getScDocShell();
+	xKey1 = processKey( Key1, mxContext, pDocShell );
 	if ( !xKey1.is() )
 		throw uno::RuntimeException( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM("Range::Sort needs a key1 param")), uno::Reference< uno::XInterface >() );
 
 	if ( Key2.hasValue() )
-		xKey2 = processKey( Key2, mxRange );
+		xKey2 = processKey( Key2, mxContext, pDocShell );
 	if ( Key3.hasValue() )
-		xKey3 = processKey( Key3, mxRange );
+		xKey3 = processKey( Key3, mxContext, pDocShell );
 
 	uno::Reference< util::XSortable > xSort( mxRange, uno::UNO_QUERY_THROW );
 	uno::Sequence< beans::PropertyValue > sortDescriptor = xSort->createSortDescriptor();
