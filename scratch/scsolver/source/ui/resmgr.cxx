@@ -89,14 +89,6 @@ void StringResMgr::loadStrings()
     for (; itr != itrEnd; ++itr)
         loadStrings(*itr);
 
-//  loadStrings(ascii("SolverDialog"), en_US);
-//
-//  lang::Locale ja_JP;
-//  ja_JP.Language = ascii("ja");
-//  ja_JP.Country = ascii("JP");
-//  ja_JP.Variant = ascii("");
-//  loadStrings(ascii("SolverDialog"), ja_JP);
-
 #if DEBUG_SCSOLVER_RESMGR
     Sequence<OUString> resids = mxStrResMgr->getResourceIDs();
     for (sal_Int32 i = 0; i < resids.getLength(); ++i)
