@@ -38,6 +38,9 @@ namespace com { namespace sun { namespace star {
     namespace lang {
         struct Locale;
     }
+    namespace ucb {
+        class XSimpleFileAccess;
+    }
 }}}
 
 namespace scsolver {
@@ -80,6 +83,13 @@ public:
     const ::rtl::OUString getLocaleStr(const ::rtl::OUString& resName);
 
 private:
+    struct PropertiesFile
+    {
+        ::rtl::OUString DialogName;
+        ::rtl::OUString FilePath;
+        ::com::sun::star::lang::Locale Locale;
+    };
+
     void init();
 
     ::rtl::OUString getResNameByID(int resid);
@@ -90,13 +100,21 @@ private:
      */
     void loadStrings();
 
-    void loadStrings(const ::rtl::OUString& dialogName, const ::com::sun::star::lang::Locale& locale);
+    void loadStrings(const PropertiesFile& propFile);
+
+    void getPropertiesFiles(::std::vector<PropertiesFile>& files);
 
     void parsePropertiesStream(const ::com::sun::star::uno::Sequence<sal_Int8>& bytes,
                                ::std::vector<Entry>& rEntries);
+
+    ::com::sun::star::uno::Reference< ::com::sun::star::ucb::XSimpleFileAccess >
+        getSimpleFileAccess();
+
 private:
     ::com::sun::star::uno::Reference< ::com::sun::star::resource::XStringResourceManager >
         mxStrResMgr;
+    ::com::sun::star::uno::Reference< ::com::sun::star::ucb::XSimpleFileAccess >
+        mxFileAccess;
     CalcInterface* mpCalc;
     ::rtl::OUString msBaseTransDirPath;
     ::std::vector< ::rtl::OUString > mResNameMapper;
@@ -112,6 +130,15 @@ public:
     PropStreamParser(const ::com::sun::star::uno::Sequence<sal_Int8>& bytes);
     ~PropStreamParser();
 
+    /** 
+     * Parse a string line like this:
+     * 
+     * 23.DialogName.WidgetName.Label=This is text label
+     * 
+     * The first numerical segment must be ignored.  A comment begins with a
+     * '#' and all characters after it will be ignored until it reaches the
+     * linefeed.
+     */
     void parse();
     void getEntries(::std::vector<StringResMgr::Entry>& rEntries) const;
 

@@ -46,6 +46,8 @@
 #include <vector>
 #include <stdio.h>
 
+#define DEBUG_SCSOLVER_RESMGR 1
+
 using namespace ::com::sun::star;
 using namespace ::std;
 
@@ -59,6 +61,7 @@ using ::com::sun::star::deployment::PackageInformationProvider;
 using ::com::sun::star::deployment::XPackageInformationProvider;
 using ::com::sun::star::io::XInputStream;
 using ::com::sun::star::resource::MissingResourceException;
+using ::com::sun::star::ucb::XSimpleFileAccess;
 
 using ::rtl::OUString;
 using ::rtl::OUStringBuffer;
@@ -79,18 +82,22 @@ void StringResMgr::loadStrings()
 {
     init();
 
-    lang::Locale en_US;
-    en_US.Language = ascii("en");
-    en_US.Country = ascii("US");
-    en_US.Variant = ascii("");
-    loadStrings(ascii("SolverDialog"), en_US);
+    // Get all text files with names formatted this way (<dialog name>_<locale>.properties).
+    vector<PropertiesFile> files;
+    getPropertiesFiles(files);
+    vector<PropertiesFile>::const_iterator itr = files.begin(), itrEnd = files.end();
+    for (; itr != itrEnd; ++itr)
+        loadStrings(*itr);
 
-    lang::Locale ja_JP;
-    ja_JP.Language = ascii("ja");
-    ja_JP.Country = ascii("JP");
-    ja_JP.Variant = ascii("");
-    loadStrings(ascii("SolverDialog"), ja_JP);
+//  loadStrings(ascii("SolverDialog"), en_US);
+//
+//  lang::Locale ja_JP;
+//  ja_JP.Language = ascii("ja");
+//  ja_JP.Country = ascii("JP");
+//  ja_JP.Variant = ascii("");
+//  loadStrings(ascii("SolverDialog"), ja_JP);
 
+#if DEBUG_SCSOLVER_RESMGR
     Sequence<OUString> resids = mxStrResMgr->getResourceIDs();
     for (sal_Int32 i = 0; i < resids.getLength(); ++i)
     {
@@ -100,13 +107,18 @@ void StringResMgr::loadStrings()
         fprintf(stdout, "StringResMgr::loadStrings: str = '%s'\n",
                 OUStringToOString(str, RTL_TEXTENCODING_UTF8).getStr());fflush(stdout);
     }
+#endif    
+    lang::Locale en_US;
+    en_US.Language = ascii("en");
+    en_US.Country = ascii("US");
+    en_US.Variant = ascii("");
     mxStrResMgr->setDefaultLocale(en_US);
 }
 
 const OUString StringResMgr::getSystemLocaleString() const
 {
     Reference<lang::XMultiComponentFactory> xFactory = mpCalc->getServiceManager();
-
+    
     try
     {
         Reference<lang::XMultiServiceFactory> xConfig(
@@ -166,9 +178,11 @@ const lang::Locale StringResMgr::getSystemLocale() const
         }
     }
 
+#if DEBUG_SCSOLVER_RESMGR    
     fprintf(stdout, "StringResMgr::getSystemLocale: language = '%s'  country = '%s'\n",
             OUStringToOString(locale.Language, RTL_TEXTENCODING_UTF8).getStr(),
             OUStringToOString(locale.Country, RTL_TEXTENCODING_UTF8).getStr());fflush(stdout);
+#endif    
 
     return locale;
 }
@@ -220,7 +234,7 @@ void StringResMgr::init()
     mxStrResMgr.set(
         xFactory->createInstanceWithContext( 
             ascii("com.sun.star.resource.StringResource"),
-            mpCalc->getComponentContext() ), 
+            mpCalc->getComponentContext() ),
         UNO_QUERY );
 
     if (!mxStrResMgr.is())
@@ -231,45 +245,73 @@ OUString StringResMgr::getResNameByID(int resid)
 {
     static const OUString resNameList[] = {
         // SCSOLVER_STR_MAINDLG_TITLE
-        ascii("1.SolverDialog.Title"),
+        ascii("SolverDialog.Title"),
         // SCSOLVER_STR_DEFINE_MODEL
-        ascii("3.SolverDialog.flModel.Label"),
+        ascii("SolverDialog.flModel.Label"),
         // SCSOLVER_STR_SET_TARGET_CELL
-        ascii("5.SolverDialog.ftTargetCell.Label"),
+        ascii("SolverDialog.ftTargetCell.Label"),
         // SCSOLVER_STR_GOAL
-        ascii("7.SolverDialog.ftObj.Label"),
+        ascii("SolverDialog.ftObj.Label"),
         // SCSOLVER_STR_MAXIMIZE
-        ascii("9.SolverDialog.rbMax.Label"),
+        ascii("SolverDialog.rbMax.Label"),
         // SCSOLVER_STR_MINIMIZE
-        ascii("11.SolverDialog.rbMin.Label")
+        ascii("SolverDialog.rbMin.Label"),
         // SCSOLVER_STR_DECISIONVAR_CELLS
+        ascii("SolverDialog.ftDecVars.Label"),
         // SCSOLVER_STR_CONSTRAINT_SEP
+        ascii("SolverDialog.flConstraints.Label"),
         // SCSOLVER_STR_CONSTRAINTDLG_TITLE
+        ascii("ConstEditDialog.Title"),
         // SCSOLVER_STR_CELL_REFERENCE
+        ascii("ConstEditDialog.ftLeft.Label"),
         // SCSOLVER_STR_CONSTRAINT
+        ascii("ConstEditDialog.ftRight.Label"),
         // SCSOLVER_STR_BTN_OK
+        ascii("Common.OK.Label"),
         // SCSOLVER_STR_BTN_CANCEL
+        ascii("Common.Cancel.Label"),
         // SCSOLVER_STR_MSG_REF_CON_RANGE_MISMATCH
+        ascii("Common.ConstRangeMismatch.Label"),
         // SCSOLVER_STR_BTN_ADD
+        ascii("SolverDialog.btnConstAdd.Label"),
         // SCSOLVER_STR_BTN_CHANGE
+        ascii("SolverDialog.btnConstChange.Label"),
         // SCSOLVER_STR_BTN_DELETE
+        ascii("SolverDialog.btnConstDelete.Label"),
         // SCSOLVER_STR_BTN_SOLVE
+        ascii("SolverDialog.btnSolve.Label"),
         // SCSOLVER_STR_BTN_RESET
+        ascii("SolverDialog.btnReset.Label"),
         // SCSOLVER_STR_BTN_OPTIONS
+        ascii("SolverDialog.btnOptions.Label"),
         // SCSOLVER_STR_BTN_SAVE_MODEL
+        ascii("SolverDialog.btnSave.Label"),
         // SCSOLVER_STR_BTN_LOAD_MODEL
+        ascii("SolverDialog.btnLoad.Label"),
         // SCSOLVER_STR_BTN_CLOSE
+        ascii("SolverDialog.btnClose.Label"),
         // SCSOLVER_STR_MSG_SOLUTION_NOT_FOUND
+        ascii("Common.SolutionNotFound.Label"),
         // SCSOLVER_STR_MSG_SOLUTION_FOUND
+        ascii("Common.SolutionFound.Label"),
         // SCSOLVER_STR_MSG_CELL_GEOMETRIES_DIFFER
+        ascii("Common.CellGeometriesDiffer.Label"),
         // SCSOLVER_STR_MSG_MAX_ITERATION_REACHED
+        ascii("Common.MaxIterationReached.Label"),
         // SCSOLVER_STR_MSG_STD_EXCEPTION_CAUGHT
+        ascii("Common.StdException.Label"),
         // SCSOLVER_STR_MSG_ITERATION_TIMED_OUT
+        ascii("Common.IterationTimedOut.Label"),
         // SCSOLVER_STR_MSG_GOAL_NOT_SET
+        ascii("Common.GoalNotSet.Label"),
         // SCSOLVER_STR_OPTIONDLG_TITLE
+        ascii("OptionDialog.Title"),
         // SCSOLVER_STR_OPTION_ASSUME_LINEAR
+        ascii("OptionDialog.cbLinear.Label"),
         // SCSOLVER_STR_OPTION_VAR_POSITIVE
+        ascii("OptionDialog.cbPositiveValue.Label"),
         // SCSOLVER_STR_OPTION_VAR_INTEGER
+        ascii("OptionDialog.cbIntegerValue.Label")
     };
 
     if (resid - SCSOLVER_RES_START >= sizeof(resNameList)/sizeof(resNameList[0]))
@@ -278,74 +320,116 @@ OUString StringResMgr::getResNameByID(int resid)
     return resNameList[resid - SCSOLVER_RES_START];
 }
 
-void StringResMgr::loadStrings(const OUString& dialogName, const lang::Locale& locale)
+void StringResMgr::loadStrings(const PropertiesFile& propFile)
 {
+    fprintf(stdout, "StringResMgr::loadStrings: dialog = '%s'  locale = (%s, %s, %s)\n",
+            OUStringToOString(propFile.DialogName, RTL_TEXTENCODING_UTF8).getStr(),
+            OUStringToOString(propFile.Locale.Language, RTL_TEXTENCODING_UTF8).getStr(),
+            OUStringToOString(propFile.Locale.Country, RTL_TEXTENCODING_UTF8).getStr(),
+            OUStringToOString(propFile.Locale.Variant, RTL_TEXTENCODING_UTF8).getStr());fflush(stdout);
+
     // Construct the file path.
 
-    OUStringBuffer buf(msBaseTransDirPath);
-    buf.append(dialogName);
-    do
-    {
-        // language
-        if (!locale.Language.getLength())
-            break;
-        buf.appendAscii("_");
-        buf.append(locale.Language);
-
-        // country
-        if (!locale.Country.getLength())
-            break;
-        buf.appendAscii("_");
-        buf.append(locale.Country);
-
-        // variant
-        if (!locale.Variant.getLength())
-            break;
-        buf.appendAscii("_");
-        buf.append(locale.Variant);
-    }
-    while (false);
-
-    buf.appendAscii(".properties");
-    OUString filePath = buf.makeStringAndClear();
-    fprintf(stdout, "StringResMgr::loadStrings: %s\n",
-            OUStringToOString(filePath, RTL_TEXTENCODING_UTF8).getStr());
-
-
-    Reference<lang::XMultiComponentFactory> xFactory = mpCalc->getServiceManager();
-
-    Reference<ucb::XSimpleFileAccess> xFileAccess(
-        xFactory->createInstanceWithContext( 
-            ascii("com.sun.star.ucb.SimpleFileAccess"),
-            mpCalc->getComponentContext() ), 
-        UNO_QUERY );
+    Reference<ucb::XSimpleFileAccess> xFileAccess = getSimpleFileAccess();
 
     if (!xFileAccess.is())
         return;
 
-    if (!xFileAccess->exists(filePath))
+    if (!xFileAccess->exists(propFile.FilePath))
         // file does not exist.
         return;
 
-    Reference<XInputStream> xInStrm = xFileAccess->openFileRead(filePath);
+    Reference<XInputStream> xInStrm = xFileAccess->openFileRead(propFile.FilePath);
     if (!xInStrm.is())
         // The input stream is empty.  Bail out.
         return;
 
-    sal_Int32 fileSize = xFileAccess->getSize(filePath);
+    sal_Int32 fileSize = xFileAccess->getSize(propFile.FilePath);
     Sequence<sal_Int8> bytes;
     xInStrm->readBytes(bytes, fileSize);
     vector<Entry> entries;
     parsePropertiesStream(bytes, entries);
-    mxStrResMgr->newLocale(locale);
-    mxStrResMgr->setCurrentLocale(locale, false);
+    try
+    {
+        mxStrResMgr->newLocale(propFile.Locale);
+    }
+    catch(const container::ElementExistException&)
+    {
+    }
+    mxStrResMgr->setCurrentLocale(propFile.Locale, false);
     vector<Entry>::const_iterator itr = entries.begin(), itrEnd = entries.end();
+#if DEBUG_SCSOLVER_RESMGR    
     for (; itr != itrEnd; ++itr)
     {
         fprintf(stdout, "StringResMgr::loadStrings: '%s' = '%s'\n",
                 OUStringToOString(itr->Name, RTL_TEXTENCODING_UTF8).getStr(),
                 OUStringToOString(itr->Value, RTL_TEXTENCODING_UTF8).getStr());fflush(stdout);
         mxStrResMgr->setString(itr->Name, itr->Value);
+    }
+#endif    
+}
+
+void StringResMgr::getPropertiesFiles(vector<PropertiesFile>& files)
+{
+    Reference<XSimpleFileAccess> xFileAccess = getSimpleFileAccess();
+    Sequence<OUString> allfiles = xFileAccess->getFolderContents(msBaseTransDirPath, false);
+    sal_Int32 fileCount = allfiles.getLength();
+    if (!fileCount)
+        return;
+
+    files.clear();
+    files.reserve(fileCount);
+    sal_Int32 beginPos = msBaseTransDirPath.getLength();
+    for (sal_Int32 i = 0; i < fileCount; ++i)
+    {
+        const sal_Unicode* chars = allfiles[i].getStr();
+        sal_Int32 strSize = allfiles[i].getLength();
+        const sal_Unicode uscore = sal_Unicode('_');
+        const sal_Unicode dot    = sal_Unicode('.');
+        OUStringBuffer buf;
+        bool inRHS = false;
+        vector<OUString> names;
+        for (sal_Int32 j = beginPos; j < strSize; ++j)
+        {
+            const sal_Unicode c = chars[j];
+            if (c == uscore && !inRHS)
+            {
+                if (buf.getLength())
+                    names.push_back(buf.makeStringAndClear());
+            }
+            else if (c == dot)
+            {
+                if (buf.getLength())
+                    names.push_back(buf.makeStringAndClear());
+                    
+                inRHS = true;
+            }
+            else
+                buf.append(c);
+        }
+
+        if (!inRHS || !buf.getLength() || names.empty())
+            continue;
+
+        OUString ext = buf.makeStringAndClear();
+        if (!ext.equalsAscii("properties"))
+            continue;
+
+        PropertiesFile propFile;
+        propFile.FilePath = allfiles[i];
+        vector<OUString>::const_iterator itr = names.begin(), itrEnd = names.end();
+        for (; itr != itrEnd; ++itr)
+        {
+            if (!propFile.DialogName.getLength())
+                propFile.DialogName = *itr;
+            else if (!propFile.Locale.Language.getLength())
+                propFile.Locale.Language = *itr;
+            else if (!propFile.Locale.Country.getLength())
+                propFile.Locale.Country = *itr;
+            else if (!propFile.Locale.Variant.getLength())
+                propFile.Locale.Variant = *itr;
+        }
+        files.push_back(propFile);
     }
 }
 
@@ -356,6 +440,21 @@ void StringResMgr::parsePropertiesStream(const Sequence<sal_Int8>& bytes,
     parser.parse();
     parser.getEntries(rEntries);
     
+}
+
+Reference<ucb::XSimpleFileAccess> StringResMgr::getSimpleFileAccess()
+{
+    if (!mxFileAccess.is())
+    {
+        Reference<lang::XMultiComponentFactory> xFactory = mpCalc->getServiceManager();
+        mxFileAccess.set( 
+            xFactory->createInstanceWithContext(
+                ascii("com.sun.star.ucb.SimpleFileAccess"),
+                mpCalc->getComponentContext() ), 
+            UNO_QUERY );
+    }
+
+    return mxFileAccess;
 }
 
 // ---------------------------------------------------------------------------
@@ -376,29 +475,52 @@ void PropStreamParser::parse()
     OUString name, value;
     buf.reserve(80);
     bool inRHS = false;
+    bool inNumericID = true;
     for (sal_Int32 i = 0; i < size; ++i)
     {
         switch (mrBytes[i])
         {
-            case 0x23: // '#'
+            case '#':
                 advanceToLinefeed(i);
-            case 0x0a: // linefeed
+            case 0x0A: // linefeed
                 purgeBuffer(value, buf);
                 pushEntry(name, value);
                 inRHS = false;
+                inNumericID = true;
                 name = OUString();
             break;
-            case 0x3D: // '='
+            case '=':
                 if (inRHS)
-                {
                     buf.push_back(mrBytes[i]);
-                    break;
+                else
+                {
+                    inRHS = true;
+                    purgeBuffer(name, buf);
                 }
-                inRHS = true;
-                purgeBuffer(name, buf);
+            break;
+            case '.':
+                if (inNumericID)
+                    // First dot is encountered.
+                    inNumericID = false;
+                else
+                    buf.push_back(mrBytes[i]);
+            break;
+            case '0':
+            case '1':
+            case '2':
+            case '3':
+            case '4':
+            case '5':
+            case '6':
+            case '7':
+            case '8':
+            case '9':
+                if (!inNumericID)
+                    buf.push_back(mrBytes[i]);
             break;
             default:
                 buf.push_back(mrBytes[i]);
+                inNumericID = false;
             break;
         }
     }
