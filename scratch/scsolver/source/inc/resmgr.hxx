@@ -85,7 +85,6 @@ public:
 private:
     struct PropertiesFile
     {
-        ::rtl::OUString DialogName;
         ::rtl::OUString FilePath;
         ::com::sun::star::lang::Locale Locale;
     };

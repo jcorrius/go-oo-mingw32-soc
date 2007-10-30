@@ -44,16 +44,6 @@
 
 #include <stdio.h>
 
-#ifdef SCSOLVER_UNO_COMPONENT
-
-#include "res/resource.hxx"
-
-class ResMgr
-{
-};
-
-#endif
-
 using namespace std;
 using ::rtl::OUString;
 
@@ -70,7 +60,9 @@ static Reference< uno::XInterface > SAL_CALL create_SolverImpl(
 
 
 SolverImpl::SolverImpl( Reference< uno::XComponentContext > const & xContext ) :
-	m_pResMgr( NULL ),
+#ifndef SCSOLVER_UNO_COMPONENT
+    m_pResMgr( NULL ),
+#endif    
 	m_pDlg( NULL ), 
     m_pCalc(new CalcInterface(xContext)),
 	m_pOption(new OptionData),
@@ -80,7 +72,9 @@ SolverImpl::SolverImpl( Reference< uno::XComponentContext > const & xContext ) :
 
 SolverImpl::~SolverImpl()
 {
-	delete m_pResMgr;
+#ifndef SCSOLVER_UNO_COMPONENT	
+    delete m_pResMgr;
+#endif    
 }
 
 //--------------------------------------------------------------------------
@@ -230,12 +224,14 @@ void SolverImpl::initLocale()
 #endif
 }
 
+#ifndef SCSOLVER_UNO_COMPONENT
 ResMgr* SolverImpl::getResMgr()
 {
-	if( !m_pResMgr )
-		initLocale();
-	return m_pResMgr;
+    if ( !m_pResMgr )
+        initLocale();
+    return m_pResMgr;
 }
+#endif
 
 rtl::OUString SolverImpl::getResStr( int resid )
 {
@@ -253,7 +249,6 @@ rtl::OUString SolverImpl::getResStr( int resid )
 void SAL_CALL SolverImpl::setLocale( const lang::Locale& eLocale )
 	throw(::com::sun::star::uno::RuntimeException)
 {
-    fprintf(stdout, "SolverImpl::setLocale: \n");fflush(stdout);
 	m_eLocale = eLocale;
 	initLocale();
 }

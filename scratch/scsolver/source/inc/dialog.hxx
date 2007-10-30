@@ -179,8 +179,6 @@ public:
 
 	void updateWidgets();
 
-	ResMgr& GetResMgr();
-
 protected:
 	
 	virtual void registerListeners();

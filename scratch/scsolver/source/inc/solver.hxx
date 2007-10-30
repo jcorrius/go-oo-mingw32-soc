@@ -154,14 +154,17 @@ public:
 	SolverDialog* getMainDialog();
 
 	sal_Bool solveModel();
-
-	ResMgr* getResMgr();
-	rtl::OUString getResStr( int resid );
+    rtl::OUString getResStr( int resid );
 
 private:
 
-	void initLocale();
-	ResMgr *m_pResMgr;
+#ifndef SCSOLVER_UNO_COMPONENT
+    ResMgr* getResMgr();
+    ResMgr *m_pResMgr;
+#endif
+
+    void initLocale();
+
     com::sun::star::lang::Locale    m_eLocale;
     ::std::auto_ptr<SolverDialog>   m_pDlg;
     ::std::auto_ptr<CalcInterface>  m_pCalc;

@@ -21,11 +21,38 @@ AC_ARG_WITH(lpsolve,
 			  Example:  --with-lpsolve=./lpsolve],
 ,)
 
+AC_ARG_WITH(platform,
+[
+  --with-platform         specify the platform to build the package on.
+  			  select from (Linux_x86, ...)
+
+                       	  Example: --with-platform=Linux_x86],
+,)
+
 SCSOLVERDIR=../..
 AC_SUBST(SCSOLVERDIR)
 
 OBJDIR=./obj
 AC_SUBST(OBJDIR)
+
+PLATFORM=$with_platform
+AC_MSG_CHECKING([checking platform])
+if test "z$PLATFORM" == "zLinux_x86"; then
+   AC_MSG_RESULT([Linux_x86])
+   HAVE_PLATFORM=yes
+elif test "z$PLATFORM" == "z"; then
+   AC_MSG_RESULT([not specified (defaults to 'Linux_x86')])
+   PLATFORM=Linux_x86
+   HAVE_PLATFORM=yes
+else
+   AC_MSG_RESULT([unknown platform])
+   HAVE_PLATFORM=no
+fi
+
+if test "z$HAVE_PLATFORM" != "zyes"; then
+   AC_MSG_ERROR(platform not found.)
+fi
+AC_SUBST(PLATFORM)
 
 OOO_INSTALL_PATH=$with_ooo
 AC_MSG_CHECKING([checking OO.o installation])

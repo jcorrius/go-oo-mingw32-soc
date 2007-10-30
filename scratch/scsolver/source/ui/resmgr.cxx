@@ -46,7 +46,7 @@
 #include <vector>
 #include <stdio.h>
 
-#define DEBUG_SCSOLVER_RESMGR 1
+#define DEBUG_SCSOLVER_RESMGR 0
 
 using namespace ::com::sun::star;
 using namespace ::std;
@@ -85,6 +85,7 @@ void StringResMgr::loadStrings()
     // Get all text files with names formatted this way (<dialog name>_<locale>.properties).
     vector<PropertiesFile> files;
     getPropertiesFiles(files);
+
     vector<PropertiesFile>::const_iterator itr = files.begin(), itrEnd = files.end();
     for (; itr != itrEnd; ++itr)
         loadStrings(*itr);
@@ -314,14 +315,6 @@ OUString StringResMgr::getResNameByID(int resid)
 
 void StringResMgr::loadStrings(const PropertiesFile& propFile)
 {
-    fprintf(stdout, "StringResMgr::loadStrings: dialog = '%s'  locale = (%s, %s, %s)\n",
-            OUStringToOString(propFile.DialogName, RTL_TEXTENCODING_UTF8).getStr(),
-            OUStringToOString(propFile.Locale.Language, RTL_TEXTENCODING_UTF8).getStr(),
-            OUStringToOString(propFile.Locale.Country, RTL_TEXTENCODING_UTF8).getStr(),
-            OUStringToOString(propFile.Locale.Variant, RTL_TEXTENCODING_UTF8).getStr());fflush(stdout);
-
-    // Construct the file path.
-
     Reference<ucb::XSimpleFileAccess> xFileAccess = getSimpleFileAccess();
 
     if (!xFileAccess.is())
@@ -350,78 +343,123 @@ void StringResMgr::loadStrings(const PropertiesFile& propFile)
     }
     mxStrResMgr->setCurrentLocale(propFile.Locale, false);
     vector<Entry>::const_iterator itr = entries.begin(), itrEnd = entries.end();
-#if DEBUG_SCSOLVER_RESMGR    
     for (; itr != itrEnd; ++itr)
     {
+#if DEBUG_SCSOLVER_RESMGR        
         fprintf(stdout, "StringResMgr::loadStrings: '%s' = '%s'\n",
                 OUStringToOString(itr->Name, RTL_TEXTENCODING_UTF8).getStr(),
                 OUStringToOString(itr->Value, RTL_TEXTENCODING_UTF8).getStr());fflush(stdout);
+#endif        
         mxStrResMgr->setString(itr->Name, itr->Value);
     }
-#endif    
 }
 
 void StringResMgr::getPropertiesFiles(vector<PropertiesFile>& files)
 {
     Reference<XSimpleFileAccess> xFileAccess = getSimpleFileAccess();
-    Sequence<OUString> allfiles = xFileAccess->getFolderContents(msBaseTransDirPath, false);
-    sal_Int32 fileCount = allfiles.getLength();
-    if (!fileCount)
+    if (!xFileAccess.is())
         return;
 
+    Sequence<OUString> alldirs = xFileAccess->getFolderContents(msBaseTransDirPath, true);
+    sal_Int32 dirCount = alldirs.getLength();
+    if (!dirCount)
+        return;
+
+    const sal_Int32 beginPos = msBaseTransDirPath.getLength();
+
+    const sal_Unicode dash   = sal_Unicode('-');
+    const sal_Unicode a = sal_Unicode('a');
+    const sal_Unicode z = sal_Unicode('z');
+    const sal_Unicode A = sal_Unicode('A');
+    const sal_Unicode Z = sal_Unicode('Z');
+
+    const OUString ext = ascii(".properties");
+
     files.clear();
-    files.reserve(fileCount);
-    sal_Int32 beginPos = msBaseTransDirPath.getLength();
-    for (sal_Int32 i = 0; i < fileCount; ++i)
+    for (sal_Int32 i = 0; i < dirCount; ++i)
     {
-        const sal_Unicode* chars = allfiles[i].getStr();
-        sal_Int32 strSize = allfiles[i].getLength();
-        const sal_Unicode uscore = sal_Unicode('_');
-        const sal_Unicode dot    = sal_Unicode('.');
+        if (!xFileAccess->isFolder(alldirs[i]))
+            continue;
+
+        // Parse the directory name to make sure it's a valid locale name.
+
+        const sal_Unicode* chars = alldirs[i].getStr();
+        sal_Int32 strSize = alldirs[i].getLength();
         OUStringBuffer buf;
-        bool inRHS = false;
         vector<OUString> names;
+        lang::Locale locale;
+        bool validName = true;
         for (sal_Int32 j = beginPos; j < strSize; ++j)
         {
             const sal_Unicode c = chars[j];
-            if (c == uscore && !inRHS)
+            if (c == dash)
             {
-                if (buf.getLength())
-                    names.push_back(buf.makeStringAndClear());
+                if (!buf.getLength())
+                {
+                    validName = false;
+                    break;
+                }
+
+                if (!locale.Language.getLength())
+                    locale.Language = buf.makeStringAndClear();
+                else if (!locale.Country.getLength())
+                    locale.Country = buf.makeStringAndClear();
+                else if (!locale.Variant.getLength())
+                    locale.Variant = buf.makeStringAndClear();
+                else
+                {
+                    validName = false;
+                    break;
+                }
             }
-            else if (c == dot)
+            else if ( !((a <= c && c <= z) || (A <= c && c <= Z)) )
             {
-                if (buf.getLength())
-                    names.push_back(buf.makeStringAndClear());
-                    
-                inRHS = true;
+                // only alphabets are allowed.
+                validName = false;
+                break;
             }
             else
                 buf.append(c);
         }
 
-        if (!inRHS || !buf.getLength() || names.empty())
-            continue;
-
-        OUString ext = buf.makeStringAndClear();
-        if (!ext.equalsAscii("properties"))
-            continue;
-
-        PropertiesFile propFile;
-        propFile.FilePath = allfiles[i];
-        vector<OUString>::const_iterator itr = names.begin(), itrEnd = names.end();
-        for (; itr != itrEnd; ++itr)
+        if (buf.getLength())
         {
-            if (!propFile.DialogName.getLength())
-                propFile.DialogName = *itr;
-            else if (!propFile.Locale.Language.getLength())
-                propFile.Locale.Language = *itr;
-            else if (!propFile.Locale.Country.getLength())
-                propFile.Locale.Country = *itr;
-            else if (!propFile.Locale.Variant.getLength())
-                propFile.Locale.Variant = *itr;
+            if (!locale.Language.getLength())
+                locale.Language = buf.makeStringAndClear();
+            else if (!locale.Country.getLength())
+                locale.Country = buf.makeStringAndClear();
+            else if (!locale.Variant.getLength())
+                locale.Variant = buf.makeStringAndClear();
+            else
+                validName = false;
         }
-        files.push_back(propFile);
+
+        if (!validName)
+            continue;
+
+#if DEBUG_SCSOLVER_RESMGR        
+        fprintf(stdout, "StringResMgr::getPropertiesFiles: locale '%s' '%s' '%s'\n",
+                OUStringToOString(locale.Language, RTL_TEXTENCODING_UTF8).getStr(),
+                OUStringToOString(locale.Country, RTL_TEXTENCODING_UTF8).getStr(),
+                OUStringToOString(locale.Variant, RTL_TEXTENCODING_UTF8).getStr());
+        fflush(stdout);
+#endif        
+
+        // Pick up all *.properties files.
+        Sequence<OUString> allfiles = xFileAccess->getFolderContents(alldirs[i], false);
+        sal_Int32 fileCount = allfiles.getLength();
+        for (sal_Int32 j = 0; j < fileCount; ++j)
+        {
+            sal_Int32 extPos = allfiles[j].indexOf(ext);
+            if (extPos < 0 || extPos != allfiles[j].getLength() - ext.getLength())
+                // the desired extension not found.  skip it.
+                continue;
+
+            PropertiesFile file;
+            file.FilePath = allfiles[j];
+            file.Locale = locale;
+            files.push_back(file);
+        }
     }
 }
 
