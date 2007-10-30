@@ -219,6 +219,22 @@ dispatchRequests (uno::Reference< frame::XModel>& xModel,rtl::OUString & aUrl)
 }
 
 
+void dispatchExecute(css::uno::Reference< css::frame::XModel>& xModel, USHORT nSlot, SfxCallMode nCall)
+{
+	ScTabViewShell* pViewShell = getBestViewShell( xModel );
+	SfxViewFrame* pViewFrame = NULL;
+	if ( pViewShell )
+		pViewFrame = pViewShell->GetViewFrame();
+	if ( pViewFrame )
+	{
+		SfxDispatcher* pDispatcher = pViewFrame->GetDispatcher();
+		if( pDispatcher )
+		{
+			pDispatcher->Execute( nSlot , nCall );
+		}
+	}	
+}
+		
 void
 implnPaste()
 {
@@ -533,6 +549,11 @@ void PrintOutHelper( const uno::Any& From, const uno::Any& To, const uno::Any& C
 	// 4 There is a pop up to do with transparent objects in the print source
 	//   should be able to disable that via configuration for the duration
 	//   of this method
+}
+
+ void PrintPreviewHelper( const css::uno::Any& EnableChanges, css::uno::Reference< css::frame::XModel >& xModel )
+{
+	dispatchExecute( xModel, SID_VIEWSHELL1 );
 }
 
 rtl::OUString getAnyAsString( const uno::Any& pvargItem ) throw ( uno::RuntimeException )

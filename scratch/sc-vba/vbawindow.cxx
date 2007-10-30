@@ -42,6 +42,7 @@
 #include <com/sun/star/view/DocumentZoomType.hpp>
 #include <com/sun/star/table/CellRangeAddress.hpp>
 #include <org/openoffice/excel/XlWindowState.hpp>
+#include <org/openoffice/excel/XlWindowView.hpp>
 #include <org/openoffice/excel/Constants.hpp>
 
 #include <docsh.hxx>
@@ -445,8 +446,8 @@ ScVbaWindow::Close( const uno::Any& SaveChanges, const uno::Any& FileName, const
 	workbook.Close(SaveChanges, FileName, RouteWorkBook );
 }
 
-uno::Reference< excel::XPane > 
-ScVbaWindow::ActivePane() 
+uno::Reference< excel::XPane > SAL_CALL
+ScVbaWindow::ActivePane() throw (script::BasicErrorException, uno::RuntimeException) 
 { 
 	return new ScVbaPane( mxContext, m_xViewPane ); 
 }
@@ -738,6 +739,72 @@ ScVbaWindow::setZoom( const uno::Any& _zoom ) throw (uno::RuntimeException)
 		xProps->setPropertyValue( sZoomType, uno::makeAny( nZoomType ));
 		xProps->setPropertyValue( sZoomValue, uno::makeAny( nZoomValue ));
 	}			
+}
+
+uno::Reference< excel::XWorksheet > SAL_CALL 
+ScVbaWindow::ActiveSheet(  ) throw (script::BasicErrorException, uno::RuntimeException)
+{
+	ScVbaWorkbook workbook( uno::Reference< vba::XHelperInterface >( ScVbaGlobals::getGlobalsImpl( mxContext )->getApplication(), uno::UNO_QUERY_THROW ), mxContext, m_xModel );
+
+	workbook.getActiveSheet();
+}
+
+uno::Any SAL_CALL
+ScVbaWindow::getView() throw (uno::RuntimeException)
+{
+	// not supported now	
+	sal_Int32 nWindowView = excel::XlWindowView::xlNormalView;	
+	return uno::makeAny( nWindowView );	
+}
+
+void SAL_CALL
+ScVbaWindow::setView( const uno::Any& _view) throw (uno::RuntimeException)
+{
+	sal_Int32 nWindowView = excel::XlWindowView::xlNormalView;
+	_view >>= nWindowView;
+	USHORT nSlot = FID_NORMALVIEWMODE;
+	switch ( nWindowView )
+	{
+		case excel::XlWindowView::xlNormalView:
+			nSlot = FID_NORMALVIEWMODE;
+			break;
+		case excel::XlWindowView::xlPageBreakPreview:
+			nSlot = FID_PAGEBREAKMODE;
+			break;
+		default:
+			DebugHelper::exception(SbERR_BAD_PARAMETER, rtl::OUString() );
+	}
+	dispatchExecute( m_xModel, nSlot );
+}
+
+sal_Int32 SAL_CALL 
+ScVbaWindow::PointsToScreenPixelsX(sal_Int32 _points) throw (css::script::BasicErrorException, css::uno::RuntimeException)
+{
+	sal_Int32 nHundredthsofOneMillimeters = Millimeter::getInHundredthsOfOneMillimeter( _points );
+	double fConvertFactor = (m_xDevice->getInfo().PixelPerMeterX/100000);
+	return static_cast<sal_Int32>(fConvertFactor * nHundredthsofOneMillimeters );
+}
+
+sal_Int32 SAL_CALL 
+ScVbaWindow::PointsToScreenPixelsY(sal_Int32 _points) throw (css::script::BasicErrorException, css::uno::RuntimeException)
+{
+	sal_Int32 nHundredthsofOneMillimeters = Millimeter::getInHundredthsOfOneMillimeter( _points );
+	double fConvertFactor = (m_xDevice->getInfo().PixelPerMeterY/100000);
+	return static_cast<sal_Int32>(fConvertFactor * nHundredthsofOneMillimeters );
+}
+
+void SAL_CALL 
+ScVbaWindow::PrintOut( const css::uno::Any& From, const css::uno::Any&To, const css::uno::Any& Copies, const css::uno::Any& Preview, const css::uno::Any& ActivePrinter, const css::uno::Any& PrintToFile, const css::uno::Any& Collate, const css::uno::Any& PrToFileName ) throw (css::script::BasicErrorException, css::uno::RuntimeException)
+{
+	// need test, print current active sheet	
+	PrintOutHelper( From, To, Copies, Preview, ActivePrinter, PrintToFile, Collate, PrToFileName, m_xModel, sal_True );
+}
+
+void SAL_CALL 
+ScVbaWindow::PrintPreview( const css::uno::Any& EnableChanges ) throw (css::script::BasicErrorException, css::uno::RuntimeException)
+{
+	// need test, print preview current active sheet	
+	PrintPreviewHelper( EnableChanges, m_xModel );	
 }
 
 rtl::OUString& 
