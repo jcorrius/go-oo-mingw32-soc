@@ -60,11 +60,8 @@ if ( ! ( $testlogdir = shift @ARGV ) ) {
 }
 
 if ( !(-d $logdir ) ) {
-   print STDERR "No output directory $logdir, attempting to create it!\n";
-   if ( !( mkdir $logdir) ) {
-       print STDERR "failed to create output directory $logdir\n";
-       exit 1;
-   }
+   print STDERR "No output directory $logdir exists, please create it!!!!\n";
+   exit 1;
 }
 if ( !(-d $testlogdir ) ) {
    print STDERR "the directory containing the logfiles to compare against \"$logdir\" does not exist\n";
