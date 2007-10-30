@@ -1,0 +1,258 @@
+diff -rup svtools/source/filter.vcl/wmf-orig/enhwmf.cxx svtools/source/filter.vcl/wmf/enhwmf.cxx
+--- svtools/source/filter.vcl/wmf-orig/enhwmf.cxx	2007-08-03 10:55:01.000000000 +0200
++++ svtools/source/filter.vcl/wmf/enhwmf.cxx	2007-10-30 16:37:13.000000000 +0100
+@@ -168,6 +168,8 @@
+ #define EMR_SETLINKEDUFIS              119
+ #define EMR_SETTEXTJUSTIFICATION       120
+ 
++#define EMFP_DEBUG(x)
++//#define EMFP_DEBUG(x) x
+ 
+ //-----------------------------------------------------------------------------------
+ 
+@@ -239,6 +241,110 @@ static sal_Bool ImplReadRegion( PolyPoly
+     return bOk;
+ }
+ 
++EMFP_DEBUG(void dumpWords( SvStream& s, int i )
++{
++    sal_uInt32 pos = s.Tell();
++    INT16 data;
++    for( ; i > 0; i -- ) {
++        s >> data;
++        EMFP_DEBUG(printf ("\t\t\tdata: %04hx\n", data));
++    }
++    s.Seek (pos);
++});
++
++void EnhWMFReader::ReadEMFPlusComment(sal_uInt32 length, sal_Bool& bHaveDC)
++{
++    if (!bEMFPlus) {
++        pOut->PassEMFPlusHeaderInfo();
++
++        // debug code - write the stream to debug file /tmp/emf-stream.emf
++        EMFP_DEBUG(int pos = pWMF->Tell();
++        pWMF->Seek(0);
++        SvFileStream file( UniString::CreateFromAscii( "/tmp/emf-stream.emf" ), STREAM_WRITE | STREAM_TRUNC );
++
++        *pWMF >> file;
++        file.Flush();
++        file.Close();
++
++        pWMF->Seek( pos );)
++    }
++    bEMFPlus = true;
++
++    void *buffer = malloc( length );
++
++    int count = 0, next, pos = pWMF->Tell();
++    pOut->PassEMFPlus( buffer, pWMF->Read( buffer, length ) );
++    pWMF->Seek( pos );
++
++    bHaveDC = false;
++
++    length -= 4;
++
++    while (length > 0) {
++        UINT16 type, flags;
++        UINT32 size, dataSize;
++        sal_uInt32 next;
++
++        *pWMF >> type >> flags >> size >> dataSize;
++
++        EMFP_DEBUG(printf ("\t\tEMF+ record type: %d\n", type));
++
++        // GetDC
++        if( type == 16388 ) {
++            bHaveDC = true;
++            EMFP_DEBUG(printf ("\t\tEMF+ lock DC (device context)\n", type));
++        }
++
++        next = pWMF->Tell() + ( size - 12 );
++
++        length -= size;
++
++        pWMF->Seek( next );
++    }
++
++    free( buffer );
++}
++
++void EnhWMFReader::ReadGDIComment()
++{
++    sal_uInt32 type;
++
++    *pWMF >> type;
++
++    switch( type ) {
++    case 2: {
++        sal_Int32 x, y, r, b;
++
++        EMFP_DEBUG(printf ("\t\tBEGINGROUP\n"));
++
++        *pWMF >> x >> y >> r >> b;
++        EMFP_DEBUG(printf ("\t\tbounding rectangle: %d,%d x %d,%d\n", x, y, r, b));
++
++        sal_uInt32 l;
++
++        *pWMF >> l;
++        EMFP_DEBUG(printf ("\t\tdescription length: %d\n", l));
++
++        break;
++    }
++    case 3: {
++        sal_uInt32 x, y, w, h;
++
++        EMFP_DEBUG(printf ("\t\tENDGROUP\n"));
++        break;
++    }
++    case 0x40000004: {
++        sal_uInt32 x, y, w, h;
++
++        EMFP_DEBUG(printf ("\t\tMULTIFORMATS\n"));
++        break;
++    }
++    default:
++        EMFP_DEBUG(printf ("\t\tunknown GDIComment\n"));
++        EMFP_DEBUG(dumpWords (*pWMF, 16));
++    }
++}
++
+ BOOL EnhWMFReader::ReadEnhWMF()
+ {
+ 	sal_uInt32  nStretchBltMode = 0;
+@@ -249,6 +355,14 @@ BOOL EnhWMFReader::ReadEnhWMF()
+ 	sal_Int16   nX16, nY16;
+ 
+ 	sal_Bool	bFlag, bStatus = ReadHeader();
++    sal_Bool    bHaveDC = false;
++
++#ifdef UNX
++    static sal_Bool bEnableEMFPlus = ( getenv( "EMF_PLUS_DISABLE" ) == NULL );
++#else
++    // TODO: make it possible to disable emf+ on windows
++    static sal_Bool bEnableEMFPlus = sal_True;
++#endif
+ 
+ 	while( bStatus && nRecordCount-- )
+ 	{
+@@ -273,6 +387,33 @@ BOOL EnhWMFReader::ReadEnhWMF()
+ 
+ 		bFlag = sal_False;
+ 
++        EMFP_DEBUG(printf ("0x%04x-0x%04x record type: %d size: %d\n", nNextPos - nRecSize, nNextPos, nRecType, nRecSize));
++
++        if( bEnableEMFPlus && nRecType == EMR_GDICOMMENT ) {
++            sal_uInt32 length;
++
++            *pWMF >> length;
++
++            EMFP_DEBUG(printf ("\tGDI comment\n\t\tlength: %d\n", length));
++
++            if( length >= 4 ) {
++                UINT32 id;
++
++                *pWMF >> id;
++
++                EMFP_DEBUG(printf ("\t\tbegin %c%c%c%c id: 0x%x\n", (char)(id & 0xff), (char)((id & 0xff00) >> 8), (char)((id & 0xff0000) >> 16), (char)((id & 0xff000000) >> 24), id));
++
++                // EMF+ comment (fixme: BE?)
++                if( id == 0x2B464D45 && nRecSize >= 12 )
++                    ReadEMFPlusComment( length, bHaveDC );
++                // GDIC comment, doesn't do anything useful yet => enabled only for debug
++                else if( id == 0x43494447 && nRecSize >= 12 )
++                    EMFP_DEBUG(ReadGDIComment());
++                else
++                    EMFP_DEBUG(printf ("\t\tunknown id: 0x%x\n", id));
++            }
++        } else if( !bEMFPlus || bHaveDC || nRecType == EMR_EOF )
++
+ 		switch( nRecType )
+ 		{
+ 			case EMR_POLYBEZIERTO :
+diff -rup svtools/source/filter.vcl/wmf-orig/winmtf.cxx svtools/source/filter.vcl/wmf/winmtf.cxx
+--- svtools/source/filter.vcl/wmf-orig/winmtf.cxx	2007-08-03 10:55:01.000000000 +0200
++++ svtools/source/filter.vcl/wmf/winmtf.cxx	2007-10-30 13:46:54.000000000 +0100
+@@ -49,6 +49,9 @@
+ 
+ // ------------------------------------------------------------------------
+ 
++#define EMFP_DEBUG(x)
++//#define EMFP_DEBUG(x) x
++
+ #define WIN_MTF_MAX_POLYPOLYCOUNT	16
+ 
+ void WinMtfClipPath::ImpUpdateType()
+@@ -2234,3 +2237,36 @@ void WinMtfOutput::Pop()
+ 	}
+ }
+ 
++void WinMtfOutput::PassEMFPlusHeaderInfo()
++{
++    EMFP_DEBUG(printf ("\t\t\tadd EMF_PLUS header info\n"));
++
++    SvMemoryStream mem;
++    sal_Int32 nLeft, nRight, nTop, nBottom;
++
++    nLeft = mrclFrame.Left();
++	nTop = mrclFrame.Top();
++	nRight = mrclFrame.Right();
++	nBottom = mrclFrame.Bottom();
++
++    // emf header info
++    mem << nLeft << nTop << nRight << nBottom;
++    mem << mnPixX << mnPixY << mnMillX << mnMillY;
++
++    float one, zero;
++
++    one = 1;
++    zero = 0;
++
++    // add transformation matrix to be used in vcl's metaact.cxx for
++    // rotate and scale operations
++    mem << one << zero << zero << one << zero << zero;
++
++    mpGDIMetaFile->AddAction( new MetaCommentAction( "EMF_PLUS_HEADER_INFO", 0, (const BYTE*) mem.GetData(), mem.GetSize() ) );
++}
++
++void WinMtfOutput::PassEMFPlus( void* pBuffer, UINT32 nLength )
++{
++    EMFP_DEBUG(printf ("\t\t\tadd EMF_PLUS comment length %d\n", nLength));
++    mpGDIMetaFile->AddAction( new MetaCommentAction( "EMF_PLUS", 0, static_cast<const BYTE*>(pBuffer), nLength ) );
++}
+diff -rup svtools/source/filter.vcl/wmf-orig/winmtf.hxx svtools/source/filter.vcl/wmf/winmtf.hxx
+--- svtools/source/filter.vcl/wmf-orig/winmtf.hxx	2007-08-03 10:55:01.000000000 +0200
++++ svtools/source/filter.vcl/wmf/winmtf.hxx	2007-10-30 16:34:44.000000000 +0100
+@@ -713,6 +713,9 @@ class WinMtfOutput
+ 		void				SetClipPath( const PolyPolygon& rPolyPoly, sal_Int32 nClippingMode, sal_Bool bIsMapped );
+ 		void				UpdateClipRegion();
+ 
++        void                PassEMFPlus( void* pBuffer, UINT32 nLength );
++        void                PassEMFPlusHeaderInfo();
++
+ 							WinMtfOutput( GDIMetaFile& rGDIMetaFile );
+ 		virtual				~WinMtfOutput();
+ };
+@@ -751,6 +754,8 @@ class EnhWMFReader : public WinMtf
+ {
+ 	sal_Bool		bRecordPath;
+ 	sal_Int32		nRecordCount;
++    BOOL            bEMFPlus;
++
+ 
+ 	BOOL			ReadHeader();
+ 	Rectangle		ReadRectangle( INT32, INT32, INT32, INT32 );			// Liesst und konvertiert ein Rechteck
+@@ -758,10 +763,12 @@ class EnhWMFReader : public WinMtf
+ 
+ public:
+ 					EnhWMFReader( SvStream& rStreamWMF, GDIMetaFile& rGDIMetaFile, FilterConfigItem* pConfigItem = NULL )
+-									: WinMtf( new WinMtfOutput( rGDIMetaFile ), rStreamWMF, pConfigItem ), bRecordPath( sal_False ) {};
++									: WinMtf( new WinMtfOutput( rGDIMetaFile ), rStreamWMF, pConfigItem ), bRecordPath( sal_False ), bEMFPlus (FALSE) {};
+ 					~EnhWMFReader();
+ 
+ 	BOOL			ReadEnhWMF();
++    void            ReadEMFPlusComment(sal_uInt32 length, sal_Bool& bHaveDC);
++    void            ReadGDIComment();
+ };
+ 
+ //============================ WMFReader ==================================
