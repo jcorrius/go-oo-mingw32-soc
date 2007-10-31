@@ -29,6 +29,16 @@ AC_ARG_WITH(platform,
                        	  Example: --with-platform=Linux_x86],
 ,)
 
+# Mandatory system library requirements first.
+
+AC_LANG_SAVE
+AC_LANG_CPLUSPLUS
+AC_CHECK_HEADER(boost/shared_ptr.hpp, [],
+   [AC_MSG_ERROR(boost/shared_ptr.hpp not found. install boost)], [])
+AC_CHECK_HEADER(boost/numeric/ublas/matrix.hpp, [],
+   [AC_MSG_ERROR(boost/numeric/ublas/matrix.hpp not found. install boost)], [])
+AC_LANG_RESTORE
+
 SCSOLVERDIR=../..
 AC_SUBST(SCSOLVERDIR)
 
@@ -106,6 +116,7 @@ AC_SUBST(GEN_UNOHEADERS_TARGET)
 
 RUNTIME_LIB_PATH=$OOO_INSTALL_PATH/program
 AC_SUBST(RUNTIME_LIB_PATH)
+
 
 AC_OUTPUT(Makefile)
 
