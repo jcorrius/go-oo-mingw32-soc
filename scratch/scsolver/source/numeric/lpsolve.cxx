@@ -156,7 +156,11 @@ void LpSolveImpl::solve()
 
 	write_LP(lp, stdout);
 
-	set_verbose(lp, IMPORTANT);
+#if SCSOLVER_DEBUG	
+    set_verbose(lp, IMPORTANT);
+#else
+    set_verbose(lp, NEUTRAL);
+#endif    
 
 	if ( ::solve(lp) == OPTIMAL )
 	{

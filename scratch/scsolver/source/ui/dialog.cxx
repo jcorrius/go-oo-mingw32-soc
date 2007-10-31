@@ -717,7 +717,9 @@ void SolverDialog::setConstraint(
 	aConstItem.Equal = eEq;
 	m_aConstraint.push_back( aConstItem );
 	
-	output();
+#if SCSOLVER_DEBUG	
+    output();
+#endif    
 	setConstraintImpl( sLeft, sRight, eEq, false );
 }
 
@@ -744,7 +746,9 @@ void SolverDialog::editConstraint( const sal_uInt32 nId,
 		++pos; ++nCurId;
 	}
 	
-	output();
+#if SCSOLVER_DEBUG	
+    output();
+#endif    
 	setConstraintImpl( sLeft, sRight, eEqVal, true, nId );
 }
 
@@ -765,7 +769,9 @@ void SolverDialog::removeConstraint( const sal_uInt32 nIdx )
 		++pos; ++nCurId;
 	}
 
-	output();
+#if SCSOLVER_DEBUG	
+    output();
+#endif    
 	
 	removeConstraintsFromListBox( nIdx, 1 );
 }

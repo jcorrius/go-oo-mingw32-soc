@@ -256,8 +256,8 @@ public:
 		aModel.setVarPositive( pOption->getVarPositive() );
 		aModel.setVarInteger( pOption->getVarInteger() );
 
-#ifdef SCSOLVER_DEBUG
-		aModel.print(); // prints model to stdout
+#if SCSOLVER_DEBUG
+        aModel.print(); // prints model to stdout
 #endif
 		aModel.setPrecision( 2 );
 		auto_ptr<lp::BaseAlgorithm> algorithm = getLpAlgorithm();

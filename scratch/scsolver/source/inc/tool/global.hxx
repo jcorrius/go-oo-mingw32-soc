@@ -32,7 +32,7 @@
 #include <iterator>
 #include <iostream>
 
-#define SCSOLVER_DEBUG 1
+#define SCSOLVER_DEBUG 0
 
 #if defined(SCSOLVER_UNO_COMPONENT) || defined(SCSOLVER_UNITTEST)
 

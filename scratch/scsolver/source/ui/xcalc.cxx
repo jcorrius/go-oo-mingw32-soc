@@ -263,7 +263,7 @@ table::CellRangeAddress CalcInterface::getCellRangeAddress(
 	
 	Reference< sheet::XCellRangeAddressable > xCRA( xCR2, UNO_QUERY );
 	aCRAddr = xCRA->getRangeAddress();
-#ifdef DEBUG
+#if SCSOLVER_DEBUG
 	sal_Int16 nSheetId = aCRAddr.Sheet;
 	sal_Int32 nSCol = aCRAddr.StartColumn;
 	sal_Int32 nSRow = aCRAddr.StartRow;
