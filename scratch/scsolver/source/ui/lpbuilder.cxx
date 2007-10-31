@@ -28,6 +28,7 @@
 
 #include "lpbuilder.hxx"
 #include "tool/global.hxx"
+#include "unoglobal.hxx"
 #include "type.hxx"
 #include "numeric/type.hxx"
 #include "numeric/lpmodel.hxx"
@@ -365,8 +366,15 @@ void LpModelBuilderImpl::setConstraintCoefficient(
 	sal_uInt32 nRowId = getConstraintId( aConstAddr );
 	
 // 	cout << "(" << nRowId << ", " << nColId << ") = " << fCoef << "  RHS = " << fRHS << endl;
-	m_mxConstraint( nRowId, nColId ) = fCoef;
-	m_mxRHS( nRowId, 0 ) = fRHS;
+    try
+    {
+        m_mxConstraint( nRowId, nColId ) = fCoef;
+        m_mxRHS( nRowId, 0 ) = fRHS;
+    }
+    catch (const numeric::BadIndex& )
+    {
+        throw RuntimeError(ascii("Error assigning value to a matrix"));
+    }
 }
 
 /** Returns a value of Equality enum by constraint ID.  A constraint ID 

@@ -447,14 +447,14 @@ void inverse( const bnu::matrix<double>& mxA, bnu::matrix<double>& mxInv )
 //---------------------------------------------------------------------------
 
 Matrix::Matrix() : 
-    m_bResizable(false)
+    m_bResizable(true)
 {
     bnu::matrix<double> m( 0, 0 );
     m_aArray = m;
 }
 
 Matrix::Matrix(size_t row, size_t col, bool identity_matrix) :
-    m_bResizable(false)
+    m_bResizable(true)
 {   
     bnu::matrix<double> m(row, col);
     for ( unsigned int i = 0; i < m.size1(); ++i )

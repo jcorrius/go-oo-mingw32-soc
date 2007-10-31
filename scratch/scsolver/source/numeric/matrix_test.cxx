@@ -69,6 +69,7 @@ void basicIO()
     mx.print();
 
     // Bad index
+    mx.setResizable(false);
     try
     {
         printf("Bad index: (-1, 0) = 999\n");
@@ -102,6 +103,7 @@ void basicIO()
         printf("BadIndex exception caught on querying a value.\n");
     }
     mx.print();
+    mx.setResizable(true);
 
     printf("3 x 3 identity matrix\n");
     Matrix mxi(3, 3, true);
@@ -112,4 +114,5 @@ int main()
 {
     printf("unit test: Matrix\n");
     basicIO();
+    printf("Unit test passed!\n");
 }
