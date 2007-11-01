@@ -1,0 +1,1994 @@
+diff --git a/automation/source/testtool/tcommuni.cxx b/automation/source/testtool/tcommuni.cxx
+index a93f2d9..463f81f 100644
+--- automation/source/testtool/tcommuni.cxx
++++ automation/source/testtool/tcommuni.cxx
+@@ -49,9 +49,6 @@
+ #ifndef _DEBUG_HXX //autogen
+ #include <tools/debug.hxx>
+ #endif
+-#ifndef _VOS_PROCESS_HXX_
+-#include <vos/process.hxx>
+-#endif
+ #include <vcl/timer.hxx>
+ 
+ #ifndef _BASIC_TTRESHLP_HXX
+diff --git a/basic/inc/basic/process.hxx b/basic/inc/basic/process.hxx
+index 425a30d..7a3de64 100644
+--- basic/inc/basic/process.hxx
++++ basic/inc/basic/process.hxx
+@@ -40,8 +40,8 @@
+ #include <tools/string.hxx>
+ #endif
+ 
+-#ifndef _VOS_PROCESS_HXX_
+-#include <vos/process.hxx>
++#ifndef _OSL_PROCESS_H_
++#include <osl/process.h>
+ #endif
+ 
+ #include <map>
+@@ -52,9 +52,12 @@ typedef Environment::value_type EnvironmentVariable;
+ class Process
+ {
+ 	// Interne Member und Methoden
+-	NAMESPACE_VOS(OArgumentList) *pArgumentList;
+-	NAMESPACE_VOS(OEnvironment) *pEnvList;
+-	NAMESPACE_VOS(OProcess) *pProcess;
++	sal_uInt32                  m_nArgumentCount;
++	rtl_uString               **m_pArgumentList;
++	sal_uInt32                  m_nEnvCount;
++	rtl_uString               **m_pEnvList;
++	rtl::OUString               m_aProcessName;
++	oslProcess                  m_pProcess;
+ 	BOOL ImplIsRunning();
+ 	long ImplGetExitCode();
+ 	BOOL bWasGPF;
+diff --git a/basic/inc/pch/precompiled_basic.hxx b/basic/inc/pch/precompiled_basic.hxx
+index 70f4753..dc841a6 100644
+--- basic/inc/pch/precompiled_basic.hxx
++++ basic/inc/pch/precompiled_basic.hxx
+@@ -286,7 +286,6 @@
+ #include "vos/diagnose.hxx"
+ #include "vos/macros.hxx"
+ #include "vos/mutex.hxx"
+-#include "vos/process.hxx"
+ 
+ #include "xmlscript/xmldlg_imexp.hxx"
+ #include "xmlscript/xmllib_imexp.hxx"
+diff --git a/basic/source/app/process.cxx b/basic/source/app/process.cxx
+index 8ff69f1..6cb5b25 100644
+--- basic/source/app/process.cxx
++++ basic/source/app/process.cxx
+@@ -72,30 +72,47 @@
+ 
+ // Konstruktor für den Process
+ Process::Process()
+-: pArgumentList( NULL )
+-, pEnvList( NULL )
+-, pProcess( NULL )
++: m_nArgumentCount( 0 )
++, m_pArgumentList( NULL )
++, m_nEnvCount( 0 )
++, m_pEnvList( NULL )
++, m_aProcessName()
++, m_pProcess( NULL )
+ , bWasGPF( FALSE )
+ , bHasBeenStarted( FALSE )
+ {
+ }
+ 
++#define FREE_USTRING_LIST( count, list ) \
++    if ( count && list ) \
++    { \
++        for ( int i = 0; i < count; ++i ) \
++        { \
++            rtl_uString_release( list[i] ); \
++            list[i] = NULL; \
++        } \
++        delete[] list; \
++    } \
++    count = 0; \
++    list = NULL;
++
+ // Destruktor
+ Process::~Process()
+ {
+-//    delete pArgumentList;
+-//    delete pEnvList;
+-	delete pProcess;
++    FREE_USTRING_LIST( m_nArgumentCount, m_pArgumentList );
++    FREE_USTRING_LIST( m_nEnvCount, m_pEnvList );
++    if ( m_pProcess )
++        osl_freeProcessHandle( m_pProcess );
+ }
+ 
+ 
+ BOOL Process::ImplIsRunning()
+ {
+-	if ( pProcess && bHasBeenStarted )
++	if ( m_pProcess && bHasBeenStarted )
+ 	{
+-		NAMESPACE_VOS(OProcess::TProcessInfo) aProcessInfo;
+-		pProcess->getInfo( NAMESPACE_VOS(OProcess::TData_ExitCode), &aProcessInfo );
+-		if ( !(aProcessInfo.Fields & NAMESPACE_VOS(OProcess::TData_ExitCode)) )
++		oslProcessInfo m_pProcessInfo;
++		osl_getProcessInfo( m_pProcess, osl_Process_EXITCODE, &m_pProcessInfo );
++		if ( !(m_pProcessInfo.Fields & osl_Process_EXITCODE) )
+ 			return TRUE;
+ 		else
+ 			return FALSE;
+@@ -106,13 +123,13 @@ BOOL Process::ImplIsRunning()
+ 
+ long Process::ImplGetExitCode()
+ {
+-	if ( pProcess )
++	if ( m_pProcess )
+ 	{
+-		NAMESPACE_VOS(OProcess::TProcessInfo) aProcessInfo;
+-		pProcess->getInfo( NAMESPACE_VOS(OProcess::TData_ExitCode), &aProcessInfo );
+-		if ( !(aProcessInfo.Fields & NAMESPACE_VOS(OProcess::TData_ExitCode)) )
++		oslProcessInfo m_pProcessInfo;
++		osl_getProcessInfo( m_pProcess, osl_Process_EXITCODE, &m_pProcessInfo );
++		if ( !(m_pProcessInfo.Fields & osl_Process_EXITCODE) )
+ 			SbxBase::SetError( SbxERR_NO_ACTIVE_OBJECT );
+-		return aProcessInfo.Code;
++		return m_pProcessInfo.Code;
+ 	}
+ 	else
+ 		SbxBase::SetError( SbxERR_NO_ACTIVE_OBJECT );
+@@ -125,63 +142,67 @@ long Process::ImplGetExitCode()
+ // Die Methoden:
+ void Process::SetImage( const String &aAppPath, const String &aAppParams, const Environment *pEnv )
+ { // Imagedatei des Executables
+-	if ( pProcess && ImplIsRunning() )
+-		SbxBase::SetError( SbxERR_NO_ACTIVE_OBJECT );
+-	else
+-	{
+-		delete pArgumentList; pArgumentList = NULL;
+-		delete pEnvList; pEnvList = NULL;
+-		delete pProcess; pProcess = NULL;
++    if ( m_pProcess && ImplIsRunning() )
++        SbxBase::SetError( SbxERR_NO_ACTIVE_OBJECT );
++    else
++    {
++        FREE_USTRING_LIST( m_nArgumentCount, m_pArgumentList );
++        FREE_USTRING_LIST( m_nEnvCount, m_pEnvList );
++        osl_freeProcessHandle( m_pProcess );
++        m_pProcess = NULL;
+ 
+-		xub_StrLen i, nCount = aAppParams.GetQuotedTokenCount( CUniString("\"\"" ), ' ' );
+-		::rtl::OUString *pParamList = new ::rtl::OUString[nCount];
++        xub_StrLen i, nCount = aAppParams.GetQuotedTokenCount( CUniString("\"\"" ), ' ' );
++        ::rtl::OUString *pParamList = new ::rtl::OUString[nCount];
+ 
+         xub_StrLen nParamCount = 0;
+-		for ( i = 0 ; i < nCount ; i++ )
+-		{
+-			::rtl::OUString aTemp = ::rtl::OUString(aAppParams.GetQuotedToken( i, CUniString("\"\"''" ), ' ' ));
+-			if ( aTemp.getLength() )
++        for ( i = 0 ; i < nCount ; i++ )
++        {
++            ::rtl::OUString aTemp = ::rtl::OUString(aAppParams.GetQuotedToken( i, CUniString("\"\"''" ), ' ' ));
++            if ( aTemp.getLength() )
+             {
+-				pParamList[nParamCount] = aTemp;
++                pParamList[nParamCount] = aTemp;
+                 nParamCount++;
+             }
+-		}
+-		pArgumentList = new NAMESPACE_VOS(OArgumentList)( pParamList, nCount );
+-
++        }
++        m_nArgumentCount = nParamCount;
++        m_pArgumentList = new rtl_uString*[m_nArgumentCount];
++        for ( i = 0 ; i < m_nArgumentCount ; i++ )
++        {
++            m_pArgumentList[i] = NULL;
++            rtl_uString_assign( &(m_pArgumentList[i]), pParamList[i].pData );
++        }
++        delete [] pParamList;
+ 
+-        ::rtl::OUString *pEnvArray = NULL;
+         if ( pEnv )
+         {
+-		    pEnvArray = new ::rtl::OUString[pEnv->size()];
++            m_nEnvCount = pEnv->size();
++            m_pEnvList = new rtl_uString*[m_nEnvCount];
+ 
+-            xub_StrLen nEnvCount = 0;
++            xub_StrLen m_nEnvCount = 0;
+             Environment::const_iterator aIter = pEnv->begin();
+-		    while ( aIter != pEnv->end() )
+-		    {
+-			    ::rtl::OUString aTemp = ::rtl::OUString( (*aIter).first );
++            while ( aIter != pEnv->end() )
++            {
++                ::rtl::OUString aTemp = ::rtl::OUString( (*aIter).first );
+                 aTemp += ::rtl::OUString::createFromAscii( "=" );
+-			    aTemp += ::rtl::OUString( (*aIter).second );
+-			    pEnvArray[nEnvCount] = aTemp;
+-                nEnvCount++;
++                aTemp += ::rtl::OUString( (*aIter).second );
++                m_pEnvList[m_nEnvCount] = NULL;
++                rtl_uString_assign( &(m_pEnvList[m_nEnvCount]), aTemp.pData );
++                m_nEnvCount++;
+                 aIter++;
+-		    }
+-		    pEnvList = new NAMESPACE_VOS(OEnvironment)( pEnvArray, nEnvCount );
++            }
+         }
+ 
+         ::rtl::OUString aNormalizedAppPath;
+-		osl::FileBase::getFileURLFromSystemPath( ::rtl::OUString(aAppPath), aNormalizedAppPath );
+-		pProcess = new NAMESPACE_VOS(OProcess)( aNormalizedAppPath );
+-		bHasBeenStarted = FALSE;
+-
+-        delete [] pParamList;
+-        delete [] pEnvArray;
+-	}
++        osl::FileBase::getFileURLFromSystemPath( ::rtl::OUString(aAppPath), aNormalizedAppPath );
++        m_aProcessName = aNormalizedAppPath;
++        bHasBeenStarted = FALSE;
++    }
+ }
+ 
+ BOOL Process::Start()
+ { // Programm wird gestartet
+ 	BOOL bSuccess=FALSE;
+-	if ( pProcess && !ImplIsRunning() )
++	if ( m_pProcess && !ImplIsRunning() )
+ 	{
+ 		bWasGPF = FALSE;
+ #ifdef WNT
+@@ -190,23 +211,18 @@ BOOL Process::Start()
+ 		try
+ 		{
+ #endif
+-            if ( pEnvList )
+-            {
+-                bSuccess = pProcess->execute( (NAMESPACE_VOS(OProcess)::TProcessOption)
+-						    ( NAMESPACE_VOS(OProcess)::TOption_SearchPath
+-						    /*| NAMESPACE_VOS(OProcess)::TOption_Detached*/
+-						    /*| NAMESPACE_VOS(OProcess)::TOption_Wait*/ ),
+-						    *pArgumentList, 
+-						    *pEnvList ) == NAMESPACE_VOS(OProcess)::E_None;
+-            }
+-            else
+-            {
+-                bSuccess = pProcess->execute( (NAMESPACE_VOS(OProcess)::TProcessOption)
+-						    ( NAMESPACE_VOS(OProcess)::TOption_SearchPath
+-						    /*| NAMESPACE_VOS(OProcess)::TOption_Detached*/
+-						    /*| NAMESPACE_VOS(OProcess)::TOption_Wait*/ ),
+-						    *pArgumentList ) == NAMESPACE_VOS(OProcess)::E_None;
+-            }
++            bSuccess = osl_executeProcess(
++                    m_aProcessName.pData,
++                    m_pArgumentList,
++                    m_nArgumentCount,
++                    osl_Process_SEARCHPATH
++                    /*| osl_Process_DETACHED*/
++                    /*| osl_Process_WAIT*/,
++                    NULL,
++                    NULL,
++                    m_pEnvList,
++                    m_nEnvCount,
++                    &m_pProcess ) == osl_Process_E_None;
+ #ifdef WNT
+ 		}
+ 		catch( ... ) 
+@@ -244,7 +260,7 @@ BOOL Process::WasGPF()
+ BOOL Process::Terminate()
+ {
+     if ( ImplIsRunning() )
+-        return pProcess->terminate() == vos::OProcess::E_None;
++        return osl_terminateProcess( m_pProcess ) == osl_Process_E_None;
+     return TRUE;
+ }
+ 
+diff --git a/basic/source/runtime/methods.cxx b/basic/source/runtime/methods.cxx
+index c4566ce..be85839 100644
+--- basic/source/runtime/methods.cxx
++++ basic/source/runtime/methods.cxx
+@@ -43,8 +43,8 @@
+ #ifndef _SBXVAR_HXX
+ #include <basic/sbxvar.hxx>
+ #endif
+-#ifndef _VOS_PROCESS_HXX
+-#include <vos/process.hxx>
++#ifndef _OSL_PROCESS_H_
++#include <osl/process.h>
+ #endif
+ #ifndef _SV_SVAPP_HXX //autogen
+ #include <vcl/svapp.hxx>
+@@ -3282,8 +3282,7 @@ RTLFUNC(Shell)
+ 	}
+ 	else
+ 	{
+-		USHORT nOptions = NAMESPACE_VOS(OProcess)::TOption_SearchPath|
+-						  NAMESPACE_VOS(OProcess)::TOption_Detached;
++		oslProcessOption nOptions = osl_Process_SEARCHPATH | osl_Process_DETACHED;
+ 		String aCmdLine = rPar.Get(1)->GetString();
+ 		// Zusaetzliche Parameter anhaengen, es muss eh alles geparsed werden
+ 		if( nArgCount >= 4 )
+@@ -3361,13 +3360,13 @@ RTLFUNC(Shell)
+ 			switch( nWinStyle )
+ 			{
+ 				case 2:
+-					nOptions |= NAMESPACE_VOS(OProcess)::TOption_Minimized;
++					nOptions |= osl_Process_MINIMIZED;
+ 					break;
+ 				case 3:
+-					nOptions |= NAMESPACE_VOS(OProcess)::TOption_Maximized;
++					nOptions |= osl_Process_MAXIMIZED;
+ 					break;
+ 				case 10:
+-					nOptions |= NAMESPACE_VOS(OProcess)::TOption_FullScreen;
++					nOptions |= osl_Process_FULLSCREEN;
+ 					break;
+ 			}
+ 
+@@ -3375,62 +3374,51 @@ RTLFUNC(Shell)
+ 			if( nArgCount >= 5 )
+ 				bSync = rPar.Get(4)->GetBool();
+ 			if( bSync )
+-				nOptions |= NAMESPACE_VOS(OProcess)::TOption_Wait;
++				nOptions |= osl_Process_WAIT;
+ 		}
+-		NAMESPACE_VOS(OProcess)::TProcessOption eOptions =
+-			(NAMESPACE_VOS(OProcess)::TProcessOption)nOptions;
+-
+ 
+ 		// #72471 Parameter aufbereiten
+ 		std::list<String>::const_iterator iter = aTokenList.begin();
+ 		const String& rStr = *iter;
+ 		::rtl::OUString aOUStrProg( rStr.GetBuffer(), rStr.Len() );
+-		String aOUStrProgUNC = getFullPathUNC( aOUStrProg );
++		::rtl::OUString aOUStrProgUNC( getFullPathUNC( aOUStrProg ) );
+ 
+ 		iter++;
+ 
+ 		USHORT nParamCount = sal::static_int_cast< USHORT >(
+             aTokenList.size() - 1 );
+-		::rtl::OUString* pArgumentList = NULL;
+-		//const char** pParamList = NULL;
++		rtl_uString** pParamList = NULL;
+ 		if( nParamCount )
+ 		{
+-			pArgumentList = new ::rtl::OUString[ nParamCount ];
+-			//pParamList = new const char*[ nParamCount ];
+-			USHORT iList = 0;
+-			while( iter != aTokenList.end() )
++			pParamList = new rtl_uString*[ nParamCount ];
++			for ( int iList = 0; iter != aTokenList.end(); ++iList, ++iter )
+ 			{
+ 				const String& rParamStr = (*iter);
+-				pArgumentList[iList++] = ::rtl::OUString( rParamStr.GetBuffer(), rParamStr.Len() );
+-				//pParamList[iList++] = (*iter).GetStr();
+-				iter++;
++				const ::rtl::OUString aTempStr( rParamStr.GetBuffer(), rParamStr.Len() );
++
++				pParamList[iList] = NULL;
++				rtl_uString_assign( &(pParamList[iList]), aTempStr.pData );
+ 			}
+ 		}
+ 
+-		//const char* pParams = aParams.Len() ? aParams.GetStr() : 0;
+-		NAMESPACE_VOS(OProcess)* pApp;
+-		pApp = new NAMESPACE_VOS(OProcess)( aOUStrProgUNC );
+-		BOOL bSucc;
+-		if( nParamCount == 0 )
+-		{
+-			bSucc = pApp->execute( eOptions ) == NAMESPACE_VOS(OProcess)::E_None;
+-		}
+-		else
++		oslProcess pApp;
++		BOOL bSucc = osl_executeProcess(
++					aOUStrProgUNC.pData,
++					pParamList,
++					nParamCount,
++					nOptions,
++					NULL,
++					NULL,
++					NULL, 0,
++					&pApp ) == osl_Process_E_None;
++
++		osl_freeProcessHandle( pApp );
++		for ( int i = 0; i < nParamCount; ++i )
+ 		{
+-		    NAMESPACE_VOS(OArgumentList) aArgList( pArgumentList, nParamCount );
+-			bSucc = pApp->execute( eOptions, aArgList ) == NAMESPACE_VOS(OProcess)::E_None;
++			rtl_uString_release( pParamList[i] );
++			pParamList[i] = NULL;
+ 		}
+-
+-		/*
+-		if( nParamCount == 0 )
+-			pApp = new NAMESPACE_VOS(OProcess)( pProg );
+-		else
+-			pApp = new NAMESPACE_VOS(OProcess)( pProg, pParamList, nParamCount );
+-		BOOL bSucc = pApp->execute( eOptions ) == NAMESPACE_VOS(OProcess)::E_None;
+-		*/
+-
+-		delete pApp;
+-		delete[] pArgumentList;
++		delete[] pParamList;
+ 		if( !bSucc )
+ 			StarBASIC::Error( SbERR_FILE_NOT_FOUND );
+ 		else
+diff --git a/binfilter/bf_sfx2/source/appl/sfx2_appmain.cxx b/binfilter/bf_sfx2/source/appl/sfx2_appmain.cxx
+index 40371ca..3645b2c 100644
+--- binfilter/bf_sfx2/source/appl/sfx2_appmain.cxx
++++ binfilter/bf_sfx2/source/appl/sfx2_appmain.cxx
+@@ -57,7 +57,6 @@
+ #include <svtools/itempool.hxx>
+ #include <svtools/urihelper.hxx>
+ #include <svtools/helpopt.hxx>
+-#include <vos/process.hxx>
+ 
+ #include "appimp.hxx"
+ #include "sfxtypes.hxx"
+diff --git a/binfilter/bf_sfx2/source/appl/sfx2_appmisc.cxx b/binfilter/bf_sfx2/source/appl/sfx2_appmisc.cxx
+index 80c52fd..b4660c8 100644
+--- binfilter/bf_sfx2/source/appl/sfx2_appmisc.cxx
++++ binfilter/bf_sfx2/source/appl/sfx2_appmisc.cxx
+@@ -39,9 +39,6 @@
+ #ifndef _SV_MSGBOX_HXX
+ #include <vcl/msgbox.hxx>
+ #endif
+-#ifndef _VOS_PROCESS_HXX //autogen
+-#include <vos/process.hxx>
+-#endif
+ #ifndef _XCEPTION_HXX_
+ #include <vos/xception.hxx>
+ #endif
+diff --git a/binfilter/bf_sfx2/source/bastyp/sfx2_fltfnc.cxx b/binfilter/bf_sfx2/source/bastyp/sfx2_fltfnc.cxx
+index 62fe691..14b2e85 100644
+--- binfilter/bf_sfx2/source/bastyp/sfx2_fltfnc.cxx
++++ binfilter/bf_sfx2/source/bastyp/sfx2_fltfnc.cxx
+@@ -51,7 +51,6 @@
+ #include <sal/types.h>
+ #include <com/sun/star/uno/Reference.h>
+ #include <com/sun/star/ucb/XContent.hpp>
+-#include <vos/process.hxx>
+ 
+ 
+ #include <rtl/logfile.hxx>
+@@ -59,7 +58,6 @@
+ using namespace ::com::sun::star::uno;
+ using namespace ::com::sun::star::ucb;
+ using namespace ::rtl;
+-using namespace ::vos;
+ 
+ #ifndef _SVTOOLS_CTYPEITM_HXX
+ #include <svtools/ctypeitm.hxx>
+diff --git a/comphelper/source/misc/regpathhelper.cxx b/comphelper/source/misc/regpathhelper.cxx
+index 3911cd2..4faa9ba 100644
+--- comphelper/source/misc/regpathhelper.cxx
++++ comphelper/source/misc/regpathhelper.cxx
+@@ -47,8 +47,8 @@
+ #ifndef _OSL_THREAD_H_
+ #include <osl/thread.h>
+ #endif
+-#ifndef _VOS_PROCESS_HXX_
+-#include <vos/process.hxx>
++#ifndef _OSL_PROCESS_H_
++#include <osl/process.h>
+ #endif
+ #ifndef _RTL_TEXTENC_H
+ #include <rtl/textenc.h>
+@@ -60,7 +60,6 @@
+ #include <rtl/uri.hxx>
+ #endif
+ 
+-using namespace vos;
+ using namespace osl;
+ using namespace rtl;
+ 
+@@ -88,13 +87,12 @@ namespace comphelper
+  */
+ static sal_Bool retrievePortalUserDir( OUString *pDirectory )
+ {
+-	OStartupInfo startInfo;
+-	sal_uInt32 nArgs = startInfo.getCommandArgCount();
++	sal_uInt32 nArgs = osl_getCommandArgCount();
+ 	sal_Bool bIsPortalUser = sal_False;
+ 	OUString sArg;
+ 	while( nArgs > 0 )
+   	{
+-		if ( !startInfo.getCommandArg(--nArgs, sArg) )
++		if ( !osl_getCommandArg(--nArgs, &sArg.pData) )
+ 	  	{
+ 	    	if ( sArg.indexOf(OUString::createFromAscii("-userid")) == 0 )
+ 	    	{
+@@ -211,8 +209,7 @@ OUString getPathToSystemRegistry()
+ 	FILE  	 *f=NULL;
+  
+ 	// search in the directory of the executable 	
+-    OStartupInfo info;
+-	if( OStartupInfo::E_None == info.getExecutableFile(uBuffer) )
++	if( osl_Process_E_None == osl_getExecutableFile(&uBuffer.pData) )
+ 	{
+ 		sal_uInt32 	lastIndex = uBuffer.lastIndexOf(PATH_DELEMITTER);
+ 		if (lastIndex > 0)
+diff --git a/connectivity/inc/pch/precompiled_connectivity.hxx b/connectivity/inc/pch/precompiled_connectivity.hxx
+index b79a411..12e3d55 100644
+--- connectivity/inc/pch/precompiled_connectivity.hxx
++++ connectivity/inc/pch/precompiled_connectivity.hxx
+@@ -332,7 +332,6 @@
+ #include "unotools/sharedunocomponent.hxx"
+ 
+ #include "vos/mutex.hxx"
+-#include "vos/process.hxx"
+ #include "vos/ref.hxx"
+ #include "vos/ref.hxx"		
+ #include "vos/refernce.hxx"
+diff --git a/connectivity/source/drivers/evoab/LConnection.cxx b/connectivity/source/drivers/evoab/LConnection.cxx
+index 63f9cc3..e0d8f3b 100644
+--- connectivity/source/drivers/evoab/LConnection.cxx
++++ connectivity/source/drivers/evoab/LConnection.cxx
+@@ -69,8 +69,8 @@
+ #ifndef _COMPHELPER_PROCESSFACTORY_HXX_
+ #include <comphelper/processfactory.hxx>
+ #endif
+-#ifndef _VOS_PROCESS_HXX_
+-#include <vos/process.hxx>
++#ifndef _OSL_PROCESS_H_
++#include <osl/process.h>
+ #endif
+ #ifndef _TOOLS_DEBUG_HXX
+ #include <tools/debug.hxx>
+@@ -158,18 +158,30 @@ void OEvoabConnection::construct(const ::rtl::OUString& url,const Sequence< Prop
+ 	::rtl::OUString aArg2 = ::rtl::OUString::createFromAscii(OEvoabDriver::getEVOAB_CLI_ARG_OUTPUT_FILE_PREFIX());
+ 	aArg2 += aWorkingDirPath;
+ 	aArg2 += getDriver()->getEvoFolderListFileName();
+-	OArgumentList aArgs(2,&aArg1,&aArg2);
++
++	const sal_uInt32 nArgsCount = 2;
++	rtl_uString *pArgs[nArgsCount] = { aArg1.pData, aArg2.pData };
+ 
+ 	EVO_TRACE_STRING("OEvoabConnection::construct()::aCLICommand = %s\n", aCLICommand );
+ 	EVO_TRACE_STRING("OEvoabConnection::construct()::aWorkingDirPath = %s\n", aWorkingDirPath );
+ 	EVO_TRACE_STRING("OEvoabConnection::construct()::aArg1 = %s\n", aArg1 );
+ 	EVO_TRACE_STRING("OEvoabConnection::construct()::aArg2 = %s\n", aArg2 );
+-	OProcess aApp( aCLICommand,aWorkingDirPath);
+-    OSL_VERIFY_EQUALS(
+-        aApp.execute( (OProcess::TProcessOption)(OProcess::TOption_Hidden | OProcess::TOption_Wait | OProcess::TOption_SearchPath),aArgs),
+-        OProcess::E_None,
+-        "Error at execute evolution-addressbook-export to get VCards");
+ 
++	oslProcess aProcess;
++	if ( osl_Process_E_None != osl_executeProcess(
++				aCLICommand.pData,
++				pArgs,
++				nArgsCount,
++				osl_Process_HIDDEN | osl_Process_WAIT | osl_Process_SEARCHPATH,
++				NULL,
++				aWorkingDirPath.pData,
++				NULL, 0,
++				&aProcess ) )
++	{
++		OSL_TRACE("Error at execute evolution-addressbook-export to get VCards");
++		::dbtools::throwGenericSQLException(
++				::rtl::OUString::createFromAscii("Error at execute evolution-addressbook-export to get VCards"),NULL);
++	}
+ 
+ 	Sequence<PropertyValue> aDriverParam;
+ 	::std::vector<PropertyValue> aParam;
+diff --git a/connectivity/source/drivers/evoab/LDatabaseMetaData.cxx b/connectivity/source/drivers/evoab/LDatabaseMetaData.cxx
+index 2e3430b..5ca44bd 100644
+--- connectivity/source/drivers/evoab/LDatabaseMetaData.cxx
++++ connectivity/source/drivers/evoab/LDatabaseMetaData.cxx
+@@ -90,9 +90,6 @@
+ #ifndef _CONNECTIVITY_COMMONTOOLS_HXX_
+ #include "connectivity/CommonTools.hxx"
+ #endif
+-#ifndef _VOS_PROCESS_HXX_
+-#include <vos/process.hxx>
+-#endif
+ #ifndef _OSL_PROCESS_H_
+ #include <osl/process.h>
+ #endif
+@@ -511,7 +508,8 @@ Reference< XResultSet > SAL_CALL OEvoabDatabaseMetaData::getTables(
+ 			aArg2 += ::rtl::OUString(pOEvoabConnection->getExtension());
+ 			::rtl::OUString aArg3 = ::rtl::OUString::createFromAscii(pOEvoabConnection->getDriver()->getEVOAB_CLI_ARG_OUTPUT_FORMAT());
+ 
+-			OArgumentList aArgs(3,&aArg1,&aArg2,&aArg3);
++			const sal_uInt32 nArgsCount = 3;
++			rtl_uString *pArgs[nArgsCount] = { aArg1.pData, aArg2.pData, aArg3.pData };
+ 
+ 			EVO_TRACE_STRING( "OEvoabDatabaseMetaData::getTables()::aCLICommand = %s\n", aCLICommand );
+ 			EVO_TRACE_STRING( "OEvoabDatabaseMetaData::getTables()::aWorkingDir = %s\n", aWorkingDir );
+@@ -519,11 +517,20 @@ Reference< XResultSet > SAL_CALL OEvoabDatabaseMetaData::getTables(
+ 			EVO_TRACE_STRING( "OEvoabDatabaseMetaData::getTables()::aArg2 = %s\n", aArg2 );
+ 			EVO_TRACE_STRING( "OEvoabDatabaseMetaData::getTables()::aArg3 = %s\n", aArg3 );
+ 
+-			OProcess aApp( aCLICommand,aWorkingDir);
+-            OSL_VERIFY_EQUALS(
+-                aApp.execute( (OProcess::TProcessOption)(OProcess::TOption_Hidden | OProcess::TOption_Wait | OProcess::TOption_SearchPath),aArgs),
+-                OProcess::E_None,
+-                "Error at execute evolution-addressbook-exporter to get VCards" );
++			oslProcess aProcess;
++			if ( osl_Process_E_None != osl_executeProcess(
++						aCLICommand.pData,
++						pArgs,
++						nArgsCount,
++						osl_Process_HIDDEN | osl_Process_WAIT | osl_Process_SEARCHPATH,
++						NULL,
++						aWorkingDir.pData,
++						NULL, 0,
++						&aProcess ) )
++			{
++				OSL_TRACE("Error at execute evolution-addressbook-export to get VCards");
++				throw SQLException();
++			}
+ 
+ 			bMoreData = pFolderList->next();
+ 		}
+diff --git a/connectivity/source/drivers/evoab2/NConnection.cxx b/connectivity/source/drivers/evoab2/NConnection.cxx
+index ec949a0..39f427a 100644
+--- connectivity/source/drivers/evoab2/NConnection.cxx
++++ connectivity/source/drivers/evoab2/NConnection.cxx
+@@ -69,9 +69,6 @@
+ #ifndef _COMPHELPER_PROCESSFACTORY_HXX_
+ #include <comphelper/processfactory.hxx>
+ #endif
+-#ifndef _VOS_PROCESS_HXX_
+-#include <vos/process.hxx>
+-#endif
+ #ifndef _TOOLS_DEBUG_HXX
+ #include <tools/debug.hxx>
+ #endif
+diff --git a/connectivity/source/drivers/jdbc/Object.cxx b/connectivity/source/drivers/jdbc/Object.cxx
+index 1312174..b509d34 100644
+--- connectivity/source/drivers/jdbc/Object.cxx
++++ connectivity/source/drivers/jdbc/Object.cxx
+@@ -51,9 +51,6 @@
+ #ifndef _CONNECTIVITY_JAVA_SQL_SQLEXCEPTION_HXX_
+ #include "java/sql/SQLException.hxx"
+ #endif
+-#ifndef _VOS_PROCESS_HXX_
+-#include <vos/process.hxx>
+-#endif
+ #ifndef _VOS_MUTEX_HXX_
+ #include <vos/mutex.hxx>
+ #endif
+diff --git a/desktop/source/app/app.cxx b/desktop/source/app/app.cxx
+index 681b6c6..7a07c50 100644
+--- desktop/source/app/app.cxx
++++ desktop/source/app/app.cxx
+@@ -196,6 +196,9 @@
+ #ifndef _TOOLKIT_HELPER_VCLUNOHELPER_HXX_
+ #include <toolkit/unohlp.hxx>
+ #endif
++#ifndef _VOS_MUTEX_HXX_
++#include <vos/mutex.hxx>
++#endif
+ #ifndef _VOS_SECURITY_HXX_
+ #include <vos/security.hxx>
+ #endif
+@@ -454,8 +457,7 @@ void FatalError(OUString const & aMessage)
+ 
+     if (!aProductKey.getLength())
+     {
+-        ::vos::OStartupInfo aInfo;
+-        aInfo.getExecutableFile( aProductKey );
++        osl_getExecutableFile( &aProductKey.pData );
+ 
+         sal_uInt32     lastIndex = aProductKey.lastIndexOf('/');
+         if ( lastIndex > 0 )
+@@ -488,7 +490,7 @@ CommandLineArgs* Desktop::GetCommandLineArgs()
+         ::osl::MutexGuard aGuard( ::osl::Mutex::getGlobalMutex() );
+         if ( !pArgs )
+ 	{
+-            ::vos::OExtCommandLine aArgs;
++            ::salhelper::ExtCommandLine aArgs;
+             pArgs = new CommandLineArgs( aArgs );
+ 	}
+     }
+@@ -739,9 +741,8 @@ void Desktop::HandleBootstrapPathErrors( ::utl::Bootstrap::Status aBootstrapStat
+         ::rtl::OUString        aUserInstallURL;
+         ::rtl::OUString        aProductKey;
+         ::rtl::OUString        aTemp;
+-        ::vos::OStartupInfo aInfo;
+ 
+-        aInfo.getExecutableFile( aProductKey );
++        osl_getExecutableFile( &aProductKey.pData );
+         sal_uInt32     lastIndex = aProductKey.lastIndexOf('/');
+         if ( lastIndex > 0 )
+             aProductKey = aProductKey.copy( lastIndex+1 );
+@@ -2394,9 +2395,8 @@ void Desktop::OpenClients()
+     else
+     {
+         OUString            aIniName;
+-        ::vos::OStartupInfo aInfo;
+ 
+-        aInfo.getExecutableFile( aIniName );
++        osl_getExecutableFile( &aIniName.pData );
+         sal_uInt32     lastIndex = aIniName.lastIndexOf('/');
+         if ( lastIndex > 0 )
+         {
+diff --git a/desktop/source/app/appinit.cxx b/desktop/source/app/appinit.cxx
+index e8e06b6..a9094f4 100644
+--- desktop/source/app/appinit.cxx
++++ desktop/source/app/appinit.cxx
+@@ -90,9 +90,6 @@
+ #ifndef _OSL_MODULE_H_
+ #include <osl/module.h>
+ #endif
+-#ifndef _VOS_PROCESS_HXX_
+-#include <vos/process.hxx>
+-#endif
+ #ifndef _RTL_URI_HXX_
+ #include <rtl/uri.hxx>
+ #endif
+@@ -139,6 +136,8 @@
+ #include <svtools/internaloptions.hxx>
+ #endif
+ 
++#include <vos/security.hxx>
++
+ 
+ #define	DEFINE_CONST_OUSTRING(CONSTASCII)		OUString(RTL_CONSTASCII_USTRINGPARAM(CONSTASCII))
+ 
+diff --git a/desktop/source/app/cmdlineargs.cxx b/desktop/source/app/cmdlineargs.cxx
+index 5658050..6df3c51 100644
+--- desktop/source/app/cmdlineargs.cxx
++++ desktop/source/app/cmdlineargs.cxx
+@@ -82,7 +82,7 @@ CommandLineArgs::CommandLineArgs()
+ }
+ 
+ // intialize class with command line parameters from process environment
+-CommandLineArgs::CommandLineArgs( ::vos::OExtCommandLine& aExtCmdLine )
++CommandLineArgs::CommandLineArgs( ::salhelper::ExtCommandLine& aExtCmdLine )
+ {
+ 	ResetParamValues();
+ 	ParseCommandLine_Impl( aExtCmdLine );
+@@ -97,7 +97,7 @@ CommandLineArgs::CommandLineArgs( const ::rtl::OUString& aCmdLineArgs )
+ 
+ // ----------------------------------------------------------------------------
+ 
+-void CommandLineArgs::ParseCommandLine_Impl( ::vos::OExtCommandLine& aCmdLine )
++void CommandLineArgs::ParseCommandLine_Impl( ::salhelper::ExtCommandLine& aCmdLine )
+ {
+ 	sal_uInt32		nCount = aCmdLine.getCommandArgCount();
+ 	::rtl::OUString	aDummy;
+diff --git a/desktop/source/app/cmdlineargs.hxx b/desktop/source/app/cmdlineargs.hxx
+index 83f1c67..59da386 100644
+--- desktop/source/app/cmdlineargs.hxx
++++ desktop/source/app/cmdlineargs.hxx
+@@ -39,13 +39,12 @@
+ #ifndef _RTL_USTRING_HXX_
+ #include <rtl/ustring.hxx>
+ #endif
+-#ifndef _VOS_PROCESS_HXX_
+-#include <vos/process.hxx>
+-#endif
+ #ifndef _OSL_MUTEX_HXX_
+ #include <osl/mutex.hxx>
+ #endif
+ 
++#include <salhelper/extcommandline.hxx>
++
+ 
+ namespace desktop
+ {
+@@ -115,7 +114,7 @@ class CommandLineArgs
+ 		};
+ 
+ 		CommandLineArgs();
+-		CommandLineArgs( ::vos::OExtCommandLine& aExtCmdLine );
++		CommandLineArgs( ::salhelper::ExtCommandLine& aExtCmdLine );
+ 		CommandLineArgs( const ::rtl::OUString& aIPCThreadCmdLine );
+ 
+ 		// generic methods to access parameter
+@@ -191,7 +190,7 @@ class CommandLineArgs
+ 		CommandLineArgs operator=( const CommandLineArgs& );
+ 
+ 		sal_Bool				InterpretCommandLineParameter( const ::rtl::OUString& );
+-		void					ParseCommandLine_Impl( ::vos::OExtCommandLine& );
++		void					ParseCommandLine_Impl( ::salhelper::ExtCommandLine& );
+ 		void					ParseCommandLine_String( const ::rtl::OUString& );
+ 		void					ResetParamValues();
+ 		sal_Bool				CheckGroupMembers( GroupParamId nGroup, BoolParam nExcludeMember ) const;
+diff --git a/desktop/source/app/intro.cxx b/desktop/source/app/intro.cxx
+index 428cb27..368fe3c 100644
+--- desktop/source/app/intro.cxx
++++ desktop/source/app/intro.cxx
+@@ -41,7 +41,6 @@
+ 
+ #include <tools/stream.hxx>
+ #include <tools/urlobj.hxx>
+-#include <vos/process.hxx>
+ #include <rtl/logfile.hxx>
+ #ifndef _SV_SVAPP_HXX
+ #include <vcl/svapp.hxx>
+diff --git a/desktop/source/app/officeipcthread.cxx b/desktop/source/app/officeipcthread.cxx
+index f1dce4d..01f7cff 100644
+--- desktop/source/app/officeipcthread.cxx
++++ desktop/source/app/officeipcthread.cxx
+@@ -42,8 +42,8 @@
+ #include "dispatchwatcher.hxx"
+ #include <stdio.h>
+ 
+-#ifndef _VOS_PROCESS_HXX_
+-#include <vos/process.hxx>
++#ifndef _OSL_PROCESS_H_
++#include <osl/process.h>
+ #endif
+ #ifndef _UTL_BOOTSTRAP_HXX
+ #include <unotools/bootstrap.hxx>
+@@ -310,7 +310,6 @@ OfficeIPCThread::Status OfficeIPCThread::EnableOfficeIPCThread()
+ 	::rtl::OUString aUserInstallPath;
+     ::rtl::OUString aDummy;
+ 
+-	::vos::OStartupInfo aInfo;
+ 	OfficeIPCThread* pThread = new OfficeIPCThread;
+ 
+ 	pThread->maPipeIdent = OUString( RTL_CONSTASCII_USTRINGPARAM( "SingleOfficeIPC_" ) );
+@@ -334,7 +333,7 @@ OfficeIPCThread::Status OfficeIPCThread::EnableOfficeIPCThread()
+ 
+     OUString            aIniName;
+     
+-    aInfo.getExecutableFile( aIniName );
++    osl_getExecutableFile( &aIniName.pData );
+     sal_uInt32     lastIndex = aIniName.lastIndexOf('/');
+     if ( lastIndex > 0 )
+     {
+@@ -416,7 +415,7 @@ OfficeIPCThread::Status OfficeIPCThread::EnableOfficeIPCThread()
+ 
+ 		sal_Bool bWaitBeforeClose = sal_False;
+ 		ByteString aArguments;
+-        ULONG nCount = aInfo.getCommandArgCount();
++        ULONG nCount = osl_getCommandArgCount();
+ 
+         if ( nCount == 0 )
+ 		{
+@@ -438,7 +437,7 @@ OfficeIPCThread::Status OfficeIPCThread::EnableOfficeIPCThread()
+ 
+             for( ULONG i=0; i < nCount; i++ )
+ 			{
+-				aInfo.getCommandArg( i, aDummy );
++				osl_getCommandArg( i, &aDummy.pData );
+ 				// Make absolute pathes from relative ones!
+ 				// It's neccessary to use current working directory of THESE office instance and not of
+ 				// currently running once, which get these information by using pipe.
+diff --git a/desktop/source/app/userinstall.cxx b/desktop/source/app/userinstall.cxx
+index 5de05f7..1d0a9f8 100644
+--- desktop/source/app/userinstall.cxx
++++ desktop/source/app/userinstall.cxx
+@@ -68,9 +68,6 @@
+ #ifndef _VOS_REF_HXX_
+ #include <vos/ref.hxx>
+ #endif
+-#ifndef _VOS_PROCESS_HXX_
+-#include <vos/process.hxx>
+-#endif
+ 
+ #ifndef _TOOLS_RESMGR_HXX_
+ #include <tools/resmgr.hxx>
+diff --git a/desktop/source/offacc/acceptor.cxx b/desktop/source/offacc/acceptor.cxx
+index 552173f..3d5a927 100644
+--- desktop/source/offacc/acceptor.cxx
++++ desktop/source/offacc/acceptor.cxx
+@@ -41,9 +41,6 @@
+ #ifndef _UTL_BOOTSTRAP_HXX
+ #include <unotools/bootstrap.hxx>
+ #endif
+-#ifndef _VOS_PROCESS_HXX_
+-#include <vos/process.hxx>
+-#endif
+ #ifndef _URLOBJ_HXX
+ #include <tools/urlobj.hxx>
+ #endif
+diff --git a/desktop/source/splash/splash.cxx b/desktop/source/splash/splash.cxx
+index 4bd6d70..538e5b6 100644
+--- desktop/source/splash/splash.cxx
++++ desktop/source/splash/splash.cxx
+@@ -42,8 +42,8 @@
+ #ifndef _UTL_BOOTSTRAP_HXX
+ #include <unotools/bootstrap.hxx>
+ #endif
+-#ifndef _VOS_PROCESS_HXX_
+-#include <vos/process.hxx>
++#ifndef _OSL_PROCESS_H_
++#include <osl/process.h>
+ #endif
+ #ifndef _URLOBJ_HXX
+ #include <tools/urlobj.hxx>
+@@ -58,6 +58,8 @@
+ #include <vcl/svapp.hxx>
+ #endif
+ 
++#include <vos/mutex.hxx>
++
+ #include <com/sun/star/registry/XRegistryKey.hpp>
+ #include <rtl/logfile.hxx>
+ #include <rtl/ustrbuf.hxx>
+@@ -294,7 +296,7 @@ OUString implReadBootstrapKey( const ::rtl::Bootstrap& _rIniFile, const OUString
+ void SplashScreen::loadConfig()
+ {
+     // detect execute path
+-    ::vos::OStartupInfo().getExecutableFile( _sExecutePath );
++    osl_getExecutableFile( &_sExecutePath.pData );
+     sal_uInt32 nLastIndex = _sExecutePath.lastIndexOf( '/' );
+     if ( nLastIndex > 0 )
+         _sExecutePath = _sExecutePath.copy( 0, nLastIndex + 1 );
+diff --git a/desktop/unx/splash/unxsplash.cxx b/desktop/unx/splash/unxsplash.cxx
+index ca20334..fb43de4 100644
+--- desktop/unx/splash/unxsplash.cxx
++++ desktop/unx/splash/unxsplash.cxx
+@@ -38,8 +38,8 @@
+ #ifndef _UTL_BOOTSTRAP_HXX
+ #include <unotools/bootstrap.hxx>
+ #endif
+-#ifndef _VOS_PROCESS_HXX_
+-#include <vos/process.hxx>
++#ifndef _OSL_PROCESS_H_
++#include <osl/process.h>
+ #endif
+ #ifndef _URLOBJ_HXX
+ #include <tools/urlobj.hxx>
+@@ -126,11 +126,10 @@ void SAL_CALL
+ UnxSplashScreen::initialize( const ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Any>& aArguments )
+     throw ( RuntimeException )
+ {
+-    ::vos::OStartupInfo aInfo;
+-    for ( sal_uInt32 i = 0; i < aInfo.getCommandArgCount(); i++ )
++    for ( sal_uInt32 i = 0; i < osl_getCommandArgCount(); i++ )
+     {
+         rtl::OUString aArg;
+-        if ( aInfo.getCommandArg( i, aArg ) )
++        if ( osl_getCommandArg( i, &aArg.pData ) )
+             break;
+         if ( aArg.matchIgnoreAsciiCaseAsciiL( PIPE_ARG, sizeof( PIPE_ARG ) - 1, 0 ) )
+         {
+diff --git a/framework/inc/commands.h b/framework/inc/commands.h
+index fd916e2..338da78 100644
+--- framework/inc/commands.h
++++ framework/inc/commands.h
+@@ -44,8 +44,8 @@
+ #include <macros/generic.hxx>
+ #endif
+ 
+-#ifndef _VOS_PROCESS_HXX_
+-#include <vos/process.hxx>
++#ifndef _OSL_PROCESS_H_
++#include <osl/process.h>
+ #endif
+ 
+ #ifndef _RTL_USTRING_HXX_
+@@ -77,12 +77,11 @@ sal_Bool c_existCommand( const ::rtl::OUString& sSearchCommand )
+ {
+ 	// Set default return value if search failed or unknown commands are searched.
+ 	sal_Bool			bState			= sal_False							;
+-	::vos::OStartupInfo	aCommandLine										;
+-	sal_uInt32			nCount			= aCommandLine.getCommandArgCount()	;
++	sal_uInt32			nCount			= osl_getCommandArgCount()	;
+ 	::rtl::OUString		sCommand											;
+ 	for( sal_uInt32 nCommand=0; nCommand<nCount; ++nCommand )
+ 	{
+-		if( aCommandLine.getCommandArg( nCommand, sCommand ) == ::vos::OStartupInfo::E_None )
++		if( osl_getCommandArg( nCommand, &sCommand.pData ) == osl_Process_E_None )
+ 		{
+ 			if( sCommand == sSearchCommand )
+ 			{
+diff --git a/framework/inc/pch/precompiled_framework.hxx b/framework/inc/pch/precompiled_framework.hxx
+index 866c978..d612d92 100644
+--- framework/inc/pch/precompiled_framework.hxx
++++ framework/inc/pch/precompiled_framework.hxx
+@@ -494,7 +494,6 @@
+ #include "vcl/wintypes.hxx"
+ 
+ #include "vos/mutex.hxx"
+-#include "vos/process.hxx"
+ #include "vos/ref.hxx"
+ #include "vos/thread.hxx"
+ #include "vos/timer.hxx"
+diff --git a/framework/source/application/framework.cxx b/framework/source/application/framework.cxx
+index 97a7508..a945d7d 100644
+--- framework/source/application/framework.cxx
++++ framework/source/application/framework.cxx
+@@ -144,8 +144,8 @@
+ #include <vcl/wrkwin.hxx>
+ #endif
+ 
+-#ifndef _VOS_PROCESS_HXX_
+-#include <vos/process.hxx>
++#ifndef _OSL_PROCESS_H_
++#include <osl/process.h>
+ #endif
+ 
+ //_________________________________________________________________________________________________________________
+@@ -245,13 +245,12 @@ void FrameWork::impl_analyzeCommandArguments()
+ 	m_bUsePlugIn = sal_False;	// depends from "/plugin"
+ 
+ 	// Then step over all given arguments and search for supported one.
+-	OStartupInfo	aInfo		;
+ 	OUString		sArgument	;
+-	sal_uInt32		nCount		= aInfo.getCommandArgCount();
++	sal_uInt32		nCount		= osl_getCommandArgCount();
+ 	for ( sal_uInt32 nArgument=0; nArgument<nCount; ++nArgument )
+ 	{
+ 		// If extraction of current argument successfull ...
+-		if ( aInfo.getCommandArg( nArgument, sArgument ) == osl_Process_E_None )
++		if ( osl_getCommandArg( nArgument, &sArgument.pData ) == osl_Process_E_None )
+ 		{
+ 			// ... search for matching with supported values.
+ 			if ( sArgument == COMMANDARGUMENT_PLUGIN )
+diff --git a/framework/source/application/login.cxx b/framework/source/application/login.cxx
+index dff7b1b..7669515 100644
+--- framework/source/application/login.cxx
++++ framework/source/application/login.cxx
+@@ -88,8 +88,8 @@
+ #include <com/sun/star/uno/Reference.hxx>
+ #endif
+ 
+-#ifndef _VOS_PROCESS_HXX_
+-#include <vos/process.hxx>
++#ifndef _OSL_PROCESS_H_
++#include <osl/process.h>
+ #endif
+ 
+ #ifndef _RTL_USTRING_
+@@ -307,12 +307,10 @@ void LoginApplication::Main()
+ //*****************************************************************************************************************
+ void LoginApplication::impl_parseCommandline()
+ {
+-	// Use vos::OStartupInfo for access to command line.
+ 	// Step over all arguments, search for supported ones and try to get his values.
+ 	// Set it on our member. Caller of this method must control setted values.
+-	OStartupInfo aInfo;
+ 
+-	sal_uInt32	nCount		=	aInfo.getCommandArgCount()	;
++	sal_uInt32	nCount		=	osl_getCommandArgCount()	;
+ 	sal_uInt32	nArgument	=	0							;
+ 	OUString	sArgument									;
+     OUString    sValue                                      ;
+@@ -329,7 +327,7 @@ void LoginApplication::impl_parseCommandline()
+ 	{
+ 		// .. but work with valid ones only!
+ 		// Don't check values here. Caller of this method must decide between wrong and allowed values!
+-		aInfo.getCommandArg( nArgument, sArgument );
++		osl_getCommandArg( nArgument, &sArgument.pData );
+ 
+ 		//_____________________________________________________________________________________________________
+         // Look for "-f=<temp. file name>"
+diff --git a/framework/source/services/substitutepathvars.cxx b/framework/source/services/substitutepathvars.cxx
+index b38b79b..d3fe64e 100644
+--- framework/source/services/substitutepathvars.cxx
++++ framework/source/services/substitutepathvars.cxx
+@@ -100,8 +100,8 @@
+ #include <osl/socket.hxx>
+ #endif
+ 
+-#ifndef _VOS_PROCESS_HXX_
+-#include <vos/process.hxx>
++#ifndef _OSL_PROCESS_H_
++#include <osl/process.h>
+ #endif
+ 
+ #ifndef INCLUDED_I18NPOOL_MSLANGID_HXX
+@@ -1245,8 +1245,7 @@ void SubstitutePathVariables::SetPredefinedPathVariables( PredefinedPathVariable
+ 	// Detect the program directory
+ 	// Set $(prog), $(progpath), $(progurl)
+     rtl::OUString aProgName;
+-    ::vos::OStartupInfo aInfo;
+-    aInfo.getExecutableFile( aProgName );
++    osl_getExecutableFile( &aProgName.pData );
+     sal_Int32 lastIndex = aProgName.lastIndexOf('/');
+     if ( lastIndex >= 0 )
+     {
+diff --git a/framework/source/threadhelp/lockhelper.cxx b/framework/source/threadhelp/lockhelper.cxx
+index abad431..5896951 100644
+--- framework/source/threadhelp/lockhelper.cxx
++++ framework/source/threadhelp/lockhelper.cxx
+@@ -62,8 +62,8 @@
+ //	other includes
+ //_________________________________________________________________________________________________________________
+ 
+-#ifndef _VOS_PROCESS_HXX_
+-#include <vos/process.hxx>
++#ifndef _OSL_PROCESS_HXX_
++#include <osl/process.h>
+ #endif
+ 
+ //_________________________________________________________________________________________________________________
+@@ -551,9 +551,9 @@ ELockType& LockHelper::implts_getLockType()
+         {
+             static ELockType eType = FALLBACK_LOCKTYPE;
+ 
+-            ::vos::OStartupInfo aEnvironment;
++            ::rtl::OUString     aEnvVar( ENVVAR_LOCKTYPE );
+             ::rtl::OUString     sValue      ;
+-            if( aEnvironment.getEnvironment( ENVVAR_LOCKTYPE, sValue ) == ::vos::OStartupInfo::E_None )
++            if( osl_getEnvironment( aEnvVar.pData, &sValue.pData ) == osl_Process_E_None )
+             {
+                 eType = (ELockType)(sValue.toInt32());
+             }
+diff --git a/framework/test/threadtest.cxx b/framework/test/threadtest.cxx
+index 64f3b95..434eecb 100644
+--- framework/test/threadtest.cxx
++++ framework/test/threadtest.cxx
+@@ -84,8 +84,8 @@
+ #include <rtl/random.h>
+ #endif
+ 
+-#ifndef _VOS_PROCESS_HXX_
+-#include <vos/process.hxx>
++#ifndef _OSL_PROCESS_H_
++#include <osl/process.h>
+ #endif
+ 
+ #ifndef _VOS_THREAD_HXX_
+@@ -742,16 +742,15 @@ void TestApplication::Main()
+ 	// Parse command line.
+ 	// Attention: All parameter are required and must exist!
+ 	// syntax: "threadtest.exe <testcount> <threadcount> <loops> <owner>"
+-	OStartupInfo	aInfo		;
+ 	OUString		sArgument	;
+ 	sal_Int32		nArgument	;
+-	sal_Int32		nCount		= aInfo.getCommandArgCount();
++	sal_Int32		nCount		= osl_getCommandArgCount();
+ 
+ 	LOG_ASSERT2( nCount!=4 ,"TestApplication::Main()" , "Wrong argument line detected!")
+ 
+ 	for( nArgument=0; nArgument<nCount; ++nArgument )
+ 	{
+-		aInfo.getCommandArg( nArgument, sArgument );
++		osl_getCommandArg( nArgument, &sArgument.pData );
+ 		if( nArgument== 0 )	nTestCount	=sArgument.toInt32();
+ 		if( nArgument== 1 )	nThreadCount=sArgument.toInt32();
+ 		if( nArgument== 2 )	nLoops		=sArgument.toInt32();
+diff --git a/framework/test/threadtest/threadtest.cxx b/framework/test/threadtest/threadtest.cxx
+index 2ec3072..b463d1d 100644
+--- framework/test/threadtest/threadtest.cxx
++++ framework/test/threadtest/threadtest.cxx
+@@ -84,8 +84,8 @@
+ #include <rtl/random.h>
+ #endif
+ 
+-#ifndef _VOS_PROCESS_HXX_
+-#include <vos/process.hxx>
++#ifndef _OSL_PROCESS_H_
++#include <osl/process.h>
+ #endif
+ 
+ #ifndef _VOS_THREAD_HXX_
+@@ -741,16 +741,15 @@ void TestApplication::Main()
+ 	// Parse command line.
+ 	// Attention: All parameter are required and must exist!
+ 	// syntax: "threadtest.exe <testcount> <threadcount> <loops> <owner>"
+-	OStartupInfo	aInfo		;
+ 	OUString		sArgument	;
+ 	sal_Int32		nArgument	;
+-	sal_Int32		nCount		= aInfo.getCommandArgCount();
++	sal_Int32		nCount		= osl_getCommandArgCount();
+ 
+ 	LOG_ASSERT2( nCount!=4 ,"TestApplication::Main()" , "Wrong argument line detected!")
+ 
+ 	for( nArgument=0; nArgument<nCount; ++nArgument )
+ 	{
+-		aInfo.getCommandArg( nArgument, sArgument );
++		osl_getCommandArg( nArgument, &sArgument.pData );
+ 		if( nArgument== 0 )	nTestCount	=sArgument.toInt32();
+ 		if( nArgument== 1 )	nThreadCount=sArgument.toInt32();
+ 		if( nArgument== 2 )	nLoops		=sArgument.toInt32();
+diff --git a/framework/test/typecfg/cfgview.cxx b/framework/test/typecfg/cfgview.cxx
+index e435ab4..127cd12 100644
+--- framework/test/typecfg/cfgview.cxx
++++ framework/test/typecfg/cfgview.cxx
+@@ -92,8 +92,8 @@
+ #include <comphelper/processfactory.hxx>
+ #endif
+ 
+-#ifndef _VOS_PROCESS_HXX_
+-#include <vos/process.hxx>
++#ifndef _OSL_PROCESS_H_
++#include <osl/process.h>
+ #endif
+ 
+ #ifndef _RTL_USTRING_
+@@ -300,15 +300,14 @@ void CFGView::impl_printSyntax()
+ *//*-*************************************************************************************************************/
+ void CFGView::impl_parseCommandLine( AppMember& rMember )
+ {
+-    ::vos::OStartupInfo aInfo                                   ;
+     ::rtl::OUString     sArgument                               ;
+     sal_Int32           nArgument   = 0                         ;
+-    sal_Int32           nCount      = aInfo.getCommandArgCount();
++    sal_Int32           nCount      = osl_getCommandArgCount()  ;
+     sal_Int32           nMinCount   = 0                         ;
+ 
+ 	while( nArgument<nCount )
+ 	{
+-		aInfo.getCommandArg( nArgument, sArgument );
++		osl_getCommandArg( nArgument, &sArgument.pData );
+ 
+ 		//_____________________________________________________________________________________________________
+         // look for "-dir="
+diff --git a/framework/test/typecfg/typecfg.cxx b/framework/test/typecfg/typecfg.cxx
+index a7dae47..e25bb7a 100644
+--- framework/test/typecfg/typecfg.cxx
++++ framework/test/typecfg/typecfg.cxx
+@@ -84,8 +84,8 @@
+ #include <comphelper/processfactory.hxx>
+ #endif
+ 
+-#ifndef _VOS_PROCESS_HXX_
+-#include <vos/process.hxx>
++#ifndef _OSL_PROCESS_H_
++#include <osl/process.h>
+ #endif
+ 
+ #ifndef _RTL_USTRING_
+@@ -201,14 +201,13 @@ void TypeApplication::Main()
+ //*****************************************************************************************************************
+ void TypeApplication::impl_parseCommandLine()
+ {
+-	OStartupInfo	aInfo		;
+ 	OUString		sArgument	;
+ 	sal_Int32		nArgument	= 0							;
+-	sal_Int32		nCount		= aInfo.getCommandArgCount();
++	sal_Int32		nCount		= osl_getCommandArgCount()  ;
+ 
+ 	while( nArgument<nCount )
+ 	{
+-		aInfo.getCommandArg( nArgument, sArgument );
++		osl_getCommandArg( nArgument, &sArgument.pData );
+ 
+ 		if( sArgument == ARGUMENT_GENERATE_CFGVIEW )
+ 		{
+diff --git a/framework/test/typecfg/xml2xcd.cxx b/framework/test/typecfg/xml2xcd.cxx
+index e13ab4d..bd4940e 100644
+--- framework/test/typecfg/xml2xcd.cxx
++++ framework/test/typecfg/xml2xcd.cxx
+@@ -89,8 +89,8 @@
+ #include <unotools/processfactory.hxx>
+ #endif
+ 
+-#ifndef _VOS_PROCESS_HXX_
+-#include <vos/process.hxx>
++#ifndef _OSL_PROCESS_H_
++#include <osl/process.h>
+ #endif
+ 
+ #ifndef _RTL_USTRING_
+@@ -378,15 +378,14 @@ void XCDGenerator::impl_printSyntax()
+ *//*-*************************************************************************************************************/
+ void XCDGenerator::impl_parseCommandLine( AppMember& rMember )
+ {
+-    ::vos::OStartupInfo aInfo                                   ;
+     ::rtl::OUString     sArgument                               ;
+     sal_Int32           nArgument   = 0                         ;
+-    sal_Int32           nCount      = aInfo.getCommandArgCount();
++    sal_Int32           nCount      = osl_getCommandArgCount()  ;
+     sal_Int32           nMinCount   = 0                         ;
+ 
+ 	while( nArgument<nCount )
+ 	{
+-		aInfo.getCommandArg( nArgument, sArgument );
++		osl_getCommandArg( nArgument, sArgument );
+ /*OBSOLETE
+ 		//_____________________________________________________________________________________________________
+         // look for "-fis=..."
+diff --git a/salhelper/inc/salhelper/extcommandline.hxx b/salhelper/inc/salhelper/extcommandline.hxx
+new file mode 100644
+index 0000000..76bbc66
+--- /dev/null
++++ salhelper/inc/salhelper/extcommandline.hxx
+@@ -0,0 +1,82 @@
++/*************************************************************************
++ *
++ *  OpenOffice.org - a multi-platform office productivity suite
++ *
++ *  $RCSfile$
++ *
++ *  $Revision$
++ *
++ *  last change: $Author$ $Date$
++ *
++ *  The Contents of this file are made available subject to
++ *  the terms of GNU Lesser General Public License Version 2.1.
++ *
++ *
++ *    GNU Lesser General Public License Version 2.1
++ *    =============================================
++ *    Copyright 2005 by Sun Microsystems, Inc.
++ *    901 San Antonio Road, Palo Alto, CA 94303, USA
++ *
++ *    This library is free software; you can redistribute it and/or
++ *    modify it under the terms of the GNU Lesser General Public
++ *    License version 2.1, as published by the Free Software Foundation.
++ *
++ *    This library is distributed in the hope that it will be useful,
++ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ *    Lesser General Public License for more details.
++ *
++ *    You should have received a copy of the GNU Lesser General Public
++ *    License along with this library; if not, write to the Free Software
++ *    Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ *    MA  02111-1307  USA
++ *
++ ************************************************************************/
++
++#ifndef _SALHELPER_EXTCOMMANDLINE_HXX_
++#define _SALHELPER_EXTCOMMANDLINE_HXX_
++
++#include <vector>
++
++#include <rtl/ustring.hxx>
++
++namespace salhelper {
++
++/* ExtCommandLine
++ *
++ * Expands command line parameters that start with '@' so that it loads the
++ * content from files.
++ */
++class ExtCommandLine
++{
++public:
++
++    /** Constructor.
++    */
++    ExtCommandLine();
++
++    /** Destructor
++    */
++    ~ExtCommandLine();
++
++    /** @return the number of extended command line arguments.
++     */
++    sal_uInt32 SAL_CALL getCommandArgCount() const;
++
++    /** get the nArg-th extended command argument
++        @param nArg [in] the number of extended argument to return.
++        @param strCommandArg [out] the string that receives the argument.
++        @return sal_True   if the nArg-th argument has been retriveded successfully
++        @return sal_False  on all other cases
++    */
++    sal_Bool SAL_CALL getCommandArg( sal_uInt32 nArg, ::rtl::OUString& aCommandArg ) const;
++
++private:
++    void init();
++    
++    static ::std::vector< ::rtl::OUString > *s_pExtArgVector;
++};
++
++} // namespace salhelper
++
++#endif // _SALHELPER_EXTCOMMANDLINE_HXX_
+diff --git a/salhelper/prj/d.lst b/salhelper/prj/d.lst
+index 718a980..14f233d 100644
+--- salhelper/prj/d.lst
++++ salhelper/prj/d.lst
+@@ -2,6 +2,7 @@ mkdir: %_DEST%\inc%_EXT%\salhelper
+ 
+ ..\inc\salhelper\condition.hxx %_DEST%\inc%_EXT%\salhelper\condition.hxx
+ ..\inc\salhelper\dynload.hxx %_DEST%\inc%_EXT%\salhelper\dynload.hxx
++..\inc\salhelper\extcommandline.hxx %_DEST%\inc%_EXT%\salhelper\extcommandline.hxx
+ ..\inc\salhelper\future.hxx %_DEST%\inc%_EXT%\salhelper\future.hxx
+ ..\inc\salhelper\futurequeue.hxx %_DEST%\inc%_EXT%\salhelper\futurequeue.hxx
+ ..\inc\salhelper\monitor.hxx %_DEST%\inc%_EXT%\salhelper\monitor.hxx
+diff --git a/salhelper/source/extcommandline.cxx b/salhelper/source/extcommandline.cxx
+new file mode 100644
+index 0000000..da6dab9
+--- /dev/null
++++ salhelper/source/extcommandline.cxx
+@@ -0,0 +1,125 @@
++/*************************************************************************
++ *
++ *  OpenOffice.org - a multi-platform office productivity suite
++ *
++ *  $RCSfile$
++ *
++ *  $Revision$
++ *
++ *  last change: $Author$ $Date$
++ *
++ *  The Contents of this file are made available subject to
++ *  the terms of GNU Lesser General Public License Version 2.1.
++ *
++ *
++ *    GNU Lesser General Public License Version 2.1
++ *    =============================================
++ *    Copyright 2005 by Sun Microsystems, Inc.
++ *    901 San Antonio Road, Palo Alto, CA 94303, USA
++ *
++ *    This library is free software; you can redistribute it and/or
++ *    modify it under the terms of the GNU Lesser General Public
++ *    License version 2.1, as published by the Free Software Foundation.
++ *
++ *    This library is distributed in the hope that it will be useful,
++ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ *    Lesser General Public License for more details.
++ *
++ *    You should have received a copy of the GNU Lesser General Public
++ *    License along with this library; if not, write to the Free Software
++ *    Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ *    MA  02111-1307  USA
++ *
++ ************************************************************************/
++
++#include <salhelper/extcommandline.hxx>
++
++#include <osl/file.hxx>
++#include <osl/mutex.hxx>
++#include <osl/process.h>
++
++using namespace salhelper;
++
++::std::vector< ::rtl::OUString > *ExtCommandLine::s_pExtArgVector = NULL;
++
++ExtCommandLine::ExtCommandLine() 
++{
++    if ( !s_pExtArgVector )
++        init();
++}
++
++ExtCommandLine::~ExtCommandLine()
++{
++}
++
++sal_uInt32 SAL_CALL ExtCommandLine::getCommandArgCount() const
++{
++    if ( !s_pExtArgVector )
++        return 0;
++
++    return s_pExtArgVector->size();
++}
++
++
++sal_Bool SAL_CALL ExtCommandLine::getCommandArg( sal_uInt32 nArg, ::rtl::OUString& strCommandArg ) const
++{
++    if ( !s_pExtArgVector || nArg >= s_pExtArgVector->size() )
++    {
++        return sal_False;
++    }
++
++    strCommandArg = (*s_pExtArgVector)[nArg];
++
++    return sal_True;
++}
++
++void ExtCommandLine::init()
++{
++    static ::osl::Mutex sMutex;
++    ::osl::MutexGuard aMutexGuard( sMutex );
++    
++    if ( !s_pExtArgVector )
++        s_pExtArgVector = new ::std::vector< ::rtl::OUString >();
++
++    sal_uInt32 nIndex=0;
++    sal_uInt32 nArgs = osl_getCommandArgCount();
++
++    for ( nIndex = 0 ; nIndex < nArgs ; ++nIndex )
++    {
++        ::rtl::OUString aString;
++        osl_getCommandArg( nIndex, &aString.pData );
++        
++        if ( aString[0] == (sal_Unicode) '@' )
++        {
++            ::rtl::OUString aFileName = aString.copy( 1 );
++            ::osl::File aFile( aFileName );
++            ::rtl::ByteSequence aSeq;
++
++            ::osl::FileBase::RC aErr = aFile.open( OpenFlag_Read );
++
++            if ( aErr != ::osl::FileBase::E_None )
++            {
++                break;
++            }
++
++            do
++            {
++                aErr = aFile.readLine( aSeq );
++                if ( aSeq.getLength() != 0 )
++                {
++                    ::rtl::OUString newString( (sal_Char*)aSeq.getArray(), aSeq.getLength(), RTL_TEXTENCODING_ASCII_US );
++                    s_pExtArgVector->push_back( newString );
++                }
++            }
++            while ( aErr == ::osl::FileBase::E_None && aSeq.getLength() > 0 );
++
++			aFile.close();
++			aFile.remove( aFileName );
++        }
++        else
++        {
++            s_pExtArgVector->push_back( aString );
++        }
++    }
++}
+diff --git a/salhelper/source/gcc3.map b/salhelper/source/gcc3.map
+index 4ea4f6f..3968981 100644
+--- salhelper/source/gcc3.map
++++ salhelper/source/gcc3.map
+@@ -70,4 +70,11 @@ UDK_3.1 {
+         _ZN9salhelper15ConditionWaiter8timedoutD2Ev;
+         # _ZTIN9salhelper15ConditionWaiter8timedoutE;
+         # _ZTSN9salhelper15ConditionWaiter8timedoutE;
++
++	_ZN9salhelper14ExtCommandLineC1Ev;
++	_ZN9salhelper14ExtCommandLineC2Ev;
++	_ZN9salhelper14ExtCommandLineD1Ev;
++	_ZN9salhelper14ExtCommandLineD2Ev;
++	_ZNK9salhelper14ExtCommandLine13getCommandArgEjRN3rtl8OUStringE;
++	_ZNK9salhelper14ExtCommandLine18getCommandArgCountEv;
+ } UDK_3_0_0;
+diff --git a/salhelper/source/makefile.mk b/salhelper/source/makefile.mk
+index 379df6c..0cbb6b7 100644
+--- salhelper/source/makefile.mk
++++ salhelper/source/makefile.mk
+@@ -54,6 +54,7 @@ UNIXVERSIONNAMES=UDK
+ SLOFILES=	\
+ 	$(SLO)$/condition.obj \
+ 	$(SLO)$/dynload.obj \
++	$(SLO)$/extcommandline.obj \
+ 	$(SLO)$/simplereferenceobject.obj
+ 
+ # SCO: the linker does know about weak symbols, but we can't ignore multiple defined symbols
+diff --git a/sd/inc/pch/precompiled_sd.hxx b/sd/inc/pch/precompiled_sd.hxx
+index 6bd60d7..39199ec 100644
+--- sd/inc/pch/precompiled_sd.hxx
++++ sd/inc/pch/precompiled_sd.hxx
+@@ -921,7 +921,6 @@
+ #include "vos/diagnose.hxx"
+ #include "vos/module.hxx"
+ #include "vos/mutex.hxx"
+-#include "vos/process.hxx"
+ #include "vos/thread.hxx"
+ #include "vos/xception.hxx"
+ //---MARKER---
+diff --git a/sd/source/ui/func/fusel.cxx b/sd/source/ui/func/fusel.cxx
+index 85b4a2c..d2347a4 100644
+--- sd/source/ui/func/fusel.cxx
++++ sd/source/ui/func/fusel.cxx
+@@ -39,9 +39,6 @@
+ 
+ #include "fusel.hxx"
+ 
+-#ifndef _VOS_PROCESS_HXX_
+-#include <vos/process.hxx>
+-#endif
+ #ifndef _SB_SBSTAR_HXX //autogen
+ #include <basic/sbstar.hxx>
+ #endif
+diff --git a/sd/source/ui/slideshow/slideshowimpl.cxx b/sd/source/ui/slideshow/slideshowimpl.cxx
+index 44af1a9..b7fd834 100644
+--- sd/source/ui/slideshow/slideshowimpl.cxx
++++ sd/source/ui/slideshow/slideshowimpl.cxx
+@@ -50,9 +50,6 @@
+ #include <com/sun/star/util/XURLTransformer.hpp>
+ #include <com/sun/star/frame/XDispatch.hpp>
+ 
+-#ifndef _VOS_PROCESS_HXX_
+-#include <vos/process.hxx>
+-#endif
+ 
+ #ifndef _AEITEM_HXX
+ #include <svtools/aeitem.hxx>
+@@ -117,6 +114,8 @@
+ #include "canvas/elapsedtime.hxx"
+ #include "canvas/prioritybooster.hxx"
+ 
++#include <vos/mutex.hxx>
++
+ // TODO(Q3): This breaks encapsulation. Either export
+ // these strings from avmedia, or provide an XManager
+ // factory there
+diff --git a/sfx2/inc/pch/precompiled_sfx2.hxx b/sfx2/inc/pch/precompiled_sfx2.hxx
+index 0341725..1a8eb44 100644
+--- sfx2/inc/pch/precompiled_sfx2.hxx
++++ sfx2/inc/pch/precompiled_sfx2.hxx
+@@ -673,7 +673,6 @@
+ #include "vos/diagnose.hxx"
+ #include "vos/module.hxx"
+ #include "vos/mutex.hxx"
+-#include "vos/process.hxx"
+ #include "vos/security.hxx"
+ #include "vos/socket.hxx"
+ #include "vos/thread.hxx"
+diff --git a/sfx2/source/appl/app.cxx b/sfx2/source/appl/app.cxx
+index f45e539..9137647 100644
+--- sfx2/source/appl/app.cxx
++++ sfx2/source/appl/app.cxx
+@@ -46,9 +46,6 @@
+ #include <sfx2/app.hxx>
+ #include <sfx2/frame.hxx>
+ 
+-#ifndef _VOS_PROCESS_HXX_
+-#include <vos/process.hxx>
+-#endif
+ #ifndef _TOOLS_SIMPLERESMGR_HXX_
+ #include <tools/simplerm.hxx>
+ #endif
+diff --git a/sfx2/source/appl/appmain.cxx b/sfx2/source/appl/appmain.cxx
+index 4609e7c..b9a989c 100644
+--- sfx2/source/appl/appmain.cxx
++++ sfx2/source/appl/appmain.cxx
+@@ -62,7 +62,6 @@
+ #include <svtools/itempool.hxx>
+ #include <svtools/urihelper.hxx>
+ #include <svtools/helpopt.hxx>
+-#include <vos/process.hxx>
+ #include <framework/sfxhelperfunctions.hxx>
+ #include <rtl/ustring.hxx>
+ #include <com/sun/star/uno/Exception.hpp>
+diff --git a/sfx2/source/appl/appmisc.cxx b/sfx2/source/appl/appmisc.cxx
+index 8d01b78..a620071 100644
+--- sfx2/source/appl/appmisc.cxx
++++ sfx2/source/appl/appmisc.cxx
+@@ -42,9 +42,6 @@
+ #ifndef _SV_MSGBOX_HXX
+ #include <vcl/msgbox.hxx>
+ #endif
+-#ifndef _VOS_PROCESS_HXX //autogen
+-#include <vos/process.hxx>
+-#endif
+ #ifndef _XCEPTION_HXX_
+ #include <vos/xception.hxx>
+ #endif
+diff --git a/sfx2/source/appl/appserv.cxx b/sfx2/source/appl/appserv.cxx
+index 558fe5e..b5a7d56 100644
+--- sfx2/source/appl/appserv.cxx
++++ sfx2/source/appl/appserv.cxx
+@@ -171,7 +171,6 @@
+ #endif // INCLUDED_SVTOOLS_MISCOPT_HXX
+ #include <tools/shl.hxx>
+ #include <unotools/bootstrap.hxx>
+-#include <vos/process.hxx>
+ #include <rtl/bootstrap.hxx>
+ 
+ #include <com/sun/star/script/provider/XScriptProviderFactory.hpp>
+diff --git a/sfx2/source/appl/updatedlg.cxx b/sfx2/source/appl/updatedlg.cxx
+index cb5f31a..bc651a2 100644
+--- sfx2/source/appl/updatedlg.cxx
++++ sfx2/source/appl/updatedlg.cxx
+@@ -61,7 +61,6 @@
+ #include <rtl/ustrbuf.hxx>
+ #include <rtl/uri.hxx>
+ #include <vos/thread.hxx>
+-#include <vos/process.hxx>
+ #include <vos/mutex.hxx>
+ #include <comphelper/processfactory.hxx>
+ #include <vcl/msgbox.hxx>
+diff --git a/sfx2/source/bastyp/fltfnc.cxx b/sfx2/source/bastyp/fltfnc.cxx
+index 1bb8ecb..aa5f62f 100644
+--- sfx2/source/bastyp/fltfnc.cxx
++++ sfx2/source/bastyp/fltfnc.cxx
+@@ -196,7 +196,6 @@
+ #include <com/sun/star/uno/Reference.hxx>
+ #include <com/sun/star/ucb/XContent.hpp>
+ #include <rtl/ustring.hxx>
+-#include <vos/process.hxx>
+ #include <svtools/pathoptions.hxx>
+ #include <svtools/moduleoptions.hxx>
+ #include <comphelper/mediadescriptor.hxx>
+@@ -208,7 +207,6 @@ using namespace ::com::sun::star::uno;
+ using namespace ::com::sun::star::ucb;
+ using namespace ::com::sun::star::document;
+ using namespace ::com::sun::star::beans;
+-using namespace ::vos;
+ 
+ #ifndef _SVTOOLS_CTYPEITM_HXX
+ #include <svtools/ctypeitm.hxx>
+diff --git a/svtools/inc/pch/precompiled_svtools.hxx b/svtools/inc/pch/precompiled_svtools.hxx
+index 02f671f..785be00 100644
+--- svtools/inc/pch/precompiled_svtools.hxx
++++ svtools/inc/pch/precompiled_svtools.hxx
+@@ -431,7 +431,6 @@
+ #include <vcl/unohelp.hxx>
+ 
+ #include <vos/mutex.hxx>
+-#include <vos/process.hxx>
+ #include <vos/ref.hxx>
+ #include <vos/refernce.hxx>
+ #include <vos/security.hxx>
+diff --git a/svtools/source/config/defaultoptions.cxx b/svtools/source/config/defaultoptions.cxx
+index 763c779..eea5a7c 100644
+--- svtools/source/config/defaultoptions.cxx
++++ svtools/source/config/defaultoptions.cxx
+@@ -64,7 +64,6 @@
+ #include <osl/mutex.hxx>
+ #endif
+ 
+-#include <vos/process.hxx>
+ #include <unotools/localfilehelper.hxx>
+ #ifndef INCLUDED_RTL_INSTANCE_HXX
+ #include <rtl/instance.hxx>
+diff --git a/svtools/source/config/pathoptions.cxx b/svtools/source/config/pathoptions.cxx
+index e7d5e0d..4c3c7dc 100644
+--- svtools/source/config/pathoptions.cxx
++++ svtools/source/config/pathoptions.cxx
+@@ -75,7 +75,6 @@
+ #endif
+ 
+ #include <unotools/ucbhelper.hxx>
+-#include <vos/process.hxx>
+ #include <comphelper/processfactory.hxx>
+ 
+ #ifndef _COM_SUN_STAR_BEANS_XFASTPROPERTYSET_HPP_
+diff --git a/svtools/source/misc1/svtdata.cxx b/svtools/source/misc1/svtdata.cxx
+index f19d792..1a18d77 100644
+--- svtools/source/misc1/svtdata.cxx
++++ svtools/source/misc1/svtdata.cxx
+@@ -44,9 +44,6 @@
+ #ifndef _SHL_HXX
+ #include <tools/shl.hxx>
+ #endif
+-#ifndef _VOS_PROCESS_HXX_
+-#include <vos/process.hxx>
+-#endif
+ 
+ #ifndef _SVTOOLS_SVTDATA_HXX
+ #include <svtools/svtdata.hxx>
+diff --git a/tools/inc/pch/precompiled_tools.hxx b/tools/inc/pch/precompiled_tools.hxx
+index d2876d9..7b5beee 100644
+--- tools/inc/pch/precompiled_tools.hxx
++++ tools/inc/pch/precompiled_tools.hxx
+@@ -93,7 +93,6 @@
+ 
+ #include "vos/macros.hxx"
+ #include "vos/mutex.hxx"
+-#include "vos/process.hxx"
+ #include "vos/signal.hxx"
+ #include "vos/timer.hxx"
+ //---MARKER---
+diff --git a/tools/source/testtoolloader/testtoolloader.cxx b/tools/source/testtoolloader/testtoolloader.cxx
+index a1a1b51..f9ebd9a 100644
+--- tools/source/testtoolloader/testtoolloader.cxx
++++ tools/source/testtoolloader/testtoolloader.cxx
+@@ -47,8 +47,8 @@
+ #ifndef _RTL_LOGFILE_HXX_
+ #include <rtl/logfile.hxx>
+ #endif
+-#ifndef _VOS_PROCESS_HXX_
+-#include <vos/process.hxx>
++#ifndef _OSL_PROCESS_H_
++#include <osl/process.h>
+ #endif
+ #ifndef _SOLAR_H
+ #include "tools/solar.h"
+@@ -72,16 +72,14 @@ static oslModule	aTestToolModule	= 0;
+ 
+ sal_uInt32 GetCommandLineParamCount()
+ {
+-	NAMESPACE_VOS( OStartupInfo ) aStartInfo;
+-	return aStartInfo.getCommandArgCount();
++	return osl_getCommandArgCount();
+ }
+ 
+ String GetCommandLineParam( sal_uInt32 nParam )
+ {
+-	NAMESPACE_VOS( OStartupInfo ) aStartInfo;
+ 	::rtl::OUString aParam;
+-	NAMESPACE_VOS( OStartupInfo )::TStartupError eError = aStartInfo.getCommandArg( nParam, aParam );
+-	if ( eError == NAMESPACE_VOS( OStartupInfo )::E_None )
++	oslProcessError eError = osl_getCommandArg( nParam, &aParam.pData );
++	if ( eError == osl_Process_E_None )
+ 		return String( aParam );
+ 	else
+ 	{
+@@ -116,7 +114,7 @@ void InitTestToolLib()
+ 	OUString	aFuncName( RTL_CONSTASCII_USTRINGPARAM( "CreateRemoteControl" ));
+ 	OUString	aModulePath;
+ 
+-	::vos::OStartupInfo().getExecutableFile( aModulePath );
++	osl_getExecutableFile( &aModulePath.pData );
+ 	sal_uInt32 	lastIndex = aModulePath.lastIndexOf('/');
+ 	if ( lastIndex > 0 )
+ 		aModulePath = aModulePath.copy( 0, lastIndex+1 );
+diff --git a/ucb/inc/pch/precompiled_ucb.hxx b/ucb/inc/pch/precompiled_ucb.hxx
+index 931acaf..846d0dc 100644
+--- ucb/inc/pch/precompiled_ucb.hxx
++++ ucb/inc/pch/precompiled_ucb.hxx
+@@ -184,7 +184,6 @@
+ 
+ #include "vos/diagnose.hxx"
+ #include "vos/mutex.hxx"
+-#include "vos/process.hxx"
+ #include "vos/ref.hxx"
+ #include "vos/refernce.hxx"
+ //---MARKER---
+diff --git a/ucb/workben/ucb/ucbdemo.cxx b/ucb/workben/ucb/ucbdemo.cxx
+index 9749a42..40ef4ee 100644
+--- ucb/workben/ucb/ucbdemo.cxx
++++ ucb/workben/ucb/ucbdemo.cxx
+@@ -45,9 +45,6 @@
+ #ifndef _VOS_MUTEX_HXX_
+ #include <vos/mutex.hxx>
+ #endif
+-#ifndef _VOS_PROCESS_HXX_
+-#include <vos/process.hxx>
+-#endif
+ 
+ #ifndef _CPPUHELPER_WEAK_HXX_
+ #include <cppuhelper/weak.hxx>
+diff --git a/vcl/source/app/svapp.cxx b/vcl/source/app/svapp.cxx
+index 8aefaf8..d5c8d34 100644
+--- vcl/source/app/svapp.cxx
++++ vcl/source/app/svapp.cxx
+@@ -48,8 +48,8 @@
+ #ifndef _SV_SALSYS_HXX
+ #include <vcl/salsys.hxx>
+ #endif
+-#ifndef _VOS_PROCESS_HXX
+-#include <vos/process.hxx>
++#ifndef _OSL_PROCESS_H_
++#include <osl/process.h>
+ #endif
+ #ifndef _VOS_MUTEX_HXX
+ #include <vos/mutex.hxx>
+@@ -395,17 +395,15 @@ void Application::DeInit()
+ 
+ USHORT Application::GetCommandLineParamCount()
+ {
+-    vos::OStartupInfo aStartInfo;
+-    return (USHORT)aStartInfo.getCommandArgCount();
++    return (USHORT)osl_getCommandArgCount();
+ }
+ 
+ // -----------------------------------------------------------------------
+ 
+ XubString Application::GetCommandLineParam( USHORT nParam )
+ {
+-    vos::OStartupInfo   aStartInfo;
+     rtl::OUString       aParam;
+-    aStartInfo.getCommandArg( nParam, aParam );
++    osl_getCommandArg( nParam, &aParam.pData );
+     return XubString( aParam );
+ }
+ 
+@@ -425,10 +423,9 @@ const XubString& Application::GetAppFileName()
+     static String aAppFileName;
+     if( !aAppFileName.Len() )
+     {
+-        vos::OStartupInfo   aStartInfo;
+         ::rtl::OUString		aExeFileName;
+ 
+-        aStartInfo.getExecutableFile( aExeFileName );
++        osl_getExecutableFile( &aExeFileName.pData );
+ 
+         // convert path to native file format
+         rtl::OUString aNativeFileName;
+diff --git a/vcl/source/app/svmain.cxx b/vcl/source/app/svmain.cxx
+index cb49c99..eafed42 100644
+--- vcl/source/app/svmain.cxx
++++ vcl/source/app/svmain.cxx
+@@ -139,7 +139,9 @@
+ #include <vcl/xconnection.hxx>
+ #endif
+ 
+-#include <vos/process.hxx>
++#include <vos/mutex.hxx>
++
++#include <osl/process.h>
+ #include <osl/file.hxx>
+ 
+ #ifndef _COMPHELPER_PROCESSFACTORY_HXX_
+@@ -374,7 +376,6 @@ BOOL InitVCL( const ::com::sun::star::uno::Reference< ::com::sun::star::lang::XM
+     // Main-Thread-Id merken
+     pSVData->mnMainThreadId = ::vos::OThread::getCurrentIdentifier();
+ 
+-    vos::OStartupInfo   aStartInfo;
+     rtl::OUString       aExeFileName;
+ 
+ 
+@@ -397,7 +398,7 @@ BOOL InitVCL( const ::com::sun::star::uno::Reference< ::com::sun::star::lang::XM
+ 
+     // Den AppFileName gleich holen und absolut machen, bevor das
+     // WorkingDirectory sich aendert...
+-    aStartInfo.getExecutableFile( aExeFileName );
++    osl_getExecutableFile( &aExeFileName.pData );
+ 
+     // convert path to native file format
+     rtl::OUString aNativeFileName;
+diff --git a/vcl/test/dndtest.cxx b/vcl/test/dndtest.cxx
+index 93ae07c..0b5469f 100755
+--- vcl/test/dndtest.cxx
++++ vcl/test/dndtest.cxx
+@@ -89,8 +89,8 @@
+ #include <com/sun/star/datatransfer/dnd/XDragGestureListener.hpp>
+ #endif
+ 
+-#ifndef _VOS_PROCESS_HXX_
+-#include <vos/process.hxx>
++#ifndef _OSL_PROCESS_H_
++#include <osl/process.h>
+ #endif
+ 
+ #include <stdio.h>
+@@ -203,18 +203,17 @@ public:
+ void MyApp::Main()
+ {
+ 	OUString aRegistry;
+-	OStartupInfo aInfo;
+ 
+-	for( sal_Int32 n = 0, nmax = aInfo.getCommandArgCount(); n < nmax; n++ )
++	for( sal_Int32 n = 0, nmax = osl_getCommandArgCount(); n < nmax; n++ )
+ 	{
+ 		OUString aArg;
+ 
+-		aInfo.getCommandArg( n, aArg );
++		osl_getCommandArg( n, &aArg.pData );
+ 		
+ 		if( aArg.compareTo( OUString::createFromAscii( "-r" ), 2 ) == 0 )
+ 		{
+ 			if ( n + 1 < nmax )
+-				aInfo.getCommandArg( ++n, aRegistry );
++				osl_getCommandArg( ++n, &aRegistry.pData );
+ 		}
+ 	}
+ 
+diff --git a/vcl/unx/kde/kdedata.cxx b/vcl/unx/kde/kdedata.cxx
+index 1b9bc3f..7c642e6 100644
+--- vcl/unx/kde/kdedata.cxx
++++ vcl/unx/kde/kdedata.cxx
+@@ -77,9 +77,6 @@
+ #include "i18n_xkb.hxx"
+ #endif
+ 
+-#ifndef _VOS_PROCESS_HXX_
+-#include <vos/process.hxx>
+-#endif
+ #ifndef _VOS_MUTEX_HXX
+ #include <vos/mutex.hxx>
+ #endif
+@@ -155,17 +152,16 @@ void KDEXLib::Init()
+ 
+     m_nFakeCmdLineArgs = 1;
+ 	USHORT nIdx;
+-	vos::OExtCommandLine aCommandLine;
+-	int nParams = aCommandLine.getCommandArgCount();
++	int nParams = osl_getCommandArgCount();
+ 	rtl::OString aDisplay;
+ 	rtl::OUString aParam, aBin;
+ 
+ 	for ( nIdx = 0; nIdx < nParams; ++nIdx ) 
+ 	{
+-		aCommandLine.getCommandArg( nIdx, aParam );
++		osl_getCommandArg( nIdx, &aParam.pData );
+ 		if ( !m_pFreeCmdLineArgs && aParam.equalsAscii( "-display" ) && nIdx + 1 < nParams )
+ 		{
+-			aCommandLine.getCommandArg( nIdx + 1, aParam );
++			osl_getCommandArg( nIdx + 1, &aParam.pData );
+ 			aDisplay = rtl::OUStringToOString( aParam, osl_getThreadTextEncoding() );
+ 
+ 			m_nFakeCmdLineArgs = 3;
+diff --git a/vcl/unx/source/app/saldata.cxx b/vcl/unx/source/app/saldata.cxx
+index 4a29665..aaaaa97 100644
+--- vcl/unx/source/app/saldata.cxx
++++ vcl/unx/source/app/saldata.cxx
+@@ -64,9 +64,6 @@
+ #include <unistd.h>
+ #endif
+ 
+-#ifndef _VOS_PROCESS_HXX_
+-#include <vos/process.hxx>
+-#endif
+ #ifndef _VOS_MUTEX_HXX
+ #include <vos/mutex.hxx>
+ #endif
+@@ -432,16 +429,15 @@ void SalXLib::Init()
+ 	Display *pDisp = NULL;
+ 
+ 	// is there a -display command line parameter?
+-	vos::OExtCommandLine aCommandLine;
+-	sal_uInt32 nParams = aCommandLine.getCommandArgCount();
++	sal_uInt32 nParams = osl_getCommandArgCount();
+ 	rtl::OUString aParam;
+ 	rtl::OString aDisplay;
+ 	for (USHORT i=0; i<nParams; i++) 
+ 	{
+-		aCommandLine.getCommandArg(i, aParam);
++		osl_getCommandArg(i, &aParam.pData);
+ 		if (aParam.equalsAscii("-display"))
+ 		{
+-			aCommandLine.getCommandArg(i+1, aParam);
++			osl_getCommandArg(i+1, &aParam.pData);
+ 			aDisplay = rtl::OUStringToOString(
+ 				   aParam, osl_getThreadTextEncoding());
+ 
