@@ -82,7 +82,7 @@ void StringResMgr::loadStrings()
 {
     init();
 
-    // Get all text files with names formatted this way (<dialog name>_<locale>.properties).
+    // Get all text files with names formatted this way (/<locale name>/*.properties).
     vector<PropertiesFile> files;
     getPropertiesFiles(files);
 
@@ -106,6 +106,7 @@ void StringResMgr::loadStrings()
     en_US.Country = ascii("US");
     en_US.Variant = ascii("");
     mxStrResMgr->setDefaultLocale(en_US);
+    mxStrResMgr->setCurrentLocale(getSystemLocale(), true);
 }
 
 const OUString StringResMgr::getSystemLocaleString() const
@@ -171,7 +172,7 @@ const lang::Locale StringResMgr::getSystemLocale() const
         }
     }
 
-#if DEBUG_SCSOLVER_RESMGR    
+#if DEBUG_SCSOLVER_RESMGR || true
     fprintf(stdout, "StringResMgr::getSystemLocale: language = '%s'  country = '%s'\n",
             OUStringToOString(locale.Language, RTL_TEXTENCODING_UTF8).getStr(),
             OUStringToOString(locale.Country, RTL_TEXTENCODING_UTF8).getStr());fflush(stdout);
@@ -195,8 +196,6 @@ const OUString StringResMgr::getLocaleStr(const OUString& resName)
 
     if (!mxStrResMgr.is() || !resName.getLength())
         return ascii("(empty)");
-
-    mxStrResMgr->setCurrentLocale(getSystemLocale(), true);
 
     try
     {
