@@ -151,6 +151,7 @@ public:
 	const Reference < awt::XControlModel > getWidgetModelByName( const rtl::OUString& ) const;
 	void enableWidget( const rtl::OUString&, sal_Bool = true ) const;
 	void toFront() const;
+    void setFocus() const;
 	void execute() const;
 
 	rtl::OUString getResStr( int resid ) const;

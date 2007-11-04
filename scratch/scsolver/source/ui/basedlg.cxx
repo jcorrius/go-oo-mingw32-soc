@@ -52,6 +52,8 @@
 #include <com/sun/star/awt/XTopWindow.hpp>
 #include <com/sun/star/awt/XWindow.hpp>
 
+#include <memory>
+
 using namespace std;
 using namespace com::sun::star;
 using uno::Any;
@@ -98,6 +100,7 @@ public:
 	
 	void enableWidget( const rtl::OUString&, sal_Bool );
 	void toFront();
+    void setFocus() const;
 	void execute();
 			
 	apWidgetProp addButton( sal_Int32, sal_Int32, sal_Int32, sal_Int32,
@@ -178,9 +181,8 @@ public:
 private:
 
 	SolverImpl* m_pSolverImpl;
-	
-	awt::Rectangle m_aRect;
-	bool m_bHasClosed;
+	auto_ptr<awt::Rectangle> mpDlgPosSize;
+    bool mbIsVisible;
 	
 	uno::Reference< uno::XInterface > m_oDlg;
 	uno::Reference< uno::XInterface > m_oDlgModel;
@@ -189,8 +191,9 @@ private:
 
 
 BaseDialogImpl::BaseDialogImpl( SolverImpl* p ) :
-	m_pSolverImpl( p ),
-	m_bHasClosed( false )
+    m_pSolverImpl(p),
+    mpDlgPosSize(NULL),
+    mbIsVisible(false)
 {
 }
 
@@ -228,19 +231,33 @@ void BaseDialogImpl::initialize( sal_Int16 nW, sal_Int16 nH, const rtl::OUString
 
 void BaseDialogImpl::setVisibleDefault( bool bVisible )
 {
-	Reference< awt::XWindow > xWnd( m_oDlg, UNO_QUERY );
-	if ( xWnd.is() )
-	{
-		if ( bVisible && m_bHasClosed )
-			xWnd->setPosSize( m_aRect.X, m_aRect.Y, m_aRect.Width, m_aRect.Height, awt::PosSize::POS );
-		xWnd->setVisible( bVisible );
-		if ( bVisible )
-			xWnd->setFocus();
-		else
-			m_bHasClosed = true;
-	}
-	else
-		Debug("xWnd is NULL!");
+    if (bVisible == mbIsVisible)
+        return;
+
+    Reference< awt::XWindow > xWnd(m_oDlg, UNO_QUERY);
+    if (!xWnd.is())
+    {
+        Debug("xWnd is NULL!");
+        return;
+    }
+
+    if (bVisible)
+    {
+        // show dialog.
+        if (mpDlgPosSize.get())
+        {
+            xWnd->setPosSize(mpDlgPosSize->X, mpDlgPosSize->Y, mpDlgPosSize->Width, 
+                             mpDlgPosSize->Height, awt::PosSize::POS);
+        }
+    }
+    else
+    {
+        // hide dialog.
+        mpDlgPosSize.reset(new awt::Rectangle(xWnd->getPosSize()));
+    }
+
+    xWnd->setVisible(bVisible);
+    mbIsVisible = bVisible;
 }
 
 apWidgetProp BaseDialogImpl::addButton( 
@@ -534,13 +551,26 @@ void BaseDialogImpl::enableWidget( const rtl::OUString& sName, sal_Bool bEnable 
 {
 	Reference< uno::XInterface > oWgt = getWidgetByName( sName );
 	Reference< awt::XWindow > xWnd( oWgt, UNO_QUERY );
+    if (!xWnd.is())
+        return;
 	xWnd->setEnable( bEnable );
 }
 
 void BaseDialogImpl::toFront()
 {
 	Reference< awt::XTopWindow > xWnd( m_oDlg, UNO_QUERY );
+    if (!xWnd.is())
+        return;
 	xWnd->toFront();
+}
+
+void BaseDialogImpl::setFocus() const
+{
+    Reference<awt::XWindow> xWnd(m_oDlg, UNO_QUERY);
+    if (!xWnd.is())
+        return;
+
+    xWnd->setFocus();
 }
 
 void BaseDialogImpl::execute()
@@ -721,7 +751,12 @@ void BaseDialog::enableWidget( const rtl::OUString& sName, sal_Bool bEnable ) co
 
 void BaseDialog::toFront() const
 {
-	return m_pImpl->toFront();
+    m_pImpl->toFront();
+}
+
+void BaseDialog::setFocus() const
+{
+    m_pImpl->setFocus();
 }
 
 void BaseDialog::execute() const

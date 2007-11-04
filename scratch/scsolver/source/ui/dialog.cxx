@@ -211,6 +211,7 @@ bool ConstEditDialog::doneRangeSelection() const
 {
 	SolverDialog* pDlg = getSolverImpl()->getMainDialog();
 	pDlg->setVisible( true );
+    setFocus();
 
 	if ( !isCellRangeGeometryEqual() )
 	{
@@ -544,7 +545,7 @@ void SolverDialog::setVisible( bool bVisible )
 
 		Reference< sheet::XSpreadsheet > xSheet = pCalc->getActiveSheet();
 		Reference< container::XNamed > xNamed( xSheet, UNO_QUERY );
-		printOUStr( ascii( "Current sheet is " ) + xNamed->getName() );
+//      printOUStr( ascii( "Current sheet is " ) + xNamed->getName() );
 	}
 	else
 		getConstEditDialog()->setVisible( false );
