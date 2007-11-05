@@ -259,7 +259,6 @@ void BaseDialogImpl::setVisibleDefault( bool bVisible )
             // Reference bounding box (e.g. dialog size & position of the 
             // parent dialog) exists.  Compute desired dialog position from 
             // it.
-            fprintf(stdout, "BaseDialogImpl::setVisibleDefault: referencing bounding box exists!!!\n");fflush(stdout);
             const awt::Rectangle* pRect = getPosSize();
             if (pRect)
             {
