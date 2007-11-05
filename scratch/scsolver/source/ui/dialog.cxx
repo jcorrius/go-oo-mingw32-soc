@@ -563,18 +563,24 @@ void SolverDialog::close()
 
 ConstEditDialog* SolverDialog::getConstEditDialog()
 {
-	if ( m_pConstEditDialog.get() == NULL )
-		m_pConstEditDialog.reset( new ConstEditDialog( getSolverImpl() ) );
-
-	return m_pConstEditDialog.get();
+    if (!m_pConstEditDialog.get())
+    {
+        m_pConstEditDialog.reset( new ConstEditDialog(getSolverImpl()) );
+        m_pConstEditDialog->setRefBoundingBox(getPosSize());
+    }
+    
+    return m_pConstEditDialog.get();
 }
 
 OptionDialog* SolverDialog::getOptionDialog()
 {
-	if( m_pOptionDialog.get() == NULL )
-		m_pOptionDialog.reset( new OptionDialog( getSolverImpl() ) );
+    if(!m_pOptionDialog.get())
+    {
+        m_pOptionDialog.reset( new OptionDialog( getSolverImpl() ) );
+        m_pOptionDialog->setRefBoundingBox(getPosSize());
+    }
 
-	return m_pOptionDialog.get();
+    return m_pOptionDialog.get();
 }
 
 sal_Int16 SolverDialog::getSelectedConstraintPos()

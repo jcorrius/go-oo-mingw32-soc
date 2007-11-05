@@ -47,6 +47,7 @@ namespace com { namespace sun { namespace star {
 
 	namespace awt
 	{
+        struct Rectangle;
 		class XControlModel;
 	}
 
@@ -100,6 +101,9 @@ public:
 	virtual bool doneRangeSelection() const = 0;
 
 	virtual void close() = 0;
+
+    void setRefBoundingBox(const ::com::sun::star::awt::Rectangle* rect);
+    const ::com::sun::star::awt::Rectangle* getPosSize() const;
 
 	// Widget creation methods
 	
