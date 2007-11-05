@@ -1,6 +1,6 @@
 --- /dev/null	
 +++ scsolver/source/ui/basedlg.cxx	
-@@ -0,0 +1,940 @@
+@@ -0,0 +1,1023 @@
 +/*************************************************************************
 + *
 + *  The Contents of this file are made available subject to
@@ -55,6 +55,8 @@
 +#include <com/sun/star/awt/XTopWindow.hpp>
 +#include <com/sun/star/awt/XWindow.hpp>
 +
++#include <memory>
++
 +using namespace std;
 +using namespace com::sun::star;
 +using uno::Any;
@@ -89,8 +91,8 @@
 +public:
 +	BaseDialogImpl( SolverImpl* );
 +	~BaseDialogImpl();
-+	
-+	void initialize( sal_Int16, sal_Int16, const rtl::OUString& );
++
++    void initialize( sal_Int32 nW, sal_Int32 nH, const rtl::OUString& );
 +	void setVisibleDefault( bool );
 +	
 +	uno::Reference < uno::XInterface > getDialog() const { return m_oDlg; }
@@ -101,8 +103,12 @@
 +	
 +	void enableWidget( const rtl::OUString&, sal_Bool );
 +	void toFront();
++    void setFocus() const;
 +	void execute();
 +			
++    void setRefBoundingBox(const awt::Rectangle* rect);
++    const awt::Rectangle* getPosSize();
++
 +	apWidgetProp addButton( sal_Int32, sal_Int32, sal_Int32, sal_Int32,
 +		const rtl::OUString &, const rtl::OUString &, sal_Int16 = awt::PushButtonType_STANDARD );
 +		
@@ -181,9 +187,9 @@
 +private:
 +
 +	SolverImpl* m_pSolverImpl;
-+	
-+	awt::Rectangle m_aRect;
-+	bool m_bHasClosed;
++	auto_ptr<awt::Rectangle> mpDlgPosSize;
++    auto_ptr<awt::Rectangle> mpRefBoundingBox;
++    bool mbIsVisible;
 +	
 +	uno::Reference< uno::XInterface > m_oDlg;
 +	uno::Reference< uno::XInterface > m_oDlgModel;
@@ -192,8 +198,9 @@
 +
 +
 +BaseDialogImpl::BaseDialogImpl( SolverImpl* p ) :
-+	m_pSolverImpl( p ),
-+	m_bHasClosed( false )
++    m_pSolverImpl(p),
++    mpDlgPosSize(NULL),
++    mbIsVisible(false)
 +{
 +}
 +
@@ -201,7 +208,7 @@
 +{
 +}
 +
-+void BaseDialogImpl::initialize( sal_Int16 nW, sal_Int16 nH, const rtl::OUString& sTitle )
++void BaseDialogImpl::initialize( sal_Int32 nW, sal_Int32 nH, const rtl::OUString& sTitle )
 +{
 +	CalcInterface* pCalc = getSolverImpl()->getCalcInterface();
 +	Reference< lang::XMultiComponentFactory > xSM = pCalc->getServiceManager();
@@ -231,19 +238,51 @@
 +
 +void BaseDialogImpl::setVisibleDefault( bool bVisible )
 +{
-+	Reference< awt::XWindow > xWnd( m_oDlg, UNO_QUERY );
-+	if ( xWnd.is() )
-+	{
-+		if ( bVisible && m_bHasClosed )
-+			xWnd->setPosSize( m_aRect.X, m_aRect.Y, m_aRect.Width, m_aRect.Height, awt::PosSize::POS );
-+		xWnd->setVisible( bVisible );
-+		if ( bVisible )
-+			xWnd->setFocus();
-+		else
-+			m_bHasClosed = true;
-+	}
-+	else
-+		Debug("xWnd is NULL!");
++    if (bVisible == mbIsVisible)
++        return;
++
++    Reference< awt::XWindow > xWnd(m_oDlg, UNO_QUERY);
++    if (!xWnd.is())
++    {
++        Debug("xWnd is NULL!");
++        return;
++    }
++
++    if (bVisible)
++    {
++        // show dialog.
++        if (mpDlgPosSize.get())
++        {
++            // previous dialog position is stored.  use it.
++            xWnd->setPosSize(mpDlgPosSize->X, mpDlgPosSize->Y, mpDlgPosSize->Width, 
++                             mpDlgPosSize->Height, awt::PosSize::POS);
++        }
++        else if (mpRefBoundingBox.get())
++        {
++            // Reference bounding box (e.g. dialog size & position of the 
++            // parent dialog) exists.  Compute desired dialog position from 
++            // it.
++            const awt::Rectangle* pRect = getPosSize();
++            if (pRect)
++            {
++                sal_Int32 xoffset = (mpRefBoundingBox->Width - pRect->Width)/2;
++                sal_Int32 yoffset = (mpRefBoundingBox->Height - pRect->Height)/2;
++                xWnd->setPosSize(mpRefBoundingBox->X + xoffset, 
++                                 mpRefBoundingBox->Y + yoffset,
++                                 0, 0, awt::PosSize::POS);
++            }
++        }
++    }
++    else
++    {
++        // hide dialog.
++        if (!mpDlgPosSize.get())
++            mpDlgPosSize.reset(new awt::Rectangle);
++        *mpDlgPosSize = xWnd->getPosSize();
++    }
++
++    xWnd->setVisible(bVisible);
++    mbIsVisible = bVisible;
 +}
 +
 +apWidgetProp BaseDialogImpl::addButton( 
@@ -537,13 +576,26 @@
 +{
 +	Reference< uno::XInterface > oWgt = getWidgetByName( sName );
 +	Reference< awt::XWindow > xWnd( oWgt, UNO_QUERY );
++    if (!xWnd.is())
++        return;
 +	xWnd->setEnable( bEnable );
 +}
 +
 +void BaseDialogImpl::toFront()
 +{
 +	Reference< awt::XTopWindow > xWnd( m_oDlg, UNO_QUERY );
++    if (!xWnd.is())
++        return;
 +	xWnd->toFront();
++}
++
++void BaseDialogImpl::setFocus() const
++{
++    Reference<awt::XWindow> xWnd(m_oDlg, UNO_QUERY);
++    if (!xWnd.is())
++        return;
++
++    xWnd->setFocus();
 +}
 +
 +void BaseDialogImpl::execute()
@@ -551,7 +603,28 @@
 +	setVisibleDefault( true );
 +	toFront();
 +	Reference< awt::XDialog > xDlg( m_oDlg, UNO_QUERY );
-+	sal_Int16 r = xDlg->execute();
++	xDlg->execute();
++}
++
++void BaseDialogImpl::setRefBoundingBox(const awt::Rectangle* rect)
++{
++    if (!rect)
++    {
++        fprintf(stdout, "BaseDialogImpl::setRefBoundingBox: rectangle is null!\n");fflush(stdout);
++        return;
++    }
++
++    if (!mpRefBoundingBox.get())
++        mpRefBoundingBox.reset(new awt::Rectangle);
++    *mpRefBoundingBox = *rect;
++}
++
++const awt::Rectangle* BaseDialogImpl::getPosSize()
++{
++    Reference< awt::XWindow > xWnd(m_oDlg, UNO_QUERY);
++    if (xWnd.is())
++        mpDlgPosSize.reset(new awt::Rectangle(xWnd->getPosSize()));
++    return mpDlgPosSize.get();
 +}
 +
 +//--------------------------------------------------------------------------
@@ -565,6 +638,16 @@
 +{
 +}
 +
++void BaseDialog::setRefBoundingBox(const awt::Rectangle* rect)
++{
++    m_pImpl->setRefBoundingBox(rect);
++}
++
++const awt::Rectangle* BaseDialog::getPosSize() const
++{
++    return m_pImpl->getPosSize();
++}
++
 +void BaseDialog::initialize( sal_Int16 nW, sal_Int16 nH, const rtl::OUString& sTitle ) const
 +{
 +	m_pImpl->initialize( nW, nH, sTitle );
@@ -573,11 +656,6 @@
 +void BaseDialog::setVisibleDefault( bool b ) const
 +{
 +	m_pImpl->setVisibleDefault( b );
-+}
-+
-+ResMgr* BaseDialog::getResMgr() const
-+{
-+	return getSolverImpl()->getResMgr();
 +}
 +
 +rtl::OUString BaseDialog::getResStr( int resid ) const
@@ -729,7 +807,12 @@
 +
 +void BaseDialog::toFront() const
 +{
-+	return m_pImpl->toFront();
++    m_pImpl->toFront();
++}
++
++void BaseDialog::setFocus() const
++{
++    m_pImpl->setFocus();
 +}
 +
 +void BaseDialog::execute() const
