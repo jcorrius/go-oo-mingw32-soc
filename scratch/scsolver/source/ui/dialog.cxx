@@ -215,7 +215,7 @@ bool ConstEditDialog::doneRangeSelection() const
 
 	if ( !isCellRangeGeometryEqual() )
 	{
-		pDlg->showSolveError( getResStr(SCSOLVER_STR_MSG_REF_CON_RANGE_MISMATCH) );
+		pDlg->showMessage( getResStr(SCSOLVER_STR_MSG_REF_CON_RANGE_MISMATCH) );
 		return false;
 	}
 
@@ -376,9 +376,6 @@ SolverDialog::SolverDialog( SolverImpl* p )
 
 	m_pConstEditDialog( NULL ),
 	m_pOptionDialog( NULL ),
-	m_pSolveErrorDlg( NULL ),
-	m_pSolInfeasibleDlg( NULL ),
-	m_pSolFoundDlg( NULL ),
 	m_pTopWindowListener(NULL),
 	m_pTargetRngListener( NULL ),
 	m_pVarCellsRngListener( NULL ),
@@ -862,29 +859,21 @@ void SolverDialog::setConstraintImpl(
  		OSL_ASSERT( !"oLB is NULL" );
 }
 
-void SolverDialog::showSolveError( const rtl::OUString& sMsg )
+void SolverDialog::showMessage( const rtl::OUString& sMsg )
 {
-	if ( m_pSolveErrorDlg.get() == NULL )
-		m_pSolveErrorDlg.reset( new MessageDialog( getSolverImpl(), sMsg ) );
-	else
-		m_pSolveErrorDlg->setMessage( sMsg );
-	m_pSolveErrorDlg->execute();
+    MessageDialog dlg(getSolverImpl(), sMsg);
+    dlg.setRefBoundingBox(getPosSize());
+    dlg.execute();
 }
 
 void SolverDialog::showSolutionInfeasible()
 {
-	if ( m_pSolInfeasibleDlg.get() == NULL )
-		m_pSolInfeasibleDlg.reset( new MessageDialog( getSolverImpl(), 
-				getResStr(SCSOLVER_STR_MSG_SOLUTION_NOT_FOUND) ) );
-	m_pSolInfeasibleDlg->execute();
+    showMessage(getResStr(SCSOLVER_STR_MSG_SOLUTION_NOT_FOUND));
 }
 
 void SolverDialog::showSolutionFound()
 {
-	if ( m_pSolFoundDlg.get() == NULL )
-		m_pSolFoundDlg.reset( new MessageDialog( getSolverImpl(), 
-				getResStr(SCSOLVER_STR_MSG_SOLUTION_FOUND) ) );
-	m_pSolFoundDlg->execute();
+    showMessage(getResStr(SCSOLVER_STR_MSG_SOLUTION_FOUND));
 }
 
 void SolverDialog::reset()

@@ -202,7 +202,7 @@ sal_Bool SolverImpl::solveModel()
 	}
 	catch( const RuntimeError& e )
 	{
-		getMainDialog()->showSolveError( e.getMessage() );
+		getMainDialog()->showMessage( e.getMessage() );
 	}
 
 	if ( p->isSolved() )

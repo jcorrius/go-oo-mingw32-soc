@@ -169,7 +169,7 @@ public:
 	
 	void setConstraint( const rtl::OUString&, const rtl::OUString&, const Equality );
 
-	void showSolveError( const rtl::OUString& );
+	void showMessage( const rtl::OUString& );
 	void showSolutionInfeasible();
 	void showSolutionFound();
 	
@@ -192,9 +192,6 @@ private:
 
 	std::auto_ptr<ConstEditDialog> m_pConstEditDialog;
 	std::auto_ptr<OptionDialog>  m_pOptionDialog;
-	std::auto_ptr<MessageDialog> m_pSolveErrorDlg;
-	std::auto_ptr<MessageDialog> m_pSolInfeasibleDlg;
-	std::auto_ptr<MessageDialog> m_pSolFoundDlg;
 
 	// Action Listeners
 	TopWindowListener* m_pTopWindowListener;

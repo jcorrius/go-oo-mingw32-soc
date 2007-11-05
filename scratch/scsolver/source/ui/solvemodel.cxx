@@ -229,7 +229,7 @@ public:
 		Goal eGoal = pMainDlg->getGoal();
 		if ( eGoal == GOAL_UNKNOWN )
 		{
-			pMainDlg->showSolveError( 
+			pMainDlg->showMessage( 
 				pMainDlg->getResStr(SCSOLVER_STR_MSG_GOAL_NOT_SET) );
 			return;
 		}
@@ -281,12 +281,12 @@ public:
 		catch( const scsolver::RuntimeError& e )
 		{
 			// This error message is localizable.
-			pMainDlg->showSolveError( e.getMessage() );
+			pMainDlg->showMessage( e.getMessage() );
 		}
 		catch( const std::exception& e )
 		{
 			// standard exception.  should rarely happen.
-			pMainDlg->showSolveError(
+			pMainDlg->showMessage(
 				pMainDlg->getResStr(SCSOLVER_STR_MSG_STD_EXCEPTION_CAUGHT) );
 		}
 	}
@@ -302,7 +302,7 @@ public:
 		Goal eGoal = pMainDlg->getGoal();
 		if ( eGoal == GOAL_UNKNOWN )
 		{
-			pMainDlg->showSolveError( ascii_i18n("Goal is not set") );
+			pMainDlg->showMessage( ascii_i18n("Goal is not set") );
 			return;
 		}
 
@@ -335,21 +335,21 @@ public:
 		}
 		catch ( const IterationTimedOut& )
 		{
-			pMainDlg->showSolveError(
+			pMainDlg->showMessage(
 				getSolverImpl()->getResStr(SCSOLVER_STR_MSG_ITERATION_TIMED_OUT) );
 		}
 		catch ( const MaxIterationReached& )
 		{
-			pMainDlg->showSolveError(
+			pMainDlg->showMessage(
 				getSolverImpl()->getResStr(SCSOLVER_STR_MSG_MAX_ITERATION_REACHED) );
 		}
 		catch ( const RuntimeError& e )
 		{
-			pMainDlg->showSolveError( e.getMessage() );
+			pMainDlg->showMessage( e.getMessage() );
 		}
 		catch ( const ::std::exception& )
 		{
-			pMainDlg->showSolveError(
+			pMainDlg->showMessage(
 				getSolverImpl()->getResStr(SCSOLVER_STR_MSG_STD_EXCEPTION_CAUGHT) );
 		}
 	}

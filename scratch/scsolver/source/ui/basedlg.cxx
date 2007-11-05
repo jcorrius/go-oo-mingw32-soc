@@ -618,12 +618,9 @@ void BaseDialogImpl::setRefBoundingBox(const awt::Rectangle* rect)
 
 const awt::Rectangle* BaseDialogImpl::getPosSize()
 {
-    if (!mpDlgPosSize.get())
-    {
-        Reference< awt::XWindow > xWnd(m_oDlg, UNO_QUERY);
-        if (xWnd.is())
-            mpDlgPosSize.reset(new awt::Rectangle(xWnd->getPosSize()));
-    }
+    Reference< awt::XWindow > xWnd(m_oDlg, UNO_QUERY);
+    if (xWnd.is())
+        mpDlgPosSize.reset(new awt::Rectangle(xWnd->getPosSize()));
     return mpDlgPosSize.get();
 }
 
