@@ -424,7 +424,7 @@ class NumFormatHelper
 public:
 	NumFormatHelper( const uno::Reference< table::XCellRange >& xRange )
 	{
-		mxSupplier.set( getCurrentDocument(), uno::UNO_QUERY_THROW );
+		mxSupplier.set( getModelFromRange( xRange ), uno::UNO_QUERY_THROW );
 		mxRangeProps.set( xRange, uno::UNO_QUERY_THROW);
 		mxFormats = mxSupplier->getNumberFormats();
 	}
