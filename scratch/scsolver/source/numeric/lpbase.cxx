@@ -28,6 +28,7 @@
 
 #include "numeric/lpbase.hxx"
 #include "numeric/lpmodel.hxx"
+#include "numeric/matrix.hxx"
 #include <list>
 #include <vector>
 #include <cstddef>

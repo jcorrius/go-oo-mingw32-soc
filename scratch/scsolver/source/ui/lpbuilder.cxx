@@ -40,6 +40,7 @@
 using namespace ::com::sun::star;
 using com::sun::star::table::CellAddress;
 using scsolver::numeric::Matrix;
+using namespace std;
 
 namespace scsolver {
 

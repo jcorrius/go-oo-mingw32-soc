@@ -33,13 +33,11 @@
 #include <vector>
 #include <memory>
 
-namespace scsolver { namespace numeric {
+namespace scsolver { namespace numeric { 
 
 class Matrix;
 
-}}
-
-namespace scsolver { namespace numeric { namespace lp {
+namespace lp {
 
 
 class BaseAlgorithm;
@@ -72,13 +70,13 @@ public:
 	double getCost( size_t rowid ) const;
 	::scsolver::numeric::Matrix getCostVector() const;
 	void setCostVectorElement( size_t, double );
-	void setCostVector( const std::vector<double>& );
+	void setCostVector( const ::std::vector<double>& );
 
 	double   getVarBound( size_t, Bound ) const;
 	void     setVarBound( size_t, Bound, double );
 	bool isVarBounded( size_t, Bound ) const;
 
-	void deleteVariables( const std::vector<size_t>& );
+	void deleteVariables( const ::std::vector<size_t>& );
 
 	Goal getGoal() const;
 	void setGoal( Goal );
@@ -103,9 +101,9 @@ public:
 	::scsolver::numeric::Matrix getRhsVector() const;
 	double getRhsValue( size_t ) const;
 	void setRhsValue( size_t, double );
-	std::vector< ::scsolver::numeric::Equality > getEqualityVector() const;
-	Equality getEquality( size_t ) const;
-	void addConstraint( const std::vector<double>&, Equality, double );
+	::std::vector< ::scsolver::numeric::Equality > getEqualityVector() const;
+	::scsolver::numeric::Equality getEquality( size_t ) const;
+	void addConstraint( const ::std::vector<double>&, Equality, double );
 	void setStandardConstraintMatrix( const ::scsolver::numeric::Matrix&, const ::scsolver::numeric::Matrix& );
 
 private:

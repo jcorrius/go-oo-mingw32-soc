@@ -32,10 +32,10 @@
 #include <memory>
 
 namespace scsolver { namespace numeric {
-    class Matrix;
-}
 
-namespace scsolver { namespace numeric { namespace lp {
+class Matrix;
+
+namespace lp {
 
 class Model;
 class BaseAlgorithmImpl;

@@ -37,6 +37,7 @@
 #include "option.hxx"
 #include "numeric/lpmodel.hxx"
 #include "numeric/nlpmodel.hxx"
+#include "numeric/matrix.hxx"
 #include "numeric/type.hxx"
 #include "numeric/lpbase.hxx"
 #include "numeric/exception.hxx"

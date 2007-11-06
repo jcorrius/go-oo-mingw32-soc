@@ -29,6 +29,7 @@
 #include "numeric/lpsolve.hxx"
 #include "numeric/lpmodel.hxx"
 #include "numeric/exception.hxx"
+#include "numeric/matrix.hxx"
 #include "unoglobal.hxx"
 #include "tool/global.hxx"
 #include "numeric/type.hxx"
