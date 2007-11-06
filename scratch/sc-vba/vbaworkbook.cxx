@@ -433,7 +433,7 @@ ScVbaWorkbook::Styles( const::uno::Any& Item ) throw (uno::RuntimeException)
 
 // Amelia Wang
 uno::Any SAL_CALL
-ScVbaWorkbook::Names( ) throw (uno::RuntimeException)
+ScVbaWorkbook::Names( const css::uno::Any& aIndex ) throw (uno::RuntimeException)
 {
 	uno::Reference< frame::XModel > xModel( getModel() );
 	ScDocShell * pDocShell = ( ScDocShell* )SfxObjectShell::GetWorkingDocument();
@@ -444,7 +444,11 @@ ScVbaWorkbook::Names( ) throw (uno::RuntimeException)
 	uno::Reference< beans::XPropertySet > xProps( xModel, uno::UNO_QUERY_THROW );
 	uno::Reference< sheet::XNamedRanges > xNamedRanges(  xProps->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("NamedRanges") ) ), uno::UNO_QUERY_THROW );
 	uno::Reference< vba::XCollection > xNames( new ScVbaNames( this , mxContext , xNamedRanges , xModel ));
-	return uno::Any( xNames );
+    if (  aIndex.getValueTypeClass() == uno::TypeClass_VOID )
+    {
+        return uno::Any( xNames );
+    }
+    return uno::Any( xNames->Item( aIndex, uno::Any() ) );
 }
 
 rtl::OUString& 

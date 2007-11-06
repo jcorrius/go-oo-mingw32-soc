@@ -36,6 +36,7 @@
 
 #include <com/sun/star/table/XCellRange.hpp>
 #include <com/sun/star/sheet/XCellRangeAddressable.hpp>
+#include <com/sun/star/sheet/XCellRangeReferrer.hpp>
 
 #include "vbaname.hxx"
 #include "vbarange.hxx"
@@ -197,7 +198,10 @@ ScVbaName::setRefersToR1C1Local( const ::rtl::OUString & rRefersTo ) throw (css:
 css::uno::Reference< oo::excel::XRange >
 ScVbaName::getRefersToRange() throw (css::uno::RuntimeException)
 {
-	css::uno::Reference< oo::excel::XRange > xRange;
+    uno::Reference< sheet::XCellRangeReferrer > xCellRangeReferr( mxNamedRange, uno::UNO_QUERY_THROW );
+    uno::Reference< table::XCellRange > xCellRange( xCellRangeReferr->getReferredCells(), uno::UNO_QUERY_THROW );
+    uno::Reference< vba::XHelperInterface > xParent( ScVbaGlobals::getGlobalsImpl( mxContext )->getActiveWorkbook(), uno::UNO_QUERY_THROW );
+	css::uno::Reference< oo::excel::XRange > xRange( new ScVbaRange( xParent, mxContext, xCellRange ) );
 	return xRange;
 }
 

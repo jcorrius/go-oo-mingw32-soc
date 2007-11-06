@@ -429,13 +429,17 @@ ScVbaApplication::Range( const uno::Any& Cell1, const uno::Any& Cell2 ) throw (u
 }
 
 uno::Any SAL_CALL
-ScVbaApplication::Names( ) throw ( uno::RuntimeException )
+ScVbaApplication::Names( const css::uno::Any& aIndex ) throw ( uno::RuntimeException )
 {
     uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY_THROW );
     uno::Reference< beans::XPropertySet > xPropertySet( xModel, uno::UNO_QUERY_THROW );
     uno::Reference< sheet::XNamedRanges > xNamedRanges( xPropertySet->getPropertyValue( rtl::OUString::createFromAscii("NamedRanges")) , uno::UNO_QUERY_THROW );
     css::uno::Reference< excel::XNames > xNames ( new ScVbaNames( this , mxContext , xNamedRanges , xModel ) );
-        return uno::makeAny( xNames );
+    if (  aIndex.getValueTypeClass() == uno::TypeClass_VOID )
+    {
+        return uno::Any( xNames );
+    }
+    return uno::Any( xNames->Item( aIndex, uno::Any() ) );
 }
 
 

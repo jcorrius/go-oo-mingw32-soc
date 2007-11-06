@@ -75,6 +75,7 @@ ScVbaNames::ScVbaNames(const css::uno::Reference< oo::vba::XHelperInterface >& x
 			mxModel( xModel ),
 			mxNames( xNames )
 {
+    m_xNameAccess.set( xNames, uno::UNO_QUERY_THROW );
 }
 
 ScVbaNames::~ScVbaNames()

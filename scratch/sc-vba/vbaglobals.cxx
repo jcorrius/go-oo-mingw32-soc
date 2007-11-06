@@ -158,9 +158,9 @@ ScVbaGlobals::Range( const uno::Any& Cell1, const uno::Any& Cell2 ) throw (uno::
 }
 
 uno::Any SAL_CALL
-ScVbaGlobals::Names( ) throw ( uno::RuntimeException )
+ScVbaGlobals::Names( const css::uno::Any& aIndex ) throw ( uno::RuntimeException )
 {
-	return getApplication()->Names();
+	return getApplication()->Names( aIndex );
 }
 
 namespace globals
