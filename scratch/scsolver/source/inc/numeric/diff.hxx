@@ -36,7 +36,7 @@ namespace scsolver { namespace numeric {
 
 class BaseFuncObj;
 
-class FuncObjectNotSet : public std::exception {};
+class FuncObjectNotSet : public ::std::exception {};
 
 /** 
  * Algorithm derived from Chapter 4.2 (p.93) of "A First Course In Numerical 

@@ -34,7 +34,7 @@ namespace scsolver { namespace numeric {
 
 class Matrix;
 
-class NotEnoughDataPoints : public std::exception 
+class NotEnoughDataPoints : public ::std::exception 
 {
 public:
     virtual const char* what() const throw();

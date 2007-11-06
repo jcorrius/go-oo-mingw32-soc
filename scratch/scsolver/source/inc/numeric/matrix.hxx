@@ -39,37 +39,37 @@ namespace scsolver { namespace numeric {
  * This exception is thrown when an element being accessed is
  * outside the current matrix boundary.
  */
-class BadIndex : public std::exception 
+class BadIndex : public ::std::exception 
 {
 public:
     virtual const char* what() const throw();
 };
 
-class MatrixSizeMismatch : public std::exception 
+class MatrixSizeMismatch : public ::std::exception 
 {
 public:
     virtual const char* what() const throw();
 };
 
-class MatrixNotDiagonal : public std::exception
+class MatrixNotDiagonal : public ::std::exception
 {
 public:
     virtual const char* what() const throw();
 };
 
-class OperationOnEmptyMatrix : public std::exception
+class OperationOnEmptyMatrix : public ::std::exception
 {
 public:
     virtual const char* what() const throw();
 };
 
-class SingularMatrix : public std::exception
+class SingularMatrix : public ::std::exception
 {
 public:
     virtual const char* what() const throw();
 };
 
-class NonSquareMatrix : public std::exception
+class NonSquareMatrix : public ::std::exception
 {
 public:
     virtual const char* what() const throw();

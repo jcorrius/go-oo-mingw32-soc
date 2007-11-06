@@ -283,7 +283,7 @@ public:
 			// This error message is localizable.
 			pMainDlg->showMessage( e.getMessage() );
 		}
-		catch( const std::exception& e )
+		catch( const ::std::exception& e )
 		{
 			// standard exception.  should rarely happen.
 			pMainDlg->showMessage(
