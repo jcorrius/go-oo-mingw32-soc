@@ -29,6 +29,7 @@
 #define _SCSOLVER_NUMERIC_CELLFUNCOBJ_HXX_
 
 #include "numeric/funcobj.hxx"
+#include "unoglobal.hxx"
 #include <memory>
 #include <vector>
 #include <string>

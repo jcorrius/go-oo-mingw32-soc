@@ -32,9 +32,7 @@
 #include <cppuhelper/implementationentry.hxx>
 #include <vector>
 #include <string>
-
-using namespace com::sun::star;
-
+#include <sal/config.h>
 
 namespace scsolver {
 
