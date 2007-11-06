@@ -34,6 +34,8 @@
 #include <stdio.h>
 #include <memory>
 
+using namespace std;
+
 namespace scsolver { namespace numeric {
 
 struct SearchData

@@ -103,7 +103,7 @@ public:
 	::scsolver::numeric::Matrix getRhsVector() const;
 	double getRhsValue( size_t ) const;
 	void setRhsValue( size_t, double );
-	std::vector<Equality> getEqualityVector() const;
+	std::vector< ::scsolver::numeric::Equality > getEqualityVector() const;
 	Equality getEquality( size_t ) const;
 	void addConstraint( const std::vector<double>&, Equality, double );
 	void setStandardConstraintMatrix( const ::scsolver::numeric::Matrix&, const ::scsolver::numeric::Matrix& );

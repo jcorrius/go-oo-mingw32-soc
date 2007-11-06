@@ -39,6 +39,8 @@
 #include <map>
 #include <list>
 
+using namespace std;
+	
 namespace scsolver { namespace numeric { namespace lp {
 
 typedef vector<size_t>				uInt32Container;

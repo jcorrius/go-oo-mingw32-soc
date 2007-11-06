@@ -34,6 +34,7 @@
 #include <iostream>
 #include <stdio.h>
 
+using namespace std;
 using com::sun::star::table::CellAddress;
 
 namespace scsolver { namespace numeric {
@@ -42,7 +43,7 @@ struct CellFuncObjImpl
 {
 	CalcInterface* pCalc;
 	CellAddress TargetCell;
-	std::vector<CellAddress> DecVarCells;
+	vector<CellAddress> DecVarCells;
 };
 
 //-----------------------------------------------------------------
@@ -64,20 +65,20 @@ CellFuncObj::~CellFuncObj() throw()
 {
 }
 
-const std::vector<double>& CellFuncObj::getVars() const
+const vector<double>& CellFuncObj::getVars() const
 {
     // Does absolutely nothing....
-    std::vector<double> fake;
+    vector<double> fake;
     return fake;
 }
 
-void CellFuncObj::setVars(const std::vector<double>& vars)
+void CellFuncObj::setVars(const vector<double>& vars)
 {
-	std::vector<CellAddress>::const_iterator itr, 
+	vector<CellAddress>::const_iterator itr, 
 		itrBeg = m_pImpl->DecVarCells.begin(), 
 		itrEnd = m_pImpl->DecVarCells.end();
 
-    std::vector<double>::const_iterator itrVar,
+    vector<double>::const_iterator itrVar,
         itrVarBeg = vars.begin(), itrVarEnd = vars.end();
 
     for (itr = itrBeg, itrVar = itrVarBeg; itr != itrEnd && itrVar != itrVarEnd; ++itr, ++itrVar)
@@ -99,7 +100,7 @@ double CellFuncObj::eval()
 
 const std::string CellFuncObj::getFuncString() const
 {
-	std::ostringstream os;
+	ostringstream os;
 	int sheet = m_pImpl->TargetCell.Sheet;
 	int column = m_pImpl->TargetCell.Column;
 	int row = m_pImpl->TargetCell.Row;

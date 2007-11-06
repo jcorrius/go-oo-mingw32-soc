@@ -33,6 +33,7 @@
 #include <cmath>
 #include <memory>
 
+using namespace std;
 using namespace scsolver::numeric;
 
 class TestFailed {};

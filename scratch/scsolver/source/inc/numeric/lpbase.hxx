@@ -30,13 +30,15 @@
 #define _LPBASE_HXX_
 
 #include <memory>
-#include "matrix.hxx"
+
+namespace scsolver { namespace numeric {
+    class Matrix;
+}
 
 namespace scsolver { namespace numeric { namespace lp {
 
 class Model;
 class BaseAlgorithmImpl;
-
 
 class BaseAlgorithm
 {
@@ -60,8 +62,8 @@ public:
 	 */
 	Model* getCanonicalModel() const;
 	
-	Matrix getSolution() const;
-	void setSolution( const Matrix& );
+	::scsolver::numeric::Matrix getSolution() const;
+	void setSolution( const ::scsolver::numeric::Matrix& );
 
 	/**
      * This method must be called to set a final solution if a canonical model
@@ -72,7 +74,7 @@ public:
      * 
      * @param mx solution matrix
 	 */
-	void setCanonicalSolution( const Matrix& mx );
+	void setCanonicalSolution( const ::scsolver::numeric::Matrix& mx );
 
 private:
 	::std::auto_ptr<BaseAlgorithmImpl> m_pImpl;

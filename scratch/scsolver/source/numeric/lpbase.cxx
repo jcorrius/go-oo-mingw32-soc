@@ -25,6 +25,7 @@
  *
  ************************************************************************/
 
+
 #include "numeric/lpbase.hxx"
 #include "numeric/lpmodel.hxx"
 #include <list>
@@ -32,7 +33,10 @@
 #include <cstddef>
 #include "tool/global.hxx"
 
+using namespace std;
+
 namespace scsolver { namespace numeric { namespace lp {
+
 
 class BaseAlgorithmImpl
 {
@@ -71,18 +75,14 @@ private:
 	void initPermIndex();
 };
 
-}}}
-
-using scsolver::numeric::Matrix;
-
-scsolver::numeric::lp::BaseAlgorithmImpl::BaseAlgorithmImpl() :
+BaseAlgorithmImpl::BaseAlgorithmImpl() :
 	m_pModel( NULL ),
 	m_pCanonModel( static_cast<Model*>(NULL) ),
 	m_mxSolution( 0, 0 )
 {
 }
 
-scsolver::numeric::lp::BaseAlgorithmImpl::~BaseAlgorithmImpl() throw()
+BaseAlgorithmImpl::~BaseAlgorithmImpl() throw()
 {
 }
 
@@ -91,7 +91,7 @@ scsolver::numeric::lp::BaseAlgorithmImpl::~BaseAlgorithmImpl() throw()
  * variables taken out.  A variable is declared constant equivalent if its
  * upper and lower bound values are equal.
  */
-void scsolver::numeric::lp::BaseAlgorithmImpl::initCanonicalModel()
+void BaseAlgorithmImpl::initCanonicalModel()
 {
 	Debug( "initCanonicalModel" );
 
@@ -114,7 +114,7 @@ void scsolver::numeric::lp::BaseAlgorithmImpl::initCanonicalModel()
 			double fUBound = m_pCanonModel->getVarBound( i, BOUND_UPPER );
 			if ( fLBound == fUBound )
 			{
-				std::cout << "var " << i << " == " << fLBound << std::endl;
+				cout << "var " << i << " == " << fLBound << endl;
 
 				// This variable is constant-equivalent.  Remove it from 
 				// the temporary model.
@@ -126,13 +126,13 @@ void scsolver::numeric::lp::BaseAlgorithmImpl::initCanonicalModel()
 				double fCost = m_pCanonModel->getCostVector().operator()( 0, i );
 				fObjConst -= fCost*fLBound;
 				cnColsNuked.push_back( i );
-				std::cout << "  (equal) fObjConstant = " << fObjConst << std::endl;
+				cout << "  (equal) fObjConstant = " << fObjConst << endl;
 				for( size_t nRow = 0; nRow < nRhsSize; ++nRow )
 				{
 					double f = m_pCanonModel->getConstraint( nRow, i )*fLBound;
-					std::cout << "  " << f;
+					cout << "  " << f;
 					cnRhsConstants[nRow] -= f;
-					std::cout << ":\t" << cnRhsConstants.at( nRow ) << std::endl;
+					cout << ":\t" << cnRhsConstants.at( nRow ) << endl;
 				}
 			}
 		}
@@ -156,53 +156,53 @@ void scsolver::numeric::lp::BaseAlgorithmImpl::initCanonicalModel()
 		// the solution at all.  But set this anyway.
 		m_pCanonModel->setObjectiveFuncConstant( fObjConst );
 
-		std::vector<size_t>::iterator it,
+		vector<size_t>::iterator it,
 			itBeg = cnColsNuked.begin(), itEnd = cnColsNuked.end();
 
 		// Remove its index from permutation index list.
-		std::list<size_t>::iterator itPerm = m_cnPermVarIndex.begin();
+		list<size_t>::iterator itPerm = m_cnPermVarIndex.begin();
 		for ( it = itBeg; it != itEnd; ++it )
 			m_cnPermVarIndex.remove( *it );
 	}
 }
 
-scsolver::numeric::lp::Model* scsolver::numeric::lp::BaseAlgorithmImpl::getCanonicalModel()
+Model* BaseAlgorithmImpl::getCanonicalModel()
 {
 	if ( m_pCanonModel.get() == NULL )
 		initCanonicalModel();
 	return m_pCanonModel.get();
 }
 
-void scsolver::numeric::lp::BaseAlgorithmImpl::setSolution( const Matrix& other )
+void BaseAlgorithmImpl::setSolution( const Matrix& other )
 {
 	Matrix m( other );
 	m_mxSolution.swap( m );
 }
 
-void scsolver::numeric::lp::BaseAlgorithmImpl::setCanonicalSolution( const Matrix& mxCanonSol )
+void BaseAlgorithmImpl::setCanonicalSolution( const Matrix& mxCanonSol )
 {
 	size_t nCostSize = getModel()->getCostVector().cols();
-	std::cout << "original cost size is " << nCostSize << std::endl;
+	cout << "original cost size is " << nCostSize << endl;
 	Matrix mxSol( nCostSize, 1 );
 	mxSol.setResizable( false );
 
 	// Map solved variables into their original position.
-	std::list<size_t>::const_iterator itBeg = m_cnPermVarIndex.begin(),
+	list<size_t>::const_iterator itBeg = m_cnPermVarIndex.begin(),
 		itEnd = m_cnPermVarIndex.end(), it;
 	for ( it = itBeg; it != itEnd; ++it )
 	{
 		size_t nSrcId = ::std::distance( itBeg, it );
 		size_t nDstId = *it;
-		std::cout << "mapped var id: " << nSrcId << " -> " << nDstId << std::endl;
+		cout << "mapped var id: " << nSrcId << " -> " << nDstId << endl;
 		mxSol( nDstId, 0 ) = mxCanonSol( nSrcId, 0 );
 	}
 
 	// Insert constant variables if any
-	std::list<ConstDecVar>::const_iterator itCdvBeg = m_cnConstDecVarList.begin(),
+	list<ConstDecVar>::const_iterator itCdvBeg = m_cnConstDecVarList.begin(),
 		itCdvEnd = m_cnConstDecVarList.end(), itCdv;
 	for ( itCdv = itCdvBeg; itCdv != itCdvEnd; ++itCdv )
 	{
-		std::cout << "constant-equivalent variable: " << itCdv->Id << "\t" << itCdv->Value << std::endl;
+		cout << "constant-equivalent variable: " << itCdv->Id << "\t" << itCdv->Value << endl;
 		mxSol( itCdv->Id, 0 ) = itCdv->Value;
 	}
 
@@ -215,7 +215,7 @@ void scsolver::numeric::lp::BaseAlgorithmImpl::setCanonicalSolution( const Matri
  * values of decision variables back to their original position in case
  * of model reduction.
  */
-void scsolver::numeric::lp::BaseAlgorithmImpl::initPermIndex()
+void BaseAlgorithmImpl::initPermIndex()
 {
 	m_cnPermVarIndex.clear();
 	size_t nCostSize = getModel()->getCostVector().cols();
@@ -227,42 +227,43 @@ void scsolver::numeric::lp::BaseAlgorithmImpl::initPermIndex()
 //---------------------------------------------------------------------------
 // BaseAlgorithm
 
-scsolver::numeric::lp::BaseAlgorithm::BaseAlgorithm() :
+BaseAlgorithm::BaseAlgorithm() :
 	m_pImpl( new BaseAlgorithmImpl() )
 {
 }
 
-scsolver::numeric::lp::BaseAlgorithm::~BaseAlgorithm() throw()
+BaseAlgorithm::~BaseAlgorithm() throw()
 {
 }
 
-scsolver::numeric::lp::Model* scsolver::numeric::lp::BaseAlgorithm::getModel() const
+Model* BaseAlgorithm::getModel() const
 {
 	return m_pImpl->getModel();
 }
 
-void scsolver::numeric::lp::BaseAlgorithm::setModel( Model* p )
+void BaseAlgorithm::setModel( Model* p )
 {
 	m_pImpl->setModel( p );
 }
 
-scsolver::numeric::lp::Model* scsolver::numeric::lp::BaseAlgorithm::getCanonicalModel() const
+Model* BaseAlgorithm::getCanonicalModel() const
 {
 	return m_pImpl->getCanonicalModel();
 }
 
-scsolver::numeric::Matrix scsolver::numeric::lp::BaseAlgorithm::getSolution() const
+Matrix BaseAlgorithm::getSolution() const
 {
 	return m_pImpl->getSolution();
 }
 
-void scsolver::numeric::lp::BaseAlgorithm::setSolution( const Matrix& mx )
+void BaseAlgorithm::setSolution( const Matrix& mx )
 {
 	m_pImpl->setSolution( mx );
 }
 
-void scsolver::numeric::lp::BaseAlgorithm::setCanonicalSolution( const Matrix& mx )
+void BaseAlgorithm::setCanonicalSolution( const Matrix& mx )
 {
 	m_pImpl->setCanonicalSolution( mx );
 }
 
+}}}

@@ -38,11 +38,12 @@
 #include <map>
 #include <boost/numeric/ublas/matrix.hpp>
 
+using namespace std;
 using ::scsolver::numeric::Matrix;
 
 namespace scsolver { namespace numeric { namespace lp {
 
-class NonBoundingException : public std::exception
+class NonBoundingException : public ::std::exception
 {
 public:
 	virtual const char* what() const throw()
