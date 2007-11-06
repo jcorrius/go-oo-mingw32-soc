@@ -29,8 +29,6 @@
 #include "numeric/matrix.hxx"
 #include <stdio.h>
 
-using namespace std;
-
 namespace scsolver { namespace numeric {
 
 const char* NotEnoughDataPoints::what() const throw()

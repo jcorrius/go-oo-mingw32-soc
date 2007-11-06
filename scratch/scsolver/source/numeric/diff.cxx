@@ -32,8 +32,6 @@
 #include <stdexcept>
 #include <cmath>
 
-using namespace std;
-
 namespace scsolver { namespace numeric {
 
 const double NumericalDiffer::OMEGA = 2.0;
@@ -61,7 +59,7 @@ void NumericalDiffer::setSecondOrder( bool b )
 	setDirty();
 }
 
-void NumericalDiffer::setVariables( const vector<double>& cnX )
+void NumericalDiffer::setVariables( const std::vector<double>& cnX )
 {
 	m_cnX = cnX;
 	setDirty();
@@ -106,11 +104,11 @@ void NumericalDiffer::setT( unsigned long m, unsigned long i, double fVal )
 	if ( nTSize < m + 1 )
 		for ( unsigned long nIdx = 0; nIdx < m + 1 - nTSize; ++nIdx )
 		{
-			vector<double> cn;
+			std::vector<double> cn;
 			m_cnT.push_back( cn );
 		}
 
-	vector<double>& cnRow = m_cnT.at( m );
+	std::vector<double>& cnRow = m_cnT.at( m );
 	size_t nRowSize = cnRow.size();
 	if ( nRowSize < i + 1 )
 		for ( unsigned long nIdx = 0; nIdx < i + 1 - nRowSize; ++nIdx )
@@ -124,7 +122,7 @@ double NumericalDiffer::getT( unsigned long m, unsigned long i )
 	if ( m_cnT.empty() || m_cnT.size() - 1 < m )
 		throw std::out_of_range( "" );
 
-	vector<double> cnRow = m_cnT.at( m );
+	std::vector<double> cnRow = m_cnT.at( m );
 	if ( cnRow.empty() || cnRow.size() - 1 < i )
 		throw std::out_of_range( "" );
 
@@ -196,7 +194,7 @@ double NumericalDiffer::run()
 	if ( m_pFuncObj == NULL )
 		throw FuncObjectNotSet();
 
-	cout << m_pFuncObj->getFuncString() << endl;
+	std::cout << m_pFuncObj->getFuncString() << std::endl;
 	initialize();
 	double fVal = Tm();
 	double fOldVal = fVal;
@@ -213,10 +211,6 @@ double NumericalDiffer::run()
 			return fVal;
 		fOldVal = fVal;
 	}
-	
-	throw std::exception();
-
-	return 0.0;
 }
 
 }}

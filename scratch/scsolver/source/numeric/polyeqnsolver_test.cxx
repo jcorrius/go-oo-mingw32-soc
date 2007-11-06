@@ -32,7 +32,6 @@
 #include <stdio.h>
 
 using namespace ::scsolver::numeric;
-using namespace ::std;
 
 class TestFailed {};
 

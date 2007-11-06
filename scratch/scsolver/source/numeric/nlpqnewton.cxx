@@ -44,7 +44,6 @@ using namespace scsolver::numeric;
 using scsolver::numeric::Matrix;
 using scsolver::numeric::NumericalDiffer;
 using boost::shared_ptr;
-using namespace std;
 
 namespace scsolver { namespace numeric { namespace nlp {
 

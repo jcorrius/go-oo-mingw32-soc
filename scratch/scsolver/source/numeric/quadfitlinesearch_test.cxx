@@ -31,7 +31,6 @@
 #include <string>
 
 using namespace ::scsolver::numeric;
-using namespace ::std;
 
 class TestFunc1 : public SingleVarFuncObj
 {

@@ -29,8 +29,8 @@
 #ifndef _LPBASE_HXX_
 #define _LPBASE_HXX_
 
-#include <numeric/matrix.hxx>
 #include <memory>
+#include "matrix.hxx"
 
 namespace scsolver { namespace numeric { namespace lp {
 

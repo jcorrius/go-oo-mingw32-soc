@@ -29,8 +29,6 @@
 #include <vector>
 #include <string>
 
-using namespace std;
-
 namespace scsolver { namespace numeric {
 
 //---------------------------------------------------------------------------
@@ -69,12 +67,12 @@ public:
         return mpFuncObj->eval();
     }
 
-    virtual const string getFuncString() const
+    virtual const std::string getFuncString() const
     {
         return mpFuncObj->getFuncString();
     }
 
-    virtual const vector<double> & getVars() const
+    virtual const std::vector<double> & getVars() const
     {
         return mVars;
     }
@@ -88,7 +86,7 @@ public:
         mVars[0] = var;
     }
 
-    virtual void setVars(const::std::vector<double> &vars)
+    virtual void setVars(const std::vector<double> &vars)
     {
         if ( vars.empty() )
             return;
@@ -99,7 +97,7 @@ public:
 
 private:
     SingleVarFuncObj* mpFuncObj;
-    vector<double> mVars;
+    std::vector<double> mVars;
 };
 
 SingleVarFuncObj::SingleVarFuncObj()

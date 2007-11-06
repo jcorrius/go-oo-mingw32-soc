@@ -26,6 +26,9 @@
  ************************************************************************/
 
 
+#include <algorithm>
+#include <exception>
+
 #include "lpbuilder.hxx"
 #include "tool/global.hxx"
 #include "unoglobal.hxx"
@@ -34,10 +37,6 @@
 #include "numeric/lpmodel.hxx"
 #include "numeric/matrix.hxx"
 
-#include <algorithm>
-#include <exception>
-
-using namespace std;
 using namespace ::com::sun::star;
 using com::sun::star::table::CellAddress;
 using scsolver::numeric::Matrix;
@@ -244,7 +243,7 @@ public:
 
 	sal_uInt32 getDecisionVarId( const CellAddress& );
 	void setDecisionVarAddress( const CellAddress& );
-	vector< CellAddress > getAllDecisionVarAddresses() const;
+	std::vector< CellAddress > getAllDecisionVarAddresses() const;
 	void clearDecisionVarAddresses() { m_cnDecisionVars.clear(); }
 
 	double getCostVector( const CellAddress& );
@@ -293,15 +292,15 @@ numeric::lp::Model LpModelBuilderImpl::getModel()
 
 	numeric::lp::Model aModel;
 	
-	vector< DecisionVar >::const_iterator it,
+	std::vector< DecisionVar >::const_iterator it,
 			itBeg = m_cnDecisionVars.begin(), itEnd = m_cnDecisionVars.end();
 	for ( it = itBeg; it != itEnd; ++it )
-		aModel.setCostVectorElement( distance( itBeg, it ), (*it).Cost );
+		aModel.setCostVectorElement( std::distance( itBeg, it ), (*it).Cost );
 	
 	// Constraint matrix, equality, and RHS
 	for ( sal_uInt32 i = 0; i < m_mxConstraint.rows(); ++i )
 	{
-		vector<double> aConst;
+		std::vector<double> aConst;
 		for ( sal_uInt32 j = 0; j < m_mxConstraint.cols(); ++j )
 			aConst.push_back( m_mxConstraint( i, j ) );
 
@@ -335,13 +334,12 @@ void LpModelBuilderImpl::setObjectiveFormulaAddress( const table::CellAddress& a
 
 sal_uInt32 LpModelBuilderImpl::getConstraintId( const ConstraintAddress& aConstAddr )
 {
-	vector< ConstraintAddress >::iterator pos;
+	std::vector< ConstraintAddress >::iterator pos;
 	for ( pos = m_cnConstraintAddress.begin(); pos != m_cnConstraintAddress.end(); ++pos )
 		if ( pos->equals( aConstAddr ) )
-			return distance( m_cnConstraintAddress.begin(), pos );
+			return std::distance( m_cnConstraintAddress.begin(), pos );
 	
 	throw NoMatchingElementsFound();
-	return 0;
 }
 
 void LpModelBuilderImpl::setConstraintAddress( const ConstraintAddress& aItem )
@@ -365,7 +363,7 @@ void LpModelBuilderImpl::setConstraintCoefficient(
 	// Next, get this coefficient's row ID from ConstraintAddress.
 	sal_uInt32 nRowId = getConstraintId( aConstAddr );
 	
-// 	cout << "(" << nRowId << ", " << nColId << ") = " << fCoef << "  RHS = " << fRHS << endl;
+// 	std::cout << "(" << nRowId << ", " << nColId << ") = " << fCoef << "  RHS = " << fRHS << std::endl;
     try
     {
         m_mxConstraint( nRowId, nColId ) = fCoef;
@@ -389,17 +387,16 @@ numeric::Equality LpModelBuilderImpl::getConstraintEquality( sal_uInt32 i ) cons
 
 sal_uInt32 LpModelBuilderImpl::getDecisionVarId( const table::CellAddress& aAddr )
 {
-	vector< DecisionVar >::const_iterator it,
+	std::vector< DecisionVar >::const_iterator it,
 			itBeg = m_cnDecisionVars.begin(), itEnd = m_cnDecisionVars.end();
 	for ( it = itBeg; it != itEnd; ++it )
 	{
 		CellAddress aAddrTmp = it->Address;
 		if ( aAddrTmp == aAddr )
-			return distance( itBeg, it );
+			return std::distance( itBeg, it );
 	}
 
 	throw NoMatchingElementsFound();
-	return 0;
 }
 
 /** Append the address of a cell whose value represents the value of a decision
@@ -413,10 +410,10 @@ void LpModelBuilderImpl::setDecisionVarAddress( const table::CellAddress& aAddr 
 	m_cnDecisionVars.push_back( aVar );
 }
 
-vector< CellAddress > LpModelBuilderImpl::getAllDecisionVarAddresses() const
+std::vector< CellAddress > LpModelBuilderImpl::getAllDecisionVarAddresses() const
 {
-	vector< CellAddress > cnAddrs;
-	vector< DecisionVar >::const_iterator it,
+	std::vector< CellAddress > cnAddrs;
+	std::vector< DecisionVar >::const_iterator it,
 			itBeg = m_cnDecisionVars.begin(), itEnd = m_cnDecisionVars.end();
 	for ( it = itBeg; it != itEnd; ++it )
 		cnAddrs.push_back( it->Address );
@@ -428,7 +425,7 @@ vector< CellAddress > LpModelBuilderImpl::getAllDecisionVarAddresses() const
 	value is in the cell passed on as the argument. */
 double LpModelBuilderImpl::getCostVector( const table::CellAddress& aAddr )
 {	
-	vector< DecisionVar >::const_iterator it,
+	std::vector< DecisionVar >::const_iterator it,
 			itBeg = m_cnDecisionVars.begin(), itEnd = m_cnDecisionVars.end();
 	for ( it = itBeg; it != itEnd; ++it )
 	{
@@ -444,7 +441,7 @@ double LpModelBuilderImpl::getCostVector( const table::CellAddress& aAddr )
 
 void LpModelBuilderImpl::setCostVector( const table::CellAddress& aAddr, double fCost )
 {
-	vector< DecisionVar >::iterator it,
+	std::vector< DecisionVar >::iterator it,
 			itBeg = m_cnDecisionVars.begin(), itEnd = m_cnDecisionVars.end();
 	for ( it = itBeg; it != itEnd; ++it )
 	{
@@ -459,7 +456,7 @@ void LpModelBuilderImpl::setCostVector( const table::CellAddress& aAddr, double 
 
 const rtl::OUString LpModelBuilderImpl::getTempCellFormula( const table::CellAddress& aAddr ) const
 {
-	vector< CellAttr >::const_iterator it,
+	std::vector< CellAttr >::const_iterator it,
 			itBeg = m_cnCellAttrs.begin(), itEnd = m_cnCellAttrs.end();
 
 	for ( it = itBeg; it != itEnd; ++it )
@@ -490,7 +487,7 @@ void LpModelBuilderImpl::stripConstConstraint()
 	OSL_ASSERT( mxConstraint.rows() == mxRHS.rows() );
 	size_t nRowSize = mxConstraint.rows();
 
-	vector<size_t> cnRowsToRemove;
+	std::vector<size_t> cnRowsToRemove;
 
 	// Scan the constraint matrix to find empty rows.
 	for ( size_t i = 0; i < nRowSize; ++i )
@@ -504,7 +501,7 @@ void LpModelBuilderImpl::stripConstConstraint()
 				cnRowsToRemove.push_back( i );
 		}
 
-	cout << "rows to remove: ";
+	std::cout << "rows to remove: ";
 	printElements( cnRowsToRemove );
 
 	mxConstraint.deleteRows( cnRowsToRemove );
@@ -521,14 +518,14 @@ void LpModelBuilderImpl::stripZeroCostDecisionVar()
 {
 	Debug( "stripZeroCostDecisionVar" );
 
-	vector< DecisionVar > cnNewVars;
+	std::vector< DecisionVar > cnNewVars;
 	Matrix mxConstraint( m_mxConstraint );
 	cnNewVars.reserve( m_cnDecisionVars.size() );
-	vector< size_t > cnColsToRemove;
+	std::vector< size_t > cnColsToRemove;
 
-	vector< DecisionVar >::iterator it,
+	std::vector< DecisionVar >::iterator it,
 			itBeg = m_cnDecisionVars.begin(), itEnd = m_cnDecisionVars.end();
-	cout << m_cnDecisionVars.size() << endl;
+	std::cout << m_cnDecisionVars.size() << std::endl;
 	size_t nLastRow = mxConstraint.rows();
 	for ( it = itBeg; it != itEnd; ++it )
 	{
@@ -536,7 +533,7 @@ void LpModelBuilderImpl::stripZeroCostDecisionVar()
 			cnNewVars.push_back( *it );
 		else
 		{
-			size_t nCol = distance( itBeg, it );
+			size_t nCol = std::distance( itBeg, it );
 			if ( mxConstraint.isColumnEmpty( nCol ) )
 				cnColsToRemove.push_back( nCol );
 			else
@@ -545,10 +542,10 @@ void LpModelBuilderImpl::stripZeroCostDecisionVar()
 	}
 
 	printElements( cnColsToRemove );
-	cout << "mxConstraint:" << endl;
+	std::cout << "mxConstraint:" << std::endl;
 	mxConstraint.print( 0 );
 	
-	cout << "(" << nLastRow << ", " << mxConstraint.cols() << ")" << endl;
+	std::cout << "(" << nLastRow << ", " << mxConstraint.cols() << ")" << std::endl;
 	
 	mxConstraint.deleteColumns( cnColsToRemove );
 	mxConstraint.print( 0 );
@@ -612,7 +609,7 @@ void LpModelBuilder::setConstraintAddress( const ConstraintAddress& aItem )
 	m_pImpl->setConstraintAddress( aItem );
 }
 
-vector< ConstraintAddress > LpModelBuilder::getAllConstraintAddresses() const
+std::vector< ConstraintAddress > LpModelBuilder::getAllConstraintAddresses() const
 {
 	return m_pImpl->getAllConstraintAddresses();
 }
@@ -634,7 +631,7 @@ void LpModelBuilder::setDecisionVarAddress( const table::CellAddress& aAddr )
 	m_pImpl->setDecisionVarAddress( aAddr );
 }
 
-vector< CellAddress > LpModelBuilder::getAllDecisionVarAddresses() const
+std::vector< CellAddress > LpModelBuilder::getAllDecisionVarAddresses() const
 {
 	return m_pImpl->getAllDecisionVarAddresses();
 }

@@ -29,8 +29,6 @@
 #include "numeric/nlpmodel.hxx"
 #include "numeric/funcobj.hxx"
 
-using namespace std;
-
 namespace scsolver { namespace numeric { namespace nlp {
 
 class BaseAlgorithmImpl
