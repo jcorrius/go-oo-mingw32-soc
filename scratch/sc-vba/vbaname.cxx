@@ -116,17 +116,37 @@ ScVbaName::getValue() throw (css::uno::RuntimeException)
 {
 	::rtl::OUString sValue = mxNamedRange->getContent();
 	::rtl::OUString sSheetName = getWorkSheet()->getName();
-	if ( sValue.toChar() == '$' )
+    ::rtl::OUString sSegmentation = ::rtl::OUString::createFromAscii( ";" );
+    ::rtl::OUString sNewSegmentation = ::rtl::OUString::createFromAscii( "," );
+    ::rtl::OUString sResult;
+    sal_Int32 nFrom = 0;
+    sal_Int32 nTo = 0;
+    nTo = sValue.indexOf( sSegmentation, nFrom );
+    while ( nTo != -1 )
+    {
+        ::rtl::OUString sTmpValue = sValue.copy( nFrom, nTo - nFrom );
+        if ( sTmpValue.toChar() == '$' )
+        {
+            ::rtl::OUString sTmp = sTmpValue.copy( 1 );
+            sTmp = sTmp.replaceAt(0, (sSheetName + ::rtl::OUString::createFromAscii(".")).getLength(), sSheetName + ::rtl::OUString::createFromAscii("!"));
+            sResult += sTmp; 
+            sResult += sNewSegmentation;
+        }
+        nFrom = nTo + 1;
+        nTo = sValue.indexOf( sSegmentation, nFrom );
+    }
+    ::rtl::OUString sTmpValue = sValue.copy( nFrom );
+	if ( sTmpValue.toChar() == '$' )
 	{
-		::rtl::OUString sTmp = sValue.copy(1);
-		sValue = sTmp;
+		::rtl::OUString sTmp = sTmpValue.copy(1);
+        sTmp = sTmp.replaceAt(0, (sSheetName + ::rtl::OUString::createFromAscii(".")).getLength(), sSheetName + ::rtl::OUString::createFromAscii("!"));
+		sResult += sTmp;
 	}
-	sValue = sValue.replaceAt(0, (sSheetName + ::rtl::OUString::createFromAscii(".")).getLength(), sSheetName + ::rtl::OUString::createFromAscii("!"));
-	if (sValue.indexOf('=') != 0)
+	if (sResult.indexOf('=') != 0)
 	{
-		sValue = ::rtl::OUString::createFromAscii("=") + sValue;
+		sResult = ::rtl::OUString::createFromAscii("=") + sResult;
 	}
-	return sValue;
+	return sResult;
 }
 
 void 
@@ -134,17 +154,38 @@ ScVbaName::setValue( const ::rtl::OUString & rValue ) throw (css::uno::RuntimeEx
 {
 	::rtl::OUString sSheetName = getWorkSheet()->getName();
 	::rtl::OUString sValue = rValue;
+    ::rtl::OUString sSegmentation = ::rtl::OUString::createFromAscii( "," );
+    ::rtl::OUString sNewSegmentation = ::rtl::OUString::createFromAscii( ";" );
+    ::rtl::OUString sResult;
+    sal_Int32 nFrom = 0;
+    sal_Int32 nTo = 0;
 	if (sValue.indexOf('=') == 0)
 	{
 		::rtl::OUString sTmp = sValue.copy(1);
-		sValue = sTmp;
+        sValue = sTmp;
 	}
-	if (sValue.copy(0, sSheetName.getLength()).equals(sSheetName))
+    nTo = sValue.indexOf( sSegmentation, nFrom );
+    while ( nTo != -1 )
+    {
+        ::rtl::OUString sTmpValue = sValue.copy( nFrom, nTo - nFrom );
+        sTmpValue = sTmpValue.replaceAt(0, (sSheetName + ::rtl::OUString::createFromAscii("!")).getLength(), sSheetName + ::rtl::OUString::createFromAscii("."));
+        if (sTmpValue.copy(0, sSheetName.getLength()).equals(sSheetName))
+        {
+            sTmpValue = ::rtl::OUString::createFromAscii("$") + sTmpValue;
+        }
+        sTmpValue += sNewSegmentation;
+        sResult += sTmpValue;
+        nFrom = nTo + 1;
+        nTo = sValue.indexOf( sSegmentation, nFrom );
+    }
+    ::rtl::OUString sTmpValue = sValue.copy( nFrom );
+	sTmpValue = sTmpValue.replaceAt(0, (sSheetName + ::rtl::OUString::createFromAscii("!")).getLength(), sSheetName + ::rtl::OUString::createFromAscii("."));
+	if (sTmpValue.copy(0, sSheetName.getLength()).equals(sSheetName))
 	{
-		sValue = ::rtl::OUString::createFromAscii("$") + sSheetName;
+		sTmpValue = ::rtl::OUString::createFromAscii("$") + sTmpValue;
 	}
-	sValue = sValue.replaceAt(0, (sSheetName + ::rtl::OUString::createFromAscii("!")).getLength(), sSheetName + ::rtl::OUString::createFromAscii("."));
-	mxNamedRange->setContent(sValue);
+    sResult += sTmpValue;
+	mxNamedRange->setContent(sResult);
 }
 
 ::rtl::OUString 
@@ -198,10 +239,7 @@ ScVbaName::setRefersToR1C1Local( const ::rtl::OUString & rRefersTo ) throw (css:
 css::uno::Reference< oo::excel::XRange >
 ScVbaName::getRefersToRange() throw (css::uno::RuntimeException)
 {
-    uno::Reference< sheet::XCellRangeReferrer > xCellRangeReferr( mxNamedRange, uno::UNO_QUERY_THROW );
-    uno::Reference< table::XCellRange > xCellRange( xCellRangeReferr->getReferredCells(), uno::UNO_QUERY_THROW );
-    uno::Reference< vba::XHelperInterface > xParent( ScVbaGlobals::getGlobalsImpl( mxContext )->getActiveWorkbook(), uno::UNO_QUERY_THROW );
-	css::uno::Reference< oo::excel::XRange > xRange( new ScVbaRange( xParent, mxContext, xCellRange ) );
+    uno::Reference< oo::excel::XRange > xRange = ScVbaRange::getRangeObjectForName( mxContext, mxNamedRange->getName(), getDocShell( mxModel ), ScAddress::CONV_XL_R1C1 );
 	return xRange;
 }
 
