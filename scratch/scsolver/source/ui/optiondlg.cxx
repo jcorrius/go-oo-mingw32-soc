@@ -109,7 +109,7 @@ OptionDialog::~OptionDialog() throw()
 void OptionDialog::initialize()
 {
 	int nWidth = 200, nHeight = 150;
-	BaseDialog::initialize( 
+	initializeDefault( 
 		static_cast<sal_Int16>(nWidth), static_cast<sal_Int16>(nHeight), 
 		getResStr(SCSOLVER_STR_OPTIONDLG_TITLE) );
 

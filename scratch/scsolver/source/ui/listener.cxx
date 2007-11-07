@@ -513,19 +513,12 @@ void OKCancelBtnListener::actionPerformed( const awt::ActionEvent& )
 		rtl::OUString sRight = pDlg->getRightCellReference();
 		Equality         eEq = pDlg->getEquality();
 		
-		SolverImpl* p = getDialog()->getSolverImpl();
-		SolverDialog* pMainDlg = p->getMainDialog();
 		if ( pDlg->isChangeMode() )
 			pMainDlg->editConstraint( pDlg->getConstraintId(), sLeft, sRight, eEq );
 		else
 			pMainDlg->setConstraint( sLeft, sRight, eEq );
 	}
 	
-#if 0	
-	if ( m_sMode.equals( ascii( "Cancel" ) ) )
-		Debug( "Cancel pressed" );
-#endif	
-
 	pDlg->setVisible( false );
 	pDlg->reset();
 	pMainDlg->updateWidgets();

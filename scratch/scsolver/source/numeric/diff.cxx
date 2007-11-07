@@ -170,7 +170,7 @@ double NumericalDiffer::Tm()
 double NumericalDiffer::Tm( unsigned long m, unsigned long i )
 {
 	if ( m_cnH.empty() )
-		throw exception();
+		throw ::std::exception();
 
 	try
 	{
@@ -214,9 +214,9 @@ double NumericalDiffer::run()
 		fOldVal = fVal;
 	}
 	
-	throw ::std::exception();
-
-	return 0.0;
+    throw ::std::exception();
+//
+//  return 0.0;
 }
 
 }}

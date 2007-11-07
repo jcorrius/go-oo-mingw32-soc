@@ -67,9 +67,8 @@ void MessageDialog::initialize()
 	const sal_Int16 nBtnWidth = 30, nBtnHeight = 14, nMargin = 3;
 	sal_Int16 nWidth = 120, nHeight = 40;
 
-	BaseDialog::initialize( nWidth, nHeight, ascii_i18n( "Message Dialog" ) );
+	initializeDefault( nWidth, nHeight, ascii_i18n( "Message Dialog" ) );
 
-	sal_Int32 nX, nY;
 	addFixedText( 5, 5, nWidth - 10, 10, ascii( "ftMessage" ), m_sMessage );
 	addButton( (nWidth - nBtnWidth)/2, nHeight - nBtnHeight - nMargin, nBtnWidth, nBtnHeight, 
 			ascii( "btnOk" ), ascii( "OK" ), awt::PushButtonType_OK );

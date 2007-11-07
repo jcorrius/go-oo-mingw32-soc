@@ -162,7 +162,7 @@ public:
 
 protected:
 
-	void initialize( sal_Int16, sal_Int16, const rtl::OUString& ) const;
+	void initializeDefault( sal_Int16, sal_Int16, const rtl::OUString& ) const;
 	void setVisibleDefault( bool ) const;
 
 private:

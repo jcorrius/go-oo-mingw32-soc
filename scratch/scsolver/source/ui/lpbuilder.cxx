@@ -341,7 +341,6 @@ sal_uInt32 LpModelBuilderImpl::getConstraintId( const ConstraintAddress& aConstA
 			return distance( m_cnConstraintAddress.begin(), pos );
 	
 	throw NoMatchingElementsFound();
-	return 0;
 }
 
 void LpModelBuilderImpl::setConstraintAddress( const ConstraintAddress& aItem )
@@ -399,7 +398,6 @@ sal_uInt32 LpModelBuilderImpl::getDecisionVarId( const table::CellAddress& aAddr
 	}
 
 	throw NoMatchingElementsFound();
-	return 0;
 }
 
 /** Append the address of a cell whose value represents the value of a decision
@@ -439,7 +437,6 @@ double LpModelBuilderImpl::getCostVector( const table::CellAddress& aAddr )
 	
 	// This should NOT be reached!
 	throw NoMatchingElementsFound();
-	return 0.0;
 }
 
 void LpModelBuilderImpl::setCostVector( const table::CellAddress& aAddr, double fCost )

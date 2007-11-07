@@ -68,7 +68,7 @@ ActionListener::~ActionListener() throw()
 {
 }
 
-void SAL_CALL ActionListener::disposing( const lang::EventObject& e )
+void SAL_CALL ActionListener::disposing( const lang::EventObject& )
 	throw ( RuntimeException )
 {
 }
@@ -124,7 +124,7 @@ void SAL_CALL TopWindowListener::windowOpened( const lang::EventObject& )
 {
 }
 
-void SAL_CALL TopWindowListener::windowClosing( const lang::EventObject& e )
+void SAL_CALL TopWindowListener::windowClosing( const lang::EventObject& )
 		throw(RuntimeException)
 {
 	BaseDialog* p = getDialog();

@@ -233,14 +233,16 @@ ResMgr* SolverImpl::getResMgr()
 }
 #endif
 
-rtl::OUString SolverImpl::getResStr( int resid )
+OUString SolverImpl::getResStr( int resid )
 {
 #ifdef SCSOLVER_UNO_COMPONENT
     return m_pStringResMgr->getLocaleStr(resid);
 #else
    	ResMgr *pResMgr = getResMgr();
 	if ( pResMgr )
-        return rtl::OUString( String( ResId( resid, *getResMgr() ) ) );
+        return OUString( String( ResId( resid, *getResMgr() ) ) );
+    else
+        OUString();
 #endif
 }
 

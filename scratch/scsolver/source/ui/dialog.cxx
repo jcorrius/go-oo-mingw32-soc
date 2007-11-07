@@ -140,7 +140,7 @@ void ConstEditDialog::unregisterListeners()
 
 void ConstEditDialog::initialize()
 {
-	BaseDialog::initialize( static_cast<sal_Int16>(180), static_cast<sal_Int16>(55), 
+	initializeDefault( static_cast<sal_Int16>(180), static_cast<sal_Int16>(55), 
 		getResStr(SCSOLVER_STR_CONSTRAINTDLG_TITLE) );
 	
 	sal_Int32 nX, nY;
@@ -253,13 +253,10 @@ Equality ConstEditDialog::getEquality()
 		{
 			case 0:
 				return LESS_THAN_EQUAL;
-				break;
 			case 1:
 				return EQUAL;
-				break;
 			case 2:
 				return GREATER_THAN_EQUAL;
-				break;
 			default:
 				OSL_ASSERT( !"Unexpected (in)equal sign" );
 		}
@@ -402,7 +399,7 @@ SolverDialog::~SolverDialog() throw()
 
 void SolverDialog::initialize()
 {
-	BaseDialog::initialize( static_cast<sal_Int16>(260), static_cast<sal_Int16>(200), 
+	initializeDefault( static_cast<sal_Int16>(260), static_cast<sal_Int16>(200), 
 		getResStr(SCSOLVER_STR_MAINDLG_TITLE) );
 
 	// START CREATING WIDGETS

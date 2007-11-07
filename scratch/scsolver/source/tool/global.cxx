@@ -33,13 +33,17 @@ using namespace std;
 
 namespace scsolver {
 
+#if SCSOLVER_DEBUG
 void Debug( const char* s )
 {
-#if SCSOLVER_DEBUG
 	fprintf(stdout, "%s\n", s);
 	fflush(stdout);
-#endif
 }
+#else
+void Debug( const char* )
+{
+}
+#endif
 
 std::string repeatString( const char* str, unsigned long nNum )
 {

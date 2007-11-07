@@ -65,9 +65,9 @@ namespace scsolver {
  * terminate. This function is for debug purposes only, and
  * should never be reached under normal circumstances.
  */
+#if SCSOLVER_DEBUG
 void lcl_dumpServiceNames( const Reference< uno::XInterface >& oWgt )
 {
-#if SCSOLVER_DEBUG
 	if (oWgt == NULL)
 		return;
 	Reference< lang::XServiceInfo > xSN( oWgt, UNO_QUERY );
@@ -76,8 +76,12 @@ void lcl_dumpServiceNames( const Reference< uno::XInterface >& oWgt )
 		printOUStr( sSN[nIdx] );
 
 	OSL_ASSERT( !"No appropriate widget type got picked up!" );
-#endif
 }
+#else
+void lcl_dumpServiceNames( const Reference< uno::XInterface >& )
+{
+}
+#endif
 
 //--------------------------------------------------------------------------
 // BaseDialogImpl
@@ -645,7 +649,7 @@ const awt::Rectangle* BaseDialog::getPosSize() const
     return m_pImpl->getPosSize();
 }
 
-void BaseDialog::initialize( sal_Int16 nW, sal_Int16 nH, const rtl::OUString& sTitle ) const
+void BaseDialog::initializeDefault( sal_Int16 nW, sal_Int16 nH, const rtl::OUString& sTitle ) const
 {
 	m_pImpl->initialize( nW, nH, sTitle );
 }
