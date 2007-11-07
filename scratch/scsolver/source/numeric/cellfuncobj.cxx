@@ -34,8 +34,10 @@
 #include <iostream>
 #include <stdio.h>
 
-using namespace std;
 using com::sun::star::table::CellAddress;
+using ::std::vector;
+using ::std::string;
+using ::std::ostringstream;
 
 namespace scsolver { namespace numeric {
 

@@ -32,7 +32,9 @@
 #include <stdexcept>
 #include <cmath>
 
-using namespace std;
+using ::std::vector;
+using ::std::cout;
+using ::std::endl;
 
 namespace scsolver { namespace numeric {
 
@@ -215,8 +217,6 @@ double NumericalDiffer::run()
 	}
 	
     throw ::std::exception();
-//
-//  return 0.0;
 }
 
 }}

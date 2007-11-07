@@ -44,7 +44,12 @@ using namespace scsolver::numeric;
 using scsolver::numeric::Matrix;
 using scsolver::numeric::NumericalDiffer;
 using boost::shared_ptr;
-using namespace std;
+using ::std::vector;
+using ::std::string;
+using ::std::cout;
+using ::std::endl;
+using ::std::distance;
+using ::std::setprecision;
 
 namespace scsolver { namespace numeric { namespace nlp {
 
@@ -172,7 +177,9 @@ private:
 
 	bool evaluateFunc()
 	{
-		using namespace std;
+        using ::std::vector;
+        using ::std::cout;
+        using ::std::endl;
 
 		// Solve f(x) given the x vector
 

@@ -29,7 +29,7 @@
 #include "numeric/matrix.hxx"
 #include <stdio.h>
 
-using namespace std;
+using ::std::list;
 
 namespace scsolver { namespace numeric {
 

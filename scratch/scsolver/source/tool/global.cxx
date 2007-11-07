@@ -29,7 +29,8 @@
 #include <sstream>
 #include <stdio.h>
 
-using namespace std;
+using ::std::string;
+using ::std::ostringstream;
 
 namespace scsolver {
 
@@ -45,9 +46,9 @@ void Debug( const char* )
 }
 #endif
 
-std::string repeatString( const char* str, unsigned long nNum )
+string repeatString( const char* str, unsigned long nNum )
 {
-	std::ostringstream os;
+    ostringstream os;
 	for ( unsigned int i = 0; i < nNum; ++i )
 		os << str;
 	return os.str();

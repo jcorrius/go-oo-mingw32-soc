@@ -54,7 +54,6 @@
 #include <com/sun/star/table/XCellRange.hpp>
 #include <com/sun/star/uno/XComponentContext.hpp>
 
-using namespace std;
 
 namespace scsolver {
 

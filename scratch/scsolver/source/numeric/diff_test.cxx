@@ -33,7 +33,9 @@
 #include <cmath>
 #include <memory>
 
-using namespace std;
+using ::std::vector;
+using ::std::cout;
+using ::std::endl;
 using namespace scsolver::numeric;
 
 class TestFailed {};

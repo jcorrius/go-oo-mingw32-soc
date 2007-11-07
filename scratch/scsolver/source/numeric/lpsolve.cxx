@@ -65,7 +65,7 @@ private:
 
 void LpSolveImpl::solve()
 {
-	using namespace std;
+    using ::std::vector;
 
 	Model* model = getModel();
 	size_t nDecVarSize = model->getDecisionVarSize();
@@ -134,7 +134,7 @@ void LpSolveImpl::solve()
 		}
 		set_obj_fnex( lp, nDecVarSize,  &row[0],  &cols[0] );
 	}
-	catch ( std::out_of_range& e )
+	catch ( ::std::out_of_range& e )
 	{
 		Debug( e.what() );
 		delete_lp(lp);

@@ -63,7 +63,6 @@
 
 using com::sun::star::uno::UNO_QUERY;
 using namespace ::com::sun::star::sheet;
-using namespace std;
 
 namespace scsolver {	
 

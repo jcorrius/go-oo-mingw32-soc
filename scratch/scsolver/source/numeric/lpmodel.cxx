@@ -38,7 +38,12 @@
 #include <map>
 #include <boost/numeric/ublas/matrix.hpp>
 
-using namespace std;
+using ::std::vector;
+using ::std::string;
+using ::std::map;
+using ::std::cout;
+using ::std::endl;
+using ::std::ostringstream;
 using ::scsolver::numeric::Matrix;
 
 namespace scsolver { namespace numeric { namespace lp {

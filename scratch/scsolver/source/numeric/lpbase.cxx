@@ -34,7 +34,10 @@
 #include <cstddef>
 #include "tool/global.hxx"
 
-using namespace std;
+using ::std::vector;
+using ::std::list;
+using ::std::cout;
+using ::std::endl;
 
 namespace scsolver { namespace numeric { namespace lp {
 

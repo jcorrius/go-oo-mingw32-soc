@@ -36,7 +36,7 @@
 #include <stdio.h>
 
 using namespace ::scsolver::numeric;
-using namespace std;
+using ::std::vector;
 
 namespace scsolver { namespace numeric { namespace nlp {
 

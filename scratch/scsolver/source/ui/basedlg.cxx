@@ -54,9 +54,9 @@
 
 #include <memory>
 
-using namespace std;
 using namespace com::sun::star;
 using uno::Any;
+using ::std::auto_ptr;
 
 namespace scsolver {
 

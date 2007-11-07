@@ -64,9 +64,11 @@
 
 #include <iostream>
 
-using namespace std;
 using namespace ::scsolver::numeric;
 using ::com::sun::star::uno::Reference;
+using ::std::vector;
+using ::std::cout;
+using ::std::endl;
 
 namespace scsolver {
 

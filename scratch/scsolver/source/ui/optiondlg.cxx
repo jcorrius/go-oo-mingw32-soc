@@ -31,13 +31,15 @@
 #include "listener.hxx"
 #include "solver.hxx"
 
+#include <memory>
+
 #include "com/sun/star/awt/XCheckBox.hpp"
 
 #include "scsolver.hrc"
 
 using namespace ::com::sun::star;
 using namespace ::com::sun::star::uno;
-using namespace std;
+using ::std::auto_ptr;
 
 namespace scsolver {
 

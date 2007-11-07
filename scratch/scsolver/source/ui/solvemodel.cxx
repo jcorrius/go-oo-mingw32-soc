@@ -56,10 +56,14 @@
 
 #include "scsolver.hrc"
 
-using namespace std;
 using namespace scsolver::numeric;
 using scsolver::numeric::Matrix;
 using com::sun::star::table::CellAddress;
+using ::std::vector;
+using ::std::cout;
+using ::std::endl;
+using ::std::map;
+using ::std::auto_ptr;
 
 namespace scsolver {
 

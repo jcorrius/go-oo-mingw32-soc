@@ -39,7 +39,10 @@
 #include <map>
 #include <list>
 
-using namespace std;
+using ::std::vector;
+using ::std::string;
+using ::std::cout;
+using ::std::endl;
 	
 namespace scsolver { namespace numeric { namespace lp {
 

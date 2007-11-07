@@ -29,10 +29,10 @@
 #ifndef _UNOGLOBAL_HXX_
 #define _UNOGLOBAL_HXX_
 
+#include <sal/config.h>
 #include <cppuhelper/implementationentry.hxx>
 #include <vector>
 #include <string>
-#include <sal/config.h>
 
 namespace scsolver {
 

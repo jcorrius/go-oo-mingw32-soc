@@ -44,7 +44,6 @@
 
 #include <stdio.h>
 
-using namespace std;
 using ::rtl::OUString;
 
 namespace scsolver {
@@ -195,7 +194,7 @@ sal_Bool SolverImpl::solveModel()
 {	
 	Debug("solveModel --------------------------------------------------------");
 
-	std::auto_ptr<SolveModel> p( new SolveModel( this ) );
+	::std::auto_ptr<SolveModel> p( new SolveModel( this ) );
 	try
 	{
 		p->solve();
