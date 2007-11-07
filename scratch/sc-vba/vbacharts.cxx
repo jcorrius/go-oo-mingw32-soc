@@ -93,7 +93,7 @@ ScVbaCharts::getCount() throw (uno::RuntimeException)
 			}
 		}
 	}
-	catch (uno::Exception& e)
+	catch (uno::Exception& )
 	{
 		throw script::BasicErrorException( rtl::OUString(), uno::Reference< uno::XInterface >(), SbERR_METHOD_FAILED, rtl::OUString() );
 	}

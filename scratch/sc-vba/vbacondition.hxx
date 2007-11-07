@@ -56,6 +56,7 @@ public:
 	virtual void setFormula1( const css::uno::Any& _aFormula1) throw ( css::script::BasicErrorException );
 	virtual void setFormula2( const css::uno::Any& _aFormula2) throw ( css::script::BasicErrorException );
 	virtual sal_Int32 Operator(sal_Bool _bIncludeFormulaValue) throw ( css::script::BasicErrorException );
-
+	virtual sal_Int32 SAL_CALL Operator() throw ( css::script::BasicErrorException, css::uno::RuntimeException ) = 0;
+	
 };
 #endif 

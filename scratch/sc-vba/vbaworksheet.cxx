@@ -698,7 +698,7 @@ ScVbaWorksheet::hasProperty( const ::rtl::OUString& aName ) throw (uno::RuntimeE
 		if ( getControl( aName ).hasValue() )
 			return sal_True;
 	}
-	catch( uno::Exception& e )
+	catch( uno::Exception& )
 	{
 	}
 	return sal_False;
@@ -754,7 +754,7 @@ ScVbaWorksheet::getControlShape( const ::rtl::OUString& sName )
     uno::Reference< drawing::XDrawPageSupplier > xDrawPageSupplier( xSpreadsheet, uno::UNO_QUERY_THROW );
     uno::Reference< drawing::XDrawPage > xDrawPage( xDrawPageSupplier->getDrawPage(), uno::UNO_QUERY_THROW );
     uno::Reference< container::XIndexAccess > xIndexAccess( xDrawPage, uno::UNO_QUERY_THROW );
-    sal_uInt16 nCount = xIndexAccess->getCount();
+    sal_Int32 nCount = xIndexAccess->getCount();
     for( int index = 0; index < nCount; index++ )
     {
         uno::Any aUnoObj =  xIndexAccess->getByIndex( index );

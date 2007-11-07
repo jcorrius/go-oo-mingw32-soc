@@ -81,7 +81,7 @@ ScVbaFormatConditions::Delete(  ) throw (script::BasicErrorException, uno::Runti
 		}
 		notifyRange();
 	}
-	catch (uno::Exception& e)
+	catch (uno::Exception& )
 	{
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString());
 	}
@@ -210,7 +210,7 @@ ScVbaFormatConditions::Add( ::sal_Int32 _nType, const uno::Any& _aOperator, cons
 			}
 		}
 	}
-	catch (uno::Exception& e)
+	catch (uno::Exception& )
 	{
 	}
 	DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString() );
@@ -232,7 +232,7 @@ ScVbaFormatConditions::notifyRange() throw ( script::BasicErrorException )
 	{
 		mxParentRangePropertySet->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("ConditionalFormat")), uno::makeAny( mxSheetConditionalEntries ));
 	}
-	catch (uno::Exception& e)
+	catch (uno::Exception& )
 	{
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString());
 	}
@@ -281,7 +281,7 @@ ScVbaFormatConditions::removeFormatCondition( const rtl::OUString& _sStyleName, 
 			}
 		}
 	}
-	catch (uno::Exception& e)
+	catch (uno::Exception& )
 	{
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString());
 	}

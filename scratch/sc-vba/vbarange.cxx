@@ -2020,7 +2020,7 @@ ScVbaRange::Columns(const uno::Any& aIndex ) throw (uno::RuntimeException)
 	{
 		if ( aIndex >>= nValue )
 		{
-			aRange.aStart.SetCol( aRange.aStart.Col() + --nValue );
+			aRange.aStart.SetCol( aRange.aStart.Col() + static_cast< SCCOL > ( --nValue ) );
 			aRange.aEnd.SetCol( aRange.aStart.Col() );
 		}
 		
@@ -2785,10 +2785,8 @@ ScVbaRange::Sort( const uno::Any& Key1, const uno::Any& Order1, const uno::Any& 
 	RangeHelper thisRange( mxRange );
 	table::CellRangeAddress thisRangeAddress = thisRange.getCellRangeAddressable()->getRangeAddress();
 	ScSortParam aSortParam;
-#ifdef VBA_OOBUILD_HACK
 	SCTAB nTab = thisRangeAddress.Sheet;
 	pDoc->GetSortParam( aSortParam, nTab );
-#endif
 
 	if ( DataOption1.hasValue() )
 		DataOption1 >>= nDataOption1;
@@ -2954,9 +2952,7 @@ ScVbaRange::Sort( const uno::Any& Key1, const uno::Any& Order1, const uno::Any& 
 	nIndex = 	findSortPropertyIndex( sortDescriptor, CONTS_HEADER );
 	sortDescriptor[ nIndex ].Value <<= bContainsHeader;
 
-#ifdef VBA_OOBUILD_HACK
 	pDoc->SetSortParam( aSortParam, nTab );
-#endif
 	xSort->sort( sortDescriptor );
 
 	// #FIXME #TODO
@@ -3710,11 +3706,14 @@ ScDBData* lcl_GetDBData_Impl( ScDocShell* pDocShell, sal_Int16 nSheet )
 
 void lcl_SelectAll( ScDocShell* pDocShell, ScQueryParam& aParam )
 {
-	ScViewData* pViewData = pDocShell->GetViewData();
-	if ( pViewData )
-	{
-		OSL_TRACE("Pushing out SelectAll query");
-		pViewData->GetView()->Query( aParam, NULL, TRUE );
+	if ( pDocShell )
+	{	
+		ScViewData* pViewData = pDocShell->GetViewData();
+		if ( pViewData )
+		{
+			OSL_TRACE("Pushing out SelectAll query");
+			pViewData->GetView()->Query( aParam, NULL, TRUE );
+		}
 	}
 }
 
@@ -3729,7 +3728,7 @@ ScQueryParam lcl_GetQueryParam( ScDocShell* pDocShell, sal_Int16 nSheet )
 	return aParam;
 }
 
-void lcl_SetAllQueryForField( ScQueryParam& aParam, sal_Int32 nField )
+void lcl_SetAllQueryForField( ScQueryParam& aParam, SCCOLROW nField )
 {
 	bool bFound = false;
 	SCSIZE i = 0;
@@ -3750,7 +3749,7 @@ void lcl_SetAllQueryForField( ScQueryParam& aParam, sal_Int32 nField )
 }
 
 
-void lcl_SetAllQueryForField( ScDocShell* pDocShell, sal_Int16 nField, sal_Int16 nSheet )
+void lcl_SetAllQueryForField( ScDocShell* pDocShell, SCCOLROW nField, sal_Int16 nSheet )
 {
 	ScQueryParam aParam = lcl_GetQueryParam( pDocShell, nSheet );
 	lcl_SetAllQueryForField( aParam, nField );
@@ -4877,7 +4876,7 @@ ScVbaRange::SpecialCellsImpl( sal_Int32 nType, const uno::Any& _oValue) throw ( 
 			xRange = lcl_makeXRangeFromSheetCellRanges( getParent(), mxContext, xLocSheetCellRanges, getScDocShell() );
 		}
 	}
-	catch (uno::Exception& e)
+	catch (uno::Exception& )
 	{
 		DebugHelper::exception(SbERR_METHOD_FAILED, STR_ERRORMESSAGE_NOCELLSWEREFOUND);                    
 	}
@@ -4956,7 +4955,7 @@ ScVbaRange::Subtotal( ::sal_Int32 _nGroupBy, ::sal_Int32 _nFunction, const uno::
 		xSubDesc->addNew(aColumns, _nGroupBy - 1);
 		xSub->applySubTotals(xSubDesc, bDoReplace);
 	}
-	catch (uno::Exception& e)
+	catch (uno::Exception& )
 	{
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString());
 	}
@@ -4976,7 +4975,7 @@ ScVbaRange::intersect( const css::uno::Reference< oo::excel::XRange >& xRange ) 
 
 					
 	}	
-	catch( uno::Exception& e )
+	catch( uno::Exception& )
 	{
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString());
 	}

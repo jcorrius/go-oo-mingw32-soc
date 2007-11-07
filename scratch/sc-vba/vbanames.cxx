@@ -151,7 +151,7 @@ ScVbaNames::Add( const css::uno::Any& Name ,
 			xAny >>= thisRange;
 		uno::Reference< sheet::XCellRangeAddressable > thisRangeAdd( thisRange, ::uno::UNO_QUERY_THROW);
 		table::CellRangeAddress aAddr = thisRangeAdd->getRangeAddress();
-		ScAddress aPos( aAddr.StartColumn , aAddr.StartRow , aAddr.Sheet );
+		ScAddress aPos( static_cast< SCCOL >( aAddr.StartColumn ) , static_cast< SCROW >( aAddr.StartRow ) , static_cast< SCTAB >(aAddr.Sheet ) );
 		uno::Any xAny2 ;
 		String sRangeAdd = xRange->Address( xAny2, xAny2 , xAny2 , xAny2, xAny2 );
 		String sTmp;

@@ -83,7 +83,7 @@ public:
 		{
 			xShapePropertySet->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("String") ), css::uno::makeAny( Text ));
 		}
-		catch ( css::uno::Exception& e )
+		catch ( css::uno::Exception& )
 		{
 			throw css::script::BasicErrorException( rtl::OUString(), css::uno::Reference< css::uno::XInterface >(), SbERR_METHOD_FAILED, rtl::OUString() );
 		}
@@ -95,7 +95,7 @@ public:
 		{
 			xShapePropertySet->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("String") ) ) >>= sText;
 		}
-		catch ( css::uno::Exception& e )
+		catch ( css::uno::Exception& )
 		{
 			throw css::script::BasicErrorException( rtl::OUString(), css::uno::Reference< css::uno::XInterface >(), SbERR_METHOD_FAILED, rtl::OUString() );
 		}
@@ -132,7 +132,7 @@ public:
 		{
 			xShapePropertySet->setPropertyValue(rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("TextRotation")), css::uno::makeAny(_nOrientation*100));
 		}
-		catch (css::uno::Exception& e)
+		catch (css::uno::Exception& )
 		{
 			throw css::script::BasicErrorException( rtl::OUString(), css::uno::Reference< css::uno::XInterface >(), SbERR_METHOD_FAILED, rtl::OUString() );
 		}
@@ -144,7 +144,7 @@ public:
 		{
 			xShapePropertySet->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("TextRotation"))) >>= nSOOrientation;
 		}
-		catch (css::uno::Exception& e)
+		catch (css::uno::Exception& )
 		{
 			throw css::script::BasicErrorException( rtl::OUString(), css::uno::Reference< css::uno::XInterface >(), SbERR_METHOD_FAILED, rtl::OUString() );
 		}		

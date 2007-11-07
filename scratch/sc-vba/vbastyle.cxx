@@ -82,7 +82,7 @@ ScVbaStyle::ScVbaStyle( const uno::Reference< oo::vba::XHelperInterface >& xPare
 	{
 		initialise();
 	}
-	catch (uno::Exception& e)
+	catch (uno::Exception& )
 	{
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString());
 	}
@@ -94,7 +94,7 @@ ScVbaStyle::ScVbaStyle( const uno::Reference< vba::XHelperInterface >& xParent, 
 	{
 		initialise();
 	}
-	catch (uno::Exception& e)
+	catch (uno::Exception& )
 	{
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString());
 	}
@@ -154,7 +154,7 @@ ScVbaStyle::Delete() throw (script::BasicErrorException, uno::RuntimeException)
 	{
 		mxStyleFamilyNameContainer->removeByName(mxStyle->getName());
 	}
-	catch (uno::Exception& e)
+	catch (uno::Exception& )
 	{
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString());
 	}

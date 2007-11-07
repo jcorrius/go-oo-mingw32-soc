@@ -154,7 +154,7 @@ ScVbaShapes::getShapesByArrayIndices( const uno::Any& Index  ) throw (uno::Runti
 		}
 		else
 		{
-			sal_Int32 nIndex;
+			sal_Int32 nIndex = 0;
 			sIndices[ index ] >>= nIndex;
 			// adjust for 1 based mso indexing
 			xShape.set( m_xIndexAccess->getByIndex( nIndex - 1 ), uno::UNO_QUERY );		

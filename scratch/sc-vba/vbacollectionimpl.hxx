@@ -169,103 +169,76 @@ protected:
 	css::uno::Reference< css::container::XIndexAccess > m_xIndexAccess;
 	css::uno::Reference< css::container::XNameAccess > m_xNameAccess;
 
-	virtual css::uno::Any getItemByStringIndex( const rtl::OUString& sIndex ) throw (css::uno::RuntimeException);
+	virtual css::uno::Any getItemByStringIndex( const rtl::OUString& sIndex ) throw (css::uno::RuntimeException)
+	{
+		if ( !m_xNameAccess.is() )
+			throw css::uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("ScVbaCollectionBase string index access not supported by this object") ), css::uno::Reference< css::uno::XInterface >() );
+	
+		return createCollectionObject( m_xNameAccess->getByName( sIndex ) );	
+	}		
 
-	virtual css::uno::Any getItemByIntIndex( const sal_Int32 nIndex ) throw (css::uno::RuntimeException);
-
+	virtual css::uno::Any getItemByIntIndex( const sal_Int32 nIndex ) throw (css::uno::RuntimeException)
+	{
+		if ( !m_xIndexAccess.is() )
+			throw css::uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("ScVbaCollectionBase numeric index access not supported by this object") ), css::uno::Reference< css::uno::XInterface >() );
+		if ( nIndex <= 0 )
+		{
+			throw  css::lang::IndexOutOfBoundsException( 
+				::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( 
+				"index is 0 or negative" ) ), 
+				css::uno::Reference< css::uno::XInterface >() );
+		}
+		// need to adjust for vba index ( for which first element is 1 )
+		return createCollectionObject( m_xIndexAccess->getByIndex( nIndex - 1 ) );		
+	}
 public:
 	ScVbaCollectionBase( const css::uno::Reference< oo::vba::XHelperInterface >& xParent,   const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::container::XIndexAccess >& xIndexAccess ) : BaseColBase( xParent, xContext ), m_xIndexAccess( xIndexAccess ){ m_xNameAccess.set(m_xIndexAccess, css::uno::UNO_QUERY); }
 	//XCollection
-	virtual ::sal_Int32 SAL_CALL getCount() throw (css::uno::RuntimeException);
-	virtual css::uno::Any SAL_CALL Item( const css::uno::Any& Index1, const css::uno::Any& Index2 ) throw (css::uno::RuntimeException);
-	// XDefaultMethod
-	::rtl::OUString SAL_CALL getDefaultMethodName(  ) throw (css::uno::RuntimeException);
+	virtual ::sal_Int32 SAL_CALL getCount() throw (css::uno::RuntimeException)
+	{
+		return m_xIndexAccess->getCount();
+	}
 
+	virtual css::uno::Any SAL_CALL Item( const css::uno::Any& Index1, const css::uno::Any& /*not processed in this base class*/ ) throw (css::uno::RuntimeException)
+	{
+		if ( Index1.getValueTypeClass() != css::uno::TypeClass_STRING )
+		{
+			sal_Int32 nIndex = 0;
+	
+			if ( ( Index1 >>= nIndex ) != sal_True )
+			{
+				rtl::OUString message;
+				message = rtl::OUString::createFromAscii(
+					"Couldn't convert index to Int32");
+				throw  css::lang::IndexOutOfBoundsException( message,
+					css::uno::Reference< css::uno::XInterface >() );
+			}
+			return 	getItemByIntIndex( nIndex );
+		}
+		rtl::OUString aStringSheet;
+
+		Index1 >>= aStringSheet;
+		return getItemByStringIndex( aStringSheet );	
+	}
+	// XDefaultMethod
+	::rtl::OUString SAL_CALL getDefaultMethodName(  ) throw (css::uno::RuntimeException)
+	{
+		const static rtl::OUString sName( RTL_CONSTASCII_USTRINGPARAM("Item") );
+		return sName;
+	}
 	// XEnumerationAccess
 	virtual css::uno::Reference< css::container::XEnumeration > SAL_CALL createEnumeration() throw (css::uno::RuntimeException) = 0;	
 
 	// XElementAccess
 	virtual css::uno::Type SAL_CALL getElementType() throw (css::uno::RuntimeException) = 0;
-
-	virtual ::sal_Bool SAL_CALL hasElements() throw (css::uno::RuntimeException);
-
-	virtual css::uno::Any createCollectionObject( const css::uno::Any& aSource ) = 0;
-};
-
-template <typename Ifc1>
-css::uno::Any
-ScVbaCollectionBase<Ifc1>::getItemByStringIndex( const rtl::OUString& sIndex ) throw (css::uno::RuntimeException)
-{
-	if ( !m_xNameAccess.is() )
-		throw css::uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("ScVbaCollectionBase string index access not supported by this object") ), css::uno::Reference< css::uno::XInterface >() );
-
-	return createCollectionObject( m_xNameAccess->getByName( sIndex ) );	
-}
-
-template <typename Ifc1>
-css::uno::Any 
-ScVbaCollectionBase<Ifc1>::getItemByIntIndex( const sal_Int32 nIndex ) throw (css::uno::RuntimeException)
-{
-	if ( !m_xIndexAccess.is() )
-		throw css::uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("ScVbaCollectionBase numeric index access not supported by this object") ), css::uno::Reference< css::uno::XInterface >() );
-	if ( nIndex <= 0 )
-	{
-		throw  css::lang::IndexOutOfBoundsException( 
-			::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( 
-			"index is 0 or negative" ) ), 
-			css::uno::Reference< css::uno::XInterface >() );
-	}
-	// need to adjust for vba index ( for which first element is 1 )
-	return createCollectionObject( m_xIndexAccess->getByIndex( nIndex - 1 ) );	
-}
-
-template <typename Ifc1>
-::sal_Int32 SAL_CALL 
-ScVbaCollectionBase<Ifc1>::getCount() throw (css::uno::RuntimeException)
-{
-	return m_xIndexAccess->getCount();
-}
-
-template <typename Ifc1>
-css::uno::Any SAL_CALL ScVbaCollectionBase<Ifc1>::Item( const css::uno::Any& aIndex, const css::uno::Any& /*not processed in this base class*/ ) throw (css::uno::RuntimeException)
-{
-	if ( aIndex.getValueTypeClass() != css::uno::TypeClass_STRING )
-	{
-		sal_Int32 nIndex = 0;
-
-		if ( ( aIndex >>= nIndex ) != sal_True )
-		{
-			rtl::OUString message;
-			message = rtl::OUString::createFromAscii(
-				"Couldn't convert index to Int32");
-			throw  css::lang::IndexOutOfBoundsException( message,
-				css::uno::Reference< css::uno::XInterface >() );
-		}
-		return 	getItemByIntIndex( nIndex );
-	}
-	rtl::OUString aStringSheet;
-
-	aIndex >>= aStringSheet;
-	return getItemByStringIndex( aStringSheet );	
-}
-
-template <typename Ifc1>
-::rtl::OUString SAL_CALL 
-ScVbaCollectionBase<Ifc1>::getDefaultMethodName(  ) throw (css::uno::RuntimeException)
-{
-	const static rtl::OUString sName( RTL_CONSTASCII_USTRINGPARAM("Item") );
-	return sName;
-}
-
 	// XElementAccess
-
-template <typename Ifc1>
-::sal_Bool SAL_CALL ScVbaCollectionBase<Ifc1>::hasElements() throw (css::uno::RuntimeException)
-{
-	return ( m_xIndexAccess->getCount() > 0 );
-}
-
-
+	virtual ::sal_Bool SAL_CALL hasElements() throw (css::uno::RuntimeException)
+	{
+		return ( m_xIndexAccess->getCount() > 0 );
+	}
+	virtual css::uno::Any createCollectionObject( const css::uno::Any& aSource ) = 0;
+	
+};
 
 typedef ::cppu::WeakImplHelper1<oo::vba::XCollection> XCollection_InterfacesBASE;
 

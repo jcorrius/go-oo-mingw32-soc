@@ -51,7 +51,7 @@ class ScVbaListBox : public ListBoxImpl_BASE
 	rtl::OUString sSourceName; 
 	rtl::OUString msDftPropName;
 
-    sal_Int32 m_nIndex;
+    sal_Int16 m_nIndex;
 	
 public:
 	ScVbaListBox( const css::uno::Reference< css::uno::XComponentContext >& xContext, 

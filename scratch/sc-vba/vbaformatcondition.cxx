@@ -73,7 +73,7 @@ ScVbaFormatCondition::Modify( ::sal_Int32 _nType, const uno::Any& _aOperator, co
 		pFormatConditions->removeFormatCondition(msStyleName, sal_False);
 		pFormatConditions->Add(_nType, _aOperator, _aFormula1, _aFormula2, mxStyle);
 	}
-	catch (uno::Exception& e)
+	catch (uno::Exception& )
 	{
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString() );
 	}
@@ -140,6 +140,11 @@ ScVbaFormatCondition::Type(  ) throw ( script::BasicErrorException, uno::Runtime
 }
 
 
+::sal_Int32 
+ScVbaFormatCondition::Operator( sal_Bool bVal ) throw (script::BasicErrorException )
+{
+	return ScVbaFormatCondition_BASE::Operator( bVal );
+}
 ::sal_Int32 SAL_CALL 
 ScVbaFormatCondition::Operator(  ) throw (script::BasicErrorException, uno::RuntimeException)
 {
@@ -153,7 +158,7 @@ ScVbaFormatCondition::notifyRange() throw ( script::BasicErrorException )
 	{
 		mxParentRangePropertySet->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("ConditionalFormat") ), uno::makeAny( mxSheetConditionalEntries) );
     }
-	catch (uno::Exception& e)
+	catch (uno::Exception& )
 	{
         DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString() );
     }

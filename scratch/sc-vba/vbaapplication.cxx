@@ -694,7 +694,7 @@ rtl::OUString ScVbaApplication::getOfficePath( const rtl::OUString& _sPathType )
 			sUrl = sUrl.copy( nIndex + 1 ); 	
 		::osl::File::getSystemPathFromFileURL( sUrl, sRetPath );
 	}
-	catch (uno::Exception& e)
+	catch (uno::Exception&)
 	{
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString());    
 	}		
@@ -824,8 +824,8 @@ ScVbaApplication::Volatile( const uno::Any& aVolatile )  throw ( uno::RuntimeExc
 {
 	sal_Bool bVolatile = sal_True;
 	aVolatile >>= bVolatile;
-	if ( true ) // getCalculation tries to get the active doc which... will barf ( on document load )
-		return; 
+	return; 
+/*
 	if ( bVolatile )
 		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Volatile - not supported" ) ), uno::Reference< uno::XInterface >() );
 	// bVoloatile is false - currently this only would make sense if 
@@ -835,6 +835,7 @@ ScVbaApplication::Volatile( const uno::Any& aVolatile )  throw ( uno::RuntimeExc
 	// the calculation mode and volatile interoperate
 	if ( ! getCalculation() == excel::XlCalculation::xlCalculationAutomatic )
 		setCalculation(  excel::XlCalculation::xlCalculationAutomatic );
+*/
 }
 
 void SAL_CALL

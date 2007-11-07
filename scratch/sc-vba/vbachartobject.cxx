@@ -87,7 +87,7 @@ ScVbaChartObject::setShape() throw ( script::BasicErrorException )
 			}
 		}
 	}
-	catch (uno::Exception& e)
+	catch (uno::Exception& )
 	{
 		throw script::BasicErrorException( rtl::OUString(), uno::Reference< uno::XInterface >(), SbERR_METHOD_FAILED, rtl::OUString() );
 	}
@@ -131,7 +131,7 @@ ScVbaChartObject::Activate() throw ( script::BasicErrorException )
 		uno::Reference< view::XSelectionSupplier > xSelectionSupplier( getCurrentDocument()->getCurrentController(), uno::UNO_QUERY_THROW );
 		xSelectionSupplier->select(uno::makeAny(xShape));
 	}
-	catch (uno::Exception& e)
+	catch (uno::Exception& )
 	{
 		throw script::BasicErrorException( rtl::OUString(), uno::Reference< uno::XInterface >(), SbERR_METHOD_FAILED, rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "ChartObject Activate internal error" ) ) );
 	}
@@ -213,5 +213,5 @@ ScVbaChartObject::setTop(double _fTop)
 uno::Reference< uno::XInterface > 
 ScVbaChartObject::getUnoObject() throw (script::BasicErrorException) 
 {
-	return xShape;
+	return uno::Reference< uno::XInterface >( xShape, uno::UNO_QUERY );
 }

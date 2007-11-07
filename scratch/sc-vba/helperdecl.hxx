@@ -106,8 +106,10 @@ struct OwnCreateFunc<ImplT, with_args<true> > {
                 css::uno::Reference<css::uno::XComponentContext>
                 const& xContext ) const
     {
-        return css::uno::Reference< org::openoffice::vba::XHelperInterface >(
+        css::uno::Reference< org::openoffice::vba::XHelperInterface > xHelp(
             new OwnServiceImpl<ImplT>( rServiceDecl, args, xContext ) );
+	css::uno::Reference< css::uno::XInterface > xIf( xHelp, css::uno::UNO_QUERY ) ;
+	return xIf;
     }
 };
 

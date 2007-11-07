@@ -55,7 +55,7 @@ ScVbaStyles::ScVbaStyles( const uno::Reference< vba::XHelperInterface >& xParent
 		mxMSF.set( mxModel, uno::UNO_QUERY_THROW );
 		mxNameContainerCellStyles.set( m_xNameAccess, uno::UNO_QUERY_THROW );
 	}
-	catch (uno::Exception& e)	
+	catch (uno::Exception& )	
 	{
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString());
 	}
@@ -148,7 +148,7 @@ ScVbaStyles::Add( const ::rtl::OUString& _sName, const uno::Any& _aBasedOn ) thr
 		}
 		aRet.set( Item( uno::makeAny( _sName ), uno::Any() ), uno::UNO_QUERY_THROW );
 	}
-	catch (uno::Exception& e)
+	catch (uno::Exception& )
 	{
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString());
 	}
@@ -163,7 +163,7 @@ ScVbaStyles::Delete(const rtl::OUString _sStyleName) throw ( script::BasicErrorE
 		if (mxNameContainerCellStyles->hasByName( _sStyleName ) )
 			mxNameContainerCellStyles->removeByName( _sStyleName );
 	}
-	catch (uno::Exception& e)
+	catch (uno::Exception& )
 	{
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString());
 	}

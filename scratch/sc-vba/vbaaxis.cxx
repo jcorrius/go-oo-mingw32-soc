@@ -157,7 +157,7 @@ ScVbaAxis::setCrosses( ::sal_Int32 _nCrosses ) throw (script::BasicErrorExceptio
 		}
 		mxPropertySet->setPropertyValue(AUTOORIGIN, uno::makeAny(sal_False) );        
 	}
-	catch (uno::Exception& e)
+	catch (uno::Exception& )
 	{
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString());
 	}
@@ -190,7 +190,7 @@ ScVbaAxis::getCrosses(  ) throw (script::BasicErrorException, uno::RuntimeExcept
 			}
 		}
 	}
-	catch (uno::Exception& e)
+	catch (uno::Exception& )
 	{
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString() );
 	}
@@ -222,7 +222,7 @@ ScVbaAxis::getCrossesAt(  ) throw (script::BasicErrorException, uno::RuntimeExce
 	{
 		mxPropertySet->getPropertyValue(ORIGIN) >>= fCrosses;
 	}
-	catch (uno::Exception& e)
+	catch (uno::Exception& )
 	{
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString());
 	}
@@ -302,7 +302,7 @@ ScVbaAxis::setMinorUnit( double _fMinorUnit ) throw (script::BasicErrorException
 		if (isValueAxis())
 			mxPropertySet->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("StepHelp") ), uno::makeAny(_fMinorUnit));                
 	}
-	catch (uno::Exception& e)
+	catch (uno::Exception& )
 	{
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString());
 	}
@@ -317,7 +317,7 @@ ScVbaAxis::getMinorUnit(  ) throw (script::BasicErrorException, uno::RuntimeExce
 		if (isValueAxis())
 			mxPropertySet->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("StepHelp"))) >>= fMinor;
 	}
-	catch (uno::Exception& e)
+	catch (uno::Exception& )
 	{
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString());
 	}
@@ -332,7 +332,7 @@ ScVbaAxis::setMinorUnitIsAuto( ::sal_Bool _bMinorUnitIsAuto ) throw (script::Bas
 		if (isValueAxis())
 			mxPropertySet->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "AutoStepHelp" ) ), uno::makeAny(_bMinorUnitIsAuto));
 	}
-	catch (uno::Exception& e)
+	catch (uno::Exception& )
 	{
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString() );
 	}
@@ -349,7 +349,7 @@ ScVbaAxis::getMinorUnitIsAuto(  ) throw (script::BasicErrorException, uno::Runti
 			mxPropertySet->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "AutoStepHelp")) ) >>= bIsAuto;
 		}
 	}
-	catch (uno::Exception& e)
+	catch (uno::Exception& )
 	{
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString());
 	}
@@ -379,7 +379,7 @@ ScVbaAxis::setMajorUnit( double _fMajorUnit ) throw (script::BasicErrorException
 			mxPropertySet->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("StepMain")), uno::makeAny(_fMajorUnit));                
 		}
 	}
-	catch (uno::Exception& e)
+	catch (uno::Exception& )
 	{
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString());
 	}
@@ -394,7 +394,7 @@ ScVbaAxis::getMajorUnit(  ) throw (script::BasicErrorException, uno::RuntimeExce
 		if (isValueAxis())
 			mxPropertySet->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("StepMain"))) >>= fMax;
 	}
-	catch (uno::Exception& e)
+	catch (uno::Exception& )
 	{
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString() );
 	}
@@ -411,7 +411,7 @@ ScVbaAxis::setMajorUnitIsAuto( ::sal_Bool _bMajorUnitIsAuto ) throw (script::Bas
 			mxPropertySet->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "AutoStepMain" ) ), uno::makeAny( _bMajorUnitIsAuto ));
 		}
 	}
-	catch (uno::Exception& e)
+	catch (uno::Exception& )
 	{
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString());
 	}
@@ -428,7 +428,7 @@ ScVbaAxis::getMajorUnitIsAuto(  ) throw (script::BasicErrorException, uno::Runti
 			mxPropertySet->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "AutoStepMain"))) >>= bIsAuto;
 		}
 	}
-	catch (uno::Exception& e)
+	catch (uno::Exception& )
 	{
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString());
 	}
@@ -445,7 +445,7 @@ ScVbaAxis::setMaximumScale( double _fMaximumScale ) throw (script::BasicErrorExc
 			mxPropertySet->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Max" ) ), uno::makeAny(_fMaximumScale));        
 		}
 	}
-	catch ( uno::Exception& e )
+	catch ( uno::Exception& )
 	{
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString());
 	}
@@ -462,7 +462,7 @@ ScVbaAxis::getMaximumScale(  ) throw (script::BasicErrorException, uno::RuntimeE
 			mxPropertySet->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Max" ))) >>= fMax;        
 		}
 	}
-	catch (uno::Exception& e)
+	catch (uno::Exception& )
 	{
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString());
 	}
@@ -479,7 +479,7 @@ ScVbaAxis::setMaximumScaleIsAuto( ::sal_Bool _bMaximumScaleIsAuto ) throw (scrip
 			mxPropertySet->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "AutoMax" ) ), uno::makeAny( _bMaximumScaleIsAuto ));
 	
 	}
-	catch ( uno::Exception& e )
+	catch ( uno::Exception& )
 	{
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString());
 	}	
@@ -495,7 +495,7 @@ ScVbaAxis::getMaximumScaleIsAuto(  ) throw (script::BasicErrorException, uno::Ru
 		if (isValueAxis())
 			mxPropertySet->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "AutoMax" )) ) >>= bIsAuto;
 	}
-	catch ( uno::Exception& e )
+	catch ( uno::Exception& )
 	{
 		DebugHelper::exception( SbERR_METHOD_FAILED, rtl::OUString() );
 	}
@@ -510,7 +510,7 @@ ScVbaAxis::setMinimumScale( double _fMinimumScale ) throw (script::BasicErrorExc
 		if (isValueAxis())
 			mxPropertySet->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Min") ), uno::makeAny( _fMinimumScale )  );
 	}
-	catch ( uno::Exception& e)
+	catch ( uno::Exception& )
 	{
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString() );
 	}
@@ -542,7 +542,7 @@ ScVbaAxis::setMinimumScaleIsAuto( ::sal_Bool _bMinimumScaleIsAuto ) throw (scrip
 			mxPropertySet->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("AutoMin") ), uno::makeAny(_bMinimumScaleIsAuto));
 		}
 	}
-	catch (uno::Exception& e)
+	catch (uno::Exception& )
 	{
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString());
 	}
@@ -559,7 +559,7 @@ ScVbaAxis::getMinimumScaleIsAuto(  ) throw (script::BasicErrorException, uno::Ru
 			mxPropertySet->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("AutoMin")) ) >>= bIsAuto;        
 		}
 	}
-	catch (uno::Exception& e)
+	catch (uno::Exception& )
 	{
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString());
 	}
@@ -593,7 +593,7 @@ ScVbaAxis::setScaleType( ::sal_Int32 _nScaleType ) throw (script::BasicErrorExce
 			}
 		}
 	}
-	catch (uno::Exception& e)
+	catch (uno::Exception& )
 	{
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString() );
 	}
@@ -615,7 +615,7 @@ ScVbaAxis::getScaleType(  ) throw (script::BasicErrorException, uno::RuntimeExce
 				nScaleType = xlScaleLinear;            
 		}
 	}
-	catch (uno::Exception& e)
+	catch (uno::Exception& )
 	{
 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString());
 	}
