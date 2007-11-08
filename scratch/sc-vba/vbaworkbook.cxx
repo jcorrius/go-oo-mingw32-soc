@@ -436,11 +436,6 @@ uno::Any SAL_CALL
 ScVbaWorkbook::Names( const css::uno::Any& aIndex ) throw (uno::RuntimeException)
 {
 	uno::Reference< frame::XModel > xModel( getModel() );
-	ScDocShell * pDocShell = ( ScDocShell* )SfxObjectShell::GetWorkingDocument();
-	if ( !pDocShell )
-		throw uno::RuntimeException(::rtl::OUString(
-                                RTL_CONSTASCII_USTRINGPARAM( "Cann't recognise the 'Names' interface. ") ),
-                                uno::Reference< XInterface >() );
 	uno::Reference< beans::XPropertySet > xProps( xModel, uno::UNO_QUERY_THROW );
 	uno::Reference< sheet::XNamedRanges > xNamedRanges(  xProps->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("NamedRanges") ) ), uno::UNO_QUERY_THROW );
 	uno::Reference< vba::XCollection > xNames( new ScVbaNames( this , mxContext , xNamedRanges , xModel ));
