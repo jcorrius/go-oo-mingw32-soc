@@ -34,6 +34,7 @@
 #include <set>
 #include <exception>
 #include <iterator>
+#include <sstream>
 
 #ifdef __GNUC__
 #warning "noalias not present in boost 1.30.2"
@@ -42,13 +43,13 @@
 #define noalias(a) (a)
 
 #include <boost/numeric/ublas/matrix_proxy.hpp>
-#include <boost/numeric/ublas/io.hpp>
-#include <boost/numeric/ublas/matrix_expression.hpp>
 
 namespace bnu = ::boost::numeric::ublas;
 
-using std::cout;
-using std::endl;
+using ::std::cout;
+using ::std::endl;
+using ::boost::numeric::ublas::prod;
+using ::std::vector;
 
 namespace scsolver { namespace numeric {
 
@@ -252,9 +253,15 @@ void factorize( const bnu::matrix<double>& mxA, bnu::matrix<double>& mxL,
                 U( i, j ) = A( i, j );
         }
 
+#if REWRITE_FOR_SUN_STUDIO_COMPILER
+    n = cnP.size();
+    for (size_t i = 0; i < n; ++i)
+        P(i, cnP[i]) = 1.0;
+#else
     ::std::vector<size_t>::const_iterator it, itBeg = cnP.begin(), itEnd = cnP.end();
     for ( it = itBeg; it != itEnd; ++it )
-        P( std::distance( itBeg, it ), *it ) = 1.0;
+        P( ::std::distance( itBeg, it ), *it ) = 1.0;
+#endif
 
     noalias( mxU ) = U;
     noalias( mxL ) = L;
@@ -968,7 +975,7 @@ bnu::matrix< std::string > Matrix::getDisplayElements(
     for ( unsigned int i = 0; i < m_aArray.size1(); ++i )
         for ( unsigned int j = 0; j < m_aArray.size2(); ++j )
         {
-            ostringstream osElem;
+            ::std::ostringstream osElem;
             double fVal = m_aArray( i, j );
             for ( unsigned int k = 0; k < nColSpace; ++k )
                 osElem << " ";
