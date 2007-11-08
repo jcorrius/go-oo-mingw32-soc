@@ -69,6 +69,7 @@ using ::com::sun::star::uno::Reference;
 using ::std::vector;
 using ::std::cout;
 using ::std::endl;
+using ::std::distance;
 
 namespace scsolver {
 

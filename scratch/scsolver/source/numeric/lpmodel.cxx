@@ -45,6 +45,8 @@ using ::std::cout;
 using ::std::endl;
 using ::std::ostringstream;
 using ::scsolver::numeric::Matrix;
+using ::std::distance;
+using ::std::find;
 
 namespace scsolver { namespace numeric { namespace lp {
 

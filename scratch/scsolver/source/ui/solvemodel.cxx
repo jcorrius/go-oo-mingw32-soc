@@ -64,6 +64,7 @@ using ::std::cout;
 using ::std::endl;
 using ::std::map;
 using ::std::auto_ptr;
+using ::std::distance;
 
 namespace scsolver {
 
