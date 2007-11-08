@@ -14,11 +14,19 @@ namespace com { namespace sun { namespace star {
     namespace sheet {
         class XSpreadsheetDocument;
         class XSpreadsheet;
+        class XDataPilotTable2;
+    }
+    namespace table {
+        struct CellAddress;
     }
 }}}
 
 namespace dptest {
 
+/** 
+ *  parameters that influence the size and other characteristics of data
+ *  source.
+ */
 struct TestParam
 {
     sal_Int32 FieldCount;
@@ -29,6 +37,15 @@ struct TestParam
 
     sal_Int32 FieldItemCountLower;
     sal_Int32 FieldItemCountUpper;
+};
+
+/** 
+ * information referenced during run-time testing.
+ */
+struct RuntimeData
+{
+    ::com::sun::star::uno::Reference< ::com::sun::star::sheet::XSpreadsheet > OutputSheetRef;
+    sal_Int32 OutputSheetId;
 };
 
 class DPTestBase
@@ -49,11 +66,13 @@ private:
     void genSrcData(const TestParam& param);
     void genDPTable(const TestParam& param, const ::com::sun::star::table::CellRangeAddress& srcRange, 
                     const ::com::sun::star::uno::Reference< ::com::sun::star::sheet::XSpreadsheet >& xDestSheet);
-    void dumpDPProperties(const ::com::sun::star::uno::Reference< ::com::sun::star::sheet::XSpreadsheet >& xSheet);
+    void dumpTableProperties(const ::com::sun::star::uno::Reference< ::com::sun::star::sheet::XSpreadsheet >& xSheet);
     void dumpFields(const ::com::sun::star::uno::Reference< ::com::sun::star::container::XIndexAccess >& xFields) const;
     void dumpItems(const ::com::sun::star::uno::Reference< ::com::sun::star::container::XIndexAccess >& xItems) const;
 
-    void verifyDPResults(const ::com::sun::star::uno::Reference< ::com::sun::star::sheet::XSpreadsheet >& xSheet);
+    void verifyTableResults(const RuntimeData& data);
+    void verifyCellResult(const RuntimeData& data, const ::com::sun::star::table::CellAddress& cell,
+                          const ::com::sun::star::uno::Reference< ::com::sun::star::sheet::XDataPilotTable2 >& xTable);
 
     const ::com::sun::star::uno::Reference< ::com::sun::star::sheet::XSpreadsheet >
         getSrcSheet() const;
