@@ -38,6 +38,8 @@
 
 #include "cppuhelper/implementationentry.hxx"
 
+#include <com/sun/star/sheet/GeneralFunction.hpp>
+
 #include <vector>
 #include <set>
 #include <ext/hash_map>
@@ -158,6 +160,9 @@ public:
 
     void output(const ::com::sun::star::uno::Reference< ::com::sun::star::sheet::XSpreadsheet >& xSheet,
                 sal_Int32 row, sal_Int16 col) const;
+
+    double aggregateValue(const ::std::vector<DataTable::Filter>& filters, sal_Int32 dataFieldId,
+                          ::com::sun::star::sheet::GeneralFunction func) const;
 
     static const ::rtl::OUString getString(sal_Int32 nId);
     static sal_Int32 getStringId(const ::rtl::OUString& aStr);

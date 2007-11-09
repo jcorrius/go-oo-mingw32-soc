@@ -115,14 +115,15 @@ UnaryProc forEachCell(const CellRangeAddress& range, UnaryProc op)
 class ResultTester
 {
 public:
-    ResultTester(const Reference<XSpreadsheet>& xSheet, const Reference<XDataPilotTable2>& xDPTab) :
-        mxSheet(xSheet), mxDPTab(xDPTab)
+    ResultTester(const RuntimeData& data, const Reference<XDataPilotTable2>& xDPTab) :
+        maData(data), mxDPTab(xDPTab), mnFailureCount(0)
     {
         init();
     }
 
     ResultTester(const ResultTester& other) :
-        mxSheet(other.mxSheet), mxDPTab(other.mxDPTab)
+        maData(other.maData), mxDPTab(other.mxDPTab), maDataFieldIds(other.maDataFieldIds), 
+        maFuncs(other.maFuncs), mnFailureCount(other.mnFailureCount)
     {
         init();
     }
@@ -130,15 +131,21 @@ public:
     void init()
     {
         Reference<XDataPilotDescriptor> xDPDesc(mxDPTab, UNO_QUERY_THROW);
-        printf("  name: '%s' (tag: '%s')\n", OUStringToOString(xDPDesc->getName(), RTL_TEXTENCODING_UTF8).getStr(),
-               OUStringToOString(xDPDesc->getTag(), RTL_TEXTENCODING_UTF8).getStr());
 
         Reference<container::XIndexAccess> xDataFields = xDPDesc->getDataFields();
         sal_Int32 fieldCount = xDataFields->getCount();
         maFuncs.reserve(fieldCount);
+        maDataFieldIds.reserve(fieldCount);
         for (sal_Int32 i = 0; i < fieldCount; ++i)
         {
             Reference<XDataPilotField> xField(xDataFields->getByIndex(i), UNO_QUERY_THROW);
+
+            // Get the field ID of a given data field.
+            Reference<container::XNamed> xNamed(xField, UNO_QUERY_THROW);
+            OUString name = xNamed->getName();
+            maDataFieldIds.push_back(maData.CacheTable.getFieldIndex(name));
+
+            // Get the function used for aggregation.
             Reference<XPropertySet> xPS(xField, UNO_QUERY_THROW);
             Any any = xPS->getPropertyValue(ascii("Function"));
             sheet::GeneralFunction func;
@@ -149,8 +156,6 @@ public:
 
     void operator()(const CellAddress& cell)
     {
-        using namespace ::com::sun::star::sheet;
-
         DataPilotTablePositionData posData = mxDPTab->getPositionData(cell);
         if (posData.PositionType != DataPilotTablePositionType::RESULT)
             return;
@@ -159,73 +164,60 @@ public:
         if (!(posData.PositionData >>= resData))
             return;
 
-        Reference<XCell> xCell = mxSheet->getCellByPosition(cell.Column, cell.Row);
+        Reference<XCell> xCell = maData.OutputSheetRef->getCellByPosition(cell.Column, cell.Row);
 
         if (xCell->getType() != table::CellContentType_VALUE)
             return;
 
-        double val = xCell->getValue();
-        fprintf(stdout, "ResultTester::(): (%ld, %ld) = %g\n", cell.Row, cell.Column, val);fflush(stdout);
+
+        vector<DataTable::Filter> filters;
+        sal_Int32 filterSize = resData.FieldFilters.getLength();
+        filters.reserve(filterSize);
+        for (sal_Int32 i = 0; i < filterSize; ++i)
+        {
+            sal_Int32 nFieldId = maData.CacheTable.getFieldIndex(resData.FieldFilters[i].FieldName);
+//          fprintf(stdout, "ResultTester::(): field name = '%s' (%ld)  match value = '%s'\n",
+//                  OUStringToOString(resData.FieldFilters[i].FieldName, RTL_TEXTENCODING_UTF8).getStr(),
+//                  nFieldId,
+//                  OUStringToOString(resData.FieldFilters[i].MatchValue, RTL_TEXTENCODING_UTF8).getStr());fflush(stdout);
+
+            if (nFieldId >= 0)
+            {
+                DataTable::Filter filter;
+                filter.FieldIndex = nFieldId;
+                filter.MatchStrId = DataTable::getStringId(resData.FieldFilters[i].MatchValue);
+                filters.push_back(filter);
+            }
+        }
 
         sal_Int32 nId = resData.DataFieldIndex;
-        const Sequence<DataPilotFieldFilter>& filters = resData.FieldFilters;
-        for (sal_Int32 i = 0; i < filters.getLength(); ++i)
-        {
-            fprintf(stdout, "ResultTester::(): field name = '%s'  match value = '%s'\n",
-                    OUStringToOString(filters[i].FieldName, RTL_TEXTENCODING_UTF8).getStr(),
-                    OUStringToOString(filters[i].MatchValue, RTL_TEXTENCODING_UTF8).getStr());fflush(stdout);
-        }
-
         const sheet::GeneralFunction func = maFuncs.at(nId);
-        switch (func)
+        const sal_Int32 nFieldId = maDataFieldIds.at(nId);
+
+        double val1 = xCell->getValue();
+        double val2 = maData.CacheTable.aggregateValue(filters, nFieldId, func);
+        if (val1 != val2)
         {
-            case GeneralFunction_NONE:
-                fprintf(stdout, "ResultTester::(): NONE\n");fflush(stdout);
-            break;
-            case GeneralFunction_AUTO:
-                fprintf(stdout, "ResultTester::(): AUTO\n");fflush(stdout);
-            break;
-            case GeneralFunction_SUM:
-                fprintf(stdout, "ResultTester::(): SUM\n");fflush(stdout);
-            break;
-            case GeneralFunction_COUNT:
-                fprintf(stdout, "ResultTester::(): COUNT\n");fflush(stdout);
-            break;
-            case GeneralFunction_AVERAGE:
-                fprintf(stdout, "ResultTester::(): AVERAGE\n");fflush(stdout);
-            break;
-            case GeneralFunction_MAX:
-                fprintf(stdout, "ResultTester::(): MAX\n");fflush(stdout);
-            break;
-            case GeneralFunction_MIN:
-                fprintf(stdout, "ResultTester::(): MIN\n");fflush(stdout);
-            break;
-            case GeneralFunction_PRODUCT:
-                fprintf(stdout, "ResultTester::(): PRODUCT\n");fflush(stdout);
-            break;
-            case GeneralFunction_COUNTNUMS:
-                fprintf(stdout, "ResultTester::(): COUNTNUMS\n");fflush(stdout);
-            break;
-            case GeneralFunction_STDEV:
-                fprintf(stdout, "ResultTester::(): STDEV\n");fflush(stdout);
-            break;
-            case GeneralFunction_STDEVP:
-                fprintf(stdout, "ResultTester::(): STDEVP\n");fflush(stdout);
-            break;
-            case GeneralFunction_VAR:
-                fprintf(stdout, "ResultTester::(): VAR\n");fflush(stdout);
-            break;
-            case GeneralFunction_VARP:
-                fprintf(stdout, "ResultTester::(): VARP\n");fflush(stdout);
-            break;
+            fprintf(stdout, "* VALUES DIFFER (%ld, %ld) : real value = %g  check value = %g (%s)\n", 
+                    cell.Row, cell.Column,
+                    val1, val2, getFunctionName(func).c_str());
+            fflush(stdout);
+            ++mnFailureCount;
         }
+    }
+
+    sal_Int16 getFailureCount() const
+    {
+        return mnFailureCount;
     }
 
 private:
     ResultTester(); // disabled
     Reference<XDataPilotTable2>     mxDPTab;
-    Reference<XSpreadsheet>         mxSheet;
+    RuntimeData                     maData;
+    vector<sal_Int32>               maDataFieldIds;
     vector<sheet::GeneralFunction>  maFuncs;
+    sal_Int16                       mnFailureCount;
 };
 
 // ============================================================================
@@ -239,18 +231,10 @@ DPTestBase::~DPTestBase()
 {
 }
 
-void DPTestBase::run()
+void DPTestBase::run(const TestParam& param)
 {
-    TestParam param;
-    param.FieldCount = 6;
-    param.RowCount   = 1000;
-    param.DataCount  = 3;
-    param.StartCol   = 0;
-    param.StartRow   = 0;
-    param.FieldItemCountLower = 3;
-    param.FieldItemCountUpper = 3;
-
-    genSrcData(param);
+    DataTable table;
+    genSrcData(param, table);
     if (!mpSrcRange.get())
         return;
 
@@ -258,6 +242,7 @@ void DPTestBase::run()
     xSheets->insertNewByName(ascii("DPTable"), mpSrcRange->Sheet+1);
 
     RuntimeData data;
+    data.CacheTable.swap(table);
     data.OutputSheetRef.set( getSheetByName(mxSpDoc, ascii("DPTable")) );
     data.OutputSheetId = mpSrcRange->Sheet + 1;
 
@@ -284,7 +269,7 @@ const OUString DPTestBase::getFieldItemName(sal_Int16 fieldId, sal_Int32 itemId)
     return buf.makeStringAndClear();
 }
 
-void DPTestBase::genSrcData(const TestParam& param)
+void DPTestBase::genSrcData(const TestParam& param, DataTable& rTable)
 {
     if (param.FieldCount < param.DataCount)
         return;
@@ -336,16 +321,34 @@ void DPTestBase::genSrcData(const TestParam& param)
         buf.append(vfield+1);
         table.setFieldName(param.FieldCount-offset, buf.makeStringAndClear());
         for (sal_Int32 row = 0; row < param.RowCount; ++row)
-            table.setCell(row, param.FieldCount-offset, rand(0, 100));
+            table.setCell(row, param.FieldCount-offset, rand(1, 100)/10.0);
     }
 
-//  table.output();
+    table.output();
     table.output(xSheet, param.StartRow, param.StartCol);
+    rTable.swap(table);
 }
 
 void DPTestBase::genDPTable(const TestParam& param, const CellRangeAddress& srcRange, 
                             const Reference<XSpreadsheet>& xDestSheet)
 {
+    static const GeneralFunction funcTable[] = {
+//      GeneralFunction_NONE,
+//      GeneralFunction_AUTO,
+        GeneralFunction_SUM,
+        GeneralFunction_COUNT,
+        GeneralFunction_AVERAGE,
+        GeneralFunction_MAX,
+        GeneralFunction_MIN,
+        GeneralFunction_PRODUCT,
+//      GeneralFunction_COUNTNUMS,
+//      GeneralFunction_STDEV,
+//      GeneralFunction_STDEVP,
+//      GeneralFunction_VAR,
+//      GeneralFunction_VARP
+    };
+    static sal_Int32 funcTableSize = sizeof(funcTable)/sizeof(funcTable[0]);
+
     // Create a data pilot table.
     sal_Int32 fieldCount = srcRange.EndColumn - srcRange.StartColumn + 1;
 
@@ -353,8 +356,6 @@ void DPTestBase::genDPTable(const TestParam& param, const CellRangeAddress& srcR
     Reference<XDataPilotTables> xDPTables(xDPTSupplier->getDataPilotTables(), UNO_QUERY_THROW);
     Reference<XDataPilotDescriptor> xDPDesc(xDPTables->createDataPilotDescriptor(), UNO_QUERY_THROW);
     xDPDesc->setSourceRange(srcRange);
-    xDPDesc->setTag(ascii("MY CUSTOM TAG"));
-    printf("tag is set to '%s'\n", OUStringToOString(xDPDesc->getTag(), RTL_TEXTENCODING_UTF8).getStr());
 
     // Define non-data fields.
     Reference<container::XIndexAccess> xIA = xDPDesc->getDataPilotFields();
@@ -379,16 +380,7 @@ void DPTestBase::genDPTable(const TestParam& param, const CellRangeAddress& srcR
         printName(xField);
         Reference<XPropertySet> xPS(xField, UNO_QUERY_THROW);
         xPS->setPropertyValue(ascii("Orientation"), makeAny(DataPilotFieldOrientation_DATA));
-        if (i % 5 == 0)
-            xPS->setPropertyValue(ascii("Function"), makeAny(GeneralFunction_SUM));
-        else if (i % 5 == 1)
-            xPS->setPropertyValue(ascii("Function"), makeAny(GeneralFunction_COUNT));
-        else if (i % 5 == 2)
-            xPS->setPropertyValue(ascii("Function"), makeAny(GeneralFunction_AVERAGE));
-        else if (i % 5 == 3)
-            xPS->setPropertyValue(ascii("Function"), makeAny(GeneralFunction_MAX));
-        else if (i % 5 == 4)
-            xPS->setPropertyValue(ascii("Function"), makeAny(GeneralFunction_MIN));
+        xPS->setPropertyValue(ascii("Function"), makeAny(funcTable[i % funcTableSize]));
     }
 
     table::CellAddress cell;
@@ -449,8 +441,6 @@ void DPTestBase::dumpTableProperties(const Reference<XSpreadsheet>& xSheet)
             printf("  (IgnoreEmptyRows: %d;  RepeatIfEmpty: %d;  ColumnGrand: %d;  RowGrand: %d;  ShowFilterButton: %d)\n",
                    ignoreEmptyRows, repeatIfEmpty, columnGrand, rowGrand, showFilterButton, drillDownOnDoubleClick);
 
-            continue;
-
             // fields and their properties
             printf("  column fields\n");
             dumpFields(xDPDesc->getColumnFields());
@@ -465,7 +455,7 @@ void DPTestBase::dumpTableProperties(const Reference<XSpreadsheet>& xSheet)
         }
         catch (const RuntimeException&)
         {
-            fprintf(stdout, "DPTestBase::dumpDPProperties: BOO!\n");fflush(stdout);
+            fprintf(stdout, "DPTestBase::dumpDPProperties: RuntimeException!\n");fflush(stdout);
         }
     }
 }
@@ -532,41 +522,15 @@ void DPTestBase::verifyTableResults(const RuntimeData& data)
             printf("  data range: sheet: %d;  range (%ld, %ld) - (%ld, %ld)\n",
                range.Sheet, range.StartRow, range.StartColumn,
                range.EndRow, range.EndColumn);
-            ResultTester tester(xSheet, xDPTab);
-            forEachCell(range, tester);
+            ResultTester tester(data, xDPTab);
+            sal_Int16 failCount = forEachCell(range, tester).getFailureCount();
+            printf("  number of failures = %d\n", failCount);
         }
         catch (const RuntimeException&)
         {
             fprintf(stdout, "DPTestBase::verifyDPResults: runtime error occurred.\n");
         }
     }
-}
-
-void DPTestBase::verifyCellResult(const RuntimeData& data, const CellAddress& cell,
-                                  const Reference<XDataPilotTable2>& xTable)
-{
-    Reference<XCell> xCell = data.OutputSheetRef->getCellByPosition(cell.Column, cell.Row);
-    if (xCell->getType() != table::CellContentType_VALUE)
-    {
-        fprintf(stdout, "DPTestBase::verifyDPResults: Cell(%ld, %ld) not a value cell\n",
-                cell.Row, cell.Column);
-        return;
-    }
-
-    double val = xCell->getValue();
-    printf("  (%ld, %ld) = %g\n", cell.Row, cell.Column, val);
-    Sequence< Sequence<Any> > table = xTable->getDrillDownData(cell);
-
-}
-
-const Reference<XSpreadsheet> DPTestBase::getSrcSheet() const
-{
-    Reference<XSpreadsheets> xSheets = mxSpDoc->getSheets();
-
-    // Remove all but one sheet.
-    Reference<container::XIndexAccess> xIA(xSheets, UNO_QUERY_THROW);
-    Reference<XSpreadsheet> xSheet(xIA->getByIndex(mpSrcRange->Sheet), UNO_QUERY_THROW);
-    return xSheet;
 }
 
 }

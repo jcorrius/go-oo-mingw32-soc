@@ -7,6 +7,8 @@
 #include <memory>
 #include <boost/shared_ptr.hpp>
 
+#include <dpcachetable.hxx>
+
 namespace com { namespace sun { namespace star { 
     namespace container {
         class XIndexAccess;
@@ -46,6 +48,7 @@ struct RuntimeData
 {
     ::com::sun::star::uno::Reference< ::com::sun::star::sheet::XSpreadsheet > OutputSheetRef;
     sal_Int32 OutputSheetId;
+    DataTable CacheTable;
 };
 
 class DPTestBase
@@ -55,7 +58,7 @@ public:
 
     ~DPTestBase();
 
-    void run();
+    void run(const TestParam& param);
 
 private:
     DPTestBase(); // disabled
@@ -63,7 +66,7 @@ private:
     const ::rtl::OUString getFieldName(sal_Int16 fieldId) const;
     const ::rtl::OUString getFieldItemName(sal_Int16 fieldId, sal_Int32 itemId) const;
 
-    void genSrcData(const TestParam& param);
+    void genSrcData(const TestParam& param, DataTable& rTable);
     void genDPTable(const TestParam& param, const ::com::sun::star::table::CellRangeAddress& srcRange, 
                     const ::com::sun::star::uno::Reference< ::com::sun::star::sheet::XSpreadsheet >& xDestSheet);
     void dumpTableProperties(const ::com::sun::star::uno::Reference< ::com::sun::star::sheet::XSpreadsheet >& xSheet);
@@ -71,11 +74,6 @@ private:
     void dumpItems(const ::com::sun::star::uno::Reference< ::com::sun::star::container::XIndexAccess >& xItems) const;
 
     void verifyTableResults(const RuntimeData& data);
-    void verifyCellResult(const RuntimeData& data, const ::com::sun::star::table::CellAddress& cell,
-                          const ::com::sun::star::uno::Reference< ::com::sun::star::sheet::XDataPilotTable2 >& xTable);
-
-    const ::com::sun::star::uno::Reference< ::com::sun::star::sheet::XSpreadsheet >
-        getSrcSheet() const;
 
 private:
     ::com::sun::star::uno::Reference< ::com::sun::star::sheet::XSpreadsheetDocument > mxSpDoc;

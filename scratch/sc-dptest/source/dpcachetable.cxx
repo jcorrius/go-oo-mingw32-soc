@@ -38,6 +38,7 @@
 #include "rtl/ustrbuf.hxx"
 
 #include <sstream>
+#include <numeric>
 #include <stdio.h>
 
 #include <com/sun/star/sdbc/DataType.hpp>
@@ -241,6 +242,106 @@ public:
 
 private:
     const vector<DataTable::Field>& mrFields;
+};
+
+// ----------------------------------------------------------------------------
+
+class ResultAggregator
+{
+public:
+    ResultAggregator(const vector<DataTable::Filter>& filters, sal_Int32 dataFieldId, 
+                     GeneralFunction func, size_t rowCount) :
+        maFilters(filters), mnDataFieldId(dataFieldId), meFunc(func)
+    {
+        maValues.reserve(rowCount);
+    }
+
+    void operator()(const vector<DataTable::Cell>& row)
+    {
+        sal_Int32 rowSize = row.size();
+        if (mnDataFieldId >= rowSize)
+            return;
+
+        bool includeRow = true;
+        vector<DataTable::Filter>::const_iterator itr, itrEnd = maFilters.end();
+        for (itr = maFilters.begin(); itr != itrEnd; ++itr)
+        {
+            const sal_Int32 fieldId = itr->FieldIndex;
+            if (fieldId >= rowSize || fieldId < 0)
+                continue;
+
+            if (row.at(fieldId).StrId != itr->MatchStrId)
+            {
+                includeRow = false;
+                break;
+            }
+        }
+        if (includeRow)
+            maValues.push_back(row.at(mnDataFieldId).Value);
+    }
+
+    double getValue() const
+    {
+        using ::std::accumulate;
+        using ::std::multiplies;
+
+        size_t valueSize = maValues.size();
+        if (!valueSize)
+            return 0.0;
+
+        switch (meFunc)
+        {
+            case GeneralFunction_NONE:
+                return 0.0;
+            case GeneralFunction_AUTO:
+                // AUTO == SUM !?
+            case GeneralFunction_SUM:
+                return accumulate(maValues.begin(), maValues.end(), 0.0);
+            case GeneralFunction_AVERAGE:
+                return accumulate(maValues.begin(), maValues.end(), 0.0) / valueSize;
+            case GeneralFunction_COUNT:
+                return static_cast<double>(maValues.size());
+            case GeneralFunction_MAX:
+            {
+                double val = maValues.front();
+                return accumulate(++maValues.begin(), maValues.end(), val, maxValue);
+            }
+            case GeneralFunction_MIN:
+            {
+                double val = maValues.front();
+                return accumulate(++maValues.begin(), maValues.end(), val, minValue);
+            }
+            case GeneralFunction_PRODUCT:
+                return accumulate(maValues.begin(), maValues.end(), 1.0, multiplies<double>());
+            case GeneralFunction_COUNTNUMS:
+            case GeneralFunction_STDEV:
+            case GeneralFunction_STDEVP:
+            case GeneralFunction_VAR:
+            case GeneralFunction_VARP:
+                break;
+        }
+        return 0.0;
+    }
+
+private:
+    ResultAggregator(); // disabled
+
+    static double maxValue(double a, double b)
+    {
+        return a > b ? a : b;
+    }
+
+    static double minValue(double a, double b)
+    {
+        return a < b ? a : b;
+    }
+
+private:
+    const vector<DataTable::Filter> maFilters;
+    const sal_Int32 mnDataFieldId;
+    const GeneralFunction meFunc;
+
+    vector<double> maValues;
 };
 
 // ----------------------------------------------------------------------------
@@ -471,6 +572,15 @@ void DataTable::output(const Reference<XSpreadsheet>& xSheet, sal_Int32 row, sal
 
     Reference<XCellRangeData> xRangeData(xRange, UNO_QUERY_THROW);
     xRangeData->setDataArray(array);
+}
+
+double DataTable::aggregateValue(const vector<DataTable::Filter>& filters, sal_Int32 dataFieldId,
+                                 GeneralFunction func) const
+{
+    using namespace ::com::sun::star::sheet;
+
+    ResultAggregator aggregator(filters, dataFieldId, func, maTable.size());
+    return for_each(maTable.begin(), maTable.end(), aggregator).getValue();
 }
 
 // static 
