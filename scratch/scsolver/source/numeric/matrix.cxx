@@ -42,8 +42,6 @@
 #undef noalias
 #define noalias(a) (a)
 
-#include <boost/numeric/ublas/matrix_proxy.hpp>
-
 namespace bnu = ::boost::numeric::ublas;
 
 using ::std::cout;

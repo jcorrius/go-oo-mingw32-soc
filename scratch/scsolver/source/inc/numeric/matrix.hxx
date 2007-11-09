@@ -29,7 +29,16 @@
 #ifndef _SCSOLVER_NUMERIC_MATRIX_HXX_
 #define _SCSOLVER_NUMERIC_MATRIX_HXX_
 
+#if 0
+// workaround for sun compiler.  unpack the separate scsolver_boost.tar.bz2
+// package into source/inc/_boost.
+#include "_boost/numeric/ublas/matrix.hpp"
+#include "_boost/numeric/ublas/matrix_proxy.hpp"
+#else
 #include <boost/numeric/ublas/matrix.hpp>
+#include <boost/numeric/ublas/matrix_proxy.hpp>
+#endif
+
 #include <vector>
 #include <memory>
 

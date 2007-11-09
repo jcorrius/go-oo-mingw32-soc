@@ -36,7 +36,6 @@
 #include <algorithm>
 #include <vector>
 #include <map>
-#include <boost/numeric/ublas/matrix.hpp>
 
 using ::std::vector;
 using ::std::string;
