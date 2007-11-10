@@ -14,6 +14,9 @@
 #include <com/sun/star/container/XNamed.hpp>
 #include <com/sun/star/sheet/DataPilotFieldFilter.hpp>
 #include <com/sun/star/sheet/DataPilotFieldOrientation.hpp>
+#include <com/sun/star/sheet/DataPilotFieldReference.hpp>
+#include <com/sun/star/sheet/DataPilotFieldReferenceItemType.hpp>
+#include <com/sun/star/sheet/DataPilotFieldReferenceType.hpp>
 #include <com/sun/star/sheet/DataPilotTableRegion.hpp>
 #include <com/sun/star/sheet/DataPilotTablePositionData.hpp>
 #include <com/sun/star/sheet/DataPilotTablePositionType.hpp>
@@ -21,6 +24,7 @@
 #include <com/sun/star/sheet/GeneralFunction.hpp>
 #include <com/sun/star/sheet/XDataPilotDescriptor.hpp>
 #include <com/sun/star/sheet/XDataPilotField.hpp>
+#include <com/sun/star/sheet/XDataPilotFieldGrouping.hpp>
 #include <com/sun/star/sheet/XDataPilotTable2.hpp>
 #include <com/sun/star/sheet/XDataPilotTable.hpp>
 #include <com/sun/star/sheet/XDataPilotTables.hpp>
@@ -247,7 +251,10 @@ void DPTestBase::run(const TestParam& param)
     data.OutputSheetId = mpSrcRange->Sheet + 1;
 
     genDPTable(param, *mpSrcRange, data.OutputSheetRef);
-    dumpTableProperties(data.OutputSheetRef);
+//  dumpTableProperties(data.OutputSheetRef);
+    verifyTableResults(data);
+    sleep(1);
+    setReferenceToField(data);
     verifyTableResults(data);
 }
 
@@ -324,7 +331,7 @@ void DPTestBase::genSrcData(const TestParam& param, DataTable& rTable)
             table.setCell(row, param.FieldCount-offset, rand(1, 100)/10.0);
     }
 
-    table.output();
+//  table.output();
     table.output(xSheet, param.StartRow, param.StartCol);
     rTable.swap(table);
 }
@@ -530,6 +537,80 @@ void DPTestBase::verifyTableResults(const RuntimeData& data)
         {
             fprintf(stdout, "DPTestBase::verifyDPResults: runtime error occurred.\n");
         }
+    }
+}
+
+void DPTestBase::setReferenceToField(const RuntimeData& data)
+{
+    const Reference<XSpreadsheet>& xSheet = data.OutputSheetRef;
+    Reference<XDataPilotTablesSupplier> xDPTSupplier(xSheet, UNO_QUERY_THROW);
+    Reference<XDataPilotTables> xDPTables(xDPTSupplier->getDataPilotTables(), UNO_QUERY_THROW);
+
+    Reference<container::XEnumerationAccess> xEA(xDPTables, UNO_QUERY_THROW);
+    Reference<container::XEnumeration> xIter = xEA->createEnumeration();
+    while (xIter->hasMoreElements())
+    {
+        printf("--------------------------------------------------------------------\n");
+        try
+        {
+            Reference<XDataPilotTable2> xDPTab(xIter->nextElement(), UNO_QUERY_THROW);
+            Reference<XDataPilotDescriptor> xDesc(xDPTab, UNO_QUERY_THROW);
+            Reference<XIndexAccess> xDataFields = xDesc->getDataFields();
+            sal_Int32 fieldCount = xDataFields->getCount();
+            if (!fieldCount)
+                continue;
+
+            for (sal_Int32 i = 0; i < fieldCount; ++i)
+            {
+                Reference<XDataPilotField> xField(xDataFields->getByIndex(i), UNO_QUERY_THROW);
+                DataPilotFieldReference ref;
+                ref.ReferenceField = getFieldName(0);
+                ref.ReferenceType = DataPilotFieldReferenceType::ITEM_DIFFERENCE;
+                ref.ReferenceItemName = getFieldItemName(0, 0);
+                ref.ReferenceItemType = DataPilotFieldReferenceItemType::NAMED;
+                Reference<XPropertySet> xPS(xField, UNO_QUERY_THROW);
+                xPS->setPropertyValue(ascii("Reference"), makeAny(ref));
+            }
+        }
+        catch (const RuntimeException&)
+        {
+            fprintf(stdout, "DPTestBase::verifyDPResults: runtime error occurred.\n");
+        }
+    }
+}
+
+void DPTestBase::groupRowFields(const Reference<XDataPilotTable2>& xDPTab, sal_Int32 groupSize) const
+{
+    Reference<XDataPilotDescriptor> xDesc(xDPTab, UNO_QUERY_THROW);
+    Reference<container::XIndexAccess> xRowFields = xDesc->getRowFields();
+    sal_Int32 fieldCount = xRowFields->getCount();
+    if (!fieldCount)
+        // No field exists !?
+        return;
+
+    Reference<XDataPilotField> xField(xRowFields->getByIndex(0), UNO_QUERY_THROW);
+    Reference<XDataPilotFieldGrouping> xGrp(xField, UNO_QUERY_THROW);
+    Reference<XIndexAccess> xItems = xField->getItems();
+    sal_Int32 itemCount = xItems->getCount();
+    if (itemCount < 2)
+        return;
+
+    Sequence<OUString> names(groupSize);
+    for (sal_Int32 i = 0; i < itemCount; ++i)
+    {
+        Reference<container::XNamed> xItem(xItems->getByIndex(i), UNO_QUERY_THROW);
+        names[i%groupSize] = xItem->getName();
+        fprintf(stdout, "DPTestBase::foo: item = '%s'", 
+                OUStringToOString(names[i%groupSize], RTL_TEXTENCODING_UTF8).getStr());fflush(stdout);
+
+        if (i > 0 && (i % groupSize == 0))
+            xGrp->createNameGroup(names);
+
+        Reference<beans::XPropertySet> xPS(xItem, UNO_QUERY_THROW);
+        bool bShowDetail = true, bIsHidden = true;
+        getPropertyValue(xPS, ascii("ShowDetail"),  bShowDetail);
+        getPropertyValue(xPS, ascii("IsHidden"),    bIsHidden);
+        fprintf(stdout, " show detail (%d)  is hidden (%d)\n", bShowDetail, bIsHidden);
     }
 }
 

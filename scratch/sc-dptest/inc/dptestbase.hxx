@@ -74,6 +74,9 @@ private:
     void dumpItems(const ::com::sun::star::uno::Reference< ::com::sun::star::container::XIndexAccess >& xItems) const;
 
     void verifyTableResults(const RuntimeData& data);
+    void setReferenceToField(const RuntimeData& data);
+
+    void groupRowFields(const ::com::sun::star::uno::Reference< ::com::sun::star::sheet::XDataPilotTable2 >& xDPTab, sal_Int32 groupSize = 2) const;
 
 private:
     ::com::sun::star::uno::Reference< ::com::sun::star::sheet::XSpreadsheetDocument > mxSpDoc;

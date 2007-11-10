@@ -29,7 +29,12 @@ int main()
 
     Reference<XDesktop> xDesktop = bootstrap();
 
-    for (sal_Int32 i = 0; i < 10; ++i)
+    Reference<XSpreadsheetDocument> xSpDoc = loadComponent(xDesktop, "private:factory/scalc");
+    DPTestBase test(xSpDoc);
+    test.run(param);
+    return 0;
+
+    for (sal_Int32 i = 0; i < 1; ++i)
     {
         Reference<XSpreadsheetDocument> xSpDoc = loadComponent(xDesktop, "private:factory/scalc");
         DPTestBase test(xSpDoc);
