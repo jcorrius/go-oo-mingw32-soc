@@ -171,9 +171,74 @@ diff -rup cppcanvas-orig/util/makefile.mk cppcanvas/util/makefile.mk
  
  SHL1LIBS=		$(SLB)$/$(TARGET).lib
  
+--- cppcanvas-orig/source/mtfrenderer/makefile.mk	2007-08-06 12:08:27.000000000 +0200
++++ cppcanvas/source/mtfrenderer/makefile.mk	2007-11-05 21:51:22.000000000 +0100
+@@ -52,6 +52,7 @@ CDEFS+= -DVERBOSE
+ 
+ SLOFILES =	$(SLO)$/cachedprimitivebase.obj \
+ 			$(SLO)$/bitmapaction.obj \
++			$(SLO)$/emfplus.obj \
+ 			$(SLO)$/implrenderer.obj \
+ 			$(SLO)$/lineaction.obj \
+ 			$(SLO)$/pointaction.obj \
+--- cppcanvas-orig/source/mtfrenderer/implrenderer.cxx	2007-08-06 12:08:27.000000000 +0200
++++ cppcanvas/source/mtfrenderer/implrenderer.cxx	2007-11-10 12:35:38.000000000 +0100
+@@ -107,6 +107,8 @@
+ #include "mtftools.hxx"
+ #include "outdevstate.hxx"
+ 
++#define EMFP_DEBUG(x)
++//#define EMFP_DEBUG(x) x
+ 
+ using namespace ::com::sun::star;
+ 
+@@ -1725,6 +1735,33 @@ namespace cppcanvas
+                                 }
+                             }
+                         }
++                        // Handle drawing layer fills
++                        else if( pAct->GetComment().Equals( "EMF_PLUS" ) ) {
++                            static int count = -1, limit = 0x7fffffff;
++                            if (count == -1) {
++                                count = 0;
++                                char *env;
++                                if (env = getenv ("EMF_PLUS_LIMIT")) {
++                                    limit = atoi (env);
++                                }
++                            }
++                            EMFP_DEBUG (printf ("EMF+ passed to canvas mtf renderer, size: %d\n", pAct->GetDataSize ()));
++                            if (count < limit)
++                            processEMFPlus( pAct, rFactoryParms, getState( rStates ), rCanvas );
++                            count ++;
++                        } else if( pAct->GetComment().Equals( "EMF_PLUS_HEADER_INFO" ) ) {
++                            EMFP_DEBUG (printf ("EMF+ passed to canvas mtf renderer - header info, size: %d\n", pAct->GetDataSize ()));
++
++                            SvMemoryStream rMF ((void*) pAct->GetData (), pAct->GetDataSize (), STREAM_READ);
++
++                            rMF >> nFrameLeft >> nFrameTop >> nFrameRight >> nFrameBottom;
++                            EMFP_DEBUG (printf ("EMF+ picture frame: %d,%d - %d,%d\n", nFrameLeft, nFrameTop, nFrameRight, nFrameBottom));
++                            rMF >> nPixX >> nPixY >> nMmX >> nMmY;
++                            EMFP_DEBUG (printf ("EMF+ ref device pixel size: %dx%d mm size: %dx%d\n", nPixX, nPixY, nMmX, nMmY));
++
++                            rMF >> aBaseTransform;
++                            //aWorldTransform.Set (aBaseTransform);
++                        }
+                     }
+                     break;
+ 
+@@ -2881,6 +2918,9 @@ namespace cppcanvas
+                                            aParms );
+             }
+ 
++            /* EMF+ */
++            memset (aObjects, 0, sizeof (aObjects));
++
+             createActions( const_cast<GDIMetaFile&>(rMtf), // HACK(Q2):
+ 								                           // we're
+                         		                           // changing
 --- /dev/null	2007-10-08 22:21:59.000000000 +0200
-+++ cppcanvas/source/mtfrenderer/emfplus.cxx	2007-11-10 12:25:18.000000000 +0100
-@@ -0,0 +1,1454 @@
++++ cppcanvas/source/mtfrenderer/emfplus.cxx	2007-11-10 18:05:44.000000000 +0100
+@@ -0,0 +1,1357 @@
 +#include <tools/stream.hxx>
 +#include <vcl/metaact.hxx>
 +#include <svtools/filter.hxx>
@@ -912,12 +977,6 @@ diff -rup cppcanvas-orig/util/makefile.mk cppcanvas/util/makefile.mk
 +            w = iwidth*aWorldTransform.eM11 + iheight*aWorldTransform.eM21;
 +            h = iwidth*aWorldTransform.eM12 + iheight*aWorldTransform.eM22;
 +
-+            // TODO: other untis
-+//             x = 2540.0*x/nHDPI;
-+//             y = 2540.0*y/nVDPI;
-+//             w = 2540.0*w/nHDPI;
-+//             h = 2540.0*h/nVDPI;
-+
 +            MapToDevice (x, y);
 +            MapToDevice (w, h);
 +
@@ -939,15 +998,6 @@ diff -rup cppcanvas-orig/util/makefile.mk cppcanvas/util/makefile.mk
 +            ::basegfx::B2DPolyPolygon localPolygon (polygon);
 +
 +            EMFP_DEBUG (printf ("EMF+\tfill polygon\n"));
-+
-+//             // do clipping
-+//             EMFP_DEBUG (printf ("EMF+\tdo clipping, clip ppoly count: %d\n", aClippingPolygon.Count ());
-+//             if (aClippingPolygon.Count ()) {
-+//                 localPolygon = ::basegfx::B2DPolyPolygon ();
-+//                 aClippingPolygon.GetIntersection (polygon, localPolygon);
-+//             }
-+
-+            //rGDIMF.AddAction (new MetaLineColorAction (Color (), false));
 +
 +            localPolygon.transform( rState.mapModeTransform );
 +
@@ -982,26 +1032,6 @@ diff -rup cppcanvas-orig/util/makefile.mk cppcanvas/util/makefile.mk
 +                    if (brush->type == 3 && !(brush->additionalFlags & 0x1))
 +                        return;  // we are unable to parse these brushes yet
 +
-+//                 // extract UseBrush
-+//                 EMFPBrush* brush = (EMFPBrush*) aObjects [brushIndexOrColor];
-+//                 EMFP_DEBUG (printf ("EMF+\tTODO: fix brush types (type: %d)\n", brush->GetType ()));
-+
-+//                 if (brush->GetType () == 4 || brush->GetType () == 3) {
-+//                     Gradient gradient ((brush->GetType () == 4) ? GRADIENT_LINEAR : GRADIENT_RADIAL);
-+
-+//                     gradient.SetStartColor (brush->solidColor);
-+//                     gradient.SetEndColor (brush->secondColor);
-+
-+//                     rGDIMF.AddAction (new MetaCommentAction ("XGRAD_SEQ_BEGIN"));
-+//                     rGDIMF.AddAction (new MetaGradientExAction (localPolygon, gradient));
-+//                     rGDIMF.AddAction (new MetaCommentAction ("XGRAD_SEQ_END"));
-+
-+//                     return;
-+//                 }
-+
-+//                 rGDIMF.AddAction (new MetaFillColorAction (brush->GetColor (), true));
-+//                 transparency = brush->GetColor ().GetTransparency ();
-+
 +                ::basegfx::B2DHomMatrix aTextureTransformation;
 +                ::basegfx::B2DHomMatrix aWorldTransformation;
 +                ::basegfx::B2DHomMatrix aBaseTransformation;
@@ -1010,17 +1040,6 @@ diff -rup cppcanvas-orig/util/makefile.mk cppcanvas/util/makefile.mk
 +                const ::basegfx::B2DRectangle aBounds( ::basegfx::tools::getRange( localPolygon ) );
 +                const double nScale( ::basegfx::pruneScaleValue( fabs( aBounds.getHeight()*sin(nRotation) ) + 
 +                                                                 fabs( aBounds.getWidth()*cos(nRotation) )));
-+//                 const double nScale( ::basegfx::pruneScaleValue( fabs( brush->areaHeight*sin(nRotation) ) + 
-+//                                                                  fabs( brush->areaWidth*cos(nRotation) )));
-+
-+//                 aTextureTransformation.scale (fabs (brush->areaWidth*cos (nRotation)), fabs (brush->areaHeight*sin (nRotation)));
-+
-+                //aTextureTransformation.scale (fabs (brush->areaWidth*cos (nRotation), fabs (brush->areaHeight*sin (nRotation));
-+
-+//                 // translate back origin to center of
-+//                 // primitive
-+//                 aTextureTransformation.translate( 0.5*aBounds.getWidth(),
-+//                                                   0.5*aBounds.getHeight() );
 +
 +                aWorldTransformation.set (0, 0, aWorldTransform.eM11);
 +                aWorldTransformation.set (0, 1, aWorldTransform.eM21);
@@ -1036,15 +1055,9 @@ diff -rup cppcanvas-orig/util/makefile.mk cppcanvas/util/makefile.mk
 +                aBaseTransformation.set (1, 1, aBaseTransform.eM22);
 +                aBaseTransformation.set (1, 2, aBaseTransform.eDy);
 +
-+                //::basegfx::B2DRectangle area = MapRectangle (brush->areaX, brush->areaY, brush->areaWidth, brush->areaHeight);
 +                if (brush->type == 4) {
-+//                     ::basegfx::B2DPoint mappedArea = MapSize (brush->areaWidth, brush->areaHeight);
-+//                     aTextureTransformation.scale (mappedArea.getX (), mappedArea.getY ());
-+
-+
 +                    aTextureTransformation.scale (brush->areaWidth, brush->areaHeight);
 +                    aTextureTransformation.translate (brush->areaX, brush->areaY);
-+
 +                } else {
 +                    aTextureTransformation.translate (-0.5, -0.5);
 +                    aTextureTransformation.scale (brush->areaWidth, brush->areaHeight);
@@ -1069,14 +1082,6 @@ diff -rup cppcanvas-orig/util/makefile.mk cppcanvas/util/makefile.mk
 +                aTextureTransformation.translate (-nFrameLeft, -nFrameTop);
 +                aTextureTransformation *= rState.mapModeTransform;
 +                aTextureTransformation *= aBaseTransformation;
-+
-+
-+                //aTextureTransformation.translate (brush->areaX, brush->areaY);
-+//                 if (brush->type == 3)
-+//                     aTextureTransformation.scale (2,2);
-+                //                    aTextureTransformation.scale (aBounds.getWidth (), aBounds.getHeight ());
-+                    
-+                //aTextureTransformation.translate( aBounds.getMinX(), aBounds.getMinY() );
 +
 +                aTexture.RepeatModeX = rendering::TexturingMode::CLAMP;
 +                aTexture.RepeatModeY = rendering::TexturingMode::CLAMP;
@@ -1165,11 +1170,6 @@ diff -rup cppcanvas-orig/util/makefile.mk cppcanvas/util/makefile.mk
 +                                                                                             aTexture ) );
 +                }
 +            }
-+
-+//             if (transparency)
-+//                 rGDIMF.AddAction (new MetaTransparentAction (localPolygon, transparency));
-+//             else
-+//                 rGDIMF.AddAction (new MetaPolyPolygonAction (localPolygon));
 +
 +            if( pPolyAction )
 +            {
@@ -1354,13 +1354,6 @@ diff -rup cppcanvas-orig/util/makefile.mk cppcanvas/util/makefile.mk
 +                        USHORT transparency = 0;
 +
 +                        rMF >> brushIndexOrColor;
-+
-+//                         if (flags & 0x8000) {
-+//                             rMF >> color;
-+//                             transparency = 0xff - (color >> 24);
-+//                         } else
-+//                             rMF >> brushIndex;
-+
 +                        rMF >> points;
 +
 +                        EMFP_DEBUG (printf ("EMF+ FillPolygon in slot: %d points: %d\n", index, points));
@@ -1372,18 +1365,6 @@ diff -rup cppcanvas-orig/util/makefile.mk cppcanvas/util/makefile.mk
 +
 +                        EMFPPlusFillPolygon (path.GetPolygon (*this), rFactoryParms, rState, rCanvas, flags & 0x8000, brushIndexOrColor);
 +
-+//                         if (flags & 0x8000) {
-+//                             rGDIMF.AddAction (new MetaFillColorAction (Color (0xff - (color >> 24), (color >> 16) & 0xff, (color >> 8) & 0xff, color & 0xff), true));
-+//                             if (transparency)
-+//                                 rGDIMF.AddAction (new MetaTransparentAction (PolyPolygon (path.GetPolygon (nHDPI, nVDPI)), transparency));
-+//                             else
-+//                                 rGDIMF.AddAction (new MetaPolygonAction (path.GetPolygon (nHDPI, nVDPI)));
-+//                         } else {
-+//                             EMFPBrush* brush = (EMFPBrush*) aObjects [brushIndex];
-+//                             EMFP_DEBUG (printf ("EMF+\tTODO: fix brush types (type: %d)\n", brush->GetType ()));
-+//                             rGDIMF.AddAction (new MetaFillColorAction (brush->GetColor (), true));
-+//                             transparency = brush->GetColor ().GetTransparency ();
-+//                         }
 +                        break;
 +                    }
 +                case EmfPlusRecordTypeDrawLines:
@@ -1399,10 +1380,6 @@ diff -rup cppcanvas-orig/util/makefile.mk cppcanvas/util/makefile.mk
 +                        path.Read (rMF, flags, *this);
 +
 +                        EMFPPen* pen = (EMFPPen*) aObjects [index];
-+//                         rGDIMF.AddAction (new MetaFillColorAction (Color (), false));
-+//                         //if (pen->GetType () == 0)
-+//                         rGDIMF.AddAction (new MetaLineColorAction (pen->GetColor (), true));
-+//                         rGDIMF.AddAction (new MetaPolyLineAction (path.GetPolygon (nHDPI, nVDPI), pen->GetLineInfo ()));
 +
 +                        rState.isFillColorSet = false;
 +                        rState.isLineColorSet = true;
@@ -1443,12 +1420,6 @@ diff -rup cppcanvas-orig/util/makefile.mk cppcanvas/util/makefile.mk
 +
 +                        EMFPPath* path = (EMFPPath*) aObjects [flags & 0xff];
 +                        EMFPPen* pen = (EMFPPen*) aObjects [penIndex];
-+
-+//                         rGDIMF.AddAction (new MetaFillColorAction (Color (), false));
-+//                         //if (pen->GetType () == 0)
-+//                         rGDIMF.AddAction (new MetaLineColorAction (pen->GetColor (), true));
-+//                         // todo: non linear poly
-+//                         rGDIMF.AddAction (new MetaPolyLineAction (path->GetPolygon (nHDPI, nVDPI), pen->GetLineInfo ()));
 +
 +                        rState.isFillColorSet = false;
 +                        rState.isLineColorSet = true;
@@ -1573,8 +1544,6 @@ diff -rup cppcanvas-orig/util/makefile.mk cppcanvas/util/makefile.mk
 +                    EMFP_DEBUG (printf ("EMF+ SetWorldTransform\n"));
 +                    XForm transform;
 +                    rMF >> transform;
-+//                     aWorldTransform.Set (aBaseTransform);
-+//                     aWorldTransform.Multiply (transform);
 +                    aWorldTransform.Set (transform);
 +                    EMFP_DEBUG (printf ("EMF+\tm11: %f m12: %f\nEMF+\tm21: %f m22: %f\nEMF+\tdx: %f dy: %f\n",
 +                            aWorldTransform.eM11, aWorldTransform.eM12,
@@ -1584,7 +1553,6 @@ diff -rup cppcanvas-orig/util/makefile.mk cppcanvas/util/makefile.mk
 +                }
 +                case EmfPlusRecordTypeResetWorldTransform:
 +                    EMFP_DEBUG (printf ("EMF+ ResetWorldTransform\n"));
-+                    //aWorldTransform.Set (aBaseTransform);
 +                    aWorldTransform.SetIdentity ();
 +                    break;
 +                case EmfPlusRecordTypeSetClipPath:
@@ -1628,68 +1596,3 @@ diff -rup cppcanvas-orig/util/makefile.mk cppcanvas/util/makefile.mk
 +        }
 +    }
 +}
---- cppcanvas-orig/source/mtfrenderer/makefile.mk	2007-08-06 12:08:27.000000000 +0200
-+++ cppcanvas/source/mtfrenderer/makefile.mk	2007-11-05 21:51:22.000000000 +0100
-@@ -52,6 +52,7 @@ CDEFS+= -DVERBOSE
- 
- SLOFILES =	$(SLO)$/cachedprimitivebase.obj \
- 			$(SLO)$/bitmapaction.obj \
-+			$(SLO)$/emfplus.obj \
- 			$(SLO)$/implrenderer.obj \
- 			$(SLO)$/lineaction.obj \
- 			$(SLO)$/pointaction.obj \
---- cppcanvas-orig/source/mtfrenderer/implrenderer.cxx	2007-08-06 12:08:27.000000000 +0200
-+++ cppcanvas/source/mtfrenderer/implrenderer.cxx	2007-11-10 12:35:38.000000000 +0100
-@@ -107,6 +107,8 @@
- #include "mtftools.hxx"
- #include "outdevstate.hxx"
- 
-+#define EMFP_DEBUG(x)
-+//#define EMFP_DEBUG(x) x
- 
- using namespace ::com::sun::star;
- 
-@@ -1725,6 +1735,33 @@ namespace cppcanvas
-                                 }
-                             }
-                         }
-+                        // Handle drawing layer fills
-+                        else if( pAct->GetComment().Equals( "EMF_PLUS" ) ) {
-+                            static int count = -1, limit = 0x7fffffff;
-+                            if (count == -1) {
-+                                count = 0;
-+                                char *env;
-+                                if (env = getenv ("EMF_PLUS_LIMIT")) {
-+                                    limit = atoi (env);
-+                                }
-+                            }
-+                            EMFP_DEBUG (printf ("EMF+ passed to canvas mtf renderer, size: %d\n", pAct->GetDataSize ()));
-+                            if (count < limit)
-+                            processEMFPlus( pAct, rFactoryParms, getState( rStates ), rCanvas );
-+                            count ++;
-+                        } else if( pAct->GetComment().Equals( "EMF_PLUS_HEADER_INFO" ) ) {
-+                            EMFP_DEBUG (printf ("EMF+ passed to canvas mtf renderer - header info, size: %d\n", pAct->GetDataSize ()));
-+
-+                            SvMemoryStream rMF ((void*) pAct->GetData (), pAct->GetDataSize (), STREAM_READ);
-+
-+                            rMF >> nFrameLeft >> nFrameTop >> nFrameRight >> nFrameBottom;
-+                            EMFP_DEBUG (printf ("EMF+ picture frame: %d,%d - %d,%d\n", nFrameLeft, nFrameTop, nFrameRight, nFrameBottom));
-+                            rMF >> nPixX >> nPixY >> nMmX >> nMmY;
-+                            EMFP_DEBUG (printf ("EMF+ ref device pixel size: %dx%d mm size: %dx%d\n", nPixX, nPixY, nMmX, nMmY));
-+
-+                            rMF >> aBaseTransform;
-+                            //aWorldTransform.Set (aBaseTransform);
-+                        }
-                     }
-                     break;
- 
-@@ -2881,6 +2918,9 @@ namespace cppcanvas
-                                            aParms );
-             }
- 
-+            /* EMF+ */
-+            memset (aObjects, 0, sizeof (aObjects));
-+
-             createActions( const_cast<GDIMetaFile&>(rMtf), // HACK(Q2):
- 								                           // we're
-                         		                           // changing
