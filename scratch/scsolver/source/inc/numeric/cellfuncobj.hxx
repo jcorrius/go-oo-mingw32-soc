@@ -73,7 +73,8 @@ public:
 private:
 	CellFuncObj();
 
-	std::auto_ptr<CellFuncObjImpl> m_pImpl;
+    ::std::vector<double> mFakeVars;
+    ::std::auto_ptr<CellFuncObjImpl> m_pImpl;
 };
 
 
