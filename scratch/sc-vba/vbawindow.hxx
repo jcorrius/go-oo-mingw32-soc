@@ -64,8 +64,11 @@ public:
 	void  Scroll( const css::uno::Any& Down, const css::uno::Any& Up, const css::uno::Any& ToRight, const css::uno::Any& ToLeft, bool bLargeScroll = false ) throw (css::uno::RuntimeException);	
 public:
 	ScVbaWindow( const css::uno::Reference< oo::vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::frame::XModel >& xModel );
- 	css::uno::Reference< oo::excel::XPane > ActivePane();
+
 	// XWindow
+	virtual css::uno::Reference< oo::excel::XRange > SAL_CALL ActiveCell(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException); 
+ 	virtual css::uno::Reference< oo::excel::XPane > SAL_CALL ActivePane() throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	virtual css::uno::Reference< oo::excel::XWorksheet > SAL_CALL ActiveSheet(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException); 
 	virtual void SAL_CALL setCaption( const css::uno::Any& _caption ) throw (css::uno::RuntimeException);
 	virtual css::uno::Any SAL_CALL getCaption() throw (css::uno::RuntimeException);
 	virtual ::sal_Bool SAL_CALL getDisplayGridlines() throw (css::uno::RuntimeException);
@@ -82,6 +85,10 @@ public:
 	virtual void SAL_CALL setDisplayWorkbookTabs( ::sal_Bool _bDisplayWorkbookTabs ) throw (css::uno::RuntimeException);
 	virtual ::sal_Bool SAL_CALL getFreezePanes() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setFreezePanes( ::sal_Bool _bFreezePanes ) throw (css::uno::RuntimeException);
+    virtual sal_Int32 SAL_CALL getHeight() throw (css::uno::RuntimeException) ;
+    virtual void SAL_CALL setHeight( sal_Int32 _height ) throw (css::uno::RuntimeException) ;
+    virtual sal_Int32 SAL_CALL getLeft() throw (css::uno::RuntimeException) ;
+    virtual void SAL_CALL setLeft( sal_Int32 _left ) throw (css::uno::RuntimeException) ;
 	virtual ::sal_Bool SAL_CALL getSplit() throw (css::uno::RuntimeException);
 	virtual void SAL_CALL setSplit( ::sal_Bool _bSplit ) throw (css::uno::RuntimeException);
     virtual sal_Int32 SAL_CALL getSplitColumn() throw (css::uno::RuntimeException) ;
@@ -96,6 +103,14 @@ public:
     virtual void SAL_CALL setScrollRow( const css::uno::Any& _scrollrow ) throw (css::uno::RuntimeException) ;
     virtual css::uno::Any SAL_CALL getScrollColumn() throw (css::uno::RuntimeException) ;
     virtual void SAL_CALL setScrollColumn( const css::uno::Any& _scrollcolumn ) throw (css::uno::RuntimeException) ;
+    virtual sal_Int32 SAL_CALL getTop() throw (css::uno::RuntimeException) ;
+    virtual void SAL_CALL setTop( sal_Int32 _top ) throw (css::uno::RuntimeException) ;
+    virtual css::uno::Any SAL_CALL getView() throw (css::uno::RuntimeException);
+    virtual void SAL_CALL setView( const css::uno::Any& _view ) throw (css::uno::RuntimeException);
+    virtual sal_Bool SAL_CALL getVisible() throw (css::uno::RuntimeException);
+    virtual void SAL_CALL setVisible( sal_Bool _visible ) throw (css::uno::RuntimeException);
+    virtual sal_Int32 SAL_CALL getWidth() throw (css::uno::RuntimeException) ;
+    virtual void SAL_CALL setWidth( sal_Int32 _width ) throw (css::uno::RuntimeException) ;
     virtual css::uno::Any SAL_CALL getWindowState() throw (css::uno::RuntimeException);
     virtual void SAL_CALL setWindowState( const css::uno::Any& _windowstate ) throw (css::uno::RuntimeException);
     virtual css::uno::Any SAL_CALL getZoom() throw (css::uno::RuntimeException);
@@ -108,8 +123,11 @@ public:
 	virtual void SAL_CALL ScrollWorkbookTabs( const css::uno::Any& Sheets, const css::uno::Any& Position ) throw (css::uno::RuntimeException);
 	virtual void SAL_CALL Activate(  ) throw (css::uno::RuntimeException);
 	virtual void SAL_CALL Close( const css::uno::Any& SaveChanges, const css::uno::Any& FileName, const css::uno::Any& RouteWorkBook ) throw (css::uno::RuntimeException);
-	 virtual css::uno::Reference< oo::excel::XRange > SAL_CALL ActiveCell(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException); 
 	 virtual css::uno::Any SAL_CALL Selection(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException); 
+	 virtual sal_Int32 SAL_CALL PointsToScreenPixelsX(sal_Int32 _points) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	 virtual sal_Int32 SAL_CALL PointsToScreenPixelsY(sal_Int32 _points) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	 virtual void SAL_CALL PrintOut( const css::uno::Any& From, const css::uno::Any&To, const css::uno::Any& Copies, const css::uno::Any& Preview, const css::uno::Any& ActivePrinter, const css::uno::Any& PrintToFile, const css::uno::Any& Collate, const css::uno::Any& PrToFileName ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+	 virtual void SAL_CALL PrintPreview( const css::uno::Any& EnableChanges ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
 	// XHelperInterface
 	virtual rtl::OUString& getServiceImplName();
 	virtual css::uno::Sequence<rtl::OUString> getServiceNames();
