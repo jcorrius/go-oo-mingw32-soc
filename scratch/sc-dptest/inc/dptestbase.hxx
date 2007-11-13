@@ -25,6 +25,9 @@ namespace com { namespace sun { namespace star {
 
 namespace dptest {
 
+struct FieldParam;
+struct DataFieldParam;
+
 /** 
  *  parameters that influence the size and other characteristics of data
  *  source.
@@ -39,6 +42,9 @@ struct TestParam
 
     sal_Int32 FieldItemCountLower;
     sal_Int32 FieldItemCountUpper;
+
+    ::std::vector<FieldParam>       Fields;
+    ::std::vector<DataFieldParam>   DataFields;
 };
 
 /** 
@@ -51,23 +57,42 @@ struct RuntimeData
     DataTable CacheTable;
 };
 
+struct FieldParam
+{
+    ::rtl::OUString Name;
+    ::std::vector< ::rtl::OUString > ItemNames;
+};
+
+struct DataFieldParam
+{
+    ::rtl::OUString Name;
+    sal_Int32       ValueLower;
+    sal_Int32       ValueUpper;
+};
+
 class DPTestBase
 {
 public:
-    DPTestBase(const ::com::sun::star::uno::Reference< ::com::sun::star::sheet::XSpreadsheetDocument >& rSpDoc);
+    DPTestBase(const ::com::sun::star::uno::Reference< ::com::sun::star::sheet::XSpreadsheetDocument >& rSpDoc,
+               const TestParam& param);
 
     ~DPTestBase();
 
-    void run(const TestParam& param);
+    void run();
 
 private:
     DPTestBase(); // disabled
 
     const ::rtl::OUString getFieldName(sal_Int16 fieldId) const;
     const ::rtl::OUString getFieldItemName(sal_Int16 fieldId, sal_Int32 itemId) const;
+    const sal_Int32 getFieldItemCount(sal_Int16 fieldId) const;
 
-    void genSrcData(const TestParam& param, DataTable& rTable);
-    void genDPTable(const TestParam& param, const ::com::sun::star::table::CellRangeAddress& srcRange, 
+    const ::rtl::OUString getDataFieldName(sal_Int16 fieldId) const;
+    const sal_Int32 getDataFieldValueLower(sal_Int16 fieldId) const;
+    const sal_Int32 getDataFieldValueUpper(sal_Int16 fieldId) const;
+
+    void genSrcData(DataTable& rTable);
+    void genDPTable(const ::com::sun::star::table::CellRangeAddress& srcRange, 
                     const ::com::sun::star::uno::Reference< ::com::sun::star::sheet::XSpreadsheet >& xDestSheet);
     void dumpTableProperties(const ::com::sun::star::uno::Reference< ::com::sun::star::sheet::XSpreadsheet >& xSheet);
     void dumpFields(const ::com::sun::star::uno::Reference< ::com::sun::star::container::XIndexAccess >& xFields) const;
@@ -81,6 +106,7 @@ private:
 private:
     ::com::sun::star::uno::Reference< ::com::sun::star::sheet::XSpreadsheetDocument > mxSpDoc;
     ::boost::shared_ptr< ::com::sun::star::table::CellRangeAddress > mpSrcRange;
+    TestParam maTestParam;
 };
 
 }

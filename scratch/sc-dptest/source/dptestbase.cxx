@@ -226,8 +226,8 @@ private:
 
 // ============================================================================
 
-DPTestBase::DPTestBase(const Reference<XSpreadsheetDocument>& rSpDoc) :
-    mxSpDoc(rSpDoc)
+DPTestBase::DPTestBase(const Reference<XSpreadsheetDocument>& rSpDoc, const TestParam& param) :
+    mxSpDoc(rSpDoc), maTestParam(param)
 {
 }
 
@@ -235,10 +235,10 @@ DPTestBase::~DPTestBase()
 {
 }
 
-void DPTestBase::run(const TestParam& param)
+void DPTestBase::run()
 {
     DataTable table;
-    genSrcData(param, table);
+    genSrcData(table);
     if (!mpSrcRange.get())
         return;
 
@@ -250,7 +250,7 @@ void DPTestBase::run(const TestParam& param)
     data.OutputSheetRef.set( getSheetByName(mxSpDoc, ascii("DPTable")) );
     data.OutputSheetId = mpSrcRange->Sheet + 1;
 
-    genDPTable(param, *mpSrcRange, data.OutputSheetRef);
+    genDPTable(*mpSrcRange, data.OutputSheetRef);
 //  dumpTableProperties(data.OutputSheetRef);
     verifyTableResults(data);
     sleep(1);
@@ -260,6 +260,9 @@ void DPTestBase::run(const TestParam& param)
 
 const OUString DPTestBase::getFieldName(sal_Int16 fieldId) const
 {
+    if (fieldId < maTestParam.Fields.size())
+        return maTestParam.Fields.at(fieldId).Name;
+
     OUStringBuffer buf;
     buf.appendAscii("Field");
     buf.append(static_cast<sal_Int32>(fieldId+1));
@@ -269,6 +272,13 @@ const OUString DPTestBase::getFieldName(sal_Int16 fieldId) const
 
 const OUString DPTestBase::getFieldItemName(sal_Int16 fieldId, sal_Int32 itemId) const
 {
+    if (fieldId < maTestParam.Fields.size())
+    {
+        const FieldParam& field = maTestParam.Fields.at(fieldId);
+        if (itemId < field.ItemNames.size())
+            return field.ItemNames.at(itemId);
+    }
+
     OUString fldName = getFieldName(fieldId);
     OUStringBuffer buf(fldName);
     buf.appendAscii("-");
@@ -276,9 +286,44 @@ const OUString DPTestBase::getFieldItemName(sal_Int16 fieldId, sal_Int32 itemId)
     return buf.makeStringAndClear();
 }
 
-void DPTestBase::genSrcData(const TestParam& param, DataTable& rTable)
+const sal_Int32 DPTestBase::getFieldItemCount(sal_Int16 fieldId) const
 {
-    if (param.FieldCount < param.DataCount)
+    if (fieldId < maTestParam.Fields.size())
+        return maTestParam.Fields.at(fieldId).ItemNames.size();
+
+    sal_Int32 itemCount = rand<sal_Int32>(
+        maTestParam.FieldItemCountLower, maTestParam.FieldItemCountUpper);
+}
+
+const OUString DPTestBase::getDataFieldName(sal_Int16 fieldId) const
+{
+    if (fieldId < maTestParam.DataFields.size())
+        return maTestParam.DataFields.at(fieldId).Name;
+
+    OUStringBuffer buf(ascii("Value"));
+    buf.append(static_cast<sal_Int32>(fieldId+1));
+    return buf.makeStringAndClear();
+}
+
+const sal_Int32 DPTestBase::getDataFieldValueLower(sal_Int16 fieldId) const
+{
+    if (fieldId < maTestParam.DataFields.size())
+        return maTestParam.DataFields.at(fieldId).ValueLower;
+
+    return 1;
+}
+
+const sal_Int32 DPTestBase::getDataFieldValueUpper(sal_Int16 fieldId) const
+{
+    if (fieldId < maTestParam.DataFields.size())
+        return maTestParam.DataFields.at(fieldId).ValueUpper;
+
+    return 100;
+}
+
+void DPTestBase::genSrcData(DataTable& rTable)
+{
+    if (maTestParam.FieldCount < maTestParam.DataCount)
         return;
 
     Reference<XSpreadsheets> xSheets = mxSpDoc->getSheets();
@@ -286,7 +331,7 @@ void DPTestBase::genSrcData(const TestParam& param, DataTable& rTable)
     // Remove all but one sheet.
     Sequence<OUString> names = xSheets->getElementNames();
     sal_Int32 n = names.getLength();
-    for (sal_Int32 i = 0; i < n-param.DataCount; ++i)
+    for (sal_Int32 i = 0; i < n-maTestParam.DataCount; ++i)
         xSheets->removeByName(names[i]);
 
     // Rename the only sheet.
@@ -300,43 +345,41 @@ void DPTestBase::genSrcData(const TestParam& param, DataTable& rTable)
 
     mpSrcRange.reset(new CellRangeAddress);
     mpSrcRange->Sheet = 0;
-    mpSrcRange->StartColumn = param.StartCol;
-    mpSrcRange->StartRow    = param.StartRow;
-    mpSrcRange->EndColumn   = param.StartCol + param.FieldCount - 1;
-    mpSrcRange->EndRow      = param.StartRow + param.RowCount;
+    mpSrcRange->StartColumn = maTestParam.StartCol;
+    mpSrcRange->StartRow    = maTestParam.StartRow;
+    mpSrcRange->EndColumn   = maTestParam.StartCol + maTestParam.FieldCount - 1;
+    mpSrcRange->EndRow      = maTestParam.StartRow + maTestParam.RowCount;
 
     // Construct a random data table, and put it into the sheet.
     DataTable table;
-    table.setTableSize(param.RowCount, param.FieldCount);
-    for (sal_Int16 field = 0; field < param.FieldCount-param.DataCount; ++field)
+    table.setTableSize(maTestParam.RowCount, maTestParam.FieldCount);
+    for (sal_Int16 field = 0; field < maTestParam.FieldCount-maTestParam.DataCount; ++field)
     {
         OUString fldName = getFieldName(field);
         table.setFieldName(field, fldName);
 
-        sal_Int32 itemCount = rand<sal_Int32>(
-            param.FieldItemCountLower, param.FieldItemCountUpper);
-
-        for (sal_Int32 row = 0; row < param.RowCount; ++row)
-            table.setCell(row, field, getFieldItemName(field, rand<sal_Int32>(0, itemCount)));
+        sal_Int32 itemCount = getFieldItemCount(field);
+        for (sal_Int32 row = 0; row < maTestParam.RowCount; ++row)
+            table.setCell(row, field, getFieldItemName(field, rand<sal_Int32>(0, itemCount-1)));
     }
 
     // Value fields come last.
-    for (sal_Int32 vfield = 0; vfield < param.DataCount; ++vfield)
+    for (sal_Int32 vfield = 0; vfield < maTestParam.DataCount; ++vfield)
     {
-        sal_Int32 offset = param.DataCount - vfield;
-        OUStringBuffer buf(ascii("Value"));
-        buf.append(vfield+1);
-        table.setFieldName(param.FieldCount-offset, buf.makeStringAndClear());
-        for (sal_Int32 row = 0; row < param.RowCount; ++row)
-            table.setCell(row, param.FieldCount-offset, rand(1, 100)/10.0);
+        sal_Int32 offset = maTestParam.DataCount - vfield;
+        table.setFieldName(maTestParam.FieldCount-offset, getDataFieldName(vfield));
+        const sal_Int32 lower = getDataFieldValueLower(vfield);
+        const sal_Int32 upper = getDataFieldValueUpper(vfield);
+        for (sal_Int32 row = 0; row < maTestParam.RowCount; ++row)
+            table.setCell(row, maTestParam.FieldCount-offset, rand(lower, upper)/1.0);
     }
 
 //  table.output();
-    table.output(xSheet, param.StartRow, param.StartCol);
+    table.output(xSheet, maTestParam.StartRow, maTestParam.StartCol);
     rTable.swap(table);
 }
 
-void DPTestBase::genDPTable(const TestParam& param, const CellRangeAddress& srcRange, 
+void DPTestBase::genDPTable(const CellRangeAddress& srcRange, 
                             const Reference<XSpreadsheet>& xDestSheet)
 {
     static const GeneralFunction funcTable[] = {
@@ -366,12 +409,12 @@ void DPTestBase::genDPTable(const TestParam& param, const CellRangeAddress& srcR
 
     // Define non-data fields.
     Reference<container::XIndexAccess> xIA = xDPDesc->getDataPilotFields();
-    for (sal_Int32 i = 0; i < fieldCount - param.DataCount; ++i)
+    for (sal_Int32 i = 0; i < fieldCount - maTestParam.DataCount; ++i)
     {
         Reference<XDataPilotField> xField(xIA->getByIndex(i), UNO_QUERY_THROW);
         printName(xField);
         Reference<XPropertySet> xPS(xField, UNO_QUERY_THROW);
-        if (i == fieldCount - param.DataCount - 1)
+        if (i == fieldCount - maTestParam.DataCount - 1)
             xPS->setPropertyValue(ascii("Orientation"), makeAny(DataPilotFieldOrientation_PAGE));
         else if (i % 3)
             xPS->setPropertyValue(ascii("Orientation"), makeAny(DataPilotFieldOrientation_ROW));
@@ -380,9 +423,9 @@ void DPTestBase::genDPTable(const TestParam& param, const CellRangeAddress& srcR
     }
 
     // Define data fields.
-    for (sal_Int32 i = 0; i < param.DataCount; ++i)
+    for (sal_Int32 i = 0; i < maTestParam.DataCount; ++i)
     {
-        sal_Int32 offset = param.DataCount - i;
+        sal_Int32 offset = maTestParam.DataCount - i;
         Reference<XDataPilotField> xField(xIA->getByIndex(fieldCount-offset), UNO_QUERY_THROW);
         printName(xField);
         Reference<XPropertySet> xPS(xField, UNO_QUERY_THROW);
