@@ -4,9 +4,9 @@
 #
 #   $RCSfile: makefile.mk,v $
 #
-#   $Revision: 1.8 $
+#   $Revision: 1.4 $
 #
-#   last change: $Author: obo $ $Date: 2005/12/21 11:35:45 $
+#   last change: $Author: rt $ $Date: 2007/04/27 09:25:06 $
 #
 #   The Contents of this file are made available subject to
 #   the terms of GNU Lesser General Public License Version 2.1.
@@ -34,28 +34,43 @@
 #*************************************************************************
 
 PRJ=..$/..$/..$/..$/
+
 PRJNAME=sc
-TARGET=testvba
+TARGET=testvbac++
+ENABLE_EXCEPTIONS=TRUE
 
-.INCLUDE : ant.mk
+# --- Settings -----------------------------------------------------
 
-.IF "$(SOLAR_JAVA)"!=""
+.INCLUDE :  settings.mk
+DLLPRE =
 
-ALLTAR : PROCESSRESULTS
-
-TESTDOCUMENTS=..$/TestDocuments
-.IF "$(GUI)"=="UNX" || "$(GUI)"=="MAC"
-TESTDOCUMENTLOGS=$(TESTDOCUMENTS)$/logs$/unix
-.ELSE
-TESTDOCUMENTLOGS=$(TESTDOCUMENTS)$/logs$/win
+.IF "$(ENABLE_VBA)"!="YES"
+dummy:
+        @echo "not building vba..."
 .ENDIF
+ 
+INCPRE=$(INCCOM)$/$(TARGET)
+CDEFS+=-DVBA_OOBUILD_HACK
+# ------------------------------------------------------------------
 
-OUTPUTDIR:=..$/$(TARGET)$/Logs
-ANT_FLAGS+=-Dtest.documents=$(TESTDOCUMENTS)
-ANT_FLAGS+=-Dtest.out=$(OUTPUTDIR)
-ANT_FLAGS+=-Dtest.officepath=$(OFFICEPATH)
-#UNITTEST : $(LOCAL_COMMON_OUT)$/class/TestVBA.class
-PROCESSRESULTS : ANTBUILD
-	$(PERL) testResults.pl  $(OUTPUTDIR) $(TESTDOCUMENTLOGS)
+SLOFILES= \
+		$(SLO)$/main.obj \
+ 
 
-.ENDIF
+# --- Targets ------------------------------------------------------
+APP1TARGET=     testclient
+APP1OBJS= $(SLOFILES)
+
+APP1STDLIBS=\
+        $(SALLIB) \
+        $(STDLIBCPP) \
+        $(CPPULIB) \
+        $(CPPUHELPERLIB) \
+        $(COMPHELPERLIB) \
+	$(TOOLSLIB) \
+        $(UNOTOOLSLIB) 
+
+#APP1OBJS= $(OBJ)$/testclient.obj
+
+.INCLUDE :	target.mk
+
