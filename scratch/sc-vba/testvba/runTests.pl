@@ -46,7 +46,8 @@ else
 {
       # ordinary windows, not sure if this will actually work
       $sysDir = "win" ;
-      $ENV{"PATH"} = "$PATH;$officepath";
+      $tmpPath=$ENV{"PATH"};
+      $ENV{"PATH"} = "$tmpPath:$officepath";
       $binext = ".exe";
 }
 
