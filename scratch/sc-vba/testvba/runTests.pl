@@ -14,7 +14,17 @@ my $binext = "";
 my $testDocDir = "$binDir/TestDocuments";
 my $testLogDir = "$binDir/Logs";
 
-if ( open(UNAME, "uname -a|") ) {
+# test for uname
+system("uname");
+$exit_value  = $? >> 8;
+$signal_num  = $? & 127;
+$dumped_core = $? & 128;
+
+$failed = ( $exit_value || $signal_num || $dumped_core );
+
+print "$failed = ( $exit_value || $signal_num || $dumped_core )\n";
+
+if ( !$failed && open(UNAME, "uname -a|") ) {
    $theResult = <UNAME>; 
    close(UNAME);
    if (  $theResult =~ /^CYGWIN/  ) {
@@ -47,14 +57,14 @@ else
       # ordinary windows, not sure if this will actually work
       $sysDir = "win" ;
       $tmpPath=$ENV{"PATH"};
-      $ENV{"PATH"} = "$tmpPath:$officepath";
+      $ENV{"PATH"} = "$tmpPath;$officepath";
       $binext = ".exe";
 }
 
 # the exe needs system paths or urls ( urls are by far the least troublesome )
 
 my $runCmd = "$binDir/testclient$binext $testDocDir $testLogDir";
-my $analyseCmd = "$binDir/testResults.pl $binDir/Logs $binDir/TestDocuments/logs/$sysDir";
+my $analyseCmd = "perl $binDir/testResults.pl $binDir/Logs $binDir/TestDocuments/logs/$sysDir";
 print "runCmd = $runCmd\n";
 
 my $status = system( $runCmd );
