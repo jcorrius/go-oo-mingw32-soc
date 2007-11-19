@@ -3,6 +3,7 @@
 
 #include "cppuhelper/implementationentry.hxx"
 #include <com/sun/star/table/CellRangeAddress.hpp>
+#include <com/sun/star/sheet/DataPilotFieldOrientation.hpp>
 
 #include <memory>
 #include <boost/shared_ptr.hpp>
@@ -48,13 +49,21 @@ struct TestParam
 };
 
 /** 
- * information referenced during run-time testing.
+ *  information referenced during run-time testing.  It gets updated
+ *  dynamically as test progresses.
  */
 struct RuntimeData
 {
     ::com::sun::star::uno::Reference< ::com::sun::star::sheet::XSpreadsheet > OutputSheetRef;
     sal_Int32 OutputSheetId;
     DataTable CacheTable;
+
+    /** 
+     * Stores the actual number of items created in each field.
+     */
+    ::std::vector<sal_Int32> FieldItemCounts;
+
+    ::std::vector< ::com::sun::star::sheet::DataPilotFieldOrientation > FieldOrientations;
 };
 
 struct FieldParam
@@ -91,15 +100,16 @@ private:
     const sal_Int32 getDataFieldValueLower(sal_Int16 fieldId) const;
     const sal_Int32 getDataFieldValueUpper(sal_Int16 fieldId) const;
 
-    void genSrcData(DataTable& rTable);
+    void genSrcData(RuntimeData& data);
     void genDPTable(const ::com::sun::star::table::CellRangeAddress& srcRange, 
-                    const ::com::sun::star::uno::Reference< ::com::sun::star::sheet::XSpreadsheet >& xDestSheet);
+                    RuntimeData& data);
     void dumpTableProperties(const ::com::sun::star::uno::Reference< ::com::sun::star::sheet::XSpreadsheet >& xSheet);
     void dumpFields(const ::com::sun::star::uno::Reference< ::com::sun::star::container::XIndexAccess >& xFields) const;
     void dumpItems(const ::com::sun::star::uno::Reference< ::com::sun::star::container::XIndexAccess >& xItems) const;
 
     void verifyTableResults(const RuntimeData& data);
-    void setReferenceToField(const RuntimeData& data);
+    void setReferenceToField(const RuntimeData& data, sal_Int32 fieldId, sal_Int32 fieldItemId, sal_Int32 refType);
+    void removeAllReferences(const RuntimeData& data);
 
     void groupRowFields(const ::com::sun::star::uno::Reference< ::com::sun::star::sheet::XDataPilotTable2 >& xDPTab, sal_Int32 groupSize = 2) const;
 

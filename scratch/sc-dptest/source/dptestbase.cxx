@@ -1,5 +1,6 @@
 
 #include "dptestbase.hxx"
+#include "dpresulttester.hxx"
 #include "global.hxx"
 #include "dpcachetable.hxx"
 #include "cppuhelper/implementationentry.hxx"
@@ -12,6 +13,7 @@
 #include <com/sun/star/container/XEnumerationAccess.hpp>
 #include <com/sun/star/container/XIndexAccess.hpp>
 #include <com/sun/star/container/XNamed.hpp>
+#include <com/sun/star/frame/XModel.hpp>
 #include <com/sun/star/sheet/DataPilotFieldFilter.hpp>
 #include <com/sun/star/sheet/DataPilotFieldOrientation.hpp>
 #include <com/sun/star/sheet/DataPilotFieldReference.hpp>
@@ -21,7 +23,9 @@
 #include <com/sun/star/sheet/DataPilotTablePositionData.hpp>
 #include <com/sun/star/sheet/DataPilotTablePositionType.hpp>
 #include <com/sun/star/sheet/DataPilotTableResultData.hpp>
+#include <com/sun/star/sheet/DataResultFlags.hpp>
 #include <com/sun/star/sheet/GeneralFunction.hpp>
+#include <com/sun/star/sheet/DataResult.hpp>
 #include <com/sun/star/sheet/XDataPilotDescriptor.hpp>
 #include <com/sun/star/sheet/XDataPilotField.hpp>
 #include <com/sun/star/sheet/XDataPilotFieldGrouping.hpp>
@@ -32,6 +36,7 @@
 #include <com/sun/star/sheet/XSheetFilterDescriptor.hpp>
 #include <com/sun/star/sheet/XSpreadsheet.hpp>
 #include <com/sun/star/sheet/XSpreadsheetDocument.hpp>
+#include <com/sun/star/sheet/XSpreadsheetView.hpp>
 #include <com/sun/star/sheet/XSpreadsheets.hpp>
 #include <com/sun/star/table/CellAddress.hpp>
 #include <com/sun/star/table/CellRangeAddress.hpp>
@@ -118,287 +123,6 @@ UnaryProc forEachCell(const CellRangeAddress& range, UnaryProc op)
 
 // ============================================================================
 
-class ResultTester
-{
-    struct DataFieldSetting
-    {
-        sal_Int32 FieldId;
-        sheet::GeneralFunction Function;
-        shared_ptr<DataPilotFieldReference> FieldRef;
-
-        DataFieldSetting() : 
-            FieldRef(static_cast<DataPilotFieldReference*>(NULL)) 
-        {
-        }
-    };
-
-public:
-    ResultTester(const RuntimeData& data, const Reference<XDataPilotTable2>& xDPTab) :
-        maData(data), mxDPTab(xDPTab), mnFailureCount(0)
-    {
-        init();
-    }
-
-    ResultTester(const ResultTester& other) :
-        maData(other.maData), mxDPTab(other.mxDPTab), 
-        maDataFieldSettings(other.maDataFieldSettings),
-        mnFailureCount(other.mnFailureCount)
-    {
-        init();
-    }
-
-    void init()
-    {
-        Reference<XDataPilotDescriptor> xDPDesc(mxDPTab, UNO_QUERY_THROW);
-
-        Reference<container::XIndexAccess> xDataFields = xDPDesc->getDataFields();
-        sal_Int32 fieldCount = xDataFields->getCount();
-        maDataFieldSettings.reserve(fieldCount);
-        for (sal_Int32 i = 0; i < fieldCount; ++i)
-        {
-            Reference<XDataPilotField> xField(xDataFields->getByIndex(i), UNO_QUERY_THROW);
-            DataFieldSetting setting;
-
-            // Get the field ID of a given data field.
-            Reference<container::XNamed> xNamed(xField, UNO_QUERY_THROW);
-            OUString name = xNamed->getName();
-            setting.FieldId = maData.CacheTable.getFieldIndex(name);
-
-            // Get the function used for aggregation.
-            Reference<XPropertySet> xPS(xField, UNO_QUERY_THROW);
-            getPropertyValue(xPS, ascii("Function"), setting.Function);
-
-            // Get the referenced item information (if any).
-            bool hasReference = false;
-            getPropertyValue(xPS, ascii("HasReference"), hasReference);
-            if (hasReference)
-            {
-                setting.FieldRef.reset(new DataPilotFieldReference);
-                getPropertyValue(xPS, ascii("Reference"), *setting.FieldRef);
-            }
-            maDataFieldSettings.push_back(setting);
-        }
-    }
-
-    void operator()(const CellAddress& cell)
-    {
-        DataPilotTablePositionData posData = mxDPTab->getPositionData(cell);
-        if (posData.PositionType != DataPilotTablePositionType::RESULT)
-            return;
-
-        DataPilotTableResultData resData;
-        if (!(posData.PositionData >>= resData))
-            return;
-
-        vector<DataTable::Filter> filters;
-        sal_Int32 filterSize = resData.FieldFilters.getLength();
-        filters.reserve(filterSize);
-        for (sal_Int32 i = 0; i < filterSize; ++i)
-        {
-            sal_Int32 nFieldId = maData.CacheTable.getFieldIndex(resData.FieldFilters[i].FieldName);
-
-            if (nFieldId >= 0)
-            {
-                DataTable::Filter filter;
-                filter.FieldIndex = nFieldId;
-                filter.MatchStrId = DataTable::getStringId(resData.FieldFilters[i].MatchValue);
-                filters.push_back(filter);
-            }
-        }
-
-        // ID only for the data field set, not the actual column ID.
-        sal_Int32 nId = resData.DataFieldIndex; 
-        const DataFieldSetting& setting = maDataFieldSettings.at(nId);
-
-        if (setting.FieldRef.get())
-        {
-            // referenced item exists.
-            verifyRefValue(cell, setting, filters);
-        }
-        else
-        {
-            // normal display mode with no reference
-
-            Reference<XCell> xCell = maData.OutputSheetRef->getCellByPosition(cell.Column, cell.Row);
-            if (xCell->getType() != table::CellContentType_VALUE)
-            {
-                fprintf(stdout, "* CELL NOT VALUE (%ld, %ld)\n", cell.Row, cell.Column);
-                ++mnFailureCount;
-                return;
-            }
-
-            // This ID is the actual column ID of the data field.
-            const sal_Int32 nFieldId = setting.FieldId;
-            const sheet::GeneralFunction func = setting.Function;
-            double val1 = xCell->getValue();
-            double val2 = maData.CacheTable.aggregateValue(filters, nFieldId, func);
-            if (val1 != val2)
-            {
-                fprintf(stdout, "* VALUES DIFFER (%ld, %ld) : real value = %g  check value = %g (%s)\n", 
-                        cell.Row, cell.Column,
-                        val1, val2, getFunctionName(func).c_str());
-                fflush(stdout);
-                ++mnFailureCount;
-            }
-        }
-    }
-
-    sal_Int16 getFailureCount() const
-    {
-        return mnFailureCount;
-    }
-
-    void verifyRefValue(const CellAddress& cell, const DataFieldSetting& setting, 
-                        const vector<DataTable::Filter>& filters)
-    {
-        Reference<XCell> xCell = maData.OutputSheetRef->getCellByPosition(cell.Column, cell.Row);
-        const sal_Int32 nFieldId = setting.FieldId;
-        const sheet::GeneralFunction func = setting.Function;
-        const DataPilotFieldReference& ref = *setting.FieldRef;
-        sal_Int32 refFieldId = maData.CacheTable.getFieldIndex(ref.ReferenceField);
-
-        // Obtain the aggregate value with the original filter set.
-        double valOrig = maData.CacheTable.aggregateValue(filters, nFieldId, func);
-
-        // Go through the filters and find the field that matches the referenced field, then
-        // replace the match value with the referenced item name.
-        vector<DataTable::Filter> filters2;
-        vector<DataTable::Filter>::const_iterator itr = filters.begin(), itrEnd = filters.end();
-        bool refItem = false;
-        for (; itr != itrEnd; ++itr)
-        {
-            if (itr->FieldIndex == refFieldId)
-            {
-                // This is the referenced field.  Replace the match value with
-                // the referenced item name.
-                DataTable::Filter filter(*itr);
-                sal_Int32 newStrId = DataTable::getStringId(ref.ReferenceItemName); 
-                if (filter.MatchStrId == newStrId)
-                    refItem = true;
-                else
-                    filter.MatchStrId = newStrId;
-                filters2.push_back(filter);
-            }
-            else
-                filters2.push_back(*itr);
-        }
-
-        table::CellContentType cellType = xCell->getType();
-        if (refItem)
-        {
-            if (cellType != table::CellContentType_EMPTY)
-            {
-                fprintf(stdout, "* CELL NOT EMPTY FOR REFERENCED ITEM (%ld, %ld)\n",
-                        cell.Row, cell.Column);
-                ++mnFailureCount;
-            }
-            return;
-        }
-
-        if (cellType != table::CellContentType_VALUE)
-        {
-            fprintf(stdout, "* CELL DOES NOT CONTAIN VALUE (%ld, %ld)\n",
-                    cell.Row, cell.Column);
-            ++mnFailureCount;
-            return;
-        }
-
-        // Get the referenced value with the new filter set.
-        double valRef = maData.CacheTable.aggregateValue(filters2, nFieldId, func);
-
-        double valCell = xCell->getValue();
-
-        switch (ref.ReferenceType)
-        {
-            case DataPilotFieldReferenceType::NONE:
-                // no reference mode.
-                return;
-            case DataPilotFieldReferenceType::ITEM_DIFFERENCE:
-            {
-                // subtract the reference value and display the difference.
-                if (valCell != valOrig - valRef)
-                {
-                    fprintf(stdout, "* VALUES DIFFER (%ld, %ld) : real value = %g  check value %g - %g = %g (%s)\n",
-                            cell.Row, cell.Column,
-                            valCell, valOrig, valRef, valOrig - valRef,
-                            getFunctionName(func).c_str());
-                    ++mnFailureCount;
-                }
-            }
-            break;
-            case DataPilotFieldReferenceType::ITEM_PERCENTAGE:
-            {
-                // each result is dividied by its reference value.
-                fprintf(stdout, "* TEST CODE NOT IMPLEMENTED (%ld, %ld)\n", cell.Row, cell.Column);
-                ++mnFailureCount;
-            }
-            break;
-            case DataPilotFieldReferenceType::ITEM_PERCENTAGE_DIFFERENCE:
-            {
-                // from each result, its reference value is subtracted, and the difference
-                // is further divided by the reference value.
-                fprintf(stdout, "* TEST CODE NOT IMPLEMENTED (%ld, %ld)\n", cell.Row, cell.Column);
-                ++mnFailureCount;
-            }
-            break;
-            case DataPilotFieldReferenceType::RUNNING_TOTAL:
-            {
-                // Each result is added to the sum of the results for preceding items 
-                // in the base field, in the base field's sort order, and the total 
-                // sum is shown.
-                fprintf(stdout, "* TEST CODE NOT IMPLEMENTED (%ld, %ld)\n", cell.Row, cell.Column);
-                ++mnFailureCount;
-            }
-            break;
-            case DataPilotFieldReferenceType::ROW_PERCENTAGE:
-            {
-                // Each result is divided by the total result for its row in 
-                // the DataPilot table. 
-                fprintf(stdout, "* TEST CODE NOT IMPLEMENTED (%ld, %ld)\n", cell.Row, cell.Column);
-                ++mnFailureCount;
-            }
-            break;
-            case DataPilotFieldReferenceType::COLUMN_PERCENTAGE:
-            {
-                // Same as DataPilotFieldReferenceType::ROW_PERCENTAGE , but the total 
-                // for the result's column is used. 
-                fprintf(stdout, "* TEST CODE NOT IMPLEMENTED (%ld, %ld)\n", cell.Row, cell.Column);
-                ++mnFailureCount;
-            }
-            break;
-            case DataPilotFieldReferenceType::TOTAL_PERCENTAGE:
-            {
-                // Same as DataPilotFieldReferenceType::ROW_PERCENTAGE , but the grand 
-                // total for the result's data field is used. 
-                fprintf(stdout, "* TEST CODE NOT IMPLEMENTED (%ld, %ld)\n", cell.Row, cell.Column);
-                ++mnFailureCount;
-            }
-            break;
-            case DataPilotFieldReferenceType::INDEX:
-            {
-                // The row and column totals and the grand total, following the same 
-                // rules as above, are used to calculate the following expression.
-                fprintf(stdout, "* TEST CODE NOT IMPLEMENTED (%ld, %ld)\n", cell.Row, cell.Column);
-                ++mnFailureCount;
-            }
-            break;
-            default:
-                fprintf(stdout, "* UNKNOWN REFERENCE TYPE (%ld, %ld)\n",
-                        cell.Row, cell.Column);
-                ++mnFailureCount;
-        }
-    }
-
-private:
-    ResultTester(); // disabled
-    Reference<XDataPilotTable2>     mxDPTab;
-    RuntimeData                     maData;
-    vector<DataFieldSetting>        maDataFieldSettings;
-    sal_Int16                       mnFailureCount;
-};
-
-// ============================================================================
-
 DPTestBase::DPTestBase(const Reference<XSpreadsheetDocument>& rSpDoc, const TestParam& param) :
     mxSpDoc(rSpDoc), maTestParam(param)
 {
@@ -410,25 +134,67 @@ DPTestBase::~DPTestBase()
 
 void DPTestBase::run()
 {
-    DataTable table;
-    genSrcData(table);
+    RuntimeData data;
+
+    // Generate the source data.
+    genSrcData(data);
     if (!mpSrcRange.get())
         return;
 
+    // Create the destination sheet where the DataPilot output will be constructed.
+    const OUString sheetName = ascii("DPTable");
     Reference<XSpreadsheets> xSheets = mxSpDoc->getSheets();
-    xSheets->insertNewByName(ascii("DPTable"), mpSrcRange->Sheet+1);
+    xSheets->insertNewByName(sheetName, mpSrcRange->Sheet+1);
 
-    RuntimeData data;
-    data.CacheTable.swap(table);
-    data.OutputSheetRef.set( getSheetByName(mxSpDoc, ascii("DPTable")) );
+    data.OutputSheetRef.set(getSheetByName(mxSpDoc, sheetName));
     data.OutputSheetId = mpSrcRange->Sheet + 1;
 
-    genDPTable(*mpSrcRange, data.OutputSheetRef);
+    // Activate the DataPilot output sheet.
+    Reference<frame::XModel> xModel(mxSpDoc, UNO_QUERY_THROW);
+    Reference<XSpreadsheetView> xSpView(xModel->getCurrentController(), UNO_QUERY_THROW);
+    xSpView->setActiveSheet(data.OutputSheetRef);
+
+    genDPTable(*mpSrcRange, data);
 //  dumpTableProperties(data.OutputSheetRef);
     verifyTableResults(data);
-    sleep(1);
-    setReferenceToField(data);
-    verifyTableResults(data);
+//  sleep(1);
+
+    // ----------------------------------------------------------------------
+    // Verify results with reference item.
+
+    static const sal_Int32 refTypeList[] = {
+        DataPilotFieldReferenceType::ITEM_DIFFERENCE,
+        DataPilotFieldReferenceType::ITEM_PERCENTAGE,
+        DataPilotFieldReferenceType::ITEM_PERCENTAGE_DIFFERENCE,
+        DataPilotFieldReferenceType::RUNNING_TOTAL,
+        DataPilotFieldReferenceType::ROW_PERCENTAGE,
+        DataPilotFieldReferenceType::COLUMN_PERCENTAGE,
+        DataPilotFieldReferenceType::TOTAL_PERCENTAGE,
+        DataPilotFieldReferenceType::INDEX
+    };
+    static const sal_Int32 refTypeCount = sizeof(refTypeList) / sizeof(refTypeList[0]);
+
+    sal_Int32 fieldCount = data.FieldItemCounts.size();
+    for (sal_Int32 refTypeId = 0; refTypeId < refTypeCount; ++refTypeId)
+    {
+        for (sal_Int32 fieldId = 0; fieldId < fieldCount; ++fieldId)
+        {
+            if (data.FieldOrientations.at(fieldId) == DataPilotFieldOrientation_PAGE)
+            {
+                fprintf(stdout, "Info: skipping page field.....\n");fflush(stdout);
+                continue;
+            }
+    
+            sal_Int32 itemCount = data.FieldItemCounts.at(fieldId);
+            for (sal_Int32 itemId = 0; itemId < itemCount; ++itemId)
+            {
+                setReferenceToField(data, fieldId, itemId, refTypeList[refTypeId]);
+                verifyTableResults(data);
+//              sleep(1);
+            }
+        }
+    }
+    removeAllReferences(data);
 }
 
 const OUString DPTestBase::getFieldName(sal_Int16 fieldId) const
@@ -494,7 +260,7 @@ const sal_Int32 DPTestBase::getDataFieldValueUpper(sal_Int16 fieldId) const
     return 100;
 }
 
-void DPTestBase::genSrcData(DataTable& rTable)
+void DPTestBase::genSrcData(RuntimeData& data)
 {
     if (maTestParam.FieldCount < maTestParam.DataCount)
         return;
@@ -526,12 +292,14 @@ void DPTestBase::genSrcData(DataTable& rTable)
     // Construct a random data table, and put it into the sheet.
     DataTable table;
     table.setTableSize(maTestParam.RowCount, maTestParam.FieldCount);
+    vector<sal_Int32> fieldItemCounts;
     for (sal_Int16 field = 0; field < maTestParam.FieldCount-maTestParam.DataCount; ++field)
     {
         OUString fldName = getFieldName(field);
         table.setFieldName(field, fldName);
 
         sal_Int32 itemCount = getFieldItemCount(field);
+        fieldItemCounts.push_back(itemCount);
         for (sal_Int32 row = 0; row < maTestParam.RowCount; ++row)
             table.setCell(row, field, getFieldItemName(field, rand<sal_Int32>(0, itemCount-1)));
     }
@@ -549,11 +317,12 @@ void DPTestBase::genSrcData(DataTable& rTable)
 
 //  table.output();
     table.output(xSheet, maTestParam.StartRow, maTestParam.StartCol);
-    rTable.swap(table);
+    data.CacheTable.swap(table);
+    data.FieldItemCounts.swap(fieldItemCounts);
 }
 
 void DPTestBase::genDPTable(const CellRangeAddress& srcRange, 
-                            const Reference<XSpreadsheet>& xDestSheet)
+                            RuntimeData& data)
 {
     static const GeneralFunction funcTable[] = {
 //      GeneralFunction_NONE,
@@ -570,6 +339,9 @@ void DPTestBase::genDPTable(const CellRangeAddress& srcRange,
 //      GeneralFunction_VAR,
 //      GeneralFunction_VARP
     };
+
+    const Reference<XSpreadsheet>& xDestSheet = data.OutputSheetRef;
+
     static sal_Int32 funcTableSize = sizeof(funcTable)/sizeof(funcTable[0]);
 
     // Create a data pilot table.
@@ -582,18 +354,24 @@ void DPTestBase::genDPTable(const CellRangeAddress& srcRange,
 
     // Define non-data fields.
     Reference<container::XIndexAccess> xIA = xDPDesc->getDataPilotFields();
+    vector<DataPilotFieldOrientation> orients;
     for (sal_Int32 i = 0; i < fieldCount - maTestParam.DataCount; ++i)
     {
         Reference<XDataPilotField> xField(xIA->getByIndex(i), UNO_QUERY_THROW);
         printName(xField);
         Reference<XPropertySet> xPS(xField, UNO_QUERY_THROW);
+        DataPilotFieldOrientation orient;
         if (i == fieldCount - maTestParam.DataCount - 1)
-            xPS->setPropertyValue(ascii("Orientation"), makeAny(DataPilotFieldOrientation_PAGE));
+            orient = com::sun::star::sheet::DataPilotFieldOrientation_PAGE;
         else if (i % 3)
-            xPS->setPropertyValue(ascii("Orientation"), makeAny(DataPilotFieldOrientation_ROW));
+            orient = com::sun::star::sheet::DataPilotFieldOrientation_ROW;
         else
-            xPS->setPropertyValue(ascii("Orientation"), makeAny(DataPilotFieldOrientation_COLUMN));
+            orient = com::sun::star::sheet::DataPilotFieldOrientation_COLUMN;
+
+        xPS->setPropertyValue(ascii("Orientation"), makeAny(orient));
+        orients.push_back(orient);
     }
+    data.FieldOrientations.swap(orients);
 
     // Define data fields.
     for (sal_Int32 i = 0; i < maTestParam.DataCount; ++i)
@@ -728,6 +506,7 @@ void DPTestBase::dumpItems(const Reference<XIndexAccess>& xItems) const
 
 void DPTestBase::verifyTableResults(const RuntimeData& data)
 {
+    fprintf(stdout, "--------------------------------------------------------------------\n");
     fprintf(stdout, "now verifying calculation results....\n");
     const Reference<XSpreadsheet>& xSheet = data.OutputSheetRef;
     Reference<XDataPilotTablesSupplier> xDPTSupplier(xSheet, UNO_QUERY_THROW);
@@ -737,10 +516,12 @@ void DPTestBase::verifyTableResults(const RuntimeData& data)
     Reference<container::XEnumeration> xIter = xEA->createEnumeration();
     while (xIter->hasMoreElements())
     {
-        printf("--------------------------------------------------------------------\n");
         try
         {
             Reference<XDataPilotTable2> xDPTab(xIter->nextElement(), UNO_QUERY_THROW);
+            Reference<XDataPilotDescriptor> xDesc(xDPTab, UNO_QUERY_THROW);
+            printf("* DataPilot Table (%s)\n",
+                   OUStringToOString(xDesc->getName(), RTL_TEXTENCODING_UTF8).getStr());
             CellRangeAddress range = xDPTab->getOutputRangeByType(DataPilotTableRegion::RESULT);
             printf("  data range: sheet: %d;  range (%ld, %ld) - (%ld, %ld)\n",
                range.Sheet, range.StartRow, range.StartColumn,
@@ -756,7 +537,7 @@ void DPTestBase::verifyTableResults(const RuntimeData& data)
     }
 }
 
-void DPTestBase::setReferenceToField(const RuntimeData& data)
+void DPTestBase::setReferenceToField(const RuntimeData& data, sal_Int32 fieldId, sal_Int32 fieldItemId, sal_Int32 refType)
 {
     const Reference<XSpreadsheet>& xSheet = data.OutputSheetRef;
     Reference<XDataPilotTablesSupplier> xDPTSupplier(xSheet, UNO_QUERY_THROW);
@@ -766,7 +547,6 @@ void DPTestBase::setReferenceToField(const RuntimeData& data)
     Reference<container::XEnumeration> xIter = xEA->createEnumeration();
     while (xIter->hasMoreElements())
     {
-        printf("--------------------------------------------------------------------\n");
         try
         {
             Reference<XDataPilotTable2> xDPTab(xIter->nextElement(), UNO_QUERY_THROW);
@@ -780,9 +560,9 @@ void DPTestBase::setReferenceToField(const RuntimeData& data)
             {
                 Reference<XDataPilotField> xField(xDataFields->getByIndex(i), UNO_QUERY_THROW);
                 DataPilotFieldReference ref;
-                ref.ReferenceField = getFieldName(0);
-                ref.ReferenceType = DataPilotFieldReferenceType::ITEM_DIFFERENCE;
-                ref.ReferenceItemName = getFieldItemName(0, 0);
+                ref.ReferenceField = getFieldName(fieldId);
+                ref.ReferenceType = refType;
+                ref.ReferenceItemName = getFieldItemName(fieldId, fieldItemId);
                 ref.ReferenceItemType = DataPilotFieldReferenceItemType::NAMED;
                 Reference<XPropertySet> xPS(xField, UNO_QUERY_THROW);
                 xPS->setPropertyValue(ascii("Reference"), makeAny(ref));
@@ -790,7 +570,42 @@ void DPTestBase::setReferenceToField(const RuntimeData& data)
         }
         catch (const RuntimeException&)
         {
-            fprintf(stdout, "DPTestBase::verifyDPResults: runtime error occurred.\n");
+            fprintf(stdout, "DPTestBase::setReferenceToField: runtime error occurred.\n");
+        }
+    }
+}
+
+void DPTestBase::removeAllReferences(const RuntimeData& data)
+{
+    const Reference<XSpreadsheet>& xSheet = data.OutputSheetRef;
+    Reference<XDataPilotTablesSupplier> xDPTSupplier(xSheet, UNO_QUERY_THROW);
+    Reference<XDataPilotTables> xDPTables(xDPTSupplier->getDataPilotTables(), UNO_QUERY_THROW);
+
+    Reference<container::XEnumerationAccess> xEA(xDPTables, UNO_QUERY_THROW);
+    Reference<container::XEnumeration> xIter = xEA->createEnumeration();
+    while (xIter->hasMoreElements())
+    {
+        try
+        {
+            Reference<XDataPilotTable2> xDPTab(xIter->nextElement(), UNO_QUERY_THROW);
+            Reference<XDataPilotDescriptor> xDesc(xDPTab, UNO_QUERY_THROW);
+            Reference<XIndexAccess> xDataFields = xDesc->getDataFields();
+            sal_Int32 fieldCount = xDataFields->getCount();
+            if (!fieldCount)
+                continue;
+
+            for (sal_Int32 i = 0; i < fieldCount; ++i)
+            {
+                Reference<XDataPilotField> xField(xDataFields->getByIndex(i), UNO_QUERY_THROW);
+                DataPilotFieldReference ref;
+                ref.ReferenceType = DataPilotFieldReferenceType::NONE;
+                Reference<XPropertySet> xPS(xField, UNO_QUERY_THROW);
+                xPS->setPropertyValue(ascii("Reference"), makeAny(ref));
+            }
+        }
+        catch (const RuntimeException&)
+        {
+            fprintf(stdout, "DPTestBase::removeAllReferences: runtime error occurred.\n");
         }
     }
 }

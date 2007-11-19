@@ -20,7 +20,8 @@ OBJFILES= \
 	$(OBJDIR)/main.o \
 	$(OBJDIR)/global.o \
 	$(OBJDIR)/dpcachetable.o \
-	$(OBJDIR)/dptestbase.o
+	$(OBJDIR)/dptestbase.o \
+	$(OBJDIR)/dpresulttester.o
 
 all: pre $(EXEC)
 
@@ -40,6 +41,9 @@ $(OBJDIR)/dpcachetable.o: source/dpcachetable.cxx
 	$(CXX) -o $@ -c $< $(CPPFLAGS)
 
 $(OBJDIR)/dptestbase.o: source/dptestbase.cxx
+	$(CXX) -o $@ -c $< $(CPPFLAGS)
+
+$(OBJDIR)/dpresulttester.o: source/dpresulttester.cxx
 	$(CXX) -o $@ -c $< $(CPPFLAGS)
 
 clean:
