@@ -59,11 +59,14 @@ struct RuntimeData
     DataTable CacheTable;
 
     /** 
-     * Stores the actual number of items created in each field.
+     * Stores the number of items created in each field.
      */
     ::std::vector<sal_Int32> FieldItemCounts;
 
-    ::std::vector< ::com::sun::star::sheet::DataPilotFieldOrientation > FieldOrientations;
+    /** 
+     * Stores the orientation of each field. 
+     */
+    std::vector< ::com::sun::star::sheet::DataPilotFieldOrientation > FieldOrientations;
 };
 
 struct FieldParam

@@ -52,6 +52,11 @@ public:
                         const ::std::vector<DataTable::Filter>& filters,
                         const ::com::sun::star::sheet::DataResult& result);
 
+    void verifyPercentValue(const ::com::sun::star::table::CellAddress& cell, 
+                            const DataFieldSetting& setting,
+                            const ::std::vector<DataTable::Filter>& filters,
+                            const ::com::sun::star::sheet::DataResult& result);
+
 private:
     ResultTester(); // disabled
     void fail();

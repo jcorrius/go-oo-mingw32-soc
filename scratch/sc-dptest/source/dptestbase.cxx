@@ -156,20 +156,20 @@ void DPTestBase::run()
 
     genDPTable(*mpSrcRange, data);
 //  dumpTableProperties(data.OutputSheetRef);
-    fprintf(stdout, "----------------------------------------------------------------------\n");
-    fprintf(stdout, "checking results for normal display mode...\n");
-    verifyTableResults(data);
+//  fprintf(stdout, "----------------------------------------------------------------------\n");
+//  fprintf(stdout, "checking results for normal display mode...\n");
+//  verifyTableResults(data);
 //  sleep(1);
 
     // ----------------------------------------------------------------------
     // Verify results with reference item.
 
     static const sal_Int32 refTypeList[] = {
-        DataPilotFieldReferenceType::ITEM_DIFFERENCE,
-        DataPilotFieldReferenceType::ITEM_PERCENTAGE,
-        DataPilotFieldReferenceType::ITEM_PERCENTAGE_DIFFERENCE,
-        DataPilotFieldReferenceType::RUNNING_TOTAL,
-//      DataPilotFieldReferenceType::ROW_PERCENTAGE,
+//      DataPilotFieldReferenceType::ITEM_DIFFERENCE,
+//      DataPilotFieldReferenceType::ITEM_PERCENTAGE,
+//      DataPilotFieldReferenceType::ITEM_PERCENTAGE_DIFFERENCE,
+//      DataPilotFieldReferenceType::RUNNING_TOTAL,
+        DataPilotFieldReferenceType::ROW_PERCENTAGE,
 //      DataPilotFieldReferenceType::COLUMN_PERCENTAGE,
 //      DataPilotFieldReferenceType::TOTAL_PERCENTAGE,
 //      DataPilotFieldReferenceType::INDEX

@@ -87,6 +87,7 @@ void ResultTester::init()
 {
     Reference<XDataPilotDescriptor> xDPDesc(mxDPTab, UNO_QUERY_THROW);
 
+    // Go though each data field
     Reference<container::XIndexAccess> xDataFields = xDPDesc->getDataFields();
     sal_Int32 fieldCount = xDataFields->getCount();
     maDataFieldSettings.reserve(fieldCount);
@@ -152,7 +153,23 @@ void ResultTester::operator()(const CellAddress& cell)
     if (setting.FieldRef.get())
     {
         // referenced item exists.
-        verifyRefValue(cell, setting, filters, resData.Result);
+        switch (setting.FieldRef->ReferenceType)
+        {
+            case DataPilotFieldReferenceType::ITEM_DIFFERENCE:
+            case DataPilotFieldReferenceType::ITEM_PERCENTAGE:
+            case DataPilotFieldReferenceType::ITEM_PERCENTAGE_DIFFERENCE:
+            case DataPilotFieldReferenceType::RUNNING_TOTAL:
+                verifyRefValue(cell, setting, filters, resData.Result);
+            break;
+
+            case DataPilotFieldReferenceType::ROW_PERCENTAGE:
+            case DataPilotFieldReferenceType::COLUMN_PERCENTAGE:
+            case DataPilotFieldReferenceType::TOTAL_PERCENTAGE:
+                verifyPercentValue(cell, setting, filters, resData.Result);
+            break;
+            case DataPilotFieldReferenceType::INDEX:
+            break;
+        }
     }
     else
     {
@@ -193,12 +210,29 @@ void ResultTester::verifyRefValue(const CellAddress& cell,
                                   const DataResult& result)
 {
     Reference<XCell> xCell = maData.OutputSheetRef->getCellByPosition(cell.Column, cell.Row);
+    table::CellContentType cellType = xCell->getType();
+    double valCell = xCell->getValue();
 
-    const sal_Int32 nFieldId = setting.FieldId;
-    const sheet::GeneralFunction func = setting.Function;
+    CellRangeAddress resRange = mxDPTab->getOutputRangeByType(DataPilotTableRegion::RESULT);
+    bool isRowSubtotal = (result.Flags & DataResultFlags::SUBTOTAL) && (resRange.EndColumn == cell.Column);
+    bool isColSubtotal = (result.Flags & DataResultFlags::SUBTOTAL) && (resRange.EndRow == cell.Row);
+
     const DataPilotFieldReference& ref = *setting.FieldRef;
     sal_Int32 refFieldId = maData.CacheTable.getFieldIndex(ref.ReferenceField);
     DataPilotFieldOrientation refOrient = maData.FieldOrientations.at(refFieldId);
+
+    if (refOrient == DataPilotFieldOrientation_COLUMN && isRowSubtotal && 
+        cellType == table::CellContentType_EMPTY)
+        // This is expected.
+        return;
+
+    if (refOrient == DataPilotFieldOrientation_ROW && isColSubtotal && 
+        cellType == table::CellContentType_EMPTY)
+        // This is also expected.
+        return;
+
+    const sal_Int32 nFieldId = setting.FieldId;
+    const sheet::GeneralFunction func = setting.Function;
 
     // Obtain the aggregate value with the original filter set.
     double valOrig = maData.CacheTable.aggregateValue(filters, nFieldId, func);
@@ -226,25 +260,7 @@ void ResultTester::verifyRefValue(const CellAddress& cell,
             filters2.push_back(*itr);
     }
 
-    // For the following ref type, only the row subtotal cells should be
-    // empty.
-    // 
-    //   * RUNNING_TOTAL
-    // 
-    // For the following ref types, the result area should be filled in its
-    // entirety.
-    // 
-    //   * ROW_PERCENTAGE
-    //   * COLUMN_PERCENTAGE
-    //   * TOTAL_PERCENTAGE
-    //   * INDEX
-
-    table::CellContentType cellType = xCell->getType();
-    CellRangeAddress resRange = mxDPTab->getOutputRangeByType(DataPilotTableRegion::RESULT);
-    bool isRowSubtotal = (result.Flags & DataResultFlags::SUBTOTAL) && (resRange.EndColumn == cell.Column);
-    bool isColSubtotal = (result.Flags & DataResultFlags::SUBTOTAL) && (resRange.EndRow == cell.Row);
     double valRef = maData.CacheTable.aggregateValue(filters2, nFieldId, func);
-    double valCell = xCell->getValue();
 
     switch (ref.ReferenceType)
     {
@@ -262,14 +278,6 @@ void ResultTester::verifyRefValue(const CellAddress& cell,
                 // the referenced item should be empty.
                 return;
 
-            if (refOrient == DataPilotFieldOrientation_COLUMN && isRowSubtotal && cellType == table::CellContentType_EMPTY)
-                // This is expected.
-                return;
-
-            if (refOrient == DataPilotFieldOrientation_ROW && isColSubtotal && cellType == table::CellContentType_EMPTY)
-                // This is also expected.
-                return;
-
             if (valCell != valOrig - valRef)
             {
                 fprintf(stdout, "Error: values differ (%ld, %ld) : real value = %g  check value %g - %g = %g (%s)\n",
@@ -283,14 +291,6 @@ void ResultTester::verifyRefValue(const CellAddress& cell,
         case DataPilotFieldReferenceType::ITEM_PERCENTAGE:
         {
             /* each result is dividied by its reference value. */
-
-            if (refOrient == DataPilotFieldOrientation_COLUMN && isRowSubtotal && cellType == table::CellContentType_EMPTY)
-                // This is expected.
-                return;
-
-            if (refOrient == DataPilotFieldOrientation_ROW && isColSubtotal && cellType == table::CellContentType_EMPTY)
-                // This is also expected.
-                return;
 
             if (valRef == 0.0)
             {
@@ -326,14 +326,6 @@ void ResultTester::verifyRefValue(const CellAddress& cell,
                 // the referenced item should be empty.
                 return;
 
-            if (refOrient == DataPilotFieldOrientation_COLUMN && isRowSubtotal && cellType == table::CellContentType_EMPTY)
-                // This is expected.
-                return;
-
-            if (refOrient == DataPilotFieldOrientation_ROW && isColSubtotal && cellType == table::CellContentType_EMPTY)
-                // This is also expected.
-                return;
-
             double res = (valOrig-valRef)/valRef;
             if (!compare(valCell, res))
             {
@@ -343,18 +335,74 @@ void ResultTester::verifyRefValue(const CellAddress& cell,
                         getFunctionName(func).c_str());
                 fail();
             }
+            return;
         }
-        break;
         case DataPilotFieldReferenceType::RUNNING_TOTAL:
         {
             /* Each result is added to the sum of the results for preceding
              * items in the base field, in the base field's sort order, and 
              * the total sum is shown.
              */
+
             fprintf(stdout, "* TEST CODE NOT IMPLEMENTED (%ld, %ld)\n", cell.Row, cell.Column);
             fail();
         }
         break;
+        default:
+            fprintf(stdout, "* UNKNOWN REFERENCE TYPE (%ld, %ld)\n",
+                    cell.Row, cell.Column);
+            fail();
+    }
+}
+
+void ResultTester::verifyPercentValue(const ::com::sun::star::table::CellAddress& cell, 
+                                      const DataFieldSetting& setting,
+                                      const vector<DataTable::Filter>& filters,
+                                      const DataResult& result)
+{
+    const sal_Int32 nFieldId = setting.FieldId;
+    const sheet::GeneralFunction func = setting.Function;
+    const DataPilotFieldReference& ref = *setting.FieldRef;
+    sal_Int32 refFieldId = maData.CacheTable.getFieldIndex(ref.ReferenceField);
+    DataPilotFieldOrientation refOrient = maData.FieldOrientations.at(refFieldId);
+
+    // Obtain the aggregate value with the original filter set.
+    double valOrig = maData.CacheTable.aggregateValue(filters, nFieldId, func);
+
+    // Go through the filters and find the field that matches the referenced field, then
+    // replace the match value with the referenced item name.
+    vector<DataTable::Filter> filters2;
+    vector<DataTable::Filter>::const_iterator itr = filters.begin(), itrEnd = filters.end();
+    bool isRefItem = false;
+    for (; itr != itrEnd; ++itr)
+    {
+        if (itr->FieldIndex == refFieldId)
+        {
+            // This is the referenced field.  Replace the match value with
+            // the referenced item name.
+            DataTable::Filter filter(*itr);
+            sal_Int32 newStrId = DataTable::getStringId(ref.ReferenceItemName); 
+            if (filter.MatchStrId == newStrId)
+                isRefItem = true;
+            else
+                filter.MatchStrId = newStrId;
+            filters2.push_back(filter);
+        }
+        else
+            filters2.push_back(*itr);
+    }
+
+    Reference<XCell> xCell = maData.OutputSheetRef->getCellByPosition(cell.Column, cell.Row);
+    table::CellContentType cellType = xCell->getType();
+    double valCell = xCell->getValue();
+
+    CellRangeAddress resRange = mxDPTab->getOutputRangeByType(DataPilotTableRegion::RESULT);
+    bool isRowSubtotal = (result.Flags & DataResultFlags::SUBTOTAL) && (resRange.EndColumn == cell.Column);
+    bool isColSubtotal = (result.Flags & DataResultFlags::SUBTOTAL) && (resRange.EndRow == cell.Row);
+    double valRef = maData.CacheTable.aggregateValue(filters2, nFieldId, func);
+
+    switch (ref.ReferenceType)
+    {
         case DataPilotFieldReferenceType::ROW_PERCENTAGE:
         {
             // Each result is divided by the total result for its row in 
