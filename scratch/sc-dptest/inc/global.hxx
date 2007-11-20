@@ -51,7 +51,11 @@ void getPropertyValue(const ::com::sun::star::uno::Reference< ::com::sun::star::
     any >>= value;
 }
 
-::std::string getFunctionName(::com::sun::star::sheet::GeneralFunction func);
+::std::string getFunctionName(const ::com::sun::star::sheet::GeneralFunction func);
+
+::std::string getReferenceTypeName(const sal_Int32 refType);
+
+bool compare(double a, double b, double tol = 0.0000000001);
 
 }
 

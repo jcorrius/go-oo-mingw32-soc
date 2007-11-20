@@ -156,6 +156,8 @@ void DPTestBase::run()
 
     genDPTable(*mpSrcRange, data);
 //  dumpTableProperties(data.OutputSheetRef);
+    fprintf(stdout, "----------------------------------------------------------------------\n");
+    fprintf(stdout, "checking results for normal display mode...\n");
     verifyTableResults(data);
 //  sleep(1);
 
@@ -167,16 +169,19 @@ void DPTestBase::run()
         DataPilotFieldReferenceType::ITEM_PERCENTAGE,
         DataPilotFieldReferenceType::ITEM_PERCENTAGE_DIFFERENCE,
         DataPilotFieldReferenceType::RUNNING_TOTAL,
-        DataPilotFieldReferenceType::ROW_PERCENTAGE,
-        DataPilotFieldReferenceType::COLUMN_PERCENTAGE,
-        DataPilotFieldReferenceType::TOTAL_PERCENTAGE,
-        DataPilotFieldReferenceType::INDEX
+//      DataPilotFieldReferenceType::ROW_PERCENTAGE,
+//      DataPilotFieldReferenceType::COLUMN_PERCENTAGE,
+//      DataPilotFieldReferenceType::TOTAL_PERCENTAGE,
+//      DataPilotFieldReferenceType::INDEX
     };
     static const sal_Int32 refTypeCount = sizeof(refTypeList) / sizeof(refTypeList[0]);
 
     sal_Int32 fieldCount = data.FieldItemCounts.size();
     for (sal_Int32 refTypeId = 0; refTypeId < refTypeCount; ++refTypeId)
     {
+        fprintf(stdout, "----------------------------------------------------------------------\n");
+        fprintf(stdout, "checking results for referenced item mode (%s)...\n", 
+                getReferenceTypeName(refTypeList[refTypeId]).c_str());
         for (sal_Int32 fieldId = 0; fieldId < fieldCount; ++fieldId)
         {
             if (data.FieldOrientations.at(fieldId) == DataPilotFieldOrientation_PAGE)
@@ -506,8 +511,6 @@ void DPTestBase::dumpItems(const Reference<XIndexAccess>& xItems) const
 
 void DPTestBase::verifyTableResults(const RuntimeData& data)
 {
-    fprintf(stdout, "--------------------------------------------------------------------\n");
-    fprintf(stdout, "now verifying calculation results....\n");
     const Reference<XSpreadsheet>& xSheet = data.OutputSheetRef;
     Reference<XDataPilotTablesSupplier> xDPTSupplier(xSheet, UNO_QUERY_THROW);
     Reference<XDataPilotTables> xDPTables(xDPTSupplier->getDataPilotTables(), UNO_QUERY_THROW);
@@ -532,7 +535,8 @@ void DPTestBase::verifyTableResults(const RuntimeData& data)
         }
         catch (const RuntimeException&)
         {
-            fprintf(stdout, "DPTestBase::verifyDPResults: runtime error occurred.\n");
+            fprintf(stdout, "DPTestBase::verifyTableResults: runtime error occurred.\n");
+            throw RuntimeException();
         }
     }
 }

@@ -54,7 +54,9 @@ public:
 
 private:
     ResultTester(); // disabled
+    void fail();
 
+private:
     ::com::sun::star::uno::Reference< ::com::sun::star::sheet::XDataPilotTable2 >     mxDPTab;
     RuntimeData                         maData;
     ::std::vector<DataFieldSetting>     maDataFieldSettings;

@@ -9,6 +9,7 @@
 #include <com/sun/star/container/XNameContainer.hpp>
 #include <com/sun/star/frame/XComponentLoader.hpp>
 #include <com/sun/star/frame/XDesktop.hpp>
+#include <com/sun/star/sheet/DataPilotFieldReferenceType.hpp>
 #include <com/sun/star/lang/XMultiComponentFactory.hpp>
 #include <com/sun/star/sheet/XSpreadsheet.hpp>
 #include <com/sun/star/sheet/XSpreadsheetDocument.hpp>
@@ -94,7 +95,7 @@ void dumpAllPropertyNames(const Reference<XPropertySet>& xPropSet)
     }
 }
 
-::std::string getFunctionName(GeneralFunction func)
+::std::string getFunctionName(const GeneralFunction func)
 {
     using ::std::string;
 
@@ -128,6 +129,47 @@ void dumpAllPropertyNames(const Reference<XPropertySet>& xPropSet)
             return string("VARP");
     }
     return string("");
+}
+
+::std::string getReferenceTypeName(const sal_Int32 refType)
+{
+    using ::std::string;
+
+    switch (refType)
+    {
+        case DataPilotFieldReferenceType::NONE:
+            return string("NONE");
+        case DataPilotFieldReferenceType::ITEM_DIFFERENCE:
+            return string("ITEM_DIFFERENCE");
+        case DataPilotFieldReferenceType::ITEM_PERCENTAGE:
+            return string("ITEM_PERCENTAGE");
+        case DataPilotFieldReferenceType::ITEM_PERCENTAGE_DIFFERENCE:
+            return string("ITEM_PERCENTAGE_DIFFERENCE");
+        case DataPilotFieldReferenceType::RUNNING_TOTAL:
+            return string("RUNNING_TOTAL");
+        case DataPilotFieldReferenceType::ROW_PERCENTAGE:
+            return string("ROW_PERCENTAGE");
+        case DataPilotFieldReferenceType::COLUMN_PERCENTAGE:
+            return string("COLUMN_PERCENTAGE");
+        case DataPilotFieldReferenceType::TOTAL_PERCENTAGE:
+            return string("TOTAL_PERCENTAGE");
+        case DataPilotFieldReferenceType::INDEX:
+            return string("INDEX");
+    }
+    return string("");
+}
+
+bool compare(double a, double b, double tol)
+{
+    if (a == 0.0)
+        return b == 0.0;
+
+    if (a == b)
+        return true;
+
+    double diff = a > b ? a - b : b - a;
+    double c = a > 0 ? a : -a;
+    return (diff < c*tol);
 }
 
 }

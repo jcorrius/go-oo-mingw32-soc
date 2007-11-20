@@ -162,7 +162,7 @@ void ResultTester::operator()(const CellAddress& cell)
         if (xCell->getType() != table::CellContentType_VALUE)
         {
             fprintf(stdout, "Error: cell not value (%ld, %ld)\n", cell.Row, cell.Column);
-            ++mnFailureCount;
+            fail();
             return;
         }
 
@@ -177,7 +177,7 @@ void ResultTester::operator()(const CellAddress& cell)
                     cell.Row, cell.Column,
                     val1, val2, getFunctionName(func).c_str());
             fflush(stdout);
-            ++mnFailureCount;
+            fail();
         }
     }
 }
@@ -198,6 +198,7 @@ void ResultTester::verifyRefValue(const CellAddress& cell,
     const sheet::GeneralFunction func = setting.Function;
     const DataPilotFieldReference& ref = *setting.FieldRef;
     sal_Int32 refFieldId = maData.CacheTable.getFieldIndex(ref.ReferenceField);
+    DataPilotFieldOrientation refOrient = maData.FieldOrientations.at(refFieldId);
 
     // Obtain the aggregate value with the original filter set.
     double valOrig = maData.CacheTable.aggregateValue(filters, nFieldId, func);
@@ -225,13 +226,6 @@ void ResultTester::verifyRefValue(const CellAddress& cell,
             filters2.push_back(*itr);
     }
 
-    // A row subtotal cell and the referenced itmes are both supposed to be 
-    // empty for the following reference types:
-    // 
-    //   * ITEM_DIFFERENCE
-    //   * ITEM_PERCENTAGE
-    //   * ITEM_PERCENTAGE_DIFFERENCE
-    // 
     // For the following ref type, only the row subtotal cells should be
     // empty.
     // 
@@ -247,25 +241,34 @@ void ResultTester::verifyRefValue(const CellAddress& cell,
 
     table::CellContentType cellType = xCell->getType();
     CellRangeAddress resRange = mxDPTab->getOutputRangeByType(DataPilotTableRegion::RESULT);
-    bool isRowSubTotal = (result.Flags & DataResultFlags::SUBTOTAL) && (resRange.EndColumn == cell.Column);
+    bool isRowSubtotal = (result.Flags & DataResultFlags::SUBTOTAL) && (resRange.EndColumn == cell.Column);
+    bool isColSubtotal = (result.Flags & DataResultFlags::SUBTOTAL) && (resRange.EndRow == cell.Row);
     double valRef = maData.CacheTable.aggregateValue(filters2, nFieldId, func);
     double valCell = xCell->getValue();
 
     switch (ref.ReferenceType)
     {
         case DataPilotFieldReferenceType::NONE:
-            // no reference mode.
+            /* no reference mode. */
+            fprintf(stdout, "Error: reference type is set to NONE\n");
+            fail();
             return;
+
         case DataPilotFieldReferenceType::ITEM_DIFFERENCE:
         {
-            // subtract the reference value and display the difference.
+            /* subtract the reference value and display the difference. */
 
-            if (isRefItem || isRowSubTotal)
-            {
-                // should be empty.
-                if (cellType == table::CellContentType_EMPTY)
-                    return;
-            }
+            if (isRefItem && cellType == table::CellContentType_EMPTY)
+                // the referenced item should be empty.
+                return;
+
+            if (refOrient == DataPilotFieldOrientation_COLUMN && isRowSubtotal && cellType == table::CellContentType_EMPTY)
+                // This is expected.
+                return;
+
+            if (refOrient == DataPilotFieldOrientation_ROW && isColSubtotal && cellType == table::CellContentType_EMPTY)
+                // This is also expected.
+                return;
 
             if (valCell != valOrig - valRef)
             {
@@ -273,32 +276,83 @@ void ResultTester::verifyRefValue(const CellAddress& cell,
                         cell.Row, cell.Column,
                         valCell, valOrig, valRef, valOrig - valRef,
                         getFunctionName(func).c_str());
-                ++mnFailureCount;
+                fail();
             }
             return;
         }
         case DataPilotFieldReferenceType::ITEM_PERCENTAGE:
         {
-            // each result is dividied by its reference value.
-            fprintf(stdout, "* TEST CODE NOT IMPLEMENTED (%ld, %ld)\n", cell.Row, cell.Column);
-            ++mnFailureCount;
+            /* each result is dividied by its reference value. */
+
+            if (refOrient == DataPilotFieldOrientation_COLUMN && isRowSubtotal && cellType == table::CellContentType_EMPTY)
+                // This is expected.
+                return;
+
+            if (refOrient == DataPilotFieldOrientation_ROW && isColSubtotal && cellType == table::CellContentType_EMPTY)
+                // This is also expected.
+                return;
+
+            if (valRef == 0.0)
+            {
+                // This is division by zero.  The cell result should also be an error.
+                if ((result.Flags & DataResultFlags::ERROR))
+                    // This is expected.
+                    fprintf(stdout, "Info: division by zero for referenced item (%s)\n",
+                            getReferenceTypeName(ref.ReferenceType).c_str());
+                else
+                    fail();
+
+                return;
+            }
+
+            double res = valOrig/valRef;
+            if (!compare(valCell, res))
+            {
+                fprintf(stdout, "Error: values differ (%ld, %ld) : real value = %.10f  check value %g/%g = %.10f (%s)\n",
+                        cell.Row, cell.Column,
+                        valCell, valOrig, valRef, res,
+                        getFunctionName(func).c_str());
+                fail();
+            }
+            return;
         }
-        break;
         case DataPilotFieldReferenceType::ITEM_PERCENTAGE_DIFFERENCE:
         {
-            // from each result, its reference value is subtracted, and the difference
-            // is further divided by the reference value.
-            fprintf(stdout, "* TEST CODE NOT IMPLEMENTED (%ld, %ld)\n", cell.Row, cell.Column);
-            ++mnFailureCount;
+            /* from each result, its reference value is subtracted, and the
+             * difference is further divided by the reference value. 
+             */
+
+            if (isRefItem && cellType == table::CellContentType_EMPTY)
+                // the referenced item should be empty.
+                return;
+
+            if (refOrient == DataPilotFieldOrientation_COLUMN && isRowSubtotal && cellType == table::CellContentType_EMPTY)
+                // This is expected.
+                return;
+
+            if (refOrient == DataPilotFieldOrientation_ROW && isColSubtotal && cellType == table::CellContentType_EMPTY)
+                // This is also expected.
+                return;
+
+            double res = (valOrig-valRef)/valRef;
+            if (!compare(valCell, res))
+            {
+                fprintf(stdout, "Error: values differ (%ld, %ld) : real value = %.10f  check value (%g-%g)/%g = %.10f (delta = %.10f) (%s)\n",
+                        cell.Row, cell.Column,
+                        valCell, valOrig, valRef, valRef, res, valCell-res,
+                        getFunctionName(func).c_str());
+                fail();
+            }
         }
         break;
         case DataPilotFieldReferenceType::RUNNING_TOTAL:
         {
-            // Each result is added to the sum of the results for preceding items 
-            // in the base field, in the base field's sort order, and the total 
-            // sum is shown.
+            /* Each result is added to the sum of the results for preceding
+             * items in the base field, in the base field's sort order, and 
+             * the total sum is shown.
+             */
             fprintf(stdout, "* TEST CODE NOT IMPLEMENTED (%ld, %ld)\n", cell.Row, cell.Column);
-            ++mnFailureCount;
+            fail();
         }
         break;
         case DataPilotFieldReferenceType::ROW_PERCENTAGE:
@@ -306,7 +360,7 @@ void ResultTester::verifyRefValue(const CellAddress& cell,
             // Each result is divided by the total result for its row in 
             // the DataPilot table. 
             fprintf(stdout, "* TEST CODE NOT IMPLEMENTED (%ld, %ld)\n", cell.Row, cell.Column);
-            ++mnFailureCount;
+            fail();
         }
         break;
         case DataPilotFieldReferenceType::COLUMN_PERCENTAGE:
@@ -314,7 +368,7 @@ void ResultTester::verifyRefValue(const CellAddress& cell,
             // Same as DataPilotFieldReferenceType::ROW_PERCENTAGE , but the total 
             // for the result's column is used. 
             fprintf(stdout, "* TEST CODE NOT IMPLEMENTED (%ld, %ld)\n", cell.Row, cell.Column);
-            ++mnFailureCount;
+            fail();
         }
         break;
         case DataPilotFieldReferenceType::TOTAL_PERCENTAGE:
@@ -322,7 +376,7 @@ void ResultTester::verifyRefValue(const CellAddress& cell,
             // Same as DataPilotFieldReferenceType::ROW_PERCENTAGE , but the grand 
             // total for the result's data field is used. 
             fprintf(stdout, "* TEST CODE NOT IMPLEMENTED (%ld, %ld)\n", cell.Row, cell.Column);
-            ++mnFailureCount;
+            fail();
         }
         break;
         case DataPilotFieldReferenceType::INDEX:
@@ -330,14 +384,20 @@ void ResultTester::verifyRefValue(const CellAddress& cell,
             // The row and column totals and the grand total, following the same 
             // rules as above, are used to calculate the following expression.
             fprintf(stdout, "* TEST CODE NOT IMPLEMENTED (%ld, %ld)\n", cell.Row, cell.Column);
-            ++mnFailureCount;
+            fail();
         }
         break;
         default:
             fprintf(stdout, "* UNKNOWN REFERENCE TYPE (%ld, %ld)\n",
                     cell.Row, cell.Column);
-            ++mnFailureCount;
+            fail();
     }
+}
+
+void ResultTester::fail()
+{
+    throw RuntimeException();
+    ++mnFailureCount;
 }
 
 }
