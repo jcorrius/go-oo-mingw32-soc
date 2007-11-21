@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <vector>
 #include <memory>
+#include <cstring>
 
 #include "osl/process.h"
 #include "osl/file.hxx"
