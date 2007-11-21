@@ -610,10 +610,7 @@ void BaseDialogImpl::execute()
 void BaseDialogImpl::setRefBoundingBox(const awt::Rectangle* rect)
 {
     if (!rect)
-    {
-        fprintf(stdout, "BaseDialogImpl::setRefBoundingBox: rectangle is null!\n");fflush(stdout);
         return;
-    }
 
     if (!mpRefBoundingBox.get())
         mpRefBoundingBox.reset(new awt::Rectangle);

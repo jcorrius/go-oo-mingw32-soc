@@ -957,7 +957,7 @@ Matrix Matrix::clone() const
 }
 #endif
 
-bnu::matrix< std::string > Matrix::getDisplayElements( 
+Matrix::StringMatrixType Matrix::getDisplayElements( 
         int prec, size_t nColSpace, bool bFormula) const
 {
     using std::string;
@@ -969,7 +969,7 @@ bnu::matrix< std::string > Matrix::getDisplayElements(
         aColLen.push_back( 0 );
     
     // Get string matrix.
-    bnu::matrix<std::string> mxElements( m_aArray.size1(), m_aArray.size2() );
+    StringMatrixType mxElements( m_aArray.size1(), m_aArray.size2() );
     for ( unsigned int i = 0; i < m_aArray.size1(); ++i )
         for ( unsigned int j = 0; j < m_aArray.size2(); ++j )
         {

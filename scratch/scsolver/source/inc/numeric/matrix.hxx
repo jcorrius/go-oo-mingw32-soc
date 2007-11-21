@@ -29,15 +29,8 @@
 #ifndef _SCSOLVER_NUMERIC_MATRIX_HXX_
 #define _SCSOLVER_NUMERIC_MATRIX_HXX_
 
-#if 0
-// workaround for sun compiler.  unpack the separate scsolver_boost.tar.bz2
-// package into source/inc/_boost.
-#include "_boost/numeric/ublas/matrix.hpp"
-#include "_boost/numeric/ublas/matrix_proxy.hpp"
-#else
 #include <boost/numeric/ublas/matrix.hpp>
 #include <boost/numeric/ublas/matrix_proxy.hpp>
-#endif
 
 #include <vector>
 #include <memory>
@@ -87,6 +80,10 @@ public:
 class Matrix
 {
 public:
+    typedef ::boost::numeric::ublas::matrix<double, ::boost::numeric::ublas::row_major, ::std::vector<double> > 
+        NumericMatrixType;
+    typedef ::boost::numeric::ublas::matrix< ::std::string > StringMatrixType;
+
     Matrix();
     Matrix(size_t row, size_t col, bool identity_matrix = false);
     Matrix( const Matrix& );
@@ -103,7 +100,8 @@ public:
     const double getValue(size_t row, size_t col) const;
     double& getValue(size_t row, size_t col);
     void setValue(size_t row, size_t col, double val);
-    ::boost::numeric::ublas::matrix< ::std::string > getDisplayElements(int prec, size_t colspace, bool formula) const;    
+
+    StringMatrixType getDisplayElements(int prec, size_t colspace, bool formula) const;    
 
     /**
      * Print the content of a matrix in to standard output. 
@@ -177,7 +175,7 @@ private:
     void throwIfEmpty() const;
 
     bool m_bResizable;
-    ::boost::numeric::ublas::matrix<double, ::boost::numeric::ublas::row_major, std::vector<double> > m_aArray;
+    NumericMatrixType m_aArray;
 };
 
 const Matrix operator+( const Matrix&, double );
