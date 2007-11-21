@@ -172,7 +172,7 @@ const lang::Locale StringResMgr::getSystemLocale() const
         }
     }
 
-#if DEBUG_SCSOLVER_RESMGR || true
+#if DEBUG_SCSOLVER_RESMGR || 1
     fprintf(stdout, "StringResMgr::getSystemLocale: language = '%s'  country = '%s'\n",
             OUStringToOString(locale.Language, RTL_TEXTENCODING_UTF8).getStr(),
             OUStringToOString(locale.Country, RTL_TEXTENCODING_UTF8).getStr());fflush(stdout);
