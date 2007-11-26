@@ -38,8 +38,6 @@
 
 #include <stdio.h>
 #include <cmath>
-#include <vector>
-#include <set>
 #include <boost/shared_ptr.hpp>
 #include <rtl/ustrbuf.hxx>
 
@@ -89,33 +87,63 @@ void ResultTester::init()
 {
     Reference<XDataPilotDescriptor> xDPDesc(mxDPTab, UNO_QUERY_THROW);
 
-    // Go though each data field
-    Reference<container::XIndexAccess> xDataFields = xDPDesc->getDataFields();
-    sal_Int32 fieldCount = xDataFields->getCount();
-    maDataFieldSettings.reserve(fieldCount);
-    for (sal_Int32 i = 0; i < fieldCount; ++i)
+    // Go though each data field and store a list of data field data.
     {
-        Reference<XDataPilotField> xField(xDataFields->getByIndex(i), UNO_QUERY_THROW);
-        DataFieldSetting setting;
-
-        // Get the field ID of a given data field.
-        Reference<container::XNamed> xNamed(xField, UNO_QUERY_THROW);
-        OUString name = xNamed->getName();
-        setting.FieldId = maData.CacheTable.getFieldIndex(name);
-
-        // Get the function used for aggregation.
-        Reference<XPropertySet> xPS(xField, UNO_QUERY_THROW);
-        getPropertyValue(xPS, ascii("Function"), setting.Function);
-
-        // Get the referenced item information (if any).
-        bool hasReference = false;
-        getPropertyValue(xPS, ascii("HasReference"), hasReference);
-        if (hasReference)
+        Reference<container::XIndexAccess> xDataFields = xDPDesc->getDataFields();
+        sal_Int32 fieldCount = xDataFields->getCount();
+        maDataFieldSettings.reserve(fieldCount);
+        for (sal_Int32 i = 0; i < fieldCount; ++i)
         {
-            setting.FieldRef.reset(new DataPilotFieldReference);
-            getPropertyValue(xPS, ascii("Reference"), *setting.FieldRef);
+            Reference<XDataPilotField> xField(xDataFields->getByIndex(i), UNO_QUERY_THROW);
+            DataFieldSetting setting;
+    
+            // Get the field ID of a given data field.
+            Reference<container::XNamed> xNamed(xField, UNO_QUERY_THROW);
+            OUString name = xNamed->getName();
+            setting.FieldId = maData.CacheTable.getFieldIndex(name);
+    
+            // Get the function used for aggregation.
+            Reference<XPropertySet> xPS(xField, UNO_QUERY_THROW);
+            getPropertyValue(xPS, ascii("Function"), setting.Function);
+    
+            // Get the referenced item information (if any).
+            bool hasReference = false;
+            getPropertyValue(xPS, ascii("HasReference"), hasReference);
+            if (hasReference)
+            {
+                setting.FieldRef.reset(new DataPilotFieldReference);
+                getPropertyValue(xPS, ascii("Reference"), *setting.FieldRef);
+            }
+            maDataFieldSettings.push_back(setting);
         }
-        maDataFieldSettings.push_back(setting);
+    }
+
+    // Store row field IDs.
+    {
+        Reference<container::XIndexAccess> xFields = xDPDesc->getRowFields();
+        sal_Int32 fieldCount = xFields->getCount();
+        for (sal_Int32 i = 0; i < fieldCount; ++i)
+        {
+            Reference<container::XNamed> xField(xFields->getByIndex(i), UNO_QUERY_THROW);
+            sal_Int32 nFldId = maData.CacheTable.getFieldIndex(xField->getName());
+            if (nFldId < 0)
+                fail("field ID is negative");
+            maRowFieldIds.insert(nFldId);
+        }
+    }
+
+    // Store column field IDs.
+    {
+        Reference<container::XIndexAccess> xFields = xDPDesc->getColumnFields();
+        sal_Int32 fieldCount = xFields->getCount();
+        for (sal_Int32 i = 0; i < fieldCount; ++i)
+        {
+            Reference<container::XNamed> xField(xFields->getByIndex(i), UNO_QUERY_THROW);
+            sal_Int32 nFldId = maData.CacheTable.getFieldIndex(xField->getName());
+            if (nFldId < 0)
+                fail("field ID is negative");
+            maColFieldIds.insert(nFldId);
+        }
     }
 }
 
@@ -382,38 +410,8 @@ void ResultTester::verifyPercentValue(const ::com::sun::star::table::CellAddress
             // Each result is divided by the total result for its row in 
             // the DataPilot table. 
 
-            // First, get the IDs of all row/column fields.
-            Reference<XDataPilotDescriptor> xDPDesc(mxDPTab, UNO_QUERY_THROW);
-            Reference<container::XIndexAccess> xFields;
-            if (ref.ReferenceType == DataPilotFieldReferenceType::ROW_PERCENTAGE)
-                xFields = xDPDesc->getRowFields();
-            else if (ref.ReferenceType == DataPilotFieldReferenceType::COLUMN_PERCENTAGE)
-                xFields = xDPDesc->getColumnFields();
-            else
-                fail("reference mode is neither %% row nor %% column");
-
-            sal_Int32 fieldCount = xFields->getCount();
-            set<sal_Int32> fieldIds;
-            for (sal_Int32 i = 0; i < fieldCount; ++i)
-            {
-                Reference<container::XNamed> xField(xFields->getByIndex(i), UNO_QUERY_THROW);
-                sal_Int32 nFldId = maData.CacheTable.getFieldIndex(xField->getName());
-                if (nFldId < 0)
-                    fail("field ID is negative");
-                fieldIds.insert(nFldId);
-            }
-
-            // Now, calculate the row/column total.
-            vector<DataTable::Filter> filters2;
-            vector<DataTable::Filter>::const_iterator itr = filters.begin(), itrEnd = filters.end();
-            for (; itr != itrEnd; ++itr)
-            {
-                if (fieldIds.find(itr->FieldIndex) == fieldIds.end())
-                    // This is not a row/column field.  Skip it.
-                    continue;
-                filters2.push_back(*itr);
-            }
-            double valTotal = maData.CacheTable.aggregateValue(filters2, setting.FieldId, setting.Function);
+            double valTotal = getColRowTotal(setting, filters, 
+                                             ref.ReferenceType == DataPilotFieldReferenceType::ROW_PERCENTAGE);
 
             if (valTotal == 0.0)
             {
@@ -443,16 +441,48 @@ void ResultTester::verifyPercentValue(const ::com::sun::star::table::CellAddress
         {
             // Same as DataPilotFieldReferenceType::ROW_PERCENTAGE , but the grand 
             // total for the result's data field is used. 
-            fprintf(stdout, "* TEST CODE NOT IMPLEMENTED (%ld, %ld)\n", cell.Row, cell.Column);
-            fail();
+            double valTotal = getGrandTotal(setting);
+            double res = valOrig/valTotal;
+            if (!compare(res, valCell))
+            {
+                fprintf(stdout, "Error: values differ (%ld, %ld) : real value = %.10f  check value %g/%g = %.10f (delta = %.10f) (%s)\n",
+                        cell.Row, cell.Column,
+                        valCell, valOrig, valTotal, res, valCell-res,
+                        getFunctionName(setting.Function).c_str());
+                fail();
+            }
         }
         break;
         case DataPilotFieldReferenceType::INDEX:
         {
             // The row and column totals and the grand total, following the same 
             // rules as above, are used to calculate the following expression.
-            fprintf(stdout, "* TEST CODE NOT IMPLEMENTED (%ld, %ld)\n", cell.Row, cell.Column);
-            fail();
+            //   ( original result * grand total ) / ( row total * column total )
+            // Division by zero results in an error. Otherwise, empty results remain empty.
+            double valTotal = getGrandTotal(setting);
+            double rowTotal = getColRowTotal(setting, filters, true);
+            double colTotal = getColRowTotal(setting, filters, false);
+            if (rowTotal == 0.0|| colTotal == 0.0)
+            {
+                // This is division by zero.  The cell result should also be an error.
+                if ((result.Flags & DataResultFlags::ERROR))
+                    // This is expected.
+                    fprintf(stdout, "Info: division by zero for referenced item (%s)\n",
+                            getReferenceTypeName(ref.ReferenceType).c_str());
+                else
+                    fail("row total or column total is zero but the displayed cell value is not an error");
+
+                return;
+            }
+            double res = (valOrig*valTotal)/(rowTotal*colTotal);
+            if (!compare(valCell, res))
+            {
+                fprintf(stdout, "Error: values differ (%ld, %ld) : real value = %.10f  check value (%g*%g)/(%g*%g) = %.10f (delta = %.10f) (%s)\n",
+                        cell.Row, cell.Column,
+                        valCell, valOrig, valTotal, rowTotal, colTotal, res, valCell-res,
+                        getFunctionName(setting.Function).c_str());
+                fail();
+            }
         }
         break;
         default:
@@ -460,6 +490,31 @@ void ResultTester::verifyPercentValue(const ::com::sun::star::table::CellAddress
                     cell.Row, cell.Column);
             fail();
     }
+}
+
+double ResultTester::getGrandTotal(const DataFieldSetting& setting)
+{
+    return maData.CacheTable.aggregateValue(vector<DataTable::Filter>(), 
+                                            setting.FieldId,
+                                            setting.Function);
+}
+
+double ResultTester::getColRowTotal(const DataFieldSetting& setting, const vector<DataTable::Filter>& filters, bool isRow)
+{
+    Reference<XDataPilotDescriptor> xDPDesc(mxDPTab, UNO_QUERY_THROW);
+
+    // Now, calculate the column/row total.
+    vector<DataTable::Filter> filters2;
+    vector<DataTable::Filter>::const_iterator itr = filters.begin(), itrEnd = filters.end();
+    for (; itr != itrEnd; ++itr)
+    {
+        if ( (isRow && maRowFieldIds.find(itr->FieldIndex) == maRowFieldIds.end()) ||
+             (!isRow && maColFieldIds.find(itr->FieldIndex) == maColFieldIds.end()) )
+            // This is not a column/row field.  Skip it.
+            continue;
+        filters2.push_back(*itr);
+    }
+    return maData.CacheTable.aggregateValue(filters2, setting.FieldId, setting.Function);
 }
 
 void ResultTester::fail(const char* reason)

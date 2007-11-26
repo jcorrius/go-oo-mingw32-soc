@@ -11,6 +11,7 @@
 #include <com/sun/star/sheet/XDataPilotTable2.hpp>
 
 #include <vector>
+#include <set>
 
 namespace com { namespace sun { namespace star { 
     namespace sheet {
@@ -75,12 +76,18 @@ public:
 
 private:
     ResultTester(); // disabled
+
+    double getGrandTotal(const DataFieldSetting& setting);
+    double getColRowTotal(const DataFieldSetting& setting, const ::std::vector<DataTable::Filter>& filters, bool isRow);
+
     void fail(const char* reason = "\0");
 
 private:
     ::com::sun::star::uno::Reference< ::com::sun::star::sheet::XDataPilotTable2 >     mxDPTab;
     RuntimeData                         maData;
     ::std::vector<DataFieldSetting>     maDataFieldSettings;
+    ::std::set<sal_Int32>               maRowFieldIds;
+    ::std::set<sal_Int32>               maColFieldIds;
     sal_Int16                           mnFailureCount;
 };
 
