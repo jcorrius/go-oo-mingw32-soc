@@ -29,6 +29,7 @@
 #define _SCSOLVER_NUMERIC_POLYEQNSOLVER_HXX
 
 #include <list>
+#include <exception>
 
 namespace scsolver { namespace numeric {
 
