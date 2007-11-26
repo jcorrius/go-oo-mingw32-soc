@@ -47,11 +47,27 @@ public:
 
     sal_Int16 getFailureCount() const;
 
+    /** 
+     * Verify a result value that is referenced from another result value.
+     * 
+     * @param cell
+     * @param setting
+     * @param filters
+     * @param result
+     */
     void verifyRefValue(const ::com::sun::star::table::CellAddress& cell, 
                         const DataFieldSetting& setting, 
                         const ::std::vector<DataTable::Filter>& filters,
                         const ::com::sun::star::sheet::DataResult& result);
 
+    /** 
+     * Verify a result value that is a percentage of a total value.
+     * 
+     * @param cell
+     * @param setting
+     * @param filters
+     * @param result
+     */
     void verifyPercentValue(const ::com::sun::star::table::CellAddress& cell, 
                             const DataFieldSetting& setting,
                             const ::std::vector<DataTable::Filter>& filters,
@@ -59,7 +75,7 @@ public:
 
 private:
     ResultTester(); // disabled
-    void fail();
+    void fail(const char* reason = "\0");
 
 private:
     ::com::sun::star::uno::Reference< ::com::sun::star::sheet::XDataPilotTable2 >     mxDPTab;

@@ -39,6 +39,7 @@
 #include <stdio.h>
 #include <cmath>
 #include <vector>
+#include <set>
 #include <boost/shared_ptr.hpp>
 #include <rtl/ustrbuf.hxx>
 
@@ -57,6 +58,7 @@ using ::com::sun::star::table::CellContentType;
 using ::rtl::OUString;
 using ::rtl::OUStringBuffer;
 using ::std::vector;
+using ::std::set;
 using ::boost::shared_ptr;
 
 namespace dptest {
@@ -360,46 +362,17 @@ void ResultTester::verifyPercentValue(const ::com::sun::star::table::CellAddress
                                       const vector<DataTable::Filter>& filters,
                                       const DataResult& result)
 {
-    const sal_Int32 nFieldId = setting.FieldId;
-    const sheet::GeneralFunction func = setting.Function;
     const DataPilotFieldReference& ref = *setting.FieldRef;
     sal_Int32 refFieldId = maData.CacheTable.getFieldIndex(ref.ReferenceField);
     DataPilotFieldOrientation refOrient = maData.FieldOrientations.at(refFieldId);
 
-    // Obtain the aggregate value with the original filter set.
-    double valOrig = maData.CacheTable.aggregateValue(filters, nFieldId, func);
-
-    // Go through the filters and find the field that matches the referenced field, then
-    // replace the match value with the referenced item name.
-    vector<DataTable::Filter> filters2;
-    vector<DataTable::Filter>::const_iterator itr = filters.begin(), itrEnd = filters.end();
-    bool isRefItem = false;
-    for (; itr != itrEnd; ++itr)
-    {
-        if (itr->FieldIndex == refFieldId)
-        {
-            // This is the referenced field.  Replace the match value with
-            // the referenced item name.
-            DataTable::Filter filter(*itr);
-            sal_Int32 newStrId = DataTable::getStringId(ref.ReferenceItemName); 
-            if (filter.MatchStrId == newStrId)
-                isRefItem = true;
-            else
-                filter.MatchStrId = newStrId;
-            filters2.push_back(filter);
-        }
-        else
-            filters2.push_back(*itr);
-    }
-
+    // Get the value displayed in the cell.
     Reference<XCell> xCell = maData.OutputSheetRef->getCellByPosition(cell.Column, cell.Row);
     table::CellContentType cellType = xCell->getType();
     double valCell = xCell->getValue();
 
-    CellRangeAddress resRange = mxDPTab->getOutputRangeByType(DataPilotTableRegion::RESULT);
-    bool isRowSubtotal = (result.Flags & DataResultFlags::SUBTOTAL) && (resRange.EndColumn == cell.Column);
-    bool isColSubtotal = (result.Flags & DataResultFlags::SUBTOTAL) && (resRange.EndRow == cell.Row);
-    double valRef = maData.CacheTable.aggregateValue(filters2, nFieldId, func);
+    // Obtain the aggregate value with the original filter set.
+    double valOrig = maData.CacheTable.aggregateValue(filters, setting.FieldId, setting.Function);
 
     switch (ref.ReferenceType)
     {
@@ -407,8 +380,54 @@ void ResultTester::verifyPercentValue(const ::com::sun::star::table::CellAddress
         {
             // Each result is divided by the total result for its row in 
             // the DataPilot table. 
-            fprintf(stdout, "* TEST CODE NOT IMPLEMENTED (%ld, %ld)\n", cell.Row, cell.Column);
-            fail();
+
+            // First, get the IDs of all row fields.
+            Reference<XDataPilotDescriptor> xDPDesc(mxDPTab, UNO_QUERY_THROW);
+            Reference<container::XIndexAccess> xRowFields = xDPDesc->getRowFields();
+            sal_Int32 fieldCount = xRowFields->getCount();
+            set<sal_Int32> rowFieldIds;
+            for (sal_Int32 i = 0; i < fieldCount; ++i)
+            {
+                Reference<container::XNamed> xField(xRowFields->getByIndex(i), UNO_QUERY_THROW);
+                sal_Int32 nFldId = maData.CacheTable.getFieldIndex(xField->getName());
+                if (nFldId < 0)
+                    fail("field ID is negative");
+                rowFieldIds.insert(nFldId);
+            }
+
+            // Now, calculate the row total.
+            vector<DataTable::Filter> filters2;
+            vector<DataTable::Filter>::const_iterator itr = filters.begin(), itrEnd = filters.end();
+            for (; itr != itrEnd; ++itr)
+            {
+                if (rowFieldIds.find(itr->FieldIndex) == rowFieldIds.end())
+                    // This is not a row field.  Skip it.
+                    continue;
+                filters2.push_back(*itr);
+            }
+            double valRowTotal = maData.CacheTable.aggregateValue(filters2, setting.FieldId, setting.Function);
+            if (valRowTotal == 0.0)
+            {
+                // This is division by zero.  The cell result should also be an error.
+                if ((result.Flags & DataResultFlags::ERROR))
+                    // This is expected.
+                    fprintf(stdout, "Info: division by zero for referenced item (%s)\n",
+                            getReferenceTypeName(ref.ReferenceType).c_str());
+                else
+                    fail("row total is zero but the displayed cell value is not an error");
+
+                return;
+            }
+
+            double res = valOrig/valRowTotal;
+            if (!compare(res, valCell))
+            {
+                fprintf(stdout, "Error: values differ (%ld, %ld) : real value = %.10f  check value %g/%g = %.10f (delta = %.10f) (%s)\n",
+                        cell.Row, cell.Column,
+                        valCell, valOrig, valRowTotal, res, valCell-res,
+                        getFunctionName(setting.Function).c_str());
+                fail();
+            }
         }
         break;
         case DataPilotFieldReferenceType::COLUMN_PERCENTAGE:
@@ -442,10 +461,13 @@ void ResultTester::verifyPercentValue(const ::com::sun::star::table::CellAddress
     }
 }
 
-void ResultTester::fail()
+void ResultTester::fail(const char* reason)
 {
-    throw RuntimeException();
+    if (reason)
+        fprintf(stdout, "ERROR: %s\n", reason);
     ++mnFailureCount;
+
+    throw RuntimeException();
 }
 
 }
