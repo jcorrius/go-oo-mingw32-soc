@@ -170,8 +170,8 @@ void DPTestBase::run()
 //      DataPilotFieldReferenceType::ITEM_PERCENTAGE_DIFFERENCE,
 //      DataPilotFieldReferenceType::RUNNING_TOTAL,
         DataPilotFieldReferenceType::ROW_PERCENTAGE,
-//      DataPilotFieldReferenceType::COLUMN_PERCENTAGE,
-//      DataPilotFieldReferenceType::TOTAL_PERCENTAGE,
+        DataPilotFieldReferenceType::COLUMN_PERCENTAGE,
+        DataPilotFieldReferenceType::TOTAL_PERCENTAGE,
 //      DataPilotFieldReferenceType::INDEX
     };
     static const sal_Int32 refTypeCount = sizeof(refTypeList) / sizeof(refTypeList[0]);

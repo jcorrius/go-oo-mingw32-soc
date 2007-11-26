@@ -377,36 +377,45 @@ void ResultTester::verifyPercentValue(const ::com::sun::star::table::CellAddress
     switch (ref.ReferenceType)
     {
         case DataPilotFieldReferenceType::ROW_PERCENTAGE:
+        case DataPilotFieldReferenceType::COLUMN_PERCENTAGE:
         {
             // Each result is divided by the total result for its row in 
             // the DataPilot table. 
 
-            // First, get the IDs of all row fields.
+            // First, get the IDs of all row/column fields.
             Reference<XDataPilotDescriptor> xDPDesc(mxDPTab, UNO_QUERY_THROW);
-            Reference<container::XIndexAccess> xRowFields = xDPDesc->getRowFields();
-            sal_Int32 fieldCount = xRowFields->getCount();
-            set<sal_Int32> rowFieldIds;
+            Reference<container::XIndexAccess> xFields;
+            if (ref.ReferenceType == DataPilotFieldReferenceType::ROW_PERCENTAGE)
+                xFields = xDPDesc->getRowFields();
+            else if (ref.ReferenceType == DataPilotFieldReferenceType::COLUMN_PERCENTAGE)
+                xFields = xDPDesc->getColumnFields();
+            else
+                fail("reference mode is neither %% row nor %% column");
+
+            sal_Int32 fieldCount = xFields->getCount();
+            set<sal_Int32> fieldIds;
             for (sal_Int32 i = 0; i < fieldCount; ++i)
             {
-                Reference<container::XNamed> xField(xRowFields->getByIndex(i), UNO_QUERY_THROW);
+                Reference<container::XNamed> xField(xFields->getByIndex(i), UNO_QUERY_THROW);
                 sal_Int32 nFldId = maData.CacheTable.getFieldIndex(xField->getName());
                 if (nFldId < 0)
                     fail("field ID is negative");
-                rowFieldIds.insert(nFldId);
+                fieldIds.insert(nFldId);
             }
 
-            // Now, calculate the row total.
+            // Now, calculate the row/column total.
             vector<DataTable::Filter> filters2;
             vector<DataTable::Filter>::const_iterator itr = filters.begin(), itrEnd = filters.end();
             for (; itr != itrEnd; ++itr)
             {
-                if (rowFieldIds.find(itr->FieldIndex) == rowFieldIds.end())
-                    // This is not a row field.  Skip it.
+                if (fieldIds.find(itr->FieldIndex) == fieldIds.end())
+                    // This is not a row/column field.  Skip it.
                     continue;
                 filters2.push_back(*itr);
             }
-            double valRowTotal = maData.CacheTable.aggregateValue(filters2, setting.FieldId, setting.Function);
-            if (valRowTotal == 0.0)
+            double valTotal = maData.CacheTable.aggregateValue(filters2, setting.FieldId, setting.Function);
+
+            if (valTotal == 0.0)
             {
                 // This is division by zero.  The cell result should also be an error.
                 if ((result.Flags & DataResultFlags::ERROR))
@@ -419,23 +428,15 @@ void ResultTester::verifyPercentValue(const ::com::sun::star::table::CellAddress
                 return;
             }
 
-            double res = valOrig/valRowTotal;
+            double res = valOrig/valTotal;
             if (!compare(res, valCell))
             {
                 fprintf(stdout, "Error: values differ (%ld, %ld) : real value = %.10f  check value %g/%g = %.10f (delta = %.10f) (%s)\n",
                         cell.Row, cell.Column,
-                        valCell, valOrig, valRowTotal, res, valCell-res,
+                        valCell, valOrig, valTotal, res, valCell-res,
                         getFunctionName(setting.Function).c_str());
                 fail();
             }
-        }
-        break;
-        case DataPilotFieldReferenceType::COLUMN_PERCENTAGE:
-        {
-            // Same as DataPilotFieldReferenceType::ROW_PERCENTAGE , but the total 
-            // for the result's column is used. 
-            fprintf(stdout, "* TEST CODE NOT IMPLEMENTED (%ld, %ld)\n", cell.Row, cell.Column);
-            fail();
         }
         break;
         case DataPilotFieldReferenceType::TOTAL_PERCENTAGE:
