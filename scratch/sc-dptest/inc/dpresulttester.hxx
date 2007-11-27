@@ -49,7 +49,12 @@ public:
     sal_Int16 getFailureCount() const;
 
     /** 
-     * Verify a result value that is referenced from another result value.
+     * Verify a result value that is referenced from another result value. 
+     * This method verifies the following display modes: 
+     *  
+     *   * item difference 
+     *   * item percentage 
+     *   * item percentage difference 
      * 
      * @param cell
      * @param setting
@@ -62,7 +67,12 @@ public:
                         const ::com::sun::star::sheet::DataResult& result);
 
     /** 
-     * Verify a result value that is a percentage of a total value.
+     * Verify a result value that is a percentage of a total value. 
+     *  
+     *   * percent row total
+     *   * percent column total
+     *   * percent grand total
+     *   * index
      * 
      * @param cell
      * @param setting
@@ -70,6 +80,11 @@ public:
      * @param result
      */
     void verifyPercentValue(const ::com::sun::star::table::CellAddress& cell, 
+                            const DataFieldSetting& setting,
+                            const ::std::vector<DataTable::Filter>& filters,
+                            const ::com::sun::star::sheet::DataResult& result);
+
+    void verifyRunningTotal(const ::com::sun::star::table::CellAddress& cell, 
                             const DataFieldSetting& setting,
                             const ::std::vector<DataTable::Filter>& filters,
                             const ::com::sun::star::sheet::DataResult& result);
