@@ -22,15 +22,15 @@ int main()
     using namespace dptest;
 
     TestParam param;
-    param.FieldCount = 5;
+    param.FieldCount = 7;
     param.RowCount   = 6000;
-    param.DataCount  = 1;
+    param.DataCount  = 3;
     param.StartCol   = 0;
     param.StartRow   = 0;
     param.FieldItemCountLower = 2;
-    param.FieldItemCountUpper = 4;
+    param.FieldItemCountUpper = 3;
 
-#if 1
+#if 0
     param.Fields.push_back(FieldParam());
     param.Fields.back().Name = ascii("Company");
     param.Fields.back().ItemNames.push_back(ascii("Novell"));

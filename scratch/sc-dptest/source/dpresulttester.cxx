@@ -61,6 +61,70 @@ using ::boost::shared_ptr;
 
 namespace dptest {
 
+// ============================================================================
+
+class RunningTotalCalculator
+{
+public:
+    RunningTotalCalculator(const DataTable& dataTable, const vector<DataTable::Filter>& filters,
+                           sal_Int32 dataFieldId, GeneralFunction func, sal_Int32 refFieldPos) :
+        maCacheTable(dataTable), maFilters(filters), mnDataFieldId(dataFieldId),
+        meFunc(func), mnRefFieldPos(refFieldPos), mfRunningTotal(0.0)
+    {
+    }
+
+    /** 
+     * 
+     * 
+     * @param itemNameId string ID of current item name for the reference 
+     *                   field
+     */
+    void operator() (const sal_Int32 itemNameId)
+    {
+        vector<DataTable::Filter> filters = maFilters;
+        filters.at(mnRefFieldPos).MatchStrId = itemNameId;
+        mfRunningTotal += maCacheTable.aggregateValue(filters, mnDataFieldId, meFunc);
+    }
+
+    double getRunningTotal() const
+    {
+        return mfRunningTotal;
+    }
+
+private:
+    RunningTotalCalculator(); // disabled
+
+private:
+    const DataTable& maCacheTable;
+    const vector<DataTable::Filter>& maFilters;
+    const sal_Int32 mnDataFieldId;
+    const GeneralFunction meFunc;
+    const sal_Int32 mnRefFieldPos;
+
+    double mfRunningTotal;
+};
+
+// ============================================================================
+
+class FilterFinder
+{
+public:
+    FilterFinder(sal_Int32 fieldId) :
+        mnFieldIndex(fieldId)
+    {
+    }
+
+    bool operator() (const DataTable::Filter& filter)
+    {
+        return filter.FieldIndex == mnFieldIndex;
+    }
+
+private:
+    sal_Int32 mnFieldIndex;
+};
+
+// ============================================================================
+
 ResultTester::DataFieldSetting::DataFieldSetting() : 
     FieldRef(static_cast<DataPilotFieldReference*>(NULL))
 {
@@ -68,16 +132,16 @@ ResultTester::DataFieldSetting::DataFieldSetting() :
 
 // ============================================================================
 
-
 ResultTester::ResultTester(const RuntimeData& data, const Reference<XDataPilotTable2>& xDPTab) :
-    maData(data), mxDPTab(xDPTab), mnFailureCount(0)
+    mxDPTab(xDPTab), maData(data), mnFailureCount(0)
 {
     init();
 }
 
 ResultTester::ResultTester(const ResultTester& other) :
-    maData(other.maData), 
     mxDPTab(other.mxDPTab), 
+    maData(other.maData), 
+    maFieldItemMap(other.maFieldItemMap),
     maDataFieldSettings(other.maDataFieldSettings),
     maRowFieldIds(other.maRowFieldIds),
     maColFieldIds(other.maColFieldIds),
@@ -120,57 +184,9 @@ void ResultTester::init()
         }
     }
 
-    // Store row field IDs.
-    {
-        Reference<container::XIndexAccess> xFields = xDPDesc->getRowFields();
-        sal_Int32 fieldCount = xFields->getCount();
-        for (sal_Int32 i = 0; i < fieldCount; ++i)
-        {
-            Reference<container::XNamed> xField(xFields->getByIndex(i), UNO_QUERY_THROW);
-            fprintf(stdout, "ResultTester::init: field = '%s'\n",
-                    OUStringToOString(xField->getName(), RTL_TEXTENCODING_UTF8).getStr());fflush(stdout);
-            sal_Int32 nFldId = maData.CacheTable.getFieldIndex(xField->getName());
-            if (nFldId < 0)
-                fail("field ID is negative");
-            maRowFieldIds.insert(nFldId);
-
-            Reference<XDataPilotField> xField2(xField, UNO_QUERY_THROW);
-            Reference<XIndexAccess> xItems(xField2->getItems(), UNO_QUERY_THROW);
-            sal_Int32 itemCount = xItems->getCount();
-            for (sal_Int32 j = 0; j < itemCount; ++j)
-            {
-                Reference<container::XNamed> xName(xItems->getByIndex(j), UNO_QUERY_THROW);
-                fprintf(stdout, "ResultTester::init:   item = '%s'\n",
-                        OUStringToOString(xName->getName(), RTL_TEXTENCODING_UTF8).getStr());fflush(stdout);
-            }
-        }
-    }
-
-    // Store column field IDs.
-    {
-        Reference<container::XIndexAccess> xFields = xDPDesc->getColumnFields();
-        sal_Int32 fieldCount = xFields->getCount();
-        for (sal_Int32 i = 0; i < fieldCount; ++i)
-        {
-            Reference<container::XNamed> xField(xFields->getByIndex(i), UNO_QUERY_THROW);
-            fprintf(stdout, "ResultTester::init: field = '%s'\n",
-                    OUStringToOString(xField->getName(), RTL_TEXTENCODING_UTF8).getStr());fflush(stdout);
-            sal_Int32 nFldId = maData.CacheTable.getFieldIndex(xField->getName());
-            if (nFldId < 0)
-                fail("field ID is negative");
-            maColFieldIds.insert(nFldId);
-
-            Reference<XDataPilotField> xField2(xField, UNO_QUERY_THROW);
-            Reference<XIndexAccess> xItems(xField2->getItems(), UNO_QUERY_THROW);
-            sal_Int32 itemCount = xItems->getCount();
-            for (sal_Int32 j = 0; j < itemCount; ++j)
-            {
-                Reference<container::XNamed> xName(xItems->getByIndex(j), UNO_QUERY_THROW);
-                fprintf(stdout, "ResultTester::init:   item = '%s'\n",
-                        OUStringToOString(xName->getName(), RTL_TEXTENCODING_UTF8).getStr());fflush(stdout);
-            }
-        }
-    }
+    // Store column row fields data.
+    storeColRowFieldsData(true);
+    storeColRowFieldsData(false);
 }
 
 void ResultTester::operator()(const CellAddress& cell)
@@ -273,7 +289,20 @@ void ResultTester::verifyRefValue(const CellAddress& cell,
 
     CellRangeAddress resRange = mxDPTab->getOutputRangeByType(DataPilotTableRegion::RESULT);
     bool isRowSubtotal = (result.Flags & DataResultFlags::SUBTOTAL) && (resRange.EndColumn == cell.Column);
-    bool isColSubtotal = (result.Flags & DataResultFlags::SUBTOTAL) && (resRange.EndRow == cell.Row);
+    bool isColSubtotal = false;
+    do
+    {
+        if (!(result.Flags & DataResultFlags::SUBTOTAL))
+            break;
+        sal_Int32 beginRow = resRange.EndRow - maDataFieldSettings.size() + 1;
+        sal_Int32 endRow = resRange.EndRow;
+        if (cell.Row < beginRow)
+            break;
+        if (cell.Row > endRow)
+            break;
+        isColSubtotal = true;
+    }
+    while (false);
 
     const DataPilotFieldReference& ref = *setting.FieldRef;
     sal_Int32 refFieldId = maData.CacheTable.getFieldIndex(ref.ReferenceField);
@@ -307,7 +336,7 @@ void ResultTester::verifyRefValue(const CellAddress& cell,
             // This is the referenced field.  Replace the match value with
             // the referenced item name.
             DataTable::Filter filter(*itr);
-            sal_Int32 newStrId = DataTable::getStringId(ref.ReferenceItemName); 
+            sal_Int32 newStrId = DataTable::getStringId(ref.ReferenceItemName);
             if (filter.MatchStrId == newStrId)
                 isRefItem = true;
             else
@@ -531,7 +560,20 @@ void ResultTester::verifyRunningTotal(const ::com::sun::star::table::CellAddress
 
     CellRangeAddress resRange = mxDPTab->getOutputRangeByType(DataPilotTableRegion::RESULT);
     bool isRowSubtotal = (result.Flags & DataResultFlags::SUBTOTAL) && (resRange.EndColumn == cell.Column);
-    bool isColSubtotal = (result.Flags & DataResultFlags::SUBTOTAL) && (resRange.EndRow == cell.Row);
+    bool isColSubtotal = false;
+    do
+    {
+        if (!(result.Flags & DataResultFlags::SUBTOTAL))
+            break;
+        sal_Int32 beginRow = resRange.EndRow - maDataFieldSettings.size() + 1;
+        sal_Int32 endRow = resRange.EndRow;
+        if (cell.Row < beginRow)
+            break;
+        if (cell.Row > endRow)
+            break;
+        isColSubtotal = true;
+    }
+    while (false);
 
     const DataPilotFieldReference& ref = *setting.FieldRef;
     sal_Int32 refFieldId = maData.CacheTable.getFieldIndex(ref.ReferenceField);
@@ -552,10 +594,78 @@ void ResultTester::verifyRunningTotal(const ::com::sun::star::table::CellAddress
         // This is also expected.
         return;
 
-    // Obtain the aggregate value with the original filter set.
-    double valOrig = maData.CacheTable.aggregateValue(filters, setting.FieldId, setting.Function);
+    sal_Int32 posRefId = -1, curItemName = -1;
+    {
+        FilterFinder finder(refFieldId);
+        vector<DataTable::Filter>::const_iterator pos = find_if(filters.begin(), filters.end(), finder);
+        if (pos == filters.end())
+            fail("filter for the reference field not found (ResultTester::verifyRunningTotal)");
+        posRefId = distance(filters.begin(), pos);
+        curItemName = pos->MatchStrId;
+    }
 
-    fail("not implemented yet");
+    FieldItemMapType::const_iterator itr = maFieldItemMap.find(refFieldId);
+    if (itr == maFieldItemMap.end())
+        fail("failed to find the item list (ResultTester::verifyRunningTotal)");
+
+    vector<sal_Int32>::const_iterator curItemPos = find(itr->second.begin(), itr->second.end(), curItemName);
+    if (curItemPos == itr->second.end())
+        fail("current item not found (ResultTester::verifyRunningTotal)");
+
+    // Run through each individual field item name up to the current item name,
+    // and accumulate individual aggregate values of those items.
+    RunningTotalCalculator calculator(maData.CacheTable, filters, setting.FieldId, setting.Function, posRefId);
+    double valOrig = for_each(itr->second.begin(), ++curItemPos, calculator).getRunningTotal();
+
+    if (!compare(valCell, valOrig))
+    {
+        fprintf(stdout, "Error: values differ (%ld, %ld) : real value = %.10f  check value = %.10f (delta = %.10f) (%s)\n",
+                cell.Row, cell.Column,
+                valCell, valOrig, valCell-valOrig,
+                getFunctionName(setting.Function).c_str());
+        fail();
+    }
+}
+
+void ResultTester::storeColRowFieldsData(bool isRow)
+{
+    Reference<XDataPilotDescriptor> xDPDesc(mxDPTab, UNO_QUERY_THROW);
+    Reference<container::XIndexAccess> xFields = isRow ? xDPDesc->getRowFields() : xDPDesc->getColumnFields();
+    sal_Int32 fieldCount = xFields->getCount();
+    for (sal_Int32 i = 0; i < fieldCount; ++i)
+    {
+        Reference<container::XNamed> xField(xFields->getByIndex(i), UNO_QUERY_THROW);
+        OUString fieldNameStr = xField->getName();
+        if (isRow && i == fieldCount - 1 && fieldNameStr.equalsAscii("Data"))
+        {
+            fprintf(stdout, "INFO: skipping data dimension....\n");
+            continue;
+        }
+
+        sal_Int32 nFldId = maData.CacheTable.getFieldIndex(fieldNameStr);
+        if (nFldId < 0)
+            fail("field ID is negative (ResultTester::storeColRowFieldsData");
+
+        if (isRow)
+            maRowFieldIds.insert(nFldId);
+        else
+            maColFieldIds.insert(nFldId);
+
+        Reference<XDataPilotField> xField2(xField, UNO_QUERY_THROW);
+        Reference<XIndexAccess> xItems(xField2->getItems(), UNO_QUERY_THROW);
+        sal_Int32 itemCount = xItems->getCount();
+        vector<sal_Int32> fieldItems;
+        fieldItems.reserve(itemCount);
+        for (sal_Int32 j = 0; j < itemCount; ++j)
+        {
+            Reference<container::XNamed> xName(xItems->getByIndex(j), UNO_QUERY_THROW);
+            sal_Int32 itemId = DataTable::getStringId(xName->getName());
+            if (itemId < 0)
+                fail("item name string ID is negative");
+            fieldItems.push_back(itemId);
+        }
+        maFieldItemMap.insert( FieldItemMapType::value_type(nFldId, fieldItems) );
+    }
 }
 
 double ResultTester::getGrandTotal(const DataFieldSetting& setting)

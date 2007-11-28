@@ -135,6 +135,16 @@ DataTable::Filter::Filter()
 {
 }
 
+DataTable::MultiStringFilter::MultiStringFilter()
+{
+}
+
+const DataTable::MultiStringFilter& DataTable::MultiStringFilter::operator =(const MultiStringFilter& o)
+{
+    this->FieldIndex = o.FieldIndex;
+    this->MatchStrIds = o.MatchStrIds;
+}
+
 ScSharedStringTable DataTable::maStringTable;
 
 // ----------------------------------------------------------------------------
@@ -246,10 +256,49 @@ private:
 
 // ----------------------------------------------------------------------------
 
+class Filter2MultiFilter
+{
+public:
+    Filter2MultiFilter(size_t filterSize)
+    {
+        maFilters.reserve(filterSize);
+    }
+
+    void operator() (const DataTable::Filter& filter)
+    {
+        DataTable::MultiStringFilter msfilter;
+        msfilter.FieldIndex = filter.FieldIndex;
+        msfilter.MatchStrIds.push_back(filter.MatchStrId);
+        maFilters.push_back(msfilter);
+    }
+
+    void swapFilters(vector<DataTable::MultiStringFilter>& dest)
+    {
+        maFilters.swap(dest);
+    }
+private:
+    Filter2MultiFilter(); // disabled
+private:
+    vector<DataTable::MultiStringFilter> maFilters;
+};
+
+// ----------------------------------------------------------------------------
+
 class ResultAggregator
 {
 public:
     ResultAggregator(const vector<DataTable::Filter>& filters, sal_Int32 dataFieldId, 
+                     GeneralFunction func, size_t rowCount) :
+        mnDataFieldId(dataFieldId), meFunc(func)
+    {
+        // Convert those single-string filters to multi-string ones.
+        Filter2MultiFilter converter(filters.size());
+        for_each(filters.begin(), filters.end(), converter).swapFilters(maFilters);
+
+        maValues.reserve(rowCount);
+    }
+
+    ResultAggregator(const vector<DataTable::MultiStringFilter>& filters, sal_Int32 dataFieldId, 
                      GeneralFunction func, size_t rowCount) :
         maFilters(filters), mnDataFieldId(dataFieldId), meFunc(func)
     {
@@ -263,14 +312,14 @@ public:
             return;
 
         bool includeRow = true;
-        vector<DataTable::Filter>::const_iterator itr, itrEnd = maFilters.end();
+        vector<DataTable::MultiStringFilter>::const_iterator itr, itrEnd = maFilters.end();
         for (itr = maFilters.begin(); itr != itrEnd; ++itr)
         {
             const sal_Int32 fieldId = itr->FieldIndex;
             if (fieldId >= rowSize || fieldId < 0)
                 continue;
 
-            if (row.at(fieldId).StrId != itr->MatchStrId)
+            if (find(itr->MatchStrIds.begin(), itr->MatchStrIds.end(), row.at(fieldId).StrId) == itr->MatchStrIds.end())
             {
                 includeRow = false;
                 break;
@@ -337,7 +386,7 @@ private:
     }
 
 private:
-    const vector<DataTable::Filter> maFilters;
+    vector<DataTable::MultiStringFilter> maFilters;
     const sal_Int32 mnDataFieldId;
     const GeneralFunction meFunc;
 
@@ -577,8 +626,13 @@ void DataTable::output(const Reference<XSpreadsheet>& xSheet, sal_Int32 row, sal
 double DataTable::aggregateValue(const vector<DataTable::Filter>& filters, sal_Int32 dataFieldId,
                                  GeneralFunction func) const
 {
-    using namespace ::com::sun::star::sheet;
+    ResultAggregator aggregator(filters, dataFieldId, func, maTable.size());
+    return for_each(maTable.begin(), maTable.end(), aggregator).getValue();
+}
 
+double DataTable::aggregateValue(const vector<DataTable::MultiStringFilter>& filters, sal_Int32 dataFieldId,
+                                 GeneralFunction func) const
+{
     ResultAggregator aggregator(filters, dataFieldId, func, maTable.size());
     return for_each(maTable.begin(), maTable.end(), aggregator).getValue();
 }

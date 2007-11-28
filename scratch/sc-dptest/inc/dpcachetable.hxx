@@ -81,6 +81,16 @@ public:
         Filter();
     };
 
+    /** filtering criteria (multi-string) */
+    struct MultiStringFilter
+    {
+        sal_Int32   FieldIndex;
+        ::std::vector<sal_Int32> MatchStrIds;
+
+        MultiStringFilter();
+        const MultiStringFilter& operator=(const MultiStringFilter& o);
+    };
+
     DataTable();
     ~DataTable();
 
@@ -127,6 +137,9 @@ public:
                 sal_Int32 row, sal_Int16 col) const;
 
     double aggregateValue(const ::std::vector<DataTable::Filter>& filters, sal_Int32 dataFieldId,
+                          ::com::sun::star::sheet::GeneralFunction func) const;
+
+    double aggregateValue(const ::std::vector<DataTable::MultiStringFilter>& filters, sal_Int32 dataFieldId,
                           ::com::sun::star::sheet::GeneralFunction func) const;
 
     static const ::rtl::OUString getString(sal_Int32 nId);

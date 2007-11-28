@@ -12,6 +12,7 @@
 
 #include <vector>
 #include <set>
+#include <map>
 
 namespace com { namespace sun { namespace star { 
     namespace sheet {
@@ -92,14 +93,19 @@ public:
 private:
     ResultTester(); // disabled
 
+    void storeColRowFieldsData(bool isRow);
+
     double getGrandTotal(const DataFieldSetting& setting);
     double getColRowTotal(const DataFieldSetting& setting, const ::std::vector<DataTable::Filter>& filters, bool isRow);
 
     void fail(const char* reason = "\0");
 
 private:
+    typedef ::std::map<sal_Int32, ::std::vector<sal_Int32> > FieldItemMapType;
+
     ::com::sun::star::uno::Reference< ::com::sun::star::sheet::XDataPilotTable2 >     mxDPTab;
     RuntimeData                         maData;
+    FieldItemMapType                    maFieldItemMap;
     ::std::vector<DataFieldSetting>     maDataFieldSettings;
     ::std::set<sal_Int32>               maRowFieldIds;
     ::std::set<sal_Int32>               maColFieldIds;

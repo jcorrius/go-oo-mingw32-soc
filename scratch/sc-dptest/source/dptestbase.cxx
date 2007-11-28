@@ -156,23 +156,22 @@ void DPTestBase::run()
 
     genDPTable(*mpSrcRange, data);
 //  dumpTableProperties(data.OutputSheetRef);
-//  fprintf(stdout, "----------------------------------------------------------------------\n");
-//  fprintf(stdout, "checking results for normal display mode...\n");
-//  verifyTableResults(data);
-//  sleep(1);
+    fprintf(stdout, "----------------------------------------------------------------------\n");
+    fprintf(stdout, "checking results for normal display mode...\n");
+    verifyTableResults(data);
 
     // ----------------------------------------------------------------------
     // Verify results with reference item.
 
     static const sal_Int32 refTypeList[] = {
-//      DataPilotFieldReferenceType::ITEM_DIFFERENCE,
-//      DataPilotFieldReferenceType::ITEM_PERCENTAGE,
-//      DataPilotFieldReferenceType::ITEM_PERCENTAGE_DIFFERENCE,
+        DataPilotFieldReferenceType::ITEM_DIFFERENCE,
+        DataPilotFieldReferenceType::ITEM_PERCENTAGE,
+        DataPilotFieldReferenceType::ITEM_PERCENTAGE_DIFFERENCE,
         DataPilotFieldReferenceType::RUNNING_TOTAL,
-//      DataPilotFieldReferenceType::ROW_PERCENTAGE,
-//      DataPilotFieldReferenceType::COLUMN_PERCENTAGE,
-//      DataPilotFieldReferenceType::TOTAL_PERCENTAGE,
-//      DataPilotFieldReferenceType::INDEX
+        DataPilotFieldReferenceType::ROW_PERCENTAGE,
+        DataPilotFieldReferenceType::COLUMN_PERCENTAGE,
+        DataPilotFieldReferenceType::TOTAL_PERCENTAGE,
+        DataPilotFieldReferenceType::INDEX
     };
     static const sal_Int32 refTypeCount = sizeof(refTypeList) / sizeof(refTypeList[0]);
 
@@ -182,24 +181,52 @@ void DPTestBase::run()
         fprintf(stdout, "----------------------------------------------------------------------\n");
         fprintf(stdout, "checking results for referenced item mode (%s)...\n", 
                 getReferenceTypeName(refTypeList[refTypeId]).c_str());
-        for (sal_Int32 fieldId = 0; fieldId < fieldCount; ++fieldId)
+
+        switch (refTypeList[refTypeId])
         {
-            if (data.FieldOrientations.at(fieldId) == DataPilotFieldOrientation_PAGE)
+            case DataPilotFieldReferenceType::ITEM_DIFFERENCE:
+            case DataPilotFieldReferenceType::ITEM_PERCENTAGE:
+            case DataPilotFieldReferenceType::ITEM_PERCENTAGE_DIFFERENCE:
             {
-                fprintf(stdout, "Info: skipping page field.....\n");fflush(stdout);
-                continue;
+                for (sal_Int32 fieldId = 0; fieldId < fieldCount; ++fieldId)
+                {
+                    if (data.FieldOrientations.at(fieldId) == DataPilotFieldOrientation_PAGE)
+                        // skip page field.
+                        continue;
+            
+                    sal_Int32 itemCount = data.FieldItemCounts.at(fieldId);
+                    for (sal_Int32 itemId = 0; itemId < itemCount; ++itemId)
+                    {
+                        setReferenceToField(data, fieldId, itemId, refTypeList[refTypeId]);
+                        verifyTableResults(data);
+                    }
+                }
             }
-    
-            sal_Int32 itemCount = data.FieldItemCounts.at(fieldId);
-            for (sal_Int32 itemId = 0; itemId < itemCount; ++itemId)
+            break;
+            case DataPilotFieldReferenceType::RUNNING_TOTAL:
             {
-                setReferenceToField(data, fieldId, itemId, refTypeList[refTypeId]);
+                for (sal_Int32 fieldId = 0; fieldId < fieldCount; ++fieldId)
+                {
+                    if (data.FieldOrientations.at(fieldId) == DataPilotFieldOrientation_PAGE)
+                        // skip page field.
+                        continue;
+            
+                    setReferenceToField(data, fieldId, 0, refTypeList[refTypeId]);
+                    verifyTableResults(data);
+                }
+            }
+            break;
+            case DataPilotFieldReferenceType::ROW_PERCENTAGE:
+            case DataPilotFieldReferenceType::COLUMN_PERCENTAGE:
+            case DataPilotFieldReferenceType::TOTAL_PERCENTAGE:
+            case DataPilotFieldReferenceType::INDEX:
+                setReferenceToField(data, 0, 0, refTypeList[refTypeId]);
                 verifyTableResults(data);
-//              sleep(1);
-            }
+            break;
         }
     }
     removeAllReferences(data);
+    fprintf(stdout, "success!\n");
 }
 
 const OUString DPTestBase::getFieldName(sal_Int16 fieldId) const
