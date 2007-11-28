@@ -1,0 +1,188 @@
+diff --git a/desktop/unx/source/start.c b/desktop/unx/source/start.c
+index 05ef574..43c6a9a 100644
+--- desktop/unx/source/start.c
++++ desktop/unx/source/start.c
+@@ -49,8 +49,10 @@
+ 
+ #include <osl/nlsupport.h>
+ #include <osl/process.h>
++#include <osl/thread.h>
+ #include <rtl/bootstrap.h>
+ #include <rtl/digest.h>
++#include <rtl/ustrbuf.h>
+ #include <sal/main.h>
+ 
+ #include "splashx.h"
+@@ -131,7 +133,7 @@ get_md5hash( rtl_uString *pText )
+         return NULL;
+ 
+     rtlDigest digest = rtl_digest_create( rtl_Digest_AlgorithmMD5 );
+-    if ( digest <= 0 )
++    if ( digest == 0 )
+         return NULL;
+ 
+     sal_uInt32 md5_key_len = rtl_digest_queryLength( digest );
+@@ -254,33 +256,126 @@ connect_pipe( rtl_uString *pPipePath )
+     return fd;
+ }
+ 
++/* Escape: "," -> "\\,", "\0" -> "\\0", "\\" -> "\\\\" */
++static rtl_uString *
++escape_path( rtl_uString *pToEscape )
++{
++    rtl_uString *pBuffer = NULL;
++    sal_Int32 nCapacity = 1000;
++
++    rtl_uString_new_WithLength( &pBuffer, nCapacity );
++
++    sal_Int32 i = 0;
++    sal_Int32 nEscapeLength = rtl_uString_getLength( pToEscape );
++    for ( ; i < nEscapeLength; ++i )
++    {
++        sal_Unicode c = pToEscape->buffer[i];
++        switch ( c )
++        {
++            case (sal_Unicode)'\0':
++                rtl_uStringbuffer_insert_ascii( &pBuffer, &nCapacity,
++                        rtl_uString_getLength( pBuffer ),
++                        RTL_CONSTASCII_STRINGPARAM( "\\0" ) );
++                break;
++            case (sal_Unicode)',':
++                rtl_uStringbuffer_insert_ascii( &pBuffer, &nCapacity,
++                        rtl_uString_getLength( pBuffer ),
++                        RTL_CONSTASCII_STRINGPARAM( "\\," ) );
++                break;
++            case (sal_Unicode)'\\':
++                rtl_uStringbuffer_insert_ascii( &pBuffer, &nCapacity,
++                        rtl_uString_getLength( pBuffer ),
++                        RTL_CONSTASCII_STRINGPARAM( "\\\\" ) );
++                break;
++            default:
++                rtl_uStringbuffer_insert( &pBuffer, &nCapacity,
++                        rtl_uString_getLength( pBuffer ),
++                        &c, 1 );
++        }
++    }
++
++    return pBuffer;
++}
++
+ /* Send args to the OOo instance (using the 'fd' file descriptor) */
+ static sal_Bool
+-send_args( int fd )
++send_args( int fd, rtl_uString *pAppPath )
+ {
+     rtl_uString *pBuffer = NULL, *pTmp = NULL;
+-    sal_Int32 nCapacity = 100;
++    sal_Int32 nCapacity = 1000;
+     rtl_String *pOut = NULL;
+     sal_Bool bResult;
+     size_t nLen;
++    rtl_uString *pEscapedAppPath = escape_path( pAppPath );
+ 
+     rtl_uString_new_WithLength( &pBuffer, nCapacity );
+     rtl_uString_new( &pTmp );
+ 
++    rtl_uStringbuffer_insert_ascii( &pBuffer, &nCapacity,
++            rtl_uString_getLength( pBuffer ),
++            RTL_CONSTASCII_STRINGPARAM( "InternalIPC::Arguments" ) );
++
++    sal_Bool bDontConvertNext = sal_False;
+     sal_uInt32 nArg;
+     sal_uInt32 nArgCount = osl_getCommandArgCount();
+     for ( nArg = 0; nArg < nArgCount; ++nArg )
+     {
++        rtl_uStringbuffer_insert_ascii( &pBuffer, &nCapacity,
++                rtl_uString_getLength( pBuffer ),
++                ",", 1 );
++
+         osl_getCommandArg( nArg, &pTmp );
+ 
++        if ( rtl_uString_getLength( pTmp ) == 0 )
++            continue;
++
++        // this is not a param, we have to prepend filenames with file://
++        // FIXME: improve the check
++        if ( pTmp->buffer[0] != (sal_Unicode)'-' )
++        {
++            sal_Int32 nFirstColon = rtl_ustr_indexOfChar_WithLength( pTmp->buffer, pTmp->length, ':' );
++            sal_Int32 nFirstSlash = rtl_ustr_indexOfChar_WithLength( pTmp->buffer, pTmp->length, '/' );
++
++            // check that pTmp is not an URI yet
++            if ( nFirstColon < 1 || ( nFirstSlash != nFirstColon + 1 ) )
++            {
++                // FIXME: there are more strict rules for file:// URIs, we
++                // should introduce some sanitizing here
++
++                // dont convert filenames with some of the switches
++                if ( !bDontConvertNext )
++                {
++                    rtl_uStringbuffer_insert_ascii( &pBuffer, &nCapacity,
++                            rtl_uString_getLength( pBuffer ),
++                            RTL_CONSTASCII_STRINGPARAM( "file://" ) );
++
++                    if ( pTmp->buffer[0] != (sal_Unicode)'/' )
++                    {
++                        rtl_uStringbuffer_insert( &pBuffer, &nCapacity,
++                                rtl_uString_getLength( pBuffer ),
++                                rtl_uString_getStr( pEscapedAppPath ),
++                                rtl_uString_getLength( pEscapedAppPath ) );
++
++                        rtl_uStringbuffer_insert_ascii( &pBuffer, &nCapacity,
++                                rtl_uString_getLength( pBuffer ),
++                                "/", 1 );
++                    }
++                }
++            }
++        }
++
++        // don't convert filenames with some of the switches
++        // (currently just -pt)
++        bDontConvertNext = !rtl_ustr_ascii_compareIgnoreAsciiCase( pTmp->buffer, "-pt" );
++
++        rtl_uString *pEscapedTmp = escape_path( pTmp );
++
+         rtl_uStringbuffer_insert( &pBuffer, &nCapacity,
+                 rtl_uString_getLength( pBuffer ),
+-                rtl_uString_getStr( pTmp ),
+-                rtl_uString_getLength( pTmp ) );
++                rtl_uString_getStr( pEscapedTmp ),
++                rtl_uString_getLength( pEscapedTmp ) );
+ 
+-        rtl_uStringbuffer_insert_ascii( &pBuffer, &nCapacity,
+-                rtl_uString_getLength( pBuffer ),
+-                "|", 1 );
++        rtl_uString_release( pEscapedTmp );
+     }
+ 
+     ustr_debug( "Pass args", pBuffer );
+@@ -288,9 +383,10 @@ send_args( int fd )
+     pOut = ustr_to_str( pBuffer );
+ 
+     nLen = rtl_string_getLength( pOut ) + 1;
+-    bResult = ( write( fd, rtl_string_getStr( pOut ), nLen ) == nLen );
++    bResult = ( write( fd, rtl_string_getStr( pOut ), nLen ) == (ssize_t) nLen );
+ 
+     /* cleanup */
++    rtl_uString_release( pEscapedAppPath );
+     rtl_uString_release( pBuffer );
+     rtl_uString_release( pTmp );
+     rtl_string_release( pOut );
+@@ -422,7 +518,7 @@ read_percent( int status_fd, int *pPercent )
+ {
+     static char pBuffer[BUFFER_LEN + 1];
+     static char *pNext = pBuffer;
+-    static size_t nRead = 0;
++    static ssize_t nRead = 0;
+ 
+     char *pBegin;
+     char *pIter;
+@@ -681,7 +777,7 @@ SAL_IMPLEMENT_MAIN_WITH_ARGS( argc, argv )
+     pPipePath = get_pipe_path( pAppPath );
+ 
+     if ( ( fd = connect_pipe( pPipePath ) ) >= 0 )
+-        bSentArgs = send_args( fd );
++        bSentArgs = send_args( fd, pAppPath );
+ #if OSL_DEBUG_LEVEL > 0
+     else
+         ustr_debug( "Failed to connect to pipe", pPipePath );
