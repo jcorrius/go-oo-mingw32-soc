@@ -244,38 +244,73 @@ void ResultTester::operator()(const CellAddress& cell)
             case DataPilotFieldReferenceType::INDEX:
             break;
         }
+        return;
     }
-    else
-    {
-        // normal display mode with no reference
 
-        Reference<XCell> xCell = maData.OutputSheetRef->getCellByPosition(cell.Column, cell.Row);
-        if (xCell->getType() != table::CellContentType_VALUE)
-        {
-            fprintf(stdout, "Error: cell not value (%ld, %ld)\n", cell.Row, cell.Column);
-            fail();
-            return;
-        }
-
-        // This ID is the actual column ID of the data field.
-        const sal_Int32 nFieldId = setting.FieldId;
-        const sheet::GeneralFunction func = setting.Function;
-        double val1 = xCell->getValue();
-        double val2 = maData.CacheTable.aggregateValue(filters, nFieldId, func);
-        if (val1 != val2)
-        {
-            fprintf(stdout, "Error: values differ (%ld, %ld) : real value = %g  check value = %g (%s)\n", 
-                    cell.Row, cell.Column,
-                    val1, val2, getFunctionName(func).c_str());
-            fflush(stdout);
-            fail();
-        }
-    }
+    // normal display mode with no reference
+    verifyNormal(cell, setting, filters, resData.Result);
 }
 
 sal_Int16 ResultTester::getFailureCount() const
 {
     return mnFailureCount;
+}
+
+void ResultTester::verifyNormal(const CellAddress& cell, 
+                                const DataFieldSetting& setting, 
+                                const vector<DataTable::Filter>& filters,
+                                const DataResult& result)
+{
+    Reference<XCell> xCell = maData.OutputSheetRef->getCellByPosition(cell.Column, cell.Row);
+
+    switch (xCell->getType())
+    {
+        case table::CellContentType_VALUE:
+        {
+            double val1 = xCell->getValue();
+            double val2 = maData.CacheTable.aggregateValue(filters, setting.FieldId, setting.Function);
+            if (!compare(val1,val2))
+            {
+                fprintf(stdout, "Error: values differ (%ld, %ld) : real value = %g  check value = %g (%s)\n", 
+                        cell.Row, cell.Column,
+                        val1, val2, getFunctionName(setting.Function).c_str());
+                fflush(stdout);
+                fail();
+            }
+        }
+        break;
+        case table::CellContentType_EMPTY:
+        {
+            double val = maData.CacheTable.aggregateValue(filters, setting.FieldId, GeneralFunction_COUNTNUMS);
+            if (val != 0.0)
+            {
+                fprintf(stdout, "Error: value not empty (%ld, %ld) : display cell is empty but associated data set is not empty.",
+                        cell.Row, cell.Column);
+                fflush(stdout);
+                fail();
+            }
+        }
+        break;
+        case table::CellContentType_TEXT:
+            fail(cell.Row, cell.Column, "this cell is text!");
+        break;
+        case table::CellContentType_FORMULA:
+        {
+            sal_Int32 error = xCell->getError();
+            if (!error)
+                fail(cell.Row, cell.Column, "cell type is formula but it's not in error condition");
+
+            double val = maData.CacheTable.aggregateValue(filters, setting.FieldId, setting.Function);
+            if (finite(val))
+                fail(cell.Row, cell.Column, "cell is in error condition but the value is finite");
+        }
+        break;
+        default:
+            fprintf(stdout, "I don't know how to handle this (%ld, %ld) (cell content type = %d)\n",
+                    cell.Row, cell.Column, xCell->getType());
+            fflush(stdout);
+            fail();
+    }
 }
 
 void ResultTester::verifyRefValue(const CellAddress& cell, 
@@ -365,11 +400,12 @@ void ResultTester::verifyRefValue(const CellAddress& cell,
                 // the referenced item should be empty.
                 return;
 
-            if (valCell != valOrig - valRef)
+            double res = valOrig - valRef;
+            if (!compare(valCell, res))
             {
-                fprintf(stdout, "Error: values differ (%ld, %ld) : real value = %g  check value %g - %g = %g (%s)\n",
+                fprintf(stdout, "Error: values differ (%ld, %ld) : real value = %.10f  check value %g - %g = %.10f (%s)\n",
                         cell.Row, cell.Column,
-                        valCell, valOrig, valRef, valOrig - valRef,
+                        valCell, valOrig, valRef, res,
                         getFunctionName(func).c_str());
                 fail();
             }
@@ -412,6 +448,19 @@ void ResultTester::verifyRefValue(const CellAddress& cell,
             if (isRefItem && cellType == table::CellContentType_EMPTY)
                 // the referenced item should be empty.
                 return;
+
+            if (valRef == 0.0)
+            {
+                // This is division by zero.  The cell result should also be an error.
+                if ((result.Flags & DataResultFlags::ERROR))
+                    // This is expected.
+                    fprintf(stdout, "Info: division by zero for referenced item (%s)\n",
+                            getReferenceTypeName(ref.ReferenceType).c_str());
+                else
+                    fail();
+
+                return;
+            }
 
             double res = (valOrig-valRef)/valRef;
             if (!compare(valCell, res))
@@ -691,6 +740,14 @@ double ResultTester::getColRowTotal(const DataFieldSetting& setting, const vecto
         filters2.push_back(*itr);
     }
     return maData.CacheTable.aggregateValue(filters2, setting.FieldId, setting.Function);
+}
+
+void ResultTester::fail(sal_Int32 row, sal_Int32 col, const char* reason)
+{
+    fprintf(stdout, "ERROR: (%ld, %ld) %s\n", row, col, reason);
+    ++mnFailureCount;
+
+    throw RuntimeException();
 }
 
 void ResultTester::fail(const char* reason)

@@ -344,7 +344,25 @@ void DPTestBase::genSrcData(RuntimeData& data)
         const sal_Int32 lower = getDataFieldValueLower(vfield);
         const sal_Int32 upper = getDataFieldValueUpper(vfield);
         for (sal_Int32 row = 0; row < maTestParam.RowCount; ++row)
+        {
+            if (maTestParam.RandomString)
+            {
+                short b = rand<short>(0, 2);
+                switch (rand<short>(0, 2))
+                {
+                    case 1:
+                        // insert text value.
+                        table.setCell(row, maTestParam.FieldCount-offset, ascii("text"));
+                    case 2:
+                        // leave the cell empty.
+                        continue;
+                    default:
+                        // insert number for all the others.
+                    break;
+                }
+            }
             table.setCell(row, maTestParam.FieldCount-offset, rand(lower, upper)/1.0);
+        }
     }
 
 //  table.output();
@@ -359,15 +377,15 @@ void DPTestBase::genDPTable(const CellRangeAddress& srcRange,
     static const GeneralFunction funcTable[] = {
 //      GeneralFunction_NONE,
 //      GeneralFunction_AUTO,
-        GeneralFunction_SUM,
-        GeneralFunction_COUNT,
-        GeneralFunction_AVERAGE,
-        GeneralFunction_MAX,
-        GeneralFunction_MIN,
-        GeneralFunction_PRODUCT,
+//      GeneralFunction_SUM,
+//      GeneralFunction_COUNT,
+//      GeneralFunction_AVERAGE,
+//      GeneralFunction_MAX,
+//      GeneralFunction_MIN,
+//      GeneralFunction_PRODUCT,
 //      GeneralFunction_COUNTNUMS,
-//      GeneralFunction_STDEV,
-//      GeneralFunction_STDEVP,
+        GeneralFunction_STDEV,
+        GeneralFunction_STDEVP,
 //      GeneralFunction_VAR,
 //      GeneralFunction_VARP
     };

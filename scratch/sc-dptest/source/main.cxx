@@ -22,13 +22,14 @@ int main()
     using namespace dptest;
 
     TestParam param;
-    param.FieldCount = 7;
-    param.RowCount   = 6000;
-    param.DataCount  = 3;
+    param.FieldCount = 6;
+    param.RowCount   = 2000;
+    param.DataCount  = 2;
     param.StartCol   = 0;
     param.StartRow   = 0;
     param.FieldItemCountLower = 2;
     param.FieldItemCountUpper = 3;
+    param.RandomString = true;
 
 #if 0
     param.Fields.push_back(FieldParam());

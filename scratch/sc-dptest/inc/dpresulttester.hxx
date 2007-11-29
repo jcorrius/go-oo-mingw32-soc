@@ -49,6 +49,10 @@ public:
 
     sal_Int16 getFailureCount() const;
 
+    void verifyNormal(const ::com::sun::star::table::CellAddress& cell, 
+                      const DataFieldSetting& setting, 
+                      const ::std::vector<DataTable::Filter>& filters,
+                      const ::com::sun::star::sheet::DataResult& result);
     /** 
      * Verify a result value that is referenced from another result value. 
      * This method verifies the following display modes: 
@@ -98,6 +102,7 @@ private:
     double getGrandTotal(const DataFieldSetting& setting);
     double getColRowTotal(const DataFieldSetting& setting, const ::std::vector<DataTable::Filter>& filters, bool isRow);
 
+    void fail(sal_Int32 row, sal_Int32 col, const char* reason = "\0");
     void fail(const char* reason = "\0");
 
 private:

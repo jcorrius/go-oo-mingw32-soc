@@ -40,6 +40,7 @@
 #include <sstream>
 #include <numeric>
 #include <stdio.h>
+#include <cmath>
 
 #include <com/sun/star/sdbc/DataType.hpp>
 #include <com/sun/star/sdbc/XRow.hpp>
@@ -71,6 +72,8 @@ using ::com::sun::star::sheet::XCellRangeData;
 using ::com::sun::star::table::XCellRange;
 
 namespace dptest {
+
+// ============================================================================
 
 ScSharedStringTable::ScSharedStringTable() :
     mnStrCount(0)
@@ -147,8 +150,103 @@ const DataTable::MultiStringFilter& DataTable::MultiStringFilter::operator =(con
 
 ScSharedStringTable DataTable::maStringTable;
 
-// ----------------------------------------------------------------------------
+// ============================================================================
 // function objects
+
+class CalcVariance
+{
+public:
+    CalcVariance() :
+        m_n(0.0), m_mean(0.0), m_S(0.0)
+    {
+    }
+
+    void operator()(const DataTable::Cell& cell)
+    {
+        if (cell.Type != DataTable::CellType_Value)
+            return;
+
+        // Algorithm derived from
+        // http://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
+
+        ++m_n;
+        double delta = cell.Value - m_mean;
+        m_mean += delta/m_n;
+        m_S += delta*(cell.Value - m_mean);
+    }
+
+    double getVariance(bool isPopulation=false) const
+    {
+        return isPopulation ? m_S/m_n : m_S/(m_n - 1.0);
+    }
+
+private:
+    double m_n;
+    double m_mean;
+    double m_S;
+};
+
+// ----------------------------------------------------------------------------
+
+class CellAccumulator
+{
+public:
+    CellAccumulator() : mnCount(0), mfTotal(0.0), mfMax(0.0), mfMin(0.0), mfProd(1.0)
+    {
+    }
+
+    void operator()(const DataTable::Cell& cell)
+    {
+        if (cell.Type != DataTable::CellType_Value)
+            return;
+
+        ++mnCount;
+        mfTotal += cell.Value;
+        mfProd  *= cell.Value;
+
+        if (mnCount == 1)
+            mfMax = mfMin = cell.Value;
+        else
+        {
+            mfMax = cell.Value > mfMax ? cell.Value : mfMax;
+            mfMin = cell.Value < mfMin ? cell.Value : mfMin;
+        }
+    }
+
+    double getAverage() const
+    {
+        return mnCount > 0 ? mfTotal/mnCount : 0.0;
+    }
+
+    double getMax() const
+    {
+        return mfMax;
+    }
+
+    double getMin() const
+    {
+        return mfMin;
+    }
+
+    double getProduct() const
+    {
+        return mnCount > 0 ? mfProd : 0.0;
+    }
+
+    size_t getCount() const
+    {
+        return mnCount;
+    }
+
+private:
+    size_t mnCount;
+    double mfTotal;
+    double mfMax;
+    double mfMin;
+    double mfProd;
+};
+
+// ----------------------------------------------------------------------------
 
 class Resizer
 {
@@ -296,6 +394,7 @@ public:
         for_each(filters.begin(), filters.end(), converter).swapFilters(maFilters);
 
         maValues.reserve(rowCount);
+        maCells.reserve(rowCount);
     }
 
     ResultAggregator(const vector<DataTable::MultiStringFilter>& filters, sal_Int32 dataFieldId, 
@@ -303,6 +402,7 @@ public:
         maFilters(filters), mnDataFieldId(dataFieldId), meFunc(func)
     {
         maValues.reserve(rowCount);
+        maCells.reserve(rowCount);
     }
 
     void operator()(const vector<DataTable::Cell>& row)
@@ -326,13 +426,15 @@ public:
             }
         }
         if (includeRow)
+        {
             maValues.push_back(row.at(mnDataFieldId).Value);
+            maCells.push_back(row.at(mnDataFieldId));
+        }
     }
 
     double getValue() const
     {
         using ::std::accumulate;
-        using ::std::multiplies;
 
         size_t valueSize = maValues.size();
         if (!valueSize)
@@ -343,31 +445,42 @@ public:
             case GeneralFunction_NONE:
                 return 0.0;
             case GeneralFunction_AUTO:
-                // AUTO == SUM !?
+                // If the values are all numerical, SUM is used, otherwise COUNT.
             case GeneralFunction_SUM:
                 return accumulate(maValues.begin(), maValues.end(), 0.0);
             case GeneralFunction_AVERAGE:
-                return accumulate(maValues.begin(), maValues.end(), 0.0) / valueSize;
+                return for_each(maCells.begin(), maCells.end(), CellAccumulator()).getAverage();
             case GeneralFunction_COUNT:
-                return static_cast<double>(maValues.size());
+            {
+                // Count both number and text cells, but do not count empty cells.
+                sal_Int32 numCount = count_if(maCells.begin(), maCells.end(), isNumText);
+                return static_cast<double>(numCount);
+            }
             case GeneralFunction_MAX:
-            {
-                double val = maValues.front();
-                return accumulate(++maValues.begin(), maValues.end(), val, maxValue);
-            }
+                return for_each(maCells.begin(), maCells.end(), CellAccumulator()).getMax();
             case GeneralFunction_MIN:
-            {
-                double val = maValues.front();
-                return accumulate(++maValues.begin(), maValues.end(), val, minValue);
-            }
+                return for_each(maCells.begin(), maCells.end(), CellAccumulator()).getMin();
             case GeneralFunction_PRODUCT:
-                return accumulate(maValues.begin(), maValues.end(), 1.0, multiplies<double>());
+                return for_each(maCells.begin(), maCells.end(), CellAccumulator()).getProduct();
             case GeneralFunction_COUNTNUMS:
+            {
+                sal_Int32 numCount = count_if(maCells.begin(), maCells.end(), isNumber);
+                return static_cast<double>(numCount);
+            }
             case GeneralFunction_STDEV:
+            {
+                double var = for_each(maCells.begin(), maCells.end(), CalcVariance()).getVariance(false);
+                return sqrt(var);
+            }
             case GeneralFunction_STDEVP:
+            {
+                double var = for_each(maCells.begin(), maCells.end(), CalcVariance()).getVariance(true);
+                return sqrt(var);
+            }
             case GeneralFunction_VAR:
+                return for_each(maCells.begin(), maCells.end(), CalcVariance()).getVariance(false);
             case GeneralFunction_VARP:
-                break;
+                return for_each(maCells.begin(), maCells.end(), CalcVariance()).getVariance(true);
         }
         return 0.0;
     }
@@ -385,12 +498,23 @@ private:
         return a < b ? a : b;
     }
 
+    static bool isNumber(const DataTable::Cell& cell)
+    {
+        return (cell.Type == DataTable::CellType_Value);
+    }
+
+    static bool isNumText(const DataTable::Cell& cell)
+    {
+        return (cell.Type == DataTable::CellType_Value) || (cell.Type == DataTable::CellType_String);
+    }
+
 private:
     vector<DataTable::MultiStringFilter> maFilters;
     const sal_Int32 mnDataFieldId;
     const GeneralFunction meFunc;
 
     vector<double> maValues;
+    vector<DataTable::Cell> maCells;
 };
 
 // ----------------------------------------------------------------------------

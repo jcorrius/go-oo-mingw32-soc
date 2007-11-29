@@ -44,6 +44,11 @@ struct TestParam
     sal_Int32 FieldItemCountLower;
     sal_Int32 FieldItemCountUpper;
 
+    /** 
+     * Whether to randomly insert a string data into data field.
+     */
+    bool RandomString;
+
     ::std::vector<FieldParam>       Fields;
     ::std::vector<DataFieldParam>   DataFields;
 };
