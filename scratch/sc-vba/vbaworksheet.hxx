@@ -136,6 +136,7 @@ public:
     virtual void SAL_CALL setCodeName( const rtl::OUString& sCodeName ) throw (css::uno::RuntimeException);
     sal_Int16 getSheetID() throw (css::uno::RuntimeException);
 
+	virtual void SAL_CALL PrintOut( const css::uno::Any& From, const css::uno::Any& To, const css::uno::Any& Copies, const css::uno::Any& Preview, const css::uno::Any& ActivePrinter, const css::uno::Any& PrintToFile, const css::uno::Any& Collate, const css::uno::Any& PrToFileName, const css::uno::Any& IgnorePrintAreas ) throw (css::uno::RuntimeException);
 	// XHelperInterface
 	virtual rtl::OUString& getServiceImplName();
 	virtual css::uno::Sequence<rtl::OUString> getServiceNames();	
