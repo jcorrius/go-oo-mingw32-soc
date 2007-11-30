@@ -35,6 +35,22 @@ SHL1STDLIBS= \
 RESLIB1NAME=scsolver
 RESLIB1SRSFILES= $(SRS)/scsolver.srs
 
+EXTPACKFILES= \
+	$(BIN)/$(SHL1TARGET).oxt \
+	$(BIN)/$(SHL1TARGET).rdb \
+	$(LB)/$(SHL1TARGET).so \
+	../workben/addon_pkg/translation \
+	../workben/addon_pkg/*.xcu
+
+EXTPACKPATH= \
+	-p ../workben/addon_pkg \
+	-p $(BIN) \
+	-p $(LB)
+
 # --- Targets ------------------------------------------------------------
 
 .INCLUDE :	target.mk
+
+ALLTAR:
+	$(REGCOMP) -register -r $(BIN)/$(SHL1TARGET).rdb -c $(LB)/$(SHL1TARGET).so
+	python ./packExtension.py $(EXTPACKPATH) $(EXTPACKFILES)

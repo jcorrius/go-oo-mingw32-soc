@@ -64,13 +64,15 @@ def main (args):
     paths = []
     for opt, arg in opts:
         if opt in ['-p', '--path']:
+            # append base path
             paths.append(arg)
+        else:
+            error("unknown option " + opt)
 
     if len(args) < 2:
         error("requires at least 2 arguments")
 
-    arcfile = args[0]
-    files = args[1:]
+    arcfile, files = args[0], args[1:]
     pack(args[0], args[1:], paths)
 
 if __name__ == '__main__':
