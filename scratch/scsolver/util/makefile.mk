@@ -53,6 +53,10 @@ EXTPACKPATH= \
 
 .INCLUDE :	target.mk
 
-ALLTAR:
+COMP=
+#COMP=build_ext
+ALLTAR: $(COMP)
+
+build_ext:
 	$(REGCOMP) -register -wop -r $(BIN)/$(SHL1TARGET).rdb -c $(LB)/$(SHL1TARGET).so
 	python ./packExtension.py $(EXTPACKPATH) $(EXTPACKFILES)
