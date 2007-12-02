@@ -2,11 +2,11 @@
 #
 #   OpenOffice.org - a multi-platform office productivity suite
 #
-#   $RCSfile: makefile.mk,v $
+#   $RCSfile$
 #
-#   $Revision: 1.2 $
+#   $Revision: 10475 $
 #
-#   last change: $Author: kyoshida $ $Date: 2006/07/01 22:53:09 $
+#   last change: $Author: mklose $ $Date: 2007-10-15 04:35:44 -0400 (Mon, 15 Oct 2007) $
 #
 #   The Contents of this file are made available subject to
 #   the terms of GNU Lesser General Public License Version 2.1.
@@ -44,9 +44,10 @@ TARGET=lpsolve
 
 # --- Files --------------------------------------------------------
 
-TARFILE_NAME=lp_solve_5.5
+TARFILE_NAME=lp_solve_5.5.0.10_source
+TARFILE_ROOTDIR=lp_solve_5.5
 
-PATCH_FILE_NAME=
+PATCH_FILE_NAME=lp_solve_5.5.diff
 
 CONFIGURE_DIR=
 CONFIGURE_ACTION=
