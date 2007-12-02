@@ -97,7 +97,7 @@ public:
     // UNO Component Interface Methods
 
     // XInitialization
-    virtual void SAL_CALL initialize( const ::com::sun::star::uno::Sequence< Any >& aArgs )
+    virtual void SAL_CALL initialize( const ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Any >& aArgs )
         throw (::com::sun::star::uno::Exception);
 
     // XServiceInfo
@@ -105,7 +105,7 @@ public:
         throw (::com::sun::star::uno::RuntimeException);
     virtual sal_Bool SAL_CALL supportsService( rtl::OUString const & )
         throw (::com::sun::star::uno::RuntimeException);
-    virtual Sequence< rtl::OUString > SAL_CALL getSupportedServiceNames()
+    virtual ::com::sun::star::uno::Sequence< rtl::OUString > SAL_CALL getSupportedServiceNames()
         throw (::com::sun::star::uno::RuntimeException);
 
     // XDispatchProvider
