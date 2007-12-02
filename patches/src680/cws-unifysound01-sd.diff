@@ -1,0 +1,573 @@
+Index: sd/source/ui/animations/CustomAnimationDialog.cxx
+===================================================================
+RCS file: /cvs/graphics/sd/source/ui/animations/CustomAnimationDialog.cxx,v
+retrieving revision 1.18
+retrieving revision 1.18.108.2
+diff -u -p -u -p -r1.18 -r1.18.108.2
+--- sd/source/ui/animations/CustomAnimationDialog.cxx	10 May 2007 15:24:40 -0000	1.18
++++ sd/source/ui/animations/CustomAnimationDialog.cxx	29 Aug 2007 14:49:32 -0000	1.18.108.2
+@@ -178,6 +178,8 @@
+ #include "STLPropertySet.hxx"
+ #endif
+ 
++#include <avmedia/mediawindow.hxx>
++
+ #include "filedlg.hxx"
+ #include "strings.hrc"
+ #include "helpids.h"
+@@ -1280,7 +1282,6 @@ private:
+ 	FixedText*		mpFTTextDelay;
+ 
+ 	::com::sun::star::uno::Reference< ::com::sun::star::media::XPlayer > mxPlayer;
+-	::com::sun::star::uno::Reference< ::com::sun::star::media::XManager > mxManager;
+ };
+ 
+ 
+@@ -1940,15 +1941,6 @@ void CustomAnimationEffectTabPage::openS
+ 	mpLBSound->SelectEntryPos( (USHORT) nPos );
+ }
+ 
+-// TODO(Q3): This breaks encapsulation. Either export
+-// these strings from avmedia, or provide an XManager
+-// factory there
+-#ifdef WNT
+-#	define AVMEDIA_MANAGER_SERVICE_NAME "com.sun.star.media.Manager_DirectX"
+-#else
+-#	define AVMEDIA_MANAGER_SERVICE_NAME "com.sun.star.media.Manager_Java"
+-#endif
+-
+ void CustomAnimationEffectTabPage::onSoundPreview()
+ {
+ 	const USHORT nPos = mpLBSound->GetSelectEntryPos();
+@@ -1956,18 +1948,7 @@ void CustomAnimationEffectTabPage::onSou
+ 	if( nPos >= 2 ) try
+     {
+ 		const OUString aSoundURL( *(String*)maSoundList.GetObject( nPos-2 ) );
+-
+-		if( !mxManager.is() )
+-		{
+-			uno::Reference<lang::XMultiServiceFactory> xFac( ::comphelper::getProcessServiceFactory() );
+-
+-			mxManager.set(
+-				xFac->createInstance(
+-					::rtl::OUString::createFromAscii( AVMEDIA_MANAGER_SERVICE_NAME ) ),
+-				uno::UNO_QUERY_THROW );
+-		}
+-
+-		mxPlayer.set( mxManager->createPlayer( aSoundURL ), uno::UNO_QUERY_THROW );
++                mxPlayer.set( avmedia::MediaWindow::createPlayer( aSoundURL ), uno::UNO_QUERY_THROW ); 
+ 		mxPlayer->start();
+ 	}
+     catch( uno::Exception& e )
+Index: sd/source/ui/dlg/filedlg.cxx
+===================================================================
+RCS file: /cvs/graphics/sd/source/ui/dlg/filedlg.cxx,v
+retrieving revision 1.17
+retrieving revision 1.17.66.2
+diff -u -p -u -p -r1.17 -r1.17.66.2
+--- sd/source/ui/dlg/filedlg.cxx	27 Jun 2007 15:40:41 -0000	1.17
++++ sd/source/ui/dlg/filedlg.cxx	27 Nov 2007 12:24:48 -0000	1.17.66.2
+@@ -78,9 +78,6 @@
+ #include <com/sun/star/ui/dialogs/XFilePicker.hpp>
+ #endif
+ 
+-#ifndef _SOUND_HXX //autogen
+-#include <vcl/sound.hxx>
+-#endif
+ #ifndef _SV_MSGBOX_HXX
+ #include <vcl/msgbox.hxx>
+ #endif
+@@ -107,6 +104,7 @@
+ 
+ #include <svx/impgrf.hxx>
+ 
++#include <avmedia/mediawindow.hxx>
+ #include "filedlg.hxx"
+ #include "sdresid.hxx"
+ #include "strings.hrc"
+@@ -133,16 +131,18 @@ private:
+ 
+ 	css::uno::Reference< css::ui::dialogs::XFilePickerControlAccess > 	mxControlAccess;
+ 
+-	Sound						maSound;
++	css::uno::Reference< css::media::XPlayer > mxPlayer;
+     ULONG                       mnPlaySoundEvent;
+ 	BOOL						mbUsableSelection;
+ 	BOOL						mbLabelPlaying;
+-	BOOL						mbDuringPreparePlaying;
+ 
+ 	void						CheckSelectionState();
+ 	                            
+                                 DECL_LINK( PlayMusicHdl, void * );
+-                                DECL_LINK( StopMusicHdl, void * );
++
++    Timer                       maUpdateTimer;
++
++                                DECL_LINK( IsMusicStoppedHdl, void * );
+ 	
+ public:
+ 								SdFileDialog_Imp( const short nDialogType, sal_Bool	bUsableSelection );
+@@ -182,16 +182,18 @@ void SAL_CALL SdFileDialog_Imp::ControlS
+ // ------------------------------------------------------------------------
+ IMPL_LINK( SdFileDialog_Imp, PlayMusicHdl, void *, EMPTYARG )
+ {
++    maUpdateTimer.Stop();
+     mnPlaySoundEvent = 0;
+ 
++    if (mxPlayer.is())
++    { 
++        if (mxPlayer->isPlaying())
++            mxPlayer->stop();
++        mxPlayer.clear();
++    }
++
+ 	if( mbLabelPlaying )
+ 	{
+-        // switch from playing to not playing
+-
+-		// reset, so that sound file gets unlocked
+-        maSound.Stop();
+-		maSound.SetSoundName( String() );
+-		
+         try
+         {
+             mxControlAccess->setLabel( css::ui::dialogs::ExtendedFilePickerElementIds::PUSHBUTTON_PLAY, 
+@@ -208,28 +210,23 @@ IMPL_LINK( SdFileDialog_Imp, PlayMusicHd
+     }
+ 	else
+ 	{
+-        // switch from not playing to playing of current file
+-		if( maSound.IsPlaying() )
+-		{
+-            // reset, so that sound file gets unlocked
+-			maSound.Stop();
+-            maSound.SetSoundName( String() );
+-		}
+-
+-        INetURLObject	aUrl( GetPath() );
+-        String			aSoundFile( aUrl.GetMainURL( INetURLObject::NO_DECODE ) );
+-		
+-        if( aSoundFile.Len() > 0 && Sound::IsSoundFile(aSoundFile) )
++        rtl::OUString aUrl( GetPath() );
++        if ( aUrl.getLength() )
+         {
+-            maSound.SetNotifyHdl( LINK( this, SdFileDialog_Imp, StopMusicHdl ) );
+-			mbDuringPreparePlaying=TRUE;
+-            maSound.SetSoundName( aSoundFile );
+-            maSound.Play();
+-			
+-			ULONG nError = maSound.GetLastError();
+-			mbDuringPreparePlaying=FALSE;
+-            // guard against early stopping
+-            if( maSound.IsPlaying() && !nError)
++            try
++            {
++                mxPlayer.set( avmedia::MediaWindow::createPlayer( aUrl ) );
++                mxPlayer->start();
++                maUpdateTimer.SetTimeout( 100 );
++                maUpdateTimer.Start();
++            }
++            catch( css::uno::Exception& e )
++            {
++                (void)e;
++                mxPlayer.clear();
++            }
++
++            if (mxPlayer.is())
+             {
+                 try
+                 {
+@@ -245,11 +242,6 @@ IMPL_LINK( SdFileDialog_Imp, PlayMusicHd
+ #endif
+                 }
+             }
+-			else if(nError)
+-			{
+-				//reset error state of sound
+-				maSound.SetSoundName( String() );
+-			}
+ 		}
+ 	}
+ 
+@@ -257,16 +249,20 @@ IMPL_LINK( SdFileDialog_Imp, PlayMusicHd
+ }
+ 
+ // ------------------------------------------------------------------------
+-IMPL_LINK( SdFileDialog_Imp, StopMusicHdl, void *, EMPTYARG )
++IMPL_LINK( SdFileDialog_Imp, IsMusicStoppedHdl, void *, EMPTYARG )
+ {
+-	if(mbDuringPreparePlaying)
+-		return( 0L ); //don't reset the error state of maSound during prepare playing
++	::vos::OGuard aGuard( Application::GetSolarMutex() );
++
++    if (
++        mxPlayer.is() && mxPlayer->isPlaying() && 
++        mxPlayer->getMediaTime() < mxPlayer->getDuration()
++       )
++    {
++        maUpdateTimer.Start();
++        return 0L;
++    }
+ 
+-	 ::vos::OGuard aGuard( Application::GetSolarMutex() );
+ 
+-	// reset, so that sound file gets unlocked
+-	maSound.SetSoundName( String() );
+-	
+ 	if( mxControlAccess.is() )
+ 	{
+ 		try
+@@ -315,9 +311,10 @@ SdFileDialog_Imp::SdFileDialog_Imp( cons
+ 	FileDialogHelper( nDialogType, 0 ),
+     mnPlaySoundEvent( 0 ),
+ 	mbUsableSelection( bUsableSelection ),
+-	mbLabelPlaying(FALSE),
+-	mbDuringPreparePlaying(FALSE)
++	mbLabelPlaying(FALSE)
+ {
++	maUpdateTimer.SetTimeoutHdl(LINK(this, SdFileDialog_Imp, IsMusicStoppedHdl));
++
+     css::uno::Reference < ::com::sun::star::ui::dialogs::XFilePicker > xFileDlg = GetFilePicker();
+ 
+ 	// get the control access
+Index: sd/source/ui/func/fusel.cxx
+===================================================================
+RCS file: /cvs/graphics/sd/source/ui/func/fusel.cxx,v
+retrieving revision 1.50
+retrieving revision 1.50.64.1
+diff -u -p -u -p -r1.50 -r1.50.64.1
+--- sd/source/ui/func/fusel.cxx	27 Jun 2007 15:42:58 -0000	1.50
++++ sd/source/ui/func/fusel.cxx	30 Aug 2007 08:27:59 -0000	1.50.64.1
+@@ -60,9 +60,6 @@
+ #ifndef _GOODIES_IMAPOBJ_HXX //autogen
+ #include <svtools/imapobj.hxx>
+ #endif
+-#ifndef _SV_SOUND_HXX //autogen
+-#include <vcl/sound.hxx>
+-#endif
+ #include <svtools/urihelper.hxx>
+ #include <unotools/localfilehelper.hxx>
+ #include <svx/svxids.hrc>
+@@ -147,6 +144,7 @@
+ #ifndef _SVDUNDO_HXX
+ #include <svx/svdundo.hxx>
+ #endif
++#include <avmedia/mediawindow.hxx>
+ 
+ using namespace ::com::sun::star;
+ 
+@@ -174,7 +172,6 @@ FuSelection::FuSelection (
+       bSuppressChangesOfSelection(FALSE),
+       bMirrorSide0(FALSE),
+       nEditMode(SID_BEZIER_MOVE),
+-      pSound(NULL),
+       pWaterCanCandidate(NULL)
+ {
+ }
+@@ -205,8 +202,6 @@ FuSelection::~FuSelection()
+ 	HPUX_DTOR_BUG;
+ 	mpView->UnmarkAllPoints();
+ 	mpView->ResetCreationActive();
+-    delete pSound;
+-    pSound = NULL;
+ 
+ 	if ( mpView->GetDragMode() != SDRDRAG_MOVE )
+ 	{
+@@ -1226,20 +1221,6 @@ void FuSelection::SetEditMode(USHORT nMo
+ 
+ /*************************************************************************
+ |*
+-|*
+-|*
+-\************************************************************************/
+-
+-IMPL_LINK( FuSelection, SoundHasStoppedHdl, void*, EMPTYARG )
+-{
+-	pSound->SetNotifyHdl( Link() );
+-	pSound->SetSoundName( String() );
+-	return 0L;
+-}
+-
+-
+-/*************************************************************************
+-|*
+ |* Animation oder Interaktion ausfuehren
+ |*
+ \************************************************************************/
+@@ -1389,15 +1370,15 @@ BOOL FuSelection::AnimateObj(SdrObject* 
+ 
+ 	            case presentation::ClickAction_SOUND:
+ 	            {
+-	                // Sound asynchron abspielen
+-	                if( !pSound )
+-	                {
+-	                    pSound = new Sound();
+-	                }
+-
+-	                pSound->SetNotifyHdl( LINK( this, FuSelection, SoundHasStoppedHdl ) );
+-					pSound->SetSoundName( pInfo->maBookmark );
+-	                pSound->Play();
++                        try
++                        {
++                            mxPlayer.set( avmedia::MediaWindow::createPlayer( pInfo->maBookmark ) );
++                            mxPlayer->start();
++                        }
++                        catch( uno::Exception& e )
++                        {
++                            (void)e;
++                        }
+ 	                bAnimated = TRUE;
+ 	            }
+ 	            break;
+Index: sd/source/ui/func/fuslsel.cxx
+===================================================================
+RCS file: /cvs/graphics/sd/source/ui/func/fuslsel.cxx,v
+retrieving revision 1.22
+retrieving revision 1.22.184.1
+diff -u -p -u -p -r1.22 -r1.22.184.1
+--- sd/source/ui/func/fuslsel.cxx	12 Dec 2006 17:24:06 -0000	1.22
++++ sd/source/ui/func/fuslsel.cxx	30 Aug 2007 08:28:00 -0000	1.22.184.1
+@@ -50,9 +50,6 @@
+ #ifndef _SFXVIEWFRM_HXX //autogen
+ #include <sfx2/viewfrm.hxx>
+ #endif
+-#ifndef _SV_SOUND_HXX //autogen
+-#include <vcl/sound.hxx>
+-#endif
+ #ifndef _SV_MSGBOX_HXX //autogen
+ #include <vcl/msgbox.hxx>
+ #endif
+@@ -103,8 +100,7 @@ FuSlideSelection::FuSlideSelection (
+     : FuSlide(pViewSh, pWin, pView, pDoc, rReq),
+       bSubstShown(FALSE),
+       bPageHit(FALSE),
+-      bDragSelection(FALSE),
+-	  pSound(new Sound)
++      bDragSelection(FALSE)
+ {
+ 	pIsShowingEffectInfo = new FSS_IsShowingEffectInfo;
+ 	pIsShowingEffectInfo->bDisposed = FALSE;
+@@ -131,7 +127,6 @@ void FuSlideSelection::DoExecute( SfxReq
+ FuSlideSelection::~FuSlideSelection()
+ {
+     aDragTimer.Stop();
+-	delete pSound;
+ 
+ 	if( pIsShowingEffectInfo && pIsShowingEffectInfo->bIsShowingEffect )
+ 	{
+@@ -496,10 +491,6 @@ void FuSlideSelection::Activate()
+ 
+ void FuSlideSelection::Deactivate()
+ {
+-	// Sound nicht mehr blockieren, damit er in der Show gespielt werden kann
+-	if (pSound)
+-		pSound->Stop();
+-
+ 	FuSlide::Deactivate();
+ }
+ 
+Index: sd/source/ui/inc/fusel.hxx
+===================================================================
+RCS file: /cvs/graphics/sd/source/ui/inc/fusel.hxx,v
+retrieving revision 1.6
+retrieving revision 1.6.442.1
+diff -u -p -u -p -r1.6 -r1.6.442.1
+--- sd/source/ui/inc/fusel.hxx	14 Dec 2005 17:16:09 -0000	1.6
++++ sd/source/ui/inc/fusel.hxx	30 Aug 2007 08:28:00 -0000	1.6.442.1
+@@ -40,6 +40,8 @@
+ #include "fudraw.hxx"
+ #endif
+ 
++#include <com/sun/star/media/XPlayer.hpp>
++
+ class SdrHdl;
+ class SdrObject;
+ class Sound;
+@@ -96,10 +98,7 @@ protected:
+ 	BOOL            bSuppressChangesOfSelection;
+ 	BOOL            bMirrorSide0;
+ 	USHORT          nEditMode;
+-	Sound*          pSound;
+-
+-					DECL_LINK( SoundHasStoppedHdl, void* );
+-					DECL_STATIC_LINK( FuSelection, StaticSoundHasStoppedHdl, Sound* );
++        ::com::sun::star::uno::Reference< ::com::sun::star::media::XPlayer > mxPlayer;
+ 
+ private:
+     /** This pointer stores a canidate for assigning a style in the water
+Index: sd/source/ui/inc/fuslsel.hxx
+===================================================================
+RCS file: /cvs/graphics/sd/source/ui/inc/fuslsel.hxx,v
+retrieving revision 1.7
+retrieving revision 1.7.442.1
+diff -u -p -u -p -r1.7 -r1.7.442.1
+--- sd/source/ui/inc/fuslsel.hxx	14 Dec 2005 17:17:12 -0000	1.7
++++ sd/source/ui/inc/fuslsel.hxx	30 Aug 2007 08:28:00 -0000	1.7.442.1
+@@ -109,7 +109,6 @@ private:
+ 	Point		                aDragSelRectAnchor;  // fester Punkt des Selektionsrechtecks
+ 	Rectangle	                aDragSelRect;
+ 	Point		                aPosOfInsertMarker;
+-    Sound*		                pSound;
+ 	FSS_IsShowingEffectInfo*	pIsShowingEffectInfo;
+ 
+ 	void                        DrawInsertMarker(BOOL bShow);
+Index: sd/source/ui/inc/tpaction.hxx
+===================================================================
+RCS file: /cvs/graphics/sd/source/ui/inc/tpaction.hxx,v
+retrieving revision 1.10
+retrieving revision 1.10.182.1
+diff -u -p -u -p -r1.10 -r1.10.182.1
+--- sd/source/ui/inc/tpaction.hxx	12 Dec 2006 17:49:15 -0000	1.10
++++ sd/source/ui/inc/tpaction.hxx	30 Aug 2007 08:28:00 -0000	1.10.182.1
+@@ -56,9 +56,6 @@
+ #include <vcl/fixed.hxx>
+ #endif
+ 
+-#ifndef _SOUND_HXX //autogen
+-#include <vcl/sound.hxx>
+-#endif
+ #ifndef _SVX_DLG_CTRL_HXX //autogen
+ #include <svx/dlgctrl.hxx>
+ #endif
+Index: sd/source/ui/slideshow/slideshowimpl.cxx
+===================================================================
+RCS file: /cvs/graphics/sd/source/ui/slideshow/slideshowimpl.cxx,v
+retrieving revision 1.46
+retrieving revision 1.46.34.2
+diff -u -p -u -p -r1.46 -r1.46.34.2
+--- sd/source/ui/slideshow/slideshowimpl.cxx	2 Aug 2007 18:23:37 -0000	1.46
++++ sd/source/ui/slideshow/slideshowimpl.cxx	29 Aug 2007 14:49:32 -0000	1.46.34.2
+@@ -116,15 +116,7 @@
+ #include "slideshow.hrc"
+ #include "canvas/elapsedtime.hxx"
+ #include "canvas/prioritybooster.hxx"
+-
+-// TODO(Q3): This breaks encapsulation. Either export
+-// these strings from avmedia, or provide an XManager
+-// factory there
+-#ifdef WNT
+-#	define AVMEDIA_MANAGER_SERVICE_NAME "com.sun.star.media.Manager_DirectX"
+-#else
+-#	define AVMEDIA_MANAGER_SERVICE_NAME "com.sun.star.media.Manager_Java"
+-#endif 
++#include "avmedia/mediawindow.hxx"
+ 
+ using ::com::sun::star::uno::UNO_QUERY;
+ using ::com::sun::star::uno::UNO_QUERY_THROW;
+@@ -1694,17 +1686,7 @@ void SAL_CALL SlideshowImpl::click( cons
+ 	{
+ 		try
+ 		{
+-			if( !mxManager.is() )
+-			{
+-				uno::Reference<lang::XMultiServiceFactory> xFac( ::comphelper::getProcessServiceFactory() );
+-		                    
+-				mxManager.set(
+-					xFac->createInstance( 
+-						::rtl::OUString::createFromAscii( AVMEDIA_MANAGER_SERVICE_NAME ) ),
+-					uno::UNO_QUERY_THROW );
+-			}
+-
+-			mxPlayer.set( mxManager->createPlayer( pEvent->maStrBookmark ), uno::UNO_QUERY_THROW );
++                        mxPlayer.set(avmedia::MediaWindow::createPlayer(pEvent->maStrBookmark), uno::UNO_QUERY_THROW );
+ 			mxPlayer->start();
+ 		}
+ 		catch( uno::Exception& e )
+Index: sd/source/ui/slideshow/slideshowimpl.hxx
+===================================================================
+RCS file: /cvs/graphics/sd/source/ui/slideshow/slideshowimpl.hxx,v
+retrieving revision 1.23
+retrieving revision 1.23.120.1
+diff -u -p -u -p -r1.23 -r1.23.120.1
+--- sd/source/ui/slideshow/slideshowimpl.hxx	3 Apr 2007 16:16:22 -0000	1.23
++++ sd/source/ui/slideshow/slideshowimpl.hxx	29 Aug 2007 14:40:07 -0000	1.23.120.1
+@@ -400,7 +400,6 @@ private:
+ 	::com::sun::star::uno::Reference< ::com::sun::star::animations::XAnimationNode > mxPreviewAnimationNode;
+ 
+ 	::com::sun::star::uno::Reference< ::com::sun::star::media::XPlayer > mxPlayer;
+-	::com::sun::star::uno::Reference< ::com::sun::star::media::XManager > mxManager;
+ 
+     ::std::auto_ptr<PaneHider> mpPaneHider;
+ 
+Index: sd/source/ui/slidesorter/controller/SlsSelectionFunction.cxx
+===================================================================
+RCS file: /cvs/graphics/sd/source/ui/slidesorter/controller/SlsSelectionFunction.cxx,v
+retrieving revision 1.32
+retrieving revision 1.32.120.1
+diff -u -p -u -p -r1.32 -r1.32.120.1
+--- sd/source/ui/slidesorter/controller/SlsSelectionFunction.cxx	3 Apr 2007 16:17:50 -0000	1.32
++++ sd/source/ui/slidesorter/controller/SlsSelectionFunction.cxx	30 Aug 2007 08:28:00 -0000	1.32.120.1
+@@ -61,9 +61,6 @@
+ #include "ViewShellBase.hxx"
+ #endif
+ #include "DrawController.hxx"
+-#ifndef _SV_SOUND_HXX
+-#include <vcl/sound.hxx>
+-#endif
+ #ifndef _SFXVIEWFRM_HXX
+ #include <sfx2/viewfrm.hxx>
+ #endif
+Index: sd/source/ui/view/drviewse.cxx
+===================================================================
+RCS file: /cvs/graphics/sd/source/ui/view/drviewse.cxx,v
+retrieving revision 1.71
+retrieving revision 1.69.34.3
+diff -u -p -u -p -r1.71 -r1.69.34.3
+--- sd/source/ui/view/drviewse.cxx	10 Oct 2007 15:32:44 -0000	1.71
++++ sd/source/ui/view/drviewse.cxx	16 Oct 2007 08:44:30 -0000	1.69.34.3
+@@ -126,9 +126,6 @@
+ #ifndef _URLOBJ_HXX //autogen
+ #include <tools/urlobj.hxx>
+ #endif
+-#ifndef _SV_SOUND_HXX
+-#include <vcl/sound.hxx>
+-#endif
+ 
+ // #UndoRedo#
+ #ifndef _SFXSLSTITM_HXX
+@@ -218,6 +215,9 @@
+ #ifndef _COMPHELPER_PROCESSFACTORY_HXX_
+ #include <comphelper/processfactory.hxx>
+ #endif
++#ifndef _AVMEDIA_MEDIAWINDOW_HXX //autogen
++#include <avmedia/mediawindow.hxx>
++#endif
+ 
+ #include "Window.hxx"
+ 
+@@ -1691,7 +1691,7 @@ void DrawViewShell::InsertURLButton(cons
+ 			form::FormButtonType eButtonType = form::FormButtonType_URL;
+ 			aTmp <<= eButtonType;
+ 			xPropSet->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "ButtonType" )), aTmp );
+-			if ( Sound::IsSoundFile( rURL ) )
++			if ( ::avmedia::MediaWindow::isMediaURL( rURL ) )
+ 			{
+ 				// #105638# OJ
+ 				aTmp <<= sal_True;
+@@ -1732,7 +1732,7 @@ void DrawViewShell::InsertURLButton(cons
+ 		aTmp <<= eButtonType;
+ 		xPropSet->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "ButtonType" )), aTmp );
+ 		// #105638# OJ
+-		if ( Sound::IsSoundFile( rURL ) )
++		if ( ::avmedia::MediaWindow::isMediaURL( rURL ) )
+ 		{
+ 			aTmp <<= sal_True;
+ 			xPropSet->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "DispatchURLInternal" )), aTmp );
+Index: sd/source/ui/view/sdview4.cxx
+===================================================================
+RCS file: /cvs/graphics/sd/source/ui/view/sdview4.cxx,v
+retrieving revision 1.32
+retrieving revision 1.31.184.2
+diff -u -p -u -p -r1.32 -r1.31.184.2
+--- sd/source/ui/view/sdview4.cxx	6 Sep 2007 13:56:57 -0000	1.32
++++ sd/source/ui/view/sdview4.cxx	4 Oct 2007 11:11:33 -0000	1.31.184.2
+@@ -56,9 +56,6 @@
+ #ifndef _SV_MSGBOX_HXX //autogen
+ #include <vcl/msgbox.hxx>
+ #endif
+-#ifndef _SV_SOUND_HXX //autogen
+-#include <vcl/sound.hxx>
+-#endif
+ #ifndef _URLBMK_HXX //autogen
+ #include <svtools/urlbmk.hxx>
+ #endif
