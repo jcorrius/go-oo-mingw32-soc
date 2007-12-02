@@ -24,8 +24,15 @@ def isHidden (filepath):
 
     return False
 
+def addDirectoryToArchive (zipobj, name):
+    dirobj = zipfile.ZipInfo(name)
+    # without setting external attribute to the following value, UNO registration
+    # fails on Linux.
+    dirobj.external_attr = 1106051088
+    zipobj.writestr(dirobj, '')
+
 def expandDirTree (_files):
-    _files2 = []
+    _files2, dirs2 = [], []
     for _file in _files:
         if os.path.isfile(_file):
             # this is a file.  add it without further processing.
@@ -37,21 +44,32 @@ def expandDirTree (_files):
             continue
 
         for root, dirs, files in os.walk(_file):
+            if not isHidden(root):
+                dirs2.append(root)
             for _dirfile in files:
                 _dirfile = root + '/' + _dirfile
                 if not isHidden(_dirfile):
                     _files2.append(_dirfile)
 
-    return _files2
+    return _files2, dirs2
 
 def pack (arcfile, files, paths):
-#   print("archiving to "+ arcfile)
-    zipobj = zipfile.ZipFile(arcfile, 'w')
-    files = expandDirTree(files)
+    zipobj = zipfile.ZipFile(arcfile, 'w', zipfile.ZIP_DEFLATED)
+    files, dirs = expandDirTree(files)
+
+    dirs.sort()
+    for _dir in dirs:
+        _dir = stripPath(_dir, paths)
+        _dir = _dir[1:]+'/'
+        print("  adding " + _dir)
+        addDirectoryToArchive(zipobj, _dir)
+
+    files.sort()
     for file in files:
-        arcname = stripPath(file, paths)
-        zipobj.write(file, arcname)
-#       print("  adding file " + file + " -> " + arcname)
+        arcname = stripPath(file, paths)[1:]
+        zipobj.write(file, arcname, zipfile.ZIP_DEFLATED)
+        print("  adding " + arcname)
+
     zipobj.close()
 
 def main (args):

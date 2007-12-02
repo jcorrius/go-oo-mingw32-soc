@@ -39,11 +39,13 @@ EXTPACKFILES= \
 	$(BIN)/$(SHL1TARGET).oxt \
 	$(BIN)/$(SHL1TARGET).rdb \
 	$(LB)/$(SHL1TARGET).so \
-	../workben/addon_pkg/translation \
-	../workben/addon_pkg/*.xcu
+	../ext/translation \
+	../ext/META-INF \
+	../ext/description.xml \
+	../ext/*.xcu
 
 EXTPACKPATH= \
-	-p ../workben/addon_pkg \
+	-p ../ext \
 	-p $(BIN) \
 	-p $(LB)
 
@@ -52,5 +54,5 @@ EXTPACKPATH= \
 .INCLUDE :	target.mk
 
 ALLTAR:
-	$(REGCOMP) -register -r $(BIN)/$(SHL1TARGET).rdb -c $(LB)/$(SHL1TARGET).so
+	$(REGCOMP) -register -wop -r $(BIN)/$(SHL1TARGET).rdb -c $(LB)/$(SHL1TARGET).so
 	python ./packExtension.py $(EXTPACKPATH) $(EXTPACKFILES)

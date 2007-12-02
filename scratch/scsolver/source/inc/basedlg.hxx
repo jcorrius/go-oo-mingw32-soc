@@ -29,6 +29,7 @@
 #ifndef _BASEDLG_HXX_
 #define _BASEDLG_HXX_
 
+#include "tool/global.hxx"
 #include <unoglobal.hxx>
 #include <memory>
 #include <com/sun/star/awt/PushButtonType.hpp>

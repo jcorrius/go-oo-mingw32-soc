@@ -38,6 +38,7 @@
 
 #include <com/sun/star/ui/dialogs/XExecutableDialog.hpp>
 
+#include "tool/global.hxx"
 #include "type.hxx"
 #include <vector>
 #include <memory>
@@ -48,11 +49,8 @@ class ResMgr;
 #include <tools/resmgr.hxx>
 #endif
 
-#define	SERVICE_NAME		"org.openoffice.sc.solver.Solver"
+#define	SERVICE_NAME		"org.go-oo.CalcSolver"
 #define	IMPLEMENTATION_NAME	"scsolver.SolverImpl"
-
-using namespace ::com::sun::star;
-using namespace ::com::sun::star::uno;
 
 namespace com { namespace sun { namespace star { 
 	
@@ -92,49 +90,51 @@ class SolverImpl : public ::cppu::WeakImplHelper6<
 {
 public:
 
-    SolverImpl(const Reference< ::com::sun::star::uno::XComponentContext >& xContext);
+    SolverImpl(const ::com::sun::star::uno::Reference< ::com::sun::star::uno::XComponentContext >& xContext);
     ~SolverImpl();
 
     //--------------------------------------------------------------------------
     // UNO Component Interface Methods
 
     // XInitialization
-    virtual void SAL_CALL initialize( const Sequence< Any >& aArgs )
+    virtual void SAL_CALL initialize( const ::com::sun::star::uno::Sequence< Any >& aArgs )
         throw (::com::sun::star::uno::Exception);
 
     // XServiceInfo
     virtual rtl::OUString SAL_CALL getImplementationName()
-        throw ( RuntimeException );
+        throw (::com::sun::star::uno::RuntimeException);
     virtual sal_Bool SAL_CALL supportsService( rtl::OUString const & )
-        throw ( RuntimeException );
+        throw (::com::sun::star::uno::RuntimeException);
     virtual Sequence< rtl::OUString > SAL_CALL getSupportedServiceNames()
-        throw ( RuntimeException );
+        throw (::com::sun::star::uno::RuntimeException);
 
     // XDispatchProvider
-    virtual Reference< frame::XDispatch > SAL_CALL queryDispatch( 
-        const util::URL&, const ::rtl::OUString &, sal_Int32 )
-        throw ( RuntimeException );
+    virtual ::com::sun::star::uno::Reference< ::com::sun::star::frame::XDispatch > SAL_CALL queryDispatch( 
+        const ::com::sun::star::util::URL&, const ::rtl::OUString &, sal_Int32 )
+        throw (::com::sun::star::uno::RuntimeException);
         
-    virtual Sequence< Reference< frame::XDispatch > > SAL_CALL queryDispatches(
-        const Sequence< frame::DispatchDescriptor >& )
-        throw ( RuntimeException );
+    virtual ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Reference< ::com::sun::star::frame::XDispatch > > SAL_CALL 
+        queryDispatches(const ::com::sun::star::uno::Sequence< ::com::sun::star::frame::DispatchDescriptor >& )
+        throw (::com::sun::star::uno::RuntimeException);
         
     // XDispatch
-    virtual void SAL_CALL dispatch( const util::URL&, const Sequence< beans::PropertyValue >& )
-        throw( RuntimeException );
+    virtual void SAL_CALL dispatch( const ::com::sun::star::util::URL&, 
+                                    const ::com::sun::star::uno::Sequence< ::com::sun::star::beans::PropertyValue >& )
+        throw(::com::sun::star::uno::RuntimeException);
         
-    virtual void SAL_CALL addStatusListener( const Reference< frame::XStatusListener >&, 
-		const util::URL& ) throw ( RuntimeException );
+    virtual void SAL_CALL addStatusListener( const ::com::sun::star::uno::Reference< ::com::sun::star::frame::XStatusListener >&, 
+		const ::com::sun::star::util::URL& ) 
+        throw (::com::sun::star::uno::RuntimeException);
         
     virtual void SAL_CALL removeStatusListener( 
-		const Reference< frame::XStatusListener >&, const util::URL& )
-        throw ( RuntimeException );
+		const ::com::sun::star::uno::Reference< ::com::sun::star::frame::XStatusListener >&, const ::com::sun::star::util::URL& )
+        throw (::com::sun::star::uno::RuntimeException);
 
     // XNotifyingDispatch
     virtual void SAL_CALL dispatchWithNotification( 
-        const util::URL&, const Sequence< beans::PropertyValue >&, 
-		const Reference< frame::XDispatchResultListener >& )
-        throw ( RuntimeException );
+        const ::com::sun::star::util::URL&, const ::com::sun::star::uno::Sequence< ::com::sun::star::beans::PropertyValue >&, 
+		const ::com::sun::star::uno::Reference< ::com::sun::star::frame::XDispatchResultListener >& )
+        throw (::com::sun::star::uno::RuntimeException);
 
     // XExecutableDialog
 	virtual void SAL_CALL setTitle( const ::rtl::OUString& aTitle )
