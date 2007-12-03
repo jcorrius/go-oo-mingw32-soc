@@ -36,18 +36,9 @@ index e8e06b6..6c231fa 100644
              }
          } catch (RuntimeException e) {
 diff --git a/ucb/source/ucp/gvfs/makefile.mk b/ucb/source/ucp/gvfs/makefile.mk
-index b071745..630ffee 100644
+index b071745..074a9fa 100644
 --- ucb/source/ucp/gvfs/makefile.mk
 +++ ucb/source/ucp/gvfs/makefile.mk
-@@ -58,7 +58,7 @@ LINKFLAGS+=-z nodefs
- .IF "$(OS)" == "LINUX"
- # hack for faked SO environment
- CFLAGS+=-gdwarf-2
--PKGCONFIG_LIBS!:=-Wl,--export-dynamic $(PKGCONFIG_LIBS:s/ -llinc//:s/ -lbonobo-activation//:s/ -lgconf-2//:s/ -lORBit-2//:s/ -lIDL-2//:s/ -lgmodule-2.0//:s/ -lgobject-2.0//:s/ -lgthread-2.0//)
-+PKGCONFIG_LIBS!:=-Wl,--export-dynamic $(PKGCONFIG_LIBS:s/ -llinc//:s/ -lbonobo-activation//:s/ -lgconf-2//:s/ -lORBit-2//:s/ -lIDL-2//:s/ -lgmodule-2.0//:s/ -lgthread-2.0//)
- .ENDIF          # "$(OS)" == "LINUX"
- 
- .IF "$(debug)" != "" || "$(DEBUG)" != ""
 @@ -88,6 +88,7 @@ SHL1STDLIBS=\
  	$(CPPULIB) \
  	$(SALLIB)  \
@@ -57,74 +48,88 @@ index b071745..630ffee 100644
  
  SHL1STDLIBS+=$(PKGCONFIG_LIBS)
 diff --git a/ucb/source/ucp/gvfs/provider.cxx b/ucb/source/ucp/gvfs/provider.cxx
-index 99cbb9e..005d3a7 100644
+index 99cbb9e..12430a5 100644
 --- ucb/source/ucp/gvfs/provider.cxx
 +++ ucb/source/ucp/gvfs/provider.cxx
-@@ -37,6 +37,10 @@
+@@ -37,6 +37,9 @@
  #include "precompiled_ucb.hxx"
  
  #include <ucbhelper/contentidentifier.hxx>
 +#include <osl/mutex.hxx>
 +#include <vcl/svapp.hxx>
 +
-+#include <glib-object.h>
  #include <libgnomevfs/gnome-vfs-init.h>
  #include "provider.hxx"
  #include "content.hxx"
-@@ -202,6 +206,28 @@ component_writeInfo( void */*pServiceManager*/,
+@@ -202,6 +205,55 @@ component_writeInfo( void */*pServiceManager*/,
  			   ::gvfs::ContentProvider::getImplementationName_Static(),
  			   ::gvfs::ContentProvider::getSupportedServiceNames_Static() );
  }
 +
-+static osl::Mutex s_aLock;
-+static bool s_bInitialized = false;
-+
-+static gboolean trigger_gnome_vfs_init( void * )
++/* This class is here to be able to initialize gnome-vfs in the main thread */
++class GnomeVFSInitializator
 +{
-+	osl::Guard< osl::Mutex > aGuard( osl::Mutex::getGlobalMutex() );
++private:
++    osl::Mutex m_aLock;
++    bool m_bInitialized;
 +
-+	// this must be performed in the same thread where we initialized
-+	// Gtk+ (if we did)
-+	if (!gnome_vfs_initialized ())
-+		gnome_vfs_init ();
-+	if (!auth_queue)
-+		auth_queue = g_private_new( auth_queue_destroy );
++public:
++    GnomeVFSInitializator() : m_bInitialized( false ) {}
 +
-+	s_aLock.acquire();
-+	s_bInitialized = true;
-+	s_aLock.release();
++    void init()
++    {
++        Application::PostUserEvent( LINK( this, GnomeVFSInitializator, ImplInitializeGnomeVFS ) );
 +
-+	return FALSE;
++        // cannot use a condition variable here, leads to a deadlock
++        while (1)
++        {
++            {
++                osl::MutexGuard aGuard( m_aLock );
++                if ( m_bInitialized )
++                    break;
++            }
++            Application::Yield();
++        }
++    }
++
++private:
++    DECL_LINK( ImplInitializeGnomeVFS, void* );
++};
++
++IMPL_LINK( GnomeVFSInitializator, ImplInitializeGnomeVFS, void*, EMPTYARG )
++{
++    osl::MutexGuard aGuard( osl::Mutex::getGlobalMutex() );
++
++    // this must be performed in the same thread where we initialized
++    // Gtk+ (if we did)
++    if ( !gnome_vfs_initialized () )
++        gnome_vfs_init ();
++    if ( !auth_queue )
++        auth_queue = g_private_new( auth_queue_destroy );
++
++    m_aLock.acquire();
++    m_bInitialized = true;
++    m_aLock.release();
++
++    return 0;
 +}
 +
  extern "C" void * SAL_CALL
  component_getFactory( const sal_Char *pImplName,
  		      void           *pServiceManager,
-@@ -209,12 +235,22 @@ component_getFactory( const sal_Char *pImplName,
+@@ -209,13 +261,8 @@ component_getFactory( const sal_Char *pImplName,
  {
  	void * pRet = 0;
  
-+	// crude gtkplug check, from fpicker/source/unx/gnome/FPentry.cxx
-+	if ( !g_type_from_name( "GdkDisplay" ) )
-+		trigger_gnome_vfs_init( NULL ); // we must call directly
-+	else
- 	{
+-	{
 -		osl::Guard< osl::Mutex > aGuard( osl::Mutex::getGlobalMutex() );
 -		if (!gnome_vfs_initialized ())
 -			gnome_vfs_init ();
 -		if (!auth_queue)
 -			auth_queue = g_private_new( auth_queue_destroy );
-+		// we must call from the main thread
-+		// (from fpicker/source/unx/gnome/SalGtkPicker.cxx)
-+		g_timeout_add_full( G_PRIORITY_HIGH_IDLE, 0, (GSourceFunc)trigger_gnome_vfs_init, NULL, NULL );
-+		while (1)
-+		{
-+			s_aLock.acquire();
-+			if ( s_bInitialized )
-+				break;
-+			s_aLock.release();
-+			Application::Yield();
-+		}
- 	}
+-	}
++	GnomeVFSInitializator aInitializator;
++	aInitializator.init();
  
  	uno::Reference< lang::XMultiServiceFactory > xSMgr
+ 		(reinterpret_cast< lang::XMultiServiceFactory * >( pServiceManager ) );
