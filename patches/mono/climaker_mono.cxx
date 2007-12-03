@@ -258,7 +258,7 @@ class UnoHelper
         // get rdb tdprovider factory
         mxTDprov_factory = Reference< lang::XSingleComponentFactory > (
             ::cppu::loadSharedLibComponentFactory(
-                OUSTR("regtypeprov.uno" SAL_DLLEXTENSION), OUString(),
+                OUSTR("bootstrap.uno" SAL_DLLEXTENSION), OUString(),
                 OUSTR("com.sun.star.comp.stoc.RegistryTypeDescriptionProvider"),
                 Reference< lang::XMultiServiceFactory >(
                     mxContext->getServiceManager(), UNO_QUERY ),
@@ -267,7 +267,7 @@ class UnoHelper
         {
             throw RuntimeException(
                 OUSTR("cannot get registry typedescription provider: "
-                      "regtypeprov.uno" SAL_DLLEXTENSION "!"),
+                      "bootstrap.uno" SAL_DLLEXTENSION "!"),
                 Reference< XInterface >() );
         }
     }
