@@ -54,7 +54,7 @@ EXTPACKPATH= \
 .INCLUDE :	target.mk
 
 COMP=
-#COMP=build_ext
+
 ALLTAR: $(COMP)
 
 build_ext:
