@@ -1,3 +1,5 @@
+SUBDIRS=sdf
+
 EXTRA_DIST=\
 	Draft.jpg \
 	Novell.dic \
