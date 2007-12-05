@@ -241,7 +241,7 @@ OUString SolverImpl::getResStr( int resid )
 	if ( pResMgr )
         return OUString( String( ResId( resid, *getResMgr() ) ) );
     else
-        OUString();
+        return OUString();
 #endif
 }
 
