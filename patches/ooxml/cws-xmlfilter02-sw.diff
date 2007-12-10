@@ -1,3 +1,13 @@
+--- sw/inc/IDocumentSettingAccess.hxx	27 Sep 2007 07:54:04 -0000	1.7
++++ sw/inc/IDocumentSettingAccess.hxx	29 Nov 2007 14:24:30 -0000	1.7.28.1
+@@ -90,6 +90,7 @@ namespace com { namespace sun { namespac
+ 
+          UNIX_FORCE_ZERO_EXT_LEADING,
+          USE_OLD_PRINTER_METRICS,
++         TABS_RELATIVE_TO_INDENT,
+          // COMPATIBILITY FLAGS END
+ 
+          BROWSE_MODE,
 --- sw/inc/cmdid.h	18 Jul 2007 12:54:22 -0000	1.73
 +++ sw/inc/cmdid.h	12 Oct 2007 07:49:09 -0000	1.73.104.1
 @@ -898,6 +898,7 @@ Achtung: Ab sofort sind in diesem File k
@@ -8,6 +18,26 @@
  
  /*--------------------------------------------------------------------
  	Bereich: Hilfe
+--- sw/inc/doc.hxx	27 Sep 2007 07:59:12 -0000	1.142
++++ sw/inc/doc.hxx	29 Nov 2007 14:24:30 -0000	1.142.26.1
+@@ -584,6 +584,9 @@ class SwDoc :
+     // SO8pu8
+     // mbOldPrinterMetrics                      def = FALSE, hidden
+     //
++    // SO9
++    // #i24363# tab stops relative to indent
++    // mbTabRelativeToIndent                    def = TRUE, hidden
+ 
+     bool mbParaSpaceMax                     : 1;
+     bool mbParaSpaceMaxAtPages              : 1;
+@@ -611,6 +614,7 @@ class SwDoc :
+     bool mbClipAsCharacterAnchoredWriterFlyFrames   : 1;   // OD 2006-04-13 #b6402800#
+     bool mbUnixForceZeroExtLeading                  : 1;   // FME 2006-10-09 #i60945#
+     bool mbOldPrinterMetrics                        : 1;   // FME 2007-05-14 #147385#
++    bool mbTabRelativeToIndent;                            // #i24363# tab stops relative to indent
+ 
+ 	// #i78591#
+ 	sal_uInt32  n32DummyCompatabilityOptions1;
 --- sw/inc/unoprnms.hxx	18 Jul 2007 12:55:53 -0000	1.121
 +++ sw/inc/unoprnms.hxx	12 Oct 2007 07:49:09 -0000	1.121.108.1
 @@ -789,7 +789,8 @@ enum SwPropNameIds
@@ -20,6 +50,240 @@
  };
  
  
+--- sw/inc/viewsh.hxx	27 Sep 2007 08:17:31 -0000	1.59
++++ sw/inc/viewsh.hxx	29 Nov 2007 14:24:30 -0000	1.59.28.1
+@@ -408,6 +408,9 @@ public:
+     // compatible behaviour of tabs
+     void SetTabCompat( bool bNew );
+ 
++    //#i24363# tab stops relative to indent
++    void SetTabsRelativeToIndent( bool bNew );
++
+     // font metric attribute "External Leading" should be considered
+     void SetAddExtLeading( bool bNew );
+ 
+--- sw/source/core/doc/doc.cxx	27 Sep 2007 08:32:40 -0000	1.60
++++ sw/source/core/doc/doc.cxx	29 Nov 2007 14:29:03 -0000	1.60.30.1
+@@ -299,6 +299,7 @@ bool SwDoc::get(/*[in]*/ DocumentSetting
+         // <--
+         case UNIX_FORCE_ZERO_EXT_LEADING: return mbUnixForceZeroExtLeading;
+         case USE_OLD_PRINTER_METRICS: return mbOldPrinterMetrics;
++        case TABS_RELATIVE_TO_INDENT : return mbTabRelativeToIndent;
+          // COMPATIBILITY FLAGS END
+ 
+         case BROWSE_MODE: return mbBrowseMode;
+@@ -411,7 +412,9 @@ void SwDoc::set(/*[in]*/ DocumentSetting
+         case USE_OLD_PRINTER_METRICS:            
+             mbOldPrinterMetrics = value;
+             break;
+-
++        case TABS_RELATIVE_TO_INDENT: 
++            mbTabRelativeToIndent = value;
++        break;
+          // COMPATIBILITY FLAGS END
+ 
+         case BROWSE_MODE:
+--- sw/source/core/doc/docnew.cxx	27 Sep 2007 08:36:19 -0000	1.79
++++ sw/source/core/doc/docnew.cxx	29 Nov 2007 14:29:03 -0000	1.79.30.1
+@@ -416,6 +416,7 @@ SwDoc::SwDoc() :
+     mbClipAsCharacterAnchoredWriterFlyFrames= false;        // hidden
+     mbUnixForceZeroExtLeading               = false;        // hidden
+     mbOldPrinterMetrics                     = false;        // hidden
++    mbTabRelativeToIndent                   = true;         // hidden
+ 
+     //
+     // COMPATIBILITY FLAGS END
+--- sw/source/core/text/inftxt.hxx	27 Sep 2007 09:13:19 -0000	1.54
++++ sw/source/core/text/inftxt.hxx	29 Nov 2007 14:26:25 -0000	1.54.28.1
+@@ -118,9 +118,8 @@ class SwLineInfo
+ public:
+ 	inline SwLineInfo( const SwAttrSet& rAttrSet )
+ 		   { CtorInitLineInfo( rAttrSet ); }
+-	// Liefert den Tabstop, der auf LinePos folgt, oder 0.
+-	const SvxTabStop *GetTabStop( const SwTwips nLinePos,
+-								 const SwTwips nLeft,
++    // #i24363# tab stops relative to indent - returns the tab stop following nSearchPos or NULL
++    const SvxTabStop *GetTabStop( const SwTwips nSearchPos,
+ 								 const SwTwips nRight ) const;
+ 	inline const SvxLineSpacingItem *GetLineSpacing() const { return pSpace; }
+ 	inline KSHORT GetDefTabStop() const { return nDefTabStop; }
+--- sw/source/core/text/txttab.cxx	27 Sep 2007 09:21:54 -0000	1.27
++++ sw/source/core/text/txttab.cxx	29 Nov 2007 14:26:02 -0000	1.27.32.1
+@@ -67,31 +67,21 @@
+  *                    SwLineInfo::GetTabStop()
+  *************************************************************************/
+ 
+-/* Die Werte in SvxTabStop::nTabPos liegen immer relativ zum linken PrtRand
+- * vor. Tabs, die im Bereich des Erstzeileneinzugs liegen, sind also negativ.
+- * nLeft  ist der linke PrtRand
+- * nRight ist der rechte PrtRand
+- * nLinePos die aktuelle Position.
+- * Es wird der erste Tabstop returnt, der groesser ist als nLinePos.
+- */
+-
+-const SvxTabStop *SwLineInfo::GetTabStop( const SwTwips nLinePos,
+-	const SwTwips nLeft, const SwTwips nRight ) const
++//#i24363# tab stops relative to indent
++/* Return the first tab stop that is > nSearchPos.
++ * If the tab stop is outside the print area, we
++ * return 0 if it is not the first tab stop.*/
++const SvxTabStop *SwLineInfo::GetTabStop( const SwTwips nSearchPos,
++                                         const SwTwips nRight ) const
+ {
+ 	// Mit den KSHORTs aufpassen, falls nLinePos < nLeft
+-	SwTwips nPos = nLinePos;
+-	nPos -= nLeft;
+ 	for( MSHORT i = 0; i < pRuler->Count(); ++i )
+ 	{
+ 		const SvxTabStop &rTabStop = pRuler->operator[](i);
+ 		if( rTabStop.GetTabPos() > SwTwips(nRight) )
+-		{
+-			if ( i )
+-				return 0;
+-			else
+-				return &rTabStop;
+-		}
+-		if( rTabStop.GetTabPos() > nPos )
++            return i ? 0 : &rTabStop;
++
++        if( rTabStop.GetTabPos() > nSearchPos )
+ 			return &rTabStop;
+ 	}
+ 	return 0;
+@@ -118,32 +108,50 @@ SwTabPortion *SwTxtFormatter::NewTabPort
+ 		if( pLastTab->PostFormat( rInf ) )
+ 			return 0;
+ 
+-	// Wir suchen den naechsten Tab. Wenn gerade ein rechts-Tab unterwegs
+-	// ist, so koennen wir uns nicht auf rInf.X() beziehen.
+-    SwTwips nTabPos = rInf.GetLastTab() ? rInf.GetLastTab()->GetTabPos() : 0;
+-	if( nTabPos < rInf.X() )
+-		nTabPos = rInf.X();
+-
+     xub_Unicode cFill = 0;
+     xub_Unicode cDec = 0;
+ 	SvxTabAdjust eAdj;
+ 
+ 	KSHORT nNewTabPos;
+ 	{
+-	   /*
+-		nPos ist der Offset in der Zeile.
+-		Die Tabulatoren haben ihren 0-Punkt bei Frm().Left().
+-		Die Zeilen beginnen ab Frm.Left() + Prt.Left().
+-		In dieser Methode wird zwischen beiden Koordinatensystemen
+-		konvertiert (vgl. rInf.GetTabPos).
+-	   */
+-		const SwTwips nTabLeft = pFrm->Frm().Left() +
+-                                 ( pFrm->IsRightToLeft() ?
+-                                   pFrm->GetAttrSet()->GetLRSpace().GetRight() :
+-                                   pFrm->GetAttrSet()->GetLRSpace().GetTxtLeft() );
++        const bool bRTL = pFrm->IsRightToLeft();
++        // #i24363# tab stops relative to indent
++        // nTabLeft: The absolute value, the tab stops are relative to: Tabs origin.
++        //
++        const SwTwips nTmpIndent = pFrm->GetTxtNode()->getIDocumentSettingAccess()->get(IDocumentSettingAccess::TABS_RELATIVE_TO_INDENT) ?
++                                   pFrm->GetAttrSet()->GetLRSpace().GetTxtLeft() : 0;
++
++        const SwTwips nTabLeft = bRTL ?
++                                 pFrm->Frm().Right() - 
++                                 nTmpIndent :
++                                 pFrm->Frm().Left() + 
++                                 nTmpIndent;
++                                   
++        //
++        // nLinePos: The absolute position, where we started the line formatting.
++        //
++        SwTwips nLinePos = GetLeftMargin();
++        if ( bRTL )
++        {
++            Point aPoint( nLinePos, 0 );
++            pFrm->SwitchLTRtoRTL( aPoint );
++            nLinePos = aPoint.X();
++        }
++
++        //
++        // nTabPos: The current position, relative to the line start.
++        //
++        SwTwips nTabPos = rInf.GetLastTab() ? rInf.GetLastTab()->GetTabPos() : 0;
++       if( nTabPos < rInf.X() )
++           nTabPos = rInf.X();
++
++        //
++        // nCurrentAbsPos: The current position in absolute coordinates.
++        //
++        const SwTwips nCurrentAbsPos = bRTL ?
++                                       nLinePos - nTabPos :                    
++                                       nLinePos + nTabPos;
+ 
+-		const SwTwips nLinePos = GetLeftMargin();
+-		const SwTwips nLineTab = nLinePos + nTabPos;
+         SwTwips nMyRight = Right();
+ 
+         if ( pFrm->IsVertical() )
+@@ -154,6 +162,14 @@ SwTabPortion *SwTxtFormatter::NewTabPort
+         }
+ 
+ 		SwTwips nNextPos;
++
++        // #i24363# tab stops relative to indent
++        // nSearchPos: The current position relative to the tabs origin.
++        //
++       const SwTwips nSearchPos = bRTL ?
++                                   nTabLeft - nCurrentAbsPos :
++                                   nCurrentAbsPos - nTabLeft;
++
+         //
+         // First, we examine the tab stops set at the paragraph style or
+         // any hard set tab stops:
+@@ -161,7 +177,7 @@ SwTabPortion *SwTxtFormatter::NewTabPort
+         // default tab stop.
+         //
+ 		const SvxTabStop* pTabStop =
+-            aLineInf.GetTabStop( nLineTab, nTabLeft, nMyRight );
++            aLineInf.GetTabStop( nSearchPos, nMyRight );
+ 		if( pTabStop )
+ 		{
+ 			cFill = ' ' != pTabStop->GetFill() ? pTabStop->GetFill() : 0;
+@@ -183,8 +199,7 @@ SwTabPortion *SwTxtFormatter::NewTabPort
+ 					nDefTabDist = SVX_TAB_DEFDIST;
+ 				aLineInf.SetDefTabStop( nDefTabDist );
+ 			}
+-			SwTwips	nCount = nLineTab;
+-			nCount -= nTabLeft;
++            SwTwips nCount = nSearchPos;
+ 
+ 			// Bei negativen Werten rundet "/" auf, "%" liefert negative Reste,
+ 			// bei positiven Werten rundet "/" ab, "%" liefert positvie Reste!
+@@ -196,7 +211,8 @@ SwTabPortion *SwTxtFormatter::NewTabPort
+             // --> FME 2004-09-21 #117919 Minimum tab stop width is 1 or 51 twips:
+             const SwTwips nMinimumTabWidth = pFrm->GetTxtNode()->getIDocumentSettingAccess()->get(IDocumentSettingAccess::TAB_COMPAT) ? 0 : 50;
+             // <--
+-			if( nNextPos + nTabLeft <= nLineTab + nMinimumTabWidth )
++           if( (  bRTL && nTabLeft - nNextPos >= nCurrentAbsPos - nMinimumTabWidth ) ||
++                ( !bRTL && nNextPos + nTabLeft <= nCurrentAbsPos + nMinimumTabWidth  ) )
+ 				nNextPos += nDefTabDist;
+ 			cFill = 0;
+ 			eAdj = SVX_TAB_ADJUST_LEFT;
+@@ -210,14 +226,16 @@ SwTabPortion *SwTxtFormatter::NewTabPort
+ 			if( pPor )
+ 				nForced = pPor->Width();
+ 		}
+-		if( nTabLeft + nForced > nLineTab && nNextPos > 0 )
++       
++        if( nNextPos > 0 &&
++             (  bRTL && nTabLeft - nForced < nCurrentAbsPos ||
++               !bRTL && nTabLeft + nForced > nCurrentAbsPos ) )
+ 		{
+ 			eAdj = SVX_TAB_ADJUST_DEFAULT;
+ 			cFill = 0;
+ 			nNextPos = nForced;
+ 		}
+-		nNextPos += nTabLeft;
+-		nNextPos -= nLinePos;
++        nNextPos += bRTL ? nLinePos - nTabLeft : nTabLeft - nLinePos;
+ 		ASSERT( nNextPos >= 0, "GetTabStop: Don't go back!" );
+ 		nNewTabPos = KSHORT(nNextPos);
+ 	}
 --- sw/source/core/unocore/unomap.cxx	27 Sep 2007 09:37:38 -0000	1.200
 +++ sw/source/core/unocore/unomap.cxx	12 Oct 2007 07:49:09 -0000	1.200.30.1
 @@ -1074,6 +1074,7 @@ const SfxItemPropertyMap* SwUnoPropertyM
@@ -32,21 +296,22 @@
  				};
 --- sw/source/core/unocore/unoprnms.cxx	18 Jul 2007 12:58:06 -0000	1.130
 +++ sw/source/core/unocore/unoprnms.cxx	12 Oct 2007 07:49:09 -0000	1.130.108.1
-@@ -771,6 +771,7 @@ const SwPropNameTab aPropNameTab = {
- /* 0714 UNO_NAME_DIALOG_LIBRARIES*/     {MAP_CHAR_LEN("DialogLibraries")},
- /* 0715 UNO_NAME_HEADER_ROW_COUNT*/     {MAP_CHAR_LEN("HeaderRowCount")},
- /* 0716 UNO_NAME_INPUT */               {MAP_CHAR_LEN("Input")},
-+/* 0717 UNO_NAME_ROW_SPAN */            {MAP_CHAR_LEN("RowSpan")},
+@@ -771,7 +771,8 @@ const SwPropNameTab aPropNameTab = {
+ /* 0716 UNO_NAME_INPUT */                {MAP_CHAR_LEN("Input")},
  /* 0717 UNO_NAME_GRID_BASE_WIDTH*/      {MAP_CHAR_LEN("GridBaseWidth")},
  /* 0718 UNO_NAME_GRID_SNAP_TO_CHARS*/   {MAP_CHAR_LEN("GridSnapToChars")},
- /* 0719 UNO_NAME_SQUARE_PAGE_MODE*/     {MAP_CHAR_LEN("SquarePageMode")}
+-/* 0719 UNO_NAME_SQUARE_PAGE_MODE*/     {MAP_CHAR_LEN("SquarePageMode")}
++/* 0719 UNO_NAME_SQUARE_PAGE_MODE*/     {MAP_CHAR_LEN("SquarePageMode")},
++/* 0717 UNO_NAME_ROW_SPAN */            {MAP_CHAR_LEN("RowSpan")}
+ };
+ 
+ const SwPropNameLen& SwGetPropName( USHORT nId )
 --- sw/source/core/unocore/unosett.cxx	27 Sep 2007 09:40:12 -0000	1.50
 +++ sw/source/core/unocore/unosett.cxx	14 Nov 2007 09:41:50 -0000	1.50.32.1
-@@ -1984,7 +1984,20 @@ void SwXNumberingRules::SetNumberingRule
+@@ -1984,6 +1984,19 @@ void SwXNumberingRules::SetNumberingRule
  					OUString uTmp;
  					pData->aVal >>= uTmp;
  					String sBulletFontName(uTmp);
--					sNewBulletFontNames[(sal_uInt16)nIndex] = sBulletFontName;
 +                    SwDocShell* pLclDocShell = pDocShell ? pDocShell : pDoc ? pDoc->GetDocShell() : 0;
 +                    if( sBulletFontName.Len() && pLclDocShell )
 +                    {
@@ -60,13 +325,12 @@
 +                        aFmt.SetBulletFont(&aFont);
 +                    }
 +                    else
-+                        sNewBulletFontNames[(sal_uInt16)nIndex] = sBulletFontName;
+ 					sNewBulletFontNames[(sal_uInt16)nIndex] = sBulletFontName;
  				}
  				break;
- 				case 13: //"BulletChar",
 --- sw/source/core/unocore/unotbl.cxx	27 Sep 2007 09:41:03 -0000	1.109
 +++ sw/source/core/unocore/unotbl.cxx	12 Oct 2007 07:49:10 -0000	1.109.32.1
-@@ -1221,15 +1221,33 @@ uno::Reference< beans::XPropertySetInfo 
+@@ -1221,17 +1221,35 @@ uno::Reference< beans::XPropertySetInfo 
  /*-- 11.12.98 10:56:34---------------------------------------------------
  
    -----------------------------------------------------------------------*/
@@ -77,10 +341,6 @@
  	vos::OGuard aGuard(Application::GetSolarMutex());
  	if(IsValid())
  	{
--		SwFrmFmt* pBoxFmt = pBox->ClaimFrmFmt();
--		SwAttrSet aSet(pBoxFmt->GetAttrSet());
--		aPropSet.setPropertyValue(rPropertyName, aValue, aSet);
--		pBoxFmt->GetDoc()->SetAttr(aSet, *pBoxFmt);
 +        const SfxItemPropertyMap*   pMap = SfxItemPropertyMap::GetByName(
 +                                    aPropSet.getPropertyMap(), rPropertyName);
 +        if( !pMap )
@@ -97,38 +357,21 @@
 +        }    
 +        else
 +        {
-+            SwFrmFmt* pBoxFmt = pBox->ClaimFrmFmt();
-+            SwAttrSet aSet(pBoxFmt->GetAttrSet());
-+            aPropSet.setPropertyValue(rPropertyName, aValue, aSet);
-+            pBoxFmt->GetDoc()->SetAttr(aSet, *pBoxFmt);
-+        }
+ 		SwFrmFmt* pBoxFmt = pBox->ClaimFrmFmt();
+ 		SwAttrSet aSet(pBoxFmt->GetAttrSet());
+ 		aPropSet.setPropertyValue(rPropertyName, aValue, aSet);
+ 		pBoxFmt->GetDoc()->SetAttr(aSet, *pBoxFmt);
  	}
  }
++}
  /*-- 11.12.98 10:56:34---------------------------------------------------
-@@ -1242,36 +1260,51 @@ uno::Any SwXCell::getPropertyValue(const
+ 
+   -----------------------------------------------------------------------*/
+@@ -1242,7 +1260,20 @@ uno::Any SwXCell::getPropertyValue(const
  	uno::Any aRet;
  	if(IsValid())
  	{
 -		if(rPropertyName.equalsAsciiL(SW_PROP_NAME(UNO_NAME_TEXT_SECTION)))
--		{
--			SwFrmFmt* pTblFmt = GetFrmFmt();
--			SwTable* pTable = SwTable::FindTable( pTblFmt );
--			SwTableNode* pTblNode = pTable->GetTableNode();
--			SwSectionNode* pSectionNode =  pTblNode->FindSectionNode();
--			if(pSectionNode)
--			{
--				const SwSection& rSect = pSectionNode->GetSection();
--				uno::Reference< text::XTextSection >  xSect =
--								SwXTextSections::GetObject( *rSect.GetFmt() );
--				aRet <<= xSect;
--			}
--		}
--		else if(rPropertyName.equalsAsciiL(SW_PROP_NAME(UNO_NAME_CELL_NAME)))
--		{
--			aRet <<= OUString ( pBox->GetName() );
--		}
--        else if(rPropertyName.equalsAsciiL(SW_PROP_NAME(UNO_NAME_START_REDLINE))||
--                rPropertyName.equalsAsciiL(SW_PROP_NAME(UNO_NAME_END_REDLINE)))
 +        const SfxItemPropertyMap*   pMap = SfxItemPropertyMap::GetByName(
 +                                    aPropSet.getPropertyMap(), rPropertyName);
 +        if( !pMap )
@@ -138,53 +381,46 @@
 +            throw( aEx );
 +        }    
 +        switch( pMap->nWID )
-         {
--            //redline can only be returned if it's a living object
--            aRet = SwXText::getPropertyValue(rPropertyName);
++        {
 +            case FN_UNO_CELL_ROW_SPAN:
 +                aRet <<= pBox->getRowSpan();
 +            break;
 +            case FN_UNO_TEXT_SECTION:
-+            {
-+                SwFrmFmt* pTblFmt = GetFrmFmt();
-+                SwTable* pTable = SwTable::FindTable( pTblFmt );
-+                SwTableNode* pTblNode = pTable->GetTableNode();
-+                SwSectionNode* pSectionNode =  pTblNode->FindSectionNode();
-+                if(pSectionNode)
-+                {
-+                    const SwSection& rSect = pSectionNode->GetSection();
-+                    uno::Reference< text::XTextSection >  xSect =
-+                                    SwXTextSections::GetObject( *rSect.GetFmt() );
-+                    aRet <<= xSect;
-+                }
-+            }
+ 		{
+ 			SwFrmFmt* pTblFmt = GetFrmFmt();
+ 			SwTable* pTable = SwTable::FindTable( pTblFmt );
+@@ -1256,23 +1287,25 @@ uno::Any SwXCell::getPropertyValue(const
+ 				aRet <<= xSect;
+ 			}
+ 		}
+-		else if(rPropertyName.equalsAsciiL(SW_PROP_NAME(UNO_NAME_CELL_NAME)))
+-		{
 +            break;
 +            case FN_UNO_CELL_NAME:
-+                aRet <<= OUString ( pBox->GetName() );
+ 			aRet <<= OUString ( pBox->GetName() );
+-		}
+-        else if(rPropertyName.equalsAsciiL(SW_PROP_NAME(UNO_NAME_START_REDLINE))||
+-                rPropertyName.equalsAsciiL(SW_PROP_NAME(UNO_NAME_END_REDLINE)))
 +            break;
 +            case FN_UNO_REDLINE_NODE_START:
 +            case FN_UNO_REDLINE_NODE_END:
-+            {
-+                //redline can only be returned if it's a living object
-+                aRet = SwXText::getPropertyValue(rPropertyName);
-+            }
-+            break;
-+            default:
-+            {
-+                const SwFrmFmt* pBoxFmt = pBox->GetFrmFmt();
-+                const SwAttrSet& rSet = pBoxFmt->GetAttrSet();
-+                aRet = aPropSet.getPropertyValue(rPropertyName, rSet);
-+            }
+         {
+             //redline can only be returned if it's a living object
+             aRet = SwXText::getPropertyValue(rPropertyName);
          }
 -        else
--		{
--			const SwFrmFmt* pBoxFmt = pBox->GetFrmFmt();
--			const SwAttrSet& rSet = pBoxFmt->GetAttrSet();
--			aRet = aPropSet.getPropertyValue(rPropertyName, rSet);
--		}
++            break;
++            default:
+ 		{
+ 			const SwFrmFmt* pBoxFmt = pBox->GetFrmFmt();
+ 			const SwAttrSet& rSet = pBoxFmt->GetAttrSet();
+ 			aRet = aPropSet.getPropertyValue(rPropertyName, rSet);
+ 		}
  	}
++	}
  	return aRet;
  }
+ /*-- 11.12.98 10:56:35---------------------------------------------------
 --- sw/source/core/unocore/unotext.cxx	27 Sep 2007 09:41:18 -0000	1.33
 +++ sw/source/core/unocore/unotext.cxx	23 Oct 2007 12:45:46 -0000	1.33.30.2
 @@ -83,6 +83,7 @@
@@ -205,372 +441,10 @@
  
  using namespace ::com::sun::star;
  using namespace ::rtl;
-@@ -251,17 +254,17 @@ uno::Any SAL_CALL SwXText::queryInterfac
-         uno::Reference< XTextPortionAppend > xRet = this;
-         aRet.setValue(&xRet, rXTextPortionAppend);
-     }
--    else if(rType == rXParagraphAppend ) 
-+    else if(rType == rXParagraphAppend )
-     {
-         uno::Reference< XParagraphAppend > xRet = this;
-         aRet.setValue(&xRet, rXParagraphAppend );
-     }
--    else if(rType == rXTextConvert ) 
-+    else if(rType == rXTextConvert )
-     {
-         uno::Reference< XTextConvert > xRet = this;
-         aRet.setValue(&xRet, rXParagraphAppend );
-     }
--    else if(rType == rXTextContentAppend ) 
-+    else if(rType == rXTextContentAppend )
-     {
-         uno::Reference< XTextContentAppend > xRet = this;
-         aRet.setValue(&xRet, rXTextContentAppend );
-@@ -1379,8 +1382,8 @@ sal_Int64 SwXText::getSomething( const u
- /*-- 23.06.2006 08:56:30---------------------------------------------------
- 
-   -----------------------------------------------------------------------*/
--uno::Reference< text::XTextRange > SwXText::appendParagraph( 
--                const uno::Sequence< beans::PropertyValue > & rProperties ) 
-+uno::Reference< text::XTextRange > SwXText::appendParagraph(
-+                const uno::Sequence< beans::PropertyValue > & rProperties )
-                 throw (lang::IllegalArgumentException, uno::RuntimeException)
- {
-     return finishOrAppendParagraph(false, rProperties);
-@@ -1388,8 +1391,8 @@ uno::Reference< text::XTextRange > SwXTe
- /*-- 23.06.2006 08:56:22---------------------------------------------------
- 
-   -----------------------------------------------------------------------*/
--uno::Reference< text::XTextRange > SwXText::finishParagraph( 
--                const uno::Sequence< beans::PropertyValue > & rProperties ) 
-+uno::Reference< text::XTextRange > SwXText::finishParagraph(
-+                const uno::Sequence< beans::PropertyValue > & rProperties )
-                 throw (lang::IllegalArgumentException, uno::RuntimeException)
- {
-     return finishOrAppendParagraph(true, rProperties);
-@@ -1398,9 +1401,9 @@ uno::Reference< text::XTextRange > SwXTe
- /*-- 08.05.2006 13:26:26---------------------------------------------------
- 
-   -----------------------------------------------------------------------*/
--uno::Reference< text::XTextRange > SwXText::finishOrAppendParagraph( 
-+uno::Reference< text::XTextRange > SwXText::finishOrAppendParagraph(
-         bool bFinish,
--        const uno::Sequence< beans::PropertyValue > & rProperties ) 
-+        const uno::Sequence< beans::PropertyValue > & rProperties )
-             throw (lang::IllegalArgumentException, uno::RuntimeException)
- 
- {
-@@ -1408,7 +1411,7 @@ uno::Reference< text::XTextRange > SwXTe
-     if(!IsValid())
-         throw  uno::RuntimeException();
-     uno::Reference< text::XTextRange > xRet;
--    
-+
-     const SwStartNode* pStartNode = GetStartNode();
-     if(!pStartNode)
-         throw  uno::RuntimeException();
-@@ -1417,7 +1420,7 @@ uno::Reference< text::XTextRange > SwXTe
-         bool bRuntimeException = false;
-         ::rtl::OUString sMessage;
-         pDoc->StartUndo(UNDO_START , NULL);
--        //find end node, go backward - don't skip tables because the new paragraph has to be the last node 
-+        //find end node, go backward - don't skip tables because the new paragraph has to be the last node
-         //aPam.Move( fnMoveBackward, fnGoNode );
-         SwPosition aInsertPosition( SwNodeIndex( *pStartNode->EndOfSectionNode(), -1 ) );
-         SwPaM aPam(aInsertPosition);
-@@ -1428,7 +1431,7 @@ uno::Reference< text::XTextRange > SwXTe
-         if(bFinish)
-             aPam.Move( fnMoveBackward, fnGoNode );
-         if(rProperties.getLength())
--        {        
-+        {
-             // now set the properties
-             const SfxItemPropertyMap* pParagraphMap = aSwMapProvider.GetPropertyMap(PROPERTY_MAP_PARAGRAPH);
-             SfxItemPropertySet aParaPropSet(pParagraphMap);
-@@ -1437,25 +1440,25 @@ uno::Reference< text::XTextRange > SwXTe
- 
-             for( sal_Int32 nProp = 0; nProp < rProperties.getLength(); ++nProp)
-             {
--                // no sorting of property names required - results in performance issues as long as SfxItemPropertyMap::GetByName 
-+                // no sorting of property names required - results in performance issues as long as SfxItemPropertyMap::GetByName
-                 // is not able to hash the maps
-                 const SfxItemPropertyMap*   pMap = SfxItemPropertyMap::GetByName( pParagraphMap, pValues[nProp].Name );
-                 if(pMap)
-                 {
-                     try
--                    {        
-+                    {
-                         SwXTextCursor::SetPropertyValue(
--                        aPam, 
--                        aParaPropSet, 
-+                        aPam,
-+                        aParaPropSet,
-                         pValues[nProp].Name,
--                        pValues[nProp].Value, 
-+                        pValues[nProp].Value,
-                         pMap, 0);
-                     }
-                     catch( lang::IllegalArgumentException& rIllegal )
-                     {
-                         sMessage = rIllegal.Message;
-                         bIllegalException = true;
--                    }        
-+                    }
-                     catch( uno::RuntimeException& rRuntime )
-                     {
-                         sMessage = rRuntime.Message;
-@@ -1467,12 +1470,12 @@ uno::Reference< text::XTextRange > SwXTe
-                 if( bIllegalException || bRuntimeException )
-                 {
-                     break;
--                }            
-+                }
-             }
-         }
-         pDoc->EndUndo(UNDO_END, NULL);
-         if( bIllegalException || bRuntimeException )
--        {        
-+        {
-             SwUndoIter aUndoIter( &aPam, UNDO_EMPTY );
-             pDoc->Undo(aUndoIter);
-             if(bIllegalException)
-@@ -1481,12 +1484,12 @@ uno::Reference< text::XTextRange > SwXTe
-                 aEx.Message = sMessage;
-                 throw aEx;
-             }
--            else //if(bRuntimeException)            
-+            else //if(bRuntimeException)
-             {
-                 uno::RuntimeException aEx;
-                 aEx.Message = sMessage;
-                 throw aEx;
--            }            
-+            }
-         }
-         SwUnoCrsr* pUnoCrsr = pDoc->CreateUnoCrsr(*aPam.Start(), sal_False);
-         xRet = new SwXParagraph(this, pUnoCrsr);
-@@ -1495,12 +1498,12 @@ uno::Reference< text::XTextRange > SwXTe
-     return xRet;
- }
- /*-- 08.05.2006 13:28:26---------------------------------------------------
--    Append text portions at the end of the last paragraph of the text 
-+    Append text portions at the end of the last paragraph of the text
-     interface. Support of import filters.
-   -----------------------------------------------------------------------*/
--uno::Reference< text::XTextRange > SwXText::appendTextPortion( 
--        const ::rtl::OUString& rText, 
--        const uno::Sequence< beans::PropertyValue > & rCharacterAndParagraphProperties ) 
-+uno::Reference< text::XTextRange > SwXText::appendTextPortion(
-+        const ::rtl::OUString& rText,
-+        const uno::Sequence< beans::PropertyValue > & rCharacterAndParagraphProperties )
-             throw (lang::IllegalArgumentException, uno::RuntimeException)
- {
-     vos::OGuard aGuard(Application::GetSolarMutex());
-@@ -1518,7 +1521,7 @@ uno::Reference< text::XTextRange > SwXTe
-         bool bRuntimeException = false;
-         ::rtl::OUString sMessage;
-         pDoc->StartUndo(UNDO_INSERT, NULL);
--        
-+
- //        SwPaM aPam(*pStartNode->EndOfSectionNode());
-         //aPam.Move( fnMoveBackward, fnGoNode );
-         SwUnoCrsr* pCursor = pTextCursor->GetCrsr();
-@@ -1532,14 +1535,14 @@ uno::Reference< text::XTextRange > SwXTe
-             SwXTextCursor::SelectPam(*pCursor, sal_True);
-             pCursor->GetPoint()->nContent = nContentPos;
-         }
--    
-+
-         if(rCharacterAndParagraphProperties.getLength())
--        {        
-+        {
- 
-             const beans::PropertyValue* pValues = rCharacterAndParagraphProperties.getConstArray();
-             for( sal_Int32 nProp = 0; nProp < rCharacterAndParagraphProperties.getLength(); ++nProp)
-             {
--                // no sorting of property names required - results in performance issues as long as SfxItemPropertyMap::GetByName 
-+                // no sorting of property names required - results in performance issues as long as SfxItemPropertyMap::GetByName
-                 // is not able to hash the maps
-                 const SfxItemPropertyMap* pCursorMap = aSwMapProvider.GetPropertyMap(PROPERTY_MAP_TEXT_CURSOR);
-                 SfxItemPropertySet aCursorPropSet(pCursorMap);
-@@ -1547,19 +1550,19 @@ uno::Reference< text::XTextRange > SwXTe
-                 if(pMap)
-                 {
-                     try
--                    {        
-+                    {
-                         SwXTextCursor::SetPropertyValue(
--                        *pCursor, 
--                        aCursorPropSet, 
-+                        *pCursor,
-+                        aCursorPropSet,
-                         pValues[nProp].Name,
--                        pValues[nProp].Value, 
-+                        pValues[nProp].Value,
-                         pMap, nsSetAttrMode::SETATTR_NOFORMATATTR);
-                     }
-                     catch( lang::IllegalArgumentException& rIllegal )
-                     {
-                         sMessage = rIllegal.Message;
-                         bIllegalException = true;
--                    }        
-+                    }
-                     catch( uno::RuntimeException& rRuntime )
-                     {
-                         sMessage = rRuntime.Message;
-@@ -1571,12 +1574,12 @@ uno::Reference< text::XTextRange > SwXTe
-                 if( bIllegalException || bRuntimeException )
-                 {
-                     break;
--                }            
-+                }
-             }
-         }
-         pDoc->EndUndo(UNDO_INSERT, NULL);
-         if( bIllegalException || bRuntimeException )
--        {        
-+        {
-             SwUndoIter aUndoIter( pCursor, UNDO_EMPTY );
-             pDoc->Undo(aUndoIter);
-             delete pCursor;
-@@ -1587,12 +1590,12 @@ uno::Reference< text::XTextRange > SwXTe
-                 aEx.Message = sMessage;
-                 throw aEx;
-             }
--            else //if(bRuntimeException)            
-+            else //if(bRuntimeException)
-             {
-                 uno::RuntimeException aEx;
-                 aEx.Message = sMessage;
-                 throw aEx;
--            }            
-+            }
-         }
-         xRet = new SwXTextRange(*pCursor, this);
-         delete pCursor;
-@@ -1603,9 +1606,9 @@ uno::Reference< text::XTextRange > SwXTe
-     enable appending text contents like graphic objects, shapes and so on
-     to support import filters
-   -----------------------------------------------------------------------*/
--uno::Reference< text::XTextRange > SwXText::appendTextContent( 
-+uno::Reference< text::XTextRange > SwXText::appendTextContent(
-     const uno::Reference< text::XTextContent >& xTextContent,
--    const uno::Sequence< beans::PropertyValue >& rCharacterAndParagraphProperties ) 
-+    const uno::Sequence< beans::PropertyValue >& rCharacterAndParagraphProperties )
-         throw (lang::IllegalArgumentException, uno::RuntimeException)
- {
-     vos::OGuard aGuard(Application::GetSolarMutex());
-@@ -1617,7 +1620,7 @@ uno::Reference< text::XTextRange > SwXTe
-     uno::Reference< text::XTextRange > xRet;
-     {
-         pDoc->StartUndo(UNDO_INSERT, NULL);
--        //find end node, go backward - don't skip tables because the new paragraph has to be the last node 
-+        //find end node, go backward - don't skip tables because the new paragraph has to be the last node
-         SwPaM aPam(*pStartNode->EndOfSectionNode());
-         aPam.Move( fnMoveBackward, fnGoNode );
-         //set cursor to the end of the last text node
-@@ -1638,15 +1641,15 @@ uno::Reference< text::XTextRange > SwXTe
-                     for( sal_Int32 nElement = 0; nElement < rCharacterAndParagraphProperties.getLength(); ++nElement )
-                     {
-                         xAnchor->setPropertyValue( rCharacterAndParagraphProperties[nElement].Name, rCharacterAndParagraphProperties[nElement].Value );
--                    }    
-+                    }
-                 }
--                
-+
-             }
-             catch(const uno::Exception&)
-             {
-                 throw uno::RuntimeException();
--            }    
--        }    
-+            }
-+        }
-         delete pCursor;
-         pDoc->EndUndo(UNDO_INSERT, NULL);
-     }
-@@ -1656,10 +1659,10 @@ uno::Reference< text::XTextRange > SwXTe
-     move previously appended paragraphs into a text frames
-     to support import filters
-   -----------------------------------------------------------------------*/
--uno::Reference< text::XTextContent > SwXText::convertToTextFrame( 
--    const uno::Reference< text::XTextRange >& xStart, 
--    const uno::Reference< text::XTextRange >& xEnd, 
--    const uno::Sequence< beans::PropertyValue >& rFrameProperties ) 
-+uno::Reference< text::XTextContent > SwXText::convertToTextFrame(
-+    const uno::Reference< text::XTextRange >& xStart,
-+    const uno::Reference< text::XTextRange >& xEnd,
-+    const uno::Sequence< beans::PropertyValue >& rFrameProperties )
-         throw (lang::IllegalArgumentException, uno::RuntimeException)
- {
-     vos::OGuard aGuard(Application::GetSolarMutex());
-@@ -1668,7 +1671,7 @@ uno::Reference< text::XTextContent > SwX
-     uno::Reference< text::XTextContent > xRet;
-    SwUnoInternalPaM aStartPam(*GetDoc());
-     std::auto_ptr < SwUnoInternalPaM > pEndPam( new SwUnoInternalPaM(*GetDoc()));
--   if(SwXTextRange::XTextRangeToSwPaM(aStartPam, xStart) && 
-+   if(SwXTextRange::XTextRangeToSwPaM(aStartPam, xStart) &&
-         SwXTextRange::XTextRangeToSwPaM(*pEndPam, xEnd) )
-     {
-        pDoc->StartUndo( UNDO_START, NULL );
-@@ -1688,14 +1691,14 @@ uno::Reference< text::XTextContent > SwX
-             throw lang::IllegalArgumentException();
-         //make a selection from aStartPam to a EndPam
-         SwSelBoxes aBoxes;
--        SfxItemSet aFrameItemSet(pDoc->GetAttrPool(),                            
-+        SfxItemSet aFrameItemSet(pDoc->GetAttrPool(),
-                                     RES_FRMATR_BEGIN, RES_FRMATR_END-1,
-                                    0 );
- 
-         aStartPam.SetMark();
-         *aStartPam.End() = *pEndPam->End();
-         pEndPam.reset(0);
--       
-+
-         SwXTextFrame* pNewFrame;
-         uno::Reference< text::XTextFrame > xNewFrame = pNewFrame = new SwXTextFrame( pDoc );
-         pNewFrame->SetSelection( aStartPam );
-@@ -1712,7 +1715,7 @@ uno::Reference< text::XTextContent > SwX
-         {
-             sMessage = rIllegal.Message;
-             bIllegalException = true;
--        }        
-+        }
-         catch( uno::RuntimeException& rRuntime )
-         {
-             sMessage = rRuntime.Message;
-@@ -1721,7 +1724,7 @@ uno::Reference< text::XTextContent > SwX
-         xRet = pNewFrame;
-         pDoc->EndUndo(UNDO_END, NULL);
-         if( bIllegalException || bRuntimeException )
--        {        
-+        {
-             SwUndoIter aUndoIter( &aStartPam, UNDO_EMPTY );
-             pDoc->Undo(aUndoIter);
-             if(bIllegalException)
-@@ -1730,12 +1733,12 @@ uno::Reference< text::XTextContent > SwX
-                 aEx.Message = sMessage;
-                 throw aEx;
-             }
--            else //if(bRuntimeException)            
-+            else //if(bRuntimeException)
-             {
-                 uno::RuntimeException aEx;
-                 aEx.Message = sMessage;
-                 throw aEx;
--            }            
-+            }
-         }
-     }
-     else
-@@ -1744,21 +1747,40 @@ uno::Reference< text::XTextContent > SwX
- }
- /*-- 11.05.2006 15:46:26---------------------------------------------------
+@@ -1746,6 +1749,25 @@ uno::Reference< text::XTextContent > SwX
      Move previously imported paragraphs into a new text table.
--    
-+
+     
    -----------------------------------------------------------------------*/
--uno::Reference< text::XTextTable > SwXText::convertToTable( 
 +struct VerticallyMergedCell
 +{
 +    std::vector<uno::Reference< beans::XPropertySet > > aCells;
@@ -590,167 +464,13 @@
 +    return abs( nPos1 - nPos2 ) < COL_POS_FUZZY;
 +}
 +
-+uno::Reference< text::XTextTable > SwXText::convertToTable(
+ uno::Reference< text::XTextTable > SwXText::convertToTable( 
      const uno::Sequence< uno::Sequence< uno::Sequence< uno::Reference< text::XTextRange > > > >& rTableRanges,
--   const uno::Sequence< uno::Sequence< uno::Sequence< beans::PropertyValue > > >& rCellProperties, 
--   const uno::Sequence< uno::Sequence< beans::PropertyValue > >& rRowProperties, 
--   const uno::Sequence< beans::PropertyValue >& rTableProperties ) 
-+   const uno::Sequence< uno::Sequence< uno::Sequence< beans::PropertyValue > > >& rCellProperties,
-+   const uno::Sequence< uno::Sequence< beans::PropertyValue > >& rRowProperties,
-+   const uno::Sequence< beans::PropertyValue >& rTableProperties )
-         throw (lang::IllegalArgumentException, uno::RuntimeException)
- {
-     vos::OGuard aGuard(Application::GetSolarMutex());
-     if(!IsValid())
-         throw  uno::RuntimeException();
- 
--    //at first collect the text ranges as SwPaMs 
--    const uno::Sequence< uno::Sequence< uno::Reference< text::XTextRange > > >* pTableRanges = rTableRanges.getConstArray(); 
-+    //at first collect the text ranges as SwPaMs
-+    const uno::Sequence< uno::Sequence< uno::Reference< text::XTextRange > > >* pTableRanges = rTableRanges.getConstArray();
-     std::auto_ptr < SwPaM > pFirstPaM;
-     std::vector< std::vector<SwNodeRange> > aTableNodes;
-     bool bExcept = false;
-@@ -1768,7 +1790,7 @@ uno::Reference< text::XTextTable > SwXTe
-         std::vector<SwNodeRange> aRowNodes;
-         const uno::Sequence< uno::Sequence< uno::Reference< text::XTextRange > > >& rRow = pTableRanges[nRow];
-        const uno::Sequence< uno::Reference< text::XTextRange > >* pRow = pTableRanges[nRow].getConstArray();
--        
-+
-         for( sal_Int32 nCell = 0; nCell < rRow.getLength(); ++nCell)
-         {
-             if( pRow[nCell].getLength() != 2 )
-@@ -1777,14 +1799,14 @@ uno::Reference< text::XTextTable > SwXTe
-             const uno::Reference< text::XTextRange > xEndRange = pRow[nCell][1];
-             SwUnoInternalPaM aStartCellPam(*pDoc);
-             SwUnoInternalPaM aEndCellPam(*pDoc);
--    
-+
-             // !!! TODO - PaMs in tables and sections do not work here - the same applies to PaMs in frames !!!
--            
--            if(!SwXTextRange::XTextRangeToSwPaM(aStartCellPam, xStartRange) || 
-+
-+            if(!SwXTextRange::XTextRangeToSwPaM(aStartCellPam, xStartRange) ||
-                 !SwXTextRange::XTextRangeToSwPaM(aEndCellPam, xEndRange) )
-                 throw lang::IllegalArgumentException();
-             /** check the nodes between start and end
--                it is allowed to have pairs of StartNode/EndNodes 
-+                it is allowed to have pairs of StartNode/EndNodes
-              */
-             if(aStartCellPam.Start()->nNode < aEndCellPam.End()->nNode)
-             {
-@@ -1806,25 +1828,25 @@ uno::Reference< text::XTextTable > SwXTe
-                         ++nOpenNodeBlock;
-                     else if(aCellIndex.GetNode().IsEndNode() )
-                         --nOpenNodeBlock;
--                    if( nOpenNodeBlock < 0 ) 
-+                    if( nOpenNodeBlock < 0 )
-                     {
-                         bExcept = true;
-                         break;
-                     }
--                }            
-+                }
-                 if( nOpenNodeBlock != 0)
--                {        
-+                {
-                     bExcept = true;
-                     break;
-                 }
-             }
--            
-+
-             /** The vector<vector> NodeRanges has to contain consecutive nodes.
--                In rTableRanges the ranges don't need to be full paragraphs but they have to follow 
-+                In rTableRanges the ranges don't need to be full paragraphs but they have to follow
-                 each other. To process the ranges they have to be aligned on paragraph borders
--                by inserting paragraph breaks. Non-consecutive ranges must initiate an 
-+                by inserting paragraph breaks. Non-consecutive ranges must initiate an
-                 exception.
--             
-+
-              */
-             if(!nRow && !nCell)
-             {
-@@ -1834,7 +1856,7 @@ uno::Reference< text::XTextTable > SwXTe
-             }
-             else
-             {
--                //check the predecessor 
-+                //check the predecessor
-                 ULONG nLastNodeIndex = aLastPaM.End()->nNode.GetIndex();
-                 ULONG nStartCellNodeIndex = aStartCellPam.Start()->nNode.GetIndex();
-                 ULONG nLastNodeEndIndex = aLastPaM.End()->nNode.GetIndex();
-@@ -1846,58 +1868,62 @@ uno::Reference< text::XTextTable > SwXTe
-                     else
-                     {
-                         pDoc->SplitNode(*aStartCellPam.Start(), sal_False);
--                    }            
-+                    }
-                 }
-                 else if(nStartCellNodeIndex == ( nLastNodeEndIndex + 1))
-                 {
-                     //next paragraph - now the content index of the new should be 0
-                     //and of the old one should be equal to the text length
--                    //but if it isn't we don't care - the cell is being inserted on the 
-+                    //but if it isn't we don't care - the cell is being inserted on the
-                     //node border anyway
-                 }
--                else  
--                    bExcept = true;    
--            }        
-+                else
-+                    bExcept = true;
-+            }
-            //now check if there's a need to insert another paragraph break
-             if( aEndCellPam.End()->nContent.GetIndex() < aEndCellPam.End()->nNode.GetNode().GetTxtNode()->Len())
-            {
-                pDoc->SplitNode(*aEndCellPam.End(), sal_False);
--                //take care that the new start/endcell is moved to the right position 
--               //aStartCellPam has to point to the start of the new (previous) node 
--               //aEndCellPam has to point the the end of the new (previous) node 
-+                //take care that the new start/endcell is moved to the right position
-+               //aStartCellPam has to point to the start of the new (previous) node
-+               //aEndCellPam has to point the the end of the new (previous) node
-                 aStartCellPam.DeleteMark();
-                 aStartCellPam.Move(fnMoveBackward, fnGoNode);
-                aStartCellPam.GetPoint()->nContent = 0;
-                 aEndCellPam.DeleteMark();
-                 aEndCellPam.Move(fnMoveBackward, fnGoNode);
-                 aEndCellPam.GetPoint()->nContent = aEndCellPam.GetNode()->GetTxtNode()->Len();
--                
-+
-            }
- 
-             *aLastPaM.GetPoint() = *aEndCellPam.Start();
-             if( aStartCellPam.HasMark() )
--            {   
-+            {
-                 aLastPaM.SetMark();
-                 *aLastPaM.GetMark() = *aEndCellPam.End();
-             }
--            else 
-+            else
-                 aLastPaM.DeleteMark();
- 
-             SwNodeRange aCellRange( aStartCellPam.Start()->nNode, aEndCellPam.End()->nNode);
-             aRowNodes.push_back(aCellRange);
-             if( !nRow && !nCell )
-                 pFirstPaM.reset( new SwPaM(*aStartCellPam.Start()));
--        } 
-+        }
-         aTableNodes.push_back(aRowNodes);
-     }
--    
-+
-     if(bExcept)
-     {
-         SwUndoIter aUndoIter( &aLastPaM, UNDO_EMPTY );
-         pDoc->Undo(aUndoIter);
+    const uno::Sequence< uno::Sequence< uno::Sequence< beans::PropertyValue > > >& rCellProperties, 
+@@ -1898,6 +1920,10 @@ uno::Reference< text::XTextTable > SwXTe
          throw lang::IllegalArgumentException();
      }
--    
-+
+     
 +    typedef uno::Sequence< text::TableColumnSeparator > TableColumnSeparators;
 +    std::vector< TableColumnSeparators > aRowSeparators(rRowProperties.getLength());
 +    std::vector<VerticallyMergedCell>       aMergedCells;
@@ -758,22 +478,7 @@
      const SwTable* pTable = pDoc->TextToTable( aTableNodes );
      SwXTextTable* pTextTable = 0;
      uno::Reference< text::XTextTable > xRet = pTextTable = new SwXTextTable( *pTable->GetFrmFmt() );
-@@ -1910,7 +1936,7 @@ uno::Reference< text::XTextTable > SwXTe
-         sal_Int32 nProperty = 0;
-         for( ; nProperty < rTableProperties.getLength(); ++nProperty)
-             xPrSet->setPropertyValue( pTableProperties[nProperty].Name, pTableProperties[nProperty].Value );
--        
-+
-         //apply row properties
-         uno::Reference< table::XTableRows >  xRows = xRet->getRows();
-         const beans::PropertyValues* pRowProperties = rRowProperties.getConstArray();
-@@ -1920,12 +1946,22 @@ uno::Reference< text::XTextTable > SwXTe
-             if( nRow >= rRowProperties.getLength())
-             {
-                 break;
--            }    
-+            }
-             uno::Reference< beans::XPropertySet > xRow;
+@@ -1925,8 +1951,18 @@ uno::Reference< text::XTextTable > SwXTe
              xRows->getByIndex( nRow ) >>= xRow;
              const beans::PropertyValue* pProperties = pRowProperties[nRow].getConstArray();
              for( nProperty = 0; nProperty < pRowProperties[nRow].getLength(); ++nProperty)
@@ -787,15 +492,15 @@
 +                    aRowSeparators[nRow] = aSeparators;
 +                }
                  xRow->setPropertyValue( pProperties[ nProperty ].Name, pProperties[ nProperty ].Value );
-+            }
          }
++        }
  
  #ifdef DEBUG
+ //-->debug cell properties of all rows
 @@ -1968,10 +2004,99 @@ uno::Reference< text::XTextTable > SwXTe
                  uno::Reference< beans::XPropertySet > xCell( pTextTable->getCellByPosition(nCell, nRow), uno::UNO_QUERY );
                  for( nProperty = 0; nProperty < nCellProperties; ++nProperty)
                  {
--                    xCell->setPropertyValue(aCellProperties[nProperty].Name, aCellProperties[nProperty].Value);
 +                    if(aCellProperties[nProperty].Name.equalsAsciiL(
 +                                RTL_CONSTASCII_STRINGPARAM ( "VerticalMerge")))
 +                    {
@@ -860,7 +565,7 @@
 +                        }
 +                    }
 +                    else
-+                        xCell->setPropertyValue(aCellProperties[nProperty].Name, aCellProperties[nProperty].Value);
+                     xCell->setPropertyValue(aCellProperties[nProperty].Name, aCellProperties[nProperty].Value);
                  }
              }
          }
@@ -892,38 +597,344 @@
      }
      catch( const lang::WrappedTargetException& rWrapped )
      {
-@@ -1980,8 +2105,8 @@ uno::Reference< text::XTextTable > SwXTe
-     catch ( const lang::IndexOutOfBoundsException& rBounds )
-     {
-         (void)rBounds;
--    }    
--    
-+    }
-+
- 
-         bool bIllegalException = false;
-         bool bRuntimeException = false;
-@@ -1989,7 +2114,7 @@ uno::Reference< text::XTextTable > SwXTe
-         pDoc->StartUndo(UNDO_START, NULL);
-         pDoc->EndUndo(UNDO_START, NULL);
-         if( bIllegalException || bRuntimeException )
--        {        
-+        {
-             SwUndoIter aUndoIter( pFirstPaM.get(), UNDO_EMPTY );
-             pDoc->Undo(aUndoIter);
-             if(bIllegalException)
-@@ -1998,12 +2123,12 @@ uno::Reference< text::XTextTable > SwXTe
-                 aEx.Message = sMessage;
-                 throw aEx;
-             }
--            else //if(bRuntimeException)            
-+            else //if(bRuntimeException)
-             {
-                 uno::RuntimeException aEx;
-                 aEx.Message = sMessage;
-                 throw aEx;
--            }            
-+            }
-         }
-     return xRet;
+--- sw/source/core/view/viewsh.cxx	27 Sep 2007 09:43:09 -0000	1.76
++++ sw/source/core/view/viewsh.cxx	29 Nov 2007 14:29:16 -0000	1.76.30.1
+@@ -914,6 +914,21 @@ void ViewShell::SetTabCompat( bool bNew 
+     }
  }
+ 
++/*-- 29.11.2007 09:03:18---------------------------------------------------
++    //#i24363# tab stops relative to indent
++  -----------------------------------------------------------------------*/
++void ViewShell::SetTabsRelativeToIndent(bool bNew)
++{
++    IDocumentSettingAccess* pIDSA = getIDocumentSettingAccess();
++    if( pIDSA->get(IDocumentSettingAccess::TABS_RELATIVE_TO_INDENT) != bNew  )
++    {
++        SwWait aWait( *GetDoc()->GetDocShell(), TRUE );
++        pIDSA->set(IDocumentSettingAccess::TABS_RELATIVE_TO_INDENT, bNew );
++        const BYTE nInv = INV_PRTAREA | INV_SIZE | INV_TABLE | INV_SECTION;
++        lcl_InvalidateAllCntnt( *this, nInv );
++    }
++}
++
+ void ViewShell::SetAddExtLeading( bool bNew )
+ {
+     IDocumentSettingAccess* pIDSA = getIDocumentSettingAccess();
+--- sw/source/filter/ww8/writerhelper.cxx	27 Sep 2007 10:00:54 -0000	1.25
++++ sw/source/filter/ww8/writerhelper.cxx	29 Nov 2007 14:28:41 -0000	1.25.32.1
+@@ -721,26 +721,6 @@ namespace sw
+             return false;
+         }
+ 
+-        bool AdjustTabs(SvxTabStopItem &rTStop, long nSrcLeft, long nDestLeft)
+-        {
+-            bool bChanged = false;
+-            if (nDestLeft != nSrcLeft)
+-            {
+-                USHORT nCount = rTStop.Count();
+-                for (USHORT nCnt = 0; nCnt < nCount; ++nCnt)
+-                {
+-                    SvxTabStop& rTab = const_cast<SvxTabStop&>(rTStop[nCnt]);
+-                    if (SVX_TAB_ADJUST_DEFAULT != rTab.GetAdjustment())
+-                    {
+-                        rTab.GetTabPos() += nSrcLeft;
+-                        rTab.GetTabPos() -= nDestLeft;
+-                        bChanged = true;
+-                    }
+-                }
+-            }
+-            return bChanged;
+-        }
+-
+         Polygon PolygonFromPolyPolygon(const PolyPolygon &rPolyPoly)
+         {
+ 			if(1 == rPolyPoly.Count())
+--- sw/source/filter/ww8/writerhelper.hxx	10 May 2007 09:14:49 -0000	1.19
++++ sw/source/filter/ww8/writerhelper.hxx	29 Nov 2007 14:28:41 -0000	1.19.210.1
+@@ -794,35 +794,6 @@ namespace sw
+         */
+         bool HasPageBreak(const SwNode &rNode);
+ 
+-        /** Shift tabstops from a given start position to a new start position
+-
+-            For no good reason except to complicate my life writer tabs are
+-            relative to the left of the paragraph text body indent. More
+-            reasonably word's are absolute.
+-
+-            AdjustTabs converts the tabs in rTabs originally relative from
+-            nScrLeft to be relative to nDestLeft. For example nSrcLeft would be
+-            0 when converting from word to writer, and vice versa when
+-            converting to word, and both values are set when moving writer tabs
+-            after an indent change
+-
+-            @param rTabs
+-            The SvxTabStopItem whose tabs we want to change
+-
+-            @param nSrcLeft
+-            The original offset that rTabs are relative to
+-
+-            @param nDestLeft
+-            The new offset to change rTabs to be relative to
+-
+-            @return true if there was any tabs changed, false otherwise
+-
+-            @author
+-            <a href="mailto:cmc@openoffice.org">Caol&aacute;n McNamara</a>
+-
+-       */
+-        bool AdjustTabs(SvxTabStopItem &rTabs, long nSrcLeft, long nDestLeft);
+-
+ 
+         /** Make a best fit Polygon from a PolyPolygon
+ 
+--- sw/source/filter/ww8/ww8par.cxx	27 Sep 2007 10:04:22 -0000	1.182
++++ sw/source/filter/ww8/ww8par.cxx	30 Nov 2007 10:22:13 -0000	1.182.30.2
+@@ -1037,36 +1037,8 @@ const SwNumFmt* SwWW8FltControlStack::Ge
+ void SwWW8FltControlStack::SetAttrInDoc(const SwPosition& rTmpPos,
+     SwFltStackEntry* pEntry)
+ {
+-    using sw::util::AdjustTabs;
+     switch( pEntry->pAttr->Which() )
+     {
+-        case RES_PARATR_TABSTOP:
+-            {
+-                /*
+-                Loop over the affected nodes and adjust the 0 based word style
+-                tabstops to writer style tabstops relative to the paragraph
+-                indent
+-                */
+-                SwPaM aRegion(rTmpPos);
+-                if (pEntry->MakeRegion(pDoc, aRegion, false))
+-                {
+-                    SvxTabStopItem aTabStops(*(SvxTabStopItem*)pEntry->pAttr);
+-                    ULONG nStart = aRegion.Start()->nNode.GetIndex();
+-                    ULONG nEnd = aRegion.End()->nNode.GetIndex();
+-                    for(; nStart <= nEnd; ++nStart)
+-                    {
+-                        SwCntntNode *pNd =
+-                            pDoc->GetNodes()[nStart]->GetCntntNode();
+-                        if (!pNd)
+-                            continue;
+-                        const SvxLRSpaceItem &rLR = (const SvxLRSpaceItem&)
+-                            pNd->GetAttr(RES_LR_SPACE);
+-                        AdjustTabs(aTabStops, 0, rLR.GetTxtLeft());
+-                        pNd->SetAttr(aTabStops);
+-                    }
+-                }
+-            }
+-        break;
+         case RES_LR_SPACE:
+             {
+                 /*
+@@ -1109,13 +1081,6 @@ void SwWW8FltControlStack::SetAttrInDoc(
+ 
+                         pNd->SetAttr(aNewLR);
+ 
+-                        SvxTabStopItem aTabs = (const SvxTabStopItem&)
+-                            pNd->GetAttr(RES_PARATR_TABSTOP);
+-                        if (AdjustTabs(aTabs, aOldLR.GetTxtLeft(),
+-                            aNewLR.GetTxtLeft()))
+-                        {
+-                            pNd->SetAttr(aTabs);
+-                        }
+                     }
+                 }
+             }
+@@ -1439,23 +1404,6 @@ void SwWW8ImplReader::Read_Tab(USHORT , 
+         }
+     }
+ 
+-    //Now turn back into 0 based word-style index, during style import
+-    //we're already in word based 0 index, we only move into crackpot
+-    //writer style when we're finished importing the styles. For
+-    //explicit tabstops we'll have to adjust on setting into the
+-    //document
+-    long nLeftPMgn(0);
+-    if (pAktColl)
+-        nLeftPMgn = 0;  //During style import we are always 0 based (word style)
+-    else if (nAktColl < nColls && pCollA[nAktColl].pFmt)
+-    {
+-        //otherwise we are writer x based, so turn back into 0 based word style
+-        const SvxLRSpaceItem &rLR = pCollA[nAktColl].pFmt->GetLRSpace();
+-        nLeftPMgn = rLR.GetTxtLeft();
+-    }
+-
+-    sw::util::AdjustTabs(aAttr, nLeftPMgn, 0);
+-
+     SvxTabStop aTabStop;
+     for (i=0; i < nDel; ++i)
+     {
+@@ -1564,6 +1512,8 @@ void SwWW8ImplReader::ImportDop()
+     maTracer.Log(sw::log::eDontUseHTMLAutoSpacing);
+     // move tabs on alignment
+     rDoc.set(IDocumentSettingAccess::TAB_COMPAT, true);
++    // #i24363# tab stops relative to indent
++    rDoc.set(IDocumentSettingAccess::TABS_RELATIVE_TO_INDENT, false);
+     maTracer.Log(sw::log::eTabStopDistance);
+     // OD 14.10.2003 #i18732# - adjust default of option 'FollowTextFlow'
+     rDoc.SetDefault( SwFmtFollowTextFlow( FALSE ) );
+--- sw/source/filter/ww8/ww8par.hxx	27 Sep 2007 10:04:36 -0000	1.151
++++ sw/source/filter/ww8/ww8par.hxx	29 Nov 2007 14:28:41 -0000	1.151.32.1
+@@ -1436,7 +1436,6 @@ public:     // eigentlich private, geht 
+     void Read_NoLineNumb(       USHORT nId, const BYTE* pData, short nLen );
+ 
+     void Read_LR(               USHORT nId, const BYTE*, short nLen );
+-    void AdjustStyleTabStops(long nLeft, SwWW8StyInf &rSty);
+     void Read_UL(               USHORT nId, const BYTE*, short nLen );
+     void Read_ParaAutoBefore(USHORT , const BYTE *pData, short nLen);
+     void Read_ParaAutoAfter(USHORT , const BYTE *pData, short nLen);
+--- sw/source/filter/ww8/ww8par2.cxx	27 Sep 2007 10:04:52 -0000	1.133
++++ sw/source/filter/ww8/ww8par2.cxx	29 Nov 2007 14:28:41 -0000	1.133.32.1
+@@ -4236,13 +4236,6 @@ void WW8RStyle::RecursiveReg(USHORT nNr)
+ 
+     pIo->RegisterNumFmtOnStyle(nNr);
+ 
+-    long nTabPosStart = 0;
+-    if (pIo->pCollA[nNr].pFmt)
+-    {
+-        const SvxLRSpaceItem &rLR = pIo->pCollA[nNr].pFmt->GetLRSpace();
+-        nTabPosStart = rLR.GetTxtLeft();
+-    }
+-    pIo->AdjustStyleTabStops(nTabPosStart, rSI);
+ }
+ 
+ /*
+--- sw/source/filter/ww8/ww8par6.cxx	27 Sep 2007 10:06:15 -0000	1.176
++++ sw/source/filter/ww8/ww8par6.cxx	29 Nov 2007 14:28:42 -0000	1.176.32.1
+@@ -3937,52 +3937,6 @@ void SwWW8ImplReader::Read_NoLineNumb(US
+     NewAttr( aLN );
+ }
+ 
+-void SwWW8ImplReader::AdjustStyleTabStops(long nLeft, SwWW8StyInf &rWWSty)
+-{
+-    const SfxPoolItem* pTabs=0;
+-    bool bOnMarginStyle(false);
+-    if (rWWSty.pFmt)
+-    {
+-        bOnMarginStyle = rWWSty.pFmt->GetAttrSet().GetItemState(
+-                RES_PARATR_TABSTOP, false, &pTabs ) == SFX_ITEM_SET;
+-    }
+-
+-    if (pTabs)
+-    {
+-        SvxTabStopItem aTStop(*(const SvxTabStopItem*)pTabs);
+-        long nOldLeft = 0;
+-
+-        const SwTxtFmtColl* pSty = 0;
+-        USHORT nTabBase = rWWSty.nBase;
+-        if (nTabBase < nColls)              // Based On
+-            pSty = (const SwTxtFmtColl*)pCollA[nTabBase].pFmt;
+-
+-        while (pSty && !bOnMarginStyle)
+-        {
+-            bOnMarginStyle = pSty->GetAttrSet().GetItemState(RES_PARATR_TABSTOP,
+-                false, &pTabs ) == SFX_ITEM_SET;
+-            if (bOnMarginStyle)
+-            {
+-                const SvxLRSpaceItem &rLR =
+-                    ItemGet<SvxLRSpaceItem>(*pSty, RES_LR_SPACE);
+-                nOldLeft = rLR.GetTxtLeft();
+-            }
+-            else
+-            {
+-                // If based on another
+-                if( nTabBase < nColls &&
+-                    (nTabBase = pCollA[nTabBase].nBase) < nColls )
+-                    pSty = (const SwTxtFmtColl*)pCollA[nTabBase].pFmt;
+-                else
+-                    pSty = 0;                           // gib die Suche auf
+-            }
+-        }
+-
+-        if (sw::util::AdjustTabs(aTStop, nOldLeft, nLeft))
+-            rWWSty.pFmt->SetAttr(aTStop);
+-    }
+-}
+-
+ // Sprm 16, 17
+ void SwWW8ImplReader::Read_LR( USHORT nId, const BYTE* pData, short nLen )
+ {
+--- sw/source/ui/shells/textsh1.cxx	27 Sep 2007 12:30:56 -0000	1.59
++++ sw/source/ui/shells/textsh1.cxx	29 Nov 2007 14:25:00 -0000	1.59.30.1
+@@ -108,6 +108,7 @@
+ #ifndef _SVTOOLS_CTLOPTIONS_HXX
+ #include <svtools/ctloptions.hxx>
+ #endif
++#include <IDocumentSettingAccess.hxx>
+ 
+ #ifndef _CHARFMT_HXX
+ #include <charfmt.hxx>
+@@ -837,8 +838,9 @@ void SwTextShell::Execute(SfxRequest &rR
+             aCoreSet.Put( aTabPos );
+ 
+             // linker Rand als Offset
+-            const long nOff = ((SvxLRSpaceItem&)aCoreSet.Get( RES_LR_SPACE )).
+-                                                                GetTxtLeft();
++            //#i24363# tab stops relative to indent
++            const long nOff = rWrtSh.getIDocumentSettingAccess()->get(IDocumentSettingAccess::TABS_RELATIVE_TO_INDENT) ?  
++                ((SvxLRSpaceItem&)aCoreSet.Get( RES_LR_SPACE )).GetTxtLeft() : 0;
+             SfxInt32Item aOff( SID_ATTR_TABSTOP_OFFSET, nOff );
+             aCoreSet.Put( aOff );
+ 
+--- sw/source/ui/uiview/viewtab.cxx	27 Sep 2007 12:39:26 -0000	1.37
++++ sw/source/ui/uiview/viewtab.cxx	29 Nov 2007 14:25:10 -0000	1.37.30.1
+@@ -992,6 +991,11 @@ void SwView::StateTabWin(SfxItemSet& rSe
+     nRulerStyle = pVRuler->GetStyle() & ~WB_EXTRAFIELD;
+     pVRuler->SetStyle(bVerticalWriting ? nRulerStyle|WB_EXTRAFIELD : nRulerStyle);
+ 
++    //#i24363# tab stops relative to indent
++    bool bRelative = rSh.getIDocumentSettingAccess()->get(IDocumentSettingAccess::TABS_RELATIVE_TO_INDENT);
++    pHRuler->SetTabsRelativeToIndent( bRelative );
++    pVRuler->SetTabsRelativeToIndent( bRelative );
++    
+     SvxLRSpaceItem aPageLRSpace( rDesc.GetMaster().GetLRSpace() );
+ 	SwapPageMargin( rDesc, aPageLRSpace );
+ 
+--- sw/source/ui/uno/SwXDocumentSettings.cxx	27 Sep 2007 12:39:53 -0000	1.57
++++ sw/source/ui/uno/SwXDocumentSettings.cxx	29 Nov 2007 14:25:46 -0000	1.57.32.1
+@@ -159,7 +159,8 @@ enum SwDocumentSettingsPropertyHandles
+     HANDLE_DO_NOT_CAPTURE_DRAW_OBJS_ON_PAGE,
+     HANDLE_CLIP_AS_CHARACTER_ANCHORED_WRITER_FLY_FRAMES,
+     HANDLE_UNIX_FORCE_ZERO_EXT_LEADING,
+-    HANDLE_USE_OLD_PRINTER_METRICS
++    HANDLE_USE_OLD_PRINTER_METRICS,
++    HANDLE_TABS_RELATIVE_TO_INDENT
+ };
+ 
+ MasterPropertySetInfo * lcl_createSettingsInfo()
+@@ -209,6 +210,7 @@ MasterPropertySetInfo * lcl_createSettin
+         { RTL_CONSTASCII_STRINGPARAM("ClipAsCharacterAnchoredWriterFlyFrames"), HANDLE_CLIP_AS_CHARACTER_ANCHORED_WRITER_FLY_FRAMES, CPPUTYPE_BOOLEAN, 0, 0},
+         { RTL_CONSTASCII_STRINGPARAM("UnxForceZeroExtLeading"), HANDLE_UNIX_FORCE_ZERO_EXT_LEADING, CPPUTYPE_BOOLEAN, 0, 0},
+         { RTL_CONSTASCII_STRINGPARAM("UseOldPrinterMetrics"), HANDLE_USE_OLD_PRINTER_METRICS, CPPUTYPE_BOOLEAN, 0, 0},
++        { RTL_CONSTASCII_STRINGPARAM("TabsRelativeToIndent"), HANDLE_TABS_RELATIVE_TO_INDENT, CPPUTYPE_BOOLEAN, 0, 0},
+ 
+ /*
+  * As OS said, we don't have a view when we need to set this, so I have to
+@@ -683,7 +685,12 @@ void SwXDocumentSettings::_setSingleValu
+             mpDoc->set(IDocumentSettingAccess::USE_OLD_PRINTER_METRICS, bTmp);
+         }
+         break;
+-
++        case HANDLE_TABS_RELATIVE_TO_INDENT:
++        {
++            sal_Bool bTmp = *(sal_Bool*)rValue.getValue();
++            mpDoc->set(IDocumentSettingAccess::TABS_RELATIVE_TO_INDENT, bTmp);
++        }
++        break;
+         default:
+ 			throw UnknownPropertyException();
+ 	}
+@@ -977,6 +984,12 @@ void SwXDocumentSettings::_getSingleValu
+             rValue.setValue( &bTmp, ::getBooleanCppuType() );
+         }
+         break;
++        case HANDLE_TABS_RELATIVE_TO_INDENT:
++        {
++            sal_Bool bTmp = mpDoc->get(IDocumentSettingAccess::TABS_RELATIVE_TO_INDENT);
++            rValue.setValue( &bTmp, ::getBooleanCppuType() );
++        }
++        break;
+ 
+         default:
+ 			throw UnknownPropertyException();
