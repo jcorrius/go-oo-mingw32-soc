@@ -1,36 +1,31 @@
---- basic/source/runtime/stdobj.cxx.old	2007-11-20 17:32:54.000000000 -1000
-+++ basic/source/runtime/stdobj.cxx	2007-11-20 22:51:43.000000000 -1000
-@@ -504,9 +504,10 @@
+--- basic/source/runtime/stdobj.cxx.orig	2007-12-05 05:29:28.000000000 +0800
++++ basic/source/runtime/stdobj.cxx	2007-12-06 15:02:07.000000000 +0800
+@@ -504,9 +504,10 @@ static Methods aMethods[] = {
    { "String1",      SbxSTRING, 0,NULL,0 },
    { "String2",      SbxSTRING, 0,NULL,0 },
    { "Compare",      SbxINTEGER,       _OPT, NULL,0 },
 -{ "StrConv",        SbxSTRING,   2 | _FUNCTION, RTLNAME(StrConv),0          },
--  { "String",       SbxSTRING, 0,NULL,0 },
 +{ "StrConv",        SbxOBJECT,   3 | _FUNCTION, RTLNAME(StrConv),0          },
-+  { "String",       SbxOBJECT, 0,NULL,0 },
+   { "String",       SbxSTRING, 0,NULL,0 },
    { "Conversion",   SbxSTRING, 0,NULL,0 },
-+  { "LCID",			SbxINTEGER, 0,NULL,0 },
++  { "LCID",			SbxINTEGER, _OPT,NULL,0 },
  { "String",         SbxSTRING,    2 | _FUNCTION, RTLNAME(String),0          },
    { "Count",        SbxLONG, 0,NULL,0 },
    { "Filler",       SbxVARIANT, 0,NULL,0 },
---- basic/source/runtime/methods.cxx.old	2007-11-20 17:32:39.000000000 -1000
-+++ basic/source/runtime/methods.cxx	2007-11-20 22:44:45.000000000 -1000
-@@ -3934,21 +3934,159 @@
+--- basic/source/runtime/rtlproto.hxx.orig	2007-12-04 15:19:05.000000000 +0800
++++ basic/source/runtime/rtlproto.hxx	2007-12-05 05:31:09.000000000 +0800
+@@ -351,3 +351,4 @@ extern RTLFUNC(CDec);
+ 
+ extern double Now_Impl();
+ extern void Wait_Impl( bool bDurationBased, SbxArray& rPar );
++bool IsBaseIndexOne();
+--- basic/source/runtime/methods.cxx.orig	2007-12-05 05:29:28.000000000 +0800
++++ basic/source/runtime/methods.cxx	2007-12-06 14:57:31.000000000 +0800
+@@ -3946,21 +3946,135 @@ RTLFUNC(QBColor)
  	rPar.Get(0)->PutLong( nRGB );
  }
  
-+bool IsIndexOne()
-+{
-+	bool result = false;
-+	if ( pINST && pINST->pRun )
-+	{
-+		USHORT res = pINST->pRun->GetBase();
-+		if ( res )
-+			result = true;
-+	}	
-+	return result;
-+}
- 
+-
 +// StrConv(string, conversion, LCID)
  RTLFUNC(StrConv)
  {
@@ -50,13 +45,8 @@
 +		return;	
 +	}
 +
-+	String aOldStr; 
++	String aOldStr = rPar.Get(1)->GetString(); 
 +	INT32 nConversion = rPar.Get(2)->GetLong();
-+	if( nConversion != 64 )
-+	{
-+		// The first parameter is String object, not byte array
-+ 		aOldStr = rPar.Get(1)->GetString();
-+	}
 +	
 +	USHORT nLanguage = LANGUAGE_SYSTEM;
 +	if( nArgCount == 3 )
@@ -68,14 +58,16 @@
 +	USHORT nOldLen = aOldStr.Len();
 +	if( nOldLen == 0 )
 +	{
-+		// null string, need check the behavior in Excel	
++		// null string,return 
++		rPar.Get(0)->PutString(aOldStr);
++		return;
 +	}
 +
 +	INT32 nType = 0;
 +	if ( (nConversion & 0x03) == 3 ) //  vbProperCase
 +	{
 +		CharClass& rCharClass = GetCharClass();
-+		aOldStr = rCharClass.toTitle( aOldStr, 0, nOldLen );
++		aOldStr = rCharClass.toTitle( aOldStr.ToLowerAscii(), 0, nOldLen );
 +	}
 +	else if ( (nConversion & 0x01) == 1 ) // vbUpperCase
 +		nType |= ::com::sun::star::i18n::TransliterationModules_LOWERCASE_UPPERCASE;
@@ -104,43 +96,34 @@
 +
 +	if ( (nConversion & 0x40) == 64 ) // vbUnicode
 +	{
-+		SbxBase* pParObj = rPar.Get(1)->GetObject();
-+		SbxDimArray* pArr = PTR_CAST(SbxDimArray,pParObj);
-+		if( pArr )
++		// convert the string to byte string, preserving unicode (2 bytes per character)
++		USHORT nSize = aNewStr.Len()*2;
++		const sal_Unicode* pSrc = aNewStr.GetBuffer();
++		sal_Char* pChar = new sal_Char[nSize+1];
++		for( USHORT i=0; i < nSize; i++ )
 +		{
-+			INT32 nLower, nUpper;
-+			if( !pArr->GetDim32( 1, nLower, nUpper ) )
-+				StarBASIC::Error( SbERR_OUT_OF_RANGE );
-+			else
-+			{
-+				UINT32 nCount = nUpper - nLower + 1;
-+				sal_Char* pChar = new sal_Char[nCount+1];
-+				for( INT32 i = nLower; i <= nUpper; i++)
-+				{
-+					INT32 index = i;
-+					pChar[ i-nLower ] = pArr->Get32(&index)->GetByte();
-+				}
-+				pChar[nCount] = '\0';
-+				OString aOStr( pChar );
-+
-+				// default text coding is incorrect in unix
-+				OUString aOUStr = OStringToOUString(aOStr, osl_getThreadTextEncoding());
-+				aNewStr = String(aOUStr);
-+				rPar.Get(0)->PutString( aNewStr );
-+			}
++			pChar[i] = i%2 ? ((*pSrc) >> 8) & 0xff : (*pSrc) & 0xff;
++			if( i%2 )
++				pSrc++;	
 +		}
-+		else
-+			StarBASIC::Error( SbERR_MUST_HAVE_DIMS );
++		pChar[nSize] = '\0';
++		OString aOStr(pChar);	
++		
++		// there is no concept about default codepage in unix. so it is incorrectly in unix 
++		OUString aOUStr = OStringToOUString(aOStr, osl_getThreadTextEncoding());
++		aNewStr = String(aOUStr);
++		rPar.Get(0)->PutString( aNewStr );
++		return;
 +	}
 +	else if ( (nConversion & 0x80) == 128 ) // vbFromUnicode
 +	{
-+		OUString aOUStr1(aNewStr);
-+		// default text coding is incorrect in unix
-+		OString aOStr1 = OUStringToOString(aNewStr,osl_getThreadTextEncoding());
-+		const sal_Char* pChar = aOStr1.getStr();
-+		USHORT nArraySize = aOStr1.getLength();
++		OUString aOUStr(aNewStr);
++		// there is no concept about default codepage in unix. so it is incorrectly in unix 
++		OString aOStr = OUStringToOString(aNewStr,osl_getThreadTextEncoding());
++		const sal_Char* pChar = aOStr.getStr();
++		USHORT nArraySize = aOStr.getLength();
 +		SbxDimArray* pArray = new SbxDimArray(SbxBYTE);
-+		bool bIncIndex = (IsIndexOne() && SbiRuntime::isVBAEnabled() );
++		bool bIncIndex = (IsBaseIndexOne() && SbiRuntime::isVBAEnabled() );
 +		if(nArraySize)
 +		{
 +			if( bIncIndex )
