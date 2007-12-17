@@ -471,9 +471,10 @@ ScVbaWorkbook::getCodeName() throw (css::uno::RuntimeException)
 #ifdef VBA_OOBUILD_HACK 
     uno::Reference< frame::XModel > xModel( getModel(), uno::UNO_QUERY_THROW );
     ScDocument* pDoc = getDocShell( xModel )->GetDocument();
-    ScExtDocOptions* pExtOptions = pDoc->GetExtDocOptions();
+    /*ScExtDocOptions* pExtOptions = pDoc->GetExtDocOptions();
     ScExtDocSettings pExtSettings = pExtOptions->GetDocSettings();
-    ::rtl::OUString sGlobCodeName = pExtSettings.maGlobCodeName;
+    ::rtl::OUString sGlobCodeName = pExtSettings.maGlobCodeName; */
+    ::rtl::OUString sGlobCodeName = pDoc->GetCodeName(); 
     return sGlobCodeName;
 #else
     throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Not implemented") ), uno::Reference< uno::XInterface >() );
@@ -485,9 +486,10 @@ ScVbaWorkbook::setCodeName( const ::rtl::OUString& sGlobCodeName ) throw (css::u
 {
     uno::Reference< frame::XModel > xModel( getModel(), uno::UNO_QUERY_THROW );
     ScDocument* pDoc = getDocShell( xModel )->GetDocument();
-    ScExtDocOptions* pExtOptions = pDoc->GetExtDocOptions();
+    /*ScExtDocOptions* pExtOptions = pDoc->GetExtDocOptions();
     ScExtDocSettings pExtSettings = pExtOptions->GetDocSettings();
-    pExtSettings.maGlobCodeName = sGlobCodeName;
+    pExtSettings.maGlobCodeName = sGlobCodeName;*/
+    pDoc->SetCodeName( sGlobCodeName );
 #else
 void SAL_CALL
 ScVbaWorkbook::setCodeName( const ::rtl::OUString& ) throw (css::uno::RuntimeException)

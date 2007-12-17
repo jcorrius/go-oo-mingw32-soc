@@ -814,8 +814,10 @@ ScVbaWorksheet::getCodeName() throw (css::uno::RuntimeException)
     {
         uno::Reference< frame::XModel > xModel( getModel(), uno::UNO_QUERY_THROW );
         ScDocument* pDoc = getDocShell( xModel )->GetDocument();
-        ScExtDocOptions* pExtOptions = pDoc->GetExtDocOptions();
-        rtl::OUString sCodeName = pExtOptions->GetCodeName( nTab );
+        /*ScExtDocOptions* pExtOptions = pDoc->GetExtDocOptions();
+        rtl::OUString sCodeName = pExtOptions->GetCodeName( nTab );*/
+        String sCodeName;
+        pDoc->GetCodeName( nTab, sCodeName );
         return sCodeName;
     }
     else
@@ -838,8 +840,10 @@ ScVbaWorksheet::setCodeName( const rtl::OUString& sCodeName ) throw (css::uno::R
     {
         uno::Reference< frame::XModel > xModel( getModel(), uno::UNO_QUERY_THROW );
         ScDocument* pDoc = getDocShell( xModel )->GetDocument();
-        ScExtDocOptions* pExtOptions = pDoc->GetExtDocOptions();
-        pExtOptions->SetCodeName( sCodeName, nTab );
+        /*ScExtDocOptions* pExtOptions = pDoc->GetExtDocOptions();
+        pExtOptions->SetCodeName( sCodeName, nTab );*/
+        String sNewCodeName( sCodeName );
+        pDoc->SetCodeName( nTab, sNewCodeName );
     }
     else
                throw uno::RuntimeException(::rtl::OUString(
