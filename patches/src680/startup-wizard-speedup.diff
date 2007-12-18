@@ -1,71 +1,841 @@
+diff --git a/desktop/inc/app.hxx b/desktop/inc/app.hxx
+index 9e931db..6a59afa 100644
+--- desktop/inc/app.hxx
++++ desktop/inc/app.hxx
+@@ -156,6 +156,11 @@ class Desktop : public Application
+ 		static sal_Bool         CheckOEM();
+         static sal_Bool         isCrashReporterEnabled();
+ 
++        // first-start (ever) & license relate methods
++        static rtl::OUString    GetLicensePath();
++        static sal_Bool         LicenseNeedsAcceptance();
++        static sal_Bool         IsFirstStartWizardNeeded();
++
+ 	private:
+ 		// Bootstrap methods
+ 		::com::sun::star::uno::Reference< ::com::sun::star::lang::XMultiServiceFactory > CreateApplicationServiceManager();
 diff --git a/desktop/source/app/app.cxx b/desktop/source/app/app.cxx
-index 353b36f..96ce066 100644
+index b9b4def..d6edeeb 100644
 --- desktop/source/app/app.cxx
 +++ desktop/source/app/app.cxx
-@@ -349,6 +349,10 @@ namespace desktop
- static SalMainPipeExchangeSignalHandler* pSignalHandler = 0;
- static sal_Bool _bCrashReporterEnabled = sal_True;
- 
-+static const OUString sConfigSrvc = OUString::createFromAscii("com.sun.star.configuration.ConfigurationProvider");
-+static const OUString sAccessSrvc = OUString::createFromAscii("com.sun.star.configuration.ConfigurationAccess");
-+static const OUString sUpdAccSrvc = OUString::createFromAscii("com.sun.star.configuration.ConfigurationUpdateAccess");
-+
- // ----------------------------------------------------------------------------
- 
- ResMgr* Desktop::GetDesktopResManager()
-@@ -1306,6 +1310,37 @@ void Desktop::AppEvent( const ApplicationEvent& rAppEvent )
-     HandleAppEvent( rAppEvent );
- }
- 
-+static sal_Bool impl_probablyNeedsFirstStartWizard()
-+{
-+    // Do we need to show EULA?
-+    ::rtl::OUString sValue;
-+    static const ::rtl::OUString BOOTPARAM_SHOWLICENSE = ::rtl::OUString::createFromAscii("HideEula");
-+    sal_Bool bParamExists = ::rtl::Bootstrap::get(BOOTPARAM_SHOWLICENSE, sValue);
-+    sal_Bool bShowEula = !( bParamExists && sValue.toBoolean() );
-+
-+    // Are we at the first start?
-+    try {
-+        Reference < XMultiServiceFactory > xFactory = ::comphelper::getProcessServiceFactory();
-+        // get configuration provider
-+        Reference< XMultiServiceFactory > theConfigProvider = Reference< XMultiServiceFactory >(
-+        xFactory->createInstance(sConfigSrvc), UNO_QUERY_THROW);
-+        Sequence< Any > theArgs(1);
-+        NamedValue v(OUString::createFromAscii("NodePath"), 
-+            makeAny(OUString::createFromAscii("org.openoffice.Setup/Office")));
-+        theArgs[0] <<= v;
-+        Reference< XPropertySet > pset = Reference< XPropertySet >(
-+            theConfigProvider->createInstanceWithArguments(sUpdAccSrvc, theArgs), UNO_QUERY_THROW);
-+        Any result = pset->getPropertyValue(OUString::createFromAscii("FirstStartWizardCompleted"));
-+        sal_Bool bCompleted = sal_False;
-+        if ((result >>= bCompleted) && bCompleted && !bShowEula)
-+            return sal_False;  // wizard was already completed, no EULA to show
-+    } catch (const Exception&)
-+    {
-+    }
-+
-+    return sal_True;
-+}
-+
- void Desktop::Main()
- {
-     RTL_LOGFILE_CONTEXT( aLog, "desktop (cd100003) ::Desktop::Main" );
-@@ -1502,6 +1537,7 @@ void Desktop::Main()
+@@ -1501,19 +1501,19 @@ void Desktop::Main()
          RTL_LOGFILE_CONTEXT_TRACE( aLog, "} tools::InitTestToolLib" );
  
          // First Start Wizard
-+        if ( impl_probablyNeedsFirstStartWizard() )
++        if ( IsFirstStartWizardNeeded() && !pCmdLineArgs->IsNoFirstStartWizard() )
          {
-             sal_Bool bWidthUI = sal_True;
-             if (pCmdLineArgs->IsNoFirstStartWizard())
-@@ -2223,9 +2259,6 @@ void Desktop::PreloadConfigurationData()
+-            sal_Bool bWidthUI = sal_True;
+-            if (pCmdLineArgs->IsNoFirstStartWizard())
+-              bWidthUI = sal_False;
+-
+             Reference< XJob > xFirstStartJob( xSMgr->createInstance(
+                 DEFINE_CONST_UNICODE( "com.sun.star.comp.desktop.FirstStart" ) ), UNO_QUERY );
+             if (xFirstStartJob.is())
+             {
+                 sal_Bool bDone = sal_False;
+-                Sequence< NamedValue > lArgs(1);
+-                lArgs[0].Name    = ::rtl::OUString::createFromAscii("WidthUI");
+-                lArgs[0].Value <<= bWidthUI;
++                Sequence< NamedValue > lArgs(2);
++                lArgs[0].Name    = ::rtl::OUString::createFromAscii("LicenseNeedsAcceptance");
++                lArgs[0].Value <<= LicenseNeedsAcceptance();
++                lArgs[1].Name    = ::rtl::OUString::createFromAscii("LicensePath");
++                lArgs[1].Value <<= GetLicensePath();
++
+                 xFirstStartJob->execute(lArgs) >>= bDone;
+                 if (!bDone) {
+                     return;
+@@ -2222,8 +2222,8 @@ void Desktop::PreloadConfigurationData()
          }
      }
  
 -    OUString sConfigSrvc = OUString::createFromAscii("com.sun.star.configuration.ConfigurationProvider");
 -    OUString sAccessSrvc = OUString::createFromAscii("com.sun.star.configuration.ConfigurationAccess");
--
++    static const OUString sConfigSrvc( RTL_CONSTASCII_USTRINGPARAM( "com.sun.star.configuration.ConfigurationProvider" ) );
++    static const OUString sAccessSrvc( RTL_CONSTASCII_USTRINGPARAM( "com.sun.star.configuration.ConfigurationAccess" ) );
+ 
      // get configuration provider
      Reference< XMultiServiceFactory > xConfigProvider;
-     xConfigProvider = Reference< XMultiServiceFactory > (
+diff --git a/desktop/source/app/appfirststart.cxx b/desktop/source/app/appfirststart.cxx
+new file mode 100644
+index 0000000..b687cff
+--- /dev/null
++++ desktop/source/app/appfirststart.cxx
+@@ -0,0 +1,277 @@
++/*************************************************************************
++ *
++ *  OpenOffice.org - a multi-platform office productivity suite
++ *
++ *  $RCSfile: app.cxx,v $
++ *
++ *  $Revision: 1.211 $
++ *
++ *  last change: $Author: ihi $ $Date: 2007/11/26 14:11:13 $
++ *
++ *  The Contents of this file are made available subject to
++ *  the terms of GNU Lesser General Public License Version 2.1.
++ *
++ *
++ *    GNU Lesser General Public License Version 2.1
++ *    =============================================
++ *    Copyright 2005 by Sun Microsystems, Inc.
++ *    901 San Antonio Road, Palo Alto, CA 94303, USA
++ *
++ *    This library is free software; you can redistribute it and/or
++ *    modify it under the terms of the GNU Lesser General Public
++ *    License version 2.1, as published by the Free Software Foundation.
++ *
++ *    This library is distributed in the hope that it will be useful,
++ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ *    Lesser General Public License for more details.
++ *
++ *    You should have received a copy of the GNU Lesser General Public
++ *    License along with this library; if not, write to the Free Software
++ *    Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ *    MA  02111-1307  USA
++ *
++ ************************************************************************/
++
++#include <osl/file.hxx>
++#include <rtl/bootstrap.hxx>
++#include <rtl/ustring.hxx>
++#include <tools/datetime.hxx>
++
++#include <comphelper/processfactory.hxx>
++
++#ifndef _COM_SUN_STAR_BEANS_XPROPERTYSET_HPP_
++#include <com/sun/star/beans/XPropertySet.hpp>
++#endif
++#ifndef _COM_SUN_STAR_BEANS_NAMEDVALUE_HPP_
++#include <com/sun/star/beans/NamedValue.hpp>
++#endif
++
++#include "app.hxx"
++
++using rtl::OUString;
++using namespace desktop;
++using namespace com::sun::star::beans;
++
++static const OUString sConfigSrvc( RTL_CONSTASCII_USTRINGPARAM( "com.sun.star.configuration.ConfigurationProvider" ) );
++static const OUString sAccessSrvc( RTL_CONSTASCII_USTRINGPARAM( "com.sun.star.configuration.ConfigurationUpdateAccess" ) );
++
++/* Path of the license. */
++OUString Desktop::GetLicensePath()
++{
++    // license file name
++    static const char *szLicensePath = "/share/readme";
++#if defined(WNT) || defined(OS2)
++    static const char *szWNTLicenseName = "/license";
++    static const char *szWNTLicenseExt = ".txt";
++#else
++    static const char *szUNXLicenseName = "/LICENSE";
++    static const char *szUNXLicenseExt = "";
++#endif
++    static OUString aLicensePath;
++
++    if (aLicensePath.getLength() > 0)
++        return aLicensePath;
++
++    OUString aBaseInstallPath;
++    ::utl::Bootstrap::PathStatus aBaseLocateResult = 
++        ::utl::Bootstrap::locateBaseInstallation(aBaseInstallPath);
++    if (aBaseLocateResult != ::utl::Bootstrap::PATH_EXISTS)
++    {
++        // yuck! no license :/
++    }
++
++    // determine the filename of the license to show
++    OUString  aLangString;
++    ::com::sun::star::lang::Locale aLocale;
++    OString aMgrName = OString("dkt") + OString::valueOf((sal_Int32)SUPD, 10);
++
++    AllSettings aSettings(Application::GetSettings());
++    aLocale = aSettings.GetUILocale();
++    ResMgr* pLocalResMgr = ResMgr::SearchCreateResMgr(aMgrName, aLocale);    
++
++    aLangString = aLocale.Language;
++    if ( aLocale.Country.getLength() != 0 )
++    {
++        aLangString += OUString::createFromAscii("-");
++        aLangString += aLocale.Country;
++        if ( aLocale.Variant.getLength() != 0 )
++        {
++            aLangString += OUString::createFromAscii("-");
++            aLangString += aLocale.Variant;
++        }
++    }
++#if defined(WNT) || defined(OS2)
++    aLicensePath = 
++        aBaseInstallPath + OUString::createFromAscii(szLicensePath)
++        + OUString::createFromAscii(szWNTLicenseName)
++        + OUString::createFromAscii("_")
++        + aLangString
++        + OUString::createFromAscii(szWNTLicenseExt);
++#else
++    aLicensePath = 
++        aBaseInstallPath + OUString::createFromAscii(szLicensePath)
++        + OUString::createFromAscii(szUNXLicenseName)
++        + OUString::createFromAscii("_")
++        + aLangString
++        + OUString::createFromAscii(szUNXLicenseExt);
++#endif
++    delete pLocalResMgr;
++    return aLicensePath;
++}
++
++/* Check if we need to accept license. */
++sal_Bool Desktop::LicenseNeedsAcceptance()
++{
++    static const ::rtl::OUString BOOTPARAM_SHOWLICENSE = ::rtl::OUString::createFromAscii("HideEula");
++    ::rtl::OUString sValue;
++    sal_Bool        bParamExists = ::rtl::Bootstrap::get(BOOTPARAM_SHOWLICENSE, sValue);
++    sal_Bool        bShowLicense = sal_True;
++    if (bParamExists)
++        bShowLicense = ! sValue.toBoolean();
++    return bShowLicense;
++}
++
++/* Local function - was the wizard completed already? */
++static sal_Bool impl_isFirstStart()
++{
++    try {
++        Reference < XMultiServiceFactory > xFactory = ::comphelper::getProcessServiceFactory();
++
++        // get configuration provider
++        Reference< XMultiServiceFactory > theConfigProvider = Reference< XMultiServiceFactory >(
++                xFactory->createInstance(sConfigSrvc), UNO_QUERY_THROW);
++
++        Sequence< Any > theArgs(1);
++        NamedValue v(OUString::createFromAscii("NodePath"), makeAny(OUString::createFromAscii("org.openoffice.Setup/Office")));
++        theArgs[0] <<= v;
++
++        Reference< XPropertySet > pset = Reference< XPropertySet >(
++                theConfigProvider->createInstanceWithArguments(sAccessSrvc, theArgs), UNO_QUERY_THROW);
++
++        Any result = pset->getPropertyValue(OUString::createFromAscii("FirstStartWizardCompleted"));
++        sal_Bool bCompleted = sal_False;
++        if ((result >>= bCompleted) && bCompleted)
++            return sal_False;  // wizard was already completed
++        else
++            return sal_True;
++    } catch (const Exception&)
++    {
++        return sal_True;
++    }
++}
++
++/* Local function - convert oslDateTime to tools DateTime */
++static DateTime impl_oslDateTimeToDateTime(const oslDateTime& aDateTime)
++{
++    return DateTime(
++        Date(aDateTime.Day, aDateTime.Month, aDateTime.Year), 
++        Time(aDateTime.Hours, aDateTime.Minutes, aDateTime.Seconds));
++}
++
++/* Local function - get DateTime from a string */
++static sal_Bool impl_parseDateTime(const OUString& aString, DateTime& aDateTime)
++{
++    // take apart a canonical literal xsd:dateTime string
++    //CCYY-MM-DDThh:mm:ss(Z)
++
++    OUString aDateTimeString = aString.trim();
++
++    // check length
++    if (aDateTimeString.getLength() < 19 || aDateTimeString.getLength() > 20)
++        return sal_False;
++
++    sal_Int32 nDateLength = 10;
++    sal_Int32 nTimeLength = 8;
++
++    OUString aDateTimeSep = OUString::createFromAscii("T");
++    OUString aDateSep = OUString::createFromAscii("-");
++    OUString aTimeSep = OUString::createFromAscii(":");
++    OUString aUTCString = OUString::createFromAscii("Z");
++
++    OUString aDateString = aDateTimeString.copy(0, nDateLength);
++    OUString aTimeString = aDateTimeString.copy(nDateLength+1, nTimeLength);
++
++    sal_Int32 nIndex = 0;
++    sal_Int32 nYear = aDateString.getToken(0, '-', nIndex).toInt32();
++    sal_Int32 nMonth = aDateString.getToken(0, '-', nIndex).toInt32();
++    sal_Int32 nDay = aDateString.getToken(0, '-', nIndex).toInt32();
++    nIndex = 0;
++    sal_Int32 nHour = aTimeString.getToken(0, ':', nIndex).toInt32();
++    sal_Int32 nMinute = aTimeString.getToken(0, ':', nIndex).toInt32();
++    sal_Int32 nSecond = aTimeString.getToken(0, ':', nIndex).toInt32();
++
++    Date tmpDate((USHORT)nDay, (USHORT)nMonth, (USHORT)nYear);
++    Time tmpTime(nHour, nMinute, nSecond);
++    DateTime tmpDateTime(tmpDate, tmpTime);
++    if (aString.indexOf(aUTCString) < 0)
++        tmpDateTime.ConvertToUTC();
++
++    aDateTime = tmpDateTime;
++    return sal_True;
++}
++
++/* Local function - was the license accepted already? */
++static sal_Bool impl_isLicenseAccepted()
++{
++    // If no license will be shown ... it must not be accepted.
++    // So it was accepted "hardly" by the outside installer.
++    // But if the configuration entry "HideEula" will be removed afterwards ..
++    // we have to show the licese page again and user has to accept it here .-)
++    if ( ! Desktop::LicenseNeedsAcceptance() )
++        return sal_True;
++
++    try 
++    {
++        Reference < XMultiServiceFactory > xFactory = ::comphelper::getProcessServiceFactory();
++
++        // get configuration provider
++        Reference< XMultiServiceFactory > theConfigProvider = Reference< XMultiServiceFactory >(
++                xFactory->createInstance(sConfigSrvc), UNO_QUERY_THROW);
++
++        Sequence< Any > theArgs(1);
++        NamedValue v(OUString::createFromAscii("NodePath"), 
++                makeAny(OUString::createFromAscii("org.openoffice.Setup/Office")));
++        theArgs[0] <<= v;
++        Reference< XPropertySet > pset = Reference< XPropertySet >(
++                theConfigProvider->createInstanceWithArguments(sAccessSrvc, theArgs), UNO_QUERY_THROW);
++
++        Any result = pset->getPropertyValue(OUString::createFromAscii("LicenseAcceptDate"));
++
++        OUString aAcceptDate;
++        if (result >>= aAcceptDate)
++        {
++            // compare to date of license file
++            OUString aLicenseURL = Desktop::GetLicensePath();
++            osl::DirectoryItem aDirItem;
++            if (osl::DirectoryItem::get(aLicenseURL, aDirItem) != osl::FileBase::E_None)
++                return sal_False;
++            osl::FileStatus aStatus(FileStatusMask_All);
++            if (aDirItem.getFileStatus(aStatus) != osl::FileBase::E_None)
++                return sal_False;
++            TimeValue aTimeVal = aStatus.getModifyTime();
++            oslDateTime aDateTimeVal;
++            if (!osl_getDateTimeFromTimeValue(&aTimeVal, &aDateTimeVal))
++                return sal_False;
++
++            // compare dates
++            DateTime aLicenseDateTime = impl_oslDateTimeToDateTime(aDateTimeVal);
++            DateTime aAcceptDateTime;
++            if (!impl_parseDateTime(aAcceptDate, aAcceptDateTime))
++                return sal_False;
++
++            if ( aAcceptDateTime > aLicenseDateTime )
++                return sal_True;
++        }         
++        return sal_False;
++    } catch (const Exception&)
++    {
++        return sal_False;
++    }
++}
++
++/* Check if we need the first start wizard. */
++sal_Bool Desktop::IsFirstStartWizardNeeded()
++{
++    return impl_isFirstStart() || !impl_isLicenseAccepted();
++}
+diff --git a/desktop/source/app/makefile.mk b/desktop/source/app/makefile.mk
+index e8f2935..9a15f39 100644
+--- desktop/source/app/makefile.mk
++++ desktop/source/app/makefile.mk
+@@ -50,6 +50,7 @@ ENABLE_EXCEPTIONS=TRUE
+ OBJFILES = \
+         $(OBJ)$/main.obj					\
+         $(OBJ)$/app.obj						\
++        $(OBJ)$/appfirststart.obj			\
+         $(OBJ)$/copyright_ascii_sun.obj		\
+         $(OBJ)$/copyright_ascii_ooo.obj		\
+         $(OBJ)$/lockfile.obj				\
+diff --git a/desktop/source/migration/pages.cxx b/desktop/source/migration/pages.cxx
+index 929f401..549f641 100644
+--- desktop/source/migration/pages.cxx
++++ desktop/source/migration/pages.cxx
+@@ -102,11 +102,12 @@ static void _setBold(FixedText& ft)
+     ft.SetControlFont(f);
+ }
+ 
+-WelcomePage::WelcomePage( svt::OWizardMachine* parent, const ResId& resid)
++WelcomePage::WelcomePage( svt::OWizardMachine* parent, const ResId& resid, sal_Bool bLicenseNeedsAcceptance )
+     : OWizardPage(parent, resid)
+     , m_ftHead(this, WizardResId(FT_WELCOME_HEADER))
+     , m_ftBody(this, WizardResId(FT_WELCOME_BODY))
+     , m_pParent(parent)
++    , m_bLicenseNeedsAcceptance( bLicenseNeedsAcceptance )
+     , bIsEvalVersion(false)
+     , bNoEvalText(false)
+ {
+@@ -137,7 +138,7 @@ WelcomePage::WelcomePage( svt::OWizardMachine* parent, const ResId& resid)
+             m_ftBody.SetText( aText );
+         }
+ 		else
+-		if ( ! FirstStartWizard::needsLicenseAcceptence())
++		if ( ! m_bLicenseNeedsAcceptance )
+ 		{
+             String aText(WizardResId(STR_WELCOME_WITHOUT_LICENSE));
+             m_ftBody.SetText( aText );
+@@ -182,7 +183,7 @@ void WelcomePage::ActivatePage()
+     // GrabFocus();
+ }
+ 
+-LicensePage::LicensePage( svt::OWizardMachine* parent, const ResId& resid)
++LicensePage::LicensePage( svt::OWizardMachine* parent, const ResId& resid, const rtl::OUString &rLicensePath )
+     : OWizardPage(parent, resid)
+     , m_pParent(parent)
+     , m_ftHead(this, WizardResId(FT_LICENSE_HEADER))
+@@ -214,13 +215,12 @@ LicensePage::LicensePage( svt::OWizardMachine* parent, const ResId& resid)
+ 
+     m_ftBody1Txt.SetText( aText );
+ 
+-    OUString aLicensePath = FirstStartWizard::getLicensePath();
+     // load license text
+-    File aLicenseFile(aLicensePath);
++    File aLicenseFile(rLicensePath);
+     if ( aLicenseFile.open(OpenFlag_Read) == FileBase::E_None)
+     {
+         DirectoryItem d;
+-        DirectoryItem::get(aLicensePath, d);
++        DirectoryItem::get(rLicensePath, d);
+         FileStatus fs(FileStatusMask_FileSize);
+         d.getFileStatus(fs);
+         sal_uInt64 nBytesRead = 0;
+diff --git a/desktop/source/migration/pages.hxx b/desktop/source/migration/pages.hxx
+index fcc3109..2550964 100644
+--- desktop/source/migration/pages.hxx
++++ desktop/source/migration/pages.hxx
+@@ -54,6 +54,7 @@ private:
+     FixedText m_ftHead;
+     FixedText m_ftBody;
+     svt::OWizardMachine *m_pParent;
++    sal_Bool m_bLicenseNeedsAcceptance;
+     enum OEMType
+     {
+         OEM_NONE, OEM_NORMAL, OEM_EXTENDED
+@@ -65,7 +66,7 @@ private:
+     
+ 
+ public:
+-    WelcomePage( svt::OWizardMachine* parent, const ResId& resid);
++    WelcomePage( svt::OWizardMachine* parent, const ResId& resid, sal_Bool bLicenseNeedsAcceptance );
+ protected:
+     virtual void ActivatePage();
+ };
+@@ -111,7 +112,7 @@ private:
+     PushButton m_pbDown;
+     sal_Bool m_bLicenseRead;
+ public:
+-    LicensePage( svt::OWizardMachine* parent, const ResId& resid);
++    LicensePage( svt::OWizardMachine* parent, const ResId& resid, const rtl::OUString &rLicensePath );
+ private:
+     DECL_LINK(PageDownHdl, PushButton*);
+     DECL_LINK(EndReachedHdl, LicenseView*);
+diff --git a/desktop/source/migration/wizard.cxx b/desktop/source/migration/wizard.cxx
+index c7c7bbd..481cb43 100644
+--- desktop/source/migration/wizard.cxx
++++ desktop/source/migration/wizard.cxx
+@@ -110,16 +110,17 @@ ResMgr *FirstStartWizard::GetResManager()
+     return FirstStartWizard::pResMgr;
+ }
+ 
+-FirstStartWizard::FirstStartWizard(Window* pParent)
++FirstStartWizard::FirstStartWizard( Window* pParent, sal_Bool bLicenseNeedsAcceptance, const rtl::OUString &rLicensePath )
+     :RoadmapWizard( pParent, WizardResId(DLG_FIRSTSTART_WIZARD),
+         WZB_NEXT|WZB_PREVIOUS|WZB_FINISH|WZB_CANCEL|WZB_HELP, WizardResId(STR_FIRSTSTART_TITLE))
+     ,m_bOverride(sal_False)
+     ,m_aDefaultPath(0)
+ 	,m_aMigrationPath(0)
+     ,m_bDone(sal_False)
+-	,m_bLicenseNeedsAcceptence(FirstStartWizard::needsLicenseAcceptence())
++	,m_bLicenseNeedsAcceptance( bLicenseNeedsAcceptance )
+     ,m_bLicenseWasAccepted(sal_False)
+     ,m_bAutomaticUpdChk(sal_True)
++    ,m_aLicensePath( rLicensePath )
+ {
+     // ---
+     // FreeResource();
+@@ -170,7 +171,7 @@ FirstStartWizard::FirstStartWizard(Window* pParent)
+     sal_Bool bPage_UpdateCheck  = sal_True;
+     sal_Bool bPage_Registration = sal_True;
+ 
+-    bPage_License     = m_bLicenseNeedsAcceptence;
++    bPage_License     = m_bLicenseNeedsAcceptance;
+     bPage_Migration   = Migration::checkMigration();
+     bPage_UpdateCheck = showOnlineUpdatePage();
+ 
+@@ -282,10 +283,10 @@ TabPage* FirstStartWizard::createPage(WizardState _nState)
+     switch (_nState)
+     {
+     case STATE_WELCOME:
+-        pTabPage = new WelcomePage(this, WizardResId(TP_WELCOME));
++        pTabPage = new WelcomePage(this, WizardResId(TP_WELCOME), m_bLicenseNeedsAcceptance);
+         break;
+     case STATE_LICENSE:
+-        pTabPage = new LicensePage(this, WizardResId(TP_LICENSE));
++        pTabPage = new LicensePage(this, WizardResId(TP_LICENSE), m_aLicensePath);
+         break;
+     case STATE_MIGRATION:
+         pTabPage = new MigrationPage(this, WizardResId(TP_MIGRATION));
+@@ -386,14 +387,6 @@ short FirstStartWizard::Execute()
+     return svt::RoadmapWizard::Execute();
+ }
+ 
+-
+-static DateTime _oslDateTimeToDateTime(const oslDateTime& aDateTime)
+-{
+-    return DateTime(
+-        Date(aDateTime.Day, aDateTime.Month, aDateTime.Year), 
+-        Time(aDateTime.Hours, aDateTime.Minutes, aDateTime.Seconds));
+-}
+-
+ static OUString _makeDateTimeString (const DateTime& aDateTime, sal_Bool bUTC = sal_False)
+ {
+     OStringBuffer aDateTimeString;
+@@ -418,47 +411,6 @@ static OUString _makeDateTimeString (const DateTime& aDateTime, sal_Bool bUTC =
+     return OStringToOUString(aDateTimeString.makeStringAndClear(), RTL_TEXTENCODING_ASCII_US);
+ }
+ 
+-static sal_Bool _parseDateTime(const OUString& aString, DateTime& aDateTime)
+-{
+-    // take apart a canonical literal xsd:dateTime string
+-    //CCYY-MM-DDThh:mm:ss(Z)
+-
+-    OUString aDateTimeString = aString.trim();
+-
+-    // check length
+-    if (aDateTimeString.getLength() < 19 || aDateTimeString.getLength() > 20)
+-        return sal_False;
+-
+-    sal_Int32 nDateLength = 10;
+-    sal_Int32 nTimeLength = 8;
+-
+-    OUString aDateTimeSep = OUString::createFromAscii("T");
+-    OUString aDateSep = OUString::createFromAscii("-");
+-    OUString aTimeSep = OUString::createFromAscii(":");
+-    OUString aUTCString = OUString::createFromAscii("Z");
+-
+-    OUString aDateString = aDateTimeString.copy(0, nDateLength);
+-    OUString aTimeString = aDateTimeString.copy(nDateLength+1, nTimeLength);
+-
+-    sal_Int32 nIndex = 0;
+-    sal_Int32 nYear = aDateString.getToken(0, '-', nIndex).toInt32();
+-    sal_Int32 nMonth = aDateString.getToken(0, '-', nIndex).toInt32();
+-    sal_Int32 nDay = aDateString.getToken(0, '-', nIndex).toInt32();
+-    nIndex = 0;
+-    sal_Int32 nHour = aTimeString.getToken(0, ':', nIndex).toInt32();
+-    sal_Int32 nMinute = aTimeString.getToken(0, ':', nIndex).toInt32();
+-    sal_Int32 nSecond = aTimeString.getToken(0, ':', nIndex).toInt32();
+-
+-    Date tmpDate((USHORT)nDay, (USHORT)nMonth, (USHORT)nYear);
+-    Time tmpTime(nHour, nMinute, nSecond);
+-    DateTime tmpDateTime(tmpDate, tmpTime);
+-    if (aString.indexOf(aUTCString) < 0)
+-        tmpDateTime.ConvertToUTC();
+-
+-    aDateTime = tmpDateTime;
+-    return sal_True;
+-}
+-
+ static OUString _getCurrentDateString()
+ {
+     OUString aString;
+@@ -466,9 +418,9 @@ static OUString _getCurrentDateString()
+ }
+ 
+ 
+-static const OUString sConfigSrvc = OUString::createFromAscii("com.sun.star.configuration.ConfigurationProvider");
+-static const OUString sAccessSrvc = OUString::createFromAscii("com.sun.star.configuration.ConfigurationUpdateAccess");
+-static const OUString sReadSrvc   = OUString::createFromAscii("com.sun.star.configuration.ConfigurationAccess");
++static const OUString sConfigSrvc( RTL_CONSTASCII_USTRINGPARAM( "com.sun.star.configuration.ConfigurationProvider" ) );
++static const OUString sAccessSrvc( RTL_CONSTASCII_USTRINGPARAM( "com.sun.star.configuration.ConfigurationUpdateAccess" ) );
++static const OUString sReadSrvc  ( RTL_CONSTASCII_USTRINGPARAM( "com.sun.star.configuration.ConfigurationAccess" ) );
+ 
+ void FirstStartWizard::storeAcceptDate()
+ {
+@@ -583,105 +535,6 @@ void FirstStartWizard::enableQuickstart()
+ 
+ }
+ 
+-sal_Bool FirstStartWizard::isWizardNeeded()
+-{
+-    return  (
+-                  FirstStartWizard::impl_isFirstStart()      ||
+-                ! FirstStartWizard::impl_isLicenseAccepted()
+-            );
+-}
+-
+-sal_Bool FirstStartWizard::impl_isFirstStart()
+-{
+-    try {
+-        Reference < XMultiServiceFactory > xFactory = ::comphelper::getProcessServiceFactory();
+-        // get configuration provider
+-        Reference< XMultiServiceFactory > theConfigProvider = Reference< XMultiServiceFactory >(
+-        xFactory->createInstance(sConfigSrvc), UNO_QUERY_THROW);
+-        Sequence< Any > theArgs(1);
+-        NamedValue v(OUString::createFromAscii("NodePath"), 
+-            makeAny(OUString::createFromAscii("org.openoffice.Setup/Office")));
+-        theArgs[0] <<= v;
+-        Reference< XPropertySet > pset = Reference< XPropertySet >(
+-            theConfigProvider->createInstanceWithArguments(sAccessSrvc, theArgs), UNO_QUERY_THROW);
+-        Any result = pset->getPropertyValue(OUString::createFromAscii("FirstStartWizardCompleted"));
+-        sal_Bool bCompleted = sal_False;
+-        if ((result >>= bCompleted) && bCompleted)
+-            return sal_False;  // wizard was already completed
+-        else
+-            return sal_True;
+-    } catch (const Exception&)
+-    {
+-        return sal_True;
+-    }
+-}
+-
+-sal_Bool FirstStartWizard::needsLicenseAcceptence()
+-{
+-	static const ::rtl::OUString BOOTPARAM_SHOWLICENSE = ::rtl::OUString::createFromAscii("HideEula");
+-	::rtl::OUString sValue;
+-	sal_Bool        bParamExists = ::rtl::Bootstrap::get(BOOTPARAM_SHOWLICENSE, sValue);
+-	sal_Bool		bShowLicense = sal_True;
+-	if (bParamExists)
+-		bShowLicense = ! sValue.toBoolean();
+-	return bShowLicense;
+-}
+-
+-sal_Bool FirstStartWizard::impl_isLicenseAccepted()
+-{
+-    // If no license will be shown ... it must not be accepted.
+-    // So it was accepted "hardly" by the outside installer.
+-    // But if the configuration entry "HideEula" will be removed afterwards ..
+-    // we have to show the licese page again and user has to accept it here .-)
+-    if ( ! FirstStartWizard::needsLicenseAcceptence())
+-        return sal_True;
+-
+-    try 
+-    {
+-        Reference < XMultiServiceFactory > xFactory = ::comphelper::getProcessServiceFactory();
+-        // get configuration provider
+-        Reference< XMultiServiceFactory > theConfigProvider = Reference< XMultiServiceFactory >(
+-        xFactory->createInstance(sConfigSrvc), UNO_QUERY_THROW);
+-        Sequence< Any > theArgs(1);
+-        NamedValue v(OUString::createFromAscii("NodePath"), 
+-            makeAny(OUString::createFromAscii("org.openoffice.Setup/Office")));
+-        theArgs[0] <<= v;
+-        Reference< XPropertySet > pset = Reference< XPropertySet >(
+-            theConfigProvider->createInstanceWithArguments(sAccessSrvc, theArgs), UNO_QUERY_THROW);
+-        Any result = pset->getPropertyValue(OUString::createFromAscii("LicenseAcceptDate"));
+-
+-        OUString aAcceptDate;
+-        if (result >>= aAcceptDate)
+-        {
+-            // compare to date of license file
+-            OUString aLicenseURL = FirstStartWizard::getLicensePath();
+-            DirectoryItem aDirItem;
+-            if (DirectoryItem::get(aLicenseURL, aDirItem) != FileBase::E_None)
+-                return sal_False;
+-            FileStatus aStatus(FileStatusMask_All);
+-            if (aDirItem.getFileStatus(aStatus) != FileBase::E_None)
+-                return sal_False;
+-            TimeValue aTimeVal = aStatus.getModifyTime();
+-            oslDateTime aDateTimeVal;
+-            if (!osl_getDateTimeFromTimeValue(&aTimeVal, &aDateTimeVal))
+-                return sal_False;
+-
+-            // compare dates
+-            DateTime aLicenseDateTime = _oslDateTimeToDateTime(aDateTimeVal);
+-            DateTime aAcceptDateTime;
+-            if (!_parseDateTime(aAcceptDate, aAcceptDateTime))
+-                return sal_False;
+-
+-            if ( aAcceptDateTime > aLicenseDateTime )
+-                return sal_True;
+-        }         
+-        return sal_False;
+-    } catch (const Exception&)
+-    {
+-        return sal_False;
+-    }
+-}
+-
+ sal_Bool FirstStartWizard::showOnlineUpdatePage()
+ {
+     try {
+@@ -707,65 +560,4 @@ sal_Bool FirstStartWizard::showOnlineUpdatePage()
+     return sal_False;
+ }
+ 
+-OUString FirstStartWizard::getLicensePath()
+-{
+-    // license file name
+-    static const char *szLicensePath = "/share/readme";
+-#if defined(WNT) || defined(OS2)
+-    static const char *szWNTLicenseName = "/license";
+-    static const char *szWNTLicenseExt = ".txt";
+-#else
+-    static const char *szUNXLicenseName = "/LICENSE";
+-    static const char *szUNXLicenseExt = "";
+-#endif
+-    static OUString aLicensePath;
+-
+-    if (aLicensePath.getLength() > 0)
+-        return aLicensePath;
+-
+-    OUString aBaseInstallPath;
+-	::utl::Bootstrap::PathStatus aBaseLocateResult = 
+-        ::utl::Bootstrap::locateBaseInstallation(aBaseInstallPath);
+-    if (aBaseLocateResult != ::utl::Bootstrap::PATH_EXISTS)
+-    {
+-        // yuck! no license :/
+-    }
+-
+-    // determine the filename of the license to show
+-	OUString  aLangString;
+-    ::com::sun::star::lang::Locale aLocale;
+-    OString aMgrName = OString("dkt") + OString::valueOf((sal_Int32)SUPD, 10);
+-    AllSettings aSettings(Application::GetSettings());
+-    aLocale = aSettings.GetUILocale();
+-    ResMgr* pLocalResMgr = ResMgr::SearchCreateResMgr(aMgrName, aLocale);    
+-
+-    aLangString = aLocale.Language;
+-    if ( aLocale.Country.getLength() != 0 )
+-    {
+-        aLangString += OUString::createFromAscii("-");
+-        aLangString += aLocale.Country;
+-	    if ( aLocale.Variant.getLength() != 0 )
+-        {
+-	        aLangString += OUString::createFromAscii("-");
+-	        aLangString += aLocale.Variant;
+-        }
+-    }
+-#if defined(WNT) || defined(OS2)
+-    aLicensePath = 
+-        aBaseInstallPath + OUString::createFromAscii(szLicensePath)
+-        + OUString::createFromAscii(szWNTLicenseName)
+-        + OUString::createFromAscii("_")
+-        + aLangString
+-        + OUString::createFromAscii(szWNTLicenseExt);
+-#else
+-    aLicensePath = 
+-        aBaseInstallPath + OUString::createFromAscii(szLicensePath)
+-        + OUString::createFromAscii(szUNXLicenseName)
+-        + OUString::createFromAscii("_")
+-        + aLangString
+-        + OUString::createFromAscii(szUNXLicenseExt);
+-#endif
+-    delete pLocalResMgr;
+-    return aLicensePath;
+-}
+ }
+diff --git a/desktop/source/migration/wizard.hxx b/desktop/source/migration/wizard.hxx
+index 8307c16..b5d9df5 100644
+--- desktop/source/migration/wizard.hxx
++++ desktop/source/migration/wizard.hxx
+@@ -64,13 +64,11 @@ public:
+     static ResMgr* pResMgr;
+     static ResMgr* GetResManager();
+ 
+-    FirstStartWizard(Window* pParent);
++    FirstStartWizard( Window* pParent, sal_Bool bLicenseNeedsAcceptance, const rtl::OUString &rLicensePath );
+ 
+     virtual short Execute();
+     virtual long PreNotify( NotifyEvent& rNEvt );
+ 
+-    static rtl::OUString getLicensePath();
+-
+     void overrideCheck(sal_Bool bOverride);
+ 
+ private:
+@@ -81,11 +79,13 @@ private:
+     String m_sNext;
+     String m_sCancel;
+     sal_Bool m_bDone;
+-    sal_Bool m_bLicenseNeedsAcceptence;
++    sal_Bool m_bLicenseNeedsAcceptance;
+     sal_Bool m_bLicenseWasAccepted;
+     sal_Bool m_bAutomaticUpdChk;
+     Link m_lnkCancel;
+ 
++    rtl::OUString m_aLicensePath;
++
+     void storeAcceptDate();
+     void disableWizard();
+     void enableQuickstart();
+@@ -96,14 +96,6 @@ private:
+     sal_Bool showOnlineUpdatePage();
+     ::svt::RoadmapWizardTypes::PathId defineWizardPagesDependingFromContext();
+ 
+-public:
+-    static sal_Bool isWizardNeeded();
+-	static sal_Bool needsLicenseAcceptence();
+-
+-private:
+-    static sal_Bool impl_isFirstStart();
+-    static sal_Bool impl_isLicenseAccepted();
+-
+ protected:
+     // from svt::WizardMachine
+     virtual TabPage* createPage(WizardState _nState);
+diff --git a/desktop/source/splash/firststart.cxx b/desktop/source/splash/firststart.cxx
+index 482c7dd..5ca1daf 100755
+--- desktop/source/splash/firststart.cxx
++++ desktop/source/splash/firststart.cxx
+@@ -135,30 +135,16 @@ throw ( RuntimeException )
+ Any SAL_CALL FirstStart::execute(const Sequence<NamedValue>& args)
+ throw ( RuntimeException )
+ {
+-    static const ::rtl::OUString ARG_OVERRIDE = ::rtl::OUString::createFromAscii("Override");
+-    static const ::rtl::OUString ARG_WIDTHUI  = ::rtl::OUString::createFromAscii("WidthUI");
++    static const ::rtl::OUString ARG_LICENSENEEDED( RTL_CONSTASCII_USTRINGPARAM( "LicenseNeedsAcceptance" ) );
++    static const ::rtl::OUString ARG_LICENSEPATH(   RTL_CONSTASCII_USTRINGPARAM( "LicensePath" ) );
+ 
+     ::comphelper::SequenceAsHashMap lArgs(args);
+ 
+-    sal_Bool bOverride      = lArgs.getUnpackedValueOrDefault(ARG_OVERRIDE, (sal_Bool)sal_False);
+-    sal_Bool bWidthUI       = lArgs.getUnpackedValueOrDefault(ARG_WIDTHUI , (sal_Bool)sal_True );
+-    sal_Bool bSomethingTodo = (  bOverride                          ||
+-                                 FirstStartWizard::isWizardNeeded() );
+-
+-    if(bSomethingTodo)
+-    {
+-        if (bWidthUI)
+-        {
+-          FirstStartWizard fsw(NULL);
+-          return makeAny((sal_Bool)fsw.Execute());
+-        }
+-        else
+-        {
+-          return makeAny(sal_True);
+-        }
+-    }
+-    else
+-        return makeAny(sal_True);
++    sal_Bool bLicenseNeeded    = lArgs.getUnpackedValueOrDefault( ARG_LICENSENEEDED, (sal_Bool)sal_True );
++    rtl::OUString aLicensePath = lArgs.getUnpackedValueOrDefault( ARG_LICENSEPATH, rtl::OUString() );
++
++    FirstStartWizard fsw( NULL, bLicenseNeeded && ( aLicensePath.getLength() > 0 ), aLicensePath );
++    return makeAny( (sal_Bool)fsw.Execute() );
+ }
+ 
+ // XJobExecutor
+diff --git a/desktop/util/makefile.mk b/desktop/util/makefile.mk
+index 390186b..b5aa146 100644
+--- desktop/util/makefile.mk
++++ desktop/util/makefile.mk
+@@ -50,6 +50,7 @@ VERINFONAME=verinfo
+ TARGETOBJS=	\
+ 			$(OBJ)$/main.obj				\
+ 			$(OBJ)$/app.obj					\
++			$(OBJ)$/appfirststart.obj		\
+ 			$(OBJ)$/lockfile.obj			\
+ 			$(OBJ)$/lockfile2.obj			\
+ 			$(OBJ)$/intro.obj				\
+@@ -61,7 +62,7 @@ TARGETOBJS=	\
+ 			$(OBJ)$/appsys.obj				\
+ 			$(OBJ)$/desktopresid.obj		\
+ 			$(OBJ)$/dispatchwatcher.obj		\
+-			$(OBJ)$/configinit.obj				\
++			$(OBJ)$/configinit.obj			\
+ 			$(OBJ)$/checkinstall.obj		\
+ 			$(OBJ)$/cmdlinehelp.obj         \
+ 			$(OBJ)$/langselect.obj          \
