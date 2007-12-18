@@ -30,6 +30,7 @@ config_office/config.status
 config_office/configure
 config_office/set_soenv
 config_office/warn
+default_images/introabout/intro-save.bmp
 default_images/svx/res/openabout_ark.png
 default_images/svx/res/openabout_translateorgza.png
 default_images/sw/res/go-oo-team.png
@@ -88,6 +89,7 @@ dmake/win95/.deps/
 dmake/win95/microsft/.deps/
 instsetoo_native/res/banner_nld.bmp
 instsetoo_native/res/nologoinstall_nld.bmp
+instsetoo_native/util/OpenOffice
 setup_native/source/win32/nsis/ooobanner_nld.bmp
 setup_native/source/win32/nsis/ooobitmap_nld.bmp
 setup_native/source/win32/nsis/ooosetup_nld.ico
