@@ -13,7 +13,7 @@
 #include <com/sun/star/sheet/DataPilotFieldReference.hpp>
 #include <com/sun/star/sheet/DataPilotFieldReferenceItemType.hpp>
 #include <com/sun/star/sheet/DataPilotFieldReferenceType.hpp>
-#include <com/sun/star/sheet/DataPilotTableRegion.hpp>
+#include <com/sun/star/sheet/DataPilotOutputRangeType.hpp>
 #include <com/sun/star/sheet/DataPilotTablePositionData.hpp>
 #include <com/sun/star/sheet/DataPilotTablePositionType.hpp>
 #include <com/sun/star/sheet/DataPilotTableResultData.hpp>
@@ -322,7 +322,7 @@ void ResultTester::verifyRefValue(const CellAddress& cell,
     table::CellContentType cellType = xCell->getType();
     double valCell = xCell->getValue();
 
-    CellRangeAddress resRange = mxDPTab->getOutputRangeByType(DataPilotTableRegion::RESULT);
+    CellRangeAddress resRange = mxDPTab->getOutputRangeByType(DataPilotOutputRangeType::RESULT);
     bool isRowSubtotal = (result.Flags & DataResultFlags::SUBTOTAL) && (resRange.EndColumn == cell.Column);
     bool isColSubtotal = false;
     do
@@ -607,7 +607,7 @@ void ResultTester::verifyRunningTotal(const ::com::sun::star::table::CellAddress
     table::CellContentType cellType = xCell->getType();
     double valCell = xCell->getValue();
 
-    CellRangeAddress resRange = mxDPTab->getOutputRangeByType(DataPilotTableRegion::RESULT);
+    CellRangeAddress resRange = mxDPTab->getOutputRangeByType(DataPilotOutputRangeType::RESULT);
     bool isRowSubtotal = (result.Flags & DataResultFlags::SUBTOTAL) && (resRange.EndColumn == cell.Column);
     bool isColSubtotal = false;
     do

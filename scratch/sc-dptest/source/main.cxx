@@ -22,9 +22,9 @@ int main()
     using namespace dptest;
 
     TestParam param;
-    param.FieldCount = 6;
+    param.FieldCount = 7;
     param.RowCount   = 2000;
-    param.DataCount  = 2;
+    param.DataCount  = 3;
     param.StartCol   = 0;
     param.StartRow   = 0;
     param.FieldItemCountLower = 2;
@@ -76,7 +76,7 @@ int main()
     test.run();
     return 0;
 
-    for (sal_Int32 i = 0; i < 1; ++i)
+    for (sal_Int32 i = 0; i < 10; ++i)
     {
         Reference<XSpreadsheetDocument> xSpDoc = loadComponent(xDesktop, "private:factory/scalc");
         DPTestBase test(xSpDoc, param);

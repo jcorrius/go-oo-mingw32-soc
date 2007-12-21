@@ -19,7 +19,7 @@
 #include <com/sun/star/sheet/DataPilotFieldReference.hpp>
 #include <com/sun/star/sheet/DataPilotFieldReferenceItemType.hpp>
 #include <com/sun/star/sheet/DataPilotFieldReferenceType.hpp>
-#include <com/sun/star/sheet/DataPilotTableRegion.hpp>
+#include <com/sun/star/sheet/DataPilotOutputRangeType.hpp>
 #include <com/sun/star/sheet/DataPilotTablePositionData.hpp>
 #include <com/sun/star/sheet/DataPilotTablePositionType.hpp>
 #include <com/sun/star/sheet/DataPilotTableResultData.hpp>
@@ -377,15 +377,15 @@ void DPTestBase::genDPTable(const CellRangeAddress& srcRange,
     static const GeneralFunction funcTable[] = {
 //      GeneralFunction_NONE,
 //      GeneralFunction_AUTO,
-//      GeneralFunction_SUM,
-//      GeneralFunction_COUNT,
+        GeneralFunction_SUM,
+        GeneralFunction_COUNT,
 //      GeneralFunction_AVERAGE,
 //      GeneralFunction_MAX,
 //      GeneralFunction_MIN,
 //      GeneralFunction_PRODUCT,
 //      GeneralFunction_COUNTNUMS,
-        GeneralFunction_STDEV,
-        GeneralFunction_STDEVP,
+//      GeneralFunction_STDEV,
+//      GeneralFunction_STDEVP,
 //      GeneralFunction_VAR,
 //      GeneralFunction_VARP
     };
@@ -458,17 +458,17 @@ void DPTestBase::dumpTableProperties(const Reference<XSpreadsheet>& xSheet)
             printf("  name: '%s' (tag: '%s')\n", OUStringToOString(xDPDesc->getName(), RTL_TEXTENCODING_UTF8).getStr(),
                    OUStringToOString(xDPDesc->getTag(), RTL_TEXTENCODING_UTF8).getStr());
     
-            CellRangeAddress range = xDPTab->getOutputRangeByType(DataPilotTableRegion::WHOLE);
+            CellRangeAddress range = xDPTab->getOutputRangeByType(DataPilotOutputRangeType::WHOLE);
             printf("  output range: sheet: %d;  range (%ld, %ld) - (%ld, %ld)\n",
                range.Sheet, range.StartRow, range.StartColumn,
                range.EndRow, range.EndColumn);
             
-            range = xDPTab->getOutputRangeByType(DataPilotTableRegion::TABLE);
+            range = xDPTab->getOutputRangeByType(DataPilotOutputRangeType::TABLE);
             printf("  table range: sheet: %d;  range (%ld, %ld) - (%ld, %ld)\n",
                range.Sheet, range.StartRow, range.StartColumn,
                range.EndRow, range.EndColumn);
             
-            range = xDPTab->getOutputRangeByType(DataPilotTableRegion::RESULT);
+            range = xDPTab->getOutputRangeByType(DataPilotOutputRangeType::RESULT);
             printf("  data range: sheet: %d;  range (%ld, %ld) - (%ld, %ld)\n",
                range.Sheet, range.StartRow, range.StartColumn,
                range.EndRow, range.EndColumn);
@@ -570,13 +570,27 @@ void DPTestBase::verifyTableResults(const RuntimeData& data)
             Reference<XDataPilotDescriptor> xDesc(xDPTab, UNO_QUERY_THROW);
             printf("* DataPilot Table (%s)\n",
                    OUStringToOString(xDesc->getName(), RTL_TEXTENCODING_UTF8).getStr());
-            CellRangeAddress range = xDPTab->getOutputRangeByType(DataPilotTableRegion::RESULT);
+            CellRangeAddress range = xDPTab->getOutputRangeByType(DataPilotOutputRangeType::RESULT);
             printf("  data range: sheet: %d;  range (%ld, %ld) - (%ld, %ld)\n",
                range.Sheet, range.StartRow, range.StartColumn,
                range.EndRow, range.EndColumn);
             ResultTester tester(data, xDPTab);
             sal_Int16 failCount = forEachCell(range, tester).getFailureCount();
             printf("  number of failures = %d\n", failCount);
+
+            CellAddress cell;
+            cell.Sheet = range.Sheet;
+            cell.Column = range.StartColumn - 1;
+            cell.Row = range.StartRow;
+            DataPilotTablePositionData data = xDPTab->getPositionData(cell);
+            cell.Sheet = range.Sheet;
+            cell.Column = range.StartColumn;
+            cell.Row = range.StartRow - 1;
+            data = xDPTab->getPositionData(cell);
+            cell.Sheet = range.Sheet;
+            cell.Column = range.StartColumn - 1;
+            cell.Row = range.StartRow - 1;
+            data = xDPTab->getPositionData(cell);
         }
         catch (const RuntimeException&)
         {
