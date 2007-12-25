@@ -580,7 +580,7 @@ ScVbaApplication::GoTo( const uno::Any& Reference, const uno::Any& Scroll ) thro
 sal_Int32 SAL_CALL
 ScVbaApplication::getCursor() throw (uno::RuntimeException)
 {
-	SfxObjectShell* pObject = SfxObjectShell::GetWorkingDocument();//Current();
+	SfxObjectShell* pObject = SfxObjectShell::Current();//SfxObjectShell::GetWorkingDocument();//Current();
     SfxViewFrame* pFrame = SfxViewFrame::GetFirst( pObject );
     sal_Int32 result = pFrame->GetFrame()->GetWindow().GetSystemWindow()->GetPointer().GetStyle();
     
@@ -602,7 +602,7 @@ ScVbaApplication::getCursor() throw (uno::RuntimeException)
 void SAL_CALL 
 ScVbaApplication::setCursor( sal_Int32 _cursor ) throw (uno::RuntimeException)
 {
-    SfxObjectShell* pObject = SfxObjectShell::GetWorkingDocument();
+    SfxObjectShell* pObject = SfxObjectShell::Current();//SfxObjectShell::GetWorkingDocument();
     for( SfxViewFrame* pFrame = SfxViewFrame::GetFirst( pObject ); pFrame; pFrame = SfxViewFrame::GetNext( *pFrame, pObject ) )
     {
         switch( _cursor )
