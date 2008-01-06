@@ -304,7 +304,11 @@ OUString StringResMgr::getResNameByID(int resid)
         // SCSOLVER_STR_OPTION_VAR_POSITIVE
         ascii("OptionDialog.cbPositiveValue.Label"),
         // SCSOLVER_STR_OPTION_VAR_INTEGER
-        ascii("OptionDialog.cbIntegerValue.Label")
+        ascii("OptionDialog.cbIntegerValue.Label"),
+        // SCSOLVER_STR_TARGET_NOT_SET
+        ascii("Common.TargetNotSet.Label"),
+        // SCSOLVER_STR_DECISIONVAR_NOT_SET
+        ascii("Common.DecisionNotSet.Label")
     };
 
     if (resid - SCSOLVER_RES_START >= sizeof(resNameList)/sizeof(resNameList[0]))

@@ -39,7 +39,7 @@ AC_CHECK_HEADER(boost/numeric/ublas/matrix.hpp, [],
    [AC_MSG_ERROR(boost/numeric/ublas/matrix.hpp not found. install boost)], [])
 AC_LANG_RESTORE
 
-SCSOLVERDIR=../..
+SCSOLVERDIR=..
 AC_SUBST(SCSOLVERDIR)
 
 OBJDIR=./obj
