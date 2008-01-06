@@ -6,7 +6,7 @@
  *
  *    GNU Lesser General Public License Version 2.1
  *    =============================================
- *    Copyright 2005 by Kohei Yoshida.
+ *    Copyright 2005-2008 by Kohei Yoshida.
  *    1039 Kingsway Dr., Apex, NC 27502, USA
  *
  *    This library is free software; you can redistribute it and/or

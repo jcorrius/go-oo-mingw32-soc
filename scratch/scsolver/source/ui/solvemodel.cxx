@@ -308,7 +308,8 @@ public:
 		Goal eGoal = pMainDlg->getGoal();
 		if ( eGoal == GOAL_UNKNOWN )
 		{
-			pMainDlg->showMessage( ascii_i18n("Goal is not set") );
+			pMainDlg->showMessage(
+                pMainDlg->getResStr(SCSOLVER_STR_MSG_GOAL_NOT_SET) );
 			return;
 		}
 
@@ -510,7 +511,7 @@ private:
 	{
 		rtl::OUString sTargetCellAddr = m_pSolverImpl->getMainDialog()->getTargetCellAddress();
 		if ( !sTargetCellAddr.getLength() )
-			throw RuntimeError( ascii_i18n("Target cell address empty") );
+			throw RuntimeError( getSolverImpl()->getResStr(SCSOLVER_STR_TARGET_NOT_SET) );
 
 		CellAddress aAddr = m_pSolverImpl->getCalcInterface()->getCellAddress(
 			sTargetCellAddr );
@@ -531,7 +532,8 @@ private:
 	
 		rtl::OUString sAddr = m_pSolverImpl->getMainDialog()->getVarCellAddress();
 		if ( !sAddr.getLength() )
-			throw RuntimeError( ascii_i18n("Decision variable cells empty") );
+			throw RuntimeError( 
+                getSolverImpl()->getResStr(SCSOLVER_STR_DECISIONVAR_NOT_SET) );
 
 		CellRangeAddress aRangeAddr = m_pSolverImpl->getCalcInterface()->getCellRangeAddress(sAddr);
 		
