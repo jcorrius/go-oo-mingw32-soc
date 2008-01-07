@@ -1,10 +1,205 @@
-diff -rup ../src680-m237.orig/sd/xml/transitions.xml sd/xml/transitions.xml
---- ../src680-m237.orig/sd/xml/transitions.xml	2007-12-05 15:02:57.000000000 +0100
-+++ sd/xml/transitions.xml	2007-12-05 16:31:38.000000000 +0100
-@@ -15,6 +15,21 @@
-  <anim:par pres:preset-id="inside-cube">
-   <anim:transitionFilter smil:type="miscShapeWipe" smil:subtype="cornersIn"/>
-  </anim:par>
+diff -rup sd-orig/inc/TransitionPreset.hxx sd/inc/TransitionPreset.hxx
+--- sd-orig/inc/TransitionPreset.hxx	2008-01-07 17:09:15.000000000 +0100
++++ sd/inc/TransitionPreset.hxx	2008-01-07 20:41:05.000000000 +0100
+@@ -49,6 +49,7 @@
+ #endif
+ 
+ #include <list>
++#include <hash_map>
+ 
+ namespace com { namespace sun { namespace star { 
+ 	namespace animations { class XAnimationNode; }
+@@ -56,12 +57,14 @@ namespace com { namespace sun { namespac
+ } } }
+ 
+ class SdPage;
++class String;
+ 
+ namespace sd {
+ 
+ class TransitionPreset;
+ typedef boost::shared_ptr< TransitionPreset > TransitionPresetPtr;
+ typedef std::list< TransitionPresetPtr > TransitionPresetList;
++typedef std::hash_map< rtl::OUString, rtl::OUString, comphelper::UStringHash, comphelper::UStringEqual > UStringMap;
+ 
+ class TransitionPreset
+ {
+@@ -90,6 +93,11 @@ private:
+ 	rtl::OUString maUIName;
+ 
+ 	static sd::TransitionPresetList* mpTransitionPresetList;
++
++    static bool importTransitionsFile( TransitionPresetList& rList,
++                                       ::com::sun::star::uno::Reference< ::com::sun::star::lang::XMultiServiceFactory >& xServiceFactory,
++                                       UStringMap& rTransitionNameMape,
++                                       String aFilaname );
+ };
+ 
+ }
+diff -rup sd-orig/source/core/TransitionPreset.cxx sd/source/core/TransitionPreset.cxx
+--- sd-orig/source/core/TransitionPreset.cxx	2008-01-07 17:09:16.000000000 +0100
++++ sd/source/core/TransitionPreset.cxx	2008-01-07 20:43:22.000000000 +0100
+@@ -92,7 +92,6 @@
+ #include <algorithm>
+ 
+ #include "sdpage.hxx"
+-#include <hash_map>
+ 
+ using namespace ::vos;
+ using namespace ::com::sun::star;
+@@ -112,7 +111,6 @@ using ::com::sun::star::beans::NamedValu
+ 
+ namespace sd {
+ 
+-typedef std::hash_map<rtl::OUString, rtl::OUString, comphelper::UStringHash, comphelper::UStringEqual> UStringMap;
+ extern Reference< XAnimationNode > implImportEffects( const Reference< XMultiServiceFactory >& xConfigProvider, const OUString& rPath );
+ extern void implImportLabels( const Reference< XMultiServiceFactory >& xConfigProvider, const OUString& rNodePath, UStringMap& rStringMap );
+ 
+@@ -142,10 +140,64 @@ TransitionPreset::TransitionPreset( cons
+ 	mnFadeColor = xTransition->getFadeColor();
+ }
+ 
++bool TransitionPreset::importTransitionsFile( TransitionPresetList& rList,
++                                              Reference< XMultiServiceFactory >& xServiceFactory,
++                                              UStringMap& rTransitionNameMape,
++                                              String aFilename )
++{
++    // import transition presets
++    INetURLObject	aURL( SvtPathOptions().GetConfigPath() );
++    aURL.Append( String( RTL_CONSTASCII_USTRINGPARAM("soffice.cfg") ) );
++    aURL.Append( String( RTL_CONSTASCII_USTRINGPARAM("simpress" ) ) );
++    aURL.Append( aFilename );
++
++    Reference< XAnimationNode > xAnimationNode;
++
++    try {
++        xAnimationNode = implImportEffects( xServiceFactory, aURL.GetMainURL( INetURLObject::NO_DECODE ) );
++        Reference< XEnumerationAccess > xEnumerationAccess( xAnimationNode, UNO_QUERY_THROW );
++		Reference< XEnumeration > xEnumeration( xEnumerationAccess->createEnumeration(), UNO_QUERY_THROW );
++
++		while( xEnumeration->hasMoreElements() )
++        {
++            Reference< XAnimationNode > xChildNode( xEnumeration->nextElement(), UNO_QUERY_THROW );
++            if( xChildNode->getType() == AnimationNodeType::PAR )
++            {
++                // create it
++                TransitionPresetPtr pPreset( new TransitionPreset( xChildNode ) );
++
++                // name it
++                OUString aPresetId( pPreset->getPresetId() );
++                if( aPresetId.getLength() )
++                {
++                    UStringMap::const_iterator aIter( rTransitionNameMape.find( aPresetId ) );
++                    if( aIter != rTransitionNameMape.end() )
++                        pPreset->maUIName = (*aIter).second;
++
++                                // add it
++                    rList.push_back( pPreset );
++                }
++            }
++            else
++                {
++                    DBG_ERROR( "sd::TransitionPreset::importTransitionPresetList(), missformed xml configuration file, giving up!" );
++                    break;
++                }
++        }
++    } catch( Exception& ) {
++        return false;
++    }
++
++    return true;
++}
++
+ bool TransitionPreset::importTransitionPresetList( TransitionPresetList& rList )
+ {
++    bool bRet = false;
++
+ 	try
+ 	{
++
+ 		// Get service factory
+ 		Reference< XMultiServiceFactory > xServiceFactory( comphelper::getProcessServiceFactory() );
+ 		DBG_ASSERT( xServiceFactory.is(), "sd::CustomAnimationPresets::import(), got no service manager" );
+@@ -162,42 +214,10 @@ bool TransitionPreset::importTransitionP
+ 		const OUString aTransitionPath( RTL_CONSTASCII_USTRINGPARAM( "/org.openoffice.Office.UI.Effects/UserInterface/Transitions" ) );
+ 		implImportLabels( xConfigProvider, aTransitionPath, aTransitionNameMape );
+ 
+-		// import transition presets
+-		INetURLObject	aURL( SvtPathOptions().GetConfigPath() );
+-		aURL.Append( String( RTL_CONSTASCII_USTRINGPARAM("soffice.cfg") ) );
+-		aURL.Append( String( RTL_CONSTASCII_USTRINGPARAM("simpress" ) ) );
+-		aURL.Append( String( RTL_CONSTASCII_USTRINGPARAM("transitions.xml" ) ) );
++        bRet = importTransitionsFile( rList, xServiceFactory, aTransitionNameMape, String( RTL_CONSTASCII_USTRINGPARAM( "transitions-ogl.xml" ) ) );
++        bRet |= importTransitionsFile( rList, xServiceFactory, aTransitionNameMape, String( RTL_CONSTASCII_USTRINGPARAM( "transitions.xml" ) ) );
+ 
+-		Reference< XEnumerationAccess > xEnumerationAccess( implImportEffects( xServiceFactory, aURL.GetMainURL( INetURLObject::NO_DECODE ) ), UNO_QUERY_THROW );
+-		Reference< XEnumeration > xEnumeration( xEnumerationAccess->createEnumeration(), UNO_QUERY_THROW );
+-		while( xEnumeration->hasMoreElements() )
+-		{
+-			Reference< XAnimationNode > xChildNode( xEnumeration->nextElement(), UNO_QUERY_THROW );
+-			if( xChildNode->getType() == AnimationNodeType::PAR )
+-			{
+-				// create it
+-				TransitionPresetPtr pPreset( new TransitionPreset( xChildNode ) );
+-
+-				// name it
+-				OUString aPresetId( pPreset->getPresetId() );
+-				if( aPresetId.getLength() )
+-				{
+-					UStringMap::const_iterator aIter( aTransitionNameMape.find( aPresetId ) );
+-					if( aIter != aTransitionNameMape.end() )
+-						pPreset->maUIName = (*aIter).second;
+-
+-					// add it
+-					rList.push_back( pPreset );
+-				}
+-			}
+-			else
+-			{
+-				DBG_ERROR( "sd::TransitionPreset::importTransitionPresetList(), missformed xml configuration file, giving up!" );
+-				break;
+-			}
+-		}
+-
+-		return true;
++		return bRet;
+ 	}
+ 	catch( Exception& e )
+ 	{
+@@ -205,7 +225,7 @@ bool TransitionPreset::importTransitionP
+ 		DBG_ERROR( "sd::TransitionPreset::importResources(), Exception cought!" );
+ 	}
+ 
+-	return false;
++	return bRet;
+ }
+ 
+ TransitionPresetList* TransitionPreset::mpTransitionPresetList = 0;
+@@ -237,4 +257,3 @@ void TransitionPreset::apply( SdPage* pS
+ }
+ 
+ }
+-
+--- /dev/null	2007-09-21 21:12:45.000000000 +0200
++++ sd/xml/transitions-ogl	2008-01-07 17:13:24.000000000 +0100
+@@ -0,0 +1,33 @@
++<?xml version="1.0"?>
++<anim:seq xmlns:office="urn:oasis:names:tc:openoffice:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:openoffice:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:openoffice:xmlns:text:1.0" xmlns:table="urn:oasis:names:tc:openoffice:xmlns:table:1.0" xmlns:draw="urn:oasis:names:tc:openoffice:xmlns:drawing:1.0" xmlns:fo="http://www.w3.org/1999/XSL/Format" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:meta="urn:oasis:names:tc:openoffice:xmlns:meta:1.0" xmlns:number="urn:oasis:names:tc:openoffice:xmlns:datastyle:1.0" xmlns:pres="urn:oasis:names:tc:openoffice:xmlns:presentation:1.0" xmlns:svg="http://www.w3.org/2000/svg" xmlns:chart="urn:oasis:names:tc:openoffice:xmlns:chart:1.0" xmlns:dr3d="urn:oasis:names:tc:openoffice:xmlns:dr3d:1.0" xmlns:math="http://www.w3.org/1998/Math/MathML" xmlns:form="urn:oasis:names:tc:openoffice:xmlns:form:1.0" xmlns:script="urn:oasis:names:tc:openoffice:xmlns:script:1.0" xmlns:ooo="http://openoffice.org/2004/office" xmlns:ooow="http://openoffice.org/2004/writer" xmlns:oooc="http://openoffice.org/2004/calc" xmlns:dom="http://www.w3.org/2001/xml-events" xmlns:smil="http://www.w3.org/2001/SMIL20" xmlns:anim="urn:oasis:names:tc:openoffice:xmlns:animation:1.0" pres:node-type="main-sequence">
++ <anim:par pres:preset-id="tile-flip">
++  <anim:transitionFilter smil:type="miscShapeWipe" smil:subtype="across"/>
++ </anim:par>
++ <anim:par pres:preset-id="outside-cube">
++  <anim:transitionFilter smil:type="miscShapeWipe" smil:subtype="cornersOut"/>
++ </anim:par>
++ <anim:par pres:preset-id="revolving-circles">
++  <anim:transitionFilter smil:type="miscShapeWipe" smil:subtype="circle"/>
++ </anim:par>
++ <anim:par pres:preset-id="turning-helix">
++  <anim:transitionFilter smil:type="miscShapeWipe" smil:subtype="fanOutHorizontal"/>
++ </anim:par>
++ <anim:par pres:preset-id="inside-cube">
++  <anim:transitionFilter smil:type="miscShapeWipe" smil:subtype="cornersIn"/>
++ </anim:par>
 + <anim:par pres:preset-id="fall">
 +  <anim:transitionFilter smil:type="miscShapeWipe" smil:subtype="leftToRight"/>
 + </anim:par>
@@ -20,6 +215,40 @@ diff -rup ../src680-m237.orig/sd/xml/transitions.xml sd/xml/transitions.xml
 + <anim:par pres:preset-id="rochade">
 +  <anim:transitionFilter smil:type="miscShapeWipe" smil:subtype="bottomRight"/>
 + </anim:par>
-  <anim:par pres:preset-id="wipe-up">
-   <anim:transitionFilter smil:type="barWipe" smil:subtype="topToBottom" smil:direction="reverse"/>
-  </anim:par>
++ </anim:seq>
+diff -ru sd-orig/prj/build.lst sd/prj/build.lst
+--- sd-orig/prj/build.lst	2008-01-07 17:09:15.000000000 +0100
++++ sd/prj/build.lst	2008-01-07 21:03:56.000000000 +0100
+@@ -31,7 +31,7 @@
+ sd	sd\source\filter\cgm					nmake	-	all	sd_cgm sd_inc NULL
+ sd	sd\source\filter\eppt					nmake	-	all	sd_eppt sd_unotypes sd_inc NULL
+ sd	sd\source\filter\grf					nmake	-	all	sd_grf sd_inc NULL
+-sd	sd\source\filter\xml					nmake	-	all	sd_xml sd_inc NULL
++sd	sd\source\filter\xml					nmake	-	all	sd_filter_xml sd_inc NULL
+ sd	sd\source\filter\html					nmake	-	all	sd_html sd_inc NULL
+ sd	sd\source\ui\animations					nmake	-	all sd_animations sd_unotypes sd_inc NULL
+ sd	sd\source\ui\slideshow					nmake	-	all sd_slideshow sd_unotypes sd_sdi sd_inc NULL
+@@ -42,4 +42,5 @@
+ sd	sd\source\ui\framework\toolbar         	nmake	-	all sd_framework_toolbar sd_inc NULL
+ sd	sd\source\ui\framework\tools           	nmake	-	all sd_framework_tools sd_inc NULL
+ sd	sd\source\ui\framework\command         	nmake	-	all sd_framework_command sd_inc NULL
+-sd	sd\util									nmake	-	all	sd_util sd_app sd_cgm sd_core sd_dlg sd_docsh sd_eppt sd_filt sd_func sd_grf sd_unid sd_view sd_xml sd_html sd_ppt sd_accessibility sd_animations sd_toolpanel sd_toolpanel_controls sd_tools sd_slsshell sd_slsmodel sd_slsview sd_slscontroller sd_slscache sd_notes sd_slideshow sd_undo sd_helper sd_framework_pane sd_framework_view sd_framework_configuration sd_framework_module sd_framework_toolbar sd_framework_tools sd_framework_command NULL
++sd	sd\util									nmake	-	all	sd_util sd_app sd_cgm sd_core sd_dlg sd_docsh sd_eppt sd_filt sd_func sd_grf sd_unid sd_view sd_filter_xml sd_html sd_ppt sd_accessibility sd_animations sd_toolpanel sd_toolpanel_controls sd_tools sd_slsshell sd_slsmodel sd_slsview sd_slscontroller sd_slscache sd_notes sd_slideshow sd_undo sd_helper sd_framework_pane sd_framework_view sd_framework_configuration sd_framework_module sd_framework_toolbar sd_framework_tools sd_framework_command NULL
++sd	sd\xml									nmake	-	all	sd_xml NULL
+Only in sd/prj: build.lst.~1.17.~
+--- /dev/null	2007-09-21 21:12:45.000000000 +0200
++++ sd/xml/makefile.mk	2008-01-07 17:19:14.000000000 +0100
+@@ -0,0 +1,13 @@
++PRJ=..
++PRJNAME=sd
++
++.INCLUDE :  settings.mk
++
++.IF "$(ENABLE_OPENGL)" != "TRUE"
++@all:
++	@echo "Building without OpenGL Transitions..."
++	$(RM) transitions-ogl.xml
++.ELSE
++@all:
++	$(GNUCOPY) transitions-ogl transitions-ogl.xml
++.ENDIF
