@@ -1,0 +1,867 @@
+diff -u -r -x testsuite -x libjava -x cc-nptl -x build-dir -x '*.orig' -x obj-i586-suse-linux -x texis -x Makeconfig -x version.h -x '*.o' -x '*.1' -x 'Makefile*' -x 'config*' -x libtool -x '*.info' -x '*.tex' pristine-gcc-4.2.1-simple/gcc/collect2.c gcc-4.2.1-simple/gcc/collect2.c
+--- pristine-gcc-4.2.1-simple/gcc/collect2.c	2006-12-11 12:18:13.000000000 +0000
++++ gcc-4.2.1-simple/gcc/collect2.c	2008-01-10 12:20:49.000000000 +0000
+@@ -175,7 +175,7 @@
+ static int aixrtl_flag;			/* true if -brtl */
+ #endif
+ 
+-int debug;				/* true if -debug */
++int debug = 1;				/* true if -debug */
+ 
+ static int shared_obj;			/* true if -shared */
+ 
+diff -u -r -x testsuite -x libjava -x cc-nptl -x build-dir -x '*.orig' -x obj-i586-suse-linux -x texis -x Makeconfig -x version.h -x '*.o' -x '*.1' -x 'Makefile*' -x 'config*' -x libtool -x '*.info' -x '*.tex' pristine-gcc-4.2.1-simple/gcc/cp/class.c gcc-4.2.1-simple/gcc/cp/class.c
+--- pristine-gcc-4.2.1-simple/gcc/cp/class.c	2007-07-05 10:02:39.000000000 +0100
++++ gcc-4.2.1-simple/gcc/cp/class.c	2008-01-15 13:01:40.000000000 +0000
+@@ -136,7 +136,7 @@
+ static tree fixed_type_or_null (tree, int *, int *);
+ static tree build_simple_base_path (tree expr, tree binfo);
+ static tree build_vtbl_ref_1 (tree, tree);
+-static tree build_vtbl_initializer (tree, tree, tree, tree, int *);
++static tree build_vtbl_initializer (tree, tree, tree, tree, int *, tree *);
+ static int count_fields (tree);
+ static int add_fields_to_record_type (tree, struct sorted_fields_type*, int);
+ static void check_bitfield_decl (tree);
+@@ -180,11 +180,11 @@
+ 					   tree, tree, splay_tree);
+ static tree end_of_class (tree, int);
+ static bool layout_empty_base (tree, tree, splay_tree);
+-static void accumulate_vtbl_inits (tree, tree, tree, tree, tree);
++static void accumulate_vtbl_inits (tree, tree, tree, tree, tree, tree *);
+ static tree dfs_accumulate_vtbl_inits (tree, tree, tree, tree,
+-					       tree);
++					       tree, tree *);
+ static void build_rtti_vtbl_entries (tree, vtbl_init_data *);
+-static void build_vcall_and_vbase_vtbl_entries (tree, vtbl_init_data *);
++static void build_vcall_and_vbase_vtbl_entries (tree, vtbl_init_data *, unsigned *);
+ static void clone_constructors_and_destructors (tree);
+ static tree build_clone (tree, tree);
+ static void update_vtable_entry_for_fn (tree, tree, tree, tree *, unsigned);
+@@ -6355,6 +6355,49 @@
+   return decl;
+ }
+ 
++/* Returns the VAR_DECL for the vtable copy relocation entries associated
++   with BINFO. */
++
++tree get_vtreloc_decl (tree t, tree slot_relocs)
++{
++  tree name, d;
++
++  name = mangle_vtreloc_for_type (t);
++  d = IDENTIFIER_GLOBAL_VALUE (name);
++
++  if (!d)
++    {
++      /* FIXME: 'nslot' calc duplicated in building
++	 inits - should we do that now instead ? */
++      int nslots = list_length (slot_relocs);
++      tree atype = build_cplus_array_type (vtbl_slot_copy_type_node,
++					   build_index_type (size_int (nslots)));
++      layout_type (atype);
++
++      d = build_lang_decl (VAR_DECL, name, atype);
++      DECL_VTRELOC_INIT(d) = 1;
++      DECL_SECTION_NAME(d) = build_string (strlen (".vtrelocs"), ".vtrelocs");
++      SET_DECL_ASSEMBLER_NAME (d, name);
++      /* Remember the type it is for.  */
++      TREE_TYPE (name) = t;
++      DECL_ARTIFICIAL (d) = 1;
++      DECL_IGNORED_P (d) = 1;
++      TREE_READONLY (d) = 1;
++      TREE_STATIC (d) = 1;
++      /* Mark the variable as undefined -- but remember that we can
++	 define it later if we need to do so.  */
++      DECL_EXTERNAL (d) = 1;
++      DECL_NOT_REALLY_EXTERN (d) = 1;
++      set_linkage_according_to_type (t, d);
++      pushdecl_top_level_and_finish (d, NULL_TREE);
++
++      /* Add decl to the global array of tinfo decls.  */
++      /*      VEC_safe_push (tree, gc, unemitted_tinfo_decls, d); */
++    }
++
++  /* FIXME: adding this screws with inheritance badly ! */
++  return d;
++}
+ 
+ /* Returns the binfo for the primary base of BINFO.  If the resulting
+    BINFO is a virtual base, and it is inherited elsewhere in the
+@@ -6637,6 +6680,25 @@
+   dump_thunk (stderr, 0, fn);
+ }
+ 
++/* List of vtable copy slot data, keyed by type */
++/*
++ * toplevel: purpose - type
++ *           value   - [slot relocs]
++ * slot relocs: purpose - original binfo
++ *              value   - initializers [ bit-mask list ]
++ */
++tree vtable_copy_slots;
++
++/* Register vtreloc for a given type, and return a decl
++   for this type's vtrelocs */
++static tree
++register_vtreloc_decl (tree t, tree slot_relocs)
++{
++  vtable_copy_slots = tree_cons (t, slot_relocs,
++				 vtable_copy_slots);
++  return get_vtreloc_decl (t, slot_relocs);
++}
++
+ /* Virtual function table initialization.  */
+ 
+ /* Create all the necessary vtables for T and its base classes.  */
+@@ -6647,19 +6709,33 @@
+   tree list;
+   tree vbase;
+ 
++  tree slot_relocs = NULL_TREE;
+   /* We lay out the primary and secondary vtables in one contiguous
+      vtable.  The primary vtable is first, followed by the non-virtual
+      secondary vtables in inheritance graph order.  */
+   list = build_tree_list (BINFO_VTABLE (TYPE_BINFO (t)), NULL_TREE);
+   accumulate_vtbl_inits (TYPE_BINFO (t), TYPE_BINFO (t),
+-			 TYPE_BINFO (t), t, list);
++			 TYPE_BINFO (t), t, list, &slot_relocs);
+ 
+   /* Then come the virtual bases, also in inheritance graph order.  */
+   for (vbase = TYPE_BINFO (t); vbase; vbase = TREE_CHAIN (vbase))
+     {
+       if (!BINFO_VIRTUAL_P (vbase))
+ 	continue;
+-      accumulate_vtbl_inits (vbase, vbase, TYPE_BINFO (t), t, list);
++      accumulate_vtbl_inits (vbase, vbase, TYPE_BINFO (t), t, list, &slot_relocs);
++    }
++
++  /* So ... we have a hack here - we append a reference to
++     the vtable to ourselves, in order to stop us getting GC'd */
++  if (slot_relocs)
++    {
++      tree decl, init;
++      decl = build_address (register_vtreloc_decl (t, slot_relocs));
++      /* Convert the declaration to a type that can be stored in the
++	 vtable.  */
++      init = build_nop (vfunc_ptr_type_node, decl);
++      TREE_VALUE (list) = chainon (TREE_VALUE (list),
++				   build_tree_list (NULL_TREE, init));
+     }
+ 
+   if (BINFO_VTABLE (TYPE_BINFO (t)))
+@@ -6676,6 +6752,10 @@
+   layout_vtable_decl (binfo, list_length (inits));
+   decl = get_vtbl_decl_for_binfo (binfo);
+   initialize_artificial_var (decl, inits);
++/*  mark_used (decl); */ /* Wasteful - but necessary -
++                       otherwise we need to build
++                       .vtrelocs data as we emit
++                       such a var_decl */
+   dump_vtable (BINFO_TYPE (binfo), binfo, decl);
+ }
+ 
+@@ -6945,6 +7025,7 @@
+   tree inits;
+   tree id;
+   tree vbase;
++  tree slot_relocs;
+ 
+   /* See if we've already created this construction vtable group.  */
+   id = mangle_ctor_vtbl_for_type (t, binfo);
+@@ -6955,11 +7036,13 @@
+   /* Build a version of VTBL (with the wrong type) for use in
+      constructing the addresses of secondary vtables in the
+      construction vtable group.  */
++
+   vtbl = build_vtable (t, id, ptr_type_node);
+   DECL_CONSTRUCTION_VTABLE_P (vtbl) = 1;
+   list = build_tree_list (vtbl, NULL_TREE);
++  slot_relocs = NULL_TREE;
+   accumulate_vtbl_inits (binfo, TYPE_BINFO (TREE_TYPE (binfo)),
+-			 binfo, t, list);
++			 binfo, t, list, NULL /* &slot_relocs */);
+ 
+   /* Add the vtables for each of our virtual bases using the vbase in T
+      binfo.  */
+@@ -6973,7 +7056,7 @@
+ 	continue;
+       b = copied_binfo (vbase, binfo);
+ 
+-      accumulate_vtbl_inits (b, vbase, binfo, t, list);
++      accumulate_vtbl_inits (b, vbase, binfo, t, list, NULL /* &slot_relocs */);
+     }
+   inits = TREE_VALUE (list);
+ 
+@@ -6986,6 +7069,11 @@
+   CLASSTYPE_VTABLES (t) = chainon (CLASSTYPE_VTABLES (t), vtbl);
+   initialize_artificial_var (vtbl, inits);
+   dump_vtable (t, binfo, vtbl);
++
++/* Construction vtables cause serious grief:
++   determining overriding is tough - and we get the
++   wrong vtable names for our fixups (etc.)
++   append_slot_relocs (t, slot_relocs); */
+ }
+ 
+ /* Add the vtbl initializers for BINFO (and its bases other than
+@@ -7003,7 +7091,8 @@
+ 		       tree orig_binfo,
+ 		       tree rtti_binfo,
+ 		       tree t,
+-		       tree inits)
++		       tree inits,
++                       tree *slot_relocs)
+ {
+   int i;
+   tree base_binfo;
+@@ -7026,7 +7115,7 @@
+   TREE_VALUE (inits)
+     = chainon (TREE_VALUE (inits),
+ 	       dfs_accumulate_vtbl_inits (binfo, orig_binfo,
+-					  rtti_binfo, t, inits));
++					  rtti_binfo, t, inits, slot_relocs));
+ 
+   /* Walk the BINFO and its bases.  We walk in preorder so that as we
+      initialize each vtable we can figure out at what offset the
+@@ -7041,7 +7130,7 @@
+       accumulate_vtbl_inits (base_binfo,
+ 			     BINFO_BASE_BINFO (orig_binfo, i),
+ 			     rtti_binfo, t,
+-			     inits);
++			     inits, slot_relocs);
+     }
+ }
+ 
+@@ -7053,7 +7142,8 @@
+ 			   tree orig_binfo,
+ 			   tree rtti_binfo,
+ 			   tree t,
+-			   tree l)
++			   tree l,
++                           tree *slot_relocs)
+ {
+   tree inits = NULL_TREE;
+   tree vtbl = NULL_TREE;
+@@ -7120,7 +7210,7 @@
+ 
+       /* Compute the initializer for this vtable.  */
+       inits = build_vtbl_initializer (binfo, orig_binfo, t, rtti_binfo,
+-				      &non_fn_entries);
++				      &non_fn_entries, slot_relocs);
+ 
+       /* Figure out the position to which the VPTR should point.  */
+       vtbl = TREE_PURPOSE (l);
+@@ -7154,6 +7244,40 @@
+   return inits;
+ }
+ 
++#ifdef REALLY_BROKEN_NOW
++static void
++dump_slot_relocs (tree t, tree slot_relocs)
++{
++  tree st;
++  fprintf (stderr, "Copy data for '%s'\n",
++           type_as_string (t, TFF_PLAIN_IDENTIFIER));
++
++  for (st = slot_relocs; st; st = TREE_CHAIN(st)) 
++    {
++        /* This is not correct anymore - not a binfo ... */
++        tree orig_binfo = TREE_PURPOSE(st);
++        tree init_list = TREE_VALUE(st);
++        tree v;
++        fprintf (stderr, "\tfrom %s (%d) entries\n",
++                 type_as_string (orig_binfo, TFF_PLAIN_IDENTIFIER),
++                 list_length (init_list));
++        for (v = init_list; v; v = TREE_CHAIN(v)) 
++          {
++            if (!TREE_VALUE(v))
++                fprintf (stderr, "\t\tNULL\n");
++            else
++              {
++                tree fn = TREE_VALUE(v);
++                fprintf (stderr, "\t\t%s ",
++                         expr_as_string (fn, TFF_PLAIN_IDENTIFIER));
++                fprintf (stderr, "[ %s ]\n",
++                         expr_as_string (DECL_VINDEX (fn), TFF_PLAIN_IDENTIFIER));
++              }
++          }
++    }
++}
++#endif
++
+ static GTY(()) tree abort_fndecl_addr;
+ 
+ /* Construct the initializer for BINFO's virtual function table.  BINFO
+@@ -7184,7 +7308,8 @@
+ 			tree orig_binfo,
+ 			tree t,
+ 			tree rtti_binfo,
+-			int* non_fn_entries_p)
++			int* non_fn_entries_p,
++                        tree *slot_relocs)
+ {
+   tree v, b;
+   tree vfun_inits;
+@@ -7192,6 +7317,8 @@
+   unsigned ix;
+   tree vbinfo;
+   VEC(tree,gc) *vbases;
++  tree slot_reloc_data;
++  unsigned num_inits, num_parent_inits;
+ 
+   /* Initialize VID.  */
+   memset (&vid, 0, sizeof (vid));
+@@ -7213,7 +7340,7 @@
+      signature, we share the vcall offsets.  */
+   vid.fns = VEC_alloc (tree, gc, 32);
+   /* Add the vcall and vbase offset entries.  */
+-  build_vcall_and_vbase_vtbl_entries (binfo, &vid);
++  build_vcall_and_vbase_vtbl_entries (binfo, &vid, &num_parent_inits);
+ 
+   /* Clear BINFO_VTABLE_PATH_MARKED; it's set by
+      build_vbase_offset_vtbl_entries.  */
+@@ -7240,18 +7367,52 @@
+ 	}
+     }
+ 
++  num_inits = list_length (vid.inits);
+   if (non_fn_entries_p)
+-    *non_fn_entries_p = list_length (vid.inits);
++      *non_fn_entries_p = num_inits;
++
++  /* If we have non-function entries not present in a parent vtable,
++     insert a bogus slot reloc copy from a NULL parent to pad that
++     out */
++  slot_reloc_data = NULL_TREE;
++  if (slot_relocs && num_inits > num_parent_inits)
++    {
++      unsigned i;
++      for (i = 0; i < num_inits - num_parent_inits; i++)
++        slot_reloc_data = tree_cons (NULL_TREE, NULL_TREE,
++                                     slot_reloc_data);
++      *slot_relocs = chainon
++          (*slot_relocs, tree_cons (NULL_TREE, slot_reloc_data, NULL));
++      slot_reloc_data = NULL_TREE;
++    }
+ 
+   /* Go through all the ordinary virtual functions, building up
+      initializers.  */
+   vfun_inits = NULL_TREE;
++
++  fprintf (stderr, "Init vtable idx %d: ",
++           slot_relocs ? list_length (*slot_relocs) : -1);
++  fprintf (stderr, " (%s)",
++           type_as_string (t, TFF_PLAIN_IDENTIFIER));
++  fprintf (stderr, " (%s)",
++           type_as_string (binfo, TFF_PLAIN_IDENTIFIER));
++  fprintf (stderr, " (%s) -",
++           type_as_string (orig_binfo, TFF_PLAIN_IDENTIFIER));
++  fprintf (stderr, " (%s) -",
++           type_as_string (rtti_binfo, TFF_PLAIN_IDENTIFIER));
++  if (get_primary_binfo (binfo))
++      fprintf (stderr, " (%s)",
++               type_as_string (get_primary_binfo (binfo), TFF_PLAIN_IDENTIFIER));
++  fprintf (stderr, "** %d inits **\n", num_inits);
++
+   for (v = BINFO_VIRTUALS (orig_binfo); v; v = TREE_CHAIN (v))
+     {
+       tree delta;
+       tree vcall_index;
+       tree fn, fn_original;
+       tree init = NULL_TREE;
++      tree slot_fn = NULL_TREE;
++      tree first_overrider = NULL_TREE;
+ 
+       fn = BV_FN (v);
+       fn_original = fn;
+@@ -7281,7 +7442,10 @@
+ 	{
+ 	  /* We found a defn before a lost primary; go ahead as normal.  */
+ 	  if (look_for_overrides_here (BINFO_TYPE (b), fn_original))
+-	    break;
++           {
++             first_overrider = TYPE_BINFO (BINFO_TYPE (b));
++             break;
++           }
+ 
+ 	  /* The nearest definition is from a lost primary; clear the
+ 	     slot.  */
+@@ -7299,6 +7463,9 @@
+ 	  delta = BV_DELTA (v);
+ 	  vcall_index = BV_VCALL_INDEX (v);
+ 
++/*          fprintf (stderr, "\tVfn: %s\n",
++            expr_as_string (fn, TFF_PLAIN_IDENTIFIER)); */
++
+ 	  gcc_assert (TREE_CODE (delta) == INTEGER_CST);
+ 	  gcc_assert (TREE_CODE (fn) == FUNCTION_DECL);
+ 
+@@ -7319,9 +7486,40 @@
+ 		  if (!DECL_NAME (fn))
+ 		    finish_thunk (fn);
+ 		}
+-	      /* Take the address of the function, considering it to be of an
+-		 appropriate generic type.  */
+-	      init = build1 (ADDR_EXPR, vfunc_ptr_type_node, fn);
++             else if (slot_relocs && first_overrider
++                      && BINFO_TYPE (first_overrider) != t
++                      /* necessary for virtual inheritance */
++                      && BINFO_TYPE (first_overrider) != binfo)
++               {
++                 /* accumulate information about overriding */
++                 gcc_assert (BINFO_VTABLE (first_overrider));
++                 slot_fn = fn;
++                 init = fold_build1 (NOP_EXPR,
++                                     vtable_entry_type,
++                                     build_int_cst (build_pointer_type (void_type_node),
++                                                    0xdeadbeef));
++               }
++/*              fprintf (stderr, " %s : ",
++                       expr_as_string (fn, TFF_PLAIN_IDENTIFIER));
++              fprintf (stderr, " %s !=? ",
++                       type_as_string (BINFO_TYPE (first_overrider), TFF_PLAIN_IDENTIFIER));
++              fprintf (stderr, " %s   %p !=? %p !=? %p !=? %p !=? %p\n",
++                       type_as_string (t, TFF_PLAIN_IDENTIFIER),
++                       BINFO_TYPE (first_overrider), t,
++                       binfo, orig_binfo, rtti_binfo);
++              fprintf (stderr, "%p !=? %p !=? %p !=? %p !=? %p\n",
++                       BINFO_INHERITANCE_CHAIN (first_overrider),
++                       BINFO_INHERITANCE_CHAIN (t),
++                       BINFO_INHERITANCE_CHAIN (binfo),
++                       BINFO_INHERITANCE_CHAIN (orig_binfo),
++                       BINFO_INHERITANCE_CHAIN (rtti_binfo)); */
++
++              if (!init)
++                {
++	          /* Take the address of the function, considering it to be of an
++		     appropriate generic type.  */
++	          init = build1 (ADDR_EXPR, vfunc_ptr_type_node, fn);
++                }
+ 	    }
+ 	}
+ 
+@@ -7346,8 +7544,34 @@
+ 	}
+       else
+ 	vfun_inits = tree_cons (NULL_TREE, init, vfun_inits);
++
++      /* Accumulate overriding information for subequent construction
++         of copy-vtable initialisers */
++      if (slot_relocs)
++      {
++        slot_reloc_data = tree_cons (NULL_TREE, slot_fn, slot_reloc_data);
++      }
+     }
+ 
++  /* Write details about vtable inheritance, if we have any parent entries */
++  if (slot_relocs)
++  {
++      unsigned i;
++      tree copy_parent = orig_binfo;
++      if (orig_binfo == TYPE_BINFO (t))
++          copy_parent = get_primary_binfo (orig_binfo);
++
++      slot_reloc_data = nreverse (slot_reloc_data);
++
++      /* Prepend dummy entries for rtti etc. */
++      for (i = 0; i < num_parent_inits; i++)
++        slot_reloc_data = tree_cons (NULL_TREE, NULL_TREE,
++                                     slot_reloc_data);
++
++      *slot_relocs = chainon
++          (*slot_relocs, tree_cons (copy_parent, slot_reloc_data, NULL));
++  }
++
+   /* The initializers for virtual functions were built up in reverse
+      order; straighten them out now.  */
+   vfun_inits = nreverse (vfun_inits);
+@@ -7363,7 +7587,8 @@
+    offsets in BINFO, which is in the hierarchy dominated by T.  */
+ 
+ static void
+-build_vcall_and_vbase_vtbl_entries (tree binfo, vtbl_init_data* vid)
++build_vcall_and_vbase_vtbl_entries (tree binfo, vtbl_init_data* vid,
++                                    unsigned *num_parent_inits)
+ {
+   tree b;
+ 
+@@ -7371,10 +7596,17 @@
+      corresponding to the primary base class.  */
+   b = get_primary_binfo (binfo);
+   if (b)
+-    build_vcall_and_vbase_vtbl_entries (b, vid);
++    build_vcall_and_vbase_vtbl_entries (b, vid, NULL);
++
++  if (num_parent_inits)
++    *num_parent_inits = list_length (vid->inits);
+ 
+   /* Add the vbase entries for this base.  */
+   build_vbase_offset_vtbl_entries (binfo, vid);
++
++  if (num_parent_inits)
++    *num_parent_inits = list_length (vid->inits);
++
+   /* Add the vcall entries for this base.  */
+   build_vcall_offset_vtbl_entries (binfo, vid);
+ }
+diff -u -r -x testsuite -x libjava -x cc-nptl -x build-dir -x '*.orig' -x obj-i586-suse-linux -x texis -x Makeconfig -x version.h -x '*.o' -x '*.1' -x 'Makefile*' -x 'config*' -x libtool -x '*.info' -x '*.tex' pristine-gcc-4.2.1-simple/gcc/cp/cp-tree.h gcc-4.2.1-simple/gcc/cp/cp-tree.h
+--- pristine-gcc-4.2.1-simple/gcc/cp/cp-tree.h	2007-07-24 09:14:47.000000000 +0100
++++ gcc-4.2.1-simple/gcc/cp/cp-tree.h	2008-01-15 13:00:54.000000000 +0000
+@@ -498,6 +498,7 @@
+     CPTI_UNKNOWN_TYPE,
+     CPTI_VTBL_TYPE,
+     CPTI_VTBL_PTR_TYPE,
++    CPTI_VTBL_SLOT_COPY_TYPE,
+     CPTI_STD,
+     CPTI_ABI,
+     CPTI_CONST_TYPE_INFO_TYPE,
+@@ -562,6 +563,7 @@
+ #define unknown_type_node		cp_global_trees[CPTI_UNKNOWN_TYPE]
+ #define vtbl_type_node			cp_global_trees[CPTI_VTBL_TYPE]
+ #define vtbl_ptr_type_node		cp_global_trees[CPTI_VTBL_PTR_TYPE]
++#define vtbl_slot_copy_type_node        cp_global_trees[CPTI_VTBL_SLOT_COPY_TYPE]
+ #define std_node			cp_global_trees[CPTI_STD]
+ #define abi_node			cp_global_trees[CPTI_ABI]
+ #define const_type_info_type_node	cp_global_trees[CPTI_CONST_TYPE_INFO_TYPE]
+@@ -3392,6 +3394,14 @@
+    TREE_PURPOSE slot.  */
+ extern GTY(()) tree static_aggregates;
+ 
++/* foo */
++extern GTY(()) tree vtable_copy_slots;
++
++/* A list of inherited vtable slots which are copies of other slots
++   The source address is stored in the TREE_VALUE slot and the
++   destination is stored in the TREE_PURPOSE slot. */
++/* extern GTY(()) tree vtable_slot_copies; */
++
+ /* Functions called along with real static constructors and destructors.  */
+ 
+ extern GTY(()) tree static_ctors;
+@@ -3847,6 +3857,7 @@
+ extern void maybe_note_name_used_in_class	(tree, tree);
+ extern void note_name_declared_in_class		(tree, tree);
+ extern tree get_vtbl_decl_for_binfo		(tree);
++extern tree get_vtreloc_decl			(tree, tree);
+ extern void debug_class				(tree);
+ extern void debug_thunks			(tree);
+ extern tree cp_fold_obj_type_ref		(tree, tree);
+@@ -4533,6 +4544,7 @@
+ extern tree mangle_typeinfo_for_type		(tree);
+ extern tree mangle_typeinfo_string_for_type	(tree);
+ extern tree mangle_vtbl_for_type		(tree);
++extern tree mangle_vtreloc_for_type		(tree);
+ extern tree mangle_vtt_for_type			(tree);
+ extern tree mangle_ctor_vtbl_for_type		(tree, tree);
+ extern tree mangle_thunk			(tree, int, tree, tree);
+diff -u -r -x testsuite -x libjava -x cc-nptl -x build-dir -x '*.orig' -x obj-i586-suse-linux -x texis -x Makeconfig -x version.h -x '*.o' -x '*.1' -x 'Makefile*' -x 'config*' -x libtool -x '*.info' -x '*.tex' pristine-gcc-4.2.1-simple/gcc/cp/decl.c gcc-4.2.1-simple/gcc/cp/decl.c
+--- pristine-gcc-4.2.1-simple/gcc/cp/decl.c	2007-07-24 09:14:45.000000000 +0100
++++ gcc-4.2.1-simple/gcc/cp/decl.c	2008-01-10 12:20:49.000000000 +0000
+@@ -124,6 +124,10 @@
+ 	tree vtbl_type_node;
+ 	tree vtbl_ptr_type_node;
+ 
++   Array slot copy type info:
++
++	tree vtbl_slot_copy_type_node;
++
+    Namespaces,
+ 
+ 	tree std_node;
+@@ -3117,6 +3121,13 @@
+     }
+ }
+ 
++static tree
++append_struct_field (const char *name, tree type, tree chain)
++{
++  return chainon (chain, build_decl (FIELD_DECL,
++                                     get_identifier (name), type));
++}
++
+ /* Create the predefined scalar types of C,
+    and some nodes representing standard constants (0, 1, (void *)0).
+    Initialize the global binding level.
+@@ -3243,6 +3254,19 @@
+   layout_type (vtbl_ptr_type_node);
+   record_builtin_type (RID_MAX, NULL, vtbl_ptr_type_node);
+ 
++  {
++    tree elem_fields = NULL;
++
++    vtbl_slot_copy_type_node = make_aggr_type (RECORD_TYPE);
++    elem_fields = append_struct_field ("vt_src_addr", ptr_type_node, elem_fields);
++    elem_fields = append_struct_field ("vt_dest_addr", ptr_type_node, elem_fields);
++    elem_fields = append_struct_field ("vt_copy_bitmask", size_type_node, elem_fields);
++    finish_builtin_struct (vtbl_slot_copy_type_node, "__vt_copy_slot_relocs",
++                           elem_fields, NULL_TREE);
++    layout_type (vtbl_slot_copy_type_node);
++    record_builtin_type (RID_MAX, NULL, vtbl_slot_copy_type_node);
++  }
++
+   push_namespace (get_identifier ("__cxxabiv1"));
+   abi_node = current_namespace;
+   pop_namespace ();
+diff -u -r -x testsuite -x libjava -x cc-nptl -x build-dir -x '*.orig' -x obj-i586-suse-linux -x texis -x Makeconfig -x version.h -x '*.o' -x '*.1' -x 'Makefile*' -x 'config*' -x libtool -x '*.info' -x '*.tex' pristine-gcc-4.2.1-simple/gcc/cp/decl2.c gcc-4.2.1-simple/gcc/cp/decl2.c
+--- pristine-gcc-4.2.1-simple/gcc/cp/decl2.c	2007-06-28 14:16:12.000000000 +0100
++++ gcc-4.2.1-simple/gcc/cp/decl2.c	2008-01-15 13:11:33.000000000 +0000
+@@ -1530,6 +1530,26 @@
+      info.  */
+   note_debug_info_needed (ctype);
+ 
++  fprintf (stderr, "Emit vtable for '%s'",
++           type_as_string (ctype, TFF_PLAIN_IDENTIFIER));
++  /* search for our type here:
++
++ Find it in the list ... and emit it !
++
+++tree vtable_copy_slots;
+++
+++static void
+++append_slot_relocs (tree t, tree slot_relocs)
+++{
+++  if (slot_relocs)
+++    vtable_copy_slots = tree_cons (t, slot_relocs,
+++                                   vtable_copy_slots);
++
++  and emit some fun in a .vtreloc section for this vtable:
++  with a given name, mangled from the type name [!]
++  */
++  
++
+   return true;
+ }
+ 
+@@ -2910,6 +2930,147 @@
+     finish_objects (function_key, priority, body);
+ }
+ 
++static tree
++build_addr_offset (tree decl, int offset)
++{
++  tree index, addr;
++
++  index = build_int_cst (NULL_TREE, offset);
++  addr = build1 (ADDR_EXPR, ptr_type_node, build_array_ref (decl, index));
++
++  return addr;
++}
++
++/* Ideal .rodata output format: */
++/* dest_symbol, |dest_offset|src_bitmap_blocks, src_symbol, <bitmap> */
++/* Pragmatic 1st cut output format: */
++/* dest_addr, src_addr, <bitmap> */
++static tree
++build_vtable_copy_slot (tree dest, int dest_offset,
++                        tree src_binfo,  int src_offset,
++                        int bitmap, tree chain)
++{
++    tree src_decl, dest_decl;
++    tree elem = NULL_TREE, init;
++    tree dest_binfo;
++
++    /* Either a padding entry or nothing to do */
++    if (!dest || !bitmap)
++      return chain;
++
++    dest_binfo = TYPE_BINFO (dest);
++    
++    fprintf (stderr, "Copy %s + %d => ",
++             type_as_string (src_binfo, TFF_PLAIN_IDENTIFIER),
++             src_offset);
++    fprintf (stderr, " %s + %d mask 0x%x\n",
++             type_as_string (dest_binfo, TFF_PLAIN_IDENTIFIER),
++             dest_offset, bitmap);
++
++    elem = tree_cons (NULL_TREE, build_int_cst (NULL_TREE, bitmap), elem);
++
++    dest_decl = get_vtbl_decl_for_binfo (dest_binfo);
++    elem = tree_cons (NULL_TREE, build_addr_offset (dest_decl, dest_offset), elem);
++
++    src_decl = get_vtable_decl (BINFO_TYPE (src_binfo), 1);
++    elem = tree_cons (NULL_TREE, build_addr_offset (src_decl, src_offset), elem);
++
++    init = build_constructor_from_list (vtbl_slot_copy_type_node, elem);
++
++    return tree_cons (NULL_TREE, init, chain);
++}
++
++static void
++generate_vtable_copy_slots (void)
++{
++  tree k, decl;
++
++  if (!getenv ("VT_SHRINK"))
++      return;
++
++  fprintf (stderr, "Generate_vtable_copy_slots\n");
++    
++  for (k = vtable_copy_slots; k; k = TREE_CHAIN(k))
++    {
++      tree st;
++      tree t = TREE_PURPOSE(k);
++      tree slot_relocs = TREE_VALUE(k);
++      int dest_offset = 0;
++      tree inits = NULL_TREE;
++
++      fprintf (stderr, "Copy data for '%s'\n",
++               type_as_string (t, TFF_PLAIN_IDENTIFIER));
++      for (st = slot_relocs; st; st = TREE_CHAIN(st)) 
++        {
++          tree orig_binfo = TREE_PURPOSE(st);
++          tree init_list = TREE_VALUE(st);
++          tree v;
++          int bitmap = 0;
++          unsigned int i = 0;
++          unsigned int src_offset = 0;
++          int elide_leading_bits = 1;
++
++          fprintf (stderr, "\tfrom %s (%d) entries\n",
++                   orig_binfo ? type_as_string (orig_binfo, TFF_PLAIN_IDENTIFIER) : "<null pad>",
++                   list_length (init_list));
++          for (v = init_list; v; v = TREE_CHAIN(v))
++            {
++              if (!TREE_VALUE(v))
++                fprintf (stderr, "\t%3d\tNULL\n", dest_offset);
++              else
++                {
++                  tree fn = TREE_VALUE(v);
++                  elide_leading_bits = 0;
++                  fprintf (stderr, "\t%3d\t%s ", dest_offset,
++                           expr_as_string (fn, TFF_PLAIN_IDENTIFIER));
++                  fprintf (stderr, "[ %s ]\n",
++                           expr_as_string (DECL_VINDEX (fn), TFF_PLAIN_IDENTIFIER));
++                  bitmap |= 1 << i;
++                }
++              /* don't waste space for non-copies */
++              if (!elide_leading_bits)
++                i++;
++              dest_offset++;
++              src_offset++;
++              /* FIXME: this sucks - must be a better way to 
++                 find target size: 32 or 64 (?) [ assuming elf etc. ] */
++              if (i == (sizeof (long) * 8)) { /* FIXME ... arch size etc. */
++                  inits = build_vtable_copy_slot (
++                      t, dest_offset - i, orig_binfo,
++                      src_offset - i, bitmap, inits);
++                  i = bitmap = 0;
++              }
++            }
++          inits = build_vtable_copy_slot (
++              t, dest_offset - i, orig_binfo,
++              src_offset - i, bitmap, inits);
++        }
++
++      {
++	tree decl, ctor, atype;
++
++	decl = get_vtreloc_decl (t, slot_relocs);
++	import_export_decl (decl);
++	if (DECL_NOT_REALLY_EXTERN (decl) && decl_needed_p (decl))
++	  {
++	    DECL_EXTERNAL (decl) = 0;
++	    ctor = build_constructor_from_list (TREE_TYPE (decl), inits);
++	    initialize_artificial_var (decl, ctor);
++	    TREE_PUBLIC (decl) = 1;
++	    DECL_WEAK (decl) = 1;
++	    DECL_INTERFACE_KNOWN (decl) = 1;
++	    mark_used (decl);
++/*	    rest_of_decl_compilation (decl, 1, 1); */
++	    finish_decl (decl, ctor, NULL_TREE);
++
++	    fprintf (stderr, "Generate vtreloc variable '%s'",
++		     decl_as_string (decl, TFF_PLAIN_IDENTIFIER));
++	  }
++      }
++    }
++}
++
++
+ /* Generate constructor and destructor functions for the priority
+    indicated by N.  */
+ 
+@@ -3128,11 +3289,15 @@
+ 	 get emitted.  */
+       for (i = VEC_length (tree, unemitted_tinfo_decls);
+ 	   VEC_iterate (tree, unemitted_tinfo_decls, --i, t);)
++      {
++          fprintf (stderr, "Emit tinfo decl for '%s'\n",
++                   decl_as_string (t, TFF_PLAIN_IDENTIFIER));
+ 	if (emit_tinfo_decl (t))
+ 	  {
+ 	    reconsider = true;
+ 	    VEC_unordered_remove (tree, unemitted_tinfo_decls, i);
+ 	  }
++      }
+ 
+       /* The list of objects with static storage duration is built up
+ 	 in reverse order.  We clear STATIC_AGGREGATES so that any new
+@@ -3312,6 +3477,9 @@
+ 	}
+     }
+ 
++  /* Generate C++ vtable copy data */
++  generate_vtable_copy_slots ();
++
+   /* We give C linkage to static constructors and destructors.  */
+   push_lang_context (lang_name_c);
+ 
+diff -u -r -x testsuite -x libjava -x cc-nptl -x build-dir -x '*.orig' -x obj-i586-suse-linux -x texis -x Makeconfig -x version.h -x '*.o' -x '*.1' -x 'Makefile*' -x 'config*' -x libtool -x '*.info' -x '*.tex' pristine-gcc-4.2.1-simple/gcc/cp/mangle.c gcc-4.2.1-simple/gcc/cp/mangle.c
+--- pristine-gcc-4.2.1-simple/gcc/cp/mangle.c	2006-12-11 12:16:19.000000000 +0000
++++ gcc-4.2.1-simple/gcc/cp/mangle.c	2008-01-14 20:39:41.000000000 +0000
+@@ -2670,6 +2670,13 @@
+   return mangle_special_for_type (type, "TV");
+ }
+ 
++/* Create an identifier for the mangled name of the vt relocs for TYPE.  */
++
++tree mangle_vtreloc_for_type (const tree type)
++{
++  return mangle_special_for_type (type, "VTR");
++}
++
+ /* Returns an identifier for the mangled name of the VTT for TYPE.  */
+ 
+ tree
+diff -u -r -x testsuite -x libjava -x cc-nptl -x build-dir -x '*.orig' -x obj-i586-suse-linux -x texis -x Makeconfig -x version.h -x '*.o' -x '*.1' -x 'Makefile*' -x 'config*' -x libtool -x '*.info' -x '*.tex' pristine-gcc-4.2.1-simple/gcc/toplev.c gcc-4.2.1-simple/gcc/toplev.c
+--- pristine-gcc-4.2.1-simple/gcc/toplev.c	2007-01-30 16:30:21.000000000 +0000
++++ gcc-4.2.1-simple/gcc/toplev.c	2008-01-14 21:32:26.000000000 +0000
+@@ -781,8 +781,17 @@
+       if (needed)
+ 	{
+ 	  rest_of_decl_compilation (decl, 1, 1);
++          fprintf (stderr, "Emit decl:");
++          print_generic_decl (stderr, decl, 0);
++          fprintf (stderr, "\n");
+ 	  return true;
+ 	}
++      else
++      {
++          fprintf (stderr, "Skip emission of decl:");
++          print_generic_decl (stderr, decl, 0);
++          fprintf (stderr, "\n");
++      }
+     }
+ 
+   return false;
+diff -u -r -x testsuite -x libjava -x cc-nptl -x build-dir -x '*.orig' -x obj-i586-suse-linux -x texis -x Makeconfig -x version.h -x '*.o' -x '*.1' -x 'Makefile*' -x 'config*' -x libtool -x '*.info' -x '*.tex' pristine-gcc-4.2.1-simple/gcc/tree.h gcc-4.2.1-simple/gcc/tree.h
+--- pristine-gcc-4.2.1-simple/gcc/tree.h	2008-01-10 09:49:05.000000000 +0000
++++ gcc-4.2.1-simple/gcc/tree.h	2008-01-10 12:20:49.000000000 +0000
+@@ -2892,6 +2892,7 @@
+  unsigned based_on_restrict_p : 1;
+  /* Used by C++.  Might become a generic decl flag.  */
+  unsigned shadowed_for_var_p : 1;
++ unsigned vtreloc_init:1;
+ 
+  /* Don't belong to VAR_DECL exclusively.  */
+  unsigned in_system_header_flag : 1;
+@@ -2918,6 +2919,9 @@
+    is not error_mark_node, then the decl cannot be put in .common.  */
+ #define DECL_COMMON(NODE) (DECL_WITH_VIS_CHECK (NODE)->decl_with_vis.common_flag)
+ 
++/* should we be emitted in a vtreloc section ? */
++#define DECL_VTRELOC_INIT(NODE) (DECL_WITH_VIS_CHECK (NODE)->decl_with_vis.vtreloc_init)
++
+ /* In a VAR_DECL, nonzero if the decl is a register variable with
+    an explicit asm specification.  */
+ #define DECL_HARD_REGISTER(NODE)  (VAR_DECL_CHECK (NODE)->decl_with_vis.hard_register)
