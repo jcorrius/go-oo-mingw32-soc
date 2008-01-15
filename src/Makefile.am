@@ -1,4 +1,4 @@
-SUBDIRS=sdf
+SUBDIRS=layout sdf
 
 EXTRA_DIST=\
 	Draft.jpg \
