@@ -1,0 +1,1358 @@
+cvs diff: Diffing basic
+cvs diff: Diffing basic/inc
+cvs diff: Diffing basic/inc/basic
+Index: basic/inc/basic/sbmeth.hxx
+===================================================================
+RCS file: /cvs/script/basic/inc/basic/sbmeth.hxx,v
+retrieving revision 1.2
+retrieving revision 1.2.80.1
+diff -u -p -b -w -B -r1.2 -r1.2.80.1
+--- basic/inc/basic/sbmeth.hxx	11 Apr 2007 12:52:00 -0000	1.2
++++ basic/inc/basic/sbmeth.hxx	20 Dec 2007 21:23:01 -0000	1.2.80.1
+@@ -58,7 +58,7 @@ class SbMethod : public SbxMethod
+ 	friend class SbIfaceMapperMethod;
+ 
+ 	SbMethodImpl* mpSbMethodImpl;			// Impl data
+-
++	SbxArrayRef refStatics;
+ 	SbModule* pMod;
+ 	USHORT    nDebugFlags;
+ 	USHORT	  nLine1, nLine2;
+@@ -76,6 +76,7 @@ public:
+ 	virtual SbxInfo* GetInfo();
+ 	SbxArray* GetLocals();
+ 	SbxArray* GetStatics();
++	void      ClearStatics();
+ 	SbModule* GetModule() 				 { return pMod; 	   }
+ 	UINT32	  GetId() const				 { return nStart;	   }
+ 	USHORT    GetDebugFlags()			 { return nDebugFlags; }
+cvs diff: Diffing basic/inc/pch
+cvs diff: Diffing basic/prj
+cvs diff: Diffing basic/source
+cvs diff: Diffing basic/source/app
+cvs diff: Diffing basic/source/basmgr
+cvs diff: Diffing basic/source/classes
+Index: basic/source/classes/sbxmod.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/classes/sbxmod.cxx,v
+retrieving revision 1.41
+retrieving revision 1.41.34.1
+diff -u -p -b -w -B -r1.41 -r1.41.34.1
+--- basic/source/classes/sbxmod.cxx	20 Sep 2007 15:54:35 -0000	1.41
++++ basic/source/classes/sbxmod.cxx	20 Dec 2007 21:23:01 -0000	1.41.34.1
+@@ -1969,10 +1969,17 @@ SbxArray* SbMethod::GetLocals()
+ 		return NULL;
+ }
+ 
++void SbMethod::ClearStatics()
++{
++	refStatics = NULL;
++	
++}
+ SbxArray* SbMethod::GetStatics()
+ {
+-	DBG_ERROR( "SbMethod::GetStatics() invalid, AB fragen" )
+-	return NULL;
++	
++	if ( !refStatics.Is() )
++		refStatics = new SbxArray;
++	return refStatics;
+ }
+ 
+ BOOL SbMethod::LoadData( SvStream& rStrm, USHORT nVer )
+cvs diff: Diffing basic/source/comp
+Index: basic/source/comp/dim.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/comp/dim.cxx,v
+retrieving revision 1.28
+retrieving revision 1.28.40.1
+diff -u -p -b -w -B -r1.28 -r1.28.40.1
+--- basic/source/comp/dim.cxx	30 Aug 2007 09:59:44 -0000	1.28
++++ basic/source/comp/dim.cxx	20 Dec 2007 21:23:01 -0000	1.28.40.1
+@@ -53,7 +53,7 @@ SbiSymDef* SbiParser::VarDecl( SbiDimLis
+ 	if( Peek() == LPAREN )
+ 		pDim = new SbiDimList( this );
+ 	pDef->SetType( t );
+-	if( bStatic )
++	if( bVBASupportOn && bStatic )
+ 		pDef->SetStatic();
+ 	TypeDecl( *pDef );
+ 	if( !ppDim && pDim )
+@@ -186,6 +186,9 @@ void SbiParser::TypeDecl( SbiSymDef& rDe
+ 
+ void SbiParser::Dim()
+ {
++	if ( pProc )
++		DefVar( _DIM, pProc->IsStatic() );
++	else
+ 	DefVar( _DIM, FALSE );
+ }
+ 
+@@ -272,7 +275,7 @@ void SbiParser::DefVar( SbiOpcode eOp, B
+ 
+ 	// AB 9.7.97, #40689, Statics -> Modul-Initialisierung, in Sub ueberspringen
+ 	UINT32 nEndOfStaticLbl = 0;
+-	if( bStatic )
++	if( !bVBASupportOn && bStatic )
+ 	{
+ 		nEndOfStaticLbl = aGen.Gen( _JUMP, 0 );
+ 		aGen.Statement();	// bei static hier nachholen
+@@ -340,13 +343,11 @@ void SbiParser::DefVar( SbiOpcode eOp, B
+                                 goto global;
+ 				case SbPUBLIC:	eOp2 = bPersistantGlobal ? _PUBLIC_P : _PUBLIC;
+ 								// AB 9.7.97, #40689, kein eigener Opcode mehr
+-								/*
+-								if( bStatic )
++								if( bVBASupportOn && bStatic )
+ 								{
+ 									eOp2 = _STATIC;
+ 									break;
+ 								}
+-								*/
+ 				global:			aGen.BackChain( nGblChain );
+ 								nGblChain = 0;
+ 								bGblDefs = bNewGblDefs = TRUE;
+@@ -477,14 +478,14 @@ void SbiParser::DefVar( SbiOpcode eOp, B
+ 		// d.h. pPool muss immer am Schleifen-Ende zurueckgesetzt werden.
+ 		// auch bei break
+ 		pPool = pOldPool;
+-		continue;		// MyBreak überspingen
++		continue;		// MyBreak uberspingen
+ 	MyBreak:
+ 		pPool = pOldPool;
+ 		break;
+ 	}
+ 
+ 	// AB 9.7.97, #40689, Sprung ueber Statics-Deklaration abschliessen
+-	if( bStatic )
++	if( !bVBASupportOn && bStatic )
+ 	{
+ 		// globalen Chain pflegen
+ 		nGblChain = aGen.Gen( _JUMP, 0 );
+@@ -501,6 +502,9 @@ void SbiParser::DefVar( SbiOpcode eOp, B
+ 
+ void SbiParser::ReDim()
+ {
++	if ( pProc )
++		DefVar( _REDIM, pProc->IsStatic() );
++	else
+ 	DefVar( _REDIM, FALSE );
+ }
+ 
+@@ -1005,11 +1009,13 @@ void SbiParser::DefProc( BOOL bStatic, B
+ 		// Normalfall: Lokale Variable->Parameter->Globale Variable
+ 		pProc->GetLocals().SetParent( &pProc->GetParams() );
+ 		pPool = &pProc->GetLocals();
++		pProc->SetStatic( FALSE );
+ 	}
++	else if ( bVBASupportOn )
++		pProc->SetStatic( TRUE );
+ 	else
+-	{
+ 		Error( SbERR_NOT_IMPLEMENTED ); // STATIC SUB ...
+-	}
++
+ 
+ 	pProc->Define();
+ 	OpenBlock( eExit );
+Index: basic/source/comp/exprgen.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/comp/exprgen.cxx,v
+retrieving revision 1.16
+retrieving revision 1.16.132.1
+diff -u -p -b -w -B -r1.16 -r1.16.132.1
+--- basic/source/comp/exprgen.cxx	12 Oct 2006 14:26:47 -0000	1.16
++++ basic/source/comp/exprgen.cxx	20 Dec 2007 21:23:01 -0000	1.16.132.1
+@@ -132,9 +132,17 @@ void SbiExprNode::Gen( RecursiveMode eRe
+                     (aVar.pDef->IsGlobal() ? _FIND_G : _FIND);
+ 		}
+ 
+-		if( eOp == _FIND && pGen->GetParser()->bClassModule )
+-			eOp = _FIND_CM;
++		if( eOp == _FIND )
++		{
+ 
++			SbiProcDef* pProc = aVar.pDef->GetProcDef();
++			if ( pGen->GetParser()->bClassModule )
++				eOp = _FIND_CM;
++			else if ( aVar.pDef->IsStatic() || pProc && pProc->IsStatic() )
++			{
++				eOp = _FIND_STATIC;
++			}
++		}
+ 		for( SbiExprNode* p = this; p; p = p->aVar.pNext )
+ 		{
+ 			if( p == this && pWithParent_ != NULL )
+Index: basic/source/comp/exprtree.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/comp/exprtree.cxx,v
+retrieving revision 1.19
+retrieving revision 1.19.64.1
+diff -u -p -b -w -B -r1.19 -r1.19.64.1
+--- basic/source/comp/exprtree.cxx	27 Jun 2007 14:20:26 -0000	1.19
++++ basic/source/comp/exprtree.cxx	20 Dec 2007 21:23:01 -0000	1.19.64.1
+@@ -278,6 +278,11 @@ SbiExprNode* SbiExpression::Term()
+ 		if( bObj )
+ 			eType = SbxOBJECT;
+ 		pDef = AddSym( eTok, *pParser->pPool, eCurExpr, aSym, eType, pPar );
++		// Looks like this is a local ( but undefined variable )
++		// if it is in a static procedure then make this Symbol
++		// static
++		if ( !bObj && pParser->pProc && pParser->pProc->IsStatic() )
++		    pDef->SetStatic();
+ 	}
+ 	else
+ 	{
+Index: basic/source/comp/sbcomp.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/comp/sbcomp.cxx,v
+retrieving revision 1.14
+retrieving revision 1.14.64.1
+diff -u -p -b -w -B -r1.14 -r1.14.64.1
+--- basic/source/comp/sbcomp.cxx	27 Jun 2007 14:20:58 -0000	1.14
++++ basic/source/comp/sbcomp.cxx	20 Dec 2007 21:23:01 -0000	1.14.64.1
+@@ -142,6 +142,13 @@ BOOL SbModule::Compile()
+ 	if( bRet )
+ 	{
+ 		pBasic->ClearAllModuleVars();
++		// clear all method statics
++		for( USHORT i = 0; i < pMethods->Count(); i++ )
++		{
++			SbMethod* p = PTR_CAST(SbMethod,pMethods->Get( i ) );
++			if( p )
++				p->ClearStatics();
++		}
+ 
+ 		// #i31510 Init other libs only if Basic isn't running
+ 		if( pINST == NULL )
+Index: basic/source/comp/symtbl.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/comp/symtbl.cxx,v
+retrieving revision 1.18
+retrieving revision 1.18.126.1
+diff -u -p -b -w -B -r1.18 -r1.18.126.1
+--- basic/source/comp/symtbl.cxx	3 Nov 2006 15:10:55 -0000	1.18
++++ basic/source/comp/symtbl.cxx	20 Dec 2007 21:23:01 -0000	1.18.126.1
+@@ -428,6 +428,7 @@ SbiProcDef::SbiProcDef( SbiParser* pPars
+ 	mePropMode = PROPERTY_MODE_NONE;
+ 	bPublic = TRUE;
+ 	bCdecl	= FALSE;
++	bStatic = FALSE;
+ 	// Fuer Returnwerte ist das erste Element der Parameterliste
+ 	// immer mit dem Namen und dem Typ der Proc definiert
+ 	aParams.AddSym( aName );
+cvs diff: Diffing basic/source/inc
+Index: basic/source/inc/opcodes.hxx
+===================================================================
+RCS file: /cvs/script/basic/source/inc/opcodes.hxx,v
+retrieving revision 1.12
+retrieving revision 1.12.40.1
+diff -u -p -b -w -B -r1.12 -r1.12.40.1
+--- basic/source/inc/opcodes.hxx	30 Aug 2007 10:00:44 -0000	1.12
++++ basic/source/inc/opcodes.hxx	20 Dec 2007 21:23:01 -0000	1.12.40.1
+@@ -167,6 +167,8 @@ enum SbiOpcode {
+     _DCREATE_REDIMP,	// Objekt-Array redimensionieren (+StringId+StringID)
+ 	_FIND_CM,        	// Search inside a class module (CM) to enable global search in time
+ 	_PUBLIC_P, 			//  Module global Variable (persisted between calls)(+StringID+Typ)
++	_FIND_STATIC,        	//  local static var lookup (+StringID+Typ) 
++
+ 	SbOP2_END
+ 
+ };
+Index: basic/source/inc/runtime.hxx
+===================================================================
+RCS file: /cvs/script/basic/source/inc/runtime.hxx,v
+retrieving revision 1.35
+retrieving revision 1.35.40.1
+diff -u -p -b -w -B -r1.35 -r1.35.40.1
+--- basic/source/inc/runtime.hxx	30 Aug 2007 10:01:05 -0000	1.35
++++ basic/source/inc/runtime.hxx	20 Dec 2007 21:23:01 -0000	1.35.40.1
+@@ -331,6 +331,7 @@ class SbiRuntime
+ 	SbiInstance*   pInst;			// aktiver Thread
+ 	SbModule*	  pMod;				// aktuelles Modul
+ 	SbMethod* 	  pMeth;			// Methoden-Instanz
++	SbMethod* 	  pRealMeth;
+ 	SbiIoSystem*   pIosys;			// I/O-System
+ 	const SbiImage* pImg;           // Code-Image
+ 	SbxArrayRef   refExprStk;       // expression stack
+@@ -392,7 +393,7 @@ class SbiRuntime
+ 	}
+ 
+ 	SbxVariable* FindElement
+-	( SbxObject* pObj, UINT32 nOp1, UINT32 nOp2, SbError, BOOL );
++	( SbxObject* pObj, UINT32 nOp1, UINT32 nOp2, SbError, BOOL bLocal, BOOL bStatic = FALSE );
+ 	void SetupArgs( SbxVariable*, UINT32 );
+ 	SbxVariable* CheckArray( SbxVariable* );
+ 
+@@ -464,16 +465,19 @@ class SbiRuntime
+ 	// Alle Opcodes mit zwei Operanden
+ 	void StepRTL( UINT32, UINT32 ),		StepPUBLIC( UINT32, UINT32 ),	StepPUBLIC_P( UINT32, UINT32 );		
+ 	void StepPUBLIC_Impl( UINT32, UINT32, bool bUsedForClassModule );
++	void StepFIND_Impl( SbxObject* pObj, UINT32 nOp1, UINT32 nOp2, SbError, BOOL bLocal, BOOL bStatic = FALSE );
+ 	void StepFIND( UINT32, UINT32 ),    StepELEM( UINT32, UINT32 );
+ 	void StepGLOBAL( UINT32, UINT32 ),  StepLOCAL( UINT32, UINT32 );
+ 	void StepPARAM( UINT32, UINT32), 	StepCREATE( UINT32, UINT32 );
+ 	void StepCALL( UINT32, UINT32 ),    StepCALLC( UINT32, UINT32 );
+ 	void StepCASEIS( UINT32, UINT32 ),  StepSTMNT( UINT32, UINT32 );
++	SbxVariable* StepSTATIC_Impl( String& aName, SbxDataType& t );
+ 	void StepOPEN( UINT32, UINT32 ),	StepSTATIC( UINT32, UINT32 );
+ 	void StepTCREATE(UINT32,UINT32),	StepDCREATE(UINT32,UINT32);
+ 	void StepGLOBAL_P( UINT32, UINT32 ),StepFIND_G( UINT32, UINT32 );
+ 	void StepDCREATE_REDIMP(UINT32,UINT32), StepDCREATE_IMPL(UINT32,UINT32);
+ 	void StepFIND_CM( UINT32, UINT32 );
++	void StepFIND_STATIC( UINT32, UINT32 );
+ public:
+ 	void          SetVBAEnabled( bool bEnabled ) { bVBAEnabled = bEnabled; };            
+ 	USHORT		GetImageFlag( USHORT n ) const;
+Index: basic/source/inc/symtbl.hxx
+===================================================================
+RCS file: /cvs/script/basic/source/inc/symtbl.hxx,v
+retrieving revision 1.11
+retrieving revision 1.11.64.1
+diff -u -p -b -w -B -r1.11 -r1.11.64.1
+--- basic/source/inc/symtbl.hxx	27 Jun 2007 14:24:09 -0000	1.11
++++ basic/source/inc/symtbl.hxx	20 Dec 2007 21:23:02 -0000	1.11.64.1
+@@ -207,6 +207,7 @@ class SbiProcDef : public SbiSymDef {	//
+ 	BOOL   bCdecl  : 1;				// TRUE: CDECL angegeben
+ 	BOOL   bPublic : 1;				// TRUE: proc ist PUBLIC
+ 	BOOL   mbProcDecl : 1;			// TRUE: instanciated by SbiParser::ProcDecl
++	BOOL   bStatic : 1;				// TRUE:
+ public:
+ 	SbiProcDef( SbiParser*, const String&, BOOL bProcDecl=false );
+ 	virtual ~SbiProcDef();
+@@ -219,6 +220,8 @@ public:
+ 	String& GetAlias() 		  		{ return aAlias;   }
+ 	void SetPublic( BOOL b )		{ bPublic = b;	   }
+ 	BOOL IsPublic() const			{ return bPublic;  }
++	void SetStatic( BOOL b )		{ bStatic = b;	   }
++	BOOL IsStatic() const			{ return bStatic;  }
+ 	void SetCdecl( BOOL b = TRUE) 	{ bCdecl = b;      }
+ 	BOOL IsCdecl() const			{ return bCdecl;   }
+ 	BOOL IsUsedForProcDecl() const	{ return mbProcDecl; }
+cvs diff: Diffing basic/source/runtime
+Index: basic/source/runtime/methods.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/runtime/methods.cxx,v
+retrieving revision 1.77
+retrieving revision 1.77.34.5
+diff -u -p -b -w -B -r1.77 -r1.77.34.5
+--- basic/source/runtime/methods.cxx	20 Sep 2007 15:55:04 -0000	1.77
++++ basic/source/runtime/methods.cxx	7 Jan 2008 06:54:10 -0000	1.77.34.5
+@@ -1352,6 +1352,87 @@ RTLFUNC(Oct)
+ 	}
+ }
+ 
++// Replace(expression, find, replace[, start[, count[, compare]]]) 
++
++RTLFUNC(Replace)
++{
++    (void)pBasic;
++    (void)bWrite;
++    
++	ULONG nArgCount = rPar.Count()-1;
++	if ( nArgCount < 3 || nArgCount > 6 )
++		StarBASIC::Error( SbERR_BAD_ARGUMENT );
++	else
++	{
++		String aExpStr = rPar.Get(1)->GetString();
++		String aFindStr = rPar.Get(2)->GetString();
++		String aReplaceStr = rPar.Get(3)->GetString();
++
++		INT32 lStartPos = 1;
++		if ( nArgCount >= 4 )
++		{
++			if( rPar.Get(4)->GetType() != SbxEMPTY )
++				lStartPos = rPar.Get(4)->GetLong();
++			if( lStartPos < 1  || lStartPos > 0xffff )
++			{
++				StarBASIC::Error( SbERR_BAD_ARGUMENT );
++				lStartPos = 1;
++			}
++		}
++
++		INT32 lCount = -1;
++		if( nArgCount >=5 )
++		{
++			if( rPar.Get(5)->GetType() != SbxEMPTY )
++				lCount = rPar.Get(5)->GetLong();
++			if( lCount < -1 || lCount > 0xffff )
++			{
++				StarBASIC::Error( SbERR_BAD_ARGUMENT );
++				lCount = -1;	
++			}
++		}
++
++		SbiInstance* pInst = pINST;
++		int bTextMode;
++		bool bCompatibility = ( pInst && pInst->IsCompatibility() );
++		if( bCompatibility )
++		{
++			SbiRuntime* pRT = pInst ? pInst->pRun : NULL;
++			bTextMode = pRT ? pRT->GetImageFlag( SBIMG_COMPARETEXT ) : FALSE;
++		}
++		else
++		{
++			bTextMode = 1;
++		}
++		if ( nArgCount == 6 )
++			bTextMode = rPar.Get(6)->GetInteger();
++
++		USHORT nStrLen = aExpStr.Len();
++
++		if( lStartPos <= nStrLen )
++		{
++			String aSrcStr( aExpStr );
++			if( bTextMode )
++			{
++					aSrcStr.ToUpperAscii();
++					aFindStr.ToUpperAscii();
++			}
++			
++			USHORT nPos = aSrcStr.Search( aFindStr, lStartPos - 1 );
++			USHORT nCounts = 0;
++			USHORT nReplaceLength = aReplaceStr.Len() ? aReplaceStr.Len():1;
++			while( nPos != STRING_NOTFOUND && (lCount == -1 || lCount > nCounts) )
++			{
++				aExpStr.Replace( nPos, aFindStr.Len(), aReplaceStr );
++				nPos += nReplaceLength;
++				nPos = aSrcStr.Search( aFindStr, nPos );
++				nCounts++;
++			}
++		}
++		rPar.Get(0)->PutString( aExpStr.Copy(lStartPos - 1)  );
++	}
++}
++
+ RTLFUNC(Right)
+ {
+     (void)pBasic;
+@@ -2835,8 +2916,18 @@ RTLFUNC(GetAttr)
+ 	{
+ 		INT16 nFlags = 0;
+ 
++		// In Windows, We want to use Windows API to get the file attributes
++		// for VBA interoperability.
++		BOOL bUCB = TRUE;
++		#ifdef _OLD_FILE_IMPL
++			#if defined( WNT )
++				if( SbiRuntime::isVBAEnabled() )
++					bUCB = FALSE;
++			#endif	
++		#endif
++		
+ 		// <-- UCB
+-		if( hasUno() )
++		if( hasUno() && bUCB )
+ 		{
+ 			Reference< XSimpleFileAccess3 > xSFI = getFileAccess();
+ 			if( xSFI.is() )
+@@ -3208,6 +3299,196 @@ RTLFUNC(Seek)
+ 	}
+ }
+ 
++enum VbaFormatType
++{
++    VBA_FORMAT_TYPE_OFFSET, // standard number format
++    VBA_FORMAT_TYPE_USERDEFINED, // user defined number format
++    VBA_FORMAT_TYPE_NULL
++};
++
++struct VbaFormatInfo
++{
++    VbaFormatType meType; 
++    const char* mpVbaFormat; // Format string in vba
++    NfIndexTableOffset meOffset; // SvNumberFormatter format index, if meType = VBA_FORMAT_TYPE_OFFSET
++    const char* mpOOoFormat; // if meType = VBA_FORMAT_TYPE_USERDEFINED
++};
++
++#define VBA_FORMAT_OFFSET( pcUtf8, eOffset ) \
++    { VBA_FORMAT_TYPE_OFFSET, pcUtf8, eOffset, 0 }
++
++#define VBA_FORMAT_USERDEFINED( pcUtf8, pcDefinedUtf8 ) \
++    { VBA_FORMAT_TYPE_USERDEFINED, pcUtf8, NF_NUMBER_STANDARD, pcDefinedUtf8 }
++
++static VbaFormatInfo pFormatInfoTable[] = 
++{
++    VBA_FORMAT_OFFSET( "Long Date", NF_DATE_SYSTEM_LONG ),
++    VBA_FORMAT_USERDEFINED( "Medium Date", "DD-MMM-YYYY" ),
++    VBA_FORMAT_OFFSET( "Short Date", NF_DATE_SYSTEM_SHORT ),
++    VBA_FORMAT_OFFSET( "Long Time", NF_TIME_HHMMSSAMPM ),
++    VBA_FORMAT_OFFSET( "Medium Time", NF_TIME_HHMMAMPM ),
++    VBA_FORMAT_OFFSET( "Short Time", NF_TIME_HHMM ),
++    VBA_FORMAT_OFFSET( "ddddd", NF_DATE_SYSTEM_SHORT ),
++    VBA_FORMAT_OFFSET( "dddddd", NF_DATE_SYSTEM_LONG ),
++    VBA_FORMAT_OFFSET( "ttttt", NF_TIME_HHMMSSAMPM ),
++    VBA_FORMAT_OFFSET( "ww", NF_DATE_WW ),
++    VBA_FORMAT_USERDEFINED( "General Number", "0.############" ),
++    VBA_FORMAT_OFFSET( "Currency", NF_CURRENCY_1000DEC2 ),
++    VBA_FORMAT_OFFSET( "Fixed", NF_NUMBER_DEC2 ),
++    VBA_FORMAT_OFFSET( "Standard", NF_NUMBER_SYSTEM ),
++    VBA_FORMAT_OFFSET( "Percent", NF_PERCENT_DEC2 ),
++    VBA_FORMAT_OFFSET( "Scientific", NF_SCIENTIFIC_000E00 ),
++    { VBA_FORMAT_TYPE_NULL, 0, NF_INDEX_TABLE_ENTRIES, 0 }
++};
++
++VbaFormatInfo* getFormatInfo( const String& rFmt )
++{
++    VbaFormatInfo* pInfo = NULL;
++    INT16 i = 0;
++    while( (pInfo = pFormatInfoTable + i )->mpVbaFormat != NULL )
++    {
++        if( rFmt.EqualsIgnoreCaseAscii( pInfo->mpVbaFormat ) )
++            break;
++        i++;    
++    }
++    return pInfo;
++}
++
++#define VBAFORMAT_GENERALDATE       "General Date"
++#define VBAFORMAT_C                 "c"
++#define VBAFORMAT_N                 "n"
++#define VBAFORMAT_NN                "nn"
++#define VBAFORMAT_W                 "w"
++#define VBAFORMAT_Y                 "y"
++#define VBAFORMAT_YESNO     	    "Yes/No"
++#define VBAFORMAT_TRUEFALSE  		"True/False"
++#define VBAFORMAT_ONOFF	    		"On/Off"
++#define VBAFORMAT_LOWERCASE     	"<"
++#define VBAFORMAT_UPPERCASE         ">"
++
++// From methods1.cxx
++INT16 implGetWeekDay( double aDate, bool bFirstDayParam = false, INT16 nFirstDay = 0 );
++
++String VbaFormat( String& rStr, String& rFmt )
++{
++    String aRetStr;
++
++    // For simple text format
++	if( rFmt.EqualsIgnoreCaseAscii( VBAFORMAT_LOWERCASE ) )
++		return rStr.ToLowerAscii();
++	if( rFmt.EqualsIgnoreCaseAscii( VBAFORMAT_UPPERCASE ) )
++		return rStr.ToUpperAscii(); 
++	if( rFmt.EqualsIgnoreCaseAscii( VBAFORMAT_YESNO ) )
++		return ( rStr.ToDouble() == 0.0 ) ? aRetStr.AssignAscii( "No" ) : aRetStr.AssignAscii( "Yes" ) ;
++	if( rFmt.EqualsIgnoreCaseAscii( VBAFORMAT_TRUEFALSE ) )
++		return ( rStr.ToDouble() == 0.0 ) ? aRetStr.AssignAscii( "False" ) : aRetStr.AssignAscii( "True" ) ;
++	if( rFmt.EqualsIgnoreCaseAscii( VBAFORMAT_ONOFF ) )
++		return ( rStr.ToDouble() == 0.0 ) ? aRetStr.AssignAscii( "Off" ) : aRetStr.AssignAscii( "On" ) ;
++
++	SvNumberFormatter* pFormatter;
++	com::sun::star::uno::Reference< com::sun::star::lang::XMultiServiceFactory > 
++		xFactory = comphelper::getProcessServiceFactory();
++	pFormatter = new SvNumberFormatter( xFactory, LANGUAGE_ENGLISH_US );
++
++	sal_uInt32 nIndex;
++	xub_StrLen nCheckPos = 0;
++	short nType;
++    double nNumber;
++    Color* pCol;
++    
++    LanguageType eLangType = GetpApp()->GetSettings().GetLanguage();
++    BOOL bSuccess = pFormatter->IsNumberFormat( rStr, nIndex, nNumber );
++
++    // Number format
++    if( bSuccess )
++    {
++        VbaFormatInfo* pInfo = getFormatInfo( rFmt );
++        if( pInfo && pInfo->meType != VBA_FORMAT_TYPE_NULL )
++        {
++            if( pInfo->meType == VBA_FORMAT_TYPE_OFFSET )
++            {
++                nIndex = pFormatter->GetFormatIndex( pInfo->meOffset, eLangType );
++            }
++            else
++            {
++                rFmt.AssignAscii( pInfo->mpOOoFormat );
++                pFormatter->PutandConvertEntry( rFmt, nCheckPos, nType, nIndex, LANGUAGE_ENGLISH_US, eLangType );
++            }
++	        pFormatter->GetOutputString( nNumber, nIndex, aRetStr, &pCol );
++        }
++        else if( rFmt.EqualsIgnoreCaseAscii( VBAFORMAT_GENERALDATE )
++                || rFmt.EqualsIgnoreCaseAscii( VBAFORMAT_C )) 
++        {
++            if( nNumber <=-1.0 || nNumber >= 1.0 )
++            {
++                // short date 
++                nIndex = pFormatter->GetFormatIndex( NF_DATE_SYSTEM_SHORT, eLangType );
++	            pFormatter->GetOutputString( nNumber, nIndex, aRetStr, &pCol );
++                
++                // long time
++                if( floor( nNumber ) != nNumber )
++                {
++                    nIndex = pFormatter->GetFormatIndex( NF_TIME_HHMMSSAMPM, eLangType );
++                    String aTime;
++	                pFormatter->GetOutputString( nNumber, nIndex, aTime, &pCol );
++                    aRetStr.AppendAscii(" ");
++                    aRetStr += aTime;
++                }
++            }
++            else
++            {
++                // long time only
++                nIndex = pFormatter->GetFormatIndex( NF_TIME_HHMMSSAMPM, eLangType );
++	            pFormatter->GetOutputString( nNumber, nIndex, aRetStr, &pCol );
++            }
++        }
++        else if( rFmt.EqualsIgnoreCaseAscii( VBAFORMAT_N )
++                || rFmt.EqualsIgnoreCaseAscii( VBAFORMAT_NN )) 
++        {
++            INT32 nMin = implGetMinute( nNumber );
++            if( nMin < 10 && rFmt.EqualsIgnoreCaseAscii( VBAFORMAT_NN ) )
++            {
++                // Minute in two digits
++                 sal_Unicode* p = aRetStr.AllocBuffer( 2 );
++                 *p++ = '0';
++                 *p = sal_Unicode( '0' + nMin );
++            }
++            else
++            {
++                aRetStr = String::CreateFromInt32( nMin );
++            }
++        }
++        else if( rFmt.EqualsIgnoreCaseAscii( VBAFORMAT_W ))
++        {
++            INT32 nWeekDay = implGetWeekDay( nNumber );
++            aRetStr = String::CreateFromInt32( nWeekDay );
++        }
++        else if( rFmt.EqualsIgnoreCaseAscii( VBAFORMAT_Y ))
++        {
++			INT16 nYear = implGetDateYear( nNumber );
++			double dBaseDate;
++			implDateSerial( nYear, 1, 1, dBaseDate );
++			INT32 nYear32 = 1 + INT32( nNumber - dBaseDate );
++            aRetStr = String::CreateFromInt32( nYear32 );
++        }
++        else
++        {
++            pFormatter->PutandConvertEntry( rFmt, nCheckPos, nType, nIndex, LANGUAGE_ENGLISH_US, eLangType );
++	        pFormatter->GetOutputString( nNumber, nIndex, aRetStr, &pCol );
++        }
++    }
++    else
++    {
++        // text format
++        pFormatter->PutandConvertEntry( rFmt, nCheckPos, nType, nIndex, LANGUAGE_ENGLISH_US, eLangType );
++	    pFormatter->GetOutputString( rStr, nIndex, aRetStr, &pCol );
++    }
++
++	delete pFormatter;
++    
++    return aRetStr;
++}
++
+ RTLFUNC(Format)
+ {
+     (void)pBasic;
+@@ -3224,8 +3505,17 @@ RTLFUNC(Format)
+ 		else
+ 		{
+ 			String aFmt( rPar.Get(2)->GetString() );
++
++            if( SbiRuntime::isVBAEnabled() )
++            {
++                String aStr = rPar.Get(1)->GetString();
++                aResult = VbaFormat( aStr, aFmt );
++            }
++            else
++            {
+ 			rPar.Get(1)->Format( aResult, &aFmt );
+ 		}
++		}
+ 		rPar.Get(0)->PutString( aResult );
+ 	}
+ }
+@@ -3865,21 +4155,135 @@ RTLFUNC(QBColor)
+ 	rPar.Get(0)->PutLong( nRGB );
+ }
+ 
+-
++// StrConv(string, conversion, LCID)
+ RTLFUNC(StrConv)
+ {
+     (void)pBasic;
+     (void)bWrite;
+-    (void)rPar;
+     
+-	DBG_ASSERT(0,"StrConv:Not implemented");
+-//	if ( rPar.Count() != 3 )
+-//	{
++	ULONG nArgCount = rPar.Count()-1;
++	if( nArgCount < 2 || nArgCount > 3 )
++	{
+ 		StarBASIC::Error( SbERR_BAD_ARGUMENT );
+-//		return;
+-//	}
++		return;	
++	}
++
++	String aOldStr = rPar.Get(1)->GetString(); 
++	INT32 nConversion = rPar.Get(2)->GetLong();
++	
++	USHORT nLanguage = LANGUAGE_SYSTEM;
++	if( nArgCount == 3 )
++	{
++		// LCID not supported now	
++		//nLanguage = rPar.Get(3)->GetInteger();
++	}
++
++	USHORT nOldLen = aOldStr.Len();
++	if( nOldLen == 0 )
++	{
++		// null string,return 
++		rPar.Get(0)->PutString(aOldStr);
++		return;
++	}
++
++	INT32 nType = 0;
++	if ( (nConversion & 0x03) == 3 ) //  vbProperCase
++	{
++		CharClass& rCharClass = GetCharClass();
++		aOldStr = rCharClass.toTitle( aOldStr.ToLowerAscii(), 0, nOldLen );
++	}
++	else if ( (nConversion & 0x01) == 1 ) // vbUpperCase
++		nType |= ::com::sun::star::i18n::TransliterationModules_LOWERCASE_UPPERCASE;
++	else if ( (nConversion & 0x02) == 2 ) // vbLowerCase
++		nType |= ::com::sun::star::i18n::TransliterationModules_UPPERCASE_LOWERCASE;
++	
++	if ( (nConversion & 0x04) == 4 ) // vbWide
++		nType |= ::com::sun::star::i18n::TransliterationModules_HALFWIDTH_FULLWIDTH;
++	else if ( (nConversion & 0x08) == 8 ) // vbNarrow
++		nType |= ::com::sun::star::i18n::TransliterationModules_FULLWIDTH_HALFWIDTH;
++
++	if ( (nConversion & 0x10) == 16) // vbKatakana
++		nType |= ::com::sun::star::i18n::TransliterationModules_HIRAGANA_KATAKANA;
++	else if ( (nConversion & 0x20) == 32 ) // vbHiragana
++		nType |= ::com::sun::star::i18n::TransliterationModules_KATAKANA_HIRAGANA;
++
++	String aNewStr( aOldStr );
++	if( nType != 0 )
++	{
++		Reference< XMultiServiceFactory > xSMgr = getProcessServiceFactory();
++    	::utl::TransliterationWrapper aTransliterationWrapper( xSMgr,nType );
++		com::sun::star::uno::Sequence<sal_Int32> aOffsets;
++		aTransliterationWrapper.loadModuleIfNeeded( nLanguage );
++		aNewStr = aTransliterationWrapper.transliterate( aOldStr, nLanguage, 0, nOldLen, &aOffsets );
++	}
++
++	if ( (nConversion & 0x40) == 64 ) // vbUnicode
++	{
++		// convert the string to byte string, preserving unicode (2 bytes per character)
++		USHORT nSize = aNewStr.Len()*2;
++		const sal_Unicode* pSrc = aNewStr.GetBuffer();
++		sal_Char* pChar = new sal_Char[nSize+1];
++		for( USHORT i=0; i < nSize; i++ )
++		{
++			pChar[i] = i%2 ? ((*pSrc) >> 8) & 0xff : (*pSrc) & 0xff;
++			if( i%2 )
++				pSrc++;	
++		}
++		pChar[nSize] = '\0';
++		OString aOStr(pChar);	
++		
++		// there is no concept about default codepage in unix. so it is incorrectly in unix 
++		OUString aOUStr = OStringToOUString(aOStr, osl_getThreadTextEncoding());
++		aNewStr = String(aOUStr);
++		rPar.Get(0)->PutString( aNewStr );
++		return;
++	}
++	else if ( (nConversion & 0x80) == 128 ) // vbFromUnicode
++	{
++		OUString aOUStr(aNewStr);
++		// there is no concept about default codepage in unix. so it is incorrectly in unix 
++		OString aOStr = OUStringToOString(aNewStr,osl_getThreadTextEncoding());
++		const sal_Char* pChar = aOStr.getStr();
++		USHORT nArraySize = aOStr.getLength();
++		SbxDimArray* pArray = new SbxDimArray(SbxBYTE);
++		bool bIncIndex = (IsBaseIndexOne() && SbiRuntime::isVBAEnabled() );
++		if(nArraySize)
++		{
++			if( bIncIndex )
++				pArray->AddDim( 1, nArraySize );
++			else
++				pArray->AddDim( 0, nArraySize-1 );	
++		}
++		else
++		{
++			pArray->unoAddDim( 0, -1 );	
+ }
+ 
++		for( USHORT	i=0; i< nArraySize; i++)
++		{
++			SbxVariable* pNew = new SbxVariable( SbxBYTE );
++			pNew->PutByte(*pChar);
++			pChar++;
++			pNew->SetFlag( SBX_WRITE );
++			short index = i;
++			if( bIncIndex )
++				++index;
++			pArray->Put( pNew, &index );	
++		}
++
++		SbxVariableRef refVar = rPar.Get(0);
++		USHORT nFlags = refVar->GetFlags();
++		refVar->ResetFlag( SBX_FIXED );
++		refVar->PutObject( pArray );
++		refVar->SetFlags( nFlags );
++	    refVar->SetParameters( NULL );
++   		return;	   
++	}
++
++	rPar.Get(0)->PutString(aNewStr);
++}
++
++
+ RTLFUNC(Beep)
+ {
+     (void)pBasic;
+@@ -4263,3 +4667,115 @@ RTLFUNC(FileExists)
+ 		StarBASIC::Error( SbERR_BAD_ARGUMENT );
+ }
+ 
++RTLFUNC(Partition)
++{
++    (void)pBasic;
++    (void)bWrite;
++    
++	if ( rPar.Count() != 5 )
++	{
++		StarBASIC::Error( SbERR_BAD_ARGUMENT );
++		return;
++	}
++
++	INT32 nNumber = rPar.Get(1)->GetLong();
++	INT32 nStart = rPar.Get(2)->GetLong();
++	INT32 nStop = rPar.Get(3)->GetLong();
++	INT32 nInterval = rPar.Get(4)->GetLong();
++	
++	if( nStart < 0 || nStop <= nStart || nInterval < 1 )
++	{
++		StarBASIC::Error( SbERR_BAD_ARGUMENT );
++		return;
++	}
++
++	// define a space (' ') character and colon(:) character
++	OUString aSpace = OUString::createFromAscii(" ");
++	OUString aColon = OUString::createFromAscii(":");
++
++	OUString aBeforStart = OUString::valueOf(nStart-1);
++	OUString aAfterStop = OUString::valueOf(nStop+1);
++	
++	// the Partition function inserts leading spaces before lowervalue and uppervalue
++    // so that they both have the same number of characters as the string
++    // representation of the value (Stop + 1). This ensures that if you use the output
++    // of the Partition function with several values of Number, the resulting text 
++	// will be handled properly during any subsequent sort operation.
++
++	// The maximun number of characters before lowervalue and uppervalue
++	INT32 nLen1 = aBeforStart.getLength();
++	INT32 nLen2 = aAfterStop.getLength();
++	INT32 nLen = nLen1 >= nLen2 ? nLen1:nLen2;
++
++	OUString aRetStr;
++	OUString aLowerValue;
++	OUString aUpperValue;	
++	OUString aSpaceStr1;
++	OUString aSpaceStr2;
++	if( nNumber < nStart || nNumber > nStop )
++	{
++		// appending the leading spaces for the lowervalue and uppervalue
++		for( INT32 i=0; i< nLen; i++ )
++		{
++			aSpaceStr1 += aSpace;
++		}
++		
++		INT32 start = nNumber < nStart ? nLen1 : nLen2;
++		
++		for( INT32 i=start; i<nLen; i++ )
++		{
++			aSpaceStr2 += aSpace;	
++		}
++
++		if( nNumber < nStart )
++		{
++			aLowerValue = aSpaceStr1;
++			aUpperValue = aSpaceStr2 + aBeforStart;
++		}
++		else
++		{
++			aLowerValue = aSpaceStr2 + aAfterStop;
++			aUpperValue = aSpaceStr1;
++		}
++
++		aRetStr = aLowerValue + aColon + aUpperValue;
++		rPar.Get(0)->PutString(String(aRetStr));
++		return;
++	}
++
++	INT32 nLowerValue;
++	INT32 nUpperValue;
++	for( INT32 i=nStart; i<nStop; i=i+nInterval )
++	{
++		if( nNumber < i+nInterval )
++		{
++			nLowerValue = i;
++			nUpperValue = ( i+nInterval-1 > nStop ) ? nStop : (i+nInterval-1);
++			break;
++		}
++	}
++
++	aLowerValue = OUString::valueOf( nLowerValue );
++	aUpperValue = OUString::valueOf( nUpperValue );
++
++	nLen1 = aLowerValue.getLength();
++	nLen2 = aUpperValue.getLength();
++
++	// appending the leading spaces for the lowervalue and uppervalue
++	for( INT32 i=nLen1; i<nLen; i++ )
++	{
++		aSpaceStr1 += aSpace;
++	}
++	aLowerValue = aSpaceStr1 + aLowerValue;	
++
++	for( INT32 i=nLen2; i<nLen; i++ )
++	{
++		aSpaceStr2 += aSpace;
++	}
++
++	aUpperValue = aSpaceStr2 + aUpperValue;
++
++	aRetStr = aLowerValue + aColon + aUpperValue;
++
++	rPar.Get(0)->PutString(String(aRetStr));
++}
+Index: basic/source/runtime/rtlproto.hxx
+===================================================================
+RCS file: /cvs/script/basic/source/runtime/rtlproto.hxx,v
+retrieving revision 1.17
+retrieving revision 1.17.64.3
+diff -u -p -b -w -B -r1.17 -r1.17.64.3
+--- basic/source/runtime/rtlproto.hxx	27 Jun 2007 14:26:27 -0000	1.17
++++ basic/source/runtime/rtlproto.hxx	7 Jan 2008 06:47:16 -0000	1.17.64.3
+@@ -189,6 +189,7 @@ extern RTLFUNC(Log);
+ extern RTLFUNC(LTrim);
+ extern RTLFUNC(Mid);
+ extern RTLFUNC(Oct);
++extern RTLFUNC(Replace);
+ extern RTLFUNC(Right);
+ extern RTLFUNC(RTrim);
+ extern RTLFUNC(RTL);
+@@ -347,6 +348,8 @@ extern RTLFUNC(CDateFromIso);
+ extern RTLFUNC(CompatibilityMode);
+ extern RTLFUNC(CDec);
+ 
++extern RTLFUNC(Partition); // Fong
+ 
+ extern double Now_Impl();
+ extern void Wait_Impl( bool bDurationBased, SbxArray& rPar );
++bool IsBaseIndexOne();
+Index: basic/source/runtime/runtime.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/runtime/runtime.cxx,v
+retrieving revision 1.36
+retrieving revision 1.36.40.1
+diff -u -p -b -w -B -r1.36 -r1.36.40.1
+--- basic/source/runtime/runtime.cxx	30 Aug 2007 10:01:29 -0000	1.36
++++ basic/source/runtime/runtime.cxx	20 Dec 2007 21:23:02 -0000	1.36.40.1
+@@ -212,6 +212,7 @@ SbiRuntime::pStep2 SbiRuntime::aStep2[] 
+ 	&SbiRuntime::StepDCREATE_REDIMP, // Objekt-Array redimensionieren (+StringID+StringID)
+ 	&SbiRuntime::StepFIND_CM,    // Search inside a class module (CM) to enable global search in time
+ 	&SbiRuntime::StepPUBLIC_P,    // Search inside a class module (CM) to enable global search in time
++	&SbiRuntime::StepFIND_STATIC,    // Search inside a class module (CM) to enable global search in time
+ };
+ 
+ 
+@@ -506,7 +507,7 @@ SbxArray* SbiInstance::GetLocals( SbMeth
+ 
+ SbiRuntime::SbiRuntime( SbModule* pm, SbMethod* pe, UINT32 nStart )
+ 		 : rBasic( *(StarBASIC*)pm->pParent ), pInst( pINST ), 
+-		   pMod( pm ), pMeth( pe ), pImg( pMod->pImage ), m_nLastTime(0)
++		   pMod( pm ), pMeth( pe ), pRealMeth(0), pImg( pMod->pImage ), m_nLastTime(0)
+ {
+ 	nFlags	  = pe ? pe->GetDebugFlags() : 0;
+ 	pIosys	  = pInst->pIosys;
+@@ -542,6 +543,13 @@ SbiRuntime::SbiRuntime( SbModule* pm, Sb
+ 	pRefSaveList = NULL;
+ 	pItemStoreList = NULL;
+ 	bVBAEnabled = isVBAEnabled();
++	if ( pMeth )
++	{
++		SbxVariable* p = pMod->Find( pMeth->GetName(), SbxCLASS_METHOD  );
++		SbMethod* pMethod= p ? PTR_CAST(SbMethod,p) : NULL;
++		if ( pMethod )
++			pRealMeth = pMethod;
++	}
+ }
+ 
+ SbiRuntime::~SbiRuntime()
+Index: basic/source/runtime/stdobj.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/runtime/stdobj.cxx,v
+retrieving revision 1.25
+retrieving revision 1.25.54.3
+diff -u -p -b -w -B -r1.25 -r1.25.54.3
+--- basic/source/runtime/stdobj.cxx	3 Aug 2007 09:56:10 -0000	1.25
++++ basic/source/runtime/stdobj.cxx	7 Jan 2008 06:47:16 -0000	1.25.54.3
+@@ -423,6 +423,12 @@ static Methods aMethods[] = {
+ { "Oct",            SbxSTRING,    1 | _FUNCTION, RTLNAME(Oct),0             },
+   { "number",       SbxLONG, 0,NULL,0 },
+ 
++{ "Partition",      SbxSTRING,    4 | _FUNCTION, RTLNAME(Partition),0       },
++  { "number",   	SbxLONG, 	0,NULL,0 },
++  { "start",     	SbxLONG, 	0,NULL,0 },
++  { "stop",  	    SbxLONG, 	0,NULL,0 },
++  { "interval",     SbxLONG, 	0,NULL,0 },
++  
+ { "Pi",				SbxDOUBLE,		  _CPROP,    RTLNAME(PI),0		      	},
+ { "Put",            SbxNULL,   3 | _FUNCTION, RTLNAME(Put),0                },
+   { "filenumber",   SbxINTEGER, 0,NULL,0 },
+@@ -443,6 +449,13 @@ static Methods aMethods[] = {
+   { "Red",       	SbxINTEGER, 0,NULL,0 },
+   { "Green",       	SbxINTEGER, 0,NULL,0 },
+   { "Blue",       	SbxINTEGER, 0,NULL,0 },
++{ "Replace",        SbxSTRING,    6 | _FUNCTION, RTLNAME(Replace),0         },
++  { "Expression",   SbxSTRING, 0,NULL,0 },
++  { "Find",     	SbxSTRING, 0,NULL,0 },
++  { "Replace",      SbxSTRING, 0,NULL,0 },
++  { "Start",        SbxINTEGER, 	_OPT, NULL,0 },
++  { "Count",        SbxINTEGER,		_OPT, NULL,0 },
++  { "Compare",      SbxINTEGER,		_OPT, NULL,0 },
+ { "Right",          SbxSTRING,    2 | _FUNCTION, RTLNAME(Right),0           },
+   { "String",       SbxSTRING, 0,NULL,0 },
+   { "Count",        SbxLONG, 0,NULL,0 },
+@@ -496,9 +509,10 @@ static Methods aMethods[] = {
+   { "String1",      SbxSTRING, 0,NULL,0 },
+   { "String2",      SbxSTRING, 0,NULL,0 },
+   { "Compare",      SbxINTEGER,       _OPT, NULL,0 },
+-{ "StrConv",        SbxSTRING,   2 | _FUNCTION, RTLNAME(StrConv),0          },
++{ "StrConv",        SbxOBJECT,   3 | _FUNCTION, RTLNAME(StrConv),0          },
+   { "String",       SbxSTRING, 0,NULL,0 },
+   { "Conversion",   SbxSTRING, 0,NULL,0 },
++  { "LCID",			SbxINTEGER, _OPT,NULL,0 },
+ { "String",         SbxSTRING,    2 | _FUNCTION, RTLNAME(String),0          },
+   { "Count",        SbxLONG, 0,NULL,0 },
+   { "Filler",       SbxVARIANT, 0,NULL,0 },
+Index: basic/source/runtime/step0.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/runtime/step0.cxx,v
+retrieving revision 1.29
+retrieving revision 1.29.40.1
+diff -u -p -b -w -B -r1.29 -r1.29.40.1
+--- basic/source/runtime/step0.cxx	30 Aug 2007 10:01:41 -0000	1.29
++++ basic/source/runtime/step0.cxx	20 Dec 2007 21:21:52 -0000	1.29.40.1
+@@ -323,8 +323,10 @@ void SbiRuntime::StepIS()
+ 	SbxVariableRef refVar2 = PopVar();
+ 	BOOL bRes = BOOL(
+ 		refVar1->GetType() == SbxOBJECT
+-	 && refVar2->GetType() == SbxOBJECT
+-	 && refVar1->GetObject() == refVar2->GetObject() );
++	 && refVar2->GetType() == SbxOBJECT );
++	if ( bVBAEnabled  && !bRes )
++		Error( SbERR_INVALID_USAGE_OBJECT );
++	bRes = ( bRes && refVar1->GetObject() == refVar2->GetObject() );
+ 	SbxVariable* pRes = new SbxVariable;
+ 	pRes->PutBool( bRes );
+ 	PushVar( pRes );
+Index: basic/source/runtime/step2.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/runtime/step2.cxx,v
+retrieving revision 1.32
+retrieving revision 1.32.40.1
+diff -u -p -b -w -B -r1.32 -r1.32.40.1
+--- basic/source/runtime/step2.cxx	30 Aug 2007 10:09:56 -0000	1.32
++++ basic/source/runtime/step2.cxx	20 Dec 2007 21:23:02 -0000	1.32.40.1
+@@ -117,7 +117,7 @@ SbxVariable* VBAFind( const String& rNam
+ // 0x8000 - Argv ist belegt
+ 
+ SbxVariable* SbiRuntime::FindElement
+-	( SbxObject* pObj, UINT32 nOp1, UINT32 nOp2, SbError nNotFound, BOOL bLocal )
++	( SbxObject* pObj, UINT32 nOp1, UINT32 nOp2, SbError nNotFound, BOOL bLocal, BOOL bStatic )
+ {
+ 	bool bIsVBAInterOp = SbiRuntime::isVBAEnabled(); 
+ 	if( bIsVBAInterOp )
+@@ -154,9 +154,17 @@ SbxVariable* SbiRuntime::FindElement
+ 			nOp1 = nOp1 | 0x8000; // indicate params are present
+ 			aName = String::CreateFromAscii("Evaluate");
+ 		}
+-
+ 		if( bLocal )
++		{
++			if ( bStatic )
++			{	
++				if ( pRealMeth )
++					pElem = pRealMeth->GetStatics()->Find( aName, SbxCLASS_DONTCARE );
++			}
++
++			if ( !pElem )
+ 			pElem = refLocals->Find( aName, SbxCLASS_DONTCARE );
++		}
+ 		if( !pElem )
+ 		{
+ 			// Die RTL brauchen wir nicht mehr zu durchsuchen!
+@@ -256,6 +264,10 @@ SbxVariable* SbiRuntime::FindElement
+ 				}
+ 				else
+ 				{
++					if ( bStatic )
++						pElem = StepSTATIC_Impl( aName, t );
++					if ( !pElem )
++					{
+ 					// Sonst Variable neu anlegen
+ 					pElem = new SbxVariable( t );
+ 					if( t != SbxVARIANT )
+@@ -265,6 +277,7 @@ SbxVariable* SbiRuntime::FindElement
+ 				}
+ 			}
+ 		}
++		}
+ 		// #39108 Args koennen schon geloescht sein!
+ 		if( !bFatalError )
+ 			SetupArgs( pElem, nOp1 );
+@@ -646,29 +659,39 @@ void SbiRuntime::StepRTL( UINT32 nOp1, U
+ 	PushVar( FindElement( rBasic.pRtl, nOp1, nOp2, SbERR_PROC_UNDEFINED, FALSE ) );
+ }
+ 
++void
++SbiRuntime::StepFIND_Impl( SbxObject* pObj, UINT32 nOp1, UINT32 nOp2, SbError nNotFound, BOOL bLocal, BOOL bStatic )
++{
++	if( !refLocals )
++		refLocals = new SbxArray;
++	PushVar( FindElement( pObj, nOp1, nOp2, nNotFound, bLocal, bStatic ) );
++}
+ // Laden einer lokalen/globalen Variablen (+StringID+Typ)
+ 
+ void SbiRuntime::StepFIND( UINT32 nOp1, UINT32 nOp2 )
+ {
+-	if( !refLocals )
+-		refLocals = new SbxArray;
+-	PushVar( FindElement( pMod, nOp1, nOp2, SbERR_PROC_UNDEFINED, TRUE ) );
++	StepFIND_Impl( pMod, nOp1, nOp2, SbERR_PROC_UNDEFINED, TRUE );
+ }
+ 
+ // Search inside a class module (CM) to enable global search in time
+ void SbiRuntime::StepFIND_CM( UINT32 nOp1, UINT32 nOp2 )
+ {
+-	if( !refLocals )
+-		refLocals = new SbxArray;
+ 
+ 	SbClassModuleObject* pClassModuleObject = PTR_CAST(SbClassModuleObject,pMod);
+ 	if( pClassModuleObject )
+ 		pMod->SetFlag( SBX_GBLSEARCH );
+-	PushVar( FindElement( pMod, nOp1, nOp2, SbERR_PROC_UNDEFINED, TRUE ) );
++
++	StepFIND_Impl( pMod, nOp1, nOp2, SbERR_PROC_UNDEFINED, TRUE );
++
+ 	if( pClassModuleObject )
+ 		pMod->ResetFlag( SBX_GBLSEARCH );
+ }
+ 
++void SbiRuntime::StepFIND_STATIC( UINT32 nOp1, UINT32 nOp2 )
++{
++	StepFIND_Impl( pMod, nOp1, nOp2, SbERR_PROC_UNDEFINED, TRUE, TRUE );
++}
++
+ // Laden eines Objekt-Elements (+StringID+Typ)
+ // Das Objekt liegt auf TOS
+ 
+@@ -1218,19 +1241,27 @@ void SbiRuntime::StepFIND_G( UINT32 nOp1
+ }
+ 
+ 
++SbxVariable* SbiRuntime::StepSTATIC_Impl( String& aName, SbxDataType& t )
++{
++    SbxVariable* p = NULL;
++    if ( pRealMeth )
++    {
++        SbxArray* pStatics = pRealMeth->GetStatics();
++        if( pStatics && ( pStatics->Find( aName, SbxCLASS_DONTCARE ) == NULL ) )
++        {
++            p = new SbxVariable( t );
++            if( t != SbxVARIANT )
++                p->SetFlag( SBX_FIXED );
++            p->SetName( aName );
++            pStatics->Put( p, pStatics->Count() );
++        }
++    }
++    return p;
++}
+ // Einrichten einer statischen Variablen (+StringID+Typ)
+-
+ void SbiRuntime::StepSTATIC( UINT32 nOp1, UINT32 nOp2 )
+ {
+-    (void)nOp1;
+-    (void)nOp2;
+-	/* AB #40689, wird nicht mehr verwendet
+ 	String aName( pImg->GetString( nOp1 ) );
+ 	SbxDataType t = (SbxDataType) nOp2;
+-	SbxVariable* p = new SbxVariable( t );
+-	p->SetName( aName );
+-	pInst -> GetStatics()->Put( p, pInst->GetStatics()->Count() );
+-	*/
++    StepSTATIC_Impl( aName, t );
+ }
+-
+-
+cvs diff: Diffing basic/source/sample
+cvs diff: Diffing basic/source/sbx
+Index: basic/source/sbx/sbxconv.hxx
+===================================================================
+RCS file: /cvs/script/basic/source/sbx/sbxconv.hxx,v
+retrieving revision 1.4
+retrieving revision 1.4.132.1
+diff -u -p -b -w -B -r1.4 -r1.4.132.1
+--- basic/source/sbx/sbxconv.hxx	12 Oct 2006 14:32:25 -0000	1.4
++++ basic/source/sbx/sbxconv.hxx	7 Jan 2008 06:45:49 -0000	1.4.132.1
+@@ -38,6 +38,8 @@
+ 
+ #include "sbxdec.hxx"
+ 
++class SbxArray;
++
+ // SBXSCAN.CXX
+ extern void ImpCvtNum( double nNum, short nPrec, String& rRes, BOOL bCoreString=FALSE );
+ extern SbxError ImpScan
+@@ -150,4 +152,8 @@ void    ImpPutULong( SbxValues*, UINT32 
+ enum SbxBOOL ImpGetBool( const SbxValues* );
+ void    ImpPutBool( SbxValues*, INT16 );
+ 
++// ByteArry <--> String
++SbxArray* StringToByteArray(const String& rStr);
++String ByteArrayToString(SbxArray* pArr);
++
+ #endif
+Index: basic/source/sbx/sbxstr.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/sbx/sbxstr.cxx,v
+retrieving revision 1.7
+retrieving revision 1.7.20.1
+diff -u -p -b -w -B -r1.7 -r1.7.20.1
+--- basic/source/sbx/sbxstr.cxx	13 Nov 2007 15:24:10 -0000	1.7
++++ basic/source/sbx/sbxstr.cxx	7 Jan 2008 06:45:49 -0000	1.7.20.1
+@@ -43,6 +43,9 @@
+ #include "sbxconv.hxx"
+ #include "sbxres.hxx"
+ 
++#ifndef _RTL_USTRBUF_HXX_
++#include <rtl/ustrbuf.hxx>
++#endif
+ // AB 29.10.99 Unicode
+ #ifndef _USE_NO_NAMESPACE
+ using namespace rtl;
+@@ -102,6 +105,13 @@ XubString ImpGetString( const SbxValues*
+ 			SbxValue* pVal = PTR_CAST(SbxValue,p->pObj);
+ 			if( pVal )
+ 				aRes = pVal->GetString();
++			else if( p->pObj && (p->pObj->GetType() & (SbxARRAY | SbxBYTE )) )
++			{
++				// convert byte array to string
++				SbxArray* pArr = PTR_CAST(SbxArray, p->pObj);
++				if( pArr )
++					aRes = ByteArrayToString( pArr );
++			}
+ 			else
+ 				SbxBase::SetError( SbxERR_NO_OBJECT );
+ 			break;
+@@ -257,3 +267,59 @@ void ImpPutString( SbxValues* p, const X
+ 	delete pTmp;
+ }
+ 
++// Convert string to an array of bytes, preserving unicode (2bytes per character)
++SbxArray* StringToByteArray(const String& rStr)
++{
++	USHORT nArraySize = rStr.Len() * 2;
++	const sal_Unicode* pSrc = rStr.GetBuffer();
++	SbxDimArray* pArray = new SbxDimArray(SbxBYTE);
++	if( nArraySize )
++		pArray->AddDim( 0, nArraySize-1 );	
++	else
++	{
++		pArray->unoAddDim( 0, -1 );
++	}
++
++	for( USHORT	i=0; i< nArraySize; i++)
++	{
++		SbxVariable* pNew = new SbxVariable( SbxBYTE );
++		BYTE aByte = i%2 ? ((*pSrc) >> 8) & 0xff : (*pSrc) & 0xff;
++		pNew->PutByte( aByte );
++		pNew->SetFlag( SBX_WRITE );
++		pArray->Put( pNew, i );	
++		if( i%2 )
++			pSrc++;
++	}
++	return pArray;
++}	
++
++// Convert an array of bytes to string (2bytes per character)
++String ByteArrayToString(SbxArray* pArr)
++{
++	USHORT nCount = pArr->Count();
++	OUStringBuffer aStrBuf;
++	sal_Unicode aChar = 0;
++	for(int i=0; i< nCount; i++)
++	{
++		sal_Unicode aTempChar = pArr->Get(i)->GetByte();
++		if( i%2 )
++		{
++			aChar = (aTempChar << 8 ) | aChar;
++			aStrBuf.append(aChar);
++			aChar = 0;
++		}
++		else
++		{
++			aChar = aTempChar;	
++		}
++	}
++	
++	if( nCount%2 )
++	{
++		aStrBuf.append(aChar);
++	}
++
++	String aStr(aStrBuf.makeStringAndClear());
++	
++	return aStr;
++}
+Index: basic/source/sbx/sbxvalue.cxx
+===================================================================
+RCS file: /cvs/script/basic/source/sbx/sbxvalue.cxx,v
+retrieving revision 1.10
+retrieving revision 1.10.40.1
+diff -u -p -b -w -B -r1.10 -r1.10.40.1
+--- basic/source/sbx/sbxvalue.cxx	30 Aug 2007 10:02:21 -0000	1.10
++++ basic/source/sbx/sbxvalue.cxx	7 Jan 2008 06:45:49 -0000	1.10.40.1
+@@ -333,6 +333,30 @@ SbxValue& SbxValue::operator=( const Sbx
+ 			SetError( SbxERR_PROP_READONLY );
+ 		else
+ 		{
++			// string -> byte array
++			if( (aData.eType == SbxOBJECT)
++				&& aData.pObj && ( aData.pObj->GetType() & (SbxARRAY | SbxBYTE) )		   	
++				&& (r.aData.eType == SbxSTRING) )
++			{
++				String aStr = r.GetString();
++				SbxArray* pArr = StringToByteArray(aStr);
++				PutObject(pArr);
++				return *this;
++			}
++			// byte array -> string
++			if( (r.aData.eType == SbxOBJECT)
++				&& r.aData.pObj && ( r.aData.pObj->GetType() & (SbxARRAY | SbxBYTE) )
++				&& (aData.eType == SbxSTRING) )
++			{
++				SbxBase* pObj = r.GetObject();
++				SbxArray* pArr = PTR_CAST(SbxArray, pObj);
++				if( pArr )
++				{
++					String aStr = ByteArrayToString( pArr );
++					PutString(aStr);
++					return *this;
++				}
++			}
+ 			// Den Inhalt der Variablen auslesen
+ 			SbxValues aNew;
+ 			if( IsFixed() )
+cvs diff: Diffing basic/source/uno
+cvs diff: Diffing basic/util
+cvs diff: Diffing basic/util/defs
+cvs diff: Diffing basic/win
+cvs diff: Diffing basic/win/res
+cvs diff: Diffing basic/workben
