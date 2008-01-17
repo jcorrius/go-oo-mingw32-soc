@@ -1,0 +1,228 @@
+diff -u -r -x '*~' -x testsuite -x libjava -x cc-nptl -x build-dir -x '*.orig' -x obj-i586-suse-linux -x texis -x Makeconfig -x version.h -x '*.o' -x '*.1' -x 'Makefile*' -x 'config*' -x libtool -x '*.info' -x '*.tex' pristine-glibc-2.6.1/elf/dl-load.c glibc-2.6.1/elf/dl-load.c
+--- glibc-2.6.1/elf/dl-load.c	2008-01-08 20:45:11.000000000 +0000
++++ glibc-2.6.1/elf/dl-load.c	2008-01-11 15:23:16.000000000 +0000
+@@ -1200,9 +1200,13 @@
+ 
+ 	/* Remember which part of the address space this object uses.  */
+ 	l->l_map_start = (ElfW(Addr)) __mmap ((void *) mappref, maplength,
+-					      c->prot,
++					      c->prot | PROT_WRITE,
+ 					      MAP_COPY|MAP_FILE,
+ 					      fd, c->mapoff);
++        if (GLRO(dl_debug_mask) & DL_DEBUG_RELOC)
++            _dl_debug_printf ("map '%s' at 0x%x prot 0x%x\n", l->l_name,
++                              l->l_map_start, c->prot);
++
+ 	if (__builtin_expect ((void *) l->l_map_start == MAP_FAILED, 0))
+ 	  {
+ 	  map_error:
+diff -u -r -x '*~' -x testsuite -x libjava -x cc-nptl -x build-dir -x '*.orig' -x obj-i586-suse-linux -x texis -x Makeconfig -x version.h -x '*.o' -x '*.1' -x 'Makefile*' -x 'config*' -x libtool -x '*.info' -x '*.tex' glibc-2.6.1/elf/dl-reloc.c glibc-2.6.1/elf/dl-reloc.c
+--- glibc-2.6.1/elf/dl-reloc.c	2007-05-18 09:37:39.000000000 +0100
++++ glibc-2.6.1/elf/dl-reloc.c	2008-01-17 19:34:38.000000000 +0000
+@@ -27,6 +27,9 @@
+ #include <sys/types.h>
+ #include "dynamic-link.h"
+ 
++#define SUSEIDX(sym)	(DT_NUM + DT_THISPROCNUM + DT_VERSIONTAGNUM + \
++			 DT_EXTRANUM + DT_VALNUM + DT_ADDRNUM + DT_SUSE_TAGIDX (sym))
++
+ /* Statistics function.  */
+ #ifdef SHARED
+ # define bump_num_cache_relocations() ++GL(dl_num_cache_relocations)
+@@ -133,6 +136,73 @@
+ 	  '\0', map->l_tls_blocksize - map->l_tls_initimage_size);
+ }
+ 
++/* process vtable / block copy relocations */
++static void
++_dl_perform_vtrelocs (struct link_map *map, struct r_scope_elem *scope[])
++{
++  ElfW(VtReloc) *rel;
++  int debug_output = GLRO(dl_debug_mask) & DL_DEBUG_RELOC;
++  int i;
++
++  if (debug_output)
++    _dl_debug_printf ("new vtcopy-reloc processing on '%s' offset 0x%x map 0x%x\n",
++                      map->l_name[0] ? map->l_name : rtld_progname,
++                      map->l_addr, map->l_map_start);
++
++  /* any vtrelocs ? */
++  if (map->l_info[SUSEIDX(DT_SUSE_VTRELOC)] == NULL)
++    {
++      if (debug_output)
++        _dl_debug_printf ("no vtreloc section in '%s'\n", map->l_name);
++      return;
++    }
++  rel = (ElfW(VtReloc) *)(D_PTR (map, l_info[SUSEIDX(DT_SUSE_VTRELOC)]));
++  if (debug_output)
++    _dl_debug_printf ("vtreloc section found in '%s' at 0x%x (0x%x) mapped at 0x%x\n",
++                      map->l_name, rel, ((ElfW(Addr))rel - map->l_addr),
++                      map->l_addr);
++  while (rel->r_src != 0)
++    {
++      ElfW(Addr) **src, **dest;
++      ElfW(Word) mask;
++
++      src = (void *)rel->r_src;
++      dest = (void *)rel->r_dest;
++      if (debug_output)
++        _dl_debug_printf ("copy from 0x%x to 0x%x mask 0x%x\n", src, dest, rel->r_mask);
++      if (dest < map->l_map_start || dest >= map->l_map_end)
++	{ /* weak symbol defined in another dso - thus already fixed up, and readonly */
++	  if (debug_output)
++	    _dl_debug_printf ("  skip, defined elsewhere\n");
++	  return;
++	}
++
++      for (mask = rel->r_mask; mask; mask >>= 1)
++        {
++/*          _dl_debug_printf ("%s copy [&0x%x -> &0x%x]\n",
++            mask & 1 ? "do" : "no", src, dest); */
++          if (mask & 1)
++            {
++              if (debug_output || !(*src == *dest || *dest == (ElfW(Addr) *)0xdeadbeef))
++                {
++                    _dl_debug_printf ("do copy 0x%x to 0x%x %s [&0x%x -> &0x%x]\n",
++                                      *src, *dest,
++                                      *src == *dest || *dest == (ElfW(Addr) *)0xdeadbeef ? "match" : "Bug",
++                                      src, dest);
++                }
++              *dest = *src;
++            }
++          else if (debug_output)
++            _dl_debug_printf ("no copy 0x%x to 0x%x %s\n",
++                              *src, *dest, *src == *dest && (int)*src > 0x100 ? "Bug" : "skip");
++          dest++; src++;
++        }
++
++      if (debug_output)
++        _dl_debug_printf ("move to next vtrel entry\n");
++      rel++;
++    }
++}
+ 
+ void
+ _dl_relocate_object (struct link_map *l, struct r_scope_elem *scope[],
+@@ -174,11 +244,15 @@
+   /* DT_TEXTREL is now in level 2 and might phase out at some time.
+      But we rewrite the DT_FLAGS entry to a DT_TEXTREL entry to make
+      testing easier and therefore it will be available at all time.  */
+-  if (__builtin_expect (l->l_info[DT_TEXTREL] != NULL, 0))
++  if (1) //__builtin_expect (l->l_info[DT_TEXTREL] != NULL, 0))
+     {
+       /* Bletch.  We must make read-only segments writable
+ 	 long enough to relocate them.  */
+       const ElfW(Phdr) *ph;
++
++      if (__builtin_expect (GLRO(dl_debug_mask) & DL_DEBUG_RELOC, 0))
++          _dl_debug_printf ("un-protecting foo\n");
++
+       for (ph = l->l_phdr; ph < &l->l_phdr[l->l_phnum]; ++ph)
+ 	if (ph->p_type == PT_LOAD && (ph->p_flags & PF_W) == 0)
+ 	  {
+@@ -293,9 +367,12 @@
+ #endif
+   }
+ 
++  _dl_perform_vtrelocs (l, scope);
++
+   /* Mark the object so we know this work has been done.  */
+   l->l_relocated = 1;
+ 
++#if 0
+   /* Undo the segment protection changes.  */
+   while (__builtin_expect (textrels != NULL, 0))
+     {
+@@ -307,6 +384,7 @@
+ 
+       textrels = textrels->next;
+     }
++#endif
+ 
+   /* In case we can protect the data now that the relocations are
+      done, do it.  */
+diff -u -r -x '*~' -x testsuite -x libjava -x cc-nptl -x build-dir -x '*.orig' -x obj-i586-suse-linux -x texis -x Makeconfig -x version.h -x '*.o' -x '*.1' -x 'Makefile*' -x 'config*' -x libtool -x '*.info' -x '*.tex' glibc-2.6.1/elf/dynamic-link.h glibc-2.6.1/elf/dynamic-link.h
+--- glibc-2.6.1/elf/dynamic-link.h	2006-07-10 22:52:18.000000000 +0100
++++ glibc-2.6.1/elf/dynamic-link.h	2008-01-10 18:08:21.000000000 +0000
+@@ -65,6 +65,10 @@
+ #ifndef VERSYMIDX
+ # define VERSYMIDX(sym)	(DT_NUM + DT_THISPROCNUM + DT_VERSIONTAGIDX (sym))
+ #endif
++#ifndef SUSEIDX
++# define SUSEIDX(sym)	(DT_NUM + DT_THISPROCNUM + DT_VERSIONTAGNUM + \
++        DT_EXTRANUM + DT_VALNUM + DT_ADDRNUM + DT_SUSE_TAGIDX (sym))
++#endif
+ 
+ 
+ /* Read the dynamic section at DYN and fill in INFO with indices DT_*.  */
+@@ -88,6 +92,9 @@
+ 
+   while (dyn->d_tag != DT_NULL)
+     {
++      if (dyn->d_tag >= DT_SUSE_LO &&
++        dyn->d_tag < DT_SUSE_LO + DT_SUSENUM)
++          info[SUSEIDX(dyn->d_tag)] = dyn;
+       if (dyn->d_tag < DT_NUM)
+ 	info[dyn->d_tag] = dyn;
+       else if (dyn->d_tag >= DT_LOPROC &&
+@@ -143,6 +150,7 @@
+ # endif
+       ADJUST_DYN_INFO (DT_JMPREL);
+       ADJUST_DYN_INFO (VERSYMIDX (DT_VERSYM));
++      ADJUST_DYN_INFO (SUSEIDX(DT_SUSE_VTRELOC));
+       ADJUST_DYN_INFO (DT_ADDRTAGIDX (DT_GNU_HASH) + DT_NUM + DT_THISPROCNUM
+ 		       + DT_VERSIONTAGNUM + DT_EXTRANUM + DT_VALNUM);
+ # undef ADJUST_DYN_INFO
+diff -u -r -x '*~' -x testsuite -x libjava -x cc-nptl -x build-dir -x '*.orig' -x obj-i586-suse-linux -x texis -x Makeconfig -x version.h -x '*.o' -x '*.1' -x 'Makefile*' -x 'config*' -x libtool -x '*.info' -x '*.tex' glibc-2.6.1/elf/elf.h glibc-2.6.1/elf/elf.h
+--- glibc-2.6.1/elf/elf.h	2007-05-18 09:37:39.000000000 +0100
++++ glibc-2.6.1/elf/elf.h	2008-01-09 16:43:02.000000000 +0000
+@@ -518,6 +518,22 @@
+   Elf64_Sxword	r_addend;		/* Addend */
+ } Elf64_Rela;
+ 
++/* VTable relocation entry */
++
++typedef struct
++{
++  Elf32_Addr r_src;  /* source address */
++  Elf32_Addr r_dest; /* destination address */
++  Elf32_Word r_mask; /* copy bit-mask */
++} Elf32_VtReloc;
++
++typedef struct
++{
++  Elf64_Addr r_src;  /* source address */
++  Elf64_Addr r_dest; /* destination address */
++  Elf64_Word r_mask; /* copy bit-mask */
++} Elf64_VtReloc;
++
+ /* How to extract and insert information held in the r_info field.  */
+ 
+ #define ELF32_R_SYM(val)		((val) >> 8)
+@@ -734,6 +750,14 @@
+ #define DT_VERSIONTAGIDX(tag)	(DT_VERNEEDNUM - (tag))	/* Reverse order! */
+ #define DT_VERSIONTAGNUM 16
+ 
++/* SUSE specific pieces - at a random OS specific address, after
++   previous 2 (direct/hashvals) development sections  */
++#define DT_SUSE_LO (0x6cbdd030 + 2)
++#define DT_SUSE_VTRELOC   DT_SUSE_LO
++#define DT_SUSE_HI 0x6cbdd040
++#define DT_SUSE_TAGIDX(tag) (tag - DT_SUSE_LO)
++#define DT_SUSENUM 1
++
+ /* Sun added these machine-independent extensions in the "processor-specific"
+    range.  Be compatible.  */
+ #define DT_AUXILIARY    0x7ffffffd      /* Shared object to load before self */
+diff -u -r -x '*~' -x testsuite -x libjava -x cc-nptl -x build-dir -x '*.orig' -x obj-i586-suse-linux -x texis -x Makeconfig -x version.h -x '*.o' -x '*.1' -x 'Makefile*' -x 'config*' -x libtool -x '*.info' -x '*.tex' glibc-2.6.1/include/link.h glibc-2.6.1/include/link.h
+--- glibc-2.6.1/include/link.h	2007-08-03 14:57:06.000000000 +0100
++++ glibc-2.6.1/include/link.h	2008-01-09 16:43:02.000000000 +0000
+@@ -121,7 +121,7 @@
+        are indexed by DT_ADDRTAGIDX(tagvalue), see <elf.h>.  */
+ 
+     ElfW(Dyn) *l_info[DT_NUM + DT_THISPROCNUM + DT_VERSIONTAGNUM
+-		      + DT_EXTRANUM + DT_VALNUM + DT_ADDRNUM];
++		      + DT_EXTRANUM + DT_VALNUM + DT_ADDRNUM + DT_SUSENUM];
+     const ElfW(Phdr) *l_phdr;	/* Pointer to program header table in core.  */
+     ElfW(Addr) l_entry;		/* Entry point location.  */
+     ElfW(Half) l_phnum;		/* Number of program header entries.  */
