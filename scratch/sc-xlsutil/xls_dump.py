@@ -166,6 +166,12 @@ recData = {
     0x00FB: ["SXFORMAT", "PivotTable Format Record"],
     0x00FC: ["SST", "Shared String Table"],
     0x00FD: ["LABELSST", "Cell Value"],
+    0x003D: ["WINDOW1", "Window Information"],
+    0x0022: ["DATEMODE", "Base Date for Displaying Date Values"],
+    0x023E: ["WINDOW2", "Sheet Window Information"],
+    0x01AF: ["PROT4REV", "Shared Workbook Protection Flag"],
+    0x01BC: ["PROT4REVPASS", "Shared Workbook Protection Password"],
+    0x0031: ["FONT", "Font and Character Formatting"],
     0x00FF: ["EXTSST", "Extended Shared String Table"] }
 
 def output (msg):
@@ -193,8 +199,8 @@ class XLStream(object):
             b1, b2 = ord(self.chars[self.pos]), ord(self.chars[self.pos+1])
             word = b1 + b2*256
             if word == 0x0809:
-                self.version = 'Biff8'
-                return 
+                self.version = 'BIFF5/BIFF8'
+                return
             self.pos += 2
 
     def readRaw (self, size=1):
