@@ -1,6 +1,6 @@
 
 import sys
-import ole
+import ole, globals
 
 recData = {
     0x000A: ["EOF", "End of File"],
@@ -179,14 +179,15 @@ def output (msg):
 
 class XLStream(object):
 
-    def __init__ (self, file):
-        self.chars = file.read()
+    def __init__ (self, chars):
+        self.chars = chars
         self.size = len(self.chars)
         self.pos = 0
         self.version = None
 
         self.header = None
         self.MSAT = None
+        self.SAT = None
 
     def __printSep (self, c='-', w=68, prefix=''):
         print(prefix + c*w)
@@ -206,6 +207,25 @@ class XLStream(object):
 
     def printMSAT (self):
         self.MSAT.output()
+#       secPosList = self.MSAT.getSATSectorPosList()
+#       secSize = self.MSAT.sectorSize
+#       for sec in secPosList:
+#           id, pos = sec[0], sec[1]
+#           print("")
+#           print("-"*68)
+#           print("Sector ID: %d  (pos = %d)"%(id, pos))
+#           print("-"*68)
+#           globals.dumpBytes(self.chars[pos:pos+secSize])
+
+    def printSAT (self):
+        sat = self.MSAT.getSAT()
+        sat.output()
+
+    def printSSAT (self):
+        obj = self.header.getSSAT()
+        if obj == None:
+            return
+        obj.output()
 
     def dumpHeader (self):
         oleobj = ole.Header(self.chars)

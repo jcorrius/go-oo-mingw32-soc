@@ -11,14 +11,16 @@ class XLDumper(object):
 
     def dump (self):
         file = open(self.filepath, 'r')
-        strm = stream.XLStream(file)
+        strm = stream.XLStream(file.read())
+        file.close()
         strm.printStreamInfo()
         strm.printHeader()
         strm.printMSAT()
+        strm.printSAT()
+        strm.printSSAT()
         success = True
         while success: 
             success = self.__read(strm)
-        file.close()
 
     def __read (self, strm):
         # read bytes from BOF to EOF.
