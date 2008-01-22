@@ -1,3 +1,11 @@
+NOTE:
+
+NOT TO BE USED ANY MORE. Now we use prebuilt dictionaries, zipped up
+now and then on a SLED machine with all dictionaries installed. See
+ChangeLog and references to writingaids* in ../download.in,
+../bin/unpack and ../patches/src680/win32-prebuilt-writingaids-zip.diff.
+
+
 #!/bin/sh
 
 # Very hacky script to unpack contributed dictionary packs into the
