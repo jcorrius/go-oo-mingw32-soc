@@ -227,6 +227,13 @@ class XLStream(object):
             return
         obj.output()
 
+    def printDirectory (self):
+        obj = self.header.getDirectory()
+        if obj == None:
+            return
+        obj.parseDirEntries()
+        obj.output()
+
     def dumpHeader (self):
         oleobj = ole.Header(self.chars)
         self.pos = oleobj.dumpBytes()

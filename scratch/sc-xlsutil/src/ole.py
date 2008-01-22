@@ -1,6 +1,6 @@
 
 import sys
-import stream
+import stream, globals
 
 # ----------------------------------------------------------------------------
 # Reference: The Microsoft Compound Document File Format by Daniel Rentz
@@ -242,7 +242,7 @@ class Header(object):
         ssatID = self.getFirstSectorID(SectorType.SSAT)
         if ssatID < 0:
             return None
-        chain = self.MSAT.getSAT().getSectorIDChain(ssatID)
+        chain = self.getSAT().getSectorIDChain(ssatID)
         if len(chain) == 0:
             return None
         obj = SSAT(2**self.secSize, self.bytes)
@@ -250,6 +250,24 @@ class Header(object):
             obj.addSector(secID)
         obj.buildArray()
         return obj
+
+
+    def getDirectory (self):
+        dirID = self.getFirstSectorID(SectorType.Directory)
+        if dirID < 0:
+            return None
+        chain = self.getSAT().getSectorIDChain(dirID)
+        if len(chain) == 0:
+            return None
+        obj = Directory(2**self.secSize, self.bytes)
+        for secID in chain:
+            obj.addSector(secID)
+        return obj
+
+
+    def dummy ():
+        pass
+
 
 
 
@@ -308,8 +326,8 @@ class SAT(object):
         self.array = []
 
 
-    def addSector (self, pos):
-        self.sectorIDs.append(pos)
+    def addSector (self, id):
+        self.sectorIDs.append(id)
 
 
     def buildArray (self):
@@ -368,6 +386,138 @@ sectors are contained in the SAT as a sector ID chain.
             output("%3d : %3d\n"%(i, item))
 
 
+class Directory(object):
+
+    class Type:
+        Empty = 0
+        UserStorage = 1
+        UserStream = 2
+        LockBytes = 3
+        Property = 4
+        RootStorage = 5
+
+    class NodeColor:
+        Red = 0
+        Black = 1
+        Unknown = 99
+        
+    class Entry:
+        def __init__ (self):
+            self.Name = ''
+            self.CharBufferSize = 0
+            self.Type = Directory.Type.Empty
+            self.NodeColor = Directory.NodeColor.Unknown
+            self.DirIDLeft = -1
+            self.DirIDRight = -1
+            self.DirIDRoot = -1
+            self.UniqueID = None
+
+    def __init__ (self, sectorSize, bytes):
+        self.sectorSize = sectorSize
+        self.bytes = bytes
+        self.sectorIDs = []
+        self.entries = []
 
 
+    def addSector (self, id):
+        self.sectorIDs.append(id)
+
+    def output (self, dumpRawBytes=False):
+        print('')
+        print("="*68)
+        print("Directory")
+        print("-"*68)
+        print("sector(s) used:")
+        for secID in self.sectorIDs:
+            print("  sector %d"%secID)
+
+        if dumpRawBytes:
+            print("")
+            for secID in self.sectorIDs:
+                print("-"*68)
+                print("  Raw Hex Dump (sector %d)"%secID)
+                print("-"*68)
+                pos = globals.getSectorPos(secID, self.sectorSize)
+                globals.dumpBytes(self.bytes[pos:pos+self.sectorSize], 128)
+
+        for entry in self.entries:
+            print("-"*68)
+            if len(entry.Name) > 0:
+                print("name: %s   (name buffer size: %d bytes)"%(entry.Name, entry.CharBufferSize))
+            else:
+                print("name: [empty]   (name buffer size: %d bytes)"%entry.CharBufferSize)
+
+            output("type: ")
+            if entry.Type == Directory.Type.Empty:
+                print("empty")
+            elif entry.Type == Directory.Type.LockBytes:
+                print("lock bytes")
+            elif entry.Type == Directory.Type.Property:
+                print("property")
+            elif entry.Type == Directory.Type.RootStorage:
+                print("root storage")
+            elif entry.Type == Directory.Type.UserStorage:
+                print("user storage")
+            elif entry.Type == Directory.Type.UserStream:
+                print("user stream")
+            else:
+                print("[unknown type]")
+
+            output("node color: ")
+            if entry.NodeColor == Directory.NodeColor.Red:
+                print("red")
+            elif entry.NodeColor == Directory.NodeColor.Black:
+                print("black")
+            elif entry.NodeColor == Directory.NodeColor.Unknown:
+                print("[unknown color]")
+
+            print("linked dir entries: left: %d; right: %d; root: %d"%
+                  (entry.DirIDLeft, entry.DirIDRight, entry.DirIDRoot))
+
+            if entry.UniqueID != None:
+                output("unique ID: ")
+                for byte in entry.UniqueID:
+                    output("%2.2X "%ord(byte))
+                print("")
+
+
+
+    def parseDirEntries (self):
+        # combine all sectors first.
+        bytes = []
+        for secID in self.sectorIDs:
+            pos = globals.getSectorPos(secID, self.sectorSize)
+            bytes.extend(self.bytes[pos:pos+self.sectorSize])
+
+        self.entries = []
+
+        # each directory entry is exactly 128 bytes.
+        numEntries = int(len(bytes)/128)
+        if numEntries == 0:
+            return
+        for i in xrange(0, numEntries):
+            pos = i*128
+            self.entries.append(self.parseDirEntry(bytes[pos:pos+128]))
+
+
+    def parseDirEntry (self, bytes):
+        entry = Directory.Entry()
+        name = globals.getUTF8FromUTF16(bytes[0:64])
+        entry.Name = name
+        entry.CharBufferSize = getSignedInt(bytes[64:66])
+        entry.Type = getSignedInt(bytes[66:67])
+        entry.NodeColor = getSignedInt(bytes[67:68])
+
+        entry.DirIDLeft  = getSignedInt(bytes[68:72])
+        entry.DirIDRight = getSignedInt(bytes[72:76])
+        entry.DirIDRoot  = getSignedInt(bytes[76:80])
+
+        entry.UniqueID = bytes[80:96]
+
+        return entry
+
+
+
+    def dummy ():
+        pass
 

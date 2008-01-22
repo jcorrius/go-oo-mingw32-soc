@@ -18,6 +18,7 @@ class XLDumper(object):
         strm.printMSAT()
         strm.printSAT()
         strm.printSSAT()
+        strm.printDirectory()
         success = True
         while success: 
             success = self.__read(strm)
