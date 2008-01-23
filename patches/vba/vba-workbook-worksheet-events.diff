@@ -357,3 +357,134 @@ diff -rup /data4/sles/ooo-build-m180/ooo-build/build/ood680-m1/sc/source/ui/view
  	{
  		SfxAbstractDialogFactory* pFact = SfxAbstractDialogFactory::Create();
  
+--- backup/sc/source/ui/unoobj/viewuno.cxx	2007-11-26 14:43:13.000000000 +0000
++++ sc/source/ui/unoobj/viewuno.cxx	2008-01-23 17:29:08.000000000 +0000
+@@ -85,9 +85,79 @@
+ #ifndef SC_ACCESSIBILITYHINTS_HXX
+ #include "AccessibilityHints.hxx"
+ #endif
+-
++#include "scextopt.hxx"
++#include <comphelper/processfactory.hxx>
+ using namespace com::sun::star;
++String docMacroExists( ScDocShell* pShell, 
++const String& sMod, const String& sMacro );
++bool executeWorkBookMacro( ScDocShell* pShell, const String& sMacroName, uno::Sequence< uno::Any >& aArgs, uno::Any& aRet );
++
++uno::Any createWorkSheet( ScDocShell* pShell, SCTAB nTab )
++{
++	uno::Any aRet;
++	try
++	{
++		uno::Reference< lang::XMultiComponentFactory > xSMgr( ::comphelper::getProcessServiceFactory(), uno::UNO_QUERY_THROW );
++		uno::Reference< beans::XPropertySet > xProps( xSMgr, uno::UNO_QUERY_THROW );
++		uno::Reference<uno::XComponentContext > xCtx( xProps->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "DefaultContext" ))), uno::UNO_QUERY_THROW );
++		// Eventually we will be able to pull the Workbook/Worksheet objects
++		// directly from basic and register them as listeners
++
++		// create Workbook
++		uno::Sequence< uno::Any > aArgs(2);
++		aArgs[0] = uno::Any( uno::Reference< uno::XInterface >() );
++		aArgs[1] = uno::Any( pShell->GetModel() );
++		uno::Reference< uno::XInterface > xWorkbook( xSMgr->createInstanceWithArgumentsAndContext(  rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("org.openoffice.excel.Workbook") ), aArgs, xCtx ), uno::UNO_QUERY );
++
++		// create WorkSheet
++		String sSheetName;
++		pShell->GetDocument()->GetName( nTab, sSheetName );
++		aArgs = uno::Sequence< uno::Any >(3);
++		aArgs[ 0 ] <<= xWorkbook;
++		aArgs[ 1 ] <<= pShell->GetModel();
++		aArgs[ 2 ] = uno::makeAny( rtl::OUString( sSheetName ) );
++		aRet <<= xSMgr->createInstanceWithArgumentsAndContext(  rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("org.openoffice.excel.Worksheet") ), aArgs, xCtx );
++	}
++	catch( uno::Exception& e )
++	{
++	}
++	return aRet;
++}
+ 
++uno::Any createRange( const uno::Any& aRange )
++{
++	uno::Any aRet;
++	try
++	{
++		uno::Reference< sheet::XSheetCellRangeContainer > xRanges( 	aRange, uno::UNO_QUERY );
++		uno::Reference< table::XCellRange > xRange( aRange, uno::UNO_QUERY );
++		uno::Reference< lang::XMultiComponentFactory > xSMgr( ::comphelper::getProcessServiceFactory(), uno::UNO_QUERY_THROW );
++		uno::Reference< beans::XPropertySet > xProps( xSMgr, uno::UNO_QUERY_THROW );
++		if (  xRanges.is() || xRange.is() )
++		{
++			uno::Reference<uno::XComponentContext > xCtx( xProps->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "DefaultContext" ))), uno::UNO_QUERY_THROW );
++			uno::Sequence< uno::Any > aArgs(2);
++			aArgs[0] = uno::Any( uno::Reference< uno::XInterface >() ); // dummy parent
++			if ( xRanges.is() )
++			{
++				aArgs[1] <<= xRanges;
++			}
++			else if ( xRange.is() )
++			{
++				aArgs[1] <<= xRange;
++			}
++			else
++			{
++				throw uno::RuntimeException(); // 
++			}
++			aRet <<= xSMgr->createInstanceWithArgumentsAndContext( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("org.openoffice.excel.Range") ), aArgs, xCtx  );	
++		}
++	}
++	catch( uno::Exception& e ) 
++	{
++	}
++	return aRet;
++}
+ //------------------------------------------------------------------------
+ 
+ //!	Clipping-Markierungen
+@@ -1691,9 +1761,46 @@ void SAL_CALL ScTabViewObj::removeSelect
+ 		}
+ 	}
+ }
+-
++bool fireSelectionChangeScript( ScDocShell* pShell, const String& sMacro, uno::Sequence< uno::Any >& aArgs ) 
++{
++	if ( sMacro.Len() == 0 )
++		return false;
++	uno::Any aRet;
++    return executeWorkBookMacro( pShell, sMacro, aArgs, aRet );
++}
+ void ScTabViewObj::SelectionChanged()
+ {
++	ScTabViewShell* pViewSh = GetViewShell();
++	if ( pViewSh )
++	{
++		ScViewData* pViewData = pViewSh->GetViewData();
++		if ( pViewData )
++		{
++			ScExtDocOptions* pExtOptions = pViewData->GetDocument()->GetExtDocOptions();
++			String sSheetModuleName;
++			pViewData->GetDocument()->GetName( pViewData->GetTabNo(), sSheetModuleName);
++			// Use code name if that exists
++			if ( pExtOptions )
++				sSheetModuleName = pExtOptions->GetCodeName( pViewData->GetTabNo() );
++			
++			String sSheetSelectionScript( RTL_CONSTASCII_USTRINGPARAM("Worksheet_SelectionChange") );
++			String sWorkBookSheetSelectionScript( RTL_CONSTASCII_USTRINGPARAM("Workbook_SheetSelectionChange") );
++			String sMacro = docMacroExists( pViewData->GetDocShell(), sSheetModuleName, sSheetSelectionScript );
++			uno::Any aRet;
++			uno::Sequence< uno::Any > aArgs(1);
++			uno::Any aRange = createRange( getSelection() );
++			aArgs[0] = aRange;
++			// Worksheet_SelectionChanged
++			fireSelectionChangeScript( pViewData->GetDocShell(), sMacro, aArgs );
++			aArgs = uno::Sequence< uno::Any >(2);
++			aArgs[0] = createWorkSheet( pViewData->GetDocShell(), pViewData->GetTabNo() );
++			aArgs[1] = aRange;
++			sMacro = docMacroExists( pViewData->GetDocShell(), String(), sWorkBookSheetSelectionScript );
++			// Workbook_SheetSelectionChanged
++			fireSelectionChangeScript( pViewData->GetDocShell(), sMacro, aArgs );
++		}
++	}
++
+ 	lang::EventObject aEvent;
+ 	aEvent.Source.set(static_cast<cppu::OWeakObject*>(this));
+ 	for ( USHORT n=0; n<aSelectionListeners.Count(); n++ )
