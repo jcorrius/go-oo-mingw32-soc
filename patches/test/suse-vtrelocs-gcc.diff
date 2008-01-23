@@ -1,0 +1,820 @@
+diff -u -r -x '*~' -x '*.rej' -x testsuite -x libjava -x cc-nptl -x build-dir -x '*.orig' -x obj-i586-suse-linux -x texis -x Makeconfig -x version.h -x '*.o' -x '*.1' -x 'Makefile*' -x 'config*' -x libtool -x '*.info' -x '*.tex' pristine-gcc-4.2.1-simple/gcc/collect2.c gcc-4.2.1-simple/gcc/collect2.c
+--- pristine-gcc-4.2.1-simple/gcc/collect2.c	2006-12-11 12:18:13.000000000 +0000
++++ gcc-4.2.1-simple/gcc/collect2.c	2008-01-21 19:50:44.000000000 +0000
+@@ -175,7 +175,7 @@
+ static int aixrtl_flag;			/* true if -brtl */
+ #endif
+ 
+-int debug;				/* true if -debug */
++int debug = 1;				/* true if -debug */
+ 
+ static int shared_obj;			/* true if -shared */
+ 
+diff -u -r -x '*~' -x '*.rej' -x testsuite -x libjava -x cc-nptl -x build-dir -x '*.orig' -x obj-i586-suse-linux -x texis -x Makeconfig -x version.h -x '*.o' -x '*.1' -x 'Makefile*' -x 'config*' -x libtool -x '*.info' -x '*.tex' pristine-gcc-4.2.1-simple/gcc/cp/class.c gcc-4.2.1-simple/gcc/cp/class.c
+--- pristine-gcc-4.2.1-simple/gcc/cp/class.c	2007-07-05 10:02:39.000000000 +0100
++++ gcc-4.2.1-simple/gcc/cp/class.c	2008-01-23 15:48:56.000000000 +0000
+@@ -181,8 +181,7 @@
+ static tree end_of_class (tree, int);
+ static bool layout_empty_base (tree, tree, splay_tree);
+ static void accumulate_vtbl_inits (tree, tree, tree, tree, tree);
+-static tree dfs_accumulate_vtbl_inits (tree, tree, tree, tree,
+-					       tree);
++static tree dfs_accumulate_vtbl_inits (tree, tree, tree, tree, tree);
+ static void build_rtti_vtbl_entries (tree, vtbl_init_data *);
+ static void build_vcall_and_vbase_vtbl_entries (tree, vtbl_init_data *);
+ static void clone_constructors_and_destructors (tree);
+@@ -6355,6 +6354,49 @@
+   return decl;
+ }
+ 
++/* Returns the VAR_DECL for the vtable copy relocation entries associated
++   with BINFO. */
++
++tree get_vtreloc_decl (tree t, tree inits)
++{
++  tree name, d;
++
++  name = mangle_vtreloc_for_type (t);
++  d = IDENTIFIER_GLOBAL_VALUE (name);
++
++  if (!d)
++    {
++      int nslots = list_length (inits);
++      tree atype = build_cplus_array_type (vtbl_slot_copy_type_node,
++					   build_index_type (size_int (nslots - 1)));
++      layout_type (atype);
++      TYPE_ALIGN (atype) = BITS_PER_UNIT * 4;
++
++      d = build_lang_decl (VAR_DECL, name, atype);
++      DECL_ALIGN(d) = 1;
++      DECL_USER_ALIGN(d) = 1;
++      DECL_SECTION_NAME(d) = mangle_vtreloc_section_for_type (t);
++      SET_DECL_ASSEMBLER_NAME (d, name);
++      /* Remember the type it is for.  */
++      TREE_TYPE (name) = t;
++      DECL_ARTIFICIAL (d) = 1;
++      DECL_IGNORED_P (d) = 1;
++      TREE_READONLY (d) = 1;
++      TREE_STATIC (d) = 1;
++      TREE_PUBLIC (d) = 0;
++      DECL_COMDAT (d) = 1;
++      /* Mark the variable as undefined -- but remember that we can
++	 define it later if we need to do so.  */
++      DECL_EXTERNAL (d) = 0;
++      DECL_NOT_REALLY_EXTERN (d) = 1;
++      set_linkage_according_to_type (t, d);
++      pushdecl_top_level_and_finish (d, NULL_TREE);
++
++      vtable_copy_slots = tree_cons (t, inits, vtable_copy_slots);
++    }
++
++  return d;
++}
+ 
+ /* Returns the binfo for the primary base of BINFO.  If the resulting
+    BINFO is a virtual base, and it is inherited elsewhere in the
+@@ -6438,7 +6480,7 @@
+   if (indented)
+     fprintf (stream, "\n");
+ 
+-  if (!(flags & TDF_SLIM))
++  if (1) /* !(flags & TDF_SLIM)) */
+     {
+       int indented = 0;
+ 
+@@ -6637,12 +6679,69 @@
+   dump_thunk (stderr, 0, fn);
+ }
+ 
++/* List of vtable copy slot data, keyed by type */
++/*
++ * toplevel: purpose - type
++ *           value   - [slot relocs]
++ * slot relocs: purpose - original binfo
++ *              value   - init structures: [src, dest, bitmap]
++ */
++tree vtable_copy_slots;
++
++
++static tree
++build_addr_offset (tree decl, int offset)
++{
++  tree index, addr;
++
++  index = build_int_cst (NULL_TREE, offset);
++  addr = build1 (ADDR_EXPR, ptr_type_node, build_array_ref (decl, index));
++
++  return addr;
++}
++
++/* Ideal .rodata output format: */
++/* dest_symbol, |dest_offset|src_bitmap_blocks, src_symbol, <bitmap> */
++/* Pragmatic 1st cut output format: */
++/* dest_addr, src_addr, <bitmap> */
++static tree
++build_vtable_copy_slot (tree dest_binfo, int dest_offset,
++                        tree src_binfo,  int src_offset,
++                        int bitmap, tree chain)
++{
++    tree src_decl, dest_decl;
++    tree elem = NULL_TREE, init;
++
++    /* Either a padding entry or nothing to do */
++    if (!dest_binfo || !bitmap)
++      return chain;
++
++    /*    fprintf (stderr, "Copy %s + %d => ",
++             type_as_string (src_binfo, TFF_PLAIN_IDENTIFIER),
++             src_offset);
++	     fprintf (stderr, " %s + %d mask 0x%x\n",
++             type_as_string (dest_binfo, TFF_PLAIN_IDENTIFIER),
++             dest_offset, bitmap); */
++
++    elem = tree_cons (NULL_TREE, build_int_cst (NULL_TREE, bitmap), elem);
++
++    dest_decl = get_vtbl_decl_for_binfo (dest_binfo);
++    elem = tree_cons (NULL_TREE, build_addr_offset (dest_decl, dest_offset), elem);
++
++    src_decl = get_vtable_decl (BINFO_TYPE (src_binfo), 1);
++    elem = tree_cons (NULL_TREE, build_addr_offset (src_decl, src_offset), elem);
++
++    init = build_constructor_from_list (vtbl_slot_copy_type_node, elem);
++
++    return tree_cons (NULL_TREE, init, chain);
++}
++
+ /* Virtual function table initialization.  */
+ 
+ /* Create all the necessary vtables for T and its base classes.  */
+ 
+-static void
+-finish_vtbls (tree t)
++static tree
++vtbl_get_inits (tree t)
+ {
+   tree list;
+   tree vbase;
+@@ -6662,8 +6761,407 @@
+       accumulate_vtbl_inits (vbase, vbase, TYPE_BINFO (t), t, list);
+     }
+ 
++  return TREE_VALUE (list);
++}
++
++/* List of un-altered vtable inits */
++/*
++ * list of: purpose - type
++ *          value   - [constructor_list]
++ */
++tree vtable_copy_types;
++
++/* FIXME: rather a lame search */
++static VEC(constructor_elt,gc) *
++get_vtinit_for_binfo (tree binfo, int list_only)
++{
++  tree k;
++  for (k = vtable_copy_types; k; k = TREE_CHAIN(k))
++    {
++      if (TREE_PURPOSE(k) == binfo)
++	return CONSTRUCTOR_ELTS (TREE_VALUE(k));
++    }
++  if (list_only)
++    return NULL;
++
++  k = get_vtbl_decl_for_binfo (binfo);
++  if (k) 
++    return CONSTRUCTOR_ELTS (DECL_INITIAL (k));
++  else
++    return NULL;
++}
++
++static void
++set_vtinit_for_binfo (tree binfo, VEC(constructor_elt,gc) *vtinits)
++{
++  vtable_copy_types = tree_cons (binfo, build_constructor (NULL_TREE, vtinits),
++				 vtable_copy_types);
++}
++
++static void
++debug_vtable (tree t, tree binfo)
++{
++  tree value;
++  unsigned HOST_WIDE_INT ix;
++  VEC(constructor_elt,gc) *vtable;
++
++  if (!getenv ("MOREDEBUG"))
++    return;
++
++  fprintf (stderr, "VTable for '%s'\n",
++	   type_as_string (t, TFF_PLAIN_IDENTIFIER));
++
++  vtable = get_vtinit_for_binfo (binfo, 0);
++  if (!vtable) 
++    {
++      fprintf (stderr, "<none>\n");
++      return;
++    }
++
++  FOR_EACH_CONSTRUCTOR_VALUE (vtable, ix, value) 
++    {
++      fprintf (stderr, "\t%-4ld  %s\n", (long)ix,
++	       expr_as_string (value, TFF_PLAIN_IDENTIFIER));
++    }
++}
++
++/* to track a segment of vtable initializer */
++typedef struct vt_fragment_d GTY(()) {
++  tree binfo;
++
++  /* ptr into the vec decl */
++  unsigned int offset;
++  unsigned int size;
++  VEC(constructor_elt,gc) *vec;
++} vt_fragment;
++
++typedef struct vt_copy_record_d GTY(()) {
++  vt_fragment *src;
++  vt_fragment *dest;
++  unsigned int bitmap;
++  unsigned int offset;
++} vt_copy_record;
++
++DEF_VEC_O(vt_fragment);
++DEF_VEC_O(vt_copy_record);
++DEF_VEC_ALLOC_O(vt_fragment, heap);
++DEF_VEC_ALLOC_O(vt_copy_record, heap);
++
++static void
++vtdecompose_frags (tree t_binfo, VEC(vt_fragment,heap) **frags)
++{
++  unsigned int seek_fn = 1, i;
++  vt_fragment *frag = NULL;
++  VEC(constructor_elt,gc) *vtable;
++
++  vtable = get_vtinit_for_binfo (t_binfo, 0);
++  if (!vtable)
++    return;
++
++  for (i = 0; i < VEC_length(constructor_elt,vtable); i++)
++    {
++      tree fn = VEC_index (constructor_elt, vtable, i)->value;
++      int is_fn = TREE_CODE (fn) == ADDR_EXPR
++	&& TREE_CODE (TREE_OPERAND (fn, 0)) == FUNCTION_DECL;
++
++      if (is_fn && seek_fn)
++	{
++	  frag = VEC_safe_push (vt_fragment, heap, *frags, NULL);
++	  frag->binfo = t_binfo;
++	  frag->offset = i;
++	  frag->size = VEC_length (constructor_elt, vtable) - i;
++	  frag->vec = vtable;
++	  seek_fn = 0;
++	}
++      if (!is_fn && !seek_fn)
++	{
++	  frag->size = i - frag->offset;
++	  seek_fn = 1;
++	}
++    }
++}
++
++static void
++debug_fragments (VEC(vt_fragment,heap) *frags)
++{
++  unsigned int i;
++  for (i = 0; i < VEC_length(vt_fragment,frags); i++)
++    {
++      vt_fragment *frag = VEC_index (vt_fragment, frags, i);
++      fprintf (stderr, "fragment %d: '%s' offset %d, size %d\n",
++	       i, type_as_string (BINFO_TYPE (frag->binfo), TFF_PLAIN_IDENTIFIER),
++	       frag->offset, frag->size);
++    }
++}
++
++static void
++push_vtfrag (VEC(vt_copy_record,heap) **vt_copies,
++	     vt_fragment *src, vt_fragment *dest,
++	     unsigned int bitmap, unsigned int offset)
++{
++  vt_copy_record *rec;
++
++  /* FIXME: we need to be able to compare these */
++  /* that is not easy, sadly - so punt for now (?), and hope we don't get too
++   * many duplicate / overlapping hits */
++  rec = VEC_safe_push (vt_copy_record, heap, *vt_copies, NULL);
++  rec->src = src;
++  rec->dest = dest;
++  rec->bitmap = bitmap;
++  rec->offset = offset;
++  if (getenv ("MOREDEBUG"))
++    fprintf (stderr, "Push frag 0x%x %d\n", bitmap, offset);
++}
++
++static void
++debug_vt_copies (VEC(vt_copy_record,heap) *vt_copies)
++{
++  unsigned int i;
++
++  if (!getenv ("MOREDEBUG"))
++    return;
++
++  fprintf (stderr, "vtcopies: %d records\n", VEC_length(vt_copy_record, vt_copies));
++  for (i = 0; i < VEC_length(vt_copy_record, vt_copies); i++)
++    {
++      vt_copy_record *cpy = VEC_index (vt_copy_record, vt_copies, i);
++      fprintf (stderr, "\tcopy from %s+%d to %s+%d mask 0x%x\n",
++	       type_as_string (BINFO_TYPE (cpy->src->binfo), TFF_PLAIN_IDENTIFIER),
++	       cpy->src->offset + cpy->offset,
++	       type_as_string (BINFO_TYPE (cpy->dest->binfo), TFF_PLAIN_IDENTIFIER),
++	       cpy->dest->offset + cpy->offset,
++	       cpy->bitmap);
++    }
++}
++
++/*
++ * Compare all src & dest fragments for the best match ...
++ */
++static tree
++compare_build_vtrelocs (tree t, VEC(constructor_elt,gc) *vinits,
++			VEC(vt_fragment,heap) *dest_frags,
++			VEC(vt_fragment,heap) *src_frags)
++{
++  unsigned int i;
++  tree cgraph_clobber = NULL_TREE;
++  VEC(vt_copy_record,heap) *vt_copies;
++  int verbose_debug = getenv ("MOREDEBUG") != NULL;
++
++  vt_copies = VEC_alloc(vt_copy_record, heap, VEC_length(vt_fragment, dest_frags));
++
++  for (i = 0; i < VEC_length(vt_fragment, dest_frags); i++)
++    {
++      unsigned int j;
++      vt_fragment *dest = VEC_index (vt_fragment, dest_frags, i);
++      
++      for (j = 0; j < VEC_length(vt_fragment, src_frags); j++)
++	{
++	  unsigned int cmp;
++	  unsigned int k, bits_set;
++	  unsigned int bitmap;
++	  int elide_leading_zeros = 1;
++	  vt_fragment *src = VEC_index (vt_fragment, src_frags, j);
++
++	  /* new virtual methods arrive only in the 1st dest fragment */
++	  if (i > 0 && dest->size != src->size)
++	    continue;
++
++	  cmp = src->size;
++	  if (cmp > dest->size)
++	    cmp = dest->size;
++
++	  /* FIXME: bin elide_leading_zeros until we have better
++	   * comparison logic ? */
++	  for (bitmap = bits_set = k = 0; k < cmp; k++)
++	    {
++	      tree src_fn = VEC_index (constructor_elt, src->vec, src->offset + k)->value;
++	      tree dest_fn = VEC_index (constructor_elt, dest->vec, dest->offset + k)->value;
++	      src_fn = TREE_OPERAND (src_fn, 0);
++	      dest_fn = TREE_OPERAND (dest_fn, 0);
++
++	      if (src_fn == dest_fn && src_fn != abort_fndecl)
++		{
++		  bitmap |= (1 << bits_set);
++		  elide_leading_zeros = 0;
++		}
++
++	      if (verbose_debug)
++		fprintf (stderr, "compare: %s %s %s (0x%x) [%s]\n",
++			 expr_as_string (src_fn, TFF_PLAIN_IDENTIFIER),
++			 src_fn == dest_fn ? "==" : "!=",
++			 expr_as_string (dest_fn, TFF_PLAIN_IDENTIFIER),
++			 bitmap,
++			 src_fn == abort_fndecl ? "pure-virt" : "non-pure virt");
++	      
++	      if (!elide_leading_zeros)
++		bits_set++;
++
++	      if (bits_set == (sizeof (long) * 8)) /* FIXME: arch size etc. urgh ... */
++		{
++		  push_vtfrag (&vt_copies, src, dest, bitmap, k - bits_set + 1);
++		  bits_set = bitmap = 0;
++		  elide_leading_zeros = 1;
++		}
++	    }
++	  if (bitmap != 0)
++	    push_vtfrag (&vt_copies, src, dest, bitmap, k - bits_set);
++	}
++    }
++
++  if (VEC_length(vt_copy_record, vt_copies) > 0)
++    {
++      VEC(constructor_elt,gc) *vtable;
++      unsigned int i;
++      tree vtreloc_inits = NULL_TREE;
++
++      debug_vt_copies (vt_copies);
++
++      /*
++       * Re-write the intializers to remove references in the vtable...
++       */
++      vtable = VEC_copy(constructor_elt,gc,vinits);
++
++      /* FIXME: copy & backup the original data before we mangle it
++	 for future reference [!] */
++      
++      if (verbose_debug)
++	fprintf (stderr, "re-writing vtable:\n");
++      for (i = 0; i < VEC_length(vt_copy_record, vt_copies); i++)
++	{
++	  unsigned int j, bitmap;
++	  vt_copy_record *vtc = VEC_index(vt_copy_record, vt_copies, i);
++
++	  /* re-write the existing vtable intializer */
++	  bitmap = vtc->bitmap;
++	  if (verbose_debug)
++	    fprintf (stderr, "\tclobber from off %d + %d, bitmap 0x%x\n",
++		     vtc->dest->offset, vtc->offset, bitmap);
++	  for (j = vtc->dest->offset + vtc->offset; bitmap; j++, (bitmap>>=1))
++	    {
++	      if (bitmap & 1)
++		{
++		  constructor_elt *elt = VEC_index (constructor_elt, vtable, j);
++		  if (verbose_debug)
++		    fprintf (stderr, "\tclobber '%s' (0x%x)\n",
++			     expr_as_string (elt->value, TFF_PLAIN_IDENTIFIER),
++			     bitmap);
++
++		  { /* Lengthy Assertion */
++		    constructor_elt *src_elt = VEC_index (constructor_elt, vtc->src->vec,
++							  vtc->src->offset + j - vtc->dest->offset);
++		    gcc_assert (TREE_CODE (elt->value) == INTEGER_CST /* FIXME: strange, but sometimes we overlap */
++				|| TREE_OPERAND (elt->value, 0) == TREE_OPERAND (src_elt->value, 0));
++		  }
++		  elt->value = fold_build1 (NOP_EXPR,
++					    vtable_entry_type,
++					    build_int_cst (build_pointer_type (void_type_node),
++							   0xdeadbeef));
++		}
++	    }
++
++	  /* build vtreloc decls */
++	  vtreloc_inits = build_vtable_copy_slot (vtc->dest->binfo, vtc->dest->offset + vtc->offset,
++						  vtc->src->binfo, vtc->src->offset + vtc->offset,
++						  vtc->bitmap, vtreloc_inits);
++	}
++
++      /* re-build as chain for constructor ... hmm */
++      for (i = 0; i < VEC_length(constructor_elt, vtable); i++)
++	{
++	  constructor_elt *elt = VEC_index (constructor_elt, vtable, i);
++	  cgraph_clobber = tree_cons (elt->index, elt->value, cgraph_clobber);
++	}
++
++      /* Append a reference to the parent vtable
++       * to encourage gcc to emit the VTReloc table */
++      cgraph_clobber = tree_cons (NULL_TREE,
++				  build_nop (vfunc_ptr_type_node,
++					     build_address (get_vtreloc_decl (t, vtreloc_inits))),
++				  cgraph_clobber);
++      cgraph_clobber = nreverse (cgraph_clobber);
++    }
++
++  vec_heap_free (vt_copies);
++  return cgraph_clobber;
++}
++
++static VEC(constructor_elt,gc) *
++build_init_vec (tree inits)
++{
++  tree t;
++  VEC(constructor_elt,gc) *v = NULL;
++
++  if (inits)
++    {
++      v = VEC_alloc (constructor_elt, gc, list_length (inits));
++      for (t = inits; t; t = TREE_CHAIN (t))
++	{
++	  constructor_elt *elt = VEC_quick_push (constructor_elt, v, NULL);
++	  elt->index = TREE_PURPOSE (t);
++	  elt->value = TREE_VALUE (t);
++	}
++    }
++
++  return v;
++}
++
++static void
++finish_vtbls (tree t)
++{
++  tree inits;
++  
++  inits = vtbl_get_inits (t);
++
++  if (inits && getenv ("VT_SHRINK"))
++  {
++    int i;
++    tree base_binfo;
++    VEC(vt_fragment,heap) *dest_frags;
++    VEC(vt_fragment,heap) *src_frags;
++    VEC(constructor_elt,gc) *vinits = NULL;
++
++    vinits = build_init_vec (inits);
++    if (!get_vtinit_for_binfo (TYPE_BINFO (t), 1))
++      set_vtinit_for_binfo (TYPE_BINFO (t), vinits);
++    else
++      fprintf (stderr, "Error: already set!\n");
++
++    debug_vtable (t, TYPE_BINFO (t));
++
++    if (getenv ("MOREDEBUG"))
++      fprintf (stderr, "Inherited from:\n");
++    for (i = 0; BINFO_BASE_ITERATE (TYPE_BINFO (t), i, base_binfo); i++)
++      {
++	tree btype = BINFO_TYPE (base_binfo);
++	debug_vtable (btype, TYPE_BINFO (btype));
++      }
++
++    src_frags = VEC_alloc(vt_fragment,heap,4);
++    dest_frags = VEC_alloc(vt_fragment,heap,4);
++    vtdecompose_frags (TYPE_BINFO (t), &dest_frags);
++    for (i = 0; BINFO_BASE_ITERATE (TYPE_BINFO (t), i, base_binfo); i++)
++      vtdecompose_frags (TYPE_BINFO (BINFO_TYPE (base_binfo)), &src_frags);
++
++    if (getenv ("MOREDEBUG"))
++      {
++	fprintf (stderr, "dest:\n");
++	debug_fragments (dest_frags);
++	fprintf (stderr, "src:\n");
++	debug_fragments (src_frags);
++      }
++
++    if (inits) {
++      tree new_inits = compare_build_vtrelocs (t, vinits, dest_frags, src_frags);
++      if (new_inits)
++	inits = new_inits;
++    }
++
++    vec_heap_free (dest_frags);
++    vec_heap_free (src_frags);
++  }
++
+   if (BINFO_VTABLE (TYPE_BINFO (t)))
+-    initialize_vtable (TYPE_BINFO (t), TREE_VALUE (list));
++    initialize_vtable (TYPE_BINFO (t), inits);
+ }
+ 
+ /* Initialize the vtable for BINFO with the INITS.  */
+diff -u -r -x '*~' -x '*.rej' -x testsuite -x libjava -x cc-nptl -x build-dir -x '*.orig' -x obj-i586-suse-linux -x texis -x Makeconfig -x version.h -x '*.o' -x '*.1' -x 'Makefile*' -x 'config*' -x libtool -x '*.info' -x '*.tex' pristine-gcc-4.2.1-simple/gcc/cp/cp-tree.h gcc-4.2.1-simple/gcc/cp/cp-tree.h
+--- pristine-gcc-4.2.1-simple/gcc/cp/cp-tree.h	2007-07-24 09:14:47.000000000 +0100
++++ gcc-4.2.1-simple/gcc/cp/cp-tree.h	2008-01-22 14:27:55.000000000 +0000
+@@ -498,6 +498,7 @@
+     CPTI_UNKNOWN_TYPE,
+     CPTI_VTBL_TYPE,
+     CPTI_VTBL_PTR_TYPE,
++    CPTI_VTBL_SLOT_COPY_TYPE,
+     CPTI_STD,
+     CPTI_ABI,
+     CPTI_CONST_TYPE_INFO_TYPE,
+@@ -562,6 +563,7 @@
+ #define unknown_type_node		cp_global_trees[CPTI_UNKNOWN_TYPE]
+ #define vtbl_type_node			cp_global_trees[CPTI_VTBL_TYPE]
+ #define vtbl_ptr_type_node		cp_global_trees[CPTI_VTBL_PTR_TYPE]
++#define vtbl_slot_copy_type_node        cp_global_trees[CPTI_VTBL_SLOT_COPY_TYPE]
+ #define std_node			cp_global_trees[CPTI_STD]
+ #define abi_node			cp_global_trees[CPTI_ABI]
+ #define const_type_info_type_node	cp_global_trees[CPTI_CONST_TYPE_INFO_TYPE]
+@@ -3392,6 +3394,14 @@
+    TREE_PURPOSE slot.  */
+ extern GTY(()) tree static_aggregates;
+ 
++/* A list of inherited vtable slots which are copies of other slots
++   The source address is stored in the TREE_VALUE slot and the
++   destination is stored in the TREE_PURPOSE slot. */
++extern GTY(()) tree vtable_copy_slots;
++
++/* A type mapping of types to un-altered type tables */
++extern GTY(()) tree vtable_copy_types;
++
+ /* Functions called along with real static constructors and destructors.  */
+ 
+ extern GTY(()) tree static_ctors;
+@@ -3847,6 +3857,7 @@
+ extern void maybe_note_name_used_in_class	(tree, tree);
+ extern void note_name_declared_in_class		(tree, tree);
+ extern tree get_vtbl_decl_for_binfo		(tree);
++extern tree get_vtreloc_decl			(tree, tree);
+ extern void debug_class				(tree);
+ extern void debug_thunks			(tree);
+ extern tree cp_fold_obj_type_ref		(tree, tree);
+@@ -4533,6 +4544,9 @@
+ extern tree mangle_typeinfo_for_type		(tree);
+ extern tree mangle_typeinfo_string_for_type	(tree);
+ extern tree mangle_vtbl_for_type		(tree);
++extern tree mangle_vtbl_for_type_local          (tree);
++extern tree mangle_vtreloc_for_type		(tree);
++extern tree mangle_vtreloc_section_for_type     (tree);
+ extern tree mangle_vtt_for_type			(tree);
+ extern tree mangle_ctor_vtbl_for_type		(tree, tree);
+ extern tree mangle_thunk			(tree, int, tree, tree);
+diff -u -r -x '*~' -x '*.rej' -x testsuite -x libjava -x cc-nptl -x build-dir -x '*.orig' -x obj-i586-suse-linux -x texis -x Makeconfig -x version.h -x '*.o' -x '*.1' -x 'Makefile*' -x 'config*' -x libtool -x '*.info' -x '*.tex' pristine-gcc-4.2.1-simple/gcc/cp/decl.c gcc-4.2.1-simple/gcc/cp/decl.c
+--- pristine-gcc-4.2.1-simple/gcc/cp/decl.c	2007-07-24 09:14:45.000000000 +0100
++++ gcc-4.2.1-simple/gcc/cp/decl.c	2008-01-21 19:50:44.000000000 +0000
+@@ -124,6 +124,10 @@
+ 	tree vtbl_type_node;
+ 	tree vtbl_ptr_type_node;
+ 
++   Array slot copy type info:
++
++	tree vtbl_slot_copy_type_node;
++
+    Namespaces,
+ 
+ 	tree std_node;
+@@ -3117,6 +3121,13 @@
+     }
+ }
+ 
++static tree
++append_struct_field (const char *name, tree type, tree chain)
++{
++  return chainon (chain, build_decl (FIELD_DECL,
++                                     get_identifier (name), type));
++}
++
+ /* Create the predefined scalar types of C,
+    and some nodes representing standard constants (0, 1, (void *)0).
+    Initialize the global binding level.
+@@ -3243,6 +3254,19 @@
+   layout_type (vtbl_ptr_type_node);
+   record_builtin_type (RID_MAX, NULL, vtbl_ptr_type_node);
+ 
++  {
++    tree elem_fields = NULL;
++
++    vtbl_slot_copy_type_node = make_aggr_type (RECORD_TYPE);
++    elem_fields = append_struct_field ("vt_src_addr", ptr_type_node, elem_fields);
++    elem_fields = append_struct_field ("vt_dest_addr", ptr_type_node, elem_fields);
++    elem_fields = append_struct_field ("vt_copy_bitmap", size_type_node, elem_fields);
++    finish_builtin_struct (vtbl_slot_copy_type_node, "__vt_copy_slot_relocs",
++                           elem_fields, NULL_TREE);
++    layout_type (vtbl_slot_copy_type_node);
++    record_builtin_type (RID_MAX, NULL, vtbl_slot_copy_type_node);
++  }
++
+   push_namespace (get_identifier ("__cxxabiv1"));
+   abi_node = current_namespace;
+   pop_namespace ();
+diff -u -r -x '*~' -x '*.rej' -x testsuite -x libjava -x cc-nptl -x build-dir -x '*.orig' -x obj-i586-suse-linux -x texis -x Makeconfig -x version.h -x '*.o' -x '*.1' -x 'Makefile*' -x 'config*' -x libtool -x '*.info' -x '*.tex' pristine-gcc-4.2.1-simple/gcc/cp/decl2.c gcc-4.2.1-simple/gcc/cp/decl2.c
+--- pristine-gcc-4.2.1-simple/gcc/cp/decl2.c	2007-06-28 14:16:12.000000000 +0100
++++ gcc-4.2.1-simple/gcc/cp/decl2.c	2008-01-23 15:48:29.000000000 +0000
+@@ -2910,6 +2910,38 @@
+     finish_objects (function_key, priority, body);
+ }
+ 
++static void
++generate_vtable_copy_slots (void)
++{
++  tree k;
++
++  if (!getenv ("VT_SHRINK"))
++      return;
++
++  for (k = vtable_copy_slots; k; k = TREE_CHAIN(k))
++    {
++      tree t = TREE_PURPOSE(k);
++      tree inits = TREE_VALUE(k);
++      tree decl, ctor;
++
++      decl = get_vtreloc_decl (t, inits);
++      import_export_decl (decl);
++      if (DECL_NOT_REALLY_EXTERN (decl) && decl_needed_p (decl))
++	{
++	  DECL_EXTERNAL (decl) = 0;
++	  comdat_linkage (decl);
++	  DECL_COMDAT (decl) = 1;
++	  ctor = build_constructor_from_list (TREE_TYPE (decl), inits);
++	  initialize_artificial_var (decl, ctor);
++	  if (getenv ("MOREDEBUG"))
++	    fprintf (stderr, "Generate vtreloc variable '%s' comdat? %d\n",
++		     decl_as_string (decl, TFF_PLAIN_IDENTIFIER),
++		     DECL_COMDAT (decl));
++	}
++    }
++}
++
++
+ /* Generate constructor and destructor functions for the priority
+    indicated by N.  */
+ 
+@@ -3312,6 +3344,9 @@
+ 	}
+     }
+ 
++  /* Generate C++ vtable copy data */
++  generate_vtable_copy_slots ();
++
+   /* We give C linkage to static constructors and destructors.  */
+   push_lang_context (lang_name_c);
+ 
+diff -u -r -x '*~' -x '*.rej' -x testsuite -x libjava -x cc-nptl -x build-dir -x '*.orig' -x obj-i586-suse-linux -x texis -x Makeconfig -x version.h -x '*.o' -x '*.1' -x 'Makefile*' -x 'config*' -x libtool -x '*.info' -x '*.tex' pristine-gcc-4.2.1-simple/gcc/cp/mangle.c gcc-4.2.1-simple/gcc/cp/mangle.c
+--- pristine-gcc-4.2.1-simple/gcc/cp/mangle.c	2006-12-11 12:16:19.000000000 +0000
++++ gcc-4.2.1-simple/gcc/cp/mangle.c	2008-01-23 15:10:38.000000000 +0000
+@@ -2670,6 +2670,99 @@
+   return mangle_special_for_type (type, "TV");
+ }
+ 
++tree
++mangle_vtbl_for_type_local (const tree type)
++{
++  const char *result;
++
++  /* We don't have an actual decl here for the special component, so
++     we can't just process the <encoded-name>.  Instead, fake it.  */
++  start_mangling (type, /*ident_p=*/true);
++
++  /* Start the mangling.  */
++  write_string ("_Z");
++  write_string ("VT");
++
++  /* Add the type.  */
++  write_type (type);
++  write_string ("_local");
++  result = finish_mangling (/*warn=*/false);
++
++  return get_identifier_nocopy (result);
++}
++
++/* FIXME: as should be obvious I have no idea what I'm doing here */
++static int calc_max_depth (const tree binfo)
++{
++  int i, max = 0;
++  tree base;
++
++  for (i = 0; BINFO_BASE_ITERATE (binfo, i, base); ++i) {
++    int depth = calc_max_depth (base);
++    if (depth > max)
++      max = depth;
++  }
++  return max + 1;
++}
++
++static void write_order_complexity_for_type (const tree type)
++{
++  int max_depth = 0;
++  int virts;
++  tree binfo;
++  char buffer[128]; /* hack */
++
++  binfo = TYPE_BINFO (type);
++
++  max_depth = calc_max_depth (binfo);
++
++  /* FIXME: virtual bases ? 
++  {
++    tree vbase;
++    for (vbase = binfo; vbase; vbase = TREE_CHAIN (vbase))
++      virts++; 
++  }
++  */
++  virts = 0;
++
++  sprintf (buffer, "_%.8i_", max_depth + virts);
++  write_string (buffer);
++}
++
++/*
++ * In order to get initialization order right, use a metric of
++ * the maximum 'inheritedness' of a class, ie. a vtable that
++ * inherits from 5 others, should be initialized after those
++ * that inherit from 4 
++ */
++static const char *mangle_vtreloc (const tree type, const char *prefix)
++{
++  const char *name;
++
++  start_mangling (type, /*ident_p=*/true);
++  write_string (prefix);
++  write_order_complexity_for_type (type);
++  write_type (type);
++  name = finish_mangling (/*warn=*/false);
++
++  return name;
++}
++
++/* Create an identifier for the mangled name of the vt relocs for TYPE.  */
++
++tree mangle_vtreloc_for_type (const tree type)
++{
++  return get_identifier_nocopy (mangle_vtreloc (type, "_ZVTR"));
++}
++
++/* Create an identifier for the section name of the vt relocs for TYPE.  */
++
++tree mangle_vtreloc_section_for_type (const tree type)
++{
++  const char *name = mangle_vtreloc (type, ".vtrelocs._ZVTR");
++  return build_string (strlen (name), name);
++}
++
+ /* Returns an identifier for the mangled name of the VTT for TYPE.  */
+ 
+ tree
