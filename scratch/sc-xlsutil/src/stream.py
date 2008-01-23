@@ -1,6 +1,7 @@
 
 import sys
 import ole, globals
+from globals import output
 
 recData = {
     0x000A: ["EOF", "End of File"],
@@ -174,8 +175,6 @@ recData = {
     0x0031: ["FONT", "Font and Character Formatting"],
     0x00FF: ["EXTSST", "Extended Shared String Table"] }
 
-def output (msg):
-    sys.stdout.write(msg)
 
 class XLStream(object):
 
@@ -207,15 +206,6 @@ class XLStream(object):
 
     def printMSAT (self):
         self.MSAT.output()
-#       secPosList = self.MSAT.getSATSectorPosList()
-#       secSize = self.MSAT.sectorSize
-#       for sec in secPosList:
-#           id, pos = sec[0], sec[1]
-#           print("")
-#           print("-"*68)
-#           print("Sector ID: %d  (pos = %d)"%(id, pos))
-#           print("-"*68)
-#           globals.dumpBytes(self.chars[pos:pos+secSize])
 
     def printSAT (self):
         sat = self.MSAT.getSAT()
@@ -227,20 +217,48 @@ class XLStream(object):
             return
         obj.output()
 
-    def printDirectory (self):
+
+    def __getDirectoryObj (self):
         obj = self.header.getDirectory()
         if obj == None:
-            return
+            return None
         obj.parseDirEntries()
+        return obj
+
+    def printDirectory (self):
+        obj = self.__getDirectoryObj()
+        if obj == None:
+            return
         obj.output()
 
-    def dumpHeader (self):
-        oleobj = ole.Header(self.chars)
-        self.pos = oleobj.dumpBytes()
+
+    def getDirectoryNames (self):
+        obj = self.__getDirectoryObj()
+        if obj == None:
+            return
+        return obj.getDirectoryNames()
+
+
+    def getDirectoryStreamByName (self, name):
+        obj = self.__getDirectoryObj()
+        bytes = []
+        if obj != None:
+            bytes = obj.getRawStreamByName(name)
+        strm = XLDirStream(bytes)
+        return strm
+
+
+class XLDirStream(object):
+
+    def __init__ (self, bytes):
+        self.bytes = bytes
+        self.size = len(self.bytes)
+        self.pos = 0
+        return
 
     def seekBOF (self):
         while self.pos < self.size-1:
-            b1, b2 = ord(self.chars[self.pos]), ord(self.chars[self.pos+1])
+            b1, b2 = ord(self.bytes[self.pos]), ord(self.bytes[self.pos+1])
             word = b1 + b2*256
             if word == 0x0809:
                 self.version = 'BIFF5/BIFF8'
@@ -251,7 +269,7 @@ class XLStream(object):
         # assume little endian
         bytes = 0
         for i in xrange(0, size):
-            b = ord(self.chars[self.pos])
+            b = ord(self.bytes[self.pos])
             if i == 0:
                 bytes = b
             else:
@@ -263,9 +281,12 @@ class XLStream(object):
     def readByteArray (self, size=1):
         bytes = []
         for i in xrange(0, size):
-            bytes.append(ord(self.chars[self.pos]))
+            bytes.append(ord(self.bytes[self.pos]))
             self.pos += 1
         return bytes
+
+    def __printSep (self, c='-', w=68, prefix=''):
+        print(prefix + c*w)
 
     def readRecord (self):
         pos = self.pos

@@ -2,7 +2,7 @@
 
 import sys, os.path
 sys.path.append(sys.path[0]+"/src")
-import ole, stream
+import ole, stream, globals
 
 class XLDumper(object):
 
@@ -19,9 +19,25 @@ class XLDumper(object):
 #       strm.printSAT()
 #       strm.printSSAT()
         strm.printDirectory()
-        success = True
-        while success: 
-            success = self.__read(strm)
+        dirnames = strm.getDirectoryNames()
+        for dirname in dirnames:
+            if len(dirname) == 0 or dirname == 'Root Entry':
+                continue
+
+            dirstrm = strm.getDirectoryStreamByName(dirname)
+            if dirname == "Workbook":
+                success = True
+                while success: 
+                    success = self.__read(dirstrm)
+            else:
+                if ord(dirname[0]) <= 5:
+                    dirname = "<%2.2Xh>%s"%(ord(dirname[0]), dirname[1:])
+                print("")
+                print("="*68)
+                print("%s (size: %d bytes)"%(dirname, len(dirstrm.bytes)))
+                print("-"*68)
+                globals.dumpBytes(dirstrm.bytes, 512)
+
 
     def __read (self, strm):
         # read bytes from BOF to EOF.

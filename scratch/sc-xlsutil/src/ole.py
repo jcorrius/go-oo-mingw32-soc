@@ -43,14 +43,18 @@ def getSignedInt (bytes):
 
 class ByteOrder:
     LittleEndian = 0
-    BigEndian = 1
-    Unknown = 2
+    BigEndian    = 1
+    Unknown      = 2
 
 class SectorType:
     MSAT      = 0
     SAT       = 1
     SSAT      = 2
     Directory = 3
+
+class StreamLocation:
+    SAT  = 0
+    SSAT = 1
 
 class Header(object):
 
@@ -104,31 +108,6 @@ class Header(object):
         elif sectorType == SectorType.Directory:
             return self.__secIDFirstDirStrm
         return -2
-
-
-    def dumpBytes (self, initPos=0, quitAtBOF=True):
-        # dump OLE header until it reaches BOF.
-        i, bprev = initPos, 0
-        labelPrinted = False
-        while True:
-            b = ord(self.bytes[i])
-            if quitAtBOF and bprev == 0x09 and b == 0x08:
-                # BOF reached
-                return i-1
-
-            if i%2 != 0:
-                if not labelPrinted:
-                    print("\n\nThe rest of the bytes:")
-                    labelPrinted = True
-                output("%2.2X %2.2X "%(bprev, b))
-
-            if (i+1)%16 == 0:
-                output("\n")
-
-            bprev = b
-            i += 1
-
-        return i
 
 
     def output (self):
@@ -429,7 +408,7 @@ class Directory(object):
             self.TimeCreated = None
             self.TimeModified = None
             self.StreamSectorID = -2
-            self.StreamSectorSize = 0
+            self.StreamSize = 0
 
 
     def __init__ (self, header):
@@ -441,6 +420,38 @@ class Directory(object):
         self.SAT = header.getSAT()
         self.SSAT = header.getSSAT()
         self.header = header
+        self.posRootStorage = None
+
+
+    def __getRawStream (self, entry):
+        chain = []
+        if entry.StreamLocation == StreamLocation.SAT:
+            chain = self.header.getSAT().getSectorIDChain(entry.StreamSectorID)
+        elif entry.StreamLocation == StreamLocation.SSAT:
+            chain = self.header.getSSAT().getSectorIDChain(entry.StreamSectorID)
+
+        offset = 512
+        size = self.header.getSectorSize()
+        bytes = []
+        if entry.StreamLocation == StreamLocation.SSAT:
+            # get root storage position
+            offset = self.posRootStorage
+            size = self.header.getShortSectorSize()
+
+        for id in chain:
+            pos = offset + id*size
+            bytes.extend(self.header.bytes[pos:pos+size])
+
+        return bytes
+
+
+    def getRawStreamByName (self, name):
+        bytes = []
+        for entry in self.entries:
+            if entry.Name == name:
+                bytes = self.__getRawStream(entry)
+                break
+        return bytes
 
 
     def addSector (self, id):
@@ -515,18 +526,18 @@ class Directory(object):
         if entry.StreamSectorID < 0:
             print("[empty stream]")
         else:
-            strmLoc = "SSAT"
-            if entry.Type == Directory.Type.RootStorage or entry.StreamSize >= self.minStreamSize:
-                strmLoc = "SAT"
+            strmLoc = "SAT"
+            if entry.StreamLocation == StreamLocation.SSAT:
+                strmLoc = "SSAT"
             print("(first sector ID: %d; size: %d; location: %s)"%
                   (entry.StreamSectorID, entry.StreamSize, strmLoc))
     
             satObj = None
             secSize = 0
-            if strmLoc == "SAT":
+            if entry.StreamLocation == StreamLocation.SAT:
                 satObj = self.SAT
                 secSize = self.header.getSectorSize()
-            elif strmLoc == "SSAT":
+            elif entry.StreamLocation == StreamLocation.SSAT:
                 satObj = self.SSAT
                 secSize = self.header.getShortSectorSize()
             if satObj != None:
@@ -566,7 +577,19 @@ class Directory(object):
             output("%2.2X "%ord(byte))
         print("")
 
+
+    def getDirectoryNames (self):
+        names = []
+        for entry in self.entries:
+            names.append(entry.Name)
+        return names
+
+
     def parseDirEntries (self):
+        if len(self.entries):
+            # directory entries already built
+            return
+
         # combine all sectors first.
         bytes = []
         for secID in self.sectorIDs:
@@ -603,11 +626,13 @@ class Directory(object):
 
         entry.StreamSectorID = getSignedInt(bytes[116:120])
         entry.StreamSize     = getSignedInt(bytes[120:124])
+        entry.StreamLocation = StreamLocation.SAT
+        if entry.Type != Directory.Type.RootStorage and \
+            entry.StreamSize < self.header.minStreamSize:
+            entry.StreamLocation = StreamLocation.SSAT
+
+        if entry.Type == Directory.Type.RootStorage and entry.StreamSectorID >= 0:
+            self.posRootStorage = 512 + entry.StreamSectorID*self.header.getSectorSize()
 
         return entry
-
-
-
-    def dummy ():
-        pass
 
