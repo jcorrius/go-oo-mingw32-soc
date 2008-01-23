@@ -10,7 +10,7 @@ class XLDumper(object):
         self.filepath = filepath
 
     def dump (self):
-        file = open(self.filepath, 'r')
+        file = open(self.filepath, 'rb')
         strm = stream.XLStream(file.read())
         file.close()
         strm.printStreamInfo()
