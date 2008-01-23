@@ -74,7 +74,7 @@ class Header(object):
         self.revision = 0
         self.version = 0
         self.byteOrder = ByteOrder.Unknown
-        self.minStrmSize = 0
+        self.minStreamSize = 0
 
         self.numSecMSAT = 0
         self.numSecSSAT = 0
@@ -86,6 +86,14 @@ class Header(object):
 
         self.secSize = 512
         self.secSizeShort = 64
+
+
+    def getSectorSize (self):
+        return 2**self.secSize
+
+
+    def getShortSectorSize (self):
+        return 2**self.secSizeShort
 
 
     def getFirstSectorID (self, sectorType):
@@ -165,7 +173,7 @@ class Header(object):
         print("Sector ID of the first sector of the directory stream: %d"%
               self.__secIDFirstDirStrm)
 
-        print("Minimum stream size: %d"%self.minStrmSize)
+        print("Minimum stream size: %d"%self.minStreamSize)
 
         if self.__secIDFirstSSAT == -2:
             print("Sector ID of the first SSAT sector: [none]")
@@ -208,7 +216,7 @@ class Header(object):
         self.numSecSAT = getSignedInt(self.bytes[44:48])
 
         self.__secIDFirstDirStrm = getSignedInt(self.bytes[48:52])
-        self.minStrmSize = getSignedInt(self.bytes[56:60])
+        self.minStreamSize = getSignedInt(self.bytes[56:60])
         self.__secIDFirstSSAT = getSignedInt(self.bytes[60:64])
         self.numSecSSAT = getSignedInt(self.bytes[64:68])
         self.__secIDFirstMSAT = getSignedInt(self.bytes[68:72])
@@ -259,7 +267,7 @@ class Header(object):
         chain = self.getSAT().getSectorIDChain(dirID)
         if len(chain) == 0:
             return None
-        obj = Directory(2**self.secSize, self.bytes)
+        obj = Directory(self)
         for secID in chain:
             obj.addSector(secID)
         return obj
@@ -326,6 +334,10 @@ class SAT(object):
         self.array = []
 
 
+    def getSectorSize (self):
+        return self.sectorSize
+
+
     def addSector (self, id):
         self.sectorIDs.append(id)
 
@@ -352,6 +364,8 @@ class SAT(object):
 
 
     def getSectorIDChain (self, initID):
+        if initID < 0:
+            return []
         chain = [initID]
         nextID = self.array[initID]
         while nextID != -2:
@@ -411,27 +425,39 @@ class Directory(object):
             self.DirIDRight = -1
             self.DirIDRoot = -1
             self.UniqueID = None
+            self.UserFlags = None
+            self.TimeCreated = None
+            self.TimeModified = None
+            self.StreamSectorID = -2
+            self.StreamSectorSize = 0
 
-    def __init__ (self, sectorSize, bytes):
-        self.sectorSize = sectorSize
-        self.bytes = bytes
+
+    def __init__ (self, header):
+        self.sectorSize = header.getSectorSize()
+        self.bytes = header.bytes
+        self.minStreamSize = header.minStreamSize
         self.sectorIDs = []
         self.entries = []
+        self.SAT = header.getSAT()
+        self.SSAT = header.getSSAT()
+        self.header = header
 
 
     def addSector (self, id):
         self.sectorIDs.append(id)
 
-    def output (self, dumpRawBytes=False):
+
+    def output (self, debug=False):
         print('')
         print("="*68)
         print("Directory")
-        print("-"*68)
-        print("sector(s) used:")
-        for secID in self.sectorIDs:
-            print("  sector %d"%secID)
 
-        if dumpRawBytes:
+        if debug:
+            print("-"*68)
+            print("sector(s) used:")
+            for secID in self.sectorIDs:
+                print("  sector %d"%secID)
+
             print("")
             for secID in self.sectorIDs:
                 print("-"*68)
@@ -441,46 +467,104 @@ class Directory(object):
                 globals.dumpBytes(self.bytes[pos:pos+self.sectorSize], 128)
 
         for entry in self.entries:
-            print("-"*68)
-            if len(entry.Name) > 0:
-                print("name: %s   (name buffer size: %d bytes)"%(entry.Name, entry.CharBufferSize))
+            self.__outputEntry(entry, debug)
+
+    def __outputEntry (self, entry, debug):
+        print("-"*68)
+        if len(entry.Name) > 0:
+            name = entry.Name
+            if ord(name[0]) <= 5:
+                name = "<%2.2Xh>%s"%(ord(name[0]), name[1:])
+            print("name: %s   (name buffer size: %d bytes)"%(name, entry.CharBufferSize))
+        else:
+            print("name: [empty]   (name buffer size: %d bytes)"%entry.CharBufferSize)
+
+        output("type: ")
+        if entry.Type == Directory.Type.Empty:
+            print("empty")
+        elif entry.Type == Directory.Type.LockBytes:
+            print("lock bytes")
+        elif entry.Type == Directory.Type.Property:
+            print("property")
+        elif entry.Type == Directory.Type.RootStorage:
+            print("root storage")
+        elif entry.Type == Directory.Type.UserStorage:
+            print("user storage")
+        elif entry.Type == Directory.Type.UserStream:
+            print("user stream")
+        else:
+            print("[unknown type]")
+
+        output("node color: ")
+        if entry.NodeColor == Directory.NodeColor.Red:
+            print("red")
+        elif entry.NodeColor == Directory.NodeColor.Black:
+            print("black")
+        elif entry.NodeColor == Directory.NodeColor.Unknown:
+            print("[unknown color]")
+
+        print("linked dir entries: left: %d; right: %d; root: %d"%
+              (entry.DirIDLeft, entry.DirIDRight, entry.DirIDRoot))
+
+        self.__outputRaw("unique ID",  entry.UniqueID)
+        self.__outputRaw("user flags", entry.UserFlags)
+        self.__outputRaw("time created", entry.TimeCreated)
+        self.__outputRaw("time last modified", entry.TimeModified)
+
+        output("stream info: ")
+        if entry.StreamSectorID < 0:
+            print("[empty stream]")
+        else:
+            strmLoc = "SSAT"
+            if entry.Type == Directory.Type.RootStorage or entry.StreamSize >= self.minStreamSize:
+                strmLoc = "SAT"
+            print("(first sector ID: %d; size: %d; location: %s)"%
+                  (entry.StreamSectorID, entry.StreamSize, strmLoc))
+    
+            satObj = None
+            secSize = 0
+            if strmLoc == "SAT":
+                satObj = self.SAT
+                secSize = self.header.getSectorSize()
+            elif strmLoc == "SSAT":
+                satObj = self.SSAT
+                secSize = self.header.getShortSectorSize()
+            if satObj != None:
+                chain = satObj.getSectorIDChain(entry.StreamSectorID)
+                print("sector count: %d"%len(chain))
+                print("total sector size: %d"%(len(chain)*secSize))
+                self.__outputSectorChain(chain)
+
+
+
+    def __outputSectorChain (self, chain):
+        line = "sector chain: "
+        lineLen = len(line)
+        for id in chain:
+            frag = "%d, "%id
+            fragLen = len(frag)
+            if lineLen + fragLen > 68:
+                print(line)
+                line = frag
+                lineLen = fragLen
             else:
-                print("name: [empty]   (name buffer size: %d bytes)"%entry.CharBufferSize)
-
-            output("type: ")
-            if entry.Type == Directory.Type.Empty:
-                print("empty")
-            elif entry.Type == Directory.Type.LockBytes:
-                print("lock bytes")
-            elif entry.Type == Directory.Type.Property:
-                print("property")
-            elif entry.Type == Directory.Type.RootStorage:
-                print("root storage")
-            elif entry.Type == Directory.Type.UserStorage:
-                print("user storage")
-            elif entry.Type == Directory.Type.UserStream:
-                print("user stream")
-            else:
-                print("[unknown type]")
-
-            output("node color: ")
-            if entry.NodeColor == Directory.NodeColor.Red:
-                print("red")
-            elif entry.NodeColor == Directory.NodeColor.Black:
-                print("black")
-            elif entry.NodeColor == Directory.NodeColor.Unknown:
-                print("[unknown color]")
-
-            print("linked dir entries: left: %d; right: %d; root: %d"%
-                  (entry.DirIDLeft, entry.DirIDRight, entry.DirIDRoot))
-
-            if entry.UniqueID != None:
-                output("unique ID: ")
-                for byte in entry.UniqueID:
-                    output("%2.2X "%ord(byte))
-                print("")
+                line += frag
+                lineLen += fragLen
+        if line[-2:] == ", ":
+            line = line[:-2]
+            lineLen -= 2
+        if lineLen > 0:
+            print(line)
 
 
+    def __outputRaw (self, name, bytes):
+        if bytes == None:
+            return
+
+        output("%s: "%name)
+        for byte in bytes:
+            output("%2.2X "%ord(byte))
+        print("")
 
     def parseDirEntries (self):
         # combine all sectors first.
@@ -512,7 +596,13 @@ class Directory(object):
         entry.DirIDRight = getSignedInt(bytes[72:76])
         entry.DirIDRoot  = getSignedInt(bytes[76:80])
 
-        entry.UniqueID = bytes[80:96]
+        entry.UniqueID     = bytes[80:96]
+        entry.UserFlags    = bytes[96:100]
+        entry.TimeCreated  = bytes[100:108]
+        entry.TimeModified = bytes[108:116]
+
+        entry.StreamSectorID = getSignedInt(bytes[116:120])
+        entry.StreamSize     = getSignedInt(bytes[120:124])
 
         return entry
 

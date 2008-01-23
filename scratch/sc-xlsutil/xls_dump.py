@@ -15,9 +15,9 @@ class XLDumper(object):
         file.close()
         strm.printStreamInfo()
         strm.printHeader()
-        strm.printMSAT()
-        strm.printSAT()
-        strm.printSSAT()
+#       strm.printMSAT()
+#       strm.printSAT()
+#       strm.printSSAT()
         strm.printDirectory()
         success = True
         while success: 
