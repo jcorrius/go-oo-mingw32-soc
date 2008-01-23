@@ -322,6 +322,10 @@ class SAT(object):
 
 
     def buildArray (self):
+        if len(self.array) > 0:
+            # array already built.
+            return
+
         numItems = int(self.sectorSize/4)
         self.array = []
         for secID in self.sectorIDs:
@@ -337,9 +341,38 @@ class SAT(object):
         print("="*68)
         print("Sector Allocation Table (SAT)")
         print("-"*68)
+        sectorTotal = len(self.array)
+        sectorP  = 0       # >= 0
+        sectorM1 = 0       # -1
+        sectorM2 = 0       # -2
+        sectorM3 = 0       # -3
+        sectorM4 = 0       # -4
+        sectorMElse = 0    # < -4
+        sectorLiveTotal = 0
         for i in xrange(0, len(self.array)):
             item = self.array[i]
-            output("%3d : %3d\n"%(i, item))
+            if item >= 0:
+                sectorP += 1
+            elif item == -1:
+                sectorM1 += 1
+            elif item == -2:
+                sectorM2 += 1
+            elif item == -3:
+                sectorM3 += 1
+            elif item == -4:
+                sectorM4 += 1
+            elif item < -4:
+                sectorMElse += 1
+            else:
+                sectorLiveTotal += 1
+        print("total sector count:          %4d"%sectorTotal)
+        print("* live sector count:         %4d"%sectorP)
+        print("* end-of-chain sector count: %4d"%sectorM2)  # end-of-chain is also live
+
+        print("* free sector count:         %4d"%sectorM1)
+        print("* SAT sector count:          %4d"%sectorM3)
+        print("* MSAT sector count:         %4d"%sectorM4)
+        print("* other sector count:        %4d"%sectorMElse)
 
 
     def getSectorIDChain (self, initID):
