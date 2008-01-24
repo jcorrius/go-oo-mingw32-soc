@@ -39,6 +39,7 @@ class XLDumper(object):
                 while success: 
                     success = self.__readSheetSubStream(dirstrm)
             elif dirname == "Revision Log":
+                dirstrm.type = stream.DirType.RevisionLog
                 try:
                     header = 0x0000
                     while header != 0x000A:

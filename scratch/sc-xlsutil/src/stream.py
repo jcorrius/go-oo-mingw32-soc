@@ -3,10 +3,7 @@ import sys
 import ole, globals
 from globals import output
 
-class EndOfStream(Exception): 
-    def __init__ (self):
-        pass
-
+class EndOfStream(Exception): pass
 
 recData = {
     0x0006: ["FORMULA", "Formula Token Array and Result"],
@@ -185,6 +182,18 @@ recData = {
     0x0868: ["RANGEPROTECTION", "Protected Range on Protected Sheet"]
 }
 
+recDataRev = {
+    0x0137: ["INSERT", "Change Track Insert"],
+    0x0138: ["INFO", "Change Track Info"],
+    0x013B: ["CELLCONTENT", "Change Track Cell Content"],
+    0x013D: ["SHEETID", "Change Track Sheet Identifier"],
+    0x0140: ["MOVERANGE", "Change Track Move Range"],
+    0x014D: ["INSERTSHEET", "Change Track Insert Sheet"],
+    0x014E: ["BONB", "Change Track Beginning of Nested Block"],
+    0x0150: ["BONB", "Change Track Beginning of Nested Block"],
+    0x014F: ["EONB", "Change Track End of Nested Block"],
+    0x0151: ["EONB", "Change Track End of Nested Block"]
+}
 
 class XLStream(object):
 
@@ -257,6 +266,9 @@ class XLStream(object):
         strm = XLDirStream(bytes)
         return strm
 
+class DirType:
+    Workbook = 0
+    RevisionLog = 1
 
 class XLDirStream(object):
 
@@ -264,7 +276,7 @@ class XLDirStream(object):
         self.bytes = bytes
         self.size = len(self.bytes)
         self.pos = 0
-        return
+        self.type = DirType.Workbook
 
     def seekBOF (self):
         while self.pos < self.size-1:
@@ -311,7 +323,11 @@ class XLDirStream(object):
         print("")
         self.__printSep('=', 61, "%4.4Xh: "%header)
         if recData.has_key(header):
-            print("%4.4Xh: %s - %s (%4.4Xh)"%(header, recData[header][0], recData[header][1], header))
+            print("%4.4Xh: %s - %s (%4.4Xh)"%
+                  (header, recData[header][0], recData[header][1], header))
+        elif self.type == DirType.RevisionLog and recDataRev.has_key(header):
+            print("%4.4Xh: %s - %s (%4.4Xh)"%
+                  (header, recDataRev[header][0], recDataRev[header][1], header))
         else:
             print("%4.4Xh: [unknown record name] (%4.4Xh)"%(header, header))
         print("%4.4Xh:   size = %d; pos = %d"%(header, size, pos))
