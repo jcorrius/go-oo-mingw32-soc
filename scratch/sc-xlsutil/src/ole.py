@@ -1,7 +1,7 @@
 
 import sys
 import stream, globals
-
+from globals import getSignedInt
 # ----------------------------------------------------------------------------
 # Reference: The Microsoft Compound Document File Format by Daniel Rentz
 # http://sc.openoffice.org/compdocfileformat.pdf
@@ -12,34 +12,6 @@ from globals import output
 def printSep (c='-', w=68, prefix=''):
     print(prefix + c*w)
 
-def char2byte (chars):
-    bytes = []
-    for c in chars:
-        bytes.append(ord(c))
-    return bytes
-
-def getSignedInt (bytes):
-    # little endian
-    n = len(bytes)
-    if n == 0:
-        return 0
-
-    if type(bytes[0]) == type('c'):
-        bytes = char2byte(bytes)
-
-    isNegative = (bytes[-1] & 0x80) == 0x80
-
-    num, ff = 0, 0
-    for i in xrange(0, n):
-        num += bytes[i]*(256**i)
-        ff += 0xFF*(256**i)
-        i += 1
-
-    if isNegative:
-        # perform two's compliment.
-        num = -((num^ff) + 1)
-
-    return num
 
 class ByteOrder:
     LittleEndian = 0

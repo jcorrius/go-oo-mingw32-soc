@@ -1,9 +1,11 @@
 
 import sys
-import ole, globals
+import ole, globals, record
 from globals import output
 
 class EndOfStream(Exception): pass
+
+    # opcode: [canonical name, description, handler (optional)]
 
 recData = {
     0x0006: ["FORMULA", "Formula Token Array and Result"],
@@ -176,7 +178,7 @@ recData = {
     0x0293: ["STYLE", "Style Information"],
     0x0406: ["FORMULA", "Cell Formula"],
     0x041E: ["FORMAT", "Number Format"],
-    0x0809: ["BOF", "Beginning of File"],
+    0x0809: ["BOF", "Beginning of File", record.BOF],
     0x0862: ["SHEETLAYOUT", "Tab Color below Sheet Name"],
     0x0867: ["SHEETPROTECTION", "Sheet Protection Options"],
     0x0868: ["RANGEPROTECTION", "Protected Range on Protected Sheet"]
@@ -185,7 +187,7 @@ recData = {
 recDataRev = {
     0x0137: ["INSERT", "Change Track Insert"],
     0x0138: ["INFO", "Change Track Info"],
-    0x013B: ["CELLCONTENT", "Change Track Cell Content"],
+    0x013B: ["CELLCONTENT", "Change Track Cell Content", record.CTCellContent],
     0x013D: ["SHEETID", "Change Track Sheet Identifier"],
     0x0140: ["MOVERANGE", "Change Track Move Range"],
     0x014D: ["INSERTSHEET", "Change Track Insert Sheet"],
@@ -319,20 +321,28 @@ class XLDirStream(object):
         if header == 0x0000:
             raise EndOfStream
         size = self.readRaw(2)
+        bytes = self.readByteArray(size)
+
+        # record handler that parses the raw bytes and displays more 
+        # meaningful information.
+        handler = None 
 
         print("")
         self.__printSep('=', 61, "%4.4Xh: "%header)
         if recData.has_key(header):
             print("%4.4Xh: %s - %s (%4.4Xh)"%
                   (header, recData[header][0], recData[header][1], header))
+            if len(recData[header]) >= 3:
+                handler = recData[header][2](header, size, bytes)
         elif self.type == DirType.RevisionLog and recDataRev.has_key(header):
             print("%4.4Xh: %s - %s (%4.4Xh)"%
                   (header, recDataRev[header][0], recDataRev[header][1], header))
+            if len(recDataRev[header]) >= 3:
+                handler = recDataRev[header][2](header, size, bytes)
         else:
             print("%4.4Xh: [unknown record name] (%4.4Xh)"%(header, header))
         print("%4.4Xh:   size = %d; pos = %d"%(header, size, pos))
         self.__printSep('-', 61, "%4.4Xh: "%header)
-        bytes = self.readByteArray(size)
         for i in xrange(0, size):
             if (i+1) % 16 == 1:
                 output("%4.4Xh: "%header)
@@ -341,5 +351,9 @@ class XLDirStream(object):
                 print("")
         if size > 0:
             print("")
+
+        if handler != None:
+            # record handler exists.  Parse the record and display more info.
+            handler.output()
 
         return header

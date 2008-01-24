@@ -4,6 +4,7 @@ import sys
 def output (msg):
     sys.stdout.write(msg)
 
+
 def dumpBytes (chars, subDivide=None):
     line = 0
     subDivideLine = None
@@ -22,6 +23,51 @@ def dumpBytes (chars, subDivide=None):
 
 def getSectorPos (secID, secSize):
     return 512 + secID*secSize
+
+
+def char2byte (chars):
+    bytes = []
+    for c in chars:
+        bytes.append(ord(c))
+    return bytes
+
+
+def getRawBytes (bytes, spaced=True):
+    text = ''
+    for b in bytes:
+        if type(b) == type(''):
+            b = ord(b)
+        if len(text) == 0:
+            text = "%2.2X"%b
+        elif spaced:
+            text = "%2.2X "%b + text
+        else:
+            text = "%2.2X"%b + text
+    return text
+
+
+def getSignedInt (bytes):
+    # little endian
+    n = len(bytes)
+    if n == 0:
+        return 0
+
+    if type(bytes[0]) == type('c'):
+        bytes = char2byte(bytes)
+
+    isNegative = (bytes[-1] & 0x80) == 0x80
+
+    num, ff = 0, 0
+    for i in xrange(0, n):
+        num += bytes[i]*(256**i)
+        ff += 0xFF*(256**i)
+        i += 1
+
+    if isNegative:
+        # perform two's compliment.
+        num = -((num^ff) + 1)
+
+    return num
 
 
 def getUTF8FromUTF16 (bytes):
