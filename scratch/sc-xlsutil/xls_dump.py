@@ -9,6 +9,14 @@ class XLDumper(object):
     def __init__ (self, filepath):
         self.filepath = filepath
 
+    def __printDirHeader (self, dirname, byteLen):
+        if ord(dirname[0]) <= 5:
+            dirname = "<%2.2Xh>%s"%(ord(dirname[0]), dirname[1:])
+        print("")
+        print("="*68)
+        print("%s (size: %d bytes)"%(dirname, byteLen))
+        print("-"*68)
+
     def dump (self):
         file = open(self.filepath, 'rb')
         strm = stream.XLStream(file.read())
@@ -25,21 +33,23 @@ class XLDumper(object):
                 continue
 
             dirstrm = strm.getDirectoryStreamByName(dirname)
+            self.__printDirHeader(dirname, len(dirstrm.bytes))
             if dirname == "Workbook":
                 success = True
                 while success: 
-                    success = self.__read(dirstrm)
+                    success = self.__readSheetSubStream(dirstrm)
+            elif dirname == "Revision Log":
+                try:
+                    header = 0x0000
+                    while header != 0x000A:
+                        header = dirstrm.readRecord()
+                except stream.EndOfStream:
+                    continue
             else:
-                if ord(dirname[0]) <= 5:
-                    dirname = "<%2.2Xh>%s"%(ord(dirname[0]), dirname[1:])
-                print("")
-                print("="*68)
-                print("%s (size: %d bytes)"%(dirname, len(dirstrm.bytes)))
-                print("-"*68)
                 globals.dumpBytes(dirstrm.bytes, 512)
 
 
-    def __read (self, strm):
+    def __readSheetSubStream (self, strm):
         # read bytes from BOF to EOF.
         strm.seekBOF()
         try:
@@ -48,7 +58,7 @@ class XLDumper(object):
                 header = strm.readRecord()
             return True
 
-        except IndexError:
+        except stream.EndOfStream:
             return False
 
 def usage ():

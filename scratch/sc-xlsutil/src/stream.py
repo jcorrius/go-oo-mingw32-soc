@@ -3,6 +3,11 @@ import sys
 import ole, globals
 from globals import output
 
+class EndOfStream(Exception): 
+    def __init__ (self):
+        pass
+
+
 recData = {
     0x0006: ["FORMULA", "Formula Token Array and Result"],
     0x000A: ["EOF", "End of File"],
@@ -294,9 +299,15 @@ class XLDirStream(object):
         print(prefix + c*w)
 
     def readRecord (self):
+        if self.size - self.pos < 4:
+            raise EndOfStream
+
         pos = self.pos
         header = self.readRaw(2)
+        if header == 0x0000:
+            raise EndOfStream
         size = self.readRaw(2)
+
         print("")
         self.__printSep('=', 61, "%4.4Xh: "%header)
         if recData.has_key(header):
