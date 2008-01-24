@@ -4,6 +4,7 @@ import ole, globals
 from globals import output
 
 recData = {
+    0x0006: ["FORMULA", "Formula Token Array and Result"],
     0x000A: ["EOF", "End of File"],
     0x000C: ["CALCCOUNT", "Iteration Count"],
     0x000D: ["CALCMODE", "Calculation Mode"],
