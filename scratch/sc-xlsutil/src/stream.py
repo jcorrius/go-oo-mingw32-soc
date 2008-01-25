@@ -162,7 +162,7 @@ recData = {
     0x01BE: ["DV", "Data Validation Criteria"],
     0x0200: ["DIMENSIONS", "Cell Table Size"],
     0x0201: ["BLANK", "Cell Value"],
-    0x0203: ["NUMBER", "Cell Value"],
+    0x0203: ["NUMBER", "Floating-Point Cell Value", record.Number],
     0x0204: ["LABEL", "Cell Value"],
     0x0205: ["BOOLERR", "Cell Value"],
     0x0207: ["STRING", "String Value of a Formula"],

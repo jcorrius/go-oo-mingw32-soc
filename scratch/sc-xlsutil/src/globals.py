@@ -1,5 +1,7 @@
 
-import sys
+import sys, struct
+
+class ByteConvertError(Exception): pass
 
 def output (msg):
     sys.stdout.write(msg)
@@ -20,6 +22,7 @@ def dumpBytes (chars, subDivide=None):
             line += 1
 
     output("\n")
+
 
 def getSectorPos (secID, secSize):
     return 512 + secID*secSize
@@ -52,22 +55,37 @@ def getSignedInt (bytes):
     if n == 0:
         return 0
 
-    if type(bytes[0]) == type('c'):
-        bytes = char2byte(bytes)
-
-    isNegative = (bytes[-1] & 0x80) == 0x80
-
-    num, ff = 0, 0
+    text = ''
     for i in xrange(0, n):
-        num += bytes[i]*(256**i)
-        ff += 0xFF*(256**i)
-        i += 1
+        b = bytes[i]
+        if type(b) == type(0x00):
+            b = struct.pack('B', b)
+        text += b
 
-    if isNegative:
-        # perform two's compliment.
-        num = -((num^ff) + 1)
+    if n == 1:
+        # byte - 1 byte
+        return struct.unpack('b', text)[0]
+    elif n == 2:
+        # short - 2 bytes
+        return struct.unpack('h', text)[0]
+    elif n == 4:
+        # int, long - 4 bytes
+        return struct.unpack('l', text)[0]
 
-    return num
+    raise ByteConvertError
+
+
+def getDouble (bytes):
+    n = len(bytes)
+    if n == 0:
+        return 0.0
+    text = ''
+    for i in xrange(0, n):
+        b = bytes[i]
+        if type(b) == type(0x00):
+            b = struct.pack('B', b)
+        text += b
+    return struct.unpack('d', text)[0]
 
 
 def getUTF8FromUTF16 (bytes):

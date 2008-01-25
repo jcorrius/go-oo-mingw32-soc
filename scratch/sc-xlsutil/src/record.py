@@ -1,7 +1,7 @@
 
 import globals
 
-#--------------------------------------------------------------------
+# -------------------------------------------------------------------
 # record handler classes
 
 class BaseRecordHandler(object):
@@ -24,6 +24,7 @@ class BaseRecordHandler(object):
     def appendLine (self, line):
         self.lines.append(line)
 
+# --------------------------------------------------------------------
 
 class BOF(BaseRecordHandler):
 
@@ -35,9 +36,6 @@ class BOF(BaseRecordHandler):
         0x0040: "Macro sheet",
         0x0100: "Workspace"
     }
-
-    def __init__ (self, header, size, bytes):
-        BaseRecordHandler.__init__(self, header, size, bytes)
 
     def parseBytes (self):
         ver = globals.getRawBytes(self.bytes[0:2])
@@ -53,26 +51,29 @@ class BOF(BaseRecordHandler):
         self.appendLine("type: %s"%BOF.Type[dataType])
         self.appendLine("file history flags: " + fileHistoryFlags)
         self.appendLine("lowest Excel version: %d"%lowestExcelVer)
-        
 
 
-class CTCellContent(BaseRecordHandler):
-
-    def __init__ (self, header, size, bytes):
-        BaseRecordHandler.__init__(self, header, size, bytes)
+class Number(BaseRecordHandler):
 
     def parseBytes (self):
-        pass
+        row = globals.getSignedInt(self.bytes[0:2])
+        col = globals.getSignedInt(self.bytes[2:4])
+        xf  = globals.getSignedInt(self.bytes[4:6])
+        fval = globals.getDouble(self.bytes[6:14])
+        self.appendLine("cell position: (col: %d; row: %d)"%(col, row))
+        self.appendLine("XF record ID: %d"%xf)
+        self.appendLine("value (IEEE 754): %g"%fval)
 
-    def output (self):
-        BaseRecordHandler.output(self)
+# -------------------------------------------------------------------
+# CT - Change Tracking
 
+class CTCellContent(BaseRecordHandler):
+    pass
 
+# -------------------------------------------------------------------
+# CH - Chart
 
 class CHChart(BaseRecordHandler):
-
-    def __init__ (self, header, size, bytes):
-        BaseRecordHandler.__init__(self, header, size, bytes)
 
     def parseBytes (self):
         x = globals.getSignedInt(self.bytes[0:4])
@@ -82,7 +83,3 @@ class CHChart(BaseRecordHandler):
         self.appendLine("position: (x, y) = (%d, %d)"%(x, y))
         self.appendLine("size: (width, height) = (%d, %d)"%(w, h))
         
-
-    def output (self):
-        BaseRecordHandler.output(self)
-
