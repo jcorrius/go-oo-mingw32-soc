@@ -1,0 +1,170 @@
+--- /dev/null	2007-05-04 18:54:36.000000000 +0800
++++ udkapi/com/sun/star/script/DateType.idl	2008-01-24 22:05:46.000000000 +0800
+@@ -0,0 +1,63 @@
++/*************************************************************************
++ *
++ *  OpenOffice.org - a multi-platform office productivity suite
++ *
++ *  $RCSfile: DateType.idl,v $
++ *
++ *  $Revision: 1.0 $
++ *
++ *  last change: $Author: rt $ $Date: 2006/05/05 10:14:46 $
++ *
++ *  The Contents of this file are made available subject to
++ *  the terms of GNU Lesser General Public License Version 2.1.
++ *
++ *
++ *    GNU Lesser General Public License Version 2.1
++ *    =============================================
++ *    Copyright 2005 by Sun Microsystems, Inc.
++ *    901 San Antonio Road, Palo Alto, CA 94303, USA
++ *
++ *    This library is free software; you can redistribute it and/or
++ *    modify it under the terms of the GNU Lesser General Public
++ *    License version 2.1, as published by the Free Software Foundation.
++ *
++ *    This library is distributed in the hope that it will be useful,
++ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ *    Lesser General Public License for more details.
++ *
++ *    You should have received a copy of the GNU Lesser General Public
++ *    License along with this library; if not, write to the Free Software
++ *    Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ *    MA  02111-1307  USA
++ *
++ ************************************************************************/
++
++#ifndef __com_sun_star_script_XDateType_idl__
++#define __com_sun_star_script_XDateType_idl__
++
++#ifndef __com_sun_star_uno_XInterface_idl__
++#include <com/sun/star/uno/XInterface.idl>
++#endif
++
++//=============================================================================
++module com {  module sun {  module star { module script {
++
++//=============================================================================
++/** A date type for script 
++*/
++
++struct DateType
++{
++    /** the value of date. 
++    */
++	double Value; 
++};
++
++//=============================================================================
++
++}; }; }; };
++
++#endif
++
++
+--- udkapi/com/sun/star/script/makefile.mk.orig	2008-01-25 11:35:24.000000000 +0800
++++ udkapi/com/sun/star/script/makefile.mk	2008-01-24 21:38:10.000000000 +0800
+@@ -89,6 +89,7 @@ IDLFILES=\
+ 	XScriptEventsAttacher.idl\
+ 	XDefaultMethod.idl\
+ 	XDefaultProperty.idl\
++	DateType.idl\
+ 
+ # ------------------------------------------------------------------
+ 
+--- sc/source/ui/vba/vbarange.cxx.orig	2008-01-24 21:40:42.000000000 +0800
++++ sc/source/ui/vba/vbarange.cxx	2008-01-24 21:52:45.000000000 +0800
+@@ -167,6 +167,7 @@
+ // end test includes
+ 
+ #include <org/openoffice/excel/Range.hpp>
++#include <com/sun/star/script/DateType.hpp>
+ 
+ using namespace ::org::openoffice;
+ using namespace ::com::sun::star;
+@@ -447,6 +448,18 @@ public:
+ 		return false;
+ 	}
+ 
++	bool isDateType()
++	{
++		sal_Int16 nType = getNumberFormat();
++		if(( nType & util::NumberFormat::DATE )
++			|| ( nType & util::NumberFormat::TIME )
++			|| ( nType & util::NumberFormat::DATETIME ))
++		{
++			return true;
++		}
++		return false;
++	}
++	
+ 	rtl::OUString getNumberFormatString()
+ 	{
+ 		uno::Reference< uno::XInterface > xIf( mxRangeProps, uno::UNO_QUERY_THROW );
+@@ -720,6 +733,8 @@ void CellValueGetter::visitNode( sal_Int
+ 			NumFormatHelper cellFormat( xRange );
+ 			if ( cellFormat.isBooleanType() )
+ 				aValue = uno::makeAny( ( xCell->getValue() != 0.0 ) );
++			else if ( cellFormat.isDateType() )
++				aValue = uno::makeAny( script::DateType( xCell->getValue() ) );
+ 			else
+ 				aValue <<= xCell->getValue();
+ 		}
+--- basic/source/classes/sbunoobj.cxx.orig	2008-01-24 21:40:12.000000000 +0800
++++ basic/source/classes/sbunoobj.cxx	2008-01-24 22:19:29.000000000 +0800
+@@ -114,6 +114,7 @@ using namespace rtl;
+ #include <hash_map>
+ #include <com/sun/star/reflection/XTypeDescriptionEnumerationAccess.hpp>
+ #include <com/sun/star/reflection/XConstantsTypeDescription.hpp>
++#include <com/sun/star/script/DateType.hpp>
+ 
+ TYPEINIT1(SbUnoMethod,SbxMethod)
+ TYPEINIT1(SbUnoProperty,SbxProperty)
+@@ -647,6 +648,7 @@ void unoToSbxValue( SbxVariable* pVar, c
+ 			if( eTypeClass == TypeClass_STRUCT )
+ 			{
+ 				ArrayWrapper aWrap;
++				DateType aUnoDate;
+ 				if ( (aValue >>= aWrap) )
+ 				{
+ 					SbxDimArray* pArray = NULL;
+@@ -666,6 +668,11 @@ void unoToSbxValue( SbxVariable* pVar, c
+ 						pVar->PutEmpty();
+ 					break;
+ 				}
++				else if( (aValue >>= aUnoDate) )
++				{
++					pVar->PutDate( aUnoDate.Value );
++					break;
++				}
+ 				else
+ 				{
+ 					SbiInstance* pInst = pINST;
+--- basic/source/runtime/methods.cxx.orig	2008-01-23 22:38:41.000000000 +0800
++++ basic/source/runtime/methods.cxx	2008-01-25 11:16:46.000000000 +0800
+@@ -2040,6 +2040,23 @@ RTLFUNC(DateValue)
+ 		String aStr( rPar.Get(1)->GetString() );
+ 		BOOL bSuccess = pFormatter->IsNumberFormat( aStr, nIndex, fResult );
+ 		short nType = pFormatter->GetType( nIndex );
++		
++		// DateValue("February 12, 1969") raises error if the system locale is not en_US
++		// by using SbiInstance::GetNumberFormatter.
++		// It seems that both locale number formatter and English number formatter 
++		// are supported in Visual Basic.
++		LanguageType eLangType = GetpApp()->GetSettings().GetLanguage();
++		if( !bSuccess && !(eLangType & LANGUAGE_ENGLISH))
++		{
++			// Create a new SvNumberFormatter by using LANGUAGE_ENGLISH to get the date value;
++			com::sun::star::uno::Reference< com::sun::star::lang::XMultiServiceFactory > 
++				xFactory = comphelper::getProcessServiceFactory();
++			SvNumberFormatter* pFormatterEn = new SvNumberFormatter( xFactory, LANGUAGE_ENGLISH );
++			bSuccess = pFormatterEn->IsNumberFormat( aStr, nIndex, fResult );
++			nType = pFormatterEn->GetType( nIndex );
++			delete pFormatterEn;
++		}
++
+ 		if(bSuccess && (nType==NUMBERFORMAT_DATE || nType==NUMBERFORMAT_DATETIME))
+ 		{
+ 			if ( nType == NUMBERFORMAT_DATETIME )
