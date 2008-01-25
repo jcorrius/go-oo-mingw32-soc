@@ -40,18 +40,18 @@ class BOF(BaseRecordHandler):
         BaseRecordHandler.__init__(self, header, size, bytes)
 
     def parseBytes (self):
-        ver = globals.getSignedInt(self.bytes[0:2])
+        ver = globals.getRawBytes(self.bytes[0:2])
         dataType = globals.getSignedInt(self.bytes[2:4])
         buildID = globals.getSignedInt(self.bytes[4:6])
         buildYear = globals.getSignedInt(self.bytes[6:8])
-        fileHistoryFlags = globals.getSignedInt(self.bytes[8:12])
+        fileHistoryFlags = globals.getRawBytes(self.bytes[8:12])
         lowestExcelVer = globals.getSignedInt(self.bytes[12:16])
 
-        self.appendLine("BIFF version: %d"%ver)
+        self.appendLine("BIFF version: " + ver)
         self.appendLine("build ID: %d"%buildID)
         self.appendLine("build year: %d"%buildYear)
         self.appendLine("type: %s"%BOF.Type[dataType])
-        self.appendLine("file history flags: " + globals.getRawBytes(self.bytes[8:12]))
+        self.appendLine("file history flags: " + fileHistoryFlags)
         self.appendLine("lowest Excel version: %d"%lowestExcelVer)
         
 
@@ -61,9 +61,28 @@ class CTCellContent(BaseRecordHandler):
     def __init__ (self, header, size, bytes):
         BaseRecordHandler.__init__(self, header, size, bytes)
 
+    def parseBytes (self):
+        pass
+
     def output (self):
         BaseRecordHandler.output(self)
 
 
 
+class CHChart(BaseRecordHandler):
+
+    def __init__ (self, header, size, bytes):
+        BaseRecordHandler.__init__(self, header, size, bytes)
+
+    def parseBytes (self):
+        x = globals.getSignedInt(self.bytes[0:4])
+        y = globals.getSignedInt(self.bytes[4:8])
+        w = globals.getSignedInt(self.bytes[8:12])
+        h = globals.getSignedInt(self.bytes[12:16])
+        self.appendLine("position: (x, y) = (%d, %d)"%(x, y))
+        self.appendLine("size: (width, height) = (%d, %d)"%(w, h))
+        
+
+    def output (self):
+        BaseRecordHandler.output(self)
 
