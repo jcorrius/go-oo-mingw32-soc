@@ -1,8 +1,20 @@
 #!/usr/bin/env python
 
-import sys, os.path
+import sys, os.path, getopt
 sys.path.append(sys.path[0]+"/src")
 import ole, stream, globals
+
+from globals import error
+
+def usage (exname):
+    exname = os.path.basename(exname)
+    msg = """Usage: %s [options] [xls file]
+
+Options:
+  --help        displays this help message.
+"""%exname
+    print msg
+
 
 class XLDumper(object):
 
@@ -62,17 +74,31 @@ class XLDumper(object):
         except stream.EndOfStream:
             return False
 
-def usage ():
-    pass
 
 def main (args):
+    exname, args = args[0], args[1:]
     if len(args) < 1:
         print("takes at least one argument")
-        usage()
+        usage(exname)
+        return
+
+    try:
+        opts, args = getopt.getopt(args, "h", ["help"])
+        for opt, arg in opts:
+            if opt in ['-h', '--help']:
+                usage(exname)
+                return
+            else:
+                error("unknown option %s\n"%opt)
+                usage()
+
+    except getopt.GetoptError:
+        error("error parsing input options\n")
+        usage(exname)
         return
 
     dumper = XLDumper(args[0])
     dumper.dump()
 
 if __name__ == '__main__':
-    main(sys.argv[1:])
+    main(sys.argv)

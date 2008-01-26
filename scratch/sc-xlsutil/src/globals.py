@@ -6,6 +6,8 @@ class ByteConvertError(Exception): pass
 def output (msg):
     sys.stdout.write(msg)
 
+def error (msg):
+    sys.stderr.write(msg)
 
 def dumpBytes (chars, subDivide=None):
     line = 0
@@ -28,14 +30,7 @@ def getSectorPos (secID, secSize):
     return 512 + secID*secSize
 
 
-def char2byte (chars):
-    bytes = []
-    for c in chars:
-        bytes.append(ord(c))
-    return bytes
-
-
-def getRawBytes (bytes, spaced=True):
+def getRawBytes (bytes, spaced=True, reverse=True):
     text = ''
     for b in bytes:
         if type(b) == type(''):
@@ -43,9 +38,26 @@ def getRawBytes (bytes, spaced=True):
         if len(text) == 0:
             text = "%2.2X"%b
         elif spaced:
-            text = "%2.2X "%b + text
+            if reverse:
+                text = "%2.2X "%b + text
+            else:
+                text += " %2.2X"%b
         else:
-            text = "%2.2X"%b + text
+            if reverse:
+                text = "%2.2X"%b + text
+            else:
+                text += "%2.2X"%b
+    return text
+
+
+def toTextBytes (bytes):
+    n = len(bytes)
+    text = ''
+    for i in xrange(0, n):
+        b = bytes[i]
+        if type(b) == type(0x00):
+            b = struct.pack('B', b)
+        text += b
     return text
 
 
@@ -55,13 +67,7 @@ def getSignedInt (bytes):
     if n == 0:
         return 0
 
-    text = ''
-    for i in xrange(0, n):
-        b = bytes[i]
-        if type(b) == type(0x00):
-            b = struct.pack('B', b)
-        text += b
-
+    text = toTextBytes(bytes)
     if n == 1:
         # byte - 1 byte
         return struct.unpack('b', text)[0]
@@ -79,12 +85,8 @@ def getDouble (bytes):
     n = len(bytes)
     if n == 0:
         return 0.0
-    text = ''
-    for i in xrange(0, n):
-        b = bytes[i]
-        if type(b) == type(0x00):
-            b = struct.pack('B', b)
-        text += b
+
+    text = toTextBytes(bytes)
     return struct.unpack('d', text)[0]
 
 

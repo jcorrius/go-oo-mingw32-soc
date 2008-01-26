@@ -1,5 +1,5 @@
 
-import globals
+import globals, formula
 
 # -------------------------------------------------------------------
 # record handler classes
@@ -13,6 +13,12 @@ class BaseRecordHandler(object):
         self.lines = []
 
     def parseBytes (self):
+        """Parse the original bytes and generate human readable output.
+
+The derived class should only worry about overwriting this function.  The
+bytes are given as self.bytes, and call self.appendLine([new line]) to
+append a line to be displayed.
+"""
         pass
 
     def output (self):
@@ -53,6 +59,33 @@ class BOF(BaseRecordHandler):
         self.appendLine("lowest Excel version: %d"%lowestExcelVer)
 
 
+class Formula(BaseRecordHandler):
+
+    def parseBytes (self):
+        row  = globals.getSignedInt(self.bytes[0:2])
+        col  = globals.getSignedInt(self.bytes[2:4])
+        xf   = globals.getSignedInt(self.bytes[4:6])
+        fval = globals.getDouble(self.bytes[6:14])
+
+        flags          = globals.getSignedInt(self.bytes[14:16])
+        recalc         = (flags & 0x0001) != 0
+        calcOnOpen     = (flags & 0x0002) != 0
+        sharedFormula  = (flags & 0x0008) != 0
+
+        tokens = self.bytes[20:]
+        fparser = formula.FormulaParser(tokens)
+        fparser.parse()
+        ftext = fparser.getText()
+
+        self.appendLine("cell position: (col: %d; row: %d)"%(col, row))
+        self.appendLine("XF record ID: %d"%xf)
+        self.appendLine("formula result: %g"%fval)
+        self.appendLine("recalculate always: %d"%recalc)
+        self.appendLine("calculate on open: %d"%calcOnOpen)
+        self.appendLine("shared formula: %d"%sharedFormula)
+        self.appendLine("tokens: "+ftext)
+
+
 class Number(BaseRecordHandler):
 
     def parseBytes (self):
@@ -62,7 +95,7 @@ class Number(BaseRecordHandler):
         fval = globals.getDouble(self.bytes[6:14])
         self.appendLine("cell position: (col: %d; row: %d)"%(col, row))
         self.appendLine("XF record ID: %d"%xf)
-        self.appendLine("value (IEEE 754): %g"%fval)
+        self.appendLine("value: %g"%fval)
 
 # -------------------------------------------------------------------
 # CT - Change Tracking

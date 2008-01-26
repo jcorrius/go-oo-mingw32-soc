@@ -8,7 +8,7 @@ class EndOfStream(Exception): pass
     # opcode: [canonical name, description, handler (optional)]
 
 recData = {
-    0x0006: ["FORMULA", "Formula Token Array and Result"],
+    0x0006: ["FORMULA", "Formula Token Array and Result", record.Formula],
     0x000A: ["EOF", "End of File"],
     0x000C: ["CALCCOUNT", "Iteration Count"],
     0x000D: ["CALCMODE", "Calculation Mode"],
@@ -176,7 +176,6 @@ recData = {
     0x0236: ["TABLE", "Data Table"],
     0x023E: ["WINDOW2", "Sheet Window Information"],
     0x0293: ["STYLE", "Style Information"],
-    0x0406: ["FORMULA", "Cell Formula"],
     0x041E: ["FORMAT", "Number Format"],
     0x0809: ["BOF", "Beginning of File", record.BOF],
     0x0862: ["SHEETLAYOUT", "Tab Color below Sheet Name"],
