@@ -64,7 +64,6 @@ sal_uInt16 getPasswordHash(const char* szPassword)
 
     wPasswordHash = ((wPasswordHash >> 14) & 0x01) | 
                     ((wPasswordHash << 1) & 0x7fff);
-    wPasswordHash ^= *pch;
 
     wPasswordHash ^= (0x8000 | ('N' << 8) | 'K');
     wPasswordHash ^= cchPassword;
