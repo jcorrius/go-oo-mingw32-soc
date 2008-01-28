@@ -3,6 +3,17 @@ import globals
 
 
 class TokenBase(object):
+    """base class for token handler
+
+Derive a class from this base class to create a token handler for a formula
+token.  
+
+The parse method takes the token array position that points to the first 
+token to be processed, and returns the position of the laste token that has 
+been processed.  So, if the handler processes only one token, it should 
+return the same value it receives without incrementing it.  
+
+"""
     def __init__ (self, tokens):
         self.tokens = tokens
 
@@ -80,6 +91,12 @@ tokenMap = {
 }
 
 class FormulaParser(object):
+    """formula parser for token bytes
+
+This class receives a series of bytes that represent formula tokens through
+the constructor.  That series of bytes must also include the formula length
+which is usually the first 2 bytes.
+"""
     def __init__ (self, tokens):
         self.tokens = tokens
         self.text = ''
@@ -94,13 +111,17 @@ class FormulaParser(object):
         i = 0
         while i < length:
             tk = ftokens[i]
+
             if type(tk) == type('c'):
                 # get the ordinal of the character.
                 tk = ord(tk)
+
             if not tokenMap.has_key(tk):
+                # no token handler
                 i += 1
                 continue
 
+            # token handler exists.
             o = tokenMap[tk](ftokens)
             i = o.parse(i)
             self.text += o.getText() + ' '

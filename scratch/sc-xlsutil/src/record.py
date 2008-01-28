@@ -1,4 +1,5 @@
 
+import struct
 import globals, formula
 
 # -------------------------------------------------------------------
@@ -96,6 +97,73 @@ class Number(BaseRecordHandler):
         self.appendLine("cell position: (col: %d; row: %d)"%(col, row))
         self.appendLine("XF record ID: %d"%xf)
         self.appendLine("value: %g"%fval)
+
+
+class RK(BaseRecordHandler):
+    """Cell with encoded integer or floating-point value"""
+
+    def parseBytes (self):
+        row = globals.getSignedInt(self.bytes[0:2])
+        col = globals.getSignedInt(self.bytes[2:4])
+        xf  = globals.getSignedInt(self.bytes[4:6])
+
+        rkval = globals.getSignedInt(self.bytes[6:10])
+        multi100  = ((rkval & 0x00000001) != 0)
+        signedInt = ((rkval & 0x00000002) != 0)
+        realVal   = (rkval & 0xFFFFFFFC)
+
+        if signedInt:
+            # for integer, perform right-shift by 2 bits.
+            realVal = realVal/4
+        else:
+            # for floating-point, convert the value back to the bytes,
+            # pad the bytes to make it 8-byte long, and convert it back
+            # to the numeric value.
+            tmpBytes = struct.pack('<L', realVal)
+            tmpBytes = struct.pack('xxxx') + tmpBytes
+            realVal = struct.unpack('<d', tmpBytes)[0]
+
+        if multi100:
+            realVal /= 100
+
+        self.appendLine("cell position: (col: %d; row: %d)"%(col, row))
+        self.appendLine("XF record ID: %d"%xf)
+        self.appendLine("multiplied by 100: %d"%multi100)
+        if signedInt:
+            self.appendLine("type: signed integer")
+        else:
+            self.appendLine("type: floating point")
+        self.appendLine("value: %g"%realVal)
+
+
+class Blank(BaseRecordHandler):
+
+    def parseBytes (self):
+        row = globals.getSignedInt(self.bytes[0:2])
+        col = globals.getSignedInt(self.bytes[2:4])
+        xf  = globals.getSignedInt(self.bytes[4:6])
+        self.appendLine("cell position: (col: %d; row: %d)"%(col, row))
+        self.appendLine("XF record ID: %d"%xf)
+
+
+class Row(BaseRecordHandler):
+
+    def parseBytes (self):
+        row  = globals.getSignedInt(self.bytes[0:2])
+        col1 = globals.getSignedInt(self.bytes[2:4])
+        col2 = globals.getSignedInt(self.bytes[4:6])
+
+        rowHeightBits = globals.getSignedInt(self.bytes[6:8])
+        rowHeight     = (rowHeightBits & 0x7FFF)
+        defaultHeight = ((rowHeightBits & 0x8000) == 1)
+
+        self.appendLine("row: %d; col: %d - %d"%(row, col1, col2))
+        self.appendLine("row height (twips): %d"%rowHeight)
+        if defaultHeight:
+            self.appendLine("row height type: default")
+        else:
+            self.appendLine("row height type: custom")
+
 
 # -------------------------------------------------------------------
 # CT - Change Tracking

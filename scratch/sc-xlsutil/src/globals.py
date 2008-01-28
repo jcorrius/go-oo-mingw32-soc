@@ -73,12 +73,21 @@ def getSignedInt (bytes):
         return struct.unpack('b', text)[0]
     elif n == 2:
         # short - 2 bytes
-        return struct.unpack('h', text)[0]
+        return struct.unpack('<h', text)[0]
     elif n == 4:
         # int, long - 4 bytes
-        return struct.unpack('l', text)[0]
+        return struct.unpack('<l', text)[0]
 
     raise ByteConvertError
+
+
+def getFloat (bytes):
+    n = len(bytes)
+    if n == 0:
+        return 0.0
+
+    text = toTextBytes(bytes)
+    return struct.unpack('<f', text)[0]
 
 
 def getDouble (bytes):
@@ -87,7 +96,7 @@ def getDouble (bytes):
         return 0.0
 
     text = toTextBytes(bytes)
-    return struct.unpack('d', text)[0]
+    return struct.unpack('<d', text)[0]
 
 
 def getUTF8FromUTF16 (bytes):
