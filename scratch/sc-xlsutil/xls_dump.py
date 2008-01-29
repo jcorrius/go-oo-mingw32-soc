@@ -22,8 +22,7 @@ class XLDumper(object):
         self.filepath = filepath
 
     def __printDirHeader (self, dirname, byteLen):
-        if ord(dirname[0]) <= 5:
-            dirname = "<%2.2Xh>%s"%(ord(dirname[0]), dirname[1:])
+        dirname = globals.decodeName(dirname)
         print("")
         print("="*68)
         print("%s (size: %d bytes)"%(dirname, byteLen))

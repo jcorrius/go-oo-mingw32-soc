@@ -1,5 +1,76 @@
 
+import struct, sys
 import globals
+
+class InvalidCellAddress(Exception): pass
+
+def toColName (colID):
+    if colID > 255:
+        raise InvalidCellAddress
+    n1 = colID % 26
+    n2 = int(colID/26)
+    name = struct.pack('b', n1 + ord('A'))
+    if n2 > 0:
+        name += struct.pack('b', n2 + ord('A'))
+    return name
+
+class CellAddress(object):
+    def __init__ (self, col=0, row=0, colRel=False, rowRel=False):
+        self.col = col
+        self.row = row
+        self.isColRelative = colRel
+        self.isRowRelative = rowRel
+
+    def getName (self):
+        colName = toColName(self.col)
+        rowName = "%d"%(self.row+1)
+        if not self.isColRelative:
+            colName = '$' + colName
+        if not self.isRowRelative:
+            rowName = '$' + rowName
+        return colName + rowName
+
+class CellRange(object):
+    def __init__ (self):
+        self.firstRow = 0
+        self.lastRow = 0
+        self.firstCol = 0
+        self.lastCol = 0
+        self.isFirstRowRelative = False
+        self.isLastRowRelative = False
+        self.isFirstColRelative = False
+        self.isLastColRelative = False
+
+def parseCellAddress (bytes):
+    if len(bytes) != 4:
+        raise InvalidCellAddress
+
+    row = globals.getSignedInt(bytes[0:2])
+    col = globals.getSignedInt(bytes[2:4])
+    colRelative = ((col & 0x4000) != 0)
+    rowRelative = ((col & 0x8000) != 0)
+    col = (col & 0x00FF)
+    obj = CellAddress(col, row)
+    return obj
+
+def parseCellRangeAddress (bytes):
+    if len(bytes) != 8:
+        raise InvalidCellAddress
+
+    obj = CellRange()
+    obj.firstRow = globals.getSignedInt(bytes[0:2])
+    obj.lastRow  = globals.getSignedInt(bytes[2:4])
+    obj.firstCol = globals.getSignedInt(bytes[4:6])
+    obj.lastCol  = globals.getSignedInt(bytes[6:8])
+
+    obj.isFirstColRelative = ((firstCol & 0x4000) != 0)
+    obj.isFirstRowRelative = ((firstCol & 0x8000) != 0)
+    obj.firstCol = (firstCol & 0x00FF)
+
+    obj.isLastColRelative = ((lastCol & 0x4000) != 0)
+    obj.isLastRowRelative = ((lastCol & 0x8000) != 0)
+    obj.lastCol = (lastCol & 0x00FF)
+    return obj
 
 
 class TokenBase(object):
@@ -55,8 +126,23 @@ class NameX(TokenBase):
         return i
 
     def getText (self):
-        return "<externname externsheet ID: %d; name ID: %d>"%(self.refID, self.nameID)
+        return "<externname externSheetID='%d' nameID='%d'>"%(self.refID, self.nameID)
 
+
+class Ref3d(TokenBase):
+    """3D reference or external reference to a cell"""
+
+    def parse (self, i):
+        i += 1
+        self.refEntryId = globals.getSignedInt(self.tokens[i:i+2])
+        i += 2
+        self.cell = parseCellAddress(self.tokens[i:i+4])
+        i += 4
+        return i
+
+    def getText (self):
+        cellName = self.cell.getName()
+        return "<3dref externSheetID='%d' cellAddress='%s'>"%(self.refEntryId, cellName)
 
 tokenMap = {
     # binary operator
@@ -86,6 +172,11 @@ tokenMap = {
     0x59: NameX,
     0x79: NameX,
 
+    # 3d reference
+    0x3A: Ref3d,
+    0x5A: Ref3d,
+    0x7A: Ref3d,
+
     # last item
     0xFF: None
 }
@@ -97,17 +188,21 @@ This class receives a series of bytes that represent formula tokens through
 the constructor.  That series of bytes must also include the formula length
 which is usually the first 2 bytes.
 """
-    def __init__ (self, tokens):
+    def __init__ (self, tokens, sizeField=True):
         self.tokens = tokens
         self.text = ''
+        self.sizeField = sizeField
 
     def parse (self):
-        # first 2-bytes contain the length of the formula tokens
-        length = globals.getSignedInt(self.tokens[0:2])
-        if length <= 0:
-            return
+        ftokens = self.tokens
+        length = len(ftokens)
+        if self.sizeField:
+            # first 2-bytes contain the length of the formula tokens
+            length = globals.getSignedInt(self.tokens[0:2])
+            if length <= 0:
+                return
+            ftokens = self.tokens[2:2+length]
 
-        ftokens = self.tokens[2:2+length]
         i = 0
         while i < length:
             tk = ftokens[i]
