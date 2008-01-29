@@ -1,0 +1,93 @@
+--- sw/source/core/doc/doctxm.cxx	27 Sep 2007 08:37:21 -0000	1.47
++++ sw/source/core/doc/doctxm.cxx	22 Jan 2008 14:21:14 -0000	1.47.160.1
+@@ -1867,10 +1867,14 @@ void SwTOXBaseSection::GenerateText( USH
+ 					}
+ 					else
+ 						nRightMargin = aNdRect.Width();
++                    //#i24363# tab stops relative to indent
++                    if( pDoc->get(IDocumentSettingAccess::TABS_RELATIVE_TO_INDENT) )
++                    {
+                     //left margin of paragraph style
+                     const SvxLRSpaceItem& rLRSpace = pTOXNd->GetTxtColl()->GetLRSpace();
+                     nRightMargin -= rLRSpace.GetLeft();
+                     nRightMargin -= rLRSpace.GetTxtFirstLineOfst();
++                    }
+ 
+                     aTStops.Insert( SvxTabStop( nRightMargin, SVX_TAB_ADJUST_RIGHT,
+ 												cDfltDecimalChar,
+--- sw/source/core/unocore/unotbl.cxx	10 Jan 2008 12:31:03 -0000	1.113
++++ sw/source/core/unocore/unotbl.cxx	22 Jan 2008 13:08:49 -0000	1.113.2.1
+@@ -769,6 +769,9 @@ void lcl_SetTblSeparators(const uno::Any
+ 
+ 	pTable->GetTabCols( aOldCols, pBox, sal_False, bRow );
+ 	sal_uInt16 nOldCount = aOldCols.Count();
++    //there's no use in setting tab cols if there's only one column
++    if( !nOldCount )
++        return;
+ 
+ 	const uno::Sequence< text::TableColumnSeparator>* pSepSeq =
+ 				(uno::Sequence< text::TableColumnSeparator>*) rVal.getValue();
+--- sw/source/core/unocore/unotext.cxx	10 Jan 2008 12:31:16 -0000	1.35
++++ sw/source/core/unocore/unotext.cxx	22 Jan 2008 13:10:53 -0000	1.35.2.1
+@@ -1674,6 +1674,26 @@ uno::Reference< text::XTextContent > SwX
+    if(SwXTextRange::XTextRangeToSwPaM(aStartPam, xStart) &&
+         SwXTextRange::XTextRangeToSwPaM(*pEndPam, xEnd) )
+     {
++        uno::Reference<lang::XUnoTunnel> xStartRangeTunnel( xStart, uno::UNO_QUERY);
++        SwXTextRange* pStartRange  = reinterpret_cast< SwXTextRange * >(
++                   sal::static_int_cast< sal_IntPtr >( xStartRangeTunnel->getSomething( SwXTextRange::getUnoTunnelId()) ));
++        uno::Reference<lang::XUnoTunnel> xEndRangeTunnel( xEnd, uno::UNO_QUERY);
++        SwXTextRange* pEndRange  = reinterpret_cast< SwXTextRange * >(
++                   sal::static_int_cast< sal_IntPtr >( xEndRangeTunnel->getSomething( SwXTextRange::getUnoTunnelId()) ));
++        //bokmarks have to be removed before the referenced text node is deleted in DelFullPara
++        if( pStartRange )
++        {
++            SwBookmark* pStartBookmark = pStartRange->GetBookmark();
++            if( pStartBookmark )
++                pDoc->deleteBookmark( pStartBookmark->GetName() );
++        }   
++        if( pEndRange )
++        {
++            SwBookmark* pEndBookmark = pEndRange->GetBookmark();
++            if( pEndBookmark )
++                pDoc->deleteBookmark( pEndBookmark->GetName() );
++        }   
++       
+        pDoc->StartUndo( UNDO_START, NULL );
+         bool bIllegalException = false;
+         bool bRuntimeException = false;
+@@ -1708,8 +1728,34 @@ uno::Reference< text::XTextContent > SwX
+             for(sal_Int32 nProp = 0; nProp < rFrameProperties.getLength(); ++nProp)
+                 pNewFrame->SwXFrame::setPropertyValue(pValues[nProp].Name, pValues[nProp].Value);
+ 
++            {//has to be in a block to remove the SwIndexes before DelFullPara is called    
+             uno::Reference< text::XTextRange> xInsertTextRange = new SwXTextRange(aStartPam, this);
+             pNewFrame->attach( xInsertTextRange );
++                pNewFrame->setName(pDoc->GetUniqueFrameName());
++            }
++            
++            if( !aStartPam.GetTxt().Len() )
++            {
++                
++                bool bMoved = false;
++                {//has to be in a block to remove the SwIndexes before DelFullPara is called    
++                    SwPaM aMovePam( *aStartPam.GetNode() );
++                    if( aMovePam.Move( fnMoveForward, fnGoCntnt ) )
++                    {
++                        //move the anchor to the next paragraph
++                        SwFmtAnchor aNewAnchor( pNewFrame->GetFrmFmt()->GetAnchor() );
++                        aNewAnchor.SetAnchor( aMovePam.Start() );
++                        pDoc->SetAttr( aNewAnchor, *pNewFrame->GetFrmFmt() );
++                    }
++                    bMoved = true;
++                }
++                if(bMoved)
++                {
++                    aStartPam.DeleteMark();
++//                    SwPaM aDelPam( *aStartPam.GetNode() );
++                    pDoc->DelFullPara(aStartPam/*aDelPam*/);
++                }
++            }
+         }
+         catch( lang::IllegalArgumentException& rIllegal )
+         {
