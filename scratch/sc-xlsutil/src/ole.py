@@ -9,9 +9,8 @@ from globals import getSignedInt
 
 from globals import output
 
-def printSep (c='-', w=68, prefix=''):
-    print(prefix + c*w)
 
+class NoRootStorage(Exception): pass
 
 class ByteOrder:
     LittleEndian = 0
@@ -41,7 +40,7 @@ class Header(object):
             return ByteOrder.Unknown
 
 
-    def __init__ (self, bytes):
+    def __init__ (self, bytes, params):
         self.bytes = bytes
         self.MSAT = None
 
@@ -63,6 +62,7 @@ class Header(object):
         self.secSize = 512
         self.secSizeShort = 64
 
+        self.params = params
 
     def getSectorSize (self):
         return 2**self.secSize
@@ -89,9 +89,16 @@ class Header(object):
                 output("%2.2X "%ord(b))
             output("\n")
 
+        def printSep (c='-', w=68, prefix=''):
+            print(prefix + c*w)
+
         printSep('=', 68)
         print("Compound Document Header")
         printSep('-', 68)
+
+        if self.params.Debug:
+            globals.dumpBytes(self.bytes[0:512])
+            printSep('-', 68)
 
         # document ID and unique ID
         output("Document ID: ")
@@ -174,7 +181,7 @@ class Header(object):
         self.numSecMSAT = getSignedInt(self.bytes[72:76])
 
         # master sector allocation table
-        self.MSAT = MSAT(2**self.secSize, self.bytes)
+        self.MSAT = MSAT(2**self.secSize, self.bytes, self.params)
 
         # First part of MSAT consisting of an array of up to 109 sector IDs.
         # Each sector ID is 4 bytes in length.
@@ -204,7 +211,7 @@ class Header(object):
         chain = self.getSAT().getSectorIDChain(ssatID)
         if len(chain) == 0:
             return None
-        obj = SSAT(2**self.secSize, self.bytes)
+        obj = SSAT(2**self.secSize, self.bytes, self.params)
         for secID in chain:
             obj.addSector(secID)
         obj.buildArray()
@@ -218,7 +225,7 @@ class Header(object):
         chain = self.getSAT().getSectorIDChain(dirID)
         if len(chain) == 0:
             return None
-        obj = Directory(self)
+        obj = Directory(self, self.params)
         for secID in chain:
             obj.addSector(secID)
         return obj
@@ -238,11 +245,13 @@ sector IDs that point to all the sectors that are used by the sector
 allocation table (SAT).  The actual SAT are to be constructed by combining 
 all the sectors pointed by the sector IDs in order of occurrence.
 """
-    def __init__ (self, sectorSize, bytes):
+    def __init__ (self, sectorSize, bytes, params):
         self.sectorSize = sectorSize
         self.secIDs = []
         self.bytes = bytes
         self.__SAT = None
+
+        self.params = params
 
     def appendSectorID (self, id):
         self.secIDs.append(id)
@@ -267,7 +276,7 @@ all the sectors pointed by the sector IDs in order of occurrence.
         if self.__SAT != None:
             return self.__SAT
 
-        obj = SAT(self.sectorSize, self.bytes)
+        obj = SAT(self.sectorSize, self.bytes, self.params)
         for id in self.secIDs:
             obj.addSector(id)
         obj.buildArray()
@@ -278,11 +287,13 @@ all the sectors pointed by the sector IDs in order of occurrence.
 class SAT(object):
     """Sector Allocation Table (SAT)
 """
-    def __init__ (self, sectorSize, bytes):
+    def __init__ (self, sectorSize, bytes, params):
         self.sectorSize = sectorSize
         self.sectorIDs = []
         self.bytes = bytes
         self.array = []
+
+        self.params = params
 
 
     def getSectorSize (self):
@@ -308,11 +319,15 @@ class SAT(object):
                 self.array.append(id)
 
 
-    def output (self):
-        print('')
-        print("="*68)
-        print("Sector Allocation Table (SAT)")
-        print("-"*68)
+    def outputRawBytes (self):
+        bytes = []
+        for secID in self.sectorIDs:
+            pos = 512 + secID*self.sectorSize
+            bytes.extend(self.bytes[pos:pos+self.sectorSize])
+        globals.dumpBytes(bytes, 512)
+
+
+    def outputArrayStats (self):
         sectorTotal = len(self.array)
         sectorP  = 0       # >= 0
         sectorM1 = 0       # -1
@@ -347,6 +362,21 @@ class SAT(object):
         print("* other sector count:        %4d"%sectorMElse)
 
 
+    def output (self):
+        print('')
+        print("="*68)
+        print("Sector Allocation Table (SAT)")
+        print("-"*68)
+        if self.params.Debug:
+            self.outputRawBytes()
+            print("-"*68)
+            for i in xrange(0, len(self.array)):
+                print("%5d: %5d"%(i, self.array[i]))
+            print("-"*68)
+
+        self.outputArrayStats()
+
+
     def getSectorIDChain (self, initID):
         if initID < 0:
             return []
@@ -370,21 +400,27 @@ The first sector ID of SSAT is in the header, and the IDs of the remaining
 sectors are contained in the SAT as a sector ID chain.
 """
 
-    def __init__ (self, sectorSize, bytes):
-        SAT.__init__(self, sectorSize, bytes)
-        return
-
     def output (self):
         print('')
         print("="*68)
         print("Short Sector Allocation Table (SSAT)")
         print("-"*68)
-        for i in xrange(0, len(self.array)):
-            item = self.array[i]
-            output("%3d : %3d\n"%(i, item))
+        if self.params.Debug:
+            self.outputRawBytes()
+            print("-"*68)
+            for i in xrange(0, len(self.array)):
+                item = self.array[i]
+                output("%3d : %3d\n"%(i, item))
+
+        self.outputArrayStats()
 
 
 class Directory(object):
+    """Directory Entries
+
+This stream contains a list of directory entries that are stored within the
+entire file stream.
+"""
 
     class Type:
         Empty = 0
@@ -414,9 +450,10 @@ class Directory(object):
             self.TimeModified = None
             self.StreamSectorID = -2
             self.StreamSize = 0
+            self.bytes = []
 
 
-    def __init__ (self, header):
+    def __init__ (self, header, params):
         self.sectorSize = header.getSectorSize()
         self.bytes = header.bytes
         self.minStreamSize = header.minStreamSize
@@ -425,7 +462,21 @@ class Directory(object):
         self.SAT = header.getSAT()
         self.SSAT = header.getSSAT()
         self.header = header
-        self.posRootStorage = None
+        self.RootStorage = None
+        self.RootStorageBytes = []
+        self.params = params
+
+
+    def __buildRootStorageBytes (self):
+        if self.RootStorage == None:
+            # no root storage exists.
+            return
+
+        firstSecID = self.RootStorage.StreamSectorID
+        chain = self.header.getSAT().getSectorIDChain(firstSecID)
+        for secID in chain:
+            pos = 512 + secID*self.sectorSize
+            self.RootStorageBytes.extend(self.header.bytes[pos:pos+self.sectorSize])
 
 
     def __getRawStream (self, entry):
@@ -435,14 +486,23 @@ class Directory(object):
         elif entry.StreamLocation == StreamLocation.SSAT:
             chain = self.header.getSSAT().getSectorIDChain(entry.StreamSectorID)
 
+
+        if entry.StreamLocation == StreamLocation.SSAT:
+            # Get the root storage stream.
+            if self.RootStorage == None:
+                raise NoRootStorage
+
+            bytes = []
+            self.__buildRootStorageBytes()
+            size = self.header.getShortSectorSize()
+            for id in chain:
+                pos = id*size
+                bytes.extend(self.RootStorageBytes[pos:pos+size])
+            return bytes
+
         offset = 512
         size = self.header.getSectorSize()
         bytes = []
-        if entry.StreamLocation == StreamLocation.SSAT:
-            # get root storage position
-            offset = self.posRootStorage
-            size = self.header.getShortSectorSize()
-
         for id in chain:
             pos = offset + id*size
             bytes.extend(self.header.bytes[pos:pos+size])
@@ -494,6 +554,11 @@ class Directory(object):
             print("name: %s   (name buffer size: %d bytes)"%(name, entry.CharBufferSize))
         else:
             print("name: [empty]   (name buffer size: %d bytes)"%entry.CharBufferSize)
+
+        if self.params.Debug:
+            print("-"*68)
+            globals.dumpBytes(entry.bytes)
+            print("-"*68)
 
         output("type: ")
         if entry.Type == Directory.Type.Empty:
@@ -614,6 +679,7 @@ class Directory(object):
 
     def parseDirEntry (self, bytes):
         entry = Directory.Entry()
+        entry.bytes = bytes
         name = globals.getUTF8FromUTF16(bytes[0:64])
         entry.Name = name
         entry.CharBufferSize = getSignedInt(bytes[64:66])
@@ -637,7 +703,8 @@ class Directory(object):
             entry.StreamLocation = StreamLocation.SSAT
 
         if entry.Type == Directory.Type.RootStorage and entry.StreamSectorID >= 0:
-            self.posRootStorage = 512 + entry.StreamSectorID*self.header.getSectorSize()
+            # This is an existing root storage.
+            self.RootStorage = entry
 
         return entry
 

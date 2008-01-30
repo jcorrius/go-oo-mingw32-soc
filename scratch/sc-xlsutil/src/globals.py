@@ -1,7 +1,13 @@
 
-import sys, struct
+import sys, struct, math
 
 class ByteConvertError(Exception): pass
+
+
+class Params(object):
+    def __init__ (self):
+        self.Debug = False
+
 
 def output (msg):
     sys.stdout.write(msg)
@@ -61,16 +67,33 @@ def dumpBytes (chars, subDivide=None):
     subDivideLine = None
     if subDivide != None:
         subDivideLine = subDivide/16
-    for i in xrange(0, len(chars)):
+
+    flushBytes = True
+    charLen = len(chars)
+    labelWidth = int(math.ceil(math.log(charLen, 10)))
+    for i in xrange(0, charLen):
+        if (i+1)%16 == 1:
+            # print line header with seek position
+            fmt = "%%%d.%dd: "%(labelWidth, labelWidth)
+            output(fmt%i)
+
         byte = ord(chars[i])
         output("%2.2X "%byte)
+        flushBytes = True
+
+        if (i+1)%4 == 0:
+            # put extra space at every 4 bytes.
+            output(" ")
+
         if (i+1)%16 == 0:
             output("\n")
+            flushBytes = False
             if subDivideLine != None and (line+1)%subDivideLine == 0:
                 output("\n")
             line += 1
 
-    output("\n")
+    if flushBytes:
+        output("\n")
 
 
 def getSectorPos (secID, secSize):

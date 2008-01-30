@@ -255,7 +255,7 @@ recDataRev = {
 
 class XLStream(object):
 
-    def __init__ (self, chars):
+    def __init__ (self, chars, params):
         self.chars = chars
         self.size = len(self.chars)
         self.pos = 0
@@ -264,6 +264,8 @@ class XLStream(object):
         self.header = None
         self.MSAT = None
         self.SAT = None
+
+        self.params = params
 
     def __printSep (self, c='-', w=68, prefix=''):
         print(prefix + c*w)
@@ -276,7 +278,7 @@ class XLStream(object):
         print('')
 
     def printHeader (self):
-        self.header = ole.Header(self.chars)
+        self.header = ole.Header(self.chars, self.params)
         self.pos = self.header.parse()
         self.header.output()
         self.MSAT = self.header.getMSAT()
@@ -321,7 +323,7 @@ class XLStream(object):
         bytes = []
         if obj != None:
             bytes = obj.getRawStreamByName(name)
-        strm = XLDirStream(bytes)
+        strm = XLDirStream(bytes, self.params)
         return strm
 
 class DirType:
@@ -330,11 +332,13 @@ class DirType:
 
 class XLDirStream(object):
 
-    def __init__ (self, bytes):
+    def __init__ (self, bytes, params):
         self.bytes = bytes
         self.size = len(self.bytes)
         self.pos = 0
         self.type = DirType.Workbook
+
+        self.params = params
 
     def seekBOF (self):
         while self.pos < self.size-1:

@@ -18,8 +18,9 @@ Options:
 
 class XLDumper(object):
 
-    def __init__ (self, filepath):
+    def __init__ (self, filepath, params):
         self.filepath = filepath
+        self.params = params
 
     def __printDirHeader (self, dirname, byteLen):
         dirname = globals.decodeName(dirname)
@@ -30,13 +31,13 @@ class XLDumper(object):
 
     def dump (self):
         file = open(self.filepath, 'rb')
-        strm = stream.XLStream(file.read())
+        strm = stream.XLStream(file.read(), self.params)
         file.close()
         strm.printStreamInfo()
         strm.printHeader()
         strm.printMSAT()
         strm.printSAT()
-#       strm.printSSAT()
+        strm.printSSAT()
         strm.printDirectory()
         dirnames = strm.getDirectoryNames()
         for dirname in dirnames:
@@ -81,12 +82,15 @@ def main (args):
         usage(exname)
         return
 
+    params = globals.Params()
     try:
-        opts, args = getopt.getopt(args, "h", ["help"])
+        opts, args = getopt.getopt(args, "h", ["help", "debug"])
         for opt, arg in opts:
             if opt in ['-h', '--help']:
                 usage(exname)
                 return
+            elif opt in ['--debug']:
+                params.Debug = True
             else:
                 error("unknown option %s\n"%opt)
                 usage()
@@ -96,7 +100,7 @@ def main (args):
         usage(exname)
         return
 
-    dumper = XLDumper(args[0])
+    dumper = XLDumper(args[0], params)
     dumper.dump()
 
 if __name__ == '__main__':
