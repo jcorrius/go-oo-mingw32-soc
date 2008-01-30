@@ -52,12 +52,16 @@ class BOF(BaseRecordHandler):
         fileHistoryFlags = globals.getRawBytes(self.bytes[8:12])
         lowestExcelVer = globals.getSignedInt(self.bytes[12:16])
 
-        self.appendLine("BIFF version: " + ver)
-        self.appendLine("build ID: %d"%buildID)
-        self.appendLine("build year: %d"%buildYear)
-        self.appendLine("type: %s"%BOF.Type[dataType])
-        self.appendLine("file history flags: " + fileHistoryFlags)
-        self.appendLine("lowest Excel version: %d"%lowestExcelVer)
+        try:
+            self.appendLine("BIFF version: " + ver)
+            self.appendLine("build ID: %d"%buildID)
+            self.appendLine("build year: %d"%buildYear)
+            self.appendLine("type: %s"%BOF.Type[dataType])
+            self.appendLine("file history flags: " + fileHistoryFlags)
+            self.appendLine("lowest Excel version: %d"%lowestExcelVer)
+        except:
+            pass
+
 
 
 class Formula(BaseRecordHandler):
