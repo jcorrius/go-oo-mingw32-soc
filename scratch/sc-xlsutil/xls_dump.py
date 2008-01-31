@@ -84,13 +84,15 @@ def main (args):
 
     params = globals.Params()
     try:
-        opts, args = getopt.getopt(args, "h", ["help", "debug"])
+        opts, args = getopt.getopt(args, "h", ["help", "debug", "show-sector-chain"])
         for opt, arg in opts:
             if opt in ['-h', '--help']:
                 usage(exname)
                 return
             elif opt in ['--debug']:
-                params.Debug = True
+                params.debug = True
+            elif opt in ['--show-sector-chain']:
+                params.showSectorChain = True
             else:
                 error("unknown option %s\n"%opt)
                 usage()

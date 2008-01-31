@@ -6,14 +6,15 @@ class ByteConvertError(Exception): pass
 
 class Params(object):
     def __init__ (self):
-        self.Debug = False
+        self.debug = False
+        self.showSectorChain = False
 
 
 def output (msg):
     sys.stdout.write(msg)
 
 def error (msg):
-    sys.stderr.write(msg)
+    sys.stderr.write("Error: " + msg)
 
 
 def decodeName (name):
@@ -22,7 +23,7 @@ def decodeName (name):
     if len(name) == 0:
         return name
 
-    if ord(name[0]) <= 5:
+    if ord(name[0]) <= 20:
         name = "<%2.2Xh>"%ord(name[0]) + name[1:]
 
     return name

@@ -235,6 +235,7 @@ class Name(BaseRecordHandler):
         statTextLen = self.__getInt(13, 1)
 
         name, byteLen = globals.getRichText(self.bytes[14:], nameLen)
+        name = globals.decodeName(name)
         tokenPos = 14 + byteLen
         tokenText = globals.getRawBytes(self.bytes[tokenPos:tokenPos+formulaLen], True, False)
         o = formula.FormulaParser(self.bytes[tokenPos:tokenPos+formulaLen], False)

@@ -17,7 +17,7 @@ class ByteOrder:
     BigEndian    = 1
     Unknown      = 2
 
-class SectorType:
+class BlockType:
     MSAT      = 0
     SAT       = 1
     SSAT      = 2
@@ -72,12 +72,12 @@ class Header(object):
         return 2**self.secSizeShort
 
 
-    def getFirstSectorID (self, sectorType):
-        if sectorType == SectorType.MSAT:
+    def getFirstSectorID (self, blockType):
+        if blockType == BlockType.MSAT:
             return self.__secIDFirstMSAT
-        elif sectorType == SectorType.SSAT:
+        elif blockType == BlockType.SSAT:
             return self.__secIDFirstSSAT
-        elif sectorType == SectorType.Directory:
+        elif blockType == BlockType.Directory:
             return self.__secIDFirstDirStrm
         return -2
 
@@ -96,7 +96,7 @@ class Header(object):
         print("Compound Document Header")
         printSep('-', 68)
 
-        if self.params.Debug:
+        if self.params.debug:
             globals.dumpBytes(self.bytes[0:512])
             printSep('-', 68)
 
@@ -145,7 +145,7 @@ class Header(object):
             print("Sector ID of the first MSAT sector: [end of chain]")
         else:
             # There is more sector IDs than 109 IDs stored in the header.
-            print("Sector ID of the first MSAT sector: %d"%(512+self.__secIDFirstMSAT*(2**self.secSize)))
+            print("Sector ID of the first MSAT sector: %d"%(self.__secIDFirstMSAT))
 
         print("Total number of sectors used to store additional MSAT: %d"%self.numSecMSAT)
 
@@ -193,7 +193,29 @@ class Header(object):
 
             self.MSAT.appendSectorID(id)
 
-        return 512
+        if self.__secIDFirstMSAT != -2:
+            # additional sectors are used to store more SAT sector IDs.
+            secID = self.__secIDFirstMSAT
+            size = self.getSectorSize()
+            inLoop = True
+            while inLoop:
+                pos = 512 + secID*size
+                bytes = self.bytes[pos:pos+size]
+                n = int(size/4)
+                for i in xrange(0, n):
+                    pos = i*4
+                    id = getSignedInt(bytes[pos:pos+4])
+                    if id < 0:
+                        inLoop = False
+                        break
+                    elif i == n-1:
+                        # last sector ID - points to the next MSAT sector.
+                        secID = id
+                        break
+                    else:
+                        self.MSAT.appendSectorID(id)
+
+        return 512 
 
 
     def getMSAT (self):
@@ -205,7 +227,7 @@ class Header(object):
 
 
     def getSSAT (self):
-        ssatID = self.getFirstSectorID(SectorType.SSAT)
+        ssatID = self.getFirstSectorID(BlockType.SSAT)
         if ssatID < 0:
             return None
         chain = self.getSAT().getSectorIDChain(ssatID)
@@ -219,7 +241,7 @@ class Header(object):
 
 
     def getDirectory (self):
-        dirID = self.getFirstSectorID(SectorType.Directory)
+        dirID = self.getFirstSectorID(BlockType.Directory)
         if dirID < 0:
             return None
         chain = self.getSAT().getSectorIDChain(dirID)
@@ -367,7 +389,7 @@ class SAT(object):
         print("="*68)
         print("Sector Allocation Table (SAT)")
         print("-"*68)
-        if self.params.Debug:
+        if self.params.debug:
             self.outputRawBytes()
             print("-"*68)
             for i in xrange(0, len(self.array)):
@@ -405,7 +427,7 @@ sectors are contained in the SAT as a sector ID chain.
         print("="*68)
         print("Short Sector Allocation Table (SSAT)")
         print("-"*68)
-        if self.params.Debug:
+        if self.params.debug:
             self.outputRawBytes()
             print("-"*68)
             for i in xrange(0, len(self.array)):
@@ -555,7 +577,7 @@ entire file stream.
         else:
             print("name: [empty]   (name buffer size: %d bytes)"%entry.CharBufferSize)
 
-        if self.params.Debug:
+        if self.params.debug:
             print("-"*68)
             globals.dumpBytes(entry.bytes)
             print("-"*68)
@@ -614,8 +636,8 @@ entire file stream.
                 chain = satObj.getSectorIDChain(entry.StreamSectorID)
                 print("sector count: %d"%len(chain))
                 print("total sector size: %d"%(len(chain)*secSize))
-                self.__outputSectorChain(chain)
-
+                if self.params.showSectorChain:
+                    self.__outputSectorChain(chain)
 
 
     def __outputSectorChain (self, chain):

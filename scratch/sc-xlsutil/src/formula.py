@@ -6,6 +6,7 @@ class InvalidCellAddress(Exception): pass
 
 def toColName (colID):
     if colID > 255:
+        globals.error("Column ID greater than 255")
         raise InvalidCellAddress
     n1 = colID % 26
     n2 = int(colID/26)
@@ -43,6 +44,7 @@ class CellRange(object):
 
 def parseCellAddress (bytes):
     if len(bytes) != 4:
+        globals.error("Byte size is %d but expected 4 bytes for cell address.\n"%len(bytes))
         raise InvalidCellAddress
 
     row = globals.getSignedInt(bytes[0:2])
@@ -87,6 +89,7 @@ return the same value it receives without incrementing it.
 """
     def __init__ (self, tokens):
         self.tokens = tokens
+        self.size = len(self.tokens)
 
     def parse (self, i):
         return i
@@ -132,15 +135,24 @@ class NameX(TokenBase):
 class Ref3d(TokenBase):
     """3D reference or external reference to a cell"""
 
+    def __init__ (self, tokens):
+        TokenBase.__init__(self, tokens)
+        self.cell = None
+
     def parse (self, i):
-        i += 1
-        self.refEntryId = globals.getSignedInt(self.tokens[i:i+2])
-        i += 2
-        self.cell = parseCellAddress(self.tokens[i:i+4])
-        i += 4
+        try:
+            i += 1
+            self.refEntryId = globals.getSignedInt(self.tokens[i:i+2])
+            i += 2
+            self.cell = parseCellAddress(self.tokens[i:i+4])
+            i += 4
+        except InvalidCellAddress:
+            pass
         return i
 
     def getText (self):
+        if self.cell == None:
+            return ''
         cellName = self.cell.getName()
         return "<3dref externSheetID='%d' cellAddress='%s'>"%(self.refEntryId, cellName)
 
@@ -178,7 +190,7 @@ tokenMap = {
     0x7A: Ref3d,
 
     # last item
-    0xFF: None
+  0xFFFF: None
 }
 
 class FormulaParser(object):
