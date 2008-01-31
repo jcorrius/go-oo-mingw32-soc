@@ -50,6 +50,7 @@ class XLDumper(object):
                 success = True
                 while success: 
                     success = self.__readSheetSubStream(dirstrm)
+
             elif dirname == "Revision Log":
                 dirstrm.type = stream.DirType.RevisionLog
                 try:
@@ -63,16 +64,15 @@ class XLDumper(object):
 
 
     def __readSheetSubStream (self, strm):
-        # read bytes from BOF to EOF.
-        strm.seekBOF()
-        try:
-            header = 0x0000
-            while header != 0x000A:
-                header = strm.readRecord()
-            return True
-
-        except stream.EndOfStream:
-            return False
+       try:
+           # read bytes from BOF to EOF.
+           header = 0x0000
+           while header != 0x000A:
+               header = strm.readRecord()
+           return True
+    
+       except stream.EndOfStream:
+           return False
 
 
 def main (args):

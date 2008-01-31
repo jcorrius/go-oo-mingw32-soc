@@ -340,14 +340,6 @@ class XLDirStream(object):
 
         self.params = params
 
-    def seekBOF (self):
-        while self.pos < self.size-1:
-            b1, b2 = ord(self.bytes[self.pos]), ord(self.bytes[self.pos+1])
-            word = b1 + b2*256
-            if word == 0x0809:
-                self.version = 'BIFF5/BIFF8'
-                return
-            self.pos += 2
 
     def readRaw (self, size=1):
         # assume little endian

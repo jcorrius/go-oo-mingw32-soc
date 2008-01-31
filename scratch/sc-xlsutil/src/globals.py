@@ -68,9 +68,13 @@ def dumpBytes (chars, subDivide=None):
     if subDivide != None:
         subDivideLine = subDivide/16
 
-    flushBytes = True
     charLen = len(chars)
+    if charLen == 0:
+        # no bytes to dump.
+        return
+
     labelWidth = int(math.ceil(math.log(charLen, 10)))
+    flushBytes = False
     for i in xrange(0, charLen):
         if (i+1)%16 == 1:
             # print line header with seek position
