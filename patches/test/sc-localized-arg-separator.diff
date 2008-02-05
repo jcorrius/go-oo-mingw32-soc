@@ -1,3 +1,14 @@
+diff -ur sc.clean/inc/compiler.hxx sc/inc/compiler.hxx
+--- sc.clean/inc/compiler.hxx	2007-10-02 11:20:55.000000000 -0400
++++ sc/inc/compiler.hxx	2008-02-05 00:24:29.000000000 -0500
+@@ -280,6 +280,7 @@
+ 											// ignore errors and create RPN nevertheless
+ 	const Convention *pConv;
+ 	BOOL		bImportXML;
++    bool        mbCompileXML;
+     bool        mbCloseBrackets;            // whether to close open brackets automatically, default TRUE
+ 
+ 	BOOL   GetToken();
 diff -ur sc.clean/source/core/src/compiler.src sc/source/core/src/compiler.src
 --- sc.clean/source/core/src/compiler.src	2007-07-03 11:48:53.000000000 -0400
 +++ sc/source/core/src/compiler.src	2008-02-04 12:27:34.000000000 -0500
@@ -27,9 +38,39 @@ diff -ur sc.clean/source/core/src/compiler.src sc/source/core/src/compiler.src
      String SC_OPCODE_PERCENT_SIGN { Text = "%" ; };
  	String SC_OPCODE_ADD { Text = "+" ; };
  	String SC_OPCODE_SUB { Text = "-" ; };
+diff -ur sc.clean/source/core/tool/compiler.cxx sc/source/core/tool/compiler.cxx
+--- sc.clean/source/core/tool/compiler.cxx	2007-10-02 11:21:24.000000000 -0400
++++ sc/source/core/tool/compiler.cxx	2008-02-05 00:26:08.000000000 -0500
+@@ -972,6 +972,7 @@
+         bCompileForFAP( FALSE ),
+         bIgnoreErrors( FALSE ),
+         bImportXML ( FALSE ),
++        mbCompileXML( false ),
+         mbCloseBrackets( true )
+ {
+     if (!nAnzStrings)
+@@ -1068,6 +1069,7 @@
+ void ScCompiler::SetCompileXML( BOOL bVal )
+ {
+     SetRefConvention( bVal ? pConvOOO_A1_XML : pConvOOO_A1 );
++    mbCompileXML = true;
+ }
+ void ScCompiler::SetRefConvention( ScAddress::Convention eConv )
+ {
+@@ -4384,6 +4386,10 @@
+     }
+     else if( eOp >= ocInternalBegin && eOp <= ocInternalEnd )
+         rBuffer.appendAscii( pInternal[ eOp - ocInternalBegin ] );
++    else if ( mbCompileXML && eOp == ocSep )
++        // special case for XML export.  arg separator is localized, but the
++        // XML file must use ';' as the arg separator.
++        rBuffer.append(sal_Unicode(';'));
+     else if( (USHORT) eOp < nAnzStrings)        // Keyword:
+         rBuffer.append(pSymbolTable[eOp]);
+     else
 diff -ur sc.clean/source/filter/xml/XMLConverter.cxx sc/source/filter/xml/XMLConverter.cxx
 --- sc.clean/source/filter/xml/XMLConverter.cxx	2007-05-22 16:01:59.000000000 -0400
-+++ sc/source/filter/xml/XMLConverter.cxx	2008-02-04 21:12:30.000000000 -0500
++++ sc/source/filter/xml/XMLConverter.cxx	2008-02-04 22:32:43.000000000 -0500
 @@ -60,6 +60,11 @@
  #ifndef SC_DOCUMENT_HXX
  #include "document.hxx"
@@ -42,37 +83,48 @@ diff -ur sc.clean/source/filter/xml/XMLConverter.cxx sc/source/filter/xml/XMLCon
  
  #ifndef _DATETIME_HXX
  #include <tools/datetime.hxx>
-@@ -79,7 +84,29 @@
+@@ -79,9 +84,39 @@
  using namespace ::rtl;
  using namespace ::com::sun::star;
  using namespace xmloff::token;
 +using ::osl::MutexGuard;
 +using ::osl::Mutex;
  
-+::std::auto_ptr<ScXMLConverter::ResContainer> ScXMLConverter::spResContainer(NULL);
++// ============================================================================
+ 
+-//___________________________________________________________________
++::std::auto_ptr<ScXMLConverter::FuncNameResContainer> ScXMLConverter::spResContainer(NULL);
 +
-+ScXMLConverter::ResContainer::ResContainer() : Resource( ScResId(RID_SC_FUNCTION_NAMES) )
++ScXMLConverter::FuncNameResContainer::FuncNameResContainer() : Resource( ScResId(RID_SC_FUNCTION_NAMES) )
 +{
 +    ResMgr& rMgr = *SC_MOD()->GetResMgr();
 +
-+    ScResId aRes(SC_OPCODE_SEP);
-+    aRes.SetRT(RSC_STRING);
-+    if (IsAvailableRes(aRes))
-+        maSep = String(ResId(SC_OPCODE_SEP, rMgr));
++    // Get a localized argument separator.
++    getResStr(SC_OPCODE_SEP, maSep, rMgr);
 +}
 +
-+const ::rtl::OUString ScXMLConverter::ResContainer::getSep() const
++const ::rtl::OUString ScXMLConverter::FuncNameResContainer::getSep() const
 +{
 +    return maSep;
 +}
 +
-+ScXMLConverter::ResContainer::~ResContainer()
++void ScXMLConverter::FuncNameResContainer::getResStr(USHORT nId, rtl::OUString& rStr, ResMgr& rMgr)
++{
++    ScResId aRes(nId);
++    aRes.SetRT(RSC_STRING);
++    if (IsAvailableRes(aRes))
++        rStr = String(ResId(nId, rMgr));
++}
++
++ScXMLConverter::FuncNameResContainer::~FuncNameResContainer()
 +{
 +}
++
++// ============================================================================
  
- //___________________________________________________________________
- 
-@@ -349,6 +376,9 @@
+ ScDocument*	ScXMLConverter::GetScDocument( uno::Reference< frame::XModel > xModel )
+ {
+@@ -349,6 +384,9 @@
  
  void ScXMLConverter::ParseFormula(OUString& sFormula, const sal_Bool bIsFormula)
  {
@@ -82,7 +134,7 @@ diff -ur sc.clean/source/filter/xml/XMLConverter.cxx sc/source/filter/xml/XMLCon
  	OUStringBuffer sBuffer(sFormula.getLength());
  	sal_Bool bInQuotationMarks(sal_False);
  	sal_Bool bInDoubleQuotationMarks(sal_False);
-@@ -367,6 +397,11 @@
+@@ -367,6 +405,11 @@
  			++nCountBraces;
  		else if (sFormula[i] == ']')
  			nCountBraces--;
@@ -94,7 +146,7 @@ diff -ur sc.clean/source/filter/xml/XMLConverter.cxx sc/source/filter/xml/XMLCon
  		else if	((sFormula[i] != '.') ||
  				((nCountBraces == 0) && bIsFormula) ||
  				!((chPrevious == '[') || (chPrevious == ':') || (chPrevious == ' ') || (chPrevious == '=')))
-@@ -414,3 +449,9 @@
+@@ -414,3 +457,9 @@
  	rDateTime = aTempDateTime;
  }
  
@@ -102,11 +154,11 @@ diff -ur sc.clean/source/filter/xml/XMLConverter.cxx sc/source/filter/xml/XMLCon
 +{
 +    MutexGuard aGuard(Mutex::getGlobalMutex());
 +    if (!spResContainer.get())
-+        spResContainer.reset(new ResContainer);    
++        spResContainer.reset(new FuncNameResContainer);    
 +}
 diff -ur sc.clean/source/filter/xml/XMLConverter.hxx sc/source/filter/xml/XMLConverter.hxx
 --- sc.clean/source/filter/xml/XMLConverter.hxx	2007-05-22 16:02:13.000000000 -0400
-+++ sc/source/filter/xml/XMLConverter.hxx	2008-02-04 20:54:40.000000000 -0500
++++ sc/source/filter/xml/XMLConverter.hxx	2008-02-04 22:32:43.000000000 -0500
 @@ -50,6 +50,8 @@
  #include <rtl/ustrbuf.hxx>
  #endif
@@ -125,7 +177,7 @@ diff -ur sc.clean/source/filter/xml/XMLConverter.hxx sc/source/filter/xml/XMLCon
  class ScDocument;
  class DateTime;
  class SvXMLUnitConverter;
-@@ -140,6 +144,22 @@
+@@ -140,6 +144,24 @@
  	static void			ConvertCoreToAPIDateTime(const DateTime& aDateTime, com::sun::star::util::DateTime& rDateTime);
  
  	static void         ConvertAPIToCoreDateTime(const com::sun::star::util::DateTime& aDateTime, DateTime& rDateTime);
@@ -134,18 +186,19 @@ diff -ur sc.clean/source/filter/xml/XMLConverter.hxx sc/source/filter/xml/XMLCon
 +    static void         Init();
 +
 +private:
-+    class ResContainer : public Resource
++
++    class FuncNameResContainer : public Resource
 +    {
 +    public:
-+        explicit ResContainer();
-+        ~ResContainer();
++        explicit FuncNameResContainer();
++        ~FuncNameResContainer();
 +
 +        const ::rtl::OUString getSep() const;
 +    private:
++        void getResStr(USHORT nId, rtl::OUString& rStr, ResMgr& rMgr);
 +        ::rtl::OUString maSep;
 +    };
-+    static ::std::auto_ptr<ResContainer> spResContainer;
++    static ::std::auto_ptr<FuncNameResContainer> spResContainer;
  };
  
  
-Only in sc: unxlngi6.pro
