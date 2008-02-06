@@ -1,204 +1,215 @@
-diff -ur sc.clean/inc/compiler.hxx sc/inc/compiler.hxx
---- sc.clean/inc/compiler.hxx	2007-10-02 11:20:55.000000000 -0400
-+++ sc/inc/compiler.hxx	2008-02-05 00:24:29.000000000 -0500
-@@ -280,6 +280,7 @@
- 											// ignore errors and create RPN nevertheless
- 	const Convention *pConv;
- 	BOOL		bImportXML;
-+    bool        mbCompileXML;
-     bool        mbCloseBrackets;            // whether to close open brackets automatically, default TRUE
- 
- 	BOOL   GetToken();
-diff -ur sc.clean/source/core/src/compiler.src sc/source/core/src/compiler.src
---- sc.clean/source/core/src/compiler.src	2007-07-03 11:48:53.000000000 -0400
-+++ sc/source/core/src/compiler.src	2008-02-04 12:27:34.000000000 -0500
-@@ -51,7 +51,11 @@
-     String SC_OPCODE_ARRAY_CLOSE { Text = "}" ; };
-     String SC_OPCODE_ARRAY_ROW_SEP { Text = "|" ; };
-     String SC_OPCODE_ARRAY_COL_SEP { Text = ";" ; };
--	String SC_OPCODE_SEP { Text = ";" ; };
-+    String SC_OPCODE_SEP
-+    { 
-+        Text [ en-US ] = "," ; 
-+        Text = ";" ;
-+    };
-     String SC_OPCODE_PERCENT_SIGN { Text = "%" ; };
- 	String SC_OPCODE_ADD { Text = "+" ; };
- 	String SC_OPCODE_SUB { Text = "-" ; };
-@@ -1179,7 +1183,11 @@
-     String SC_OPCODE_ARRAY_CLOSE { Text = "}" ; };
-     String SC_OPCODE_ARRAY_ROW_SEP { Text = "|" ; };
-     String SC_OPCODE_ARRAY_COL_SEP { Text = ";" ; };
--	String SC_OPCODE_SEP { Text = ";" ; };
-+    String SC_OPCODE_SEP
-+    { 
-+        Text [ en-US ] = "," ; 
-+        Text = ";" ;
-+    };
-     String SC_OPCODE_PERCENT_SIGN { Text = "%" ; };
- 	String SC_OPCODE_ADD { Text = "+" ; };
- 	String SC_OPCODE_SUB { Text = "-" ; };
-diff -ur sc.clean/source/core/tool/compiler.cxx sc/source/core/tool/compiler.cxx
---- sc.clean/source/core/tool/compiler.cxx	2007-10-02 11:21:24.000000000 -0400
-+++ sc/source/core/tool/compiler.cxx	2008-02-05 00:26:08.000000000 -0500
-@@ -972,6 +972,7 @@
-         bCompileForFAP( FALSE ),
-         bIgnoreErrors( FALSE ),
-         bImportXML ( FALSE ),
-+        mbCompileXML( false ),
-         mbCloseBrackets( true )
+diff -urp --exclude=CVS --exclude=unxlngi6.pro --exclude=sc.vpj sc.clean/inc/compiler.hxx sc/inc/compiler.hxx
+--- sc.clean/inc/compiler.hxx	2008-02-05 11:16:54.000000000 -0500
++++ sc/inc/compiler.hxx	2008-02-05 19:41:04.000000000 -0500
+@@ -236,26 +236,6 @@ typedef ::std::hash_map< String, String,
+ class SC_DLLPUBLIC ScCompiler
  {
-     if (!nAnzStrings)
-@@ -1068,6 +1069,7 @@
- void ScCompiler::SetCompileXML( BOOL bVal )
- {
-     SetRefConvention( bVal ? pConvOOO_A1_XML : pConvOOO_A1 );
-+    mbCompileXML = true;
- }
- void ScCompiler::SetRefConvention( ScAddress::Convention eConv )
- {
-@@ -4384,6 +4386,10 @@
-     }
-     else if( eOp >= ocInternalBegin && eOp <= ocInternalEnd )
-         rBuffer.appendAscii( pInternal[ eOp - ocInternalBegin ] );
-+    else if ( mbCompileXML && eOp == ocSep )
-+        // special case for XML export.  arg separator is localized, but the
-+        // XML file must use ';' as the arg separator.
-+        rBuffer.append(sal_Unicode(';'));
-     else if( (USHORT) eOp < nAnzStrings)        // Keyword:
-         rBuffer.append(pSymbolTable[eOp]);
-     else
-diff -ur sc.clean/source/filter/xml/XMLConverter.cxx sc/source/filter/xml/XMLConverter.cxx
---- sc.clean/source/filter/xml/XMLConverter.cxx	2007-05-22 16:01:59.000000000 -0400
-+++ sc/source/filter/xml/XMLConverter.cxx	2008-02-04 22:32:43.000000000 -0500
-@@ -60,6 +60,11 @@
- #ifndef SC_DOCUMENT_HXX
- #include "document.hxx"
- #endif
-+#include "opcode.hxx"
-+#include "scmod.hxx"
-+#include "sc.hrc"
-+#include "scresid.hxx"
-+#include <tools/rcid.h>
+ public:
+-	struct Convention
+-	{
+-		const ScAddress::Convention meConv;
+-		const ULONG*   				mpCharTable;
+-
+-
+-		Convention( ScAddress::Convention eConvP );
+-        virtual ~Convention();
+-
+-		virtual void MakeRefStr( rtl::OUStringBuffer&	rBuffer,
+-								 const ScCompiler&		rCompiler,
+-								 const ComplRefData&	rRef,
+-								 BOOL bSingleRef ) const = 0;
+-		virtual ::com::sun::star::i18n::ParseResult
+-					parseAnyToken( const String& rFormula,
+-								   xub_StrLen nSrcPos,
+-								   const CharClass* pCharClass) const = 0;
+-	};
+-    friend struct Convention;
+-
+     /** Mappings from strings to OpCodes and vice versa. */
+     class OpCodeMap
+     {
+@@ -362,6 +342,30 @@ private:
+     typedef ::boost::shared_ptr< const OpCodeMap > OpCodeMapPtr;
+     typedef ::boost::shared_ptr< OpCodeMap > NonConstOpCodeMapPtr;
  
- #ifndef _DATETIME_HXX
- #include <tools/datetime.hxx>
-@@ -79,9 +84,39 @@
- using namespace ::rtl;
- using namespace ::com::sun::star;
- using namespace xmloff::token;
-+using ::osl::MutexGuard;
-+using ::osl::Mutex;
- 
-+// ============================================================================
- 
--//___________________________________________________________________
-+::std::auto_ptr<ScXMLConverter::FuncNameResContainer> ScXMLConverter::spResContainer(NULL);
-+
-+ScXMLConverter::FuncNameResContainer::FuncNameResContainer() : Resource( ScResId(RID_SC_FUNCTION_NAMES) )
-+{
-+    ResMgr& rMgr = *SC_MOD()->GetResMgr();
-+
-+    // Get a localized argument separator.
-+    getResStr(SC_OPCODE_SEP, maSep, rMgr);
-+}
-+
-+const ::rtl::OUString ScXMLConverter::FuncNameResContainer::getSep() const
-+{
-+    return maSep;
-+}
-+
-+void ScXMLConverter::FuncNameResContainer::getResStr(USHORT nId, rtl::OUString& rStr, ResMgr& rMgr)
-+{
-+    ScResId aRes(nId);
-+    aRes.SetRT(RSC_STRING);
-+    if (IsAvailableRes(aRes))
-+        rStr = String(ResId(nId, rMgr));
-+}
-+
-+ScXMLConverter::FuncNameResContainer::~FuncNameResContainer()
-+{
-+}
-+
-+// ============================================================================
- 
- ScDocument*	ScXMLConverter::GetScDocument( uno::Reference< frame::XModel > xModel )
- {
-@@ -349,6 +384,9 @@
- 
- void ScXMLConverter::ParseFormula(OUString& sFormula, const sal_Bool bIsFormula)
- {
-+    Init();
-+    const rtl::OUString& rSep = spResContainer->getSep();
-+
- 	OUStringBuffer sBuffer(sFormula.getLength());
- 	sal_Bool bInQuotationMarks(sal_False);
- 	sal_Bool bInDoubleQuotationMarks(sal_False);
-@@ -367,6 +405,11 @@
- 			++nCountBraces;
- 		else if (sFormula[i] == ']')
- 			nCountBraces--;
-+        else if (sFormula[i] == ';' && nCountBraces == 0)
-+        {
-+            // localized argument separator
-+            sBuffer.append(rSep);
-+        }
- 		else if	((sFormula[i] != '.') ||
- 				((nCountBraces == 0) && bIsFormula) ||
- 				!((chPrevious == '[') || (chPrevious == ':') || (chPrevious == ' ') || (chPrevious == '=')))
-@@ -414,3 +457,9 @@
- 	rDateTime = aTempDateTime;
- }
- 
-+void ScXMLConverter::Init()
-+{
-+    MutexGuard aGuard(Mutex::getGlobalMutex());
-+    if (!spResContainer.get())
-+        spResContainer.reset(new FuncNameResContainer);    
-+}
-diff -ur sc.clean/source/filter/xml/XMLConverter.hxx sc/source/filter/xml/XMLConverter.hxx
---- sc.clean/source/filter/xml/XMLConverter.hxx	2007-05-22 16:02:13.000000000 -0400
-+++ sc/source/filter/xml/XMLConverter.hxx	2008-02-04 22:32:43.000000000 -0500
-@@ -50,6 +50,8 @@
- #include <rtl/ustrbuf.hxx>
- #endif
- 
-+#include <tools/rc.hxx>
-+
- #ifndef _COM_SUN_STAR_FRAME_XMODEL_HPP_
- #include <com/sun/star/frame/XModel.hpp>
- #endif
-@@ -65,6 +67,8 @@
- #include <com/sun/star/util/DateTime.hpp>
- #endif
- 
-+#include <memory>
-+
- class ScDocument;
- class DateTime;
- class SvXMLUnitConverter;
-@@ -140,6 +144,24 @@
- 	static void			ConvertCoreToAPIDateTime(const DateTime& aDateTime, com::sun::star::util::DateTime& rDateTime);
- 
- 	static void         ConvertAPIToCoreDateTime(const com::sun::star::util::DateTime& aDateTime, DateTime& rDateTime);
-+
-+private:
-+    static void         Init();
-+
-+private:
-+
-+    class FuncNameResContainer : public Resource
++    struct Convention
 +    {
-+    public:
-+        explicit FuncNameResContainer();
-+        ~FuncNameResContainer();
++        const ScAddress::Convention meConv;
++        const ULONG*                mpCharTable;
 +
-+        const ::rtl::OUString getSep() const;
-+    private:
-+        void getResStr(USHORT nId, rtl::OUString& rStr, ResMgr& rMgr);
-+        ::rtl::OUString maSep;
++
++        Convention( ScAddress::Convention eConvP );
++        virtual ~Convention();
++
++        virtual void MakeRefStr( rtl::OUStringBuffer&   rBuffer,
++                                 const ScCompiler&      rCompiler,
++                                 const ComplRefData&    rRef,
++                                 BOOL bSingleRef ) const = 0;
++        virtual ::com::sun::star::i18n::ParseResult
++                    parseAnyToken( const String& rFormula,
++                                   xub_StrLen nSrcPos,
++                                   const CharClass* pCharClass) const = 0;
++
++        virtual const String& GetSymbol( const OpCodeMapPtr& rpMap, OpCode e ) const = 0;
++
++        virtual OpCode GetOpCode( const OpCodeMapPtr& rpMap, const String& rName ) const = 0;
 +    };
-+    static ::std::auto_ptr<FuncNameResContainer> spResContainer;
++    friend struct Convention;
++
+ private:
+ 
+     static NonConstOpCodeMapPtr  mxSymbolsODFF;                          // ODFF symbols
+Only in sc: sc.diff
+diff -urp --exclude=CVS --exclude=unxlngi6.pro --exclude=sc.vpj sc.clean/source/core/data/documen2.cxx sc/source/core/data/documen2.cxx
+--- sc.clean/source/core/data/documen2.cxx	2008-02-05 11:16:59.000000000 -0500
++++ sc/source/core/data/documen2.cxx	2008-02-05 13:39:02.000000000 -0500
+@@ -210,7 +210,7 @@ ScDocument::ScDocument( ScDocumentMode	e
+         nInDdeLinkUpdate( 0 ),
+         bInUnoBroadcast( FALSE ),
+         bInUnoListenerCall( FALSE ),
+-        eAddrConv( ScAddress::CONV_OOO ),
++        eAddrConv( ScAddress::CONV_XL_A1 ),
+         bStyleSheetUsageInvalid( TRUE ),
+         bUndoEnabled( TRUE ),
+         mbAdjustHeightEnabled( true ),
+diff -urp --exclude=CVS --exclude=unxlngi6.pro --exclude=sc.vpj sc.clean/source/core/tool/compiler.cxx sc/source/core/tool/compiler.cxx
+--- sc.clean/source/core/tool/compiler.cxx	2008-02-05 11:16:59.000000000 -0500
++++ sc/source/core/tool/compiler.cxx	2008-02-05 20:12:26.000000000 -0500
+@@ -928,7 +928,7 @@ for (i = 97; i < 123; i++)
+ /* ) */     t[41] |=   SC_COMPILER_C_WORD;
+ /* * */     t[42] |=   SC_COMPILER_C_WORD;
+ /* + */     t[43] |=   SC_COMPILER_C_WORD;
+-#if 0 /* this really needs to be locale specific. */
++#if 1 /* this really needs to be locale specific. */
+ /* , */     t[44]  =   SC_COMPILER_C_CHAR | SC_COMPILER_C_WORD_SEP | SC_COMPILER_C_VALUE_SEP;
+ #else
+ /* , */     t[44] |=   SC_COMPILER_C_WORD;
+@@ -980,6 +980,20 @@ struct Convention_A1 : public ScCompiler
+         return pCharClass->parseAnyToken( rFormula,
+                 nSrcPos, nStartFlags, aAddAllowed, nContFlags, aAddAllowed );
+     }
++
++    virtual const String& GetSymbol( const ScCompiler::OpCodeMapPtr& rpMap, OpCode e ) const
++    {
++        return rpMap->getSymbol(e);
++    }
++
++    virtual OpCode GetOpCode( const ScCompiler::OpCodeMapPtr& rpMap, const String& rName ) const
++    {
++        const ScOpCodeHashMap* pHashMap = rpMap->getHashMap();
++        ScOpCodeHashMap::const_iterator itr = pHashMap->find(rName);
++        if (itr == pHashMap->end())
++            return ocNone;
++        return itr->second;
++    }
  };
  
+ String Convention_A1::MakeColStr( SCCOL nCol )
+@@ -1232,6 +1246,8 @@ static const ScCompiler::Convention *pCo
  
+ struct ConventionXL
+ {
++    static const String maSep;
++
+     static bool GetDocAndTab( const ScCompiler& rComp,
+                               const SingleRefData& rRef,
+                               String& rDocName,
+@@ -1316,6 +1332,8 @@ struct ConventionXL
+     }
+ };
+ 
++const String ConventionXL::maSep = String::CreateFromAscii(",");
++
+ struct ConventionXL_A1 : public Convention_A1, public ConventionXL
+ {
+     ConventionXL_A1() : Convention_A1( ScAddress::CONV_XL_A1 ) { }
+@@ -1389,6 +1407,30 @@ struct ConventionXL_A1 : public Conventi
+             MakeRowStr( rBuf, aRef.Ref2.nRow );
+         }
+     }
++
++    virtual const String& GetSymbol( const ScCompiler::OpCodeMapPtr& rpMap, OpCode e ) const
++    {
++        switch (e)
++        {
++            case ocSep:
++                return ConventionXL::maSep;
++        }
++        return rpMap->getSymbol(e);
++    }
++
++    virtual OpCode GetOpCode( const ScCompiler::OpCodeMapPtr& rpMap, const String& rName ) const
++    {
++        const ScOpCodeHashMap* pHashMap = rpMap->getHashMap();
++        ScOpCodeHashMap::const_iterator itr = pHashMap->find(rName);
++        if (itr == pHashMap->end())
++        {
++            if (rName.Equals(ConventionXL::maSep))
++                // TODO: Don't do this!
++                return ocSep;
++            return ocNone;
++        }
++        return itr->second;
++    }
+ };
+ 
+ static const ConventionXL_A1 ConvXL_A1;
+@@ -1508,6 +1550,30 @@ struct ConventionXL_R1C1 : public ScComp
+         return pCharClass->parseAnyToken( rFormula,
+                 nSrcPos, nStartFlags, aAddAllowed, nContFlags, aAddAllowed );
+     }
++
++    virtual const String& GetSymbol( const ScCompiler::OpCodeMapPtr& rpMap, OpCode e ) const
++    {
++        switch (e)
++        {
++            case ocSep:
++                return ConventionXL::maSep;
++        }
++        return rpMap->getSymbol(e);
++    }
++
++    virtual OpCode GetOpCode( const ScCompiler::OpCodeMapPtr& rpMap, const String& rName ) const
++    {
++        const ScOpCodeHashMap* pHashMap = rpMap->getHashMap();
++        ScOpCodeHashMap::const_iterator itr = pHashMap->find(rName);
++        if (itr == pHashMap->end())
++        {
++            if (rName.Equals(ConventionXL::maSep))
++                // TODO: Don't do this!
++                return ocSep;
++            return ocNone;
++        }
++        return itr->second;
++    }
+ };
+ 
+ static const ConventionXL_R1C1 ConvXL_R1C1;
+@@ -1970,13 +2036,14 @@ xub_StrLen ScCompiler::NextSymbol()
+ 
+ BOOL ScCompiler::IsOpCode( const String& rName )
+ {
+-    ScOpCodeHashMap::const_iterator iLook( mxSymbols->getHashMap()->find( rName));
+-    BOOL bFound = (iLook != mxSymbols->getHashMap()->end());
+-    if (bFound)
++    bool bFound = false;
++    OpCode oc = pConv->GetOpCode(mxSymbols, rName);
++    if (oc != ocNone)
+     {
+         ScRawToken aToken;
+-        aToken.SetOpCode( (*iLook).second );
++        aToken.SetOpCode(oc);
+         pRawToken = aToken.Clone();
++        bFound = true;
+     }
+     else
+     {
+@@ -5046,7 +5113,7 @@ ScToken* ScCompiler::CreateStringFromTok
+     else if( eOp >= ocInternalBegin && eOp <= ocInternalEnd )
+         rBuffer.appendAscii( pInternal[ eOp - ocInternalBegin ] );
+     else if( (USHORT) eOp < mxSymbolsNative->getSymbolCount())        // Keyword:
+-        rBuffer.append(mxSymbols->getSymbol(eOp));
++        rBuffer.append( pConv->GetSymbol(mxSymbols, eOp) );
+     else
+     {
+         DBG_ERROR("Unbekannter OpCode");
