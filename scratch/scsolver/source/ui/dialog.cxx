@@ -418,11 +418,11 @@ void SolverDialog::initialize()
 	nY += 18;
 	addFixedText( 10, nY, 35, 12, ascii( "ftObj" ), getResStr(SCSOLVER_STR_GOAL) );
 	addRadioButton( 50, nY, 40, 12, ascii( "rbMax" ), getResStr(SCSOLVER_STR_MAXIMIZE) );
-	addRadioButton( 95, nY, 40, 12, ascii( "rbMin" ), getResStr(SCSOLVER_STR_MINIMIZE) );
+	addRadioButton( 115, nY, 40, 12, ascii( "rbMin" ), getResStr(SCSOLVER_STR_MINIMIZE) );
 	
 	nY += 15;
 	addFixedText( 10, nY+2, 60, 12, ascii( "ftDecVars" ), getResStr(SCSOLVER_STR_DECISIONVAR_CELLS) );
-	addRangeEdit( 70, nY, 115, 12, ascii( "editVarCells" ), ascii( "btnRangeSelect" ) );
+	addRangeEdit( 85, nY, 115, 12, ascii( "editVarCells" ), ascii( "btnRangeSelect" ) );
 	
 	nY += 20;
 	addFixedLine( 5, nY, 195, 12, ascii( "flConstraints" ), getResStr(SCSOLVER_STR_CONSTRAINT_SEP) );
