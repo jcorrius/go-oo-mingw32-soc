@@ -59,6 +59,8 @@
  *
  ************************************************************************/
 
+#include <string.h>
+
 #include "uno/dispatcher.h"
 #include "uno/environment.h"
 #include "uno/lbnames.h"
@@ -224,6 +226,24 @@ void Bridge::release() const SAL_THROW( () )
     }
 }
 
+MonoAssembly *
+DoLoad (MonoDomain *domain, char *fullname)
+{
+        MonoAssemblyName aname;
+        MonoImageOpenStatus status;
+        MonoAssembly *ass;
+
+        memset (&aname, 0, sizeof (aname));
+        aname.culture = "";
+        strncpy ((char *)aname.public_key_token, "ce2cb7e279207b9e", MONO_PUBLIC_KEY_TOKEN_LENGTH);
+        aname.name = "cli_uno_bridge";
+
+        ass = mono_assembly_load (&aname, NULL, &status);
+        if (status != MONO_IMAGE_OK)
+                return NULL;
+        return ass;
+}
+
 Bridge::Bridge(
     uno_Environment * mono_env, uno_ExtEnvironment * uno_env,
     bool registered_mono2uno )
@@ -234,7 +254,7 @@ Bridge::Bridge(
 {
     MonoDomain * pDomain = mono_get_root_domain();
     // FIXME where is this freed?
-    MonoAssembly * pAssembly = mono_domain_assembly_open( pDomain, "cli_uno_bridge.dll" );
+    MonoAssembly * pAssembly = DoLoad (pDomain, "cli_uno_bridge, Version=0.0.0.0, Culture=neutral, PublicKeyToken=ce2cb7e279207b9e");
     // FIXME and this, is this needed later?
     MonoClass * pClass = mono_class_from_name (
         (MonoImage *)mono_assembly_get_image( pAssembly ), "com.sun.star.bridges.mono_uno", "Bridge" );

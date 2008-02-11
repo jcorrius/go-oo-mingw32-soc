@@ -5,8 +5,8 @@ SOURCES=GeneralTableSample.cs \
 
 all:	test
 
-test:	SpreadsheetSample.exe SpreadsheetSample
-	./SpreadsheetSample
+test:	SpreadsheetSample.exe
+	mono SpreadsheetSample.exe
 
 SpreadsheetSample.exe: ${SOURCES}
 	mcs SpreadsheetSample.cs SpreadsheetDocHelper.cs \
