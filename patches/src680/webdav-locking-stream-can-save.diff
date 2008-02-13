@@ -1,0 +1,297 @@
+diff --git a/ucb/source/ucp/webdav/DAVResourceAccess.cxx b/ucb/source/ucp/webdav/DAVResourceAccess.cxx
+index 40b7734..1686958 100644
+--- ucb/source/ucp/webdav/DAVResourceAccess.cxx
++++ ucb/source/ucp/webdav/DAVResourceAccess.cxx
+@@ -597,6 +597,43 @@ void DAVResourceAccess::PUT(
+ }
+ 
+ //=========================================================================
++void DAVResourceAccess::PUT(
++        const char * buffer, size_t size,
++        const uno::Reference< ucb::XCommandEnvironment > & xEnv )
++throw( DAVException )
++{
++    initialize();
++
++    bool bRetry = false;
++    do
++    {
++        bRetry = false;
++        try
++        {
++            DAVRequestHeaders aHeaders;
++            getUserRequestHeaders( xEnv, 
++                                   getRequestURI(), 
++                                   rtl::OUString::createFromAscii( "PUT" ), 
++                                   aHeaders );
++            
++            m_xSession->PUT( getRequestURI(),
++                             buffer, size,
++                             DAVRequestEnvironment(
++                                 getRequestURI(),
++                                 new DAVAuthListener_Impl( xEnv ),
++                                 aHeaders, xEnv ) );
++        }
++        catch ( DAVException & e )
++        {
++            bRetry = handleException( e );
++            if ( !bRetry )
++                throw;
++        }
++    }
++    while ( bRetry );
++}
++
++//=========================================================================
+ uno::Reference< io::XInputStream > DAVResourceAccess::POST(
+ 	const rtl::OUString & rContentType,
+ 	const rtl::OUString & rReferer,
+diff --git a/ucb/source/ucp/webdav/DAVResourceAccess.hxx b/ucb/source/ucp/webdav/DAVResourceAccess.hxx
+index 5069ae7..aba8342 100644
+--- ucb/source/ucp/webdav/DAVResourceAccess.hxx
++++ ucb/source/ucp/webdav/DAVResourceAccess.hxx
+@@ -190,6 +190,11 @@ public:
+ 	     com::sun::star::ucb::XCommandEnvironment > & xEnv )
+ 	throw( DAVException );
+ 
++    void
++    PUT( const char * buffer, size_t size,
++         const com::sun::star::uno::Reference< com::sun::star::ucb::XCommandEnvironment > & xEnv )
++        throw( DAVException );
++
+     com::sun::star::uno::Reference< com::sun::star::io::XInputStream >
+     POST( const rtl::OUString & rContentType,
+ 	  const rtl::OUString & rReferer,
+diff --git a/ucb/source/ucp/webdav/DAVSession.hxx b/ucb/source/ucp/webdav/DAVSession.hxx
+index df5ac71..a0d6d38 100644
+--- ucb/source/ucp/webdav/DAVSession.hxx
++++ ucb/source/ucp/webdav/DAVSession.hxx
+@@ -166,6 +166,12 @@ public:
+         const DAVRequestEnvironment & rEnv )
+ 		throw( DAVException ) = 0;
+ 
++    virtual void PUT( const ::rtl::OUString & inPath,
++             const char * buffer,
++             size_t size,
++             const DAVRequestEnvironment & rEnv )
++        throw ( DAVException ) = 0;
++
+     virtual com::sun::star::uno::Reference< com::sun::star::io::XInputStream >
+                     POST( const rtl::OUString & inPath,
+                           const rtl::OUString & rContentType,
+diff --git a/ucb/source/ucp/webdav/NeonInputStream.cxx b/ucb/source/ucp/webdav/NeonInputStream.cxx
+index 720bd65..c969218 100644
+--- ucb/source/ucp/webdav/NeonInputStream.cxx
++++ ucb/source/ucp/webdav/NeonInputStream.cxx
+@@ -45,6 +45,9 @@
+ #ifndef _COMPHELPER_PROCESSFACTORY_HXX_
+ #include <comphelper/processfactory.hxx>
+ #endif
++#ifndef _COM_SUN_STAR_UCB_COMMANDFAILEDEXCEPTION_HPP_
++#include <com/sun/star/ucb/CommandFailedException.hpp>
++#endif
+ 
+ #include <cstdio>
+ 
+@@ -294,10 +297,33 @@ void SAL_CALL NeonInputStream::flush( void )
+ 	throw( NotConnectedException, BufferSizeExceededException,
+ 	       IOException, uno::RuntimeException )
+ {
++    if ( m_bDirty )
++    {
+ #if OSL_DEBUG_LEVEL > 0
+-    fprintf( stderr, "WebDAV: flush()\n" );
++        fprintf( stderr, "WebDAV: flush(), saving the changed file.\n" );
+ #endif
+-    // Nothing to do, we transfer the data in closeOutput() (if dirty)
++        // FIXME It's really hacky to create the new session
++        // But so far it seems I have no other chance...
++        // see also NeonInputStream::Unlock()
++        uno::Reference< lang::XMultiServiceFactory > xFactory = ::comphelper::getProcessServiceFactory();
++        rtl::Reference< DAVSessionFactory > rDAVFactory( new DAVSessionFactory() );
++        
++        DAVResourceAccess aResourceAccess( xFactory, rDAVFactory, m_aURL );
++        
++        try {
++            aResourceAccess.PUT( reinterpret_cast<const char*>( m_aInputBuffer.getConstArray() ), m_nLen,
++                    DAVResourceAccess::createCommandEnvironment() );
++        }
++        catch ( DAVException & e )
++        {
++            throw ucb::CommandFailedException(
++                    e.getData(),
++                    uno::Reference< uno::XInterface >(),
++                    uno::makeAny( e.getData() ) );
++        }
++
++        m_bDirty = sal_False;
++    }
+ }
+         
+ // -------------------------------------------------------------------
+@@ -341,8 +367,8 @@ void NeonInputStream::Unlock( void )
+ {
+     if ( m_pLock )
+     {
+-        // FIXME I guess it is a bit hacky to create the new session just for
+-        // the unlock?  But so far it seems I have no other chance...
++        // FIXME It's really hacky to create the new session
++        // But so far it seems I have no other chance...
+         uno::Reference< lang::XMultiServiceFactory > xFactory = ::comphelper::getProcessServiceFactory();
+         rtl::Reference< DAVSessionFactory > rDAVFactory( new DAVSessionFactory() );
+         
+diff --git a/ucb/source/ucp/webdav/NeonSession.cxx b/ucb/source/ucp/webdav/NeonSession.cxx
+index eb85c85..b2d7979 100644
+--- ucb/source/ucp/webdav/NeonSession.cxx
++++ ucb/source/ucp/webdav/NeonSession.cxx
+@@ -629,6 +629,8 @@ extern "C" void NeonSession_PreSendRequest( ne_request * req,
+     }
+ }
+ 
++NeonLockStore * NeonSession::s_aNeonLockStore = NULL;
++
+ // -------------------------------------------------------------------
+ // Constructor
+ // -------------------------------------------------------------------
+@@ -657,12 +659,6 @@ NeonSession::~NeonSession( )
+ {
+     if ( m_pHttpSession )
+     {
+-        if ( m_NeonLockStore != NULL )
+-        {
+-            ne_lockstore_destroy( m_NeonLockStore );
+-            m_NeonLockStore = NULL;
+-        }
+-
+         ne_session_destroy( m_pHttpSession );
+         m_pHttpSession = 0;
+     }
+@@ -806,14 +802,15 @@ void NeonSession::Init()
+                               m_nProxyPort );
+         }
+ 
+-        m_NeonLockStore = ne_lockstore_create();
++        if ( !s_aNeonLockStore )
++            s_aNeonLockStore = ne_lockstore_create();
+ 
+-        if ( m_NeonLockStore == NULL )
++        if ( s_aNeonLockStore == NULL )
+             throw DAVException( DAVException::DAV_SESSION_CREATE,
+                                 NeonUri::makeConnectionEndPointString( m_aHostName, m_nPort ) );
+ 
+         // Register the lock store
+-        ne_lockstore_register( m_NeonLockStore, m_pHttpSession );
++        ne_lockstore_register( s_aNeonLockStore, m_pHttpSession );
+ 
+         // Register for redirects.
+         ne_redirect_register( m_pHttpSession );
+@@ -1210,22 +1207,38 @@ void NeonSession::PUT( const rtl::OUString &                      inPath,
+                        const DAVRequestEnvironment & rEnv )
+     throw ( DAVException )
+ {
++    // initialization etc. is performed in the other PUT
++
++    uno::Sequence< sal_Int8 > aDataToSend;
++    if ( !getDataFromInputStream( inInputStream, aDataToSend, false ) )
++        throw DAVException( DAVException::DAV_INVALID_ARG );
++
++    PUT( inPath,
++            reinterpret_cast< const char * >( aDataToSend.getConstArray() ),
++            aDataToSend.getLength(),
++            rEnv );
++}
++
++// -------------------------------------------------------------------
++// PUT
++// -------------------------------------------------------------------
++void NeonSession::PUT( const rtl::OUString &inPath,
++                       const char * buffer,
++                       size_t size,
++                       const DAVRequestEnvironment & rEnv )
++    throw ( DAVException )
++{
+     osl::Guard< osl::Mutex > theGuard( m_aMutex );
+ 
+     Init();
+ 
+     m_aEnv = rEnv;
+ 
+-    uno::Sequence< sal_Int8 > aDataToSend;
+-    if ( !getDataFromInputStream( inInputStream, aDataToSend, false ) )
+-        throw DAVException( DAVException::DAV_INVALID_ARG );
+-
+     int theRetVal = PUT( m_pHttpSession,
+                          rtl::OUStringToOString(
+                             inPath, RTL_TEXTENCODING_UTF8 ),
+-                         reinterpret_cast< const char * >(
+-                            aDataToSend.getConstArray() ),
+-                         aDataToSend.getLength() );
++                         buffer,
++                         size );
+ 
+     HandleError( theRetVal );
+ }
+@@ -1468,6 +1481,9 @@ void NeonSession::HandleError( int nError )
+         {
+             rtl::OUString aText = rtl::OUString::createFromAscii(
+                     ne_get_error( m_pHttpSession ) );
++#if OSL_DEBUG_LEVEL > 0
++            fprintf( stderr, "WebDAV: got error '%s'\n", rtl::OUStringToOString( aText, RTL_TEXTENCODING_UTF8 ).getStr() );
++#endif
+             throw DAVException( DAVException::DAV_HTTP_ERROR,
+                                 aText,
+                                 makeStatusCode( aText ) );
+@@ -1529,7 +1545,7 @@ void NeonSession::Lockit( ucb::Lock & rLock, bool bLockit )
+ {
+     osl::Guard< osl::Mutex > theGuard( m_aMutex );
+ 
+-    if ( !m_NeonLockStore )
++    if ( !s_aNeonLockStore )
+         throw DAVException( DAVException::DAV_INVALID_ARG );
+ 
+     ne_uri aUri;
+@@ -1537,7 +1553,7 @@ void NeonSession::Lockit( ucb::Lock & rLock, bool bLockit )
+             &aUri );
+ 
+     // Create the neon lock
+-    NeonLock * theLock = ne_lockstore_findbyuri( m_NeonLockStore, &aUri );
++    NeonLock * theLock = ne_lockstore_findbyuri( s_aNeonLockStore, &aUri );
+     if ( !theLock )
+     {
+         theLock = ne_lock_create();
+@@ -1576,7 +1592,7 @@ void NeonSession::Lockit( ucb::Lock & rLock, bool bLockit )
+         //theLock->timeout = rLock.timeout;
+         theLock->timeout = -1;
+ 
+-        ne_lockstore_add( m_NeonLockStore, theLock );
++        ne_lockstore_add( s_aNeonLockStore, theLock );
+     }
+ 
+     if ( bLockit )
+diff --git a/ucb/source/ucp/webdav/NeonSession.hxx b/ucb/source/ucp/webdav/NeonSession.hxx
+index 4f1798f..7ac692d 100644
+--- ucb/source/ucp/webdav/NeonSession.hxx
++++ ucb/source/ucp/webdav/NeonSession.hxx
+@@ -84,7 +84,7 @@ class NeonSession : public DAVSession
+         // moment.
+         DAVRequestEnvironment m_aEnv;
+ 
+-        NeonLockStore    *m_NeonLockStore;
++        static NeonLockStore *s_aNeonLockStore;
+ 
+         static bool       m_bGlobalsInited;
+ 
+@@ -178,6 +178,13 @@ class NeonSession : public DAVSession
+                 const DAVRequestEnvironment & rEnv )
+ 			throw ( DAVException );
+ 
++        virtual void
++        PUT( const ::rtl::OUString & inPath,
++             const char * buffer,
++             size_t size,
++             const DAVRequestEnvironment & rEnv )
++            throw ( DAVException );
++
+         virtual com::sun::star::uno::Reference<
+             com::sun::star::io::XInputStream >
+         POST( const rtl::OUString & inPath,
