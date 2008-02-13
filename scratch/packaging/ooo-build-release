@@ -1,17 +1,23 @@
 #!/usr/bin/perl
+    eval 'exec /usr/bin/perl -S $0 ${1+"$@"}'
+	if $running_under_some_shell;
+#!/usr/bin/perl
 
 use strict;
+use File::Copy;
 use File::Temp qw/ tempfile tempdir /;
 
-my $default_branch='trunk';
+my $default_svn_tree='trunk';
+my $svn_root='svn://svn.gnome.org/svn/ooo-build';
 
-# get ooo-build version from the given configure.in
-sub get_version_configure_in($)
+# get ooo-build version from the given ooo-build sources
+sub get_config_version($)
 {
-    my ($configure) = @_;
+    my ($ooo_build_dir) = @_;
     my $version;
 
-    open (CONFIGURE, $configure) || die "can't open $configure for reading: $!\n";
+    open (CONFIGURE, "$ooo_build_dir/configure.in") ||
+	die "can't open \"$ooo_build_dir/configure.in\" for reading: $!\n";
 
     while (my $line = <CONFIGURE>) {
         chomp $line;
@@ -24,15 +30,54 @@ sub get_version_configure_in($)
     return $version;
 }
 
+# set ooo-build version in the given ooo-build sources
+sub set_config_version($$)
+{
+    my ($ooo_build_dir, $version) = @_;
+    my $configure = "$ooo_build_dir/configure.in";
+
+    open (CONFIGURE, "$configure") ||
+	die "can't open \"$configure\" for reading: $!\n";
+
+    my ( $tmp_fh, $tmp_filename ) = tempfile( "$configure.XXXXXX" );
+    if ( !defined $tmp_fh ) {
+	close (CONFIGURE);
+	die "Error: can't create temporary file: \"$configure.XXXXXX\"\n";
+    }
+    
+    while (my $line = <CONFIGURE>) {
+        chomp $line;
+    
+	if ($line =~ /^(\s*AC_INIT\s*\(\s*ooo-build\s*,\s*)([\w\.]*)(\s*\)\s*)$/) {
+	    print ${tmp_fh} "$1$version$3\n";
+	} else {
+	    print ${tmp_fh} "$line\n";
+	}
+    }
+    close (CONFIGURE);
+    close (${tmp_fh});
+    
+    # preserve permissions on target file by applying them to temp file
+    my ( $mode, $uid, $gid ) = ( stat($configure) )[ 2, 4, 5 ];
+    $mode = $mode & 07777;
+
+    chmod $mode, $tmp_filename;
+    chown $uid, $gid, $tmp_filename;
+
+    rename ($tmp_filename, $configure) ||
+	die "Can't rename \"$tmp_filename\" to \"$configure\": $!\n";
+}
+
 # increment the version for a test build:
 #	+ add 'a' if the version ended with a number
 #       + bump the letter otherwise
 sub inc_test_version($)
 {
     my ($version) = @_;
+
     my $lastchar = chop $version;
     my $new_version;
-    print "lastchar = |$lastchar|\n";
+
     if ($lastchar =~ /\d/) {
 	return "$version" . "$lastchar" . "a";
     } elsif ($lastchar =~ /\w/) {
@@ -50,17 +95,175 @@ sub copy_to_tempdir($)
 {
     my ($ooo_build_dir) = @_;
     
-    my $temp_dir = tempdir( '/tmp/ooo-build-XXXXXX' );
-    my $blacklist = "$temp_dir/ooo-build.copy.blacklist";
+    my $tempdir = tempdir( '/tmp/ooo-build-XXXXXX' );
+    my $blacklist = "$tempdir/ooo-build.copy.blacklist";
     
-    print "Copying \"$ooo_build_dir\" -> \"$temp_dir\"...";
+    print "Copying \"$ooo_build_dir\" -> \"$tempdir\"...";
     # FIXME: crazy hacks to copy ooo-build without .svn subdirectories and to show a progress
-    system "find $ooo_build_dir -wholename \"*/.svn\" >$blacklist";
-    system "tar -cf - --transform=s%$ooo_build_dir%% -X $blacklist $ooo_build_dir | tar -xf - -C $temp_dir --checkpoint=25 2>&1 | awk '{ ORS=\"\" ; printf \".\"; fflush() }'";
+    system ("find $ooo_build_dir -wholename \"*/.svn\" >$blacklist") &&
+	die "Error: failed to find .svn subdirectories: $!\n";
+    system ("tar -cf - --transform=s%$ooo_build_dir%% -X $blacklist $ooo_build_dir | " .
+            "tar -xf - -C $tempdir --checkpoint=25 2>&1 | " . 
+	    "awk '{ ORS=\"\" ; printf \".\"; fflush() }'") &&
+	die "Error: copying failed: $!\n";
     print "\n";
     unlink $blacklist;
+    
+    return $tempdir;
 }
 
+sub check_out_to_tempdir($)
+{
+    my ($svn_path) = @_;
+
+    my $tempdir = tempdir( '/tmp/ooo-build-XXXXXX' );
+
+    print "Checking out from $svn_path...";
+    system ("svn co \"$svn_path\" \"$tempdir\"") &&
+	die "Check out failed\n";
+
+    return $tempdir;
+}
+
+# get ooo-build version from the given ooo-build sources
+sub get_svn_config_version($)
+{
+    my ($svn_path) = @_;
+    my $tempdir = tempdir( '/tmp/ooo-build-XXXXXX' );
+    my $version;
+
+    system ("svn co -N \"$svn_path\" \"$tempdir\" >/dev/null 2>&1") &&
+	die "Check out failed\n";
+
+    my $version = get_config_version("$tempdir");
+
+    remove_tempdir($tempdir);
+    
+    return $version;
+}
+
+sub release_tarball($)
+{
+    my ($ooo_build_dir) = @_;
+
+    print "Creating ooo-build tarball...\n";
+    system ("cd $ooo_build_dir && " .
+            "./autogen.sh --with-distro=GoOoLinux && " .
+	    "make dist && " .
+	    "cd -") && die "Error: releasing failed: $!\n";
+}
+
+sub default_releases_state_file($)
+{
+    my ($ooo_build_dir) = @_;
+
+    my $rootdir = $ooo_build_dir;
+    $rootdir =~ s/^(.*?)\/?[^\/]+\/?$/$1/;
+
+    my $releases_state_file;
+    if ($rootdir) {
+	$releases_state_file = "$rootdir/.releases";
+    } else {
+	$releases_state_file = ".releases";
+    }
+
+    return "$releases_state_file";
+}
+
+sub default_releases_archive($)
+{
+    my ($ooo_build_dir) = @_;
+
+    my $rootdir = $ooo_build_dir;
+    $rootdir =~ s/^(.*?)\/?[^\/]+\/?$/$1/;
+
+    my $releases_archive;
+    if ($rootdir) {
+	$releases_archive = "$rootdir/archive";
+    } else {
+	$releases_archive = "archive";
+    }
+
+    return "$releases_archive";
+}
+
+sub load_releases_state($)
+{
+    my ($releases_state_file) = @_;
+    
+    my $state_config_version;
+    my $state_release_version;
+    
+    if (open (STATE, "$releases_state_file")) {
+	
+	while (my $line = <STATE>) {
+	    chomp $line;
+
+	    if ($line =~ /^\s*configure_version\s*=\s*(.*)$/) {
+		$state_config_version = "$1";
+	    } elsif ($line =~ /^\s*released_version\s*=\s*(.*)$/) {
+		$state_release_version = "$1";
+	    }
+	}
+    	close (STATE);
+    }
+
+    return $state_config_version, $state_release_version;
+}
+
+sub save_releases_state($$$)
+{
+    my ($releases_state_file, $config_version, $release_version) = @_;
+    
+    open (STATE, '>', "$releases_state_file") ||
+	die "Can't open \"$releases_state_file\" for writing: $!\n";
+
+    print STATE "configure_version = $config_version\n";
+    print STATE "released_version  = $release_version\n";
+
+    close (STATE);
+}
+
+sub remove_tempdir($)
+{
+    my ($tempdir) = @_;
+    
+#    print "Cleaning $tempdir...\n";
+    system ("rm -rf $tempdir") && die "Error: rm failed: $!\n";
+}
+
+sub copy_to_archive($$$)
+{
+    my ($ooo_build_dir, $releases_archive, $release_tarball) = @_;
+    
+    unless ( -d "$releases_archive" ) {
+	mkdir ("$releases_archive") ||
+	    die "Can't create directory $releases_archive: $!\n";
+    }
+    
+    if ( -f "$releases_archive/$release_tarball" ) {
+	print "Warning: $releases_archive/$release_tarball already exists and will be replaced\n";
+	unlink ("$releases_archive/$release_tarball");
+    }
+    
+    print "Copying into archive: $releases_archive/$release_tarball ...\n";
+    copy ("$ooo_build_dir/$release_tarball", "$releases_archive/$release_tarball") ||
+	die "Error: Can't copy $ooo_build_dir/$release_tarball to $releases_archive/$release_tarball: $!\n";
+}
+
+sub copy_to_cwd($$)
+{
+    my ($ooo_build_dir, $release_tarball) = @_;
+    
+    if ( -f "$release_tarball" ) {
+	print "Warning: $release_tarball already exists and will be replaced\n";
+	unlink ("$release_tarball");
+    }
+    
+    print "Copying $release_tarball to the working direcotry ...\n";
+    copy ("$ooo_build_dir/$release_tarball", "$release_tarball") ||
+	die "Error: Can't copy $ooo_build_dir/$release_tarball to $release_tarball: $!\n";
+}
 
 sub usage()
 {
@@ -78,6 +281,7 @@ sub usage()
 	  "\t--ptf: release ptf-specific tarball for given bugzilla number\n" .
 	  "\t--get-last:\n" .
 	  "\t--branch=<name>\n" .
+	  "\t--tag=<name>\n" .
 	  "\t--version\n" .
 	  "\t--set-version=<ver>\n" .
 	  "\t--inc-version=<ver>\n" .
@@ -86,27 +290,153 @@ sub usage()
 
 
 my $ptf;
+my $final;
 my $daily;
-my $branch;
+my $svn_tree;
 my $bugid;
+my $inc_version;
 my $config_version;
-my $test_version_inc;
+my $set_version;
+my $get_config_version;
+my $release_version;
+my $ooo_build_dir;
+my $releases_archive;
+my $releases_state_file;
+my $state_config_version;
+my $state_release_version;
+my $release_tarball;
+my $ooo_build_tempdir;
+my $verbose=1;
+
+###################
+# Arguments parsing
+###################
+
 for my $arg (@ARGV) {
     if ($arg eq '--help' || $arg eq '-h') {
 	usage;
-    } elsif ($arg eq '--daily') {
-	$daily=1
-    } elsif ($a =~ m/--ptf=(.*)/) {
+    } elsif ($arg eq '--final') {
+	$final=1
+    } elsif ($arg eq '--version') {
+	$get_config_version=1;
+	$verbose = undef;
+    } elsif ($arg eq '--inc-version') {
+	$inc_version=1
+    } elsif ($arg =~ m/--set-version=(.*)/) {
+	  $set_version="$1";
+    } elsif ($arg =~ m/--ptf=(.*)/) {
 	$bugid=$1;
 	$ptf=1;
+    } elsif ($arg =~ m/--branch=(.*)/) {
+	$svn_tree="branches/$1";
+    } elsif ($arg =~ m/--tag=(.*)/) {
+	$svn_tree="tags/$1";
     } else {
-	print "Too many arguments $arg\n";
-	syntax (1);
+	if (! defined $ooo_build_dir) {
+	    $ooo_build_dir = $arg;
+	} else {
+	    die "Too many arguments $arg\n";
+	}
     }
 }
 
-#$config_version = get_version_configure_in("ooo-build/configure.in");
-#$test_version_inc = inc_test_version($config_version);
-#    print "config_version = $config_version\n";
-#    print "test_version_inc = $test_version_inc\n";
-#copy_to_tempdir("tmp/ooo-build");
+###################
+# Initial checks
+###################
+
+#print "ooo_build_dir=$ooo_build_dir\n";
+
+if ( defined $ptf && ! defined $svn_tree ) {
+    print "Warning: Neither --branch nor --tag is used!\n" .
+          "         Using \"$default_svn_tree\"\n\n";
+    $svn_tree = $default_svn_tree;
+}
+
+unless ( defined $ooo_build_dir || defined $svn_tree ) {
+    die "Error: Neither ooo-build source direcotry nor svn branch nor\n" .
+        "       svn tag is defined\n";
+}
+
+if ( defined $ooo_build_dir && defined $svn_tree ) {
+    die "Error: Source mismatch. Both svn tree and local copy are defined\n";
+}
+
+if ( defined $ooo_build_dir && ! -e "$ooo_build_dir/autogen.sh" ) {
+    die "Error: \"$ooo_build_dir\" is not a valid directory\n";
+}
+
+
+###################
+# Main logic
+###################
+
+if ($verbose) {
+    if (defined $ooo_build_dir) {
+	print "Source: $ooo_build_dir\n";
+    } else {
+	print "Source: $svn_root/$svn_tree\n";
+    }
+}
+
+if (defined $ooo_build_dir) {
+    $releases_state_file = default_releases_state_file($ooo_build_dir) unless (defined $releases_state_file);
+    $releases_archive = default_releases_archive($ooo_build_dir) unless (defined $releases_archive);
+}
+
+# FIXME: this is not optimal in case of svn check but the svn check out to
+#        get the version is optimized and it helps to keep the logic "simple"
+if (defined $set_version) {
+    $release_version = "$set_version";
+} else {
+    if (defined $ooo_build_dir) {
+	$config_version = get_config_version($ooo_build_dir);
+	print "Original version : $config_version\n" if ($verbose);
+	($state_config_version, $state_release_version) = load_releases_state($releases_state_file);
+	if (defined $state_config_version &&
+	    defined $state_release_version &&
+	    "$state_config_version" eq "$config_version") {
+	    $release_version = "$state_release_version";
+	    print ("Last used version: $state_release_version\n") if ($verbose);
+	} else {
+	    $release_version = "$config_version";
+	}
+    } else {
+	$config_version = get_svn_config_version("$svn_root/$svn_tree");
+	$release_version = "$config_version";
+	print "Original version : $config_version\n" if ($verbose);
+    }
+}
+
+if ( defined $inc_version ) {
+    if (defined $final ) {
+	die "FIXME: --inc-version toegeter with --final has not impemented yet\n";
+    } else {
+	$release_version = inc_test_version($release_version);
+    }
+    print "Bumped version   : $release_version\n" if ($verbose);
+} elsif ( defined $ptf ) {
+    $release_version .= ".$bugid";
+    print "PTF version      : $release_version\n" if ($verbose);
+}
+
+if ( defined $get_config_version ) {
+    print "$release_version\n";
+} else {
+    # going to release
+    $release_tarball = "ooo-build-$release_version.tar.gz";
+    if (defined $ooo_build_dir) {
+	$ooo_build_tempdir = copy_to_tempdir("$ooo_build_dir");
+    } else {
+	$ooo_build_tempdir = check_out_to_tempdir("$svn_root/$svn_tree");
+    }
+    set_config_version($ooo_build_tempdir, $release_version);
+    release_tarball($ooo_build_tempdir);
+    copy_to_cwd($ooo_build_tempdir, $release_tarball);
+    if ( defined $releases_archive ) {
+	copy_to_archive($ooo_build_tempdir, $releases_archive, $release_tarball);
+    }
+    if ( defined $releases_state_file ) {
+	save_releases_state($releases_state_file, $config_version, $release_version);
+    }
+    remove_tempdir($ooo_build_tempdir);
+}
