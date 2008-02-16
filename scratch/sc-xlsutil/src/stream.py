@@ -162,6 +162,8 @@ recData = {
     0x01BB: ["SXFDBTYPE", "SQL Datatype Identifier"],
     0x01BC: ["PROT4REVPASS", "Shared Workbook Protection Password"],
     0x01BE: ["DV", "Data Validation Criteria"],
+    0x01C0: ["EXCEL9FILE", "Excel 9 File"],
+    0X01C1: ["RECALCID", "Recalc Information"],
     0x0200: ["DIMENSIONS", "Cell Table Size"],
     0x0201: ["BLANK", "Blank Cell", record.Blank],
     0x0203: ["NUMBER", "Floating-Point Cell Value", record.Number],
