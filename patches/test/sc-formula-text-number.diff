@@ -1,0 +1,252 @@
+diff --git a/sc/inc/dociter.hxx b/sc/inc/dociter.hxx
+index 40bfe0c..bdac8b4 100644
+--- sc/inc/dociter.hxx
++++ sc/inc/dociter.hxx
+@@ -115,6 +115,7 @@ private:
+ 	BOOL			bNextValid;
+ 	BOOL			bCalcAsShown;
+ 	BOOL			bTextAsZero;
++    SvNumberFormatter* pFormatter;
+ 
+ 	BOOL			GetThis(double& rValue, USHORT& rErr);
+ public:
+@@ -134,6 +135,8 @@ public:
+ 												++nColRow, bNumValid = FALSE, TRUE )
+ 										  : ( ++nRow, GetThis(rValue, rErr) );
+ 					}
++
++    void            SetNumberFormatter(SvNumberFormatter* p);
+ };
+ 
+ class ScQueryValueIterator            // alle Zahlenwerte in einem Bereich durchgehen
+diff --git a/sc/source/core/data/dociter.cxx b/sc/source/core/data/dociter.cxx
+index 6a740cd..7a862ef 100644
+--- sc/source/core/data/dociter.cxx
++++ sc/source/core/data/dociter.cxx
+@@ -243,7 +243,8 @@ ScValueIterator::ScValueIterator( ScDocument* pDocument,
+ 	bSubTotal(bSTotal),
+ 	bNextValid( FALSE ),
+ 	bCalcAsShown( pDocument->GetDocOptions().IsCalcAsShown() ),
+-	bTextAsZero( bTextZero )
++	bTextAsZero( bTextZero ),
++    pFormatter( NULL )
+ {
+ 	PutInOrder( nStartCol, nEndCol);
+ 	PutInOrder( nStartRow, nEndRow);
+@@ -282,7 +283,8 @@ ScValueIterator::ScValueIterator( ScDocument* pDocument, const ScRange& rRange,
+ 	bSubTotal(bSTotal),
+ 	bNextValid( FALSE ),
+ 	bCalcAsShown( pDocument->GetDocOptions().IsCalcAsShown() ),
+-	bTextAsZero( bTextZero )
++	bTextAsZero( bTextZero ),
++    pFormatter( NULL )
+ {
+ 	PutInOrder( nStartCol, nEndCol);
+ 	PutInOrder( nStartRow, nEndRow);
+@@ -342,79 +344,81 @@ BOOL ScValueIterator::GetThis(double& rValue, USHORT& rErr)
+ 			if ( !bSubTotal || !pDoc->pTab[nTab]->IsFiltered( nRow-1 ) )
+ 			{
+ 				ScBaseCell* pCell = pCol->pItems[nColRow].pCell;
++                CellType eType = pCell->GetCellType();
+ 				++nColRow;
+-				switch (pCell->GetCellType())
+-				{
+-					case CELLTYPE_VALUE:
+-					{
+-						bNumValid = FALSE;
+-						rValue = ((ScValueCell*)pCell)->GetValue();
+-						rErr = 0;
+-						--nRow;
+-						if ( bCalcAsShown )
+-						{
+-							lcl_IterGetNumberFormat( nNumFormat, pAttrArray,
+-								nAttrEndRow, pCol->pAttrArray, nRow, pDoc );
+-							rValue = pDoc->RoundValueAsShown( rValue, nNumFormat );
+-						}
+-						//
+-						//	wenn in der selben Spalte gleich noch eine Value-Cell folgt, die
+-						//	auch noch im Block liegt, den Wert jetzt schon holen
+-						//
+-						if ( nColRow < pCol->nCount &&
+-							 pCol->pItems[nColRow].nRow <= nEndRow &&
+-							 pCol->pItems[nColRow].pCell->GetCellType() == CELLTYPE_VALUE &&
+-							 !bSubTotal )
+-						{
+-							fNextValue = ((ScValueCell*)pCol->pItems[nColRow].pCell)->GetValue();
+-							nNextRow = pCol->pItems[nColRow].nRow;
+-							bNextValid = TRUE;
+-							if ( bCalcAsShown )
+-							{
+-								lcl_IterGetNumberFormat( nNumFormat, pAttrArray,
+-									nAttrEndRow, pCol->pAttrArray, nNextRow, pDoc );
+-								fNextValue = pDoc->RoundValueAsShown( fNextValue, nNumFormat );
+-							}
+-						}
+ 
+-						return TRUE;									// gefunden
+-					}
+-//                    break;
+-					case CELLTYPE_FORMULA:
+-					{
+-						if (!bSubTotal || !((ScFormulaCell*)pCell)->IsSubTotal())
+-						{
+-							rErr = ((ScFormulaCell*)pCell)->GetErrCode();
+-							if ( rErr || ((ScFormulaCell*)pCell)->IsValue() )
+-							{
+-								rValue = ((ScFormulaCell*)pCell)->GetValue();
+-								nRow--;
+-								bNumValid = FALSE;
+-								return TRUE;							// gefunden
+-							}
+-						}
+-					}
+-					break;
+-					case CELLTYPE_STRING :
+-					case CELLTYPE_EDIT :
+-					{
+-						if ( bTextAsZero )
+-						{
+-							rErr = 0;
+-							rValue = 0.0;
+-							nNumFmtType = NUMBERFORMAT_NUMBER;
+-							nNumFmtIndex = 0;
+-							bNumValid = TRUE;
+-							--nRow;
+-							return TRUE;
+-						}
+-					}
+-					break;
+-                    default:
++                bool bNumberText = false;
++                double fTextNumVal = 0.0;
++                if ( !bTextAsZero && pFormatter && (eType == CELLTYPE_STRING || eType == CELLTYPE_EDIT) )
++                {
++                    // check and see if this a number text.
++                    sal_uInt32 nFIndex = 0;
++                    String aStr = pCell->GetStringData();
++                    if ( pFormatter->IsNumberFormat(aStr, nFIndex, fTextNumVal) )
++                        bNumberText = true;
++                }
++
++                if (eType == CELLTYPE_VALUE || bNumberText)
++                {
++                    bNumValid = FALSE;
++                    rValue = bNumberText ? fTextNumVal : static_cast<ScValueCell*>(pCell)->GetValue();
++                    rErr = 0;
++                    --nRow;
++                    if ( bCalcAsShown )
+                     {
+-                        // added to avoid warnings
++                        lcl_IterGetNumberFormat( nNumFormat, pAttrArray,
++                            nAttrEndRow, pCol->pAttrArray, nRow, pDoc );
++                        rValue = pDoc->RoundValueAsShown( rValue, nNumFormat );
+                     }
+-				}
++                    //
++                    //	wenn in der selben Spalte gleich noch eine Value-Cell folgt, die
++                    //	auch noch im Block liegt, den Wert jetzt schon holen
++                    //
++                    if ( nColRow < pCol->nCount &&
++                         pCol->pItems[nColRow].nRow <= nEndRow &&
++                         pCol->pItems[nColRow].pCell->GetCellType() == CELLTYPE_VALUE &&
++                         !bSubTotal )
++                    {
++                        fNextValue = ((ScValueCell*)pCol->pItems[nColRow].pCell)->GetValue();
++                        nNextRow = pCol->pItems[nColRow].nRow;
++                        bNextValid = TRUE;
++                        if ( bCalcAsShown )
++                        {
++                            lcl_IterGetNumberFormat( nNumFormat, pAttrArray,
++                                nAttrEndRow, pCol->pAttrArray, nNextRow, pDoc );
++                            fNextValue = pDoc->RoundValueAsShown( fNextValue, nNumFormat );
++                        }
++                    }
++
++                    return TRUE;									// gefunden
++                }
++                else if (eType == CELLTYPE_FORMULA)
++                {
++                    if (!bSubTotal || !((ScFormulaCell*)pCell)->IsSubTotal())
++                    {
++                        rErr = ((ScFormulaCell*)pCell)->GetErrCode();
++                        if ( rErr || ((ScFormulaCell*)pCell)->IsValue() )
++                        {
++                            rValue = ((ScFormulaCell*)pCell)->GetValue();
++                            nRow--;
++                            bNumValid = FALSE;
++                            return TRUE;							// gefunden
++                        }
++                    }
++                }
++                else if (eType == CELLTYPE_STRING || eType == CELLTYPE_EDIT)
++                {
++                    if ( bTextAsZero )
++                    {
++                        rErr = 0;
++                        rValue = 0.0;
++                        nNumFmtType = NUMBERFORMAT_NUMBER;
++                        nNumFmtIndex = 0;
++                        bNumValid = TRUE;
++                        --nRow;
++                        return TRUE;
++                    }
++                }
+ 			}
+ 		}
+ 		else
+@@ -472,6 +476,11 @@ BOOL ScValueIterator::GetFirst(double& rValue, USHORT& rErr)
+ 	return GetThis(rValue, rErr);
+ }
+ 
++void ScValueIterator::SetNumberFormatter(SvNumberFormatter* p)
++{
++    pFormatter = p;
++}
++
+ /*	ist inline:
+ BOOL ScValueIterator::GetNext(double& rValue, USHORT& rErr)
+ {
+diff --git a/sc/source/core/tool/interpr1.cxx b/sc/source/core/tool/interpr1.cxx
+index 1dba9a8..4a0137d 100644
+--- sc/source/core/tool/interpr1.cxx
++++ sc/source/core/tool/interpr1.cxx
+@@ -3080,16 +3080,27 @@ double ScInterpreter::IterateParameters( ScIterFunc eFunc, BOOL bTextAsZero )
+ 				ScBaseCell* pCell = GetCell( aAdr );
+ 				if ( pCell )
+ 				{
++                    bool bNumberText = false;
++                    double fTextNumVal = 0.0;
++                    if ( !bTextAsZero && pCell->HasStringData() )
++                    {
++                        // check and see if this a number text.
++                        sal_uInt32 nFIndex = 0;
++                        String aStr = pCell->GetStringData();
++                        if ( pFormatter->IsNumberFormat(aStr, nFIndex, fTextNumVal) )
++                            bNumberText = true;
++                    }
++
+ 					if( eFunc == ifCOUNT2 )
+ 					{
+ 						CellType eCellType = pCell->GetCellType();
+ 						if (eCellType != CELLTYPE_NONE && eCellType != CELLTYPE_NOTE)
+ 							nCount++;
+ 					}
+-					else if ( pCell->HasValueData() )
++					else if ( pCell->HasValueData() || bNumberText )
+ 					{
+ 						nCount++;
+-						fVal = GetCellValue( aAdr, pCell );
++						fVal = bNumberText ? fTextNumVal : GetCellValue( aAdr, pCell );
+ 						CurFmtToFuncFmt();
+ 						switch( eFunc )
+ 						{
+@@ -3139,6 +3150,7 @@ double ScInterpreter::IterateParameters( ScIterFunc eFunc, BOOL bTextAsZero )
+ 				else
+ 				{
+ 					ScValueIterator aValIter( pDok, aRange, glSubTotal, bTextAsZero );
++                    aValIter.SetNumberFormatter(pFormatter);
+ 					if (aValIter.GetFirst(fVal, nErr))
+ 					{
+ 						//	Schleife aus Performance-Gruenden nach innen verlegt:
+diff --git a/sc/source/ui/view/gridwin4.cxx b/sc/source/ui/view/gridwin4.cxx
+diff --git a/sc/source/ui/view/output.cxx b/sc/source/ui/view/output.cxx
