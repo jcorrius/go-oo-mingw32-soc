@@ -1,0 +1,156 @@
+Index: solenv/bin/deliver.pl
+===================================================================
+RCS file: /cvs/tools/solenv/bin/deliver.pl,v
+retrieving revision 1.124
+diff -u -p -u -r1.124 deliver.pl
+--- solenv/bin/deliver.pl	26 Nov 2007 19:00:17 -0000	1.124
++++ solenv/bin/deliver.pl	18 Feb 2008 16:57:01 -0000
+@@ -40,6 +40,8 @@ eval 'exec perl -wS $0 ${1+"$@"}'
+ # deliver.pl - copy from module output tree to solver
+ #
+ 
++use lib ("$ENV{SOLARENV}/bin/modules");
++
+ use Cwd;
+ use File::Basename;
+ use File::Copy;
+@@ -47,6 +49,9 @@ use File::DosGlob 'glob';
+ use File::Path;
+ use File::Spec;
+ 
++# for component registration ...
++use installer::globals;
++
+ #### script id #####
+ 
+ ( $script_name = $0 ) =~ s/^.*\b(\w+)\.pl$/$1/; 
+@@ -757,6 +762,109 @@ sub strip_target {
+     return $rc;
+ };
+ 
++# start evil cut/paste from bin/modules/installer/servicesfile.pm ...
++
++################################################################
++# Generating a file url from a path
++################################################################
++
++sub remove_ending_pathseparator
++{
++	my ( $stringref ) = @_;
++
++	$$stringref =~ s/\Q$installer::globals::separator\E\s*$//;	
++}
++
++sub make_file_url
++{
++	my ( $path ) = @_;
++
++	my $fileurl = "";
++	
++	# removing ending slash/backslash
++	
++	remove_ending_pathseparator(\$path);
++	
++	if ($installer::globals::iswin)
++	{
++		$path =~ s/\\/\//g;
++		$fileurl = "file\:\/\/\/" . $path;
++	}
++	else
++	{
++		$fileurl = "file\:\/\/" . $path;
++	} 
++	
++	return $fileurl;
++}
++
++################################################################
++# Helper routine to change cygwin (POSIX) path to DOS notation
++# if needed
++################################################################
++sub fix_cygwin_path
++{
++    my ( $path ) = @_;
++
++    if ( $installer::globals::iswin eq 1 && $ENV{'USE_SHELL'} ne "4nt" && $installer::globals::wrapcmd eq "" )
++    {
++	$path = qx{cygpath -m "$path"};
++	chomp($path);
++    }
++
++    return $path;
++}
++
++sub get_regcomp()
++{
++    my $searchname;
++    if ($installer::globals::isunix) { $searchname = "regcomp"; }
++    else { $searchname = "regcomp.exe"; } 
++    return $searchname;
++}
++
++sub register_component ($)
++{
++    my $component = shift;
++
++    # Try to register all libraries
++    $component =~ /\.(so|dylib|dll)/ || return;
++
++    my $solarlib = $ENV{SOLARVER}."/".$ENV{INPATH}."/lib";
++    my $servicesfile = "$solarlib/services.rdb";
++    my @regcompoutput = ();
++    my $regcomp = get_regcomp();
++
++    my $filestring = make_file_url($component);
++
++    my $systemcall = "$installer::globals::wrapcmd $regcomp " .
++	"-register -r ".fix_cygwin_path($servicesfile).
++	" -c " . $installer::globals::quote . $filestring . $installer::globals::quote .
++	" -wop=" . $installer::globals::quote . $allvariableshashref->{'NATIVESERVICESURLPREFIX'} . $installer::globals::quote .
++	" 2\>\&1 |";
++
++    open (REG, "$systemcall");
++    while (<REG>) {push(@regcompoutput, $_); }
++    close (REG);
++    
++    my $returnvalue = $?;   # $? contains the return value of the systemcall
++
++    # cf. cpputools/source/registercomponent/registercomponent.cxx
++    if ($returnvalue == 256) {
++	# has no component_ methods (?)
++	print "non component: $component\n" if !$opt_silent;
++	return;
++    } elsif ($returnvalue == 0) {
++	print "registered component: $component\n" if !$opt_silent;
++    } elsif (!$opt_silent) {
++	print "Warning: registraiton failed abnormally with code: $returnvalue\n";
++	print "command: $systemcall";
++	print "output: @regcompoutput";
++    }
++}
++
++# evil cut/paste from bin/modules/installer/servicesfile.pm ends ...
++
+ sub copy_if_newer 
+ {
+     # return 0 if file is unchanged ( for whatever reason )
+@@ -841,6 +949,11 @@ sub copy_if_newer 
+                 system("macosx-create-bundle", "$to=$from.app") if ( -d "$from.app" );
+                 system("ranlib", "$to" ) if ( $to =~ /\.a/ );
+             }
++
++	    # register each component as it is delivered into a tests .rdb
++#	    if (defined $ENV{QAREG}) {
++		register_component ($to);
++#	    }
+             return 1;
+         }
+         else {
+@@ -854,6 +967,7 @@ sub copy_if_newer 
+             print_error("directory '$destdir' does not exist", 0);
+         }
+     }
++
+     unlink($temp_file);
+     return 0;
+ }
