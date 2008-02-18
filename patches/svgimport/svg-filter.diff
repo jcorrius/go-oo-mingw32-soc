@@ -762,10 +762,10 @@ index 0000000..124457f
 +close ( GPERF );
 diff --git a/filter/source/svgimport/gfxtypes.hxx b/filter/source/svgimport/gfxtypes.hxx
 new file mode 100644
-index 0000000..6d77d5e
+index 0000000..eb6b80f
 --- /dev/null
 +++ filter/source/svgimport/gfxtypes.hxx
-@@ -0,0 +1,296 @@
+@@ -0,0 +1,309 @@
 +/*************************************************************************
 + *
 + *    OpenOffice.org - a multi-platform office productivity suite
@@ -789,6 +789,7 @@ index 0000000..6d77d5e
 +#include <basegfx/polygon/b2dlinegeometry.hxx>
 +
 +#include <hash_set>
++#include <hash_map>
 +
 +namespace svgi
 +{
@@ -892,7 +893,9 @@ index 0000000..6d77d5e
 +{
 +    State() :
 +        maCTM(),
-+        maViewport(0,0,100,100),
++        maTransform(),
++        maViewport(),
++        maViewBox(),
 +        maFontFamily(), // app-default
 +        mnFontSize(12.0),
 +        meFontStyle(STYLE_NORMAL),
@@ -917,15 +920,18 @@ index 0000000..6d77d5e
 +        maDashArray(),
 +        mnDashOffset(0.0),
 +        meLineCap(BUTT),
-+        meLineJoin(basegfx::tools::B2DLINEJOIN_MITER),
++        meLineJoin(basegfx::B2DLINEJOIN_MITER),
 +        mnMiterLimit(4.0),
 +        mnStrokeWidth(1.0),
 +        maViewportFillColor(1.0),
-+        maViewportFillGradient()
++        maViewportFillGradient(),
++        mnStyleId(0)
 +    {}
 +
 +    basegfx::B2DHomMatrix       maCTM;
++    basegfx::B2DHomMatrix       maTransform;
 +    basegfx::B2DRange           maViewport;
++    basegfx::B2DRange           maViewBox;
 +
 +    rtl::OUString               maFontFamily;
 +    /** Absolute: xx-small=6.94 | x-small=8.33 | small=10 | medium=12 | large=14.4 | x-large=17.28 | xx-large=20.736
@@ -962,18 +968,22 @@ index 0000000..6d77d5e
 +    std::vector<double>         maDashArray;
 +    double                      mnDashOffset;
 +    CapStyle                    meLineCap;
-+    basegfx::tools::B2DLineJoin meLineJoin;
++    basegfx::B2DLineJoin        meLineJoin;
 +    double                      mnMiterLimit;
 +    double                      mnStrokeWidth;
 +
 +    ARGBColor                   maViewportFillColor;
 +    Gradient                    maViewportFillGradient;
++
++    sal_Int32                   mnStyleId;
 +};
 +
 +inline bool operator==(const State& rLHS, const State& rRHS )
 +{
 +    return rLHS.maCTM==rRHS.maCTM &&
++        rLHS.maTransform==rRHS.maTransform &&
 +        rLHS.maViewport==rRHS.maViewport &&
++        rLHS.maViewBox==rRHS.maViewBox &&
 +        rLHS.maFontFamily==rRHS.maFontFamily &&
 +        rLHS.mnFontSize==rRHS.mnFontSize &&
 +        rLHS.meFontStyle==rRHS.meFontStyle &&
@@ -1017,6 +1027,8 @@ index 0000000..6d77d5e
 +            ^  size_t(rState.maCTM.get( 1, 2 ))
 +            ^  size_t(rState.maViewport.getWidth())
 +            ^  size_t(rState.maViewport.getHeight())
++            ^  size_t(rState.maViewBox.getWidth())
++            ^  size_t(rState.maViewBox.getHeight())
 +            ^  size_t(rState.maFontFamily.hashCode())
 +            ^  size_t(rState.mnFontSize)
 +            ^  size_t(rState.meFontStyle)
@@ -1057,17 +1069,18 @@ index 0000000..6d77d5e
 +    }
 +};
 +
-+typedef std::hash_set<State, StateHash > StatePool;
++typedef std::hash_set<State, StateHash> StatePool;
++typedef std::hash_map<sal_Int32, State> StateMap;
 +
 +} // namespace svgi
 +
 +#endif
 diff --git a/filter/source/svgimport/makefile.mk b/filter/source/svgimport/makefile.mk
 new file mode 100644
-index 0000000..9da4a72
+index 0000000..45eac4b
 --- /dev/null
 +++ filter/source/svgimport/makefile.mk
-@@ -0,0 +1,135 @@
+@@ -0,0 +1,136 @@
 +#*************************************************************************
 +#
 +#    OpenOffice.org - a multi-platform office productivity suite
@@ -1109,7 +1122,8 @@ index 0000000..9da4a72
 +			$(SLO)$/services.obj		\
 +			$(SLO)$/svgimporter.obj		\
 +			$(SLO)$/svgreader.obj       \
-+			$(SLO)$/tokenmap.obj
++			$(SLO)$/tokenmap.obj        \
++			$(SLO)$/units.obj
 +
 +# --- Library -----------------------------------
 +
@@ -1388,10 +1402,10 @@ index 0000000..f2ab4a3
 +#endif // _COM_SUN_STAR_XML_SAX_XDOCUMENTHANDLER_HDL_
 diff --git a/filter/source/svgimport/parserfragments.cxx b/filter/source/svgimport/parserfragments.cxx
 new file mode 100644
-index 0000000..d2d6f01
+index 0000000..790281d
 --- /dev/null
 +++ filter/source/svgimport/parserfragments.cxx
-@@ -0,0 +1,126 @@
+@@ -0,0 +1,344 @@
 +/*************************************************************************
 + *
 + *    OpenOffice.org - a multi-platform office productivity suite
@@ -1407,11 +1421,21 @@ index 0000000..d2d6f01
 + *
 + ************************************************************************/
 +
++// MARKER(update_precomp.py): autogen include statement, do not remove
++#include "precompiled_filter.hxx"
++
 +#include "parserfragments.hxx"
 +#include "gfxtypes.hxx"
 +
++#include <basegfx/tools/canvastools.hxx>
++#include <com/sun/star/geometry/AffineMatrix2D.hpp>
++
 +#include <boost/bind.hpp>
 +#include <boost/spirit.hpp>
++#include <numeric>
++#include <algorithm>
++
++using namespace ::com::sun::star;
 +
 +namespace svgi
 +{
@@ -1437,6 +1461,52 @@ index 0000000..d2d6f01
 +void setIntColor( double& rChannel, sal_uInt8 nVal )
 +{
 +    rChannel = nVal/255.0;
++}
++
++void calcRotation(std::vector<geometry::AffineMatrix2D>& rTransforms,
++                  geometry::AffineMatrix2D&              rCurrTransform,
++                  double                                 fRotationAngle)
++{
++    ::basegfx::B2DHomMatrix aCurr;
++    aCurr.translate(-rCurrTransform.m02,-rCurrTransform.m12);
++    aCurr.rotate(fRotationAngle*M_PI/180);
++    aCurr.translate(rCurrTransform.m02,rCurrTransform.m12);
++
++    rTransforms.push_back(
++        basegfx::unotools::affineMatrixFromHomMatrix(
++            rCurrTransform,
++            aCurr));
++}
++
++void calcSkewX(std::vector<geometry::AffineMatrix2D>& rTransforms,
++               double                                 fSkewAngle)
++{
++    geometry::AffineMatrix2D aMat(1.0,0.0,0.0,
++                                  tan(fSkewAngle),1.0,0.0);
++    rTransforms.push_back(aMat);
++}
++
++void calcSkewY(std::vector<geometry::AffineMatrix2D>& rTransforms,
++               double                                 fSkewAngle)
++{
++    geometry::AffineMatrix2D aMat(1.0,tan(fSkewAngle),0.0,
++                                  0.0,1.0,0.0);
++    rTransforms.push_back(aMat);
++}
++
++geometry::AffineMatrix2D multiplyMatrix( const geometry::AffineMatrix2D& rLHS,
++                                         const geometry::AffineMatrix2D& rRHS )
++{
++    basegfx::B2DHomMatrix aLHS;
++    basegfx::B2DHomMatrix aRHS;
++
++    basegfx::unotools::homMatrixFromAffineMatrix(aLHS,rLHS);
++    basegfx::unotools::homMatrixFromAffineMatrix(aRHS,rRHS);
++
++    aRHS*=aLHS;
++
++    geometry::AffineMatrix2D aRet;
++    return basegfx::unotools::affineMatrixFromHomMatrix(aRet,aRHS);
 +}
 +
 +bool parseColor( const char* sColor, ARGBColor& rColor  )
@@ -1516,14 +1586,176 @@ index 0000000..d2d6f01
 +        //  End grammar
 +        space_p).full;
 +}
++
++//////////////////////////////////////////////////////////////
++
++bool parseTransform( const char* sTransform, basegfx::B2DHomMatrix& rTransform )
++{
++    using namespace ::boost::spirit;
++
++    double fRefOffsetX(0.0);
++    double fRefOffsetY(0.0);
++    bool   bRefTransform(false);
++
++    double fRotationAngle=0.0;
++    double fSkewAngle=0.0;
++    geometry::AffineMatrix2D aIdentityTransform;
++    geometry::AffineMatrix2D aCurrTransform;
++    std::vector<geometry::AffineMatrix2D> aTransforms;
++    aIdentityTransform.m00 = 1.0; aIdentityTransform.m11 = 1.0;
++    aCurrTransform = aIdentityTransform;
++    
++    const bool bRes = parse(sTransform,
++        //  Begin grammar
++        (
++            // identity transform
++            str_p("none")
++          |
++            // the ref() form
++            (str_p("ref")
++             >> confix_p('(', 
++                         str_p("svg")[assign_a(bRefTransform,true)] 
++                         >> *(real_p[assign_a(fRefOffsetX)] >> ',' >>
++                              real_p[assign_a(fRefOffsetY)]),
++                         ')'))
++          |
++            // the transform-list form
++            (list_p(
++               (   
++                 // matrix(a,b,c,d,e,f)  
++                 (str_p("matrix") 
++                  >> confix_p('(', 
++                              real_p[assign_a(aCurrTransform.m00)] >> ',' >>
++                              real_p[assign_a(aCurrTransform.m10)] >> ',' >>
++                              real_p[assign_a(aCurrTransform.m01)] >> ',' >>
++                              real_p[assign_a(aCurrTransform.m11)] >> ',' >>
++                              real_p[assign_a(aCurrTransform.m02)] >> ',' >>
++                              real_p[assign_a(aCurrTransform.m12)],
++                              ')'))[push_back_a(aTransforms,aCurrTransform)]
++               |  
++                 // translate(x,[y])
++                 (str_p("translate") 
++                  >> confix_p('(', 
++                              real_p[assign_a(aCurrTransform.m02)] >>
++                              !(',' >> real_p[assign_a(aCurrTransform.m12)]),
++                              ')'))[push_back_a(aTransforms,aCurrTransform)]
++               |  
++                 // scale(x,[y])
++                 (str_p("scale") 
++                  >> confix_p('(', 
++                              real_p[assign_a(aCurrTransform.m00)] >> 
++                              !(',' >> real_p[assign_a(aCurrTransform.m11)]),
++                              ')'))[push_back_a(aTransforms,aCurrTransform)]
++               |  
++                 // rotate(phi,[cx, cy])
++                 (str_p("rotate") 
++                  >> confix_p('(', 
++                              real_p[assign_a(fRotationAngle)] >> ',' >>
++                              real_p[assign_a(aCurrTransform.m00)] >> ',' >>
++                              real_p[assign_a(aCurrTransform.m11)],
++                              ')'))[boost::bind(&calcRotation,
++                                                boost::ref(aTransforms),
++                                                boost::ref(aCurrTransform),
++                                                boost::cref(fRotationAngle))]
++               |  
++                 // skewX(phi)
++                 (str_p("skewX") 
++                  >> '(' 
++                  >> real_p[assign_a(fSkewAngle)] 
++                  >> ')')[boost::bind(&calcSkewX,
++                                      boost::ref(aTransforms),
++                                      boost::cref(fSkewAngle))]
++               |  
++                 // skewY(phi)
++                 (str_p("skewY") 
++                  >> '(' 
++                  >> real_p[assign_a(fSkewAngle)] 
++                  >> ')')[boost::bind(&calcSkewY,
++                                      boost::ref(aTransforms),
++                                      boost::cref(fSkewAngle))]
++                 // reset current transform after every push
++               )[assign_a(aCurrTransform,aIdentityTransform)],
++                 // list delimiter is either ',' or space
++                ',' | eps_p ))
++        ),
++        //  End grammar
++        space_p).full;
++
++    if( !bRes )
++        return false;
++
++    // fold all transformations into one
++    const geometry::AffineMatrix2D aTotalTransform(
++        std::accumulate(aTransforms.begin(),
++                        aTransforms.end(),
++                        aIdentityTransform,
++                        &multiplyMatrix));
++
++    basegfx::unotools::homMatrixFromAffineMatrix(
++        rTransform,
++        aTotalTransform);
++
++    // TODO(F1): handle the ref case
++    return bRes;
++}
++
++//////////////////////////////////////////////////////////////
++
++bool parseViewBox( const char* sViewbox, basegfx::B2DRange& rRect )
++{
++    using namespace ::boost::spirit;
++
++    double x=0.0,y=0.0,w=0.0,h=0.0;
++    
++    const bool bRes = parse(sViewbox,
++        //  Begin grammar
++        (
++            // either comma- or space-delimited list of four doubles
++            (real_p[assign_a(x)] >> ',' >>
++             real_p[assign_a(y)] >> ',' >>
++             real_p[assign_a(w)] >> ',' >>
++             real_p[assign_a(h)])
++           | 
++            (real_p[assign_a(x)] >>
++             real_p[assign_a(y)] >>
++             real_p[assign_a(w)] >>
++             real_p[assign_a(h)])
++        ),
++        //  End grammar
++        space_p).full;
++
++    if( !bRes )
++        return false;
++
++    rRect = basegfx::B2DRange(x,y,x+w,y+h);
++
++    return true;
++}
++
++//////////////////////////////////////////////////////////////
++
++bool parseDashArray( const char* sDashArray, std::vector<double>& rOutputVector )
++{
++    using namespace ::boost::spirit;
++    
++    rOutputVector.clear();
++    return parse(sDashArray,
++        //  Begin grammar
++        (
++            // parse comma-delimited list of doubles
++            list_p(real_p[push_back_a(rOutputVector)])
++        ),
++        //  End grammar
++        space_p).full;
++}
 +    
 +} // namespace svgi
 diff --git a/filter/source/svgimport/parserfragments.hxx b/filter/source/svgimport/parserfragments.hxx
 new file mode 100644
-index 0000000..a13a243
+index 0000000..0139934
 --- /dev/null
 +++ filter/source/svgimport/parserfragments.hxx
-@@ -0,0 +1,29 @@
+@@ -0,0 +1,45 @@
 +/*************************************************************************
 + *
 + *    OpenOffice.org - a multi-platform office productivity suite
@@ -1542,13 +1774,29 @@ index 0000000..a13a243
 +#ifndef INCLUDED_PARSERFRAGMENTS_HXX
 +#define INCLUDED_PARSERFRAGMENTS_HXX
 +
++#include <sal/config.h>
++#include <vector>
++
++namespace basegfx
++{ 
++    class B2DHomMatrix; 
++    class B2DRange; 
++}
 +namespace svgi
 +{
-+
 +    struct ARGBColor;
 +
 +    /// Parse given string for one of the SVG color grammars
 +    bool parseColor( const char* sColor, ARGBColor& rColor );
++
++    /// Parse given string for one of the SVG transformation grammars
++    bool parseTransform( const char* sTransform, basegfx::B2DHomMatrix& rTransform );
++
++    /// Parse given string for the viewBox attribute
++    bool parseViewBox( const char* sViewbox, basegfx::B2DRange& rRect );
++
++    /// Parse given string for a list of double values, comma-delimited
++    bool parseDashArray( const char* sDashArray, std::vector<double>& rOutputVector );
 +
 +} // namespace svgi
 +
@@ -1662,7 +1910,7 @@ index 0000000..6061f9d
 +
 diff --git a/filter/source/svgimport/saxattrlist.hxx b/filter/source/svgimport/saxattrlist.hxx
 new file mode 100644
-index 0000000..d701849
+index 0000000..2dd0ae8
 --- /dev/null
 +++ filter/source/svgimport/saxattrlist.hxx
 @@ -0,0 +1,69 @@
@@ -1697,7 +1945,7 @@ index 0000000..d701849
 +{
 +    typedef std::hash_map< rtl::OUString, rtl::OUString, rtl::OUStringHash > PropertyMap;
 +
-+    // TODO(Q3): Move this to comphelper
++    // TODO(Q3): Move this to comphelper - duplicate to xmloff, pdfimport, too
 +    class AttributeList : public ::cppu::WeakImplHelper2<
 +		    com::sun::star::xml::sax::XAttributeList,
 +            com::sun::star::util::XCloneable
@@ -1958,10 +2206,10 @@ index 0000000..1c86425
 +PDFI_IMPLEMENTATION_IDENTIFIER="com.sun.star.comp.documents.PDFImport"
 diff --git a/filter/source/svgimport/svgreader.cxx b/filter/source/svgimport/svgreader.cxx
 new file mode 100644
-index 0000000..0eb7a7a
+index 0000000..b0a20b1
 --- /dev/null
 +++ filter/source/svgimport/svgreader.cxx
-@@ -0,0 +1,484 @@
+@@ -0,0 +1,992 @@
 +/*************************************************************************
 + *
 + *    OpenOffice.org - a multi-platform office productivity suite
@@ -1977,28 +2225,39 @@ index 0000000..0eb7a7a
 + *
 + ************************************************************************/
 +
++// MARKER(update_precomp.py): autogen include statement, do not remove
++#include "precompiled_filter.hxx"
++
 +#include "svgreader.hxx"
 +#include "saxattrlist.hxx"
 +#include "gfxtypes.hxx"
++#include "units.hxx"
 +#include "parserfragments.hxx"
 +#include "tokenmap.hxx"
 +
 +#include <rtl/math.hxx>
 +#include <rtl/ref.hxx>
++#include <rtl/ustring.hxx>
++#include <rtl/ustrbuf.hxx>
++#include <basegfx/vector/b2enums.hxx>
 +#include <basegfx/range/b2drange.hxx>
 +#include <basegfx/matrix/b2dhommatrix.hxx>
 +#include <basegfx/polygon/b2dpolypolygon.hxx>
 +#include <basegfx/polygon/b2dlinegeometry.hxx>
++#include <basegfx/polygon/b2dpolygontools.hxx>
 +#include <basegfx/polygon/b2dpolypolygontools.hxx>
++#include <basegfx/polygon/b2dlinegeometry.hxx>
 +#include <com/sun/star/io/XSeekable.hpp>
 +#include <com/sun/star/xml/sax/XParser.hpp>
 +#include <com/sun/star/xml/dom/XDocumentBuilder.hpp>
 +#include <com/sun/star/xml/dom/NodeType.hpp>
 +
++#include <boost/bind.hpp>
 +#include <hash_set>
 +
 +#define USTR(x) rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( x ) )
 +#define OASIS_STR "urn:oasis:names:tc:opendocument:xmlns:"
++#define USER_UNIT (50.0) // FIXME? 50.0 considered a nice magic value ;-)
 +
 +using namespace ::com::sun::star;
 +
@@ -2040,11 +2299,24 @@ index 0000000..0eb7a7a
 +
 +struct AnnotatingVisitor
 +{
-+    AnnotatingVisitor() :
++    AnnotatingVisitor(StatePool&                                        rStatePool,
++                      StateMap&                                         rStateMap,
++                      const uno::Reference<xml::sax::XDocumentHandler>& xDocumentHandler) :
++        mnCurrStateId(0),
 +        maCurrState(),
-+        maParentStates(1),
-+        maStates()
-+    {}
++        maParentStates(),
++        mrStates(rStatePool),
++        mrStateMap(rStateMap),
++        mxDocumentHandler(xDocumentHandler)
++    {
++        // fake initial parent - needs to setup a somewhat upscaling
++        // transformation, to avoid those dreaded integer roundoff
++        // errors in the drawing layer
++        State aState;
++        aState.maTransform.scale(USER_UNIT,USER_UNIT);
++        aState.maCTM = aState.maTransform;
++        maParentStates.push_back(aState);
++    }
 +
 +    void operator()( const uno::Reference<xml::dom::XElement>& )
 +    {}
@@ -2052,6 +2324,11 @@ index 0000000..0eb7a7a
 +    void operator()( const uno::Reference<xml::dom::XElement>&      xElem,
 +                     const uno::Reference<xml::dom::XNamedNodeMap>& xAttributes )
 +    {
++        // init state. CTM and viewport gets inherited from parent
++        maCurrState = State(); 
++        maCurrState.maCTM = maParentStates.back().maCTM;
++        maCurrState.maViewport = maParentStates.back().maViewport;
++
 +        // scan for style info
 +        const sal_Int32 nNumElems( xAttributes->getLength() );
 +        rtl::OUString sAttributeValue;
@@ -2067,19 +2344,174 @@ index 0000000..0eb7a7a
 +                               xAttributes->item(i)->getNodeName(),
 +                               sAttributeValue);
 +        }
++
++        // all attributes parsed, can calc total CTM now
++        if( !maCurrState.maViewBox.isEmpty() &&
++            maCurrState.maViewBox.getWidth() != 0.0 && 
++            maCurrState.maViewBox.getHeight() != 0.0 )
++        {
++            // transform aViewBox into viewport, such that they
++            // coincide
++            maCurrState.maTransform.translate(-maCurrState.maViewBox.getMinX(),
++                                              -maCurrState.maViewBox.getMinY());
++            maCurrState.maTransform.scale(maCurrState.maViewport.getWidth()/maCurrState.maViewBox.getWidth(),
++                                          maCurrState.maViewport.getHeight()/maCurrState.maViewBox.getHeight());
++        }
++        maCurrState.maCTM *= maCurrState.maTransform;
 +        
-+        std::pair<StatePool::iterator,bool> aRes(
-+            maStates.insert(maCurrState));
++        // if necessary, serialize to automatic-style section
++        writeStyle(xElem);
++    }
++
++    rtl::OUString getStyleName( const char* sPrefix, sal_Int32 nId )
++    {
++        return rtl::OUString::createFromAscii(sPrefix)+rtl::OUString::valueOf(nId);
++    }
++
++    sal_Int8 toByteColor( double val )
++    {
++        // TODO(Q3): duplicated from vcl::unotools
++        return sal::static_int_cast<sal_Int8>(
++            basegfx::fround(val*255.0));
++    }
++
++    rtl::OUString getOdfColor( const ARGBColor& rColor )
++    {
++        // TODO(Q3): duplicated from pdfimport
++        rtl::OUStringBuffer aBuf( 7 );
++        const sal_uInt8 nRed  ( toByteColor(rColor.r)   );
++        const sal_uInt8 nGreen( toByteColor(rColor.g) );
++        const sal_uInt8 nBlue ( toByteColor(rColor.b)  );
++        aBuf.append( sal_Unicode('#') );
++        if( nRed < 10 )
++            aBuf.append( sal_Unicode('0') );
++        aBuf.append( sal_Int32(nRed), 16 );
++        if( nGreen < 10 )
++            aBuf.append( sal_Unicode('0') );
++        aBuf.append( sal_Int32(nGreen), 16 );
++        if( nBlue < 10 )
++            aBuf.append( sal_Unicode('0') );
++        aBuf.append( sal_Int32(nBlue), 16 );
++
++        // TODO(F3): respect alpha transparency (polygons etc.)
++        OSL_ASSERT(rColor.a == 1.0);
++
++        return aBuf.makeStringAndClear();
++    }
++
++    bool writeStyle(const State& rState)
++    {
++        PropertyMap aProps;
++        rtl::Reference<AttributeList> xAttrs( new AttributeList(aProps) );
++        uno::Reference<xml::sax::XAttributeList> xUnoAttrs( xAttrs.get() );
++
++        std::pair<StatePool::iterator,
++                  bool> aRes = mrStates.insert(rState);
++        if( !aRes.second )
++            return false; // not written
++
++        ++mnCurrStateId;
++
++        // mnStyleId does not take part in hashing/comparison
++        const_cast<State&>(*aRes.first).mnStyleId = mnCurrStateId;
++        mrStateMap.insert(std::make_pair(
++                              mnCurrStateId,
++                              rState));
++        
++        // serialize to automatic-style section
++        aProps[ USTR( "style:name" ) ] = getStyleName("svggraphicstyle",
++                                                      mnCurrStateId);
++        aProps[ USTR( "style:family" ) ] = USTR("graphic");
++        *xAttrs = aProps;
++        mxDocumentHandler->startElement( USTR("style:style"), 
++                                         xUnoAttrs );
++        
++        aProps.clear();
++        if( rState.meFillType != NONE )
++        {
++            aProps[ USTR( "draw:fill" ) ] = USTR("solid");
++            aProps[ USTR( "draw:fill-color" ) ] = getOdfColor(rState.maFillColor);
++            if( maCurrState.mnFillOpacity != 1.0 )
++                aProps[ USTR( "draw:fill-opacity" ) ] = rtl::OUString::valueOf(maCurrState.mnFillOpacity);
++        }
++        else
++        {
++            aProps[ USTR( "draw:fill" ) ] = USTR("none");
++        }
++        if( rState.meStrokeType != NONE )
++        {
++            aProps[ USTR( "draw:stroke" ) ] = USTR("solid");
++            aProps[ USTR( "draw:stroke-color" ) ] = getOdfColor(rState.maStrokeColor);
++        }
++        else
++        {
++            aProps[ USTR( "draw:stroke" ) ] = USTR("none");
++        }
++        if( maCurrState.mnStrokeWidth != 0.0 )
++        {
++            ::basegfx::B2DVector aVec(maCurrState.mnStrokeWidth,0);
++            aVec *= maCurrState.maCTM;
++            aProps[ USTR("svg:stroke-width") ] = rtl::OUString::valueOf( aVec.getLength()/100.0 )+USTR("mm");
++        }
++        if( maCurrState.meLineJoin == basegfx::B2DLINEJOIN_MITER )
++            aProps[ USTR( "draw:stroke-linejoin") ] = USTR("miter");
++        else if( maCurrState.meLineJoin == basegfx::B2DLINEJOIN_ROUND )
++            aProps[ USTR( "draw:stroke-linejoin") ] = USTR("round");
++        else if( maCurrState.meLineJoin == basegfx::B2DLINEJOIN_BEVEL )
++            aProps[ USTR( "draw:stroke-linejoin") ] = USTR("bevel");
++        if( maCurrState.mnStrokeOpacity != 1.0 )
++            aProps[ USTR( "svg:stroke-opacity") ] = rtl::OUString::valueOf(maCurrState.mnStrokeOpacity);
++        *xAttrs = aProps;
++        mxDocumentHandler->startElement( USTR("style:graphic-properties"), 
++                                         xUnoAttrs );
++        mxDocumentHandler->endElement( USTR("style:graphic-properties") );
++        mxDocumentHandler->endElement( USTR("style:style") );
++
++        return true; // newly written
++    }
++
++    void writeStyle(const uno::Reference<xml::dom::XElement>& xElem)
++    {
++        sal_Int32 nEmulatedStyleId=0;
++        if( maCurrState.maDashArray.size() && 
++            maCurrState.meStrokeType != NONE )
++        {
++            // ODF dashing is severly borked - generate filled shape
++            // instead (further down the road - here, we simply
++            // emulate a filled style with the next id)
++
++            // move all stroke attribs to fill, clear stroking
++            State aEmulatedStrokeState( maCurrState );
++            aEmulatedStrokeState.meFillType = maCurrState.meStrokeType;
++            aEmulatedStrokeState.mnFillOpacity = maCurrState.mnStrokeOpacity;
++            aEmulatedStrokeState.maFillColor = maCurrState.maStrokeColor;
++            aEmulatedStrokeState.maFillGradient = maCurrState.maStrokeGradient;
++            aEmulatedStrokeState.meFillRule = EVEN_ODD;
++            aEmulatedStrokeState.meStrokeType = NONE;
++
++            if( writeStyle(aEmulatedStrokeState) )
++                nEmulatedStyleId = mnCurrStateId;
++            else
++                nEmulatedStyleId = mrStates.find(aEmulatedStrokeState)->mnStyleId;
++        }
++
++        sal_Int32 nStyleId=0;
++        if( writeStyle(maCurrState) )
++            nStyleId = mnCurrStateId;
++        else
++            nStyleId = mrStates.find(maCurrState)->mnStyleId;
++
 +        xElem->setAttribute(USTR("internal-style-ref"),
 +                            rtl::OUString::valueOf(
-+                                reinterpret_cast<sal_Int64>(&(*aRes.first)),
-+                                16));
++                                nStyleId,16)
++                            +USTR("$")
++                            +rtl::OUString::valueOf(
++                                nEmulatedStyleId,16));
 +    }
 +
 +    void push()
 +    {
 +        maParentStates.push_back(maCurrState);
-+        maCurrState = State();
 +    }
 +
 +    void pop()
@@ -2094,9 +2526,103 @@ index 0000000..0eb7a7a
 +        rtl::OString aValueUtf8( sValue.getStr(), 
 +                                 sValue.getLength(), 
 +                                 RTL_TEXTENCODING_UTF8 );
-+
 +        switch(nTokenId)
 +        {
++            case XML_WIDTH:
++            {
++                const double fViewPortWidth(
++                    convLength(sValue));
++            
++                maCurrState.maViewport.expand(
++                    basegfx::B2DTuple(fViewPortWidth,0.0));
++                break;
++            }
++            case XML_HEIGHT:
++            {
++                const double fViewPortHeight(
++                    convLength(sValue));
++            
++                maCurrState.maViewport.expand(
++                    basegfx::B2DTuple(0.0,fViewPortHeight));
++                break;
++            }
++            case XML_VIEWBOX:
++            {
++                // TODO(F1): preserveAspectRatio
++                parseViewBox(
++                    aValueUtf8,
++                    maCurrState.maViewBox);
++                break;
++            }
++            case XML_FILL_RULE:
++            {
++                if( aValueUtf8 == "evenodd" )
++                    maCurrState.meFillRule = EVEN_ODD;
++                else if( aValueUtf8 == "nonzero" )
++                    maCurrState.meFillRule = NON_ZERO;
++                else if( aValueUtf8 == "inherit" )
++                    maCurrState.meFillRule = maParentStates.back().meFillRule;
++                break;
++            }
++            case XML_STROKE_WIDTH:
++            {
++                if( aValueUtf8 == "inherit" )
++                    maCurrState.mnStrokeWidth = maParentStates.back().mnStrokeWidth;
++                else
++                    maCurrState.mnStrokeWidth = convLength(sValue);
++                break;
++            }
++            case XML_STROKE_LINECAP:
++            {
++                if( aValueUtf8 == "butt" )
++                    maCurrState.meLineCap = BUTT;
++                else if( aValueUtf8 == "round" )
++                    maCurrState.meLineCap = ROUND;
++                else if( aValueUtf8 == "square" )
++                    maCurrState.meLineCap = RECT;
++                else if( aValueUtf8 == "inherit" )
++                    maCurrState.meLineCap = maParentStates.back().meLineCap;
++                break;
++            }
++            case XML_STROKE_LINEJOIN:
++            {
++                if( aValueUtf8 == "miter" )
++                    maCurrState.meLineJoin = basegfx::B2DLINEJOIN_MITER;
++                else if( aValueUtf8 == "round" )
++                    maCurrState.meLineJoin = basegfx::B2DLINEJOIN_ROUND;
++                else if( aValueUtf8 == "bevel" )
++                    maCurrState.meLineJoin = basegfx::B2DLINEJOIN_BEVEL;
++                else if( aValueUtf8 == "inherit" )
++                    maCurrState.meLineJoin = maParentStates.back().meLineJoin;
++                break;
++            }
++            case XML_STROKE_MITERLIMIT:
++            {
++                if( aValueUtf8 == "inherit" )
++                    maCurrState.mnMiterLimit = maParentStates.back().mnMiterLimit;
++                else
++                    maCurrState.mnMiterLimit = aValueUtf8.toDouble();
++                break;
++            }
++            case XML_STROKE_DASHOFFSET:
++            {
++                if( aValueUtf8 == "inherit" )
++                    maCurrState.mnDashOffset = maParentStates.back().mnDashOffset;
++                else
++                    maCurrState.mnDashOffset = convLength(sValue);
++                break;
++            }
++            case XML_STROKE_DASHARRAY:
++            {
++                if( aValueUtf8 == "none" )
++                    maCurrState.maDashArray.clear();
++                else if( aValueUtf8 == "inherit" )
++                    maCurrState.maDashArray = maParentStates.back().maDashArray;
++                else
++                    parseDashArray(aValueUtf8.getStr(),
++                                   maCurrState.maDashArray);
++                break;
++            }
 +            case XML_FILL:
 +            {
 +                const State& rParent( maParentStates.back() );
@@ -2121,6 +2647,13 @@ index 0000000..0eb7a7a
 +                            rParent.maStrokeGradient );
 +                break;
 +            }
++            case XML_TRANSFORM:
++            {
++                basegfx::B2DHomMatrix aTransform;
++                parseTransform(aValueUtf8.getStr(),aTransform);
++                maCurrState.maTransform = maCurrState.maTransform*aTransform;
++                break;
++            }
 +            default:
 +                fprintf(stderr, 
 +                        "unhandled token %s (detected as %s)\n", 
@@ -2135,19 +2668,20 @@ index 0000000..0eb7a7a
 +    void parseStyle( const rtl::OUString& sValue )
 +    {
 +        // split individual style attributes
-+        sal_Int32 nIndex, nDummyIndex=0;
++        sal_Int32 nIndex=0, nDummyIndex=0;
 +        rtl::OUString aCurrToken;
 +        do 
 +        {
 +            aCurrToken=sValue.getToken(0,';',nIndex);
 +            
 +            // split attrib & value
++            nDummyIndex=0;
 +            rtl::OUString aCurrAttrib(
-+                aCurrToken.getToken(0,':',nDummyIndex));
++                aCurrToken.getToken(0,':',nDummyIndex).trim());
 +            OSL_ASSERT(nDummyIndex!=-1);
 +            nDummyIndex=0;
 +            rtl::OUString aCurrValue(
-+                aCurrToken.getToken(1,':',nDummyIndex));
++                aCurrToken.getToken(1,':',nDummyIndex).trim());
 +            OSL_ASSERT(nDummyIndex==-1);
 +
 +            // recurse into normal attribute parsing
@@ -2166,14 +2700,14 @@ index 0000000..0eb7a7a
 +                     const ARGBColor& rInheritColor,
 +                     const Gradient&  rInheritGradient )
 +    {
-+        if( strcmp(sValue,"none") )
++        if( strcmp(sValue,"none") == 0 )
 +            rType = NONE;
-+        else if( strcmp(sValue,"currentColor") )
++        else if( strcmp(sValue,"currentColor") == 0 )
 +        {
 +            rType = SOLID;
 +            rColor = maCurrState.maCurrentColor;
 +        }
-+        else if( strcmp(sValue,"inherit") )
++        else if( strcmp(sValue,"inherit") == 0)
 +        {
 +            rType = rInheritType;
 +            rColor = rInheritColor;
@@ -2186,21 +2720,267 @@ index 0000000..0eb7a7a
 +        }
 +    }
 +
-+    void parseStroke( const rtl::OUString& )
-+    {
-+    }
-+
-+    State              maCurrState;
-+    std::vector<State> maParentStates;
-+    StatePool          maStates;
++    sal_Int32                                   mnCurrStateId;
++    State                                       maCurrState;
++    std::vector<State>                          maParentStates;
++    StatePool&                                  mrStates;
++    StateMap&                                   mrStateMap;
++    uno::Reference<xml::sax::XDocumentHandler>  mxDocumentHandler;
 +};
 +
 +/// Annotate svg styles with unique references to state pool
-+static StatePool annotateStyles( const uno::Reference<xml::dom::XElement> xElem )
++static void annotateStyles( StatePool&                                        rStatePool,
++                            StateMap&                                         rStateMap,
++                            const uno::Reference<xml::dom::XElement>          xElem,
++                            const uno::Reference<xml::sax::XDocumentHandler>& xDocHdl )
 +{
-+    AnnotatingVisitor aVisitor;
++    AnnotatingVisitor aVisitor(rStatePool,rStateMap,xDocHdl);
 +    visitElements(aVisitor, xElem);
-+    return aVisitor.maStates;
++}
++
++struct ShapeWritingVisitor
++{
++    ShapeWritingVisitor(StatePool&                                        rStatePool,
++                        StateMap&                                         rStateMap,
++                        const uno::Reference<xml::sax::XDocumentHandler>& xDocumentHandler) :
++        mrStates(rStatePool),
++        mrStateMap(rStateMap),
++        mxDocumentHandler(xDocumentHandler),
++        mnShapeNum(0)
++    {}
++
++    void operator()( const uno::Reference<xml::dom::XElement>& )
++    {
++    }
++
++    void operator()( const uno::Reference<xml::dom::XElement>&      xElem,
++                     const uno::Reference<xml::dom::XNamedNodeMap>& xAttributes )
++    {
++        PropertyMap aProps;
++        rtl::Reference<AttributeList> xAttrs( new AttributeList(aProps) );
++        uno::Reference<xml::sax::XAttributeList> xUnoAttrs( xAttrs.get() );
++        
++        sal_Int32 nDummyIndex(0);
++        rtl::OUString sStyleId(
++            xElem->getAttribute(
++                USTR("internal-style-ref")).getToken(
++                    0,'$',nDummyIndex));
++        StateMap::iterator pOrigState=mrStateMap.find(
++            sStyleId.toInt32());
++        maCurrState = pOrigState != mrStateMap.end() ? pOrigState->second : maParentStates.back();
++
++        const sal_Int32 nTokenId(getTokenId(xElem->getNodeName()));
++        switch(nTokenId)
++        {
++            case XML_POLYGON:
++            case XML_POLYLINE:
++            {
++                rtl::OUString sPoints = xElem->getAttribute(USTR("points"));
++                basegfx::B2DPolygon aPoly;
++                basegfx::tools::importFromSvgPoints(aPoly, sPoints);
++                if( nTokenId == XML_POLYGON )
++                    aPoly.setClosed(true);
++
++                writePathShape(aProps,
++                               xAttrs,
++                               xUnoAttrs,
++                               xElem,
++                               sStyleId,
++                               basegfx::B2DPolyPolygon(aPoly));
++                break;
++            }
++            case XML_RECT:
++            {
++                // collect attributes
++                const sal_Int32 nNumElems( xAttributes->getLength() );
++                rtl::OUString sAttributeValue;
++                bool bRxSeen=false, bRySeen=false;
++                double x=0.0,y=0.0,width=0.0,height=0.0,rx=0.0,ry=0.0;
++                for( sal_Int32 i=0; i<nNumElems; ++i )
++                {
++                    sAttributeValue = xAttributes->item(i)->getNodeValue();
++                    const sal_Int32 nAttribId( 
++                        getTokenId(xAttributes->item(i)->getNodeName()));
++                    switch(nAttribId)
++                    {
++                        case XML_X:
++                            x = convLength(sAttributeValue);
++                            break;
++                        case XML_Y:
++                            y = convLength(sAttributeValue);
++                            break;
++                        case XML_WIDTH:
++                            width = convLength(sAttributeValue);
++                            break;
++                        case XML_HEIGHT:
++                            height = convLength(sAttributeValue);
++                            break;
++                        case XML_RX:
++                            rx = convLength(sAttributeValue);
++                            bRxSeen=true;
++                            break;
++                        case XML_RY:
++                            ry = convLength(sAttributeValue);
++                            bRySeen=true;
++                            break;
++                        default:
++                            // skip
++                            break;
++                    }
++                }
++
++                if( bRxSeen && !bRySeen )
++                    ry = rx;
++                else if( bRySeen && !bRxSeen )
++                    rx = ry;
++
++                basegfx::B2DPolygon aPoly;
++                aPoly = basegfx::tools::createPolygonFromRect(
++                    basegfx::B2DRange(x,y,x+width,y+height),
++                    rx, ry );
++
++                writePathShape(aProps,
++                               xAttrs,
++                               xUnoAttrs,
++                               xElem,
++                               sStyleId,
++                               basegfx::B2DPolyPolygon(aPoly));                
++                break;
++            }
++            case XML_PATH:
++            {
++                rtl::OUString sPath = xElem->getAttribute(USTR("d"));
++                basegfx::B2DPolyPolygon aPoly;
++                basegfx::tools::importFromSvgD(aPoly, sPath);
++
++                writePathShape(aProps,
++                               xAttrs,
++                               xUnoAttrs,
++                               xElem,
++                               sStyleId,
++                               aPoly);
++                break;
++            }
++        }
++    }
++
++    void push()
++    {
++        maParentStates.push_back(maCurrState);
++    }
++
++    void pop()
++    {
++        maParentStates.pop_back();
++    }
++
++    void writePathShape( PropertyMap&                                    rProps, 
++                         rtl::Reference<AttributeList>&                  xAttrs,
++                         const uno::Reference<xml::sax::XAttributeList>& xUnoAttrs,
++                         const uno::Reference<xml::dom::XElement>&       xElem,
++                         const rtl::OUString&                            rStyleId,
++                         const basegfx::B2DPolyPolygon&                  rPoly )
++    {
++        // we might need to split up polypolygon into multiple path
++        // shapes (e.g. when emulating line stroking)
++        std::vector<basegfx::B2DPolyPolygon> aPolys(1,rPoly);
++        State aState = maCurrState;
++        rtl::OUString aStyleId(rStyleId);
++
++        rProps.clear();
++
++        if( aState.maDashArray.size() )
++        {
++            // ODF dashing is severly borked - generate filled polygon instead
++            aPolys.clear();
++            for( sal_uInt32 i=0; i<rPoly.count(); ++i )
++            {                
++                aPolys.push_back(
++                    basegfx::tools::createAreaGeometry(
++                        rPoly.getB2DPolygon(i),
++                        aState.mnStrokeWidth/2.0,
++                        aState.meLineJoin));
++                // TODO(F2): line ends
++            }
++
++            sal_Int32 nDummyIndex(0);
++            aStyleId = xElem->getAttribute(
++                USTR("internal-style-ref")).getToken(1,'$',nDummyIndex);
++            StateMap::iterator pAlternateState=mrStateMap.find(aStyleId.toInt32());
++            aState = pAlternateState != mrStateMap.end() ? pAlternateState->second : maParentStates.back();
++            OSL_ENSURE( pAlternateState == mrStateMap.end(),
++                        "Doh - where's my alternate style entry?!" );
++        }
++
++        // TODO(F2): separate out shear, rotate etc.
++        // apply transformation to polygon, to keep draw
++        // import in 100th mm   
++        std::for_each(aPolys.begin(),aPolys.end(),
++                      boost::bind(&basegfx::B2DPolyPolygon::transform,
++                                  _1,boost::cref(aState.maCTM)));
++
++        for( sal_uInt32 i=0; i<aPolys.size(); ++i )
++        {
++            fillShapeProperties(rProps,
++                                xElem,
++                                aPolys[i].areControlPointsUsed() ?
++                                basegfx::tools::getRange(
++                                    basegfx::tools::adaptiveSubdivideByAngle(aPolys[i])) :
++                                basegfx::tools::getRange(aPolys[i]),
++                                USTR("svggraphicstyle")+aStyleId);
++            
++            rProps[ USTR( "svg:d" ) ] = basegfx::tools::exportToSvgD(
++                aPolys[i],
++                false,   // no relative coords. causes rounding errors      
++                false ); // no quad bezier detection. crashes older versions.   
++            *xAttrs = rProps;    
++            mxDocumentHandler->startElement(USTR("draw:path"), 
++                                            xUnoAttrs);
++            mxDocumentHandler->endElement(USTR("draw:path"));
++        }
++    }
++
++    void fillShapeProperties( PropertyMap&                              rProps, 
++                              const uno::Reference<xml::dom::XElement>& xElem,
++                              const basegfx::B2DRange&                  rShapeBounds,
++                              const rtl::OUString&                      rStyleName )
++    {
++        rProps[ USTR( "draw:z-index" ) ] = rtl::OUString::valueOf( mnShapeNum++ );
++        rProps[ USTR( "draw:style-name" ) ] = rStyleName;
++        rProps[ USTR( "svg:width" ) ] = rtl::OUString::valueOf(rShapeBounds.getWidth()/100.0)+USTR("mm");
++        rProps[ USTR( "svg:height" ) ] = rtl::OUString::valueOf(rShapeBounds.getHeight()/100.0)+USTR("mm");
++
++        // OOo expects the viewbox to be in 100th of mm
++        rProps[ USTR( "svg:viewBox" ) ] = 
++            USTR("0 0 ")
++            + rtl::OUString::valueOf( 
++                basegfx::fround(rShapeBounds.getWidth()) )
++            + USTR(" ")
++            + rtl::OUString::valueOf(
++                basegfx::fround(rShapeBounds.getHeight()) );
++
++        // TODO(F1): decompose transformation in calling code, and use
++        // transform attribute here
++        rProps[ USTR( "svg:x" ) ] = rtl::OUString::valueOf(rShapeBounds.getMinX()/100.0)+USTR("mm");
++        rProps[ USTR( "svg:y" ) ] = rtl::OUString::valueOf(rShapeBounds.getMinY()/100.0)+USTR("mm");
++    }
++
++    State                                      maCurrState;
++    std::vector<State>                         maParentStates;
++    StatePool&                                 mrStates;
++    StateMap&                                  mrStateMap;
++    uno::Reference<xml::sax::XDocumentHandler> mxDocumentHandler;
++    sal_Int32                                  mnShapeNum;
++};
++
++/// Write out shapes from DOM tree
++static void writeShapes( StatePool&                                        rStatePool,
++                         StateMap&                                         rStateMap,
++                         const uno::Reference<xml::dom::XElement>          xElem,
++                         const uno::Reference<xml::sax::XDocumentHandler>& xDocHdl )
++{
++    ShapeWritingVisitor aVisitor(rStatePool,rStateMap,xDocHdl);
++    visitElements(aVisitor, xElem);
 +}
 +
 +#ifdef VERBOSE
@@ -2237,7 +3017,7 @@ index 0000000..0eb7a7a
 +    }
 +
 +    void push() {}
-+    void pop)() {}
++    void pop()  {}
 +};
 +
 +static void dumpTree( const uno::Reference<xml::dom::XElement> xElem )
@@ -2270,11 +3050,24 @@ index 0000000..0eb7a7a
 +        xDomBuilder->parse(m_xInputStream),
 +        uno::UNO_QUERY_THROW );
 +
++    uno::Reference<xml::dom::XElement> xDocElem( xDom->getDocumentElement(),
++                                                 uno::UNO_QUERY_THROW );
++
 +    /////////////////////////////////////////////////////////////////
 +    // doc boilerplate    
 +    /////////////////////////////////////////////////////////////////
 +
 +    m_xDocumentHandler->startDocument();
++    
++    // get the document dimensions
++
++    // together with the AnnotatingVisitor, fake a somewhat upscaling
++    // transformation, to avoid those dreaded integer roundoff errors
++    // in the drawing layer
++    double fViewPortWidth(
++        USER_UNIT*convLength(xDocElem->getAttribute(USTR("width"))));
++    double fViewPortHeight(
++        USER_UNIT*convLength(xDocElem->getAttribute(USTR("height"))));
 +
 +    PropertyMap aProps;
 +
@@ -2306,7 +3099,6 @@ index 0000000..0eb7a7a
 +    xAttrs->clear();
 +    m_xDocumentHandler->startElement( USTR("office:automatic-styles"), 
 +                                      xUnoAttrs );
-+
 +    aProps.clear();
 +    aProps[ USTR( "style:name" ) ] = USTR("pagelayout1");
 +    *xAttrs = aProps;
@@ -2314,13 +3106,16 @@ index 0000000..0eb7a7a
 +                                      xUnoAttrs );
 +    // TODO(Q3): this is super-ugly. In-place container come to mind.
 +    aProps.clear();
-+    aProps[ USTR( "fo:margin-top" ) ] = USTR("10mm");
-+    aProps[ USTR( "fo:margin-bottom" ) ] = USTR("10mm");
-+    aProps[ USTR( "fo:margin-left" ) ] = USTR("10mm");
-+    aProps[ USTR( "fo:margin-right" ) ] = USTR("10mm");
-+    aProps[ USTR( "fo:page-width" ) ] = USTR("100mm");
-+    aProps[ USTR( "fo:page-height" ) ] = USTR("100mm");
-+    aProps[ USTR( "style:print-orientation" ) ] = USTR("landscape");
++    aProps[ USTR( "fo:margin-top" ) ] = 
++    aProps[ USTR( "fo:margin-bottom" ) ] = rtl::OUString::valueOf(fViewPortHeight/2000.0)+USTR("mm");
++    aProps[ USTR( "fo:margin-left" ) ] = 
++    aProps[ USTR( "fo:margin-right" ) ] = rtl::OUString::valueOf(fViewPortWidth/2000.0)+USTR("mm");
++    aProps[ USTR( "fo:page-width" ) ] = rtl::OUString::valueOf(11.0*fViewPortWidth/1000.0)+USTR("mm");
++    aProps[ USTR( "fo:page-height" ) ] = rtl::OUString::valueOf(11.0*fViewPortHeight/1000.0)+USTR("mm");
++    aProps[ USTR( "style:print-orientation" ) ] = 
++        fViewPortWidth > fViewPortHeight ? 
++        USTR("landscape") :
++        USTR("portrait");
 +    *xAttrs = aProps;
 +    m_xDocumentHandler->startElement( USTR("style:page-layout-properties"), 
 +                                      xUnoAttrs );
@@ -2343,22 +3138,14 @@ index 0000000..0eb7a7a
 +    m_xDocumentHandler->endElement( USTR("style:drawing-page-properties") );
 +    m_xDocumentHandler->endElement( USTR("style:style") );
 +
-+    // TEMP
-+    aProps.clear();
-+    aProps[ USTR( "style:name" ) ] = USTR("graphicstyle1");
-+    aProps[ USTR( "style:family" ) ] = USTR("graphic");
-+    *xAttrs = aProps;
-+    m_xDocumentHandler->startElement( USTR("style:style"), 
-+                                      xUnoAttrs );
-+    aProps.clear();
-+    aProps[ USTR( "draw:stroke" ) ] = USTR("none");
-+    aProps[ USTR( "draw:fill" ) ] = USTR("solid");
-+    aProps[ USTR( "draw:fill-color" ) ] = USTR("#ffffff");
-+    *xAttrs = aProps;
-+    m_xDocumentHandler->startElement( USTR("style:graphic-properties"), 
-+                                      xUnoAttrs );
-+    m_xDocumentHandler->endElement( USTR("style:graphic-properties") );
-+    m_xDocumentHandler->endElement( USTR("style:style") );
++    StatePool aStatePool;
++    StateMap  aStateMap;
++    annotateStyles(aStatePool,aStateMap,
++                   xDocElem,m_xDocumentHandler);
++
++#ifdef VERBOSE
++    dumpTree(xDocElem);
++#endif
 +
 +    m_xDocumentHandler->endElement( USTR("office:automatic-styles") );
 +
@@ -2399,42 +3186,11 @@ index 0000000..0eb7a7a
 +    m_xDocumentHandler->startElement(USTR("draw:page"), 
 +                                     xUnoAttrs);
 +
-+    // grab all polylines
-+    uno::Reference<xml::dom::XElement> xDocElem( xDom->getDocumentElement(),
-+                                                 uno::UNO_QUERY_THROW );
-+
-+    annotateStyles(xDocElem);
-+
-+#ifdef VERBOSE
-+    dumpTree(xDocElem);
-+#endif
-+
-+    uno::Reference<xml::dom::XNodeList> xPolylineElems( xDocElem->getElementsByTagName( USTR("polyline") ) );
-+    const sal_Int32 nNumElems(xPolylineElems->getLength() );
-+    for( sal_Int32 i=0; i<nNumElems; ++i )
-+    {
-+        uno::Reference<xml::dom::XElement> xCurrElem( xPolylineElems->item(i),
-+                                                      uno::UNO_QUERY_THROW );
-+        rtl::OUString sPoints = xCurrElem->getAttribute(USTR("points"));
-+        basegfx::B2DPolygon aPoly;
-+        basegfx::tools::importFromSvgPoints(aPoly, sPoints);
-+        
-+        aProps.clear();
-+        aProps[ USTR( "draw:style-name" ) ] = USTR("graphicstyle1");
-+        aProps[ USTR( "svg:width" ) ] = USTR("20mm");
-+        aProps[ USTR( "svg:height" ) ] = USTR("20mm");
-+        aProps[ USTR( "svg:x" ) ] = USTR("20mm");
-+        aProps[ USTR( "svg:y" ) ] = USTR("20mm");
-+        aProps[ USTR( "svg:viewBox" ) ] = USTR("0 0 1000 1000");
-+        aProps[ USTR( "svg:d" ) ] = basegfx::tools::exportToSvgD(
-+            basegfx::B2DPolyPolygon(aPoly),
-+            false,   // no relative coords. causes rounding errors
-+            false ); // no quad bezier detection. crashes older versions.
-+        *xAttrs = aProps;    
-+        m_xDocumentHandler->startElement(USTR("draw:path"), 
-+                                         xUnoAttrs);
-+        m_xDocumentHandler->endElement(USTR("draw:path"));
-+    }
++    // write out all shapes
++    writeShapes(aStatePool,
++                aStateMap,
++                xDocElem,
++                m_xDocumentHandler);
 +
 +    m_xDocumentHandler->endElement( USTR("draw:page") );
 +    m_xDocumentHandler->endElement( USTR("office:drawing") );
@@ -8108,3 +8864,140 @@ index 0000000..72b3870
 +y2
 +zoomAndPan
 \ No newline at end of file
+diff --git a/filter/source/svgimport/units.cxx b/filter/source/svgimport/units.cxx
+new file mode 100644
+index 0000000..ebafca5
+--- /dev/null
++++ filter/source/svgimport/units.cxx
+@@ -0,0 +1,82 @@
++/*************************************************************************
++ *
++ *    OpenOffice.org - a multi-platform office productivity suite
++ *
++ *    Author:
++ *      Jan Holesovsky   <kendy@suse.cz>
++ *      Fridrich Strba   <fridrich.strba@bluewin.ch>
++ *      Thorsten Behrens <tbehrens@novell.com>	   	
++ *
++ *      Copyright (C) 2008, Novell Inc.
++ *
++ *   The Contents of this file are made available subject to
++ *   the terms of GNU Lesser General Public License Version 2.1.
++ *
++ ************************************************************************/
++
++// MARKER(update_precomp.py): autogen include statement, do not remove
++#include "precompiled_filter.hxx"
++
++#include "units.hxx"
++#include <rtl/ustring.hxx>
++#include <boost/spirit.hpp>
++
++namespace svgi
++{
++
++double convLength( double value, SvgUnit unit )
++{
++    // convert svg unit to internal coordinates ("pixel"). Since the
++    // OOo drawing layer is still largely integer-based, the initial
++    // viewport transformation includes a certain scale factor
++    switch ( unit )
++    {
++        case SVG_LENGTH_UNIT_CM: return value * 1000.0;
++        case SVG_LENGTH_UNIT_EM: fprintf( stderr, "TODO: legth type EM not implemented.\n" ); return 1000.0;
++        case SVG_LENGTH_UNIT_EX: fprintf( stderr, "TODO: legth type EX not implemented.\n" ); return 1000.0;
++        case SVG_LENGTH_UNIT_IN: return value * 2540.0;
++        case SVG_LENGTH_UNIT_MM: return value * 100.0;
++        case SVG_LENGTH_UNIT_PC: return value * 2540.0/6.0;
++        case SVG_LENGTH_UNIT_PCT: fprintf( stderr, "TODO: legth type PCT not implemented.\n" ); return 1000.0;
++        case SVG_LENGTH_UNIT_PT: return value * 35.277778;
++        case SVG_LENGTH_UNIT_PX: return value;
++        default: fprintf( stderr, "Unknown length type\n" );
++    }
++
++    return 0.0;
++}
++
++double convLength( const rtl::OUString& sValue )
++{
++    using namespace ::boost::spirit;
++
++    rtl::OString aUTF8 = rtl::OUStringToOString( sValue, 
++                                                 RTL_TEXTENCODING_UTF8 );  
++
++    double  nVal=0.0;
++    SvgUnit eUnit=SVG_LENGTH_UNIT_PX;
++    const bool bRes = parse(aUTF8.getStr(),
++        //  Begin grammar
++        (
++            real_p[assign_a(nVal)] 
++            >> (  str_p("cm") [assign_a(eUnit,SVG_LENGTH_UNIT_CM)]
++                | str_p("em") [assign_a(eUnit,SVG_LENGTH_UNIT_EM)]
++                | str_p("ex") [assign_a(eUnit,SVG_LENGTH_UNIT_EX)]
++                | str_p("in") [assign_a(eUnit,SVG_LENGTH_UNIT_IN)]
++                | str_p("mm") [assign_a(eUnit,SVG_LENGTH_UNIT_MM)]
++                | str_p("pc") [assign_a(eUnit,SVG_LENGTH_UNIT_PC)]
++                | str_p("pct")[assign_a(eUnit,SVG_LENGTH_UNIT_PCT)]
++                | str_p("pt") [assign_a(eUnit,SVG_LENGTH_UNIT_PT)]
++                | str_p("px") [assign_a(eUnit,SVG_LENGTH_UNIT_PX)]
++                | end_p)
++        ),
++        //  End grammar
++        space_p).full;
++
++    if( !bRes )
++        return 0.0;
++
++    return convLength(nVal,eUnit);
++}
++
++} // namespace svgi
+diff --git a/filter/source/svgimport/units.hxx b/filter/source/svgimport/units.hxx
+new file mode 100644
+index 0000000..c430f73
+--- /dev/null
++++ filter/source/svgimport/units.hxx
+@@ -0,0 +1,43 @@
++/*************************************************************************
++ *
++ *    OpenOffice.org - a multi-platform office productivity suite
++ *
++ *    Author:
++ *      Jan Holesovsky   <kendy@suse.cz>
++ *      Fridrich Strba   <fridrich.strba@bluewin.ch>
++ *      Thorsten Behrens <tbehrens@novell.com>	   	
++ *
++ *      Copyright (C) 2008, Novell Inc.
++ *
++ *   The Contents of this file are made available subject to
++ *   the terms of GNU Lesser General Public License Version 2.1.
++ *
++ ************************************************************************/
++
++#ifndef INCLUDED_UNITS_HXX
++#define INCLUDED_UNITS_HXX
++
++#include <sal/config.h>
++
++namespace rtl{ class OUString; }
++namespace svgi
++{
++    enum SvgUnit
++    {
++        SVG_LENGTH_UNIT_CM,
++        SVG_LENGTH_UNIT_EM,
++        SVG_LENGTH_UNIT_EX,
++        SVG_LENGTH_UNIT_IN,
++        SVG_LENGTH_UNIT_MM,
++        SVG_LENGTH_UNIT_PC,
++        SVG_LENGTH_UNIT_PCT,
++        SVG_LENGTH_UNIT_PT,
++        SVG_LENGTH_UNIT_PX
++    };
++
++    /// return svg_length_t in 100th's of mm
++    double convLength( double fVal, SvgUnit unit );
++    double convLength( const rtl::OUString& sValue );
++} // namespace svgi
++
++#endif
