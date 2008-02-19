@@ -7,74 +7,569 @@ use strict;
 use File::Copy;
 use File::Temp qw/ tempfile tempdir /;
 
+my $critical_free_space_limit = 50000000;	# in Bytes, for /abuild
+
 sub show_error($)
 {
     my ($msg) = @_;
     
+    $msg =~ s/\'/\\\'/g;
+    $msg =~ s/\"/\\\"/g;
+    $msg =~ s/\;/\\\;/g;
     system("xterm -hold -T \"ooo-build-package error\" -bg IndianRed1 -e /bin/sh -c \"echo $msg\"");
+    die "$msg\n";
 }
 
 sub show_warning($)
 {
     my ($msg) = @_;
     
+    $msg =~ s/\'/\\\'/g;
+    $msg =~ s/\"/\\\"/g;
+    $msg =~ s/\;/\\\;/g;
     system("xterm -hold -T \"ooo-build-package warning\" -bg PaleGreen -e /bin/sh -c \"echo $msg\" &");
+    print "$msg\n";
 }
 
-sub run_script_remote($$)
+sub show_msg($)
+{
+    my ($msg) = @_;
+    
+    $msg =~ s/\'/\\\'/g;
+    $msg =~ s/\"/\\\"/g;
+    $msg =~ s/\;/\\\;/g;
+    system("xterm -hold -T \"ooo-build-package warning\" -bg LightBlue1 -e /bin/sh -c \"echo $msg\" &");
+    print "$msg\n";
+}
+
+sub mktemp_remote($$$)
+{
+    my ($host, $pattern, $mktemp_options) = @_;
+
+    my $remote_tempdir;
+    my $pattern_reg = $pattern;
+    $pattern_reg =~ s/\//\\\//g;
+    $pattern_reg =~ s/X/./g;
+    print "pattern_reg = $pattern_reg\n";
+    print ("open (MKTEMP, \"ssh -q $host mktemp $mktemp_options $pattern 2>&1 |\");");
+    my $pid = open (MKTEMP, "ssh -q $host mktemp $mktemp_options $pattern 2>&1 |");
+    show_error("Can't start remote mktemp") unless (defined $pid);
+    while (my $line = <MKTEMP>) {
+        chomp $line;
+	print "$line \n";
+	$remote_tempdir = "$line" if $line =~ /$pattern_reg/;
+    }
+    close (MKTEMP);
+    show_error("Can't create remote tempdir") unless ( defined $remote_tempdir );
+
+    return $remote_tempdir;
+}
+
+sub run_script_remote($$$)
 {
     my ($host, $script) = @_;
-    my $pid;
 
     #locate the script
-    $pid = open (WHICH, "which $script |");
-    die "Can't start the command \"which $script\n" unless (defined $pid);
+    my $pid = open (WHICH, "which $script |");
+    show_error("Can't start the command \"which\" $script") unless (defined $pid);
     while (my $line = <WHICH>) {
         chomp $line;
 	$script = $line if $line =~ /$script$/;
     }
     close (WHICH);
 
-    my $script_name=$script;
+    my $script_name = $script;
     $script_name =~ s/^.*\///;
     
     # create a temporary directory on the remote machine
-    my $remote_tempdir;
-    $pid = open (MKTEMP, "ssh -t $host mktemp -d /tmp/ooo-build-remote-XXXXXX 2>&1 |");
-    die "Can't start remote mktemp\n" unless (defined $pid);
-    while (my $line = <MKTEMP>) {
-        chomp $line;
-        chomp $line;
-        chomp $line;
-        chomp $line;
-        chomp $line;
-	$remote_tempdir = "$line" if $line =~ /\/tmp\/ooo-build-remote-/;
-    }
-    close (MKTEMP);
-    die "Can't create remote tempdir\n" unless ( defined $remote_tempdir );
+    my $remote_tempdir = mktemp_remote($host, "/tmp/ooo-build-remote-XXXXXX", "-d");
 
     # upload the script to the remote tempdir
-    system("scp $script $host:$remote_tempdir") &&
-	die "Can't upload $script to $host:$remote_tempdir\n";
+    system("scp -q $script $host:$remote_tempdir") &&
+	show_error("Can't upload $script to $host:$remote_tempdir");
 
     # finally start the script
-    print "aaaaaaaaaaaaaaaa\n";
-    $remote_tempdir =~ s/\//\\\//g;
-#    $remote_tempdir = "/aaaa/bbbb";
-    print "remote_tempdir=$remote_tempdir\n";
-    print "remote_tempdir=|$remote_tempdir|\n";
-    print ("script_name=$script_name\n");
-    print ("x=$remote_tempdir/$script_name\n");
-    print "y=$script_name$remote_tempdir/\n";
-    print ("system (\"ssh -t $host $remote_tempdir/" , "$script_name\"\n");
-    print ("system ssh -t $host $remote_tempdir$script_name\n");
-    print "bbbbbbbbbbbbbbbb\n";
-    system ("ssh -t $host $remote_tempdir\/$script_name") &&
-	die "$host:$remote_tempdir/$script failed\n";
+    system ("ssh -q -t $host $remote_tempdir/$script_name") &&
+	show_error("$host:$remote_tempdir/$script_name failed");
 
     # cleanup the remote tempdir
-    system ("ssh -t $host rm -rf $remote_tempdir") &&
-	die "Error: rm -rf on $remote_tempdir failed\n";
+    system ("ssh -q -t $host rm -rf $remote_tempdir") &&
+	show_error("Error: rm -rf on $remote_tempdir failed\n");
 }
 
-# run_script_remote("storm.suse.cz", "/home/pmladek/bin/test.sh");
+sub sync_sources($$)
+{
+    my ($source, $destination) = @_;
+    
+    print "Uploading $source to $destination...\n";
+    system ("rsync -e ssh -rav --delete --progress --checksum --exclude=BUILD $source $destination") &&
+	show_error("Error: rsync failed: $!");
+}
+
+sub upload_sources($)
+{
+    my ($p_options) = @_;
+    
+    unless (defined $p_options->{'do_not_update_remote_sources'}) {
+	sync_sources ("$p_options->{'package_source_path'}",
+		      "$p_options->{'host'}:$p_options->{'remote_tempdir'}");
+    }
+    
+    return;
+}
+
+sub test_remote_dir($$)
+{
+    my ($host, $dir) = @_;
+    
+    # FIXME: is there a better way to do this?
+    my $err = system ("ssh -q $host test -d $dir");
+    show_error("$host test -d $dir can't be started") if ($err == -1);
+
+    # non-zero $err value meand that the directory was not found
+    if ($err) {
+	return 0;
+    } else {
+	return 1;
+    }
+}
+
+sub create_remote_tempdir($)
+{
+    my ($p_options) = @_;
+    
+    unless (defined $p_options->{'remote_tempdir'}) {
+	$p_options->{'remote_tempdir'} = mktemp_remote("$p_options->{'host'}", 
+						       "/tmp/$p_options->{'package_source_name'}-XXXXXX",
+						       "-d");
+    }
+
+    return;
+}
+
+sub remove_remote_tempdir($)
+{
+    my ($p_options) = @_;
+
+    unless (defined $p_options->{'keep_remote_tempdir'}) {
+	system ("ssh $p_options->{'host'} rm -rf $p_options->{'remote_tempdir'}") &&
+	    show_error("Error: rm -rf $p_options->{'remote_tempdir'} failed on $p_options->{'host'}: $!");
+    }
+
+    return;
+}
+
+sub abuild_package($)
+{
+    my ($p_options) = @_;
+    
+    #FIXME: We should check the architecture of the host
+    my $linux32="";
+    $linux32 = "linux32" if ("$p_options->{'arch'}" eq "i386");
+
+    my $buildroot="$p_options->{'buildroot'}";
+    my $build_dist="$p_options->{'distro'}";
+    my $abuild_options = "--icecream=10";
+    my $abuild_options .= " --debug=yes";
+    $abuild_options .= " --prefer-rpms=$p_options->{'prefer_rpms'}" if (defined $p_options->{'prefer_rpms'});
+    $abuild_options .= " $p_options->{'package_remote_sources_path'}/$p_options->{'specfile'}";
+    
+    print "abuild_options=$abuild_options\n";
+#    system ("ssh -t $p_options->{'host'} sudo /bin/sh -c \\\". /work/src/bin/.profile\\\; echo \\\\\$PATH\\\"");
+     system ("ssh -t $p_options->{'host'} $linux32 sudo /bin/sh -c \\\". /work/src/bin/.profile\\\; export BUILD_ROOT=$buildroot\\\; export BUILD_DIST=$build_dist\\\; abuild $abuild_options\\\"") &&
+	show_error("Error: abuild failed on $p_options->{'host'}\n");
+}
+
+sub find_specfile_in_current_dir()
+{
+    my $dirh;
+    my $specfile;
+
+    if (opendir($dirh, "./")) {
+	while (my $file = readdir ($dirh)) {
+	    $file =~ /^\./ && next;     # hidden
+	    $file =~ /\.spec$/ || next; # non-spec
+	    unless (defined $specfile) {
+		$specfile = $file;
+	    } else {
+		show_error("Error: More specfiles found; Please specify one on the commandline");
+	    }	    
+	}
+	closedir($dirh);
+    }
+
+    show_error("Error: No spec file found in current directory") unless (defined $specfile);
+    
+    return $specfile;    	
+}
+
+sub find_specfile($)
+{
+    my ($p_options) = @_;
+    
+    if (defined $p_options->{'specfile_path'}) {
+        $p_options->{'specfile'} = $p_options->{'specfile_path'};
+        $p_options->{'specfile'} =~ s/^.*\///g;
+    } else {
+	$p_options->{'specfile'} = find_specfile_in_current_dir();
+    }
+    
+    return;
+}
+
+sub find_package_sources($)
+{
+    my ($p_options) = @_;
+    my $abs_src_path;
+
+    if (defined $p_options->{'specfile_path'}) {
+	$abs_src_path = "$p_options->{'specfile_path'}";
+	# bin the specfile
+	$abs_src_path =~ s/^(.*?)\/?[^\/]+$/$1/;
+	# make sure that 'cd' stays in the current dir when the path is empty
+	$abs_src_path = "." unless ("$abs_src_path");
+	# get absolute path
+	$abs_src_path = `cd $abs_src_path; pwd`;
+	chomp $abs_src_path;
+    } else {
+	$abs_src_path = `pwd`;
+	chomp $abs_src_path;
+    }
+
+    my $last_dir = $abs_src_path;
+    $last_dir =~ s/^.*\///g;
+    
+    $p_options->{'package_source_path'} = "$abs_src_path";
+    $p_options->{'package_source_name'} = "$last_dir";
+
+    return;
+}
+
+sub set_package_name($)
+{
+    my ($p_options) = @_;
+    
+    $p_options->{'package_name'} = $p_options->{'specfile'};
+    $p_options->{'package_name'} =~ s/.spec$//;
+    
+    return;
+}
+
+
+sub set_package_remote_sources_path($)
+{
+    my ($p_options) = @_;
+    # $p_options->{'package_source_name'}" must be in sync with upload_sources function
+    $p_options->{'package_remote_sources_path'} = "$p_options->{'remote_tempdir'}/$p_options->{'package_source_name'}";
+    return;
+}
+
+sub check_free_space_in_abuild($)
+{
+    my ($host) = @_;
+    
+    # FIXME: this is currently use only to check /abuild and 
+    # we expect that it is mounted as an extra partition
+    my $free_space;
+    my $pid = open (DF, "ssh $host df |");
+    show_error("Can't start \"df\" on $host: $!\n") unless (defined $pid);
+    while (my $line = <DF>) {
+        chomp $line;
+	if ($line =~ m/\S+\s+\S+\s+\S+\s+(\S+)\s+\S+\s+\/abuild/) {
+	    $free_space = $1;
+	}
+    }
+    close (DF);
+
+    if (defined $free_space) {
+	if ($free_space < $critical_free_space_limit) {
+	    my $free_space_mb = int($free_space/1000000);
+	    show_warning("Warning: There is only ${free_space_mb}MB free space left on $host:/abuild\n");
+	}
+    } else {
+	show_warning("Warning: Failed to check free space on $host:/abuild\n");
+    }
+
+    return;
+}
+
+sub set_buildroot_names($)
+{
+    my ($p_options) = @_;
+    
+    my $buildroot_basename = $p_options->{'package_name'};
+    my $buildroot_suffix = "";
+
+    if ($buildroot_basename =~ /^OpenOffice_org(-.*)?/) {
+	$buildroot_basename = "ooo";
+	# FIXME: an ugly hack to differ the split and non-split builds
+	if ($1) {
+	    $buildroot_suffix = "$1";
+	} elsif (-e "$p_options->{'package_source_path'}/OpenOffice_org-i18n.spec") {
+	    $buildroot_suffix = "-devel";
+	}
+    }
+    
+    my $min_suffix="";
+    $min_suffix=".min" if (defined $buildroot_basename);
+    $p_options->{'buildroot'} = "/abuild/$buildroot_basename-$p_options->{'version'}$min_suffix-$p_options->{'distro'}$buildroot_suffix";
+
+    unless (defined $p_options->{'clean'} || defined $p_options->{'force'}) {
+	my $result = test_remote_dir("$p_options->{'host'}", "$p_options->{'buildroot'}");
+	if (test_remote_dir("$p_options->{'host'}", "$p_options->{'buildroot'}")) {
+	    show_error ("Error: \"$p_options->{'host'}:$p_options->{'buildroot'}\" already exists; You might use either --clean or --force");
+	}
+    }
+
+    return;
+}
+
+sub set_rpms_paths($)
+{
+    my ($p_options) = @_;
+    
+    $p_options->{'remote_rpms_path'} = "$p_options->{'buildroot'}/usr/src/packages/RPMS/$p_options->{'arch'}";
+}
+
+
+sub set_package_version($)
+{
+    my ($p_options) = @_;
+    my $version_reg;
+    
+    if ($p_options->{'package_name'} =~ m/^OpenOffice_org/) {
+	$version_reg = '\%define\s*ooo_build_version\s*([\.\w]+)';
+    } else {
+	$version_reg = 'Version:\s*([\.\w]+)';
+    }
+    
+    open (SPEC, "$p_options->{'package_source_path'}/$p_options->{'specfile'}") ||
+	die "can't open \"$p_options->{'package_source_path'}/$p_options->{'specfile'}\" for reading: $!\n";
+
+    while (my $line = <SPEC>) {
+        chomp $line;
+    
+	if ($line =~ m/$version_reg/) {
+	    $p_options->{'version'}="$1";
+	}
+    }
+    close (SPEC);
+
+    unless (defined $p_options->{'version'}) {
+	show_error("Package version did not found in \"$p_options->{'package_source_path'}/$p_options->{'specfile'}\"");
+    }
+    return;
+}
+
+sub check_distro($)
+{
+    my ($p_options) = @_;
+    
+    # FIXME: We should check the architecture of the host
+    unless (defined $p_options->{'distro'}) {
+	show_warning("Warning: distro is not defined; Defaulting to i386!");
+	$p_options->{'distro'} = "i386";
+    }
+}
+
+sub set_arch($)
+{
+    my ($p_options) = @_;
+
+    # architectrure is the last piece of the distro string
+    $p_options->{'arch'} = $p_options->{'distro'};
+    $p_options->{'arch'} =~ s/.*-//g;
+}
+
+sub show_status($)
+{
+    my ($p_options) = @_;
+
+    my $re_use = '';
+    $re_use = " (re-use)" if (defined $p_options->{'re_using_remote_tempdir'});
+
+    my $force = '';
+    $force = " (force)" if (defined $p_options->{'force'});
+
+    my $keep_remore_sources = '';
+    $keep_remore_sources = " (keep)" if (defined $p_options->{'keep_remote_tempdir'});
+
+
+    print ("\n");
+    print ("Package name:     $p_options->{'package_name'}\n");
+    print ("Package version:  $p_options->{'version'}\n\n");
+
+    print ("Distro:           $p_options->{'distro'}\n");
+    print ("Host:             $p_options->{'host'}\n\n");
+
+    print ("Pkg. Sources:     $p_options->{'package_source_path'}\n");
+    print ("Pkg Rmt. Sources: $p_options->{'package_remote_sources_path'}$re_use$keep_remore_sources\n\n");
+
+    print ("BuildRoot:        $p_options->{'buildroot'}$force\n");
+    print ("\n");
+
+#    print ("package_sources_name = $p_options->{'package_source_name'}\n");
+#    print ("Spec file:	     $p_options->{'specfile'}\n");
+}
+
+sub save_status($)
+{
+    my ($p_options) = @_;
+    
+    return unless (defined $p_options->{'status_file'});
+    
+    # FIXME: there should be a force option or another logic at all
+    show_error("Error: Status file \"$p_options->{'status_file'}\" already exists") if (-e $p_options->{'status_file'});
+    
+    open (STATE, '>', "$p_options->{'status_file'}") ||
+	show_error("Can't open \"$p_options->{'status_file'}\" for writing: $!");
+
+    print STATE "package_name = $p_options->{'package_name'}\n";
+    print STATE "version = $p_options->{'version'}\n";
+    print STATE "distro = $p_options->{'distro'}\n\n";
+
+    print STATE "package_source_path = $p_options->{'package_source_path'}\n";
+    print STATE "package_source_name = $p_options->{'package_source_name'}\n";
+    print STATE "specfile = $p_options->{'specfile'}\n\n";
+
+    print STATE "arch = $p_options->{'arch'}\n\n";
+
+    print STATE "remote_tempdir = $p_options->{'remote_tempdir'}\n";
+    print STATE "package_remote_sources_path = $p_options->{'package_remote_sources_path'}\n";
+
+    print STATE "buildroot = $p_options->{'buildroot'}\n";
+    print STATE "remote_rpms_path = $p_options->{'remote_rpms_path'}\n";
+
+    close (STATE);
+}
+
+# FIXME: there should be another function to read the whole stat file if needed
+sub read_item_from_stat($$)
+{
+    my ($item_name, $status_file) = @_;
+    
+    open (STATE, "$status_file") ||
+	show_error("Can't open \"$status_file\" to read \"$item_name\": $!");
+    
+    my $item_value;
+    while (my $line = <STATE>) {
+        chomp $line;
+	if ( $line =~ m/$item_name\s*=\s*(.*)\s?/ ) {
+	    $item_value = "$1";
+	}
+    }
+    
+    close (STATE);
+    
+    show_error("Error: $item_name entry not found in $status_file") unless (defined $item_value);
+    
+    return $item_value;
+}
+
+sub usage()
+{
+    print "This tool helps to build packages on remote machines. Unfortunately, it is\n" .
+	  "SUSE specific.\n\n" .
+    
+          "Usage:\n".
+	  "\tooo-build-release [--help] [--host=<host>] [--distro=<distro>]\n" .
+	  "\t[--force] [--min] [--status-file=<stat_file>]\n" .
+	  "\t[--prefer-rpms-from-build=<stat_file>]\n" .
+	  "\t[--re-use-remote-sources-from-build=<stat_file>]\n" .
+	  "\t[--do-not-update-remote-sources] [--keep-remote-tempdir]\n" .
+	  "\t[--no-final-message]\n" .
+	
+	  "Options:\n" .
+	  "\t--help: prints this help\n" .
+	  "\t--host: where to build\n" .
+	  "\t--distro: for what distro build\n" .
+	  "\t--force: re-use remote buildroot if it exists\n" .
+	  "\t--min: affects the buildroot name only now\n" .
+	  "\t--status-file: where to store information about the current build;\n" .
+	  "\t\tit can be reused for consequent builds\n" .
+	  "\t--prefer-rpms-from-build: prefer_rpms produced by another build\n" .
+	  "\t--re-use-remote-sources-from-build: re-use an older remote source dir;\n" .
+	  "\t\tit might speed up the source synchronization\n" .
+	  "\t--do-not-update-remote-sources: skip the source synchronization at all\n" .
+	  "\t--keep-remote-tempdir: do not remove the remote source dir after a\n" .
+	  "\t\tsuccessful build\n" . 
+	  "\t--no-final-message: do not show extra pop up window about about that\n" .
+	  "\t\tbuild succeeded\n";
+
+#	  "\t--debug=<opts>:\n" .
+#	  "\t--prefer-rpms=:\n" .
+#	  "\t--icecream=<number>=:\n" .
+#	  "\t--extra-packs=<list of packs>=:\n" .	  
+#	  "\t--no-lint:\n" .
+#	  "\t--distros=<list of distros>:\n" .
+#	  "\t--clean:\n" .
+#	  "\t--icecream=<number>:\n" .
+#	  "\t--ptf: release ptf-specific tarball for given bugzilla number\n";
+}
+
+my %options;
+
+###################
+# Arguments parsing
+###################
+
+for my $arg (@ARGV) {
+    if ($arg eq '--help' || $arg eq '-h') {
+	usage;
+	exit 0;
+    } elsif ($arg =~ m/--status-file=(.*)/) {
+	$options{'status_file'} = "$1";
+    } elsif ($arg =~ m/--prefer-rpms-from-build=(.*)/) {
+	$options{'prefer_rpms'} = read_item_from_stat("remote_rpms_path", "$1");
+    } elsif ($arg =~ m/--re-use-remote-sources-from-build=(.*)/) {
+	$options{'remote_tempdir'} = read_item_from_stat("remote_tempdir", "$1");
+	$options{'re_using_remote_tempdir'} = 1;
+    } elsif ($arg =~ m/--do-not-update-remote-sources/) {
+	$options{'do_not_update_remote_sources'} = 1;
+    } elsif ($arg =~ m/--keep-remote-tempdir/) {
+	$options{'keep_remote_tempdir'} = 1;
+    } elsif ($arg =~ m/--min/) {
+	$options{'min'} = 1;
+    } elsif ($arg =~ m/--force/) {
+	$options{'force'} = 1;
+    } elsif ($arg =~ m/--no-final-message/) {
+	$options{'no_final_message'} = 1;
+    } elsif ($arg =~ m/--host=(.*)/) {
+	$options{'host'} = "$1";
+    } elsif ($arg =~ m/--distro=(.*)/) {
+	$options{'distro'} = "$1";
+    } else {
+	if (! defined $options{'specfile_path'}) {
+	    $options{'specfile_path'} = $arg;
+	} else {
+	    die "Too many arguments $arg\n";
+	}
+    }
+}
+
+find_specfile(\%options);
+set_package_name(\%options);
+find_package_sources(\%options);
+check_distro(\%options);
+set_arch(\%options);
+set_package_version(\%options);
+set_buildroot_names(\%options);
+check_free_space_in_abuild($options{'host'});
+set_rpms_paths(\%options);
+create_remote_tempdir(\%options);
+set_package_remote_sources_path(\%options);
+save_status(\%options);
+
+show_status(\%options);
+print ("Waiting 5 seconds...\n");
+sleep 5;
+
+upload_sources(\%options);
+
+print ("package_remote_sources_path = $options{'package_remote_sources_path'}\n");
+
+abuild_package(\%options);
+
+remove_remote_tempdir(\%options);
+
+show_msg("Abuild succeeded\n") unless (defined $options{'no_final_message'});
