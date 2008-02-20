@@ -1,0 +1,211 @@
+Index: configmgr/source/backend/layermerge.cxx
+===================================================================
+RCS file: /cvs/util/configmgr/source/backend/layermerge.cxx,v
+retrieving revision 1.26
+diff -u -p -u -r1.26 layermerge.cxx
+--- configmgr/source/backend/layermerge.cxx	16 Sep 2006 15:05:04 -0000	1.26
++++ configmgr/source/backend/layermerge.cxx	20 Feb 2008 11:50:31 -0000
+@@ -936,7 +936,12 @@ void SAL_CALL LayerMergeHandler::setProp
+ 	m_pProperty->modifyState( node::isMerged );
+ 	m_aContext.markCurrentMerged();
+ 
+-    applyPropertyValue(aValue);
++    try {
++        applyPropertyValue(aValue);
++    } catch (script::CannotConvertException &ex) {
++        fprintf (stderr, "Foo - killed conversion exception!\n");
++        // the solver's Setup.xcu's "${PRODUCTVERSION}" is not an double eg.
++    } 
+ }
+ // -----------------------------------------------------------------------------
+ 
+Index: solenv/bin/deliver.pl
+===================================================================
+RCS file: /cvs/tools/solenv/bin/deliver.pl,v
+retrieving revision 1.124
+diff -u -p -u -r1.124 deliver.pl
+--- solenv/bin/deliver.pl	26 Nov 2007 19:00:17 -0000	1.124
++++ solenv/bin/deliver.pl	20 Feb 2008 11:51:07 -0000
+@@ -40,6 +40,8 @@ eval 'exec perl -wS $0 ${1+"$@"}'
+ # deliver.pl - copy from module output tree to solver
+ #
+ 
++use lib ("$ENV{SOLARENV}/bin/modules");
++
+ use Cwd;
+ use File::Basename;
+ use File::Copy;
+@@ -47,6 +49,9 @@ use File::DosGlob 'glob';
+ use File::Path;
+ use File::Spec;
+ 
++# for component registration ...
++use installer::globals;
++
+ #### script id #####
+ 
+ ( $script_name = $0 ) =~ s/^.*\b(\w+)\.pl$/$1/; 
+@@ -695,12 +700,16 @@ sub glob_and_copy 
+     my $touch = shift;
+ 
+     my @copy_files = @{glob_line($from, $to)};
++    my @register = ();
+     
+     for (my $i = 0; $i <= $#copy_files; $i++) {
+         next if filter_out($copy_files[$i][0]); # apply copy filter
+-        copy_if_newer($copy_files[$i][0], $copy_files[$i][1], $touch) 
++        copy_if_newer($copy_files[$i][0], $copy_files[$i][1], $touch, \@register) 
+                     ? $files_copied++ : $files_unchanged++;
+     }
++    for my $comp (@register) {
++	register_component ($comp);
++    }
+ }
+ 
+ sub is_unstripped {
+@@ -757,6 +766,119 @@ sub strip_target {
+     return $rc;
+ };
+ 
++# start evil cut/paste from bin/modules/installer/servicesfile.pm ...
++
++################################################################
++# Generating a file url from a path
++################################################################
++
++sub remove_ending_pathseparator
++{
++	my ( $stringref ) = @_;
++
++	$$stringref =~ s/\Q$installer::globals::separator\E\s*$//;	
++}
++
++sub make_file_url
++{
++	my ( $path ) = @_;
++
++	my $fileurl = "";
++	
++	# removing ending slash/backslash
++	
++	remove_ending_pathseparator(\$path);
++	
++	if ($installer::globals::iswin)
++	{
++		$path =~ s/\\/\//g;
++		$fileurl = "file\:\/\/\/" . $path;
++	}
++	else
++	{
++		$fileurl = "file\:\/\/" . $path;
++	} 
++	
++	return $fileurl;
++}
++
++################################################################
++# Helper routine to change cygwin (POSIX) path to DOS notation
++# if needed
++################################################################
++sub fix_cygwin_path
++{
++    my ( $path ) = @_;
++
++    if ( $installer::globals::iswin eq 1 && $ENV{'USE_SHELL'} ne "4nt" && $installer::globals::wrapcmd eq "" )
++    {
++	$path = qx{cygpath -m "$path"};
++	chomp($path);
++    }
++
++    return $path;
++}
++
++sub get_regcomp()
++{
++    my $searchname;
++    if ($installer::globals::isunix) { $searchname = "regcomp"; }
++    else { $searchname = "regcomp.exe"; } 
++    return $searchname;
++}
++
++sub register_queue ($$)
++{
++    my $queue = shift;
++    my $component = shift;
++
++    # Try to register all libraries
++    $component =~ /\.(so|dylib|dll)/ || return;
++    push @$queue, $component;
++}
++
++sub register_component ($)
++{
++    my $component = shift;
++
++    my $solarlib = $ENV{SOLARVER}."/".$ENV{INPATH}."/lib";
++    my $servicesfile = "$solarlib/services.rdb";
++    my @regcompoutput = ();
++    my $regcomp = get_regcomp();
++
++    my $filestring = make_file_url($component);
++
++    my $systemcall = "$installer::globals::wrapcmd $regcomp " .
++	"-register -r ".fix_cygwin_path($servicesfile).
++	" -c " . $installer::globals::quote . $filestring . $installer::globals::quote .
++	" 2\>\&1 |";
++
++#	" -wop=" . $installer::globals::quote . $allvariableshashref->{'NATIVESERVICESURLPREFIX'} . $installer::globals::quote .
++
++    open (REG, "$systemcall");
++    while (<REG>) {push(@regcompoutput, $_); }
++    close (REG);
++    
++    my $returnvalue = $?;   # $? contains the return value of the systemcall
++
++    # cf. cpputools/source/registercomponent/registercomponent.cxx
++    if ($returnvalue == 256) {
++	# has no component_ methods (?)
++	print "non component: $component\n" if !$opt_silent;
++#	print "command: $systemcall";
++#	print "output: @regcompoutput";
++	return;
++    } elsif ($returnvalue == 0) {
++	print "registered component: $component\n" if !$opt_silent;
++    } elsif (!$opt_silent) {
++	print "Warning: registration failed abnormally with code: $returnvalue\n";
++	print "command: $systemcall";
++	print "output: @regcompoutput";
++    }
++}
++
++# evil cut/paste from bin/modules/installer/servicesfile.pm ends ...
++
+ sub copy_if_newer 
+ {
+     # return 0 if file is unchanged ( for whatever reason )
+@@ -764,6 +886,7 @@ sub copy_if_newer 
+     my $from = shift;
+     my $to = shift;
+     my $touch = shift;
++    my $register = shift;
+     my $from_stat_ref;
+     my $rc = 0;
+     
+@@ -841,6 +964,9 @@ sub copy_if_newer 
+                 system("macosx-create-bundle", "$to=$from.app") if ( -d "$from.app" );
+                 system("ranlib", "$to" ) if ( $to =~ /\.a/ );
+             }
++
++	    # register each component as it is delivered into a tests .rdb
++	    register_queue ($register, $to);
+             return 1;
+         }
+         else {
+@@ -854,6 +980,7 @@ sub copy_if_newer 
+             print_error("directory '$destdir' does not exist", 0);
+         }
+     }
++
+     unlink($temp_file);
+     return 0;
+ }
