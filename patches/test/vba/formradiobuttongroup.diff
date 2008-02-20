@@ -1,0 +1,317 @@
+? sc/source/filter/build.log
+? sc/source/filter/excel/.xiescher.cxx.swp
+Index: sc/source/filter/excel/xiescher.cxx
+===================================================================
+RCS file: /cvs/sc/sc/source/filter/excel/xiescher.cxx,v
+retrieving revision 1.54
+diff -u -p -r1.54 xiescher.cxx
+--- sc/source/filter/excel/xiescher.cxx	6 Jul 2007 12:37:20 -0000	1.54
++++ sc/source/filter/excel/xiescher.cxx	20 Feb 2008 10:48:41 -0000
+@@ -221,6 +221,7 @@
+ #include "xicontent.hxx"
+ #endif
+ 
++#include "xlescher.hxx"
+ using ::rtl::OUString;
+ using ::rtl::OUStringBuffer;
+ using ::com::sun::star::uno::Reference;
+@@ -327,6 +328,171 @@ SdrTextVertAdjust lclGetSvxVerAlignment(
+ 
+ } // namespace
+ 
++
++bool XclRadioButtonManager::objectIDSort::operator()( const SdrObjectInfo& a, const SdrObjectInfo& b )
++{
++    return a.mID < b.mID;
++}
++
++bool
++XclRadioButtonManager::AddSdrObject( const XclImpDrawObjBase& rDrawObj, SdrObject* pSdrObj )
++{
++    const XclImpTbxControlObj* pFormObj = dynamic_cast< const XclImpTbxControlObj* >(&rDrawObj );
++    OSL_TRACE("XclRadioButtonManager::AddSdrObject ObjectID 0x%x ShapeID 0x%x", rDrawObj.GetObjId().mnObjId, rDrawObj.GetShapeId() );
++    if (  !mDfltGroupName.getLength() )
++    {
++        mDfltGroupName = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Sheet ") ) + rtl::OUString::valueOf( static_cast< sal_Int32 >( rDrawObj.GetScTab() ) + 1 );
++    } 
++    switch( rDrawObj.GetObjType() )
++    {
++        case EXC_OBJ_CMO_OPTIONBUTTON:
++            mRadioButtons.push_back( SdrObjectInfo( rDrawObj.GetAnchorRect(), pSdrObj, pFormObj->GetControlPropSet(), rDrawObj.GetObjId(), rDrawObj.GetShapeId() ) );
++            break;
++        case EXC_OBJ_CMO_GROUPBOX:
++            mGroupBoxes.push_back( SdrObjectInfo( rDrawObj.GetAnchorRect(), pSdrObj, pFormObj->GetControlPropSet(), rDrawObj.GetObjId(), rDrawObj.GetShapeId() ) );
++            break;
++        default:
++            return false;
++            break;
++    }
++    return true;
++}
++
++// total hack, this is just some experimental foo to try and poke
++// the imported radio buttons into life
++void
++XclRadioButtonManager::Reprocess( XclImpObjectManager& rObjMgr ) 
++{
++    Objects::iterator it_rbs = mRadioButtons.begin(); 
++    Objects::iterator it_rbs_end = mRadioButtons.end(); 
++    for ( ; it_rbs != it_rbs_end; ++it_rbs )
++    {
++        if( XclImpTbxControlObj* pDrawObj = dynamic_cast< XclImpTbxControlObj* >( rObjMgr.FindDrawObj( it_rbs->mObjID ).get() ) )
++        {
++            // reprocess 
++            pDrawObj->DoProcessSdrObj( *it_rbs->mpObject );
++        }
++
++    }
++}
++
++void
++XclRadioButtonManager::ApplyGrouping() 
++{
++    OUString sGroupName = mDfltGroupName;
++    Objects::iterator it_rbs = mRadioButtons.begin(); 
++    Objects::iterator it_rbs_end = mRadioButtons.end(); 
++    for ( ; it_rbs != it_rbs_end; ++it_rbs )
++    {
++        String sRBName;
++        it_rbs->mObjProps.GetStringProperty( sRBName, CREATE_OUSTRING( "Name" ));
++        Objects::iterator it_gb = mGroupBoxes.begin();
++        Objects::iterator it_gb_end = mGroupBoxes.end();
++        for ( ; it_gb != it_gb_end; ++it_gb )
++        {
++            // mmm I just discovered a more accurate way of determining the 
++            // radio group ( the converted dimensions here may not be accurate )
++            // the format of the ftRboData field is
++            // ftRboData
++            //     sal_uInt16 nextShapeID; // the next radio button in the group
++            //     sal_uInt8  unknown1; // the next radio button in the group
++            //     sal_uInt8  bPrimaryGroupMember:1; // set if this is the lead radio-button in the group
++            //     sal_uInt8  unknown2:7; // unknown
++            if ( it_gb->mArea.IsInside( it_rbs->mArea ) )
++            {
++                String sTmpName;
++                it_gb->mObjProps.GetStringProperty( sTmpName, CREATE_OUSTRING( "Name" ));
++                sGroupName = sTmpName;
++                break;
++            }
++            else
++                sGroupName = mDfltGroupName;
++  
++        }
++        // this isn't really necessary for form control radiobuttons IF there
++        // is a linked cell associated with the group
++        it_rbs->mObjProps.SetStringProperty( CREATE_OUSTRING( "GroupName" ), sGroupName );
++        // we shouldn't really need to store the groups except I am hacking a 
++        // reprocess step and I want to remember the groups
++        mRadioGroups[ sGroupName ].push_back( *it_rbs );
++    }
++    // sort radiobuttons in each group by objectID, this determines the value 
++    // of the Radio button ( lowest objectID is in the group will have ref val set to 1 )
++    RadioGroups::iterator it_groups = mRadioGroups.begin(); 
++    RadioGroups::iterator it_groups_end = mRadioGroups.end(); 
++    for ( ; it_groups != it_groups_end; ++it_groups )
++    {
++        Objects::iterator it = it_groups->second.begin();
++        Objects::iterator it_end = it_groups->second.end();
++        ::std::sort( it, it_end, objectIDSort() );
++    } 
++    for ( it_groups = mRadioGroups.begin(); it_groups != it_groups_end; ++it_groups )
++    {
++        Objects::iterator it = it_groups->second.begin();
++        Objects::iterator it_end = it_groups->second.end();
++        sal_Int32 refValue = 1;
++        CellAddress aCellLink;        
++        for ( ; it != it_end; ++it, ++refValue )
++        {
++            Reference< XBindableValue > xBindable( it->mObjProps.GetApiPropertySet(), UNO_QUERY );
++            // Each radiobutton in the group *must* have the same
++            // ValueBinding, propagate the binding to group members that
++            // don't have it set
++
++            it->mObjProps.SetStringProperty( CREATE_OUSTRING( "RefValue" ), rtl::OUString::valueOf( refValue ) );
++
++            if ( xBindable.is() )
++            {
++                Reference< XValueBinding > xBinding( xBindable->getValueBinding() );
++                // The assumption here is the lead radiobutton is the first
++                // we process ( e.g. the one with the lowest object id )
++                // we should check if that is not the case and assert or
++                // something
++                if ( xBinding.is() )
++                {
++                    // extract the binding
++                    ScfPropertySet bindProps( xBinding );
++                    Any cellLinkAsAny;
++                    bindProps.GetAnyProperty( cellLinkAsAny,  CREATE_OUSTRING(SC_UNONAME_BOUNDCELL  ) );
++                    cellLinkAsAny >>= aCellLink;
++                }
++                else
++                {
++                    // create a binding
++                    // get service factory from Calc document
++                    Reference< XMultiServiceFactory > xFactory;
++                    if( SfxObjectShell* pDocShell = GetRoot().GetDocShell() )
++                        xFactory.set( pDocShell->GetModel(), UNO_QUERY );                    
++                    if ( !xFactory.is() )
++                        return; // we should report this problem 
++
++                    NamedValue aValue;
++                    aValue.Name = CREATE_OUSTRING( SC_UNONAME_BOUNDCELL );
++                    aValue.Value <<= aCellLink; 
++
++                    Sequence< Any > aArgs( 1 );
++                    aArgs[ 0 ] <<= aValue;
++
++                    xBinding.set( xFactory->createInstanceWithArguments(
++                        CREATE_OUSTRING( SC_SERVICENAME_LISTCELLBIND ), aArgs ), UNO_QUERY );
++                    if ( !xBinding.is() )
++                        return; // we should report this problem
++
++                    xBindable->setValueBinding( xBinding );
++                }
++            }
++        }
++    }
++}
++
++
++void
++XclRadioButtonManager::Init()
++{
++    mRadioButtons.clear();
++    mGroupBoxes.clear();
++    mDfltGroupName  = rtl::OUString();  
++}
+ // ----------------------------------------------------------------------------
+ 
+ XclImpTxoData::XclImpTxoData( const XclImpRoot& rRoot ) :
+@@ -917,7 +1083,6 @@ void XclImpTbxControlObj::DoProcessSdrOb
+         aCtrlName = XclControlObjHelper::GetTbxControlName( GetObjType() );
+     if( aCtrlName.getLength() > 0 )
+         aPropSet.SetProperty( CREATE_OUSTRING( "Name" ), aCtrlName );
+-
+     // sheet links
+     ConvertSheetLinks( GetRoot(), rSdrObj );
+ 
+@@ -956,6 +1121,7 @@ void XclImpTbxControlObj::DoProcessSdrOb
+             if( bCheckBox )
+                 aPropSet.SetBoolProperty( CREATE_OUSTRING( "TriState" ), nApiState == 2 );
+             aPropSet.SetProperty( CREATE_OUSTRING( "DefaultState" ), nApiState );
++            OSL_TRACE("DefaultState %s for radiobutton is 0x%d",  rtl::OUStringToOString( aCtrlName, RTL_TEXTENCODING_UTF8 ).getStr(), nApiState );
+ 
+             sal_Int16 nApiBorder = mbFlatButton ? AwtVisualEffect::FLAT : AwtVisualEffect::LOOK3D;
+             aPropSet.SetProperty( CREATE_OUSTRING( "VisualEffect" ), nApiBorder );
+@@ -1547,6 +1713,7 @@ XclImpDffManager::XclImpDffManager(
+     XclImpRoot( rRoot ),
+     mrObjManager( rObjManager ),
+     mxOcxConverter( new XclImpOcxConverter( rRoot ) ),
++    maRadioButtonManager( rRoot ), 
+     mnOleImpFlags( 0 )
+ {
+     SetSvxMSDffSettings( SVXMSDFF_SETTINGS_CROP_BITMAPS | SVXMSDFF_SETTINGS_IMPORT_EXCEL | SVXMSDFF_SETTINGS_IMPORT_IAS );
+@@ -1713,6 +1880,7 @@ SdrObject* XclImpDffManager::ProcessObj(
+     // process the SdrObject
+     if( xSdrObj.get() )
+     {
++	
+         // maybe if there is no color, we could do this in ApplyAttributes (writer?, calc?)
+         if( GetPropertyBool( DFF_Prop_fFilled ) && !IsProperty( DFF_Prop_fillColor ) )
+             xSdrObj->SetMergedItem( XFillColorItem( EMPTY_STRING, Color( COL_WHITE ) ) );
+@@ -1749,7 +1917,13 @@ SdrObject* XclImpDffManager::ProcessObj(
+         be done here (and not in InsertSdrObject() function), otherwise all
+         SdrObjects embedded in groups would be lost. */
+     if( xSdrObj.get() )
++    {
++        // add formcontrol radiobuttons and groupboxes to 
++        if ( xDrawObj.is() 
++        && ( ( xDrawObj->GetObjType() == EXC_OBJ_CMO_OPTIONBUTTON ) || ( xDrawObj->GetObjType() == EXC_OBJ_CMO_GROUPBOX ) ) )
++            maRadioButtonManager.AddSdrObject( *xDrawObj, xSdrObj.get() );
+         maSolverCont.InsertSdrObjectInfo( *xDrawObj, xSdrObj.get() );
++    }
+ 
+     return xSdrObj.release();
+ }
+@@ -1835,6 +2009,11 @@ void XclImpDffManager::ProcessDgContaine
+     maSolverCont.UpdateConnectorRules();
+     SolveSolver( maSolverCont );
+     maSolverCont.RemoveConnectorRules();
++    maRadioButtonManager.ApplyGrouping();
++//    hack to reapply the default state ( and unfortunately everthing else )
++//    after grouping is applied. 
++//    maRadioButtonManager.Reprocess( mrObjManager );
++    maRadioButtonManager.Init();
+ }
+ 
+ void XclImpDffManager::ProcessShGrContainer( SvStream& rEscherStrm, const DffRecordHeader& rShGrHeader )
+Index: sc/source/filter/inc/xiescher.hxx
+===================================================================
+RCS file: /cvs/sc/sc/source/filter/inc/xiescher.hxx,v
+retrieving revision 1.27
+diff -u -p -r1.27 xiescher.hxx
+--- sc/source/filter/inc/xiescher.hxx	6 Jul 2007 12:38:40 -0000	1.27
++++ sc/source/filter/inc/xiescher.hxx	20 Feb 2008 10:48:42 -0000
+@@ -310,6 +310,7 @@ private:
+     bool                mbFlatButton;   /// False = 3D button style; True = Flat button style.
+     bool                mbFlatBorder;   /// False = 3D border style; True = Flat border style.
+     bool                mbScrollHor;    /// Scrollbar: true = horizontal.
++friend class XclRadioButtonManager;
+ };
+ 
+ // ----------------------------------------------------------------------------
+@@ -435,6 +436,46 @@ private:
+     XclImpSdrInfoMap    maSdrInfoMap;   /// Maps shape IDs to SdrObjects.
+ };
+ 
++class XclRadioButtonManager : protected XclImpRoot
++{
++public:
++    XclRadioButtonManager( const XclImpRoot& rRoot ) : XclImpRoot( rRoot ) {} 
++    // Only RadioButtons and GroupBoxes are added ( per sheet )
++    // The class expects to operate in a sheet context and be re-initialised
++    // after processing each sheet
++    bool AddSdrObject( const XclImpDrawObjBase& rDrawObj, SdrObject* pSdrObj );
++    // ApplyGrouping
++    // - Sorts RadioButtons into groups
++    // - applies groupname property to underlying  uno object
++    // - assumes that all the objects added by 'AddSdrObject' are located on
++    //   the same sheet 
++    void ApplyGrouping();
++    void Reprocess( XclImpObjectManager& rObjMgr );
++    void Init();
++private:
++    rtl::OUString mDfltGroupName;
++    struct SdrObjectInfo
++    {
++       	XclObjId mObjID; 
++       	sal_Int32 mID; 
++        Rectangle mArea;
++	ScfPropertySet mObjProps;
++        SdrObject* mpObject;
++        SdrObjectInfo( const Rectangle& rRect, SdrObject* pObject, const ScfPropertySet& rProps, const XclObjId& rObjId, sal_Int32 aID ): mObjID( rObjId ), mID( aID ), mArea( rRect ), mObjProps( rProps ), mpObject( pObject ) {}
++    };
++    struct objectIDSort
++    {
++        bool operator()( const SdrObjectInfo& a, const SdrObjectInfo& b );
++    };
++
++    typedef std::vector< SdrObjectInfo > Objects;
++    typedef std::map< rtl::OUString, Objects > RadioGroups;
++
++    Objects mGroupBoxes;
++    Objects mRadioButtons;
++    RadioGroups mRadioGroups;
++};
++
+ // ----------------------------------------------------------------------------
+ 
+ class XclImpObjectManager;
+@@ -521,6 +562,7 @@ private:
+     ScRangeMap          maUsedAreaMap;      /// Used ranges for all sheets.
+     ScfProgressBarRef   mxProgress;         /// The progress bar used in ProcessObj().
+     XclImpOcxConvRef    mxOcxConverter;     /// The form controls converter.
++    XclRadioButtonManager maRadioButtonManager; /// applies grouping for radio buttons
+     sal_uInt32          mnOleImpFlags;      /// Application OLE import settings.
+ };
+ 
