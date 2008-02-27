@@ -1,0 +1,150 @@
+the whole Parse chain is generally set in motion via
+
+SbiModule::Compile
+ while ( SbiParser::Parse() )
+
+for the purpose of example consider the following module code
+
+e.g. 
+
+REM  *****  BASIC  *****
+
+Sub Main
+n = 52
+cMAX = 10.234
+Dim mRangeArray(0, 0) as String
+ReDim mRangeArray(CInt(cMAX), n) as String
+'msgbox (  ("here"), cInt(2) , "foo" )
+End Sub
+
+REM and its line contents are practically ignored as they are not compilable content, ditto the blank lines, the Next significate line to be processed is
+
+Sub Main
+which initially yields the SUB token, SUB is processed as follows
+
+where 
+SbiParser::Parse
+   SbiParser::Peek()
+   tests for end of file 
+      if true ( generates code ( JMP 0 ) for that ) and returns FALSE to terminate the compile
+   test for end of line  
+      calls Next() and return TRUE ( indicating more stuff to parse )
+
+the main SbiParser::Parse function sets detects the main statements to process like function/subroutine etc. ( keywords are picked up from StmntTable in parser.cxx, note in addition to the Statements the appropriate handlers (functions) are also defined e.g. SbiParser::SubFunc )
+   A SUB, FUNCTION or PROPERY results in a  STATEMENT getting generated 
+
+SbiParser::SubFunc
+   SbiParser::DefProc
+      create a SbiProcdecl by calling SbiParser::ProcDecl
+          a new SbiProcDef is created to hold procedure related info e.g. ( scope ( static, public etc. ) params defined for the procedure, local variables, return type )
+      if public the SbiProcDecl instance is added to aPublics ( list of public procedures )
+      SbiParser::pProc is set to the current procedure
+      OpenBlock() is called ( with SUB token )
+          creates a SbiParseStack ( and sets SbiParser::pStack to that )
+      StmntBlock( ENDSUB )          
+          does a while loop on Parse ( e.g. recursive call ) 
+          SbiParse::Parse()
+1st iter
+=========
+            processes the tokens e.g. like line 4 "n = 52"
+            the first token to be read is n which doesn't match anything token is deemed to be a SYMBOL ( e.g. to be resolved later or at runtime, basically a SYMBOL is a lhs arg or a procedure call )
+            a SYMBOL is treated as follows
+                strange Next()/Push() call combination where Next() returns the previously "Peeked" SYMBOL, followed by a Push() to ensure Next() will be set up to return SYMBOL again
+                a STATEMENT is generated
+                SbiParser::Symbol() is called
+                    which creates a SbiExpression aVar( this, SbSYMBOL ) [1]
+                    peeks at the next symbol to decide whether this is a procedure/object call or EQ ( it is in this case EQ )
+                    aVar.Gen( eRecMode ) ( from above ) is called the value of eRecMode refects whether this is EQ or call
+
+                      calls SbiExprNode::GenElement( SbiOpcode eOp )(..) which generates a eOp  _FIND  e.g. ( StepFIND( id, type ) )
+		      pGen->Gen( _FIND.... ) where pGen is a SbiCodeGen 
+                      note: first call of SbiCodeGen::Gen will generate a statement ( STMNT  ) prior ti the desired type ( so in fact this will generates StepSTMNT(..) followed by StepFIND
+                   the above generates the lhs of the assignment
+                   for the rhs another SbiExpression is created e.g. SbiExpression aExpr(this) - note the lack a SbSYMBOL in the ctor [3]
+                   aExpr.Gen() is called  ( which generated another _FIND (*I think*) )
+                   and then a _PUT is forced
+2nd iter
+========
+         processes newline
+2nd iter
+========
+         processes cMAX = 10.234
+
+
+[1]
+SbiExpression() this class is passed an instance of the parser and all of the work is done in the ctor,
+  basically depending of the type passed either
+    SbiExpression::Term() or SbiExpression::Boolean() are called which return a SbiExprNode ( )
+       SbiExpression::Term()
+          can handle a following '.' DOT and associated processing or..
+          locks the column ( why? ) pParser->LockColumn
+          Peeks at the following TOKEN 
+          if the peeked token == ASSIGN
+             unlocks the column if its and Assign and returns a new SbiExprNode( represents a single or list of expressions left to right *I think* )
+          if its a KeyWord and it's compatible and == INPUT then INPUT is turned into SYMBOL and returned, otherwise an Error is generated ( looks like INPUT has been filtered out here ) - check with other compat filtering to see why here, is this useful for filtering out other vba specific bits?
+          the is a check to see if parameters follow
+             if so then SbiParameters are created ( which can create further SbiExpressions etc. )
+          see if the current symbol ( "n" ) at the stage is in the pParser->pPool or if its in the RTL library e.g. pParser->CheckRTLForSym( aSym, eType );
+          if we don't have a symbol definition for the symbol then 
+             create a new symbol definition via AddSym[2]
+          create a new SbiExprNode          	
+          the SbiExprNode always has a valid instance of SbiParameters associated with it ( event if there are no paramaters ) so a new SbiParameters is created 
+          column is unlocked and the SbiNode created previously is returned
+
+---------
+[3]
+SbiExpression::SbiExpression calles
+    SbiExpression::Boolean() is called for a Standard expression
+        SbiExpNode pNd is created for from SbiExpression::Like()
+            SbiExpression::Like() calls SbiExprNode* pNd = Cat(), which inturn calls AddSub, Mod, IntDiv, MulDiv, Exp, Unary, 
+                in the case of "n = 52" in Unary() pNd is set to result of Operand()
+                    Operand()
+                        just returns a new SbiExpression for a simple number, result falls back through each of the previous AddSub(), Mod(), IntDiv() etc. calls 
+[2]
+A symbol definintion is defined by the SbiSymDef class, it of course defines the name of the symbol, it's type, it's scope, and can of course also define it's own symbols ( e.g. if the symbol is a procedure )
+
+The tokenizer is a strange beast that operates with
+
+Next() & Peek() semantics, 
+
+there is no point talking about how the strings in the module are processed, suffice to say the SbiParser has the following inheritance
+
+SbiScanner
+    |
+SbiTokenizer
+    |
+SbiParser
+
+where SbiScanner does the hard lifting wrt parsing the raw lines into Symbols
+
+Peek() 
+======
+
+you would think would return the next symbol ( lookahead ) and it *sortof* works like this
+
+if ePush IS NIL then ePush is set to result of Next() ( what sets ePush )
+
+eCurTok is allways set to ePush  ( this is the strange bit for me )
+eCurTok is returned
+
+so it seems if you call Peek() you will get the Next() token only if you didn't call Peek() previously
+
+
+Next()
+======
+basically if Peek() was called previously ( and then Next() returns the value previoulsy 'Peeked' at ( and sets up ePush to NIL to force either next call to Peek() or next call to Next() to read the next token ) - what makes this strange for me is the fact that Peek() modifies the current token ( e.g. eCurTok )
+
+
+if ePush ISN'T NIL ( NIL is the initial and terminating state ) eCurTok is set to ePush and ePush is set to NIL
+
+otherwise is gets the next symbol ( via NextSym() which populates aSym )
+aSym is compared with the tokens in pTokTable 
+   pTokTable contains keywords and symbols like ( &,+,And,Goto,If etc... ) { populated from aTokTable_Basic }
+when aSym matches something from pTokTable then it is handled in the 'special' labled code branch ( urky ) c/c++ mix
+   'special' branch can cause recursion if the symbol is 'LINE' or 'END' ( this is so END FUNCTION, END SUB, LINE INPUT etc. will be resolved as single tokens
+    if the aSym is neither LINE or END then some further magic happens like
+        * detecting datatype symbols e.g. INTEGER, DOUBLE, OBJECT etc.
+        * detecting As
+        * suppressing compatibility only tokens ( like CLASSMODULE, ENUM etc. )
+            these are supressed by returning the SYMBOL token
+
