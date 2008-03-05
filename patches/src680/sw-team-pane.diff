@@ -258,10 +258,10 @@ index af24186..bfeddb5 100644
  	SwSyncChildWin::RegisterChildWindow( sal_True, pMod );
 diff --git a/sw/source/ui/inc/teampi.hxx b/sw/source/ui/inc/teampi.hxx
 new file mode 100644
-index 0000000..d698231
+index 0000000..78fcc1a
 --- /dev/null
 +++ sw/source/ui/inc/teampi.hxx
-@@ -0,0 +1,73 @@
+@@ -0,0 +1,98 @@
 +/*
 + * written by Florian Reuter, (c) Novell Inc 2008
 + */
@@ -299,18 +299,40 @@ index 0000000..d698231
 +#include <vcl/javachild.hxx>
 +#include <vcl/combobox.hxx>
 +#include <vcl/syschildctrl.hxx>
++#include <osl/thread.hxx>
++#include <osl/process.h>
++
++class SfxMedium;
++
++class SwMonoThread : public osl::Thread
++{
++private:
++    sal_uInt32 socketId;
++public:
++    SwMonoThread(sal_uInt32 socketId);
++    virtual void SAL_CALL run();
++};
 +
 +class SwTeamPI : public Window,
 +		 public SfxControllerItem, public SfxListener
 +{
 +//    OKButton        aOKButton;
-+    ListBox aEdit;
++//    ListBox aEdit;
 +    SystemChildControl aJavaWindow;
++    SwMonoThread *aMonoThread;
++    oslProcess pProcess;
++    SfxBindings 		&rBindings;    
++    SwView				*pCreateView;
++    Timer 				aTimer;
 +//    SystemChildControl aJavaWindow2;
 +protected:
-+    DECL_LINK( MyClickHandler, OKButton* pBtn );
-+    DECL_LINK( MyListBoxHandler, ListBox * );
++//    DECL_LINK( MyClickHandler, OKButton* pBtn );
++//    DECL_LINK( MyListBoxHandler, ListBox * );
++    DECL_LINK( TimerHdl, Timer* );
++    SwView*         GetCreateView() const;
 +public:
++    static void invokeMono(char *file, sal_uInt32 socketId);
++    void invokeApp(::rtl::OUString appURI, sal_uInt32 socketId, SfxMedium *pMedium);
 +    SwTeamPI(SfxBindings*, SfxChildWindowContext*, Window*);
 +    ~SwTeamPI();
 +
@@ -318,7 +340,10 @@ index 0000000..d698231
 +/*
 +    virtual void        Resizing( Size& rSize );
 +    virtual BOOL        Close();
-+*/
++*/    
++public:
++    virtual void        Activate();
++    virtual void        Deactivate();
 +};
 +
 +class SwTeamChild : public SfxChildWindowContext
@@ -335,6 +360,28 @@ index 0000000..d698231
 +
 +
 +#endif
+diff --git a/sw/source/ui/uiview/view.cxx b/sw/source/ui/uiview/view.cxx
+index 9a01ee3..f4fbbc9 100644
+--- sw/source/ui/uiview/view.cxx
++++ sw/source/ui/uiview/view.cxx
+@@ -179,6 +179,7 @@
+ #ifndef _NAVIPI_HXX
+ #include <navipi.hxx>
+ #endif
++#include <teampi.hxx>
+ #ifndef _GLOSHDL_HXX
+ #include <gloshdl.hxx>
+ #endif
+@@ -1169,7 +1170,8 @@ SwView::SwView( SfxViewFrame *_pFrame, SfxViewShell* pOldSh )
+ 		SfxBoolItem aNavi(SID_NAVIGATOR, sal_True);
+ 		GetDispatcher().Execute(SID_NAVIGATOR, SFX_CALLMODE_ASYNCHRON, &aNavi, 0L);
+ 	}
+-
++	SfxBoolItem aNavi(SID_TEAM, sal_True);
++	GetDispatcher().Execute(SID_TEAM, SFX_CALLMODE_ASYNCHRON, &aNavi, 0L);
+ 
+     /*uno::Reference< awt::XWindow >  aTmpRef;
+ 	_pFrame->GetFrame()->GetFrameInterface()->setComponent( aTmpRef,
 diff --git a/sw/source/ui/uiview/view0.cxx b/sw/source/ui/uiview/view0.cxx
 index 13160f7..e3063df 100644
 --- sw/source/ui/uiview/view0.cxx
@@ -366,10 +413,19 @@ index af8d645..320b9c8 100644
  		break;
  
 diff --git a/sw/source/ui/utlui/makefile.mk b/sw/source/ui/utlui/makefile.mk
-index 8faae2d..1e908de 100644
+index 8faae2d..305ee9c 100644
 --- sw/source/ui/utlui/makefile.mk
 +++ sw/source/ui/utlui/makefile.mk
-@@ -69,6 +69,7 @@ SLOFILES =  $(EXCEPTIONSFILES) \
+@@ -46,6 +46,8 @@ TARGET=utlui
+ 
+ # --- Files --------------------------------------------------------
+ 
++#xxINPROCESSMONO PKGCONFIG_MODULES=mono
++#xxINPROCESSMONO .INCLUDE: pkg_config.mk
+ 
+ SRS1NAME=$(TARGET)
+ SRC1FILES =  \
+@@ -69,6 +71,7 @@ SLOFILES =  $(EXCEPTIONSFILES) \
  		$(SLO)$/glbltree.obj \
  		$(SLO)$/initui.obj \
  		$(SLO)$/navipi.obj \
@@ -379,10 +435,10 @@ index 8faae2d..1e908de 100644
  		$(SLO)$/prcntfld.obj \
 diff --git a/sw/source/ui/utlui/teampi.cxx b/sw/source/ui/utlui/teampi.cxx
 new file mode 100644
-index 0000000..7090cfd
+index 0000000..8b0845c
 --- /dev/null
 +++ sw/source/ui/utlui/teampi.cxx
-@@ -0,0 +1,272 @@
+@@ -0,0 +1,449 @@
 +/*
 + * written by Florian Reuter, (c) Novell Inc 2008
 + */
@@ -482,11 +538,28 @@ index 0000000..7090cfd
 +
 +#include <unomid.h>
 +
++//#include <glib/glib.h>
++#ifdef xxINPROCESSMONO
++#include <mono/jit/jit.h>
++#include <mono/metadata/assembly.h>
++#endif
++#include <osl/thread.hxx>
++#include <sfx2/docfile.hxx>
++#include <com/sun/star/util/XMacroExpander.hpp>
++#include <comphelper/processfactory.hxx>
++#include <com/sun/star/beans/XPropertySet.hpp>
 +
 +
 +using namespace ::com::sun::star::uno;
 +using namespace ::com::sun::star::frame;
-+
++using namespace ::com::sun::star::container;
++using namespace ::com::sun::star::lang;
++using namespace ::com::sun::star::uno;
++using namespace ::com::sun::star::beans;
++using namespace ::com::sun::star::ucb;
++using namespace ::com::sun::star::task;
++using namespace ::com::sun::star::util;
++/*
 +IMPL_LINK( SwTeamPI, MyClickHandler, OKButton*, EMPTYARG )
 +{
 +    printf("### CLICK\n");
@@ -500,7 +573,36 @@ index 0000000..7090cfd
 +    aJavaWindow.LoadUrl("http://www.google.com");
 +    return 0;
 +}
++*/
++IMPL_LINK( SwTeamPI, TimerHdl, Timer*, EMPTYARG )
++{
++    SwView* pView=GetCreateView();
++    printf("**TIMER pView=%p\n", pView);
++    if (pView) {
++	::rtl::OUString aName=pView->GetDocShell()->GetName();
++	rtl::OString aName8 = ::rtl::OUStringToOString (aName, RTL_TEXTENCODING_UTF8);
++	printf("**TIMER aName8=\"%s\"\n", aName8.getStr());
++	SfxMedium* pMedium=pView->GetDocShell()->GetMedium();
++	printf("**TIMER pMedium=%p\n", pMedium);
++	aTimer.Stop();
 +
++	Reference< XMultiServiceFactory> xMS(::comphelper::getProcessServiceFactory(), UNO_QUERY);
++	Reference< XPropertySet >  xProps(xMS, UNO_QUERY);
++	Reference< XComponentContext > xContext(xProps->getPropertyValue(rtl::OUString::createFromAscii("DefaultContext")), UNO_QUERY);
++	Reference< XMacroExpander > xExpander(xContext->getValueByName(::rtl::OUString::createFromAscii("/singletons/com.sun.star.util.theMacroExpander")), UNO_QUERY);
++
++	::rtl::OUString sProgUri=xExpander->expandMacros(rtl::OUString::createFromAscii("$ORIGIN/TeamApp"));
++	rtl::OString sProgUri8 = ::rtl::OUStringToOString (sProgUri, RTL_TEXTENCODING_UTF8);
++	printf("**TIMER sProgUri=\"%s\"\n", sProgUri8.getStr());
++	
++
++	invokeApp(sProgUri, aJavaWindow.GetSocketId(), pMedium);
++    } else {
++	aTimer.Stop();
++	aTimer.Start();
++    }
++    return 0;
++}
 +
 +SwTeamPI::SwTeamPI( SfxBindings* _pBindings,
 +		    SfxChildWindowContext* pCw,
@@ -509,11 +611,15 @@ index 0000000..7090cfd
 +    Window( pParent /*,  SW_RES(DLG_NAVIGATION_PI)*/ ),
 +    SfxControllerItem( SID_DOCFULLNAME, *_pBindings ),
 +//    aOKButton       ( this ),
-+    aEdit       ( this, WB_DROPDOWN ),
-+    aJavaWindow ( this, SystemChildControl::SOCKET )
++//    aEdit       ( this, WB_DROPDOWN ),
++    aJavaWindow ( this, SystemChildControl::SOCKET ),
++    aMonoThread(NULL),
++    pProcess(NULL),
++    rBindings(*_pBindings),
++    pCreateView(NULL)
 +//    aJavaWindow2 ( this )    
 +{
-+    printf("SwTeamPI::SwTeamPI\n");
++    printf("SwTeamPI::SwTeamPI(%p)\n", &rBindings);
 +    StartListening(*SFX_APP());
 +/*
 +    Size aOKSiz = aOKButton.GetSizePixel();
@@ -527,6 +633,7 @@ index 0000000..7090cfd
 +    aOKButton.SetClickHdl( LINK( this, SwTeamPI, MyClickHandler ) );
 +    aOKButton.Show();
 +*/
++/*
 +    Size aEditSiz = aEdit.GetSizePixel();
 +    Point aEditPnt = aEdit.GetPosPixel();
 +    aEditPnt.X() = 0;
@@ -538,16 +645,27 @@ index 0000000..7090cfd
 +    aEdit.InsertEntry(rtl::OUString::createFromAscii("Buddies"));
 +    aEdit.SetSelectHdl( LINK( this, SwTeamPI, MyListBoxHandler ) );
 +    aEdit.Show();
-+
++*/
 +    Size aJavaWindowSiz = aJavaWindow.GetSizePixel();
 +    Point aJavaWindowPnt = aJavaWindow.GetPosPixel();
 +    aJavaWindowPnt.X() = 0;
-+    aJavaWindowPnt.Y() = 25;
++    aJavaWindowPnt.Y() = 0;
 +    aJavaWindow.SetPosPixel( aJavaWindowPnt );
 +    aJavaWindowSiz.Width()=300;
 +    aJavaWindowSiz.Height()=300;
 +    aJavaWindow.SetSizePixel( aJavaWindowSiz );
 +    aJavaWindow.Show();
++/*
++    aMonoThread=new SwMonoThread(aJavaWindow.GetSocketId());
++    if (aMonoThread!=NULL) {
++	aMonoThread->create();  
++    }
++*/
++    printf("start timer...\n");
++    aTimer.SetTimeoutHdl(LINK(this, SwTeamPI, TimerHdl));
++    aTimer.SetTimeout(1000);
++    aTimer.Start();
++
 +/*
 +    Size aJavaWindow2Siz = aJavaWindow2.GetSizePixel();
 +    Point aJavaWindow2Pnt = aJavaWindow2.GetPosPixel();
@@ -585,6 +703,29 @@ index 0000000..7090cfd
 +*/
 +}
 +
++SwView* SwTeamPI::GetCreateView() const
++{
++    if(!pCreateView)
++    {
++	printf("SwTeamPI::GetCreateView():\n");
++        SwView* pView = SwModule::GetFirstView();
++        while(pView)
++        {
++	    ::rtl::OUString aName=pView->GetName();
++	    rtl::OString aName8 = ::rtl::OUStringToOString (aName, RTL_TEXTENCODING_UTF8);
++	    printf("pView=%p %p %p \"%s\"\n", pView, &pView->GetViewFrame()->GetBindings(), &rBindings, aName8.getStr());	   
++            if(&pView->GetViewFrame()->GetBindings() == &rBindings)
++            {
++		const_cast<SwTeamPI*>(this)->pCreateView = pView;
++		const_cast<SwTeamPI*>(this)->StartListening(*pCreateView);
++                break;
++            }
++            pView = SwModule::GetNextView(pView);
++        }
++    }
++    return pCreateView;
++}
++
 +
 +void SwTeamPI::Resize()
 +{
@@ -602,19 +743,30 @@ index 0000000..7090cfd
 +	aNewSize = pParent->GetOutputSizePixel();
 +    }
 +//XXX    printf("SwTeamPI::Resize(pFloat=%p; Width=%li; Height=%li)\n", pFloat, aNewSize.Width(), aNewSize.Height());
++/*
 +    Size aEditSize=aEdit.GetSizePixel();
 +    aEditSize.Width()=aNewSize.Width();
 +    aEdit.SetSizePixel(aEditSize); 
-+
++*/
 +    Size aJavaWindowSize=aJavaWindow.GetSizePixel();
 +    aJavaWindowSize.Width()=aNewSize.Width();
-+    aJavaWindowSize.Height()=aNewSize.Height()-aEditSize.Height();
++//    aJavaWindowSize.Height()=aNewSize.Height()-aEditSize.Height();
++    aJavaWindowSize.Height()=aNewSize.Height();
 +    aJavaWindow.SetSizePixel(aJavaWindowSize);
 +}
 +
 +SwTeamPI::~SwTeamPI()
 +{
 +	EndListening(*SFX_APP());
++	if (aMonoThread!=NULL) {
++	    aMonoThread->terminate();
++	    delete aMonoThread;
++	    aMonoThread=NULL;
++	}
++	if (pProcess!=NULL) {
++	    osl_terminateProcess(pProcess);
++	    pProcess=NULL;
++	}
 +}
 +
 +
@@ -654,7 +806,88 @@ index 0000000..7090cfd
 +*/
 +}
 +
++SwMonoThread::SwMonoThread(sal_uInt32 socketId) : osl::Thread(),
++			       socketId(socketId)
++{
++    
++}
 +
++void SAL_CALL SwMonoThread::run() {
++    printf("**START MonoThread::run\n");
++    SwTeamPI::invokeMono("/home/freuter/tmp/plug/SamplePlug.exe", socketId);
++//    SwTeamPI::invokeMono("/home/freuter/tmp/plug/SampleApp.exe", socketId);
++    printf("**END MonoThread::run\n");
++}
++
++void SwTeamPI::invokeMono(char *file, sal_uInt32 socketId)
++{
++#ifdef xxINPROCESSMONO
++    MonoDomain *domain;
++    MonoAssembly *assembly;
++    domain = mono_jit_init (file);
++    if (domain) {
++	assembly = mono_domain_assembly_open (domain, file);
++	if (assembly) {
++	    int argc=2;
++	    char _buf[100];
++	    sprintf(_buf, "%li", (long)socketId);
++	    char *argv[]= { file, _buf };
++	    printf("invoking: \"%s\"\n", file);
++	    mono_jit_exec (domain, assembly, argc, argv);
++	}   
++	mono_jit_cleanup (domain);  
++    }
++#endif
++}
++
++void SwTeamPI::invokeApp(::rtl::OUString appURI, sal_uInt32 socketId, SfxMedium *pMedium)
++{
++    rtl::OString aAppURI8 = ::rtl::OUStringToOString (appURI, RTL_TEXTENCODING_UTF8);
++    printf("invokeApp(\"%s\", %li)\n", aAppURI8.getStr(), (long)socketId);
++    int argc=3;
++    rtl_uString **args=new rtl_uString*[argc];
++    args[0]=appURI.pData; rtl_uString_acquire(args[0]);
++    char _buf[100]; sprintf(_buf, "%li", (long)socketId);
++    rtl::OUString ssocket=rtl::OUString::createFromAscii(_buf);
++    args[1]=ssocket.pData; rtl_uString_acquire(args[1]);
++    
++    ::rtl::OUString sOrigUrl=(pMedium!=NULL?pMedium->GetOrigURL():String());
++    args[2]=sOrigUrl.pData; rtl_uString_acquire(args[2]);
++        
++    oslProcessError error = osl_executeProcess( args[0],
++						args+1,
++						argc-1,
++						osl_Process_NORMAL,
++						0,
++						NULL,
++						NULL,
++						0,
++						&pProcess );
++
++
++    printf("error=%i\n", error);
++    if (error==osl_Process_E_None) {
++	printf("started...\n");
++    }
++    for(int i=0;i<argc;i++) {
++	rtl_uString_release(args[i]);
++    }
++    delete[] args;
++			      
++}
++
++
++void SwTeamPI::Activate()
++{
++    printf("SwTeamPI::Activate()\n");
++    Window::Activate();
++}
++
++void SwTeamPI::Deactivate()
++{
++    printf("SwTeamPI::Deactivate()\n");
++    Window::Deactivate();
++}
 diff --git a/vcl/inc/vcl/salinst.hxx b/vcl/inc/vcl/salinst.hxx
 index b392ffa..9ae1276 100644
 --- vcl/inc/vcl/salinst.hxx
@@ -1091,7 +1324,7 @@ index 57c52ba..860223c 100644
  
      if( pThis->m_pIMHandler )
 diff --git a/vcl/unx/gtk/window/gtkobject.cxx b/vcl/unx/gtk/window/gtkobject.cxx
-index 1f1d7b5..2289042 100644
+index 1f1d7b5..c83e6f4 100644
 --- vcl/unx/gtk/window/gtkobject.cxx
 +++ vcl/unx/gtk/window/gtkobject.cxx
 @@ -41,14 +41,33 @@
@@ -1162,7 +1395,15 @@ index 1f1d7b5..2289042 100644
      }
  }
  
-@@ -199,6 +227,7 @@ gboolean GtkSalObject::signalButton( GtkWidget*, GdkEventButton* pEvent, gpointe
+@@ -141,6 +169,7 @@ void GtkSalObject::EndSetClipRegion()
+ 
+ void GtkSalObject::SetPosSize( long nX, long nY, long nWidth, long nHeight )
+ {
++    GTK_YIELD_GRAB();
+     if( m_pSocket )
+     {
+         GtkFixed* pContainer = GTK_FIXED(gtk_widget_get_parent(m_pSocket));
+@@ -199,6 +228,7 @@ gboolean GtkSalObject::signalButton( GtkWidget*, GdkEventButton* pEvent, gpointe
  gboolean GtkSalObject::signalFocus( GtkWidget*, GdkEventFocus* pEvent, gpointer object )
  {
      GtkSalObject* pThis = (GtkSalObject*)object;
@@ -1170,7 +1411,7 @@ index 1f1d7b5..2289042 100644
  
      GTK_YIELD_GRAB();
  
-@@ -207,6 +236,19 @@ gboolean GtkSalObject::signalFocus( GtkWidget*, GdkEventFocus* pEvent, gpointer
+@@ -207,6 +237,19 @@ gboolean GtkSalObject::signalFocus( GtkWidget*, GdkEventFocus* pEvent, gpointer
      return FALSE;
  }
  
@@ -1190,7 +1431,7 @@ index 1f1d7b5..2289042 100644
  void GtkSalObject::signalDestroy( GtkObject* pObj, gpointer object )
  {
      GtkSalObject* pThis = (GtkSalObject*)object;
-@@ -224,3 +266,42 @@ void GtkSalObject::SetForwardKey( BOOL bEnable )
+@@ -224,3 +267,44 @@ void GtkSalObject::SetForwardKey( BOOL bEnable )
      else
          gtk_widget_set_events( GTK_WIDGET( m_pSocket ), ~(GDK_KEY_PRESS_MASK | GDK_KEY_RELEASE) & gtk_widget_get_events( GTK_WIDGET( m_pSocket ) ) );
  }
@@ -1198,6 +1439,7 @@ index 1f1d7b5..2289042 100644
 +
 +void GtkSalObject::RemoveFocus()
 +{
++    GTK_YIELD_GRAB();
 +    printf("GtkSalObject::RemoveFocus\n");
 +    GtkSalObject *pGtkSalObject = this;
 +    GtkWidget *socket=GTK_WIDGET(pGtkSalObject->GetSystemData()->pWidget);
@@ -1231,6 +1473,7 @@ index 1f1d7b5..2289042 100644
 +
 +sal_uInt32 GtkSalObject::GetSocketId()
 +{
++    GTK_YIELD_GRAB();
 +    return gtk_socket_get_id(GTK_SOCKET(m_pSocket));
 +}
 diff --git a/vcl/unx/gtk/window/makefile.mk b/vcl/unx/gtk/window/makefile.mk
