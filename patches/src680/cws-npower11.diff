@@ -659,11 +659,46 @@ Index: sc/source/ui/vba/vbarange.cxx
 ===================================================================
 RCS file: /cvs/sc/sc/source/ui/vba/vbarange.cxx,v
 retrieving revision 1.5
-retrieving revision 1.5.34.3
-diff -u -p -u -p -b -w -B -r1.5 -r1.5.34.3
+retrieving revision 1.5.34.5
+diff -u -p -u -p -b -w -B -r1.5 -r1.5.34.5
 --- sc/source/ui/vba/vbarange.cxx	14 Dec 2007 12:41:04 -0000	1.5
-+++ sc/source/ui/vba/vbarange.cxx	15 Feb 2008 13:23:15 -0000	1.5.34.3
-@@ -743,6 +743,7 @@ protected:
++++ sc/source/ui/vba/vbarange.cxx	10 Mar 2008 11:56:40 -0000	1.5.34.5
+@@ -521,6 +521,34 @@ sal_Int32 m_nArea;
+ typedef ::cppu::WeakImplHelper1< container::XEnumeration > CellsEnumeration_BASE;
+ typedef vector< CellPos > vCellPos;
+ 
++// #FIXME - QUICK
++// we could probably could and should modify CellsEnumeration below
++// to handle rows and columns ( but I do this seperately for now 
++// and.. this class only handles singe areas ( does it have to handle
++// multi area ranges?? ) 
++class ColumnsRowEnumeration: public CellsEnumeration_BASE
++{
++	uno::Reference< uno::XComponentContext > mxContext;
++        uno::Reference< excel::XRange > mxRange;
++	sal_Int32 mMaxElems;
++	sal_Int32 mCurElem;
++        
++public:
++	ColumnsRowEnumeration( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< excel::XRange >& xRange, sal_Int32 nElems ) : mxContext( xContext ), mxRange( xRange ), mMaxElems( nElems ), mCurElem( 0 )
++        {
++	}
++
++	virtual ::sal_Bool SAL_CALL hasMoreElements() throw (::uno::RuntimeException){ return mCurElem < mMaxElems; }
++
++	virtual uno::Any SAL_CALL nextElement() throw (container::NoSuchElementException, lang::WrappedTargetException, uno::RuntimeException)
++	{
++		if ( !hasMoreElements() )
++			throw container::NoSuchElementException();
++		sal_Int32 vbaIndex = 1 + mCurElem++; 
++		return uno::makeAny( mxRange->Item( uno::makeAny( vbaIndex ), uno::Any() ) ); 
++	}
++};
++
+ class CellsEnumeration : public CellsEnumeration_BASE
+ {
+ 	uno::Reference< uno::XComponentContext > mxContext;
+@@ -743,6 +771,7 @@ protected:
  	bool processValue( const uno::Any& aValue, const uno::Reference< table::XCell >& xCell )
  	{
  		rtl::OUString sFormula;
@@ -671,7 +706,7 @@ diff -u -p -u -p -b -w -B -r1.5 -r1.5.34.3
  		if ( aValue >>= sFormula )
  		{
  			// get current convention
-@@ -769,6 +770,11 @@ protected:
+@@ -769,6 +798,11 @@ protected:
  			xCell->setFormula( sFormula );
  			return true;
  		}
@@ -683,20 +718,20 @@ diff -u -p -u -p -b -w -B -r1.5 -r1.5.34.3
  		return false;
  	}
  		
-@@ -1154,10 +1160,19 @@ lcl_setupBorders( const uno::Reference< 
+@@ -1154,10 +1188,19 @@ lcl_setupBorders( const uno::Reference< 
  }
  
  ScVbaRange::ScVbaRange( uno::Sequence< uno::Any> const & args,
 -    uno::Reference< uno::XComponentContext> const & xContext )  throw ( lang::IllegalArgumentException ) : ScVbaRange_BASE( getXSomethingFromArgs< vba::XHelperInterface >( args, 0 ), xContext, getXSomethingFromArgs< beans::XPropertySet >( args, 1, false ), getModelFromRange( getXSomethingFromArgs< table::XCellRange >( args, 1 ) ), true ), mbIsRows( sal_False ), mbIsColumns( sal_False )
 +    uno::Reference< uno::XComponentContext> const & xContext )  throw ( lang::IllegalArgumentException ) : ScVbaRange_BASE( getXSomethingFromArgs< vba::XHelperInterface >( args, 0 ), xContext, getXSomethingFromArgs< beans::XPropertySet >( args, 1, false ), getModelFromXIf( getXSomethingFromArgs< uno::XInterface >( args, 1 ) ), true ), mbIsRows( sal_False ), mbIsColumns( sal_False )
-+{
+ {
+-	mxRange.set( mxPropertySet, uno::UNO_QUERY_THROW );
+-	uno::Reference< container::XIndexAccess > xIndex( new SingleRangeIndexAccess( mxContext, mxRange ) );
 +	mxRange.set( mxPropertySet, uno::UNO_QUERY );
 +	mxRanges.set( mxPropertySet, uno::UNO_QUERY );
 +	uno::Reference< container::XIndexAccess >  xIndex;
 +	if ( mxRange.is() )
- {
--	mxRange.set( mxPropertySet, uno::UNO_QUERY_THROW );
--	uno::Reference< container::XIndexAccess > xIndex( new SingleRangeIndexAccess( mxContext, mxRange ) );
++	{
 +		xIndex = new SingleRangeIndexAccess( mxContext, mxRange );
 +	}
 +	else if ( mxRanges.is() )
@@ -706,7 +741,73 @@ diff -u -p -u -p -b -w -B -r1.5 -r1.5.34.3
  	m_Areas = new ScVbaRangeAreas( mxContext, xIndex, mbIsRows, mbIsColumns );
  }
  
-@@ -4739,6 +4754,7 @@ ScVbaRange::SpecialCells( const uno::Any
+@@ -1838,7 +1881,36 @@ ScVbaRange::Cells( const uno::Any &nRowI
+ 	}
+ 
+ 	sal_Int32 nRow = 0, nColumn = 0;
+-	sal_Bool bIsIndex = nRowIndex >>= nRow, bIsColumnIndex = nColumnIndex >>= nColumn;
++
++	sal_Bool bIsIndex = nRowIndex.hasValue();
++	sal_Bool bIsColumnIndex = nColumnIndex.hasValue();
++
++	// Sometimes we might get a float or a double or whatever
++	// set in the Any, we should convert as appropriate
++	// #FIXME - perhaps worth turning this into some sort of
++	// convertion routine e.g. bSuccess = getValueFromAny( nRow, nRowIndex, getCppuType((sal_Int32*)0) )
++	if ( nRowIndex.hasValue() && !( nRowIndex >>= nRow ) )
++	{
++		uno::Reference< script::XTypeConverter > xConverter = getTypeConverter( mxContext );
++		uno::Any aConverted;
++		try
++		{
++			aConverted = xConverter->convertTo( nRowIndex, getCppuType((sal_Int32*)0) );
++			bIsIndex = ( aConverted >>= nRow );
++		}
++		catch( uno::Exception& ) {} // silence any errors
++	}
++	if ( bIsColumnIndex && !( nColumnIndex >>= nColumn ) )
++	{
++		uno::Reference< script::XTypeConverter > xConverter = getTypeConverter( mxContext );
++		uno::Any aConverted;
++		try
++		{
++			aConverted = xConverter->convertTo( nColumnIndex, getCppuType((sal_Int32*)0) );
++			bIsColumnIndex = ( aConverted >>= nColumn );
++		}
++		catch( uno::Exception& ) {} // silence any errors
++	}
+                                                                                                                        
+ 	RangeHelper thisRange( mxRange );
+ 	table::CellRangeAddress thisRangeAddress =  thisRange.getCellRangeAddressable()->getRangeAddress();
+@@ -3121,6 +3193,18 @@ ScVbaRange::hasElements() throw (uno::Ru
+ uno::Reference< container::XEnumeration > SAL_CALL 
+ ScVbaRange::createEnumeration() throw (uno::RuntimeException)
+ {
++	if ( mbIsColumns || mbIsRows )
++	{
++		uno::Reference< table::XColumnRowRange > xColumnRowRange(mxRange, uno::UNO_QUERY );
++		uno::Reference< excel::XRange > xRange( m_Areas->Item( uno::makeAny( sal_Int32(1) ), uno::Any() ), uno::UNO_QUERY_THROW );
++                sal_Int32 nElems = 0;
++		if ( mbIsColumns )	
++			nElems = xColumnRowRange->getColumns()->getCount();
++		else
++			nElems = xColumnRowRange->getRows()->getCount();
++                return new ColumnsRowEnumeration( mxContext, xRange, nElems );
++		
++	}
+ 	return new CellsEnumeration( mxContext, m_Areas );
+ }
+ 
+@@ -4124,7 +4208,7 @@ ScVbaRange::Autofit() throw (uno::Runtim
+ 		// if the range is a not a row or column range autofit will
+ 		// throw an error
+ 
+-		if ( !mbIsColumns  )
++		if ( !( mbIsColumns || mbIsRows ) )
+ 			DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString()); 			
+         ScDocShell* pDocShell = getDocShellFromRange( mxRange );
+         if ( pDocShell )
+@@ -4739,6 +4823,7 @@ ScVbaRange::SpecialCells( const uno::Any
  		case excel::XlCellType::xlCellTypeConstants:
  		case excel::XlCellType::xlCellTypeFormulas:
  		case excel::XlCellType::xlCellTypeVisible:
@@ -1315,47 +1416,47 @@ Index: sc/source/ui/vba/testvba/TestDocuments/AutoFilter.xls
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/AutoFilter.xls
 diff -N sc/source/ui/vba/testvba/TestDocuments/AutoFilter.xls
-Binary files /dev/null and /tmp/cvsJTaOnH differ
+Binary files /dev/null and /tmp/cvsh_aqgX differ
 Index: sc/source/ui/vba/testvba/TestDocuments/MiscRangeTests.xls
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/MiscRangeTests.xls
 diff -N sc/source/ui/vba/testvba/TestDocuments/MiscRangeTests.xls
-Binary files /dev/null and /tmp/cvsKTaOnH differ
+Binary files /dev/null and /tmp/cvsi_aqgX differ
 Index: sc/source/ui/vba/testvba/TestDocuments/Ranges-2.xls
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/Ranges-2.xls
 diff -N sc/source/ui/vba/testvba/TestDocuments/Ranges-2.xls
-Binary files /dev/null and /tmp/cvsLTaOnH differ
+Binary files /dev/null and /tmp/cvsj_aqgX differ
 Index: sc/source/ui/vba/testvba/TestDocuments/Ranges-3.xls
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/Ranges-3.xls
 diff -N sc/source/ui/vba/testvba/TestDocuments/Ranges-3.xls
-Binary files /dev/null and /tmp/cvsMTaOnH differ
+Binary files /dev/null and /tmp/cvsk_aqgX differ
 Index: sc/source/ui/vba/testvba/TestDocuments/Ranges.xls
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/Ranges.xls
 diff -N sc/source/ui/vba/testvba/TestDocuments/Ranges.xls
-Binary files /dev/null and /tmp/cvsNTaOnH differ
+Binary files /dev/null and /tmp/cvsl_aqgX differ
 Index: sc/source/ui/vba/testvba/TestDocuments/Shapes.xls
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/Shapes.xls
 diff -N sc/source/ui/vba/testvba/TestDocuments/Shapes.xls
-Binary files /dev/null and /tmp/cvsOTaOnH differ
+Binary files /dev/null and /tmp/cvsm_aqgX differ
 Index: sc/source/ui/vba/testvba/TestDocuments/TestAddress.xls
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/TestAddress.xls
 diff -N sc/source/ui/vba/testvba/TestDocuments/TestAddress.xls
-Binary files /dev/null and /tmp/cvsPTaOnH differ
+Binary files /dev/null and /tmp/cvsn_aqgX differ
 Index: sc/source/ui/vba/testvba/TestDocuments/TestCalc_Rangetest.xls
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/TestCalc_Rangetest.xls
 diff -N sc/source/ui/vba/testvba/TestDocuments/TestCalc_Rangetest.xls
-Binary files /dev/null and /tmp/cvsQTaOnH differ
+Binary files /dev/null and /tmp/cvso_aqgX differ
 Index: sc/source/ui/vba/testvba/TestDocuments/TestCalc_Rangetest2.xls
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/TestCalc_Rangetest2.xls
 diff -N sc/source/ui/vba/testvba/TestDocuments/TestCalc_Rangetest2.xls
-Binary files /dev/null and /tmp/cvsRTaOnH differ
+Binary files /dev/null and /tmp/cvsp_aqgX differ
 Index: sc/source/ui/vba/testvba/TestDocuments/logs/excel/AutoFilter.log
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/logs/excel/AutoFilter.log
