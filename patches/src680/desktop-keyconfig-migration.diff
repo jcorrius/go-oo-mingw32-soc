@@ -1,0 +1,503 @@
+diff -urp --exclude=CVS --exclude=unxlngi6.pro --exclude=desktop.vpj desktop.clean/source/migration/migration.cxx desktop/source/migration/migration.cxx
+--- desktop.clean/source/migration/migration.cxx	2008-03-07 09:57:38.000000000 -0500
++++ desktop/source/migration/migration.cxx	2008-03-12 00:31:30.000000000 -0400
+@@ -58,6 +58,10 @@
+ #include <com/sun/star/configuration/backend/XSingleLayerStratum.hpp>
+ #include <com/sun/star/util/XRefreshable.hpp>
+ #include <com/sun/star/util/XChangesBatch.hpp>
++#include <com/sun/star/ui/XModuleUIConfigurationManagerSupplier.hpp>
++#include <com/sun/star/ui/XAcceleratorConfiguration.hpp>
++#include <com/sun/star/awt/Key.hpp>
++#include <com/sun/star/awt/KeyEvent.hpp>
+  
+ using namespace rtl;
+ using namespace osl;
+@@ -71,6 +75,8 @@ using namespace com::sun::star::containe
+ using namespace com::sun::star::configuration;
+ using namespace com::sun::star::configuration::backend;
+ 
++#define ascii( asc ) \
++    ::rtl::OUString::intern( RTL_CONSTASCII_USTRINGPARAM( asc ) )
+ 
+ namespace desktop {
+ 
+@@ -133,12 +139,107 @@ OUString MigrationImpl::getOldVersionNam
+     return m_aInfo.productname;
+ }
+ 
+-sal_Bool MigrationImpl::checkMigration()
++static bool splitVersionString(const OUString& rVer, sal_uInt8& rMajor, sal_uInt8& rMinor, sal_uInt8& rMicro)
+ {
+-    if (m_aInfo.userdata.getLength() > 0 && ! checkMigrationCompleted())
++    rMajor = 0;
++    rMinor = 0;
++    rMicro = 0;
++
++    sal_Int32 nLen = rVer.getLength();
++    const sal_Unicode* pStr = rVer.getStr();
++    OUStringBuffer buf;
++    sal_uInt8 nPos = 0; // 0 = major; 1 = minor; 2 = micro
++    for (sal_Int32 i = 0; i < nLen; ++i)
++    {
++        const sal_Unicode c = pStr[i];
++        if (c >= sal_Unicode('0') && c <= sal_Unicode('9'))
++            buf.append(c);
++        else if (c == sal_Unicode('.'))
++        {
++            if (buf.getLength() == 0)
++                // no numbers.
++                return false;
++
++            sal_Int32 nTmp = buf.makeStringAndClear().toInt32();
++            if (nTmp < 0 || nTmp > 255)
++                // only 0 - 255 allowed in a version number.
++                return false;
++
++            switch (nPos)
++            {
++                case 0: rMajor = static_cast<sal_uInt8>(nTmp); break;
++                case 1: rMinor = static_cast<sal_uInt8>(nTmp); break;
++                case 2: rMicro = static_cast<sal_uInt8>(nTmp); break;
++            }
++
++            nPos += 1;
++            if (nPos > 2)
++                return true;
++        }
++        else
++            return false;
++    }
++
++    return true;
++}
++
++static sal_Bool isMigrationNeeded(const OUString& rConfigVer, const OUString& rAppVer)
++{
++    sal_uInt8 nConfMajor, nConfMinor, nConfMicro;
++    sal_uInt8 nAppMajor,  nAppMinor,  nAppMicro;
++    if (!splitVersionString(rConfigVer, nConfMajor, nConfMinor, nConfMicro))
++        return sal_False;
++
++    if (!splitVersionString(rAppVer, nAppMajor, nAppMinor, nAppMicro))
++        return sal_False;
++
++#if 0    
++    fprintf(stdout, "desktop::isMigrationNeeded: config ver = %d.%d.%d\n", 
++            nConfMajor,nConfMinor,nConfMicro);
++
++    fprintf(stdout, "desktop::isMigrationNeeded: app ver = %d.%d.%d\n", 
++            nAppMajor,nAppMinor,nAppMicro);
++#endif    
++
++    if (nConfMajor < nAppMajor)
+         return sal_True;
+-    else
++
++    if (nConfMinor < nAppMinor)
++        return sal_True;
++
++    if (nConfMicro < nAppMicro)
++        return sal_True;
++
++    return sal_False;
++}
++
++sal_Bool MigrationImpl::checkMigration()
++{
++    if (m_bMigrationCompleted)
++        // migration is already complete.
+         return sal_False;
++
++    try
++    {
++        Reference< XPropertySet > aPropSet(getConfigAccess("org.openoffice.Setup/Product"), UNO_QUERY_THROW);
++        Any any = aPropSet->getPropertyValue(ascii("ooSetupVersionAboutBox"));
++        if (!(any >>= m_aAppVersion))
++            // Current version unknown.  Don't do migration (this should not happen).
++            return sal_False;
++
++        aPropSet.set(getConfigAccess("org.openoffice.Setup/Configuration"), UNO_QUERY_THROW);    
++        any = aPropSet->getPropertyValue(ascii("ooLastVersionTouched"));
++        OUString aLastVersion;
++        if (!(any >>= aLastVersion))
++            // last touched version unknown.  Do the migration.
++            return sal_True;
++
++        return isMigrationNeeded(aLastVersion, m_aAppVersion);
++    }
++    catch (const Exception&)
++    {
++    }
++    return sal_True;
+ }
+ 
+ MigrationImpl::MigrationImpl(const Reference< XMultiServiceFactory >& xFactory)
+@@ -148,6 +249,7 @@ MigrationImpl::MigrationImpl(const Refer
+     , m_aInfo(findInstallation())    
+     , m_vrFileList(compileFileList())
+     , m_vrServiceList(compileServiceList())
++    , m_bMigrationCompleted(false)
+ {
+ }
+ 
+@@ -158,28 +260,13 @@ MigrationImpl::~MigrationImpl()
+ 
+ sal_Bool MigrationImpl::doMigration()
+ {
+-    sal_Bool result = sal_False;
+-    try{
+-        copyFiles();
+-
+-		// execute the migration items from Setup.xcu 
+-		// and refresh the cache
+-        copyConfig();
+-		refresh();
+-
+-		// execute custom migration services from Setup.xcu
+-		// and refresh the cache
+-        runServices();            
+-        refresh();
+-		
+-
+-        result = sal_True;
+-    } catch (...)
+-    {
+-        OString aMsg("An unexpected exception was thrown during migration");
+-        aMsg += "\nOldVersion: " + OUStringToOString(m_aInfo.productname, RTL_TEXTENCODING_ASCII_US);
+-        aMsg += "\nDataPath  : " + OUStringToOString(m_aInfo.userdata, RTL_TEXTENCODING_ASCII_US);
+-        OSL_ENSURE(sal_False, aMsg.getStr());
++    try
++    {
++        transKeyConfig();
++    
++    }
++    catch (const Exception&)
++    {
+     }
+ 
+ 	// prevent running the migration multiple times
+@@ -187,43 +274,60 @@ sal_Bool MigrationImpl::doMigration()
+     return sal_False;
+ }
+ 
+-void MigrationImpl::refresh()
++void MigrationImpl::transKeyConfig()
+ {
+-    Reference< XRefreshable > xRefresh(m_xFactory->createInstance(
+-                OUString::createFromAscii("com.sun.star.configuration.ConfigurationProvider")), UNO_QUERY);
+-    if (xRefresh.is())
+-        xRefresh->refresh();
+-    else
+-        OSL_ENSURE(sal_False, "could not get XRefresh interface from default config provider. No refresh done.");    
+-            
++    using namespace ::com::sun::star;
++    using namespace ::com::sun::star::ui;
++
++    Reference< XModuleUIConfigurationManagerSupplier > xModuleCfgSupplier(
++        m_xFactory->createInstance(
++            ascii("com.sun.star.ui.ModuleUIConfigurationManagerSupplier")), UNO_QUERY_THROW);
++
++    // Grab the Calc configuration.
++    Reference< XUIConfigurationManager > xConfigMgr = 
++        xModuleCfgSupplier->getUIConfigurationManager(
++            ascii("com.sun.star.sheet.SpreadsheetDocument"));
++
++    if (!xConfigMgr.is())
++        return;
++
++    Reference< XAcceleratorConfiguration > xScAccel(
++        xConfigMgr->getShortCutManager(), UNO_QUERY_THROW);
++
++    // Backsapce key
++    awt::KeyEvent aBackEv;
++    aBackEv.KeyCode = awt::Key::BACKSPACE;
++    aBackEv.Modifiers = 0;
++    xScAccel->setKeyEvent(aBackEv, ascii(".uno:Delete"));
++
++    // Delete key
++    awt::KeyEvent aDeleteEv;
++    aDeleteEv.KeyCode = awt::Key::DELETE;
++    aDeleteEv.Modifiers = 0;
++    xScAccel->setKeyEvent(aDeleteEv, ascii(".uno:ClearContents"));
++
++    xScAccel->store();
+ }
+ 
+ void MigrationImpl::setMigrationCompleted() 
+ {
+-	try {
+-		Reference< XPropertySet > aPropertySet(getConfigAccess("org.openoffice.Setup/Office", true), UNO_QUERY_THROW);
+-		aPropertySet->setPropertyValue(OUString::createFromAscii("MigrationCompleted"), makeAny(sal_True));
+-		Reference< XChangesBatch >(aPropertySet, UNO_QUERY_THROW)->commitChanges();
+-	} catch (...) {
+-		// fail silently
+-	}
+-}
++	try
++    {
++        Reference< XPropertySet > aPropSet;
++        if (m_aAppVersion.getLength() > 0)
++        {
++            aPropSet.set(getConfigAccess("org.openoffice.Setup/Configuration", true), UNO_QUERY_THROW);
++            aPropSet->setPropertyValue(ascii("ooLastVersionTouched"), makeAny(m_aAppVersion));
++            Reference< XChangesBatch >(aPropSet, UNO_QUERY_THROW)->commitChanges();
++        }
+ 
+-sal_Bool MigrationImpl::checkMigrationCompleted() 
+-{
+-    sal_Bool bMigrationCompleted = sal_False;
+-    try {
+-        Reference< XPropertySet > aPropertySet(
+-            getConfigAccess("org.openoffice.Setup/Office"), UNO_QUERY_THROW);    
+-        aPropertySet->getPropertyValue(
+-            OUString::createFromAscii("MigrationCompleted")) >>= bMigrationCompleted;
+-    } catch (Exception&) {
+-        // just return false...
+-    }
+-    return bMigrationCompleted;
++        m_bMigrationCompleted = true;
++	} 
++    catch (const Exception&)
++    {
++	}
+ }
+ 
+-
+ migrations_vr MigrationImpl::readMigrationSteps()
+ {
+ 
+@@ -442,82 +546,6 @@ strings_vr MigrationImpl::compileFileLis
+     return vrResult;
+ }
+ 
+-
+-void MigrationImpl::copyConfig()
+-{
+-    try {
+-        // 1. get a list of all components from hierachy browser
+-        Reference< XJob > xBrowser(m_xFactory->createInstance(
+-            OUString::createFromAscii("com.sun.star.configuration.backend.LocalHierarchyBrowser")), UNO_QUERY_THROW);
+-
+-        Sequence< NamedValue > seqArgs(2);
+-        seqArgs[0] = NamedValue(
+-            OUString::createFromAscii("LayerDataUrl"),
+-            makeAny(m_aInfo.userdata + OUString::createFromAscii("/user/registry")));
+-        seqArgs[1] = NamedValue(
+-            OUString::createFromAscii("FetchComponentNames"),
+-            makeAny(sal_True));
+-
+-        // execute the search
+-        Any aResult = xBrowser->execute(seqArgs);
+-        Sequence< OUString > seqComponents;
+-        aResult >>= seqComponents;
+-        OSL_ENSURE(seqComponents.getLength()>0, "MigrationImpl::copyConfig(): no config components available");
+-                    
+-        // 2. create an importer 
+-        Reference< XJob > xImporter(m_xFactory->createInstance(
+-            OUString::createFromAscii("com.sun.star.configuration.backend.LocalDataImporter")), UNO_QUERY_THROW);
+-
+-        // 3. for each migration step...
+-        Sequence< NamedValue > importerArgs(3);
+-        importerArgs[0] = NamedValue(
+-            OUString::createFromAscii("LayerDataUrl"),
+-            makeAny(m_aInfo.userdata + OUString::createFromAscii("/user/registry")));
+-        importerArgs[1] = NamedValue(
+-            OUString::createFromAscii("LayerFilter"),
+-            Any());        
+-        importerArgs[2] = NamedValue(
+-            OUString::createFromAscii("Component"),
+-            Any());        
+-
+-        migrations_v::const_iterator i_mig = m_vrMigrations->begin();
+-        while (i_mig != m_vrMigrations->end())
+-        {
+-            //   a. create config filter for step            
+-            Reference< XInitialization > xFilter(
+-                new CConfigFilter(&(i_mig->includeConfig), &(i_mig->excludeConfig)));
+-            importerArgs[1].Value = makeAny(xFilter);
+-
+-            //   b. run each importer with config filter
+-            for (sal_Int32 i=0; i<seqComponents.getLength(); i++)
+-            {
+-                OUString component = seqComponents[i];
+-                importerArgs[2].Value = makeAny(seqComponents[i]);                
+-                try {
+-                    aResult = xImporter->execute(importerArgs);
+-                    Exception myException;
+-                    if (aResult >>= myException) throw myException;
+-                } catch(Exception& aException) {
+-                    OString aMsg("Exception in config layer import.\ncomponent: ");
+-                    aMsg += OUStringToOString(seqComponents[i], RTL_TEXTENCODING_ASCII_US);
+-                    aMsg += "\nmessage: ";
+-                    aMsg += OUStringToOString(aException.Message, RTL_TEXTENCODING_ASCII_US);
+-                    OSL_ENSURE(sal_False, aMsg.getStr());
+-                }
+-            }
+-            i_mig++;
+-        }
+-    }
+-    catch (Exception& e)
+-    {
+-        OString aMsg("Exception in config layer import.\nmessage: ");
+-        aMsg += OUStringToOString(e.Message, RTL_TEXTENCODING_ASCII_US);
+-        OSL_ENSURE(sal_False, aMsg.getStr());            
+-    }    
+-
+-
+-}
+-
+ // removes elements of vector 2 in vector 1
+ void MigrationImpl::substract(strings_v& va, const strings_v& vb_c) const
+ {
+@@ -597,123 +625,6 @@ static FileBase::RC _checkAndCreateDirec
+         return result;
+ }       
+ 
+-void MigrationImpl::copyFiles()
+-{
+-    strings_v::const_iterator i_file = m_vrFileList->begin();
+-    OUString localName;
+-    OUString destName;
+-    OUString userInstall;
+-    utl::Bootstrap::PathStatus aStatus;
+-    aStatus = utl::Bootstrap::locateUserInstallation(userInstall);
+-    if (aStatus == utl::Bootstrap::PATH_EXISTS)
+-    {
+-        while (i_file != m_vrFileList->end())
+-        {
+-            
+-            // remove installation prefix from file
+-            localName = i_file->copy(m_aInfo.userdata.getLength());
+-            destName = userInstall + localName;
+-            INetURLObject aURL(destName);
+-            // check whether destination directory exists
+-            aURL.removeSegment();
+-            _checkAndCreateDirectory(aURL);            
+-            FileBase::RC copyResult = File::copy(*i_file, destName);
+-            if (copyResult != FileBase::E_None)
+-            {
+-                OString msg("Cannot copy ");
+-                msg += OUStringToOString(*i_file, RTL_TEXTENCODING_UTF8) + " to "
+-                    +  OUStringToOString(destName, RTL_TEXTENCODING_UTF8);
+-                OSL_ENSURE(sal_False, msg.getStr());
+-            }
+-            i_file++;
+-        }
+-    } 
+-    else
+-    {
+-        OSL_ENSURE(sal_False, "copyFiles: UserInstall does not exist");
+-    }
+-}
+-
+-void MigrationImpl::runServices()
+-{
+-    
+-    //create stratum for old user layer
+-    OUString aOldLayerURL = m_aInfo.userdata;
+-    aOldLayerURL += OUString::createFromAscii("/user/registry");
+-    OUString aStratumSvc = OUString::createFromAscii("com.sun.star.configuration.backend.LocalSingleStratum");
+-    Sequence< Any > stratumArgs(1);
+-    stratumArgs[0] = makeAny(aOldLayerURL);
+-    Reference< XSingleLayerStratum> xStartum( m_xFactory->createInstanceWithArguments(
+-        aStratumSvc, stratumArgs), UNO_QUERY);   
+-
+-    // Build argument array
+-    Sequence< Any > seqArguments(3);
+-    seqArguments[0] = makeAny(NamedValue(
+-        OUString::createFromAscii("Productname"),
+-        makeAny(m_aInfo.productname)));
+-    seqArguments[1] = makeAny(NamedValue(
+-        OUString::createFromAscii("UserData"),
+-        makeAny(m_aInfo.userdata)));
+-
+-
+-    // create an instance of every migration service
+-    // and execute the migration job
+-    Reference< XJob > xMigrationJob;
+-
+-    migrations_v::const_iterator i_mig  = m_vrMigrations->begin();    
+-    while (i_mig != m_vrMigrations->end())
+-    {
+-        if( i_mig->service.getLength() > 0)
+-        {
+-            
+-            try
+-            {
+-                // create access to old configuration components in the user layer
+-                // that were requested by the migration service
+-                Sequence< NamedValue > seqComponents(i_mig->configComponents.size());
+-                strings_v::const_iterator i_comp = i_mig->configComponents.begin();
+-                sal_Int32 i = 0;
+-                while (i_comp != i_mig->configComponents.end() && xStartum.is())
+-                {
+-                    // create Layer for i_comp
+-                    seqComponents[i] =  NamedValue(
+-                        *i_comp, makeAny(xStartum->getLayer(*i_comp, OUString())));
+-
+-                    // next component
+-                    i_comp++;
+-                    i++;
+-                }
+-                // set old config argument
+-                seqArguments[2] = makeAny(NamedValue(
+-                    OUString::createFromAscii("OldConfiguration"),
+-                    makeAny(seqComponents)));
+-
+-                xMigrationJob = Reference< XJob >(m_xFactory->createInstanceWithArguments(
+-                    i_mig->service, seqArguments), UNO_QUERY_THROW);
+-
+-                xMigrationJob->execute(Sequence< NamedValue >());
+-
+-
+-            } catch (Exception& e)
+-            {
+-                OString aMsg("Execution of migration service failed (Exception caught).\nService: ");
+-                aMsg += OUStringToOString(i_mig->service, RTL_TEXTENCODING_ASCII_US) + "\nMessage: ";
+-                aMsg += OUStringToOString(e.Message, RTL_TEXTENCODING_ASCII_US);
+-                OSL_ENSURE(sal_False, aMsg.getStr());
+-            } catch (...)
+-            {
+-                OString aMsg("Execution of migration service failed (Exception caught).\nService: ");
+-                aMsg += OUStringToOString(i_mig->service, RTL_TEXTENCODING_ASCII_US) + 
+-					"\nNo message available";
+-                OSL_ENSURE(sal_False, aMsg.getStr());
+-            }
+-
+-        }
+-        i_mig++;
+-    }
+-}
+-
+-
+ strings_vr MigrationImpl::compileServiceList()
+ {
+     strings_vr vrResult(new strings_v);
+diff -urp --exclude=CVS --exclude=unxlngi6.pro --exclude=desktop.vpj desktop.clean/source/migration/migration_impl.hxx desktop/source/migration/migration_impl.hxx
+--- desktop.clean/source/migration/migration_impl.hxx	2008-03-07 09:57:38.000000000 -0500
++++ desktop/source/migration/migration_impl.hxx	2008-03-12 00:30:29.000000000 -0400
+@@ -90,6 +90,8 @@ private:
+     strings_vr m_vrFileList;      // final list of files to be copied
+     strings_vr m_vrConfigList;    // final list of nodes to be copied
+     strings_vr m_vrServiceList;   // final list of services to be called
++    ::rtl::OUString m_aAppVersion;
++    bool m_bMigrationCompleted;
+ 
+     // initializer functions...
+     migrations_vr readMigrationSteps();
+@@ -104,14 +106,9 @@ private:
+     strings_vr applyPatterns(const strings_v& vSet, const strings_v& vPatterns) const;
+     NS_UNO::Reference< NS_CSS::container::XNameAccess > getConfigAccess(const sal_Char* path, sal_Bool rw=sal_False);
+ 
+-    // actual processing function that perform the migration steps
+-    void copyFiles();
+-    void copyConfig();
+-    void runServices();
+-    void refresh();
++    void transKeyConfig();
+ 
+     void setMigrationCompleted();
+-    sal_Bool checkMigrationCompleted();
+     
+ public:
+     MigrationImpl(const NS_UNO::Reference< NS_CSS::lang::XMultiServiceFactory >&);
