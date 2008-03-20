@@ -1,3 +1,30 @@
+Index: sc/source/ui/inc/gridwin.hxx
+===================================================================
+RCS file: /cvs/sc/sc/source/ui/inc/gridwin.hxx,v
+retrieving revision 1.27
+diff -u -p -r1.27 gridwin.hxx
+--- sc/source/ui/inc/gridwin.hxx	21 Sep 2007 09:23:22 -0000	1.27
++++ sc/source/ui/inc/gridwin.hxx	20 Mar 2008 20:22:07 -0000
+@@ -164,6 +164,7 @@ private:
+ 	// #114409#
+ 	::sdr::overlay::OverlayObjectList*				mpOOCursors;
+     ::sdr::overlay::OverlayObjectList*              mpOOSelection;
++    ::sdr::overlay::OverlayObjectList*              mpOOSelectionBorder;
+     ::sdr::overlay::OverlayObjectList*              mpOOAutoFill;
+     ::sdr::overlay::OverlayObjectList*              mpOODragRect;
+     ::sdr::overlay::OverlayObjectList*              mpOOHeader;
+@@ -331,6 +332,11 @@ private:
+ 	void			SelectForContextMenu( const Point& rPosPixel );
+ 
+     void            GetSelectionRects( ::std::vector< Rectangle >& rPixelRects );
++    void            ConvertPixelRectsToRangeVector( 
++                        const ::std::vector< Rectangle >& rPixelRects, 
++                        sdr::overlay::OverlayObjectCell::RangeVector& rRanges,
++                        const MapMode& rDrawMode );
++    void            UpdateCopySourceOverlay(const MapMode& rDrawMode);
+ 
+ protected:
+     using Window::Resize;
 Index: sc/source/ui/view/gridwin.cxx
 ===================================================================
 RCS file: /cvs/sc/sc/source/ui/view/gridwin.cxx,v
@@ -5,27 +32,48 @@ retrieving revision 1.88
 diff -u -p -r1.88 gridwin.cxx
 --- sc/source/ui/view/gridwin.cxx	12 Dec 2007 13:21:19 -0000	1.88
 +++ sc/source/ui/view/gridwin.cxx	20 Mar 2008 02:45:50 -0000
-@@ -5028,6 +5131,59 @@ void ScGridWindow::DeleteCursorOverlay()
+@@ -5028,6 +5138,79 @@ void ScGridWindow::UpdateAllOverlays()
+ void ScGridWindow::DeleteCursorOverlay()
+ {
      DELETEZ( mpOOCursors );
- }
- 
-+static void AddCopySelection( std::vector<Rectangle>& rPixelRects, ScDocument* pClipDoc, 
-+    ScViewData* pViewData, ScSplitPos eWhich )
-+{
-+    if( !pClipDoc || !pViewData->IsPasteMode())
-+        return;
++    DELETEZ( mpOOSelectionBorder );
++}
 +
-+    SCCOL nX = pViewData->GetCurX();
-+    SCROW nY = pViewData->GetCurY();
++void ScGridWindow::ConvertPixelRectsToRangeVector( const ::std::vector< Rectangle >& rPixelRects, 
++        sdr::overlay::OverlayObjectCell::RangeVector& rRanges,
++        const MapMode& rDrawMode )
++{
++    std::vector<Rectangle>::const_iterator aPixelEnd( rPixelRects.end() );
++    for ( std::vector<Rectangle>::const_iterator aPixelIter( rPixelRects.begin() );
++          aPixelIter != aPixelEnd; ++aPixelIter )
++    {
++        Rectangle aLogic( PixelToLogic( *aPixelIter, rDrawMode ) );
++
++        const basegfx::B2DPoint aTopLeft(aLogic.Left(), aLogic.Top());
++        const basegfx::B2DPoint aBottomRight(aLogic.Right(), aLogic.Bottom());
++        const basegfx::B2DRange a2DRange(aTopLeft, aBottomRight);
++
++        rRanges.push_back( a2DRange );
++    }
++}
++
++void ScGridWindow::UpdateCopySourceOverlay( const MapMode& rDrawMode )
++{
++    if (!pViewData->IsPasteMode())
++        return;
++    ::sdr::overlay::OverlayManager* pOverlayManager = getOverlayManager();
++    if (!pOverlayManager)
++        return;
++    ScTransferObj* pTransObj = ScTransferObj::GetOwnClipboard( pViewData->GetActiveWin() );
++    if (!pTransObj)
++        return;
++    ScDocument* pClipDoc = pTransObj->GetDocument();
++    if (!pClipDoc)
++        return;
 +
 +    SCCOL nClipStartX;
 +    SCROW nClipStartY;
 +    pClipDoc->GetClipStart( nClipStartX, nClipStartY );
-+
-+    // we don't want to "draw-over" the actual cursor, as this causes the
-+    // cursor to disappear.
-+    if (nX == nClipStartX && nY == nClipStartY)
-+        return;
 +
 +    SCCOL nClipAreaX;
 +    SCROW nClipAreaY;
@@ -43,38 +91,96 @@ diff -u -p -r1.88 gridwin.cxx
 +
 +    Rectangle aRect( aClipStartScrPos, Size( nSizeXPix + 3, nSizeYPix + 3 ) );
 +
-+    // cursor borders XOR wth each other -- if a border is drawn over the same
-+    // area twice, no border is drawn.  Consequently, we can't draw a border
-+    // around the copy selection of the cursor is next to the copied cell(s),
-+    // otherwise we'll get a "missing" border.
++    std::vector<Rectangle> aPixelRects;
 +
-+    // left edge
-+    if (!(nY == nClipStartY && nX == nClipStartX-1))
-+        rPixelRects.push_back(Rectangle( aRect.Left(), aRect.Top(), aRect.Left()+2, aRect.Bottom() ));
-+    // right edge
-+    if (!(nY == nClipStartY && nX == nClipStartX+1))
-+        rPixelRects.push_back(Rectangle( aRect.Right()-2, aRect.Top(), aRect.Right(), aRect.Bottom() ));
-+    // top edge
-+    if (!(nX == nClipStartX && nY == nClipStartY-1))
-+        rPixelRects.push_back(Rectangle( aRect.Left()+3, aRect.Top(), aRect.Right()-3, aRect.Top()+2 ));
-+    // bottom edge
-+    if (!(nX == nClipStartX && nY == nClipStartY+1))
-+        rPixelRects.push_back(Rectangle( aRect.Left()+3, aRect.Bottom()-2, aRect.Right()-3, aRect.Bottom() ));
-+}
++    aPixelRects.push_back(Rectangle( aRect.Left(), aRect.Top(), aRect.Left()+2, aRect.Bottom() ));
++    aPixelRects.push_back(Rectangle( aRect.Right()-2, aRect.Top(), aRect.Right(), aRect.Bottom() ));
++    aPixelRects.push_back(Rectangle( aRect.Left()+3, aRect.Top(), aRect.Right()-3, aRect.Top()+2 ));
++    aPixelRects.push_back(Rectangle( aRect.Left()+3, aRect.Bottom()-2, aRect.Right()-3, aRect.Bottom() ));
 +
- void ScGridWindow::UpdateCursorOverlay()
- {
-     MapMode aDrawMode = GetDrawMapMode();
-@@ -5042,6 +5198,12 @@ void ScGridWindow::UpdateCursorOverlay()
++    sdr::overlay::OverlayObjectCell::RangeVector aRanges;
++    ConvertPixelRectsToRangeVector( aPixelRects, aRanges, rDrawMode );
++
++    ScOverlayType eType = SC_OVERLAY_TRANSPARENT;
++
++    Color aHighlight = GetSettings().GetStyleSettings().GetHighlightColor();
++    sdr::overlay::OverlayObjectCell* pOverlay = new sdr::overlay::OverlayObjectCell( eType, aHighlight, aRanges );
++
++    pOverlayManager->add(*pOverlay);
++    mpOOSelectionBorder = new ::sdr::overlay::OverlayObjectList;
++    mpOOSelectionBorder->append(*pOverlay);
+ }
  
+ void ScGridWindow::UpdateCursorOverlay()
+@@ -5042,6 +5225,8 @@ void ScGridWindow::UpdateCursorOverlay()
+ 
+     DeleteCursorOverlay();
+ 
++    UpdateCopySourceOverlay( aDrawMode );
++
      std::vector<Rectangle> aPixelRects;
  
-+    ScTransferObj* pTransObj = ScTransferObj::GetOwnClipboard( pViewData->GetActiveWin() );
-+    if (pTransObj)
-+    {
-+        AddCopySelection( aPixelRects, pTransObj->GetDocument(), pViewData, eWhich );
-+    }
-+
      //
-     //  determine the cursor rectangles in pixels (moved from ScGridWindow::DrawCursor)
-     //
+@@ -5126,19 +5311,7 @@ void ScGridWindow::UpdateCursorOverlay()
+     if ( aPixelRects.size() )
+     {
+         sdr::overlay::OverlayObjectCell::RangeVector aRanges;
+-
+-        std::vector<Rectangle>::const_iterator aPixelEnd( aPixelRects.end() );
+-        for ( std::vector<Rectangle>::const_iterator aPixelIter( aPixelRects.begin() );
+-              aPixelIter != aPixelEnd; ++aPixelIter )
+-        {
+-            Rectangle aLogic( PixelToLogic( *aPixelIter, aDrawMode ) );
+-
+-            const basegfx::B2DPoint aTopLeft(aLogic.Left(), aLogic.Top());
+-            const basegfx::B2DPoint aBottomRight(aLogic.Right(), aLogic.Bottom());
+-            const basegfx::B2DRange a2DRange(aTopLeft, aBottomRight);
+-
+-            aRanges.push_back( a2DRange );
+-        }
++        ConvertPixelRectsToRangeVector( aPixelRects, aRanges, aDrawMode );
+ 
+ 		// #i70788# get the OverlayManager safely
+ 		::sdr::overlay::OverlayManager* pOverlayManager = getOverlayManager();
+@@ -5182,19 +5355,7 @@ void ScGridWindow::UpdateSelectionOverla
+     if ( aPixelRects.size() && pViewData->IsActive() )
+     {
+         sdr::overlay::OverlayObjectCell::RangeVector aRanges;
+-
+-        std::vector<Rectangle>::const_iterator aPixelEnd( aPixelRects.end() );
+-        for ( std::vector<Rectangle>::const_iterator aPixelIter( aPixelRects.begin() );
+-              aPixelIter != aPixelEnd; ++aPixelIter )
+-        {
+-            Rectangle aLogic( PixelToLogic( *aPixelIter, aDrawMode ) );
+-
+-            const basegfx::B2DPoint aTopLeft(aLogic.Left(), aLogic.Top());
+-            const basegfx::B2DPoint aBottomRight(aLogic.Right(), aLogic.Bottom());
+-            const basegfx::B2DRange a2DRange(aTopLeft, aBottomRight);
+-
+-            aRanges.push_back( a2DRange );
+-        }
++        ConvertPixelRectsToRangeVector( aPixelRects, aRanges, aDrawMode );
+ 
+ 		// #i70788# get the OverlayManager safely
+ 		::sdr::overlay::OverlayManager* pOverlayManager = getOverlayManager();
+@@ -5400,19 +5561,7 @@ void ScGridWindow::UpdateDragRectOverlay
+         //
+ 
+         sdr::overlay::OverlayObjectCell::RangeVector aRanges;
+-
+-        std::vector<Rectangle>::const_iterator aPixelEnd( aPixelRects.end() );
+-        for ( std::vector<Rectangle>::const_iterator aPixelIter( aPixelRects.begin() );
+-              aPixelIter != aPixelEnd; ++aPixelIter )
+-        {
+-            Rectangle aLogic( PixelToLogic( *aPixelIter, aDrawMode ) );
+-
+-            const basegfx::B2DPoint aTopLeft(aLogic.Left(), aLogic.Top());
+-            const basegfx::B2DPoint aBottomRight(aLogic.Right(), aLogic.Bottom());
+-            const basegfx::B2DRange a2DRange(aTopLeft, aBottomRight);
+-
+-            aRanges.push_back( a2DRange );
+-        }
++        ConvertPixelRectsToRangeVector( aPixelRects, aRanges, aDrawMode );
+ 
+ 		// #i70788# get the OverlayManager safely
+ 		::sdr::overlay::OverlayManager* pOverlayManager = getOverlayManager();
