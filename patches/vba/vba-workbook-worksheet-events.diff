@@ -1,22 +1,160 @@
-diff -rup /data4/sles/ooo-build-m180/ooo-build/build/ood680-m1/sc/source/ui/docshell/docsh.cxx sc/source/ui/docshell/docsh.cxx
---- /data4/sles/ooo-build-m180/ooo-build/build/ood680-m1/sc/source/ui/docshell/docsh.cxx	2006-07-21 14:37:27.000000000 +0100
-+++ sc/source/ui/docshell/docsh.cxx	2006-09-06 18:21:59.000000000 +0100
-@@ -148,6 +148,11 @@
- #include <rtl/logfile.hxx>
- #endif
+diff -uNrp backup/sc/source/ui/docshell/docsh.cxx sc/source/ui/docshell/docsh.cxx
+--- backup/sc/source/ui/docshell/docsh.cxx	2008-03-25 22:04:43.000000000 +0800
++++ sc/source/ui/docshell/docsh.cxx	2008-03-25 20:53:51.000000000 +0800
+@@ -150,6 +150,8 @@
  
+ using namespace com::sun::star;
+ 
++bool processDocOpenMacro( ScDocShell* pShell );
++bool processDocBeforeCloseMacro( ScDocShell* pShell );
+ // STATIC DATA -----------------------------------------------------------
+ 
+ //	Stream-Namen im Storage
+@@ -688,7 +690,6 @@ BOOL ScDocShell::SaveXML( SfxMedium* pSa
+ BOOL __EXPORT ScDocShell::Load( SfxMedium& rMedium )
+ {
+ 	RTL_LOGFILE_CONTEXT_AUTHOR ( aLog, "sc", "nn93723", "ScDocShell::Load" );
+-
+ 	ScRefreshTimerProtector( aDocument.GetRefreshTimerControlAddress() );
+ 
+ 	//	only the latin script language is loaded
+@@ -731,6 +732,10 @@ BOOL __EXPORT ScDocShell::Load( SfxMediu
+ 		aDocument.InvalidateTableArea();
+ 
+ 	bIsEmpty = FALSE;
++
++	// Handler for open workbook event
++	processDocOpenMacro( this );
++
+ 	FinishedLoading( SFX_LOADED_MAINDOCUMENT | SFX_LOADED_IMAGES );
+ 	return bRet;
+ }
+@@ -812,7 +817,7 @@ BOOL __EXPORT ScDocShell::ConvertFrom( S
+ 	ScRefreshTimerProtector( aDocument.GetRefreshTimerControlAddress() );
+ 
+ 	GetUndoManager()->Clear();
+-
++	
+ 	// ob nach dem Import optimale Spaltenbreiten gesetzt werden sollen
+ 	BOOL bSetColWidths = FALSE;
+ 	BOOL bSetSimpleTextColWidths = FALSE;
+@@ -833,6 +838,7 @@ BOOL __EXPORT ScDocShell::ConvertFrom( S
+     nCanUpdate = pUpdateDocItem ? pUpdateDocItem->GetValue() : com::sun::star::document::UpdateDocMode::NO_UPDATE;
+ 
+     const SfxFilter* pFilter = rMedium.GetFilter();
++						
+ 	if (pFilter)
+ 	{
+ 		String aFltName = pFilter->GetFilterName();
+@@ -1257,6 +1263,10 @@ BOOL __EXPORT ScDocShell::ConvertFrom( S
+ 		if ( bSetRowHeights )
+ 			UpdateAllRowHeights();		// with vdev or printer, depending on configuration
+ 	}
++
++	// Handler for open workbook event
++	processDocOpenMacro( this );
++
+ 	FinishedLoading( SFX_LOADED_MAINDOCUMENT | SFX_LOADED_IMAGES );
+ 
+ 	// #73762# invalidate eventually temporary table areas
+@@ -2033,7 +2043,6 @@ BOOL __EXPORT ScDocShell::SaveCompleted(
+     return SfxObjectShell::SaveCompleted( xStor );
+ }
+ 
+-
+ BOOL __EXPORT ScDocShell::DoSaveCompleted( SfxMedium * pNewStor )
+ {
+ 	BOOL bRet = SfxObjectShell::DoSaveCompleted( pNewStor );
+@@ -2070,6 +2079,11 @@ USHORT __EXPORT ScDocShell::PrepareClose
+ 
+ 	DoEnterHandler();
+ 
++	// start handler for possible veto from DocBefore_Close
++	if ( !IsInPrepareClose() && processDocBeforeCloseMacro( this ) )
++		return sal_False;
++	// end handler code
++
+ 	USHORT nRet = SfxObjectShell::PrepareClose( bUI, bForBrowsing );
+ 	if (nRet == TRUE)						// TRUE = schliessen
+ 		aDocument.DisableIdle(TRUE);		// nicht mehr drin rumpfuschen !!!
+diff -uNrp backup/sc/source/ui/docshell/makefile.mk sc/source/ui/docshell/makefile.mk
+--- backup/sc/source/ui/docshell/makefile.mk	2008-03-25 10:12:40.000000000 +0800
++++ sc/source/ui/docshell/makefile.mk	2008-03-25 20:58:46.000000000 +0800
+@@ -101,10 +101,12 @@ SLOFILES =  \
+         $(SLO)$/hiranges.obj \
+         $(SLO)$/pntlock.obj \
+         $(SLO)$/sizedev.obj \
++        $(SLO)$/vbaevents.obj \
+         $(SLO)$/editable.obj
+ 
+ 
+ EXCEPTIONSFILES= \
++        $(SLO)$/vbaevents.obj	\
+         $(SLO)$/docsh8.obj \
+         $(SLO)$/dbdocimp.obj
+ 
+@@ -135,6 +137,7 @@ LIB1OBJFILES =  \
+         $(SLO)$/hiranges.obj \
+         $(SLO)$/pntlock.obj \
+         $(SLO)$/sizedev.obj \
++        $(SLO)$/vbaevents.obj \
+         $(SLO)$/editable.obj
+ 
+ # --- Tagets -------------------------------------------------------
+diff -uNrp backup/sc/source/ui/docshell/vbaevents.cxx sc/source/ui/docshell/vbaevents.cxx
+--- backup/sc/source/ui/docshell/vbaevents.cxx	1970-01-01 08:00:00.000000000 +0800
++++ sc/source/ui/docshell/vbaevents.cxx	2008-03-25 20:51:55.000000000 +0800
+@@ -0,0 +1,419 @@
++/*************************************************************************
++ *
++ *  OpenOffice.org - a multi-platform office productivity suite
++ *
++ *  $RCSfile: vbaevents.cxx,v $
++ *
++ *  $Revision$
++ *
++ *  last change: $Author$ $Date$
++ *
++ *  The Contents of this file are made available subject to
++ *  the terms of GNU Lesser General Public License Version 2.1.
++ *
++ *
++ *    GNU Lesser General Public License Version 2.1
++ *    =============================================
++ *    Copyright 2005 by Sun Microsystems, Inc.
++ *    901 San Antonio Road, Palo Alto, CA 94303, USA
++ *
++ *    This library is free software; you can redistribute it and/or
++ *    modify it under the terms of the GNU Lesser General Public
++ *    License version 2.1, as published by the Free Software Foundation.
++ *
++ *    This library is distributed in the hope that it will be useful,
++ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ *    Lesser General Public License for more details.
++ *
++ *    You should have received a copy of the GNU Lesser General Public
++ *    License along with this library; if not, write to the Free Software
++ *    Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ *    MA  02111-1307  USA
++ *
++ ************************************************************************/
++#include "docsh.hxx"
 +#include <basic/basmgr.hxx>
 +#include <basic/sbmod.hxx>
 +#include <basic/sbmeth.hxx>
 +#include <basic/sbx.hxx>
 +#include "scextopt.hxx"
- using namespace com::sun::star;
- 
- // STATIC DATA -----------------------------------------------------------
-@@ -190,6 +195,205 @@ static const sal_Char __FAR_DATA pFilter
- #define ScDocShell
- #include "scslots.hxx"
- 
++#include <comphelper/processfactory.hxx>
++#ifndef _COM_SUN_STAR_SHEET_XSHEETCELLRANGECONTAINER_HPP_
++#include <com/sun/star/sheet/XSheetCellRangeContainer.hpp>
++#endif
++#include <com/sun/star/document/XEventsSupplier.hpp>
++#ifndef _COM_SUN_STAR_SHEET_XCELLRANGEREFERRER_HPP_
++#include <com/sun/star/sheet/XCellRangeReferrer.hpp>
++#endif
++using namespace com::sun::star;
++
 +const static String sLibrary( RTL_CONSTASCII_USTRINGPARAM("Standard"));
 +const static String sModule( RTL_CONSTASCII_USTRINGPARAM("ThisWorkbook"));
 +
@@ -216,161 +354,6 @@ diff -rup /data4/sles/ooo-build-m180/ooo-build/build/ood680-m1/sc/source/ui/docs
 +	return result;
 +}
 +
- 
- SFX_IMPL_INTERFACE(ScDocShell,SfxObjectShell, ScResId(SCSTR_DOCSHELL))
- {
-@@ -682,7 +866,6 @@ BOOL ScDocShell::SaveXML( SfxMedium* pMe
- BOOL __EXPORT ScDocShell::Load( SfxMedium& rMedium )
- {
- 	RTL_LOGFILE_CONTEXT_AUTHOR ( aLog, "sc", "nn93723", "ScDocShell::Load" );
--
- 	ScRefreshTimerProtector( aDocument.GetRefreshTimerControlAddress() );
- 
- 	//	only the latin script language is loaded
-@@ -725,6 +908,10 @@ BOOL __EXPORT ScDocShell::Load( SfxMediu
- 		aDocument.InvalidateTableArea();
- 
- 	bIsEmpty = FALSE;
-+
-+	// Handler for open workbook event
-+	processDocOpenMacro( this );
-+
- 	FinishedLoading( SFX_LOADED_MAINDOCUMENT | SFX_LOADED_IMAGES );
- 	return bRet;
- }
-@@ -807,7 +994,7 @@ BOOL __EXPORT ScDocShell::ConvertFrom( S
- 	ScRefreshTimerProtector( aDocument.GetRefreshTimerControlAddress() );
- 
- 	GetUndoManager()->Clear();
--
-+	
- 	// ob nach dem Import optimale Spaltenbreiten gesetzt werden sollen
- 	BOOL bSetColWidths = FALSE;
- 	BOOL bSetSimpleTextColWidths = FALSE;
-@@ -828,6 +1015,7 @@ BOOL __EXPORT ScDocShell::ConvertFrom( S
-     nCanUpdate = pUpdateDocItem ? pUpdateDocItem->GetValue() : com::sun::star::document::UpdateDocMode::NO_UPDATE;
- 
-     const SfxFilter* pFilter = rMedium.GetFilter();
-+						
- 	if (pFilter)
- 	{
- 		String aFltName = pFilter->GetFilterName();
-@@ -1242,6 +1430,10 @@ BOOL __EXPORT ScDocShell::ConvertFrom( S
- 		if ( bSetRowHeights )
- 			UpdateAllRowHeights();		// with vdev or printer, depending on configuration
- 	}
-+
-+	// Handler for open workbook event
-+	processDocOpenMacro( this );
-+
- 	FinishedLoading( SFX_LOADED_MAINDOCUMENT | SFX_LOADED_IMAGES );
- 
- 	// #73762# invalidate eventually temporary table areas
-@@ -2016,7 +2208,6 @@ BOOL __EXPORT ScDocShell::SaveCompleted(
-     return SfxObjectShell::SaveCompleted( xStor );
- }
- 
--
- BOOL __EXPORT ScDocShell::DoSaveCompleted( SfxMedium * pNewStor )
- {
- 	BOOL bRet = SfxObjectShell::DoSaveCompleted( pNewStor );
-@@ -2053,6 +2244,11 @@ USHORT __EXPORT ScDocShell::PrepareClose
- 
- 	DoEnterHandler();
- 
-+	// start handler for possible veto from DocBefore_Close
-+	if ( !IsInPrepareClose() && processDocBeforeCloseMacro( this ) )
-+		return sal_False;
-+	// end handler code
-+
- 	USHORT nRet = SfxObjectShell::PrepareClose( bUI, bForBrowsing );
- 	if (nRet == TRUE)						// TRUE = schliessen
- 		aDocument.DisableIdle(TRUE);		// nicht mehr drin rumpfuschen !!!
-diff -rup /data4/sles/ooo-build-m180/ooo-build/build/ood680-m1/sc/source/ui/view/tabview5.cxx sc/source/ui/view/tabview5.cxx
---- /data4/sles/ooo-build-m180/ooo-build/build/ood680-m1/sc/source/ui/view/tabview5.cxx	2006-07-21 16:10:17.000000000 +0100
-+++ sc/source/ui/view/tabview5.cxx	2006-09-08 13:59:24.000000000 +0100
-@@ -70,6 +70,7 @@
- #include "seltrans.hxx"
- #include "scmod.hxx"
- #include "AccessibilityHints.hxx"
-+#include "scextopt.hxx"
- 
- 
- // STATIC DATA -----------------------------------------------------------
-@@ -338,6 +339,27 @@ void ScTabView::TabChanged()
- 		aViewData.GetViewShell()->BroadcastAccessibility(aAccHint);
- 	}
- 	aViewData.GetDocument()->BroadcastUno( SfxSimpleHint( SC_HINT_TABLECHANGED ) );
-+	ScExtDocOptions* pExtOptions = aViewData.GetDocument()->GetExtDocOptions();
-+	String sSheetModuleName;
-+	aViewData.GetDocument()->GetName( aViewData.GetTabNo(), sSheetModuleName);
-+	// Use code name if that exists
-+	if ( pExtOptions )
-+		sSheetModuleName = pExtOptions->GetCodeName( aViewData. GetTabNo() );
-+	static String sUrl( RTL_CONSTASCII_USTRINGPARAM("vnd.sun.star.script:Standard") );
-+	static String sUrl2( RTL_CONSTASCII_USTRINGPARAM("?language=Basic&location=document") );
-+	static String sSheetActivateScript( RTL_CONSTASCII_USTRINGPARAM("Worksheet_Activate") );
-+	String sMacroUrl = sSheetActivateScript;
-+	sMacroUrl.Insert( '.', 0 ).Insert( sSheetModuleName, 0 ).Insert( '.', 0 ).Insert( sUrl, 0 );
-+	sMacroUrl +=  sUrl2;
-+	com::sun::star::uno::Sequence< sal_Int16 > aOutArgsIndex;
-+	com::sun::star::uno::Sequence< com::sun::star::uno::Any > aOutArgs;
-+	com::sun::star::uno::Sequence< com::sun::star::uno::Any > aArgs;
-+	com::sun::star::uno::Any aRet;
-+	
-+	aViewData.GetSfxDocShell()->CallXScript( sMacroUrl,  aArgs, aRet,
-+			aOutArgsIndex, aOutArgs, false );
-+
-+		
- }
- 
- void ScTabView::UpdateLayerLocks()
---- /data4/sles/ooo-mLnew/ooo-build/build/ooc680-m2/sfx2/inc/objsh.hxx	2006-05-02 17:01:46.000000000 +0100
-+++ sfx2/inc/sfx2/objsh.hxx	2006-06-02 13:29:01.000000000 +0100
-@@ -427,7 +427,8 @@ public:
-         const ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Any >& aParams,
-         ::com::sun::star::uno::Any& aRet,
-         ::com::sun::star::uno::Sequence< sal_Int16 >& aOutParamIndex,
--        ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Any >& aOutParam
-+        ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Any >& aOutParam,
-+        bool bRaiseError = true
-     );
- 
-     BOOL                        DoMacroQuery( const String& rScriptType );
---- /data4/sles/ooo-mLnew/ooo-build/build/ooc680-m2/sfx2/source/doc/objmisc.cxx	2006-05-22 08:25:06.000000000 +0100
-+++ sfx2/source/doc/objmisc.cxx	2006-06-02 13:29:02.000000000 +0100
-@@ -1396,7 +1396,7 @@ ErrCode SfxObjectShell::CallXScript( con
-         ::com::sun::star::uno::Any& aRet,
-         ::com::sun::star::uno::Sequence< sal_Int16 >& aOutParamIndex,
-         ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Any >&
--            aOutParam)
-+            aOutParam, bool bRaiseError )
- {
-     OSL_TRACE( "in CallXScript" );
- 	ErrCode nErr = ERRCODE_NONE;
-@@ -1470,7 +1470,7 @@ ErrCode SfxObjectShell::CallXScript( con
-         nErr = ERRCODE_BASIC_INTERNAL_ERROR;
-     }
- 
--	if ( bCaughtException )
-+	if ( bCaughtException && bRaiseError )
- 	{
- 		SfxAbstractDialogFactory* pFact = SfxAbstractDialogFactory::Create();
- 
---- backup/sc/source/ui/unoobj/viewuno.cxx	2007-11-26 14:43:13.000000000 +0000
-+++ sc/source/ui/unoobj/viewuno.cxx	2008-01-23 17:29:08.000000000 +0000
-@@ -85,9 +85,79 @@
- #ifndef SC_ACCESSIBILITYHINTS_HXX
- #include "AccessibilityHints.hxx"
- #endif
--
-+#include "scextopt.hxx"
-+#include <comphelper/processfactory.hxx>
- using namespace com::sun::star;
-+String docMacroExists( ScDocShell* pShell, 
-+const String& sMod, const String& sMacro );
-+bool executeWorkBookMacro( ScDocShell* pShell, const String& sMacroName, uno::Sequence< uno::Any >& aArgs, uno::Any& aRet );
-+
 +uno::Any createWorkSheet( ScDocShell* pShell, SCTAB nTab )
 +{
 +	uno::Any aRet;
@@ -402,7 +385,7 @@ diff -rup /data4/sles/ooo-build-m180/ooo-build/build/ood680-m1/sc/source/ui/view
 +	}
 +	return aRet;
 +}
- 
++
 +uno::Any createRange( const uno::Any& aRange )
 +{
 +	uno::Any aRet;
@@ -437,21 +420,127 @@ diff -rup /data4/sles/ooo-build-m180/ooo-build/build/ood680-m1/sc/source/ui/view
 +	}
 +	return aRet;
 +}
++
++String getSheetModuleName( ScDocShell* pShell, SCTAB nTab )
++{
++	ScExtDocOptions* pExtOptions = pShell->GetDocument()->GetExtDocOptions();
++	String aCodeName;
++	pShell->GetDocument()->GetName( nTab, aCodeName);
++	// Use code name if that exists
++	if ( pExtOptions )
++		aCodeName = pExtOptions->GetCodeName( nTab );
++	return aCodeName;	
++}
++
++sal_Bool executeSheetMacro( ScDocShell* pShell, SCTAB nTab, String& rMacroName, uno::Sequence< uno::Any >& rArgs )
++{
++	String aModuleName = getSheetModuleName( pShell, nTab );
++	String aMacro = docMacroExists( pShell, aModuleName, rMacroName );
++	if( aMacro.Len() == 0 )
++		return sal_False;
++	
++	uno::Any aRet;
++	return executeWorkBookMacro( pShell, aMacro, rArgs, aRet );
++}
++
++sal_Bool processSheetActivateMacro( ScDocShell* pShell, SCTAB nTab )
++{
++	static String aMacroName( RTL_CONSTASCII_USTRINGPARAM("Worksheet_Activate") );
++	uno::Sequence< uno::Any > aArgs;
++	return executeSheetMacro( pShell, nTab, aMacroName, aArgs );
++}
++
++sal_Bool processSheetDeactivateMacro( ScDocShell* pShell, SCTAB nTab )
++{
++	static String aMacroName( RTL_CONSTASCII_USTRINGPARAM("Worksheet_Deactivate") );
++	uno::Sequence< uno::Any > aArgs;
++	return executeSheetMacro( pShell, nTab, aMacroName, aArgs );
++}
++
++sal_Bool processSheetCalculateMacro( ScDocShell* pShell, SCTAB nTab )
++{
++	static String aMacroName( RTL_CONSTASCII_USTRINGPARAM("Worksheet_Calculate") );
++	uno::Sequence< uno::Any > aArgs;
++	return executeSheetMacro( pShell, nTab, aMacroName, aArgs );
++}
++
++sal_Bool processSheetChangeMacro( ScDocShell* pShell, SCTAB nTab, const uno::Any& rRange )
++{
++	static String aMacroName( RTL_CONSTASCII_USTRINGPARAM("Worksheet_Change") );
++	uno::Sequence< uno::Any > aArgs(1);
++	uno::Any aRange = createRange( rRange );
++	aArgs[0] = aRange;
++	return executeSheetMacro( pShell, nTab, aMacroName, aArgs );
++}
++
++sal_Bool processSheetBeforeDoubleClickMacro( ScDocShell* pShell, SCTAB nTab, const uno::Any& rRange )
++{
++	sal_Bool result = sal_False;
++	static String aMacroName( RTL_CONSTASCII_USTRINGPARAM("Worksheet_BeforeDoubleClick") );
++	uno::Sequence< uno::Any > aArgs(2);
++	uno::Any aRange = createRange( rRange );
++	aArgs[0] = aRange;
++	aArgs[1] <<= sal_False;
++	executeSheetMacro( pShell, nTab, aMacroName, aArgs );
++	aArgs[1] >>= result;
++	return result;
++}
++
++sal_Bool processSheetBeforeRightClickMacro( ScDocShell* pShell, SCTAB nTab, const uno::Any& rRange )
++{
++	sal_Bool result = sal_False;
++	static String aMacroName( RTL_CONSTASCII_USTRINGPARAM("Worksheet_BeforeRightClick") );
++	uno::Sequence< uno::Any > aArgs(2);
++	uno::Any aRange = createRange( rRange );
++	aArgs[0] = aRange;
++	aArgs[1] <<= sal_False;
++	executeSheetMacro( pShell, nTab, aMacroName, aArgs );
++	aArgs[1] >>= result;
++	return result;
++}
++
++sal_Bool processSelectionChangeMacro( ScDocShell* pShell, SCTAB nTab, const uno::Any& rRange )
++{
++	sal_Bool result = sal_False;
++	String aSheetSelectionScript( RTL_CONSTASCII_USTRINGPARAM("Worksheet_SelectionChange") );
++	String aWorkBookSheetSelectionScript( RTL_CONSTASCII_USTRINGPARAM("Workbook_SheetSelectionChange") );
++	
++	uno::Sequence< uno::Any > aArgs(1);
++	uno::Any aRange = createRange( rRange );
++	aArgs[0] = aRange;
++	//Worksheet_SelectionChanged
++	result = executeSheetMacro( pShell, nTab, aSheetSelectionScript, aArgs );
++
++	//Workbook_SheetSelectionChange
++	aArgs = uno::Sequence< uno::Any >(2);
++	aArgs[0] = createWorkSheet( pShell, nTab );
++	aArgs[1] = aRange;
++	String aMacro = docMacroExists( pShell, String(), aWorkBookSheetSelectionScript );
++	if( aMacro.Len() > 0 )
++	{
++		uno::Any aRet;
++		result = executeWorkBookMacro( pShell, aMacro, aArgs, aRet );
++	}
++
++	return result;
++}
+diff -uNrp backup/sc/source/ui/unoobj/viewuno.cxx sc/source/ui/unoobj/viewuno.cxx
+--- backup/sc/source/ui/unoobj/viewuno.cxx	2008-03-25 22:06:25.000000000 +0800
++++ sc/source/ui/unoobj/viewuno.cxx	2008-03-25 15:42:34.000000000 +0800
+@@ -85,9 +85,10 @@
+ #ifndef SC_ACCESSIBILITYHINTS_HXX
+ #include "AccessibilityHints.hxx"
+ #endif
+-
+ using namespace com::sun::star;
+ 
++sal_Bool processSelectionChangeMacro( ScDocShell* pShell, SCTAB nTab, const uno::Any& rRange );
++
  //------------------------------------------------------------------------
  
  //!	Clipping-Markierungen
-@@ -1691,9 +1761,46 @@ void SAL_CALL ScTabViewObj::removeSelect
- 		}
- 	}
- }
--
-+bool fireSelectionChangeScript( ScDocShell* pShell, const String& sMacro, uno::Sequence< uno::Any >& aArgs ) 
-+{
-+	if ( sMacro.Len() == 0 )
-+		return false;
-+	uno::Any aRet;
-+    return executeWorkBookMacro( pShell, sMacro, aArgs, aRet );
-+}
+@@ -1694,6 +1695,16 @@ void SAL_CALL ScTabViewObj::removeSelect
+ 
  void ScTabViewObj::SelectionChanged()
  {
 +	ScTabViewShell* pViewSh = GetViewShell();
@@ -460,31 +549,44 @@ diff -rup /data4/sles/ooo-build-m180/ooo-build/build/ood680-m1/sc/source/ui/view
 +		ScViewData* pViewData = pViewSh->GetViewData();
 +		if ( pViewData )
 +		{
-+			ScExtDocOptions* pExtOptions = pViewData->GetDocument()->GetExtDocOptions();
-+			String sSheetModuleName;
-+			pViewData->GetDocument()->GetName( pViewData->GetTabNo(), sSheetModuleName);
-+			// Use code name if that exists
-+			if ( pExtOptions )
-+				sSheetModuleName = pExtOptions->GetCodeName( pViewData->GetTabNo() );
-+			
-+			String sSheetSelectionScript( RTL_CONSTASCII_USTRINGPARAM("Worksheet_SelectionChange") );
-+			String sWorkBookSheetSelectionScript( RTL_CONSTASCII_USTRINGPARAM("Workbook_SheetSelectionChange") );
-+			String sMacro = docMacroExists( pViewData->GetDocShell(), sSheetModuleName, sSheetSelectionScript );
-+			uno::Any aRet;
-+			uno::Sequence< uno::Any > aArgs(1);
-+			uno::Any aRange = createRange( getSelection() );
-+			aArgs[0] = aRange;
-+			// Worksheet_SelectionChanged
-+			fireSelectionChangeScript( pViewData->GetDocShell(), sMacro, aArgs );
-+			aArgs = uno::Sequence< uno::Any >(2);
-+			aArgs[0] = createWorkSheet( pViewData->GetDocShell(), pViewData->GetTabNo() );
-+			aArgs[1] = aRange;
-+			sMacro = docMacroExists( pViewData->GetDocShell(), String(), sWorkBookSheetSelectionScript );
-+			// Workbook_SheetSelectionChanged
-+			fireSelectionChangeScript( pViewData->GetDocShell(), sMacro, aArgs );
++			processSelectionChangeMacro( pViewData->GetDocShell(), pViewData->GetTabNo(), getSelection() );
 +		}
 +	}
 +
  	lang::EventObject aEvent;
  	aEvent.Source.set(static_cast<cppu::OWeakObject*>(this));
  	for ( USHORT n=0; n<aSelectionListeners.Count(); n++ )
+diff -uNrp backup/sc/source/ui/view/tabview3.cxx sc/source/ui/view/tabview3.cxx
+--- backup/sc/source/ui/view/tabview3.cxx	2008-03-25 10:12:54.000000000 +0800
++++ sc/source/ui/view/tabview3.cxx	2008-03-25 22:13:13.000000000 +0800
+@@ -88,6 +88,9 @@
+ 
+ #include <com/sun/star/chart2/data/HighlightedRange.hpp>
+ 
++sal_Bool processSheetDeactivateMacro( ScDocShell* pShell, SCTAB nTab );
++sal_Bool processSheetActivateMacro( ScDocShell* pShell, SCTAB nTab );
++
+ namespace
+ {
+ 
+@@ -1676,6 +1679,8 @@ void ScTabView::SetTabNo( SCTAB nTab, BO
+ 			}
+ 		}
+ 
++		if( !bNew )
++			processSheetDeactivateMacro( aViewData.GetDocShell(), aViewData.GetTabNo() );
+ 										//	nicht InputEnterHandler wegen Referenzeingabe !
+ 
+ 		ScDocument* pDoc = aViewData.GetDocument();
+@@ -1777,7 +1782,10 @@ void ScTabView::SetTabNo( SCTAB nTab, BO
+ 					if ( pGridWin[i]->IsVisible() )
+ 						pGridWin[i]->UpdateEditViewPos();
+ 		}
+-
++		
++		if( !bNew )
++			processSheetActivateMacro( aViewData.GetDocShell(), aViewData.GetTabNo() );
++			
+ 		TabChanged();										// DrawView
+ 		aViewData.GetViewShell()->WindowChanged();			// falls das aktive Fenster anders ist
+         if ( !bUnoRefDialog )
