@@ -1,0 +1,202 @@
+? svx/svx.vpj
+Index: svx/inc/mscodec.hxx
+===================================================================
+RCS file: /cvs/graphics/svx/inc/mscodec.hxx,v
+retrieving revision 1.4
+retrieving revision 1.4.1138.1
+diff -u -b -I $Revision.*$ -I $Author.*$ -r1.4 -r1.4.1138.1
+--- svx/inc/mscodec.hxx	8 Sep 2005 18:04:23 -0000	1.4
++++ svx/inc/mscodec.hxx	8 Jan 2008 04:03:39 -0000	1.4.1138.1
+@@ -247,6 +247,10 @@
+      */
+     bool                InitCipher( sal_uInt32 nCounter );
+ 
++    bool                Encode(
++                            const void* pData, sal_Size nDatLen,
++                            sal_uInt8* pBuffer, sal_Size nBufLen );
++
+     /** Decodes a block of memory.
+ 
+         @see rtl_cipher_decode()
+Index: svx/source/msfilter/mscodec.cxx
+===================================================================
+RCS file: /cvs/graphics/svx/source/msfilter/mscodec.cxx,v
+retrieving revision 1.6
+retrieving revision 1.5.580.2
+diff -u -b -I $Revision.*$ -I $Author.*$ -r1.6 -r1.5.580.2
+--- svx/source/msfilter/mscodec.cxx	4 Feb 2008 13:38:53 -0000	1.6
++++ svx/source/msfilter/mscodec.cxx	15 Feb 2008 00:44:32 -0000	1.5.580.2
+@@ -45,6 +45,10 @@
+ #include <string.h>
+ #include <tools/solar.h>
+ 
++#include <stdio.h>
++
++#define DEBUG_MSO_ENCRYPTION_STD97 0
++
+ namespace svx {
+ 
+ // ============================================================================
+@@ -249,15 +253,42 @@
+     rtl_cipher_destroy (m_hCipher);
+ }
+ 
++static void lcl_PrintKeyData(const sal_uInt8* pKeyData, const char* msg)
++{
++#if DEBUG_MSO_ENCRYPTION_STD97    
++    printf("pKeyData: (%s)\n", msg);
++    for (int j = 0; j < 4; ++j)
++    {
++        for (int i = 0; i < 16; ++i)
++            printf("%2.2x ", pKeyData[j*16+i]);
++        printf("\n");
++    }
++#endif    
++}
++
++static void lcl_PrintDigest(const sal_uInt8* pDigest)
++{
++#if DEBUG_MSO_ENCRYPTION_STD97    
++    printf("digest:\n");
++    for (int i = 0; i < 16; ++i)
++        printf("%2.2x ", pDigest[i]);
++    printf("\n");
++#endif    
++}
++
+ void MSCodec_Std97::InitKey (
+     const sal_uInt16 pPassData[16],
+     const sal_uInt8  pUnique[16])
+ {
++#if DEBUG_MSO_ENCRYPTION_STD97    
++    fprintf(stdout, "MSCodec_Std97::InitKey: --begin\n");fflush(stdout);
++#endif    
+     sal_uInt8 pKeyData[64];
+     int       i, n;
+ 
+     // Fill PassData into KeyData.
+     (void)memset (pKeyData, 0, sizeof(pKeyData));
++    lcl_PrintKeyData(pKeyData, "initial");
+     for (i = 0, n = 16; (i < n) && pPassData[i]; i++)
+     {
+         pKeyData[2*i    ] = sal::static_int_cast< sal_uInt8 >(
+@@ -268,12 +299,16 @@
+     pKeyData[2*i] = 0x80;
+     pKeyData[ 56] = sal::static_int_cast< sal_uInt8 >(i << 4);
+ 
++    lcl_PrintKeyData(pKeyData, "password data");
++
+     // Fill raw digest of KeyData into KeyData.
+     (void)rtl_digest_updateMD5 (
+         m_hDigest, pKeyData, sizeof(pKeyData));
+     (void)rtl_digest_rawMD5 (
+         m_hDigest, pKeyData, RTL_DIGEST_LENGTH_MD5);
+ 
++    lcl_PrintKeyData(pKeyData, "raw digest of key data");
++
+     // Update digest with KeyData and Unique.
+     for (i = 0; i < 16; i++)
+     {
+@@ -287,6 +322,8 @@
+     pKeyData[56] = 0x80;
+     pKeyData[57] = 0x0a;
+ 
++    lcl_PrintKeyData(pKeyData, "update digest with padding");
++
+     rtl_digest_updateMD5 (
+         m_hDigest, &(pKeyData[16]), sizeof(pKeyData) - 16);
+ 
+@@ -294,6 +331,8 @@
+     rtl_digest_rawMD5 (
+         m_hDigest, m_pDigestValue, sizeof(m_pDigestValue));
+ 
++    lcl_PrintDigest(m_pDigestValue);
++
+     // Erase KeyData array and leave.
+     (void)memset (pKeyData, 0, sizeof(pKeyData));
+ }
+@@ -302,6 +341,11 @@
+     const sal_uInt8 pSaltData[16],
+     const sal_uInt8 pSaltDigest[16])
+ {
++    // both the salt data and salt digest (hash) come from the document being imported.
++
++#if DEBUG_MSO_ENCRYPTION_STD97    
++    fprintf(stdout, "MSCodec_Std97::VerifyKey: \n");fflush(stdout);
++#endif    
+     bool result = false;
+ 
+     if (InitCipher(0))
+@@ -313,6 +357,20 @@
+         rtl_cipher_decode (
+             m_hCipher, pSaltData, 16, pBuffer, sizeof(pBuffer));
+ 
++#if DEBUG_MSO_ENCRYPTION_STD97        
++        fprintf(stdout, "salt:\n");
++        for (int i = 0; i < 16; ++i)
++            fprintf(stdout, "%2.2x ", pSaltData[i]);
++        fprintf(stdout, "\n");
++        fprintf(stdout, "decoded salt:\n");
++        for (int i = 0; i < 4; ++i)
++        {
++            for (int j = 0; j < 16; ++j)
++                fprintf(stdout, "%2.2x ", pBuffer[i*16+j]);
++            fprintf(stdout, "\n");
++        }
++#endif        
++
+         pBuffer[16] = 0x80;
+         (void)memset (pBuffer + 17, 0, sizeof(pBuffer) - 17);
+         pBuffer[56] = 0x80;
+@@ -323,6 +381,13 @@
+         rtl_digest_rawMD5 (
+             m_hDigest, pDigest, sizeof(pDigest));
+ 
++#if DEBUG_MSO_ENCRYPTION_STD97        
++        printf("raw digest:\n");
++        for (int i = 0; i < 16; ++i)
++            printf("%2.2x ", pDigest[i]);
++        printf("\n");
++#endif        
++
+         // Decode original SaltDigest into Buffer.
+         rtl_cipher_decode (
+             m_hCipher, pSaltDigest, 16, pBuffer, sizeof(pBuffer));
+@@ -340,8 +405,9 @@
+ 
+ bool MSCodec_Std97::InitCipher (sal_uInt32 nCounter)
+ {
++//  fprintf(stdout, "MSCodec_Std97::InitCipher: \n");fflush(stdout);
+     rtlCipherError result;
+-    sal_uInt8      pKeyData[64];
++    sal_uInt8      pKeyData[64]; // 512-bit message block
+ 
+     // Initialize KeyData array.
+     (void)memset (pKeyData, 0, sizeof(pKeyData));
+@@ -366,7 +432,7 @@
+ 
+     // Initialize Cipher with KeyData (for decoding).
+     result = rtl_cipher_init (
+-        m_hCipher, rtl_Cipher_DirectionDecode,
++        m_hCipher, rtl_Cipher_DirectionBoth,
+         pKeyData, RTL_DIGEST_LENGTH_MD5, 0, 0);
+ 
+     // Erase KeyData array and leave.
+@@ -375,6 +441,17 @@
+     return (result == rtl_Cipher_E_None);
+ }
+ 
++bool MSCodec_Std97::Encode(
++    const void *pData,   sal_Size nDatLen,
++    sal_uInt8  *pBuffer, sal_Size nBufLen)
++{
++    rtlCipherError result;
++    result = rtl_cipher_encode (
++        m_hCipher, pData, nDatLen, pBuffer, nBufLen);
++
++    return (result == rtl_Cipher_E_None);
++}
++
+ bool MSCodec_Std97::Decode (
+     const void *pData,   sal_Size nDatLen,
+     sal_uInt8  *pBuffer, sal_Size nBufLen)
