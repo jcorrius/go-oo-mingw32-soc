@@ -1,4 +1,4 @@
-SUBDIRS=16x16 22x22 24x24 32x32 48x48 scalable
+SUBDIRS=16x16 22x22 24x24 32x32 48x48 scalable mimetypes
 
 desktop_in_files = ${wildcard *.desktop.in.in}
 
