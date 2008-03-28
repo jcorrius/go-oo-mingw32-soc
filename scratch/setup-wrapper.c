@@ -39,7 +39,7 @@ try_langpack (LANGID langid)
       GetLocaleInfoW (lcid, LOCALE_SISO3166CTRYNAME, ctry, NELEMS (ctry)))
     {
       wcscpy (locale, lang);
-      wcscat (locale, L"_");
+      wcscat (locale, L"-");
       wcscat (locale, ctry);
 
       wcscpy (langpack_setup, path);
