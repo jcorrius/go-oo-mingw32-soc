@@ -25,6 +25,21 @@ static wchar_t path[1000];
 static LANGID system_ui_lang;
 static LANGID user_ui_lang;
 
+static int
+run (wchar_t *program)
+{
+  wchar_t quoted_program[1000];
+
+  if (GetFileAttributesW (program) == INVALID_FILE_ATTRIBUTES)
+    return -1;
+
+  wcscpy (quoted_program, L"\"");
+  wcscat (quoted_program, program);
+  wcscat (quoted_program, L"\"");
+      
+  return _wspawnl (_P_WAIT, program, quoted_program, NULL);
+}
+
 static void
 try_langpack (LANGID langid)
 {
@@ -47,8 +62,7 @@ try_langpack (LANGID langid)
       wcscat (langpack_setup, locale);
       wcscat (langpack_setup, L"/setup.exe");
 
-      if (GetFileAttributesW (langpack_setup) != INVALID_FILE_ATTRIBUTES)
-        _wspawnl (_P_WAIT, langpack_setup, langpack_setup, NULL);
+      run (langpack_setup);
     }
 
   /* Then try just the language */
@@ -59,8 +73,7 @@ try_langpack (LANGID langid)
       wcscat (langpack_setup, locale);
       wcscat (langpack_setup, L"/setup.exe");
 
-      if (GetFileAttributesW (langpack_setup) != INVALID_FILE_ATTRIBUTES)
-        _wspawnl (_P_WAIT, langpack_setup, langpack_setup, NULL);
+      run (langpack_setup);
     }
 }
 
@@ -107,7 +120,7 @@ main (int argc, char **argv)
   wcscpy (base_setup, path);
   wcscat (base_setup, L"base/setup.exe");
 
-  rc =_wspawnl (_P_WAIT, base_setup, base_setup, NULL);
+  rc = run (base_setup);
 
   if (rc != 0)
     exit (1);
