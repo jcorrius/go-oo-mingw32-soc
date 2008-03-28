@@ -44,7 +44,7 @@ try_langpack (LANGID langid)
       wcscat (locale, ctry);
 
       wcscpy (langpack_setup, path);
-      wcscat (langpack_setup, L"/langpack/");
+      wcscat (langpack_setup, L"langpack/");
       wcscat (langpack_setup, locale);
       wcscat (langpack_setup, L"/setup.exe");
 
@@ -56,7 +56,7 @@ try_langpack (LANGID langid)
   if (GetLocaleInfoW (lcid, LOCALE_SISO639LANGNAME, locale, NELEMS (locale)))
     {
       wcscpy (langpack_setup, path);
-      wcscat (langpack_setup, L"/langpack/");
+      wcscat (langpack_setup, L"langpack/");
       wcscat (langpack_setup, locale);
       wcscat (langpack_setup, L"/setup.exe");
 
