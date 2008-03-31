@@ -1,0 +1,327 @@
+Index: sc/source/filter/excel/xiescher.cxx
+===================================================================
+RCS file: /cvs/sc/sc/source/filter/excel/xiescher.cxx,v
+retrieving revision 1.54
+diff -u -p -r1.54 xiescher.cxx
+--- sc/source/filter/excel/xiescher.cxx	6 Jul 2007 12:37:20 -0000	1.54
++++ sc/source/filter/excel/xiescher.cxx	20 Feb 2008 17:21:49 -0000
+@@ -221,6 +221,7 @@
+ #include "xicontent.hxx"
+ #endif
+ 
++#include "xlescher.hxx"
+ using ::rtl::OUString;
+ using ::rtl::OUStringBuffer;
+ using ::com::sun::star::uno::Reference;
+@@ -424,7 +425,7 @@ XclImpDrawObjBase::~XclImpDrawObjBase()
+ {
+ }
+ 
+-XclImpDrawObjRef XclImpDrawObjBase::ReadObjCmo( XclImpStream& rStrm )
++XclImpDrawObjRef XclImpDrawObjBase::ReadObjCmo( XclImpObjectManager& rObjMgr, XclImpStream& rStrm )
+ {
+     XclImpDrawObjRef xDrawObj;
+ 
+@@ -457,7 +458,7 @@ XclImpDrawObjRef XclImpDrawObjBase::Read
+         case EXC_OBJ_CMO_COMBOBOX:
+         case EXC_OBJ_CMO_SPIN:
+         case EXC_OBJ_CMO_SCROLLBAR:
+-            xDrawObj.reset( new XclImpTbxControlObj( rStrm.GetRoot() ) );
++            xDrawObj.reset( new XclImpTbxControlObj( rObjMgr, rStrm.GetRoot() ) );
+         break;
+         case EXC_OBJ_CMO_PICTURE:
+             xDrawObj.reset( new XclImpOleObj( rStrm.GetRoot() ) );
+@@ -739,23 +740,31 @@ ScfPropertySet XclImpControlObjHelper::G
+     return ScfPropertySet( mxCtrlModel );
+ }
+ 
+-void XclImpControlObjHelper::ConvertSheetLinks( const XclImpRoot& rRoot, SdrObject& /* rSdrObj */ ) const
++// get service factory from Calc document
++Reference< XMultiServiceFactory > lclGetFactoryFromRoot( const XclImpRoot& rRoot )
+ {
+     // get service factory from Calc document
+     Reference< XMultiServiceFactory > xFactory;
+     if( SfxObjectShell* pDocShell = rRoot.GetDocShell() )
+         xFactory.set( pDocShell->GetModel(), UNO_QUERY );
++    return xFactory;
++}
++
++void XclImpControlObjHelper::ConvertSheetLinks( const XclImpRoot& rRoot, const ScfRef< ScAddress >& rxCellLink ) const
++{
++    Reference< XMultiServiceFactory > xFactory = lclGetFactoryFromRoot( rRoot );
++
+     if( !mxCtrlModel.is() || !xFactory.is() )
+         return;
+ 
+     // *** cell link *** ------------------------------------------------------
+ 
+     Reference< XBindableValue > xBindable( mxCtrlModel, UNO_QUERY );
+-    if( mxCellLink.is() && xBindable.is() )
++    if( rxCellLink.is() && xBindable.is() )
+     {
+         // create argument sequence for createInstanceWithArguments()
+         CellAddress aApiAddress;
+-        ScUnoConversion::FillApiAddress( aApiAddress, *mxCellLink );
++        ScUnoConversion::FillApiAddress( aApiAddress, *rxCellLink );
+ 
+         NamedValue aValue;
+         aValue.Name = CREATE_OUSTRING( SC_UNONAME_BOUNDCELL );
+@@ -792,14 +801,24 @@ void XclImpControlObjHelper::ConvertShee
+             xBindable->setValueBinding( xBinding );
+     }
+ 
++
++}
++
++void XclImpControlObjHelper::ConvertSheetLinks( const XclImpRoot& rRoot, const ScfRef< ScRange >& rxSrcRange ) const
++{
++    Reference< XMultiServiceFactory > xFactory = lclGetFactoryFromRoot( rRoot );
++
++    if( !mxCtrlModel.is() || !xFactory.is() )
++        return;
++
+     // *** source range *** ---------------------------------------------------
+ 
+     Reference< XListEntrySink > xEntrySink( mxCtrlModel, UNO_QUERY );
+-    if( mxSrcRange.is() && xEntrySink.is() )
++    if( rxSrcRange.is() && xEntrySink.is() )
+     {
+         // create argument sequence for createInstanceWithArguments()
+         CellRangeAddress aApiRange;
+-        ScUnoConversion::FillApiRange( aApiRange, *mxSrcRange );
++        ScUnoConversion::FillApiRange( aApiRange, *rxSrcRange );
+ 
+         NamedValue aValue;
+         aValue.Name = CREATE_OUSTRING( SC_UNONAME_CELLRANGE );
+@@ -824,13 +843,27 @@ void XclImpControlObjHelper::ConvertShee
+         if( xEntrySource.is() )
+             xEntrySink->setListEntrySource( xEntrySource );
+     }
++
++}
++
++void XclImpControlObjHelper::ConvertSheetLinks( const XclImpRoot& rRoot, SdrObject& /* rSdrObj */ ) const
++{
++    // *** cell link *** ------------------------------------------------------
++
++    ConvertSheetLinks( rRoot, mxCellLink );
++
++    // *** source range *** ---------------------------------------------------
++
++    ConvertSheetLinks( rRoot, mxSrcRange );
+ }
+ 
+ // ----------------------------------------------------------------------------
+ 
+-XclImpTbxControlObj::XclImpTbxControlObj( const XclImpRoot& rRoot ) :
++XclImpTbxControlObj::XclImpTbxControlObj( XclImpObjectManager& rObjMgr, const XclImpRoot& rRoot ) :
+     XclImpDrawingObj( rRoot, true ),
+     XclImpControlObjHelper( EXC_CTRL_BINDPOSITION ),
++    mrObjManager( rObjMgr ),
++    mbGroupLeader( false ),
+     mnState( EXC_OBJ_CBLS_STATE_UNCHECK ),
+     mnSelEntry( 0 ),
+     mnSelType( EXC_OBJ_LBS_SEL_SIMPLE ),
+@@ -866,6 +899,9 @@ void XclImpTbxControlObj::ReadSubRecord(
+         case EXC_ID_OBJ_FTGBODATA:
+             ReadGboData( rStrm );
+         break;
++        case EXC_ID_OBJ_FTRBODATA:
++            ReadRboData( rStrm );
++        break;
+         default:
+             XclImpDrawObjBase::ReadSubRecord( rStrm, nSubRecId, nSubRecSize );
+     }
+@@ -904,7 +940,6 @@ void XclImpTbxControlObj::DoProcessSdrOb
+ 
+     namespace AwtVisualEffect = ::com::sun::star::awt::VisualEffect;
+     namespace AwtScrollOrient = ::com::sun::star::awt::ScrollBarOrientation;
+-    using ::com::sun::star::style::VerticalAlignment_MIDDLE;
+ 
+     // control name, printable, sheet links -----------------------------------
+ 
+@@ -944,24 +979,29 @@ void XclImpTbxControlObj::DoProcessSdrOb
+         case EXC_OBJ_CMO_CHECKBOX:
+         case EXC_OBJ_CMO_OPTIONBUTTON:
+         {
+-            bool bCheckBox = GetObjType() == EXC_OBJ_CMO_CHECKBOX;
+-
+-            sal_Int16 nApiState = 0;
+-            switch( mnState )
++            if( GetObjType() == EXC_OBJ_CMO_CHECKBOX )
++                SetCBRBCommonProps();
++            else
+             {
+-                case EXC_OBJ_CBLS_STATE_UNCHECK:    nApiState = 0;                  break;
+-                case EXC_OBJ_CBLS_STATE_CHECK:      nApiState = 1;                  break;
+-                case EXC_OBJ_CBLS_STATE_TRI:        nApiState = bCheckBox ? 2 : 1;  break;
++                XclImpTbxControlObj* pTbxObj = dynamic_cast< XclImpTbxControlObj* >( mrObjManager.FindDrawObj( mNextRBInGroupId ).get() );
++                if ( ( pTbxObj && pTbxObj->mbGroupLeader ) )
++                {
++                    // Group has terminated
++                    // traverse each RadioButton in group and 
++                    //     a) apply the groupname 
++                    //     b) propagate the linked cell from the lead radiobutton
++                    //     c) apply the correct Ref value
++                    XclImpTbxControlObj* pLeader = pTbxObj;
++                    XclObjId rLeaderId = pLeader->GetObjId();
++                    sal_Int32 nRefVal = 1;
++                    do 
++                    {
++                        pTbxObj->ApplyGroupingBits( *pLeader, nRefVal++ );
++                        pTbxObj = dynamic_cast< XclImpTbxControlObj* >( mrObjManager.FindDrawObj( pTbxObj->mNextRBInGroupId ).get() );
++                    } while ( pTbxObj && !pTbxObj->mbGroupLeader );
++                } 
++               
+             }
+-            if( bCheckBox )
+-                aPropSet.SetBoolProperty( CREATE_OUSTRING( "TriState" ), nApiState == 2 );
+-            aPropSet.SetProperty( CREATE_OUSTRING( "DefaultState" ), nApiState );
+-
+-            sal_Int16 nApiBorder = mbFlatButton ? AwtVisualEffect::FLAT : AwtVisualEffect::LOOK3D;
+-            aPropSet.SetProperty( CREATE_OUSTRING( "VisualEffect" ), nApiBorder );
+-
+-            // #i40279# always centered vertically
+-            aPropSet.SetProperty( CREATE_OUSTRING( "VerticalAlign" ), VerticalAlignment_MIDDLE );
+         }
+         break;
+ 
+@@ -1111,6 +1151,45 @@ void XclImpTbxControlObj::ReadLbsData( X
+     }
+ }
+ 
++void XclImpTbxControlObj::ApplyGroupingBits( XclImpTbxControlObj& rLeadRB, sal_Int32 nRefVal )
++{
++    ScfPropertySet aProps = GetControlPropSet();
++    // shape Id is formed from object id + sheet id
++    rtl::OUString sGroupName = rtl::OUString::valueOf( static_cast< sal_Int32 >( rLeadRB.GetShapeId() ) );
++    aProps.SetStringProperty( CREATE_OUSTRING( "GroupName" ), sGroupName );
++    aProps.SetStringProperty( CREATE_OUSTRING( "RefValue" ), rtl::OUString::valueOf( nRefVal ) );
++    // propagate cell link info
++    if ( rLeadRB.HasCellLink() && !HasCellLink() )
++    {
++        ScfRef< ScAddress > xAddress( new ScAddress( *rLeadRB.GetCellLink() ) );
++        ConvertSheetLinks( GetRoot(), xAddress ); 
++    }
++    SetCBRBCommonProps();
++}
++
++void XclImpTbxControlObj::SetCBRBCommonProps() const
++{
++    sal_Int16 nApiState = 0;
++    bool bCheckBox = ( GetObjType() == EXC_OBJ_CMO_CHECKBOX );
++    switch( mnState )
++    {
++        case EXC_OBJ_CBLS_STATE_UNCHECK:    nApiState = 0;                  break;
++        case EXC_OBJ_CBLS_STATE_CHECK:      nApiState = 1;                  break;
++        case EXC_OBJ_CBLS_STATE_TRI:        nApiState = bCheckBox ? 2 : 1;  break;
++    }
++    ScfPropertySet aPropSet = GetControlPropSet();
++    if ( bCheckBox )
++        aPropSet.SetBoolProperty( CREATE_OUSTRING( "TriState" ), nApiState == 2 );
++    namespace AwtVisualEffect = ::com::sun::star::awt::VisualEffect;
++    using ::com::sun::star::style::VerticalAlignment_MIDDLE;
++
++    aPropSet.SetProperty( CREATE_OUSTRING( "DefaultState" ), nApiState );
++    sal_Int16 nApiBorder = mbFlatButton ? AwtVisualEffect::FLAT : AwtVisualEffect::LOOK3D;
++    aPropSet.SetProperty( CREATE_OUSTRING( "VisualEffect" ), nApiBorder );
++    // #i40279# always centered vertically
++    aPropSet.SetProperty( CREATE_OUSTRING( "VerticalAlign" ), VerticalAlignment_MIDDLE );
++}
++
+ void XclImpTbxControlObj::ReadSbs( XclImpStream& rStrm )
+ {
+     sal_uInt16 nOrient, nStyle;
+@@ -1131,6 +1210,17 @@ void XclImpTbxControlObj::ReadGboData( X
+     mbFlatBorder = ::get_flag( nStyle, EXC_OBJ_GBO_FLAT );
+ }
+ 
++void XclImpTbxControlObj::ReadRboData( XclImpStream& rStrm )
++{
++    sal_Int16 mnNextRBInGroup;
++    rStrm >> mnNextRBInGroup;
++    sal_uInt8 nGroupLeader;
++    rStrm >> nGroupLeader;
++    sal_uInt8 unknown;
++    rStrm >> unknown;
++    mbGroupLeader = ( nGroupLeader & 0x1 );
++    mNextRBInGroupId = XclObjId( GetScTab(), mnNextRBInGroup );
++}
+ // ----------------------------------------------------------------------------
+ 
+ XclImpOleObj::XclImpOleObj( const XclImpRoot& rRoot ) :
+@@ -2224,7 +2314,7 @@ void XclImpObjectManager::ReadObj8( XclI
+             break;
+             case EXC_ID_OBJ_FTCMO:
+                 DBG_ASSERT( !xDrawObj, "XclImpObjectManager::ReadObj8 - multiple FTCMO subrecords" );
+-                xDrawObj = XclImpDrawObjBase::ReadObjCmo( rStrm );
++                xDrawObj = XclImpDrawObjBase::ReadObjCmo( *this, rStrm );
+                 bLoop = xDrawObj.is();
+             break;
+             default:
+Index: sc/source/filter/inc/xiescher.hxx
+===================================================================
+RCS file: /cvs/sc/sc/source/filter/inc/xiescher.hxx,v
+retrieving revision 1.27
+diff -u -p -r1.27 xiescher.hxx
+--- sc/source/filter/inc/xiescher.hxx	6 Jul 2007 12:38:40 -0000	1.27
++++ sc/source/filter/inc/xiescher.hxx	20 Feb 2008 17:21:50 -0000
+@@ -99,7 +99,7 @@ public:
+     virtual             ~XclImpDrawObjBase();
+ 
+     /** Reads the FTCMO subrecord (common object data) in an OBJ record, returns a new object. */
+-    static XclImpDrawObjRef ReadObjCmo( XclImpStream& rStrm );
++    static XclImpDrawObjRef ReadObjCmo( XclImpObjectManager& rObjMrg, XclImpStream& rStrm );
+     /** Reads the contents of the specified subrecord of an OBJ record from stream. */
+     virtual void        ReadSubRecord( XclImpStream& rStrm, sal_uInt16 nSubRecId, sal_uInt16 nSubRecSize );
+     /** Reads the client anchor from an msofbtClientAnchor Escher record. */
+@@ -254,6 +254,9 @@ protected:
+     ScfPropertySet      GetControlPropSet() const;
+     /** Tries to set a spreadsheet cell link and source range link at the passed form control. */
+     void                ConvertSheetLinks( const XclImpRoot& rRoot, SdrObject& rSdrObj ) const;
++    void                ConvertSheetLinks( const XclImpRoot& rRoot, const ScfRef< ScAddress >& rxCellLink ) const;
++    void                ConvertSheetLinks( const XclImpRoot& rRoot, const ScfRef< ScRange >& rxSrcRange ) const;
++    ScAddress*          GetCellLink(){ return mxCellLink.get(); }
+ 
+ private:
+     XControlModelRef    mxCtrlModel;    /// Model of the created form control object.
+@@ -268,7 +271,7 @@ private:
+ class XclImpTbxControlObj : public XclImpDrawingObj, public XclImpControlObjHelper
+ {
+ public:
+-    explicit            XclImpTbxControlObj( const XclImpRoot& rRoot );
++    explicit            XclImpTbxControlObj( XclImpObjectManager& rObjMgr, const XclImpRoot& rRoot );
+ 
+     /** Reads the contents of the specified subrecord of an OBJ record from stream. */
+     virtual void        ReadSubRecord( XclImpStream& rStrm, sal_uInt16 nSubRecId, sal_uInt16 nSubRecSize );
+@@ -295,8 +298,15 @@ private:
+     void                ReadSbs( XclImpStream& rStrm );
+     /** Reads the contents of the ftGboData sub structure in an OBJ record. */
+     void                ReadGboData( XclImpStream& rStrm );
++    /** Reads the contents of the ftRboData sub structure in an OBJ record. */
++    void                ReadRboData( XclImpStream& rStrm );
+ 
+ private:
++    void SetCBRBCommonProps() const;
++    void ApplyGroupingBits( XclImpTbxControlObj& rTbxObj, sal_Int32 nRefVal );
++    XclImpObjectManager&  mrObjManager;
++    bool                mbGroupLeader;  /// Identifies start of group
++    XclObjId            mNextRBInGroupId;    /// 
+     ScfInt16Vec         maMultiSel;     /// Indexes of all selected entries in a multi selection.
+     sal_uInt16          mnState;        /// Checked/unchecked state.
+     sal_Int16           mnSelEntry;     /// Index of selected entry (1-based).
+Index: sc/source/filter/inc/xlescher.hxx
+===================================================================
+RCS file: /cvs/sc/sc/source/filter/inc/xlescher.hxx,v
+retrieving revision 1.21
+diff -u -p -r1.21 xlescher.hxx
+--- sc/source/filter/inc/xlescher.hxx	22 Jan 2007 13:22:23 -0000	1.21
++++ sc/source/filter/inc/xlescher.hxx	20 Feb 2008 17:21:50 -0000
+@@ -75,6 +75,7 @@ const sal_uInt16 EXC_ID_OBJ_FTCBLS      
+ const sal_uInt16 EXC_ID_OBJ_FTSBS           = 0x000C;   /// Scroll bar data.
+ const sal_uInt16 EXC_ID_OBJ_FTSBSFMLA       = 0x000E;   /// Scroll bar/list box/combo box cell link.
+ const sal_uInt16 EXC_ID_OBJ_FTGBODATA       = 0x000F;   /// Group box data.
++const sal_uInt16 EXC_ID_OBJ_FTRBODATA       = 0x0011;   /// Radiobutton data.
+ const sal_uInt16 EXC_ID_OBJ_FTLBSDATA       = 0x0013;   /// List box/combo box data.
+ const sal_uInt16 EXC_ID_OBJ_FTCBLSFMLA      = 0x0014;   /// Check box/radio button cell link.
+ const sal_uInt16 EXC_ID_OBJ_FTCMO           = 0x0015;   /// Common object settings.
