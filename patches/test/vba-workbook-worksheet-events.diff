@@ -1,0 +1,626 @@
+diff -uNrp backup/sc/source/ui/docshell/docsh.cxx sc/source/ui/docshell/docsh.cxx
+--- backup/sc/source/ui/docshell/docsh.cxx	2008-03-25 22:04:43.000000000 +0800
++++ sc/source/ui/docshell/docsh.cxx	2008-03-25 20:53:51.000000000 +0800
+@@ -150,6 +150,8 @@
+ 
+ using namespace com::sun::star;
+ 
++bool processDocOpenMacro( ScDocShell* pShell );
++bool processDocBeforeCloseMacro( ScDocShell* pShell );
+ // STATIC DATA -----------------------------------------------------------
+ 
+ //	Stream-Namen im Storage
+@@ -688,7 +690,6 @@ BOOL ScDocShell::SaveXML( SfxMedium* pSa
+ BOOL __EXPORT ScDocShell::Load( SfxMedium& rMedium )
+ {
+ 	RTL_LOGFILE_CONTEXT_AUTHOR ( aLog, "sc", "nn93723", "ScDocShell::Load" );
+-
+ 	ScRefreshTimerProtector( aDocument.GetRefreshTimerControlAddress() );
+ 
+ 	//	only the latin script language is loaded
+@@ -731,6 +732,10 @@ BOOL __EXPORT ScDocShell::Load( SfxMediu
+ 		aDocument.InvalidateTableArea();
+ 
+ 	bIsEmpty = FALSE;
++
++	// Handler for open workbook event
++	processDocOpenMacro( this );
++
+ 	FinishedLoading( SFX_LOADED_MAINDOCUMENT | SFX_LOADED_IMAGES );
+ 	return bRet;
+ }
+@@ -812,7 +817,7 @@ BOOL __EXPORT ScDocShell::ConvertFrom( S
+ 	ScRefreshTimerProtector( aDocument.GetRefreshTimerControlAddress() );
+ 
+ 	GetUndoManager()->Clear();
+-
++	
+ 	// ob nach dem Import optimale Spaltenbreiten gesetzt werden sollen
+ 	BOOL bSetColWidths = FALSE;
+ 	BOOL bSetSimpleTextColWidths = FALSE;
+@@ -833,6 +838,7 @@ BOOL __EXPORT ScDocShell::ConvertFrom( S
+     nCanUpdate = pUpdateDocItem ? pUpdateDocItem->GetValue() : com::sun::star::document::UpdateDocMode::NO_UPDATE;
+ 
+     const SfxFilter* pFilter = rMedium.GetFilter();
++						
+ 	if (pFilter)
+ 	{
+ 		String aFltName = pFilter->GetFilterName();
+@@ -1257,6 +1263,10 @@ BOOL __EXPORT ScDocShell::ConvertFrom( S
+ 		if ( bSetRowHeights )
+ 			UpdateAllRowHeights();		// with vdev or printer, depending on configuration
+ 	}
++
++	// Handler for open workbook event
++	processDocOpenMacro( this );
++
+ 	FinishedLoading( SFX_LOADED_MAINDOCUMENT | SFX_LOADED_IMAGES );
+ 
+ 	// #73762# invalidate eventually temporary table areas
+@@ -2033,7 +2043,6 @@ BOOL __EXPORT ScDocShell::SaveCompleted(
+     return SfxObjectShell::SaveCompleted( xStor );
+ }
+ 
+-
+ BOOL __EXPORT ScDocShell::DoSaveCompleted( SfxMedium * pNewStor )
+ {
+ 	BOOL bRet = SfxObjectShell::DoSaveCompleted( pNewStor );
+@@ -2070,6 +2079,11 @@ USHORT __EXPORT ScDocShell::PrepareClose
+ 
+ 	DoEnterHandler();
+ 
++	// start handler for possible veto from DocBefore_Close
++	if ( !IsInPrepareClose() && processDocBeforeCloseMacro( this ) )
++		return sal_False;
++	// end handler code
++
+ 	USHORT nRet = SfxObjectShell::PrepareClose( bUI, bForBrowsing );
+ 	if (nRet == TRUE)						// TRUE = schliessen
+ 		aDocument.DisableIdle(TRUE);		// nicht mehr drin rumpfuschen !!!
+diff -uNrp backup/sc/source/ui/docshell/makefile.mk sc/source/ui/docshell/makefile.mk
+--- backup/sc/source/ui/docshell/makefile.mk	2008-03-25 10:12:40.000000000 +0800
++++ sc/source/ui/docshell/makefile.mk	2008-03-25 20:58:46.000000000 +0800
+@@ -101,10 +101,12 @@ SLOFILES =  \
+         $(SLO)$/hiranges.obj \
+         $(SLO)$/pntlock.obj \
+         $(SLO)$/sizedev.obj \
++        $(SLO)$/vbaevents.obj \
+         $(SLO)$/editable.obj
+ 
+ 
+ EXCEPTIONSFILES= \
++        $(SLO)$/vbaevents.obj	\
+         $(SLO)$/docsh8.obj \
+         $(SLO)$/dbdocimp.obj
+ 
+@@ -135,6 +137,7 @@ LIB1OBJFILES =  \
+         $(SLO)$/hiranges.obj \
+         $(SLO)$/pntlock.obj \
+         $(SLO)$/sizedev.obj \
++        $(SLO)$/vbaevents.obj \
+         $(SLO)$/editable.obj
+ 
+ # --- Tagets -------------------------------------------------------
+diff -uNrp backup/sc/source/ui/docshell/vbaevents.cxx sc/source/ui/docshell/vbaevents.cxx
+--- backup/sc/source/ui/docshell/vbaevents.cxx	1970-01-01 08:00:00.000000000 +0800
++++ sc/source/ui/docshell/vbaevents.cxx	2008-03-25 20:51:55.000000000 +0800
+@@ -0,0 +1,419 @@
++/*************************************************************************
++ *
++ *  OpenOffice.org - a multi-platform office productivity suite
++ *
++ *  $RCSfile: vbaevents.cxx,v $
++ *
++ *  $Revision$
++ *
++ *  last change: $Author$ $Date$
++ *
++ *  The Contents of this file are made available subject to
++ *  the terms of GNU Lesser General Public License Version 2.1.
++ *
++ *
++ *    GNU Lesser General Public License Version 2.1
++ *    =============================================
++ *    Copyright 2005 by Sun Microsystems, Inc.
++ *    901 San Antonio Road, Palo Alto, CA 94303, USA
++ *
++ *    This library is free software; you can redistribute it and/or
++ *    modify it under the terms of the GNU Lesser General Public
++ *    License version 2.1, as published by the Free Software Foundation.
++ *
++ *    This library is distributed in the hope that it will be useful,
++ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ *    Lesser General Public License for more details.
++ *
++ *    You should have received a copy of the GNU Lesser General Public
++ *    License along with this library; if not, write to the Free Software
++ *    Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ *    MA  02111-1307  USA
++ *
++ ************************************************************************/
++#include "docsh.hxx"
++#include <basic/basmgr.hxx>
++#include <basic/sbmod.hxx>
++#include <basic/sbmeth.hxx>
++#include <basic/sbx.hxx>
++#include "scextopt.hxx"
++#include <comphelper/processfactory.hxx>
++#ifndef _COM_SUN_STAR_SHEET_XSHEETCELLRANGECONTAINER_HPP_
++#include <com/sun/star/sheet/XSheetCellRangeContainer.hpp>
++#endif
++#include <com/sun/star/document/XEventsSupplier.hpp>
++#ifndef _COM_SUN_STAR_SHEET_XCELLRANGEREFERRER_HPP_
++#include <com/sun/star/sheet/XCellRangeReferrer.hpp>
++#endif
++using namespace com::sun::star;
++
++const static String sLibrary( RTL_CONSTASCII_USTRINGPARAM("Standard"));
++const static String sModule( RTL_CONSTASCII_USTRINGPARAM("ThisWorkbook"));
++
++const static rtl::OUString sUrlPart0 = rtl::OUString::createFromAscii( "vnd.sun.star.script:");
++const static rtl::OUString sUrlPart1 = rtl::OUString::createFromAscii( "vnd.sun.star.script:Standard.");
++const static rtl::OUString sUrlPart2 = rtl::OUString::createFromAscii( "?language=Basic&location=document"); 
++
++ rtl::OUString getWorkbookModuleName( ScDocShell* pShell )
++{
++	rtl::OUString sCodeName = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("ThisWorkbook") );
++	if ( pShell )
++	{
++		if ( ScExtDocOptions* pExtDocOpts = pShell->GetDocument()->GetExtDocOptions() )
++		{
++			if ( pExtDocOpts->GetDocSettings().maGlobCodeName.Len() > 0 ) 
++				sCodeName = pExtDocOpts->GetDocSettings().maGlobCodeName;
++		}
++	}
++	return sCodeName;
++}	
++// Treat the args as possible inouts ( convertion at bottom of method )
++bool executeWorkBookMacro( ScDocShell* pShell, const String& sMacroName, uno::Sequence< uno::Any >& aArgs, uno::Any& aRet )
++{
++	// until ObjectModules ( and persisting of codenames ) is supported, if this is a
++	// document saved from XL then we won't be able to determine the codename for the Workbook
++	// Module, so... we have no choice but to search all modules for the moment, thus the macro
++	// passed in should be the fully specified name. 	
++	//rtl::OUString sCodeName = getWorkbookModuleName( pShell );
++	//rtl::OUString sUrl = sUrlPart1.concat( sCodeName ).concat( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM(".") ) ).concat( sMacroName ).concat( sUrlPart2 );
++	rtl::OUString sUrl = sUrlPart0.concat( sMacroName ).concat( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM(".") ) ).concat( sUrlPart2 ) ;
++	uno::Sequence< sal_Int16 > aOutArgsIndex;
++	uno::Sequence< uno::Any > aOutArgs;
++	ErrCode nErr = pShell->CallXScript( sUrl,  aArgs, aRet,
++			aOutArgsIndex, aOutArgs, false );
++
++	// Script Executed?
++	if ( nErr != ERRCODE_NONE )
++		return false;
++
++	sal_Int32 nLen = aOutArgs.getLength();
++	// convert any out params to seem like they were inouts
++	if ( nLen )
++	{
++		for ( sal_Int32 index=0; index < nLen; ++index )
++		{
++			sal_Int32 nOutIndex = aOutArgsIndex[ index ];
++			aArgs[ nOutIndex ] = aOutArgs[ nOutIndex ];
++		}
++
++	}
++	return true;
++}
++String docMacroExists( ScDocShell* pShell, 
++const String& sMod, const String& sMacro )
++{
++	String sFullName;	
++	// would use the script provider to see if the macro exists but
++	// called at this stage tdoc content handler stuff is not set up
++	// so it fails
++
++	BasicManager* pBasicMgr = pShell-> GetBasicManager();
++	if ( pBasicMgr )
++	{
++		StarBASIC* pBasic = pBasicMgr->GetLib( sLibrary );
++		if ( !pBasic )
++		{
++			USHORT nId = pBasicMgr->GetLibId( sLibrary );
++			pBasicMgr->LoadLib( nId );
++			pBasic = pBasicMgr->GetLib( sLibrary );
++		}
++		if ( pBasic )
++		{
++			if ( sMod.Len() ) // we wish to find the macro is a specific module
++			{
++				SbModule* pModule = pBasic->FindModule( sMod );
++				if ( pModule )
++				{
++					SbxArray* pMethods = pModule->GetMethods();
++					if ( pMethods )
++					{
++						SbMethod* pMethod = static_cast< SbMethod* >( pMethods->Find( sMacro, SbxCLASS_METHOD ) );
++						if ( pMethod )
++						{
++							sFullName = sMacro;
++							sFullName.Insert( '.', 0 ).Insert( sMod, 0 ).Insert( '.', 0 ).Insert( sLibrary, 0 );
++						}
++					}
++				}
++			}
++			else if( SbMethod* pMethod = dynamic_cast< SbMethod* >( pBasic->Find( sMacro, SbxCLASS_METHOD ) ) )
++			{
++					if( SbModule* pModule = pMethod->GetModule() )
++					{
++						sFullName = sMacro;
++						sFullName.Insert( '.', 0 ).Insert( pModule->GetName(), 0).Insert( '.', 0 ).Insert( sLibrary, 0 );
++					}
++			}		
++				
++		}
++	}
++	return sFullName;
++}
++
++bool processDocBeforeCloseMacro( ScDocShell* pShell )
++{
++	
++	uno::Any aRet;
++	uno::Sequence< uno::Any > aArgs( 1 );
++	bool bCancel = sal_False;
++	aArgs[ 0 ] <<= bCancel;
++	const static String sBeforeClose( RTL_CONSTASCII_USTRINGPARAM("Workbook_BeforeClose") );
++	String sFullClose = docMacroExists( pShell, String(), sBeforeClose );
++	if ( sFullClose.Len() > 0 )
++	{ 
++		if ( !executeWorkBookMacro( pShell, sFullClose, aArgs, aRet ) )
++			return false;
++	}
++	aArgs[ 0 ] >>= bCancel;
++	return bCancel;
++}
++
++bool addOpenDocEvent( const uno::Reference< container::XNameReplace >& xEvts, const rtl::OUString& sOpenMacro )
++{
++	bool result = false;
++	const rtl::OUString sUrl = sUrlPart0.concat( sOpenMacro ).concat( sUrlPart2 );
++	const static rtl::OUString sEvtType( RTL_CONSTASCII_USTRINGPARAM("EventType") );
++	const static rtl::OUString sScript( RTL_CONSTASCII_USTRINGPARAM("Script") );
++	const static rtl::OUString sEvt( RTL_CONSTASCII_USTRINGPARAM("OnLoad") );
++	if ( xEvts.is() )
++	{
++		uno::Sequence< beans::PropertyValue > aEvents;
++		xEvts->getByName( sEvt ) >>= aEvents;
++		uno::Sequence< beans::PropertyValue > aOpenEvt( 2 );
++		aOpenEvt[ 0 ].Name = sEvtType;
++		aOpenEvt[ 0 ].Value = uno::makeAny(sScript);
++		aOpenEvt[ 1 ].Name = sScript;
++		aOpenEvt[ 1 ].Value = uno::makeAny(sUrl);
++		sal_Int32 nPos = aEvents.getLength();
++
++		sal_Int32 nNewSize = aEvents.getLength() + aOpenEvt.getLength();
++		if ( nNewSize > aEvents.getLength() )
++			aEvents.realloc( nNewSize );
++
++		for ( sal_Int32 nIndex = nPos, nCpyIndex = 0; nIndex<nNewSize; nIndex++, nCpyIndex++ )
++			aEvents[ nIndex ] = aOpenEvt[ nCpyIndex ];	
++			
++		uno::Any aParam = uno::makeAny( aEvents );
++
++		xEvts->replaceByName( sEvt, aParam ); 
++		result = true;
++	}
++	return result;
++}
++
++bool processDocOpenMacro( ScDocShell* pShell )
++{
++	bool result = false;
++	// no point adding a handler for unless it exists
++	// probably worth just doing this on import of xl document
++	
++		
++	// Urk due to async nature, re-enterency and other horrors of the load
++	// process, its seems the most sensible thing is to hook into the 
++	// document event broadcaster
++	const static rtl::OUString sOpenMacro( RTL_CONSTASCII_USTRINGPARAM("Workbook_Open") );
++	const static rtl::OUString sAuto_OpenMacro( RTL_CONSTASCII_USTRINGPARAM("auto_open") );
++
++	uno::Reference< document::XEventsSupplier > xEvtSupplier( pShell->GetModel(), uno::UNO_QUERY );
++	String sNull;
++
++	if ( xEvtSupplier.is() )
++	{
++		uno::Reference< container::XNameReplace > xEvts( xEvtSupplier->getEvents(), uno::UNO_QUERY );
++		// until ObjectModules ( and persisting of codename )  are supported if this is a
++		// document saved from XL then we won't be able to determine the codename for the Workbook
++		// Module, so... we have no choice but to search all modules for the moment 	
++		//rtl::OUString workbookModule = getWorkbookModuleName( pShell );
++		rtl::OUString workbookModule; // no name means all modules will be searched
++		String sFullOpen = docMacroExists( pShell, workbookModule, sOpenMacro );
++		if ( sFullOpen.Len() > 0 )
++		{
++				if ( !addOpenDocEvent( xEvts, sFullOpen ) )
++					return false;
++		}
++	// deep sigh, you can only specify one event binding not multiple ones, thats crap
++/*
++		String sFullAuto = docMacroExists( pShell, workbookModule, sAuto_OpenMacro );
++		if ( sFullAuto.Len() > 0 )
++		{
++				if ( !addOpenDocEvent( xEvts, sFullAuto ) )
++					return false;
++		}
++*/
++		result = true;
++
++	}
++	return result;
++}
++
++uno::Any createWorkSheet( ScDocShell* pShell, SCTAB nTab )
++{
++	uno::Any aRet;
++	try
++	{
++		uno::Reference< lang::XMultiComponentFactory > xSMgr( ::comphelper::getProcessServiceFactory(), uno::UNO_QUERY_THROW );
++		uno::Reference< beans::XPropertySet > xProps( xSMgr, uno::UNO_QUERY_THROW );
++		uno::Reference<uno::XComponentContext > xCtx( xProps->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "DefaultContext" ))), uno::UNO_QUERY_THROW );
++		// Eventually we will be able to pull the Workbook/Worksheet objects
++		// directly from basic and register them as listeners
++
++		// create Workbook
++		uno::Sequence< uno::Any > aArgs(2);
++		aArgs[0] = uno::Any( uno::Reference< uno::XInterface >() );
++		aArgs[1] = uno::Any( pShell->GetModel() );
++		uno::Reference< uno::XInterface > xWorkbook( xSMgr->createInstanceWithArgumentsAndContext(  rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("org.openoffice.excel.Workbook") ), aArgs, xCtx ), uno::UNO_QUERY );
++
++		// create WorkSheet
++		String sSheetName;
++		pShell->GetDocument()->GetName( nTab, sSheetName );
++		aArgs = uno::Sequence< uno::Any >(3);
++		aArgs[ 0 ] <<= xWorkbook;
++		aArgs[ 1 ] <<= pShell->GetModel();
++		aArgs[ 2 ] = uno::makeAny( rtl::OUString( sSheetName ) );
++		aRet <<= xSMgr->createInstanceWithArgumentsAndContext(  rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("org.openoffice.excel.Worksheet") ), aArgs, xCtx );
++	}
++	catch( uno::Exception& e )
++	{
++	}
++	return aRet;
++}
++
++uno::Any createRange( const uno::Any& aRange )
++{
++	uno::Any aRet;
++	try
++	{
++		uno::Reference< sheet::XSheetCellRangeContainer > xRanges( 	aRange, uno::UNO_QUERY );
++		uno::Reference< table::XCellRange > xRange( aRange, uno::UNO_QUERY );
++		uno::Reference< lang::XMultiComponentFactory > xSMgr( ::comphelper::getProcessServiceFactory(), uno::UNO_QUERY_THROW );
++		uno::Reference< beans::XPropertySet > xProps( xSMgr, uno::UNO_QUERY_THROW );
++		if (  xRanges.is() || xRange.is() )
++		{
++			uno::Reference<uno::XComponentContext > xCtx( xProps->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "DefaultContext" ))), uno::UNO_QUERY_THROW );
++			uno::Sequence< uno::Any > aArgs(2);
++			aArgs[0] = uno::Any( uno::Reference< uno::XInterface >() ); // dummy parent
++			if ( xRanges.is() )
++			{
++				aArgs[1] <<= xRanges;
++			}
++			else if ( xRange.is() )
++			{
++				aArgs[1] <<= xRange;
++			}
++			else
++			{
++				throw uno::RuntimeException(); // 
++			}
++			aRet <<= xSMgr->createInstanceWithArgumentsAndContext( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("org.openoffice.excel.Range") ), aArgs, xCtx  );	
++		}
++	}
++	catch( uno::Exception& e ) 
++	{
++	}
++	return aRet;
++}
++
++String getSheetModuleName( ScDocShell* pShell, SCTAB nTab )
++{
++	ScExtDocOptions* pExtOptions = pShell->GetDocument()->GetExtDocOptions();
++	String aCodeName;
++	pShell->GetDocument()->GetName( nTab, aCodeName);
++	// Use code name if that exists
++	if ( pExtOptions )
++		aCodeName = pExtOptions->GetCodeName( nTab );
++	return aCodeName;	
++}
++
++sal_Bool executeSheetMacro( ScDocShell* pShell, SCTAB nTab, String& rMacroName, uno::Sequence< uno::Any >& rArgs )
++{
++	String aModuleName = getSheetModuleName( pShell, nTab );
++	String aMacro = docMacroExists( pShell, aModuleName, rMacroName );
++	if( aMacro.Len() == 0 )
++		return sal_False;
++	
++	uno::Any aRet;
++	return executeWorkBookMacro( pShell, aMacro, rArgs, aRet );
++}
++
++sal_Bool processSheetActivateMacro( ScDocShell* pShell, SCTAB nTab )
++{
++	static String aMacroName( RTL_CONSTASCII_USTRINGPARAM("Worksheet_Activate") );
++	uno::Sequence< uno::Any > aArgs;
++	return executeSheetMacro( pShell, nTab, aMacroName, aArgs );
++}
++
++sal_Bool processSheetDeactivateMacro( ScDocShell* pShell, SCTAB nTab )
++{
++	static String aMacroName( RTL_CONSTASCII_USTRINGPARAM("Worksheet_Deactivate") );
++	uno::Sequence< uno::Any > aArgs;
++	return executeSheetMacro( pShell, nTab, aMacroName, aArgs );
++}
++
++sal_Bool processSheetCalculateMacro( ScDocShell* pShell, SCTAB nTab )
++{
++	static String aMacroName( RTL_CONSTASCII_USTRINGPARAM("Worksheet_Calculate") );
++	uno::Sequence< uno::Any > aArgs;
++	return executeSheetMacro( pShell, nTab, aMacroName, aArgs );
++}
++
++sal_Bool processSheetChangeMacro( ScDocShell* pShell, SCTAB nTab, const uno::Any& rRange )
++{
++	static String aMacroName( RTL_CONSTASCII_USTRINGPARAM("Worksheet_Change") );
++	uno::Sequence< uno::Any > aArgs(1);
++	uno::Any aRange = createRange( rRange );
++	aArgs[0] = aRange;
++	return executeSheetMacro( pShell, nTab, aMacroName, aArgs );
++}
++
++sal_Bool processSheetBeforeDoubleClickMacro( ScDocShell* pShell, SCTAB nTab, const uno::Any& rRange )
++{
++	sal_Bool result = sal_False;
++	static String aMacroName( RTL_CONSTASCII_USTRINGPARAM("Worksheet_BeforeDoubleClick") );
++	uno::Sequence< uno::Any > aArgs(2);
++	uno::Any aRange = createRange( rRange );
++	aArgs[0] = aRange;
++	aArgs[1] <<= sal_False;
++	executeSheetMacro( pShell, nTab, aMacroName, aArgs );
++	aArgs[1] >>= result;
++	return result;
++}
++
++sal_Bool processSheetBeforeRightClickMacro( ScDocShell* pShell, SCTAB nTab, const uno::Any& rRange )
++{
++	sal_Bool result = sal_False;
++	static String aMacroName( RTL_CONSTASCII_USTRINGPARAM("Worksheet_BeforeRightClick") );
++	uno::Sequence< uno::Any > aArgs(2);
++	uno::Any aRange = createRange( rRange );
++	aArgs[0] = aRange;
++	aArgs[1] <<= sal_False;
++	executeSheetMacro( pShell, nTab, aMacroName, aArgs );
++	aArgs[1] >>= result;
++	return result;
++}
++
++sal_Bool processSelectionChangeMacro( ScDocShell* pShell, SCTAB nTab, const uno::Any& rRange )
++{
++	sal_Bool result = sal_False;
++	String aSheetSelectionScript( RTL_CONSTASCII_USTRINGPARAM("Worksheet_SelectionChange") );
++	String aWorkBookSheetSelectionScript( RTL_CONSTASCII_USTRINGPARAM("Workbook_SheetSelectionChange") );
++	
++	uno::Sequence< uno::Any > aArgs(1);
++	uno::Any aRange = createRange( rRange );
++	aArgs[0] = aRange;
++	//Worksheet_SelectionChanged
++	result = executeSheetMacro( pShell, nTab, aSheetSelectionScript, aArgs );
++
++	//Workbook_SheetSelectionChange
++	aArgs = uno::Sequence< uno::Any >(2);
++	aArgs[0] = createWorkSheet( pShell, nTab );
++	aArgs[1] = aRange;
++	String aMacro = docMacroExists( pShell, String(), aWorkBookSheetSelectionScript );
++	if( aMacro.Len() > 0 )
++	{
++		uno::Any aRet;
++		result = executeWorkBookMacro( pShell, aMacro, aArgs, aRet );
++	}
++
++	return result;
++}
+diff -uNrp backup/sc/source/ui/unoobj/viewuno.cxx sc/source/ui/unoobj/viewuno.cxx
+--- backup/sc/source/ui/unoobj/viewuno.cxx	2008-03-25 22:06:25.000000000 +0800
++++ sc/source/ui/unoobj/viewuno.cxx	2008-03-25 15:42:34.000000000 +0800
+@@ -85,9 +85,10 @@
+ #ifndef SC_ACCESSIBILITYHINTS_HXX
+ #include "AccessibilityHints.hxx"
+ #endif
+-
+ using namespace com::sun::star;
+ 
++sal_Bool processSelectionChangeMacro( ScDocShell* pShell, SCTAB nTab, const uno::Any& rRange );
++
+ //------------------------------------------------------------------------
+ 
+ //!	Clipping-Markierungen
+@@ -1694,6 +1695,16 @@ void SAL_CALL ScTabViewObj::removeSelect
+ 
+ void ScTabViewObj::SelectionChanged()
+ {
++	ScTabViewShell* pViewSh = GetViewShell();
++	if ( pViewSh )
++	{
++		ScViewData* pViewData = pViewSh->GetViewData();
++		if ( pViewData )
++		{
++			processSelectionChangeMacro( pViewData->GetDocShell(), pViewData->GetTabNo(), getSelection() );
++		}
++	}
++
+ 	lang::EventObject aEvent;
+ 	aEvent.Source.set(static_cast<cppu::OWeakObject*>(this));
+ 	for ( USHORT n=0; n<aSelectionListeners.Count(); n++ )
+diff -uNrp backup/sc/source/ui/view/tabview3.cxx sc/source/ui/view/tabview3.cxx
+--- backup/sc/source/ui/view/tabview3.cxx	2008-03-25 10:12:54.000000000 +0800
++++ sc/source/ui/view/tabview3.cxx	2008-03-25 22:13:13.000000000 +0800
+@@ -88,6 +88,9 @@
+ 
+ #include <com/sun/star/chart2/data/HighlightedRange.hpp>
+ 
++sal_Bool processSheetDeactivateMacro( ScDocShell* pShell, SCTAB nTab );
++sal_Bool processSheetActivateMacro( ScDocShell* pShell, SCTAB nTab );
++
+ namespace
+ {
+ 
+@@ -1676,6 +1679,8 @@ void ScTabView::SetTabNo( SCTAB nTab, BO
+ 			}
+ 		}
+ 
++		if( !bNew )
++			processSheetDeactivateMacro( aViewData.GetDocShell(), aViewData.GetTabNo() );
+ 										//	nicht InputEnterHandler wegen Referenzeingabe !
+ 
+ 		ScDocument* pDoc = aViewData.GetDocument();
+@@ -1777,7 +1782,10 @@ void ScTabView::SetTabNo( SCTAB nTab, BO
+ 					if ( pGridWin[i]->IsVisible() )
+ 						pGridWin[i]->UpdateEditViewPos();
+ 		}
+-
++		
++		if( !bNew )
++			processSheetActivateMacro( aViewData.GetDocShell(), aViewData.GetTabNo() );
++			
+ 		TabChanged();										// DrawView
+ 		aViewData.GetViewShell()->WindowChanged();			// falls das aktive Fenster anders ist
+         if ( !bUnoRefDialog )
+--- /data4/sles/ooo-mLnew/ooo-build/build/ooc680-m2/sfx2/source/doc/objmisc.cxx	2006-05-22 08:25:06.000000000 +0100
++++ sfx2/source/doc/objmisc.cxx	2006-06-02 13:29:02.000000000 +0100
+@@ -1396,7 +1396,7 @@ ErrCode SfxObjectShell::CallXScript( con
+         ::com::sun::star::uno::Any& aRet,
+         ::com::sun::star::uno::Sequence< sal_Int16 >& aOutParamIndex,
+         ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Any >&
+-            aOutParam)
++            aOutParam, bool bRaiseError )
+ {
+     OSL_TRACE( "in CallXScript" );
+ 	ErrCode nErr = ERRCODE_NONE;
+@@ -1470,7 +1470,7 @@ ErrCode SfxObjectShell::CallXScript( con
+         nErr = ERRCODE_BASIC_INTERNAL_ERROR;
+     }
+ 
+-	if ( bCaughtException )
++	if ( bCaughtException && bRaiseError )
+ 	{
+ 		SfxAbstractDialogFactory* pFact = SfxAbstractDialogFactory::Create();
+ 
+
+--- /data4/sles/ooo-mLnew/ooo-build/build/ooc680-m2/sfx2/inc/objsh.hxx	2006-05-02 17:01:46.000000000 +0100
++++ sfx2/inc/sfx2/objsh.hxx	2006-06-02 13:29:01.000000000 +0100
+@@ -427,7 +427,8 @@ public:
+         const ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Any >& aParams,
+         ::com::sun::star::uno::Any& aRet,
+         ::com::sun::star::uno::Sequence< sal_Int16 >& aOutParamIndex,
+-        ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Any >& aOutParam
++        ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Any >& aOutParam,
++        bool bRaiseError = true
+     );
+ 
+     BOOL                        DoMacroQuery( const String& rScriptType );
+
