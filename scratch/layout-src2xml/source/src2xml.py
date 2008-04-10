@@ -11,8 +11,25 @@ def usage (quitAfter=True):
 
 Options:
 
-TODO: to be worked on.  Meanwhile, please read README.
+    --output-dir        output directory where the converted xml files are 
+                        stored.  The names of the output files will be 
+                       
+                          [basename].xml
+                       
+                        where the [basename] is the base name of the original 
+                        source file.
 
+    --include-dir       specifiy a header search path where header files are
+                        located.  In case of multiple header search paths, use
+                        this option multiple times.
+
+    --include-dir-list  specify a file that contains header search paths.  
+                        Each line in the specified file must correspond with
+                        each individual header search path.
+
+    --file-list         specify a file that contains the source file paths.
+                        Each line in the specified file must correspond with
+                        each individual source file path.
 """
     print msg
     if quitAfter:
