@@ -9,7 +9,7 @@
  	virtual void    Activate();
  	virtual void    Deactivate();
 --- sc/source/ui/docshell/docsh.cxx.bak	2008-04-07 16:25:30.000000000 +0800
-+++ sc/source/ui/docshell/docsh.cxx	2008-04-09 16:35:49.000000000 +0800
++++ sc/source/ui/docshell/docsh.cxx	2008-04-10 15:19:30.000000000 +0800
 @@ -32,7 +32,8 @@
   *    MA  02111-1307  USA
   *
@@ -311,7 +311,7 @@
      else if ( rHint.ISA( SfxEventHint ) )
      {
          ULONG nEventId = ((SfxEventHint&)rHint).GetEventId();
-@@ -1152,6 +990,12 @@ void __EXPORT ScDocShell::Notify( SfxBro
+@@ -1152,6 +990,13 @@ void __EXPORT ScDocShell::Notify( SfxBro
                      }
                  }
                  break;
@@ -319,12 +319,13 @@
 +            case SFX_EVENT_DEACTIVATEDOC:
 +            case SFX_EVENT_CLOSEDOC :
 +            case SFX_EVENT_CLOSEVIEW :
++            case SFX_EVENT_OPENDOC:
 +                processSfxEventHint( this, (SfxEventHint&)rHint );
 +                break;
              default:
                  {
                  }
-@@ -1648,7 +1492,7 @@ BOOL __EXPORT ScDocShell::ConvertFrom( S
+@@ -1648,7 +1493,7 @@ BOOL __EXPORT ScDocShell::ConvertFrom( S
  	}
  
  	// Handler for open workbook event
@@ -560,8 +561,8 @@
  
  # --- Tagets -------------------------------------------------------
 --- /dev/null	2007-05-04 18:54:36.000000000 +0800
-+++ sc/source/ui/docshell/vbaevents.cxx	2008-04-09 16:38:46.000000000 +0800
-@@ -0,0 +1,602 @@
++++ sc/source/ui/docshell/vbaevents.cxx	2008-04-10 18:27:01.000000000 +0800
+@@ -0,0 +1,750 @@
 +/*************************************************************************
 + *
 + *  OpenOffice.org - a multi-platform office productivity suite
@@ -596,7 +597,7 @@
 + *    MA  02111-1307  USA
 + *
 + ************************************************************************/
-+#include "docsh.hxx"
++#include <cppuhelper/implbase1.hxx>
 +#include <basic/basmgr.hxx>
 +#include <basic/sbmod.hxx>
 +#include <basic/sbmeth.hxx>
@@ -604,7 +605,8 @@
 +#include <sfx2/evntconf.hxx>
 +#include <sfx2/event.hxx>
 +#include <sfx2/sfx.hrc>
-+#include "scextopt.hxx"
++#include <toolkit/unohlp.hxx>
++
 +#include <comphelper/processfactory.hxx>
 +#ifndef _COM_SUN_STAR_SHEET_XSHEETCELLRANGECONTAINER_HPP_
 +#include <com/sun/star/sheet/XSheetCellRangeContainer.hpp>
@@ -616,7 +618,12 @@
 +#include <com/sun/star/sheet/XSpreadsheetDocument.hpp>
 +#include <com/sun/star/sheet/XSpreadsheet.hpp>
 +#include <com/sun/star/container/XNamed.hpp>
++#include <com/sun/star/awt/XWindowListener.hpp>
++#include <com/sun/star/awt/WindowEvent.hpp>
++#include <com/sun/star/lang/EventObject.hpp>
++#include "docsh.hxx"
 +#include "uiitems.hxx"
++#include "scextopt.hxx"
 +using namespace com::sun::star;
 +
 +const static String sLibrary( RTL_CONSTASCII_USTRINGPARAM("Standard"));
@@ -625,6 +632,142 @@
 +const static rtl::OUString sUrlPart0 = rtl::OUString::createFromAscii( "vnd.sun.star.script:");
 +const static rtl::OUString sUrlPart1 = rtl::OUString::createFromAscii( "vnd.sun.star.script:Standard.");
 +const static rtl::OUString sUrlPart2 = rtl::OUString::createFromAscii( "?language=Basic&location=document"); 
++
++void processWindowMacro( ScDocShell* pShell, uno::Any aElement, String sFuncName );
++uno::Any getVbaWindow( ScDocShell* pShell );
++
++typedef ::cppu::WeakImplHelper1< awt::XWindowListener > WindowListener_BASE;
++class VbaWindowListener : public WindowListener_BASE
++{
++    ScDocShell* m_pShell;
++    uno::Reference< frame::XModel > m_xModel;
++    sal_Bool m_bPrepare;
++protected :
++    uno::Reference< awt::XWindow > GetContainerWindow();
++    sal_Bool IsMouseReleased();
++    DECL_LINK( fireResizeMacro, Timer* );
++    void processWindowResizeMacro();
++public :
++    VbaWindowListener( ScDocShell* pShell );
++    void startWindowLinstener();
++    void stopWindowLinstener();
++    // XWindowListener
++    virtual void SAL_CALL windowResized( const awt::WindowEvent& aEvent ) throw ( uno::RuntimeException );
++    virtual void SAL_CALL windowMoved( const awt::WindowEvent& aEvent ) throw ( uno::RuntimeException );
++    virtual void SAL_CALL windowShown( const lang::EventObject& aEvent ) throw ( uno::RuntimeException );
++    virtual void SAL_CALL windowHidden( const lang::EventObject& aEvent ) throw ( uno::RuntimeException );
++    virtual void SAL_CALL disposing( const lang::EventObject& aEvent ) throw ( uno::RuntimeException );
++};
++VbaWindowListener::VbaWindowListener( ScDocShell* pShell ) : m_pShell( pShell )
++{
++    m_xModel.set( pShell->GetModel(), uno::UNO_QUERY_THROW );
++    m_bPrepare = sal_False;
++    //m_pTimer = 0;
++}
++uno::Reference< awt::XWindow > 
++VbaWindowListener::GetContainerWindow() 
++{
++    try
++    {
++        if( m_xModel.is() )
++        {
++            uno::Reference< frame::XModel > xModel( m_xModel, uno::UNO_QUERY_THROW );
++            uno::Reference< frame::XController > xController( xModel->getCurrentController(), uno::UNO_QUERY_THROW );
++            uno::Reference< frame::XFrame > xFrame( xController->getFrame(), uno::UNO_QUERY_THROW );
++            uno::Reference< awt::XWindow > xWindow( xFrame->getContainerWindow(), uno::UNO_QUERY_THROW );
++            return xWindow;
++        }
++    }
++	catch( uno::Exception& e )
++    {
++    }
++    return uno::Reference< awt::XWindow >();
++}
++sal_Bool
++VbaWindowListener::IsMouseReleased()
++{
++    Window* pWindow = (VCLUnoHelper::GetWindow(  GetContainerWindow() ) );
++    if( pWindow )
++    {
++        Window::PointerState aPointerState = pWindow->GetPointerState();
++        if( !aPointerState.mnState & ( MOUSE_LEFT | MOUSE_MIDDLE | MOUSE_RIGHT ) )
++            return sal_True; 
++    }
++    return sal_False;
++}
++void
++VbaWindowListener::startWindowLinstener()
++{
++    uno::Reference< awt::XWindow > xWindow( GetContainerWindow(), uno::UNO_QUERY_THROW );
++    xWindow->addWindowListener( this );
++}
++void
++VbaWindowListener::stopWindowLinstener()
++{
++    uno::Reference< awt::XWindow > xWindow( GetContainerWindow(), uno::UNO_QUERY_THROW );
++    xWindow->removeWindowListener( this );
++}
++void
++VbaWindowListener::processWindowResizeMacro()
++{
++    const static String sWindowResize( RTL_CONSTASCII_USTRINGPARAM("Workbook_WindowResize") );
++    if( m_xModel.is() )
++        processWindowMacro( m_pShell, getVbaWindow( m_pShell ), sWindowResize );
++}
++IMPL_LINK( VbaWindowListener, fireResizeMacro, Timer*, pTimer )
++{
++    if( m_bPrepare && pTimer )
++    {
++        if( IsMouseReleased() )
++        {
++            pTimer->Stop();
++            delete pTimer;
++            pTimer = 0;
++            m_bPrepare = sal_False;
++            OSL_TRACE("\tfiredMacroAtHere");
++            processWindowResizeMacro();
++        }
++    }
++    return 0;
++}
++void SAL_CALL
++VbaWindowListener::windowResized(  const awt::WindowEvent& /*aEvent*/ ) throw ( uno::RuntimeException )
++{
++    Window* pWindow = (VCLUnoHelper::GetWindow(  GetContainerWindow() ) );
++    if( pWindow && !m_bPrepare )
++    {
++        m_bPrepare = sal_True;
++        AutoTimer* pTimer = new AutoTimer();
++        pTimer->SetTimeoutHdl( LINK( this, VbaWindowListener, fireResizeMacro ) );
++        pTimer->Start();
++        OSL_TRACE("\tVbaWindowListener::windowResized");
++    }
++}
++void SAL_CALL
++VbaWindowListener::windowMoved(  const awt::WindowEvent& /*aEvent*/ ) throw ( uno::RuntimeException )
++{
++    // not interest this time
++    OSL_TRACE("\tVbaWindowListener::windowMoved");
++}
++void SAL_CALL
++VbaWindowListener::windowShown(  const lang::EventObject& /*aEvent*/ ) throw ( uno::RuntimeException )
++{
++    // not interest this time
++    OSL_TRACE("\tVbaWindowListener::windowShown");
++}
++void SAL_CALL
++VbaWindowListener::windowHidden(  const lang::EventObject& /*aEvent*/ ) throw ( uno::RuntimeException )
++{
++    // not interest this time
++    OSL_TRACE("\tVbaWindowListener::windowHidden");
++}
++void SAL_CALL
++VbaWindowListener::disposing(  const lang::EventObject& /*aEvent*/ ) throw ( uno::RuntimeException )
++{
++    m_pShell = 0;
++    m_xModel->dispose();
++    OSL_TRACE("\tVbaWindowListener::disposing");
++}
 +
 + rtl::OUString getWorkbookModuleName( ScDocShell* pShell )
 +{
@@ -936,10 +1079,10 @@
 +    const static String sWindowDeactivate( RTL_CONSTASCII_USTRINGPARAM("Workbook_WindowDeactivate") );
 +    switch( nEventId )
 +    {
-+        case SFX_EVENT_ACTIVATEDOC:
++        case SFX_EVENT_ACTIVATEDOC :
 +            processWindowMacro( pShell, getVbaWindow( pShell ), sWindowActivate );
 +            break;
-+        case SFX_EVENT_DEACTIVATEDOC:
++        case SFX_EVENT_DEACTIVATEDOC :
 +            // it will be called when close the doc. but will not launch the macro.
 +            processWindowMacro( pShell, getVbaWindow( pShell ), sWindowDeactivate );
 +            break;
@@ -952,6 +1095,12 @@
 +            // does Doc be closed surely?
 +            processDocDeactivateMacroRun( pShell );
 +            break;
++        case SFX_EVENT_OPENDOC :
++        {
++            VbaWindowListener* pListener = new VbaWindowListener( pShell );
++            pListener->startWindowLinstener();
++            break;
++        }
 +        default:
 +            break;
 +    }
