@@ -11,16 +11,18 @@ if test "z$1" = "z--clean"; then
     exit 1;
 fi
 
-# autover=`automake --version | sed 's/^.*[      ]\([0-9.]*[a-z]*\).*$/\1/'`;
-# echo "autover: '$autover'";
-# exit 1;
+old_args=""
+if test "z$@" = "z" && test -f config.log; then
+    old_args=`grep '\$ ./configure' config.log | sed -e 's/.*configure //'`
+    echo "re-using arguments from last configure: $old_args";
+fi
 
 aclocal $ACLOCAL_FLAGS || exit 1;
 automake --gnu --add-missing --copy || exit 1;
 # intltoolize --copy --force --automake
 autoconf || exit 1;
 if test "x$NOCONFIGURE" = "x"; then
-    ./configure "$@"
+    ./configure "$@" "$old_args"
 else
     echo "Skipping configure process."
 fi
