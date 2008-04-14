@@ -22,7 +22,7 @@ automake --gnu --add-missing --copy || exit 1;
 # intltoolize --copy --force --automake
 autoconf || exit 1;
 if test "x$NOCONFIGURE" = "x"; then
-    ./configure "$@" "$old_args"
+    ./configure "$@" $old_args
 else
     echo "Skipping configure process."
 fi
