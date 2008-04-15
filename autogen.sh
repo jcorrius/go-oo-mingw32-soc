@@ -13,7 +13,7 @@ fi
 
 old_args=""
 if test "z$@" = "z" && test -f config.log; then
-    old_args=`grep '\$ ./configure' config.log | sed -e 's/.*configure //' -e 's/=\(\([^-]\|-[^-]\)*\)\( \|$\)/="\1" /g'`
+    old_args=`grep '\$ ./configure' config.log | sed -e 's/.*configure //' -e 's/=\(\([^"-]\|-[-]\)*\)\( \|$\)/="\1" /g'`
     echo "re-using arguments from last configure: $old_args";
 fi
 
@@ -22,7 +22,7 @@ automake --gnu --add-missing --copy || exit 1;
 # intltoolize --copy --force --automake
 autoconf || exit 1;
 if test "x$NOCONFIGURE" = "x"; then
-    ./configure "$@" $old_args
+    ./configure "$@" "$old_args"
 else
     echo "Skipping configure process."
 fi
