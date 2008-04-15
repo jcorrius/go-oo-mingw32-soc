@@ -13,7 +13,7 @@ fi
 
 old_args=""
 if test "z$@" = "z" && test -f config.log; then
-    old_args=`grep '\$ ./configure' config.log | sed -e 's/.*configure //'`
+    old_args=`grep '\$ ./configure' config.log | sed -e 's/.*configure //' -e 's/=\(\([^-]\|-[^-]\)*\)\( \|$\)/="\1" /g'`
     echo "re-using arguments from last configure: $old_args";
 fi
 
