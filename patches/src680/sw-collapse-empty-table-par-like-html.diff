@@ -1,0 +1,170 @@
+Index: sw/source/core/crsr/callnk.cxx
+===================================================================
+RCS file: /cvs/sw/sw/source/core/crsr/callnk.cxx,v
+retrieving revision 1.10
+diff -u -r1.10 callnk.cxx
+--- sw/source/core/crsr/callnk.cxx	16 Sep 2006 20:44:36 -0000	1.10
++++ sw/source/core/crsr/callnk.cxx	15 Apr 2008 13:13:07 -0000
+@@ -124,6 +124,7 @@
+ 	if( !nNdTyp || !rShell.bCallChgLnk )		// siehe ctor
+ 		return ;
+ 
++
+ 	// wird ueber Nodes getravellt, Formate ueberpruefen und im neuen
+ 	// Node wieder anmelden
+ 	SwPaM* pCurCrsr = rShell.IsTableMode() ? rShell.GetTblCrs() : rShell.GetCrsr();
+@@ -131,6 +132,21 @@
+ 	if( !pCNd )
+ 		return;
+ 
++	{
++	    SwFrm *myFrm=pCNd->GetFrm();
++	    if (myFrm!=NULL) {
++		myFrm->InvalidateAll();
++	    }
++
++	    const SwDoc *pDoc=rShell.GetDoc();
++	    const SwCntntNode *pNode=(pDoc!=NULL?pDoc->GetNodes()[nNode]->GetCntntNode():NULL);
++	    SwFrm *myFrm2=pNode->GetFrm();
++	    if (myFrm2!=NULL) {
++		myFrm2->InvalidateAll();
++	    }
++	}
++
++
+ 	xub_StrLen nCmp, nAktCntnt = pCurCrsr->GetPoint()->nContent.GetIndex();
+ 	USHORT nNdWhich = pCNd->GetNodeType();
+ 	ULONG nAktNode = pCurCrsr->GetPoint()->nNode.GetIndex();
+Index: sw/source/core/layout/calcmove.cxx
+===================================================================
+RCS file: /cvs/sw/sw/source/core/layout/calcmove.cxx,v
+retrieving revision 1.69.130.1
+diff -u -r1.69.130.1 calcmove.cxx
+--- sw/source/core/layout/calcmove.cxx	2 Jan 2008 14:39:22 -0000	1.69.130.1
++++ sw/source/core/layout/calcmove.cxx	15 Apr 2008 13:13:07 -0000
+@@ -91,6 +91,8 @@
+ #endif
+ // <--
+ 
++#include <ndtxt.hxx>
++
+ //------------------------------------------------------------------------
+ //				Move-Methoden
+ //------------------------------------------------------------------------
+@@ -977,6 +979,34 @@
+ |*	Letzte Aenderung	MA 03. Mar. 96
+ |*
+ |*************************************************************************/
++bool SwTxtNode::IsCollapse() const
++{
++    if (GetTxt().Len()==0) {
++	ULONG nIdx=GetIndex();
++	const SwEndNode *pNdBefore=GetNodes()[nIdx-1]->GetEndNode();
++	const SwEndNode *pNdAfter=GetNodes()[nIdx+1]->GetEndNode();
++	if (pNdBefore!=NULL && pNdAfter!=NULL) {
++	    return true;
++	} else {
++	    return false;
++	}
++    } else return false;
++}
++
++bool SwFrm::IsCollapse() const
++{
++    if (IsTxtFrm()) {
++	const SwTxtFrm *pTxtFrm=(SwTxtFrm*)this;
++	const SwTxtNode *pTxtNode=pTxtFrm->GetTxtNode();
++	if (pTxtNode && pTxtNode->IsCollapse()) {
++	    return true;
++	} else {
++	    return false;
++	}
++    } else {
++	return false;
++    }
++}
+ 
+ BOOL SwCntntFrm::MakePrtArea( const SwBorderAttrs &rAttrs )
+ {
+@@ -1078,6 +1108,11 @@
+ 
+             // OD 2004-03-02 #106629# - use new method <CalcLowerSpace(..)>
+             SwTwips nLower = CalcLowerSpace( &rAttrs );
++	    if (IsCollapse()) {
++		ViewShell *pSh = GetShell();
++		nUpper=0;
++		nLower=0;
++	    }
+ //            // in balanced columned section frames we do not want the
+ //            // common border
+ //            sal_Bool bCommonBorder = sal_True;
+Index: sw/source/core/text/porrst.cxx
+===================================================================
+RCS file: /cvs/sw/sw/source/core/text/porrst.cxx,v
+retrieving revision 1.43
+diff -u -r1.43 porrst.cxx
+--- sw/source/core/text/porrst.cxx	27 Sep 2007 09:18:30 -0000	1.43
++++ sw/source/core/text/porrst.cxx	15 Apr 2008 13:13:07 -0000
+@@ -120,6 +120,8 @@
+ #include <IDocumentSettingAccess.hxx>
+ #include <IDocumentDeviceAccess.hxx>
+ 
++#include <crsrsh.hxx>
++
+ /*************************************************************************
+  *                      class SwTmpEndPortion
+  *************************************************************************/
+@@ -289,6 +291,20 @@
+ 
+ SwTwips SwTxtFrm::EmptyHeight() const
+ {
++    if (IsCollapse()) {
++	ViewShell *pSh = GetShell();
++	if ( pSh->IsA( TYPE(SwCrsrShell) ) ) {
++	    SwCrsrShell *pCrSh=(SwCrsrShell*)pSh;
++	    SwCntntFrm *pCurrFrm=pCrSh->GetCurrFrm();
++	    if (pCurrFrm==(SwCntntFrm*)this) {
++		// do nothing
++	    } else {
++		return 1;
++	    }
++	} else {
++	    return 1;
++	}
++    }
+     ASSERT( ! IsVertical() || ! IsSwapped(),"SwTxtFrm::EmptyHeight with swapped frame" );
+ 
+     SwFont *pFnt;
+Index: sw/source/core/inc/frame.hxx
+===================================================================
+RCS file: /cvs/sw/sw/source/core/inc/frame.hxx,v
+retrieving revision 1.57
+diff -u -r1.57 frame.hxx
+--- sw/source/core/inc/frame.hxx	22 Nov 2007 15:35:16 -0000	1.57
++++ sw/source/core/inc/frame.hxx	15 Apr 2008 13:13:08 -0000
+@@ -923,6 +923,9 @@
+ 
+     // FME 2007-08-30 #i81146# new loop control
+     void ValidateThisAndAllLowers( const USHORT nStage );
++
++public:
++    bool IsCollapse() const;
+ };
+ 
+ inline BOOL	SwFrm::IsInDocBody() const
+Index: sw/inc/ndtxt.hxx
+===================================================================
+RCS file: /cvs/sw/sw/inc/ndtxt.hxx,v
+retrieving revision 1.51
+diff -u -r1.51 ndtxt.hxx
+--- sw/inc/ndtxt.hxx	22 Oct 2007 15:06:19 -0000	1.51
++++ sw/inc/ndtxt.hxx	15 Apr 2008 13:13:08 -0000
+@@ -700,6 +700,8 @@
+ 
+ 	USHORT GetScalingOfSelectedText( xub_StrLen nStt, xub_StrLen nEnd ) const;
+ 
++    bool IsCollapse() const;
++
+     DECL_FIXEDMEMPOOL_NEWDEL(SwTxtNode)
+ };
+ 
