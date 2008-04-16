@@ -118,6 +118,19 @@ sub upload_sources($)
     return;
 }
 
+sub upload_prefer_rpms($)
+{
+    my ($p_options) = @_;
+    
+    if (defined $p_options->{'local_prefer_rpms'} &&
+        ! defined $p_options->{'do_not_update_remote_sources'}) {
+	sync_sources ("$p_options->{'local_prefer_rpms'}/*",
+		      "$p_options->{'host'}:$p_options->{'remote_prefer_rpms'}");
+    }
+    
+    return;
+}
+
 sub test_remote_dir($$)
 {
     my ($host, $dir) = @_;
@@ -165,19 +178,22 @@ sub abuild_package($)
     
     #FIXME: We should check the architecture of the host
     my $linux32="";
-    $linux32 = "linux32" if ("$p_options->{'arch'}" eq "i386");
+    $linux32 = "linux32" if ("$p_options->{'distro_arch'}" eq "i386");
+    $linux32 = "powerpc32" if ("$p_options->{'distro_arch'}" eq "ppc");
 
     my $buildroot="$p_options->{'buildroot'}";
     my $build_dist="$p_options->{'distro'}";
-    my $abuild_options = "--icecream=10";
-    my $abuild_options .= " --debug=yes";
+    my $abuild_options = "";
+    $abuild_options .= " --prefer-rpms=$p_options->{'remote_prefer_rpms'}" if (defined $p_options->{'remote_prefer_rpms'});
+    $abuild_options .=  " --icecream=$p_options->{'jobs'}" if (defined $p_options->{'icecream'});
+    $abuild_options .= " --debug=$p_options->{'debug'}" if (defined $p_options->{'debug'});
     $abuild_options .= " --prefer-rpms=$p_options->{'prefer_rpms'}" if (defined $p_options->{'prefer_rpms'});
     $abuild_options .= " $p_options->{'package_remote_sources_path'}/$p_options->{'specfile'}";
     
     print "abuild_options=$abuild_options\n";
 #    system ("ssh -t $p_options->{'host'} sudo /bin/sh -c \\\". /work/src/bin/.profile\\\; echo \\\\\$PATH\\\"");
      system ("ssh -t $p_options->{'host'} $linux32 sudo /bin/sh -c \\\". /work/src/bin/.profile\\\; export BUILD_ROOT=$buildroot\\\; export BUILD_DIST=$build_dist\\\; abuild $abuild_options\\\"") &&
-	show_error("Error: abuild failed on $p_options->{'host'}\n");
+	show_error("Error: abuild failed at $p_options->{'host'}:$p_options->{'buildroot'}\n");
 }
 
 sub find_specfile_in_current_dir()
@@ -200,7 +216,7 @@ sub find_specfile_in_current_dir()
 
     show_error("Error: No spec file found in current directory") unless (defined $specfile);
     
-    return $specfile;    	
+    return $specfile;
 }
 
 sub find_specfile($)
@@ -264,6 +280,22 @@ sub set_package_remote_sources_path($)
     return;
 }
 
+sub set_remote_prefer_rpms_path($)
+{
+    my ($p_options) = @_;
+
+
+    if ($p_options->{'local_prefer_rpms'}) {
+	(-d $p_options->{'local_prefer_rpms'}) || show_error("Error: The path $p_options->{'local_prefer_rpms'} defined by --prefer-rpms is not a directory\n");
+	unless (defined $p_options->{'remote_prefer_rpms'}) {
+	    $p_options->{'remote_prefer_rpms'} = mktemp_remote("$p_options->{'host'}", "$p_options->{'remote_tempdir'}/prefer-rpms-XXXX", "-d");
+	}
+    }
+
+    return;
+}
+
+
 sub check_free_space_in_abuild($)
 {
     my ($host) = @_;
@@ -297,22 +329,53 @@ sub set_buildroot_names($)
 {
     my ($p_options) = @_;
     
-    my $buildroot_basename = $p_options->{'package_name'};
-    my $buildroot_suffix = "";
-
-    if ($buildroot_basename =~ /^OpenOffice_org(-.*)?/) {
-	$buildroot_basename = "ooo";
-	# FIXME: an ugly hack to differ the split and non-split builds
-	if ($1) {
-	    $buildroot_suffix = "$1";
-	} elsif (-e "$p_options->{'package_source_path'}/OpenOffice_org-i18n.spec") {
-	    $buildroot_suffix = "-devel";
-	}
-    }
+    if (defined $p_options->{'buildroot'}) {
     
-    my $min_suffix="";
-    $min_suffix=".min" if (defined $buildroot_basename);
-    $p_options->{'buildroot'} = "/abuild/$buildroot_basename-$p_options->{'version'}$min_suffix-$p_options->{'distro'}$buildroot_suffix";
+	$p_options->{'buildroot_name'} = $p_options->{'buildroot'};
+	$p_options->{'buildroot_name'} =~ s/^.*\///g;
+
+    } else {
+
+	my $buildroot_basename = $p_options->{'package_name'};
+	my $buildroot_suffix = "";
+
+	if ($buildroot_basename =~ /^OpenOffice_org(-.*)?/) {
+	    $buildroot_basename = "ooo";
+	    # FIXME: an ugly hack to differ the split and non-split builds
+	    if ($1) {
+		$buildroot_suffix = "$1";
+	    } elsif (-e "$p_options->{'package_source_path'}/OpenOffice_org-i18n.spec") {
+		$buildroot_suffix = "-devel";
+	    } elsif (-e "$p_options->{'package_source_path'}/OpenOffice_org-i18n-group1.spec") {
+		$buildroot_suffix = "-devel";
+	    }
+	}
+
+	my $min_suffix="";
+	$min_suffix=".min" if (defined $p_options->{'min'});
+	
+	my $buildid_suffix="";
+	$buildid_suffix="-$p_options->{'buildid'}" if (defined $p_options->{'buildid'});
+	
+		
+	if (defined $p_options->{'ptf'}) {
+	    $p_options->{'buildroot_name'} = "$buildroot_basename-ptf-$p_options->{'bugid'}$buildroot_suffix$buildid_suffix";
+	} elsif (defined $p_options->{'security'}) {
+	    $p_options->{'buildroot_name'} = "$buildroot_basename-sec$min_suffix-$p_options->{'distro'}$buildroot_suffix$buildid_suffix";
+	} else {
+	    $p_options->{'buildroot_name'} = "$buildroot_basename-$p_options->{'version'}$min_suffix-$p_options->{'distro'}$buildroot_suffix$buildid_suffix";
+	}
+	
+	$p_options->{'buildroot'} = "/abuild/$p_options->{'buildroot_name'}";
+    }
+
+
+    return;
+}
+
+sub check_buildroot($)
+{
+    my ($p_options) = @_;
 
     unless (defined $p_options->{'clean'} || defined $p_options->{'force'}) {
 	my $result = test_remote_dir("$p_options->{'host'}", "$p_options->{'buildroot'}");
@@ -328,7 +391,7 @@ sub set_rpms_paths($)
 {
     my ($p_options) = @_;
     
-    $p_options->{'remote_rpms_path'} = "$p_options->{'buildroot'}/usr/src/packages/RPMS/$p_options->{'arch'}";
+    $p_options->{'remote_rpms_path'} = "$p_options->{'buildroot'}/usr/src/packages/RPMS/$p_options->{'rpm_arch'}";
 }
 
 
@@ -337,8 +400,14 @@ sub set_package_version($)
     my ($p_options) = @_;
     my $version_reg;
     
-    if ($p_options->{'package_name'} =~ m/^OpenOffice_org/) {
+    if ($p_options->{'package_name'} =~ m/^OpenOffice_org$/ ||
+        $p_options->{'package_name'} =~ m/^OpenOffice_org-i18n-icon-themes$/ ||
+        $p_options->{'package_name'} =~ m/^OpenOffice_org-i18n-group1$/ ||
+        $p_options->{'package_name'} =~ m/^OpenOffice_org-i18n-group2$/ ||
+        $p_options->{'package_name'} =~ m/^OpenOffice_org-i18n$/) {
 	$version_reg = '\%define\s*ooo_build_version\s*([\.\w]+)';
+	# OOo_BUILD_VERSION is used on NLD9
+	# $version_reg = '\%define\s*OOo_BUILD_VERSION\s*([\.\w]+)';
     } else {
 	$version_reg = 'Version:\s*([\.\w]+)';
     }
@@ -372,13 +441,39 @@ sub check_distro($)
     }
 }
 
-sub set_arch($)
+sub set_archs($)
 {
     my ($p_options) = @_;
 
     # architectrure is the last piece of the distro string
-    $p_options->{'arch'} = $p_options->{'distro'};
-    $p_options->{'arch'} =~ s/.*-//g;
+    $p_options->{'distro_arch'} = $p_options->{'distro'};
+    $p_options->{'distro_arch'} =~ s/.*-//g;
+    
+    $p_options->{'rpm_arch'} = $p_options->{'distro_arch'};
+    $p_options->{'rpm_arch'} =~ s/i386/i586/;
+}
+
+sub set_status_file($)
+{
+    my ($p_options) = @_;
+
+    unless (defined $p_options->{'status_file'}) {
+	$p_options->{'status_file'} = "$p_options->{'package_source_path'}/../$p_options->{'buildroot_name'}.stat";
+    }
+    
+    return;
+}
+
+sub set_rebuild_options($)
+{
+    my ($p_options) = @_;
+    
+    if (-r $p_options->{'status_file'}) {
+	$p_options->{'remote_tempdir'} = read_item_from_stat("remote_tempdir", $p_options->{'status_file'}, 1);
+	$p_options->{'remote_prefer_rpms'} = read_item_from_stat("remote_prefer_rpms", $p_options->{'status_file'}, 1);
+	$p_options->{'replace_status_file'} = 1;
+    }	
+    $p_options->{'force'} = 1;
 }
 
 sub show_status($)
@@ -419,7 +514,9 @@ sub save_status($)
     return unless (defined $p_options->{'status_file'});
     
     # FIXME: there should be a force option or another logic at all
-    show_error("Error: Status file \"$p_options->{'status_file'}\" already exists") if (-e $p_options->{'status_file'});
+    if ((! defined $p_options->{'replace_status_file'}) && (-e $p_options->{'status_file'})) {
+	show_error("Error: Status file \"$p_options->{'status_file'}\" already exists");
+    }
     
     open (STATE, '>', "$p_options->{'status_file'}") ||
 	show_error("Can't open \"$p_options->{'status_file'}\" for writing: $!");
@@ -432,10 +529,12 @@ sub save_status($)
     print STATE "package_source_name = $p_options->{'package_source_name'}\n";
     print STATE "specfile = $p_options->{'specfile'}\n\n";
 
-    print STATE "arch = $p_options->{'arch'}\n\n";
+    print STATE "distro_arch = $p_options->{'distro_arch'}\n\n";
+    print STATE "rpm_arch = $p_options->{'rpm_arch'}\n\n";
 
     print STATE "remote_tempdir = $p_options->{'remote_tempdir'}\n";
     print STATE "package_remote_sources_path = $p_options->{'package_remote_sources_path'}\n";
+    print STATE "remote_prefer_rpms = $p_options->{'remote_prefer_rpms'}\n";
 
     print STATE "buildroot = $p_options->{'buildroot'}\n";
     print STATE "remote_rpms_path = $p_options->{'remote_rpms_path'}\n";
@@ -444,9 +543,9 @@ sub save_status($)
 }
 
 # FIXME: there should be another function to read the whole stat file if needed
-sub read_item_from_stat($$)
+sub read_item_from_stat($$$)
 {
-    my ($item_name, $status_file) = @_;
+    my ($item_name, $status_file, $optional) = @_;
     
     open (STATE, "$status_file") ||
 	show_error("Can't open \"$status_file\" to read \"$item_name\": $!");
@@ -456,12 +555,15 @@ sub read_item_from_stat($$)
         chomp $line;
 	if ( $line =~ m/$item_name\s*=\s*(.*)\s?/ ) {
 	    $item_value = "$1";
+	    $item_value = undef if (length($item_value) == 0);
 	}
     }
     
     close (STATE);
-    
-    show_error("Error: $item_name entry not found in $status_file") unless (defined $item_value);
+
+    unless ($optional || defined $item_value) {
+	show_error("Error: $item_name entry not found in $status_file");
+    }	
     
     return $item_value;
 }
@@ -473,26 +575,52 @@ sub usage()
     
           "Usage:\n".
 	  "\tooo-build-release [--help] [--host=<host>] [--distro=<distro>]\n" .
-	  "\t[--force] [--min] [--status-file=<stat_file>]\n" .
+	  "\t[--buildid=<id>] [--min] [--prefer-rpms=<dir>]\n" .
+	  "\t[--icecream=<njobs>] [--debug=<opts>]\n" .
+	  "\t[--rebuild[=<stat_file>]] [--force] \n" .
+	  "\t[--ptf=<bugid>] [--security] [--buildroot=<name>]\n" .
+	  "\t[--status-file=<stat_file>] [--replace-status-file=<stat_file>]\n" .
+	  "\t[--get-status-file]\n" .
 	  "\t[--prefer-rpms-from-build=<stat_file>]\n" .
 	  "\t[--re-use-remote-sources-from-build=<stat_file>]\n" .
 	  "\t[--do-not-update-remote-sources] [--keep-remote-tempdir]\n" .
-	  "\t[--no-final-message]\n" .
+	  "\t[--remove-remote-tempdir=<stat_file>][--no-final-message]\n" .
 	
 	  "Options:\n" .
 	  "\t--help: prints this help\n" .
 	  "\t--host: where to build\n" .
 	  "\t--distro: for what distro build\n" .
+	  "\t--prefer-rpms: use rpms from the given directory to install\n" .
+	  "\t\tthe build-root\n" .
+	  "\t--icecream: allow to use icecream with the specified number of\n" .
+	  "\t\tparallel jobs\n" .
+	  "\t--debug: also build the debug package; If <opts> is \"yes\",\n" .
+	  "\t\tuse default settings for debugging. Otherwise append <opts>\n" .
+	  "\t\tto \$RPM_OPT_FLAGS\n" .
+	  "\t--rebuild: start the build again; re-use the remote sources copy;\n" .
+	  "\t\tre-use the buildroot, ...\n" .
 	  "\t--force: re-use remote buildroot if it exists\n" .
+	  "\t--buildid: define extra id to do the \"same\" build in another\n" .
+	  "\t\tbuildroot\n" .
 	  "\t--min: affects the buildroot name only now\n" .
+	  "\t--ptf: do PTF build for the given bugid\n" .
+	  "\t--security: build security fix; defined special builroot number\n" .
+	  "\t--buildroot: force another buildroot directory\n" .
 	  "\t--status-file: where to store information about the current build;\n" .
 	  "\t\tit can be reused for consequent builds\n" .
+	  "\t--replace-status-file: the same like --status-file but it allows to\n" .
+	  "\t\trewrite the older one\n" .
+	  "\t--get-status-file: print the path to the status file; note that the\n" .
+	  "\t\tdefault status file name is derived from other options, like\n" .
+	  "\t\t--distro, --min\n" .
 	  "\t--prefer-rpms-from-build: prefer_rpms produced by another build\n" .
 	  "\t--re-use-remote-sources-from-build: re-use an older remote source dir;\n" .
 	  "\t\tit might speed up the source synchronization\n" .
 	  "\t--do-not-update-remote-sources: skip the source synchronization at all\n" .
 	  "\t--keep-remote-tempdir: do not remove the remote source dir after a\n" .
 	  "\t\tsuccessful build\n" . 
+	  "\t--remove-remote-tempdir: just remove the remote temporary directory\n" .
+	  "\t\tfor the given status file and exit\n" .
 	  "\t--no-final-message: do not show extra pop up window about about that\n" .
 	  "\t\tbuild succeeded\n";
 
@@ -517,19 +645,37 @@ for my $arg (@ARGV) {
     if ($arg eq '--help' || $arg eq '-h') {
 	usage;
 	exit 0;
+    } elsif ($arg =~ m/--rebuild=?(.*)?/) {
+	$options{'status_file'} = "$1" if (length($1));
+	$options{'rebuild'} = 1;
     } elsif ($arg =~ m/--status-file=(.*)/) {
 	$options{'status_file'} = "$1";
+    } elsif ($arg =~ m/--get-status-file/) {
+	$options{'get_status_file'} = 1;
+    } elsif ($arg =~ m/--replace-status-file=(.*)/) {
+	$options{'status_file'} = "$1";
+	$options{'replace_status_file'} = 1;
     } elsif ($arg =~ m/--prefer-rpms-from-build=(.*)/) {
-	$options{'prefer_rpms'} = read_item_from_stat("remote_rpms_path", "$1");
+	$options{'prefer_rpms'} = read_item_from_stat("remote_rpms_path", "$1", 0);
     } elsif ($arg =~ m/--re-use-remote-sources-from-build=(.*)/) {
-	$options{'remote_tempdir'} = read_item_from_stat("remote_tempdir", "$1");
+	$options{'remote_tempdir'} = read_item_from_stat("remote_tempdir", "$1", 0);
 	$options{'re_using_remote_tempdir'} = 1;
     } elsif ($arg =~ m/--do-not-update-remote-sources/) {
 	$options{'do_not_update_remote_sources'} = 1;
     } elsif ($arg =~ m/--keep-remote-tempdir/) {
 	$options{'keep_remote_tempdir'} = 1;
+    } elsif ($arg =~ m/--remove-remote-tempdir=(.*)/) {
+	$options{'remote_tempdir'} = read_item_from_stat("remote_tempdir", "$1", 0);
+	$options{'remove_remote_tempdir'} = 1;
+    } elsif ($arg =~ m/--buildid=(.*)/) {
+	$options{'buildid'} = "$1";
     } elsif ($arg =~ m/--min/) {
 	$options{'min'} = 1;
+    } elsif ($arg =~ m/--ptf=(.*)/) {
+	$options{'ptf'} = 1;
+	$options{'bugid'} = "$1";
+    } elsif ($arg =~ m/--security/) {
+	$options{'security'} = 1;
     } elsif ($arg =~ m/--force/) {
 	$options{'force'} = 1;
     } elsif ($arg =~ m/--no-final-message/) {
@@ -538,6 +684,15 @@ for my $arg (@ARGV) {
 	$options{'host'} = "$1";
     } elsif ($arg =~ m/--distro=(.*)/) {
 	$options{'distro'} = "$1";
+    } elsif ($arg =~ m/--icecream=(.*)/) {
+	$options{'icecream'} = 1;
+	$options{'jobs'} = "$1";
+    } elsif ($arg =~ m/--prefer-rpms=(.*)/) {
+	$options{'local_prefer_rpms'} = "$1";
+    } elsif ($arg =~ m/--debug=?(.*)/) {
+	$options{'debug'} = "$1";
+    } elsif ($arg =~ m/--buildroot=(.*)/) {
+	$options{'buildroot'} = "$1";
     } else {
 	if (! defined $options{'specfile_path'}) {
 	    $options{'specfile_path'} = $arg;
@@ -547,17 +702,34 @@ for my $arg (@ARGV) {
     }
 }
 
+if (defined $options{'remove_remote_tempdir'}) {
+    remove_remote_tempdir(\%options);
+    exit 0;
+}
+
 find_specfile(\%options);
 set_package_name(\%options);
 find_package_sources(\%options);
 check_distro(\%options);
-set_arch(\%options);
+set_archs(\%options);
 set_package_version(\%options);
 set_buildroot_names(\%options);
+set_status_file(\%options);
+
+if (defined $options{'get_status_file'}) {
+    print "$options{'status_file'}\n";
+    exit 0;
+}
+
+set_rebuild_options(\%options) if (defined $options{'rebuild'});
+
 check_free_space_in_abuild($options{'host'});
+check_buildroot(\%options);
 set_rpms_paths(\%options);
 create_remote_tempdir(\%options);
 set_package_remote_sources_path(\%options);
+set_remote_prefer_rpms_path(\%options);
+
 save_status(\%options);
 
 show_status(\%options);
@@ -565,6 +737,7 @@ print ("Waiting 5 seconds...\n");
 sleep 5;
 
 upload_sources(\%options);
+upload_prefer_rpms(\%options);
 
 print ("package_remote_sources_path = $options{'package_remote_sources_path'}\n");
 
@@ -572,4 +745,4 @@ abuild_package(\%options);
 
 remove_remote_tempdir(\%options);
 
-show_msg("Abuild succeeded\n") unless (defined $options{'no_final_message'});
+show_msg("Abuild succeeded at $options{'host'}:$options{'buildroot'}\n") unless (defined $options{'no_final_message'});
