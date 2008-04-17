@@ -19,8 +19,6 @@ EXTRA_DIST = \
 	ChangeLog-to-2.0.0	\
 	ChangeLog-to-2.2
 
-ACLOCAL_AMFLAGS = -I m4
-
 clean-local:
 	test -z "$(OOBUILDDIR)" || rm -rf $(OOBUILDDIR)
 	for icons in $(OOO_ICONS_VERS) ; do \
