@@ -1,5 +1,5 @@
 CWS_WORK_STAMP=koheidatapilot01
-MILESTONE=m238
+MILESTONE=m2
 BASEDIR=$(HOME)/ooo/$(CWS_WORK_STAMP)-$(MILESTONE)
 INSTBASEDIR=$(HOME)/ooo/install/$(CWS_WORK_STAMP)-$(MILESTONE)
 OBJDIR=obj
@@ -8,8 +8,8 @@ DEFINES=-DUNX -DGCC -DLINUX -DCPPU_ENV=gcc3 -DHAVE_GCC_VISIBILITY_FEATURE -g -O0
 CPPFLAGS= \
 	$(DEFINES) \
 	-I$(BASEDIR)/cppuhelper/inc \
-	-I$(BASEDIR)/solver/680/unxlngi6.pro/inc \
-	-I$(BASEDIR)/solver/680/unxlngi6.pro/inc/offuh \
+	-I$(BASEDIR)/solver/300/unxlngi6.pro/inc \
+	-I$(BASEDIR)/solver/300/unxlngi6.pro/inc/offuh \
 	-I./inc
 
 LDFLAGS= \
