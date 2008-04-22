@@ -1,0 +1,152 @@
+--- sw/source/ui/inc/conttree.hxx.orig	2008-02-19 21:56:13.000000000 +0800
++++ sw/source/ui/inc/conttree.hxx	2008-04-22 10:19:21.000000000 +0800
+@@ -43,6 +43,9 @@
+ #include "swcont.hxx"
+ #endif
+ 
++#include<map>
++//using namespace std;
++
+ class SwWrtShell;
+ class SwContentType;
+ class SwNavigationPI;
+@@ -87,6 +90,8 @@ class SwContentTree : public SvTreeListB
+ 	SwWrtShell* 		pActiveShell;   // die aktive oder eine konst. offene View
+ 	SwNavigationConfig*	pConfig;
+ 
++    std::map< void*, sal_Bool > mOutLineNodeMap;
++
+     sal_Int32           nActiveBlock;
+ 	USHORT				nHiddenBlock;
+ 	USHORT 				nRootType;
+--- sw/source/ui/utlui/content.cxx.bak	2008-04-22 10:16:09.000000000 +0800
++++ sw/source/ui/utlui/content.cxx	2008-04-22 10:19:21.000000000 +0800
+@@ -999,7 +999,6 @@ SwContentTree::~SwContentTree()
+ /***************************************************************************
+ 	Drag&Drop methods
+ ***************************************************************************/
+-
+ void SwContentTree::StartDrag( sal_Int8 nAction, const Point& rPosPixel )
+ {
+ 	if( !bIsRoot || nRootType != CONTENT_TYPE_OUTLINE )
+@@ -1049,8 +1048,45 @@ sal_Int8 SwContentTree::AcceptDrop( cons
+ /***************************************************************************
+ 	Beschreibung:	Drop wird im Navigator ausgefuehrt
+ ***************************************************************************/
++void* lcl_GetOutlineKey( SwContentTree* pTree, SwOutlineContent* pContent)
++{
++    void* key = 0;
++    if( pTree && pContent )
++    {
++        SwWrtShell* pShell = pTree->GetWrtShell();
++        sal_Int32 nPos = pContent->GetYPos();
++        if( nPos )
++        {
++            key = (void*)pShell->GetOutlineNode( nPos );
++        }
++    }
++    return key;
++}
++
+ sal_Int8 SwContentTree::ExecuteDrop( const ExecuteDropEvent& rEvt )
+ {
++    SvLBoxEntry* pEntry = pTargetEntry;
++    if( pEntry && ( nRootType == CONTENT_TYPE_OUTLINE ) && lcl_IsContent( pEntry ) )
++    {
++        SwOutlineContent* pOutlineContent = ( SwOutlineContent* )( pEntry->GetUserData() );
++        if( pOutlineContent )
++        {
++            void* key = lcl_GetOutlineKey(this, pOutlineContent);
++            if( !mOutLineNodeMap[key] )
++            {
++                while( pEntry->HasChilds() )
++                {
++                    SvLBoxEntry* pChildEntry = FirstChild( pEntry );
++                    while( pChildEntry )
++                    {
++                        pEntry = pChildEntry;
++                        pChildEntry = NextSibling( pChildEntry );
++                    }
++                }
++                pTargetEntry = pEntry;
++            }
++        }
++    }
+ 	if( bIsRoot )
+ 		return SvTreeListBox::ExecuteDrop( rEvt );
+ 	return bIsInDrag ? DND_ACTION_NONE : GetParentWindow()->ExecuteDrop(rEvt);
+@@ -1339,7 +1375,8 @@ void  SwContentTree::RequestingChilds( S
+ 
+ sal_Bool  SwContentTree::Expand( SvLBoxEntry* pParent )
+ {
+-	if(!bIsRoot || ((SwContentType*)pParent->GetUserData())->GetType() == CONTENT_TYPE_OUTLINE)
++	if(!bIsRoot || (((SwContentType*)pParent->GetUserData())->GetType() == CONTENT_TYPE_OUTLINE) || 
++            (nRootType == CONTENT_TYPE_OUTLINE))
+ 	{
+ 		if(lcl_IsContentType(pParent))
+ 		{
+@@ -1354,18 +1391,39 @@ sal_Bool  SwContentTree::Expand( SvLBoxE
+ 				nHiddenBlock |= nOr;
+             if((pCntType->GetType() == CONTENT_TYPE_OUTLINE))
+             {
++                std::map< void*, sal_Bool > mCurrOutLineNodeMap;
++
++                SwWrtShell* pShell = GetWrtShell();
+                 sal_Bool bBool = SvTreeListBox::Expand(pParent);
+                 SvLBoxEntry* pChild = Next(pParent);
+                 while(pChild && lcl_IsContent(pChild) && pParent->HasChilds())
+                 {
+                     if(pChild->HasChilds())
+-                        SvTreeListBox::Expand(pChild);
++                    {
++                        sal_Int32 nPos = ((SwContent*)pChild->GetUserData())->GetYPos();
++                        void* key = (void*)pShell->GetOutlineNode( nPos );
++                        mCurrOutLineNodeMap.insert(std::map<void*, sal_Bool>::value_type( key, sal_False ) );
++                        std::map<void*,sal_Bool>::iterator iter = mOutLineNodeMap.find( key );
++                        if( iter != mOutLineNodeMap.end() && mOutLineNodeMap[key])
++                        {
++                            mCurrOutLineNodeMap[key] = sal_True;
++                            SvTreeListBox::Expand(pChild);
++                        }
++                    }
+                     pChild = Next(pChild);
+                 }
++                mOutLineNodeMap = mCurrOutLineNodeMap;
+                 return bBool;
+             }
+ 
+ 		}
++        else if( lcl_IsContent(pParent) )
++        {
++            SwWrtShell* pShell = GetWrtShell();
++            sal_Int32 nPos = ((SwContent*)pParent->GetUserData())->GetYPos();
++            void* key = (void*)pShell->GetOutlineNode( nPos );
++            mOutLineNodeMap[key] = sal_True;
++        }
+ 	}
+ 	return SvTreeListBox::Expand(pParent);
+ }
+@@ -1377,7 +1435,8 @@ sal_Bool  SwContentTree::Expand( SvLBoxE
+ sal_Bool  SwContentTree::Collapse( SvLBoxEntry* pParent )
+ {
+ 	sal_Bool bRet;
+-	if(!bIsRoot || ((SwContentType*)pParent->GetUserData())->GetType() == CONTENT_TYPE_OUTLINE)
++	if(!bIsRoot || (((SwContentType*)pParent->GetUserData())->GetType() == CONTENT_TYPE_OUTLINE) || 
++            (nRootType == CONTENT_TYPE_OUTLINE))
+ 	{
+ 		if(lcl_IsContentType(pParent))
+ 		{
+@@ -1394,6 +1453,13 @@ sal_Bool  SwContentTree::Collapse( SvLBo
+ 			else
+ 				nHiddenBlock &= nAnd;
+ 		}
++        else if( lcl_IsContent(pParent) )
++        {
++            SwWrtShell* pShell = GetWrtShell();
++            sal_Int32 nPos = ((SwContent*)pParent->GetUserData())->GetYPos();
++            void* key = (void*)pShell->GetOutlineNode( nPos );
++            mOutLineNodeMap[key] = sal_False;
++        }
+ 			bRet = SvTreeListBox::Collapse(pParent);
+ 	}
+ 	else
