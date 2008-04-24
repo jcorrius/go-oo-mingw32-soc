@@ -1,5 +1,4 @@
 ? sc/Debug
-? sc/sc.diff
 ? sc/sc.vpj
 ? sc/qa/unoapi/sc.sce.single
 Index: sc/inc/dapiuno.hxx
@@ -70,17 +69,17 @@ Index: sc/inc/dpcachetable.hxx
 RCS file: sc/inc/dpcachetable.hxx
 diff -N sc/inc/dpcachetable.hxx
 --- /dev/null	1 Jan 1970 00:00:00 -0000
-+++ sc/inc/dpcachetable.hxx	20 Apr 2008 02:46:57 -0000	1.1.2.7
-@@ -0,0 +1,197 @@
++++ sc/inc/dpcachetable.hxx	25 Apr 2008 00:19:03 -0000	1.1.2.10
+@@ -0,0 +1,256 @@
 +/*************************************************************************
 + *
 + *  OpenOffice.org - a multi-platform office productivity suite
 + *
 + *  $RCSfile: dpcachetable.hxx,v $
 + *
-+ *  $Revision: 1.1.2.7 $
++ *  $Revision: 1.1.2.10 $
 + *
-+ *  last change: $Author: kohei $ $Date: 2008/04/20 02:46:57 $
++ *  last change: $Author: kohei $ $Date: 2008/04/25 00:19:03 $
 + *
 + *  The Contents of this file are made available subject to
 + *  the terms of GNU Lesser General Public License Version 2.1.
@@ -114,7 +113,6 @@ diff -N sc/inc/dpcachetable.hxx
 +#include "osl/mutex.hxx"
 +#include "global.hxx"
 +#include "collect.hxx"
-+#include "dptabdat.hxx"
 +
 +#include <vector>
 +#include <set>
@@ -137,25 +135,43 @@ diff -N sc/inc/dpcachetable.hxx
 +class ScRange;
 +class ScDPDimension;
 +struct ScDPItemData;
++class Date;
 +
-+class ScSharedStringTable
++// ----------------------------------------------------------------------------
++
++/** public interface for string-sharing */
++class ScSharedString
 +{
 +public:
 +    static const sal_Int32 EMPTY = 0;
 +
-+    sal_Int32 insertString(const String& aStr);
-+    sal_Int32 getStringId(const String& aStr);
-+    const String* getString(sal_Int32 nId) const;
-+
-+    ScSharedStringTable();
-+    ~ScSharedStringTable();
++    static const String*    getString(sal_Int32 nId);
++    static sal_Int32        getStringId(const String& aStr);
++    static sal_Int32        insertString(const String& aStr);
 +
 +private:
-+    typedef ::std::hash_map< String, sal_Int32, ScStringHashCode, ::std::equal_to< String > > SharedStrMap;
 +
-+    ::std::vector<String> maSharedStrings;
-+    SharedStrMap maSharedStringIds;
-+    sal_Int32 mnStrCount;
++    /** internal shared string table implementation */
++    class StringTable
++    {
++    public:
++        sal_Int32 insertString(const String& aStr);
++        sal_Int32 getStringId(const String& aStr);
++        const String* getString(sal_Int32 nId) const;
++    
++        StringTable();
++        ~StringTable();
++    
++    private:
++        typedef ::std::hash_map< String, sal_Int32, ScStringHashCode, ::std::equal_to< String > > SharedStrMap;
++    
++        ::std::vector<String> maSharedStrings;
++        SharedStrMap maSharedStringIds;
++        sal_Int32 mnStrCount;
++    };
++
++    static ::osl::Mutex maStrMutex;
++    static StringTable maStringTable;
 +};
 +
 +// ----------------------------------------------------------------------------
@@ -163,7 +179,6 @@ diff -N sc/inc/dpcachetable.hxx
 +class ScDPCacheTable
 +{
 +public:
-+    typedef ::std::hash_map<long, ::std::vector<ScDPItemData> > GroupFilterType;
 +
 +    /** individual cell within table. */
 +    struct Cell
@@ -177,14 +192,62 @@ diff -N sc/inc/dpcachetable.hxx
 +        Cell();
 +    };
 +
-+    /** filtering criteria */
-+    struct Filter
++    /** individual filter item used in SingleFilter and GroupFilter. */
++    struct FilterItem
 +    {
-+        sal_Int32   mnFieldIndex;
 +        sal_Int32   mnMatchStrId;
 +        double      mfValue;
++        bool        mbHasValue;
 +
-+        Filter();
++        FilterItem();
++    };
++
++    /** interface class used for filtering of rows. */
++    class FilterBase
++    {
++    public:
++        /** returns true if the matching condition is met for a single cell
++            value, or false otherwise. */
++        virtual bool match(const Cell& rCell) const = 0;
++    };
++
++    /** ordinary single-item filter. */
++    class SingleFilter : public FilterBase
++    {
++    public:
++        explicit SingleFilter();
++        explicit SingleFilter(sal_Int32 nMatchStrId, double fValue, bool bHasValue);
++
++        virtual bool match(const Cell& rCell) const;
++
++        const String    getMatchString() const;
++        double          getMatchValue() const;
++        bool            hasValue() const;
++
++    private:
++        FilterItem  maItem;
++    };
++
++    /** multi-item (group) filter. */
++    class GroupFilter : public FilterBase
++    {
++    public:
++        GroupFilter();
++        virtual bool match(const Cell& rCell) const;
++
++        void addMatchItem(const String& rStr, double fVal, bool bHasValue);
++
++    private:
++        ::std::vector<FilterItem> maItems;
++    };
++
++    /** single filtering criterion. */
++    struct Criterion
++    {
++        sal_Int32 mnFieldIndex;
++        ::boost::shared_ptr<FilterBase> mpFilter;
++
++        Criterion();
 +    };
 +
 +    ScDPCacheTable();
@@ -230,17 +293,16 @@ diff -N sc/inc/dpcachetable.hxx
 +        get an empty collection. */
 +    const TypedStrCollection& getFieldEntries(sal_Int32 nIndex) const;
 +
-+    void filterTable(const ::std::hash_map<long, ScDPItemData>& rFilters,
++    /** Filter the table based on the specified criteria, and copy the
++        result to rTabData.  This method is used, for example, to generate
++        a drill-down data table. */
++    void filterTable(const ::std::vector<Criterion>& rCriteria,
 +                     ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Any > >& rTabData,
-+                     bool bRepeatIfEmpty = false,
-+                     GroupFilterType* pGroupFilter = NULL);
++                     bool bRepeatIfEmpty = false);
 +
 +    void clear();
 +    void swap(ScDPCacheTable& rOther);
 +    bool empty() const;
-+
-+    static const String* getString(sal_Int32 nId);
-+    static sal_Int32 getStringId(const String& aStr);
 +
 +private:
 +    void getValueData(ScDocument* pDoc, const ScAddress& rPos, Cell& rCell);
@@ -261,10 +323,6 @@ diff -N sc/inc/dpcachetable.hxx
 +    /** used to track visibility of rows.  The first row below the header row
 +        has the index of 0. */
 +    ::std::vector<bool> maRowsVisible;
-+
-+    static sal_Int32 insertString(const String& aStr);
-+    static ::osl::Mutex maStrMutex;
-+    static ScSharedStringTable maStringTable;
 +};
 +
 +
@@ -273,10 +331,10 @@ Index: sc/inc/dpgroup.hxx
 ===================================================================
 RCS file: /cvs/sc/sc/inc/dpgroup.hxx,v
 retrieving revision 1.4
-retrieving revision 1.4.570.3
-diff -u -b -I $Revision.*$ -I $Author.*$ -r1.4 -r1.4.570.3
+retrieving revision 1.4.570.4
+diff -u -b -I $Revision.*$ -I $Author.*$ -r1.4 -r1.4.570.4
 --- sc/inc/dpgroup.hxx	8 Sep 2005 17:34:35 -0000	1.4
-+++ sc/inc/dpgroup.hxx	17 Apr 2008 13:10:39 -0000	1.4.570.3
++++ sc/inc/dpgroup.hxx	24 Apr 2008 23:26:38 -0000	1.4.570.4
 @@ -37,6 +37,7 @@
  #define SC_DPGROUP_HXX
  
@@ -290,7 +348,7 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.4 -r1.4.570.3
      bool        HasElement( const ScDPItemData& rData ) const;
      bool        HasCommonElement( const ScDPGroupItem& rOther ) const;
 +
-+    void        GetAllElements( ::std::vector<ScDPItemData>& rElements ) const;
++    void        FillGroupFilter( ScDPCacheTable::GroupFilter& rFilter ) const;
  };
  
  typedef ::std::vector<ScDPGroupItem> ScDPGroupItemVec;
@@ -328,7 +386,7 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.4 -r1.4.570.3
      long*       CopyFields( const long* pSourceDims, long nCount );
  
      bool        IsNumGroupDimension( long nDimension ) const;
-@@ -213,8 +223,13 @@
+@@ -213,8 +223,12 @@
      virtual void                    DisposeData();
      virtual void                    SetEmptyFlags( BOOL bIgnoreEmptyRows, BOOL bRepeatIfEmpty );
  
@@ -336,9 +394,8 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.4 -r1.4.570.3
 -    virtual BOOL                    GetNextRow( const ScDPTableIteratorParam& rParam );
 +    virtual void                    CreateCacheTable();
 +    virtual void                    FilterCacheTable(const ::std::vector<ScDPDimension*>& rPageDims);
-+    virtual void                    GetDrillDownData(const ::std::hash_map<long, ScDPItemData>& rFilters,
-+                                                     ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Any > >& rTabData,
-+                                                     GroupFilterType* pGroupFilter = NULL);
++    virtual void                    GetDrillDownData(const ::std::vector<ScDPCacheTable::Criterion>& rCriteria,
++                                                     ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Any > >& rData);
 +    virtual void                    CalcResults(CalcInfo& rInfo, bool bAutoShow);
 +    virtual const ScDPCacheTable&   GetCacheTable() const;
  
@@ -529,10 +586,10 @@ Index: sc/inc/dpsdbtab.hxx
 ===================================================================
 RCS file: /cvs/sc/sc/inc/dpsdbtab.hxx,v
 retrieving revision 1.3
-retrieving revision 1.3.570.3
-diff -u -b -I $Revision.*$ -I $Author.*$ -r1.3 -r1.3.570.3
+retrieving revision 1.3.570.4
+diff -u -b -I $Revision.*$ -I $Author.*$ -r1.3 -r1.3.570.4
 --- sc/inc/dpsdbtab.hxx	8 Sep 2005 17:35:48 -0000	1.3
-+++ sc/inc/dpsdbtab.hxx	17 Apr 2008 13:10:39 -0000	1.3.570.3
++++ sc/inc/dpsdbtab.hxx	24 Apr 2008 23:26:38 -0000	1.3.570.4
 @@ -50,6 +50,11 @@
  #include "dptabdat.hxx"
  #endif
@@ -553,7 +610,7 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.3 -r1.3.570.3
  
  public:
  					ScDatabaseDPData(
-@@ -94,8 +98,13 @@
+@@ -94,8 +98,12 @@
  	virtual void					DisposeData();
  	virtual void					SetEmptyFlags( BOOL bIgnoreEmptyRows, BOOL bRepeatIfEmpty );
  
@@ -561,9 +618,8 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.3 -r1.3.570.3
 -	virtual BOOL					GetNextRow( const ScDPTableIteratorParam& rParam );
 +    virtual void                    CreateCacheTable();
 +    virtual void                    FilterCacheTable(const ::std::vector<ScDPDimension*>& rPageDims);
-+    virtual void                    GetDrillDownData(const ::std::hash_map<long, ScDPItemData>& rFilters,
-+                                                     ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Any > >& rTabData,
-+                                                     GroupFilterType* pGroupFilter = NULL);
++    virtual void                    GetDrillDownData(const ::std::vector<ScDPCacheTable::Criterion>& rCriteria,
++                                                     ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Any > >& rData);
 +    virtual void                    CalcResults(CalcInfo& rInfo, bool bAutoShow);
 +    virtual const ScDPCacheTable&   GetCacheTable() const;
  };
@@ -573,10 +629,10 @@ Index: sc/inc/dpshttab.hxx
 ===================================================================
 RCS file: /cvs/sc/sc/inc/dpshttab.hxx,v
 retrieving revision 1.4
-retrieving revision 1.4.570.4
-diff -u -b -I $Revision.*$ -I $Author.*$ -r1.4 -r1.4.570.4
+retrieving revision 1.4.570.5
+diff -u -b -I $Revision.*$ -I $Author.*$ -r1.4 -r1.4.570.5
 --- sc/inc/dpshttab.hxx	8 Sep 2005 17:36:03 -0000	1.4
-+++ sc/inc/dpshttab.hxx	17 Apr 2008 13:10:39 -0000	1.4.570.4
++++ sc/inc/dpshttab.hxx	24 Apr 2008 23:26:38 -0000	1.4.570.5
 @@ -48,6 +48,14 @@
  #include "address.hxx"
  #endif
@@ -600,7 +656,7 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.4 -r1.4.570.4
  
  public:
  					ScSheetDPData( ScDocument* pD, const ScSheetSourceDesc& rDesc );
-@@ -85,8 +92,15 @@
+@@ -85,8 +92,14 @@
  	virtual void					DisposeData();
  	virtual void					SetEmptyFlags( BOOL bIgnoreEmptyRows, BOOL bRepeatIfEmpty );
  
@@ -610,9 +666,8 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.4 -r1.4.570.4
 +
 +    virtual void                    CreateCacheTable();
 +    virtual void                    FilterCacheTable(const ::std::vector<ScDPDimension*>& rPageDims);
-+    virtual void                    GetDrillDownData(const ::std::hash_map<long, ScDPItemData>& rFilters,
-+                                                     ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Any > >& rData,
-+                                                     GroupFilterType* pGroupFilter = NULL);
++    virtual void                    GetDrillDownData(const ::std::vector<ScDPCacheTable::Criterion>& rCriteria,
++                                                     ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Any > >& rData);
 +    virtual void                    CalcResults(CalcInfo& rInfo, bool bAutoShow);
 +    virtual const ScDPCacheTable&   GetCacheTable() const;
  };
@@ -622,15 +677,16 @@ Index: sc/inc/dptabdat.hxx
 ===================================================================
 RCS file: /cvs/sc/sc/inc/dptabdat.hxx,v
 retrieving revision 1.6
-retrieving revision 1.6.216.4
-diff -u -b -I $Revision.*$ -I $Author.*$ -r1.6 -r1.6.216.4
+retrieving revision 1.6.216.6
+diff -u -b -I $Revision.*$ -I $Author.*$ -r1.6 -r1.6.216.6
 --- sc/inc/dptabdat.hxx	25 Jan 2007 11:03:15 -0000	1.6
-+++ sc/inc/dptabdat.hxx	17 Apr 2008 13:10:39 -0000	1.6.216.4
-@@ -40,11 +40,22 @@
++++ sc/inc/dptabdat.hxx	25 Apr 2008 00:02:15 -0000	1.6.216.6
+@@ -40,10 +40,21 @@
  #include "address.hxx"
  #endif
  
 +#include "dpoutput.hxx"
++#include "dpcachetable.hxx"
 +
  #ifndef _STRING_HXX
  #include <tools/string.hxx>
@@ -645,10 +701,8 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.6 -r1.6.216.4
 +}}}}
 +
  class TypedStrCollection;
-+class ScDPDimension;
  
  // -----------------------------------------------------------------------
- 
 @@ -65,6 +76,7 @@
  #define SC_DAPI_LEVEL_WEEK		1
  #define SC_DAPI_LEVEL_WEEKDAY	2
@@ -657,7 +711,7 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.6 -r1.6.216.4
  // --------------------------------------------------------------------
  //
  //	base class ScDPTableData to allow implementation with tabular data
-@@ -105,29 +117,12 @@
+@@ -105,29 +117,11 @@
  	void	Set( double fV, BYTE nT ) { fValue = fV; nType = nT; }
  };
  
@@ -688,16 +742,14 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.6 -r1.6.216.4
 +class ScDPDimension;
 +class ScDPLevel;
 +class ScDPInitState;
-+class ScDPCacheTable;
 +class ScDPResultMember;
  
  class ScDPTableData
  {
-@@ -138,6 +133,31 @@
+@@ -138,6 +132,30 @@
  	long 	nLastRet;
  
  public:
-+    typedef ::std::hash_map<long, ::std::vector<ScDPItemData> > GroupFilterType;
 +
 +    /** This structure stores dimension information used when calculating
 +        results.  These data are read only during result calculation, so it
@@ -725,7 +777,7 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.6 -r1.6.216.4
  				ScDPTableData();
  	virtual		~ScDPTableData();
  
-@@ -155,8 +175,15 @@
+@@ -155,8 +173,14 @@
  	virtual void					DisposeData() = 0;
  	virtual void					SetEmptyFlags( BOOL bIgnoreEmptyRows, BOOL bRepeatIfEmpty ) = 0;
  
@@ -735,15 +787,14 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.6 -r1.6.216.4
 +
 +    virtual void                    CreateCacheTable();
 +    virtual void                    FilterCacheTable(const ::std::vector<ScDPDimension*>& rPageDims);
-+    virtual void                    GetDrillDownData(const ::std::hash_map<long, ScDPItemData>& rFilters,
-+                                                     ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Any > >& rData,
-+                                                     GroupFilterType* pGroupFilter = NULL);
++    virtual void                    GetDrillDownData(const ::std::vector<ScDPCacheTable::Criterion>& rCriteria,
++                                                     ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Any > >& rData);
 +    virtual void                    CalcResults(CalcInfo& rInfo, bool bAutoShow);
 +    virtual const ScDPCacheTable&   GetCacheTable() const = 0;
  
                                      // overloaded in ScDPGroupTableData:
      virtual BOOL                    IsBaseForGroup(long nDim) const;
-@@ -166,6 +193,25 @@
+@@ -166,6 +190,25 @@
                                                 const ScDPItemData& rBaseData, long nBaseIndex ) const;
      virtual BOOL                    HasCommonElement( const ScDPItemData& rFirstData, long nFirstIndex,
                                                        const ScDPItemData& rSecondData, long nSecondIndex ) const;
@@ -1056,17 +1107,17 @@ Index: sc/source/core/data/dpcachetable.cxx
 RCS file: sc/source/core/data/dpcachetable.cxx
 diff -N sc/source/core/data/dpcachetable.cxx
 --- /dev/null	1 Jan 1970 00:00:00 -0000
-+++ sc/source/core/data/dpcachetable.cxx	17 Apr 2008 13:11:10 -0000	1.1.2.10
-@@ -0,0 +1,803 @@
++++ sc/source/core/data/dpcachetable.cxx	25 Apr 2008 00:02:15 -0000	1.1.2.12
+@@ -0,0 +1,781 @@
 +/*************************************************************************
 + *
 + *  OpenOffice.org - a multi-platform office productivity suite
 + *
 + *  $RCSfile: dpcachetable.cxx,v $
 + *
-+ *  $Revision: 1.1.2.10 $
++ *  $Revision: 1.1.2.12 $
 + *
-+ *  last change: $Author: kohei $ $Date: 2008/04/17 13:11:10 $
++ *  last change: $Author: kohei $ $Date: 2008/04/25 00:02:15 $
 + *
 + *  The Contents of this file are made available subject to
 + *  the terms of GNU Lesser General Public License Version 2.1.
@@ -1110,6 +1161,7 @@ diff -N sc/source/core/data/dpcachetable.cxx
 +#include <com/sun/star/sdbc/XResultSetMetaDataSupplier.hpp>
 +#include <com/sun/star/util/Date.hpp>
 +#include <com/sun/star/sheet/DataPilotFieldFilter.hpp>
++#include <com/sun/star/sheet/DataPilotFieldGroupBy.hpp>
 +
 +#include <memory>
 +
@@ -1135,7 +1187,7 @@ diff -N sc/source/core/data/dpcachetable.cxx
 +            rParam.GetEntry(0).bDoQuery;
 +}
 +
-+ScSharedStringTable::ScSharedStringTable() :
++ScSharedString::StringTable::StringTable() :
 +    mnStrCount(0)
 +{
 +    // empty string (ID = 0)
@@ -1143,11 +1195,11 @@ diff -N sc/source/core/data/dpcachetable.cxx
 +    maSharedStringIds.insert( SharedStrMap::value_type(String(), mnStrCount++) );
 +}
 +
-+ScSharedStringTable::~ScSharedStringTable()
++ScSharedString::StringTable::~StringTable()
 +{
 +}
 +
-+sal_Int32 ScSharedStringTable::insertString(const String& aStr)
++sal_Int32 ScSharedString::StringTable::insertString(const String& aStr)
 +{
 +    SharedStrMap::const_iterator itr = maSharedStringIds.find(aStr), 
 +        itrEnd = maSharedStringIds.end();
@@ -1164,7 +1216,7 @@ diff -N sc/source/core/data/dpcachetable.cxx
 +    return itr->second;
 +}
 +
-+sal_Int32 ScSharedStringTable::getStringId(const String& aStr)
++sal_Int32 ScSharedString::StringTable::getStringId(const String& aStr)
 +{
 +    SharedStrMap::const_iterator itr = maSharedStringIds.find(aStr), 
 +        itrEnd = maSharedStringIds.end();
@@ -1176,7 +1228,7 @@ diff -N sc/source/core/data/dpcachetable.cxx
 +    return itr->second;
 +}
 +
-+const String* ScSharedStringTable::getString(sal_Int32 nId) const
++const String* ScSharedString::StringTable::getString(sal_Int32 nId) const
 +{
 +    if (nId >= mnStrCount)
 +        return NULL;
@@ -1186,24 +1238,131 @@ diff -N sc/source/core/data/dpcachetable.cxx
 +
 +// ----------------------------------------------------------------------------
 +
++// static 
++::osl::Mutex ScSharedString::maStrMutex;
++ScSharedString::StringTable ScSharedString::maStringTable;
++
++sal_Int32 ScSharedString::insertString(const String& aStr)
++{
++    ::osl::MutexGuard aGuard(maStrMutex);
++    return maStringTable.insertString(aStr);
++}
++
++const String* ScSharedString::getString(sal_Int32 nId)
++{
++    ::osl::MutexGuard aGuard(maStrMutex);
++    return maStringTable.getString(nId);
++}
++
++sal_Int32 ScSharedString::getStringId(const String& aStr)
++{
++    ::osl::MutexGuard aGuard(maStrMutex);
++    return maStringTable.getStringId(aStr);
++}
++
++// ----------------------------------------------------------------------------
++
 +ScDPCacheTable::Cell::Cell() :
 +    mnCategoryRef(0),
-+    mnStrId(ScSharedStringTable::EMPTY),
++    mnStrId(ScSharedString::EMPTY),
 +    mnType(SC_VALTYPE_EMPTY),
 +    mfValue(0.0),
 +    mbNumeric(false)
 +{
 +}
 +
-+ScDPCacheTable::Filter::Filter() :
-+    mnFieldIndex(-1),
-+    mnMatchStrId(ScSharedStringTable::EMPTY),
-+    mfValue(0.0)
++// ----------------------------------------------------------------------------
++
++ScDPCacheTable::FilterItem::FilterItem() :
++    mnMatchStrId(ScSharedString::EMPTY),
++    mfValue(0.0),
++    mbHasValue(false)
 +{
 +}
 +
-+::osl::Mutex ScDPCacheTable::maStrMutex;
-+ScSharedStringTable ScDPCacheTable::maStringTable;
++// ----------------------------------------------------------------------------
++
++ScDPCacheTable::SingleFilter::SingleFilter()
++{
++}
++
++ScDPCacheTable::SingleFilter::SingleFilter(sal_Int32 nMatchStrId, double fValue, bool bHasValue)
++{
++    maItem.mnMatchStrId = nMatchStrId;
++    maItem.mfValue      = fValue;
++    maItem.mbHasValue   = bHasValue;
++}
++
++bool ScDPCacheTable::SingleFilter::match(const Cell& rCell) const
++{
++    if (rCell.mnStrId != maItem.mnMatchStrId &&
++        (!rCell.mbNumeric || rCell.mfValue != maItem.mfValue))
++        return false;
++
++    return true;
++}
++
++const String ScDPCacheTable::SingleFilter::getMatchString() const
++{
++    const String* pStr = ScSharedString::getString(maItem.mnMatchStrId);
++    if (pStr)
++        return *pStr;
++
++    return String();
++}
++
++double ScDPCacheTable::SingleFilter::getMatchValue() const
++{
++    return maItem.mfValue;
++}
++
++bool ScDPCacheTable::SingleFilter::hasValue() const
++{
++    return maItem.mbHasValue;
++}
++
++// ----------------------------------------------------------------------------
++
++ScDPCacheTable::GroupFilter::GroupFilter()
++{
++}
++
++bool ScDPCacheTable::GroupFilter::match(const Cell& rCell) const
++{
++    vector<FilterItem>::const_iterator itrEnd = maItems.end();
++    for (vector<FilterItem>::const_iterator itr = maItems.begin(); itr != itrEnd; ++itr)
++    {
++        bool bMatch = false;
++        if (rCell.mbNumeric)
++            bMatch = (itr->mfValue == rCell.mfValue);
++        else
++            bMatch = (itr->mnMatchStrId == rCell.mnStrId);
++
++        if (bMatch)
++            return true;
++    }
++    return false;
++}
++
++void ScDPCacheTable::GroupFilter::addMatchItem(const String& rStr, double fVal, bool bHasValue)
++{
++    sal_Int32 nStrId = ScSharedString::getStringId(rStr);
++    FilterItem aItem;
++    aItem.mnMatchStrId = nStrId;
++    aItem.mfValue = fVal;
++    aItem.mbHasValue = bHasValue;
++    maItems.push_back(aItem);
++}
++
++// ----------------------------------------------------------------------------
++
++ScDPCacheTable::Criterion::Criterion() :
++    mnFieldIndex(-1),
++    mpFilter(static_cast<FilterBase*>(NULL))
++{
++}
++
++// ----------------------------------------------------------------------------
 +
 +ScDPCacheTable::ScDPCacheTable()
 +{
@@ -1252,7 +1411,7 @@ diff -N sc/source/core/data/dpcachetable.cxx
 +    {
 +        String aStr;
 +        pDoc->GetString(nCol + nStartCol, nStartRow, nTab, aStr);
-+        sal_Int32 nStrId = maStringTable.insertString(aStr);
++        sal_Int32 nStrId = ScSharedString::insertString(aStr);
 +        maHeader.push_back(nStrId);
 +    }
 +
@@ -1298,7 +1457,7 @@ diff -N sc/source/core/data/dpcachetable.cxx
 +
 +            String aStr;
 +            pDoc->GetString(nStartCol + nCol, nStartRow + nRow, nTab, aStr);
-+            rCell.mnStrId = maStringTable.insertString(aStr);
++            rCell.mnStrId = ScSharedString::insertString(aStr);
 +            rCell.mnType = SC_VALTYPE_STRING;
 +            rCell.mbNumeric = false;
 +            ScAddress aPos(nStartCol + nCol, nStartRow + nRow, nTab);
@@ -1324,7 +1483,7 @@ diff -N sc/source/core/data/dpcachetable.cxx
 +    try
 +    {
 +        rStr = xRow->getString(nCol);
-+        rCell.mnStrId = ScDPCacheTable::getStringId(rStr);
++        rCell.mnStrId = ScSharedString::getStringId(rStr);
 +        rCell.mnType = SC_VALTYPE_STRING;
 +
 +        switch (nType)
@@ -1415,7 +1574,7 @@ diff -N sc/source/core/data/dpcachetable.cxx
 +        {
 +            String aColTitle = xMeta->getColumnLabel(nCol+1);
 +            aColTypes[nCol]  = xMeta->getColumnType(nCol+1);
-+            maHeader.push_back( ScDPCacheTable::getStringId(aColTitle) );
++            maHeader.push_back( ScSharedString::getStringId(aColTitle) );
 +        }
 +
 +        // Initialize field entries container.
@@ -1490,15 +1649,17 @@ diff -N sc/source/core/data/dpcachetable.cxx
 +        for (; itr != itrEnd; ++itr)
 +        {
 +            ScDPDimension* pDim = *itr;
++            if (!pDim->HasSelectedPage())
++                // 'show all' is selected.
++                continue;
++
 +            ScDPCacheTable::Cell aDimCell = getSelectedDimension(pDim);
 +            
 +            sal_Int32 nCol = pDim->GetDimension();
 +            const Cell& rCell = rRow[nCol];
-+            if (aDimCell.mnStrId != ScSharedStringTable::EMPTY && aDimCell.mnStrId != rCell.mnStrId)
++            if (aDimCell.mnStrId != rCell.mnStrId)
 +            {
-+                // Selected page dimension value does not match the current value.  Skip it 
-+                // (note: when the selected page dimension value is empty, '- all -' is 
-+                // selected.
++                // Selected page dimension value does not match the current value.  Skip it.
 +                maRowsVisible[nRow] = false;
 +                break;
 +            }
@@ -1527,12 +1688,12 @@ diff -N sc/source/core/data/dpcachetable.cxx
 +    if (nIndex >= static_cast<sal_Int32>(maHeader.size()))
 +        return NULL;
 +
-+    return getString(maHeader[nIndex]);
++    return ScSharedString::getString(maHeader[nIndex]);
 +}
 +
 +sal_Int32 ScDPCacheTable::getFieldIndex(const String& rStr) const
 +{
-+    sal_Int32 nStrId = getStringId(rStr);
++    sal_Int32 nStrId = ScSharedString::getStringId(rStr);
 +    if (nStrId < 0)
 +        // string not found.
 +        return nStrId;
@@ -1551,7 +1712,6 @@ diff -N sc/source/core/data/dpcachetable.cxx
 +{
 +    if (nIndex < 0 || static_cast<size_t>(nIndex) >= maFieldEntries.size())
 +    {
-+        fprintf(stdout, "ScDPCacheTable::getFieldEntries: OUT OF BOUND\n");fflush(stdout);
 +        // index out of bound.  Hopefully this code will never be reached.
 +        static const TypedStrCollection emptyCollection;
 +        return emptyCollection;
@@ -1560,33 +1720,8 @@ diff -N sc/source/core/data/dpcachetable.cxx
 +    return *maFieldEntries[nIndex].get();
 +}
 +
-+void ScDPCacheTable::filterTable(const hash_map<long, ScDPItemData>& rFilters, 
-+                                 Sequence< Sequence<Any> >& rTabData, bool bRepeatIfEmpty,
-+                                 GroupFilterType* pGroupFilter)
++void ScDPCacheTable::filterTable(const vector<Criterion>& rCriteria, Sequence< Sequence<Any> >& rTabData, bool bRepeatIfEmpty)
 +{
-+#if 0    
-+    if (pGroupFilter)
-+    {
-+        GroupFilterType::const_iterator itrEnd = pGroupFilter->end();
-+        for (GroupFilterType::const_iterator itr = pGroupFilter->begin(); itr != itrEnd; ++itr)
-+        {
-+            const String* fieldName = getFieldName(itr->first);
-+            if (!fieldName)
-+                continue;
-+
-+            fprintf(stdout, "ScDPCacheTable::filterTable:   group field name = '%s'\n",
-+                    rtl::OUStringToOString(*fieldName, RTL_TEXTENCODING_UTF8).getStr());
-+            const vector<ScDPItemData>& rGrpItems = itr->second;
-+            vector<ScDPItemData>::const_iterator itrItemEnd = rGrpItems.end();
-+            for (vector<ScDPItemData>::const_iterator itrItem = rGrpItems.begin(); itrItem != itrItemEnd; ++itrItem)
-+            {
-+                fprintf(stdout, "ScDPCacheTable::filterTable:     match name = '%s'\n",
-+                        rtl::OUStringToOString(itrItem->aString, RTL_TEXTENCODING_UTF8).getStr());
-+            }
-+        }
-+    }
-+#endif    
-+
 +    sal_Int32 nRowSize = getRowSize();
 +    sal_Int32 nColSize = getColSize();
 +
@@ -1603,7 +1738,7 @@ diff -N sc/source/core/data/dpcachetable.cxx
 +    for (sal_Int32 nCol = 0; nCol < nColSize; ++nCol)
 +    {
 +        OUString str;
-+        const String* pStr = getString(maHeader[nCol]);
++        const String* pStr = ScSharedString::getString(maHeader[nCol]);
 +        if (pStr)
 +            str = *pStr;
 +
@@ -1613,48 +1748,7 @@ diff -N sc/source/core/data/dpcachetable.cxx
 +    }
 +    tableData.push_back(headerRow);
 +
-+    // Convert filters.
-+    vector<Filter> filters;
-+    size_t nFilterSize = rFilters.size();
-+    filters.reserve(nFilterSize);
-+    {
-+        hash_map<long, ScDPItemData>::const_iterator itrEnd = rFilters.end();
-+        for (hash_map<long, ScDPItemData>::const_iterator itr = rFilters.begin(); itr != itrEnd; ++itr)
-+        {
-+            const ScDPItemData& rItem = itr->second;
-+            Filter fil;
-+            fil.mnFieldIndex = itr->first;
-+            fil.mnMatchStrId = getStringId(itr->second.aString);
-+            fil.mfValue = itr->second.fValue;
-+            if (fil.mnFieldIndex >= 0)
-+                filters.push_back(fil);
-+        }
-+    }
 +
-+    hash_map<long, vector<Filter> > groupFilters;
-+    if (pGroupFilter)
-+    {
-+        GroupFilterType::const_iterator itrEnd = pGroupFilter->end();
-+        for (GroupFilterType::const_iterator itr = pGroupFilter->begin(); itr != itrEnd; ++itr)
-+        {
-+            long nField = itr->first;
-+            vector<Filter> aGrpItems;
-+            const vector<ScDPItemData>& rGrpItems = itr->second;
-+            vector<ScDPItemData>::const_iterator itrItemEnd = rGrpItems.end();
-+            for (vector<ScDPItemData>::const_iterator itrItem = rGrpItems.begin(); itrItem != itrItemEnd; ++itrItem)
-+            {
-+                Filter fil;
-+                fil.mnFieldIndex = itr->first;
-+                fil.mnMatchStrId = getStringId(itrItem->aString);
-+                fil.mfValue = itrItem->fValue;
-+                aGrpItems.push_back(fil);
-+            }
-+
-+            groupFilters.insert( hash_map<long, vector<Filter> >::value_type(nField, aGrpItems) );
-+        }
-+    }
-+
-+    // Data rows.
 +    for (sal_Int32 nRow = 0; nRow < nRowSize; ++nRow)
 +    {
 +        if (!maRowsVisible[nRow])
@@ -1662,73 +1756,27 @@ diff -N sc/source/core/data/dpcachetable.cxx
 +            continue;
 +
 +        bool bRetainRow = true;
++
++        vector<Criterion>::const_iterator itrEnd = rCriteria.end();
++        for (vector<Criterion>::const_iterator itr = rCriteria.begin(); itr != itrEnd; ++itr)
 +        {
-+            vector<Filter>::const_iterator itr, itrEnd = filters.end();
-+            for (itr = filters.begin(); itr != itrEnd; ++itr)
++            if (itr->mnFieldIndex >= nColSize)
++                // specified field is outside the source data columns.  Don't
++                // use this criterion.
++                continue;
++
++            const Cell* pCell = getCell(itr->mnFieldIndex, nRow, bRepeatIfEmpty);
++            if (!pCell)
 +            {
-+                if (itr->mnFieldIndex >= nColSize)
-+                    // specified field is outside the source data columns.  Don't use
-+                    // this criteria.
-+                    continue;
-+    
-+                const Cell* pCell = getCell(itr->mnFieldIndex, nRow, bRepeatIfEmpty);
-+                if (!pCell)
-+                {
-+                    // This should never happen, but just in case...
-+                    bRetainRow = false;
-+                    break;
-+                }
-+    
-+                if (pCell->mnStrId != itr->mnMatchStrId &&
-+                    (!pCell->mbNumeric || pCell->mfValue != itr->mfValue))
-+                {
-+                    bRetainRow = false;
-+                    break;
-+                }    
++                // This should never happen, but just in case...
++                bRetainRow = false;
++                break;
 +            }
-+        }
 +
-+        if (!bRetainRow)
-+            continue;
-+
-+        // filter for grouping.
-+
-+        if (!groupFilters.empty())
-+        {
-+            hash_map<long, vector<Filter> >::const_iterator itrEnd = groupFilters.end();
-+            for (hash_map<long, vector<Filter> >::const_iterator itr = groupFilters.begin(); itr != itrEnd; ++itr)
++            if (!itr->mpFilter->match(*pCell))
 +            {
-+                if (itr->first >= nColSize)
-+                    // specified field is outside the source data columns.  Don't use
-+                    // this criteria.
-+                    continue;
-+
-+                const Cell* pCell = getCell(itr->first, nRow, bRepeatIfEmpty);
-+                if (!pCell)
-+                {
-+                    // This should never happen, but just in case...
-+                    bRetainRow = false;
-+                    break;
-+                }
-+
-+                const vector<Filter>& rFilItems = itr->second;
-+                vector<Filter>::const_iterator itr2End = rFilItems.end();
-+                bool bGroupMatch = false;
-+                for (vector<Filter>::const_iterator itr2 = rFilItems.begin(); itr2 != itr2End; ++itr2)
-+                {
-+                    if (pCell->mnStrId == itr2->mnMatchStrId ||
-+                        (pCell->mbNumeric && pCell->mfValue == itr2->mfValue))
-+                    {
-+                        bGroupMatch = true;
-+                        break;
-+                    }
-+                }
-+
-+                if (!bGroupMatch)
-+                {
-+                    bRetainRow = false;
-+                    break;
-+                }
++                bRetainRow = false;
++                break;
 +            }
 +        }
 +
@@ -1744,8 +1792,8 @@ diff -N sc/source/core/data/dpcachetable.cxx
 +            const Cell* pCell = getCell(nCol, nRow, bRepeatIfEmpty);
 +            if (!pCell)
 +            {
-+                    // This should never happen, but in case this happens,
-+                    // just stick in an empty string.
++                // This should never happen, but in case this happens, just
++                // stick in an empty string.
 +                OUString str;
 +                any <<= str;
 +                row[nCol] = any;
@@ -1757,7 +1805,7 @@ diff -N sc/source/core/data/dpcachetable.cxx
 +            else
 +            {
 +                OUString str;
-+                const String* pStr = getString(pCell->mnStrId);
++                const String* pStr = ScSharedString::getString(pCell->mnStrId);
 +                if (pStr)
 +                    str = *pStr;
 +                any <<= str;
@@ -1839,36 +1887,17 @@ diff -N sc/source/core/data/dpcachetable.cxx
 +    Cell aCell;
 +    aCell.mfValue = rData.fValue;
 +    aCell.mbNumeric = rData.bHasValue;
-+    aCell.mnStrId = getStringId(rData.aString);
++    aCell.mnStrId = ScSharedString::getStringId(rData.aString);
 +    return aCell;
-+}
-+
-+// static 
-+sal_Int32 ScDPCacheTable::insertString(const String& aStr)
-+{
-+    ::osl::MutexGuard aGuard(maStrMutex);
-+    return maStringTable.insertString(aStr);
-+}
-+
-+const String* ScDPCacheTable::getString(sal_Int32 nId)
-+{
-+    ::osl::MutexGuard aGuard(maStrMutex);
-+    return maStringTable.getString(nId);
-+}
-+
-+sal_Int32 ScDPCacheTable::getStringId(const String& aStr)
-+{
-+    ::osl::MutexGuard aGuard(maStrMutex);
-+    return maStringTable.getStringId(aStr);
 +}
 Index: sc/source/core/data/dpgroup.cxx
 ===================================================================
 RCS file: /cvs/sc/sc/source/core/data/dpgroup.cxx,v
 retrieving revision 1.7
-retrieving revision 1.7.202.4
-diff -u -b -I $Revision.*$ -I $Author.*$ -r1.7 -r1.7.202.4
+retrieving revision 1.7.202.5
+diff -u -b -I $Revision.*$ -I $Author.*$ -r1.7 -r1.7.202.5
 --- sc/source/core/data/dpgroup.cxx	27 Feb 2007 12:03:31 -0000	1.7
-+++ sc/source/core/data/dpgroup.cxx	21 Apr 2008 03:07:58 -0000	1.7.202.4
++++ sc/source/core/data/dpgroup.cxx	24 Apr 2008 23:26:45 -0000	1.7.202.5
 @@ -51,10 +51,29 @@
  #include "collect.hxx"
  #include "global.hxx"
@@ -1901,20 +1930,158 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.7 -r1.7.202.4
  
  #define D_TIMEFACTOR              86400.0
  
-@@ -396,6 +415,12 @@
+@@ -64,7 +83,135 @@
+ const sal_Int32 SC_DP_DATE_FIRST = -1;
+ const sal_Int32 SC_DP_DATE_LAST = 10000;
+ 
+-// -----------------------------------------------------------------------
++// ============================================================================
++
++class ScDPGroupDateFilter : public ScDPCacheTable::FilterBase
++{
++public:
++    ScDPGroupDateFilter(double fMatchValue, sal_Int32 nDatePart, 
++                        const Date* pNullDate, const ScDPNumGroupInfo* pNumInfo);
++
++    virtual bool match(const ScDPCacheTable::Cell &rCell) const;
++
++private:
++    ScDPGroupDateFilter(); // disabled
++
++    const Date*             mpNullDate;
++    const ScDPNumGroupInfo* mpNumInfo;
++    double                  mfMatchValue;
++    sal_Int32               mnDatePart;
++};
++
++// ----------------------------------------------------------------------------
++
++ScDPGroupDateFilter::ScDPGroupDateFilter(double fMatchValue, sal_Int32 nDatePart, 
++                                 const Date* pNullDate, const ScDPNumGroupInfo* pNumInfo) :
++    mpNullDate(pNullDate),
++    mpNumInfo(pNumInfo),
++    mfMatchValue(fMatchValue),
++    mnDatePart(nDatePart)
++{
++//  fprintf(stdout, "ScDPCacheTable:DateGroupFilter::DateGroupFilter: match value = %g; date part = %ld\n",
++//          mfMatchValue, mnDatePart);
++}
++
++bool ScDPGroupDateFilter::match(const ScDPCacheTable::Cell& rCell) const
++{
++    using namespace ::com::sun::star::sheet;
++    using ::rtl::math::approxFloor;
++    using ::rtl::math::approxEqual;
++
++    if (!rCell.mbNumeric)
++        return false;
++
++    if (!mpNumInfo)
++        return false;
++
++    // Start and end dates are inclusive.  (An end date without a time value
++    // is included, while an end date with a time value is not.)
++
++    if ( rCell.mfValue < mpNumInfo->Start && !approxEqual(rCell.mfValue, mpNumInfo->Start) )
++        return static_cast<sal_Int32>(mfMatchValue) == SC_DP_DATE_FIRST;
++
++    if ( rCell.mfValue > mpNumInfo->End && !approxEqual(rCell.mfValue, mpNumInfo->End) )
++        return static_cast<sal_Int32>(mfMatchValue) == SC_DP_DATE_LAST;
++
++    if (mnDatePart == DataPilotFieldGroupBy::HOURS || mnDatePart == DataPilotFieldGroupBy::MINUTES || 
++        mnDatePart == DataPilotFieldGroupBy::SECONDS)
++    {
++        // handle time
++        // (as in the cell functions, ScInterpreter::ScGetHour etc.: seconds are rounded)
++
++        double time = rCell.mfValue - approxFloor(rCell.mfValue);
++        long seconds = static_cast<long>(approxFloor(time*D_TIMEFACTOR + 0.5));
++
++        switch (mnDatePart)
++        {
++            case DataPilotFieldGroupBy::HOURS:
++            {
++                sal_Int32 hrs = seconds / 3600;
++                sal_Int32 matchHrs = static_cast<sal_Int32>(mfMatchValue);
++                return hrs == matchHrs;
++            }
++            case DataPilotFieldGroupBy::MINUTES:
++            {
++                sal_Int32 minutes = (seconds % 3600) / 60;
++                sal_Int32 matchMinutes = static_cast<sal_Int32>(mfMatchValue);
++                return minutes == matchMinutes;
++            }
++            case DataPilotFieldGroupBy::SECONDS:
++            {
++                sal_Int32 sec = seconds % 60;
++                sal_Int32 matchSec = static_cast<sal_Int32>(mfMatchValue);
++                return sec == matchSec;
++            }
++            default:
++                DBG_ERROR("invalid time part");
++        }
++        return false;
++    }
++
++    Date date = *mpNullDate + static_cast<long>(approxFloor(rCell.mfValue));
++    switch (mnDatePart)
++    {
++        case DataPilotFieldGroupBy::YEARS:
++        {
++            sal_Int32 year = static_cast<sal_Int32>(date.GetYear());
++            sal_Int32 matchYear = static_cast<sal_Int32>(mfMatchValue);
++            return year == matchYear;
++        }
++        case DataPilotFieldGroupBy::QUARTERS:
++        {
++            sal_Int32 qtr =  1 + (static_cast<sal_Int32>(date.GetMonth()) - 1) / 3;
++            sal_Int32 matchQtr = static_cast<sal_Int32>(mfMatchValue);
++            return qtr == matchQtr;
++        }
++        case DataPilotFieldGroupBy::MONTHS:
++        {
++            sal_Int32 month = static_cast<sal_Int32>(date.GetMonth());
++            sal_Int32 matchMonth = static_cast<sal_Int32>(mfMatchValue);
++            return month == matchMonth;
++        }
++        case DataPilotFieldGroupBy::DAYS:
++        {
++            Date yearStart(1, 1, date.GetYear());
++            sal_Int32 days = (date - yearStart) + 1;       // Jan 01 has value 1
++            if (days >= 60 && !date.IsLeapYear())
++            {
++                // This is not a leap year.  Adjust the value accordingly.
++                ++days;
++            }
++            sal_Int32 matchDays = static_cast<sal_Int32>(mfMatchValue);
++            return days == matchDays;
++        }
++        default:
++            DBG_ERROR("invalid date part");
++    }
++
++    return false;
++}
++
++// ============================================================================
+ 
+ void lcl_AppendDateStr( rtl::OUStringBuffer& rBuffer, double fValue, SvNumberFormatter* pFormatter )
+ {
+@@ -396,6 +543,13 @@
      return false;
  }
  
-+void ScDPGroupItem::GetAllElements( vector<ScDPItemData>& rElements ) const
++void ScDPGroupItem::FillGroupFilter( ScDPCacheTable::GroupFilter& rFilter ) const
 +{
-+    rElements.clear();
-+    rElements.assign(aElements.begin(), aElements.end());
++    ScDPItemDataVec::const_iterator itrEnd = aElements.end();
++    for (ScDPItemDataVec::const_iterator itr = aElements.begin(); itr != itrEnd; ++itr)
++        rFilter.addMatchItem(itr->aString, itr->fValue, itr->bHasValue);
 +}
 +
  // -----------------------------------------------------------------------
  
  ScDPGroupDimension::ScDPGroupDimension( long nSource, const String& rNewName ) :
-@@ -514,6 +539,14 @@
+@@ -514,6 +668,14 @@
      return NULL;
  }
  
@@ -1929,7 +2096,7 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.7 -r1.7.202.4
  void ScDPGroupDimension::DisposeData()
  {
      delete pCollection;
-@@ -825,6 +858,7 @@
+@@ -825,6 +987,7 @@
  {
      DBG_ASSERT( pSource, "ScDPGroupTableData: pSource can't be NULL" );
  
@@ -1937,7 +2104,7 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.7 -r1.7.202.4
      nSourceCount = pSource->GetColumnCount();               // real columns, excluding data layout
      pNumGroups = new ScDPNumGroupDimension[nSourceCount];
  }
-@@ -840,6 +874,7 @@
+@@ -840,6 +1003,7 @@
      ScDPGroupDimension aNewGroup( rGroup );
      aNewGroup.SetGroupDim( GetColumnCount() );      // new dimension will be at the end
      aGroups.push_back( aNewGroup );
@@ -1945,7 +2112,7 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.7 -r1.7.202.4
  }
  
  void ScDPGroupTableData::SetNumGroupDimension( long nIndex, const ScDPNumGroupDimension& rGroup )
-@@ -972,9 +1007,123 @@
+@@ -972,9 +1136,179 @@
      pSourceData->SetEmptyFlags( bIgnoreEmptyRows, bRepeatIfEmpty );
  }
  
@@ -1956,12 +2123,12 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.7 -r1.7.202.4
 +}
 +
 +void ScDPGroupTableData::FilterCacheTable(const vector<ScDPDimension*>& rPageDims)
-+{
+ {
+-    pSourceData->ResetIterator();
 +    pSourceData->FilterCacheTable(rPageDims);
 +}
 +
-+void ScDPGroupTableData::GetDrillDownData(const hash_map<long, ScDPItemData>& rFilters, Sequence< Sequence<Any> >& rTabData,
-+                                          GroupFilterType* /*pGroupFilter*/)
++void ScDPGroupTableData::GetDrillDownData(const vector<ScDPCacheTable::Criterion>& rCriteria, Sequence< Sequence<Any> >& rData)
 +{
 +    typedef hash_map<long, const ScDPGroupDimension*> GroupFieldMapType;
 +    GroupFieldMapType aGroupFieldIds;
@@ -1971,45 +2138,101 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.7 -r1.7.202.4
 +            aGroupFieldIds.insert( hash_map<long, const ScDPGroupDimension*>::value_type(itr->GetGroupDim(), &(*itr)) );
 +    }
 +
-+    // Go through all the field names and skip group name(s) if any.
-+    hash_map<long, ScDPItemData> filters;
-+    GroupFilterType groupFilters;
++    vector<ScDPCacheTable::Criterion> aNewCriteria;
++    aNewCriteria.reserve(rCriteria.size() + aGroups.size());
++
++    // Go through all the filtered field names and process them appropriately.
++
++    vector<ScDPCacheTable::Criterion>::const_iterator itrEnd = rCriteria.end();
++    GroupFieldMapType::const_iterator itrGrpEnd = aGroupFieldIds.end();
++    for (vector<ScDPCacheTable::Criterion>::const_iterator itr = rCriteria.begin(); itr != itrEnd; ++itr)
 +    {
-+        hash_map<long, ScDPItemData>::const_iterator itrEnd = rFilters.end();
-+        GroupFieldMapType::const_iterator itrGrpEnd = aGroupFieldIds.end();
-+        for (hash_map<long, ScDPItemData>::const_iterator itr = rFilters.begin(); itr != itrEnd; ++itr)
++        ScDPCacheTable::SingleFilter* pFilter = dynamic_cast<ScDPCacheTable::SingleFilter*>(itr->mpFilter.get());
++        if (!pFilter)
++            // We expect this to be a single filter.
++            continue;
++
++        GroupFieldMapType::const_iterator itrGrp = aGroupFieldIds.find(itr->mnFieldIndex);
++        if (itrGrp == itrGrpEnd)
 +        {
-+            const ScDPItemData& rGrpItem = itr->second;
-+            GroupFieldMapType::const_iterator itrGrp = aGroupFieldIds.find(itr->first);
-+            if (itrGrp == itrGrpEnd)
-+                // This is a regular source field.
-+                filters.insert( hash_map<long, ScDPItemData>::value_type(itr->first, itr->second) );
++            if (IsNumGroupDimension(itr->mnFieldIndex))
++            {
++                // internal number group field
++                const ScDPNumGroupDimension& rNumGrpDim = pNumGroups[itr->mnFieldIndex];
++                const ScDPDateGroupHelper* pDateHelper = rNumGrpDim.GetDateHelper();
++                if (!pDateHelper)
++                {
++                    // What do we do here !?
++                    continue;
++                }
++
++                ScDPCacheTable::Criterion aCri;
++                aCri.mnFieldIndex = itr->mnFieldIndex;
++                aCri.mpFilter.reset(new ScDPGroupDateFilter(
++                    pFilter->getMatchValue(), pDateHelper->GetDatePart(), 
++                    pDoc->GetFormatTable()->GetNullDate(), &pDateHelper->GetNumInfo()));
++
++                aNewCriteria.push_back(aCri);
++            }
 +            else
 +            {
-+                // This is a group field.
-+                const ScDPGroupDimension* pGrpDim = itrGrp->second;
-+                long nSrcDim = pGrpDim->GetSourceDim();
-+                vector<ScDPItemData> aGrpItems;
++                // This is a regular source field.
++                aNewCriteria.push_back(*itr);
++            }
++        }
++        else
++        {
++            // This is an ordinary group field or external number group field.
++
++            const ScDPGroupDimension* pGrpDim = itrGrp->second;
++            long nSrcDim = pGrpDim->GetSourceDim();
++            const ScDPDateGroupHelper* pDateHelper = pGrpDim->GetDateHelper();
++
++            if (pDateHelper)
++            {
++                // external number group
++                ScDPCacheTable::Criterion aCri;
++                aCri.mnFieldIndex = nSrcDim;  // use the source dimension, not the group dimension.
++                aCri.mpFilter.reset(new ScDPGroupDateFilter(
++                    pFilter->getMatchValue(), pDateHelper->GetDatePart(), 
++                    pDoc->GetFormatTable()->GetNullDate(), &pDateHelper->GetNumInfo()));
++
++                aNewCriteria.push_back(aCri);
++            }
++            else
++            {
++                // normal group
++
++                // Note that each group dimension may have multiple group names!
 +                size_t nGroupItemCount = pGrpDim->GetItemCount();
 +                for (size_t i = 0; i < nGroupItemCount; ++i)
 +                {
 +                    const ScDPGroupItem* pGrpItem = pGrpDim->GetGroupByIndex(i);
-+                    if (!pGrpItem || !pGrpItem->GetName().IsCaseInsEqual(rGrpItem))
++                    ScDPItemData aName;
++                    aName.aString   = pFilter->getMatchString();
++                    aName.fValue    = pFilter->getMatchValue();
++                    aName.bHasValue = pFilter->hasValue();
++                    if (!pGrpItem || !pGrpItem->GetName().IsCaseInsEqual(aName))
 +                        continue;
-+
-+                    pGrpItem->GetAllElements(aGrpItems);
++    
++                    ScDPCacheTable::Criterion aCri;
++                    aCri.mnFieldIndex = nSrcDim;
++                    aCri.mpFilter.reset(new ScDPCacheTable::GroupFilter);
++                    ScDPCacheTable::GroupFilter* pGrpFilter = 
++                        static_cast<ScDPCacheTable::GroupFilter*>(aCri.mpFilter.get());
++    
++                    pGrpItem->FillGroupFilter(*pGrpFilter);
++                    aNewCriteria.push_back(aCri);
 +                }
-+                groupFilters.insert( GroupFilterType::value_type(nSrcDim, aGrpItems) );
 +            }
 +        }
 +    }
-+    
-+    pSourceData->GetDrillDownData(filters, rTabData, &groupFilters);
++
++    pSourceData->GetDrillDownData(aNewCriteria, rData);
 +}
 +
 +void ScDPGroupTableData::CalcResults(CalcInfo& rInfo, bool bAutoShow)
- {
--    pSourceData->ResetIterator();
++{
 +    // This CalcInfo instance is used only to retrive data from the original
 +    // data source.
 +    CalcInfo aInfoSrc = rInfo;
@@ -2071,7 +2294,7 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.7 -r1.7.202.4
  }
  
  long* ScDPGroupTableData::CopyFields( const long* pSourceDims, long nCount )
-@@ -1055,42 +1204,6 @@
+@@ -1055,42 +1389,6 @@
      }
  }
  
@@ -2685,10 +2908,10 @@ Index: sc/source/core/data/dpsdbtab.cxx
 ===================================================================
 RCS file: /cvs/sc/sc/source/core/data/dpsdbtab.cxx,v
 retrieving revision 1.12
-retrieving revision 1.12.202.5
-diff -u -b -I $Revision.*$ -I $Author.*$ -r1.12 -r1.12.202.5
+retrieving revision 1.12.202.6
+diff -u -b -I $Revision.*$ -I $Author.*$ -r1.12 -r1.12.202.6
 --- sc/source/core/data/dpsdbtab.cxx	27 Feb 2007 12:04:37 -0000	1.12
-+++ sc/source/core/data/dpsdbtab.cxx	21 Apr 2008 03:07:58 -0000	1.12.202.5
++++ sc/source/core/data/dpsdbtab.cxx	24 Apr 2008 23:26:45 -0000	1.12.202.6
 @@ -55,14 +55,25 @@
  #include <com/sun/star/sdbc/XRowSet.hpp>
  #include <com/sun/star/sdbc/XResultSetMetaDataSupplier.hpp>
@@ -3053,7 +3276,7 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.12 -r1.12.202.5
  	DBG_ERROR("getDimensionName: invalid dimension");
  	return String();
  }
-@@ -500,106 +280,40 @@
+@@ -500,106 +280,43 @@
  	//!	disable flags
  }
  
@@ -3134,11 +3357,17 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.12 -r1.12.202.5
 -			for (i=0; i<rParam.nDatCount; i++)
 -			{
 -				//!	merge this with lcl_FillItemData, distinguish all SC_VALTYPE_... types
--
--				long nDim = rParam.pDats[i];
 +    CreateCacheTable();
 +    pImpl->aCacheTable.filterByPageDimension(rPageDims);
 +}
+ 
+-				long nDim = rParam.pDats[i];
++void ScDatabaseDPData::GetDrillDownData(const vector<ScDPCacheTable::Criterion>& rCriteria, Sequence< Sequence<Any> >& rData)
++{
++    CreateCacheTable();
++    sal_Int32 nRowSize = pImpl->aCacheTable.getRowSize();
++    if (!nRowSize)
++        return;
  
 -				double fVal = 0.0;
 -				BYTE nType = SC_VALTYPE_EMPTY;
@@ -3153,11 +3382,7 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.12 -r1.12.202.5
 -				}
 -				rParam.pValues[i].Set( fVal, SC_VALTYPE_VALUE );
 -			}
-+void ScDatabaseDPData::GetDrillDownData(const hash_map<long, ScDPItemData>& rFilters, Sequence< Sequence<Any> >& rTabData,
-+                                        GroupFilterType* pGroupFilter)
-+{
-+    CreateCacheTable();
-+    pImpl->aCacheTable.filterTable(rFilters, rTabData, IsRepeatIfEmpty(), pGroupFilter);
++    pImpl->aCacheTable.filterTable(rCriteria, rData, IsRepeatIfEmpty());
 +}
  
 -			bSuccess = TRUE;
@@ -3190,10 +3415,10 @@ Index: sc/source/core/data/dpshttab.cxx
 ===================================================================
 RCS file: /cvs/sc/sc/source/core/data/dpshttab.cxx,v
 retrieving revision 1.9
-retrieving revision 1.9.202.8
-diff -u -b -I $Revision.*$ -I $Author.*$ -r1.9 -r1.9.202.8
+retrieving revision 1.9.202.9
+diff -u -b -I $Revision.*$ -I $Author.*$ -r1.9 -r1.9.202.9
 --- sc/source/core/data/dpshttab.cxx	27 Feb 2007 12:04:49 -0000	1.9
-+++ sc/source/core/data/dpshttab.cxx	17 Apr 2008 13:11:10 -0000	1.9.202.8
++++ sc/source/core/data/dpshttab.cxx	24 Apr 2008 23:26:45 -0000	1.9.202.9
 @@ -44,11 +44,25 @@
  #include <svtools/zforlist.hxx>
  
@@ -3453,7 +3678,7 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.9 -r1.9.202.8
  }
  
  void ScSheetDPData::SetEmptyFlags( BOOL bIgnoreEmptyRows, BOOL bRepeatIfEmpty )
-@@ -295,131 +255,48 @@
+@@ -295,131 +255,47 @@
  	pImpl->bRepeatIfEmpty   = bRepeatIfEmpty;
  }
  
@@ -3545,8 +3770,7 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.9 -r1.9.202.8
 -									(SCCOL)(nStartCol+nDim), pImpl->nNextRow, nDocTab,
 -									pImpl->bRepeatIfEmpty, nFirstDataRow );
 -	}
-+void ScSheetDPData::GetDrillDownData(const hash_map<long, ScDPItemData>& rFilters, Sequence< Sequence<Any> >& rData,
-+                                     GroupFilterType* pGroupFilter)
++void ScSheetDPData::GetDrillDownData(const vector<ScDPCacheTable::Criterion>& rCriteria, Sequence< Sequence<Any> >& rData)
 +{
 +    CreateCacheTable();
 +    sal_Int32 nRowSize = pImpl->aCacheTable.getRowSize();
@@ -3563,7 +3787,7 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.9 -r1.9.202.8
 -									(SCCOL)(nStartCol+nDim), pImpl->nNextRow, nDocTab,
 -									pImpl->bRepeatIfEmpty, nFirstDataRow );
 -	}
-+    pImpl->aCacheTable.filterTable(rFilters, rData, IsRepeatIfEmpty(), pGroupFilter);
++    pImpl->aCacheTable.filterTable(rCriteria, rData, IsRepeatIfEmpty());
 +}
  
 -	for (i=0; i<rParam.nPageCount; i++)
@@ -3619,10 +3843,10 @@ Index: sc/source/core/data/dptabdat.cxx
 ===================================================================
 RCS file: /cvs/sc/sc/source/core/data/dptabdat.cxx,v
 retrieving revision 1.12
-retrieving revision 1.12.202.8
-diff -u -b -I $Revision.*$ -I $Author.*$ -r1.12 -r1.12.202.8
+retrieving revision 1.12.202.9
+diff -u -b -I $Revision.*$ -I $Author.*$ -r1.12 -r1.12.202.9
 --- sc/source/core/data/dptabdat.cxx	27 Feb 2007 12:05:02 -0000	1.12
-+++ sc/source/core/data/dptabdat.cxx	21 Apr 2008 03:07:58 -0000	1.12.202.8
++++ sc/source/core/data/dptabdat.cxx	24 Apr 2008 23:26:45 -0000	1.12.202.9
 @@ -50,8 +50,19 @@
  #include <unotools/collatorwrapper.hxx>
  #endif
@@ -3696,7 +3920,7 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.12 -r1.12.202.8
 +    fprintf(stdout, "ScDPTableData::FilterCacheTable: un-implemented...\n");fflush(stdout);
 +}
 +
-+void ScDPTableData::GetDrillDownData(const hash_map<long, ScDPItemData>&, Sequence< Sequence<Any> >&, GroupFilterType*)
++void ScDPTableData::GetDrillDownData(const vector<ScDPCacheTable::Criterion>&, Sequence< Sequence<Any> >&)
 +{
 +    fprintf(stdout, "ScDPTableData::GetDrillDownData: un-implemented...\n");fflush(stdout);
 +}
@@ -3798,7 +4022,7 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.12 -r1.12.202.8
 +        if (!pCell || pCell->mnType == SC_VALTYPE_EMPTY)
 +            continue;
 +
-+        const String* pString = ScDPCacheTable::getString(pCell->mnStrId);
++        const String* pString = ScSharedString::getString(pCell->mnStrId);
 +        if (!pString)
 +            continue;
 +
@@ -4276,10 +4500,10 @@ Index: sc/source/core/data/dptabsrc.cxx
 ===================================================================
 RCS file: /cvs/sc/sc/source/core/data/dptabsrc.cxx,v
 retrieving revision 1.23
-retrieving revision 1.20.42.13
-diff -u -b -I $Revision.*$ -I $Author.*$ -r1.23 -r1.20.42.13
+retrieving revision 1.20.42.14
+diff -u -b -I $Revision.*$ -I $Author.*$ -r1.23 -r1.20.42.14
 --- sc/source/core/data/dptabsrc.cxx	29 Jan 2008 15:18:53 -0000	1.23
-+++ sc/source/core/data/dptabsrc.cxx	17 Apr 2008 13:11:10 -0000	1.20.42.13
++++ sc/source/core/data/dptabsrc.cxx	24 Apr 2008 23:26:45 -0000	1.20.42.14
 @@ -36,11 +36,15 @@
  // MARKER(update_precomp.py): autogen include statement, do not remove
  #include "precompiled_sc.hxx"
@@ -4320,7 +4544,7 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.23 -r1.20.42.13
  
  // -----------------------------------------------------------------------
  
-@@ -417,6 +429,41 @@
+@@ -417,6 +429,45 @@
  	DBG_ERROR("not implemented");	//! exception?
  }
  
@@ -4330,7 +4554,7 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.23 -r1.20.42.13
 +    long nColumnCount = GetData()->GetColumnCount();
 +
 +    // collect ScDPItemData for each filtered column
-+    hash_map<long, ScDPItemData> aFilterMap;
++    vector<ScDPCacheTable::Criterion> aFilterCriteria;
 +    sal_Int32 nFilterCount = aFilters.getLength();
 +    for (sal_Int32 i = 0; i < nFilterCount; ++i)
 +    {
@@ -4348,21 +4572,25 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.23 -r1.20.42.13
 +                {
 +                    ScDPItemData aItem;
 +                    pMembers->getByIndex(nIndex)->FillItemData( aItem );
-+                    aFilterMap.insert( hash_map<long, ScDPItemData>::value_type(nCol, aItem) );
++                    aFilterCriteria.push_back( ScDPCacheTable::Criterion() );
++                    sal_Int32 nMatchStrId = ScSharedString::getStringId(aItem.aString);
++                    aFilterCriteria.back().mnFieldIndex = nCol;
++                    aFilterCriteria.back().mpFilter.reset(
++                        new ScDPCacheTable::SingleFilter(nMatchStrId, aItem.fValue, aItem.bHasValue) );
 +                }
 +            }
 +        }
 +    }
 +
 +    Sequence< Sequence<Any> > aTabData;
-+    pData->GetDrillDownData(aFilterMap, aTabData);
++    pData->GetDrillDownData(aFilterCriteria, aTabData);
 +    return aTabData;
 +}
 +
  String ScDPSource::getDataDescription()
  {
  	CreateRes_Impl();		// create pResData
-@@ -508,7 +555,7 @@
+@@ -508,7 +559,7 @@
  	bResultOverflow = FALSE;
  }
  
@@ -4371,7 +4599,7 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.23 -r1.20.42.13
  {
  	//	Calculate the product of the member count for those consecutive levels that
  	//	have the "show all" flag, one following level, and the data layout dimension.
-@@ -580,6 +627,54 @@
+@@ -580,6 +631,54 @@
      return -1;  // not found
  }
  
@@ -4426,7 +4654,7 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.23 -r1.20.42.13
  void ScDPSource::CreateRes_Impl()
  {
  	if ( !pResData )
-@@ -593,24 +688,33 @@
+@@ -593,24 +692,33 @@
  			nDataOrient = sheet::DataPilotFieldOrientation_ROW;
  		}
  
@@ -4462,7 +4690,7 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.23 -r1.20.42.13
  			long nDimIndex = nDataDims[i];
  			ScDPDimension* pDim = GetDimensionsObject()->getByIndex(nDimIndex);
  			sheet::GeneralFunction eUser = (sheet::GeneralFunction)pDim->getFunction();
-@@ -619,7 +723,11 @@
+@@ -619,7 +727,11 @@
  				//!	test for numeric data
  				eUser = sheet::GeneralFunction_SUM;
  			}
@@ -4474,7 +4702,7 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.23 -r1.20.42.13
  			pDataRefValues[i] = pDim->GetReferenceValue();
  			nDataRefOrient[i] = sheet::DataPilotFieldOrientation_HIDDEN;	// default if not used
  			sal_Int32 eRefType = pDataRefValues[i].ReferenceType;
-@@ -653,10 +761,10 @@
+@@ -653,10 +765,10 @@
  			//!	the complete name (function and field) must be stored at the dimension
  
  			long nSource = ((ScDPDimension*)pDim)->GetSourceDim();
@@ -4488,7 +4716,7 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.23 -r1.20.42.13
  		}
  
  		pResData = new ScDPResultData( this );
-@@ -667,7 +775,7 @@
+@@ -667,7 +779,7 @@
  		delete[] pDataNames;
  		delete[] pDataRefValues;
  
@@ -4497,7 +4725,7 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.23 -r1.20.42.13
  
          ScDPInitState aInitState;
  
-@@ -685,86 +793,22 @@
+@@ -685,86 +797,22 @@
  		pColResRoot = new ScDPResultMember( pResData, NULL, NULL, NULL, bColumnGrand );
  		pRowResRoot = new ScDPResultMember( pResData, NULL, NULL, NULL, bRowGrand );
  
@@ -4591,7 +4819,7 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.23 -r1.20.42.13
  		pRowResRoot->SetHasElements();
  
          // initialize members object also for all page dimensions (needed for numeric groups)
-@@ -774,6 +818,7 @@
+@@ -774,6 +822,7 @@
              long nHierarchy = pDim->getUsedHierarchy();
              if ( nHierarchy >= pDim->GetHierarchiesObject()->getCount() )
                  nHierarchy = 0;
@@ -4599,7 +4827,7 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.23 -r1.20.42.13
              ScDPLevels* pLevels = pDim->GetHierarchiesObject()->getByIndex(nHierarchy)->GetLevelsObject();
              long nCount = pLevels->getCount();
              for (long j=0; j<nCount; j++)
-@@ -783,8 +828,9 @@
+@@ -783,8 +832,9 @@
  		//	pre-check: calculate minimum number of result columns / rows from
  		//	levels that have the "show all" flag set
  
@@ -4611,7 +4839,7 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.23 -r1.20.42.13
  		if ( nMinColMembers > SC_MINCOUNT_LIMIT || nMinRowMembers > SC_MINCOUNT_LIMIT )
  		{
  			//	resulting table is too big -> abort before calculating
-@@ -794,49 +840,25 @@
+@@ -794,49 +844,25 @@
  		}
  		else
  		{
@@ -4676,7 +4904,7 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.23 -r1.20.42.13
  
  			// ----------------------------------------------------------------
  			//  With all data processed, calculate the final results:
-@@ -854,21 +876,7 @@
+@@ -854,21 +880,7 @@
      			//  desired members only.
      			pColResRoot->ResetResults( TRUE );
      			pRowResRoot->ResetResults( TRUE );
@@ -4699,7 +4927,7 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.23 -r1.20.42.13
  
      			//  Call UpdateDataResults again, with the new (limited) values.
      			pRowResRoot->UpdateDataResults( pColResRoot, pResData->GetRowStartMeasure() );
-@@ -894,105 +902,6 @@
+@@ -894,105 +906,6 @@
  	}
  }
  
@@ -4805,7 +5033,7 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.23 -r1.20.42.13
  void ScDPSource::DumpState( ScDocument* pDoc, const ScAddress& rPos )
  {
      CreateRes_Impl();
-@@ -1186,6 +1095,12 @@
+@@ -1186,6 +1099,12 @@
  		lcl_SetBoolInAny( aRet, getRepeatIfEmpty() );
  	else if ( aNameStr.EqualsAscii( SC_UNO_DATADESC ) )				// read-only
  		aRet <<= rtl::OUString( getDataDescription() );
@@ -5429,3 +5657,19 @@ diff -u -b -I $Revision.*$ -I $Author.*$ -r1.92 -r1.85.36.11
                      const ScDPSaveDimension* pDim = pDPObj->GetSaveData()->GetExistingDimensionByName( aDimName );
                      if ( pDim )
                      {
+Index: sc/xml/ScDataPilotTableObj.xml
+===================================================================
+RCS file: /cvs/sc/sc/xml/ScDataPilotTableObj.xml,v
+retrieving revision 1.5
+retrieving revision 1.5.50.1
+diff -u -b -I $Revision.*$ -I $Author.*$ -r1.5 -r1.5.50.1
+--- sc/xml/ScDataPilotTableObj.xml	23 Oct 2007 14:56:07 -0000	1.5
++++ sc/xml/ScDataPilotTableObj.xml	17 Apr 2008 20:34:29 -0000	1.5.50.1
+@@ -78,6 +78,7 @@
+         <type>com.sun.star.sheet.XConsolidationDescriptor</type>
+         <type>com.sun.star.sheet.XDataPilotDescriptor</type>
+         <type>com.sun.star.sheet.XDataPilotTable</type>
++        <type>com.sun.star.sheet.XDataPilotTable2</type>
+         <type>com.sun.star.sheet.XDataPilotTables</type>
+         <type>com.sun.star.sheet.XDatabaseRange</type>
+         <type>com.sun.star.sheet.XDatabaseRanges</type>
