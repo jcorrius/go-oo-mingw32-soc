@@ -1,0 +1,343 @@
+diff -urp --exclude=CVS --exclude=unxlngi6.pro --exclude=sc.vpj sc.clean/inc/document.hxx sc/inc/document.hxx
+--- sc.clean/inc/document.hxx	2008-04-29 19:57:28.000000000 -0400
++++ sc/inc/document.hxx	2008-05-01 12:14:13.000000000 -0400
+@@ -584,7 +584,6 @@ SC_DLLPUBLIC	ScDBCollection*	GetDBCollec
+ 	void			SnapVisArea( Rectangle& rRect ) const;			// 1/100 mm
+ 
+ 	SC_DLLPUBLIC BOOL			ValidTabName( const String& rName ) const;
+-    static SC_DLLPUBLIC void      ConvertToValidTabName( String& rName, sal_Unicode cReplaceChar );
+ 	SC_DLLPUBLIC BOOL			ValidNewTabName( const String& rName ) const;
+ 	SC_DLLPUBLIC void			CreateValidTabName(String& rName) const;
+ 	BOOL			InsertTab( SCTAB nPos, const String& rName,
+diff -urp --exclude=CVS --exclude=unxlngi6.pro --exclude=sc.vpj sc.clean/source/core/data/document.cxx sc/source/core/data/document.cxx
+--- sc.clean/source/core/data/document.cxx	2008-04-29 19:57:34.000000000 -0400
++++ sc/source/core/data/document.cxx	2008-05-01 12:14:13.000000000 -0400
+@@ -177,40 +177,7 @@ BOOL ScDocument::GetTable( const String&
+ 
+ BOOL ScDocument::ValidTabName( const String& rName ) const
+ {
+-    // behaviour must be equal to ConvertToValidTabName(), see below
+-	using namespace ::com::sun::star::i18n;
+-	sal_Int32 nStartFlags = KParseTokens::ANY_LETTER_OR_NUMBER |
+-		KParseTokens::ASC_UNDERSCORE;
+-	sal_Int32 nContFlags = nStartFlags;
+-	String aContChars( RTL_CONSTASCII_USTRINGPARAM(" ") );
+-    ParseResult aRes = ScGlobal::pCharClass->parsePredefinedToken(
+-        KParseType::IDENTNAME, rName, 0, nStartFlags, EMPTY_STRING, nContFlags, aContChars );
+-    return (aRes.TokenType & KParseType::IDENTNAME) && aRes.EndPos == rName.Len();
+-}
+-
+-
+-void ScDocument::ConvertToValidTabName( String& rName, sal_Unicode cReplaceChar )
+-{
+-    // behaviour must be equal to ValidTabName(), see above
+-    using namespace ::com::sun::star::i18n;
+-    sal_Int32 nStartFlags = KParseTokens::ANY_LETTER_OR_NUMBER |
+-        KParseTokens::ASC_UNDERSCORE;
+-    sal_Int32 nContFlags = nStartFlags;
+-    String aStartChars;
+-    String aContChars( RTL_CONSTASCII_USTRINGPARAM(" ") );
+-    sal_Int32 nStartPos = 0;
+-    while( nStartPos < rName.Len() )
+-    {
+-        ParseResult aRes = ScGlobal::pCharClass->parsePredefinedToken( KParseType::IDENTNAME,
+-            rName, nStartPos, nStartFlags, aStartChars, nContFlags, aContChars );
+-        if( aRes.EndPos < rName.Len() )
+-        {
+-            rName.SetChar( static_cast< xub_StrLen >( aRes.EndPos ), cReplaceChar );
+-            nStartFlags = nContFlags;
+-            aStartChars = aContChars;
+-        }
+-        nStartPos = aRes.EndPos + 1;
+-    }
++    return rName.Len() > 0;
+ }
+ 
+ 
+diff -urp --exclude=CVS --exclude=unxlngi6.pro --exclude=sc.vpj sc.clean/source/core/tool/address.cxx sc/source/core/tool/address.cxx
+--- sc.clean/source/core/tool/address.cxx	2008-04-29 19:57:34.000000000 -0400
++++ sc/source/core/tool/address.cxx	2008-05-01 12:14:13.000000000 -0400
+@@ -722,23 +722,30 @@ lcl_ScAddress_Parse_OOo( BOOL& bExternal
+     BOOL    bExtDoc = FALSE;
+     BOOL    bNeedExtTab = FALSE;
+ 
++    //Lets see if this is a reference to something in an external file
++    //A Documentname is always quoted and has a trailing #
+     if ( *p == '\'' && ScGlobal::UnicodeStrChr( p, SC_COMPILER_FILE_TAB_SEP ) )
+     {
+-        BOOL bQuote = TRUE;         // Dokumentenname ist immer quoted
++        const sal_Unicode *pStart = p;   
++        BOOL bQuote = TRUE;         // A Documentname is always quoted
+         aDocTab += *p++;
+         while ( bQuote && *p )
+         {
+             if ( *p == '\'' && *(p-1) != '\\' )
+                 bQuote = FALSE;
+             else if( !(*p == '\\' && *(p+1) == '\'') )
+-                aDocName += *p;     // falls escaped Quote: nur Quote in den Namen
++                aDocName += *p;     // An escaped Quote in the Documentname
+             aDocTab += *p++;
+         }
+         aDocTab += *p;              // den SC_COMPILER_FILE_TAB_SEP mitnehmen
+         if( *p++ == SC_COMPILER_FILE_TAB_SEP )
+             bExtDoc = TRUE;
+         else
+-            return nRes;
++        {
++            //It wasn't a document after all, reset and continue as normal
++            p = pStart;
++            aDocTab = String();
++        }
+     }
+ 
+     SCCOL   nCol = 0;
+@@ -753,12 +760,33 @@ lcl_ScAddress_Parse_OOo( BOOL& bExternal
+             nRes |= SCA_TAB_ABSOLUTE;
+         if (*p == '$')
+             nRes |= SCA_TAB_ABSOLUTE, p++;
+-        BOOL bQuote = FALSE;
++
++        //Tokens that start at ' can have anything in them until a final '
++        //but '' marks an escaped '
++        //We've earlier guaranteed that a string containing '' will be
++        //surrounded by '
+         if( *p == '\'' )
+-            p++, bQuote = TRUE;
+-        while (*p && (*p != '.'))
+         {
+-            if( bQuote && *p == '\'' )
++            ++p;
++            while (*p)
++            {
++                if (*p == '\'')
++                {
++                    if ( (*(p+1) != '\'') )
++                        break;
++                    else
++                        *p++;
++                }
++                aTab += *p++;
++            }
++        }
++
++        while (*p)
++        {
++            if( *p == '.')
++                break;
++
++            if( *p == '\'' )
+             {
+                 p++; break;
+             }
+@@ -807,6 +835,7 @@ lcl_ScAddress_Parse_OOo( BOOL& bExternal
+     }
+     nRes |= nBits;
+ 
++
+     q = p;
+     if (*p)
+     {
+diff -urp --exclude=CVS --exclude=unxlngi6.pro --exclude=sc.vpj sc.clean/source/core/tool/compiler.cxx sc/source/core/tool/compiler.cxx
+--- sc.clean/source/core/tool/compiler.cxx	2008-04-29 19:57:34.000000000 -0400
++++ sc/source/core/tool/compiler.cxx	2008-05-01 12:14:13.000000000 -0400
+@@ -974,6 +974,30 @@ struct Convention_A1 : public ScCompiler
+                                xub_StrLen nSrcPos,
+                                const CharClass* pCharClass) const
+     {
++        //Tokens that start at ' can have anything in them until a final '
++        //but '' marks an escaped '
++        //We've earlier guaranteed that a string containing '' will be
++        //surrounded by '
++        if (rFormula.GetChar(nSrcPos) == '\'')
++        {
++            xub_StrLen nPos = nSrcPos+1;
++            while (nPos < rFormula.Len())
++            {
++                if (rFormula.GetChar(nPos) == '\'')
++                {
++                    if ( (nPos+1 == rFormula.Len()) || (rFormula.GetChar(nPos+1) != '\'') )
++                    {
++                        ParseResult aRet;
++                        aRet.TokenType = KParseType::SINGLE_QUOTE_NAME;
++                        aRet.EndPos = nPos+1;
++                        return aRet;
++                    }
++                    ++nPos;
++                }
++                ++nPos;
++            }
++        }
++
+         static const sal_Int32 nStartFlags = KParseTokens::ANY_LETTER_OR_NUMBER |
+             KParseTokens::ASC_UNDERSCORE | KParseTokens::ASC_DOLLAR;
+         static const sal_Int32 nContFlags = nStartFlags | KParseTokens::ASC_DOT |
+@@ -1705,29 +1729,18 @@ ScCompiler::ScCompiler(ScDocument* pDocu
+ void ScCompiler::CheckTabQuotes( String& rString,
+                                  const ScAddress::Convention eConv )
+ {
+-    register const xub_StrLen nLen = rString.Len();
+-    register xub_StrLen i;
+-
+-    bool bNeedsQuote = false;
+-
+-    for ( i = 0 ; i < nLen ; i++ )
+-    {
+-        if( !IsWordChar( rString, i ) )
+-        {
+-            bNeedsQuote = true;
+-            break;
+-        }
+-    }
+-    if ( !bNeedsQuote && CharClass::isAsciiNumeric( rString ) )
+-    {
+-        bNeedsQuote = true;
+-    }
++    using namespace ::com::sun::star::i18n;
++    sal_Int32 nStartFlags = KParseTokens::ANY_LETTER_OR_NUMBER | KParseTokens::ASC_UNDERSCORE;
++    sal_Int32 nContFlags = nStartFlags;
++    ParseResult aRes = ScGlobal::pCharClass->parsePredefinedToken(
++        KParseType::IDENTNAME, rString, 0, nStartFlags, EMPTY_STRING, nContFlags, EMPTY_STRING);
++    bool bNeedsQuote = !((aRes.TokenType & KParseType::IDENTNAME) && aRes.EndPos == rString.Len());
+ 
+     switch ( eConv ) {
+         default :
+         case ScAddress::CONV_UNSPECIFIED :
+-        case ScAddress::CONV_OOO :
+             break;
++        case ScAddress::CONV_OOO :
+         case ScAddress::CONV_XL_A1 :
+         case ScAddress::CONV_XL_R1C1 :
+             if( bNeedsQuote )
+diff -urp --exclude=CVS --exclude=unxlngi6.pro --exclude=sc.vpj sc.clean/source/filter/excel/excimp8.cxx sc/source/filter/excel/excimp8.cxx
+--- sc.clean/source/filter/excel/excimp8.cxx	2008-04-29 19:57:38.000000000 -0400
++++ sc/source/filter/excel/excimp8.cxx	2008-05-01 12:14:13.000000000 -0400
+@@ -218,7 +218,6 @@ void ImportExcel8::Boundsheet( void )
+     String aName( aIn.ReadUniString( nLen ) );
+     GetTabInfo().AppendXclTabName( aName, nBdshtTab );
+ 
+-    ScfTools::ConvertToScSheetName( aName );
+ 	*pExcRoot->pTabNameBuff << aName;
+ 
+     SCTAB nScTab = static_cast< SCTAB >( nBdshtTab );
+diff -urp --exclude=CVS --exclude=unxlngi6.pro --exclude=sc.vpj sc.clean/source/filter/excel/exctools.cxx sc/source/filter/excel/exctools.cxx
+--- sc.clean/source/filter/excel/exctools.cxx	2008-04-29 19:57:38.000000000 -0400
++++ sc/source/filter/excel/exctools.cxx	2008-05-01 12:14:13.000000000 -0400
+@@ -401,7 +401,6 @@ void ExcScenario::Apply( const XclImpRoo
+     ScDocument&         r = rRoot.GetDoc();
+ 	ExcScenarioCell*	p = EXCSCFIRST();
+ 	String				aSzenName( *pName );
+-	ScfTools::ConvertToScSheetName( aSzenName );
+ 	UINT16				nNewTab = nTab + 1;
+ 
+ 	if( !r.InsertTab( nNewTab, aSzenName ) )
+diff -urp --exclude=CVS --exclude=unxlngi6.pro --exclude=sc.vpj sc.clean/source/filter/excel/impop.cxx sc/source/filter/excel/impop.cxx
+--- sc.clean/source/filter/excel/impop.cxx	2008-04-29 19:57:38.000000000 -0400
++++ sc/source/filter/excel/impop.cxx	2008-05-01 12:14:13.000000000 -0400
+@@ -440,7 +440,6 @@ void ImportExcel::Externsheet( void )
+     bool bSameWorkBook;
+     String aEncodedUrl( aIn.ReadByteString( false ) );
+     XclImpUrlHelper::DecodeUrl( aUrl, aTabName, bSameWorkBook, *pExcRoot->pIR, aEncodedUrl );
+-    ScfTools::ConvertToScSheetName( aTabName );
+     pExcRoot->pExtSheetBuff->Add( aUrl, aTabName, bSameWorkBook );
+ }
+ 
+@@ -691,7 +690,6 @@ void ImportExcel::Boundsheet( void )
+ 	}
+ 
+     String aName( aIn.ReadByteString( FALSE ) );
+-    ScfTools::ConvertToScSheetName( aName );
+ 
+ 	*pExcRoot->pTabNameBuff << aName;
+ 
+diff -urp --exclude=CVS --exclude=unxlngi6.pro --exclude=sc.vpj sc.clean/source/filter/excel/xicontent.cxx sc/source/filter/excel/xicontent.cxx
+--- sc.clean/source/filter/excel/xicontent.cxx	2008-04-29 19:57:38.000000000 -0400
++++ sc/source/filter/excel/xicontent.cxx	2008-05-01 12:14:13.000000000 -0400
+@@ -434,12 +434,7 @@ void XclImpHyperlink::ConvertToValidTabN
+         {
+             bInQuote = !bInQuote;
+             if (!bInQuote && aTabName.Len() > 0)
+-            {
+-                // Sheet name exists.  Convert it to valid name the same way the
+-                // sheet names are converted.
+-                ScDocument::ConvertToValidTabName(aTabName, sal_Unicode('_'));
+                 aNewUrl.Append(aTabName);
+-            }
+         }
+         else if (bInQuote)
+             aTabName.Append(c);
+diff -urp --exclude=CVS --exclude=unxlngi6.pro --exclude=sc.vpj sc.clean/source/filter/excel/xilink.cxx sc/source/filter/excel/xilink.cxx
+--- sc.clean/source/filter/excel/xilink.cxx	2008-04-29 19:57:38.000000000 -0400
++++ sc/source/filter/excel/xilink.cxx	2008-05-01 12:14:13.000000000 -0400
+@@ -446,7 +446,6 @@ XclImpSupbook::XclImpSupbook( XclImpStre
+         for( sal_uInt16 nSBTab = 0; nSBTab < nSBTabCnt; ++nSBTab )
+         {
+             String aTabName( rStrm.ReadUniString() );
+-            ScfTools::ConvertToScSheetName( aTabName );
+             maSupbTabList.Append( new XclImpSupbookTab( aTabName ) );
+         }
+     }
+diff -urp --exclude=CVS --exclude=unxlngi6.pro --exclude=sc.vpj sc.clean/source/filter/excel/xipivot.cxx sc/source/filter/excel/xipivot.cxx
+--- sc.clean/source/filter/excel/xipivot.cxx	2008-04-29 19:57:38.000000000 -0400
++++ sc/source/filter/excel/xipivot.cxx	2008-05-01 12:14:13.000000000 -0400
+@@ -700,7 +700,6 @@ void XclImpPivotCache::ReadPivotCacheStr
+             String aDummyName = CREATE_STRING( "DPCache" );
+             if( maTabName.Len() > 0 )
+                 aDummyName.Append( '_' ).Append( maTabName );
+-            ScfTools::ConvertToScSheetName( aDummyName );
+             rDoc.CreateValidTabName( aDummyName );
+             rDoc.RenameTab( nScTab, aDummyName );
+             // set sheet index to source range
+diff -urp --exclude=CVS --exclude=unxlngi6.pro --exclude=sc.vpj sc.clean/source/filter/ftools/ftools.cxx sc/source/filter/ftools/ftools.cxx
+--- sc.clean/source/filter/ftools/ftools.cxx	2008-04-29 19:57:38.000000000 -0400
++++ sc/source/filter/ftools/ftools.cxx	2008-05-01 12:14:13.000000000 -0400
+@@ -190,11 +190,6 @@ Color ScfTools::GetMixedColor( const Col
+ 
+ // *** conversion of names *** ------------------------------------------------
+ 
+-void ScfTools::ConvertToScSheetName( String& rName )
+-{
+-    ScDocument::ConvertToValidTabName( rName, '_' );
+-}
+-
+ void ScfTools::ConvertToScDefinedName( String& rName )
+ {
+     xub_StrLen nLen = rName.Len();
+diff -urp --exclude=CVS --exclude=unxlngi6.pro --exclude=sc.vpj sc.clean/source/filter/inc/ftools.hxx sc/source/filter/inc/ftools.hxx
+--- sc.clean/source/filter/inc/ftools.hxx	2008-04-29 19:57:34.000000000 -0400
++++ sc/source/filter/inc/ftools.hxx	2008-05-01 12:14:13.000000000 -0400
+@@ -304,10 +304,6 @@ public:
+ 
+ // *** conversion of names *** ------------------------------------------------
+ 
+-    /** Converts a string to a valid Calc sheet name.
+-        @descr  Sheet names in Calc may contain letters, digits, underscores, and spaces
+-        (space characters are not allowed at first position). */
+-    static void         ConvertToScSheetName( String& rName );
+     /** Converts a string to a valid Calc defined name or database range name.
+         @descr  Defined names in Calc may contain letters, digits (*), underscores, periods (*),
+         colons (*), question marks, and dollar signs.
+diff -urp --exclude=CVS --exclude=unxlngi6.pro --exclude=sc.vpj sc.clean/source/filter/xcl97/XclImpChangeTrack.cxx sc/source/filter/xcl97/XclImpChangeTrack.cxx
+--- sc.clean/source/filter/xcl97/XclImpChangeTrack.cxx	2008-04-29 19:57:38.000000000 -0400
++++ sc/source/filter/xcl97/XclImpChangeTrack.cxx	2008-05-01 12:14:13.000000000 -0400
+@@ -204,7 +204,6 @@ sal_Bool XclImpChangeTrack::Read3DTabRef
+         pStrm->Ignore( 1 );
+         // - sheet name, always separated from URL
+         String aTabName( pStrm->ReadUniString() );
+-        ScfTools::ConvertToScSheetName( aTabName );
+         pStrm->Ignore( 1 );
+         rFirstTab = rLastTab = static_cast<SCTAB>(GetLinkManager().GetScTab( aUrl, aTabName ));
+ 	}
+diff -urp --exclude=CVS --exclude=unxlngi6.pro --exclude=sc.vpj sc.clean/source/ui/vba/vbaworksheets.cxx sc/source/ui/vba/vbaworksheets.cxx
+--- sc.clean/source/ui/vba/vbaworksheets.cxx	2008-04-29 19:57:30.000000000 -0400
++++ sc/source/ui/vba/vbaworksheets.cxx	2008-05-01 12:14:13.000000000 -0400
+@@ -407,9 +407,7 @@ ScVbaWorksheets::Item( const uno::Any& I
+ uno::Any 
+ ScVbaWorksheets::getItemByStringIndex( const rtl::OUString& sIndex ) throw (uno::RuntimeException)
+ {
+-	String sScIndex = sIndex;
+-	ScDocument::ConvertToValidTabName( sScIndex, '_' );
+-	return ScVbaWorksheets_BASE::getItemByStringIndex( sScIndex );
++	return ScVbaWorksheets_BASE::getItemByStringIndex( sIndex );
+ }
+ 
+ rtl::OUString& 
