@@ -38,10 +38,10 @@ index e9c4a7c..e8b18e9 100644
  	SC_DLLPUBLIC void			CreateValidTabName(String& rName) const;
  	BOOL			InsertTab( SCTAB nPos, const String& rName,
 diff --git a/sc/source/core/data/document.cxx b/sc/source/core/data/document.cxx
-index dbe6130..b3d0607 100644
+index dbe6130..372fb72 100644
 --- sc/source/core/data/document.cxx
 +++ sc/source/core/data/document.cxx
-@@ -193,40 +193,7 @@ BOOL ScDocument::GetTable( const String& rName, SCTAB& rTab ) const
+@@ -193,40 +193,34 @@ BOOL ScDocument::GetTable( const String& rName, SCTAB& rTab ) const
  
  BOOL ScDocument::ValidTabName( const String& rName ) const
  {
@@ -68,18 +68,41 @@ index dbe6130..b3d0607 100644
 -    String aContChars( RTL_CONSTASCII_USTRINGPARAM(" ") );
 -    sal_Int32 nStartPos = 0;
 -    while( nStartPos < rName.Len() )
--    {
++    xub_StrLen nLen = rName.Len();
++    if (!nLen)
++        return false;
++
++    for (xub_StrLen i = 0; i < nLen; ++i)
+     {
 -        ParseResult aRes = ScGlobal::pCharClass->parsePredefinedToken( KParseType::IDENTNAME,
 -            rName, nStartPos, nStartFlags, aStartChars, nContFlags, aContChars );
 -        if( aRes.EndPos < rName.Len() )
--        {
++        const sal_Unicode c = rName.GetChar(i);
++        switch (c)
+         {
 -            rName.SetChar( static_cast< xub_StrLen >( aRes.EndPos ), cReplaceChar );
 -            nStartFlags = nContFlags;
 -            aStartChars = aContChars;
--        }
++            case ':':
++            case '\\':
++            case '/':
++            case '?':
++            case '*':
++            case '[':
++            case ']':
++                // these characters are not allowed to match XL's convention.
++                return false;
++            case '\'':
++                if (i == 0 || i == nLen - 1)
++                    // single quote is not allowed at the first or last 
++                    // character position.
++                    return false;
++            break;
+         }
 -        nStartPos = aRes.EndPos + 1;
--    }
-+    return rName.Len() > 0;
+     }
++
++    return true;
  }
  
  
@@ -160,41 +183,56 @@ index d2bb670..22815cb 100644
                  p++; break;
              }
 diff --git a/sc/source/core/tool/compiler.cxx b/sc/source/core/tool/compiler.cxx
-index ab91737..0e0955b 100644
+index ab91737..d01754f 100644
 --- sc/source/core/tool/compiler.cxx
 +++ sc/source/core/tool/compiler.cxx
-@@ -1087,6 +1087,30 @@ struct Convention_A1 : public ScCompiler::Convention
-                                xub_StrLen nSrcPos,
-                                const CharClass* pCharClass) const
-     {
-+        //Tokens that start at ' can have anything in them until a final '
-+        //but '' marks an escaped '
-+        //We've earlier guaranteed that a string containing '' will be
-+        //surrounded by '
-+        if (rFormula.GetChar(nSrcPos) == '\'')
+@@ -1075,6 +1075,34 @@ for (i = 97; i < 123; i++)
+ 
+ //-----------------------------------------------------------------------------
+ 
++static bool lcl_isValidQuotedText( const String& rFormula, xub_StrLen nSrcPos, ParseResult& rRes )
++{
++    //Tokens that start at ' can have anything in them until a final '
++    //but '' marks an escaped '
++    //We've earlier guaranteed that a string containing '' will be
++    //surrounded by '
++    if (rFormula.GetChar(nSrcPos) == '\'')
++    {
++        xub_StrLen nPos = nSrcPos+1;
++        while (nPos < rFormula.Len())
 +        {
-+            xub_StrLen nPos = nSrcPos+1;
-+            while (nPos < rFormula.Len())
++            if (rFormula.GetChar(nPos) == '\'')
 +            {
-+                if (rFormula.GetChar(nPos) == '\'')
++                if ( (nPos+1 == rFormula.Len()) || (rFormula.GetChar(nPos+1) != '\'') )
 +                {
-+                    if ( (nPos+1 == rFormula.Len()) || (rFormula.GetChar(nPos+1) != '\'') )
-+                    {
-+                        ParseResult aRet;
-+                        aRet.TokenType = KParseType::SINGLE_QUOTE_NAME;
-+                        aRet.EndPos = nPos+1;
-+                        return aRet;
-+                    }
-+                    ++nPos;
++                    rRes.TokenType = KParseType::SINGLE_QUOTE_NAME;
++                    rRes.EndPos = nPos+1;
++                    return false;
 +                }
 +                ++nPos;
 +            }
++            ++nPos;
 +        }
++    }
++
++    return true;
++}
++
+ struct Convention_A1 : public ScCompiler::Convention
+ {
+     Convention_A1( ScAddress::Convention eConv ) : ScCompiler::Convention( eConv ) { }
+@@ -1087,6 +1115,10 @@ struct Convention_A1 : public ScCompiler::Convention
+                                xub_StrLen nSrcPos,
+                                const CharClass* pCharClass) const
+     {
++        ParseResult aRet;
++        if ( !lcl_isValidQuotedText(rFormula, nSrcPos, aRet) )
++            return aRet;
 +
          static const sal_Int32 nStartFlags = KParseTokens::ANY_LETTER_OR_NUMBER |
              KParseTokens::ASC_UNDERSCORE | KParseTokens::ASC_DOLLAR;
          static const sal_Int32 nContFlags = nStartFlags | KParseTokens::ASC_DOT;
-@@ -1261,6 +1285,19 @@ struct ConventionOOO_A1 : public Convention_A1
+@@ -1261,6 +1293,19 @@ struct ConventionOOO_A1 : public Convention_A1
      {
          MakeRefStrImpl( rBuffer, rComp, rRef, bSingleRef, false);
      }
@@ -214,7 +252,7 @@ index ab91737..0e0955b 100644
  };
  
  
-@@ -1370,6 +1407,16 @@ struct ConventionXL
+@@ -1370,6 +1415,16 @@ struct ConventionXL
              rBuf.append( sal_Unicode( '!' ) );
          }
      }
@@ -231,7 +269,7 @@ index ab91737..0e0955b 100644
  };
  
  struct ConventionXL_A1 : public Convention_A1, public ConventionXL
-@@ -1446,6 +1493,11 @@ struct ConventionXL_A1 : public Convention_A1, public ConventionXL
+@@ -1446,6 +1501,11 @@ struct ConventionXL_A1 : public Convention_A1, public ConventionXL
              MakeRowStr( rBuf, aRef.Ref2.nRow );
          }
      }
@@ -243,7 +281,18 @@ index ab91737..0e0955b 100644
  };
  
  static const ConventionXL_A1 ConvXL_A1;
-@@ -1564,6 +1616,11 @@ struct ConventionXL_R1C1 : public ScCompiler::Convention, public ConventionXL
+@@ -1555,6 +1615,10 @@ struct ConventionXL_R1C1 : public ScCompiler::Convention, public ConventionXL
+                                xub_StrLen nSrcPos,
+                                const CharClass* pCharClass) const
+     {
++        ParseResult aRet;
++        if ( !lcl_isValidQuotedText(rFormula, nSrcPos, aRet) )
++            return aRet;
++
+         static const sal_Int32 nStartFlags = KParseTokens::ANY_LETTER_OR_NUMBER |
+             KParseTokens::ASC_UNDERSCORE ;
+         static const sal_Int32 nContFlags = nStartFlags | KParseTokens::ASC_DOT;
+@@ -1564,6 +1628,11 @@ struct ConventionXL_R1C1 : public ScCompiler::Convention, public ConventionXL
          return pCharClass->parseAnyToken( rFormula,
                  nSrcPos, nStartFlags, aAddAllowed, nContFlags, aAddAllowed );
      }
@@ -255,7 +304,7 @@ index ab91737..0e0955b 100644
  };
  
  static const ConventionXL_R1C1 ConvXL_R1C1;
-@@ -1621,29 +1678,18 @@ ScCompiler::ScCompiler( ScDocument* pDocument, const ScAddress& rPos,
+@@ -1621,29 +1690,18 @@ ScCompiler::ScCompiler( ScDocument* pDocument, const ScAddress& rPos,
  void ScCompiler::CheckTabQuotes( String& rString,
                                   const ScAddress::Convention eConv )
  {
@@ -292,7 +341,7 @@ index ab91737..0e0955b 100644
          case ScAddress::CONV_XL_A1 :
          case ScAddress::CONV_XL_R1C1 :
              if( bNeedsQuote )
-@@ -1756,6 +1802,11 @@ xub_StrLen ScCompiler::NextSymbol()
+@@ -1756,6 +1814,11 @@ xub_StrLen ScCompiler::NextSymbol()
      sal_Unicode cSep = mxSymbols->getSymbol( ocSep).GetChar(0);
      sal_Unicode cDecSep = (mxSymbols->isEnglish() ? '.' :
              ScGlobal::pLocaleData->getNumDecimalSep().GetChar(0));
@@ -304,7 +353,7 @@ index ab91737..0e0955b 100644
      int nDecSeps = 0;
      int nRefInSheetName = 0;
      mnPredetectedReference = 0;
-@@ -2063,8 +2114,8 @@ xub_StrLen ScCompiler::NextSymbol()
+@@ -2063,8 +2126,8 @@ xub_StrLen ScCompiler::NextSymbol()
          do
          {
              bi18n = FALSE;
@@ -315,7 +364,7 @@ index ab91737..0e0955b 100644
                  aSymbol += pStart[nSrcPos++];
  
              ParseResult aRes = pConv->parseAnyToken( aFormula, nSrcPos, pCharClass );
-@@ -2082,9 +2133,9 @@ xub_StrLen ScCompiler::NextSymbol()
+@@ -2082,9 +2145,9 @@ xub_StrLen ScCompiler::NextSymbol()
                  aSymbol.Append( pStart + nSrcPos, (xub_StrLen)aRes.EndPos - nSrcPos );
                  nSrcPos = (xub_StrLen) aRes.EndPos;
                  if ( aRes.TokenType & KParseType::SINGLE_QUOTE_NAME )
