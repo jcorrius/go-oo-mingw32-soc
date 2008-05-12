@@ -60,8 +60,8 @@
 +
 +.INCLUDE :	target.mk
 --- /dev/null	2007-05-04 11:54:36.000000000 +0100
-+++ scripting/source/vbaevents/eventhelper.cxx	2008-04-30 17:50:07.000000000 +0100
-@@ -0,0 +1,977 @@
++++ scripting/source/vbaevents/eventhelper.cxx	2008-05-09 12:06:59.000000000 +0100
+@@ -0,0 +1,919 @@
 +#include <comphelper/processfactory.hxx>
 +#include <comphelper/uno3.hxx>
 +#include <comphelper/proparrhlp.hxx>
@@ -111,6 +111,7 @@
 +#include <com/sun/star/script/XScriptListener.hpp>
 +#include <cppuhelper/implbase1.hxx>
 +#include <cppuhelper/implbase2.hxx>
++#include <comphelper/evtlistenerhlp.hxx>
 +
 +#include <set>
 +#include <list>
@@ -125,39 +126,6 @@
 +// Some constants 
 +const static rtl::OUString DELIM = rtl::OUString::createFromAscii( "::" );
 +const static sal_Int32 DELIMLEN = DELIM.getLength();
-+
-+// Helper Methods
-+
-+// TODO this method now appears/is-defined in at least three places
-+// svx/source/forms/fmtools.cxx extensions/source/propctrlr/formcontroller.cxx
-+// and here. We must do better than that
-+Sequence< ::rtl::OUString> getEventMethods(const Type& type)
-+{
-+    typelib_InterfaceTypeDescription *pType=0;
-+    type.getDescription( (typelib_TypeDescription**)&pType);
-+
-+    if(!pType)
-+        return Sequence< ::rtl::OUString>();
-+    
-+    Sequence< ::rtl::OUString> aNames(pType->nMembers);
-+    ::rtl::OUString* pNames = aNames.getArray();
-+    for(sal_Int32 i=0;i<pType->nMembers;i++,++pNames)
-+    {
-+        // the decription reference
-+        typelib_TypeDescriptionReference* pMemberDescriptionReference = pType->ppMembers[i];
-+        // the description for the reference
-+        typelib_TypeDescription* pMemberDescription = NULL;
-+        typelib_typedescriptionreference_getDescription(&pMemberDescription, pMemberDescriptionReference);
-+        if (pMemberDescription)
-+        {
-+            typelib_InterfaceMemberTypeDescription* pRealMemberDescription =
-+            reinterpret_cast<typelib_InterfaceMemberTypeDescription*>(pMemberDescription);
-+            *pNames = pRealMemberDescription->pMemberName;
-+        }
-+    }
-+    typelib_typedescription_release( (typelib_TypeDescription *)pType );
-+    return aNames;
-+}
 +
 +#if 0
 +void dumpListeners( const Reference< beans::XIntrospection >& xIntrospection, const Reference<XInterface>& xIfc)
@@ -181,7 +149,7 @@
 +            {
 +                sTypeName = sFullTypeName.copy( lastDotIndex + 1 );    
 +            } 
-+            Sequence< ::rtl::OUString > sMeths = getEventMethods( listType );    
++            Sequence< ::rtl::OUString > sMeths = comphelper::EventHelper::getEventMethodsForType( listType );    
 +            sal_Int32 sMethLen = sMeths.getLength();
 +            for ( sal_Int32 j=0 ; j < sMethLen; ++j )
 +            {
@@ -425,16 +393,15 @@
 +
 +// Helper class
 +
-+class ScriptEventFactory
++class ScriptEventHelper
 +{
 +public:
-+    static Sequence< ScriptEventDescriptor > createEvents( const Reference< XInterface >& xControl, const rtl::OUString& sCodeName );   
-+    static ScriptEventFactory& instance() { static ScriptEventFactory inst; return inst; }
-+    static rtl::OUString getControlName( const Reference< XInterface >& xControl );
-+    static Sequence< rtl::OUString > getEventListeners( const Reference< XInterface >& xControl );
++    ScriptEventHelper( const Reference< XInterface >& xControl );
++    Sequence< ScriptEventDescriptor > createEvents( const rtl::OUString& sCodeName );   
++    Sequence< rtl::OUString > getEventListeners();
 +private:
-+    ScriptEventFactory();
 +    Reference< XComponentContext > m_xCtx;
++    Reference< XInterface > m_xControl;
 +};
 +
 +bool
@@ -479,7 +446,7 @@
 +
 +}
 +
-+ScriptEventFactory::ScriptEventFactory()
++ScriptEventHelper::ScriptEventHelper( const Reference< XInterface >& xControl ) : m_xControl( xControl )
 +{
 +    Reference < beans::XPropertySet > xProps(
 +        ::comphelper::getProcessServiceFactory(), UNO_QUERY_THROW );
@@ -487,55 +454,28 @@
 +        RTL_CONSTASCII_USTRINGPARAM( "DefaultContext" ))), 
 +        uno::UNO_QUERY_THROW );
 +}
-+rtl::OUString
-+ScriptEventFactory::getControlName( const Reference< XInterface >& rXControl )
-+{
-+    Reference< XInterface > xIfModel;
-+    Reference< awt::XControl > xControl( rXControl, UNO_QUERY );
-+    if ( xControl.is() )
-+        xIfModel = xControl->getModel();
-+    else
-+        xIfModel = rXControl;
-+
-+    Reference< beans::XPropertySet > xProps( xIfModel, UNO_QUERY );
-+    ::rtl::OUString sName;
-+    if ( xProps.is() )
-+    {
-+        try
-+        {
-+            xProps->getPropertyValue(
-+                ::rtl::OUString::createFromAscii("Name") ) >>= sName;
-+        }
-+        catch(Exception& e)
-+        {
-+            OSL_TRACE("PropertyStuff mucked up no name got exception: %s",
-+               (const sal_Char *) rtl::OUStringToOString( e.Message, RTL_TEXTENCODING_UTF8 ));	
-+        }
-+    }
-+    return sName;
-+}
 +
 +Sequence< rtl::OUString > 
-+ScriptEventFactory::getEventListeners( const Reference< XInterface >& xControl )
++ScriptEventHelper::getEventListeners()
 +{
 +    Reference< lang::XMultiComponentFactory > xMFac( 
-+        instance().m_xCtx->getServiceManager(), UNO_QUERY );
++        m_xCtx->getServiceManager(), UNO_QUERY );
 +    std::list< rtl::OUString > eventMethods;
 +
 +    if ( xMFac.is() )
 +    {
 +        Reference< beans::XIntrospection > xIntrospection( 
 +            xMFac->createInstanceWithContext( rtl::OUString( 
-+                RTL_CONSTASCII_USTRINGPARAM( "com.sun.star.beans.Introspection"  ) ), instance().m_xCtx ), UNO_QUERY );
++                RTL_CONSTASCII_USTRINGPARAM( "com.sun.star.beans.Introspection"  ) ), m_xCtx ), UNO_QUERY );
 +#if 0
-+        dumpListeners( xIntrospection, xControl );
-+        dumpListeners( xIntrospection, xControl->getModel() );
++        dumpListeners( xIntrospection, m_xControl );
++        dumpListeners( xIntrospection, m_xControl->getModel() );
 +#endif 
 +        Reference< beans::XIntrospectionAccess > xIntrospectionAccess;
 +	if  ( xIntrospection.is() )
 +	{
 +            xIntrospectionAccess = xIntrospection->inspect( 
-+                makeAny( xControl ) );
++                makeAny( m_xControl ) );
 +            Sequence< Type > aControlListeners = 
 +                xIntrospectionAccess->getSupportedListeners();
 +            sal_Int32 nLength = aControlListeners.getLength();             
@@ -544,7 +484,7 @@
 +                Type& listType = aControlListeners[ i ];
 +                rtl::OUString sFullTypeName = listType.getTypeName();
 +                Sequence< ::rtl::OUString > sMeths = 
-+                    getEventMethods( listType );    
++                    comphelper::EventHelper::getEventMethodsForType( listType );    
 +                sal_Int32 sMethLen = sMeths.getLength();
 +                for ( sal_Int32 j=0 ; j < sMethLen; ++j )
 +                {
@@ -569,9 +509,9 @@
 +}
 +
 +Sequence< ScriptEventDescriptor > 
-+ScriptEventFactory::createEvents( const Reference< XInterface >& xControl, const rtl::OUString& sCodeName )
++ScriptEventHelper::createEvents( const rtl::OUString& sCodeName )
 +{
-+    Sequence< rtl::OUString > aControlListeners = ScriptEventFactory::instance().getEventListeners( xControl );
++    Sequence< rtl::OUString > aControlListeners = getEventListeners();
 +    rtl::OUString* pSrc = aControlListeners.getArray();
 +    sal_Int32 nLength = aControlListeners.getLength();             
 +
@@ -755,7 +695,7 @@
 +};
 +
 +EventListener::EventListener( const Reference< XComponentContext >& rxContext ) :
-+OPropertyContainer(GetBroadcastHelper()), m_xContext( rxContext )
++OPropertyContainer(GetBroadcastHelper()), m_xContext( rxContext ), mpShell( 0 )
 +{
 +    registerProperty( EVENTLSTNR_PROPERTY_MODEL, EVENTLSTNR_PROPERTY_ID_MODEL,
 +        beans::PropertyAttribute::TRANSIENT, &m_xModel, ::getCppuType( &m_xModel ) );
@@ -768,7 +708,7 @@
 +	// reset mpShell
 +	mpShell = 0;
 +	SfxObjectShell* pShell = SfxObjectShell::GetFirst();
-+	while ( pShell )
++	while ( m_xModel.is() && pShell )
 +	{
 +		if ( pShell->GetModel() == m_xModel )
 +		{
@@ -932,7 +872,7 @@
 +                    {
 +                        uno::Reference< script::provider::XScript > xScript = xScriptProvider->getScript( url );
 +                        if ( xScript.is() )
-+                           xScript->invoke( aArguments, aOutArgsIndex, aOutArgs );
++                           xScript->invoke( aArguments, aOutArgsIndex, aOutArgs  );
 +                    }
 +                    catch ( uno::Exception& e )
 +                    {
@@ -965,15 +905,17 @@
 +Sequence< ScriptEventDescriptor > SAL_CALL 
 +VBAToOOEventDescGen::getEventDescriptions( const Reference< XInterface >& xControl, const rtl::OUString& sCodeName ) throw (RuntimeException)
 +{
-+    return ScriptEventFactory::instance().createEvents( xControl, sCodeName ); 
++    ScriptEventHelper evntHelper( xControl ); 
++    return evntHelper.createEvents( sCodeName ); 
 +}
 +
 +Reference< XScriptEventsSupplier > SAL_CALL 
 +VBAToOOEventDescGen::getEventSupplier( const Reference< XInterface >& xControl, const rtl::OUString& sCodeName  ) throw (::com::sun::star::uno::RuntimeException)
 +{
++    ScriptEventHelper evntHelper( xControl ); 
 +    Reference< XScriptEventsSupplier > xSupplier = 
 +        new ReadOnlyEventsSupplier( 
-+            ScriptEventFactory::instance().getEventListeners( xControl ), sCodeName ) ;
++            evntHelper.getEventListeners(), sCodeName ) ;
 +    return xSupplier;
 +}
 +
@@ -1185,6 +1127,29 @@
 diff -rup scripting/source/dlgprov/dlgevtatt.cxx scripting/source/dlgprov/dlgevtatt.cxx
 --- scripting/source/dlgprov/dlgevtatt.cxx	2008-04-29 13:37:12.000000000 +0100
 +++ scripting/source/dlgprov/dlgevtatt.cxx	2008-04-28 22:20:38.000000000 +0100
+@@ -121,18 +121,20 @@ namespace dlgprov
+     DialogVBAScriptListenerImpl::DialogVBAScriptListenerImpl( const Reference< XComponentContext >& rxContext, const Reference< awt::XControl >& rxControl, const Reference< frame::XModel >& xModel ) : DialogScriptListenerImpl( rxContext )
+     {
+         Reference< XMultiComponentFactory > xSMgr( m_xContext->getServiceManager() );
++        Sequence< Any > args(1);
+         if ( xSMgr.is() )
+         {
+-            Sequence< Any > args(1);
+             args[0] <<= xModel;
+             mxListener = Reference< XScriptListener >( xSMgr->createInstanceWithArgumentsAndContext( ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "org.openoffice.vba.EventListener" ) ), args, m_xContext ), UNO_QUERY );
+         }
+         if ( rxControl.is() )
+         {
+-            Reference< XPropertySet > xProps( rxControl->getModel(), UNO_QUERY );
+             try
+             {
++                Reference< XPropertySet > xProps( rxControl->getModel(), UNO_QUERY_THROW );
+                 xProps->getPropertyValue( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM("Name") ) ) >>= msDialogCodeName;
++                xProps.set( mxListener, UNO_QUERY_THROW );
++                xProps->setPropertyValue( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM("Model") ), args[ 0 ] );
+             } 
+             catch ( Exception&  ) {}
+         }
 @@ -232,7 +232,7 @@ namespace dlgprov
          return it->second; 
      }
@@ -1871,3 +1836,175 @@ diff -rup /data4/OOOBuildDEVM4-source-only/ooo-build/build/dev300-m4/forms/sourc
  void SAL_CALL
  ScVbaWorksheet::setCodeName( const rtl::OUString& sCodeName ) throw (css::uno::RuntimeException)
  {
+diff -up comphelper/source/misc/evtlistenerhlp.cxx comphelper.patched/source/misc/evtlistenerhlp.cxx
+--- comphelper/source/misc/evtlistenerhlp.cxx	2008-04-11 12:08:06.000000000 +0100
++++ comphelper/source/misc/evtlistenerhlp.cxx	2008-05-09 12:00:24.000000000 +0100
+@@ -32,8 +32,40 @@
+ #include "precompiled_comphelper.hxx"
+ #include "comphelper/evtlistenerhlp.hxx"
+ 
++using ::com::sun::star::uno::Sequence;
++using ::com::sun::star::uno::Type;
++
+ namespace comphelper
+ {
++
++	Sequence< ::rtl::OUString> EventHelper::getEventMethodsForType(const Type& type)
++	{
++		typelib_InterfaceTypeDescription *pType=0;
++		type.getDescription( (typelib_TypeDescription**)&pType);
++	
++		if(!pType)
++			return Sequence< ::rtl::OUString>();
++	    
++		Sequence< ::rtl::OUString> aNames(pType->nMembers);
++		::rtl::OUString* pNames = aNames.getArray();
++		for(sal_Int32 i=0;i<pType->nMembers;i++,++pNames)
++		{
++			// the decription reference
++			typelib_TypeDescriptionReference* pMemberDescriptionReference = pType->ppMembers[i];
++			// the description for the reference
++			typelib_TypeDescription* pMemberDescription = NULL;
++			typelib_typedescriptionreference_getDescription(&pMemberDescription, pMemberDescriptionReference);
++			if (pMemberDescription)
++			{
++				typelib_InterfaceMemberTypeDescription* pRealMemberDescription =
++				reinterpret_cast<typelib_InterfaceMemberTypeDescription*>(pMemberDescription);
++				*pNames = pRealMemberDescription->pMemberName;
++			}
++		}
++		typelib_typedescription_release( (typelib_TypeDescription *)pType );
++		return aNames;
++	}
++
+ 	OEventListenerHelper::OEventListenerHelper(const ::com::sun::star::uno::Reference< ::com::sun::star::lang::XEventListener>&
+ 			_rxListener) : m_xListener(_rxListener)
+ 	{
+diff -up comphelper/inc/comphelper/evtlistenerhlp.hxx comphelper.patched/inc/comphelper/evtlistenerhlp.hxx
+--- comphelper/inc/comphelper/evtlistenerhlp.hxx	2008-04-11 11:29:59.000000000 +0100
++++ comphelper/inc/comphelper/evtlistenerhlp.hxx	2008-05-09 11:50:55.000000000 +0100
+@@ -39,6 +39,11 @@
+ //........................................................................
+ namespace comphelper
+ {
++	class COMPHELPER_DLLPUBLIC EventHelper
++	{ 
++	public:
++		static ::com::sun::star::uno::Sequence< ::rtl::OUString> getEventMethodsForType(const ::com::sun::star::uno::Type& type);
++	};
+ //........................................................................
+ 
+ 	//==========================================================================
+--- extensions/source/propctrlr/eventhandler.cxx	2008-04-11 11:47:33.000000000 +0100
++++ extensions/source/propctrlr/eventhandler.cxx	2008-05-09 15:08:21.000000000 +0100
+@@ -62,6 +62,7 @@
+ /** === end UNO includes === **/
+ 
+ #include <comphelper/namedvaluecollection.hxx>
++#include <comphelper/evtlistenerhlp.hxx>
+ #include <comphelper/types.hxx>
+ #include <cppuhelper/implbase1.hxx>
+ #include <rtl/ref.hxx>
+@@ -165,36 +166,6 @@ namespace pcr
+     namespace
+     {
+         //....................................................................
+-        Sequence< ::rtl::OUString > lcl_getListenerMethodsForType( const Type& type )
+-        {
+-            typelib_InterfaceTypeDescription *pType=0;
+-            type.getDescription( (typelib_TypeDescription**)&pType);
+-
+-            if ( !pType )
+-                return Sequence< ::rtl::OUString>();
+-
+-            Sequence< ::rtl::OUString > aNames( pType->nMembers );
+-            ::rtl::OUString* pNames = aNames.getArray();
+-            for ( sal_Int32 i = 0; i < pType->nMembers; ++i, ++pNames)
+-            {
+-                // the decription reference
+-                typelib_TypeDescriptionReference* pMemberDescriptionReference = pType->ppMembers[i];
+-                // the description for the reference
+-                typelib_TypeDescription* pMemberDescription = NULL;
+-                typelib_typedescriptionreference_getDescription( &pMemberDescription, pMemberDescriptionReference );
+-                if ( pMemberDescription )
+-                {
+-                    typelib_InterfaceMemberTypeDescription* pRealMemberDescription =
+-                        reinterpret_cast<typelib_InterfaceMemberTypeDescription*>(pMemberDescription);
+-                    *pNames = pRealMemberDescription->pMemberName;
+-                }
+-            }
+-
+-            typelib_typedescription_release( (typelib_TypeDescription*)pType );
+-            return aNames;
+-        }
+-
+-        //....................................................................
+         #define DESCRIBE_EVENT( asciinamespace, asciilistener, asciimethod, id_postfix ) \
+             s_aKnownEvents.insert( EventMap::value_type( \
+                 ::rtl::OUString::createFromAscii( asciimethod ), \
+@@ -762,7 +733,7 @@ namespace pcr
+                         continue;
+ 
+                     // loop through all methods
+-                    Sequence< ::rtl::OUString > aMethods( lcl_getListenerMethodsForType( *pListeners ) );
++                    Sequence< ::rtl::OUString > aMethods( comphelper::EventHelper::getEventMethodsForType( *pListeners ) );
+ 
+                     const ::rtl::OUString* pMethods = aMethods.getConstArray();
+                     sal_uInt32 methodCount = aMethods.getLength();
+--- svx/source/form/fmtools.cxx	2008-04-11 02:13:38.000000000 +0100
++++ svx/source/form/fmtools.cxx	2008-05-09 15:17:26.000000000 +0100
+@@ -105,6 +105,7 @@
+ #include <comphelper/uno3.hxx>
+ #include <connectivity/dbexception.hxx>
+ #include <comphelper/extract.hxx>
++#include <comphelper/evtlistenerhlp.hxx>
+ #include <cppuhelper/typeprovider.hxx>
+ #include <algorithm>
+ 
+@@ -719,36 +720,6 @@ sal_Int16 getControlTypeByObject(const R
+ 	return ::rtl::OUString();
+ }
+ //------------------------------------------------------------------------------
+-Sequence< ::rtl::OUString> getEventMethods(const Type& type)
+-{
+-	typelib_InterfaceTypeDescription *pType=0;
+-	type.getDescription( (typelib_TypeDescription**)&pType);
+-
+-	if(!pType)
+-		return Sequence< ::rtl::OUString>();
+-
+-	Sequence< ::rtl::OUString> aNames(pType->nMembers);
+-	::rtl::OUString* pNames = aNames.getArray();
+-	for(sal_Int32 i=0;i<pType->nMembers;i++,++pNames)
+-	{
+-		// the decription reference
+-		typelib_TypeDescriptionReference* pMemberDescriptionReference = pType->ppMembers[i];
+-		// the description for the reference
+-		typelib_TypeDescription* pMemberDescription = NULL;
+-		typelib_typedescriptionreference_getDescription(&pMemberDescription, pMemberDescriptionReference);
+-		if (pMemberDescription)
+-		{
+-			typelib_InterfaceMemberTypeDescription* pRealMemberDescription =
+-				reinterpret_cast<typelib_InterfaceMemberTypeDescription*>(pMemberDescription);
+-			*pNames = pRealMemberDescription->pMemberName;
+-		}
+-	}
+-	typelib_typedescription_release( (typelib_TypeDescription *)pType );
+-	return aNames;
+-}
+-
+-
+-//------------------------------------------------------------------------------
+ void TransferEventScripts(const Reference< ::com::sun::star::awt::XControlModel>& xModel, const Reference< ::com::sun::star::awt::XControl>& xControl,
+ 	const Sequence< ::com::sun::star::script::ScriptEventDescriptor>& rTransferIfAvailable)
+ {
+@@ -821,7 +792,8 @@ void TransferEventScripts(const Referenc
+ 					continue;
+ 
+ 				// now check the methods
+-				Sequence< ::rtl::OUString> aMethodsNames = getEventMethods(*pCurrentListeners);
++				Sequence< ::rtl::OUString> aMethodsNames = ::comphelper::EventHelper::getEventMethodsForType(*pCurrentListeners);
++
+ 				const ::rtl::OUString* pMethodsNames = aMethodsNames.getConstArray();
+ 				for (k=0; k<aMethodsNames.getLength(); ++k, ++pMethodsNames)
+ 				{
