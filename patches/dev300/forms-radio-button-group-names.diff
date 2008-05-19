@@ -578,7 +578,7 @@ RCS file: /cvs/gsl/toolkit/inc/toolkit/controls/dialogcontrol.hxx,v
 retrieving revision 1.9
 diff -u -p -r1.9 dialogcontrol.hxx
 --- toolkit/inc/toolkit/controls/dialogcontrol.hxx	11 Apr 2008 08:52:41 -0000	1.9
-+++ toolkit/inc/toolkit/controls/dialogcontrol.hxx	15 May 2008 05:25:19 -0000
++++ toolkit/inc/toolkit/controls/dialogcontrol.hxx	20 May 2008 00:39:17 -0000
 @@ -51,6 +51,7 @@
  #include <cppuhelper/propshlp.hxx>
  #include <cppuhelper/basemutex.hxx>
@@ -587,16 +587,18 @@ diff -u -p -r1.9 dialogcontrol.hxx
  
  //	----------------------------------------------------
  //	class UnoControlDialogModel
-@@ -182,6 +183,12 @@ protected:
+@@ -182,6 +183,14 @@ protected:
  	void implNotifyTabModelChange( const ::rtl::OUString& _rAccessor );
  
  	void implUpdateGroupStructure();
 +private:
-+    ModelGroup* AddRadioButtonToGroup (
-+            const ::com::sun::star::uno::Reference< XPropertySet >& rCurProps,
++    void AddRadioButtonToGroup (
++            const ::com::sun::star::uno::Reference< XControlModel >& rControlModel,
 +            const ::rtl::OUString& rPropertyName,
 +            ::std::map< ::rtl::OUString, ModelGroup >* pNamedGroups,
-+            ::rtl::OUString* pCurGroup );
++            ModelGroup** pCurrentGroup );
++    void AddRadioButtonGroup (
++            ::std::map< ::rtl::OUString, ModelGroup >* pNamedGroups );
  };
  
  //	----------------------------------------------------
@@ -606,7 +608,7 @@ RCS file: /cvs/gsl/toolkit/source/controls/dialogcontrol.cxx,v
 retrieving revision 1.27
 diff -u -p -r1.27 dialogcontrol.cxx
 --- toolkit/source/controls/dialogcontrol.cxx	11 Apr 2008 09:24:40 -0000	1.27
-+++ toolkit/source/controls/dialogcontrol.cxx	15 May 2008 05:25:19 -0000
++++ toolkit/source/controls/dialogcontrol.cxx	20 May 2008 00:39:17 -0000
 @@ -142,6 +142,18 @@ namespace
          return xGraphic;
      }
@@ -626,63 +628,87 @@ diff -u -p -r1.27 dialogcontrol.cxx
  }
  
  // ----------------------------------------------------------------------------
-@@ -897,6 +909,29 @@ void UnoControlDialogModel::implNotifyTa
+@@ -897,6 +909,63 @@ void UnoControlDialogModel::implNotifyTa
  	}
  }
  
 +// ----------------------------------------------------------------------------
-+UnoControlDialogModel::ModelGroup* UnoControlDialogModel::AddRadioButtonToGroup ( 
-+        const Reference< XPropertySet >& rCurProps,
++void UnoControlDialogModel::AddRadioButtonGroup ( 
++        ::std::map< ::rtl::OUString, ModelGroup >* pNamedGroups )
++{
++    if ( pNamedGroups->size() == 0 )
++        return;
++
++    size_t nGroups = maGroups.size();
++    maGroups.reserve( nGroups + pNamedGroups->size() );
++    ::std::map< ::rtl::OUString, ModelGroup >::const_iterator i = pNamedGroups->begin(), e = pNamedGroups->end();
++    for ( ; i != e; ++i)
++    {
++        maGroups.push_back( i->second );
++    }
++
++    pNamedGroups->clear();
++}
++
++void UnoControlDialogModel::AddRadioButtonToGroup ( 
++        const Reference< XControlModel >& rControlModel,
 +        const ::rtl::OUString& rPropertyName,
 +        ::std::map< ::rtl::OUString, ModelGroup >* pNamedGroups,
-+        ::rtl::OUString* pCurGroup )
++        ModelGroup** pCurrentGroup )
 +{
-+    *pCurGroup = lcl_GetStringProperty( rPropertyName, rCurProps );
++    Reference< XPropertySet > xCurProps( rControlModel, UNO_QUERY );
++    ::rtl::OUString sGroup = lcl_GetStringProperty( rPropertyName, xCurProps );
++    const sal_Int32 nControlModelStep = lcl_getDialogStep( rControlModel );
 +
-+    AllGroups* pGroups;
-+    if ( pCurGroup->getLength() == 0 )
++    if ( sGroup.getLength() == 0 )
 +    {
-+        pGroups = &maGroups;
-+        size_t nGroups = maGroups.size();
-+        maGroups.resize( nGroups + 1 );
-+        return &maGroups[ nGroups ];
++        // Create a new group if:
++        if ( maGroups.size() == 0 ||                // no groups
++                *pCurrentGroup == NULL ||           // previous group was closed
++                (nControlModelStep != 0 &&          // control step matches current group
++                 maGroups.back().size() > 0 &&      //  (group 0 == display everywhere)
++                 nControlModelStep != lcl_getDialogStep( maGroups.back().back() ) ) )
++        {
++            size_t nGroups = maGroups.size();
++            maGroups.resize( nGroups + 1 );
++        }
++        *pCurrentGroup = &maGroups.back();
 +    }
 +    else
 +    {
-+        ModelGroup& aCurGroup = (*pNamedGroups)[ *pCurGroup ];
-+        return &aCurGroup;
++        // Different steps get different sets of named groups
++        if ( pNamedGroups->size() > 0 &&
++                pNamedGroups->begin()->second.size() > 0 )
++        {
++            const sal_Int32 nPrevStep = lcl_getDialogStep( pNamedGroups->begin()->second.front() );
++            if ( nControlModelStep != nPrevStep )
++                AddRadioButtonGroup( pNamedGroups );
++        }
++
++        *pCurrentGroup = & (*pNamedGroups)[ sGroup ];
 +    }
++    (*pCurrentGroup)->push_back( rControlModel );
 +}
  
  // ----------------------------------------------------------------------------
  void UnoControlDialogModel::implUpdateGroupStructure()
-@@ -921,10 +956,16 @@ void UnoControlDialogModel::implUpdateGr
+@@ -921,10 +990,13 @@ void UnoControlDialogModel::implUpdateGr
  
  	GroupingMachineState eState = eLookingForGroup;		// the current state of our machine
  	Reference< XServiceInfo > xModelSI;					// for checking for a radion button
 -	AllGroups::iterator aCurrentGroup = maGroups.end();	// the group which we're currently building
+-	sal_Int32	nCurrentGroupStep = -1;					// the step which all controls of the current group belong to
 +	ModelGroup* aCurrentGroup = NULL;                   // the group which we're currently building
- 	sal_Int32	nCurrentGroupStep = -1;					// the step which all controls of the current group belong to
  	sal_Bool	bIsRadioButton;							// is it a radio button?
  
 +    const ::rtl::OUString GROUP_NAME (::rtl::OUString::createFromAscii( "GroupName" ) );
-+    ::rtl::OUString sCurGroup;
 +
-+    typedef ::std::map< ::rtl::OUString, ModelGroup > NamedGroups;
-+    NamedGroups aNamedGroups;
++    ::std::map< ::rtl::OUString, ModelGroup > aNamedGroups;
 +
  #if OSL_DEBUG_LEVEL > 1
  	::std::vector< ::rtl::OUString > aCurrentGroupLabels;
  #endif
-@@ -934,6 +975,7 @@ void UnoControlDialogModel::implUpdateGr
- 		// we'll need this in every state
- 		xModelSI = xModelSI.query( *pControlModels );
- 		bIsRadioButton = xModelSI.is() && xModelSI->supportsService( ::rtl::OUString::createFromAscii( szServiceName2_UnoControlRadioButtonModel ) );
-+        Reference< XPropertySet > xCurProps( *pControlModels, UNO_QUERY );
- 
- 		switch ( eState )
- 		{
-@@ -945,11 +987,8 @@ void UnoControlDialogModel::implUpdateGr
+@@ -945,14 +1017,8 @@ void UnoControlDialogModel::implUpdateGr
  				// the current model is a radio button
  				// -> we found the beginning of a new group
  				// create the place for this group
@@ -691,70 +717,77 @@ diff -u -p -r1.27 dialogcontrol.cxx
 -				aCurrentGroup = maGroups.begin() + nGroups;
 -				// and add the (only, til now) member
 -				aCurrentGroup->push_back( *pControlModels );
-+                aCurrentGroup = AddRadioButtonToGroup( xCurProps, GROUP_NAME, &aNamedGroups, &sCurGroup );
-+                aCurrentGroup->push_back( *pControlModels );
++                AddRadioButtonToGroup( *pControlModels, GROUP_NAME, &aNamedGroups, &aCurrentGroup );
  
- 				// get the step which all controls of this group now have to belong to
- 				nCurrentGroupStep = lcl_getDialogStep( *pControlModels );
-@@ -970,18 +1009,21 @@ void UnoControlDialogModel::implUpdateGr
+-				// get the step which all controls of this group now have to belong to
+-				nCurrentGroupStep = lcl_getDialogStep( *pControlModels );
+ 				// new state: looking for further members
+ 				eState = eExpandingGroup;
+ 
+@@ -970,7 +1036,7 @@ void UnoControlDialogModel::implUpdateGr
  			{
  				if ( !bIsRadioButton )
  				{	// no radio button -> the group is done
 -					aCurrentGroup = maGroups.end();
 +					aCurrentGroup = NULL;
  					eState = eLookingForGroup;
-+                    sCurGroup = ::rtl::OUString ();
  #if OSL_DEBUG_LEVEL > 1
  					aCurrentGroupLabels.clear();
- #endif
+@@ -978,48 +1044,9 @@ void UnoControlDialogModel::implUpdateGr
  					continue;
  				}
  
 -				// it is a radio button - is it on the proper page?
-+				// it is a radio button - is it in the same group?
- 				const sal_Int32 nThisModelStep = lcl_getDialogStep( *pControlModels );
+-				const sal_Int32 nThisModelStep = lcl_getDialogStep( *pControlModels );
 -				if	(	( nThisModelStep == nCurrentGroupStep )	// the current button is on the same dialog page
 -					||	( 0 == nThisModelStep )					// the current button appears on all pages
-+                ::rtl::OUString sGroupName = lcl_GetStringProperty( GROUP_NAME, xCurProps );
-+				if	(  (( nThisModelStep == nCurrentGroupStep )	// the current button is on the same dialog page
-+					||	( 0 == nThisModelStep ))				// the current button appears on all pages
-+					&& sGroupName == sCurGroup                  // the group name matches
- 					)
- 				{
- 					// -> it belongs to the same group
-@@ -1003,17 +1045,14 @@ void UnoControlDialogModel::implUpdateGr
- 				// -> we open a new group for it
+-					)
+-				{
+-					// -> it belongs to the same group
+-					aCurrentGroup->push_back( *pControlModels );
+-					// state still is eExpandingGroup - we're looking for further elements
+-					eState = eExpandingGroup;
++                AddRadioButtonToGroup( *pControlModels, GROUP_NAME, &aNamedGroups, &aCurrentGroup );
  
- 				// close the old group
--				aCurrentGroup = maGroups.end();
-+				aCurrentGroup = NULL;
  #if OSL_DEBUG_LEVEL > 1
- 				aCurrentGroupLabels.clear();
- #endif
- 
- 				// open a new group
+-					Reference< XPropertySet > xModelProps( *pControlModels, UNO_QUERY );
+-					::rtl::OUString sLabel;
+-					if ( xModelProps.is() && xModelProps->getPropertySetInfo().is() && xModelProps->getPropertySetInfo()->hasPropertyByName( ::rtl::OUString::createFromAscii( "Label" ) ) )
+-						xModelProps->getPropertyValue( ::rtl::OUString::createFromAscii( "Label" ) ) >>= sLabel;
+-					aCurrentGroupLabels.push_back( sLabel );
+-#endif
+-					continue;
+-				}
+-
+-				// it's a radio button, but on a different page
+-				// -> we open a new group for it
+-
+-				// close the old group
+-				aCurrentGroup = maGroups.end();
+-#if OSL_DEBUG_LEVEL > 1
+-				aCurrentGroupLabels.clear();
+-#endif
+-
+-				// open a new group
 -				size_t nGroups = maGroups.size();
 -				maGroups.resize( nGroups + 1 );
 -				aCurrentGroup = maGroups.begin() + nGroups;
 -				// and add the (only, til now) member
 -				aCurrentGroup->push_back( *pControlModels );
-+                aCurrentGroup = AddRadioButtonToGroup( xCurProps, GROUP_NAME, &aNamedGroups, &sCurGroup );
-+                aCurrentGroup->push_back( *pControlModels );
- 
- 				nCurrentGroupStep = nThisModelStep;
- 
-@@ -1031,6 +1070,14 @@ void UnoControlDialogModel::implUpdateGr
+-
+-				nCurrentGroupStep = nThisModelStep;
+-
+-				// state is the same: we still are looking for further elements of the current group
+-				eState = eExpandingGroup;
+-#if OSL_DEBUG_LEVEL > 1
+ 				Reference< XPropertySet > xModelProps( *pControlModels, UNO_QUERY );
+ 				::rtl::OUString sLabel;
+ 				if ( xModelProps.is() && xModelProps->getPropertySetInfo().is() && xModelProps->getPropertySetInfo()->hasPropertyByName( ::rtl::OUString::createFromAscii( "Label" ) ) )
+@@ -1031,6 +1058,7 @@ void UnoControlDialogModel::implUpdateGr
  		}
  	}
  
-+    size_t nGroups = maGroups.size();
-+    maGroups.reserve( nGroups + aNamedGroups.size() );
-+    NamedGroups::const_iterator i = aNamedGroups.begin(), e = aNamedGroups.end();
-+    for ( ; i != e; ++i)
-+    {
-+        maGroups.push_back( i->second );
-+    }
-+
++    AddRadioButtonGroup( &aNamedGroups );
  	mbGroupsUpToDate = sal_True;
  }
  
