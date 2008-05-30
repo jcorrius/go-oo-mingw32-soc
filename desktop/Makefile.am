@@ -18,11 +18,7 @@ clean:
 	$(top_builddir)/intltool-merge $(top_srcdir)/po $< $@ -d -u -c $(top_builddir)/po/.intltool-merge-cache
 
 %: %.in
-	sed -e "s|\@OOO_BINSUFFIX\@|@OOO_BINSUFFIX@|" \
-	    -e "s|\@STARTUPNOTIFY\@|@STARTUPNOTIFY@|" \
-	    -e "s|\@ADD_OPENXML_PRESENTATION_MIME\@|@ADD_OPENXML_PRESENTATION_MIME@|" \
-	    -e "s|\@ADD_OPENXML_SPREADSHEET_MIME\@|@ADD_OPENXML_SPREADSHEET_MIME@|" \
-	    -e "s|\@ADD_OPENXML_WORD_MIME\@|@ADD_OPENXML_WORD_MIME@|" $< > $@
+	sed -e "s|\@OOO_BINSUFFIX\@|@OOO_BINSUFFIX@|" $< > $@
 
 EXTRA_DIST=$(desktop_in_files) \
 	$(old_gnome_files) \
