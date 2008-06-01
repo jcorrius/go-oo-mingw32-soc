@@ -50,11 +50,7 @@ PARFILES= \
         module_accessories.par             \
         module_gallery_accessories.par     \
         module_templates_accessories.par   \
-        module_templates_accessories_langpack.par   \
         module_samples_accessories.par     \
-        module_samples_accessories_langpack.par     \
-        module_documentations_accessories_langpack.par     \
-        module_advertisement_accessories_langpack.par     \
         module_font_accessories.par        \
         file_accessories.par               \
         file_gallery_accessories.par       \
@@ -66,11 +62,7 @@ ULFFILES= \
         module_accessories.ulf             \
         module_gallery_accessories.ulf     \
         module_templates_accessories.ulf   \
-        module_templates_accessories_langpack.ulf   \
         module_samples_accessories.ulf     \
-        module_samples_accessories_langpack.ulf     \
-        module_documentations_accessories_langpack.ulf     \
-        module_advertisement_accessories_langpack.ulf     \
         module_font_accessories.ulf
 
 
