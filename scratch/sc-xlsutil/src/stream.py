@@ -186,6 +186,7 @@ recData = {
     0x0862: ["SHEETLAYOUT", "Tab Color below Sheet Name"],
     0x0867: ["SHEETPROTECTION", "Sheet Protection Options"],
     0x0858: ["CHPIVOTREF", "Pivot Chart Reference"],
+    0x0863: ["BOOKEXT", "Extra Book Info"],
     0x0868: ["RANGEPROTECTION", "Protected Range on Protected Sheet"],
     0x1001: ["CHUNITS", "?"],
     0x1002: ["CHCHART", "Chart Header Data", record.CHChart],
