@@ -619,6 +619,10 @@ class Main(object):
 
     def __init__ (self):
         self.stats = CommitStats()
+        self.debug = False
+        self.verbose = False
+
+        self.isError = False
 
     def main (self):
 
@@ -632,7 +636,27 @@ path is relative, it is relative to the current directory."""
                              action="store", type="string", dest='dirlist',
                              help=helptext, metavar='FILE')
 
+        helptext = """output debug messages to stderr."""
+        optparser.add_option('-d', '--debug',
+                             action="store_true", dest="debug",
+                             help=helptext)
+
+        helptext = """set verbose mode."""
+        optparser.add_option('-v', '--verbose',
+                             action="store_true", dest="verbose",
+                             help=helptext)
+
+        helptext = """specify output file to write result to."""
+        optparser.add_option('-o', '--output-file',
+                             action='store', type='string', dest='outputfile',
+                             help=helptext, metavar='FILE')
+
         options, args = optparser.parse_args()
+
+        self.debug = options.debug
+        self.verbose = options.verbose
+
+        outfile = options.outputfile
 
         if options.dirlist != None:
             # directory list exists.
@@ -649,7 +673,11 @@ path is relative, it is relative to the current directory."""
             elif os.path.isdir(filepath):
                 self.__parseDir(filepath)
 
-        self.__outputReport()
+        fd = sys.stdout
+        if outfile != None and not os.path.isdir(outfile):
+            fd = open(outfile, 'w')
+
+        self.__outputReport(fd)
 
 
     def __useDirectoryList (self, filepath):
@@ -672,6 +700,9 @@ path is relative, it is relative to the current directory."""
 
 
     def __parseDir (self, dirpath):
+        if self.verbose:
+            print("parsing directory %s"%dirpath)
+
         for root, dirs, files in os.walk(dirpath):
             for filename in files:
                 fullpath =  root + '/' + filename
@@ -681,13 +712,17 @@ path is relative, it is relative to the current directory."""
                     sys.exit(1)
 
 
-
     def __openRCSFile (self, filepath):
         cmd = "rlog " + filepath
         r, w, e = popen2.popen3(cmd)
     
         obj = RCSFile(r.readlines())
+        obj.debug = self.debug
         obj.parse()
+        if obj.isError():
+            sys.stderr.write("error parsing " + filepath)
+            self.isError = True
+
 #       obj.output()
         if not obj.writeCommitStats(self.stats):
             sys.stderr.write("failed to write commit stats\n")
@@ -700,10 +735,10 @@ path is relative, it is relative to the current directory."""
         return not obj.isError()
 
 
-    def __outputReport (self):
+    def __outputReport (self, fd):
         authorNames = self.stats.authors.keys()
         authorNames.sort()
-        print("author\tyear\tmonth\taffiliation\tcommit count\tlines added\tlines removed")
+        fd.write("author\tyear\tmonth\taffiliation\tcommit count\tlines added\tlines removed\n")
         for authorName in authorNames:
             authorObj = self.stats.authors[authorName]
             years = authorObj.years.keys()
@@ -714,7 +749,7 @@ path is relative, it is relative to the current directory."""
                 months.sort()
                 for month in months:
                     monthObj = yearObj.months[month]
-                    print("%s\t%d\t%d\t%s\t%d\t%d\t%d"%(
+                    fd.write("%s\t%d\t%d\t%s\t%d\t%d\t%d\n"%(
                         authorName, year, month,
                         monthObj.affiliation,
                         monthObj.commitCounts, 
