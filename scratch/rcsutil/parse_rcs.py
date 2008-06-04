@@ -292,7 +292,8 @@ class RCSFile(Debuggable):
     # regex pattern for category match
     reCategory = '^' + alphnum + '(' + alphnum + '|\ )*\:'
 
-    reRevSeparator = '^\-+$'
+    # regex pattern for revision separator
+    reRevSeparator = '^\-{28}$'
 
 
     def __init__ (self, lines):
@@ -417,6 +418,11 @@ A typical comment record would look like this:
 The first two lines contain auxiliary information about the commit, while the
 rest of the lines contain commit message.
 """
+        if self.__isEndLogSeparator(i):
+            # The description block is empty.  This happens when the file is
+            # committed initially without any subsequent commits.
+            return i
+
         if not self.__isRevSeparator(i):
             self.descError = True
             self.debugPrint("revision separator expected", True)
@@ -720,7 +726,7 @@ path is relative, it is relative to the current directory."""
         obj.debug = self.debug
         obj.parse()
         if obj.isError():
-            sys.stderr.write("error parsing " + filepath)
+            sys.stderr.write("error parsing " + filepath + "\n")
             self.isError = True
 
 #       obj.output()
