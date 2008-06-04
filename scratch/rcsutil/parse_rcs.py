@@ -3,156 +3,279 @@
 import sys, popen2, os.path, os
 import re
 import time, datetime
+import optparse
 
 currentAffiliations = {
-    'OPENSTEP':               'unaffiliated',
-    'ab':                     'Sun',
-    'abi':                    'Sun',
-    'ace_dent':               'unaffiliated',
-    'af':                     'Sun',
-    'aklitzing':              'unaffiliated',
-    'ama':                    'Sun',
-    'andreschnabel':          'unaffiliated',
-    'antoxu':                 'Intel',
-    'armin':                  'Sun',            # Armin Theissen (former Sun Ireland)
-    'as':                     'Sun',
-    'aw':                     'Sun',
-    'bc':                     'Sun',
-    'bei':                    'Sun',
-    'beppec56':               'unaffiliated',
-    'bm':                     'Sun',
-    'cd':                     'Sun',
-    'cedricbosdo':            'unaffiliated',
-    'cl':                     'Sun',
-    'cloph':                  'unaffiliated',
-    'clu':                    'Sun',
-    'cmc':                    'RedHat',
-    'cn':                     'Sun',
-    'cp':                     'Sun',
-    'dbo':                    'Sun',
-    'dfoster':                'Sun',
-    'dkeskar':                'Intel',
-    'dr':                     'Sun',
-    'dv':                     'Sun',
-    'dvo':                    'unaffiliated',
-    'ebischoff':              'unaffiliated',
-    'er':                     'Sun',
-    'erack':                  'Sun',
-    'ericb':                  'unaffiliated',
-    'fa':                     'RedHat',         # Dan Williams
-    'fheckl':                 'unaffiliated',
-    'flr':                    'Novell',
-    'fme':                    'Sun',
-    'fpe':                    'Sun',
-    'fredrikh':               'unaffiliated',
-    'fridrich_strba':         'Novell',
-    'fs':                     'Sun',
-    'gh':                     'Sun',
-    'gm':                     'Sun',
-    'grichter':               'MySQL',
-    'hbrinkm':                'Sun',
-    'hde':                    'Sun',
-    'hdu':                    'Sun',
-    'hjs':                    'Sun',
-    'hr':                     'Sun',
-    'hro':                    'Sun',
-    'ih':                     'Sun',
-    'iha':                    'Sun',
-    'ihi':                    'Sun',
-    'is':                     'Sun',
-    'jakob_lechner':          'Fabalabs',
-    'jbu':                    'Sun',
-    'jimmac':                 'Novell',
-    'jl':                     'Sun',
-    'jmarmion':               'Sun',
-    'jodygoldberg':           'Novell',
-    'john.marmion':           'Sun',
-    'jsc':                    'Sun',
-    'jsi':                    'Sun',
-    'jsk':                    'Sun',
-    'ka':                     'Sun',
-    'kaib':                   'Google',
-    'kendy':                  'Novell',
-    'khong':                  'Sun',
-    'kohei':                  'Novell',
-    'kr':                     'Sun',
-    'kso':                    'Sun',
-    'kz':                     'Sun',
-    'laurentgodard':          'unaffiliated',
-    'liutao':                 'RedFlag',
-    'liyuan':                 'RedFlag',
-    'lla':                    'Sun',
-    'lo':                     'Sun',
-    'maho':                   'unaffiliated',
-    'manikandan':             'unaffiliated',
-    'mav':                    'Sun',
-    'mba':                    'Sun',
-    'mh':                     'Sun',
-    'mhu':                    'Sun',
-    'mib':                    'Sun',
-    'mikeleib':               'Intel',
-    'mkretzschmar':           'Google',
-    'mmeeks':                 'Novell',
-    'mox':                    'unaffiliated',
-    'msc':                    'Sun',
-    'mt':                     'Sun',
-    'nemeth':                 'unaffiliated',
-    'nn':                     'Sun',
-    'np':                     'Sun',
-    'npower':                 'Novell',
-    'obo':                    'Sun',
-    'obr':                    'Sun',
-    'oc':                     'Sun',
-    'od':                     'Sun',
-    'oj':                     'Sun',
-    'os':                     'Sun',
-    'pb':                     'Sun',
-    'pdefilippis':            'unaffiliated',
-    'pj':                     'RedFlag',
-    'pjanik':                 'unaffiliated',
-    'pl':                     'Sun',
-    'pmladek':                'Novell',
-    'radekdoulik':            'Novell',
-    'rene':                   'unaffiliated',
-    'rt':                     'Sun',
-    'sb':                     'Sun',
-    'sg':                     'Sun',
-    'sj':                     'Sun',
-    'smsm1':                  'unaffiliated',
-    'sparcmoz':               'unaffiliated',
-    'ssa':                    'Sun',
-    'st':                     'Sun',
-    'sus':                    'Sun',
-    'svesik':                 'Sun',
-    'sw':                     'unaffiliated',
-    'tbe':                    'Sun',
-    'tbo':                    'Sun',
-    'thb':                    'Sun',
-    'timseves':               'SIL',
-    'tl':                     'Sun',
-    'tml':                    'Novell',
-    'tra':                    'Sun',
-    'tristan':                'unaffiliated',
-    'tv':                     'Sun',
-    'ufi':                    'Sun',
-    'va':                     'Sun',
-    'vg':                     'Sun',
-    'vq':                     'unaffiliated',
-    'wangyumin_ccoss':        'CCOSS',
-    'ydario':                 'unaffiliated'}
+    'ab': 'Sun', # Andreas Bregas       
+    'abi': 'Sun', # Andreas Bille        
+    'ace_dent': 'unaffiliated', # Andrew Dent          
+    'af': 'Sun', # Andre Fischer        
+    'aidan': 'unaffiliated', # Aidan Butler         
+    'ama': 'Sun', # Andreas Martens      
+    'antoxu': 'Intel', # Antonio Xu           
+    'armin': 'Sun', # Armin Theissen       
+    'as': 'Sun',      
+    'asrail': 'BrOffice.org', # Caio Tiago Oliveira  
+    'aw': 'Sun', # Armin Weiss          
+    'b_michaelsen': 'Sun', # Bjorn Michaelsen     
+    'bc': 'Sun', # Behrend Cornelius    
+    'bei': 'Sun', # Bernd Eilers         
+    'beppec56': 'unaffiliated', # Giuseppe Castagno    
+    'berryjia': 'Sun', # Berry Jia            
+    'bh': 'Sun', # Bettina Haberer      
+    'Bibek': 'Trees For Life', # Bibek Sahu           
+    'bluedwarf': 'unaffiliated', # Takashi Nakamoto     
+    'bm': 'Sun', # Bjorn Milcke         
+    'bmahbod': 'unaffiliated', # Babak Mahbod         
+    'bnolte': 'unaffiliated', # Bertram Nolte        
+    'bustamam': 'unaffiliated', # Bustamam Harun       
+    'cd': 'Sun', # Carsten Driesner     
+    'ch2000liuy': 'Redflag', # YU Liu               
+    'chainchen': 'Redflag', # Jinhong Chen         
+    'cj': 'Sun', # Christian Jansen     
+    'cl': 'Sun', # Christian Lippka     
+    'cmc': 'RedHat', # Caolan McNamara      
+    'cn': 'Sun', # Christoph Neumann    
+    'coni': 'Sun', # Rafaella Braconi     
+    'cp': 'Sun', # Christof Pintaske    
+    'cphennessy': 'OpenApp', # Con Hennessy         
+    'cremlae': 'unaffiliated', # Omer Bar-or          
+    'cs': 'ProFOSS', # Claus Sorensen       
+    'Cyb': 'Trees For Life', # Christian Junker     
+    'cyrillem': 'Sun', # Cyrille Moureaux     
+    'davidfraser': 'translate.org.za', # David Fraser         
+    'dbo': 'Sun', # Daniel Boelzle       
+    'dfoster': 'Sun', # Duncan Foster        
+    'dg': 'Sun', # Dirk Grobler         
+    'dkeskar': 'Intel', # Dhananjay Keskar     
+    'dl': 'Sun', # Dieter Loeschky      
+    'doko': 'Canonical', # Matthias Klose       
+    'donqg': 'Redflag', # Quangang Dong        
+    'dr': 'Sun', # Daniel Rentz         
+    'drbyte': 'bytebot.net', # Colin Charles        
+    'dsherwin': 'Propylon', # Darragh Sherwin      
+    'duyunfen': 'Redflag', # Yunfen Du            
+    'dv': 'Sun', # Dirk Volzke          
+    'dvo': 'unaffiliated', # Daniel Vogelheim     
+    'ebischoff': 'Bureau Cornavin', # Eric Bischoff        
+    'ekato': 'Independent', # Etsushi Kato         
+    'er': 'Sun', # Eike Rathke          
+    'ericb': 'unaffiliated', # Eric Bachard         
+    'fa': 'RedHat', # Dan Williams         
+    'fangyq': 'Redflag', # Yaqiong Fang         
+    'federicomena': 'Novell', # Federico Mena-Quinter
+    'filhocf': 'BrOffice.org', # Claudio F Filho      
+    'flr': 'Novell', # Florian Reuter       
+    'fma': 'Sun', # Frank Mau            
+    'fme': 'Sun', # Frank Meies          
+    'fne': 'Sun', # Frank Neumann        
+    'fpe': 'Sun', # Frank Peters         
+    'fridrich_strba': 'Novell', # Fridrich Strba       
+    'fs': 'Sun', # Frank Schonheit      
+    'ganaya': 'unaffiliated', # Gene Anaya           
+    'Gao Peng': 'Redflag', # Peng Gao             
+    'gaozemin': 'Redflag', # Zemin Gao            
+    'georgez': 'unaffiliated', # George Zahopoulos    
+    'gh': 'Sun', # Gregor Hartmann      
+    'ghiggins': 'Sun', # Geoff Higgins      
+    'gm': 'Sun', # Gerd Weiss           
+    'grichter': 'MySQL', # Georg Richter        
+    'grsingleton': 'pathtech.org', # G. Roderick Singleton
+    'haggai': 'Debian', # Chris Halls          
+    'hdu': 'Sun', # Herbert Duerr        
+    'hjs': 'Sun', # Hans-Joachim Lankenau
+    'hr': 'Sun', # Jens-Heiner Rechtien 
+    'hro': 'Sun', # Hennes Rohling       
+    'hub': 'Novell', # Hubert Figuiere      
+    'icobgr': 'unaffiliated', # Hristo Hristov       
+    'iha': 'Sun', # Ingrid Halama        
+    'ihi': 'Sun', # Ivo Hinkelmann       
+    'is': 'Sun', # Ingo Schmidt         
+    'isma87': 'Student', # Ismael Merzaq        
+    'ja': 'Sun', # Joost Andrae         
+    'jacky23': 'Redflag', # Sheng zhao           
+    'jakob_lechner': 'Fabalabs', # Jakob Lechner        
+    'jayant_madavi': 'Novell', # Jayant Balraj Madavi 
+    'jb': 'Sun', # Jorg Barfurth        
+    'jbrunsmann': 'unaffiliated', # Jorg Brunsmann       
+    'jbu': 'Sun', # Jorg Budischewski    
+    'jcn': 'Novell', # Jan Nieuwenhuizen    
+    'jiamingfei': 'IBM Corp.', # Mingfei Jia          
+    'jiangc': 'Redflag', # Chuang Jiang         
+    'jj': 'Sun', # Jorg Jahnke          
+    'jl': 'Sun', # Joachim Lingner      
+    'jmarmion': 'Sun', # John Marmion         
+    'john.marmion': 'Sun', # John Marmion         
+    'jnavrati': 'RedHat', # Jan Navratil         
+    'jodygoldberg': 'Novell', # Jody Goldberg        
+    'jpryor': 'Novell', # Jonathan Pryor       
+    'jsc': 'Sun', # Jurgen Schmidt       
+    'jspindler': 'unaffiliated', # Jorg Spindler        
+    'jza': 'unaffiliated', # Alexandro Colorado   
+    'ka': 'Sun', # Kai Ahrens           
+    'kaib': 'unaffiliated', # Kai Backman          
+    'kangjingchuan': 'Redflag', # Jingchuan Kang       
+    'kcarr': 'Progbits', # Scott Carr           
+    'kendy': 'Novell', # Jan Holesovsky       
+    'khendricks': 'unaffiliated', # Kevin Hendricks      
+    'khirano': 'unaffiliated', # Hirano Kazunari      
+    'khong': 'Sun', # Karl Hong            
+    'kohei': 'Novell', # Kohei Yoshida        
+    'kr': 'Sun', # Kay Ramme            
+    'kso': 'Sun', # Kai Sommerfeld       
+    'kz': 'Sun', # Kurt Zenker          
+    'laurentgodard': 'inDesko/Nuxeo', # Laurent Godard       
+    'lh': 'Sun', # Lutz Hoeger          
+    'liangweike': 'Redflag', # Weike Liang          
+    'lijian': 'Redflag', # Jian Li              
+    'liujl': 'Redflag', # Jianli Liu           
+    'liutao': 'Redflag', # LiuTao               
+    'liuyuhua': 'Redflag', # Yuhua Liu            
+    'lixxing': 'IBM Corp.', # Xing Li              
+    'liyuan': 'Redflag', # Yuan Li              
+    'lkovacs': 'unaffiliated', # Laszlo Kovacs        
+    'lla': 'Sun', # Lars Langhans        
+    'lo': 'Sun', # Lars Oppermann       
+    'louis': 'Sun', # Louis Suarez-Potts   
+    'Luo Jingrong': 'Redflag', # Jingrong Luo         
+    'lvxg': 'Redflag', # Xugang Lv            
+    'lvyue': 'Redflag', # Yue Lv               
+    'maho': 'Independent', # Nakata Maho          
+    'maoyonggang': 'Redflag', # Yonggang Mao         
+    'mav': 'Sun', # Mikhail Voitenko     
+    'maveric': 'unaffiliated', # Eric Hoch            
+    'mba': 'Sun', # Mathias Bauer        
+    'mci': 'unaffiliated', # Michael Cziebalski   
+    'mfe': 'Sun', # Michael Ralf Fehr
+    'mh': 'Sun', # Martin Hollmichel    
+    'mhu': 'Sun', # Matthias Huetsch     
+    'mi': 'Sun', # Michael Honnig       
+    'mib': 'Sun', # Michael Brauer       
+    'mikeleib': 'Intel', # Michael Leibowitz    
+    'mindyliu': 'unaffiliated', # Mindy Liu            
+    'mkretzschmar': 'Student', # Martin Kretzschmar   
+    'mloiseleur': 'Linagora', # Michel Loiseleur     
+    'mmaher': 'unaffiliated', # Martin Maher         
+    'mmeeks': 'Novell', # Michael Meeks        
+    'mmi': 'unaffiliated', # Michael Mi           
+    'mmp': 'Sun', # Matthias Muller-Prove
+    'mnicel': 'Novell', # NicelKM              
+    'mod': 'unaffiliated', # Maximilian Odendahl  
+    'mox': 'unaffiliated', # Mox Soini            
+    'mrauch': 'unaffiliated', # Michael Rauch        
+    'mt': 'Sun', # Malte Timmermann     
+    'mtg': 'unaffiliated', # Martin Gallwey       
+    'muthusuba': 'unaffiliated', # Muthu Subramanian    
+    'nemeth': 'unaffiliated',
+    'nf': 'Sun', # Nils Fuhrmann        
+    'nick': 'unaffiliated', # Nick Blievers        
+    'nn': 'Sun', # Niklas Nebel         
+    'np': 'Sun', # Nikolai Pretzell     
+    'npower': 'Novell', # Noel Power           
+    'obo': 'Sun', # Oliver Bolte         
+    'obr': 'Sun', # Oliver Braun         
+    'od': 'Sun', # Oliver Dusterhoff    
+    'oj': 'Sun', # Ocke Janssen         
+    'OPENSTEP': 'unaffiliated', # Edward Peterlin      
+    'os': 'Sun', # Oliver Specht        
+    'pagalmes': 'StarXpert', # Pierre-Andre Galmes  
+    'pb': 'Sun', # Peter Burow          
+    'pdefilippis': 'unaffiliated', # Pierre de Filippis   
+    'pereriksson': 'unaffiliated', # Per Eriksson         
+    'pflin': 'Novell', # Fong Lin             
+    'pj': 'Redflag', # Peter Junge          
+    'pjanik': 'unaffiliated', # Pavel Janik          
+    'pjunck': 'Sun', # Pascal Junck         
+    'pl': 'Sun', # Philipp Lohmann      
+    'pliao': 'unaffiliated', # Ping Liao            
+    'plipli': 'OO Aqua Port', # Sebastien Plisson    
+    'pluby': 'unaffiliated', # Patrick Luby         
+    'pmadhav': 'Intel', # Prasad Madhav        
+    'pmladek': 'Novell', # Petr Mladek          
+    'quch': 'Redflag', # Canghua Qu           
+    'radekdoulik': 'Novell', # Radek Doulik         
+    'rail': 'Infra-Resource', # Rail Aliev           
+    'rajeshsola': 'NOSIP', # Rajesh Sola          
+    'rene': 'Debian', # Rene Engelhard       
+    'Rescue/k0fcc': 'Canonical', # Joey Stanford        
+    'rkinsella': 'Sun', # Robert Kinsella      
+    'rodarvus': 'INdT (Instituto Nokia de Tecno', # Rodrigo Parra Novo   
+    'rpiterman': 'unaffiliated', # Ron Piterman         
+    'rsiddhartha': 'Novell', # Raul Siddhartha      
+    'rt': 'Sun', # Rudiger Timm         
+    'rvojta': 'unaffiliated', # Robert Vojta         
+    'sab': 'Sun', # Sascha Ballach       
+    'sb': 'Sun', # Stephan Bergmann     
+    'schmidtm': 'Sun', # Matthias Schmidt     
+    'sewardj': 'unaffiliated', # Julian Seward        
+    'sg': 'Sun', # Steffen Grund        
+    'sgauti': 'unaffiliated', # Sophie Gautier       
+    'shilei': 'Redflag', # Lei shi              
+    'shiwg': 'IBM Corp.', # Wei Guo SHI          
+    'shizhoubo': 'Redflag', # Zhoubo Shi           
+    'sj': 'Sun', # Sven Jacobi          
+    'sjanki': 'unaffiliated', # Sunil Amitkumar Janki
+    'smmathews': 'student', # Shane M Mathews      
+    'smsm1': 'unaffiliated', # Shaun McDonald       
+    'sparcmoz': 'clug.org.au', # Jim Watson           
+    'ssa': 'Sun', # Stephan Schaefer      
+    'ssmith': 'unaffiliated', # Sarah Smith          
+    'st': 'Sun', # Stefan Taxhet        
+    'sts': 'Sun', # Stella Schulze       
+    'svesik': 'Sun', # Sander Vesik         
+    'sw': 'unaffiliated', # Stephan Wunderlich   
+    'tbe': 'Sun', # Thomas Benisch       
+    'thb': 'Sun', # Thorsten Behrens     
+    'tietjens': 'unaffiliated', # Jan Tietjens         
+    'tkr': 'Sun', # Tobias Krause        
+    'tl': 'Sun', # Thomas Lange         
+    'tml': 'Novell', # Tor Lillqvist        
+    'toconnor': 'unaffiliated', # Tomas O': 'Connor       
+    'tonn': 'unaffiliated', # Gerhard Tonn         
+    'tonygalmiche': 'unaffiliated', # Tony Galmiche        
+    'tqfa': 'Redflag', # Quanfa Tang          
+    'tra': 'Sun', # Tino Rachui          
+    'tv': 'Sun', # Tom Verbeek          
+    'ufi': 'Sun', # Uwe Fischer          
+    'us': 'Sun', # Ulf Stroehler        
+    'va': 'Sun', # Volker Ahrendt       
+    'vg': 'Sun', # Vladimir Glazounov   
+    'volody': 'unaffiliated', # Volodymyr Khrystynych
+    'vq': 'Gravity Waves', # Volker Quetschke     
+    'waratah': 'slug.org.au', # Ken Foskey           
+    'weiz': 'Redflag', # Zhao Wei             
+    'willem.vandorp': 'unaffiliated', # Willem van Dorp      
+    'windly': 'unaffiliated', # Wind Li              
+    'wlach': 'Net Integration Technologies', # Will Lachance        
+    'wuy': 'Redflag', # Yan Wu               
+    'xudehua': 'Redflag', # Dehua Xu             
+    'xxjack12xx': 'unaffiliated', # Jackson Low          
+    'xzcheng': 'Redflag', # Xiuzhi Cheng         
+    'ydario': 'Serenity Systems intl', # Yuri Dario           
+    'zhanghuajun': 'Redflag', # Huajun Zhang         
+    'Zhangxiaofei': 'Redflag', # Xiaofei Zhang        
+    'zhaojianwei': 'Redflag', # Jianwei Zhao         
+    'zhiming': 'Intel'} # Jeremy Zheng         
 
 
 def getAffiliation (name, year, month):
     affil = '(unknown)'
     if currentAffiliations.has_key(name):
         affil = currentAffiliations[name]
+        if affil == 'Independent':
+            affil = 'unaffiliated'
+        elif not affil in ['Sun', 'Novell', 'Intel', 'RedHat', 'Redflag'] :
+            affil = 'Other'
+
+    # TODO: Process names whose affiliations have changed over time.
+        
     return affil
 
 
 class Debuggable(object):
 
     def __init__ (self):
-        self.debug = False
+        self.debug = True
 
     def debugPrint (self, msg, abortAfter=False):
         if self.debug:
@@ -497,9 +620,25 @@ class Main(object):
     def __init__ (self):
         self.stats = CommitStats()
 
-    def main (self, args):
+    def main (self):
 
-        filepaths = args[1:]
+        optparser = optparse.OptionParser()
+        optparser.usage += "  file1, file2, ..."
+
+        helptext = """specify a file that contains a list of directories to walk.
+Each line in the file must correspond to each directory path.  If a directory
+path is relative, it is relative to the current directory."""
+        optparser.add_option('', '--dir-list', 
+                             action="store", type="string", dest='dirlist',
+                             help=helptext, metavar='FILE')
+
+        options, args = optparser.parse_args()
+
+        if options.dirlist != None:
+            # directory list exists.
+            self.__useDirectoryList(options.dirlist)
+
+        filepaths = args
 
         for filepath in filepaths:
             if os.path.isfile(filepath):
@@ -511,6 +650,25 @@ class Main(object):
                 self.__parseDir(filepath)
 
         self.__outputReport()
+
+
+    def __useDirectoryList (self, filepath):
+        if len(filepath) > 0 and filepath[0] == '~':
+            filepath = os.environ['HOME'] + filepath[1:]
+
+        filepath = os.path.abspath(filepath)
+        if not os.path.isfile(filepath):
+            sys.stderr.write("%s is not a file\n"%filepath)
+            sys.exit(1)
+
+        for dirpath in open(filepath).readlines():
+            dirpath = dirpath.strip()
+            if len(dirpath) == 0:
+                continue
+            dirpath = os.path.abspath(dirpath)
+            if not os.path.isdir(dirpath):
+                continue
+            self.__parseDir(dirpath)
 
 
     def __parseDir (self, dirpath):
@@ -566,4 +724,4 @@ class Main(object):
 
 if __name__ == '__main__':
     mainObj = Main()
-    mainObj.main(sys.argv)
+    mainObj.main()
