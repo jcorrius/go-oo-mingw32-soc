@@ -14,6 +14,7 @@ currentAffiliations = {
     'ama': 'Sun', # Andreas Martens      
     'antoxu': 'Intel', # Antonio Xu           
     'armin': 'Sun', # Armin Theissen       
+    'armin.theissen': 'Sun', # Armin Theissen       
     'as': 'Sun',      
     'asrail': 'BrOffice.org', # Caio Tiago Oliveira  
     'aw': 'Sun', # Armin Weiss          
@@ -58,12 +59,13 @@ currentAffiliations = {
     'dv': 'Sun', # Dirk Volzke          
     'dvo': 'unaffiliated', # Daniel Vogelheim     
     'ebischoff': 'Bureau Cornavin', # Eric Bischoff        
-    'ekato': 'Independent', # Etsushi Kato         
+    'ekato': 'unaffiliated', # Etsushi Kato         
     'er': 'Sun', # Eike Rathke          
     'ericb': 'unaffiliated', # Eric Bachard         
     'fa': 'RedHat', # Dan Williams         
     'fangyq': 'Redflag', # Yaqiong Fang         
     'federicomena': 'Novell', # Federico Mena-Quinter
+    'fheckl': 'Sun', ### unknown (probably Sun?  working on MacOS aqua port)
     'filhocf': 'BrOffice.org', # Claudio F Filho      
     'flr': 'Novell', # Florian Reuter       
     'fma': 'Sun', # Frank Mau            
@@ -81,6 +83,8 @@ currentAffiliations = {
     'gm': 'Sun', # Gerd Weiss           
     'grichter': 'MySQL', # Georg Richter        
     'grsingleton': 'pathtech.org', # G. Roderick Singleton
+    'gt': 'Sun', ### unknown (last commit in 2004)
+    'gyang': 'Sun', ### unkown (2002 - 2005)
     'haggai': 'Debian', # Chris Halls          
     'hdu': 'Sun', # Herbert Duerr        
     'hjs': 'Sun', # Hans-Joachim Lankenau
@@ -88,6 +92,7 @@ currentAffiliations = {
     'hro': 'Sun', # Hennes Rohling       
     'hub': 'Novell', # Hubert Figuiere      
     'icobgr': 'unaffiliated', # Hristo Hristov       
+    'ih': 'Sun', ### unknown (works on installation)
     'iha': 'Sun', # Ingrid Halama        
     'ihi': 'Sun', # Ivo Hinkelmann       
     'is': 'Sun', # Ingo Schmidt         
@@ -102,12 +107,15 @@ currentAffiliations = {
     'jcn': 'Novell', # Jan Nieuwenhuizen    
     'jiamingfei': 'IBM Corp.', # Mingfei Jia          
     'jiangc': 'Redflag', # Chuang Jiang         
+    'jimmac': 'Novell', # Jacob Steiner
     'jj': 'Sun', # Jorg Jahnke          
     'jl': 'Sun', # Joachim Lingner      
     'jmarmion': 'Sun', # John Marmion         
+    'jmeng': 'Sun', ### unknown (2002 - 2005)
     'john.marmion': 'Sun', # John Marmion         
     'jnavrati': 'RedHat', # Jan Navratil         
-    'jodygoldberg': 'Novell', # Jody Goldberg        
+    'jodygoldberg': 'Novell', # Jody Goldberg  
+    'jp': 'Sun', ### unknown (last commit in 2002)      
     'jpryor': 'Novell', # Jonathan Pryor       
     'jsc': 'Sun', # Jurgen Schmidt       
     'jspindler': 'unaffiliated', # Jorg Spindler        
@@ -140,11 +148,12 @@ currentAffiliations = {
     'Luo Jingrong': 'Redflag', # Jingrong Luo         
     'lvxg': 'Redflag', # Xugang Lv            
     'lvyue': 'Redflag', # Yue Lv               
-    'maho': 'Independent', # Nakata Maho          
+    'maho': 'unaffiliated', # Nakata Maho          
     'maoyonggang': 'Redflag', # Yonggang Mao         
     'mav': 'Sun', # Mikhail Voitenko     
     'maveric': 'unaffiliated', # Eric Hoch            
     'mba': 'Sun', # Mathias Bauer        
+    'mbu': 'Sun', ### unknown (2004-2005)
     'mci': 'unaffiliated', # Michael Cziebalski   
     'mfe': 'Sun', # Michael Ralf Fehr
     'mh': 'Sun', # Martin Hollmichel    
@@ -163,9 +172,11 @@ currentAffiliations = {
     'mod': 'unaffiliated', # Maximilian Odendahl  
     'mox': 'unaffiliated', # Mox Soini            
     'mrauch': 'unaffiliated', # Michael Rauch        
+    'mst': 'Sun', ### unknown (2007-current)
     'mt': 'Sun', # Malte Timmermann     
     'mtg': 'unaffiliated', # Martin Gallwey       
     'muthusuba': 'unaffiliated', # Muthu Subramanian    
+    'mwu': 'Sun', # Minna Wu (Sun China?)
     'nemeth': 'unaffiliated',
     'nf': 'Sun', # Nils Fuhrmann        
     'nick': 'unaffiliated', # Nick Blievers        
@@ -222,17 +233,21 @@ currentAffiliations = {
     'ssmith': 'unaffiliated', # Sarah Smith          
     'st': 'Sun', # Stefan Taxhet        
     'sts': 'Sun', # Stella Schulze       
+    'sus': 'Sun', ### unknown (2000-current)
     'svesik': 'Sun', # Sander Vesik         
     'sw': 'unaffiliated', # Stephan Wunderlich   
     'tbe': 'Sun', # Thomas Benisch       
-    'thb': 'Sun', # Thorsten Behrens     
+    'th': 'Sun', ### unknown (2000-2001)
+    'thb': 'Novell', # Thorsten Behrens     
     'tietjens': 'unaffiliated', # Jan Tietjens         
+    'timseves': 'SIL', # Tim Seves
     'tkr': 'Sun', # Tobias Krause        
     'tl': 'Sun', # Thomas Lange         
     'tml': 'Novell', # Tor Lillqvist        
-    'toconnor': 'unaffiliated', # Tomas O': 'Connor       
+    'toconnor': 'unaffiliated', # Tomas O'Connor       
     'tonn': 'unaffiliated', # Gerhard Tonn         
     'tonygalmiche': 'unaffiliated', # Tony Galmiche        
+    'tpf': 'Sun', ### unknown (last commit in 2003)
     'tqfa': 'Redflag', # Quanfa Tang          
     'tra': 'Sun', # Tino Rachui          
     'tv': 'Sun', # Tom Verbeek          
@@ -258,17 +273,41 @@ currentAffiliations = {
     'zhiming': 'Intel'} # Jeremy Zheng         
 
 
-def getAffiliation (name, year, month):
+def getAffiliation (name, date):
     affil = '(unknown)'
     if currentAffiliations.has_key(name):
         affil = currentAffiliations[name]
-        if affil == 'Independent':
-            affil = 'unaffiliated'
-        elif not affil in ['Sun', 'Novell', 'Intel', 'RedHat', 'Redflag'] :
-            affil = 'Other'
+#       if affil == 'Independent':
+#           affil = 'unaffiliated'
+#       elif not affil in ['Sun', 'Novell', 'Intel', 'RedHat', 'Redflag'] :
+#           affil = 'Other'
 
-    # TODO: Process names whose affiliations have changed over time.
-        
+    # Process names whose affiliations have changed over time.
+
+    if name == 'thb':
+        # Thorsten joined Novell in Feb 2008.
+        dateJoinedNovell = datetime.datetime(2008, 2, 1)
+        if date < dateJoinedNovell:
+            affil = 'Sun'
+        else:
+            affil = 'Novell'
+
+    if name == 'flr':
+        # Florian joined Novell in Nov 2006.
+        dateJoinedNovell = datetime.datetime(2006, 11, 1)
+        if date < dateJoinedNovell:
+            affil = 'Sun'
+        else:
+            affil = 'Novell'
+
+    if name == 'npower':
+        # Noel Power (TODO: double-check with him)
+        dateJoinedNovell = datetime.datetime(2006, 2, 1)
+        if date < dateJoinedNovell:
+            affil = 'Sun'
+        else:
+            affil = 'Novell'
+
     return affil
 
 
@@ -615,7 +654,7 @@ class CommitStats(object):
             yearObj.months[date.month] = CommitStats.Month()
         monthObj = yearObj.months[date.month]
 
-        monthObj.affiliation = getAffiliation(author, date.year, date.month)
+        monthObj.affiliation = getAffiliation(author, date)
         monthObj.commitCounts += 1
         monthObj.linesAdded += added
         monthObj.linesRemoved += removed
