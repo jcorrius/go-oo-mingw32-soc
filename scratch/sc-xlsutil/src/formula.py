@@ -184,7 +184,8 @@ tokenMap = {
     0x59: NameX,
     0x79: NameX,
 
-    # 3d reference
+    # 3d reference (TODO: There is a slight variation in how a cell reference
+    # is represented between 0x3A and 0x5A).
     0x3A: Ref3d,
     0x5A: Ref3d,
     0x7A: Ref3d,
