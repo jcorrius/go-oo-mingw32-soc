@@ -11,6 +11,8 @@ currentAffiliations = {
     'ace_dent': 'unaffiliated', # Andrew Dent          
     'af': 'Sun', # Andre Fischer        
     'aidan': 'unaffiliated', # Aidan Butler         
+    'akhva': 'Sun', ### unknown (2007-2008, works on PDF import)
+    'aklitzing': 'unaffiliated', # Andre Klitzing (2006 GSoC student)
     'ama': 'Sun', # Andreas Martens      
     'antoxu': 'Intel', # Antonio Xu           
     'armin': 'Sun', # Armin Theissen       
@@ -22,7 +24,7 @@ currentAffiliations = {
     'bc': 'Sun', # Behrend Cornelius    
     'bei': 'Sun', # Bernd Eilers         
     'beppec56': 'unaffiliated', # Giuseppe Castagno    
-    'berryjia': 'Sun', # Berry Jia            
+    'BerryJia': 'Sun', # Berry Jia            
     'bh': 'Sun', # Bettina Haberer      
     'Bibek': 'Trees For Life', # Bibek Sahu           
     'bluedwarf': 'unaffiliated', # Takashi Nakamoto     
@@ -34,7 +36,8 @@ currentAffiliations = {
     'ch2000liuy': 'Redflag', # YU Liu               
     'chainchen': 'Redflag', # Jinhong Chen         
     'cj': 'Sun', # Christian Jansen     
-    'cl': 'Sun', # Christian Lippka     
+    'cl': 'Sun', # Christian Lippka   
+    'cloph': 'unaffiliated', # Christian Lohmaier  
     'cmc': 'RedHat', # Caolan McNamara      
     'cn': 'Sun', # Christoph Neumann    
     'coni': 'Sun', # Rafaella Braconi     
@@ -60,13 +63,16 @@ currentAffiliations = {
     'dvo': 'unaffiliated', # Daniel Vogelheim     
     'ebischoff': 'Bureau Cornavin', # Eric Bischoff        
     'ekato': 'unaffiliated', # Etsushi Kato         
-    'er': 'Sun', # Eike Rathke          
+    'er': 'Sun',    # Eike Rathke          
+    'erack': 'Sun', # Eike Rathke          
     'ericb': 'unaffiliated', # Eric Bachard         
     'fa': 'RedHat', # Dan Williams         
-    'fangyq': 'Redflag', # Yaqiong Fang         
+    'fangyq': 'Redflag', # Yaqiong Fang  
+    'fdechelle': 'unaffiliated', # Francois Dechelle (works in api/exthome)       
     'federicomena': 'Novell', # Federico Mena-Quinter
     'fheckl': 'Sun', ### unknown (probably Sun?  working on MacOS aqua port)
     'filhocf': 'BrOffice.org', # Claudio F Filho      
+    'fl': 'Sun', # Frank Loehmann
     'flr': 'Novell', # Florian Reuter       
     'fma': 'Sun', # Frank Mau            
     'fme': 'Sun', # Frank Meies          
@@ -85,7 +91,8 @@ currentAffiliations = {
     'grsingleton': 'pathtech.org', # G. Roderick Singleton
     'gt': 'Sun', ### unknown (last commit in 2004)
     'gyang': 'Sun', ### unkown (2002 - 2005)
-    'haggai': 'Debian', # Chris Halls          
+    'haggai': 'Debian', # Chris Halls       
+    'hbrinkm': 'Sun', # Henning Brinkmann   
     'hdu': 'Sun', # Herbert Duerr        
     'hjs': 'Sun', # Hans-Joachim Lankenau
     'hr': 'Sun', # Jens-Heiner Rechtien 
@@ -96,7 +103,7 @@ currentAffiliations = {
     'iha': 'Sun', # Ingrid Halama        
     'ihi': 'Sun', # Ivo Hinkelmann       
     'is': 'Sun', # Ingo Schmidt         
-    'isma87': 'Student', # Ismael Merzaq        
+    'isma87': 'unaffiliated', # Ismael Merzaq        
     'ja': 'Sun', # Joost Andrae         
     'jacky23': 'Redflag', # Sheng zhao           
     'jakob_lechner': 'Fabalabs', # Jakob Lechner        
@@ -105,13 +112,14 @@ currentAffiliations = {
     'jbrunsmann': 'unaffiliated', # Jorg Brunsmann       
     'jbu': 'Sun', # Jorg Budischewski    
     'jcn': 'Novell', # Jan Nieuwenhuizen    
-    'jiamingfei': 'IBM Corp.', # Mingfei Jia          
+    'jiamingfei': 'IBM', # Mingfei Jia          
     'jiangc': 'Redflag', # Chuang Jiang         
     'jimmac': 'Novell', # Jacob Steiner
     'jj': 'Sun', # Jorg Jahnke          
     'jl': 'Sun', # Joachim Lingner      
     'jmarmion': 'Sun', # John Marmion         
     'jmeng': 'Sun', ### unknown (2002 - 2005)
+    'jobin': 'CollabNet', # Jobin Thomas
     'john.marmion': 'Sun', # John Marmion         
     'jnavrati': 'RedHat', # Jan Navratil         
     'jodygoldberg': 'Novell', # Jody Goldberg  
@@ -132,6 +140,7 @@ currentAffiliations = {
     'kr': 'Sun', # Kay Ramme            
     'kso': 'Sun', # Kai Sommerfeld       
     'kz': 'Sun', # Kurt Zenker          
+    'larsbehr': 'unaffiliated', # Lars B (AODL library, toolkit)
     'laurentgodard': 'inDesko/Nuxeo', # Laurent Godard       
     'lh': 'Sun', # Lutz Hoeger          
     'liangweike': 'Redflag', # Weike Liang          
@@ -139,7 +148,7 @@ currentAffiliations = {
     'liujl': 'Redflag', # Jianli Liu           
     'liutao': 'Redflag', # LiuTao               
     'liuyuhua': 'Redflag', # Yuhua Liu            
-    'lixxing': 'IBM Corp.', # Xing Li              
+    'lixxing': 'IBM', # Xing Li              
     'liyuan': 'Redflag', # Yuan Li              
     'lkovacs': 'unaffiliated', # Laszlo Kovacs        
     'lla': 'Sun', # Lars Langhans        
@@ -162,7 +171,7 @@ currentAffiliations = {
     'mib': 'Sun', # Michael Brauer       
     'mikeleib': 'Intel', # Michael Leibowitz    
     'mindyliu': 'unaffiliated', # Mindy Liu            
-    'mkretzschmar': 'Student', # Martin Kretzschmar   
+    'mkretzschmar': 'unaffiliated', # Martin Kretzschmar   
     'mloiseleur': 'Linagora', # Michel Loiseleur     
     'mmaher': 'unaffiliated', # Martin Maher         
     'mmeeks': 'Novell', # Michael Meeks        
@@ -171,7 +180,8 @@ currentAffiliations = {
     'mnicel': 'Novell', # NicelKM              
     'mod': 'unaffiliated', # Maximilian Odendahl  
     'mox': 'unaffiliated', # Mox Soini            
-    'mrauch': 'unaffiliated', # Michael Rauch        
+    'mrauch': 'unaffiliated', # Michael Rauch  
+    'msicotte': 'unaffiliated', # Michael Sicotte (Aqua port)      
     'mst': 'Sun', ### unknown (2007-current)
     'mt': 'Sun', # Malte Timmermann     
     'mtg': 'unaffiliated', # Martin Gallwey       
@@ -199,7 +209,7 @@ currentAffiliations = {
     'pjunck': 'Sun', # Pascal Junck         
     'pl': 'Sun', # Philipp Lohmann      
     'pliao': 'unaffiliated', # Ping Liao            
-    'plipli': 'OO Aqua Port', # Sebastien Plisson    
+    'plipli': 'unaffiliated', # Sebastien Plisson    
     'pluby': 'unaffiliated', # Patrick Luby         
     'pmadhav': 'Intel', # Prasad Madhav        
     'pmladek': 'Novell', # Petr Mladek          
@@ -210,7 +220,7 @@ currentAffiliations = {
     'rene': 'Debian', # Rene Engelhard       
     'Rescue/k0fcc': 'Canonical', # Joey Stanford        
     'rkinsella': 'Sun', # Robert Kinsella      
-    'rodarvus': 'INdT (Instituto Nokia de Tecno', # Rodrigo Parra Novo   
+    'rodarvus': 'INdT', # Rodrigo Parra Novo   
     'rpiterman': 'unaffiliated', # Ron Piterman         
     'rsiddhartha': 'Novell', # Raul Siddhartha      
     'rt': 'Sun', # Rudiger Timm         
@@ -222,11 +232,11 @@ currentAffiliations = {
     'sg': 'Sun', # Steffen Grund        
     'sgauti': 'unaffiliated', # Sophie Gautier       
     'shilei': 'Redflag', # Lei shi              
-    'shiwg': 'IBM Corp.', # Wei Guo SHI          
+    'shiwg': 'IBM', # Wei Guo SHI          
     'shizhoubo': 'Redflag', # Zhoubo Shi           
     'sj': 'Sun', # Sven Jacobi          
     'sjanki': 'unaffiliated', # Sunil Amitkumar Janki
-    'smmathews': 'student', # Shane M Mathews      
+    'smmathews': 'unaffiliated', # Shane M Mathews      
     'smsm1': 'unaffiliated', # Shaun McDonald       
     'sparcmoz': 'clug.org.au', # Jim Watson           
     'ssa': 'Sun', # Stephan Schaefer      
@@ -256,7 +266,8 @@ currentAffiliations = {
     'va': 'Sun', # Volker Ahrendt       
     'vg': 'Sun', # Vladimir Glazounov   
     'volody': 'unaffiliated', # Volodymyr Khrystynych
-    'vq': 'Gravity Waves', # Volker Quetschke     
+    'vq': 'Gravity Waves', # Volker Quetschke  
+    'wangyumin_ccoss': 'CCOSS',   
     'waratah': 'slug.org.au', # Ken Foskey           
     'weiz': 'Redflag', # Zhao Wei             
     'willem.vandorp': 'unaffiliated', # Willem van Dorp      
@@ -277,10 +288,6 @@ def getAffiliation (name, date):
     affil = '(unknown)'
     if currentAffiliations.has_key(name):
         affil = currentAffiliations[name]
-#       if affil == 'Independent':
-#           affil = 'unaffiliated'
-#       elif not affil in ['Sun', 'Novell', 'Intel', 'RedHat', 'Redflag'] :
-#           affil = 'Other'
 
     # Process names whose affiliations have changed over time.
 
@@ -292,7 +299,7 @@ def getAffiliation (name, date):
         else:
             affil = 'Novell'
 
-    if name == 'flr':
+    elif name == 'flr':
         # Florian joined Novell in Nov 2006.
         dateJoinedNovell = datetime.datetime(2006, 11, 1)
         if date < dateJoinedNovell:
@@ -300,11 +307,25 @@ def getAffiliation (name, date):
         else:
             affil = 'Novell'
 
-    if name == 'npower':
+    elif name == 'npower':
         # Noel Power (TODO: double-check with him)
         dateJoinedNovell = datetime.datetime(2006, 2, 1)
         if date < dateJoinedNovell:
             affil = 'Sun'
+        else:
+            affil = 'Novell'
+
+    elif name == 'fridrich_strba':
+        dateJoinedNovell = datetime.datetime(2007, 3, 1)
+        if date < dateJoinedNovell:
+            affil = 'unaffiliated'
+        else:
+            affil = 'Novell'
+
+    elif name == 'kohei':
+        dateJoinedNovell = datetime.datetime(2007, 3, 1)
+        if date < dateJoinedNovell:
+            affil = 'unaffiliated'
         else:
             affil = 'Novell'
 
@@ -350,7 +371,6 @@ class RCSFile(Debuggable):
         self.descError = False
         self.symbolicNamesError = False
         self.miscError = False
-
 
     def parse (self):
         self.reset()
@@ -571,6 +591,22 @@ rest of the lines contain commit message.
         return True
 
 
+    def __isResyncCommit (self, msglines):
+        reResync = re.compile('^RESYNC:.*;')
+        for msgline in msglines:
+            res = reResync.search(msgline)
+            if res != None:
+                return True
+        return False
+
+    def __isCwsIntegrationCommit (self, msglines):
+        reCwsIntegration = re.compile('^INTEGRATION:\ CWS')
+        for msgline in msglines:
+            res = reCwsIntegration.search(msgline)
+            if res != None:
+                return True
+        return False
+
     def writeCommitStats (self, statObj):
         """Write commit statistics to the passed CommitStats instance.
 
@@ -587,8 +623,48 @@ Each commit log may have the following data:
 Each commit log is supposed to have at least the author, revision and the date
 records, while some logs may not have the added/removed line information (such
 as initial commits, branch nodes etc.
+
+Also, disregard commits whose message contains RESYNC or INTEGRATION: CWS.
 """
+
+        issueNum = 'i[1-9][0-9]+'
+        reIssueNumbers = []
+#       reIssueNumbers.append(re.compile('^#' + issueNum + '#'))
+#       reIssueNumbers.append(re.compile('^Issue number:\ *' + issueNum))
+        reIssueNumbers.append(re.compile(issueNum))
+
         for log in self.commitLogs:
+
+            statObj.totalCommitCount += 1
+
+            if log.has_key('message'):
+
+                # Check the message and disregard RESYNC commits.
+                if self.__isResyncCommit(log['message']):
+                    statObj.resyncCommitCount += 1
+                    continue
+
+                # Skip if this is a CWS integration commit.
+                if self.__isCwsIntegrationCommit(log['message']):
+                    statObj.integrationCommitCount += 1
+                    continue
+
+                # Check the message to see if this is a patch submission.
+                isIssueNumber = False
+                for msgline in log['message']:
+                    for reIssueNumber in reIssueNumbers:
+                        res = reIssueNumber.search(msgline)
+                        if res != None:
+                            txt = msgline[res.start(0):res.end(0)]
+                            isIssueNumber = True
+                            break
+
+                    if isIssueNumber:
+                        break
+
+                if isIssueNumber:
+                    statObj.patchCommitCount += 1
+
             # author
             if not log.has_key('author'):
                 self.debugPrint("author record is absent")
@@ -636,6 +712,11 @@ class CommitStats(object):
 
     def __init__ (self):
         self.authors = {}
+        self.totalFileCount = 0
+        self.totalCommitCount = 0
+        self.resyncCommitCount = 0
+        self.integrationCommitCount = 0
+        self.patchCommitCount = 0
 
     def add (self, author, date, added, removed):
 
@@ -776,14 +857,16 @@ path is relative, it is relative to the current directory."""
         r.close()
         w.close()
         e.close()
-    
+
+        self.stats.totalFileCount += 1
+
         return not obj.isError()
 
 
     def __outputReport (self, fd):
         authorNames = self.stats.authors.keys()
         authorNames.sort()
-        fd.write("author\tyear\tmonth\taffiliation\tcommit count\tlines added\tlines removed\n")
+        fd.write("author\tyear\tmonth\taffiliation\tcommit count\tlines added\tlines removed\tdate\n")
         for authorName in authorNames:
             authorObj = self.stats.authors[authorName]
             years = authorObj.years.keys()
@@ -794,11 +877,19 @@ path is relative, it is relative to the current directory."""
                 months.sort()
                 for month in months:
                     monthObj = yearObj.months[month]
-                    fd.write("%s\t%d\t%d\t%s\t%d\t%d\t%d\n"%(
+                    fd.write("%s\t%d\t%d\t%s\t%d\t%d\t%d\t%d-%d-1\n"%(
                         authorName, year, month,
                         monthObj.affiliation,
                         monthObj.commitCounts, 
-                        monthObj.linesAdded, monthObj.linesRemoved))
+                        monthObj.linesAdded, monthObj.linesRemoved,
+                        year, month))
+
+        fd.write("\n")
+        fd.write("total file count\t%d\n"%self.stats.totalFileCount)
+        fd.write("total commit count\t%d\n"%self.stats.totalCommitCount)
+        fd.write("cws integration commits ignored\t%d\n"%self.stats.integrationCommitCount)
+        fd.write("resync commits ignored\t%d\n"%self.stats.resyncCommitCount)
+        fd.write("issue numbers found\t%d\n"%self.stats.patchCommitCount)
 
 
 
