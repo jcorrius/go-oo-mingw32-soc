@@ -129,7 +129,7 @@ currentAffiliations = {
     'jspindler': 'unaffiliated', # Jorg Spindler        
     'jza': 'unaffiliated', # Alexandro Colorado   
     'ka': 'Sun', # Kai Ahrens           
-    'kaib': 'unaffiliated', # Kai Backman          
+    'kaib': 'Google', # Kai Backman          
     'kangjingchuan': 'Redflag', # Jingchuan Kang       
     'kcarr': 'Progbits', # Scott Carr           
     'kendy': 'Novell', # Jan Holesovsky       
@@ -171,7 +171,7 @@ currentAffiliations = {
     'mib': 'Sun', # Michael Brauer       
     'mikeleib': 'Intel', # Michael Leibowitz    
     'mindyliu': 'unaffiliated', # Mindy Liu            
-    'mkretzschmar': 'unaffiliated', # Martin Kretzschmar   
+    'mkretzschmar': 'Google', # Martin Kretzschmar   
     'mloiseleur': 'Linagora', # Michel Loiseleur     
     'mmaher': 'unaffiliated', # Martin Maher         
     'mmeeks': 'Novell', # Michael Meeks        
