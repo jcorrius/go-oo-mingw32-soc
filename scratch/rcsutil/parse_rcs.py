@@ -308,8 +308,8 @@ def getAffiliation (name, date):
             affil = 'Novell'
 
     elif name == 'npower':
-        # Noel Power (TODO: double-check with him)
-        dateJoinedNovell = datetime.datetime(2006, 2, 1)
+        # Noel joined Novell in July of 2005.
+        dateJoinedNovell = datetime.datetime(2005, 7, 1)
         if date < dateJoinedNovell:
             affil = 'Sun'
         else:
@@ -328,6 +328,14 @@ def getAffiliation (name, date):
             affil = 'unaffiliated'
         else:
             affil = 'Novell'
+
+    elif name == 'cmc':
+        # Caolan moved from Sun to RedHat about March of 2004.
+        dateJoinedRH = datetime.datetime(2004, 3, 1)
+        if date < dateJoinedRH:
+            affil = 'Sun'
+        else:
+            affil = 'RedHat'
 
     return affil
 
