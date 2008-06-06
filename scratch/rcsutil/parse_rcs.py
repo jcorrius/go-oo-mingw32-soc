@@ -364,11 +364,12 @@ class RCSFile(Debuggable):
     reRevSeparator = '^\-{28}$'
 
 
-    def __init__ (self, lines):
+    def __init__ (self, lines, ext):
         Debuggable.__init__(self)
 
         self.lines = lines
         self.lineLength = len(self.lines)
+        self.ext = ext
         self.reset()
 
 
@@ -696,7 +697,7 @@ Also, disregard commits whose message contains RESYNC or INTEGRATION: CWS.
                 removed = log['removed']
 
             if added or removed:
-                statObj.add(author, date, added, removed)
+                statObj.add(author, date, self.ext, added, removed)
 
         return True
 
@@ -710,8 +711,12 @@ class CommitStats(object):
     class Year(object):
         def __init__ (self):
             self.months = {}
-    
+
     class Month(object):
+        def __init__ (self):
+            self.extensions = {}
+
+    class Extension(object):
         def __init__ (self):
             self.affiliation = '(unknown)'
             self.commitCounts = 0
@@ -726,7 +731,7 @@ class CommitStats(object):
         self.integrationCommitCount = 0
         self.patchCommitCount = 0
 
-    def add (self, author, date, added, removed):
+    def add (self, author, date, ext, added, removed):
 
         # author node
         if not self.authors.has_key(author):
@@ -743,10 +748,15 @@ class CommitStats(object):
             yearObj.months[date.month] = CommitStats.Month()
         monthObj = yearObj.months[date.month]
 
-        monthObj.affiliation = getAffiliation(author, date)
-        monthObj.commitCounts += 1
-        monthObj.linesAdded += added
-        monthObj.linesRemoved += removed
+        # extension node
+        if not monthObj.extensions.has_key(ext):
+            monthObj.extensions[ext] = CommitStats.Extension()
+        extObj = monthObj.extensions[ext]
+
+        extObj.affiliation = getAffiliation(author, date)
+        extObj.commitCounts += 1
+        extObj.linesAdded += added
+        extObj.linesRemoved += removed
 
 
 class Main(object):
@@ -846,11 +856,31 @@ path is relative, it is relative to the current directory."""
                     sys.exit(1)
 
 
+    def __getExtension (self, filepath):
+        if filepath[-2:] != ',v':
+            # this isn't a right RCS file name.
+            sys.stderr.write("This is not an RCS file: %s\n"%filepath)
+            sys.exit(1)
+        filepath = filepath[:-2]
+        ext = os.path.splitext(filepath)[1]
+        return ext
+
+
     def __openRCSFile (self, filepath):
+        if filepath[-2:] != ',v':
+            # this isn't a right RCS file name.  Skip it.
+            if self.verbose:
+                sys.stdout.write("Skipping a non-RCS file: %s\n"%filepath)
+            return True
+
         cmd = "rlog " + filepath
         r, w, e = popen2.popen3(cmd)
-    
-        obj = RCSFile(r.readlines())
+        lines = r.readlines()
+        r.close()
+        w.close()
+        e.close()
+
+        obj = RCSFile(lines, self.__getExtension(filepath))
         obj.debug = self.debug
         obj.parse()
         if obj.isError():
@@ -862,9 +892,6 @@ path is relative, it is relative to the current directory."""
             sys.stderr.write("failed to write commit stats\n")
             sys.exit(1)
     
-        r.close()
-        w.close()
-        e.close()
 
         self.stats.totalFileCount += 1
 
@@ -874,7 +901,7 @@ path is relative, it is relative to the current directory."""
     def __outputReport (self, fd):
         authorNames = self.stats.authors.keys()
         authorNames.sort()
-        fd.write("author\tyear\tmonth\taffiliation\tcommit count\tlines added\tlines removed\tdate\n")
+        fd.write("author\tyear\tmonth\taffiliation\text\tcommit count\tlines added\tlines removed\tdate\n")
         for authorName in authorNames:
             authorObj = self.stats.authors[authorName]
             years = authorObj.years.keys()
@@ -885,12 +912,16 @@ path is relative, it is relative to the current directory."""
                 months.sort()
                 for month in months:
                     monthObj = yearObj.months[month]
-                    fd.write("%s\t%d\t%d\t%s\t%d\t%d\t%d\t%d-%d-1\n"%(
-                        authorName, year, month,
-                        monthObj.affiliation,
-                        monthObj.commitCounts, 
-                        monthObj.linesAdded, monthObj.linesRemoved,
-                        year, month))
+                    extensions = monthObj.extensions.keys()
+                    extensions.sort()
+                    for ext in extensions:
+                        extObj = monthObj.extensions[ext]
+                        fd.write("%s\t%d\t%d\t%s\t%s\t%d\t%d\t%d\t%d-%d-1\n"%(
+                            authorName, year, month,
+                            extObj.affiliation, ext,
+                            extObj.commitCounts, 
+                            extObj.linesAdded, extObj.linesRemoved,
+                            year, month))
 
         fd.write("\n")
         fd.write("total file count\t%d\n"%self.stats.totalFileCount)
