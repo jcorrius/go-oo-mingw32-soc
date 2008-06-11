@@ -13,4 +13,4 @@ SpreadsheetSample.exe: ${SOURCES}
 	    `pkg-config --libs mono-ooo-2.0`
 
 clean:
-	rm SpreadsheetSample.exe
+	rm -f SpreadsheetSample.exe
