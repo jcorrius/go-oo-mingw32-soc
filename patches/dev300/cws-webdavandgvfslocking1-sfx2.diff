@@ -1,0 +1,305 @@
+Index: sfx2/inc/sfx2/docfile.hxx
+===================================================================
+RCS file: /cvs/framework/sfx2/inc/sfx2/docfile.hxx,v
+retrieving revision 1.8
+retrieving revision 1.6.22.2
+diff -u -p -u -p -B -r1.8 -r1.6.22.2
+--- sfx2/inc/sfx2/docfile.hxx	15 Apr 2008 14:18:01 -0000	1.8
++++ sfx2/inc/sfx2/docfile.hxx	2 Jun 2008 14:00:55 -0000	1.6.22.2
+@@ -181,7 +181,7 @@ public:
+ 	const INetURLObject& GetURLObject() const;
+ #endif
+     ::com::sun::star::uno::Reference< ::com::sun::star::ucb::XContent > GetContent() const;
+-	const String&       GetPhysicalName() const;
++	const String&       GetPhysicalName( sal_Bool bForceCreateTempIfRemote = sal_True ) const;
+ 	void                SetTemporary( sal_Bool bTemp );
+     sal_Bool            IsTemporary() const;
+     sal_Bool            IsRemote();
+@@ -254,6 +254,8 @@ public:
+ 	void				SetCharset( ::rtl::OUString );
+     ::rtl::OUString     GetBaseURL( bool bForSaving=false );
+ 
++    sal_Bool            SupportsActiveStreaming( const rtl::OUString &rName ) const;
++
+ #if _SOLAR__PRIVATE
+ //REMOVE		// the storage will be truncated, if it is still not open then the stream will be truncated
+ //REMOVE	    ::com::sun::star::uno::Reference< ::com::sun::star::embed::XStorage > GetOutputStorage_Impl();
+Index: sfx2/source/bastyp/helper.cxx
+===================================================================
+RCS file: /cvs/framework/sfx2/source/bastyp/helper.cxx,v
+retrieving revision 1.30
+retrieving revision 1.29.234.2
+diff -u -p -u -p -B -r1.30 -r1.29.234.2
+--- sfx2/source/bastyp/helper.cxx	11 Apr 2008 12:17:07 -0000	1.30
++++ sfx2/source/bastyp/helper.cxx	2 Jun 2008 14:00:58 -0000	1.29.234.2
+@@ -796,16 +796,15 @@ ErrCode SfxContentHelper::QueryDiskSpace
+ 
+ // -----------------------------------------------------------------------
+ 
+-ULONG SfxContentHelper::GetSize( const String& rContent )
++sal_Int64 SfxContentHelper::GetSize( const String& rContent )
+ {
+-	ULONG nSize = 0;
+-	sal_Int64 nTemp = 0;
++	sal_Int64 nSize = -1;
+     INetURLObject aObj( rContent );
+     DBG_ASSERT( aObj.GetProtocol() != INET_PROT_NOT_VALID, "Invalid URL!" );
+ 	try
+ 	{
+ 		::ucbhelper::Content aCnt( aObj.GetMainURL( INetURLObject::NO_DECODE ), uno::Reference< ucb::XCommandEnvironment > () );
+-		aCnt.getPropertyValue( OUString::createFromAscii( "Size" ) ) >>= nTemp;
++		aCnt.getPropertyValue( OUString::createFromAscii( "Size" ) ) >>= nSize;
+ 	}
+ 	catch( ucb::CommandAbortedException& )
+ 	{
+@@ -815,7 +814,6 @@ ULONG SfxContentHelper::GetSize( const S
+ 	{
+ 		DBG_ERRORFILE( "Any other exception" );
+ 	}
+-	nSize = (UINT32)nTemp;
+ 	return nSize;
+ }
+ 
+Index: sfx2/source/dialog/dinfdlg.cxx
+===================================================================
+RCS file: /cvs/framework/sfx2/source/dialog/dinfdlg.cxx,v
+retrieving revision 1.44
+retrieving revision 1.43.38.2
+diff -u -p -u -p -B -r1.44 -r1.43.38.2
+--- sfx2/source/dialog/dinfdlg.cxx	11 Apr 2008 12:33:30 -0000	1.44
++++ sfx2/source/dialog/dinfdlg.cxx	2 Jun 2008 14:01:11 -0000	1.43.38.2
+@@ -1063,8 +1063,9 @@ void SfxDocumentPage::Reset( const SfxIt
+ 
+ 	// determine size and type
+ 	String aSizeText( aUnknownSize );
+-	if ( aURL.GetProtocol() == INET_PROT_FILE )
+-		aSizeText = CreateSizeText( SfxContentHelper::GetSize( aURL.GetMainURL( INetURLObject::NO_DECODE ) ) );
++	sal_Int64 nSize = SfxContentHelper::GetSize( aURL.GetMainURL( INetURLObject::NO_DECODE ) );
++	if ( nSize >= 0 )
++		aSizeText = CreateSizeText( static_cast< ULONG >( nSize ) );
+ 	aShowSizeFT.SetText( aSizeText );
+ 
+ 	String aDescription = SvFileInformationManager::GetDescription( INetURLObject(rMainURL) );
+Index: sfx2/source/doc/docfile.cxx
+===================================================================
+RCS file: /cvs/framework/sfx2/source/doc/docfile.cxx,v
+retrieving revision 1.202
+retrieving revision 1.198.22.4
+diff -u -p -u -p -B -r1.202 -r1.198.22.4
+--- sfx2/source/doc/docfile.cxx	24 Apr 2008 19:15:48 -0000	1.202
++++ sfx2/source/doc/docfile.cxx	10 Jun 2008 15:04:48 -0000	1.198.22.4
+@@ -108,6 +108,7 @@ using namespace ::com::sun::star::io;
+ 
+ #include <comphelper/storagehelper.hxx>
+ #include <comphelper/mediadescriptor.hxx>
++#include <comphelper/stillreadwriteinteraction.hxx>
+ #include <tools/urlobj.hxx>
+ #include <tools/inetmime.hxx>
+ #include <unotools/ucblockbytes.hxx>
+@@ -144,43 +145,6 @@ using namespace ::com::sun::star::io;
+ 
+ #define MAX_REDIRECT 5
+ 
+-class SfxMediumHandler_Impl : public ::cppu::WeakImplHelper1< com::sun::star::task::XInteractionHandler >
+-{
+-    com::sun::star::uno::Reference< com::sun::star::task::XInteractionHandler > m_xInter;
+-
+-public:
+-    virtual void SAL_CALL handle( const com::sun::star::uno::Reference< com::sun::star::task::XInteractionRequest >& xRequest )
+-            throw( com::sun::star::uno::RuntimeException );
+-
+-    SfxMediumHandler_Impl( com::sun::star::uno::Reference< com::sun::star::task::XInteractionHandler > xInteraction )
+-        : m_xInter( xInteraction )
+-        {}
+-
+-    ~SfxMediumHandler_Impl();
+-};
+-
+-SfxMediumHandler_Impl::~SfxMediumHandler_Impl()
+-{
+-}
+-
+-void SAL_CALL SfxMediumHandler_Impl::handle( const com::sun::star::uno::Reference< com::sun::star::task::XInteractionRequest >& xRequest )
+-        throw( com::sun::star::uno::RuntimeException )
+-{
+-	if( !m_xInter.is() )
+-		return;
+-
+-    com::sun::star::uno::Any aRequest = xRequest->getRequest();
+-    com::sun::star::ucb::InteractiveIOException aIoException;
+-    com::sun::star::ucb::UnsupportedDataSinkException aSinkException;
+-    if ( (aRequest >>= aIoException) && ( aIoException.Code == IOErrorCode_ACCESS_DENIED || aIoException.Code == IOErrorCode_LOCKING_VIOLATION ) )
+-        return;
+-    else
+-    if ( aRequest >>= aSinkException )
+-        return;
+-    else
+-        m_xInter->handle( xRequest );
+-}
+-
+ class SfxPoolCancelManager_Impl  :   public SfxCancelManager ,
+                                      public SfxCancellable   ,
+                                      public SfxListener      ,
+@@ -460,6 +424,11 @@ Reference < XContent > SfxMedium::GetCon
+ 		Reference < ::com::sun::star::ucb::XContent > xContent;
+ 	    Reference < ::com::sun::star::ucb::XCommandEnvironment > xEnv;
+ 
++        Reference < ::com::sun::star::task::XInteractionHandler > xInteractionHandler = const_cast< SfxMedium* >( this )->GetInteractionHandler();
++        if ( xInteractionHandler.is() )
++            xEnv = new ::ucbhelper::CommandEnvironment( new ::comphelper::StillReadWriteInteraction( xInteractionHandler ),
++                                                        Reference< ::com::sun::star::ucb::XProgressHandler >() );
++
+         SFX_ITEMSET_ARG( pSet, pItem, SfxUnoAnyItem, SID_CONTENT, sal_False);
+         if ( pItem )
+             pItem->GetValue() >>= xContent;
+@@ -653,10 +622,13 @@ sal_Bool SfxMedium::CloseOutStream_Impl(
+ }
+ 
+ //------------------------------------------------------------------
+-const String& SfxMedium::GetPhysicalName() const
++const String& SfxMedium::GetPhysicalName( sal_Bool bForceCreateTempIfRemote ) const
+ {
+     if ( !aName.Len() && aLogicName.Len() )
+-        (( SfxMedium*)this)->CreateFileStream();
++    {
++        if ( bForceCreateTempIfRemote || !SupportsActiveStreaming( aLogicName ) )
++            (( SfxMedium*)this)->CreateFileStream();
++    }
+ 
+     // return the name then
+     return aName;
+@@ -822,11 +794,37 @@ sal_Bool SfxMedium::TryStorage()
+ }
+ 
+ //------------------------------------------------------------------
++sal_Bool SfxMedium::SupportsActiveStreaming( const rtl::OUString &rName ) const
++{
++    if ( ::utl::LocalFileHelper::IsLocalFile( rName ) )
++        return sal_True;
++
++    ::ucbhelper::Content aTmpContent;
++    Reference< ::com::sun::star::ucb::XCommandEnvironment > xEnv;
++
++    Reference < ::com::sun::star::task::XInteractionHandler > xInteractionHandler = const_cast< SfxMedium* >( this )->GetInteractionHandler();
++    if ( xInteractionHandler.is() )
++        xEnv = new ::ucbhelper::CommandEnvironment( new ::comphelper::StillReadWriteInteraction( xInteractionHandler ),
++                                                    Reference< ::com::sun::star::ucb::XProgressHandler >() );
++
++    if ( ::ucbhelper::Content::create( GetURLObject().GetMainURL( INetURLObject::NO_DECODE ), xEnv, aTmpContent ) )
++    {
++        Any aAny = aTmpContent.getPropertyValue(
++                ::rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "SupportsActiveStreaming" )) );
++
++        sal_Bool bSupportsStreaming = sal_False;
++        return ( ( aAny >>= bSupportsStreaming ) && bSupportsStreaming );
++    }
++
++    return sal_False;
++}
++
++//------------------------------------------------------------------
+ sal_Bool SfxMedium::BasedOnOriginalFile_Impl()
+ {
+ 	return ( !pImp->pTempFile && !( aLogicName.Len() && pImp->m_bSalvageMode )
+ 	  && GetURLObject().GetMainURL( INetURLObject::NO_DECODE ).getLength()
+-      && ::utl::LocalFileHelper::IsLocalFile( GetURLObject().GetMainURL( INetURLObject::NO_DECODE ) )
++ 	  && SupportsActiveStreaming( GetURLObject().GetMainURL( INetURLObject::NO_DECODE ) )
+ 	  && ::utl::UCBContentHelper::IsDocument( GetURLObject().GetMainURL( INetURLObject::NO_DECODE ) ) );
+ }
+ 
+@@ -892,7 +890,7 @@ uno::Reference < embed::XStorage > SfxMe
+ 
+     // medium based on OutputStream: must work with TempFile
+     if( aLogicName.CompareToAscii( "private:stream", 14 ) == COMPARE_EQUAL
+-	  || !::utl::LocalFileHelper::IsLocalFile( aLogicName ) )
++            || !::utl::LocalFileHelper::IsLocalFile( aLogicName ) )
+         CreateTempFileNoCopy();
+ 	// if Medium already contains a stream - TODO/LATER: store stream/outputstream in ImplData, not in Medium
+ 	else if ( GetItemSet()->GetItemState( SID_STREAM ) < SFX_ITEM_SET )
+@@ -1165,7 +1163,7 @@ uno::Reference < embed::XStorage > SfxMe
+ 
+             try
+             {
+-                if ( IsReadOnly() && ::utl::LocalFileHelper::IsLocalFile( aLogicName ) )
++                if ( IsReadOnly() && SupportsActiveStreaming( aLogicName ) )
+                 {
+                     //TODO/LATER: performance problem if not controlled by special Mode in SfxMedium
+                     //(should be done only for permanently open storages)
+@@ -1212,21 +1210,6 @@ uno::Reference < embed::XStorage > SfxMe
+     					if ( aLogicName.CompareToAscii( "private:stream", 14 ) != COMPARE_EQUAL
+ 						  && GetContent().is() )
+ 						{
+-                            // unfortunately the content can not always have the interaction handler
+-                            // so in some cases it has to be set for some time
+-	                        Reference < ::com::sun::star::ucb::XCommandEnvironment > xEnv;
+-	                        Reference < ::com::sun::star::ucb::XCommandEnvironment > xOldEnv;
+-       	                    Reference < ::com::sun::star::task::XInteractionHandler > xInteractionHandler = ((SfxMedium*)this)->GetInteractionHandler();
+-                            if ( xInteractionHandler.is() )
+-			                    xEnv = new ::ucbhelper::CommandEnvironment( xInteractionHandler,
+-													  Reference< ::com::sun::star::ucb::XProgressHandler >() );
+-
+-                            if ( xEnv.is() )
+-                            {
+-                                xOldEnv = pImp->aContent.getCommandEnvironment();
+-                                pImp->aContent.setCommandEnvironment( xEnv );
+-                            }
+-                            
+                             try
+                             {
+                                 Any aAny = pImp->aContent.getPropertyValue(
+@@ -1240,9 +1223,6 @@ uno::Reference < embed::XStorage > SfxMe
+                             }
+                             catch( uno::Exception& )
+                             {}
+-
+-                            if ( xEnv.is() )
+-                                pImp->aContent.setCommandEnvironment( xOldEnv );
+ 						}
+ 
+ 						// if the document is opened as readonly the copy should be done according to selected approach
+@@ -1982,7 +1962,7 @@ void SfxMedium::Transfer_Impl()
+ 			xComEnv = new ::ucbhelper::CommandEnvironment( xInteractionHandler,
+ 													  Reference< ::com::sun::star::ucb::XProgressHandler >() );
+ 
+-        if ( ::utl::LocalFileHelper::IsLocalFile( aDest.GetMainURL( INetURLObject::NO_DECODE ) ) || !aDest.removeSegment() )
++		if ( SupportsActiveStreaming( aDest.GetMainURL( INetURLObject::NO_DECODE ) ) || !aDest.removeSegment() )
+ 		{
+ 			TransactedTransferForFS_Impl( aSource, aDest, xComEnv );
+ 		}
+Index: sfx2/source/inc/helper.hxx
+===================================================================
+RCS file: /cvs/framework/sfx2/source/inc/helper.hxx,v
+retrieving revision 1.9
+retrieving revision 1.8.726.2
+diff -u -p -u -p -B -r1.9 -r1.8.726.2
+--- sfx2/source/inc/helper.hxx	11 Apr 2008 13:19:50 -0000	1.9
++++ sfx2/source/inc/helper.hxx	2 Jun 2008 14:01:19 -0000	1.8.726.2
+@@ -69,7 +69,7 @@ public:
+ 
+ 	static sal_Bool				MakeFolder( const String& rFolder );
+ 	static ErrCode				QueryDiskSpace( const String& rPath, sal_Int64& rFreeBytes );
+-	static ULONG				GetSize( const String& rContent );
++	static sal_Int64			GetSize( const String& rContent );
+ 	static sal_Bool				IsYounger( const String& rIsYoung, const String& rIsOlder );
+ 
+ 	// please don't use this!
+Index: sfx2/source/view/viewfrm.cxx
+===================================================================
+RCS file: /cvs/framework/sfx2/source/view/viewfrm.cxx,v
+retrieving revision 1.136
+retrieving revision 1.133.70.2
+diff -u -p -u -p -B -r1.136 -r1.133.70.2
+--- sfx2/source/view/viewfrm.cxx	13 May 2008 13:09:22 -0000	1.136
++++ sfx2/source/view/viewfrm.cxx	2 Jun 2008 14:01:23 -0000	1.133.70.2
+@@ -626,6 +626,11 @@ void SfxViewFrame::ExecReload_Impl( SfxR
+                 sal_Bool bHandsOff =
+                     ( pMedium->GetURLObject().GetProtocol() == INET_PROT_FILE && !xOldObj->IsDocShared() );
+ 
++                // we must do the same for the contents that support active
++                // streaming
++                if ( !bHandsOff && pMedium && pMedium->SupportsActiveStreaming( aURL ) )
++                    bHandsOff = sal_True;
++
+                 // bestehende SfxMDIFrames f"ur dieses Doc leeren
+                 // eigenes Format oder R/O jetzt editierbar "offnen?
+                 SfxViewNotificatedFrameList_Impl aFrames;
