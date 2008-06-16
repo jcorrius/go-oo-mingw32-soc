@@ -33,11 +33,31 @@ index 2674c59..3c4f364 100644
  	{}
  };
  
+diff --git basic/inc/basic/sbobjmod.hxx basic/inc/basic/sbobjmod.hxx
+index bdc23d9..15f6352 100644
+--- basic/inc/basic/sbobjmod.hxx
++++ basic/inc/basic/sbobjmod.hxx
+@@ -56,6 +56,7 @@ public:
+     SbObjModule( const com::sun::star::script::ModuleInfo& mInfo, bool bIsVbaCompatible );
+     virtual SbxVariable* Find( const XubString& rName, SbxClassType t );
+     SbxVariable* GetObject();
++    void SetUnoObject( const com::sun::star::uno::Any& aObj )throw ( com::sun::star::uno::RuntimeException ) ;
+ };
+ 
+ class SbUserFormModule : public SbObjModule
 diff --git basic/source/basmgr/basmgr.cxx basic/source/basmgr/basmgr.cxx
-index b5394ae..eb68578 100644
+index b5394ae..f12312e 100644
 --- basic/source/basmgr/basmgr.cxx
 +++ basic/source/basmgr/basmgr.cxx
-@@ -60,6 +60,7 @@
+@@ -44,6 +44,7 @@
+ #include <tools/debug.hxx>
+ #include <tools/diagnose_ex.h>
+ #include <basic/sbmod.hxx>
++#include <basic/sbobjmod.hxx>
+ 
+ #include <basic/sbuno.hxx>
+ #include <basic/basmgr.hxx>
+@@ -60,6 +61,7 @@
  
  // Library API, implemented for XML import/export
  
@@ -45,7 +65,7 @@ index b5394ae..eb68578 100644
  #include <com/sun/star/container/XNameContainer.hpp>
  #include <com/sun/star/container/XContainer.hpp>
  #include <com/sun/star/script/XStarBasicAccess.hpp>
-@@ -208,10 +209,11 @@ void BasMgrContainerListenerImpl::insert
+@@ -208,10 +210,11 @@ void BasMgrContainerListenerImpl::insert
  	if( !pMgr->GetLib( aLibName ) )
  	{
          BasicManager* pBasMgr = static_cast< BasicManager* >( pMgr );
@@ -59,7 +79,7 @@ index b5394ae..eb68578 100644
  		DBG_ASSERT( pLib, "XML Import: Basic library could not be created");
  	}
  
-@@ -292,6 +294,12 @@ void SAL_CALL BasMgrContainerListenerImp
+@@ -292,6 +295,12 @@ void SAL_CALL BasMgrContainerListenerImp
  	{
          Reference< XLibraryContainer > xScriptCont( Event.Source, UNO_QUERY );
  		insertLibraryImpl( xScriptCont, mpMgr, Event.Element, aName );
@@ -72,7 +92,58 @@ index b5394ae..eb68578 100644
  	}
  	else
  	{
-@@ -822,6 +830,12 @@ void BasicManager::SetLibraryContainerIn
+@@ -337,25 +346,35 @@ void SAL_CALL BasMgrContainerListenerImp
+     DBG_ASSERT( !bLibContainer, "library container fired elementReplaced()");
+ 
+ 	StarBASIC* pLib = mpMgr->GetLib( maLibName );
++    
+ 	if( pLib )
+ 	{
+-         ModuleInfo mInfo;
++	    SbModule* pMod = pLib->FindModule( aName );
++		OUString aMod;
++        ModuleInfo mInfo;
+         if( Event.Element >>= mInfo )
+-        {
+-            OSL_TRACE("#elementReplaced Mod");
+-            pLib->MakeModule32( mInfo );
+-        }
+-        else
+-        {
+-		    SbModule* pMod = pLib->FindModule( aName );
+-
+-		    OUString aMod;
++			aMod = mInfo.ModuleSource;
++        else 
+             Event.Element >>= aMod;
+-		    if( pMod )
+-		   	    pMod->SetSource32( aMod );
+-            else
+-			    pLib->MakeModule32( aName, aMod );
+-        }
++		if( pMod )
++		{
++			pMod->SetSource32( aMod );
++			if ( mInfo.ModuleType == ModuleType::Document )
++			{
++				SbObjModule* pObjModule = dynamic_cast< SbObjModule* >( pMod );
++				if ( pObjModule )	
++					pObjModule->SetUnoObject( makeAny( mInfo.ModuleObject ) );
++			}
++		}
++        else
++			// Probably we should have an assert for
++			// unknow module type, e.g. either we are using
++			// the ModuleInfo structure ( vba ) for *all* modules
++			// or not ( normal )
++			if ( mInfo.ModuleType == ModuleType::Unknown )
++				pLib->MakeModule32( aName, aMod );
++			else
++				pLib->MakeModule32( mInfo );
+ 
+ 		pLib->SetModified( FALSE );
+ 	}
+@@ -822,6 +841,12 @@ void BasicManager::SetLibraryContainerIn
  
  	Reference< XLibraryContainer > xScriptCont( mpImpl->maContainerInfo.mxScriptCont.get() );
  	StarBASIC* pStdLib = GetStdLib();
@@ -86,55 +157,52 @@ index b5394ae..eb68578 100644
  	if( xScriptCont.is() )
  	{
 diff --git basic/source/classes/sbxmod.cxx basic/source/classes/sbxmod.cxx
-index 3f9e76c..e51fb8f 100644
+index 3f9e76c..8083eaa 100644
 --- basic/source/classes/sbxmod.cxx
 +++ basic/source/classes/sbxmod.cxx
-@@ -2250,26 +2250,31 @@ SbObjModule::SbObjModule( const com::sun
+@@ -2250,25 +2250,26 @@ SbObjModule::SbObjModule( const com::sun
      if ( mInfo.ModuleType == script::ModuleType::Form )
      {
          SetClassName( rtl::OUString::createFromAscii( "Form" ) );
 -        return;
      }
 -    try
-+    else 
++    else if ( mInfo.ModuleObject.is() )
++        SetUnoObject( uno::makeAny( mInfo.ModuleObject ) );   
++}
++void
++SbObjModule::SetUnoObject( const uno::Any& aObj ) throw ( uno::RuntimeException )
++{
++    SbUnoObject* pUnoObj = PTR_CAST(SbUnoObject,(SbxVariable*)pDocObject);
++    if ( pUnoObj && pUnoObj->getUnoAny() == aObj ) // object is equal, nothing to do
++        return;
++    pDocObject = new SbUnoObject( GetName(), uno::makeAny( aObj ) );
++            
++    com::sun::star::uno::Reference< com::sun::star::lang::XServiceInfo > xServiceInfo( aObj, com::sun::star::uno::UNO_QUERY_THROW );
++    if( xServiceInfo->supportsService( rtl::OUString::createFromAscii( "org.openoffice.excel.Worksheet" ) ) )
      {
 -        com::sun::star::uno::Any aObject( mInfo.ModuleObject );
 -        pDocObject = new SbUnoObject( GetName(), aObject );
 -        com::sun::star::uno::Reference< com::sun::star::lang::XServiceInfo > xServiceInfo( aObject, com::sun::star::uno::UNO_QUERY_THROW );
 -        if( xServiceInfo->supportsService( rtl::OUString::createFromAscii( "org.openoffice.excel.Worksheet" ) ) )
-+        try
-         {
+-        {
 -            SetClassName( rtl::OUString::createFromAscii( "Worksheet" ) );
-+            uno::Reference< lang::XMultiServiceFactory > xSF( mInfo.ModuleObject, uno::UNO_QUERY_THROW );
-+            uno::Reference< container::XNameAccess > xVBAObjectForCodeName( xSF->createInstance( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "org.openoffice.vba.VBAObjectModuleObjectProvider"))), UNO_QUERY_THROW );
-+            
-+            com::sun::star::uno::Any aObject( xVBAObjectForCodeName->getByName( mInfo.ModuleName ) );
-+            pDocObject = new SbUnoObject( GetName(), aObject );
-+            com::sun::star::uno::Reference< com::sun::star::lang::XServiceInfo > xServiceInfo( aObject, com::sun::star::uno::UNO_QUERY_THROW );
-+            if( xServiceInfo->supportsService( rtl::OUString::createFromAscii( "org.openoffice.excel.Worksheet" ) ) )
-+            {
-+                SetClassName( rtl::OUString::createFromAscii( "Worksheet" ) );
-+            }
-+            else if( xServiceInfo->supportsService( rtl::OUString::createFromAscii( "org.openoffice.excel.Workbook" ) ) )
-+            {
-+                SetClassName( rtl::OUString::createFromAscii( "Workbook" ) );
-+            }
-         }
+-        }
 -        else if( xServiceInfo->supportsService( rtl::OUString::createFromAscii( "org.openoffice.excel.Workbook" ) ) )
-+        catch( com::sun::star::uno::RuntimeException e )
-         {
+-        {
 -            SetClassName( rtl::OUString::createFromAscii( "Workbook" ) );
-+            OSL_TRACE("***** Failed to initialise API Object." );
-         }
+-        }
++        SetClassName( rtl::OUString::createFromAscii( "Worksheet" ) );
      }
 -    catch( com::sun::star::uno::RuntimeException e )
--    {
++    else if( xServiceInfo->supportsService( rtl::OUString::createFromAscii( "org.openoffice.excel.Workbook" ) ) )
+     {
 -        OSL_TRACE("***** Failed to initialise API Object." );
--    }
++        SetClassName( rtl::OUString::createFromAscii( "Workbook" ) );
+     }
  }
  
- SbxVariable*
-@@ -2301,7 +2306,7 @@ class FormObjEventListenerImpl : public 
+@@ -2301,7 +2302,7 @@ class FormObjEventListenerImpl : public 
  public:
      FormObjEventListenerImpl( SbUserFormModule* pUserForm, const uno::Reference< lang::XComponent >& xComponent ) : mpUserForm( pUserForm ), mxComponent( xComponent) , mbDisposed( false )
      {
@@ -200,18 +268,10 @@ index e5b3d76..4f1d26a 100644
  	// Provide modify state including resources
  	virtual sal_Bool isModified( void ) = 0;
 diff --git basic/source/uno/namecont.cxx basic/source/uno/namecont.cxx
-index e5f37c7..bdf9bbf 100644
+index e5f37c7..a062c0d 100644
 --- basic/source/uno/namecont.cxx
 +++ basic/source/uno/namecont.cxx
-@@ -75,6 +75,7 @@
- #ifndef _COM_SUN_STAR_SCRIPT_MODULEINFO_HPP_
- #include <com/sun/star/script/ModuleInfo.hpp>
- #endif
-+#include <com/sun/star/script/XCodeNameBinder.hpp>
- 
- namespace basic
- {
-@@ -325,6 +326,17 @@ void ModifiableHelper::setModified( sal_
+@@ -325,6 +325,17 @@ void ModifiableHelper::setModified( sal_
  // Implementation class SfxLibraryContainer
  DBG_NAME( SfxLibraryContainer )
  
@@ -229,7 +289,7 @@ index e5f37c7..bdf9bbf 100644
  // Ctor
  SfxLibraryContainer::SfxLibraryContainer( void )
  	: LibraryContainerHelper( maMutex )
-@@ -334,6 +346,7 @@ SfxLibraryContainer::SfxLibraryContainer
+@@ -334,6 +345,7 @@ SfxLibraryContainer::SfxLibraryContainer
      , mbOasis2OOoFormat( sal_False )
      , mpBasMgr( NULL )
      , mbOwnBasMgr( sal_False )
@@ -237,7 +297,7 @@ index e5f37c7..bdf9bbf 100644
  {
      DBG_CTOR( SfxLibraryContainer, NULL );
  
-@@ -790,7 +803,7 @@ sal_Bool SfxLibraryContainer::init_Impl(
+@@ -790,7 +802,7 @@ sal_Bool SfxLibraryContainer::init_Impl(
                  OSL_ENSURE( 0, OUStringToOString( e.Message, RTL_TEXTENCODING_ASCII_US ).getStr() );
                  return sal_False;
              }
@@ -246,27 +306,25 @@ index e5f37c7..bdf9bbf 100644
  		    sal_Int32 nLibCount = pLibArray->mnLibCount;
  		    for( sal_Int32 i = 0 ; i < nLibCount ; i++ )
  		    {
-@@ -1620,16 +1633,35 @@ void SfxLibraryContainer::implImportLibD
+@@ -1620,16 +1632,33 @@ void SfxLibraryContainer::implImportLibD
  	    sal_Int32 nElementCount = rLib.aElementNames.getLength();
  	    const OUString* pElementNames = rLib.aElementNames.getConstArray();
  	    Any aDummyElement = createEmptyLibraryElement();
-+            // push code name associations
-+            Reference< XMultiServiceFactory > xDocumentFac( mxOwnerDocument.get(), UNO_QUERY );
-+            Reference< XCodeNameBinder > xBind;
-+            if ( xDocumentFac.is() )
-+                xBind.set( xDocumentFac->createInstance( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "org.openoffice.vba.VBAObjectModuleObjectProvider"))), UNO_QUERY );
 +            ::xmlscript::ObjectModuleDescHash::iterator it_end = rLib.hCodeNameToObjDesc.end();
  	    for( sal_Int32 i = 0 ; i < nElementCount ; i++ )
  	    {
 +                    ::xmlscript::ObjectModuleDescHash::iterator it = rLib.hCodeNameToObjDesc.find( pElementNames[i] );
 +                    
-+                    if ( it != it_end  && xBind.is() )
++                    if ( it != it_end )
 +                    {
 +                        // for all other types set up the ModuleInfo structure
 +                        com::sun::star::script::ModuleInfo mInfo;
 +                        mInfo.ModuleName = pElementNames[i];
 +                        mInfo.ModuleType = it->second.mnModuleType;
-+                        mInfo.ModuleObject = mxOwnerDocument;
++                        // hack for userform, needs to know about the document
++                        // well really it needs the dialog library
++                        if (  mInfo.ModuleType == ModuleType::Form )
++                            mInfo.ModuleObject = mxOwnerDocument;
 +                        aDummyElement <<= mInfo;
 +                    }
  		    pLib->maNameContainer.insertByName( pElementNames[i], aDummyElement );
@@ -283,7 +341,7 @@ index e5f37c7..bdf9bbf 100644
      }
  }
  
-@@ -2177,10 +2209,26 @@ void SAL_CALL SfxLibraryContainer::loadL
+@@ -2177,10 +2206,26 @@ void SAL_CALL SfxLibraryContainer::loadL
  			}
  
  			Any aAny = importLibraryElement( aFile, xInStream );
@@ -692,6 +750,74 @@ index b123ad7..7ee3b4a 100644
 +
  
  
+diff --git sc/source/filter/excel/excimp8.cxx sc/source/filter/excel/excimp8.cxx
+index efd372d..8ec6e31 100644
+--- sc/source/filter/excel/excimp8.cxx
++++ sc/source/filter/excel/excimp8.cxx
+@@ -105,6 +105,7 @@
+ 
+ #include <com/sun/star/document/XDocumentProperties.hpp>
+ #include <com/sun/star/document/XDocumentPropertiesSupplier.hpp>
++#include <com/sun/star/script/ModuleInfo.hpp>
+ 
+ 
+ using namespace com::sun::star;
+@@ -112,8 +113,8 @@ using namespace com::sun::star;
+ 
+ #define	INVALID_POS		0xFFFFFFFF
+ 
+-
+-
++// defined in docfunc.cxx ( really this needs a new name )
++script::ModuleInfo lcl_InitModuleInfo( SfxObjectShell& rDocSh, String& sModule );
+ 
+ ImportExcel8::ImportExcel8( XclImpRootData& rImpData, SvStream& rStrm ) :
+     ImportExcel( rImpData, rStrm ), mnTab(0)
+@@ -291,6 +292,44 @@ void ImportExcel8::ReadBasic( void )
+             SvxImportMSVBasic aBasicImport( *pShell, *xRootStrg, bLoadCode, bLoadStrg );
+ 			bool bAsComment = !bLoadExecutable || !lcl_hasVBAEnabled();
+             aBasicImport.Import( EXC_STORAGE_VBA_PROJECT, EXC_STORAGE_VBA, bAsComment );
++            // for each document module get the associated object for the codename and do a replacebyname
++            ScDocument& aDoc = GetDoc();
++            uno::Reference< script::XLibraryContainer > xLibContainer = GetDocShell()->GetBasicContainer();
++            uno::Reference< container::XNameContainer > xLib;
++            if( xLibContainer.is() )
++            {
++                String aLibName( RTL_CONSTASCII_USTRINGPARAM( "Standard" ) );
++                uno::Any aLibAny = xLibContainer->getByName( aLibName );
++                aLibAny >>= xLib;
++            }
++            if ( xLib.is() )
++            {
++                rtl::OUString sOUCodeName( aDoc.GetCodeName() );
++                if ( xLib->hasByName( sOUCodeName ) )
++                {
++                    script::ModuleInfo mInfo;
++                    xLib->getByName( sOUCodeName ) >>= mInfo; 
++                    String sTmp = sOUCodeName;
++                    mInfo.ModuleObject = lcl_InitModuleInfo( *GetDocShell(), sTmp ).ModuleObject;
++                    xLib->replaceByName( sOUCodeName, uno::makeAny( mInfo ) );
++			
++                }
++                SCTAB nCount = aDoc.GetTableCount();
++    
++                for( SCTAB i = 0; i < nCount; ++i )
++                {
++                    String sName;
++                    aDoc.GetCodeName( i, sName );
++                    sOUCodeName = sName;
++                    if ( xLib->hasByName( sOUCodeName ) )
++                    {
++                        script::ModuleInfo mInfo;
++                        xLib->getByName( sOUCodeName ) >>= mInfo; 
++                        mInfo.ModuleObject = lcl_InitModuleInfo( *GetDocShell(), sName ).ModuleObject;
++                        xLib->replaceByName( sOUCodeName, uno::makeAny( mInfo ) );
++                    }
++                }
++            }
+         }
+     }
+ }
 diff --git sc/source/filter/xml/xmlsubti.cxx sc/source/filter/xml/xmlsubti.cxx
 index ab00932..d03592f 100644
 --- sc/source/filter/xml/xmlsubti.cxx
@@ -717,12 +843,67 @@ index ab00932..d03592f 100644
  									xNamed->setName(sTableName);
  								}
  								catch ( uno::RuntimeException& )
-diff --git sc/source/filter/xml/xmltabi.cxx sc/source/filter/xml/xmltabi.cxx
 diff --git sc/source/ui/docshell/docfunc.cxx sc/source/ui/docshell/docfunc.cxx
-index 105f743..9b1443c 100644
+index 105f743..29b1a31 100644
 --- sc/source/ui/docshell/docfunc.cxx
 +++ sc/source/ui/docshell/docfunc.cxx
-@@ -2116,8 +2116,11 @@ BOOL ScDocFunc::InsertTable( SCTAB nTab,
+@@ -2028,7 +2028,7 @@ BOOL ScDocFunc::MoveBlock( const ScRange
+ }
+ 
+ //------------------------------------------------------------------------
+-script::ModuleInfo lcl_InitModuleInfo( ScDocShell& rDocSh, String& sModule )
++script::ModuleInfo lcl_InitModuleInfo( SfxObjectShell& rDocSh, String& sModule )
+ {
+     ::rtl::OUString aModName( sModule );
+     uno::Reference< lang::XMultiServiceFactory> xSF(rDocSh.GetModel(), uno::UNO_QUERY);
+@@ -2064,22 +2064,35 @@ void lcl_InsertModule( ScDocShell& rDocS
+     }
+     if( xLib.is() )
+     {
+-        // test Module has exist
+-        // if the Module is exist. changed to another name
+-        // and at this time the string like "SheetX"
++        // if the Module with codename exists ( and we are NOT loading the 
++        // document ( xml ) find a new name
+         sal_Int32 nNum = 1;
+-        while( xLib->hasByName( sModuleInfo.ModuleName  ) )
++        sModuleInfo.ModuleName = sModuleName;
++        while( !rDocSh.GetDocument()->IsImportingXML() && xLib->hasByName( sModuleInfo.ModuleName  ) )
+         {
+-            sModuleName = rtl::OUString::createFromAscii( "Sheet" ) + rtl::OUString::valueOf( nNum );
++            sModuleInfo.ModuleName = rtl::OUString::createFromAscii( "Sheet" ) + rtl::OUString::valueOf( nNum );
+             nNum += 1;
+         }
+-        sModuleInfo.ModuleName = sModuleName;
+         uno::Any aSourceAny;
+-        aSourceAny <<= sModuleInfo;
+-        xLib->insertByName( sModuleName, aSourceAny );
+-        ScDocument* pDoc = rDocSh.GetDocument();
+-        String sCodeName( sModuleName );
+-        pDoc->SetCodeName( nTab, sCodeName );
++        if ( rDocSh.GetDocument()->IsImportingXML() )
++        {
++            // Importing xml? well if we are then basic has read in
++            // whatever codenames/docmodules there are, lets set the
++            // associated api object here
++            uno::Reference< uno::XInterface > xApi( sModuleInfo.ModuleObject );
++            xLib->getByName( sModuleInfo.ModuleName ) >>= sModuleInfo;
++            sModuleInfo.ModuleObject = xApi;
++            aSourceAny <<= sModuleInfo;
++            xLib->replaceByName( sModuleInfo.ModuleName, aSourceAny );
++        }
++        else
++        {
++            aSourceAny <<= sModuleInfo;
++            xLib->insertByName( sModuleInfo.ModuleName, aSourceAny );
++            ScDocument* pDoc = rDocSh.GetDocument();
++            String sCodeName( sModuleInfo.ModuleName );
++            pDoc->SetCodeName( nTab, sCodeName );
++        }
+     }
+     SFX_APP()->LeaveBasicCall();
+ }
+@@ -2116,8 +2129,10 @@ BOOL ScDocFunc::InsertTable( SCTAB nTab,
  	ScDocShellModificator aModificator( rDocShell );
  
  	ScDocument* pDoc = rDocShell.GetDocument();
@@ -730,13 +911,17 @@ index 105f743..9b1443c 100644
 -    BOOL bVbaEnabled = pStarBASIC->isVBAEnabled();
 +    // Strange loop, also basic is loaded too early ( InsertTable )
 +    // is called via the xml import for sheets in described in odf 
-+    //StarBASIC* pStarBASIC = rDocShell.GetBasic(); 
-+    StarBASIC* pStarBASIC = NULL; 
++    StarBASIC* pStarBASIC = rDocShell.GetBasic(); 
 +    BOOL bVbaEnabled = pStarBASIC ? pStarBASIC->isVBAEnabled() : false;
  	if (bRecord && !pDoc->IsUndoEnabled())
  		bRecord = FALSE;
      if ( bVbaEnabled )
-@@ -2136,6 +2139,17 @@ BOOL ScDocFunc::InsertTable( SCTAB nTab,
+@@ -2132,13 +2147,26 @@ BOOL ScDocFunc::InsertTable( SCTAB nTab,
+ 
+ 	if (pDoc->InsertTab( nTab, rName ))
+ 	{
++		String sCodeName;
+ 		if (bRecord)
  			rDocShell.GetUndoManager()->AddUndoAction(
  						new ScUndoInsertTab( &rDocShell, nTab, bAppend, rName));
  		//	Views updaten:
@@ -747,13 +932,18 @@ index 105f743..9b1443c 100644
 +			{
 +				rtl::OUString sOUSCodeName;
 +				xCodeNames->getByName( rName ) >>= sOUSCodeName;
-+				String sCodeName( sOUSCodeName );
++				sCodeName = sOUSCodeName;
 +				pDoc->SetCodeName( nTab, sCodeName );		
 +			}
 +		}
          if( bVbaEnabled )
          {
-             String sCodeName( rName );
+-            String sCodeName( rName );
++            if ( sCodeName.Len() == 0 )
++		sCodeName = rName;
+             lcl_InsertModule( rDocShell, nTab, sCodeName );
+         }
+ 		rDocShell.Broadcast( ScTablesHint( SC_TAB_INSERTED, nTab ) );
 diff --git sc/source/ui/docshell/docsh.cxx sc/source/ui/docshell/docsh.cxx
 index da54daa..3e3d8cd 100644
 --- sc/source/ui/docshell/docsh.cxx
