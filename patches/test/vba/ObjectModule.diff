@@ -1,13 +1,3 @@
-diff --git .gitignore .gitignore
-index 71145e6..7f99c80 100644
---- .gitignore
-+++ .gitignore
-@@ -6,3 +6,5 @@ unxlng*.pro
- localize.sdf
- /solver
- *.orig
-+*.swp
-+/sc.nodebug
 diff --git basic/inc/basic/basmgr.hxx basic/inc/basic/basmgr.hxx
 index 2674c59..3c4f364 100644
 --- basic/inc/basic/basmgr.hxx
@@ -818,57 +808,61 @@ index efd372d..8ec6e31 100644
          }
      }
  }
-diff --git sc/source/filter/xml/xmlsubti.cxx sc/source/filter/xml/xmlsubti.cxx
-index ab00932..d03592f 100644
---- sc/source/filter/xml/xmlsubti.cxx
-+++ sc/source/filter/xml/xmlsubti.cxx
-@@ -238,6 +238,20 @@ void ScMyTables::NewSheet(const rtl::OUS
- 							if ( xNamed.is() )
- 								try
- 								{
-+									ScDocument *pDoc = ScXMLConverter::GetScDocument(rImport.GetModel());
-+									if ( pDoc && nCurrentSheet == 0 ) // can it be < 0 ?
-+									{
-+										uno::Reference< container::XNameAccess > xCodeNames( pDoc->GetPersistedCodeNames() );
-+										if( xCodeNames->hasByName( sTableName ) )
-+										{
-+											rtl::OUString sOUSCodeName;
-+											xCodeNames->getByName( sTableName ) >>= sOUSCodeName;
-+											rImport.LockSolarMutex();
-+											String sCodeName( sOUSCodeName );
-+											pDoc->SetCodeName( nCurrentSheet, sCodeName );		
-+											rImport.UnlockSolarMutex();
-+										}
-+									}
- 									xNamed->setName(sTableName);
- 								}
- 								catch ( uno::RuntimeException& )
 diff --git sc/source/ui/docshell/docfunc.cxx sc/source/ui/docshell/docfunc.cxx
-index 105f743..29b1a31 100644
+index 105f743..91ff9f7 100644
 --- sc/source/ui/docshell/docfunc.cxx
 +++ sc/source/ui/docshell/docfunc.cxx
-@@ -2028,7 +2028,7 @@ BOOL ScDocFunc::MoveBlock( const ScRange
+@@ -2028,23 +2028,29 @@ BOOL ScDocFunc::MoveBlock( const ScRange
  }
  
  //------------------------------------------------------------------------
 -script::ModuleInfo lcl_InitModuleInfo( ScDocShell& rDocSh, String& sModule )
-+script::ModuleInfo lcl_InitModuleInfo( SfxObjectShell& rDocSh, String& sModule )
++uno::Reference< uno::XInterface > GetDocModuleObject( SfxObjectShell& rDocSh, String& sCodeName )
  {
-     ::rtl::OUString aModName( sModule );
+-    ::rtl::OUString aModName( sModule );
      uno::Reference< lang::XMultiServiceFactory> xSF(rDocSh.GetModel(), uno::UNO_QUERY);
-@@ -2064,22 +2064,35 @@ void lcl_InsertModule( ScDocShell& rDocS
++    uno::Reference< container::XNameAccess > xVBACodeNamedObjectAccess;
++    uno::Reference< uno::XInterface > xDocModuleApiObject;
++    if ( xSF.is() )
++    {
++        xVBACodeNamedObjectAccess.set( xSF->createInstance( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "org.openoffice.vba.VBAObjectModuleObjectProvider"))), uno::UNO_QUERY );    
++        xDocModuleApiObject.set( xVBACodeNamedObjectAccess->getByName( sCodeName ), uno::UNO_QUERY );    
++    }
++    return xDocModuleApiObject;
++
++}
++
++script::ModuleInfo lcl_InitModuleInfo( SfxObjectShell& rDocSh, String& sModule )
++{
++    ::rtl::OUString aModName( sModule );
+     ::rtl::OUString sVbaOption( RTL_CONSTASCII_USTRINGPARAM( "Rem Attribute VBA_ModuleType=VBADocumentModule\nOption VBASupport 1\n" ));
+     script::ModuleInfo sModuleInfo;
+     sModuleInfo.ModuleName = aModName;
+     sModuleInfo.ModuleSource = sVbaOption;
+     sModuleInfo.ModuleType = script::ModuleType::Document;
+-    uno::Reference< container::XNameAccess > xVBACodeNamedObjectAccess;
+-    if ( xSF.is() )
+-    {
+-        uno::Sequence< uno::Any > aArgs(1);
+-        aArgs[0] = uno::Any( aModName );
+-        xVBACodeNamedObjectAccess.set( xSF->createInstanceWithArguments( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "org.openoffice.vba.VBAObjectModuleObjectProvider")), aArgs), uno::UNO_QUERY );    
+-        sModuleInfo.ModuleObject.set( xVBACodeNamedObjectAccess->getByName( aModName ), uno::UNO_QUERY );    
+-    }
++    sModuleInfo.ModuleObject = GetDocModuleObject( rDocSh, sModule );
+     return sModuleInfo;
+ }
+ 
+@@ -2064,21 +2070,19 @@ void lcl_InsertModule( ScDocShell& rDocS
      }
      if( xLib.is() )
      {
 -        // test Module has exist
 -        // if the Module is exist. changed to another name
 -        // and at this time the string like "SheetX"
-+        // if the Module with codename exists ( and we are NOT loading the 
-+        // document ( xml ) find a new name
++        // if the Module with codename exists then find a new name
          sal_Int32 nNum = 1;
--        while( xLib->hasByName( sModuleInfo.ModuleName  ) )
 +        sModuleInfo.ModuleName = sModuleName;
-+        while( !rDocSh.GetDocument()->IsImportingXML() && xLib->hasByName( sModuleInfo.ModuleName  ) )
+         while( xLib->hasByName( sModuleInfo.ModuleName  ) )
          {
 -            sModuleName = rtl::OUString::createFromAscii( "Sheet" ) + rtl::OUString::valueOf( nNum );
 +            sModuleInfo.ModuleName = rtl::OUString::createFromAscii( "Sheet" ) + rtl::OUString::valueOf( nNum );
@@ -876,34 +870,16 @@ index 105f743..29b1a31 100644
          }
 -        sModuleInfo.ModuleName = sModuleName;
          uno::Any aSourceAny;
--        aSourceAny <<= sModuleInfo;
+         aSourceAny <<= sModuleInfo;
 -        xLib->insertByName( sModuleName, aSourceAny );
--        ScDocument* pDoc = rDocSh.GetDocument();
++        xLib->insertByName( sModuleInfo.ModuleName, aSourceAny );
+         ScDocument* pDoc = rDocSh.GetDocument();
 -        String sCodeName( sModuleName );
--        pDoc->SetCodeName( nTab, sCodeName );
-+        if ( rDocSh.GetDocument()->IsImportingXML() )
-+        {
-+            // Importing xml? well if we are then basic has read in
-+            // whatever codenames/docmodules there are, lets set the
-+            // associated api object here
-+            uno::Reference< uno::XInterface > xApi( sModuleInfo.ModuleObject );
-+            xLib->getByName( sModuleInfo.ModuleName ) >>= sModuleInfo;
-+            sModuleInfo.ModuleObject = xApi;
-+            aSourceAny <<= sModuleInfo;
-+            xLib->replaceByName( sModuleInfo.ModuleName, aSourceAny );
-+        }
-+        else
-+        {
-+            aSourceAny <<= sModuleInfo;
-+            xLib->insertByName( sModuleInfo.ModuleName, aSourceAny );
-+            ScDocument* pDoc = rDocSh.GetDocument();
-+            String sCodeName( sModuleInfo.ModuleName );
-+            pDoc->SetCodeName( nTab, sCodeName );
-+        }
++        String sCodeName( sModuleInfo.ModuleName );
+         pDoc->SetCodeName( nTab, sCodeName );
      }
      SFX_APP()->LeaveBasicCall();
- }
-@@ -2116,8 +2129,10 @@ BOOL ScDocFunc::InsertTable( SCTAB nTab,
+@@ -2116,8 +2120,10 @@ BOOL ScDocFunc::InsertTable( SCTAB nTab,
  	ScDocShellModificator aModificator( rDocShell );
  
  	ScDocument* pDoc = rDocShell.GetDocument();
@@ -916,7 +892,7 @@ index 105f743..29b1a31 100644
  	if (bRecord && !pDoc->IsUndoEnabled())
  		bRecord = FALSE;
      if ( bVbaEnabled )
-@@ -2132,13 +2147,26 @@ BOOL ScDocFunc::InsertTable( SCTAB nTab,
+@@ -2132,13 +2138,16 @@ BOOL ScDocFunc::InsertTable( SCTAB nTab,
  
  	if (pDoc->InsertTab( nTab, rName ))
  	{
@@ -925,18 +901,9 @@ index 105f743..29b1a31 100644
  			rDocShell.GetUndoManager()->AddUndoAction(
  						new ScUndoInsertTab( &rDocShell, nTab, bAppend, rName));
  		//	Views updaten:
-+		if ( pDoc )
-+		{
-+			uno::Reference< container::XNameAccess > xCodeNames( pDoc->GetPersistedCodeNames() );
-+			if( xCodeNames->hasByName( rName ) )
-+			{
-+				rtl::OUString sOUSCodeName;
-+				xCodeNames->getByName( rName ) >>= sOUSCodeName;
-+				sCodeName = sOUSCodeName;
-+				pDoc->SetCodeName( nTab, sCodeName );		
-+			}
-+		}
-         if( bVbaEnabled )
+-        if( bVbaEnabled )
++        // Only insert vba modules if vba mode ( and not currently importing XML )
++        if( bVbaEnabled && !rDocShell.GetDocument()->IsImportingXML() )
          {
 -            String sCodeName( rName );
 +            if ( sCodeName.Len() == 0 )
@@ -945,10 +912,18 @@ index 105f743..29b1a31 100644
          }
  		rDocShell.Broadcast( ScTablesHint( SC_TAB_INSERTED, nTab ) );
 diff --git sc/source/ui/docshell/docsh.cxx sc/source/ui/docshell/docsh.cxx
-index da54daa..3e3d8cd 100644
+index da54daa..6e57e1e 100644
 --- sc/source/ui/docshell/docsh.cxx
 +++ sc/source/ui/docshell/docsh.cxx
-@@ -516,7 +516,11 @@ sal_uInt16 ScDocShell::GetHiddenInformat
+@@ -130,6 +130,7 @@
+ #include "cellsuno.hxx"
+ #include <com/sun/star/document/XVbaEventsHelper.hpp>
+ #include <com/sun/star/document/VbaEventId.hpp>
++#include <com/sun/star/script/ModuleInfo.hpp>
+ 
+ using namespace com::sun::star;
+ using namespace com::sun::star::document::VbaEventId;
+@@ -516,7 +517,11 @@ sal_uInt16 ScDocShell::GetHiddenInformat
  void ScDocShell::BeforeXMLLoading()
  {
      aDocument.DisableIdle( TRUE );
@@ -961,14 +936,86 @@ index da54daa..3e3d8cd 100644
      // prevent unnecessary broadcasts and updates
      DBG_ASSERT(pModificator == NULL, "The Modificator should not exist");
  	pModificator = new ScDocShellModificator( *this );
-@@ -602,6 +606,11 @@ void ScDocShell::AfterXMLLoading(sal_Boo
- 		aDocument.SetInsertingFromOtherDoc( FALSE );
+@@ -530,6 +535,45 @@ void ScDocShell::BeforeXMLLoading()
+ 		ScColumn::bDoubleAlloc = sal_True;
+ }
  
- 	aDocument.SetImportingXML( FALSE );
++// defined in docfunc.cxx ( really this needs a new name )
++uno::Reference< uno::XInterface > GetDocModuleObject( SfxObjectShell& rDocSh, String& sCodeName );
++
++rtl::OUString GetCodeName( ScDocument& aDocument, String& sObjectName )
++{
++    uno::Reference< container::XNameAccess > xCodeNames( aDocument.GetPersistedCodeNames() );
++    rtl::OUString sOUSCodeName;
++    xCodeNames->getByName( sObjectName ) >>= sOUSCodeName;
++    return sOUSCodeName;
++}
++
++void SetDocModuleForCodeName( ScDocument& aDocument, String& sCodeName )
++{
++    uno::Reference< script::XLibraryContainer > xLibContainer = aDocument.GetDocumentShell()->GetBasicContainer();
++    uno::Reference< container::XNameContainer > xLib;
++
++    if( xLibContainer.is() )
++    {
++        String aLibName( RTL_CONSTASCII_USTRINGPARAM( "Standard" ) );
++        uno::Any aLibAny = xLibContainer->getByName( aLibName );
++        aLibAny >>= xLib;
++    }
++
++    if ( xLib.is() )
++    {
++        rtl::OUString sOUCodeName( sCodeName );
++        script::ModuleInfo mInfo;
++        if ( xLib->getByName( sOUCodeName ) >>= mInfo )
++        {
++            mInfo.ModuleObject = GetDocModuleObject( *aDocument.GetDocumentShell(), sCodeName );
++            xLib->replaceByName( sOUCodeName, uno::makeAny( mInfo ) );         
++        }
++        else
++        {
++            // Insert a big fat assertion etc
++        }
++    }
++}
++
+ void ScDocShell::AfterXMLLoading(sal_Bool bRet)
+ {
+ 	if (GetCreateMode() != SFX_CREATE_MODE_ORGANIZER)
+@@ -600,8 +644,36 @@ void ScDocShell::AfterXMLLoading(sal_Boo
+     }
+     else
+ 		aDocument.SetInsertingFromOtherDoc( FALSE );
+-
 +        // suppress VBA events when loading the xml
 +        uno::Reference< document::XVbaEventsHelper > xEvt( aDocument.GetVbaEventsHelper() );
 +        if ( xEvt.is() )
 +            xEvt->setIgnoreEvents( sal_False );
++        // SetCodenames for each tab  ( and set up the vba DOC Modules ) 
++        SCTAB nTabCount = aDocument.GetTableCount();
++        for (SCTAB i = 0; i < nTabCount; ++i)
++        {
++            String sObjectName;
++            String sCodeName;
++            try
++            {
++                if ( i == 0 )
++                {
++                    sObjectName = String( RTL_CONSTASCII_USTRINGPARAM("ThisWorkbook") );
++                    sCodeName = GetCodeName( aDocument, sObjectName );
++                    SetDocModuleForCodeName( aDocument, sCodeName );
++                }
++                aDocument.GetName( i, sObjectName );
++                sCodeName = GetCodeName( aDocument, sObjectName );
++                aDocument.SetCodeName( i, sCodeName );
++                SetDocModuleForCodeName( aDocument, sCodeName );
++            } 
++            catch( uno::Exception& )
++            {
++            }
++        }
++            
+ 	aDocument.SetImportingXML( FALSE );
 +    
      aDocument.EnableUndo( TRUE );
      bIsEmpty = FALSE;
@@ -994,7 +1041,7 @@ index 1dcc337..55e67bd 100644
          uno::Reference< drawing::XDrawPagesSupplier > xSupplier( pDocShell->GetModel(), uno::UNO_QUERY_THROW );
          uno::Reference< container::XIndexAccess > xIndex( xSupplier->getDrawPages(), uno::UNO_QUERY_THROW );
 diff --git sc/source/ui/unoobj/servuno.cxx sc/source/ui/unoobj/servuno.cxx
-index b1a8a85..33a6dcd 100644
+index b1a8a85..270c61a 100644
 --- sc/source/ui/unoobj/servuno.cxx
 +++ sc/source/ui/unoobj/servuno.cxx
 @@ -63,7 +63,6 @@
@@ -1005,39 +1052,6 @@ index b1a8a85..33a6dcd 100644
  using namespace ::com::sun::star;
  
  class ScVbaObjectForCodeNameProvider : public ::cppu::WeakImplHelper1< container::XNameAccess >
-@@ -89,6 +88,32 @@ public:
-             maWorkbook <<= mxSF->createInstanceWithArguments(  rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("org.openoffice.excel.Workbook") ), aArgs );
-         }
-     }
-+    virtual void SAL_CALL bindCodeName( const ::rtl::OUString& codename, const ::rtl::OUString& objectname ) throw (::com::sun::star::uno::RuntimeException)
-+    {
-+        ScDocument* pDoc = mpDocShell->GetDocument();
-+        String sObjName( objectname );
-+        String sCodeName( codename );
-+        if ( pDoc )
-+        {
-+            if ( sObjName == String( RTL_CONSTASCII_USTRINGPARAM("ThisWorkbook") ) ) 
-+                pDoc->SetCodeName( sCodeName );
-+            else 
-+            {
-+                String sSheetObjName;
-+                SCTAB nCount = pDoc->GetTableCount();
-+                for( SCTAB i = 0; i < nCount; i++ )
-+                {
-+                    pDoc->GetName( i, sSheetObjName );
-+                    if ( sObjName == sSheetObjName )
-+                    {
-+                        pDoc->SetCodeName( i, sCodeName );
-+                        break;
-+                    }   
-+                }
-+            }
-+        }
-+        
-+    } 
- 
-     virtual ::sal_Bool SAL_CALL hasByName( const ::rtl::OUString& aName ) throw (::com::sun::star::uno::RuntimeException )
-     {
 diff --git sc/source/ui/vba/vbaeventshelper.cxx sc/source/ui/vba/vbaeventshelper.cxx
 index 6c11c73..31664d0 100644
 --- sc/source/ui/vba/vbaeventshelper.cxx
