@@ -1,5 +1,5 @@
 diff --git ucb/source/ucp/webdav/NeonInputStream.cxx ucb/source/ucp/webdav/NeonInputStream.cxx
-index 37a8580..7db7fca 100644
+index 37a8580..abd43f2 100644
 --- ucb/source/ucp/webdav/NeonInputStream.cxx
 +++ ucb/source/ucp/webdav/NeonInputStream.cxx
 @@ -33,6 +33,7 @@
@@ -10,7 +10,7 @@ index 37a8580..7db7fca 100644
  #include <rtl/memory.h>
  
  #include <com/sun/star/ucb/CommandFailedException.hpp>
-@@ -46,16 +47,120 @@ using namespace com::sun::star::io;
+@@ -46,16 +47,117 @@ using namespace com::sun::star::io;
  using namespace com::sun::star;
  using namespace webdav_ucp;
  
@@ -100,30 +100,27 @@ index 37a8580..7db7fca 100644
 +}
 +
 +// -------------------------------------------------------------------
-+// Signal handlers
++// Signal handler
 +// -------------------------------------------------------------------
-+oslSignalAction NeonInputStream::RefreshLockOnSignal( void* pData, oslSignalInfo* pSignalInfo )
++oslSignalAction NeonInputStream::HandleLockingSignal( void* pData, oslSignalInfo* pSignalInfo )
  {
      NeonInputStream *pStream = static_cast< NeonInputStream *>( pData );
  
 -    if ( pStream )
-+    if ( pStream &&
-+            pSignalInfo &&
++    if ( !pStream )
++        return osl_Signal_ActCallNextHdl;
++
++    if ( pSignalInfo  &&
 +            pSignalInfo->Signal == osl_Signal_User &&
 +            pSignalInfo->UserSignal == TICKER_THREAD_USER_SIGNAL )
 +    {
 +        pStream->RefreshLock();
 +    }
-+
-+    return osl_Signal_ActCallNextHdl;
-+}
-+
-+oslSignalAction NeonInputStream::UnlockOnSignal( void* pData, oslSignalInfo* pSignalInfo )
-+{
-+    NeonInputStream *pStream = static_cast< NeonInputStream *>( pData );
-+
-+    if ( pStream && ( !pSignalInfo || ( pSignalInfo && pSignalInfo->Signal != osl_Signal_User ) ) )
++    else if ( !pSignalInfo || ( pSignalInfo->Signal != osl_Signal_User ) )
++    {
++        // terminating or something, let's unlock the stream
          pStream->Unlock();
++    }
  
      return osl_Signal_ActCallNextHdl;
  }
@@ -133,7 +130,7 @@ index 37a8580..7db7fca 100644
  // -------------------------------------------------------------------
  // Constructor
  // -------------------------------------------------------------------
-@@ -65,10 +170,14 @@ NeonInputStream::NeonInputStream( const uno::Reference< lang::XMultiServiceFacto
+@@ -65,10 +167,13 @@ NeonInputStream::NeonInputStream( const uno::Reference< lang::XMultiServiceFacto
    m_nPos( 0 ),
    m_bDirty( sal_False ),
    m_pLock( NULL ),
@@ -142,14 +139,13 @@ index 37a8580..7db7fca 100644
    m_xEnv( m_rEnv )
  {
 -    m_pSignalHandler = osl_addSignalHandler( NeonInputStream::UnlockOnSignal, this );
-+    m_pRefreshLockSignalHandler = osl_addSignalHandler( NeonInputStream::RefreshLockOnSignal, this );
-+    m_pUnlockSignalHandler = osl_addSignalHandler( NeonInputStream::UnlockOnSignal, this );
++    m_pSignalHandler = osl_addSignalHandler( NeonInputStream::HandleLockingSignal, this );
 +
 +    sTickerThreadController.start();
  }
  
  // -------------------------------------------------------------------
-@@ -76,9 +185,12 @@ NeonInputStream::NeonInputStream( const uno::Reference< lang::XMultiServiceFacto
+@@ -76,6 +181,8 @@ NeonInputStream::NeonInputStream( const uno::Reference< lang::XMultiServiceFacto
  // -------------------------------------------------------------------
  NeonInputStream::~NeonInputStream( void )
  {
@@ -157,13 +153,16 @@ index 37a8580..7db7fca 100644
 +
      Unlock();
  
--    osl_removeSignalHandler( m_pSignalHandler );
-+    osl_removeSignalHandler( m_pUnlockSignalHandler );
-+    osl_removeSignalHandler( m_pRefreshLockSignalHandler );
- }
+     osl_removeSignalHandler( m_pSignalHandler );
+@@ -100,12 +207,17 @@ void NeonInputStream::AddToStream( const char * inBuf, sal_Int32 inLen )
+ void NeonInputStream::SetLock( const com::sun::star::ucb::Lock &rLock,
+         const rtl::OUString &rURL )
+ {
++    osl::MutexGuard aGuard( m_aLock );
++
+     m_aURL = rURL;
  
- // -------------------------------------------------------------------
-@@ -106,6 +218,9 @@ void NeonInputStream::SetLock( const com::sun::star::ucb::Lock &rLock,
+     if ( !m_pLock )
          m_pLock = new ucb::Lock( rLock );
      else
          *m_pLock = rLock;
@@ -173,7 +172,7 @@ index 37a8580..7db7fca 100644
  }
  
  // -------------------------------------------------------------------
-@@ -364,10 +479,41 @@ void SAL_CALL NeonInputStream::truncate( void )
+@@ -364,10 +476,41 @@ void SAL_CALL NeonInputStream::truncate( void )
  }
  
  // -------------------------------------------------------------------
@@ -215,7 +214,7 @@ index 37a8580..7db7fca 100644
  #if OSL_DEBUG_LEVEL > 0
      fprintf( stderr, "WebDAV: unlock()\n" );
  #endif
-@@ -384,5 +529,7 @@ void NeonInputStream::Unlock( void )
+@@ -384,5 +527,7 @@ void NeonInputStream::Unlock( void )
  
          delete m_pLock;
          m_pLock = NULL;
@@ -224,7 +223,7 @@ index 37a8580..7db7fca 100644
      }
  }
 diff --git ucb/source/ucp/webdav/NeonInputStream.hxx ucb/source/ucp/webdav/NeonInputStream.hxx
-index bf8c4a7..6c713e3 100644
+index bf8c4a7..8cda106 100644
 --- ucb/source/ucp/webdav/NeonInputStream.hxx
 +++ ucb/source/ucp/webdav/NeonInputStream.hxx
 @@ -31,6 +31,7 @@
@@ -235,17 +234,15 @@ index bf8c4a7..6c713e3 100644
  #include <osl/signal.h>
  #include <rtl/ustring.hxx>
  #include <cppuhelper/weak.hxx>
-@@ -71,13 +72,17 @@ private:
+@@ -71,6 +72,7 @@ private:
      sal_Bool                   m_bDirty;
  
      com::sun::star::ucb::Lock *m_pLock;
 +    int                        m_nToExpire;
      rtl::OUString              m_aURL;
  
--    oslSignalHandler           m_pSignalHandler;
-+    oslSignalHandler           m_pRefreshLockSignalHandler;
-+    oslSignalHandler           m_pUnlockSignalHandler;
- 
+     oslSignalHandler           m_pSignalHandler;
+@@ -78,6 +80,8 @@ private:
      com::sun::star::uno::Reference< com::sun::star::lang::XMultiServiceFactory > m_xMSF;
      com::sun::star::uno::Reference< com::sun::star::ucb::XCommandEnvironment > m_xEnv;
  
@@ -254,7 +251,7 @@ index bf8c4a7..6c713e3 100644
  public:
               NeonInputStream( const com::sun::star::uno::Reference< com::sun::star::lang::XMultiServiceFactory > &m_rMSF,
                                const com::sun::star::uno::Reference< com::sun::star::ucb::XCommandEnvironment > &m_rEnv );
-@@ -183,9 +188,15 @@ public:
+@@ -183,11 +187,15 @@ public:
      
  protected:
  
@@ -264,12 +261,14 @@ index bf8c4a7..6c713e3 100644
      // Unlock the stream & destroy the lock
      void Unlock( void );
  
-+    // Refresh the lock if necessary
-+    static oslSignalAction RefreshLockOnSignal( void* pData, oslSignalInfo* pInfo );
-+
-     // Unlock the stream when OOo crashes/is terminated/...
-     static oslSignalAction UnlockOnSignal( void* pData, oslSignalInfo* pInfo );
+-    // Unlock the stream when OOo crashes/is terminated/...
+-    static oslSignalAction UnlockOnSignal( void* pData, oslSignalInfo* pInfo );
++    // Refresh the lock if necessary, or unlock the stream when
++    // OOo crashes/is terminated/...
++    static oslSignalAction HandleLockingSignal( void* pData, oslSignalInfo* pInfo );
  };
+ 
+ } // namespace webdav_ucp
 diff --git ucb/source/ucp/webdav/NeonSession.cxx ucb/source/ucp/webdav/NeonSession.cxx
 index 4194c11..9f14c11 100644
 --- ucb/source/ucp/webdav/NeonSession.cxx
