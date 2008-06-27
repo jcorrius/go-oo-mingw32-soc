@@ -802,6 +802,16 @@ path is relative, it is relative to the current directory."""
 
         outfile = options.outputfile
 
+        # Check to make sure I have rlog.
+        r, w, e = popen2.popen3("/usr/bin/which rlog")
+        if len(r.read()) == 0:
+            sys.stderr.write("rlog command not available.  You need to install rcs.")
+            sys.exit(1)
+
+        r.close()
+        w.close()
+        e.close()
+
         if options.dirlist != None:
             # directory list exists.
             self.__useDirectoryList(options.dirlist)
@@ -867,6 +877,7 @@ path is relative, it is relative to the current directory."""
 
 
     def __openRCSFile (self, filepath):
+
         if filepath[-2:] != ',v':
             # this isn't a right RCS file name.  Skip it.
             if self.verbose:
