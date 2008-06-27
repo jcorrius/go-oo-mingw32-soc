@@ -1,195 +1,631 @@
-diff --git sc/source/ui/docshell/arealink.cxx sc/source/ui/docshell/arealink.cxx
-index 3c25701..af15b50 100644
---- sc/source/ui/docshell/arealink.cxx
-+++ sc/source/ui/docshell/arealink.cxx
-@@ -69,6 +69,8 @@
- #include "sc.hrc" //CHINA001
- #include "scabstdlg.hxx" //CHINA001
+diff --git sc/inc/compiler.hrc sc/inc/compiler.hrc
+index 2eb24d8..31c6a30 100644
+--- sc/inc/compiler.hrc
++++ sc/inc/compiler.hrc
+@@ -39,25 +39,26 @@
+ #define SC_OPCODE_STOP                2
+ #define SC_OPCODE_EXTERNAL            3
+ #define SC_OPCODE_NAME                4
+-#define SC_OPCODE_IF                  5     /* jump commands */
+-#define SC_OPCODE_CHOSE               6
+-#define SC_OPCODE_OPEN                7     /* parentheses and separators */
+-#define SC_OPCODE_CLOSE               8
+-#define SC_OPCODE_SEP                 9
+-#define SC_OPCODE_MISSING            10     /* special OpCodes */
+-#define SC_OPCODE_BAD                11
+-#define SC_OPCODE_SPACES             12
+-#define SC_OPCODE_MAT_REF            13
+-#define SC_OPCODE_DB_AREA            14     /* additional access operators */
+-#define SC_OPCODE_MACRO              15
+-#define SC_OPCODE_COL_ROW_NAME       16
+-#define SC_OPCODE_COL_ROW_NAME_AUTO  17
+-#define SC_OPCODE_PERCENT_SIGN       18     /* operator _follows_ value */
+-#define SC_OPCODE_ARRAY_OPEN         19
+-#define SC_OPCODE_ARRAY_CLOSE        20
+-#define SC_OPCODE_ARRAY_ROW_SEP      21
+-#define SC_OPCODE_ARRAY_COL_SEP      22     /* some convs use sep != col_sep */
+-#define SC_OPCODE_STOP_DIV           23
++#define SC_OPCODE_EXTERNAL_NAME       5
++#define SC_OPCODE_IF                  6     /* jump commands */
++#define SC_OPCODE_CHOSE               7
++#define SC_OPCODE_OPEN                8     /* parentheses and separators */
++#define SC_OPCODE_CLOSE               9
++#define SC_OPCODE_SEP                10
++#define SC_OPCODE_MISSING            11     /* special OpCodes */
++#define SC_OPCODE_BAD                12
++#define SC_OPCODE_SPACES             13
++#define SC_OPCODE_MAT_REF            14
++#define SC_OPCODE_DB_AREA            15     /* additional access operators */
++#define SC_OPCODE_MACRO              16
++#define SC_OPCODE_COL_ROW_NAME       17
++#define SC_OPCODE_COL_ROW_NAME_AUTO  18
++#define SC_OPCODE_PERCENT_SIGN       19     /* operator _follows_ value */
++#define SC_OPCODE_ARRAY_OPEN         20
++#define SC_OPCODE_ARRAY_CLOSE        21
++#define SC_OPCODE_ARRAY_ROW_SEP      22
++#define SC_OPCODE_ARRAY_COL_SEP      23     /* some convs use sep != col_sep */
++#define SC_OPCODE_STOP_DIV           24
+ 
+ /*** error constants #... ***/
+ #define SC_OPCODE_START_ERRORS       30
+diff --git sc/inc/compiler.hxx sc/inc/compiler.hxx
+index 4e8b388..c6a1423 100644
+--- sc/inc/compiler.hxx
++++ sc/inc/compiler.hxx
+@@ -45,6 +45,7 @@
+ #include <unotools/charclass.hxx>
+ #include <rtl/ustrbuf.hxx>
+ #include <com/sun/star/uno/Sequence.hxx>
++#include <vector>
+ 
+ namespace com { namespace sun { namespace star {
+     namespace sheet {
+@@ -151,6 +152,7 @@ public:
+         } sbyte;
+         ComplRefData aRef;
+         ScMatrix*    pMat;
++        ::std::vector<String>* pStrings;
+         USHORT       nIndex;                // index into name collection
+         sal_Unicode  cStr[ MAXSTRLEN+1 ];   // string (up to 255 characters + 0)
+         short        nJump[MAXJUMPCOUNT+1]; // If/Chose token
+@@ -179,6 +181,7 @@ public:
+     void SetDouble( double fVal );
+     void SetInt( int nVal );
+     void SetName( USHORT n );
++    void SetExternalName( ::std::vector<String>* p );
+     void SetMatrix( ScMatrix* p );
+     void SetExternal(const sal_Unicode* pStr);
+     // These methods are ok to use, reference count not cleared.
+@@ -227,6 +230,14 @@ public:
+                                    xub_StrLen nSrcPos,
+                                    const CharClass* pCharClass) const = 0;
+ 
++        /** 
++         * Parse the symbol string and pick up the file name and the external 
++         * range name. 
++         *
++         * @return true on successful parse, or false otherwise.
++         */
++        virtual bool parseExternalName( const String& rSymbol, String& rFile, String& rName ) const = 0;
++
+         enum SpecialSymbolType
+         {
+             /** 
+@@ -443,6 +454,7 @@ private:
+     BOOL IsDoubleReference( const String& );
+     BOOL IsMacro( const String& );
+     BOOL IsNamedRange( const String& );
++    bool IsExternalNamedRange( const String& rSymbol );
+     BOOL IsDBRange( const String& );
+     BOOL IsColRowName( const String& );
+     BOOL IsBoolean( const String& );
+diff --git sc/inc/document.hxx sc/inc/document.hxx
+index 6188643..b464041 100644
+--- sc/inc/document.hxx
++++ sc/inc/document.hxx
+@@ -624,6 +624,8 @@ SC_DLLPUBLIC	ScDBCollection*	GetDBCollection() const;
+ 									const String& aFileName,
+ 									const String& aTabName );
+ 
++    bool            FindExternalRangeName( const String& rFile, const String& rName, USHORT& rIndex );
++
+     /** Creates a new sheet, and makes it linked to the specified sheet in an external document.
+         @param rnTab  (out-param) Returns the sheet index, if sheet could be inserted).
+         @return  TRUE = Sheet created, rnTab contains valid sheet index. */
+diff --git sc/inc/opcode.hxx sc/inc/opcode.hxx
+index 588cdd5..dad2d2b 100644
+--- sc/inc/opcode.hxx
++++ sc/inc/opcode.hxx
+@@ -44,6 +44,7 @@ enum OpCodeEnum
+ 		ocStop				= SC_OPCODE_STOP,
+ 		ocExternal			= SC_OPCODE_EXTERNAL,
+ 		ocName				= SC_OPCODE_NAME,
++        ocExternalName      = SC_OPCODE_EXTERNAL_NAME,
+ 	// Jump commands
+ 		ocIf				= SC_OPCODE_IF,
+ 		ocChose				= SC_OPCODE_CHOSE,
+diff --git sc/inc/token.hxx sc/inc/token.hxx
+index 8fab11b..0e00d23 100644
+--- sc/inc/token.hxx
++++ sc/inc/token.hxx
+@@ -64,7 +64,7 @@ enum StackVarEnum
+                                         // cell during import, having a double
+                                         // and/or string result and a formula
+                                         // string to be compiled.
+-
++    svMultiString,
+     svError,                            // error token
+     svMissing = 0x70,                   // 0 or ""
+     svUnknown                           // unknown StackType
+@@ -151,6 +151,8 @@ public:
+     virtual double              GetDouble() const;
+     virtual double&             GetDoubleAsReference();
+     virtual const String&       GetString() const;
++    virtual const String&       GetString( USHORT ) const;
++    virtual USHORT              GetStringCount() const;
+     virtual const SingleRefData&    GetSingleRef() const;
+     virtual SingleRefData&      GetSingleRef();
+     virtual const ComplRefData& GetDoubleRef() const;
+@@ -446,6 +448,19 @@ public:
+     virtual BOOL                operator==( const ScToken& rToken ) const;
+ };
+ 
++class ScMultiStringOpToken : public ScOpToken
++{
++private:
++    ::std::vector<String>       aStrings;
++public:
++                                ScMultiStringOpToken( ::std::vector<String>* pStrings, OpCode e );
++                                ScMultiStringOpToken( const ScMultiStringOpToken& r );
++    virtual                     ~ScMultiStringOpToken();
++    virtual const String&       GetString( USHORT n ) const;
++    virtual USHORT              GetStringCount() const;
++    virtual BOOL                operator==( const ScToken& rToken ) const;
++};
++
+ 
+ class ScJumpToken : public ScOpToken
+ {
+diff --git sc/source/core/data/documen3.cxx sc/source/core/data/documen3.cxx
+index dc99201..0744058 100644
+--- sc/source/core/data/documen3.cxx
++++ sc/source/core/data/documen3.cxx
+@@ -478,6 +478,31 @@ BOOL ScDocument::LinkExternalTab( SCTAB& rTab, const String& aDocTab,
+ 	return TRUE;
+ }
+ 
++bool ScDocument::FindExternalRangeName( const String& rFile, const String& rName, USHORT& rIndex )
++{
++    fprintf(stdout, "ScDocument::FindExternalRangeName: --begin (file = '%s'; name = '%s')\n",
++            rtl::OUStringToOString(rFile, RTL_TEXTENCODING_UTF8).getStr(), 
++            rtl::OUStringToOString(rName, RTL_TEXTENCODING_UTF8).getStr());
++
++    String aFilterName, aOptions;
++    sal_uInt32 nLinkCnt = pExtDocOptions ? pExtDocOptions->GetDocSettings().mnLinkCnt : 0;
++    ScDocumentLoader aLoader(rFile, aFilterName, aOptions, nLinkCnt + 1);
++    if (aLoader.IsError())
++        return false;
++
++    ScDocument* pSrcDoc = aLoader.GetDocument();
++    ScRangeName* pExtNames = pSrcDoc->GetRangeName();
++    String aUpperName = ScGlobal::pCharClass->upper(rName);
++    USHORT n;
++    bool bRes = pExtNames->SearchNameUpper(aUpperName, n);
++    if (!bRes)
++        return false;
++
++    ScRangeData* p = (*pExtNames)[n];
++    rIndex = p->GetIndex();
++    return true;
++}
++
+ BOOL ScDocument::InsertLinkedEmptyTab( SCTAB& rnTab, const String& rFileName,
+         const String& rFilterName, const String& rFilterOpt, const String& rTabName )
+ {
+diff --git sc/source/core/tool/compiler.cxx sc/source/core/tool/compiler.cxx
+index b9905d8..b1ed00e 100644
+--- sc/source/core/tool/compiler.cxx
++++ sc/source/core/tool/compiler.cxx
+@@ -74,8 +74,11 @@
+ #include "parclass.hxx"
+ #include "autonamecache.hxx"
  
 +#include <stdio.h>
 +
- struct AreaLink_Impl
- {
-     ScDocShell* m_pDocSh;
-@@ -97,20 +99,35 @@ ScAreaLink::ScAreaLink( SfxObjectShell* pShell, const String& rFile,
- 	bInCreate		(FALSE),
- 	bDoInsert		(TRUE)
- {
-+    fprintf(stdout, "ScAreaLink::ScAreaLink: --begin ctor\n");
+ using namespace ::com::sun::star;
+ using rtl::OUString;
++using ::std::vector;
+ 
+ #if OSL_DEBUG_LEVEL > 1
+ // For some unknown reason the identical dbg_dump utilities in
+@@ -1361,6 +1364,54 @@ struct ConventionOOO_A1 : public Convention_A1
+ 
+         return sal_Unicode(0);
+     }
 +
- 	DBG_ASSERT(pShell->ISA(ScDocShell), "ScAreaLink mit falscher ObjectShell");
-     pImpl->m_pDocSh = static_cast< ScDocShell* >( pShell );
- 	SetRefreshHandler( LINK( this, ScAreaLink, RefreshHdl ) );
-     SetRefreshControl( pImpl->m_pDocSh->GetDocument()->GetRefreshTimerControlAddress() );
-+
-+    fprintf(stdout, "ScAreaLink::ScAreaLink:   file name = '%s'; filter name = '%s'; options = '%s'; src area = '%s'\n",
-+            rtl::OUStringToOString(aFileName, RTL_TEXTENCODING_UTF8).getStr(),
-+            rtl::OUStringToOString(aFilterName, RTL_TEXTENCODING_UTF8).getStr(),
-+            rtl::OUStringToOString(aOptions, RTL_TEXTENCODING_UTF8).getStr(),
-+            rtl::OUStringToOString(aSourceArea, RTL_TEXTENCODING_UTF8).getStr());
-+
-+    String aDestAreaStr;
-+    aDestArea.Format(aDestAreaStr, SCR_ABS_3D, pImpl->m_pDocSh->GetDocument());
-+    fprintf(stdout, "ScAreaLink::ScAreaLink:   dest area = '%s'\n", 
-+            rtl::OUStringToOString(aDestAreaStr, RTL_TEXTENCODING_UTF8).getStr());
- }
- 
- __EXPORT ScAreaLink::~ScAreaLink()
- {
-+    fprintf(stdout, "ScAreaLink::~ScAreaLink: --begin dtor\n");
- 	StopRefreshTimer();
-     delete pImpl;
- }
- 
- void __EXPORT ScAreaLink::Edit(Window* pParent, const Link& /* rEndEditHdl */ )
- {
-+    fprintf(stdout, "ScAreaLink::Edit: --begni dtor\n");
- 	//	use own dialog instead of SvBaseLink::Edit...
- 	//	DefModalDialogParent setzen, weil evtl. aus der DocShell beim ConvertFrom
- 	//	ein Optionen-Dialog kommt...
-@@ -123,16 +140,21 @@ void __EXPORT ScAreaLink::Edit(Window* pParent, const Link& /* rEndEditHdl */ )
- 	pDlg->InitFromOldLink( aFileName, aFilterName, aOptions, aSourceArea, GetRefreshDelay() );
-     pImpl->m_pDialog = pDlg;
-     pDlg->StartExecuteModal( LINK( this, ScAreaLink, AreaEndEditHdl ) );
-+    fprintf(stdout, "ScAreaLink::Edit: --end\n");
- }
- 
- void __EXPORT ScAreaLink::DataChanged( const String&,
- 									   const ::com::sun::star::uno::Any& )
- {
-+    fprintf(stdout, "ScAreaLink::DataChanged: --begin\n");
- 	//	bei bInCreate nichts tun, damit Update gerufen werden kann, um den Status im
- 	//	LinkManager zu setzen, ohne die Daten im Dokument zu aendern
- 
- 	if (bInCreate)
--		return;
++    virtual bool parseExternalName( const String& rSymbol, String& rFile, String& rName ) const
 +    {
-+        fprintf(stdout, "ScAreaLink::DataChanged: --end (in create)\n");
-+        return;
++        // in OOO A1, an external name syntax is as follows:
++        // 
++        //   'file:///path/to/source'#ExternalName
++
++        String aTmpFile, aTmpName;
++        xub_StrLen nLen = rSymbol.Len();
++        const sal_Unicode* p = rSymbol.GetBuffer();
++        bool bInFilePath = false;
++        bool bInName = false;
++        sal_Unicode cPrev = 0;
++        for (xub_StrLen i = 0; i < nLen; ++i, ++p)
++        {
++            const sal_Unicode c = *p;
++            if (c == '\'')
++            {
++                if (!bInFilePath && i != 0)
++                    // The first character must be a single quote.
++                    return false;
++
++                bInFilePath = !bInFilePath;
++            }
++            else if (bInFilePath)
++                aTmpFile.Append(c);
++            else if (bInName)
++                aTmpName.Append(c);
++            else if (c == '#')
++            {
++                if (cPrev != '\'')
++                    // '#' must immediately follow the closing single quote.
++                    return false;
++
++                bInName = true;
++            }
++
++            cPrev = c;
++        }
++
++        if (aTmpFile.Len() == 0 || aTmpName.Len() == 0)
++            return false;
++
++        rFile = aTmpFile;
++        rName = aTmpName;
++
++        return true;
 +    }
+ };
  
-     SvxLinkManager* pLinkManager=pImpl->m_pDocSh->GetDocument()->GetLinkManager();
- 	if (pLinkManager!=NULL)
-@@ -159,10 +181,12 @@ void __EXPORT ScAreaLink::DataChanged( const String&,
  
- 		Refresh( aFile, aFilter, aArea, GetRefreshDelay() );
- 	}
-+    fprintf(stdout, "ScAreaLink::DataChanged: --end\n");
+@@ -1480,6 +1531,11 @@ struct ConventionXL
+         }
+         return sal_Unicode(0);
+     }
++
++    static bool parseExternalName( const String& rSymbol, String& rFile, String& rName )
++    {
++        return false;
++    }
+ };
+ 
+ struct ConventionXL_A1 : public Convention_A1, public ConventionXL
+@@ -1561,6 +1617,11 @@ struct ConventionXL_A1 : public Convention_A1, public ConventionXL
+     {
+         return ConventionXL::getSpecialSymbol(eSymType);
+     }
++
++    virtual bool parseExternalName( const String& rSymbol, String& rFile, String& rName ) const
++    {
++        return ConventionXL::parseExternalName(rSymbol, rFile, rName);
++    }
+ };
+ 
+ static const ConventionXL_A1 ConvXL_A1;
+@@ -1688,6 +1749,11 @@ struct ConventionXL_R1C1 : public ScCompiler::Convention, public ConventionXL
+     {
+         return ConventionXL::getSpecialSymbol(eSymType);
+     }
++
++    virtual bool parseExternalName( const String& rSymbol, String& rFile, String& rName ) const
++    {
++        return ConventionXL::parseExternalName(rSymbol, rFile, rName);
++    }
+ };
+ 
+ static const ConventionXL_R1C1 ConvXL_R1C1;
+@@ -2207,6 +2273,7 @@ xub_StrLen ScCompiler::NextSymbol()
+                         aSymbol += pStart[nSrcPos++];
+                 }
+             }
++            fprintf(stdout, "ScCompiler::NextSymbol:   symbol = '%s'\n", rtl::OUStringToOString(aSymbol, RTL_TEXTENCODING_UTF8).getStr());
+         } while ( bi18n && !nErr );
+         xub_StrLen nLen = aSymbol.Len();
+         if ( nLen >= MAXSTRLEN )
+@@ -2499,6 +2566,8 @@ BOOL ScCompiler::IsSingleReference( const String& rName )
+ 
+ BOOL ScCompiler::IsReference( const String& rName )
+ {
++    fprintf(stdout, "ScCompiler::IsReference: --begin (name = '%s')\n", rtl::OUStringToOString(rName, RTL_TEXTENCODING_UTF8).getStr());
++
+     // Has to be called before IsValue
+     sal_Unicode ch1 = rName.GetChar(0);
+     sal_Unicode cDecSep = ( mxSymbols->isEnglish() ? '.' :
+@@ -2597,6 +2666,31 @@ BOOL ScCompiler::IsNamedRange( const String& rUpperName )
+         return FALSE;
  }
  
- void __EXPORT ScAreaLink::Closed()
++bool ScCompiler::IsExternalNamedRange( const String& rSymbol )
++{
++    if (!pConv)
++        return false;
++
++    String aFile, aName;
++    if (!pConv->parseExternalName(rSymbol, aFile, aName))
++        return false;
++
++    // Parse the name to see if this is an external named range.
++    USHORT nIndex;
++    if (!pDoc->FindExternalRangeName(aFile, aName, nIndex))
++        return false;
++
++    ScRawToken aToken;
++    vector<String>* p = new vector<String>;
++    fprintf(stdout, "ScCompiler::IsExternalNamedRange:   p = %p (original)\n", p);
++    p->reserve(2);
++    p->push_back(aFile);
++    p->push_back(aName);
++    aToken.SetExternalName(p);
++    pRawToken = aToken.Clone();
++    return true;
++}
++
+ BOOL ScCompiler::IsDBRange( const String& rName )
  {
-+    fprintf(stdout, "ScAreaLink::Closed: --begin\n");
- 	// Verknuepfung loeschen: Undo
+     USHORT n;
+@@ -3108,6 +3202,7 @@ void ScCompiler::AutoCorrectParsedSymbol()
  
-     ScDocument* pDoc = pImpl->m_pDocSh->GetDocument();
-@@ -177,6 +201,7 @@ void __EXPORT ScAreaLink::Closed()
- 	}
+ BOOL ScCompiler::NextNewToken( bool bAllowBooleans )
+ {
++    fprintf(stdout, "ScCompiler::NextNewToken: --begin\n");
+     xub_StrLen nSpaces = NextSymbol();
  
- 	SvBaseLink::Closed();
-+    fprintf(stdout, "ScAreaLink::Closed: --end\n");
+ #if 0
+@@ -3183,6 +3278,15 @@ BOOL ScCompiler::NextNewToken( bool bAllowBooleans )
+             fprintf( stderr, "Token '%s'\n",
+                      rtl::OUStringToOString( aUpper, RTL_TEXTENCODING_UTF8 ).getStr() );
+ #endif
++            fprintf(stdout, "ScCompiler::NextNewToken:   token = '%s'\n",
++                    rtl::OUStringToOString(aOrg, RTL_TEXTENCODING_UTF8).getStr());
++
++            bool bIsRef = IsReference(aOrg);
++            bool bIsNamedRange = IsNamedRange(aUpper);
++            bool bIsExternNameRange = IsExternalNamedRange(aOrg);
++            fprintf(stdout, "ScCompiler::NextNewToken:   is reference? (%d); is named range? (%d); external name? (%d)\n", 
++                    bIsRef, bIsNamedRange, bIsExternNameRange);
++
+             // Column 'DM' ("Deutsche Mark", German currency) couldn't be
+             // referred to => IsReference() before IsValue().
+             // #42016# Italian ARCTAN.2 resulted in #REF! => IsOpcode() before
+@@ -3190,10 +3294,11 @@ BOOL ScCompiler::NextNewToken( bool bAllowBooleans )
+             // IsBoolean before isValue to catch inline bools without the kludge
+             //    for inline arrays.
+             if ( !(bMayBeFuncName && IsOpCode( aUpper ))
+-              && !IsReference( aOrg )
++              && !bIsRef
+               && !(bAllowBooleans && IsBoolean( aUpper ))
+               && !IsValue( aUpper )
+-              && !IsNamedRange( aUpper )
++              && !bIsNamedRange
++              && !bIsExternNameRange
+               && !IsDBRange( aUpper )
+               && !IsColRowName( aUpper )
+               && !(bMayBeFuncName && IsMacro( aUpper ))
+@@ -3202,6 +3307,8 @@ BOOL ScCompiler::NextNewToken( bool bAllowBooleans )
+                 // Provide single token information and continue. Do not set an
+                 // error, that would prematurely end compilation. Simple
+                 // unknown names are handled by the interpreter.
++
++                fprintf(stdout, "ScCompiler::NextNewToken:   unknown token.  setting it to ocBad.\n");
+                 ScGlobal::pCharClass->toLower( aUpper );
+                 aToken.SetString( aUpper.GetBuffer() );
+                 aToken.NewOpCode( ocBad );
+@@ -3210,10 +3317,14 @@ BOOL ScCompiler::NextNewToken( bool bAllowBooleans )
+                     AutoCorrectParsedSymbol();
+             }
+         }
++        fprintf(stdout, "ScCompiler::NextNewToken: --end\n");
+         return TRUE;
+     }
+     else
++    {
++        fprintf(stdout, "ScCompiler::NextNewToken: --end\n");
+         return FALSE;
++    }
  }
  
- void ScAreaLink::SetDestArea(const ScRange& rNew)
-@@ -244,6 +269,7 @@ BOOL ScAreaLink::FindExtRange( ScRange& rRange, ScDocument* pSrcDoc, const Strin
- BOOL ScAreaLink::Refresh( const String& rNewFile, const String& rNewFilter,
- 							const String& rNewArea, ULONG nNewRefresh )
+ ScTokenArray* ScCompiler::CompileString( const String& rFormula )
+@@ -3391,6 +3502,7 @@ void ScCompiler::PopTokenArray()
+ 
+ BOOL ScCompiler::GetToken()
  {
-+    fprintf(stdout, "ScAreaLink::Refresh: --begin\n");
- 	//	Dokument laden - wie TabLink
- 
- 	if (!rNewFile.Len() || !rNewFilter.Len())
-@@ -270,6 +296,7 @@ BOOL ScAreaLink::Refresh( const String& rNewFile, const String& rNewFilter,
- 	if ( aOptions.Len() )
- 		pSet->Put( SfxStringItem( SID_FILE_FILTEROPTIONS, aOptions ) );
- 
-+    fprintf(stdout, "ScAreaLink::Refresh:   new url = '%s'\n", rtl::OUStringToOString(aNewUrl, RTL_TEXTENCODING_UTF8).getStr());
- 	SfxMedium* pMed = new SfxMedium(aNewUrl, STREAM_STD_READ, FALSE, pFilter);
- 
- 	ScDocShell* pSrcShell = new ScDocShell(SFX_CREATE_MODE_INTERNAL);
-@@ -278,6 +305,7 @@ BOOL ScAreaLink::Refresh( const String& rNewFile, const String& rNewFilter,
- 	pSrcShell->DoLoad(pMed);
- 
- 	ScDocument* pSrcDoc = pSrcShell->GetDocument();
-+    fprintf(stdout, "ScAreaLink::Refresh:   src document loaded.\n");
- 
- 	// Optionen koennten gesetzt worden sein
- 	String aNewOpt = ScDocumentLoader::GetOptions(*pMed);
-@@ -292,6 +320,8 @@ BOOL ScAreaLink::Refresh( const String& rNewFile, const String& rNewFilter,
- 	else
- 		aTempArea = rNewArea;
- 
-+    fprintf(stdout, "ScAreaLink::Refresh:   tmp area = '%s'\n", rtl::OUStringToOString(aTempArea, RTL_TEXTENCODING_UTF8).getStr());
++    fprintf(stdout, "ScCompiler::GetToken: --begin\n");
+     static const short nRecursionMax = 42;
+     ScCompilerRecursionGuard aRecursionGuard( nRecursion );
+     if ( nRecursion > nRecursionMax )
+@@ -3448,12 +3560,29 @@ BOOL ScCompiler::GetToken()
+     if( bStop )
+     {
+         pToken = new ScByteToken( ocStop );
++        fprintf(stdout, "ScCompiler::GetToken: --end\n");
+         return FALSE;
+     }
+     if( pToken->GetOpCode() == ocSubTotal )
+         glSubTotal = TRUE;
++    else if ( pToken->GetOpCode() == ocExternalName )
++    {
++        fprintf(stdout, "ScCompiler::GetToken:   ocExternalName\n");
++        if (pToken->GetStringCount() != 2)
++            SetError(errNoName);
 +
- 	// find total size of source area
- 	SCCOL nWidth = 0;
- 	SCROW nHeight = 0;
-@@ -497,6 +527,7 @@ BOOL ScAreaLink::Refresh( const String& rNewFile, const String& rNewFilter,
- 		pDoc->BroadcastUno( aHint );
- 	}
- 
-+    fprintf(stdout, "ScAreaLink::Refresh: --end (can do: %s)\n", bCanDo?"yes":"no");
- 	return bCanDo;
++        const String& rFile = pToken->GetString(0);
++        const String& rName = pToken->GetString(1);
++
++        fprintf(stdout, "ScCompiler::GetToken:     file = '%s'; name = '%s'\n",
++                rtl::OUStringToOString(rFile, RTL_TEXTENCODING_UTF8).getStr(), 
++                rtl::OUStringToOString(rName, RTL_TEXTENCODING_UTF8).getStr());
++
++        SetError(errNoName);
++    }
+     else if( pToken->GetOpCode() == ocName )
+     {
++        fprintf(stdout, "ScCompiler::GetToken:   ocName\n");
+         ScRangeData* pRangeData = pDoc->GetRangeName()->FindIndex( pToken->GetIndex() );
+         if (pRangeData)
+         {
+@@ -3706,6 +3835,7 @@ BOOL ScCompiler::GetToken()
+                 }
+                 PushTokenArray( pNew, TRUE );
+                 pNew->Reset();
++                fprintf(stdout, "ScCompiler::GetToken: --end\n");
+                 return GetToken();
+             }
+         }
+@@ -3748,13 +3878,18 @@ BOOL ScCompiler::GetToken()
+ //          SetError(errNoRef);
+         pArr->nRefs++;
+     }
++    fprintf(stdout, "ScCompiler::GetToken: --end\n");
+     return TRUE;
  }
  
-diff --git sc/source/ui/docshell/docfunc.cxx sc/source/ui/docshell/docfunc.cxx
-index f9aac10..7ff4463 100644
---- sc/source/ui/docshell/docfunc.cxx
-+++ sc/source/ui/docshell/docfunc.cxx
-@@ -3957,6 +3957,9 @@ BOOL ScDocFunc::InsertAreaLink( const String& rFile, const String& rFilter,
- 								const ScRange& rDestRange, ULONG nRefresh,
-                                 BOOL bFitBlock, BOOL bApi )
+ OpCode ScCompiler::NextToken()
  {
-+    fprintf(stdout, "ScDocFunc::InsertAreaLink: --begin (file = '%s')\n",
-+            rtl::OUStringToOString(rFile, RTL_TEXTENCODING_UTF8).getStr());
++    fprintf(stdout, "ScCompiler::NextToken: --begin\n");
+     if( !GetToken() )
++    {
++        fprintf(stdout, "ScCompiler::NextToken: --end\n");
+         return ocStop;
++    }
+     OpCode eOp = pToken->GetOpCode();
+     // There must be an operator before a push
+     if ( (eOp == ocPush || eOp == ocColRowNameAuto) &&
+@@ -3843,6 +3978,7 @@ OpCode ScCompiler::NextToken()
+         }
+         eLastOp = eOp;
+     }
++    fprintf(stdout, "ScCompiler::NextToken: --end\n");
+     return eOp;
+ }
+ 
+diff --git sc/source/core/tool/token.cxx sc/source/core/tool/token.cxx
+index a94c417..acc9447 100644
+--- sc/source/core/tool/token.cxx
++++ sc/source/core/tool/token.cxx
+@@ -52,6 +52,8 @@
+ #include "parclass.hxx"
+ #include "jumpmatrix.hxx"
+ 
++using ::std::vector;
 +
- 	//!	auch fuer ScViewFunc::InsertAreaLink benutzen!
+ // ImpTokenIterator wird je Interpreter angelegt, mehrfache auch durch
+ // SubCode via ScTokenIterator Push/Pop moeglich
+ IMPL_FIXEDMEMPOOL_NEWDEL( ImpTokenIterator, 32, 16 )
+@@ -196,6 +198,14 @@ void ScRawToken::SetName( USHORT n )
+     nRefCnt = 0;
+ }
  
- 	ScDocument* pDoc = rDocShell.GetDocument();
-diff --git sfx2/source/appl/lnkbase2.cxx sfx2/source/appl/lnkbase2.cxx
-index 9267906..bf53fac 100644
---- sfx2/source/appl/lnkbase2.cxx
-+++ sfx2/source/appl/lnkbase2.cxx
-@@ -57,6 +57,8 @@
- 
- #include <svtools/svdde.hxx>
- 
-+#include <stdio.h>
++void ScRawToken::SetExternalName( ::std::vector<String>* p )
++{
++    eOp = ocExternalName;
++    eType = svMultiString;
++    pStrings = p;
++    nRefCnt = 0;
++}
 +
- using namespace ::com::sun::star::uno;
- 
- namespace sfx2
-@@ -365,6 +367,7 @@ void SvBaseLink::SetUpdateMode( USHORT nMode )
- 
- BOOL SvBaseLink::Update()
+ ComplRefData& ScRawToken::GetReference()
  {
-+    fprintf(stdout, "sfx2/SvBaseLink::Update: --begin\n");
- 	if( OBJECT_CLIENT_SO & nObjType )
- 	{
- 		AddNextRef();
-@@ -388,13 +391,17 @@ BOOL SvBaseLink::Update()
- 				if( OBJECT_CLIENT_DDE == nObjType &&
- 					LINKUPDATE_ONCALL == GetUpdateMode() && xObj.Is() )
- 					xObj->RemoveAllDataAdvise( this );
-+                fprintf(stdout, "sfx2/SvBaseLink::Update: --end (%d)\n", __LINE__);
- 				return TRUE;
- 			}
- 			if( xObj.Is() )
- 			{
- 				// sollten wir asynschron sein?
- 				if( xObj->IsPending() )
-+                {    
-+                    fprintf(stdout, "sfx2/SvBaseLink::Update: --end (%d)\n", __LINE__);
- 					return TRUE;
-+                }
+     DBG_ASSERT( lcl_IsReference( eOp, GetType() ), "GetReference: no Ref" );
+@@ -255,6 +265,7 @@ ScRawToken* ScRawToken::Clone() const
+             case svSingleRef:
+             case svDoubleRef:   n += sizeof(aRef); break;
+             case svMatrix:      n += sizeof(ScMatrix*); break;
++            case svMultiString: n += sizeof(vector<String>*); break;
+             case svIndex:       n += sizeof(USHORT); break;
+             case svJump:        n += nJump[ 0 ] * 2 + 2; break;
+             case svExternal:    n = sal::static_int_cast<USHORT>( n + GetStrLenBytes( cStr+1 ) + GetStrLenBytes( 2 ) ); break;
+@@ -311,8 +322,11 @@ ScToken* ScRawToken::CreateToken() const
+             return new ScMatrixToken( pMat );
+         //break;
+         case svIndex :
++            fprintf(stdout, "ScRawToken::CreateToken:   creating index token ... (op = %d)\n", eOp);
+             return new ScIndexToken( eOp, nIndex );
+         //break;
++        case svMultiString:
++            return new ScMultiStringOpToken( pStrings, eOp );
+         case svJump :
+             return new ScJumpToken( eOp, (short*) nJump );
+         //break;
+@@ -756,6 +770,18 @@ const String& ScToken::GetString() const
+     return aDummyString;
+ }
  
- 				// dann brauchen wir das Object auch nicht mehr
- 				AddNextRef();
-@@ -403,6 +410,7 @@ BOOL SvBaseLink::Update()
- 			}
- 		}
- 	}
-+    fprintf(stdout, "sfx2/SvBaseLink::Update: --end (%d)\n", __LINE__);
- 	return FALSE;
++const String& ScToken::GetString( USHORT ) const
++{
++    DBG_ERRORFILE( "ScToken::GetString: virtual dummy called" );
++    return aDummyString;
++}
++
++USHORT ScToken::GetStringCount() const
++{
++    DBG_ERRORFILE( "ScToken::GetStringCount: virtual dummy called" );
++    return 0;
++}
++
+ const SingleRefData& ScToken::GetSingleRef() const
+ {
+     DBG_ERRORFILE( "ScToken::GetSingleRef: virtual dummy called" );
+@@ -1016,6 +1042,60 @@ BOOL ScIndexToken::operator==( const ScToken& r ) const
+ }
+ 
+ 
++ScMultiStringOpToken::ScMultiStringOpToken( ::std::vector<String>* pStrings, OpCode e ) :
++    ScOpToken( e, svMultiString )
++{
++    aStrings = *pStrings;
++    fprintf(stdout, "ScMultiStringOpToken::ScMultiStringOpToken:   pStrings = %p\n", pStrings);
++    delete pStrings;
++}
++
++ScMultiStringOpToken::ScMultiStringOpToken( const ScMultiStringOpToken& r ) :
++    ScOpToken( r )
++{
++    aStrings = r.aStrings;
++}
++
++ScMultiStringOpToken::~ScMultiStringOpToken() {}
++
++const String& ScMultiStringOpToken::GetString( USHORT n ) const
++{
++    return aStrings[n];
++}
++
++USHORT ScMultiStringOpToken::GetStringCount() const
++{
++    return static_cast<USHORT>(aStrings.size());
++}
++
++BOOL ScMultiStringOpToken::operator==( const ScToken& r ) const
++{
++    if ( !ScToken::operator==(r) )
++        return false;
++
++    USHORT n = GetStringCount();
++    if ( n != r.GetStringCount() )
++        return false;
++
++    for (USHORT i = 0; i < n; ++i)
++    {
++        xub_StrLen nLen = GetString(i).Len();
++        if ( nLen != r.GetString(i).Len() )
++            return false;
++        
++        const sal_Unicode* p1 = GetString(i).GetBuffer();
++        const sal_Unicode* p2 = r.GetString(i).GetBuffer();
++        for (xub_StrLen j = 0; j < nLen; ++j)
++        {
++            if (p1[j] != p2[j])
++                return false;
++        }
++    }
++
++    return true;
++}
++
++
+ short* ScJumpToken::GetJump() const                     { return pJump; }
+ BOOL ScJumpToken::operator==( const ScToken& r ) const
+ {
+@@ -1854,6 +1934,7 @@ ScToken* ScTokenArray::AddDoubleReference( const ComplRefData& rRef )
+ 
+ ScToken* ScTokenArray::AddName( USHORT n )
+ {
++    fprintf(stdout, "ScTokenArray::AddName: --begin (index = %d)\n", n);
+     return Add( new ScIndexToken( ocName, n ) );
  }
  
