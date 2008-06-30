@@ -1,3 +1,5 @@
+SUBDIRS=piece
+
 script_files = \
 	a2az.pl \
 	bash-completion.in \
