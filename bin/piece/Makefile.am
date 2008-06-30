@@ -1,7 +1,4 @@
-piece_files = \
-	${wildcard unpack-*} \
+EXTRA_DIST = \
+	sys-setup \
 	${wildcard build-*} \
 	${wildcard install-*}
-
-EXTRA_DIST = \
-	$(piece_files)
