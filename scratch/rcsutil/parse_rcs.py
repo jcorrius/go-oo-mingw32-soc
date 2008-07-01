@@ -11,13 +11,13 @@ currentAffiliations = {
     'ace_dent': 'unaffiliated', # Andrew Dent          
     'af': 'Sun', # Andre Fischer        
     'aidan': 'unaffiliated', # Aidan Butler         
-    'akhva': 'Sun', ### unknown (2007-2008, works on PDF import)
+    'akhva': 'Sun', # Artem Khvat
     'aklitzing': 'unaffiliated', # Andre Klitzing (2006 GSoC student)
     'ama': 'Sun', # Andreas Martens      
     'antoxu': 'Intel', # Antonio Xu           
     'armin': 'Sun', # Armin Theissen       
     'armin.theissen': 'Sun', # Armin Theissen       
-    'as': 'Sun',      
+    'as': 'Sun', # Andreas Schluens
     'asrail': 'BrOffice.org', # Caio Tiago Oliveira  
     'aw': 'Sun', # Armin Weiss          
     'b_michaelsen': 'Sun', # Bjorn Michaelsen     
@@ -70,7 +70,7 @@ currentAffiliations = {
     'fangyq': 'Redflag', # Yaqiong Fang  
     'fdechelle': 'unaffiliated', # Francois Dechelle (works in api/exthome)       
     'federicomena': 'Novell', # Federico Mena-Quinter
-    'fheckl': 'Sun', ### unknown (probably Sun?  working on MacOS aqua port)
+    'fheckl': 'unaffiliated', # Florian Heckl
     'filhocf': 'BrOffice.org', # Claudio F Filho      
     'fl': 'Sun', # Frank Loehmann
     'flr': 'Novell', # Florian Reuter       
@@ -89,7 +89,7 @@ currentAffiliations = {
     'gm': 'Sun', # Gerd Weiss           
     'grichter': 'MySQL', # Georg Richter        
     'grsingleton': 'pathtech.org', # G. Roderick Singleton
-    'gt': 'Sun', ### unknown (last commit in 2004)
+    'gt': 'Sun', # Gunnar Timm (last commit in 2004)
     'gyang': 'Sun', ### unkown (2002 - 2005)
     'haggai': 'Debian', # Chris Halls       
     'hbrinkm': 'Sun', # Henning Brinkmann   
@@ -99,7 +99,7 @@ currentAffiliations = {
     'hro': 'Sun', # Hennes Rohling       
     'hub': 'Novell', # Hubert Figuiere      
     'icobgr': 'unaffiliated', # Hristo Hristov       
-    'ih': 'Sun', ### unknown (works on installation)
+    'ih': 'Sun', # Ilko Hoepping (works on installation)
     'iha': 'Sun', # Ingrid Halama        
     'ihi': 'Sun', # Ivo Hinkelmann       
     'is': 'Sun', # Ingo Schmidt         
@@ -123,7 +123,7 @@ currentAffiliations = {
     'john.marmion': 'Sun', # John Marmion         
     'jnavrati': 'RedHat', # Jan Navratil         
     'jodygoldberg': 'Novell', # Jody Goldberg  
-    'jp': 'Sun', ### unknown (last commit in 2002)      
+    'jp': 'Sun', # Juergen Pingel (last commit in 2002)      
     'jpryor': 'Novell', # Jonathan Pryor       
     'jsc': 'Sun', # Jurgen Schmidt       
     'jspindler': 'unaffiliated', # Jorg Spindler        
@@ -140,7 +140,7 @@ currentAffiliations = {
     'kr': 'Sun', # Kay Ramme            
     'kso': 'Sun', # Kai Sommerfeld       
     'kz': 'Sun', # Kurt Zenker          
-    'larsbehr': 'unaffiliated', # Lars B (AODL library, toolkit)
+    'larsbehr': 'Sun', # Lars Behrmann (AODL library, toolkit)
     'laurentgodard': 'inDesko/Nuxeo', # Laurent Godard       
     'lh': 'Sun', # Lutz Hoeger          
     'liangweike': 'Redflag', # Weike Liang          
@@ -162,7 +162,7 @@ currentAffiliations = {
     'mav': 'Sun', # Mikhail Voitenko     
     'maveric': 'unaffiliated', # Eric Hoch            
     'mba': 'Sun', # Mathias Bauer        
-    'mbu': 'Sun', ### unknown (2004-2005)
+    'mbu': 'Sun', # Michael Buettner
     'mci': 'unaffiliated', # Michael Cziebalski   
     'mfe': 'Sun', # Michael Ralf Fehr
     'mh': 'Sun', # Martin Hollmichel    
@@ -182,7 +182,7 @@ currentAffiliations = {
     'mox': 'unaffiliated', # Mox Soini            
     'mrauch': 'unaffiliated', # Michael Rauch  
     'msicotte': 'unaffiliated', # Michael Sicotte (Aqua port)      
-    'mst': 'Sun', ### unknown (2007-current)
+    'mst': 'Sun', # Michael Stahl (2007-current)
     'mt': 'Sun', # Malte Timmermann     
     'mtg': 'unaffiliated', # Martin Gallwey       
     'muthusuba': 'unaffiliated', # Muthu Subramanian    
@@ -243,11 +243,11 @@ currentAffiliations = {
     'ssmith': 'unaffiliated', # Sarah Smith          
     'st': 'Sun', # Stefan Taxhet        
     'sts': 'Sun', # Stella Schulze       
-    'sus': 'Sun', ### unknown (2000-current)
+    'sus': 'Sun', # Svante Schubert (2000-current)
     'svesik': 'Sun', # Sander Vesik         
     'sw': 'unaffiliated', # Stephan Wunderlich   
     'tbe': 'Sun', # Thomas Benisch       
-    'th': 'Sun', ### unknown (2000-2001)
+    'th': 'Sun', # Thomas Hosemann
     'thb': 'Novell', # Thorsten Behrens     
     'tietjens': 'unaffiliated', # Jan Tietjens         
     'timseves': 'SIL', # Tim Seves
@@ -257,7 +257,7 @@ currentAffiliations = {
     'toconnor': 'unaffiliated', # Tomas O'Connor       
     'tonn': 'unaffiliated', # Gerhard Tonn         
     'tonygalmiche': 'unaffiliated', # Tony Galmiche        
-    'tpf': 'Sun', ### unknown (last commit in 2003)
+    'tpf': 'Sun', # Thomas Pfohe
     'tqfa': 'Redflag', # Quanfa Tang          
     'tra': 'Sun', # Tino Rachui          
     'tv': 'Sun', # Tom Verbeek          
