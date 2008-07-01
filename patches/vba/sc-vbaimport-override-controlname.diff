@@ -1,0 +1,214 @@
+--- svx/inc/svxmsbas.hxx	2008-04-10 20:03:26.000000000 +0100
++++ svx/inc/svxmsbas.hxx	2008-06-30 17:26:38.000000000 +0100
+@@ -35,6 +35,8 @@
+ #include "svx/svxdllapi.h"
+ 
+ #include <sot/storage.hxx>
++#include <map>
++#include <hash_map>
+ 
+ class SfxObjectShell;
+ 
+@@ -53,8 +55,15 @@ class SfxObjectShell;
+  * probably what the user expects to see when viewing the code
+  */
+ 
++typedef std::hash_map< sal_Int32, String >  ObjIdToName;
++
++typedef std::map< String, ObjIdToName >  ControlAttributeInfo;
++
+ class SVX_DLLPUBLIC SvxImportMSVBasic
+-{
++{ 
++	ControlAttributeInfo m_ModuleNameToObjIdHash;
++	void extractAttribute( const String& rAttribute, const String& rModName );
++
+ public:
+ 	SvxImportMSVBasic( SfxObjectShell &rDocS, SotStorage &rRoot,
+ 						BOOL bImportCode = TRUE, BOOL bCopyStorage = TRUE )
+@@ -73,9 +82,10 @@ public:
+ 	// - returns a warning code if a modified basic exist, in all other
+ 	//   cases return ERRCODE_NONE.
+ 	ULONG SaveOrDelMSVBAStorage( BOOL bSaveInto, const String& rStorageName );
+-
+ 	// check if the MS-VBA-Storage exist in the RootStorage of the DocShell.
+ 	// If it exist, then return the WarningId for loosing the information.
++
++        const ControlAttributeInfo& ControlNameForObjectId(){ return m_ModuleNameToObjIdHash; }
+ 	static ULONG GetSaveWarningOfMSVBAStorage( SfxObjectShell &rDocS );
+ 
+ 	static String GetMSBasicStorageName();
+@@ -87,7 +97,7 @@ private:
+ 
+ 	SVX_DLLPRIVATE BOOL ImportCode_Impl( const String& rStorageName,
+ 						  const String &rSubStorageName,
+-						  BOOL bAsComment, BOOL bStripped);
++						  BOOL bAsComment, BOOL bStripped );
+ 	SVX_DLLPRIVATE bool ImportForms_Impl(const String& rStorageName, 
+ 		const String &rSubStorageName);
+ 	SVX_DLLPRIVATE BOOL CopyStorage_Impl( const String& rStorageName,
+--- svx/source/msfilter/svxmsbas.cxx	2008-06-26 21:31:45.000000000 +0100
++++ svx/source/msfilter/svxmsbas.cxx	2008-06-30 17:25:56.000000000 +0100
+@@ -62,6 +62,23 @@ using namespace com::sun::star;
+ 
+ using rtl::OUString;
+ 
++void SvxImportMSVBasic::extractAttribute( const String& rAttribute, const String& rModName )
++{
++    // format of the attribute we are interested in is
++    // Attribute VB_Control = "ControlName", intString, MSForms, ControlTypeAsString
++    // e.g.
++    // Attribute VB_Control = "CommandButton1, 201, 19, MSForms, CommandButton"
++    String sControlAttribute( RTL_CONSTASCII_USTRINGPARAM("Attribute VB_Control = \"") );
++    if ( rAttribute.Search( sControlAttribute ) !=  STRING_NOTFOUND )
++    {
++        String sRest = rAttribute.Copy( sControlAttribute.Len() );
++        xub_StrLen nPos = 0; 
++        String sCntrlName = sRest.GetToken( 0, ',', nPos );
++        
++        sal_Int32 nCntrlId = sRest.GetToken( 0, ',', nPos).ToInt32();
++        m_ModuleNameToObjIdHash[ rModName ][ nCntrlId ] =  sCntrlName;
++    }
++}
+ int SvxImportMSVBasic::Import( const String& rStorageName,
+ 								const String &rSubStorageName,
+ 								BOOL bAsComment, BOOL bStripped )
+@@ -384,7 +401,12 @@ BOOL SvxImportMSVBasic::ImportCode_Impl(
+                             if( nEnd == STRING_NOTFOUND )
+                                 pStr->Erase();
+                             else
++                            {
++								//OSL_TRACE("Erase %s", rtl::OUStringToOString(*pStr, RTL_TEXTENCODING_UTF8 ).getStr() );
++                                String sAttr= pStr->Copy( nBegin, (nEnd-nBegin)+1);
++                                extractAttribute( sAttr, sModule );
+                                 pStr->Erase(nBegin, (nEnd-nBegin)+1);
++                            }
+ 						}
+ 					}
+ 					if( aDecompressed.Get(j)->Len() )
+diff -rup sc/source/filter/excel/excimp8.cxx sc/source/filter/excel/excimp8.cxx
+--- sc/source/filter/excel/excimp8.cxx	2008-06-26 21:31:48.000000000 +0100
++++ sc/source/filter/excel/excimp8.cxx	2008-06-30 19:12:57.000000000 +0100
+@@ -291,11 +291,11 @@ void ImportExcel8::ReadBasic( void )
+             SvxImportMSVBasic aBasicImport( *pShell, *xRootStrg, bLoadCode, bLoadStrg );
+ 			bool bAsComment = !bLoadExecutable || !lcl_hasVBAEnabled();
+             aBasicImport.Import( EXC_STORAGE_VBA_PROJECT, EXC_STORAGE_VBA, bAsComment );
++            GetObjectManager().SetOleNameOverrideInfo( aBasicImport.ControlNameForObjectId() );
+         }
+     }
+ }
+ 
+-
+ void ImportExcel8::EndSheet( void )
+ {
+     GetCondFormatManager().Apply();
+diff -rup sc/source/filter/excel/xiescher.cxx sc/source/filter/excel/xiescher.cxx
+--- sc/source/filter/excel/xiescher.cxx	2008-06-26 21:31:45.000000000 +0100
++++ sc/source/filter/excel/xiescher.cxx	2008-06-30 19:15:19.000000000 +0100
+@@ -105,6 +105,8 @@
+ #include "xipage.hxx"
+ #include "xichart.hxx"
+ #include "xicontent.hxx"
++#include "scextopt.hxx"
++
+
+ #include "xlescher.hxx"
+ using ::rtl::OUString;
+@@ -1172,8 +1172,13 @@ void XclImpOleObj::DoProcessSdrObj( SdrO
+         // printable
+         aPropSet.SetBoolProperty( CREATE_OUSTRING( "Printable" ), IsPrintable() );
+         // #118053# #i51348# set name from SdrObject as internal name of the control
++        String sName;
+         if( rSdrObj.GetName().Len() > 0 )
+-            aPropSet.SetStringProperty( CREATE_OUSTRING( "Name" ), rSdrObj.GetName() );
++            sName = rSdrObj.GetName();
++        String sOverRide( GetObjectManager().GetOleNameOverride( GetObjId() ) );
++        if ( sOverRide.Len() > 0 )
++            sName = sOverRide;
++        aPropSet.SetStringProperty( CREATE_OUSTRING( "Name" ), sName );
+         // sheet links
+         ConvertSheetLinks( GetRoot(), rSdrObj );
+     }
+@@ -1573,6 +1578,23 @@ XclImpDffManager::~XclImpDffManager()
+ {
+ }
+ 
++String XclImpObjectManager::GetOleNameOverride( const XclObjId& nObjId )
++{
++    String sOleName; 
++    String sCodeName = GetExtDocOptions().GetCodeName( nObjId.mnScTab );
++    
++    CodeNameToCntrlObjIdInfo::iterator it = maOleCtrlNameOverride.find( sCodeName );
++    if ( it != maOleCtrlNameOverride.end() )
++    {
++        CntrlObjIdToName::iterator it_id = it->second.find( nObjId.mnObjId );
++        if ( it_id != it->second.end() )
++        {
++            sOleName = it_id->second;
++        }
++    }
++    return sOleName;
++}
++
+ void XclImpDffManager::StartProgressBar( sal_Size nProgressSize )
+ {
+     mxProgress.reset( new ScfProgressBar( GetDocShell(), STR_PROGRESS_CALCULATING ) );
+diff -rup sc/source/filter/inc/xiescher.hxx sc/source/filter/inc/xiescher.hxx
+--- sc/source/filter/inc/xiescher.hxx	2008-06-26 21:31:39.000000000 +0100
++++ sc/source/filter/inc/xiescher.hxx	2008-06-30 19:14:38.000000000 +0100
+@@ -34,6 +34,7 @@
+ #include <vector>
+ #include <list>
+ #include <map>
++#include <hash_map>
+ #include <svx/msdffimp.hxx>
+ #include "xlescher.hxx"
+ #include "xiroot.hxx"
+@@ -439,6 +440,7 @@ private:
+ 
+ // ----------------------------------------------------------------------------
+ 
++
+ class XclImpObjectManager;
+ class XclImpOcxConverter;
+ 
+@@ -482,7 +484,6 @@ protected:
+     virtual ULONG       Calc_nBLIPPos( ULONG nOrgVal, ULONG nStreamPos ) const;
+     /** Returns a color from the Excel color palette. */
+     virtual FASTBOOL    GetColorFromPalette( USHORT nIndex, Color& rColor ) const;
+-
+ private:
+     /** Reads contents of a hyperlink property and returns the extracted URL. */
+     ::rtl::OUString     ReadHlinkProperty( SvStream& rEscherStrm ) const;
+@@ -518,6 +519,7 @@ private:
+     typedef ScfRef< ScfProgressBar >        ScfProgressBarRef;
+     typedef ScfRef< XclImpOcxConverter >    XclImpOcxConvRef;
+ 
++
+     XclImpObjectManager& mrObjManager;      /// The Excel object manager.
+     XclImpSolverContainer maSolverCont;     /// The solver container for connector rules.
+     ScRangeMap          maUsedAreaMap;      /// Used ranges for all sheets.
+@@ -531,6 +533,8 @@ private:
+ /** Stores all drawing and OLE objects and additional data related to these objects. */
+ class XclImpObjectManager : protected XclImpRoot
+ {
++typedef std::hash_map< sal_Int32, String >  CntrlObjIdToName;
++typedef std::map< String, CntrlObjIdToName > CodeNameToCntrlObjIdInfo;
+ public:
+     explicit            XclImpObjectManager( const XclImpRoot& rRoot );
+     virtual             ~XclImpObjectManager();
+@@ -573,8 +577,14 @@ public:
+     /** Returns the used area in the sheet with the passed index. */
+     ScRange             GetUsedArea( SCTAB nScTab ) const;
+ 
++    void SetOleNameOverrideInfo( const CodeNameToCntrlObjIdInfo& rOverrideInfo ) {  maOleCtrlNameOverride = rOverrideInfo; }
++    String GetOleNameOverride( const XclObjId& nObjId );
++
+     // ------------------------------------------------------------------------
+ private:
++    
++    CodeNameToCntrlObjIdInfo maOleCtrlNameOverride;
++
+     /** Reads contents of an Escher record and append data to internal Escher stream. */
+     void                ReadEscherRecord( XclImpStream& rStrm );
+     /** Reads a BIFF8 OBJ record following an MSODRAWING record. */
