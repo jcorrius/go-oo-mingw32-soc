@@ -43,9 +43,9 @@ devel package
 %build
 
 #setup env.
-OO_INSTDIR=%{_libdir}/%ooo_home/
-OO_SOLVERDIR=$OO_INSTDIR/solver
-OO_TOOLSDIR=$OO_INSTDIR/ooo-build/bin
+export OO_INSTDIR=%{_libdir}/%ooo_home/
+export OO_SOLVERDIR=$OO_INSTDIR/solver
+export OO_TOOLSDIR=$OO_INSTDIR/ooo-build/bin
 
 $OO_TOOLSDIR/../patches/apply.pl $OO_TOOLSDIR/../patches/dev300 --pieces --tag=%ooo_build_tag --distro=SUSE `pwd` 
 source $OO_TOOLSDIR/piece/sys-setup
@@ -54,9 +54,9 @@ $OO_TOOLSDIR/piece/build-%piece
 %install
 
 #setup env.
-OO_INSTDIR=%{_libdir}/%ooo_home/
-OO_SOLVERDIR=$OO_INSTDIR/solver
-OO_TOOLSDIR=$OO_INSTDIR/ooo-build/bin
+export OO_INSTDIR=%{_libdir}/%ooo_home/
+export OO_SOLVERDIR=$OO_INSTDIR/solver
+export OO_TOOLSDIR=$OO_INSTDIR/ooo-build/bin
 
 source $OO_TOOLSDIR/piece/sys-setup
 $OO_TOOLSDIR/piece/install-%piece

@@ -300,8 +300,10 @@ rm -rf $RPM_BUILD_ROOT
 %files devel
 %defattr(-,root,root)
 %dir %ooo_prefix/%ooo_home/solver
+%dir %ooo_prefix/%ooo_home/solenv
 %dir %ooo_prefix/%ooo_home/ooo-build
 %ooo_prefix/%ooo_home/solver/*
+%ooo_prefix/%ooo_home/solenv/*
 %ooo_prefix/%ooo_home/ooo-build/*
 
 %changelog
