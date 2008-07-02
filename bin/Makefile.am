@@ -36,6 +36,7 @@ script_files = \
 	unpack \
 	setup.in \
 	transform \
+	sloppypatch.pl \
 	README
 
 EXTRA_DIST = $(script_files)

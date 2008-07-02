@@ -127,11 +127,11 @@ BuildRequires:  gjdoc
 %define	      ooo_home		ooo-3
 %define	      ooo_build_dir	build
 %define	      ooo_build_version 2.99.4
-%define	      ooo_build_tag     dev300-m19
+%define	      ooo_build_tag     dev300-m22
 License:        Artistic License; BSD 3-Clause; GPL v2 or later; LaTeX Public License (LPPL); LGPL v2.1 or later; MOZILLA PUBLIC LICENSE (MPL/NPL); X11/MIT
 Group:          Productivity/Office/Suite
 Version:        3
-Release:        1
+Release:        3
 AutoReqProv:    on
 PreReq:         coreutils /usr/bin/update-mime-database
 PreReq:         %{?suseconfig_fonts_prereq:%suseconfig_fonts_prereq}
