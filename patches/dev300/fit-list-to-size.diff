@@ -1,12 +1,15 @@
- svx/inc/svx/svdotext.hxx         |    3 ++
- svx/source/editeng/impedit3.cxx  |    7 +++++
- svx/source/msfilter/msdffimp.cxx |   14 ++++++++++-
- svx/source/svdraw/svdedxv.cxx    |   38 +++++++++++++++++++++--------
- svx/source/svdraw/svdotext.cxx   |   50 +++++++++++++++++++++++++++++++++-----
- 5 files changed, 93 insertions(+), 19 deletions(-)
+ svx/inc/svx/svdotext.hxx         |   10 +++-
+ svx/source/editeng/impedit3.cxx  |    7 ++-
+ svx/source/svdraw/svdedxv.cxx    |    4 +-
+ svx/source/svdraw/svdotext.cxx   |  100 ++++++++++++++++++++++++++++++--------
+ svx/source/svdraw/svdotxat.cxx   |    3 -
+ svx/source/svdraw/svdotxed.cxx   |   17 ++++--
+ svx/source/svdraw/svdtxhdl.cxx   |    3 -
+ svx/source/svdraw/svdview.cxx    |    3 -
+ 9 files changed, 119 insertions(+), 39 deletions(-)
 
 diff --git a/svx/inc/svx/svdotext.hxx b/svx/inc/svx/svdotext.hxx
-index e90c491..7d1d0ae 100644
+index e90c491..d1fc9df 100644
 --- svx/inc/svx/svdotext.hxx
 +++ svx/inc/svx/svdotext.hxx
 @@ -244,6 +244,9 @@ protected:
@@ -19,6 +22,34 @@ index e90c491..7d1d0ae 100644
  	SVX_DLLPRIVATE SdrOutliner& ImpGetDrawOutliner() const;
  
  private:
+@@ -257,6 +260,7 @@ private:
+                                        Rectangle& 		rAnchorRect, 
+                                        Rectangle& 		rPaintRect, 
+                                        Fraction& 		aFitXKorreg ) const;
++    void ImpAutoFitText( SdrOutliner& rOutliner ) const;
+ 	SVX_DLLPRIVATE SdrObject* ImpConvertObj(FASTBOOL bToPoly) const;
+ 	SVX_DLLPRIVATE void ImpLinkAnmeldung();
+ 	SVX_DLLPRIVATE void ImpLinkAbmeldung();
+@@ -268,7 +272,7 @@ protected:
+ 	SdrObject* ImpConvertMakeObj(const basegfx::B2DPolyPolygon& rPolyPolygon, sal_Bool bClosed, sal_Bool bBezier, sal_Bool bNoSetAttr = sal_False) const;
+ 	SdrObject* ImpConvertAddText(SdrObject* pObj, FASTBOOL bBezier) const;
+ 	void ImpSetTextStyleSheetListeners();
+-	void ImpSetCharStretching(SdrOutliner& rOutliner, const Rectangle& rTextRect, const Rectangle& rAnchorRect, Fraction& rFitXKorreg) const;
++    void ImpSetCharStretching(SdrOutliner& rOutliner, const Size& rTextSize, const Size& rShapeSize, Fraction& rFitXKorreg) const;
+ 	void ImpAddTextToBoundRect();
+ 	void ImpJustifyRect(Rectangle& rRect) const;
+ 	void ImpCheckShear();
+@@ -331,6 +335,10 @@ public:
+ 	void NbcResizeTextAttributes(const Fraction& xFact, const Fraction& yFact);
+ 	FASTBOOL IsTextFrame() const { return bTextFrame; }
+ 	FASTBOOL IsOutlText() const { return bTextFrame && (eTextKind==OBJ_OUTLINETEXT || eTextKind==OBJ_TITLETEXT); }
++    /// returns true if the PPT autofit of text into shape bounds is enabled. implies IsFitToSize()==false!
++	FASTBOOL IsAutoFit() const;
++    /// returns true if the old feature for fitting shape content should into shape is enabled. implies IsAutoFit()==false!
++	FASTBOOL IsFitToSize() const;
+ 	SdrObjKind GetTextKind() const { return eTextKind; }
+ 
+ 	virtual bool HasText() const;
 diff --git a/svx/source/editeng/impedit3.cxx b/svx/source/editeng/impedit3.cxx
 index 5639cb5..aa7162c 100644
 --- svx/source/editeng/impedit3.cxx
@@ -50,119 +81,30 @@ index 5639cb5..aa7162c 100644
  		UpdateViews( GetActiveView() );
  	}
  }
-diff --git a/svx/source/msfilter/msdffimp.cxx b/svx/source/msfilter/msdffimp.cxx
-index e34d920..d572729 100644
---- svx/source/msfilter/msdffimp.cxx
-+++ svx/source/msfilter/msdffimp.cxx
-@@ -1921,7 +1921,16 @@ void DffPropertyReader::ApplyCustomShapeTextAttributes( SfxItemSet& rSet ) const
- 	rSet.Put( SdrTextLowerDistItem( nTextBottom ) );
- 
- 	rSet.Put( SdrTextWordWrapItem( (MSO_WrapMode)GetPropertyValue( DFF_Prop_WrapText, mso_wrapSquare ) != mso_wrapNone ? sal_True : sal_False ) );
--	rSet.Put( SdrTextAutoGrowHeightItem( ( GetPropertyValue( DFF_Prop_FitTextToShape ) & 2 ) != 0 ) );
-+    if( GetPropertyValue( DFF_Prop_FitTextToShape ) & 2 )
-+        rSet.Put( SdrTextAutoGrowHeightItem( TRUE ) );
-+    else 
-+    {
-+        OSL_TRACE( "DFF_Prop_FitTextToShape is %d", GetPropertyValue(DFF_Prop_FitTextToShape) );
-+
-+        rSet.Put( SdrTextAutoGrowHeightItem( FALSE ) );
-+        //if (GetPropertyValue(DFF_Prop_FitTextToShape) & 1)
-+        rSet.Put( SdrTextFitToSizeTypeItem(SDRTEXTFIT_ALLLINES) ); // seems PPT unconditionally implies fit-to-shape for presentation text outliner
-+    }
- 
- //	rSet.Put( SdrTextAutoGrowWidthItem( (MSO_WrapMode)GetPropertyValue( DFF_Prop_WrapText, mso_wrapSquare ) != mso_wrapNone ? sal_False : sal_True ) );
- //	rSet.Put( SdrTextAutoGrowHeightItem( ( GetPropertyValue( DFF_Prop_FitTextToShape ) & 2 ) != 0 ) );
-@@ -5587,6 +5596,9 @@ SdrObject* SvxMSDffManager::ProcessObj(SvStream& rSt,
-             }
-             else
-             {
-+                if (GetPropertyValue(DFF_Prop_FitTextToShape) & 1)
-+                    aSet.Put( SdrTextFitToSizeTypeItem(SDRTEXTFIT_ALLLINES) );
-+
-                 aSet.Put( SdrTextAutoGrowHeightItem( FALSE ) );
-                 aSet.Put( SdrTextAutoGrowWidthItem( FALSE ) );
-             }
 diff --git a/svx/source/svdraw/svdedxv.cxx b/svx/source/svdraw/svdedxv.cxx
-index 40d9ee8..764706b 100644
+index 40d9ee8..d373176 100644
 --- svx/source/svdraw/svdedxv.cxx
 +++ svx/source/svdraw/svdedxv.cxx
-@@ -218,11 +218,16 @@ void SdrObjEditView::ModelHasChanged()
-                     pTextEditOutliner->SetMinAutoPaperSize(aPaperMin1);
-                     pTextEditOutliner->SetMaxAutoPaperSize(aPaperMax1);
-                     pTextEditOutliner->SetPaperSize(Size(0,0)); // Damit der Outliner neu formatiert
-+                    const SdrFitToSizeType eFit = pTextObj->GetFitToSize();
-+                    ULONG nStat=pTextEditOutliner->GetControlWord();
-                     if (!bContourFrame) {
-                         pTextEditOutliner->ClearPolygon();
--                        ULONG nStat=pTextEditOutliner->GetControlWord();
--                        nStat|=EE_CNTRL_AUTOPAGESIZE;
--                        pTextEditOutliner->SetControlWord(nStat);
-+                        if( eFit!=SDRTEXTFIT_PROPORTIONAL && 
-+                            eFit!=SDRTEXTFIT_ALLLINES ) 
-+                        {
-+                            nStat|=EE_CNTRL_AUTOPAGESIZE;
-+                            pTextEditOutliner->SetControlWord(nStat);
-+                        }
-                     } else {
-                         ULONG nStat=pTextEditOutliner->GetControlWord();
-                         nStat&=~EE_CNTRL_AUTOPAGESIZE;
-@@ -234,10 +239,17 @@ void SdrObjEditView::ModelHasChanged()
-                     for (ULONG nOV=0; nOV<nOutlViewAnz; nOV++) {
-                         OutlinerView* pOLV=pTextEditOutliner->GetView(nOV);
-                         ULONG nStat0=pOLV->GetControlWord();
--                        ULONG nStat=nStat0;
--                        // AutoViewSize nur wenn nicht KontourFrame.
--                        if (!bContourFrame) nStat|=EV_CNTRL_AUTOSIZE;
--                        else nStat&=~EV_CNTRL_AUTOSIZE;
-+                        nStat=nStat0;
-+                        // AutoViewSize only when not a ContourFrame, and not when scaling
-+                        // down text to shape size anyway
-+                        if (!bContourFrame) 
-+                        {
-+                            nStat|=EV_CNTRL_AUTOSIZE;
-+                        }
-+                        else
-+                        {
-+                            nStat&=~EV_CNTRL_AUTOSIZE;
-+                        }
-                         if (nStat!=nStat0) pOLV->SetControlWord(nStat);
-                     }
-                     pTextEditOutliner->SetUpdateMode(TRUE);
-@@ -318,7 +330,6 @@ void SdrObjEditView::ImpPaintOutlinerView(OutlinerView& rOutlView, const Rectang
+@@ -318,7 +318,7 @@ void SdrObjEditView::ImpPaintOutlinerView(OutlinerView& rOutlView, const Rectang
  	{
  		const SdrTextObj* pText = PTR_CAST(SdrTextObj,GetTextEditObject());
  		bool bTextFrame(pText && pText->IsTextFrame());
 -		bool bFitToSize(0 != (pTextEditOutliner->GetControlWord() & EE_CNTRL_STRETCHING));
++		bool bFitToSize(pText && pText->IsFitToSize());
  		bool bModifyMerk(pTextEditOutliner->IsModified()); // #43095#
  		Rectangle aBlankRect(rOutlView.GetOutputArea());
  		aBlankRect.Union(aMinTextEditArea);
-@@ -333,7 +344,7 @@ void SdrObjEditView::ImpPaintOutlinerView(OutlinerView& rOutlView, const Rectang
- 			pTextEditOutliner->ClearModifyFlag(); 
- 		}
+@@ -387,7 +387,7 @@ void SdrObjEditView::ImpInvalidateOutlinerView(OutlinerView& rOutlView) const
+ 	{
+ 		const SdrTextObj* pText = PTR_CAST(SdrTextObj,GetTextEditObject());
+ 		bool bTextFrame(pText && pText->IsTextFrame());
+-		bool bFitToSize(0 != (pTextEditOutliner->GetControlWord() & EE_CNTRL_STRETCHING));
++		bool bFitToSize(pText && pText->IsFitToSize());
  
--		if(bTextFrame && !bFitToSize) 
-+		if(bTextFrame) 
+ 		if(bTextFrame && !bFitToSize) 
  		{
- 			aPixRect.Left()--;
- 			aPixRect.Top()--;
-@@ -485,8 +496,13 @@ OutlinerView* SdrObjEditView::ImpMakeOutlinerView(Window* pWin, BOOL /*bNoPaint*
-     // Scrollen verbieten
-     ULONG nStat=pOutlView->GetControlWord();
-     nStat&=~EV_CNTRL_AUTOSCROLL;
--    // AutoViewSize nur wenn nicht KontourFrame.
--    if (!bContourFrame) nStat|=EV_CNTRL_AUTOSIZE;
-+    // AutoViewSize only when not a ContourFrame, and not when scaling
-+    // down text to shape size anyway
-+    const SdrFitToSizeType eFit = pText->GetFitToSize();
-+    if (!bContourFrame) 
-+    {
-+        nStat|=EV_CNTRL_AUTOSIZE;
-+    }
-     if (bTextFrame) {
-         USHORT nPixSiz=aHdl.GetHdlSize()*2+1;
-         nStat|=EV_CNTRL_INVONEMORE;
 diff --git a/svx/source/svdraw/svdotext.cxx b/svx/source/svdraw/svdotext.cxx
-index 65d164b..2c00ec3 100644
+index 65d164b..e5efa9f 100644
 --- svx/source/svdraw/svdotext.cxx
 +++ svx/source/svdraw/svdotext.cxx
 @@ -140,6 +140,7 @@ SdrTextObj::SdrTextObj()
@@ -205,80 +147,270 @@ index 65d164b..2c00ec3 100644
  
  	// #108784#
  	maTextEditOffset = Point(0, 0);
-@@ -876,6 +881,10 @@ void SdrTextObj::TakeTextRect( SdrOutliner& rOutliner, Rectangle& rTextRect, FAS
- 			rOutliner.SetMinAutoPaperSize(Size(0, nAnkHgt));
- 		}
- 	}
-+    else if( bFitToSize && !bContourFrame )
+@@ -829,8 +834,7 @@ void SdrTextObj::TakeTextRect( SdrOutliner& rOutliner, Rectangle& rTextRect, FAS
+ 	SdrTextAniKind      eAniKind=GetTextAniKind();
+ 	SdrTextAniDirection eAniDirection=GetTextAniDirection();
+ 
+-	SdrFitToSizeType eFit=GetFitToSize();
+-	FASTBOOL bFitToSize=(eFit==SDRTEXTFIT_PROPORTIONAL || eFit==SDRTEXTFIT_ALLLINES);
++    FASTBOOL bFitToSize(IsFitToSize());
+ 	FASTBOOL bContourFrame=IsContourTextFrame();
+ 
+ 	FASTBOOL bFrame=IsTextFrame();
+@@ -988,7 +992,7 @@ OutlinerParaObject* SdrTextObj::GetEditOutlinerParaObject() const
+ 	return pPara;
+ }
+ 
+-void SdrTextObj::ImpSetCharStretching(SdrOutliner& rOutliner, const Rectangle& rTextRect, const Rectangle& rAnchorRect, Fraction& rFitXKorreg) const
++void SdrTextObj::ImpSetCharStretching(SdrOutliner& rOutliner, const Size& rTextSize, const Size& rShapeSize, Fraction& rFitXKorreg) const
+ {
+ 	OutputDevice* pOut = rOutliner.GetRefDevice();
+ 	BOOL bNoStretching(FALSE);
+@@ -1033,12 +1037,12 @@ void SdrTextObj::ImpSetCharStretching(SdrOutliner& rOutliner, const Rectangle& r
+ 	unsigned nLoopCount=0;
+ 	FASTBOOL bNoMoreLoop=FALSE;
+ 	long nXDiff0=0x7FFFFFFF;
+-	long nWantWdt=rAnchorRect.Right()-rAnchorRect.Left();
+-	long nIsWdt=rTextRect.Right()-rTextRect.Left();
++	long nWantWdt=rShapeSize.Width();
++	long nIsWdt=rTextSize.Width();
+ 	if (nIsWdt==0) nIsWdt=1;
+ 
+-	long nWantHgt=rAnchorRect.Bottom()-rAnchorRect.Top();
+-	long nIsHgt=rTextRect.Bottom()-rTextRect.Top();
++	long nWantHgt=rShapeSize.Height();
++	long nIsHgt=rTextSize.Height();
+ 	if (nIsHgt==0) nIsHgt=1;
+ 
+ 	long nXTolPl=nWantWdt/100; // Toleranz +1%
+@@ -1401,8 +1405,7 @@ void SdrTextObj::ImpAddTextToBoundRect()
+ 				Rectangle aTextRect;
+ 				Rectangle aAnchorRect;
+ 				TakeTextRect(rOutliner,aTextRect,TRUE,&aAnchorRect); // EditText ignorieren!
+-				SdrFitToSizeType eFit=GetFitToSize();
+-				FASTBOOL bFitToSize=(eFit==SDRTEXTFIT_PROPORTIONAL || eFit==SDRTEXTFIT_ALLLINES);
++                FASTBOOL bFitToSize(IsFitToSize());
+ 				if (bFitToSize) aTextRect=aAnchorRect;
+ 				rOutliner.Clear();
+ 				if (aGeo.nDrehWink!=0) {
+@@ -1431,8 +1434,7 @@ SdrObject* SdrTextObj::CheckHit(const Point& rPnt, USHORT nTol, const SetOfByte*
+ 
+ 	INT32 nMyTol=nTol;
+ 	FASTBOOL bFontwork=IsFontwork();
+-	SdrFitToSizeType eFit=GetFitToSize();
+-	FASTBOOL bFitToSize=(eFit==SDRTEXTFIT_PROPORTIONAL || eFit==SDRTEXTFIT_ALLLINES);
++    FASTBOOL bFitToSize(IsFitToSize());
+ 	Rectangle aR(aRect);
+ 	Rectangle aAnchor2(aR);
+ 	Rectangle aTextRect(aR);
+@@ -1665,8 +1667,7 @@ basegfx::B2DPolyPolygon SdrTextObj::TakeContour() const
+ 		Rectangle aR;
+ 		TakeTextRect(rOutliner,aR,FALSE,&aAnchor2);
+ 		rOutliner.Clear();
+-		SdrFitToSizeType eFit=GetFitToSize();
+-		FASTBOOL bFitToSize=(eFit==SDRTEXTFIT_PROPORTIONAL || eFit==SDRTEXTFIT_ALLLINES);
++        FASTBOOL bFitToSize(IsFitToSize());
+ 		if (bFitToSize) aR=aAnchor2;
+ 		Polygon aPol(aR);
+ 		if (aGeo.nDrehWink!=0) RotatePoly(aPol,aR.TopLeft(),aGeo.nSin,aGeo.nCos);
+@@ -1783,8 +1784,7 @@ void SdrTextObj::ImpSetupDrawOutlinerForPaint( FASTBOOL 		bContourFrame,
+     if (!bContourFrame)
+     {
+         // FitToSize erstmal nicht mit ContourFrame
+-        SdrFitToSizeType eFit=GetFitToSize();
+-        if (eFit==SDRTEXTFIT_PROPORTIONAL || eFit==SDRTEXTFIT_ALLLINES)
++        if (IsFitToSize() || IsAutoFit())
+         {
+             ULONG nStat=rOutliner.GetControlWord();
+             nStat|=EE_CNTRL_STRETCHING|EE_CNTRL_AUTOPAGESIZE;
+@@ -1798,15 +1798,52 @@ void SdrTextObj::ImpSetupDrawOutlinerForPaint( FASTBOOL 		bContourFrame,
+     if (!bContourFrame)
+     {
+         // FitToSize erstmal nicht mit ContourFrame
+-        SdrFitToSizeType eFit=GetFitToSize();
+-        if (eFit==SDRTEXTFIT_PROPORTIONAL || eFit==SDRTEXTFIT_ALLLINES)
++        if (IsFitToSize())
+         {
+-            ImpSetCharStretching(rOutliner,rTextRect,rAnchorRect,rFitXKorreg);
++            ImpSetCharStretching(rOutliner,rTextRect.GetSize(),rAnchorRect.GetSize(),rFitXKorreg);
+             rPaintRect=rAnchorRect;
+         }
++        else if (IsAutoFit())
++        {
++            ImpAutoFitText(rOutliner);
++        }
+     }
+ }
+ 
++void SdrTextObj::ImpAutoFitText( SdrOutliner& rOutliner ) const
++{
++    // EditEngine formatting is unstable enough for
++    // line-breaking text that we need some more samples
++    USHORT nMinStretchX=65535, nMinStretchY=65535;
++    const Size aShapeSize = GetLastBoundRect().GetSize();
++    for(int i=0; i<3; ++i)
 +    {
-+        rOutliner.SetMinAutoPaperSize(aAnkRect.GetSize());
++        const Size aCurrTextSize = rOutliner.CalcTextSize();
++        const double fFactor( 
++            double(aShapeSize.Height())/
++            (aCurrTextSize.Height()+GetTextUpperDistance()+GetTextLowerDistance()));
++
++        USHORT nCurrStretchX, nCurrStretchY;
++        rOutliner.GetGlobalCharStretching(nCurrStretchX, nCurrStretchY);
++
++        // only do the scaling once (we'll get notified again, recursively)
++        if (fFactor < 1.0 || (fFactor >= 1.0 && nCurrStretchX != 100))
++        {
++            nCurrStretchX = sal::static_int_cast<USHORT>(nCurrStretchX*fFactor);
++            nCurrStretchY = sal::static_int_cast<USHORT>(nCurrStretchY*fFactor);
++            rOutliner.SetGlobalCharStretching(std::min(USHORT(100),nCurrStretchX),
++                                              std::min(USHORT(100),nCurrStretchY));
++            OSL_TRACE("SdrTextObj::onEditOutlinerStatusEvent(): zoom is %d", nCurrStretchX);
++
++            nMinStretchX = std::min(nMinStretchX,nCurrStretchX);
++            nMinStretchY = std::min(nMinStretchY,nCurrStretchY);
++        }
 +    }
++
++    rOutliner.SetGlobalCharStretching(std::min(USHORT(100),nMinStretchX),
++                                      std::min(USHORT(100),nMinStretchY));
++}
++
+ void SdrTextObj::SetupOutlinerFormatting( SdrOutliner& rOutl, Rectangle& rPaintRect ) const
+ {
+     ImpInitDrawOutliner( rOutl );
+@@ -2397,6 +2434,17 @@ sal_Bool SdrTextObj::IsTextAnimationAllowed() const
+ 	return mbTextAnimationAllowed;
+ }
  
- 	rOutliner.SetPaperSize(aNullSize);
- 	if (bContourFrame)
-@@ -1057,11 +1066,11 @@ void SdrTextObj::ImpSetCharStretching(SdrOutliner& rOutliner, const Rectangle& r
- 	while (nLoopCount<5 && !bNoMoreLoop) {
- 		if (nX<0) nX=-nX;
- 		if (nX<1) { nX=1; bNoMoreLoop=TRUE; }
--		if (nX>65535) { nX=65535; bNoMoreLoop=TRUE; }
-+		if (nX>100) { nX=100; bNoMoreLoop=TRUE; }
- 
- 		if (nY<0) nY=-nY;
- 		if (nY<1) { nY=1; bNoMoreLoop=TRUE; }
--		if (nY>65535) { nY=65535; bNoMoreLoop=TRUE; }
-+		if (nY>100) { nY=100; bNoMoreLoop=TRUE; }
- 
- 		// exception, there is no text yet (horizontal case)
- 		if(nIsWdt <= 1)
-@@ -1077,7 +1086,7 @@ void SdrTextObj::ImpSetCharStretching(SdrOutliner& rOutliner, const Rectangle& r
- 			bNoMoreLoop = TRUE;
- 		}
- 
--		rOutliner.SetGlobalCharStretching((USHORT)nX,(USHORT)nY);
-+		rOutliner.SetGlobalCharStretching((USHORT)std::min(nX,nY),(USHORT)std::min(nX,nY));
- 		nLoopCount++;
- 		Size aSiz(rOutliner.CalcTextSize());
- 		long nXDiff=aSiz.Width()-nWantWdt;
-@@ -2414,10 +2423,39 @@ void SdrTextObj::onEditOutlinerStatusEvent( EditStatus* pEditStatus )
++FASTBOOL SdrTextObj::IsAutoFit() const
++{
++    return FALSE;
++}
++
++FASTBOOL SdrTextObj::IsFitToSize() const
++{
++    const SdrFitToSizeType eFit=GetFitToSize();
++    return (eFit==SDRTEXTFIT_PROPORTIONAL || eFit==SDRTEXTFIT_ALLLINES);
++}
++
+ void SdrTextObj::SetTextAnimationAllowed(sal_Bool bNew)
+ {
+ 	if(mbTextAnimationAllowed != bNew)
+@@ -2414,13 +2462,21 @@ void SdrTextObj::onEditOutlinerStatusEvent( EditStatus* pEditStatus )
  	const bool bGrowY=(nStat & EE_STAT_TEXTHEIGHTCHANGED) !=0;
      if(bTextFrame && (bGrowX || bGrowY))
  	{
 -		const bool bAutoGrowHgt= bTextFrame && IsAutoGrowHeight();
 -		const bool bAutoGrowWdt= bTextFrame && IsAutoGrowWidth();
-+        // auto-shrink text when GetFitToSize() demands it
-+        const SdrFitToSizeType eFit = GetFitToSize();
-+        if( (bGrowX || bGrowY) &&
-+            (eFit==SDRTEXTFIT_PROPORTIONAL || eFit==SDRTEXTFIT_ALLLINES) )
-+        {
-+            const Size aShapeSize = GetLastBoundRect().GetSize();
-+            const Size aCurrTextSize = pEdtOutl->CalcTextSize();
-+            const double fFactor( 
-+                std::min( 
-+                    double(aShapeSize.Width())/
-+                    (aCurrTextSize.Width()+GetTextLeftDistance()+GetTextRightDistance()),
-+                    double(aShapeSize.Height())/
-+                    (aCurrTextSize.Height()+GetTextUpperDistance()+GetTextLowerDistance())));
-+
-+            USHORT nOldStretchX, nOldStretchY;
-+            pEdtOutl->GetGlobalCharStretching(nOldStretchX, nOldStretchY);
-+
-+            // only do the scaling once (we'll get notified again, recursively)
-+            if( !mbInDownScale && (fFactor < 1.0 || (fFactor >= 1.0 && nOldStretchX != 100)) )
-+            {
-+                mbInDownScale = sal_True;
- 
+-
 -	    if ((bGrowX && bAutoGrowWdt) || (bGrowY && bAutoGrowHgt))
-+                nOldStretchX = sal::static_int_cast<USHORT>(nOldStretchX*fFactor);
-+                nOldStretchY = sal::static_int_cast<USHORT>(nOldStretchY*fFactor);
-+                pEdtOutl->SetGlobalCharStretching(std::min(USHORT(100),nOldStretchX),
-+                                                           std::min(USHORT(100),nOldStretchY));
-+
-+                OSL_TRACE("SdrObjEditView::ImpOutlinerStatusEventHdl: shrink factor is %f, shrink X: %d, shrink Y: %d\n", fFactor, nOldStretchX, nOldStretchY);
-+
-+                mbInDownScale = sal_False;
-+            }
-+        }
-+        else if ((bGrowX && IsAutoGrowWidth()) || (bGrowY && IsAutoGrowHeight()))
++	    if ((bGrowX && IsAutoGrowWidth()) || (bGrowY && IsAutoGrowHeight()))
  		{
  			AdjustTextFrameWidthAndHeight();
  		}
++        else if (IsAutoFit() && !mbInDownScale)
++        {
++            OSL_ASSERT(pEdtOutl);
++            mbInDownScale = sal_True;
++
++            // sucks that we cannot disable paints via
++            // pEdtOutl->SetUpdateMode(FALSE) - but EditEngine skips
++            // formatting as well, then.
++            ImpAutoFitText(*pEdtOutl);
++            mbInDownScale = sal_False;
++        }
+ 	}
+ }
+ 
+diff --git a/svx/source/svdraw/svdotxat.cxx b/svx/source/svdraw/svdotxat.cxx
+index 4d6ec63..15eb01b 100644
+--- svx/source/svdraw/svdotxat.cxx
++++ svx/source/svdraw/svdotxat.cxx
+@@ -82,8 +82,7 @@ FASTBOOL SdrTextObj::AdjustTextFrameWidthAndHeight(Rectangle& rR, FASTBOOL bHgt,
+ {
+ 	if (bTextFrame && pModel!=NULL && !rR.IsEmpty())
+ 	{
+-		SdrFitToSizeType eFit=GetFitToSize();
+-		FASTBOOL bFitToSize=(eFit==SDRTEXTFIT_PROPORTIONAL || eFit==SDRTEXTFIT_ALLLINES);
++        FASTBOOL bFitToSize(IsFitToSize());
+ 		FASTBOOL bWdtGrow=bWdt && IsAutoGrowWidth();
+ 		FASTBOOL bHgtGrow=bHgt && IsAutoGrowHeight();
+ 		SdrTextAniKind eAniKind=GetTextAniKind();
+diff --git a/svx/source/svdraw/svdotxed.cxx b/svx/source/svdraw/svdotxed.cxx
+index 7838d97..265283b 100644
+--- svx/source/svdraw/svdotxed.cxx
++++ svx/source/svdraw/svdotxed.cxx
+@@ -75,15 +75,17 @@ sal_Bool SdrTextObj::BegTextEdit(SdrOutliner& rOutl)
+ 	rOutl.Init( nOutlinerMode );
+ 	rOutl.SetRefDevice( pModel->GetRefDevice() );
+ 
+-	SdrFitToSizeType eFit=GetFitToSize();
+-	FASTBOOL bFitToSize=(eFit==SDRTEXTFIT_PROPORTIONAL || eFit==SDRTEXTFIT_ALLLINES);
++    FASTBOOL bFitToSize(IsFitToSize());
+ 	FASTBOOL bContourFrame=IsContourTextFrame();
+ 	ImpSetTextEditParams();
+ 
+ 	if (!bContourFrame) {
+ 		ULONG nStat=rOutl.GetControlWord();
+ 		nStat|=EE_CNTRL_AUTOPAGESIZE;
+-		if (bFitToSize) nStat|=EE_CNTRL_STRETCHING; else nStat&=~EE_CNTRL_STRETCHING;
++		if (bFitToSize || IsAutoFit()) 
++            nStat|=EE_CNTRL_STRETCHING; 
++        else 
++            nStat&=~EE_CNTRL_STRETCHING;
+ 		rOutl.SetControlWord(nStat);
+ 	}
+ 
+@@ -119,8 +121,12 @@ sal_Bool SdrTextObj::BegTextEdit(SdrOutliner& rOutl)
+ 		TakeTextRect(rOutl, aTextRect, FALSE, 
+ 			&aAnchorRect/* #97097# give TRUE here, not FALSE */);
+ 		Fraction aFitXKorreg(1,1);
+-		ImpSetCharStretching(rOutl,aTextRect,aAnchorRect,aFitXKorreg);
++		ImpSetCharStretching(rOutl,aTextRect.GetSize(),aAnchorRect.GetSize(),aFitXKorreg);
+ 	}
++    else if (IsAutoFit())
++    {
++        ImpAutoFitText(rOutl);
++    }
+ 
+ 	if(pOutlinerParaObject)
+ 	{
+@@ -146,8 +152,7 @@ sal_Bool SdrTextObj::BegTextEdit(SdrOutliner& rOutl)
+ 
+ void SdrTextObj::TakeTextEditArea(Size* pPaperMin, Size* pPaperMax, Rectangle* pViewInit, Rectangle* pViewMin) const
+ {
+-	SdrFitToSizeType eFit=GetFitToSize();
+-	FASTBOOL bFitToSize=(eFit==SDRTEXTFIT_PROPORTIONAL || eFit==SDRTEXTFIT_ALLLINES);
++    FASTBOOL bFitToSize(IsFitToSize());
+ 	Size aPaperMin,aPaperMax;
+ 	Rectangle aViewInit;
+ 	TakeTextAnchorRect(aViewInit);
+diff --git a/svx/source/svdraw/svdtxhdl.cxx b/svx/source/svdraw/svdtxhdl.cxx
+index 69aeaa4..d1e526f 100644
+--- svx/source/svdraw/svdtxhdl.cxx
++++ svx/source/svdraw/svdtxhdl.cxx
+@@ -90,8 +90,7 @@ void ImpTextPortionHandler::ConvertToPathObj(SdrObjGroup& rGroup, FASTBOOL bPoly
+ 
+ 	Rectangle aAnchorRect;
+ 	Rectangle aTextRect;
+-	SdrFitToSizeType eFit=rTextObj.GetFitToSize();
+-	FASTBOOL bFitToSize=(eFit==SDRTEXTFIT_PROPORTIONAL || eFit==SDRTEXTFIT_ALLLINES);
++    FASTBOOL bFitToSize(rTextObj.IsFitToSize());
+ 	// Bei TakeTextRect wird u.a. auch der Text in
+ 	// den Outliner gesteckt
+ 	rTextObj.TakeTextRect(rOutliner,aTextRect,FALSE,&aAnchorRect);
+diff --git a/svx/source/svdraw/svdview.cxx b/svx/source/svdraw/svdview.cxx
+index f1b2a6d..e353e58 100644
+--- svx/source/svdraw/svdview.cxx
++++ svx/source/svdraw/svdview.cxx
+@@ -504,8 +504,7 @@ SdrHitKind SdrView::PickAnything(const Point& rLogicPos, SdrViewEvent& rVEvt) co
+ 				Point aTemporaryTextRelativePosition(aLocalLogicPosition - aTextRect.TopLeft());
+ 				
+ 				// FitToSize berueksichtigen
+-				SdrFitToSizeType eFit=pTextObj->GetFitToSize();
+-				BOOL bFitToSize=(eFit==SDRTEXTFIT_PROPORTIONAL || eFit==SDRTEXTFIT_ALLLINES);
++                BOOL bFitToSize(pTextObj->IsFitToSize());
+ 				if (bFitToSize) {
+ 					Fraction aX(aTextRect.GetWidth()-1,aAnchor.GetWidth()-1);
+ 					Fraction aY(aTextRect.GetHeight()-1,aAnchor.GetHeight()-1);
