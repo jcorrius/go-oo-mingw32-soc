@@ -1,5 +1,5 @@
 diff --git sc/inc/compiler.hrc sc/inc/compiler.hrc
-index 2eb24d8..31c6a30 100644
+index 92b7e82..22d77cb 100644
 --- sc/inc/compiler.hrc
 +++ sc/inc/compiler.hrc
 @@ -39,25 +39,26 @@
@@ -49,7 +49,7 @@ index 2eb24d8..31c6a30 100644
  /*** error constants #... ***/
  #define SC_OPCODE_START_ERRORS       30
 diff --git sc/inc/compiler.hxx sc/inc/compiler.hxx
-index 4e8b388..c6a1423 100644
+index 8036115..6d89e05 100644
 --- sc/inc/compiler.hxx
 +++ sc/inc/compiler.hxx
 @@ -45,6 +45,7 @@
@@ -60,23 +60,26 @@ index 4e8b388..c6a1423 100644
  
  namespace com { namespace sun { namespace star {
      namespace sheet {
-@@ -151,6 +152,7 @@ public:
+@@ -150,6 +151,10 @@ public:
+             bool        bHasForceArray;
          } sbyte;
          ComplRefData aRef;
++        struct {
++            sal_Unicode cFile[MAXSTRLEN+1];
++            sal_Unicode cName[MAXSTRLEN+1];
++        } extname;
          ScMatrix*    pMat;
-+        ::std::vector<String>* pStrings;
          USHORT       nIndex;                // index into name collection
          sal_Unicode  cStr[ MAXSTRLEN+1 ];   // string (up to 255 characters + 0)
-         short        nJump[MAXJUMPCOUNT+1]; // If/Chose token
-@@ -179,6 +181,7 @@ public:
+@@ -179,6 +184,7 @@ public:
      void SetDouble( double fVal );
      void SetInt( int nVal );
      void SetName( USHORT n );
-+    void SetExternalName( ::std::vector<String>* p );
++    void SetExternalName( const String& rFile, const String& rName );
      void SetMatrix( ScMatrix* p );
      void SetExternal(const sal_Unicode* pStr);
      // These methods are ok to use, reference count not cleared.
-@@ -227,6 +230,14 @@ public:
+@@ -227,6 +233,16 @@ public:
                                     xub_StrLen nSrcPos,
                                     const CharClass* pCharClass) const = 0;
  
@@ -88,10 +91,12 @@ index 4e8b388..c6a1423 100644
 +         */
 +        virtual bool parseExternalName( const String& rSymbol, String& rFile, String& rName ) const = 0;
 +
++        virtual String makeExternalNameStr( const String& rFile, const String& rName ) const = 0;
++
          enum SpecialSymbolType
          {
              /** 
-@@ -443,6 +454,7 @@ private:
+@@ -443,6 +459,7 @@ private:
      BOOL IsDoubleReference( const String& );
      BOOL IsMacro( const String& );
      BOOL IsNamedRange( const String& );
@@ -100,7 +105,7 @@ index 4e8b388..c6a1423 100644
      BOOL IsColRowName( const String& );
      BOOL IsBoolean( const String& );
 diff --git sc/inc/document.hxx sc/inc/document.hxx
-index 6188643..b464041 100644
+index 8a648d3..3ed285b 100644
 --- sc/inc/document.hxx
 +++ sc/inc/document.hxx
 @@ -624,6 +624,8 @@ SC_DLLPUBLIC	ScDBCollection*	GetDBCollection() const;
@@ -113,7 +118,7 @@ index 6188643..b464041 100644
          @param rnTab  (out-param) Returns the sheet index, if sheet could be inserted).
          @return  TRUE = Sheet created, rnTab contains valid sheet index. */
 diff --git sc/inc/opcode.hxx sc/inc/opcode.hxx
-index 588cdd5..dad2d2b 100644
+index 285104d..b72ebad 100644
 --- sc/inc/opcode.hxx
 +++ sc/inc/opcode.hxx
 @@ -44,6 +44,7 @@ enum OpCodeEnum
@@ -125,7 +130,7 @@ index 588cdd5..dad2d2b 100644
  		ocIf				= SC_OPCODE_IF,
  		ocChose				= SC_OPCODE_CHOSE,
 diff --git sc/inc/token.hxx sc/inc/token.hxx
-index 8fab11b..0e00d23 100644
+index 23decd6..cfb47b3 100644
 --- sc/inc/token.hxx
 +++ sc/inc/token.hxx
 @@ -64,7 +64,7 @@ enum StackVarEnum
@@ -133,7 +138,7 @@ index 8fab11b..0e00d23 100644
                                          // and/or string result and a formula
                                          // string to be compiled.
 -
-+    svMultiString,
++    svExternalName,
      svError,                            // error token
      svMissing = 0x70,                   // 0 or ""
      svUnknown                           // unknown StackType
@@ -150,14 +155,14 @@ index 8fab11b..0e00d23 100644
      virtual BOOL                operator==( const ScToken& rToken ) const;
  };
  
-+class ScMultiStringOpToken : public ScOpToken
++class ScExternalNameToken : public ScOpToken
 +{
 +private:
-+    ::std::vector<String>       aStrings;
++    ::std::vector<String>   maData;
 +public:
-+                                ScMultiStringOpToken( ::std::vector<String>* pStrings, OpCode e );
-+                                ScMultiStringOpToken( const ScMultiStringOpToken& r );
-+    virtual                     ~ScMultiStringOpToken();
++                                ScExternalNameToken( const String& rFile, const String& rName );
++                                ScExternalNameToken( const ScExternalNameToken& r );
++    virtual                     ~ScExternalNameToken();
 +    virtual const String&       GetString( USHORT n ) const;
 +    virtual USHORT              GetStringCount() const;
 +    virtual BOOL                operator==( const ScToken& rToken ) const;
@@ -166,8 +171,45 @@ index 8fab11b..0e00d23 100644
  
  class ScJumpToken : public ScOpToken
  {
+diff --git sc/source/core/data/cell.cxx sc/source/core/data/cell.cxx
+index 143a66b..23bb790 100644
+--- sc/source/core/data/cell.cxx
++++ sc/source/core/data/cell.cxx
+@@ -748,13 +748,16 @@ ScBaseCell* ScFormulaCell::Clone( ScDocument* pDoc, const ScAddress& rPos,
+ void ScFormulaCell::GetFormula( rtl::OUStringBuffer& rBuffer,
+                                 const ScGrammar::Grammar eGrammar ) const
+ {
++    fprintf(stdout, "ScFormulaCell::GetFormula: --begin\n");
+     if( pCode->GetCodeError() && !pCode->GetLen() )
+     {
++        fprintf(stdout, "ScFormulaCell::GetFormula:   cp (%d)\n", __LINE__);
+         rBuffer = rtl::OUStringBuffer( ScGlobal::GetErrorString( pCode->GetCodeError()));
+         return;
+     }
+     else if( cMatrixFlag == MM_REFERENCE )
+     {
++        fprintf(stdout, "ScFormulaCell::GetFormula:   cp (%d)\n", __LINE__);
+         // Reference to another cell that contains a matrix formula.
+         pCode->Reset();
+         ScToken* p = pCode->GetNextReferenceRPN();
+@@ -794,6 +797,7 @@ void ScFormulaCell::GetFormula( rtl::OUStringBuffer& rBuffer,
+         GetFormulaForPof( rBuffer, aPos, eGrammar);
+     else
+     {
++        fprintf(stdout, "ScFormulaCell::GetFormula:   cp (%d)\n", __LINE__);
+         ScCompiler aComp( pDocument, aPos, *pCode, eGrammar);
+         aComp.CreateStringFromTokenArray( rBuffer );
+     }
+@@ -870,6 +874,7 @@ void ScFormulaCell::Compile( const String& rFormula, BOOL bNoListening,
+ 	{
+ 		if ( !pCode->GetLen() && aResult.GetHybridFormula().Len() && rFormula == aResult.GetHybridFormula() )
+ 		{	// #65994# nicht rekursiv CompileTokenArray/Compile/CompileTokenArray
++            fprintf(stdout, "ScFormulaCell::Compile:   adding ocBad here\n");
+ 			if ( rFormula.GetChar(0) == '=' )
+ 				pCode->AddBad( rFormula.GetBuffer() + 1 );
+ 			else
 diff --git sc/source/core/data/documen3.cxx sc/source/core/data/documen3.cxx
-index dc99201..0744058 100644
+index 541e2e4..32bc869 100644
 --- sc/source/core/data/documen3.cxx
 +++ sc/source/core/data/documen3.cxx
 @@ -478,6 +478,31 @@ BOOL ScDocument::LinkExternalTab( SCTAB& rTab, const String& aDocTab,
@@ -203,7 +245,7 @@ index dc99201..0744058 100644
          const String& rFilterName, const String& rFilterOpt, const String& rTabName )
  {
 diff --git sc/source/core/tool/compiler.cxx sc/source/core/tool/compiler.cxx
-index b9905d8..b1ed00e 100644
+index 7caea76..f43e053 100644
 --- sc/source/core/tool/compiler.cxx
 +++ sc/source/core/tool/compiler.cxx
 @@ -74,8 +74,11 @@
@@ -218,7 +260,7 @@ index b9905d8..b1ed00e 100644
  
  #if OSL_DEBUG_LEVEL > 1
  // For some unknown reason the identical dbg_dump utilities in
-@@ -1361,6 +1364,54 @@ struct ConventionOOO_A1 : public Convention_A1
+@@ -1361,6 +1364,64 @@ struct ConventionOOO_A1 : public Convention_A1
  
          return sal_Unicode(0);
      }
@@ -270,10 +312,20 @@ index b9905d8..b1ed00e 100644
 +
 +        return true;
 +    }
++
++    virtual String makeExternalNameStr( const String& rFile, const String& rName ) const
++    {
++        String aStr;
++        aStr.Append(sal_Unicode('\''));
++        aStr.Append(rFile);
++        aStr.AppendAscii("\'#");
++        aStr.Append(rName);
++        return aStr;
++    }
  };
  
  
-@@ -1480,6 +1531,11 @@ struct ConventionXL
+@@ -1480,6 +1541,16 @@ struct ConventionXL
          }
          return sal_Unicode(0);
      }
@@ -282,10 +334,15 @@ index b9905d8..b1ed00e 100644
 +    {
 +        return false;
 +    }
++
++    static String makeExternalNameStr( const String& rFile, const String& rName )
++    {
++        return String();
++    }
  };
  
  struct ConventionXL_A1 : public Convention_A1, public ConventionXL
-@@ -1561,6 +1617,11 @@ struct ConventionXL_A1 : public Convention_A1, public ConventionXL
+@@ -1561,6 +1632,16 @@ struct ConventionXL_A1 : public Convention_A1, public ConventionXL
      {
          return ConventionXL::getSpecialSymbol(eSymType);
      }
@@ -293,11 +350,16 @@ index b9905d8..b1ed00e 100644
 +    virtual bool parseExternalName( const String& rSymbol, String& rFile, String& rName ) const
 +    {
 +        return ConventionXL::parseExternalName(rSymbol, rFile, rName);
++    }
++
++    virtual String makeExternalNameStr( const String& rFile, const String& rName ) const
++    {
++        return ConventionXL::makeExternalNameStr(rFile, rName);
 +    }
  };
  
  static const ConventionXL_A1 ConvXL_A1;
-@@ -1688,6 +1749,11 @@ struct ConventionXL_R1C1 : public ScCompiler::Convention, public ConventionXL
+@@ -1688,6 +1769,16 @@ struct ConventionXL_R1C1 : public ScCompiler::Convention, public ConventionXL
      {
          return ConventionXL::getSpecialSymbol(eSymType);
      }
@@ -306,10 +368,15 @@ index b9905d8..b1ed00e 100644
 +    {
 +        return ConventionXL::parseExternalName(rSymbol, rFile, rName);
 +    }
++
++    virtual String makeExternalNameStr( const String& rFile, const String& rName ) const
++    {
++        return ConventionXL::makeExternalNameStr(rFile, rName);
++    }
  };
  
  static const ConventionXL_R1C1 ConvXL_R1C1;
-@@ -2207,6 +2273,7 @@ xub_StrLen ScCompiler::NextSymbol()
+@@ -2207,6 +2298,7 @@ xub_StrLen ScCompiler::NextSymbol()
                          aSymbol += pStart[nSrcPos++];
                  }
              }
@@ -317,7 +384,7 @@ index b9905d8..b1ed00e 100644
          } while ( bi18n && !nErr );
          xub_StrLen nLen = aSymbol.Len();
          if ( nLen >= MAXSTRLEN )
-@@ -2499,6 +2566,8 @@ BOOL ScCompiler::IsSingleReference( const String& rName )
+@@ -2499,6 +2591,8 @@ BOOL ScCompiler::IsSingleReference( const String& rName )
  
  BOOL ScCompiler::IsReference( const String& rName )
  {
@@ -326,7 +393,7 @@ index b9905d8..b1ed00e 100644
      // Has to be called before IsValue
      sal_Unicode ch1 = rName.GetChar(0);
      sal_Unicode cDecSep = ( mxSymbols->isEnglish() ? '.' :
-@@ -2597,6 +2666,31 @@ BOOL ScCompiler::IsNamedRange( const String& rUpperName )
+@@ -2597,6 +2691,29 @@ BOOL ScCompiler::IsNamedRange( const String& rUpperName )
          return FALSE;
  }
  
@@ -338,19 +405,17 @@ index b9905d8..b1ed00e 100644
 +    String aFile, aName;
 +    if (!pConv->parseExternalName(rSymbol, aFile, aName))
 +        return false;
-+
++#if 0
 +    // Parse the name to see if this is an external named range.
 +    USHORT nIndex;
 +    if (!pDoc->FindExternalRangeName(aFile, aName, nIndex))
 +        return false;
-+
++#endif
 +    ScRawToken aToken;
-+    vector<String>* p = new vector<String>;
-+    fprintf(stdout, "ScCompiler::IsExternalNamedRange:   p = %p (original)\n", p);
-+    p->reserve(2);
-+    p->push_back(aFile);
-+    p->push_back(aName);
-+    aToken.SetExternalName(p);
++    if (aFile.Len() > MAXSTRLEN || aName.Len() > MAXSTRLEN)
++        return false;
++
++    aToken.SetExternalName(aFile, aName);
 +    pRawToken = aToken.Clone();
 +    return true;
 +}
@@ -358,7 +423,7 @@ index b9905d8..b1ed00e 100644
  BOOL ScCompiler::IsDBRange( const String& rName )
  {
      USHORT n;
-@@ -3108,6 +3202,7 @@ void ScCompiler::AutoCorrectParsedSymbol()
+@@ -3108,6 +3225,7 @@ void ScCompiler::AutoCorrectParsedSymbol()
  
  BOOL ScCompiler::NextNewToken( bool bAllowBooleans )
  {
@@ -366,7 +431,15 @@ index b9905d8..b1ed00e 100644
      xub_StrLen nSpaces = NextSymbol();
  
  #if 0
-@@ -3183,6 +3278,15 @@ BOOL ScCompiler::NextNewToken( bool bAllowBooleans )
+@@ -3155,6 +3273,7 @@ BOOL ScCompiler::NextNewToken( bool bAllowBooleans )
+              * manual/API input. */
+             String aBad( aFormula.Copy( nSrcPos-1 ) );
+             eLastOp = pArr->AddBad( aBad )->GetOpCode();
++            fprintf(stdout, "ScCompiler::NextNewToken:   adding ocBad here\n");
+             return FALSE;
+         }
+         if( !IsString() )
+@@ -3183,6 +3302,15 @@ BOOL ScCompiler::NextNewToken( bool bAllowBooleans )
              fprintf( stderr, "Token '%s'\n",
                       rtl::OUStringToOString( aUpper, RTL_TEXTENCODING_UTF8 ).getStr() );
  #endif
@@ -382,7 +455,7 @@ index b9905d8..b1ed00e 100644
              // Column 'DM' ("Deutsche Mark", German currency) couldn't be
              // referred to => IsReference() before IsValue().
              // #42016# Italian ARCTAN.2 resulted in #REF! => IsOpcode() before
-@@ -3190,10 +3294,11 @@ BOOL ScCompiler::NextNewToken( bool bAllowBooleans )
+@@ -3190,10 +3318,11 @@ BOOL ScCompiler::NextNewToken( bool bAllowBooleans )
              // IsBoolean before isValue to catch inline bools without the kludge
              //    for inline arrays.
              if ( !(bMayBeFuncName && IsOpCode( aUpper ))
@@ -396,7 +469,7 @@ index b9905d8..b1ed00e 100644
                && !IsDBRange( aUpper )
                && !IsColRowName( aUpper )
                && !(bMayBeFuncName && IsMacro( aUpper ))
-@@ -3202,6 +3307,8 @@ BOOL ScCompiler::NextNewToken( bool bAllowBooleans )
+@@ -3202,6 +3331,8 @@ BOOL ScCompiler::NextNewToken( bool bAllowBooleans )
                  // Provide single token information and continue. Do not set an
                  // error, that would prematurely end compilation. Simple
                  // unknown names are handled by the interpreter.
@@ -405,7 +478,7 @@ index b9905d8..b1ed00e 100644
                  ScGlobal::pCharClass->toLower( aUpper );
                  aToken.SetString( aUpper.GetBuffer() );
                  aToken.NewOpCode( ocBad );
-@@ -3210,10 +3317,14 @@ BOOL ScCompiler::NextNewToken( bool bAllowBooleans )
+@@ -3210,10 +3341,14 @@ BOOL ScCompiler::NextNewToken( bool bAllowBooleans )
                      AutoCorrectParsedSymbol();
              }
          }
@@ -420,7 +493,7 @@ index b9905d8..b1ed00e 100644
  }
  
  ScTokenArray* ScCompiler::CompileString( const String& rFormula )
-@@ -3391,6 +3502,7 @@ void ScCompiler::PopTokenArray()
+@@ -3391,6 +3526,7 @@ void ScCompiler::PopTokenArray()
  
  BOOL ScCompiler::GetToken()
  {
@@ -428,7 +501,7 @@ index b9905d8..b1ed00e 100644
      static const short nRecursionMax = 42;
      ScCompilerRecursionGuard aRecursionGuard( nRecursion );
      if ( nRecursion > nRecursionMax )
-@@ -3448,12 +3560,29 @@ BOOL ScCompiler::GetToken()
+@@ -3448,12 +3584,41 @@ BOOL ScCompiler::GetToken()
      if( bStop )
      {
          pToken = new ScByteToken( ocStop );
@@ -450,7 +523,19 @@ index b9905d8..b1ed00e 100644
 +                rtl::OUStringToOString(rFile, RTL_TEXTENCODING_UTF8).getStr(), 
 +                rtl::OUStringToOString(rName, RTL_TEXTENCODING_UTF8).getStr());
 +
-+        SetError(errNoName);
++        USHORT nIndex;
++        if (!pDoc->FindExternalRangeName(rFile, rName, nIndex))
++        {
++            SetError(errNoName);
++        }
++            
++        fprintf(stdout, "ScCompiler::GetToken:   ext name index = %d\n", nIndex);
++
++        ScTokenArray* pNew = new ScTokenArray;
++        pNew->Add( new ScStringToken( String::CreateFromAscii("External Name!") ) );
++        PushTokenArray( pNew, TRUE );
++        pNew->Reset();
++        return GetToken();
 +    }
      else if( pToken->GetOpCode() == ocName )
      {
@@ -458,7 +543,7 @@ index b9905d8..b1ed00e 100644
          ScRangeData* pRangeData = pDoc->GetRangeName()->FindIndex( pToken->GetIndex() );
          if (pRangeData)
          {
-@@ -3706,6 +3835,7 @@ BOOL ScCompiler::GetToken()
+@@ -3706,6 +3871,7 @@ BOOL ScCompiler::GetToken()
                  }
                  PushTokenArray( pNew, TRUE );
                  pNew->Reset();
@@ -466,7 +551,7 @@ index b9905d8..b1ed00e 100644
                  return GetToken();
              }
          }
-@@ -3748,13 +3878,18 @@ BOOL ScCompiler::GetToken()
+@@ -3748,13 +3914,18 @@ BOOL ScCompiler::GetToken()
  //          SetError(errNoRef);
          pArr->nRefs++;
      }
@@ -485,7 +570,7 @@ index b9905d8..b1ed00e 100644
      OpCode eOp = pToken->GetOpCode();
      // There must be an operator before a push
      if ( (eOp == ocPush || eOp == ocColRowNameAuto) &&
-@@ -3843,6 +3978,7 @@ OpCode ScCompiler::NextToken()
+@@ -3843,6 +4014,7 @@ OpCode ScCompiler::NextToken()
          }
          eLastOp = eOp;
      }
@@ -493,8 +578,18 @@ index b9905d8..b1ed00e 100644
      return eOp;
  }
  
+@@ -5402,6 +5574,9 @@ ScToken* ScCompiler::CreateStringFromToken( rtl::OUStringBuffer& rBuffer, ScToke
+     BOOL bSpaces = FALSE;
+     ScToken* t = pTokenP;
+     OpCode eOp = t->GetOpCode();
++    if (eOp == ocExternalName)
++        rBuffer.append(pConv->makeExternalNameStr(t->GetString(0), t->GetString(1)));
++
+     if( eOp >= ocAnd && eOp <= ocOr )
+     {
+         // AND, OR infix?
 diff --git sc/source/core/tool/token.cxx sc/source/core/tool/token.cxx
-index a94c417..acc9447 100644
+index 7312257..cb101a3 100644
 --- sc/source/core/tool/token.cxx
 +++ sc/source/core/tool/token.cxx
 @@ -52,6 +52,8 @@
@@ -506,42 +601,63 @@ index a94c417..acc9447 100644
  // ImpTokenIterator wird je Interpreter angelegt, mehrfache auch durch
  // SubCode via ScTokenIterator Push/Pop moeglich
  IMPL_FIXEDMEMPOOL_NEWDEL( ImpTokenIterator, 32, 16 )
-@@ -196,6 +198,14 @@ void ScRawToken::SetName( USHORT n )
+@@ -196,6 +198,21 @@ void ScRawToken::SetName( USHORT n )
      nRefCnt = 0;
  }
  
-+void ScRawToken::SetExternalName( ::std::vector<String>* p )
++void ScRawToken::SetExternalName( const String& rFile, const String& rName )
 +{
 +    eOp = ocExternalName;
-+    eType = svMultiString;
-+    pStrings = p;
++    eType = svExternalName;
 +    nRefCnt = 0;
++
++    xub_StrLen n = rFile.Len();
++    memcpy(extname.cFile, rFile.GetBuffer(), n*sizeof(sal_Unicode));
++    extname.cFile[n] = 0;
++
++    n = rName.Len();
++    memcpy(extname.cName, rName.GetBuffer(), n*sizeof(sal_Unicode));
++    extname.cName[n] = 0;
 +}
 +
  ComplRefData& ScRawToken::GetReference()
  {
      DBG_ASSERT( lcl_IsReference( eOp, GetType() ), "GetReference: no Ref" );
-@@ -255,6 +265,7 @@ ScRawToken* ScRawToken::Clone() const
+@@ -255,6 +272,7 @@ ScRawToken* ScRawToken::Clone() const
              case svSingleRef:
              case svDoubleRef:   n += sizeof(aRef); break;
              case svMatrix:      n += sizeof(ScMatrix*); break;
-+            case svMultiString: n += sizeof(vector<String>*); break;
++            case svExternalName: n += sizeof(extname); break;
              case svIndex:       n += sizeof(USHORT); break;
              case svJump:        n += nJump[ 0 ] * 2 + 2; break;
              case svExternal:    n = sal::static_int_cast<USHORT>( n + GetStrLenBytes( cStr+1 ) + GetStrLenBytes( 2 ) ); break;
-@@ -311,8 +322,11 @@ ScToken* ScRawToken::CreateToken() const
+@@ -311,8 +329,15 @@ ScToken* ScRawToken::CreateToken() const
              return new ScMatrixToken( pMat );
          //break;
          case svIndex :
 +            fprintf(stdout, "ScRawToken::CreateToken:   creating index token ... (op = %d)\n", eOp);
              return new ScIndexToken( eOp, nIndex );
          //break;
-+        case svMultiString:
-+            return new ScMultiStringOpToken( pStrings, eOp );
++        case svExternalName:
++        {
++            String aFile(extname.cFile);
++            String aName(extname.cName);
++            return new ScExternalNameToken( aFile, aName );
++        }
          case svJump :
              return new ScJumpToken( eOp, (short*) nJump );
          //break;
-@@ -756,6 +770,18 @@ const String& ScToken::GetString() const
+@@ -505,6 +530,9 @@ ScToken* ScToken::Clone() const
+         case svExternal :
+             return new ScExternalToken( *static_cast<const ScExternalToken*>(this) );
+         //break;
++        case svExternalName :
++            return new ScExternalNameToken( *static_cast<const ScExternalNameToken*>(this) );
++        //break;
+         case svFAP :
+             return new ScFAPToken( *static_cast<const ScFAPToken*>(this) );
+         //break;
+@@ -756,6 +784,18 @@ const String& ScToken::GetString() const
      return aDummyString;
  }
  
@@ -560,37 +676,37 @@ index a94c417..acc9447 100644
  const SingleRefData& ScToken::GetSingleRef() const
  {
      DBG_ERRORFILE( "ScToken::GetSingleRef: virtual dummy called" );
-@@ -1016,6 +1042,60 @@ BOOL ScIndexToken::operator==( const ScToken& r ) const
+@@ -1016,6 +1056,60 @@ BOOL ScIndexToken::operator==( const ScToken& r ) const
  }
  
  
-+ScMultiStringOpToken::ScMultiStringOpToken( ::std::vector<String>* pStrings, OpCode e ) :
-+    ScOpToken( e, svMultiString )
++ScExternalNameToken::ScExternalNameToken( const String& rFile, const String& rName ) :
++    ScOpToken( ocExternalName, svExternalName )
 +{
-+    aStrings = *pStrings;
-+    fprintf(stdout, "ScMultiStringOpToken::ScMultiStringOpToken:   pStrings = %p\n", pStrings);
-+    delete pStrings;
++    maData.reserve(2);
++    maData.push_back(rFile);
++    maData.push_back(rName);
 +}
 +
-+ScMultiStringOpToken::ScMultiStringOpToken( const ScMultiStringOpToken& r ) :
++ScExternalNameToken::ScExternalNameToken( const ScExternalNameToken& r ) :
 +    ScOpToken( r )
 +{
-+    aStrings = r.aStrings;
++    maData = r.maData;
 +}
 +
-+ScMultiStringOpToken::~ScMultiStringOpToken() {}
++ScExternalNameToken::~ScExternalNameToken() {}
 +
-+const String& ScMultiStringOpToken::GetString( USHORT n ) const
++const String& ScExternalNameToken::GetString( USHORT n ) const
 +{
-+    return aStrings[n];
++    return maData[n];
 +}
 +
-+USHORT ScMultiStringOpToken::GetStringCount() const
++USHORT ScExternalNameToken::GetStringCount() const
 +{
-+    return static_cast<USHORT>(aStrings.size());
++    return static_cast<USHORT>(maData.size());
 +}
 +
-+BOOL ScMultiStringOpToken::operator==( const ScToken& r ) const
++BOOL ScExternalNameToken::operator==( const ScToken& r ) const
 +{
 +    if ( !ScToken::operator==(r) )
 +        return false;
@@ -621,11 +737,3 @@ index a94c417..acc9447 100644
  short* ScJumpToken::GetJump() const                     { return pJump; }
  BOOL ScJumpToken::operator==( const ScToken& r ) const
  {
-@@ -1854,6 +1934,7 @@ ScToken* ScTokenArray::AddDoubleReference( const ComplRefData& rRef )
- 
- ScToken* ScTokenArray::AddName( USHORT n )
- {
-+    fprintf(stdout, "ScTokenArray::AddName: --begin (index = %d)\n", n);
-     return Add( new ScIndexToken( ocName, n ) );
- }
- 
