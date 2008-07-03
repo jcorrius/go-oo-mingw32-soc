@@ -10,7 +10,7 @@ test:	SpreadsheetSample.exe
 
 SpreadsheetSample.exe: ${SOURCES}
 	mcs SpreadsheetSample.cs SpreadsheetDocHelper.cs \
-	    `pkg-config --libs mono-ooo-2.0`
+	    `pkg-config --libs mono-openoffice`
 
 clean:
 	rm -f SpreadsheetSample.exe
