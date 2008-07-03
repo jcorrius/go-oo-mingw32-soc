@@ -43,7 +43,7 @@ devel package
 %build
 
 #setup env.
-export OO_INSTDIR=%{_libdir}/%ooo_home/
+export OO_INSTDIR=%{_libdir}/%ooo_home
 export OO_SOLVERDIR=$OO_INSTDIR/solver
 export OO_TOOLSDIR=$OO_INSTDIR/ooo-build/bin
 
@@ -54,7 +54,7 @@ $OO_TOOLSDIR/piece/build-%piece
 %install
 
 #setup env.
-export OO_INSTDIR=%{_libdir}/%ooo_home/
+export OO_INSTDIR=%{_libdir}/%ooo_home
 export OO_SOLVERDIR=$OO_INSTDIR/solver
 export OO_TOOLSDIR=$OO_INSTDIR/ooo-build/bin
 
