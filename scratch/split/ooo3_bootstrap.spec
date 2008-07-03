@@ -126,7 +126,7 @@ BuildRequires:  gjdoc
 %define	      ooo_prefix	%_libdir
 %define	      ooo_home		ooo-3
 %define	      ooo_build_dir	build
-%define	      ooo_build_version 2.99.4
+%define	      ooo_build_version 2.99.21
 %define	      ooo_build_tag     dev300-m22
 License:        Artistic License; BSD 3-Clause; GPL v2 or later; LaTeX Public License (LPPL); LGPL v2.1 or later; MOZILLA PUBLIC LICENSE (MPL/NPL); X11/MIT
 Group:          Productivity/Office/Suite
