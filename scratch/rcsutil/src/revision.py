@@ -3,7 +3,7 @@ import sys
 import globals
 
 class RevisionError(Exception):
-    def __init__ (self, msg='RevisionFormatError Exception'):
+    def __init__ (self, msg='RevisionError Exception'):
         self.message = msg
 
 class Node(object):
@@ -101,7 +101,7 @@ CVS's revision number has the following characteristics:
 
 
     def getBranchName (self, revision):
-        """Get the branch name for a give revision number.
+        """Get the branch name for a given revision number.
 
 The revision number must be given as a string (e.g. '1.23.2.1').
 """

@@ -155,6 +155,7 @@ currentAffiliations = {
     'kohei': 'Novell', # Kohei Yoshida        
     'kr': 'Sun', # Kay Ramme            
     'kso': 'Sun', # Kai Sommerfeld       
+    'kstribley': 'unaffiliated', # Keith Stribley
     'kz': 'Sun', # Kurt Zenker          
     'larsbehr': 'Sun', # Lars Behrmann (AODL library, toolkit)
     'laurentgodard': 'inDesko/Nuxeo', # Laurent Godard       
@@ -270,6 +271,7 @@ currentAffiliations = {
     'tkr': 'Sun', # Tobias Krause        
     'tl': 'Sun', # Thomas Lange         
     'tml': 'Novell', # Tor Lillqvist        
+    'tmorgner': 'Pentaho', # Thomas Morgner (Pentaho reporting engine)
     'toconnor': 'unaffiliated', # Tomas O'Connor       
     'tonn': 'unaffiliated', # Gerhard Tonn         
     'tonygalmiche': 'unaffiliated', # Tony Galmiche        
