@@ -9,7 +9,6 @@ import optparse
 sys.path.append(sys.path[0]+"/src")
 import revision, globals
 
-
 # all commits that were made to the following branches are ignored.
 ignoredBranches = [
     'SRX643_TF_BINFILTER',
@@ -17,9 +16,25 @@ ignoredBranches = [
     'cws_src680_hedaburemove01',
     'cws_src680_ooo19126']
 
-# all commmits done by the following authors are ignored.
+# all commmits done by the following authors are ignored
+# release engineers do eg. huge license changes directly
+# on HEAD, and integrate all branches themselves.
 ignoredAuthors = [
     'gh', 'ihi', 'rt', 'vg']
+
+# just examine source code, avoiding binary bits & so on
+sourceExtension = {
+    '.c':1, '.cc':1, '.cpp':1, '.cs':1, '.csc':1, '.css':1, '.cxx':1,
+    '.diff':1, '.h':1, '.hpp':1, '.hxx':1, '.idl':1, '.inc':1, '.ini':1,
+    '.jam':1, '.java':1, '.lst':1, '.mk':1, '.patch':1, '.py':1,
+    '.scp':1, '.sh':1, '.txt':1, '.xcs':1, '.xcu':1, '.xsl':1, '.y':1}
+
+# ignore large auto-generated files that people like to regularly
+# check into CVS for unknown reasons.
+autogenFiles = [
+    'sw/writerfilter/source/ooxml/OOXMLresources.cxx,v'
+    'sw/writerfilter/source/ooxml/OOXMLresources.hxx,v'
+]
 
 currentAffiliations = {
     'ab': 'Sun', # Andreas Bregas       
@@ -301,19 +316,6 @@ currentAffiliations = {
     'zhaojianwei': 'Redflag', # Jianwei Zhao         
     'zhiming': 'Intel'} # Jeremy Zheng         
 
-
-# include raw source code pruning random other cruft
-sourceExtension = {
-    '.c':1, '.cc':1, '.cpp':1, '.cs':1, '.csc':1, '.css':1, '.cxx':1,
-    '.diff':1, '.h':1, '.hpp':1, '.hxx':1, '.idl':1, '.inc':1, '.ini':1,
-    '.jam':1, '.java':1, '.lst':1, '.mk':1, '.patch':1, '.py':1,
-    '.scp':1, '.sh':1, '.txt':1, '.xcs':1, '.xcu':1, '.xsl':1, '.y':1}
-
-# for unknown reasons some (large) auto-generated files get checked in
-autogenFiles = [
-    'sw/writerfilter/source/ooxml/OOXMLresources.cxx,v'
-    'sw/writerfilter/source/ooxml/OOXMLresources.hxx,v'
-]
 
 def getAffiliation (name, date):
     affil = '(unknown)'
