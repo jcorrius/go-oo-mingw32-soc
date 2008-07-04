@@ -5,6 +5,22 @@ import re
 import time, datetime
 import optparse
 
+# import local modules.
+sys.path.append(sys.path[0]+"/src")
+import revision, globals
+
+
+# all commits that were made to the following branches are ignored.
+ignoredBranches = [
+    'SRX643_TF_BINFILTER',
+    'cws_dev300_changefileheader', 
+    'cws_src680_hedaburemove01',
+    'cws_src680_ooo19126']
+
+# all commmits done by the following authors are ignored.
+ignoredAuthors = [
+    'gh', 'ihi', 'rt', 'vg']
+
 currentAffiliations = {
     'ab': 'Sun', # Andreas Bregas       
     'abi': 'Sun', # Andreas Bille        
@@ -340,19 +356,9 @@ def getAffiliation (name, date):
     return affil
 
 
-class Debuggable(object):
-
-    def __init__ (self):
-        self.debug = True
-
-    def debugPrint (self, msg, abortAfter=False):
-        if self.debug:
-            sys.stderr.write(msg + "\n")
-            if abortAfter:
-                sys.exit(1)
 
 
-class RCSFile(Debuggable):
+class RCSFile(globals.Debuggable):
 
     # alpha numeric letter
     alphnum = '([a-z]|[A-Z]|[0-9])'
@@ -365,17 +371,17 @@ class RCSFile(Debuggable):
 
 
     def __init__ (self, lines, ext):
-        Debuggable.__init__(self)
+        globals.Debuggable.__init__(self)
 
         self.lines = lines
-        self.lineLength = len(self.lines)
+        self.lineCount = len(self.lines)
         self.ext = ext
         self.reset()
 
 
     def reset (self):
         self.headers = {}
-        self.branchSymbols = {}
+        self.revTree = revision.RevisionTree()
         self.commitLogs = []
         self.descError = False
         self.symbolicNamesError = False
@@ -386,7 +392,7 @@ class RCSFile(Debuggable):
 
         rePattern = re.compile(RCSFile.reCategory)
         i = 0
-        while i < self.lineLength:
+        while i < self.lineCount:
             line = self.lines[i].rstrip()
             res = rePattern.search(line)
             if res == None:
@@ -407,14 +413,15 @@ class RCSFile(Debuggable):
             i += 1
 
 
+    def outputRevTree (self):
+        self.revTree.output()
+
+    def getBranchName (self, revision):
+        return self.revTree.getBranchName(revision)
+
     def output (self):
         for key in self.headers.keys():
             print key + " -> '" + self.headers[key] + "'"
-
-        keys = self.branchSymbols.keys()
-        keys.sort()
-        for key in keys:
-            print key + " -> " + self.branchSymbols[key]
 
         for commitLog in self.commitLogs:
             print ('-'*45)
@@ -432,7 +439,7 @@ class RCSFile(Debuggable):
 
         # [tab]symbol name: branch number
 
-        while i < self.lineLength:
+        while i < self.lineCount:
             line = self.__getLine(i)
             if len(line) == 0:
                 break
@@ -445,7 +452,7 @@ class RCSFile(Debuggable):
             name = name.strip()
             number = number.strip()
 
-            self.branchSymbols[number] = name
+            self.revTree.addSymbol(name, number)
             i += 1
 
         self.symbolicNamesError = True
@@ -499,7 +506,7 @@ rest of the lines contain commit message.
         self.debugPrint(self.__getLine(i))
         i += 1
 
-        while i < self.lineLength:
+        while i < self.lineCount:
             self.debugPrint(self.__getLine(i))
             commitLog = {}
     
@@ -512,7 +519,12 @@ rest of the lines contain commit message.
     
             revnum = line.split()[1].strip()
             commitLog['revision'] = revnum
-    
+            try:
+                branch = self.revTree.getBranchName(revnum)
+                commitLog['branch'] = branch
+            except revision.RevisionError:
+                pass
+
             i += 1
             self.debugPrint(self.__getLine(i))
 
@@ -526,7 +538,7 @@ rest of the lines contain commit message.
     
             # the rest is a commit message.
             msg = []
-            while i < self.lineLength:
+            while i < self.lineCount:
                 self.debugPrint(self.__getLine(i))
                 if self.__isRevSeparator(i):
                     break
@@ -626,6 +638,7 @@ Each commit log may have the following data:
     * date - commit date and time (datetime object).
     * author - who made the commit (string).
     * revision - revision number (string)
+    * branch - name of the branch to which the commit was made (string).
     * state - state of the file ??? (string)
     * message - commit message (string list).
 
@@ -674,11 +687,22 @@ Also, disregard commits whose message contains RESYNC or INTEGRATION: CWS.
                 if isIssueNumber:
                     statObj.patchCommitCount += 1
 
+            # branch
+            if log.has_key('branch') and log['branch'] in ignoredBranches:
+                self.debugPrint ("commit made to branch %s is ignored (%s)"%(log['branch'], log['revision']))
+                statObj.ignoredByBranchCount += 1
+                continue
+
             # author
             if not log.has_key('author'):
                 self.debugPrint("author record is absent")
                 return False
             author = log['author']
+            if author in ignoredAuthors:
+                self.debugPrint("commit made by %s is ignored"%author)
+                statObj.ignoredByAuthorCount += 1
+                continue
+
 
             # date
             if not log.has_key('date'):
@@ -729,6 +753,8 @@ class CommitStats(object):
         self.totalCommitCount = 0
         self.resyncCommitCount = 0
         self.integrationCommitCount = 0
+        self.ignoredByBranchCount = 0
+        self.ignoredByAuthorCount = 0
         self.patchCommitCount = 0
 
     def add (self, author, date, ext, added, removed):
@@ -898,7 +924,9 @@ path is relative, it is relative to the current directory."""
             sys.stderr.write("error parsing " + filepath + "\n")
             self.isError = True
 
+#       obj.outputRevTree()
 #       obj.output()
+
         if not obj.writeCommitStats(self.stats):
             sys.stderr.write("failed to write commit stats\n")
             sys.exit(1)
@@ -939,6 +967,8 @@ path is relative, it is relative to the current directory."""
         fd.write("total commit count\t%d\n"%self.stats.totalCommitCount)
         fd.write("cws integration commits ignored\t%d\n"%self.stats.integrationCommitCount)
         fd.write("resync commits ignored\t%d\n"%self.stats.resyncCommitCount)
+        fd.write("commits ignored by branch name\t%d\n"%self.stats.ignoredByBranchCount)
+        fd.write("commits ignored by author name\t%d\n"%self.stats.ignoredByAuthorCount)
         fd.write("issue numbers found\t%d\n"%self.stats.patchCommitCount)
 
 
