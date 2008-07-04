@@ -15,15 +15,15 @@ Name:           ooo3_%piece
 BuildRequires:  ooo3_bootstrap-devel
 %define	      ooo_prefix	%_libdir
 %define	      ooo_home		ooo-3
-%define	      ooo_build_tag     dev300-m22
+%define	      ooo_build_tag     dev300-m21
 License:        Artistic License; BSD 3-Clause; GPL v2 or later; LaTeX Public License (LPPL); LGPL v2.1 or later; MOZILLA PUBLIC LICENSE (MPL/NPL); X11/MIT
 Group:          Productivity/Office/Suite
 Version:        3
-Release:        3
+Release:        4
 AutoReqProv:    on
 Summary:        A Free Office Suite (Framework)
 Url:            http://www.openoffice.org/
-Source:         %ooo_build_tag-libs-extern.tar.bz2
+Source:         %ooo_build_tag-%piece.tar.bz2
 
 %description
 ure
