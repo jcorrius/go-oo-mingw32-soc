@@ -1,0 +1,131 @@
+--- oovbaapi/org/openoffice/excel/XWorksheet.idl.orig	2008-07-03 23:33:34.000000000 +0800
++++ oovbaapi/org/openoffice/excel/XWorksheet.idl	2008-07-03 23:35:37.000000000 +0800
+@@ -69,6 +69,7 @@ interface XWorksheet
+ 	[attribute, readonly] XWorksheet Next;
+ 	[attribute, readonly] XWorksheet Previous;
+ 	[attribute, readonly] string CodeName;
++	[attribute] long EnableSelection;
+ 	
+ 	void Activate();
+ 	void Calculate( );
+--- sc/inc/document.hxx.orig	2008-07-04 12:43:09.000000000 +0800
++++ sc/inc/document.hxx	2008-07-04 00:10:41.000000000 +0800
+@@ -537,7 +537,7 @@ SC_DLLPUBLIC	ScDBCollection*	GetDBCollec
+ 	BOOL			IsDocProtected() const;
+ 	BOOL			IsDocEditable() const;
+ 	BOOL			IsTabProtected( SCTAB nTab ) const;
+-    ScTableProtection* GetTabProtection( SCTAB nTab ) const;
++    SC_DLLPUBLIC    ScTableProtection* GetTabProtection( SCTAB nTab ) const;
+     void            SetTabProtection(SCTAB nTab, bool bProtect, const String& aPassText);
+     void            SetTabProtection(SCTAB nTab, const ScTableProtection* pProtect);
+     void            CopyTabProtection(SCTAB nTabSrc, SCTAB nTabDest);
+--- sc/inc/tabprotection.hxx.orig	2008-07-04 00:11:11.000000000 +0800
++++ sc/inc/tabprotection.hxx	2008-07-04 00:12:23.000000000 +0800
+@@ -155,8 +155,8 @@ public:
+                                  ScPasswordHash eHash = PASSHASH_OOO);
+     virtual bool verifyPassword(const String& aPassText) const;
+     
+-    bool isOptionEnabled(Option eOption) const;
+-    void setOption(Option eOption, bool bEnabled);
++    SC_DLLPUBLIC    bool isOptionEnabled(Option eOption) const;
++    SC_DLLPUBLIC    void setOption(Option eOption, bool bEnabled);
+ 
+ private:
+     ::std::auto_ptr<ScTableProtectionImpl> mpImpl;
+--- sc/source/ui/vba/vbaworksheet.hxx.orig	2008-07-03 23:36:21.000000000 +0800
++++ sc/source/ui/vba/vbaworksheet.hxx	2008-07-03 23:37:29.000000000 +0800
+@@ -95,6 +95,8 @@ public:
+ 	virtual css::uno::Reference< oo::excel::XHPageBreaks > SAL_CALL HPageBreaks( ) throw (css::uno::RuntimeException);
+ 	virtual css::uno::Reference< oo::excel::XWorksheet > SAL_CALL getNext() throw (css::uno::RuntimeException);
+ 	virtual css::uno::Reference< oo::excel::XWorksheet > SAL_CALL getPrevious() throw (css::uno::RuntimeException);
++	virtual sal_Int32 SAL_CALL getEnableSelection() throw (css::uno::RuntimeException);
++	virtual void SAL_CALL setEnableSelection( sal_Int32 nSelection ) throw (css::uno::RuntimeException);
+ 
+     // Methods
+ 	virtual void SAL_CALL Activate() throw (css::uno::RuntimeException);
+--- sc/source/ui/vba/vbaworksheet.cxx.orig	2008-07-03 23:36:26.000000000 +0800
++++ sc/source/ui/vba/vbaworksheet.cxx	2008-07-04 08:03:28.000000000 +0800
+@@ -58,6 +58,7 @@
+ #include <com/sun/star/drawing/XControlShape.hpp>
+ #include <com/sun/star/form/FormComponentType.hpp>
+ #include <com/sun/star/form/XFormsSupplier.hpp>
++#include <org/openoffice/excel/XlEnableSelection.hpp>
+ 
+ #include <comphelper/processfactory.hxx>
+ 
+@@ -251,6 +252,75 @@ ScVbaWorksheet::setVisible( sal_Bool bVi
+ 			(rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "IsVisible" ) ), aValue);
+ }
+ 
++sal_Int32
++ScVbaWorksheet::getEnableSelection() throw (uno::RuntimeException)
++{
++    uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( getModel(), uno::UNO_QUERY_THROW );
++    SCTAB nTab = 0;
++    rtl::OUString aSheetName = getName();
++    bool bSheetExists = nameExists (xSpreadDoc, aSheetName, nTab);
++    if ( bSheetExists )
++    {
++        uno::Reference< frame::XModel > xModel( getModel(), uno::UNO_QUERY_THROW );
++        ScDocument* pDoc = getDocShell( xModel )->GetDocument();
++        ScTableProtection* pProtect = pDoc->GetTabProtection(nTab);
++        sal_Bool bLockedCells   = pProtect->isOptionEnabled(ScTableProtection::SELECT_LOCKED_CELLS);
++        sal_Bool bUnlockedCells = pProtect->isOptionEnabled(ScTableProtection::SELECT_UNLOCKED_CELLS);
++        if( bLockedCells )
++            return excel::XlEnableSelection::xlNoRestrictions;
++        if( bUnlockedCells )
++            return excel::XlEnableSelection::xlUnlockedCells;
++        return excel::XlEnableSelection::xlNoSelection;    
++    }
++    else
++		throw uno::RuntimeException(::rtl::OUString(
++                                RTL_CONSTASCII_USTRINGPARAM( "Sheet Name does not exist. ") ),
++                                uno::Reference< XInterface >() );
++    return excel::XlEnableSelection::xlNoSelection;
++}    
++
++
++void
++ScVbaWorksheet::setEnableSelection( sal_Int32 nSelection ) throw (uno::RuntimeException)
++{
++    if( (nSelection != excel::XlEnableSelection::xlNoRestrictions) &&
++        (nSelection != excel::XlEnableSelection::xlUnlockedCells) &&
++        (nSelection != excel::XlEnableSelection::xlNoSelection) )
++    {
++        DebugHelper::exception(SbERR_BAD_PARAMETER, rtl::OUString() );
++    }
++
++    uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( getModel(), uno::UNO_QUERY_THROW );
++    SCTAB nTab = 0;
++    rtl::OUString aSheetName = getName();
++    bool bSheetExists = nameExists (xSpreadDoc, aSheetName, nTab);
++    if ( bSheetExists )
++    {
++        uno::Reference< frame::XModel > xModel( getModel(), uno::UNO_QUERY_THROW );
++        ScDocument* pDoc = getDocShell( xModel )->GetDocument();
++        ScTableProtection* pProtect = pDoc->GetTabProtection(nTab);
++        // default is xlNoSelection
++        sal_Bool bLockedCells = sal_False;
++        sal_Bool bUnlockedCells = sal_False;
++        if( nSelection == excel::XlEnableSelection::xlNoRestrictions )
++        {
++            bLockedCells = sal_True;
++            bUnlockedCells = sal_True;
++        }
++        else if( nSelection == excel::XlEnableSelection::xlUnlockedCells )
++        {
++            bUnlockedCells = sal_True;
++        }
++        pProtect->setOption( ScTableProtection::SELECT_LOCKED_CELLS, bLockedCells );
++        pProtect->setOption( ScTableProtection::SELECT_UNLOCKED_CELLS, bUnlockedCells );
++    }
++    else
++		throw uno::RuntimeException(::rtl::OUString(
++                                RTL_CONSTASCII_USTRINGPARAM( "Sheet Name does not exist. ") ),
++                                uno::Reference< XInterface >() );
++
++}
++
+ uno::Reference< excel::XRange > 
+ ScVbaWorksheet::getUsedRange() throw (uno::RuntimeException)
+ {
