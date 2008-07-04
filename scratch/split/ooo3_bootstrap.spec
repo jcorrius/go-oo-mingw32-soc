@@ -216,9 +216,11 @@ export CLASSPATH=$JAVA_HOME/lib/tools.jar
 %endif
 %endif
 %if %prepare_build != 0
+# FIXME: disabled mono for now (piece-wise build) - lots of cli breakage !
 ./configure $PARALLEL_BUILD \
 	--with-split \
 	--with-piece=bootstrap \
+	--disable-mono \
 	--libdir=%{_libdir} \
 	--prefix=%{_prefix} \
 	--mandir=%{_mandir} \
