@@ -131,7 +131,7 @@ BuildRequires:  gjdoc
 License:        Artistic License; BSD 3-Clause; GPL v2 or later; LaTeX Public License (LPPL); LGPL v2.1 or later; MOZILLA PUBLIC LICENSE (MPL/NPL); X11/MIT
 Group:          Productivity/Office/Suite
 Version:        3
-Release:        4
+Release:        5
 AutoReqProv:    on
 PreReq:         coreutils /usr/bin/update-mime-database
 PreReq:         %{?suseconfig_fonts_prereq:%suseconfig_fonts_prereq}
