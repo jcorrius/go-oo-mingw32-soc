@@ -302,6 +302,19 @@ currentAffiliations = {
     'zhiming': 'Intel'} # Jeremy Zheng         
 
 
+# include raw source code pruning random other cruft
+sourceExtension = {
+    '.c':1, '.cc':1, '.cpp':1, '.cs':1, '.csc':1, '.css':1, '.cxx':1,
+    '.diff':1, '.h':1, '.hpp':1, '.hxx':1, '.idl':1, '.inc':1, '.ini':1,
+    '.jam':1, '.java':1, '.lst':1, '.mk':1, '.patch':1, '.py':1,
+    '.scp':1, '.sh':1, '.txt':1, '.xcs':1, '.xcu':1, '.xsl':1, '.y':1}
+
+# for unknown reasons some (large) auto-generated files get checked in
+autogenFiles = [
+    'sw/writerfilter/source/ooxml/OOXMLresources.cxx,v'
+    'sw/writerfilter/source/ooxml/OOXMLresources.hxx,v'
+]
+
 def getAffiliation (name, date):
     affil = '(unknown)'
     if currentAffiliations.has_key(name):
@@ -372,12 +385,13 @@ class RCSFile(globals.Debuggable):
     reRevSeparator = '^\-{28}$'
 
 
-    def __init__ (self, lines, ext):
+    def __init__ (self, lines, ext, filepath):
         globals.Debuggable.__init__(self)
 
         self.lines = lines
         self.lineCount = len(self.lines)
         self.ext = ext
+        self.filepath = filepath;
         self.reset()
 
 
@@ -722,6 +736,9 @@ Also, disregard commits whose message contains RESYNC or INTEGRATION: CWS.
             if log.has_key('removed'):
                 removed = log['removed']
 
+            if (added > 5000 or removed > 5000):
+                sys.stdout.write ("huge commit: +%d -%d in %s\n" % (added, removed, self.filepath))
+
             if added or removed:
                 statObj.add(author, date, self.ext, added, removed)
 
@@ -912,6 +929,18 @@ path is relative, it is relative to the current directory."""
                 sys.stdout.write("Skipping a non-RCS file: %s\n"%filepath)
             return True
 
+        for autog in autogenFiles:
+            if filepath.endswith (autog):
+                if self.verbose:
+                    sys.stdout.write("Skipping auto-generated file: %s\n"%filepath)
+                return True
+
+        extn = self.__getExtension(filepath)
+        if not sourceExtension.has_key(extn):
+            if self.verbose:
+                sys.stdout.write("Skipping a non-source file: %s\n"%filepath)
+            return True
+
         cmd = "rlog " + filepath
         r, w, e = popen2.popen3(cmd)
         lines = r.readlines()
@@ -919,7 +948,7 @@ path is relative, it is relative to the current directory."""
         w.close()
         e.close()
 
-        obj = RCSFile(lines, self.__getExtension(filepath))
+        obj = RCSFile(lines, extn, filepath);
         obj.debug = self.debug
         obj.parse()
         if obj.isError():
