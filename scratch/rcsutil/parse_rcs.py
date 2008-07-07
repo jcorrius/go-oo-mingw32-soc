@@ -15,7 +15,9 @@ ignoredBranches = [
     'cws_dev300_changefileheader', 
     'cws_src680_hedaburemove01',
     'cws_src680_ooo19126',
-    'cws_src680_so3deadcorpses'
+    'cws_src680_so3deadcorpses',
+    'cws_src680_incguards01',
+    'cws_src680_pchfix02'
 ]
 
 # all commmits done by the following authors are ignored
