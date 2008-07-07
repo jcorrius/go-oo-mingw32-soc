@@ -14,7 +14,9 @@ ignoredBranches = [
     'SRX643_TF_BINFILTER',
     'cws_dev300_changefileheader', 
     'cws_src680_hedaburemove01',
-    'cws_src680_ooo19126']
+    'cws_src680_ooo19126',
+    'cws_src680_so3deadcorpses'
+]
 
 # all commmits done by the following authors are ignored
 # release engineers do eg. huge license changes directly
