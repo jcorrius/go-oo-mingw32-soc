@@ -29,640 +29,6 @@ diff -u -p -u -p -B -r1.25 -r1.24.64.2
  
  				case FileBase::E_FAULT: // Bad address
  				case FileBase::E_LOOP:	// Too many symbolic links encountered
-Index: ucb/source/ucp/gvfs/content.cxx
-===================================================================
-RCS file: /cvs/ucb/ucb/source/ucp/gvfs/content.cxx,v
-retrieving revision 1.12
-retrieving revision 1.10.64.2
-diff -u -p -u -p -B -r1.12 -r1.10.64.2
---- ucb/source/ucp/gvfs/content.cxx	22 Apr 2008 15:34:22 -0000	1.12
-+++ ucb/source/ucp/gvfs/content.cxx	2 Jun 2008 13:28:32 -0000	1.10.64.2
-@@ -39,28 +39,24 @@
- 
- #include "osl/doublecheckedlocking.h"
- 
--#ifndef _COM_SUN_STAR_BEANS_PROPERTYVALUES_HPP_
- #include <com/sun/star/beans/PropertyValue.hpp>
--#endif
- #include <com/sun/star/beans/PropertyAttribute.hpp>
- #include <com/sun/star/beans/PropertySetInfoChange.hpp>
- #include <com/sun/star/beans/PropertySetInfoChangeEvent.hpp>
- #include <com/sun/star/io/XActiveDataSink.hpp>
- #include <com/sun/star/io/XOutputStream.hpp>
-+#include <com/sun/star/io/XActiveDataStreamer.hpp>
- #include <com/sun/star/lang/IllegalAccessException.hpp>
- #include <com/sun/star/ucb/ContentInfoAttribute.hpp>
- #include <com/sun/star/ucb/InsertCommandArgument.hpp>
--#ifndef _COM_SUN_STAR_UCB_INTERACTIVEBADTRANSFRERURLEXCEPTION_HPP_
- #include <com/sun/star/ucb/InteractiveBadTransferURLException.hpp>
--#endif
- #include <com/sun/star/ucb/InteractiveAugmentedIOException.hpp>
- #include <com/sun/star/ucb/InteractiveNetworkConnectException.hpp>
--#ifndef _COM_SUN_STAR_UCB_INTERACTIVENETWORKGENBERALEXCEPTION_HPP_
- #include <com/sun/star/ucb/InteractiveNetworkGeneralException.hpp>
--#endif
- #include <com/sun/star/ucb/InteractiveNetworkReadException.hpp>
- #include <com/sun/star/ucb/InteractiveNetworkResolveNameException.hpp>
- #include <com/sun/star/ucb/InteractiveNetworkWriteException.hpp>
-+#include <com/sun/star/ucb/IOErrorCode.hpp>
- #include <com/sun/star/ucb/NameClash.hpp>
- #include <com/sun/star/ucb/NameClashException.hpp>
- #include <com/sun/star/ucb/OpenCommandArgument2.hpp>
-@@ -79,9 +75,7 @@
- #include <com/sun/star/ucb/NameClashException.hpp>
- #include <ucbhelper/contentidentifier.hxx>
- #include <ucbhelper/propertyvalueset.hxx>
--#ifndef _UCBHELPER_INTERACTIONREQUEST_HXX
- #include <ucbhelper/interactionrequest.hxx>
--#endif
- #include <ucbhelper/cancelcommandexecution.hxx>
- #include <ucbhelper/simpleauthenticationrequest.hxx>
- 
-@@ -133,7 +127,8 @@ Content::Content(
-   throw ( ucb::ContentCreationException )
- 	: ContentImplHelper( rxSMgr, pProvider, Identifier ),
- 	  m_pProvider( pProvider ),
--	  m_bTransient( sal_False )
-+	  m_bTransient( sal_False ),
-+	  m_bForceReadOnly( sal_False )
- {
- 	CLEAR_INFO (&m_info);
- #ifdef DEBUG
-@@ -149,7 +144,8 @@ Content::Content( 
- 	    throw ( ucb::ContentCreationException )
- 	: ContentImplHelper( rxSMgr, pProvider, Identifier ),
- 	  m_pProvider( pProvider ),
--	  m_bTransient( sal_True )
-+	  m_bTransient( sal_True ),
-+	  m_bForceReadOnly( sal_False )
- {
- 	CLEAR_INFO (&m_info);
- 
-@@ -579,8 +575,7 @@ uno::Reference< sdbc::XRow > Content::ge
- 	GnomeVFSResult result;
- 	uno::Sequence< beans::Property > allProperties;
- 
--	if( ( result = getInfo( xEnv ) ) != GNOME_VFS_OK )
--		cancelCommandExecution( result, xEnv, sal_False );
-+	result = getInfo( xEnv );
- 		
- 	const beans::Property* pProps;
- 
-@@ -596,15 +591,36 @@ uno::Reference< sdbc::XRow > Content::ge
- 	rtl::Reference< ::ucbhelper::PropertyValueSet > xRow
- 		= new ::ucbhelper::PropertyValueSet( m_xSMgr );
- 
--    	osl::Guard< osl::Mutex > aGuard( m_aMutex );
-+	osl::Guard< osl::Mutex > aGuard( m_aMutex );
- 	for( sal_Int32 n = 0; n < nProps; ++n ) {
- 		const beans::Property& rProp = pProps[ n ];
- 
--		if (rProp.Name.equalsAsciiL( RTL_CONSTASCII_STRINGPARAM( "Title" ) ) ) {
-+		if (rProp.Name.equalsAsciiL( RTL_CONSTASCII_STRINGPARAM( "SupportsActiveStreaming" ) ) ) {
-+			xRow->appendBoolean( rProp, sal_True );
-+		}
-+		else if (result != GNOME_VFS_OK && result != GNOME_VFS_ERROR_PROTOCOL_ERROR) {
-+			// 'SupportsActiveStreaming' is the only property that can be
-+			// obtained even if getInfo() failed
-+			// We ignore protocol errors - happens eg. for broken links over sftp:// :-(
-+			cancelCommandExecution( result, xEnv, sal_False );
-+		}
-+		else if (rProp.Name.equalsAsciiL( RTL_CONSTASCII_STRINGPARAM( "Title" ) ) ) {
- 			if (m_info.name && m_info.name[0] == '/')
- 				g_warning ("Odd NFS title on item '%s' == '%s'",
- 					   getURI(), m_info.name);
--			xRow->appendString( rProp, GnomeToOUString( m_info.name ) );
-+
-+			if (result != GNOME_VFS_ERROR_PROTOCOL_ERROR)
-+				xRow->appendString( rProp, GnomeToOUString( m_info.name ) );
-+			else {
-+				// m_info is not valid, we have to guess something close enough
-+				rtl::OUString aURI( getOUURI() );
-+
-+				sal_Int32 nLastSlash = aURI.lastIndexOf( '/' );
-+				if (nLastSlash >= 0)
-+					aURI = aURI.copy( nLastSlash + 1 );
-+
-+				xRow->appendString( rProp, aURI );
-+			}
- 		}
- 
- 		else if (rProp.Name.equalsAsciiL( RTL_CONSTASCII_STRINGPARAM( "ContentType" ) ) )
-@@ -633,7 +649,9 @@ uno::Reference< sdbc::XRow > Content::ge
- 		}
- 
- 		else if (rProp.Name.equalsAsciiL( RTL_CONSTASCII_STRINGPARAM( "IsReadOnly" ) ) ) {
--			if (m_info.valid_fields & GNOME_VFS_FILE_INFO_FIELDS_PERMISSIONS) {
-+			if ( m_bForceReadOnly )
-+				xRow->appendBoolean( rProp, sal_True );
-+			else if (m_info.valid_fields & GNOME_VFS_FILE_INFO_FIELDS_PERMISSIONS) {
- 				bool read_only = true;
- 
- 				if (m_info.uid == getuid () &&
-@@ -921,6 +939,8 @@ void Content::insert(
- {
-   	osl::ClearableGuard< osl::Mutex > aGuard( m_aMutex );
- 
-+	GnomeVFSOpenMode nOpenMode;
-+
- #ifdef DEBUG
- 	g_warning( "Insert '%s' (%d) (0x%x:%d)", getURI(), bReplaceExisting,
- 		   m_info.valid_fields, m_info.type );
-@@ -973,22 +993,27 @@ void Content::insert(
- 	result = GNOME_VFS_OK;
- 	if ( bReplaceExisting ) {
- 		Authentication aAuth( xEnv );
--		result = gnome_vfs_open( &handle, (const sal_Char *)aURI,
--					 GNOME_VFS_OPEN_WRITE );
-+		nOpenMode = (GnomeVFSOpenMode)(GNOME_VFS_OPEN_WRITE | GNOME_VFS_OPEN_LOCKED);
-+		result = gnome_vfs_open( &handle, (const sal_Char *)aURI, nOpenMode );
- 	}
- 
--	if ( result != GNOME_VFS_OK ) {
-+	if ( result == GNOME_VFS_ERROR_LOCKED )
-+		throwLocked( xEnv );
-+	else if ( result != GNOME_VFS_OK ) {
- 		int perm;
- 		Authentication aAuth( xEnv );
- 
- 		perm = ( ( GNOME_VFS_PERM_USER_WRITE | GNOME_VFS_PERM_USER_READ ) |
- 			 ( GNOME_VFS_PERM_GROUP_WRITE | GNOME_VFS_PERM_GROUP_READ ) );
- 
-+		nOpenMode = (GnomeVFSOpenMode)(GNOME_VFS_OPEN_WRITE | GNOME_VFS_OPEN_LOCKED);
- 		result = gnome_vfs_create
--			( &handle, (const sal_Char *)aURI, GNOME_VFS_OPEN_WRITE, TRUE, perm );
-+			( &handle, (const sal_Char *)aURI, nOpenMode, TRUE, perm );
- 	}
- 
--	if( result != GNOME_VFS_OK )
-+	if ( result == GNOME_VFS_ERROR_LOCKED )
-+		throwLocked( xEnv );
-+	else if ( result != GNOME_VFS_OK )
- 		cancelCommandExecution( result, xEnv, sal_True );
- 
- 	if ( !xInputStream.is() ) {
-@@ -998,7 +1023,7 @@ void Content::insert(
- 
- 	} else { // copy it over
- 		uno::Reference < io::XOutputStream > xOutput =
--			new gvfs::Stream( handle, &m_info );
-+			new gvfs::Stream( handle, &m_info, (const sal_Char *)aURI, nOpenMode );
- 
- 		copyData( xInputStream, xOutput );
- 	}
-@@ -1294,6 +1319,22 @@ void Content::cancelCommandExecution(
-     // Unreachable
- }
- 
-+void Content::throwLocked( const uno::Reference< ucb::XCommandEnvironment > & xEnv)
-+	throw( uno::Exception )
-+{
-+#ifdef DEBUG
-+	g_warning( "File locked, throwing IOErrorCode_LOCKING_VIOLATION" );
-+#endif
-+
-+	m_bForceReadOnly = sal_True;
-+
-+	ucbhelper::cancelCommandExecution( ucb::IOErrorCode_LOCKING_VIOLATION,
-+			uno::Sequence< uno::Any >( 0 ), // FIXME more info about the file?
-+			xEnv,
-+			rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "an error occured during file opening" ) ),
-+			this );
-+}
-+
- uno::Sequence< beans::Property > Content::getProperties(
-     const uno::Reference< ucb::XCommandEnvironment > & /*xEnv*/ )
- {
-@@ -1335,6 +1376,10 @@ uno::Sequence< beans::Property > Content
- 				 beans::PropertyAttribute::BOUND | beans::PropertyAttribute::READONLY ),
-                 beans::Property( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "IsHidden" ) ),
- 				 -1, getCppuBooleanType(),
-+				 beans::PropertyAttribute::BOUND | beans::PropertyAttribute::READONLY ),
-+
-+                beans::Property( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "SupportsActiveStreaming" ) ),
-+				 -1, getCppuBooleanType(),
- 				 beans::PropertyAttribute::BOUND | beans::PropertyAttribute::READONLY )
- 	};
- 
-@@ -1428,6 +1473,7 @@ Content::createTempStream( 
- 	GnomeVFSResult result;
- 	GnomeVFSHandle *handle = NULL;
- 	::rtl::OString aURI = getOURI();
-+	GnomeVFSOpenMode nOpenMode = GNOME_VFS_OPEN_READ;
- 
-     	osl::Guard< osl::Mutex > aGuard( m_aMutex );
- 	// Something badly wrong happened - can't seek => stream to a temporary file
-@@ -1439,60 +1485,78 @@ Content::createTempStream( 
- 	if ( !xTempOut.is() )
- 		cancelCommandExecution( GNOME_VFS_ERROR_IO, xEnv );
- 
--	result = gnome_vfs_open
--		( &handle, (const sal_Char *)aURI, GNOME_VFS_OPEN_READ );
-+	result = gnome_vfs_open( &handle, (const sal_Char *)aURI, nOpenMode );
- 	if (result != GNOME_VFS_OK)
- 		cancelCommandExecution( result, xEnv );
- 
--	uno::Reference < io::XInputStream > pStream = new ::gvfs::Stream( handle, &m_info );
-+	uno::Reference < io::XInputStream > pStream = new ::gvfs::Stream( handle, &m_info, (const sal_Char *)aURI, nOpenMode );
- 	copyData( pStream, xTempOut );
- 
- 	return uno::Reference < io::XInputStream > ( xTempOut, uno::UNO_QUERY );
- }
- 
--uno::Reference< io::XInputStream > 
--Content::createInputStream( 
--    const uno::Reference< ucb::XCommandEnvironment >& xEnv )
-+uno::Reference< io::XStream > 
-+Content::createStream( const uno::Reference< ucb::XCommandEnvironment >& xEnv,
-+                       bool bReadWrite )
- 	    throw( uno::Exception )
- {
- 	GnomeVFSHandle *handle = NULL;
- 	GnomeVFSResult  result;
--	uno::Reference<io::XInputStream > xIn;
-+	uno::Reference< io::XStream > xStream;
- 
- 	Authentication aAuth( xEnv );
--    	osl::Guard< osl::Mutex > aGuard( m_aMutex );
-+	osl::Guard< osl::Mutex > aGuard( m_aMutex );
- 
- 	getInfo( xEnv );
- 	::rtl::OString aURI = getOURI();
- 
--	if ( !(m_info.valid_fields & GNOME_VFS_FILE_INFO_FIELDS_SIZE) )
--		return createTempStream( xEnv );
-+	if ( !bReadWrite && !(m_info.valid_fields & GNOME_VFS_FILE_INFO_FIELDS_SIZE) )
-+		return xStream;
-+
-+	GnomeVFSOpenMode nOpenMode = (GnomeVFSOpenMode)(GNOME_VFS_OPEN_READ | GNOME_VFS_OPEN_RANDOM);
-+	if ( bReadWrite )
-+		nOpenMode = (GnomeVFSOpenMode)(nOpenMode | GNOME_VFS_OPEN_WRITE | GNOME_VFS_OPEN_LOCKED);
- 
--	result = gnome_vfs_open
--		( &handle, (const sal_Char *)aURI,
--		  (GnomeVFSOpenMode) (GNOME_VFS_OPEN_READ | GNOME_VFS_OPEN_RANDOM ) );
-+	result = gnome_vfs_open( &handle, (const sal_Char *)aURI, nOpenMode );
- 	
-+	if (bReadWrite && (result == GNOME_VFS_ERROR_NOT_FOUND))
-+	{
-+		int perm;
-+		Authentication aAuth( xEnv );
-+
-+		perm = ( ( GNOME_VFS_PERM_USER_WRITE | GNOME_VFS_PERM_USER_READ ) |
-+			 ( GNOME_VFS_PERM_GROUP_WRITE | GNOME_VFS_PERM_GROUP_READ ) );
-+
-+		result = gnome_vfs_create
-+			( &handle, (const sal_Char *)aURI, nOpenMode, TRUE, perm );
-+	}
-+
- 	if (result == GNOME_VFS_ERROR_INVALID_OPEN_MODE ||
--	    result == GNOME_VFS_ERROR_NOT_SUPPORTED)
--		return createTempStream( xEnv );
--	
--	if (result != GNOME_VFS_OK)
-+	    result == GNOME_VFS_ERROR_NOT_SUPPORTED ||
-+	    result == GNOME_VFS_ERROR_ACCESS_DENIED)
-+	{
-+		m_bForceReadOnly = sal_True;
-+		return xStream;
-+	}
-+	else if (result == GNOME_VFS_ERROR_LOCKED )
-+		throwLocked( xEnv );
-+	else if (result != GNOME_VFS_OK)
- 		cancelCommandExecution( result, xEnv );
- 
- 	// Try a seek just to make sure it's Random access: some lie.
- 	result = gnome_vfs_seek( handle, GNOME_VFS_SEEK_START, 0);
- 	if (result == GNOME_VFS_ERROR_NOT_SUPPORTED) {
- 		gnome_vfs_close( handle );
--		return createTempStream( xEnv );
-+		return xStream;
- 	}
- 
- 	if (result != GNOME_VFS_OK)
- 		cancelCommandExecution( result, xEnv );
- 
- 	if (handle != NULL)
--		xIn = new ::gvfs::Stream( handle, &m_info );
-+		xStream = new ::gvfs::Stream( handle, &m_info, (const sal_Char *)aURI, nOpenMode );
- 
--	return xIn;
-+	return xStream;
- }
- 
- sal_Bool
-@@ -1502,25 +1566,53 @@ Content::feedSink( uno::Reference< uno::
- 	if ( !aSink.is() )
- 		return sal_False;
- 
--	uno::Reference< io::XOutputStream > xOut
--		= uno::Reference< io::XOutputStream >(aSink, uno::UNO_QUERY );
--	uno::Reference< io::XActiveDataSink > xDataSink
--		= uno::Reference< io::XActiveDataSink >(aSink, uno::UNO_QUERY );
--	
--	if ( !xOut.is() && !xDataSink.is() )
--		return sal_False;
--
--	uno::Reference< io::XInputStream > xIn = createInputStream( xEnv );
--	if ( !xIn.is() )
--		return sal_False;
--	
-+	uno::Reference< io::XOutputStream > xOut( aSink, uno::UNO_QUERY );
- 	if ( xOut.is() )
-+	{
-+#ifdef DEBUG
-+		g_warning( "feedSink(), using XOutputStream" );
-+#endif
-+		uno::Reference< io::XInputStream > xIn( createStream( xEnv, false ), uno::UNO_QUERY );
-+		if ( !xIn.is() )
-+			xIn = createTempStream( xEnv );
-+		if ( !xIn.is() )
-+			return sal_False;
-+
- 		copyData( xIn, xOut );
-+		return sal_True;
-+	}
- 
-+	uno::Reference< io::XActiveDataSink > xDataSink( aSink, uno::UNO_QUERY );
- 	if ( xDataSink.is() )
-+	{
-+#ifdef DEBUG
-+		g_warning( "feedSink(), using XActiveDataSink" );
-+#endif
-+		uno::Reference< io::XInputStream > xIn( createStream( xEnv, false ), uno::UNO_QUERY );
-+		if ( !xIn.is() )
-+			xIn = createTempStream( xEnv );
-+		if ( !xIn.is() )
-+			return sal_False;
-+
- 		xDataSink->setInputStream( xIn );
-+		return sal_True;
-+	}
- 
--	return sal_True;
-+	uno::Reference< io::XActiveDataStreamer > xDataStreamer( aSink, uno::UNO_QUERY );
-+	if ( xDataStreamer.is() )
-+	{
-+#ifdef DEBUG
-+		g_warning( "feedSink(), using XActiveDataStreamer" );
-+#endif
-+		uno::Reference< io::XStream > xStream = createStream( xEnv, true );
-+		if ( !xStream.is() )
-+			return sal_False;
-+
-+		xDataStreamer->setStream( xStream );
-+		return sal_True;
-+	}
-+	
-+	return sal_False;
- }
- 
- extern "C" {
-Index: ucb/source/ucp/gvfs/content.hxx
-===================================================================
-RCS file: /cvs/ucb/ucb/source/ucp/gvfs/content.hxx,v
-retrieving revision 1.6
-retrieving revision 1.5.70.2
-diff -u -p -u -p -B -r1.6 -r1.5.70.2
---- ucb/source/ucp/gvfs/content.hxx	10 Apr 2008 15:05:55 -0000	1.6
-+++ ucb/source/ucp/gvfs/content.hxx	2 Jun 2008 13:28:35 -0000	1.5.70.2
-@@ -49,6 +49,7 @@ namespace com { namespace sun { namespac
- namespace com { namespace sun { namespace star { namespace io {
- 	class XInputStream;
- 	class XOutputStream;
-+	class XStream;
- } } } }
- 
- namespace com { namespace sun { namespace star { namespace sdbc {
-@@ -92,6 +93,7 @@ private:
- 	ContentProvider  *m_pProvider;  // No need for a ref, base class holds object
- 	sal_Bool          m_bTransient; // A non-existant (as yet) item
- 	GnomeVFSFileInfo  m_info;       // cached status information
-+	sal_Bool          m_bForceReadOnly; // behave as read-only
- 
- 	// Internal helpers
- 	void                       queryChildren   ( ContentRefList& rChildren );
-@@ -166,9 +168,10 @@ private:
- 					com::sun::star::ucb::XCommandEnvironment >& xEnv )
- 		throw( ::com::sun::star::uno::Exception );
- 	::com::sun::star::uno::Reference<
--		::com::sun::star::io::XInputStream > 
--		createInputStream(  const ::com::sun::star::uno::Reference<
--					com::sun::star::ucb::XCommandEnvironment >& xEnv )
-+		::com::sun::star::io::XStream > 
-+		createStream(  const ::com::sun::star::uno::Reference<
-+					com::sun::star::ucb::XCommandEnvironment >& xEnv,
-+					bool bReadWrite )
- 		throw( ::com::sun::star::uno::Exception );
-        	sal_Bool feedSink( ::com::sun::star::uno::Reference<
- 				::com::sun::star::uno::XInterface> aSink,
-@@ -184,6 +187,9 @@ private:
- 				    sal_Bool bWrite = sal_False )
- 		throw( ::com::sun::star::uno::Exception );
- 
-+	void throwLocked(const ::com::sun::star::uno::Reference< com::sun::star::ucb::XCommandEnvironment > & xEnv)
-+		throw( ::com::sun::star::uno::Exception );
-+
- 
- public:
- 	// Non-interface bits
-Index: ucb/source/ucp/gvfs/directory.cxx
-===================================================================
-RCS file: /cvs/ucb/ucb/source/ucp/gvfs/directory.cxx,v
-retrieving revision 1.7
-retrieving revision 1.6.70.2
-diff -u -p -u -p -B -r1.7 -r1.6.70.2
---- ucb/source/ucp/gvfs/directory.cxx	10 Apr 2008 15:06:14 -0000	1.7
-+++ ucb/source/ucp/gvfs/directory.cxx	2 Jun 2008 13:28:38 -0000	1.6.70.2
-@@ -361,24 +361,25 @@ sal_Bool DataSupplier::getData()
- 		}
- 
- 
--		GnomeVFSFileInfo fileInfo;
--        fileInfo.name = 0;
--		while ((result = gnome_vfs_directory_read_next (dirHandle, &fileInfo)) == GNOME_VFS_OK) {
--			if( fileInfo.name && fileInfo.name[0] == '.' &&
--			    ( fileInfo.name[1] == '\0' ||
--			      ( fileInfo.name[1] == '.' && fileInfo.name[2] == '\0' ) ) )
-+		GnomeVFSFileInfo *pFileInfo = gnome_vfs_file_info_new();
-+		while ((result = gnome_vfs_directory_read_next (dirHandle, pFileInfo)) == GNOME_VFS_OK) {
-+			if( !pFileInfo->name ||
-+				pFileInfo->name[0] == '\0' ||
-+				( pFileInfo->name[0] == '.' &&
-+					( pFileInfo->name[1] == '\0' ||
-+					( pFileInfo->name[1] == '.' && pFileInfo->name[2] == '\0' ) ) ) )
- 				continue;
- 
- 			switch ( m_pImpl->m_nOpenMode ) {
- 			case ucb::OpenMode::FOLDERS:
--				if ( !(fileInfo.valid_fields & GNOME_VFS_FILE_INFO_FIELDS_TYPE) ||
--				     fileInfo.type != GNOME_VFS_FILE_TYPE_DIRECTORY )
-+				if ( !(pFileInfo->valid_fields & GNOME_VFS_FILE_INFO_FIELDS_TYPE) ||
-+				     pFileInfo->type != GNOME_VFS_FILE_TYPE_DIRECTORY )
- 					continue;
- 				break;
- 				
- 			case ucb::OpenMode::DOCUMENTS:
--				if ( !(fileInfo.valid_fields & GNOME_VFS_FILE_INFO_FIELDS_TYPE) ||
--				     fileInfo.type != GNOME_VFS_FILE_TYPE_REGULAR )
-+				if ( !(pFileInfo->valid_fields & GNOME_VFS_FILE_INFO_FIELDS_TYPE) ||
-+				     pFileInfo->type != GNOME_VFS_FILE_TYPE_REGULAR )
- 					continue;
- 				break;
- 				
-@@ -387,8 +388,9 @@ sal_Bool DataSupplier::getData()
- 				break;
- 			}
- 			
--			m_pImpl->m_aResults.push_back( new ResultListEntry( &fileInfo ) );
-+			m_pImpl->m_aResults.push_back( new ResultListEntry( pFileInfo ) );
- 		}
-+		g_free( pFileInfo );
- #ifdef DEBUG
- 		g_warning ("Got %d directory entries", result);
- #endif
-Index: ucb/source/ucp/gvfs/makefile.mk
-===================================================================
-RCS file: /cvs/ucb/ucb/source/ucp/gvfs/makefile.mk,v
-retrieving revision 1.8
-retrieving revision 1.7.64.3
-diff -u -p -u -p -B -r1.8 -r1.7.64.3
---- ucb/source/ucp/gvfs/makefile.mk	10 Apr 2008 15:06:47 -0000	1.8
-+++ ucb/source/ucp/gvfs/makefile.mk	2 Jun 2008 13:28:41 -0000	1.7.64.3
-@@ -57,6 +57,14 @@ CFLAGS+=-gdwarf-2
- PKGCONFIG_LIBS!:=-Wl,--export-dynamic $(PKGCONFIG_LIBS:s/ -llinc//:s/ -lbonobo-activation//:s/ -lgconf-2//:s/ -lORBit-2//:s/ -lIDL-2//:s/ -lgmodule-2.0//:s/ -lgobject-2.0//:s/ -lgthread-2.0//)
- .ENDIF          # "$(OS)" == "LINUX"
- 
-+.IF "$(debug)" != "" || "$(DEBUG)" != ""
-+CFLAGS+=-DDEBUG
-+.ENDIF
-+
-+.IF "$(GNOMEVFS_HAS_LOCKING)" != "YES"
-+CFLAGS+=-DGNOME_VFS_OPEN_LOCKED=16
-+.ENDIF
-+
- # no "lib" prefix
- DLLPRE =
- 
-Index: ucb/source/ucp/gvfs/stream.cxx
-===================================================================
-RCS file: /cvs/ucb/ucb/source/ucp/gvfs/stream.cxx,v
-retrieving revision 1.7
-retrieving revision 1.6.70.2
-diff -u -p -u -p -B -r1.7 -r1.6.70.2
---- ucb/source/ucp/gvfs/stream.cxx	10 Apr 2008 15:07:37 -0000	1.7
-+++ ucb/source/ucp/gvfs/stream.cxx	2 Jun 2008 13:28:47 -0000	1.6.70.2
-@@ -44,10 +44,14 @@ using namespace com::sun::star::ucb;
- using namespace gvfs;
- 
- Stream::Stream( GnomeVFSHandle         *handle,
--		const GnomeVFSFileInfo *aInfo ) :
-+		const GnomeVFSFileInfo *aInfo,
-+		const gchar *uri,
-+		GnomeVFSOpenMode open_mode ) :
- 	m_eof (sal_False),
- 	m_bInputStreamCalled( sal_False ),
--	m_bOutputStreamCalled( sal_False )
-+	m_bOutputStreamCalled( sal_False ),
-+	m_pURI( g_strdup( uri ) ),
-+	m_nOpenMode( open_mode )
- {
- 	m_handle = handle;
- 	gnome_vfs_file_info_copy (&m_info, aInfo);
-@@ -59,6 +63,7 @@ Stream::~Stream( void )
- 		gnome_vfs_close (m_handle);
- 		m_handle = NULL;
- 	}
-+	g_free( m_pURI );
- }
- 
- Any Stream::queryInterface( const Type &type )
-@@ -113,7 +118,6 @@ sal_Int32 SAL_CALL Stream::readBytes(
- 		       RuntimeException )
- {
- 	GnomeVFSResult   result;
--	GnomeVFSFileSize nBytesRead = 0;
- 
- 	if( ! m_handle )
- 		throw IOException();
-@@ -129,10 +133,15 @@ sal_Int32 SAL_CALL Stream::readBytes(
- 		throw BufferSizeExceededException();
- 	}
- 
-+	GnomeVFSFileSize nTotalBytesRead = 0;
- 	do {
--		result = gnome_vfs_read( m_handle, aData.getArray(),
--					 nBytesToRead, &nBytesRead );
--	} while( result == GNOME_VFS_ERROR_INTERRUPTED );
-+		GnomeVFSFileSize nBytesRead = 0;
-+		do {
-+			result = gnome_vfs_read( m_handle, aData.getArray() + nTotalBytesRead,
-+					nBytesToRead - nTotalBytesRead, &nBytesRead );
-+		} while( result == GNOME_VFS_ERROR_INTERRUPTED );
-+		nTotalBytesRead += nBytesRead;
-+	} while( result == GNOME_VFS_OK && nTotalBytesRead < nBytesToRead );
- 
- 	if (result != GNOME_VFS_OK &&
- 	    result != GNOME_VFS_ERROR_EOF)
-@@ -141,9 +150,9 @@ sal_Int32 SAL_CALL Stream::readBytes(
- 	if (result == GNOME_VFS_ERROR_EOF)
- 		m_eof = sal_True;
- 
--	aData.realloc( sal::static_int_cast<sal_uInt32>(nBytesRead) );
-+	aData.realloc( sal::static_int_cast<sal_uInt32>(nTotalBytesRead) );
- 
--	return sal::static_int_cast<sal_Int32>(nBytesRead);
-+	return sal::static_int_cast<sal_Int32>(nTotalBytesRead);
- }
- 
- sal_Int32 SAL_CALL Stream::readSomeBytes(
-@@ -261,7 +270,17 @@ void SAL_CALL Stream::truncate( void )
- 	if( ! m_handle )
- 		throw IOException();
- 
--	throwOnError( gnome_vfs_truncate_handle( m_handle, 0 ) );
-+	GnomeVFSResult result = gnome_vfs_truncate_handle( m_handle, 0 );
-+
-+	if ( result == GNOME_VFS_ERROR_NOT_SUPPORTED )
-+	{
-+		result = gnome_vfs_close( m_handle );
-+		m_handle = NULL;
-+		if ( result == GNOME_VFS_OK )
-+			result = gnome_vfs_open( &m_handle, m_pURI, (GnomeVFSOpenMode)( m_nOpenMode | GNOME_VFS_OPEN_LOCKED ) );
-+	}
-+
-+	throwOnError( result );
- }
- 
- // -------------------------------------------------------------------
-Index: ucb/source/ucp/gvfs/stream.hxx
-===================================================================
-RCS file: /cvs/ucb/ucb/source/ucp/gvfs/stream.hxx,v
-retrieving revision 1.5
-retrieving revision 1.4.136.2
-diff -u -p -u -p -B -r1.5 -r1.4.136.2
---- ucb/source/ucp/gvfs/stream.hxx	10 Apr 2008 15:07:53 -0000	1.5
-+++ ucb/source/ucp/gvfs/stream.hxx	2 Jun 2008 13:28:50 -0000	1.4.136.2
-@@ -58,6 +58,8 @@ private:
- 	sal_Bool         m_eof;
- 	sal_Bool         m_bInputStreamCalled;
- 	sal_Bool         m_bOutputStreamCalled;
-+	gchar           *m_pURI;     // necessary to be able to simulate gnome_vfs_truncate if not supported
-+	GnomeVFSOpenMode m_nOpenMode;// necessary to be able to simulate gnome_vfs_truncate if not supported
- 
- 	void throwOnError( GnomeVFSResult result )
- 		throw( ::com::sun::star::io::NotConnectedException,
-@@ -72,7 +74,9 @@ private:
- 
- public:
- 	Stream ( GnomeVFSHandle         *handle,
--		 const GnomeVFSFileInfo *aInfo );
-+		 const GnomeVFSFileInfo *aInfo,
-+		 const gchar *uri,
-+		 GnomeVFSOpenMode open_mode );
- 	virtual ~Stream();
- 	
- 	// XInterface
 Index: ucb/source/ucp/webdav/DAVRequestEnvironment.hxx
 ===================================================================
 RCS file: /cvs/ucb/ucb/source/ucp/webdav/DAVRequestEnvironment.hxx,v
@@ -1074,16 +440,17 @@ Index: ucb/source/ucp/webdav/NeonInputStream.cxx
 ===================================================================
 RCS file: /cvs/ucb/ucb/source/ucp/webdav/NeonInputStream.cxx,v
 retrieving revision 1.11
-retrieving revision 1.10.116.3
-diff -u -p -u -p -B -r1.11 -r1.10.116.3
+retrieving revision 1.10.116.5
+diff -u -p -u -p -B -r1.11 -r1.10.116.5
 --- ucb/source/ucp/webdav/NeonInputStream.cxx	10 Apr 2008 15:40:23 -0000	1.11
-+++ ucb/source/ucp/webdav/NeonInputStream.cxx	2 Jun 2008 13:29:06 -0000	1.10.116.3
-@@ -31,22 +31,44 @@
++++ ucb/source/ucp/webdav/NeonInputStream.cxx	28 Jun 2008 01:20:47 -0000	1.10.116.5
+@@ -31,22 +31,149 @@
  // MARKER(update_precomp.py): autogen include statement, do not remove
  #include "precompiled_ucb.hxx"
  #include "NeonInputStream.hxx"
 +#include "DAVResourceAccess.hxx"
 +
++#include <osl/thread.hxx>
  #include <rtl/memory.h>
  
 +#include <com/sun/star/ucb/CommandFailedException.hpp>
@@ -1099,15 +466,116 @@ diff -u -p -u -p -B -r1.11 -r1.10.116.3
 +using namespace com::sun::star;
  using namespace webdav_ucp;
  
-+oslSignalAction NeonInputStream::UnlockOnSignal( void* pData, oslSignalInfo* )
++// Our signal - 246 is just a random number ;-)
++const sal_Int32 TICKER_THREAD_USER_SIGNAL = OSL_SIGNAL_USER_RESERVED + 246;
++
++// -------------------------------------------------------------------
++// A thread that 'ticks' - emits the user signal every second
++// -------------------------------------------------------------------
++class TickerThread : public osl::Thread
++{
++    bool m_bFinish;
++
++public:
++
++    TickerThread() : osl::Thread(), m_bFinish( false ) {}
++
++    void finish() { m_bFinish = true; }
++
++protected:
++
++    virtual void SAL_CALL run();
++};
++
++void TickerThread::run()
++{
++    // we have to go through the loop more often to be able to finish ~quickly
++    const int nNth = 25;
++
++    int nCount = nNth;
++    while ( !m_bFinish )
++    {
++        if ( nCount-- <= 0 )
++        {
++            osl_raiseSignal( TICKER_THREAD_USER_SIGNAL, NULL );
++            nCount = nNth;
++        }
++
++        TimeValue aTV;
++        aTV.Seconds = 0;
++        aTV.Nanosec = 1000000000/nNth;
++        wait( aTV );
++    }
++}
++
++// -------------------------------------------------------------------
++// A class that takes care of creating and destroying the ticker thread
++// -------------------------------------------------------------------
++class TickerThreadController
++{
++    osl::Mutex    m_aMutex;
++    int           m_nCount;
++    TickerThread *m_pTickerThread;
++
++public:
++
++    TickerThreadController() : m_nCount( 0 ), m_pTickerThread( NULL ) {}
++
++    void start();
++    void stop();
++};
++
++void TickerThreadController::start()
++{
++    osl::MutexGuard aGuard( m_aMutex );
++    
++    if ( ( m_nCount++ == 0 ) && !m_pTickerThread )
++    {
++        m_pTickerThread = new TickerThread();
++        m_pTickerThread->create();
++    }
++}
++        
++void TickerThreadController::stop()
++{
++    osl::MutexGuard aGuard( m_aMutex );
++
++    if ( ( --m_nCount == 0 ) && m_pTickerThread )
++    {
++        m_pTickerThread->finish();
++        m_pTickerThread->join();
++
++        delete m_pTickerThread;
++        m_pTickerThread = NULL;
++    }
++}
++
++// -------------------------------------------------------------------
++// Signal handler
++// -------------------------------------------------------------------
++oslSignalAction NeonInputStream::HandleLockingSignal( void* pData, oslSignalInfo* pSignalInfo )
 +{
 +    NeonInputStream *pStream = static_cast< NeonInputStream *>( pData );
 +
-+    if ( pStream )
++    if ( !pStream )
++        return osl_Signal_ActCallNextHdl;
++
++    if ( pSignalInfo  &&
++            pSignalInfo->Signal == osl_Signal_User &&
++            pSignalInfo->UserSignal == TICKER_THREAD_USER_SIGNAL )
++    {
++        pStream->RefreshLock();
++    }
++    else if ( !pSignalInfo || ( pSignalInfo->Signal != osl_Signal_User ) )
++    {
++        // terminating or something, let's unlock the stream
 +        pStream->Unlock();
++    }
 +
 +    return osl_Signal_ActCallNextHdl;
 +}
++
++static TickerThreadController sTickerThreadController;
  
  // -------------------------------------------------------------------
  // Constructor
@@ -1121,24 +589,29 @@ diff -u -p -u -p -B -r1.11 -r1.10.116.3
 +  m_nPos( 0 ),
 +  m_bDirty( sal_False ),
 +  m_pLock( NULL ),
++  m_nToExpire( -1 ),
 +  m_xMSF( m_rMSF ),
 +  m_xEnv( m_rEnv )
  {
-+    m_pSignalHandler = osl_addSignalHandler( NeonInputStream::UnlockOnSignal, this );
++    m_pSignalHandler = osl_addSignalHandler( NeonInputStream::HandleLockingSignal, this );
++
++    sTickerThreadController.start();
  }
  
  // -------------------------------------------------------------------
-@@ -54,6 +76,9 @@ NeonInputStream::NeonInputStream( void )
+@@ -54,6 +181,11 @@ NeonInputStream::NeonInputStream( void )
  // -------------------------------------------------------------------
  NeonInputStream::~NeonInputStream( void )
  {
++    sTickerThreadController.stop();
++
 +    Unlock();
 +
 +    osl_removeSignalHandler( m_pSignalHandler );
  }
  
  // -------------------------------------------------------------------
-@@ -62,24 +87,63 @@ NeonInputStream::~NeonInputStream( void 
+@@ -62,24 +194,68 @@ NeonInputStream::~NeonInputStream( void 
  // -------------------------------------------------------------------
  void NeonInputStream::AddToStream( const char * inBuf, sal_Int32 inLen )
  {
@@ -1158,12 +631,17 @@ diff -u -p -u -p -B -r1.11 -r1.10.116.3
 +void NeonInputStream::SetLock( const com::sun::star::ucb::Lock &rLock,
 +        const rtl::OUString &rURL )
 +{
++    osl::MutexGuard aGuard( m_aLock );
++
 +    m_aURL = rURL;
 +
 +    if ( !m_pLock )
 +        m_pLock = new ucb::Lock( rLock );
 +    else
 +        *m_pLock = rLock;
++
++    if ( m_pLock )
++        m_nToExpire = m_pLock->Timeout;
  }
  
  // -------------------------------------------------------------------
@@ -1210,7 +688,7 @@ diff -u -p -u -p -B -r1.11 -r1.10.116.3
  // readBytes
  // "Reads" the specified number of bytes from the stream
  // -------------------------------------------------------------------
-@@ -92,7 +156,7 @@ sal_Int32 SAL_CALL NeonInputStream::read
+@@ -92,7 +268,7 @@ sal_Int32 SAL_CALL NeonInputStream::read
  {
  	// Work out how much we're actually going to write
  	sal_Int32 theBytes2Read = nBytesToRead;
@@ -1219,7 +697,7 @@ diff -u -p -u -p -B -r1.11 -r1.10.116.3
  	if ( theBytes2Read > theBytesLeft )
  		theBytes2Read = theBytesLeft;
  
-@@ -101,10 +165,10 @@ sal_Int32 SAL_CALL NeonInputStream::read
+@@ -101,10 +277,10 @@ sal_Int32 SAL_CALL NeonInputStream::read
  
  	// Write the data
  	rtl_copyMemory(
@@ -1232,7 +710,7 @@ diff -u -p -u -p -B -r1.11 -r1.10.116.3
  
      return theBytes2Read;
  }
-@@ -133,9 +197,9 @@ void SAL_CALL NeonInputStream::skipBytes
+@@ -133,9 +309,9 @@ void SAL_CALL NeonInputStream::skipBytes
                 ::com::sun::star::io::IOException,
                 ::com::sun::star::uno::RuntimeException )
  {
@@ -1245,7 +723,7 @@ diff -u -p -u -p -B -r1.11 -r1.10.116.3
  }
  
  // -------------------------------------------------------------------
-@@ -147,7 +211,7 @@ sal_Int32 SAL_CALL NeonInputStream::avai
+@@ -147,7 +323,7 @@ sal_Int32 SAL_CALL NeonInputStream::avai
                 ::com::sun::star::io::IOException,
                 ::com::sun::star::uno::RuntimeException )
  {
@@ -1254,7 +732,7 @@ diff -u -p -u -p -B -r1.11 -r1.10.116.3
  }
  
  // -------------------------------------------------------------------
-@@ -168,12 +232,12 @@ void SAL_CALL NeonInputStream::seek( sal
+@@ -168,12 +344,12 @@ void SAL_CALL NeonInputStream::seek( sal
  			   ::com::sun::star::io::IOException,
  			   ::com::sun::star::uno::RuntimeException )
  {
@@ -1272,7 +750,7 @@ diff -u -p -u -p -B -r1.11 -r1.10.116.3
          throw ::com::sun::star::lang::IllegalArgumentException();
  }
  
-@@ -184,7 +248,7 @@ sal_Int64 SAL_CALL NeonInputStream::getP
+@@ -184,7 +360,7 @@ sal_Int64 SAL_CALL NeonInputStream::getP
  		throw( ::com::sun::star::io::IOException,
  			   ::com::sun::star::uno::RuntimeException )
  {
@@ -1281,7 +759,7 @@ diff -u -p -u -p -B -r1.11 -r1.10.116.3
  }
  
  // -------------------------------------------------------------------
-@@ -194,5 +258,131 @@ sal_Int64 SAL_CALL NeonInputStream::getL
+@@ -194,5 +370,164 @@ sal_Int64 SAL_CALL NeonInputStream::getL
  		throw( ::com::sun::star::io::IOException,
  			   ::com::sun::star::uno::RuntimeException )
  {
@@ -1392,10 +870,41 @@ diff -u -p -u -p -B -r1.11 -r1.10.116.3
 +}
 +
 +// -------------------------------------------------------------------
++// Lock the stream again
++// -------------------------------------------------------------------
++void NeonInputStream::RefreshLock( void )
++{
++    osl::MutexGuard aGuard( m_aLock );
++
++#if OSL_DEBUG_LEVEL > 0
++    fprintf( stderr, "WebDAV: RefreshLock() - will refresh in %d sec\n", m_nToExpire - 30 );
++#endif
++
++    if ( m_nToExpire > 0 )
++        --m_nToExpire;
++
++    // Refresh the lock if it expires in less than 30 sec
++    if ( m_pLock && m_nToExpire >= 0 && m_nToExpire < 30 )
++    {
++        // FIXME It's really hacky to create the new session
++        // But so far it seems I have no other chance...
++        rtl::Reference< DAVSessionFactory > rDAVFactory( new DAVSessionFactory() );
++        
++        DAVResourceAccess aResourceAccess( m_xMSF, rDAVFactory, m_aURL );
++
++        aResourceAccess.LOCK( *m_pLock, m_xEnv );
++
++        m_nToExpire = m_pLock->Timeout;
++    }
++}
++
++// -------------------------------------------------------------------
 +// Unlock the stream & destroy the lock
 +// -------------------------------------------------------------------
 +void NeonInputStream::Unlock( void )
 +{
++    osl::MutexGuard aGuard( m_aLock );
++
 +#if OSL_DEBUG_LEVEL > 0
 +    fprintf( stderr, "WebDAV: unlock()\n" );
 +#endif
@@ -1412,20 +921,23 @@ diff -u -p -u -p -B -r1.11 -r1.10.116.3
 +
 +        delete m_pLock;
 +        m_pLock = NULL;
++
++        m_nToExpire = -1;
 +    }
  }
 Index: ucb/source/ucp/webdav/NeonInputStream.hxx
 ===================================================================
 RCS file: /cvs/ucb/ucb/source/ucp/webdav/NeonInputStream.hxx,v
 retrieving revision 1.8
-retrieving revision 1.7.136.3
-diff -u -p -u -p -B -r1.8 -r1.7.136.3
+retrieving revision 1.7.136.4
+diff -u -p -u -p -B -r1.8 -r1.7.136.4
 --- ucb/source/ucp/webdav/NeonInputStream.hxx	10 Apr 2008 15:40:39 -0000	1.8
-+++ ucb/source/ucp/webdav/NeonInputStream.hxx	2 Jun 2008 13:29:10 -0000	1.7.136.3
-@@ -31,11 +31,22 @@
++++ ucb/source/ucp/webdav/NeonInputStream.hxx	27 Jun 2008 12:59:58 -0000	1.7.136.4
+@@ -31,11 +31,23 @@
  #define _NEONINPUTSTREAM_HXX_
  
  #include <sal/types.h>
++#include <osl/mutex.hxx>
 +#include <osl/signal.h>
  #include <rtl/ustring.hxx>
  #include <cppuhelper/weak.hxx>
@@ -1445,7 +957,7 @@ diff -u -p -u -p -B -r1.8 -r1.7.136.3
  
  namespace webdav_ucp
  {
-@@ -45,21 +56,39 @@ namespace webdav_ucp
+@@ -45,21 +57,42 @@ namespace webdav_ucp
  // A simple XInputStream implementation provided specifically for use
  // by the DAVSession::GET method.
  // -------------------------------------------------------------------
@@ -1473,6 +985,7 @@ diff -u -p -u -p -B -r1.8 -r1.7.136.3
 +    sal_Bool                   m_bDirty;
 +
 +    com::sun::star::ucb::Lock *m_pLock;
++    int                        m_nToExpire;
 +    rtl::OUString              m_aURL;
 +
 +    oslSignalHandler           m_pSignalHandler;
@@ -1482,6 +995,8 @@ diff -u -p -u -p -B -r1.8 -r1.7.136.3
  
 -		// Add some data to the end of the stream
 -		void AddToStream( const char * inBuf, sal_Int32 inLen );
++    osl::Mutex                 m_aLock;
++
 +public:
 +             NeonInputStream( const com::sun::star::uno::Reference< com::sun::star::lang::XMultiServiceFactory > &m_rMSF,
 +                              const com::sun::star::uno::Reference< com::sun::star::ucb::XCommandEnvironment > &m_rEnv );
@@ -1496,7 +1011,7 @@ diff -u -p -u -p -B -r1.8 -r1.7.136.3
  
  	// XInterface
  	virtual com::sun::star::uno::Any SAL_CALL queryInterface(
-@@ -74,6 +103,12 @@ class NeonInputStream : public ::com::su
+@@ -74,6 +107,12 @@ class NeonInputStream : public ::com::su
  							throw()
  								{ OWeakObject::release(); }
  
@@ -1509,7 +1024,7 @@ diff -u -p -u -p -B -r1.8 -r1.7.136.3
  
  	// XInputStream
  	virtual sal_Int32 SAL_CALL readBytes(
-@@ -121,6 +156,38 @@ class NeonInputStream : public ::com::su
+@@ -121,6 +160,42 @@ class NeonInputStream : public ::com::su
  	virtual sal_Int64 SAL_CALL getLength()
  		throw( ::com::sun::star::io::IOException,
  			   ::com::sun::star::uno::RuntimeException );
@@ -1540,23 +1055,48 @@ diff -u -p -u -p -B -r1.8 -r1.7.136.3
 +    
 +protected:
 +
++    // Refresh the lock on the stream
++    void RefreshLock( void );
++
 +    // Unlock the stream & destroy the lock
 +    void Unlock( void );
 +
-+    // Unlock the stream when OOo crashes/is terminated/...
-+    static oslSignalAction UnlockOnSignal( void* pData, oslSignalInfo* pInfo );
++    // Refresh the lock if necessary, or unlock the stream when
++    // OOo crashes/is terminated/...
++    static oslSignalAction HandleLockingSignal( void* pData, oslSignalInfo* pInfo );
  };
  
  } // namespace webdav_ucp
 Index: ucb/source/ucp/webdav/NeonSession.cxx
 ===================================================================
 RCS file: /cvs/ucb/ucb/source/ucp/webdav/NeonSession.cxx,v
-retrieving revision 1.54
-retrieving revision 1.53.12.5
-diff -u -p -u -p -B -r1.54 -r1.53.12.5
---- ucb/source/ucp/webdav/NeonSession.cxx	10 Apr 2008 15:41:36 -0000	1.54
-+++ ucb/source/ucp/webdav/NeonSession.cxx	4 Jun 2008 13:09:51 -0000	1.53.12.5
-@@ -48,9 +48,7 @@
+retrieving revision 1.55
+retrieving revision 1.53.12.8
+diff -u -p -u -p -B -r1.55 -r1.53.12.8
+--- ucb/source/ucp/webdav/NeonSession.cxx	4 Jun 2008 09:44:08 -0000	1.55
++++ ucb/source/ucp/webdav/NeonSession.cxx	30 Jun 2008 09:01:24 -0000	1.53.12.8
+@@ -34,11 +34,13 @@
+ #include <hash_map>
+ #include <string.h>
+ #include <rtl/string.h>
++
++#include "NeonTypes.hxx"
+ #include <ne_socket.h>
+ #include <ne_auth.h>
+ #include <ne_redirect.h>
+-#include <ne_locks.h>
+ #include <ne_ssl.h>
++
+ #include "libxml/parser.h"
+ #include <rtl/ustrbuf.hxx>
+ #include "DAVAuthListener.hxx"
+@@ -42,15 +44,12 @@
+ #include "libxml/parser.h"
+ #include <rtl/ustrbuf.hxx>
+ #include "DAVAuthListener.hxx"
+-#include "NeonTypes.hxx"
+ #include "NeonSession.hxx"
+ #include "NeonInputStream.hxx"
  #include "NeonPropFindRequest.hxx"
  #include "NeonHeadRequest.hxx"
  #include "NeonUri.hxx"
@@ -1566,7 +1106,7 @@ diff -u -p -u -p -B -r1.54 -r1.53.12.5
  
  #include <com/sun/star/xml/crypto/XSEInitializer.hpp>
  #include "UCBDeadPropertyValue.hxx"
-@@ -61,10 +59,8 @@
+@@ -61,10 +60,8 @@
  #include <com/sun/star/security/CertificateContainer.hpp>
  #include <com/sun/star/security/XCertificateContainer.hpp>
  
@@ -1578,7 +1118,7 @@ diff -u -p -u -p -B -r1.54 -r1.53.12.5
  
  #include <cppuhelper/bootstrap.hxx> 
  
-@@ -153,6 +149,12 @@ static sal_uInt16 makeStatusCode( const 
+@@ -153,6 +150,12 @@ static sal_uInt16 makeStatusCode( const 
      return sal_uInt16( rStatusText.copy( 0, nPos ).toInt32() );
  }
  
@@ -1591,7 +1131,7 @@ diff -u -p -u -p -B -r1.54 -r1.53.12.5
  // -------------------------------------------------------------------
  struct NeonRequestContext
  {
-@@ -196,12 +198,13 @@ struct NeonRequestContext
+@@ -196,12 +199,13 @@ struct NeonRequestContext
  // -------------------------------------------------------------------
  
  #if NEON_VERSION >= 0x0250
@@ -1609,7 +1149,7 @@ diff -u -p -u -p -B -r1.54 -r1.53.12.5
  {
      // neon calls this function with (inLen == 0)...
      if ( inLen > 0 )
-@@ -226,12 +229,13 @@ extern "C" void NeonSession_ResponseBloc
+@@ -226,12 +230,13 @@ extern "C" void NeonSession_ResponseBloc
  // -------------------------------------------------------------------
  
  #if NEON_VERSION >= 0x0250
@@ -1627,7 +1167,7 @@ diff -u -p -u -p -B -r1.54 -r1.53.12.5
  {
      // neon calls this function with (inLen == 0)...
      if ( inLen > 0 )
-@@ -297,11 +301,10 @@ extern "C" int NeonSession_NeonAuth( voi
+@@ -297,11 +302,10 @@ extern "C" int NeonSession_NeonAuth( voi
  
          try
          {
@@ -1641,7 +1181,7 @@ diff -u -p -u -p -B -r1.54 -r1.53.12.5
                  if ( nPos == -1 )
                  {
                      theUserName = aUserInfo;
-@@ -561,6 +564,8 @@ extern "C" void NeonSession_PreSendReque
+@@ -561,6 +565,8 @@ extern "C" void NeonSession_PreSendReque
      }
  }
  
@@ -1650,7 +1190,7 @@ diff -u -p -u -p -B -r1.54 -r1.53.12.5
  // -------------------------------------------------------------------
  // Constructor
  // -------------------------------------------------------------------
-@@ -578,6 +583,7 @@ NeonSession::NeonSession(
+@@ -578,6 +584,7 @@ NeonSession::NeonSession(
      m_aScheme    = theUri.GetScheme();
      m_aHostName  = theUri.GetHost();
      m_nPort      = theUri.GetPort();
@@ -1658,7 +1198,7 @@ diff -u -p -u -p -B -r1.54 -r1.53.12.5
  
  //   Init();
  }
-@@ -591,14 +597,6 @@ NeonSession::~NeonSession( )
+@@ -591,14 +598,6 @@ NeonSession::~NeonSession( )
      {
          ne_session_destroy( m_pHttpSession );
          m_pHttpSession = 0;
@@ -1673,7 +1213,16 @@ diff -u -p -u -p -B -r1.54 -r1.53.12.5
      }
  
      delete static_cast<RequestDataMap*>(m_pRequestData);
-@@ -740,14 +738,15 @@ void NeonSession::Init()
+@@ -614,7 +613,7 @@ void NeonSession::Init()
+ 
+     if ( m_pHttpSession == 0 )
+     {
+-        // Ensure that Neon sockets are initialize
++        // Ensure that Neon sockets are initialized
+ 
+ 		// --> tkr #151111# crashed if copy and pasted pictures from the internet
+ 		// ne_sock_init() was executed by two threads at the same time.
+@@ -743,14 +742,15 @@ void NeonSession::Init()
                                m_nProxyPort );
          }
  
@@ -1695,7 +1244,7 @@ diff -u -p -u -p -B -r1.54 -r1.53.12.5
  
          // Register for redirects.
          ne_redirect_register( m_pHttpSession );
-@@ -1040,7 +1039,7 @@ NeonSession::GET( const rtl::OUString & 
+@@ -1043,7 +1043,7 @@ NeonSession::GET( const rtl::OUString & 
  
      m_aEnv = rEnv;
  
@@ -1704,7 +1253,7 @@ diff -u -p -u -p -B -r1.54 -r1.53.12.5
      NeonRequestContext aCtx( xInputStream );
      int theRetVal = GET( m_pHttpSession,
                           rtl::OUStringToOString(
-@@ -1079,11 +1078,14 @@ void NeonSession::GET( const rtl::OUStri
+@@ -1082,11 +1082,14 @@ void NeonSession::GET( const rtl::OUStri
  // -------------------------------------------------------------------
  // GET
  // -------------------------------------------------------------------
@@ -1721,7 +1270,7 @@ diff -u -p -u -p -B -r1.54 -r1.53.12.5
      throw ( DAVException )
  {
      osl::Guard< osl::Mutex > theGuard( m_aMutex );
-@@ -1095,16 +1097,27 @@ NeonSession::GET( const rtl::OUString & 
+@@ -1098,16 +1101,27 @@ NeonSession::GET( const rtl::OUString & 
      ioResource.uri = inPath;
      ioResource.properties.clear();
  
@@ -1753,7 +1302,7 @@ diff -u -p -u -p -B -r1.54 -r1.53.12.5
  }
  
  // -------------------------------------------------------------------
-@@ -1144,22 +1157,38 @@ void NeonSession::PUT( const rtl::OUStri
+@@ -1147,22 +1161,38 @@ void NeonSession::PUT( const rtl::OUStri
                         const DAVRequestEnvironment & rEnv )
      throw ( DAVException )
  {
@@ -1799,7 +1348,7 @@ diff -u -p -u -p -B -r1.54 -r1.53.12.5
  
      HandleError( theRetVal );
  }
-@@ -1185,7 +1214,7 @@ NeonSession::POST( const rtl::OUString &
+@@ -1188,7 +1218,7 @@ NeonSession::POST( const rtl::OUString &
  
      m_aEnv = rEnv;
  
@@ -1808,7 +1357,7 @@ diff -u -p -u -p -B -r1.54 -r1.53.12.5
      NeonRequestContext aCtx( xInputStream );
      int theRetVal = POST( m_pHttpSession,
                            rtl::OUStringToOString(
-@@ -1335,9 +1364,7 @@ void NeonSession::DESTROY( const rtl::OU
+@@ -1338,9 +1368,7 @@ void NeonSession::DESTROY( const rtl::OU
  // -------------------------------------------------------------------
  // LOCK
  // -------------------------------------------------------------------
@@ -1819,7 +1368,7 @@ diff -u -p -u -p -B -r1.54 -r1.53.12.5
                          const DAVRequestEnvironment & rEnv )
  	throw ( DAVException )
  {
-@@ -1347,16 +1374,13 @@ void NeonSession::LOCK( const Lock & inL
+@@ -1350,16 +1378,13 @@ void NeonSession::LOCK( const Lock & inL
  
      m_aEnv = rEnv;
  
@@ -1838,7 +1387,7 @@ diff -u -p -u -p -B -r1.54 -r1.53.12.5
                            const DAVRequestEnvironment & rEnv )
  	throw ( DAVException )
  {
-@@ -1366,9 +1390,8 @@ void NeonSession::UNLOCK( const Lock & i
+@@ -1369,9 +1394,8 @@ void NeonSession::UNLOCK( const Lock & i
  
      m_aEnv = rEnv;
  
@@ -1849,7 +1398,7 @@ diff -u -p -u -p -B -r1.54 -r1.53.12.5
  
  // -------------------------------------------------------------------
  const ucbhelper::InternetProxyServer & NeonSession::getProxySettings() const
-@@ -1407,7 +1430,10 @@ void NeonSession::HandleError( int nErro
+@@ -1410,7 +1434,10 @@ void NeonSession::HandleError( int nErro
          case NE_ERROR:        // Generic error
          {
              rtl::OUString aText = rtl::OUString::createFromAscii(
@@ -1861,7 +1410,7 @@ diff -u -p -u -p -B -r1.54 -r1.53.12.5
              throw DAVException( DAVException::DAV_HTTP_ERROR,
                                  aText,
                                  makeStatusCode( aText ) );
-@@ -1464,77 +1490,114 @@ void NeonSession::HandleError( int nErro
+@@ -1467,77 +1494,125 @@ void NeonSession::HandleError( int nErro
      }
  }
  
@@ -1925,7 +1474,10 @@ diff -u -p -u -p -B -r1.54 -r1.53.12.5
 -		}
 +    // Create the neon lock
 +    NeonLock * theLock = ne_lockstore_findbyuri( s_aNeonLockStore, &aUri );
-+    if ( !theLock )
++    bool bAlreadyExists = false;
++    if ( theLock )
++        bAlreadyExists = true;
++    else
 +    {
 +        theLock = ne_lock_create();
  
@@ -1979,28 +1531,34 @@ diff -u -p -u -p -B -r1.54 -r1.53.12.5
 +        theLock->owner = strdup( rtl::OUStringToOString( aValue, RTL_TEXTENCODING_UTF8 ).getStr() );
 +
 +        // Set the lock timeout
-+        // Note: Neon ignores the timeout
-+        //theLock->timeout = rLock.timeout;
-+        theLock->timeout = -1;
++        // We re-new the lock while the stream is open
++        theLock->timeout = rLock.Timeout;
 +    }
 +
 +    if ( bLockit )
 +    {
-+        int nRet = ne_lock( m_pHttpSession, theLock );
-+
-+        if ( nRet == NE_OK )
++        int nRet;
++        if ( !bAlreadyExists )
 +        {
-+            ne_lockstore_add( s_aNeonLockStore, theLock );
++            nRet = ne_lock( m_pHttpSession, theLock );
 +
-+            uno::Sequence< rtl::OUString > aTokens( 1 );
-+            aTokens[0] = rtl::OUString::createFromAscii( theLock->token );
-+            rLock.LockTokens = aTokens;
++            if ( nRet == NE_OK )
++            {
++                ne_lockstore_add( s_aNeonLockStore, theLock );
++
++                uno::Sequence< rtl::OUString > aTokens( 1 );
++                aTokens[0] = rtl::OUString::createFromAscii( theLock->token );
++                rLock.LockTokens = aTokens;
 +
 +#if OSL_DEBUG_LEVEL > 0
-+            fprintf( stderr, "WebDAV: locked the URL, the token is: %s\n", theLock->token );
++                fprintf( stderr, "WebDAV: locked the URL, the token is: %s\n", theLock->token );
 +#endif
++            }
 +        }
-+        else if ( ( nRet == NE_ERROR ) && ( getStatusCode( m_pHttpSession ) == SC_LOCKED ) )
++        else
++            nRet = ne_lock_refresh( m_pHttpSession, theLock );
++
++        if ( ( nRet == NE_ERROR ) && ( getStatusCode( m_pHttpSession ) == SC_LOCKED ) )
 +        {
 +            ucbhelper::cancelCommandExecution( ucb::IOErrorCode_LOCKING_VIOLATION,
 +                    uno::Sequence< uno::Any >( 0 ), // FIXME more info about the file?
@@ -2009,6 +1567,8 @@ diff -u -p -u -p -B -r1.54 -r1.53.12.5
 +                    uno::Reference< ucb::XCommandProcessor >() );
 +        }
 +#if OSL_DEBUG_LEVEL > 0
++        else if ( nRet == NE_OK )
++            fprintf( stderr, "WebDAV: locked/refreshed lock OK\n" );
 +        else
 +            fprintf( stderr, "WebDAV: failed to lock the file, status code is: %d\n", getStatusCode( m_pHttpSession ) );
 +#endif
@@ -2038,12 +1598,12 @@ diff -u -p -u -p -B -r1.54 -r1.53.12.5
 Index: ucb/source/ucp/webdav/NeonSession.hxx
 ===================================================================
 RCS file: /cvs/ucb/ucb/source/ucp/webdav/NeonSession.hxx,v
-retrieving revision 1.30
-retrieving revision 1.29.40.3
-diff -u -p -u -p -B -r1.30 -r1.29.40.3
---- ucb/source/ucp/webdav/NeonSession.hxx	10 Apr 2008 15:41:52 -0000	1.30
-+++ ucb/source/ucp/webdav/NeonSession.hxx	2 Jun 2008 13:29:17 -0000	1.29.40.3
-@@ -56,6 +56,7 @@ class NeonSession : public DAVSession
+retrieving revision 1.31
+retrieving revision 1.29.40.4
+diff -u -p -u -p -B -r1.31 -r1.29.40.4
+--- ucb/source/ucp/webdav/NeonSession.hxx	4 Jun 2008 09:44:25 -0000	1.31
++++ ucb/source/ucp/webdav/NeonSession.hxx	30 Jun 2008 09:01:27 -0000	1.29.40.4
+@@ -57,6 +57,7 @@ class NeonSession : public DAVSession
          rtl::OUString     m_aScheme;
          rtl::OUString     m_aHostName;
          rtl::OUString     m_aProxyName;
@@ -2051,7 +1611,7 @@ diff -u -p -u -p -B -r1.30 -r1.29.40.3
          sal_Int32         m_nPort;
          sal_Int32         m_nProxyPort;
          HttpSession *     m_pHttpSession;
-@@ -69,8 +70,7 @@ class NeonSession : public DAVSession
+@@ -70,8 +71,7 @@ class NeonSession : public DAVSession
          // moment.
          DAVRequestEnvironment m_aEnv;
  
@@ -2061,7 +1621,7 @@ diff -u -p -u -p -B -r1.30 -r1.29.40.3
  
          static bool       m_bGlobalsInited;
  
-@@ -91,6 +91,8 @@ class NeonSession : public DAVSession
+@@ -92,6 +92,8 @@ class NeonSession : public DAVSession
          const DAVRequestEnvironment & getRequestEnvironment() const
          { return m_aEnv; }
  
@@ -2070,7 +1630,7 @@ diff -u -p -u -p -B -r1.30 -r1.29.40.3
          virtual void
          OPTIONS( const ::rtl::OUString &  inPath,
                   DAVCapabilities & outCapabilities,
-@@ -141,11 +143,14 @@ class NeonSession : public DAVSession
+@@ -142,11 +144,14 @@ class NeonSession : public DAVSession
  			throw ( DAVException );
  
          virtual com::sun::star::uno::Reference<
@@ -2087,7 +1647,7 @@ diff -u -p -u -p -B -r1.30 -r1.29.40.3
              throw ( DAVException );
  
          virtual void
-@@ -164,6 +169,13 @@ class NeonSession : public DAVSession
+@@ -165,6 +170,13 @@ class NeonSession : public DAVSession
                  const DAVRequestEnvironment & rEnv )
  			throw ( DAVException );
  
@@ -2101,7 +1661,7 @@ diff -u -p -u -p -B -r1.30 -r1.29.40.3
          virtual com::sun::star::uno::Reference<
              com::sun::star::io::XInputStream >
          POST( const rtl::OUString & inPath,
-@@ -208,16 +220,13 @@ class NeonSession : public DAVSession
+@@ -209,16 +221,13 @@ class NeonSession : public DAVSession
                                const DAVRequestEnvironment & rEnv )
  			throw ( DAVException );
  
@@ -2122,7 +1682,7 @@ diff -u -p -u -p -B -r1.30 -r1.29.40.3
  
          // helpers
          const rtl::OUString & getHostName() const { return m_aHostName; }
-@@ -242,9 +251,8 @@ class NeonSession : public DAVSession
+@@ -243,9 +252,8 @@ class NeonSession : public DAVSession
  
          const ucbhelper::InternetProxyServer & getProxySettings() const;
  
@@ -2138,19 +1698,36 @@ Index: ucb/source/ucp/webdav/NeonTypes.hxx
 ===================================================================
 RCS file: /cvs/ucb/ucb/source/ucp/webdav/NeonTypes.hxx,v
 retrieving revision 1.13
-retrieving revision 1.12.150.2
-diff -u -p -u -p -B -r1.13 -r1.12.150.2
+retrieving revision 1.12.150.3
+diff -u -p -u -p -B -r1.13 -r1.12.150.3
 --- ucb/source/ucp/webdav/NeonTypes.hxx	10 Apr 2008 15:42:08 -0000	1.13
-+++ ucb/source/ucp/webdav/NeonTypes.hxx	2 Jun 2008 13:29:20 -0000	1.12.150.2
-@@ -35,6 +35,7 @@
- #include <ne_utils.h>
++++ ucb/source/ucp/webdav/NeonTypes.hxx	17 Jun 2008 12:58:27 -0000	1.12.150.3
+@@ -36,6 +36,24 @@
  #include <ne_basic.h>
  #include <ne_props.h>
-+#include <ne_locks.h>
  
++// ne_locks.h throws this warning during compilation:
++// /usr/include/neon/ne_locks.h:125: warning: 'int ne_lock(ne_session*, ne_lock*)' hides constructor for 'struct ne_lock'
++// Let's disable the warnings for that file
++#if defined __GNUC__
++#pragma GCC system_header
++#elif defined __SUNPRO_CC
++#pragma disable_warn
++#elif defined _MSC_VER
++#pragma warning(push, 1)
++#endif
++#include <ne_locks.h>
++#if defined __SUNPRO_CC
++#pragma enable_warn
++#elif defined _MSC_VER
++#pragma warning(pop)
++#endif
++// end of ne_locks.h inclusion
++
  typedef ne_session                  HttpSession;
  typedef ne_status                   HttpStatus;
-@@ -43,4 +44,7 @@ typedef ne_server_capabilities      Http
+ typedef ne_server_capabilities      HttpServerCapabilities;
+@@ -43,4 +61,7 @@ typedef ne_server_capabilities      Http
  typedef ne_propname                 NeonPropName;
  typedef ne_prop_result_set          NeonPropFindResultSet;
  
@@ -2161,11 +1738,11 @@ diff -u -p -u -p -B -r1.13 -r1.12.150.2
 Index: ucb/source/ucp/webdav/webdavcontent.cxx
 ===================================================================
 RCS file: /cvs/ucb/ucb/source/ucp/webdav/webdavcontent.cxx,v
-retrieving revision 1.62
-retrieving revision 1.59.16.5
-diff -u -p -u -p -B -r1.62 -r1.59.16.5
---- ucb/source/ucp/webdav/webdavcontent.cxx	22 Apr 2008 15:35:53 -0000	1.62
-+++ ucb/source/ucp/webdav/webdavcontent.cxx	2 Jun 2008 13:29:24 -0000	1.59.16.5
+retrieving revision 1.63
+retrieving revision 1.59.16.6
+diff -u -p -u -p -B -r1.63 -r1.59.16.6
+--- ucb/source/ucp/webdav/webdavcontent.cxx	4 Jun 2008 09:44:45 -0000	1.63
++++ ucb/source/ucp/webdav/webdavcontent.cxx	27 Jun 2008 12:59:58 -0000	1.59.16.6
 @@ -48,20 +48,17 @@
  #include <com/sun/star/beans/PropertySetInfoChangeEvent.hpp>
  #include <com/sun/star/beans/PropertyValue.hpp>
@@ -2408,7 +1985,7 @@ diff -u -p -u -p -B -r1.62 -r1.59.16.5
              }
              catch ( DAVException const & e )
              {
-@@ -2106,11 +2180,19 @@ uno::Any Content::open(
+@@ -2106,11 +2180,20 @@ uno::Any Content::open(
          }
          else
          {
@@ -2428,11 +2005,12 @@ diff -u -p -u -p -B -r1.62 -r1.59.16.5
 +                ucb::Lock aLock;
 +                aLock.Depth = ucb::LockDepth_ZERO;
 +                aLock.Scope = ucb::LockScope_EXCLUSIVE;
++                aLock.Timeout = 3*60; // 3 minutes
 +
                  // PULL: wait for client read
                  try
                  {
-@@ -2128,43 +2210,66 @@ uno::Any Content::open(
+@@ -2128,43 +2211,66 @@ uno::Any Content::open(
                      // fill inputsream sync; return if all data present
                      DAVResource aResource;
                      std::vector< rtl::OUString > aHeaders;
@@ -2512,7 +2090,7 @@ diff -u -p -u -p -B -r1.62 -r1.59.16.5
                  // Unreachable
              }
          }
-@@ -2182,6 +2287,9 @@ void Content::post(
+@@ -2182,6 +2288,9 @@ void Content::post(
      uno::Reference< io::XActiveDataSink > xSink( rArg.Sink, uno::UNO_QUERY );
      if ( xSink.is() )
      {
@@ -2522,7 +2100,7 @@ diff -u -p -u -p -B -r1.62 -r1.59.16.5
          try
          {
              std::auto_ptr< DAVResourceAccess > xResAccess;
-@@ -2216,6 +2324,9 @@ void Content::post(
+@@ -2216,6 +2325,9 @@ void Content::post(
          uno::Reference< io::XOutputStream > xResult( rArg.Sink, uno::UNO_QUERY );
          if ( xResult.is() )
          {
@@ -2532,7 +2110,7 @@ diff -u -p -u -p -B -r1.62 -r1.59.16.5
              try
              {
                  std::auto_ptr< DAVResourceAccess > xResAccess;
-@@ -2245,6 +2356,9 @@ void Content::post(
+@@ -2245,6 +2357,9 @@ void Content::post(
          }
          else
          {
@@ -2542,7 +2120,7 @@ diff -u -p -u -p -B -r1.62 -r1.59.16.5
              ucbhelper::cancelCommandExecution(
                  uno::makeAny(
                      ucb::UnsupportedDataSinkException(
-@@ -2585,19 +2699,19 @@ void Content::transfer(
+@@ -2585,19 +2700,19 @@ void Content::transfer(
          //
          const rtl::OUString aScheme = sourceURI.GetScheme().toAsciiLowerCase();
          if ( aScheme.equalsAsciiL(
@@ -2570,15 +2148,11 @@ diff -u -p -u -p -B -r1.62 -r1.59.16.5
          {
              sourceURI.SetScheme(
                  rtl::OUString::createFromAscii( HTTPS_URL_SCHEME ) );
-@@ -2609,13 +2735,23 @@ void Content::transfer(
+@@ -2621,13 +2736,23 @@ void Content::transfer(
          }
  
          if ( targetURI.GetScheme().toAsciiLowerCase().equalsAsciiL(
 -                 RTL_CONSTASCII_STRINGPARAM( WEBDAV_URL_SCHEME ) ) )
--            targetURI.SetScheme(
--                rtl::OUString::createFromAscii( HTTP_URL_SCHEME ) );
--        else if ( targetURI.GetScheme().toAsciiLowerCase().equalsAsciiL(
--                 RTL_CONSTASCII_STRINGPARAM( DAV_URL_SCHEME ) ) )
 +                 RTL_CONSTASCII_STRINGPARAM( WEBDAV_URL_SCHEME ) ) ||
 +             targetURI.GetScheme().toAsciiLowerCase().equalsAsciiL(
 +                 RTL_CONSTASCII_STRINGPARAM( DAV_URL_SCHEME ) ) ||
@@ -2588,12 +2162,14 @@ diff -u -p -u -p -B -r1.62 -r1.59.16.5
              targetURI.SetScheme(
                  rtl::OUString::createFromAscii( HTTP_URL_SCHEME ) );
 +        }
-+        else if ( targetURI.GetScheme().toAsciiLowerCase().equalsAsciiL(
+         else if ( targetURI.GetScheme().toAsciiLowerCase().equalsAsciiL(
+-                 RTL_CONSTASCII_STRINGPARAM( DAV_URL_SCHEME ) ) )
 +                      RTL_CONSTASCII_STRINGPARAM( DAVS_URL_SCHEME ) ) ||
 +                  targetURI.GetScheme().toAsciiLowerCase().equalsAsciiL(
 +                      RTL_CONSTASCII_STRINGPARAM( PLAIN_WEBDAVS_URL_SCHEME ) ) )
 +        {
-+            targetURI.SetScheme(
+             targetURI.SetScheme(
+-                rtl::OUString::createFromAscii( HTTP_URL_SCHEME ) );
 +                rtl::OUString::createFromAscii( HTTPS_URL_SCHEME ) );
 +        }
  	
@@ -2651,11 +2227,11 @@ diff -u -p -u -p -B -r1.21 -r1.20.70.2
 Index: ucb/source/ucp/webdav/webdavprovider.cxx
 ===================================================================
 RCS file: /cvs/ucb/ucb/source/ucp/webdav/webdavprovider.cxx,v
-retrieving revision 1.20
-retrieving revision 1.18.70.2
-diff -u -p -u -p -B -r1.20 -r1.18.70.2
---- ucb/source/ucp/webdav/webdavprovider.cxx	10 Apr 2008 15:45:28 -0000	1.20
-+++ ucb/source/ucp/webdav/webdavprovider.cxx	2 Jun 2008 13:29:34 -0000	1.18.70.2
+retrieving revision 1.21
+retrieving revision 1.18.70.3
+diff -u -p -u -p -B -r1.21 -r1.18.70.3
+--- ucb/source/ucp/webdav/webdavprovider.cxx	4 Jun 2008 09:44:59 -0000	1.21
++++ ucb/source/ucp/webdav/webdavprovider.cxx	30 Jun 2008 09:01:32 -0000	1.18.70.3
 @@ -36,6 +36,9 @@
   **************************************************************************
  
@@ -2666,18 +2242,20 @@ diff -u -p -u -p -B -r1.20 -r1.18.70.2
  #include <ucbhelper/contentidentifier.hxx>
  #include "webdavprovider.hxx"
  #include "webdavcontent.hxx"
-@@ -133,6 +136,10 @@ ContentProvider::queryContent(
-         !aScheme.equalsAsciiL(
-            RTL_CONSTASCII_STRINGPARAM( DAVS_URL_SCHEME ) ) &&
+@@ -138,7 +141,11 @@ ContentProvider::queryContent(
+             RTL_CONSTASCII_STRINGPARAM( DAV_URL_SCHEME ) ) &&
           !aScheme.equalsAsciiL(
+             RTL_CONSTASCII_STRINGPARAM( DAVS_URL_SCHEME ) ) &&
+-          !aScheme.equalsAsciiL(
++         !aScheme.equalsAsciiL(
 +            RTL_CONSTASCII_STRINGPARAM( PLAIN_WEBDAV_URL_SCHEME ) ) &&
 +         !aScheme.equalsAsciiL(
 +            RTL_CONSTASCII_STRINGPARAM( PLAIN_WEBDAVS_URL_SCHEME ) ) &&
 +         !aScheme.equalsAsciiL(
-             RTL_CONSTASCII_STRINGPARAM( FTP_URL_SCHEME ) )       )
-        throw ucb::IllegalIdentifierException();
-
-@@ -155,32 +165,27 @@ ContentProvider::queryContent(
+              RTL_CONSTASCII_STRINGPARAM( FTP_URL_SCHEME ) )       )
+         throw ucb::IllegalIdentifierException();
+ 
+@@ -157,32 +164,27 @@ ContentProvider::queryContent(
      uno::Reference< ucb::XContentIdentifier > xCanonicId;
  
      bool bNewId = false;
@@ -2733,32 +2311,42 @@ diff -u -p -u -p -B -r1.20 -r1.18.70.2
 Index: ucb/source/ucp/webdav/webdavprovider.hxx
 ===================================================================
 RCS file: /cvs/ucb/ucb/source/ucp/webdav/webdavprovider.hxx,v
-retrieving revision 1.10
-retrieving revision 1.9.70.2
-diff -u -p -u -p -B -r1.10 -r1.9.70.2
---- ucb/source/ucp/webdav/webdavprovider.hxx	10 Apr 2008 15:45:49 -0000	1.10
-+++ ucb/source/ucp/webdav/webdavprovider.hxx	2 Jun 2008 13:29:37 -0000	1.9.70.2
-@@ -52,21 +52,18 @@ namespace webdav_ucp {
+retrieving revision 1.11
+retrieving revision 1.9.70.3
+diff -u -p -u -p -B -r1.11 -r1.9.70.3
+--- ucb/source/ucp/webdav/webdavprovider.hxx	4 Jun 2008 09:45:13 -0000	1.11
++++ ucb/source/ucp/webdav/webdavprovider.hxx	30 Jun 2008 09:01:35 -0000	1.9.70.3
+@@ -50,25 +50,18 @@ namespace webdav_ucp {
+ // URL scheme. This is the scheme the provider will be able to create
+ // contents for. The UCB will select the provider ( i.e. in order to create
  // contents ) according to this scheme.
- #define WEBDAV_URL_SCHEME \
- 				"vnd.sun.star.webdav"
+-#define WEBDAV_URL_SCHEME \
+-				"vnd.sun.star.webdav"
 -#define WEBDAV_URL_SCHEME_LENGTH	19
++#define WEBDAV_URL_SCHEME        "vnd.sun.star.webdav"
  
- #define HTTP_URL_SCHEME 		"http"
+-#define HTTP_URL_SCHEME 		"http"
 -#define HTTP_URL_SCHEME_LENGTH	4
++#define HTTP_URL_SCHEME          "http"
++#define HTTPS_URL_SCHEME         "https"
  
- #define HTTPS_URL_SCHEME 		"https"
+-#define HTTPS_URL_SCHEME 		"https"
 -#define HTTPS_URL_SCHEME_LENGTH	5
++#define DAV_URL_SCHEME           "dav"
++#define DAVS_URL_SCHEME          "davs"
  
- #define DAV_URL_SCHEME			"dav"
+-#define DAV_URL_SCHEME			"dav"
 -#define DAV_URL_SCHEME_LENGTH	3	
- 
- #define DAVS_URL_SCHEME		"davs"
--#define DAVS_URL_SCHEME_LENGTH	4	 
-
-+#define PLAIN_WEBDAV_URL_SCHEME "webdav"
-
++#define PLAIN_WEBDAV_URL_SCHEME  "webdav"
 +#define PLAIN_WEBDAVS_URL_SCHEME "webdavs"
-
- #define FTP_URL_SCHEME "ftp"
  
+-#define DAVS_URL_SCHEME		"davs"
+-#define DAVS_URL_SCHEME_LENGTH	4	 
+-
+-
+-
+-#define FTP_URL_SCHEME "ftp"
++#define FTP_URL_SCHEME           "ftp"
+ 
+ #define HTTP_CONTENT_TYPE \
+ 				"application/" HTTP_URL_SCHEME "-content"
