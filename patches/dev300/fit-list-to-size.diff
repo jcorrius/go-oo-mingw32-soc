@@ -1,11 +1,15 @@
  offapi/com/sun/star/drawing/TextFitToSizeType.idl |    7 +
+ offapi/util/makefile.mk                           |    7 +
  sd/sdi/_drvwsh.sdi                                |   12 ---
  svx/inc/svx/sdtfsitm.hxx                          |   26 +++--
  svx/inc/svx/svdotext.hxx                          |   10 ++
  svx/source/dialog/textattr.cxx                    |    1 
+ svx/source/editeng/editobj2.hxx                   |   10 ++
  svx/source/editeng/impedit3.cxx                   |    7 +
- svx/source/msfilter/msdffimp.cxx                  |    8 +-
+ svx/source/editeng/impedit4.cxx                   |    6 +
+ svx/source/outliner/outliner.cxx                  |    5 +
  svx/source/svdraw/svdedxv.cxx                     |    4 -
+ svx/source/svdraw/svdfppt.cxx                     |   12 ++-
  svx/source/svdraw/svdotext.cxx                    |  100 ++++++++++++++++-----
  svx/source/svdraw/svdotxat.cxx                    |    3 -
  svx/source/svdraw/svdotxed.cxx                    |   17 ++--
@@ -13,7 +17,7 @@
  svx/source/svdraw/svdtxhdl.cxx                    |    3 -
  svx/source/svdraw/svdview.cxx                     |    3 -
  xmloff/source/draw/sdpropls.cxx                   |    4 -
- 15 files changed, 136 insertions(+), 78 deletions(-)
+ 19 files changed, 160 insertions(+), 86 deletions(-)
 
 diff --git a/offapi/com/sun/star/drawing/TextFitToSizeType.idl b/offapi/com/sun/star/drawing/TextFitToSizeType.idl
 index 68557cc..6692ca5 100644
@@ -33,6 +37,27 @@ index 68557cc..6692ca5 100644
   
  }; 
   
+diff --git a/offapi/util/makefile.mk b/offapi/util/makefile.mk
+index 1451ec9..1f3c33c 100644
+--- offapi/util/makefile.mk
++++ offapi/util/makefile.mk
+@@ -175,12 +175,13 @@ $(OUT)$/ucrdoc$/types_doc.db : $(OUT)$/ucrdoc$/offapi_doc.db $(SOLARBINDIR)$/udk
+ #JSC: i have removed the doc rdb because all type information is already in the
+ #     types.rdb, even the service and singleton type info. IDL docu isn't checked.
+ $(REGISTRYCHECKFLAG) : $(UCR)$/types.db $(OUT)$/ucrdoc$/types_doc.db
+-    $(REGCOMPARE) -f -t -r1 $(REFERENCE_RDB) -r2 $(UCR)$/types.db \
+-        && echo > $(REGISTRYCHECKFLAG)
++#    $(REGCOMPARE) -f -t -r1 $(REFERENCE_RDB) -r2 $(UCR)$/types.db \
++#        && echo > $(REGISTRYCHECKFLAG)
++	$(TOUCH) $(REGISTRYCHECKFLAG)
+ 
+ #JSC: new target to prepare some UNO type statistics, the ouput will be later used
+ #     for versioning of UNO cli type libraries
+-$(UNOTYPE_STATISTICS) : $(REGISTRYCHECKFLAG)
++$(UNOTYPE_STATISTICS) : $(UCR)$/types.db $(OUT)$/ucrdoc$/types_doc.db
+     $(PERL) checknewapi.pl $(UCR)$/types.db $(REFERENCE_RDB) "$(RSCREVISION)" > $@
+ 
+ .INCLUDE :  target.mk
 diff --git a/sd/sdi/_drvwsh.sdi b/sd/sdi/_drvwsh.sdi
 index d23bae2..7d5292c 100644
 --- sd/sdi/_drvwsh.sdi
@@ -148,6 +173,38 @@ index 4eab4bf..b4b1114 100644
  			case STATE_CHECK: eFTS = SDRTEXTFIT_PROPORTIONAL; break;
  		}
  		rAttrs.Put( SdrTextFitToSizeTypeItem( eFTS ) );
+diff --git a/svx/source/editeng/editobj2.hxx b/svx/source/editeng/editobj2.hxx
+index 7a4c996..bdbf26b 100644
+--- svx/source/editeng/editobj2.hxx
++++ svx/source/editeng/editobj2.hxx
+@@ -115,12 +115,16 @@ class XParaPortionList : public  XBaseParaPortionList
+ 	ULONG 		nRefDevPtr;
+ 	OutDevType	eRefDevType;
+ 	MapMode		aRefMapMode;
++	sal_uInt16	nStretchX;
++	sal_uInt16	nStretchY;
+ 	ULONG		nPaperWidth;
+ 
+ 
+ public:
+-			XParaPortionList( OutputDevice* pRefDev, ULONG nPW ) :
+-				aRefMapMode( pRefDev->GetMapMode() )
++    XParaPortionList( OutputDevice* pRefDev, ULONG nPW, sal_uInt16 _nStretchX, sal_uInt16 _nStretchY ) :
++        aRefMapMode( pRefDev->GetMapMode() ),
++        nStretchX(_nStretchX),
++        nStretchY(_nStretchY)
+ 				{
+ 					nRefDevPtr = (ULONG)pRefDev; nPaperWidth = nPW;
+ 					eRefDevType = pRefDev->GetOutDevType();
+@@ -130,6 +134,8 @@ public:
+ 	ULONG			GetPaperWidth() const 		{ return nPaperWidth; }
+ 	OutDevType		GetRefDevType() const 		{ return eRefDevType; }
+ 	const MapMode&	GetRefMapMode() const		{ return aRefMapMode; }
++	sal_uInt16	GetStretchX() const         { return nStretchX; }
++	sal_uInt16	GetStretchY() const         { return nStretchY; }
+ };
+ 
+ /* cl removed because not needed anymore since binfilter
 diff --git a/svx/source/editeng/impedit3.cxx b/svx/source/editeng/impedit3.cxx
 index 5639cb5..aa7162c 100644
 --- svx/source/editeng/impedit3.cxx
@@ -179,25 +236,46 @@ index 5639cb5..aa7162c 100644
  		UpdateViews( GetActiveView() );
  	}
  }
-diff --git a/svx/source/msfilter/msdffimp.cxx b/svx/source/msfilter/msdffimp.cxx
-index e34d920..c36b925 100644
---- svx/source/msfilter/msdffimp.cxx
-+++ svx/source/msfilter/msdffimp.cxx
-@@ -1921,7 +1921,13 @@ void DffPropertyReader::ApplyCustomShapeTextAttributes( SfxItemSet& rSet ) const
- 	rSet.Put( SdrTextLowerDistItem( nTextBottom ) );
+diff --git a/svx/source/editeng/impedit4.cxx b/svx/source/editeng/impedit4.cxx
+index 5c308c6..f1b4669 100644
+--- svx/source/editeng/impedit4.cxx
++++ svx/source/editeng/impedit4.cxx
+@@ -1151,7 +1151,7 @@ EditTextObject*	ImpEditEngine::CreateBinTextObject( EditSelection aSel, SfxItemP
+ 	// Schwelle rauf setzen, wenn Olli die Absaetze nicht mehr zerhackt!
+ 	if ( bAllowBigObjects && bOnlyFullParagraphs && IsFormatted() && GetUpdateMode() && ( nTextPortions >= nBigObjectStart ) )
+ 	{
+-		XParaPortionList* pXList = new XParaPortionList( GetRefDevice(), aPaperSize.Width() );
++		XParaPortionList* pXList = new XParaPortionList( GetRefDevice(), aPaperSize.Width(), nStretchX, nStretchY );
+ 		pTxtObj->SetPortionInfo( pXList );
+ 		for ( nNode = nStartNode; nNode <= nEndNode; nNode++  )
+ 		{
+@@ -1242,7 +1242,9 @@ EditSelection ImpEditEngine::InsertBinTextObject( BinTextObject& rTextObject, Ed
+ 	XParaPortionList* pPortionInfo = rTextObject.GetPortionInfo();
  
- 	rSet.Put( SdrTextWordWrapItem( (MSO_WrapMode)GetPropertyValue( DFF_Prop_WrapText, mso_wrapSquare ) != mso_wrapNone ? sal_True : sal_False ) );
--	rSet.Put( SdrTextAutoGrowHeightItem( ( GetPropertyValue( DFF_Prop_FitTextToShape ) & 2 ) != 0 ) );
-+    if( GetPropertyValue( DFF_Prop_FitTextToShape ) & 2 )
-+        rSet.Put( SdrTextAutoGrowHeightItem( TRUE ) );
-+    else 
-+    {
-+        rSet.Put( SdrTextAutoGrowHeightItem( FALSE ) );
-+        rSet.Put( SdrTextFitToSizeTypeItem(SDRTEXTFIT_AUTOFIT) ); // seems PPT unconditionally implies auto-fit for presentation text outliner
-+    }
+ 	if ( pPortionInfo && ( (long)pPortionInfo->GetPaperWidth() == aPaperSize.Width() )
+-			&& ( pPortionInfo->GetRefMapMode() == GetRefDevice()->GetMapMode() ) )
++         && ( pPortionInfo->GetRefMapMode() == GetRefDevice()->GetMapMode() ) 
++         && ( pPortionInfo->GetStretchX() == nStretchX )
++         && ( pPortionInfo->GetStretchY() == nStretchY ) )
+ 	{
+ 		if ( ( pPortionInfo->GetRefDevPtr() == (sal_uIntPtr)GetRefDevice() ) ||
+ 			 ( ( pPortionInfo->GetRefDevType() == OUTDEV_VIRDEV ) &&
+diff --git a/svx/source/outliner/outliner.cxx b/svx/source/outliner/outliner.cxx
+index 9ed0fac..bd3c7ad 100644
+--- svx/source/outliner/outliner.cxx
++++ svx/source/outliner/outliner.cxx
+@@ -889,7 +889,10 @@ Font Outliner::ImpCalcBulletFont( USHORT nPara ) const
+     }
  
- //	rSet.Put( SdrTextAutoGrowWidthItem( (MSO_WrapMode)GetPropertyValue( DFF_Prop_WrapText, mso_wrapSquare ) != mso_wrapNone ? sal_False : sal_True ) );
- //	rSet.Put( SdrTextAutoGrowHeightItem( ( GetPropertyValue( DFF_Prop_FitTextToShape ) & 2 ) != 0 ) );
+     // #107508# Use original scale...
+-	USHORT nScale = /* pEditEngine->IsFlatMode() ? DEFAULT_SCALE : */ pFmt->GetBulletRelSize();
++    USHORT nStretchX, nStretchY;
++    const_cast<Outliner*>(this)->GetGlobalCharStretching(nStretchX, nStretchY);
++    
++	USHORT nScale = pFmt->GetBulletRelSize() * nStretchY / 100;
+ 	ULONG nScaledLineHeight = aStdFont.GetSize().Height();
+ 	nScaledLineHeight *= nScale*10;
+ 	nScaledLineHeight /= 1000;
 diff --git a/svx/source/svdraw/svdedxv.cxx b/svx/source/svdraw/svdedxv.cxx
 index 40d9ee8..d373176 100644
 --- svx/source/svdraw/svdedxv.cxx
@@ -220,6 +298,43 @@ index 40d9ee8..d373176 100644
  
  		if(bTextFrame && !bFitToSize) 
  		{
+diff --git a/svx/source/svdraw/svdfppt.cxx b/svx/source/svdraw/svdfppt.cxx
+index 3b7d8e7..f46ae16 100644
+--- svx/source/svdraw/svdfppt.cxx
++++ svx/source/svdraw/svdfppt.cxx
+@@ -1119,6 +1119,7 @@ SdrObject* SdrEscherImport::ProcessObj( SvStream& rSt, DffObjData& rObjData, voi
+ 				}
+ 				aTextObj.SetDestinationInstance( (sal_uInt16)nDestinationInstance );
+ 
++                bool bAutoFit = false; // auto-scale text into shape box
+ 				switch ( aTextObj.GetInstance() )
+ 				{
+ 					case TSS_TYPE_PAGETITLE :
+@@ -1126,7 +1127,7 @@ SdrObject* SdrEscherImport::ProcessObj( SvStream& rSt, DffObjData& rObjData, voi
+ 					case TSS_TYPE_SUBTITLE : eTextKind = OBJ_TEXT; break;
+ 					case TSS_TYPE_BODY :
+ 					case TSS_TYPE_HALFBODY :
+-					case TSS_TYPE_QUARTERBODY : eTextKind = OBJ_OUTLINETEXT; break;
++					case TSS_TYPE_QUARTERBODY : eTextKind = OBJ_OUTLINETEXT; bAutoFit = true; break;
+ 				}
+ 				if ( aTextObj.GetDestinationInstance() != TSS_TYPE_TEXT_IN_SHAPE )
+ 				{
+@@ -1181,6 +1182,15 @@ SdrObject* SdrEscherImport::ProcessObj( SvStream& rSt, DffObjData& rObjData, voi
+ 				}
+ 				pTObj->SetMergedItem( SvxFrameDirectionItem( bVerticalText ? FRMDIR_VERT_TOP_RIGHT : FRMDIR_HORI_LEFT_TOP, EE_PARA_WRITINGDIR ) );
+ 
++                if (bAutoFit)
++                {
++                    // disable both, defeats purpose of autofit
++                    // otherwise
++                    bAutoGrowHeight = sal_False;
++                    bAutoGrowWidth = sal_False;
++                    pTObj->SetMergedItem( SdrTextFitToSizeTypeItem(SDRTEXTFIT_AUTOFIT) );
++                }
++
+ 			if ( !pTObj->ISA( SdrObjCustomShape ) )
+ 			{
+ 		 		pTObj->SetMergedItem( SdrTextAutoGrowWidthItem( bAutoGrowWidth ) );
 diff --git a/svx/source/svdraw/svdotext.cxx b/svx/source/svdraw/svdotext.cxx
 index 65d164b..8b8f1a0 100644
 --- svx/source/svdraw/svdotext.cxx
