@@ -1,0 +1,721 @@
+#! /usr/bin/python
+
+# gob.py - ooo-build to GIT conversion:  dump gob branch description files
+#          and create branched git
+#
+# Usage: python bin/gob --help
+
+import optparse
+import operator
+import os
+import re
+import sys
+
+class SystemFailed (Exception):
+    pass
+
+def exception_string (exception=Exception ('no message')):
+    import traceback
+    return traceback.format_exc (None)
+
+def filter_out (predicate, lst):
+    return filter (lambda x: not predicate (x), lst)
+    
+def system (command, raise_on_error=True):
+    if options.verbose > 1:
+        print >> sys.stderr, 'executing: %(command)s' % locals ()
+    silence = ''
+    if options.verbose < 2:
+        silence = ' > .log- 2>&1'
+    status = os.system (command + silence)
+    if status and raise_on_error:
+        print >> sys.stderr, command
+        print >> sys.stderr, file ('.log-').read ()
+        raise SystemFailed ('Command failed: %(command)s' % locals ())
+
+def read_pipe (command, raise_on_error=True):
+    if options.verbose > 1:
+        print >> sys.stderr, 'executing: %(command)s' % locals ()
+    if options.verbose < 2:
+        silence = ' 2> .log-'
+    pipe = os.popen (command + silence)
+    output = pipe.read ()
+    if options.verbose > 2:
+        print >> sys.stderr, 'pipe-output:\n%(output)s)s' % locals ()
+    if pipe.close () and raise_on_error:
+        print >> sys.stderr, command
+        print >> sys.stderr, file ('.log-').read ()
+        raise SystemFailed ('Pipe failed: %(command)s' % locals ())
+    return output
+
+def list_dirs (dir):
+    return filter (lambda x: os.path.isdir (os.path.join (dir, x)), os.listdir (dir))
+
+def find_file (root, path, name):
+    for dir in path:
+        file_name = os.path.abspath (os.path.join (root, dir, name))
+        if os.path.isfile (file_name):
+            return file_name
+    return None
+
+def apply_patch (dir, patch):
+    system ('patch -l -p0 -d %(dir)s < %(patch)s' % locals ())
+
+def patch_get_branch (patch):
+    patch_file = patch.file_name
+    if not patch_file:
+        return None
+
+    m = re.search ('(writerfilter-qnametostr-NOOPTFILES)', patch_file)
+    if m:
+        return m.group (1)
+
+    dir = os.path.basename (os.path.dirname  (patch_file))
+    base = os.path.splitext (os.path.basename (patch_file))[0]
+
+    if (not re.search ('chart2|helpcontent2|javainstaller2|scp2|sfx2|sj2|stlport5|testshl2|transex3|\d\d+$', base)
+        and re.search ('\d$', base)):
+        base = re.sub ('-*\d$', '', base)
+
+    if not re.search ('[.]$|^[.][.]$|64bit|dev300|hotfixes' , dir):
+        return dir
+
+    m = re.search ('^(cjk-character-units|cws-scsheetprotection02|emf\+|fpicker-kde|jvmfwk-gij|lockfile|mono|sal-strintern-speed|sc-dataform|sc-datapilot|speed-configmgr|svg-import|system-lpsolve|transogl|unittesting|unxsplash|vba|wpgimporter|writerfilter)', base)
+    if m:
+        return m.group (1)
+    
+    if re.search ('^(cairocanvas-alpha-pixmap-rewrite|vcl-grey-alpha-unix-sal-bitmap)', base):
+        return 'emf+'
+
+    if re.search ('^(fix-linkoo|linkoo-)', base):
+        return 'linkoo'
+
+    if re.search ('^(win32-installer-register-moox-types)', base):
+        return 'ooxml'
+
+    if re.search ('^(default-autotext-and-form-name|sc-toggle-merge-center)', base):
+        return 'vba'
+
+    module_re = None
+    if not module_re:
+        modules = list_dirs (options.build_dir)
+        module_re = '|'.join (modules)
+    return re.sub ('-(%(module_re)s)$' % locals (), '', base)
+
+def dump_gob (gob_dir, branch, patches):
+    owner = ''
+    for patch in patches:
+        owner = patch.owner
+        if owner:
+            break
+    issues = []
+    for patch in patches:
+        issues += patch.issues
+    issue_string = ', '.join (issues)
+    file (os.path.join (gob_dir, branch), 'w').write ('''name: %(branch)s
+state: stable
+issue: %(issue_string)s
+owner: %(owner)s
+''' % locals ())
+
+def range_union (a, b, fuzz=1):
+    u = (max (a[0], b[0]) - fuzz, min (a[1], b[1]) + fuzz, a[2], b[2])
+    if u[0] > u[1]:
+        return None
+    return u
+
+class File:
+    def __init__ (self, s):
+        self.string = s
+        if self.string.find ('\n+++ ') == -1:
+            self.name = None
+            return
+        self.name = re.search ('\n[+]{3}\s+([^\s]+)', self.string).group (1)
+        self.ranges = None
+    def __repr__ (self):
+        return '<File: %(name)s>' % self.__dict__
+    def get_ranges (self):
+        if not self.ranges:
+            self.numbers = re.findall ('\n(@@ -(\d+),(\d+) [+](\d+),(\d+) @@(.|\n[^@])*)', self.string)
+            self.ranges = map (lambda x: (min (int (x[1]), int (x[3])), max (int (x[1]) + int (x[2]), int (x[3]) + int (x[4])), x[0][:160]), self.numbers)
+        return self.ranges
+
+def patch_depend (p, q):
+    files = []
+    for file_name in p.files.keys ():
+        if file_name in q.files.keys ():
+            for a in p.files[file_name].get_ranges ():
+                for b in q.files[file_name].get_ranges ():
+                    union = range_union (a, b)
+                    if union:
+                        return union
+    return False
+
+def patch_get_dependencies (patches, patch):
+    dependencies = ['pristine']
+    for p in patches:
+        if p == patch:
+            break
+        if patch_depend (patch, p):
+            dependencies += [p.name]
+    return dependencies
+
+def branch_get_dependencies (branches, patches, branch):
+    patch_dependencies = {}
+    patch_overlaps = []
+    first_patch = None
+    for patch in patches:
+        if patch in branches[branch]:
+            first_patch = patch
+            break
+    for patch in branches[branch]:
+        for p in patches:
+            if p == first_patch:
+                # We cannot have a branch pre-depend on a patch/branch
+                # that does not exist yet.  FIXME: if it is really
+                # needed, it should be auto-assimilated by the branch.
+                # This is now done manually in patch_get_branch ().
+                break
+            o = patch_depend (patch, p)
+            if o:
+                patch_dependencies[p] = p
+                patch_overlaps += [o]
+    branch_dependencies = {}
+    for patch in patch_dependencies.values ():
+        b = patch_get_branch (patch)
+        if b != branch:
+            branch_dependencies[b] = b
+    if not branch_dependencies:
+        return ['pristine']
+    return branch_dependencies.values ()
+
+branch_override_dependencies = {
+    'ooxml': ['lwp-filter-component'],
+    'sc-copy-on-merged-cells': ['sc-dataform'],
+    'sfx2-pre-and-postprocess-crash-fix': ['sfx2-pre-and-postprocess-during-save-load'],
+    'sfx2-pre-and-postprocess-during-save-load': ['sfx2-remove-check-update-on-fileload'],
+    'unittesting': ['tools-qa-urlobj-unittest', 'gnome-vfs-late-init'],
+    'vcl-linking-randr': ['autocorrect-accidental-caps-lock', 'internal-mesa-headers'],
+    }
+
+def branch_get_dependencies_with_override (branches, patches, branch):
+    return branch_override_dependencies.get (branch, branch_get_dependencies (branches, patches, branch))
+
+GitFailed = SystemFailed
+
+gitignores = '''
+*-
+*-HEAD
+*-git
+*-patched
+*-pristine
+*.bak
+*.cxx-*
+*.git
+*.hxx-*
+*.orig
+*.patched
+*.pristine
+*.pyc
+*~
+.\#*
+/Linux*Env.Set*
+/bootstrap
+/makefile.mk
+/solver
+CVS
+TAGS
+\#*
+localize.sdf
+unxlng*.pro
+config_office/autom4te.cache/
+config_office/config.log
+config_office/config.parms
+config_office/config.status
+config_office/configure
+config_office/set_soenv
+config_office/visibility.cxx
+config_office/visibility.s
+config_office/warn
+default_images/introabout/intro-save.bmp
+default_images/introabout/intro.bmp
+default_images/svx/res/openabout_ark.png
+default_images/svx/res/openabout_translateorgza.png
+default_images/sw/res/go-oo-team.png
+dmake/.deps/
+dmake/Makefile
+dmake/config.h
+dmake/config.log
+dmake/config.status
+dmake/dag.o
+dmake/dbug/dbug/.deps/
+dmake/dmake
+dmake/dmake.o
+dmake/dmakeroot.h
+dmake/dmdump.o
+dmake/dmstring.o
+dmake/expand.o
+dmake/function.o
+dmake/getinp.o
+dmake/hash.o
+dmake/imacs.o
+dmake/infer.o
+dmake/macparse.o
+dmake/make.o
+dmake/msdos/.deps/
+dmake/parse.o
+dmake/path.o
+dmake/percent.o
+dmake/quit.o
+dmake/rulparse.o
+dmake/stamp-h1
+dmake/startup/Makefile
+dmake/startup/config.mk
+dmake/startup/unix/Makefile
+dmake/startup/unix/cygwin/Makefile
+dmake/startup/unix/linux/Makefile
+dmake/startup/unix/macosx/Makefile
+dmake/startup/unix/solaris/Makefile
+dmake/startup/unix/sysvr4/Makefile
+dmake/startup/winnt/Makefile
+dmake/startup/winnt/mingw/Makefile
+dmake/startup/winnt/msvc6/Makefile
+dmake/stat.o
+dmake/state.o
+dmake/sysintf.o
+dmake/tests/Makefile
+dmake/unix/.deps/
+dmake/unix/.dirstamp
+dmake/unix/arlib.o
+dmake/unix/dcache.o
+dmake/unix/dirbrk.o
+dmake/unix/rmprq.o
+dmake/unix/ruletab.o
+dmake/unix/runargv.o
+dmake/unix/tempnam.o
+dmake/win95/.deps/
+dmake/win95/microsft/.deps/
+instsetoo_native/res/banner_nld.bmp
+instsetoo_native/res/banner_ooop.bmp
+instsetoo_native/res/nologoinstall_nld.bmp
+instsetoo_native/res/nologoinstall_ooop.bmp
+instsetoo_native/util/OpenOffice
+sd/xml/transitions-ogl.xml
+setup_native/source/win32/nsis/ooobanner_nld.bmp
+setup_native/source/win32/nsis/ooobanner_ooop.bmp
+setup_native/source/win32/nsis/ooobitmap_nld.bmp
+setup_native/source/win32/nsis/ooobitmap_ooop.bmp
+setup_native/source/win32/nsis/ooosetup_nld.ico
+solenv/unxlngx*
+svx/res
+'''
+
+def create_gitignores (dir):
+    for i in filter_out (operator.not_, gitignores.split ('\n')):
+        if i[0] == '/':
+            file (dir + '/.gitignore', 'a').write (i + '\n')
+        else:
+            if i[-1] == '/':
+                i = i[:-1]
+            file (dir + '/' + os.path.dirname (i) + '/.gitignore', 'a').write (os.path.basename (i) + '\n')
+
+def get_drink ():
+    if os.path.exists ('config.log'):
+        m = re.search ('''DRINK=['"*]([^*"']*)''', file ('config.log').read ())
+        if m:
+            return m.group (1)
+    return 'tea'
+            
+def get_svn_revision ():
+    return re.search ('\nRevision: ([0-9]+)', read_pipe ('svn info')).group (1)
+
+class Git:
+    def __init__ (self, dir, patched):
+        self.dir = dir
+        self.patched = patched
+        self.workspace = options.workspace
+        self.milestone = options.milestone
+        self.pristine = 'upstream/%(workspace)s-m%(milestone)s' % self.__dict__
+        self.commits = {}
+        if not os.path.isdir (dir + '/.git'):
+            create_gitignores (dir)
+            drink = get_drink ()
+            print >> sys.stderr, 'Creating GIT archive - [ go and have some %(drink)s ] ...' % locals ()
+            self.system ('git-init')
+            svn_revision = get_svn_revision ()
+            self.commit ('Initial svn:r%(svn_revision)s unpatched' % locals ())
+            self.system ('git-branch %(pristine)s' % self.__dict__)
+            self.system ('git-tag gob-%(workspace)s-%(milestone)s %(pristine)s' % self.__dict__)
+            self.system ('git-branch pristine')
+            self.system ('git-gc')
+        self.assert_clean ()
+        if self.has_branch (self.patched):
+            self.checkout (self.patched)
+        else:
+            self.system ('git-checkout -b %(patched)s pristine' % self.__dict__)
+    def pipe (self, command, raise_on_error=True):
+        dir = self.dir
+        return read_pipe ('cd %(dir)s && %(command)s' % locals (), raise_on_error)
+    def system (self, command, raise_on_error=True):
+        dir = self.dir
+        return system ('cd %(dir)s && %(command)s' % locals (), raise_on_error)
+    def get_branches (self):
+        return filter_out (operator.not_,
+                           self.pipe ('git-branch')
+                           .replace ('*', '')
+                           .replace (' ', '').split ('\n'))
+    def get_log (self, branch=''):
+        return self.pipe ('git-log --pretty=oneline %(branch)s --' % locals ())
+    def get_commit (self, patch):
+        if not self.commits:
+            log = self.get_log (self.patched)
+            def grok_log_line (s):
+                m = re.match ('([^ ]+) Apply.*/([^/]+[.](diff|patch))', s)
+                if not m:
+                    print >> sys.stderr, 'Skipping line:%(s)s:' % locals ()
+                    return None, None
+                return m.group (2), m.group (1)
+            self.commits = dict (map (grok_log_line, log.split ('\n')[:-2]))
+        return self.commits.get (patch, None)
+    def commit (self, message):
+        self.system ('git-add .')
+        self.system ('git-add -u .')
+        self.system ('''git-commit -m '%(message)s' ''' % locals ())
+    def is_modified (self):
+        return re.sub ('# On branch.*\nnothing to commit \(working directory clean\)\n', '',
+                       self.pipe ('git-status', raise_on_error=False))
+    def assert_clean (self):
+        pending = self.is_modified ()
+        if pending:
+            raise GitFailed ('working directory unclean: %(dir)s\n%(pending)s' % locals ())
+    def checkout (self, branch):
+        if not self.is_on_branch (branch):
+            self.system ('git-checkout %(branch)s' % locals ())
+    def get_current_branch (self):
+        return self.pipe ('git-name-rev --name-only HEAD')[:-1]
+    def is_on_branch (self, branch):
+        return branch == self.get_current_branch ()
+    def has_branch (self, branch):
+        return branch in self.get_branches ()
+    def apply_patch (self, branches, patches, patch):
+        print >> sys.stderr, 'Applying patch:', patch.name
+        self.assert_clean ()
+        self.checkout (self.patched)
+        apply_patch (self.dir, patch.file_name)
+        base = os.path.basename (patch.file_name)
+        self.commit ('Apply %(base)s.' % locals ())
+        branch = patch_get_branch (patch)
+        dependencies = branch_get_dependencies_with_override (branches, patches, branch)
+        if not self.has_branch (branch):
+            base_depend = dependencies[0]
+            self.system ('git-checkout -b %(branch)s %(base_depend)s' % locals ())
+            for dependency in dependencies[1:]:
+                self.system ('git-rebase %(dependency)s' % locals ())
+        else:
+            self.checkout (branch)
+        log = self.get_log (self.patched)
+        commit = log[:log.index (' ')]
+        self.system ('git-cherry-pick -x %(commit)s' % locals ())
+    def add_patch (self, branches, patches, patch):
+        if patch.name in self.get_log ():
+            print >> sys.stderr, 'patch already applied, skipping:', patch.name
+            return
+        if file (patch.file_name).read ().find ('\n+++ ') == -1:
+            print >> sys.stderr, 'patch is empty, skipping:', patch.name
+            return
+        commit = None
+        branch = patch_get_branch (patch)
+        if self.has_branch (branch):
+            m = re.search ('(^|\n)([^\s]+)\s+.*(\s|/)%(name)s' % patch.__dict__, self.get_log (branch))
+            if m:
+                commit = m.group (2)
+        if commit:
+            print >> sys.stderr, 'Adding patch:', patch.name
+            self.assert_clean ()
+            self.checkout (self.patched)
+            self.system ('git-cherry-pick -x %(commit)s' % locals ())
+        else:
+            self.apply_patch (branches, patches, patch)
+
+class Patch:
+    def __init__ (self, s, section, owner, issue):
+        self.string = s
+        self.section = section
+        self.owner = owner
+        m = re.search (', (\w\w+)', self.string)
+        if m:
+            self.owner = m.group (1)
+        m = re.match ('^\s*(([^#\s].*).(diff|patch))(.*)', self.string)
+        self.name = m.group (1)
+        self.base = m.group (2)
+        self.issues = map (lambda x: x[0], re.findall ('((i|n)#[0-9]+)', self.string))
+        if issue:
+            self.issues.append (issue)
+        self.file_name = None
+        self.files = None
+    def __repr__ (self):
+        return '<Patch: %(file_name)s [%(section)s] %(owner)s %(issues)s>' % self.__dict__
+    def set_file_name (self, dir, path):
+        self.file_name = find_file (dir, path, self.name)
+        self.files = dict (map (lambda x: (x.name, x), map (File, file (self.file_name).read ().split ('\n---')[1:])))
+
+class Section:
+    def __init__ (self, s):
+        self.string = s
+        m = re.match ('[[\s]*(.*[^\s])\s*\]', self.string)
+        self.tag = m.group (1).replace (' ', '')
+        m = re.search ('\n(SectionOwner)\s*=>\s*(.*[^\s])', self.string)
+        self.owner = ''
+        if m:
+            self.owner = m.group (2)
+        m = re.search ('\n(SectionIssue)\s*=>\s*(.*[^\s])', self.string)
+        self.issue = ''
+        if m:
+            self.issue = m.group (2)
+    def __repr__ (self):
+        return '<Section: %(tag)s %(owner)s %(issue)s>' % self.__dict__
+    def get_patches (self):
+        def create_patch (s):
+            return Patch (s[0], self.tag, self.owner, self.issue)
+        return map (create_patch, re.findall ('\n\s*([^#\s].*.(diff|patch).*)', self.string))
+
+class Apply:
+    def __init__ (self, apply_file, workspace, milestone):
+        self.workspace = workspace
+        self.milestone = milestone
+        self.string = file (apply_file).read ()
+        first_section = self.string.index ('\n[')
+        self.distros_string = self.string[:first_section]
+        self.sections_string = self.string[first_section:]
+        self.path = re.search ('\nPATCHPATH=(.*)', self.string).group (1).split (':')
+        self.distro = {}
+        self.master = {}
+        self.distros_string = re.sub ('\s*\\\s*\n\s*', '', self.distros_string)
+        for distro in re.findall ('\n\s*([^#=\s:]+)\s*:\s*(.*)', self.distros_string):
+            lst = distro[1].replace (' ', '').split (',')
+            expanded = []
+            for i in lst:
+                if i in self.master.keys ():
+                    del self.master[i]
+                expanded += self.distro.get (i, [i])
+            self.master[distro[0]] = self.distro[distro[0]] = expanded
+    def get_section_strings (self):
+        return map (lambda x: '[' + x, self.sections_string.split ('\n[')[1:])
+    def get_sections (self):
+        return map (Section, self.get_section_strings ())
+    def get_distro (self, distro_name):
+        def section_in_distro (section):
+            m = re.search ('(\w+).*(<=|<|==|!=|>=|>)%(workspace)s-m([0-9]+)'
+            % self.__dict__, section.tag)
+            if m:
+                name = m.group (1)
+                if not name in self.distro[distro_name]:
+                    return False
+                left_milestone = self.milestone
+                operator = m.group (2)
+                right_milestone = int (m.group (3))
+                return eval ('%(left_milestone)s %(operator)s %(right_milestone)s' % locals ())
+            else:
+                return section.tag in self.distro[distro_name]
+        return filter (section_in_distro, self.get_sections ())
+
+class Command:
+    def __init__ (self, apply, options):
+        self.options = options
+        self.apply = apply
+        self.patches_ = []
+        self.branches_ = {}
+    def patches (self):
+        '''list patches'''
+        print '\n'.join (map (str, self.get_patches ()))
+    def sections (self):
+        '''list sections'''
+        print '\n'.join (map (str, self.get_sections ()))
+    def distros (self):
+        '''list distros'''
+        print '\n'.join (map (str, self.apply.distro.keys ()))
+    def masters (self):
+        '''list masters'''
+        print '\n'.join (map (str, self.apply.master.keys ()))
+    def get_branches (self):
+        if not self.branches_:
+            for patch in self.get_patches ():
+                branch = patch_get_branch (patch)
+                self.branches_[branch] = self.branches_.get (branch, []) + [patch]
+        return self.branches_
+    def dump_gobs (self):
+        ## FIXME: now that we have also export to git functionalty,
+        ## rather dump gob files while exporting
+        '''dump gob files FIXME: obsolete-me'''
+        gob_dir = self.options.build_dir + '/.git/refs/gob'
+        if not os.path.exists (gob_dir):
+            os.makedirs (gob_dir)
+        branches = self.get_branches ()
+        git = Git (self.options.build_dir, self.options.patched)
+        for branch in git.get_branches ():
+            patches = branches.get (branch)
+            if patches:
+                dump_gob (gob_dir, branch, patches)
+    def checkout (self):
+        '''checkout patched'''
+        git = Git (self.options.build_dir, self.options.patched)
+    def git_export (self):
+        '''export to GIT with branches'''
+        if (not options.force
+            and (self.options.milestone != '19'
+                 or self.options.workspace != 'dev300')):
+            raise SystemFailed ('Export only supported for dev300-m19.  Use --force to override')
+        if not os.path.exists (self.options.build_dir):
+            drink = get_drink ()
+            print >> sys.stderr, 'Unpacking source tree - [ go and have some %(drink)s ] ...' % locals ()
+            system ('make unpack')
+        git = Git (self.options.build_dir, self.options.patched)
+        patches = self.get_patches ()
+        branches = self.get_branches ()
+        for patch in self.get_patches ():
+            git.add_patch (branches, patches, patch)
+        git.system ('git-gc')
+    def get_patches_for_distro (self, distro):
+        patches = reduce (operator.add, map (lambda section: section.get_patches (), self.get_sections_for_distro (distro)))
+        for patch in patches:
+            patch.set_file_name (self.options.apply_dir, self.apply.path)
+        return patches
+    def get_patches (self):
+        if not self.patches_:
+            self.patches_ = reduce (operator.add, map (self.get_patches_for_distro, self.options.distros))
+        return self.patches_
+    def get_sections_for_distro (self, distro):
+        return self.apply.get_distro (distro)
+    def get_sections (self):
+        return reduce (operator.add, map (self.get_sections_for_distro, self.options.distros))
+    def prepare (self):
+        '''prepare ooo-build dir for use with GIT'''
+        git = Git (self.options.build_dir, self.options.patched)
+    def postpare (self):
+        '''update ooo-build dir GIT after patching'''
+        git = Git (self.options.build_dir, self.options.patched)
+        svn_revision = get_svn_revision ()
+        git.commit ('Update to svn:r%(svn_revision)s patched.' % locals ())
+        git.system ('git-rebase patched')
+    def dependencies (self):
+        '''list patch dependencies'''
+        patches = self.get_patches ()
+        branches = self.get_branches ()
+        independent = 0
+        for branch in branches:
+            dependencies = sorted (branch_get_dependencies (branches, patches, branch))
+            if dependencies == ['pristine']:
+                independent += 1
+            print 'BRANCH:', branch, dependencies
+        print 'INDEPENDENT:', independent
+    def bump (self):
+        '''bump BRANCH TAG-NAME - bump current branch (BRANCH=new, TAG-NAME=gob-*)'''
+        if self.options.arguments != 2:
+            print 'Usage: gob bump BRANCH TAG-NAME'
+            print 'BRANCH: new upstream'
+            print 'TAG-NAME: gob-*'
+            print 'Example:'
+            print '    gob bump upstream/dev300-m21 gob-my-21-update'
+            sys.exit (1)
+        branch = options.arguments[0]
+        tag = options.arguments[1]
+        system ('gob-bump %(branch)s %(tag)s' % locals ())
+    def update (self):
+        '''update BRANCH - update current branch (BRANCH='master')'''
+        if self.options.arguments != 2:
+            print 'Usage: gob update BRANCH'
+            print '''BRANCH: the 'master' branch'''
+            print 'Example: '
+            print '    gob update distro/SUSE'
+            sys.exit (1)
+        branch = options.arguments[0]
+        tag = options.arguments[1]
+        system ('gob-bump %(branch)s %(tag)s' % locals ())
+
+def get_cli_parser ():
+    p = optparse.OptionParser ()
+
+    p.usage = '%prog [OPTION]... COMMAND\n\nCommands:\n'
+    d = Command.__dict__
+    commands = [(k, d[k].__doc__) for k in d.keys ()
+                if d[k].__doc__ and type (d[k]) == type (lambda x: x)]
+    commands.sort ()
+
+    src_dir = ''
+    if not os.path.exists ('patches'):
+        src_dir = '../'
+    os.environ['PATH'] = src_dir + '/bin:' + os.environ['PATH']
+        
+    for (command, doc) in commands:
+        p.usage += '    %s - %s\n' % (re.sub ('_', '-', command), doc)
+
+    def get (option):
+        return p.get_option ('--' + option.replace ('-', '_')).default
+
+    p.add_option ('--workspace',
+                  dest='workspace',
+                  default='dev300',
+                  metavar='STRING',
+                  help='set master workspace')
+    p.add_option ('--milestone',
+                  dest='milestone',
+                  default='19',
+                  metavar='STRING',
+                  help='set milestone')
+    p.add_option ('--distro',
+                  action='append',
+                  dest='distros',
+                  default=[],
+                  metavar='DISTRO',
+                  help='add distribution')
+    p.add_option ('--build-dir',
+                  default=src_dir + 'build/' + get ('workspace') + '-m' + get ('milestone'),
+                  dest='build_dir',
+                  metavar='DIR',
+                  help='build (/git) directory')
+    p.add_option ('--apply-dir',
+                  default=src_dir + 'patches/' + get ('workspace'),
+                  dest='apply_dir',
+                  metavar='DIR',
+                  help='directory with APPLY file')
+    p.add_option ('--patched',
+                  default='patched',
+                  dest='patched',
+                  metavar='BRANCH',
+                  help='name of patched branch')
+    p.add_option ('--force', action='store_true', dest='force', default=False)
+    p.add_option ('-v', '--verbose', action='count', dest='verbose', default=1)
+    p.add_option ('-q', '--quiet', action='count', dest='quiet', default=0)
+    return p
+
+def parse_options ():
+    p = get_cli_parser ()
+    (options, arguments) = p.parse_args ()
+
+    options.command = ''
+    options.arguments = []
+    if arguments:
+        options.command = re.sub ('-', '_', arguments.pop (0))
+    options.arguments = arguments
+
+    if options.command in Command.__dict__:
+        return options
+    if options.command:
+        sys.stderr.write ('no such command: ' + options.command)
+        sys.stderr.write ('\n\n')
+    p.print_help ()
+    sys.exit (2)
+
+options = None
+def main ():
+    global options
+    options = parse_options ()
+    options.verbose -= options.quiet
+    if not options.distros:
+        options.distros = ['SUSE']
+    apply_file = options.apply_dir + '/apply'
+    apply = Apply (apply_file, options.workspace, options.milestone)
+    Command.__dict__[options.command] (Command (apply, options))
+
+if __name__ == '__main__':
+    main ()

@@ -1,0 +1,73 @@
+#! /bin/sh
+
+set -e
+
+if test $# -lt 2
+then
+	echo "gob-bump <branch> <tag-name>"
+	echo "branch     Merge the newest changes from here"
+	echo "tag-name   To create the new gob-tag-name tag"
+	exit 1
+fi
+
+new_changes=$1
+new_tag=gob-$2
+
+# setup
+this_branch=$(git-name-rev --name-only HEAD)
+
+gob_bases=$(git-tag | grep '^gob-')
+if test -z "$gob_bases"
+then
+    echo 'cannot find any gob-* tag, aborting'  1>&2
+    exit 1
+fi
+
+# find the last unpatched version and create a 'reset' commit
+# (actually this is one commit after that, we'll use ${one_ofter}^ to get
+# the right one)
+one_after=$(git-rev-list $this_branch --not $gob_bases | tail -n 1)
+
+# reset to the state of the last gob tag
+if test -n "$one_after"
+then
+	temp_branch=$(mktemp $(echo temp.$this_branch.XXXXXXXXXX | tr '/' '-'))
+	rm $temp_branch
+	git-checkout -b $temp_branch ${one_after}^
+	git-reset --soft $this_branch
+	git-commit -m 'Changes reverted to the last gob tag.' -a
+	git-checkout $this_branch
+	if git-merge $temp_branch
+	then
+		git-branch -d $temp_branch
+	else
+		echo "Reverting changes failed." 1>&2
+		exit 1
+	fi
+fi
+
+# get the newest changes and tag the tip
+git-merge $new_changes
+git-tag $new_tag
+
+# update the branches
+git-branch -r | sed 's#^.*origin/##' | grep -Ev '/|^HEAD$' |
+	while read branch
+	do
+		temp_branch=$(mktemp fixme.$branch.XXXXXXXXXX)
+		rm $temp_branch
+		git-checkout -b $temp_branch origin/$branch
+		if gob-update $this_branch
+		then
+			git-push
+			git-checkout $this_branch
+			if git-merge $temp_branch
+			then
+				git-branch -d $temp_branch
+			else
+				echo "Merging back failed, please merge manually: $temp_branch" 1>&2
+			fi
+		else
+			echo "Update failed, please update manually: $temp_branch"  1>&2
+		fi
+	done
