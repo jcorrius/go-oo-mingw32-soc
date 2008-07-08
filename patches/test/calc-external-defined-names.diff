@@ -105,18 +105,155 @@ index 8036115..6d89e05 100644
      BOOL IsColRowName( const String& );
      BOOL IsBoolean( const String& );
 diff --git sc/inc/document.hxx sc/inc/document.hxx
-index 8a648d3..82bd60a 100644
+index 8a648d3..9b373cc 100644
 --- sc/inc/document.hxx
 +++ sc/inc/document.hxx
-@@ -624,6 +624,8 @@ SC_DLLPUBLIC	ScDBCollection*	GetDBCollection() const;
+@@ -92,6 +92,7 @@ class ScDocOptions;
+ class ScDocumentPool;
+ class ScDrawLayer;
+ class ScExtDocOptions;
++class ScExternalRefManager;
+ class ScFormulaCell;
+ class ScMarkData;
+ class ScOutlineTable;
+@@ -281,6 +282,7 @@ private:
+ 	ScFieldEditEngine*	pCacheFieldEditEngine;
+ 
+     ::std::auto_ptr<ScDocProtection> pDocProtection;
++    ::std::auto_ptr<ScExternalRefManager> pExternalRefMgr;
+ 	String              aDocName;                       // opt: Dokumentname
+ 	String              aDocCodeName;                       // opt: Dokumentname
+ 	ScRangePairListRef	xColNameRanges;
+@@ -624,6 +626,8 @@ SC_DLLPUBLIC	ScDBCollection*	GetDBCollection() const;
  									const String& aFileName,
  									const String& aTabName );
  
-+    ScTokenArray*   FindExternalRangeName( const String& rFile, const String& rName, const ScAddress& rCurPos );
++    ScExternalRefManager* GetExternalRefManager();
 +
      /** Creates a new sheet, and makes it linked to the specified sheet in an external document.
          @param rnTab  (out-param) Returns the sheet index, if sheet could be inserted).
          @return  TRUE = Sheet created, rnTab contains valid sheet index. */
+diff --git sc/inc/externalrefmgr.hxx sc/inc/externalrefmgr.hxx
+new file mode 100644
+index 0000000..6637583
+--- /dev/null
++++ sc/inc/externalrefmgr.hxx
+@@ -0,0 +1,115 @@
++/*************************************************************************
++ *
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ * 
++ * Copyright 2008 by Sun Microsystems, Inc.
++ *
++ * OpenOffice.org - a multi-platform office productivity suite
++ *
++ * $RCSfile: document.hxx,v $
++ * $Revision: 1.112 $
++ *
++ * This file is part of OpenOffice.org.
++ *
++ * OpenOffice.org is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License version 3
++ * only, as published by the Free Software Foundation.
++ *
++ * OpenOffice.org is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License version 3 for more details
++ * (a copy is included in the LICENSE file that accompanied this code).
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * version 3 along with OpenOffice.org.  If not, see
++ * <http://www.openoffice.org/license.html>
++ * for a copy of the LGPLv3 License.
++ *
++ ************************************************************************/
++
++#ifndef SC_EXTERNALREFMGR_HXX
++#define SC_EXTERNALREFMGR_HXX
++
++#include "sfx2/objsh.hxx"
++#include "global.hxx"
++#include "address.hxx"
++
++#include <hash_map>
++#include <boost/shared_ptr.hpp>
++
++class ScDocument;
++class ScToken;
++class ScTokenArray;
++class String;
++class SfxObjectShellRef;
++
++class ScExternalRefManager
++{
++    struct ScAddressHash
++    {
++        size_t operator()(const ScAddress& rAddr) const
++        {
++            // dumb hashing - how do we properly hash a cell address?
++            return rAddr.Tab() + rAddr.Col() + rAddr.Row();
++        }
++    };
++
++    struct ScRangeHash
++    {
++        size_t operator()(const ScRange& rRange) const
++        {
++            const ScAddress& s = rRange.aStart;
++            const ScAddress& e = rRange.aEnd;
++            return s.Tab() + s.Col() + s.Row() + e.Tab() + e.Col() + e.Row();
++        }
++    };
++
++    typedef ::std::hash_map<String, SfxObjectShellRef, ScStringHashCode, ::std::equal_to<String> >  ScDocShellMap;
++    typedef ::boost::shared_ptr<ScToken>                ScTokenRef;
++    typedef ::boost::shared_ptr<ScTokenArray>           ScTokenArrayRef;
++    typedef ::std::hash_map<ScAddress, ScTokenRef, ScAddressHash, ::std::equal_to<ScAddress> >      SingleTokenMap;
++    typedef ::std::hash_map<ScRange, ScTokenRef, ScRangeHash, ::std::equal_to<ScRange> >            DoubleTokenMap;
++    typedef ::std::hash_map<String, ScTokenArrayRef, ScStringHashCode, ::std::equal_to<String> >     RangeNameMap;
++
++    /** 
++     * Cached content of a single external document
++     */
++    struct DocCache
++    {
++        SingleTokenMap  maSingleTokens;
++        DoubleTokenMap  maDoubleTokens;
++        RangeNameMap    maRangeNames;
++    };
++    typedef ::boost::shared_ptr<DocCache> DocCacheRef;
++
++    typedef ::std::hash_map<String, DocCacheRef, ScStringHashCode, ::std::equal_to<String> >   DocCacheMap;
++
++public:
++    explicit ScExternalRefManager(ScDocument* pDoc);
++    ~ScExternalRefManager();
++
++    ScToken* getSingleRefToken(const String& rFile, const ScAddress& rCell);
++    ScToken* getDoubleRefToken(const String& rFile, const ScRange& rRange);
++    ScTokenArray* getRangeNameTokens(const String& rFile, const String& rName, const ScAddress& rCurPos);
++
++    void clear();
++
++private:
++    ScExternalRefManager();
++    ScExternalRefManager(const ScExternalRefManager&); 
++
++    DocCache* getDocumentCache(const String& rFile);
++    ScDocument* getSrcDocument(const String& rFile);
++
++private:
++    ScDocument* mpDoc;
++
++    /** source document cache */
++    ScDocShellMap maDocShells;
++
++    DocCacheMap maCachedDocContents;
++};
++
++
++#endif
 diff --git sc/inc/opcode.hxx sc/inc/opcode.hxx
 index 285104d..b72ebad 100644
 --- sc/inc/opcode.hxx
@@ -130,7 +267,7 @@ index 285104d..b72ebad 100644
  		ocIf				= SC_OPCODE_IF,
  		ocChose				= SC_OPCODE_CHOSE,
 diff --git sc/inc/token.hxx sc/inc/token.hxx
-index 23decd6..0cc2f24 100644
+index 23decd6..4b0aa47 100644
 --- sc/inc/token.hxx
 +++ sc/inc/token.hxx
 @@ -64,7 +64,7 @@ enum StackVarEnum
@@ -151,38 +288,10 @@ index 23decd6..0cc2f24 100644
      virtual const SingleRefData&    GetSingleRef() const;
      virtual SingleRefData&      GetSingleRef();
      virtual const ComplRefData& GetDoubleRef() const;
-@@ -171,6 +173,7 @@ public:
-     virtual       ScRefList*    GetRefList();
-     virtual USHORT              GetError() const;
-     virtual void                SetError( USHORT );
-+    virtual bool                IsExternalRef() const;
- 
-             ScToken*            Clone() const;
- 
-@@ -446,6 +449,39 @@ public:
-     virtual BOOL                operator==( const ScToken& rToken ) const;
+@@ -447,6 +449,20 @@ public:
  };
  
-+/** 
-+ *  represents an external cell reference that points to a cell outside
-+ *  the current document.  The cell address must be absolute, and the
-+ *  value may be cached.
-+ */
-+class ScExternalSingleRefToken : public ScToken
-+{
-+private:
-+    SingleRefData       maSingleRef;
-+    String  maFile;
-+
-+public:
-+    ScExternalSingleRefToken( SCsCOL nCol, SCsROW nRow, SCsTAB nTab, const String& rFile );
-+    ScExternalSingleRefToken( const ScExternalSingleRefToken& r );
-+    virtual ~ScExternalSingleRefToken();
-+    virtual const SingleRefData&    GetSingleRef() const;
-+    virtual const String&           GetString() const;
-+    virtual bool                    IsExternalRef() const;
-+};
-+
+ 
 +class ScExternalNameToken : public ScOpToken
 +{
 +private:
@@ -196,14 +305,35 @@ index 23decd6..0cc2f24 100644
 +    virtual BOOL                operator==( const ScToken& rToken ) const;
 +};
 +
- 
++
  class ScJumpToken : public ScOpToken
  {
+ private:
+diff --git sc/source/core/data/documen2.cxx sc/source/core/data/documen2.cxx
+index 6dd6697..69e45fb 100644
+--- sc/source/core/data/documen2.cxx
++++ sc/source/core/data/documen2.cxx
+@@ -140,6 +140,7 @@ ScDocument::ScDocument( ScDocumentMode	eMode,
+ 		pScriptTypeData( NULL ),
+         pCacheFieldEditEngine( NULL ),
+         pDocProtection( NULL ),
++        pExternalRefMgr( NULL ),
+ 		pViewOptions( NULL ),
+ 		pDocOptions( NULL ),
+ 		pExtDocOptions( NULL ),
 diff --git sc/source/core/data/documen3.cxx sc/source/core/data/documen3.cxx
-index 541e2e4..5f33212 100644
+index 541e2e4..20dae1e 100644
 --- sc/source/core/data/documen3.cxx
 +++ sc/source/core/data/documen3.cxx
-@@ -81,7 +81,10 @@
+@@ -61,6 +61,7 @@
+ #include "brdcst.hxx"
+ #include "bcaslot.hxx"
+ #include "tablink.hxx"
++#include "externalrefmgr.hxx"
+ #include "markdata.hxx"
+ #include "validat.hxx"
+ #include "dociter.hxx"
+@@ -81,7 +82,10 @@
  #include "svtools/PasswordHelper.hxx"
  #include "tabprotection.hxx"
  
@@ -214,238 +344,40 @@ index 541e2e4..5f33212 100644
  
  //------------------------------------------------------------------------
  
-@@ -478,6 +481,214 @@ BOOL ScDocument::LinkExternalTab( SCTAB& rTab, const String& aDocTab,
+@@ -478,6 +482,14 @@ BOOL ScDocument::LinkExternalTab( SCTAB& rTab, const String& aDocTab,
  	return TRUE;
  }
  
-+static bool lcl_AddSingleRefToTokenArray(ScBaseCell* pCell, ScTokenArray& rArray)
++ScExternalRefManager* ScDocument::GetExternalRefManager()
 +{
-+    switch (pCell->GetCellType())
-+    {
-+        case CELLTYPE_STRING:
-+        {
-+            String aStr;
-+            static_cast<ScStringCell*>(pCell)->GetString(aStr);
-+            ScStringToken aToken(aStr);
-+            rArray.AddToken(aToken);
-+            return true;
-+        }
-+        break;
-+        case CELLTYPE_VALUE:
-+        {
-+            double fVal = static_cast<ScValueCell*>(pCell)->GetValue();
-+            ScDoubleToken aToken(fVal);
-+            rArray.AddToken(aToken);
-+            return true;
-+        }
-+        break;
-+        case CELLTYPE_FORMULA:
-+        {
-+            ScFormulaCell* pFCell = static_cast<ScFormulaCell*>(pCell);
-+            if (pFCell->IsValue())
-+            {
-+                double fVal = pFCell->GetValue();
-+                ScDoubleToken aToken(fVal);
-+                rArray.AddToken(aToken);
-+                return true;
-+            }
-+            else
-+            {
-+                String aStr;
-+                pFCell->GetString(aStr);
-+                ScStringToken aToken(aStr);
-+                rArray.AddToken(aToken);
-+                return true;
-+            }
-+        }
-+        break;
-+        default:
-+            DBG_ERROR("attempted to convert an unknown cell type.");
-+    }
++    if (!pExternalRefMgr.get())
++        pExternalRefMgr.reset(new ScExternalRefManager(this));
 +
-+    return false;
-+}
-+
-+static bool lcl_AddDoubleRefToTokenArray(SCsTAB nTab1, SCsCOL nCol1, SCsROW nRow1,
-+                                         SCsTAB nTab2, SCsCOL nCol2, SCsROW nRow2,
-+                                         ScDocument* pSrcDoc, ScTokenArray& rArray)
-+{
-+    for (SCsTAB nTab = nTab1; nTab <= nTab2; ++nTab)
-+    {
-+        ScMatrixRef xMat = new ScMatrix(
-+            static_cast<SCSIZE>(nCol2-nCol1+1),
-+            static_cast<SCSIZE>(nRow2-nRow1+1));
-+
-+        for (SCsCOL nCol = nCol1; nCol <= nCol2; ++nCol)
-+        {
-+            for (SCsROW nRow = nRow1; nRow <= nRow2; ++nRow)
-+            {
-+                SCSIZE nC = nCol - nCol1, nR = nRow - nRow1;
-+                ScBaseCell* pCell;
-+                pSrcDoc->GetCell(nCol, nRow, nTab, pCell);
-+                if (pCell)
-+                {
-+                    switch (pCell->GetCellType())
-+                    {
-+                        case CELLTYPE_STRING:
-+                        {
-+                            String aStr;
-+                            static_cast<ScStringCell*>(pCell)->GetString(aStr);
-+                            xMat->PutString(aStr, nC, nR);
-+                        }
-+                        break;
-+                        case CELLTYPE_VALUE:
-+                        {
-+                            double fVal = static_cast<ScValueCell*>(pCell)->GetValue();
-+                            xMat->PutDouble(fVal, nC, nR);
-+                        }
-+                        break;
-+                        case CELLTYPE_FORMULA:
-+                        {
-+                            ScFormulaCell* pFCell = static_cast<ScFormulaCell*>(pCell);
-+                            if (pFCell->IsValue())
-+                            {
-+                                double fVal = pFCell->GetValue();
-+                                xMat->PutDouble(fVal, nC, nR);
-+                            }
-+                            else
-+                            {
-+                                String aStr;
-+                                pFCell->GetString(aStr);
-+                                xMat->PutString(aStr, nC, nR);
-+                            }
-+                        }
-+                        break;
-+                        default:
-+                            DBG_ERROR("attempted to convert an unknown cell type.");
-+                    }
-+                }
-+                else
-+                {
-+                    xMat->PutEmpty(nC, nR);
-+                }
-+            }
-+        }
-+        ScMatrix* pMat2 = xMat;
-+        ScMatrixToken aToken(pMat2);
-+        rArray.AddToken(aToken);
-+    }
-+    return true;
-+}
-+
-+ScTokenArray* ScDocument::FindExternalRangeName( const String& rFile, const String& rName, const ScAddress& rCurPos )
-+{
-+    fprintf(stdout, "ScDocument::FindExternalRangeName: --begin (file = '%s'; name = '%s')\n",
-+            rtl::OUStringToOString(rFile, RTL_TEXTENCODING_UTF8).getStr(), 
-+            rtl::OUStringToOString(rName, RTL_TEXTENCODING_UTF8).getStr());
-+
-+    String aFilterName, aOptions;
-+    sal_uInt32 nLinkCnt = pExtDocOptions ? pExtDocOptions->GetDocSettings().mnLinkCnt : 0;
-+    ScDocumentLoader aLoader(rFile, aFilterName, aOptions, nLinkCnt + 1);
-+    if (aLoader.IsError())
-+        return NULL;
-+
-+    // TODO: Find a way to cache the source document to avoid loading it for
-+    // every single external cell reference.
-+
-+    ScDocument* pSrcDoc = aLoader.GetDocument();
-+    ScRangeName* pExtNames = pSrcDoc->GetRangeName();
-+    String aUpperName = ScGlobal::pCharClass->upper(rName);
-+    USHORT n;
-+    bool bRes = pExtNames->SearchNameUpper(aUpperName, n);
-+    if (!bRes)
-+        return NULL;
-+
-+    ScRangeData* p = (*pExtNames)[n];
-+    if (!p)
-+        return NULL;
-+
-+    // Parse all tokens in this external range data, and replace each absolute 
-+    // reference token with an external reference token, and cache them.  Also
-+    // register the source document with the link manager if it's a new
-+    // source.
-+
-+    auto_ptr<ScTokenArray> pNew(new ScTokenArray);
-+
-+    ScTokenArray* pCode = p->GetCode();
-+    for (ScToken* pToken = pCode->First(); pToken; pToken = pCode->Next())
-+    {
-+        bool bTokenAdded = false;
-+        switch (pToken->GetType())
-+        {
-+            case svSingleRef:
-+            {
-+                fprintf(stdout, "ScDocument::FindExternalRangeName:   single ref\n");
-+                SingleRefData aRef(pToken->GetSingleRef());
-+                if (aRef.IsTabRel())
-+                    break;
-+
-+                // The sheet reference is absolute.  Get the cell from the 
-+                // source document, and convert it to a static value.
-+    
-+                aRef.CalcAbsIfRel(rCurPos);
-+                ScBaseCell* pCell;
-+                pSrcDoc->GetCell(aRef.nCol, aRef.nRow, aRef.nTab, pCell);
-+                if (pCell)
-+                    bTokenAdded = lcl_AddSingleRefToTokenArray(pCell, *pNew);        
-+
-+                if (!bTokenAdded)
-+                {
-+                    // Cell in the source document is probably empty.
-+                    ScEmptyCellToken aToken(false, false);
-+                    pNew->AddToken(aToken);
-+                    bTokenAdded = true;
-+                }
-+            }
-+            break;
-+            case svDoubleRef:
-+            {
-+                fprintf(stdout, "ScDocument::FindExternalRangeName:   double ref\n");
-+                ComplRefData aComRef(pToken->GetDoubleRef());
-+                if (aComRef.Ref1.IsTabRel() || aComRef.Ref2.IsTabRel())
-+                    break;
-+
-+                aComRef.CalcAbsIfRel(rCurPos);
-+                SCsTAB nTab1 = aComRef.Ref1.nTab;
-+                SCsCOL nCol1 = aComRef.Ref1.nCol;
-+                SCsROW nRow1 = aComRef.Ref1.nRow;
-+                SCsTAB nTab2 = aComRef.Ref2.nTab;
-+                SCsCOL nCol2 = aComRef.Ref2.nCol;
-+                SCsROW nRow2 = aComRef.Ref2.nRow;
-+                
-+                bTokenAdded = lcl_AddDoubleRefToTokenArray(
-+                    nTab1, nCol1, nRow1, nTab2, nCol2, nRow2, pSrcDoc, *pNew);
-+            }
-+            break;
-+        }
-+        
-+        if (!bTokenAdded)
-+            pNew->AddToken(*pToken);
-+    }
-+
-+    return pNew.release();
++    return pExternalRefMgr.get();
 +}
 +
  BOOL ScDocument::InsertLinkedEmptyTab( SCTAB& rnTab, const String& rFileName,
          const String& rFilterName, const String& rFilterOpt, const String& rTabName )
  {
 diff --git sc/source/core/tool/compiler.cxx sc/source/core/tool/compiler.cxx
-index 7caea76..2fbeb71 100644
+index 7caea76..c5837ce 100644
 --- sc/source/core/tool/compiler.cxx
 +++ sc/source/core/tool/compiler.cxx
-@@ -74,8 +74,11 @@
+@@ -73,9 +73,13 @@
+ #include "errorcodes.hxx"
  #include "parclass.hxx"
  #include "autonamecache.hxx"
- 
-+#include <stdio.h>
++#include "externalrefmgr.hxx"
 +
++#include <stdio.h>
+ 
  using namespace ::com::sun::star;
  using rtl::OUString;
 +using ::std::vector;
  
  #if OSL_DEBUG_LEVEL > 1
  // For some unknown reason the identical dbg_dump utilities in
-@@ -1361,6 +1364,64 @@ struct ConventionOOO_A1 : public Convention_A1
+@@ -1361,6 +1365,64 @@ struct ConventionOOO_A1 : public Convention_A1
  
          return sal_Unicode(0);
      }
@@ -510,7 +442,7 @@ index 7caea76..2fbeb71 100644
  };
  
  
-@@ -1480,6 +1541,16 @@ struct ConventionXL
+@@ -1480,6 +1542,16 @@ struct ConventionXL
          }
          return sal_Unicode(0);
      }
@@ -527,7 +459,7 @@ index 7caea76..2fbeb71 100644
  };
  
  struct ConventionXL_A1 : public Convention_A1, public ConventionXL
-@@ -1561,6 +1632,16 @@ struct ConventionXL_A1 : public Convention_A1, public ConventionXL
+@@ -1561,6 +1633,16 @@ struct ConventionXL_A1 : public Convention_A1, public ConventionXL
      {
          return ConventionXL::getSpecialSymbol(eSymType);
      }
@@ -544,7 +476,7 @@ index 7caea76..2fbeb71 100644
  };
  
  static const ConventionXL_A1 ConvXL_A1;
-@@ -1688,6 +1769,16 @@ struct ConventionXL_R1C1 : public ScCompiler::Convention, public ConventionXL
+@@ -1688,6 +1770,16 @@ struct ConventionXL_R1C1 : public ScCompiler::Convention, public ConventionXL
      {
          return ConventionXL::getSpecialSymbol(eSymType);
      }
@@ -561,7 +493,7 @@ index 7caea76..2fbeb71 100644
  };
  
  static const ConventionXL_R1C1 ConvXL_R1C1;
-@@ -2597,6 +2688,24 @@ BOOL ScCompiler::IsNamedRange( const String& rUpperName )
+@@ -2597,6 +2689,24 @@ BOOL ScCompiler::IsNamedRange( const String& rUpperName )
          return FALSE;
  }
  
@@ -586,37 +518,31 @@ index 7caea76..2fbeb71 100644
  BOOL ScCompiler::IsDBRange( const String& rName )
  {
      USHORT n;
-@@ -3183,6 +3292,15 @@ BOOL ScCompiler::NextNewToken( bool bAllowBooleans )
+@@ -3183,6 +3293,9 @@ BOOL ScCompiler::NextNewToken( bool bAllowBooleans )
              fprintf( stderr, "Token '%s'\n",
                       rtl::OUStringToOString( aUpper, RTL_TEXTENCODING_UTF8 ).getStr() );
  #endif
 +            fprintf(stdout, "ScCompiler::NextNewToken:   token = '%s'\n",
 +                    rtl::OUStringToOString(aOrg, RTL_TEXTENCODING_UTF8).getStr());
 +
-+            bool bIsRef = IsReference(aOrg);
-+            bool bIsNamedRange = IsNamedRange(aUpper);
-+            bool bIsExternNameRange = IsExternalNamedRange(aOrg);
-+            fprintf(stdout, "ScCompiler::NextNewToken:   is reference? (%d); is named range? (%d); external name? (%d)\n", 
-+                    bIsRef, bIsNamedRange, bIsExternNameRange);
-+
              // Column 'DM' ("Deutsche Mark", German currency) couldn't be
              // referred to => IsReference() before IsValue().
              // #42016# Italian ARCTAN.2 resulted in #REF! => IsOpcode() before
-@@ -3190,10 +3308,11 @@ BOOL ScCompiler::NextNewToken( bool bAllowBooleans )
+@@ -3190,10 +3303,11 @@ BOOL ScCompiler::NextNewToken( bool bAllowBooleans )
              // IsBoolean before isValue to catch inline bools without the kludge
              //    for inline arrays.
              if ( !(bMayBeFuncName && IsOpCode( aUpper ))
 -              && !IsReference( aOrg )
-+              && !bIsRef
++              && !IsReference(aOrg)
                && !(bAllowBooleans && IsBoolean( aUpper ))
                && !IsValue( aUpper )
 -              && !IsNamedRange( aUpper )
-+              && !bIsNamedRange
-+              && !bIsExternNameRange
++              && !IsNamedRange(aUpper)
++              && !IsExternalNamedRange(aOrg)
                && !IsDBRange( aUpper )
                && !IsColRowName( aUpper )
                && !(bMayBeFuncName && IsMacro( aUpper ))
-@@ -3452,8 +3571,30 @@ BOOL ScCompiler::GetToken()
+@@ -3452,8 +3566,31 @@ BOOL ScCompiler::GetToken()
      }
      if( pToken->GetOpCode() == ocSubTotal )
          glSubTotal = TRUE;
@@ -633,7 +559,8 @@ index 7caea76..2fbeb71 100644
 +                rtl::OUStringToOString(rFile, RTL_TEXTENCODING_UTF8).getStr(), 
 +                rtl::OUStringToOString(rName, RTL_TEXTENCODING_UTF8).getStr());
 +
-+        ScTokenArray* pNew = pDoc->FindExternalRangeName(rFile, rName, aPos);
++        ScExternalRefManager* pRefMgr = pDoc->GetExternalRefManager();
++        ScTokenArray* pNew = pRefMgr->getRangeNameTokens(rFile, rName, aPos);
 +        if (pNew)
 +        {
 +            PushTokenArray(pNew, true);
@@ -647,7 +574,7 @@ index 7caea76..2fbeb71 100644
          ScRangeData* pRangeData = pDoc->GetRangeName()->FindIndex( pToken->GetIndex() );
          if (pRangeData)
          {
-@@ -5402,6 +5543,9 @@ ScToken* ScCompiler::CreateStringFromToken( rtl::OUStringBuffer& rBuffer, ScToke
+@@ -5402,6 +5539,9 @@ ScToken* ScCompiler::CreateStringFromToken( rtl::OUStringBuffer& rBuffer, ScToke
      BOOL bSpaces = FALSE;
      ScToken* t = pTokenP;
      OpCode eOp = t->GetOpCode();
@@ -658,7 +585,7 @@ index 7caea76..2fbeb71 100644
      {
          // AND, OR infix?
 diff --git sc/source/core/tool/token.cxx sc/source/core/tool/token.cxx
-index 7312257..493fc2e 100644
+index 7312257..cb101a3 100644
 --- sc/source/core/tool/token.cxx
 +++ sc/source/core/tool/token.cxx
 @@ -52,6 +52,8 @@
@@ -745,57 +672,10 @@ index 7312257..493fc2e 100644
  const SingleRefData& ScToken::GetSingleRef() const
  {
      DBG_ERRORFILE( "ScToken::GetSingleRef: virtual dummy called" );
-@@ -878,6 +918,11 @@ void ScToken::SetError( USHORT )
-     DBG_ERRORFILE( "ScToken::SetError: virtual dummy called" );
+@@ -1016,6 +1056,60 @@ BOOL ScIndexToken::operator==( const ScToken& r ) const
  }
  
-+bool ScToken::IsExternalRef() const
-+{
-+    return false;
-+}
-+
- // ==========================================================================
- // real implementations of virtual functions
- // --------------------------------------------------------------------------
-@@ -1015,6 +1060,94 @@ BOOL ScIndexToken::operator==( const ScToken& r ) const
-     return ScToken::operator==( r ) && nIndex == r.GetIndex();
- }
  
-+ScExternalSingleRefToken::ScExternalSingleRefToken( SCsCOL nCol, SCsROW nRow, SCsTAB nTab, const String& rFile ) :
-+    ScToken( svSingleRef ),
-+    maFile(rFile)
-+{
-+    maSingleRef.nCol = nCol;
-+    maSingleRef.nRow = nRow;
-+    maSingleRef.nTab = nTab;
-+}
-+
-+ScExternalSingleRefToken::ScExternalSingleRefToken( const ScExternalSingleRefToken& r ) :
-+    ScToken( svSingleRef ),
-+    maSingleRef(r.maSingleRef),
-+    maFile(r.maFile)
-+{
-+}
-+
-+ScExternalSingleRefToken::~ScExternalSingleRefToken()
-+{
-+}
-+
-+const SingleRefData& ScExternalSingleRefToken::GetSingleRef() const
-+{
-+    return maSingleRef;
-+}
-+
-+const String& ScExternalSingleRefToken::GetString() const
-+{
-+    return maFile;
-+}
-+
-+bool ScExternalSingleRefToken::IsExternalRef() const
-+{
-+    return true;
-+}
-+
 +ScExternalNameToken::ScExternalNameToken( const String& rFile, const String& rName ) :
 +    ScOpToken( ocExternalName, svExternalName )
 +{
@@ -849,6 +729,471 @@ index 7312257..493fc2e 100644
 +    return true;
 +}
 +
- 
++
  short* ScJumpToken::GetJump() const                     { return pJump; }
  BOOL ScJumpToken::operator==( const ScToken& r ) const
+ {
+diff --git sc/source/ui/docshell/externalrefmgr.cxx sc/source/ui/docshell/externalrefmgr.cxx
+new file mode 100644
+index 0000000..6124a78
+--- /dev/null
++++ sc/source/ui/docshell/externalrefmgr.cxx
+@@ -0,0 +1,422 @@
++/*************************************************************************
++ *
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ * 
++ * Copyright 2008 by Sun Microsystems, Inc.
++ *
++ * OpenOffice.org - a multi-platform office productivity suite
++ *
++ * $RCSfile: document.hxx,v $
++ * $Revision: 1.112 $
++ *
++ * This file is part of OpenOffice.org.
++ *
++ * OpenOffice.org is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License version 3
++ * only, as published by the Free Software Foundation.
++ *
++ * OpenOffice.org is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License version 3 for more details
++ * (a copy is included in the LICENSE file that accompanied this code).
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * version 3 along with OpenOffice.org.  If not, see
++ * <http://www.openoffice.org/license.html>
++ * for a copy of the LGPLv3 License.
++ *
++ ************************************************************************/
++
++// MARKER(update_precomp.py): autogen include statement, do not remove
++#include "precompiled_sc.hxx"
++
++
++
++// INCLUDE ---------------------------------------------------------------
++
++#include "externalrefmgr.hxx"
++#include "document.hxx"
++#include "token.hxx"
++#include "tokenarray.hxx"
++#include "address.hxx"
++#include "tablink.hxx"
++#include "docsh.hxx"
++#include "scextopt.hxx"
++#include "rangenam.hxx"
++#include "cell.hxx"
++
++#include "sfx2/app.hxx"
++#include "sfx2/docfilt.hxx"
++#include "sfx2/docfile.hxx"
++#include "sfx2/fcontnr.hxx"
++#include "sfx2/sfxsids.hrc"
++#include "sfx2/objsh.hxx"
++#include "svtools/itemset.hxx"
++#include "svtools/stritem.hxx"
++
++#include <memory>
++#include <stdio.h>
++
++using ::std::auto_ptr;
++
++static ScToken* lcl_convertToToken(ScBaseCell* pCell)
++{
++    if (!pCell)
++        return NULL;
++
++    switch (pCell->GetCellType())
++    {
++        case CELLTYPE_STRING:
++        {
++            String aStr;
++            static_cast<ScStringCell*>(pCell)->GetString(aStr);
++            ScStringToken aToken(aStr);
++            return aToken.Clone();
++        }
++        break;
++        case CELLTYPE_VALUE:
++        {
++            double fVal = static_cast<ScValueCell*>(pCell)->GetValue();
++            ScDoubleToken aToken(fVal);
++            return aToken.Clone();
++        }
++        break;
++        case CELLTYPE_FORMULA:
++        {
++            ScFormulaCell* pFCell = static_cast<ScFormulaCell*>(pCell);
++            if (pFCell->IsValue())
++            {
++                double fVal = pFCell->GetValue();
++                ScDoubleToken aToken(fVal);
++                return aToken.Clone();
++            }
++            else
++            {
++                String aStr;
++                pFCell->GetString(aStr);
++                ScStringToken aToken(aStr);
++                return aToken.Clone();
++            }
++        }
++        break;
++        default:
++            DBG_ERROR("attempted to convert an unknown cell type.");
++    }
++
++    return NULL;
++}
++
++static bool lcl_AddDoubleRefToTokenArray(SCsTAB nTab1, SCsCOL nCol1, SCsROW nRow1,
++                                         SCsTAB nTab2, SCsCOL nCol2, SCsROW nRow2,
++                                         ScDocument* pSrcDoc, ScTokenArray& rArray)
++{
++    for (SCsTAB nTab = nTab1; nTab <= nTab2; ++nTab)
++    {
++        ScMatrixRef xMat = new ScMatrix(
++            static_cast<SCSIZE>(nCol2-nCol1+1),
++            static_cast<SCSIZE>(nRow2-nRow1+1));
++
++        for (SCsCOL nCol = nCol1; nCol <= nCol2; ++nCol)
++        {
++            for (SCsROW nRow = nRow1; nRow <= nRow2; ++nRow)
++            {
++                SCSIZE nC = nCol - nCol1, nR = nRow - nRow1;
++                ScBaseCell* pCell;
++                pSrcDoc->GetCell(nCol, nRow, nTab, pCell);
++                if (pCell)
++                {
++                    switch (pCell->GetCellType())
++                    {
++                        case CELLTYPE_STRING:
++                        {
++                            String aStr;
++                            static_cast<ScStringCell*>(pCell)->GetString(aStr);
++                            xMat->PutString(aStr, nC, nR);
++                        }
++                        break;
++                        case CELLTYPE_VALUE:
++                        {
++                            double fVal = static_cast<ScValueCell*>(pCell)->GetValue();
++                            xMat->PutDouble(fVal, nC, nR);
++                        }
++                        break;
++                        case CELLTYPE_FORMULA:
++                        {
++                            ScFormulaCell* pFCell = static_cast<ScFormulaCell*>(pCell);
++                            if (pFCell->IsValue())
++                            {
++                                double fVal = pFCell->GetValue();
++                                xMat->PutDouble(fVal, nC, nR);
++                            }
++                            else
++                            {
++                                String aStr;
++                                pFCell->GetString(aStr);
++                                xMat->PutString(aStr, nC, nR);
++                            }
++                        }
++                        break;
++                        default:
++                            DBG_ERROR("attempted to convert an unknown cell type.");
++                    }
++                }
++                else
++                {
++                    xMat->PutEmpty(nC, nR);
++                }
++            }
++        }
++        ScMatrix* pMat2 = xMat;
++        ScMatrixToken aToken(pMat2);
++        rArray.AddToken(aToken);
++    }
++    return true;
++}
++
++ScExternalRefManager::ScExternalRefManager(ScDocument* pDoc) :
++    mpDoc(pDoc)
++{
++}
++
++ScExternalRefManager::~ScExternalRefManager()
++{
++    clear();
++}
++
++ScToken* ScExternalRefManager::getSingleRefToken(const String& rFile, const ScAddress& rCell)
++{
++    {
++        String aStr;
++        rCell.Format(aStr, SCA_ABS_3D);
++        fprintf(stdout, "ScExternalRefManager::getSingleRefToken: --begin (file = '%s'; address = '%s')\n",
++                rtl::OUStringToOString(rFile, RTL_TEXTENCODING_UTF8).getStr(),
++                rtl::OUStringToOString(aStr, RTL_TEXTENCODING_UTF8).getStr());
++    }
++
++    SingleTokenMap& rMap = getDocumentCache(rFile)->maSingleTokens;
++    SingleTokenMap::iterator itr = rMap.find(rCell);
++    if (itr != rMap.end())
++    {
++        fprintf(stdout, "ScExternalRefManager::getSingleRefToken:   reference cached\n");
++        // this single reference is cached.
++        return itr->second.get();
++    }
++
++    // reference not cached.  read from the source document.
++    ScDocument* pSrcDoc = getSrcDocument(rFile);
++    if (!pSrcDoc)
++        return NULL;
++
++    ScBaseCell* pCell = NULL;
++    pSrcDoc->GetCell(rCell.Col(), rCell.Row(), rCell.Tab(), pCell);
++    ScTokenRef pTok(lcl_convertToToken(pCell));
++
++    if (!pTok.get())
++    {
++        // Cell in the source document is probably empty.
++        pTok.reset(new ScEmptyCellToken(false, false));
++    }
++
++    rMap.insert(SingleTokenMap::value_type(rCell, pTok));
++    itr = rMap.find(rCell);
++    if (itr == rMap.end())
++        // This should never happen!
++        return NULL;
++
++    fprintf(stdout, "ScExternalRefManager::getSingleRefToken: --end\n");
++    return itr->second.get();
++}
++
++ScToken* ScExternalRefManager::getDoubleRefToken(const String& rFile, const ScRange& rRange)
++{
++    {
++        String aStr;
++        rRange.Format(aStr, SCR_ABS_3D, mpDoc);
++        fprintf(stdout, "ScExternalRefManager::getDoubleRefToken: --begin (file = '%s'; range = '%s)\n",
++                rtl::OUStringToOString(rFile, RTL_TEXTENCODING_UTF8).getStr(), 
++                rtl::OUStringToOString(aStr, RTL_TEXTENCODING_UTF8).getStr());
++    }
++
++    DoubleTokenMap& rMap = getDocumentCache(rFile)->maDoubleTokens;
++    DoubleTokenMap::iterator itr = rMap.find(rRange);
++    if (itr != rMap.end())
++    {
++        fprintf(stdout, "ScExternalRefManager::getDoubleRefToken:   range reference cached\n");
++        // this range reference is cached.
++        return itr->second.get();
++    }
++
++    // reference not cached.  read from the source document.
++    ScDocument* pSrcDoc = getSrcDocument(rFile);
++    if (!pSrcDoc)
++        return NULL;
++
++
++    return NULL;
++}
++
++ScTokenArray* ScExternalRefManager::getRangeNameTokens(const String& rFile, const String& rName, const ScAddress& rCurPos)
++{
++    ScDocument* pSrcDoc = getSrcDocument(rFile);
++    if (!pSrcDoc)
++        return NULL;
++
++    ScRangeName* pExtNames = pSrcDoc->GetRangeName();
++    String aUpperName = ScGlobal::pCharClass->upper(rName);
++    USHORT n;
++    bool bRes = pExtNames->SearchNameUpper(aUpperName, n);
++    if (!bRes)
++        return NULL;
++
++    ScRangeData* p = (*pExtNames)[n];
++    if (!p)
++        return NULL;
++
++    // Parse all tokens in this external range data, and replace each absolute 
++    // reference token with an external reference token, and cache them.  Also
++    // register the source document with the link manager if it's a new
++    // source.
++
++    auto_ptr<ScTokenArray> pNew(new ScTokenArray);
++
++    ScTokenArray* pCode = p->GetCode();
++    for (ScToken* pToken = pCode->First(); pToken; pToken = pCode->Next())
++    {
++        bool bTokenAdded = false;
++        switch (pToken->GetType())
++        {
++            case svSingleRef:
++            {
++                fprintf(stdout, "ScDocument::FindExternalRangeName:   single ref\n");
++                SingleRefData aRef(pToken->GetSingleRef());
++                if (aRef.IsTabRel())
++                    break;
++
++                // The sheet reference is absolute.  Get the cell from the 
++                // source document, and convert it to a static value.
++    
++                aRef.CalcAbsIfRel(rCurPos);
++                ScToken* pTok = getSingleRefToken(rFile, ScAddress(aRef.nCol, aRef.nRow, aRef.nTab));
++                if (pTok)
++                {
++                    pNew->AddToken(*pTok);
++                    bTokenAdded = true;
++                }
++            }
++            break;
++            case svDoubleRef:
++            {
++                fprintf(stdout, "ScDocument::FindExternalRangeName:   double ref\n");
++                ComplRefData aComRef(pToken->GetDoubleRef());
++                if (aComRef.Ref1.IsTabRel() || aComRef.Ref2.IsTabRel())
++                    break;
++
++                aComRef.CalcAbsIfRel(rCurPos);
++                SCsTAB nTab1 = aComRef.Ref1.nTab;
++                SCsCOL nCol1 = aComRef.Ref1.nCol;
++                SCsROW nRow1 = aComRef.Ref1.nRow;
++                SCsTAB nTab2 = aComRef.Ref2.nTab;
++                SCsCOL nCol2 = aComRef.Ref2.nCol;
++                SCsROW nRow2 = aComRef.Ref2.nRow;
++
++                ScToken* pTok = getDoubleRefToken(rFile, ScRange(nCol1, nRow1, nTab1, nCol2, nRow2, nTab2));
++                if (pTok)
++                {
++                    pNew->AddToken(*pTok);
++                    bTokenAdded = true;
++                }
++                else
++                {                    
++                    bTokenAdded = lcl_AddDoubleRefToTokenArray(
++                        nTab1, nCol1, nRow1, nTab2, nCol2, nRow2, pSrcDoc, *pNew);
++                }
++            }
++            break;
++        }
++        
++        if (!bTokenAdded)
++            pNew->AddToken(*pToken);
++    }
++
++    return pNew.release();
++}
++
++ScExternalRefManager::DocCache* ScExternalRefManager::getDocumentCache(const String& rFile)
++{
++    DocCacheMap::iterator itr = maCachedDocContents.find(rFile);
++    if (itr == maCachedDocContents.end())
++    {
++        DocCacheRef pCache(new DocCache);
++        maCachedDocContents.insert(DocCacheMap::value_type(rFile, pCache));
++        itr = maCachedDocContents.find(rFile);
++        if (itr == maCachedDocContents.end())
++            // this should not happen!
++            return NULL;
++    }
++
++    return itr->second.get();
++}
++
++ScDocument* ScExternalRefManager::getSrcDocument(const String& rFile)
++{
++    ScDocShellMap::iterator itrEnd = maDocShells.end();
++    ScDocShellMap::iterator itr = maDocShells.find(rFile);
++    if (itr == itrEnd)
++    {
++        fprintf(stdout, "ScExternalRefManager::getSourceDocument:   file not found: '%s'\n",
++                rtl::OUStringToOString(rFile, RTL_TEXTENCODING_UTF8).getStr());
++
++        String aFilter, aOptions;
++        ScDocumentLoader::GetFilterName(rFile, aFilter, aOptions, true, false);
++        const SfxFilter* pFilter = ScDocShell::Factory().GetFilterContainer()->GetFilter4FilterName(aFilter);
++
++        SfxItemSet* pSet = new SfxAllItemSet(SFX_APP()->GetPool());
++        if (aOptions.Len())
++            pSet->Put(SfxStringItem(SID_FILE_FILTEROPTIONS, aOptions));
++
++        auto_ptr<SfxMedium> pMedium(new SfxMedium(rFile, STREAM_STD_READ, FALSE, pFilter, pSet));
++        if (pMedium->GetError() != ERRCODE_NONE)
++            return NULL;
++
++        pMedium->UseInteractionHandler(false);
++
++        auto_ptr<ScDocShell> pNewShell(new ScDocShell(SFX_CREATE_MODE_INTERNAL));
++
++        // increment the recursive link count of the source document.
++        ScExtDocOptions* pExtOpt = mpDoc->GetExtDocOptions();
++        sal_uInt32 nLinkCount = pExtOpt ? pExtOpt->GetDocSettings().mnLinkCnt : 0;
++        ScDocument* pSrcDoc = pNewShell->GetDocument();
++        ScExtDocOptions* pExtOptNew = pSrcDoc->GetExtDocOptions();
++        if (!pExtOptNew)
++        {
++            pExtOptNew = new ScExtDocOptions;
++            pSrcDoc->SetExtDocOptions(pExtOptNew);
++        }
++        pExtOptNew->GetDocSettings().mnLinkCnt = nLinkCount + 1;
++
++        pNewShell->DoLoad(pMedium.release());
++
++        SfxObjectShellRef aRef = pNewShell.release();
++        maDocShells.insert(ScDocShellMap::value_type(rFile, aRef));
++
++        itr = maDocShells.find(rFile);
++
++        if (itr == itrEnd)
++            // can't find the item I just inserted !?
++            return NULL;
++    }
++
++    SfxObjectShell* p = itr->second;
++    return static_cast<ScDocShell*>(p)->GetDocument();
++}
++
++void ScExternalRefManager::clear()
++{
++    ScDocShellMap::iterator itrEnd = maDocShells.end();
++    for (ScDocShellMap::iterator itr = maDocShells.begin(); itr != itrEnd; ++itr)
++        itr->second->DoClose();
++
++    maDocShells.clear();
++}
++
+diff --git sc/source/ui/docshell/makefile.mk sc/source/ui/docshell/makefile.mk
+index db83fec..6286dfb 100644
+--- sc/source/ui/docshell/makefile.mk
++++ sc/source/ui/docshell/makefile.mk
+@@ -53,6 +53,7 @@ CXXFILES = \
+         docsh6.cxx 	\
+         docsh7.cxx 	\
+         docsh8.cxx 	\
++        externalrefmgr.cxx \
+         tablink.cxx 	\
+         arealink.cxx 	\
+         dbdocfun.cxx 	\
+@@ -79,6 +80,7 @@ SLOFILES =  \
+         $(SLO)$/docsh6.obj   	\
+         $(SLO)$/docsh7.obj   	\
+         $(SLO)$/docsh8.obj   	\
++        $(SLO)$/externalrefmgr.obj \
+         $(SLO)$/tablink.obj   	\
+         $(SLO)$/arealink.obj   	\
+         $(SLO)$/dbdocfun.obj 	\
+@@ -101,6 +103,7 @@ EXCEPTIONSFILES= \
+         $(SLO)$/docsh3.obj	\
+         $(SLO)$/docsh4.obj \
+         $(SLO)$/docsh8.obj \
++        $(SLO)$/externalrefmgr.obj \
+         $(SLO)$/dbdocimp.obj
+ 
+ SRS1NAME=$(TARGET)
+@@ -117,6 +120,7 @@ LIB1OBJFILES =  \
+         $(SLO)$/docsh6.obj   	\
+         $(SLO)$/docsh7.obj   	\
+         $(SLO)$/docsh8.obj   	\
++        $(SLO)$/externalrefmgr.obj \
+         $(SLO)$/tablink.obj   	\
+         $(SLO)$/arealink.obj   	\
+         $(SLO)$/dbdocfun.obj 	\
