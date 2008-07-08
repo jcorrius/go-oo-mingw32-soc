@@ -1,0 +1,190 @@
+ vcl/inc/vcl/gdimtf.hxx    |   26 +++++++++++
+ vcl/source/gdi/gdimtf.cxx |  107 +++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 132 insertions(+), 1 deletions(-)
+
+diff --git a/vcl/inc/vcl/gdimtf.hxx b/vcl/inc/vcl/gdimtf.hxx
+index 234e127..b336414 100644
+--- vcl/inc/vcl/gdimtf.hxx
++++ vcl/inc/vcl/gdimtf.hxx
+@@ -41,6 +41,7 @@
+ class OutputDevice;
+ class ImpLabelList;
+ class MetaAction;
++class MetaCommentAction;
+ class SvStream;
+ class Color;
+ class BitmapEx;
+@@ -140,6 +141,7 @@ private:
+                                                       const PolyPolygon&    rPolyPoly,
+                                                       const Gradient&	  	rGrad 		);
+ 	SAL_DLLPRIVATE bool			   ImplPlayWithRenderer( OutputDevice* pOut, const Point& rPos, Size rDestSize );
++    SAL_DLLPRIVATE void          ImplDelegatePluggableRenderer( const MetaCommentAction* pAct, OutputDevice* pOut );
+ 
+ //#endif // __PRIVATE
+ 
+@@ -243,5 +245,29 @@ public:
+     void           UseCanvas( BOOL _bUseCanvas );
+ };
+ 
++/** Create a special metaaction that delegates rendering to specified
++    service.
++
++    This factory function creates a MetaCommentAction that delegates
++    rendering to the specified services, once played back in the
++    metafile.
++
++    @param rRendererServiceName
++    Renderer service. Gets an awt::XGraphic on instantiation
++
++    @param rGraphicServiceName
++    Graphic service. Gets the raw data on instantiation
++
++    @param pData
++    Raw data. Gets copied
++
++    @param nDataSize
++    Length, in byte, of raw data
++ */
++MetaCommentAction* makePluggableRendererAction( const rtl::OUString& rRendererServiceName,
++                                                const rtl::OUString& rGraphicServiceName,
++                                                const BYTE* pData,
++                                                sal_uInt32 nDataSize );
++
+ #endif // _SV_GDIMTF_HXX
+ 
+diff --git a/vcl/source/gdi/gdimtf.cxx b/vcl/source/gdi/gdimtf.cxx
+index 92e2acf..24a28ac 100644
+--- vcl/source/gdi/gdimtf.cxx
++++ vcl/source/gdi/gdimtf.cxx
+@@ -54,6 +54,9 @@
+ #include <com/sun/star/rendering/MtfRenderer.hpp>
+ #include <comphelper/processfactory.hxx>
+ #include <com/sun/star/lang/XMultiServiceFactory.hpp>
++#include <com/sun/star/awt/XGraphics.hpp>
++#include <com/sun/star/graphic/XGraphic.hpp>
++#include <com/sun/star/graphic/XGraphicRenderer.hpp>
+ 
+ using namespace com::sun::star;
+ 
+@@ -477,7 +480,16 @@ void GDIMetaFile::Play( OutputDevice* pOut, ULONG nPos )
+ 		{
+ 			if( !Hook() )
+ 			{
+-				pAction->Execute( pOut );
++                MetaCommentAction* pCommentAct = static_cast<MetaCommentAction*>(pAction);
++                if( pAction->GetType() == META_COMMENT_ACTION &&
++                    pCommentAct->GetComment().Equals("DELEGATE_PLUGGABLE_RENDERER") )
++                {
++                    ImplDelegatePluggableRenderer(pCommentAct, pOut);
++                }
++                else
++                {
++                    pAction->Execute( pOut );
++                }
+ 
+ 				// flush output from time to time
+ 				if( i++ > nSyncCount )
+@@ -563,6 +575,58 @@ bool GDIMetaFile::ImplPlayWithRenderer( OutputDevice* pOut, const Point& rPos, S
+ 
+ // ------------------------------------------------------------------------
+ 
++void GDIMetaFile::ImplDelegatePluggableRenderer( const MetaCommentAction* pAct, OutputDevice* pOut )
++{
++    OSL_ASSERT( pAct->GetComment().Equals("DELEGATE_PLUGGABLE_RENDERER") );
++
++    // read payload - string of service name, followed by raw render input
++    const BYTE* pData = pAct->GetData();
++    const BYTE* const pEndData = pData + pAct->GetDataSize();
++    if( !pData )
++        return;
++
++    ::rtl::OUStringBuffer aBuffer;
++    while( pData<pEndData && *pData )
++        aBuffer.append(static_cast<sal_Unicode>(*pData++));
++    const ::rtl::OUString aRendererServiceName=aBuffer.makeStringAndClear();
++    ++pData;
++
++    while( pData<pEndData && *pData )
++        aBuffer.append(static_cast<sal_Unicode>(*pData++));
++    const ::rtl::OUString aGraphicServiceName=aBuffer.makeStringAndClear();
++    ++pData;
++
++    uno::Reference< lang::XMultiServiceFactory > xFactory = vcl::unohelper::GetMultiServiceFactory();
++    if( pData<pEndData && xFactory.is() )
++    {
++        // instantiate render service
++        uno::Sequence<uno::Any> aArgs(1);
++        aArgs[0] = makeAny(uno::Reference<awt::XGraphics>(pOut->CreateUnoGraphics()));
++        uno::Reference<graphic::XGraphicRenderer> xRenderer(
++            xFactory->createInstanceWithArguments(
++                aRendererServiceName,
++                aArgs),
++            uno::UNO_QUERY );
++
++        // instantiate graphic service
++        uno::Sequence< sal_Int8 > aSeq( 
++            (sal_Int8*)&pData, pEndData-pData );
++        aArgs[0] = makeAny(aSeq);
++        uno::Reference<graphic::XGraphic> xGraphic(
++            xFactory->createInstanceWithArguments(
++                aGraphicServiceName,
++                aArgs),
++            uno::UNO_QUERY );
++
++        if(xGraphic.is() && xRenderer.is())
++        {
++            xRenderer->render(xGraphic);
++        }
++    }
++}
++
++// ------------------------------------------------------------------------
++
+ void GDIMetaFile::Play( OutputDevice* pOut, const Point& rPos,
+ 						const Size& rSize, ULONG nPos )
+ {
+@@ -2606,3 +2670,44 @@ void GDIMetaFile::UseCanvas( BOOL _bUseCanvas )
+ {
+     bUseCanvas = _bUseCanvas;
+ }
++
++// ------------------------------------------------------------------------
++
++MetaCommentAction* makePluggableRendererAction( const rtl::OUString& rRendererServiceName,
++                                                const rtl::OUString& rGraphicServiceName,
++                                                const BYTE* pData,
++                                                sal_uInt32 nDataSize )
++{
++    // data gets copied twice, unfortunately
++    rtl::OString aRendererServiceName(
++        rRendererServiceName.getStr(), 
++        rRendererServiceName.getLength(), 
++        RTL_TEXTENCODING_ASCII_US);
++    rtl::OString aGraphicServiceName(
++        rGraphicServiceName.getStr(), 
++        rGraphicServiceName.getLength(), 
++        RTL_TEXTENCODING_ASCII_US);
++
++    std::vector<sal_uInt8> aMem(
++        aRendererServiceName.getLength()+
++        aGraphicServiceName.getLength()+2+nDataSize);
++    sal_uInt8* pMem=&aMem[0];
++
++    std::copy(aRendererServiceName.getStr(),
++              aRendererServiceName.getStr()+aRendererServiceName.getLength()+1,
++              pMem);
++    pMem+=aRendererServiceName.getLength()+1;
++    std::copy(aGraphicServiceName.getStr(),
++              aGraphicServiceName.getStr()+aGraphicServiceName.getLength()+1,
++              pMem);
++    pMem+=aGraphicServiceName.getLength()+1;
++
++    std::copy(pData,pData+nDataSize,
++              pMem);
++
++    return new MetaCommentAction(
++        "DELEGATE_PLUGGABLE_RENDERER",
++        0,
++        &aMem[0],
++        aMem.size());
++}
