@@ -2,25 +2,59 @@
 
 set -e
 
-if test $# -lt 2
-then
-	echo "gob-bump <branch> <tag-name>"
-	echo "branch     Merge the newest changes from here"
-	echo "tag-name   To create the new gob-tag-name tag"
-	exit 1
-fi
+OPTIONS_KEEPDASHDASH=
+OPTIONS_SPEC="\
+gob-bump [options] <branch> <tag>
+--
+distro=              use branches for distro
+apply-dir=           use apply-dir
+
+ BRANCH     Merge the newest changes from here
+ TAG        To create the new gob-tag-name tag
+"
+
+. git-sh-setup
+
+parse_config () {
+	while test $# != 0; do
+		case "$1" in
+		--apply-dir)
+			shift
+			apply_dir=$1
+			;;
+		--distro)
+			shift
+			distro=$1
+			;;
+		--)
+			shift
+			break ;;
+		*)	usage ;;
+		esac
+		shift
+	done
+	args_left=$#
+	echo args_left=$args_left
+}
+
+test $# != 0 || usage
+
+parse_config "$@"
+while test $args_left -lt $#; do shift; done
+
+test $# = 2 || usage
 
 new_changes=$1
 new_tag=gob-$2
 
 # setup
-this_branch=$(git-name-rev --name-only HEAD)
+this_branch=$(git-branch | grep '^\*' | sed -e 's/^\* //')
 
 gob_bases=$(git-tag | grep '^gob-')
 if test -z "$gob_bases"
 then
-    echo 'cannot find any gob-* tag, aborting'  1>&2
-    exit 1
+	echo 'cannot find any gob-* tag, aborting'  1>&2
+	exit 1
 fi
 
 # find the last unpatched version and create a 'reset' commit
@@ -51,23 +85,42 @@ git-merge $new_changes
 git-tag $new_tag
 
 # update the branches
-git-branch -r | sed 's#^.*origin/##' | grep -Ev '/|^HEAD$' |
-	while read branch
-	do
-		temp_branch=$(mktemp fixme.$branch.XXXXXXXXXX)
-		rm $temp_branch
-		git-checkout -b $temp_branch origin/$branch
-		if gob-update $this_branch
+if test -z "$apply_dir"
+then
+	branches="$(git-branch -r | sed 's#^.*origin/##' | grep -Ev '/|^(HEAD|master|patched|pristine)$')"
+else
+	# Allow gob-bump to work in multi-distro GIT: work with subset
+	# of [this distro's only] branches
+	if test -z "$distro"
+	then
+		distro=SUSE
+	fi
+	branches="$(gob --apply-dir=$apply_dir --distro=$distro branches)"
+fi
+broken='layout-plugin'
+echo "$branches" | grep -Ev $broken | while read branch
+do
+	temp_branch=$(mktemp fixme.$branch.XXXXXXXXXX)
+	rm $temp_branch
+	git-checkout -b $temp_branch origin/$branch
+	if gob-update $this_branch
+	then
+		git-push
+		git-checkout $this_branch
+		if git-merge $temp_branch
 		then
-			git-push
-			git-checkout $this_branch
-			if git-merge $temp_branch
-			then
-				git-branch -d $temp_branch
-			else
-				echo "Merging back failed, please merge manually: $temp_branch" 1>&2
-			fi
+##			git-branch -d $temp_branch
+			echo "And now?"
+			exit 0
 		else
-			echo "Update failed, please update manually: $temp_branch"  1>&2
+			echo "Merging back failed, please merge manually: $temp_branch" 1>&2
 		fi
-	done
+	else
+		echo "Update failed, please update manually: $temp_branch"  1>&2
+	fi
+done
+
+# Local Variables:
+# mode:shell-script
+# sh-basic-offset:8
+# End:
