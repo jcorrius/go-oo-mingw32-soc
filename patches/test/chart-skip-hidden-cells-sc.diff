@@ -1,0 +1,441 @@
+diff --git sc/inc/chart2uno.hxx sc/inc/chart2uno.hxx
+index 2d98a5f..4f53e17 100644
+--- sc/inc/chart2uno.hxx
++++ sc/inc/chart2uno.hxx
+@@ -59,6 +59,7 @@
+ 
+ #include <map>
+ #include <list>
++#include <vector>
+ 
+ class ScDocument;
+ 
+@@ -382,6 +383,7 @@ public:
+ // 	static ScChart2DataSequence* getImplementation( const com::sun::star::uno::Reference<
+ // 									com::sun::star::uno::XInterface> xObj );
+ 
++private:
+     // Implementation --------------------------------------------------------
+ 
+     ScRangeListRef GetRangeList() { return m_xRanges; }
+@@ -389,8 +391,26 @@ public:
+     void    RefChanged();
+     DECL_LINK( ValueListenerHdl, SfxHint* );
+ 
++    /** 
++     * Build an internal data array and other information such as hidden 
++     * values. 
++     */
++    void BuildDataArray();
++
+ private:
+ 
++    // data array
++    struct Item
++    {
++        double              mfValue;
++        ::rtl::OUString     maString;
++        bool                mbIsValue;
++        Item();
++    };
++
++    ::std::list<Item>           m_aDataArray;
++    ::com::sun::star::uno::Sequence<sal_Int32>  m_aHiddenValues;
++
+     // properties
+     ::com::sun::star::chart2::data::DataSequenceRole  m_aRole;
+     sal_Bool                    m_bHidden;
+diff --git sc/inc/unonames.hxx sc/inc/unonames.hxx
+index 4193574..fcfd0fb 100644
+--- sc/inc/unonames.hxx
++++ sc/inc/unonames.hxx
+@@ -606,6 +606,7 @@
+ // Chart2
+ #define SC_UNONAME_ISHIDDEN         "IsHidden"
+ #define SC_UNONAME_ROLE             "Role"
++#define SC_UNONAME_HIDDENVALUES     "HiddenValues"
+ 
+ // Solver
+ #define SC_UNONAME_TIMEOUT          "Timeout"
+diff --git sc/source/ui/unoobj/chart2uno.cxx sc/source/ui/unoobj/chart2uno.cxx
+index 676ce91..3698f5f 100644
+--- sc/source/ui/unoobj/chart2uno.cxx
++++ sc/source/ui/unoobj/chart2uno.cxx
+@@ -1287,6 +1287,11 @@ void SAL_CALL ScChart2LabeledDataSequence::removeModifyListener( const uno::Refe
+ 
+ // DataSequence ==============================================================
+ 
++ScChart2DataSequence::Item::Item() :
++    mfValue(0.0), mbIsValue(true)
++{
++}
++
+ ScChart2DataSequence::ScChart2DataSequence( ScDocument* pDoc,
+         const uno::Reference < chart2::data::XDataProvider >& xDP,
+         const ScRangeListRef& rRangeList)
+@@ -1342,22 +1347,96 @@ void ScChart2DataSequence::RefChanged()
+     }
+ }
+ 
++void ScChart2DataSequence::BuildDataArray()
++{
++    if (!m_aDataArray.empty())
++        return;
++
++    ::std::list<sal_Int32> aHiddenValues;
++    sal_Int32 nDataCount = 0;
++    sal_Int32 nHiddenValueCount = 0;
++
++    for (ScRangePtr p = m_xRanges->First(); p; p = m_xRanges->Next())
++    {
++        for (SCTAB nTab = p->aStart.Tab(); nTab <= p->aEnd.Tab(); ++nTab)
++        {
++            for (SCCOL nCol = p->aStart.Col(); nCol <= p->aEnd.Col(); ++nCol)
++            {
++                for (SCROW nRow = p->aStart.Row(); nRow <= p->aEnd.Row(); ++nRow)
++                {
++                    m_aDataArray.push_back(Item());
++                    Item& rItem = m_aDataArray.back();
++                    ++nDataCount;
++                    USHORT nWidth = m_pDocument->GetColWidth(nCol, nTab);
++                    USHORT nHeight = m_pDocument->GetRowHeight(nRow, nTab);
++                    if (!nWidth || !nHeight)
++                    {
++                        // hidden cell
++                        ++nHiddenValueCount;
++                        aHiddenValues.push_back(nDataCount-1);
++                    }
++
++                    ScAddress aAdr(nCol, nRow, nTab);
++                    ScBaseCell* pCell = m_pDocument->GetCell(aAdr);
++                    if (!pCell)
++                        continue;
++
++                    if (pCell->HasStringData())
++                        rItem.maString = pCell->GetStringData();
++
++                    switch (pCell->GetCellType())
++                    {
++                        case CELLTYPE_VALUE:
++                            rItem.mfValue = static_cast< ScValueCell*>(pCell)->GetValue();
++                            rItem.mbIsValue = true;
++                        break;
++                        case CELLTYPE_FORMULA:
++                        {
++                            ScFormulaCell* pFCell = static_cast<ScFormulaCell*>(pCell);
++                            USHORT nErr = pFCell->GetErrCode();
++                            if (nErr)
++                                break;
++
++                            if (pFCell->HasValueData())
++                                rItem.mfValue = pFCell->GetValue();
++                                rItem.mbIsValue = true;
++                        }
++                    }
++                }
++            }
++        }
++    }
++
++    // convert the hidden cell list to sequence.
++    m_aHiddenValues.realloc(nHiddenValueCount);
++    sal_Int32* pArr = m_aHiddenValues.getArray();
++    ::std::list<sal_Int32>::const_iterator itr = aHiddenValues.begin(), itrEnd = aHiddenValues.end();
++    for (;itr != itrEnd; ++itr, ++pArr)
++        *pArr = *itr;
++}
+ 
+ void ScChart2DataSequence::Notify( SfxBroadcaster& /*rBC*/, const SfxHint& rHint)
+ {
++    fprintf(stdout, "ScChart2DataSequence::Notify: --begin\n");
+     if ( rHint.ISA( SfxSimpleHint ) )
+     {
++        fprintf(stdout, "ScChart2DataSequence::Notify:   simple hint\n");
+         ULONG nId = static_cast<const SfxSimpleHint&>(rHint).GetId();
+         if ( nId ==SFX_HINT_DYING )
+         {
++            fprintf(stdout, "ScChart2DataSequence::Notify:     dying\n");
+             m_pDocument = NULL;
+         }
+         else if ( nId == SFX_HINT_DATACHANGED )
+         {
++            fprintf(stdout, "ScChart2DataSequence::Notify:     data changed (%d)\n", m_bGotDataChangedHint);
++            
+             // delayed broadcast as in ScCellRangesBase
+ 
+-            if ( m_bGotDataChangedHint && m_pDocument )
++//          if ( m_bGotDataChangedHint && m_pDocument )
++            if (true)
+             {
++                m_aDataArray.clear();
+                 lang::EventObject aEvent;
+                 aEvent.Source.set((cppu::OWeakObject*)this);
+ 
+@@ -1367,12 +1446,17 @@ void ScChart2DataSequence::Notify( SfxBroadcaster& /*rBC*/, const SfxHint& rHint
+                         m_pDocument->AddUnoListenerCall( *m_aValueListeners[n], aEvent );
+                 }
+ 
+-                m_bGotDataChangedHint = FALSE;
++//              m_bGotDataChangedHint = FALSE;
+             }
+         }
++        else
++        {
++            fprintf(stdout, "ScChart2DataSequence::Notify:     none of the above\n");
++        }
+     }
+     else if ( rHint.ISA( ScUpdateRefHint ) )
+     {
++        fprintf(stdout, "ScChart2DataSequence::Notify:   update ref hint\n");
+         const ScUpdateRefHint& rRef = (const ScUpdateRefHint&)rHint;
+ 
+         ScRangeList* pUndoRanges = NULL;
+@@ -1396,6 +1480,7 @@ void ScChart2DataSequence::Notify( SfxBroadcaster& /*rBC*/, const SfxHint& rHint
+     }
+     else if ( rHint.ISA( ScUnoRefUndoHint ) )
+     {
++        fprintf(stdout, "ScChart2DataSequence::Notify:   uno ref undo hint\n");
+         const ScUnoRefUndoHint& rUndoHint = static_cast<const ScUnoRefUndoHint&>(rHint);
+         if ( rUndoHint.GetObjectId() == m_nObjectId )
+         {
+@@ -1408,6 +1493,9 @@ void ScChart2DataSequence::Notify( SfxBroadcaster& /*rBC*/, const SfxHint& rHint
+                 m_bGotDataChangedHint = TRUE;     // need to broadcast the undo, too
+         }
+     }
++    else
++        fprintf(stdout, "ScChart2DataSequence::Notify:   none of the above\n");
++    fprintf(stdout, "ScChart2DataSequence::Notify: --end\n");
+ }
+ 
+ 
+@@ -1433,72 +1521,19 @@ uno::Sequence< uno::Any> SAL_CALL ScChart2DataSequence::getData()
+     if ( !m_pDocument)
+         throw uno::RuntimeException();
+ 
+-    const ScDocument* pDoc = m_pDocument;
+-    sal_Int32 nCount = 0;
+-    ScRangePtr p;
+-    for ( p = m_xRanges->First(); p; p = m_xRanges->Next())
++    BuildDataArray();
++    sal_Int32 nCount = m_aDataArray.size();
++    uno::Sequence<uno::Any> aSeq(nCount);
++    uno::Any* pArr = aSeq.getArray();
++    ::std::list<Item>::const_iterator itr = m_aDataArray.begin(), itrEnd = m_aDataArray.end();
++    for (; itr != itrEnd; ++itr, ++pArr)
+     {
+-        nCount += sal_Int32(p->aEnd.Col() - p->aStart.Col() + 1) *
+-            (p->aEnd.Row() - p->aStart.Row() + 1) * (p->aEnd.Tab() -
+-                                                     p->aStart.Tab() + 1);
++        if (itr->mbIsValue)
++            *pArr <<= itr->mfValue;
++        else
++            *pArr <<= itr->maString;
+     }
+-    uno::Sequence< uno::Any> aSeq( nCount);
+-    uno::Any * pArr = aSeq.getArray();
+-    nCount = 0;
+-    for ( p = m_xRanges->First(); p; p = m_xRanges->Next())
+-    {
+-        // TODO: use DocIter?
+-        ScAddress aAdr( p->aStart);
+-        for ( SCTAB nTab = p->aStart.Tab(); nTab <= p->aEnd.Tab(); ++nTab)
+-        {
+-            aAdr.SetTab( nTab);
+-            for ( SCCOL nCol = p->aStart.Col(); nCol <= p->aEnd.Col(); ++nCol)
+-            {
+-                aAdr.SetCol( nCol);
+-                for ( SCROW nRow = p->aStart.Row(); nRow <= p->aEnd.Row();
+-                        ++nRow)
+-                {
+-                    aAdr.SetRow( nRow);
+-                    ScBaseCell* pCell = pDoc->GetCell( aAdr);
+-                    if ( pCell)
+-                    {
+-                        switch ( pCell->GetCellType())
+-                        {
+-                            case CELLTYPE_VALUE:
+-                                pArr[nCount] <<= static_cast< ScValueCell*>(
+-                                        pCell)->GetValue();
+-                            break;
+-                            case CELLTYPE_FORMULA:
+-                            {
+-                                ScFormulaCell* pFCell = static_cast<
+-                                    ScFormulaCell*>( pCell);
+-                                USHORT nErr = pFCell->GetErrCode();
+-                                if  ( !nErr)
+-                                {
+-                                    if ( pFCell->HasValueData())
+-                                        pArr[nCount] <<= pFCell->GetValue();
+-                                    else
+-                                    {
+-                                        String aStr;
+-                                        pFCell->GetString( aStr);
+-                                        pArr[nCount] <<= ::rtl::OUString(
+-                                                aStr);
+-                                    }
+-                                }
+-                            }
+-                            default:
+-                            {
+-                                if ( pCell->HasStringData())
+-                                    pArr[nCount] <<= ::rtl::OUString(pCell->GetStringData());
+ 
+-                            }
+-                        }
+-                    }
+-                    ++nCount;
+-                }
+-            }
+-        }
+-    }
+     return aSeq;
+ }
+ 
+@@ -1511,67 +1546,18 @@ uno::Sequence< double > SAL_CALL ScChart2DataSequence::getNumericalData()
+     if ( !m_pDocument)
+         throw uno::RuntimeException();
+ 
++    BuildDataArray();
++
+     double fNAN;
+-    ::rtl::math::setNan( & fNAN );
++    ::rtl::math::setNan(&fNAN);
+ 
+-    const ScDocument* pDoc = m_pDocument;
+-    sal_Int32 nCount = 0;
+-    ScRangePtr p;
+-    for ( p = m_xRanges->First(); p; p = m_xRanges->Next())
+-    {
+-        nCount += sal_Int32(p->aEnd.Col() - p->aStart.Col() + 1) *
+-            (p->aEnd.Row() - p->aStart.Row() + 1) * (p->aEnd.Tab() -
+-                                                     p->aStart.Tab() + 1);
+-    }
+-    uno::Sequence< double > aSeq( nCount);
++    sal_Int32 nCount = m_aDataArray.size();
++    uno::Sequence<double> aSeq(nCount);
+     double* pArr = aSeq.getArray();
+-    nCount = 0;
+-    for ( p = m_xRanges->First(); p; p = m_xRanges->Next())
+-    {
+-        // TODO: use DocIter?
+-        ScAddress aAdr( p->aStart);
+-        for ( SCTAB nTab = p->aStart.Tab(); nTab <= p->aEnd.Tab(); ++nTab)
+-        {
+-            aAdr.SetTab( nTab);
+-            for ( SCCOL nCol = p->aStart.Col(); nCol <= p->aEnd.Col(); ++nCol)
+-            {
+-                aAdr.SetCol( nCol);
+-                for ( SCROW nRow = p->aStart.Row(); nRow <= p->aEnd.Row();
+-                        ++nRow)
+-                {
+-                    pArr[nCount] = fNAN;
++    ::std::list<Item>::const_iterator itr = m_aDataArray.begin(), itrEnd = m_aDataArray.end();
++    for (; itr != itrEnd; ++itr, ++pArr)
++        *pArr = itr->mbIsValue ? itr->mfValue : fNAN;
+ 
+-                    aAdr.SetRow( nRow);
+-                    ScBaseCell* pCell = pDoc->GetCell( aAdr);
+-                    if ( pCell)
+-                    {
+-                        switch ( pCell->GetCellType())
+-                        {
+-                            case CELLTYPE_VALUE:
+-                                pArr[nCount] = static_cast< ScValueCell*>(
+-                                        pCell)->GetValue();
+-                            break;
+-                            case CELLTYPE_FORMULA:
+-                            {
+-                                ScFormulaCell* pFCell = static_cast<
+-                                    ScFormulaCell*>( pCell);
+-                                USHORT nErr = pFCell->GetErrCode();
+-                                if  ( !nErr)
+-                                {
+-                                    if ( pFCell->HasValueData())
+-                                        pArr[nCount] = pFCell->GetValue();
+-                                }
+-                            }
+-                            default:
+-                                // nothing
+-                                break;
+-                        }
+-                    }
+-                    ++nCount;
+-                }
+-            }
+-        }
+-    }
+     return aSeq;
+ }
+ 
+@@ -1583,49 +1569,15 @@ uno::Sequence< rtl::OUString > SAL_CALL ScChart2DataSequence::getTextualData(  )
+     if ( !m_pDocument)
+         throw uno::RuntimeException();
+ 
+-    sal_Int32 nCount = 0;
+-    ScRangePtr p;
+-    for ( p = m_xRanges->First(); p; p = m_xRanges->Next())
+-    {
+-        nCount += sal_Int32(p->aEnd.Col() - p->aStart.Col() + 1) *
+-            (p->aEnd.Row() - p->aStart.Row() + 1) * (p->aEnd.Tab() -
+-                                                     p->aStart.Tab() + 1);
+-    }
+-    uno::Sequence< rtl::OUString > aSeq( nCount);
++    BuildDataArray();
++
++    sal_Int32 nCount = m_aDataArray.size();
++    uno::Sequence<rtl::OUString> aSeq(nCount);
+     rtl::OUString* pArr = aSeq.getArray();
+-    nCount = 0;
+-	uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( lcl_GetSpreadSheetDocument( m_pDocument ));
+-	if ( xSpreadDoc.is() )
+-	{
+-		uno::Reference<container::XIndexAccess> xIndex( xSpreadDoc->getSheets(), uno::UNO_QUERY );
+-		if ( xIndex.is() )
+-		{
+-            uno::Reference< table::XCellRange > xSheet;
+-            for ( p = m_xRanges->First(); p; p = m_xRanges->Next())
+-            {
+-                // TODO: use DocIter?
+-                table::CellAddress aStart, aEnd;
+-                ScUnoConversion::FillApiAddress( aStart, p->aStart );
+-                ScUnoConversion::FillApiAddress( aEnd, p->aEnd );
+-                for ( sal_Int16 nSheet = aStart.Sheet; nSheet <= aEnd.Sheet; ++nSheet)
+-                {
+-                    xSheet.set(xIndex->getByIndex(nSheet), uno::UNO_QUERY);
+-                    for ( sal_Int32 nCol = aStart.Column; nCol <= aEnd.Column; ++nCol)
+-                    {
+-                        for ( sal_Int32 nRow = aStart.Row; nRow <= aEnd.Row; ++nRow)
+-                        {
+-                            uno::Reference< text::XText > xText(xSheet->getCellByPosition(nCol, nRow), uno::UNO_QUERY);
+-                            if (xText.is())
+-                            {
+-                                pArr[nCount] = xText->getString();
+-                                ++nCount;
+-                            }
+-                        }
+-                    }
+-                }
+-            }
+-        }
+-    }
++    ::std::list<Item>::const_iterator itr = m_aDataArray.begin(), itrEnd = m_aDataArray.end();
++    for (; itr != itrEnd; ++itr, ++pArr)
++        *pArr = itr->maString;
++
+     return aSeq;
+ }
+ 
+@@ -1926,6 +1878,13 @@ uno::Any SAL_CALL ScChart2DataSequence::getPropertyValue(
+         aRet <<= m_aRole;
+     else if ( rPropertyName.equalsAsciiL( RTL_CONSTASCII_STRINGPARAM( SC_UNONAME_ISHIDDEN)))
+         aRet <<= m_bHidden;
++    else if ( rPropertyName.equalsAsciiL( RTL_CONSTASCII_STRINGPARAM(SC_UNONAME_HIDDENVALUES)))
++    {
++        // This property is read-only thus cannot be set externally via 
++        // setPropertyValue(...).
++        BuildDataArray();
++        aRet <<= m_aHiddenValues;
++    }
+     else
+         throw beans::UnknownPropertyException();
+     // TODO: support optional properties
