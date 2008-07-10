@@ -135,10 +135,10 @@ index 8a648d3..9b373cc 100644
          @return  TRUE = Sheet created, rnTab contains valid sheet index. */
 diff --git sc/inc/externalrefmgr.hxx sc/inc/externalrefmgr.hxx
 new file mode 100644
-index 0000000..6637583
+index 0000000..3ffd85c
 --- /dev/null
 +++ sc/inc/externalrefmgr.hxx
-@@ -0,0 +1,115 @@
+@@ -0,0 +1,124 @@
 +/*************************************************************************
 + *
 + * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
@@ -210,8 +210,8 @@ index 0000000..6637583
 +    typedef ::boost::shared_ptr<ScToken>                ScTokenRef;
 +    typedef ::boost::shared_ptr<ScTokenArray>           ScTokenArrayRef;
 +    typedef ::std::hash_map<ScAddress, ScTokenRef, ScAddressHash, ::std::equal_to<ScAddress> >      SingleTokenMap;
-+    typedef ::std::hash_map<ScRange, ScTokenRef, ScRangeHash, ::std::equal_to<ScRange> >            DoubleTokenMap;
-+    typedef ::std::hash_map<String, ScTokenArrayRef, ScStringHashCode, ::std::equal_to<String> >     RangeNameMap;
++    typedef ::std::hash_map<ScRange, ScTokenArrayRef, ScRangeHash, ::std::equal_to<ScRange> >            DoubleTokenMap;
++    typedef ::std::hash_map<String, ScTokenArrayRef, ScStringHashCode, ::std::equal_to<String> >    RangeNameMap;
 +
 +    /** 
 +     * Cached content of a single external document
@@ -231,9 +231,18 @@ index 0000000..6637583
 +    ~ScExternalRefManager();
 +
 +    ScToken* getSingleRefToken(const String& rFile, const ScAddress& rCell);
-+    ScToken* getDoubleRefToken(const String& rFile, const ScRange& rRange);
++    ScTokenArray* getDoubleRefTokens(const String& rFile, const ScRange& rRange);
++
++    /** 
++     * Get an array of tokens corresponding with a specified name in a 
++     * specified file. 
++     * 
++     * @return a new instance of ScTokenArray.  The caller must manage its 
++     *         life cycle.
++     */
 +    ScTokenArray* getRangeNameTokens(const String& rFile, const String& rName, const ScAddress& rCurPos);
 +
++    void refreshNames(const String& rFile);
 +    void clear();
 +
 +private:
@@ -735,10 +744,10 @@ index 7312257..cb101a3 100644
  {
 diff --git sc/source/ui/docshell/externalrefmgr.cxx sc/source/ui/docshell/externalrefmgr.cxx
 new file mode 100644
-index 0000000..6124a78
+index 0000000..93e8910
 --- /dev/null
 +++ sc/source/ui/docshell/externalrefmgr.cxx
-@@ -0,0 +1,422 @@
+@@ -0,0 +1,454 @@
 +/*************************************************************************
 + *
 + * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
@@ -848,19 +857,26 @@ index 0000000..6124a78
 +    return NULL;
 +}
 +
-+static bool lcl_AddDoubleRefToTokenArray(SCsTAB nTab1, SCsCOL nCol1, SCsROW nRow1,
-+                                         SCsTAB nTab2, SCsCOL nCol2, SCsROW nRow2,
-+                                         ScDocument* pSrcDoc, ScTokenArray& rArray)
++static ScTokenArray* lcl_convertToTokenArray(ScDocument* pSrcDoc, const ScRange& rRange)
 +{
-+    for (SCsTAB nTab = nTab1; nTab <= nTab2; ++nTab)
++    const ScAddress& s = rRange.aStart;
++    const ScAddress& e = rRange.aEnd;
++
++    SCTAB nTab1 = s.Tab(), nTab2 = e.Tab();
++    SCCOL nCol1 = s.Col(), nCol2 = e.Col();
++    SCROW nRow1 = s.Row(), nRow2 = e.Row();
++
++    auto_ptr<ScTokenArray> pArray(new ScTokenArray);
++    bool bFirstTab = true;
++    for (SCTAB nTab = nTab1; nTab <= nTab2; ++nTab)
 +    {
 +        ScMatrixRef xMat = new ScMatrix(
 +            static_cast<SCSIZE>(nCol2-nCol1+1),
 +            static_cast<SCSIZE>(nRow2-nRow1+1));
 +
-+        for (SCsCOL nCol = nCol1; nCol <= nCol2; ++nCol)
++        for (SCCOL nCol = nCol1; nCol <= nCol2; ++nCol)
 +        {
-+            for (SCsROW nRow = nRow1; nRow <= nRow2; ++nRow)
++            for (SCROW nRow = nRow1; nRow <= nRow2; ++nRow)
 +            {
 +                SCSIZE nC = nCol - nCol1, nR = nRow - nRow1;
 +                ScBaseCell* pCell;
@@ -908,11 +924,16 @@ index 0000000..6124a78
 +                }
 +            }
 +        }
++        if (!bFirstTab)
++            pArray->AddOpCode(ocSep);
++
 +        ScMatrix* pMat2 = xMat;
 +        ScMatrixToken aToken(pMat2);
-+        rArray.AddToken(aToken);
++        pArray->AddToken(aToken);
++
++        bFirstTab = false;
 +    }
-+    return true;
++    return pArray.release();
 +}
 +
 +ScExternalRefManager::ScExternalRefManager(ScDocument* pDoc) :
@@ -960,16 +981,11 @@ index 0000000..6124a78
 +    }
 +
 +    rMap.insert(SingleTokenMap::value_type(rCell, pTok));
-+    itr = rMap.find(rCell);
-+    if (itr == rMap.end())
-+        // This should never happen!
-+        return NULL;
-+
 +    fprintf(stdout, "ScExternalRefManager::getSingleRefToken: --end\n");
-+    return itr->second.get();
++    return pTok.get();
 +}
 +
-+ScToken* ScExternalRefManager::getDoubleRefToken(const String& rFile, const ScRange& rRange)
++ScTokenArray* ScExternalRefManager::getDoubleRefTokens(const String& rFile, const ScRange& rRange)
 +{
 +    {
 +        String aStr;
@@ -993,12 +1009,35 @@ index 0000000..6124a78
 +    if (!pSrcDoc)
 +        return NULL;
 +
++    ScTokenArrayRef pArray(lcl_convertToTokenArray(pSrcDoc, rRange));
++    if (!pArray.get())
++    {
++        // highly unlikely since lcl_convertToTokenArray never returns NULL.
++        fprintf(stdout, "ScExternalRefManager::getDoubleRefToken: --end (NULL)\n");
++        return NULL;
++    }
 +
-+    return NULL;
++    rMap.insert(DoubleTokenMap::value_type(rRange, pArray));
++    fprintf(stdout, "ScExternalRefManager::getDoubleRefToken: --end\n");
++    return pArray.get();
 +}
 +
 +ScTokenArray* ScExternalRefManager::getRangeNameTokens(const String& rFile, const String& rName, const ScAddress& rCurPos)
 +{
++    fprintf(stdout, "ScExternalRefManager::getRangeNameTokens: --begin (file = '%s'; name = '%s')\n",
++            rtl::OUStringToOString(rFile, RTL_TEXTENCODING_UTF8).getStr(),
++            rtl::OUStringToOString(rName, RTL_TEXTENCODING_UTF8).getStr());
++
++    // First, check if this name has already been cached.
++    RangeNameMap& rMap = getDocumentCache(rFile)->maRangeNames;
++    RangeNameMap::iterator itr = rMap.find(rName);
++    if (itr != rMap.end())
++    {
++        fprintf(stdout, "ScExternalRefManager::getRangeNameTokens:   name is cached\n");
++        // this name is cached.
++        return itr->second->Clone();
++    }
++
 +    ScDocument* pSrcDoc = getSrcDocument(rFile);
 +    if (!pSrcDoc)
 +        return NULL;
@@ -1019,7 +1058,7 @@ index 0000000..6124a78
 +    // register the source document with the link manager if it's a new
 +    // source.
 +
-+    auto_ptr<ScTokenArray> pNew(new ScTokenArray);
++    ScTokenArrayRef pNew(new ScTokenArray);
 +
 +    ScTokenArray* pCode = p->GetCode();
 +    for (ScToken* pToken = pCode->First(); pToken; pToken = pCode->Next())
@@ -1061,26 +1100,28 @@ index 0000000..6124a78
 +                SCsCOL nCol2 = aComRef.Ref2.nCol;
 +                SCsROW nRow2 = aComRef.Ref2.nRow;
 +
-+                ScToken* pTok = getDoubleRefToken(rFile, ScRange(nCol1, nRow1, nTab1, nCol2, nRow2, nTab2));
-+                if (pTok)
++                ScTokenArray* pArray = getDoubleRefTokens(rFile, ScRange(nCol1, nRow1, nTab1, nCol2, nRow2, nTab2));
++                if (pArray)
 +                {
-+                    pNew->AddToken(*pTok);
-+                    bTokenAdded = true;
-+                }
-+                else
-+                {                    
-+                    bTokenAdded = lcl_AddDoubleRefToTokenArray(
-+                        nTab1, nCol1, nRow1, nTab2, nCol2, nRow2, pSrcDoc, *pNew);
++                    for (ScToken* p = pArray->First(); p; p = pArray->Next())
++                    {
++                        pNew->AddToken(*p);
++                        bTokenAdded = true;
++                    }
 +                }
 +            }
 +            break;
++            default:
++                fprintf(stdout, "ScExternalRefManager::getRangeNameTokens:   other token type (%d)\n", pToken->GetType());
 +        }
 +        
 +        if (!bTokenAdded)
 +            pNew->AddToken(*pToken);
 +    }
 +
-+    return pNew.release();
++    rMap.insert(RangeNameMap::value_type(rName, pNew));
++    fprintf(stdout, "ScExternalRefManager::getRangeNameTokens: --end\n");
++    return pNew->Clone();
 +}
 +
 +ScExternalRefManager::DocCache* ScExternalRefManager::getDocumentCache(const String& rFile)
@@ -1090,10 +1131,7 @@ index 0000000..6124a78
 +    {
 +        DocCacheRef pCache(new DocCache);
 +        maCachedDocContents.insert(DocCacheMap::value_type(rFile, pCache));
-+        itr = maCachedDocContents.find(rFile);
-+        if (itr == maCachedDocContents.end())
-+            // this should not happen!
-+            return NULL;
++        return pCache.get();
 +    }
 +
 +    return itr->second.get();
@@ -1140,16 +1178,19 @@ index 0000000..6124a78
 +
 +        SfxObjectShellRef aRef = pNewShell.release();
 +        maDocShells.insert(ScDocShellMap::value_type(rFile, aRef));
-+
-+        itr = maDocShells.find(rFile);
-+
-+        if (itr == itrEnd)
-+            // can't find the item I just inserted !?
-+            return NULL;
++        return pSrcDoc;
 +    }
 +
 +    SfxObjectShell* p = itr->second;
 +    return static_cast<ScDocShell*>(p)->GetDocument();
++}
++
++void ScExternalRefManager::refreshNames(const String& rFile)
++{
++    // 1. Find the cached content (DocCache) for a given file name.
++    // 2. Clear the single and double reference caches.
++    // 3. Re-parse the cached names from the source documents.
++    // 4. Update those cells that contain the cached names.
 +}
 +
 +void ScExternalRefManager::clear()
