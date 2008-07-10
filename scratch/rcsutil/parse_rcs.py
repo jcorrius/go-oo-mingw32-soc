@@ -35,9 +35,16 @@ sourceExtension = {
 
 # ignore large auto-generated files that people like to regularly
 # check into CVS for unknown reasons.
-autogenFiles = [
-    'sw/writerfilter/source/ooxml/OOXMLresources.cxx,v'
-    'sw/writerfilter/source/ooxml/OOXMLresources.hxx,v'
+autogenFileRegex = [
+    'sw/writerfilter/source/ooxml/gperf.*\.hxx',
+    'sw/writerfilter/source/ooxml/OOXMLtokens\.hxx',
+    'sw/writerfilter/source/doctok/qnametostr\.cxx',
+    'sw/writerfilter/source/doctok/resources\.[ch]xx',
+    'sw/writerfilter/source/ooxml/OOXMLvalues\.[ch]xx',
+    'sw/writerfilter/source/resourcemodel/.*tostr\.cxx',
+    'sw/writerfilter/source/ooxml/OOXMLFastTokens\.hxx',
+    'sw/writerfilter/source/ooxml/OOXMLresources.*\.?xx',
+    'sw/writerfilter/source/ooxml/OOXMLfastresources.*\.?xx'
 ]
 
 currentAffiliations = {
@@ -935,8 +942,8 @@ path is relative, it is relative to the current directory."""
                 sys.stdout.write("Skipping a non-RCS file: %s\n"%filepath)
             return True
 
-        for autog in autogenFiles:
-            if filepath.endswith (autog):
+        for autogp in autogenFileRegex:
+            if re.search (autogp, filepath) != None:
                 if self.verbose:
                     sys.stdout.write("Skipping auto-generated file: %s\n"%filepath)
                 return True

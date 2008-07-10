@@ -52,7 +52,7 @@ export OO_TOOLSDIR=$OO_INSTDIR/ooo-build/bin
 
 $OO_TOOLSDIR/../patches/apply.pl $OO_TOOLSDIR/../patches/dev300 --pieces --tag=%ooo_build_tag --distro=SUSE --distro=Piece `pwd` 
 source $OO_TOOLSDIR/piece/sys-setup
-$OO_TOOLSDIR/piece/build-%piece
+$OO_TOOLSDIR/piece/build-generic
 
 %install
 
@@ -63,7 +63,7 @@ export OO_TOOLSDIR=$OO_INSTDIR/ooo-build/bin
 export DESTDIR=$RPM_BUILD_ROOT
 
 source $OO_TOOLSDIR/piece/sys-setup
-$OO_TOOLSDIR/piece/install-%piece
+$OO_TOOLSDIR/piece/install-generic
 
 %clean
 %post

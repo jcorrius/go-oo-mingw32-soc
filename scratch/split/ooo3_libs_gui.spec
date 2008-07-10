@@ -52,6 +52,8 @@ export OO_TOOLSDIR=$OO_INSTDIR/ooo-build/bin
 
 $OO_TOOLSDIR/../patches/apply.pl $OO_TOOLSDIR/../patches/dev300 --pieces --tag=%ooo_build_tag --distro=SUSE --distro=Piece `pwd` 
 source $OO_TOOLSDIR/piece/sys-setup
+
+export VERBOSE=1
 $OO_TOOLSDIR/piece/build-%piece
 
 %install
