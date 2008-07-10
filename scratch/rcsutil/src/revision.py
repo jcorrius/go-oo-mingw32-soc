@@ -49,9 +49,9 @@ class RevisionTree(globals.Debuggable):
 CVS's revision number has the following characteristics:
 
     * The first number is always 1 (for root node).
-    * The second number is the revision in HEAD.
+    * The second number is a revision in HEAD.
     * When the 2nd to the last number is 0, that node is a branch 
-      node whose number is the original revision with theat 0 removed 
+      node whose number is the original revision with that 0 removed 
       e.g. if the original number is 1.34.0.4, then that's the branch 
       node for 1.34.4.
 """
