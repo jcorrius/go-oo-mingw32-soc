@@ -13,10 +13,10 @@
  filter/source/svg/svgfilter.cxx                    |  121 +
  filter/source/svg/svgfilter.hxx                    |   39 
  filter/source/svg/svgimport.cxx                    |  191 --
- filter/source/svg/svgreader.cxx                    | 1899 ++++++++++++++++++++
+ filter/source/svg/svgreader.cxx                    | 1876 ++++++++++++++++++++
  filter/source/svg/svgreader.hxx                    |   43 
  filter/source/svg/svguno.cxx                       |  105 -
- filter/source/svg/test/makefile.mk                 |  124 +
+ filter/source/svg/test/makefile.mk                 |  114 +
  filter/source/svg/test/odfserializer.cxx           |  140 +
  filter/source/svg/test/odfserializer.hxx           |   31 
  filter/source/svg/test/parsertest.cxx              |  210 ++
@@ -24,9 +24,9 @@
  filter/source/svg/tokenmap.cxx                     |   62 +
  filter/source/svg/tokenmap.hxx                     |   32 
  filter/source/svg/tokens.txt                       |  403 ++++
- filter/source/svg/units.cxx                        |  112 +
- filter/source/svg/units.hxx                        |   47 
- 28 files changed, 4715 insertions(+), 369 deletions(-)
+ filter/source/svg/units.cxx                        |   99 +
+ filter/source/svg/units.hxx                        |   60 +
+ 28 files changed, 4682 insertions(+), 369 deletions(-)
 
 diff --git a/filter/source/config/fragments/fcfg_drawgraphics.mk b/filter/source/config/fragments/fcfg_drawgraphics.mk
 index 7038e27..41a4625 100644
@@ -2032,10 +2032,10 @@ index 32c114c..1d27cf0 100644
      
 diff --git a/filter/source/svg/svgreader.cxx b/filter/source/svg/svgreader.cxx
 new file mode 100644
-index 0000000..a486247
+index 0000000..2525999
 --- /dev/null
 +++ filter/source/svg/svgreader.cxx
-@@ -0,0 +1,1899 @@
+@@ -0,0 +1,1876 @@
 +/*************************************************************************
 + *
 + *    OpenOffice.org - a multi-platform office productivity suite
@@ -2161,6 +2161,7 @@ index 0000000..a486247
 +{
 +    AnnotatingVisitor(StatePool&                                        rStatePool,
 +                      StateMap&                                         rStateMap,
++                      const State&                                       rInitialState,
 +                      const uno::Reference<xml::sax::XDocumentHandler>& xDocumentHandler) :
 +        mnCurrStateId(0),
 +        maCurrState(),
@@ -2171,9 +2172,7 @@ index 0000000..a486247
 +		maGradientVector(),
 +        maGradientStopVector()
 +    {
-+        State aState;
-+        aState.maCTM = aState.maTransform;
-+        maParentStates.push_back(aState);
++        maParentStates.push_back(rInitialState);
 +    }
 +
 +    void operator()( const uno::Reference<xml::dom::XElement>& )
@@ -2282,14 +2281,6 @@ index 0000000..a486247
 +    		    maCurrState = maParentStates.back(); 
 +        		maCurrState.maTransform.identity();
 +
-+		         OSL_TRACE("the CTM is currently #1: %f %f %f %f %f %f", 
-+    		               maCurrState.maCTM.get(0,0),
-+        		           maCurrState.maCTM.get(0,1),
-+            		       maCurrState.maCTM.get(0,2),
-+                		   maCurrState.maCTM.get(1,0),
-+	                	   maCurrState.maCTM.get(1,1),
-+						   maCurrState.maCTM.get(1,2));
-+
 +		        // scan for style info
 +    		    const sal_Int32 nNumAttrs( xAttributes->getLength() );
 +        		rtl::OUString sAttributeValue;
@@ -2306,20 +2297,21 @@ index 0000000..a486247
 +		        }
 +
 +    		    // all attributes parsed, can calc total CTM now
++                basegfx::B2DHomMatrix aLocalTransform;
 +        		if( !maCurrState.maViewBox.isEmpty() &&
 +            		maCurrState.maViewBox.getWidth() != 0.0 && 
 +		            maCurrState.maViewBox.getHeight() != 0.0 )
 +    		    {
 +        		    // transform aViewBox into viewport, such that they
 +            		// coincide
-+	            	maCurrState.maTransform.translate(-maCurrState.maViewBox.getMinX(),
-+    	            	                              -maCurrState.maViewBox.getMinY());
-+	        	    maCurrState.maTransform.scale(maCurrState.maViewport.getWidth()/maCurrState.maViewBox.getWidth(),
-+    	        	                              maCurrState.maViewport.getHeight()/maCurrState.maViewBox.getHeight());
++	            	aLocalTransform.translate(-maCurrState.maViewBox.getMinX(),
++                                              -maCurrState.maViewBox.getMinY());
++	        	    aLocalTransform.scale(maCurrState.maViewport.getWidth()/maCurrState.maViewBox.getWidth(),
++                                          maCurrState.maViewport.getHeight()/maCurrState.maViewBox.getHeight());
 +	    	    }
-+    	    	maCurrState.maCTM *= maCurrState.maTransform;
++    	    	maCurrState.maCTM = maCurrState.maCTM*maCurrState.maTransform*aLocalTransform;
 +
-+		        OSL_TRACE("the CTM is currently #2: %f %f %f %f %f %f", 
++		        OSL_TRACE("annotateStyle - CTM is: %f %f %f %f %f %f", 
 +    		              maCurrState.maCTM.get(0,0),
 +        		          maCurrState.maCTM.get(0,1),
 +            		      maCurrState.maCTM.get(0,2),
@@ -2615,7 +2607,7 @@ index 0000000..a486247
 +            {
 +                ::basegfx::B2DVector aVec(maCurrState.mnStrokeWidth,0);
 +                aVec *= maCurrState.maCTM;
-+                xAttrs->AddAttribute( USTR("svg:stroke-width"), rtl::OUString::valueOf( aVec.getLength()/100.0 )+USTR("mm"));
++                xAttrs->AddAttribute( USTR("svg:stroke-width"), rtl::OUString::valueOf( pt2mm(aVec.getLength()) )+USTR("mm"));
 +            }
 +            if( maCurrState.meLineJoin == basegfx::tools::B2DLINEJOIN_MITER )
 +                xAttrs->AddAttribute( USTR( "draw:stroke-linejoin"), USTR("miter"));
@@ -2701,16 +2693,16 @@ index 0000000..a486247
 +                break;
 +            }
 +			case XML_X1:
-+				io_rCurrGradient.maCoords.linear.mfX1 = convLength(sValue);
++				io_rCurrGradient.maCoords.linear.mfX1 = convLength(sValue,maCurrState,'h');
 +				break;
 +			case XML_X2:
-+				io_rCurrGradient.maCoords.linear.mfX2 = convLength(sValue);
++				io_rCurrGradient.maCoords.linear.mfX2 = convLength(sValue,maCurrState,'h');
 +				break;
 +			case XML_Y1:
-+				io_rCurrGradient.maCoords.linear.mfY1 = convLength(sValue);
++				io_rCurrGradient.maCoords.linear.mfY1 = convLength(sValue,maCurrState,'v');
 +				break;
 +			case XML_Y2:
-+				io_rCurrGradient.maCoords.linear.mfY2 = convLength(sValue);
++				io_rCurrGradient.maCoords.linear.mfY2 = convLength(sValue,maCurrState,'v');
 +				break;
 +			case XML_ID:
 +                maGradientIdMap.insert(std::make_pair(sValue,nGradientNumber));
@@ -2742,19 +2734,19 @@ index 0000000..a486247
 +                break;
 +            }
 +			case XML_CX:
-+				io_rCurrGradient.maCoords.radial.mfCX = convLength(sValue);
++				io_rCurrGradient.maCoords.radial.mfCX = convLength(sValue,maCurrState,'h');
 +				break;
 +			case XML_CY:
-+				io_rCurrGradient.maCoords.radial.mfCY = convLength(sValue);
++				io_rCurrGradient.maCoords.radial.mfCY = convLength(sValue,maCurrState,'v');
 +				break;
 +			case XML_FX:
-+				io_rCurrGradient.maCoords.radial.mfFX = convLength(sValue);
++				io_rCurrGradient.maCoords.radial.mfFX = convLength(sValue,maCurrState,'h');
 +				break;
 +			case XML_FY:
-+				io_rCurrGradient.maCoords.radial.mfFY = convLength(sValue);
++				io_rCurrGradient.maCoords.radial.mfFY = convLength(sValue,maCurrState,'v');
 +				break;
 +			case XML_R:
-+				io_rCurrGradient.maCoords.radial.mfR = convLength(sValue);
++				io_rCurrGradient.maCoords.radial.mfR = convLength(sValue,maCurrState,'r');
 +				break;
 +			case XML_ID:
 +                maGradientIdMap.insert(std::make_pair(sValue,nGradientNumber));
@@ -2814,7 +2806,7 @@ index 0000000..a486247
 +            case XML_WIDTH:
 +            {
 +                const double fViewPortWidth(
-+                    convLength(sValue));
++                    convLength(sValue,maCurrState,'h'));
 +            
 +                maCurrState.maViewport.expand(
 +                    basegfx::B2DTuple(fViewPortWidth,0.0));
@@ -2823,7 +2815,7 @@ index 0000000..a486247
 +            case XML_HEIGHT:
 +            {
 +                const double fViewPortHeight(
-+                    convLength(sValue));
++                    convLength(sValue,maCurrState,'v'));
 +            
 +                maCurrState.maViewport.expand(
 +                    basegfx::B2DTuple(0.0,fViewPortHeight));
@@ -2858,7 +2850,7 @@ index 0000000..a486247
 +                if( aValueUtf8 == "inherit" )
 +                    maCurrState.mnStrokeWidth = maParentStates.back().mnStrokeWidth;
 +                else
-+                    maCurrState.mnStrokeWidth = convLength(sValue);
++                    maCurrState.mnStrokeWidth = convLength(sValue,maCurrState,'r');
 +                break;
 +            }
 +            case XML_STROKE_LINECAP:
@@ -2898,7 +2890,7 @@ index 0000000..a486247
 +                if( aValueUtf8 == "inherit" )
 +                    maCurrState.mnDashOffset = maParentStates.back().mnDashOffset;
 +                else
-+                    maCurrState.mnDashOffset = convLength(sValue);
++                    maCurrState.mnDashOffset = convLength(sValue,maCurrState,'r');
 +                break;
 +            }
 +            case XML_STROKE_DASHARRAY:
@@ -2948,9 +2940,6 @@ index 0000000..a486247
 +            {
 +                basegfx::B2DHomMatrix aTransform;
 +                parseTransform(aValueUtf8.getStr(),aTransform);
-+				// Ugly and temprorary hack
-+				aTransform.set(0,2,convLength(aTransform.get(0,2),SVG_LENGTH_UNIT_PT));
-+				aTransform.set(1,2,convLength(aTransform.get(1,2),SVG_LENGTH_UNIT_PT));
 +                maCurrState.maTransform = maCurrState.maTransform*aTransform;
 +                break;
 +            }
@@ -2958,7 +2947,7 @@ index 0000000..a486247
 +                maCurrState.maFontFamily=sValue;
 +                break;
 +            case XML_FONT_SIZE:
-+                maCurrState.mnFontSize=convLength(sValue);
++                maCurrState.mnFontSize=convLength(sValue,maCurrState,'v');
 +                break;
 +            case XML_FONT_STYLE:
 +                maCurrState.meFontStyle=STYLE_ITALIC; // TODO: sValue.toStyleId();
@@ -3000,19 +2989,22 @@ index 0000000..a486247
 +        {
 +            aCurrToken=sValue.getToken(0,';',nIndex);
 +            
-+            // split attrib & value
-+            nDummyIndex=0;
-+            rtl::OUString aCurrAttrib(
-+                aCurrToken.getToken(0,':',nDummyIndex).trim());
-+            OSL_ASSERT(nDummyIndex!=-1);
-+            nDummyIndex=0;
-+            rtl::OUString aCurrValue(
-+                aCurrToken.getToken(1,':',nDummyIndex).trim());
-+            OSL_ASSERT(nDummyIndex==-1);
++            if( aCurrToken.getLength() )
++            {
++                // split attrib & value
++                nDummyIndex=0;
++                rtl::OUString aCurrAttrib(
++                    aCurrToken.getToken(0,':',nDummyIndex).trim());
++                OSL_ASSERT(nDummyIndex!=-1);
++                nDummyIndex=0;
++                rtl::OUString aCurrValue(
++                    aCurrToken.getToken(1,':',nDummyIndex).trim());
++                OSL_ASSERT(nDummyIndex==-1);
 +
-+            // recurse into normal attribute parsing
-+            parseAttribute( getTokenId(aCurrAttrib),
-+                            aCurrValue );
++                // recurse into normal attribute parsing
++                parseAttribute( getTokenId(aCurrAttrib),
++                                aCurrValue );
++            }
 +        }
 +        while( nIndex != -1 );
 +    }
@@ -3075,19 +3067,19 @@ index 0000000..a486247
 +/// Annotate svg styles with unique references to state pool
 +static void annotateStyles( StatePool&                                        rStatePool,
 +                            StateMap&                                         rStateMap,
++                            const State&                                       rInitialState,
 +                            const uno::Reference<xml::dom::XElement>          xElem,
 +                            const uno::Reference<xml::sax::XDocumentHandler>& xDocHdl )
 +{
-+    AnnotatingVisitor aVisitor(rStatePool,rStateMap,xDocHdl);
++    AnnotatingVisitor aVisitor(rStatePool,rStateMap,rInitialState,xDocHdl);
 +    visitElements(aVisitor, xElem);
 +}
 +
 +struct ShapeWritingVisitor
 +{
-+    ShapeWritingVisitor(StatePool&                                        rStatePool,
++    ShapeWritingVisitor(StatePool&                                        /*rStatePool*/,
 +                        StateMap&                                         rStateMap,
 +                        const uno::Reference<xml::sax::XDocumentHandler>& xDocumentHandler) :
-+        mrStates(rStatePool),
 +        mrStateMap(rStateMap),
 +        mxDocumentHandler(xDocumentHandler),
 +        mnShapeNum(0)
@@ -3110,16 +3102,12 @@ index 0000000..a486247
 +                    0,'$',nDummyIndex));
 +        StateMap::iterator pOrigState=mrStateMap.find(
 +            sStyleId.toInt32());
-+        maCurrState = pOrigState != mrStateMap.end() ? pOrigState->second : maParentStates.back();
 +
-+        OSL_TRACE("the CTM is now #2: %f %f %f %f %f %f", 
-+                  maCurrState.maCTM.get(0,0),
-+                  maCurrState.maCTM.get(0,1),
-+                  maCurrState.maCTM.get(0,2),
-+                  maCurrState.maCTM.get(1,0),
-+                  maCurrState.maCTM.get(1,1),
-+                  maCurrState.maCTM.get(1,2));
-+        
++        if( pOrigState == mrStateMap.end() )
++            return; // non-exportable element, e.g. linearGradient
++
++        maCurrState = pOrigState->second;
++
 +        const sal_Int32 nTokenId(getTokenId(xElem->getNodeName()));
 +        switch(nTokenId)
 +        {
@@ -3137,16 +3125,16 @@ index 0000000..a486247
 +                    switch(nAttribId)
 +                    {
 +                        case XML_X1:
-+                            x1= convLength(sAttributeValue);
++                            x1= convLength(sAttributeValue,maCurrState,'h');
 +                            break;
 +                        case XML_X2:
-+                            x2 = convLength(sAttributeValue);
++                            x2 = convLength(sAttributeValue,maCurrState,'h');
 +                            break;
 +                        case XML_Y1:
-+                            y1 = convLength(sAttributeValue);
++                            y1 = convLength(sAttributeValue,maCurrState,'v');
 +                            break;
 +                        case XML_Y2:
-+                            y2 = convLength(sAttributeValue);
++                            y2 = convLength(sAttributeValue,maCurrState,'v');
 +                            break;
 +                        default:
 +                            // skip
@@ -3176,11 +3164,6 @@ index 0000000..a486247
 +                // if( nTokenId == XML_POLYGON )
 +                    aPoly.setClosed(true);
 +
-+				// assuming the coordinates are in pts since they are interpreted as such by different renderers
-+				basegfx::B2DHomMatrix aScale;
-+				aScale.scale(2540.0f/72.0f,2540.0f/72.0f);
-+				aPoly.transform(aScale);
-+
 +                writePathShape(xAttrs,
 +                               xUnoAttrs,
 +                               xElem,
@@ -3203,23 +3186,23 @@ index 0000000..a486247
 +                    switch(nAttribId)
 +                    {
 +                        case XML_X:
-+                            x = convLength(sAttributeValue);
++                            x = convLength(sAttributeValue,maCurrState,'h');
 +                            break;
 +                        case XML_Y:
-+                            y = convLength(sAttributeValue);
++                            y = convLength(sAttributeValue,maCurrState,'v');
 +                            break;
 +                        case XML_WIDTH:
-+                            width = convLength(sAttributeValue);
++                            width = convLength(sAttributeValue,maCurrState,'h');
 +                            break;
 +                        case XML_HEIGHT:
-+                            height = convLength(sAttributeValue);
++                            height = convLength(sAttributeValue,maCurrState,'v');
 +                            break;
 +                        case XML_RX:
-+                            rx = convLength(sAttributeValue);
++                            rx = convLength(sAttributeValue,maCurrState,'h');
 +                            bRxSeen=true;
 +                            break;
 +                        case XML_RY:
-+                            ry = convLength(sAttributeValue);
++                            ry = convLength(sAttributeValue,maCurrState,'v');
 +                            bRySeen=true;
 +                            break;
 +                        default:
@@ -3251,11 +3234,6 @@ index 0000000..a486247
 +                basegfx::B2DPolyPolygon aPoly;
 +                basegfx::tools::importFromSvgD(aPoly, sPath);
 +
-+				// assuming the coordinates are in pts since they are interpreted as such by different renderers
-+				basegfx::B2DHomMatrix aScale;
-+				aScale.scale(2540.0f/72.0f,2540.0f/72.0f);
-+				aPoly.transform(aScale);
-+				
 +                writePathShape(xAttrs,
 +                               xUnoAttrs,
 +                               xElem,
@@ -3277,13 +3255,13 @@ index 0000000..a486247
 +                    switch(nAttribId)
 +                    {
 +                        case XML_CX:
-+                            cx = convLength(sAttributeValue);
++                            cx = convLength(sAttributeValue,maCurrState,'h');
 +                            break;
 +                        case XML_CY:
-+                            cy = convLength(sAttributeValue);
++                            cy = convLength(sAttributeValue,maCurrState,'v');
 +                            break;
 +                        case XML_R:
-+                            r = convLength(sAttributeValue);
++                            r = convLength(sAttributeValue,maCurrState,'r');
 +                        default:
 +                            // skip
 +                            break;
@@ -3311,16 +3289,16 @@ index 0000000..a486247
 +                    switch(nAttribId)
 +                    {
 +                        case XML_CX:
-+                            cx = convLength(sAttributeValue);
++                            cx = convLength(sAttributeValue,maCurrState,'h');
 +                            break;
 +                        case XML_CY:
-+                            cy = convLength(sAttributeValue);
++                            cy = convLength(sAttributeValue,maCurrState,'v');
 +                            break;
 +                        case XML_RX:
-+                            rx = convLength(sAttributeValue);
++                            rx = convLength(sAttributeValue,maCurrState,'h');
 +							break;
 +						case XML_RY:
-+							ry = convLength(sAttributeValue);
++							ry = convLength(sAttributeValue,maCurrState,'v');
 +                        default:
 +                            // skip
 +                            break;
@@ -3348,16 +3326,16 @@ index 0000000..a486247
 +                    switch(nAttribId)
 +                    {
 +                        case XML_X:
-+                            x = convLength(sAttributeValue);
++                            x = convLength(sAttributeValue,maCurrState,'h');
 +                            break;
 +                        case XML_Y:
-+                            y = convLength(sAttributeValue);
++                            y = convLength(sAttributeValue,maCurrState,'v');
 +                            break;
 +                        case XML_WIDTH:
-+                            width = convLength(sAttributeValue);
++                            width = convLength(sAttributeValue,maCurrState,'h');
 +                            break;
 +                        case XML_HEIGHT:
-+                            height = convLength(sAttributeValue);
++                            height = convLength(sAttributeValue,maCurrState,'v');
 +                            break;
 +                        default:
 +                            // skip
@@ -3398,16 +3376,16 @@ index 0000000..a486247
 +                    switch(nAttribId)
 +                    {
 +                        case XML_X:
-+                            x = convLength(sAttributeValue);
++                            x = convLength(sAttributeValue,maCurrState,'h');
 +                            break;
 +                        case XML_Y:
-+                            y = convLength(sAttributeValue);
++                            y = convLength(sAttributeValue,maCurrState,'v');
 +                            break;
 +                        case XML_WIDTH:
-+                            width = convLength(sAttributeValue);
++                            width = convLength(sAttributeValue,maCurrState,'h');
 +                            break;
 +                        case XML_HEIGHT:
-+                            height = convLength(sAttributeValue);
++                            height = convLength(sAttributeValue,maCurrState,'v');
 +                            break;
 +                        default:
 +                            // skip
@@ -3442,10 +3420,8 @@ index 0000000..a486247
 +                        sTransform += USTR(" skewX(") + rtl::OUString::valueOf(fShearX*180.0/M_PI) + USTR(")");
 +                }
 +
-+                xAttrs->AddAttribute( USTR( "svg:x" ), rtl::OUString::valueOf(x/100.0)+USTR("mm"));
-+                xAttrs->AddAttribute( USTR( "svg:y" ), rtl::OUString::valueOf(y/100.0)+USTR("mm"));
-+                //xAttrs->AddAttribute( USTR( "svg:width" ), rtl::OUString::valueOf(width/100.0)+USTR("mm"));
-+                //xAttrs->AddAttribute( USTR( "svg:height" ), rtl::OUString::valueOf(height/100.0)+USTR("mm"));
++                xAttrs->AddAttribute( USTR( "svg:x" ), rtl::OUString::valueOf(pt2mm(x))+USTR("mm"));
++                xAttrs->AddAttribute( USTR( "svg:y" ), rtl::OUString::valueOf(pt2mm(y))+USTR("mm"));
 +                xAttrs->AddAttribute( USTR( "draw:style-name" ), USTR("svggraphicstyle")+sStyleId );
 +
 +                mxDocumentHandler->startElement(USTR("draw:frame"),xUnoAttrs);
@@ -3464,14 +3440,10 @@ index 0000000..a486247
 +    }
 +
 +    void push()
-+    {
-+        maParentStates.push_back(maCurrState);
-+    }
++    {}
 +
 +    void pop()
-+    {
-+        maParentStates.pop_back();
-+    }
++    {}
 +	
 +	void writeBinaryData( rtl::Reference<SvXMLAttributeList>&           xAttrs,
 +						const uno::Reference<xml::sax::XAttributeList>& xUnoAttrs,
@@ -3480,10 +3452,10 @@ index 0000000..a486247
 +						const std::string&                              data)
 +	{
 +		xAttrs->Clear();
-+        xAttrs->AddAttribute( USTR( "svg:x" ), rtl::OUString::valueOf(rShapeBounds.getMinX()/100.0)+USTR("mm"));
-+        xAttrs->AddAttribute( USTR( "svg:y" ), rtl::OUString::valueOf(rShapeBounds.getMinY()/100.0)+USTR("mm"));
-+        xAttrs->AddAttribute( USTR( "svg:width" ), rtl::OUString::valueOf(rShapeBounds.getWidth()/100.0)+USTR("mm"));
-+        xAttrs->AddAttribute( USTR( "svg:height" ), rtl::OUString::valueOf(rShapeBounds.getHeight()/100.0)+USTR("mm"));
++        xAttrs->AddAttribute( USTR( "svg:x" ), rtl::OUString::valueOf(pt2mm(rShapeBounds.getMinX()))+USTR("mm"));
++        xAttrs->AddAttribute( USTR( "svg:y" ), rtl::OUString::valueOf(pt2mm(rShapeBounds.getMinY()))+USTR("mm"));
++        xAttrs->AddAttribute( USTR( "svg:width" ), rtl::OUString::valueOf(pt2mm(rShapeBounds.getWidth()))+USTR("mm"));
++        xAttrs->AddAttribute( USTR( "svg:height" ), rtl::OUString::valueOf(pt2mm(rShapeBounds.getHeight()))+USTR("mm"));
 +
 +		mxDocumentHandler->startElement(USTR("draw:frame"),xUnoAttrs);
 +
@@ -3536,14 +3508,6 @@ index 0000000..a486247
 +		
 +		xAttrs->Clear();
 +
-+        OSL_TRACE("the CTM is now #2: %f %f %f %f %f %f", 
-+                  maCurrState.maCTM.get(0,0),
-+                  maCurrState.maCTM.get(0,1),
-+                  maCurrState.maCTM.get(0,2),
-+                  maCurrState.maCTM.get(1,0),
-+                  maCurrState.maCTM.get(1,1),
-+                  maCurrState.maCTM.get(1,2));
-+        
 +		basegfx::B2DPolygon aPoly = basegfx::tools::createPolygonFromEllipse(rEllipse.getB2DEllipseCenter(),
 +			rEllipse.getB2DEllipseRadius().getX(), rEllipse.getB2DEllipseRadius().getY());
 +		writePathShape(xAttrs, xUnoAttrs, xElem, rStyleId, basegfx::B2DPolyPolygon(aPoly));
@@ -3564,7 +3528,7 @@ index 0000000..a486247
 +		
 +		xAttrs->Clear();
 +
-+        OSL_TRACE("the CTM is now #2: %f %f %f %f %f %f", 
++        OSL_TRACE("writePath - the CTM is: %f %f %f %f %f %f", 
 +                  maCurrState.maCTM.get(0,0),
 +                  maCurrState.maCTM.get(0,1),
 +                  maCurrState.maCTM.get(0,2),
@@ -3590,7 +3554,8 @@ index 0000000..a486247
 +            aStyleId = xElem->getAttribute(
 +                USTR("internal-style-ref")).getToken(1,'$',nDummyIndex);
 +            StateMap::iterator pAlternateState=mrStateMap.find(aStyleId.toInt32());
-+            aState = pAlternateState != mrStateMap.end() ? pAlternateState->second : maParentStates.back();
++            OSL_ASSERT(pAlternateState != mrStateMap.end());
++            aState = pAlternateState->second;
 +            OSL_ENSURE( pAlternateState == mrStateMap.end(),
 +                        "Doh - where's my alternate style entry?!" );
 +        }
@@ -3604,14 +3569,25 @@ index 0000000..a486247
 +
 +        for( sal_uInt32 i=0; i<aPolys.size(); ++i )
 +        {
++            const basegfx::B2DRange aBounds(
++                aPolys[i].areControlPointsUsed() ?
++                basegfx::tools::getRange(
++                    basegfx::tools::adaptiveSubdivideByAngle(aPolys[i])) :
++                basegfx::tools::getRange(aPolys[i]));
 +            fillShapeProperties(xAttrs,
 +                                xElem,
-+                                aPolys[i].areControlPointsUsed() ?
-+                                basegfx::tools::getRange(
-+                                    basegfx::tools::adaptiveSubdivideByAngle(aPolys[i])) :
-+                                basegfx::tools::getRange(aPolys[i]),
++                                aBounds,
 +                                USTR("svggraphicstyle")+aStyleId);
 +            
++            // force path coordinates to 100th millimeter, after
++            // putting polygon data at origin (odf viewbox
++            // calculations largely untested codepaths, as OOo always
++            // writes "0 0 w h" viewboxes)
++            basegfx::B2DHomMatrix aNormalize;
++            aNormalize.translate(-aBounds.getMinX(),-aBounds.getMinY());
++            aNormalize.scale(2540.0/72.0,2540.0/72.0);
++            aPolys[i].transform(aNormalize);
++
 +            xAttrs->AddAttribute( USTR( "svg:d" ), basegfx::tools::exportToSvgD(
 +                aPolys[i],
 +                false,   // no relative coords. causes rounding errors      
@@ -3629,28 +3605,26 @@ index 0000000..a486247
 +    {
 +        xAttrs->AddAttribute( USTR( "draw:z-index" ), rtl::OUString::valueOf( mnShapeNum++ ));
 +        xAttrs->AddAttribute( USTR( "draw:style-name" ), rStyleName);
-+        xAttrs->AddAttribute( USTR( "svg:width" ), rtl::OUString::valueOf(rShapeBounds.getWidth()/100.0)+USTR("mm"));
-+        xAttrs->AddAttribute( USTR( "svg:height" ), rtl::OUString::valueOf(rShapeBounds.getHeight()/100.0)+USTR("mm"));
++        xAttrs->AddAttribute( USTR( "svg:width" ), rtl::OUString::valueOf(pt2mm(rShapeBounds.getWidth()))+USTR("mm"));
++        xAttrs->AddAttribute( USTR( "svg:height" ), rtl::OUString::valueOf(pt2mm(rShapeBounds.getHeight()))+USTR("mm"));
 +
 +        // OOo expects the viewbox to be in 100th of mm
 +        xAttrs->AddAttribute( USTR( "svg:viewBox" ), 
 +            USTR("0 0 ")
 +            + rtl::OUString::valueOf( 
-+                basegfx::fround(rShapeBounds.getWidth()) )
++                basegfx::fround(pt100thmm(rShapeBounds.getWidth())) )
 +            + USTR(" ")
 +            + rtl::OUString::valueOf(
-+                basegfx::fround(rShapeBounds.getHeight()) ));
++                basegfx::fround(pt100thmm(rShapeBounds.getHeight())) ));
 +
 +        // TODO(F1): decompose transformation in calling code, and use
 +        // transform attribute here
 +		// writeTranslate(maCurrState.maCTM, xAttrs);
-+        xAttrs->AddAttribute( USTR( "svg:x" ), rtl::OUString::valueOf(rShapeBounds.getMinX()/100.0)+USTR("mm"));
-+        xAttrs->AddAttribute( USTR( "svg:y" ), rtl::OUString::valueOf(rShapeBounds.getMinY()/100.0)+USTR("mm"));
++        xAttrs->AddAttribute( USTR( "svg:x" ), rtl::OUString::valueOf(pt2mm(rShapeBounds.getMinX()))+USTR("mm"));
++        xAttrs->AddAttribute( USTR( "svg:y" ), rtl::OUString::valueOf(pt2mm(rShapeBounds.getMinY()))+USTR("mm"));
 +    }
 +
 +    State                                      maCurrState;
-+    std::vector<State>                         maParentStates;
-+    StatePool&                                 mrStates;
 +    StateMap&                                  mrStateMap;
 +    uno::Reference<xml::sax::XDocumentHandler> mxDocumentHandler;
 +    sal_Int32                                  mnShapeNum;
@@ -3733,6 +3707,9 @@ index 0000000..a486247
 +    uno::Reference<xml::dom::XElement> xDocElem( xDom->getDocumentElement(),
 +                                                 uno::UNO_QUERY_THROW );
 +
++    // the root state for svg document
++    State aInitialState;
++
 +    /////////////////////////////////////////////////////////////////
 +    // doc boilerplate    
 +    /////////////////////////////////////////////////////////////////
@@ -3748,8 +3725,8 @@ index 0000000..a486247
 +	if (!xDocElem->hasAttribute(USTR("height")))
 +		xDocElem->setAttribute(USTR("height"), USTR("297mm"));
 +		
-+    double fViewPortWidth( convLength(xDocElem->getAttribute(USTR("width"))));
-+    double fViewPortHeight( convLength(xDocElem->getAttribute(USTR("height"))));
++    double fViewPortWidth( pt2mm(convLength(xDocElem->getAttribute(USTR("width")),aInitialState,'h')) );
++    double fViewPortHeight( pt2mm(convLength(xDocElem->getAttribute(USTR("height")),aInitialState,'v')) );
 +
 +    // document prolog
 +    rtl::Reference<SvXMLAttributeList> xAttrs( new SvXMLAttributeList() );
@@ -3848,8 +3825,8 @@ index 0000000..a486247
 +    xAttrs->AddAttribute( USTR( "fo:margin-bottom" ), USTR("0mm"));
 +    xAttrs->AddAttribute( USTR( "fo:margin-left" ), USTR("0mm"));
 +    xAttrs->AddAttribute( USTR( "fo:margin-right" ), USTR("0mm"));
-+    xAttrs->AddAttribute( USTR( "fo:page-width" ), rtl::OUString::valueOf(fViewPortWidth/100.0)+USTR("mm"));
-+    xAttrs->AddAttribute( USTR( "fo:page-height" ), rtl::OUString::valueOf(fViewPortHeight/100.0)+USTR("mm"));
++    xAttrs->AddAttribute( USTR( "fo:page-width" ), rtl::OUString::valueOf(fViewPortWidth)+USTR("mm"));
++    xAttrs->AddAttribute( USTR( "fo:page-height" ), rtl::OUString::valueOf(fViewPortHeight)+USTR("mm"));
 +    xAttrs->AddAttribute( USTR( "style:print-orientation" ), 
 +        fViewPortWidth > fViewPortHeight ? 
 +        USTR("landscape") :
@@ -3875,7 +3852,7 @@ index 0000000..a486247
 +
 +    StatePool aStatePool;
 +    StateMap  aStateMap;
-+    annotateStyles(aStatePool,aStateMap,
++    annotateStyles(aStatePool,aStateMap,aInitialState,
 +                   xDocElem,m_xDocumentHandler);
 +
 +#ifdef VERBOSE
@@ -3986,10 +3963,10 @@ index 0000000..420d326
 +#endif
 diff --git a/filter/source/svg/test/makefile.mk b/filter/source/svg/test/makefile.mk
 new file mode 100644
-index 0000000..c3adda5
+index 0000000..3f14c88
 --- /dev/null
 +++ filter/source/svg/test/makefile.mk
-@@ -0,0 +1,124 @@
+@@ -0,0 +1,114 @@
 +#*************************************************************************
 +#
 +#    OpenOffice.org - a multi-platform office productivity suite
@@ -4075,18 +4052,8 @@ index 0000000..c3adda5
 +
 +TESTFILES=\
 +	anarchist.svg \
-+	andorra.svg \
-+	butterfly.svg \
-+	daisies.svg \
-+	ellipticarcs.svg \
-+	firewall_denco_01.svg \
-+	mediatrice.svg \
-+	mouse_the_structorr.svg \
-+	network_could_nicolas_cl.svg \
-+	otto_01.svg \
-+	roundingerrors.svg \
-+	test.svg \
-+	tiger.svg
++	anarchist2.svg \
++	Nested.svg
 +
 +$(MISC)$/%_svgi_unittest_succeeded : $(BIN)$/svg2odf
 +    rm -f $(MISC)$/$(@:s/_succeeded/.xml/:f)
@@ -4111,9 +4078,9 @@ index 0000000..c3adda5
 +	@echo UNO_SERVICES=$(BIN)$/unittestservices.rdb > $@
 +	@echo UNO_TYPES=$(UNOUCRRDB:s/\/\\/) >> $@
 +
-+#ALLTAR : $(BIN)$/svgi_unittest_test.ini \
-+#		 $(BIN)$/unittestservices.rdb \
-+#         $(foreach,i,$(TESTFILES:s/.svg/_svgi_unittest_succeeded/:f) $(MISC)$/$i)
++ALLTAR : $(BIN)$/svgi_unittest_test.ini \
++		 $(BIN)$/unittestservices.rdb \
++         $(foreach,i,$(TESTFILES:s/.svg/_svgi_unittest_succeeded/:f) $(MISC)$/$i)
 diff --git a/filter/source/svg/test/odfserializer.cxx b/filter/source/svg/test/odfserializer.cxx
 new file mode 100644
 index 0000000..7686223
@@ -5160,10 +5127,10 @@ index 0000000..1211e69
 +objectBoundingBox
 diff --git a/filter/source/svg/units.cxx b/filter/source/svg/units.cxx
 new file mode 100644
-index 0000000..16fe8ab
+index 0000000..b4f9d94
 --- /dev/null
 +++ filter/source/svg/units.cxx
-@@ -0,0 +1,112 @@
+@@ -0,0 +1,99 @@
 +/*************************************************************************
 + *
 + *    OpenOffice.org - a multi-platform office productivity suite
@@ -5184,6 +5151,7 @@ index 0000000..16fe8ab
 +#include "precompiled_filter.hxx"
 +
 +#include "units.hxx"
++#include "gfxtypes.hxx"
 +#include "spirit_supplements.hxx"
 +
 +#include <string.h>
@@ -5198,50 +5166,36 @@ index 0000000..16fe8ab
 +namespace svgi
 +{
 +
-+namespace
++double convLength( double value, SvgUnit unit, const State& rState, char dir )
 +{
++    const double fBoxLen( dir=='h' ? rState.maViewBox.getWidth() : 
++                          (dir=='v' ? rState.maViewBox.getHeight() : 
++                           rState.maViewBox.getRange().getLength()));
 +
-+void appendChar( rtl::OUString& str, char character)
-+{
-+	str += rtl::OUString((sal_Char *)&character, 1, RTL_TEXTENCODING_UTF8);
-+}
-+
-+void appendString( rtl::OUString& str, const char *characters)
-+{
-+	str += rtl::OUString((sal_Char *)characters, strlen(characters), RTL_TEXTENCODING_UTF8);
-+}
-+
-+void appendDouble( rtl::OUString& str, double value, SvgUnit unit )
-+{
-+	str += rtl::OUString::valueOf(convLength(value, unit));
-+}
-+
-+} //namespace
-+
-+double convLength( double value, SvgUnit unit )
-+{
 +    // convert svg unit to internal coordinates ("pixel"). Since the
 +    // OOo drawing layer is still largely integer-based, the initial
 +    // viewport transformation includes a certain scale factor
++    double fRet(value);
 +    switch ( unit )
 +    {
-+        case SVG_LENGTH_UNIT_CM: return value * 1000.0;
-+        case SVG_LENGTH_UNIT_EM: fprintf( stderr, "TODO: legth type EM not implemented.\n" ); return 1000.0;
-+        case SVG_LENGTH_UNIT_EX: fprintf( stderr, "TODO: legth type EX not implemented.\n" ); return 1000.0;
-+        case SVG_LENGTH_UNIT_IN: return value * 2540.0;
-+        case SVG_LENGTH_UNIT_MM: return value * 100.0;
-+        case SVG_LENGTH_UNIT_PC: return value * 2540.0/6.0;
-+        case SVG_LENGTH_UNIT_PCT: fprintf( stderr, "TODO: legth type PCT not implemented.\n" ); return 1000.0;
-+        case SVG_LENGTH_UNIT_PT: return value * 2540.0/72.0;
-+        case SVG_LENGTH_UNIT_PX: return value;
-+		case SVG_LENGTH_UNIT_USER: return value * 2540.0/72.0;  //FIXME, not true according to the documentation
-+        default: fprintf( stderr, "Unknown length type\n" );
++        case SVG_LENGTH_UNIT_CM: fRet *= 72.0/2.54; break;
++        case SVG_LENGTH_UNIT_IN: fRet *= 72.0; break;
++        case SVG_LENGTH_UNIT_MM: fRet *= 72.0/25.4; break;
++        case SVG_LENGTH_UNIT_PC: fRet *= 72.0/6.0; break;
++		case SVG_LENGTH_UNIT_USER:
++        case SVG_LENGTH_UNIT_PX: // no unit defaults to PX in svg,
++                                 // assume display to have 72DPI
++        case SVG_LENGTH_UNIT_PT: break;
++        case SVG_LENGTH_UNIT_EM: fRet *= rState.mnFontSize; break;
++        case SVG_LENGTH_UNIT_EX: fRet *= rState.mnFontSize / 2.0; break;
++        case SVG_LENGTH_UNIT_PERCENTAGE: fRet *= fBoxLen; break;
++        default: OSL_TRACE( "Unknown length type" ); break;
 +    }
 +
-+    return 0.0;
++    return fRet;
 +}
 +
-+double convLength( const rtl::OUString& sValue )
++double convLength( const rtl::OUString& sValue, const State& rState, char dir )
 +{
 +    using namespace ::boost::spirit;
 +
@@ -5260,9 +5214,9 @@ index 0000000..16fe8ab
 +                | str_p("in") [assign_a(eUnit,SVG_LENGTH_UNIT_IN)]
 +                | str_p("mm") [assign_a(eUnit,SVG_LENGTH_UNIT_MM)]
 +                | str_p("pc") [assign_a(eUnit,SVG_LENGTH_UNIT_PC)]
-+                | str_p("pct")[assign_a(eUnit,SVG_LENGTH_UNIT_PCT)]
 +                | str_p("pt") [assign_a(eUnit,SVG_LENGTH_UNIT_PT)]
 +                | str_p("px") [assign_a(eUnit,SVG_LENGTH_UNIT_PX)]
++                | str_p("%") [assign_a(eUnit,SVG_LENGTH_UNIT_PERCENTAGE)]
 +                | str_p("") [assign_a(eUnit,SVG_LENGTH_UNIT_USER)]
 +                | end_p)
 +        ),
@@ -5272,16 +5226,16 @@ index 0000000..16fe8ab
 +    if( !bRes )
 +        return 0.0;
 +
-+    return convLength(nVal,eUnit);
++    return convLength(nVal,eUnit,rState,dir);
 +}
 +
 +} // namespace svgi
 diff --git a/filter/source/svg/units.hxx b/filter/source/svg/units.hxx
 new file mode 100644
-index 0000000..8e20fcf
+index 0000000..e48b5d5
 --- /dev/null
 +++ filter/source/svg/units.hxx
-@@ -0,0 +1,47 @@
+@@ -0,0 +1,60 @@
 +/*************************************************************************
 + *
 + *    OpenOffice.org - a multi-platform office productivity suite
@@ -5306,6 +5260,7 @@ index 0000000..8e20fcf
 +namespace rtl{ class OUString; }
 +namespace svgi
 +{
++    struct State;
 +    enum SvgUnit
 +    {
 +        SVG_LENGTH_UNIT_CM,
@@ -5314,18 +5269,30 @@ index 0000000..8e20fcf
 +        SVG_LENGTH_UNIT_IN,
 +        SVG_LENGTH_UNIT_MM,
 +        SVG_LENGTH_UNIT_PC,
-+        SVG_LENGTH_UNIT_PCT,
 +        SVG_LENGTH_UNIT_PT,
 +        SVG_LENGTH_UNIT_PX,
++        SVG_LENGTH_UNIT_PERCENTAGE,
 +		SVG_LENGTH_UNIT_USER
 +    };
 +
-+    /// return svg_length_t in 100th's of mm
-+    double convLength( double fVal, SvgUnit unit );
-+    double convLength( const rtl::OUString& sValue );
-+#if 0
-+	void transformPathPointsString( rtl::OUString& sData );
-+#endif
++    /** return svg_length_t in 100th's of mm
++         @param fVal value to convert
++         @param unit unit the value is in
++         @param rState current state (needed for viewport dimensions etc.)
++         @param dir direction - either 'h' or 'v' for horizonal or vertical, resp.
++     */
++    double convLength( double fVal, SvgUnit unit, const State& rState, char dir );
++
++    /** return svg_length_t in 100th's of mm
++         @param sValue value to convert
++         @param rState current state (needed for viewport dimensions etc.)
++         @param dir direction - either 'h' or 'v' for horizonal or vertical, resp.
++     */
++    double convLength( const rtl::OUString& sValue, const State& rState, char dir );
++
++    inline double pt2mm(double fVal) { return fVal*25.4/72.0; }
++    inline double pt100thmm(double fVal) { return fVal*2540.0/72.0; }
++
 +} // namespace svgi
 +
 +#endif
