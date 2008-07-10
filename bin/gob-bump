@@ -6,6 +6,7 @@ OPTIONS_KEEPDASHDASH=
 OPTIONS_SPEC="\
 gob-bump [options] <branch> <tag>
 --
+continue             continue from previous run
 distro=              use branches for distro
 apply-dir=           use apply-dir
 
@@ -16,11 +17,15 @@ apply-dir=           use apply-dir
 . git-sh-setup
 
 parse_config () {
-	while test $# != 0; do
+	while test $# != 0
+	 do
 		case "$1" in
 		--apply-dir)
 			shift
 			apply_dir=$1
+			;;
+		--continue)
+			continue=t
 			;;
 		--distro)
 			shift
@@ -34,7 +39,6 @@ parse_config () {
 		shift
 	done
 	args_left=$#
-	echo args_left=$args_left
 }
 
 test $# != 0 || usage
@@ -50,39 +54,49 @@ new_tag=gob-$2
 # setup
 this_branch=$(git-branch | grep '^\*' | sed -e 's/^\* //')
 
-gob_bases=$(git-tag | grep '^gob-')
+gob_bases=$(git-tag | grep '^gob-'; true)
 if test -z "$gob_bases"
 then
 	echo 'cannot find any gob-* tag, aborting'  1>&2
 	exit 1
 fi
 
-# find the last unpatched version and create a 'reset' commit
-# (actually this is one commit after that, we'll use ${one_ofter}^ to get
-# the right one)
-one_after=$(git-rev-list $this_branch --not $gob_bases | tail -n 1)
+# second run, tag already set?
+the_tag=$(git-tag | grep "^$new_tag\$"; true)
 
-# reset to the state of the last gob tag
-if test -n "$one_after"
+if test -n "$the_tag" -a -z "$continue"
 then
-	temp_branch=$(mktemp $(echo temp.$this_branch.XXXXXXXXXX | tr '/' '-'))
-	rm $temp_branch
-	git-checkout -b $temp_branch ${one_after}^
-	git-reset --soft $this_branch
-	git-commit -m 'Changes reverted to the last gob tag.' -a
-	git-checkout $this_branch
-	if git-merge $temp_branch
-	then
-		git-branch -d $temp_branch
-	else
-		echo "Reverting changes failed." 1>&2
-		exit 1
-	fi
-fi
+	echo "TAG: \`$the_tag' already exists, specify new tag or use --continue" 1>&2
+	exit 1
+elif test -z "$the_tag"
+then
+	# find the last unpatched version and create a 'reset' commit
+	# (actually this is one commit after that, we'll use ${one_ofter}^ to get
+	# the right one)
+	one_after=$(git-rev-list $this_branch --not $gob_bases | tail -n 1)
 
-# get the newest changes and tag the tip
-git-merge $new_changes
-git-tag $new_tag
+	# reset to the state of the last gob tag
+	if test -n "$one_after"
+	then
+		temp_branch=$(mktemp $(echo temp.$this_branch.XXXXXXXXXX | tr '/' '-'))
+		rm $temp_branch
+		git-checkout -b $temp_branch ${one_after}^
+		git-reset --soft $this_branch
+		git-commit -m 'Changes reverted to the last gob tag.' -a
+		git-checkout $this_branch
+		if git-merge $temp_branch
+		then
+			git-branch -d $temp_branch
+		else
+			echo "Reverting changes failed." 1>&2
+			exit 1
+		fi
+	fi
+	
+	# get the newest changes and tag the tip
+	git-merge $new_changes
+	git-tag $new_tag
+fi
 
 # update the branches
 if test -z "$apply_dir"
@@ -98,8 +112,15 @@ else
 	branches="$(gob --apply-dir=$apply_dir --distro=$distro branches)"
 fi
 broken='layout-plugin'
-echo "$branches" | grep -Ev $broken | while read branch
+bumped=$(git branch | grep bumped/ | sed -e s'@bumped/@@' | tr -d ' ' | tr '\n' '|' | sed -e s'@|$@@')
+if test -n "$bumped" -a -z "$continue"
+then
+	echo 'bumped/* branches found, delete them or use --continue' 1>&2
+	exit 1
+fi
+echo "$branches" | grep -Ev "^(${broken}|${bumped})\$" | while read branch
 do
+	echo "Bumping: $branch"
 	temp_branch=$(mktemp fixme.$branch.XXXXXXXXXX)
 	rm $temp_branch
 	git-checkout -b $temp_branch origin/$branch
