@@ -149,22 +149,6 @@ def patch_get_branch (patch):
     base = re.sub ('-m%(milestone)s' % locals (), '', base)
     return base
 
-def dump_gob (gob_dir, branch, patches):
-    owner = ''
-    for patch in patches:
-        owner = patch.owner
-        if owner:
-            break
-    issues = []
-    for patch in patches:
-        issues += patch.issues
-    issue_string = ', '.join (issues)
-    file (os.path.join (gob_dir, branch), 'w').write ('''name: %(branch)s
-state: stable
-issue: %(issue_string)s
-owner: %(owner)s
-''' % locals ())
-
 # Hard handy work for m19 gets quickly bit rotten
 # Use patch dependency calculation instead
 manual_m19_branch_dependencies = {
@@ -410,13 +394,22 @@ def create_gitignores (dir):
                 slash = '/'
             file (dir + '/' + os.path.dirname (i) + '/.gitignore', 'a').write (os.path.basename (i) + slash + '\n')
 
-def get_drink ():
-    if os.path.exists ('config.log'):
-        m = re.search ('''DRINK=['"*]([^*"']*)''', file ('config.log').read ())
+class Setup:
+    string = None
+    vars = {}
+    def __init__ (self, file_name='config.log'):
+        if not self.string and os.path.exists (file_name):
+            self.string = file (file_name).read ()
+    def get (self, key, default=None):
+        return self.vars.get (key, self.read_ (key, default))
+    def read_ (self, key, default):
+        m = re.search ('''%(key)s=['"*]([^*"']*)''' % locals (), self.string)
         if m:
-            return m.group (1)
-    return 'tea'
-            
+            self.vars[key] = m.group (1)
+        else:
+            self.vars[key] = default
+        return self.vars[key]
+ 
 def get_svn_revision ():
     return re.search ('\nRevision: ([0-9]+)', read_pipe ('svn info')).group (1)
 
@@ -430,12 +423,12 @@ class Git:
         self.pristine = 'upstream/%(workspace)s-m%(milestone)s' % self.__dict__
         self.commits = {}
         if not os.path.exists (self.dir):
-            drink = get_drink ()
+            drink = Setup ().get ('DRINK', 'tea')
             print >> sys.stderr, 'Unpacking source tree - [ go and have some %(drink)s ] ...' % locals ()
             system ('make unpack')
         if not os.path.isdir (dir + '/.git'):
             create_gitignores (dir)
-            drink = get_drink ()
+            drink = Setup ().get ('DRINK')
             print >> sys.stderr, 'Creating GIT archive - [ go and have some %(drink)s ] ...' % locals ()
             self.system ('git-init')
             svn_revision = get_svn_revision ()
@@ -466,6 +459,9 @@ class Git:
                            .replace (' ', '').split ('\n'))
     def get_log (self, branch=''):
         return self.pipe ('git-log --pretty=oneline %(branch)s --' % locals ())
+    def current_commit (self, branch=''):
+        s = self.get_log ('-1 ' + branch)
+        return s[:s.index (' ')]
     def get_commit (self, patch):
         if not self.commits:
             log = self.get_log (self.patched)
@@ -549,6 +545,33 @@ class Git:
         else:
             self.apply_patch (branches, patches, patch)
         self.after_ ()
+    def dump_gob (self, branches, patches, branch):
+        gob_dir = self.dir + '/.git/refs/gob'
+        if not os.path.exists (gob_dir):
+            os.makedirs (gob_dir)
+        branch_patches = branches.get (branch, [])
+        if not branch_patches:
+            return
+        owner = ''
+        for patch in branch_patches:
+            owner = patch.owner
+            if owner:
+                break
+        issues = []
+        for patch in branch_patches:
+            issues += patch.issues
+        issue_string = ', '.join (issues)
+        dependencies = filter (lambda x: x != 'pristine', branch_get_dependencies (branches, patches, branch))
+        dependencies_string = ', '.join (dependencies)
+        commit = self.current_commit ()
+        gob_file_name = os.path.join (gob_dir, branch)
+        print >> sys.stderr, 'Writing:', gob_file_name
+        file (gob_file_name, 'w').write ('''%(commit)s
+state: stable
+issue: %(issue_string)s
+owner: %(owner)s
+depend: %(dependencies_string)s
+''' % locals ())
 
 class Patch:
     def __init__ (self, file_name):
@@ -671,18 +694,12 @@ class Command:
                 self.branches_[branch] = self.branches_.get (branch, []) + [patch]
         return self.branches_
     def dump_gobs (self):
-        ## FIXME: now that we have also export to git functionalty,
-        ## rather dump gob files while exporting
-        '''dump gob files FIXME: obsolete-me'''
-        gob_dir = self.options.build_dir + '/.git/refs/gob'
-        if not os.path.exists (gob_dir):
-            os.makedirs (gob_dir)
+        '''dump gob files'''
         branches = self.get_branches ()
+        patches = self.get_patches ()
         git = Git (self.options.build_dir, self.options.patched)
         for branch in git.get_branches ():
-            patches = branches.get (branch)
-            if patches:
-                dump_gob (gob_dir, branch, patches)
+            git.dump_gob (branches, patches, branch)
     def checkout (self):
         '''checkout patched ('master') branch'''
         git = Git (self.options.build_dir, self.options.patched)
@@ -791,7 +808,7 @@ class Command:
         extra = 0
         independent = 0
         for branch in branches:
-            manual_dependencies = sorted (branch_dependencies.get (branch, ['pristine']))
+            manual_dependencies = sorted (manual_m19_branch_dependencies.get (branch, ['pristine']))
             auto_dependencies = sorted (branch_get_dependencies (branches, patches, branch))
             missing = False
             for m in manual_dependencies:
@@ -842,14 +859,16 @@ def get_cli_parser ():
     def get (option):
         return p.get_option ('--' + option.replace ('-', '_')).default
 
+    setup_workspace, setup_milestone = Setup ().get ('CVSTAG', 'dev300-m19').split ('-m')
+
     p.add_option ('--workspace',
                   dest='workspace',
-                  default='dev300',
+                  default=setup_workspace,
                   metavar='STRING',
                   help='set master workspace')
     p.add_option ('--milestone',
                   dest='milestone',
-                  default='19',
+                  default=setup_milestone,
                   metavar='STRING',
                   help='set milestone')
     p.add_option ('--distro',
