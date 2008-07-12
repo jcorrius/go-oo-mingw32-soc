@@ -49,7 +49,7 @@ index 92b7e82..22d77cb 100644
  /*** error constants #... ***/
  #define SC_OPCODE_START_ERRORS       30
 diff --git sc/inc/compiler.hxx sc/inc/compiler.hxx
-index 8036115..6d89e05 100644
+index 8036115..047ff2c 100644
 --- sc/inc/compiler.hxx
 +++ sc/inc/compiler.hxx
 @@ -45,6 +45,7 @@
@@ -65,7 +65,7 @@ index 8036115..6d89e05 100644
          } sbyte;
          ComplRefData aRef;
 +        struct {
-+            sal_Unicode cFile[MAXSTRLEN+1];
++            sal_uInt16  nFileId;
 +            sal_Unicode cName[MAXSTRLEN+1];
 +        } extname;
          ScMatrix*    pMat;
@@ -75,7 +75,7 @@ index 8036115..6d89e05 100644
      void SetDouble( double fVal );
      void SetInt( int nVal );
      void SetName( USHORT n );
-+    void SetExternalName( const String& rFile, const String& rName );
++    void SetExternalName( sal_uInt16 nFileId, const String& rName );
      void SetMatrix( ScMatrix* p );
      void SetExternal(const sal_Unicode* pStr);
      // These methods are ok to use, reference count not cleared.
@@ -135,10 +135,10 @@ index 8a648d3..9b373cc 100644
          @return  TRUE = Sheet created, rnTab contains valid sheet index. */
 diff --git sc/inc/externalrefmgr.hxx sc/inc/externalrefmgr.hxx
 new file mode 100644
-index 0000000..3ffd85c
+index 0000000..b5427ec
 --- /dev/null
 +++ sc/inc/externalrefmgr.hxx
-@@ -0,0 +1,124 @@
+@@ -0,0 +1,164 @@
 +/*************************************************************************
 + *
 + * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
@@ -173,21 +173,47 @@ index 0000000..3ffd85c
 +#define SC_EXTERNALREFMGR_HXX
 +
 +#include "sfx2/objsh.hxx"
++#include "sfx2/lnkbase.hxx"
 +#include "global.hxx"
 +#include "address.hxx"
 +
 +#include <hash_map>
 +#include <boost/shared_ptr.hpp>
++#include <vector>
 +
 +class ScDocument;
 +class ScToken;
 +class ScTokenArray;
 +class String;
 +class SfxObjectShellRef;
++class Window;
++
++class ScExternalRefLink : public ::sfx2::SvBaseLink
++{
++public:
++    ScExternalRefLink(ScDocument* pDoc, const String& rFile, const String& rFilter);
++    virtual ~ScExternalRefLink();
++
++    virtual void Closed();
++    virtual void DataChanged(const String& rMimeType, const ::com::sun::star::uno::Any & rValue);
++    virtual void Edit(Window* pParent, const Link& rEndEditHdl);
++
++private:
++    ScExternalRefLink(); // disabled
++    ScExternalRefLink(const ScExternalRefLink&); // disabled
++
++    DECL_LINK(EndEditHdl, void*);
++
++    String      maFileName;
++    String      maFilterName;
++    ScDocument* mpDoc;
++};
++
++// ============================================================================
 +
 +class ScExternalRefManager
 +{
-+    struct ScAddressHash
++    struct AddressHash
 +    {
 +        size_t operator()(const ScAddress& rAddr) const
 +        {
@@ -196,7 +222,7 @@ index 0000000..3ffd85c
 +        }
 +    };
 +
-+    struct ScRangeHash
++    struct RangeHash
 +    {
 +        size_t operator()(const ScRange& rRange) const
 +        {
@@ -206,12 +232,13 @@ index 0000000..3ffd85c
 +        }
 +    };
 +
-+    typedef ::std::hash_map<String, SfxObjectShellRef, ScStringHashCode, ::std::equal_to<String> >  ScDocShellMap;
-+    typedef ::boost::shared_ptr<ScToken>                ScTokenRef;
-+    typedef ::boost::shared_ptr<ScTokenArray>           ScTokenArrayRef;
-+    typedef ::std::hash_map<ScAddress, ScTokenRef, ScAddressHash, ::std::equal_to<ScAddress> >      SingleTokenMap;
-+    typedef ::std::hash_map<ScRange, ScTokenArrayRef, ScRangeHash, ::std::equal_to<ScRange> >            DoubleTokenMap;
-+    typedef ::std::hash_map<String, ScTokenArrayRef, ScStringHashCode, ::std::equal_to<String> >    RangeNameMap;
++    typedef ::boost::shared_ptr<ScToken>        TokenRef;
++    typedef ::boost::shared_ptr<ScTokenArray>   TokenArrayRef;
++
++    typedef ::std::hash_map<String, SfxObjectShellRef, ScStringHashCode, ::std::equal_to<String> >  DocShellMap;
++    typedef ::std::hash_map<ScAddress, TokenRef, AddressHash, ::std::equal_to<ScAddress> >          SingleTokenMap;
++    typedef ::std::hash_map<ScRange, TokenArrayRef, RangeHash, ::std::equal_to<ScRange> >           DoubleTokenMap;
++    typedef ::std::hash_map<String, TokenArrayRef, ScStringHashCode, ::std::equal_to<String> >      RangeNameMap;
 +
 +    /** 
 +     * Cached content of a single external document
@@ -242,7 +269,11 @@ index 0000000..3ffd85c
 +     */
 +    ScTokenArray* getRangeNameTokens(const String& rFile, const String& rName, const ScAddress& rCurPos);
 +
++    sal_uInt16 getExternalFileId(const String& rFile);
++    const String* getExternalFileName(sal_uInt16 nIndex) const;
++    
 +    void refreshNames(const String& rFile);
++    void switchSrcFile(const String& rOldFile, const String& rNewFile);
 +    void clear();
 +
 +private:
@@ -251,14 +282,23 @@ index 0000000..3ffd85c
 +
 +    DocCache* getDocumentCache(const String& rFile);
 +    ScDocument* getSrcDocument(const String& rFile);
++    void insertExternalFileLink(const String& rFile, const String& rFilterName);
 +
 +private:
 +    ScDocument* mpDoc;
 +
-+    /** source document cache */
-+    ScDocShellMap maDocShells;
++    /** 
++     * Source document cache.  This stores the original source document 
++     * instances.  The source documents get purged after certain period of 
++     * time. 
++     */
++    DocShellMap maDocShells;
 +
++    /** cache only of referenced ranges and names from source documents. */
 +    DocCacheMap maCachedDocContents;
++
++    /** original source file index. */
++    ::std::vector<String> maFileNames;
 +};
 +
 +
@@ -276,7 +316,7 @@ index 285104d..b72ebad 100644
  		ocIf				= SC_OPCODE_IF,
  		ocChose				= SC_OPCODE_CHOSE,
 diff --git sc/inc/token.hxx sc/inc/token.hxx
-index 23decd6..4b0aa47 100644
+index 23decd6..01e67ca 100644
 --- sc/inc/token.hxx
 +++ sc/inc/token.hxx
 @@ -64,7 +64,7 @@ enum StackVarEnum
@@ -288,29 +328,21 @@ index 23decd6..4b0aa47 100644
      svError,                            // error token
      svMissing = 0x70,                   // 0 or ""
      svUnknown                           // unknown StackType
-@@ -151,6 +151,8 @@ public:
-     virtual double              GetDouble() const;
-     virtual double&             GetDoubleAsReference();
-     virtual const String&       GetString() const;
-+    virtual const String&       GetString( USHORT ) const;
-+    virtual USHORT              GetStringCount() const;
-     virtual const SingleRefData&    GetSingleRef() const;
-     virtual SingleRefData&      GetSingleRef();
-     virtual const ComplRefData& GetDoubleRef() const;
-@@ -447,6 +449,20 @@ public:
+@@ -447,6 +447,21 @@ public:
  };
  
  
 +class ScExternalNameToken : public ScOpToken
 +{
 +private:
-+    ::std::vector<String>   maData;
++    sal_uInt16                  mnFileId;
++    String                      maName;
 +public:
-+                                ScExternalNameToken( const String& rFile, const String& rName );
++                                ScExternalNameToken( sal_uInt16 nFileId, const String& rName );
 +                                ScExternalNameToken( const ScExternalNameToken& r );
 +    virtual                     ~ScExternalNameToken();
-+    virtual const String&       GetString( USHORT n ) const;
-+    virtual USHORT              GetStringCount() const;
++    virtual USHORT              GetIndex() const;
++    virtual const String&       GetString() const;
 +    virtual BOOL                operator==( const ScToken& rToken ) const;
 +};
 +
@@ -318,6 +350,18 @@ index 23decd6..4b0aa47 100644
  class ScJumpToken : public ScOpToken
  {
  private:
+diff --git sc/inc/tokenarray.hxx sc/inc/tokenarray.hxx
+index 1d903ce..f7c4d6b 100644
+--- sc/inc/tokenarray.hxx
++++ sc/inc/tokenarray.hxx
+@@ -193,6 +193,7 @@ public:
+     ScToken* AddDoubleReference( const ComplRefData& rRef );
+     ScToken* AddName( USHORT n );
+     ScToken* AddMatrix( ScMatrix* p );
++    ScToken* AddExternalName( sal_uInt16 nFileId, const String& rName );
+     ScToken* AddExternal( const sal_Unicode* pStr );
+     /** Xcl import may play dirty tricks with OpCode!=ocExternal.
+         Others don't use! */
 diff --git sc/source/core/data/documen2.cxx sc/source/core/data/documen2.cxx
 index 6dd6697..69e45fb 100644
 --- sc/source/core/data/documen2.cxx
@@ -369,7 +413,7 @@ index 541e2e4..20dae1e 100644
          const String& rFilterName, const String& rFilterOpt, const String& rTabName )
  {
 diff --git sc/source/core/tool/compiler.cxx sc/source/core/tool/compiler.cxx
-index 7caea76..c5837ce 100644
+index 7caea76..106514c 100644
 --- sc/source/core/tool/compiler.cxx
 +++ sc/source/core/tool/compiler.cxx
 @@ -73,9 +73,13 @@
@@ -502,7 +546,7 @@ index 7caea76..c5837ce 100644
  };
  
  static const ConventionXL_R1C1 ConvXL_R1C1;
-@@ -2597,6 +2689,24 @@ BOOL ScCompiler::IsNamedRange( const String& rUpperName )
+@@ -2597,6 +2689,28 @@ BOOL ScCompiler::IsNamedRange( const String& rUpperName )
          return FALSE;
  }
  
@@ -519,7 +563,11 @@ index 7caea76..c5837ce 100644
 +    if (aFile.Len() > MAXSTRLEN || aName.Len() > MAXSTRLEN)
 +        return false;
 +
-+    aToken.SetExternalName(aFile, aName);
++    sal_uInt16 nFileId = pDoc->GetExternalRefManager()->getExternalFileId(aFile);
++    fprintf(stdout, "ScCompiler::IsExternalNamedRange:   file name = '%s'; file id = %d\n",
++            rtl::OUStringToOString(aFile, RTL_TEXTENCODING_UTF8).getStr(), nFileId);
++
++    aToken.SetExternalName(nFileId, aName);
 +    pRawToken = aToken.Clone();
 +    return true;
 +}
@@ -527,17 +575,7 @@ index 7caea76..c5837ce 100644
  BOOL ScCompiler::IsDBRange( const String& rName )
  {
      USHORT n;
-@@ -3183,6 +3293,9 @@ BOOL ScCompiler::NextNewToken( bool bAllowBooleans )
-             fprintf( stderr, "Token '%s'\n",
-                      rtl::OUStringToOString( aUpper, RTL_TEXTENCODING_UTF8 ).getStr() );
- #endif
-+            fprintf(stdout, "ScCompiler::NextNewToken:   token = '%s'\n",
-+                    rtl::OUStringToOString(aOrg, RTL_TEXTENCODING_UTF8).getStr());
-+
-             // Column 'DM' ("Deutsche Mark", German currency) couldn't be
-             // referred to => IsReference() before IsValue().
-             // #42016# Italian ARCTAN.2 resulted in #REF! => IsOpcode() before
-@@ -3190,10 +3303,11 @@ BOOL ScCompiler::NextNewToken( bool bAllowBooleans )
+@@ -3190,10 +3304,11 @@ BOOL ScCompiler::NextNewToken( bool bAllowBooleans )
              // IsBoolean before isValue to catch inline bools without the kludge
              //    for inline arrays.
              if ( !(bMayBeFuncName && IsOpCode( aUpper ))
@@ -551,25 +589,19 @@ index 7caea76..c5837ce 100644
                && !IsDBRange( aUpper )
                && !IsColRowName( aUpper )
                && !(bMayBeFuncName && IsMacro( aUpper ))
-@@ -3452,8 +3566,31 @@ BOOL ScCompiler::GetToken()
+@@ -3452,6 +3567,22 @@ BOOL ScCompiler::GetToken()
      }
      if( pToken->GetOpCode() == ocSubTotal )
          glSubTotal = TRUE;
 +    else if ( pToken->GetOpCode() == ocExternalName )
 +    {
-+        fprintf(stdout, "ScCompiler::GetToken:   ocExternalName\n");
-+        if (pToken->GetStringCount() != 2)
++        ScExternalRefManager* pRefMgr = pDoc->GetExternalRefManager();
++        const String* pFile = pRefMgr->getExternalFileName(pToken->GetIndex());
++        if (!pFile)
 +            SetError(errNoName);
 +
-+        const String& rFile = pToken->GetString(0);
-+        const String& rName = pToken->GetString(1);
-+
-+        fprintf(stdout, "ScCompiler::GetToken:     file = '%s'; name = '%s'\n",
-+                rtl::OUStringToOString(rFile, RTL_TEXTENCODING_UTF8).getStr(), 
-+                rtl::OUStringToOString(rName, RTL_TEXTENCODING_UTF8).getStr());
-+
-+        ScExternalRefManager* pRefMgr = pDoc->GetExternalRefManager();
-+        ScTokenArray* pNew = pRefMgr->getRangeNameTokens(rFile, rName, aPos);
++        const String& rName = pToken->GetString();
++        ScTokenArray* pNew = pRefMgr->getRangeNameTokens(*pFile, rName, aPos);
 +        if (pNew)
 +        {
 +            PushTokenArray(pNew, true);
@@ -579,22 +611,25 @@ index 7caea76..c5837ce 100644
 +    }
      else if( pToken->GetOpCode() == ocName )
      {
-+        fprintf(stdout, "ScCompiler::GetToken:   ocName\n");
          ScRangeData* pRangeData = pDoc->GetRangeName()->FindIndex( pToken->GetIndex() );
-         if (pRangeData)
-         {
-@@ -5402,6 +5539,9 @@ ScToken* ScCompiler::CreateStringFromToken( rtl::OUStringBuffer& rBuffer, ScToke
+@@ -5402,6 +5533,15 @@ ScToken* ScCompiler::CreateStringFromToken( rtl::OUStringBuffer& rBuffer, ScToke
      BOOL bSpaces = FALSE;
      ScToken* t = pTokenP;
      OpCode eOp = t->GetOpCode();
 +    if (eOp == ocExternalName)
-+        rBuffer.append(pConv->makeExternalNameStr(t->GetString(0), t->GetString(1)));
++    {
++        const String *pStr = pDoc->GetExternalRefManager()->getExternalFileName(t->GetIndex());
++        if (pStr)
++        {
++            rBuffer.append(pConv->makeExternalNameStr(*pStr, t->GetString()));
++        }
++    }
 +
      if( eOp >= ocAnd && eOp <= ocOr )
      {
          // AND, OR infix?
 diff --git sc/source/core/tool/token.cxx sc/source/core/tool/token.cxx
-index 7312257..cb101a3 100644
+index 7312257..8ccba56 100644
 --- sc/source/core/tool/token.cxx
 +++ sc/source/core/tool/token.cxx
 @@ -52,6 +52,8 @@
@@ -606,21 +641,19 @@ index 7312257..cb101a3 100644
  // ImpTokenIterator wird je Interpreter angelegt, mehrfache auch durch
  // SubCode via ScTokenIterator Push/Pop moeglich
  IMPL_FIXEDMEMPOOL_NEWDEL( ImpTokenIterator, 32, 16 )
-@@ -196,6 +198,21 @@ void ScRawToken::SetName( USHORT n )
+@@ -196,6 +198,19 @@ void ScRawToken::SetName( USHORT n )
      nRefCnt = 0;
  }
  
-+void ScRawToken::SetExternalName( const String& rFile, const String& rName )
++void ScRawToken::SetExternalName( sal_uInt16 nFileId, const String& rName )
 +{
 +    eOp = ocExternalName;
 +    eType = svExternalName;
 +    nRefCnt = 0;
 +
-+    xub_StrLen n = rFile.Len();
-+    memcpy(extname.cFile, rFile.GetBuffer(), n*sizeof(sal_Unicode));
-+    extname.cFile[n] = 0;
++    extname.nFileId = nFileId;
 +
-+    n = rName.Len();
++    xub_StrLen n = rName.Len();
 +    memcpy(extname.cName, rName.GetBuffer(), n*sizeof(sal_Unicode));
 +    extname.cName[n] = 0;
 +}
@@ -628,7 +661,7 @@ index 7312257..cb101a3 100644
  ComplRefData& ScRawToken::GetReference()
  {
      DBG_ASSERT( lcl_IsReference( eOp, GetType() ), "GetReference: no Ref" );
-@@ -255,6 +272,7 @@ ScRawToken* ScRawToken::Clone() const
+@@ -255,6 +270,7 @@ ScRawToken* ScRawToken::Clone() const
              case svSingleRef:
              case svDoubleRef:   n += sizeof(aRef); break;
              case svMatrix:      n += sizeof(ScMatrix*); break;
@@ -636,7 +669,7 @@ index 7312257..cb101a3 100644
              case svIndex:       n += sizeof(USHORT); break;
              case svJump:        n += nJump[ 0 ] * 2 + 2; break;
              case svExternal:    n = sal::static_int_cast<USHORT>( n + GetStrLenBytes( cStr+1 ) + GetStrLenBytes( 2 ) ); break;
-@@ -311,8 +329,15 @@ ScToken* ScRawToken::CreateToken() const
+@@ -311,8 +327,14 @@ ScToken* ScRawToken::CreateToken() const
              return new ScMatrixToken( pMat );
          //break;
          case svIndex :
@@ -645,14 +678,13 @@ index 7312257..cb101a3 100644
          //break;
 +        case svExternalName:
 +        {
-+            String aFile(extname.cFile);
 +            String aName(extname.cName);
-+            return new ScExternalNameToken( aFile, aName );
++            return new ScExternalNameToken( extname.nFileId, aName );
 +        }
          case svJump :
              return new ScJumpToken( eOp, (short*) nJump );
          //break;
-@@ -505,6 +530,9 @@ ScToken* ScToken::Clone() const
+@@ -505,6 +527,9 @@ ScToken* ScToken::Clone() const
          case svExternal :
              return new ScExternalToken( *static_cast<const ScExternalToken*>(this) );
          //break;
@@ -662,53 +694,34 @@ index 7312257..cb101a3 100644
          case svFAP :
              return new ScFAPToken( *static_cast<const ScFAPToken*>(this) );
          //break;
-@@ -756,6 +784,18 @@ const String& ScToken::GetString() const
-     return aDummyString;
- }
- 
-+const String& ScToken::GetString( USHORT ) const
-+{
-+    DBG_ERRORFILE( "ScToken::GetString: virtual dummy called" );
-+    return aDummyString;
-+}
-+
-+USHORT ScToken::GetStringCount() const
-+{
-+    DBG_ERRORFILE( "ScToken::GetStringCount: virtual dummy called" );
-+    return 0;
-+}
-+
- const SingleRefData& ScToken::GetSingleRef() const
- {
-     DBG_ERRORFILE( "ScToken::GetSingleRef: virtual dummy called" );
-@@ -1016,6 +1056,60 @@ BOOL ScIndexToken::operator==( const ScToken& r ) const
+@@ -1016,6 +1041,56 @@ BOOL ScIndexToken::operator==( const ScToken& r ) const
  }
  
  
-+ScExternalNameToken::ScExternalNameToken( const String& rFile, const String& rName ) :
-+    ScOpToken( ocExternalName, svExternalName )
++ScExternalNameToken::ScExternalNameToken( sal_uInt16 nFileId, const String& rName ) :
++    ScOpToken( ocExternalName, svExternalName ),
++    mnFileId(nFileId),
++    maName(rName)
 +{
-+    maData.reserve(2);
-+    maData.push_back(rFile);
-+    maData.push_back(rName);
 +}
 +
 +ScExternalNameToken::ScExternalNameToken( const ScExternalNameToken& r ) :
-+    ScOpToken( r )
++    ScOpToken( r ),
++    mnFileId(r.mnFileId),
++    maName(r.maName)
 +{
-+    maData = r.maData;
 +}
 +
 +ScExternalNameToken::~ScExternalNameToken() {}
 +
-+const String& ScExternalNameToken::GetString( USHORT n ) const
++USHORT ScExternalNameToken::GetIndex() const
 +{
-+    return maData[n];
++    return mnFileId;
 +}
 +
-+USHORT ScExternalNameToken::GetStringCount() const
++const String& ScExternalNameToken::GetString() const
 +{
-+    return static_cast<USHORT>(maData.size());
++    return maName;
 +}
 +
 +BOOL ScExternalNameToken::operator==( const ScToken& r ) const
@@ -716,25 +729,21 @@ index 7312257..cb101a3 100644
 +    if ( !ScToken::operator==(r) )
 +        return false;
 +
-+    USHORT n = GetStringCount();
-+    if ( n != r.GetStringCount() )
++    if (mnFileId != r.GetIndex())
 +        return false;
 +
-+    for (USHORT i = 0; i < n; ++i)
-+    {
-+        xub_StrLen nLen = GetString(i).Len();
-+        if ( nLen != r.GetString(i).Len() )
-+            return false;
-+        
-+        const sal_Unicode* p1 = GetString(i).GetBuffer();
-+        const sal_Unicode* p2 = r.GetString(i).GetBuffer();
-+        for (xub_StrLen j = 0; j < nLen; ++j)
-+        {
-+            if (p1[j] != p2[j])
-+                return false;
-+        }
-+    }
++    xub_StrLen nLen = maName.Len();
++    const String& rName = r.GetString();
++    if (nLen != rName.Len())
++        return false;
 +
++    const sal_Unicode* p1 = maName.GetBuffer();
++    const sal_Unicode* p2 = rName.GetBuffer();
++    for (xub_StrLen j = 0; j < nLen; ++j)
++    {
++        if (p1[j] != p2[j])
++            return false;
++    }
 +    return true;
 +}
 +
@@ -742,12 +751,225 @@ index 7312257..cb101a3 100644
  short* ScJumpToken::GetJump() const                     { return pJump; }
  BOOL ScJumpToken::operator==( const ScToken& r ) const
  {
+@@ -1873,6 +1948,11 @@ ScToken* ScTokenArray::AddMatrix( ScMatrix* p )
+     return Add( new ScMatrixToken( p ) );
+ }
+ 
++ScToken* ScTokenArray::AddExternalName( sal_uInt16 nFileId, const String& rName )
++{
++    return Add( new ScExternalNameToken(nFileId, rName) );
++}
++
+ ScToken* ScTokenArray::AddColRowName( const SingleRefData& rRef )
+ {
+     return Add( new ScSingleRefOpToken( ocColRowName, rRef ) );
+diff --git sc/source/filter/excel/excform8.cxx sc/source/filter/excel/excform8.cxx
+index ebf8543..da9ded9 100644
+--- sc/source/filter/excel/excform8.cxx
++++ sc/source/filter/excel/excform8.cxx
+@@ -41,6 +41,7 @@
+ #include "xilink.hxx"
+ #include "xiname.hxx"
+ 
++#include "externalrefmgr.hxx"
+ 
+ ExcelToSc8::ExcelToSc8( const XclImpRoot& rRoot ) :
+     ExcelToSc( rRoot ),
+@@ -608,8 +609,22 @@ ConvErr ExcelToSc8::Convert( const ScTokenArray*& rpTokArray, XclImpStream& aIn,
+                     {
+                         case xlExtName:
+                         {
+-                            aStack << aPool.Store( ocNoName, pExtName->GetName() );
+-                            GetTracer().TraceFormulaExtName();
++                            const String* pFileUrl = rLinkMan.GetSupbookUrl(nXtiIndex);
++                            if (!pFileUrl)
++                            {    
++                                aStack << aPool.Store(ocNoName, pExtName->GetName());
++                                break;
++                            }
++
++                            String aFileUrl = ScGlobal::GetAbsDocName(*pFileUrl, GetDocShell());
++                            ScExternalRefManager* pRefMgr = GetDoc().GetExternalRefManager();
++                            sal_uInt16 nFileId = pRefMgr->getExternalFileId(aFileUrl);
++                            fprintf(stdout, "ExcelToSc8::Convert:   external name (file: %s; name: %s; file id: %d)\n",
++                                    rtl::OUStringToOString(aFileUrl, RTL_TEXTENCODING_UTF8).getStr(),
++                                    rtl::OUStringToOString(pExtName->GetName(), RTL_TEXTENCODING_UTF8).getStr(),
++                                    nFileId);
++
++                            aStack << aPool.StoreExtName(nFileId, pExtName->GetName());
+                         }
+                         break;
+ 
+diff --git sc/source/filter/excel/tokstack.cxx sc/source/filter/excel/tokstack.cxx
+index 20ada63..091de84 100644
+--- sc/source/filter/excel/tokstack.cxx
++++ sc/source/filter/excel/tokstack.cxx
+@@ -395,6 +395,16 @@ void TokenPool::GetElement( const UINT16 nId )
+                         pScToken->AddMatrix( p );
+                 }
+                 break;
++            case T_ExtName:
++            {
++                UINT16 n = pElement[nId];
++                if (n < maExtNames.size())
++                {
++                    const ExtName& r = maExtNames[n];
++                    pScToken->AddExternalName(r.mnFileId, r.maName);
++                }
++            }
++            break;
+ 			default:
+ 				DBG_ERROR("-TokenPool::GetElement(): Zustand undefiniert!?");
+ 		}
+@@ -477,6 +487,16 @@ void TokenPool::GetElementRek( const UINT16 nId )
+                             pScToken->AddMatrix( p );
+                     }
+                     break;
++                case T_ExtName:
++                {
++                    UINT16 n = pElement[*pAkt];
++                    if (n < maExtNames.size())
++                    {
++                        const ExtName& r = maExtNames[n];
++                        pScToken->AddExternalName(r.mnFileId, r.maName);
++                    }
++                }
++                break;
+ 				default:
+ 					DBG_ERROR("-TokenPool::GetElementRek(): Zustand undefiniert!?");
+ 			}
+@@ -724,6 +744,24 @@ const TokenId TokenPool::StoreMatrix( SCSIZE nC, SCSIZE nR )
+     return ( const TokenId ) nElementAkt;
+ }
+ 
++const TokenId TokenPool::StoreExtName( sal_uInt16 nFileId, const String& rName )
++{
++    if ( nElementAkt >= nElement )
++        GrowElement();
++
++    pElement[nElementAkt] = static_cast<UINT16>(maExtNames.size());
++    pType[nElementAkt] = T_ExtName;
++    
++    maExtNames.push_back(ExtName());
++    ExtName& r = maExtNames.back();
++    r.mnFileId = nFileId;
++    r.maName = rName;
++
++    ++nElementAkt;
++
++    return static_cast<const TokenId>(nElementAkt);
++}
++
+ void TokenPool::Reset( void )
+ {
+     nP_IdAkt = nP_IdLast = nElementAkt = nP_StrAkt = nP_DblAkt = nP_ErrAkt = nP_RefTrAkt = nP_ExtAkt = nP_NlfAkt = nP_MatrixAkt = 0;
+diff --git sc/source/filter/excel/xilink.cxx sc/source/filter/excel/xilink.cxx
+index e351863..b58f6ec 100644
+--- sc/source/filter/excel/xilink.cxx
++++ sc/source/filter/excel/xilink.cxx
+@@ -191,6 +191,11 @@ public:
+                             sal_uInt16 nXtiIndex ) const;
+     /** Returns the specified external name or 0 on error. */
+     const XclImpExtName* GetExternName( sal_uInt16 nXtiIndex, sal_uInt16 nExtName ) const;
++
++    /** Returns the absolute file URL of a supporting workbook specified by
++        the index. */
++    const String*       GetSupbookUrl( sal_uInt16 nXtiIndex ) const;
++
+     /** Tries to decode the URL of the specified XTI entry to OLE or DDE link components.
+         @descr  For DDE links: Decodes to application name and topic.
+         For OLE object links: Decodes to class name and document URL.
+@@ -584,6 +589,14 @@ const XclImpExtName* XclImpLinkManagerImpl::GetExternName( sal_uInt16 nXtiIndex,
+     return pSupbook ? pSupbook->GetExternName( nExtName ) : 0;
+ }
+ 
++const String* XclImpLinkManagerImpl::GetSupbookUrl( sal_uInt16 nXtiIndex ) const
++{
++    const XclImpSupbook* p = GetSupbook( nXtiIndex );
++    if (!p)
++        return NULL;
++    return &p->GetXclUrl();
++}
++
+ bool XclImpLinkManagerImpl::GetLinkData( String& rApplic, String& rTopic, sal_uInt16 nXtiIndex ) const
+ {
+     const XclImpSupbook* pSupbook = GetSupbook( nXtiIndex );
+@@ -707,6 +720,11 @@ const XclImpExtName* XclImpLinkManager::GetExternName( sal_uInt16 nXtiIndex, sal
+     return mxImpl->GetExternName( nXtiIndex, nExtName );
+ }
+ 
++const String* XclImpLinkManager::GetSupbookUrl( sal_uInt16 nXtiIndex ) const
++{
++    return mxImpl->GetSupbookUrl(nXtiIndex);
++}
++
+ bool XclImpLinkManager::GetLinkData( String& rApplic, String& rTopic, sal_uInt16 nXtiIndex ) const
+ {
+     return mxImpl->GetLinkData( rApplic, rTopic, nXtiIndex );
+diff --git sc/source/filter/inc/tokstack.hxx sc/source/filter/inc/tokstack.hxx
+index fef6b03..c319704 100644
+--- sc/source/filter/inc/tokstack.hxx
++++ sc/source/filter/inc/tokstack.hxx
+@@ -37,6 +37,8 @@
+ #include <tools/debug.hxx>
+ #include "compiler.hxx"
+ 
++#include <vector>
++
+ 
+ typedef OpCode DefTokenId;
+ // in PRODUCT version: ambiguity between OpCode (being USHORT) and UINT16
+@@ -80,6 +82,7 @@ enum E_TYPE
+ 	T_Ext,		// irgendwas Unbekanntes mit Funktionsnamen
+ 	T_Nlf,		// token for natural language formula
+ 	T_Matrix,	// token for inline arrays
++    T_ExtName,  // token for external names
+ 	T_Error		// fuer Abfrage im Fehlerfall
+ };
+ 
+@@ -136,6 +139,14 @@ class TokenPool
+ 		UINT16						nP_Matrix;
+ 		UINT16						nP_MatrixAkt;
+ 
++        /** for storage of external names */
++        struct ExtName
++        {
++            sal_uInt16  mnFileId;
++            String      maName;
++        };
++        ::std::vector<ExtName>      maExtNames;
++
+ 		UINT16*						pElement;	// Array mit Indizes fuer Elemente
+ 		E_TYPE*						pType;		// ...mit Typ-Info
+ 		UINT16*						pSize;		// ...mit Laengenangabe (Anz. UINT16)
+@@ -182,6 +193,7 @@ class TokenPool
+ 										// 4 externals (e.g. AddIns, Makros...)
+ 		const TokenId				StoreNlf( const SingleRefData& rTr );
+ 		const TokenId				StoreMatrix( SCSIZE nC, SCSIZE nR );
++        const TokenId               StoreExtName( sal_uInt16 nFileId, const String& rName );
+ 
+ 		inline const TokenId		LastId( void ) const;
+ 		inline const ScTokenArray*	operator []( const TokenId nId );
+diff --git sc/source/filter/inc/xilink.hxx sc/source/filter/inc/xilink.hxx
+index 0d547fe..3c2d0d9 100644
+--- sc/source/filter/inc/xilink.hxx
++++ sc/source/filter/inc/xilink.hxx
+@@ -179,6 +179,9 @@ public:
+                             sal_uInt16 nXtiIndex ) const;
+     /** Returns the specified external name or 0 on error. */
+     const XclImpExtName* GetExternName( sal_uInt16 nXtiIndex, sal_uInt16 nExtName ) const;
++
++    const String* GetSupbookUrl( sal_uInt16 nXtiIndex ) const;
++
+     /** Tries to decode the URL of the specified XTI entry to OLE or DDE link components.
+         @descr  For DDE links: Decodes to application name and topic.
+         For OLE object links: Decodes to class name and document URL.
 diff --git sc/source/ui/docshell/externalrefmgr.cxx sc/source/ui/docshell/externalrefmgr.cxx
 new file mode 100644
-index 0000000..93e8910
+index 0000000..52074f9
 --- /dev/null
 +++ sc/source/ui/docshell/externalrefmgr.cxx
-@@ -0,0 +1,454 @@
+@@ -0,0 +1,564 @@
 +/*************************************************************************
 + *
 + * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
@@ -804,11 +1026,64 @@ index 0000000..93e8910
 +#include "sfx2/objsh.hxx"
 +#include "svtools/itemset.hxx"
 +#include "svtools/stritem.hxx"
++#include "svx/linkmgr.hxx"
 +
 +#include <memory>
 +#include <stdio.h>
 +
 +using ::std::auto_ptr;
++using ::com::sun::star::uno::Any;
++using ::std::vector;
++using ::std::find;
++using ::std::distance;
++
++ScExternalRefLink::ScExternalRefLink(ScDocument* pDoc, const String& rFile, const String& rFilter) :
++    ::sfx2::SvBaseLink(::sfx2::LINKUPDATE_ONCALL, FORMAT_FILE),
++    maFileName(rFile),
++    maFilterName(rFilter),
++    mpDoc(pDoc)
++{
++}
++
++ScExternalRefLink::~ScExternalRefLink()
++{
++}
++
++void ScExternalRefLink::Closed()
++{
++    fprintf(stdout, "ScExternalRefLink::Closed: --begin\n");
++    fprintf(stdout, "ScExternalRefLink::Closed: --end\n");
++}
++
++void ScExternalRefLink::DataChanged(const String& /*rMimeType*/, const Any& /*rValue*/)
++{
++    String aFile, aFilter;
++    mpDoc->GetLinkManager()->GetDisplayNames(this, NULL, &aFile, NULL, &aFilter);
++    ScExternalRefManager* pMgr = mpDoc->GetExternalRefManager();
++
++    if (maFileName.Equals(aFile))
++    {
++        pMgr->refreshNames(aFile);
++    }
++    else
++    {
++        pMgr->switchSrcFile(maFileName, aFile);
++        maFileName   = aFile;
++        maFilterName = aFilter;
++    }
++}
++
++void ScExternalRefLink::Edit(Window* pParent, const Link& /*rEndEditHdl*/)
++{
++    SvBaseLink::Edit(pParent, LINK(this, ScExternalRefLink, EndEditHdl));
++}
++
++IMPL_LINK(ScExternalRefLink, EndEditHdl, void*, EMPTYARG)
++{
++    return 0;
++}
++
++// ============================================================================
 +
 +static ScToken* lcl_convertToToken(ScBaseCell* pCell)
 +{
@@ -972,7 +1247,7 @@ index 0000000..93e8910
 +
 +    ScBaseCell* pCell = NULL;
 +    pSrcDoc->GetCell(rCell.Col(), rCell.Row(), rCell.Tab(), pCell);
-+    ScTokenRef pTok(lcl_convertToToken(pCell));
++    TokenRef pTok(lcl_convertToToken(pCell));
 +
 +    if (!pTok.get())
 +    {
@@ -1009,7 +1284,7 @@ index 0000000..93e8910
 +    if (!pSrcDoc)
 +        return NULL;
 +
-+    ScTokenArrayRef pArray(lcl_convertToTokenArray(pSrcDoc, rRange));
++    TokenArrayRef pArray(lcl_convertToTokenArray(pSrcDoc, rRange));
 +    if (!pArray.get())
 +    {
 +        // highly unlikely since lcl_convertToTokenArray never returns NULL.
@@ -1024,9 +1299,12 @@ index 0000000..93e8910
 +
 +ScTokenArray* ScExternalRefManager::getRangeNameTokens(const String& rFile, const String& rName, const ScAddress& rCurPos)
 +{
-+    fprintf(stdout, "ScExternalRefManager::getRangeNameTokens: --begin (file = '%s'; name = '%s')\n",
++    String aCellStr;
++    rCurPos.Format(aCellStr, SCA_ABS_3D);
++    fprintf(stdout, "ScExternalRefManager::getRangeNameTokens: --begin (file = '%s'; name = '%s'; pos = '%s')\n",
 +            rtl::OUStringToOString(rFile, RTL_TEXTENCODING_UTF8).getStr(),
-+            rtl::OUStringToOString(rName, RTL_TEXTENCODING_UTF8).getStr());
++            rtl::OUStringToOString(rName, RTL_TEXTENCODING_UTF8).getStr(),
++            rtl::OUStringToOString(aCellStr, RTL_TEXTENCODING_UTF8).getStr());
 +
 +    // First, check if this name has already been cached.
 +    RangeNameMap& rMap = getDocumentCache(rFile)->maRangeNames;
@@ -1049,8 +1327,8 @@ index 0000000..93e8910
 +    if (!bRes)
 +        return NULL;
 +
-+    ScRangeData* p = (*pExtNames)[n];
-+    if (!p)
++    ScRangeData* pRangeData = (*pExtNames)[n];
++    if (!pRangeData)
 +        return NULL;
 +
 +    // Parse all tokens in this external range data, and replace each absolute 
@@ -1058,9 +1336,9 @@ index 0000000..93e8910
 +    // register the source document with the link manager if it's a new
 +    // source.
 +
-+    ScTokenArrayRef pNew(new ScTokenArray);
++    TokenArrayRef pNew(new ScTokenArray);
 +
-+    ScTokenArray* pCode = p->GetCode();
++    ScTokenArray* pCode = pRangeData->GetCode();
 +    for (ScToken* pToken = pCode->First(); pToken; pToken = pCode->Next())
 +    {
 +        bool bTokenAdded = false;
@@ -1111,8 +1389,6 @@ index 0000000..93e8910
 +                }
 +            }
 +            break;
-+            default:
-+                fprintf(stdout, "ScExternalRefManager::getRangeNameTokens:   other token type (%d)\n", pToken->GetType());
 +        }
 +        
 +        if (!bTokenAdded)
@@ -1139,8 +1415,8 @@ index 0000000..93e8910
 +
 +ScDocument* ScExternalRefManager::getSrcDocument(const String& rFile)
 +{
-+    ScDocShellMap::iterator itrEnd = maDocShells.end();
-+    ScDocShellMap::iterator itr = maDocShells.find(rFile);
++    DocShellMap::iterator itrEnd = maDocShells.end();
++    DocShellMap::iterator itr = maDocShells.find(rFile);
 +    if (itr == itrEnd)
 +    {
 +        fprintf(stdout, "ScExternalRefManager::getSourceDocument:   file not found: '%s'\n",
@@ -1160,7 +1436,8 @@ index 0000000..93e8910
 +
 +        pMedium->UseInteractionHandler(false);
 +
-+        auto_ptr<ScDocShell> pNewShell(new ScDocShell(SFX_CREATE_MODE_INTERNAL));
++        ScDocShell* pNewShell = new ScDocShell(SFX_CREATE_MODE_INTERNAL);
++        SfxObjectShellRef aRef = pNewShell;
 +
 +        // increment the recursive link count of the source document.
 +        ScExtDocOptions* pExtOpt = mpDoc->GetExtDocOptions();
@@ -1176,8 +1453,8 @@ index 0000000..93e8910
 +
 +        pNewShell->DoLoad(pMedium.release());
 +
-+        SfxObjectShellRef aRef = pNewShell.release();
-+        maDocShells.insert(ScDocShellMap::value_type(rFile, aRef));
++        maDocShells.insert(DocShellMap::value_type(rFile, aRef));
++        insertExternalFileLink(rFile, aFilter);
 +        return pSrcDoc;
 +    }
 +
@@ -1185,18 +1462,73 @@ index 0000000..93e8910
 +    return static_cast<ScDocShell*>(p)->GetDocument();
 +}
 +
++void ScExternalRefManager::insertExternalFileLink(const String& rFile, const String& rFilterName)
++{
++    SvxLinkManager* pLinkMgr = mpDoc->GetLinkManager();
++    ScExternalRefLink* pLink = new ScExternalRefLink(mpDoc, rFile, rFilterName);
++    pLinkMgr->InsertFileLink(*pLink, OBJECT_CLIENT_FILE, rFile, &rFilterName);
++    pLink->Update();
++}
++
++sal_uInt16 ScExternalRefManager::getExternalFileId(const String& rFile)
++{
++    using namespace std;
++
++    vector<String>::const_iterator itrBeg = maFileNames.begin(), itrEnd = maFileNames.end();
++    vector<String>::const_iterator itr = find(itrBeg, itrEnd, rFile);
++    if (itr != itrEnd)
++    {
++        size_t nId = distance(itrBeg, itr);
++        return static_cast<sal_uInt16>(nId);
++    }
++
++    maFileNames.push_back(rFile);
++    return static_cast<sal_uInt16>(maFileNames.size() - 1);
++}
++
++const String* ScExternalRefManager::getExternalFileName(sal_uInt16 nIndex) const
++{
++    if (nIndex >= maFileNames.size())
++        return NULL;
++
++    return &maFileNames[nIndex];
++}
++
 +void ScExternalRefManager::refreshNames(const String& rFile)
 +{
++    fprintf(stdout, "ScExternalRefManager::refreshNames: --begin\n");
 +    // 1. Find the cached content (DocCache) for a given file name.
 +    // 2. Clear the single and double reference caches.
 +    // 3. Re-parse the cached names from the source documents.
 +    // 4. Update those cells that contain the cached names.
++
++
++}
++
++void ScExternalRefManager::switchSrcFile(const String& rOldFile, const String& rNewFile)
++{
++    fprintf(stdout, "ScExternalRefManager::switchSrcFile: --begin (old file = '%s'; new file = '%s')\n",
++            rtl::OUStringToOString(rOldFile, RTL_TEXTENCODING_UTF8).getStr(), 
++            rtl::OUStringToOString(rNewFile, RTL_TEXTENCODING_UTF8).getStr());
++
++    /**
++     * This is a tricky one.  First, remove all cached data associated with 
++     * the old file (and purge the cached source document if it's still 
++     * alive), swap the file location with the new one, then recalculate those 
++     * cells that contain reference to the old file. 
++     *  
++     * To implement this, I need to switch from storing the file path string 
++     * with the external name token, to storing the index of it and storing 
++     * the string itself with ScExternalRefManager.  This way I can just 
++     * switch the file name here centrally instead of converting the token 
++     * arrays of all affected cells.
++     */
 +}
 +
 +void ScExternalRefManager::clear()
 +{
-+    ScDocShellMap::iterator itrEnd = maDocShells.end();
-+    for (ScDocShellMap::iterator itr = maDocShells.begin(); itr != itrEnd; ++itr)
++    DocShellMap::iterator itrEnd = maDocShells.end();
++    for (DocShellMap::iterator itr = maDocShells.begin(); itr != itrEnd; ++itr)
 +        itr->second->DoClose();
 +
 +    maDocShells.clear();
