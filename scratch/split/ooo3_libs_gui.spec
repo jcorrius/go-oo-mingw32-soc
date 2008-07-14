@@ -54,7 +54,8 @@ $OO_TOOLSDIR/../patches/apply.pl $OO_TOOLSDIR/../patches/dev300 --pieces --tag=%
 source $OO_TOOLSDIR/piece/sys-setup
 
 export VERBOSE=1
-$OO_TOOLSDIR/piece/build-generic
+# export EXTRA_BUILD_FLAGS="-P2"
+$OO_TOOLSDIR/piece/build-generic %piece
 
 %install
 
@@ -65,7 +66,7 @@ export OO_TOOLSDIR=$OO_INSTDIR/ooo-build/bin
 export DESTDIR=$RPM_BUILD_ROOT
 
 source $OO_TOOLSDIR/piece/sys-setup
-$OO_TOOLSDIR/piece/install-generic
+$OO_TOOLSDIR/piece/install-generic %piece
 
 %clean
 %post
