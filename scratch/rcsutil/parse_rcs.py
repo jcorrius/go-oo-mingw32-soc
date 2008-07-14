@@ -942,8 +942,9 @@ path is relative, it is relative to the current directory."""
                 sys.stdout.write("Skipping a non-RCS file: %s\n"%filepath)
             return True
 
+        no_attic_path = re.subn ("/Attic/", "/", filepath)[0]
         for autogp in autogenFileRegex:
-            if re.search (autogp, filepath) != None:
+            if re.search (autogp, no_attic_path) != None:
                 if self.verbose:
                     sys.stdout.write("Skipping auto-generated file: %s\n"%filepath)
                 return True
