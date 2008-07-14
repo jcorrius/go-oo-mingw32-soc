@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+# FIXME: we should eliminate $Revision, $Author changes ~ 2 lines +/- per .[ch]xx
+
 import sys, popen2, os.path, os
 import re
 import time, datetime
@@ -15,10 +17,19 @@ ignoredBranches = [
     'cws_dev300_changefileheader', 
     'cws_src680_hedaburemove01',
     'cws_src680_ooo19126',
-    'cws_src680_so3deadcorpses',
     'cws_src680_incguards01',
     'cws_src680_pchfix02'
 ]
+
+# commits on these branches, matching regexps are ignored.
+ignoredPartialBranches = {
+        'cws_src680_impresstables2' : 'framework/binfilter/',
+        'cws_src680_so3deadcorpses' : 'framework/binfilter/',
+        'cws_src680_so3deadcorpses' : 'oi/so3/',
+        'cws_src680_so3deadcorpses' : 'sc/sc/',
+}
+
+#        'cws_src680_filtercfg'      : 'util/officecfg/registry/data/'
 
 # all commmits done by the following authors are ignored
 # release engineers do eg. huge license changes directly
@@ -30,8 +41,11 @@ ignoredAuthors = [
 sourceExtension = {
     '.c':1, '.cc':1, '.cpp':1, '.cs':1, '.csc':1, '.css':1, '.cxx':1,
     '.diff':1, '.h':1, '.hpp':1, '.hxx':1, '.idl':1, '.inc':1, '.ini':1,
-    '.jam':1, '.java':1, '.lst':1, '.mk':1, '.patch':1, '.py':1,
-    '.scp':1, '.sh':1, '.txt':1, '.xcs':1, '.xcu':1, '.xsl':1, '.y':1}
+    '.jam':1, '.java':1, '.lst':1, '.mk':1, '.py':1,
+    '.scp':1, '.sh':1, '.txt':1, '.xcs':1, '.xcu':1, '.y':1}
+
+# abberations in .patch, libxslt.diff, .xcu, .xcs eg. filtercfg
+# and .xsl - someone likes renaming huge import filter files regularly
 
 # ignore large auto-generated files that people like to regularly
 # check into CVS for unknown reasons.
@@ -44,7 +58,16 @@ autogenFileRegex = [
     'sw/writerfilter/source/resourcemodel/.*tostr\.cxx',
     'sw/writerfilter/source/ooxml/OOXMLFastTokens\.hxx',
     'sw/writerfilter/source/ooxml/OOXMLresources.*\.?xx',
-    'sw/writerfilter/source/ooxml/OOXMLfastresources.*\.?xx'
+    'sw/writerfilter/source/ooxml/OOXMLfastresources.*\.?xx',
+    'documentation/helpcontent2/helpers/hid.lst',
+    'api/odk/pack/gendocu/Attic/idl_chapter_refs_oo.txt',
+    'xml/oox/source/token/tokens.txt'
+]
+
+# abberations: a big patch moving across versions, getting renamed
+abberationFileRegex = [
+    'external/libxmlsec/xmlsec1-1.2.4.patch',
+    'external/libxmlsec/xmlsec1-1.2.6.patch',
 ]
 
 currentAffiliations = {
@@ -657,7 +680,7 @@ rest of the lines contain commit message.
                 return True
         return False
 
-    def writeCommitStats (self, statObj):
+    def writeCommitStats (self, statObj, filePath):
         """Write commit statistics to the passed CommitStats instance.
 
 Each commit log may have the following data:
@@ -716,9 +739,18 @@ Also, disregard commits whose message contains RESYNC or INTEGRATION: CWS.
                 if isIssueNumber:
                     statObj.patchCommitCount += 1
 
-            # branch
-            if log.has_key('branch') and log['branch'] in ignoredBranches:
-                self.debugPrint ("commit made to branch %s is ignored (%s)"%(log['branch'], log['revision']))
+            if log.has_key('branch'):
+                branch = log['branch']
+            else:
+                branch = ''
+            # by branch
+            if branch in ignoredBranches:
+                self.debugPrint ("commit made to branch %s is ignored (%s)"%(branch, log['revision']))
+                statObj.ignoredByBranchCount += 1
+                continue
+            # by branch & regexp
+            if branch in ignoredPartialBranches and re.search (ignoredPartialBranches[branch], filePath):
+                self.debugPrint ("commit made to partial branch %s is ignored (%s) for file %s"%(branch, log['revision'], filePath))
                 statObj.ignoredByBranchCount += 1
                 continue
 
@@ -749,8 +781,8 @@ Also, disregard commits whose message contains RESYNC or INTEGRATION: CWS.
             if log.has_key('removed'):
                 removed = log['removed']
 
-            if (added > 5000 or removed > 5000):
-                sys.stdout.write ("huge commit: +%d -%d in %s\n" % (added, removed, self.filepath))
+            if (added > 1000 or removed > 1000):
+                sys.stdout.write ("huge commit: +%d -%d in %s date %s branch %s\n" % (added, removed, self.filepath, date, branch))
 
             if added or removed:
                 statObj.add(author, date, self.ext, added, removed)
@@ -972,7 +1004,7 @@ path is relative, it is relative to the current directory."""
 #       obj.outputRevTree()
 #       obj.output()
 
-        if not obj.writeCommitStats(self.stats):
+        if not obj.writeCommitStats(self.stats, filepath):
             sys.stderr.write("failed to write commit stats\n")
             sys.exit(1)
     
