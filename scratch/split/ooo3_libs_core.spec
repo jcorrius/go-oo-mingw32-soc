@@ -12,7 +12,8 @@
 
 %define         piece      libs_core
 Name:           ooo3_%piece
-BuildRequires:  ooo3_bootstrap-devel
+Requires:       ooo3_libs_gui
+BuildRequires:  ooo3_libs_gui-devel
 %define	      ooo_prefix	%_libdir
 %define	      ooo_home		ooo-3
 %define	      ooo_build_tag     dev300-m21
@@ -30,6 +31,7 @@ BuildRoot:      %{_tmppath}/%{name}-%{version}-build
 ure
 
 %package devel
+Requires:       ooo3_ure-devel ooo3_libs_extern-devel
 License:        Artistic License; BSD 3-Clause; GPL v2 or later; LaTeX Public License (LPPL); LGPL v2.1 or later; MOZILLA PUBLIC LICENSE (MPL/NPL); X11/MIT
 Summary:        A Free Office Suite (Framework)
 Group:          Productivity/Office/Suite
@@ -50,7 +52,10 @@ export OO_TOOLSDIR=$OO_INSTDIR/ooo-build/bin
 
 $OO_TOOLSDIR/../patches/apply.pl $OO_TOOLSDIR/../patches/dev300 --pieces --tag=%ooo_build_tag --distro=SUSE --distro=Piece `pwd` 
 source $OO_TOOLSDIR/piece/sys-setup
-$OO_TOOLSDIR/piece/build-%piece
+
+export VERBOSE=1
+# export EXTRA_BUILD_FLAGS="-P2"
+$OO_TOOLSDIR/piece/build-generic %piece
 
 %install
 
@@ -61,7 +66,7 @@ export OO_TOOLSDIR=$OO_INSTDIR/ooo-build/bin
 export DESTDIR=$RPM_BUILD_ROOT
 
 source $OO_TOOLSDIR/piece/sys-setup
-$OO_TOOLSDIR/piece/install-%piece
+$OO_TOOLSDIR/piece/install-generic %piece
 
 %clean
 %post
