@@ -1,0 +1,180 @@
+moving vcl stuff to pluggable render patch
+
+From:  <>
+
+
+---
+
+ .../internalgraphicfilters/svg_Export.xcu          |   10 +++
+ filter/source/svg/exports.map                      |    1 
+ filter/source/svg/svgfilter.cxx                    |    9 ++
+ filter/source/svg/svgfilter.hxx                    |    7 ++
+ filter/source/svg/svgreader.cxx                    |   81 ++++++++++++++++++++
+ 5 files changed, 108 insertions(+), 0 deletions(-)
+
+diff --git a/filter/source/config/fragments/internalgraphicfilters/svg_Export.xcu b/filter/source/config/fragments/internalgraphicfilters/svg_Export.xcu
+index 8b73f15..f0cd69d 100644
+--- filter/source/config/fragments/internalgraphicfilters/svg_Export.xcu
++++ filter/source/config/fragments/internalgraphicfilters/svg_Export.xcu
+@@ -8,3 +8,13 @@
+ 		</prop>
+ 		<prop oor:name="Flags"><value>EXPORT</value></prop>
+ 	</node>
++	<node oor:name="svg_Import" oor:op="replace"  >
++		<prop oor:name="Type"><value>svg_Scalable_Vector_Graphics</value></prop>
++        <prop oor:name="FormatName"><value>svgfilter</value></prop>
++        <prop oor:name="RealFilterName"/>
++		<prop oor:name="UIComponent"/>
++		<prop oor:name="UIName">
++			<value xml:lang="en-US">SVG - Scalable Vector Graphics</value>
++		</prop>
++		<prop oor:name="Flags"><value>IMPORT</value></prop>
++	</node>
+diff --git a/filter/source/svg/exports.map b/filter/source/svg/exports.map
+index acb4748..d56c225 100644
+--- filter/source/svg/exports.map
++++ filter/source/svg/exports.map
+@@ -3,6 +3,7 @@ SVGFILTER_1_0 {
+                 component_getImplementationEnvironment;
+                 component_getFactory;
+                 component_writeInfo;
++                GraphicImport;
+ 
+         local:
+                 *;
+diff --git a/filter/source/svg/svgfilter.cxx b/filter/source/svg/svgfilter.cxx
+index 9efbed7..de1e638 100644
+--- filter/source/svg/svgfilter.cxx
++++ filter/source/svg/svgfilter.cxx
+@@ -208,6 +208,14 @@ rtl::OUString SAL_CALL SVGFilter::detect( Sequence< PropertyValue >& io_rDescrip
+ 
+ // -----------------------------------------------------------------------------
+ 
++class FilterConfigItem;
++extern "C" BOOL __LOADONCALLAPI GraphicImport(SvStream & rStream, Graphic & rGraphic, FilterConfigItem*, BOOL )
++{
++	return importSvg( rStream, rGraphic );
++}
++
++// -----------------------------------------------------------------------------
++
+ namespace sdecl = comphelper::service_decl;
+  sdecl::class_<SVGFilter> serviceImpl;
+  const sdecl::ServiceDecl svgFilter(
+@@ -219,3 +227,4 @@ namespace sdecl = comphelper::service_decl;
+ 
+ // The C shared lib entry points
+ COMPHELPER_SERVICEDECL_EXPORTS1(svgFilter)
++
+diff --git a/filter/source/svg/svgfilter.hxx b/filter/source/svg/svgfilter.hxx
+index dcb8065..b057a5e 100644
+--- filter/source/svg/svgfilter.hxx
++++ filter/source/svg/svgfilter.hxx
+@@ -271,4 +271,11 @@ sal_Bool SAL_CALL SVGFilter_supportsService( const ::rtl::OUString& ServiceName
+ SAL_CALL SVGFilter_createInstance( const ::com::sun::star::uno::Reference< ::com::sun::star::lang::XMultiServiceFactory > & rSMgr)
+ 	throw ( ::com::sun::star::uno::Exception );
+ 
++// -----------------------------------------------------------------------------
++
++class SvStream;
++class Graphic;
++
++bool importSvg(SvStream & rStream, Graphic & rGraphic );
++
+ #endif // SVGFILTER_HXX
+diff --git a/filter/source/svg/svgreader.cxx b/filter/source/svg/svgreader.cxx
+index 2525999..56c5269 100644
+--- filter/source/svg/svgreader.cxx
++++ filter/source/svg/svgreader.cxx
+@@ -41,6 +41,18 @@
+ #include <com/sun/star/xml/dom/XDocumentBuilder.hpp>
+ #include <com/sun/star/xml/dom/NodeType.hpp>
+ 
++#include <comphelper/processfactory.hxx>
++#include <basegfx/polygon/b2dpolygoncutandtouch.hxx>
++#include <basegfx/polygon/b2dpolypolygontools.hxx>
++#include <unotools/streamwrap.hxx>
++#include <xmloff/xmluconv.hxx>
++#include <vcl/graph.hxx>
++#include <vcl/virdev.hxx>
++#include <vcl/metaact.hxx>
++#include <vcl/gradient.hxx>
++#include <svx/impgrf.hxx>
++#include <tools/zcodec.hxx>
++
+ #include <boost/bind.hpp>
+ #include <hash_set>
+ #include <map>
+@@ -1874,3 +1886,72 @@ sal_Bool SVGReader::parseAndConvert()
+ }
+ 
+ } // namespace svgi
++
++/////////////////////////////////////////////////////////////////////
++
++bool importSvg(SvStream & rStream, Graphic & rGraphic )
++{
++    // TODO(P2): need to peek into svg to determine dimensions. but no
++    // need to load the _whole_ document! Better use librsvg to
++    // generate a preview bitmap and grab size from there
++    const uno::Reference<lang::XMultiServiceFactory> xServiceFactory(
++        ::comphelper::getProcessServiceFactory());    
++
++	uno::Reference<xml::dom::XDocumentBuilder> xDomBuilder( 
++        xServiceFactory->createInstance( 
++            rtl::OUString::createFromAscii("com.sun.star.xml.dom.DocumentBuilder")), 
++        uno::UNO_QUERY );
++
++    uno::Reference<io::XInputStream> xStream(
++        new utl::OInputStreamWrapper(rStream) );
++
++    uno::Reference<xml::dom::XDocument> xDom(
++        xDomBuilder->parse(xStream),
++        uno::UNO_QUERY_THROW );
++
++    uno::Reference<xml::dom::XElement> xDocElem( xDom->getDocumentElement(),
++                                                 uno::UNO_QUERY_THROW );
++    
++    // get the document dimensions
++
++    // if the "width" and "height" attributes are missing, inkscape fakes
++    // A4 portrait for. Let's do the same.
++    double nWidth(21000.0);
++    double nHeight(29700.0);
++    svgi::State aInitialState;
++	if (xDocElem->hasAttribute(USTR("width")))
++        nWidth = svgi::pt100thmm(svgi::convLength(xDocElem->getAttribute(USTR("width")),
++                                                  aInitialState,'h')); 
++	if (xDocElem->hasAttribute(USTR("height")))
++        nHeight = svgi::pt100thmm(svgi::convLength(xDocElem->getAttribute(USTR("height")),
++                                                   aInitialState,'v'));
++    GDIMetaFile aMtf;
++
++    // rewind stream & extract binary blob
++    const sal_Size nBytes(rStream.Tell());
++    rStream.Seek(STREAM_SEEK_TO_BEGIN);
++    void* const pBuf=rtl_allocateMemory(nBytes);
++    if( rStream.Read(pBuf,nBytes) != nBytes )
++    {
++        rtl_freeMemory(pBuf);
++        return sal_False;
++    }
++    aMtf.AddAction( 
++        makePluggableRendererAction(
++            USTR("com.sun.star.comp.SVGRenderer"),
++            USTR("com.sun.star.comp.SVGGraphic"),
++            pBuf,nBytes));
++    rtl_freeMemory(pBuf);
++
++    aMtf.SetPrefMapMode( MAP_100TH_MM );
++
++    aMtf.SetPrefSize( 
++        Size( basegfx::fround(nWidth), 
++              basegfx::fround(nHeight)));
++
++    rGraphic = aMtf;
++    
++    return sal_True;
++}
++
++
