@@ -21,13 +21,8 @@ ignoredBranches = [
 
 # commits on these branches, matching regexps are ignored.
 ignoredPartialBranches = {
-        'cws_src680_impresstables2' : 'framework/binfilter/',
-        'cws_src680_impresstables2' : 'util/svtools/',
-        'cws_src680_impresstables2' : 'sw/sw/',
-        'cws_src680_impresstables2' : 'gsl/vcl/',
-        'cws_src680_so3deadcorpses' : 'xml/xmloff/',
-        'cws_src680_so3deadcorpses' : 'oi/so3/',
-        'cws_src680_so3deadcorpses' : 'sc/sc/',
+        'cws_src680_impresstables2' : [ 'framework/binfilter/', 'util/svtools/', 'sw/sw/', 'gsl/vcl/' ],
+        'cws_src680_so3deadcorpses' : [ 'xml/xmloff/', 'oi/so3/', 'sc/sc/', ]
 }
 
 # all commmits done by the following authors are ignored
@@ -761,10 +756,13 @@ Also, disregard commits whose message contains RESYNC or INTEGRATION: CWS.
                 statObj.ignoredByBranchCount += 1
                 continue
             # by branch & regexp
-            if branch in ignoredPartialBranches and re.search (ignoredPartialBranches[branch], filePath):
-                self.debugPrint ("commit made to partial branch %s is ignored (%s) for file %s"%(branch, log['revision'], filePath))
-                statObj.ignoredByBranchCount += 1
-                continue
+            if branch in ignoredPartialBranches:
+                for pathRe in ignoredPartialBranches[branch]:
+                    if re.search (pathRe, filePath):
+                        self.debugPrint ("commit made to partial branch %s is ignored (%s) for file %s"%(branch, log['revision'], filePath))
+                        statObj.ignoredByBranchCount += 1
+                        continue
+                    
 
             # author
             if not log.has_key('author'):
@@ -1018,8 +1016,8 @@ path is relative, it is relative to the current directory."""
             sys.stderr.write("error parsing " + filepath + "\n")
             self.isError = True
 
-#       obj.outputRevTree()
-#       obj.output()
+#        obj.outputRevTree()
+#        obj.output()
 
         if not obj.writeCommitStats(self.stats, filepath):
             sys.stderr.write("failed to write commit stats\n")
