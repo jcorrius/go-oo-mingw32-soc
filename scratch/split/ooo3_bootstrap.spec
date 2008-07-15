@@ -10,7 +10,7 @@
 
 # norootforbuild
 
-
+%define         distro     SUSE
 %define         piece bootstrap
 Name:           ooo3_bootstrap
 BuildRequires:  ImageMagick ant bison boost-devel ccache cups-devel curl-devel db-devel flac-devel flex gnome-vfs2-devel gperf gtk2-devel icu kdelibs3-devel krb5 libexif mono-devel neon-devel openldap2-devel pam-devel perl-Archive-Zip perl-Compress-Zlib python-devel recode unixODBC-devel unzip xml-commons-apis xorg-x11 zip

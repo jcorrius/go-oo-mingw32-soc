@@ -11,10 +11,10 @@
 # norootforbuild
 
 %define         distro     SUSE
-%define         piece      libs_core
+%define         piece      l10n
 Name:           ooo3_%piece
-Requires:       ooo3_libs_gui
-BuildRequires:  ooo3_libs_gui-devel
+Requires:       ooo3_libs_core
+BuildRequires:  ooo3_libs_core-devel
 %define	      ooo_prefix	%_libdir
 %define	      ooo_home		ooo-3
 %define	      ooo_build_tag     dev300-m21

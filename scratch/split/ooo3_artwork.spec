@@ -11,10 +11,9 @@
 # norootforbuild
 
 %define         distro     SUSE
-%define         piece      libs_core
+%define         piece      artwork
 Name:           ooo3_%piece
-Requires:       ooo3_libs_gui
-BuildRequires:  ooo3_libs_gui-devel
+BuildRequires:  ooo3_bootstrap-devel
 %define	      ooo_prefix	%_libdir
 %define	      ooo_home		ooo-3
 %define	      ooo_build_tag     dev300-m21
@@ -32,7 +31,7 @@ BuildRoot:      %{_tmppath}/%{name}-%{version}-build
 ure
 
 %package devel
-Requires:       ooo3_ure-devel ooo3_libs_extern-devel
+Requires:       ooo3_bootstrap-devel
 License:        Artistic License; BSD 3-Clause; GPL v2 or later; LaTeX Public License (LPPL); LGPL v2.1 or later; MOZILLA PUBLIC LICENSE (MPL/NPL); X11/MIT
 Summary:        A Free Office Suite (Framework)
 Group:          Productivity/Office/Suite

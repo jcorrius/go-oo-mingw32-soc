@@ -10,6 +10,7 @@
 
 # norootforbuild
 
+%define         distro     SUSE
 %define         piece      libs_gui
 Name:           ooo3_%piece
 Requires:       ooo3_ure ooo3_libs_extern
@@ -45,28 +46,20 @@ devel package
 
 %build
 
-#setup env.
+# setup env.
 export OO_INSTDIR=%{_libdir}/%ooo_home
-export OO_SOLVERDIR=$OO_INSTDIR/solver
 export OO_TOOLSDIR=$OO_INSTDIR/ooo-build/bin
-
-$OO_TOOLSDIR/../patches/apply.pl $OO_TOOLSDIR/../patches/dev300 --pieces --tag=%ooo_build_tag --distro=SUSE --distro=Piece `pwd` 
-source $OO_TOOLSDIR/piece/sys-setup
-
 export VERBOSE=1
-# export EXTRA_BUILD_FLAGS="-P2"
-$OO_TOOLSDIR/piece/build-generic %piece
+$OO_TOOLSDIR/piece/build-generic %piece %ooo_build_tag %distro
 
 %install
 
-#setup env.
+# setup env.
 export OO_INSTDIR=%{_libdir}/%ooo_home
-export OO_SOLVERDIR=$OO_INSTDIR/solver
 export OO_TOOLSDIR=$OO_INSTDIR/ooo-build/bin
 export DESTDIR=$RPM_BUILD_ROOT
 
-source $OO_TOOLSDIR/piece/sys-setup
-$OO_TOOLSDIR/piece/install-generic %piece
+$OO_TOOLSDIR/piece/install-generic %piece %ooo_build_tag %distro
 
 %clean
 %post
