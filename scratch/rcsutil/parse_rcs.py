@@ -1,7 +1,5 @@
 #!/usr/bin/env python
 
-# FIXME: we should eliminate $Revision, $Author changes ~ 2 lines +/- per .[ch]xx
-
 import sys, popen2, os.path, os
 import re
 import time, datetime
@@ -24,12 +22,13 @@ ignoredBranches = [
 # commits on these branches, matching regexps are ignored.
 ignoredPartialBranches = {
         'cws_src680_impresstables2' : 'framework/binfilter/',
-        'cws_src680_so3deadcorpses' : 'framework/binfilter/',
+        'cws_src680_impresstables2' : 'util/svtools/',
+        'cws_src680_impresstables2' : 'sw/sw/',
+        'cws_src680_impresstables2' : 'gsl/vcl/',
+        'cws_src680_so3deadcorpses' : 'xml/xmloff/',
         'cws_src680_so3deadcorpses' : 'oi/so3/',
         'cws_src680_so3deadcorpses' : 'sc/sc/',
 }
-
-#        'cws_src680_filtercfg'      : 'util/officecfg/registry/data/'
 
 # all commmits done by the following authors are ignored
 # release engineers do eg. huge license changes directly
@@ -39,13 +38,16 @@ ignoredAuthors = [
 
 # just examine source code, avoiding binary bits & so on
 sourceExtension = {
-    '.c':1, '.cc':1, '.cpp':1, '.cs':1, '.csc':1, '.css':1, '.cxx':1,
-    '.diff':1, '.h':1, '.hpp':1, '.hxx':1, '.idl':1, '.inc':1, '.ini':1,
-    '.jam':1, '.java':1, '.lst':1, '.mk':1, '.py':1,
-    '.scp':1, '.sh':1, '.txt':1, '.xcs':1, '.xcu':1, '.y':1}
+    '.c':1, '.cc':1, '.cpp':1, '.cs':1, '.csc':1, '.cxx':1,
+    '.h':1, '.hpp':1, '.hxx':1, '.idl':1, '.java':1,
+    '.py':1, '.sh':1, '.y':1}
 
-# abberations in .patch, libxslt.diff, .xcu, .xcs eg. filtercfg
-# and .xsl - someone likes renaming huge import filter files regularly
+# not strictly source, or have matching source changes & strange
+# abberations in some of these, ignore for now.
+wilderExtensions = {
+    '.patch':1, '.diff':1, '.lst':1, 'mk':1, '.jam':1, '.scp':1,
+    '.css':1, '.ini':1, '.inc':1, '.xcu':1, '.xcs':1, '.xsl':1
+}
 
 # ignore large auto-generated files that people like to regularly
 # check into CVS for unknown reasons.
@@ -61,7 +63,7 @@ autogenFileRegex = [
     'sw/writerfilter/source/ooxml/OOXMLfastresources.*\.?xx',
     'documentation/helpcontent2/helpers/hid.lst',
     'api/odk/pack/gendocu/Attic/idl_chapter_refs_oo.txt',
-    'xml/oox/source/token/tokens.txt'
+    'xml/oox/source/token/tokens.txt',
 ]
 
 # abberations: a big patch moving across versions, getting renamed
@@ -655,6 +657,16 @@ rest of the lines contain commit message.
 
                 removed = abs(int(res.group(0)))
 
+                # correct for separate $Revision and $Date changes in every commit
+                if added > 2:
+                    added -= 2
+                else:
+                    added = 0
+                if removed > 2:
+                    removed -= 2
+                else:
+                    removed = 0
+                    
                 commitLog['added']   = added
                 commitLog['removed'] = removed
 
@@ -781,11 +793,11 @@ Also, disregard commits whose message contains RESYNC or INTEGRATION: CWS.
             if log.has_key('removed'):
                 removed = log['removed']
 
-            if (added > 1000 or removed > 1000):
-                sys.stdout.write ("huge commit: +%d -%d in %s date %s branch %s\n" % (added, removed, self.filepath, date, branch))
+            if (added > 2500 or removed > 2500):
+                sys.stdout.write ("huge commit: +%d -%d author %s date %s branch %s file %s\n" % (added, removed, author, date, branch, self.filepath))
 
             if added or removed:
-                statObj.add(author, date, self.ext, added, removed)
+                statObj.add(author, date, self.ext, added, removed, branch, self.filepath)
 
         return True
 
@@ -810,6 +822,7 @@ class CommitStats(object):
             self.commitCounts = 0
             self.linesAdded = 0
             self.linesRemoved = 0
+            self.warned = 0;
 
     def __init__ (self):
         self.authors = {}
@@ -821,7 +834,7 @@ class CommitStats(object):
         self.ignoredByAuthorCount = 0
         self.patchCommitCount = 0
 
-    def add (self, author, date, ext, added, removed):
+    def add (self, author, date, ext, added, removed, branch, filePath):
 
         # author node
         if not self.authors.has_key(author):
@@ -847,7 +860,11 @@ class CommitStats(object):
         extObj.commitCounts += 1
         extObj.linesAdded += added
         extObj.linesRemoved += removed
-
+        if extObj.warned < 10 and extObj.linesAdded > 50000:
+            extObj.warned += 1
+            sys.stdout.write ("large author commit count: %d author %s date %s branch %s file %s\n" \
+                                  % (extObj.linesAdded, author, date, branch, filePath))
+            
 
 class Main(object):
 
