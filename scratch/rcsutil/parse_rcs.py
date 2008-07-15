@@ -756,13 +756,16 @@ Also, disregard commits whose message contains RESYNC or INTEGRATION: CWS.
                 statObj.ignoredByBranchCount += 1
                 continue
             # by branch & regexp
+            ignoreRev = False
             if branch in ignoredPartialBranches:
                 for pathRe in ignoredPartialBranches[branch]:
                     if re.search (pathRe, filePath):
                         self.debugPrint ("commit made to partial branch %s is ignored (%s) for file %s"%(branch, log['revision'], filePath))
                         statObj.ignoredByBranchCount += 1
-                        continue
-                    
+                        ignoreRev = True
+                        break
+            if ignoreRev:
+                continue
 
             # author
             if not log.has_key('author'):
@@ -796,6 +799,7 @@ Also, disregard commits whose message contains RESYNC or INTEGRATION: CWS.
 
             if added or removed:
                 statObj.add(author, date, self.ext, added, removed, branch, self.filepath)
+            self.debugPrint ("commit %s counted +%d -%d\n"%(log['revision'], added, removed));
 
         return True
 
