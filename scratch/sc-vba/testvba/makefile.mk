@@ -36,7 +36,7 @@
 PRJ=..$/..$/..$/..$/
 
 PRJNAME=sc
-TARGET=testvbac++
+TARGET=testvba
 ENABLE_EXCEPTIONS=TRUE
 
 # --- Settings -----------------------------------------------------
@@ -54,11 +54,12 @@ CDEFS+=-DVBA_OOBUILD_HACK
 # ------------------------------------------------------------------
 
 SLOFILES= \
-		$(SLO)$/main.obj \
+		$(SLO)$/testvba.obj \
  
 
 # --- Targets ------------------------------------------------------
-APP1TARGET=     testclient
+
+APP1TARGET=testclient
 APP1OBJS= $(SLOFILES)
 
 APP1STDLIBS=\
@@ -67,10 +68,10 @@ APP1STDLIBS=\
         $(CPPULIB) \
         $(CPPUHELPERLIB) \
         $(COMPHELPERLIB) \
-	$(TOOLSLIB) \
-        $(UNOTOOLSLIB) 
+	    $(TOOLSLIB) \
+        $(UNOTOOLSLIB) \
 
 #APP1OBJS= $(OBJ)$/testclient.obj
-
 .INCLUDE :	target.mk
+
 

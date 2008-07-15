@@ -13,6 +13,7 @@
 #include <com/sun/star/uno/XComponentContext.hpp>
 #include <com/sun/star/ucb/XSimpleFileAccess.hpp>
 #include <com/sun/star/script/provider/XScriptProviderSupplier.hpp>
+#include <com/sun/star/document/XTypeDetection.hpp>
 
 #include <tools/urlobj.hxx>
 #include <osl/file.hxx>
@@ -38,6 +39,7 @@ using ::com::sun::star::uno::UNO_QUERY_THROW;
 using ::com::sun::star::uno::XComponentContext;
 using ::com::sun::star::uno::XInterface;
 using ::com::sun::star::ucb::XSimpleFileAccess;
+using ::com::sun::star::document::XTypeDetection;
 using ::rtl::OUString;
 
 using ::std::auto_ptr;
@@ -106,10 +108,112 @@ mxCompLoader( _xCompLoader ), msOutDirPath( convertToURL( _outDirPath  ) )
 		sLogLocation = sLogLocation.concat( rtl::OUString::createFromAscii( "/" ) ).concat( rtl::OUString::createFromAscii( "HelperAPI-test.log" ) );
 		return sLogLocation;
 	}
+	rtl::OUString getLogLocationWithName( OUString fileName ) throw (  beans::UnknownPropertyException,  lang::IllegalArgumentException, lang::WrappedTargetException,  uno::Exception ) 
+    {
+		//rtl::OUString sLogLocation( rtl::OUString::createFromAscii( getenv("HOME") ) );
+		rtl::OUString sLogLocation;
+		Reference< XPropertySet > pathSettings( mxMCF->createInstanceWithContext( rtl::OUString::createFromAscii( "com.sun.star.comp.framework.PathSettings" ), mxContext), uno::UNO_QUERY_THROW );
+		pathSettings->getPropertyValue( rtl::OUString::createFromAscii( "Work" ) ) >>= sLogLocation;
+		sLogLocation = sLogLocation.concat( rtl::OUString::createFromAscii( "/" ) ).concat( fileName.copy ( 0, fileName.lastIndexOf( EXTN )  ) + rtl::OUString::createFromAscii( ".log" ) );
+		return sLogLocation;
+    }
 
 	void init() 
 	{
 		// blow away previous logs?
+	}
+
+	void proccessDocument( const rtl::OUString& sUrl ) 
+	{
+			if ( !mxSFA->isFolder( sUrl ) && sUrl.endsWithIgnoreAsciiCaseAsciiL( ".xls", 4 ) ) 
+				
+			{
+				try 
+				{
+					OSL_TRACE( "processing %s",  rtl::OUStringToOString( sUrl, RTL_TEXTENCODING_UTF8 ).getStr() );
+					// Loading the wanted document
+					Sequence< PropertyValue > propertyValues(1);
+					propertyValues[0].Name = rtl::OUString::createFromAscii( "Hidden" );
+					propertyValues[0].Value <<= sal_False;
+
+                    rtl::OUString sfileUrl = convertToURL( sUrl );
+					Reference< uno::XInterface > xDoc =	
+						mxCompLoader->loadComponentFromURL( sfileUrl, rtl::OUString::createFromAscii( "_blank" ), 0, propertyValues);
+
+					OUString logFileURL = convertToURL( getLogLocation() );
+					try
+					{
+						Reference< script::provider::XScriptProviderSupplier > xSupplier( xDoc, uno::UNO_QUERY_THROW ) ; 
+						if ( mxSFA->exists( logFileURL ) )	
+							mxSFA->kill( logFileURL );
+					
+						Reference< script::provider::XScriptProvider > xProv = xSupplier->getScriptProvider();
+                        Reference< script::provider::XScript > xScript;
+						try
+                        {
+						    xScript = xProv->getScript( rtl::OUString::createFromAscii( "vnd.sun.star.script:Standard.TestMacros.Main?language=Basic&location=document" ));
+                        } catch ( uno::Exception& e )
+                        {
+                            try
+                            {
+						        xScript = xProv->getScript( rtl::OUString::createFromAscii( "vnd.sun.star.script:Standard.testMacro.Main?language=Basic&location=document" ));
+                            } catch ( uno::Exception& e2 )
+                            {
+						        xScript = xProv->getScript( rtl::OUString::createFromAscii( "vnd.sun.star.script:Standard.testMain.Main?language=Basic&location=document" ));
+                            }
+                        }
+						OSL_TRACE("Got script for doc %s", rtl::OUStringToOString( sUrl, RTL_TEXTENCODING_UTF8 ).getStr() );
+						Sequence< uno::Any > aArgs;
+						Sequence< sal_Int16 > aOutArgsIndex;
+						Sequence< uno::Any > aOutArgs;
+						
+						xScript->invoke(aArgs, aOutArgsIndex, aOutArgs); 
+		
+						OUString fileName = sUrl.copy ( sUrl.lastIndexOf( '/' ) );
+						OUString newLocation = msOutDirPath + fileName.copy ( 0, fileName.lastIndexOf( EXTN )  ) + rtl::OUString::createFromAscii( ".log" );
+                        try
+                        {
+	    					mxSFA->move( logFileURL, newLocation );
+		    				OSL_TRACE("new logfile location is %s ", rtl::OUStringToOString( newLocation, RTL_TEXTENCODING_UTF8 ).getStr() );
+                        }
+                        catch ( uno::Exception& e )
+                        {
+                            logFileURL = convertToURL( getLogLocationWithName( fileName ) );
+	    					mxSFA->move( logFileURL, newLocation );
+		    				OSL_TRACE("new logfile location is %s ", rtl::OUStringToOString( newLocation, RTL_TEXTENCODING_UTF8 ).getStr() );
+                        }
+						
+					}
+					catch ( uno::Exception& e )
+					{
+						std::cerr << "Caught exception " << rtl::OUStringToOString( e.Message, RTL_TEXTENCODING_UTF8 ).getStr() << std::endl;
+					}
+
+					// interface is supported, otherwise use XComponent.dispose
+					Reference< util::XCloseable > xCloseable ( xDoc, uno::UNO_QUERY );
+		
+					if ( xCloseable.is() ) 
+					{
+                        // will close application. and only run a test case for 3.0
+                        // maybe it is a bug. yes, it is a bug
+                        // if only one frame and model, click a button which related will colse.
+                        // will make a crash. It related with window listener.
+                        // so, for run all test cases, it should not close the document at this moment.
+						xCloseable->close(sal_False);
+					} 
+					else 
+					{
+						Reference< XComponent > xComp( xDoc, uno::UNO_QUERY_THROW );
+                        // same as close.
+						xComp->dispose();
+					}
+				}
+				catch( uno::Exception& e ) 
+				{
+					std::cerr << "Caught exception " << rtl::OUStringToOString( e.Message, RTL_TEXTENCODING_UTF8 ).getStr() << std::endl;
+				}
+		                
+			}
 	}
 
 	void traverse( const rtl::OUString& sFileDirectory ) 
@@ -125,75 +229,7 @@ mxCompLoader( _xCompLoader ), msOutDirPath( convertToURL( _outDirPath  ) )
 		// Iterating for each file and directory
 		for ( sal_Int32 i = 0; i < entries.getLength(); ++i ) 
 		{
-		// Testing, if the entry in the list is a directory
-		//
-		//            if ( entries[ i ].isDirectory() ) 
-		//            {
-		//                // ignore Recursive call for the new directory
-		//                // traverse( entries[ i ] );
-		//            } 
-		//            else 
-			rtl::OUString sUrl = entries[ i ];
-			if ( !mxSFA->isFolder( sUrl ) && sUrl.endsWithIgnoreAsciiCaseAsciiL( ".xls", 4 ) ) 
-				
-			{
-				try 
-				{
-					OSL_TRACE( "processing %s",  rtl::OUStringToOString( sUrl, RTL_TEXTENCODING_UTF8 ).getStr() );
-					// Loading the wanted document
-					Sequence< PropertyValue > propertyValues(1);
-					propertyValues[0].Name = rtl::OUString::createFromAscii( "Hidden" );
-					propertyValues[0].Value <<= sal_False;
-				
-					Reference< uno::XInterface > xDoc =	
-						mxCompLoader->loadComponentFromURL( sUrl, rtl::OUString::createFromAscii( "_blank" ), 0, propertyValues);
-					OUString logFileURL = convertToURL( getLogLocation() );
-					try
-					{
-						Reference< script::provider::XScriptProviderSupplier > xSupplier( xDoc, uno::UNO_QUERY_THROW ) ; 
-						if ( mxSFA->exists( logFileURL ) )	
-							mxSFA->kill( logFileURL );
-					
-						Reference< script::provider::XScriptProvider > xProv = xSupplier->getScriptProvider();
-						Reference< script::provider::XScript > xScript = xProv->getScript( rtl::OUString::createFromAscii( "vnd.sun.star.script:Standard.TestMacros.Main?language=Basic&location=document" ));
-						OSL_TRACE("Got script for doc %s", rtl::OUStringToOString( sUrl, RTL_TEXTENCODING_UTF8 ).getStr() );
-						Sequence< uno::Any > aArgs;
-						Sequence< sal_Int16 > aOutArgsIndex;
-						Sequence< uno::Any > aOutArgs;
-						
-						xScript->invoke(aArgs, aOutArgsIndex, aOutArgs); 
-		
-						OUString fileName = sUrl.copy ( sUrl.lastIndexOf( '/' ) );
-						OUString newLocation = msOutDirPath + fileName.copy ( 0, fileName.lastIndexOf( EXTN )  ) + rtl::OUString::createFromAscii( ".log" );
-						mxSFA->move( logFileURL, newLocation );
-						OSL_TRACE("new logfile location is %s ", rtl::OUStringToOString( newLocation, RTL_TEXTENCODING_UTF8 ).getStr() ); 
-						
-					}
-					catch ( uno::Exception& e )
-					{
-						std::cerr << "Caught exception " << rtl::OUStringToOString( e.Message, RTL_TEXTENCODING_UTF8 ).getStr() << std::endl;
-					}
-
-					// interface is supported, otherwise use XComponent.dispose
-					Reference< util::XCloseable > xCloseable ( xDoc, uno::UNO_QUERY );
-		
-					if ( xCloseable.is() ) 
-					{
-						xCloseable->close(sal_False);
-					} 
-					else 
-					{
-						Reference< XComponent > xComp( xDoc, uno::UNO_QUERY_THROW );
-		                        
-						xComp->dispose();
-					}
-				}
-				catch( uno::Exception& e ) 
-				{
-					std::cerr << "Caught exception " << rtl::OUStringToOString( e.Message, RTL_TEXTENCODING_UTF8 ).getStr() << std::endl;
-				}
-		                
-			}
+            proccessDocument( entries[ i ] );
 		}
 	}	
 };
@@ -229,7 +265,14 @@ int main( int argv, char** argc )
 		OSL_TRACE("got desktop");
 		Reference<frame::XComponentLoader> xLoader(desktop, UNO_QUERY_THROW);
 		TestVBA* dTest = new TestVBA( xCC, xFactory, xLoader, ascii( argc[ 2 ] ) );
-		dTest->traverse( ascii( argc[ 1 ] ) );
+        if ( argv == 4 )
+        {
+            dTest->proccessDocument( ascii( argc[ 3 ] ) );
+        }
+        else
+        {
+		    dTest->traverse( ascii( argc[ 1 ] ) );
+        }
 		delete dTest;
 //		tryDispose( xLoader, "desktop" );
 //		tryDispose( xCC, "remote context" );
