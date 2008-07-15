@@ -22,7 +22,10 @@ ignoredBranches = [
 # commits on these branches, matching regexps are ignored.
 ignoredPartialBranches = {
         'cws_src680_impresstables2' : [ 'framework/binfilter/', 'util/svtools/', 'sw/sw/', 'gsl/vcl/' ],
-        'cws_src680_so3deadcorpses' : [ 'xml/xmloff/', 'oi/so3/', 'sc/sc/', ]
+        'cws_src680_so3deadcorpses' : [ 'framework/binfilter/', 'xml/xmloff/', 'oi/so3/', 'sc/sc/', ],
+        'cws_src680_basmgr02'       : [ 'framework/binfilter/' ],
+        'cws_src680_hr38'           : [ 'framework/binfilter/' ],
+        'cws_src680_bff2'           : [ 'framework/binfilter/' ],
 }
 
 # all commmits done by the following authors are ignored
@@ -862,7 +865,7 @@ class CommitStats(object):
         extObj.commitCounts += 1
         extObj.linesAdded += added
         extObj.linesRemoved += removed
-        if extObj.warned < 10 and extObj.linesAdded > 50000:
+        if extObj.warned < 10 and extObj.linesAdded > 10000:
             extObj.warned += 1
             sys.stdout.write ("large author commit count: %d author %s date %s branch %s file %s\n" \
                                   % (extObj.linesAdded, author, date, branch, filePath))
