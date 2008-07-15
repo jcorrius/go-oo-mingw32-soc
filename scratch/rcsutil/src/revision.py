@@ -11,7 +11,6 @@ class Node(object):
     def __init__ (self, num, parent):
         self.num = num
         self.children = {}
-        self.tags = []
         self.branchName = ''
         self.parent = parent
 
@@ -82,6 +81,10 @@ CVS's revision number has the following characteristics:
             nums = nums2
             n -= 1
 
+#       sys.stderr.write ("is branch name '%s' %d '%s'\n"%(revision,isBranchName,name))
+        if not isBranchName:
+            return
+
         currentNode = self.root
         for i in xrange(1, n):
             num = nums[i]
@@ -90,10 +93,7 @@ CVS's revision number has the following characteristics:
             currentNode = currentNode.children[num]
             if i == n - 1:
                 # last node
-                if isBranchName:
-                    currentNode.branchName = name
-                else:
-                    currentNode.tags.append(name)
+                currentNode.branchName = name
 
 
     def output (self):
