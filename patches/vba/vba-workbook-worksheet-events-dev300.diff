@@ -278,8 +278,8 @@
  
  # ------------------------------------------------------------------
 
---- /dev/null	2008-04-03 19:37:22.000000000 +0800
-+++ sc/source/ui/vba/vbaeventshelper.hxx	2008-06-16 13:57:16.000000000 +0800
+--- /dev/null	2007-09-22 05:50:58.000000000 +0800
++++ sc/source/ui/vba/vbaeventshelper.hxx	2008-07-15 11:55:59.000000000 +0800
 @@ -0,0 +1,83 @@
 +/*************************************************************************
 + *
@@ -329,13 +329,13 @@
 +
 +typedef ::cppu::WeakImplHelper1< com::sun::star::document::XVbaEventsHelper > VBAWorkbookEvent_BASE;
 +
-+class VbaWindowListener;
++class VbaEventsListener;
 +class ScVbaEventsHelper : public VBAWorkbookEvent_BASE
 +{
 +private:
 +	ScDocument* pDoc;
 +    css::uno::Reference< css::uno::XComponentContext > m_xContext;
-+    VbaWindowListener* mpWindowListener;
++    VbaEventsListener* mpVbaEventsListener;
 +    sal_Bool mbOpened;
 +    sal_Bool mbIgnoreEvents;
 +
@@ -352,7 +352,7 @@
 +    sal_Bool processVbaEvent( const sal_Int32 nEventId, const css::uno::Sequence< css::uno::Any >& rArgs, const SCTAB nTab = INVALID_TAB );
 +
 +public:
-+	ScVbaEventsHelper( ScDocument* pDocument ):pDoc( pDocument ), mpWindowListener( NULL ), mbOpened( sal_False ){};
++	ScVbaEventsHelper( ScDocument* pDocument ):pDoc( pDocument ), mpVbaEventsListener( NULL ), mbOpened( sal_False ){};
 +    ScVbaEventsHelper( css::uno::Sequence< css::uno::Any > const& aArgs, css::uno::Reference< css::uno::XComponentContext > const& xContext );
 +    ~ScVbaEventsHelper();
 +	ScDocument* getDocument() { return pDoc; };
@@ -364,10 +364,9 @@
 +
 +#endif
 +
-
---- /dev/null	2008-04-03 19:37:22.000000000 +0800
-+++ sc/source/ui/vba/vbaeventshelper.cxx	2008-06-17 13:25:46.000000000 +0800
-@@ -0,0 +1,968 @@
+--- /dev/null	2007-09-22 05:50:58.000000000 +0800
++++ sc/source/ui/vba/vbaeventshelper.cxx	2008-07-15 12:04:50.000000000 +0800
+@@ -0,0 +1,1067 @@
 +/*************************************************************************
 + *
 + *  OpenOffice.org - a multi-platform office productivity suite
@@ -426,6 +425,10 @@
 +#include <com/sun/star/awt/XWindowListener.hpp>
 +#include <com/sun/star/awt/WindowEvent.hpp>
 +#include <com/sun/star/lang/EventObject.hpp>
++#include <com/sun/star/util/XCloseListener.hpp>
++#include <com/sun/star/util/XCloseBroadcaster.hpp>
++#include <com/sun/star/frame/XControllerBorder.hpp>
++#include <com/sun/star/frame/XBorderResizeListener.hpp>
 +#include "cellsuno.hxx" 
 +
 +#include <map>
@@ -441,37 +444,48 @@
 +const static rtl::OUString sUrlPart1 = rtl::OUString::createFromAscii( "vnd.sun.star.script:Standard.");
 +const static rtl::OUString sUrlPart2 = rtl::OUString::createFromAscii( "?language=Basic&location=document"); 
 +
-+typedef ::cppu::WeakImplHelper1< awt::XWindowListener > WindowListener_BASE;
++
++typedef ::cppu::WeakImplHelper3< awt::XWindowListener, util::XCloseListener, frame::XBorderResizeListener > WindowListener_BASE;
 +
 +// This class is to process Workbook window related event
-+class VbaWindowListener : public WindowListener_BASE
++class VbaEventsListener : public WindowListener_BASE
 +{
 +    ScVbaEventsHelper* pVbaEventsHelper;
 +    uno::Reference< frame::XModel > m_xModel;
 +    sal_Bool m_bPrepare;
++    sal_Bool m_bWindowResized;
++    sal_Bool m_bBorderChanged;
 +protected :
 +    uno::Reference< awt::XWindow > GetContainerWindow();
++    uno::Reference< frame::XFrame > GetFrame();
 +    sal_Bool IsMouseReleased();
 +    DECL_LINK( fireResizeMacro, Timer* );
 +    void processWindowResizeMacro();
 +public :
-+    VbaWindowListener( ScVbaEventsHelper* pHelper );
-+    void startWindowLinstener();
-+    void stopWindowLinstener();
++    VbaEventsListener( ScVbaEventsHelper* pHelper );
++    void startEventsLinstener();
++    void stopEventsLinstener();
 +    // XWindowListener
 +    virtual void SAL_CALL windowResized( const awt::WindowEvent& aEvent ) throw ( uno::RuntimeException );
 +    virtual void SAL_CALL windowMoved( const awt::WindowEvent& aEvent ) throw ( uno::RuntimeException );
 +    virtual void SAL_CALL windowShown( const lang::EventObject& aEvent ) throw ( uno::RuntimeException );
 +    virtual void SAL_CALL windowHidden( const lang::EventObject& aEvent ) throw ( uno::RuntimeException );
 +    virtual void SAL_CALL disposing( const lang::EventObject& aEvent ) throw ( uno::RuntimeException );
++    // XCloseListener
++    virtual void SAL_CALL queryClosing( const lang::EventObject& Source, ::sal_Bool GetsOwnership ) throw (util::CloseVetoException, uno::RuntimeException);
++    virtual void SAL_CALL notifyClosing( const lang::EventObject& Source ) throw (uno::RuntimeException);
++    // XBorderResizeListener
++    virtual void SAL_CALL borderWidthsChanged( const uno::Reference< uno::XInterface >& aObject, const frame::BorderWidths& aNewSize ) throw (uno::RuntimeException);
 +};
-+VbaWindowListener::VbaWindowListener( ScVbaEventsHelper* pHelper ) : pVbaEventsHelper( pHelper )
++VbaEventsListener::VbaEventsListener( ScVbaEventsHelper* pHelper ) : pVbaEventsHelper( pHelper )
 +{
 +    m_xModel.set( pVbaEventsHelper->getDocument()->GetDocumentShell()->GetModel(), uno::UNO_QUERY );
 +    m_bPrepare = sal_False;
++    m_bWindowResized = sal_False;
++    m_bBorderChanged = sal_False;
 +}
-+uno::Reference< awt::XWindow > 
-+VbaWindowListener::GetContainerWindow() 
++uno::Reference< frame::XFrame > 
++VbaEventsListener::GetFrame()
 +{
 +    try
 +    {
@@ -485,9 +499,7 @@
 +                    uno::Reference< frame::XFrame > xFrame( xController->getFrame(), uno::UNO_QUERY );
 +                    if( xFrame.is() )
 +                    {
-+                        uno::Reference< awt::XWindow > xWindow( xFrame->getContainerWindow(), uno::UNO_QUERY );
-+                        if( xWindow.is() )
-+                            return xWindow;
++                            return xFrame;
 +                    }
 +                }
 +            }
@@ -496,10 +508,28 @@
 +	catch( uno::Exception& /*e*/ )
 +    {
 +    }
++    return uno::Reference< frame::XFrame >();
++}
++uno::Reference< awt::XWindow > 
++VbaEventsListener::GetContainerWindow() 
++{
++    try
++    {
++        uno::Reference< frame::XFrame > xFrame( GetFrame(), uno::UNO_QUERY );
++        if( xFrame.is() )
++        {
++            uno::Reference< awt::XWindow > xWindow( xFrame->getContainerWindow(), uno::UNO_QUERY );
++            if( xWindow.is() )
++                return xWindow;
++        }
++    }
++	catch( uno::Exception& /*e*/ )
++    {
++    }
 +    return uno::Reference< awt::XWindow >();
 +}
 +sal_Bool
-+VbaWindowListener::IsMouseReleased()
++VbaEventsListener::IsMouseReleased()
 +{
 +    Window* pWindow = (VCLUnoHelper::GetWindow(  GetContainerWindow() ) );
 +    if( pWindow )
@@ -511,29 +541,68 @@
 +    return sal_False;
 +}
 +void
-+VbaWindowListener::startWindowLinstener()
++VbaEventsListener::startEventsLinstener()
 +{
-+    uno::Reference< awt::XWindow > xWindow( GetContainerWindow(), uno::UNO_QUERY );
-+    if( xWindow.is() )
-+        xWindow->addWindowListener( this );
++    if( m_xModel.is() )
++    {
++        // add window listener
++        uno::Reference< awt::XWindow > xWindow( GetContainerWindow(), uno::UNO_QUERY );
++        if( xWindow.is() )
++            xWindow->addWindowListener( this );
++        // add close listener
++        //uno::Reference< util::XCloseBroadcaster > xCloseBroadcaster( GetFrame(), uno::UNO_QUERY );
++        uno::Reference< util::XCloseBroadcaster > xCloseBroadcaster( m_xModel, uno::UNO_QUERY );
++        if( xCloseBroadcaster.is() )
++        {
++            xCloseBroadcaster->addCloseListener( this );
++        }
++        // add Border resize listener
++        uno::Reference< frame::XController > xController( m_xModel->getCurrentController(), uno::UNO_QUERY );
++        if( xController.is() )
++        {
++            uno::Reference< frame::XControllerBorder > xControllerBorder( xController, uno::UNO_QUERY );
++            if( xControllerBorder.is() )
++            {
++                xControllerBorder->addBorderResizeListener( this );
++            }
++        }
++    }
 +}
 +void
-+VbaWindowListener::stopWindowLinstener()
++VbaEventsListener::stopEventsLinstener()
 +{
-+    uno::Reference< awt::XWindow > xWindow( GetContainerWindow(), uno::UNO_QUERY );
-+    if( xWindow.is() )
++    if( m_xModel.is() )
 +    {
-+        xWindow->removeWindowListener( this );
++        uno::Reference< awt::XWindow > xWindow( GetContainerWindow(), uno::UNO_QUERY );
++        if( xWindow.is() )
++        {
++            xWindow->removeWindowListener( this );
++        }
++        //uno::Reference< util::XCloseBroadcaster > xCloseBroadcaster( GetFrame(), uno::UNO_QUERY );
++        uno::Reference< util::XCloseBroadcaster > xCloseBroadcaster( m_xModel, uno::UNO_QUERY );
++        if( xCloseBroadcaster.is() )
++        {
++            xCloseBroadcaster->removeCloseListener( this );
++        }
++        uno::Reference< frame::XController > xController( m_xModel->getCurrentController(), uno::UNO_QUERY );
++        if( xController.is() )
++        {
++            uno::Reference< frame::XControllerBorder > xControllerBorder( xController, uno::UNO_QUERY );
++            if( xControllerBorder.is() )
++            {
++                xControllerBorder->removeBorderResizeListener( this );
++            }
++        }
 +        pVbaEventsHelper = NULL;
 +    }
 +}
 +void
-+VbaWindowListener::processWindowResizeMacro()
++VbaEventsListener::processWindowResizeMacro()
 +{
 +    if( pVbaEventsHelper )
 +        pVbaEventsHelper->ProcessCompatibleVbaEvent( VBAEVENT_WORKBOOK_WINDOWRESIZE, uno::Sequence< uno::Any >() );
 +}
-+IMPL_LINK( VbaWindowListener, fireResizeMacro, Timer*, pTimer )
++IMPL_LINK( VbaEventsListener, fireResizeMacro, Timer*, pTimer )
 +{
 +    if( pVbaEventsHelper && m_bPrepare && pTimer )
 +    {
@@ -549,38 +618,67 @@
 +    return 0;
 +}
 +void SAL_CALL
-+VbaWindowListener::windowResized(  const awt::WindowEvent& /*aEvent*/ ) throw ( uno::RuntimeException )
++VbaEventsListener::windowResized(  const awt::WindowEvent& /*aEvent*/ ) throw ( uno::RuntimeException )
 +{
 +    // Workbook_window_resize event
-+    
++    OSL_TRACE("VbaEventsListener::windowResized");
++    m_bWindowResized = sal_True;
 +    Window* pWindow = (VCLUnoHelper::GetWindow(  GetContainerWindow() ) );
-+    if( pWindow && !m_bPrepare )
++    if( pWindow && !m_bPrepare && m_bBorderChanged )
 +    {
 +        m_bPrepare = sal_True;
++        m_bBorderChanged = m_bWindowResized = sal_False;
 +        AutoTimer* pTimer = new AutoTimer();
-+        pTimer->SetTimeoutHdl( LINK( this, VbaWindowListener, fireResizeMacro ) );
++        pTimer->SetTimeoutHdl( LINK( this, VbaEventsListener, fireResizeMacro ) );
 +        pTimer->Start();
 +    }
 +}
 +void SAL_CALL
-+VbaWindowListener::windowMoved(  const awt::WindowEvent& /*aEvent*/ ) throw ( uno::RuntimeException )
++VbaEventsListener::windowMoved(  const awt::WindowEvent& /*aEvent*/ ) throw ( uno::RuntimeException )
 +{
 +    // not interest this time
 +}
 +void SAL_CALL
-+VbaWindowListener::windowShown(  const lang::EventObject& /*aEvent*/ ) throw ( uno::RuntimeException )
++VbaEventsListener::windowShown(  const lang::EventObject& /*aEvent*/ ) throw ( uno::RuntimeException )
 +{
 +    // not interest this time
 +}
 +void SAL_CALL
-+VbaWindowListener::windowHidden(  const lang::EventObject& /*aEvent*/ ) throw ( uno::RuntimeException )
++VbaEventsListener::windowHidden(  const lang::EventObject& /*aEvent*/ ) throw ( uno::RuntimeException )
 +{
 +    // not interest this time
 +}
 +void SAL_CALL
-+VbaWindowListener::disposing(  const lang::EventObject& /*aEvent*/ ) throw ( uno::RuntimeException )
++VbaEventsListener::disposing(  const lang::EventObject& /*aEvent*/ ) throw ( uno::RuntimeException )
 +{
 +    pVbaEventsHelper = NULL;
++}
++void SAL_CALL 
++VbaEventsListener::queryClosing( const lang::EventObject& Source, ::sal_Bool GetsOwnership ) throw (util::CloseVetoException, uno::RuntimeException)
++{
++     // it can cancel the close, but need to throw a CloseVetoException, and it will be transmit to caller.
++}
++void SAL_CALL 
++VbaEventsListener::notifyClosing( const lang::EventObject& Source ) throw (uno::RuntimeException)
++{
++    OSL_TRACE("VbaEventsListener::notifyClosing");
++    stopEventsLinstener();
++}
++void SAL_CALL 
++VbaEventsListener::borderWidthsChanged( const uno::Reference< uno::XInterface >& aObject, const frame::BorderWidths& aNewSize ) throw (uno::RuntimeException)
++{
++    // work with WindowResized event to guard Window Resize event.
++    OSL_TRACE("VbaEventsListener::borderWidthsChanged");
++    m_bBorderChanged = sal_True;
++    Window* pWindow = (VCLUnoHelper::GetWindow(  GetContainerWindow() ) );
++    if( pWindow && !m_bPrepare && m_bWindowResized )
++    {
++        m_bPrepare = sal_True;
++        m_bWindowResized = m_bBorderChanged = sal_False;
++        AutoTimer* pTimer = new AutoTimer();
++        pTimer->SetTimeoutHdl( LINK( this, VbaEventsListener, fireResizeMacro ) );
++        pTimer->Start();
++    }
 +}
 +
 +class ImplVbaEventNameInfo
@@ -668,7 +766,7 @@
 +}
 +
 +ScVbaEventsHelper::ScVbaEventsHelper( uno::Sequence< css::uno::Any > const& aArgs, uno::Reference< uno::XComponentContext > const& xContext )
-+    : m_xContext( xContext ), mpWindowListener( NULL ), mbOpened( sal_False ), mbIgnoreEvents( sal_False )
++    : m_xContext( xContext ), mpVbaEventsListener( NULL ), mbOpened( sal_False ), mbIgnoreEvents( sal_False )
 +{
 +    uno::Reference< frame::XModel > xModel ( getXSomethingFromArgs< frame::XModel >( aArgs, 0 ), uno::UNO_QUERY );
 +    ScDocShell* pDocShell = getDocShell( xModel );
@@ -677,10 +775,10 @@
 +
 +ScVbaEventsHelper::~ScVbaEventsHelper()
 +{
-+    if( mpWindowListener )
++    if( mpVbaEventsListener )
 +    {
-+        mpWindowListener->stopWindowLinstener();
-+        mpWindowListener = NULL;
++        mpVbaEventsListener->stopEventsLinstener();
++        mpVbaEventsListener = NULL;
 +    }
 +}
 +
@@ -950,7 +1048,7 @@
 +            if( pExtOptions )
 +            {
 +                ScExtDocSettings aExtDocSettings = pExtOptions->GetDocSettings();
-+                String sWorkbookModuleName = aExtDocSettings.maGlobCodeName;
++                sWorkbookModuleName = aExtDocSettings.maGlobCodeName;
 +            }
 +           
 +            sMacroPath = workbookMacroExists( pShell, sWorkbookModuleName, sMacroName );
@@ -1270,10 +1368,10 @@
 +                ProcessCompatibleVbaEvent( VBAEVENT_WORKBOOK_ACTIVATE, aArgs );
 +            }
 +            // register the window listener.
-+            if( !mpWindowListener )
++            if( !mpVbaEventsListener )
 +            {
-+                mpWindowListener = new VbaWindowListener( this );
-+                mpWindowListener->startWindowLinstener();
++                mpVbaEventsListener = new VbaEventsListener( this );
++                mpVbaEventsListener->startEventsLinstener();
 +            }
 +            break;
 +        }
@@ -1283,10 +1381,10 @@
 +		case VBAEVENT_WORKBOOK_BEFORECLOSE:
 +        {
 +            sal_Bool bCancel = processVbaEvent( nEventId, aArgs ); 
-+            if( mpWindowListener && !bCancel )
++            if( mpVbaEventsListener && !bCancel )
 +            {
-+                mpWindowListener->stopWindowLinstener();
-+                mpWindowListener = NULL;
++                mpVbaEventsListener->stopEventsLinstener();
++                mpVbaEventsListener = NULL;
 +            }
 +            return bCancel;
 +        }
@@ -1336,7 +1434,6 @@
 +    "ScVbaEventsHelper",
 +    "com.sun.star.document.VbaEventsHelper" );
 +}
-
 --- /home/feng/work/ooo-build/build/dev300-m14/sc/inc/document.hxx	2008-06-16 21:30:17.000000000 +0800
 +++ sc/inc/document.hxx	2008-06-16 14:34:49.000000000 +0800
 @@ -151,6 +151,9 @@ namespace com { namespace sun { namespac
