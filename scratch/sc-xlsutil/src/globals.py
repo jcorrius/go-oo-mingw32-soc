@@ -20,13 +20,18 @@ def error (msg):
 def decodeName (name):
     """decode name that contains unprintable characters."""
 
-    if len(name) == 0:
+    n = len(name)
+    if n == 0:
         return name
 
-    if ord(name[0]) <= 20:
-        name = "<%2.2Xh>"%ord(name[0]) + name[1:]
+    newname = ''
+    for i in xrange(0, n):
+        if ord(name[i]) <= 20:
+            newname += "<%2.2Xh>"%ord(name[i])
+        else:
+            newname += name[i]
 
-    return name
+    return newname
 
 
 def getRichText (bytes, textLen=None):

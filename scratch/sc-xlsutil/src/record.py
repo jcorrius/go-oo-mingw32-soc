@@ -356,6 +356,61 @@ class ExternName(BaseRecordHandler):
             self.appendLine("formula: %s"%ftext)
 
 
+class Xct(BaseRecordHandler):
+
+    def parseBytes (self):
+        crnCount = globals.getSignedInt(self.bytes[0:2])
+        sheetIndex = globals.getSignedInt(self.bytes[2:4])
+        self.appendLine("CRN count: %d"%crnCount)
+        self.appendLine("index of referenced sheet in the SUPBOOK record: %d"%sheetIndex)
+
+class Crn(BaseRecordHandler):
+
+    def parseBytes (self):
+        lastCol = globals.getSignedInt(self.bytes[0:1])
+        firstCol = globals.getSignedInt(self.bytes[1:2])
+        rowIndex = globals.getSignedInt(self.bytes[2:4])
+        self.appendLine("first column: %d"%firstCol)
+        self.appendLine("last column:  %d"%lastCol)
+        self.appendLine("row index: %d"%rowIndex)
+
+        i = 4
+        n = len(self.bytes)
+        while i < n:
+            typeId = self.bytes[i]
+            i += 1
+            if typeId == 0x00:
+                # empty value
+                i += 8
+                self.appendLine("* empty value")
+            elif typeId == 0x01:
+                # number
+                val = globals.getDouble(self.bytes[i:i+8])
+                i += 8
+                self.appendLine("* numeric value (%g)"%val)
+            elif typeId == 0x2:
+                # string
+                text, length = globals.getRichText(self.bytes[i:])
+                i += length
+                text = globals.decodeName(text)
+                self.appendLine("* string value (%s)"%text)
+            elif typeId == 0x04:
+                # boolean
+                val = self.bytes[i]
+                i += 7 # next 7 bytes not used
+                self.appendLine("* boolean value (%d)"%val)
+            elif typeId == 0x10:
+                # error value
+                val = self.bytes[i]
+                i += 7 # not used
+                self.appendLine("* error value (%d)"%val)
+            else:
+                sys.stderr.write("error parsing CRN record")
+                sys.exit(1)
+            
+
+
+
 # -------------------------------------------------------------------
 # CT - Change Tracking
 
