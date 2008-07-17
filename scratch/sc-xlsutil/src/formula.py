@@ -132,7 +132,34 @@ class NameX(TokenBase):
         return "<externname externSheetID='%d' nameID='%d'>"%(self.refID, self.nameID)
 
 
-class Ref3d(TokenBase):
+class Ref3dR(TokenBase):
+    """3D reference or external reference to a cell"""
+
+    def __init__ (self, tokens):
+        TokenBase.__init__(self, tokens)
+        self.cell = None
+
+    def parse (self, i):
+        try:
+            i += 1
+            self.refEntryId = globals.getSignedInt(self.tokens[i:i+2])
+            i += 2
+            self.sheet = globals.getSignedInt(self.tokens[i:i+2])
+            i += 2
+            self.cell = parseCellAddress(self.tokens[i:i+4])
+            i += 4
+        except InvalidCellAddress:
+            pass
+        return i
+
+    def getText (self):
+        if self.cell == None:
+            return ''
+        cellName = self.cell.getName()
+        return "<3dref externSheetID='%d' cellAddress='%s'>"%(self.refEntryId, cellName)
+
+
+class Ref3dV(TokenBase):
     """3D reference or external reference to a cell"""
 
     def __init__ (self, tokens):
@@ -155,6 +182,12 @@ class Ref3d(TokenBase):
             return ''
         cellName = self.cell.getName()
         return "<3dref externSheetID='%d' cellAddress='%s'>"%(self.refEntryId, cellName)
+
+
+class Ref3dA(Ref3dV):
+    def __init__ (self, tokens):
+        Ref3dA.__init__(self, tokens)
+
 
 tokenMap = {
     # binary operator
@@ -186,9 +219,9 @@ tokenMap = {
 
     # 3d reference (TODO: There is a slight variation in how a cell reference
     # is represented between 0x3A and 0x5A).
-    0x3A: Ref3d,
-    0x5A: Ref3d,
-    0x7A: Ref3d,
+    0x3A: Ref3dR,
+    0x5A: Ref3dV,
+    0x7A: Ref3dA,
 
     # last item
   0xFFFF: None
