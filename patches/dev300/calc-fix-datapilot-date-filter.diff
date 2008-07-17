@@ -1,0 +1,329 @@
+diff --git sc/inc/dpcachetable.hxx sc/inc/dpcachetable.hxx
+index 30b4a31..e867b6a 100644
+--- sc/inc/dpcachetable.hxx
++++ sc/inc/dpcachetable.hxx
+@@ -198,7 +198,7 @@ public:
+ 
+     /** Set filter on/off flag to each row to control visibility.  The caller
+         must ensure that the table is filled before calling this function. */
+-    void filterByPageDimension(const ::std::vector<ScDPDimension*>& rPageDims);
++    void filterByPageDimension(const ::std::vector<Criterion>& rCriteria, bool bRepeatIfEmpty = false);
+ 
+     /** Get the cell instance at specified location within the data grid. Note
+         that the data grid doesn't include the header row.  Don't delete the
+@@ -229,6 +229,10 @@ public:
+     bool empty() const;
+ 
+ private:
++    /**
++     * Check if a given row meets all specified criteria. 
++     */
++    bool isRowQualified(sal_Int32 nRow, const ::std::vector<Criterion>& rCriteria, bool bRepeatIfEmpty) const;
+     void getValueData(ScDocument* pDoc, const ScAddress& rPos, Cell& rCell);
+     ScDPCacheTable::Cell getSelectedDimension(ScDPDimension* pDim) const;
+ 
+diff --git sc/inc/dpgroup.hxx sc/inc/dpgroup.hxx
+index 77100b2..3ddbbcf 100644
+--- sc/inc/dpgroup.hxx
++++ sc/inc/dpgroup.hxx
+@@ -196,6 +196,8 @@ class ScDPGroupTableData : public ScDPTableData
+     void        GetNumGroupInfo( long nDimension, ScDPNumGroupInfo& rInfo,
+                                     bool& rNonInteger, sal_Unicode& rDecimal );
+ 
++    void        ModifyFilterCriteria(::std::vector<ScDPCacheTable::Criterion>& rCriteria) const;
++
+ public:
+                 // takes ownership of pSource
+                 ScDPGroupTableData( ScDPTableData* pSource, ScDocument* pDocument );
+@@ -217,7 +219,7 @@ public:
+     virtual void                    SetEmptyFlags( BOOL bIgnoreEmptyRows, BOOL bRepeatIfEmpty );
+ 
+     virtual void                    CreateCacheTable();
+-    virtual void                    FilterCacheTable(const ::std::vector<ScDPDimension*>& rPageDims);
++    virtual void                    FilterCacheTable(const ::std::vector<ScDPCacheTable::Criterion>& rCriteria);
+     virtual void                    GetDrillDownData(const ::std::vector<ScDPCacheTable::Criterion>& rCriteria,
+                                                      ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Any > >& rData);
+     virtual void                    CalcResults(CalcInfo& rInfo, bool bAutoShow);
+diff --git sc/inc/dpsdbtab.hxx sc/inc/dpsdbtab.hxx
+index 970323c..c04709a 100644
+--- sc/inc/dpsdbtab.hxx
++++ sc/inc/dpsdbtab.hxx
+@@ -89,7 +89,7 @@ public:
+ 	virtual void					SetEmptyFlags( BOOL bIgnoreEmptyRows, BOOL bRepeatIfEmpty );
+ 
+     virtual void                    CreateCacheTable();
+-    virtual void                    FilterCacheTable(const ::std::vector<ScDPDimension*>& rPageDims);
++    virtual void                    FilterCacheTable(const ::std::vector<ScDPCacheTable::Criterion>& rCriteria);
+     virtual void                    GetDrillDownData(const ::std::vector<ScDPCacheTable::Criterion>& rCriteria,
+                                                      ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Any > >& rData);
+     virtual void                    CalcResults(CalcInfo& rInfo, bool bAutoShow);
+diff --git sc/inc/dpshttab.hxx sc/inc/dpshttab.hxx
+index 84e09b8..828826b 100644
+--- sc/inc/dpshttab.hxx
++++ sc/inc/dpshttab.hxx
+@@ -82,7 +82,7 @@ public:
+     virtual bool                    IsRepeatIfEmpty();
+ 
+     virtual void                    CreateCacheTable();
+-    virtual void                    FilterCacheTable(const ::std::vector<ScDPDimension*>& rPageDims);
++    virtual void                    FilterCacheTable(const ::std::vector<ScDPCacheTable::Criterion>& rCriteria);
+     virtual void                    GetDrillDownData(const ::std::vector<ScDPCacheTable::Criterion>& rCriteria,
+                                                      ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Any > >& rData);
+     virtual void                    CalcResults(CalcInfo& rInfo, bool bAutoShow);
+diff --git sc/inc/dptabdat.hxx sc/inc/dptabdat.hxx
+index 1356716..07550aa 100644
+--- sc/inc/dptabdat.hxx
++++ sc/inc/dptabdat.hxx
+@@ -166,7 +166,7 @@ public:
+     virtual bool                    IsRepeatIfEmpty();
+ 
+     virtual void                    CreateCacheTable();
+-    virtual void                    FilterCacheTable(const ::std::vector<ScDPDimension*>& rPageDims);
++    virtual void                    FilterCacheTable(const ::std::vector<ScDPCacheTable::Criterion>& rCriteria);
+     virtual void                    GetDrillDownData(const ::std::vector<ScDPCacheTable::Criterion>& rCriteria,
+                                                      ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Any > >& rData);
+     virtual void                    CalcResults(CalcInfo& rInfo, bool bAutoShow);
+diff --git sc/source/core/data/dpcachetable.cxx sc/source/core/data/dpcachetable.cxx
+index 422b8f1..cdfa636 100644
+--- sc/source/core/data/dpcachetable.cxx
++++ sc/source/core/data/dpcachetable.cxx
+@@ -544,40 +544,18 @@ bool ScDPCacheTable::isRowActive(sal_Int32 nRow) const
+     return maRowsVisible[nRow];
+ }
+ 
+-void ScDPCacheTable::filterByPageDimension(const vector<ScDPDimension*>& rPageDims)
++void ScDPCacheTable::filterByPageDimension(const vector<Criterion>& rCriteria, bool bRepeatIfEmpty)
+ {
+     sal_Int32 nRowSize = getRowSize();
+-
++    sal_Int32 nColSize = getColSize();
+     if (nRowSize != static_cast<sal_Int32>(maRowsVisible.size()))
+     {
+-        fprintf(stdout, "ScDPCacheTable::filterByPageDimension: the sizes of the two tables differ.\n");fflush(stdout);
++        // sizes of the two tables differ!
+         return;
+     }
+ 
+     for (sal_Int32 nRow = 0; nRow < nRowSize; ++nRow)
+-    {
+-        maRowsVisible[nRow] = true;
+-        const vector<Cell>& rRow = maTable[nRow];
+-        vector<ScDPDimension*>::const_iterator itr = rPageDims.begin(), itrEnd = rPageDims.end();
+-        for (; itr != itrEnd; ++itr)
+-        {
+-            ScDPDimension* pDim = *itr;
+-            if (!pDim->HasSelectedPage())
+-                // 'show all' is selected.
+-                continue;
+-
+-            ScDPCacheTable::Cell aDimCell = getSelectedDimension(pDim);
+-            
+-            sal_Int32 nCol = pDim->GetDimension();
+-            const Cell& rCell = rRow[nCol];
+-            if (aDimCell.mnStrId != rCell.mnStrId)
+-            {
+-                // Selected page dimension value does not match the current value.  Skip it.
+-                maRowsVisible[nRow] = false;
+-                break;
+-            }
+-        }
+-    }
++        maRowsVisible[nRow] = isRowQualified(nRow, rCriteria, bRepeatIfEmpty);
+ }
+ 
+ const ::ScDPCacheTable::Cell* ScDPCacheTable::getCell(SCCOL nCol, SCROW nRow, bool bRepeatIfEmpty) const
+@@ -668,32 +646,7 @@ void ScDPCacheTable::filterTable(const vector<Criterion>& rCriteria, Sequence< S
+             // This row is filtered out.
+             continue;
+ 
+-        bool bRetainRow = true;
+-
+-        vector<Criterion>::const_iterator itrEnd = rCriteria.end();
+-        for (vector<Criterion>::const_iterator itr = rCriteria.begin(); itr != itrEnd; ++itr)
+-        {
+-            if (itr->mnFieldIndex >= nColSize)
+-                // specified field is outside the source data columns.  Don't
+-                // use this criterion.
+-                continue;
+-
+-            const Cell* pCell = getCell(static_cast<SCCOL>(itr->mnFieldIndex), nRow, bRepeatIfEmpty);
+-            if (!pCell)
+-            {
+-                // This should never happen, but just in case...
+-                bRetainRow = false;
+-                break;
+-            }
+-
+-            if (!itr->mpFilter->match(*pCell))
+-            {
+-                bRetainRow = false;
+-                break;
+-            }
+-        }
+-
+-        if (!bRetainRow)
++        if (!isRowQualified(nRow, rCriteria, bRepeatIfEmpty))
+             continue;
+ 
+         // Insert this row into table.
+@@ -756,6 +709,28 @@ bool ScDPCacheTable::empty() const
+     return maTable.empty();
+ }
+ 
++bool ScDPCacheTable::isRowQualified(sal_Int32 nRow, const vector<Criterion>& rCriteria, bool bRepeatIfEmpty) const
++{
++    sal_Int32 nColSize = getColSize();
++    vector<Criterion>::const_iterator itrEnd = rCriteria.end();
++    for (vector<Criterion>::const_iterator itr = rCriteria.begin(); itr != itrEnd; ++itr)
++    {
++        if (itr->mnFieldIndex >= nColSize)
++            // specified field is outside the source data columns.  Don't
++            // use this criterion.
++            continue;
++
++        const Cell* pCell = getCell(static_cast<SCCOL>(itr->mnFieldIndex), nRow, bRepeatIfEmpty);
++        if (!pCell)
++            // This should never happen, but just in case...
++            return false;
++
++        if (!itr->mpFilter->match(*pCell))
++            return false;
++    }
++    return true;
++}
++
+ void ScDPCacheTable::getValueData(ScDocument* pDoc, const ScAddress& rPos, Cell& rCell)
+ {
+     ScBaseCell* pCell = pDoc->GetCell(rPos);
+diff --git sc/source/core/data/dpgroup.cxx sc/source/core/data/dpgroup.cxx
+index bb0b8b5..5db1086 100644
+--- sc/source/core/data/dpgroup.cxx
++++ sc/source/core/data/dpgroup.cxx
+@@ -1136,18 +1136,13 @@ void ScDPGroupTableData::CreateCacheTable()
+     pSourceData->CreateCacheTable();
+ }
+ 
+-void ScDPGroupTableData::FilterCacheTable(const vector<ScDPDimension*>& rPageDims)
+-{
+-    pSourceData->FilterCacheTable(rPageDims);
+-}
+-
+-void ScDPGroupTableData::GetDrillDownData(const vector<ScDPCacheTable::Criterion>& rCriteria, Sequence< Sequence<Any> >& rData)
++void ScDPGroupTableData::ModifyFilterCriteria(vector<ScDPCacheTable::Criterion>& rCriteria) const
+ {
+     typedef hash_map<long, const ScDPGroupDimension*> GroupFieldMapType;
+     GroupFieldMapType aGroupFieldIds;
+     {
+-        ScDPGroupDimensionVec::const_iterator itrEnd = aGroups.end();
+-        for (ScDPGroupDimensionVec::const_iterator itr = aGroups.begin(); itr != itrEnd; ++itr)
++        ScDPGroupDimensionVec::const_iterator itr = aGroups.begin(), itrEnd = aGroups.end();
++        for (; itr != itrEnd; ++itr)
+             aGroupFieldIds.insert( hash_map<long, const ScDPGroupDimension*>::value_type(itr->GetGroupDim(), &(*itr)) );
+     }
+ 
+@@ -1240,7 +1235,20 @@ void ScDPGroupTableData::GetDrillDownData(const vector<ScDPCacheTable::Criterion
+             }
+         }
+     }
++    rCriteria.swap(aNewCriteria);
++}
+ 
++void ScDPGroupTableData::FilterCacheTable(const vector<ScDPCacheTable::Criterion>& rCriteria)
++{
++    vector<ScDPCacheTable::Criterion> aNewCriteria(rCriteria);
++    ModifyFilterCriteria(aNewCriteria);
++    pSourceData->FilterCacheTable(aNewCriteria);
++}
++
++void ScDPGroupTableData::GetDrillDownData(const vector<ScDPCacheTable::Criterion>& rCriteria, Sequence< Sequence<Any> >& rData)
++{
++    vector<ScDPCacheTable::Criterion> aNewCriteria(rCriteria);
++    ModifyFilterCriteria(aNewCriteria);
+     pSourceData->GetDrillDownData(aNewCriteria, rData);
+ }
+ 
+diff --git sc/source/core/data/dpsdbtab.cxx sc/source/core/data/dpsdbtab.cxx
+index 9b2cdaa..4f632ac 100644
+--- sc/source/core/data/dpsdbtab.cxx
++++ sc/source/core/data/dpsdbtab.cxx
+@@ -287,10 +287,10 @@ void ScDatabaseDPData::CreateCacheTable()
+     pImpl->aCacheTable.fillTable(pImpl->xRowSet, *pImpl->pFormatter->GetNullDate());
+ }
+ 
+-void ScDatabaseDPData::FilterCacheTable(const vector<ScDPDimension*>& rPageDims)
++void ScDatabaseDPData::FilterCacheTable(const vector<ScDPCacheTable::Criterion>& rCriteria)
+ {
+     CreateCacheTable();
+-    pImpl->aCacheTable.filterByPageDimension(rPageDims);
++    pImpl->aCacheTable.filterByPageDimension(rCriteria, IsRepeatIfEmpty());
+ }
+ 
+ void ScDatabaseDPData::GetDrillDownData(const vector<ScDPCacheTable::Criterion>& rCriteria, Sequence< Sequence<Any> >& rData)
+diff --git sc/source/core/data/dpshttab.cxx sc/source/core/data/dpshttab.cxx
+index 0090bf1..abc42a2 100644
+--- sc/source/core/data/dpshttab.cxx
++++ sc/source/core/data/dpshttab.cxx
+@@ -266,10 +266,10 @@ void ScSheetDPData::CreateCacheTable()
+                                  pImpl->bIgnoreEmptyRows);
+ }
+ 
+-void ScSheetDPData::FilterCacheTable(const vector<ScDPDimension*>& rPageDims)
++void ScSheetDPData::FilterCacheTable(const vector<ScDPCacheTable::Criterion>& rCriteria)
+ {
+     CreateCacheTable();
+-    pImpl->aCacheTable.filterByPageDimension(rPageDims);
++    pImpl->aCacheTable.filterByPageDimension(rCriteria, IsRepeatIfEmpty());
+ }
+ 
+ void ScSheetDPData::GetDrillDownData(const vector<ScDPCacheTable::Criterion>& rCriteria, Sequence< Sequence<Any> >& rData)
+diff --git sc/source/core/data/dptabdat.cxx sc/source/core/data/dptabdat.cxx
+index 6ed02ad..87168ea 100644
+--- sc/source/core/data/dptabdat.cxx
++++ sc/source/core/data/dptabdat.cxx
+@@ -191,9 +191,9 @@ void ScDPTableData::CreateCacheTable()
+     fprintf(stdout, "ScDPTableData::CreateCacheTable: un-implemented...\n");fflush(stdout);
+ }
+ 
+-void ScDPTableData::FilterCacheTable(const vector<ScDPDimension*>&)
++void ScDPTableData::FilterCacheTable(const vector<ScDPCacheTable::Criterion>&)
+ {
+-    fprintf(stdout, "ScDPTableData::FilterCacheTable: un-implemented...\n");fflush(stdout);
++    fprintf(stdout, "ScDPTableData::FilterCacheTable: un-implemented...\n");
+ }
+ 
+ void ScDPTableData::GetDrillDownData(const vector<ScDPCacheTable::Criterion>&, Sequence< Sequence<Any> >&)
+diff --git sc/source/core/data/dptabsrc.cxx sc/source/core/data/dptabsrc.cxx
+index fd52679..50d114e 100644
+--- sc/source/core/data/dptabsrc.cxx
++++ sc/source/core/data/dptabsrc.cxx
+@@ -834,15 +834,25 @@ void ScDPSource::CreateRes_Impl()
+ 		else
+ 		{
+             {
+-                vector<ScDPDimension*> aPageDims;
+-                aPageDims.reserve(nPageDimCount);
++                // filter table by page dimensions.
++                vector<ScDPCacheTable::Criterion> aCriteria;
+                 for (i = 0; i < nPageDimCount; ++i)
+                 {
+                     ScDPDimension* pDim = GetDimensionsObject()->getByIndex(nPageDims[i]);
+-                    if (pDim)
+-                        aPageDims.push_back(pDim);
++                    if (!pDim || !pDim->HasSelectedPage())
++                        continue;
++
++                    long nField = pDim->GetDimension();
++                    const ScDPItemData& rData = pDim->GetSelectedData();
++                    aCriteria.push_back(ScDPCacheTable::Criterion());
++                    ScDPCacheTable::Criterion& r = aCriteria.back();
++                    r.mnFieldIndex = static_cast<sal_Int32>(nField);
++                    sal_Int32 nStrId = ScSharedString::getStringId(rData.aString);
++                    r.mpFilter.reset(
++                        new ScDPCacheTable::SingleFilter(nStrId, rData.fValue, rData.bHasValue));
+                 }
+-                pData->FilterCacheTable(aPageDims);
++                if (!aCriteria.empty())
++                    pData->FilterCacheTable(aCriteria);
+             }
+             aInfo.aPageDims.reserve(nPageDimCount);
+             for (i = 0; i < nPageDimCount; ++i)
