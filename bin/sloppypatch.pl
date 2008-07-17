@@ -34,7 +34,7 @@ while (<STDIN>) {
 	$minusline .= $line;
 	next;
     }
-    if ( $line =~ m/^\+\+\+ [ \t]*([^\/]+)([^ \t]+)/ ) {
+    if ( $line =~ m/^\+\+\+ [ \t]*\.?\/?([^\/]+)([^ \t]+)/ ) {
 	$eliding = ! -d "$applydir/$1";
 
 	if (!$eliding) {
