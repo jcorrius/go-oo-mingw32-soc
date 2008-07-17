@@ -110,6 +110,8 @@ mxCompLoader( _xCompLoader ), msOutDirPath( convertToURL( _outDirPath  ) )
 	}
 	rtl::OUString getLogLocationWithName( OUString fileName ) throw (  beans::UnknownPropertyException,  lang::IllegalArgumentException, lang::WrappedTargetException,  uno::Exception ) 
     {
+        printf("%s\n", getenv("HOME") );
+    	printf("file name %s\n", rtl::OUStringToOString( fileName, RTL_TEXTENCODING_UTF8 ).getStr() );
 		//rtl::OUString sLogLocation( rtl::OUString::createFromAscii( getenv("HOME") ) );
 		rtl::OUString sLogLocation;
 		Reference< XPropertySet > pathSettings( mxMCF->createInstanceWithContext( rtl::OUString::createFromAscii( "com.sun.star.comp.framework.PathSettings" ), mxContext), uno::UNO_QUERY_THROW );
@@ -131,14 +133,17 @@ mxCompLoader( _xCompLoader ), msOutDirPath( convertToURL( _outDirPath  ) )
 				try 
 				{
 					OSL_TRACE( "processing %s",  rtl::OUStringToOString( sUrl, RTL_TEXTENCODING_UTF8 ).getStr() );
+					printf( "processing %s\n",  rtl::OUStringToOString( sUrl, RTL_TEXTENCODING_UTF8 ).getStr() );
 					// Loading the wanted document
 					Sequence< PropertyValue > propertyValues(1);
 					propertyValues[0].Name = rtl::OUString::createFromAscii( "Hidden" );
 					propertyValues[0].Value <<= sal_False;
 
                     rtl::OUString sfileUrl = convertToURL( sUrl );
+					printf( "try to get xDoc %s\n", rtl::OUStringToOString( sfileUrl, RTL_TEXTENCODING_UTF8 ).getStr() );
 					Reference< uno::XInterface > xDoc =	
 						mxCompLoader->loadComponentFromURL( sfileUrl, rtl::OUString::createFromAscii( "_blank" ), 0, propertyValues);
+					printf( "got xDoc\n" );
 
 					OUString logFileURL = convertToURL( getLogLocation() );
 					try
@@ -147,7 +152,10 @@ mxCompLoader( _xCompLoader ), msOutDirPath( convertToURL( _outDirPath  ) )
 						if ( mxSFA->exists( logFileURL ) )	
 							mxSFA->kill( logFileURL );
 					
+						printf("try to get the ScriptProvider\n");
 						Reference< script::provider::XScriptProvider > xProv = xSupplier->getScriptProvider();
+						printf("get the ScriptProvider\n");
+						printf("try to get the Script\n");
                         Reference< script::provider::XScript > xScript;
 						try
                         {
@@ -163,6 +171,7 @@ mxCompLoader( _xCompLoader ), msOutDirPath( convertToURL( _outDirPath  ) )
                             }
                         }
 						OSL_TRACE("Got script for doc %s", rtl::OUStringToOString( sUrl, RTL_TEXTENCODING_UTF8 ).getStr() );
+						printf("get the Script\n");
 						Sequence< uno::Any > aArgs;
 						Sequence< sal_Int16 > aOutArgsIndex;
 						Sequence< uno::Any > aOutArgs;
@@ -173,14 +182,18 @@ mxCompLoader( _xCompLoader ), msOutDirPath( convertToURL( _outDirPath  ) )
 						OUString newLocation = msOutDirPath + fileName.copy ( 0, fileName.lastIndexOf( EXTN )  ) + rtl::OUString::createFromAscii( ".log" );
                         try
                         {
+    						printf("move log file\n");
 	    					mxSFA->move( logFileURL, newLocation );
 		    				OSL_TRACE("new logfile location is %s ", rtl::OUStringToOString( newLocation, RTL_TEXTENCODING_UTF8 ).getStr() );
+			    			printf("moved to new location\n");
                         }
                         catch ( uno::Exception& e )
                         {
                             logFileURL = convertToURL( getLogLocationWithName( fileName ) );
+    						printf("move log file from %s\n", rtl::OUStringToOString( logFileURL, RTL_TEXTENCODING_UTF8 ).getStr() );
 	    					mxSFA->move( logFileURL, newLocation );
 		    				OSL_TRACE("new logfile location is %s ", rtl::OUStringToOString( newLocation, RTL_TEXTENCODING_UTF8 ).getStr() );
+			    			printf("moved to new location\n");
                         }
 						
 					}
@@ -194,18 +207,22 @@ mxCompLoader( _xCompLoader ), msOutDirPath( convertToURL( _outDirPath  ) )
 		
 					if ( xCloseable.is() ) 
 					{
+			    		printf("try to close\n");
                         // will close application. and only run a test case for 3.0
                         // maybe it is a bug. yes, it is a bug
                         // if only one frame and model, click a button which related will colse.
                         // will make a crash. It related with window listener.
                         // so, for run all test cases, it should not close the document at this moment.
 						xCloseable->close(sal_False);
+			    		printf("closed\n");
 					} 
 					else 
 					{
+			    		printf("try to dispose\n");
 						Reference< XComponent > xComp( xDoc, uno::UNO_QUERY_THROW );
                         // same as close.
 						xComp->dispose();
+			    		printf("disposed\n");
 					}
 				}
 				catch( uno::Exception& e ) 
@@ -214,6 +231,7 @@ mxCompLoader( _xCompLoader ), msOutDirPath( convertToURL( _outDirPath  ) )
 				}
 		                
 			}
+		printf("complete processing %s\n", rtl::OUStringToOString( sUrl, RTL_TEXTENCODING_UTF8 ).getStr() );
 	}
 
 	void traverse( const rtl::OUString& sFileDirectory ) 
@@ -227,6 +245,7 @@ mxCompLoader( _xCompLoader ), msOutDirPath( convertToURL( _outDirPath  ) )
 		Sequence<OUString> entries = mxSFA->getFolderContents( sFileDirectoryURL, sal_False );
 	   	 
 		// Iterating for each file and directory
+        printf( "Entries %d\n", (int)entries.getLength() );
 		for ( sal_Int32 i = 0; i < entries.getLength(); ++i ) 
 		{
             proccessDocument( entries[ i ] );
@@ -260,14 +279,18 @@ int main( int argv, char** argc )
 		Reference<XComponentContext> xCC = ::cppu::bootstrap();
 		Reference<XMultiComponentFactory> xFactory = xCC->getServiceManager();
 		OSL_TRACE("got servicemanager");
+        std::cout << "got servicemanager" << std::endl;
 		Reference<XInterface> desktop = xFactory->createInstanceWithContext(
 		ascii("com.sun.star.frame.Desktop"), xCC);
 		OSL_TRACE("got desktop");
+        std::cout << "got desktop" << std::endl;
 		Reference<frame::XComponentLoader> xLoader(desktop, UNO_QUERY_THROW);
 		TestVBA* dTest = new TestVBA( xCC, xFactory, xLoader, ascii( argc[ 2 ] ) );
         if ( argv == 4 )
         {
+            std::cout << "before process" << std::endl;
             dTest->proccessDocument( ascii( argc[ 3 ] ) );
+            std::cout << "after process" << std::endl;
         }
         else
         {
