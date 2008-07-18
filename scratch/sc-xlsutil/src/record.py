@@ -365,6 +365,7 @@ class Xct(BaseRecordHandler):
         self.appendLine("CRN count: %d"%crnCount)
         self.appendLine("index of referenced sheet in the SUPBOOK record: %d"%sheetIndex)
 
+
 class Crn(BaseRecordHandler):
 
     def parseBytes (self):
@@ -410,6 +411,14 @@ class Crn(BaseRecordHandler):
                 sys.exit(1)
             
 
+class RefreshAll(BaseRecordHandler):
+
+    def parseBytes (self):
+        boolVal = globals.getSignedInt(self.bytes[0:2])
+        strVal = "no"
+        if boolVal:
+            strVal = "yes"
+        self.appendLine("refresh all external data ranges and pivot tables: %s"%strVal)
 
 
 # -------------------------------------------------------------------
