@@ -88,6 +88,7 @@ class Formula(BaseRecordHandler):
         self.appendLine("recalculate always: %d"%recalc)
         self.appendLine("calculate on open: %d"%calcOnOpen)
         self.appendLine("shared formula: %d"%sharedFormula)
+        self.appendLine("formula bytes: %s"%globals.getRawBytes(tokens, True, False))
         self.appendLine("tokens: "+ftext)
 
 
