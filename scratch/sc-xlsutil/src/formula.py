@@ -52,7 +52,7 @@ def parseCellAddress (bytes):
     colRelative = ((col & 0x4000) != 0)
     rowRelative = ((col & 0x8000) != 0)
     col = (col & 0x00FF)
-    obj = CellAddress(col, row)
+    obj = CellAddress(col, row, colRelative, rowRelative)
     return obj
 
 def parseCellRangeAddress (bytes):
