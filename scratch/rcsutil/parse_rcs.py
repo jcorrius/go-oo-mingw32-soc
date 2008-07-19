@@ -131,6 +131,7 @@ currentAffiliations = {
     'er': 'Sun',    # Eike Rathke          
     'erack': 'Sun', # Eike Rathke          
     'ericb': 'unaffiliated', # Eric Bachard         
+    'es': 'Sun', # Eric Savary
     'fa': 'RedHat', # Dan Williams         
     'fangyq': 'Redflag', # Yaqiong Fang  
     'fdechelle': 'unaffiliated', # Francois Dechelle (works in api/exthome)       
