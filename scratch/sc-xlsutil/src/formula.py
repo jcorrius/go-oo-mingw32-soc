@@ -15,6 +15,11 @@ def toColName (colID):
         name += struct.pack('b', n2 + ord('A'))
     return name
 
+def toAbsName (name, isRelative):
+    if not isRelative:
+        name = '$' + name
+    return name
+
 class CellAddress(object):
     def __init__ (self, col=0, row=0, colRel=False, rowRel=False):
         self.col = col
@@ -23,12 +28,8 @@ class CellAddress(object):
         self.isRowRelative = rowRel
 
     def getName (self):
-        colName = toColName(self.col)
-        rowName = "%d"%(self.row+1)
-        if not self.isColRelative:
-            colName = '$' + colName
-        if not self.isRowRelative:
-            rowName = '$' + rowName
+        colName = toAbsName(toColName(self.col), self.isColRelative)
+        rowName = toAbsName("%d"%(self.row+1),   self.isRowRelative)
         return colName + rowName
 
 class CellRange(object):
@@ -41,6 +42,17 @@ class CellRange(object):
         self.isLastRowRelative = False
         self.isFirstColRelative = False
         self.isLastColRelative = False
+
+    def getName (self):
+        col1 = toColName(self.firstCol)
+        col2 = toColName(self.lastCol)
+        row1 = "%d"%(self.firstRow+1)
+        row2 = "%d"%(self.lastRow+1)
+        col1 = toAbsName(col1, self.isFirstColRelative)
+        col2 = toAbsName(col2, self.isLastColRelative)
+        row1 = toAbsName(row1, self.isFirstRowRelative)
+        row2 = toAbsName(row2, self.isLastRowRelative)
+        return col1 + row1 + ':' + col2 + row2
 
 def parseCellAddress (bytes):
     if len(bytes) != 4:
@@ -65,14 +77,22 @@ def parseCellRangeAddress (bytes):
     obj.firstCol = globals.getSignedInt(bytes[4:6])
     obj.lastCol  = globals.getSignedInt(bytes[6:8])
 
-    obj.isFirstColRelative = ((firstCol & 0x4000) != 0)
-    obj.isFirstRowRelative = ((firstCol & 0x8000) != 0)
-    obj.firstCol = (firstCol & 0x00FF)
+    obj.isFirstColRelative = ((obj.firstCol & 0x4000) != 0)
+    obj.isFirstRowRelative = ((obj.firstCol & 0x8000) != 0)
+    obj.firstCol = (obj.firstCol & 0x00FF)
 
-    obj.isLastColRelative = ((lastCol & 0x4000) != 0)
-    obj.isLastRowRelative = ((lastCol & 0x8000) != 0)
-    obj.lastCol = (lastCol & 0x00FF)
+    obj.isLastColRelative = ((obj.lastCol & 0x4000) != 0)
+    obj.isLastRowRelative = ((obj.lastCol & 0x8000) != 0)
+    obj.lastCol = (obj.lastCol & 0x00FF)
     return obj
+
+
+def makeSheetName (sheet1, sheet2):
+    if sheet1 == sheet2:
+        sheetName = "sheetID='%d'"%sheet1
+    else:
+        sheetName = "sheetID='%d-%d'"%(sheet1, sheet2)
+    return sheetName
 
 
 class TokenBase(object):
@@ -142,9 +162,9 @@ class Ref3dR(TokenBase):
     def parse (self, i):
         try:
             i += 1
-            self.refEntryId = globals.getSignedInt(self.tokens[i:i+2])
+            self.sheet1 = globals.getSignedInt(self.tokens[i:i+2])
             i += 2
-            self.sheet = globals.getSignedInt(self.tokens[i:i+2])
+            self.sheet2 = globals.getSignedInt(self.tokens[i:i+2])
             i += 2
             self.cell = parseCellAddress(self.tokens[i:i+4])
             i += 4
@@ -156,7 +176,8 @@ class Ref3dR(TokenBase):
         if self.cell == None:
             return ''
         cellName = self.cell.getName()
-        return "<3dref externSheetID='%d' cellAddress='%s'>"%(self.refEntryId, cellName)
+        sheetName = makeSheetName(self.sheet1, self.sheet2)
+        return "<3dref %s cellAddress='%s'>"%(sheetName, cellName)
 
 
 class Ref3dV(TokenBase):
@@ -169,7 +190,7 @@ class Ref3dV(TokenBase):
     def parse (self, i):
         try:
             i += 1
-            self.refEntryId = globals.getSignedInt(self.tokens[i:i+2])
+            self.sheet1 = globals.getSignedInt(self.tokens[i:i+2])
             i += 2
             self.cell = parseCellAddress(self.tokens[i:i+4])
             i += 4
@@ -181,12 +202,38 @@ class Ref3dV(TokenBase):
         if self.cell == None:
             return ''
         cellName = self.cell.getName()
-        return "<3dref externSheetID='%d' cellAddress='%s'>"%(self.refEntryId, cellName)
+        sheetName = makeSheetName(self.sheet1, self.sheet1)
+        return "<3dref %s cellAddress='%s'>"%(sheetName, cellName)
 
 
 class Ref3dA(Ref3dV):
     def __init__ (self, tokens):
         Ref3dA.__init__(self, tokens)
+
+
+class Area3d(TokenBase):
+
+    def parse (self, i):
+        self.cellrange = None
+        try:
+            op = self.tokens[i]
+            i += 1
+            self.sheet1 = globals.getSignedInt(self.tokens[i:i+2])
+            i += 2
+            self.sheet2 = globals.getSignedInt(self.tokens[i:i+2])
+            i += 2
+            self.cellrange = parseCellRangeAddress(self.tokens[i:i+8])
+        except InvalidCellAddress:
+            pass
+        return i
+
+    def getText (self):
+        if self.cellrange == None:
+            return ''
+        cellRangeName = self.cellrange.getName()
+        sheetName = makeSheetName(self.sheet1, self.sheet2)
+        return "<3drange %s rangeAddress='%s'>"%(sheetName, cellRangeName)
+
 
 
 tokenMap = {
@@ -223,6 +270,10 @@ tokenMap = {
     0x5A: Ref3dV,
     0x7A: Ref3dA,
 
+    0x3B: Area3d,
+    0x5B: Area3d,
+    0x7B: Area3d,
+
     # last item
   0xFFFF: None
 }
@@ -248,6 +299,7 @@ which is usually the first 2 bytes.
             if length <= 0:
                 return
             ftokens = self.tokens[2:2+length]
+            length = len(ftokens)
 
         i = 0
         while i < length:
