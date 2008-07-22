@@ -14,14 +14,15 @@
 %define         piece      libs_extern
 Name:           ooo3_%piece
 Requires:       ooo3_bootstrap
-BuildRequires:  ooo3_bootstrap-devel
+# urg, ure dep is now required for cppunit ...
+BuildRequires:  ooo3_bootstrap ooo3_ure
 %define	      ooo_prefix	%_libdir
 %define	      ooo_home		ooo-3
-%define	      ooo_build_tag     dev300-m21
+%define	      ooo_build_tag     dev300-m25
 License:        Artistic License; BSD 3-Clause; GPL v2 or later; LaTeX Public License (LPPL); LGPL v2.1 or later; MOZILLA PUBLIC LICENSE (MPL/NPL); X11/MIT
 Group:          Productivity/Office/Suite
 Version:        3
-Release:        5
+Release:        6
 AutoReqProv:    on
 Summary:        A Free Office Suite (Framework)
 Url:            http://www.openoffice.org/
@@ -32,7 +33,7 @@ BuildRoot:      %{_tmppath}/%{name}-%{version}-build
 ure
 
 %package devel
-Requires:       ooo3_bootstrap-devel
+Requires:       ooo3_bootstrap
 License:        Artistic License; BSD 3-Clause; GPL v2 or later; LaTeX Public License (LPPL); LGPL v2.1 or later; MOZILLA PUBLIC LICENSE (MPL/NPL); X11/MIT
 Summary:        A Free Office Suite (Framework)
 Group:          Productivity/Office/Suite

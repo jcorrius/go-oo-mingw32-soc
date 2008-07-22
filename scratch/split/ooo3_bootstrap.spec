@@ -77,7 +77,7 @@ BuildRequires:  gjdoc
 # build_module_in_parallel 0 = no
 #			   1 = yes (the number is defined be the number of cpus)
 #			   2,3,4... = yes (force the number of modules to be built in parallel)
-%define		build_module_in_parallel	1
+%define		build_module_in_parallel	0
 # prepare_build:	   0 = no
 #			   1 = yes (just build, install and create packages; without %%prep section and configure)
 %define		prepare_build 		1
@@ -126,12 +126,12 @@ BuildRequires:  gjdoc
 %define	      ooo_prefix	%_libdir
 %define	      ooo_home		ooo-3
 %define	      ooo_build_dir	build
-%define	      ooo_build_version 2.99.21
-%define	      ooo_build_tag     dev300-m21
+%define	      ooo_build_version 2.99.25
+%define	      ooo_build_tag     dev300-m25
 License:        Artistic License; BSD 3-Clause; GPL v2 or later; LaTeX Public License (LPPL); LGPL v2.1 or later; MOZILLA PUBLIC LICENSE (MPL/NPL); X11/MIT
 Group:          Productivity/Office/Suite
 Version:        3
-Release:        5
+Release:        6
 AutoReqProv:    on
 PreReq:         coreutils /usr/bin/update-mime-database
 PreReq:         %{?suseconfig_fonts_prereq:%suseconfig_fonts_prereq}
@@ -291,15 +291,8 @@ rm -rf $RPM_BUILD_ROOT
 %post
 %preun
 %postun
-%post devel
 
 %files
-%defattr(-,root,root)
-# FIXME - should have the actual files in it ! ;-)
-# except we have ~none here - just a devel package (?)
-# is there anything we absolutely need here ?
-
-%files devel
 %defattr(-,root,root)
 %dir %ooo_prefix/%ooo_home/solver
 %dir %ooo_prefix/%ooo_home/solenv
