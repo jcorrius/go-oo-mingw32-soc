@@ -131,7 +131,7 @@ BuildRequires:  gjdoc
 License:        Artistic License; BSD 3-Clause; GPL v2 or later; LaTeX Public License (LPPL); LGPL v2.1 or later; MOZILLA PUBLIC LICENSE (MPL/NPL); X11/MIT
 Group:          Productivity/Office/Suite
 Version:        3
-Release:        6
+Release:        7
 AutoReqProv:    on
 PreReq:         coreutils /usr/bin/update-mime-database
 PreReq:         %{?suseconfig_fonts_prereq:%suseconfig_fonts_prereq}
@@ -140,6 +140,7 @@ Url:            http://www.openoffice.org/
 #Url-help:    ftp://ftp.services.openoffice.org/pub/OpenOffice.org/contrib/helpcontent/
 Source0:        ooo-build-%ooo_build_version.tar.gz
 Source1:        %ooo_build_tag-bootstrap.tar.bz2
+Source2:        setup_native_packinfo-m25.tar.bz2
 #
 # patches against the upstream sources, must be -p0
 # Patch1000:    bug-123456-fix-foo.diff		# example
@@ -164,7 +165,7 @@ devel package
 #
 # apply patches against ooo-build
 # %patch0	# example
-install -m 644 %{S:1} src/
+install -m 644 %{S:1} %{S:2} src/
 
 %build
 %if %prepare_build != 0
