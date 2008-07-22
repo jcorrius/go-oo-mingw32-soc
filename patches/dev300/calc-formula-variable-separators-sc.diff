@@ -1,0 +1,270 @@
+diff --git sc/inc/compiler.hxx sc/inc/compiler.hxx
+index 047ff2c..5a7fb4e 100644
+--- sc/inc/compiler.hxx
++++ sc/inc/compiler.hxx
+@@ -430,7 +430,7 @@ private:
+     ScGrammar::Grammar  meGrammar;          // The grammar used, language plus convention.
+ 
+     BOOL   GetToken();
+-    BOOL   NextNewToken(bool bAllowBooleans = false);
++    BOOL   NextNewToken(bool bInArray = false);
+     OpCode NextToken();
+     void PutCode( ScTokenRef& );
+     void Factor();
+@@ -448,9 +448,9 @@ private:
+     OpCode Expression();
+ 
+     void SetError(USHORT nError);
+-    xub_StrLen NextSymbol();
++    xub_StrLen NextSymbol(bool bInArray);
+     BOOL IsValue( const String& );
+-    BOOL IsOpCode( const String& );
++    BOOL IsOpCode( const String&, bool bInArray );
+     BOOL IsOpCode2( const String& );
+     BOOL IsString();
+     BOOL IsReference( const String& );
+diff --git sc/source/core/tool/compiler.cxx sc/source/core/tool/compiler.cxx
+index c2d36c4..c9ae080 100644
+--- sc/source/core/tool/compiler.cxx
++++ sc/source/core/tool/compiler.cxx
+@@ -42,6 +42,7 @@
+ #include <tools/rc.hxx>
+ #include <tools/solar.h>
+ #include <unotools/charclass.hxx>
++#include <com/sun/star/i18n/LocaleDataItem.hpp>
+ #include <com/sun/star/lang/Locale.hpp>
+ #include <com/sun/star/sheet/FormulaOpCodeMapEntry.hpp>
+ #include <com/sun/star/sheet/FormulaLanguage.hpp>
+@@ -223,16 +224,16 @@ private:
+     void putDefaultOpCode( ScCompiler::NonConstOpCodeMapPtr xMap, USHORT nOp );
+ 
+ private:
+-    enum SeparatorType
+-    {
+-        SEMICOLON_BASE,
+-        COMMA_BASE
+-    };
+-    SeparatorType meSepType;
++    sal_Unicode mcParamSep;
++    sal_Unicode mcArrayRowSep;
++    sal_Unicode mcArrayColSep;
+ };
+ 
+ ScOpCodeList::ScOpCodeList( USHORT nRID, ScCompiler::NonConstOpCodeMapPtr xMap ) :
+-    Resource( ScResId(nRID) )
++    Resource( ScResId(nRID) ),
++    mcParamSep(sal_Unicode(';')),
++    mcArrayRowSep(sal_Unicode('|')),
++    mcArrayColSep(sal_Unicode(';'))
+ {
+     init(xMap->getGrammar());
+ 
+@@ -248,21 +249,59 @@ ScOpCodeList::ScOpCodeList( USHORT nRID, ScCompiler::NonConstOpCodeMapPtr xMap )
+     FreeResource();
+ }
+ 
+-void ScOpCodeList::init( ScGrammar::Grammar /*eGrammar*/ )
++void ScOpCodeList::init( ScGrammar::Grammar eGrammar )
+ {
+     using namespace ::com::sun::star::sheet;
+ 
+-    meSepType = SEMICOLON_BASE;
+-#if 0
+-    if (ScGrammar::extractFormulaLanguage(eGrammar) == FormulaLanguage::NATIVE)
+-    {
+-        // Use localized separators.
+-        const lang::Locale& rLocale = *ScGlobal::pLocale;
+-        if (rLocale.Language.equalsAscii("en"))
+-            meSepType = COMMA_BASE;
++    if (eGrammar == ScGrammar::GRAM_NATIVE || 
++        ScGrammar::extractFormulaLanguage(eGrammar) != FormulaLanguage::NATIVE)
++        return;
+ 
+-        // TODO: Check for more locales.
+-    }
++    if (!ScGlobal::pLocaleData || !ScGlobal::pLocale)
++        return;
++
++    const LocaleDataWrapper& rLocaleData = *ScGlobal::pLocaleData;
++    const i18n::LocaleDataItem& aItem = rLocaleData.getLocaleItem();
++    const String& rDecSep  = rLocaleData.getNumDecimalSep();
++    const String& rListSep = rLocaleData.getListSep();
++    if (rListSep.Len() != 1 || rDecSep.Len() != 1)
++        // Something is wrong.  Stick with the default separators.
++        return;
++
++    sal_Unicode cDecSep  = rDecSep.GetChar(0);
++    sal_Unicode cListSep = rListSep.GetChar(0);
++
++    // TODO: for some reason the list separator for 'en' on Linux is ';'. It's
++    // supposed to be ','.  Work around it for now, and find out later why
++    // it's set to ';'.
++    if (cDecSep == sal_Unicode('.'))
++        cListSep = sal_Unicode(',');
++
++    // by default, the parameter separator equals the locale-specific
++    // list separator.
++    mcParamSep = cListSep;
++
++    if (cDecSep == cListSep && cDecSep != sal_Unicode(';'))
++        // if the decimal and list separators are equal, set the
++        // parameter separator to be ';', unless they are both
++        // semicolon in which case don't change the decimal separator.
++        mcParamSep = sal_Unicode(';');
++
++    mcArrayColSep = sal_Unicode(',');
++    if (cDecSep == sal_Unicode(','))
++        mcArrayColSep = sal_Unicode('.');
++    mcArrayRowSep = sal_Unicode(';');
++
++    // TODO: Excel also has its own internal decimal separator which may 
++    // be different from the system's, and if one of the array separators
++    // equals this internal value, Excel changes it to a backslash '/'.
++    // I don't think we have to go that far to emulate that odd behavior,
++    // so for now we just stop here.
++#if 0
++    fprintf(stdout, "ScOpCodeList::init:   arg sep = '%s'; array col sep = '%s'; array row sep = '%s'\n",
++            rtl::OUStringToOString(String(mcParamSep), RTL_TEXTENCODING_UTF8).getStr(),
++            rtl::OUStringToOString(String(mcArrayColSep), RTL_TEXTENCODING_UTF8).getStr(),
++            rtl::OUStringToOString(String(mcArrayRowSep), RTL_TEXTENCODING_UTF8).getStr());
+ #endif
+ }
+ 
+@@ -270,50 +309,16 @@ bool ScOpCodeList::getOpCodeString( String& rStr, USHORT nOp )
+ {
+     switch (nOp)
+     {
+-        case SC_OPCODE_SEP:
+-        {
+-            if (meSepType == COMMA_BASE)
+-            {
+-                rStr = String::CreateFromAscii(",");
+-                return true;
+-            }
+-            else if (meSepType == SEMICOLON_BASE)
+-            {
+-                rStr = String::CreateFromAscii(";");
+-                return true;
+-            }
+-        }
+-        break;
+-        case SC_OPCODE_ARRAY_COL_SEP:
+-        {
+-            if (meSepType == COMMA_BASE)
+-            {
+-                rStr = String::CreateFromAscii(",");
+-                return true;
+-            }
+-            else if (meSepType == SEMICOLON_BASE)
+-            {
+-                rStr = String::CreateFromAscii(";");
+-                return true;
+-            }
+-        }
+-        break;
+-        case SC_OPCODE_ARRAY_ROW_SEP:
+-        {
+-            if (meSepType == COMMA_BASE)
+-            {
+-                rStr = String::CreateFromAscii(";");
+-                return true;
+-            }
+-            else if (meSepType == SEMICOLON_BASE)
+-            {
+-                rStr = String::CreateFromAscii("|");
+-                return true;
+-            }
+-        }
+-        break;
++        case SC_OPCODE_SEP:   
++            rStr = mcParamSep;        
++            return true;
++        case SC_OPCODE_ARRAY_ROW_SEP: 
++            rStr = mcArrayRowSep;
++            return true;
++        case SC_OPCODE_ARRAY_COL_SEP: 
++            rStr = mcArrayColSep;
++            return true;
+     }
+-
+     return false;
+ }
+ 
+@@ -1946,7 +1951,7 @@ sal_Unicode* lcl_UnicodeStrNCpy( sal_Unicode* pDst, const sal_Unicode* pSrc, xub
+ //               | Sonst             | Symbol=Symbol+Zeichen | GetString
+ //---------------+-------------------+-----------------------+---------------
+ 
+-xub_StrLen ScCompiler::NextSymbol()
++xub_StrLen ScCompiler::NextSymbol(bool bInArray)
+ {
+     cSymbol[MAXSTRLEN-1] = 0;       // Stopper
+     sal_Unicode* pSym = cSymbol;
+@@ -1959,6 +1964,8 @@ xub_StrLen ScCompiler::NextSymbol()
+     ScanState eState = ssGetChar;
+     xub_StrLen nSpaces = 0;
+     sal_Unicode cSep = mxSymbols->getSymbol( ocSep).GetChar(0);
++    sal_Unicode cArrayColSep = mxSymbols->getSymbol( ocArrayColSep).GetChar(0);
++    sal_Unicode cArrayRowSep = mxSymbols->getSymbol( ocArrayRowSep).GetChar(0);
+     sal_Unicode cDecSep = (mxSymbols->isEnglish() ? '.' :
+             ScGlobal::pLocaleData->getNumDecimalSep().GetChar(0));
+ 
+@@ -1974,9 +1981,9 @@ xub_StrLen ScCompiler::NextSymbol()
+     {
+         pSrc++;
+         ULONG nMask = GetCharTableFlags( c );
+-        // The parameter separator ends things unconditionally if not in
+-        // string or reference.
+-        if (c == cSep)
++        // The parameter separator and the array column and row separators end
++        // things unconditionally if not in string or reference.
++        if (c == cSep || (bInArray && (c == cArrayColSep || c == cArrayRowSep)))
+         {
+             switch (eState)
+             {
+@@ -2322,14 +2329,22 @@ xub_StrLen ScCompiler::NextSymbol()
+ // Convert symbol to token
+ //---------------------------------------------------------------------------
+ 
+-BOOL ScCompiler::IsOpCode( const String& rName )
++BOOL ScCompiler::IsOpCode( const String& rName, bool bInArray )
+ {
+     ScOpCodeHashMap::const_iterator iLook( mxSymbols->getHashMap()->find( rName));
+     BOOL bFound = (iLook != mxSymbols->getHashMap()->end());
+     if (bFound)
+     {
+         ScRawToken aToken;
+-        aToken.SetOpCode( (*iLook).second );
++        OpCode eOp = iLook->second;
++        if (bInArray)
++        {
++            if (rName.Equals(mxSymbols->getSymbol(ocArrayColSep)))
++                eOp = ocArrayColSep;
++            else if (rName.Equals(mxSymbols->getSymbol(ocArrayRowSep)))
++                eOp = ocArrayRowSep;
++        }
++        aToken.SetOpCode(eOp);
+         pRawToken = aToken.Clone();
+     }
+     else
+@@ -3220,9 +3235,10 @@ void ScCompiler::AutoCorrectParsedSymbol()
+     }
+ }
+ 
+-BOOL ScCompiler::NextNewToken( bool bAllowBooleans )
++BOOL ScCompiler::NextNewToken( bool bInArray )
+ {
+-    xub_StrLen nSpaces = NextSymbol();
++    bool bAllowBooleans = bInArray;
++    xub_StrLen nSpaces = NextSymbol(bInArray);
+ 
+ #if 0
+     fprintf( stderr, "NextNewToken '%s' (spaces = %d)\n",
+@@ -3303,7 +3319,7 @@ BOOL ScCompiler::NextNewToken( bool bAllowBooleans )
+             // IsReference().
+             // IsBoolean before isValue to catch inline bools without the kludge
+             //    for inline arrays.
+-            if ( !(bMayBeFuncName && IsOpCode( aUpper ))
++            if ( !(bMayBeFuncName && IsOpCode( aUpper, bInArray ))
+               && !IsReference(aOrg)
+               && !(bAllowBooleans && IsBoolean( aUpper ))
+               && !IsValue( aUpper )
