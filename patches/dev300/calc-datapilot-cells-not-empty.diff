@@ -1,0 +1,177 @@
+diff --git sc/source/ui/app/uiitems.cxx sc/source/ui/app/uiitems.cxx
+index d7453a2..39c3744 100644
+--- sc/source/ui/app/uiitems.cxx
++++ sc/source/ui/app/uiitems.cxx
+@@ -744,3 +744,37 @@ SfxPoolItem* __EXPORT ScCondFrmtItem::Clone( SfxItemPool * ) const
+ {
+ 	return new ScCondFrmtItem( *this );
+ }
++
++//------------------------------------------------------------------------
++
++ScBoolItem::ScBoolItem(USHORT nWhich, bool bValue) :
++    SfxPoolItem(nWhich), mbValue(bValue)
++{
++}
++
++ScBoolItem::ScBoolItem(const ScBoolItem& r) :
++    SfxPoolItem(r), mbValue(r.mbValue)
++{
++}
++
++ScBoolItem::~ScBoolItem()
++{
++}
++
++int ScBoolItem::operator ==(const SfxPoolItem& rItem) const
++{
++    DBG_ASSERT( SfxPoolItem::operator==( rItem ), "unequal Which or Type" );
++    const ScBoolItem& rBItem = static_cast<const ScBoolItem&>(rItem);
++    return mbValue == rBItem.mbValue;
++}
++
++bool ScBoolItem::GetBoolValue() const
++{
++    return mbValue;
++}
++
++SfxPoolItem* ScBoolItem::Clone(SfxItemPool*) const
++{
++    return new ScBoolItem(*this);
++}
++
+diff --git sc/source/ui/dbgui/pvlaydlg.cxx sc/source/ui/dbgui/pvlaydlg.cxx
+index 0ba15ab..202d33f 100644
+--- sc/source/ui/dbgui/pvlaydlg.cxx
++++ sc/source/ui/dbgui/pvlaydlg.cxx
+@@ -1562,10 +1562,25 @@ IMPL_LINK( ScDPLayoutDlg, OkHdl, OKButton *, EMPTYARG )
+ 			//	#95513# don't hide the dialog before executing the slot, instead it is used as
+ 			//	parent for message boxes in ScTabViewShell::GetDialogParent
+ 
+-			GetBindings().GetDispatcher()->Execute( SID_PIVOT_TABLE,
++			const SfxPoolItem* pRet = GetBindings().GetDispatcher()->Execute( SID_PIVOT_TABLE,
+ 									  SFX_CALLMODE_SLOT | SFX_CALLMODE_RECORD,
+ 									  &aOutItem, 0L, 0L );
+-			Close();
++            bool bSuccess = true;
++            if (pRet)
++            {
++                const ScBoolItem* pItem = dynamic_cast<const ScBoolItem*>(pRet);
++                if (pItem)
++                    bSuccess = pItem->GetBoolValue();
++            }
++            if (bSuccess)
++                // Table successfully inserted.
++                Close();
++            else
++            {    
++                // Table insertion failed.  Keep the dialog open.
++                bRefInputMode = true;
++                SetDispatcherLock(true);
++            }
+ 		}
+ 		else
+ 		{
+diff --git sc/source/ui/inc/dbfunc.hxx sc/source/ui/inc/dbfunc.hxx
+index c05d8d3..44d497b 100644
+--- sc/source/ui/inc/dbfunc.hxx
++++ sc/source/ui/inc/dbfunc.hxx
+@@ -86,8 +86,8 @@ public:
+ 
+ 	void			Consolidate( const ScConsolidateParam& rParam, BOOL bRecord = TRUE );
+ 
+-	void			MakePivotTable( const ScDPSaveData& rData, const ScRange& rDest, BOOL bNewTable,
+-									const ScDPObject& rSource, BOOL bApi = FALSE );
++    bool            MakePivotTable( const ScDPSaveData& rData, const ScRange& rDest, BOOL bNewTable,
++                                    const ScDPObject& rSource, BOOL bApi = FALSE );
+ 	void			DeletePivotTable();
+ 	void			RecalcPivotTable();
+         void                    AutoFormatPivotTable(USHORT nIndex);
+diff --git sc/source/ui/inc/uiitems.hxx sc/source/ui/inc/uiitems.hxx
+index 274ba00..ca19927 100644
+--- sc/source/ui/inc/uiitems.hxx
++++ sc/source/ui/inc/uiitems.hxx
+@@ -371,6 +371,23 @@ private:
+ 	ScConditionalFormat	theCondFrmtData;
+ };
+ 
++class ScBoolItem : public SfxPoolItem
++{
++public:
++    explicit ScBoolItem(USHORT nWhich, bool bValue);
++    explicit ScBoolItem(const ScBoolItem& r);
++    virtual ~ScBoolItem();
++    virtual int operator==(const SfxPoolItem& rItem) const;
++    virtual SfxPoolItem* Clone(SfxItemPool* pPool = 0) const;
++
++    bool GetBoolValue() const;
++
++private:
++    ScBoolItem();
++
++    bool mbValue;
++};
++
+ 
+ 
+ #endif
+diff --git sc/source/ui/view/cellsh2.cxx sc/source/ui/view/cellsh2.cxx
+index 7b82845..8974b0c 100644
+--- sc/source/ui/view/cellsh2.cxx
++++ sc/source/ui/view/cellsh2.cxx
+@@ -643,11 +643,10 @@ void ScCellShell::ExecuteDB( SfxRequest& rReq )
+ 					if ( pDPObject )
+ 					{
+ 						const ScPivotItem* pPItem = (const ScPivotItem*)pItem;
+-						pTabViewShell->MakePivotTable(
+-											pPItem->GetData(),
+-											pPItem->GetDestRange(),
+-											pPItem->IsNewSheet(),
+-											*pDPObject );
++                        bool bSuccess = pTabViewShell->MakePivotTable(
++                            pPItem->GetData(), pPItem->GetDestRange(), pPItem->IsNewSheet(), *pDPObject );
++                        ScBoolItem aRet(0, bSuccess);
++                        rReq.SetReturnValue(aRet);
+ 					}
+ 					rReq.Done();
+ 				}
+diff --git sc/source/ui/view/dbfunc3.cxx sc/source/ui/view/dbfunc3.cxx
+index 05a7fbe..514d512 100644
+--- sc/source/ui/view/dbfunc3.cxx
++++ sc/source/ui/view/dbfunc3.cxx
+@@ -579,7 +579,7 @@ String lcl_MakePivotTabName( const String& rPrefix, SCTAB nNumber )
+ 	return aName;
+ }
+ 
+-void ScDBFunc::MakePivotTable( const ScDPSaveData& rData, const ScRange& rDest, BOOL bNewTable,
++bool ScDBFunc::MakePivotTable( const ScDPSaveData& rData, const ScRange& rDest, BOOL bNewTable,
+ 								const ScDPObject& rSource, BOOL bApi )
+ {
+ 	//	#70096# error message if no fields are set
+@@ -588,7 +588,7 @@ void ScDBFunc::MakePivotTable( const ScDPSaveData& rData, const ScRange& rDest,
+ 	if ( rData.IsEmpty() && !bApi )
+ 	{
+ 		ErrorMessage(STR_PIVOT_NODATA);
+-		return;
++		return false;
+ 	}
+ 
+ 	ScDocShell* pDocSh	= GetViewData()->GetDocShell();
+@@ -652,7 +652,7 @@ void ScDBFunc::MakePivotTable( const ScDPSaveData& rData, const ScRange& rDest,
+ 	BOOL bAllowMove = ( pDPObj != NULL );	// allow re-positioning when editing existing table
+ 
+ 	ScDBDocFunc aFunc( *pDocSh );
+-	aFunc.DataPilotUpdate( pDPObj, &aObj, TRUE, FALSE, bAllowMove );
++	bool bSuccess = aFunc.DataPilotUpdate( pDPObj, &aObj, TRUE, FALSE, bAllowMove );
+ 
+ 	CursorPosChanged();		// shells may be switched
+ 
+@@ -661,6 +661,8 @@ void ScDBFunc::MakePivotTable( const ScDPSaveData& rData, const ScRange& rDest,
+ 		pDocSh->PostPaintExtras();
+ 		SFX_APP()->Broadcast( SfxSimpleHint( SC_HINT_TABLES_CHANGED ) );
+ 	}
++
++	return bSuccess;
+ }
+ 
+ void ScDBFunc::DeletePivotTable()
