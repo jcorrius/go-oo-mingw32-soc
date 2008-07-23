@@ -21,7 +21,7 @@ BuildRequires:  ooo3_bootstrap ooo3_libs_extern-devel
 License:        Artistic License; BSD 3-Clause; GPL v2 or later; LaTeX Public License (LPPL); LGPL v2.1 or later; MOZILLA PUBLIC LICENSE (MPL/NPL); X11/MIT
 Group:          Productivity/Office/Suite
 Version:        3
-Release:        6
+Release:        7
 AutoReqProv:    on
 Summary:        A Free Office Suite (Framework)
 Url:            http://www.openoffice.org/
@@ -60,6 +60,10 @@ export OO_TOOLSDIR=$OO_INSTDIR/ooo-build/bin
 export DESTDIR=$RPM_BUILD_ROOT
 
 $OO_TOOLSDIR/piece/install-generic %piece %ooo_build_tag %distro
+# prune redundant files the scp2 likes to make for us
+rm -Rf \
+    "$DESTDIR/$OO_INSTDIR/basis-link" \
+    "$DESTDIR/$OO_INSTDIR/ure"
 
 %clean
 %post
@@ -67,9 +71,12 @@ $OO_TOOLSDIR/piece/install-generic %piece %ooo_build_tag %distro
 
 %files
 %defattr(-,root,root)
-# FIXME - should have the actual files in it ! ;-)
-# except we have ~none here - just a devel package (?)
-# is there anything we absolutely need here ?
+%dir %ooo_prefix/%ooo_home/basis3.0
+%dir %ooo_prefix/%ooo_home/program
+%dir %ooo_prefix/%ooo_home/share
+%ooo_prefix/%ooo_home/basis3.0/*
+%ooo_prefix/%ooo_home/program/*
+%ooo_prefix/%ooo_home/share/*
 
 %files devel
 %defattr(-,root,root)
