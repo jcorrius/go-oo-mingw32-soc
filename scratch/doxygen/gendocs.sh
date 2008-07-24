@@ -14,7 +14,7 @@
 shopt -s expand_aliases
 
 # Title of the documentation
-DOXYGEN_PROJECTNAME="OOo Source Documentation"
+DOXYGEN_PROJECT_PREFIX="OOo"
 
 # branch to draw from
 MASTER_BRANCH=DEV300
@@ -41,14 +41,14 @@ for DIR in *; do if [ -d $DIR ]; then pushd $DIR; deliver; popd; fi; done
 
 # get list of modules in build order
 #INPUT_PROJECTS=`build --all --show | sed -n -e '/Building module/ s/Building module // p'`
-INPUT_PROJECTS="basegfx vcl canvas cppcanvas svtools goodies xmloff slideshow sfx2 svx chart2 sd sc sw"
+INPUT_PROJECTS="basegfx vcl canvas cppcanvas oox svtools goodies xmloff slideshow sfx2 svx chart2 dbaccess sd sc sw"
 
 # output directory for generated documentation
 BASE_OUTPUT="/tmp/docs"
 
 # paths for binary and configuration file
 BASE_PATH=`pwd`
-DOXYGEN_CFG="$HOME/doxygen.cfg"
+DOXYGEN_CFG="$HOME/bin/doxygen.cfg"
 
 # strip -I. and bin -I prefix. exlude system headers
 DOXYGEN_INCLUDE_PATH=`echo $SOLARINC | sed -e ' s/-I\.//'g | sed -e ' s/ -I/ /'g | sed -e ' s|/usr/[^ ]*| |g'`
@@ -78,6 +78,7 @@ do
 
   DOXYGEN_OUTPUT="$BASE_OUTPUT/$PROJECT"  
   DOXYGEN_OUR_TAGFILE="$DOXYGEN_OUTPUT/$PROJECT.tags"
+  DOXYGEN_PROJECTNAME="$DOXYGEN_PROJECT_PREFIX Module $PROJECT"
 
   # export variables referenced in doxygen config file
   export DOXYGEN_INPUT
@@ -103,6 +104,35 @@ do
   # setup referenced tagfiles for next round
   DOXYGEN_REF_TAGFILES="$DOXYGEN_REF_TAGFILES $DOXYGEN_OUR_TAGFILE=$BASE_URL/$PROJECT/html"
 done
+
+# generate entry page
+cat - > $BASE_OUTPUT/index.html <<EOF
+<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML//EN">
+<html>
+    <head>
+        <title>OOo Source Code Documentation (fragmentary)</title>
+    </head>
+    <body>
+        <h1>OOo Source Code Documentation (fragmentary)</h1>
+        <ul>
+EOF
+
+for PROJECT in $INPUT_PROJECTS;
+do
+  echo "<li><a href=\"$PROJECT/html/index.html\">$PROJECT</a></li>" >> $BASE_OUTPUT/index.html
+done
+
+cat - >> $BASE_OUTPUT/index.html <<EOF
+        </ul>
+        <p>Last updated: 
+EOF
+date >> $BASE_OUTPUT/index.html
+
+cat - >> $BASE_OUTPUT/index.html <<EOF
+        </p>
+    </body>
+</html>
+EOF
 
 ## done
 
