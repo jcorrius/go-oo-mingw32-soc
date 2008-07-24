@@ -105,7 +105,7 @@ index 2d816d1..332dd31 100644
      BOOL IsColRowName( const String& );
      BOOL IsBoolean( const String& );
 diff --git sc/inc/document.hxx sc/inc/document.hxx
-index c78dfce..7d8cb1e 100644
+index 6d361ae..b5fd39d 100644
 --- sc/inc/document.hxx
 +++ sc/inc/document.hxx
 @@ -93,6 +93,7 @@ class ScDocOptions;
@@ -124,7 +124,7 @@ index c78dfce..7d8cb1e 100644
  	String              aDocName;                       // opt: Dokumentname
  	String              aDocCodeName;                       // opt: Dokumentname
  	ScRangePairListRef	xColNameRanges;
-@@ -630,6 +632,8 @@ SC_DLLPUBLIC	ScDBCollection*	GetDBCollection() const;
+@@ -631,6 +633,8 @@ SC_DLLPUBLIC	ScDBCollection*	GetDBCollection() const;
  									const String& aFileName,
  									const String& aTabName );
  
@@ -135,10 +135,10 @@ index c78dfce..7d8cb1e 100644
          @return  TRUE = Sheet created, rnTab contains valid sheet index. */
 diff --git sc/inc/externalrefmgr.hxx sc/inc/externalrefmgr.hxx
 new file mode 100644
-index 0000000..2af580a
+index 0000000..c034a5b
 --- /dev/null
 +++ sc/inc/externalrefmgr.hxx
-@@ -0,0 +1,217 @@
+@@ -0,0 +1,224 @@
 +/*************************************************************************
 + *
 + * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
@@ -290,6 +290,13 @@ index 0000000..2af580a
 +     */
 +    ScTokenArray* getRangeNameTokens(sal_uInt16 nFileId, const String& rName, const ScAddress* pCurPos = NULL);
 +
++    /** 
++     * Takes a flat file name, and convert it to an absolute URL path.  An 
++     * absolute URL path begines with 'file:///. 
++     *
++     * @param rFile file name to convert 
++     */
++    void convertToAbsName(String& rFile) const;
 +    sal_uInt16 getExternalFileId(const String& rFile);
 +    const String* getExternalFileName(sal_uInt16 nFileId) const;
 +    const String* getExternalTableName(sal_uInt16 nFileId, SCTAB nTabId);
@@ -456,7 +463,7 @@ index 1d903ce..f7c4d6b 100644
      /** Xcl import may play dirty tricks with OpCode!=ocExternal.
          Others don't use! */
 diff --git sc/source/core/data/documen2.cxx sc/source/core/data/documen2.cxx
-index cbf19d4..d35011c 100644
+index 85ad0e5..f04061f 100644
 --- sc/source/core/data/documen2.cxx
 +++ sc/source/core/data/documen2.cxx
 @@ -93,6 +93,7 @@
@@ -475,7 +482,7 @@ index cbf19d4..d35011c 100644
  		pViewOptions( NULL ),
  		pDocOptions( NULL ),
  		pExtDocOptions( NULL ),
-@@ -381,6 +383,11 @@ ScDocument::~ScDocument()
+@@ -382,6 +384,11 @@ ScDocument::~ScDocument()
  			pLinkManager->Remove( 0, pLinkManager->GetLinks().Count() );
  	}
  
@@ -526,16 +533,41 @@ index 541e2e4..20dae1e 100644
          const String& rFilterName, const String& rFilterOpt, const String& rTabName )
  {
 diff --git sc/source/core/tool/compiler.cxx sc/source/core/tool/compiler.cxx
-index 00c93e0..eba7995 100644
+index f88d5d3..c763f91 100644
 --- sc/source/core/tool/compiler.cxx
 +++ sc/source/core/tool/compiler.cxx
-@@ -74,9 +74,13 @@
+@@ -74,9 +74,38 @@
  #include "errorcodes.hxx"
  #include "parclass.hxx"
  #include "autonamecache.hxx"
 +#include "externalrefmgr.hxx"
 +
 +#include <stdio.h>
++
++
++namespace {
++
++#include <string>
++
++class StackPrinter
++{
++public:
++    explicit StackPrinter(const char* msg) :
++        msMsg(msg)
++    {
++        fprintf(stdout, "%s: --begin\n", msMsg.c_str());
++    }
++
++    ~StackPrinter()
++    {
++        fprintf(stdout, "%s: --end\n", msMsg.c_str());
++    }
++
++private:
++    ::std::string msMsg;
++};
++
++}
  
  using namespace ::com::sun::star;
  using rtl::OUString;
@@ -543,89 +575,225 @@ index 00c93e0..eba7995 100644
  
  #if OSL_DEBUG_LEVEL > 1
  // For some unknown reason the identical dbg_dump utilities in
-@@ -1368,6 +1372,64 @@ struct ConventionOOO_A1 : public Convention_A1
+@@ -1165,6 +1194,174 @@ static bool lcl_isValidQuotedText( const String& rFormula, xub_StrLen nSrcPos, P
+     return true;
+ }
+ 
++static bool lcl_parseExternalName( const String& rSymbol, String& rFile, String& rName, const sal_Unicode cSep )
++{
++    StackPrinter aStack("lcl_parseExternalName");
++    fprintf(stdout, "lcl_parseExternalName:   symbol = '%s'\n", rtl::OUStringToOString(rSymbol, RTL_TEXTENCODING_UTF8).getStr());
++
++    const sal_Unicode* p = rSymbol.GetBuffer();
++    xub_StrLen nLen = rSymbol.Len();
++    sal_Unicode cPrev = 0;
++    String aTmpFile, aTmpName;
++    bool bInName = false;
++    for (xub_StrLen i = 0; i < nLen; ++i, ++p)
++    {
++        sal_Unicode c = *p;
++        if (i == 0)
++        {
++            if (c == '.' || c == cSep)
++            {
++                fprintf(stdout, "lcl_parseExternalName:   not allowed as first character '%s'\n", 
++                        rtl::OUStringToOString(String(c), RTL_TEXTENCODING_UTF8).getStr());    
++                return false;
++            }
++
++            if (c == '\'')
++            {
++                // Move to the next chart and loop until the second single
++                // quote.
++                cPrev = c;
++                ++i; ++p;
++                for (xub_StrLen j = i; j < nLen; ++j, ++p)
++                {
++                    c = *p;
++                    if (c == '\'')
++                    {
++                        if (j == i)
++                        {    
++                            // empty quote e.g. (=''!Name)
++                            fprintf(stdout, "lcl_parseExternalName:   empty quote\n");
++                            return false;
++                        }
++
++                        if (cPrev == '\'')
++                        {
++                            // two consecutive quotes equals a single
++                            // quote in the file name.
++                            aTmpFile.Append(c);
++                            cPrev = 'a';
++                        }
++                        else
++                            cPrev = c;
++
++                        continue;
++                    }
++
++                    if (cPrev == '\'' && j != i)
++                    {
++                        // this is not a quote but the previous one
++                        // is.  This ends the parsing of the quoted
++                        // segment.
++
++                        i = j;
++                        bInName = true;
++                        break;
++                    }
++                    aTmpFile.Append(c);
++                    cPrev = c;
++                }
++
++                if (!bInName)
++                {    
++                    // premature ending of the quoted segment.
++                    fprintf(stdout, "lcl_parseExternalName:   premature ending of the quoted segment\n");
++                    return false;
++                }
++
++                if (c != cSep)
++                {    
++                    // only the separator is allowed after the closing quote.
++                    fprintf(stdout, "lcl_parseExternalName:   only the '%s' is allowed after the closing quote '%s'\n",
++                            rtl::OUStringToOString(String(cSep), RTL_TEXTENCODING_UTF8).getStr(),
++                            rtl::OUStringToOString(String(c), RTL_TEXTENCODING_UTF8).getStr());
++                    return false;
++                }
++
++                cPrev = c;
++                continue;
++            }
++        }
++
++        if (bInName)
++        {
++            if (c == cSep)
++            {
++                // A second separator ?  Not a valid external name.
++                fprintf(stdout, "lcl_parseExternalName:   second %s encountered\n",
++                        rtl::OUStringToOString(String(cSep), RTL_TEXTENCODING_UTF8).getStr());
++                return false;
++            }
++            aTmpName.Append(c);
++        }
++        else
++        {
++            if (c == cSep)
++            {
++                bInName = true;
++            }
++            else
++            {
++                do
++                {
++                    if (CharClass::isAsciiAlphaNumeric(c))
++                        // allowed.
++                        break;
++
++                    if (c > 128)
++                        // non-ASCII character is allowed.
++                        break;
++
++                    bool bValid = false;
++                    switch (c)
++                    {
++                        case '_':
++                        case '-':
++                        case '.':
++                            // these special characters are allowed.
++                            bValid = true;
++                            break;
++                    }
++                    if (bValid)
++                        break;
++
++                    fprintf(stdout, "lcl_parseExternalName:   invalid character '%s'\n",
++                            rtl::OUStringToOString(String(c), RTL_TEXTENCODING_UTF8).getStr());
++                    return false;
++                }
++                while (false);
++                aTmpFile.Append(c);
++            }
++        }
++        cPrev = c;
++    }
++
++    if (!bInName)
++    {
++        // No name found - most likely the symbol has no '!'s.
++        fprintf(stdout, "lcl_parseExternalName:   not name found\n");
++        return false;
++    }
++
++    fprintf(stdout, "lcl_parseExternalName:   file = '%s'; name = '%s'\n",
++            rtl::OUStringToOString(aTmpFile, RTL_TEXTENCODING_UTF8).getStr(),
++            rtl::OUStringToOString(aTmpName, RTL_TEXTENCODING_UTF8).getStr());
++    rFile = aTmpFile;
++    rName = aTmpName;
++    return true;
++}
++
++static String lcl_makeExternalNameStr( const String& rFile, const String& rName, const sal_Unicode cSep )
++{
++    String aStr, aFile = rFile;
++    aFile.SearchAndReplaceAllAscii("'", String::CreateFromAscii("''"));
++    aStr.Append(sal_Unicode('\''));
++    aStr.Append(aFile);
++    aStr.Append(sal_Unicode('\''));
++    aStr.Append(cSep);
++    aStr.Append(rName);
++    return aStr;
++}
++
+ struct Convention_A1 : public ScCompiler::Convention
+ {
+     Convention_A1( ScAddress::Convention eConv ) : ScCompiler::Convention( eConv ) { }
+@@ -1185,7 +1382,7 @@ struct Convention_A1 : public ScCompiler::Convention
+             KParseTokens::ASC_UNDERSCORE | KParseTokens::ASC_DOLLAR;
+         static const sal_Int32 nContFlags = nStartFlags | KParseTokens::ASC_DOT;
+         // '?' allowed in range names because of Xcl :-/
+-        static const String aAddAllowed( '?' );
++        static const String aAddAllowed(String::CreateFromAscii("?#"));
+         return pCharClass->parseAnyToken( rFormula,
+                 nSrcPos, nStartFlags, aAddAllowed, nContFlags, aAddAllowed );
+     }
+@@ -1368,6 +1565,16 @@ struct ConventionOOO_A1 : public Convention_A1
  
          return sal_Unicode(0);
      }
 +
 +    virtual bool parseExternalName( const String& rSymbol, String& rFile, String& rName ) const
 +    {
-+        // in OOO A1, an external name syntax is as follows:
-+        // 
-+        //   'file:///path/to/source'#ExternalName
-+
-+        String aTmpFile, aTmpName;
-+        xub_StrLen nLen = rSymbol.Len();
-+        const sal_Unicode* p = rSymbol.GetBuffer();
-+        bool bInFilePath = false;
-+        bool bInName = false;
-+        sal_Unicode cPrev = 0;
-+        for (xub_StrLen i = 0; i < nLen; ++i, ++p)
-+        {
-+            const sal_Unicode c = *p;
-+            if (c == '\'')
-+            {
-+                if (!bInFilePath && i != 0)
-+                    // The first character must be a single quote.
-+                    return false;
-+
-+                bInFilePath = !bInFilePath;
-+            }
-+            else if (bInFilePath)
-+                aTmpFile.Append(c);
-+            else if (bInName)
-+                aTmpName.Append(c);
-+            else if (c == '#')
-+            {
-+                if (cPrev != '\'')
-+                    // '#' must immediately follow the closing single quote.
-+                    return false;
-+
-+                bInName = true;
-+            }
-+
-+            cPrev = c;
-+        }
-+
-+        if (aTmpFile.Len() == 0 || aTmpName.Len() == 0)
-+            return false;
-+
-+        rFile = aTmpFile;
-+        rName = aTmpName;
-+
-+        return true;
++        return lcl_parseExternalName(rSymbol, rFile, rName, sal_Unicode('#'));
 +    }
 +
 +    virtual String makeExternalNameStr( const String& rFile, const String& rName ) const
 +    {
-+        String aStr;
-+        aStr.Append(sal_Unicode('\''));
-+        aStr.Append(rFile);
-+        aStr.AppendAscii("\'#");
-+        aStr.Append(rName);
-+        return aStr;
++        return lcl_makeExternalNameStr(rFile, rName, sal_Unicode('#'));
 +    }
  };
  
  
-@@ -1489,6 +1551,16 @@ struct ConventionXL
+@@ -1489,6 +1696,16 @@ struct ConventionXL
          }
          return sal_Unicode(0);
      }
 +
 +    static bool parseExternalName( const String& rSymbol, String& rFile, String& rName )
 +    {
-+        return false;
++        return lcl_parseExternalName(rSymbol, rFile, rName, sal_Unicode('!'));
 +    }
 +
 +    static String makeExternalNameStr( const String& rFile, const String& rName )
 +    {
-+        return String();
++        return lcl_makeExternalNameStr(rFile, rName, sal_Unicode('!'));
 +    }
  };
  
  struct ConventionXL_A1 : public Convention_A1, public ConventionXL
-@@ -1570,6 +1642,16 @@ struct ConventionXL_A1 : public Convention_A1, public ConventionXL
+@@ -1587,6 +1804,16 @@ struct ConventionXL_A1 : public Convention_A1, public ConventionXL
      {
          return ConventionXL::getSpecialSymbol(eSymType);
      }
@@ -642,7 +810,7 @@ index 00c93e0..eba7995 100644
  };
  
  static const ConventionXL_A1 ConvXL_A1;
-@@ -1697,6 +1779,16 @@ struct ConventionXL_R1C1 : public ScCompiler::Convention, public ConventionXL
+@@ -1714,6 +1941,16 @@ struct ConventionXL_R1C1 : public ScCompiler::Convention, public ConventionXL
      {
          return ConventionXL::getSpecialSymbol(eSymType);
      }
@@ -659,7 +827,63 @@ index 00c93e0..eba7995 100644
  };
  
  static const ConventionXL_R1C1 ConvXL_R1C1;
-@@ -2652,6 +2744,28 @@ BOOL ScCompiler::IsNamedRange( const String& rUpperName )
+@@ -1888,6 +2125,7 @@ sal_Unicode* lcl_UnicodeStrNCpy( sal_Unicode* pDst, const sal_Unicode* pSrc, xub
+ 
+ xub_StrLen ScCompiler::NextSymbol(bool bInArray)
+ {
++    StackPrinter aStack("ScCompiler:NextSymbol");
+     cSymbol[MAXSTRLEN-1] = 0;       // Stopper
+     sal_Unicode* pSym = cSymbol;
+     const sal_Unicode* const pStart = aFormula.GetBuffer();
+@@ -1912,6 +2150,11 @@ xub_StrLen ScCompiler::NextSymbol(bool bInArray)
+     bool bAutoIntersection = false;
+     int nRefInSheetName = 0;
+     mnPredetectedReference = 0;
++#if 0 
++    // disable non-i18n parsing
++    if (c != 0)
++        bi18n = true;
++#else
+     // try to parse simple tokens before calling i18n parser
+     while ((c != 0) && (eState != ssStop) )
+     {
+@@ -2169,7 +2412,7 @@ xub_StrLen ScCompiler::NextSymbol(bool bInArray)
+                     static const int kQuote = kInc * 2;
+                     static const int kPast = kInc * 3;
+                     bool bAddToSymbol = true;
+-                    if ('.' == c && nRefInSheetName == 0)
++                    if (cSheetSep == c && nRefInSheetName == 0)
+                     {
+                         // eat it, no sheet name
+                         bAddToSymbol = false;
+@@ -2184,7 +2427,7 @@ xub_StrLen ScCompiler::NextSymbol(bool bInArray)
+                     }
+                     else if (nRefInSheetName < kPast)
+                     {
+-                        if ('$' == c && nRefInSheetName < kDollar)
++                        if (cSheetPrefix == c && nRefInSheetName < kDollar)
+                             nRefInSheetName += kDollar;
+                         else if ('\'' == c)
+                         {
+@@ -2235,6 +2478,7 @@ xub_StrLen ScCompiler::NextSymbol(bool bInArray)
+         cLast = c;
+         c = *pSrc;
+     }
++#endif
+     if ( bi18n )
+     {
+         nSrcPos = sal::static_int_cast<xub_StrLen>( nSrcPos + nSpaces );
+@@ -2287,6 +2531,9 @@ xub_StrLen ScCompiler::NextSymbol(bool bInArray)
+         aCorrectedSymbol = cSymbol;
+     if (bAutoIntersection && nSpaces > 1)
+         --nSpaces;  // replace '!!' with only one space
++
++    fprintf(stdout, "ScCompiler::NextSymbol:   symbol = '%s'\n", 
++            rtl::OUStringToOString(aCorrectedSymbol, RTL_TEXTENCODING_UTF8).getStr());
+     return nSpaces;
+ }
+ 
+@@ -2669,6 +2916,30 @@ BOOL ScCompiler::IsNamedRange( const String& rUpperName )
          return FALSE;
  }
  
@@ -676,7 +900,9 @@ index 00c93e0..eba7995 100644
 +    if (aFile.Len() > MAXSTRLEN || aName.Len() > MAXSTRLEN)
 +        return false;
 +
-+    sal_uInt16 nFileId = pDoc->GetExternalRefManager()->getExternalFileId(aFile);
++    ScExternalRefManager* pRefMgr = pDoc->GetExternalRefManager();
++    pRefMgr->convertToAbsName(aFile);
++    sal_uInt16 nFileId = pRefMgr->getExternalFileId(aFile);
 +    fprintf(stdout, "ScCompiler::IsExternalNamedRange:   file name = '%s'; file id = %d\n",
 +            rtl::OUStringToOString(aFile, RTL_TEXTENCODING_UTF8).getStr(), nFileId);
 +
@@ -688,7 +914,7 @@ index 00c93e0..eba7995 100644
  BOOL ScCompiler::IsDBRange( const String& rName )
  {
      USHORT n;
-@@ -3250,6 +3364,7 @@ BOOL ScCompiler::NextNewToken( bool bInArray )
+@@ -3267,6 +3538,7 @@ BOOL ScCompiler::NextNewToken( bool bInArray )
                && !(bAllowBooleans && IsBoolean( aUpper ))
                && !IsValue( aUpper )
                && !IsNamedRange( aUpper )
@@ -696,7 +922,7 @@ index 00c93e0..eba7995 100644
                && !IsDBRange( aUpper )
                && !IsColRowName( aUpper )
                && !(bMayBeFuncName && IsMacro( aUpper ))
-@@ -3576,6 +3691,69 @@ BOOL ScCompiler::GetToken()
+@@ -3593,6 +3865,69 @@ BOOL ScCompiler::GetToken()
      }
      if( pToken->GetOpCode() == ocSubTotal )
          glSubTotal = TRUE;
@@ -766,7 +992,7 @@ index 00c93e0..eba7995 100644
      else if( pToken->GetOpCode() == ocName )
      {
          ScRangeData* pRangeData = pDoc->GetRangeName()->FindIndex( pToken->GetIndex() );
-@@ -5526,6 +5704,15 @@ ScToken* ScCompiler::CreateStringFromToken( rtl::OUStringBuffer& rBuffer, ScToke
+@@ -5543,6 +5878,15 @@ ScToken* ScCompiler::CreateStringFromToken( rtl::OUStringBuffer& rBuffer, ScToke
      BOOL bSpaces = FALSE;
      ScToken* t = pTokenP;
      OpCode eOp = t->GetOpCode();
@@ -2078,10 +2304,10 @@ index 0d547fe..3c2d0d9 100644
          For OLE object links: Decodes to class name and document URL.
 diff --git sc/source/ui/docshell/externalrefmgr.cxx sc/source/ui/docshell/externalrefmgr.cxx
 new file mode 100644
-index 0000000..c7c0bae
+index 0000000..1e6da7c
 --- /dev/null
 +++ sc/source/ui/docshell/externalrefmgr.cxx
-@@ -0,0 +1,789 @@
+@@ -0,0 +1,795 @@
 +/*************************************************************************
 + *
 + * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
@@ -2742,6 +2968,12 @@ index 0000000..c7c0bae
 +
 +    fprintf(stdout, "ScExternalRefManager::compileTokensByCell: --end (cell re-compiled)\n");
 +    return true;
++}
++
++void ScExternalRefManager::convertToAbsName(String& rFile) const
++{
++    ScDocShell* pDocShell = ScDocShell::GetViewData()->GetDocShell();
++    rFile = ScGlobal::GetAbsDocName(rFile, pDocShell);
 +}
 +
 +sal_uInt16 ScExternalRefManager::getExternalFileId(const String& rFile)
