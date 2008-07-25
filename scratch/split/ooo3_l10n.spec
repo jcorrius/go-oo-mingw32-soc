@@ -60,6 +60,10 @@ export OO_TOOLSDIR=$OO_INSTDIR/ooo-build/bin
 export DESTDIR=$RPM_BUILD_ROOT
 
 $OO_TOOLSDIR/piece/install-generic %piece %ooo_build_tag %distro
+# prune redundant files the scp2 likes to make for us
+rm -Rf \
+    "$DESTDIR/$OO_INSTDIR/basis-link" \
+    "$DESTDIR/$OO_INSTDIR/ure"
 
 %clean
 %post
@@ -67,9 +71,19 @@ $OO_TOOLSDIR/piece/install-generic %piece %ooo_build_tag %distro
 
 %files
 %defattr(-,root,root)
-# FIXME - should have the actual files in it ! ;-)
-# except we have ~none here - just a devel package (?)
-# is there anything we absolutely need here ?
+%dir %ooo_prefix/%ooo_home/basis3.0
+%dir %ooo_prefix/%ooo_home/LICENSE
+%dir %ooo_prefix/%ooo_home/LICENSE.html
+%dir %ooo_prefix/%ooo_home/README
+%dir %ooo_prefix/%ooo_home/README.html
+%dir %ooo_prefix/%ooo_home/readmes
+%dir %ooo_prefix/%ooo_home/licenses
+%dir %ooo_prefix/%ooo_home/share
+%dir %ooo_prefix/%ooo_home/THIRDPARTYLICENSEREADME.html
+%ooo_prefix/%ooo_home/basis3.0/*
+%ooo_prefix/%ooo_home/readmes/*
+%ooo_prefix/%ooo_home/licenses/*
+%ooo_prefix/%ooo_home/share/*
 
 %files devel
 %defattr(-,root,root)

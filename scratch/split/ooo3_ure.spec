@@ -68,14 +68,9 @@ $OO_TOOLSDIR/piece/install-generic %piece %ooo_build_tag %distro
 %files
 %defattr(-,root,root)
 %dir %ooo_prefix/%ooo_home/basis3.0
-%dir %ooo_prefix/%ooo_home/program
-%dir %ooo_prefix/%ooo_home/share
 %dir %ooo_prefix/%ooo_home/ure
 %ooo_prefix/%ooo_home/basis3.0/*
-%ooo_prefix/%ooo_home/program/*
-%ooo_prefix/%ooo_home/share/*
 %ooo_prefix/%ooo_home/ure/*
-%ooo_prefix/%ooo_home/basis-link
 
 %files devel
 %defattr(-,root,root)
