@@ -7,6 +7,8 @@ script_files = \
 	build-ooo \
 	build-tools \
 	cvs-tags-normalize \
+	extract-gsi \
+	extract-new-strings \
 	font-munge \
 	fix-deps \
 	generate-bash-completion \
