@@ -1,0 +1,1507 @@
+diff --git basctl/source/basicide/scriptdocument.cxx basctl/source/basicide/scriptdocument.cxx
+index 645c396..7e48d82 100644
+--- basctl/source/basicide/scriptdocument.cxx
++++ basctl/source/basicide/scriptdocument.cxx
+@@ -749,8 +749,16 @@ namespace basctl
+             Reference< XNameContainer > xLib( getOrCreateLibrary( E_SCRIPTS, _rLibName ), UNO_QUERY_THROW );
+ 	        if ( !xLib->hasByName( _rModName ) )
+                 return false;
+-
+-            xLib->replaceByName( _rModName, makeAny( _rModuleCode ) );
++            ModuleInfo mInfo;
++            Any aMod;
++            if ( xLib->getByName( _rModName ) >>= mInfo )
++            {
++                mInfo.ModuleSource = _rModuleCode;
++                aMod <<= mInfo;
++            }
++            else
++                aMod <<= _rModuleCode;
++            xLib->replaceByName( _rModName, aMod );
+             return true;
+         }
+         catch( const Exception& )
+diff --git basic/inc/basic/basmgr.hxx basic/inc/basic/basmgr.hxx
+index 2674c59..3c4f364 100644
+--- basic/inc/basic/basmgr.hxx
++++ basic/inc/basic/basmgr.hxx
+@@ -113,9 +113,10 @@ struct LibraryContainerInfo
+     ::com::sun::star::uno::Reference< com::sun::star::script::XPersistentLibraryContainer > mxScriptCont;
+     ::com::sun::star::uno::Reference< com::sun::star::script::XPersistentLibraryContainer > mxDialogCont;
+     OldBasicPassword* mpOldBasicPassword;
++    bool mbVBACompatOn;
+ 
+     LibraryContainerInfo()
+-        :mpOldBasicPassword( NULL )
++        :mpOldBasicPassword( NULL ), mbVBACompatOn( false )
+     {
+     }
+ 
+@@ -127,7 +128,7 @@ struct LibraryContainerInfo
+     )
+         : mxScriptCont( xScriptCont )
+         , mxDialogCont( xDialogCont )
+-        , mpOldBasicPassword( pOldBasicPassword )
++        , mpOldBasicPassword( pOldBasicPassword ), mbVBACompatOn( false )
+ 	{}
+ };
+ 
+diff --git basic/inc/basic/sbobjmod.hxx basic/inc/basic/sbobjmod.hxx
+index bdc23d9..ecc1a8c 100644
+--- basic/inc/basic/sbobjmod.hxx
++++ basic/inc/basic/sbobjmod.hxx
+@@ -56,6 +56,7 @@ public:
+     SbObjModule( const com::sun::star::script::ModuleInfo& mInfo, bool bIsVbaCompatible );
+     virtual SbxVariable* Find( const XubString& rName, SbxClassType t );
+     SbxVariable* GetObject();
++    void SetUnoObject( const com::sun::star::uno::Any& aObj )throw ( com::sun::star::uno::RuntimeException ) ;
+ };
+ 
+ class SbUserFormModule : public SbObjModule
+@@ -66,7 +67,7 @@ class SbUserFormModule : public SbObjMod
+     String sFormName;
+     SbUserFormModule( const SbUserFormModule& );
+     SbUserFormModule();
+-
++    bool mbInit;
+ protected:
+     virtual void InitObject();
+ public:
+diff --git basic/source/basmgr/basmgr.cxx basic/source/basmgr/basmgr.cxx
+index 4ac2e48..0a4ca77 100644
+--- basic/source/basmgr/basmgr.cxx
++++ basic/source/basmgr/basmgr.cxx
+@@ -44,6 +44,7 @@
+ #include <tools/debug.hxx>
+ #include <tools/diagnose_ex.h>
+ #include <basic/sbmod.hxx>
++#include <basic/sbobjmod.hxx>
+ 
+ #include <basic/sbuno.hxx>
+ #include <basic/basmgr.hxx>
+@@ -60,6 +61,7 @@
+ 
+ // Library API, implemented for XML import/export
+ 
++#include <com/sun/star/script/XVBACompat.hpp>
+ #include <com/sun/star/container/XNameContainer.hpp>
+ #include <com/sun/star/container/XContainer.hpp>
+ #include <com/sun/star/script/XStarBasicAccess.hpp>
+@@ -290,6 +292,12 @@ void SAL_CALL BasMgrContainerListenerImp
+ 	{
+         Reference< XLibraryContainer > xScriptCont( Event.Source, UNO_QUERY );
+ 		insertLibraryImpl( xScriptCont, mpMgr, Event.Element, aName );
++                Reference<  XVBACompat > xCompat( xScriptCont, UNO_QUERY );
++                if ( xCompat.is() )
++                {
++		    StarBASIC* pLib = mpMgr->GetLib( aName );
++                    pLib->SetVBAEnabled( xCompat->getVBACompatModeOn() );
++                }
+ 	}
+ 	else
+ 	{
+@@ -335,25 +343,35 @@ void SAL_CALL BasMgrContainerListenerImp
+     DBG_ASSERT( !bLibContainer, "library container fired elementReplaced()");
+ 
+ 	StarBASIC* pLib = mpMgr->GetLib( maLibName );
++    
+ 	if( pLib )
+ 	{
+-         ModuleInfo mInfo;
++	    SbModule* pMod = pLib->FindModule( aName );
++		::rtl::OUString aMod;
++        ModuleInfo mInfo;
+         if( Event.Element >>= mInfo )
+-        {
+-            OSL_TRACE("#elementReplaced Mod");
+-            pLib->MakeModule32( mInfo );
+-        }
+-        else
+-        {
+-		    SbModule* pMod = pLib->FindModule( aName );
+-
+-		    ::rtl::OUString aMod;
++			aMod = mInfo.ModuleSource;
++        else 
+             Event.Element >>= aMod;
+-		    if( pMod )
+-		   	    pMod->SetSource32( aMod );
+-            else
+-			    pLib->MakeModule32( aName, aMod );
+-        }
++		if( pMod )
++		{
++			pMod->SetSource32( aMod );
++			if ( mInfo.ModuleType == ModuleType::Document )
++			{
++				SbObjModule* pObjModule = dynamic_cast< SbObjModule* >( pMod );
++				if ( pObjModule )	
++					pObjModule->SetUnoObject( makeAny( mInfo.ModuleObject ) );
++			}
++		}
++        else
++			// Probably we should have an assert for
++			// unknow module type, e.g. either we are using
++			// the ModuleInfo structure ( vba ) for *all* modules
++			// or not ( normal )
++			if ( mInfo.ModuleType == ModuleType::Unknown )
++				pLib->MakeModule32( aName, aMod );
++			else
++				pLib->MakeModule32( mInfo );
+ 
+ 		pLib->SetModified( FALSE );
+ 	}
+@@ -820,6 +838,12 @@ void BasicManager::SetLibraryContainerIn
+ 
+ 	Reference< XLibraryContainer > xScriptCont( mpImpl->maContainerInfo.mxScriptCont.get() );
+ 	StarBASIC* pStdLib = GetStdLib();
++        Reference< XVBACompat > xCompat( GetScriptLibraryContainer(), UNO_QUERY );
++        if ( xCompat.is() )
++                mpImpl->maContainerInfo.mbVBACompatOn = xCompat->getVBACompatModeOn();    
++	// Std is created regardless of any persisted Libraries, so.. we need
++	// to make sure we set its compat mode here
++	pStdLib->SetVBAEnabled( mpImpl->maContainerInfo.mbVBACompatOn );
+ 	String aLibName = pStdLib->GetName();
+ 	if( xScriptCont.is() )
+ 	{
+diff --git basic/source/classes/sbxmod.cxx basic/source/classes/sbxmod.cxx
+index 24921f8..d9f69e7 100644
+--- basic/source/classes/sbxmod.cxx
++++ basic/source/classes/sbxmod.cxx
+@@ -2233,25 +2233,26 @@ SbObjModule::SbObjModule( const com::sun
+     if ( mInfo.ModuleType == script::ModuleType::Form )
+     {
+         SetClassName( rtl::OUString::createFromAscii( "Form" ) );
+-        return;
+     }
+-    try
++    else if ( mInfo.ModuleObject.is() )
++        SetUnoObject( uno::makeAny( mInfo.ModuleObject ) );   
++}
++void
++SbObjModule::SetUnoObject( const uno::Any& aObj ) throw ( uno::RuntimeException )
++{
++    SbUnoObject* pUnoObj = PTR_CAST(SbUnoObject,(SbxVariable*)pDocObject);
++    if ( pUnoObj && pUnoObj->getUnoAny() == aObj ) // object is equal, nothing to do
++        return;
++    pDocObject = new SbUnoObject( GetName(), uno::makeAny( aObj ) );
++            
++    com::sun::star::uno::Reference< com::sun::star::lang::XServiceInfo > xServiceInfo( aObj, com::sun::star::uno::UNO_QUERY_THROW );
++    if( xServiceInfo->supportsService( rtl::OUString::createFromAscii( "org.openoffice.excel.Worksheet" ) ) )
+     {
+-        com::sun::star::uno::Any aObject( mInfo.ModuleObject );
+-        pDocObject = new SbUnoObject( GetName(), aObject );
+-        com::sun::star::uno::Reference< com::sun::star::lang::XServiceInfo > xServiceInfo( aObject, com::sun::star::uno::UNO_QUERY_THROW );
+-        if( xServiceInfo->supportsService( rtl::OUString::createFromAscii( "org.openoffice.excel.Worksheet" ) ) )
+-        {
+-            SetClassName( rtl::OUString::createFromAscii( "Worksheet" ) );
+-        }
+-        else if( xServiceInfo->supportsService( rtl::OUString::createFromAscii( "org.openoffice.excel.Workbook" ) ) )
+-        {
+-            SetClassName( rtl::OUString::createFromAscii( "Workbook" ) );
+-        }
++        SetClassName( rtl::OUString::createFromAscii( "Worksheet" ) );
+     }
+-    catch( com::sun::star::uno::RuntimeException e )
++    else if( xServiceInfo->supportsService( rtl::OUString::createFromAscii( "org.openoffice.excel.Workbook" ) ) )
+     {
+-        OSL_TRACE("***** Failed to initialise API Object." );
++        SetClassName( rtl::OUString::createFromAscii( "Workbook" ) );
+     }
+ }
+ 
+@@ -2286,7 +2287,7 @@ class FormObjEventListenerImpl : public 
+ public:
+     FormObjEventListenerImpl( SbUserFormModule* pUserForm, const uno::Reference< lang::XComponent >& xComponent ) : mpUserForm( pUserForm ), mxComponent( xComponent) , mbDisposed( false ), mbOpened( sal_False ), mbActivated( sal_False )
+     {
+-        if ( mxComponent.is() );
++        if ( mxComponent.is() )
+         {
+ 	    uno::Reference< awt::XTopWindow > xList( mxComponent, uno::UNO_QUERY_THROW );;
+             //uno::Reference< awt::XWindow > xList( mxComponent, uno::UNO_QUERY_THROW );;
+@@ -2362,7 +2363,7 @@ public:
+ };
+ 
+ SbUserFormModule::SbUserFormModule( const com::sun::star::script::ModuleInfo& mInfo, bool bIsCompat )
+-    :SbObjModule( mInfo, bIsCompat )
++    :SbObjModule( mInfo, bIsCompat ), mbInit( false )
+ {
+         m_xModel.set( mInfo.ModuleObject, uno::UNO_QUERY_THROW );
+ }
+@@ -2403,12 +2404,13 @@ void SbUserFormModule::triggerDeActivate
+ }
+ 
+ void SbUserFormModule::triggerInitializeEvent( void )
+-
+ {
++        if ( mbInit )
++            return;
+         OSL_TRACE("**** SbUserFormModule::triggerInitializeEvent");
+ 	static String aInitMethodName( RTL_CONSTASCII_USTRINGPARAM("Userform_Initialize") );
++        mbInit = true;
+ 	triggerMethod( aInitMethodName );
+-
+ }
+ 
+ void SbUserFormModule::triggerTerminateEvent( void )
+@@ -2416,6 +2418,7 @@ void SbUserFormModule::triggerTerminateE
+         OSL_TRACE("**** SbUserFormModule::triggerTerminateEvent");
+ 	static String aTermMethodName( RTL_CONSTASCII_USTRINGPARAM("Userform_Terminate") );
+ 	triggerMethod( aTermMethodName );
++        mbInit=false;
+ }
+ 
+ void SbUserFormModule::load()
+@@ -2473,7 +2476,7 @@ void SbUserFormModule::InitObject()
+             m_DialogListener = new FormObjEventListenerImpl( this, xComponent );
+ 
+             // trigger initialise event
+-            triggerInitializeEvent();
++            //triggerInitializeEvent();
+         } 
+     }
+     catch( uno::Exception& e )
+diff --git basic/source/inc/namecont.hxx basic/source/inc/namecont.hxx
+index 3572d95..67d95bb 100644
+--- basic/source/inc/namecont.hxx
++++ basic/source/inc/namecont.hxx
+@@ -63,20 +63,23 @@
+ #include <cppuhelper/implbase2.hxx>
+ #include <cppuhelper/compbase6.hxx>
+ #include <cppuhelper/compbase7.hxx>
++#include <cppuhelper/compbase8.hxx>
+ #include <cppuhelper/interfacecontainer.hxx>
++#include <com/sun/star/script/XVBACompat.hpp>
+ 
+ class BasicManager;
+ 
+ namespace basic
+ {
+ 
+-typedef ::cppu::WeakComponentImplHelper7< 
++typedef ::cppu::WeakComponentImplHelper8< 
+     ::com::sun::star::lang::XInitialization,
+     ::com::sun::star::script::XStorageBasedLibraryContainer,
+     ::com::sun::star::script::XLibraryContainerPassword,
+     ::com::sun::star::script::XLibraryContainerExport,
+     ::com::sun::star::container::XContainer,
+     ::com::sun::star::script::XLibraryQueryExecutable,
++    ::com::sun::star::script::XVBACompat,
+     ::com::sun::star::lang::XServiceInfo > LibraryContainerHelper;
+ 
+ typedef ::cppu::WeakImplHelper2< ::com::sun::star::container::XNameContainer,
+@@ -110,6 +113,11 @@ NameContainerNameMap;
+ 
+ 
+ //============================================================================
++class ItemConvertor
++{
++public:
++    virtual bool convert(com::sun::star::uno::Any& item ) = 0;
++};
+ 
+ class NameContainer : public ::cppu::BaseMutex, public NameContainerHelper
+ {
+@@ -133,7 +141,7 @@ public:
+ 
+ 	void setEventSource( ::com::sun::star::uno::XInterface* pxEventSource )
+ 		{ mpxEventSource = pxEventSource; }
+-
++        virtual bool convertContainer( const ::com::sun::star::uno::Type& rNewType, ItemConvertor& aConvertor );
+     // Methods XElementAccess
+     virtual ::com::sun::star::uno::Type SAL_CALL getElementType(  ) 
+ 		throw(::com::sun::star::uno::RuntimeException);
+@@ -248,7 +256,7 @@ protected:
+ 	sal_Bool        mbOwnBasMgr;
+ 
+     InitMode meInitMode;
+-
++    bool mbVBACompatModeOn;
+ 	void implStoreLibrary( SfxLibrary* pLib,
+ 							const ::rtl::OUString& aName,
+ 							const ::com::sun::star::uno::Reference< ::com::sun::star::embed::XStorage >& xStorage );
+@@ -331,7 +339,7 @@ protected:
+     virtual const sal_Char* SAL_CALL    getOldInfoFileName() const = 0;
+     virtual const sal_Char* SAL_CALL    getLibElementFileExtension() const = 0;
+     virtual const sal_Char* SAL_CALL    getLibrariesDir() const = 0;
+-
++    virtual void convertLibraryEntries() { /*default bogus implementation*/}
+     // Handle maLibInfoFileURL and maStorageURL correctly
+     void checkStorageURL
+     (
+@@ -499,6 +507,9 @@ public:
+         throw (::com::sun::star::uno::RuntimeException);
+     virtual ::com::sun::star::uno::Sequence< ::rtl::OUString > SAL_CALL getSupportedServiceNames( )
+         throw (::com::sun::star::uno::RuntimeException) = 0;
++    // Methods XVBACompat
++    virtual ::sal_Bool SAL_CALL getVBACompatModeOn() throw (::com::sun::star::uno::RuntimeException);
++    virtual void SAL_CALL setVBACompatModeOn( ::sal_Bool _vbacompatmodeon ) throw (::com::sun::star::uno::RuntimeException);
+ };
+ 
+ class LibraryContainerMethodGuard
+@@ -560,6 +571,7 @@ private:
+ 	sal_Bool mbSharedIndexFile;
+ 	sal_Bool mbExtension;
+ 
++	::xmlscript::ObjectModuleDescHash mhCodeNameToObjDesc;
+ 	// Additional functionality for localisation
+ 	// Provide modify state including resources
+ 	virtual sal_Bool isModified( void ) = 0;
+@@ -653,6 +665,7 @@ public:
+ 	virtual void SAL_CALL removeContainerListener( const ::com::sun::star::uno::Reference< 
+ 		::com::sun::star::container::XContainerListener >& xListener ) 
+ 			throw (::com::sun::star::uno::RuntimeException);
++        virtual bool convertContainer( const ::com::sun::star::uno::Type& rNewType, ItemConvertor& aConvertor );
+ 
+ protected:
+ 	virtual bool SAL_CALL isLibraryElementValid( ::com::sun::star::uno::Any aElement ) const = 0;
+diff --git basic/source/inc/scriptcont.hxx basic/source/inc/scriptcont.hxx
+index 1679b30..b9d3415 100644
+--- basic/source/inc/scriptcont.hxx
++++ basic/source/inc/scriptcont.hxx
+@@ -97,6 +97,7 @@ class SfxScriptLibraryContainer : public
+     virtual const sal_Char* SAL_CALL    getOldInfoFileName() const;
+     virtual const sal_Char* SAL_CALL    getLibElementFileExtension() const;
+     virtual const sal_Char* SAL_CALL    getLibrariesDir() const;
++    virtual void convertLibraryEntries();
+ 
+ public:
+ 	SfxScriptLibraryContainer( void );
+@@ -161,7 +162,7 @@ public:
+     (
+         ModifiableHelper& _rModifiable,
+         const ::com::sun::star::uno::Reference< ::com::sun::star::lang::XMultiServiceFactory >& xMSF,
+-	    const ::com::sun::star::uno::Reference< ::com::sun::star::ucb::XSimpleFileAccess >& xSFI
++	    const ::com::sun::star::uno::Reference< ::com::sun::star::ucb::XSimpleFileAccess >& xSFI, bool bVBACompat
+     );
+ 
+ 	SfxScriptLibrary
+@@ -169,7 +170,7 @@ public:
+         ModifiableHelper& _rModifiable,
+         const ::com::sun::star::uno::Reference< ::com::sun::star::lang::XMultiServiceFactory >& xMSF,
+ 	    const ::com::sun::star::uno::Reference< ::com::sun::star::ucb::XSimpleFileAccess >& xSFI,
+-        const ::rtl::OUString& aLibInfoFileURL, const ::rtl::OUString& aStorageURL, sal_Bool ReadOnly
++        const ::rtl::OUString& aLibInfoFileURL, const ::rtl::OUString& aStorageURL, sal_Bool ReadOnly, bool bVBACOmpat
+     );
+ 
+     static bool containsValidModule( const ::com::sun::star::uno::Any& _rElement );
+diff --git basic/source/runtime/step2.cxx basic/source/runtime/step2.cxx
+index 1f659e1..80d144f 100644
+--- basic/source/runtime/step2.cxx
++++ basic/source/runtime/step2.cxx
+@@ -39,6 +39,7 @@
+ #include "sbintern.hxx"
+ #include "sbunoobj.hxx"
+ #include "opcodes.hxx"
++#include "basic/sbobjmod.hxx"
+ 
+ #include <com/sun/star/container/XIndexAccess.hpp>
+ #include <com/sun/star/script/XDefaultMethod.hpp>
+@@ -707,8 +708,12 @@ void SbiRuntime::StepELEM( UINT32 nOp1, 
+ 	// zu fueh die Referenz verlieren
+ 	// #74254 Jetzt per Liste
+ 	if( pObj )
++        {
++	        SbUserFormModule* pUserForm = PTR_CAST(SbUserFormModule,(SbxVariable*) pObjVar);
++                if ( pUserForm )
++                    pUserForm->triggerInitializeEvent();
+ 		SaveRef( (SbxVariable*)pObj );
+-
++        }
+ 	PushVar( FindElement( pObj, nOp1, nOp2, SbERR_NO_METHOD, FALSE ) );
+ }
+ 
+diff --git basic/source/uno/namecont.cxx basic/source/uno/namecont.cxx
+index 5c9c44b..41e189d 100644
+--- basic/source/uno/namecont.cxx
++++ basic/source/uno/namecont.cxx
+@@ -110,6 +110,27 @@ static bool GbMigrationSuppressErrors = 
+ //============================================================================
+ // Implementation class NameContainer
+ 
++bool 
++NameContainer::convertContainer(const ::com::sun::star::uno::Type& rNewType, ItemConvertor& aConvertor )
++{
++        bool bRes = true;
++        uno::Sequence< uno::Any > mCopyValues( mValues );
++	for ( sal_Int32	i = 0; bRes && i < mCopyValues.getLength();  ++i )
++	{
++		if ( !aConvertor.convert( mCopyValues[ i ] ) )
++                {
++			bRes = false;
++                        break;
++                }
++	}
++	if ( bRes )
++        {
++                mValues = mCopyValues;
++		mType = rNewType;
++        }
++	return bRes;
++}
++
+ // Methods XElementAccess
+ Type NameContainer::getElementType()
+ 	throw(RuntimeException)
+@@ -158,7 +179,7 @@ void NameContainer::replaceByName( const
+ 	throw(IllegalArgumentException, NoSuchElementException, WrappedTargetException, RuntimeException)
+ {
+ 	Type aAnyType = aElement.getValueType();
+-    if( mType != aAnyType && aAnyType != getCppuType( static_cast< ModuleInfo* >( NULL ) ) )
++    if( mType != aAnyType )
+ 		throw IllegalArgumentException();
+ 
+ 	NameContainerNameMap::iterator aIt = mHashMap.find( aName );
+@@ -200,7 +221,7 @@ void NameContainer::insertByName( const 
+ 	throw(IllegalArgumentException, ElementExistException, WrappedTargetException, RuntimeException)
+ {
+ 	Type aAnyType = aElement.getValueType();
+-    if( mType != aAnyType && aAnyType != getCppuType( static_cast< ModuleInfo* >( NULL ) ) )
++    if( mType != aAnyType )
+ 		throw IllegalArgumentException();
+ 
+ 	NameContainerNameMap::iterator aIt = mHashMap.find( aName );
+@@ -330,6 +351,30 @@ void ModifiableHelper::setModified( sal_
+ // Implementation class SfxLibraryContainer
+ DBG_NAME( SfxLibraryContainer )
+ 
++::sal_Bool SAL_CALL 
++SfxLibraryContainer::getVBACompatModeOn() throw (RuntimeException)
++{
++    return mbVBACompatModeOn;
++}
++void SAL_CALL 
++SfxLibraryContainer::setVBACompatModeOn( ::sal_Bool _vbacompatmodeon ) throw (RuntimeException)
++{
++    // will need to trigger event so that basicmanager can get it	
++    bool bNeedsConversion = ( mbVBACompatModeOn != _vbacompatmodeon );
++    mbVBACompatModeOn =  ( _vbacompatmodeon == sal_True );
++    // for Dialogs 'convertLibraryEntries' does nothing ( for now ) 
++    // for Scripts the Library's NameContainer needs to be converted as follows
++    // When vba mode is turned off
++    // Userform and Document modules need to be deleted
++    //    String -> Any( ModuleInfo ) to
++    //    String -> Any( String ) 
++    // When vba mode is turned on
++    //    String -> Any( String )  to
++    //    String -> Any( ModuleInfo )
++    // Userform and Document modules need to be created
++    if ( bNeedsConversion )
++        convertLibraryEntries(); // for Dialogs this does nothing ( for now ) 
++}
+ // Ctor
+ SfxLibraryContainer::SfxLibraryContainer( void )
+ 	: LibraryContainerHelper( maMutex )
+@@ -339,6 +384,7 @@ SfxLibraryContainer::SfxLibraryContainer
+     , mbOasis2OOoFormat( sal_False )
+     , mpBasMgr( NULL )
+     , mbOwnBasMgr( sal_False )
++    , mbVBACompatModeOn( sal_False )
+ {
+     DBG_CTOR( SfxLibraryContainer, NULL );
+ 
+@@ -798,7 +844,7 @@ sal_Bool SfxLibraryContainer::init_Impl(
+                 OSL_ENSURE( 0, OUStringToOString( e.Message, RTL_TEXTENCODING_ASCII_US ).getStr() );
+                 return sal_False;
+             }
+-
++            mbVBACompatModeOn = pLibArray->mbVBAMode; 
+ 		    sal_Int32 nLibCount = pLibArray->mnLibCount;
+ 		    for( sal_Int32 i = 0 ; i < nLibCount ; i++ )
+ 		    {
+@@ -1696,17 +1742,39 @@ void SfxLibraryContainer::implImportLibD
+     {
+ 	    sal_Int32 nElementCount = rLib.aElementNames.getLength();
+ 	    const OUString* pElementNames = rLib.aElementNames.getConstArray();
+-	    Any aDummyElement = createEmptyLibraryElement();
++	    Any aDummyElement;
++            ::xmlscript::ObjectModuleDescHash::iterator it_end = rLib.hModuleTypeDesc.end();
+ 	    for( sal_Int32 i = 0 ; i < nElementCount ; i++ )
+ 	    {
++                    if ( getVBACompatModeOn() ) 
++                    {
++                        ::xmlscript::ObjectModuleDescHash::iterator it = rLib.hModuleTypeDesc.find( pElementNames[i] );
++                    
++                        com::sun::star::script::ModuleInfo mInfo;
++                        mInfo.ModuleType = ModuleType::Normal;
++                        mInfo.ModuleName = pElementNames[i];
++                        if ( it != it_end )
++                        {
++                            mInfo.ModuleType = it->second.mnModuleType;
++                            // hack for userform, needs to know about the document
++                            // well really it needs the dialog library
++                            if (  mInfo.ModuleType == ModuleType::Form )
++                                mInfo.ModuleObject = mxOwnerDocument;
++                        }
++                        aDummyElement <<= mInfo;
++                    }
++                    else
++	                aDummyElement = createEmptyLibraryElement();
+ 		    pLib->maNameContainer.insertByName( pElementNames[i], aDummyElement );
+-	    }
++        }
+         pLib->mbPasswordProtected = rLib.bPasswordProtected;
+         pLib->mbReadOnly = rLib.bReadOnly;
+ 		pLib->mbPreload  = rLib.bPreload;
+         pLib->implSetModified( sal_False );
+ 
+         pLib->mbInitialised = sal_True;
++        pLib->mhCodeNameToObjDesc = rLib.hModuleTypeDesc;
++
+     }
+ }
+ 
+@@ -2283,13 +2351,29 @@ void SAL_CALL SfxLibraryContainer::loadL
+ 			}
+ 
+ 			Any aAny = importLibraryElement( aFile, xInStream );
++
++            com::sun::star::script::ModuleInfo mInfo;
+ 			if( pImplLib->hasByName( aElementName ) )
+             {
++                if ( getVBACompatModeOn() )
++                {
++				    pImplLib->maNameContainer.getByName( aElementName ) >>= mInfo;
++                    aAny >>= mInfo.ModuleSource; 
++                    aAny <<= mInfo;
++                } 
+                 if( aAny.hasValue() )
++                {
+ 				    pImplLib->maNameContainer.replaceByName( aElementName, aAny );
++                }
+             }
+ 			else
+             {
++                if ( getVBACompatModeOn() )
++                {
++                    mInfo.ModuleType = ModuleType::Normal;
++                    aAny >>= mInfo.ModuleSource; 
++                    aAny <<= mInfo;
++                }
+ 				pImplLib->maNameContainer.insertByName( aElementName, aAny );
+             }
+ 		}
+@@ -2700,6 +2784,12 @@ OUString SfxLibraryContainer::expand_url
+     return sal_False;
+ }
+ 
++bool SfxLibrary::convertContainer(const ::com::sun::star::uno::Type& rNewType, ItemConvertor& aConvertor )
++{
++	return maNameContainer.convertContainer( rNewType, aConvertor );
++}
++
++
+ //============================================================================
+ 
+ // Implementation class SfxLibrary
+diff --git basic/source/uno/sbservices.cxx basic/source/uno/sbservices.cxx
+index a2a4ded..aa076ea 100644
+--- basic/source/uno/sbservices.cxx
++++ basic/source/uno/sbservices.cxx
+@@ -43,6 +43,7 @@ namespace basic
+     //--------------------------------------------------------------------
+     extern void createRegistryInfo_SfxDialogLibraryContainer();
+     extern void createRegistryInfo_SfxScriptLibraryContainer();
++    extern void createRegistryInfo_PersistedReadOnlyCodeNames();
+ 
+     static void initializeModule()
+     {
+@@ -54,6 +55,7 @@ namespace basic
+             {
+                 createRegistryInfo_SfxDialogLibraryContainer();
+                 createRegistryInfo_SfxScriptLibraryContainer();
++                createRegistryInfo_PersistedReadOnlyCodeNames();
+             }
+         }
+     }
+diff --git basic/source/uno/scriptcont.cxx basic/source/uno/scriptcont.cxx
+index 4a46e98..0683981 100644
+--- basic/source/uno/scriptcont.cxx
++++ basic/source/uno/scriptcont.cxx
+@@ -157,7 +157,7 @@ SfxScriptLibraryContainer::SfxScriptLibr
+ SfxLibrary* SfxScriptLibraryContainer::implCreateLibrary( const OUString& aName )
+ {
+ 	(void)aName;	// Only needed for SfxDialogLibrary
+-	SfxLibrary* pRet = new SfxScriptLibrary( maModifiable, mxMSF, mxSFI );
++	SfxLibrary* pRet = new SfxScriptLibrary( maModifiable, mxMSF, mxSFI, getVBACompatModeOn() );
+ 	return pRet;
+ }
+ 
+@@ -168,7 +168,7 @@ SfxLibrary* SfxScriptLibraryContainer::i
+ 	(void)aName;	// Only needed for SfxDialogLibrary
+ 	SfxLibrary* pRet =
+ 		new SfxScriptLibrary
+-            ( maModifiable, mxMSF, mxSFI, aLibInfoFileURL, StorageURL, ReadOnly );
++            ( maModifiable, mxMSF, mxSFI, aLibInfoFileURL, StorageURL, ReadOnly, getVBACompatModeOn() );
+ 	return pRet;
+ }
+ 
+@@ -1068,6 +1068,11 @@ SfxScriptLibraryContainer:: HasExecutabl
+ 
+ //============================================================================
+ // Service
++class PersistedReadOnlyCodeNames;
++void createRegistryInfo_PersistedReadOnlyCodeNames()
++{
++    static OAutoRegistration< PersistedReadOnlyCodeNames > aAutoRegistration;
++}
+ void createRegistryInfo_SfxScriptLibraryContainer()
+ {
+     static OAutoRegistration< SfxScriptLibraryContainer > aAutoRegistration;
+@@ -1121,8 +1126,8 @@ Reference< XInterface > SAL_CALL SfxScri
+ // Ctor
+ SfxScriptLibrary::SfxScriptLibrary( ModifiableHelper& _rModifiable,
+                                     const Reference< XMultiServiceFactory >& xMSF,
+-                                    const Reference< XSimpleFileAccess >& xSFI )
+-	: SfxLibrary( _rModifiable, getCppuType( (const OUString *)0 ), xMSF, xSFI )
++                                    const Reference< XSimpleFileAccess >& xSFI, bool bVBA )
++	: SfxLibrary( _rModifiable, bVBA ? getCppuType( ( const script::ModuleInfo*)0 ) : getCppuType( (const OUString *)0 ), xMSF, xSFI )
+     , mbLoadedSource( sal_False )
+     , mbLoadedBinary( sal_False )
+ {
+@@ -1133,8 +1138,8 @@ SfxScriptLibrary::SfxScriptLibrary( Modi
+                                     const Reference< XSimpleFileAccess >& xSFI,
+                                     const OUString& aLibInfoFileURL,
+                                     const OUString& aStorageURL,
+-                                    sal_Bool ReadOnly )
+-	: SfxLibrary( _rModifiable, getCppuType( (const OUString *)0 ), xMSF, xSFI,
++                                    sal_Bool ReadOnly, bool bVBA )
++	: SfxLibrary( _rModifiable, bVBA ? getCppuType( ( const script::ModuleInfo*)0 ) : getCppuType( (const OUString *)0 ), xMSF, xSFI,
+ 						aLibInfoFileURL, aStorageURL, ReadOnly)
+     , mbLoadedSource( sal_False )
+     , mbLoadedBinary( sal_False )
+@@ -1188,7 +1193,183 @@ bool SAL_CALL SfxScriptLibrary::isLibrar
+ {
+     return SfxScriptLibrary::containsValidModule( aElement );
+ }
++typedef ::cppu::WeakImplHelper3< container::XNameAccess, lang::XInitialization, lang::XServiceInfo > ReadOnlyCodeNames_BASE;
++
++// XNameAccess, codename to/from objectnames
++class PersistedReadOnlyCodeNames : ReadOnlyCodeNames_BASE
++{
++    ::xmlscript::CodeNameHash mCodeNameToObjectNames;
++public:
++    PersistedReadOnlyCodeNames()
++    {
++    }
++    // Methods - XInitialise
++    virtual void SAL_CALL initialize( const uno::Sequence< uno::Any >& aArguments ) throw (uno::Exception, uno::RuntimeException)
++    {
++        if ( !aArguments.getLength() )
++            throw RuntimeException();
++        Reference< document::XStorageBasedDocument > xDocument( aArguments[ 0 ], uno::UNO_QUERY_THROW ); 
++        Reference< embed::XStorage > xDocStorage; 
++        try
++        {
++            Reference< XMultiServiceFactory > xMSF = comphelper::getProcessServiceFactory();
++            Reference< XServiceInfo > xSI( xDocument, UNO_QUERY_THROW );
++            if ( xSI->supportsService( ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "com.sun.star.document.OfficeDocument" ) ) ) )
++                xDocStorage.set( xDocument->getDocumentStorage(), UNO_QUERY_THROW );
++            if ( xDocStorage.is() ) // not a 'real' document
++            {
++                rtl::OUString codeNameDir( RTL_CONSTASCII_USTRINGPARAM("Basic") );
++                rtl::OUString codeNameFile( RTL_CONSTASCII_USTRINGPARAM("script-lc.xml") );
++    
++                uno::Reference< embed::XStorage > xLibrariesStor( xDocStorage->openStorageElement( codeNameDir, embed::ElementModes::READ ), UNO_QUERY_THROW );
++                uno::Reference< io::XStream > xStream( xLibrariesStor->openStreamElement( codeNameFile, embed::ElementModes::READ ), UNO_QUERY_THROW );
++                uno::Reference< io::XInputStream > xInput( xStream->getInputStream(), UNO_QUERY_THROW );
++                ::xmlscript::LibDescriptorArray* pLibArray = new ::xmlscript::LibDescriptorArray();
++                InputSource source;
++                source.aInputStream = xInput;
++
++                Reference< XParser > xParser( xMSF->createInstance( OUString( RTL_CONSTASCII_USTRINGPARAM("com.sun.star.xml.sax.Parser") ) ), UNO_QUERY_THROW );
++                xParser->setDocumentHandler(  ::xmlscript::importLibraryCodeNames( pLibArray ) );
++                xParser->parseStream( source );
++                mCodeNameToObjectNames = pLibArray->mCodeNames;
++            }
++        }
++        catch ( Exception& e )
++        {
++            OSL_TRACE("Urk, should never get here, help!!");
++        }
++    }
++    // Methods - XNameAccess
++    virtual uno::Any SAL_CALL getByName( const ::rtl::OUString& aName ) throw (container::NoSuchElementException, lang::WrappedTargetException, uno::RuntimeException)
++    {
++        ::xmlscript::CodeNameHash::iterator it = mCodeNameToObjectNames.find( aName );
++        if ( it == mCodeNameToObjectNames.end() )
++            throw container::NoSuchElementException();
++        return uno::makeAny( it->second );
++    }
++    virtual uno::Sequence< ::rtl::OUString > SAL_CALL getElementNames(  ) throw (uno::RuntimeException)
++    {
++        uno::Sequence< ::rtl::OUString > sNames( mCodeNameToObjectNames.size() );
++        ::rtl::OUString* pStr = sNames.getArray();
++        ::xmlscript::CodeNameHash::iterator it = mCodeNameToObjectNames.begin();
++        ::xmlscript::CodeNameHash::iterator it_end = mCodeNameToObjectNames.end();
++        for ( ; it != it_end ; ++it, ++pStr )
++            *pStr = it->first;    
++        return sNames;
++    }
++    virtual ::sal_Bool SAL_CALL hasByName( const ::rtl::OUString& aName ) throw (uno::RuntimeException)
++    {
++        return ( mCodeNameToObjectNames.find( aName ) != mCodeNameToObjectNames.end() );
++    }
++    // Methods - XElementAccess
++    virtual uno::Type SAL_CALL getElementType(  ) throw (uno::RuntimeException)
++    {
++        return ::getCppuType( (const rtl::OUString *)0 );
++    }
++    virtual ::sal_Bool SAL_CALL hasElements(  ) throw (uno::RuntimeException)
++    {
++        return ( mCodeNameToObjectNames.size() > 0 );
++    }
++    // Methods XServiceInfo
++    virtual ::rtl::OUString SAL_CALL getImplementationName( ) throw (::com::sun::star::uno::RuntimeException)
++    {
++        return getImplementationName_static(); 
++    }
++    virtual ::sal_Bool SAL_CALL supportsService( const ::rtl::OUString& ServiceName ) throw (::com::sun::star::uno::RuntimeException)
++    {
++        uno::Sequence< rtl::OUString > sNames( getSupportedServiceNames() );
++        rtl::OUString* pStr = sNames.getArray(); 
++        rtl::OUString* pEnd = ( sNames.getArray() + sNames.getLength() ); 
++        for ( ; pStr != pEnd ; ++pStr )
++        {
++            if ( (*pStr).equals( ServiceName ) )
++                return sal_True; 
++        } 
++        return sal_False;
++    }
++    virtual ::com::sun::star::uno::Sequence< ::rtl::OUString > SAL_CALL getSupportedServiceNames( ) throw (::com::sun::star::uno::RuntimeException)
++    {
++        return getSupportedServiceNames_static();
++    }
++    // Service
++    static ::com::sun::star::uno::Sequence< ::rtl::OUString > getSupportedServiceNames_static()
++    {
++        uno::Sequence< rtl::OUString > sServiceNames(1);
++        sServiceNames[ 0 ] = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("org.openoffice.vba.PersistedCodeNames"));
++        return sServiceNames;
++    }
++    static ::rtl::OUString getImplementationName_static()
++    {
++         static OUString sImplName( RTL_CONSTASCII_USTRINGPARAM("PersistedReadOnlyCodeNames") );
++         return sImplName;
++    }
++
++    static Reference< XInterface > SAL_CALL Create ( const Reference< XComponentContext >& xServiceManager ) throw( Exception )
++    {
++        Reference< XInterface > xRet =
++        static_cast< XInterface* >( static_cast< OWeakObject* >( new PersistedReadOnlyCodeNames() ));
++        return xRet;
++    }
++};
++class ConvertEntryToVbaEntry : public ItemConvertor
++{
++	virtual bool convert( Any& item )
++	{
++	    // All entries are converted to 'Normal' modules
++	    // Document Modules need to be created externall ( e.g. these are under the control
++	    // of the document itself )
++	    rtl::OUString sSource;
++	    bool bRes = false;
++	
++	    if ( item >>= sSource )
++	    {
++	        script::ModuleInfo mInfo;
++	        mInfo.ModuleSource = sSource;
++	        mInfo.ModuleType = script::ModuleType::Normal;
++	        item <<= mInfo;
++	        bRes = true;
++	    }
++	    return bRes; 
++	}
++};
++
++class ConvertEntryFromVbaEntry : public ItemConvertor
++{
++	bool convert( Any& item )
++	{
++	    bool bRes = false;
++	    script::ModuleInfo mInfo;
++	    if ( item >>= mInfo )
++	    {
++	        item <<= mInfo.ModuleSource;
++	        bRes = true;
++	    }
++	    return bRes;
++	}
++};
+ 
++void SfxScriptLibraryContainer::convertLibraryEntries()
++{
++    if ( getVBACompatModeOn() )
++    {
++        // going from non-vba to vba        
++        SfxLibrary* pImplLib = getImplLib( String( RTL_CONSTASCII_USTRINGPARAM("Standard") ) );
++        
++	ConvertEntryToVbaEntry converter;
++	bool bRes = pImplLib ? pImplLib->convertContainer( getCppuType( ( const script::ModuleInfo* ) NULL ), converter ) : false;
++    }
++    else
++    { 
++        // going from vba to non-vba        
++        // we must delete all Document modules
++        // what we also must do is warn the user that this is going to happen ( see. Excel )
++        // needs interaction handler love ( perhaps that needs to be passed into the setVBACompat ) 
++        // or perhaps we can access the documents InteractionHandler ?
++        SfxLibrary* pImplLib = getImplLib( String( RTL_CONSTASCII_USTRINGPARAM("Standard") ) );
++	ConvertEntryFromVbaEntry convertor;
++	bool bRes = pImplLib ? pImplLib->convertContainer( getCppuType( ( const rtl::OUString*) NULL ), convertor ) : false;
++    }
++}
+ //============================================================================
+ 
+ }   // namespace basic
+diff --git offapi/com/sun/star/script/makefile.mk offapi/com/sun/star/script/makefile.mk
+index ea9bbd1..9837104 100644
+--- offapi/com/sun/star/script/makefile.mk
++++ offapi/com/sun/star/script/makefile.mk
+@@ -52,6 +52,7 @@ IDLFILES=\
+ 	XPersistentLibraryContainer.idl\
+ 	XStorageBasedLibraryContainer.idl\
+ 	XLibraryQueryExecutable.idl \
++	XVBACompat.idl\
+ 	ModuleSizeExceededRequest.idl\
+ 
+ # ------------------------------------------------------------------
+diff --git sc/inc/document.hxx sc/inc/document.hxx
+index 6d361ae..ce9fdf0 100644
+--- sc/inc/document.hxx
++++ sc/inc/document.hxx
+@@ -34,6 +34,7 @@
+ 
+ #include <vcl/prntypes.hxx>
+ #include <vcl/timer.hxx>
++#include <com/sun/star/container/XNameAccess.hpp>
+ #include <com/sun/star/uno/Reference.hxx>
+ #include <vos/ref.hxx>
+ #include "tabprotection.hxx"
+@@ -314,7 +315,7 @@ private:
+ 	Timer				aTrackTimer;
+ 
+     com::sun::star::uno::Reference< com::sun::star::document::XVbaEventsHelper > mxVbaEventsHelper;
+-
++        com::sun::star::uno::Reference< com::sun::star::container::XNameAccess > mxCodeNames;
+ public:
+     ScTabOpList         aTableOpList;		            // list of ScInterpreterTableOpParams currently in use
+     ScInterpreterTableOpParams  aLastTableOpParams;     // remember last params
+@@ -433,6 +434,7 @@ public:
+ 								SfxObjectShell* pDocShell = NULL );
+ 					~ScDocument();
+ 
++    com::sun::star::uno::Reference< com::sun::star::container::XNameAccess > GetPersistedCodeNames() throw( com::sun::star::uno::RuntimeException );
+ 	inline ::com::sun::star::uno::Reference< ::com::sun::star::lang::XMultiServiceFactory >
+ 					GetServiceManager() const { return xServiceManager; }
+ 
+diff --git sc/source/core/data/documen2.cxx sc/source/core/data/documen2.cxx
+index 08912c2..60926e2 100644
+--- sc/source/core/data/documen2.cxx
++++ sc/source/core/data/documen2.cxx
+@@ -260,6 +260,7 @@ ScDocument::ScDocument( ScDocumentMode	e
+ 
+ 	aTrackTimer.SetTimeoutHdl( LINK( this, ScDocument, TrackTimeHdl ) );
+ 	aTrackTimer.SetTimeout( 100 );
++	aDocCodeName = String( RTL_CONSTASCII_USTRINGPARAM("ThisWorkbook") );
+ }
+ 
+ 
+diff --git sc/source/core/data/document.cxx sc/source/core/data/document.cxx
+index c5dc8b8..f1766c0 100644
+--- sc/source/core/data/document.cxx
++++ sc/source/core/data/document.cxx
+@@ -91,6 +91,9 @@
+ #include "bcaslot.hxx"
+ #include "postit.hxx"
+ #include "tabprotection.hxx"
++#include <comphelper/processfactory.hxx>
++
++using namespace ::com::sun::star;
+ 
+ struct ScDefaultAttr
+ {
+@@ -4865,5 +4868,30 @@ BOOL ScDocument::NeedPageResetAfterTab( 
+ 	return FALSE;		// sonst nicht
+ }
+ 
++uno::Reference< container::XNameAccess > 
++ScDocument::GetPersistedCodeNames() throw( uno::RuntimeException )
++{
++    SfxObjectShell* pObjShell = GetDocumentShell();
++    if ( pShell && !mxCodeNames.is() )
++    {
++        uno::Sequence< uno::Any > aArgs( 1 );
++        aArgs[ 0 ] = uno::makeAny( pObjShell->GetModel() );
++        mxCodeNames.set( ::comphelper::getProcessServiceFactory()->createInstanceWithArguments(rtl::OUString(RTL_CONSTASCII_USTRINGPARAM("org.openoffice.vba.PersistedCodeNames")), aArgs),  uno::UNO_QUERY );
++        if ( mxCodeNames.is() )
++        {
++            rtl::OUString sWorkbook( RTL_CONSTASCII_USTRINGPARAM("ThisWorkbook") );
++            if ( mxCodeNames->hasByName( sWorkbook ) )
++            {
++		
++                rtl::OUString sCodeName;
++                mxCodeNames->getByName( sWorkbook ) >>= sCodeName;
++                SetCodeName( sCodeName );
++            }
++        }
++    }
++    return mxCodeNames;
++}
++
++
+ 
+ 
+diff --git sc/source/filter/excel/excimp8.cxx sc/source/filter/excel/excimp8.cxx
+index fa27688..7028b3d 100644
+--- sc/source/filter/excel/excimp8.cxx
++++ sc/source/filter/excel/excimp8.cxx
+@@ -103,6 +103,7 @@
+ 
+ #include <com/sun/star/document/XDocumentProperties.hpp>
+ #include <com/sun/star/document/XDocumentPropertiesSupplier.hpp>
++#include <com/sun/star/script/ModuleInfo.hpp>
+ 
+ 
+ using namespace com::sun::star;
+@@ -110,8 +111,8 @@ using namespace com::sun::star;
+ 
+ #define	INVALID_POS		0xFFFFFFFF
+ 
+-
+-
++// defined in docfunc.cxx ( really this needs a new name )
++script::ModuleInfo lcl_InitModuleInfo( SfxObjectShell& rDocSh, String& sModule );
+ 
+ ImportExcel8::ImportExcel8( XclImpRootData& rImpData, SvStream& rStrm ) :
+     ImportExcel( rImpData, rStrm ), mnTab(0)
+@@ -290,6 +291,44 @@ void ImportExcel8::ReadBasic( void )
+ 			bool bAsComment = !bLoadExecutable || !lcl_hasVBAEnabled();
+             aBasicImport.Import( EXC_STORAGE_VBA_PROJECT, EXC_STORAGE_VBA, bAsComment );
+             GetObjectManager().SetOleNameOverrideInfo( aBasicImport.ControlNameForObjectId() );
++            // for each document module get the associated object for the codename and do a replacebyname
++            ScDocument& aDoc = GetDoc();
++            uno::Reference< script::XLibraryContainer > xLibContainer = GetDocShell()->GetBasicContainer();
++            uno::Reference< container::XNameContainer > xLib;
++            if( xLibContainer.is() )
++            {
++                String aLibName( RTL_CONSTASCII_USTRINGPARAM( "Standard" ) );
++                uno::Any aLibAny = xLibContainer->getByName( aLibName );
++                aLibAny >>= xLib;
++            }
++            if ( xLib.is() )
++            {
++                rtl::OUString sOUCodeName( aDoc.GetCodeName() );
++                if ( xLib->hasByName( sOUCodeName ) )
++                {
++                    script::ModuleInfo mInfo;
++                    xLib->getByName( sOUCodeName ) >>= mInfo; 
++                    String sTmp = sOUCodeName;
++                    mInfo.ModuleObject = lcl_InitModuleInfo( *GetDocShell(), sTmp ).ModuleObject;
++                    xLib->replaceByName( sOUCodeName, uno::makeAny( mInfo ) );
++			
++                }
++                SCTAB nCount = aDoc.GetTableCount();
++    
++                for( SCTAB i = 0; i < nCount; ++i )
++                {
++                    String sName;
++                    aDoc.GetCodeName( i, sName );
++                    sOUCodeName = sName;
++                    if ( xLib->hasByName( sOUCodeName ) )
++                    {
++                        script::ModuleInfo mInfo;
++                        xLib->getByName( sOUCodeName ) >>= mInfo; 
++                        mInfo.ModuleObject = lcl_InitModuleInfo( *GetDocShell(), sName ).ModuleObject;
++                        xLib->replaceByName( sOUCodeName, uno::makeAny( mInfo ) );
++                    }
++                }
++            }
+         }
+     }
+ }
+diff --git sc/source/filter/xml/xmlsubti.cxx sc/source/filter/xml/xmlsubti.cxx
+index ab00932..f8674ae 100644
+--- sc/source/filter/xml/xmlsubti.cxx
++++ sc/source/filter/xml/xmlsubti.cxx
+@@ -228,6 +228,7 @@ void ScMyTables::NewSheet(const rtl::OUS
+ 				uno::Reference <container::XIndexAccess> xIndex( xSheets, uno::UNO_QUERY );
+ 				if ( xIndex.is() )
+ 				{
++
+                     xCurrentSheet.set(xIndex->getByIndex(nCurrentSheet), uno::UNO_QUERY);
+ 					if ( xCurrentSheet.is() )
+ 					{
+@@ -254,6 +255,25 @@ void ScMyTables::NewSheet(const rtl::OUS
+ 									}
+ 								}
+ 						}
++
++						ScDocument *pDoc = ScXMLConverter::GetScDocument(rImport.GetModel());
++						// Codenames need to be set as sheets are created and read
++						if ( pDoc  )
++						{
++							String sName;
++							pDoc->GetName( nCurrentSheet, sName );
++	                        rtl::OUString sOUName( sName );
++							uno::Reference< container::XNameAccess > xCodeNames( pDoc->GetPersistedCodeNames() );
++							if( xCodeNames.is() && xCodeNames->hasByName( sName ) )
++							{
++								rtl::OUString sOUSCodeName;
++								xCodeNames->getByName( sName ) >>= sOUSCodeName;
++								rImport.LockSolarMutex();
++								String sCodeName( sOUSCodeName );
++								pDoc->SetCodeName( nCurrentSheet, sCodeName );		
++								rImport.UnlockSolarMutex();
++							}
++						}
+ 						rImport.SetTableStyle(sStyleName);
+ 
+                         if ( sStyleName.getLength() )
+diff --git sc/source/ui/docshell/docfunc.cxx sc/source/ui/docshell/docfunc.cxx
+index 105f743..91ff9f7 100644
+--- sc/source/ui/docshell/docfunc.cxx
++++ sc/source/ui/docshell/docfunc.cxx
+@@ -2028,23 +2028,29 @@ BOOL ScDocFunc::MoveBlock( const ScRange
+ }
+ 
+ //------------------------------------------------------------------------
+-script::ModuleInfo lcl_InitModuleInfo( ScDocShell& rDocSh, String& sModule )
++uno::Reference< uno::XInterface > GetDocModuleObject( SfxObjectShell& rDocSh, String& sCodeName )
+ {
+-    ::rtl::OUString aModName( sModule );
+     uno::Reference< lang::XMultiServiceFactory> xSF(rDocSh.GetModel(), uno::UNO_QUERY);
++    uno::Reference< container::XNameAccess > xVBACodeNamedObjectAccess;
++    uno::Reference< uno::XInterface > xDocModuleApiObject;
++    if ( xSF.is() )
++    {
++        xVBACodeNamedObjectAccess.set( xSF->createInstance( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "org.openoffice.vba.VBAObjectModuleObjectProvider"))), uno::UNO_QUERY );    
++        xDocModuleApiObject.set( xVBACodeNamedObjectAccess->getByName( sCodeName ), uno::UNO_QUERY );    
++    }
++    return xDocModuleApiObject;
++
++}
++
++script::ModuleInfo lcl_InitModuleInfo( SfxObjectShell& rDocSh, String& sModule )
++{
++    ::rtl::OUString aModName( sModule );
+     ::rtl::OUString sVbaOption( RTL_CONSTASCII_USTRINGPARAM( "Rem Attribute VBA_ModuleType=VBADocumentModule\nOption VBASupport 1\n" ));
+     script::ModuleInfo sModuleInfo;
+     sModuleInfo.ModuleName = aModName;
+     sModuleInfo.ModuleSource = sVbaOption;
+     sModuleInfo.ModuleType = script::ModuleType::Document;
+-    uno::Reference< container::XNameAccess > xVBACodeNamedObjectAccess;
+-    if ( xSF.is() )
+-    {
+-        uno::Sequence< uno::Any > aArgs(1);
+-        aArgs[0] = uno::Any( aModName );
+-        xVBACodeNamedObjectAccess.set( xSF->createInstanceWithArguments( rtl::OUString(RTL_CONSTASCII_USTRINGPARAM( "org.openoffice.vba.VBAObjectModuleObjectProvider")), aArgs), uno::UNO_QUERY );    
+-        sModuleInfo.ModuleObject.set( xVBACodeNamedObjectAccess->getByName( aModName ), uno::UNO_QUERY );    
+-    }
++    sModuleInfo.ModuleObject = GetDocModuleObject( rDocSh, sModule );
+     return sModuleInfo;
+ }
+ 
+@@ -2064,21 +2070,19 @@ void lcl_InsertModule( ScDocShell& rDocS
+     }
+     if( xLib.is() )
+     {
+-        // test Module has exist
+-        // if the Module is exist. changed to another name
+-        // and at this time the string like "SheetX"
++        // if the Module with codename exists then find a new name
+         sal_Int32 nNum = 1;
++        sModuleInfo.ModuleName = sModuleName;
+         while( xLib->hasByName( sModuleInfo.ModuleName  ) )
+         {
+-            sModuleName = rtl::OUString::createFromAscii( "Sheet" ) + rtl::OUString::valueOf( nNum );
++            sModuleInfo.ModuleName = rtl::OUString::createFromAscii( "Sheet" ) + rtl::OUString::valueOf( nNum );
+             nNum += 1;
+         }
+-        sModuleInfo.ModuleName = sModuleName;
+         uno::Any aSourceAny;
+         aSourceAny <<= sModuleInfo;
+-        xLib->insertByName( sModuleName, aSourceAny );
++        xLib->insertByName( sModuleInfo.ModuleName, aSourceAny );
+         ScDocument* pDoc = rDocSh.GetDocument();
+-        String sCodeName( sModuleName );
++        String sCodeName( sModuleInfo.ModuleName );
+         pDoc->SetCodeName( nTab, sCodeName );
+     }
+     SFX_APP()->LeaveBasicCall();
+@@ -2116,8 +2120,10 @@ BOOL ScDocFunc::InsertTable( SCTAB nTab,
+ 	ScDocShellModificator aModificator( rDocShell );
+ 
+ 	ScDocument* pDoc = rDocShell.GetDocument();
+-    StarBASIC* pStarBASIC = rDocShell.GetBasic();
+-    BOOL bVbaEnabled = pStarBASIC->isVBAEnabled();
++    // Strange loop, also basic is loaded too early ( InsertTable )
++    // is called via the xml import for sheets in described in odf 
++    StarBASIC* pStarBASIC = rDocShell.GetBasic(); 
++    BOOL bVbaEnabled = pStarBASIC ? pStarBASIC->isVBAEnabled() : false;
+ 	if (bRecord && !pDoc->IsUndoEnabled())
+ 		bRecord = FALSE;
+     if ( bVbaEnabled )
+@@ -2132,13 +2138,16 @@ BOOL ScDocFunc::InsertTable( SCTAB nTab,
+ 
+ 	if (pDoc->InsertTab( nTab, rName ))
+ 	{
++		String sCodeName;
+ 		if (bRecord)
+ 			rDocShell.GetUndoManager()->AddUndoAction(
+ 						new ScUndoInsertTab( &rDocShell, nTab, bAppend, rName));
+ 		//	Views updaten:
+-        if( bVbaEnabled )
++        // Only insert vba modules if vba mode ( and not currently importing XML )
++        if( bVbaEnabled && !rDocShell.GetDocument()->IsImportingXML() )
+         {
+-            String sCodeName( rName );
++            if ( sCodeName.Len() == 0 )
++		sCodeName = rName;
+             lcl_InsertModule( rDocShell, nTab, sCodeName );
+         }
+ 		rDocShell.Broadcast( ScTablesHint( SC_TAB_INSERTED, nTab ) );
+diff --git sc/source/ui/docshell/docsh.cxx sc/source/ui/docshell/docsh.cxx
+index c702954..5ce0d4b 100644
+--- sc/source/ui/docshell/docsh.cxx
++++ sc/source/ui/docshell/docsh.cxx
+@@ -131,6 +131,7 @@
+ #include "cellsuno.hxx"
+ #include <com/sun/star/document/XVbaEventsHelper.hpp>
+ #include <com/sun/star/document/VbaEventId.hpp>
++#include <com/sun/star/script/ModuleInfo.hpp>
+ 
+ using namespace com::sun::star;
+ using namespace com::sun::star::document::VbaEventId;
+@@ -535,6 +536,45 @@ void ScDocShell::BeforeXMLLoading()
+ 		ScColumn::bDoubleAlloc = sal_True;
+ }
+ 
++// defined in docfunc.cxx ( really this needs a new name )
++uno::Reference< uno::XInterface > GetDocModuleObject( SfxObjectShell& rDocSh, String& sCodeName );
++
++rtl::OUString GetCodeName( ScDocument& aDocument, String& sObjectName )
++{
++    uno::Reference< container::XNameAccess > xCodeNames( aDocument.GetPersistedCodeNames() );
++    rtl::OUString sOUSCodeName;
++    xCodeNames->getByName( sObjectName ) >>= sOUSCodeName;
++    return sOUSCodeName;
++}
++
++void SetDocModuleForCodeName( ScDocument& aDocument, String& sCodeName )
++{
++    uno::Reference< script::XLibraryContainer > xLibContainer = aDocument.GetDocumentShell()->GetBasicContainer();
++    uno::Reference< container::XNameContainer > xLib;
++
++    if( xLibContainer.is() )
++    {
++        String aLibName( RTL_CONSTASCII_USTRINGPARAM( "Standard" ) );
++        uno::Any aLibAny = xLibContainer->getByName( aLibName );
++        aLibAny >>= xLib;
++    }
++
++    if ( xLib.is() )
++    {
++        rtl::OUString sOUCodeName( sCodeName );
++        script::ModuleInfo mInfo;
++        if ( xLib->getByName( sOUCodeName ) >>= mInfo )
++        {
++            mInfo.ModuleObject = GetDocModuleObject( *aDocument.GetDocumentShell(), sCodeName );
++            xLib->replaceByName( sOUCodeName, uno::makeAny( mInfo ) );         
++        }
++        else
++        {
++            // Insert a big fat assertion etc
++        }
++    }
++}
++
+ void ScDocShell::AfterXMLLoading(sal_Bool bRet)
+ {
+ 	if (GetCreateMode() != SFX_CREATE_MODE_ORGANIZER)
+@@ -610,6 +650,29 @@ void ScDocShell::AfterXMLLoading(sal_Boo
+         uno::Reference< document::XVbaEventsHelper > xEvt( aDocument.GetVbaEventsHelper() );
+         if ( xEvt.is() )
+             xEvt->setIgnoreEvents( sal_False );
++        // SetCodenames for each tab  ( and set up the vba DOC Modules ) 
++        SCTAB nTabCount = aDocument.GetTableCount();
++        for (SCTAB i = 0; i < nTabCount; ++i)
++        {
++            String sObjectName;
++            String sCodeName;
++            try
++            {
++                if ( i == 0 )
++                {
++                    sObjectName = String( RTL_CONSTASCII_USTRINGPARAM("ThisWorkbook") );
++                    sCodeName = GetCodeName( aDocument, sObjectName );
++                    SetDocModuleForCodeName( aDocument, sCodeName );
++                }
++                aDocument.GetName( i, sObjectName );
++                sCodeName = GetCodeName( aDocument, sObjectName );
++                SetDocModuleForCodeName( aDocument, sCodeName );
++            } 
++            catch( uno::Exception& )
++            {
++            }
++        }
++            
+ 	aDocument.SetImportingXML( FALSE );
+     aDocument.EnableUndo( TRUE );
+     bIsEmpty = FALSE;
+diff --git sc/source/ui/vba/vbaeventshelper.cxx sc/source/ui/vba/vbaeventshelper.cxx
+index 7e1e1c5..1287c13 100644
+--- sc/source/ui/vba/vbaeventshelper.cxx
++++ sc/source/ui/vba/vbaeventshelper.cxx
+@@ -620,7 +620,7 @@ String ScVbaEventsHelper::getSheetModule
+ {
+ 	ScExtDocOptions* pExtOptions = pDoc->GetExtDocOptions();
+ 	String aCodeName;
+-	pDoc->GetName( nTab, aCodeName);
++	pDoc->GetCodeName( nTab, aCodeName);
+ 	// Use code name if that exists
+ 	if ( pExtOptions )
+ 		aCodeName = pExtOptions->GetCodeName( nTab );
+diff --git svx/source/msfilter/svxmsbas.cxx svx/source/msfilter/svxmsbas.cxx
+index 7acf7db..14ed343 100644
+--- svx/source/msfilter/svxmsbas.cxx
++++ svx/source/msfilter/svxmsbas.cxx
+@@ -54,6 +54,7 @@ using namespace com::sun::star::awt;
+ #include <com/sun/star/container/XNameContainer.hpp>
+ #include <com/sun/star/script/XLibraryContainer.hpp>
+ #include <com/sun/star/script/ModuleInfo.hpp>
++#include <com/sun/star/script/XVBACompat.hpp>
+ using namespace com::sun::star::container;
+ using namespace com::sun::star::script;
+ using namespace com::sun::star::uno;
+@@ -267,12 +268,13 @@ BOOL SvxImportMSVBasic::ImportCode_Impl(
+             Any aLibAny = xLibContainer->getByName( aLibName );
+ 		    aLibAny >>= xLib;
+         }
+-		if( xLib.is() )
++		Reference< XVBACompat > xCompat( xLibContainer, UNO_QUERY );
++		if( xLib.is() && xCompat.is() )
+ 		{
+             Reference< container::XNameAccess > xVBAObjectForCodeName;
+ 			if ( !bAsComment )
+             {
+-                rDocSh.GetBasic()->SetVBAEnabled( true );
++         		xCompat->setVBACompatModeOn( sal_True );
+                 Reference< XMultiServiceFactory> xSF(rDocSh.GetModel(), UNO_QUERY);
+                 if ( xSF.is() )
+                 {
+@@ -425,20 +427,24 @@ BOOL SvxImportMSVBasic::ImportCode_Impl(
+ 
+ 					Any aSourceAny;
+                     OSL_TRACE("erm %d", mType );
+-                    if (  xVBAObjectForCodeName.is() && ( mType == ModuleType::Document || mType == ModuleType::Class || mType == ModuleType::Form ) )
++                    //if ( /*xVBAObjectForCodeName.is() && */ ( mType == ModuleType::Document || mType == ModuleType::Class || mType == ModuleType::Form ) )
++                    if ( true )
+                     {
+                         OSL_TRACE("vba processing  %d", mType );
+                         script::ModuleInfo sModuleInfo;
+                         sModuleInfo.ModuleName = aModName;
+                         sModuleInfo.ModuleSource = aSource;
+                         sModuleInfo.ModuleType = mType;
++// ok, try always passing the model to basic, should fit
+                         if ( mType == ModuleType::Form )
+                             // hack, the module ( in document basic should...
+                             // know the XModel... ) needs fixing in basic 
+                             // somewhere
+                             sModuleInfo.ModuleObject.set( rDocSh.GetModel(), UNO_QUERY );
++/*
+                         else if ( mType != ModuleType::Class )
+                             sModuleInfo.ModuleObject.set( xVBAObjectForCodeName->getByName( aModName ), UNO_QUERY );
++*/
+                         aSourceAny <<= sModuleInfo;
+                     }
+                     else
+diff --git xmlscript/inc/xmlscript/xmllib_imexp.hxx xmlscript/inc/xmlscript/xmllib_imexp.hxx
+index 9a3048f..f92b154 100644
+--- xmlscript/inc/xmlscript/xmllib_imexp.hxx
++++ xmlscript/inc/xmlscript/xmllib_imexp.hxx
+@@ -34,11 +34,21 @@
+ #include <com/sun/star/uno/Sequence.hxx>
+ 
+ #include "xmlscript/xmlns.h"
+-
++#include <hash_map>
++#include <com/sun/star/script/ModuleType.hpp>
+ 
+ namespace xmlscript
+ {
++struct ObjectModuleDesc
++{
++    rtl::OUString msObjectName;
++    sal_Int32 mnModuleType;
++ObjectModuleDesc() : mnModuleType( ::com::sun::star::script::ModuleType::Normal ) {}
++};
+ 
++typedef  std::hash_map< rtl::OUString,
++ObjectModuleDesc, ::rtl::OUStringHash,
++::std::equal_to< ::rtl::OUString > > ObjectModuleDescHash;
+ //==============================================================================
+ // Library container export
+ // HACK C++ struct to transport info. Later the container 
+@@ -53,14 +63,19 @@ struct LibDescriptor
+ 	sal_Bool bPasswordProtected;
+ 	::com::sun::star::uno::Sequence< ::rtl::OUString > aElementNames;
+ 	sal_Bool bPreload;
++	ObjectModuleDescHash hModuleTypeDesc;
+ };
+ 
++typedef std::hash_map< rtl::OUString, rtl::OUString, ::rtl::OUStringHash, ::std::equal_to< ::rtl::OUString > > CodeNameHash;
++
+ struct LibDescriptorArray
+ {
+     LibDescriptor* mpLibs;
+     sal_Int32 mnLibCount;
+ 
+-    LibDescriptorArray( void ) { mpLibs = NULL; mnLibCount = 0; }
++    CodeNameHash mCodeNames;
++    bool mbVBAMode;
++    LibDescriptorArray( void ) { mpLibs = NULL; mnLibCount = 0; mbVBAMode = false; }
+     LibDescriptorArray( sal_Int32 nLibCount );
+ 
+     ~LibDescriptorArray();
+@@ -79,6 +94,11 @@ SAL_CALL exportLibraryContainer(
+ SAL_CALL importLibraryContainer( LibDescriptorArray* pLibArray )
+ 		SAL_THROW( (::com::sun::star::uno::Exception) );
+ 
++::com::sun::star::uno::Reference<
++    ::com::sun::star::xml::sax::XDocumentHandler >
++SAL_CALL importLibraryCodeNames( LibDescriptorArray* pLibArray )
++		SAL_THROW( (::com::sun::star::uno::Exception) );
++
+ 
+ void
+ SAL_CALL exportLibrary(
+diff --git xmlscript/source/xmllib_imexp/imp_share.hxx xmlscript/source/xmllib_imexp/imp_share.hxx
+index d602103..fdc0536 100644
+--- xmlscript/source/xmllib_imexp/imp_share.hxx
++++ xmlscript/source/xmllib_imexp/imp_share.hxx
+@@ -220,7 +220,6 @@ class LibrariesElement : public LibEleme
+     
+ protected:
+     vector< LibDescriptor > mLibDescriptors;
+-
+ public:
+     virtual Reference< xml::input::XElement > SAL_CALL startChildElement(
+         sal_Int32 nUid, OUString const & rLocalName,
+@@ -244,7 +243,7 @@ class LibraryElement : public LibElement
+ {
+ protected:
+     vector< OUString > mElements;
+-
++    ObjectModuleDescHash mObjectDescs;
+ public:
+ 
+     virtual Reference< xml::input::XElement > SAL_CALL startChildElement(
+diff --git xmlscript/source/xmllib_imexp/xmllib_import.cxx xmlscript/source/xmllib_imexp/xmllib_import.cxx
+index b533d37..ce31ee0 100644
+--- xmlscript/source/xmllib_imexp/xmllib_import.cxx
++++ xmlscript/source/xmllib_imexp/xmllib_import.cxx
+@@ -44,7 +44,20 @@ namespace xmlscript
+ {
+ 
+ //##################################################################################################
+-
++sal_Int32 lcl_getModuleTypeForStringType( const rtl::OUString& rsType )
++{
++    // default to normal unknown
++    sal_Int32 nType = com::sun::star::script::ModuleType::Unknown;
++    if ( rsType.equalsIgnoreAsciiCase( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("class") ) ) )
++        nType = com::sun::star::script::ModuleType::Class;
++    else if ( rsType.equalsIgnoreAsciiCase( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("form") ) ) )
++        nType = com::sun::star::script::ModuleType::Form;
++    else if ( rsType.equalsIgnoreAsciiCase( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("document") ) ) )
++        nType = com::sun::star::script::ModuleType::Document;
++    else if ( rsType.equalsIgnoreAsciiCase( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("normal") ) ) )
++        nType = com::sun::star::script::ModuleType::Normal;
++    return nType;
++}
+ //__________________________________________________________________________________________________
+ Reference< xml::input::XElement > LibElementBase::getParent()
+     throw (RuntimeException)
+@@ -185,6 +198,13 @@ Reference< xml::input::XElement > Librar
+     }
+     else if (mpLibArray && rLocalName.equalsAsciiL( RTL_CONSTASCII_STRINGPARAM("libraries") ))
+     {
++        rtl::OUString sVbaCompatMode;
++        sVbaCompatMode =  xAttributes->getValueByUidName(
++            XMLNS_LIBRARY_UID,
++            OUString( RTL_CONSTASCII_USTRINGPARAM("vbaenabled") ) );
++
++        if ( sVbaCompatMode.equalsIgnoreAsciiCase( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("true") ) ) )
++            mpLibArray->mbVBAMode = true;
+         return new LibrariesElement( rLocalName, xAttributes, 0, this );
+     }
+     else if (mpLibDesc && rLocalName.equalsAsciiL( RTL_CONSTASCII_STRINGPARAM("library") ))
+@@ -269,6 +289,19 @@ Reference< xml::input::XElement > Librar
+         mLibDescriptors.push_back( aDesc );
+         return new LibraryElement( rLocalName, xAttributes, this, _pImport );
+     }
++    // CodeNames are only relevant for the container ( e.g. the document )
++    else if (rLocalName.equalsAsciiL( RTL_CONSTASCII_STRINGPARAM("codename") ))
++    {
++        rtl::OUString sCodeName =  xAttributes->getValueByUidName(
++            _pImport->XMLNS_LIBRARY_UID,
++            OUString( RTL_CONSTASCII_USTRINGPARAM("name") ) );
++        rtl::OUString sObjectName =  xAttributes->getValueByUidName(
++            _pImport->XMLNS_LIBRARY_UID,
++            OUString( RTL_CONSTASCII_USTRINGPARAM("objectname") ) );
++        if ( ( sCodeName.getLength() > 0 ) && ( sObjectName.getLength() > 0 ) )
++                _pImport->mpLibArray->mCodeNames[ sObjectName ] = sCodeName;
++        return new LibElementBase( rLocalName, xAttributes, this, _pImport );
++    }
+     else
+     {
+         throw xml::sax::SAXException(
+@@ -311,7 +344,13 @@ Reference< xml::input::XElement > Librar
+             OUString( RTL_CONSTASCII_USTRINGPARAM("name") ) ) );
+         if (aValue.getLength())
+             mElements.push_back( aValue );
+-
++        ObjectModuleDesc aDesc;
++        aDesc.mnModuleType = lcl_getModuleTypeForStringType( 
++          xAttributes->getValueByUidName(
++            _pImport->XMLNS_LIBRARY_UID,
++            OUString( RTL_CONSTASCII_USTRINGPARAM("moduletype") ) ) );
++        if ( aValue.getLength() && aDesc.mnModuleType != ::com::sun::star::script::ModuleType::Unknown )
++             mObjectDescs[ aValue ] = aDesc;
+         return new LibElementBase( rLocalName, xAttributes, this, _pImport );
+     }
+     else
+@@ -335,6 +374,7 @@ void LibraryElement::endElement()
+     if( !pLib )
+         pLib = &static_cast< LibrariesElement* >( _pParent )->mLibDescriptors.back();
+     pLib->aElementNames = aElementNames;
++    pLib->hModuleTypeDesc = mObjectDescs;
+ }
+ 
+ 
+@@ -348,6 +388,16 @@ SAL_CALL importLibraryContainer( LibDesc
+         static_cast< xml::input::XRoot * >( new LibraryImport( pLibArray ) ) );
+ }
+ 
++
++Reference< ::com::sun::star::xml::sax::XDocumentHandler >
++SAL_CALL importLibraryCodeNames( LibDescriptorArray* pLibArray )
++        SAL_THROW( (Exception) )
++{
++    return ::xmlscript::createDocumentHandler(
++        static_cast< xml::input::XRoot * >( new LibraryImport( pLibArray ) ) );
++}
++
++
+ //##################################################################################################
+ 
+ ::com::sun::star::uno::Reference< ::com::sun::star::xml::sax::XDocumentHandler >
+@@ -365,6 +415,7 @@ LibDescriptorArray::LibDescriptorArray( 
+ {
+     mnLibCount = nLibCount;
+     mpLibs = new LibDescriptor[ mnLibCount ];
++    mbVBAMode = false;
+ }
+ 
+ LibDescriptorArray::~LibDescriptorArray()
