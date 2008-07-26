@@ -190,7 +190,7 @@ class Ref3dV(TokenBase):
     def parse (self, i):
         try:
             i += 1
-            self.sheet1 = globals.getSignedInt(self.tokens[i:i+2])
+            self.extSheetId = globals.getSignedInt(self.tokens[i:i+2])
             i += 2
             self.cell = parseCellAddress(self.tokens[i:i+4])
             i += 4
@@ -202,8 +202,7 @@ class Ref3dV(TokenBase):
         if self.cell == None:
             return ''
         cellName = self.cell.getName()
-        sheetName = makeSheetName(self.sheet1, self.sheet1)
-        return "<3dref %s cellAddress='%s'>"%(sheetName, cellName)
+        return "<3dref externSheetID=%d cellAddress='%s'>"%(self.extSheetId, cellName)
 
 
 class Ref3dA(Ref3dV):
@@ -218,9 +217,7 @@ class Area3d(TokenBase):
         try:
             op = self.tokens[i]
             i += 1
-            self.sheet1 = globals.getSignedInt(self.tokens[i:i+2])
-            i += 2
-            self.sheet2 = globals.getSignedInt(self.tokens[i:i+2])
+            self.extSheetId = globals.getSignedInt(self.tokens[i:i+2])
             i += 2
             self.cellrange = parseCellRangeAddress(self.tokens[i:i+8])
         except InvalidCellAddress:
@@ -231,8 +228,7 @@ class Area3d(TokenBase):
         if self.cellrange == None:
             return ''
         cellRangeName = self.cellrange.getName()
-        sheetName = makeSheetName(self.sheet1, self.sheet2)
-        return "<3drange %s rangeAddress='%s'>"%(sheetName, cellRangeName)
+        return "<3drange externSheetID=%d rangeAddress='%s'>"%(self.extSheetId, cellRangeName)
 
 
 
