@@ -5,7 +5,6 @@ EXTRA_DIST=\
 	Novell.dic \
 	Ubuntu.dic \
 	banner_nld.bmp \
-	cli_cppuhelper.dll.config.in \
 	cli_uno_bridge.dll.config.in \
 	mono-ooo.pc.in \
 	nologoinstall_nld.bmp \
