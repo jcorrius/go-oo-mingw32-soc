@@ -1,0 +1,187 @@
+ sd/source/filter/pptin.cxx                         |    6 +
+ .../engine/transitions/slidetransitionfactory.cxx  |  115 +++++++++++++++++++++--
+ .../engine/transitions/transitionfactorytab.cxx    |   14 +++
+ 3 files changed, 124 insertions(+), 11 deletions(-)
+
+diff --git a/sd/source/filter/pptin.cxx b/sd/source/filter/pptin.cxx
+index 479299a..bb73ddc 100644
+--- sd/source/filter/pptin.cxx
++++ sd/source/filter/pptin.cxx
+@@ -1638,7 +1638,11 @@ void ImplSdPPTImport::ImportPageEffect( SdPage* pPage, const sal_Bool bNewAnimat
+ 											if ( nDirection == 0 )
+ 												pPage->SetFadeEffect( ::com::sun::star::presentation::FadeEffect_NONE );				// Direkt
+ 											else if ( nDirection == 1 )
+-												pPage->SetFadeEffect( ::com::sun::star::presentation::FadeEffect_NONE );				// Direkt ueber Schwarz
++                                            {
++                                                pPage->setTransitionType( 0 );
++                                                pPage->setTransitionSubtype( animations::TransitionSubType::FADEOVERCOLOR );
++                                                pPage->setTransitionFadeColor( 0 );
++                                            }
+ 										}
+ 										else
+ 											pPage->setTransitionType( 0 );
+diff --git a/slideshow/source/engine/transitions/slidetransitionfactory.cxx b/slideshow/source/engine/transitions/slidetransitionfactory.cxx
+index 854467b..ec23e29 100644
+--- slideshow/source/engine/transitions/slidetransitionfactory.cxx
++++ slideshow/source/engine/transitions/slidetransitionfactory.cxx
+@@ -349,6 +349,89 @@ void FadingSlideChange::performOut(
+     }
+ }
+ 
++class CutSlideChange : public SlideChangeBase
++{
++public:
++    /** Create a new SlideChanger, for the given leaving and
++        entering slides, which applies a cut effect.
++    */
++    CutSlideChange(
++        boost::optional<SlideSharedPtr> const & leavingSlide,
++        const SlideSharedPtr&                   pEnteringSlide,
++        const RGBColor&                          rFadeColor,
++        const SoundPlayerSharedPtr&             pSoundPlayer,
++        const UnoViewContainer&                 rViewContainer,
++        ScreenUpdater&                          rScreenUpdater,
++        EventMultiplexer&                       rEventMultiplexer )
++        : SlideChangeBase( leavingSlide,
++                           pEnteringSlide,
++                           pSoundPlayer,
++                           rViewContainer,
++                           rScreenUpdater,
++                           rEventMultiplexer ),
++          maFadeColor( rFadeColor ),
++          mbFirstTurn( true )
++        {}
++    
++    virtual void performIn(
++        const ::cppcanvas::CustomSpriteSharedPtr&   rSprite,
++        const ViewEntry&                            rViewEntry,
++        const ::cppcanvas::CanvasSharedPtr&         rDestinationCanvas,
++        double                                      t );
++    
++    virtual void performOut(
++        const ::cppcanvas::CustomSpriteSharedPtr&  rSprite,
++        const ViewEntry&                           rViewEntry,
++        const ::cppcanvas::CanvasSharedPtr&        rDestinationCanvas,
++        double                                     t );
++    
++private:
++    RGBColor maFadeColor;
++    bool    mbFirstTurn;
++};
++
++void CutSlideChange::performIn(
++    const ::cppcanvas::CustomSpriteSharedPtr&   rSprite,
++    const ViewEntry&                            /*rViewEntry*/,
++    const ::cppcanvas::CanvasSharedPtr&         /*rDestinationCanvas*/,
++    double                                      t )
++{
++    ENSURE_OR_THROW(
++        rSprite,
++        "CutSlideChange::performIn(): Invalid sprite" );
++    
++    // After 2/3rd of the active time, display new slide
++    rSprite->setAlpha( t > 2/3.0 ? 1.0 : 0.0 );
++}
++
++void CutSlideChange::performOut(
++    const ::cppcanvas::CustomSpriteSharedPtr&  rSprite,
++    const ViewEntry&                           rViewEntry,
++    const ::cppcanvas::CanvasSharedPtr&        rDestinationCanvas,
++    double                                     t )
++{
++    ENSURE_OR_THROW(
++        rSprite,
++        "CutSlideChange::performOut(): Invalid sprite" );
++    ENSURE_OR_THROW(
++        rDestinationCanvas,
++        "FadingSlideChange::performOut(): Invalid dest canvas" );
++    
++    if( mbFirstTurn )
++    {
++        mbFirstTurn = false;
++            
++        // clear page to given fade color. 'Leaving' slide is
++        // painted atop of that
++        fillPage( rDestinationCanvas,
++                  getEnteringSlideSizePixel( rViewEntry.mpView ),
++                  maFadeColor );
++    }
++        
++    // Until 1/3rd of the active time, display old slide.
++    rSprite->setAlpha( t > 1/3.0 ? 0.0 : 1.0 );
++}
++
+ class MovingSlideChange : public SlideChangeBase
+ {
+     /// Direction vector for leaving slide,
+@@ -883,6 +966,7 @@ NumberAnimationSharedPtr TransitionFactory::createSlideTransition(
+                             pSoundPlayer );
+                     }
+ 
++                    case 0:
+                     case animations::TransitionType::FADE:
+                     {
+                         // black page:
+@@ -914,16 +998,27 @@ NumberAnimationSharedPtr TransitionFactory::createSlideTransition(
+                                                   "SlideTransitionFactory::createSlideTransition(): Unknown FADE subtype" );
+                         }
+ 
+-                        return NumberAnimationSharedPtr( 
+-                            new FadingSlideChange(
+-                                leavingSlide,
+-                                pEnteringSlide,
+-                                comphelper::make_optional(
+-                                    rTransitionFadeColor),
+-                                pSoundPlayer,
+-                                rViewContainer,
+-                                rScreenUpdater,
+-                                rEventMultiplexer ));
++                        if( nTransitionType )
++                            return NumberAnimationSharedPtr( 
++                                new FadingSlideChange(
++                                    leavingSlide,
++                                    pEnteringSlide,
++                                    comphelper::make_optional(
++                                        rTransitionFadeColor),
++                                    pSoundPlayer,
++                                    rViewContainer,
++                                    rScreenUpdater,
++                                    rEventMultiplexer ));
++                        else
++                            return NumberAnimationSharedPtr( 
++                                new CutSlideChange(
++                                    leavingSlide,
++                                    pEnteringSlide,
++                                    rTransitionFadeColor,
++                                    pSoundPlayer,
++                                    rViewContainer,
++                                    rScreenUpdater,
++                                    rEventMultiplexer ));
+                     }
+                 }
+             }
+diff --git a/slideshow/source/engine/transitions/transitionfactorytab.cxx b/slideshow/source/engine/transitions/transitionfactorytab.cxx
+index d5be3d2..ed3f7dd 100644
+--- slideshow/source/engine/transitions/transitionfactorytab.cxx
++++ slideshow/source/engine/transitions/transitionfactorytab.cxx
+@@ -2018,6 +2018,20 @@ static const TransitionInfo lcl_transitionInfo[] =
+         true,                   // 'out' by parameter sweep inversion
+         false                   // scale isotrophically to target size
+     },
++    // this is the cut through black fade (does not fade, but does a
++    // hard cut)
++    {
++        0,
++        animations::TransitionSubType::FADEOVERCOLOR,
++        TransitionInfo::TRANSITION_SPECIAL,
++        // TODO(F2): Setup parameters
++        0.0,                    // no rotation
++        1.0,                    // no scaling
++        1.0,                    // no scaling
++        TransitionInfo::REVERSEMETHOD_IGNORE,
++        true,                   // 'out' by parameter sweep inversion
++        false                   // scale isotrophically to target size
++    },
+     
+     {
+         // mapped to RandomWipe:
