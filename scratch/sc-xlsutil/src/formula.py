@@ -88,7 +88,7 @@ def parseCellRangeAddress (bytes):
 
 
 def makeSheetName (sheet1, sheet2):
-    if sheet1 == sheet2:
+    if sheet2 == None or sheet1 == sheet2:
         sheetName = "sheetID='%d'"%sheet1
     else:
         sheetName = "sheetID='%d-%d'"%(sheet1, sheet2)
@@ -107,9 +107,15 @@ been processed.  So, if the handler processes only one token, it should
 return the same value it receives without incrementing it.  
 
 """
-    def __init__ (self, tokens):
+    def __init__ (self, header, tokens):
+        self.header = header
         self.tokens = tokens
         self.size = len(self.tokens)
+        self.init()
+
+    def init (self):
+        """initializer for a derived class"""
+        pass
 
     def parse (self, i):
         return i
@@ -155,17 +161,20 @@ class NameX(TokenBase):
 class Ref3dR(TokenBase):
     """3D reference or external reference to a cell"""
 
-    def __init__ (self, tokens):
-        TokenBase.__init__(self, tokens)
+    def init (self):
         self.cell = None
+        self.sheet1 = None
+        self.sheet2 = None
 
     def parse (self, i):
         try:
             i += 1
             self.sheet1 = globals.getSignedInt(self.tokens[i:i+2])
             i += 2
-            self.sheet2 = globals.getSignedInt(self.tokens[i:i+2])
-            i += 2
+            if self.header == 0x0023:
+                # 3A in EXTERNNAME expects a 2nd sheet index
+                self.sheet2 = globals.getSignedInt(self.tokens[i:i+2])
+                i += 2
             self.cell = parseCellAddress(self.tokens[i:i+4])
             i += 4
         except InvalidCellAddress:
@@ -183,8 +192,7 @@ class Ref3dR(TokenBase):
 class Ref3dV(TokenBase):
     """3D reference or external reference to a cell"""
 
-    def __init__ (self, tokens):
-        TokenBase.__init__(self, tokens)
+    def init (self):
         self.cell = None
 
     def parse (self, i):
@@ -206,8 +214,8 @@ class Ref3dV(TokenBase):
 
 
 class Ref3dA(Ref3dV):
-    def __init__ (self, tokens):
-        Ref3dA.__init__(self, tokens)
+    def __init__ (self, header, tokens):
+        Ref3dA.__init__(self, header, tokens)
 
 
 class Area3d(TokenBase):
@@ -230,7 +238,19 @@ class Area3d(TokenBase):
         cellRangeName = self.cellrange.getName()
         return "<3drange externSheetID=%d rangeAddress='%s'>"%(self.extSheetId, cellRangeName)
 
+class Error(TokenBase):
 
+    def parse (self, i):
+        i += 1 # skip opcode
+        self.errorNum = globals.getSignedInt(self.tokens[i:i+1])
+        i += 1
+        return i
+
+    def getText (self):
+        errorText = ''
+        if self.errorNum == 0x17:
+            errorText = '#REF!'
+        return "<error code='0x%2.2X' text='%s'>"%(self.errorNum, errorText)
 
 tokenMap = {
     # binary operator
@@ -270,6 +290,8 @@ tokenMap = {
     0x5B: Area3d,
     0x7B: Area3d,
 
+    0x1C: Error,
+
     # last item
   0xFFFF: None
 }
@@ -281,7 +303,8 @@ This class receives a series of bytes that represent formula tokens through
 the constructor.  That series of bytes must also include the formula length
 which is usually the first 2 bytes.
 """
-    def __init__ (self, tokens, sizeField=True):
+    def __init__ (self, header, tokens, sizeField=True):
+        self.header = header
         self.tokens = tokens
         self.text = ''
         self.sizeField = sizeField
@@ -311,7 +334,7 @@ which is usually the first 2 bytes.
                 continue
 
             # token handler exists.
-            o = tokenMap[tk](ftokens)
+            o = tokenMap[tk](self.header, ftokens)
             i = o.parse(i)
             self.text += o.getText() + ' '
 

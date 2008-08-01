@@ -78,7 +78,7 @@ class Formula(BaseRecordHandler):
         sharedFormula  = (flags & 0x0008) != 0
 
         tokens = self.bytes[20:]
-        fparser = formula.FormulaParser(tokens)
+        fparser = formula.FormulaParser(self.header, tokens)
         fparser.parse()
         ftext = fparser.getText()
 
@@ -239,7 +239,7 @@ class Name(BaseRecordHandler):
         name = globals.decodeName(name)
         tokenPos = 14 + byteLen
         tokenText = globals.getRawBytes(self.bytes[tokenPos:tokenPos+formulaLen], True, False)
-        o = formula.FormulaParser(self.bytes[tokenPos:tokenPos+formulaLen], False)
+        o = formula.FormulaParser(self.header, self.bytes[tokenPos:tokenPos+formulaLen], False)
         o.parse()
         self.appendLine("name: %s"%name)
         self.__parseOptionFlags(optionFlags)
@@ -351,7 +351,7 @@ class ExternName(BaseRecordHandler):
             self.appendLine("formula bytes: %s"%tokenText)
 
             # parse formula tokens
-            o = formula.FormulaParser(self.bytes[7+byteLen:])
+            o = formula.FormulaParser(self.header, self.bytes[7+byteLen:])
             o.parse()
             ftext = o.getText()
             self.appendLine("formula: %s"%ftext)
