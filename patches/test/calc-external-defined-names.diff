@@ -173,10 +173,10 @@ index 2d816d1..74f8f35 100644
      BOOL IsColRowName( const String& );
      BOOL IsBoolean( const String& );
 diff --git sc/inc/document.hxx sc/inc/document.hxx
-index 6d361ae..b5fd39d 100644
+index 85d9fd4..cf11460 100644
 --- sc/inc/document.hxx
 +++ sc/inc/document.hxx
-@@ -93,6 +93,7 @@ class ScDocOptions;
+@@ -93,6 +93,7 @@ class ScDocProtection;
  class ScDocumentPool;
  class ScDrawLayer;
  class ScExtDocOptions;
@@ -201,12 +201,20 @@ index 6d361ae..b5fd39d 100644
      /** Creates a new sheet, and makes it linked to the specified sheet in an external document.
          @param rnTab  (out-param) Returns the sheet index, if sheet could be inserted).
          @return  TRUE = Sheet created, rnTab contains valid sheet index. */
+@@ -639,6 +643,7 @@ SC_DLLPUBLIC	ScDBCollection*	GetDBCollection() const;
+ 
+ 	BOOL			HasDdeLinks() const;
+ 	BOOL			HasAreaLinks() const;
++    void            UpdateExternalRefLinks();
+ 	void			UpdateDdeLinks();
+ 	void			UpdateAreaLinks();
+ 
 diff --git sc/inc/externalrefmgr.hxx sc/inc/externalrefmgr.hxx
 new file mode 100644
-index 0000000..08b0c53
+index 0000000..aa02003
 --- /dev/null
 +++ sc/inc/externalrefmgr.hxx
-@@ -0,0 +1,343 @@
+@@ -0,0 +1,346 @@
 +/*************************************************************************
 + *
 + * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
@@ -497,6 +505,8 @@ index 0000000..08b0c53
 +    void removeSrcDocument(sal_uInt16 nFileId, bool bBreakLink);
 +    void clear();
 +
++    bool hasExternalData() const;
++
 +private:
 +    ScExternalRefManager();
 +    ScExternalRefManager(const ScExternalRefManager&); 
@@ -507,7 +517,8 @@ index 0000000..08b0c53
 +
 +    ScDocument* getSrcDocument(sal_uInt16 nFileId);
 +    SfxObjectShellRef loadSrcDocument(const String& rFile, String& rFilter);
-+    void insertExternalFileLink(sal_uInt16 nFileId, const String& rFilterName);
++
++    void maybeLinkExternalFile(sal_uInt16 nFileId);
 +
 +    bool compileTokensByCell(const ScAddress& rCell);
 +
@@ -695,7 +706,7 @@ index a68efc0..a1e3c12 100644
  
  ScBaseCell::ScBaseCell( CellType eNewType ) :
 diff --git sc/source/core/data/documen2.cxx sc/source/core/data/documen2.cxx
-index 85ad0e5..f04061f 100644
+index bfd615c..2287033 100644
 --- sc/source/core/data/documen2.cxx
 +++ sc/source/core/data/documen2.cxx
 @@ -93,6 +93,7 @@
@@ -764,8 +775,54 @@ index 541e2e4..20dae1e 100644
  BOOL ScDocument::InsertLinkedEmptyTab( SCTAB& rnTab, const String& rFileName,
          const String& rFilterName, const String& rFilterOpt, const String& rTabName )
  {
+diff --git sc/source/core/data/documen8.cxx sc/source/core/data/documen8.cxx
+index fd09e93..719206e 100644
+--- sc/source/core/data/documen8.cxx
++++ sc/source/core/data/documen8.cxx
+@@ -91,6 +91,7 @@
+ #include "markdata.hxx"
+ #include "scmod.hxx"
+ #include "printopt.hxx"
++#include "externalrefmgr.hxx"
+ #include "globstr.hrc"
+ #include "sc.hrc"
+ 
+@@ -1062,6 +1063,33 @@ BOOL ScDocument::IsInLinkUpdate() const
+     return bInLinkUpdate || IsInDdeLinkUpdate();
+ }
+ 
++void ScDocument::UpdateExternalRefLinks()
++{
++    if (!pLinkManager)
++        return;
++
++    const ::sfx2::SvBaseLinks& rLinks = pLinkManager->GetLinks();
++    USHORT nCount = rLinks.Count();
++
++    bool bAny = false;
++    for (USHORT i = 0; i < nCount; ++i)
++    {
++        ::sfx2::SvBaseLink* pBase = *rLinks[i];
++        ScExternalRefLink* pRefLink = dynamic_cast<ScExternalRefLink*>(pBase);
++        if (pRefLink)
++        {
++            pRefLink->Update();
++            bAny = true;
++        }
++    }
++    if (bAny)
++    {
++        TrackFormulas();
++        pShell->Broadcast( SfxSimpleHint(FID_DATACHANGED) );
++        ResetChanged( ScRange(0, 0, 0, MAXCOL, MAXROW, MAXTAB) );
++    }
++}
++
+ void ScDocument::UpdateDdeLinks()
+ {
+     if (pLinkManager)
 diff --git sc/source/core/tool/address.cxx sc/source/core/tool/address.cxx
-index 2cb5dce..39cdd8e 100644
+index 2cb5dce..f2d89a2 100644
 --- sc/source/core/tool/address.cxx
 +++ sc/source/core/tool/address.cxx
 @@ -35,6 +35,7 @@
@@ -776,39 +833,7 @@ index 2cb5dce..39cdd8e 100644
  
  #include "globstr.hrc"
  #include <sal/alloca.h>
-@@ -45,6 +46,31 @@
- #include <tools/urlobj.hxx>
- using namespace ::com::sun::star;
- 
-+
-+namespace {
-+
-+#include <string>
-+
-+class StackPrinter
-+{
-+public:
-+    explicit StackPrinter(const char* msg) :
-+        msMsg(msg)
-+    {
-+        fprintf(stdout, "%s: --begin\n", msMsg.c_str());
-+    }
-+
-+    ~StackPrinter()
-+    {
-+        fprintf(stdout, "%s: --end\n", msMsg.c_str());
-+    }
-+
-+private:
-+    ::std::string msMsg;
-+};
-+
-+}
-+
- ////////////////////////////////////////////////////////////////////////////
- const ScAddress::Details ScAddress::detailsOOOa1( CONV_OOO, 0, 0 );
- 
-@@ -713,15 +739,16 @@ lcl_ScRange_Parse_XL_A1( ScRange& r,
+@@ -713,15 +714,15 @@ lcl_ScRange_Parse_XL_A1( ScRange& r,
  }
  
  static USHORT
@@ -817,7 +842,6 @@ index 2cb5dce..39cdd8e 100644
 +lcl_ScAddress_Parse_OOo( const sal_Unicode* p, ScDocument* pDoc, ScAddress& rAddr, 
 +                         ScAddress::ExternalInfo* pExtInfo = NULL )
  {
-+    StackPrinter aStack("::lcl_ScAddress_Parse_OOo");
      USHORT  nRes = 0;
      String  aDocName;       // der pure Dokumentenname
      String  aDocTab;        // zusammengesetzt fuer Table
@@ -828,7 +852,7 @@ index 2cb5dce..39cdd8e 100644
  
      // Lets see if this is a reference to something in an external file.
      // A Documentname is always quoted and has a trailing #
-@@ -795,35 +822,11 @@ lcl_ScAddress_Parse_OOo( BOOL& bExternal, const sal_Unicode* p,
+@@ -795,35 +796,11 @@ lcl_ScAddress_Parse_OOo( BOOL& bExternal, const sal_Unicode* p,
          }
          if( *p++ != '.' )
              nBits = 0;
@@ -868,7 +892,7 @@ index 2cb5dce..39cdd8e 100644
          }
          else
              nBits = 0;
-@@ -884,16 +887,33 @@ lcl_ScAddress_Parse_OOo( BOOL& bExternal, const sal_Unicode* p,
+@@ -884,16 +861,33 @@ lcl_ScAddress_Parse_OOo( BOOL& bExternal, const sal_Unicode* p,
          if( !nBits )
              p = q;
      }
@@ -906,7 +930,7 @@ index 2cb5dce..39cdd8e 100644
      if ( !(nRes & SCA_VALID_ROW) && (nRes & SCA_VALID_COL)
              && !( (nRes & SCA_TAB_3D) && (nRes & SCA_VALID_TAB)) )
      {   // keine Row, keine Tab, aber Col => DM (...), B (...) o.ae.
-@@ -912,9 +932,8 @@ lcl_ScAddress_Parse_OOo( BOOL& bExternal, const sal_Unicode* p,
+@@ -912,9 +906,8 @@ lcl_ScAddress_Parse_OOo( BOOL& bExternal, const sal_Unicode* p,
  }
  
  static USHORT
@@ -918,7 +942,7 @@ index 2cb5dce..39cdd8e 100644
  {
      if( !*p )
          return 0;
-@@ -924,7 +943,7 @@ lcl_ScAddress_Parse ( BOOL& bExternal, const sal_Unicode* p,
+@@ -924,7 +917,7 @@ lcl_ScAddress_Parse ( BOOL& bExternal, const sal_Unicode* p,
      default :
      case ScAddress::CONV_OOO:
          {
@@ -927,7 +951,7 @@ index 2cb5dce..39cdd8e 100644
          }
  
      case ScAddress::CONV_XL_A1:
-@@ -949,9 +968,8 @@ bool ConvertSingleRef( ScDocument* pDoc, const String& rRefString,
+@@ -949,9 +942,8 @@ bool ConvertSingleRef( ScDocument* pDoc, const String& rRefString,
                         SCTAB nDefTab, ScRefAddress& rRefAddress,
                         const ScAddress::Details& rDetails )
  {
@@ -938,7 +962,7 @@ index 2cb5dce..39cdd8e 100644
      if( nRes & SCA_VALID )
      {
          rRefAddress.Set( aAddr,
-@@ -988,10 +1006,9 @@ bool ConvertDoubleRef( ScDocument* pDoc, const String& rRefString, SCTAB nDefTab
+@@ -988,10 +980,9 @@ bool ConvertDoubleRef( ScDocument* pDoc, const String& rRefString, SCTAB nDefTab
  
  
  USHORT ScAddress::Parse( const String& r, ScDocument* pDoc,
@@ -951,7 +975,7 @@ index 2cb5dce..39cdd8e 100644
  }
  
  
-@@ -1060,7 +1077,7 @@ void ScRange::ExtendTo( const ScRange& rRange )
+@@ -1060,7 +1051,7 @@ void ScRange::ExtendTo( const ScRange& rRange )
  }
  
  static USHORT
@@ -960,7 +984,7 @@ index 2cb5dce..39cdd8e 100644
  {
      USHORT nRes1 = 0, nRes2 = 0;
      xub_StrLen nTmp = 0;
-@@ -1073,13 +1090,12 @@ lcl_ScRange_Parse_OOo( ScRange &aRange, const String& r, ScDocument* pDoc )
+@@ -1073,13 +1064,12 @@ lcl_ScRange_Parse_OOo( ScRange &aRange, const String& r, ScDocument* pDoc )
          String aTmp( r );
          sal_Unicode* p = aTmp.GetBufferAccess();
          p[ nPos ] = 0;
@@ -977,7 +1001,7 @@ index 2cb5dce..39cdd8e 100644
                      nRes2 &= ~SCA_VALID_TAB;    // #REF!
                  else
                  {
-@@ -1132,7 +1148,7 @@ lcl_ScRange_Parse_OOo( ScRange &aRange, const String& r, ScDocument* pDoc )
+@@ -1132,7 +1122,7 @@ lcl_ScRange_Parse_OOo( ScRange &aRange, const String& r, ScDocument* pDoc )
  }
  
  USHORT ScRange::Parse( const String& r, ScDocument* pDoc,
@@ -986,7 +1010,7 @@ index 2cb5dce..39cdd8e 100644
  {
      if ( r.Len() <= 0 )
          return 0;
-@@ -1141,7 +1157,7 @@ USHORT ScRange::Parse( const String& r, ScDocument* pDoc,
+@@ -1141,7 +1131,7 @@ USHORT ScRange::Parse( const String& r, ScDocument* pDoc,
      {
      default :
      case ScAddress::CONV_OOO:
@@ -5048,12 +5072,32 @@ index c702954..219b227 100644
  	RTL_LOGFILE_CONTEXT_AUTHOR ( aLog, "sc", "nn93723", "ScDocShell::ConvertTo" );
  
  	ScRefreshTimerProtector( aDocument.GetRefreshTimerControlAddress() );
+diff --git sc/source/ui/docshell/docsh4.cxx sc/source/ui/docshell/docsh4.cxx
+index bc5975d..6701d1c 100644
+--- sc/source/ui/docshell/docsh4.cxx
++++ sc/source/ui/docshell/docsh4.cxx
+@@ -123,6 +123,7 @@ using namespace ::com::sun::star;
+ #include <com/sun/star/document/UpdateDocMode.hpp>
+ #include "scresid.hxx" //add by CHINA001
+ #include "scabstdlg.hxx" //CHINA001
++#include "externalrefmgr.hxx"
+ 
+ #include "sharedocdlg.hxx"
+ 
+@@ -540,6 +541,7 @@ void ScDocShell::Execute( SfxRequest& rReq )
+ 				if (nDlgRet == RET_YES || nSet==LM_ALWAYS)
+ 				{
+ 					ReloadTabLinks();
++                    aDocument.UpdateExternalRefLinks();
+ 					aDocument.UpdateDdeLinks();
+ 					aDocument.UpdateAreaLinks();
+ 
 diff --git sc/source/ui/docshell/externalrefmgr.cxx sc/source/ui/docshell/externalrefmgr.cxx
 new file mode 100644
-index 0000000..7e3ddcc
+index 0000000..80425f0
 --- /dev/null
 +++ sc/source/ui/docshell/externalrefmgr.cxx
-@@ -0,0 +1,1332 @@
+@@ -0,0 +1,1360 @@
 +/*************************************************************************
 + *
 + * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
@@ -5116,6 +5160,7 @@ index 0000000..7e3ddcc
 +#include "svtools/itemset.hxx"
 +#include "svtools/stritem.hxx"
 +#include "svx/linkmgr.hxx"
++#include "unotools/ucbhelper.hxx"
 +
 +#include <memory>
 +#include <stdio.h>
@@ -5859,6 +5904,8 @@ index 0000000..7e3ddcc
 +    if (pCurPos)
 +        insertReferencingCell(nFileId, *pCurPos);
 +
++    maybeLinkExternalFile(nFileId);
++
 +    if (pTab)
 +        *pTab = -1;
 +
@@ -5910,6 +5957,8 @@ index 0000000..7e3ddcc
 +{
 +    if (pCurPos)
 +        insertReferencingCell(nFileId, *pCurPos);
++
++    maybeLinkExternalFile(nFileId);
 +
 +    // Check if the given table name and the cell position is cached.
 +    ScTokenArray* p = maRefCache.getCellRangeData(nFileId, rTabName, rRange);
@@ -5989,6 +6038,8 @@ index 0000000..7e3ddcc
 +
 +    if (pCurPos)
 +        insertReferencingCell(nFileId, *pCurPos);
++
++    maybeLinkExternalFile(nFileId);
 +
 +    ScTokenArray* pArray = maRefCache.getRangeNameTokens(nFileId, rName);
 +    if (pArray)
@@ -6133,6 +6184,12 @@ index 0000000..7e3ddcc
 +    String aFilter;
 +    SrcDoc aSrcDoc;
 +    aSrcDoc.maShell = loadSrcDocument(*pFile, aFilter);
++    if (!aSrcDoc.maShell.Is())
++    {
++        fprintf(stdout, "ScExternalRefManager::getSrcDocument:   source document could not be loaded.\n");    
++        return NULL;
++    }
++
 +    if (maDocShells.empty())
 +    {
 +        // If this is the first source document insertion, start up the timer.
@@ -6140,12 +6197,6 @@ index 0000000..7e3ddcc
 +    }
 +
 +    maDocShells.insert(DocShellMap::value_type(nFileId, aSrcDoc));
-+    if (!maLinkedDocs.count(nFileId))
-+    {
-+        // Source document not linked yet.  Link it now.
-+        insertExternalFileLink(nFileId, aFilter);
-+        maLinkedDocs.insert(nFileId);
-+    }
 +    SfxObjectShell* p = aSrcDoc.maShell;
 +    ScDocument* pSrcDoc = static_cast<ScDocShell*>(p)->GetDocument();
 +
@@ -6168,6 +6219,11 @@ index 0000000..7e3ddcc
 +
 +SfxObjectShellRef ScExternalRefManager::loadSrcDocument(const String& rFile, String& rFilter)
 +{
++    // First, make sure the file actually exists at the specified URL.
++    if (!utl::UCBContentHelper::Exists(rFile) || utl::UCBContentHelper::IsFolder(rFile))
++        // Either the specified file doesn't exist, or it's a folder.
++        return NULL;
++
 +    String aOptions;
 +    ScDocumentLoader::GetFilterName(rFile, rFilter, aOptions, true, false);
 +    const SfxFilter* pFilter = ScDocShell::Factory().GetFilterContainer()->GetFilter4FilterName(rFilter);
@@ -6176,7 +6232,7 @@ index 0000000..7e3ddcc
 +    if (aOptions.Len())
 +        pSet->Put(SfxStringItem(SID_FILE_FILTEROPTIONS, aOptions));
 +
-+    auto_ptr<SfxMedium> pMedium(new SfxMedium(rFile, STREAM_STD_READ, FALSE, pFilter, pSet));
++    auto_ptr<SfxMedium> pMedium(new SfxMedium(rFile, STREAM_STD_READ, false, pFilter, pSet));
 +    if (pMedium->GetError() != ERRCODE_NONE)
 +        return NULL;
 +
@@ -6201,17 +6257,29 @@ index 0000000..7e3ddcc
 +    return aRef;
 +}
 +
-+void ScExternalRefManager::insertExternalFileLink(sal_uInt16 nFileId, const String& rFilterName)
++void ScExternalRefManager::maybeLinkExternalFile(sal_uInt16 nFileId)
 +{
-+    SvxLinkManager* pLinkMgr = mpDoc->GetLinkManager();
-+    ScExternalRefLink* pLink = new ScExternalRefLink(mpDoc, nFileId, rFilterName);
++    if (maLinkedDocs.count(nFileId))
++        // file alerady linked.
++        return;
++
++    // Source document not linked yet.  Link it now.
 +    const String* pFileName = getExternalFileName(nFileId);
++    if (!pFileName)
++        return;
++
++    String aFilter, aOptions;
++    ScDocumentLoader::GetFilterName(*pFileName, aFilter, aOptions, true, false);
++    SvxLinkManager* pLinkMgr = mpDoc->GetLinkManager();
++    ScExternalRefLink* pLink = new ScExternalRefLink(mpDoc, nFileId, aFilter);
 +    DBG_ASSERT(pFileName, "ScExternalRefManager::insertExternalFileLink: file name pointer is NULL");
-+    pLinkMgr->InsertFileLink(*pLink, OBJECT_CLIENT_FILE, *pFileName, &rFilterName);
++    pLinkMgr->InsertFileLink(*pLink, OBJECT_CLIENT_FILE, *pFileName, &aFilter);
 +
 +    pLink->SetDoReferesh(false);
 +    pLink->Update();
 +    pLink->SetDoReferesh(true);
++
++    maLinkedDocs.insert(nFileId);
 +}
 +
 +bool ScExternalRefManager::compileTokensByCell(const ScAddress& rCell)
@@ -6225,10 +6293,7 @@ index 0000000..7e3ddcc
 +    mpDoc->GetCell(rCell.Col(), rCell.Row(), rCell.Tab(), pCell);
 +
 +    if (!pCell || pCell->GetCellType() != CELLTYPE_FORMULA)
-+    {
-+        fprintf(stdout, "ScExternalRefManager::compileTokensByCell: --end (not a valid formula cell)\n");
 +        return false;
-+    }
 +
 +    ScFormulaCell* pFC = static_cast<ScFormulaCell*>(pCell);
 +
@@ -6247,16 +6312,18 @@ index 0000000..7e3ddcc
 +        }
 +    }
 +    if (!bCompile)
-+    {
-+        fprintf(stdout, "ScExternalRefManager::compileTokensByCell: --end (cell doesn't contain any external name)\n");
 +        return false;
-+    }
++
++    ScTokenArray* pArray = pFC->GetCode();
++    if (pArray)
++        // Clear the error code, or a cell with error won't get re-compiled.
++        pArray->SetCodeError(0);
 +
 +    pFC->SetCompile(true);
 +    pFC->CompileTokenArray();
 +    pFC->SetDirty();
 +
-+    fprintf(stdout, "ScExternalRefManager::compileTokensByCell: --end (cell re-compiled)\n");
++    fprintf(stdout, "ScExternalRefManager::compileTokensByCell:   cell recompiled\n");
 +    return true;
 +}
 +
@@ -6356,6 +6423,11 @@ index 0000000..7e3ddcc
 +    maSrcDocTimer.Stop();
 +}
 +
++bool ScExternalRefManager::hasExternalData() const
++{
++    return !maFileNames.empty();
++}
++
 +void ScExternalRefManager::purgeStaleSrcDocument(sal_Int32 nTimeOut)
 +{
 +    DocShellMap aNewDocShells;
@@ -6422,6 +6494,32 @@ index db83fec..6286dfb 100644
          $(SLO)$/tablink.obj   	\
          $(SLO)$/arealink.obj   	\
          $(SLO)$/dbdocfun.obj 	\
+diff --git sc/source/ui/view/tabvwsh4.cxx sc/source/ui/view/tabvwsh4.cxx
+index 436f0eb..2bf1f26 100644
+--- sc/source/ui/view/tabvwsh4.cxx
++++ sc/source/ui/view/tabvwsh4.cxx
+@@ -100,6 +100,7 @@
+ #include "navsett.hxx"
+ #include "sc.hrc" //CHINA001
+ #include "scabstdlg.hxx" //CHINA001
++#include "externalrefmgr.hxx"
+ 
+ void ActivateOlk( ScViewData* pViewData );
+ void DeActivateOlk( ScViewData* pViewData );
+@@ -1833,11 +1834,8 @@ void ScTabViewShell::Construct( BYTE nForceDesignMode )
+ 		if ( pDocSh->GetCreateMode() != SFX_CREATE_MODE_INTERNAL &&
+              pDocSh->IsUpdateEnabled() )  // #105575#; update only in the first creation of the ViewShell
+ 		{
+-			BOOL bLink = FALSE;									// Links updaten
+-			SCTAB nTabCount = pDoc->GetTableCount();
+-			for (SCTAB i=0; i<nTabCount && !bLink; i++)
+-				if (pDoc->IsLinked(i))
+-					bLink = TRUE;
++            // Check if there are any external data.
++            bool bLink = pDoc->GetExternalRefManager()->hasExternalData();
+ 			if (!bLink)
+ 				if (pDoc->HasDdeLinks() || pDoc->HasAreaLinks())
+ 					bLink = TRUE;
 diff --git sc/source/ui/view/viewfun3.cxx sc/source/ui/view/viewfun3.cxx
 index e42ed5d..e660e1c 100644
 --- sc/source/ui/view/viewfun3.cxx
