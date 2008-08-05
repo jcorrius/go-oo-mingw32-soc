@@ -20,6 +20,7 @@ done << EOF
 /bootstrap
 /makefile.mk
 unxlng*.pro
+unxlngi6
 localize.sdf
 /solver
 *.orig
