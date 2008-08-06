@@ -1,84 +1,71 @@
-diff --git basctl/source/dlged/propbrw.cxx basctl/source/dlged/propbrw.cxx
-index bfc59b0..0e40383 100644
---- basctl/source/dlged/propbrw.cxx
-+++ basctl/source/dlged/propbrw.cxx
-@@ -209,7 +209,12 @@ void PropBrw::ImplReCreateController()
-         ::cppu::ContextEntry_Init aHandlerContextInfo[] =
-         {
-             ::cppu::ContextEntry_Init( ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "DialogParentWindow" ) ), makeAny( VCLUnoHelper::GetInterface ( this ) ) ),
--            ::cppu::ContextEntry_Init( ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "ContextDocument" ) ), makeAny( m_xContextDocument ) )
-+            ::cppu::ContextEntry_Init( ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "ContextDocument" ) ), makeAny( m_xContextDocument ) ),
-+            // Temporary disable of non-linked images for dialogs 
-+            // (needs some support in the dialog code, the toolkit 
-+            // already supports non-linked images ) 
-+            ::cppu::ContextEntry_Init( ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "SupportNonLinkedImage" ) ), makeAny( sal_False ) )
-+
-         };
-         Reference< XComponentContext > xInspectorContext(
-             ::cppu::createComponentContext( aHandlerContextInfo, sizeof( aHandlerContextInfo ) / sizeof( aHandlerContextInfo[0] ),
 diff --git extensions/source/propctrlr/formcomponenthandler.cxx extensions/source/propctrlr/formcomponenthandler.cxx
-index e8ef25c..df1b436 100644
+index e8ef25c..50b418b 100644
 --- extensions/source/propctrlr/formcomponenthandler.cxx
 +++ extensions/source/propctrlr/formcomponenthandler.cxx
 @@ -80,6 +80,7 @@
  #include <com/sun/star/inspection/PropertyLineElement.hpp>
  #include <com/sun/star/resource/XStringResourceManager.hpp>
  #include <com/sun/star/resource/MissingResourceException.hpp>
-+#include <com/sun/star/graphic/GraphicObjectAccess.hpp>
++#include <com/sun/star/graphic/GraphicObjectFactory.hpp>
  /** === end UNO includes === **/
  #include <connectivity/dbexception.hxx>
  #include <vcl/wrkwin.hxx>
-@@ -1360,9 +1361,18 @@ namespace pcr
-             break;
+@@ -116,6 +117,7 @@
  
-         case PROPERTY_ID_IMAGE_URL:
--            if ( impl_browseForImage_nothrow( _rData, aGuard ) )
--                eResult = InteractiveSelectionResult_ObtainedValue;
-+        {
-+            bool bIsLink = false;
-+            if ( impl_browseForImage_nothrow( _rData, bIsLink, aGuard ) )
-+            {
-+                if ( bIsLink )
-+                    eResult = InteractiveSelectionResult_ObtainedValue;
-+                else 
-+                    // ImageURL already set in impl_browseForImage_nothrow
-+                    eResult = InteractiveSelectionResult_Success;
-+            }
-             break;
-+        }
+ #include <limits>
  
-         case PROPERTY_ID_TARGET_URL:
-             if ( impl_browseForTargetURL_nothrow( _rData, aGuard ) )
-@@ -2656,13 +2666,27 @@ namespace pcr
-     }
- 
-     //------------------------------------------------------------------------
--    bool FormComponentPropertyHandler::impl_browseForImage_nothrow( Any& _out_rNewValue, ::osl::ClearableMutexGuard& _rClearBeforeDialog ) const
-+    bool FormComponentPropertyHandler::impl_browseForImage_nothrow( Any& _out_rNewValue, bool& bIsLink, ::osl::ClearableMutexGuard& _rClearBeforeDialog ) const
++#define GRAPHOBJ_URLPREFIX "vnd.sun.star.GraphicObject:"
+ //------------------------------------------------------------------------
+ extern "C" void SAL_CALL createRegistryInfo_FormComponentPropertyHandler()
+ {
+@@ -328,6 +330,8 @@ namespace pcr
+     //--------------------------------------------------------------------
+     void SAL_CALL FormComponentPropertyHandler::setPropertyValue( const ::rtl::OUString& _rPropertyName, const Any& _rValue ) throw (UnknownPropertyException, RuntimeException)
      {
-+        bIsLink = true;// reflect the legacy behavior
++	rtl::OUString sVal;
++	_rValue >>= sVal;
+         if( _rPropertyName == PROPERTY_ROWSET )
+         {
+             ::comphelper::OPropertyContainer::setPropertyValue( _rPropertyName, _rValue );
+@@ -336,7 +340,16 @@ namespace pcr
+         ::osl::MutexGuard aGuard( m_aMutex );
+         PropertyId nPropId( impl_getPropertyId_throw( _rPropertyName ) ); // check if property is known by the handler
+ 
+-        if ( PROPERTY_ID_FONT_NAME == nPropId )
++        Reference< graphic::XGraphicObject > xGrfObj;
++        if ( PROPERTY_ID_IMAGE_URL == nPropId && ( _rValue >>= xGrfObj ) )
++        {
++            DBG_ASSERT( xGrfObj.is(), "FormComponentPropertyHandler::setPropertyValue() xGrfObj is invalid");
++            rtl::OUString ObjectID( RTL_CONSTASCII_USTRINGPARAM( GRAPHOBJ_URLPREFIX ) );
++            ObjectID = ObjectID + xGrfObj->getUniqueID();
++            Any aValue( ObjectID );
++            m_xComponent->setPropertyValue( _rPropertyName, aValue );
++        }
++        else if ( PROPERTY_ID_FONT_NAME == nPropId )
+         {
+             // special handling, the value is a faked value we generated ourself in impl_executeFontDialog_nothrow
+             Sequence< NamedValue > aFontPropertyValues;
+@@ -2658,12 +2673,18 @@ namespace pcr
+     //------------------------------------------------------------------------
+     bool FormComponentPropertyHandler::impl_browseForImage_nothrow( Any& _out_rNewValue, ::osl::ClearableMutexGuard& _rClearBeforeDialog ) const
+     {
++        bool bIsLink = true;// reflect the legacy behavior
          ::rtl::OUString aStrTrans = m_pInfoService->getPropertyTranslation( PROPERTY_ID_IMAGE_URL );
  
          ::sfx2::FileDialogHelper aFileDlg(SFXWB_GRAPHIC);
  
          aFileDlg.SetTitle(aStrTrans);
-+        bool bHandleNonLink = sal_True; 
+-
 +        // Bit of a hack to allow basic dialogs to override support for 
 +        // non-linked images ( e.g. those located in the document 
-+        // stream )  Event though the toolkit control CAN handle this but 
++        // stream )  Even though the toolkit control CAN handle this but 
 +        // the dialog code can't ( right now ) hopefully it  will soon
-+        try
-+        {	
-+            m_aContext.getContextValueByAsciiName( "SupportNonLinkedImage" ) >>= bHandleNonLink;
-+        }
-+        catch( const Exception& e )
-+        {
-+            DBG_UNHANDLED_EXCEPTION(); // shouldn't happen
-+        }
- 
++        bool bHandleNonLink = ( m_eComponentClass == eFormControl );
++        
          Reference< XFilePickerControlAccess > xController(aFileDlg.GetFilePicker(), UNO_QUERY);
          DBG_ASSERT(xController.is(), "FormComponentPropertyHandler::impl_browseForImage_nothrow: missing the controller interface on the file picker!");
-@@ -2671,9 +2695,9 @@ namespace pcr
+         if (xController.is())
+@@ -2671,14 +2692,14 @@ namespace pcr
              // do a preview by default
              xController->setValue(ExtendedFilePickerElementIds::CHECKBOX_PREVIEW, 0, ::cppu::bool2any(sal_True));
  
@@ -91,10 +78,17 @@ index e8ef25c..df1b436 100644
          }
  
          ::rtl::OUString sCurValue;
-@@ -2687,7 +2711,26 @@ namespace pcr
+         OSL_VERIFY( impl_getPropertyValue_throw( PROPERTY_IMAGE_URL ) >>= sCurValue );
+-        if ( sCurValue.getLength() != 0 )
++        if ( sCurValue.getLength() != 0 && sCurValue.compareToAscii(GRAPHOBJ_URLPREFIX, RTL_CONSTASCII_LENGTH(GRAPHOBJ_URLPREFIX) ) != 0 )
+         {
+             aFileDlg.SetDisplayDirectory( sCurValue );
+             // TODO: need to set the display directory _and_ the default name
+@@ -2687,7 +2708,26 @@ namespace pcr
          _rClearBeforeDialog.clear();
          bool bSuccess = ( 0 == aFileDlg.Execute() );
          if ( bSuccess )
+-            _out_rNewValue <<= (::rtl::OUString)aFileDlg.GetPath();
 +        {
 +            if ( bHandleNonLink && xController.is() )
 +            {
@@ -104,71 +98,63 @@ index e8ef25c..df1b436 100644
 +            {
 +                Graphic aGraphic;
 +                aFileDlg.GetGraphic( aGraphic );
-+                // Hold GraphicObject instance here until the property is set
-+                Reference< graphic::XGraphicObject > xGrfObj = graphic::GraphicObjectAccess::createGraphicObject( m_aContext.getUNOContext() );
++                
++                Reference< graphic::XGraphicObject > xGrfObj = graphic::GraphicObjectFactory::createGraphicObject( m_aContext.getUNOContext() );
 +                xGrfObj->setGraphic( aGraphic.GetXGraphic() ); 
-+                rtl::OUString ObjectID( RTL_CONSTASCII_USTRINGPARAM("vnd.sun.star.GraphicObject:" ) );
-+                ObjectID = ObjectID + xGrfObj->getUniqueID();
++                
++                
++                _out_rNewValue <<= xGrfObj;
 +                 
-+                m_xComponent->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "ImageURL" ) ), uno::makeAny( ObjectID ) );
 +            }
-+
-             _out_rNewValue <<= (::rtl::OUString)aFileDlg.GetPath();
++            else
++                _out_rNewValue <<= (::rtl::OUString)aFileDlg.GetPath();
 +        }
          return bSuccess;
      }
  
-diff --git extensions/source/propctrlr/formcomponenthandler.hxx extensions/source/propctrlr/formcomponenthandler.hxx
-index 2216704..fb34827 100644
---- extensions/source/propctrlr/formcomponenthandler.hxx
-+++ extensions/source/propctrlr/formcomponenthandler.hxx
-@@ -305,11 +305,13 @@ namespace pcr
-                 our component actually has a ImageURL property
-             @param _out_rNewValue
-                 the new property value, if the user chose a new image url
-+            @param _out_bIsLink
-+                <TRUE/> if the chosen image a link
-             @return
-                 <TRUE/> if and only if a new image URL has been chosen by the user.
-                 In this case, ->_out_rNewValue is filled with the new property value
-         */
--        bool impl_browseForImage_nothrow( ::com::sun::star::uno::Any& _out_rNewValue, ::osl::ClearableMutexGuard& _rClearBeforeDialog ) const;
-+        bool impl_browseForImage_nothrow( ::com::sun::star::uno::Any& _out_rNewValue, bool& _out_bIsLink, ::osl::ClearableMutexGuard& _rClearBeforeDialog ) const;
- 
-         /** executes a dialog which allows the user to change the TargetURL property of
-             our component
-diff --git extensions/source/propctrlr/propcontroller.cxx extensions/source/propctrlr/propcontroller.cxx
-index 80c07a6..26eba26 100644
---- extensions/source/propctrlr/propcontroller.cxx
-+++ extensions/source/propctrlr/propcontroller.cxx
-@@ -1481,7 +1481,8 @@ namespace pcr
-         {
-             ::cppu::ContextEntry_Init aHandlerContextInfo[] =
-             {
--                ::cppu::ContextEntry_Init( ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "DialogParentWindow" ) ), makeAny( VCLUnoHelper::GetInterface( m_pView ) ) )
-+                ::cppu::ContextEntry_Init( ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "DialogParentWindow" ) ), makeAny( VCLUnoHelper::GetInterface( m_pView ) ) ),
-+                ::cppu::ContextEntry_Init( ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "SupportNonLinkedImage" ) ), makeAny( sal_True ) )
-             };
-             xHandlerContext = ::cppu::createComponentContext(
-                 aHandlerContextInfo, sizeof( aHandlerContextInfo ) / sizeof( aHandlerContextInfo[0] ),
+diff --git extensions/source/propctrlr/usercontrol.cxx extensions/source/propctrlr/usercontrol.cxx
+index a9db7bd..6250e8d 100644
+--- extensions/source/propctrlr/usercontrol.cxx
++++ extensions/source/propctrlr/usercontrol.cxx
+@@ -282,7 +282,7 @@ namespace pcr
+ 	void SAL_CALL OFileUrlControl::setValue( const Any& _rValue ) throw (IllegalTypeException, RuntimeException)
+     {
+         ::rtl::OUString sURL;
+-        if ( _rValue >>= sURL )
++        if ( ( _rValue >>= sURL ) && sURL.indexOf( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "vnd.sun.star.GraphicObject:"  ) ) ) != 0  )
+             getTypedControlWindow()->DisplayURL( sURL );
+         else
+             getTypedControlWindow()->SetText( String() );
 diff --git forms/source/component/ImageControl.cxx forms/source/component/ImageControl.cxx
-index 1ba9f90..5d9e757 100644
+index 1ba9f90..bd8e338 100644
 --- forms/source/component/ImageControl.cxx
 +++ forms/source/component/ImageControl.cxx
-@@ -353,7 +353,7 @@ sal_Bool OImageControlModel::handleNewIm
+@@ -353,9 +353,9 @@ sal_Bool OImageControlModel::handleNewImageURL( const ::rtl::OUString& _rURL, Va
      ::std::auto_ptr< SvStream > pImageStream;
      Reference< XInputStream > xImageStream;
  
 -    if ( ::svt::ImageResourceAccess::isImageResourceURL( _rURL ) )
-+    if ( ::svt::ImageResourceAccess::isImageResourceURL( _rURL ) || _rURL.indexOf( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "vnd.sun.star.GraphicObject:"  ) )  == 0  ))
++    if ( ::svt::GraphicAccess::isImageResourceURL( _rURL ) || ::svt::GraphicAccess::isGraphicObjectURL( _rURL ) )
      {
-         xImageStream = ::svt::ImageResourceAccess::getImageXStream( getORB(), _rURL );
+-        xImageStream = ::svt::ImageResourceAccess::getImageXStream( getORB(), _rURL );
++        xImageStream = ::svt::GraphicAccess::getImageXStream( getORB(), _rURL );
      }
+     else
+     {
 diff --git forms/source/component/clickableimage.cxx forms/source/component/clickableimage.cxx
-index 2a3e691..9c6a478 100644
+index 2a3e691..c7b31ec 100644
 --- forms/source/component/clickableimage.cxx
 +++ forms/source/component/clickableimage.cxx
-@@ -705,6 +705,9 @@ namespace frm
+@@ -52,7 +52,7 @@
+ #include "services.hxx"
+ #include <comphelper/container.hxx>
+ #include <comphelper/listenernotification.hxx>
+-
++#include <svtools/imageresourceaccess.hxx>
+ #define LOCAL_URL_PREFIX	'#'
+ 
+ //.........................................................................
+@@ -705,15 +705,20 @@ namespace frm
      void OClickableImageBaseModel::StartProduction()
      {
          ImageProducer *pImgProd = GetImageProducer();
@@ -177,8 +163,15 @@ index 2a3e691..9c6a478 100644
 +        getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("ImageURL") ) ) >>= sURL;       
          if (!m_pMedium)
          {
-             // caution: the medium may be NULL if somebody gave us a invalid URL to work with
-@@ -713,7 +716,6 @@ namespace frm
+-            // caution: the medium may be NULL if somebody gave us a invalid URL to work with
+-            // 11/24/2000 - 79667 - FS
+-            pImgProd->SetImage(String());
++            if ( ::svt::GraphicAccess::isGraphicObjectURL( sURL )  )
++                pImgProd->SetImage( sURL );
++            else 
++                // caution: the medium may be NULL if somebody gave us a invalid URL to work with
++                // 11/24/2000 - 79667 - FS
++                pImgProd->SetImage(String());
              m_bDownloading = sal_False;
              return;
          }
@@ -186,62 +179,42 @@ index 2a3e691..9c6a478 100644
          if (m_pMedium->GetErrorCode()==0)
          {
              SvStream* pStream = m_pMedium->GetInStream();
-@@ -722,7 +724,29 @@ namespace frm
-             pImgProd->startProduction();
-             m_bProdStarted = sal_True;
+@@ -749,8 +754,8 @@ namespace frm
+             // we treat an invalid URL like we would treat no URL
+             return;
+ 
+-        if (rURL.getLength())
+-        {
++        if (rURL.getLength() && !::svt::GraphicAccess::isGraphicObjectURL( rURL ) ) 
++       {
+             if (m_pMedium)
+                 delete m_pMedium;
+ 
+@@ -860,6 +865,8 @@ namespace frm
          }
--        else
-+        else if ( sURL.indexOf( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("vnd.sun.star.GraphicObject:") ) == 0 ) )
-+        {
-+            // #TODO This is a bit of a hack, but I can't see a reason why using 
-+            // SfxMedium [*] is necessary here ( for GraphicObject scheme 
-+            // objects )
-+            // We will get here if we have a vnd.sun.star.GraphicObject:xxxxx
-+            // object ( the test above will fail because the SfxMedium can't 
-+            // handle 'em )
-+            // Is the SfxMedium use just to handle say external links ( ftp etc. )
-+            // and notify when they are read?
-+            //
-+            // [*] there are 2 scenarios with "vnd.sun.star.GraphicObject:xxx"
-+            // a) there is a real "vnd.sun.star.Package:xxx" type url. e.g. the image is stored to the document 
-+            // b) the image is not yet stored to document ( in this case the
-+            // real url to the target image could be used ) or a stream could
-+            // I guess be contstructed from the XGraphic object, but is this
-+            // necessary ?
-+            pImgProd->SetImage(sURL);
-+            pImgProd->startProduction();
-+            m_bProdStarted = sal_True;
-+        }
-+
-+        else 
+         else
          {
-             pImgProd->SetImage(String());
-             delete m_pMedium;
++            if ( ::svt::GraphicAccess::isGraphicObjectURL( rURL )  )
++                GetImageProducer()->SetImage( rURL );
+             GetImageProducer()->startProduction();
+         }
+     }
 diff --git forms/source/component/imgprod.cxx forms/source/component/imgprod.cxx
-index 01fa8ac..96882b3 100644
+index 01fa8ac..79d8510 100644
 --- forms/source/component/imgprod.cxx
 +++ forms/source/component/imgprod.cxx
-@@ -267,7 +267,7 @@ void ImageProducer::SetImage( const ::rt
+@@ -267,9 +267,9 @@ void ImageProducer::SetImage( const ::rtl::OUString& rPath )
  	mbAsync = sal_False;
  	delete mpStm;
  
 -    if ( ::svt::ImageResourceAccess::isImageResourceURL( maURL ) )
-+    if ( ::svt::ImageResourceAccess::isImageResourceURL( maURL ) || maURL.compareToAscii( UNO_NAME_GRAPHOBJ_URLPREFIX, RTL_CONSTASCII_LENGTH( UNO_NAME_GRAPHOBJ_URLPREFIX ) ) == 0 )
++    if ( ::svt::GraphicAccess::isImageResourceURL( maURL ) || ::svt::GraphicAccess::isGraphicObjectURL( maURL ) )
      {
-         mpStm = ::svt::ImageResourceAccess::getImageStream( ::comphelper::getProcessServiceFactory(), maURL );
+-        mpStm = ::svt::ImageResourceAccess::getImageStream( ::comphelper::getProcessServiceFactory(), maURL );
++        mpStm = ::svt::GraphicAccess::getImageStream( ::comphelper::getProcessServiceFactory(), maURL );
      }
-diff --git forms/source/component/imgprod.hxx forms/source/component/imgprod.hxx
-index 6dc6235..e7ab6d0 100644
---- forms/source/component/imgprod.hxx
-+++ forms/source/component/imgprod.hxx
-@@ -40,6 +40,7 @@
- #include <com/sun/star/lang/XInitialization.hpp>
- #include <cppuhelper/weak.hxx>
- 
-+#define UNO_NAME_GRAPHOBJ_URLPREFIX                             "vnd.sun.star.GraphicObject:"
- 
- // -----------------
- // - ImageProducer -
+     else if( maURL.getLength() )
+ 	{
 diff --git goodies/source/unographic/graphicuno.cxx goodies/source/unographic/graphicuno.cxx
 index 645c048..b39f7a7 100755
 --- goodies/source/unographic/graphicuno.cxx
@@ -261,7 +234,7 @@ index 645c048..b39f7a7 100755
  // --------------------
  // - *_createInstance -
  // --------------------
-@@ -72,7 +74,7 @@ extern "C" void SAL_CALL component_getIm
+@@ -72,7 +74,7 @@ extern "C" void SAL_CALL component_getImplementationEnvironment( const sal_Char*
  // - component_writeInfo -
  // -----------------------
  
@@ -270,7 +243,7 @@ index 645c048..b39f7a7 100755
  {
  	sal_Bool bRet = sal_False;
  
-@@ -105,6 +107,9 @@ extern "C" sal_Bool SAL_CALL component_w
+@@ -105,6 +107,9 @@ extern "C" sal_Bool SAL_CALL component_writeInfo( void* /*pServiceManager*/, voi
  		    
  			for( i = 0; i < aServices.getLength(); i++ )
  		        xNewKey->createKey( aServices.getConstArray()[ i ] );
@@ -280,7 +253,7 @@ index 645c048..b39f7a7 100755
  				
  			bRet = true;
  		}
-@@ -121,7 +126,7 @@ extern "C" sal_Bool SAL_CALL component_w
+@@ -121,7 +126,7 @@ extern "C" sal_Bool SAL_CALL component_writeInfo( void* /*pServiceManager*/, voi
  // - component_getFactory -
  // ------------------------
  
@@ -289,7 +262,7 @@ index 645c048..b39f7a7 100755
  {
  	void * pRet = 0;
  	
-@@ -153,7 +158,11 @@ extern "C" void* SAL_CALL component_getF
+@@ -153,7 +158,11 @@ extern "C" void* SAL_CALL component_getFactory( const sal_Char* pImplName, void*
  			pRet = xFactory.get();
  		}
  	}
@@ -301,114 +274,6 @@ index 645c048..b39f7a7 100755
  	return pRet;
  }
   
-diff --git goodies/source/unographic/graphicunoaccess.cxx goodies/source/unographic/graphicunoaccess.cxx
-new file mode 100644
-index 0000000..2d5a8cf
---- /dev/null
-+++ goodies/source/unographic/graphicunoaccess.cxx
-@@ -0,0 +1,102 @@
-+/*************************************************************************
-+ *
-+ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
-+ * 
-+ * Copyright 2008 by Sun Microsystems, Inc.
-+ *
-+ * OpenOffice.org - a multi-platform office productivity suite
-+ *
-+ * $RCSfile: graphicuno.cxx,v $
-+ * $Revision: 1.6 $
-+ *
-+ * This file is part of OpenOffice.org.
-+ *
-+ * OpenOffice.org is free software: you can redistribute it and/or modify
-+ * it under the terms of the GNU Lesser General Public License version 3
-+ * only, as published by the Free Software Foundation.
-+ *
-+ * OpenOffice.org is distributed in the hope that it will be useful,
-+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
-+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-+ * GNU Lesser General Public License version 3 for more details
-+ * (a copy is included in the LICENSE file that accompanied this code).
-+ *
-+ * You should have received a copy of the GNU Lesser General Public License
-+ * version 3 along with OpenOffice.org.  If not, see
-+ * <http://www.openoffice.org/license.html>
-+ * for a copy of the LGPLv3 License.
-+ *
-+ ************************************************************************/
-+
-+
-+// MARKER(update_precomp.py): autogen include statement, do not remove
-+#include "precompiled_goodies.hxx"
-+#include <comphelper/servicedecl.hxx>
-+#include <cppuhelper/implbase1.hxx>
-+#include <com/sun/star/graphic/XGraphicObject.hpp>
-+#include <com/sun/star/lang/IllegalArgumentException.hpp>
-+#include "grfmgr.hxx"
-+
-+using namespace com::sun::star;
-+
-+namespace unographic {
-+
-+typedef ::cppu::WeakImplHelper1< graphic::XGraphicObject > GObjectAccess_BASE;
-+ // Simple uno wrapper around the GraphicObject class to allow basic
-+ // access. ( and solves a horrible cyclic link problem between
-+ // goodies/toolkit/extensions )
-+class GObjectAccessImpl : public GObjectAccess_BASE
-+{
-+     std::auto_ptr< GraphicObject > mpGObject;
-+public:
-+     GObjectAccessImpl( uno::Sequence< uno::Any > const & args, uno::Reference< uno::XComponentContext > const & xComponentContext ) throw (uno::RuntimeException);
-+
-+     // XGraphicObject
-+    virtual uno::Reference< graphic::XGraphic > SAL_CALL getGraphic() throw (uno::RuntimeException);
-+    virtual void SAL_CALL setGraphic( const uno::Reference< graphic::XGraphic >& _graphic ) throw (uno::RuntimeException);
-+    ::rtl::OUString SAL_CALL getUniqueID() throw (uno::RuntimeException);
-+};
-+
-+GObjectAccessImpl::GObjectAccessImpl( uno::Sequence< uno::Any > const & args, uno::Reference< uno::XComponentContext > const & xComponentContext ) throw (uno::RuntimeException)
-+{
-+    if ( args.getLength() == 1 )
-+    {
-+        rtl::OUString sId;
-+        if ( !( args[ 0 ] >>= sId ) )
-+            throw lang::IllegalArgumentException();
-+        ByteString bsId( sId.getStr(), RTL_TEXTENCODING_UTF8 ); 
-+        mpGObject.reset( new GraphicObject( bsId ) ); 
-+    }
-+    else
-+       mpGObject.reset( new GraphicObject() ); 
-+}
-+
-+uno::Reference< graphic::XGraphic > SAL_CALL GObjectAccessImpl::getGraphic() throw (uno::RuntimeException)
-+{
-+    if ( !mpGObject.get() )
-+        throw uno::RuntimeException();
-+    return mpGObject->GetGraphic().GetXGraphic();
-+}
-+
-+void SAL_CALL GObjectAccessImpl::setGraphic( const uno::Reference< graphic::XGraphic >& _graphic ) throw (uno::RuntimeException)
-+{
-+    if ( !mpGObject.get() )
-+        throw uno::RuntimeException();
-+    Graphic aGraphic( _graphic );
-+    mpGObject->SetGraphic( aGraphic );
-+}
-+
-+::rtl::OUString SAL_CALL GObjectAccessImpl::getUniqueID() throw (uno::RuntimeException)
-+{
-+    rtl::OUString sId;
-+    if ( mpGObject.get() )
-+        sId = String( mpGObject->GetUniqueID().GetBuffer(), RTL_TEXTENCODING_ASCII_US );
-+    return sId;
-+}
-+
-+
-+namespace sdecl = comphelper::service_decl;
-+sdecl::class_<GObjectAccessImpl, sdecl::with_args<true> > serviceBI;
-+extern sdecl::ServiceDecl const serviceDecl( serviceBI, "com.sun.star.graphic.GraphicObjectAccess", "com.sun.star.graphic.GraphicObjectAccess" );
-+
-+}
 diff --git goodies/source/unographic/makefile.mk goodies/source/unographic/makefile.mk
 index 7eee7f2..7702beb 100755
 --- goodies/source/unographic/makefile.mk
@@ -417,7 +282,7 @@ index 7eee7f2..7702beb 100755
  			provider.cxx			\
  			graphic.cxx				\
  			renderer.cxx			\
-+			graphicunoaccess.cxx			\
++			graphicunofactory.cxx			\
  			transformer.cxx
  
  SLOFILES=							\
@@ -425,12 +290,12 @@ index 7eee7f2..7702beb 100755
  			$(SLO)$/provider.obj	\
  			$(SLO)$/graphic.obj		\
  			$(SLO)$/renderer.obj	\
-+			$(SLO)$/graphicunoaccess.obj	\
++			$(SLO)$/graphicunofactory.obj	\
  			$(SLO)$/transformer.obj
  
  # --- Target -------------------------------------------------------
 diff --git goodies/source/unographic/provider.cxx goodies/source/unographic/provider.cxx
-index f51b852..cf7d733 100644
+index 2f40db7..9fe7abf 100644
 --- goodies/source/unographic/provider.cxx
 +++ goodies/source/unographic/provider.cxx
 @@ -54,12 +54,15 @@
@@ -449,31 +314,70 @@ index f51b852..cf7d733 100644
  // -------------------
  // - GraphicProvider -
  // -------------------
-@@ -176,6 +179,19 @@ uno::Reference< ::graphic::XGraphic > Gr
- 			xRet = pUnoGraphic;
- 		}
- 	}
-+	else if( rResourceURL.compareToAscii( UNO_NAME_GRAPHOBJ_URLPREFIX, RTL_CONSTASCII_LENGTH( UNO_NAME_GRAPHOBJ_URLPREFIX ) ) == 0 )
+@@ -159,6 +162,24 @@ uno::Sequence< sal_Int8 > SAL_CALL GraphicProvider::getImplementationId()
+ 
+ // ------------------------------------------------------------------------------
+ 
++uno::Reference< ::graphic::XGraphic > GraphicProvider::implLoadGraphicObject( const ::rtl::OUString& rResourceURL ) const
++{
++	uno::Reference< ::graphic::XGraphic > 	xRet;
++	if( rResourceURL.compareToAscii( UNO_NAME_GRAPHOBJ_URLPREFIX, RTL_CONSTASCII_LENGTH( UNO_NAME_GRAPHOBJ_URLPREFIX ) ) == 0 ) 
 +	{
 +		// graphic manager url
 +		String aTmpStr( rResourceURL.copy( sizeof( UNO_NAME_GRAPHOBJ_URLPREFIX ) - 1 ) );
 +		ByteString aUniqueID( aTmpStr, RTL_TEXTENCODING_UTF8 );
 +		GraphicObject aGrafObj( aUniqueID );	
 +		// I don't call aGrafObj.GetXGraphic because it will call us back 		
-+		// here again ( albeit in the "private:memorygraphic" test 
-+		// above )
++		// into implLoadMemory ( with "private:memorygraphic" test )
 +		::unographic::Graphic* pUnoGraphic = new ::unographic::Graphic;
 +		pUnoGraphic->init( aGrafObj.GetGraphic() );
 +		xRet = pUnoGraphic;
 +	}
- 	
- 	return xRet;
- }
-diff --git offapi/com/sun/star/graphic/GraphicObjectAccess.idl offapi/com/sun/star/graphic/GraphicObjectAccess.idl
++	return xRet;
++}
++
+ uno::Reference< ::graphic::XGraphic > GraphicProvider::implLoadMemory( const ::rtl::OUString& rResourceURL ) const
+ {
+ 	uno::Reference< ::graphic::XGraphic > 	xRet;
+@@ -382,9 +403,10 @@ uno::Reference< beans::XPropertySet > SAL_CALL GraphicProvider::queryGraphicDesc
+ 	else if( aURL.getLength() )
+ 	{
+ 		uno::Reference< ::graphic::XGraphic > xGraphic( implLoadMemory( aURL ) );
+-		
+ 		if( !xGraphic.is() )
+ 			xGraphic = implLoadResource( aURL );
++		if( !xGraphic.is() )
++			xGraphic = implLoadGraphicObject( aURL );
+ 
+         if ( !xGraphic.is() )
+             xGraphic = implLoadRepositoryImage( aURL );
+@@ -453,6 +475,9 @@ uno::Reference< ::graphic::XGraphic > SAL_CALL GraphicProvider::queryGraphic( co
+ 	else if( aPath.Len() )
+ 	{
+ 		xRet = implLoadMemory( aPath );
++
++		if( !xRet.is() )
++			xRet = implLoadGraphicObject( aPath );
+ 		
+ 		if( !xRet.is() )
+ 			xRet = implLoadResource( aPath );
+diff --git goodies/source/unographic/provider.hxx goodies/source/unographic/provider.hxx
+index 663d17d..e32b104 100644
+--- goodies/source/unographic/provider.hxx
++++ goodies/source/unographic/provider.hxx
+@@ -73,6 +73,7 @@ protected:
+ private:
+ 
+ 	::com::sun::star::uno::Reference< ::com::sun::star::graphic::XGraphic > implLoadMemory( const ::rtl::OUString& rResourceURL ) const;
++	::com::sun::star::uno::Reference< ::com::sun::star::graphic::XGraphic > implLoadGraphicObject( const ::rtl::OUString& rResourceURL ) const;
+ 	::com::sun::star::uno::Reference< ::com::sun::star::graphic::XGraphic > implLoadResource( const ::rtl::OUString& rResourceURL ) const;
+ 	::com::sun::star::uno::Reference< ::com::sun::star::graphic::XGraphic > implLoadRepositoryImage( const ::rtl::OUString& rResourceURL ) const;
+ 	::com::sun::star::uno::Reference< ::com::sun::star::graphic::XGraphic > implLoadBitmap( const ::com::sun::star::uno::Reference< ::com::sun::star::awt::XBitmap >& rBitmap ) const;
+diff --git offapi/com/sun/star/graphic/GraphicObjectFactory.idl offapi/com/sun/star/graphic/GraphicObjectFactory.idl
 new file mode 100644
 index 0000000..a01e2cd
 --- /dev/null
-+++ offapi/com/sun/star/graphic/GraphicObjectAccess.idl
++++ offapi/com/sun/star/graphic/GraphicObjectFactory.idl
 @@ -0,0 +1,47 @@
 +/*************************************************************************
 + *
@@ -505,15 +409,15 @@ index 0000000..a01e2cd
 + *
 + ************************************************************************/
 +
-+#ifndef com_sun_star_graphic_GraphicObjectAccess_idl
-+#define com_sun_star_graphic_GraphicObjectAccess_idl
++#ifndef com_sun_star_graphic_GraphicObjectFactory_idl
++#define com_sun_star_graphic_GraphicObjectFactory_idl
 +
 +#include <com/sun/star/graphic/XGraphicObject.idl>
 +
 +module com { module sun { module star { module graphic
 +{
 +
-+service GraphicObjectAccess : XGraphicObject
++service GraphicObjectFactory : XGraphicObject
 +{
 +    createGraphicObject();
 +    createGraphicObjectWithId( [in] string uniqueId );
@@ -522,6 +426,27 @@ index 0000000..a01e2cd
 +} ; } ; } ; } ; 
 +
 +#endif
+diff --git offapi/com/sun/star/graphic/MediaProperties.idl offapi/com/sun/star/graphic/MediaProperties.idl
+index c857109..b255532 100755
+--- offapi/com/sun/star/graphic/MediaProperties.idl
++++ offapi/com/sun/star/graphic/MediaProperties.idl
+@@ -61,11 +61,15 @@ published service MediaProperties
+ 			<li>private:resource/projectshortname/imagelist/12345</li>
+ 			<li>private:resource/projectshortname/imagelist/12345/12</li>
+ 		</ul>
++And additionally, GraphicObject scheme url's like 
++            <ul> <li>vnd.sun.star.GraphicObject:10000000000001940000012FB99807BD</li> </ul>
++              can be used to access graphics held by the GraphicCache implementation. 
+         </p>
+ 
+         <p>Yet more, you can access graphics in the application-wide image
+         repository by specifying URLs of the form
+-        <code>private:graphicrepository/<em>&lt;path_in_repository&gt;</em></code>.</p>
++        <code>private:graphicrepository/<em>&lt;path_in_repository&gt;</em></code>. 
++</p>
+ 	*/
+ 	[optional, property ] string URL;
+ 
 diff --git offapi/com/sun/star/graphic/XGraphicObject.idl offapi/com/sun/star/graphic/XGraphicObject.idl
 new file mode 100644
 index 0000000..97b4920
@@ -584,12 +509,130 @@ index 600f60d..9224b90 100755
  	XGraphicProvider.idl \
  	XGraphicRenderer.idl \
 +	XGraphicObject.idl \
-+	GraphicObjectAccess.idl \
++	GraphicObjectFactory.idl \
  	XGraphicTransformer.idl
  	
  # --- Targets ------------------------------------------------------
+diff --git svtools/inc/imageresourceaccess.hxx svtools/inc/imageresourceaccess.hxx
+index 7469b5c..6d46087 100644
+--- svtools/inc/imageresourceaccess.hxx
++++ svtools/inc/imageresourceaccess.hxx
+@@ -45,22 +45,26 @@ namespace svt
+ //........................................................................
+ 
+     //====================================================================
+-    //= ImageResourceAccess
++    //= GraphicAccess
+     //====================================================================
+     /** helper class for obtaining streams (which also can be used with the ImageProducer)
+         from a resource
+     */
+-    class ImageResourceAccess
++    class GraphicAccess
+     {
+     private:
+-        ImageResourceAccess();    // never implemented
++        GraphicAccess();    // never implemented
+ 
+     public:
+         /** determines whether the given URL denotes an image within a resource
+         */
+         SVT_DLLPUBLIC static  bool        isImageResourceURL( const ::rtl::OUString& _rURL );
+ 
+-        /** for a given URL of an image within a resource, this method retrieves
++        /** determines whether the given URL denotes an image specified by the
++         vnd.sun.star.GraphicObject scheme   
++        */
++        SVT_DLLPUBLIC static  bool        isGraphicObjectURL( const ::rtl::OUString& _rURL );
++        /** for a given URL of an image within a resource ( or an image specified by a vnd.sun.star.GraphicObject scheme URL ), this method retrieves
+             an SvStream for this image.
+ 
+             This method works for arbitrary URLs denoting an image, since the
+@@ -74,7 +78,7 @@ namespace svt
+                     const ::rtl::OUString& _rImageResourceURL
+                 );
+ 
+-        /** for a given URL of an image within a resource, this method retrieves
++        /** for a given URL of an image within a resource ( or an image specified by a vnd.sun.star.GraphicObject scheme URL ), this method retrieves
+             an <type scope="com::sun::star::io">XInputStream</type> for this image.
+         */
+         SVT_DLLPUBLIC static  ::com::sun::star::uno::Reference< ::com::sun::star::io::XInputStream >
+diff --git svtools/source/misc/imageresourceaccess.cxx svtools/source/misc/imageresourceaccess.cxx
+index 039ba89..6ee9ff8 100644
+--- svtools/source/misc/imageresourceaccess.cxx
++++ svtools/source/misc/imageresourceaccess.cxx
+@@ -51,6 +51,8 @@ namespace svt
+ {
+ //........................................................................
+ 
++#define GRAPHOBJ_URLPREFIX "vnd.sun.star.GraphicObject:"
++
+     using namespace ::utl;
+     using namespace ::comphelper;
+     using namespace ::com::sun::star::io;
+@@ -137,17 +139,22 @@ namespace svt
+     }
+ 
+     //====================================================================
+-	//= ImageResourceAccess
++	//= GraphicAccess
+ 	//====================================================================
+ 	//--------------------------------------------------------------------
+-    bool ImageResourceAccess::isImageResourceURL( const ::rtl::OUString& _rURL )
++    bool GraphicAccess::isImageResourceURL( const ::rtl::OUString& _rURL )
+     {
+         ::rtl::OUString sIndicator( RTL_CONSTASCII_USTRINGPARAM( "private:resource/" ) );
+         return _rURL.indexOf( sIndicator ) == 0;
+     }
+ 
++    bool GraphicAccess::isGraphicObjectURL( const ::rtl::OUString& _rURL )
++    {
++        return ( _rURL.compareToAscii( GRAPHOBJ_URLPREFIX, RTL_CONSTASCII_LENGTH( GRAPHOBJ_URLPREFIX ) ) == 0 );
++    }
++
+ 	//--------------------------------------------------------------------
+-    SvStream* ImageResourceAccess::getImageStream( const Reference< XMultiServiceFactory >& _rxORB, const ::rtl::OUString& _rImageResourceURL )
++    SvStream* GraphicAccess::getImageStream( const Reference< XMultiServiceFactory >& _rxORB, const ::rtl::OUString& _rImageResourceURL )
+     {
+         SvStream* pReturn = NULL;
+ 
+@@ -157,7 +164,7 @@ namespace svt
+             Reference< XGraphicProvider > xProvider;
+             if ( _rxORB.is() )
+                 xProvider = xProvider.query( _rxORB->createInstance( ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "com.sun.star.graphic.GraphicProvider" ) ) ) );
+-            OSL_ENSURE( xProvider.is(), "ImageResourceAccess::getImageStream: could not create a graphic provider!" );
++            OSL_ENSURE( xProvider.is(), "GraphicAccess::getImageStream: could not create a graphic provider!" );
+ 
+             if ( !xProvider.is() )
+                 return pReturn;
+@@ -167,7 +174,7 @@ namespace svt
+             aMediaProperties[0].Name = ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "URL" ) );
+             aMediaProperties[0].Value <<= _rImageResourceURL;
+             Reference< XGraphic > xGraphic( xProvider->queryGraphic( aMediaProperties ) );
+-            OSL_ENSURE( xGraphic.is(), "ImageResourceAccess::getImageStream: the provider did not give us a graphic object!" );
++            OSL_ENSURE( xGraphic.is(), "GraphicAccess::getImageStream: the provider did not give us a graphic object!" );
+             if ( !xGraphic.is() )
+                 return pReturn;
+ 
+@@ -190,14 +197,14 @@ namespace svt
+         }
+         catch( const Exception& )
+         {
+-        	OSL_ENSURE( sal_False, "ImageResourceAccess::getImageStream: caught an exception!" );
++        	OSL_ENSURE( sal_False, "GraphicAccess::getImageStream: caught an exception!" );
+         }
+ 
+         return pReturn;
+     }
+ 
+ 	//--------------------------------------------------------------------
+-    Reference< XInputStream > ImageResourceAccess::getImageXStream( const Reference< XMultiServiceFactory >& _rxORB, const ::rtl::OUString& _rImageResourceURL )
++    Reference< XInputStream > GraphicAccess::getImageXStream( const Reference< XMultiServiceFactory >& _rxORB, const ::rtl::OUString& _rImageResourceURL )
+     {
+         return new OSeekableInputStreamWrapper( getImageStream( _rxORB, _rImageResourceURL ), sal_True );   // take ownership
+     }
 diff --git toolkit/inc/toolkit/controls/unocontrols.hxx toolkit/inc/toolkit/controls/unocontrols.hxx
-index 72c7db8..29ef91a 100644
+index 72c7db8..2743f2e 100644
 --- toolkit/inc/toolkit/controls/unocontrols.hxx
 +++ toolkit/inc/toolkit/controls/unocontrols.hxx
 @@ -54,6 +54,7 @@
@@ -610,52 +653,82 @@ index 72c7db8..29ef91a 100644
  
  //	----------------------------------------------------
  //	class UnoControlEditModel
-@@ -219,7 +223,8 @@ private:
+@@ -219,7 +223,9 @@ private:
  	std::list< ::com::sun::star::uno::Reference< ::com::sun::star::awt::XImageConsumer > >  maListeners;
      bool                                                                                    mbAdjustingImagePosition;
      bool                                                                                    mbAdjustingGraphic;
 -
 +    
 +    ::com::sun::star::uno::Reference< ::com::sun::star::graphic::XGraphicObject > mxGrfObj;
++    ::com::sun::star::uno::Reference< ::com::sun::star::graphic::XGraphic > getGraphicFromURL_nothrow( const ::rtl::OUString& _rURL );
  protected:
      ImageProducerControlModel() : mbAdjustingImagePosition( false ), mbAdjustingGraphic( false ) { }
      ImageProducerControlModel( const ImageProducerControlModel& _rSource ) : com::sun::star::awt::XImageProducer(), UnoControlModel( _rSource ), mbAdjustingImagePosition( false ), mbAdjustingGraphic( false ) { }
 diff --git toolkit/source/controls/unocontrols.cxx toolkit/source/controls/unocontrols.cxx
-index 821c1b9..8412a98 100644
+index 821c1b9..e817f69 100644
 --- toolkit/source/controls/unocontrols.cxx
 +++ toolkit/source/controls/unocontrols.cxx
 @@ -37,6 +37,7 @@
  #include <com/sun/star/awt/VisualEffect.hpp>
  #include <com/sun/star/awt/LineEndFormat.hpp>
  #include <com/sun/star/graphic/XGraphicProvider.hpp>
-+#include <com/sun/star/graphic/GraphicObjectAccess.hpp>
++#include <com/sun/star/graphic/GraphicObjectFactory.hpp>
  #include <com/sun/star/util/Date.hpp>
  
  
-@@ -621,6 +622,17 @@ void SAL_CALL ImageProducerControlModel:
+@@ -576,11 +577,21 @@ uno::Any ImageProducerControlModel::ImplGetDefaultValue( sal_uInt16 nPropId ) co
+ 
+     return UnoControlModel::ImplGetDefaultValue( nPropId );
+ }
+-namespace
+-{
+-    uno::Reference< graphic::XGraphic > lcl_getGraphicFromURL_nothrow( const ::rtl::OUString& _rURL )
++    uno::Reference< graphic::XGraphic > ImageProducerControlModel::getGraphicFromURL_nothrow( const ::rtl::OUString& _rURL )
+     {
+         uno::Reference< graphic::XGraphic > xGraphic;
++
++        if( ( _rURL.compareToAscii( UNO_NAME_GRAPHOBJ_URLPREFIX, RTL_CONSTASCII_LENGTH( UNO_NAME_GRAPHOBJ_URLPREFIX ) ) == 0 ) )
++        {
++            // graphic manager uniqueid
++            rtl::OUString sID = _rURL.copy( sizeof( UNO_NAME_GRAPHOBJ_URLPREFIX ) - 1 );
++            // get the DefaultContext
++            ::comphelper::ComponentContext aContext( ::comphelper::getProcessServiceFactory() );
++            mxGrfObj = graphic::GraphicObjectFactory::createGraphicObjectWithId( aContext.getUNOContext(), sID );
++        }
++        else // linked
++            mxGrfObj = NULL; // release the GraphicObject
++
+         if ( !_rURL.getLength() )
+             return xGraphic;
+ 
+@@ -603,7 +614,6 @@ namespace
+ 
+         return xGraphic;
+     }
+-}
+ 
+ void SAL_CALL ImageProducerControlModel::setFastPropertyValue_NoBroadcast( sal_Int32 nHandle, const ::com::sun::star::uno::Any& rValue ) throw (::com::sun::star::uno::Exception)
+ {
+@@ -621,7 +631,8 @@ void SAL_CALL ImageProducerControlModel::setFastPropertyValue_NoBroadcast( sal_I
                  mbAdjustingGraphic = true;
                  ::rtl::OUString sImageURL;
                  OSL_VERIFY( rValue >>= sImageURL );
+-                setPropertyValue( GetPropertyName( BASEPROPERTY_GRAPHIC ), uno::makeAny( lcl_getGraphicFromURL_nothrow( sImageURL ) ) );
 +
-+                if( ( sImageURL.compareToAscii( UNO_NAME_GRAPHOBJ_URLPREFIX, RTL_CONSTASCII_LENGTH( UNO_NAME_GRAPHOBJ_URLPREFIX ) ) == 0 ) )
-+		{
-+		    // graphic manager uniqueid
-+                    rtl::OUString sID = sImageURL.copy( sizeof( UNO_NAME_GRAPHOBJ_URLPREFIX ) - 1 );
-+                    // get the DefaultContext
-+                    ::comphelper::ComponentContext aContext( ::comphelper::getProcessServiceFactory() );
-+                    mxGrfObj = graphic::GraphicObjectAccess::createGraphicObjectWithId( aContext.getUNOContext(), sID );
-+                }
-+                else // linked
-+                    mxGrfObj = NULL; // release the GraphicObject
-                 setPropertyValue( GetPropertyName( BASEPROPERTY_GRAPHIC ), uno::makeAny( lcl_getGraphicFromURL_nothrow( sImageURL ) ) );
++                setPropertyValue( GetPropertyName( BASEPROPERTY_GRAPHIC ), uno::makeAny( getGraphicFromURL_nothrow( sImageURL ) ) );
                  mbAdjustingGraphic = false;
              }
+             break;
 diff --git xmloff/source/forms/elementimport.cxx xmloff/source/forms/elementimport.cxx
-index edc0c77..8903f74 100644
+index edc0c77..71d70ab 100644
 --- xmloff/source/forms/elementimport.cxx
 +++ xmloff/source/forms/elementimport.cxx
-@@ -1136,7 +1136,7 @@ namespace xmloff
- 		if ( bMakeAbsolute )
+@@ -1133,10 +1133,10 @@ namespace xmloff
+ 					)
+ 				);
+ 
+-		if ( bMakeAbsolute )
++		if ( bMakeAbsolute && ( _rValue.getLength() > 0  ) )
  		{
  			// make a global URL out of the local one
 -			::rtl::OUString sAdjustedValue = m_rContext.getGlobalContext().GetAbsoluteReference( _rValue );
@@ -678,3 +751,115 @@ index bedd87f..0b5f7a7 100644
  		AddAttribute(OAttributeMetaData::getCommonControlAttributeNamespace(_nProperty)
  					,OAttributeMetaData::getCommonControlAttributeName(_nProperty)
  					, sTargetLocation);
+diff --git goodies/source/unographic/graphicunofactory.cxx goodies/source/unographic/graphicunofactory.cxx
+new file mode 100644
+index 0000000..d8b25bc
+--- /dev/null
++++ goodies/source/unographic/graphicunofactory.cxx
+@@ -0,0 +1,106 @@
++/*************************************************************************
++ *
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ * 
++ * Copyright 2008 by Sun Microsystems, Inc.
++ *
++ * OpenOffice.org - a multi-platform office productivity suite
++ *
++ * $RCSfile: graphicuno.cxx,v $
++ * $Revision: 1.6 $
++ *
++ * This file is part of OpenOffice.org.
++ *
++ * OpenOffice.org is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License version 3
++ * only, as published by the Free Software Foundation.
++ *
++ * OpenOffice.org is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License version 3 for more details
++ * (a copy is included in the LICENSE file that accompanied this code).
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * version 3 along with OpenOffice.org.  If not, see
++ * <http://www.openoffice.org/license.html>
++ * for a copy of the LGPLv3 License.
++ *
++ ************************************************************************/
++
++
++// MARKER(update_precomp.py): autogen include statement, do not remove
++#include "precompiled_goodies.hxx"
++#include <comphelper/servicedecl.hxx>
++#include <cppuhelper/implbase1.hxx>
++#include <com/sun/star/graphic/XGraphicObject.hpp>
++#include <com/sun/star/lang/IllegalArgumentException.hpp>
++#include "grfmgr.hxx"
++
++using namespace com::sun::star;
++
++namespace unographic {
++
++typedef ::cppu::WeakImplHelper1< graphic::XGraphicObject > GObjectAccess_BASE;
++ // Simple uno wrapper around the GraphicObject class to allow basic
++ // access. ( and solves a horrible cyclic link problem between
++ // goodies/toolkit/extensions )
++class GObjectImpl : public GObjectAccess_BASE
++{
++     ::osl::Mutex m_aMutex;
++     std::auto_ptr< GraphicObject > mpGObject;
++public:
++     GObjectImpl( uno::Sequence< uno::Any > const & args, uno::Reference< uno::XComponentContext > const & xComponentContext ) throw (uno::RuntimeException);
++
++     // XGraphicObject
++    virtual uno::Reference< graphic::XGraphic > SAL_CALL getGraphic() throw (uno::RuntimeException);
++    virtual void SAL_CALL setGraphic( const uno::Reference< graphic::XGraphic >& _graphic ) throw (uno::RuntimeException);
++    ::rtl::OUString SAL_CALL getUniqueID() throw (uno::RuntimeException);
++};
++
++GObjectImpl::GObjectImpl( uno::Sequence< uno::Any > const & args, uno::Reference< uno::XComponentContext > const & /*xComponentContext*/ ) throw (uno::RuntimeException)
++{
++    if ( args.getLength() == 1 )
++    {
++        rtl::OUString sId;
++        if ( !( args[ 0 ] >>= sId ) || sId.getLength() == 0 )
++            throw lang::IllegalArgumentException();
++        ByteString bsId( sId.getStr(), RTL_TEXTENCODING_UTF8 ); 
++        mpGObject.reset( new GraphicObject( bsId ) ); 
++    }
++    else
++       mpGObject.reset( new GraphicObject() ); 
++}
++
++uno::Reference< graphic::XGraphic > SAL_CALL GObjectImpl::getGraphic() throw (uno::RuntimeException)
++{
++    ::osl::MutexGuard aGuard( m_aMutex );
++    if ( !mpGObject.get() )
++        throw uno::RuntimeException();
++    return mpGObject->GetGraphic().GetXGraphic();
++}
++
++void SAL_CALL GObjectImpl::setGraphic( const uno::Reference< graphic::XGraphic >& _graphic ) throw (uno::RuntimeException)
++{
++    ::osl::MutexGuard aGuard( m_aMutex );
++    if ( !mpGObject.get() )
++        throw uno::RuntimeException();
++    Graphic aGraphic( _graphic );
++    mpGObject->SetGraphic( aGraphic );
++}
++
++::rtl::OUString SAL_CALL GObjectImpl::getUniqueID() throw (uno::RuntimeException)
++{
++    ::osl::MutexGuard aGuard( m_aMutex );
++    rtl::OUString sId;
++    if ( mpGObject.get() )
++        sId = String( mpGObject->GetUniqueID().GetBuffer(), RTL_TEXTENCODING_ASCII_US );
++    return sId;
++}
++
++
++namespace sdecl = comphelper::service_decl;
++sdecl::class_<GObjectImpl, sdecl::with_args<true> > serviceBI;
++extern sdecl::ServiceDecl const serviceDecl( serviceBI, "com.sun.star.graphic.GraphicObjectFactory", "com.sun.star.graphic.GraphicObjectFactory" );
++
++}
