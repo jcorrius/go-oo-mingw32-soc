@@ -17,11 +17,11 @@ Requires:       ooo3_libs_core
 BuildRequires:  ooo3_libs_core-devel
 %define	      ooo_prefix	%_libdir
 %define	      ooo_home		ooo-3
-%define	      ooo_build_tag     dev300-m25
+%define	      ooo_build_tag     dev300-m28
 License:        Artistic License; BSD 3-Clause; GPL v2 or later; LaTeX Public License (LPPL); LGPL v2.1 or later; MOZILLA PUBLIC LICENSE (MPL/NPL); X11/MIT
 Group:          Productivity/Office/Suite
 Version:        3
-Release:        6
+Release:        8
 AutoReqProv:    on
 Summary:        A Free Office Suite (Framework)
 Url:            http://www.openoffice.org/
@@ -50,7 +50,9 @@ devel package
 export OO_INSTDIR=%{_libdir}/%ooo_home
 export OO_TOOLSDIR=$OO_INSTDIR/ooo-build/bin
 export VERBOSE=1
-$OO_TOOLSDIR/piece/build-generic %piece %ooo_build_tag %distro
+export EXTRA_BUILD_FLAGS=%{?jobs:-P%jobs}
+export EXTRA_DMAKE_FLAGS=%{?jobs:-- -P%jobs}
+OO_TOOLSDIR/piece/build-generic %piece %ooo_build_tag %distro
 
 %install
 
@@ -67,9 +69,8 @@ $OO_TOOLSDIR/piece/install-generic %piece %ooo_build_tag %distro
 
 %files
 %defattr(-,root,root)
-# FIXME - should have the actual files in it ! ;-)
-# except we have ~none here - just a devel package (?)
-# is there anything we absolutely need here ?
+%dir %ooo_prefix/%ooo_home/basis3.0
+%ooo_prefix/%ooo_home/basis3.0/*
 
 %files devel
 %defattr(-,root,root)
