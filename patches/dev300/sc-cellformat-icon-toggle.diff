@@ -1,7 +1,44 @@
-diff -urp --exclude=CVS --exclude=unxlngi6.pro --exclude=sc.vpj sc.clean/sdi/formatsh.sdi sc/sdi/formatsh.sdi
---- sc.clean/sdi/formatsh.sdi	2008-02-05 11:16:54.000000000 -0500
-+++ sc/sdi/formatsh.sdi	2008-02-22 15:20:31.000000000 -0500
-@@ -124,11 +124,11 @@ interface FormatForSelection
+diff --git sc/inc/column.hxx sc/inc/column.hxx
+index 3621d78..d68e4e6 100644
+--- sc/inc/column.hxx
++++ sc/inc/column.hxx
+@@ -306,6 +306,7 @@ public:
+     const ScPatternAttr*    GetMostUsedPattern( SCROW nStartRow, SCROW nEndRow ) const;
+ 
+ 	ULONG		GetNumberFormat( SCROW nRow ) const;
++    sal_uInt32  GetNumberFormat( SCROW nStartRow, SCROW nEndRow ) const;
+ 
+ 	void		MergeSelectionPattern( ScMergePatternState& rState, const ScMarkData& rMark, BOOL bDeep ) const;
+ 	void		MergePatternArea( ScMergePatternState& rState, SCROW nRow1, SCROW nRow2, BOOL bDeep ) const;
+diff --git sc/inc/document.hxx sc/inc/document.hxx
+index 6d361ae..80fc25c 100644
+--- sc/inc/document.hxx
++++ sc/inc/document.hxx
+@@ -764,6 +764,7 @@ SC_DLLPUBLIC	ScDBCollection*	GetDBCollection() const;
+ 	double			RoundValueAsShown( double fVal, ULONG nFormat );
+ 	void			GetNumberFormat( SCCOL nCol, SCROW nRow, SCTAB nTab,
+ 									 sal_uInt32& rFormat );
++    sal_uInt32      GetNumberFormat( const ScRange& rRange ) const;
+ 	sal_uInt32		GetNumberFormat( const ScAddress& ) const;
+                     /** If no number format attribute is set and the cell
+                         pointer passed is of type formula cell, the calculated
+diff --git sc/inc/table.hxx sc/inc/table.hxx
+index 570bdd3..af9d62b 100644
+--- sc/inc/table.hxx
++++ sc/inc/table.hxx
+@@ -440,6 +440,7 @@ public:
+ 	ULONG					GetNumberFormat( const ScAddress& rPos ) const
+ 								{ return aCol[rPos.Col()].GetNumberFormat( rPos.Row() ); }
+ 	ULONG					GetNumberFormat( SCCOL nCol, SCROW nRow ) const;
++    sal_uInt32              GetNumberFormat( SCCOL nCol, SCROW nStartRow, SCROW nEndRow ) const;
+ 	void					MergeSelectionPattern( ScMergePatternState& rState,
+ 												const ScMarkData& rMark, BOOL bDeep ) const;
+ 	void					MergePatternArea( ScMergePatternState& rState, SCCOL nCol1, SCROW nRow1,
+diff --git sc/sdi/formatsh.sdi sc/sdi/formatsh.sdi
+index 9bac9d3..71f78f7 100644
+--- sc/sdi/formatsh.sdi
++++ sc/sdi/formatsh.sdi
+@@ -119,11 +119,11 @@ interface FormatForSelection
      SID_ATTR_NUMBERFORMAT_VALUE       [ ExecMethod = ExecuteNumFormat; StateMethod = GetNumFormatState;]
      SID_NUMBER_FORMAT       [ ExecMethod = ExecuteNumFormat; StateMethod = GetNumFormatState;]
  	SID_NUMBER_TWODEC		[ ExecMethod = ExecuteNumFormat;]
@@ -18,23 +55,108 @@ diff -urp --exclude=CVS --exclude=unxlngi6.pro --exclude=sc.vpj sc.clean/sdi/for
  	SID_NUMBER_STANDARD		[ ExecMethod = ExecuteNumFormat;]
  	SID_NUMBER_INCDEC		[ ExecMethod = ExecuteNumFormat;]
  	SID_NUMBER_DECDEC		[ ExecMethod = ExecuteNumFormat;]
-diff -urp --exclude=CVS --exclude=unxlngi6.pro --exclude=sc.vpj sc.clean/source/ui/inc/formatsh.hxx sc/source/ui/inc/formatsh.hxx
---- sc.clean/source/ui/inc/formatsh.hxx	2008-02-05 11:16:55.000000000 -0500
-+++ sc/source/ui/inc/formatsh.hxx	2008-02-22 13:00:00.000000000 -0500
-@@ -91,6 +91,9 @@ public:
+diff --git sc/source/core/data/column.cxx sc/source/core/data/column.cxx
+index 67f0b70..474da0f 100644
+--- sc/source/core/data/column.cxx
++++ sc/source/core/data/column.cxx
+@@ -368,6 +368,22 @@ ULONG ScColumn::GetNumberFormat( SCROW nRow ) const
+ 	return pAttrArray->GetPattern( nRow )->GetNumberFormat( pDocument->GetFormatTable() );
+ }
+ 
++sal_uInt32 ScColumn::GetNumberFormat( SCROW nStartRow, SCROW nEndRow ) const
++{
++    SCROW nPatStartRow, nPatEndRow;
++    const ScPatternAttr* pPattern = pAttrArray->GetPatternRange(nPatStartRow, nPatEndRow, nStartRow);
++    sal_uInt32 nFormat = pPattern->GetNumberFormat(pDocument->GetFormatTable());
++    while (nEndRow > nPatEndRow)
++    {
++        nStartRow = nPatEndRow + 1;
++        pPattern = pAttrArray->GetPatternRange(nPatStartRow, nPatEndRow, nStartRow);
++        sal_uInt32 nTmpFormat = pPattern->GetNumberFormat(pDocument->GetFormatTable());
++        if (nFormat != nTmpFormat)
++            return 0;
++    }
++    return nFormat;
++}
++
+ 
+ SCsROW ScColumn::ApplySelectionCache( SfxItemPoolCache* pCache, const ScMarkData& rMark, ScEditDataArray* pDataArray )
+ {
+diff --git sc/source/core/data/document.cxx sc/source/core/data/document.cxx
+index c5dc8b8..886156d 100644
+--- sc/source/core/data/document.cxx
++++ sc/source/core/data/document.cxx
+@@ -2291,6 +2291,32 @@ void ScDocument::GetNumberFormat( SCCOL nCol, SCROW nRow, SCTAB nTab,
+ 	rFormat = 0;
+ }
+ 
++sal_uInt32 ScDocument::GetNumberFormat( const ScRange& rRange ) const
++{
++    SCTAB nTab1 = rRange.aStart.Tab(), nTab2 = rRange.aEnd.Tab();
++    SCCOL nCol1 = rRange.aStart.Col(), nCol2 = rRange.aEnd.Col();
++    SCROW nRow1 = rRange.aStart.Row(), nRow2 = rRange.aEnd.Row();
++
++    if (!ValidTab(nTab1) || !ValidTab(nTab2) || !pTab[nTab1] || !pTab[nTab2])
++        return 0;
++
++    sal_uInt32 nFormat = 0;
++    bool bFirstItem = true;
++    for (SCTAB nTab = nTab1; nTab <= nTab2; ++nTab)
++        for (SCCOL nCol = nCol1; nCol <= nCol2; ++nCol)
++        {
++            sal_uInt32 nThisFormat = pTab[nTab]->GetNumberFormat(nCol, nRow1, nRow2);
++            if (bFirstItem)
++            {
++                nFormat = nThisFormat;
++                bFirstItem = false;
++            }
++            else if (nThisFormat != nFormat)
++                return 0;
++        }
++
++    return nFormat;
++}
+ 
+ sal_uInt32 ScDocument::GetNumberFormat( const ScAddress& rPos ) const
+ {
+diff --git sc/source/core/data/table2.cxx sc/source/core/data/table2.cxx
+index 6a55cb5..243a9c1 100644
+--- sc/source/core/data/table2.cxx
++++ sc/source/core/data/table2.cxx
+@@ -1106,6 +1106,14 @@ ULONG ScTable::GetNumberFormat( SCCOL nCol, SCROW nRow ) const
+ 		return 0;
+ }
+ 
++sal_uInt32 ScTable::GetNumberFormat( SCCOL nCol, SCROW nStartRow, SCROW nEndRow ) const
++{
++    if (!ValidCol(nCol) || !ValidRow(nStartRow) || !ValidRow(nEndRow))
++        return 0;
++ 
++    return aCol[nCol].GetNumberFormat(nStartRow, nEndRow);
++}
++
+ 
+ const ScPatternAttr* ScTable::GetPattern( SCCOL nCol, SCROW nRow ) const
+ {
+diff --git sc/source/ui/inc/formatsh.hxx sc/source/ui/inc/formatsh.hxx
+index a214685..2f99aa8 100644
+--- sc/source/ui/inc/formatsh.hxx
++++ sc/source/ui/inc/formatsh.hxx
+@@ -79,6 +79,9 @@ public:
  
      void        ExecFormatPaintbrush( SfxRequest& rReq );
      void        StateFormatPaintbrush( SfxItemSet& rSet );
 +
 +private:
-+    short       GetCurrentNumberFormatType() const;
++    short       GetCurrentNumberFormatType();
  };
  
  #endif
-diff -urp --exclude=CVS --exclude=unxlngi6.pro --exclude=sc.vpj sc.clean/source/ui/view/formatsh.cxx sc/source/ui/view/formatsh.cxx
---- sc.clean/source/ui/view/formatsh.cxx	2008-02-05 11:16:56.000000000 -0500
-+++ sc/source/ui/view/formatsh.cxx	2008-02-22 15:22:45.000000000 -0500
-@@ -72,6 +72,7 @@
+diff --git sc/source/ui/view/formatsh.cxx sc/source/ui/view/formatsh.cxx
+index 0651b18..7b93eef 100644
+--- sc/source/ui/view/formatsh.cxx
++++ sc/source/ui/view/formatsh.cxx
+@@ -58,6 +58,7 @@
  
  #include <sfx2/app.hxx>
  #include <sfx2/viewfrm.hxx>
@@ -42,7 +164,7 @@ diff -urp --exclude=CVS --exclude=unxlngi6.pro --exclude=sc.vpj sc.clean/source/
  #include <sfx2/objface.hxx>
  #include <sfx2/request.hxx>
  #include <svtools/whiter.hxx>
-@@ -935,6 +936,7 @@ void ScFormatShell::ExecuteNumFormat( Sf
+@@ -919,6 +920,7 @@ void ScFormatShell::ExecuteNumFormat( SfxRequest& rReq )
  	ScTabViewShell*	pTabViewShell  	= GetViewData()->GetViewShell();
  	const SfxItemSet*	pReqArgs	= rReq.GetArgs();
  	USHORT				nSlot		= rReq.GetSlot();
@@ -50,7 +172,7 @@ diff -urp --exclude=CVS --exclude=unxlngi6.pro --exclude=sc.vpj sc.clean/source/
  
  	pTabViewShell->HideListBox();					// Autofilter-DropDown-Listbox
  
-@@ -967,6 +969,8 @@ void ScFormatShell::ExecuteNumFormat( Sf
+@@ -951,6 +953,8 @@ void ScFormatShell::ExecuteNumFormat( SfxRequest& rReq )
  		}
  	}
  
@@ -59,7 +181,7 @@ diff -urp --exclude=CVS --exclude=unxlngi6.pro --exclude=sc.vpj sc.clean/source/
  	switch ( nSlot )
  	{
  		case SID_NUMBER_TWODEC:
-@@ -974,23 +978,48 @@ void ScFormatShell::ExecuteNumFormat( Sf
+@@ -958,23 +962,48 @@ void ScFormatShell::ExecuteNumFormat( SfxRequest& rReq )
  			rReq.Done();
  			break;
  		case SID_NUMBER_SCIENTIFIC:
@@ -113,7 +235,7 @@ diff -urp --exclude=CVS --exclude=unxlngi6.pro --exclude=sc.vpj sc.clean/source/
  			rReq.Done();
  			break;
  		case SID_NUMBER_STANDARD:
-@@ -2006,9 +2035,8 @@ void ScFormatShell::GetBckColState( SfxI
+@@ -1983,9 +2012,8 @@ void ScFormatShell::GetBckColState( SfxItemSet& rSet )
  void ScFormatShell::GetNumFormatState( SfxItemSet& rSet )
  {
  	ScTabViewShell*	pTabViewShell  	= GetViewData()->GetViewShell();
@@ -125,7 +247,7 @@ diff -urp --exclude=CVS --exclude=unxlngi6.pro --exclude=sc.vpj sc.clean/source/
  
  	SfxWhichIter aIter(rSet);
  	USHORT nWhich = aIter.FirstWhich();
-@@ -2035,7 +2063,21 @@ void ScFormatShell::GetNumFormatState( S
+@@ -2012,7 +2040,21 @@ void ScFormatShell::GetNumFormatState( SfxItemSet& rSet )
  					rSet.Put( SfxStringItem( nWhich, aFormatCode ) );
  				}
  				break;
@@ -148,24 +270,80 @@ diff -urp --exclude=CVS --exclude=unxlngi6.pro --exclude=sc.vpj sc.clean/source/
  		}
  		nWhich = aIter.NextWhich();
  	}
-@@ -2186,3 +2228,13 @@ void ScFormatShell::StateFormatPaintbrus
+@@ -2163,3 +2205,68 @@ void ScFormatShell::StateFormatPaintbrush( SfxItemSet& rSet )
          rSet.Put( SfxBoolItem( SID_FORMATPAINTBRUSH, pViewData->GetView()->HasPaintBrush() ) );
  }
  
-+short ScFormatShell::GetCurrentNumberFormatType() const
++short ScFormatShell::GetCurrentNumberFormatType() 
 +{
-+	ScDocument* pDoc = pViewData->GetDocument();
-+    sal_uInt32 nCurrentNumberFormat;
-+    pDoc->GetNumberFormat( pViewData->GetCurX(), pViewData->GetCurY(), 
-+                           pViewData->GetTabNo(), nCurrentNumberFormat );
-+    const SvNumberformat* pEntry = pDoc->GetFormatTable()->GetEntry( nCurrentNumberFormat );
-+    return pEntry->GetType();
++    short nType = NUMBERFORMAT_ALL;
++    ScDocument* pDoc = GetViewData()->GetDocument();   
++    ScMarkData aMark(GetViewData()->GetMarkData());
++    const SvNumberFormatter* pFormatter = pDoc->GetFormatTable();
++    if (!pFormatter)
++        return nType;
++
++    // TODO: Find out how to get a selected table range in case multiple tables 
++    // are selected.  Currently we only check for the current active table.
++
++    if ( aMark.IsMarked() || aMark.IsMultiMarked() )
++    {
++        aMark.MarkToMulti();
++        ScRange aRange;
++        aMark.GetMultiMarkArea(aRange);
++
++        const ScMarkArray* pArray = aMark.GetArray();
++        if (!pArray)
++            return nType;
++
++        short nComboType = NUMBERFORMAT_ALL;
++        bool bFirstItem = true;
++        for (SCCOL nCol = aRange.aStart.Col(); nCol <= aRange.aEnd.Col(); ++nCol)
++        {
++            const ScMarkArray& rColArray = pArray[nCol];
++            if (!rColArray.HasMarks())
++                continue;
++
++            SCROW nRow1, nRow2;
++            ScMarkArrayIter aMarkIter(&rColArray);
++            while (aMarkIter.Next(nRow1, nRow2))
++            {
++                ScRange aColRange(nCol, nRow1, aRange.aStart.Tab());
++                aColRange.aEnd.SetRow(nRow2);
++                sal_uInt32 nNumFmt = pDoc->GetNumberFormat(aColRange);
++                const SvNumberformat* pEntry = pFormatter->GetEntry(nNumFmt);
++                if (!pEntry)
++                    return 0;
++
++                short nThisType = pEntry->GetType();
++                if (bFirstItem)
++                {
++                    bFirstItem = false;
++                    nComboType = nThisType;
++                }
++                else if (nComboType != nThisType)
++                    // mixed number format type.
++                    return NUMBERFORMAT_ALL;
++            }
++        }
++        nType = nComboType;
++    }
++    else
++    {    
++        sal_uInt32 nNumFmt;
++        pDoc->GetNumberFormat( pViewData->GetCurX(), pViewData->GetCurY(), 
++                               pViewData->GetTabNo(), nNumFmt );
++        const SvNumberformat* pEntry = pFormatter->GetEntry( nNumFmt );
++        nType = pEntry->GetType();
++    }
++    return nType;
 +}
 +
-diff -urp --exclude=CVS --exclude=unxlngi6.pro --exclude=sc.vpj sc.clean/source/ui/view/tabview3.cxx sc/source/ui/view/tabview3.cxx
---- sc.clean/source/ui/view/tabview3.cxx	2008-02-05 11:16:56.000000000 -0500
-+++ sc/source/ui/view/tabview3.cxx	2008-02-22 12:17:51.000000000 -0500
-@@ -355,6 +355,13 @@ void ScTabView::InvalidateAttribs()
+diff --git sc/source/ui/view/tabview3.cxx sc/source/ui/view/tabview3.cxx
+index 153a407..04796f5 100644
+--- sc/source/ui/view/tabview3.cxx
++++ sc/source/ui/view/tabview3.cxx
+@@ -356,6 +356,13 @@ void ScTabView::InvalidateAttribs()
      rBindings.Invalidate( SID_ALIGN_ANY_VCENTER );
      rBindings.Invalidate( SID_ALIGN_ANY_BOTTOM );
  
@@ -179,9 +357,10 @@ diff -urp --exclude=CVS --exclude=unxlngi6.pro --exclude=sc.vpj sc.clean/source/
  //	rBindings.Invalidate( SID_RANGE_VALUE );
  //	rBindings.Invalidate( SID_RANGE_FORMULA );
  }
-diff -urp --exclude=CVS --exclude=unxlngi6.pro --exclude=sc.vpj sc.clean/uiconfig/scalc/toolbar/formatobjectbar.xml sc/uiconfig/scalc/toolbar/formatobjectbar.xml
---- sc.clean/uiconfig/scalc/toolbar/formatobjectbar.xml	2008-02-05 11:16:54.000000000 -0500
-+++ sc/uiconfig/scalc/toolbar/formatobjectbar.xml	2008-02-22 11:16:00.000000000 -0500
+diff --git sc/uiconfig/scalc/toolbar/formatobjectbar.xml sc/uiconfig/scalc/toolbar/formatobjectbar.xml
+index 22f023d..3654ce5 100644
+--- sc/uiconfig/scalc/toolbar/formatobjectbar.xml
++++ sc/uiconfig/scalc/toolbar/formatobjectbar.xml
 @@ -33,7 +33,6 @@
   <toolbar:toolbaritem xlink:href=".uno:NumberFormatPercent" toolbar:helpid="helpid:26046"  />
   <toolbar:toolbaritem xlink:href=".uno:NumberFormatDate" toolbar:helpid="helpid:26053"  toolbar:visible="false" />
