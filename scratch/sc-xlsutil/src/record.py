@@ -12,6 +12,7 @@ class BaseRecordHandler(object):
         self.size = size
         self.bytes = bytes
         self.lines = []
+        self.pos = 0       # current byte position
 
     def parseBytes (self):
         """Parse the original bytes and generate human readable output.
@@ -30,6 +31,17 @@ append a line to be displayed.
 
     def appendLine (self, line):
         self.lines.append(line)
+
+    def readBytes (self, length):
+        r = self.bytes[self.pos:self.pos+length]
+        self.pos += length
+        return r
+
+    def getCurrentPos (self):
+        return self.pos
+
+    def setCurrentPos (self, pos):
+        self.pos = pos
 
 # --------------------------------------------------------------------
 
@@ -425,7 +437,107 @@ class RefreshAll(BaseRecordHandler):
 # CT - Change Tracking
 
 class CTCellContent(BaseRecordHandler):
-    pass
+    
+    EXC_CHTR_TYPE_MASK       = 0x0007
+    EXC_CHTR_TYPE_FORMATMASK = 0xFF00
+    EXC_CHTR_TYPE_EMPTY      = 0x0000
+    EXC_CHTR_TYPE_RK         = 0x0001
+    EXC_CHTR_TYPE_DOUBLE     = 0x0002
+    EXC_CHTR_TYPE_STRING     = 0x0003
+    EXC_CHTR_TYPE_BOOL       = 0x0004
+    EXC_CHTR_TYPE_FORMULA    = 0x0005
+
+    def parseBytes (self):
+        size = globals.getSignedInt(self.readBytes(4))
+        id = globals.getSignedInt(self.readBytes(4))
+        opcode = globals.getSignedInt(self.readBytes(2))
+        accept = globals.getSignedInt(self.readBytes(2))
+        tabCreateId = globals.getSignedInt(self.readBytes(2))
+        valueType = globals.getSignedInt(self.readBytes(2))
+        self.appendLine("header: (size=%d; index=%d; opcode=0x%2.2X; accept=%d)"%(size, id, opcode, accept))
+        self.appendLine("sheet creation id: %d"%tabCreateId)
+
+        oldType = (valueType/(2*2*2) & CTCellContent.EXC_CHTR_TYPE_MASK)
+        newType = (valueType & CTCellContent.EXC_CHTR_TYPE_MASK)
+        self.appendLine("value type: (old=0x%4.4X; new=0x%4.4X)"%(oldType, newType))
+        self.readBytes(2) # ignore next 2 bytes.
+
+        row = globals.getSignedInt(self.readBytes(2))
+        col = globals.getSignedInt(self.readBytes(2))
+        cell = formula.CellAddress(col, row)
+        self.appendLine("cell position: %s"%cell.getName())
+
+        oldSize = globals.getSignedInt(self.readBytes(2))
+        self.readBytes(4) # ignore 4 bytes.
+
+        fmtType = (valueType & CTCellContent.EXC_CHTR_TYPE_FORMATMASK)
+        if fmtType == 0x1100:
+            self.readBytes(16)
+        elif fmtType == 0x1300:
+            self.readBytes(8)
+
+        self.readCell(oldType, "old cell type")
+        self.readCell(newType, "new cell type")
+
+    def readCell (self, cellType, cellName):
+
+        cellTypeText = 'unknown'
+
+        if cellType == CTCellContent.EXC_CHTR_TYPE_FORMULA:
+            cellTypeText, formulaBytes, formulaText = self.readFormula()
+            self.appendLine("%s: %s"%(cellName, cellTypeText))
+            self.appendLine("formula bytes: %s"%globals.getRawBytes(formulaBytes, True, False))
+            self.appendLine("tokens: %s"%formulaText)
+            return
+
+        if cellType == CTCellContent.EXC_CHTR_TYPE_EMPTY:
+            cellTypeText = 'empty'
+        elif cellType == CTCellContent.EXC_CHTR_TYPE_RK:
+            cellTypeText = self.readRK()
+        elif cellType == CTCellContent.EXC_CHTR_TYPE_DOUBLE:
+            cellTypeText = self.readDouble()
+        elif cellType == CTCellContent.EXC_CHTR_TYPE_STRING:
+            cellTypeText = self.readString()
+        elif cellType == CTCellContent.EXC_CHTR_TYPE_BOOL:
+            cellTypeText = self.readBool()
+        elif cellType == CTCellContent.EXC_CHTR_TYPE_FORMULA:
+            cellTypeText, formulaText = self.readFormula()
+
+        self.appendLine("%s: %s"%(cellName, cellTypeText))
+
+    def readRK (self):
+        valRK = globals.getSignedInt(self.readBytes(4))
+        return 'RK value'
+
+    def readDouble (self):
+        val = globals.getDouble(self.readBytes(4))
+        return "value %f"%val
+
+    def readString (self):
+        size = globals.getSignedInt(self.readBytes(2))
+        pos = self.getCurrentPos()
+        name, byteLen = globals.getRichText(self.bytes[pos:], size)
+        self.setCurrentPos(pos + byteLen)
+        return "string '%s'"%name
+
+    def readBool (self):
+        bool = globals.getSignedInt(self.readBytes(2))
+        return "bool (%d)"%bool
+
+    def readFormula (self):
+        size = globals.getSignedInt(self.readBytes(2))
+        fmlaBytes = self.readBytes(size)
+        o = formula.FormulaParser(self.header, fmlaBytes, False)
+        o.parse()
+        return "formula", fmlaBytes, o.getText()
+
+
+
+
+
+
+
+
 
 # -------------------------------------------------------------------
 # CH - Chart
