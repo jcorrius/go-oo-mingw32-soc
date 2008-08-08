@@ -844,7 +844,7 @@ index fd09e93..719206e 100644
  {
      if (pLinkManager)
 diff --git sc/source/core/tool/address.cxx sc/source/core/tool/address.cxx
-index 2cb5dce..f2d89a2 100644
+index 2cb5dce..bb5bc8e 100644
 --- sc/source/core/tool/address.cxx
 +++ sc/source/core/tool/address.cxx
 @@ -35,6 +35,7 @@
@@ -855,7 +855,397 @@ index 2cb5dce..f2d89a2 100644
  
  #include "globstr.hrc"
  #include <sal/alloca.h>
-@@ -713,15 +714,15 @@ lcl_ScRange_Parse_XL_A1( ScRange& r,
+@@ -45,6 +46,32 @@
+ #include <tools/urlobj.hxx>
+ using namespace ::com::sun::star;
+ 
++
++#include <stdio.h>
++#include <string>
++
++namespace {
++
++class StackPrinter
++{
++public:
++    explicit StackPrinter(const char* msg) :
++        msMsg(msg)
++    {
++        fprintf(stdout, "%s: --begin\n", msMsg.c_str());
++    }
++
++    ~StackPrinter()
++    {
++        fprintf(stdout, "%s: --end\n", msMsg.c_str());
++    }
++
++private:
++    ::std::string msMsg;
++};
++
++}
++
+ ////////////////////////////////////////////////////////////////////////////
+ const ScAddress::Details ScAddress::detailsOOOa1( CONV_OOO, 0, 0 );
+ 
+@@ -102,12 +129,9 @@ sal_Unicode_strtol ( const sal_Unicode*  p,
+ // Returns NULL if the string should be a sheet name, but is invalid
+ // Returns a pointer to the first character after the sheet name
+ static const sal_Unicode *
+-lcl_XL_ParseSheetRef( const sal_Unicode *start,
+-                      ScAddress *pAddr,
+-                      const ScDocument* pDoc,
+-                      const String& rDocName,
++lcl_XL_ParseSheetRef( const sal_Unicode* start,
+                       String& rExternTabName,
+-                      bool allow_3d )
++                      bool allow_3d)
+ {
+     String aTabName;
+     SCTAB  nTab = 0;
+@@ -190,26 +214,7 @@ lcl_XL_ParseSheetRef( const sal_Unicode *start,
+         aTabName.Append( start, sal::static_int_cast<xub_StrLen>( p - start ) );
+     }
+ 
+-    if( pDoc )
+-    {
+-        if( rDocName.Len() > 0 )
+-        {
+-            // This is a simplification of the OOo code which does an
+-            // optimization to manually construct the DocTab before calling
+-            // GetDocTabName
+-            String aDocTab = ScGlobal::GetDocTabName( rDocName, aTabName );
+-            if( !pDoc->GetTable( aDocTab, nTab ) &&
+-                 pDoc->ValidTabName( aTabName ) &&
+-                !pDoc->GetTable( aDocTab, nTab ) )
+-            {
+-                rExternTabName = aDocTab;
+-            }
+-        }
+-        else if( !pDoc->GetTable( aTabName, nTab ) )
+-            return start;
+-    }
+-
+-    pAddr->SetTab( nTab );
++    rExternTabName = aTabName;
+     return p;
+ }
+ 
+@@ -227,39 +232,66 @@ lcl_ScRange_Parse_XL_Header( ScRange& r,
+     // Is this an external reference ?
+     rStartTabName.Erase();
+     rEndTabName.Erase();
+-    if( *p == '[' )
++    rExternDocName.Erase();
++    if (*p == '[')
+     {
+-        p++;
+-        // TODO : Get more detail on how paths are quoted
+-        // 1) I suspect only single quote is correct
+-        // 2) check whether this is another doubled quote rather than a
+-        //    backslash
+-        if( *p == '\'' || *p == '\"' )
++        ++p;
++        // Only single quotes are correct, and a double single quote escapes a
++        // single quote text inside the quoted text.
++        if (*p == '\'')
+         {
+-            for( const sal_Unicode cQuote = *p++; *p && *p != cQuote ; )
++            sal_Unicode cPrev;
++            String aDocName;
++            for (++p; *p; ++p)
+             {
+-                if( *p == '\\' && p[1] )
+-                    p++;
+-                rExternDocName += *p++;
++                if (*p == '\'')
++                {
++                    if (cPrev == '\'')
++                        // two successive single quote is treated as a single 
++                        // valid character.
++                        aDocName += *p;
++                }
++                else if (*p == ']')
++                {
++                    if (cPrev == '\'')
++                    {
++                        // Success!
++                        rExternDocName = aDocName;
++                        break;
++                    }
++                    else
++                        return start;
++                }
++                else
++                {
++                    // any other character
++                    if (aDocName.Len() > 0 && cPrev == '\'')
++                        // unless it's the 3rd character, a normal character 
++                        // following immediately a single quote is invalid.
++                        return start;
++                    aDocName += *p;
++                }
++                cPrev = *p;
+             }
++
++            if (!*p)
++                return start;
+         }
+         else
+         {
++            // non-quoted file name.
+             p = ScGlobal::UnicodeStrChr( start+1, ']' );
+             if( p == NULL )
+                 return start;
+             rExternDocName.Append( start+1, sal::static_int_cast<xub_StrLen>( p-(start+1) ) );
+         }
+ 
+-        rExternDocName = ScGlobal::GetAbsDocName( rExternDocName,
+-            pDoc->GetDocumentShell() );
+-        if( *p != ']' )
+-            return start;
+-        p++;
++        rExternDocName = ScGlobal::GetAbsDocName(rExternDocName, pDoc->GetDocumentShell());
++        ++p;
+     }
+ 
+     startTabs = p;
+-    p = lcl_XL_ParseSheetRef( p, &r.aStart, pDoc, rExternDocName, rStartTabName, TRUE );
++    p = lcl_XL_ParseSheetRef( p, rStartTabName, TRUE );
+     if( NULL == p )
+         return start;       // invalid tab
+     if( p != startTabs )
+@@ -267,7 +299,7 @@ lcl_ScRange_Parse_XL_Header( ScRange& r,
+         nFlags |= SCA_VALID_TAB | SCA_TAB_3D | SCA_TAB_ABSOLUTE;
+         if( *p == ':' ) // 3d ref
+         {
+-            p = lcl_XL_ParseSheetRef( p+1, &r.aEnd, pDoc, rExternDocName, rEndTabName, FALSE );
++            p = lcl_XL_ParseSheetRef( p+1, rEndTabName, FALSE );
+             if( p == NULL )
+                 return start; // invalid tab
+             nFlags |= SCA_VALID_TAB2 | SCA_TAB2_3D | SCA_TAB2_ABSOLUTE;
+@@ -289,45 +321,36 @@ lcl_ScRange_Parse_XL_Header( ScRange& r,
+         // Use the current tab, it needs to be passed in. : r.aEnd.SetTab( .. );
+     }
+ 
+-    return p;
+-}
+-
+-static USHORT
+-lcl_XL_LinkSheetRef( ScRange& r,
+-                     ScDocument* pDoc,
+-                     const String& rExternDocName,
+-                     const String& rStartTabName,
+-                     const String& rEndTabName,
+-                     USHORT nFlags )
+-{
+-    SCTAB nTab;
+-
+-    if( rExternDocName.Len() > 0 )
++    if (!rExternDocName.Len())
+     {
+-        String aDocName = ScGlobal::GetAbsDocName( rExternDocName,
+-                                                   pDoc->GetDocumentShell() );
++        // Internal reference.
++        if (!rStartTabName.Len())
++            return start;
+ 
+-        String aDocTab;
+-       
+-        aDocTab = ScGlobal::GetDocTabName( aDocName, rStartTabName );
+-        if( !pDoc->LinkExternalTab( nTab, aDocTab, rExternDocName, rStartTabName ) )
+-            return 0;
+-        r.aStart.SetTab( nTab );
++        SCTAB nTab;
++        if (!pDoc->GetTable(rStartTabName, nTab))
++        {
++            // invalid table name.
++            nFlags &= ~SCA_VALID_TAB;
++            nTab = -1;
++        }
+ 
+-        if( rEndTabName.Len() > 0 &&
+-            rStartTabName != rEndTabName )
++        r.aStart.SetTab(nTab);
++        r.aEnd.SetTab(nTab);
++
++        if (rEndTabName.Len())
+         {
+-            aDocTab = ScGlobal::GetDocTabName( aDocName, rEndTabName );
+-            if( !pDoc->LinkExternalTab( nTab, aDocTab, rExternDocName, rEndTabName ) )
+-            {
+-                DBG_ASSERT( r.IsValid(), "lcl_XL_LinkSheetRef - unable to link endTab of 3d ref" );
+-                return 0;
++            if (!pDoc->GetTable(rEndTabName, nTab))
++            {    
++                // invalid table name.
++                nFlags &= ~SCA_VALID_TAB2;
++                nTab = -1;
+             }
++                
++            r.aEnd.SetTab(nTab);
+         }
+-        r.aEnd.SetTab( nTab );
+     }
+-
+-    return nFlags;
++    return p;
+ }
+ 
+ 
+@@ -427,7 +450,7 @@ lcl_ScRange_Parse_XL_R1C1( ScRange& r,
+                            const sal_Unicode* p,
+                            ScDocument* pDoc,
+                            const ScAddress::Details& rDetails,
+-                           BOOL bOnlyAcceptSingle )
++                           BOOL bOnlyAcceptSingle, ScAddress::ExternalInfo* pExtInfo )
+ {
+     const sal_Unicode* pTmp = NULL;
+     String aExternDocName, aStartTabName, aEndTabName;
+@@ -442,6 +465,15 @@ lcl_ScRange_Parse_XL_R1C1( ScRange& r,
+ #endif
+     p = lcl_ScRange_Parse_XL_Header( r, p, pDoc,
+         aExternDocName, aStartTabName, aEndTabName, nFlags );
++
++    if (aExternDocName.Len() > 0)
++    {
++        ScExternalRefManager* pRefMgr = pDoc->GetExternalRefManager();
++        pExtInfo->mbExternal = true;
++        pExtInfo->maTabName = aStartTabName;
++        pExtInfo->mnFileId = pRefMgr->getExternalFileId(aExternDocName);
++    }
++
+     if( NULL == p )
+         return 0;
+ 
+@@ -480,8 +512,7 @@ lcl_ScRange_Parse_XL_R1C1( ScRange& r,
+             r.aStart.SetCol( 0 );
+             r.aEnd.SetCol( MAXCOL );
+ 
+-            return bOnlyAcceptSingle ? 0 : lcl_XL_LinkSheetRef( r, pDoc,
+-                aExternDocName, aStartTabName, aEndTabName, nFlags );
++            return bOnlyAcceptSingle ? 0 : nFlags;
+         }
+         else if( NULL == (p = lcl_r1c1_get_col( p, rDetails, &r.aStart, &nFlags )))
+             goto failed;
+@@ -501,8 +532,7 @@ lcl_ScRange_Parse_XL_R1C1( ScRange& r,
+                 return nFlags;
+             }
+ 
+-            return bOnlyAcceptSingle ? lcl_XL_LinkSheetRef( r, pDoc,
+-                aExternDocName, aStartTabName, aEndTabName, nFlags ) : 0;
++            return bOnlyAcceptSingle ? nFlags : 0;
+         }
+         p = pTmp;
+ 
+@@ -517,8 +547,7 @@ lcl_ScRange_Parse_XL_R1C1( ScRange& r,
+         }
+ 
+         nFlags |= (nFlags2 << 4);
+-        return bOnlyAcceptSingle ? 0 : lcl_XL_LinkSheetRef( r, pDoc,
+-            aExternDocName, aStartTabName, aEndTabName, nFlags );
++        return bOnlyAcceptSingle ? 0 : nFlags;
+     }
+     else if( *p == 'C' || *p == 'c' )   // full col C#
+     {
+@@ -550,8 +579,7 @@ lcl_ScRange_Parse_XL_R1C1( ScRange& r,
+         r.aStart.SetRow( 0 );
+         r.aEnd.SetRow( MAXROW );
+ 
+-        return bOnlyAcceptSingle ? 0 : lcl_XL_LinkSheetRef( r, pDoc,
+-            aExternDocName, aStartTabName, aEndTabName, nFlags );
++        return bOnlyAcceptSingle ? 0 : nFlags;
+     }
+ 
+ failed :
+@@ -604,8 +632,12 @@ static USHORT
+ lcl_ScRange_Parse_XL_A1( ScRange& r,
+                          const sal_Unicode* p,
+                          ScDocument* pDoc,
+-                         BOOL bOnlyAcceptSingle )
++                         BOOL bOnlyAcceptSingle,
++                         ScAddress::ExternalInfo* pExtInfo )
+ {
++    StackPrinter __stack_print__("::lcl_ScRange_Parse_XL_A1");
++    fprintf(stdout, "lcl_ScRange_Parse_XL_A1:   text = '%s'\n", 
++            rtl::OUStringToOString(String(p), RTL_TEXTENCODING_UTF8).getStr());
+     const sal_Unicode* tmp1, *tmp2;
+     String aExternDocName, aStartTabName, aEndTabName; // for external link table
+     USHORT nFlags = SCA_VALID | SCA_VALID_TAB, nFlags2 = SCA_VALID_TAB2;
+@@ -619,6 +651,20 @@ lcl_ScRange_Parse_XL_A1( ScRange& r,
+ #endif
+     p = lcl_ScRange_Parse_XL_Header( r, p, pDoc,
+         aExternDocName, aStartTabName, aEndTabName, nFlags );
++
++    fprintf(stdout, "lcl_ScRange_Parse_XL_A1:   extern doc name = '%s'; start tab = '%s'; end tab = '%s'\n",
++            rtl::OUStringToOString(aExternDocName, RTL_TEXTENCODING_UTF8).getStr(), 
++            rtl::OUStringToOString(aStartTabName, RTL_TEXTENCODING_UTF8).getStr(),
++            rtl::OUStringToOString(aEndTabName, RTL_TEXTENCODING_UTF8).getStr());
++
++    if (aExternDocName.Len() > 0)
++    {
++        ScExternalRefManager* pRefMgr = pDoc->GetExternalRefManager();
++        pExtInfo->mbExternal = true;
++        pExtInfo->maTabName = aStartTabName;
++        pExtInfo->mnFileId = pRefMgr->getExternalFileId(aExternDocName);
++    }
++
+     if( NULL == p )
+         return 0;
+ 
+@@ -640,8 +686,7 @@ lcl_ScRange_Parse_XL_A1( ScRange& r,
+             SCA_VALID_COL | SCA_VALID_COL2 |
+             SCA_COL_ABSOLUTE | SCA_COL2_ABSOLUTE;
+         nFlags |= (nFlags2 << 4);
+-        return lcl_XL_LinkSheetRef( r, pDoc,
+-            aExternDocName, aStartTabName, aEndTabName, nFlags );
++        return nFlags;
+     }
+ 
+     tmp2 = lcl_a1_get_row( tmp1, &r.aStart, &nFlags );
+@@ -661,8 +706,7 @@ lcl_ScRange_Parse_XL_A1( ScRange& r,
+             SCA_VALID_ROW | SCA_VALID_ROW2 |
+             SCA_ROW_ABSOLUTE | SCA_ROW2_ABSOLUTE;
+         nFlags |= (nFlags2 << 4);
+-        return lcl_XL_LinkSheetRef( r, pDoc,
+-            aExternDocName, aStartTabName, aEndTabName, nFlags );
++        return nFlags;
+     }
+ 
+     // prepare as if it's a singleton, in case we want to fall back */
+@@ -672,8 +716,7 @@ lcl_ScRange_Parse_XL_A1( ScRange& r,
+     if ( bOnlyAcceptSingle )
+     {
+         if ( *tmp2 == 0 )
+-            return lcl_XL_LinkSheetRef( r, pDoc,
+-                aExternDocName, aStartTabName, aEndTabName, nFlags );
++            return nFlags;
+         else
+         {
+             // any trailing invalid character must invalidate the address.
+@@ -692,12 +735,11 @@ lcl_ScRange_Parse_XL_A1( ScRange& r,
+     p = tmp2;
+     tmp1 = lcl_a1_get_col( p+1, &r.aEnd, &nFlags2 );
+     if( !tmp1 ) // strange, but valid singleton
+-        return lcl_XL_LinkSheetRef( r, pDoc,
+-            aExternDocName, aStartTabName, aEndTabName, nFlags );
++        return nFlags;
++
+     tmp2 = lcl_a1_get_row( tmp1, &r.aEnd, &nFlags2 );
+     if( !tmp2 ) // strange, but valid singleton
+-        return lcl_XL_LinkSheetRef( r, pDoc,
+-            aExternDocName, aStartTabName, aEndTabName, nFlags );
++        return nFlags;
+ 
+     if ( *tmp2 != 0 )
+     {
+@@ -708,20 +750,19 @@ lcl_ScRange_Parse_XL_A1( ScRange& r,
+     }
+ 
+     nFlags |= (nFlags2 << 4);
+-    return lcl_XL_LinkSheetRef( r, pDoc,
+-        aExternDocName, aStartTabName, aEndTabName, nFlags );
++    return nFlags;
  }
  
  static USHORT
@@ -874,7 +1264,7 @@ index 2cb5dce..f2d89a2 100644
  
      // Lets see if this is a reference to something in an external file.
      // A Documentname is always quoted and has a trailing #
-@@ -795,35 +796,11 @@ lcl_ScAddress_Parse_OOo( BOOL& bExternal, const sal_Unicode* p,
+@@ -795,35 +836,11 @@ lcl_ScAddress_Parse_OOo( BOOL& bExternal, const sal_Unicode* p,
          }
          if( *p++ != '.' )
              nBits = 0;
@@ -914,7 +1304,7 @@ index 2cb5dce..f2d89a2 100644
          }
          else
              nBits = 0;
-@@ -884,16 +861,33 @@ lcl_ScAddress_Parse_OOo( BOOL& bExternal, const sal_Unicode* p,
+@@ -884,16 +901,33 @@ lcl_ScAddress_Parse_OOo( BOOL& bExternal, const sal_Unicode* p,
          if( !nBits )
              p = q;
      }
@@ -952,7 +1342,7 @@ index 2cb5dce..f2d89a2 100644
      if ( !(nRes & SCA_VALID_ROW) && (nRes & SCA_VALID_COL)
              && !( (nRes & SCA_TAB_3D) && (nRes & SCA_VALID_TAB)) )
      {   // keine Row, keine Tab, aber Col => DM (...), B (...) o.ae.
-@@ -912,9 +906,8 @@ lcl_ScAddress_Parse_OOo( BOOL& bExternal, const sal_Unicode* p,
+@@ -912,9 +946,8 @@ lcl_ScAddress_Parse_OOo( BOOL& bExternal, const sal_Unicode* p,
  }
  
  static USHORT
@@ -964,7 +1354,7 @@ index 2cb5dce..f2d89a2 100644
  {
      if( !*p )
          return 0;
-@@ -924,7 +917,7 @@ lcl_ScAddress_Parse ( BOOL& bExternal, const sal_Unicode* p,
+@@ -924,20 +957,20 @@ lcl_ScAddress_Parse ( BOOL& bExternal, const sal_Unicode* p,
      default :
      case ScAddress::CONV_OOO:
          {
@@ -973,7 +1363,22 @@ index 2cb5dce..f2d89a2 100644
          }
  
      case ScAddress::CONV_XL_A1:
-@@ -949,9 +942,8 @@ bool ConvertSingleRef( ScDocument* pDoc, const String& rRefString,
+         {
+             ScRange r = rAddr;
+-            USHORT nFlags = lcl_ScRange_Parse_XL_A1( r, p, pDoc, TRUE );
++            USHORT nFlags = lcl_ScRange_Parse_XL_A1( r, p, pDoc, TRUE, pExtInfo );
+             rAddr = r.aStart;
+             return nFlags;
+         }
+     case ScAddress::CONV_XL_R1C1:
+         {
+             ScRange r = rAddr;
+-            USHORT nFlags = lcl_ScRange_Parse_XL_R1C1( r, p, pDoc, rDetails, TRUE );
++            USHORT nFlags = lcl_ScRange_Parse_XL_R1C1( r, p, pDoc, rDetails, TRUE, pExtInfo );
+             rAddr = r.aStart;
+             return nFlags;
+         }
+@@ -949,9 +982,8 @@ bool ConvertSingleRef( ScDocument* pDoc, const String& rRefString,
                         SCTAB nDefTab, ScRefAddress& rRefAddress,
                         const ScAddress::Details& rDetails )
  {
@@ -984,7 +1389,7 @@ index 2cb5dce..f2d89a2 100644
      if( nRes & SCA_VALID )
      {
          rRefAddress.Set( aAddr,
-@@ -988,10 +980,9 @@ bool ConvertDoubleRef( ScDocument* pDoc, const String& rRefString, SCTAB nDefTab
+@@ -988,10 +1020,9 @@ bool ConvertDoubleRef( ScDocument* pDoc, const String& rRefString, SCTAB nDefTab
  
  
  USHORT ScAddress::Parse( const String& r, ScDocument* pDoc,
@@ -997,7 +1402,7 @@ index 2cb5dce..f2d89a2 100644
  }
  
  
-@@ -1060,7 +1051,7 @@ void ScRange::ExtendTo( const ScRange& rRange )
+@@ -1060,7 +1091,7 @@ void ScRange::ExtendTo( const ScRange& rRange )
  }
  
  static USHORT
@@ -1006,7 +1411,7 @@ index 2cb5dce..f2d89a2 100644
  {
      USHORT nRes1 = 0, nRes2 = 0;
      xub_StrLen nTmp = 0;
-@@ -1073,13 +1064,12 @@ lcl_ScRange_Parse_OOo( ScRange &aRange, const String& r, ScDocument* pDoc )
+@@ -1073,13 +1104,12 @@ lcl_ScRange_Parse_OOo( ScRange &aRange, const String& r, ScDocument* pDoc )
          String aTmp( r );
          sal_Unicode* p = aTmp.GetBufferAccess();
          p[ nPos ] = 0;
@@ -1023,7 +1428,7 @@ index 2cb5dce..f2d89a2 100644
                      nRes2 &= ~SCA_VALID_TAB;    // #REF!
                  else
                  {
-@@ -1132,7 +1122,7 @@ lcl_ScRange_Parse_OOo( ScRange &aRange, const String& r, ScDocument* pDoc )
+@@ -1132,7 +1162,7 @@ lcl_ScRange_Parse_OOo( ScRange &aRange, const String& r, ScDocument* pDoc )
  }
  
  USHORT ScRange::Parse( const String& r, ScDocument* pDoc,
@@ -1032,7 +1437,7 @@ index 2cb5dce..f2d89a2 100644
  {
      if ( r.Len() <= 0 )
          return 0;
-@@ -1141,7 +1131,7 @@ USHORT ScRange::Parse( const String& r, ScDocument* pDoc,
+@@ -1141,13 +1171,13 @@ USHORT ScRange::Parse( const String& r, ScDocument* pDoc,
      {
      default :
      case ScAddress::CONV_OOO:
@@ -1040,9 +1445,17 @@ index 2cb5dce..f2d89a2 100644
 +        return lcl_ScRange_Parse_OOo( *this, r, pDoc, pExtInfo );
  
      case ScAddress::CONV_XL_A1:
-         return lcl_ScRange_Parse_XL_A1( *this, r.GetBuffer(), pDoc, FALSE );
+-        return lcl_ScRange_Parse_XL_A1( *this, r.GetBuffer(), pDoc, FALSE );
++        return lcl_ScRange_Parse_XL_A1( *this, r.GetBuffer(), pDoc, FALSE, pExtInfo );
+ 
+     case ScAddress::CONV_XL_R1C1:
+-        return lcl_ScRange_Parse_XL_R1C1( *this, r.GetBuffer(), pDoc, rDetails, FALSE );
++        return lcl_ScRange_Parse_XL_R1C1( *this, r.GetBuffer(), pDoc, rDetails, FALSE, pExtInfo );
+     }
+ }
+ 
 diff --git sc/source/core/tool/compiler.cxx sc/source/core/tool/compiler.cxx
-index 084f533..e0d201c 100644
+index 084f533..37ec1f8 100644
 --- sc/source/core/tool/compiler.cxx
 +++ sc/source/core/tool/compiler.cxx
 @@ -74,9 +74,38 @@
@@ -1084,13 +1497,25 @@ index 084f533..e0d201c 100644
  
  #if OSL_DEBUG_LEVEL > 1
  // For some unknown reason the identical dbg_dump utilities in
-@@ -1175,6 +1204,214 @@ static bool lcl_isValidQuotedText( const String& rFormula, xub_StrLen nSrcPos, P
-     return true;
- }
+@@ -1164,7 +1193,7 @@ static bool lcl_isValidQuotedText( const String& rFormula, xub_StrLen nSrcPos, P
+                 {
+                     rRes.TokenType = KParseType::SINGLE_QUOTE_NAME;
+                     rRes.EndPos = nPos+1;
+-                    return false;
++                    return true;
+                 }
+                 ++nPos;
+             }
+@@ -1172,9 +1201,217 @@ static bool lcl_isValidQuotedText( const String& rFormula, xub_StrLen nSrcPos, P
+         }
+     }
  
++    return false;
++}
++
 +static bool lcl_parseExternalName( const String& rSymbol, String& rFile, String& rName, const sal_Unicode cSep )
 +{
-+    StackPrinter aStack("lcl_parseExternalName");
++    StackPrinter __stack_print__("::lcl_parseExternalName");
 +    fprintf(stdout, "lcl_parseExternalName:   symbol = '%s'\n", rtl::OUStringToOString(rSymbol, RTL_TEXTENCODING_UTF8).getStr());
 +
 +    const sal_Unicode* p = rSymbol.GetBuffer();
@@ -1241,9 +1666,9 @@ index 084f533..e0d201c 100644
 +            rtl::OUStringToOString(aTmpName, RTL_TEXTENCODING_UTF8).getStr());
 +    rFile = aTmpFile;
 +    rName = aTmpName;
-+    return true;
-+}
-+
+     return true;
+ }
+ 
 +static String lcl_makeExternalNameStr( const String& rFile, const String& rName, const sal_Unicode cSep )
 +{
 +    String aStr, aFile = rFile;
@@ -1299,7 +1724,15 @@ index 084f533..e0d201c 100644
  struct Convention_A1 : public ScCompiler::Convention
  {
      Convention_A1( ScAddress::Convention eConv ) : ScCompiler::Convention( eConv ) { }
-@@ -1195,7 +1432,7 @@ struct Convention_A1 : public ScCompiler::Convention
+@@ -1188,14 +1425,14 @@ struct Convention_A1 : public ScCompiler::Convention
+                                const CharClass* pCharClass) const
+     {
+         ParseResult aRet;
+-        if ( !lcl_isValidQuotedText(rFormula, nSrcPos, aRet) )
++        if ( lcl_isValidQuotedText(rFormula, nSrcPos, aRet) )
+             return aRet;
+ 
+         static const sal_Int32 nStartFlags = KParseTokens::ANY_LETTER_OR_NUMBER |
              KParseTokens::ASC_UNDERSCORE | KParseTokens::ASC_DOLLAR;
          static const sal_Int32 nContFlags = nStartFlags | KParseTokens::ASC_DOT;
          // '?' allowed in range names because of Xcl :-/
@@ -1395,7 +1828,7 @@ index 084f533..e0d201c 100644
  };
  
  
-@@ -1499,11 +1816,97 @@ struct ConventionXL
+@@ -1499,11 +1816,150 @@ struct ConventionXL
          }
          return sal_Unicode(0);
      }
@@ -1474,6 +1907,59 @@ index 084f533..e0d201c 100644
 +            lcl_appendTabName(rBuf, aLastTabName);
 +        }
 +    }
++
++    static void parseExternalDocName( const String& rFormula, xub_StrLen& rSrcPos )
++    {
++        xub_StrLen nLen = rFormula.Len();
++        const sal_Unicode* p = rFormula.GetBuffer();
++        sal_Unicode cPrev = 0;
++        for (xub_StrLen i = rSrcPos; i < nLen; ++i)
++        {
++            sal_Unicode c = p[i];
++            if (i == rSrcPos)
++            {
++                // first character must be '['.
++                if (c != '[')
++                    return;
++            }
++            else if (i == rSrcPos + 1)
++            {
++                // second character must be a single quote.
++                if (c != '\'')
++                    return;
++            }
++            else if (c == '\'')
++            {
++                if (cPrev == '\'')
++                    // two successive single quote is treated as a single 
++                    // valid character.
++                    c = 'a';
++            }
++            else if (c == ']')
++            {
++                if (cPrev == '\'')
++                {
++                    // valid source document path found.  Increment the
++                    // current position to skip the source path.
++                    rSrcPos = i + 1;
++                    if (rSrcPos >= nLen)
++                        rSrcPos = nLen - 1;
++                    return;
++                }
++                else
++                    return;
++            }
++            else
++            {
++                // any other character
++                if (i > rSrcPos + 2 && cPrev == '\'')
++                    // unless it's the 3rd character, a normal character 
++                    // following immediately a single quote is invalid.
++                    return;
++            }
++            cPrev = c;
++        }
++    }
  };
  
  struct ConventionXL_A1 : public Convention_A1, public ConventionXL
@@ -1493,7 +1979,7 @@ index 084f533..e0d201c 100644
      void MakeRefStr( rtl::OUStringBuffer&   rBuf,
                       const ScCompiler&      rComp,
                       const ComplRefData& rRef,
-@@ -1557,22 +1960,11 @@ struct ConventionXL_A1 : public Convention_A1, public ConventionXL
+@@ -1557,22 +2013,11 @@ struct ConventionXL_A1 : public Convention_A1, public ConventionXL
              }
          }
  
@@ -1518,7 +2004,19 @@ index 084f533..e0d201c 100644
          }
      }
  
-@@ -1597,6 +1989,67 @@ struct ConventionXL_A1 : public Convention_A1, public ConventionXL
+@@ -1580,8 +2025,10 @@ struct ConventionXL_A1 : public Convention_A1, public ConventionXL
+                                        xub_StrLen nSrcPos,
+                                        const CharClass* pCharClass) const
+     {
++        ConventionXL::parseExternalDocName(rFormula, nSrcPos);
++
+         ParseResult aRet;
+-        if ( !lcl_isValidQuotedText(rFormula, nSrcPos, aRet) )
++        if ( lcl_isValidQuotedText(rFormula, nSrcPos, aRet) )
+             return aRet;
+ 
+         static const sal_Int32 nStartFlags = KParseTokens::ANY_LETTER_OR_NUMBER |
+@@ -1597,6 +2044,67 @@ struct ConventionXL_A1 : public Convention_A1, public ConventionXL
      {
          return ConventionXL::getSpecialSymbol(eSymType);
      }
@@ -1586,7 +2084,19 @@ index 084f533..e0d201c 100644
  };
  
  static const ConventionXL_A1 ConvXL_A1;
-@@ -1724,6 +2177,95 @@ struct ConventionXL_R1C1 : public ScCompiler::Convention, public ConventionXL
+@@ -1706,8 +2214,10 @@ struct ConventionXL_R1C1 : public ScCompiler::Convention, public ConventionXL
+                                xub_StrLen nSrcPos,
+                                const CharClass* pCharClass) const
+     {
++        ConventionXL::parseExternalDocName(rFormula, nSrcPos);
++
+         ParseResult aRet;
+-        if ( !lcl_isValidQuotedText(rFormula, nSrcPos, aRet) )
++        if ( lcl_isValidQuotedText(rFormula, nSrcPos, aRet) )
+             return aRet;
+ 
+         static const sal_Int32 nStartFlags = KParseTokens::ANY_LETTER_OR_NUMBER |
+@@ -1724,6 +2234,95 @@ struct ConventionXL_R1C1 : public ScCompiler::Convention, public ConventionXL
      {
          return ConventionXL::getSpecialSymbol(eSymType);
      }
@@ -1682,15 +2192,16 @@ index 084f533..e0d201c 100644
  };
  
  static const ConventionXL_R1C1 ConvXL_R1C1;
-@@ -1898,6 +2440,7 @@ sal_Unicode* lcl_UnicodeStrNCpy( sal_Unicode* pDst, const sal_Unicode* pSrc, xub
+@@ -1898,6 +2497,8 @@ sal_Unicode* lcl_UnicodeStrNCpy( sal_Unicode* pDst, const sal_Unicode* pSrc, xub
  
  xub_StrLen ScCompiler::NextSymbol(bool bInArray)
  {
-+    StackPrinter aStack("ScCompiler:NextSymbol");
++    StackPrinter __stack_print__("ScCompiler::NextSymbol");
++
      cSymbol[MAXSTRLEN-1] = 0;       // Stopper
      sal_Unicode* pSym = cSymbol;
      const sal_Unicode* const pStart = aFormula.GetBuffer();
-@@ -1922,6 +2465,11 @@ xub_StrLen ScCompiler::NextSymbol(bool bInArray)
+@@ -1922,6 +2523,11 @@ xub_StrLen ScCompiler::NextSymbol(bool bInArray)
      bool bAutoIntersection = false;
      int nRefInSheetName = 0;
      mnPredetectedReference = 0;
@@ -1702,7 +2213,7 @@ index 084f533..e0d201c 100644
      // try to parse simple tokens before calling i18n parser
      while ((c != 0) && (eState != ssStop) )
      {
-@@ -2179,7 +2727,7 @@ xub_StrLen ScCompiler::NextSymbol(bool bInArray)
+@@ -2179,7 +2785,7 @@ xub_StrLen ScCompiler::NextSymbol(bool bInArray)
                      static const int kQuote = kInc * 2;
                      static const int kPast = kInc * 3;
                      bool bAddToSymbol = true;
@@ -1711,7 +2222,7 @@ index 084f533..e0d201c 100644
                      {
                          // eat it, no sheet name
                          bAddToSymbol = false;
-@@ -2194,7 +2742,7 @@ xub_StrLen ScCompiler::NextSymbol(bool bInArray)
+@@ -2194,7 +2800,7 @@ xub_StrLen ScCompiler::NextSymbol(bool bInArray)
                      }
                      else if (nRefInSheetName < kPast)
                      {
@@ -1720,15 +2231,18 @@ index 084f533..e0d201c 100644
                              nRefInSheetName += kDollar;
                          else if ('\'' == c)
                          {
-@@ -2245,6 +2793,7 @@ xub_StrLen ScCompiler::NextSymbol(bool bInArray)
+@@ -2245,8 +2851,10 @@ xub_StrLen ScCompiler::NextSymbol(bool bInArray)
          cLast = c;
          c = *pSrc;
      }
 +#endif
      if ( bi18n )
      {
++        fprintf(stdout, "ScCompiler::NextSymbol:   i18n parsing\n");
          nSrcPos = sal::static_int_cast<xub_StrLen>( nSrcPos + nSpaces );
-@@ -2297,6 +2846,9 @@ xub_StrLen ScCompiler::NextSymbol(bool bInArray)
+         String aSymbol;
+         USHORT nErr = 0;
+@@ -2297,6 +2905,9 @@ xub_StrLen ScCompiler::NextSymbol(bool bInArray)
          aCorrectedSymbol = cSymbol;
      if (bAutoIntersection && nSpaces > 1)
          --nSpaces;  // replace '!!' with only one space
@@ -1738,7 +2252,7 @@ index 084f533..e0d201c 100644
      return nSpaces;
  }
  
-@@ -2516,7 +3068,8 @@ BOOL ScCompiler::IsDoubleReference( const String& rName )
+@@ -2516,7 +3127,8 @@ BOOL ScCompiler::IsDoubleReference( const String& rName )
  {
      ScRange aRange( aPos, aPos );
      const ScAddress::Details aDetails( pConv->meConv, aPos );
@@ -1748,7 +2262,7 @@ index 084f533..e0d201c 100644
      if( nFlags & SCA_VALID )
      {
          ScRawToken aToken;
-@@ -2535,23 +3088,41 @@ BOOL ScCompiler::IsDoubleReference( const String& rName )
+@@ -2535,23 +3147,41 @@ BOOL ScCompiler::IsDoubleReference( const String& rName )
              aRef.Ref2.SetTabDeleted( TRUE );        // #REF!
          aRef.Ref2.SetFlag3D( ( nFlags & SCA_TAB2_3D ) != 0 );
          aRef.CalcRelFromAbs( aPos );
@@ -1772,7 +2286,7 @@ index 084f533..e0d201c 100644
  
  BOOL ScCompiler::IsSingleReference( const String& rName )
  {
-+    StackPrinter aStack("ScCompiler::IsSingleReference");
++    StackPrinter __stack_print__("ScCompiler::IsSingleReference");
 +    fprintf(stdout, "ScCompiler::IsSingleReference:   symbol ='%s'\n", rtl::OUStringToOString(rName, RTL_TEXTENCODING_UTF8).getStr());
 +
      ScAddress aAddr( aPos );
@@ -1792,7 +2306,7 @@ index 084f533..e0d201c 100644
          ScRawToken aToken;
          SingleRefData aRef;
          aRef.InitAddress( aAddr );
-@@ -2571,16 +3142,28 @@ BOOL ScCompiler::IsSingleReference( const String& rName )
+@@ -2571,16 +3201,28 @@ BOOL ScCompiler::IsSingleReference( const String& rName )
              nFlags |= SCA_VALID;
          }
          aRef.CalcRelFromAbs( aPos );
@@ -1822,7 +2336,7 @@ index 084f533..e0d201c 100644
      // Has to be called before IsValue
      sal_Unicode ch1 = rName.GetChar(0);
      sal_Unicode cDecSep = ( mxSymbols->isEnglish() ? '.' :
-@@ -2679,6 +3262,30 @@ BOOL ScCompiler::IsNamedRange( const String& rUpperName )
+@@ -2679,6 +3321,30 @@ BOOL ScCompiler::IsNamedRange( const String& rUpperName )
          return FALSE;
  }
  
@@ -1853,7 +2367,7 @@ index 084f533..e0d201c 100644
  BOOL ScCompiler::IsDBRange( const String& rName )
  {
      USHORT n;
-@@ -3277,6 +3884,7 @@ BOOL ScCompiler::NextNewToken( bool bInArray )
+@@ -3277,6 +3943,7 @@ BOOL ScCompiler::NextNewToken( bool bInArray )
                && !(bAllowBooleans && IsBoolean( aUpper ))
                && !IsValue( aUpper )
                && !IsNamedRange( aUpper )
@@ -1861,7 +2375,7 @@ index 084f533..e0d201c 100644
                && !IsDBRange( aUpper )
                && !IsColRowName( aUpper )
                && !(bMayBeFuncName && IsMacro( aUpper ))
-@@ -3603,6 +4211,70 @@ BOOL ScCompiler::GetToken()
+@@ -3603,6 +4270,70 @@ BOOL ScCompiler::GetToken()
      }
      if( pToken->GetOpCode() == ocSubTotal )
          glSubTotal = TRUE;
@@ -1932,7 +2446,7 @@ index 084f533..e0d201c 100644
      else if( pToken->GetOpCode() == ocName )
      {
          ScRangeData* pRangeData = pDoc->GetRangeName()->FindIndex( pToken->GetIndex() );
-@@ -5553,6 +6225,7 @@ ScToken* ScCompiler::CreateStringFromToken( rtl::OUStringBuffer& rBuffer, ScToke
+@@ -5553,6 +6284,7 @@ ScToken* ScCompiler::CreateStringFromToken( rtl::OUStringBuffer& rBuffer, ScToke
      BOOL bSpaces = FALSE;
      ScToken* t = pTokenP;
      OpCode eOp = t->GetOpCode();
@@ -1940,7 +2454,7 @@ index 084f533..e0d201c 100644
      if( eOp >= ocAnd && eOp <= ocOr )
      {
          // AND, OR infix?
-@@ -5600,111 +6273,140 @@ ScToken* ScCompiler::CreateStringFromToken( rtl::OUStringBuffer& rBuffer, ScToke
+@@ -5600,111 +6332,140 @@ ScToken* ScCompiler::CreateStringFromToken( rtl::OUStringBuffer& rBuffer, ScToke
          DBG_ERRORFILE("unknown OpCode");
          rBuffer.append(ScGlobal::GetRscString(STR_NO_NAME_REF));
      }
@@ -1969,15 +2483,15 @@ index 084f533..e0d201c 100644
              {
 -                rRef.CalcAbsIfRel( aPos );
 -                if ( pDoc->HasStringData( rRef.nCol, rRef.nRow, rRef.nTab ) )
-+                case svExternalName:
-                 {
+-                {
 -                    String aStr;
 -                    pDoc->GetString( rRef.nCol, rRef.nRow, rRef.nTab, aStr );
 -                    EnQuote( aStr );
 -                    rBuffer.append(aStr);
 -                }
 -                else
--                {
++                case svExternalName:
+                 {
 -                    rBuffer.append(ScGlobal::GetRscString(STR_NO_NAME_REF));
 -                    pConv->MakeRefStr (rBuffer, *this, aRef, TRUE );
 +                    const String *pStr = pRefMgr->getExternalFileName(t->GetIndex());
@@ -2685,7 +3199,7 @@ index 3070f34..fd87dbf 100644
  {
      DBG_ASSERT_BIFF( GetBiff() == EXC_BIFF5 );
 diff --git sc/source/filter/excel/excform8.cxx sc/source/filter/excel/excform8.cxx
-index ebf8543..be5ec15 100644
+index ebf8543..5b55c59 100644
 --- sc/source/filter/excel/excform8.cxx
 +++ sc/source/filter/excel/excform8.cxx
 @@ -41,6 +41,35 @@
@@ -2724,15 +3238,12 @@ index ebf8543..be5ec15 100644
  
  ExcelToSc8::ExcelToSc8( const XclImpRoot& rRoot ) :
      ExcelToSc( rRoot ),
-@@ -53,15 +82,23 @@ ExcelToSc8::~ExcelToSc8()
+@@ -53,15 +82,33 @@ ExcelToSc8::~ExcelToSc8()
  {
  }
  
--
--BOOL ExcelToSc8::Read3DTabReference( XclImpStream& rStrm, SCTAB& rFirstTab, SCTAB& rLastTab )
 +bool ExcelToSc8::GetExternalFileIdFromXti( UINT16 nIxti, sal_uInt16& rFileId ) const
- {
--	rFirstTab = rLastTab = 0;
++{
 +    const String* pFileUrl = rLinkMan.GetSupbookUrl(nIxti);
 +    if (!pFileUrl || pFileUrl->Len() == 0)
 +        return false;
@@ -2740,21 +3251,32 @@ index ebf8543..be5ec15 100644
 +    String aFileUrl = ScGlobal::GetAbsDocName(*pFileUrl, GetDocShell());
 +    ScExternalRefManager* pRefMgr = GetDoc().GetExternalRefManager();
 +    rFileId = pRefMgr->getExternalFileId(aFileUrl);
- 
--	UINT16 nIxti;
--    rStrm >> nIxti;
++
 +    return true;
 +}
  
+-BOOL ExcelToSc8::Read3DTabReference( XclImpStream& rStrm, SCTAB& rFirstTab, SCTAB& rLastTab )
++bool ExcelToSc8::Read3DTabReference( UINT16 nIxti, SCTAB& rFirstTab, SCTAB& rLastTab, ExternalTabInfo& rExtInfo )
+ {
+ 	rFirstTab = rLastTab = 0;
++    rExtInfo.mbExternal = !rLinkMan.IsSelfRef(nIxti);
++    bool bSuccess = rLinkMan.GetScTabRange(rFirstTab, rLastTab, nIxti);
++    if (!bSuccess)
++        return false;
+ 
+-	UINT16 nIxti;
+-    rStrm >> nIxti;
++    if (!rExtInfo.mbExternal)
++        // This is internal reference.  Stop here.
++        return true;
+ 
 -    return rLinkMan.GetScTabRange( rFirstTab, rLastTab, nIxti );
-+bool ExcelToSc8::Read3DTabReference( SCTAB& rFirstTab, SCTAB& rLastTab, UINT16 nIxti )
-+{
-+	rFirstTab = rLastTab = 0;
-+    return rLinkMan.GetScTabRange(rFirstTab, rLastTab, nIxti);
++    rExtInfo.maTabName = rLinkMan.GetSupbookTabName(nIxti, rFirstTab);
++    return GetExternalFileIdFromXti(nIxti, rExtInfo.mnFileId);
  }
  
  
-@@ -608,8 +645,15 @@ ConvErr ExcelToSc8::Convert( const ScTokenArray*& rpTokArray, XclImpStream& aIn,
+@@ -608,8 +655,15 @@ ConvErr ExcelToSc8::Convert( const ScTokenArray*& rpTokArray, XclImpStream& aIn,
                      {
                          case xlExtName:
                          {
@@ -2772,7 +3294,7 @@ index ebf8543..be5ec15 100644
                          }
                          break;
  
-@@ -657,47 +701,81 @@ ConvErr ExcelToSc8::Convert( const ScTokenArray*& rpTokArray, XclImpStream& aIn,
+@@ -657,47 +711,71 @@ ConvErr ExcelToSc8::Convert( const ScTokenArray*& rpTokArray, XclImpStream& aIn,
  			case 0x7C:
  			case 0x3C: // Deleted 3-D Cell Reference			[    277]
  			{
@@ -2790,7 +3312,8 @@ index ebf8543..be5ec15 100644
 -					aSRD.nTab = nTabFirst;
 -                    aSRD.SetFlag3D( TRUE );
 -					aSRD.SetTabRel( FALSE );
-+                if (!Read3DTabReference(nTabFirst, nTabLast, nIxti))
++                ExternalTabInfo aExtInfo;
++                if (!Read3DTabReference(nIxti, nTabFirst, nTabLast, aExtInfo))
 +                {
 +                    aPool << ocBad;
 +                    aPool >> aStack;
@@ -2798,8 +3321,8 @@ index ebf8543..be5ec15 100644
 +                }
  
 -                    ExcRelToScRel8( nRw, nGrbitCol, aSRD, bRangeName );
-+                bool bExternal = !rLinkMan.IsSelfRef(nIxti);
-+                fprintf(stdout, "ExcelToSc8::Convert:   first tab = %d; last tab = %d; external (%d)\n", nTabFirst, nTabLast, bExternal);
++                fprintf(stdout, "ExcelToSc8::Convert:   first tab = %d; last tab = %d; external (%d)\n", 
++                        nTabFirst, nTabLast, aExtInfo.mbExternal);
  
 -					switch ( nOp )
 -					{
@@ -2832,7 +3355,7 @@ index ebf8543..be5ec15 100644
 +                        aSRD.SetRowDeleted( TRUE );
 +                }
 +
-+                if (bExternal)
++                if (aExtInfo.mbExternal)
 +                {
 +                    // nTabFirst and nTabLast are the indices of the refernced 
 +                    // sheets in the SUPBOOK record, hence do not represent
@@ -2840,25 +3363,14 @@ index ebf8543..be5ec15 100644
 +                    // SUPBOOK record only stores referenced sheets and skips
 +                    // the ones that are not referenced.
 +
-+                    const String& rTabName = rLinkMan.GetSupbookTabName(nIxti, nTabFirst);
-+                    fprintf(stdout, "ExcelToSc8::Convert:   tab name of first sheet = '%s'\n",
-+                            rtl::OUStringToOString(rTabName, RTL_TEXTENCODING_UTF8).getStr());
-+
-+                    sal_uInt16 nFileId;
-+                    if (!GetExternalFileIdFromXti(nIxti, nFileId))
-+                    {
-+                        aPool << ocBad;
-+                        aPool >> aStack;
-+                        break;
-+                    }
 +                    if (nTabLast != nTabFirst)
 +                    {
 +                        aCRD.Ref1 = aCRD.Ref2 = aSRD;
 +                        aCRD.Ref2.nTab = nTabLast;
-+                        aStack << aPool.StoreExtRef(nFileId, rTabName, aCRD);
++                        aStack << aPool.StoreExtRef(aExtInfo.mnFileId, aExtInfo.maTabName, aCRD);
 +                    }
 +                    else
-+                        aStack << aPool.StoreExtRef(nFileId, rTabName, aSRD);
++                        aStack << aPool.StoreExtRef(aExtInfo.mnFileId, aExtInfo.maTabName, aSRD);
 +                }
 +                else
 +                {
@@ -2888,7 +3400,7 @@ index ebf8543..be5ec15 100644
  			}
  				break;
  			case 0x5B:
-@@ -707,55 +785,75 @@ ConvErr ExcelToSc8::Convert( const ScTokenArray*& rpTokArray, XclImpStream& aIn,
+@@ -707,55 +785,65 @@ ConvErr ExcelToSc8::Convert( const ScTokenArray*& rpTokArray, XclImpStream& aIn,
  			case 0x7D:
  			case 0x3D: // Deleted 3-D Area Reference			[    277]
  			{
@@ -2902,7 +3414,8 @@ index ebf8543..be5ec15 100644
 -				aIn >> nRw1 >> nRw2 >> nGrbitCol1 >> nGrbitCol2;
 -
 -				if( bOK )
-+                if (!Read3DTabReference(nTabFirst, nTabLast, nIxti))
++                ExternalTabInfo aExtInfo;
++                if (!Read3DTabReference(nIxti, nTabFirst, nTabLast, aExtInfo))
  				{
 -					SingleRefData	&rR1 = aCRD.Ref1;
 -					SingleRefData	&rR2 = aCRD.Ref2;
@@ -2917,8 +3430,8 @@ index ebf8543..be5ec15 100644
 -					rR1.SetTabRel( FALSE );
 -                    rR2.SetFlag3D( nTabFirst != nTabLast );
 -					rR2.SetTabRel( FALSE );
-+                bool bExternal = !rLinkMan.IsSelfRef(nIxti);
-+                fprintf(stdout, "ExcelToSc8::Convert:   first tab = %d; last tab = %d; external (%d)\n", nTabFirst, nTabLast, bExternal);
++                fprintf(stdout, "ExcelToSc8::Convert:   first tab = %d; last tab = %d; external (%d)\n", 
++                        nTabFirst, nTabLast, aExtInfo.mbExternal);
 +                
 +                SingleRefData	&rR1 = aCRD.Ref1;
 +                SingleRefData	&rR2 = aCRD.Ref2;
@@ -2978,20 +3491,9 @@ index ebf8543..be5ec15 100644
 +                        rR2.SetRowDeleted( TRUE );
 +                }
 +
-+                if (bExternal)
++                if (aExtInfo.mbExternal)
 +                {
-+                    const String& rTabName = rLinkMan.GetSupbookTabName(nIxti, nTabFirst);
-+                    fprintf(stdout, "ExcelToSc8::Convert:   tab name of first sheet = '%s'\n",
-+                            rtl::OUStringToOString(rTabName, RTL_TEXTENCODING_UTF8).getStr());
-+
-+                    sal_uInt16 nFileId;
-+                    if (!GetExternalFileIdFromXti(nIxti, nFileId))
-+                    {
-+                        aPool << ocBad;
-+                        aPool >> aStack;
-+                        break;
-+                    }
-+                    aStack << aPool.StoreExtRef(nFileId, rTabName, aCRD);
++                    aStack << aPool.StoreExtRef(aExtInfo.mnFileId, aExtInfo.maTabName, aCRD);
 +                }
 +                else
 +                {
@@ -3005,7 +3507,7 @@ index ebf8543..be5ec15 100644
  			}
  				break;
  			default: bError = TRUE;
-@@ -1143,7 +1241,135 @@ ConvErr ExcelToSc8::Convert( _ScRangeListTabs& rRangeList, XclImpStream& aIn, sa
+@@ -1143,7 +1231,135 @@ ConvErr ExcelToSc8::Convert( _ScRangeListTabs& rRangeList, XclImpStream& aIn, sa
  	return eRet;
  }
  
@@ -3034,7 +3536,7 @@ index ebf8543..be5ec15 100644
 +        rpArray = aPool[aStack.Get()];
 +        return ConvOK;
 +    }
- 
++
 +    ScExternalRefManager* pRefMgr = GetDoc().GetExternalRefManager();
 +    sal_uInt16 nFileId = pRefMgr->getExternalFileId(aFileUrl);
 +    sal_uInt16 nTabCount = rTabNames.size();
@@ -3044,7 +3546,7 @@ index ebf8543..be5ec15 100644
 +    while( (rStrm.GetRecPos() < nEndPos) && !bError )
 +    {
 +        rStrm >> nOp;
-+
+ 
 +        // #98524# always reset flags
 +        aSRD.InitFlags();
 +        aCRD.InitFlags();
@@ -5097,20 +5599,29 @@ index 01932a5..ae4623c 100644
  // ============================================================================
  
 diff --git sc/source/filter/inc/XclImpChangeTrack.hxx sc/source/filter/inc/XclImpChangeTrack.hxx
-index 2335c6c..399a650 100644
+index 2335c6c..60108cb 100644
 --- sc/source/filter/inc/XclImpChangeTrack.hxx
 +++ sc/source/filter/inc/XclImpChangeTrack.hxx
+@@ -126,7 +126,7 @@ public:
+ 
+ 								// reads extended 3D ref info following the formulas, returns sc tab nums
+ 								// ( called by XclImpChTrFmlConverter::Read3DTabReference() )
+-	sal_Bool					Read3DTabRefInfo( SCTAB& rFirstTab, SCTAB& rLastTab );
++	sal_Bool					Read3DTabRefInfo( SCTAB& rFirstTab, SCTAB& rLastTab, ExcelToSc8::ExternalTabInfo& rExtInfo );
+ 
+ 	void						Apply();
+ };
 @@ -182,7 +182,7 @@ class XclImpChTrFmlConverter : public ExcelToSc8
  private:
  	XclImpChangeTrack&			rChangeTrack;
  
 -    virtual BOOL                Read3DTabReference( XclImpStream& rStrm, SCTAB& rFirstTab, SCTAB& rLastTab );
-+    virtual bool                Read3DTabReference( SCTAB& rFirstTab, SCTAB& rLastTab, UINT16 nIxti );
++    virtual bool                Read3DTabReference( UINT16 nIxti, SCTAB& rFirstTab, SCTAB& rLastTab, ExternalTabInfo& rExtInfo );
  
  public:
  	inline						XclImpChTrFmlConverter(
 diff --git sc/source/filter/inc/excform.hxx sc/source/filter/inc/excform.hxx
-index 915dd98..1b36638 100644
+index 915dd98..279cbbd 100644
 --- sc/source/filter/inc/excform.hxx
 +++ sc/source/filter/inc/excform.hxx
 @@ -35,6 +35,7 @@
@@ -5132,7 +5643,22 @@ index 915dd98..1b36638 100644
      virtual BOOL        GetAbsRefs( ScRangeList& rRangeList, XclImpStream& rStrm, sal_Size nLen );
  
  	void				GetDummy( const ScTokenArray*& );
-@@ -113,8 +118,9 @@ private:
+@@ -107,14 +112,24 @@ class XclImpLinkManager;
+ 
+ class ExcelToSc8 : public ExcelToSc
+ {
++public:
++
++    struct ExternalTabInfo
++    {
++        String      maTabName;
++        sal_uInt16  mnFileId;
++        bool        mbExternal;
++    };
++
+ private:
+     const XclImpLinkManager&    rLinkMan;
+ 
      void                ExcRelToScRel8( UINT16 nRow, UINT16 nCol, SingleRefData&,
  							const BOOL bName );
  
@@ -5140,11 +5666,11 @@ index 915dd98..1b36638 100644
 -    virtual BOOL        Read3DTabReference( XclImpStream& rStrm, SCTAB& rFirstTab, SCTAB& rLastTab );
 +    bool                GetExternalFileIdFromXti( UINT16 nIxti, sal_uInt16& rFileId ) const;
 +
-+    virtual bool        Read3DTabReference( SCTAB& rFirstTab, SCTAB& rLastTab, UINT16 nIxti );
++    virtual bool        Read3DTabReference( UINT16 nIxti, SCTAB& rFirstTab, SCTAB& rLastTab, ExternalTabInfo& rExtInfo );
  
  public:
                          ExcelToSc8( const XclImpRoot& rRoot );
-@@ -124,6 +130,9 @@ public:
+@@ -124,6 +139,9 @@ public:
  
      virtual ConvErr     Convert( _ScRangeListTabs&, XclImpStream& rStrm, sal_Size nFormulaLen, SCsTAB nTab, const FORMULA_TYPE eFT = FT_CellFormula );
  
@@ -5373,27 +5899,184 @@ index 0d547fe..ffb9f4c 100644
  private:
      typedef ::std::auto_ptr< XclImpLinkManagerImpl > XclImpLinkMgrImplPtr;
 diff --git sc/source/filter/xcl97/XclImpChangeTrack.cxx sc/source/filter/xcl97/XclImpChangeTrack.cxx
-index 022b472..75cc8c6 100644
+index 022b472..1b60abc 100644
 --- sc/source/filter/xcl97/XclImpChangeTrack.cxx
 +++ sc/source/filter/xcl97/XclImpChangeTrack.cxx
-@@ -176,7 +176,7 @@ sal_Bool XclImpChangeTrack::Read3DTabRefInfo( SCTAB& rFirstTab, SCTAB& rLastTab
+@@ -40,6 +40,33 @@
+ #include "chgtrack.hxx"
+ #include "xihelper.hxx"
+ #include "xilink.hxx"
++#include "externalrefmgr.hxx"
++
++
++#include <stdio.h>
++#include <string>
++
++namespace {
++
++class StackPrinter
++{
++public:
++    explicit StackPrinter(const char* msg) :
++        msMsg(msg)
++    {
++        fprintf(stdout, "%s: --begin\n", msMsg.c_str());
++    }
++
++    ~StackPrinter()
++    {
++        fprintf(stdout, "%s: --end\n", msMsg.c_str());
++    }
++
++private:
++    ::std::string msMsg;
++};
++
++}
+ 
+ //___________________________________________________________________
+ // class XclImpChangeTrack
+@@ -153,10 +180,11 @@ sal_Bool XclImpChangeTrack::CheckRecord( sal_uInt16 nOpCode )
+ 	return aRecHeader.nIndex != 0;
+ }
+ 
+-sal_Bool XclImpChangeTrack::Read3DTabRefInfo( SCTAB& rFirstTab, SCTAB& rLastTab )
++sal_Bool XclImpChangeTrack::Read3DTabRefInfo( SCTAB& rFirstTab, SCTAB& rLastTab, ExcelToSc8::ExternalTabInfo& rExtInfo )
+ {
+ 	if( LookAtuInt8() == 0x01 )
+ 	{
++        rExtInfo.mbExternal = false;
+ 		// internal ref - read tab num and return sc tab num (position in TABID list)
+         pStrm->Ignore( 3 );
+         rFirstTab = static_cast< SCTAB >( GetTabInfo().GetCurrentIndex( pStrm->ReaduInt16(), nTabIdCount ) );
+@@ -176,7 +204,13 @@ sal_Bool XclImpChangeTrack::Read3DTabRefInfo( SCTAB& rFirstTab, SCTAB& rLastTab
          // - sheet name, always separated from URL
          String aTabName( pStrm->ReadUniString() );
          pStrm->Ignore( 1 );
 -        rFirstTab = rLastTab = static_cast<SCTAB>(GetLinkManager().GetScTab( aUrl, aTabName ));
-+        rFirstTab = rLastTab = static_cast<SCTAB>(GetLinkManager().GetXclTab( aUrl, aTabName ));
++
++        rExtInfo.mbExternal = true;
++        ScExternalRefManager* pRefMgr = GetDoc().GetExternalRefManager();
++        pRefMgr->convertToAbsName(aUrl);
++        rExtInfo.mnFileId = pRefMgr->getExternalFileId(aUrl);
++        rExtInfo.maTabName = aTabName;
++        rFirstTab = rLastTab = 0;
  	}
  	return sal_True;
  }
-@@ -490,9 +490,8 @@ XclImpChTrFmlConverter::~XclImpChTrFmlConverter()
+@@ -215,14 +249,18 @@ void XclImpChangeTrack::ReadCell(
+ 		sal_uInt16 nFlags,
+ 		const ScAddress& rPosition )
+ {
++	StackPrinter __stack_print__("XclImpChangeTrack::ReadCell");
++
+ 	rpCell = NULL;
+ 	rFormat = 0;
+ 	switch( nFlags & EXC_CHTR_TYPE_MASK )
+ 	{
+ 		case EXC_CHTR_TYPE_EMPTY:
++            fprintf(stdout, "XclImpChangeTrack::ReadCell:   empty\n");
+ 		break;
+ 		case EXC_CHTR_TYPE_RK:
+ 		{
++            fprintf(stdout, "XclImpChangeTrack::ReadCell:   rk\n");
+ 			double fValue = ReadRK();
+ 			if( pStrm->IsValid() )
+ 				rpCell = new ScValueCell( fValue );
+@@ -230,6 +268,7 @@ void XclImpChangeTrack::ReadCell(
+ 		break;
+ 		case EXC_CHTR_TYPE_DOUBLE:
+ 		{
++            fprintf(stdout, "XclImpChangeTrack::ReadCell:   double\n");
+ 			double fValue;
+ 			*pStrm >> fValue;
+ 			if( pStrm->IsValid() )
+@@ -238,6 +277,7 @@ void XclImpChangeTrack::ReadCell(
+ 		break;
+ 		case EXC_CHTR_TYPE_STRING:
+ 		{
++            fprintf(stdout, "XclImpChangeTrack::ReadCell:   string\n");
+             String sString( pStrm->ReadUniString() );
+ 			if( pStrm->IsValid() )
+ 				rpCell = new ScStringCell( sString );
+@@ -245,6 +285,7 @@ void XclImpChangeTrack::ReadCell(
+ 		break;
+ 		case EXC_CHTR_TYPE_BOOL:
+ 		{
++            fprintf(stdout, "XclImpChangeTrack::ReadCell:   bool\n");
+ 			double fValue = (double) ReadBool();
+ 			if( pStrm->IsValid() )
+ 			{
+@@ -255,6 +296,7 @@ void XclImpChangeTrack::ReadCell(
+ 		break;
+ 		case EXC_CHTR_TYPE_FORMULA:
+ 		{
++            fprintf(stdout, "XclImpChangeTrack::ReadCell:   formula\n");
+ 			ScTokenArray* pTokenArray = NULL;
+ 			ReadFormula( pTokenArray, rPosition );
+ 			if( pStrm->IsValid() && pTokenArray )
+@@ -325,17 +367,33 @@ void XclImpChangeTrack::ReadChTrInfo()
+ 
+ void XclImpChangeTrack::ReadChTrCellContent()
+ {
++	StackPrinter __stack_print__("XclImpChangeTrack::ReadChTrCellContent");
++
+ 	*pStrm >> aRecHeader;
++	fprintf(stdout, "XclImpChangeTrack::ReadChTrCellContent:   size = %ld; index = %ld; opcode = %d; accept = %d\n",
++			aRecHeader.nSize, aRecHeader.nIndex, aRecHeader.nOpCode, aRecHeader.nAccept);
++
+ 	if( CheckRecord( EXC_CHTR_OP_CELL ) )
+ 	{
+ 		ScAddress aPosition;
+-		aPosition.SetTab( ReadTabNum() );
++		SCTAB nTab = ReadTabNum();
++        fprintf(stdout, "XclImpChangeTrack::ReadChTrCellContent:   tab = %d\n", nTab);
++		aPosition.SetTab( nTab );
+ 		sal_uInt16 nValueType;
+ 		*pStrm >> nValueType;
++        fprintf(stdout, "XclImpChangeTrack::ReadChTrCellContent:   value type = 0x%2.2X\n", nValueType);
+ 		sal_uInt16 nOldValueType = (nValueType >> 3) & EXC_CHTR_TYPE_MASK;
+ 		sal_uInt16 nNewValueType = nValueType & EXC_CHTR_TYPE_MASK;
++        fprintf(stdout, "XclImpChangeTrack::ReadChTrCellContent:   old value type = 0x%2.2X; new value type = 0x%2.2X\n",
++				nOldValueType, nNewValueType);
++
+         pStrm->Ignore( 2 );
+ 		Read2DAddress( aPosition );
++		String aAddrStr;
++		aPosition.Format(aAddrStr, SCA_ABS_3D, &GetDoc());
++        fprintf(stdout, "XclImpChangeTrack::ReadChTrCellContent:   pos = '%s'\n", 
++				rtl::OUStringToOString(aAddrStr, RTL_TEXTENCODING_UTF8).getStr());
++
+ 		sal_uInt16 nOldSize;
+ 		*pStrm >> nOldSize;
+ 		DBG_ASSERT( (nOldSize == 0) == (nOldValueType == EXC_CHTR_TYPE_EMPTY),
+@@ -445,10 +503,15 @@ sal_Bool XclImpChangeTrack::EndNestedMode()
+ 
+ void XclImpChangeTrack::ReadRecords()
+ {
++	StackPrinter __stack_print__("XclImpChangeTrack::ReadRecords");
++
+ 	sal_Bool bExitLoop = sal_False;
+ 
+ 	while( !bExitLoop && !bGlobExit && pStrm->StartNextRecord() )
+ 	{
++		sal_uInt16 nRecId = pStrm->GetRecId();
++        fprintf(stdout, "XclImpChangeTrack::ReadRecords:   rec id = 0x%4.4X\n", nRecId);
++
+         switch( pStrm->GetRecId() )
+ 		{
+ 			case 0x000A:	bGlobExit = sal_True;			break;
+@@ -490,9 +553,9 @@ XclImpChTrFmlConverter::~XclImpChTrFmlConverter()
  }
  
  // virtual, called from ExcToSc8::Convert()
 -BOOL XclImpChTrFmlConverter::Read3DTabReference( XclImpStream& rStrm, SCTAB& rFirstTab, SCTAB& rLastTab )
-+bool XclImpChTrFmlConverter::Read3DTabReference( SCTAB& rFirstTab, SCTAB& rLastTab, UINT16 /*nIxti*/ )
++bool XclImpChTrFmlConverter::Read3DTabReference( UINT16 /*nIxti*/, SCTAB& rFirstTab, SCTAB& rLastTab, 
++												 ExternalTabInfo& rExtInfo )
  {
 -    rStrm.Ignore( 2 );
- 	return rChangeTrack.Read3DTabRefInfo( rFirstTab, rLastTab );
+-	return rChangeTrack.Read3DTabRefInfo( rFirstTab, rLastTab );
++	return rChangeTrack.Read3DTabRefInfo( rFirstTab, rLastTab, rExtInfo );
  }
  
 diff --git sc/source/ui/docshell/docsh.cxx sc/source/ui/docshell/docsh.cxx
