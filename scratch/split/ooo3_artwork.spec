@@ -16,7 +16,7 @@ Name:           ooo3_%piece
 BuildRequires:  ooo3_bootstrap
 %define	      ooo_prefix	%_libdir
 %define	      ooo_home		ooo-3
-%define	      ooo_build_tag     dev300-m28
+%define	      ooo_build_tag     ooo300-m1
 License:        Artistic License; BSD 3-Clause; GPL v2 or later; LaTeX Public License (LPPL); LGPL v2.1 or later; MOZILLA PUBLIC LICENSE (MPL/NPL); X11/MIT
 Group:          Productivity/Office/Suite
 Version:        3

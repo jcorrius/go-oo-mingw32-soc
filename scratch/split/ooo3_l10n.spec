@@ -17,7 +17,7 @@ Requires:       ooo3_libs_core
 BuildRequires:  ooo3_libs_core-devel
 %define	      ooo_prefix	%_libdir
 %define	      ooo_home		ooo-3
-%define	      ooo_build_tag     dev300-m28
+%define	      ooo_build_tag     ooo300-m1
 License:        Artistic License; BSD 3-Clause; GPL v2 or later; LaTeX Public License (LPPL); LGPL v2.1 or later; MOZILLA PUBLIC LICENSE (MPL/NPL); X11/MIT
 Group:          Productivity/Office/Suite
 Version:        3
@@ -50,8 +50,9 @@ devel package
 export OO_INSTDIR=%{_libdir}/%ooo_home
 export OO_TOOLSDIR=$OO_INSTDIR/ooo-build/bin
 export VERBOSE=1
-export EXTRA_BUILD_FLAGS=%{?jobs:-P%jobs}
-export EXTRA_DMAKE_FLAGS=%{?jobs:-- -P%jobs}
+# don't build help 8x since - well - it needs a shed load of memory.
+export EXTRA_BUILD_FLAGS=%{?jobs:-P2}
+export EXTRA_DMAKE_FLAGS="%{?jobs:-- -P2}"
 $OO_TOOLSDIR/piece/build-generic %piece %ooo_build_tag %distro
 
 %install
