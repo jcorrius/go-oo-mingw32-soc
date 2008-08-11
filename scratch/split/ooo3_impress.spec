@@ -52,7 +52,7 @@ export OO_TOOLSDIR=$OO_INSTDIR/ooo-build/bin
 export VERBOSE=1
 export EXTRA_BUILD_FLAGS=%{?jobs:-P%jobs}
 export EXTRA_DMAKE_FLAGS="%{?jobs:-- -P%jobs}"
-OO_TOOLSDIR/piece/build-generic %piece %ooo_build_tag %distro
+$OO_TOOLSDIR/piece/build-generic %piece %ooo_build_tag %distro
 
 %install
 
