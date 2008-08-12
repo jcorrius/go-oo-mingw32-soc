@@ -9,67 +9,11 @@ import optparse
 sys.path.append(sys.path[0]+"/src")
 import revision, globals
 
-# all commits that were made to the following branches are ignored.
-ignoredBranches = [
-    'SRX643_TF_BINFILTER',
-    'cws_dev300_changefileheader', 
-    'cws_src680_hedaburemove01',
-    'cws_src680_ooo19126',
-    'cws_src680_incguards01',
-    'cws_src680_pchfix02'
-]
-
-# commits on these branches, matching regexps are ignored.
-ignoredPartialBranches = {
-        'cws_src680_impresstables2' : [ 'framework/binfilter/', 'util/svtools/', 'sw/sw/', 'gsl/vcl/' ],
-        'cws_src680_so3deadcorpses' : [ 'framework/binfilter/', 'xml/xmloff/', 'oi/so3/', 'sc/sc/', ],
-        'cws_src680_basmgr02'       : [ 'framework/binfilter/' ],
-        'cws_src680_hr38'           : [ 'framework/binfilter/' ],
-        'cws_src680_bff2'           : [ 'framework/binfilter/' ],
-        'cws_src680_picom'          : [ 'graphics/slideshow/' ],
-}
-
-# all commmits done by the following authors are ignored
-# release engineers do eg. huge license changes directly
-# on HEAD, and integrate all branches themselves.
-ignoredAuthors = [
-    'gh', 'ihi', 'rt', 'vg']
-
 # just examine source code, avoiding binary bits & so on
 sourceExtension = {
     '.c':1, '.cc':1, '.cpp':1, '.cs':1, '.csc':1, '.cxx':1,
     '.h':1, '.hpp':1, '.hxx':1, '.idl':1, '.java':1,
     '.py':1, '.sh':1, '.y':1}
-
-# not strictly source, or have matching source changes & strange
-# abberations in some of these, ignore for now.
-wilderExtensions = {
-    '.patch':1, '.diff':1, '.lst':1, 'mk':1, '.jam':1, '.scp':1,
-    '.css':1, '.ini':1, '.inc':1, '.xcu':1, '.xcs':1, '.xsl':1
-}
-
-# ignore large auto-generated files that people like to regularly
-# check into CVS for unknown reasons.
-autogenFileRegex = [
-    'sw/writerfilter/source/ooxml/gperf.*\.hxx',
-    'sw/writerfilter/source/ooxml/OOXMLtokens\.hxx',
-    'sw/writerfilter/source/doctok/qnametostr\.cxx',
-    'sw/writerfilter/source/doctok/resources\.[ch]xx',
-    'sw/writerfilter/source/ooxml/OOXMLvalues\.[ch]xx',
-    'sw/writerfilter/source/resourcemodel/.*tostr\.cxx',
-    'sw/writerfilter/source/ooxml/OOXMLFastTokens\.hxx',
-    'sw/writerfilter/source/ooxml/OOXMLresources.*\.?xx',
-    'sw/writerfilter/source/ooxml/OOXMLfastresources.*\.?xx',
-    'documentation/helpcontent2/helpers/hid.lst',
-    'api/odk/pack/gendocu/Attic/idl_chapter_refs_oo.txt',
-    'xml/oox/source/token/tokens.txt',
-]
-
-# abberations: a big patch moving across versions, getting renamed
-abberationFileRegex = [
-    'external/libxmlsec/xmlsec1-1.2.4.patch',
-    'external/libxmlsec/xmlsec1-1.2.6.patch',
-]
 
 currentAffiliations = {
     'ab': 'Sun', # Andreas Bregas       
@@ -132,7 +76,6 @@ currentAffiliations = {
     'er': 'Sun',    # Eike Rathke          
     'erack': 'Sun', # Eike Rathke          
     'ericb': 'unaffiliated', # Eric Bachard         
-    'es': 'Sun', # Eric Savary
     'fa': 'RedHat', # Dan Williams         
     'fangyq': 'Redflag', # Yaqiong Fang  
     'fdechelle': 'unaffiliated', # Francois Dechelle (works in api/exthome)       
@@ -755,33 +698,12 @@ Also, disregard commits whose message contains RESYNC or INTEGRATION: CWS.
                 branch = log['branch']
             else:
                 branch = ''
-            # by branch
-            if branch in ignoredBranches:
-                self.debugPrint ("commit made to branch %s is ignored (%s)"%(branch, log['revision']))
-                statObj.ignoredByBranchCount += 1
-                continue
-            # by branch & regexp
-            ignoreRev = False
-            if branch in ignoredPartialBranches:
-                for pathRe in ignoredPartialBranches[branch]:
-                    if re.search (pathRe, filePath):
-                        self.debugPrint ("commit made to partial branch %s is ignored (%s) for file %s"%(branch, log['revision'], filePath))
-                        statObj.ignoredByBranchCount += 1
-                        ignoreRev = True
-                        break
-            if ignoreRev:
-                continue
 
             # author
             if not log.has_key('author'):
                 self.debugPrint("author record is absent")
                 return False
             author = log['author']
-            if author in ignoredAuthors:
-                self.debugPrint("commit made by %s is ignored"%author)
-                statObj.ignoredByAuthorCount += 1
-                continue
-
 
             # date
             if not log.has_key('date'):
@@ -798,9 +720,6 @@ Also, disregard commits whose message contains RESYNC or INTEGRATION: CWS.
             removed = 0
             if log.has_key('removed'):
                 removed = log['removed']
-
-            if (added > 2500 or removed > 2500):
-                sys.stdout.write ("huge commit: +%d -%d author %s date %s branch %s file %s\n" % (added, removed, author, date, branch, self.filepath))
 
             if added or removed:
                 statObj.add(author, date, self.ext, added, removed, branch, self.filepath)
@@ -820,10 +739,6 @@ class CommitStats(object):
             self.months = {}
 
     class Month(object):
-        def __init__ (self):
-            self.extensions = {}
-
-    class Extension(object):
         def __init__ (self):
             self.affiliation = '(unknown)'
             self.commitCounts = 0
@@ -857,20 +772,12 @@ class CommitStats(object):
         if not yearObj.months.has_key(date.month):
             yearObj.months[date.month] = CommitStats.Month()
         monthObj = yearObj.months[date.month]
-
-        # extension node
-        if not monthObj.extensions.has_key(ext):
-            monthObj.extensions[ext] = CommitStats.Extension()
-        extObj = monthObj.extensions[ext]
+        extObj = monthObj
 
         extObj.affiliation = getAffiliation(author, date)
         extObj.commitCounts += 1
         extObj.linesAdded += added
         extObj.linesRemoved += removed
-        if extObj.warned < 10 and extObj.linesAdded > 10000:
-            extObj.warned += 1
-            sys.stdout.write ("large author commit count: %d author %s date %s branch %s file %s\n" \
-                                  % (extObj.linesAdded, author, date, branch, filePath))
             
 
 class Main(object):
@@ -999,11 +906,6 @@ path is relative, it is relative to the current directory."""
             return True
 
         no_attic_path = re.subn ("/Attic/", "/", filepath)[0]
-        for autogp in autogenFileRegex:
-            if re.search (autogp, no_attic_path) != None:
-                if self.verbose:
-                    sys.stdout.write("Skipping auto-generated file: %s\n"%filepath)
-                return True
 
         extn = self.__getExtension(filepath)
         if not sourceExtension.has_key(extn):
@@ -1041,7 +943,7 @@ path is relative, it is relative to the current directory."""
     def __outputReport (self, fd):
         authorNames = self.stats.authors.keys()
         authorNames.sort()
-        fd.write("author\tyear\tmonth\taffiliation\text\tcommit count\tlines added\tlines removed\tdate\n")
+        fd.write("author\tyear\tmonth\taffiliation\tcommit count\tlines added\tlines removed\tdate\n")
         for authorName in authorNames:
             authorObj = self.stats.authors[authorName]
             years = authorObj.years.keys()
@@ -1052,16 +954,14 @@ path is relative, it is relative to the current directory."""
                 months.sort()
                 for month in months:
                     monthObj = yearObj.months[month]
-                    extensions = monthObj.extensions.keys()
-                    extensions.sort()
-                    for ext in extensions:
-                        extObj = monthObj.extensions[ext]
-                        fd.write("%s\t%d\t%d\t%s\t%s\t%d\t%d\t%d\t%d-%d-1\n"%(
-                            authorName, year, month,
-                            extObj.affiliation, ext,
-                            extObj.commitCounts, 
-                            extObj.linesAdded, extObj.linesRemoved,
-                            year, month))
+                    extObj = monthObj
+                    fd.write("%s\t%d\t%d\t%s\t%d\t%d\t%d\t%d-%d-1\n"%(
+                             authorName, year, month,
+                             extObj.affiliation,
+                             extObj.commitCounts, 
+                             extObj.linesAdded,
+                             extObj.linesRemoved,
+                             year, month))
 
         fd.write("\n")
         fd.write("total file count\t%d\n"%self.stats.totalFileCount)
