@@ -1,0 +1,244 @@
+diff --git svx/inc/svx/msocximex.hxx svx/inc/svx/msocximex.hxx
+index 3d52e4d..1b2b811 100644
+--- svx/inc/svx/msocximex.hxx
++++ svx/inc/svx/msocximex.hxx
+@@ -532,8 +532,9 @@ public:
+         SotStorageStreamRef getContainerStream() { return mContainerStream; }
+ 
+         virtual void ProcessControl( OCX_Control* pControl, SvStorageStream* pS, ContainerRecord& rec );
+-        bool createFromContainerRecord( const ContainerRecord& record,
++        bool createFromContainerRecord( ContainerRecord& record,
+             OCX_Control*& );
++        SotStorageStreamRef getContainedControlsStream(){ return mContainedControlsStream; }
+ protected:
+         // This class not meant to be instantiated
+         // needs to be subclassed
+@@ -548,6 +549,7 @@ protected:
+         com::sun::star::uno::Reference<
+                 com::sun::star::container::XNameContainer > mxParent;
+ 	std::vector<OCX_Control*> mpControls;
++        std::hash_map<sal_uInt16, sal_uInt16> mActiveXIDMap;
+         SotStorageRef mContainerStorage;
+         SotStorageStreamRef mContainerStream;
+         SotStorageStreamRef mContainedControlsStream;
+diff --git svx/source/msfilter/msocximex.cxx svx/source/msfilter/msocximex.cxx
+index 85cabda..a771d13 100644
+--- svx/source/msfilter/msocximex.cxx
++++ svx/source/msfilter/msocximex.cxx
+@@ -572,8 +572,143 @@ const sal_uInt16 TOGGLEBUTTON = (sal_uIn
+ const sal_uInt16 SCROLLBAR = (sal_uInt16)0x2F;
+ 
+ const sal_uInt16 MULTIPAGE = (sal_uInt16)0x39;
++// The IDs with bit 0x8000 set appear to be generated.
++// It looks like these ID's are used with the non-toolbox [1]
++// ActiveX controls that can be present in a Userform
++// ( note: RefEdit seems to be an exception )
++// In UserForm::Read just before the Container record starts
++// you will notice there can be sometimes trailing records, 
++// it seems that these records have a 1:1 relationship with the non-toolbox
++// controls present in the Userform. An id in the trailing record
++// seems to identify the specific ActiveX control and an artificial nTypeIdent
++// e.g. 0x8000, 0x8001 etc. is created so as to be able to associate
++// the ActiveX control when referenced later 
++// [1] Such ActiveX controls are added via Tools/AddionalControls
++// menu
++
++// create a fixed set of those special id(s)
++// ahem, we can only read one Progress bars at the moment so....
+ const sal_uInt16 PROGRESSBAR = (sal_uInt16)0x8000;
+ 
++// A set of IDs from the trailing records mentioned above that seem to
++// identify the following ActiveX controls 
++// Currently we only can process ( in a limited way ) the ProgressBar
++// the other ID's are for reference ( & future )
++
++// RefEdit control
++const sal_uInt8 aRefEditID[] =
++{
++0x12, 0x45, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
++0x12, 0x1d, 0xd2, 0x8b, 0x42, 0xec, 0xce, 0x11, 0x9e, 0x0d, 0x00, 0xaa, 0x00, 0x60, 0x02, 0xf3,
++0x18, 0x45, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
++};
++
++// Microsoft ProgressBar Control, version 6.0
++const sal_uInt8 aProgressID[] =
++{
++0x22, 0x3a, 0x05, 0x35, 0x89, 0x85, 0xd1, 0x11,  0xb1, 0x6a, 0x00, 0xc0, 0xf0, 0x28, 0x36, 0x28,
++0x21, 0x3a, 0x05, 0x35, 0x89, 0x85, 0xd1, 0x11,  0xb1, 0x6a, 0x00, 0xc0, 0xf0, 0x28, 0x36, 0x28,
++0x20, 0x3a, 0x05, 0x35, 0x89, 0x85, 0xd1, 0x11,  0xb1, 0x6a, 0x00, 0xc0, 0xf0, 0x28, 0x36, 0x28,
++};
++
++// Calendar Control 10.0
++const sal_uInt8 aCalendarID[] =
++{
++0x2b, 0xc9, 0x27, 0x8e, 0x64, 0x12, 0x1c, 0x10, 0x8a, 0x2f, 0x04, 0x02, 0x24, 0x00, 0x9c, 0x02,
++0x2d, 0xc9, 0x27, 0x8e, 0x64, 0x12, 0x1c, 0x10, 0x8a, 0x2f, 0x04, 0x02, 0x24, 0x00, 0x9c, 0x02,
++0x2c, 0xc9, 0x27, 0x8e, 0x64, 0x12, 0x1c, 0x10, 0x8a, 0x2f, 0x04, 0x02, 0x24, 0x00, 0x9c, 0x02,
++};
++
++
++// Microsoft ImageComboxBox Control, version 6.0
++const sal_uInt8 aImageComboID[] =
++{
++0x66, 0xa6, 0x9d, 0xdd, 0x94, 0x85, 0xd1, 0x11, 0xb1, 0x6a, 0x00, 0xc0, 0xf0, 0x28, 0x36, 0x28,
++0x65, 0xa6, 0x9d, 0xdd, 0x94, 0x85, 0xd1, 0x11, 0xb1, 0x6a, 0x00, 0xc0, 0xf0, 0x28, 0x36, 0x28,
++0x64, 0xa6, 0x9d, 0xdd, 0x94, 0x85, 0xd1, 0x11, 0xb1, 0x6a, 0x00, 0xc0, 0xf0, 0x28, 0x36, 0x28,
++};
++
++// Microsoft ImageList Control, version 6.0
++const sal_uInt8 aImageListID[] =
++{
++0x23, 0x7f, 0x24, 0x2c, 0x91, 0x85, 0xd1, 0x11, 0xb1, 0x6a, 0x00, 0xc0, 0xf0, 0x28, 0x36, 0x28,
++0x22, 0x7f, 0x24, 0x2c, 0x91, 0x85, 0xd1, 0x11, 0xb1, 0x6a, 0x00, 0xc0, 0xf0, 0x28, 0x36, 0x28,
++0x21, 0x7f, 0x24, 0x2c, 0x91, 0x85, 0xd1, 0x11, 0xb1, 0x6a, 0x00, 0xc0, 0xf0, 0x28, 0x36, 0x28,
++};
++
++// Microsoft Slider Control, version 6.0
++const sal_uInt8 aSliderID[] =
++{
++0x54, 0xf9, 0x8d, 0xf0, 0x92, 0x85, 0xd1, 0x11, 0xb1, 0x6a, 0x00, 0xc0, 0xf0, 0x28, 0x36, 0x28,
++0x53, 0xf9, 0x8d, 0xf0, 0x92, 0x85, 0xd1, 0x11, 0xb1, 0x6a, 0x00, 0xc0, 0xf0, 0x28, 0x36, 0x28,
++0x52, 0xf9, 0x8d, 0xf0, 0x92, 0x85, 0xd1, 0x11, 0xb1, 0x6a, 0x00, 0xc0, 0xf0, 0x28, 0x36, 0x28,
++};
++
++// Microsoft StatusBar Control, version 6.0
++const sal_uInt8 aStatusBarID[] =
++{
++0xa3, 0x67, 0x38, 0x8e, 0x86, 0x85, 0xd1, 0x11, 0xb1, 0x6a, 0x00, 0xc0, 0xf0, 0x28, 0x36, 0x28,
++0xa2, 0x67, 0x38, 0x8e, 0x86, 0x85, 0xd1, 0x11, 0xb1, 0x6a, 0x00, 0xc0, 0xf0, 0x28, 0x36, 0x28,
++0xa1, 0x67, 0x38, 0x8e, 0x86, 0x85, 0xd1, 0x11, 0xb1, 0x6a, 0x00, 0xc0, 0xf0, 0x28, 0x36, 0x28,
++};
++
++// Microsoft Office Chart 10.0
++const sal_uInt8 aChartSpaceID[] =
++{
++0x46, 0xe5, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
++0x7a, 0x9a, 0xb3, 0xf5, 0x80, 0x14, 0xd3, 0x11, 0x85, 0x49, 0x00, 0xc0, 0x4f, 0xac, 0x67, 0xd7,
++0x82, 0x9a, 0xb3, 0xf5, 0x80, 0x14, 0xd3, 0x11, 0x85, 0x49, 0x00, 0xc0, 0x4f, 0xac, 0x67, 0xd7,
++};
++
++const sal_Int16 ActiveXIDLen = 0x30;
++
++bool lcl_handleActiveXControl(  SvStorageStream *pS, sal_uInt16& nTypeID )
++{
++    nTypeID = 0; // Illegal ActiveX ID 
++    bool bRes = false;
++    sal_uInt16 nIdentifier, nFixedAreaLen;
++    *pS >> nIdentifier;    
++    *pS >> nFixedAreaLen;    
++    pS->SeekRel( ( nFixedAreaLen - ActiveXIDLen ) );
++    sal_uInt8 aID[ ActiveXIDLen ];
++    if ( !pS->IsEof() )
++    {
++        pS->Read( aID, ActiveXIDLen );
++    }
++    if ( memcmp( aID, aProgressID, ActiveXIDLen ) == 0 )
++    {
++        nTypeID = PROGRESSBAR;
++        OSL_TRACE("Found supported ***PROGRESSBAR*** ActiveX control");
++        bRes = true;
++    }
++#if (OSL_DEBUG_LEVEL > 0)
++    // If we really want to process these more controls we should put them in 
++    // a list or array and have a single loop testing each id. For the moment 
++    // as we only can process PROGRESSBAR, not much point doing that until 
++    // we add support for at least another activex control
++
++    else if ( memcmp( aID, aCalendarID, 0x30 ) == 0 )
++        OSL_TRACE("Found unsupported ***CALENDAR*** ActiveX control");
++    else if ( memcmp( aID, aRefEditID, 0x30 ) == 0 )
++        OSL_TRACE("Found unsupported ***REFEDIT*** ActiveX control");
++    else if ( memcmp( aID, aImageComboID, 0x30 ) == 0 )
++        OSL_TRACE("Found unsupported ***IMAGECOMBO*** ActiveX control");
++    else if ( memcmp( aID, aImageListID, 0x30 ) == 0 )
++        OSL_TRACE("Found unsupported ***IMAGELIST*** ActiveX control");
++    else if ( memcmp( aID, aChartSpaceID, 0x30 ) == 0 )
++        OSL_TRACE("Found unsupported ***CHARTSPACE*** ActiveX control");
++    else if ( memcmp( aID, aSliderID, 0x30 ) == 0 )
++        OSL_TRACE("Found unsupported ***SLIDER*** ActiveX control");
++    else if ( memcmp( aID, aStatusBarID, 0x30 ) == 0 )
++        OSL_TRACE("Found unsupported ***STATUSBAR*** ActiveX control");
++#endif
++    else
++    {
++        OSL_TRACE("Unknown activeX ID !");
++    }
++    return bRes;
++}
++
+ typedef std::vector< ContainerRecord > ContainerRecordList;
+ 
+ class ContainerRecReader
+@@ -644,6 +779,8 @@ class ContainerRecReader
+             // control type
+             if( nContentFlags & 0x00000080 )
+                 *pS >> rec.nTypeIdent;
++            if( nContentFlags & 0x00000200 )
++                pS->SeekRel( 4 ); // Grouping?
+             // length of infotip
+             sal_uInt32 nTipLen = 0;
+             if( nContentFlags & 0x00000800 )
+@@ -750,6 +887,13 @@ class ContainerRecReader
+                 pControl->pDocSh = pContainerControl->pDocSh;
+                 pContainerControl->ProcessControl( pControl, pS, rec );
+             }
++            else if ( rec.nTypeIdent & 0x8000 )
++            {
++                // Skip ActiveX Controls we can't import
++                SotStorageStreamRef oStream = pContainerControl->getContainedControlsStream(); 
++                ULONG nStrmPos = oStream->Tell();
++                oStream->Seek( nStrmPos + rec.nSubStreamLen );
++            }  
+             else
+             {
+                 DBG_ERROR("Terminating import, unexpected error");
+@@ -770,6 +914,11 @@ class ContainerRecReader
+     {
+         sal_uInt8 aUnknown11[4];
+         pS->Read(aUnknown11, sizeof(aUnknown11));
++        // discovered a dialog with value of 0xFF for aUnknown11 
++        // needed an extra 4 bytes to offset correctly  into the control
++        // records. Valid test or coincidence ?
++        if ( aUnknown11[1] == 0xFF )
++           pS->Read( aUnknown11, sizeof(aUnknown11));
+         return true;
+     }
+ 
+@@ -3412,9 +3561,18 @@ OUString OCX_ContainerControl::createSub
+     return buf.makeStringAndClear();
+ }
+ 
+-bool OCX_ContainerControl::createFromContainerRecord( const ContainerRecord& record, OCX_Control*& pControl )
++
++bool OCX_ContainerControl::createFromContainerRecord( ContainerRecord& record, OCX_Control*& pControl )
+ {
+     pControl = NULL;
++    if (  record.nTypeIdent & 0x8000 )
++    {
++        std::hash_map<sal_uInt16, sal_uInt16>::iterator it = mActiveXIDMap.find( record.nTypeIdent );
++        if ( it == mActiveXIDMap.end() )
++            return false;
++        // replace the generated id with our hardcoded one
++        record.nTypeIdent = it->second; 
++    }
+     switch ( record.nTypeIdent)
+         {
+             case CMDBUTTON:
+@@ -4153,10 +4311,14 @@ sal_Bool OCX_UserForm::Read(SvStorageStr
+     // ( unknown what these trailing records are for)
+     if ( numTrailingRecs )
+     {
+-        for ( ; numTrailingRecs ; --numTrailingRecs )
++        for ( sal_Int16 i = 0 ; numTrailingRecs ; --numTrailingRecs, ++i )
+         {
+-            OCX_Control skip(C2S("dummy")) ;
+-            skip.Read( pS );
++            sal_uInt16 nTypeID = 0;
++            if ( lcl_handleActiveXControl( pS, nTypeID ) )
++            {
++                if ( nTypeID & 0x8000 ) // valid ActiveXID
++                    mActiveXIDMap[ ( i | 0x8000 ) ] = nTypeID;
++            }
+         }
+     }
+ 	return OCX_ContainerControl::Read( pS );
