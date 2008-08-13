@@ -3,6 +3,8 @@ EXTRA_DIST = \
 	unpack-l10n \
 	copyexcept \
 	noulf noulfconv \
+	install-generic \
+	install-bootstrap \
 	${wildcard env-*} \
 	${wildcard build-*} \
-	${wildcard install-*}
+	${wildcard inst-*}
