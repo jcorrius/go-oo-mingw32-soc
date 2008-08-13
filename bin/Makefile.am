@@ -1,6 +1,7 @@
 SUBDIRS=piece
 
 script_files = \
+	applyflags \
 	a2az.pl \
 	bash-completion.in \
 	build-galleries \
