@@ -1,0 +1,236 @@
+--- svx/inc/svx/msocximex.hxx.orig	2008-08-15 13:27:08.000000000 +0800
++++ svx/inc/svx/msocximex.hxx	2008-08-15 13:44:19.000000000 +0800
+@@ -32,6 +32,7 @@
+ 
+ #include <sot/storage.hxx>
+ #include <tools/debug.hxx>
++#include <com/sun/star/graphic/GraphicObjectFactory.hpp>
+ 
+ //!! no such defines in global namespaces - it will break other existing code that uses the same define!!
+ //#ifndef C2U
+@@ -466,6 +467,7 @@ public:
+ 
+         bool bAutoSize;
+         ::rtl::OUString sImageUrl;
++		com::sun::star::uno::Reference< com::sun::star::graphic::XGraphicObject> mxGrfObj;
+         sal_Bool Read(SotStorageStream *pS);
+ 
+ 	using OCX_Control::Import; // to not hide the other two import methods
+--- svx/source/msfilter/msocximex.cxx.orig	2008-08-15 06:28:07.000000000 +0800
++++ svx/source/msfilter/msocximex.cxx	2008-08-15 14:01:20.000000000 +0800
+@@ -90,6 +90,12 @@
+ #include <com/sun/star/table/CellAddress.hpp>
+ #include <com/sun/star/sheet/XSpreadsheetView.hpp>
+ #include <com/sun/star/sheet/XCellRangeAddressable.hpp>
++
++#include <com/sun/star/graphic/XGraphicProvider.hpp>
++#include <com/sun/star/graphic/XGraphic.hpp>
++#include <com/sun/star/io/XInputStream.hpp>
++#include "comphelper/componentcontext.hxx"
++#include <unotools/streamwrap.hxx>
+  
+ #ifndef C2S
+ #define C2S(cChar)	String::CreateFromAscii(RTL_CONSTASCII_STRINGPARAM(cChar))
+@@ -113,6 +119,7 @@ using namespace cppu;
+ 
+ 
+ #define WW8_ASCII2STR(s) String::CreateFromAscii(RTL_CONSTASCII_STRINGPARAM(s))
++#define GRAPHOBJ_URLPREFIX "vnd.sun.star.GraphicObject:"
+ 
+ 
+ static char sWW8_form[] = "WW-Standard";
+@@ -141,126 +148,48 @@ long ReadAlign(SvStorageStream *pS, long
+     return 0;
+ }
+ 
+-
+ // NP - Images in controls in OO2.0/SO8 exist as links, e.g. they are not part of the document so are
+ // referenced externally. On import from ms document try to save images for controls here.
+ // Images are stored in directory called temp in the user installation directory. Next version of OO/SO
+ // hopefully will address this issue and allow a choice e.g. images for controls to be stored as links
+ // or embeded in the document.
+-
+-// [out]location     path to the stream to where the image is to be stored,
+-//               if same name exists in folder then this function calcuates a new name
+-// [in] data     raw bytes of image to be stored.
+-// [in] dataLen  no. byte to be stored
+-//
+-// returns, true if successful
+-
+-bool storePictureInFileSystem( OUString& location, sal_uInt8* data, sal_uInt32 dataLen )
++uno::Reference< graphic::XGraphicObject> lcl_readGraphicObject( SotStorageStream *pS )
+ {
+-    bool result = true;
+-    OUString origPath = location;
+-    try
+-    {
+-        uno::Reference<lang::XMultiServiceFactory > xMSF( ::comphelper::getProcessServiceFactory(),
+-                                                      uno::UNO_QUERY_THROW );
+-        uno::Reference< com::sun::star::ucb::XSimpleFileAccess> xSFA( xMSF->createInstance(
+-                                                       S2U("com.sun.star.ucb.SimpleFileAccess" ) ),
+-                                                       uno::UNO_QUERY_THROW );
+-        OUString ext;
+-        sal_Int32 index = 0;
+-        while (  xSFA->exists( location ) )
+-        {
+-            ext = OUString::valueOf( ++index );
+-            location = origPath + ext;
+-        }
+-
+-        SvStream*  pStream = ::utl::UcbStreamHelper::CreateStream( location, STREAM_WRITE | STREAM_TRUNC );
+-        if ( pStream )
+-        {
+-            pStream->Write(data, dataLen);
+-            delete pStream;
+-        }
+-        else
+-        {
+-            result = false;
+-        }
+-    }
+-    catch( uno::Exception& )
+-    {
+-        result = false;
+-    }
+-    return result;
++	uno::Reference< graphic::XGraphicObject > xGrfObj;
++	uno::Reference< lang::XMultiServiceFactory > xServiceManager = ::comphelper::getProcessServiceFactory();
++	if( xServiceManager.is() )
++	{
++		try
++		{
++			// use the GraphicProvider service to get the XGraphic
++			uno::Reference< graphic::XGraphicProvider > xGraphProvider(
++					xServiceManager->createInstance( ::rtl::OUString::createFromAscii( "com.sun.star.graphic.GraphicProvider" ) ), uno::UNO_QUERY );
++			if( xGraphProvider.is() )
++			{
++				uno::Reference< io::XInputStream > xStream( new utl::OInputStreamWrapper( *pS ) );
++				if( xStream.is() )
++				{
++					uno::Sequence< beans::PropertyValue > aMediaProps( 1 );
++					aMediaProps[0].Name = ::rtl::OUString::createFromAscii( "InputStream" );
++					aMediaProps[0].Value <<= xStream;
++					uno::Reference< graphic::XGraphic > xGraphic = xGraphProvider->queryGraphic( aMediaProps );
++					if( xGraphic.is() )
++					{
++						// create an XGraphicObject
++						::comphelper::ComponentContext aContext( xServiceManager );
++						xGrfObj = graphic::GraphicObjectFactory::createGraphicObject( aContext.getUNOContext() );
++						xGrfObj->setGraphic(xGraphic);
++					}
++				}
++			}
++		}
++		catch( uno::Exception& )
++		{
++		}
++	}
++	return xGrfObj;
+ }
+ 
+-// NP - Images in controls in OO2.0/SO8 exist as links, e.g. they are not part of the document so are
+-// referenced externally. On import from ms document try to save images from controls here so this
+-// at least a macro programmer has a chance to accessed them manually later. Next version of OO/SO
+-// hopefully will address this issue.
+-// Images will be stored in a top level folder in the document package, folder is named "MigratedImages"
+-
+-// [in] pDocSh*  the document shell.
+-// [in] name     name of stream image to stored in.
+-// [in] data     raw bytes of image to be stored.
+-// [in] dataLen  no. byte to be stored
+-
+-bool storePictureInDoc( SfxObjectShell* pDocSh, OUString& name, sal_uInt8* data, sal_uInt32 dataLen )
+-{
+-    uno::Reference < embed::XStorage > xStor;
+-    if (pDocSh)
+-    {
+-        xStor = pDocSh->GetStorage();
+-        if( xStor.is() )
+-        {
+-            try
+-            {
+-                uno::Reference< embed::XStorage > xPictures = xStor->openStorageElement(
+-                    OUString( RTL_CONSTASCII_USTRINGPARAM( "MigratedImages" ) ),
+-                    embed::ElementModes::READWRITE );
+-                uno::Reference< beans::XPropertySet > xPropSet( xPictures, uno::UNO_QUERY );
+-
+-                // Set media type of folder MigratedImages to something ( that is unknown ) so that
+-                // it will get copied to exported OO/SO format after SaveAs
+-                if ( xPropSet.is() )
+-                {
+-                    OUString aMediaType = C2U("MigrationImages");
+-                    uno::Any a;
+-                    a <<= aMediaType;
+-                    xPropSet->setPropertyValue( C2U("MediaType"), a );
+-                }
+-
+-                uno::Reference< io::XStream > xObjReplStr = xPictures->openStreamElement(
+-                        name,
+-                        embed::ElementModes::READWRITE | embed::ElementModes::TRUNCATE );
+-                uno::Reference< io::XOutputStream > xOutStream( xObjReplStr->getOutputStream(), uno::UNO_QUERY_THROW );
+-                uno::Sequence< sal_Int8 > imageBytes( (sal_Int8*)data, dataLen );
+-                xOutStream->writeBytes( imageBytes );
+-                xOutStream->closeOutput();
+-
+-                uno::Reference< embed::XTransactedObject > xTransact( xPictures, uno::UNO_QUERY );
+-                if ( xTransact.is() )
+-                {
+-                    xTransact->commit();
+-                }
+-            }
+-            catch( uno::Exception& )
+-            {
+-                return false;
+-            }
+-
+-        }
+-        else
+-        {
+-            // no storage something wrong
+-            return false;
+-        }
+-    }
+-    else
+-    {
+-        //No doc shell
+-        return false;
+-    }
+-    return true;
+-}
+ 
+ long WriteAlign(SvStorageStream *pS, int nAmount)
+ {
+@@ -5389,15 +5318,7 @@ sal_Bool OCX_Image::Read(SotStorageStrea
+         long imagePos = pS->Tell();
+ 
+         pS->Seek( imagePos );
+-
+-        sImageUrl =  C2U("vnd.sun.star.expand:${$BRAND_BASE_DIR/program/") + C2U( SAL_CONFIGFILE( "bootstrap" ) ) + C2U("::UserInstallation}/user/temp/") + sName;
+-
+-        sal_uInt8* pImage = new sal_uInt8[ nImageLen ];
+-        pS->Read(pImage, nImageLen);
+-        bool result = storePictureInFileSystem( sImageUrl, pImage, nImageLen );
+-        OUString pictName = sImageUrl.copy( sImageUrl.lastIndexOf('/') + 1 );
+-        result = storePictureInDoc( pDocSh, pictName, pImage, nImageLen );
+-        delete pImage;
++		mxGrfObj = lcl_readGraphicObject( pS );
+     }
+     return sal_True;
+ }
+@@ -5420,11 +5341,13 @@ sal_Bool OCX_Image::Import( uno::Referen
+ 		bTemp = sal_False;
+ 	aTmp = bool2any(bTemp);
+ 	rPropSet->setPropertyValue( WW8_ASCII2STR("Enabled"), aTmp);
+-    if ( sImageUrl.getLength() )
+-    {
++	if( mxGrfObj.is() )
++	{
++		sImageUrl = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( GRAPHOBJ_URLPREFIX ) );
++		sImageUrl = sImageUrl + mxGrfObj->getUniqueID();
+         aTmp <<= sImageUrl;
+         rPropSet->setPropertyValue( WW8_ASCII2STR("ImageURL"), aTmp);
+-    }
++	}
+ 	return sal_True;
+ }
+ 
