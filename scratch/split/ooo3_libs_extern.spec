@@ -13,7 +13,6 @@
 %define         distro     SUSE
 %define         piece      libs_extern
 Name:           ooo3_%piece
-Requires:       ooo3_bootstrap
 # urg, ure dep is now required for cppunit ...
 BuildRequires:  ooo3_bootstrap ooo3_ure
 %define	      ooo_prefix	%_libdir

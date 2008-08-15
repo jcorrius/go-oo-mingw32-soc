@@ -13,7 +13,6 @@
 %define         distro     SUSE
 %define         piece ure
 Name:           ooo3_%piece
-Requires:       ooo3_bootstrap
 BuildRequires:  ooo3_bootstrap
 %define	      ooo_prefix	%_libdir
 %define	      ooo_home		ooo-3
@@ -60,7 +59,6 @@ $OO_TOOLSDIR/piece/build-generic %piece %ooo_build_tag %distro
 export OO_INSTDIR=%{_libdir}/%ooo_home
 export OO_TOOLSDIR=$OO_INSTDIR/ooo-build/bin
 export DESTDIR=$RPM_BUILD_ROOT
-
 $OO_TOOLSDIR/piece/install-generic %piece %ooo_build_tag %distro
 
 %clean

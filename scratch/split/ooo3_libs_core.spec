@@ -65,7 +65,8 @@ $OO_TOOLSDIR/piece/install-generic %piece %ooo_build_tag %distro
 # prune redundant files the scp2 likes to make for us
 rm -Rf \
     "$DESTDIR/$OO_INSTDIR/basis-link" \
-    "$DESTDIR/$OO_INSTDIR/ure"
+    "$DESTDIR/$OO_INSTDIR/ure" \
+    "$DESTDIR/$OO_INSTDIR/basis3.0/program/services.rdb"
 
 %clean
 %post
