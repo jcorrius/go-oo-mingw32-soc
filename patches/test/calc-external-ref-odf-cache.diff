@@ -1,5 +1,5 @@
 diff --git sc/inc/externalrefmgr.hxx sc/inc/externalrefmgr.hxx
-index 8a11b5d..b514c4e 100644
+index 8a11b5d..9d3f766 100644
 --- sc/inc/externalrefmgr.hxx
 +++ sc/inc/externalrefmgr.hxx
 @@ -109,7 +109,7 @@ public:
@@ -31,6 +31,25 @@ index 8a11b5d..b514c4e 100644
      /** 
       * Takes a flat file name, and convert it to an absolute URL path.  An 
       * absolute URL path begines with 'file:///. 
+@@ -281,6 +283,18 @@ public:
+     const ::std::vector<String>* getAllCachedTableNames(sal_uInt16 nFileId) const;
+     void refreshNames(sal_uInt16 nFileId);
+     void switchSrcFile(sal_uInt16 nFileId, const String& rNewFile);
++
++    /** 
++     * Set an alternatve file location that will be searched in in case the 
++     * source file is not located at the primary file location.  This is 
++     * useful for example when the main file and the source files are located
++     * in the same directory and the directory is moved to another location.
++     *
++     * @param nFileId file ID of the original file URL
++     * @param rAltFile alternate URL
++     */
++    void setAlternateFileName(sal_uInt16 nFileId, const String& rAltFile);
++
+     void removeSrcDocument(sal_uInt16 nFileId, bool bBreakLink);
+     void clear();
+ 
 diff --git sc/source/core/tool/address.cxx sc/source/core/tool/address.cxx
 index 80dfb34..c1906dd 100644
 --- sc/source/core/tool/address.cxx
@@ -284,10 +303,10 @@ index e29223a..604e04e 100644
  
 diff --git sc/source/filter/xml/xmlexternaltabi.cxx sc/source/filter/xml/xmlexternaltabi.cxx
 new file mode 100644
-index 0000000..7be958d
+index 0000000..5c9ebcc
 --- /dev/null
 +++ sc/source/filter/xml/xmlexternaltabi.cxx
-@@ -0,0 +1,290 @@
+@@ -0,0 +1,346 @@
 +/*************************************************************************
 + *
 + * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
@@ -330,6 +349,7 @@ index 0000000..7be958d
 +#include "xmltabi.hxx"
 +
 +#include "token.hxx"
++#include "document.hxx"
 +
 +#include <xmloff/nmspmap.hxx>
 +#include <xmloff/xmlnmspe.hxx>
@@ -342,6 +362,61 @@ index 0000000..7be958d
 +using ::rtl::OUString;
 +using ::com::sun::star::uno::Reference;
 +using ::com::sun::star::xml::sax::XAttributeList;
++
++// ============================================================================
++
++ScXMLExternalRefTabSourceContext::ScXMLExternalRefTabSourceContext(
++    ScXMLImport& rImport, USHORT nPrefix, const OUString& rLName, 
++    const Reference<XAttributeList>& xAttrList, ScXMLExternalTabData& rRefInfo ) :
++    SvXMLImportContext( rImport, nPrefix, rLName ),
++    mrScImport(rImport), 
++    mrExternalRefInfo(rRefInfo)
++{
++    using namespace ::xmloff::token;
++
++	sal_Int16 nAttrCount(xAttrList.is() ? xAttrList->getLength() : 0);
++	for (sal_Int16 i = 0; i < nAttrCount; ++i)
++	{
++		const rtl::OUString& sAttrName = xAttrList->getNameByIndex(i);
++		rtl::OUString aLocalName;
++		sal_uInt16 nPrefix = mrScImport.GetNamespaceMap().GetKeyByAttrName(sAttrName, &aLocalName);
++		const rtl::OUString& sValue = xAttrList->getValueByIndex(i);
++		if (nPrefix == XML_NAMESPACE_XLINK)
++		{
++			if (IsXMLToken(aLocalName, XML_HREF))
++                maFileUrl = mrScImport.GetAbsoluteReference(sValue);
++		}
++		else if (nPrefix == XML_NAMESPACE_TABLE)
++		{
++			if (IsXMLToken(aLocalName, XML_TABLE_NAME))
++				maTableName = sValue;
++		}
++	}
++}
++
++ScXMLExternalRefTabSourceContext::~ScXMLExternalRefTabSourceContext()
++{
++}
++
++SvXMLImportContext* ScXMLExternalRefTabSourceContext::CreateChildContext(
++    USHORT nPrefix, const OUString& rLocalName, const Reference<XAttributeList>& xAttrList )
++{
++    return new SvXMLImportContext(GetImport(), nPrefix, rLocalName);
++}
++
++void ScXMLExternalRefTabSourceContext::EndElement()
++{
++    // TODO: maFileUrl may be different from the absolute file URL given in
++    // the original table name especially when the main document has moved.
++    // We may need to register this alternate URL associated with the original
++    // URL so that they point to the same source document.
++    ScDocument* pDoc = mrScImport.GetDocument();
++    if (!pDoc)
++        return;
++
++    ScExternalRefManager* pRefMgr = pDoc->GetExternalRefManager();
++    pRefMgr->setAlternateFileName(mrExternalRefInfo.mnFileId, maFileUrl);
++}
 +
 +// ============================================================================
 +
@@ -580,10 +655,10 @@ index 0000000..7be958d
 +}
 diff --git sc/source/filter/xml/xmlexternaltabi.hxx sc/source/filter/xml/xmlexternaltabi.hxx
 new file mode 100644
-index 0000000..525024a
+index 0000000..eae7417
 --- /dev/null
 +++ sc/source/filter/xml/xmlexternaltabi.hxx
-@@ -0,0 +1,120 @@
+@@ -0,0 +1,147 @@
 +/*************************************************************************
 + *
 + * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
@@ -621,6 +696,33 @@ index 0000000..525024a
 +
 +class ScXMLImport;
 +struct ScXMLExternalTabData;
++
++class ScXMLExternalRefTabSourceContext : public SvXMLImportContext
++{
++public:
++	ScXMLExternalRefTabSourceContext( ScXMLImport& rImport, USHORT nPrefix,
++						const ::rtl::OUString& rLName,
++						const ::com::sun::star::uno::Reference<
++										::com::sun::star::xml::sax::XAttributeList>& xAttrList,
++                        ScXMLExternalTabData& rRefInfo );
++
++	virtual ~ScXMLExternalRefTabSourceContext();
++
++	virtual SvXMLImportContext *CreateChildContext( USHORT nPrefix,
++									 const ::rtl::OUString& rLocalName,
++									 const ::com::sun::star::uno::Reference<
++									  	::com::sun::star::xml::sax::XAttributeList>& xAttrList );
++
++	virtual void EndElement();
++private:
++    ScXMLImport&            mrScImport;
++    ScXMLExternalTabData&   mrExternalRefInfo;
++
++    ::rtl::OUString         maFileUrl;
++    ::rtl::OUString         maTableName;
++};
++
++// ============================================================================
 +
 +class ScXMLExternalRefRowContext : public SvXMLImportContext
 +{
@@ -843,7 +945,7 @@ index 4d51084..ee9a2ea 100644
  extern const XMLPropertyMapEntry aXMLScColumnStylesProperties[];
  extern const XMLPropertyMapEntry aXMLScRowStylesProperties[];
 diff --git sc/source/filter/xml/xmltabi.cxx sc/source/filter/xml/xmltabi.cxx
-index 4a0f83e..f938f12 100644
+index 4a0f83e..7cfb082 100644
 --- sc/source/filter/xml/xmltabi.cxx
 +++ sc/source/filter/xml/xmltabi.cxx
 @@ -40,6 +40,7 @@
@@ -934,7 +1036,7 @@ index 4a0f83e..f938f12 100644
 +}
 +
 +ScXMLExternalTabData::ScXMLExternalTabData() :
-+    /*mpCacheTable(NULL),*/ mnRow(0), mnCol(0)
++    mpCacheTable(NULL), mnRow(0), mnCol(0), mnFileId(0)
 +{
 +}
 +
@@ -949,7 +1051,7 @@ index 4a0f83e..f938f12 100644
  	bStartFormPage(sal_False),
      bPrintEntireSheet(sal_True)
  {
-@@ -117,7 +192,33 @@ ScXMLTableContext::ScXMLTableContext( ScXMLImport& rImport,
+@@ -117,7 +192,30 @@ ScXMLTableContext::ScXMLTableContext( ScXMLImport& rImport,
                      break;
  			}
  		}
@@ -969,11 +1071,8 @@ index 4a0f83e..f938f12 100644
 +            if (pDoc)
 +            {
 +                ScExternalRefManager* pRefMgr = pDoc->GetExternalRefManager();
-+                if (!pRefMgr->isOwnDocument(aExtUrl))
-+                {
-+                    sal_uInt16 nFileId = pRefMgr->getExternalFileId(aExtUrl);
-+                    pExternalRefInfo->mpCacheTable = pRefMgr->getCacheTable(nFileId, aExtTabName);
-+                }
++                pExternalRefInfo->mnFileId = pRefMgr->getExternalFileId(aExtUrl);
++                pExternalRefInfo->mpCacheTable = pRefMgr->getCacheTable(pExternalRefInfo->mnFileId, aExtTabName);
 +            }
 +        }
 +        else
@@ -984,7 +1083,7 @@ index 4a0f83e..f938f12 100644
  	}
  	else
  	{
-@@ -134,10 +235,21 @@ SvXMLImportContext *ScXMLTableContext::CreateChildContext( USHORT nPrefix,
+@@ -134,10 +232,29 @@ SvXMLImportContext *ScXMLTableContext::CreateChildContext( USHORT nPrefix,
  											const ::com::sun::star::uno::Reference<
  									  	::com::sun::star::xml::sax::XAttributeList>& xAttrList )
  {
@@ -993,9 +1092,17 @@ index 4a0f83e..f938f12 100644
 +    if (pExternalRefInfo.get())
 +    {
 +        // We only care about the row elements for external cache data.
-+        if (pExternalRefInfo->mpCacheTable && nToken == XML_TOK_TABLE_ROW)
-+            return new ScXMLExternalRefRowContext(
-+                GetScImport(), nPrefix, rLName, xAttrList, *pExternalRefInfo);
++        switch (nToken)
++        {
++            case XML_TOK_TABLE_ROW:
++                return new ScXMLExternalRefRowContext(
++                    GetScImport(), nPrefix, rLName, xAttrList, *pExternalRefInfo);
++            case XML_TOK_TABLE_SOURCE:
++                return new ScXMLExternalRefTabSourceContext(
++                    GetScImport(), nPrefix, rLName, xAttrList, *pExternalRefInfo);
++            default:
++                ;
++        }
 +
 +        return new SvXMLImportContext(GetImport(), nPrefix, rLName);
 +    }
@@ -1008,11 +1115,20 @@ index 4a0f83e..f938f12 100644
  	{
  	case XML_TOK_TABLE_COL_GROUP:
  		pContext = new ScXMLTableColsContext( GetScImport(), nPrefix,
+@@ -195,6 +312,8 @@ SvXMLImportContext *ScXMLTableContext::CreateChildContext( USHORT nPrefix,
+ 			pContext = GetScImport().GetFormImport()->createOfficeFormsContext( GetScImport(), nPrefix, rLName );
+ 		}
+ 		break;
++    default:
++        ;
+ 	}
+ 
+ 	if( !pContext )
 diff --git sc/source/filter/xml/xmltabi.hxx sc/source/filter/xml/xmltabi.hxx
-index 687cff8..a7d063f 100644
+index 687cff8..e2e14d2 100644
 --- sc/source/filter/xml/xmltabi.hxx
 +++ sc/source/filter/xml/xmltabi.hxx
-@@ -30,13 +30,26 @@
+@@ -30,13 +30,27 @@
  #ifndef SC_XMLTABI_HXX
  #define SC_XMLTABI_HXX
  
@@ -1028,6 +1144,7 @@ index 687cff8..a7d063f 100644
 +    ScExternalRefCache::Table* mpCacheTable;
 +    sal_Int32 mnRow;
 +    sal_Int32 mnCol;
++    sal_uInt16 mnFileId;
 +
 +    ScXMLExternalTabData();
 +};
@@ -1107,7 +1224,7 @@ index 6b30687..22a7583 100644
      DocLoadChecker aChecker(&aDocument);
  	ScRefreshTimerProtector( aDocument.GetRefreshTimerControlAddress() );
 diff --git sc/source/ui/docshell/externalrefmgr.cxx sc/source/ui/docshell/externalrefmgr.cxx
-index 8b5858d..34cba43 100644
+index 8b5858d..036561c 100644
 --- sc/source/ui/docshell/externalrefmgr.cxx
 +++ sc/source/ui/docshell/externalrefmgr.cxx
 @@ -105,13 +105,14 @@ void ScExternalRefCache::Table::setCell(SCROW nRow, SCCOL nCol, TokenRef pToken)
@@ -1211,3 +1328,15 @@ index 8b5858d..34cba43 100644
  void ScExternalRefManager::convertToAbsName(String& rFile) const
  {
      SfxObjectShell* pDocShell = mpDoc->GetDocumentShell();
+@@ -1107,6 +1126,11 @@ void ScExternalRefManager::switchSrcFile(sal_uInt16 nFileId, const String& rNewF
+     refreshNames(nFileId);
+ }
+ 
++void ScExternalRefManager::setAlternateFileName(sal_uInt16 /*nFileId*/, const String& /*rAltFile*/)
++{
++    // TODO: not implemented yet.
++}
++
+ void ScExternalRefManager::removeSrcDocument(sal_uInt16 nFileId, bool bBreakLink)
+ {
+     maRefCache.clearCache(nFileId);
