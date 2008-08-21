@@ -207,10 +207,10 @@ index 1de31e7..8c50532 100644
  
 diff --git sc/inc/externalrefmgr.hxx sc/inc/externalrefmgr.hxx
 new file mode 100644
-index 0000000..82f694d
+index 0000000..46d691d
 --- /dev/null
 +++ sc/inc/externalrefmgr.hxx
-@@ -0,0 +1,373 @@
+@@ -0,0 +1,382 @@
 +/*************************************************************************
 + *
 + * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
@@ -495,6 +495,7 @@ index 0000000..82f694d
 +     */
 +    ScTokenArray* getRangeNameTokens(sal_uInt16 nFileId, const String& rName, const ScAddress* pCurPos = NULL);
 +
++    const String& getOwnDocumentName() const;
 +    bool isOwnDocument(const String& rFile) const;
 +
 +    /** 
@@ -531,6 +532,13 @@ index 0000000..82f694d
 +
 +    bool hasExternalData() const;
 +
++    /** 
++     * Re-generates relative names for all stored source files.  This is 
++     * necessary when exporting to an ods document, to ensure that all source 
++     * files have their respective relative names for xlink:href export.
++     */
++    void resetSrcFileData();
++
 +private:
 +    ScExternalRefManager();
 +    ScExternalRefManager(const ScExternalRefManager&); 
@@ -540,7 +548,8 @@ index 0000000..82f694d
 +    void insertReferencingCell(sal_uInt16 nFileId, const ScAddress& rCell);
 +
 +    ScDocument* getSrcDocument(sal_uInt16 nFileId);
-+    SfxObjectShellRef loadSrcDocument(sal_uInt16 nFileId, const String& rFile, String& rFilter);
++    SfxObjectShellRef loadSrcDocument(sal_uInt16 nFileId, String& rFilter);
++    bool isFileLoadable(const String& rFile) const;
 +
 +    void maybeLinkExternalFile(sal_uInt16 nFileId);
 +
@@ -840,7 +849,7 @@ index fd09e93..719206e 100644
  {
      if (pLinkManager)
 diff --git sc/source/core/tool/address.cxx sc/source/core/tool/address.cxx
-index 2cb5dce..c1906dd 100644
+index 2cb5dce..e518b27 100644
 --- sc/source/core/tool/address.cxx
 +++ sc/source/core/tool/address.cxx
 @@ -35,6 +35,7 @@
@@ -851,7 +860,57 @@ index 2cb5dce..c1906dd 100644
  
  #include "globstr.hrc"
  #include <sal/alloca.h>
-@@ -102,10 +103,7 @@ sal_Unicode_strtol ( const sal_Unicode*  p,
+@@ -68,6 +69,49 @@ void ScAddress::Details::SetPos ( const ScDocument* pDoc,
+ 
+ #include <iostream>
+ 
++/** 
++ * Parse from the opening single quote to the closing single quote.  Inside 
++ * the quotes, a single quote character is encoded by double single-quote 
++ * characters. 
++ *
++ * @param p pointer to the first character to begin parsing. 
++ * @param rName (reference) parsed name within the quotes.  If the name is 
++ *              empty, either the parsing failed or it's an empty quote.
++ * 
++ * @return pointer to the character immediately after the closing single 
++ *         quote.
++ */
++static const sal_Unicode* lcl_ParseQuotedName( const sal_Unicode* p, String& rName )
++{
++    rName.Erase();
++    if (*p != '\'')
++        return p;
++
++    const sal_Unicode* pStart = p;
++    sal_Unicode cPrev = 0;
++    for (++p; *p; ++p)
++    {
++        if (*p == '\'')
++        {
++            if (cPrev == '\'')
++            {    
++                // double single-quote equals one single quote.
++                rName += *p;
++                cPrev = 0;
++                continue;
++            }
++        }
++        else if (cPrev == '\'')
++            // We are past the closing quote.  We're done!
++            return p;
++        else
++            rName += *p;
++        cPrev = *p;
++    }
++    rName.Erase();
++    return pStart;
++}
++
+ static long int
+ sal_Unicode_strtol ( const sal_Unicode*  p,
+                      const sal_Unicode** pEnd )
+@@ -102,31 +146,18 @@ sal_Unicode_strtol ( const sal_Unicode*  p,
  // Returns NULL if the string should be a sheet name, but is invalid
  // Returns a pointer to the first character after the sheet name
  static const sal_Unicode *
@@ -863,7 +922,30 @@ index 2cb5dce..c1906dd 100644
                        String& rExternTabName,
                        bool allow_3d )
  {
-@@ -190,26 +188,7 @@ lcl_XL_ParseSheetRef( const sal_Unicode *start,
+     String aTabName;
+-    SCTAB  nTab = 0;
+     const sal_Unicode *p = start;
+ 
+     //pAddr->SetTab( 0 );
+     if( *p == '\'' ) // XL only seems to use single quotes for sheet names
+     {
+-        for( p++; *p ; )
+-        {
+-            if( *p == '\'' )
+-            {
+-                if( p[1] != '\'' )  // end quote
+-                    break;
+-                p++;    // 2 quotes in a row are a quote in a the name
+-            }
+-            aTabName += *p++;
+-        }
+-        if( *p++ != '\'' )
++        p = lcl_ParseQuotedName(p, aTabName);
++        if (!aTabName.Len())
+             return NULL;
+     }
+     else
+@@ -190,26 +221,7 @@ lcl_XL_ParseSheetRef( const sal_Unicode *start,
          aTabName.Append( start, sal::static_int_cast<xub_StrLen>( p - start ) );
      }
  
@@ -891,7 +973,7 @@ index 2cb5dce..c1906dd 100644
      return p;
  }
  
-@@ -227,39 +206,66 @@ lcl_ScRange_Parse_XL_Header( ScRange& r,
+@@ -227,39 +239,33 @@ lcl_ScRange_Parse_XL_Header( ScRange& r,
      // Is this an external reference ?
      rStartTabName.Erase();
      rEndTabName.Erase();
@@ -911,44 +993,13 @@ index 2cb5dce..c1906dd 100644
 +        if (*p == '\'')
          {
 -            for( const sal_Unicode cQuote = *p++; *p && *p != cQuote ; )
-+            sal_Unicode cPrev;
-+            String aDocName;
-+            for (++p; *p; ++p)
-             {
+-            {
 -                if( *p == '\\' && p[1] )
 -                    p++;
 -                rExternDocName += *p++;
-+                if (*p == '\'')
-+                {
-+                    if (cPrev == '\'')
-+                        // two successive single quote is treated as a single 
-+                        // valid character.
-+                        aDocName += *p;
-+                }
-+                else if (*p == ']')
-+                {
-+                    if (cPrev == '\'')
-+                    {
-+                        // Success!
-+                        rExternDocName = aDocName;
-+                        break;
-+                    }
-+                    else
-+                        return start;
-+                }
-+                else
-+                {
-+                    // any other character
-+                    if (aDocName.Len() > 0 && cPrev == '\'')
-+                        // unless it's the 3rd character, a normal character 
-+                        // following immediately a single quote is invalid.
-+                        return start;
-+                    aDocName += *p;
-+                }
-+                cPrev = *p;
-             }
-+
-+            if (!*p)
+-            }
++            p = lcl_ParseQuotedName(p, rExternDocName);
++            if (!*p || *p != ']' || !rExternDocName.Len())
 +                return start;
          }
          else
@@ -1070,7 +1121,7 @@ index 2cb5dce..c1906dd 100644
 +    if (aExternDocName.Len() > 0)
 +    {
 +        ScExternalRefManager* pRefMgr = pDoc->GetExternalRefManager();
-+        if (!pRefMgr->isOwnDocument(aExternDocName))
++        if (pExtInfo && !pRefMgr->isOwnDocument(aExternDocName))
 +        {
 +            pExtInfo->mbExternal = true;
 +            pExtInfo->maTabName = aStartTabName;
@@ -1139,7 +1190,7 @@ index 2cb5dce..c1906dd 100644
 +    if (aExternDocName.Len() > 0)
 +    {
 +        ScExternalRefManager* pRefMgr = pDoc->GetExternalRefManager();
-+        if (!pRefMgr->isOwnDocument(aExternDocName))
++        if (pExtInfo && !pRefMgr->isOwnDocument(aExternDocName))
 +        {
 +            pExtInfo->mbExternal = true;
 +            pExtInfo->maTabName = aStartTabName;
@@ -1196,7 +1247,7 @@ index 2cb5dce..c1906dd 100644
  
      if ( *tmp2 != 0 )
      {
-@@ -708,20 +722,19 @@ lcl_ScRange_Parse_XL_A1( ScRange& r,
+@@ -708,45 +722,31 @@ lcl_ScRange_Parse_XL_A1( ScRange& r,
      }
  
      nFlags |= (nFlags2 << 4);
@@ -1213,15 +1264,80 @@ index 2cb5dce..c1906dd 100644
  {
      USHORT  nRes = 0;
      String  aDocName;       // der pure Dokumentenname
-     String  aDocTab;        // zusammengesetzt fuer Table
+-    String  aDocTab;        // zusammengesetzt fuer Table
      String  aTab;
      BOOL    bExtDoc = FALSE;
 -    BOOL    bNeedExtTab = FALSE;
 +    const ScAddress aCurPos(rAddr);
  
-     // Lets see if this is a reference to something in an external file.
-     // A Documentname is always quoted and has a trailing #
-@@ -795,35 +808,11 @@ lcl_ScAddress_Parse_OOo( BOOL& bExternal, const sal_Unicode* p,
+-    // Lets see if this is a reference to something in an external file.
+-    // A Documentname is always quoted and has a trailing #
+-    if ( *p == '\'' && ScGlobal::UnicodeStrChr( p, SC_COMPILER_FILE_TAB_SEP ) )
++    // Lets see if this is a reference to something in an external file.  A
++    // document name is always quoted and has a trailing #.
++    if (*p == '\'')
+     {
+-        const sal_Unicode *pStart = p;   
+-        BOOL bQuote = TRUE;         // A Documentname is always quoted
+-        aDocTab += *p++;
+-        while ( bQuote && *p )
+-        {
+-            if ( *p == '\'' && *(p-1) != '\\' )
+-                bQuote = FALSE;
+-            else if( !(*p == '\\' && *(p+1) == '\'') )
+-                aDocName += *p;     // An escaped Quote in the Documentname
+-            aDocTab += *p++;
+-        }
+-        aDocTab += *p;              // den SC_COMPILER_FILE_TAB_SEP mitnehmen
+-        if( *p++ == SC_COMPILER_FILE_TAB_SEP )
+-            bExtDoc = TRUE;
++        const sal_Unicode* pStart = p;
++        p = lcl_ParseQuotedName(p, aDocName);
++        if (*p++ == SC_COMPILER_FILE_TAB_SEP)
++            bExtDoc = true;
+         else
+-        {
+-            // It wasn't a document after all, reset and continue as normal
++            // This is not a document name.  Perhaps a quoted relative table 
++            // name.
+             p = pStart;
+-            aDocTab = String();
+-        }
+     }
+ 
+     SCCOL   nCol = 0;
+@@ -762,25 +762,11 @@ lcl_ScAddress_Parse_OOo( BOOL& bExternal, const sal_Unicode* p,
+         if (*p == '$')
+             nRes |= SCA_TAB_ABSOLUTE, p++;
+ 
+-        // Tokens that start at ' can have anything in them until a final '
+-        // but '' marks an escaped '
+-        // We've earlier guaranteed that a string containing '' will be
+-        // surrounded by '
+-        if( *p == '\'' )
+-        {
+-            ++p;
+-            while (*p)
+-            {
+-                if (*p == '\'')
+-                {
+-                    if ( (*(p+1) != '\'') )
+-                        break;
+-                    else
+-                        *p++;
+-                }
+-                aTab += *p++;
+-            }
+-        }
++        if (*p == '\'')
++            // Tokens that start at ' can have anything in them until a final
++            // ' but '' marks an escaped '.  We've earlier guaranteed that a
++            // string containing '' will be surrounded by '.
++            p = lcl_ParseQuotedName(p, aTab);
+ 
+         while (*p)
+         {
+@@ -795,35 +781,11 @@ lcl_ScAddress_Parse_OOo( BOOL& bExternal, const sal_Unicode* p,
          }
          if( *p++ != '.' )
              nBits = 0;
@@ -1261,7 +1377,7 @@ index 2cb5dce..c1906dd 100644
          }
          else
              nBits = 0;
-@@ -884,16 +873,32 @@ lcl_ScAddress_Parse_OOo( BOOL& bExternal, const sal_Unicode* p,
+@@ -884,16 +846,31 @@ lcl_ScAddress_Parse_OOo( BOOL& bExternal, const sal_Unicode* p,
          if( !nBits )
              p = q;
      }
@@ -1274,7 +1390,6 @@ index 2cb5dce..c1906dd 100644
 +        ScExternalRefManager* pRefMgr = pDoc->GetExternalRefManager();
 +        pRefMgr->convertToAbsName(aDocName);
 +
-+        // TODO: Do we need to check if the document exists before going further?
 +        if (!pRefMgr->isOwnDocument(aDocName))
          {
 -            nRes |= SCA_VALID_TAB;
@@ -1300,7 +1415,7 @@ index 2cb5dce..c1906dd 100644
      if ( !(nRes & SCA_VALID_ROW) && (nRes & SCA_VALID_COL)
              && !( (nRes & SCA_TAB_3D) && (nRes & SCA_VALID_TAB)) )
      {   // keine Row, keine Tab, aber Col => DM (...), B (...) o.ae.
-@@ -912,9 +917,8 @@ lcl_ScAddress_Parse_OOo( BOOL& bExternal, const sal_Unicode* p,
+@@ -912,9 +889,8 @@ lcl_ScAddress_Parse_OOo( BOOL& bExternal, const sal_Unicode* p,
  }
  
  static USHORT
@@ -1312,7 +1427,7 @@ index 2cb5dce..c1906dd 100644
  {
      if( !*p )
          return 0;
-@@ -924,20 +928,20 @@ lcl_ScAddress_Parse ( BOOL& bExternal, const sal_Unicode* p,
+@@ -924,20 +900,20 @@ lcl_ScAddress_Parse ( BOOL& bExternal, const sal_Unicode* p,
      default :
      case ScAddress::CONV_OOO:
          {
@@ -1336,7 +1451,7 @@ index 2cb5dce..c1906dd 100644
              rAddr = r.aStart;
              return nFlags;
          }
-@@ -949,9 +953,8 @@ bool ConvertSingleRef( ScDocument* pDoc, const String& rRefString,
+@@ -949,9 +925,8 @@ bool ConvertSingleRef( ScDocument* pDoc, const String& rRefString,
                         SCTAB nDefTab, ScRefAddress& rRefAddress,
                         const ScAddress::Details& rDetails )
  {
@@ -1347,7 +1462,7 @@ index 2cb5dce..c1906dd 100644
      if( nRes & SCA_VALID )
      {
          rRefAddress.Set( aAddr,
-@@ -988,10 +991,9 @@ bool ConvertDoubleRef( ScDocument* pDoc, const String& rRefString, SCTAB nDefTab
+@@ -988,10 +963,9 @@ bool ConvertDoubleRef( ScDocument* pDoc, const String& rRefString, SCTAB nDefTab
  
  
  USHORT ScAddress::Parse( const String& r, ScDocument* pDoc,
@@ -1360,7 +1475,7 @@ index 2cb5dce..c1906dd 100644
  }
  
  
-@@ -1060,7 +1062,7 @@ void ScRange::ExtendTo( const ScRange& rRange )
+@@ -1060,7 +1034,7 @@ void ScRange::ExtendTo( const ScRange& rRange )
  }
  
  static USHORT
@@ -1369,7 +1484,7 @@ index 2cb5dce..c1906dd 100644
  {
      USHORT nRes1 = 0, nRes2 = 0;
      xub_StrLen nTmp = 0;
-@@ -1073,13 +1075,12 @@ lcl_ScRange_Parse_OOo( ScRange &aRange, const String& r, ScDocument* pDoc )
+@@ -1073,13 +1047,12 @@ lcl_ScRange_Parse_OOo( ScRange &aRange, const String& r, ScDocument* pDoc )
          String aTmp( r );
          sal_Unicode* p = aTmp.GetBufferAccess();
          p[ nPos ] = 0;
@@ -1386,7 +1501,7 @@ index 2cb5dce..c1906dd 100644
                      nRes2 &= ~SCA_VALID_TAB;    // #REF!
                  else
                  {
-@@ -1132,7 +1133,7 @@ lcl_ScRange_Parse_OOo( ScRange &aRange, const String& r, ScDocument* pDoc )
+@@ -1132,7 +1105,7 @@ lcl_ScRange_Parse_OOo( ScRange &aRange, const String& r, ScDocument* pDoc )
  }
  
  USHORT ScRange::Parse( const String& r, ScDocument* pDoc,
@@ -1395,7 +1510,7 @@ index 2cb5dce..c1906dd 100644
  {
      if ( r.Len() <= 0 )
          return 0;
-@@ -1141,13 +1142,13 @@ USHORT ScRange::Parse( const String& r, ScDocument* pDoc,
+@@ -1141,13 +1114,13 @@ USHORT ScRange::Parse( const String& r, ScDocument* pDoc,
      {
      default :
      case ScAddress::CONV_OOO:
@@ -3542,7 +3657,7 @@ index 20ada63..9c4ddba 100644
  
  
 diff --git sc/source/filter/excel/xeformula.cxx sc/source/filter/excel/xeformula.cxx
-index 3db8da7..f9f87c2 100644
+index 3db8da7..947b4ce 100644
 --- sc/source/filter/excel/xeformula.cxx
 +++ sc/source/filter/excel/xeformula.cxx
 @@ -42,6 +42,11 @@
@@ -3611,7 +3726,7 @@ index 3db8da7..f9f87c2 100644
      switch( eTokType )
      {
          case svUnknown:     mbOk = false;                           break;
-@@ -1248,6 +1286,133 @@ void XclExpFmlaCompImpl::ProcessExternal( const XclExpTokenData& rTokData, sal_u
+@@ -1248,6 +1286,131 @@ void XclExpFmlaCompImpl::ProcessExternal( const XclExpTokenData& rTokData, sal_u
          ProcessFunction( rTokData, nExpClass );
  }
  
@@ -3645,7 +3760,6 @@ index 3db8da7..f9f87c2 100644
 +            XclAddress aXclPos(ScAddress::UNINITIALIZED);
 +            ConvertRefData(aRef, aXclPos, false, false, false);
 +
-+            const String* pFile = pRefMgr->getExternalFileName(nFileId);
 +            sal_uInt16 nExtSheet, nFirstSBTab, nLastSBTab;
 +            mpLinkMgr->FindExtSheet(nFileId, rTabName, 1, nExtSheet, nFirstSBTab, nLastSBTab, GetNewRefLogEntry());
 +            sal_uInt8 nBaseId = lclIsRefDel2D(aRef) ? EXC_TOKID_REFERR3D : EXC_TOKID_REF3D;
@@ -3683,7 +3797,6 @@ index 3db8da7..f9f87c2 100644
 +            mpLinkMgr->StoreCellRange(nFileId, rTabName, aRef);
 +            XclRange aXclRange(ScAddress::UNINITIALIZED);
 +            ConvertRefData(aRef, aXclRange, false);
-+            const String* pFile = pRefMgr->getExternalFileName(nFileId);
 +            sal_uInt16 nExtSheet, nFirstSBTab, nLastSBTab;
 +            sal_uInt16 nTabSpan = r2.nTab - r1.nTab + 1;
 +            mpLinkMgr->FindExtSheet(nFileId, rTabName, nTabSpan, nExtSheet, nFirstSBTab, nLastSBTab, GetNewRefLogEntry());
@@ -3745,7 +3858,7 @@ index 3db8da7..f9f87c2 100644
  void XclExpFmlaCompImpl::ProcessFunction( const XclExpTokenData& rTokData, sal_uInt8 nExpClass )
  {
      OpCode eOpCode = rTokData.GetOpCode();
-@@ -1623,32 +1788,6 @@ void XclExpFmlaCompImpl::AppendTrailingParam( XclExpFuncData& rFuncData )
+@@ -1623,32 +1786,6 @@ void XclExpFmlaCompImpl::AppendTrailingParam( XclExpFuncData& rFuncData )
      }
  }
  
@@ -4672,7 +4785,7 @@ index b1bacad..08517ca 100644
  {
      mxImpl->Save( rStrm );
 diff --git sc/source/filter/excel/xilink.cxx sc/source/filter/excel/xilink.cxx
-index 01932a5..2c50c2b 100644
+index 01932a5..ab4c08b 100644
 --- sc/source/filter/excel/xilink.cxx
 +++ sc/source/filter/excel/xilink.cxx
 @@ -38,6 +38,13 @@
@@ -5041,9 +5154,12 @@ index 01932a5..2c50c2b 100644
  }
  
  bool XclImpLinkManagerImpl::IsSelfRef( sal_uInt16 nXtiIndex ) const
-@@ -570,8 +613,8 @@ bool XclImpLinkManagerImpl::GetScTabRange(
+@@ -568,10 +611,10 @@ bool XclImpLinkManagerImpl::GetScTabRange(
+ {
+     if( const XclImpXti* pXti = maXtiList.GetObject( nXtiIndex ) )
      {
-         if( const XclImpSupbook* pSupbook = maSupbookList.GetObject( pXti->mnSupbook ) )
+-        if( const XclImpSupbook* pSupbook = maSupbookList.GetObject( pXti->mnSupbook ) )
++        if (maSupbookList.GetObject(pXti->mnSupbook))
          {
 -            rnFirstScTab = pSupbook->GetScTabNum( pXti->mnSBTabFirst );
 -            rnLastScTab = pSupbook->GetScTabNum( pXti->mnSBTabLast );
@@ -5938,7 +6054,7 @@ index e29223a..604e04e 100644
  //------------------------------------------------------------------
  
 diff --git sc/source/filter/xml/xmlexprt.cxx sc/source/filter/xml/xmlexprt.cxx
-index 52f5145..2d173a5 100644
+index 52f5145..92dea13 100644
 --- sc/source/filter/xml/xmlexprt.cxx
 +++ sc/source/filter/xml/xmlexprt.cxx
 @@ -68,6 +68,7 @@
@@ -6343,7 +6459,7 @@ index 52f5145..2d173a5 100644
  				}
  				if (getExportFlags() & EXPORT_MASTERSTYLES)
  				{
-@@ -3316,6 +3336,182 @@ void ScXMLExport::WriteNamedExpressions(const com::sun::star::uno::Reference <co
+@@ -3316,6 +3336,183 @@ void ScXMLExport::WriteNamedExpressions(const com::sun::star::uno::Reference <co
  	}
  }
  
@@ -6353,6 +6469,7 @@ index 52f5145..2d173a5 100644
 +        return;
 +
 +    ScExternalRefManager* pRefMgr = pDoc->GetExternalRefManager();
++    pRefMgr->resetSrcFileData();
 +    sal_uInt16 nCount = pRefMgr->getCachedFileCount();
 +    for (sal_uInt16 nFileId = 0; nFileId < nCount; ++nFileId)
 +    {
@@ -7051,7 +7168,7 @@ index 0000000..6f26789
 +
 +#endif
 diff --git sc/source/filter/xml/xmlimprt.cxx sc/source/filter/xml/xmlimprt.cxx
-index 47b26b9..3541e45 100644
+index 47b26b9..eb74c99 100644
 --- sc/source/filter/xml/xmlimprt.cxx
 +++ sc/source/filter/xml/xmlimprt.cxx
 @@ -104,6 +104,7 @@
@@ -7095,7 +7212,7 @@ index 47b26b9..3541e45 100644
 +    { XML_NAMESPACE_OFFICE, XML_TIME_VALUE,                     XML_TOK_TABLE_ROW_CELL_ATTR_TIME_VALUE              },
 +    { XML_NAMESPACE_OFFICE, XML_STRING_VALUE,                   XML_TOK_TABLE_ROW_CELL_ATTR_STRING_VALUE            },
 +    { XML_NAMESPACE_OFFICE, XML_BOOLEAN_VALUE,                  XML_TOK_TABLE_ROW_CELL_ATTR_BOOLEAN_VALUE           },
-+    { XML_NAMESPACE_OFFICE, XML_FORMULA,                        XML_TOK_TABLE_ROW_CELL_ATTR_FORMULA                 },
++    { XML_NAMESPACE_TABLE,  XML_FORMULA,                        XML_TOK_TABLE_ROW_CELL_ATTR_FORMULA                 },
 +    { XML_NAMESPACE_OFFICE, XML_CURRENCY,                       XML_TOK_TABLE_ROW_CELL_ATTR_CURRENCY                },
 +    XML_TOKEN_MAP_END
  };
@@ -7228,7 +7345,7 @@ index 4d51084..ee9a2ea 100644
  extern const XMLPropertyMapEntry aXMLScColumnStylesProperties[];
  extern const XMLPropertyMapEntry aXMLScRowStylesProperties[];
 diff --git sc/source/filter/xml/xmltabi.cxx sc/source/filter/xml/xmltabi.cxx
-index 4a0f83e..fcfb281 100644
+index 4a0f83e..264901d 100644
 --- sc/source/filter/xml/xmltabi.cxx
 +++ sc/source/filter/xml/xmltabi.cxx
 @@ -40,6 +40,7 @@
@@ -7247,7 +7364,7 @@ index 4a0f83e..fcfb281 100644
  
  #include <xmloff/xmltkmap.hxx>
  #include <xmloff/nmspmap.hxx>
-@@ -63,6 +65,78 @@
+@@ -63,6 +65,77 @@
  using namespace com::sun::star;
  using namespace xmloff::token;
  
@@ -7267,6 +7384,8 @@ index 4a0f83e..fcfb281 100644
 +{
 +    // 'file:///path/to/file.ods'#MySheet
 +    // 'file:///path/to/file.ods'#MySheet with space
++    // 'file:///path/to/file's.ods'#Sheet (Notice the quote in the file name.
++    //  That's allowed.)
 +
 +    static const sal_Unicode aPrefix[] = {
 +        '\'', 'f', 'i', 'l', 'e', ':', '/', '/'
@@ -7287,17 +7406,14 @@ index 4a0f83e..fcfb281 100644
 +            if (c != aPrefix[i])
 +                return false;
 +        }
-+        else if (c == '\'')
-+        {
-+            if (!bInUrl)
-+                return false;
-+            bInUrl = false;
-+            rUrl = aUrlBuf.makeStringAndClear();
-+        }
 +        else if (c == '#')
 +        {
 +            if (cPrev != '\'')
 +                return false;
++
++            rUrl = aUrlBuf.makeStringAndClear();
++            rUrl = rUrl.copy(0, rUrl.getLength()-1); // remove the trailing single-quote.
++            bInUrl = false;
 +        }
 +        else if (bInUrl)
 +            aUrlBuf.append(c);
@@ -7326,7 +7442,7 @@ index 4a0f83e..fcfb281 100644
  //------------------------------------------------------------------
  
  ScXMLTableContext::ScXMLTableContext( ScXMLImport& rImport,
-@@ -73,6 +147,7 @@ ScXMLTableContext::ScXMLTableContext( ScXMLImport& rImport,
+@@ -73,6 +146,7 @@ ScXMLTableContext::ScXMLTableContext( ScXMLImport& rImport,
  									  const sal_Bool bTempIsSubTable,
  									  const sal_Int32 nSpannedCols) :
  	SvXMLImportContext( rImport, nPrfx, rLName ),
@@ -7334,7 +7450,7 @@ index 4a0f83e..fcfb281 100644
  	bStartFormPage(sal_False),
      bPrintEntireSheet(sal_True)
  {
-@@ -117,7 +192,26 @@ ScXMLTableContext::ScXMLTableContext( ScXMLImport& rImport,
+@@ -117,7 +191,26 @@ ScXMLTableContext::ScXMLTableContext( ScXMLImport& rImport,
                      break;
  			}
  		}
@@ -7362,7 +7478,7 @@ index 4a0f83e..fcfb281 100644
  	}
  	else
  	{
-@@ -134,10 +228,30 @@ SvXMLImportContext *ScXMLTableContext::CreateChildContext( USHORT nPrefix,
+@@ -134,10 +227,30 @@ SvXMLImportContext *ScXMLTableContext::CreateChildContext( USHORT nPrefix,
  											const ::com::sun::star::uno::Reference<
  									  	::com::sun::star::xml::sax::XAttributeList>& xAttrList )
  {
@@ -7395,7 +7511,7 @@ index 4a0f83e..fcfb281 100644
  	{
  	case XML_TOK_TABLE_COL_GROUP:
  		pContext = new ScXMLTableColsContext( GetScImport(), nPrefix,
-@@ -195,6 +309,8 @@ SvXMLImportContext *ScXMLTableContext::CreateChildContext( USHORT nPrefix,
+@@ -195,6 +308,8 @@ SvXMLImportContext *ScXMLTableContext::CreateChildContext( USHORT nPrefix,
  			pContext = GetScImport().GetFormImport()->createOfficeFormsContext( GetScImport(), nPrefix, rLName );
  		}
  		break;
@@ -7471,10 +7587,10 @@ index bc5975d..6701d1c 100644
  
 diff --git sc/source/ui/docshell/externalrefmgr.cxx sc/source/ui/docshell/externalrefmgr.cxx
 new file mode 100644
-index 0000000..5648cf1
+index 0000000..25266aa
 --- /dev/null
 +++ sc/source/ui/docshell/externalrefmgr.cxx
-@@ -0,0 +1,1267 @@
+@@ -0,0 +1,1328 @@
 +/*************************************************************************
 + *
 + * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
@@ -7536,7 +7652,9 @@ index 0000000..5648cf1
 +#include "svtools/smplhint.hxx"
 +#include "svtools/itemset.hxx"
 +#include "svtools/stritem.hxx"
++#include "svtools/urihelper.hxx"
 +#include "svx/linkmgr.hxx"
++#include "tools/urlobj.hxx"
 +#include "unotools/ucbhelper.hxx"
 +
 +#include <memory>
@@ -7544,6 +7662,7 @@ index 0000000..5648cf1
 +
 +using ::std::auto_ptr;
 +using ::com::sun::star::uno::Any;
++using ::rtl::OUString;
 +using ::std::vector;
 +using ::std::find;
 +using ::std::distance;
@@ -8423,7 +8542,7 @@ index 0000000..5648cf1
 +
 +    String aFilter;
 +    SrcShell aSrcDoc;
-+    aSrcDoc.maShell = loadSrcDocument(nFileId, *pFile, aFilter);
++    aSrcDoc.maShell = loadSrcDocument(nFileId, aFilter);
 +    if (!aSrcDoc.maShell.Is())
 +    {
 +        // source document could not be loaded.
@@ -8457,20 +8576,46 @@ index 0000000..5648cf1
 +    return pSrcDoc;
 +}
 +
-+SfxObjectShellRef ScExternalRefManager::loadSrcDocument(sal_uInt16 nFileId, const String& rFile, String& rFilter)
++SfxObjectShellRef ScExternalRefManager::loadSrcDocument(sal_uInt16 nFileId, String& rFilter)
 +{
-+    // First, make sure the file actually exists at the specified URL.
-+    if (!utl::UCBContentHelper::Exists(rFile) || utl::UCBContentHelper::IsFolder(rFile))
-+        // Either the specified file doesn't exist, or it's a folder.
++    const SrcFileData* pFileData = getExternalFileData(nFileId);
++    if (!pFileData)
 +        return NULL;
 +
-+    if (isOwnDocument(rFile))
-+        // Don't load itself.  That would be asking for trouble.
-+        return NULL;
++    String aFile = pFileData->maFileName;
++    if (!isFileLoadable(aFile))
++    {
++        // The original file path is not loadable.  Try the relative path.  
++        // Note that the path is relative to the content.xml substream which
++        // is one-level higher than the file itself.
++
++        if (!pFileData->maRelativeName.Len())
++            return NULL;
++
++        INetURLObject aBaseURL(getOwnDocumentName());
++        aBaseURL.insertName(OUString::createFromAscii("content.xml"));
++        bool bWasAbs = false;
++        aFile = aBaseURL.smartRel2Abs(pFileData->maRelativeName, bWasAbs).GetMainURL(INetURLObject::NO_DECODE);
++        if (!isFileLoadable(aFile))
++            // Ok, I've tried both paths but no success.  Bail out.
++            return NULL;
++    }
 +
 +    String aOptions;
-+    ScDocumentLoader::GetFilterName(rFile, rFilter, aOptions, true, false);
++    ScDocumentLoader::GetFilterName(aFile, rFilter, aOptions, true, false);
 +    const SfxFilter* pFilter = ScDocShell::Factory().GetFilterContainer()->GetFilter4FilterName(rFilter);
++
++    if (!pFileData->maRelativeName.Len())
++    {
++        // Generate a relative file path.
++        INetURLObject aBaseURL(getOwnDocumentName());
++        aBaseURL.insertName(OUString::createFromAscii("content.xml"));
++
++        String aStr = URIHelper::simpleNormalizedMakeRelative(
++            aBaseURL.GetMainURL(INetURLObject::NO_DECODE), aFile);
++
++        setRelativeFileName(nFileId, aStr);
++    }
 +
 +    // Update the filter data now that we are loading it again.
 +    setFilterData(nFileId, rFilter, aOptions);
@@ -8479,7 +8624,7 @@ index 0000000..5648cf1
 +    if (aOptions.Len())
 +        pSet->Put(SfxStringItem(SID_FILE_FILTEROPTIONS, aOptions));
 +
-+    auto_ptr<SfxMedium> pMedium(new SfxMedium(rFile, STREAM_STD_READ, false, pFilter, pSet));
++    auto_ptr<SfxMedium> pMedium(new SfxMedium(aFile, STREAM_STD_READ, false, pFilter, pSet));
 +    if (pMedium->GetError() != ERRCODE_NONE)
 +        return NULL;
 +
@@ -8502,6 +8647,17 @@ index 0000000..5648cf1
 +
 +    pNewShell->DoLoad(pMedium.release());
 +    return aRef;
++}
++
++bool ScExternalRefManager::isFileLoadable(const String& rFile) const
++{
++    if (isOwnDocument(rFile))
++        return false;
++
++    if (utl::UCBContentHelper::IsFolder(rFile))
++        return false;
++
++    return utl::UCBContentHelper::Exists(rFile);
 +}
 +
 +void ScExternalRefManager::maybeLinkExternalFile(sal_uInt16 nFileId)
@@ -8568,18 +8724,23 @@ index 0000000..5648cf1
 +    return true;
 +}
 +
-+bool ScExternalRefManager::isOwnDocument(const String& rFile) const
++const String& ScExternalRefManager::getOwnDocumentName() const
 +{
 +    SfxObjectShell* pShell = mpDoc->GetDocumentShell();
 +    if (!pShell)
 +        // This should not happen!
-+        return true;
++        return EMPTY_STRING;
 +
 +    SfxMedium* pMed = pShell->GetMedium();
 +    if (!pMed)
-+        return false;
++        return EMPTY_STRING;
 +
-+    return pMed->GetName().Equals(rFile);
++    return pMed->GetName();
++}
++
++bool ScExternalRefManager::isOwnDocument(const String& rFile) const
++{
++    return getOwnDocumentName().Equals(rFile);
 +}
 +
 +void ScExternalRefManager::convertToAbsName(String& rFile) const
@@ -8715,6 +8876,22 @@ index 0000000..5648cf1
 +bool ScExternalRefManager::hasExternalData() const
 +{
 +    return !maSrcFiles.empty();
++}
++
++void ScExternalRefManager::resetSrcFileData()
++{
++    INetURLObject aBaseURL(getOwnDocumentName());
++    aBaseURL.insertName(OUString::createFromAscii("content.xml"));
++    String aBaseUrlStr = aBaseURL.GetMainURL(INetURLObject::NO_DECODE);
++    for (vector<SrcFileData>::iterator itr = maSrcFiles.begin(), itrEnd = maSrcFiles.end();
++          itr != itrEnd; ++itr)
++    {
++        if (!itr->maRelativeName.Len())
++        {
++            itr->maRelativeName = URIHelper::simpleNormalizedMakeRelative(
++                aBaseUrlStr, itr->maFileName);
++        }
++    }
 +}
 +
 +void ScExternalRefManager::purgeStaleSrcDocument(sal_Int32 nTimeOut)
