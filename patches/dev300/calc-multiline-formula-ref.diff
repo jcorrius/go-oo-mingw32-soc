@@ -1,0 +1,456 @@
+diff --git sc/inc/cell.hxx sc/inc/cell.hxx
+index ac35dc6..83620a1 100644
+--- sc/inc/cell.hxx
++++ sc/inc/cell.hxx
+@@ -475,6 +475,9 @@ public:
+ 	inline BOOL		IsHyperLinkCell() const { return pCode && pCode->IsHyperLink(); }
+ 	EditTextObject*		CreateURLObject() ;
+     void            GetURLResult( String& rURL, String& rCellText );
++
++    /** Determines whether or not the result string contains more than one paragraph */
++    bool            IsMultilineResult();
+ };
+ 
+ //			Iterator fuer Referenzen in einer Formelzelle
+diff --git sc/inc/editutil.hxx sc/inc/editutil.hxx
+index 8072f26..0838d6a 100644
+--- sc/inc/editutil.hxx
++++ sc/inc/editutil.hxx
+@@ -63,8 +63,13 @@ class ScEditUtil
+ 
+ public:
+ 	static String ModifyDelimiters( const String& rOld );
++
++    /// Retrieves string with paragraphs delimited by spaces
+ 	static String GetSpaceDelimitedString( const EditEngine& rEngine );
+ 
++    /// Retrieves string with paragraphs delimited by new lines ('\n').
++    static String GetMultilineString( const EditEngine& rEngine );
++
+ public:
+ 				ScEditUtil( ScDocument* pDocument, SCCOL nX, SCROW nY, SCTAB nZ,
+ 							const Point& rScrPosPixel,
+diff --git sc/inc/formularesult.hxx sc/inc/formularesult.hxx
+index 727476c..1836303 100644
+--- sc/inc/formularesult.hxx
++++ sc/inc/formularesult.hxx
+@@ -38,6 +38,12 @@
+     and memory consumption. */
+ class ScFormulaResult
+ {
++    enum Multiline
++    {
++        MULTILINE_UNKNOWN = 0,
++        MULTILINE_FALSE,
++        MULTILINE_TRUE
++    };
+     union
+     {
+         double          mfValue;    // double result direct for performance and memory consumption
+@@ -47,6 +53,7 @@ class ScFormulaResult
+     bool                mbToken :1; // whether content of union is a token
+     bool                mbEmpty :1; // empty cell result
+     bool                mbEmptyDisplayedAsString :1;    // only if mbEmpty
++    Multiline           meMultiline :2; // result is multiline
+ 
+     /** Reset mnError, mbEmpty and mbEmptyDisplayedAsString to their defaults
+         prior to assigning other types */
+@@ -69,12 +76,14 @@ public:
+                                 /** Effectively type svUnknown. */
+                                 ScFormulaResult()
+                                     : mpToken(NULL), mnError(0), mbToken(true),
+-                                    mbEmpty(false), mbEmptyDisplayedAsString(false) {}
++                                    mbEmpty(false), mbEmptyDisplayedAsString(false),
++                                    meMultiline(MULTILINE_UNKNOWN) {}
+ 
+                                 ScFormulaResult( const ScFormulaResult & r )
+                                     : mnError( r.mnError), mbToken( r.mbToken),
+                                     mbEmpty( r.mbEmpty),
+-                                    mbEmptyDisplayedAsString( r.mbEmptyDisplayedAsString)
++                                    mbEmptyDisplayedAsString( r.mbEmptyDisplayedAsString),
++                                    meMultiline( r.meMultiline)
+                                 {
+                                     if (mbToken)
+                                     {
+@@ -99,7 +108,8 @@ public:
+     /** Same comments as for SetToken() apply! */
+     explicit                    ScFormulaResult( const ScToken* p )
+                                     : mnError(0), mbToken(false),
+-                                    mbEmpty(false), mbEmptyDisplayedAsString(false)
++                                    mbEmpty(false), mbEmptyDisplayedAsString(false),
++                                    meMultiline(MULTILINE_UNKNOWN)
+                                 {
+                                     SetToken( p);
+                                 }
+@@ -153,6 +163,10 @@ public:
+         details instead. */
+     inline  bool                IsValue() const;
+ 
++    /** Determines whether or not the result is a string containing more than 
++        one paragraph */
++    inline  bool                IsMultiline();
++
+     /** Get error code if set or GetCellResultType() is svError or svUnknown,
+         else 0. */
+     inline  USHORT              GetResultError() const;
+@@ -211,6 +225,7 @@ inline void ScFormulaResult::ResetToDefaults()
+     mnError = 0;
+     mbEmpty = false;
+     mbEmptyDisplayedAsString = false;
++    meMultiline = MULTILINE_UNKNOWN;
+ }
+ 
+ 
+@@ -232,10 +247,12 @@ inline void ScFormulaResult::ResolveToken( const ScToken * p )
+                 mbToken = false;
+                 // set in case mnError is 0 now, which shouldn't happen but ...
+                 mfValue = 0.0;
++                meMultiline = MULTILINE_FALSE;
+                 break;
+             case svEmptyCell:
+                 mbEmpty = true;
+                 mbEmptyDisplayedAsString = static_cast<const ScEmptyCellToken*>(p)->IsDisplayedAsString();
++                meMultiline = MULTILINE_FALSE;
+                 p->DecRef();
+                 mbToken = false;
+                 break;
+@@ -243,6 +260,7 @@ inline void ScFormulaResult::ResolveToken( const ScToken * p )
+                 mfValue = p->GetDouble();
+                 p->DecRef();
+                 mbToken = false;
++                meMultiline = MULTILINE_FALSE;
+                 break;
+             default:
+                 mpToken = p;
+@@ -270,6 +288,7 @@ inline void ScFormulaResult::Assign( const ScFormulaResult & r )
+         mbToken = false;
+         mbEmpty = true;
+         mbEmptyDisplayedAsString = r.mbEmptyDisplayedAsString;
++        meMultiline = r.meMultiline;
+     }
+     else if (r.mbToken)
+     {
+@@ -352,6 +371,7 @@ inline void ScFormulaResult::SetDouble( double f )
+             mpToken->DecRef();
+         mfValue = f;
+         mbToken = false;
++        meMultiline = MULTILINE_FALSE;
+     }
+ }
+ 
+@@ -404,6 +424,19 @@ inline bool ScFormulaResult::IsValue() const
+     return sv == svDouble || sv == svError || sv == svEmptyCell;
+ }
+ 
++inline bool ScFormulaResult::IsMultiline()
++{
++    if (meMultiline == MULTILINE_UNKNOWN)
++    {
++        const String& rStr = GetString();
++        if (rStr.Len() && rStr.Search( _LF ) != STRING_NOTFOUND)
++            meMultiline = MULTILINE_TRUE;
++        else
++            meMultiline = MULTILINE_FALSE;
++    }
++    return meMultiline == MULTILINE_TRUE;
++}
++
+ 
+ inline USHORT ScFormulaResult::GetResultError() const
+ {
+@@ -537,6 +570,7 @@ inline void ScFormulaResult::SetHybridDouble( double f )
+     {
+         mfValue = f;
+         mbToken = false;
++        meMultiline = MULTILINE_FALSE;
+     }
+ }
+ 
+diff --git sc/source/core/data/cell.cxx sc/source/core/data/cell.cxx
+index ed6a75e..ba0a973 100644
+--- sc/source/core/data/cell.cxx
++++ sc/source/core/data/cell.cxx
+@@ -1813,6 +1813,13 @@ void ScFormulaCell::GetURLResult( String& rURL, String& rCellText )
+     }
+ }
+ 
++bool ScFormulaCell::IsMultilineResult()
++{
++    if (!IsValue())
++        return aResult.IsMultiline();
++    return false;
++}
++
+ EditTextObject* ScFormulaCell::CreateURLObject()
+ {
+     String aCellText;
+diff --git sc/source/core/data/cell2.cxx sc/source/core/data/cell2.cxx
+index a4c9a1c..fc6df5f 100644
+--- sc/source/core/data/cell2.cxx
++++ sc/source/core/data/cell2.cxx
+@@ -163,7 +163,7 @@ void ScEditCell::GetString( String& rString ) const
+         // auch Text von URL-Feldern, Doc-Engine ist eine ScFieldEditEngine
+         EditEngine& rEngine = pDoc->GetEditEngine();
+         rEngine.SetText( *pData );
+-        rString = ScEditUtil::GetSpaceDelimitedString(rEngine);     // space between paragraphs
++        rString = ScEditUtil::GetMultilineString(rEngine); // string with line separators between paragraphs
+         // kurze Strings fuer Formeln merken
+         if ( rString.Len() < MAXSTRLEN )
+             ((ScEditCell*)this)->pString = new String( rString );   //! non-const
+diff --git sc/source/core/data/column.cxx sc/source/core/data/column.cxx
+index 474da0f..d898aaa 100644
+--- sc/source/core/data/column.cxx
++++ sc/source/core/data/column.cxx
+@@ -2317,8 +2317,10 @@ BOOL ScColumn::HasEditCells(SCROW nStartRow, SCROW nEndRow, SCROW& rFirst) const
+ 	while ( (nIndex < nCount) ? ((nRow=pItems[nIndex].nRow) <= nEndRow) : FALSE )
+ 	{
+ 		ScBaseCell* pCell = pItems[nIndex].pCell;
+-		if ( pCell->GetCellType() == CELLTYPE_EDIT ||
+-			 IsAmbiguousScriptNonZero( pDocument->GetScriptType(nCol, nRow, nTab, pCell) ) )
++        CellType eCellType = pCell->GetCellType();
++		if ( eCellType == CELLTYPE_EDIT ||
++			 IsAmbiguousScriptNonZero( pDocument->GetScriptType(nCol, nRow, nTab, pCell) ) ||
++             ((eCellType == CELLTYPE_FORMULA) && ((ScFormulaCell*)pCell)->IsMultilineResult()) )
+ 		{
+ 			rFirst = nRow;
+ 			return TRUE;
+diff --git sc/source/core/data/column2.cxx sc/source/core/data/column2.cxx
+index 8e75dcd..888a51e 100644
+--- sc/source/core/data/column2.cxx
++++ sc/source/core/data/column2.cxx
+@@ -793,9 +793,12 @@ long ScColumn::GetNeededSize( SCROW nRow, OutputDevice* pDev,
+ 		}
+ 
+ 		BOOL bAddMargin = TRUE;
+-		BOOL bEditEngine = ( pCell->GetCellType() == CELLTYPE_EDIT ||
++        CellType eCellType = pCell->GetCellType();
++
++		BOOL bEditEngine = ( eCellType == CELLTYPE_EDIT ||
+ 								eOrient == SVX_ORIENTATION_STACKED ||
+-								IsAmbiguousScript( nScript ) );
++								IsAmbiguousScript( nScript ) ||
++                                ((eCellType == CELLTYPE_FORMULA) && ((ScFormulaCell*)pCell)->IsMultilineResult()) );
+ 
+ 		if (!bEditEngine)									// direkte Ausgabe
+ 		{
+diff --git sc/source/core/data/column3.cxx sc/source/core/data/column3.cxx
+index 1f5f531..76ddd16 100644
+--- sc/source/core/data/column3.cxx
++++ sc/source/core/data/column3.cxx
+@@ -898,8 +898,17 @@ ScBaseCell* ScColumn::CloneCell(SCSIZE nIndex, USHORT nFlags,
+ 							String aString;
+ 							pForm->GetString(aString);
+ 							if ( aString.Len() )
+-								pNew = new ScStringCell(aString);
+-								// #33224# LeerStrings nicht kopieren
++                            {
++                                if ( pForm->IsMultilineResult() )
++                                {
++                                    pNew = new ScEditCell( aString, pDestDoc );
++                                }
++                                else
++                                {
++                                    pNew = new ScStringCell(aString);
++                                    // #33224# LeerStrings nicht kopieren
++                                }
++                            }
+ 						}
+ 					}
+ 					if ( pNew && pSource->GetNotePtr() && ( nFlags & IDF_NOTE ) )
+diff --git sc/source/core/tool/editutil.cxx sc/source/core/tool/editutil.cxx
+index 65605ce..31dc996 100644
+--- sc/source/core/tool/editutil.cxx
++++ sc/source/core/tool/editutil.cxx
+@@ -82,19 +82,29 @@ String ScEditUtil::ModifyDelimiters( const String& rOld )
+ 	return aRet;
+ }
+ 
+-String ScEditUtil::GetSpaceDelimitedString( const EditEngine& rEngine )
++static String lcl_GetDelimitedString( const EditEngine& rEngine, const sal_Char c )
+ {
+ 	String aRet;
+ 	USHORT nParCount = rEngine.GetParagraphCount();
+ 	for (USHORT nPar=0; nPar<nParCount; nPar++)
+ 	{
+ 		if (nPar > 0)
+-			aRet += ' ';
++			aRet += c;
+ 		aRet += rEngine.GetText( nPar );
+ 	}
+ 	return aRet;
+ }
+ 
++String ScEditUtil::GetSpaceDelimitedString( const EditEngine& rEngine )
++{
++    return lcl_GetDelimitedString(rEngine, ' ');
++}
++
++String ScEditUtil::GetMultilineString( const EditEngine& rEngine )
++{
++    return lcl_GetDelimitedString(rEngine, '\n');
++}
++
+ //------------------------------------------------------------------------
+ 
+ Rectangle ScEditUtil::GetEditArea( const ScPatternAttr* pPattern, BOOL bForceToTop )
+diff --git sc/source/filter/excel/xestyle.cxx sc/source/filter/excel/xestyle.cxx
+index 55edbf1..0a5231e 100644
+--- sc/source/filter/excel/xestyle.cxx
++++ sc/source/filter/excel/xestyle.cxx
+@@ -1963,9 +1963,9 @@ sal_uInt32 XclExpXFBuffer::InsertWithFont( const ScPatternAttr* pPattern, sal_In
+     return InsertCellXF( pPattern, nScript, NUMBERFORMAT_ENTRY_NOT_FOUND, nForceXclFont, bForceLineBreak );
+ }
+ 
+-sal_uInt32 XclExpXFBuffer::InsertWithNumFmt( const ScPatternAttr* pPattern, sal_Int16 nScript, ULONG nForceScNumFmt )
++sal_uInt32 XclExpXFBuffer::InsertWithNumFmt( const ScPatternAttr* pPattern, sal_Int16 nScript, ULONG nForceScNumFmt, bool bForceLineBreak )
+ {
+-    return InsertCellXF( pPattern, nScript, nForceScNumFmt, EXC_FONT_NOTFOUND, false );
++    return InsertCellXF( pPattern, nScript, nForceScNumFmt, EXC_FONT_NOTFOUND, bForceLineBreak );
+ }
+ 
+ sal_uInt32 XclExpXFBuffer::InsertStyle( const SfxStyleSheetBase* pStyleSheet )
+diff --git sc/source/filter/excel/xetable.cxx sc/source/filter/excel/xetable.cxx
+index 91f4736..9323d86 100644
+--- sc/source/filter/excel/xetable.cxx
++++ sc/source/filter/excel/xetable.cxx
+@@ -760,13 +760,15 @@ XclExpFormulaCell::XclExpFormulaCell(
+ 
+         // #i41420# find script type according to result type (always latin for numeric results)
+         sal_Int16 nScript = ApiScriptType::LATIN;
++        bool bForceLineBreak = false;
+         if( nFormatType == NUMBERFORMAT_TEXT )
+         {
+             String aResult;
+             mrScFmlaCell.GetString( aResult );
++            bForceLineBreak = mrScFmlaCell.IsMultilineResult();
+             nScript = XclExpStringHelper::GetLeadingScriptType( rRoot, aResult );
+         }
+-        SetXFId( rRoot.GetXFBuffer().InsertWithNumFmt( pPattern, nScript, nAltScNumFmt ) );
++        SetXFId( rRoot.GetXFBuffer().InsertWithNumFmt( pPattern, nScript, nAltScNumFmt, bForceLineBreak ) );
+     }
+ 
+     // *** Convert the formula token array *** --------------------------------
+diff --git sc/source/filter/inc/xestyle.hxx sc/source/filter/inc/xestyle.hxx
+index 16bd7ed..810e301 100644
+--- sc/source/filter/inc/xestyle.hxx
++++ sc/source/filter/inc/xestyle.hxx
+@@ -617,10 +617,13 @@ public:
+         @param nXFFlags  Additional flags allowing to control the creation of an XF.
+         @param nForceScNumFmt  The number format to be exported, e.g. formula
+             result type. This format will always overwrite the cell's number format.
++        @param bForceLineBreak  true = Set line break flag unconditionally.
++            This is required for cells that contain multi-line text.
+         @return  A unique XF record ID. */
+     sal_uInt32          InsertWithNumFmt(
+                             const ScPatternAttr* pPattern, sal_Int16 nScript,
+-                            ULONG nForceScNumFmt );
++                            ULONG nForceScNumFmt,
++                            bool bForceLineBreak );
+     /** Inserts the passed cell style. Creates a style XF record and a STYLE record.
+         @return  A unique XF record ID. */
+     sal_uInt32          InsertStyle( const SfxStyleSheetBase* pStyleSheet );
+diff --git sc/source/filter/xml/xmlexprt.cxx sc/source/filter/xml/xmlexprt.cxx
+index c8c629e..535ed45 100644
+--- sc/source/filter/xml/xmlexprt.cxx
++++ sc/source/filter/xml/xmlexprt.cxx
+@@ -2410,7 +2410,8 @@ void ScXMLExport::WriteCell (ScMyCell& aCell)
+ 
+ 	if (!bIsEmpty)
+ 	{
+-		if ((aCell.nType == table::CellContentType_TEXT) && IsEditCell(aCell))
++		if ((aCell.nType == table::CellContentType_TEXT && IsEditCell(aCell)) || 
++            IsMultiLineFormulaCell(aCell))
+ 		{
+             bEditCell = sal_True;
+             uno::Reference<text::XText> xText(xCurrentTableCellRange->getCellByPosition(aCell.aCellAddress.Column, aCell.aCellAddress.Row), uno::UNO_QUERY);
+@@ -2907,6 +2908,22 @@ sal_Bool ScXMLExport::IsEditCell(ScMyCell& rCell) const
+ 	}
+ }
+ 
++sal_Bool ScXMLExport::IsMultiLineFormulaCell(ScMyCell& rCell) const
++{
++    if (!pDoc)
++        return false;
++
++    ScAddress aAddr(static_cast<SCCOL>(rCell.aCellAddress.Column), 
++                    static_cast<SCROW>(rCell.aCellAddress.Row), 
++                    static_cast<SCTAB>(rCell.aCellAddress.Sheet));
++
++    ScBaseCell* pCell = pDoc->GetCell(aAddr);
++    if (!pCell || pCell->GetCellType() != CELLTYPE_FORMULA)
++        return false;
++
++    return static_cast<ScFormulaCell*>(pCell)->IsMultilineResult();
++}
++
+ sal_Bool ScXMLExport::IsAnnotationEqual(const uno::Reference<table::XCell>& /* xCell1 */,
+                                         const uno::Reference<table::XCell>& /* xCell2 */)
+ {
+diff --git sc/source/filter/xml/xmlexprt.hxx sc/source/filter/xml/xmlexprt.hxx
+index 6a366f5..e8477e5 100644
+--- sc/source/filter/xml/xmlexprt.hxx
++++ sc/source/filter/xml/xmlexprt.hxx
+@@ -185,6 +185,7 @@ class ScXMLExport : public SvXMLExport
+ 	sal_Bool IsEditCell(const com::sun::star::table::CellAddress& aAddress) const;
+ 	sal_Bool IsEditCell(const com::sun::star::uno::Reference <com::sun::star::table::XCell>& xCell) const;
+ 	sal_Bool IsEditCell(ScMyCell& rCell) const;
++    sal_Bool IsMultiLineFormulaCell(ScMyCell& rCell) const;
+ 	sal_Bool IsAnnotationEqual(const com::sun::star::uno::Reference<com::sun::star::table::XCell>& xCell1,
+ 								const com::sun::star::uno::Reference<com::sun::star::table::XCell>& xCell2);
+ 	sal_Bool IsCellEqual (ScMyCell& aCell1, ScMyCell& aCell2);
+diff --git sc/source/ui/app/transobj.cxx sc/source/ui/app/transobj.cxx
+index d13e4b9..d324b1b 100644
+--- sc/source/ui/app/transobj.cxx
++++ sc/source/ui/app/transobj.cxx
+@@ -815,7 +815,10 @@ void ScTransferObj::StripRefs( ScDocument* pDoc,
+ 				{
+ 					String aStr;
+ 					pFCell->GetString(aStr);
+-					pNew = new ScStringCell( aStr );
++                    if ( pFCell->IsMultilineResult() )
++                        pNew = new ScEditCell( aStr, pDestDoc );
++                    else
++                        pNew = new ScStringCell( aStr );
+ 				}
+ 				pDestDoc->PutCell( nCol,nRow,nDestTab, pNew );
+ 
+diff --git sc/source/ui/docshell/impex.cxx sc/source/ui/docshell/impex.cxx
+index 5ecaa46..7c21c4a 100644
+--- sc/source/ui/docshell/impex.cxx
++++ sc/source/ui/docshell/impex.cxx
+@@ -1606,6 +1606,7 @@ BOOL ScImportExport::Sylk2Doc( SvStream& rStrm )
+ 
+ BOOL ScImportExport::Doc2Sylk( SvStream& rStrm )
+ {
++    const String SYLK_LF = String::CreateFromAscii("\x1b :");
+ 	SCCOL nCol;
+ 	SCROW nRow;
+ 	SCCOL nStartCol = aRange.aStart.Col();
+@@ -1660,6 +1661,7 @@ BOOL ScImportExport::Doc2Sylk( SvStream& rStrm )
+ 				case CELLTYPE_EDIT:
+ 				hasstring:
+ 					pDoc->GetString( nCol, nRow, aRange.aStart.Tab(), aCellStr );
++                    aCellStr.SearchAndReplaceAll( _LF, SYLK_LF );
+ 
+ 					aBufStr.AssignAscii(RTL_CONSTASCII_STRINGPARAM( "C;X" ));
+ 					aBufStr += String::CreateFromInt32( c );
+diff --git sc/source/ui/view/output2.cxx sc/source/ui/view/output2.cxx
+index c472906..c92818e 100644
+--- sc/source/ui/view/output2.cxx
++++ sc/source/ui/view/output2.cxx
+@@ -1427,11 +1427,13 @@ void ScOutputData::DrawStrings( BOOL bPixelToLogic )
+ 				}
+ 				if (bDoCell && !bNeedEdit)
+ 				{
+-					if ( pCell->GetCellType() == CELLTYPE_FORMULA )
++					BOOL bFormulaCell = (pCell->GetCellType() == CELLTYPE_FORMULA );
++					if ( bFormulaCell )
+ 						lcl_CreateInterpretProgress( bProgress, pDoc, (ScFormulaCell*)pCell );
+ 					if ( aVars.SetText(pCell) )
+ 						pOldPattern = NULL;
+-                    bNeedEdit = aVars.HasEditCharacters();
++                    bNeedEdit = aVars.HasEditCharacters() ||
++					                (bFormulaCell && ((ScFormulaCell*)pCell)->IsMultilineResult());
+                 }
+                 if (bDoCell && !bNeedEdit)
+                 {
