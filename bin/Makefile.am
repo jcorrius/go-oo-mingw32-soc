@@ -33,6 +33,7 @@ script_files = \
 	owner \
 	package-lang-win32 \
 	package-ooo \
+	po2sdf \
 	pyunorc-update64.in \
 	re-root \
 	stat-localizations \
