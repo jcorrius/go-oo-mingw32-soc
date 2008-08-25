@@ -1,0 +1,191 @@
+diff --git sc/inc/unonames.hxx sc/inc/unonames.hxx
+index 73b3744..b2c45ac 100644
+--- sc/inc/unonames.hxx
++++ sc/inc/unonames.hxx
+@@ -523,6 +523,7 @@
+ #define SC_UNO_ZOOMTYPE             "ZoomType"
+ #define SC_UNO_ZOOMVALUE            "ZoomValue"
+ #define SC_UNO_UPDTEMPL             "UpdateFromTemplate"
++#define SC_UNO_FILTERED_RANGE_SELECTION       "FilteredRangeSelection"
+ /*Stampit enable/disable print cancel */
+ #define SC_UNO_ALLOWPRINTJOBCANCEL  "AllowPrintJobCancel"
+ 
+diff --git sc/inc/viewuno.hxx sc/inc/viewuno.hxx
+index 9dfdc83..54671f2 100644
+--- sc/inc/viewuno.hxx
++++ sc/inc/viewuno.hxx
+@@ -198,6 +198,7 @@ private:
+ 	XMouseClickHandlerArr_Impl              aMouseClickHandlers;
+ 	XActivationEventListenerArr_Impl        aActivationListeners;
+ 	sal_Bool								bDrawSelModeSet;
++    sal_Bool                                bFilteredRangeSelection;
+ 
+ 	ScViewPaneObj*			GetObjectByIndex_Impl(USHORT nIndex) const;
+     INT16                   GetZoom(void) const;
+diff --git sc/source/ui/unoobj/viewuno.cxx sc/source/ui/unoobj/viewuno.cxx
+index 3f48d35..8399e8e 100644
+--- sc/source/ui/unoobj/viewuno.cxx
++++ sc/source/ui/unoobj/viewuno.cxx
+@@ -544,7 +544,8 @@ ScTabViewObj::ScTabViewObj() :
+ 	aPropSet( lcl_GetViewOptPropertyMap() ),
+ 	aMouseClickHandlers( 0 ),
+ 	aActivationListeners( 0 ),
+-	bDrawSelModeSet(sal_False)
++	bDrawSelModeSet(sal_False),
++    bFilteredRangeSelection(sal_True)
+ {
+ }
+ 
+@@ -554,7 +555,8 @@ ScTabViewObj::ScTabViewObj( ScTabViewShell* pViewSh ) :
+ 	aPropSet( lcl_GetViewOptPropertyMap() ),
+ 	aMouseClickHandlers( 0 ),
+ 	aActivationListeners( 0 ),
+-	bDrawSelModeSet(sal_False)
++	bDrawSelModeSet(sal_False),
++    bFilteredRangeSelection(sal_True)
+ {
+ 	if( pViewSh )
+ 	{
+@@ -971,6 +973,15 @@ uno::Any SAL_CALL ScTabViewObj::getSelection() throw(uno::RuntimeException)
+ 
+ 		ScRange aRange;
+         ScMarkType eMarkType = pViewData->GetSimpleArea(aRange);
++
++        if (!bFilteredRangeSelection)
++        {
++            if (eMarkType == SC_MARK_SIMPLE_FILTERED)
++                eMarkType = SC_MARK_SIMPLE;
++            else if (eMarkType == SC_MARK_FILTERED)
++                eMarkType = SC_MARK_MULTI;
++        }
++
+ 		if ( nTabs == 1 && (eMarkType == SC_MARK_SIMPLE) )
+ 		{
+ 			if (aRange.aStart == aRange.aEnd)
+@@ -1815,6 +1826,12 @@ void SAL_CALL ScTabViewObj::setPropertyValue(
+ 	ScUnoGuard aGuard;
+ 	String aString(aPropertyName);
+ 
++    if ( aString.EqualsAscii(SC_UNO_FILTERED_RANGE_SELECTION) )
++    {
++        bFilteredRangeSelection = ScUnoHelpFunctions::GetBoolFromAny(aValue);
++        return;
++    }
++
+ 	ScTabViewShell* pViewSh = GetViewShell();
+ 	if (pViewSh)
+ 	{
+@@ -1937,6 +1954,12 @@ uno::Any SAL_CALL ScTabViewObj::getPropertyValue( const rtl::OUString& aProperty
+ 	String aString(aPropertyName);
+ 	uno::Any aRet;
+ 
++    if ( aString.EqualsAscii(SC_UNO_FILTERED_RANGE_SELECTION) )
++    {
++        ScUnoHelpFunctions::SetBoolInAny(aRet, bFilteredRangeSelection);
++        return aRet;
++    }
++
+ 	ScTabViewShell* pViewSh = GetViewShell();
+ 	if (pViewSh)
+ 	{
+diff --git sc/source/ui/vba/vbaapplication.cxx sc/source/ui/vba/vbaapplication.cxx
+index 6ccb8e1..b451440 100644
+--- sc/source/ui/vba/vbaapplication.cxx
++++ sc/source/ui/vba/vbaapplication.cxx
+@@ -84,10 +84,16 @@
+ 
+ #include "convuno.hxx"
+ #include "cellsuno.hxx"
++#include "miscuno.hxx"
++#include "unonames.hxx"
+ #include "docsh.hxx"
+ 
+ using namespace ::org::openoffice;
+ using namespace ::com::sun::star;
++using ::com::sun::star::uno::Reference;
++using ::com::sun::star::uno::UNO_QUERY_THROW;
++using ::com::sun::star::uno::UNO_QUERY;
++using ::rtl::OUString;
+ 
+ // #TODO is this defined somewhere else?
+ #if ( defined UNX ) || ( defined OS2 ) //unix
+@@ -151,33 +157,53 @@ uno::Any SAL_CALL
+ ScVbaApplication::getSelection() throw (uno::RuntimeException)
+ {
+     OSL_TRACE("** ScVbaApplication::getSelection() ** ");
+-    uno::Reference< lang::XServiceInfo > xServiceInfo( getCurrentDocument()->getCurrentSelection(), uno::UNO_QUERY_THROW );
+-    rtl::OUString sImpementaionName = xServiceInfo->getImplementationName();
+-    if( sImpementaionName.equalsIgnoreAsciiCaseAscii("com.sun.star.drawing.SvxShapeCollection") )
++
++    Reference< view::XSelectionSupplier > xSelSupp( getCurrentDocument()->getCurrentController(), UNO_QUERY_THROW );
++    Reference< beans::XPropertySet > xPropSet( xSelSupp, UNO_QUERY_THROW );
++    OUString aPropName = OUString::createFromAscii( SC_UNO_FILTERED_RANGE_SELECTION );
++    uno::Any aOldVal = xPropSet->getPropertyValue( aPropName );
++    uno::Any any;
++    any <<= sal_False;
++    xPropSet->setPropertyValue( aPropName, any );
++    uno::Reference< uno::XInterface > aSelection = ScUnoHelpFunctions::AnyToInterface(
++        xSelSupp->getSelection() );
++    xPropSet->setPropertyValue( aPropName, aOldVal );
++
++    if (!aSelection.is())
++    {
++        throw uno::RuntimeException( 
++            rtl::OUString::createFromAscii("failed to obtain current selection"), 
++            uno::Reference< uno::XInterface >() );
++    }
++
++    uno::Reference< lang::XServiceInfo > xServiceInfo( aSelection, uno::UNO_QUERY_THROW );
++    rtl::OUString sImplementationName = xServiceInfo->getImplementationName();
++
++    if( sImplementationName.equalsIgnoreAsciiCaseAscii("com.sun.star.drawing.SvxShapeCollection") )
+     {
+-        uno::Reference< drawing::XShapes > xShapes( getCurrentDocument()->getCurrentSelection(), uno::UNO_QUERY_THROW );
++        uno::Reference< drawing::XShapes > xShapes( aSelection, uno::UNO_QUERY_THROW );
+         uno::Reference< container::XIndexAccess > xIndexAccess( xShapes, uno::UNO_QUERY_THROW );
+         uno::Reference< drawing::XShape > xShape( xIndexAccess->getByIndex(0), uno::UNO_QUERY_THROW );
+-	// if ScVbaShape::getType( xShape ) == office::MsoShapeType::msoAutoShape
+-	// and the uno object implements the com.sun.star.drawing.Text service
+-	// return a textboxshape object
+-	if ( ScVbaShape::getType( xShape ) == office::MsoShapeType::msoAutoShape )
+-	{
+-		uno::Reference< lang::XServiceInfo > xShapeServiceInfo( xShape, uno::UNO_QUERY_THROW );
+-		if ( xShapeServiceInfo->supportsService( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "com.sun.star.drawing.Text" ) ) )  )
+-		{
+-        		return uno::makeAny( uno::Reference< msforms::XTextBoxShape >(new ScVbaTextBoxShape( mxContext, xShape, xShapes, getCurrentDocument() ) ) );
+-		}
+-	}
++    	// if ScVbaShape::getType( xShape ) == office::MsoShapeType::msoAutoShape
++    	// and the uno object implements the com.sun.star.drawing.Text service
++    	// return a textboxshape object
++    	if ( ScVbaShape::getType( xShape ) == office::MsoShapeType::msoAutoShape )
++    	{
++    		uno::Reference< lang::XServiceInfo > xShapeServiceInfo( xShape, uno::UNO_QUERY_THROW );
++    		if ( xShapeServiceInfo->supportsService( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "com.sun.star.drawing.Text" ) ) )  )
++    		{
++                return uno::makeAny( uno::Reference< msforms::XTextBoxShape >(new ScVbaTextBoxShape( mxContext, xShape, xShapes, getCurrentDocument() ) ) );
++    		}
++    	}
+         return uno::makeAny( uno::Reference< msforms::XShape >(new ScVbaShape( this, mxContext, xShape, xShapes, ScVbaShape::getType( xShape ) ) ) );
+     }
+     else if( xServiceInfo->supportsService( rtl::OUString::createFromAscii("com.sun.star.sheet.SheetCellRange")) ||
+              xServiceInfo->supportsService( rtl::OUString::createFromAscii("com.sun.star.sheet.SheetCellRanges")))
+     {
+-	    uno::Reference< table::XCellRange > xRange( getCurrentDocument()->getCurrentSelection(), ::uno::UNO_QUERY);
++	    uno::Reference< table::XCellRange > xRange( aSelection, ::uno::UNO_QUERY);
+ 	    if ( !xRange.is() )
+ 	    {
+-		    uno::Reference< sheet::XSheetCellRangeContainer > xRanges( getCurrentDocument()->getCurrentSelection(), ::uno::UNO_QUERY);
++		    uno::Reference< sheet::XSheetCellRangeContainer > xRanges( aSelection, ::uno::UNO_QUERY);
+ 		    if ( xRanges.is() )
+ 			    return uno::makeAny( uno::Reference< excel::XRange >( new ScVbaRange( this, mxContext, xRanges ) ) );
+ 
+@@ -186,7 +212,7 @@ ScVbaApplication::getSelection() throw (uno::RuntimeException)
+     }
+     else
+     {
+-        throw uno::RuntimeException( sImpementaionName + rtl::OUString::createFromAscii(" donot be surpported"), uno::Reference< uno::XInterface >() );
++        throw uno::RuntimeException( sImplementationName + rtl::OUString::createFromAscii(" not surpported"), uno::Reference< uno::XInterface >() );
+     }
+ }
+ 
