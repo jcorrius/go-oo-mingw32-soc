@@ -16,6 +16,8 @@ ooo-build-*.po: ooo-build.pot /usr/bin/pot2po
 	pot2po -t $@ -i ooo-build.pot -o $@.new
 	mv $@.new $@
 
+# ../bin/po2sdf is a crazy hack until
+# http://bugs.locamotion.org/show_bug.cgi?id=487" is fixed"
 ooo-build-%.sdf: ooo-build-%.po ooo-build.sdf /usr/bin/po2oo ../bin/po2sdf
 	../bin/po2sdf $* ooo-build.sdf $< $@
 
