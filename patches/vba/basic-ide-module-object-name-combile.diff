@@ -1,0 +1,124 @@
+--- ../ooo300-m3.bak/oovbaapi/org/openoffice/excel/XWorksheet.idl	2008-08-21 15:26:00.000000000 +0800
++++ oovbaapi/org/openoffice/excel/XWorksheet.idl	2008-08-23 16:09:13.000000000 +0800
+@@ -42,6 +42,9 @@
+ #include <com/sun/star/script/XInvocation.idl>
+ #endif
+ 
++#ifndef __com_sun_star_container_XNamed_idl__
++#include <com/sun/star/container/XNamed.idl>
++#endif
+ //=============================================================================
+ 
+ module org {  module openoffice {  module excel { 
+@@ -57,8 +60,9 @@ interface XWorksheet
+ {
+ 	interface ::org::openoffice::vba::XHelperInterface;
+ 	interface ::com::sun::star::script::XInvocation;
++	interface ::com::sun::star::container::XNamed;
+ 
+-	[attribute] string Name;
++//	[attribute] string Name;
+ 	[attribute] boolean Visible; 
+ 	[attribute, readonly] long StandardHeight;
+ 	[attribute, readonly] long StandardWidth;
+--- ../ooo300-m3.bak/sc/source/ui/vba/vbaworksheet.hxx	2008-08-21 15:26:00.000000000 +0800
++++ sc/source/ui/vba/vbaworksheet.hxx	2008-08-23 15:44:48.000000000 +0800
+@@ -45,6 +45,7 @@
+ #include <org/openoffice/excel/XPageSetup.hpp>
+ #include <org/openoffice/excel/XHPageBreaks.hpp>
+ #include <org/openoffice/excel/XChartObjects.hpp>
++#include <com/sun/star/container/XNamed.hpp>
+ 
+ #include "vbahelperinterface.hxx"
+ 
+--- ../ooo300-m3.bak/basic/inc/basic/sbobjmod.hxx	2008-08-21 15:25:58.000000000 +0800
++++ basic/inc/basic/sbobjmod.hxx	2008-08-23 16:10:54.000000000 +0800
+@@ -56,6 +56,7 @@ public:
+     SbObjModule( const com::sun::star::script::ModuleInfo& mInfo, bool bIsVbaCompatible );
+     virtual SbxVariable* Find( const XubString& rName, SbxClassType t );
+     SbxVariable* GetObject();
++	const String GetObjectName();
+ };
+ 
+ class SbUserFormModule : public SbObjModule
+--- ../ooo300-m3.bak/basic/source/classes/sbxmod.cxx	2008-08-21 15:26:00.000000000 +0800
++++ basic/source/classes/sbxmod.cxx	2008-08-23 16:48:45.000000000 +0800
+@@ -53,6 +53,7 @@
+ #include <vos/mutex.hxx>
+ #include <basic/sbobjmod.hxx>
+ #include <com/sun/star/lang/XServiceInfo.hpp>
++#include <com/sun/star/container/XNamed.hpp>
+ 
+ // for the bsearch
+ #ifdef WNT
+@@ -2260,6 +2261,21 @@ SbObjModule::GetObject() 
+ {
+     return pDocObject;
+ }
++
++const String SbObjModule::GetObjectName()
++{
++	String sName;
++	SbUnoObject* pUnoObj = PTR_CAST(SbUnoObject, (SbxObject*)pDocObject);
++	if( pUnoObj )
++	{
++		com::sun::star::uno::Reference< com::sun::star::container::XNamed > xNamed ( pUnoObj->getUnoAny(), com::sun::star::uno::UNO_QUERY_THROW );
++		if( xNamed.is() )
++			sName = xNamed->getName();
++	}
++	OSL_TRACE(" SbObjModule:GetObjectName: %s", rtl::OUStringToOString( sName, RTL_TEXTENCODING_UTF8 ).getStr());
++	return sName;
++}
++
+ SbxVariable*
+ SbObjModule::Find( const XubString& rName, SbxClassType t )
+ {
+--- ../ooo300-m3.bak/basic/prj/d.lst	2007-05-11 19:42:43.000000000 +0800
++++ basic/prj/d.lst	2008-08-21 17:18:21.000000000 +0800
+@@ -27,6 +27,7 @@ mkdir: %_DEST%\inc%_EXT%\basic
+ 
+ ..\inc\basic\sbdef.hxx %_DEST%\inc%_EXT%\basic\sbdef.hxx
+ ..\inc\basic\sbmod.hxx %_DEST%\inc%_EXT%\basic\sbmod.hxx
++..\inc\basic\sbobjmod.hxx %_DEST%\inc%_EXT%\basic\sbobjmod.hxx
+ ..\inc\basic\sbjsmod.hxx %_DEST%\inc%_EXT%\basic\sbjsmod.hxx
+ ..\inc\basic\sbmeth.hxx %_DEST%\inc%_EXT%\basic\sbmeth.hxx
+ ..\inc\basic\sbprop.hxx %_DEST%\inc%_EXT%\basic\sbprop.hxx
+--- ../ooo300-m3.bak/basctl/source/basicide/basides2.cxx	2008-08-21 15:25:58.000000000 +0800
++++ basctl/source/basicide/basides2.cxx	2008-08-24 18:14:46.000000000 +0800
+@@ -55,6 +55,7 @@
+ #include <tools/diagnose_ex.h>
+ #include <sfx2/sfxdefs.hxx>
+ #include <sfx2/signaturestate.hxx>
++#include <basic/sbobjmod.hxx>
+ 
+ using namespace ::com::sun::star;
+ using namespace ::com::sun::star::uno;
+@@ -272,7 +273,28 @@ ModulWindow* BasicIDEShell::CreateBasWin
+ 		DBG_ASSERT( nKey, "CreateBasWin: Kein Key- Fenster nicht gefunden!" );
+ 	}
+     if( nKey )
++	{
++		BasicManager* pBasMgr = rDocument.getBasicManager();
++		if( pBasMgr )
++		{
++			// display a nice friendly name in the ObjectModule tab,
++			// combining the objectname and module name, e.g. Sheet1 ( Financials )
++			StarBASIC* pBasic = pBasMgr->GetLib( aLibName );
++			if( pBasic )
++			{
++				SbModule* pModule = (SbModule*)pBasic->FindModule( aModName );
++				if( ( pModule->ISA( SbObjModule )) && ( pModule->GetClassName().EqualsIgnoreCaseAscii("Worksheet") ))
++				{
++					String sObjName = ((SbObjModule*)pModule)->GetObjectName();
++					if( sObjName.Len() )
++					{
++						aModName.AppendAscii(" ( ").Append(sObjName).AppendAscii(" )");
++					}
++				}
++			}
++		}
+ 	    pTabBar->InsertPage( (USHORT)nKey, aModName );
++	}	
+ 	pTabBar->Sort();
+ 	pWin->GrabScrollBars( &aHScrollBar, &aVScrollBar );
+ 	if ( !pCurWin )
