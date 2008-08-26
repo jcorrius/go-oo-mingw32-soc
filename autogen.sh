@@ -11,6 +11,23 @@ if test "z$1" = "z--clean"; then
     exit 1;
 fi
 
+for arg in "$@"; do
+    case "$arg" in
+	*' '*)
+
+	    echo '
+
+This autogen.sh script does not handle command-line arguments
+containing spaces correctly. So if you need to pass such arguments on
+to the configure script that autogen.sh produces, you should run
+autogen.sh first without arguments, then run ./configure with the
+arguments you want.'
+
+	    exit 1
+	    ;;
+    esac
+done
+
 old_args=""
 if test $# -eq 0 && test -f config.log; then
     old_args=`grep '\$ ./configure' config.log | sed -e 's/.*configure //' -e 's/=\(\([^"'"'"'-]\|-[^-]\| \)*\)\( \|$\)/="\1" /g'`
