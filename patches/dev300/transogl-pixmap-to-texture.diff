@@ -1,0 +1,1577 @@
+diff -rup slideshow/source/engine/OGLTrans-orig/OGLTrans_TransitionerImpl.cxx slideshow/source/engine/OGLTrans/OGLTrans_TransitionerImpl.cxx
+--- slideshow/source/engine/OGLTrans-orig/OGLTrans_TransitionerImpl.cxx	2008-08-27 08:27:25.000000000 +0200
++++ slideshow/source/engine/OGLTrans/OGLTrans_TransitionerImpl.cxx	2008-08-27 09:03:37.000000000 +0200
+@@ -31,6 +31,7 @@
+ #define GLX_GLXEXT_PROTOTYPES 1
+ #include "OGLTrans_TransitionImpl.hxx"
+ 
++#include <com/sun/star/beans/XFastPropertySet.hpp>
+ #include <com/sun/star/rendering/IntegerBitmapLayout.hpp>
+ #include <com/sun/star/rendering/ColorComponentTag.hpp>
+ #include <com/sun/star/rendering/ColorSpaceType.hpp>
+@@ -71,18 +72,78 @@
+ namespace unx
+ {
+ #include <X11/keysym.h>
++#include <X11/X.h>
+ #include <GL/glx.h>
+ #include <GL/glxext.h>
+ }
+ #endif
+ 
++#ifdef DEBUG
++#include <boost/date_time/posix_time/posix_time.hpp>
++using namespace ::boost::posix_time;
++
++static ptime t1;
++static ptime t2;
++static ptime t3;
++static ptime t4;
++
++#endif
++
+ using namespace ::com::sun::star;
++using ::com::sun::star::beans::XFastPropertySet;
++using ::com::sun::star::uno::Any;
++using ::com::sun::star::uno::Reference;
++using ::com::sun::star::uno::Sequence;
++using ::com::sun::star::uno::UNO_QUERY;
++using ::com::sun::star::uno::UNO_QUERY_THROW;
+ 
+ namespace
+ {
+ 
+ typedef cppu::WeakComponentImplHelper1<presentation::XTransition> OGLTransitionerImplBase;
+ 
++namespace
++{
++    struct OGLFormat
++    {
++        GLint  nInternalFormat;
++        GLenum eFormat;
++        GLenum eType;
++    };
++
++    /* channel ordering: (0:rgba, 1:bgra, 2:argb, 3:abgr)  
++    */
++    int calcComponentOrderIndex(const uno::Sequence<sal_Int8>& rTags)
++    {
++        using namespace rendering::ColorComponentTag;
++
++        static const sal_Int8 aOrderTable[] =
++        {
++            RGB_RED, RGB_GREEN, RGB_BLUE, ALPHA,
++            RGB_BLUE, RGB_GREEN, RGB_RED, ALPHA,
++            ALPHA, RGB_RED, RGB_GREEN, RGB_BLUE,
++            ALPHA, RGB_BLUE, RGB_GREEN, RGB_RED, 
++        };
++
++        const sal_Int32 nNumComps(rTags.getLength());
++        const sal_Int8* pLine=aOrderTable;
++        for(int i=0; i<4; ++i)
++        {
++            int j=0;
++            while( j<4 && j<nNumComps && pLine[j] == rTags[j] )
++                ++j;
++
++            // all of the line passed, this is a match!
++            if( j==nNumComps )
++                return i;
++
++            pLine+=4;
++        }
++
++        return -1;
++    }
++}
++
+ /** This is the Transitioner class for OpenGL 3D transitions in
+  * slideshow. At the moment, it's Linux only. This class is implicitly
+  * constructed from XTransitionFactory.
+@@ -96,7 +157,7 @@ public:
+     static bool initialize( const uno::Reference< presentation::XSlideShowView >& xView );
+ 
+     // XTransition
+-	virtual void SAL_CALL update( double nTime ) throw (uno::RuntimeException);
++    virtual void SAL_CALL update( double nTime ) throw (uno::RuntimeException);
+     
+ protected:
+     // WeakComponentImplHelperBase
+@@ -107,6 +168,18 @@ protected:
+         return (rBHelper.bDisposed || rBHelper.bInDispose);
+     }
+ 
++    bool createWindow( Window* pPWindow );
++    void createTexture( unsigned int* texID,
++#ifdef GLX_VERSION_1_3
++			unx::GLXPixmap pixmap,
++#endif
++			bool usePixmap,
++			bool useMipmap,
++			uno::Sequence<sal_Int8>& data,
++			const OGLFormat* pFormat );
++    void prepareEnvironment ();
++    const OGLFormat* chooseFormats();
++
+ private:    
+     /** After the window has been created, and the slides have been set, we'll initialize the slides with OpenGL.
+     */
+@@ -117,23 +190,29 @@ private:
+     struct GLWindow
+     {
+ #if defined( WNT ) 
+-			HWND					hWnd;
+-			HDC						hDC;
+-			HGLRC					hRC;
++	HWND					hWnd;
++	HDC						hDC;
++	HGLRC					hRC;
+ #elif defined( OS2 )
+ #elif defined( QUARTZ )
+ #elif defined( UNX )
+-    		unx::Display*           dpy;
+-    		int						screen;
+-    		unx::Window				win;
+-    		unx::GLXContext			ctx;
++	unx::Display*           dpy;
++	int                     screen;
++	unx::Window             win;
++#ifdef GLX_VERSION_1_3
++	unx::GLXFBConfig        fbc;
++#endif
++	unx::XVisualInfo*       vi;
++	unx::GLXContext         ctx;
+ #endif
+-    	unsigned int			bpp;
++    	unsigned int            bpp;
+     	unsigned int            Width;
+     	unsigned int            Height;
+         const char*             GLXExtensions;
++	const GLubyte*          GLExtensions;
+ 
+-        bool HasGLXExtension( const char* name ) { return gluCheckExtension( (const GLubyte*) name, (const GLubyte*) GLXExtensions ); };
++        bool HasGLXExtension( const char* name ) { return gluCheckExtension( (const GLubyte*) name, (const GLubyte*) GLXExtensions ); }
++	bool HasGLExtension( const char* name ) { return gluCheckExtension( (const GLubyte*) name, GLExtensions ); }
+     } GLWin;
+     
+     /** OpenGL handle to the leaving slide's texture
+@@ -154,6 +233,17 @@ private:
+     /** raw bytes of the leaving bitmap
+     */
+     uno::Sequence<sal_Int8> LeavingBytes;
++
++#ifdef GLX_VERSION_1_3
++    unx::GLXPixmap LeavingPixmap;
++    unx::GLXPixmap EnteringPixmap;
++#endif
++    bool mbUseLeavingPixmap;
++    bool mbUseEnteringPixmap;
++    bool mbFreeLeavingPixmap;
++    bool mbFreeEnteringPixmap;
++    unx::Pixmap maLeavingPixmap;
++    unx::Pixmap maEnteringPixmap;
+     
+     /** the form the raw bytes are in for the bitmaps
+     */
+@@ -175,6 +265,7 @@ public:
+     /** GL version
+      */
+     static float cnGLVersion;
++    float mnGLXVersion;
+ 
+     /** Whether Mesa is the OpenGL vendor
+      */
+@@ -184,6 +275,13 @@ public:
+        whether the display has GLX extension
+      */
+     static bool cbGLXPresent;
++
++    /**
++       whether texture from pixmap extension is available
++    */
++    bool mbTextureFromPixmap;
++
++    bool mbGenerateMipmap;
+ };
+ 
+ // declare the static variables as some gcc versions have problems declaring them automaticaly
+@@ -231,25 +329,8 @@ bool OGLTransitionerImpl::initialize( co
+     return cbGLXPresent;
+ }
+ 
+-bool OGLTransitionerImpl::initWindowFromSlideShowView( const uno::Reference< presentation::XSlideShowView >& xView, double, double)
++bool OGLTransitionerImpl::createWindow( Window* pPWindow )
+ {
+-    osl::MutexGuard const guard( m_aMutex );
+-
+-    if (isDisposed())
+-        return false;
+-
+-    /// take the XSlideShowView and extract the parent window from it. see viewmediashape.cxx
+-    uno::Reference< rendering::XCanvas > xCanvas(xView->getCanvas(), uno::UNO_QUERY_THROW);
+-	uno::Sequence< uno::Any > aDeviceParams;
+-	::canvas::tools::getDeviceInfo( xCanvas, aDeviceParams );
+-	::rtl::OUString aImplName;
+-	aDeviceParams[ 0 ] >>= aImplName;
+-	sal_Int64 aVal = 0;
+-	aDeviceParams[1] >>= aVal;
+-	Window* pPWindow = reinterpret_cast< Window* >( aVal );
+-	GLWin.Width = pPWindow->GetSizePixel().Width();
+-	GLWin.Height = pPWindow->GetSizePixel().Height();
+-
+     const SystemEnvData* sysData(pPWindow->GetSystemData());
+ #if defined( WNT ) 
+ 	GLWin.hWnd = sysData->hWnd;
+@@ -260,46 +341,54 @@ bool OGLTransitionerImpl::initWindowFrom
+         return false;
+ 
+     GLWin.win = sysData->aWindow;
+-    GLWin.screen = unx::XDefaultScreen(GLWin.dpy);
++
++    unx::XWindowAttributes xattr;
++    unx::XGetWindowAttributes( GLWin.dpy, GLWin.win, &xattr );
++
++    GLWin.screen = XScreenNumberOfScreen( xattr.screen );
++
+     unx::XVisualInfo* vi( NULL );
++#ifdef GLX_VERSION_1_3
++    unx::XVisualInfo* visinfo;
++#endif
+     static int attrList3[] =
+         {
+-            GLX_RGBA,//only TrueColor or DirectColor
++	    GLX_RGBA,//only TrueColor or DirectColor
+             //single buffered
+-            GLX_RED_SIZE,4,//use the maximum red bits, with a minimum of 4 bits
+-            GLX_GREEN_SIZE,4,//use the maximum green bits, with a minimum of 4 bits
+-            GLX_BLUE_SIZE,4,//use the maximum blue bits, with a minimum of 4 bits
++            GLX_RED_SIZE,8,//use the maximum red bits, with a minimum of 4 bits
++            GLX_GREEN_SIZE,8,//use the maximum green bits, with a minimum of 4 bits
++            GLX_BLUE_SIZE,8,//use the maximum blue bits, with a minimum of 4 bits
+             GLX_DEPTH_SIZE,0,//no depth buffer
+             None
+         };
+     static int attrList2[] = 
+-        {
+-            GLX_RGBA,/// only TrueColor or DirectColor
++	{
++	    GLX_RGBA,//only TrueColor or DirectColor
+             /// single buffered
+-            GLX_RED_SIZE,4,/// use the maximum red bits, with a minimum of 4 bits
+-            GLX_GREEN_SIZE,4,/// use the maximum green bits, with a minimum of 4 bits
+-            GLX_BLUE_SIZE,4,/// use the maximum blue bits, with a minimum of 4 bits
+-            GLX_DEPTH_SIZE,1,/// use the maximum depth bits, making sure there is a depth buffer
++            GLX_RED_SIZE,8,/// use the maximum red bits, with a minimum of 4 bits
++            GLX_GREEN_SIZE,8,/// use the maximum green bits, with a minimum of 4 bits
++            GLX_BLUE_SIZE,8,/// use the maximum blue bits, with a minimum of 4 bits
++            GLX_DEPTH_SIZE,8,/// use the maximum depth bits, making sure there is a depth buffer
+             None
+         };
+     static int attrList1[] =
+         {
+-            GLX_RGBA,/// only TrueColor or DirectColor
++	    GLX_RGBA,//only TrueColor or DirectColor
+             GLX_DOUBLEBUFFER,/// only double buffer
+-            GLX_RED_SIZE,4,/// use the maximum red bits, with a minimum of 4 bits
+-            GLX_GREEN_SIZE,4,/// use the maximum green bits, with a minimum of 4 bits
+-            GLX_BLUE_SIZE,4,/// use the maximum blue bits, with a minimum of 4 bits
++            GLX_RED_SIZE,8,/// use the maximum red bits, with a minimum of 4 bits
++            GLX_GREEN_SIZE,8,/// use the maximum green bits, with a minimum of 4 bits
++            GLX_BLUE_SIZE,8,/// use the maximum blue bits, with a minimum of 4 bits
+             GLX_DEPTH_SIZE,0,/// no depth buffer
+             None
+         };
+     static int attrList0[] =
+         {
+-            GLX_RGBA,/// only TrueColor or DirectColor
++	    GLX_RGBA,//only TrueColor or DirectColor
+             GLX_DOUBLEBUFFER,/// only double buffer
+-            GLX_RED_SIZE,4,/// use the maximum red bits, with a minimum of 4 bits
+-            GLX_GREEN_SIZE,4,/// use the maximum green bits, with a minimum of 4 bits
+-            GLX_BLUE_SIZE,4,/// use the maximum blue bits, with a minimum of 4 bits
+-            GLX_DEPTH_SIZE,1,/// use the maximum depth bits, making sure there is a depth buffer
++            GLX_RED_SIZE,8,/// use the maximum red bits, with a minimum of 4 bits
++            GLX_GREEN_SIZE,8,/// use the maximum green bits, with a minimum of 4 bits
++            GLX_BLUE_SIZE,8,/// use the maximum blue bits, with a minimum of 4 bits
++            GLX_DEPTH_SIZE,8,/// use the maximum depth bits, making sure there is a depth buffer
+             None
+        }; 
+     static int* attrTable[] = 
+@@ -314,70 +403,147 @@ bool OGLTransitionerImpl::initWindowFrom
+     const SystemEnvData* pChildSysData = NULL;
+     delete pWindow;
+     pWindow=NULL;
++
++#ifdef GLX_VERSION_1_3
++    unx::GLXFBConfig* fbconfigs = NULL;
++    int nfbconfigs, value, i = 0;
++#endif
++
+     while( *pAttributeTable )
+     {
+         // try to find a visual for the current set of attributes
+         vi = unx::glXChooseVisual( GLWin.dpy,
+                                    GLWin.screen,
+                                    *pAttributeTable );
+-    
+-        if( vi )
+-        {
+-            SystemWindowData winData;
+-            winData.nSize = sizeof(winData);
+-            winData.pVisual = (void*)(vi->visual);
+-            pWindow=new SystemChildWindow(pPWindow, 0, &winData, FALSE);
+-            pChildSysData = pWindow->GetSystemData();
+-            if( pChildSysData )
+-            {
+-                break;
+-            }
+-            else
+-            {
+-                delete pWindow, pWindow=NULL;
+-            }
+-        }
++
++#ifdef GLX_VERSION_1_3
++      if( vi ) {
++	  OSL_TRACE("OGLTrans: using VisualID %08X", vi->visualid);
++          fbconfigs = glXGetFBConfigs (GLWin.dpy, GLWin.screen, &nfbconfigs);
++          for ( ; i < nfbconfigs; i++)
++          {
++              visinfo = glXGetVisualFromFBConfig (GLWin.dpy, fbconfigs[i]);
++              if( !visinfo || visinfo->visualid != vi->visualid )
++                  continue;
++
++              glXGetFBConfigAttrib (GLWin.dpy, fbconfigs[i], GLX_DRAWABLE_TYPE, &value);
++              if (!(value & GLX_PIXMAP_BIT))
++                  continue;
++
++              glXGetFBConfigAttrib (GLWin.dpy, fbconfigs[i],
++                                    GLX_BIND_TO_TEXTURE_TARGETS_EXT,
++                                    &value);
++              if (!(value & GLX_TEXTURE_2D_BIT_EXT))
++                  continue;
++
++              glXGetFBConfigAttrib (GLWin.dpy, fbconfigs[i],
++                                    GLX_BIND_TO_TEXTURE_RGB_EXT,
++                                    &value);
++              if (value == FALSE)
++                  continue;
++
++              glXGetFBConfigAttrib (GLWin.dpy, fbconfigs[i],
++                                    GLX_BIND_TO_MIPMAP_TEXTURE_EXT,
++                                    &value);
++              if (value == FALSE)
++                  continue;
++
++              /* TODO: handle non Y inverted cases */
++              break;
++          }
++
++          if( i != nfbconfigs ) {
++              vi = glXGetVisualFromFBConfig( GLWin.dpy, fbconfigs[i] );
++#else
++          if( vi ) {
++#endif
++              SystemWindowData winData;
++              winData.nSize = sizeof(winData);
++              winData.pVisual = (void*)(vi->visual);
++              pWindow=new SystemChildWindow(pPWindow, 0, &winData, FALSE);
++              pChildSysData = pWindow->GetSystemData();
++              if( pChildSysData ) {
++                  break;
++              } else {
++                  delete pWindow, pWindow=NULL;
++              }
++          }
++#ifdef GLX_VERSION_1_3
++      }
++#endif
++
+         ++pAttributeTable;
+-    }
++      }
+ #endif
+ 
+ #if defined( WNT ) 
+-			const SystemEnvData* pChildSysData = NULL;
+-			SystemWindowData winData;
+-            winData.nSize = sizeof(winData);
+-            pWindow=new SystemChildWindow(pPWindow, 0, &winData, FALSE);
+-            pChildSysData = pWindow->GetSystemData();
++      const SystemEnvData* pChildSysData = NULL;
++      SystemWindowData winData;
++      winData.nSize = sizeof(winData);
++      pWindow=new SystemChildWindow(pPWindow, 0, &winData, FALSE);
++      pChildSysData = pWindow->GetSystemData();
+ #endif            
+ 
+-    if( pWindow )
+-    {
+-        pWindow->SetMouseTransparent( TRUE );
+-        pWindow->SetParentClipMode( PARENTCLIPMODE_NOCLIP );
+-        pWindow->EnableEraseBackground( FALSE );
+-        pWindow->SetControlForeground();
+-        pWindow->SetControlBackground();
+-        pWindow->EnablePaint(FALSE);
+-        pWindow->SetPosSizePixel(pPWindow->GetPosPixel(),pPWindow->GetSizePixel());
++      if( pWindow )
++      {
++	  pWindow->SetMouseTransparent( TRUE );
++	  pWindow->SetParentClipMode( PARENTCLIPMODE_NOCLIP );
++	  pWindow->EnableEraseBackground( FALSE );
++	  pWindow->SetControlForeground();
++	  pWindow->SetControlBackground();
++	  pWindow->EnablePaint(FALSE);
++	  pWindow->SetPosSizePixel(pPWindow->GetPosPixel(),pPWindow->GetSizePixel());
+ 
++	GLWin.Width = pPWindow->GetSizePixel().Width();
++	GLWin.Height = pPWindow->GetSizePixel().Height();
+ #if defined( WNT ) 
+ 		GLWin.hWnd = sysData->hWnd;
+ #elif defined( UNX )
+         GLWin.dpy = reinterpret_cast<unx::Display*>(pChildSysData->pDisplay);
+         GLWin.win = pChildSysData->aWindow;
++#ifdef GLX_VERSION_1_3
++	GLWin.fbc = fbconfigs[i];
++#endif
++	GLWin.vi = vi;
+ 	GLWin.GLXExtensions = unx::glXQueryExtensionsString( GLWin.dpy, GLWin.screen );
+ 	OSL_TRACE("available GLX extensions: %s", GLWin.GLXExtensions);
+ #endif
++
++	return true;
+     }
+ 
++    return false;
++}
++
++bool OGLTransitionerImpl::initWindowFromSlideShowView( const uno::Reference< presentation::XSlideShowView >& xView, double, double)
++{
++    osl::MutexGuard const guard( m_aMutex );
++
++    if (isDisposed())
++        return false;
++
++    /// take the XSlideShowView and extract the parent window from it. see viewmediashape.cxx
++    uno::Reference< rendering::XCanvas > xCanvas(xView->getCanvas(), uno::UNO_QUERY_THROW);
++    uno::Sequence< uno::Any > aDeviceParams;
++    ::canvas::tools::getDeviceInfo( xCanvas, aDeviceParams );
++
++    ::rtl::OUString aImplName;
++    aDeviceParams[ 0 ] >>= aImplName;
++
++    sal_Int64 aVal = 0;
++    aDeviceParams[1] >>= aVal;
++    if( !createWindow( reinterpret_cast< Window* >( aVal ) ) )
++	return false;
++
+ #if defined( WNT ) 
+ 		GLWin.hDC = GetDC(GLWin.hWnd);
+ #elif defined( UNX )
+     GLWin.ctx = glXCreateContext(GLWin.dpy,
+-                                 vi,
++                                 GLWin.vi,
+                                  0,
+                                  GL_TRUE);
+     if( glGetError() != GL_NO_ERROR ) {
+-	    OSL_TRACE("glError: %s\n", (char *)gluErrorString(glGetError()));
++	    OSL_TRACE("glError: %s", (char *)gluErrorString(glGetError()));
+ 	    return false;
+     }
+ #endif
+@@ -411,10 +577,22 @@ bool OGLTransitionerImpl::initWindowFrom
+ #elif defined( UNX )
+     glXMakeCurrent( GLWin.dpy, GLWin.win, GLWin.ctx );
+     if( glGetError() != GL_NO_ERROR ) {
+-	    OSL_TRACE("glError: %s\n", (char *)gluErrorString(glGetError()));
++	    OSL_TRACE("glError: %s", (char *)gluErrorString(glGetError()));
+ 	    return false;
+     }
+ 
++    int glxMinor, glxMajor;
++    mnGLXVersion = 0;
++    if( glXQueryVersion( GLWin.dpy, &glxMajor, &glxMinor ) )
++      mnGLXVersion = glxMajor + 0.1*glxMinor;
++    OSL_TRACE("available GLX version: %f", mnGLXVersion);
++
++    GLWin.GLExtensions = glGetString( GL_EXTENSIONS );
++    OSL_TRACE("available GL  extensions: %s", GLWin.GLExtensions);
++
++    mbTextureFromPixmap = GLWin.HasGLXExtension( "GLX_EXT_texture_from_pixmap" );
++    mbGenerateMipmap = GLWin.HasGLExtension( "GL_SGIS_generate_mipmap" );
++
+     if( GLWin.HasGLXExtension("GLX_SGI_swap_control" ) ) {
+ 	    // enable vsync
+ 	    typedef GLint (*glXSwapIntervalProc)(GLint);
+@@ -453,6 +631,15 @@ bool OGLTransitionerImpl::initWindowFrom
+     return true;
+ }
+ 
++
++static bool errorTriggered;
++int oglErrorHandler( unx::Display* /*dpy*/, unx::XErrorEvent* /*evnt*/ )
++{
++    errorTriggered = true;
++
++    return 0;
++}
++
+ void OGLTransitionerImpl::setSlides( const uno::Reference< rendering::XBitmap >& xLeavingSlide, 
+                                      const uno::Reference< rendering::XBitmap >& xEnteringSlide )
+ {
+@@ -461,8 +648,10 @@ void OGLTransitionerImpl::setSlides( con
+     if (isDisposed())
+         return;
+         
+-    uno::Reference< rendering::XIntegerBitmap > LeavingSlideIntBitmap( xLeavingSlide , uno::UNO_QUERY_THROW );
+-    uno::Reference< rendering::XIntegerBitmap > EnteringSlideIntBitmap( xEnteringSlide , uno::UNO_QUERY_THROW );
++    Reference< rendering::XIntegerBitmap > LeavingSlideIntBitmap( xLeavingSlide , UNO_QUERY_THROW );
++    Reference< rendering::XIntegerBitmap > EnteringSlideIntBitmap( xEnteringSlide , UNO_QUERY_THROW );
++    Reference< XFastPropertySet > xLeavingSet( xLeavingSlide , UNO_QUERY );
++    Reference< XFastPropertySet > xEnteringSet( xEnteringSlide , UNO_QUERY );
+ 
+     geometry::IntegerRectangle2D SlideRect;
+     SlideSize = LeavingSlideIntBitmap->getSize();
+@@ -471,65 +660,196 @@ void OGLTransitionerImpl::setSlides( con
+     SlideRect.Y1 = 0;
+     SlideRect.Y2 = SlideSize.Height;
+ 
+-    LeavingBytes = LeavingSlideIntBitmap->getData(SlideBitmapLayout,SlideRect);
+-    EnteringBytes = EnteringSlideIntBitmap->getData(SlideBitmapLayout,SlideRect);
++#ifdef UNX
++    unx::glXWaitGL();
++    XSync(GLWin.dpy, false);
++#endif
+ 
+-// TODO    if(GLWin.ctx)//if we have a rendering context, let's init the slides
+-        GLInitSlides();
++#ifdef DEBUG
++    t1 = microsec_clock::local_time();
++#endif
+ 
+-    OSL_ENSURE(SlideBitmapLayout.PlaneStride == 0,"only handle no plane stride now");
+-}
++    mbUseLeavingPixmap = false;
++    mbUseEnteringPixmap = false;
+ 
+-namespace
+-{
+-    struct OGLFormat
+-    {
+-        GLint  nInternalFormat;
+-        GLenum eFormat;
+-        GLenum eType;
+-    };
++#ifdef UNX
++#ifdef GLX_VERSION_1_3
+ 
+-    /* channel ordering: (0:rgba, 1:bgra, 2:argb, 3:abgr)  
+-    */
+-    int calcComponentOrderIndex(const uno::Sequence<sal_Int8>& rTags)
+-    {
+-        using namespace rendering::ColorComponentTag;
++    if( mnGLXVersion >= 1.2999 && mbTextureFromPixmap && xLeavingSet.is() && xEnteringSet.is() ) {
++	Sequence< Any > leaveArgs;
++	Sequence< Any > enterArgs;
++	if( (xLeavingSet->getFastPropertyValue( 1 ) >>= leaveArgs) &&
++	    (xEnteringSet->getFastPropertyValue( 1 ) >>= enterArgs) ) {
++	    OSL_TRACE ("pixmaps available");
++
++	    int depth;
++
++	    leaveArgs[0] >>= mbFreeLeavingPixmap;
++	    enterArgs[0] >>= mbFreeEnteringPixmap;
++	    leaveArgs[1] >>= maLeavingPixmap;
++	    enterArgs[1] >>= maEnteringPixmap;
++	    leaveArgs[2] >>= depth;
++
++	    int pixmapAttribs[] = { GLX_TEXTURE_TARGET_EXT, GLX_TEXTURE_2D_EXT,
++				    GLX_TEXTURE_FORMAT_EXT, GLX_TEXTURE_FORMAT_RGB_EXT,
++				    GLX_MIPMAP_TEXTURE_EXT, True,
++				    None };
++
++
++	    // sync so that we possibly get an pending XError, before we set our handler.
++	    // this way we will not miss any error from other code
++	    unx::glXWaitGL();
++	    XSync(GLWin.dpy, false);
++
++	    int (*oldHandler)(unx::Display* /*dpy*/, unx::XErrorEvent* /*evnt*/);
++
++	    // replace error handler temporarily
++	    oldHandler = unx::XSetErrorHandler( oglErrorHandler );
++
++	    errorTriggered = false;
++	    LeavingPixmap = glXCreatePixmap( GLWin.dpy, GLWin.fbc, maLeavingPixmap, pixmapAttribs );
++
++	    // sync so that we possibly get an XError
++	    unx::glXWaitGL();
++	    XSync(GLWin.dpy, false);
++
++	    if( !errorTriggered )
++		mbUseLeavingPixmap = true;
++	    else {
++		OSL_TRACE("XError triggered");
++		if( mbFreeLeavingPixmap ) {
++		    unx::XFreePixmap( GLWin.dpy, maLeavingPixmap );
++		    mbFreeLeavingPixmap = false;
++		}
++		errorTriggered = false;
++	    }
++          
++	    EnteringPixmap = glXCreatePixmap( GLWin.dpy, GLWin.fbc, maEnteringPixmap, pixmapAttribs );
+ 
+-        static const sal_Int8 aOrderTable[] =
+-        {
+-            RGB_RED, RGB_GREEN, RGB_BLUE, ALPHA,
+-            RGB_BLUE, RGB_GREEN, RGB_RED, ALPHA,
+-            ALPHA, RGB_RED, RGB_GREEN, RGB_BLUE,
+-            ALPHA, RGB_BLUE, RGB_GREEN, RGB_RED, 
+-        };
++	    // sync so that we possibly get an XError
++	    unx::glXWaitGL();
++	    XSync(GLWin.dpy, false);
++
++	    OSL_TRACE("created glx pixmap %p and %p depth: %d", LeavingPixmap, EnteringPixmap, depth);
++	    if( !errorTriggered )
++		mbUseEnteringPixmap = true;
++	    else {
++		OSL_TRACE("XError triggered");
++		if( mbFreeEnteringPixmap ) {
++		    unx::XFreePixmap( GLWin.dpy, maEnteringPixmap );
++		    mbFreeEnteringPixmap = false;
++		}
++	    }
+ 
+-        const sal_Int32 nNumComps(rTags.getLength());
+-        const sal_Int8* pLine=aOrderTable;
+-        for(int i=0; i<4; ++i)
+-        {
+-            int j=0;
+-            while( j<4 && j<nNumComps && pLine[j] == rTags[j] )
+-                ++j;
++	    // restore the error handler
++	    unx::XSetErrorHandler( oldHandler );
++	}
++    }
+ 
+-            // all of the line passed, this is a match!
+-            if( j==nNumComps )
+-                return i;
++#endif
++#endif
++    if( !mbUseLeavingPixmap )
++	LeavingBytes = LeavingSlideIntBitmap->getData(SlideBitmapLayout,SlideRect);
++    if( !mbUseEnteringPixmap )
++	EnteringBytes = EnteringSlideIntBitmap->getData(SlideBitmapLayout,SlideRect);
++
++// TODO    
++#ifdef UNX
++    if(GLWin.ctx)//if we have a rendering context, let's init the slides
++#endif
++	GLInitSlides();
+ 
+-            pLine+=4;
+-        }
++    OSL_ENSURE(SlideBitmapLayout.PlaneStride == 0,"only handle no plane stride now");
+ 
+-        return -1;
+-    }
+-}
++#ifdef UNX
++    /* flush & sync */
++    unx::glXWaitGL();
++    XSync( GLWin.dpy, false );
+ 
++    // synchronized X still gives us much smoother play
++    // I suspect some issues in above code in slideshow
++    // synchronize whole transition for now
++    XSynchronize( GLWin.dpy, true );
++#endif
++}
+ 
+-void OGLTransitionerImpl::GLInitSlides()
++void OGLTransitionerImpl::createTexture( unsigned int* texID,
++#ifdef GLX_VERSION_1_3
++					 unx::GLXPixmap pixmap,
++#endif
++					 bool usePixmap,
++					 bool useMipmap,
++					 uno::Sequence<sal_Int8>& data,
++					 const OGLFormat* pFormat )
+ {
+-    osl::MutexGuard const guard( m_aMutex );
++    glDeleteTextures( 1, texID );
++    glGenTextures( 1, texID );
++    glBindTexture( GL_TEXTURE_2D, *texID );
++    glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT );
++    glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT );
++
++#ifdef GLX_VERSION_1_3
++    unx::PFNGLXBINDTEXIMAGEEXTPROC myglXBindTexImageEXT = (unx::PFNGLXBINDTEXIMAGEEXTPROC) unx::glXGetProcAddress( (const GLubyte*) "glXBindTexImageEXT" );
++
++    if( usePixmap ) {
++      if( mbGenerateMipmap )
++          glTexParameteri( GL_TEXTURE_2D, GL_GENERATE_MIPMAP_SGIS, True);
++      myglXBindTexImageEXT (GLWin.dpy, pixmap, GLX_FRONT_LEFT_EXT, NULL);
++      if( mbGenerateMipmap && useMipmap ) {
++          OSL_TRACE("use mipmaps");
++          glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
++          glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR_MIPMAP_LINEAR); //TRILINEAR FILTERING
++      } else {
++          glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
++          glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
++      }
++    } else {
++#endif
++    if( !pFormat )
++    {
++        // force-convert color to ARGB8888 int color space  
++        uno::Sequence<sal_Int8> tempBytes(
++            SlideBitmapLayout.ColorSpace->convertToIntegerColorSpace(
++                data,
++                canvas::tools::getStdColorSpace()));
++        gluBuild2DMipmaps(GL_TEXTURE_2D, 
++                          4, 
++                          SlideSize.Width, 
++                          SlideSize.Height, 
++                          GL_RGBA, 
++                          GL_UNSIGNED_BYTE,
++                          &tempBytes[0]);
++	glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
++	glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR_MIPMAP_LINEAR); //TRILINEAR FILTERING
+ 
+-    if (isDisposed() || pTransition->mnRequiredGLVersion > cnGLVersion)
+-        return;
++        //anistropic filtering (to make texturing not suck when looking at polygons from oblique angles)
++	GLfloat largest_supported_anisotropy;
++	glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &largest_supported_anisotropy);
++	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, largest_supported_anisotropy);
++    } else {
++	if( pTransition && !cbBrokenTexturesATI && !useMipmap) {
++	    glTexImage2D( GL_TEXTURE_2D, 0, pFormat->nInternalFormat, SlideSize.Width, SlideSize.Height, 0, pFormat->eFormat, pFormat->eType, &data[0] );
++	    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
++	    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
++	} else {
++	    gluBuild2DMipmaps( GL_TEXTURE_2D, pFormat->nInternalFormat, SlideSize.Width, SlideSize.Height, pFormat->eFormat, pFormat->eType, &data[0] );
++	    glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
++	    glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR ); //TRILINEAR FILTERING
++
++	    //anistropic filtering (to make texturing not suck when looking at polygons from oblique angles)
++	    GLfloat largest_supported_anisotropy;
++	    glGetFloatv( GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &largest_supported_anisotropy );
++	    glTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, largest_supported_anisotropy );
++	}
++    }
++#ifdef GLX_VERSION_1_3
++    }
++#endif
++    OSL_ENSURE(glIsTexture(*texID), "Can't generate Leaving slide textures in OpenGL");
++}
+ 
++void OGLTransitionerImpl::prepareEnvironment()
++{
+     glMatrixMode(GL_PROJECTION);
+     glLoadIdentity();
+     double EyePos(10.0);
+@@ -549,11 +869,14 @@ void OGLTransitionerImpl::GLInitSlides()
+     glScaled( 1.0 / ( ( ( RealR * 2.0 * ClipN ) / ( EyePos * ( ClipR - ClipL ) ) ) - ( ( ClipR + ClipL ) / ( ClipR - ClipL ) ) ),
+               1.0 / ( ( ( RealT * 2.0 * ClipN ) / ( EyePos * ( ClipT - ClipB ) ) ) - ( ( ClipT + ClipB ) / ( ClipT - ClipB ) ) ),
+               1.0 );
+-	glFrustum(ClipL,ClipR,ClipB,ClipT,ClipN,ClipF);
++    glFrustum(ClipL,ClipR,ClipB,ClipT,ClipN,ClipF);
+     glMatrixMode(GL_MODELVIEW);
+     glLoadIdentity();
+     glTranslated(0,0,-EyePos);
++}
+ 
++const OGLFormat* OGLTransitionerImpl::chooseFormats()
++{
+     const OGLFormat* pDetectedFormat=NULL;
+     uno::Reference<rendering::XIntegerBitmapColorSpace> xIntColorSpace(
+         SlideBitmapLayout.ColorSpace);
+@@ -667,119 +990,50 @@ void OGLTransitionerImpl::GLInitSlides()
+         }
+ #endif
+     }
+-	
+-    glDeleteTextures(1,&GLleavingSlide);
+-    
+-    glGenTextures(1, &GLleavingSlide);
+-	glBindTexture(GL_TEXTURE_2D, GLleavingSlide);
+ 
+-    if( !pDetectedFormat )
+-    {
+-        // force-convert color to ARGB8888 int color space  
+-        uno::Sequence<sal_Int8> tempBytes(
+-            SlideBitmapLayout.ColorSpace->convertToIntegerColorSpace(
+-                LeavingBytes,
+-                canvas::tools::getStdColorSpace()));
+-        gluBuild2DMipmaps(GL_TEXTURE_2D, 
+-                          4, 
+-                          SlideSize.Width, 
+-                          SlideSize.Height, 
+-                          GL_RGBA, 
+-                          GL_UNSIGNED_BYTE,
+-                          &tempBytes[0]);
+-        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_REPEAT);
+-	glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_REPEAT);
+-	glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+-	glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR_MIPMAP_LINEAR);//TRILINEAR FILTERING
+-	GLfloat largest_supported_anisotropy;
+-	glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &largest_supported_anisotropy);
+-	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, largest_supported_anisotropy);//anistropic filtering (to make texturing not suck when looking at polygons from oblique angles)
+-	
+-    }
+-    else
+-    {
+-	if( pTransition && !cbBrokenTexturesATI && !pTransition->mbUseMipMapLeaving) {
+-	    glTexImage2D(GL_TEXTURE_2D, 0, pDetectedFormat->nInternalFormat, SlideSize.Width,
+-			 SlideSize.Height, 0, pDetectedFormat->eFormat, GL_UNSIGNED_BYTE, &LeavingBytes[0]);
+-	    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_REPEAT);
+-	    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_REPEAT);
+-	    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
+-	    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
+-	} else {
+-            gluBuild2DMipmaps(GL_TEXTURE_2D, 
+-                              pDetectedFormat->nInternalFormat, 
+-                              SlideSize.Width, 
+-                              SlideSize.Height, 
+-                              pDetectedFormat->eFormat, 
+-                              pDetectedFormat->eType, 
+-                              &LeavingBytes[0]);
+-            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_REPEAT);
+-	    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_REPEAT);
+-	    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+-	    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR_MIPMAP_LINEAR);//TRILINEAR FILTERING
+-	    //anistropic filtering (to make texturing not suck when looking at polygons from oblique angles)
+-	    GLfloat largest_supported_anisotropy;
+-	    glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &largest_supported_anisotropy);
+-	    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, largest_supported_anisotropy);
+-	}
+-    }
+-	OSL_ENSURE(glIsTexture(GLleavingSlide), "Can't generate Leaving slide textures in OpenGL");
+-	
+-	glDeleteTextures(1,&GLenteringSlide);
+-	
+-	glGenTextures(1, &GLenteringSlide);
+-	glBindTexture(GL_TEXTURE_2D, GLenteringSlide);
+-    if( !pDetectedFormat )
+-    {
+-        // force-convert color to ARGB8888 int color space  
+-        uno::Sequence<sal_Int8> tempBytes(
+-            SlideBitmapLayout.ColorSpace->convertToIntegerColorSpace(
+-                EnteringBytes,
+-                canvas::tools::getStdColorSpace()));
+-        gluBuild2DMipmaps(GL_TEXTURE_2D, 
+-                          4, 
+-                          SlideSize.Width, 
+-                          SlideSize.Height, 
+-                          GL_RGBA, 
+-                          GL_UNSIGNED_BYTE,
+-                          &tempBytes[0]);
+-        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_REPEAT);
+-	glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_REPEAT);
+-	glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+-	glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR_MIPMAP_LINEAR);//TRILINEAR FILTERING
+-	GLfloat largest_supported_anisotropy;
+-	glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &largest_supported_anisotropy);
+-	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, largest_supported_anisotropy);//anistropic filtering (to make texturing not suck when looking at polygons from oblique angles)
+-	
+-    }
+-    else
+-    {
+-	if( pTransition && !cbBrokenTexturesATI && !pTransition->mbUseMipMapEntering ) {
+-	    glTexImage2D(GL_TEXTURE_2D, 0, pDetectedFormat->nInternalFormat, SlideSize.Width, SlideSize.Height, 0, pDetectedFormat->eFormat, GL_UNSIGNED_BYTE, &EnteringBytes[0]);
+-	    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_REPEAT);
+-	    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_REPEAT);
+-	    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
+-	    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
+-	} else {
+-            gluBuild2DMipmaps(GL_TEXTURE_2D, 
+-                              pDetectedFormat->nInternalFormat, 
+-                              SlideSize.Width, 
+-                              SlideSize.Height, 
+-                              pDetectedFormat->eFormat, 
+-                              pDetectedFormat->eType, 
+-                              &EnteringBytes[0]);
+-            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_REPEAT);
+-	    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_REPEAT);
+-	    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+-	    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR_MIPMAP_LINEAR);//TRILINEAR FILTERING
+-	    //anistropic filtering (to make texturing not suck when looking at polygons from oblique angles)
+-	    GLfloat largest_supported_anisotropy;
+-	    glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &largest_supported_anisotropy);
+-	    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, largest_supported_anisotropy);
+-	
+-	}
+-    }
+-	OSL_ENSURE( glIsTexture(GLenteringSlide), "Can't generate entering slide textures in OpenGL" );
++    return pDetectedFormat;
++}
++
++void OGLTransitionerImpl::GLInitSlides()
++{
++    osl::MutexGuard const guard( m_aMutex );
++
++    if (isDisposed() || pTransition->mnRequiredGLVersion > cnGLVersion)
++        return;
++
++    prepareEnvironment();
++
++    const OGLFormat* pFormat = NULL;
++    if( !mbUseLeavingPixmap || !mbUseEnteringPixmap )
++	pFormat = chooseFormats();
++
++    createTexture( &GLleavingSlide,
++#ifdef GLX_VERSION_1_3
++		   LeavingPixmap,
++#endif
++		   mbUseLeavingPixmap,
++		   pTransition->mbUseMipMapLeaving,
++		   LeavingBytes,
++		   pFormat );
++
++    createTexture( &GLenteringSlide,
++#ifdef GLX_VERSION_1_3
++		   EnteringPixmap,
++#endif
++		   mbUseEnteringPixmap,
++		   pTransition->mbUseMipMapEntering,
++		   EnteringBytes,
++		   pFormat );
++
++#ifdef UNX
++    unx::glXWaitGL();
++    XSync(GLWin.dpy, false);
++#endif
++
++#ifdef DEBUG
++    t2 = microsec_clock::local_time();
++    OSL_TRACE("textures created in: %s", to_simple_string( t2 - t1 ).c_str());
++#endif
+ }
+ 
+ void SAL_CALL OGLTransitionerImpl::update( double nTime ) throw (uno::RuntimeException)
+@@ -789,38 +1043,80 @@ void SAL_CALL OGLTransitionerImpl::updat
+     if (isDisposed() || !cbGLXPresent || pTransition->mnRequiredGLVersion > cnGLVersion)
+         return;
+ 
++#ifdef DEBUG
++    t3 = microsec_clock::local_time();
++#endif
++
+     glEnable(GL_DEPTH_TEST);
+-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
++    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+ 
+-	if(pTransition)
+-	    pTransition->display( nTime, GLleavingSlide, GLenteringSlide, 
++    if(pTransition)
++	pTransition->display( nTime, GLleavingSlide, GLenteringSlide, 
+                               SlideSize.Width, SlideSize.Height,
+                               static_cast<double>(GLWin.Width),
+                               static_cast<double>(GLWin.Height) );
+ 
+ #if defined( WNT ) 
+-	SwapBuffers(GLWin.hDC);
++    SwapBuffers(GLWin.hDC);
+ #elif defined( UNX )
+     unx::glXSwapBuffers(GLWin.dpy, GLWin.win);
+ #endif
+-	if( pWindow )
++    if( pWindow )
+         pWindow->Show();
+ 
++#ifdef UNX
+     /* flush & sync */
+-    glFlush();
++    unx::glXWaitGL();
+     XSync( GLWin.dpy, false );
++#endif
++
++#ifdef DEBUG
++    t4 = microsec_clock::local_time();
++
++    OSL_TRACE("update time: %f", nTime);
++    OSL_TRACE("update took: %s", to_simple_string( t4 - t3 ).c_str());
++#endif
+ }
+ 
+ // we are about to be disposed (someone call dispose() on us)
+ void OGLTransitionerImpl::disposing()
+ {
+     osl::MutexGuard const guard( m_aMutex );
+-    glDeleteTextures(1,&GLleavingSlide);
+-    glDeleteTextures(1,&GLenteringSlide);
++
++#ifdef GLX_VERSION_1_3
++    unx::PFNGLXRELEASETEXIMAGEEXTPROC myglXReleaseTexImageEXT = (unx::PFNGLXRELEASETEXIMAGEEXTPROC) unx::glXGetProcAddress( (const GLubyte*) "glXReleaseTexImageEXT" );
++    if( mbUseLeavingPixmap ) {
++
++	myglXReleaseTexImageEXT( GLWin.dpy, LeavingPixmap, GLX_FRONT_LEFT_EXT );
++	glXDestroyGLXPixmap( GLWin.dpy, LeavingPixmap );
++	if( mbFreeLeavingPixmap ) {
++	    unx::XFreePixmap( GLWin.dpy, maLeavingPixmap );
++	    mbFreeLeavingPixmap = false;
++	}
++    }
++    if( mbUseEnteringPixmap ) {
++	myglXReleaseTexImageEXT( GLWin.dpy, EnteringPixmap, GLX_FRONT_LEFT_EXT );
++	glXDestroyGLXPixmap( GLWin.dpy, EnteringPixmap );
++	if( mbFreeLeavingPixmap ) {
++	    unx::XFreePixmap( GLWin.dpy, maLeavingPixmap );
++	    mbFreeLeavingPixmap = false;
++	}
++    }
++#endif
++
++    if( !mbUseLeavingPixmap )
++	glDeleteTextures(1,&GLleavingSlide);
++    if( !mbUseEnteringPixmap )
++	glDeleteTextures(1,&GLenteringSlide);
+ 
+     if (pTransition)
+         pTransition->finish();
+ 
++#ifdef UNX
++    // try to reestablish synchronize state
++    char* sal_synchronize = getenv("SAL_SYNCHRONIZE");
++    XSynchronize( GLWin.dpy, sal_synchronize && *sal_synchronize == '1' );
++#endif
+ 
+ #if defined( WNT )
+ 	if (GLWin.hRC)
+@@ -834,7 +1130,7 @@ void OGLTransitionerImpl::disposing()
+ 	{
+         glXMakeCurrent(GLWin.dpy, None, NULL);
+         if( glGetError() != GL_NO_ERROR ) {
+-            OSL_TRACE("glError: %s\n", (char *)gluErrorString(glGetError()));
++            OSL_TRACE("glError: %s", (char *)gluErrorString(glGetError()));
+         }
+ 		glXDestroyContext(GLWin.dpy, GLWin.ctx);
+ 		GLWin.ctx = NULL;
+@@ -854,6 +1150,8 @@ OGLTransitionerImpl::OGLTransitionerImpl
+     pWindow( NULL ), 
+     EnteringBytes(),
+     LeavingBytes(),
++    mbUseLeavingPixmap( false ),
++    mbUseEnteringPixmap( false ),
+     SlideBitmapLayout(),
+     SlideSize(),
+     pTransition(pOGLTransition)
+@@ -901,6 +1199,8 @@ public:
+                 }
+         } else if( transitionType == animations::TransitionType::FADE && transitionSubType == animations::TransitionSubType::CROSSFADE ) {
+             return sal_True;
++        } else if( transitionType == animations::TransitionType::FADE && transitionSubType == animations::TransitionSubType::FADEOVERCOLOR ) {
++            return sal_True;
+         } else if( transitionType == animations::TransitionType::IRISWIPE && transitionSubType == animations::TransitionSubType::DIAMOND ) {
+             return sal_True;
+         } else if( transitionType == animations::TransitionType::ZOOM && transitionSubType == animations::TransitionSubType::ROTATEIN ) {
+@@ -924,6 +1224,7 @@ public:
+ 
+         if( OGLTransitionerImpl::cbMesa && (
+             ( transitionType == animations::TransitionType::FADE && transitionSubType == animations::TransitionSubType::CROSSFADE ) ||
++            ( transitionType == animations::TransitionType::FADE && transitionSubType == animations::TransitionSubType::FADEOVERCOLOR ) ||
+             ( transitionType == animations::TransitionType::IRISWIPE && transitionSubType == animations::TransitionSubType::DIAMOND ) ) )
+             return uno::Reference< presentation::XTransition >();
+             
+@@ -980,6 +1281,9 @@ public:
+         } else if( transitionType == animations::TransitionType::FADE && transitionSubType == animations::TransitionSubType::CROSSFADE ) {
+             pTransition = new OGLTransitionImpl();
+             pTransition->makeFadeSmoothly();
++        } else if( transitionType == animations::TransitionType::FADE && transitionSubType == animations::TransitionSubType::FADEOVERCOLOR ) {
++            pTransition = new OGLTransitionImpl();
++            pTransition->makeFadeThroughBlack();
+         } else if( transitionType == animations::TransitionType::IRISWIPE && transitionSubType == animations::TransitionSubType::DIAMOND ) {
+             pTransition = new OGLTransitionImpl();
+             pTransition->makeDiamond();
+diff -rup slideshow/source/engine/OGLTrans-orig/OGLTrans_TransitionerImpl.cxx.orig slideshow/source/engine/OGLTrans/OGLTrans_TransitionerImpl.cxx.orig
+--- slideshow/source/engine/OGLTrans-orig/OGLTrans_TransitionerImpl.cxx.orig	2008-08-26 18:06:46.000000000 +0200
++++ slideshow/source/engine/OGLTrans/OGLTrans_TransitionerImpl.cxx.orig	2008-08-25 19:10:29.000000000 +0200
+@@ -93,7 +93,7 @@ public:
+     explicit OGLTransitionerImpl(OGLTransitionImpl* pOGLTransition);
+     bool initWindowFromSlideShowView( const uno::Reference< presentation::XSlideShowView >& xView, double, double);
+     void setSlides( const uno::Reference< rendering::XBitmap >& xLeavingSlide , const uno::Reference< rendering::XBitmap >& xEnteringSlide );
+-    static void initialize( const uno::Reference< presentation::XSlideShowView >& xView );
++    static bool initialize( const uno::Reference< presentation::XSlideShowView >& xView );
+ 
+     // XTransition
+ 	virtual void SAL_CALL update( double nTime ) throw (uno::RuntimeException);
+@@ -179,14 +179,20 @@ public:
+     /** Whether Mesa is the OpenGL vendor
+      */
+     static bool cbMesa;
++
++    /**
++       whether the display has GLX extension
++     */
++    static bool cbGLXPresent;
+ };
+ 
+ // declare the static variables as some gcc versions have problems declaring them automaticaly
+ bool OGLTransitionerImpl::cbBrokenTexturesATI;
+ float OGLTransitionerImpl::cnGLVersion;
+ bool OGLTransitionerImpl::cbMesa;
++bool OGLTransitionerImpl::cbGLXPresent;
+ 
+-void OGLTransitionerImpl::initialize( const uno::Reference< presentation::XSlideShowView >& xView )
++bool OGLTransitionerImpl::initialize( const uno::Reference< presentation::XSlideShowView >& xView )
+ {
+     // not thread safe
+     static bool initialized = false;
+@@ -195,28 +201,34 @@ void OGLTransitionerImpl::initialize( co
+         OGLTransitionerImpl *instance;
+ 
+         instance = new OGLTransitionerImpl( NULL );
+-        instance->initWindowFromSlideShowView( xView, 0, 0 );
++        if( instance->initWindowFromSlideShowView( xView, 0, 0 ) ) {
+ 
+-        const GLubyte* version = glGetString( GL_VERSION );
+-        if( version && version[0] ) {
+-            cnGLVersion = version[0] - '0';
+-            if( version[1] == '.' && version[2] )
+-                cnGLVersion += (version[2] - '0')/10.0;
+-        } else
+-            cnGLVersion = 1.0;
+-        OSL_TRACE("GL version: %s parsed: %f", version, cnGLVersion );
++            const GLubyte* version = glGetString( GL_VERSION );
++            if( version && version[0] ) {
++                cnGLVersion = version[0] - '0';
++                if( version[1] == '.' && version[2] )
++                    cnGLVersion += (version[2] - '0')/10.0;
++            } else
++                cnGLVersion = 1.0;
++            OSL_TRACE("GL version: %s parsed: %f", version, cnGLVersion );
++
++            const GLubyte* vendor = glGetString( GL_VENDOR );
++            cbMesa = ( vendor && strstr( (const char *) vendor, "Mesa" ) );
++            OSL_TRACE("GL vendor: %s identified as Mesa: %d", vendor, cbMesa );
+ 
+-        const GLubyte* vendor = glGetString( GL_VENDOR );
+-        cbMesa = ( vendor && strstr( (const char *) vendor, "Mesa" ) );
+-        OSL_TRACE("GL vendor: %s identified as Mesa: %d", vendor, cbMesa );
++            /* TODO: check for version once the bug in fglrx driver is fixed */
++            cbBrokenTexturesATI = (vendor && strcmp( (const char *) vendor, "ATI Technologies Inc." ) == 0 );
+ 
+-        /* TODO: check for version once the bug in fglrx driver is fixed */
+-        cbBrokenTexturesATI = (strcmp( (const char *) glGetString( GL_VENDOR ), "ATI Technologies Inc." ) == 0 );
++            instance->disposing();
++            cbGLXPresent = true;
++        } else
++            cbGLXPresent = false;
+ 
+-        instance->disposing();
+         delete instance;
+         initialized = true;
+     }
++
++    return cbGLXPresent;
+ }
+ 
+ bool OGLTransitionerImpl::initWindowFromSlideShowView( const uno::Reference< presentation::XSlideShowView >& xView, double, double)
+@@ -243,6 +255,10 @@ bool OGLTransitionerImpl::initWindowFrom
+ 	GLWin.hWnd = sysData->hWnd;
+ #elif defined( UNX )
+     GLWin.dpy = reinterpret_cast<unx::Display*>(sysData->pDisplay);
++
++    if( unx::glXQueryExtension( GLWin.dpy, NULL, NULL ) == false )
++        return false;
++
+     GLWin.win = sysData->aWindow;
+     GLWin.screen = unx::XDefaultScreen(GLWin.dpy);
+     unx::XVisualInfo* vi( NULL );
+@@ -553,10 +569,10 @@ void OGLTransitionerImpl::GLInitSlides()
+         static const OGLFormat lcl_RGB24[] = 
+         {
+             // 24 bit RGB
++            {3, GL_BGR, GL_UNSIGNED_BYTE},
+             {3, GL_RGB, GL_UNSIGNED_BYTE},
+-//            {3, GL_BGR, GL_UNSIGNED_BYTE},
+-            {3, GL_RGB, GL_UNSIGNED_BYTE},
+- //           {3, GL_BGR, GL_UNSIGNED_BYTE}
++            {3, GL_BGR, GL_UNSIGNED_BYTE},
++            {3, GL_RGB, GL_UNSIGNED_BYTE}
+         };
+ 
+ #if defined(GL_VERSION_1_2) && defined(GLU_VERSION_1_3)
+@@ -564,37 +580,37 @@ void OGLTransitionerImpl::GLInitSlides()
+         static const OGLFormat lcl_RGB16[] = 
+         {
+             // 16 bit RGB
+-            {3, GL_RGB, GL_UNSIGNED_SHORT_5_6_5},
+             {3, GL_RGB, GL_UNSIGNED_SHORT_5_6_5_REV},
+             {3, GL_RGB, GL_UNSIGNED_SHORT_5_6_5},
+-            {3, GL_RGB, GL_UNSIGNED_SHORT_5_6_5_REV}
++            {3, GL_RGB, GL_UNSIGNED_SHORT_5_6_5_REV},
++            {3, GL_RGB, GL_UNSIGNED_SHORT_5_6_5}
+         };
+ 
+         static const OGLFormat lcl_ARGB16_4[] = 
+         {
+             // 16 bit ARGB
+-            {4, GL_RGBA, GL_UNSIGNED_SHORT_4_4_4_4},
+-//            {4, GL_BGRA, GL_UNSIGNED_SHORT_4_4_4_4},
+- //           {4, GL_BGRA, GL_UNSIGNED_SHORT_4_4_4_4_REV},
+-            {4, GL_RGBA, GL_UNSIGNED_SHORT_4_4_4_4_REV}
++            {4, GL_RGBA, GL_UNSIGNED_SHORT_4_4_4_4_REV},
++            {4, GL_BGRA, GL_UNSIGNED_SHORT_4_4_4_4_REV},
++            {4, GL_BGRA, GL_UNSIGNED_SHORT_4_4_4_4},
++            {4, GL_RGBA, GL_UNSIGNED_SHORT_4_4_4_4}
+         };
+ 
+         static const OGLFormat lcl_ARGB16_5[] = 
+         {
+             // 16 bit ARGB
+-            {4, GL_RGBA, GL_UNSIGNED_SHORT_5_5_5_1},
+- //           {4, GL_BGRA, GL_UNSIGNED_SHORT_5_5_5_1},
+-  //          {4, GL_BGRA, GL_UNSIGNED_SHORT_1_5_5_5_REV},
+-            {4, GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV}
++            {4, GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV},
++            {4, GL_BGRA, GL_UNSIGNED_SHORT_1_5_5_5_REV},
++            {4, GL_BGRA, GL_UNSIGNED_SHORT_5_5_5_1},
++            {4, GL_RGBA, GL_UNSIGNED_SHORT_5_5_5_1}
+         };
+ 
+         static const OGLFormat lcl_ARGB32[] = 
+         {
+             // 32 bit ARGB
+-            {4, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8},
+-//            {4, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8},
+-  //          {4, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV},
+-            {4, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV}
++            {4, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV},
++            {4, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV},
++            {4, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8},
++            {4, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8}
+         };
+ 
+         const uno::Sequence<sal_Int8> aComponentTags(
+@@ -684,7 +700,7 @@ void OGLTransitionerImpl::GLInitSlides()
+     {
+ 	if( pTransition && !cbBrokenTexturesATI && !pTransition->mbUseMipMapLeaving) {
+ 	    glTexImage2D(GL_TEXTURE_2D, 0, pDetectedFormat->nInternalFormat, SlideSize.Width,
+-			 SlideSize.Height, &LeavingBytes[0]);
++			 SlideSize.Height, 0, pDetectedFormat->eFormat, GL_UNSIGNED_BYTE, &LeavingBytes[0]);
+ 	    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_REPEAT);
+ 	    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_REPEAT);
+ 	    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
+@@ -739,7 +755,7 @@ void OGLTransitionerImpl::GLInitSlides()
+     else
+     {
+ 	if( pTransition && !cbBrokenTexturesATI && !pTransition->mbUseMipMapEntering ) {
+-	    glTexImage2D(GL_TEXTURE_2D, 0, pDetectedFormat->nInternalFormat, SlideSize.Width, SlideSize.Height, 0, Format, GL_UNSIGNED_BYTE, &EnteringBytes[0]);
++	    glTexImage2D(GL_TEXTURE_2D, 0, pDetectedFormat->nInternalFormat, SlideSize.Width, SlideSize.Height, 0, pDetectedFormat->eFormat, GL_UNSIGNED_BYTE, &EnteringBytes[0]);
+ 	    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_REPEAT);
+ 	    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_REPEAT);
+ 	    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
+@@ -770,7 +786,7 @@ void SAL_CALL OGLTransitionerImpl::updat
+ {
+     osl::MutexGuard const guard( m_aMutex );
+ 
+-    if (isDisposed() || pTransition->mnRequiredGLVersion > cnGLVersion)
++    if (isDisposed() || !cbGLXPresent || pTransition->mnRequiredGLVersion > cnGLVersion)
+         return;
+ 
+     glEnable(GL_DEPTH_TEST);
+@@ -904,7 +920,7 @@ public:
+         if( !hasTransition( transitionType, transitionSubType ) )
+             return uno::Reference< presentation::XTransition >();
+ 
+-        OGLTransitionerImpl::initialize( view );
++        bool bGLXPresent = OGLTransitionerImpl::initialize( view );
+ 
+         if( OGLTransitionerImpl::cbMesa && (
+             ( transitionType == animations::TransitionType::FADE && transitionSubType == animations::TransitionSubType::CROSSFADE ) ||
+@@ -974,9 +990,11 @@ public:
+ 
+         rtl::Reference<OGLTransitionerImpl> xRes(
+             new OGLTransitionerImpl(pTransition) );
+-        if(!xRes->initWindowFromSlideShowView(view,slideOffset.X,slideOffset.Y))
+-            return uno::Reference< presentation::XTransition >();
+-        xRes->setSlides(leavingBitmap,enteringBitmap);
++        if( bGLXPresent ) {
++            if( !xRes->initWindowFromSlideShowView(view,slideOffset.X,slideOffset.Y))
++                return uno::Reference< presentation::XTransition >();
++            xRes->setSlides(leavingBitmap,enteringBitmap);
++        }
+ 
+         return uno::Reference<presentation::XTransition>(xRes.get());
+     }
+Only in slideshow/source/engine/OGLTrans: OGLTrans_TransitionerImpl.cxx.rej
+diff -rup slideshow/source/engine/OGLTrans-orig/OGLTrans_TransitionImpl.cxx slideshow/source/engine/OGLTrans/OGLTrans_TransitionImpl.cxx
+--- slideshow/source/engine/OGLTrans-orig/OGLTrans_TransitionImpl.cxx	2008-08-26 18:06:46.000000000 +0200
++++ slideshow/source/engine/OGLTrans/OGLTrans_TransitionImpl.cxx	2008-08-26 18:07:43.000000000 +0200
+@@ -121,6 +121,23 @@ static void blendSlide( double depth )
+     glEnable( GL_DEPTH_TEST );
+ }
+ 
++static void slideShadow( double nTime, Primitive& primitive, double sw, double sh )
++{
++    double reflectionDepth = 0.3;
++
++    glEnable(GL_BLEND);
++    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
++    glDisable(GL_LIGHTING);
++
++    glPushMatrix();
++    primitive.applyOperations( nTime, sw, sh );
++    blendSlide( reflectionDepth );
++    glPopMatrix();
++
++    glDisable(GL_BLEND);
++    glEnable(GL_LIGHTING);
++}
++
+ void OGLTransitionImpl::display( double nTime, ::sal_Int32 glLeavingSlideTex, ::sal_Int32 glEnteringSlideTex,
+                                  double SlideWidth, double SlideHeight, double DispWidth, double DispHeight )
+ {
+@@ -135,42 +152,6 @@ void OGLTransitionImpl::display( double
+     }
+ 
+     glPushMatrix();
+-    if ( mbReflectSlides ) {
+-        double reflectionDepth = 0.3;
+-        double surfaceLevel = -0.04;
+-
+-        /* reflected slides */
+-        glPushMatrix();
+-
+-        glScaled( 1, -1, 1 );
+-        glTranslated( 0, 2 - surfaceLevel, 0 );
+-
+-        glCullFace(GL_FRONT);
+-        displaySlides( nTime, glLeavingSlideTex, glEnteringSlideTex, SlideWidthScale, SlideHeightScale );
+-        glCullFace(GL_BACK);
+-
+-        glEnable(GL_BLEND);
+-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+-        glDisable(GL_LIGHTING);
+-
+-        /* leaving slide reflection blending */
+-        glPushMatrix();
+-        maLeavingSlidePrimitives[0].applyOperations( nTime, SlideWidthScale, SlideHeightScale );
+-        blendSlide( reflectionDepth );
+-        glPopMatrix();
+-
+-        /* entering slide reflection blending */
+-        glPushMatrix();
+-        maEnteringSlidePrimitives[0].applyOperations( nTime, SlideWidthScale, SlideHeightScale );
+-        blendSlide( reflectionDepth );
+-        glPopMatrix();
+-
+-        glDisable(GL_BLEND);
+-        glEnable(GL_LIGHTING);
+-
+-        glPopMatrix();
+-    }
+-
+     displaySlides( nTime, glLeavingSlideTex, glEnteringSlideTex, SlideWidthScale, SlideHeightScale );
+     displayScene( nTime, SlideWidth, SlideHeight, DispWidth, DispHeight );
+     glPopMatrix();
+@@ -188,6 +169,28 @@ void OGLTransitionImpl::displaySlide( do
+    //TODO change to foreach
+     glBindTexture(GL_TEXTURE_2D, glSlideTex);
+ 
++    // display slide reflection
++    // note that depth test is turned off while blending the shadow
++    // so the slides has to be rendered in right order, see rochade as example
++    if( mbReflectSlides ) {
++        double surfaceLevel = -0.04;
++
++        /* reflected slides */
++        glPushMatrix();
++
++        glScaled( 1, -1, 1 );
++        glTranslated( 0, 2 - surfaceLevel, 0 );
++
++        glCullFace(GL_FRONT);
++	for(unsigned int i(0); i < primitives.size(); ++i)
++	    primitives[i].display(nTime, SlideWidthScale, SlideHeightScale);
++        glCullFace(GL_BACK);
++
++	slideShadow( nTime, primitives[0], SlideWidthScale, SlideHeightScale );
++
++        glPopMatrix();
++    }
++
+     for(unsigned int i(0); i < primitives.size(); ++i)
+         primitives[i].display(nTime, SlideWidthScale, SlideHeightScale);
+ }
+@@ -452,12 +455,29 @@ void OGLTransitionImpl::makeIris()
+     mbUseMipMapLeaving = mbUseMipMapEntering = false;
+ }
+ 
++void OGLTransitionImpl::displaySlidesRochade( double nTime, ::sal_Int32 glLeavingSlideTex, ::sal_Int32 glEnteringSlideTex,
++					      double SlideWidthScale, double SlideHeightScale )
++{
++    applyOverallOperations( nTime, SlideWidthScale, SlideHeightScale );
++
++    glEnable(GL_TEXTURE_2D);
++
++    if( nTime > .5) {
++	displaySlide( nTime, glLeavingSlideTex, maLeavingSlidePrimitives, SlideWidthScale, SlideHeightScale );
++	displaySlide( nTime, glEnteringSlideTex, maEnteringSlidePrimitives, SlideWidthScale, SlideHeightScale );
++    } else {
++	displaySlide( nTime, glEnteringSlideTex, maEnteringSlidePrimitives, SlideWidthScale, SlideHeightScale );
++	displaySlide( nTime, glLeavingSlideTex, maLeavingSlidePrimitives, SlideWidthScale, SlideHeightScale );
++    }
++}
++
+ void OGLTransitionImpl::makeRochade()
+ {
+     clear();
+     Primitive Slide;
+     
+     mbReflectSlides = true;
++    mmDisplaySlides = &OGLTransitionImpl::displaySlidesRochade;
+ 
+     double w, h;
+ 
+@@ -1016,6 +1036,43 @@ void OGLTransitionImpl::makeFadeSmoothly
+     mbUseMipMapLeaving = mbUseMipMapEntering = false;
+ }
+ 
++void OGLTransitionImpl::displaySlidesFadeThroughBlack( double nTime, ::sal_Int32 glLeavingSlideTex, ::sal_Int32 glEnteringSlideTex, double SlideWidthScale, double SlideHeightScale )
++{
++    applyOverallOperations( nTime, SlideWidthScale, SlideHeightScale );
++
++    glDisable(GL_DEPTH_TEST);
++
++    glDisable(GL_LIGHTING);
++    glEnable(GL_BLEND);
++    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
++    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
++    if( nTime < 0.5 ) {
++	glColor4f( 1, 1, 1, 1 - nTime*2 );
++	displaySlide( nTime, glLeavingSlideTex, maLeavingSlidePrimitives, SlideWidthScale, SlideHeightScale );
++    } else {
++	glColor4f( 1, 1, 1, (nTime - 0.5)*2 );
++	displaySlide( nTime, glEnteringSlideTex, maEnteringSlidePrimitives, SlideWidthScale, SlideHeightScale );
++    }
++    glDisable(GL_BLEND);
++    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
++    glEnable(GL_LIGHTING);
++
++    glEnable(GL_DEPTH_TEST);
++}
++
++void OGLTransitionImpl::makeFadeThroughBlack()
++{ 
++    Primitive Slide;
++
++    Slide.pushTriangle (basegfx::B2DVector (0,0), basegfx::B2DVector (1,0), basegfx::B2DVector (0,1));
++    Slide.pushTriangle (basegfx::B2DVector (1,0), basegfx::B2DVector (0,1), basegfx::B2DVector (1,1));
++    maLeavingSlidePrimitives.push_back (Slide);
++    maEnteringSlidePrimitives.push_back (Slide);
++
++    mmDisplaySlides = &OGLTransitionImpl::displaySlidesFadeThroughBlack;
++    mbUseMipMapLeaving = mbUseMipMapEntering = false;
++}
++
+ static const char* basicVertexShader = "\n\
+ varying vec2 v_texturePosition;\n\
+ \n\
+Only in slideshow/source/engine/OGLTrans: OGLTrans_TransitionImpl.cxx.orig
+diff -rup slideshow/source/engine/OGLTrans-orig/OGLTrans_TransitionImpl.hxx slideshow/source/engine/OGLTrans/OGLTrans_TransitionImpl.hxx
+--- slideshow/source/engine/OGLTrans-orig/OGLTrans_TransitionImpl.hxx	2008-08-26 18:06:46.000000000 +0200
++++ slideshow/source/engine/OGLTrans/OGLTrans_TransitionImpl.hxx	2008-08-26 18:10:02.000000000 +0200
+@@ -104,6 +104,7 @@ public:
+      */
+     void makeDiamond();
+     void makeFadeSmoothly();
++    void makeFadeThroughBlack();
+ 
+     /** Whether to use mipmaping for slides textures
+      */
+@@ -176,6 +177,8 @@ private:
+ 	 */
+ 	void prepareDiamond( double nTime, double SlideWidth, double SlideHeight,double DispWidth, double DispHeight );
+ 	void displaySlidesFadeSmoothly( double nTime, ::sal_Int32 glLeavingSlideTex, ::sal_Int32 glEnteringSlideTex, double SlideWidthScale, double SlideHeightScale );
++        void displaySlidesFadeThroughBlack( double nTime, ::sal_Int32 glLeavingSlideTex, ::sal_Int32 glEnteringSlideTex, double SlideWidthScale, double SlideHeightScale );
++        void displaySlidesRochade( double nTime, ::sal_Int32 glLeavingSlideTex, ::sal_Int32 glEnteringSlideTex, double SlideWidthScale, double SlideHeightScale );
+ 	void displaySlidesShaders( double nTime, ::sal_Int32 glLeavingSlideTex, ::sal_Int32 glEnteringSlideTex, double SlideWidthScale, double SlideHeightScale );
+ 	void prepareStatic( ::sal_Int32 glLeavingSlideTex, ::sal_Int32 glEnteringSlideTex );
+ 	void prepareDissolve( ::sal_Int32 glLeavingSlideTex, ::sal_Int32 glEnteringSlideTex );
+diff -rup slideshow/source/engine/OGLTrans-orig/OGLTrans_TransitionImpl.hxx.orig slideshow/source/engine/OGLTrans/OGLTrans_TransitionImpl.hxx.orig
+--- slideshow/source/engine/OGLTrans-orig/OGLTrans_TransitionImpl.hxx.orig	2008-08-26 18:06:46.000000000 +0200
++++ slideshow/source/engine/OGLTrans/OGLTrans_TransitionImpl.hxx.orig	2008-08-25 19:10:22.000000000 +0200
+@@ -64,18 +64,25 @@ public:
+     OGLTransitionImpl() :
+         mbUseMipMapLeaving( true ),
+         mbUseMipMapEntering( true ),
++        mnRequiredGLVersion( 1.0 ),
+         maLeavingSlidePrimitives(),
+         maEnteringSlidePrimitives(),
+         maSceneObjects(),
+         mbReflectSlides( false ),
++        mVertexObject( 0 ),
++        mFragmentObject( 0 ),
++        mProgramObject( 0 ),
++        maHelperTexture( 0 ),
+         mmPrepare( NULL ),
++        mmPrepareTransition( NULL ),
++        mmClearTransition( NULL ),
+         mmDisplaySlides( NULL )
+     {}
+ 
+     ~OGLTransitionImpl();
+     
+-    void prepare();
+-    void display( double nTime, ::sal_Int32 glLeavingSlideTex, ::sal_Int32 glEnteringSlideTex, double SlideWidth, double SlideHeight, double DispWidth, double DispHeight);
++    void prepare( ::sal_Int32 glLeavingSlideTex, ::sal_Int32 glEnteringSlideTex );
++    void display( double nTime, ::sal_Int32 glLeavingSlideTex, ::sal_Int32 glEnteringSlideTex, double SlideWidth, double SlideHeight, double DispWidth, double DispHeight );
+     void finish();
+ 
+     void makeOutsideCubeFaceToLeft();
+@@ -89,6 +96,9 @@ public:
+     void makeIris();
+     void makeRochade();
+     void makeVenetianBlinds( bool vertical, int parts );
++    void makeStatic();
++    void makeDissolve();
++    void makeNewsflash();
+ 
+     /** 2D replacements
+      */
+@@ -100,6 +110,10 @@ public:
+     bool mbUseMipMapLeaving;
+     bool mbUseMipMapEntering;
+ 
++    /** which GL version does the transition require
++     */
++    float mnRequiredGLVersion;
++
+ private:
+     /** clears all the primitives and operations
+ 	*/
+@@ -138,6 +152,16 @@ private:
+ 	 */
+ 	void (OGLTransitionImpl::*mmPrepare)( double nTime, double SlideWidth, double SlideHeight, double DispWidth, double DispHeight );
+ 
++	/** When this method is not NULL, it is called after glx context is ready to let the transition prepare GL related things, like GLSL program.
++	 ** We might later replace this by cleaner derived class.
++	 */
++	void (OGLTransitionImpl::*mmPrepareTransition)( ::sal_Int32 glLeavingSlideTex, ::sal_Int32 glEnteringSlideTex );
++
++	/** When this method is not NULL, it is called when the transition needs to clear after itself, like delete own textures etc.
++	 ** We might later replace this by cleaner derived class.
++	 */
++	void (OGLTransitionImpl::*mmClearTransition)();
++
+ 	/** When this method is not NULL, it is called in display method to display the slides.
+ 	 ** We might later replace this by cleaner derived class.
+ 	 */
+@@ -152,6 +176,10 @@ private:
+ 	 */
+ 	void prepareDiamond( double nTime, double SlideWidth, double SlideHeight,double DispWidth, double DispHeight );
+ 	void displaySlidesFadeSmoothly( double nTime, ::sal_Int32 glLeavingSlideTex, ::sal_Int32 glEnteringSlideTex, double SlideWidthScale, double SlideHeightScale );
++	void displaySlidesShaders( double nTime, ::sal_Int32 glLeavingSlideTex, ::sal_Int32 glEnteringSlideTex, double SlideWidthScale, double SlideHeightScale );
++	void prepareStatic( ::sal_Int32 glLeavingSlideTex, ::sal_Int32 glEnteringSlideTex );
++	void prepareDissolve( ::sal_Int32 glLeavingSlideTex, ::sal_Int32 glEnteringSlideTex );
++	void preparePermShader();
+ };
+ 
+ class SceneObject
+Only in slideshow/source/engine/OGLTrans: OGLTrans_TransitionImpl.hxx.rej
