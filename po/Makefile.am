@@ -1,3 +1,5 @@
+SUBDIRS=sdf-templates
+
 EXTRA_DIST=${wildcard *.po} \
 	${wildcard *.sdf} \
 	ooo-build.pot \
@@ -8,6 +10,12 @@ EXTRA_DIST=${wildcard *.po} \
 ooo_build_po_files = ${wildcard ooo-build-*.po}
 
 update-sdf: $(ooo_build_po_files:ooo-build-%.po=ooo-build-%.sdf)
+
+ooo-build.sdf: ${wildcard sdf-templates/*.sdf}
+	cat $^ | \
+	sed -e 's/^\([^\t]*\t[^\t]*\t[^\t]*\t[^\t]*\t[^\t]*\t[^\t]*\t[^\t]*\t[^\t]*\t\)[0-9]*/\1999/' \
+	    -e 's/^\([^\t]*\t[^\t]*\t[^\t]*\t[^\t]*\t[^\t]*\t[^\t]*\t[^\t]*\t[^\t]*\t[^\t]*\t[^\t]*\t[^\t]*\t[^\t]*\t[^\t]*\t[^\t]*\t\)[-: 0-9]*/\12002-02-02 02:02:02/' | \
+	sort -u >$@
 
 ooo-build.pot: ooo-build.sdf /usr/bin/oo2po
 	oo2po -P --multifile=onefile ooo-build.sdf $@
