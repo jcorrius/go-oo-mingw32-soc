@@ -1,0 +1,115 @@
+--- sc/inc/compiler.hxx.orig	2008-08-27 11:34:35.000000000 +0800
++++ sc/inc/compiler.hxx	2008-08-28 10:50:22.000000000 +0800
+@@ -620,6 +620,9 @@ public:
+ 
+     BOOL HasModifiedRange();
+ 
++ 	// Check if it is a valid function name
++ 	static BOOL HasMethod( const String& rName ); 
++ 
+     /// If the character is allowed as first character in sheet names or references
+     static inline BOOL IsCharWordChar( String const & rStr,
+                                        xub_StrLen nPos,
+--- sc/source/core/tool/compiler.cxx.orig	2008-08-27 11:34:35.000000000 +0800
++++ sc/source/core/tool/compiler.cxx	2008-08-28 10:49:14.000000000 +0800
+@@ -698,6 +698,33 @@ void ScCompiler::SetGrammar( const ScGra
+         SetRefConvention( eConv );
+ }
+ 
++// static
++BOOL ScCompiler::HasMethod( const String& rName )
++{
++	// function names are always case-insensitive
++	String aUpper( ScGlobal::pCharClass->upper( rName ) );
++
++	// 1. built-in function name
++    OpCode eOp = ScCompiler::GetEnglishOpCode( aUpper );
++    if ( eOp != ocNone )
++    {
++        return TRUE;
++    }
++	// 2. old add in functions
++	USHORT nIndex;
++	if ( ScGlobal::GetFuncCollection()->SearchFunc( aUpper, nIndex ) )
++	{
++		return TRUE;
++	}
++
++	// 3. new (uno) add in functions
++	String aIntName(ScGlobal::GetAddInCollection()->FindFunction( aUpper, FALSE ));
++	if (aIntName.Len())
++	{
++		return TRUE;
++	}
++	return FALSE;		// no valid function name
++}
+ 
+ void ScCompiler::SetFormulaLanguage( const ScCompiler::OpCodeMapPtr & xMap )
+ {
+--- sc/source/ui/vba/vbawsfunction.hxx.orig	2008-08-28 10:51:15.000000000 +0800
++++ sc/source/ui/vba/vbawsfunction.hxx	2008-08-28 10:51:21.000000000 +0800
+@@ -41,7 +41,6 @@ typedef InheritedHelperInterfaceImpl1< o
+ 
+ class ScVbaWSFunction :  public ScVbaWSFunction_BASE
+ {
+-	css::uno::Reference< css::container::XNameAccess > m_xNameAccess;
+ public:
+ 	ScVbaWSFunction( const css::uno::Reference< oo::vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext);
+ 	virtual ~ScVbaWSFunction(){}
+--- sc/source/ui/vba/vbawsfunction.cxx.orig	2008-04-11 09:24:09.000000000 +0800
++++ sc/source/ui/vba/vbawsfunction.cxx	2008-08-28 10:51:52.000000000 +0800
+@@ -42,13 +42,14 @@
+ #include <comphelper/anytostring.hxx>
+ 
+ #include "vbawsfunction.hxx"
++#include "opcode.hxx"
++#include "compiler.hxx"
+ 
+ using namespace com::sun::star;
+ using namespace org::openoffice;
+ 
+ ScVbaWSFunction::ScVbaWSFunction( const uno::Reference< vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext): ScVbaWSFunction_BASE( xParent, xContext )
+ {
+-	m_xNameAccess.set(  mxContext->getServiceManager()->createInstanceWithContext( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("com.sun.star.sheet.FunctionDescriptions") ), mxContext ), uno::UNO_QUERY_THROW );
+ }
+ 
+ 
+@@ -86,7 +87,25 @@ ScVbaWSFunction::invoke(const rtl::OUStr
+ 	for ( int count=0; count < aParamTemp.getLength(); ++count )
+ 		OSL_TRACE("Param[%d] is %s",
+ 			count, rtl::OUStringToOString( comphelper::anyToString( aParamTemp[count] ), RTL_TEXTENCODING_UTF8 ).getStr()  );
+-	return xFunctionAccess->callFunction(FunctionName,aParamTemp);
++	
++	uno::Any aRet = xFunctionAccess->callFunction(FunctionName,aParamTemp);
++	// MATCH function should alwayse return a double value, but currently if the first argument is XCellRange, MATCH function returns an array instead of a double value. Don't know why?
++	// To fix this issue in safe, current solution is to convert this array to a double value just for MATCH function.
++	String aUpper( FunctionName );
++	OSL_TRACE("Function name is: ", rtl::OUStringToOString( FunctionName, RTL_TEXTENCODING_UTF8 ).getStr()  );
++	OpCode eOp = ScCompiler::GetEnglishOpCode( aUpper.ToUpperAscii() );
++	if( eOp == ocMatch )
++	{
++		double fVal = 0.0;
++		if( aRet >>= fVal )
++			return aRet;
++		uno::Sequence< uno::Sequence< uno::Any > > aSequence;
++		if( !( ( aRet >>= aSequence ) && ( aSequence.getLength() > 0 ) &&
++			( aSequence[0].getLength() > 0 ) && ( aSequence[0][0] >>= fVal ) ) )
++				throw uno::RuntimeException();
++		aRet <<= fVal;
++	}
++	return aRet;
+ }
+ 
+ void SAL_CALL
+@@ -107,7 +126,10 @@ ScVbaWSFunction::hasMethod(const rtl::OU
+ 	sal_Bool bIsFound = sal_False;
+ 	try 
+ 	{
+-		if ( m_xNameAccess->hasByName( Name ) )
++		// the function name contained in the com.sun.star.sheet.FunctionDescription service is alwayse localized.
++		// but the function name used in WorksheetFunction is a programmatic name (seems English).
++		// So m_xNameAccess->hasByName( Name ) may fail to find name when a function name has a localized name.
++		if( ScCompiler::HasMethod( Name ) )
+ 			bIsFound = sal_True;
+ 	}
+ 	catch( uno::Exception& /*e*/ )
