@@ -1,0 +1,165 @@
+--- backup/sc/inc/document.hxx	2008-08-27 16:40:13.000000000 +0800
++++ sc/inc/document.hxx	2008-08-27 16:44:15.000000000 +0800
+@@ -419,6 +419,9 @@ private:
+ 
+     sal_Int16           mnNamedRangesLockCount;
+ 
++	// for worksheet calculate event
++	::std::vector< SCTAB > maTabs;
++
+ 	inline BOOL 		RowHidden( SCROW nRow, SCTAB nTab );		// FillInfo
+ 
+ public:
+@@ -879,6 +882,10 @@ SC_DLLPUBLIC	ScDBCollection*	GetDBCollec
+ 	BOOL			IsForcedFormulaPending() const { return bForcedFormulaPending; }
+ 					// if CalcFormulaTree() is currently running
+ 	BOOL			IsCalculatingFormulaTree() { return bCalculatingFormulaTree; }
++	
++					// for worksheet calculate event
++	BOOL			FireCalculateEvent( SCTAB nTab );
++	void			AddCalculateTable( SCTAB nTab );
+ 
+ 	void			GetErrCode( SCCOL nCol, SCROW nRow, SCTAB nTab, USHORT& rErrCode );
+ 	USHORT			GetErrCode( const ScAddress& ) const;
+--- backup/sc/source/core/data/documen7.cxx	2008-08-27 16:40:23.000000000 +0800
++++ sc/source/core/data/documen7.cxx	2008-08-27 21:43:54.000000000 +0800
+@@ -457,7 +457,6 @@ void ScDocument::TrackFormulas( ULONG nH
+ 		ScFormulaCell* pTrack;
+ 		ScFormulaCell* pNext;
+ 		pTrack = pFormulaTrack;
+-		::std::vector<SCTAB> aTabs; 
+ 		do
+ 		{
+ 			ScHint aHint( nHintId, pTrack->aPos, pTrack );
+@@ -467,12 +466,6 @@ void ScDocument::TrackFormulas( ULONG nH
+ 			//	Repaint fuer bedingte Formate mit relativen Referenzen:
+ 			if ( pCondFormList )
+ 				pCondFormList->SourceChanged( pTrack->aPos );
+-			::std::vector<SCTAB>::iterator result;
+-			result = ::std::find( aTabs.begin(), aTabs.end(), pTrack->aPos.Tab() );
+-			if( result == aTabs.end() )
+-			{
+-				aTabs.push_back( pTrack->aPos.Tab() );
+-			}
+ 			pTrack = pTrack->GetNextTrack();
+ 		} while ( pTrack );
+ 		pTrack = pFormulaTrack;
+@@ -495,18 +488,6 @@ void ScDocument::TrackFormulas( ULONG nH
+ 			else
+ 				SetForcedFormulaPending( TRUE );
+ 		}
+-
+-		::std::vector<SCTAB>::iterator iter;
+-		for( iter = aTabs.begin(); iter != aTabs.end(); iter++ )
+-		{
+-            uno::Reference< document::XVbaEventsHelper > xVbaEventsHelper ( GetVbaEventsHelper(), uno::UNO_QUERY );
+-            if( xVbaEventsHelper.is() )
+-            {
+-			    uno::Sequence< uno::Any > aArgs(1);
+-                aArgs[0] <<= *iter;
+-			    xVbaEventsHelper->ProcessCompatibleVbaEvent( VBAEVENT_WORKSHEET_CALCULATE, aArgs );
+-            }
+-		}
+ 	}
+ 	DBG_ASSERT( nFormulaTrackCount==0, "TrackFormulas: nFormulaTrackCount!=0" );
+ }
+@@ -544,5 +525,35 @@ void ScDocument::SetAutoCalc( BOOL bNewA
+ 	}
+ }
+ 
++BOOL ScDocument::FireCalculateEvent( SCTAB nTab )
++{
++	BOOL bSuccess = FALSE;
++	::std::vector<SCTAB>::iterator iter;
++	iter = ::std::find( maTabs.begin(), maTabs.end(), nTab );
++	if( iter != maTabs.end() )
++	{
++		uno::Reference< document::XVbaEventsHelper > xVbaEventsHelper ( GetVbaEventsHelper(), uno::UNO_QUERY );
++		if( xVbaEventsHelper.is() )
++		{
++			uno::Sequence< uno::Any > aArgs(1);
++			aArgs[0] <<= *iter;
++			bSuccess = xVbaEventsHelper->ProcessCompatibleVbaEvent( VBAEVENT_WORKSHEET_CALCULATE, aArgs );
++		}
+ 
++		// make sure fire worksheet calculate event only once for each sheet 
++		// regardless of how much formula cell are calculated.
++		maTabs.erase(iter);
++	}	
++	return bSuccess;
++}
++
++void ScDocument::AddCalculateTable( SCTAB nTab )
++{
++	::std::vector<SCTAB>::iterator iter;
++	iter = ::std::find( maTabs.begin(), maTabs.end(), nTab );
++	if( iter == maTabs.end() )
++	{
++		maTabs.push_back( nTab );
++	}
++}
+ 
+--- backup/sc/inc/cell.hxx	2008-08-27 16:40:13.000000000 +0800
++++ sc/inc/cell.hxx	2008-08-27 21:29:02.000000000 +0800
+@@ -356,7 +356,7 @@ public:
+ 								const ScGrammar::Grammar = ScGrammar::GRAM_DEFAULT ) const;
+ 
+ 	void			SetDirty();
+-	inline void		SetDirtyVar() { bDirty = TRUE; }
++	void			SetDirtyVar();
+     // If setting entire document dirty after load, no broadcasts but still append to FormulaTree.
+     void            SetDirtyAfterLoad();
+ 	inline void		ResetTableOpDirtyVar() { bTableOpDirty = FALSE; }
+--- backup/sc/source/core/data/cell.cxx	2008-08-27 16:40:25.000000000 +0800
++++ sc/source/core/data/cell.cxx	2008-08-28 10:12:15.000000000 +0800
+@@ -1379,6 +1379,9 @@ void ScFormulaCell::Interpret()
+             }
+         } while (bIterationFromRecursion || bResumeIteration);
+     }
++
++	// Fire worksheet calculate event
++	pDocument->FireCalculateEvent( aPos.Tab() );
+ }
+ 
+ void ScFormulaCell::InterpretTail( ScInterpretTailParameter eTailParam )
+@@ -1663,7 +1666,7 @@ void __EXPORT ScFormulaCell::Notify( Svt
+ 			else
+             {
+                 bForceTrack = !bDirty;
+-				bDirty = TRUE;
++				SetDirtyVar();
+             }
+             // #35962# Don't remove from FormulaTree to put in FormulaTrack to
+             // put in FormulaTree again and again, only if necessary.
+@@ -1686,7 +1689,7 @@ void ScFormulaCell::SetDirty()
+ 	if ( !IsInChangeTrack() )
+ 	{
+ 		if ( pDocument->GetHardRecalcState() )
+-			bDirty = TRUE;
++			SetDirtyVar();
+ 		else
+ 		{
+ 			// Mehrfach-FormulaTracking in Load und in CompileAll
+@@ -1695,7 +1698,7 @@ void ScFormulaCell::SetDirty()
+ 			// setzen, z.B. in CompileTokenArray
+ 			if ( !bDirty || !pDocument->IsInFormulaTree( this ) )
+ 			{
+-				bDirty = TRUE;
++				SetDirtyVar();
+ 				pDocument->AppendToFormulaTrack( this );
+ 				pDocument->TrackFormulas();
+ 			}
+@@ -1703,6 +1706,13 @@ void ScFormulaCell::SetDirty()
+ 	}
+ }
+ 
++void ScFormulaCell::SetDirtyVar()
++{
++	bDirty = TRUE;
++	// mark this cell should be calculate
++	pDocument->AddCalculateTable( aPos.Tab() );
++}
++
+ void ScFormulaCell::SetDirtyAfterLoad()
+ {
+     bDirty = TRUE;
