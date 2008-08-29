@@ -11,26 +11,16 @@ if test "z$1" = "z--clean"; then
     exit 1;
 fi
 
-for arg in "$@"; do
-    case "$arg" in
-	*' '*)
+requote_args ()
+{
+    sed -e 's/.*configure //' -e 's/=\(\([^"'"'"'-]\|-[^-]\| \)*\)\( \|$\)/="\1" /g'
+}
 
-	    echo '
-
-This autogen.sh script does not handle command-line arguments
-containing spaces correctly. So if you need to pass such arguments on
-to the configure script that autogen.sh produces, you should run
-autogen.sh first without arguments, then run ./configure with the
-arguments you want.'
-
-	    exit 1
-	    ;;
-    esac
-done
+new_args=`echo $@ | requote_args`
 
 old_args=""
 if test $# -eq 0 && test -f config.log; then
-    old_args=`grep '\$ ./configure' config.log | sed -e 's/.*configure //' -e 's/=\(\([^"'"'"'-]\|-[^-]\| \)*\)\( \|$\)/="\1" /g'`
+    old_args=`grep '\$ ./configure' config.log | requote_args`
     echo "re-using arguments from last configure: $old_args";
 fi
 
@@ -39,7 +29,7 @@ automake --gnu --add-missing --copy || exit 1;
 # intltoolize --copy --force --automake
 autoconf || exit 1;
 if test "x$NOCONFIGURE" = "x"; then
-    eval `echo ./configure "$@" $old_args`
+    eval `echo ./configure $new_args $old_args`
 else
     echo "Skipping configure process."
 fi
