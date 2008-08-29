@@ -12,7 +12,7 @@ index e676a49..ab496bc 100644
  protected:
      ::rtl::OUString	aOUSource;
 diff --git basic/inc/basic/sbobjmod.hxx basic/inc/basic/sbobjmod.hxx
-index 7a8f096..eeb7869 100644
+index cb581c1..96cbe9b 100644
 --- basic/inc/basic/sbobjmod.hxx
 +++ basic/inc/basic/sbobjmod.hxx
 @@ -41,6 +41,7 @@
@@ -32,8 +32,8 @@ index 7a8f096..eeb7869 100644
  public:
      TYPEINFO();
      SbObjModule( const com::sun::star::script::ModuleInfo& mInfo, bool bIsVbaCompatible );
-@@ -55,6 +58,32 @@ public:
-     SbxVariable* GetObject();
+@@ -56,6 +59,32 @@ public:
+     void SetUnoObject( const com::sun::star::uno::Any& aObj )throw ( com::sun::star::uno::RuntimeException ) ;
  };
  
 +class SbUserFormModule : public SbObjModule
@@ -92,7 +92,7 @@ index 5226d3f..e47234f 100644
  			// GBLSEARCH-Flag rausnehmen (wg. Rekursion)
  			USHORT nGblFlag = p->GetFlags() & SBX_GBLSEARCH;
 diff --git basic/source/classes/sbxmod.cxx basic/source/classes/sbxmod.cxx
-index 5ad04db..bfb0cf6 100644
+index 8ea4b64..d3dd8d5 100644
 --- basic/source/classes/sbxmod.cxx
 +++ basic/source/classes/sbxmod.cxx
 @@ -73,7 +73,6 @@
@@ -111,19 +111,7 @@ index 5ad04db..bfb0cf6 100644
  
  SV_DECL_VARARR(SbiBreakpoints,USHORT,4,4)
  SV_IMPL_VARARR(SbiBreakpoints,USHORT)
-@@ -2230,6 +2230,11 @@ SbObjModule::SbObjModule( const com::sun
-     : SbModule( mInfo.ModuleName, bIsVbaCompatible )
- {
-     SetModuleType( mInfo.ModuleType );
-+    if ( mInfo.ModuleType == script::ModuleType::Form )
-+    {
-+        SetClassName( rtl::OUString::createFromAscii( "Form" ) );
-+        return;
-+    }
-     try
-     {
-         com::sun::star::uno::Any aObject( mInfo.ModuleObject );
-@@ -2266,6 +2271,228 @@ SbObjModule::Find( const XubString& rNam
+@@ -2272,6 +2272,242 @@ SbObjModule::Find( const XubString& rNam
          pVar = SbModule::Find( rName, t );
      return pVar;
  }
@@ -137,10 +125,11 @@ index 5ad04db..bfb0cf6 100644
 +    bool mbDisposed;
 +    sal_Bool mbOpened;
 +    sal_Bool mbActivated;
++    sal_Bool mbShowing;
 +    FormObjEventListenerImpl(); // not defined
 +    FormObjEventListenerImpl(const FormObjEventListenerImpl&); // not defined
 +public:
-+    FormObjEventListenerImpl( SbUserFormModule* pUserForm, const uno::Reference< lang::XComponent >& xComponent ) : mpUserForm( pUserForm ), mxComponent( xComponent) , mbDisposed( false ), mbOpened( sal_False ), mbActivated( sal_False )
++    FormObjEventListenerImpl( SbUserFormModule* pUserForm, const uno::Reference< lang::XComponent >& xComponent ) : mpUserForm( pUserForm ), mxComponent( xComponent) , mbDisposed( false ), mbOpened( sal_False ), mbActivated( sal_False ), mbShowing( sal_False )
 +    {
 +        if ( mxComponent.is() );
 +        {
@@ -155,6 +144,7 @@ index 5ad04db..bfb0cf6 100644
 +    {
 +        removeListener();
 +    }
++    sal_Bool isShowing() { return mbShowing; }
 +    void removeListener()
 +    {
 +        try
@@ -174,6 +164,7 @@ index 5ad04db..bfb0cf6 100644
 +        if ( mpUserForm  )
 +        {
 +            mbOpened = sal_True;
++            mbShowing = sal_True;
 +            if ( mbActivated )
 +            {
 +                mbOpened = mbActivated = sal_False;
@@ -182,7 +173,7 @@ index 5ad04db..bfb0cf6 100644
 +        }
 +    }
 +    virtual void SAL_CALL windowClosing( const lang::EventObject& /*e*/ ) throw (uno::RuntimeException) {}
-+    virtual void SAL_CALL windowClosed( const lang::EventObject& /*e*/ ) throw (uno::RuntimeException) {}
++    virtual void SAL_CALL windowClosed( const lang::EventObject& /*e*/ ) throw (uno::RuntimeException) { mbOpened = sal_False; mbShowing = sal_False; }
 +    virtual void SAL_CALL windowMinimized( const lang::EventObject& /*e*/ ) throw (uno::RuntimeException) {}
 +    virtual void SAL_CALL windowNormalized( const lang::EventObject& /*e*/ ) throw (uno::RuntimeException){}
 +    virtual void SAL_CALL windowActivated( const lang::EventObject& /*e*/ ) throw (uno::RuntimeException)
@@ -298,8 +289,19 @@ index 5ad04db..bfb0cf6 100644
 +		OSL_TRACE("Attempting too run the UnloadObjectMethod");
 +                m_xDialog = NULL; //release ref to the uno object
 +		SbxValues aVals;
-+		pMeth->Get( aVals );
-+		ResetApiObj();
++               FormObjEventListenerImpl* pFormListener = dynamic_cast< FormObjEventListenerImpl* >( m_DialogListener.get() );
++		bool bWaitForDispose = true; // assume dialog is showing
++                if ( pFormListener ) 
++		{
++			bWaitForDispose = pFormListener->isShowing();
++			OSL_TRACE("Showing %d", bWaitForDispose );
++		}
++		pMeth->Get( aVals);
++                if ( !bWaitForDispose )
++                {
++                    // we've either already got a dispose or we'er never going to get one 
++		    ResetApiObj();
++                } // else wait for dispose
 +		OSL_TRACE("UnloadObject completed ( we hope )");
 +	}
 +}
@@ -345,7 +347,7 @@ index 5ad04db..bfb0cf6 100644
 +SbxVariable*
 +SbUserFormModule::Find( const XubString& rName, SbxClassType t )
 +{
-+    if ( !pDocObject && pImage->bInit )
++    if ( !pDocObject && !GetSbData()->bRunInit  )
 +        InitObject();
 +    return SbObjModule::Find( rName, t );
 +}
@@ -393,31 +395,3 @@ index 792bce2..a0c3cad 100644
  	{
  		SbxVariable* pVar = ((SbxObject*)pObj)->
  			Find( String( RTL_CONSTASCII_USTRINGPARAM("Unload") ), SbxCLASS_METHOD );
-diff --git svx/source/msfilter/svxmsbas.cxx svx/source/msfilter/svxmsbas.cxx
-index 441562a..7acf7db 100644
---- svx/source/msfilter/svxmsbas.cxx
-+++ svx/source/msfilter/svxmsbas.cxx
-@@ -425,15 +425,20 @@ BOOL SvxImportMSVBasic::ImportCode_Impl(
- 
- 					Any aSourceAny;
-                     OSL_TRACE("erm %d", mType );
--                    if (  xVBAObjectForCodeName.is() && ( mType == ModuleType::Document || mType == ModuleType::Class ) )
-+                    if (  xVBAObjectForCodeName.is() && ( mType == ModuleType::Document || mType == ModuleType::Class || mType == ModuleType::Form ) )
-                     {
-                         OSL_TRACE("vba processing  %d", mType );
-                         script::ModuleInfo sModuleInfo;
-                         sModuleInfo.ModuleName = aModName;
-                         sModuleInfo.ModuleSource = aSource;
-                         sModuleInfo.ModuleType = mType;
--						if ( mType != ModuleType::Class )
--                        	sModuleInfo.ModuleObject.set( xVBAObjectForCodeName->getByName( aModName ), UNO_QUERY );
-+                        if ( mType == ModuleType::Form )
-+                            // hack, the module ( in document basic should...
-+                            // know the XModel... ) needs fixing in basic 
-+                            // somewhere
-+                            sModuleInfo.ModuleObject.set( rDocSh.GetModel(), UNO_QUERY );
-+                        else if ( mType != ModuleType::Class )
-+                            sModuleInfo.ModuleObject.set( xVBAObjectForCodeName->getByName( aModName ), UNO_QUERY );
-                         aSourceAny <<= sModuleInfo;
-                     }
-                     else
