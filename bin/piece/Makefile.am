@@ -1,5 +1,5 @@
 EXTRA_DIST = \
-	sys-setup \
+	sys-setup.in \
 	unpack-l10n \
 	copyexcept \
 	noulf noulfconv \
