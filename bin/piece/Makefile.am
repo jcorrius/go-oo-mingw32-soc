@@ -7,4 +7,5 @@ EXTRA_DIST = \
 	install-bootstrap \
 	${wildcard env-*} \
 	${wildcard build-*} \
-	${wildcard inst-*}
+	${wildcard inst-*} \
+	${wildcard post-inst-*}
