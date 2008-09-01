@@ -7,7 +7,7 @@ use strict;
 use File::Copy;
 use File::Temp qw/ tempfile tempdir /;
 
-my $critical_free_space_limit = 50000000;	# in Bytes, for /abuild
+my $critical_free_space_limit_abuild = 50000000;	# in Bytes
 
 sub show_error($)
 {
@@ -122,12 +122,37 @@ sub upload_prefer_rpms($)
 {
     my ($p_options) = @_;
     
-    if (defined $p_options->{'local_prefer_rpms'} &&
-        ! defined $p_options->{'do_not_update_remote_sources'}) {
+    if (defined $p_options->{'local_prefer_rpms'}) {
 	sync_sources ("$p_options->{'local_prefer_rpms'}/*",
 		      "$p_options->{'host'}:$p_options->{'remote_prefer_rpms'}");
     }
-    
+
+    return;
+}
+
+sub get_packages($)
+{
+    my ($p_options) = @_;
+
+    if (defined $p_options->{'get_packages_path'}) {
+	if (defined $p_options->{'packages'}) {
+	    system ("mkdir -p $p_options->{'get_packages_path'})") && 
+		show_error("Can't create direcotry $p_options->{'get_packages_path'} to get packages");
+	    for my $pack (split (",",  $p_options->{'packages'})) {
+		system ("scp $p_options->{'host'}:$p_options->{'remote_rpms_path'}/$pack-*.rpm $p_options->{'get_packages_path'}");
+	    }
+	}
+	if (defined $p_options->{'devel_packages'}) {
+	    system ("mkdir -p $p_options->{'get_packages_path'}/devel") &&
+		show_error("Can't create direcotry $p_options->{'get_packages_path'}/devel to get devel packages");
+	    for my $pack (split (",",  $p_options->{'devel_packages'})) {
+		system ("scp $p_options->{'host'}:$p_options->{'remote_rpms_path'}/$pack-*.rpm $p_options->{'get_packages_path'}/devel");
+	    }
+	}
+    }
+    # successfully finished
+    $p_options->{'downloaded'}="yes";
+    save_status($p_options, 1);
     return;
 }
 
@@ -194,6 +219,10 @@ sub abuild_package($)
 #    system ("ssh -t $p_options->{'host'} sudo /bin/sh -c \\\". /work/src/bin/.profile\\\; echo \\\\\$PATH\\\"");
      system ("ssh -t $p_options->{'host'} $linux32 sudo /bin/sh -c \\\". /work/src/bin/.profile\\\; export BUILD_ROOT=$buildroot\\\; export BUILD_DIST=$build_dist\\\; abuild $abuild_options\\\"") &&
 	show_error("Error: abuild failed at $p_options->{'host'}:$p_options->{'buildroot'}\n");
+    # build successfully finished
+    $p_options->{'built'}="yes";
+    $p_options->{'downloaded'}="no";
+    save_status($p_options, 1);
 }
 
 sub find_specfile_in_current_dir()
@@ -287,88 +316,94 @@ sub set_remote_prefer_rpms_path($)
 
     if ($p_options->{'local_prefer_rpms'}) {
 	(-d $p_options->{'local_prefer_rpms'}) || show_error("Error: The path $p_options->{'local_prefer_rpms'} defined by --prefer-rpms is not a directory\n");
-	unless (defined $p_options->{'remote_prefer_rpms'}) {
-	    $p_options->{'remote_prefer_rpms'} = mktemp_remote("$p_options->{'host'}", "$p_options->{'remote_tempdir'}/prefer-rpms-XXXX", "-d");
-	}
+    }
+    # FIXME: we will always create the remote_prefer_rpms directory because we want to share it for the split OOo build
+    unless (defined $p_options->{'remote_prefer_rpms'}) {
+        $p_options->{'remote_prefer_rpms'} = mktemp_remote("$p_options->{'host'}", "$p_options->{'remote_tempdir'}/prefer-rpms-XXXX", "-d");
     }
 
     return;
 }
 
 
-sub check_free_space_in_abuild($)
+sub check_free_space($$$)
 {
-    my ($host) = @_;
-    
-    # FIXME: this is currently use only to check /abuild and 
-    # we expect that it is mounted as an extra partition
+    my ($host, $dir, $critical_limit) = @_;
+
     my $free_space;
-    my $pid = open (DF, "ssh $host df |");
+    my $pid = open (DF, "ssh $host df $dir |");
     show_error("Can't start \"df\" on $host: $!\n") unless (defined $pid);
     while (my $line = <DF>) {
         chomp $line;
-	if ($line =~ m/\S+\s+\S+\s+\S+\s+(\S+)\s+\S+\s+\/abuild/) {
+	if ($line =~ m/\S+\s+\S+\s+\S+\s+(\S+)\s+\S+\s+\/.*/) {
 	    $free_space = $1;
 	}
     }
     close (DF);
 
     if (defined $free_space) {
-	if ($free_space < $critical_free_space_limit) {
+	if ($free_space < $critical_limit) {
 	    my $free_space_mb = int($free_space/1000000);
-	    show_warning("Warning: There is only ${free_space_mb}MB free space left on $host:/abuild\n");
+	    show_warning("Warning: There is only ${free_space_mb}MB free space left on $host:$dir\n");
 	}
     } else {
-	show_warning("Warning: Failed to check free space on $host:/abuild\n");
+	show_warning("Warning: Failed to check free space on $host:$dir\n");
     }
 
     return;
 }
 
-sub set_buildroot_names($)
+sub set_packdir_names($)
 {
     my ($p_options) = @_;
-    
-    if (defined $p_options->{'buildroot'}) {
-    
-	$p_options->{'buildroot_name'} = $p_options->{'buildroot'};
-	$p_options->{'buildroot_name'} =~ s/^.*\///g;
 
-    } else {
+    # define some useful prefixes and suffixes
+    my $packdir_basename = $p_options->{'package_name'};
+    my $buildroot_suffix = "";
 
-	my $buildroot_basename = $p_options->{'package_name'};
-	my $buildroot_suffix = "";
-
-	if ($buildroot_basename =~ /^OpenOffice_org(-.*)?/) {
-	    $buildroot_basename = "ooo";
-	    # FIXME: an ugly hack to differ the split and non-split builds
-	    if ($1) {
+    if ($packdir_basename =~ /^OpenOffice_org(-.*)?/) {
+	$packdir_basename = "ooo";
+	# FIXME: an ugly hack to differ the split and non-split builds
+	if ($1) {
 		$buildroot_suffix = "$1";
-	    } elsif (-e "$p_options->{'package_source_path'}/OpenOffice_org-i18n.spec") {
-		$buildroot_suffix = "-devel";
-	    } elsif (-e "$p_options->{'package_source_path'}/OpenOffice_org-i18n-group1.spec") {
-		$buildroot_suffix = "-devel";
-	    }
+	} elsif (-e "$p_options->{'package_source_path'}/OpenOffice_org-i18n.spec") {
+	    $buildroot_suffix = "-devel";
+	} elsif (-e "$p_options->{'package_source_path'}/OpenOffice_org-i18n-group1.spec") {
+	    $buildroot_suffix = "-devel";
+	} elsif (-e "$p_options->{'package_source_path'}/OpenOffice_org-l10n-group1.spec") {
+	    $buildroot_suffix = "-devel";
 	}
+    }
 
-	my $min_suffix="";
-	$min_suffix=".min" if (defined $p_options->{'min'});
+    my $min_suffix="";
+    $min_suffix=".min" if (defined $p_options->{'min'});
 	
-	my $buildid_suffix="";
-	$buildid_suffix="-$p_options->{'buildid'}" if (defined $p_options->{'buildid'});
-	
-		
-	if (defined $p_options->{'ptf'}) {
-	    $p_options->{'buildroot_name'} = "$buildroot_basename-ptf-$p_options->{'bugid'}$buildroot_suffix$buildid_suffix";
-	} elsif (defined $p_options->{'security'}) {
-	    $p_options->{'buildroot_name'} = "$buildroot_basename-sec$min_suffix-$p_options->{'distro'}$buildroot_suffix$buildid_suffix";
-	} else {
-	    $p_options->{'buildroot_name'} = "$buildroot_basename-$p_options->{'version'}$min_suffix-$p_options->{'distro'}$buildroot_suffix$buildid_suffix";
-	}
-	
+    my $buildid_suffix="";
+    $buildid_suffix="-$p_options->{'buildid'}" if (defined $p_options->{'buildid'});
+
+    # packdir
+    my $packdir;
+    if (defined $p_options->{'ptf'}) {
+	$packdir = "$packdir_basename-ptf-$p_options->{'bugid'}$buildid_suffix";
+    } elsif (defined $p_options->{'security'}) {
+	$packdir = "$packdir_basename-sec$min_suffix$buildid_suffix-$p_options->{'distro'}";
+    } else {
+	$packdir = "$packdir_basename-$p_options->{'version'}$min_suffix$buildid_suffix-$p_options->{'distro'}";
+    }
+
+    # buildroot
+    if (defined $p_options->{'buildroot'}) {
+	$p_options->{'buildroot_name'} = "$p_options->{'buildroot'}";
+	$p_options->{'buildroot_name'} =~ s/^.*\///g;
+    } else {
+	$p_options->{'buildroot_name'} = "$packdir$buildroot_suffix";
 	$p_options->{'buildroot'} = "/abuild/$p_options->{'buildroot_name'}";
     }
 
+    # define diretory where to get the final packages
+    if (defined $p_options->{'get_packages_path_prefix'}) {
+	$p_options->{'get_packages_path'} = "$p_options->{'get_packages_path_prefix'}/$packdir";
+    }
 
     return;
 }
@@ -401,7 +436,9 @@ sub set_package_version($)
     my $version_reg;
     
     if ($p_options->{'package_name'} =~ m/^OpenOffice_org$/ ||
-        $p_options->{'package_name'} =~ m/^OpenOffice_org-i18n-icon-themes$/ ||
+        $p_options->{'package_name'} =~ m/^OpenOffice_org-icon-themes$/ ||
+        $p_options->{'package_name'} =~ m/^OpenOffice_org-l10n-group1$/ ||
+        $p_options->{'package_name'} =~ m/^OpenOffice_org-l10n-group2$/ ||
         $p_options->{'package_name'} =~ m/^OpenOffice_org-i18n-group1$/ ||
         $p_options->{'package_name'} =~ m/^OpenOffice_org-i18n-group2$/ ||
         $p_options->{'package_name'} =~ m/^OpenOffice_org-i18n$/) {
@@ -441,6 +478,27 @@ sub check_distro($)
     }
 }
 
+sub check_for_noarch($)
+{
+    my ($p_options) = @_;
+    my $result = 0;
+
+    open (SPEC, "$p_options->{'package_source_path'}/$p_options->{'specfile'}") ||
+	die "can't open \"$p_options->{'package_source_path'}/$p_options->{'specfile'}\" for reading: $!\n";
+
+    while (my $line = <SPEC>) {
+        chomp $line;
+
+	if ($line =~ m/BuildArch\s*:\s*noarch/) {
+	    $result = 1;
+	    last;
+	}
+    }
+    close (SPEC);
+    
+    return $result
+}
+
 sub set_archs($)
 {
     my ($p_options) = @_;
@@ -449,7 +507,11 @@ sub set_archs($)
     $p_options->{'distro_arch'} = $p_options->{'distro'};
     $p_options->{'distro_arch'} =~ s/.*-//g;
     
-    $p_options->{'rpm_arch'} = $p_options->{'distro_arch'};
+    if (check_for_noarch($p_options)) {
+	$p_options->{'rpm_arch'} = "noarch"
+    } else {
+	$p_options->{'rpm_arch'} = $p_options->{'distro_arch'};
+    }
     $p_options->{'rpm_arch'} =~ s/i386/i586/;
 }
 
@@ -507,23 +569,25 @@ sub show_status($)
 #    print ("Spec file:	     $p_options->{'specfile'}\n");
 }
 
-sub save_status($)
+sub save_status($$)
 {
-    my ($p_options) = @_;
-    
+    my ($p_options, $force) = @_;
+
     return unless (defined $p_options->{'status_file'});
-    
-    # FIXME: there should be a force option or another logic at all
-    if ((! defined $p_options->{'replace_status_file'}) && (-e $p_options->{'status_file'})) {
-	show_error("Error: Status file \"$p_options->{'status_file'}\" already exists");
+
+    if (-e $p_options->{'status_file'}) {
+	unless ((defined $p_options->{'replace_status_file'}) || $force ) {
+	    show_error("Error: Status file \"$p_options->{'status_file'}\" already exists");
+	}
     }
-    
+
     open (STATE, '>', "$p_options->{'status_file'}") ||
 	show_error("Can't open \"$p_options->{'status_file'}\" for writing: $!");
 
     print STATE "package_name = $p_options->{'package_name'}\n";
     print STATE "version = $p_options->{'version'}\n";
     print STATE "distro = $p_options->{'distro'}\n\n";
+    print STATE "host = $p_options->{'host'}\n\n";
 
     print STATE "package_source_path = $p_options->{'package_source_path'}\n";
     print STATE "package_source_name = $p_options->{'package_source_name'}\n";
@@ -538,6 +602,10 @@ sub save_status($)
 
     print STATE "buildroot = $p_options->{'buildroot'}\n";
     print STATE "remote_rpms_path = $p_options->{'remote_rpms_path'}\n";
+    print STATE "get_packages_path = $p_options->{'get_packages_path'}\n\n";
+
+    print STATE "built = $p_options->{'built'}\n";
+    print STATE "downloaded = $p_options->{'downloaded'}\n";
 
     close (STATE);
 }
@@ -546,11 +614,16 @@ sub save_status($)
 sub read_item_from_stat($$$)
 {
     my ($item_name, $status_file, $optional) = @_;
-    
-    open (STATE, "$status_file") ||
-	show_error("Can't open \"$status_file\" to read \"$item_name\": $!");
-    
     my $item_value;
+
+    unless (open (STATE, "$status_file")) {
+	if ($optional) {
+	    return $item_value;
+	} else {
+	    show_error("Can't open \"$status_file\" to read \"$item_name\": $!");
+	}
+    }
+    
     while (my $line = <STATE>) {
         chomp $line;
 	if ( $line =~ m/$item_name\s*=\s*(.*)\s?/ ) {
@@ -582,6 +655,7 @@ sub usage()
 	  "\t[--status-file=<stat_file>] [--replace-status-file=<stat_file>]\n" .
 	  "\t[--get-status-file]\n" .
 	  "\t[--prefer-rpms-from-build=<stat_file>]\n" .
+	  "\t[--re-use-remote-prefer-rpms-from-build=<stat_file>]\n" .
 	  "\t[--re-use-remote-sources-from-build=<stat_file>]\n" .
 	  "\t[--do-not-update-remote-sources] [--keep-remote-tempdir]\n" .
 	  "\t[--remove-remote-tempdir=<stat_file>][--no-final-message]\n" .
@@ -614,6 +688,8 @@ sub usage()
 	  "\t\tdefault status file name is derived from other options, like\n" .
 	  "\t\t--distro, --min\n" .
 	  "\t--prefer-rpms-from-build: prefer_rpms produced by another build\n" .
+	  "\t--re-use-remote-prefer-rpms-from-build: re-use the remote prefer\n" .
+	  "\t\tRPMs directory\n" .
 	  "\t--re-use-remote-sources-from-build: re-use an older remote source dir;\n" .
 	  "\t\tit might speed up the source synchronization\n" .
 	  "\t--do-not-update-remote-sources: skip the source synchronization at all\n" .
@@ -656,7 +732,10 @@ for my $arg (@ARGV) {
 	$options{'status_file'} = "$1";
 	$options{'replace_status_file'} = 1;
     } elsif ($arg =~ m/--prefer-rpms-from-build=(.*)/) {
-	$options{'prefer_rpms'} = read_item_from_stat("remote_rpms_path", "$1", 0);
+	$options{'local_prefer_rpms'} = read_item_from_stat("get_packages_path", "$1", 0);
+	$options{'local_prefer_rpms'} .= "/devel";
+    } elsif ($arg =~ m/--re-use-remote-prefer-rpms-from-build=(.*)/) {
+	$options{'remote_prefer_rpms'} = read_item_from_stat("remote_prefer_rpms", "$1", 0);
     } elsif ($arg =~ m/--re-use-remote-sources-from-build=(.*)/) {
 	$options{'remote_tempdir'} = read_item_from_stat("remote_tempdir", "$1", 0);
 	$options{'re_using_remote_tempdir'} = 1;
@@ -667,6 +746,12 @@ for my $arg (@ARGV) {
     } elsif ($arg =~ m/--remove-remote-tempdir=(.*)/) {
 	$options{'remote_tempdir'} = read_item_from_stat("remote_tempdir", "$1", 0);
 	$options{'remove_remote_tempdir'} = 1;
+    } elsif ($arg =~ m/--packages=(.*)/) {
+	$options{'packages'} = "$1";
+    } elsif ($arg =~ m/--devel-packages=(.*)/) {
+	$options{'devel_packages'} = "$1";
+    } elsif ($arg =~ m/--get-packages=(.*)/) {
+	$options{'get_packages_path_prefix'} = "$1";
     } elsif ($arg =~ m/--buildid=(.*)/) {
 	$options{'buildid'} = "$1";
     } elsif ($arg =~ m/--min/) {
@@ -713,7 +798,7 @@ find_package_sources(\%options);
 check_distro(\%options);
 set_archs(\%options);
 set_package_version(\%options);
-set_buildroot_names(\%options);
+set_packdir_names(\%options);
 set_status_file(\%options);
 
 if (defined $options{'get_status_file'}) {
@@ -721,27 +806,37 @@ if (defined $options{'get_status_file'}) {
     exit 0;
 }
 
+unless (defined $options{'force'}) {
+    # will skip build and/or download when already done
+    $options{'built'} = read_item_from_stat("built", "$options{'status_file'}", 1);
+    $options{'downloaded'} = read_item_from_stat("downloaded", "$options{'status_file'}", 1);
+}
+
 set_rebuild_options(\%options) if (defined $options{'rebuild'});
 
-check_free_space_in_abuild($options{'host'});
+check_free_space($options{'host'}, "/abuild", $critical_free_space_limit_abuild);
+
 check_buildroot(\%options);
 set_rpms_paths(\%options);
 create_remote_tempdir(\%options);
 set_package_remote_sources_path(\%options);
 set_remote_prefer_rpms_path(\%options);
 
-save_status(\%options);
+save_status(\%options, 0);
 
 show_status(\%options);
 print ("Waiting 5 seconds...\n");
-sleep 5;
+# do not delay already finished build
+sleep 5 unless (defined $options{'built'} && "$options{'built'}" eq "yes");
 
+# always upload sources, they might be necessary to rebuild the other spec files
 upload_sources(\%options);
-upload_prefer_rpms(\%options);
+# update prefer rpms only when we will build the package
+upload_prefer_rpms(\%options) unless (defined $options{'built'} && "$options{'built'}" eq "yes");
 
-print ("package_remote_sources_path = $options{'package_remote_sources_path'}\n");
+abuild_package(\%options) unless (defined $options{'built'} && "$options{'built'}" eq "yes");
 
-abuild_package(\%options);
+get_packages(\%options) unless (defined $options{'downloaded'} && $options{'downloaded'} eq "yes");
 
 remove_remote_tempdir(\%options);
 
