@@ -1,0 +1,240 @@
+--- fpicker/source/unx/gnome/SalGtkFilePicker.cxx	11 Apr 2008 09:28:01 -0000	1.28
++++ fpicker/source/unx/gnome/SalGtkFilePicker.cxx	18 Aug 2008 15:07:41 -0000	1.28.42.1
+@@ -995,13 +995,17 @@ sal_Int16 SAL_CALL SalGtkFilePicker::exe
+ 			G_CALLBACK( selection_changed_cb ), ( gpointer )this );
+ 
+ 	int btn = GTK_RESPONSE_NO;
+-	
++
++    uno::Reference< awt::XExtendedToolkit > xToolkit(
++        m_xServiceMgr->createInstance( ::rtl::OUString::createFromAscii("com.sun.star.awt.Toolkit") ), uno::UNO_QUERY);
++
++	RunDialog* pRunInMain = new RunDialog(m_pDialog, xToolkit);
++	uno::Reference < awt::XTopWindowListener > xLifeCycle(pRunInMain);
+ 	while( GTK_RESPONSE_NO == btn )
+ 	{
+ 		btn = GTK_RESPONSE_YES; // we dont want to repeat unless user clicks NO for file save.
+ 
+-        RunDialog aRunInMain(m_pDialog);
+-        gint nStatus = aRunInMain.runandwaitforresult();
++        gint nStatus = pRunInMain->runandwaitforresult();
+ 		switch( nStatus )
+ 		{
+ 			case GTK_RESPONSE_ACCEPT:
+@@ -1028,8 +1032,9 @@ sal_Int16 SAL_CALL SalGtkFilePicker::exe
+                                 OUStringToOString(aResProvider.getResString(FILE_PICKER_TITLE_SAVE ),
+                                 RTL_TEXTENCODING_UTF8 ).getStr() );
+                                  
+-                            RunDialog aAnotherRunInMain(dlg);
+-                            btn = aAnotherRunInMain.runandwaitforresult();
++	                        RunDialog* pAnotherRunInMain = new RunDialog(dlg, xToolkit);
++	                        uno::Reference < awt::XTopWindowListener > xAnotherLifeCycle(pAnotherRunInMain);
++                            btn = pAnotherRunInMain->runandwaitforresult();
+ 
+ 							gtk_widget_destroy( dlg );
+ 						}
+--- fpicker/source/unx/gnome/SalGtkFolderPicker.cxx	11 Apr 2008 09:28:32 -0000	1.11
++++ fpicker/source/unx/gnome/SalGtkFolderPicker.cxx	18 Aug 2008 15:07:41 -0000	1.11.42.1
+@@ -173,8 +173,12 @@ sal_Int16 SAL_CALL SalGtkFolderPicker::e
+ 
+ 	sal_Int16 retVal = 0;
+ 
+-        RunDialog aRunInMain(m_pDialog);
+-        gint nStatus = aRunInMain.runandwaitforresult();
++    uno::Reference< awt::XExtendedToolkit > xToolkit(
++        m_xServiceMgr->createInstance( ::rtl::OUString::createFromAscii("com.sun.star.awt.Toolkit") ), uno::UNO_QUERY);
++
++    RunDialog* pRunInMain = new RunDialog(m_pDialog, xToolkit);
++    uno::Reference < awt::XTopWindowListener > xLifeCycle(pRunInMain);
++    gint nStatus = pRunInMain->runandwaitforresult();
+ 	switch( nStatus )
+ 	{
+ 		case GTK_RESPONSE_ACCEPT:
+--- fpicker/source/unx/gnome/SalGtkPicker.cxx	14 May 2008 09:41:16 -0000	1.17
++++ fpicker/source/unx/gnome/SalGtkPicker.cxx	18 Aug 2008 15:07:41 -0000	1.17.32.1
+@@ -37,16 +37,19 @@
+ #include <com/sun/star/lang/DisposedException.hpp>
+ #include <com/sun/star/lang/XMultiServiceFactory.hpp>
+ #include <com/sun/star/uri/XExternalUriReferenceTranslator.hpp>
++#include <com/sun/star/lang/SystemDependent.hpp>
++#include <com/sun/star/awt/XSystemDependentWindowPeer.hpp>
++#include <com/sun/star/awt/SystemDependentXWindow.hpp>
++#include <com/sun/star/beans/NamedValue.hpp>
+ #include <comphelper/processfactory.hxx>
+ #include <cppuhelper/interfacecontainer.h>
++#include <rtl/process.h>
+ #include <osl/diagnose.h>
+ #include <com/sun/star/uno/Any.hxx>
+ #include <FPServiceInfo.hxx>
+ #include <vos/mutex.hxx>
+ #include <vcl/svapp.hxx>
+-#ifndef _SALGTKPICKER_HXX_
+ #include "SalGtkPicker.hxx"
+-#endif
+ #include <tools/urlobj.hxx>
+ #include <stdio.h>
+ 
+@@ -107,11 +110,87 @@ gboolean rundialog(RunDialog *pDialog)
+     return false;
+ }
+ 
++gboolean canceldialog(RunDialog *pDialog)
++{
++    pDialog->cancel();
++    return false;
++}
++
++extern "C"
++{
++    struct Display;
++    extern GdkDisplay* gdk_x11_lookup_xdisplay (void*xdisplay);
++}
++
++RunDialog::RunDialog( GtkWidget *pDialog, uno::Reference< awt::XExtendedToolkit >& rToolkit ) :
++    cppu::WeakComponentImplHelper1< awt::XTopWindowListener >( maLock ),
++    mbFinished(false), mpDialog(pDialog), mpCreatedParent(NULL), mxToolkit(rToolkit)
++{
++    awt::SystemDependentXWindow aWindowHandle;
++
++    if (mxToolkit.is())
++    {
++        uno::Reference< awt::XTopWindow > xWindow(mxToolkit->getActiveTopWindow());
++        if (xWindow.is())
++        {
++            uno::Reference< awt::XSystemDependentWindowPeer > xSystemDepParent(xWindow, uno::UNO_QUERY);
++            if (xSystemDepParent.is())
++            {
++
++                sal_Int8 processID[16];
++
++                rtl_getGlobalProcessId( (sal_uInt8*)processID );
++                uno::Sequence<sal_Int8> processIdSeq(processID, 16);
++                uno::Any anyHandle = xSystemDepParent->getWindowHandle(processIdSeq, SystemDependent::SYSTEM_XWINDOW);
++
++                anyHandle >>= aWindowHandle;
++            }
++        }
++    }
++
++    GdkDisplay *pDisplay = aWindowHandle.DisplayPointer ? gdk_x11_lookup_xdisplay((void*)aWindowHandle.DisplayPointer) : NULL;
++    GdkWindow* pParent = pDisplay ? gdk_window_lookup_for_display(pDisplay, aWindowHandle.WindowHandle) : NULL;
++    if (!pParent && pDisplay)
++        pParent = mpCreatedParent = gdk_window_foreign_new_for_display( pDisplay, aWindowHandle.WindowHandle);
++    if (pParent)
++    {
++        gtk_widget_realize(mpDialog);
++        gdk_window_set_transient_for(mpDialog->window, pParent);
++    }
++}
++
++
++RunDialog::~RunDialog()
++{
++    if (mpCreatedParent)
++        gdk_window_destroy (mpCreatedParent);
++}
++
++void SAL_CALL RunDialog::windowOpened( const ::com::sun::star::lang::EventObject& )
++    throw (::com::sun::star::uno::RuntimeException)
++{
++    g_timeout_add_full(G_PRIORITY_HIGH_IDLE, 0, (GSourceFunc)canceldialog, this, NULL);
++}
++
++void RunDialog::cancel()
++{
++    gtk_dialog_response( GTK_DIALOG( mpDialog ), GTK_RESPONSE_CANCEL );
++    gtk_widget_hide( mpDialog );
++}
++
+ void RunDialog::run() 
+ { 
+-    mnStatus = gtk_dialog_run( GTK_DIALOG( m_pDialog ) ); 
++    if (mxToolkit.is())
++        mxToolkit->addTopWindowListener(this);
++
++    mnStatus = gtk_dialog_run( GTK_DIALOG( mpDialog ) ); 
++
++    if (mxToolkit.is())
++        mxToolkit->removeTopWindowListener(this);
++
++
+     if (mnStatus != 1)	//PLAY
+-        gtk_widget_hide( m_pDialog );
++        gtk_widget_hide( mpDialog );
+ 
+     maLock.acquire();
+     mbFinished = true;
+--- fpicker/source/unx/gnome/SalGtkPicker.hxx	11 Apr 2008 09:29:19 -0000	1.10
++++ fpicker/source/unx/gnome/SalGtkPicker.hxx	18 Aug 2008 15:07:41 -0000	1.10.42.1
+@@ -36,15 +36,16 @@
+ //_____________________________________________________________________________
+ 
+ #include <osl/mutex.hxx>
++#include <cppuhelper/compbase1.hxx>
+ #include <com/sun/star/ui/dialogs/XFilePicker.hpp>
+ #include <com/sun/star/ui/dialogs/XFilePicker2.hpp>
+-
+-#ifndef _COM_SUN_STAR_UI_XFOLDERPICKER_HPP_
+ #include <com/sun/star/ui/dialogs/XFolderPicker.hpp>
+-#endif
+ #include <com/sun/star/lang/XServiceInfo.hpp>
+ #include <com/sun/star/util/XCancellable.hpp>
+ 
++#include <com/sun/star/awt/XTopWindowListener.hpp>
++#include <com/sun/star/awt/XExtendedToolkit.hpp>
++
+ #include <gtk/gtk.h>
+ #include <gdk/gdkkeysyms.h>
+ 
+@@ -73,17 +74,47 @@ class SalGtkPicker
+ 		static rtl::OString unicodetouri(const rtl::OUString &rURL);
+ };
+ 
+-class RunDialog
++//Run the Gtk Dialog in the "Main Thread" for us to avoid threading conflict and
++//report back to this thread. Watch for any "new windows" created while we're
++//executing and consider that a CANCEL event to avoid e.g. "file cannot be opened"
++//modal dialogs and this one getting locked if some other API call causes this
++//to happen while we're opened waiting for user input, e.g. 
++//https://bugzilla.redhat.com/show_bug.cgi?id=441108
++class RunDialog :
++    public cppu::WeakComponentImplHelper1< ::com::sun::star::awt::XTopWindowListener >
+ {
+ private:
+     bool mbFinished;
+     osl::Mutex maLock;
+     gint mnStatus;
+-    GtkWidget *m_pDialog;
++    GtkWidget *mpDialog;
++    GdkWindow *mpCreatedParent;
++    ::com::sun::star::uno::Reference< ::com::sun::star::awt::XExtendedToolkit>  mxToolkit;
+ public:
+-    void run();
+-    RunDialog(GtkWidget *pDialog) : mbFinished(false), m_pDialog(pDialog) { }
++
++    // XTopWindowListener
++    virtual void SAL_CALL disposing( const ::com::sun::star::lang::EventObject& )
++        throw(::com::sun::star::uno::RuntimeException) {}
++    virtual void SAL_CALL windowOpened( const ::com::sun::star::lang::EventObject& e )
++        throw (::com::sun::star::uno::RuntimeException);
++    virtual void SAL_CALL windowClosing( const ::com::sun::star::lang::EventObject& )
++        throw (::com::sun::star::uno::RuntimeException) {}
++    virtual void SAL_CALL windowClosed( const ::com::sun::star::lang::EventObject& )
++        throw (::com::sun::star::uno::RuntimeException) {}
++    virtual void SAL_CALL windowMinimized( const ::com::sun::star::lang::EventObject& )
++        throw (::com::sun::star::uno::RuntimeException) {}
++    virtual void SAL_CALL windowNormalized( const ::com::sun::star::lang::EventObject& )
++        throw (::com::sun::star::uno::RuntimeException) {}
++    virtual void SAL_CALL windowActivated( const ::com::sun::star::lang::EventObject& )
++        throw (::com::sun::star::uno::RuntimeException) {}
++    virtual void SAL_CALL windowDeactivated( const ::com::sun::star::lang::EventObject& )
++        throw (::com::sun::star::uno::RuntimeException) {}
++public:
++    RunDialog(GtkWidget *pDialog, ::com::sun::star::uno::Reference< ::com::sun::star::awt::XExtendedToolkit > &rToolkit);
+     gint runandwaitforresult();
++    void run();
++    void cancel();
++    ~RunDialog();
+ };
+ 
+ #endif
