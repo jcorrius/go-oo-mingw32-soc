@@ -289,10 +289,10 @@ index a01f09b..5d4ca1f 100644
  
 diff --git sc/inc/externalrefmgr.hxx sc/inc/externalrefmgr.hxx
 new file mode 100644
-index 0000000..c094e14
+index 0000000..91be428
 --- /dev/null
 +++ sc/inc/externalrefmgr.hxx
-@@ -0,0 +1,383 @@
+@@ -0,0 +1,405 @@
 +/*************************************************************************
 + *
 + * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
@@ -418,6 +418,9 @@ index 0000000..c094e14
 +    ScExternalRefCache();
 +    ~ScExternalRefCache();
 +
++    const String* getRealTableName(sal_uInt16 nFileId, const String& rTabName) const;
++    const String* getRealRangeName(sal_uInt16 nFileId, const String& rRangeName) const;
++
 +    /** 
 +     * Get a cached cell data at specified cell location.
 +     *
@@ -448,6 +451,7 @@ index 0000000..c094e14
 +
 +    struct SingleRangeData
 +    {
++        /** This name must be in upper-case. */
 +        String      maTableName;
 +        ScMatrixRef mpRangeData;
 +    };
@@ -456,7 +460,7 @@ index 0000000..c094e14
 +
 +    bool isDocInitialized(sal_uInt16 nFileId);
 +    void initializeDoc(sal_uInt16 nFileId, const ::std::vector<String>& rTabNames);
-+    const ::std::vector<String>* getAllTableNames(sal_uInt16 nFileId) const;
++    void getAllTableNames(sal_uInt16 nFileId, ::std::vector<String>& rTabNames) const;
 +
 +    /** 
 +     * Get a cache table instance for specified file and table name.  If the 
@@ -480,15 +484,31 @@ index 0000000..c094e14
 +private:
 +    typedef ::std::hash_map<String, TokenArrayRef, ScStringHashCode>    RangeNameMap;
 +    typedef ::std::hash_map<ScRange, TokenArrayRef, RangeHash>          RangeArrayMap;
++    typedef ::std::hash_map<String, String, ScStringHashCode>           NamePairMap;
++
++    struct TableName
++    {
++        String maUpperName;
++        String maRealName;
++
++        explicit TableName(const String& rUppper, const String& rReal);
++    };
 +
 +    /** Represents data cached for a single external document. */
 +    struct DocItem
 +    {
++        /** The raw cache tables. */
 +        ::std::vector<TableTypeRef> maTables;
-+        ::std::vector<String>       maTableNames; 
++        /** Table name list in correct order, in both upper- and real-case. */
++        ::std::vector<TableName>    maTableNames;
++        /** Table name to index map.  The names must be stored upper-case. */
 +        TableNameIndexMap           maTableNameIndex;
++        /** Range name cache. */
 +        RangeNameMap                maRangeNames;
++        /** Token array cache for cell ranges. */
 +        RangeArrayMap               maRangeArrays;
++        /** Upper- to real-case mapping for range names. */
++        NamePairMap                 maRealRangeNameMap;
 +
 +        bool mbInitFromSource;
 +
@@ -592,7 +612,9 @@ index 0000000..c094e14
 +    const String* getExternalFileName(sal_uInt16 nFileId) const;
 +    const SrcFileData* getExternalFileData(sal_uInt16 nFileId) const;
 +
-+    const ::std::vector<String>* getAllCachedTableNames(sal_uInt16 nFileId) const;
++    const String* getRealTableName(sal_uInt16 nFileId, const String& rTabName) const;
++    const String* getRealRangeName(sal_uInt16 nFileId, const String& rRangeName) const;
++    void getAllCachedTableNames(sal_uInt16 nFileId, ::std::vector<String>& rTabNames) const;
 +    sal_uInt16 getCachedFileCount() const;
 +    void refreshNames(sal_uInt16 nFileId);
 +    void switchSrcFile(sal_uInt16 nFileId, const String& rNewFile);
@@ -601,7 +623,7 @@ index 0000000..c094e14
 +
 +    /** 
 +     * Set the filter name and options if any for a given source document. 
-+     * These values get reset whne the source document ever gets reloaded. 
++     * These values get reset when the source document ever gets reloaded. 
 +     *
 +     * @param nFileId 
 +     * @param rFilterName 
@@ -1910,7 +1932,7 @@ index 2cb5dce..4572ccd 100644
          aString.Append( '$' );
  
 diff --git sc/source/core/tool/compiler.cxx sc/source/core/tool/compiler.cxx
-index 918332d..f11442e 100644
+index 918332d..0910e72 100644
 --- sc/source/core/tool/compiler.cxx
 +++ sc/source/core/tool/compiler.cxx
 @@ -74,9 +74,11 @@
@@ -2328,7 +2350,7 @@ index 918332d..f11442e 100644
          return pCharClass->parseAnyToken( rFormula,
                  nSrcPos, nStartFlags, aAddAllowed, nContFlags, aAddAllowed );
      }
-@@ -1405,6 +1627,113 @@ struct ConventionOOO_A1 : public Convention_A1
+@@ -1405,6 +1627,114 @@ struct ConventionOOO_A1 : public Convention_A1
  
          return sal_Unicode(0);
      }
@@ -2416,12 +2438,13 @@ index 918332d..f11442e 100644
 +            rBuffer.append(sal_Unicode(':'));
 +
 +            // Get the name of the last table.
-+            const vector<String>* pTabNames = pRefMgr->getAllCachedTableNames(nFileId);
-+            if (!pTabNames)
++            vector<String> aTabNames;
++            pRefMgr->getAllCachedTableNames(nFileId, aTabNames);
++            if (aTabNames.empty())
 +                break;
 +
 +            String aLastTabName;
-+            if (!lcl_getLastTabName(aLastTabName, rTabName, *pTabNames, aRef))
++            if (!lcl_getLastTabName(aLastTabName, rTabName, aTabNames, aRef))
 +            {
 +                rBuffer.append(aLastTabName);
 +                break;
@@ -2442,7 +2465,7 @@ index 918332d..f11442e 100644
  };
  
  
-@@ -1423,6 +1752,25 @@ struct ConventionOOO_A1_ODF : public ConventionOOO_A1
+@@ -1423,6 +1753,25 @@ struct ConventionOOO_A1_ODF : public ConventionOOO_A1
      {
          MakeRefStrImpl( rBuffer, rComp, rRef, bSingleRef, true);
      }
@@ -2468,7 +2491,7 @@ index 918332d..f11442e 100644
  };
  
  static const ConventionOOO_A1_ODF ConvOOO_A1_ODF;
-@@ -1526,11 +1874,129 @@ struct ConventionXL
+@@ -1526,11 +1875,129 @@ struct ConventionXL
          }
          return sal_Unicode(0);
      }
@@ -2598,7 +2621,7 @@ index 918332d..f11442e 100644
      void MakeRefStr( rtl::OUStringBuffer&   rBuf,
                       const ScCompiler&      rComp,
                       const ComplRefData& rRef,
-@@ -1584,22 +2050,11 @@ struct ConventionXL_A1 : public Convention_A1, public ConventionXL
+@@ -1584,22 +2051,11 @@ struct ConventionXL_A1 : public Convention_A1, public ConventionXL
              }
          }
  
@@ -2623,7 +2646,7 @@ index 918332d..f11442e 100644
          }
      }
  
-@@ -1607,8 +2062,10 @@ struct ConventionXL_A1 : public Convention_A1, public ConventionXL
+@@ -1607,8 +2063,10 @@ struct ConventionXL_A1 : public Convention_A1, public ConventionXL
                                         xub_StrLen nSrcPos,
                                         const CharClass* pCharClass) const
      {
@@ -2635,7 +2658,7 @@ index 918332d..f11442e 100644
              return aRet;
  
          static const sal_Int32 nStartFlags = KParseTokens::ANY_LETTER_OR_NUMBER |
-@@ -1624,11 +2081,82 @@ struct ConventionXL_A1 : public Convention_A1, public ConventionXL
+@@ -1624,11 +2082,83 @@ struct ConventionXL_A1 : public Convention_A1, public ConventionXL
      {
          return ConventionXL::getSpecialSymbol(eSymType);
      }
@@ -2682,15 +2705,16 @@ index 918332d..f11442e 100644
 +        if (!pFullName)
 +            return;
 +
-+        const vector<String>* pTabNames = pRefMgr->getAllCachedTableNames(nFileId);
-+        if (!pTabNames)
++        vector<String> aTabNames;
++        pRefMgr->getAllCachedTableNames(nFileId, aTabNames);
++        if (aTabNames.empty())
 +            return;
 +
 +        ComplRefData aRef(rRef);
 +        aRef.CalcAbsIfRel(rCompiler.GetPos());
 +
 +        ConventionXL::makeExternalDocStr(rBuffer, *pFullName);
-+        ConventionXL::makeExternalTabNameRange(rBuffer, rTabName, *pTabNames, aRef);
++        ConventionXL::makeExternalTabNameRange(rBuffer, rTabName, aTabNames, aRef);
 +        rBuffer.append(sal_Unicode('!'));
 +
 +        makeSingleCellStr(rBuffer, aRef.Ref1);
@@ -2718,7 +2742,7 @@ index 918332d..f11442e 100644
  //-----------------------------------------------------------------------------
  
  static void
-@@ -1733,8 +2261,10 @@ struct ConventionXL_R1C1 : public ScCompiler::Convention, public ConventionXL
+@@ -1733,8 +2263,10 @@ struct ConventionXL_R1C1 : public ScCompiler::Convention, public ConventionXL
                                 xub_StrLen nSrcPos,
                                 const CharClass* pCharClass) const
      {
@@ -2730,7 +2754,7 @@ index 918332d..f11442e 100644
              return aRet;
  
          static const sal_Int32 nStartFlags = KParseTokens::ANY_LETTER_OR_NUMBER |
-@@ -1751,6 +2281,95 @@ struct ConventionXL_R1C1 : public ScCompiler::Convention, public ConventionXL
+@@ -1751,6 +2283,96 @@ struct ConventionXL_R1C1 : public ScCompiler::Convention, public ConventionXL
      {
          return ConventionXL::getSpecialSymbol(eSymType);
      }
@@ -2778,15 +2802,16 @@ index 918332d..f11442e 100644
 +        if (!pFullName)
 +            return;
 +
-+        const vector<String>* pTabNames = pRefMgr->getAllCachedTableNames(nFileId);
-+        if (!pTabNames)
++        vector<String> aTabNames;
++        pRefMgr->getAllCachedTableNames(nFileId, aTabNames);
++        if (aTabNames.empty())
 +            return;
 +
 +        ComplRefData aRef(rRef);
 +        aRef.CalcAbsIfRel(rCompiler.GetPos());
 +
 +        ConventionXL::makeExternalDocStr(rBuffer, *pFullName);
-+        ConventionXL::makeExternalTabNameRange(rBuffer, rTabName, *pTabNames, aRef);
++        ConventionXL::makeExternalTabNameRange(rBuffer, rTabName, aTabNames, aRef);
 +        rBuffer.append(sal_Unicode('!'));
 +
 +        if (aRef.Ref2.IsColDeleted() || aRef.Ref2.IsRowDeleted())
@@ -2826,7 +2851,7 @@ index 918332d..f11442e 100644
  };
  
  static const ConventionXL_R1C1 ConvXL_R1C1;
-@@ -1817,13 +2436,15 @@ void ScCompiler::CheckTabQuotes( String& rString,
+@@ -1817,13 +2439,15 @@ void ScCompiler::CheckTabQuotes( String& rString,
          KParseType::IDENTNAME, rString, 0, nStartFlags, EMPTY_STRING, nContFlags, EMPTY_STRING);
      bool bNeedsQuote = !((aRes.TokenType & KParseType::IDENTNAME) && aRes.EndPos == rString.Len());
  
@@ -2843,7 +2868,7 @@ index 918332d..f11442e 100644
              if( bNeedsQuote )
              {
                  static const String one_quote = static_cast<sal_Unicode>( '\'' );
-@@ -1859,6 +2480,7 @@ void ScCompiler::SetRefConvention( ScAddress::Convention eConv )
+@@ -1859,6 +2483,7 @@ void ScCompiler::SetRefConvention( ScAddress::Convention eConv )
          case ScAddress::CONV_ODF :      SetRefConvention( pConvOOO_A1_ODF ); break;
          case ScAddress::CONV_XL_A1 :    SetRefConvention( pConvXL_A1 );  break;
          case ScAddress::CONV_XL_R1C1 :  SetRefConvention( pConvXL_R1C1 ); break;
@@ -2851,7 +2876,7 @@ index 918332d..f11442e 100644
      }
  }
  
-@@ -2208,7 +2830,7 @@ xub_StrLen ScCompiler::NextSymbol(bool bInArray)
+@@ -2208,7 +2833,7 @@ xub_StrLen ScCompiler::NextSymbol(bool bInArray)
                      static const int kQuote = kInc * 2;
                      static const int kPast = kInc * 3;
                      bool bAddToSymbol = true;
@@ -2860,7 +2885,7 @@ index 918332d..f11442e 100644
                      {
                          // eat it, no sheet name
                          bAddToSymbol = false;
-@@ -2223,7 +2845,7 @@ xub_StrLen ScCompiler::NextSymbol(bool bInArray)
+@@ -2223,7 +2848,7 @@ xub_StrLen ScCompiler::NextSymbol(bool bInArray)
                      }
                      else if (nRefInSheetName < kPast)
                      {
@@ -2869,7 +2894,7 @@ index 918332d..f11442e 100644
                              nRefInSheetName += kDollar;
                          else if ('\'' == c)
                          {
-@@ -2545,7 +3167,8 @@ BOOL ScCompiler::IsDoubleReference( const String& rName )
+@@ -2545,7 +3170,8 @@ BOOL ScCompiler::IsDoubleReference( const String& rName )
  {
      ScRange aRange( aPos, aPos );
      const ScAddress::Details aDetails( pConv->meConv, aPos );
@@ -2879,14 +2904,17 @@ index 918332d..f11442e 100644
      if( nFlags & SCA_VALID )
      {
          ScRawToken aToken;
-@@ -2564,7 +3187,14 @@ BOOL ScCompiler::IsDoubleReference( const String& rName )
+@@ -2564,7 +3190,17 @@ BOOL ScCompiler::IsDoubleReference( const String& rName )
              aRef.Ref2.SetTabDeleted( TRUE );        // #REF!
          aRef.Ref2.SetFlag3D( ( nFlags & SCA_TAB2_3D ) != 0 );
          aRef.CalcRelFromAbs( aPos );
 -        aToken.SetDoubleReference( aRef );
 +        if (aExtInfo.mbExternal)
 +        {
-+            aToken.SetExternalDoubleRef(aExtInfo.mnFileId, aExtInfo.maTabName, aRef);
++            ScExternalRefManager* pRefMgr = pDoc->GetExternalRefManager();
++            const String* pRealTab = pRefMgr->getRealTableName(aExtInfo.mnFileId, aExtInfo.maTabName);
++            aToken.SetExternalDoubleRef(
++                aExtInfo.mnFileId, pRealTab ? *pRealTab : aExtInfo.maTabName, aRef);
 +        }
 +        else
 +        {
@@ -2895,7 +2923,7 @@ index 918332d..f11442e 100644
          pRawToken = aToken.Clone();
      }
  
-@@ -2576,7 +3206,8 @@ BOOL ScCompiler::IsSingleReference( const String& rName )
+@@ -2576,7 +3212,8 @@ BOOL ScCompiler::IsSingleReference( const String& rName )
  {
      ScAddress aAddr( aPos );
      const ScAddress::Details aDetails( pConv->meConv, aPos );
@@ -2905,20 +2933,25 @@ index 918332d..f11442e 100644
      // Something must be valid in order to recognize Sheet1.blah or blah.a1
      // as a (wrong) reference.
      if( nFlags & ( SCA_VALID_COL|SCA_VALID_ROW|SCA_VALID_TAB ) )
-@@ -2600,7 +3231,11 @@ BOOL ScCompiler::IsSingleReference( const String& rName )
+@@ -2600,7 +3237,16 @@ BOOL ScCompiler::IsSingleReference( const String& rName )
              nFlags |= SCA_VALID;
          }
          aRef.CalcRelFromAbs( aPos );
 -        aToken.SetSingleReference( aRef );
 +
 +        if (aExtInfo.mbExternal)
-+            aToken.SetExternalSingleRef(aExtInfo.mnFileId, aExtInfo.maTabName, aRef);
++        {
++            ScExternalRefManager* pRefMgr = pDoc->GetExternalRefManager();
++            const String* pRealTab = pRefMgr->getRealTableName(aExtInfo.mnFileId, aExtInfo.maTabName);
++            aToken.SetExternalSingleRef(
++                aExtInfo.mnFileId, pRealTab ? *pRealTab : aExtInfo.maTabName, aRef);
++        }
 +        else
 +            aToken.SetSingleReference(aRef);
          pRawToken = aToken.Clone();
      }
  
-@@ -2708,6 +3343,27 @@ BOOL ScCompiler::IsNamedRange( const String& rUpperName )
+@@ -2708,6 +3354,32 @@ BOOL ScCompiler::IsNamedRange( const String& rUpperName )
          return FALSE;
  }
  
@@ -2938,7 +2971,12 @@ index 918332d..f11442e 100644
 +    ScExternalRefManager* pRefMgr = pDoc->GetExternalRefManager();
 +    pRefMgr->convertToAbsName(aFile);
 +    sal_uInt16 nFileId = pRefMgr->getExternalFileId(aFile);
-+    aToken.SetExternalName(nFileId, aName);
++    if (!pRefMgr->getRangeNameTokens(nFileId, aName).get())
++        // range name doesn't exist in the source document.
++        return false;
++
++    const String* pRealName = pRefMgr->getRealRangeName(nFileId, aName);
++    aToken.SetExternalName(nFileId, pRealName ? *pRealName : aName);
 +    pRawToken = aToken.Clone();
 +    return true;
 +}
@@ -2946,7 +2984,7 @@ index 918332d..f11442e 100644
  BOOL ScCompiler::IsDBRange( const String& rName )
  {
      USHORT n;
-@@ -3243,7 +3899,7 @@ BOOL ScCompiler::NextNewToken( bool bInArray )
+@@ -3243,7 +3915,7 @@ BOOL ScCompiler::NextNewToken( bool bInArray )
          if (mnPredetectedReference)
          {
              String aStr( cSymbol);
@@ -2955,7 +2993,7 @@ index 918332d..f11442e 100644
              {
                  /* TODO: it would be nice to generate a #REF! error here, which
                   * would need an ocBad token with additional error value.
-@@ -3306,6 +3962,7 @@ BOOL ScCompiler::NextNewToken( bool bInArray )
+@@ -3306,6 +3978,7 @@ BOOL ScCompiler::NextNewToken( bool bInArray )
                && !(bAllowBooleans && IsBoolean( aUpper ))
                && !IsValue( aUpper )
                && !IsNamedRange( aUpper )
@@ -2963,7 +3001,7 @@ index 918332d..f11442e 100644
                && !IsDBRange( aUpper )
                && !IsColRowName( aUpper )
                && !(bMayBeFuncName && IsMacro( aUpper ))
-@@ -3628,9 +4285,9 @@ BOOL ScCompiler::GetToken()
+@@ -3628,9 +4301,9 @@ BOOL ScCompiler::GetToken()
          else
          {
              if ( nWasColRowName >= 2 && pToken->GetOpCode() == ocColRowName )
@@ -2975,7 +3013,7 @@ index 918332d..f11442e 100644
              }
          }
      }
-@@ -3641,6 +4298,78 @@ BOOL ScCompiler::GetToken()
+@@ -3641,6 +4314,78 @@ BOOL ScCompiler::GetToken()
      }
      if( pToken->GetOpCode() == ocSubTotal )
          glSubTotal = TRUE;
@@ -3054,7 +3092,7 @@ index 918332d..f11442e 100644
      else if( pToken->GetOpCode() == ocName )
      {
          ScRangeData* pRangeData = pDoc->GetRangeName()->FindIndex( pToken->GetIndex() );
-@@ -3796,7 +4525,7 @@ BOOL ScCompiler::GetToken()
+@@ -3796,7 +4541,7 @@ BOOL ScCompiler::GetToken()
                      {   // next defined RowNameRange to the right limits column
                          const ScRange& rRange = pR->GetRange(1);
                          if ( rRange.aStart.Row() <= nRow && nRow <= rRange.aEnd.Row() )
@@ -3063,7 +3101,7 @@ index 918332d..f11442e 100644
                              SCCOL nTmp = rRange.aStart.Col();
                              if ( nStartCol < nTmp && nTmp <= nMaxCol )
                                  nMaxCol = nTmp - 1;
-@@ -5638,111 +6367,140 @@ ScToken* ScCompiler::CreateStringFromToken( rtl::OUStringBuffer& rBuffer, ScToke
+@@ -5638,111 +6383,144 @@ ScToken* ScCompiler::CreateStringFromToken( rtl::OUStringBuffer& rBuffer, ScToke
          DBG_ERRORFILE("unknown OpCode");
          rBuffer.append(ScGlobal::GetRscString(STR_NO_NAME_REF));
      }
@@ -3109,14 +3147,18 @@ index 918332d..f11442e 100644
 +                        aFileName, t->GetString()));
                  }
 +                break;
-+                case svSingleRef:
++                case svExternalSingleRef:
 +                    pConv->makeExternalRefStr(
 +                        rBuffer, *this, t->GetIndex(), t->GetString(), t->GetSingleRef(), pRefMgr);
 +                break;
-+                case svDoubleRef:
++                case svExternalDoubleRef:
 +                    pConv->makeExternalRefStr(
 +                        rBuffer, *this, t->GetIndex(), t->GetString(), t->GetDoubleRef(), pRefMgr);
 +                break;
++                default:
++                    // warning, not error, otherwise we may end up with a never
++                    // ending message box loop if this was the cursor cell to be redrawn.
++                    DBG_WARNING("ScCompiler::CreateStringFromToken: unknown type of ocExternalRef");
              }
 -            else
 -                pConv->MakeRefStr( rBuffer, *this, aRef, TRUE );
@@ -4726,7 +4768,7 @@ index 3db8da7..6488f69 100644
  
  SCTAB XclExpFmlaCompImpl::GetScTab( const SingleRefData& rRefData ) const
 diff --git sc/source/filter/excel/xelink.cxx sc/source/filter/excel/xelink.cxx
-index b1bacad..90217ae 100644
+index b1bacad..d929e21 100644
 --- sc/source/filter/excel/xelink.cxx
 +++ sc/source/filter/excel/xelink.cxx
 @@ -38,6 +38,14 @@
@@ -5146,7 +5188,7 @@ index b1bacad..90217ae 100644
  void XclExpXct::Save( XclExpStream& rStrm )
  {
      XclExpRecord::Save( rStrm );
-@@ -1168,6 +1425,17 @@ XclExpSupbook::XclExpSupbook( const XclExpRoot& rRoot, const String& rUrl ) :
+@@ -1168,6 +1425,18 @@ XclExpSupbook::XclExpSupbook( const XclExpRoot& rRoot, const String& rUrl ) :
      mnXclTabCount( 0 )
  {
      SetRecSize( 2 + maUrlEncoded.GetSize() );
@@ -5154,17 +5196,18 @@ index b1bacad..90217ae 100644
 +    // We need to create all tables up front to ensure the correct table order.
 +    ScExternalRefManager* pRefMgr = rRoot.GetDoc().GetExternalRefManager();
 +    sal_uInt16 nFileId = pRefMgr->getExternalFileId(rUrl);
-+    const vector<String>* pTabNames = pRefMgr->getAllCachedTableNames(nFileId);
-+    if (!pTabNames)
++    vector<String> aTabNames;
++    pRefMgr->getAllCachedTableNames(nFileId, aTabNames);
++    if (aTabNames.empty())
 +        return;
 +
-+    vector<String>::const_iterator itr = pTabNames->begin(), itrEnd = pTabNames->end();
++    vector<String>::const_iterator itr = aTabNames.begin(), itrEnd = aTabNames.end();
 +    for (; itr != itrEnd; ++itr)
 +        InsertTabName(*itr);
  }
  
  XclExpSupbook::XclExpSupbook( const XclExpRoot& rRoot, const String& rApplic, const String& rTopic ) :
-@@ -1206,6 +1474,46 @@ void XclExpSupbook::StoreCellRange( const ScRange& rRange, sal_uInt16 nSBTab )
+@@ -1206,6 +1475,46 @@ void XclExpSupbook::StoreCellRange( const ScRange& rRange, sal_uInt16 nSBTab )
          xXct->StoreCellRange( GetRoot(), rRange );
  }
  
@@ -5211,7 +5254,7 @@ index b1bacad..90217ae 100644
  sal_uInt16 XclExpSupbook::InsertTabName( const String& rTabName )
  {
      DBG_ASSERT( meType == EXC_SBTYPE_EXTERN, "XclExpSupbook::InsertTabName - don't insert sheet names here" );
-@@ -1226,6 +1534,11 @@ sal_uInt16 XclExpSupbook::InsertDde( const String& rItem )
+@@ -1226,6 +1535,11 @@ sal_uInt16 XclExpSupbook::InsertDde( const String& rItem )
      return GetExtNameBuffer().InsertDde( maUrl, maDdeTopic, rItem );
  }
  
@@ -5223,7 +5266,7 @@ index b1bacad..90217ae 100644
  void XclExpSupbook::Save( XclExpStream& rStrm )
  {
      // SUPBOOK record
-@@ -1289,11 +1602,6 @@ XclExpSupbookBuffer::XclExpSupbookBuffer( const XclExpRoot& rRoot ) :
+@@ -1289,11 +1603,6 @@ XclExpSupbookBuffer::XclExpSupbookBuffer( const XclExpRoot& rRoot ) :
          mnOwnDocSB = Append( xSupbook );
          for( sal_uInt16 nXclTab = 0; nXclTab < nXclCnt; ++nXclTab )
              maSBIndexVec[ nXclTab ].Set( mnOwnDocSB, nXclTab );
@@ -5235,7 +5278,7 @@ index b1bacad..90217ae 100644
      }
  }
  
-@@ -1352,6 +1660,130 @@ void XclExpSupbookBuffer::StoreCellRange( const ScRange& rRange )
+@@ -1352,6 +1661,130 @@ void XclExpSupbookBuffer::StoreCellRange( const ScRange& rRange )
      }
  }
  
@@ -5366,7 +5409,7 @@ index b1bacad..90217ae 100644
  bool XclExpSupbookBuffer::InsertAddIn(
          sal_uInt16& rnSupbook, sal_uInt16& rnExtName, const String& rName )
  {
-@@ -1383,6 +1815,78 @@ bool XclExpSupbookBuffer::InsertDde(
+@@ -1383,6 +1816,78 @@ bool XclExpSupbookBuffer::InsertDde(
      return rnExtName > 0;
  }
  
@@ -5445,7 +5488,7 @@ index b1bacad..90217ae 100644
  void XclExpSupbookBuffer::Save( XclExpStream& rStrm )
  {
      maSupbookList.Save( rStrm );
-@@ -1424,27 +1928,6 @@ sal_uInt16 XclExpSupbookBuffer::Append( XclExpSupbookRef xSupbook )
+@@ -1424,27 +1929,6 @@ sal_uInt16 XclExpSupbookBuffer::Append( XclExpSupbookRef xSupbook )
      return ulimit_cast< sal_uInt16 >( maSupbookList.GetSize() - 1 );
  }
  
@@ -5473,7 +5516,7 @@ index b1bacad..90217ae 100644
  // Export link manager ========================================================
  
  XclExpLinkManagerImpl::XclExpLinkManagerImpl( const XclExpRoot& rRoot ) :
-@@ -1485,11 +1968,29 @@ sal_uInt16 XclExpLinkManagerImpl5::FindExtSheet( sal_Unicode cCode )
+@@ -1485,11 +1969,29 @@ sal_uInt16 XclExpLinkManagerImpl5::FindExtSheet( sal_Unicode cCode )
      return nExtSheet;
  }
  
@@ -5503,7 +5546,7 @@ index b1bacad..90217ae 100644
  bool XclExpLinkManagerImpl5::InsertAddIn(
          sal_uInt16& rnExtSheet, sal_uInt16& rnExtName, const String& rName )
  {
-@@ -1510,6 +2011,14 @@ bool XclExpLinkManagerImpl5::InsertDde(
+@@ -1510,6 +2012,14 @@ bool XclExpLinkManagerImpl5::InsertDde(
      return false;
  }
  
@@ -5518,7 +5561,7 @@ index b1bacad..90217ae 100644
  void XclExpLinkManagerImpl5::Save( XclExpStream& rStrm )
  {
      if( sal_uInt16 nExtSheetCount = GetExtSheetCount() )
-@@ -1630,6 +2139,17 @@ sal_uInt16 XclExpLinkManagerImpl8::FindExtSheet( sal_Unicode cCode )
+@@ -1630,6 +2140,17 @@ sal_uInt16 XclExpLinkManagerImpl8::FindExtSheet( sal_Unicode cCode )
      return InsertXti( maSBBuffer.GetXti( EXC_TAB_EXTERNAL, EXC_TAB_EXTERNAL ) );
  }
  
@@ -5536,7 +5579,7 @@ index b1bacad..90217ae 100644
  void XclExpLinkManagerImpl8::StoreCellRange( const SingleRefData& rRef1, const SingleRefData& rRef2 )
  {
      if( !rRef1.IsDeleted() && !rRef2.IsDeleted() && (rRef1.nTab >= 0) && (rRef2.nTab >= 0) )
-@@ -1652,6 +2172,19 @@ void XclExpLinkManagerImpl8::StoreCellRange( const SingleRefData& rRef1, const S
+@@ -1652,6 +2173,19 @@ void XclExpLinkManagerImpl8::StoreCellRange( const SingleRefData& rRef1, const S
      }
  }
  
@@ -5556,7 +5599,7 @@ index b1bacad..90217ae 100644
  bool XclExpLinkManagerImpl8::InsertAddIn(
          sal_uInt16& rnExtSheet, sal_uInt16& rnExtName, const String& rName )
  {
-@@ -1677,6 +2210,18 @@ bool XclExpLinkManagerImpl8::InsertDde(
+@@ -1677,6 +2211,18 @@ bool XclExpLinkManagerImpl8::InsertDde(
      return false;
  }
  
@@ -5575,7 +5618,7 @@ index b1bacad..90217ae 100644
  void XclExpLinkManagerImpl8::Save( XclExpStream& rStrm )
  {
      if( !maXtiVec.empty() )
-@@ -1745,6 +2290,13 @@ sal_uInt16 XclExpLinkManager::FindExtSheet( sal_Unicode cCode )
+@@ -1745,6 +2291,13 @@ sal_uInt16 XclExpLinkManager::FindExtSheet( sal_Unicode cCode )
      return mxImpl->FindExtSheet( cCode );
  }
  
@@ -5589,7 +5632,7 @@ index b1bacad..90217ae 100644
  void XclExpLinkManager::StoreCell( const SingleRefData& rRef )
  {
      mxImpl->StoreCellRange( rRef, rRef );
-@@ -1755,6 +2307,16 @@ void XclExpLinkManager::StoreCellRange( const ComplRefData& rRef )
+@@ -1755,6 +2308,16 @@ void XclExpLinkManager::StoreCellRange( const ComplRefData& rRef )
      mxImpl->StoreCellRange( rRef.Ref1, rRef.Ref2 );
  }
  
@@ -5606,7 +5649,7 @@ index b1bacad..90217ae 100644
  bool XclExpLinkManager::InsertAddIn(
          sal_uInt16& rnExtSheet, sal_uInt16& rnExtName, const String& rName )
  {
-@@ -1768,6 +2330,13 @@ bool XclExpLinkManager::InsertDde(
+@@ -1768,6 +2331,13 @@ bool XclExpLinkManager::InsertDde(
      return mxImpl->InsertDde( rnExtSheet, rnExtName, rApplic, rTopic, rItem );
  }
  
@@ -6898,7 +6941,7 @@ index e29223a..604e04e 100644
  //------------------------------------------------------------------
  
 diff --git sc/source/filter/xml/xmlexprt.cxx sc/source/filter/xml/xmlexprt.cxx
-index 441f463..d724e25 100644
+index 441f463..119a53f 100644
 --- sc/source/filter/xml/xmlexprt.cxx
 +++ sc/source/filter/xml/xmlexprt.cxx
 @@ -68,6 +68,7 @@
@@ -7303,7 +7346,7 @@ index 441f463..d724e25 100644
  				}
  				if (getExportFlags() & EXPORT_MASTERSTYLES)
  				{
-@@ -3333,6 +3353,183 @@ void ScXMLExport::WriteNamedExpressions(const com::sun::star::uno::Reference <co
+@@ -3333,6 +3353,184 @@ void ScXMLExport::WriteNamedExpressions(const com::sun::star::uno::Reference <co
  	}
  }
  
@@ -7321,11 +7364,12 @@ index 441f463..d724e25 100644
 +        if (!pUrl)
 +            continue;
 +
-+        const vector<String>* pTabNames = pRefMgr->getAllCachedTableNames(nFileId);
-+        if (!pTabNames)
++        vector<String> aTabNames;
++        pRefMgr->getAllCachedTableNames(nFileId, aTabNames);
++        if (aTabNames.empty())
 +            continue;
 +
-+        for (vector<String>::const_iterator itr = pTabNames->begin(), itrEnd = pTabNames->end();
++        for (vector<String>::const_iterator itr = aTabNames.begin(), itrEnd = aTabNames.end();
 +              itr != itrEnd; ++itr)
 +        {
 +            ScExternalRefCache::TableTypeRef pTable = pRefMgr->getCacheTable(nFileId, *itr, false);
@@ -8431,10 +8475,10 @@ index bc5975d..6701d1c 100644
  
 diff --git sc/source/ui/docshell/externalrefmgr.cxx sc/source/ui/docshell/externalrefmgr.cxx
 new file mode 100644
-index 0000000..1a06014
+index 0000000..20dd943
 --- /dev/null
 +++ sc/source/ui/docshell/externalrefmgr.cxx
-@@ -0,0 +1,1319 @@
+@@ -0,0 +1,1398 @@
 +/*************************************************************************
 + *
 + * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
@@ -8600,11 +8644,58 @@ index 0000000..1a06014
 +
 +// ----------------------------------------------------------------------------
 +
++ScExternalRefCache::TableName::TableName(const String& rUpper, const String& rReal) :
++    maUpperName(rUpper), maRealName(rReal)
++{
++}
++
++// ----------------------------------------------------------------------------
++
 +ScExternalRefCache::ScExternalRefCache()
 +{
 +}
 +ScExternalRefCache::~ScExternalRefCache()
 +{
++}
++
++const String* ScExternalRefCache::getRealTableName(sal_uInt16 nFileId, const String& rTabName) const
++{
++    DocDataType::const_iterator itrDoc = maDocs.find(nFileId);
++    if (itrDoc == maDocs.end())
++    {
++        // specified document is not cached.
++        return NULL;
++    }
++
++    const DocItem& rDoc = itrDoc->second;
++    TableNameIndexMap::const_iterator itrTabId = rDoc.maTableNameIndex.find(
++        ScGlobal::pCharClass->upper(rTabName));
++    if (itrTabId == rDoc.maTableNameIndex.end())
++    {
++        // the specified table is not in cache.
++        return NULL;
++    }
++
++    return &rDoc.maTableNames[itrTabId->second].maRealName;
++}
++
++const String* ScExternalRefCache::getRealRangeName(sal_uInt16 nFileId, const String& rRangeName) const
++{
++    DocDataType::const_iterator itrDoc = maDocs.find(nFileId);
++    if (itrDoc == maDocs.end())
++    {
++        // specified document is not cached.
++        return NULL;
++    }
++
++    const DocItem& rDoc = itrDoc->second;
++    NamePairMap::const_iterator itr = rDoc.maRealRangeNameMap.find(
++        ScGlobal::pCharClass->upper(rRangeName));
++    if (itr == rDoc.maRealRangeNameMap.end())
++        // range name not found.
++        return NULL;
++
++    return &itr->second;
 +}
 +
 +ScExternalRefCache::TokenRef ScExternalRefCache::getCellData(sal_uInt16 nFileId, const String& rTabName, SCROW nRow, SCCOL nCol)
@@ -8617,7 +8708,8 @@ index 0000000..1a06014
 +    }
 +
 +    const DocItem& rDoc = itrDoc->second;
-+    TableNameIndexMap::const_iterator itrTabId = rDoc.maTableNameIndex.find(rTabName);
++    TableNameIndexMap::const_iterator itrTabId = rDoc.maTableNameIndex.find(
++        ScGlobal::pCharClass->upper(rTabName));
 +    if (itrTabId == rDoc.maTableNameIndex.end())
 +    {
 +        // the specified table is not in cache.
@@ -8647,7 +8739,8 @@ index 0000000..1a06014
 +        return itrRange->second;
 +    }
 +
-+    TableNameIndexMap::iterator itrTabId = rDoc.maTableNameIndex.find(rTabName);
++    TableNameIndexMap::iterator itrTabId = rDoc.maTableNameIndex.find(
++        ScGlobal::pCharClass->upper(rTabName));
 +    if (itrTabId == rDoc.maTableNameIndex.end())
 +        // the specified table is not in cache.
 +        return TokenArrayRef();
@@ -8720,7 +8813,8 @@ index 0000000..1a06014
 +        return TokenArrayRef();
 +
 +    RangeNameMap& rMap = pDoc->maRangeNames;
-+    RangeNameMap::const_iterator itr = rMap.find(rName);
++    RangeNameMap::const_iterator itr = rMap.find(
++        ScGlobal::pCharClass->upper(rName));
 +    if (itr == rMap.end())
 +        return TokenArrayRef();
 +
@@ -8733,8 +8827,10 @@ index 0000000..1a06014
 +    if (!pDoc)
 +        return;
 +
++    String aUpperName = ScGlobal::pCharClass->upper(rName);
 +    RangeNameMap& rMap = pDoc->maRangeNames;
-+    rMap.insert(RangeNameMap::value_type(rName, pArray));
++    rMap.insert(RangeNameMap::value_type(aUpperName, pArray));
++    pDoc->maRealRangeNameMap.insert(NamePairMap::value_type(aUpperName, rName));
 +}
 +
 +void ScExternalRefCache::setCellData(sal_uInt16 nFileId, const String& rTabName, SCROW nRow, SCCOL nCol, TokenRef pToken)
@@ -8750,7 +8846,8 @@ index 0000000..1a06014
 +    DocItem& rDoc = *pDocItem;
 +    
 +    // See if the table by this name already exists.
-+    TableNameIndexMap::iterator itrTabName = rDoc.maTableNameIndex.find(rTabName);
++    TableNameIndexMap::iterator itrTabName = rDoc.maTableNameIndex.find(
++        ScGlobal::pCharClass->upper(rTabName));
 +    if (itrTabName == rDoc.maTableNameIndex.end())
 +        // Table not found.  Maybe the table name or the file id is wrong ???
 +        return;
@@ -8779,7 +8876,8 @@ index 0000000..1a06014
 +
 +    // Now, find the table position of the first table to cache.
 +    const String& rFirstTabName = rData.front().maTableName;
-+    TableNameIndexMap::iterator itrTabName = rDoc.maTableNameIndex.find(rFirstTabName);
++    TableNameIndexMap::iterator itrTabName = rDoc.maTableNameIndex.find(
++        ScGlobal::pCharClass->upper(rFirstTabName));
 +    if (itrTabName == rDoc.maTableNameIndex.end())
 +    {
 +        // table index not found.
@@ -8849,15 +8947,23 @@ index 0000000..1a06014
 +    // table name list - the list must include all table names in the source 
 +    // document and only to be populated when loading the source document, not
 +    // when loading cached data from, say, Excel XCT/CRN records.
-+    pDoc->maTableNames.assign(rTabNames.begin(), rTabNames.end());
++    vector<TableName> aNewTabNames;
++    aNewTabNames.reserve(n);
++    for (vector<String>::const_iterator itr = rTabNames.begin(), itrEnd = rTabNames.end();
++          itr != itrEnd; ++itr)
++    {
++        TableName aNameItem(ScGlobal::pCharClass->upper(*itr), *itr);
++        aNewTabNames.push_back(aNameItem);
++    }
++    pDoc->maTableNames.swap(aNewTabNames);
 +    
 +    // data tables - preserve any existing data that may have been set during 
-+    // Excel import.
++    // file import.
 +    vector<TableTypeRef> aNewTables(n);
 +    for (size_t i = 0; i < n; ++i)
 +    {
 +        size_t nIndex;
-+        if (lcl_getTableDataIndex(pDoc->maTableNameIndex, rTabNames[i], nIndex))
++        if (lcl_getTableDataIndex(pDoc->maTableNameIndex, pDoc->maTableNames[i].maUpperName, nIndex))
 +        {
 +            aNewTables[i] = pDoc->maTables[nIndex];
 +        }
@@ -8867,19 +8973,24 @@ index 0000000..1a06014
 +    // name index map
 +    TableNameIndexMap aNewNameIndex;
 +    for (size_t i = 0; i < n; ++i)
-+        aNewNameIndex.insert(TableNameIndexMap::value_type(rTabNames[i], i));
++        aNewNameIndex.insert(TableNameIndexMap::value_type(pDoc->maTableNames[i].maUpperName, i));
 +    pDoc->maTableNameIndex.swap(aNewNameIndex);
 +
 +    pDoc->mbInitFromSource = true;
 +}
 +
-+const vector<String>* ScExternalRefCache::getAllTableNames(sal_uInt16 nFileId) const
++void ScExternalRefCache::getAllTableNames(sal_uInt16 nFileId, vector<String>& rTabNames) const
 +{
++    rTabNames.clear();
 +    DocItem* pDoc = getDocItem(nFileId);
 +    if (!pDoc)
-+        return NULL;
++        return;
 +
-+    return &pDoc->maTableNames;
++    size_t n = pDoc->maTableNames.size();
++    rTabNames.reserve(n);
++    for (vector<TableName>::const_iterator itr = pDoc->maTableNames.begin(), itrEnd = pDoc->maTableNames.end();
++          itr != itrEnd; ++itr)
++        rTabNames.push_back(itr->maRealName);
 +}
 +
 +ScExternalRefCache::TableTypeRef ScExternalRefCache::getCacheTable(sal_uInt16 nFileId, const String& rTabName, bool bCreateNew)
@@ -8891,7 +9002,8 @@ index 0000000..1a06014
 +    DocItem& rDoc = *pDoc;
 +
 +    size_t nIndex;
-+    if (lcl_getTableDataIndex(rDoc.maTableNameIndex, rTabName, nIndex))
++    String aTabNameUpper = ScGlobal::pCharClass->upper(rTabName);
++    if (lcl_getTableDataIndex(rDoc.maTableNameIndex, aTabNameUpper, nIndex))
 +        // specified table found.
 +        return rDoc.maTables[nIndex];
 +
@@ -8901,9 +9013,9 @@ index 0000000..1a06014
 +    // Specified table doesn't exist yet.  Create one.
 +    TableTypeRef pTab(new Table);
 +    rDoc.maTables.push_back(pTab);
-+    rDoc.maTableNames.push_back(rTabName);
++    rDoc.maTableNames.push_back(TableName(aTabNameUpper, rTabName));
 +    rDoc.maTableNameIndex.insert(
-+        TableNameIndexMap::value_type(rTabName, rDoc.maTables.size()-1));
++        TableNameIndexMap::value_type(aTabNameUpper, rDoc.maTables.size()-1));
 +    return pTab;
 +}
 +
@@ -9227,7 +9339,7 @@ index 0000000..1a06014
 +    vector<ScExternalRefCache::SingleRangeData> aCacheData;
 +    aCacheData.reserve(nTabSpan+1);
 +    aCacheData.push_back(ScExternalRefCache::SingleRangeData());
-+    aCacheData.back().maTableName = rTabName;
++    aCacheData.back().maTableName = ScGlobal::pCharClass->upper(rTabName);
 +
 +    for (SCTAB i = 1; i < nTabSpan + 1; ++i)
 +    {
@@ -9237,7 +9349,7 @@ index 0000000..1a06014
 +            break;
 +
 +        aCacheData.push_back(ScExternalRefCache::SingleRangeData());
-+        aCacheData.back().maTableName = aTabName;
++        aCacheData.back().maTableName = ScGlobal::pCharClass->upper(aTabName);
 +    }
 +
 +    aRange.aStart.SetTab(nTab1);
@@ -9319,7 +9431,8 @@ index 0000000..1a06014
 +            pNew->AddToken(*pToken);
 +    }
 +
-+    maRefCache.setRangeNameTokens(nFileId, rName, pNew);
++    // Make sure to pass the correctly-cased range name here.
++    maRefCache.setRangeNameTokens(nFileId, pRangeData->GetName(), pNew);
 +    return pNew;
 +}
 +
@@ -9638,9 +9751,19 @@ index 0000000..1a06014
 +    return &maSrcFiles[nFileId];
 +}
 +
-+const vector<String>* ScExternalRefManager::getAllCachedTableNames(sal_uInt16 nFileId) const
++const String* ScExternalRefManager::getRealTableName(sal_uInt16 nFileId, const String& rTabName) const
 +{
-+    return maRefCache.getAllTableNames(nFileId);
++    return maRefCache.getRealTableName(nFileId, rTabName);
++}
++
++const String* ScExternalRefManager::getRealRangeName(sal_uInt16 nFileId, const String& rRangeName) const
++{
++    return maRefCache.getRealRangeName(nFileId, rRangeName);
++}
++
++void ScExternalRefManager::getAllCachedTableNames(sal_uInt16 nFileId, vector<String>& rTabNames) const
++{
++    maRefCache.getAllTableNames(nFileId, rTabNames);
 +}
 +
 +sal_uInt16 ScExternalRefManager::getCachedFileCount() const
