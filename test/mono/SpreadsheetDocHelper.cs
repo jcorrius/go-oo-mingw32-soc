@@ -29,7 +29,15 @@ public class SpreadsheetDocHelper : System.IDisposable
         // Connect to a running office and get the service manager
         mxMSFactory = connect( args );
         // Create a new spreadsheet document
-        mxDocument = initDocument();
+	try {
+	    mxDocument = initDocument();
+	} catch {
+	    Console.WriteLine("Error: unable to properly initialize document! That\n" +
+	        "usually happens when UNO bootstrap went wrong. Please check that soffice\n" +
+	        "binary in your path points to right OOo installation or use UNO_PATH\n" +
+		"environment variable to set path to your soffice binary.");
+	    Environment.Exit(1);
+	}
     }
 
 // __  helper methods  ____________________________________________
