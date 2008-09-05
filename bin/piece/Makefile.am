@@ -5,7 +5,9 @@ EXTRA_DIST = \
 	noulf noulfconv \
 	install-generic \
 	install-bootstrap \
+	save-noarch \
 	${wildcard env-*} \
 	${wildcard build-*} \
+	${wildcard file-list-*} \
 	${wildcard inst-*} \
 	${wildcard post-inst-*}
