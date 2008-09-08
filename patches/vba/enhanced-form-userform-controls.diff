@@ -1116,10 +1116,161 @@ index b30665a..0ba055d 100644
  	}
  
  	if (pCaption)
+diff --git toolkit/inc/toolkit/controls/dialogcontrol.hxx toolkit/inc/toolkit/controls/dialogcontrol.hxx
+index 1301975..e8f0005 100644
+--- toolkit/inc/toolkit/controls/dialogcontrol.hxx
++++ toolkit/inc/toolkit/controls/dialogcontrol.hxx
+@@ -52,6 +52,7 @@
+ #include <cppuhelper/basemutex.hxx>
+ #include <list>
+ #include <map>
++#include <com/sun/star/graphic/XGraphicObject.hpp>
+ 
+ //	----------------------------------------------------
+ //	class UnoControlDialogModel
+@@ -92,7 +93,9 @@ private:
+ 
+ 	AllGroups							maGroups;
+ 	sal_Bool							mbGroupsUpToDate;
+-
++        
++	::com::sun::star::uno::Reference< ::com::sun::star::graphic::XGraphicObject > mxGrfObj;
++	bool mbAdjustingGraphic;
+ protected:	
+ 	::com::sun::star::uno::Any			ImplGetDefaultValue( sal_uInt16 nPropId ) const;
+ 	::cppu::IPropertyArrayHelper&		SAL_CALL getInfoHelper();
+@@ -179,6 +182,8 @@ public:
+ protected:
+ 	void startControlListening( const ::com::sun::star::uno::Reference< ::com::sun::star::awt::XControlModel >& _rxChildModel );
+ 	void stopControlListening( const ::com::sun::star::uno::Reference< ::com::sun::star::awt::XControlModel >& _rxChildModel );
++    // ::cppu::OPropertySetHelper
++	void SAL_CALL setFastPropertyValue_NoBroadcast( sal_Int32 nHandle, const ::com::sun::star::uno::Any& rValue ) throw (::com::sun::star::uno::Exception);
+ 
+ 	void implNotifyTabModelChange( const ::rtl::OUString& _rAccessor );
+ 
 diff --git toolkit/source/controls/dialogcontrol.cxx toolkit/source/controls/dialogcontrol.cxx
 index 3fd5723..7e717ae 100644
 --- toolkit/source/controls/dialogcontrol.cxx
 +++ toolkit/source/controls/dialogcontrol.cxx
+@@ -90,6 +90,8 @@ using namespace toolkit;
+ //HELPER
+ ::rtl::OUString getPhysicalLocation( const ::com::sun::star::uno::Any& rbase, const ::com::sun::star::uno::Any& rUrl );
+ 
++uno::Reference< graphic::XGraphic > getGraphicFromURL_nothrow( uno::Reference< graphic::XGraphicObject >& rxGrfObj, const ::rtl::OUString& _rURL );
++
+ struct LanguageDependentProp
+ {
+     const char* pPropName;
+@@ -115,7 +117,7 @@ namespace
+         }
+         return s_aLanguageDependentProperties;
+     }
+-
++ 
+     static uno::Reference< graphic::XGraphic > lcl_getGraphicFromURL_nothrow( const ::rtl::OUString& _rURL )
+     {
+         uno::Reference< graphic::XGraphic > xGraphic;
+@@ -265,7 +267,7 @@ static const ::rtl::OUString& getStepPropertyName( )
+ UnoControlDialogModel::UnoControlDialogModel()
+ 	:maContainerListeners( *this )
+ 	,maChangeListeners ( GetMutex() )
+-	,mbGroupsUpToDate( sal_False )
++	,mbGroupsUpToDate( sal_False ), mbAdjustingGraphic( false )
+ {
+ 	ImplRegisterProperty( BASEPROPERTY_BACKGROUNDCOLOR );
+ //	ImplRegisterProperty( BASEPROPERTY_BORDER );
+@@ -294,7 +296,7 @@ UnoControlDialogModel::UnoControlDialogModel( const UnoControlDialogModel& rMode
+     , UnoControlDialogModel_Base( rModel )
+ 	, maContainerListeners( *this )
+ 	, maChangeListeners ( GetMutex() )
+-	, mbGroupsUpToDate( sal_False )
++	, mbGroupsUpToDate( sal_False ), mbAdjustingGraphic( false )
+ {
+ }
+ 
+@@ -325,6 +327,40 @@ Sequence< Type > UnoControlDialogModel::getTypes() throw(RuntimeException)
+ 	return ::rtl::OUString::createFromAscii( szServiceName_UnoControlDialogModel );
+ }
+ 
++void SAL_CALL UnoControlDialogModel::setFastPropertyValue_NoBroadcast( sal_Int32 nHandle, const ::com::sun::star::uno::Any& rValue ) throw (::com::sun::star::uno::Exception)
++{
++    UnoControlModel::setFastPropertyValue_NoBroadcast( nHandle, rValue );
++    try
++    {
++        switch ( nHandle )
++        {
++        case BASEPROPERTY_IMAGEURL:
++            if ( !mbAdjustingGraphic && ImplHasProperty( BASEPROPERTY_GRAPHIC ) )
++            {
++                mbAdjustingGraphic = true;
++                ::rtl::OUString sImageURL;
++                OSL_VERIFY( rValue >>= sImageURL );
++                setPropertyValue( GetPropertyName( BASEPROPERTY_GRAPHIC ), uno::makeAny( getGraphicFromURL_nothrow( mxGrfObj, sImageURL ) ) );
++                mbAdjustingGraphic = false;
++            }
++            break;
++
++        case BASEPROPERTY_GRAPHIC:
++            if ( !mbAdjustingGraphic && ImplHasProperty( BASEPROPERTY_IMAGEURL ) )
++            {
++                mbAdjustingGraphic = true;
++                setPropertyValue( GetPropertyName( BASEPROPERTY_IMAGEURL ), uno::makeAny( ::rtl::OUString() ) );
++                mbAdjustingGraphic = false;
++            }
++            break;
++	}
++    }
++    catch( const ::com::sun::star::uno::Exception& )
++    {
++        OSL_ENSURE( sal_False, "UnoControlDialogModel::setFastPropertyValue_NoBroadcast: caught an exception while setting Graphic/ImageURL properties!" );
++    }
++}
++
+ Any UnoControlDialogModel::ImplGetDefaultValue( sal_uInt16 nPropId ) const
+ {
+     Any aAny;
+@@ -1668,17 +1704,16 @@ void UnoDialogControl::PrepareWindowDescriptor( ::com::sun::star::awt::WindowDes
+     // can lead to overwrites we have to set the graphic property
+     // before the propertiesChangeEvents are sent!
+     ::rtl::OUString aImageURL;
+-    Reference< graphic::XGraphic > xGraphic;
+     if (( ImplGetPropertyValue( PROPERTY_IMAGEURL ) >>= aImageURL ) &&
+         ( aImageURL.getLength() > 0 ))
+     {
+-        ::rtl::OUString absoluteUrl =
++        aImageURL = 
+             getPhysicalLocation( ImplGetPropertyValue( PROPERTY_DIALOGSOURCEURL ),
+                                  ImplGetPropertyValue( PROPERTY_IMAGEURL ));
+ 
+-        xGraphic = lcl_getGraphicFromURL_nothrow( absoluteUrl );
+-        ImplSetPropertyValue( PROPERTY_GRAPHIC, uno::makeAny( xGraphic ), sal_True );
+     }
++    if ( aImageURL.compareToAscii( UNO_NAME_GRAPHOBJ_URLPREFIX, RTL_CONSTASCII_LENGTH( UNO_NAME_GRAPHOBJ_URLPREFIX ) ) != 0 )
++        ImplSetPropertyValue( PROPERTY_IMAGEURL, uno::makeAny( aImageURL ), sal_True );
+ }
+ 
+ void UnoDialogControl::elementInserted( const ContainerEvent& Event ) throw(RuntimeException)
+@@ -1910,18 +1945,16 @@ void UnoDialogControl::ImplModelPropertiesChanged( const Sequence< PropertyChang
+         if ( bOwnModel && rEvt.PropertyName.equalsAsciiL( "ImageURL", 8 ))
+         {
+             ::rtl::OUString aImageURL;
+-            Reference< graphic::XGraphic > xGraphic;
+             if (( ImplGetPropertyValue( PROPERTY_IMAGEURL ) >>= aImageURL ) &&
+                 ( aImageURL.getLength() > 0 ))
+             {
+-                ::rtl::OUString absoluteUrl =
++                aImageURL =
+                     getPhysicalLocation( ImplGetPropertyValue( PROPERTY_DIALOGSOURCEURL ),
+                                          ImplGetPropertyValue( PROPERTY_IMAGEURL ));
+ 
+-                xGraphic = lcl_getGraphicFromURL_nothrow( absoluteUrl );
+             }
+ 
+-            ImplSetPropertyValue( PROPERTY_GRAPHIC, uno::makeAny( xGraphic ), sal_True );
++            ImplSetPropertyValue( PROPERTY_IMAGEURL, uno::makeAny( aImageURL ), sal_True );
+             break;
+         }
+     }
 @@ -2120,10 +2120,17 @@ throw (RuntimeException)
  
  	if ( url.getLength() > 0 )
