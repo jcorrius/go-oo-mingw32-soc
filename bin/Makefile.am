@@ -14,7 +14,6 @@ script_files = \
 	fix-deps \
 	generate-bash-completion \
 	help-font-munge \
-	install-dict.in \
 	install-dictionaries \
 	install-mono \
 	install-artwork \
