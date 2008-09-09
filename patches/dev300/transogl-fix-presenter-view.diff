@@ -1,0 +1,216 @@
+diff -rup offapi.orig/com/sun/star/presentation/XSlideShowView.idl offapi/com/sun/star/presentation/XSlideShowView.idl
+--- offapi.orig/com/sun/star/presentation/XSlideShowView.idl	2008-09-09 11:40:58.000000000 +0200
++++ offapi/com/sun/star/presentation/XSlideShowView.idl	2008-09-09 12:11:40.000000000 +0200
+@@ -37,9 +37,6 @@
+ #ifndef __com_sun_star_rendering_XSpriteCanvas_idl__ 
+ #include <com/sun/star/rendering/XSpriteCanvas.idl> 
+ #endif 
+-#ifndef __com_sun_star_geometry_RealRectangle2D_idl__ 
+-#include <com/sun/star/geometry/RealRectangle2D.idl> 
+-#endif 
+ #ifndef __com_sun_star_util_XModifyListener_idl__ 
+ #include <com/sun/star/util/XModifyListener.idl> 
+ #endif 
+@@ -52,6 +49,9 @@
+ #ifndef __com_sun_star_awt_XMouseMotionListener_idl__ 
+ #include <com/sun/star/awt/XMouseMotionListener.idl> 
+ #endif 
++#ifndef __com_sun_star_awt_Rectangle_idl__ 
++#include <com/sun/star/awt/Rectangle.idl> 
++#endif 
+ 
+ module com {  module sun {  module star {  module presentation {
+ 
+@@ -179,6 +179,10 @@ interface XSlideShowView : ::com::sun::s
+      */
+     void setMouseCursor( [in] short nPointerShape );
+ 
++    /** Get rectangle defining area inside of canvas device which
++	this slideshow view uses.
++    */
++    ::com::sun::star::awt::Rectangle getCanvasArea();
+ };
+ 
+ }; }; }; };
+diff -rup sd.orig/source/ui/slideshow/slideshowviewimpl.cxx sd/source/ui/slideshow/slideshowviewimpl.cxx
+--- sd.orig/source/ui/slideshow/slideshowviewimpl.cxx	2008-09-09 11:50:57.000000000 +0200
++++ sd/source/ui/slideshow/slideshowviewimpl.cxx	2008-09-09 12:12:55.000000000 +0200
+@@ -57,7 +57,6 @@ using ::comphelper::ImplementationRefere
+ 
+ using ::rtl::OUString;
+ using namespace ::com::sun::star;
+-using namespace ::com::sun::star;
+ 
+ namespace sd
+ {
+@@ -489,6 +488,18 @@ void SAL_CALL SlideShowView::setMouseCur
+ 		mxWindowPeer->setPointer( mxPointer );
+ }
+ 
++awt::Rectangle SAL_CALL SlideShowView::getCanvasArea(  ) throw (RuntimeException)
++{
++    awt::Rectangle aRectangle;
++
++    if( mxWindow.is() )
++	return mxWindow->getPosSize();
++
++    aRectangle.X = aRectangle.Y = aRectangle.Width = aRectangle.Height = 0;
++
++    return aRectangle;
++}
++
+ void SlideShowView::updateimpl( ::osl::ClearableMutexGuard& rGuard, SlideshowImpl* pSlideShow )
+ {
+ 	if( pSlideShow )
+diff -rup sd.orig/source/ui/slideshow/slideshowviewimpl.hxx sd/source/ui/slideshow/slideshowviewimpl.hxx
+--- sd.orig/source/ui/slideshow/slideshowviewimpl.hxx	2008-09-09 11:50:57.000000000 +0200
++++ sd/source/ui/slideshow/slideshowviewimpl.hxx	2008-09-09 12:11:30.000000000 +0200
+@@ -236,6 +236,7 @@ public:
+     virtual void SAL_CALL addMouseMotionListener( const ::com::sun::star::uno::Reference< ::com::sun::star::awt::XMouseMotionListener >& xListener ) throw (::com::sun::star::uno::RuntimeException);
+ 	virtual void SAL_CALL removeMouseMotionListener( const ::com::sun::star::uno::Reference< ::com::sun::star::awt::XMouseMotionListener >& xListener ) throw (::com::sun::star::uno::RuntimeException);
+     virtual void SAL_CALL setMouseCursor( sal_Int16 nPointerShape ) throw (::com::sun::star::uno::RuntimeException);
++    virtual ::com::sun::star::awt::Rectangle SAL_CALL getCanvasArea(  ) throw (::com::sun::star::uno::RuntimeException);
+ 
+     // XWindowListener methods
+     virtual void SAL_CALL windowResized( const ::com::sun::star::awt::WindowEvent& e ) throw (::com::sun::star::uno::RuntimeException);
+diff -rup sdext.orig/source/presenter/PresenterSlideShowView.cxx sdext/source/presenter/PresenterSlideShowView.cxx
+--- sdext.orig/source/presenter/PresenterSlideShowView.cxx	2008-09-09 11:41:38.000000000 +0200
++++ sdext/source/presenter/PresenterSlideShowView.cxx	2008-09-09 15:13:32.000000000 +0200
+@@ -82,6 +82,8 @@ PresenterSlideShowView::PresenterSlideSh
+       mxPointer(),
+       mxWindow(),
+       mxViewWindow(),
++      mxTopPane(),
++      mxPresenterHelper(),
+       mxBackgroundPolygon1(),
+       mxBackgroundPolygon2(),
+       mbIsViewAdded(false),
+@@ -114,6 +116,13 @@ void PresenterSlideShowView::LateInit (v
+     if (xSlideShowComponent.is())
+         xSlideShowComponent->addEventListener(static_cast<awt::XWindowListener*>(this));
+ 
++    Reference<lang::XMultiComponentFactory> xFactory (
++        mxComponentContext->getServiceManager(), UNO_QUERY_THROW);
++    mxPresenterHelper.set (xFactory->createInstanceWithContext(
++			       OUString::createFromAscii("com.sun.star.comp.Draw.PresenterHelper"),
++			       mxComponentContext),
++			   UNO_QUERY_THROW);
++
+     // Use view id and controller to retrieve window and canvas from
+     // configuration controller.
+     Reference<XControllerManager> xCM (mxController, UNO_QUERY_THROW);
+@@ -121,6 +130,8 @@ void PresenterSlideShowView::LateInit (v
+ 
+     if (xCC.is())
+     {
++	mxTopPane.set(xCC->getResource(mxViewId->getAnchor()->getAnchor()), UNO_QUERY);
++
+         Reference<XPane> xPane (xCC->getResource(mxViewId->getAnchor()), UNO_QUERY_THROW);
+ 
+         mxWindow = xPane->getWindow();
+@@ -142,8 +153,8 @@ void PresenterSlideShowView::LateInit (v
+     // Create a window for the actual slide show view.  It is places
+     // centered and with maximal size inside the pane.
+     mxViewWindow = CreateViewWindow(mxWindow);
+-    mxViewCanvas = CreateViewCanvas(mxViewWindow,
+-        Reference<XPane>(xCC->getResource(mxViewId->getAnchor()->getAnchor()), UNO_QUERY));
++
++    mxViewCanvas = CreateViewCanvas(mxViewWindow);
+             
+     if (mxViewWindow.is())
+     {
+@@ -543,6 +554,19 @@ void SAL_CALL PresenterSlideShowView::se
+ 
+ 
+ 
++awt::Rectangle SAL_CALL PresenterSlideShowView::getCanvasArea(  ) throw (RuntimeException)
++{
++    if( mxViewWindow.is() && mxTopPane.is() )
++	return mxPresenterHelper->getWindowExtentsRelative( mxViewWindow, mxTopPane->getWindow() );
++
++    awt::Rectangle aRectangle;
++
++    aRectangle.X = aRectangle.Y = aRectangle.Width = aRectangle.Height = 0;
++
++    return aRectangle;
++}
++
++
+ 
+ //----- lang::XEventListener --------------------------------------------------
+ 
+@@ -976,22 +1000,14 @@ Reference<awt::XWindow> PresenterSlideSh
+ 
+ 
+ Reference<rendering::XCanvas> PresenterSlideShowView::CreateViewCanvas (
+-    const Reference<awt::XWindow>& rxViewWindow,
+-    const Reference<XPane>& rxParentPane) const
++    const Reference<awt::XWindow>& rxViewWindow) const
+ {
+     // Create a canvas for the view window.
+-    Reference<lang::XMultiComponentFactory> xFactory (
+-        mxComponentContext->getServiceManager(), UNO_QUERY_THROW);
+-    Reference<drawing::XPresenterHelper> xPresenterHelper(
+-        xFactory->createInstanceWithContext(
+-            OUString::createFromAscii("com.sun.star.comp.Draw.PresenterHelper"),
+-            mxComponentContext),
+-        UNO_QUERY_THROW);
+-    return xPresenterHelper->createSharedCanvas(
+-        Reference<rendering::XSpriteCanvas>(rxParentPane->getCanvas(), UNO_QUERY),
+-        rxParentPane->getWindow(),
+-        rxParentPane->getCanvas(),
+-        rxParentPane->getWindow(),
++    return mxPresenterHelper->createSharedCanvas(
++        Reference<rendering::XSpriteCanvas>(mxTopPane->getCanvas(), UNO_QUERY),
++        mxTopPane->getWindow(),
++        mxTopPane->getCanvas(),
++        mxTopPane->getWindow(),
+         rxViewWindow);
+ }
+ 
+diff -rup sdext.orig/source/presenter/PresenterSlideShowView.hxx sdext/source/presenter/PresenterSlideShowView.hxx
+--- sdext.orig/source/presenter/PresenterSlideShowView.hxx	2008-09-09 11:41:38.000000000 +0200
++++ sdext/source/presenter/PresenterSlideShowView.hxx	2008-09-09 14:29:00.000000000 +0200
+@@ -149,6 +149,8 @@ public:
+     virtual void SAL_CALL setMouseCursor(::sal_Int16 nPointerShape)
+         throw (css::uno::RuntimeException);
+ 
++    virtual ::com::sun::star::awt::Rectangle SAL_CALL getCanvasArea(  )
++	throw (::com::sun::star::uno::RuntimeException);
+     
+     // lang::XEventListener
+     virtual void SAL_CALL disposing (const css::lang::EventObject& rEvent)
+@@ -236,6 +238,8 @@ private:
+     css::uno::Reference<css::awt::XPointer> mxPointer;
+     css::uno::Reference<css::awt::XWindow> mxWindow;
+     css::uno::Reference<css::awt::XWindow> mxViewWindow;
++    css::uno::Reference<css::drawing::framework::XPane> mxTopPane;
++    css::uno::Reference<css::drawing::XPresenterHelper> mxPresenterHelper;
+     css::uno::Reference<css::rendering::XPolyPolygon2D> mxBackgroundPolygon1;
+     css::uno::Reference<css::rendering::XPolyPolygon2D> mxBackgroundPolygon2;
+     bool mbIsViewAdded;
+@@ -267,8 +271,7 @@ private:
+     css::uno::Reference<css::awt::XWindow> CreateViewWindow (
+         const css::uno::Reference<css::awt::XWindow>& rxParentWindow) const;
+     css::uno::Reference<css::rendering::XCanvas> CreateViewCanvas (
+-        const css::uno::Reference<css::awt::XWindow>& rxWindow,
+-        const css::uno::Reference<css::drawing::framework::XPane>& rxParentPane) const;
++        const css::uno::Reference<css::awt::XWindow>& rxWindow) const;
+ 
+     void Resize (void);
+ 
+diff -rup slideshow.orig/source/engine/OGLTrans/OGLTrans_TransitionerImpl.cxx slideshow/source/engine/OGLTrans/OGLTrans_TransitionerImpl.cxx
+--- slideshow.orig/source/engine/OGLTrans/OGLTrans_TransitionerImpl.cxx	2008-09-09 11:41:47.000000000 +0200
++++ slideshow/source/engine/OGLTrans/OGLTrans_TransitionerImpl.cxx	2008-09-09 15:04:49.000000000 +0200
+@@ -539,6 +539,11 @@ bool OGLTransitionerImpl::initWindowFrom
+     if( !createWindow( reinterpret_cast< Window* >( aVal ) ) )
+ 	return false;
+ 
++    awt::Rectangle aCanvasArea = xView->getCanvasArea();
++    pWindow->SetPosSizePixel(aCanvasArea.X, aCanvasArea.Y, aCanvasArea.Width, aCanvasArea.Height);
++    GLWin.Width = aCanvasArea.Width;
++    GLWin.Height = aCanvasArea.Height;
++
+ #if defined( WNT ) 
+ 		GLWin.hDC = GetDC(GLWin.hWnd);
+ #elif defined( UNX )
