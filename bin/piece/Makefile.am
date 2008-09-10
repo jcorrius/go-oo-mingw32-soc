@@ -8,6 +8,7 @@ EXTRA_DIST = \
 	install-l10n-helper \
 	install-l10n-merged \
 	link-to-ooo-home \
+	merge-file-lists \
 	save-noarch \
 	sort-l10n \
 	${wildcard env-*} \
