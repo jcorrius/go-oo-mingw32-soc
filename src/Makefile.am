@@ -6,6 +6,7 @@ EXTRA_DIST=\
 	Ubuntu.dic \
 	banner_nld.bmp \
 	cli_uno_bridge.dll.config.in \
+	main_transform.xsl \
 	mono-ooo.pc.in \
 	nologoinstall_nld.bmp \
 	ooobanner_nld.bmp \

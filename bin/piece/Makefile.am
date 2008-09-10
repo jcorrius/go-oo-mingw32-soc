@@ -2,9 +2,11 @@ EXTRA_DIST = \
 	sys-setup.in \
 	unpack-l10n \
 	copyexcept \
+	desktop-support-app \
 	noulf noulfconv \
 	install-generic \
 	install-bootstrap \
+	install-devel-helper \
 	install-l10n-helper \
 	install-l10n-merged \
 	link-to-ooo-home \
