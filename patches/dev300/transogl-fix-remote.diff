@@ -1,0 +1,303 @@
+diff -rup slideshow-orig/source/engine/OGLTrans/OGLTrans_TransitionerImpl.cxx slideshow/source/engine/OGLTrans/OGLTrans_TransitionerImpl.cxx
+--- slideshow-orig/source/engine/OGLTrans/OGLTrans_TransitionerImpl.cxx	2008-09-09 22:57:31.000000000 +0200
++++ slideshow/source/engine/OGLTrans/OGLTrans_TransitionerImpl.cxx	2008-09-09 22:59:28.000000000 +0200
+@@ -145,6 +145,15 @@ namespace
+     }
+ }
+ 
++// not thread safe
++static bool errorTriggered;
++int oglErrorHandler( unx::Display* /*dpy*/, unx::XErrorEvent* /*evnt*/ )
++{
++    errorTriggered = true;
++
++    return 0;
++}
++
+ /** This is the Transitioner class for OpenGL 3D transitions in
+  * slideshow. At the moment, it's Linux only. This class is implicitly
+  * constructed from XTransitionFactory.
+@@ -286,7 +295,16 @@ public:
+     */
+     bool mbTextureFromPixmap;
+ 
++    /**
++       whether to generate mipmaped textures
++    */
+     bool mbGenerateMipmap;
++
++    /**
++       whether we have visual which can be used for texture_from_pixmap extension
++    */
++    bool mbHasTFPVisual;
++
+ #ifdef DEBUG
+     ptime t3;
+     ptime t4;
+@@ -363,6 +381,7 @@ bool OGLTransitionerImpl::createWindow(
+     unx::XVisualInfo* vi( NULL );
+ #if defined( GLX_VERSION_1_3 ) && defined( GLX_EXT_texture_from_pixmap )
+     unx::XVisualInfo* visinfo;
++    unx::XVisualInfo* firstVisual( NULL );
+ #endif
+     static int attrList3[] =
+         {
+@@ -431,7 +450,9 @@ bool OGLTransitionerImpl::createWindow(
+ 
+ #if defined( GLX_VERSION_1_3 ) && defined( GLX_EXT_texture_from_pixmap )
+       if( vi ) {
+-	  OSL_TRACE("OGLTrans: using VisualID %08X", vi->visualid);
++	  if( !firstVisual )
++	      firstVisual = vi;
++	  OSL_TRACE("trying VisualID %08X", vi->visualid);
+           fbconfigs = glXGetFBConfigs (GLWin.dpy, GLWin.screen, &nfbconfigs);
+           for ( ; i < nfbconfigs; i++)
+           {
+@@ -465,13 +486,22 @@ bool OGLTransitionerImpl::createWindow(
+               break;
+           }
+ 
+-          if( i != nfbconfigs ) {
+-              vi = glXGetVisualFromFBConfig( GLWin.dpy, fbconfigs[i] );
++          if( i != nfbconfigs || ( firstVisual && pAttributeTable[1] == NULL ) ) {
++	      if( i != nfbconfigs ) {
++		  vi = glXGetVisualFromFBConfig( GLWin.dpy, fbconfigs[i] );
++		  mbHasTFPVisual = true;
++		  OSL_TRACE("found visual suitable for texture_from_pixmap");
++	      } else {
++		  vi = firstVisual;
++		  mbHasTFPVisual = false;
++		  OSL_TRACE("did not find visual suitable for texture_from_pixmap, using %08X", vi->visualid);
++	      }
+ #else
+-          if( vi ) {
++	  if( vi ) {
+ #endif
+               SystemWindowData winData;
+               winData.nSize = sizeof(winData);
++	      OSL_TRACE("using VisualID %08X", vi->visualid);
+               winData.pVisual = (void*)(vi->visual);
+               pWindow=new SystemChildWindow(pPWindow, 0, &winData, FALSE);
+               pChildSysData = pWindow->GetSystemData();
+@@ -505,17 +535,14 @@ bool OGLTransitionerImpl::createWindow(
+ 	  pWindow->SetControlForeground();
+ 	  pWindow->SetControlBackground();
+ 	  pWindow->EnablePaint(FALSE);
+-	  pWindow->SetPosSizePixel(pPWindow->GetPosPixel(),pPWindow->GetSizePixel());
+-
+-	GLWin.Width = pPWindow->GetSizePixel().Width();
+-	GLWin.Height = pPWindow->GetSizePixel().Height();
+ #if defined( WNT ) 
+ 		GLWin.hWnd = sysData->hWnd;
+ #elif defined( UNX )
+         GLWin.dpy = reinterpret_cast<unx::Display*>(pChildSysData->pDisplay);
+         GLWin.win = pChildSysData->aWindow;
+ #if defined( GLX_VERSION_1_3 ) && defined( GLX_EXT_texture_from_pixmap )
+-	GLWin.fbc = fbconfigs[i];
++	if( mbHasTFPVisual )
++	    GLWin.fbc = fbconfigs[i];
+ #endif
+ 	GLWin.vi = vi;
+ 	GLWin.GLXExtensions = unx::glXQueryExtensionsString( GLWin.dpy, GLWin.screen );
+@@ -552,6 +579,7 @@ bool OGLTransitionerImpl::initWindowFrom
+     pWindow->SetPosSizePixel(aCanvasArea.X, aCanvasArea.Y, aCanvasArea.Width, aCanvasArea.Height);
+     GLWin.Width = aCanvasArea.Width;
+     GLWin.Height = aCanvasArea.Height;
++    OSL_TRACE("canvas area: %d,%d - %dx%d", aCanvasArea.X, aCanvasArea.Y, aCanvasArea.Width, aCanvasArea.Height);
+ 
+ #if defined( WNT ) 
+ 		GLWin.hDC = GetDC(GLWin.hWnd);
+@@ -560,9 +588,9 @@ bool OGLTransitionerImpl::initWindowFrom
+                                  GLWin.vi,
+                                  0,
+                                  GL_TRUE);
+-    if( glGetError() != GL_NO_ERROR ) {
+-	    OSL_TRACE("glError: %s", (char *)gluErrorString(glGetError()));
+-	    return false;
++    if( GLWin.ctx == NULL ) {
++	OSL_TRACE("unable to create GLX context");
++	return false;
+     }
+ #endif
+ 
+@@ -593,11 +621,10 @@ bool OGLTransitionerImpl::initWindowFrom
+ 	GLWin.hRC  = wglCreateContext(GLWin.hDC);
+ 	wglMakeCurrent(GLWin.hDC,GLWin.hRC);
+ #elif defined( UNX )
+-    glXMakeCurrent( GLWin.dpy, GLWin.win, GLWin.ctx );
+-    if( glGetError() != GL_NO_ERROR ) {
+-	    OSL_TRACE("glError: %s", (char *)gluErrorString(glGetError()));
++	if( !glXMakeCurrent( GLWin.dpy, GLWin.win, GLWin.ctx ) ) {
++	    OSL_TRACE("unable to select current GLX context");
+ 	    return false;
+-    }
++	}
+ 
+     int glxMinor, glxMajor;
+     mnGLXVersion = 0;
+@@ -616,8 +643,26 @@ bool OGLTransitionerImpl::initWindowFrom
+ 	    typedef GLint (*glXSwapIntervalProc)(GLint);
+ 	    glXSwapIntervalProc glXSwapInterval = (glXSwapIntervalProc) unx::glXGetProcAddress( (const GLubyte*) "glXSwapIntervalSGI" );
+ 	    if( glXSwapInterval ) {
+-		    glXSwapInterval( 1 );
++		int (*oldHandler)(unx::Display* /*dpy*/, unx::XErrorEvent* /*evnt*/);
++
++		// replace error handler temporarily
++		oldHandler = unx::XSetErrorHandler( oglErrorHandler );
++
++		errorTriggered = false;
++
++		glXSwapInterval( 1 );
++
++		// sync so that we possibly get an XError
++		unx::glXWaitGL();
++		XSync(GLWin.dpy, false);
++
++		if( errorTriggered )
++		    OSL_TRACE("error when trying to set swap interval, NVIDIA or Mesa bug?");
++		else
+ 		    OSL_TRACE("set swap interval to 1 (enable vsync)");
++
++		// restore the error handler
++		unx::XSetErrorHandler( oldHandler );
+ 	    }
+     }
+ #endif
+@@ -649,15 +694,6 @@ bool OGLTransitionerImpl::initWindowFrom
+     return true;
+ }
+ 
+-
+-static bool errorTriggered;
+-int oglErrorHandler( unx::Display* /*dpy*/, unx::XErrorEvent* /*evnt*/ )
+-{
+-    errorTriggered = true;
+-
+-    return 0;
+-}
+-
+ void OGLTransitionerImpl::setSlides( const uno::Reference< rendering::XBitmap >& xLeavingSlide, 
+                                      const uno::Reference< rendering::XBitmap >& xEnteringSlide )
+ {
+@@ -693,7 +729,7 @@ void OGLTransitionerImpl::setSlides( con
+ #ifdef UNX
+ #if defined( GLX_VERSION_1_3 ) && defined( GLX_EXT_texture_from_pixmap )
+ 
+-    if( mnGLXVersion >= 1.2999 && mbTextureFromPixmap && xLeavingSet.is() && xEnteringSet.is() ) {
++    if( mnGLXVersion >= 1.2999 && mbTextureFromPixmap && xLeavingSet.is() && xEnteringSet.is() && mbHasTFPVisual ) {
+ 	Sequence< Any > leaveArgs;
+ 	Sequence< Any > enterArgs;
+ 	if( (xLeavingSet->getFastPropertyValue( 1 ) >>= leaveArgs) &&
+@@ -1128,70 +1164,72 @@ void OGLTransitionerImpl::disposing()
+     }
+ #endif
+ 
++    if( pWindow ) {
+ #ifdef WNT
+-    wglMakeCurrent(GLWin.hDC,GLWin.hRC);
++	wglMakeCurrent(GLWin.hDC,GLWin.hRC);
+ #endif
+ #ifdef UNX
+-    glXMakeCurrent( GLWin.dpy, GLWin.win, GLWin.ctx );
++	glXMakeCurrent( GLWin.dpy, GLWin.win, GLWin.ctx );
+ #endif
+ 
+ #if defined( GLX_VERSION_1_3 ) && defined( GLX_EXT_texture_from_pixmap )
+-    unx::PFNGLXRELEASETEXIMAGEEXTPROC myglXReleaseTexImageEXT = (unx::PFNGLXRELEASETEXIMAGEEXTPROC) unx::glXGetProcAddress( (const GLubyte*) "glXReleaseTexImageEXT" );
+-    if( mbUseLeavingPixmap ) {
++	unx::PFNGLXRELEASETEXIMAGEEXTPROC myglXReleaseTexImageEXT = (unx::PFNGLXRELEASETEXIMAGEEXTPROC) unx::glXGetProcAddress( (const GLubyte*) "glXReleaseTexImageEXT" );
++	if( mbUseLeavingPixmap ) {
+ 
+-	myglXReleaseTexImageEXT( GLWin.dpy, LeavingPixmap, GLX_FRONT_LEFT_EXT );
+-	glXDestroyGLXPixmap( GLWin.dpy, LeavingPixmap );
+-	if( mbFreeLeavingPixmap ) {
+-	    unx::XFreePixmap( GLWin.dpy, maLeavingPixmap );
+-	    mbFreeLeavingPixmap = false;
++	    myglXReleaseTexImageEXT( GLWin.dpy, LeavingPixmap, GLX_FRONT_LEFT_EXT );
++	    glXDestroyGLXPixmap( GLWin.dpy, LeavingPixmap );
++	    if( mbFreeLeavingPixmap ) {
++		unx::XFreePixmap( GLWin.dpy, maLeavingPixmap );
++		mbFreeLeavingPixmap = false;
++	    }
+ 	}
+-    }
+-    if( mbUseEnteringPixmap ) {
+-	myglXReleaseTexImageEXT( GLWin.dpy, EnteringPixmap, GLX_FRONT_LEFT_EXT );
+-	glXDestroyGLXPixmap( GLWin.dpy, EnteringPixmap );
+-	if( mbFreeLeavingPixmap ) {
+-	    unx::XFreePixmap( GLWin.dpy, maLeavingPixmap );
+-	    mbFreeLeavingPixmap = false;
++	if( mbUseEnteringPixmap ) {
++	    myglXReleaseTexImageEXT( GLWin.dpy, EnteringPixmap, GLX_FRONT_LEFT_EXT );
++	    glXDestroyGLXPixmap( GLWin.dpy, EnteringPixmap );
++	    if( mbFreeLeavingPixmap ) {
++		unx::XFreePixmap( GLWin.dpy, maLeavingPixmap );
++		mbFreeLeavingPixmap = false;
++	    }
+ 	}
+-    }
+ #endif
+ 
+-    if( !mbUseLeavingPixmap )
+-	glDeleteTextures(1,&GLleavingSlide);
+-    if( !mbUseEnteringPixmap )
+-	glDeleteTextures(1,&GLenteringSlide);
++	if( !mbUseLeavingPixmap )
++	    glDeleteTextures(1,&GLleavingSlide);
++	if( !mbUseEnteringPixmap )
++	    glDeleteTextures(1,&GLenteringSlide);
+ 
+-    if (pTransition)
+-        pTransition->finish();
++	if (pTransition)
++	    pTransition->finish();
+ 
+ #ifdef UNX
+-    if( mbRestoreSync ) {
+-	// try to reestablish synchronize state
+-	char* sal_synchronize = getenv("SAL_SYNCHRONIZE");
+-	XSynchronize( GLWin.dpy, sal_synchronize && *sal_synchronize == '1' );
+-    }
++	if( mbRestoreSync ) {
++	    // try to reestablish synchronize state
++	    char* sal_synchronize = getenv("SAL_SYNCHRONIZE");
++	    XSynchronize( GLWin.dpy, sal_synchronize && *sal_synchronize == '1' );
++	}
+ #endif
+ 
+ #if defined( WNT )
+ 	if (GLWin.hRC)
+ 	{
+-		wglMakeCurrent( GLWin.hDC, 0 );		// kill Device Context
+-		wglDeleteContext( GLWin.hRC );		// Kill Render Context
+-		ReleaseDC( GLWin.hWnd, GLWin.hDC );// Release Window
++	    wglMakeCurrent( GLWin.hDC, 0 );		// kill Device Context
++	    wglDeleteContext( GLWin.hRC );		// Kill Render Context
++	    ReleaseDC( GLWin.hWnd, GLWin.hDC );         // Release Window
+ 	}
+ #elif defined( UNX )
+-    if(GLWin.ctx)
++	if(GLWin.ctx)
+ 	{
+-        glXMakeCurrent(GLWin.dpy, None, NULL);
+-        if( glGetError() != GL_NO_ERROR ) {
+-            OSL_TRACE("glError: %s", (char *)gluErrorString(glGetError()));
+-        }
+-		glXDestroyContext(GLWin.dpy, GLWin.ctx);
+-		GLWin.ctx = NULL;
++	    glXMakeCurrent(GLWin.dpy, None, NULL);
++	    if( glGetError() != GL_NO_ERROR ) {
++		OSL_TRACE("glError: %s", (char *)gluErrorString(glGetError()));
++	    }
++	    glXDestroyContext(GLWin.dpy, GLWin.ctx);
++	    GLWin.ctx = NULL;
+ 	}
+ #endif
+-	if (pWindow)
+-		delete pWindow;
++	delete pWindow;
++    }
++
+     if (pTransition)
+ 	delete pTransition;
+ 
