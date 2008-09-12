@@ -1,0 +1,131 @@
+package org.openoffice.coooder.comp.ui;
+
+import java.util.Calendar;
+
+import org.openoffice.coooder.XHighlighter;
+import org.openoffice.coooder.XLanguage;
+import org.openoffice.coooder.theLanguagesManager;
+
+import com.sun.star.frame.XDesktop;
+import com.sun.star.frame.XModel;
+import com.sun.star.lang.XComponent;
+import com.sun.star.lang.XMultiComponentFactory;
+import com.sun.star.lang.XServiceInfo;
+import com.sun.star.lang.XSingleComponentFactory;
+import com.sun.star.lib.uno.helper.Factory;
+import com.sun.star.lib.uno.helper.WeakBase;
+import com.sun.star.registry.XRegistryKey;
+import com.sun.star.task.XJobExecutor;
+import com.sun.star.uno.UnoRuntime;
+import com.sun.star.uno.XComponentContext;
+
+
+public final class ParseTriggerImpl extends WeakBase implements XServiceInfo, XJobExecutor {
+
+    private static final String IMPLEMENTATION_NAME = ParseTriggerImpl.class.getName();
+    private static final String[] SERVICE_NAMES = { "org.openoffice.coooder.ui.ParseTrigger" };
+
+    private final XComponentContext mContext;
+
+
+    public ParseTriggerImpl(XComponentContext pContext) {
+        mContext = pContext;
+    };
+
+    public static XSingleComponentFactory __getComponentFactory(String pImplementationName) {
+        XSingleComponentFactory xFactory = null;
+
+        if (pImplementationName.equals(IMPLEMENTATION_NAME)) {
+            xFactory = Factory.createComponentFactory(ParseTriggerImpl.class, SERVICE_NAMES);
+        }
+        return xFactory;
+    }
+
+    public static boolean __writeRegistryServiceInfo(XRegistryKey pRegistryKey) {
+        return Factory.writeRegistryServiceInfo(IMPLEMENTATION_NAME,
+                                                SERVICE_NAMES, pRegistryKey);
+    }
+
+    
+    //------------------------------------------ com.sun.star.lang.XServiceInfo
+    
+    
+    public String getImplementationName() {
+        return IMPLEMENTATION_NAME;
+    }
+
+    public boolean supportsService(String pService) {
+        int len = SERVICE_NAMES.length;
+
+        for( int i=0; i < len; i++) {
+            if (pService.equals(SERVICE_NAMES[i]))
+                return true;
+        }
+        return false;
+    }
+
+    public String[] getSupportedServiceNames() {
+        return SERVICE_NAMES;
+    }
+
+    
+    //------------------------------------------ com.sun.star.task.XJobExecutor
+    
+    
+    public void trigger(String pEvent)
+    {
+        ProgressDialog monitor = null;
+        try {
+            // Check if the selection is a text selection
+            XMultiComponentFactory xMngr = mContext.getServiceManager();
+            Object desktop = xMngr.createInstanceWithContext("com.sun.star.frame.Desktop", mContext);
+            XDesktop xDesktop = (XDesktop)UnoRuntime.queryInterface(XDesktop.class, desktop);
+            XComponent xComponent = xDesktop.getCurrentComponent();
+            XModel xDocModel = (XModel)UnoRuntime.queryInterface(XModel.class, xComponent);
+            
+            XServiceInfo xInfos = (XServiceInfo)UnoRuntime.queryInterface(
+                    XServiceInfo.class, xDocModel.getCurrentSelection());
+            if (!xInfos.supportsService("com.sun.star.text.TextRanges")) {
+                throw new Exception("Can only highlight code snippets");
+            }
+
+            // Ask for the language
+            String langId = askLanguage();
+            
+            if (langId != null) {
+                
+                XLanguage xLanguage = theLanguagesManager.get(mContext).getLanguage(langId);
+                
+                // Parse
+                Object highlighter = xMngr.createInstanceWithContext(
+                        "org.openoffice.coooder.Highlighter", mContext);
+                XHighlighter xHighlighter = (XHighlighter)UnoRuntime.queryInterface(
+                        XHighlighter.class, highlighter);
+
+                xHighlighter.setLanguage(xLanguage);
+                
+                // Run the progress monitor
+                monitor = new ProgressDialog(mContext);
+                monitor.execute();
+
+                // Parse the code snippet
+                long debut = Calendar.getInstance().getTimeInMillis();
+                xHighlighter.parse(monitor);
+                long fin = Calendar.getInstance().getTimeInMillis();
+                long duree = fin - debut;
+                
+                System.out.println("Highlighting duration: (in ms)" + duree);
+            }
+        } catch (Exception e) {
+            monitor.updateProgress(100);
+            
+            String title = "Error during syntax highlighting";
+            AbstractDialog.showErrorDialog(mContext, title, e.getMessage());
+        }
+    }
+
+    private String askLanguage() {
+        LanguageDialog dlg = new LanguageDialog(mContext);
+        return dlg.execute();
+    }
+}
