@@ -1,0 +1,321 @@
+diff --git sc/inc/dpcachetable.hxx sc/inc/dpcachetable.hxx
+index 7b2be7e..8a88c70 100644
+--- sc/inc/dpcachetable.hxx
++++ sc/inc/dpcachetable.hxx
+@@ -38,7 +38,6 @@
+ #include "collect.hxx"
+ 
+ #include <vector>
+-#include <set>
+ #include <hash_map>
+ #include <boost/shared_ptr.hpp>
+ #include <com/sun/star/uno/Reference.hxx>
+@@ -103,16 +102,24 @@ class ScDPCacheTable
+ {
+ public:
+ 
+-    /** individual cell within table. */
+-    struct Cell
++    struct CellContent
+     {
+-        SCROW       mnCategoryRef;
+         sal_Int32   mnStrId;
+         sal_uInt8   mnType;
+         double      mfValue;
+         bool        mbNumeric;
+ 
++        CellContent();
++    };
++
++    /** individual cell within table. */
++    struct Cell
++    {
++        SCROW           mnCategoryRef;
++        CellContent*    mpContent;
++
+         Cell();
++        ~Cell();
+     };
+ 
+     /** individual filter item used in SingleFilter and GroupFilter. */
+@@ -131,7 +138,7 @@ public:
+     public:
+         /** returns true if the matching condition is met for a single cell
+             value, or false otherwise. */
+-        virtual bool match(const Cell& rCell) const = 0;
++        virtual bool match(const CellContent& rCell) const = 0;
+     };
+ 
+     /** ordinary single-item filter. */
+@@ -141,7 +148,7 @@ public:
+         explicit SingleFilter();
+         explicit SingleFilter(sal_Int32 nMatchStrId, double fValue, bool bHasValue);
+ 
+-        virtual bool match(const Cell& rCell) const;
++        virtual bool match(const CellContent& rCell) const;
+ 
+         const String    getMatchString() const;
+         double          getMatchValue() const;
+@@ -157,7 +164,7 @@ public:
+     public:
+         GroupFilter();
+         virtual ~GroupFilter(){}
+-        virtual bool match(const Cell& rCell) const;
++        virtual bool match(const CellContent& rCell) const;
+ 
+         void addMatchItem(const String& rStr, double fVal, bool bHasValue);
+ 
+@@ -202,7 +209,7 @@ public:
+     /** Get the cell instance at specified location within the data grid. Note
+         that the data grid doesn't include the header row.  Don't delete the
+         returned object! */
+-    const ::ScDPCacheTable::Cell* getCell(SCCOL nCol, SCROW nRow, bool bRepeatIfEmpty = false) const;
++    const ::ScDPCacheTable::CellContent* getCell(SCCOL nCol, SCROW nRow, bool bRepeatIfEmpty = false) const;
+ 
+     const String* getFieldName(sal_Int32 nIndex) const;
+ 
+@@ -232,8 +239,7 @@ private:
+      * Check if a given row meets all specified criteria. 
+      */
+     bool isRowQualified(sal_Int32 nRow, const ::std::vector<Criterion>& rCriteria, bool bRepeatIfEmpty) const;
+-    void getValueData(ScDocument* pDoc, const ScAddress& rPos, Cell& rCell);
+-    ScDPCacheTable::Cell getSelectedDimension(ScDPDimension* pDim) const;
++    void getValueData(ScDocument* pDoc, const ScAddress& rPos, CellContent& rCell);
+ 
+ private:
+     typedef ::boost::shared_ptr<TypedStrCollection> TypedStrCollectionPtr;
+diff --git sc/source/core/data/dpcachetable.cxx sc/source/core/data/dpcachetable.cxx
+index 707b56d..3e53a6b 100644
+--- sc/source/core/data/dpcachetable.cxx
++++ sc/source/core/data/dpcachetable.cxx
+@@ -151,8 +151,7 @@ sal_Int32 ScSharedString::getStringId(const String& aStr)
+ 
+ // ----------------------------------------------------------------------------
+ 
+-ScDPCacheTable::Cell::Cell() :
+-    mnCategoryRef(0),
++ScDPCacheTable::CellContent::CellContent() :
+     mnStrId(ScSharedString::EMPTY),
+     mnType(SC_VALTYPE_EMPTY),
+     mfValue(0.0),
+@@ -160,6 +159,21 @@ ScDPCacheTable::Cell::Cell() :
+ {
+ }
+ 
++static ScDPCacheTable::CellContent EmptyCellContent = ScDPCacheTable::CellContent();
++
++// ----------------------------------------------------------------------------
++
++ScDPCacheTable::Cell::Cell() :
++    mnCategoryRef(0),
++    mpContent(NULL)
++{
++}
++
++ScDPCacheTable::Cell::~Cell()
++{
++    delete mpContent;
++}
++
+ // ----------------------------------------------------------------------------
+ 
+ ScDPCacheTable::FilterItem::FilterItem() :
+@@ -182,7 +196,7 @@ ScDPCacheTable::SingleFilter::SingleFilter(sal_Int32 nMatchStrId, double fValue,
+     maItem.mbHasValue   = bHasValue;
+ }
+ 
+-bool ScDPCacheTable::SingleFilter::match(const Cell& rCell) const
++bool ScDPCacheTable::SingleFilter::match(const CellContent& rCell) const
+ {
+     if (rCell.mnStrId != maItem.mnMatchStrId &&
+         (!rCell.mbNumeric || rCell.mfValue != maItem.mfValue))
+@@ -216,7 +230,7 @@ ScDPCacheTable::GroupFilter::GroupFilter()
+ {
+ }
+ 
+-bool ScDPCacheTable::GroupFilter::match(const Cell& rCell) const
++bool ScDPCacheTable::GroupFilter::match(const CellContent& rCell) const
+ {
+     vector<FilterItem>::const_iterator itrEnd = maItems.end();
+     for (vector<FilterItem>::const_iterator itr = maItems.begin(); itr != itrEnd; ++itr)
+@@ -334,24 +348,28 @@ void ScDPCacheTable::fillTable(ScDocument* pDoc, const ScRange& rRange, const Sc
+             Cell& rCell = maTable.back().back();
+             rCell.mnCategoryRef = maTable.size()-1;
+ 
+-            if (nRow == 0 || pDoc->HasData(nStartCol + nCol, nStartRow + nRow, nTab))
++            String aCellStr;
++            bool bReadCell = nRow == 0 || pDoc->HasData(nStartCol + nCol, nStartRow + nRow, nTab);
++            if (bReadCell)
++            {    
+                 aLastNonEmptyRows[nCol] = maTable.size()-1;
++
++                rCell.mpContent = new CellContent;
++                pDoc->GetString(nStartCol + nCol, nStartRow + nRow, nTab, aCellStr);
++                rCell.mpContent->mnStrId = ScSharedString::insertString(aCellStr);
++                rCell.mpContent->mnType = SC_VALTYPE_STRING;
++                rCell.mpContent->mbNumeric = false;
++                ScAddress aPos(nStartCol + nCol, nStartRow + nRow, nTab);
++                getValueData(pDoc, aPos, *rCell.mpContent);
++            }
+             else
+                 rCell.mnCategoryRef = aLastNonEmptyRows[nCol];
+ 
+-            String aStr;
+-            pDoc->GetString(nStartCol + nCol, nStartRow + nRow, nTab, aStr);
+-            rCell.mnStrId = ScSharedString::insertString(aStr);
+-            rCell.mnType = SC_VALTYPE_STRING;
+-            rCell.mbNumeric = false;
+-            ScAddress aPos(nStartCol + nCol, nStartRow + nRow, nTab);
+-            getValueData(pDoc, aPos, rCell);
+-
+             TypedStrData* pNew;
+-            if (rCell.mbNumeric)
+-                pNew = new TypedStrData(aStr, rCell.mfValue, SC_STRTYPE_VALUE);
++            if (rCell.mpContent && rCell.mpContent->mbNumeric)
++                pNew = new TypedStrData(aCellStr, rCell.mpContent->mfValue, SC_STRTYPE_VALUE);
+             else
+-                pNew = new TypedStrData(aStr);
++                pNew = new TypedStrData(aCellStr);
+ 
+             if (!maFieldEntries[nCol]->Insert(pNew))
+                 delete pNew;
+@@ -360,7 +378,7 @@ void ScDPCacheTable::fillTable(ScDocument* pDoc, const ScRange& rRange, const Sc
+ }
+ 
+ void lcl_GetCellValue(const Reference<sdbc::XRow>& xRow, sal_Int32 nType, long nCol,
+-             const Date& rNullDate, ScDPCacheTable::Cell& rCell, String& rStr)
++             const Date& rNullDate, ScDPCacheTable::CellContent& rCell, String& rStr)
+ {
+     short nNumType = NUMBERFORMAT_NUMBER;
+     BOOL bEmptyFlag = FALSE;
+@@ -508,12 +526,13 @@ void ScDPCacheTable::fillTable(const Reference<sdbc::XRowSet>& xRowSet, const Da
+             {
+                 maTable.back().push_back( Cell() );
+                 Cell& rCell = maTable.back().back();
++                rCell.mpContent = new CellContent;
+                 String aStr;
+-                lcl_GetCellValue(xRow, aColTypes[nCol], nCol+1, rNullDate, rCell, aStr);
++                lcl_GetCellValue(xRow, aColTypes[nCol], nCol+1, rNullDate, *rCell.mpContent, aStr);
+ 
+                 TypedStrData* pNew;
+-                if (rCell.mbNumeric)
+-                    pNew = new TypedStrData(aStr, rCell.mfValue, SC_STRTYPE_VALUE);
++                if (rCell.mpContent->mbNumeric)
++                    pNew = new TypedStrData(aStr, rCell.mpContent->mfValue, SC_STRTYPE_VALUE);
+                 else
+                     pNew = new TypedStrData(aStr);
+ 
+@@ -552,20 +571,21 @@ void ScDPCacheTable::filterByPageDimension(const vector<Criterion>& rCriteria, b
+         maRowsVisible[nRow] = isRowQualified(nRow, rCriteria, bRepeatIfEmpty);
+ }
+ 
+-const ::ScDPCacheTable::Cell* ScDPCacheTable::getCell(SCCOL nCol, SCROW nRow, bool bRepeatIfEmpty) const
++const ::ScDPCacheTable::CellContent* ScDPCacheTable::getCell(SCCOL nCol, SCROW nRow, bool bRepeatIfEmpty) const
+ {
+     if ( nRow >= static_cast<SCROW>(maTable.size()) )
+         return NULL;
+ 
+-    const vector<Cell>& rRow = maTable.at(nRow);
++    const vector<Cell>& rRow = maTable[nRow];
+     if ( nCol < 0 || static_cast<size_t>(nCol) >= rRow.size() )
+         return NULL;
+ 
+-    const Cell* pCell = &rRow.at(nCol);
+-    if (bRepeatIfEmpty && pCell && pCell->mnType == SC_VALTYPE_EMPTY)
+-        pCell = getCell(nCol, pCell->mnCategoryRef, false);
++    const Cell& rCell = rRow[nCol];
++    const CellContent* pCell = rCell.mpContent;
++    if (bRepeatIfEmpty && !pCell)
++        pCell = getCell(nCol, rCell.mnCategoryRef, false);
+ 
+-    return pCell;
++    return pCell ? pCell : &EmptyCellContent;
+ }
+ 
+ const String* ScDPCacheTable::getFieldName(sal_Int32 nIndex) const
+@@ -649,7 +669,7 @@ void ScDPCacheTable::filterTable(const vector<Criterion>& rCriteria, Sequence< S
+         for (SCCOL nCol = 0; nCol < nColSize; ++nCol)
+         {
+             Any any;
+-            const Cell* pCell = getCell(nCol, nRow, bRepeatIfEmpty);
++            const CellContent* pCell = getCell(nCol, nRow, bRepeatIfEmpty);
+             if (!pCell)
+             {
+                 // This should never happen, but in case this happens, just
+@@ -714,7 +734,7 @@ bool ScDPCacheTable::isRowQualified(sal_Int32 nRow, const vector<Criterion>& rCr
+             // use this criterion.
+             continue;
+ 
+-        const Cell* pCell = getCell(static_cast<SCCOL>(itr->mnFieldIndex), nRow, bRepeatIfEmpty);
++        const CellContent* pCell = getCell(static_cast<SCCOL>(itr->mnFieldIndex), nRow, bRepeatIfEmpty);
+         if (!pCell)
+             // This should never happen, but just in case...
+             return false;
+@@ -725,7 +745,7 @@ bool ScDPCacheTable::isRowQualified(sal_Int32 nRow, const vector<Criterion>& rCr
+     return true;
+ }
+ 
+-void ScDPCacheTable::getValueData(ScDocument* pDoc, const ScAddress& rPos, Cell& rCell)
++void ScDPCacheTable::getValueData(ScDocument* pDoc, const ScAddress& rPos, CellContent& rCell)
+ {
+     ScBaseCell* pCell = pDoc->GetCell(rPos);
+     if (!pCell)
+@@ -763,12 +783,3 @@ void ScDPCacheTable::getValueData(ScDocument* pDoc, const ScAddress& rPos, Cell&
+     }
+ }
+ 
+-ScDPCacheTable::Cell ScDPCacheTable::getSelectedDimension(ScDPDimension* pDim) const
+-{
+-    const ScDPItemData& rData = pDim->GetSelectedData();
+-    Cell aCell;
+-    aCell.mfValue = rData.fValue;
+-    aCell.mbNumeric = rData.bHasValue;
+-    aCell.mnStrId = ScSharedString::getStringId(rData.aString);
+-    return aCell;
+-}
+diff --git sc/source/core/data/dpgroup.cxx sc/source/core/data/dpgroup.cxx
+index 42c1f17..81511c3 100644
+--- sc/source/core/data/dpgroup.cxx
++++ sc/source/core/data/dpgroup.cxx
+@@ -86,7 +86,7 @@ public:
+     ScDPGroupDateFilter(double fMatchValue, sal_Int32 nDatePart, 
+                         const Date* pNullDate, const ScDPNumGroupInfo* pNumInfo);
+ 
+-    virtual bool match(const ScDPCacheTable::Cell &rCell) const;
++    virtual bool match(const ScDPCacheTable::CellContent &rCell) const;
+ 
+ private:
+     ScDPGroupDateFilter(); // disabled
+@@ -110,7 +110,7 @@ ScDPGroupDateFilter::ScDPGroupDateFilter(double fMatchValue, sal_Int32 nDatePart
+ //          mfMatchValue, mnDatePart);
+ }
+ 
+-bool ScDPGroupDateFilter::match(const ScDPCacheTable::Cell& rCell) const
++bool ScDPGroupDateFilter::match(const ScDPCacheTable::CellContent& rCell) const
+ {
+     using namespace ::com::sun::star::sheet;
+     using ::rtl::math::approxFloor;
+diff --git sc/source/core/data/dptabdat.cxx sc/source/core/data/dptabdat.cxx
+index dc42601..0d6ac5c 100644
+--- sc/source/core/data/dptabdat.cxx
++++ sc/source/core/data/dptabdat.cxx
+@@ -258,7 +258,8 @@ void ScDPTableData::FillRowDataFromCacheTable(sal_Int32 nRow, const ScDPCacheTab
+         long nDim = rInfo.aDataSrcCols[i];
+         rData.aValues.push_back( ScDPValueData() );
+         ScDPValueData& rVal = rData.aValues.back();
+-        const ScDPCacheTable::Cell* pCell = rCacheTable.getCell(static_cast<SCCOL>(nDim), static_cast<SCROW>(nRow));
++        const ScDPCacheTable::CellContent* pCell = rCacheTable.getCell(
++            static_cast<SCCOL>(nDim), static_cast<SCROW>(nRow));
+         if (pCell)
+         {
+             rVal.fValue = pCell->mbNumeric ? pCell->mfValue : 0.0;
+@@ -321,7 +322,8 @@ void ScDPTableData::GetItemData(const ScDPCacheTable& rCacheTable, sal_Int32 nRo
+             continue;
+         }
+ 
+-        const ScDPCacheTable::Cell* pCell = rCacheTable.getCell(static_cast<SCCOL>(nDim), static_cast<SCROW>(nRow), IsRepeatIfEmpty());
++        const ScDPCacheTable::CellContent* pCell = rCacheTable.getCell(
++            static_cast<SCCOL>(nDim), static_cast<SCROW>(nRow), IsRepeatIfEmpty());
+         if (!pCell || pCell->mnType == SC_VALTYPE_EMPTY)
+             continue;
+ 
