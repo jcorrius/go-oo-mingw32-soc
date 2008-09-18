@@ -1,0 +1,566 @@
+diff -rup ../ooo300-m4-orig/offapi/com/sun/star/presentation/XTransitionFactory.idl offapi/com/sun/star/presentation/XTransitionFactory.idl
+--- ../ooo300-m4-orig/offapi/com/sun/star/presentation/XTransitionFactory.idl	2008-04-11 12:33:10.000000000 +0200
++++ offapi/com/sun/star/presentation/XTransitionFactory.idl	2008-09-18 11:49:53.000000000 +0200
+@@ -85,8 +85,7 @@ interface XTransitionFactory : ::com::su
+                                   [in] short                                 transitionSubType,
+                                   [in] XSlideShowView                        view,
+                                   [in] com::sun::star::rendering::XBitmap    leavingBitmap,
+-                                  [in] com::sun::star::rendering::XBitmap    enteringBitmap,
+-                                  [in] com::sun::star::geometry::RealPoint2D slideOffset );
++                                  [in] com::sun::star::rendering::XBitmap    enteringBitmap );
+ };
+ 
+ service TransitionFactory : XTransitionFactory;
+diff -rup ../ooo300-m4-orig/offapi/com/sun/star/presentation/XTransition.idl offapi/com/sun/star/presentation/XTransition.idl
+--- ../ooo300-m4-orig/offapi/com/sun/star/presentation/XTransition.idl	2008-04-11 12:32:51.000000000 +0200
++++ offapi/com/sun/star/presentation/XTransition.idl	2008-09-17 14:55:45.000000000 +0200
+@@ -35,7 +35,14 @@
+ #include <com/sun/star/uno/XInterface.idl> 
+ #endif 
+ 
+-module com {  module sun {  module star {  module presentation {
++module com {  module sun {  module star {
++
++module rendering { interface XBitmap; };
++
++module presentation {
++
++interface XSlideShowView;
++
+ /** Transition interface to render custom transitions over time.<p>
+ 
+     @since OOo 2.4
+@@ -49,6 +56,10 @@ interface XTransition : ::com::sun::star
+         [0,1] range.
+      */
+     void update( [in] double t );
++
++    void viewChanged( [in] XSlideShowView                        view,
++		      [in] com::sun::star::rendering::XBitmap    leavingBitmap,
++		      [in] com::sun::star::rendering::XBitmap    enteringBitmap );
+ };
+ 
+ }; }; }; };
+diff -rup ../ooo300-m4-orig/slideshow//source/engine/OGLTrans/OGLTrans_TransitionerImpl.cxx slideshow//source/engine/OGLTrans/OGLTrans_TransitionerImpl.cxx
+--- ../ooo300-m4-orig/slideshow//source/engine/OGLTrans/OGLTrans_TransitionerImpl.cxx	2008-09-17 12:12:55.000000000 +0200
++++ slideshow//source/engine/OGLTrans/OGLTrans_TransitionerImpl.cxx	2008-09-18 11:50:32.000000000 +0200
+@@ -162,14 +162,22 @@ class OGLTransitionerImpl : private cppu
+ {
+ public:
+     explicit OGLTransitionerImpl(OGLTransitionImpl* pOGLTransition);
+-    bool initWindowFromSlideShowView( const uno::Reference< presentation::XSlideShowView >& xView, double, double);
+-    void setSlides( const uno::Reference< rendering::XBitmap >& xLeavingSlide , const uno::Reference< rendering::XBitmap >& xEnteringSlide );
+-    static bool initialize( const uno::Reference< presentation::XSlideShowView >& xView );
++    bool initWindowFromSlideShowView( const uno::Reference< presentation::XSlideShowView >& xView );
++    void setSlides( const Reference< rendering::XBitmap >& xLeavingSlide , const uno::Reference< rendering::XBitmap >& xEnteringSlide );
++    static bool initialize( const Reference< presentation::XSlideShowView >& xView );
+ 
+     // XTransition
+-    virtual void SAL_CALL update( double nTime ) throw (uno::RuntimeException);
++    virtual void SAL_CALL update( double nTime )
++	throw (uno::RuntimeException);
++    virtual void SAL_CALL viewChanged( const Reference< presentation::XSlideShowView >& rView,
++				       const Reference< rendering::XBitmap >& rLeavingBitmap,
++				       const Reference< rendering::XBitmap >& rEnteringBitmap )
++	throw (uno::RuntimeException);
+     
+ protected:
++    void disposeContextAndWindow();
++    void disposeTextures();
++
+     // WeakComponentImplHelperBase
+     virtual void SAL_CALL disposing();
+     
+@@ -236,6 +244,7 @@ private:
+     */
+     class SystemChildWindow* pWindow;
+ 
++    Reference< presentation::XSlideShowView > mxView;
+     Reference< rendering::XIntegerBitmap > mxLeavingBitmap;
+     Reference< rendering::XIntegerBitmap > mxEnteringBitmap;
+     
+@@ -321,7 +330,7 @@ float OGLTransitionerImpl::cnGLVersion;
+ bool OGLTransitionerImpl::cbMesa;
+ bool OGLTransitionerImpl::cbGLXPresent;
+ 
+-bool OGLTransitionerImpl::initialize( const uno::Reference< presentation::XSlideShowView >& xView )
++bool OGLTransitionerImpl::initialize( const Reference< presentation::XSlideShowView >& xView )
+ {
+     // not thread safe
+     static bool initialized = false;
+@@ -330,7 +339,7 @@ bool OGLTransitionerImpl::initialize( co
+         OGLTransitionerImpl *instance;
+ 
+         instance = new OGLTransitionerImpl( NULL );
+-        if( instance->initWindowFromSlideShowView( xView, 0, 0 ) ) {
++        if( instance->initWindowFromSlideShowView( xView ) ) {
+ 
+             const GLubyte* version = glGetString( GL_VERSION );
+             if( version && version[0] ) {
+@@ -373,6 +382,8 @@ bool OGLTransitionerImpl::createWindow(
+ 
+     GLWin.win = sysData->aWindow;
+ 
++    OSL_TRACE("parent window: %d", GLWin.win);
++
+     unx::XWindowAttributes xattr;
+     unx::XGetWindowAttributes( GLWin.dpy, GLWin.win, &xattr );
+ 
+@@ -555,15 +566,19 @@ bool OGLTransitionerImpl::createWindow(
+     return false;
+ }
+ 
+-bool OGLTransitionerImpl::initWindowFromSlideShowView( const uno::Reference< presentation::XSlideShowView >& xView, double, double)
++bool OGLTransitionerImpl::initWindowFromSlideShowView( const Reference< presentation::XSlideShowView >& xView )
+ {
+     osl::MutexGuard const guard( m_aMutex );
+ 
+     if (isDisposed())
+         return false;
+ 
++    mxView.set( xView, UNO_QUERY );
++    if( !mxView.is() )
++	return false;
++
+     /// take the XSlideShowView and extract the parent window from it. see viewmediashape.cxx
+-    uno::Reference< rendering::XCanvas > xCanvas(xView->getCanvas(), uno::UNO_QUERY_THROW);
++    uno::Reference< rendering::XCanvas > xCanvas(mxView->getCanvas(), uno::UNO_QUERY_THROW);
+     uno::Sequence< uno::Any > aDeviceParams;
+     ::canvas::tools::getDeviceInfo( xCanvas, aDeviceParams );
+ 
+@@ -575,7 +590,7 @@ bool OGLTransitionerImpl::initWindowFrom
+     if( !createWindow( reinterpret_cast< Window* >( aVal ) ) )
+ 	return false;
+ 
+-    awt::Rectangle aCanvasArea = xView->getCanvasArea();
++    awt::Rectangle aCanvasArea = mxView->getCanvasArea();
+     pWindow->SetPosSizePixel(aCanvasArea.X, aCanvasArea.Y, aCanvasArea.Width, aCanvasArea.Height);
+     GLWin.Width = aCanvasArea.Width;
+     GLWin.Height = aCanvasArea.Height;
+@@ -714,6 +729,10 @@ void OGLTransitionerImpl::setSlides( con
+     SlideRect.Y1 = 0;
+     SlideRect.Y2 = SlideSize.Height;
+ 
++    OSL_TRACE("leaving bitmap area: %dx%d", SlideSize.Width, SlideSize.Height);
++    SlideSize = mxEnteringBitmap->getSize();
++    OSL_TRACE("entering bitmap area: %dx%d", SlideSize.Width, SlideSize.Height);
++
+ #ifdef UNX
+     unx::glXWaitGL();
+     XSync(GLWin.dpy, false);
+@@ -1145,6 +1164,94 @@ void SAL_CALL OGLTransitionerImpl::updat
+ #endif
+ }
+ 
++void SAL_CALL OGLTransitionerImpl::viewChanged( const Reference< presentation::XSlideShowView >& rView,
++						const Reference< rendering::XBitmap >& rLeavingBitmap,
++						const Reference< rendering::XBitmap >& rEnteringBitmap )
++    throw (uno::RuntimeException)
++{
++    OSL_TRACE("transitioner: view changed");
++
++    disposeTextures();
++    disposeContextAndWindow();
++
++    initWindowFromSlideShowView( rView );
++    setSlides( rLeavingBitmap, rEnteringBitmap );
++}
++
++void OGLTransitionerImpl::disposeContextAndWindow()
++{
++#if defined( WNT )
++    if (GLWin.hRC)
++    {
++	wglMakeCurrent( GLWin.hDC, 0 );		// kill Device Context
++	wglDeleteContext( GLWin.hRC );		// Kill Render Context
++	ReleaseDC( GLWin.hWnd, GLWin.hDC );         // Release Window
++    }
++#elif defined( UNX )
++    if(GLWin.ctx)
++    {
++	glXMakeCurrent(GLWin.dpy, None, NULL);
++	if( glGetError() != GL_NO_ERROR ) {
++	    OSL_TRACE("glError: %s", (char *)gluErrorString(glGetError()));
++	}
++	glXDestroyContext(GLWin.dpy, GLWin.ctx);
++	GLWin.ctx = NULL;
++    }
++#endif
++    if( pWindow ) {
++	delete pWindow;
++	pWindow = NULL;
++	GLWin.win = 0;
++    }
++}
++
++void OGLTransitionerImpl::disposeTextures()
++{
++#ifdef WNT
++    wglMakeCurrent(GLWin.hDC,GLWin.hRC);
++#endif
++#ifdef UNX
++    glXMakeCurrent( GLWin.dpy, GLWin.win, GLWin.ctx );
++#endif
++
++#if defined( GLX_VERSION_1_3 ) && defined( GLX_EXT_texture_from_pixmap )
++    unx::PFNGLXRELEASETEXIMAGEEXTPROC myglXReleaseTexImageEXT = (unx::PFNGLXRELEASETEXIMAGEEXTPROC) unx::glXGetProcAddress( (const GLubyte*) "glXReleaseTexImageEXT" );
++    if( mbUseLeavingPixmap ) {
++
++	myglXReleaseTexImageEXT( GLWin.dpy, LeavingPixmap, GLX_FRONT_LEFT_EXT );
++	glXDestroyGLXPixmap( GLWin.dpy, LeavingPixmap );
++	LeavingPixmap = 0;
++	if( mbFreeLeavingPixmap ) {
++	    unx::XFreePixmap( GLWin.dpy, maLeavingPixmap );
++	    mbFreeLeavingPixmap = false;
++	    maLeavingPixmap = 0;
++	}
++    }
++    if( mbUseEnteringPixmap ) {
++	myglXReleaseTexImageEXT( GLWin.dpy, EnteringPixmap, GLX_FRONT_LEFT_EXT );
++	glXDestroyGLXPixmap( GLWin.dpy, EnteringPixmap );
++	EnteringPixmap = 0;
++	if( mbFreeEnteringPixmap ) {
++	    unx::XFreePixmap( GLWin.dpy, maEnteringPixmap );
++	    mbFreeEnteringPixmap = false;
++	    maEnteringPixmap = 0;
++	}
++    }
++#endif
++
++    if( !mbUseLeavingPixmap ) {
++	glDeleteTextures(1,&GLleavingSlide);
++	GLleavingSlide = 0;
++    }
++    if( !mbUseEnteringPixmap ) {
++	glDeleteTextures(1,&GLenteringSlide);
++	GLleavingSlide = 0;
++    }
++
++    mbUseLeavingPixmap = false;
++    mbUseEnteringPixmap = false;
++}
++
+ // we are about to be disposed (someone call dispose() on us)
+ void OGLTransitionerImpl::disposing()
+ {
+@@ -1165,38 +1272,8 @@ void OGLTransitionerImpl::disposing()
+ #endif
+ 
+     if( pWindow ) {
+-#ifdef WNT
+-	wglMakeCurrent(GLWin.hDC,GLWin.hRC);
+-#endif
+-#ifdef UNX
+-	glXMakeCurrent( GLWin.dpy, GLWin.win, GLWin.ctx );
+-#endif
+ 
+-#if defined( GLX_VERSION_1_3 ) && defined( GLX_EXT_texture_from_pixmap )
+-	unx::PFNGLXRELEASETEXIMAGEEXTPROC myglXReleaseTexImageEXT = (unx::PFNGLXRELEASETEXIMAGEEXTPROC) unx::glXGetProcAddress( (const GLubyte*) "glXReleaseTexImageEXT" );
+-	if( mbUseLeavingPixmap ) {
+-
+-	    myglXReleaseTexImageEXT( GLWin.dpy, LeavingPixmap, GLX_FRONT_LEFT_EXT );
+-	    glXDestroyGLXPixmap( GLWin.dpy, LeavingPixmap );
+-	    if( mbFreeLeavingPixmap ) {
+-		unx::XFreePixmap( GLWin.dpy, maLeavingPixmap );
+-		mbFreeLeavingPixmap = false;
+-	    }
+-	}
+-	if( mbUseEnteringPixmap ) {
+-	    myglXReleaseTexImageEXT( GLWin.dpy, EnteringPixmap, GLX_FRONT_LEFT_EXT );
+-	    glXDestroyGLXPixmap( GLWin.dpy, EnteringPixmap );
+-	    if( mbFreeLeavingPixmap ) {
+-		unx::XFreePixmap( GLWin.dpy, maLeavingPixmap );
+-		mbFreeLeavingPixmap = false;
+-	    }
+-	}
+-#endif
+-
+-	if( !mbUseLeavingPixmap )
+-	    glDeleteTextures(1,&GLleavingSlide);
+-	if( !mbUseEnteringPixmap )
+-	    glDeleteTextures(1,&GLenteringSlide);
++	disposeTextures();
+ 
+ 	if (pTransition)
+ 	    pTransition->finish();
+@@ -1209,25 +1286,7 @@ void OGLTransitionerImpl::disposing()
+ 	}
+ #endif
+ 
+-#if defined( WNT )
+-	if (GLWin.hRC)
+-	{
+-	    wglMakeCurrent( GLWin.hDC, 0 );		// kill Device Context
+-	    wglDeleteContext( GLWin.hRC );		// Kill Render Context
+-	    ReleaseDC( GLWin.hWnd, GLWin.hDC );         // Release Window
+-	}
+-#elif defined( UNX )
+-	if(GLWin.ctx)
+-	{
+-	    glXMakeCurrent(GLWin.dpy, None, NULL);
+-	    if( glGetError() != GL_NO_ERROR ) {
+-		OSL_TRACE("glError: %s", (char *)gluErrorString(glGetError()));
+-	    }
+-	    glXDestroyContext(GLWin.dpy, GLWin.ctx);
+-	    GLWin.ctx = NULL;
+-	}
+-#endif
+-	delete pWindow;
++	disposeContextAndWindow();
+     }
+ 
+     if (pTransition)
+@@ -1235,6 +1294,7 @@ void OGLTransitionerImpl::disposing()
+ 
+     mxLeavingBitmap.clear();
+     mxEnteringBitmap.clear();
++    mxView.clear();
+ }
+ 
+ OGLTransitionerImpl::OGLTransitionerImpl(OGLTransitionImpl* pOGLTransition) : 
+@@ -1243,6 +1303,7 @@ OGLTransitionerImpl::OGLTransitionerImpl
+     GLleavingSlide( 0 ), 
+     GLenteringSlide( 0 ), 
+     pWindow( NULL ), 
++    mxView(),
+     EnteringBytes(),
+     LeavingBytes(),
+     mbRestoreSync( false ),
+@@ -1312,8 +1373,8 @@ public:
+         ::sal_Int16                                           transitionSubType, 
+         const uno::Reference< presentation::XSlideShowView >& view, 
+         const uno::Reference< rendering::XBitmap >&           leavingBitmap, 
+-        const uno::Reference< rendering::XBitmap >&           enteringBitmap, 
+-        const geometry::RealPoint2D&                          slideOffset ) throw (uno::RuntimeException)
++        const uno::Reference< rendering::XBitmap >&           enteringBitmap )
++	throw (uno::RuntimeException)
+     {
+         if( !hasTransition( transitionType, transitionSubType ) )
+             return uno::Reference< presentation::XTransition >();
+@@ -1393,7 +1454,7 @@ public:
+         rtl::Reference<OGLTransitionerImpl> xRes(
+             new OGLTransitionerImpl(pTransition) );
+         if( bGLXPresent ) {
+-            if( !xRes->initWindowFromSlideShowView(view,slideOffset.X,slideOffset.Y))
++            if( !xRes->initWindowFromSlideShowView(view))
+                 return uno::Reference< presentation::XTransition >();
+             xRes->setSlides(leavingBitmap,enteringBitmap);
+         }
+diff -rup ../ooo300-m4-orig/slideshow//source/engine/transitions/slidetransitionfactory.cxx slideshow//source/engine/transitions/slidetransitionfactory.cxx
+--- ../ooo300-m4-orig/slideshow//source/engine/transitions/slidetransitionfactory.cxx	2008-09-17 12:12:55.000000000 +0200
++++ slideshow//source/engine/transitions/slidetransitionfactory.cxx	2008-09-18 11:52:08.000000000 +0200
+@@ -106,6 +106,28 @@ void fillPage( const ::cppcanvas::Canvas
+ 
+ class PluginSlideChange: public SlideChangeBase
+ {
++    struct TransitionViewPair {
++	uno::Reference<presentation::XTransition> mxTransition;
++	UnoViewSharedPtr mpView;
++
++	TransitionViewPair( uno::Reference<presentation::XTransition> xTransition, const UnoViewSharedPtr pView )
++	{
++	    mxTransition = xTransition;
++	    mpView = pView;
++	}
++
++	~TransitionViewPair()
++	{
++	    mxTransition.clear();
++	    mpView.reset();;
++	}
++
++	void update( double t )
++	{
++	    mxTransition->update( t );
++	}
++    };
++
+ public:
+     /** Create a new SlideChanger, for the given leaving and
+         entering slide bitmaps, which uses super secret OpenGL
+@@ -128,43 +150,61 @@ public:
+                          rScreenUpdater,
+                          rEventMultiplexer ),
+         maTransitions(),
+-        mbSuccess( false )
++        mbSuccess( false ),
++	mnTransitionType( nTransitionType ),
++	mnTransitionSubType( nTransitionSubType ),
++	mxFactory( xFactory )
+     {
+         // create one transition per view
+         UnoViewVector::const_iterator aCurrView (rViewContainer.begin());
+         const UnoViewVector::const_iterator aEnd(rViewContainer.end());
+         while( aCurrView != aEnd )
+         {
+-            const ::basegfx::B2DHomMatrix aViewTransform(
+-                (*aCurrView)->getCanvas()->getTransformation() );
+-            const ::basegfx::B2DPoint aOffsetPixel(
+-                aViewTransform * ::basegfx::B2DPoint() );
+-        
+-	    uno::Reference<presentation::XTransition> rTransition = xFactory->createTransition(
+-                    nTransitionType, 
+-                    nTransitionSubType,
+-                    (*aCurrView)->getUnoView(),
+-                    getLeavingBitmap(ViewEntry(*aCurrView))->getXBitmap(),
+-                    getEnteringBitmap(ViewEntry(*aCurrView))->getXBitmap(),
+-                    basegfx::unotools::point2DFromB2DPoint(aOffsetPixel) );
+-
+-	    if( rTransition.is() )
+-		    maTransitions.push_back( rTransition );
+-	    else
+-		    return;
++	    addTransition( *aCurrView );
+ 
+-            ENSURE_OR_THROW(maTransitions.back().is(),
++            ENSURE_OR_THROW(maTransitions.back()->mxTransition.is(),
+                             "Failed to create plugin transition");
+             ++aCurrView;
+         }
+ 	mbSuccess = true;
+     }
++
++    ~PluginSlideChange()
++    {
++	mxFactory.clear();
++
++        ::std::vector< TransitionViewPair* >::const_iterator aCurrView (maTransitions.begin());
++        ::std::vector< TransitionViewPair* >::const_iterator aEnd(maTransitions.end());
++        while( aCurrView != aEnd )
++        {
++	    delete (*aCurrView);
++            ++aCurrView;
++	}
++	maTransitions.clear();
++    }
++
++    bool addTransition( const UnoViewSharedPtr& rView )
++    {
++	uno::Reference<presentation::XTransition> rTransition = mxFactory->createTransition(
++	    mnTransitionType, 
++	    mnTransitionSubType,
++	    rView->getUnoView(),
++	    getLeavingBitmap(ViewEntry(rView))->getXBitmap(),
++	    getEnteringBitmap(ViewEntry(rView))->getXBitmap() );
++
++	if( rTransition.is() )
++	    maTransitions.push_back( new TransitionViewPair( rTransition, rView ) );
++	else
++	    return false;
++
++	return true;
++    }
+         
+     virtual bool operator()( double t )
+     {
+         std::for_each(maTransitions.begin(),
+                       maTransitions.end(),
+-                      boost::bind( &presentation::XTransition::update,
++                      boost::bind( &TransitionViewPair::update,
+                                    _1, t) );
+         return true;
+     }
+@@ -174,14 +214,100 @@ public:
+         return mbSuccess;
+     }
+ 
+-private:
++    // ViewEventHandler
++    virtual void viewAdded( const UnoViewSharedPtr& rView )
++    {
++	OSL_TRACE("PluginSlideChange viewAdded");
++	SlideChangeBase::viewAdded( rView );
++
++        ::std::vector< TransitionViewPair* >::const_iterator aCurrView (maTransitions.begin());
++        ::std::vector< TransitionViewPair* >::const_iterator aEnd(maTransitions.end());
++	bool bKnown = false;
++        while( aCurrView != aEnd )
++        {
++	    if( (*aCurrView)->mpView == rView ) {
++		bKnown = true;
++		break;
++	    }
++            ++aCurrView;
++	}
++
++	if( !bKnown ) {
++	    OSL_TRACE("need to be added");
++
++	    addTransition( rView );
++	}
++    }
++
++    virtual void viewRemoved( const UnoViewSharedPtr& rView )
++    {
++	OSL_TRACE("PluginSlideChange viewRemoved");
++	SlideChangeBase::viewRemoved( rView );
++
++        ::std::vector< TransitionViewPair* >::iterator aCurrView (maTransitions.begin());
++        ::std::vector< TransitionViewPair* >::const_iterator aEnd(maTransitions.end());
++        while( aCurrView != aEnd )
++        {
++	    if( (*aCurrView)->mpView == rView ) {
++		OSL_TRACE( "view removed" );
++		delete (*aCurrView);
++		maTransitions.erase( aCurrView );
++		break;
++	    }
++            ++aCurrView;
++	}
++    }
++
++    virtual void viewChanged( const UnoViewSharedPtr& rView )
++    {
++	OSL_TRACE("PluginSlideChange viewChanged");
++	SlideChangeBase::viewChanged( rView );
++
++        ::std::vector< TransitionViewPair* >::const_iterator aCurrView (maTransitions.begin());
++        ::std::vector< TransitionViewPair* >::const_iterator aEnd(maTransitions.end());
++        while( aCurrView != aEnd )
++        {
++	    if( (*aCurrView)->mpView == rView ) {
++		OSL_TRACE( "view changed" );
++ 		(*aCurrView)->mxTransition->viewChanged( rView->getUnoView(),
++							 getLeavingBitmap(ViewEntry(rView))->getXBitmap(),
++							 getEnteringBitmap(ViewEntry(rView))->getXBitmap() );
++	    } else
++		OSL_TRACE( "view did not changed" );
++
++            ++aCurrView;
++	}
++    }
++
++    virtual void viewsChanged()
++    {
++	OSL_TRACE("PluginSlideChange viewsChanged");
++	SlideChangeBase::viewsChanged();
++
++        ::std::vector< TransitionViewPair* >::const_iterator aCurrView (maTransitions.begin());
++        ::std::vector< TransitionViewPair* >::const_iterator aEnd(maTransitions.end());
++        while( aCurrView != aEnd )
++        {
++	    OSL_TRACE( "view changed" );
++	    (*aCurrView)->mxTransition->viewChanged( (*aCurrView)->mpView->getUnoView(),
++						     getLeavingBitmap(ViewEntry((*aCurrView)->mpView))->getXBitmap(),
++						     getEnteringBitmap(ViewEntry((*aCurrView)->mpView))->getXBitmap() );
++            ++aCurrView;
++	}
++    }
++
++private:	
+     // One transition object per view
+-    std::vector< uno::Reference<presentation::XTransition> > maTransitions;
++    std::vector< TransitionViewPair* > maTransitions;
+ 
+     // bool
+     bool mbSuccess;
+-};
+ 
++    sal_Int16 mnTransitionType;
++    sal_Int16 mnTransitionSubType;
++
++    uno::Reference<presentation::XTransitionFactory> mxFactory;
++};
+ 
+ class ClippedSlideChange : public SlideChangeBase
+ {
