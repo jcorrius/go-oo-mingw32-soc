@@ -439,7 +439,10 @@ class RefreshAll(BaseRecordHandler):
 class SXViewEx9(BaseRecordHandler):
 
     def parseBytes (self):
-        pass
+        rt = globals.getSignedInt(self.bytes[0:2])
+        self.appendLine("record type: 0x%4.4X (always 0x0810)"%rt)
+        autoFmtId = globals.getSignedInt(self.bytes[12:14])
+        self.appendLine("autoformat index: %d"%autoFmtId)
 
 class SXAddlInfo(BaseRecordHandler):
 
