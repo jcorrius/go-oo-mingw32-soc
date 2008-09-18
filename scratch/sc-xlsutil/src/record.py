@@ -434,6 +434,25 @@ class RefreshAll(BaseRecordHandler):
 
 
 # -------------------------------------------------------------------
+# SX - Pivot Table
+
+class SXViewEx9(BaseRecordHandler):
+
+    def parseBytes (self):
+        pass
+
+class SXAddlInfo(BaseRecordHandler):
+
+    def parseBytes (self):
+        pass
+
+class PivotQueryTableEx(BaseRecordHandler):
+
+    def parseBytes (self):
+        pass
+
+
+# -------------------------------------------------------------------
 # CT - Change Tracking
 
 class CTCellContent(BaseRecordHandler):
