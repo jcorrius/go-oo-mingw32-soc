@@ -179,10 +179,9 @@ public final class HighlighterImpl extends WeakBase implements XServiceInfo, XHi
                     // Get the end of the string
                     String escape = "";
                     if (!mLanguage.getEscapeChar().equals("")) {
-                        escape = mLanguage.getEscapeChar() + car;
+                        escape = mLanguage.getEscapeChar();
                     }
-                    int closePos = getClosePos(selectedString, i + 1, car,
-                            new String[]{ escape } );
+                    int closePos = getClosePos(selectedString, i + 1, car, escape);
                     
                     String style = getStyleName(DefinitionsConstants.STYLE_STRING, null);
                     setStyle(cursor, style, i, closePos + 1);
@@ -207,7 +206,7 @@ public final class HighlighterImpl extends WeakBase implements XServiceInfo, XHi
                     // Get the end of the hardquoted string
                     String close = mLanguage.getHardquote()[1];
                     i += hq.length() - 1;
-                    int closePos = getClosePos(selectedString, i + hq.length(), 
+                    int closePos = getHardquotedClosePos(selectedString, i + hq.length(), 
                             close, mLanguage.getHardEscapes());
                     
                     // Set the string style on the characters
@@ -215,7 +214,7 @@ public final class HighlighterImpl extends WeakBase implements XServiceInfo, XHi
                     setStyle(cursor, style, i - 1, closePos + close.length());
                     
                     // Parse the hardquoted string
-                    parseHarquoted(cursor, i + hq.length() - 1, closePos);
+                    parseHarquoted(cursor, i + hq.length() - 1, closePos + 1);
                     i = closePos;
                     
                     // Set the positions for non string parsing for after the string
@@ -501,17 +500,82 @@ public final class HighlighterImpl extends WeakBase implements XServiceInfo, XHi
      * @param pSelected the selection where to look for the close string
      * @param pStart the position from which to start searching
      * @param pClose the close string to look for
+     * @param pEscape the escape sequence
+     * 
+     * @return the position of the close string or <code>-1</code>
+     */
+    private int getClosePos(String pSelected, int pStart, String pClose, String pEscape) {
+        
+        int closePos = -1;
+        
+        boolean escape_open = false;
+        
+        int i = pStart;
+        while (closePos < 0 && i < pSelected.length()) {
+            
+            String test_close = pSelected.substring(i, i + pClose.length());
+            if (!escape_open && test_close.equals(pClose)) {
+                // Test the closing char
+                closePos = i;
+            } else if (!escape_open) {
+                
+                // Test for an escape character
+                String escaped = "";
+                if (i + pEscape.length() < pSelected.length()) {
+                    String test_escape = pSelected.substring(i, i + pEscape.length());
+
+                    if (test_escape.equals(pEscape)) {
+                        escaped = test_escape;
+                    }
+                }
+
+                if (!escaped.equals("")) {
+                    i += escaped.length();
+                    escape_open = true;
+                } else {
+                    i++;
+                }
+            } else {
+                i++;
+                escape_open = false;
+            }
+        }
+        
+        
+        if (closePos == -1) {
+            closePos = pSelected.length() - 1;
+        }
+        
+        return closePos;
+    }
+    
+    /**
+     * Finds the first non-escaped occurrence of the close string in the 
+     * selection after the start position.
+     * 
+     * @param pSelected the selection where to look for the close string
+     * @param pStart the position from which to start searching
+     * @param pClose the close string to look for
      * @param pEscapes the escape sequences that doesn't count as a close string
      * 
      * @return the position of the close string or <code>-1</code>
      */
-    private int getClosePos(String pSelected, int pStart, String pClose, String[] pEscapes) {
+    private int getHardquotedClosePos(String pSelected, int pStart, String pClose, String[] pEscapes) {
         
         int closePos = -1;
         
         int i = pStart;
         while (closePos < 0 && i < pSelected.length()) {
+            
+            // Test the closing char
+            String test_close = pSelected.substring(i, i + pClose.length());
+            if (test_close.equals(pClose)) {
+                closePos = i;
+            } 
+            
+            // Test for an escape sequence
             String escaped = "";
+
             int j = 0;
             while (j < pEscapes.length && escaped.equals("")) {
                 String escape = pEscapes[j];
@@ -524,15 +588,13 @@ public final class HighlighterImpl extends WeakBase implements XServiceInfo, XHi
                 }
                 j++;
             }
-            
-            String test_close = pSelected.substring(i, i + pClose.length());
+
             if (!escaped.equals("")) {
-                i += escaped.length();
-            } else if (test_close.equals(pClose)) {
-                closePos = i;
+                i += escaped.length() - 1;
             }
             i++;
         }
+        
         
         if (closePos == -1) {
             closePos = pSelected.length() - 1;

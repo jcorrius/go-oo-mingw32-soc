@@ -19,6 +19,23 @@
  *   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
+function getColor($color) {
+    $COLORS = array(
+        "black" => "#000000",
+        "navy" => "#000080",
+        "brown" => "#a52a2a",
+        "green" => "#008000",
+        "blue" => "#0000ff"
+    );
+
+    $hexcode = $COLORS[$color];
+    if ($hexcode != null) {
+        $color = $hexcode;
+    }
+    $color = substr($color, 1, strlen($color) - 1);
+    return $color;
+}
+
 function computeStyle($cssStyle) {
     $result = array();
     $parts = split(";", $cssStyle);
@@ -150,8 +167,10 @@ if (is_file($geshiFile)) {
     
     // Compute the symbols element
     $symbols = "<l:symbols>" . getLF($optimize);
-    foreach ($language_data['SYMBOLS'] as $symbol) {
-        $symbols .= "<l:value>" . htmlentities($symbol) . "</l:value>" . getLF($optimize);
+    if ($language_data['SYMBOLS'] != null) {
+        foreach ($language_data['SYMBOLS'] as $symbol) {
+            $symbols .= "<l:value>" . htmlentities($symbol) . "</l:value>" . getLF($optimize);
+        }
     }
     $symbols .= "</l:symbols>" . getLF($optimize);
     $xml .= $symbols;
@@ -262,7 +281,7 @@ if (is_file($geshiFile)) {
 
         $color = $style['color'];
         if (!is_null($color)) {
-            $color = substr($color, 1, strlen($color) - 1);
+            $color = getColor($color);
             $attributes .= " color=\"$color\"";
         }
 
