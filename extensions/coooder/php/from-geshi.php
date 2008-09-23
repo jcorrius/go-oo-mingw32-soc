@@ -168,8 +168,30 @@ if (is_file($geshiFile)) {
     // Compute the symbols element
     $symbols = "<l:symbols>" . getLF($optimize);
     if ($language_data['SYMBOLS'] != null) {
-        foreach ($language_data['SYMBOLS'] as $symbol) {
-            $symbols .= "<l:value>" . htmlentities($symbol) . "</l:value>" . getLF($optimize);
+        $setopened = false;
+        foreach ($language_data['SYMBOLS'] as $key => $symbol) {
+            if (is_array($symbol)) {
+                $setId = "symbols_" + $key;
+
+                $symbols .= "<l:set id=\"" . $setId . "\">" . getLF($optimize);
+                foreach ($symbol as $value) {
+                    $symbols .= "<l:value>" . htmlentities($value) . "</l:value>" . getLF($optimize);
+                    $style = $language_data['STYLES']['SYMBOLS'][$key];
+                    $styles[$setId] = computeStyle($style);
+                }
+                $symbols .= "</l:set>" . getLF($optimize);
+            } else {
+                if (!$setopened) {
+                    $symbols .= "<l:set id=\"symbols_0\">" . getLF($optimize);
+                    $setopened = true;
+                }
+                $symbols .= "<l:value>" . htmlentities($symbol) . "</l:value>" . getLF($optimize);
+                if ($key == (count($language_data['SYMBOLS']) - 1)) {
+                    $symbols .= "</l:set>" . getLF($optimize);
+                    $style = $language_data['STYLES']['SYMBOLS'][0];
+                    $styles["symbols_0"] = computeStyle($style);
+                }
+            }
         }
     }
     $symbols .= "</l:symbols>" . getLF($optimize);
@@ -208,11 +230,11 @@ if (is_file($geshiFile)) {
     foreach ($language_data['KEYWORDS'] as $key => $keywordsSet) {
         $setId = "keywords_$key";
 
-        $keywords .= "<l:keywordsSet id=\"$setId\">" . getLF($optimize);
+        $keywords .= "<l:set id=\"$setId\">" . getLF($optimize);
         foreach ($keywordsSet as $keyword) {
             $keywords .= "<l:value>" . htmlentities($keyword) . "</l:value>" . getLF($optimize);
         }
-        $keywords .= "</l:keywordsSet>" . getLF($optimize);
+        $keywords .= "</l:set>" . getLF($optimize);
 
         // Define the keywords set style
         $style = $language_data['STYLES']['KEYWORDS'][$key];
@@ -265,12 +287,6 @@ if (is_file($geshiFile)) {
     $style = $language_data['STYLES']['ESCAPE_CHAR'][0];
     if ($style != null) {
         $styles['escaped'] = computeStyle($style);
-    }
-    
-    // Get the symbol style
-    $style = $language_data['STYLES']['SYMBOLS'][0];
-    if ($style != null) {
-        $styles['symbol'] = computeStyle($style);
     }
 
     // Compute the styles element

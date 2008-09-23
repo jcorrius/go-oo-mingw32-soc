@@ -18,12 +18,21 @@
 #   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 OUTPUT_DIR=../config/org/openoffice/langs
-GESHI_DIR=/media/stockage/perso/Web/mirror/ftpperso.free.fr/wordpress/wp-content/plugins/wp-syntax/geshi/geshi
+GESHI_VERSION=1.0.8
 
-mkdir $OUTPUT_DIR
+## TODO Change this to fetch the latest language definitions from GeSHi's website
+orig_dir=`pwd`
+cd ../build
+wget http://surfnet.dl.sourceforge.net/sourceforge/geshi/geshi-$GESHI_VERSION.tar.bz2
+tar xjf geshi-$GESHI_VERSION.tar.bz2
+cd $orig_dir
+
+GESHI_DIR=../build/geshi/geshi
+
+mkdir -p $OUTPUT_DIR
 
 for phpFile in `ls $GESHI_DIR/*.php`
 do
-    echo "Converting $phpFile"
+    echo "Converting `basename $phpFile`"
     php ./from-geshi.php $phpFile $OUTPUT_DIR
 done

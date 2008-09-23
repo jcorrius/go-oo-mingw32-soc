@@ -39,7 +39,6 @@ import com.sun.star.xml.dom.XAttr;
 import com.sun.star.xml.dom.XNamedNodeMap;
 import com.sun.star.xml.dom.XNode;
 import com.sun.star.xml.dom.XNodeList;
-import com.sun.star.xml.dom.XText;
 
 
 /**

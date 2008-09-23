@@ -49,7 +49,8 @@ public interface DefinitionsConstants {
     String NODE_CLOSING = "closing";
     
     String NODE_KEYWORDS = "keywords";
-    Object NODE_KEYWORDS_SET = "keywordsSet";
+
+    Object NODE_SET = "set";
     
     String NODE_REGEXPS = "regexps";
     String NODE_REGEXP = "regexp";

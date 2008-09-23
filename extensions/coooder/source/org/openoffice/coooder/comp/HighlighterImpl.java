@@ -130,7 +130,9 @@ public final class HighlighterImpl extends WeakBase implements XServiceInfo, XHi
             // Start with a clean patterns cache
             mPatternsCache.cleanCache();
             
-            pMonitor.updateProgress(0);
+            if (pMonitor != null) {
+                pMonitor.updateProgress(0);
+            }
             
             boolean COMMENT_MATCHED = false;
             int parseStartPos = 0;
@@ -193,7 +195,9 @@ public final class HighlighterImpl extends WeakBase implements XServiceInfo, XHi
                     
                     // Set the positions for non string parsing for after the string
                     parseStartPos = closePos + 1;
-                    pMonitor.updateProgress(Math.round((parseStartPos * 100) / mLength));
+                    if (pMonitor != null) {
+                        pMonitor.updateProgress(Math.round((parseStartPos * 100) / mLength));
+                    }
                     
                 } else if (!hq.equals("") &&
                         i + hq.length() < selectedString.length() && 
@@ -219,7 +223,9 @@ public final class HighlighterImpl extends WeakBase implements XServiceInfo, XHi
                     
                     // Set the positions for non string parsing for after the string
                     parseStartPos = closePos + 1;
-                    pMonitor.updateProgress(Math.round((parseStartPos * 100) / mLength));
+                    if (pMonitor != null) {
+                        pMonitor.updateProgress(Math.round((parseStartPos * 100) / mLength));
+                    }
                     
                 } else {
                     // Is this a multiline comment?
@@ -257,7 +263,9 @@ public final class HighlighterImpl extends WeakBase implements XServiceInfo, XHi
                             
                             // Set the parse positions for after the comment
                             parseStartPos = i + 1;
-                            pMonitor.updateProgress(Math.round((parseStartPos * 100) / mLength));
+                            if (pMonitor != null) {
+                                pMonitor.updateProgress(Math.round((parseStartPos * 100) / mLength));
+                            }
                             
                             break;
                         }
@@ -302,7 +310,9 @@ public final class HighlighterImpl extends WeakBase implements XServiceInfo, XHi
                                 
                                 // Set the parse positions for the after the comment
                                 parseStartPos = i;
-                                pMonitor.updateProgress(Math.round((parseStartPos * 100) / mLength));
+                                if (pMonitor != null) {
+                                    pMonitor.updateProgress(Math.round((parseStartPos * 100) / mLength));
+                                }
                             }
                         }
                     }
@@ -318,7 +328,9 @@ public final class HighlighterImpl extends WeakBase implements XServiceInfo, XHi
             
             parseNonString(cursor, parseStartPos, parseEndPos);
             
-            pMonitor.updateProgress(100);
+            if (pMonitor != null) {
+                pMonitor.updateProgress(100);
+            }
             
         } catch (Exception e) {
             throw new HighlightingException("Parsing error", e);
@@ -371,8 +383,8 @@ public final class HighlighterImpl extends WeakBase implements XServiceInfo, XHi
                     keyword = "\\" + keyword;
                 }
                 
-                String regexp = "([^a-zA-Z0-9\\$_\\|\\#;>|^])(" + keyword
-                    + ")(?=[^a-zA-Z0-9_<\\|%\\-&])";
+                String regexp = "([^a-zA-Z0-9\\$_\\|\\#;>|^]|^)(" + keyword
+                    + ")(?=[^a-zA-Z0-9_<\\|%\\-&]|$)";
                 
                 replaceStyle(style, regexp, flags, 2, selected, pCursor, pStart);
             }
@@ -392,9 +404,12 @@ public final class HighlighterImpl extends WeakBase implements XServiceInfo, XHi
         
         // Highlight the symbols
         for (int i = 0; i < mLanguage.getSymbols().length; i++) {
-            String regexp = Pattern.quote(mLanguage.getSymbols()[i]);
-            style = getStyleName(DefinitionsConstants.STYLE_SYMBOL, null);
-            replaceStyle(style, regexp, 0, 0, selected, pCursor, pStart);
+            String[] symbolsSet = mLanguage.getSymbols()[i];
+            for (int j = 0; j < symbolsSet.length; j++) {
+                String regexp = Pattern.quote(symbolsSet[j]);
+                style = getStyleName(DefinitionsConstants.STYLE_SYMBOL, Integer.valueOf(i));
+                replaceStyle(style, regexp, 0, 0, selected, pCursor, pStart);
+            }
         }
     }
 

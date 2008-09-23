@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.Map.Entry;
 
 import org.openoffice.coooder.HighlightingException;
 import org.openoffice.coooder.XLanguage;
@@ -62,7 +63,7 @@ public final class LanguageImpl extends WeakBase implements XServiceInfo, XLangu
     private String[][] mKeywords;
     private boolean mObjectOriented;
     private String[] mObjectSplitters;
-    private String[] mSymbols;
+    private String[][] mSymbols;
     private boolean mCommentCaseSensitivity;
     private HashMap mKeywordCaseSensitivity = new HashMap();
     private HashMap mStyles;
@@ -207,11 +208,11 @@ public final class LanguageImpl extends WeakBase implements XServiceInfo, XLangu
         mObjectSplitters = pObjectSplitters;
     }
 
-    public String[] getSymbols() {
+    public String[][] getSymbols() {
         return mSymbols;
     }
 
-    public void setSymbols(String[] pSymbols) {
+    public void setSymbols(String[][] pSymbols) {
         mSymbols = pSymbols;
     }
 
@@ -281,15 +282,20 @@ public final class LanguageImpl extends WeakBase implements XServiceInfo, XLangu
                 
                 mEscapeChar = Utils.getAttribute(languageNode, DefinitionsConstants.ATTR_ESCAPE_CHAR);
                 
+                // Map of map of ids
+                HashMap ids = new HashMap();
+                
                 // Initialize the object splitters
                 HashMap splittersIds = initSplitters(languageNode);
+                ids.put(DefinitionsConstants.STYLE_MEMBER, splittersIds);
                 
                 // Initialize the comments
                 HashMap commentsIds = initComments(languageNode);
+                ids.put(DefinitionsConstants.STYLE_COMMENT, commentsIds);
                 
                 // Initialize the symbols
-                mSymbols = Utils.getValues(languageNode, 
-                        DefinitionsConstants.NODE_SYMBOLS, true);
+                HashMap symbolsIds = initSymbols(languageNode);
+                ids.put(DefinitionsConstants.STYLE_SYMBOL, symbolsIds);
                 
                 // Initialize the quotemarks
                 mQuotemarks = Utils.getValues(languageNode, 
@@ -305,12 +311,14 @@ public final class LanguageImpl extends WeakBase implements XServiceInfo, XLangu
                 
                 // Initialize the keywords
                 HashMap keywordsIds = initKeywords(languageNode);
+                ids.put(DefinitionsConstants.STYLE_KEYWORD, keywordsIds);
                 
                 // Initialize the regexps
                 HashMap regexpIds = initRegexps(languageNode);
+                ids.put(DefinitionsConstants.STYLE_REGEXP, regexpIds);
                 
                 // Initialize the styles informations
-                initStyles(languageNode, splittersIds, commentsIds, keywordsIds, regexpIds);
+                initStyles(languageNode, ids);
             }
             
         } catch (Exception e) {
@@ -487,34 +495,15 @@ public final class LanguageImpl extends WeakBase implements XServiceInfo, XLangu
             XNodeList children = keywordsNode.getChildNodes();
             for (int i = 0, length = children.getLength(); i < length; i++) {
                 XNode keywordsSet = children.item(i);
-                if (keywordsSet.getNodeName().equals(DefinitionsConstants.NODE_KEYWORDS_SET)) {
-                    // Check for case sensitivity
-                    boolean caseSensitive = true;
-                    try {
-                        String value = Utils.getAttribute(keywordsSet, DefinitionsConstants.ATTR_CASE_SENSITIVE);
-                        caseSensitive = Boolean.parseBoolean(value);
-                    } catch (HighlightingException e) {
-                        // Default value is true
-                        caseSensitive = true;
-                    }
+                SetNode set = new SetNode(keywordsSet);
+                
+                if (set.getId() != null && set.getValues() != null) {
+                    // Update the list and map
+                    keywordSets.add(set.getValues());
+                    int pos = keywordSets.size() - 1;
+                    ids.put(set.getId(), Integer.valueOf(pos));
                     
-                    
-                    // Get the keyword set id
-                    try {
-                        String id = Utils.getAttribute(keywordsSet, DefinitionsConstants.ATTR_ID);
-
-                        // Get the keywords
-                        String[] keywords = Utils.getValues(keywordsSet);
-                    
-                        // Update the list and map
-                        keywordSets.add(keywords);
-                        int pos = keywordSets.size() - 1;
-                        ids.put(id, Integer.valueOf(pos));
-                        
-                        setKeywordCaseSensitivity(pos, caseSensitive);
-                    } catch (HighlightingException e) {
-                        // No ID: no keywordset
-                    }
+                    setKeywordCaseSensitivity(pos, set.isCaseSensitive());
                 }
             }
         }
@@ -525,6 +514,48 @@ public final class LanguageImpl extends WeakBase implements XServiceInfo, XLangu
             aKeywords[i] = (String[])keywordSets.get(i);
         }
         mKeywords = aKeywords;
+        
+        return ids;
+    }
+    
+    /**
+     * Initializes the symbols from the DOM language node and build a map 
+     * of the symbols sets IDs.
+     * 
+     * @param pLanguageNode the DOM language node.
+     * 
+     * @return a map of {@link String} to {@link Integer} mapping the symbols sets ID 
+     *      to their position in the symbols array.
+     */
+    private HashMap initSymbols(XNode pLanguageNode) {
+        
+        HashMap ids = new HashMap();
+        XNode symbolsNode = Utils.getChild(pLanguageNode, 
+                DefinitionsConstants.NODE_SYMBOLS);
+        
+        // Get the keywords in a temporary list
+        ArrayList symbolsSets = new ArrayList();
+        if (symbolsNode != null) {
+            XNodeList children = symbolsNode.getChildNodes();
+            for (int i = 0, length = children.getLength(); i < length; i++) {
+                XNode symbolsSet = children.item(i);
+                SetNode set = new SetNode(symbolsSet);
+                
+                if (set.getId() != null && set.getValues() != null) {
+                    // Update the list and map
+                    symbolsSets.add(set.getValues());
+                    int pos = symbolsSets.size() - 1;
+                    ids.put(set.getId(), Integer.valueOf(pos));
+                }
+            }
+        }
+        
+        // Set the keywords from the temporary list
+        String[][] aSymbols = new String[symbolsSets.size()][];
+        for (int i = 0, length = aSymbols.length; i < length; i++) {
+            aSymbols[i] = (String[])symbolsSets.get(i);
+        }
+        mSymbols = aSymbols;
         
         return ids;
     }
@@ -584,8 +615,7 @@ public final class LanguageImpl extends WeakBase implements XServiceInfo, XLangu
         return ids;
     }
     
-    private void initStyles(XNode pLanguageNode, HashMap pSplitterIds, HashMap pCommentIds, 
-            HashMap pKeywordIds, HashMap pRegexpIds) {
+    private void initStyles(XNode pLanguageNode, HashMap pIds) {
         
         XNode stylesNode = Utils.getChild(pLanguageNode, DefinitionsConstants.NODE_STYLES);
         
@@ -601,7 +631,7 @@ public final class LanguageImpl extends WeakBase implements XServiceInfo, XLangu
                 boolean bold = false;
                 try {
                     String value = Utils.getAttribute(child, DefinitionsConstants.ATTR_BOLD);
-                    bold = Boolean.getBoolean(value);
+                    bold = Boolean.parseBoolean(value);
                 } catch (HighlightingException e) {
                     bold = false;
                 }
@@ -609,7 +639,7 @@ public final class LanguageImpl extends WeakBase implements XServiceInfo, XLangu
                 boolean italic = false;
                 try {
                     String value = Utils.getAttribute(child, DefinitionsConstants.ATTR_ITALIC);
-                    italic = Boolean.getBoolean(value);
+                    italic = Boolean.parseBoolean(value);
                 } catch (HighlightingException e) {
                     italic = false;
                 }
@@ -620,8 +650,7 @@ public final class LanguageImpl extends WeakBase implements XServiceInfo, XLangu
                     
                     // Correct the element for the single comments, regexps, splitters, 
                     // and keywords
-                    element = computeStyleName(element, pSplitterIds, pCommentIds, 
-                            pKeywordIds, pRegexpIds);
+                    element = computeStyleName(element, pIds);
                     
                     mStyles.put(element, new Style(color, bold, italic));
                 } catch (HighlightingException e) {
@@ -631,10 +660,14 @@ public final class LanguageImpl extends WeakBase implements XServiceInfo, XLangu
         }
         
         // Loop over the ids to see if there is no missing style
-        addMissingStyles(pSplitterIds, DefinitionsConstants.STYLE_MEMBER);
-        addMissingStyles(pCommentIds, DefinitionsConstants.STYLE_COMMENT);
-        addMissingStyles(pKeywordIds, DefinitionsConstants.STYLE_KEYWORD);
-        addMissingStyles(pRegexpIds, DefinitionsConstants.STYLE_REGEXP);
+        Iterator iter = pIds.entrySet().iterator();
+        while (iter.hasNext()) {
+            Entry entry = (Entry)iter.next();
+            String style = (String)entry.getKey();
+            HashMap ids = (HashMap)entry.getValue();
+            
+            addMissingStyles(ids, style);
+        }
     }
 
     private void addMissingStyles(HashMap pIds, String pStyle) {
@@ -650,26 +683,23 @@ public final class LanguageImpl extends WeakBase implements XServiceInfo, XLangu
         }
     }
 
-    private String computeStyleName(String pElement, HashMap pSplitterIds,
-            HashMap pCommentIds, HashMap pKeywordIds, HashMap pRegexpIds) {
+    private String computeStyleName(String pElement, HashMap pIds) {
         
-        String styleName = pElement;
+        String styleName = null;
         
-        if (pSplitterIds.containsKey(pElement)) {
-            Integer id = (Integer)pSplitterIds.get(pElement);
-            styleName = DefinitionsConstants.STYLE_MEMBER + id.toString();
+        Iterator iter = pIds.entrySet().iterator();
+        while (iter.hasNext() && styleName == null) {
+            Entry entry = (Entry)iter.next();
+            HashMap ids = (HashMap)entry.getValue();
             
-        } else if (pCommentIds.containsKey(pElement)) {
-            Integer id = (Integer)pCommentIds.get(pElement);
-            styleName = DefinitionsConstants.STYLE_COMMENT + id.toString();
-            
-        } else if (pKeywordIds.containsKey(pElement)) {
-            Integer id = (Integer)pKeywordIds.get(pElement);
-            styleName = DefinitionsConstants.STYLE_KEYWORD + id.toString();
-            
-        } else if (pRegexpIds.containsKey(pElement)) {
-            Integer id = (Integer)pRegexpIds.get(pElement);
-            styleName = DefinitionsConstants.STYLE_REGEXP + id.toString();
+            if (ids.containsKey(pElement)) {
+                Integer id = (Integer)ids.get(pElement);
+                styleName = (String)entry.getKey() + id.toString(); 
+            }
+        }
+        
+        if (styleName == null) {
+            styleName = pElement;
         }
         
         return styleName + "_" + getId();
