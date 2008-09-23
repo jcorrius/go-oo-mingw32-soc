@@ -25,6 +25,10 @@ clean-local:
 	    test "$(BUILDDIR)/$$icons" = "/" || rm -rf "$(BUILDDIR)/$$icons" ; \
 	done
 	test -z "$(BUILDDIR)/gcc-3.4.1" || rm -rf $(BUILDDIR)/gcc-3.4.1
+	test -z "$(BUILDDIR)/bin" || rm -rf $(BUILDDIR)/bin/*
+	test -z "$(BUILDDIR)/include/c++" || rm -rf $(BUILDDIR)/include/c++
+	test -z "$(BUILDDIR)/lib" || rpm -rf $(BUILDDIR)/lib/*
+	test -z "$(BUILDDIR)/libexec" || rpm -rf $(BUILDDIR)/libexec/*
 
 maintainer-clean-local:
 	test -z "$(BUILDDIR)" || rm -rf $(BUILDDIR)
