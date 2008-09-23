@@ -28,7 +28,7 @@ clean-local:
 	test -z "$(BUILDDIR)/bin" || rm -rf $(BUILDDIR)/bin/*
 	test -z "$(BUILDDIR)/include/c++" || rm -rf $(BUILDDIR)/include/c++
 	test -z "$(BUILDDIR)/lib" || rpm -rf $(BUILDDIR)/lib/*
-	test -z "$(BUILDDIR)/libexec" || rpm -rf $(BUILDDIR)/libexec/*
+	test -z "$(BUILDDIR)/libexec" || rm -rf $(BUILDDIR)/libexec/*
 
 maintainer-clean-local:
 	test -z "$(BUILDDIR)" || rm -rf $(BUILDDIR)
