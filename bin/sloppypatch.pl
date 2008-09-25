@@ -27,22 +27,38 @@ for (;;) {
 
 my $eliding = 1;
 my $minusline = '';
+my $minusline_dir = '';
+my $minusline_subpath = '';
 my $sections = 0;
 while (<STDIN>) {
     my $line = $_;
-    if ( $line =~ m/^--- /) {
+    if ( $line =~ m/^--- [ \t]*\.?\/?([^\/]+)([^ \t]+)/ ) {
+	$minusline_topdir="$1";
+	$minusline_subpath="$2";
 	$minusline .= $line;
 	next;
     }
     if ( $line =~ m/^\+\+\+ [ \t]*\.?\/?([^\/]+)([^ \t]+)/ ) {
-	$eliding = ! -d "$applydir/$1";
+	my $topdir="$1";
+	my $subpath="$2";
+
+	# need to use the --- path when the file should get removed
+	chomp $subpath;
+	if ("$topdir$subpath" eq "dev/null") {
+	    $topdir="$minusline_topdir";
+	    $subpath="$minusline_subpath";
+	}
+
+	$eliding = ! -d "$applydir/$topdir";
 
 	if (!$eliding) {
 	    $sections++;
-	    print STDERR "+ apply fragment for $1$2\n";
+	    print STDERR "+ apply fragment for $topdir$subpath\n";
 	}
 	$line = $minusline . $line;
 	$minusline = '';
+	$minusline_topdir='';
+	$minusline_subpath='';
     }
     if (!$eliding) {
 	print $fh $line;
