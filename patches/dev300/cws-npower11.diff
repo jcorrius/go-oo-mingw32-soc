@@ -201,10 +201,10 @@ Index: sc/source/ui/vba/vbaapplication.cxx
 ===================================================================
 RCS file: /cvs/sc/sc/source/ui/vba/vbaapplication.cxx,v
 retrieving revision 1.7
-retrieving revision 1.5.42.4
-diff -u -p -u -p -b -w -B -r1.7 -r1.5.42.4
+retrieving revision 1.5.42.5
+diff -u -p -u -p -b -w -B -r1.7 -r1.5.42.5
 --- sc/source/ui/vba/vbaapplication.cxx	11 Apr 2008 00:47:25 -0000	1.7
-+++ sc/source/ui/vba/vbaapplication.cxx	29 Jul 2008 06:35:39 -0000	1.5.42.4
++++ sc/source/ui/vba/vbaapplication.cxx	30 Sep 2008 14:06:04 -0000	1.5.42.5
 @@ -42,6 +42,7 @@
  #include <com/sun/star/task/XStatusIndicator.hpp>
  #include <org/openoffice/excel/XlMousePointer.hpp>
@@ -223,7 +223,7 @@ diff -u -p -u -p -b -w -B -r1.7 -r1.5.42.4
  #include "sc.hrc"
  
  #include <osl/file.hxx>
-@@ -78,6 +82,10 @@
+@@ -78,9 +82,19 @@
  #include <basic/sbuno.hxx>
  #include <basic/sbmeth.hxx>
  
@@ -234,7 +234,16 @@ diff -u -p -u -p -b -w -B -r1.7 -r1.5.42.4
  using namespace ::org::openoffice;
  using namespace ::com::sun::star;
  
-@@ -122,9 +130,25 @@ ScVbaApplication::getThisWorkbook() thro
++// Enable our own join detection for Intersection and Union
++// should be more efficient than using ScRangeList::Join ( because
++// we already are testing the same things )
++
++#define OWN_JOIN 1
++
+ // #TODO is this defined somewhere else?
+ #if ( defined UNX ) || ( defined OS2 ) //unix
+ #define FILE_PATH_SEPERATOR "/"
+@@ -122,9 +136,25 @@ ScVbaApplication::getThisWorkbook() thro
  	return getActiveWorkbook();
  }
  
@@ -260,7 +269,7 @@ diff -u -p -u -p -b -w -B -r1.7 -r1.5.42.4
      uno::Reference< lang::XServiceInfo > xServiceInfo( getCurrentDocument()->getCurrentSelection(), uno::UNO_QUERY_THROW );
      rtl::OUString sImpementaionName = xServiceInfo->getImplementationName();
      if( sImpementaionName.equalsIgnoreAsciiCaseAscii("com.sun.star.drawing.SvxShapeCollection") )
-@@ -132,6 +156,17 @@ ScVbaApplication::getSelection() throw (
+@@ -132,6 +162,17 @@ ScVbaApplication::getSelection() throw (
          uno::Reference< drawing::XShapes > xShapes( getCurrentDocument()->getCurrentSelection(), uno::UNO_QUERY_THROW );
          uno::Reference< container::XIndexAccess > xIndexAccess( xShapes, uno::UNO_QUERY_THROW );
          uno::Reference< drawing::XShape > xShape( xIndexAccess->getByIndex(0), uno::UNO_QUERY_THROW );
@@ -278,7 +287,7 @@ diff -u -p -u -p -b -w -B -r1.7 -r1.5.42.4
          return uno::makeAny( uno::Reference< msforms::XShape >(new ScVbaShape( this, mxContext, xShape, xShapes, ScVbaShape::getType( xShape ) ) ) );
      }
      else if( xServiceInfo->supportsService( rtl::OUString::createFromAscii("com.sun.star.sheet.SheetCellRange")) ||
-@@ -426,12 +461,17 @@ ScVbaApplication::Range( const uno::Any&
+@@ -426,12 +467,17 @@ ScVbaApplication::Range( const uno::Any&
  }
  
  uno::Any SAL_CALL
@@ -299,98 +308,425 @@ diff -u -p -u -p -b -w -B -r1.7 -r1.5.42.4
  }
  
  
-@@ -883,6 +923,97 @@ ScVbaApplication::Intersect( const uno::
+@@ -800,89 +846,382 @@ ScVbaApplication::PathSeparator(  ) thro
+ 	return sPathSep;
+ }
+ 
++typedef std::list< ScRange > Ranges;
++typedef std::list< ScRangeList > RangesList;
++
++void lcl_addRangesToVec( RangesList& vRanges, const uno::Any& aArg ) throw ( script::BasicErrorException, uno::RuntimeException )
++{
++	ScRangeList theRanges;
++	uno::Reference< excel::XRange > xRange( aArg, uno::UNO_QUERY_THROW );
++	uno::Reference< vba::XCollection > xCol( xRange->Areas( uno::Any() ), uno::UNO_QUERY_THROW );
++	sal_Int32 nCount = xCol->getCount();
++	for( sal_Int32 i = 1; i <= nCount; ++i )
++	{
++		uno::Reference< excel::XRange > xAreaRange( xCol->Item( uno::makeAny( sal_Int32(i) ), uno::Any() ), uno::UNO_QUERY_THROW );
++		uno::Reference< sheet::XCellRangeAddressable > xAddressable( xAreaRange->getCellRange(), uno::UNO_QUERY_THROW );
++		table::CellRangeAddress addr = xAddressable->getRangeAddress(); 
++		ScRange refRange;
++		ScUnoConversion::FillScRange( refRange, addr );
++		theRanges.Append( refRange );
++	}
++	vRanges.push_back( theRanges );
++}
++
++void lcl_addRangeToVec( Ranges& vRanges, const uno::Any& aArg ) throw ( script::BasicErrorException, uno::RuntimeException )
++{
++	uno::Reference< excel::XRange > xRange( aArg, uno::UNO_QUERY_THROW );
++	uno::Reference< vba::XCollection > xCol( xRange->Areas( uno::Any() ), uno::UNO_QUERY_THROW );
++	sal_Int32 nCount = xCol->getCount();
++	for( sal_Int32 i = 1; i <= nCount; ++i )
++	{
++		uno::Reference< excel::XRange > xAreaRange( xCol->Item( uno::makeAny( sal_Int32(i) ), uno::Any() ), uno::UNO_QUERY_THROW );
++		uno::Reference< sheet::XCellRangeAddressable > xAddressable( xAreaRange->getCellRange(), uno::UNO_QUERY_THROW );
++		table::CellRangeAddress addr = xAddressable->getRangeAddress(); 
++		ScRange refRange;
++		ScUnoConversion::FillScRange( refRange, addr );
++		vRanges.push_back( refRange );
++	}
++}
++
++bool lcl_canJoin( ScRange& r1, ScRange& r2 )
++{
++	bool bCanJoin = false;
++	SCCOL startEndColDiff = r2.aStart.Col() - r1.aEnd.Col(); 
++	SCROW startEndRowDiff = r2.aStart.Row() - r1.aEnd.Row(); 
++	SCCOL startColDiff = r2.aStart.Col() - r1.aStart.Col();
++	SCCOL endColDiff = r2.aEnd.Col() - r1.aEnd.Col();
++	SCROW startRowDiff =  r2.aStart.Row() - r1.aStart.Row();
++	SCROW endRowDiff = r2.aEnd.Row() - r1.aEnd.Row();
++	if ( ( startRowDiff == endRowDiff ) && startRowDiff == 0 && startColDiff >=0 && endColDiff > 0 && ( startEndColDiff <= 1 && startEndColDiff >= -r1.aEnd.Col() ) )
++		bCanJoin = true;
++	else if ( ( startColDiff == endColDiff ) && startColDiff == 0 && startRowDiff >= 0 && endRowDiff > 0 && ( startEndRowDiff <= 1 && startEndRowDiff  >= -r1.aEnd.Row() ) )
++		bCanJoin = true;
++#ifdef DEBUG
++	String sr1;
++	String sr2;
++	r1.Format( sr1, SCA_VALID ) ;
++	r2.Format( sr2, SCA_VALID ) ;
++	OSL_TRACE(" canJoin address %s with %s %s ( startRowDiff(%d), endRowDiff(%d), startColDiff(%d) endColDiff(%d) startEndRowDiff(%d), startEndColDiff(%d) ", 
++		rtl::OUStringToOString( sr1, RTL_TEXTENCODING_UTF8 ).getStr(),
++		rtl::OUStringToOString( sr2, RTL_TEXTENCODING_UTF8 ).getStr(), bCanJoin ? "true" : "false", startRowDiff, endRowDiff, startColDiff, endColDiff, startEndRowDiff, startEndColDiff );
++#endif
++	return bCanJoin;
++}
++// strips out ranges that contain other ranges, also
++// if the borders of the intersecting ranges are alligned 
++// then the the range is extended to the larger
++// e.g. Range("A4:D10"), Range("B4:E10") would be combined
++// to Range("A4:E10")
++void lcl_strip_containedRanges( Ranges& vRanges )
++{
++	// get rid of ranges that are surrounded by other ranges
++	for( Ranges::iterator it = vRanges.begin(); it != vRanges.end(); ++it )
++	{
++		for( Ranges::iterator it_inner = vRanges.begin(); it_inner != vRanges.end(); ++it_inner )
++		{
++			if ( it != it_inner )
++			{
++#ifdef DEBUG
++			String r1;
++			String r2;
++			it->Format( r1, SCA_VALID ) ;
++			it_inner->Format( r2, SCA_VALID ) ;
++			OSL_TRACE( "try strip/join address %s with %s ", 
++				rtl::OUStringToOString( r1, RTL_TEXTENCODING_UTF8 ).getStr(),
++				rtl::OUStringToOString( r2, RTL_TEXTENCODING_UTF8 ).getStr() );
++#endif
++				if ( it->In( *it_inner ) )
++					it_inner = vRanges.erase( it_inner );
++				else if ( it_inner->In( *it ) )
++					it = vRanges.erase( it );
++#ifndef OWN_JOIN
++				else if ( (*it_inner).aStart.Row() == (*it).aStart.Row() 
++				&& (*it_inner).aEnd.Row() == (*it).aEnd.Row() )
++				{
++					it->ExtendTo( *it_inner );
++					it_inner = vRanges.erase( it_inner );
++				}
++#else
++				else if ( lcl_canJoin( *it, *it_inner ) )
++				{
++					it->ExtendTo( *it_inner );
++					it_inner = vRanges.erase( it_inner );
++				}
++				else if ( lcl_canJoin( *it_inner, *it) )
++				{
++					it_inner->ExtendTo( *it );
++					it = vRanges.erase( it );
++				}
++#endif
++			}
++		}
++	}
++    
++}
++
++Ranges
++lcl_intersectionImpl( ScRangeList& rl1, ScRangeList& rl2 )
++{
++	Ranges intersections;
++	for ( USHORT x = 0 ; x < rl1.Count(); ++x )
++	{
++		for ( USHORT y = 0 ; y < rl2.Count(); ++y )
++		{
++#ifdef DEBUG
++			String r1;
++			String r2;
++			rl1.GetObject( x )->Format( r1, SCA_VALID ) ;
++			rl2.GetObject( y )->Format( r2, SCA_VALID ) ;
++			OSL_TRACE( "comparing address %s with %s ", 
++				rtl::OUStringToOString( r1, RTL_TEXTENCODING_UTF8 ).getStr(),
++				rtl::OUStringToOString( r2, RTL_TEXTENCODING_UTF8 ).getStr() );
++#endif
++			if( rl1.GetObject( x )->Intersects( *rl2.GetObject( y ) ) )
++			{     
++				ScRange aIntersection = ScRange( Max( rl1.GetObject( x )->aStart.Col(), rl2.GetObject( y )->aStart.Col() ),
++					Max( rl1.GetObject( x )->aStart.Row(), rl2.GetObject( y )->aStart.Row() ),
++					Max( rl1.GetObject( x )->aStart.Tab(), rl2.GetObject( y )->aStart.Tab() ),
++					Min( rl1.GetObject( x )->aEnd.Col(), rl2.GetObject( y )->aEnd.Col() ),
++					Min( rl1.GetObject( x )->aEnd.Row(), rl2.GetObject( y )->aEnd.Row() ),
++						Min( rl1.GetObject( x )->aEnd.Tab(), rl2.GetObject( y )->aEnd.Tab() ) );
++				intersections.push_back( aIntersection );
++			}
++		}
++	}
++	lcl_strip_containedRanges( intersections );
++	return intersections;
++}
++
++// Intersection of a set of ranges ( where each range is represented by a ScRangeList e.g.
++// any range can be a multi-area range )
++// An intersection is performed between each range in the set of ranges. 
++// The resulting set of intersections is then processed to strip out any 
++// intersections that contain other intersections ( and also ranges that directly line up
++// are joined ) ( see lcl_strip_containedRanges )
++RangesList lcl_intersections( RangesList& vRanges )
++{
++	RangesList intersections;
++	for( RangesList::iterator it = vRanges.begin(); it != vRanges.end(); ++it )
++	{
++		Ranges intermediateList;
++		for( RangesList::iterator it_inner = vRanges.begin(); it_inner != vRanges.end(); ++it_inner )
++		{
++			if ( it != it_inner )
++			{
++				Ranges ranges = lcl_intersectionImpl( *it, *it_inner );
++				for ( Ranges::iterator range_it = ranges.begin(); range_it != ranges.end(); ++range_it )
++					intermediateList.push_back( *range_it );					
++			}
++		}
++		it = vRanges.erase( it ); // remove it so we don't include it in the next pass.
++
++		ScRangeList argIntersect;
++		lcl_strip_containedRanges( intermediateList );
++
++		for( Ranges::iterator it_inter = intermediateList.begin(); it_inter != intermediateList.end(); ++it_inter )
++#ifndef OWN_JOIN
++			argIntersect.Join( *it_inter );
++#else
++			argIntersect.Append( *it_inter );
++#endif
++
++		intersections.push_back( argIntersect );
++	}
++	return intersections;
++}
++
+ uno::Reference< excel::XRange > SAL_CALL 
+ ScVbaApplication::Intersect( const uno::Reference< excel::XRange >& Arg1, const uno::Reference< excel::XRange >& Arg2, const uno::Any& Arg3, const uno::Any& Arg4, const uno::Any& Arg5, const uno::Any& Arg6, const uno::Any& Arg7, const uno::Any& Arg8, const uno::Any& Arg9, const uno::Any& Arg10, const uno::Any& Arg11, const uno::Any& Arg12, const uno::Any& Arg13, const uno::Any& Arg14, const uno::Any& Arg15, const uno::Any& Arg16, const uno::Any& Arg17, const uno::Any& Arg18, const uno::Any& Arg19, const uno::Any& Arg20, const uno::Any& Arg21, const uno::Any& Arg22, const uno::Any& Arg23, const uno::Any& Arg24, const uno::Any& Arg25, const uno::Any& Arg26, const uno::Any& Arg27, const uno::Any& Arg28, const uno::Any& Arg29, const uno::Any& Arg30 ) throw (script::BasicErrorException, uno::RuntimeException)
+ {
+-	std::vector< uno::Reference< excel::XRange > > vRanges;
+ 	if ( !Arg1.is() || !Arg2.is() )
+ 		DebugHelper::exception(SbERR_BAD_PARAMETER, rtl::OUString() );
+ 
+-	vRanges.push_back( Arg1 );
+-	vRanges.push_back( Arg2 );
++	RangesList vRanges;
++	lcl_addRangesToVec( vRanges, uno::makeAny( Arg1 ) );
++	lcl_addRangesToVec( vRanges, uno::makeAny( Arg2 ) );
+ 
+ 	if ( Arg3.hasValue() )
+-		vRanges.push_back( uno::Reference< excel::XRange >( Arg3, uno::UNO_QUERY_THROW ) );
++		lcl_addRangesToVec( vRanges, Arg3 );
+ 	if ( Arg4.hasValue() )
+-		vRanges.push_back( uno::Reference< excel::XRange >( Arg4, uno::UNO_QUERY_THROW ) );
++		lcl_addRangesToVec( vRanges, Arg4 );
+ 	if ( Arg5.hasValue() )
+-		vRanges.push_back( uno::Reference< excel::XRange >( Arg5, uno::UNO_QUERY_THROW ) );
++		lcl_addRangesToVec( vRanges, Arg5 );
+ 	if ( Arg6.hasValue() )
+-		vRanges.push_back( uno::Reference< excel::XRange >( Arg6, uno::UNO_QUERY_THROW ) );
++		lcl_addRangesToVec( vRanges, Arg6 );
+ 	if ( Arg7.hasValue() )
+-		vRanges.push_back( uno::Reference< excel::XRange >( Arg7, uno::UNO_QUERY_THROW ) );
++		lcl_addRangesToVec( vRanges, Arg7 );
+ 	if ( Arg8.hasValue() )
+-		vRanges.push_back( uno::Reference< excel::XRange >( Arg8, uno::UNO_QUERY_THROW ) );
++		lcl_addRangesToVec( vRanges, Arg8 );
+ 	if ( Arg9.hasValue() )
+-		vRanges.push_back( uno::Reference< excel::XRange >( Arg9, uno::UNO_QUERY_THROW ) );
++		lcl_addRangesToVec( vRanges, Arg9 );
+ 	if ( Arg10.hasValue() )
+-		vRanges.push_back( uno::Reference< excel::XRange >( Arg10, uno::UNO_QUERY_THROW ) );
++		lcl_addRangesToVec( vRanges, Arg10 );
+ 	if ( Arg11.hasValue() )
+-		vRanges.push_back( uno::Reference< excel::XRange >( Arg11, uno::UNO_QUERY_THROW ) );
++		lcl_addRangesToVec( vRanges, Arg11 );
+ 	if ( Arg12.hasValue() )
+-		vRanges.push_back( uno::Reference< excel::XRange >( Arg12, uno::UNO_QUERY_THROW ) );
++		lcl_addRangesToVec( vRanges, Arg12 );
+ 	if ( Arg13.hasValue() )
+-		vRanges.push_back( uno::Reference< excel::XRange >( Arg13, uno::UNO_QUERY_THROW ) );
++		lcl_addRangesToVec( vRanges, Arg13 );
+ 	if ( Arg14.hasValue() )
+-		vRanges.push_back( uno::Reference< excel::XRange >( Arg14, uno::UNO_QUERY_THROW ) );
++		lcl_addRangesToVec( vRanges, Arg14 );
+ 	if ( Arg15.hasValue() )
+-		vRanges.push_back( uno::Reference< excel::XRange >( Arg15, uno::UNO_QUERY_THROW ) );
++		lcl_addRangesToVec( vRanges, Arg15 );
+ 	if ( Arg16.hasValue() )
+-		vRanges.push_back( uno::Reference< excel::XRange >( Arg16, uno::UNO_QUERY_THROW ) );
++		lcl_addRangesToVec( vRanges, Arg16 );
+ 	if ( Arg17.hasValue() )
+-		vRanges.push_back( uno::Reference< excel::XRange >( Arg17, uno::UNO_QUERY_THROW ) );
++		lcl_addRangesToVec( vRanges, Arg17 );
+ 	if ( Arg18.hasValue() )
+-		vRanges.push_back( uno::Reference< excel::XRange >( Arg18, uno::UNO_QUERY_THROW ) );
++		lcl_addRangesToVec( vRanges, Arg18 );
+ 	if ( Arg19.hasValue() )
+-		vRanges.push_back( uno::Reference< excel::XRange >( Arg19, uno::UNO_QUERY_THROW ) );
++		lcl_addRangesToVec( vRanges, Arg19 );
+ 	if ( Arg20.hasValue() )
+-		vRanges.push_back( uno::Reference< excel::XRange >( Arg20, uno::UNO_QUERY_THROW ) );
++		lcl_addRangesToVec( vRanges, Arg20 );
+ 	if ( Arg21.hasValue() )
+-		vRanges.push_back( uno::Reference< excel::XRange >( Arg21, uno::UNO_QUERY_THROW ) );
++		lcl_addRangesToVec( vRanges, Arg21 );
+ 	if ( Arg22.hasValue() )
+-		vRanges.push_back( uno::Reference< excel::XRange >( Arg22, uno::UNO_QUERY_THROW ) );
++		lcl_addRangesToVec( vRanges, Arg22 );
+ 	if ( Arg23.hasValue() )
+-		vRanges.push_back( uno::Reference< excel::XRange >( Arg23, uno::UNO_QUERY_THROW ) );
++		lcl_addRangesToVec( vRanges, Arg23 );
+ 	if ( Arg24.hasValue() )
+-		vRanges.push_back( uno::Reference< excel::XRange >( Arg24, uno::UNO_QUERY_THROW ) );
++		lcl_addRangesToVec( vRanges, Arg24 );
+ 	if ( Arg25.hasValue() )
+-		vRanges.push_back( uno::Reference< excel::XRange >( Arg25, uno::UNO_QUERY_THROW ) );
++		lcl_addRangesToVec( vRanges, Arg25 );
+ 	if ( Arg26.hasValue() )
+-		vRanges.push_back( uno::Reference< excel::XRange >( Arg26, uno::UNO_QUERY_THROW ) );
++		lcl_addRangesToVec( vRanges, Arg26 );
+ 	if ( Arg27.hasValue() )
+-		vRanges.push_back( uno::Reference< excel::XRange >( Arg27, uno::UNO_QUERY_THROW ) );
++		lcl_addRangesToVec( vRanges, Arg27 );
+ 	if ( Arg28.hasValue() )
+-		vRanges.push_back( uno::Reference< excel::XRange >( Arg28, uno::UNO_QUERY_THROW ) );
++		lcl_addRangesToVec( vRanges, Arg28 );
+ 	if ( Arg29.hasValue() )
+-		vRanges.push_back( uno::Reference< excel::XRange >( Arg29, uno::UNO_QUERY_THROW ) );
++		lcl_addRangesToVec( vRanges, Arg29 );
+ 	if ( Arg30.hasValue() )
+-		vRanges.push_back( uno::Reference< excel::XRange >( Arg30, uno::UNO_QUERY_THROW ) );
++		lcl_addRangesToVec( vRanges, Arg30 );
+ 
+-	std::vector< uno::Reference< excel::XRange > >::iterator it = vRanges.begin();
+-	std::vector< uno::Reference< excel::XRange > >::iterator it_end = vRanges.end();
++	uno::Reference< excel::XRange > xRefRange; 
++
++	ScRangeList aCellRanges;
++	// first pass - gets the set of all possible interections of Arg1..ArgN
++	RangesList intersections = lcl_intersections( vRanges );
++	// second pass - gets the intersections of the intersections ( don't ask, but this
++	// is what seems to happen )
++	if ( intersections.size() > 1)
++		intersections = lcl_intersections( intersections );
++	for( RangesList::iterator it = intersections.begin(); it != intersections.end(); ++it )
++	{
++		for ( USHORT x = 0 ; x < it->Count(); ++x )
++#ifndef OWN_JOIN
++			aCellRanges.Join( *it->GetObject(x) );
++#else
++			aCellRanges.Append( *it->GetObject(x) );
++#endif
++	}
++
++	uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY_THROW );
++	ScDocShell* pDocShell = getDocShell( xModel );
++	if ( aCellRanges.Count() == 1 )
++	{
++		xRefRange = new ScVbaRange( uno::Reference< vba::XHelperInterface >(), mxContext, new ScCellRangeObj( pDocShell, *aCellRanges.First() ) );
++	}
++	else if ( aCellRanges.Count() > 1 )
++	{
++		uno::Reference< sheet::XSheetCellRangeContainer > xRanges( new ScCellRangesObj( pDocShell, aCellRanges ) );
++		xRefRange = new ScVbaRange( uno::Reference< vba::XHelperInterface >(), mxContext, xRanges );
+ 
+-	uno::Reference< excel::XRange > xRefRange( *it );
+-	++it;
+-	for ( ; it != it_end; ++it )
+-	{
+-		ScVbaRange* pRange = dynamic_cast< ScVbaRange * >( xRefRange.get());
+-		if ( pRange )
+-			xRefRange = pRange->intersect( *it );
+-		if ( !xRefRange.is() )
+-			return uno::Reference< excel::XRange >();
+ 	}
  	return xRefRange;
  }
  
 +uno::Reference< excel::XRange > SAL_CALL 
 +ScVbaApplication::Union( const uno::Reference< excel::XRange >& Arg1, const uno::Reference< excel::XRange >& Arg2, const uno::Any& Arg3, const uno::Any& Arg4, const uno::Any& Arg5, const uno::Any& Arg6, const uno::Any& Arg7, const uno::Any& Arg8, const uno::Any& Arg9, const uno::Any& Arg10, const uno::Any& Arg11, const uno::Any& Arg12, const uno::Any& Arg13, const uno::Any& Arg14, const uno::Any& Arg15, const uno::Any& Arg16, const uno::Any& Arg17, const uno::Any& Arg18, const uno::Any& Arg19, const uno::Any& Arg20, const uno::Any& Arg21, const uno::Any& Arg22, const uno::Any& Arg23, const uno::Any& Arg24, const uno::Any& Arg25, const uno::Any& Arg26, const uno::Any& Arg27, const uno::Any& Arg28, const uno::Any& Arg29, const uno::Any& Arg30 ) throw (script::BasicErrorException, uno::RuntimeException)
 +{
-+	std::vector< uno::Reference< excel::XRange > > vRanges;
 +	if ( !Arg1.is() || !Arg2.is() )
 +		DebugHelper::exception(SbERR_BAD_PARAMETER, rtl::OUString() );
 +
-+	vRanges.push_back( Arg1 );
-+	vRanges.push_back( Arg2 );
++	uno::Reference< excel::XRange > xRange;
++	Ranges vRanges;
++	lcl_addRangeToVec( vRanges, uno::makeAny( Arg1 ) );
++	lcl_addRangeToVec( vRanges, uno::makeAny( Arg2 ) );
 +
 +	if ( Arg3.hasValue() )
-+		vRanges.push_back( uno::Reference< excel::XRange >( Arg3, uno::UNO_QUERY_THROW ) );
++		lcl_addRangeToVec( vRanges, Arg3 );
 +	if ( Arg4.hasValue() )
-+		vRanges.push_back( uno::Reference< excel::XRange >( Arg4, uno::UNO_QUERY_THROW ) );
++		lcl_addRangeToVec( vRanges, Arg4 );
 +	if ( Arg5.hasValue() )
-+		vRanges.push_back( uno::Reference< excel::XRange >( Arg5, uno::UNO_QUERY_THROW ) );
++		lcl_addRangeToVec( vRanges, Arg5 );
 +	if ( Arg6.hasValue() )
-+		vRanges.push_back( uno::Reference< excel::XRange >( Arg6, uno::UNO_QUERY_THROW ) );
++		lcl_addRangeToVec( vRanges, Arg6 );
 +	if ( Arg7.hasValue() )
-+		vRanges.push_back( uno::Reference< excel::XRange >( Arg7, uno::UNO_QUERY_THROW ) );
++		lcl_addRangeToVec( vRanges, Arg7 );
 +	if ( Arg8.hasValue() )
-+		vRanges.push_back( uno::Reference< excel::XRange >( Arg8, uno::UNO_QUERY_THROW ) );
++		lcl_addRangeToVec( vRanges, Arg8 );
 +	if ( Arg9.hasValue() )
-+		vRanges.push_back( uno::Reference< excel::XRange >( Arg9, uno::UNO_QUERY_THROW ) );
++		lcl_addRangeToVec( vRanges, Arg9 );
 +	if ( Arg10.hasValue() )
-+		vRanges.push_back( uno::Reference< excel::XRange >( Arg10, uno::UNO_QUERY_THROW ) );
++		lcl_addRangeToVec( vRanges, Arg10 );
 +	if ( Arg11.hasValue() )
-+		vRanges.push_back( uno::Reference< excel::XRange >( Arg11, uno::UNO_QUERY_THROW ) );
++		lcl_addRangeToVec( vRanges, Arg11 );
 +	if ( Arg12.hasValue() )
-+		vRanges.push_back( uno::Reference< excel::XRange >( Arg12, uno::UNO_QUERY_THROW ) );
++		lcl_addRangeToVec( vRanges, Arg12 );
 +	if ( Arg13.hasValue() )
-+		vRanges.push_back( uno::Reference< excel::XRange >( Arg13, uno::UNO_QUERY_THROW ) );
++		lcl_addRangeToVec( vRanges, Arg13 );
 +	if ( Arg14.hasValue() )
-+		vRanges.push_back( uno::Reference< excel::XRange >( Arg14, uno::UNO_QUERY_THROW ) );
++		lcl_addRangeToVec( vRanges, Arg14 );
 +	if ( Arg15.hasValue() )
-+		vRanges.push_back( uno::Reference< excel::XRange >( Arg15, uno::UNO_QUERY_THROW ) );
++		lcl_addRangeToVec( vRanges, Arg15 );
 +	if ( Arg16.hasValue() )
-+		vRanges.push_back( uno::Reference< excel::XRange >( Arg16, uno::UNO_QUERY_THROW ) );
++		lcl_addRangeToVec( vRanges, Arg16 );
 +	if ( Arg17.hasValue() )
-+		vRanges.push_back( uno::Reference< excel::XRange >( Arg17, uno::UNO_QUERY_THROW ) );
++		lcl_addRangeToVec( vRanges, Arg17 );
 +	if ( Arg18.hasValue() )
-+		vRanges.push_back( uno::Reference< excel::XRange >( Arg18, uno::UNO_QUERY_THROW ) );
++		lcl_addRangeToVec( vRanges, Arg18 );
 +	if ( Arg19.hasValue() )
-+		vRanges.push_back( uno::Reference< excel::XRange >( Arg19, uno::UNO_QUERY_THROW ) );
++		lcl_addRangeToVec( vRanges, Arg19 );
 +	if ( Arg20.hasValue() )
-+		vRanges.push_back( uno::Reference< excel::XRange >( Arg20, uno::UNO_QUERY_THROW ) );
++		lcl_addRangeToVec( vRanges, Arg20 );
 +	if ( Arg21.hasValue() )
-+		vRanges.push_back( uno::Reference< excel::XRange >( Arg21, uno::UNO_QUERY_THROW ) );
++		lcl_addRangeToVec( vRanges, Arg21 );
 +	if ( Arg22.hasValue() )
-+		vRanges.push_back( uno::Reference< excel::XRange >( Arg22, uno::UNO_QUERY_THROW ) );
++		lcl_addRangeToVec( vRanges, Arg22 );
 +	if ( Arg23.hasValue() )
-+		vRanges.push_back( uno::Reference< excel::XRange >( Arg23, uno::UNO_QUERY_THROW ) );
++		lcl_addRangeToVec( vRanges, Arg23 );
 +	if ( Arg24.hasValue() )
-+		vRanges.push_back( uno::Reference< excel::XRange >( Arg24, uno::UNO_QUERY_THROW ) );
++		lcl_addRangeToVec( vRanges, Arg24 );
 +	if ( Arg25.hasValue() )
-+		vRanges.push_back( uno::Reference< excel::XRange >( Arg25, uno::UNO_QUERY_THROW ) );
++		lcl_addRangeToVec( vRanges, Arg25 );
 +	if ( Arg26.hasValue() )
-+		vRanges.push_back( uno::Reference< excel::XRange >( Arg26, uno::UNO_QUERY_THROW ) );
++		lcl_addRangeToVec( vRanges, Arg26 );
 +	if ( Arg27.hasValue() )
-+		vRanges.push_back( uno::Reference< excel::XRange >( Arg27, uno::UNO_QUERY_THROW ) );
++		lcl_addRangeToVec( vRanges, Arg27 );
 +	if ( Arg28.hasValue() )
-+		vRanges.push_back( uno::Reference< excel::XRange >( Arg28, uno::UNO_QUERY_THROW ) );
++		lcl_addRangeToVec( vRanges, Arg28 );
 +	if ( Arg29.hasValue() )
-+		vRanges.push_back( uno::Reference< excel::XRange >( Arg29, uno::UNO_QUERY_THROW ) );
++		lcl_addRangeToVec( vRanges, Arg29 );
 +	if ( Arg30.hasValue() )
-+		vRanges.push_back( uno::Reference< excel::XRange >( Arg30, uno::UNO_QUERY_THROW ) );
++		lcl_addRangeToVec( vRanges, Arg30 );
 +
-+	std::vector< uno::Reference< excel::XRange > >::iterator it = vRanges.begin();
-+	std::vector< uno::Reference< excel::XRange > >::iterator it_end = vRanges.end();
++	ScRangeList aCellRanges;
++	lcl_strip_containedRanges( vRanges );
 +
-+    uno::Reference< excel::XRange > xRange;
-+    ScRangeList aCellRanges;
-+    for( ; it != it_end; ++it )
-+    {
-+        xRange = *it;
-+        uno::Reference< table::XCellRange > xRangeParam;
-+        xRange->getCellRange() >>= xRangeParam;
-+        uno::Reference< sheet::XCellRangeAddressable > xAddressable( xRangeParam, uno::UNO_QUERY_THROW );
-+        ScRange refRange;
-+        ScUnoConversion::FillScRange( refRange, xAddressable->getRangeAddress() );
-+        aCellRanges.Append( refRange );
-+    }
++	for( Ranges::iterator it = vRanges.begin(); it != vRanges.end(); ++it )
++		aCellRanges.Append( *it );
 +
 +	uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY_THROW );
 +    ScDocShell* pDocShell = getDocShell( xModel ); 
-+    uno::Reference< sheet::XSheetCellRangeContainer > xRanges( new ScCellRangesObj( pDocShell, aCellRanges ) );
++	if ( aCellRanges.Count() == 1 ) 
++	{
++	// normal range
++		xRange = new ScVbaRange( uno::Reference< vba::XHelperInterface >(), mxContext, new ScCellRangeObj( pDocShell, *aCellRanges.First() ) );
++	}
++	else if ( aCellRanges.Count() > 1 ) // Multi-Area
++	{
++		uno::Reference< sheet::XSheetCellRangeContainer > xRanges( new ScCellRangesObj( pDocShell, aCellRanges ) );
++    	xRange = new ScVbaRange( uno::Reference< vba::XHelperInterface >(), mxContext, xRanges );
++	}
++	
 +    // #FIXME need proper (WorkSheet) parent
-+    xRange = new ScVbaRange( uno::Reference< vba::XHelperInterface >(), mxContext, xRanges );
 +	return xRange;
 +}
 +
@@ -8015,10 +8351,10 @@ Index: sc/source/ui/vba/vbarange.cxx
 ===================================================================
 RCS file: /cvs/sc/sc/source/ui/vba/vbarange.cxx,v
 retrieving revision 1.9
-retrieving revision 1.5.34.16
-diff -u -p -u -p -b -w -B -r1.9 -r1.5.34.16
+retrieving revision 1.5.34.17
+diff -u -p -u -p -b -w -B -r1.9 -r1.5.34.17
 --- sc/source/ui/vba/vbarange.cxx	14 May 2008 10:03:31 -0000	1.9
-+++ sc/source/ui/vba/vbarange.cxx	23 Sep 2008 14:58:56 -0000	1.5.34.16
++++ sc/source/ui/vba/vbarange.cxx	30 Sep 2008 14:06:04 -0000	1.5.34.17
 @@ -115,6 +115,7 @@
  #include <org/openoffice/excel/XlCellType.hpp>
  #include <org/openoffice/excel/XlSpecialCellsValue.hpp>
@@ -8556,70 +8892,51 @@ diff -u -p -u -p -b -w -B -r1.9 -r1.5.34.16
  		{
  			if ( bIsMultiArea )
  			{
-@@ -4959,20 +5323,51 @@ uno::Reference< excel::XRange > 
- ScVbaRange::intersect( const css::uno::Reference< oo::excel::XRange >& xRange ) throw (script::BasicErrorException, uno::RuntimeException)
- {
- 	uno::Reference< excel::XRange > xResult;
-+	sal_Int32 nLen = m_Areas->getCount();
-+	if ( nLen > 1 ) 
-+	{
-+		ScRangeList aCellRanges;
-+		for ( sal_Int32 index = 1; index != nLen; ++index )
-+		{
-+			uno::Reference< excel::XRange > xAreaRange( getArea( index ), uno::UNO_QUERY_THROW );
-+			ScVbaRange* pRange = dynamic_cast< ScVbaRange * >( xAreaRange.get());
-+			if ( pRange ) 
-+			{
-+				uno::Reference< excel::XRange > xResultRange = pRange->intersect( xAreaRange );
-+				if ( xResultRange.is() )
-+				{
-+					ScRange refRange;
-+					RangeHelper aRange( xResultRange->getCellRange() );
-+					ScUnoConversion::FillScRange( refRange, aRange.getCellRangeAddressable()->getRangeAddress() );
-+					aCellRanges.Append( refRange );
-+				}	 	
-+			}
-+		}
-+		if ( aCellRanges.First() != aCellRanges.Last() )
-+		{
-+			uno::Reference< sheet::XSheetCellRangeContainer > xRanges( new ScCellRangesObj( getScDocShell(), aCellRanges ) );
-+			xResult = new ScVbaRange( getParent(), mxContext, xRanges );
-+		}
-+		return xResult;
-+	}
-+	else
-+	{
-+		// This is a single range
- 	try
- 	{
--		uno::Reference< sheet::XCellRangesQuery > xQuery( mxRange, uno::UNO_QUERY_THROW );
--		RangeHelper aRange( xRange->getCellRange() );
-+			// xRange could be a single of multi-area range
-+			uno::Reference< sheet::XCellRangesQuery > xQuery( xRange->getCellRange(), uno::UNO_QUERY_THROW );
-+			RangeHelper aRange( mxRange );
- 		table::CellRangeAddress aAddress = aRange.getCellRangeAddressable()->getRangeAddress();
- 		uno::Reference< sheet::XSheetCellRanges > xIntersectRanges = xQuery->queryIntersection( aAddress );
- 		xResult = lcl_makeXRangeFromSheetCellRanges( getParent(), mxContext, xIntersectRanges, getScDocShell() );
- 
--					
- 	}	
- 	catch( uno::Exception& )
- 	{
- 		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString());
+@@ -4955,27 +5319,6 @@ ScVbaRange::Subtotal( ::sal_Int32 _nGrou
  	}
-+	}
- 	return xResult;
  }
  
+-uno::Reference< excel::XRange > 
+-ScVbaRange::intersect( const css::uno::Reference< oo::excel::XRange >& xRange ) throw (script::BasicErrorException, uno::RuntimeException)
+-{
+-	uno::Reference< excel::XRange > xResult;
+-	try
+-	{
+-		uno::Reference< sheet::XCellRangesQuery > xQuery( mxRange, uno::UNO_QUERY_THROW );
+-		RangeHelper aRange( xRange->getCellRange() );
+-		table::CellRangeAddress aAddress = aRange.getCellRangeAddressable()->getRangeAddress();
+-		uno::Reference< sheet::XSheetCellRanges > xIntersectRanges = xQuery->queryIntersection( aAddress );
+-		xResult = lcl_makeXRangeFromSheetCellRanges( getParent(), mxContext, xIntersectRanges, getScDocShell() );
+-
+-					
+-	}	
+-	catch( uno::Exception& )
+-	{
+-		DebugHelper::exception(SbERR_METHOD_FAILED, rtl::OUString());
+-	}
+-	return xResult;
+-}
+-
+ rtl::OUString& 
+ ScVbaRange::getServiceImplName()
+ {
 Index: sc/source/ui/vba/vbarange.hxx
 ===================================================================
 RCS file: /cvs/sc/sc/source/ui/vba/vbarange.hxx,v
 retrieving revision 1.6
-retrieving revision 1.6.70.1
-diff -u -p -u -p -b -w -B -r1.6 -r1.6.70.1
+retrieving revision 1.6.70.2
+diff -u -p -u -p -b -w -B -r1.6 -r1.6.70.2
 --- sc/source/ui/vba/vbarange.hxx	14 May 2008 10:03:47 -0000	1.6
-+++ sc/source/ui/vba/vbarange.hxx	29 Jul 2008 06:35:42 -0000	1.6.70.1
-@@ -171,6 +171,10 @@ public:
++++ sc/source/ui/vba/vbarange.hxx	30 Sep 2008 14:06:05 -0000	1.6.70.2
+@@ -128,7 +128,6 @@ public:
+ 	virtual ~ScVbaRange();
+ 	virtual css::uno::Reference< oo::vba::XHelperInterface > thisHelperIface() { return this; }
+ 	bool isSingleCellRange(); 
+-	css::uno::Reference< oo::excel::XRange > intersect( const css::uno::Reference< oo::excel::XRange >& xRange ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+         static css::uno::Reference< oo::excel::XRange > getRangeObjectForName( const css::uno::Reference< css::uno::XComponentContext >& xContext, const rtl::OUString& sRangeName, ScDocShell* pDocSh, ScAddress::Convention eConv = ScAddress::CONV_XL_A1  ) throw ( css::uno::RuntimeException );
+ 
+     // Attributes
+@@ -171,6 +170,10 @@ public:
  	virtual css::uno::Reference< oo::excel::XValidation > SAL_CALL getValidation() throw (css::uno::RuntimeException);
  	virtual css::uno::Any SAL_CALL getFormulaHidden() throw (css::script::BasicErrorException, css::uno::RuntimeException);
  	virtual void SAL_CALL setFormulaHidden(const css::uno::Any& aHidden) throw (css::script::BasicErrorException, css::uno::RuntimeException);	
@@ -8630,7 +8947,7 @@ diff -u -p -u -p -b -w -B -r1.6 -r1.6.70.1
  	// Methods
  	sal_Bool IsRows() { return mbIsRows; }
  	sal_Bool IsColumns() { return mbIsColumns; }
-@@ -210,6 +214,7 @@ public:
+@@ -210,6 +213,7 @@ public:
  	virtual css::uno::Any SAL_CALL getCellRange(  ) throw (css::uno::RuntimeException);
  	virtual void SAL_CALL PasteSpecial( const css::uno::Any& Paste, const css::uno::Any& Operation, const css::uno::Any& SkipBlanks, const css::uno::Any& Transpose ) throw (css::uno::RuntimeException);
  	virtual ::sal_Bool SAL_CALL Replace( const ::rtl::OUString& What, const ::rtl::OUString& Replacement, const css::uno::Any& LookAt, const css::uno::Any& SearchOrder, const css::uno::Any& MatchCase, const css::uno::Any& MatchByte, const css::uno::Any& SearchFormat, const css::uno::Any& ReplaceFormat ) throw (css::uno::RuntimeException);
@@ -8638,7 +8955,7 @@ diff -u -p -u -p -b -w -B -r1.6 -r1.6.70.1
  	virtual void SAL_CALL Sort( const css::uno::Any& Key1, const css::uno::Any& Order1, const css::uno::Any& Key2, const css::uno::Any& Type, const css::uno::Any& Order2, const css::uno::Any& Key3, const css::uno::Any& Order3, const css::uno::Any& Header, const css::uno::Any& OrderCustom, const css::uno::Any& MatchCase, const css::uno::Any& Orientation, const css::uno::Any& SortMethod,  const css::uno::Any& DataOption1, const css::uno::Any& DataOption2, const css::uno::Any& DataOption3 ) throw (css::uno::RuntimeException);
  	virtual css::uno::Reference< oo::excel::XRange > SAL_CALL End( ::sal_Int32 Direction )  throw (css::uno::RuntimeException);
  	virtual css::uno::Reference< oo::excel::XCharacters > SAL_CALL characters( const css::uno::Any& Start, const css::uno::Any& Length ) throw (css::uno::RuntimeException);
-@@ -241,6 +246,7 @@ public:
+@@ -241,6 +245,7 @@ public:
  	virtual css::uno::Reference< oo::excel::XRange > SAL_CALL Next() throw (css::script::BasicErrorException, css::uno::RuntimeException);
  	virtual css::uno::Reference< oo::excel::XRange > SAL_CALL Previous() throw (css::script::BasicErrorException, css::uno::RuntimeException);
  	virtual void SAL_CALL RemoveSubtotal(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
@@ -11461,117 +11778,117 @@ Index: sc/source/ui/vba/testvba/TestDocuments/AutoFilter.xls
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/AutoFilter.xls
 diff -N sc/source/ui/vba/testvba/TestDocuments/AutoFilter.xls
-Binary files /dev/null and /tmp/cvsKXaG4v differ
+Binary files /dev/null and /tmp/cvssWaGWk differ
 Index: sc/source/ui/vba/testvba/TestDocuments/MiscRangeTests.xls
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/MiscRangeTests.xls
 diff -N sc/source/ui/vba/testvba/TestDocuments/MiscRangeTests.xls
-Binary files /dev/null and /tmp/cvsLXaG4v differ
+Binary files /dev/null and /tmp/cvstWaGWk differ
 Index: sc/source/ui/vba/testvba/TestDocuments/PageBreaks.xls
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/PageBreaks.xls
 diff -N sc/source/ui/vba/testvba/TestDocuments/PageBreaks.xls
-Binary files /dev/null and /tmp/cvsMXaG4v differ
+Binary files /dev/null and /tmp/cvsuWaGWk differ
 Index: sc/source/ui/vba/testvba/TestDocuments/PageSetup.xls
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/PageSetup.xls
 diff -N sc/source/ui/vba/testvba/TestDocuments/PageSetup.xls
-Binary files /dev/null and /tmp/cvsNXaG4v differ
+Binary files /dev/null and /tmp/cvsvWaGWk differ
 Index: sc/source/ui/vba/testvba/TestDocuments/Ranges-2.xls
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/Ranges-2.xls
 diff -N sc/source/ui/vba/testvba/TestDocuments/Ranges-2.xls
-Binary files /dev/null and /tmp/cvsOXaG4v differ
+Binary files /dev/null and /tmp/cvswWaGWk differ
 Index: sc/source/ui/vba/testvba/TestDocuments/Ranges-3.xls
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/Ranges-3.xls
 diff -N sc/source/ui/vba/testvba/TestDocuments/Ranges-3.xls
-Binary files /dev/null and /tmp/cvsPXaG4v differ
+Binary files /dev/null and /tmp/cvsxWaGWk differ
 Index: sc/source/ui/vba/testvba/TestDocuments/Ranges.xls
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/Ranges.xls
 diff -N sc/source/ui/vba/testvba/TestDocuments/Ranges.xls
-Binary files /dev/null and /tmp/cvsQXaG4v differ
+Binary files /dev/null and /tmp/cvsyWaGWk differ
 Index: sc/source/ui/vba/testvba/TestDocuments/Shapes.xls
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/Shapes.xls
 diff -N sc/source/ui/vba/testvba/TestDocuments/Shapes.xls
-Binary files /dev/null and /tmp/cvsRXaG4v differ
+Binary files /dev/null and /tmp/cvszWaGWk differ
 Index: sc/source/ui/vba/testvba/TestDocuments/StrConv-test.xls
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/StrConv-test.xls
 diff -N sc/source/ui/vba/testvba/TestDocuments/StrConv-test.xls
-Binary files /dev/null and /tmp/cvsSXaG4v differ
+Binary files /dev/null and /tmp/cvsAWaGWk differ
 Index: sc/source/ui/vba/testvba/TestDocuments/Template.xls
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/Template.xls
 diff -N sc/source/ui/vba/testvba/TestDocuments/Template.xls
-Binary files /dev/null and /tmp/cvsTXaG4v differ
+Binary files /dev/null and /tmp/cvsBWaGWk differ
 Index: sc/source/ui/vba/testvba/TestDocuments/TestAddress.xls
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/TestAddress.xls
 diff -N sc/source/ui/vba/testvba/TestDocuments/TestAddress.xls
-Binary files /dev/null and /tmp/cvsUXaG4v differ
+Binary files /dev/null and /tmp/cvsCWaGWk differ
 Index: sc/source/ui/vba/testvba/TestDocuments/TestCalc_Rangetest.xls
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/TestCalc_Rangetest.xls
 diff -N sc/source/ui/vba/testvba/TestDocuments/TestCalc_Rangetest.xls
-Binary files /dev/null and /tmp/cvsVXaG4v differ
+Binary files /dev/null and /tmp/cvsDWaGWk differ
 Index: sc/source/ui/vba/testvba/TestDocuments/TestCalc_Rangetest2.xls
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/TestCalc_Rangetest2.xls
 diff -N sc/source/ui/vba/testvba/TestDocuments/TestCalc_Rangetest2.xls
-Binary files /dev/null and /tmp/cvsWXaG4v differ
+Binary files /dev/null and /tmp/cvsEWaGWk differ
 Index: sc/source/ui/vba/testvba/TestDocuments/Window.xls
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/Window.xls
 diff -N sc/source/ui/vba/testvba/TestDocuments/Window.xls
-Binary files /dev/null and /tmp/cvsXXaG4v differ
+Binary files /dev/null and /tmp/cvsFWaGWk differ
 Index: sc/source/ui/vba/testvba/TestDocuments/bytearraystring.xls
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/bytearraystring.xls
 diff -N sc/source/ui/vba/testvba/TestDocuments/bytearraystring.xls
-Binary files /dev/null and /tmp/cvsYXaG4v differ
+Binary files /dev/null and /tmp/cvsGWaGWk differ
 Index: sc/source/ui/vba/testvba/TestDocuments/dateserial.xls
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/dateserial.xls
 diff -N sc/source/ui/vba/testvba/TestDocuments/dateserial.xls
-Binary files /dev/null and /tmp/cvsZXaG4v differ
+Binary files /dev/null and /tmp/cvsHWaGWk differ
 Index: sc/source/ui/vba/testvba/TestDocuments/datevalue.xls
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/datevalue.xls
 diff -N sc/source/ui/vba/testvba/TestDocuments/datevalue.xls
-Binary files /dev/null and /tmp/cvs0XaG4v differ
+Binary files /dev/null and /tmp/cvsIWaGWk differ
 Index: sc/source/ui/vba/testvba/TestDocuments/format.xls
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/format.xls
 diff -N sc/source/ui/vba/testvba/TestDocuments/format.xls
-Binary files /dev/null and /tmp/cvs1XaG4v differ
+Binary files /dev/null and /tmp/cvsJWaGWk differ
 Index: sc/source/ui/vba/testvba/TestDocuments/partition.xls
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/partition.xls
 diff -N sc/source/ui/vba/testvba/TestDocuments/partition.xls
-Binary files /dev/null and /tmp/cvs2XaG4v differ
+Binary files /dev/null and /tmp/cvsKWaGWk differ
 Index: sc/source/ui/vba/testvba/TestDocuments/range-4.xls
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/range-4.xls
 diff -N sc/source/ui/vba/testvba/TestDocuments/range-4.xls
-Binary files /dev/null and /tmp/cvs3XaG4v differ
+Binary files /dev/null and /tmp/cvsLWaGWk differ
 Index: sc/source/ui/vba/testvba/TestDocuments/replace.xls
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/replace.xls
 diff -N sc/source/ui/vba/testvba/TestDocuments/replace.xls
-Binary files /dev/null and /tmp/cvs4XaG4v differ
+Binary files /dev/null and /tmp/cvsMWaGWk differ
 Index: sc/source/ui/vba/testvba/TestDocuments/stringplusdouble.xls
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/stringplusdouble.xls
 diff -N sc/source/ui/vba/testvba/TestDocuments/stringplusdouble.xls
-Binary files /dev/null and /tmp/cvs5XaG4v differ
+Binary files /dev/null and /tmp/cvsNWaGWk differ
 Index: sc/source/ui/vba/testvba/TestDocuments/window2.xls
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/window2.xls
 diff -N sc/source/ui/vba/testvba/TestDocuments/window2.xls
-Binary files /dev/null and /tmp/cvs6XaG4v differ
+Binary files /dev/null and /tmp/cvsOWaGWk differ
 Index: sc/source/ui/vba/testvba/TestDocuments/logs/excel/AutoFilter.log
 ===================================================================
 RCS file: sc/source/ui/vba/testvba/TestDocuments/logs/excel/AutoFilter.log
