@@ -1,3 +1,5 @@
+#!/usr/bin/php
+<?php
 /*
  *   OpenOffice.org extension for syntax highlighting
  *   Copyright (C) 2008  Cédric Bosdonnat cedricbosdo@openoffice.org
@@ -16,25 +18,21 @@
  *   License along with this library; if not, write to the Free
  *   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
-package org.openoffice.coooder.comp.test;
 
-import junit.framework.Test;
+include("geshi/geshi.php");
 
-import org.openoffice.coooder.comp.test.base.UnoTestSuite;
+// get the arguments
 
+$sourceFile = $argv[1];
+$destDir = $argv[2];
 
-public class AllTests  {
+// Read the file
+$source = file_get_contents($sourceFile);
+$lang = basename($sourceFile, ".txt");
 
-    public static Test suite() {
-        
-        // The tests to run by the suite
-        Class[] testClasses = new Class[] {
-                SyntaxTest.class
-        };
-        
-        // Create the test suite
-        UnoTestSuite suite = new UnoTestSuite(testClasses);
-        
-        return suite;
-    }
-}
+// Run Geshi
+$geshi = new GeSHi($source, $lang);
+$highlighted = $geshi->parse_code();
+
+// Write to the ouput directory
+file_put_contents("$destDir/$lang.html", $highlighted);
