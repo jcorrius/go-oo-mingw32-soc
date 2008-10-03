@@ -574,3 +574,36 @@ class CHChart(BaseRecordHandler):
         self.appendLine("position: (x, y) = (%d, %d)"%(x, y))
         self.appendLine("size: (width, height) = (%d, %d)"%(w, h))
         
+
+class CHProperties(BaseRecordHandler):
+
+    def parseBytes (self):
+        flags = globals.getSignedInt(self.bytes[0:2])
+        emptyFlags = globals.getSignedInt(self.bytes[2:4])
+
+        manualSeries   = "false"
+        showVisCells   = "false"
+        noResize       = "false"
+        manualPlotArea = "false"
+
+        if (flags & 0x0001):
+            manualSeries = "true"
+        if (flags & 0x0002):
+            showVisCells = "true"
+        if (flags & 0x0004):
+            noResize = "true"
+        if (flags & 0x0008):
+            manualPlotArea = "true"
+
+        self.appendLine("manual series: %s"%manualSeries)
+        self.appendLine("show only visible cells: %s"%showVisCells)
+        self.appendLine("no resize: %s"%noResize)
+        self.appendLine("manual plot area: %s"%manualPlotArea)
+
+        emptyValues = "skip"
+        if emptyFlags == 1:
+            emptyValues = "plot as zero"
+        elif emptyFlags == 2:
+            emptyValues = "interpolate empty values"
+
+        self.appendLine("empty value treatment: %s"%emptyValues)

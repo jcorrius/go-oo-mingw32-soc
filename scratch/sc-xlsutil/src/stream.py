@@ -230,7 +230,7 @@ recData = {
     0x103F: ["CHSURFACE", "?"],
     0x1040: ["CHRADARAREA", "?"],
     0x1041: ["CHAXESSET", "?"],
-    0x1044: ["CHPROPERTIES", "?"],
+    0x1044: ["CHPROPERTIES", "?", record.CHProperties],
     0x1045: ["CHSERGROUP", "?"],
     0x1048: ["CHPIVOTREF", "?"],
     0x104A: ["CHSERPARENT", "?"],
