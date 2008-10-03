@@ -1,25 +1,36 @@
 diff --git sc/inc/chart2uno.hxx sc/inc/chart2uno.hxx
-index e9d9d47..9126e8e 100644
+index aa13bef..5a7769b 100644
 --- sc/inc/chart2uno.hxx
 +++ sc/inc/chart2uno.hxx
-@@ -59,6 +59,7 @@
+@@ -33,6 +33,7 @@
+ 
+ #include "cellsuno.hxx"     // for XModifyListenerArr_Impl / ScLinkListener
+ #include "rangelst.hxx"
++#include "chartlis.hxx"
+ #include <svtools/lstner.hxx>
+ #include <com/sun/star/chart2/data/XDataProvider.hpp>
+ #include <com/sun/star/chart2/data/XRangeXMLConversion.hpp>
+@@ -59,6 +60,8 @@
  
  #include <map>
  #include <list>
 +#include <vector>
++#include <memory>
  
  class ScDocument;
  
-@@ -380,5 +381,8 @@ public:
+@@ -379,6 +382,10 @@ public:
+ // 	static ScChart2DataSequence* getImplementation( const com::sun::star::uno::Reference<
  // 									com::sun::star::uno::XInterface> xObj );
  
 +private:
 +    void markRangeDirty(const ScRange& rRange) const;
++    void setDataChangedHint(bool b);
 +
      // Implementation --------------------------------------------------------
  
      ScRangeListRef GetRangeList() { return m_xRanges; }
-@@ -387,8 +391,26 @@ private:
+@@ -386,8 +393,38 @@ public:
      void    RefChanged();
      DECL_LINK( ValueListenerHdl, SfxHint* );
  
@@ -40,12 +51,102 @@ index e9d9d47..9126e8e 100644
 +        Item();
 +    };
 +
++    class HiddenRangeListener : public ScChartHiddenRangeListener
++    {
++    public:
++        HiddenRangeListener(ScChart2DataSequence& rParent);
++        virtual ~HiddenRangeListener();
++
++        virtual void notify();
++
++    private:
++        ScChart2DataSequence& mrParent;
++    };
++
 +    ::std::list<Item>           m_aDataArray;
 +    ::com::sun::star::uno::Sequence<sal_Int32>  m_aHiddenValues;
 +
      // properties
      ::com::sun::star::chart2::data::DataSequenceRole  m_aRole;
      sal_Bool                    m_bHidden;
+@@ -398,6 +435,7 @@ private:
+     com::sun::star::uno::Reference < com::sun::star::chart2::data::XDataProvider > m_xDataProvider;
+ 	SfxItemPropertySet		    m_aPropSet;
+ 
++    ::std::auto_ptr<HiddenRangeListener> m_pHiddenListener;
+     ScLinkListener*             m_pValueListener;
+     sal_Bool                    m_bGotDataChangedHint;
+     XModifyListenerArr_Impl     m_aValueListeners;
+diff --git sc/inc/chartlis.hxx sc/inc/chartlis.hxx
+index 0069085..60e77ce 100644
+--- sc/inc/chartlis.hxx
++++ sc/inc/chartlis.hxx
+@@ -37,6 +37,8 @@
+ #include "collect.hxx"
+ #include "rangelst.hxx"
+ 
++#include <list>
++
+ class ScDocument;
+ class ScChartUnoData;
+ #include <com/sun/star/chart/XChartData.hpp>
+@@ -97,9 +99,31 @@ public:
+ 						{ return !operator==( r ); }
+ };
+ 
++// ============================================================================
++
++class ScChartHiddenRangeListener
++{
++public:
++    ScChartHiddenRangeListener();
++    virtual ~ScChartHiddenRangeListener();
++    virtual void notify() = 0;
++};
++
++// ============================================================================
++
+ class ScChartListenerCollection : public StrCollection
+ {
++public:
++    struct RangeListenerItem
++    {
++        ScRange                     maRange;
++        ScChartHiddenRangeListener* mpListener;
++        explicit RangeListenerItem(const ScRange& rRange, ScChartHiddenRangeListener* p);
++    };
++
+ private:
++    ::std::list<RangeListenerItem> maHiddenListeners;
++
+ 	Timer			aTimer;
+ 	ScDocument*		pDoc;
+ 
+@@ -139,6 +163,24 @@ public:
+     void            UpdateChartsContainingTab( SCTAB nTab );
+ 
+ 	BOOL			operator==( const ScChartListenerCollection& );
++
++    /** 
++     * Start listening on hide/show change within specified cell range.  A 
++     * single listener may listen on multiple ranges when the caller passes 
++     * the same pointer multiple times with different ranges. 
++     *  
++     * Note that the caller is responsible for managing the life-cycle of the 
++     * listener instance. 
++     */
++    void            StartListeningHiddenRange( const ScRange& rRange, 
++                                               ScChartHiddenRangeListener* pListener );
++
++    /** 
++     * Remove all ranges associated with passed listener instance from the 
++     * list of hidden range listeners.  This does not delete the passed 
++     * listener instance. 
++     */
++    void            EndListeningHiddenRange( ScChartHiddenRangeListener* pListener );
+ };
+ 
+ 
 diff --git sc/inc/unonames.hxx sc/inc/unonames.hxx
 index ad84ca3..18c858b 100644
 --- sc/inc/unonames.hxx
@@ -58,11 +159,120 @@ index ad84ca3..18c858b 100644
  
  // Solver
  #define SC_UNONAME_TIMEOUT          "Timeout"
+diff --git sc/source/core/tool/chartlis.cxx sc/source/core/tool/chartlis.cxx
+index 4d6b1b3..12eadf1 100644
+--- sc/source/core/tool/chartlis.cxx
++++ sc/source/core/tool/chartlis.cxx
+@@ -40,7 +40,7 @@
+ #include "document.hxx"
+ 
+ using namespace com::sun::star;
+-
++using ::std::list;
+ 
+ //2do: DocOption TimeOut?
+ //#define SC_CHARTTIMEOUT 1000		// eine Sekunde keine Aenderung/KeyEvent
+@@ -265,9 +265,24 @@ BOOL ScChartListener::operator==( const ScChartListener& r )
+ 		;
+ }
+ 
++// ============================================================================
++
++ScChartHiddenRangeListener::ScChartHiddenRangeListener()
++{
++}
++
++ScChartHiddenRangeListener::~ScChartHiddenRangeListener()
++{
++    // empty d'tor
++}
+ 
+ // === ScChartListenerCollection ======================================
+ 
++ScChartListenerCollection::RangeListenerItem::RangeListenerItem(const ScRange& rRange, ScChartHiddenRangeListener* p) :
++    maRange(rRange), mpListener(p)
++{
++}
++
+ ScChartListenerCollection::ScChartListenerCollection( ScDocument* pDocP ) :
+ 	StrCollection( 4, 4, FALSE ),
+ 	pDoc( pDocP )
+@@ -454,6 +469,14 @@ void ScChartListenerCollection::SetRangeDirty( const ScRange& rRange )
+ 	}
+ 	if ( bDirty )
+ 		StartTimer();
++
++    // New range size listener implementation
++    for (list<RangeListenerItem>::iterator itr = maHiddenListeners.begin(), itrEnd = maHiddenListeners.end();
++          itr != itrEnd; ++itr)
++    {
++        if (itr->maRange.Intersects(rRange))
++            itr->mpListener->notify();
++    }
+ }
+ 
+ 
+@@ -493,6 +516,34 @@ BOOL ScChartListenerCollection::operator==( const ScChartListenerCollection& r )
+ 	return TRUE;
+ }
+ 
++void ScChartListenerCollection::StartListeningHiddenRange( const ScRange& rRange, ScChartHiddenRangeListener* pListener )
++{
++    RangeListenerItem aItem(rRange, pListener);
++    maHiddenListeners.push_back(aItem);
++}
+ 
++namespace {
+ 
++struct MatchListener : public ::std::unary_function<
++        ScChartListenerCollection::RangeListenerItem, bool>
++{
++    MatchListener(const ScChartHiddenRangeListener* pMatch) :
++        mpMatch(pMatch)
++    {
++    }
++
++    bool operator() (const ScChartListenerCollection::RangeListenerItem& rItem) const
++    {
++        return mpMatch == rItem.mpListener;
++    }
++
++private:
++    const ScChartHiddenRangeListener* mpMatch;
++};
++
++}
++void ScChartListenerCollection::EndListeningHiddenRange( ScChartHiddenRangeListener* pListener )
++{
++    maHiddenListeners.remove_if(MatchListener(pListener));
++}
+ 
+diff --git sc/source/filter/inc/fdumper.hxx sc/source/filter/inc/fdumper.hxx
+index aea8de6..8f57403 100644
+--- sc/source/filter/inc/fdumper.hxx
++++ sc/source/filter/inc/fdumper.hxx
+@@ -31,7 +31,7 @@
+ #ifndef SC_FDUMPER_HXX
+ #define SC_FDUMPER_HXX
+ 
+-#define SCF_INCL_DUMPER (OSL_DEBUG_LEVEL > 0)
++#define SCF_INCL_DUMPER (OSL_DEBUG_LEVEL > 0) && 0
+ 
+ #include <map>
+ #include <math.h>
 diff --git sc/source/ui/unoobj/chart2uno.cxx sc/source/ui/unoobj/chart2uno.cxx
-index 28223a8..e2be940 100644
+index 28223a8..0d561fd 100644
 --- sc/source/ui/unoobj/chart2uno.cxx
 +++ sc/source/ui/unoobj/chart2uno.cxx
-@@ -1319,6 +1319,11 @@ void SAL_CALL ScChart2LabeledDataSequence::removeModifyListener( const uno::Refe
+@@ -43,6 +43,7 @@
+ #include "rangeutl.hxx"
+ #include "hints.hxx"
+ #include "unoreflist.hxx"
++#include "chartlis.hxx"
+ 
+ #include <sfx2/objsh.hxx>
+ 
+@@ -1319,6 +1320,25 @@ void SAL_CALL ScChart2LabeledDataSequence::removeModifyListener( const uno::Refe
  
  // DataSequence ==============================================================
  
@@ -71,11 +281,75 @@ index 28223a8..e2be940 100644
 +{
 +}
 +
++ScChart2DataSequence::HiddenRangeListener::HiddenRangeListener(ScChart2DataSequence& rParent) :
++    mrParent(rParent)
++{
++}
++
++ScChart2DataSequence::HiddenRangeListener::~HiddenRangeListener()
++{
++}
++
++void ScChart2DataSequence::HiddenRangeListener::notify()
++{
++    mrParent.setDataChangedHint(true);
++}
++
  ScChart2DataSequence::ScChart2DataSequence( ScDocument* pDoc,
          const uno::Reference < chart2::data::XDataProvider >& xDP,
          const ScRangeListRef& rRangeList)
-@@ -1374,6 +1379,73 @@ void ScChart2DataSequence::RefChanged()
+@@ -1328,6 +1348,7 @@ ScChart2DataSequence::ScChart2DataSequence( ScDocument* pDoc,
+     , m_pDocument( pDoc)
+     , m_xDataProvider( xDP)
+ 	, m_aPropSet(lcl_GetDataSequencePropertyMap())
++    , m_pHiddenListener(NULL)
+     , m_pValueListener( NULL )
+     , m_bGotDataChangedHint( FALSE )
+ {
+@@ -1353,7 +1374,15 @@ ScChart2DataSequence::ScChart2DataSequence( ScDocument* pDoc,
+ ScChart2DataSequence::~ScChart2DataSequence()
+ {
+     if ( m_pDocument )
++    {
+         m_pDocument->RemoveUnoObject( *this);
++        if (m_pHiddenListener.get())
++        {
++            ScChartListenerCollection* pCLC = m_pDocument->GetChartListenerCollection();
++            if (pCLC)
++                pCLC->EndListeningHiddenRange(m_pHiddenListener.get());
++        }
++    }
+ 
+     delete m_pValueListener;
+ }
+@@ -1361,7 +1390,10 @@ ScChart2DataSequence::~ScChart2DataSequence()
+ 
+ void ScChart2DataSequence::RefChanged()
+ {
+-    if( m_pValueListener && m_aValueListeners.Count() != 0 )
++    if (m_aValueListeners.Count() == 0)
++        return;
++
++    if( m_pValueListener )
+     {
+         m_pValueListener->EndListeningAll();
+ 
+@@ -1372,8 +1404,87 @@ void ScChart2DataSequence::RefChanged()
+                 m_pDocument->StartListeningArea( *m_xRanges->GetObject(i), m_pValueListener );
+         }
      }
++
++    if (m_pHiddenListener.get() && m_pDocument)
++    {
++        ScChartListenerCollection* pCLC = m_pDocument->GetChartListenerCollection();
++        if (pCLC)
++        {
++            pCLC->EndListeningHiddenRange(m_pHiddenListener.get());
++            ULONG nCount = m_xRanges->Count();
++            for (ULONG i = 0; i < nCount; ++i)
++                pCLC->StartListeningHiddenRange(*m_xRanges->GetObject(i), m_pHiddenListener.get());
++        }
++    }
  }
  
 +void ScChart2DataSequence::BuildDataArray()
@@ -148,28 +422,26 @@ index 28223a8..e2be940 100644
  
  void ScChart2DataSequence::Notify( SfxBroadcaster& /*rBC*/, const SfxHint& rHint)
  {
-@@ -1388,8 +1460,10 @@ void ScChart2DataSequence::Notify( SfxBroadcaster& /*rBC*/, const SfxHint& rHint
-         {
+@@ -1389,7 +1500,8 @@ void ScChart2DataSequence::Notify( SfxBroadcaster& /*rBC*/, const SfxHint& rHint
              // delayed broadcast as in ScCellRangesBase
  
--            if ( m_bGotDataChangedHint && m_pDocument )
-+//          if ( m_bGotDataChangedHint && m_pDocument )
-+            if (true)
-             {
+             if ( m_bGotDataChangedHint && m_pDocument )
+-            {
++            {        
 +                m_aDataArray.clear();
                  lang::EventObject aEvent;
                  aEvent.Source.set((cppu::OWeakObject*)this);
  
-@@ -1399,7 +1473,7 @@ void ScChart2DataSequence::Notify( SfxBroadcaster& /*rBC*/, const SfxHint& rHint
-                         m_pDocument->AddUnoListenerCall( *m_aValueListeners[n], aEvent );
-                 }
+@@ -1452,7 +1564,7 @@ IMPL_LINK( ScChart2DataSequence, ValueListenerHdl, SfxHint*, pHint )
+         //  in the range are notified. So only a flag is set that is checked when
+         //  SFX_HINT_DATACHANGED is received.
  
--                m_bGotDataChangedHint = FALSE;
-+//              m_bGotDataChangedHint = FALSE;
-             }
-         }
+-        m_bGotDataChangedHint = TRUE;
++        setDataChangedHint(true);
      }
-@@ -1465,72 +1539,19 @@ uno::Sequence< uno::Any> SAL_CALL ScChart2DataSequence::getData()
+     return 0;
+ }
+@@ -1465,72 +1577,19 @@ uno::Sequence< uno::Any> SAL_CALL ScChart2DataSequence::getData()
      if ( !m_pDocument)
          throw uno::RuntimeException();
  
@@ -252,7 +524,7 @@ index 28223a8..e2be940 100644
      return aSeq;
  }
  
-@@ -1543,67 +1564,18 @@ uno::Sequence< double > SAL_CALL ScChart2DataSequence::getNumericalData()
+@@ -1543,67 +1602,18 @@ uno::Sequence< double > SAL_CALL ScChart2DataSequence::getNumericalData()
      if ( !m_pDocument)
          throw uno::RuntimeException();
  
@@ -328,7 +600,7 @@ index 28223a8..e2be940 100644
      return aSeq;
  }
  
-@@ -1615,49 +1587,15 @@ uno::Sequence< rtl::OUString > SAL_CALL ScChart2DataSequence::getTextualData(  )
+@@ -1615,49 +1625,15 @@ uno::Sequence< rtl::OUString > SAL_CALL ScChart2DataSequence::getTextualData(  )
      if ( !m_pDocument)
          throw uno::RuntimeException();
  
@@ -386,7 +658,14 @@ index 28223a8..e2be940 100644
      return aSeq;
  }
  
-@@ -1886,7 +1824,11 @@ void SAL_CALL ScChart2DataSequence::addModifyListener( const uno::Reference< uti
+@@ -1882,11 +1858,22 @@ void SAL_CALL ScChart2DataSequence::addModifyListener( const uno::Reference< uti
+ 		if (!m_pValueListener)
+ 			m_pValueListener = new ScLinkListener( LINK( this, ScChart2DataSequence, ValueListenerHdl ) );
+ 
++        if (!m_pHiddenListener.get())
++            m_pHiddenListener.reset(new HiddenRangeListener(*this));
++
+         if( m_pDocument )
          {
              ULONG nCount = m_xRanges->Count();
              for (ULONG i=0; i<nCount; i++)
@@ -394,12 +673,30 @@ index 28223a8..e2be940 100644
 +            {
 +                ScRange aRange = *m_xRanges->GetObject(i);    
 +                m_pDocument->StartListeningArea( aRange, m_pValueListener );
++                ScChartListenerCollection* pCLC = m_pDocument->GetChartListenerCollection();
++                if (pCLC)
++                    pCLC->StartListeningHiddenRange(aRange, m_pHiddenListener.get());
++
 +                markRangeDirty(aRange);
 +            }
          }
  
  		acquire();	// don't lose this object (one ref for all listeners)
-@@ -1973,6 +1915,13 @@ uno::Any SAL_CALL ScChart2DataSequence::getPropertyValue(
+@@ -1918,6 +1905,13 @@ void SAL_CALL ScChart2DataSequence::removeModifyListener( const uno::Reference<
+ 				if (m_pValueListener)
+ 					m_pValueListener->EndListeningAll();
+ 
++                if (m_pHiddenListener.get() && m_pDocument)
++                {
++                    ScChartListenerCollection* pCLC = m_pDocument->GetChartListenerCollection();
++                    if (pCLC)
++                        pCLC->EndListeningHiddenRange(m_pHiddenListener.get());
++                }
++
+ 				release();		// release the ref for the listeners
+ 			}
+ 
+@@ -1973,6 +1967,13 @@ uno::Any SAL_CALL ScChart2DataSequence::getPropertyValue(
          aRet <<= m_aRole;
      else if ( rPropertyName.equalsAsciiL( RTL_CONSTASCII_STRINGPARAM( SC_UNONAME_ISHIDDEN)))
          aRet <<= m_bHidden;
@@ -413,7 +710,7 @@ index 28223a8..e2be940 100644
      else
          throw beans::UnknownPropertyException();
      // TODO: support optional properties
-@@ -2027,6 +1976,37 @@ void SAL_CALL ScChart2DataSequence::removeVetoableChangeListener(
+@@ -2027,6 +2028,42 @@ void SAL_CALL ScChart2DataSequence::removeVetoableChangeListener(
      OSL_ENSURE( false, "Not yet implemented" );
  }
  
@@ -446,6 +743,11 @@ index 28223a8..e2be940 100644
 +            }
 +        }
 +    }
++}
++
++void ScChart2DataSequence::setDataChangedHint(bool b)
++{
++    m_bGotDataChangedHint = b;
 +}
 +
  // XUnoTunnel
