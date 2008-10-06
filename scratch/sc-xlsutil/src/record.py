@@ -153,6 +153,15 @@ class RK(BaseRecordHandler):
         self.appendLine("value: %g"%realVal)
 
 
+class String(BaseRecordHandler):
+    """Cached string formula result for preceding formula record."""
+
+    def parseBytes (self):
+        strLen = globals.getSignedInt(self.bytes[0:1])
+        name, byteLen = globals.getRichText(self.bytes[2:], strLen)
+        self.appendLine("string value: '%s'"%name)
+
+
 class Blank(BaseRecordHandler):
 
     def parseBytes (self):

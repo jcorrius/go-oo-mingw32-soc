@@ -169,7 +169,7 @@ recData = {
     0x0203: ["NUMBER", "Floating-Point Cell Value", record.Number],
     0x0204: ["LABEL", "Cell Value"],
     0x0205: ["BOOLERR", "Cell Value"],
-    0x0207: ["STRING", "String Value of a Formula"],
+    0x0207: ["STRING", "String Value of a Formula", record.String],
     0x0208: ["ROW", "Describes a Row", record.Row],
     0x020B: ["INDEX", "Index Record"],
     0x0218: ["NAME", "Defined Name"],
