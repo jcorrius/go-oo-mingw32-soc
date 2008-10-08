@@ -363,6 +363,8 @@ class XLDirStream(object):
     def readByteArray (self, size=1):
         bytes = []
         for i in xrange(0, size):
+            if self.pos >= self.size:
+                raise EndOfStream
             bytes.append(ord(self.bytes[self.pos]))
             self.pos += 1
         return bytes
