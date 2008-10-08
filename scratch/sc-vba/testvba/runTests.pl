@@ -19,7 +19,7 @@ my $fileSep = "/";
 my $theResult;
 my $officepath = shift || die "please specify path to office installation program dir";
 my $DocName = shift || "";
-my $programpath = "$officepath/program";
+my $programpath = "$officepath"."3/program:$officepath/program:";
 my $basiclibrarypath = "$officepath/basis3.0/program";
 my $urelibpath = "$officepath/ure/lib";
 my $binext = "";
@@ -57,7 +57,7 @@ if ( !$failed && open(UNAME, "uname -a|") ) {
       # windows under cygwin
       $sysDir = "win" ;
       $tmpPath=$ENV{"PATH"};
-      $ENV{"PATH"} = "$officepath:$tmpPath";
+      $ENV{"PATH"} = "$officepath/program:$officepath/URE/bin:$officepath/Basis/program:$tmpPath";
       $testDocDir=`cygpath -m  $testDocDir`;
       uri_escape($testDocDir);
       # hacky windows url construction
@@ -71,6 +71,8 @@ if ( !$failed && open(UNAME, "uname -a|") ) {
       chomp($testLogDir);
       #print "*** log dir is $testLogDir\n";
       $binext = ".exe";
+      my $tmpPath=$ENV{"PATH"};
+      #print"*** win PATH is $tmpPath\n"
    }
    else{
       # unix we need to find sal etc. ( from the office path )
