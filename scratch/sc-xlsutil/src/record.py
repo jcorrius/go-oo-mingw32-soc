@@ -458,6 +458,150 @@ class SXAddlInfo(BaseRecordHandler):
     def parseBytes (self):
         pass
 
+class SXStreamID(BaseRecordHandler):
+
+    def parseBytes (self):
+        if self.size != 2:
+            return
+
+        strmId = globals.getSignedInt(self.bytes)
+        self.appendLine("pivot cache stream ID in SX DB storage: %d"%strmId)
+
+class SXViewSource(BaseRecordHandler):
+
+    def parseBytes (self):
+        if self.size != 2:
+            return
+
+        src = globals.getSignedInt(self.bytes)
+        srcType = 'unknown'
+        if src == 0x01:
+            srcType = 'Excel list or database'
+        elif src == 0x02:
+            srcType = 'External data source (Microsoft Query)'
+        elif src == 0x04:
+            srcType = 'Multiple consolidation ranges'
+        elif src == 0x10:
+            srcType = 'Scenario Manager summary report'
+
+        self.appendLine("data source type: %s"%srcType)
+
+class SXViewFields(BaseRecordHandler):
+
+    def parseBytes (self):
+        axis          = globals.getSignedInt(self.readBytes(2))
+        subtotalCount = globals.getSignedInt(self.readBytes(2))
+        subtotalType  = globals.getSignedInt(self.readBytes(2))
+        itemCount     = globals.getSignedInt(self.readBytes(2))
+        nameLen       = globals.getSignedInt(self.readBytes(2))
+        
+        axisType = 'unknown'
+        if axis == 0:
+            axisType = 'no axis'
+        elif axis == 1:
+            axisType = 'row'
+        elif axis == 2:
+            axisType = 'column'
+        elif axis == 4:
+            axisType = 'page'
+        elif axis == 8:
+            axisType = 'data'
+
+        subtotalTypeName = 'unknown'
+        if subtotalType == 0x0000:
+            subtotalTypeName = 'None'
+        elif subtotalType == 0x0001:
+            subtotalTypeName = 'Default'
+        elif subtotalType == 0x0002:
+            subtotalTypeName = 'Sum'
+        elif subtotalType == 0x0004:
+            subtotalTypeName = 'CountA'
+        elif subtotalType == 0x0008:
+            subtotalTypeName = 'Average'
+        elif subtotalType == 0x0010:
+            subtotalTypeName = 'Max'
+        elif subtotalType == 0x0020:
+            subtotalTypeName = 'Min'
+        elif subtotalType == 0x0040:
+            subtotalTypeName = 'Product'
+        elif subtotalType == 0x0080:
+            subtotalTypeName = 'Count'
+        elif subtotalType == 0x0100:
+            subtotalTypeName = 'Stdev'
+        elif subtotalType == 0x0200:
+            subtotalTypeName = 'StdevP'
+        elif subtotalType == 0x0400:
+            subtotalTypeName = 'Var'
+        elif subtotalType == 0x0800:
+            subtotalTypeName = 'VarP'
+
+        self.appendLine("axis type: %s"%axisType)
+        self.appendLine("number of subtotals: %d"%subtotalCount)
+        self.appendLine("subtotal type: %s"%subtotalTypeName)
+        self.appendLine("number of items: %d"%itemCount)
+
+        if nameLen == -1:
+            self.appendLine("name length: null (use name in the cache)")
+        else:
+            self.appendLine("name length: %d"%nameLen)
+
+class SXViewItem(BaseRecordHandler):
+
+    itemTypes = {
+        0xFE: 'Page',
+        0xFF: 'Null',
+        0x00: 'Data',
+        0x01: 'Default',
+        0x02: 'SUM',
+        0x03: 'COUNTA',
+        0x04: 'COUNT',
+        0x05: 'AVERAGE',
+        0x06: 'MAX',
+        0x07: 'MIN',
+        0x08: 'PRODUCT',
+        0x09: 'STDEV',
+        0x0A: 'STDEVP',
+        0x0B: 'VAR',
+        0x0C: 'VARP',
+        0x0D: 'Grand total',
+        0x0E: 'blank'
+    }
+
+    def parseBytes (self):
+        itemType = globals.getSignedInt(self.readBytes(2))
+        grbit    = globals.getSignedInt(self.readBytes(2))
+        iCache   = globals.getSignedInt(self.readBytes(2))
+        nameLen  = globals.getSignedInt(self.readBytes(2))
+        
+        itemTypeName = 'unknown'
+        if SXViewItem.itemTypes.has_key(itemType):
+            itemTypeName = SXViewItem.itemTypes[itemType]
+
+        flags = ''
+        if (grbit & 0x0001):
+            flags += 'hidden, '
+        if (grbit & 0x0002):
+            flags += 'detail hidden, '
+        if (grbit & 0x0008):
+            flags += 'formula, '
+        if (grbit & 0x0010):
+            flags += 'missing, '
+
+        if len(flags) > 0:
+            # strip the trailing ', '
+            flags = flags[:-2]
+        else:
+            flags = '(none)'
+
+        self.appendLine("item type: %s"%itemTypeName)
+        self.appendLine("flags: %s"%flags)
+        self.appendLine("pivot cache index: %d"%iCache)
+        if nameLen == -1:
+            self.appendLine("name length: null (use name in the cache)")
+        else:
+            self.appendLine("name length: %d"%nameLen)
+
+
 class PivotQueryTableEx(BaseRecordHandler):
 
     def parseBytes (self):
