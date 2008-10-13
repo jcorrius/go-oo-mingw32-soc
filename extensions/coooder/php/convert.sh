@@ -20,14 +20,14 @@
 OUTPUT_DIR=../config/org/openoffice/langs
 GESHI_VERSION=1.0.8
 
-## TODO Change this to fetch the latest language definitions from GeSHi's website
-orig_dir=`pwd`
-cd ../build
-wget http://surfnet.dl.sourceforge.net/sourceforge/geshi/geshi-$GESHI_VERSION.tar.bz2
-tar xjf geshi-$GESHI_VERSION.tar.bz2
-cd $orig_dir
+## Change this to fetch the latest language definitions from GeSHi's website
+if [ ! -e geshi-$GESHI_VERSION.tar.bz2 ]
+then
+    wget http://surfnet.dl.sourceforge.net/sourceforge/geshi/geshi-$GESHI_VERSION.tar.bz2
+    tar xjf geshi-$GESHI_VERSION.tar.bz2
+fi
 
-GESHI_DIR=../build/geshi/geshi
+GESHI_DIR=geshi/geshi
 
 mkdir -p $OUTPUT_DIR
 
