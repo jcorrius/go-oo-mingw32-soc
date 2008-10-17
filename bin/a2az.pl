@@ -38,6 +38,7 @@ while( <FILE1>){
                    s/([ 	~">][Aa]) \\<item type=\\\"productname\\\"\\>%PRODUCTNAME/$1z \\<item type=\\\"productname\\\"\\>%PRODUCTNAME/g;
                    s/([ 	~">][Aa]) %productname/$1z %productname/g;
                    s/([ 	~">][Aa]) \$\[officename\]/$1z \$\[officename\]/g;
+                   s/([ 	~">][Aa]) \$\{PRODUCT_NAME\}/$1z \$\{PRODUCT_NAME\}/g;
                    s/([ 	~">][Aa]) \\<emph\\>\$\[officename\]/$1z \\<emph\\>\$\[officename\]/g;
                    s/([ 	~">][Aa]) \[ProductName\]/$1z \[ProductName\]/g;
                    s/\\nA %PRODUCTNAME/\\nAz %PRODUCTNAME/g;
