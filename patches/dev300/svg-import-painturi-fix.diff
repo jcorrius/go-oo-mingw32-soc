@@ -1,0 +1,243 @@
+--- filter/source/svg/svgreader.cxx.old	2008-10-20 10:54:11.000000000 +0200
++++ filter/source/svg/svgreader.cxx	2008-10-20 12:12:44.000000000 +0200
+@@ -996,6 +996,9 @@
+                      const ARGBColor& rInheritColor,
+                      const Gradient&  rInheritGradient )
+     {
++        std::pair<const char*,const char*> aPaintUri(NULL,NULL);
++        std::pair<ARGBColor,bool>          aColor(maCurrState.maCurrentColor,
++                                                  false);
+         if( strcmp(sValue,"none") == 0 )
+             rType = NONE;
+         else if( strcmp(sValue,"currentColor") == 0 )
+@@ -1009,19 +1012,33 @@
+             rColor = rInheritColor;
+             rGradient = rInheritGradient;
+         }
+-		else if( strncmp(sValue,"url(#",5) == 0 )
++		else if( parsePaintUri(aPaintUri,aColor,sValue) )
+ 		{
+-            // assuming gradient. assumption does not hold generally
+-            if( rValue.getLength() > 5 )
++            if( aPaintUri.first != aPaintUri.second )
+             {
+-                ElementRefMapType::iterator aRes;
+-                if( (aRes=maGradientIdMap.find(rValue.copy(5,
+-                                                           rValue.getLength()-6))) != maGradientIdMap.end() )
++                // assuming gradient. assumption does not hold generally    
++                const char* pClosingBracket;
++                if( (pClosingBracket=strstr(sValue,")")) && rValue.getLength() > 5 )
+                 {
+-                    rGradient = maGradientVector[aRes->second];
+-                    rType = GRADIENT;
++                    ElementRefMapType::iterator aRes;
++                    if( (aRes=maGradientIdMap.find(
++                             rValue.copy(aPaintUri.first-sValue,
++                                         aPaintUri.second-aPaintUri.first))) != maGradientIdMap.end() )
++                    {
++                        rGradient = maGradientVector[aRes->second];
++                        rType = GRADIENT;
++                    }
+                 }
+             }
++            else if( aColor.second )
++            {
++                rType = SOLID;
++                rColor = aColor.first;
++            }
++            else
++            {
++                rType = NONE;
++            }
+ 		}
+         else
+         { 
+--- filter/source/svg/parserfragments.cxx.old	2008-10-20 10:53:31.000000000 +0200
++++ filter/source/svg/parserfragments.cxx	2008-10-20 12:04:27.000000000 +0200
+@@ -117,52 +117,72 @@
+     return basegfx::unotools::affineMatrixFromHomMatrix(aRet,aRHS);
+ }
+ 
++namespace
++{
++    struct ColorGrammar : public ::boost::spirit::grammar< ColorGrammar >
++    {
++    public:
++        ARGBColor& m_rColor;
++        explicit ColorGrammar( ARGBColor& rColor ) : m_rColor(rColor) {}
++        template< typename ScannerT > 
++        struct definition
++        {
++            ::boost::spirit::rule< ScannerT > colorExpression;
++            definition( const ColorGrammar& self )
++            {
++                using namespace ::boost::spirit;
++
++                int_parser<sal_uInt8,10,1,3> byte_p;
++                colorExpression = 
++                    (
++                        // the #rrggbb form
++                        ('#' >> (xdigit_p >> xdigit_p)[boost::bind(&setEightBitColor,
++                                                                   boost::ref(self.m_rColor.r),_1,_2)]
++                             >> (xdigit_p >> xdigit_p)[boost::bind(&setEightBitColor,
++                                                                   boost::ref(self.m_rColor.g),_1,_2)]
++                             >> (xdigit_p >> xdigit_p)[boost::bind(&setEightBitColor,
++                                                                   boost::ref(self.m_rColor.b),_1,_2)]) 
++                        |
++                        // the #rgb form
++                        ('#' >> xdigit_p[boost::bind(&setFourBitColor,
++                                                     boost::ref(self.m_rColor.r),_1)] 
++                             >> xdigit_p[boost::bind(&setFourBitColor,
++                                                     boost::ref(self.m_rColor.g),_1)] 
++                             >> xdigit_p[boost::bind(&setFourBitColor,
++                                                     boost::ref(self.m_rColor.b),_1)]) 
++                        |
++                        // rgb() form
++                        (str_p("rgb") 
++                            >> '(' >>
++                            (
++                	            // rgb(int,int,int)
++                    	        (byte_p[boost::bind(&setIntColor,
++                                                    boost::ref(self.m_rColor.r),_1)] >> ',' >>
++	                             byte_p[boost::bind(&setIntColor,
++                                                    boost::ref(self.m_rColor.g),_1)] >> ',' >>
++        	                     byte_p[boost::bind(&setIntColor,
++                                                    boost::ref(self.m_rColor.b),_1)])
++                             |  
++                    	        // rgb(double,double,double)
++                        	    (real_p[assign_a(self.m_rColor.r)] >> ',' >>
++                                 real_p[assign_a(self.m_rColor.g)] >> ',' >>
++                                 real_p[assign_a(self.m_rColor.b)])
++                             )
++                         >> ')')
++                     );
++            }
++            ::boost::spirit::rule<ScannerT> const& start() const { return colorExpression; }
++        };
++    };
++}
++
+ bool parseColor( const char* sColor, ARGBColor& rColor  )
+ {
+     using namespace ::boost::spirit;
+ 
+-    int_parser<sal_uInt8,10,1,3> byte_p;
+-	
+     if( parse(sColor,
+-    	    //  Begin grammar
+-        	(
+-            	// the #rrggbb form
+-	            ('#' >> (xdigit_p >> xdigit_p)[boost::bind(&setEightBitColor,
+-    	                                                   boost::ref(rColor.r),_1,_2)]
+-        	         >> (xdigit_p >> xdigit_p)[boost::bind(&setEightBitColor,
+-            	                                           boost::ref(rColor.g),_1,_2)]
+-                	 >> (xdigit_p >> xdigit_p)[boost::bind(&setEightBitColor,
+-            	                                           boost::ref(rColor.b),_1,_2)]) 
+-	          |
+-    	        // the #rgb form
+-        	    ('#' >> xdigit_p[boost::bind(&setFourBitColor,
+-            	                             boost::ref(rColor.r),_1)] 
+-                	 >> xdigit_p[boost::bind(&setFourBitColor,
+-	                                         boost::ref(rColor.g),_1)] 
+-    	             >> xdigit_p[boost::bind(&setFourBitColor,
+-        	                                 boost::ref(rColor.b),_1)]) 
+-	          |
+-    	        // rgb() form
+-        	    (str_p("rgb") 
+-            	 >> '(' >>
+-                     (
+-                	         // rgb(int,int,int)
+-                    	     (byte_p[boost::bind(&setIntColor,
+-                        	                     boost::ref(rColor.r),_1)] >> ',' >>
+-	                          byte_p[boost::bind(&setIntColor,
+-    	                                         boost::ref(rColor.g),_1)] >> ',' >>
+-        	                  byte_p[boost::bind(&setIntColor,
+-            	                                 boost::ref(rColor.b),_1)])
+-                	       |  
+-                    	     // rgb(double,double,double)
+-                        	 (real_p[assign_a(rColor.r)] >> ',' >>
+-	                          real_p[assign_a(rColor.g)] >> ',' >>
+-    	                      real_p[assign_a(rColor.b)])
+-                     )
+-        	     >> ')')
+-	        ) >> end_p,
+-    	    //  End grammar
+-            space_p).full )
++              ColorGrammar(rColor) >> end_p,
++              space_p).full )
+     {
+         // free-form color found & parsed
+         return true;
+@@ -519,6 +539,32 @@
+ }
+ 
+ //////////////////////////////////////////////////////////////
++
++bool parsePaintUri( std::pair<const char*,const char*>& o_rPaintUri,
++                    std::pair<ARGBColor,bool>&          io_rColor,
++                    const char*                         sPaintUri )
++{
++    using namespace ::boost::spirit;
++
++    const bool bRes = parse(sPaintUri,
++        //  Begin grammar
++        (
++            str_p("url(#") >>
++            (+alnum_p)[assign_a(o_rPaintUri)] >> 
++            str_p(")") >>
++            *( str_p("none")[assign_a(io_rColor.second,false)] | 
++               str_p("currentColor")[assign_a(io_rColor.second,true)] |
++               ColorGrammar(io_rColor.first)
++               // TODO(F1): named color
++             )
++        ) >> end_p,
++        //  End grammar
++        space_p).full;
++
++    return bRes;
++}
++
++//////////////////////////////////////////////////////////////
+ 
+ namespace
+ {
+--- filter/source/svg/parserfragments.hxx.old	2008-10-20 10:53:13.000000000 +0200
++++ filter/source/svg/parserfragments.hxx	2008-10-20 12:12:58.000000000 +0200
+@@ -18,6 +18,7 @@
+ 
+ #include <sal/config.h>
+ #include <vector>
++#include <utility>
+ #include <string>
+ 
+ namespace basegfx
+@@ -42,6 +43,29 @@
+     /// Parse given string for a list of double values, comma-delimited
+     bool parseDashArray( const char* sDashArray, std::vector<double>& rOutputVector );
+ 	
++    /** Parse paint uri
++
++        @param o_rPaintUri
++        Start and end ptr for uri substring (within
++        [sPaintUri,sPaintUri+strlen(sPaintUri)]
++
++        @param io_rColor
++        The optional paint color to use. if o_rPaintUri is empty,
++        parser sets io_rColor.second to false for color="None", to
++        true and keeps current io_rColor.first entry for
++        "currentColor", and to true and sets io_rColor.first to parsed
++        color otherwise.
++
++        @param sPaintUri
++        String to parse. Permitted to contain the optional paint
++        stuff, like fallback color.
++
++        @return true, if a paint uri was successfully parsed.
++     */
++    bool parsePaintUri( std::pair<const char*,const char*>& o_rPaintUri,
++                        std::pair<ARGBColor,bool>&          io_rColor,
++                        const char*                         sPaintUri );
++
+ 	/// Parse given string for the xlink attribute
+ 	bool parseXlinkHref( const char* xlink, std::string& data );
+ 
