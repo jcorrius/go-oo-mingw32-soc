@@ -212,7 +212,7 @@ recData = {
     0x001C: ["CHCHARTLINE", "?"],
     0x101D: ["CHAXIS", "?"],
     0x101E: ["CHTICK", "?"],
-    0x101F: ["CHVALUERANGE", "?"],
+    0x101F: ["CHVALUERANGE", "?", record.CHValueRange],
     0x1020: ["CHLABELRANGE", "?"],
     0x1021: ["CHAXISLINE", "?"],
     0x1024: ["CHDEFAULTTEXT", "?"],

@@ -760,3 +760,19 @@ class CHProperties(BaseRecordHandler):
             emptyValues = "interpolate empty values"
 
         self.appendLine("empty value treatment: %s"%emptyValues)
+
+
+class CHValueRange(BaseRecordHandler):
+
+    def parseBytes (self):
+        minVal = globals.getDouble(self.readBytes(8))
+        maxVal = globals.getDouble(self.readBytes(8))
+        majorStep = globals.getDouble(self.readBytes(8))
+        minorStep = globals.getDouble(self.readBytes(8))
+        cross = globals.getDouble(self.readBytes(8))
+        flags = globals.getSignedInt(self.readBytes(2))
+
+        self.appendLine("min: %g    max: %g"%(minVal, maxVal))
+        self.appendLine("major step: %g    minor step: %g"%(majorStep, minorStep))
+        self.appendLine("cross: %g"%cross)
+        self.appendLine("flags: 0x%4.4X"%flags)
