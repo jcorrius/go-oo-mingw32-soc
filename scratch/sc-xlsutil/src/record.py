@@ -764,6 +764,12 @@ class CHProperties(BaseRecordHandler):
 
 class CHValueRange(BaseRecordHandler):
 
+    def __getYesNo (self, boolVal):
+        if boolVal:
+            return 'yes'
+        else:
+            return 'no'
+
     def parseBytes (self):
         minVal = globals.getDouble(self.readBytes(8))
         maxVal = globals.getDouble(self.readBytes(8))
@@ -772,7 +778,23 @@ class CHValueRange(BaseRecordHandler):
         cross = globals.getDouble(self.readBytes(8))
         flags = globals.getSignedInt(self.readBytes(2))
 
-        self.appendLine("min: %g    max: %g"%(minVal, maxVal))
-        self.appendLine("major step: %g    minor step: %g"%(majorStep, minorStep))
-        self.appendLine("cross: %g"%cross)
-        self.appendLine("flags: 0x%4.4X"%flags)
+        autoMin   = (flags & 0x0001)
+        autoMax   = (flags & 0x0002)
+        autoMajor = (flags & 0x0004)
+        autoMinor = (flags & 0x0008)
+        autoCross = (flags & 0x0010)
+        logScale  = (flags & 0x0020)
+        reversed  = (flags & 0x0040)
+        maxCross  = (flags & 0x0080)
+        bit8      = (flags & 0x0100)
+
+        self.appendLine("min: %g (auto min: %s)"%(minVal, self.__getYesNo(autoMin)))
+        self.appendLine("max: %g (auto max: %s)"%(maxVal, self.__getYesNo(autoMax)))
+        self.appendLine("major step: %g (auto major: %s)"%
+            (majorStep, self.__getYesNo(autoMajor)))
+        self.appendLine("minor step: %g (auto minor: %s)"%
+            (minorStep, self.__getYesNo(autoMinor)))
+        self.appendLine("cross: %g (auto cross: %s) (max cross: %s)"%
+            (cross, self.__getYesNo(autoCross), self.__getYesNo(maxCross)))
+        self.appendLine("biff5 or above: %s"%self.__getYesNo(bit8))
+
