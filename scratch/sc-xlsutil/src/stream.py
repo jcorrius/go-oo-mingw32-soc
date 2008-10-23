@@ -204,7 +204,7 @@ recData = {
     0x100D: ["CHSTRING", "?"],
     0x1014: ["CHTYPEGROUP", "?"],
     0x1015: ["CHLEGEND", "?"],
-    0x1017: ["CHBAR, CHCOLUMN", "?"],
+    0x1017: ["CHBAR, CHCOLUMN", "?", record.CHBar],
     0x1018: ["CHLINE", "?"],
     0x1019: ["CHPIE", "?"],
     0x101A: ["CHAREA", "?"],

@@ -165,6 +165,26 @@ def getSignedInt (bytes):
     raise ByteConvertError
 
 
+def getUnsignedInt (bytes):
+    # little endian
+    n = len(bytes)
+    if n == 0:
+        return 0
+
+    text = toTextBytes(bytes)
+    if n == 1:
+        # byte - 1 byte
+        return struct.unpack('B', text)[0]
+    elif n == 2:
+        # short - 2 bytes
+        return struct.unpack('<H', text)[0]
+    elif n == 4:
+        # int, long - 4 bytes
+        return struct.unpack('<L', text)[0]
+
+    raise ByteConvertError
+
+
 def getFloat (bytes):
     n = len(bytes)
     if n == 0:

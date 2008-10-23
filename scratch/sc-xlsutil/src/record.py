@@ -43,6 +43,12 @@ append a line to be displayed.
     def setCurrentPos (self, pos):
         self.pos = pos
 
+    def getYesNo (self, boolVal):
+        if boolVal:
+            return 'yes'
+        else:
+            return 'no'
+
 # --------------------------------------------------------------------
 
 class BOF(BaseRecordHandler):
@@ -764,12 +770,6 @@ class CHProperties(BaseRecordHandler):
 
 class CHValueRange(BaseRecordHandler):
 
-    def __getYesNo (self, boolVal):
-        if boolVal:
-            return 'yes'
-        else:
-            return 'no'
-
     def parseBytes (self):
         minVal = globals.getDouble(self.readBytes(8))
         maxVal = globals.getDouble(self.readBytes(8))
@@ -788,13 +788,32 @@ class CHValueRange(BaseRecordHandler):
         maxCross  = (flags & 0x0080)
         bit8      = (flags & 0x0100)
 
-        self.appendLine("min: %g (auto min: %s)"%(minVal, self.__getYesNo(autoMin)))
-        self.appendLine("max: %g (auto max: %s)"%(maxVal, self.__getYesNo(autoMax)))
+        self.appendLine("min: %g (auto min: %s)"%(minVal, self.getYesNo(autoMin)))
+        self.appendLine("max: %g (auto max: %s)"%(maxVal, self.getYesNo(autoMax)))
         self.appendLine("major step: %g (auto major: %s)"%
-            (majorStep, self.__getYesNo(autoMajor)))
+            (majorStep, self.getYesNo(autoMajor)))
         self.appendLine("minor step: %g (auto minor: %s)"%
-            (minorStep, self.__getYesNo(autoMinor)))
+            (minorStep, self.getYesNo(autoMinor)))
         self.appendLine("cross: %g (auto cross: %s) (max cross: %s)"%
-            (cross, self.__getYesNo(autoCross), self.__getYesNo(maxCross)))
-        self.appendLine("biff5 or above: %s"%self.__getYesNo(bit8))
+            (cross, self.getYesNo(autoCross), self.getYesNo(maxCross)))
+        self.appendLine("biff5 or above: %s"%self.getYesNo(bit8))
 
+
+class CHBar(BaseRecordHandler):
+
+    def parseBytes (self):
+        overlap = globals.getSignedInt(self.readBytes(2))
+        gap     = globals.getSignedInt(self.readBytes(2))
+        flags   = globals.getUnsignedInt(self.readBytes(2))
+
+        horizontal = (flags & 0x0001)
+        stacked    = (flags & 0x0002)
+        percent    = (flags & 0x0004)
+        shadow     = (flags & 0x0008)
+
+        self.appendLine("overlap width: %d"%overlap)
+        self.appendLine("gap: %d"%gap)
+        self.appendLine("horizontal: %s"%self.getYesNo(horizontal))
+        self.appendLine("stacked: %s"%self.getYesNo(stacked))
+        self.appendLine("percent: %s"%self.getYesNo(percent))
+        self.appendLine("shadow: %s"%self.getYesNo(shadow))
