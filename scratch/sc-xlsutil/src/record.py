@@ -817,3 +817,17 @@ class CHBar(BaseRecordHandler):
         self.appendLine("stacked: %s"%self.getYesNo(stacked))
         self.appendLine("percent: %s"%self.getYesNo(percent))
         self.appendLine("shadow: %s"%self.getYesNo(shadow))
+
+
+class CHLine(BaseRecordHandler):
+
+    def parseBytes (self):
+        flags   = globals.getUnsignedInt(self.readBytes(2))
+        stacked = (flags & 0x0001)
+        percent = (flags & 0x0002)
+        shadow  = (flags & 0x0004)
+
+        self.appendLine("stacked: %s"%self.getYesNo(stacked))
+        self.appendLine("percent: %s"%self.getYesNo(percent))
+        self.appendLine("shadow: %s"%self.getYesNo(shadow))
+
