@@ -459,10 +459,141 @@ class SXViewEx9(BaseRecordHandler):
         autoFmtId = globals.getSignedInt(self.bytes[12:14])
         self.appendLine("autoformat index: %d"%autoFmtId)
 
+
 class SXAddlInfo(BaseRecordHandler):
 
+    sxcNameList = {
+        0x00: "sxcView",
+        0x01: "sxcField",
+        0x02: "sxcHierarchy",
+        0x03: "sxcCache",
+        0x04: "sxcCacheField",
+        0x05: "sxcQsi",
+        0x06: "sxcQuery",
+        0x07: "sxcGrpLevel",
+        0x08: "sxcGroup"
+    }
+
+    sxdNameList = {
+        0x00: 'sxdId',
+        0x01: 'sxdVerUpdInv',
+        0x02: 'sxdVer10Info',
+        0x03: 'sxdCalcMember',
+        0x04: 'sxdXMLSource',
+        0x05: 'sxdProperty',
+        0x05: 'sxdSrcDataFile',
+        0x06: 'sxdGrpLevelInfo',
+        0x06: 'sxdSrcConnFile',
+        0x07: 'sxdGrpInfo',
+        0x07: 'sxdReconnCond',
+        0x08: 'sxdMember',
+        0x09: 'sxdFilterMember',
+        0x0A: 'sxdCalcMemString',
+        0xFF: 'sxdEnd'
+    }
+
     def parseBytes (self):
-        pass
+        dummy = self.readBytes(2) # 0x0864
+        dummy = self.readBytes(2) # 0x0000
+        sxc = self.readBytes(1)[0]
+        sxd = self.readBytes(1)[0]
+        dwUserData = self.readBytes(4)
+        dummy = self.readBytes(2)
+
+        className = "(unknown)"
+        if SXAddlInfo.sxcNameList.has_key(sxc):
+            className = SXAddlInfo.sxcNameList[sxc]
+        self.appendLine("class name: %s"%className)
+        typeName = '(unknown)'
+        if SXAddlInfo.sxdNameList.has_key(sxd):
+            typeName = SXAddlInfo.sxdNameList[sxd]
+        self.appendLine("type name: %s"%typeName)
+        
+        if sxd == 0x00:
+            self.__parseId(sxc, dwUserData)
+
+        elif sxd == 0x02:
+            if sxc == 0x03:
+                self.__parseSxDbSave10()
+            elif sxc == 0x00:
+                self.__parseViewFlags(dwUserData)
+
+    def __parseViewFlags (self, dwUserData):
+        flags = globals.getUnsignedInt(dwUserData)
+        viewVer = (flags & 0x000000FF)
+        verName = self.__getExcelVerName(viewVer)
+        self.appendLine("PivotTable view version: %s"%verName)
+        displayImmediateItems = (flags & 0x00000100)
+        enableDataEd          = (flags & 0x00000200)
+        disableFList          = (flags & 0x00000400)
+        reenterOnLoadOnce     = (flags & 0x00000800)
+        notViewCalcMembers    = (flags & 0x00001000)
+        notVisualTotals       = (flags & 0x00002000)
+        pageMultiItemLabel    = (flags & 0x00004000)
+        tensorFillCv          = (flags & 0x00008000)
+        hideDDData            = (flags & 0x00010000)
+
+        self.appendLine("display immediate items: %s"%self.getYesNo(displayImmediateItems))
+        self.appendLine("editing values in data area allowed: %s"%self.getYesNo(enableDataEd))
+        self.appendLine("field list disabled: %s"%self.getYesNo(disableFList))
+        self.appendLine("re-center on load once: %s"%self.getYesNo(reenterOnLoadOnce))
+        self.appendLine("hide calculated members: %s"%self.getYesNo(notViewCalcMembers))
+        self.appendLine("totals include hidden members: %s"%self.getYesNo(notVisualTotals))
+        self.appendLine("(Multiple Items) instead of (All) in page field: %s"%self.getYesNo(pageMultiItemLabel))
+        self.appendLine("background color from source: %s"%self.getYesNo(tensorFillCv))
+        self.appendLine("hide drill-down for data field: %s"%self.getYesNo(hideDDData))
+
+    def __parseId (self, sxc, dwUserData):
+        if sxc == 0x03:
+            idCache = globals.getUnsignedInt(dwUserData)
+            self.appendLine("cache ID: %d"%idCache)
+        elif sxc in [0x00, 0x01, 0x02, 0x05, 0x06, 0x07, 0x08]:
+            lenStr = globals.getUnsignedInt(dwUserData)
+            self.appendLine("length of ID string: %d"%lenStr)
+            textLen = globals.getUnsignedInt(self.readBytes(2))
+            data = self.bytes[self.getCurrentPos():]
+            if lenStr == 0:
+                self.appendLine("name (ID) string: (continued from last record)")
+            elif lenStr == len(data) - 1:
+                text, textLen = globals.getRichText(data, textLen)
+                self.appendLine("name (ID) string: %s"%text)
+            else:
+                self.appendLine("name (ID) string: (first of multiple records)")
+
+
+    def __parseSxDbSave10 (self):
+        countGhostMax = globals.getSignedInt(self.readBytes(4))
+        self.appendLine("max ghost pivot items: %d"%countGhostMax)
+
+        # version last refreshed this cache
+        lastVer = globals.getUnsignedInt(self.readBytes(1))
+        verName = self.__getExcelVerName(lastVer)
+        self.appendLine("last version refreshed: %s"%verName)
+        
+        # minimum version needed to refresh this cache
+        lastVer = globals.getUnsignedInt(self.readBytes(1))
+        verName = self.__getExcelVerName(lastVer)
+        self.appendLine("minimum version needed to refresh: %s"%verName)
+
+        # date last refreshed
+        dateRefreshed = globals.getDouble(self.readBytes(8))
+        self.appendLine("date last refreshed: %g"%dateRefreshed)
+
+
+    def __getExcelVerName (self, ver):
+        verName = '(unknown)'
+        if ver == 0:
+            verName = 'Excel 9 (2000) and earlier'
+        elif ver == 1:
+            verName = 'Excel 10 (XP)'
+        elif ver == 2:
+            verName = 'Excel 11 (2003)'
+        elif ver == 3:
+            verName = 'Excel 12 (2007)'
+        return verName
+
+
+
 
 class SXStreamID(BaseRecordHandler):
 
