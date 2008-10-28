@@ -7,12 +7,14 @@ import globals, formula
 
 class BaseRecordHandler(object):
 
-    def __init__ (self, header, size, bytes):
+    def __init__ (self, header, size, bytes, strmData):
         self.header = header
         self.size = size
         self.bytes = bytes
         self.lines = []
         self.pos = 0       # current byte position
+
+        self.strmData = strmData
 
     def parseBytes (self):
         """Parse the original bytes and generate human readable output.
@@ -37,6 +39,11 @@ append a line to be displayed.
         self.pos += length
         return r
 
+    def readRemainingBytes (self):
+        r = self.bytes[self.pos:]
+        self.pos = self.size
+        return r
+
     def getCurrentPos (self):
         return self.pos
 
@@ -48,6 +55,19 @@ append a line to be displayed.
             return 'yes'
         else:
             return 'no'
+
+    def readUnsignedInt (self, length):
+        bytes = self.readBytes(length)
+        return globals.getUnsignedInt(bytes)
+
+    def readSignedInt (self, length):
+        bytes = self.readBytes(length)
+        return globals.getSignedInt(bytes)
+
+    def readDouble (self):
+        # double is always 8 bytes.
+        bytes = self.readBytes(8)
+        return globals.getDouble(bytes)
 
 # --------------------------------------------------------------------
 
@@ -593,6 +613,91 @@ class SXAddlInfo(BaseRecordHandler):
         return verName
 
 
+class SXDb(BaseRecordHandler):
+
+    def parseBytes (self):
+        recCount = self.readUnsignedInt(4)
+        strmId   = self.readUnsignedInt(2)
+        flags    = self.readUnsignedInt(2)
+        self.appendLine("number of records: %d"%recCount)
+        self.appendLine("stream ID: 0x%4.4X"%strmId)
+        self.appendLine("flags: 0x%4.4X"%flags)
+
+        dbBlockRecs = self.readUnsignedInt(2)
+        baseFields = self.readUnsignedInt(2)
+        allFields = self.readUnsignedInt(2)
+        self.appendLine("DB block records: %d"%dbBlockRecs)
+        self.appendLine("base fields: %d"%baseFields)
+        self.appendLine("all fields: %d"%allFields)
+
+        dummy = self.readBytes(2)
+        type = self.readUnsignedInt(2)
+        self.appendLine("type: 0x%4.4X"%type)
+        textLen = self.readUnsignedInt(2)
+        changedBy, textLen = globals.getRichText(self.readRemainingBytes(), textLen)
+        self.appendLine("changed by: %s"%changedBy)
+
+
+class SXDbEx(BaseRecordHandler):
+
+    def parseBytes (self):
+        lastChanged = self.readDouble()
+        sxFmlaRecs = self.readUnsignedInt(4)
+        self.appendLine("last changed: %g"%lastChanged)
+        self.appendLine("SXFORMULA records: %d"%sxFmlaRecs)
+
+
+class SXField(BaseRecordHandler):
+
+    dataTypeNames = {
+        0x0000: 'spc',
+        0x0480: 'str',
+        0x0520: 'int[+dbl]',
+        0x0560: 'dbl',
+        0x05A0: 'str+int[+dbl]',
+        0x05E0: 'str+dbl',
+        0x0900: 'dat',
+        0x0D00: 'dat+int/dbl',
+        0x0D80: 'dat+str[+int/dbl]'
+    }
+
+    def parseBytes (self):
+        flags = self.readUnsignedInt(2)
+        origItems  = (flags & 0x0001)
+        postponed  = (flags & 0x0002)
+        calculated = (flags & 0x0004)
+        groupChild = (flags & 0x0008)
+        numGroup   = (flags & 0x0010)
+        longIndex  = (flags & 0x0200)
+        self.appendLine("original items: %s"%self.getYesNo(origItems))
+        self.appendLine("postponed: %s"%self.getYesNo(postponed))
+        self.appendLine("calculated: %s"%self.getYesNo(calculated))
+        self.appendLine("group child: %s"%self.getYesNo(groupChild))
+        self.appendLine("num group: %s"%self.getYesNo(numGroup))
+        self.appendLine("long index: %s"%self.getYesNo(longIndex))
+        dataType = (flags & 0x0DE0)
+        if SXField.dataTypeNames.has_key(dataType):
+            self.appendLine("data type: %s (0x%4.4X)"%(SXField.dataTypeNames[dataType], dataType))
+        else:
+            self.appendLine("data type: unknown (0x%4.4X)"%dataType)
+
+        grpSubField = self.readUnsignedInt(2)
+        grpBaseField = self.readUnsignedInt(2)
+        itemCount = self.readUnsignedInt(2)
+        grpItemCount = self.readUnsignedInt(2)
+        baseItemCount = self.readUnsignedInt(2)
+        srcItemCount = self.readUnsignedInt(2)
+        self.appendLine("group sub-field: %d"%grpSubField)
+        self.appendLine("group base-field: %d"%grpBaseField)
+        self.appendLine("item count: %d"%itemCount)
+        self.appendLine("group item count: %d"%grpItemCount)
+        self.appendLine("base item count: %d"%baseItemCount)
+        self.appendLine("source item count: %d"%srcItemCount)
+
+        # field name
+        textLen = self.readUnsignedInt(2)
+        name, textLen = globals.getRichText(self.readRemainingBytes(), textLen)
+        self.appendLine("field name: %s"%name)
 
 
 class SXStreamID(BaseRecordHandler):
@@ -602,6 +707,7 @@ class SXStreamID(BaseRecordHandler):
             return
 
         strmId = globals.getSignedInt(self.bytes)
+        self.strmData.appendPivotCacheId(strmId)
         self.appendLine("pivot cache stream ID in SX DB storage: %d"%strmId)
 
 class SXViewSource(BaseRecordHandler):
@@ -744,6 +850,32 @@ class PivotQueryTableEx(BaseRecordHandler):
     def parseBytes (self):
         pass
 
+
+class SXDouble(BaseRecordHandler):
+    def parseBytes (self):
+        val = self.readDouble()
+        self.appendLine("value: %g"%val)
+
+
+class SXBoolean(BaseRecordHandler):
+    def parseBytes (self):
+        pass
+
+class SXError(BaseRecordHandler):
+    def parseBytes (self):
+        pass
+
+
+class SXInteger(BaseRecordHandler):
+    def parseBytes (self):
+        pass
+
+
+class SXString(BaseRecordHandler):
+    def parseBytes (self):
+        textLen = self.readUnsignedInt(2)
+        text, textLen = globals.getRichText(self.readRemainingBytes(), textLen)
+        self.appendLine("value: %s"%text)
 
 # -------------------------------------------------------------------
 # CT - Change Tracking

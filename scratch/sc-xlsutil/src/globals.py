@@ -5,9 +5,25 @@ class ByteConvertError(Exception): pass
 
 
 class Params(object):
+    """command-line parameters."""
     def __init__ (self):
         self.debug = False
         self.showSectorChain = False
+
+
+class StreamData(object):
+    """run-time stream data."""
+    def __init__ (self):
+        self.encrypted = False
+        self.pivotCacheIDs = {}
+
+    def appendPivotCacheId (self, newId):
+        # must be 4-digit with leading '0's.
+        strId = "%.4d"%newId
+        self.pivotCacheIDs[strId] = True
+
+    def isPivotCacheStream (self, name):
+        return self.pivotCacheIDs.has_key(name)
 
 
 def output (msg):

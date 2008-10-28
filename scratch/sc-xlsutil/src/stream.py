@@ -105,8 +105,16 @@ recData = {
     0x00C2: ["ADDMENU", "Menu Addition"],
     0x00C3: ["DELMENU", "Menu Deletion"],
     0x00C5: ["SXDI", "Data Item"],
-    0x00C6: ["SXDB", "PivotTable Cache Data"],
-    0x00CD: ["SXSTRING", "String"],
+    0x00C6: ["SXDB", "PivotTable Cache Data", record.SXDb],
+    0x00C7: ["SXFIELD", "Pivot Field", record.SXField],
+    0x00C8: ["SXINDEXLIST", "Indices to Source Data"],       
+    0x00C9: ["SXDOUBLE", "Double Value", record.SXDouble],                    
+    0x00CA: ["SXBOOLEAN", "Boolean Value", record.SXBoolean],                  
+    0x00CB: ["SXERROR", "Error Code", record.SXError],                       
+    0x00CC: ["SXINTEGER", "Integer Value", record.SXInteger],                  
+    0x00CD: ["SXSTRING", "String", record.SXString],
+    0x00CE: ["SXDATETIME", "Date & Time Special Format"],    
+    0x00CF: ["SXEMPTY", "Empty Value"],                      
     0x00D0: ["SXTBL", "Multiple Consolidation Source Info"],
     0x00D1: ["SXTBRGIITM", "Page Item Name Count"],
     0x00D2: ["SXTBPG", "Page Item Indexes"],
@@ -142,7 +150,7 @@ recData = {
     0x00FF: ["EXTSST", "Extended Shared String Table"],
     0x0100: ["SXVDEX", "Extended PivotTable View Fields"],
     0x0103: ["SXFORMULA", "PivotTable Formula Record"],
-    0x0122: ["SXDBEX", "PivotTable Cache Data"],
+    0x0122: ["SXDBEX", "PivotTable Cache Data", record.SXDbEx],
     0x013D: ["TABID", "Sheet Tab Index Array"],
     0x0160: ["USESELFS", "Natural Language Formulas Flag"],
     0x0161: ["DSF", "Double Stream File"],
@@ -261,7 +269,7 @@ recDataRev = {
 
 class XLStream(object):
 
-    def __init__ (self, chars, params):
+    def __init__ (self, chars, params, strmData):
         self.chars = chars
         self.size = len(self.chars)
         self.pos = 0
@@ -272,6 +280,7 @@ class XLStream(object):
         self.SAT = None
 
         self.params = params
+        self.strmData = strmData
 
     def __printSep (self, c='-', w=68, prefix=''):
         print(prefix + c*w)
@@ -329,22 +338,24 @@ class XLStream(object):
         bytes = []
         if obj != None:
             bytes = obj.getRawStreamByName(name)
-        strm = XLDirStream(bytes, self.params)
+        strm = XLDirStream(bytes, self.params, self.strmData)
         return strm
 
 class DirType:
     Workbook = 0
     RevisionLog = 1
+    PivotTableCache = 2
 
 class XLDirStream(object):
 
-    def __init__ (self, bytes, params):
+    def __init__ (self, bytes, params, strmData):
         self.bytes = bytes
         self.size = len(self.bytes)
         self.pos = 0
         self.type = DirType.Workbook
 
         self.params = params
+        self.strmData = strmData
 
 
     def readRaw (self, size=1):
@@ -393,12 +404,12 @@ class XLDirStream(object):
             print("%4.4Xh: %s - %s (%4.4Xh)"%
                   (header, recData[header][0], recData[header][1], header))
             if len(recData[header]) >= 3:
-                handler = recData[header][2](header, size, bytes)
+                handler = recData[header][2](header, size, bytes, self.strmData)
         elif self.type == DirType.RevisionLog and recDataRev.has_key(header):
             print("%4.4Xh: %s - %s (%4.4Xh)"%
                   (header, recDataRev[header][0], recDataRev[header][1], header))
             if len(recDataRev[header]) >= 3:
-                handler = recDataRev[header][2](header, size, bytes)
+                handler = recDataRev[header][2](header, size, bytes, self.strmData)
         else:
             print("%4.4Xh: [unknown record name] (%4.4Xh)"%(header, header))
         print("%4.4Xh:   size = %d; pos = %d"%(header, size, pos))

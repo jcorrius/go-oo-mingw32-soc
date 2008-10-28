@@ -31,7 +31,8 @@ class XLDumper(object):
 
     def dump (self):
         file = open(self.filepath, 'rb')
-        strm = stream.XLStream(file.read(), self.params)
+        strmData = globals.StreamData()
+        strm = stream.XLStream(file.read(), self.params, strmData)
         file.close()
         strm.printStreamInfo()
         strm.printHeader()
@@ -53,6 +54,22 @@ class XLDumper(object):
 
             elif dirname == "Revision Log":
                 dirstrm.type = stream.DirType.RevisionLog
+                try:
+                    header = 0x0000
+                    while header != 0x000A:
+                        header = dirstrm.readRecord()
+                except stream.EndOfStream:
+                    continue
+            elif dirname == '_SX_DB_CUR':
+                dirstrm.type = stream.DirType.PivotTableCache
+                try:
+                    header = 0x0000
+                    while header != 0x000A:
+                        header = dirstrm.readRecord()
+                except stream.EndOfStream:
+                    continue
+            elif strmData.isPivotCacheStream(dirname):
+                dirstrm.type = stream.DirType.PivotTableCache
                 try:
                     header = 0x0000
                     while header != 0x000A:
