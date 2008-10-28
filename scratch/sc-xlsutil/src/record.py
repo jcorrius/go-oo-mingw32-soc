@@ -201,11 +201,11 @@ class Blank(BaseRecordHandler):
 class Row(BaseRecordHandler):
 
     def parseBytes (self):
-        row  = globals.getSignedInt(self.bytes[0:2])
-        col1 = globals.getSignedInt(self.bytes[2:4])
-        col2 = globals.getSignedInt(self.bytes[4:6])
+        row  = self.readSignedInt(2)
+        col1 = self.readSignedInt(2)
+        col2 = self.readSignedInt(2)
 
-        rowHeightBits = globals.getSignedInt(self.bytes[6:8])
+        rowHeightBits = self.readSignedInt(2)
         rowHeight     = (rowHeightBits & 0x7FFF)
         defaultHeight = ((rowHeightBits & 0x8000) == 1)
 
@@ -216,6 +216,21 @@ class Row(BaseRecordHandler):
         else:
             self.appendLine("row height type: custom")
 
+        irwMac = self.readUnsignedInt(2)
+        self.appendLine("optimize flag (0 for BIFF): %d"%irwMac)
+
+        dummy = self.readUnsignedInt(2)
+        flags = self.readUnsignedInt(2)
+        outLevel   = (flags & 0x0007)
+        collapsed  = (flags & 0x0010)
+        zeroHeight = (flags & 0x0020)
+        unsynced   = (flags & 0x0040)
+        ghostDirty = (flags & 0x0080)
+        self.appendLine("outline level: %d"%outLevel)
+        self.appendLine("collapsed: %s"%self.getYesNo(collapsed))
+        self.appendLine("zero height: %s"%self.getYesNo(zeroHeight))
+        self.appendLine("unsynced: %s"%self.getYesNo(unsynced))
+        self.appendLine("ghost dirty: %s"%self.getYesNo(ghostDirty))
 
 
 class Name(BaseRecordHandler):
