@@ -10,7 +10,7 @@ use File::Basename;
 sub get_search_paths()
 {
     my @paths = ();
-    my @search = split /:/, $options{'PATCHPATH'};
+    my @search = split (/:/, $options{'PATCHPATH'});
 
     for my $stem (@search) {
 	push @paths, "$patch_dir/$stem";
@@ -39,12 +39,37 @@ sub find_patch_file($)
     return $file_path;
 }
 
+sub patch_has_no_effect ($$)
+{
+    my ($patch, $dest_dir) = @_;
+    defined $dest_dir || die "no dest dir";
+
+    foreach my $pf ( patched_files (slurp ($patch)) ) {
+#	print "\tpatched file '$pf'\n";
+	$pf =~ m/^([^\/]+)\// || die "malformed path $pf";
+	my $topdir = "$dest_dir/$1";
+#	print "\tcheck directory $topdir\n";
+	-d $topdir && return 0;
+#	print "\tno directory $topdir\n";
+    }
+    return 1;
+}
+
 sub do_patch {
     my $patch = shift;
     my $base_cmd = shift;
     my $patch_file = basename($patch);
     my $cmd_output = "";
     my $cmd_suffix = "";
+
+# short circuit in sloppy patching mode, when there is no file to patch
+# speeds up, and calms down the split build pleasingly
+    if ($base_cmd =~ m/sloppypatch.pl/) {
+	if (patch_has_no_effect ($patch, $dest_dir)) {
+	    print "$patch_file: sloppily skipping...\n"; 
+	    return 0;
+	}
+    }
 
     print "$patch_file: testing..."; 
 
@@ -67,6 +92,7 @@ sub do_patch {
 			 "- this is often caused by duplicate sections in a patch.\n".
 			 "you will need to manually reverse this patch\n";
     print "done.\n";
+    return 1;
 }
 
 sub slurp {
@@ -229,10 +255,18 @@ sub patched_files($) {
     my @lines = split (/\n/, $file);
     my @dest;
 
-    foreach $line (@lines) {
-        if ( $line =~ /\+\+\+ ([^\s]*)/ ) {
+    my $minusfile = '';
+    foreach my $line (@lines) {
+	if ( $line =~ m/^--- ([^\s]*)/) {
+	    $minusfile = $1;
+            $minusfile =~ s#[/]+#/#g;
+	}
+        if ( $line =~ /^\+\+\+ ([^\s]*)/ ) {
             my $file = $1;
             $file =~ s#[/]+#/#g;
+	    if ($file eq '/dev/null') { # removal
+		$file = $minusfile;
+	    }
             push @dest, $file;
         }
     }
@@ -245,7 +279,7 @@ sub is_dependent_patch($$) {
     
     my @files = patched_files ($patch);
 
-    foreach $file (@files) {
+    foreach my $file (@files) {
         if ( exists $patchedref->{$file} ) {
             return 1;
         }
@@ -722,13 +756,13 @@ sub apply_patches {
     foreach $patch (@to_apply) {
         my $patch_file = basename($patch);
         print "\n" unless $quiet;
-        do_patch $patch, $base_cmd;
+        if (do_patch ($patch, $base_cmd)) {
+	    my $patch_copy = sprintf("%s/%03d-%s", $applied_patches, $patch_num++, $patch_file);
 
-        my $patch_copy = sprintf("%s/%03d-%s", $applied_patches, $patch_num++, $patch_file);
+	    print "copy $patch_file -> $patch_copy\n" unless $quiet;
 
-        print "copy $patch_file -> $patch_copy\n" unless $quiet;
-
-        copy($patch, $patch_copy) || die "Can't copy $patch to $patch_copy $!";
+	    copy($patch, $patch_copy) || die "Can't copy $patch to $patch_copy $!";
+	}
     }
 
     if (keys %existing_patches) {
