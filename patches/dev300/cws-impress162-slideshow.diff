@@ -1,0 +1,360 @@
+? unxlngx6
+Index: source/engine/shapeattributelayer.cxx
+===================================================================
+RCS file: /cvs/graphics/slideshow/source/engine/shapeattributelayer.cxx,v
+retrieving revision 1.10
+retrieving revision 1.10.16.1
+diff -u -p -r1.10 -r1.10.16.1
+--- slideshow/source/engine/shapeattributelayer.cxx	24 Jun 2008 12:02:30 -0000	1.10
++++ slideshow/source/engine/shapeattributelayer.cxx	20 Oct 2008 11:53:44 -0000	1.10.16.1
+@@ -46,6 +46,7 @@
+ #include <com/sun/star/animations/AnimationAdditiveMode.hpp>
+ 
+ #include <basegfx/numeric/ftools.hxx>
++#include <basegfx/polygon/b2dpolygon.hxx>
+ #include <rtl/math.hxx>
+ 
+ 
+@@ -76,6 +77,8 @@ namespace slideshow
+                     ++mnPositionState;
+                 if( mnContentState != mpChild->getContentState() )
+                     ++mnContentState;
++                if( mnVisibilityState != mpChild->getVisibilityState() )
++                    ++mnVisibilityState;
+             }
+         }
+ 
+@@ -172,6 +175,7 @@ namespace slideshow
+             mnAlphaState( rChildLayer ? rChildLayer->getAlphaState() : 0),
+             mnPositionState( rChildLayer ? rChildLayer->getPositionState() : 0 ),
+             mnContentState( rChildLayer ? rChildLayer->getContentState() : 0 ),
++            mnVisibilityState( rChildLayer ? rChildLayer->getVisibilityState() : 0 ),
+ 
+             mnAdditiveMode( animations::AnimationAdditiveMode::BASE ),
+ 
+@@ -205,7 +209,7 @@ namespace slideshow
+             mbUnderlineModeValid( false ),	
+             mbCharPostureValid( false ),		
+             mbVisibilityValid( false )
+-        {            
++        {
+         }
+ 
+         bool ShapeAttributeLayer::revokeChildLayer( const ShapeAttributeLayerSharedPtr& rChildLayer )
+@@ -233,6 +237,7 @@ namespace slideshow
+                     ++mnAlphaState;
+                     ++mnPositionState;
+                     ++mnContentState;                    
++                    ++mnVisibilityState;                    
+                 }
+             }
+             else
+@@ -267,6 +272,7 @@ namespace slideshow
+                 ++mnAlphaState;
+                 ++mnPositionState;
+                 ++mnContentState;   
++                ++mnVisibilityState;   
+             }                 
+ 
+             mnAdditiveMode = nMode;
+@@ -633,7 +639,7 @@ namespace slideshow
+         {
+             mbVisibility = bVisible;
+             mbVisibilityValid = true;
+-            ++mnContentState;
++            ++mnVisibilityState;
+         }
+ 
+         bool ShapeAttributeLayer::isCharColorValid() const
+@@ -841,5 +847,13 @@ namespace slideshow
+                 mnContentState; 
+         }
+         
++        State::StateId ShapeAttributeLayer::getVisibilityState() const
++        { 
++            return haveChild() ? 
++                ::std::max( mnVisibilityState,
++                            mpChild->getVisibilityState() ) : 
++                mnVisibilityState; 
++        }
++        
+     }
+ }
+Index: source/engine/slideshowimpl.cxx
+===================================================================
+RCS file: /cvs/graphics/slideshow/source/engine/slideshowimpl.cxx,v
+retrieving revision 1.10
+retrieving revision 1.10.16.2
+diff -u -p -r1.10 -r1.10.16.2
+--- slideshow/source/engine/slideshowimpl.cxx	24 Jun 2008 12:03:06 -0000	1.10
++++ slideshow/source/engine/slideshowimpl.cxx	16 Oct 2008 14:48:04 -0000	1.10.16.2
+@@ -92,6 +92,7 @@
+ #include "slidebitmap.hxx"
+ #include "rehearsetimingsactivity.hxx"
+ #include "waitsymbol.hxx"
++#include "framerate.hxx"
+ 
+ #include <boost/noncopyable.hpp>
+ #include <boost/bind.hpp>
+@@ -1522,8 +1523,9 @@ sal_Bool SlideShowImpl::update( double &
+             // calc nNextTimeout value:
+             if (bActivitiesLeft) 
+             {
+-                // activities left: requires immediate updates
+-                nNextTimeout = 0.0; // come back ASAP
++                // Activity queue is not empty.  Tell caller that we would
++                // like to render another frame.
++                nNextTimeout = 1.0 / FrameRate::PreferredFramesPerSecond;
+             }
+             else 
+             {
+Index: source/engine/animationnodes/animationbasenode.cxx
+===================================================================
+RCS file: /cvs/graphics/slideshow/source/engine/animationnodes/animationbasenode.cxx,v
+retrieving revision 1.16
+retrieving revision 1.16.16.2
+diff -u -p -r1.16 -r1.16.16.2
+--- slideshow/source/engine/animationnodes/animationbasenode.cxx	24 Jun 2008 12:06:45 -0000	1.16
++++ slideshow/source/engine/animationnodes/animationbasenode.cxx	16 Oct 2008 14:48:04 -0000	1.16.16.2
+@@ -45,6 +45,7 @@
+ #include "doctreenode.hxx"
+ #include "animationbasenode.hxx"
+ #include "delayevent.hxx"
++#include "framerate.hxx"
+ 
+ #include <boost/bind.hpp>
+ #include <boost/optional.hpp>
+@@ -457,19 +458,24 @@ AnimationBaseNode::fillCommonParameters(
+         pEndEvent = makeEvent(
+             boost::bind( &AnimationNode::deactivate, pSelf ) );
+     }
+-    
++
++    // Calculate the minimum frame count that depends on the duration and
++    // the minimum frame count.
++    const sal_Int32 nMinFrameCount (basegfx::clamp<sal_Int32>(
++        basegfx::fround(nDuration * FrameRate::MinimumFramesPerSecond), 1, 10));
++
+     return ActivitiesFactory::CommonParameters(
+         pEndEvent,
+         getContext().mrEventQueue,
+         getContext().mrActivitiesQueue,
+         nDuration,
+-        10, // always display at least 10 frames
++        nMinFrameCount,
+         bAutoReverse,
+         aRepeats,
+         nAcceleration,
+         nDeceleration,
+         getShape(),
+-        getSlideSize() );
++        getSlideSize());
+ }
+ 
+ AttributableShapeSharedPtr AnimationBaseNode::getShape() const
+Index: source/engine/shapes/drawshape.cxx
+===================================================================
+RCS file: /cvs/graphics/slideshow/source/engine/shapes/drawshape.cxx,v
+retrieving revision 1.7
+retrieving revision 1.7.12.1
+diff -u -p -r1.7 -r1.7.12.1
+--- slideshow/source/engine/shapes/drawshape.cxx	11 Jul 2008 07:08:56 -0000	1.7
++++ slideshow/source/engine/shapes/drawshape.cxx	20 Oct 2008 11:55:33 -0000	1.7.12.1
+@@ -270,6 +270,7 @@ namespace slideshow
+                 mnAttributeAlphaState = mpAttributeLayer->getAlphaState();
+                 mnAttributePositionState = mpAttributeLayer->getPositionState();
+                 mnAttributeContentState = mpAttributeLayer->getContentState();
++                mnAttributeVisibilityState = mpAttributeLayer->getVisibilityState();
+             }
+         }
+ 
+@@ -383,27 +384,42 @@ namespace slideshow
+             // do we have an attribute layer?
+             if( mpAttributeLayer )
+             {
+-                // TODO(P1): This can be done without conditional branching. 
+-                // See HAKMEM.
+-                if( mpAttributeLayer->getPositionState() != mnAttributePositionState )
++                // Prevent nUpdateFlags to be modified when the shape is not
++                // visible, except when it just was hidden.
++                if (mpAttributeLayer->getVisibility()
++                    || mpAttributeLayer->getVisibilityState() != mnAttributeVisibilityState )
+                 {
+-                    nUpdateFlags |= ViewShape::POSITION;
+-                }
+-                if( mpAttributeLayer->getAlphaState() != mnAttributeAlphaState )
+-                {
+-                    nUpdateFlags |= ViewShape::ALPHA;
+-                }
+-                if( mpAttributeLayer->getClipState() != mnAttributeClipState )
+-                {
+-                    nUpdateFlags |= ViewShape::CLIP;
+-                }
+-                if( mpAttributeLayer->getTransformationState() != mnAttributeTransformationState )
+-                {                
+-                    nUpdateFlags |= ViewShape::TRANSFORMATION;
+-                }
+-                if( mpAttributeLayer->getContentState() != mnAttributeContentState )
+-                {                
+-                    nUpdateFlags |= ViewShape::CONTENT;
++                    if (mpAttributeLayer->getVisibilityState() != mnAttributeVisibilityState )
++                    {
++                        // Change of the visibility state is mapped to
++                        // content change because when the visibility
++                        // changes then usually a sprite is shown or hidden
++                        // and the background under has to be painted once.
++                        nUpdateFlags |= ViewShape::CONTENT;
++                    }
++
++                    // TODO(P1): This can be done without conditional branching. 
++                    // See HAKMEM.
++                    if( mpAttributeLayer->getPositionState() != mnAttributePositionState )
++                    {
++                        nUpdateFlags |= ViewShape::POSITION;
++                    }
++                    if( mpAttributeLayer->getAlphaState() != mnAttributeAlphaState )
++                    {
++                        nUpdateFlags |= ViewShape::ALPHA;
++                    }
++                    if( mpAttributeLayer->getClipState() != mnAttributeClipState )
++                    {
++                        nUpdateFlags |= ViewShape::CLIP;
++                    }
++                    if( mpAttributeLayer->getTransformationState() != mnAttributeTransformationState )
++                    {                
++                        nUpdateFlags |= ViewShape::TRANSFORMATION;
++                    }
++                    if( mpAttributeLayer->getContentState() != mnAttributeContentState )
++                    {                
++                        nUpdateFlags |= ViewShape::CONTENT;
++                    }
+                 }
+             }
+ 
+@@ -543,6 +559,7 @@ namespace slideshow
+             mnAttributeAlphaState(0),
+             mnAttributePositionState(0),
+             mnAttributeContentState(0),
++            mnAttributeVisibilityState(0),
+             maViewShapes(),
+             mxComponentContext( rContext.mxComponentContext ),
+             maHyperlinkIndices(),
+@@ -603,6 +620,7 @@ namespace slideshow
+             mnAttributeAlphaState(0),
+             mnAttributePositionState(0),
+             mnAttributeContentState(0),
++            mnAttributeVisibilityState(0),
+             maViewShapes(),
+             mxComponentContext( rContext.mxComponentContext ),
+             maHyperlinkIndices(),
+@@ -654,6 +672,7 @@ namespace slideshow
+             mnAttributeAlphaState(0),
+             mnAttributePositionState(0),
+             mnAttributeContentState(0),
++            mnAttributeVisibilityState(0),
+             maViewShapes(),
+             mxComponentContext( rSrc.mxComponentContext ),
+             maHyperlinkIndices(),
+Index: source/engine/shapes/drawshape.hxx
+===================================================================
+RCS file: /cvs/graphics/slideshow/source/engine/shapes/drawshape.hxx,v
+retrieving revision 1.4
+retrieving revision 1.4.12.1
+diff -u -p -r1.4 -r1.4.12.1
+--- slideshow/source/engine/shapes/drawshape.hxx	11 Jul 2008 07:09:10 -0000	1.4
++++ slideshow/source/engine/shapes/drawshape.hxx	24 Oct 2008 13:24:21 -0000	1.4.12.1
+@@ -338,6 +338,7 @@ namespace slideshow
+             mutable State::StateId                                                  mnAttributeAlphaState;
+             mutable State::StateId                                                  mnAttributePositionState;
+             mutable State::StateId                                                  mnAttributeContentState;
++            mutable State::StateId                                                  mnAttributeVisibilityState;
+ 
+             /// the list of active view shapes (one for each registered view layer)
+             typedef ::std::vector< ViewShapeSharedPtr > ViewShapeVector;
+Index: source/inc/framerate.hxx
+===================================================================
+RCS file: source/inc/framerate.hxx
+diff -N source/inc/framerate.hxx
+--- /dev/null	1 Jan 1970 00:00:00 -0000
++++ slideshow/source/inc/framerate.hxx	16 Oct 2008 14:48:05 -0000	1.1.2.1
+@@ -0,0 +1,56 @@
++/*************************************************************************
++ *
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ * 
++ * Copyright 2008 by Sun Microsystems, Inc.
++ *
++ * OpenOffice.org - a multi-platform office productivity suite
++ *
++ * $RCSfile$
++ * $Revision$
++ *
++ * This file is part of OpenOffice.org.
++ *
++ * OpenOffice.org is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License version 3
++ * only, as published by the Free Software Foundation.
++ *
++ * OpenOffice.org is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License version 3 for more details
++ * (a copy is included in the LICENSE file that accompanied this code).
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * version 3 along with OpenOffice.org.  If not, see
++ * <http://www.openoffice.org/license.html>
++ * for a copy of the LGPLv3 License.
++ *
++ ************************************************************************/
++
++#ifndef INCLUDED_SLIDESHOW_FRAMERATE_HXX
++#define INCLUDED_SLIDESHOW_FRAMERATE_HXX
++
++#include <sal/types.h>
++
++namespace slideshow { namespace internal {
++
++/** Some frame rate related data.
++*/
++class FrameRate
++{
++public:
++    /** The minimum number of frames per second is used to calculate the
++        minimum number of frames that is to be shown for active activities.
++    */
++    static const sal_Int32 MinimumFramesPerSecond = 10;
++
++    /** Aim high with the number of preferred number of frames per second.
++        This number is the maximum as well and the true number will be lower.
++    */
++    static const sal_Int32 PreferredFramesPerSecond = 50;
++};
++
++} } // end of namespace slideshow::internal
++
++#endif
+Index: source/inc/shapeattributelayer.hxx
+===================================================================
+RCS file: /cvs/graphics/slideshow/source/inc/shapeattributelayer.hxx,v
+retrieving revision 1.8
+retrieving revision 1.8.30.1
+diff -u -p -r1.8 -r1.8.30.1
+--- slideshow/source/inc/shapeattributelayer.hxx	11 Apr 2008 01:29:17 -0000	1.8
++++ slideshow/source/inc/shapeattributelayer.hxx	20 Oct 2008 11:52:16 -0000	1.8.30.1
+@@ -471,6 +471,7 @@ namespace slideshow
+             State::StateId getAlphaState() const;
+             State::StateId getPositionState() const;
+             State::StateId getContentState() const;
++            State::StateId getVisibilityState() const;
+ 
+         private:
+             // default copy/assignment operator is okay
+@@ -516,6 +517,7 @@ namespace slideshow
+             State::StateId 								mnAlphaState;
+             State::StateId 								mnPositionState;
+             State::StateId 								mnContentState;
++            State::StateId 								mnVisibilityState;
+ 
+             sal_Int16									mnAdditiveMode;
+ 
