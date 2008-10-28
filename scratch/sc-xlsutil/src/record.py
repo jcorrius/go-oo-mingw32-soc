@@ -619,20 +619,42 @@ class SXDb(BaseRecordHandler):
         recCount = self.readUnsignedInt(4)
         strmId   = self.readUnsignedInt(2)
         flags    = self.readUnsignedInt(2)
-        self.appendLine("number of records: %d"%recCount)
+        self.appendLine("number of records in database: %d"%recCount)
         self.appendLine("stream ID: 0x%4.4X"%strmId)
-        self.appendLine("flags: 0x%4.4X"%flags)
+#       self.appendLine("flags: 0x%4.4X"%flags)
+
+        saveLayout    = (flags & 0x0001)
+        invalid       = (flags & 0x0002)
+        refreshOnLoad = (flags & 0x0004)
+        optimizeCache = (flags & 0x0008)
+        backQuery     = (flags & 0x0010)
+        enableRefresh = (flags & 0x0020)
+        self.appendLine("save data with table layout: %s"%self.getYesNo(saveLayout))
+        self.appendLine("invalid table (must be refreshed before next update): %s"%self.getYesNo(invalid))
+        self.appendLine("refresh table on load: %s"%self.getYesNo(refreshOnLoad))
+        self.appendLine("optimize cache for least memory use: %s"%self.getYesNo(optimizeCache))
+        self.appendLine("query results obtained in the background: %s"%self.getYesNo(backQuery))
+        self.appendLine("refresh is enabled: %s"%self.getYesNo(enableRefresh))
 
         dbBlockRecs = self.readUnsignedInt(2)
         baseFields = self.readUnsignedInt(2)
         allFields = self.readUnsignedInt(2)
-        self.appendLine("DB block records: %d"%dbBlockRecs)
-        self.appendLine("base fields: %d"%baseFields)
-        self.appendLine("all fields: %d"%allFields)
+        self.appendLine("number of records for each database block: %d"%dbBlockRecs)
+        self.appendLine("number of base fields: %d"%baseFields)
+        self.appendLine("number of all fields: %d"%allFields)
 
         dummy = self.readBytes(2)
         type = self.readUnsignedInt(2)
-        self.appendLine("type: 0x%4.4X"%type)
+        typeName = '(unknown)'
+        if type == 1:
+            typeName = 'Excel worksheet'
+        elif type == 2:
+            typeName = 'External data'
+        elif type == 4:
+            typeName = 'Consolidation'
+        elif type == 8:
+            typeName = 'Scenario PivotTable'
+        self.appendLine("type: %s (%d)"%(typeName, type))
         textLen = self.readUnsignedInt(2)
         changedBy, textLen = globals.getRichText(self.readRemainingBytes(), textLen)
         self.appendLine("changed by: %s"%changedBy)
@@ -644,7 +666,7 @@ class SXDbEx(BaseRecordHandler):
         lastChanged = self.readDouble()
         sxFmlaRecs = self.readUnsignedInt(4)
         self.appendLine("last changed: %g"%lastChanged)
-        self.appendLine("SXFORMULA records: %d"%sxFmlaRecs)
+        self.appendLine("count of SXFORMULA records for this cache: %d"%sxFmlaRecs)
 
 
 class SXField(BaseRecordHandler):
