@@ -50,46 +50,29 @@ class XLDumper(object):
             if dirname == "Workbook":
                 success = True
                 while success: 
-                    success = self.__readSheetSubStream(dirstrm)
+                    success = self.__readSubStream(dirstrm)
 
             elif dirname == "Revision Log":
                 dirstrm.type = stream.DirType.RevisionLog
-                try:
-                    header = 0x0000
-                    while header != 0x000A:
-                        header = dirstrm.readRecord()
-                except stream.EndOfStream:
-                    continue
+                self.__readSubStream(dirstrm)
             elif dirname == '_SX_DB_CUR':
                 dirstrm.type = stream.DirType.PivotTableCache
-                try:
-                    header = 0x0000
-                    while header != 0x000A:
-                        header = dirstrm.readRecord()
-                except stream.EndOfStream:
-                    continue
+                self.__readSubStream(dirstrm)
             elif strmData.isPivotCacheStream(dirname):
                 dirstrm.type = stream.DirType.PivotTableCache
-                try:
-                    header = 0x0000
-                    while header != 0x000A:
-                        header = dirstrm.readRecord()
-                except stream.EndOfStream:
-                    continue
+                self.__readSubStream(dirstrm)
             else:
                 globals.dumpBytes(dirstrm.bytes, 512)
 
-
-    def __readSheetSubStream (self, strm):
-       try:
-           # read bytes from BOF to EOF.
-           header = 0x0000
-           while header != 0x000A:
-               header = strm.readRecord()
-           return True
-    
-       except stream.EndOfStream:
-           return False
+    def __readSubStream (self, strm):
+        try:
+            # read bytes from BOF to EOF.
+            header = 0x0000
+            while header != 0x000A:
+                header = strm.readRecord()
+            return True
+        except stream.EndOfStream:
+            return False
 
 
 def main (args):
