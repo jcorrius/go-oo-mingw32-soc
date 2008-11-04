@@ -34,6 +34,10 @@ append a line to be displayed.
     def appendLine (self, line):
         self.lines.append(line)
 
+    def appendLineBoolean (self, name, value):
+        text = "%s: %s"%(name, self.getYesNo(value))
+        self.appendLine(text)
+
     def readBytes (self, length):
         r = self.bytes[self.pos:self.pos+length]
         self.pos += length
@@ -1033,6 +1037,23 @@ class CHChart(BaseRecordHandler):
         self.appendLine("position: (x, y) = (%d, %d)"%(x, y))
         self.appendLine("size: (width, height) = (%d, %d)"%(w, h))
         
+        
+class CHAxis(BaseRecordHandler):
+
+    axisTypeList = ['x-axis', 'y-axis', 'z-axis']
+
+    def parseBytes (self):
+        axisType = self.readUnsignedInt(2)
+        x = self.readSignedInt(4)
+        y = self.readSignedInt(4)
+        w = self.readSignedInt(4)
+        h = self.readSignedInt(4)
+        if axisType < len(CHAxis.axisTypeList):
+            self.appendLine("axis type: %s (%d)"%(CHAxis.axisTypeList[axisType], axisType))
+        else:
+            self.appendLine("axis type: unknown")
+        self.appendLine("area: (x, y, w, h) = (%d, %d, %d, %d) [no longer used]"%(x, y, w, h))
+
 
 class CHProperties(BaseRecordHandler):
 
@@ -1066,6 +1087,25 @@ class CHProperties(BaseRecordHandler):
             emptyValues = "interpolate empty values"
 
         self.appendLine("empty value treatment: %s"%emptyValues)
+
+
+class CHLabelRange(BaseRecordHandler):
+
+    def parseBytes (self):
+        axisCross = self.readUnsignedInt(2)
+        freqLabel = self.readUnsignedInt(2)
+        freqTick  = self.readUnsignedInt(2)
+        self.appendLine("axis crossing: %d"%axisCross)
+        self.appendLine("label frequency: %d"%freqLabel)
+        self.appendLine("tick frequency: %d"%freqTick)
+
+        flags     = self.readUnsignedInt(2)
+        betweenCateg = (flags & 0x0001)
+        maxCross     = (flags & 0x0002)
+        reversed     = (flags & 0x0004)
+        self.appendLineBoolean("axis between categories", betweenCateg)
+        self.appendLineBoolean("other axis crosses at maximum", maxCross)
+        self.appendLineBoolean("axis reversed", reversed)
 
 
 class CHValueRange(BaseRecordHandler):

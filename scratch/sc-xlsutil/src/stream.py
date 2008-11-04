@@ -218,10 +218,10 @@ recData = {
     0x101A: ["CHAREA", "?"],
     0x101B: ["CHSCATTER", "?"],
     0x001C: ["CHCHARTLINE", "?"],
-    0x101D: ["CHAXIS", "?"],
+    0x101D: ["CHAXIS", "Chart Axis", record.CHAxis],
     0x101E: ["CHTICK", "?"],
-    0x101F: ["CHVALUERANGE", "?", record.CHValueRange],
-    0x1020: ["CHLABELRANGE", "?"],
+    0x101F: ["CHVALUERANGE", "Chart Axis Value Range", record.CHValueRange],
+    0x1020: ["CHLABELRANGE", "Chart Axis Label Range", record.CHLabelRange],
     0x1021: ["CHAXISLINE", "?"],
     0x1024: ["CHDEFAULTTEXT", "?"],
     0x1025: ["CHTEXT", "?"],
@@ -251,6 +251,7 @@ recData = {
     0x105D: ["CHSERIESFORMAT", "?"],
     0x105F: ["CH3DDATAFORMAT", "?"],
     0x1061: ["CHPIEEXT", "?"],
+    0x1062: ["CHLABELRANGE2", "?"],
     0x1066: ["CHESCHERFORMAT", "?"]
 }
 
