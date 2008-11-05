@@ -9,8 +9,10 @@ EXTRA_DIST = \
 	install-devel-helper \
 	install-l10n-helper \
 	install-l10n-merged \
+	install-registry \
 	link-to-ooo-home \
 	merge-file-lists \
+	save-registry \
 	save-noarch \
 	sort-l10n \
 	${wildcard env-*} \
