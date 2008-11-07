@@ -493,10 +493,19 @@ class RefreshAll(BaseRecordHandler):
 class SXViewEx9(BaseRecordHandler):
 
     def parseBytes (self):
-        rt = globals.getSignedInt(self.bytes[0:2])
+        rt = self.readUnsignedInt(2)
+        dummy = self.readBytes(6)
+        flags = self.readUnsignedInt(4)
+        autoFmtId = self.readUnsignedInt(2)
+
         self.appendLine("record type: 0x%4.4X (always 0x0810)"%rt)
-        autoFmtId = globals.getSignedInt(self.bytes[12:14])
         self.appendLine("autoformat index: %d"%autoFmtId)
+
+        nameLen = self.readSignedInt(2)
+        if nameLen > 0:
+            name, nameLen = globals.getRichText(self.readRemainingBytes(), nameLen)
+            self.appendLine("grand total name: %s"%name)
+        return
 
 
 class SXAddlInfo(BaseRecordHandler):
@@ -825,9 +834,108 @@ class SXViewFields(BaseRecordHandler):
         self.appendLine("number of items: %d"%itemCount)
 
         if nameLen == -1:
-            self.appendLine("name length: null (use name in the cache)")
+            self.appendLine("name: null (use name in the cache)")
         else:
-            self.appendLine("name length: %d"%nameLen)
+            name, nameLen = globals.getRichText(self.readRemainingBytes(), nameLen)
+            self.appendLine("name: %s"%name)
+
+
+class SXViewFieldsEx(BaseRecordHandler):
+
+    def parseBytes (self):
+        grbit1 = self.readUnsignedInt(2)
+        grbit2 = self.readUnsignedInt(1)
+        numItemAutoShow = self.readUnsignedInt(1)
+        dataFieldSort = self.readSignedInt(2)
+        dataFieldAutoShow = self.readSignedInt(2)
+        numFmt = self.readUnsignedInt(2)
+
+        # custom name length: it can be up to 254 characters.  255 (0xFF) if
+        # no custom name is used.
+        nameLen = self.readUnsignedInt(1)
+
+        dummy = self.readBytes(10)
+        
+        self.appendLine("auto show item: %d"%numItemAutoShow)
+        self.appendLine("sort field index: %d"%dataFieldSort)
+        self.appendLine("auto show field index: %d"%dataFieldAutoShow)
+        self.appendLine("number format: %d"%numFmt)
+
+        if nameLen == 0xFF:
+            self.appendLine("custome name: none")
+        else:
+            name = globals.getTextBytes(self.readRemainingBytes())
+            self.appendLine("custome name: %s"%name)
+
+        return
+
+
+class SXDataItem(BaseRecordHandler):
+
+    functionType = {
+        0x00: 'sum',
+        0x01: 'count',
+        0x02: 'average',
+        0x03: 'max',
+        0x04: 'min',
+        0x05: 'product',
+        0x06: 'count nums',
+        0x07: 'stddev',
+        0x08: 'stddevp',
+        0x09: 'var',
+        0x0A: 'varp'
+    }
+
+    displayFormat = {
+        0x00: 'normal',
+        0x01: 'difference from',
+        0x02: 'percentage of',
+        0x03: 'perdentage difference from',
+        0x04: 'running total in',
+        0x05: 'percentage of row',
+        0x06: 'percentage of column',
+        0x07: 'percentage of total',
+        0x08: 'index'
+    }
+
+    def parseBytes (self):
+        isxvdData = self.readUnsignedInt(2)
+        funcIndex = self.readUnsignedInt(2)
+
+        # data display format
+        df = self.readUnsignedInt(2)
+
+        # index to the SXVD/SXVI records used by the data display format
+        sxvdIndex = self.readUnsignedInt(2)
+        sxviIndex = self.readUnsignedInt(2)
+
+        # index to the format table for this item
+        fmtIndex = self.readUnsignedInt(2)
+
+        # name
+        nameLen = self.readSignedInt(2)
+        name, nameLen = globals.getRichText(self.readRemainingBytes(), nameLen)
+
+        self.appendLine("field that this data item is based on: %d"%isxvdData)
+        funcName = '(unknown)'
+        if SXDataItem.functionType.has_key(funcIndex):
+            funcName = SXDataItem.functionType[funcIndex]
+        self.appendLine("aggregate function: %s"%funcName)
+        dfName = '(unknown)'
+        if SXDataItem.displayFormat.has_key(df):
+            dfName = SXDataItem.displayFormat[df]
+        self.appendLine("data display format: %s"%dfName)
+        self.appendLine("SXVD record index: %d"%sxvdIndex)
+        self.appendLine("SXVI record index: %d"%sxviIndex)
+        self.appendLine("format table index: %d"%fmtIndex)
+
+        if nameLen == -1:
+            self.appendLine("name: null (use name in the cache)")
+        else:
+            self.appendLine("name: %s"%name)
+
+        return
+
 
 class SXViewItem(BaseRecordHandler):
 
@@ -852,10 +960,10 @@ class SXViewItem(BaseRecordHandler):
     }
 
     def parseBytes (self):
-        itemType = globals.getSignedInt(self.readBytes(2))
-        grbit    = globals.getSignedInt(self.readBytes(2))
-        iCache   = globals.getSignedInt(self.readBytes(2))
-        nameLen  = globals.getSignedInt(self.readBytes(2))
+        itemType = self.readSignedInt(2)
+        grbit    = self.readSignedInt(2)
+        iCache   = self.readSignedInt(2)
+        nameLen  = self.readSignedInt(2)
         
         itemTypeName = 'unknown'
         if SXViewItem.itemTypes.has_key(itemType):
@@ -881,9 +989,10 @@ class SXViewItem(BaseRecordHandler):
         self.appendLine("flags: %s"%flags)
         self.appendLine("pivot cache index: %d"%iCache)
         if nameLen == -1:
-            self.appendLine("name length: null (use name in the cache)")
+            self.appendLine("name: null (use name in the cache)")
         else:
-            self.appendLine("name length: %d"%nameLen)
+            name, nameLen = globals.getRichText(self.readRemainingBytes(), nameLen)
+            self.appendLine("name: %s"%name)
 
 
 class PivotQueryTableEx(BaseRecordHandler):
