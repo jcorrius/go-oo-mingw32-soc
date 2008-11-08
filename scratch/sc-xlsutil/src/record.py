@@ -760,6 +760,66 @@ class SXStreamID(BaseRecordHandler):
         self.strmData.appendPivotCacheId(strmId)
         self.appendLine("pivot cache stream ID in SX DB storage: %d"%strmId)
 
+
+class SXView(BaseRecordHandler):
+
+    def parseBytes (self):
+        rowFirst = self.readUnsignedInt(2)
+        rowLast  = self.readUnsignedInt(2)
+        self.appendLine("row range: %d - %d"%(rowFirst, rowLast))
+
+        colFirst = self.readUnsignedInt(2)
+        colLast  = self.readUnsignedInt(2)
+        self.appendLine("col range: %d - %d"%(colFirst,colLast))
+
+        rowHeadFirst = self.readUnsignedInt(2)
+        rowDataFirst = self.readUnsignedInt(2)
+        colDataFirst = self.readUnsignedInt(2)
+        self.appendLine("heading row: %d"%rowHeadFirst)
+        self.appendLine("data row: %d"%rowDataFirst)
+        self.appendLine("data col: %d"%colDataFirst)
+
+        cacheIndex = self.readUnsignedInt(2)
+        self.appendLine("cache index: %d"%cacheIndex)
+
+        self.readBytes(2)
+
+        dataFieldAxis = self.readUnsignedInt(2)
+        self.appendLine("default data field axis: %d"%dataFieldAxis)
+
+        dataFieldPos = self.readUnsignedInt(2)
+        self.appendLine("default data field pos: %d"%dataFieldPos)
+
+        numFields = self.readUnsignedInt(2)
+        numRowFields = self.readUnsignedInt(2)
+        numColFields = self.readUnsignedInt(2)
+        numPageFields = self.readUnsignedInt(2)
+        numDataFields = self.readUnsignedInt(2)
+        numDataRows = self.readUnsignedInt(2)
+        numDataCols = self.readUnsignedInt(2)
+        self.appendLine("field count: %d"%numFields)
+        self.appendLine("row field count: %d"%numRowFields)
+        self.appendLine("col field count: %d"%numColFields)
+        self.appendLine("page field count: %d"%numPageFields)
+        self.appendLine("data field count: %d"%numDataFields)
+        self.appendLine("data row count: %d"%numDataRows)
+        self.appendLine("data col count: %d"%numDataCols)
+
+        # option flags (TODO: display these later.)
+        flags = self.readUnsignedInt(2)
+
+        # autoformat index
+        autoFmtIndex = self.readUnsignedInt(2)
+        self.appendLine("autoformat index: %d"%autoFmtIndex)
+
+        nameLenTable = self.readUnsignedInt(2)
+        nameLenDataField = self.readUnsignedInt(2)
+        text, nameLenTable = globals.getRichText(self.readBytes(nameLenTable+1), nameLenTable)
+        self.appendLine("PivotTable name: %s"%text)
+        text, nameLenDataField = globals.getRichText(self.readBytes(nameLenDataField+1), nameLenDataField)
+        self.appendLine("data field name: %s"%text)
+
+
 class SXViewSource(BaseRecordHandler):
 
     def parseBytes (self):
@@ -778,6 +838,7 @@ class SXViewSource(BaseRecordHandler):
             srcType = 'Scenario Manager summary report'
 
         self.appendLine("data source type: %s"%srcType)
+
 
 class SXViewFields(BaseRecordHandler):
 

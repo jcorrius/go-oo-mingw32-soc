@@ -90,7 +90,7 @@ recData = {
     0x00AB: ["GCW", "Global Column-Width Flags"],
     0x00AE: ["SCENMAN", "Scenario Output Data"],
     0x00AF: ["SCENARIO", "Scenario Data"],
-    0x00B0: ["SXVIEW", "View Definition"],
+    0x00B0: ["SXVIEW", "View Definition", record.SXView],
     0x00B1: ["SXVD", "View Fields", record.SXViewFields],
     0x00B2: ["SXVI", "View Item", record.SXViewItem],
     0x00B4: ["SXIVD", "Row/Column Field IDs"],
