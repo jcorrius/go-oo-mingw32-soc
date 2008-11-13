@@ -505,6 +505,8 @@ class SXViewEx9(BaseRecordHandler):
         if nameLen > 0:
             name, nameLen = globals.getRichText(self.readRemainingBytes(), nameLen)
             self.appendLine("grand total name: %s"%name)
+        else:
+            self.appendLine("grand total name: (none)")
         return
 
 
