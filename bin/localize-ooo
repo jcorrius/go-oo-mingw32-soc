@@ -3,13 +3,59 @@
 #
 # See setup for user tweakables.
 #
-. ./setup
-. $OOBUILDDIR/*.[sS]et.sh
-. ./setup
+if test -n "$OO_TOOLSDIR" ; then
+    # split build
+    . $OO_TOOLSDIR/piece/sys-setup
+    . $OO_TOOLSDIR/setup
+    OOBUILDDIR=`pwd`
+    SRCDIR=$OO_TOOLSDIR/../src
+    SRCDIR_PIECE=$OOBUILDDIR/ooo-build/sdf
+    TOOLSDIR=$OO_TOOLSDIR/..
+    OOO_LANGS_LIST="$OO_LANGS"
+    ALL_LANGS=`sed -n -e "s|^[[:space:]]*completelangiso=\(.*\)\(en-US \)\(.*\)$|\2\1\3|p" $SOLARENV/inc/postset.mk`
+    split_build=yes
+else
+    . ./setup
+    . $OOBUILDDIR/*.[sS]et.sh
+    . ./setup
+    SRCDIR_PIECE=
+    split_build=no
+fi
 
 export LC_ALL='C';
 
-if ! which localize 2>/dev/null 2>&1 ; then
+merge_localization()
+{
+    sdf_file="$1"
+    langcode="$2"
+    split_build="$3"
+    sdf_file_filter="$4"
+
+    # filter the sdf file in the split build
+    if test "$split_build" = "yes" ; then
+	sdf_file_filtered=`mktemp /tmp/localize-ooo-sdf-filtered-XXXXXX`
+	grep -f "$sdf_file_filter" "$sdf_file" >$sdf_file_filtered
+    else
+	sdf_file_filtered="$sdf_file"
+    fi
+
+    # merge the localization
+    if test `wc -l $sdf_file_filtered | cut -d " " -f 1` -eq 0 ; then
+	echo "Warning: Ignoring empty extra localization $(basename $sdf_file)..."
+    else
+	echo "Merging extra localization $(basename $sdf_file)..."
+	localize -m -x -l $langcode -f $sdf_file_filtered || exit 1;
+	echo ""
+    fi
+
+    # remove temp file
+    if test "$split_build" = "yes" ; then
+	rm $sdf_file_filtered
+    fi
+}
+
+# build the localize tool if needed (only in the non-split build)
+if test "$split_build" != "yes" && ! which localize >/dev/null 2>&1 ; then
     echo 'Building localize stuff at first...'
     cd $OOBUILDDIR/transex3
     perl $SOLARENV/bin/build.pl --all $EXTRA_BUILD_FLAGS $EXTRA_DMAKE_FLAGS || exit 1;
@@ -20,78 +66,92 @@ if ! which localize 2>/dev/null 2>&1 ; then
     find $OOBUILDDIR -type f -name "localize.sdf" -exec chmod 644 {} \;
 fi
 
-# What extra localizations are avilable as $SRCDIR/GSI_*.sdf and are not
-# already merged?
-extra_trans_stamp=$TOOLSDIR/stamp/build.extra.translations
-extra_trans=`find $SRCDIR -name "GSI_*.sdf"`
-extra_trans_langs=
-for file in $extra_trans ; do
-    # skip this localization if it is already merged
-    grep -q "^$file$" $extra_trans_stamp 2>/dev/null && continue;
-    # find if this localization is required
-    trans_lang=`echo $file | sed "s|^$SRCDIR/GSI_\(.*\).sdf\$|\1|"`
-    for lang in $OOO_LANGS_LIST ; do
-	if echo "$lang" | grep -q "$trans_lang" ; then
-	    extra_trans_langs="$trans_lang $extra_trans_langs"
-	    break;
-	fi
-    done
-done	    
+# will filter the sdf files in the split-build
+if test "$split_build" = "yes" ; then
+    sdf_file_filter=`mktemp /tmp/localize-ooo-sdf-filter-XXXXXX`
+    find $OOBUILDDIR -mindepth 1 -maxdepth 1 -type d -printf "^%P\t\n" >$sdf_file_filter
+fi
 
-for langcode in $extra_trans_langs ; do
-    # merge the available localization
-    echo "Merging extra \"$langcode\" localization..."
-    $SOLARVERSION/$INPATH/bin/localize -m -x -l $langcode -f $SRCDIR/GSI_$langcode.sdf || exit 1;
-    echo ""
-    DEB_GSIFILE=$DEB_GSIDIR/GSI_$langcode.sdf
-    if test "z$DEB_GSIDIR" != "z" && test -f $DEB_GSIFILE; then
-	echo "Merging imported \"$langcode\" localization..."
-	$SOLARVERSION/$INPATH/bin/localize -m -x -l $langcode -f $DEB_GSIFILE || exit 1;
-	echo ""
-    else
-	DEB_GSIFILE=
-    fi
+# stamp files
+if test "$split_build" = "yes" ; then
+    stamp_dir=$OOBUILDDIR/ooo-build/stamp
+    mkdir -p $stamp_dir
+else
+    stamp_dir=$TOOLSDIR/stamp
+fi
+# already applied sdf files
+extra_trans_stamp=$stamp_dir/build.extra.translations
+# lang-specific sdf files
+extra_trans_lang_list=$stamp_dir/build.extra.translations.lang.list
 
-    # workaround for i#56622, n#210797
-    if echo "$langcode" | grep -q "hu" ; then
-        echo "Fixing Hungarian strings: OOo vs. SO"
-        for file in `find $OOBUILDDIR -type f -name "localize.sdf"` ; do
-    	    $TOOLSDIR/bin/a2az.pl $file >$file.a2az
-	    mv $file.a2az $file
-	done
-    fi
-
-    # copy help auxiliary files if they are missing but the localized strings are available
-    if grep -q "^helpcontent2" $SRCDIR/GSI_$langcode.sdf $DEB_GSIFILE &&
-       test ! -d $OOBUILDDIR/helpcontent2/source/auxiliary/$langcode ; then
-        echo "Copying English help auxiliary files for \"$langcode\"..."
-	cd $OOBUILDDIR/helpcontent2/source/auxiliary
-	cp -r en-US $langcode
-	perl -pi -e "s|Language=en-US|Language=$langcode|" $langcode/*.cfg
-    fi
-    # make stamp for this localization
-    echo $SRCDIR/GSI_$langcode.sdf >>$extra_trans_stamp
+# call grep only once to speed up the search from 22s to 2s
+all_langs_pattern=`mktemp /tmp/localize-ooo-XXXXXX`
+for lang in $ALL_LANGS ; do
+    echo "$lang.sdf\$" >>$all_langs_pattern
 done
 
-# apply translations for ooo-build-specific strings
-for langcode in $OOO_LANGS_LIST ; do
-    sdf_file=$TOOLSDIR/po/ooo-build-$langcode.sdf
-    test -f $sdf_file || continue
+# lang-specific sdf files
+# it looks for files "any-name-<lang>.sdf", e.g. "gallery-hu.sdf"
+hungarian_updated=
+for sdf_file in `find $SRCDIR $DEB_GSIDIR $TOOLSDIR/po $SRCDIR_PIECE -name "*.sdf"` ; do
+
+    # check if it is lang-specific file
+    echo "$sdf_file" | grep -q -f "$all_langs_pattern" || continue;
+
+    # mention it in specific sdf file list
+    grep -q "^$sdf_file$" $extra_trans_lang_list 2>/dev/null || echo $sdf_file >>$extra_trans_lang_list
+
+    # skip this localization if it is already merged
     grep -q "^$sdf_file$" $extra_trans_stamp 2>/dev/null && continue;
-    echo "Merging ooo-build strings translation $(basename $sdf_file) ..."
-    $SOLARVERSION/$INPATH/bin/localize -m -x -l all -f $sdf_file || exit 1;
+
+    # find if this localization is required
+    langcode=
+    for lang in $OOO_LANGS_LIST ; do
+	echo "$sdf_file" | grep -q "$lang.sdf$" && langcode=$lang
+    done
+    test -z "$langcode" && continue;
+
+    merge_localization "$sdf_file" "$langcode" "$split_build" "$sdf_file_filter"
+
+    # workaround for i#56622, n#210797
+    test "$langcode" = "hu" && hungarian_updated=yes
+
+    # copy help auxiliary files if they are missing but the localized strings are available
+    if test -d "$OOBUILDDIR/helpcontent2" ; then
+	if grep -q "^helpcontent2" $sdf_file &&
+	    test ! -d $OOBUILDDIR/helpcontent2/source/auxiliary/$langcode ; then
+	    echo "Copying English help auxiliary files for \"$langcode\"..."
+	    cd $OOBUILDDIR/helpcontent2/source/auxiliary
+	    cp -r en-US $langcode
+	    perl -pi -e "s|Language=en-US|Language=$langcode|" $langcode/*.cfg
+	fi
+    fi
+
+    # make stamp for this localization
     echo "$sdf_file" >>$extra_trans_stamp
 done
 
-# apply all extra string fixes and updates
+# workaround for i#56622, n#210797
+if test "$hungarian_updated" = "yes" ; then
+    echo "Fixing Hungarian strings: OOo vs. SO"
+    for file in `find $OOBUILDDIR -type f -name "localize.sdf"` ; do
+        $TOOLSDIR/bin/a2az.pl $file >$file.a2az
+        mv $file.a2az $file
+    done
+fi
+
+# apply lang-non-specific sdf files
+# the files "any-name-<lang>.sdf" are ignored because they are already processed above
 for fn in $SRCDIR/sdf/*.sdf; do
     [ -f "$fn" ] || continue
+    # skip if already processed as lang-specific files
+    grep -q "^$fn$" $extra_trans_lang_list 2>/dev/null && continue;
+    # skip if already merged
     grep -q "^$fn$" $extra_trans_stamp 2>/dev/null && continue;
     if echo "$fn" | grep -q patches && ! echo $OOO_LANGS | grep -q "$(echo $(basename $fn) | cut -d'-' -f1)"; then continue; fi
     if echo "$fn" | grep -q gallery && ! echo $OOO_LANGS | grep -q "$(echo $(basename $fn) | cut -d'-' -f1)"; then continue; fi
     if echo "$fn" | grep -q hu-fix && ! echo $OOO_LANGS | grep -q hu; then continue; fi
-    echo "Merging extra localization $(basename $fn) ..."
-    $SOLARVERSION/$INPATH/bin/localize -m -x -l all -f $fn || exit 1;
+    merge_localization "$fn" "all" "$split_build" "$sdf_file_filter" || exit 1;
     echo "$fn" >>$extra_trans_stamp
 done
 
@@ -99,7 +159,7 @@ if test "z$DEB_GSIDIR" != "z"; then
     for fn in $DEB_GSIDIR/*all*.sdf; do
 	[ -f "$fn" ] || continue
 	echo "Merging extra localization $(basename $fn) ..."
-	$SOLARVERSION/$INPATH/bin/localize -m -x -l all -f $fn || exit 1;
+	merge_localization "$fn" "all" "$split_build" "$sdf_file_filter" || exit 1;
     done
 fi
 
@@ -117,6 +177,10 @@ if ! grep -q "^GSI_en-GB-en-US.sdf$" $extra_trans_stamp 2>/dev/null ; then
 	fi
     done
 fi
+
+# remove temporary files
+test "$split_build" = "yes" && rm $sdf_file_filter
+rm $all_langs_pattern
 
 echo "Localizations updated ...!"
 

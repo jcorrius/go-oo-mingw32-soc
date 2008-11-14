@@ -1,0 +1,154 @@
+#!/usr/bin/perl
+    eval 'exec /usr/bin/perl -S $0 ${1+"$@"}'
+	if $running_under_some_shell;
+#!/usr/bin/perl
+
+use strict;
+use File::Copy;
+use File::Path;
+use File::Temp qw/ tempfile tempdir /;
+
+sub usage()
+{
+    print "This script split the given sdf files for each piece\n\n" .
+
+	  "Usage: ooo-sdf-split modules_list sdf_file...\n\n" .
+
+	  "Parameters:\n\n" .
+
+	  "	modules_list	file that defines what OOo source module belongs for\n" .
+	  "		what piece\n" .
+	  "	sdf_file	original sdf file";
+}
+
+sub load_modules_list($$$)
+{
+    my ($modules_list, $p_modules, $p_pieces) = @_;
+    print "Loading $modules_list";
+
+    open (MODULES_LIST, "$modules_list") || die "Can't open $modules_list";
+    while (my $line = <MODULES_LIST>) {
+        chomp $line;
+	if ( $line =~ m/^\s*(\w*)\s*=\s*(.*)$/ ) {
+	    my $piece = "$1";
+	    foreach my $module ( split( ',', $2 ) ) {
+		$p_modules->{"$module"} = "$piece";
+	    }
+	} else {
+	    die "Syntax error at $modules_list, line $.\n";
+	}
+	print ".";
+    }
+    close (MODULES_LIST);
+    print "\n";
+}
+
+sub guess_lang($)
+{
+    my ($sdf_file) = @_;
+
+    $sdf_file =~ /^GSI_([\w-]*).sdf/;
+    return "$1" if (defined $1);
+    die "Warning: Can't guess the target language for $sdf_file\n";
+}
+
+sub split_sdf_file($$$$)
+{
+    my ($sdf_file, $temp_dir, $p_modules, $p_pieces) = @_;
+
+    my $lang = guess_lang("$sdf_file");
+
+    # This hash includes the sdf lines split by piece
+    # The key is the piece name, the value is array with sdf lines for the given piece
+    my %lines = ();
+    my $piece;
+
+    print "Processing $sdf_file";
+
+    open (sdf_file, "$sdf_file") || die "Can't open $sdf_file";
+    while (my $line = <sdf_file>) {
+	chomp $line;
+	$line =~ /^\s*(\w*)\t/;
+	my $module = "$1";
+	if ( defined $p_modules->{"$module"} ) {
+	    $piece = "$p_modules->{$module}";
+        } else {
+	    $piece = "unknown";
+	}
+	push @{$lines{$piece}}, "$line";
+	$p_pieces->{"$piece"} = 1;
+	if ( ($. % 10000 ) == 0 ) {
+	    print ".";
+	    $|++; # flush
+	}
+    }
+    close (sdf_file);
+
+    my $out_dir="$temp_dir/ooo-build/sdf";
+    mkpath "$out_dir" || die "Can't create directory $out_dir\n";
+
+    foreach $piece (keys %lines) {
+	open (SDF_FILE_PIECE, '>', "$out_dir/$piece-$lang.sdf") || die "Can't open $out_dir/$piece-$lang.sdf for writing\n";
+	foreach my $line (@{$lines{$piece}}) {
+	    print SDF_FILE_PIECE "$line\n";
+	}
+	close (SDF_FILE_PIECE);
+	print ".";
+	$|++; # flush
+    }
+    print "\n";
+}
+
+sub compress_split_sdf_files($$)
+{
+    my ($temp_dir, $p_pieces) = @_;
+
+    
+    foreach my $piece (keys %{$p_pieces}) {
+	my $archive = "ooo-sdf-$piece.tar.bz2";
+	print "Creating $archive...";
+	system ("cd $temp_dir; tar -cjf $archive ooo-build/sdf/$piece*.sdf") == 0 || die "Can't create $temp_dir/$archive\n";
+	system ("cp $temp_dir/$archive ./$archive") == 0 || die "Can't move $temp_dir/$archive -> $archive\n";
+	print " done\n";
+    }
+}
+
+my $temp_dir;
+my $modules_list;
+my @sdf_files = ();
+# This hash includes information about how the modules are split into the pieces
+# The key is the module name, the value is the piece name
+my %modules = ();
+# list of supported pieces
+my %pieces;
+
+###################
+# Arguments parsing
+###################
+
+for my $arg (@ARGV) {
+    if ($arg eq '--help' || $arg eq '-h') {
+	usage;
+	exit 0;
+    } else {
+	(-f $arg) || die "Error: $arg is not a file";
+	if (! defined $modules_list) {
+	    $modules_list = $arg;
+	} else {
+	    push @sdf_files, "$arg";
+	}
+    }
+}
+
+(defined $modules_list) || die "Modules list is not defined\n";
+(@sdf_files > 0) || die "No SDF file defined\n";
+
+$temp_dir = tempdir( "/tmp/ooo-sdf-split-XXXXXX" );
+
+load_modules_list($modules_list, \%modules, \%pieces);
+foreach my $sdf_file (@sdf_files) {
+    split_sdf_file($sdf_file, $temp_dir, \%modules, \%pieces);
+}
+compress_split_sdf_files($temp_dir, \%pieces);
+
+system ("rm -rf $temp_dir");
