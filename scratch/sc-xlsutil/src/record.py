@@ -60,6 +60,12 @@ append a line to be displayed.
         else:
             return 'no'
 
+    def getTrueFalse (self, boolVal):
+        if boolVal:
+            return 'true'
+        else:
+            return 'false'
+
     def readUnsignedInt (self, length):
         bytes = self.readBytes(length)
         return globals.getUnsignedInt(bytes)
@@ -80,30 +86,61 @@ class BOF(BaseRecordHandler):
     Type = {
         0x0005: "Workbook globals",
         0x0006: "Visual Basic module",
-        0x0010: "Sheet or dialog",
+        0x0010: "Worksheet or dialog sheet",
         0x0020: "Chart",
-        0x0040: "Macro sheet",
-        0x0100: "Workspace"
+        0x0040: "Excel 4.0 macro sheet",
+        0x0100: "Workspace file"
     }
 
+    # TODO: Add more build identifiers.
+    buildId = {
+        0x0DBB: 'Excel 97',
+        0x2775: 'Excel XP'
+    }
+
+    def getBuildIdName (self, value):
+        if BOF.buildId.has_key(value):
+            return BOF.buildId[value]
+        else:
+            return '(unknown)'
+
     def parseBytes (self):
-        ver = globals.getRawBytes(self.bytes[0:2])
-        dataType = globals.getSignedInt(self.bytes[2:4])
-        buildID = globals.getSignedInt(self.bytes[4:6])
-        buildYear = globals.getSignedInt(self.bytes[6:8])
-        fileHistoryFlags = globals.getRawBytes(self.bytes[8:12])
-        lowestExcelVer = globals.getSignedInt(self.bytes[12:16])
+        # BIFF version
+        ver = self.readUnsignedInt(2)
+        s = 'not BIFF8'
+        if ver == 0x0600:
+            s = 'BIFF8'
+        self.appendLine("BIFF version: %s"%s)
 
-        try:
-            self.appendLine("BIFF version: " + ver)
-            self.appendLine("build ID: %d"%buildID)
-            self.appendLine("build year: %d"%buildYear)
-            self.appendLine("type: %s"%BOF.Type[dataType])
-            self.appendLine("file history flags: " + fileHistoryFlags)
-            self.appendLine("lowest Excel version: %d"%lowestExcelVer)
-        except:
-            pass
+        # Substream type
+        dataType = self.readUnsignedInt(2)
+        self.appendLine("type: %s"%BOF.Type[dataType])
 
+        # build ID and year
+        buildID = self.readUnsignedInt(2)
+        self.appendLine("build ID: %s (%4.4Xh)"%(self.getBuildIdName(buildID), buildID))
+        buildYear = self.readUnsignedInt(2)
+        self.appendLine("build year: %d"%buildYear)
+
+        # file history flags
+        flags = self.readUnsignedInt(4)
+        win     = (flags & 0x00000001)
+        risc    = (flags & 0x00000002)
+        beta    = (flags & 0x00000004)
+        winAny  = (flags & 0x00000008)
+        macAny  = (flags & 0x00000010)
+        betaAny = (flags & 0x00000020)
+        riscAny = (flags & 0x00000100)
+        self.appendLine("last edited by Excel on Windows: %s"%self.getYesNo(win))
+        self.appendLine("last edited by Excel on RISC: %s"%self.getYesNo(risc))
+        self.appendLine("last edited by beta version of Excel: %s"%self.getYesNo(beta))
+        self.appendLine("has ever been edited by Excel for Windows: %s"%self.getYesNo(winAny))
+        self.appendLine("has ever been edited by Excel for Macintosh: %s"%self.getYesNo(macAny))
+        self.appendLine("has ever been edited by beta version of Excel: %s"%self.getYesNo(betaAny))
+        self.appendLine("has ever been edited by Excel on RISC: %s"%self.getYesNo(riscAny))
+
+        lowestExcelVer = self.readSignedInt(4)
+        self.appendLine("earliest Excel version that can read all records: %d"%lowestExcelVer)
 
 
 class Formula(BaseRecordHandler):
@@ -498,7 +535,7 @@ class SXViewEx9(BaseRecordHandler):
         flags = self.readUnsignedInt(4)
         autoFmtId = self.readUnsignedInt(2)
 
-        self.appendLine("record type: 0x%4.4X (always 0x0810)"%rt)
+        self.appendLine("record type: %4.4Xh (always 0x0810)"%rt)
         self.appendLine("autoformat index: %d"%autoFmtId)
 
         nameLen = self.readSignedInt(2)
@@ -650,8 +687,8 @@ class SXDb(BaseRecordHandler):
         strmId   = self.readUnsignedInt(2)
         flags    = self.readUnsignedInt(2)
         self.appendLine("number of records in database: %d"%recCount)
-        self.appendLine("stream ID: 0x%4.4X"%strmId)
-#       self.appendLine("flags: 0x%4.4X"%flags)
+        self.appendLine("stream ID: %4.4Xh"%strmId)
+#       self.appendLine("flags: %4.4Xh"%flags)
 
         saveLayout    = (flags & 0x0001)
         invalid       = (flags & 0x0002)
@@ -729,9 +766,9 @@ class SXField(BaseRecordHandler):
         self.appendLine("long index: %s"%self.getYesNo(longIndex))
         dataType = (flags & 0x0DE0)
         if SXField.dataTypeNames.has_key(dataType):
-            self.appendLine("data type: %s (0x%4.4X)"%(SXField.dataTypeNames[dataType], dataType))
+            self.appendLine("data type: %s (%4.4Xh)"%(SXField.dataTypeNames[dataType], dataType))
         else:
-            self.appendLine("data type: unknown (0x%4.4X)"%dataType)
+            self.appendLine("data type: unknown (%4.4Xh)"%dataType)
 
         grpSubField = self.readUnsignedInt(2)
         grpBaseField = self.readUnsignedInt(2)
@@ -1059,9 +1096,86 @@ class SXViewItem(BaseRecordHandler):
 
 
 class PivotQueryTableEx(BaseRecordHandler):
+    """QSISXTAG: Pivot Table and Query Table Extensions (802h)"""
+    excelVersionList = [
+        'Excel 2000',
+        'Excel XP',
+        'Excel 2003',
+        'Excel 2007'
+    ]
+
+    class TableType:
+        QueryTable = 0
+        PivotTable = 1
+
+    def getExcelVersion (self, lastExcelVer):
+        s = '(unknown)'
+        if lastExcelVer < len(PivotQueryTableEx.excelVersionList):
+            s = PivotQueryTableEx.excelVersionList[lastExcelVer]
+        return s
 
     def parseBytes (self):
-        pass
+        recordType = self.readUnsignedInt(2)
+        self.appendLine("record type (always 0802h): %4.4Xh"%recordType)
+        dummyFlags = self.readUnsignedInt(2)
+        self.appendLine("flags (must be zero): %4.4Xh"%dummyFlags)
+        tableType = self.readUnsignedInt(2)
+        s = '(unknown)'
+        if tableType == PivotQueryTableEx.TableType.QueryTable:
+            s = 'query table'
+        elif tableType == PivotQueryTableEx.TableType.PivotTable:
+            s = 'pivot table'
+        self.appendLine("this record is for: %s"%s)
+
+        # general flags
+        flags = self.readUnsignedInt(2)
+        enableRefresh = (flags & 0x0001)
+        invalid       = (flags & 0x0002)
+        tensorEx      = (flags & 0x0004)
+        s = '(unknown)'
+        if enableRefresh:
+            s = 'ignore'
+        else:
+            s = 'check'
+        self.appendLine("check for SXDB or QSI for table refresh: %s"%s)
+        self.appendLine("PivotTable cache is invalid: %s"%self.getYesNo(invalid))
+        self.appendLine("This is an OLAP PivotTable report: %s"%self.getYesNo(tensorEx))
+
+        # feature-specific options
+        featureOptions = self.readUnsignedInt(4)
+        if tableType == PivotQueryTableEx.TableType.QueryTable:
+            # query table
+            preserveFormat = (featureOptions & 0x00000001)
+            autoFit        = (featureOptions & 0x00000002)
+            self.appendLine("keep formatting applied by the user: %s"%self.getYesNo(preserveFormat))
+            self.appendLine("auto-fit columns after refresh: %s"%self.getYesNo(autoFit))
+        elif tableType == PivotQueryTableEx.TableType.PivotTable:
+            # pivot table
+            noStencil         = (featureOptions & 0x00000001)
+            hideTotAnnotation = (featureOptions & 0x00000002)
+            includeEmptyRow   = (featureOptions & 0x00000008)
+            includeEmptyCol   = (featureOptions & 0x00000010)
+            self.appendLine("no large drop zones if no data fields: %s"%self.getTrueFalse(noStencil))
+            self.appendLine("no asterisk for the total in OLAP table: %s"%self.getTrueFalse(hideTotAnnotation))
+            self.appendLine("retrieve and show empty rows from OLAP source: %s"%self.getTrueFalse(includeEmptyRow))
+            self.appendLine("retrieve and show empty columns from OLAP source: %s"%self.getTrueFalse(includeEmptyCol))
+
+        self.appendLine("table last refreshed by: %s"%
+            self.getExcelVersion(self.readUnsignedInt(1)))
+
+        self.appendLine("minimal version that can refresh: %s"%
+            self.getExcelVersion(self.readUnsignedInt(1)))
+
+        offsetBytes = self.readUnsignedInt(1)
+        self.appendLine("offset from first FRT byte to first cchName byte: %d"%offsetBytes)
+
+        self.appendLine("first version that created the table: %s"%
+            self.getExcelVersion(self.readUnsignedInt(1)))
+
+        textLen = self.readUnsignedInt(2)
+        name, textLen = globals.getRichText(self.readRemainingBytes(), textLen)
+        self.appendLine("table name: %s"%name)
+        return
 
 
 class SXDouble(BaseRecordHandler):
@@ -1116,7 +1230,7 @@ class CTCellContent(BaseRecordHandler):
 
         oldType = (valueType/(2*2*2) & CTCellContent.EXC_CHTR_TYPE_MASK)
         newType = (valueType & CTCellContent.EXC_CHTR_TYPE_MASK)
-        self.appendLine("value type: (old=0x%4.4X; new=0x%4.4X)"%(oldType, newType))
+        self.appendLine("value type: (old=%4.4Xh; new=%4.4Xh)"%(oldType, newType))
         self.readBytes(2) # ignore next 2 bytes.
 
         row = globals.getSignedInt(self.readBytes(2))
