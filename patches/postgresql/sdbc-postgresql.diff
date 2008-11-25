@@ -18,16 +18,16 @@
 + </node>
 +</oor:node>
 \ Kein Zeilenumbruch am Dateiende.
---- /dev/null	2007-08-27 20:56:43.916000000 +0200
-+++ connectivity/source/drivers/postgresql/makefile.mk	2007-08-28 23:22:23.000000000 +0200
+--- /dev/null	2008-11-25 09:24:02.506388553 +0100
++++ connectivity/source/drivers/postgresql/makefile.mk	2008-07-07 23:37:11.000000000 +0200
 @@ -0,0 +1,218 @@
 +#*************************************************************************
 +#
 +#   $RCSfile: makefile.mk,v $
 +#
-+#   $Revision: 1.1.2.13 $
++#   $Revision: 1.1.2.14 $
 +#
-+#   last change: $Author: jbu $ $Date: 2007/08/28 21:22:23 $
++#   last change: $Author: jbu $ $Date: 2008/07/07 21:37:11 $
 +#
 +#   The Contents of this file are made available subject to the terms of
 +#   either of the following licenses
@@ -104,7 +104,7 @@
 +
 +PQ_SDBC_MAJOR=0
 +PQ_SDBC_MINOR=7
-+PQ_SDBC_MICRO=5
++PQ_SDBC_MICRO=6
 +.IF "$(SYSTEM_POSTGRESQL)" == "YES"
 +POSTGRESQL_MAJOR=`pg_config --version | awk '{ print $$2 }' | cut -d. -f1`
 +POSTGRESQL_MINOR=`pg_config --version | awk '{ print $$2 }' | cut -d. -f2`
@@ -6082,16 +6082,16 @@
 +};
 +}
 +#endif
---- /dev/null	2007-08-27 20:56:43.916000000 +0200
-+++ connectivity/source/drivers/postgresql/pq_preparedstatement.cxx	2007-08-26 22:40:40.000000000 +0200
-@@ -0,0 +1,850 @@
+--- /dev/null	2008-11-25 09:24:02.506388553 +0100
++++ connectivity/source/drivers/postgresql/pq_preparedstatement.cxx	2008-07-07 23:37:11.000000000 +0200
+@@ -0,0 +1,882 @@
 +/*************************************************************************
 + *
 + *  $RCSfile: pq_preparedstatement.cxx,v $
 + *
-+ *  $Revision: 1.1.2.9 $
++ *  $Revision: 1.1.2.10 $
 + *
-+ *  last change: $Author: jbu $ $Date: 2007/08/26 20:40:40 $
++ *  last change: $Author: jbu $ $Date: 2008/07/07 21:37:11 $
 + *
 + *  The Contents of this file are made available subject to the terms of
 + *  either of the following licenses
@@ -6742,9 +6742,13 @@
 +void PreparedStatement::setObject( sal_Int32 parameterIndex, const Any& x )
 +    throw (SQLException, RuntimeException)
 +{
-+    throw SQLException(
-+        ASCII_STR( "pq_preparedstatement: setObject not implemented" ),
-+        *this, OUString(), 1, Any () );
++    if( ! implSetObject( this, parameterIndex, x ))
++    {
++        OUStringBuffer buf;
++        buf.append( ASCII_STR("pq_preparedstatement::setObject: can't convert value of type " ) );
++        buf.append( x.getValueTypeName() );
++        throw SQLException( buf.makeStringAndClear(), *this, OUString(), 1, Any () );
++    }
 +}
 +
 +void PreparedStatement::setObjectWithInfo(
@@ -6754,9 +6758,37 @@
 +    sal_Int32 scale )
 +    throw (SQLException, RuntimeException)
 +{
-+    throw SQLException(
-+        ASCII_STR( "pq_preparedstatement: setObjectWithInfo not implemented" ),
-+        *this, OUString(), 1, Any () );
++    if( com::sun::star::sdbc::DataType::DECIMAL == targetSqlType ||
++        com::sun::star::sdbc::DataType::NUMERIC == targetSqlType )
++    {
++        double myDouble;
++        OUString myString;
++        if( x >>= myDouble )
++        {
++            myString = OUString::valueOf( myDouble );
++        }
++        else  
++        {
++            x >>= myString;
++        }
++        if( myString.getLength() )
++        {
++//              printf( "setObjectWithInfo %s\n", OUStringToOString(myString,RTL_TEXTENCODING_ASCII_US).getStr());
++            setString( parameterIndex, myString );
++        }
++        else
++        {
++            OUStringBuffer buf;
++            buf.append( ASCII_STR("pq_preparedstatement::setObjectWithInfo: can't convert value of type " ) );
++            buf.append( x.getValueTypeName() );
++            buf.append( ASCII_STR(" to type DECIMAL or NUMERIC" ) );
++            throw SQLException( buf.makeStringAndClear(), *this, OUString(), 1, Any () );
++        }
++    }
++    else 
++    {
++        setObject( parameterIndex, x );
++    }
 +    
 +}
 +
@@ -11178,9 +11210,9 @@
 +
 +}
 +#endif
---- /dev/null	2007-08-27 20:56:43.916000000 +0200
-+++ connectivity/source/drivers/postgresql/pq_tools.cxx	2007-08-28 22:31:17.000000000 +0200
-@@ -0,0 +1,1141 @@
+--- /dev/null	2008-11-25 09:24:02.506388553 +0100
++++ connectivity/source/drivers/postgresql/pq_tools.cxx	2008-07-07 23:43:17.000000000 +0200
+@@ -0,0 +1,1232 @@
 +#include <rtl/strbuf.hxx>
 +#include <rtl/ustrbuf.hxx>
 +
@@ -12321,17 +12353,108 @@
 +}
 +
 +
++// copied from connectivity/source/dbtools, can't use the function directly
++bool implSetObject(	const Reference< XParameters >& _rxParameters,
++						const sal_Int32 _nColumnIndex, const Any& _rValue) 
++{
++	sal_Bool bSuccessfullyReRouted = sal_True;
++	switch (_rValue.getValueTypeClass())
++	{
++		case typelib_TypeClass_HYPER:
++		{
++			sal_Int64 nValue = 0;
++			_rxParameters->setLong( _nColumnIndex, nValue );
++		}
++		break;
++
++		case typelib_TypeClass_VOID:
++			_rxParameters->setNull(_nColumnIndex,com::sun::star::sdbc::DataType::VARCHAR);
++			break;
++
++		case typelib_TypeClass_STRING:
++			_rxParameters->setString(_nColumnIndex, *(rtl::OUString*)_rValue.getValue());
++			break;
++
++		case typelib_TypeClass_BOOLEAN:
++			_rxParameters->setBoolean(_nColumnIndex, *(sal_Bool *)_rValue.getValue());
++			break;
++
++		case typelib_TypeClass_BYTE:
++			_rxParameters->setByte(_nColumnIndex, *(sal_Int8 *)_rValue.getValue());
++			break;
++
++		case typelib_TypeClass_UNSIGNED_SHORT:
++		case typelib_TypeClass_SHORT:
++			_rxParameters->setShort(_nColumnIndex, *(sal_Int16*)_rValue.getValue());
++			break;
++
++		case typelib_TypeClass_CHAR:
++			_rxParameters->setString(_nColumnIndex, ::rtl::OUString((sal_Unicode *)_rValue.getValue(),1));
++			break;
++
++		case typelib_TypeClass_UNSIGNED_LONG:
++		case typelib_TypeClass_LONG:
++			_rxParameters->setInt(_nColumnIndex, *(sal_Int32*)_rValue.getValue());
++			break;
++
++		case typelib_TypeClass_FLOAT:
++			_rxParameters->setFloat(_nColumnIndex, *(float*)_rValue.getValue());
++			break;
++
++		case typelib_TypeClass_DOUBLE:
++			_rxParameters->setDouble(_nColumnIndex, *(double*)_rValue.getValue());
++			break;
++
++		case typelib_TypeClass_SEQUENCE:
++			if (_rValue.getValueType() == ::getCppuType((const Sequence< sal_Int8 > *)0))
++			{
++				_rxParameters->setBytes(_nColumnIndex, *(Sequence<sal_Int8>*)_rValue.getValue());
++			}
++			else
++				bSuccessfullyReRouted = sal_False;
++			break;
++		case typelib_TypeClass_STRUCT:
++			if (_rValue.getValueType() == ::getCppuType((const com::sun::star::util::DateTime*)0))
++				_rxParameters->setTimestamp(_nColumnIndex, *(com::sun::star::util::DateTime*)_rValue.getValue());
++			else if (_rValue.getValueType() == ::getCppuType((const com::sun::star::util::Date*)0))
++				_rxParameters->setDate(_nColumnIndex, *(com::sun::star::util::Date*)_rValue.getValue());
++			else if (_rValue.getValueType() == ::getCppuType((const com::sun::star::util::Time*)0))
++				_rxParameters->setTime(_nColumnIndex, *(com::sun::star::util::Time*)_rValue.getValue());
++			else
++				bSuccessfullyReRouted = sal_False;
++			break;
++
++		case typelib_TypeClass_INTERFACE:
++        {
++            Reference< com::sun::star::io::XInputStream >  xStream;
++			if (_rValue >>= xStream)
++			{
++				_rValue >>= xStream;
++				_rxParameters->setBinaryStream(_nColumnIndex, xStream, xStream->available());
++				break;
++			}
++        }
++			// run through
++		default:
++			bSuccessfullyReRouted = sal_False;
++
++	}
++
++	return bSuccessfullyReRouted;
 +}
---- /dev/null	2007-08-27 20:56:43.916000000 +0200
-+++ connectivity/source/drivers/postgresql/pq_tools.hxx	2006-05-01 21:19:07.000000000 +0200
-@@ -0,0 +1,196 @@
++
++
++}
+--- /dev/null	2008-11-25 09:24:02.506388553 +0100
++++ connectivity/source/drivers/postgresql/pq_tools.hxx	2008-07-07 23:37:11.000000000 +0200
+@@ -0,0 +1,201 @@
 +/*************************************************************************
 + *
 + *  $RCSfile: pq_tools.hxx,v $
 + *
-+ *  $Revision: 1.1.2.6 $
++ *  $Revision: 1.1.2.7 $
 + *
-+ *  last change: $Author: jbu $ $Date: 2006/05/01 19:19:07 $
++ *  last change: $Author: jbu $ $Date: 2008/07/07 21:37:11 $
 + *
 + *  The Contents of this file are made available subject to the terms of
 + *  either of the following licenses
@@ -12390,6 +12513,7 @@
 +#define _PQ_TOOLS_
 +
 +#include <com/sun/star/beans/XPropertySet.hpp>
++#include <com/sun/star/sdbc/XParameters.hpp>
 +#include <com/sun/star/util/Date.hpp>
 +#include <com/sun/star/util/Time.hpp>
 +#include <com/sun/star/util/DateTime.hpp>
@@ -12495,6 +12619,10 @@
 +
 +void extractNameValuePairsFromInsert( String2StringMap & map, const rtl::OString & lastQuery );
 +sal_Int32 typeNameToDataType( const rtl::OUString &typeName, const rtl::OUString &typtype );
++
++// copied from connectivity/source/dbtools, can't use the function directly
++bool implSetObject(	const com::sun::star::uno::Reference< com::sun::star::sdbc::XParameters >& _rxParameters,
++                    const sal_Int32 _nColumnIndex, const com::sun::star::uno::Any& _rValue);
 +
 +class DisposeGuard
 +{
