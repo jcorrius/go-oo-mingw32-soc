@@ -2025,3 +2025,118 @@ index 745df3e..69e06dd 100644
  
  # ------------------------------------------------------------------
  
+diff --git sc/source/filter/excel/xiescher.cxx sc/source/filter/excel/xiescher.cxx
+index 2508629..4d6fddf 100644
+--- sc/source/filter/excel/xiescher.cxx
++++ sc/source/filter/excel/xiescher.cxx
+@@ -496,14 +496,14 @@ void XclImpDrawObjBase::ProcessSdrObject( SdrObject& rSdrObj ) const
+     {
+         if( ScMacroInfo* pInfo = ScDrawLayer::GetMacroInfo( &rSdrObj, TRUE ) )
+         {
+-            pInfo->SetMacro( XclControlHelper::GetScMacroName( maMacroName ) );
++            pInfo->SetMacro( XclControlHelper::GetScMacroName( maMacroName ), GetDocShell() );
+             pInfo->SetHlink( maHyperlink );
+         }
+     }
+ #else
+     if( mbSimpleMacro && (maMacroName.Len() > 0) )
+         if( ScMacroInfo* pInfo = ScDrawLayer::GetMacroInfo( &rSdrObj, TRUE ) )
+-            pInfo->SetMacro( XclControlHelper::GetScMacroName( maMacroName ) );
++            pInfo->SetMacro( XclControlHelper::GetScMacroName( maMacroName, GetDocShell() ) );
+ #endif
+ 
+     // call virtual function for object type specific processing
+@@ -1887,7 +1887,7 @@ void XclImpTbxObjBase::SetDffProperties( const DffPropSet& rDffPropSet )
+ 
+ bool XclImpTbxObjBase::FillMacroDescriptor( ScriptEventDescriptor& rDescriptor ) const
+ {
+-    return XclControlHelper::FillMacroDescriptor( rDescriptor, DoGetEventType(), GetMacroName() );
++    return XclControlHelper::FillMacroDescriptor( rDescriptor, DoGetEventType(), GetMacroName(), GetDocShell() );
+ }
+ 
+ void XclImpTbxObjBase::ConvertFont( ScfPropertySet& rPropSet ) const
+diff --git sc/source/filter/excel/xlescher.cxx sc/source/filter/excel/xlescher.cxx
+index e66f60d..272578a 100644
+--- sc/source/filter/excel/xlescher.cxx
++++ sc/source/filter/excel/xlescher.cxx
+@@ -39,6 +39,11 @@
+ #include "xistream.hxx"
+ #include "xestream.hxx"
+ 
++#include <sfx2/objsh.hxx>
++#include <basic/sbstar.hxx>
++#include <basic/sbmod.hxx>
++#include <basic/sbmeth.hxx>
++
+ using ::rtl::OUString;
+ using ::com::sun::star::uno::Reference;
+ using ::com::sun::star::uno::UNO_QUERY;
+@@ -301,10 +306,26 @@ Reference< XControlModel > XclControlHelper::GetControlModel( Reference< XShape
+ #define EXC_MACRONAME_PRE "vnd.sun.star.script:Standard."
+ #define EXC_MACRONAME_SUF "?language=Basic&location=document"
+ 
+-OUString XclControlHelper::GetScMacroName( const String& rXclMacroName )
++OUString XclControlHelper::GetScMacroName( const String& rXclMacroName, SfxObjectShell* pDocShell )
+ {
++    String sTmp( rXclMacroName );
+     if( rXclMacroName.Len() > 0 )
+-        return CREATE_OUSTRING( EXC_MACRONAME_PRE ) + rXclMacroName + CREATE_OUSTRING( EXC_MACRONAME_SUF );
++    {
++        if ( ( sTmp.Search( '.' ) == STRING_NOTFOUND) && pDocShell )
++        {
++            if( StarBASIC* pBasic = pDocShell->GetBasic() )
++            {
++                if( SbMethod* pMethod = dynamic_cast< SbMethod* >( pBasic->Find( sTmp, SbxCLASS_METHOD ) ) )
++                {
++                    if( SbModule* pModule = pMethod->GetModule() )
++                    {
++                        sTmp.Insert( '.', 0 ).Insert( pModule->GetName(), 0 );
++                    }
++                }
++            }
++        return CREATE_OUSTRING( EXC_MACRONAME_PRE ) + sTmp + CREATE_OUSTRING( EXC_MACRONAME_SUF );
++        }
++    }
+     return OUString();
+ }
+ 
+@@ -338,14 +359,14 @@ spTbxListenerData[] =
+ #define EXC_MACROSCRIPT "Script"
+ 
+ bool XclControlHelper::FillMacroDescriptor( ScriptEventDescriptor& rDescriptor,
+-        XclTbxEventType eEventType, const String& rXclMacroName )
++        XclTbxEventType eEventType, const String& rXclMacroName, SfxObjectShell* pShell )
+ {
+     if( rXclMacroName.Len() > 0 )
+     {
+         rDescriptor.ListenerType = OUString::createFromAscii( spTbxListenerData[ eEventType ].mpcListenerType );
+         rDescriptor.EventMethod = OUString::createFromAscii( spTbxListenerData[ eEventType ].mpcEventMethod );
+         rDescriptor.ScriptType = CREATE_OUSTRING( EXC_MACROSCRIPT );
+-        rDescriptor.ScriptCode = GetScMacroName( rXclMacroName );
++        rDescriptor.ScriptCode = GetScMacroName( rXclMacroName, pShell );
+         return true;
+     }
+     return false;
+diff --git sc/source/filter/inc/xlescher.hxx sc/source/filter/inc/xlescher.hxx
+index 97fb567..d6c9b7c 100644
+--- sc/source/filter/inc/xlescher.hxx
++++ sc/source/filter/inc/xlescher.hxx
+@@ -432,7 +432,8 @@ public:
+                         GetControlModel( ::com::sun::star::uno::Reference< ::com::sun::star::drawing::XShape > xShape );
+ 
+     /** Returns the Calc macro name from an Excel macro name. */
+-    static ::rtl::OUString GetScMacroName( const String& rXclMacroName );
++    static ::rtl::OUString GetScMacroName( const String& rXclMacroName, SfxObjectShell* pShell = NULL );
++
+     /** Returns the Excel macro name from a Calc macro name. */
+     static String       GetXclMacroName( const ::rtl::OUString& rScMacroName );
+ 
+@@ -440,7 +441,7 @@ public:
+     static bool         FillMacroDescriptor(
+                             ::com::sun::star::script::ScriptEventDescriptor& rDescriptor,
+                             XclTbxEventType eEventType,
+-                            const String& rXclMacroName );
++                            const String& rXclMacroName, SfxObjectShell* pShell = NULL );
+     /** Tries to extract an Excel macro name from the passed macro descriptor. */
+     static String       ExtractFromMacroDescriptor(
+                             const ::com::sun::star::script::ScriptEventDescriptor& rDescriptor,
