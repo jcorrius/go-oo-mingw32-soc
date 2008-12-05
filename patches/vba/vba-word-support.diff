@@ -1,0 +1,2659 @@
+diff --git basic/inc/basic/sbstar.hxx basic/inc/basic/sbstar.hxx
+index 3c7e149..a62b1fb 100644
+--- basic/inc/basic/sbstar.hxx
++++ basic/inc/basic/sbstar.hxx
+@@ -75,6 +75,10 @@ class StarBASIC : public SbxObject
+     BOOL            bVBAEnabled;
+ 	BasicLibInfo*	pLibInfo;			// Infoblock fuer Basic-Manager
+ 	SbLanguageMode	eLanguageMode;		// LanguageMode des Basic-Objekts
++
++	SbxArrayRef pVBAGlobals; 
++	SbxArray* getVBAGlobals( );
++
+ protected:
+ 	BOOL 			CError( SbError, const String&, xub_StrLen, xub_StrLen, xub_StrLen );
+ private:
+@@ -199,6 +203,7 @@ public:
+ 
+ 	SbxObjectRef getRTL( void ) { return pRtl; }
+ 	BOOL IsDocBasic() { return bDocBasic; }
++	SbxVariable* VBAFind( const String& rName, SbxClassType t );
+ };
+ 
+ #ifndef __SB_SBSTARBASICREF_HXX
+diff --git basic/source/classes/sb.cxx basic/source/classes/sb.cxx
+index e47234f..c5d36cd 100644
+--- basic/source/classes/sb.cxx
++++ basic/source/classes/sb.cxx
+@@ -70,7 +70,50 @@ SV_IMPL_VARARR(SbTextPortions,SbTextPortion)
+ TYPEINIT1(StarBASIC,SbxObject)
+ 
+ #define RTLNAME "@SBRTL"
++//  i#i68894#
+ 
++const static String aThisComponent( RTL_CONSTASCII_USTRINGPARAM("ThisComponent") );
++const static String aVBAHook( RTL_CONSTASCII_USTRINGPARAM( "VBAGlobals" ) );
++
++SbxArray* StarBASIC::getVBAGlobals( )
++{
++	if ( !pVBAGlobals )
++	{
++		SbUnoObject* pGlobs = (SbUnoObject*)Find( aVBAHook , SbxCLASS_DONTCARE );
++		if ( pGlobs )
++		{ 
++			SbxVariable *vba = pGlobs->Find( String( RTL_CONSTASCII_USTRINGPARAM("getGlobals") ) , SbxCLASS_DONTCARE );
++	
++			if ( vba )
++				pVBAGlobals = static_cast<SbxArray *>(vba->GetObject());
++		}
++	}
++	return pVBAGlobals;
++}
++
++//  i#i68894#
++SbxVariable* StarBASIC::VBAFind( const String& rName, SbxClassType t )
++{
++	if( rName == aThisComponent )
++		return NULL;
++	// rename to init globals
++	getVBAGlobals( );
++
++	for (USHORT i = 0; pVBAGlobals && i < pVBAGlobals->Count(); i++)
++	{
++		SbxVariable *pElem = pVBAGlobals->Get( i );
++		if (!pElem || !pElem->IsObject())
++			continue;
++		SbxObject *pVba = static_cast<SbxObject *>(pElem->GetObject());
++		SbxVariable *pVbaVar = pVba ? pVba->Find( rName, t ) : NULL;
++		if( pVbaVar )
++		{
++			return pVbaVar;
++		}
++	}
++	return NULL;
++
++}
+ 
+ //========================================================================
+ // Array zur Umrechnung SFX <-> VB-Fehlercodes anlegen
+@@ -608,6 +651,7 @@ StarBASIC::StarBASIC( StarBASIC* p, BOOL bIsDocBasic  )
+ 	pRtl = new SbiStdObject( String( RTL_CONSTASCII_USTRINGPARAM(RTLNAME) ), this );
+ 	// Suche ueber StarBASIC ist immer global
+ 	SetFlag( SBX_GBLSEARCH );
++	pVBAGlobals = NULL;
+ }
+ 
+ // #51727 SetModified ueberladen, damit der Modified-
+diff --git basic/source/inc/runtime.hxx basic/source/inc/runtime.hxx
+index 93cc5f6..5a1bff2 100644
+--- basic/source/inc/runtime.hxx
++++ basic/source/inc/runtime.hxx
+@@ -206,7 +206,6 @@ class SbiInstance
+ 	BOOL			bCompatibility; // Flag: TRUE = VBA runtime compatibility mode
+ 
+     ComponentVector_t ComponentVector;
+-
+ public:
+ 	SbiRuntime*  pRun;        		// Call-Stack
+ 	SbiInstance* pNext;             // Instanzen-Chain
+diff --git basic/source/runtime/step2.cxx basic/source/runtime/step2.cxx
+index a9ea4b1..38e794d 100644
+--- basic/source/runtime/step2.cxx
++++ basic/source/runtime/step2.cxx
+@@ -56,57 +56,6 @@ using com::sun::star::uno::Reference;
+ 
+ SbxVariable* getVBAConstant( const String& rName );
+ 
+-const static String aThisComponent( RTL_CONSTASCII_USTRINGPARAM("ThisComponent") );
+-const static String aVBAHook( RTL_CONSTASCII_USTRINGPARAM( "VBAGlobals" ) );
+-//  i#i68894#
+-SbxArray* getVBAGlobals( )
+-{
+-	static SbxArrayRef pArray;
+-	static bool isInitialised = false;
+-	if ( isInitialised )
+-		return pArray;
+-	Reference < XComponentContext > xCtx;
+-	Reference < XPropertySet > xProps(
+-	::comphelper::getProcessServiceFactory(), UNO_QUERY_THROW );
+-	xCtx.set( xProps->getPropertyValue( rtl::OUString(
+-		RTL_CONSTASCII_USTRINGPARAM( "DefaultContext" ))),
+-			UNO_QUERY_THROW );
+-	SbUnoObject dGlobs( String( RTL_CONSTASCII_USTRINGPARAM("ExcelGlobals") ), xCtx->getValueByName( ::rtl::OUString::createFromAscii( "/singletons/ooo.vba.theGlobals") ) );
+-
+-	SbxVariable *vba = dGlobs.Find( String( RTL_CONSTASCII_USTRINGPARAM("getGlobals") ) , SbxCLASS_DONTCARE );
+-
+-	if ( vba )
+-	{
+-		pArray = static_cast<SbxArray *>(vba->GetObject());
+-		isInitialised = true;
+-		return pArray;
+-	}
+-	return NULL;
+-}
+-
+-//  i#i68894#
+-SbxVariable* VBAFind( const String& rName, SbxClassType t )
+-{
+-	if( rName == aThisComponent )
+-		return NULL;
+-
+-	SbxArray *pVBAGlobals = getVBAGlobals( );
+-	for (USHORT i = 0; pVBAGlobals && i < pVBAGlobals->Count(); i++)
+-	{
+-		SbxVariable *pElem = pVBAGlobals->Get( i );
+-		if (!pElem || !pElem->IsObject())
+-			continue;
+-		SbxObject *pVba = static_cast<SbxObject *>(pElem->GetObject());
+-		SbxVariable *pVbaVar = pVba ? pVba->Find( rName, t ) : NULL;
+-		if( pVbaVar )
+-		{
+-			return pVbaVar;
+-		}
+-	}
+-	return NULL;
+-
+-}
+-
+ // Suchen eines Elements
+ // Die Bits im String-ID:
+ // 0x8000 - Argv ist belegt
+@@ -191,7 +140,7 @@ SbxVariable* SbiRuntime::FindElement
+ 				if ( bVBAEnabled )
+ 				{
+ 					// Try Find in VBA symbols space
+-					pElem = VBAFind( aName, SbxCLASS_DONTCARE );
++					pElem = rBasic.VBAFind( aName, SbxCLASS_DONTCARE );
+ 					if ( pElem )
+ 						bSetName = false; // don't overwrite uno name
+ 					else
+diff --git forms/source/misc/InterfaceContainer.cxx forms/source/misc/InterfaceContainer.cxx
+index 78d65d6..f908eff 100644
+--- forms/source/misc/InterfaceContainer.cxx
++++ forms/source/misc/InterfaceContainer.cxx
+@@ -132,9 +132,8 @@ OInterfaceContainer::fakeVbaEventsHack(  sal_Int32 _nIndex )
+ 		// we'll ignore,  we'll get called back here  anyway )
+ 		Reference< XChild > xChild(  xForm->getParent(), UNO_QUERY_THROW );
+ 		Reference< XModel > xDocOwner( xChild->getParent(), UNO_QUERY );
+-		Reference< XCodeNameQuery > xNameQuery( xDocOwner, UNO_QUERY );
+ 		OSL_TRACE(" Is DOC ????? %s", xDocOwner.is() ? "true" : "false" );
+-		if ( xDocOwner.is() && xNameQuery.is() )
++		if ( xDocOwner.is() )
+ 		{
+ 			bool hasVBABindings = lcl_hasVbaEvents( m_xEventAttacher->getScriptEvents( _nIndex ) );  
+ 			if ( hasVBABindings )
+@@ -143,12 +142,14 @@ OInterfaceContainer::fakeVbaEventsHack(  sal_Int32 _nIndex )
+ 				return;
+ 			}
+ 			Reference< XMultiServiceFactory > xFac(  comphelper::getProcessServiceFactory(), UNO_QUERY );
+-			if ( xFac.is() )
++			Reference< XMultiServiceFactory > xDocFac(  xDocOwner, UNO_QUERY );
++			if ( xFac.is() && xDocFac.is() )
+ 			{
+ 				try
+ 				{
+ 					Reference< ooo::vba::XVBAToOOEventDescGen > xDescSupplier( xFac->createInstance( rtl::OUString::createFromAscii( "ooo.vba.VBAToOOEventDesc" ) ), UNO_QUERY_THROW );
+ 					Reference< XInterface > xIf( getByIndex( _nIndex ) , UNO_QUERY_THROW );
++					Reference< XCodeNameQuery > xNameQuery(  xDocFac->createInstance( rtl::OUString::createFromAscii( "ooo.vba.VBACodeNameProvider" ) ), UNO_QUERY_THROW );
+ 					rtl::OUString sCodeName;	
+ 					sCodeName = xNameQuery->getCodeNameForObject( xIf );
+ 					Reference< XPropertySet > xProps( xIf, UNO_QUERY );
+diff --git oovbaapi/ooo/vba/word/XApplication.idl oovbaapi/ooo/vba/word/XApplication.idl
+new file mode 100644
+index 0000000..292399b
+--- /dev/null
++++ oovbaapi/ooo/vba/word/XApplication.idl
+@@ -0,0 +1,57 @@
++/*************************************************************************
++ *
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ * 
++ * Copyright 2008 by Sun Microsystems, Inc.
++ *
++ * OpenOffice.org - a multi-platform office productivity suite
++ *
++ * $RCSfile: XApplication.idl,v $
++ * $Revision: 1.4 $
++ *
++ * This file is part of OpenOffice.org.
++ *
++ * OpenOffice.org is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License version 3
++ * only, as published by the Free Software Foundation.
++ *
++ * OpenOffice.org is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License version 3 for more details
++ * (a copy is included in the LICENSE file that accompanied this code).
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * version 3 along with OpenOffice.org.  If not, see
++ * <http://www.openoffice.org/license.html>
++ * for a copy of the LGPLv3 License.
++ *
++ ************************************************************************/
++#ifndef __ooo_vba_word_XApplication_idl__
++#define __ooo_vba_word_XApplication_idl__
++
++#ifndef __com_sun_star_uno_XInterface_idl__
++#include <com/sun/star/uno/XInterface.idl>
++#endif
++
++#ifndef __ooo_vba_XHelperInterface_idl__
++#include <ooo/vba/XHelperInterface.idl>
++#endif
++
++
++module ooo {  module vba {  module word { 
++
++interface XApplication
++{
++
++	interface ::ooo::vba::XHelperInterface;
++
++	[attribute, readonly] string Name;
++	void DoEvents();
++};
++
++}; }; };
++
++#endif
++
++
+diff --git oovbaapi/ooo/vba/word/XGlobals.idl oovbaapi/ooo/vba/word/XGlobals.idl
+new file mode 100644
+index 0000000..3c144a6
+--- /dev/null
++++ oovbaapi/ooo/vba/word/XGlobals.idl
+@@ -0,0 +1,54 @@
++/*************************************************************************
++ *
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ * 
++ * Copyright 2008 by Sun Microsystems, Inc.
++ *
++ * OpenOffice.org - a multi-platform office productivity suite
++ *
++ * $RCSfile: XGlobals.idl,v $
++ * $Revision: 1.4 $
++ *
++ * This file is part of OpenOffice.org.
++ *
++ * OpenOffice.org is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License version 3
++ * only, as published by the Free Software Foundation.
++ *
++ * OpenOffice.org is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License version 3 for more details
++ * (a copy is included in the LICENSE file that accompanied this code).
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * version 3 along with OpenOffice.org.  If not, see
++ * <http://www.openoffice.org/license.html>
++ * for a copy of the LGPLv3 License.
++ *
++ ************************************************************************/
++#ifndef __ooo_vba_word_XGlobals_idl__
++#define __ooo_vba_word_XGlobals_idl__
++
++#ifndef __com_sun_star_uno_XInterface_idl__
++#include <com/sun/star/uno/XInterface.idl>
++#endif
++#ifndef __ooo_vba_word_XApplication_idl__
++#include <ooo/vba/word/XApplication.idl>
++#endif
++
++module ooo {  module vba {  module word { 
++
++interface XGlobals: com::sun::star::uno::XInterface
++{
++        // FIXME, need better way to expose globals
++	sequence< any > getGlobals();
++
++	[attribute, readonly] ooo::vba::word::XApplication Application;
++};
++
++}; }; };
++
++#endif
++
++
+diff --git oovbaapi/ooo/vba/word/makefile.mk oovbaapi/ooo/vba/word/makefile.mk
+new file mode 100644
+index 0000000..27f6b68
+--- /dev/null
++++ oovbaapi/ooo/vba/word/makefile.mk
+@@ -0,0 +1,50 @@
++#*************************************************************************
++#
++# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++# 
++# Copyright 2008 by Sun Microsystems, Inc.
++#
++# OpenOffice.org - a multi-platform office productivity suite
++#
++# $RCSfile: makefile.mk,v $
++#
++# $Revision: 1.4 $
++#
++# This file is part of OpenOffice.org.
++#
++# OpenOffice.org is free software: you can redistribute it and/or modify
++# it under the terms of the GNU Lesser General Public License version 3
++# only, as published by the Free Software Foundation.
++#
++# OpenOffice.org is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++# GNU Lesser General Public License version 3 for more details
++# (a copy is included in the LICENSE file that accompanied this code).
++#
++# You should have received a copy of the GNU Lesser General Public License
++# version 3 along with OpenOffice.org.  If not, see
++# <http://www.openoffice.org/license.html>
++# for a copy of the LGPLv3 License.
++#
++#*************************************************************************
++PRJ=..$/..$/..
++
++PRJNAME=oovapi
++
++TARGET=word
++PACKAGE=ooo$/vba$/Word
++
++# --- Settings -----------------------------------------------------
++.INCLUDE :  $(PRJ)$/util$/makefile.pmk
++
++# ------------------------------------------------------------------------
++
++
++IDLFILES= XGlobals.idl\
++	XApplication.idl \
++
++# ------------------------------------------------------------------
++
++.INCLUDE :  target.mk
++
+diff --git oovbaapi/prj/build.lst oovbaapi/prj/build.lst
+index 04060dd..937c864 100644
+--- oovbaapi/prj/build.lst
++++ oovbaapi/prj/build.lst
+@@ -4,5 +4,6 @@ ovba	oovbaapi\genconstidl         nmake	-	all	ovba_genconstidl NULL
+ ovba	oovbaapi\ooo\vba\constants          nmake	-	all	ovba_constants  ovba_genconstidl NULL
+ ovba	oovbaapi\ooo\vba                    nmake	-	all	ovba_vba NULL
+ ovba	oovbaapi\ooo\vba\excel              nmake	-	all	ovba_excel NULL
++ovba	oovbaapi\ooo\vba\word               nmake	-	all	ovba_word NULL
+ ovba	oovbaapi\ooo\vba\msforms            nmake	-	all	ovba_msforms NULL
+-ovba   oovbaapi\util                             nmake   -   all ovba_util ovba_vba ovba_excel ovba_msforms ovba_constants ovba_genconstidl NULL
++ovba   oovbaapi\util                             nmake   -   all ovba_util ovba_vba ovba_excel ovba_word ovba_msforms ovba_constants ovba_genconstidl NULL
+diff --git oovbaapi/util/makefile.mk oovbaapi/util/makefile.mk
+index 4b98130..a0f4982 100644
+--- oovbaapi/util/makefile.mk
++++ oovbaapi/util/makefile.mk
+@@ -44,6 +44,7 @@ TARGET=oovbaapi_db
+ UNOIDLDBFILES= \
+ 	$(UCR)$/vba.db \
+ 	$(UCR)$/excel.db \
++	$(UCR)$/word.db \
+ 	$(UCR)$/msforms.db \
+ 	$(UCR)$/constants.db
+ 
+diff --git sc/inc/docuno.hxx sc/inc/docuno.hxx
+index f036a23..58ebb35 100644
+--- sc/inc/docuno.hxx
++++ sc/inc/docuno.hxx
+@@ -74,8 +74,6 @@ class ScTableSheetObj;
+ class SvxFmDrawPage;
+ class SvxDrawPage;
+ 
+-#include <com/sun/star/document/XCodeNameQuery.hpp>
+-
+ class SC_DLLPUBLIC ScModelObj : public SfxBaseModel,
+ 					public com::sun::star::sheet::XSpreadsheetDocument,
+ 					public com::sun::star::document::XActionLockable,
+@@ -89,7 +87,6 @@ class SC_DLLPUBLIC ScModelObj : public SfxBaseModel,
+ 					public com::sun::star::view::XRenderable,
+ 					public com::sun::star::document::XLinkTargetSupplier,
+ 					public com::sun::star::beans::XPropertySet,
+-					public com::sun::star::document::XCodeNameQuery,
+                     public com::sun::star::document::XDocumentEventCompatibleHelper,
+ 					public SvxFmMSFactory,	// derived from XMultiServiceFactory
+                     public com::sun::star::lang::XServiceInfo
+@@ -300,8 +297,6 @@ public:
+ 								throw(::com::sun::star::uno::RuntimeException);
+ 	virtual ::com::sun::star::uno::Sequence< sal_Int8 > SAL_CALL getImplementationId()
+ 								throw(::com::sun::star::uno::RuntimeException);
+- 	virtual rtl::OUString SAL_CALL getCodeNameForObject( const ::com::sun::star::uno::Reference< ::com::sun::star::uno::XInterface >& aObj )
+-								throw(::com::sun::star::uno::RuntimeException);
+                             // XVbaEventHelper
+     virtual sal_Bool SAL_CALL processCompatibleEvent( sal_Int16 nEventId ) throw (::com::sun::star::uno::RuntimeException);
+ };
+diff --git sc/inc/servuno.hxx sc/inc/servuno.hxx
+index 3beb852..13950f1 100644
+--- sc/inc/servuno.hxx
++++ sc/inc/servuno.hxx
+@@ -94,7 +94,8 @@ class ScDocShell;
+ #define SC_SERVICE_FORMULAPARS  38
+ #define SC_SERVICE_OPCODEMAPPER 39
+ #define SC_SERVICE_VBAOBJECTPROVIDER   40
+-#define SC_SERVICE_COUNT        41
++#define SC_SERVICE_VBACODENAMEPROVIDER   41
++#define SC_SERVICE_COUNT        42
+ #define SC_SERVICE_INVALID		USHRT_MAX
+ 
+ 
+diff --git sc/source/filter/excel/excimp8.cxx sc/source/filter/excel/excimp8.cxx
+index 033cb76..f091a47 100644
+--- sc/source/filter/excel/excimp8.cxx
++++ sc/source/filter/excel/excimp8.cxx
+@@ -103,7 +103,7 @@
+ #include <com/sun/star/document/XDocumentProperties.hpp>
+ #include <com/sun/star/document/XDocumentPropertiesSupplier.hpp>
+ #include <com/sun/star/script/ModuleInfo.hpp>
+-
++#include <basic/basmgr.hxx>
+ 
+ using namespace com::sun::star;
+ 
+@@ -280,6 +280,15 @@ void ImportExcel8::ReadBasic( void )
+         bool bLoadStrg = pFilterOpt->IsLoadExcelBasicStorage();
+         if( bLoadCode || bLoadStrg )
+         {
++            // Create and insert Excel vba Globals
++            uno::Reference < uno::XComponentContext > xCtx;
++            uno::Reference < beans::XPropertySet > xProps(
++            ::comphelper::getProcessServiceFactory(), uno::UNO_QUERY_THROW );
++            xCtx.set( xProps->getPropertyValue( rtl::OUString(
++                RTL_CONSTASCII_USTRINGPARAM( "DefaultContext" ))),
++                uno::UNO_QUERY_THROW );
++            uno::Any aGlobs = uno::makeAny( xCtx->getValueByName( ::rtl::OUString::createFromAscii( "/singletons/ooo.vba.theGlobals") ) );
++            pShell->GetBasicManager()->SetGlobalUNOConstant( "VBAGlobals", aGlobs );
+             SvxImportMSVBasic aBasicImport( *pShell, *xRootStrg, bLoadCode, bLoadStrg );
+ 			bool bAsComment = !bLoadExecutable || !lcl_hasVBAEnabled();
+             aBasicImport.Import( EXC_STORAGE_VBA_PROJECT, EXC_STORAGE_VBA, bAsComment );
+diff --git sc/source/ui/docshell/docsh.cxx sc/source/ui/docshell/docsh.cxx
+index c09c087..8abc135 100644
+--- sc/source/ui/docshell/docsh.cxx
++++ sc/source/ui/docshell/docsh.cxx
+@@ -131,7 +131,8 @@
+ #include "cellsuno.hxx"
+ #include <com/sun/star/document/XVbaEventsHelper.hpp>
+ #include <com/sun/star/document/VbaEventId.hpp>
+-
++#include <basic/sbstar.hxx>
++#include <basic/basmgr.hxx>
+ using namespace com::sun::star;
+ using namespace com::sun::star::document::VbaEventId;
+ 
+@@ -286,6 +287,7 @@ void ScDocShell::BeforeXMLLoading()
+     if ( xEvt.is() )
+        xEvt->setIgnoreEvents( sal_True );
+     
++// if VBA enabled then we need to  
+     // prevent unnecessary broadcasts and updates
+     DBG_ASSERT(pModificator == NULL, "The Modificator should not exist");
+ 	pModificator = new ScDocShellModificator( *this );
+@@ -369,7 +371,26 @@ void ScDocShell::AfterXMLLoading(sal_Bool bRet)
+     }
+     else
+ 		aDocument.SetInsertingFromOtherDoc( FALSE );
+-
++	// see if vba mode is enabled, if so add globals
++	SfxObjectShell* pShell = aDocument.GetDocumentShell();
++	if ( pShell )
++	{
++		StarBASIC* pStd = pShell->GetBasic();
++		if ( pStd )
++		{
++			if ( pStd->isVBAEnabled() )
++			{
++				uno::Reference < uno::XComponentContext > xCtx;
++				uno::Reference < beans::XPropertySet > xProps(
++					::comphelper::getProcessServiceFactory(), uno::UNO_QUERY_THROW );
++				xCtx.set( xProps->getPropertyValue( rtl::OUString(
++					RTL_CONSTASCII_USTRINGPARAM( "DefaultContext" ))),
++					uno::UNO_QUERY_THROW );
++				uno::Any aGlobs = uno::makeAny( xCtx->getValueByName( ::rtl::OUString::createFromAscii( "/singletons/ooo.vba.theGlobals") ) );
++				pShell->GetBasicManager()->SetGlobalUNOConstant( "VBAGlobals", aGlobs );
++			}
++		}
++	}
+         // suppress VBA events when loading the xml
+         uno::Reference< document::XVbaEventsHelper > xEvt( aDocument.GetVbaEventsHelper() );
+         if ( xEvt.is() )
+diff --git sc/source/ui/unoobj/docuno.cxx sc/source/ui/unoobj/docuno.cxx
+index 92f87a3..d1d08ca 100644
+--- sc/source/ui/unoobj/docuno.cxx
++++ sc/source/ui/unoobj/docuno.cxx
+@@ -106,7 +106,6 @@ using namespace com::sun::star::document::VbaEventId;
+ //	alles ohne Which-ID, Map nur fuer PropertySetInfo
+ 
+ //!	umbenennen, sind nicht mehr nur Options
+-#include <com/sun/star/script/ScriptEventDescriptor.hpp>
+ const SfxItemPropertyMap* lcl_GetDocOptPropertyMap()
+ {
+ 	static SfxItemPropertyMap aDocOptPropertyMap_Impl[] =
+@@ -313,7 +312,6 @@ uno::Any SAL_CALL ScModelObj::queryInterface( const uno::Type& rType )
+ 	SC_QUERYINTERFACE( view::XRenderable )
+ 	SC_QUERYINTERFACE( document::XLinkTargetSupplier )
+ 	SC_QUERYINTERFACE( beans::XPropertySet )
+-	SC_QUERYINTERFACE( document::XCodeNameQuery )
+ 	SC_QUERYINTERFACE( document::XDocumentEventCompatibleHelper)
+ 	SC_QUERYINTERFACE( lang::XMultiServiceFactory )
+ 	SC_QUERYINTERFACE( lang::XServiceInfo )
+@@ -1715,49 +1713,7 @@ uno::Sequence<rtl::OUString> SAL_CALL ScModelObj::getAvailableServiceNames()
+ 
+ 	return concatServiceNames( aMyServices, aDrawServices );
+ }
+-// XCodeNameQuery
+-rtl::OUString SAL_CALL 
+-ScModelObj::getCodeNameForObject( const uno::Reference< uno::XInterface >& xIf ) throw( uno::RuntimeException )
+-{
+-    rtl::OUString sCodeName;
+-    if ( pDocShell )
+-    {
+-        OSL_TRACE( "*** In ScModelObj::getCodeNameForObject");
+-        // need to find the page ( and index )  for this control
+-        uno::Reference< drawing::XDrawPagesSupplier > xSupplier( pDocShell->GetModel(), uno::UNO_QUERY_THROW );
+-        uno::Reference< container::XIndexAccess > xIndex( xSupplier->getDrawPages(), uno::UNO_QUERY_THROW );
+-        sal_Int32 nLen = xIndex->getCount();
+-        bool bMatched = false;
+-        uno::Sequence< script::ScriptEventDescriptor > aFakeEvents;
+-        for ( sal_Int32 index = 0; index < nLen; ++index )
+-        {
+-            try
+-            {
+-                uno::Reference< form::XFormsSupplier >  xFormSupplier( xIndex->getByIndex( index ), uno::UNO_QUERY_THROW );
+-                uno::Reference< container::XIndexAccess > xFormIndex( xFormSupplier->getForms(), uno::UNO_QUERY_THROW );
+-                // get the www-standard container
+-                uno::Reference< container::XIndexAccess > xFormControls( xFormIndex->getByIndex(0), uno::UNO_QUERY_THROW );
+-                sal_Int32 nCntrls = xFormControls->getCount();
+-                for( sal_Int32 cIndex = 0; cIndex < nCntrls; ++cIndex )
+-                {
+-                    uno::Reference< uno::XInterface > xControl( xFormControls->getByIndex( cIndex ), uno::UNO_QUERY_THROW );	
+-                    bMatched = ( xControl == xIf );
+-                    if ( bMatched )
+-                    {
+-                        String sName;
+-                        pDocShell->GetDocument()->GetCodeName( index, sName );
+-                        sCodeName = sName;
+-                    }
+-                }
+-            }
+-            catch( uno::Exception& ) {}
+-            if ( bMatched )
+-                break;
+-        }
+-    }
+-    // Probably should throw here ( if !bMatched )
+-     return sCodeName;
+-}
++
+ // XVbaEventHelper
+ // For Vba Event
+ sal_Bool SAL_CALL
+diff --git sc/source/ui/unoobj/servuno.cxx sc/source/ui/unoobj/servuno.cxx
+index 83db312..05ec9d2 100644
+--- sc/source/ui/unoobj/servuno.cxx
++++ sc/source/ui/unoobj/servuno.cxx
+@@ -63,6 +63,11 @@
+ #include <svx/xmlgrhlp.hxx>
+ 
+ #include <comphelper/processfactory.hxx>
++#include <com/sun/star/document/XCodeNameQuery.hpp>
++#include <com/sun/star/drawing/XDrawPagesSupplier.hpp>
++#include <com/sun/star/form/XFormsSupplier.hpp>
++#include <com/sun/star/script/ScriptEventDescriptor.hpp>
++
+ 
+ using namespace ::com::sun::star;
+ 
+@@ -160,6 +165,56 @@ public:
+ 
+ };
+ 
++class ScVbaCodeNameProvider : public ::cppu::WeakImplHelper1< document::XCodeNameQuery >
++{
++ScDocShell* mpDocShell;
++public:
++    ScVbaCodeNameProvider( ScDocShell* pDocShell ) : mpDocShell( pDocShell ) {}
++    // XCodeNameQuery
++    rtl::OUString SAL_CALL getCodeNameForObject( const uno::Reference< uno::XInterface >& xIf ) throw( uno::RuntimeException )
++    {
++        rtl::OUString sCodeName;
++        if ( mpDocShell )
++        {
++            OSL_TRACE( "*** In ScVbaCodeNameProvider::getCodeNameForObject");
++            // need to find the page ( and index )  for this control
++            uno::Reference< drawing::XDrawPagesSupplier > xSupplier( mpDocShell->GetModel(), uno::UNO_QUERY_THROW );
++            uno::Reference< container::XIndexAccess > xIndex( xSupplier->getDrawPages(), uno::UNO_QUERY_THROW );
++            sal_Int32 nLen = xIndex->getCount();
++            bool bMatched = false;
++            uno::Sequence< script::ScriptEventDescriptor > aFakeEvents;
++            for ( sal_Int32 index = 0; index < nLen; ++index )
++            {
++                try
++                {
++                    uno::Reference< form::XFormsSupplier >  xFormSupplier( xIndex->getByIndex( index ), uno::UNO_QUERY_THROW );
++                    uno::Reference< container::XIndexAccess > xFormIndex( xFormSupplier->getForms(), uno::UNO_QUERY_THROW );
++                    // get the www-standard container
++                    uno::Reference< container::XIndexAccess > xFormControls( xFormIndex->getByIndex(0), uno::UNO_QUERY_THROW );
++                    sal_Int32 nCntrls = xFormControls->getCount();
++                    for( sal_Int32 cIndex = 0; cIndex < nCntrls; ++cIndex )
++                    {
++                        uno::Reference< uno::XInterface > xControl( xFormControls->getByIndex( cIndex ), uno::UNO_QUERY_THROW );	
++                        bMatched = ( xControl == xIf );
++                        if ( bMatched )
++                        {
++                            String sName;
++                            mpDocShell->GetDocument()->GetCodeName( index, sName );
++                            sCodeName = sName;
++                        }
++                    }
++                }
++                catch( uno::Exception& ) {}
++                if ( bMatched )
++                    break;
++            }
++        }
++        // Probably should throw here ( if !bMatched )
++         return sCodeName;
++    }
++
++};
++
+ //------------------------------------------------------------------------
+ 
+ static const sal_Char* __FAR_DATA aProvNames[SC_SERVICE_COUNT] =
+@@ -210,6 +265,7 @@ static const sal_Char* __FAR_DATA aProvNames[SC_SERVICE_COUNT] =
+         SC_SERVICENAME_FORMULAPARS,                 // SC_SERVICE_FORMULAPARS
+         SC_SERVICENAME_OPCODEMAPPER,                 // SC_SERVICE_OPCODEMAPPER
+ "ooo.vba.VBAObjectModuleObjectProvider",// SC_SERVICE_VBAOBJECTPROVIDER
++"ooo.vba.VBACodeNameProvider",// SC_SERVICE_VBACODENAMEPROVIDER
+ 	};
+ 
+ //
+@@ -263,6 +319,7 @@ static const sal_Char* __FAR_DATA aOldNames[SC_SERVICE_COUNT] =
+         "",                                         // SC_SERVICE_FORMULAPARS
+         "",                                         // SC_SERVICE_OPCODEMAPPER
+         "",                                         // SC_SERVICE_VBAOBJECTPROVIDER
++        "",                                         // SC_SERVICE_VBACODENAMEPROVIDER
+ 	};
+ 
+ 
+@@ -458,6 +515,9 @@ uno::Reference<uno::XInterface> ScServiceProvider::MakeInstance(
+         case SC_SERVICE_VBAOBJECTPROVIDER:
+             xRet.set(static_cast<container::XNameAccess*>(new ScVbaObjectForCodeNameProvider( pDocShell )));
+             break;
++        case SC_SERVICE_VBACODENAMEPROVIDER:
++            xRet.set(static_cast<document::XCodeNameQuery*>(new ScVbaCodeNameProvider( pDocShell )));
++            break;
+ 	}
+ 	return xRet;
+ }
+diff --git scp2/source/ooo/file_library_ooo.scp scp2/source/ooo/file_library_ooo.scp
+index e90317d..0cb5b40 100644
+--- scp2/source/ooo/file_library_ooo.scp
++++ scp2/source/ooo/file_library_ooo.scp
+@@ -422,6 +422,17 @@ File gid_File_Lib_Vbaobj
+   #endif
+ End
+ 
++File gid_File_Lib_Vbaswobj
++    TXT_FILE_BODY;
++    Styles = (PACKED,UNO_COMPONENT);
++    RegistryID = gid_Starregistry_Services_Rdb;
++    Dir = gid_Dir_Program;
++  #ifdef UNX
++    Name = STRING(CONCAT4(libvbaswobj,DLLPOSTFIX,.uno,UNXSUFFIX));
++  #else
++    Name = STRING(CONCAT4(vbaswobj,DLLPOSTFIX,.uno,.dll));
++  #endif
++End
+ #endif // VBA_EXTENSION
+ #endif // ENABLE_VBA
+ 
+diff --git sw/inc/unocoll.hxx sw/inc/unocoll.hxx
+index 7b4632d..06fe329 100644
+--- sw/inc/unocoll.hxx
++++ sw/inc/unocoll.hxx
+@@ -194,8 +194,10 @@ class SwUnoCollection
+ #define SW_SERVICE_CHART2_DATA_PROVIDER                 106
+ #define SW_SERVICE_TYPE_FIELDMARK                       107
+ #define SW_SERVICE_TYPE_FORMFIELDMARK                   108
++#define SW_SERVICE_VBAOBJECTPROVIDER                    109
++#define SW_SERVICE_VBACODENAMEPROVIDER                  110
+ 
+-#define SW_SERVICE_LAST                 SW_SERVICE_TYPE_FORMFIELDMARK
++#define SW_SERVICE_LAST                 SW_SERVICE_VBACODENAMEPROVIDER
+ 
+ #define SW_SERVICE_INVALID			USHRT_MAX
+ 
+diff --git sw/prj/build.lst sw/prj/build.lst
+index 1a799f7..aa47144 100644
+--- sw/prj/build.lst
++++ sw/prj/build.lst
+@@ -33,6 +33,7 @@ sw      sw\source\ui\smartmenu                                          nmake
+ sw      sw\source\ui\table                                              nmake   -       all     sw_table sw_inc NULL
+ sw	sw\source\ui\uiview						nmake	-	all	sw_uivw sw_sdi sw_inc NULL
+ sw	sw\source\ui\uno						nmake	-	all	sw_uiuno sw_sdi sw_inc NULL
++sw	sw\source\ui\vba						nmake	-	all	sw_vba sw_inc NULL
+ sw	sw\source\ui\utlui						nmake	-	all	sw_utlui sw_inc NULL
+ sw	sw\source\ui\web						nmake	-	all	sw_web sw_uinc sw_sdi sw_inc NULL
+ sw	sw\source\ui\wrtsh						nmake	-	all	sw_wrtsh sw_inc NULL
+diff --git sw/source/core/unocore/unocoll.cxx sw/source/core/unocore/unocoll.cxx
+index 8ff51f9..c0e5e95 100644
+--- sw/source/core/unocore/unocoll.cxx
++++ sw/source/core/unocore/unocoll.cxx
+@@ -73,7 +73,12 @@
+ #include <unochart.hxx>
+ 
+ #include "docsh.hxx"
+-
++#include <com/sun/star/document/XCodeNameQuery.hpp>
++#include <com/sun/star/drawing/XDrawPageSupplier.hpp>
++#include <com/sun/star/form/XFormsSupplier.hpp>
++#include <com/sun/star/script/ModuleInfo.hpp>
++#include <com/sun/star/script/ModuleType.hpp>
++#include <com/sun/star/script/ScriptEventDescriptor.hpp>
+ using ::rtl::OUString;
+ using namespace ::com::sun::star;
+ using namespace ::com::sun::star::document;
+@@ -82,6 +87,104 @@ using namespace ::com::sun::star::text;
+ using namespace ::com::sun::star::container;
+ using namespace ::com::sun::star::lang;
+ 
++class SwVbaCodeNameProvider : public ::cppu::WeakImplHelper1< document::XCodeNameQuery >
++{
++    SwDocShell* mpDocShell;
++    rtl::OUString msThisDocumentCodeName;
++public:
++    SwVbaCodeNameProvider( SwDocShell* pDocShell ) : mpDocShell( pDocShell ) {}
++        // XCodeNameQuery
++    rtl::OUString SAL_CALL getCodeNameForObject( const uno::Reference< uno::XInterface >& xIf ) throw( uno::RuntimeException )
++    {
++        // Initialise the code name
++        if ( msThisDocumentCodeName.getLength() == 0 )
++        {
++            try
++            {
++                uno::Reference< beans::XPropertySet > xProps( mpDocShell->GetModel(), uno::UNO_QUERY_THROW );
++                uno::Reference< container::XNameAccess > xLibContainer( xProps->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("BasicLibraries") ) ), uno::UNO_QUERY_THROW );
++                uno::Reference< container::XNameAccess > xStandard( xLibContainer->getByName( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Standard") ) ), uno::UNO_QUERY_THROW );
++                uno::Sequence< rtl::OUString > sModuleNames = xStandard->getElementNames();
++                for ( sal_Int32 i=0; i < sModuleNames.getLength(); ++i )
++                {
++                    script::ModuleInfo mInfo;
++                    if ( xStandard->getByName( sModuleNames[ i ] ) >>= mInfo )
++                    {
++                        if ( mInfo.ModuleType == script::ModuleType::Document )
++                        {
++                            msThisDocumentCodeName = sModuleNames[ i ];
++                            break;
++                        }
++                    } 
++                }
++		
++            }
++            catch( uno::Exception& )
++            {
++            }
++        }
++        rtl::OUString sCodeName;
++        if ( mpDocShell )
++        {
++            OSL_TRACE( "*** In ScVbaCodeNameProvider::getCodeNameForObject");
++            // need to find the page ( and index )  for this control
++            uno::Reference< drawing::XDrawPageSupplier > xSupplier( mpDocShell->GetModel(), uno::UNO_QUERY_THROW );
++            uno::Reference< container::XIndexAccess > xIndex( xSupplier->getDrawPage(), uno::UNO_QUERY_THROW );
++            sal_Int32 nLen = xIndex->getCount();
++            bool bMatched = false;
++            uno::Sequence< script::ScriptEventDescriptor > aFakeEvents;
++                try
++                {
++                    uno::Reference< form::XFormsSupplier >  xFormSupplier( xIndex, uno::UNO_QUERY_THROW );
++                    uno::Reference< container::XIndexAccess > xFormIndex( xFormSupplier->getForms(), uno::UNO_QUERY_THROW );
++                    // get the www-standard container
++                    uno::Reference< container::XIndexAccess > xFormControls( xFormIndex->getByIndex(0), uno::UNO_QUERY_THROW );
++                    sal_Int32 nCntrls = xFormControls->getCount();
++                    for( sal_Int32 cIndex = 0; cIndex < nCntrls; ++cIndex )
++                    {
++                        uno::Reference< uno::XInterface > xControl( xFormControls->getByIndex( cIndex ), uno::UNO_QUERY_THROW );	
++                        bMatched = ( xControl == xIf );
++                        if ( bMatched )
++                        {
++                            sCodeName = msThisDocumentCodeName;
++                            break;
++                        }
++                    }
++                }
++                catch( uno::Exception& ) {}
++        }
++        // Probably should throw here ( if !bMatched )
++        return sCodeName;
++    }
++};
++
++class SwVbaObjectForCodeNameProvider : public ::cppu::WeakImplHelper1< container::XNameAccess >
++{
++    SwDocShell* mpDocShell;
++public:
++    SwVbaObjectForCodeNameProvider( SwDocShell* pDocShell ) : mpDocShell( pDocShell )
++    {
++    }
++
++    virtual ::sal_Bool SAL_CALL hasByName( const ::rtl::OUString& aName ) throw (::com::sun::star::uno::RuntimeException )
++    {
++        return sal_False;
++    }
++    ::com::sun::star::uno::Any SAL_CALL getByName( const ::rtl::OUString& aName ) throw (::com::sun::star::container::NoSuchElementException, ::com::sun::star::lang::WrappedTargetException, ::com::sun::star::uno::RuntimeException)
++    {
++        return uno::Any();
++    }
++    virtual ::com::sun::star::uno::Sequence< ::rtl::OUString > SAL_CALL getElementNames(  ) throw (::com::sun::star::uno::RuntimeException)
++    {
++        uno::Sequence< rtl::OUString > aNames;
++        return aNames;
++    }
++    // XElemenAccess
++    virtual ::com::sun::star::uno::Type SAL_CALL getElementType(  ) throw (::com::sun::star::uno::RuntimeException){ return uno::Type(); }
++    virtual ::sal_Bool SAL_CALL hasElements(  ) throw (::com::sun::star::uno::RuntimeException ) { return sal_True; }
++
++};
++
+ /******************************************************************************
+  *
+  ******************************************************************************/
+@@ -203,6 +306,8 @@ const ProvNamesId_Type __FAR_DATA aProvNamesId[] =
+     { "com.sun.star.text.Fieldmark",                          SW_SERVICE_TYPE_FIELDMARK },
+     { "com.sun.star.text.FormFieldmark",                      SW_SERVICE_TYPE_FORMFIELDMARK },
+     { "com.sun.star.chart2.data.DataProvider",                SW_SERVICE_CHART2_DATA_PROVIDER },
++    { "ooo.vba.VBAObjectModuleObjectProvider",                SW_SERVICE_VBAOBJECTPROVIDER },
++    { "ooo.vba.VBACodeNameProvider",                          SW_SERVICE_VBACODENAMEPROVIDER },
+ 
+     // case-correct versions of the service names (see #i67811)
+     { CSS_TEXT_TEXTFIELD_DATE_TIME,                   SW_SERVICE_FIELDTYPE_DATETIME },
+@@ -383,6 +488,18 @@ uno::Reference< uno::XInterface >   SwXServiceProvider::MakeInstance(sal_uInt16
+             xRet =  (cppu::OWeakObject*)pFieldmark;
+         }
+         break;
++		case  SW_SERVICE_VBAOBJECTPROVIDER :
++		{
++			SwVbaObjectForCodeNameProvider* pObjProv = new SwVbaObjectForCodeNameProvider( pDoc->GetDocShell() );
++			xRet =  (cppu::OWeakObject*)pObjProv;
++		}
++		break;
++		case  SW_SERVICE_VBACODENAMEPROVIDER :
++		{
++			SwVbaCodeNameProvider* pObjProv = new SwVbaCodeNameProvider( pDoc->GetDocShell() );
++			xRet =  (cppu::OWeakObject*)pObjProv;
++		}
++		break;
+         case  SW_SERVICE_TYPE_FOOTNOTE :
+             xRet =  (cppu::OWeakObject*)new SwXFootnote(sal_False);
+         break;
+diff --git sw/source/filter/ww8/ww8par.cxx sw/source/filter/ww8/ww8par.cxx
+index b581124..4dc4011 100644
+--- sw/source/filter/ww8/ww8par.cxx
++++ sw/source/filter/ww8/ww8par.cxx
+@@ -140,6 +140,8 @@
+ #include <svtools/itemiter.hxx>  //SfxItemIter
+ 
+ #include <stdio.h>
++#include <comphelper/processfactory.hxx>
++#include <basic/basmgr.hxx>
+ 
+ #define MM_250 1417             // WW-Default fuer Hor. Seitenraender: 2.5 cm
+ #define MM_200 1134             // WW-Default fuer u.Seitenrand: 2.0 cm
+@@ -3971,7 +3973,38 @@ ULONG SwWW8ImplReader::CoreLoad(WW8Glossary *pGloss, const SwPosition &rPos)
+     }
+     else //ordinary case
+     {
++        if (mbNewDoc && pStg && !pGloss) /*meaningless for a glossary, cmc*/
++        {
++            const SvtFilterOptions* pVBAFlags = SvtFilterOptions::Get();
++            maTracer.EnterEnvironment(sw::log::eMacros);
++            // Create and insert Excel vba Globals
++            uno::Reference < uno::XComponentContext > xCtx;
++            uno::Reference < beans::XPropertySet > xProps(
++            ::comphelper::getProcessServiceFactory(), uno::UNO_QUERY_THROW );
++            xCtx.set( xProps->getPropertyValue( rtl::OUString(
++                RTL_CONSTASCII_USTRINGPARAM( "DefaultContext" ))),
++                uno::UNO_QUERY_THROW );
++            uno::Any aGlobs = uno::makeAny( xCtx->getValueByName( ::rtl::OUString::createFromAscii( "/singletons/ooo.vba.word.theGlobals") ) );
++            mpDocShell->GetBasicManager()->SetGlobalUNOConstant( "VBAGlobals", aGlobs );
++            
++            SvxImportMSVBasic aVBasic(*mpDocShell, *pStg,
++                            pVBAFlags->IsLoadWordBasicCode(),
++                            pVBAFlags->IsLoadWordBasicStorage() );
++            String s1(CREATE_CONST_ASC("Macros"));
++            String s2(CREATE_CONST_ASC("VBA"));
++            int nRet = aVBasic.Import( s1, s2, ! pVBAFlags->IsLoadWordBasicCode() );
++            if( 2 & nRet )
++            {
++                maTracer.Log(sw::log::eContainsVisualBasic);
++                rDoc.SetContainsMSVBasic(true);
++            }
++
++            StoreMacroCmds();
++
++            maTracer.LeaveEnvironment(sw::log::eMacros);
++        }
+         ReadText(0, pWwFib->ccpText, MAN_MAINTEXT);
++
+     }
+ 
+     ::SetProgressState(nProgress, mpDocShell);    // Update
+@@ -4045,26 +4078,6 @@ ULONG SwWW8ImplReader::CoreLoad(WW8Glossary *pGloss, const SwPosition &rPos)
+             eMode |= nsRedlineMode_t::REDLINE_ON;
+         if( pWDop->fRMView )
+             eMode |= nsRedlineMode_t::REDLINE_SHOW_DELETE;
+-        if (pStg && !pGloss) /*meaningless for a glossary, cmc*/
+-        {
+-            const SvtFilterOptions* pVBAFlags = SvtFilterOptions::Get();
+-            maTracer.EnterEnvironment(sw::log::eMacros);
+-            SvxImportMSVBasic aVBasic(*mpDocShell, *pStg,
+-                            pVBAFlags->IsLoadWordBasicCode(),
+-                            pVBAFlags->IsLoadWordBasicStorage() );
+-            String s1(CREATE_CONST_ASC("Macros"));
+-            String s2(CREATE_CONST_ASC("VBA"));
+-            int nRet = aVBasic.Import( s1, s2 );
+-            if( 2 & nRet )
+-            {
+-                maTracer.Log(sw::log::eContainsVisualBasic);
+-                rDoc.SetContainsMSVBasic(true);
+-            }
+-
+-            StoreMacroCmds();
+-
+-            maTracer.LeaveEnvironment(sw::log::eMacros);
+-        }
+     }
+ 
+     maInsertedTables.DelAndMakeTblFrms();
+diff --git sw/source/ui/vba/helperdecl.hxx sw/source/ui/vba/helperdecl.hxx
+new file mode 100644
+index 0000000..1581e66
+--- /dev/null
++++ sw/source/ui/vba/helperdecl.hxx
+@@ -0,0 +1,138 @@
++/*************************************************************************
++ *
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ * 
++ * Copyright 2008 by Sun Microsystems, Inc.
++ *
++ * OpenOffice.org - a multi-platform office productivity suite
++ *
++ * $RCSfile: helperdecl.hxx,v $
++ * $Revision: 1.3 $
++ *
++ * This file is part of OpenOffice.org.
++ *
++ * OpenOffice.org is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License version 3
++ * only, as published by the Free Software Foundation.
++ *
++ * OpenOffice.org is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License version 3 for more details
++ * (a copy is included in the LICENSE file that accompanied this code).
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * version 3 along with OpenOffice.org.  If not, see
++ * <http://www.openoffice.org/license.html>
++ * for a copy of the LGPLv3 License.
++ *
++ ************************************************************************/
++#include <comphelper/servicedecl.hxx>
++#include <ooo/vba/XHelperInterface.hpp>
++
++namespace comphelper {
++namespace service_decl {
++
++namespace detail {
++namespace css = ::com::sun::star;
++template <typename ImplT>
++class OwnServiceImpl
++    : public ImplT,
++      private ::boost::noncopyable
++{
++    typedef ImplT BaseT;
++    
++public:    
++    OwnServiceImpl(
++        ServiceDecl const& rServiceDecl,
++        css::uno::Sequence<css::uno::Any> const& args,
++        css::uno::Reference<css::uno::XComponentContext> const& xContext )
++        :BaseT(args, xContext), m_rServiceDecl(rServiceDecl) {}
++    OwnServiceImpl(
++        ServiceDecl const& rServiceDecl,
++        css::uno::Reference<css::uno::XComponentContext> const& xContext )
++        : BaseT(xContext), m_rServiceDecl(rServiceDecl) {}
++    
++    // XServiceInfo
++    virtual ::rtl::OUString SAL_CALL getImplementationName()
++        throw (css::uno::RuntimeException) {
++        return m_rServiceDecl.getImplementationName();
++    }
++    virtual sal_Bool SAL_CALL supportsService( ::rtl::OUString const& name )
++        throw (css::uno::RuntimeException) {
++        return m_rServiceDecl.supportsService(name);
++    }
++    virtual css::uno::Sequence< ::rtl::OUString>
++    SAL_CALL getSupportedServiceNames() throw (css::uno::RuntimeException) {
++        return m_rServiceDecl.getSupportedServiceNames();
++    }
++    
++private:
++    ServiceDecl const& m_rServiceDecl;
++};
++
++
++template <typename ImplT, typename WithArgsT>
++struct OwnCreateFunc;
++
++template <typename ImplT>
++struct OwnCreateFunc<ImplT, with_args<false> > {
++    explicit OwnCreateFunc(  )
++         {}
++    
++    css::uno::Reference<css::uno::XInterface>
++    operator()( ServiceDecl const& rServiceDecl,
++                css::uno::Sequence<css::uno::Any> const&,
++                css::uno::Reference<css::uno::XComponentContext>
++                const& xContext ) const
++    {
++        return css::uno::Reference< ooo::vba::XHelperInterface >(new OwnServiceImpl<ImplT>( rServiceDecl, xContext ));
++    }
++};
++
++template <typename ImplT>
++struct OwnCreateFunc<ImplT, with_args<true> > {
++    explicit OwnCreateFunc( )
++         {}
++    
++    css::uno::Reference<css::uno::XInterface>
++    operator()( ServiceDecl const& rServiceDecl,
++                css::uno::Sequence<css::uno::Any> const& args,
++                css::uno::Reference<css::uno::XComponentContext>
++                const& xContext ) const
++    {
++        css::uno::Reference< ooo::vba::XHelperInterface > xHelp(
++            new OwnServiceImpl<ImplT>( rServiceDecl, args, xContext ) );
++	css::uno::Reference< css::uno::XInterface > xIf( xHelp, css::uno::UNO_QUERY ) ;
++	return xIf;
++    }
++};
++
++} // namespace detail
++
++/** Defines a service implementation class.
++    
++    @tpl ImplT_ service implementation class
++    @WithArgsT whether the implementation class ctor expects arguments
++               (uno::Sequence<uno::Any>, uno::Reference<uno::XComponentContext>)
++               or just (uno::Reference<uno::XComponentContext>)
++*/
++template <typename ImplT_, typename WithArgsT = with_args<false> >
++struct vba_service_class_ {
++    typedef ImplT_ ImplT;
++    typedef detail::OwnServiceImpl<ImplT_ > ServiceImplT;
++    
++    detail::CreateFuncF const m_createFunc;
++    
++    /** Default ctor.  Implementation class without args, expecting
++        component context as single argument.
++    */
++    vba_service_class_() : m_createFunc(
++        detail::OwnCreateFunc<ImplT, WithArgsT>() ) {}
++
++};
++
++
++} // namespace service_decl
++} // namespace comphelper
++
+diff --git sw/source/ui/vba/makefile.mk sw/source/ui/vba/makefile.mk
+new file mode 100644
+index 0000000..96b7c8b
+--- /dev/null
++++ sw/source/ui/vba/makefile.mk
+@@ -0,0 +1,69 @@
++#*************************************************************************
++#
++# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++# 
++# Copyright 2008 by Sun Microsystems, Inc.
++#
++# OpenOffice.org - a multi-platform office productivity suite
++#
++# $RCSfile: makefile.mk,v $
++#
++# $Revision: 1.6 $
++#
++# This file is part of OpenOffice.org.
++#
++# OpenOffice.org is free software: you can redistribute it and/or modify
++# it under the terms of the GNU Lesser General Public License version 3
++# only, as published by the Free Software Foundation.
++#
++# OpenOffice.org is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++# GNU Lesser General Public License version 3 for more details
++# (a copy is included in the LICENSE file that accompanied this code).
++#
++# You should have received a copy of the GNU Lesser General Public License
++# version 3 along with OpenOffice.org.  If not, see
++# <http://www.openoffice.org/license.html>
++# for a copy of the LGPLv3 License.
++#
++#*************************************************************************
++
++PRJ=..$/..$/..
++
++PRJNAME=sw
++TARGET=vbaswobj
++ENABLE_EXCEPTIONS=TRUE
++
++# --- Settings -----------------------------------------------------
++
++.INCLUDE :  settings.mk
++DLLPRE =
++
++.IF "$(ENABLE_VBA)"!="YES"
++dummy:
++        @echo "not building vba..."
++.ENDIF
++ 
++INCPRE=$(INCCOM)$/$(TARGET)
++CDEFS+=-DVBA_OOBUILD_HACK
++# ------------------------------------------------------------------
++
++SLOFILES= \
++		$(SLO)$/vbaglobals.obj \
++		$(SLO)$/vbaapplication.obj \
++				$(SLO)$/service.obj \
++
++# --- Targets ------------------------------------------------------
++
++.INCLUDE :	target.mk
++
++ALLTAR : \
++        $(MISC)$/$(TARGET).don \
++
++$(SLOFILES) : $(MISC)$/$(TARGET).don
++
++$(MISC)$/$(TARGET).don : $(SOLARBINDIR)$/oovbaapi.rdb
++        +$(CPPUMAKER) -O$(INCCOM)$/$(TARGET) -BUCR $(SOLARBINDIR)$/oovbaapi.rdb -X$(SOLARBINDIR)$/types.rdb && echo > $@
++        echo $@
++
+diff --git sw/source/ui/vba/service.cxx sw/source/ui/vba/service.cxx
+new file mode 100644
+index 0000000..c3dc180
+--- /dev/null
++++ sw/source/ui/vba/service.cxx
+@@ -0,0 +1,96 @@
++/*************************************************************************
++ *
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ * 
++ * Copyright 2008 by Sun Microsystems, Inc.
++ *
++ * OpenOffice.org - a multi-platform office productivity suite
++ *
++ * $RCSfile: service.cxx,v $
++ * $Revision: 1.4 $
++ *
++ * This file is part of OpenOffice.org.
++ *
++ * OpenOffice.org is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License version 3
++ * only, as published by the Free Software Foundation.
++ *
++ * OpenOffice.org is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License version 3 for more details
++ * (a copy is included in the LICENSE file that accompanied this code).
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * version 3 along with OpenOffice.org.  If not, see
++ * <http://www.openoffice.org/license.html>
++ * for a copy of the LGPLv3 License.
++ *
++ ************************************************************************/
++#include "cppuhelper/implementationentry.hxx"
++#include "com/sun/star/lang/XMultiServiceFactory.hpp"
++#include "com/sun/star/registry/XRegistryKey.hpp"
++#include "comphelper/servicedecl.hxx"
++
++// =============================================================================
++// component exports
++// =============================================================================
++using namespace ::com::sun::star;
++using namespace ::com::sun::star::uno;
++
++namespace sdecl = comphelper::service_decl;
++
++namespace globals
++{
++extern sdecl::ServiceDecl const serviceDecl;
++}
++
++extern "C"
++{
++    void SAL_CALL component_getImplementationEnvironment( 
++        const sal_Char ** ppEnvTypeName, uno_Environment ** /*ppEnv*/ )
++    {
++		OSL_TRACE("In component_getImplementationEnv");
++        *ppEnvTypeName = CPPU_CURRENT_LANGUAGE_BINDING_NAME;
++    }
++
++    sal_Bool SAL_CALL component_writeInfo( 
++        lang::XMultiServiceFactory * pServiceManager, registry::XRegistryKey * pRegistryKey )
++    {
++		OSL_TRACE("In component_writeInfo");
++
++	// Component registration
++        if ( component_writeInfoHelper( pServiceManager, pRegistryKey, 
++		globals::serviceDecl ) )
++		{
++			// Singleton registration
++			try
++			{
++				registry::XRegistryKey * pKey =
++					reinterpret_cast< registry::XRegistryKey * >(pRegistryKey);
++
++				Reference< registry::XRegistryKey >xKey = pKey->createKey(
++					rtl::OUString::createFromAscii( ("ooo.vba.sw.Globals/UNO/SINGLETONS/ooo.vba.word.theGlobals") ) );
++				xKey->setStringValue( ::rtl::OUString::createFromAscii( 
++					("ooo.vba.word.Globals") ) );
++				return sal_True;
++			}
++			catch( uno::Exception& /*e*/ )
++			{
++				//recomp & friends will detect false returned and fail
++			}
++		}
++		return sal_False;
++    }
++
++    void * SAL_CALL component_getFactory( 
++        const sal_Char * pImplName, lang::XMultiServiceFactory * pServiceManager,
++        registry::XRegistryKey * pRegistryKey )
++    {
++		OSL_TRACE("In component_getFactory for %s", pImplName );
++	void* pRet =  component_getFactoryHelper(
++        	pImplName, pServiceManager, pRegistryKey, globals::serviceDecl );
++	OSL_TRACE("Ret is 0x%x", pRet);
++	return pRet;
++    }
++}
+diff --git sw/source/ui/vba/vbaapplication.cxx sw/source/ui/vba/vbaapplication.cxx
+new file mode 100644
+index 0000000..3fd0635
+--- /dev/null
++++ sw/source/ui/vba/vbaapplication.cxx
+@@ -0,0 +1,100 @@
++/*************************************************************************
++ *
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ * 
++ * Copyright 2008 by Sun Microsystems, Inc.
++ *
++ * OpenOffice.org - a multi-platform office productivity suite
++ *
++ * $RCSfile: vbaapplication.cxx,v $
++ * $Revision: 1.7 $
++ *
++ * This file is part of OpenOffice.org.
++ *
++ * OpenOffice.org is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License version 3
++ * only, as published by the Free Software Foundation.
++ *
++ * OpenOffice.org is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License version 3 for more details
++ * (a copy is included in the LICENSE file that accompanied this code).
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * version 3 along with OpenOffice.org.  If not, see
++ * <http://www.openoffice.org/license.html>
++ * for a copy of the LGPLv3 License.
++ *
++ ************************************************************************/
++#include <stdio.h>
++
++
++#include "vbaapplication.hxx"
++#include <osl/file.hxx>
++
++using namespace ::ooo;
++using namespace ::com::sun::star;
++
++using ::com::sun::star::uno::Reference;
++using ::com::sun::star::uno::UNO_QUERY_THROW;
++using ::com::sun::star::uno::UNO_QUERY;
++using ::rtl::OUString;
++
++// Enable our own join detection for Intersection and Union
++// should be more efficient than using ScRangeList::Join ( because
++// we already are testing the same things )
++
++#define OWN_JOIN 1
++
++// #TODO is this defined somewhere else?
++#if ( defined UNX ) || ( defined OS2 ) //unix
++#define FILE_PATH_SEPERATOR "/"
++#else // windows
++#define FILE_PATH_SEPERATOR "\\"
++#endif 
++
++#define EXCELVERSION "11.0"
++
++uno::Any sbxToUnoValue( SbxVariable* pVar );
++
++SwVbaApplication::SwVbaApplication( uno::Reference<uno::XComponentContext >& xContext ): SwVbaApplication_BASE( uno::Reference< vba::XHelperInterface >(), xContext )
++{
++    OSL_TRACE("SwVbaApplication::SwVbaApplication");
++}
++
++SwVbaApplication::~SwVbaApplication()
++{
++}
++	
++
++void SAL_CALL
++SwVbaApplication::DoEvents() throw ( uno::RuntimeException )
++{
++}
++
++rtl::OUString& 
++SwVbaApplication::getServiceImplName()
++{
++	static rtl::OUString sImplName( RTL_CONSTASCII_USTRINGPARAM("SwVbaApplication") );
++	return sImplName;
++}
++
++rtl::OUString SAL_CALL
++SwVbaApplication::getName() throw (uno::RuntimeException)
++{
++        static rtl::OUString appName( RTL_CONSTASCII_USTRINGPARAM("Microsoft Word" ) );
++        return appName;
++}
++
++uno::Sequence< rtl::OUString > 
++SwVbaApplication::getServiceNames()
++{
++	static uno::Sequence< rtl::OUString > aServiceNames;
++	if ( aServiceNames.getLength() == 0 )
++	{
++		aServiceNames.realloc( 1 );
++		aServiceNames[ 0 ] = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("ooo.vba.word.Application" ) );
++	}
++	return aServiceNames;
++}
+diff --git sw/source/ui/vba/vbaapplication.hxx sw/source/ui/vba/vbaapplication.hxx
+new file mode 100644
+index 0000000..cfe655e
+--- /dev/null
++++ sw/source/ui/vba/vbaapplication.hxx
+@@ -0,0 +1,58 @@
++/*************************************************************************
++ *
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ * 
++ * Copyright 2008 by Sun Microsystems, Inc.
++ *
++ * OpenOffice.org - a multi-platform office productivity suite
++ *
++ * $RCSfile: vbaapplication.hxx,v $
++ * $Revision: 1.4 $
++ *
++ * This file is part of OpenOffice.org.
++ *
++ * OpenOffice.org is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License version 3
++ * only, as published by the Free Software Foundation.
++ *
++ * OpenOffice.org is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License version 3 for more details
++ * (a copy is included in the LICENSE file that accompanied this code).
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * version 3 along with OpenOffice.org.  If not, see
++ * <http://www.openoffice.org/license.html>
++ * for a copy of the LGPLv3 License.
++ *
++ ************************************************************************/
++#ifndef SC_VBA_APPLICATION_HXX
++#define SC_VBA_APPLICATION_HXX
++
++
++#include <ooo/vba/word/XApplication.hpp>
++
++#include "vbahelperinterface.hxx"
++
++typedef InheritedHelperInterfaceImpl1< ooo::vba::word::XApplication > SwVbaApplication_BASE;
++
++class SwVbaApplication : public SwVbaApplication_BASE
++{
++private:
++public:
++	SwVbaApplication( css::uno::Reference< css::uno::XComponentContext >& m_xContext );
++	virtual ~SwVbaApplication();
++
++	// XHelperInterface ( parent is itself )
++	virtual css::uno::Reference< ooo::vba::XHelperInterface > SAL_CALL getParent(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException) { return this; }
++
++	// XApplication
++	
++	virtual rtl::OUString SAL_CALL getName() throw (css::uno::RuntimeException);
++	virtual void SAL_CALL DoEvents() throw (css::uno::RuntimeException);
++	// XHelperInterface
++	virtual rtl::OUString& getServiceImplName();
++	virtual css::uno::Sequence<rtl::OUString> getServiceNames();
++};
++#endif /* SC_VBA_APPLICATION_HXX */
+diff --git sw/source/ui/vba/vbaglobals.cxx sw/source/ui/vba/vbaglobals.cxx
+new file mode 100644
+index 0000000..ccdafd3
+--- /dev/null
++++ sw/source/ui/vba/vbaglobals.cxx
+@@ -0,0 +1,109 @@
++/*************************************************************************
++ *
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ * 
++ * Copyright 2008 by Sun Microsystems, Inc.
++ *
++ * OpenOffice.org - a multi-platform office productivity suite
++ *
++ * $RCSfile: vbaglobals.cxx,v $
++ * $Revision: 1.4 $
++ *
++ * This file is part of OpenOffice.org.
++ *
++ * OpenOffice.org is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License version 3
++ * only, as published by the Free Software Foundation.
++ *
++ * OpenOffice.org is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License version 3 for more details
++ * (a copy is included in the LICENSE file that accompanied this code).
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * version 3 along with OpenOffice.org.  If not, see
++ * <http://www.openoffice.org/license.html>
++ * for a copy of the LGPLv3 License.
++ *
++ ************************************************************************/
++#include "helperdecl.hxx"
++#include "vbaglobals.hxx"
++
++#include <comphelper/unwrapargs.hxx>
++
++#include <com/sun/star/lang/XMultiComponentFactory.hpp>
++#include <com/sun/star/beans/XPropertySet.hpp>
++
++#include <cppuhelper/bootstrap.hxx>
++#include "vbaapplication.hxx"
++using namespace ::com::sun::star;
++using namespace ::com::sun::star::uno;
++using namespace ::ooo::vba;
++
++
++
++// =============================================================================
++// SwVbaGlobals
++// =============================================================================
++
++SwVbaGlobals::SwVbaGlobals(  css::uno::Reference< css::uno::XComponentContext >const& rxContext )
++        :m_xContext( rxContext )
++{
++	OSL_TRACE("SwVbaGlobals::SwVbaGlobals()");
++	mxApplication = uno::Reference< word::XApplication > ( new SwVbaApplication( m_xContext) );
++}
++
++SwVbaGlobals::~SwVbaGlobals()
++{
++	OSL_TRACE("SwVbaGlobals::~SwVbaGlobals");
++}
++
++// Will throw if singleton can't be accessed 
++uno::Reference< word::XGlobals >
++SwVbaGlobals::getGlobalsImpl( const uno::Reference< uno::XComponentContext >& xContext ) throw ( uno::RuntimeException )
++{
++	uno::Reference< XGlobals > xGlobals( 
++		xContext->getValueByName( ::rtl::OUString::createFromAscii( 
++			"/singletons/ooo.vba.word.theGlobals") ), uno::UNO_QUERY);
++
++	if ( !xGlobals.is() )
++	{
++		throw uno::RuntimeException(
++                ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ": Couldn't access Globals" ) ),
++                    uno::Reference< XInterface >() );
++	}
++	return xGlobals;
++}
++
++// =============================================================================
++// XGlobals
++// =============================================================================
++uno::Reference<word::XApplication >
++SwVbaGlobals::getApplication() throw (uno::RuntimeException)
++{
++	OSL_TRACE("In SwVbaGlobals::getApplication");	
++    return mxApplication;
++}
++
++::uno::Sequence< ::uno::Any > SAL_CALL
++SwVbaGlobals::getGlobals(  ) throw (::uno::RuntimeException)
++{
++	sal_uInt32 nMax = 0;
++	uno::Sequence< uno::Any > maGlobals(4);
++	maGlobals[ nMax++ ] <<= SwVbaGlobals::getGlobalsImpl(m_xContext);
++	maGlobals[ nMax++ ] <<= mxApplication;
++	maGlobals.realloc( nMax );
++	return maGlobals;
++}
++
++namespace globals
++{
++namespace sdecl = comphelper::service_decl;
++sdecl::class_<SwVbaGlobals, sdecl::with_args<false> > serviceImpl;
++extern sdecl::ServiceDecl const serviceDecl(
++    serviceImpl,
++    "SwVbaGlobals",
++    "ooo.vba.word.Globals" );
++}
++
+diff --git sw/source/ui/vba/vbaglobals.hxx sw/source/ui/vba/vbaglobals.hxx
+new file mode 100644
+index 0000000..e150515
+--- /dev/null
++++ sw/source/ui/vba/vbaglobals.hxx
+@@ -0,0 +1,69 @@
++/*************************************************************************
++ *
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ * 
++ * Copyright 2008 by Sun Microsystems, Inc.
++ *
++ * OpenOffice.org - a multi-platform office productivity suite
++ *
++ * $RCSfile: vbaglobals.hxx,v $
++ * $Revision: 1.4 $
++ *
++ * This file is part of OpenOffice.org.
++ *
++ * OpenOffice.org is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License version 3
++ * only, as published by the Free Software Foundation.
++ *
++ * OpenOffice.org is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License version 3 for more details
++ * (a copy is included in the LICENSE file that accompanied this code).
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * version 3 along with OpenOffice.org.  If not, see
++ * <http://www.openoffice.org/license.html>
++ * for a copy of the LGPLv3 License.
++ *
++ ************************************************************************/
++#ifndef SC_VBA_GLOBALS
++#define SC_VBA_GLOBALS
++
++#include <com/sun/star/lang/XServiceInfo.hpp>
++#include <com/sun/star/lang/XInitialization.hpp>
++#include <com/sun/star/uno/XComponentContext.hpp>
++#include <ooo/vba/word/XGlobals.hpp>
++#include <ooo/vba/word/XApplication.hpp>
++
++#include <cppuhelper/implbase1.hxx>
++#include "vbahelper.hxx"
++
++    // =============================================================================
++    // class SwVbaGlobals
++    // =============================================================================
++
++    typedef ::cppu::WeakImplHelper1<    
++        ooo::vba::word::XGlobals > SwVbaGlobals_BASE;
++
++
++    class SwVbaGlobals : public SwVbaGlobals_BASE
++    {
++    private:
++            css::uno::Reference< css::uno::XComponentContext > m_xContext;
++            css::uno::Reference< ooo::vba::word::XApplication > mxApplication;
++    public:
++	
++        SwVbaGlobals(
++            css::uno::Reference< css::uno::XComponentContext >const& rxContext );
++        virtual ~SwVbaGlobals();
++
++		static 	css::uno::Reference< ooo::vba::word::XGlobals > getGlobalsImpl(const css::uno::Reference< css::uno::XComponentContext >& ) throw (css::uno::RuntimeException);
++
++        // XGlobals
++        virtual css::uno::Reference<
++                        ooo::vba::word::XApplication > SAL_CALL getApplication()
++                        throw (css::uno::RuntimeException);
++	virtual css::uno::Sequence< css::uno::Any > SAL_CALL getGlobals(  ) throw (css::uno::RuntimeException);
++    };
++#endif // 
+diff --git sw/source/ui/vba/vbahelper.cxx sw/source/ui/vba/vbahelper.cxx
+new file mode 100644
+index 0000000..8e448ce
+--- /dev/null
++++ sw/source/ui/vba/vbahelper.cxx
+@@ -0,0 +1,482 @@
++/*************************************************************************
++ *
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ * 
++ * Copyright 2008 by Sun Microsystems, Inc.
++ *
++ * OpenOffice.org - a multi-platform office productivity suite
++ *
++ * $RCSfile: vbahelper.cxx,v $
++ * $Revision: 1.5 $
++ *
++ * This file is part of OpenOffice.org.
++ *
++ * OpenOffice.org is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License version 3
++ * only, as published by the Free Software Foundation.
++ *
++ * OpenOffice.org is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License version 3 for more details
++ * (a copy is included in the LICENSE file that accompanied this code).
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * version 3 along with OpenOffice.org.  If not, see
++ * <http://www.openoffice.org/license.html>
++ * for a copy of the LGPLv3 License.
++ *
++ ************************************************************************/
++#include <cppuhelper/bootstrap.hxx>
++#include <com/sun/star/util/XURLTransformer.hpp>
++#include <com/sun/star/frame/XDispatchProvider.hpp>
++#include <com/sun/star/frame/XModel.hpp>
++#include <com/sun/star/frame/XFrame.hpp>
++#include <com/sun/star/frame/XDesktop.hpp>
++#include <com/sun/star/frame/XController.hpp>
++#include <com/sun/star/uno/XComponentContext.hpp>
++#include <com/sun/star/lang/XMultiComponentFactory.hpp>
++#include <com/sun/star/beans/XPropertySet.hpp>
++#include <com/sun/star/beans/XIntrospection.hpp>
++
++#include <comphelper/processfactory.hxx>
++
++#include <sfx2/objsh.hxx>
++#include <sfx2/viewfrm.hxx>
++#include <sfx2/dispatch.hxx>
++#include <sfx2/app.hxx>
++#include <svtools/stritem.hxx>
++
++#include <docuno.hxx>
++
++#include <basic/sbx.hxx>
++#include <basic/sbstar.hxx>
++#include <rtl/math.hxx>
++
++#include <math.h>
++#include "vbahelper.hxx"
++#include "tabvwsh.hxx"
++#include "transobj.hxx"
++#include "scmod.hxx"
++#include "vbashape.hxx"
++#include "unonames.hxx"
++using namespace ::com::sun::star;
++using namespace ::ooo;
++
++#define POINTTO100THMILLIMETERFACTOR 35.27778
++void unoToSbxValue( SbxVariable* pVar, const uno::Any& aValue );
++
++uno::Any sbxToUnoValue( SbxVariable* pVar );
++
++
++namespace ooo
++{
++namespace vba
++{
++
++const double Millimeter::factor =  35.27778;
++
++uno::Reference< beans::XIntrospectionAccess >
++getIntrospectionAccess( const uno::Any& aObject ) throw (uno::RuntimeException)
++{
++	static uno::Reference< beans::XIntrospection > xIntrospection;
++	if( !xIntrospection.is() )
++	{
++		uno::Reference< lang::XMultiServiceFactory > xFactory( comphelper::getProcessServiceFactory(), uno::UNO_QUERY_THROW );
++		xIntrospection.set( xFactory->createInstance( rtl::OUString::createFromAscii("com.sun.star.beans.Introspection") ), uno::UNO_QUERY_THROW );
++	}
++	return xIntrospection->inspect( aObject );
++}
++
++uno::Reference< script::XTypeConverter >
++getTypeConverter( const uno::Reference< uno::XComponentContext >& xContext ) throw (uno::RuntimeException)
++{
++	static uno::Reference< script::XTypeConverter > xTypeConv( xContext->getServiceManager()->createInstanceWithContext( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("com.sun.star.script.Converter") ), xContext ), uno::UNO_QUERY_THROW );
++	return xTypeConv;
++}
++
++const uno::Any&
++aNULL()
++{
++ 	static  uno::Any aNULLL = uno::makeAny( uno::Reference< uno::XInterface >() );
++	return aNULLL;
++}
++
++ uno::Reference< frame::XModel > 
++getCurrentDocument() throw (uno::RuntimeException)
++{
++	uno::Reference< frame::XModel > xModel;
++	SbxObject* pBasic = dynamic_cast< SbxObject* > ( SFX_APP()->GetBasic() );
++	SbxObject* basicChosen =  pBasic ;
++	if ( basicChosen == NULL)
++	{
++		OSL_TRACE("getModelFromBasic() StarBASIC* is NULL" );
++		return xModel;
++	}    
++    SbxObject* p = pBasic;
++    SbxObject* pParent = p->GetParent();
++    SbxObject* pParentParent = pParent ? pParent->GetParent() : NULL;
++
++    if( pParentParent )
++    {
++        basicChosen = pParentParent;
++    }
++    else if( pParent )
++    {
++        basicChosen = pParent;
++    }
++
++
++    uno::Any aModel; 
++    SbxVariable *pCompVar = basicChosen->Find(  UniString(RTL_CONSTASCII_USTRINGPARAM("ThisComponent")), SbxCLASS_OBJECT );
++
++	if ( pCompVar )
++	{
++		aModel = sbxToUnoValue( pCompVar );
++		if ( sal_False == ( aModel >>= xModel ) ||
++			!xModel.is() )
++		{
++			// trying last gasp try the current component
++			uno::Reference< beans::XPropertySet > xProps( ::comphelper::getProcessServiceFactory(), uno::UNO_QUERY_THROW );
++			// test if vba service is present
++			uno::Reference< uno::XComponentContext > xCtx( xProps->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "DefaultContext" ))), uno::UNO_QUERY_THROW );
++			uno::Reference<lang::XMultiComponentFactory > xSMgr( xCtx->getServiceManager(), uno::UNO_QUERY_THROW );
++			uno::Reference< frame::XDesktop > xDesktop (xSMgr->createInstanceWithContext(::rtl::OUString::createFromAscii("com.sun.star.frame.Desktop"), xCtx), uno::UNO_QUERY_THROW );
++			xModel.set( xDesktop->getCurrentComponent(), uno::UNO_QUERY );
++			if ( !xModel.is() )
++			{
++				throw uno::RuntimeException( 
++					rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Can't extract model from basic ( its obviously not set yet ) therefore don't know the currently selected document") ), uno::Reference< uno::XInterface >() );
++			}
++			return xModel;
++		}
++		else
++		{
++			OSL_TRACE("Have model ThisComponent points to url %s",
++			::rtl::OUStringToOString( xModel->getURL(),
++				RTL_TEXTENCODING_ASCII_US ).pData->buffer );
++		}
++	}
++	else
++	{
++		OSL_TRACE("Failed to get ThisComponent");
++		throw uno::RuntimeException( 
++			rtl::OUString( 
++				RTL_CONSTASCII_USTRINGPARAM(
++					"Can't determine the currently selected document") ),
++			uno::Reference< uno::XInterface >() );
++	}
++	return xModel;
++}
++
++sal_Int32 
++OORGBToXLRGB( sal_Int32 nCol )
++{
++	sal_Int32 nRed = nCol;
++	nRed &= 0x00FF0000;
++	nRed >>= 16;
++	sal_Int32 nGreen = nCol;
++	nGreen &= 0x0000FF00;
++	nGreen >>= 8;
++	sal_Int32 nBlue = nCol;
++	nBlue &= 0x000000FF;
++	sal_Int32 nRGB =  ( (nBlue << 16) | (nGreen << 8) | nRed );
++	return nRGB;
++}
++sal_Int32 
++XLRGBToOORGB( sal_Int32 nCol )
++{
++	sal_Int32 nBlue = nCol;
++	nBlue &= 0x00FF0000;
++	nBlue >>= 16;
++	sal_Int32 nGreen = nCol;
++	nGreen &= 0x0000FF00;
++	nGreen >>= 8;
++	sal_Int32 nRed = nCol;
++	nRed &= 0x000000FF;
++	sal_Int32 nRGB =  ( (nRed << 16) | (nGreen << 8) | nBlue );
++	return nRGB;
++}
++uno::Any 
++OORGBToXLRGB( const uno::Any& aCol )
++{
++	sal_Int32 nCol;
++	aCol >>= nCol;
++	nCol = OORGBToXLRGB( nCol );
++	return uno::makeAny( nCol );
++}
++uno::Any 
++XLRGBToOORGB(  const uno::Any& aCol )
++{
++	sal_Int32 nCol;
++	aCol >>= nCol;
++	nCol = XLRGBToOORGB( nCol );
++	return uno::makeAny( nCol );
++}
++
++rtl::OUString getAnyAsString( const uno::Any& pvargItem ) throw ( uno::RuntimeException )
++{
++	uno::Type aType = pvargItem.getValueType();
++	uno::TypeClass eTypeClass = aType.getTypeClass();
++	rtl::OUString sString;
++	switch ( eTypeClass )
++	{
++		case uno::TypeClass_BOOLEAN:
++		{
++			sal_Bool bBool = sal_False;
++			pvargItem >>= bBool;
++			sString = rtl::OUString::valueOf( bBool );
++			break;
++		}
++		case uno::TypeClass_STRING:
++			pvargItem >>= sString;
++			break;
++		case uno::TypeClass_FLOAT:
++			{
++				float aFloat = 0;
++				pvargItem >>= aFloat;
++				sString = rtl::OUString::valueOf( aFloat );
++				break;
++			}
++		case uno::TypeClass_DOUBLE:
++			{
++				double aDouble = 0;
++				pvargItem >>= aDouble;
++				sString = rtl::OUString::valueOf( aDouble );
++				break;
++			}
++		case uno::TypeClass_SHORT:
++		case uno::TypeClass_LONG:
++		case uno::TypeClass_BYTE:
++			{
++				sal_Int32 aNum = 0;
++				pvargItem >>= aNum;
++				sString = rtl::OUString::valueOf( aNum );
++				break;
++			}
++
++		case uno::TypeClass_HYPER:
++			{
++				sal_Int64 aHyper = 0;
++				pvargItem >>= aHyper;
++				sString = rtl::OUString::valueOf( aHyper );
++				break;
++			}
++		default:
++       			throw uno::RuntimeException( rtl::OUString::createFromAscii( "Invalid type, can't convert" ), uno::Reference< uno::XInterface >() );
++	}
++	return sString;
++}
++
++
++rtl::OUString 
++ContainerUtilities::getUniqueName( const uno::Sequence< ::rtl::OUString >&  _slist, const rtl::OUString& _sElementName, const ::rtl::OUString& _sSuffixSeparator)
++{
++	return getUniqueName(_slist, _sElementName, _sSuffixSeparator, sal_Int32(2));
++}
++
++rtl::OUString 
++ContainerUtilities::getUniqueName( const uno::Sequence< rtl::OUString >& _slist, const rtl::OUString _sElementName, const rtl::OUString& _sSuffixSeparator, sal_Int32 _nStartSuffix)
++{
++	sal_Int32 a = _nStartSuffix;
++	rtl::OUString scompname = _sElementName;
++	bool bElementexists = true;
++	sal_Int32 nLen = _slist.getLength();
++	if ( nLen == 0 )
++		return _sElementName;
++
++	while (bElementexists == true) 
++	{
++		for (sal_Int32 i = 0; i < nLen; i++)
++		{
++			if (FieldInList(_slist, scompname) == -1)
++			{
++				return scompname;
++			}
++		}
++		scompname = _sElementName + _sSuffixSeparator + rtl::OUString::valueOf( a++ );
++	}
++	return rtl::OUString();
++}
++
++sal_Int32 
++ContainerUtilities::FieldInList( const uno::Sequence< rtl::OUString >& SearchList, const rtl::OUString& SearchString )
++{
++	sal_Int32 FieldLen = SearchList.getLength();
++	sal_Int32 retvalue = -1;
++	for (sal_Int32 i = 0; i < FieldLen; i++) 
++	{
++		// I wonder why comparing lexicographically is done
++		// when its a match is whats interesting?
++		//if (SearchList[i].compareTo(SearchString) == 0) 
++		if ( SearchList[i].equals( SearchString ) ) 
++		{
++			retvalue = i;
++			break;
++		}
++	}
++	return retvalue;
++
++}
++bool NeedEsc(sal_Unicode cCode)
++{
++	String sEsc(RTL_CONSTASCII_USTRINGPARAM(".^$+\\|{}()"));
++	return (STRING_NOTFOUND != sEsc.Search(cCode));
++}
++
++rtl::OUString VBAToRegexp(const rtl::OUString &rIn, bool bForLike )
++{
++	rtl::OUStringBuffer sResult;
++	const sal_Unicode *start = rIn.getStr();
++	const sal_Unicode *end = start + rIn.getLength();
++
++	int seenright = 0;
++	if ( bForLike )
++		sResult.append(static_cast<sal_Unicode>('^'));
++
++	while (start < end) 
++	{
++		switch (*start)
++		{
++			case '?':
++				sResult.append(static_cast<sal_Unicode>('.'));
++				start++;
++				break;
++			case '*':
++				sResult.append(rtl::OUString(RTL_CONSTASCII_USTRINGPARAM(".*")));
++				start++;
++				break;
++			case '#':
++				sResult.append(rtl::OUString(RTL_CONSTASCII_USTRINGPARAM("[0-9]")));
++				start++;
++				break;
++			case '~':
++				sResult.append(static_cast<sal_Unicode>('\\'));
++				sResult.append(*(++start));
++				start++;
++				break;
++				// dump the ~ and escape the next characture
++			case ']':
++				sResult.append(static_cast<sal_Unicode>('\\'));
++				sResult.append(*start++);
++				break;
++			case '[':
++				sResult.append(*start++);
++				seenright = 0;
++				while (start < end && !seenright)
++				{
++					switch (*start)
++					{
++						case '[':
++						case '?':
++						case '*':
++						sResult.append(static_cast<sal_Unicode>('\\'));
++						sResult.append(*start);
++							break;
++						case ']':
++						sResult.append(*start);
++							seenright = 1;
++							break;
++						case '!':
++							sResult.append(static_cast<sal_Unicode>('^'));
++							break;
++						default:
++						if (NeedEsc(*start))
++							sResult.append(static_cast<sal_Unicode>('\\'));
++						sResult.append(*start);
++							break;
++					}
++					start++;
++				}
++				break;
++			default:
++				if (NeedEsc(*start))
++					sResult.append(static_cast<sal_Unicode>('\\'));
++				sResult.append(*start++);
++		}
++	}
++
++	if ( bForLike )
++		sResult.append(static_cast<sal_Unicode>('$'));
++
++	return sResult.makeStringAndClear( );
++}
++
++double getPixelTo100thMillimeterConversionFactor( css::uno::Reference< css::awt::XDevice >& xDevice, sal_Bool bVertical)
++{
++	double fConvertFactor = 1.0;
++	if( bVertical )
++	{
++		fConvertFactor = xDevice->getInfo().PixelPerMeterY/100000;
++	}
++	else
++	{
++		fConvertFactor = xDevice->getInfo().PixelPerMeterX/100000;	
++	}
++	return fConvertFactor;
++}
++
++double PointsToPixels( css::uno::Reference< css::awt::XDevice >& xDevice, double fPoints, sal_Bool bVertical)
++{
++	double fConvertFactor = getPixelTo100thMillimeterConversionFactor( xDevice, bVertical );
++	return fPoints * POINTTO100THMILLIMETERFACTOR * fConvertFactor;
++}
++double PixelsToPoints( css::uno::Reference< css::awt::XDevice >& xDevice, double fPixels, sal_Bool bVertical)
++{
++	double fConvertFactor = getPixelTo100thMillimeterConversionFactor( xDevice, bVertical );
++	return (fPixels/fConvertFactor)/POINTTO100THMILLIMETERFACTOR;
++}
++
++ConcreteXShapeGeometryAttributes::ConcreteXShapeGeometryAttributes( const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::drawing::XShape >& xShape )
++{
++	m_xShape = new ScVbaShape( xContext, xShape );
++}
++
++#define VBA_LEFT "PositionX"
++#define VBA_TOP "PositionY"
++UserFormGeometryHelper::UserFormGeometryHelper( const uno::Reference< uno::XComponentContext >& /*xContext*/, const uno::Reference< awt::XControl >& xControl )
++{
++    mxModel.set( xControl->getModel(), uno::UNO_QUERY_THROW );
++}
++    double UserFormGeometryHelper::getLeft()
++    {
++	sal_Int32 nLeft = 0;
++	mxModel->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( VBA_LEFT ) ) ) >>= nLeft;	
++	return Millimeter::getInPoints( nLeft );
++    }
++    void UserFormGeometryHelper::setLeft( double nLeft )
++    {
++        mxModel->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( VBA_LEFT ) ), uno::makeAny( Millimeter::getInHundredthsOfOneMillimeter( nLeft ) ) );
++    }
++    double UserFormGeometryHelper::getTop()
++    {
++	sal_Int32 nTop = 0;
++	mxModel->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( 	VBA_TOP ) ) ) >>= nTop;	
++	return Millimeter::getInPoints( nTop );
++    }
++    void UserFormGeometryHelper::setTop( double nTop )
++    {
++	mxModel->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( 	VBA_TOP ) ), uno::makeAny( Millimeter::getInHundredthsOfOneMillimeter( nTop ) ) );
++    }
++    double UserFormGeometryHelper::getHeight()
++    {
++	sal_Int32 nHeight = 0;
++	mxModel->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( 	SC_UNONAME_CELLHGT ) ) ) >>= nHeight;	
++	return Millimeter::getInPoints( nHeight );
++    }
++    void UserFormGeometryHelper::setHeight( double nHeight )
++    {
++	mxModel->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( 	SC_UNONAME_CELLHGT ) ), uno::makeAny( Millimeter::getInHundredthsOfOneMillimeter( nHeight ) ) );
++    }
++    double UserFormGeometryHelper::getWidth()
++    {
++	sal_Int32 nWidth = 0;
++	mxModel->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( 	SC_UNONAME_CELLWID ) ) ) >>= nWidth;	
++	return Millimeter::getInPoints( nWidth );
++    }
++    void UserFormGeometryHelper::setWidth( double nWidth)
++    {
++	mxModel->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( 	SC_UNONAME_CELLWID ) ), uno::makeAny(  Millimeter::getInHundredthsOfOneMillimeter( nWidth ) ) );
++    }
++} // vba 
++} //ooo
+diff --git sw/source/ui/vba/vbahelper.hxx sw/source/ui/vba/vbahelper.hxx
+new file mode 100644
+index 0000000..b8f4615
+--- /dev/null
++++ sw/source/ui/vba/vbahelper.hxx
+@@ -0,0 +1,331 @@
++/*************************************************************************
++ *
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ * 
++ * Copyright 2008 by Sun Microsystems, Inc.
++ *
++ * OpenOffice.org - a multi-platform office productivity suite
++ *
++ * $RCSfile: vbahelper.hxx,v $
++ * $Revision: 1.5 $
++ *
++ * This file is part of OpenOffice.org.
++ *
++ * OpenOffice.org is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License version 3
++ * only, as published by the Free Software Foundation.
++ *
++ * OpenOffice.org is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License version 3 for more details
++ * (a copy is included in the LICENSE file that accompanied this code).
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * version 3 along with OpenOffice.org.  If not, see
++ * <http://www.openoffice.org/license.html>
++ * for a copy of the LGPLv3 License.
++ *
++ ************************************************************************/
++#ifndef SC_VBA_HELPER_HXX
++#define SC_VBA_HELPER_HXX
++
++#include <com/sun/star/drawing/XShape.hpp>
++#include <com/sun/star/beans/XIntrospectionAccess.hpp>
++#include <com/sun/star/beans/XPropertySet.hpp>
++#include <com/sun/star/script/BasicErrorException.hpp>
++#include <com/sun/star/script/XTypeConverter.hpp>
++#include <com/sun/star/lang/IllegalArgumentException.hpp>
++#include <com/sun/star/awt/XControl.hpp>
++#include <com/sun/star/awt/XDevice.hpp>
++#include <basic/sberrors.hxx>
++#include <cppuhelper/implbase1.hxx>
++#include <com/sun/star/frame/XModel.hpp>
++#include <sfx2/dispatch.hxx>
++#include <ooo/vba/msforms/XShape.hpp>
++
++namespace css = ::com::sun::star;
++
++namespace ooo 
++{
++	namespace vba 
++	{
++		template < class T > 
++		css::uno::Reference< T > getXSomethingFromArgs( css::uno::Sequence< css::uno::Any > const & args, sal_Int32 nPos, bool bCanBeNull = true ) throw (css::lang::IllegalArgumentException)
++		{
++			if ( args.getLength() < ( nPos + 1) )
++				throw css::lang::IllegalArgumentException();
++			css::uno::Reference< T > aSomething( args[ nPos ], css::uno::UNO_QUERY );
++			if ( !bCanBeNull && !aSomething.is() )
++				throw css::lang::IllegalArgumentException();
++			return aSomething;
++		}
++		css::uno::Reference< css::beans::XIntrospectionAccess > getIntrospectionAccess( const css::uno::Any& aObject ) throw (css::uno::RuntimeException);
++		css::uno::Reference< css::script::XTypeConverter > getTypeConverter( const css::uno::Reference< css::uno::XComponentContext >& xContext ) throw (css::uno::RuntimeException);
++
++		css::uno::Reference< css::frame::XModel >
++			getCurrentDocument() throw (css::uno::RuntimeException);
++		sal_Int32 OORGBToXLRGB( sal_Int32 );
++		sal_Int32 XLRGBToOORGB( sal_Int32 );
++		css::uno::Any OORGBToXLRGB( const css::uno::Any& );
++		css::uno::Any XLRGBToOORGB( const css::uno::Any& );
++		// provide a NULL object that can be passed as variant so that 
++		// the object when passed to IsNull will return true. aNULL 
++		// contains an empty object reference
++		const css::uno::Any& aNULL();
++
++		rtl::OUString getAnyAsString( const css::uno::Any& pvargItem ) throw ( css::uno::RuntimeException );
++		rtl::OUString VBAToRegexp(const rtl::OUString &rIn, bool bForLike = false); // needs to be in an uno service ( already this code is duplicated in basic )
++	double getPixelTo100thMillimeterConversionFactor( css::uno::Reference< css::awt::XDevice >& xDevice, sal_Bool bVertical);
++	double PointsToPixels( css::uno::Reference< css::awt::XDevice >& xDevice, double fPoints, sal_Bool bVertical);
++	double PixelsToPoints( css::uno::Reference< css::awt::XDevice >& xDevice, double fPoints, sal_Bool bVertical);
++
++class Millimeter
++{
++//Factor to translate between points and hundredths of millimeters:
++private:
++	static const double factor;
++    
++	double m_nMillimeter;
++
++public:
++	Millimeter():m_nMillimeter(0) {}
++    
++	Millimeter(double mm):m_nMillimeter(mm) {}
++    
++	void set(double mm) { m_nMillimeter = mm; }
++	void setInPoints(double points) 
++	{ 
++		m_nMillimeter = points * 0.352777778; 
++		// 25.4mm / 72 
++	}
++      
++	void setInHundredthsOfOneMillimeter(double hmm)
++	{
++		m_nMillimeter = hmm / 100;
++	}
++    
++	double get()
++	{
++		return m_nMillimeter;
++	}
++	double getInHundredthsOfOneMillimeter()
++	{
++		return m_nMillimeter * 100;
++	}
++	double getInPoints()
++	{
++		return m_nMillimeter * 2.834645669; // 72 / 25.4mm
++	}    
++
++	static sal_Int32 getInHundredthsOfOneMillimeter(double points)
++	{
++		sal_Int32 mm = static_cast<sal_Int32>(points * factor);
++		return mm;
++	}
++    
++	static double getInPoints(int _hmm)
++	{
++		double points = double( static_cast<double>(_hmm) / factor);
++		return points;
++	}
++};
++
++class AbstractGeometryAttributes // probably should replace the ShapeHelper below
++{
++public:
++    virtual ~AbstractGeometryAttributes() {}
++    virtual double getLeft() = 0;
++    virtual void setLeft( double ) = 0;
++    virtual double getTop() = 0;
++    virtual void setTop( double ) = 0;
++    virtual double getHeight() = 0;
++    virtual void setHeight( double ) = 0;
++    virtual double getWidth() = 0;
++    virtual void setWidth( double ) = 0;
++};
++
++class ConcreteXShapeGeometryAttributes : public AbstractGeometryAttributes
++{
++public:
++    css::uno::Reference< ooo::vba::msforms::XShape > m_xShape; 
++    ConcreteXShapeGeometryAttributes( const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::drawing::XShape >& xShape );
++    virtual double getLeft()
++    {
++        return m_xShape->getLeft();
++    }
++    virtual void setLeft( double nLeft )
++    {
++        m_xShape->setLeft( nLeft );
++    }
++    virtual double getTop()
++    {
++        return m_xShape->getTop();
++    }
++    virtual void setTop( double nTop )
++    {
++        m_xShape->setTop( nTop );
++    }
++
++    virtual double getHeight()
++    {
++        return m_xShape->getHeight();
++    }
++    virtual void setHeight( double nHeight )
++    {
++        m_xShape->setHeight( nHeight );
++    }
++    virtual double getWidth()
++    {
++        return m_xShape->getWidth();
++    }
++    virtual void setWidth( double nWidth)
++    {
++        m_xShape->setHeight( nWidth );
++    }
++
++   
++};
++#define VBA_LEFT "PositionX"
++#define VBA_TOP "PositionY"
++class UserFormGeometryHelper : public AbstractGeometryAttributes
++{
++
++    css::uno::Reference< css::beans::XPropertySet > mxModel;
++public:
++    UserFormGeometryHelper( const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::awt::XControl >& xControl );
++    virtual double getLeft();
++    virtual void setLeft( double nLeft );
++    virtual double getTop();
++    virtual void setTop( double nTop );
++    virtual double getHeight();
++    virtual void setHeight( double nHeight );
++    virtual double getWidth();
++    virtual void setWidth( double nWidth);
++};
++
++class ShapeHelper
++{
++protected:
++	css::uno::Reference< css::drawing::XShape > xShape;
++public:
++	ShapeHelper( const css::uno::Reference< css::drawing::XShape >& _xShape) throw (css::script::BasicErrorException ) : xShape( _xShape )
++	{ 
++		if( !xShape.is() ) 
++			throw css::uno::RuntimeException( rtl::OUString::createFromAscii("No valid shape for helper"), css::uno::Reference< css::uno::XInterface >() );
++	}
++    
++	double getHeight()
++	{
++        	return  Millimeter::getInPoints(xShape->getSize().Height);
++    	}
++
++
++    	void setHeight(double _fheight) throw ( css::script::BasicErrorException )
++	{
++		try
++		{
++			css::awt::Size aSize = xShape->getSize();
++			aSize.Height = Millimeter::getInHundredthsOfOneMillimeter(_fheight);
++			xShape->setSize(aSize);
++		}
++		catch ( css::uno::Exception& /*e*/)
++		{
++			throw css::script::BasicErrorException( rtl::OUString(), css::uno::Reference< css::uno::XInterface >(), SbERR_METHOD_FAILED, rtl::OUString() );
++    		}
++	}
++    
++    
++	double getWidth()
++	{ 
++		return Millimeter::getInPoints(xShape->getSize().Width);
++    	}
++
++	void setWidth(double _fWidth) throw ( css::script::BasicErrorException )
++	{
++		try
++		{
++			css::awt::Size aSize = xShape->getSize();
++			aSize.Width = Millimeter::getInHundredthsOfOneMillimeter(_fWidth);
++			xShape->setSize(aSize);
++		}
++		catch (css::uno::Exception& /*e*/)
++		{
++			throw css::script::BasicErrorException( rtl::OUString(), css::uno::Reference< css::uno::XInterface >(), SbERR_METHOD_FAILED, rtl::OUString() );
++		}
++	}
++    
++    
++	double getLeft()
++	{
++		return Millimeter::getInPoints(xShape->getPosition().X);
++	}
++
++    
++	void setLeft(double _fLeft)
++	{
++		css::awt::Point aPoint = xShape->getPosition();
++		aPoint.X = Millimeter::getInHundredthsOfOneMillimeter(_fLeft);
++		xShape->setPosition(aPoint);
++	}
++    
++
++	double getTop()
++	{
++        	return Millimeter::getInPoints(xShape->getPosition().Y);
++	}
++
++    
++	void setTop(double _fTop)
++	{
++		css::awt::Point aPoint = xShape->getPosition();
++		aPoint.Y = Millimeter::getInHundredthsOfOneMillimeter(_fTop);
++		xShape->setPosition(aPoint);
++	}
++    
++};
++
++class ContainerUtilities
++{
++
++public: 
++	static rtl::OUString getUniqueName( const css::uno::Sequence< ::rtl::OUString >&  _slist, const rtl::OUString& _sElementName, const ::rtl::OUString& _sSuffixSeparator);
++	static rtl::OUString getUniqueName( const css::uno::Sequence< rtl::OUString >& _slist, const rtl::OUString _sElementName, const rtl::OUString& _sSuffixSeparator, sal_Int32 _nStartSuffix );
++
++	static sal_Int32 FieldInList( const css::uno::Sequence< rtl::OUString >& SearchList, const rtl::OUString& SearchString );
++};
++
++// really just a a place holder to ease the porting pain
++class DebugHelper
++{
++public:
++	static void exception( const rtl::OUString&  DetailedMessage, const css::uno::Exception& ex,  int err, const rtl::OUString& /*additionalArgument*/ ) throw( css::script::BasicErrorException )
++	{
++		// #TODO #FIXME ( do we want to support additionalArg here )
++		throw css::script::BasicErrorException( DetailedMessage.concat( rtl::OUString::createFromAscii(" ") ).concat( ex.Message ), css::uno::Reference< css::uno::XInterface >(), err, rtl::OUString() );
++	}
++
++	static void exception( int err,  const rtl::OUString& additionalArgument ) throw( css::script::BasicErrorException )
++	{
++		exception( rtl::OUString(), css::uno::Exception(), err, additionalArgument );
++	}
++
++	static void exception( css::uno::Exception& ex ) throw( css::script::BasicErrorException )
++	{
++		exception( rtl::OUString(), ex, SbERR_INTERNAL_ERROR, rtl::OUString() );
++	}
++};
++	} // vba 
++} // ooo
++
++namespace ov = ooo::vba;
++
++#ifdef DEBUG
++#  define SC_VBA_FIXME(a) OSL_TRACE( a )
++#  define SC_VBA_STUB() SC_VBA_FIXME(( "%s - stubbed\n", __FUNCTION__ ))
++#else
++#  define SC_VBA_FIXME(a)
++#  define SC_VBA_STUB()
++#endif
++
++#endif
+diff --git sw/source/ui/vba/vbahelperinterface.hxx sw/source/ui/vba/vbahelperinterface.hxx
+new file mode 100644
+index 0000000..b01f524
+--- /dev/null
++++ sw/source/ui/vba/vbahelperinterface.hxx
+@@ -0,0 +1,116 @@
++/*************************************************************************
++ *
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ * 
++ * Copyright 2008 by Sun Microsystems, Inc.
++ *
++ * OpenOffice.org - a multi-platform office productivity suite
++ *
++ * $RCSfile: vbahelperinterface.hxx,v $
++ * $Revision: 1.3 $
++ *
++ * This file is part of OpenOffice.org.
++ *
++ * OpenOffice.org is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License version 3
++ * only, as published by the Free Software Foundation.
++ *
++ * OpenOffice.org is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License version 3 for more details
++ * (a copy is included in the LICENSE file that accompanied this code).
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * version 3 along with OpenOffice.org.  If not, see
++ * <http://www.openoffice.org/license.html>
++ * for a copy of the LGPLv3 License.
++ *
++ ************************************************************************/
++#ifndef SC_VBA_HELPERINTERFACE_HXX
++#define SC_VBA_HELPERINTERFACE_HXX
++
++#include <cppuhelper/implbase1.hxx>
++#include <ooo/vba/XHelperInterface.hpp>
++#include "vbahelper.hxx"
++#include "vbaglobals.hxx"
++
++// use this class when you have an a object like
++// interface  XAnInterface which contains XHelperInterface in its inheritance hierarchy
++// interface XAnInterface
++// { 
++//     interface XHelperInterface;
++//     [attribute, string] name;
++// }
++// or
++// interface XAnInterface : XHelperInterface;
++// { 
++//     [attribute, string] name;
++// }
++//
++// then this class can provide a default implementation of XHelperInterface,
++// you can use it like this
++// typedef InheritedHelperInterfaceImpl< XAnInterface > > AnInterfaceImpl_BASE;
++// class AnInterfaceImpl : public AnInterfaceImpl_BASE
++// {
++// public:
++//     AnInterface( const Reference< HelperInterface >& xParent ) : AnInterfaceImpl_BASE( xParent ) {}
++//     // implement XAnInterface methods only, no need to implement the XHelperInterface 
++//     // methods
++//     virtual void setName( const OUString& );  
++//     virtual OUString getName();  
++// }
++//
++const ::rtl::OUString sHelperServiceName( RTL_CONSTASCII_USTRINGPARAM( "ooo.vba.HelperServiceBase" ) );
++
++template< typename Ifc1 >
++class InheritedHelperInterfaceImpl : public Ifc1
++{
++protected: 
++	css::uno::WeakReference< ooo::vba::XHelperInterface > mxParent;
++	css::uno::Reference< css::uno::XComponentContext > mxContext;
++public:
++	InheritedHelperInterfaceImpl() {}
++	InheritedHelperInterfaceImpl( const css::uno::Reference< ooo::vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext ) : mxParent( xParent ), mxContext( xContext ) {}
++	virtual rtl::OUString& getServiceImplName() = 0;
++	virtual css::uno::Sequence<rtl::OUString> getServiceNames() = 0;
++
++	// XHelperInterface Methods
++	virtual ::sal_Int32 SAL_CALL getCreator() throw (css::script::BasicErrorException, css::uno::RuntimeException)
++	{
++		return 0x53756E4F;
++	}
++	virtual css::uno::Reference< ooo::vba::XHelperInterface > SAL_CALL getParent(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException) { return mxParent; }
++	// #FIXME	
++	virtual css::uno::Any SAL_CALL Application(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException) { return  css::uno::Any(); }
++
++
++	// XServiceInfo Methods
++	virtual ::rtl::OUString SAL_CALL getImplementationName(  ) throw (css::uno::RuntimeException) { return getServiceImplName(); }
++	virtual ::sal_Bool SAL_CALL supportsService( const ::rtl::OUString& ServiceName ) throw (css::uno::RuntimeException) 
++	{ 
++		css::uno::Sequence< rtl::OUString > sServices = getSupportedServiceNames();
++		const rtl::OUString* pStart = sServices.getConstArray();
++		const rtl::OUString* pEnd = pStart + sServices.getLength();
++		for ( ; pStart != pEnd ; ++pStart )
++			if ( (*pStart).equals( ServiceName ) )
++				return sal_True;
++		return sal_False;	
++	}
++	virtual css::uno::Sequence< ::rtl::OUString > SAL_CALL getSupportedServiceNames(  ) throw (css::uno::RuntimeException) 
++	{ 
++		css::uno::Sequence< rtl::OUString > aNames = getServiceNames();;
++		return aNames;
++	}
++ };
++
++template< typename Ifc1 >
++class InheritedHelperInterfaceImpl1 : public InheritedHelperInterfaceImpl< ::cppu::WeakImplHelper1< Ifc1 > >
++
++{
++typedef InheritedHelperInterfaceImpl< ::cppu::WeakImplHelper1< Ifc1 > > Base;
++public:
++	InheritedHelperInterfaceImpl1< Ifc1 > ( const css::uno::Reference< ooo::vba::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext ) : Base( xParent, xContext ) {}	
++
++};
++#endif
+diff --git sw/util/makefile.mk sw/util/makefile.mk
+index ef9b141..9becb8c 100644
+--- sw/util/makefile.mk
++++ sw/util/makefile.mk
+@@ -296,6 +296,35 @@ LIB3OBJFILES = \
+         $(SLO)$/mmpreparemergepage.obj \
+         $(SLO)$/selectdbtabledialog.obj
+ 
++#target vba
++TARGET_VBA=vbaswobj
++SHL4TARGET=$(TARGET_VBA)$(DLLPOSTFIX).uno
++SHL4IMPLIB=     i$(TARGET_VBA)
++
++SHL4VERSIONMAP=$(TARGET_VBA).map
++SHL4DEF=$(MISC)$/$(SHL4TARGET).def
++DEF4NAME=$(SHL4TARGET)
++SHL4STDLIBS= \
++                $(CPPUHELPERLIB) \
++                $(VCLLIB) \
++                $(CPPULIB) \
++                $(COMPHELPERLIB) \
++                $(SVLIB) \
++                $(TOOLSLIB) \
++                $(SALLIB)\
++                $(BASICLIB)     \
++                $(SFXLIB)       \
++                $(SVXLIB)       \
++                $(SVTOOLLIB)    \
++                $(SVLLIB) \
++                $(ISCLIB) \
++        $(VCLLIB) \
++        $(TKLIB) \
++
++SHL4DEPN=$(SHL1TARGETN)
++SHL4LIBS=$(SLB)$/$(TARGET_VBA).lib
++
++
+ .IF "$(GUI)$(COM)" == "WNTMSC"
+ .IF "$(ENABLE_PCH)" != "" && ( "$(PRJNAME)"!="sw" || "$(BUILD_SPECIAL)"!="TRUE" )
+ #target sw
+diff --git sw/util/vbaswobj.map sw/util/vbaswobj.map
+new file mode 100644
+index 0000000..832e82c
+--- /dev/null
++++ sw/util/vbaswobj.map
+@@ -0,0 +1,9 @@
++OOO_1.1 {
++	global:
++		component_getImplementationEnvironment;
++		component_getFactory;
++		component_writeInfo;
++
++	local:
++		*;
++};
