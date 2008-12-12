@@ -215,7 +215,7 @@ class Ref3dV(TokenBase):
 
 class Ref3dA(Ref3dV):
     def __init__ (self, header, tokens):
-        Ref3dA.__init__(self, header, tokens)
+        Ref3dV.__init__(self, header, tokens)
 
 
 class Area3d(TokenBase):
