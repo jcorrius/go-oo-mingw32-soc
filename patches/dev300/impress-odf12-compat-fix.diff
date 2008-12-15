@@ -1,0 +1,154 @@
+ sd/source/filter/xml/sdtransform.cxx |   15 ------------
+ sd/source/filter/xml/sdxmlwrp.cxx    |   17 +++++++++++++
+ xmloff/source/draw/sdpropls.cxx      |   43 ++++++++++++++++++++++++++++++++--
+ xmloff/source/draw/sdpropls.hxx      |    3 ++
+ 4 files changed, 60 insertions(+), 18 deletions(-)
+
+
+diff --git sd/source/filter/xml/sdtransform.cxx sd/source/filter/xml/sdtransform.cxx
+index 39b028b..f9a893e 100644
+--- sd/source/filter/xml/sdtransform.cxx
++++ sd/source/filter/xml/sdtransform.cxx
+@@ -209,13 +209,6 @@ void SdTransformOOo2xDocument::transformTextShape( SdrTextObj& rTextShape )
+ 		rTextShape.SetMergedItem( aItem );
+ 	}
+ */
+-    if( rSet.GetItemState( SDRATTR_TEXT_WORDWRAP ) == SFX_ITEM_SET )
+-    {
+-		SdrTextWordWrapItem aItem( *static_cast<const SdrTextWordWrapItem*>(rSet.GetItem( SDRATTR_TEXT_WORDWRAP )) );
+-		aItem.SetValue( !aItem.GetValue() );
+-		rTextShape.SetMergedItem( aItem );
+-    }
+-
+ 	if(!rTextShape.IsEmptyPresObj())
+ 	{
+ 		OutlinerParaObject* pOPO = rTextShape.GetOutlinerParaObject();
+@@ -338,14 +331,6 @@ bool SdTransformOOo2xDocument::transformItemSet( SfxItemSet& rSet, bool bNumberi
+         }
+ 	}
+ 
+-    if( rSet.GetItemState( SDRATTR_TEXT_WORDWRAP ) == SFX_ITEM_SET )
+-    {
+-		SdrTextWordWrapItem aItem( *static_cast<const SdrTextWordWrapItem*>(rSet.GetItem( SDRATTR_TEXT_WORDWRAP )) );
+-		aItem.SetValue( !aItem.GetValue() );
+-		rSet.Put( aItem );
+-        bRet = true;
+-    }
+-
+ 	return bRet;
+ }
+ 
+diff --git sd/source/filter/xml/sdxmlwrp.cxx sd/source/filter/xml/sdxmlwrp.cxx
+index d9e5e0b..e3bdbd3 100644
+--- sd/source/filter/xml/sdxmlwrp.cxx
++++ sd/source/filter/xml/sdxmlwrp.cxx
+@@ -649,6 +649,23 @@ sal_Bool SdXMLFilter::Import( ErrCode& nError )
+ 				aFilterArgs, aName, sal_False );
+ 		}
+ 
++        // set BuildId on XModel for compat mapping
++        if( xInfoSet.is() )
++        {
++            uno::Reference< beans::XPropertySet > xModelSet( mxModel, uno::UNO_QUERY );
++            if( xModelSet.is() )
++            {
++                uno::Reference< beans::XPropertySetInfo > xModelSetInfo( xModelSet->getPropertySetInfo() );
++                const OUString sPropName( RTL_CONSTASCII_USTRINGPARAM("BuildId" ) );
++
++                OUString sBuildId;
++                xInfoSet->getPropertyValue(sPropName) >>= sBuildId;
++			
++                if( xModelSetInfo.is() && xModelSetInfo->hasPropertyByName(sPropName) )
++                    xModelSet->setPropertyValue( sPropName, Any( sBuildId ) );
++            }
++        }
++
+ 		nRet = ReadThroughComponent(
+ 			xStorage, xModelComp, "styles.xml", NULL, xServiceFactory,
+ 			pServices->mpStyles,
+diff --git xmloff/source/draw/sdpropls.cxx xmloff/source/draw/sdpropls.cxx
+index 9df993c..d6d87e3 100644
+--- xmloff/source/draw/sdpropls.cxx
++++ xmloff/source/draw/sdpropls.cxx
+@@ -860,19 +860,53 @@ sal_Bool XMLSdHeaderFooterVisibilityTypeHdl::exportXML(
+ //////////////////////////////////////////////////////////////////////////////
+ 
+ XMLSdPropHdlFactory::XMLSdPropHdlFactory( uno::Reference< frame::XModel > xModel, SvXMLImport& rImport )
+-: mxModel( xModel ), mpExport(0), mpImport( &rImport )
++    : mxModel( xModel ), mpExport(0), mpImport( &rImport ), mbTransform(false)
+ {
++    init();
+ }
+ 
+ XMLSdPropHdlFactory::XMLSdPropHdlFactory( uno::Reference< frame::XModel > xModel, SvXMLExport& rExport )
+-: mxModel( xModel ), mpExport( &rExport ), mpImport(0)
++: mxModel( xModel ), mpExport( &rExport ), mpImport(0), mbTransform(false)
+ {
++    init();
+ }
+ 
+ XMLSdPropHdlFactory::~XMLSdPropHdlFactory()
+ {
+ }
+ 
++void XMLSdPropHdlFactory::init()
++{
++	// query BuildId for potential backward compat mode
++    uno::Reference< beans::XPropertySet > xModelSet( mxModel, uno::UNO_QUERY );
++    if( xModelSet.is() )
++    {
++        uno::Reference< beans::XPropertySetInfo > xModelSetInfo( xModelSet->getPropertySetInfo() );
++        const OUString sPropName( RTL_CONSTASCII_USTRINGPARAM("BuildId" ) );
++
++        OUString sBuildId;
++        xModelSet->getPropertyValue(sPropName) >>= sBuildId;
++			
++        if( sBuildId.getLength() )
++        {
++            sal_Int32 nIndex = sBuildId.indexOf('$');
++            if( nIndex != -1 )
++            {
++                sal_Int32 nUPD = sBuildId.copy( 0, nIndex ).toInt32();
++
++                if( nUPD == 300 )
++                {
++                    sal_Int32 nBuildId = sBuildId.copy( nIndex+1 ).toInt32();
++                    if( (nBuildId > 0) && (nBuildId < 9316) )
++                        mbTransform = true; // treat OOo 3.0 beta1 as OOo 2.x
++                }
++                else if( (nUPD == 680) || ( nUPD >= 640 && nUPD <= 645 ) )
++                    mbTransform = true;
++            }
++        }
++    }
++}
++
+ const XMLPropertyHandler* XMLSdPropHdlFactory::GetPropertyHandler( sal_Int32 nType ) const
+ {
+ 	const XMLPropertyHandler* pHdl = XMLPropertyHandlerFactory::GetPropertyHandler( nType );
+@@ -1131,7 +1165,10 @@ const XMLPropertyHandler* XMLSdPropHdlFactory::GetPropertyHandler( sal_Int32 nTy
+ 				pHdl = new XMLNamedBoolPropertyHdl( GetXMLToken(XML_FORWARD), GetXMLToken(XML_REVERSE) );
+ 				break;
+ 			case XML_TYPE_WRAP_OPTION:
+-				pHdl = new XMLNamedBoolPropertyHdl( GetXMLToken( XML_WRAP ), GetXMLToken( XML_NO_WRAP ) );
++                if( mbTransform )
++                    pHdl = new XMLNamedBoolPropertyHdl( GetXMLToken( XML_NO_WRAP ), GetXMLToken( XML_WRAP ) );
++                else
++                    pHdl = new XMLNamedBoolPropertyHdl( GetXMLToken( XML_WRAP ), GetXMLToken( XML_NO_WRAP ) );
+ 				break;
+ 
+ 			case XML_SD_TYPE_MOVE_PROTECT:
+diff --git xmloff/source/draw/sdpropls.hxx xmloff/source/draw/sdpropls.hxx
+index 59b9aca..ce270c9 100644
+--- xmloff/source/draw/sdpropls.hxx
++++ xmloff/source/draw/sdpropls.hxx
+@@ -243,6 +243,9 @@ private:
+ 	::com::sun::star::uno::Reference< ::com::sun::star::frame::XModel > mxModel;
+ 	SvXMLExport* mpExport;
+ 	SvXMLImport* mpImport;
++    bool         mbTransform;
++
++    void init();
+ 
+ public:
+ 	XMLSdPropHdlFactory( ::com::sun::star::uno::Reference< ::com::sun::star::frame::XModel >, SvXMLExport& rExport );
