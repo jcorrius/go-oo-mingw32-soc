@@ -1,0 +1,398 @@
+diff --git basctl/source/basicide/baside3.cxx basctl/source/basicide/baside3.cxx
+index e89c22f..8d11a16 100644
+--- basctl/source/basicide/baside3.cxx
++++ basctl/source/basicide/baside3.cxx
+@@ -82,6 +82,7 @@
+ #include <com/sun/star/resource/XStringResourceResolver.hpp>
+ #include <com/sun/star/resource/StringResourceWithLocation.hpp>
+ #include <com/sun/star/task/XInteractionHandler.hpp>
++#include <com/sun/star/script/XVBACompat.hpp>
+ 
+ using namespace comphelper;
+ using namespace	::com::sun::star;
+@@ -114,6 +115,14 @@ DialogWindow::DialogWindow( Window* pPar
+ 
+ 	pEditor = new DlgEditor();
+ 	pEditor->SetWindow( this );
++	// set vba mode on DialogModel ( allows it to work in 100thmm instead of MAP_APPFONT )
++	if ( rDocument.getDocument().is() )
++	{
++		uno::Reference< script::XVBACompat > xDocVBAMode( rDocument.getLibraryContainer( E_SCRIPTS ), uno::UNO_QUERY );
++		uno::Reference< script::XVBACompat > xDialogModelVBAMode( xDialogModel, uno::UNO_QUERY );
++		if ( xDocVBAMode.is()  &&  xDialogModelVBAMode.is() )
++			xDialogModelVBAMode->setVBACompatModeOn( xDocVBAMode->getVBACompatModeOn() );
++	}
+ 	pEditor->SetDialog( xDialogModel );
+ 
+ 	// Undo einrichten
+diff --git basctl/source/dlged/dlgedobj.cxx basctl/source/dlged/dlgedobj.cxx
+index bed7bc3..ae7df5c 100644
+--- basctl/source/dlged/dlgedobj.cxx
++++ basctl/source/dlged/dlgedobj.cxx
+@@ -77,6 +78,22 @@ TYPEINIT1(DlgEdObj, SdrUnoObj);
+ DBG_NAME(DlgEdObj);
+ 
+ //----------------------------------------------------------------------------
++MapMode lcl_getMapModeForForm( DlgEdForm* pForm )
++{
++	MapMode aMode( MAP_APPFONT ); //Default
++	try
++	{
++		uno::Reference< beans::XPropertySet > xProps( pForm ? pForm->GetUnoControlModel() : NULL, uno::UNO_QUERY_THROW );
++		sal_Bool bVBAForm = sal_False;
++		xProps->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("VBAForm") ) ) >>= bVBAForm;	
++		if ( bVBAForm )
++			aMode = MapMode( MAP_100TH_MM );
++	}
++	catch ( Exception& )
++	{
++	}
++	return aMode;
++}
+ 
+ DlgEdObj::DlgEdObj()
+ 		  :SdrUnoObj(String(), sal_False)
+@@ -207,8 +224,9 @@ bool DlgEdObj::TransformSdrToControlCoor
+ 	}
+     
+     // convert pixel to logic units
+-    aPos = pDevice->PixelToLogic( aPos, MapMode( MAP_APPFONT ) );
+-    aSize = pDevice->PixelToLogic( aSize, MapMode( MAP_APPFONT ) );
++    MapMode aConvMode = lcl_getMapModeForForm( pForm );
++    aPos = pDevice->PixelToLogic( aPos, aConvMode );
++    aSize = pDevice->PixelToLogic( aSize, aConvMode );
+ 
+     // set out parameters
+     nXOut = aPos.Width();
+@@ -255,10 +273,10 @@ bool DlgEdObj::TransformSdrToFormCoordin
+ 		aSize.Width() -= aDeviceInfo.LeftInset + aDeviceInfo.RightInset;
+ 		aSize.Height() -= aDeviceInfo.TopInset + aDeviceInfo.BottomInset;
+ 	}
+-
++    MapMode aConvMode = lcl_getMapModeForForm( pForm );
+     // convert pixel to logic units
+-    aPos = pDevice->PixelToLogic( aPos, MapMode( MAP_APPFONT ) );
+-    aSize = pDevice->PixelToLogic( aSize, MapMode( MAP_APPFONT ) );
++    aPos = pDevice->PixelToLogic( aPos, aConvMode );
++    aSize = pDevice->PixelToLogic( aSize, aConvMode );
+ 
+     // set out parameters
+     nXOut = aPos.Width();
+@@ -300,9 +318,10 @@ bool DlgEdObj::TransformControlToSdrCoor
+     DBG_ASSERT( pDevice, "DlgEdObj::TransformControlToSdrCoordinates: missing default device!" );
+     if ( !pDevice )
+         return false;
+-    aPos = pDevice->LogicToPixel( aPos, MapMode( MAP_APPFONT ) );
+-    aSize = pDevice->LogicToPixel( aSize, MapMode( MAP_APPFONT ) );
+-    aFormPos = pDevice->LogicToPixel( aFormPos, MapMode( MAP_APPFONT ) );
++    MapMode aConvMode = lcl_getMapModeForForm( pForm );
++    aPos = pDevice->LogicToPixel( aPos, aConvMode );
++    aSize = pDevice->LogicToPixel( aSize, aConvMode );
++    aFormPos = pDevice->LogicToPixel( aFormPos, aConvMode );
+ 
+     // add form position
+     aPos.Width() += aFormPos.Width();
+@@ -346,14 +365,16 @@ bool DlgEdObj::TransformFormToSdrCoordin
+     DBG_ASSERT( pDevice, "DlgEdObj::TransformFormToSdrCoordinates: missing default device!" );
+     if ( !pDevice )
+         return false;
+-    aPos = pDevice->LogicToPixel( aPos, MapMode( MAP_APPFONT ) );
+-    aSize = pDevice->LogicToPixel( aSize, MapMode( MAP_APPFONT ) );
+ 
+     // take window borders into account
+     DlgEdForm* pForm = NULL;
+     if ( !lcl_getDlgEdForm( this, pForm ) )
+         return false;
+ 
++    MapMode aConvMode = lcl_getMapModeForForm( pForm );
++    aPos = pDevice->LogicToPixel( aPos, aConvMode );
++    aSize = pDevice->LogicToPixel( aSize, aConvMode );
++
+     // take window borders into account
+     Reference< beans::XPropertySet > xPSetForm( pForm->GetUnoControlModel(), UNO_QUERY );
+     DBG_ASSERT( xPSetForm.is(), "DlgEdObj::TransformFormToSdrCoordinates: no form property set!" );
+diff --git svx/inc/svxmsbas.hxx svx/inc/svxmsbas.hxx
+index f99247b..5e87fe6 100644
+--- svx/inc/svxmsbas.hxx
++++ svx/inc/svxmsbas.hxx
+@@ -99,7 +99,7 @@ private:
+ 						  const String &rSubStorageName,
+ 						  BOOL bAsComment, BOOL bStripped );
+ 	SVX_DLLPRIVATE bool ImportForms_Impl(const String& rStorageName, 
+-		const String &rSubStorageName);
++		const String &rSubStorageName, BOOL bVBAMode );
+ 	SVX_DLLPRIVATE BOOL CopyStorage_Impl( const String& rStorageName,
+ 						   const String &rSubStorageName);
+ };
+diff --git svx/source/msfilter/msocximex.cxx svx/source/msfilter/msocximex.cxx
+index 1075424..46986eb 100644
+--- svx/source/msfilter/msocximex.cxx
++++ svx/source/msfilter/msocximex.cxx
+@@ -1075,6 +1075,9 @@ sal_Bool OCX_Control::Import(
+ sal_Bool OCX_Control::Import(uno::Reference<container::XNameContainer> &rDialog
+     )
+ {
++    uno::Reference<beans::XPropertySet > xDlgProps( rDialog, uno::UNO_QUERY);
++
++    
+     uno::Reference<lang::XMultiServiceFactory>
+         xFactory(rDialog, uno::UNO_QUERY);
+ 
+@@ -1087,11 +1090,15 @@ sal_Bool OCX_Control::Import(uno::Refere
+ 	if (!xModel.is())
+ 		return sal_False;
+ 
++    sal_Bool bVBA = sal_False;
+     /*  #147900# sometimes insertion of a control fails due to existing name,
+         do not break entire form import then... */
+     try
+     {
+         rDialog->insertByName(sName, uno::makeAny(xModel));
++        if ( xDlgProps.is() )
++            xDlgProps->getPropertyValue( OUString(RTL_CONSTASCII_USTRINGPARAM("VBAForm") ) ) >>= bVBA;
++
+     }
+     catch( uno::Exception& )
+     {
+@@ -1107,16 +1114,32 @@ sal_Bool OCX_Control::Import(uno::Refere
+ 
+     if (!Import(xPropSet))
+         return sal_False;
+-
++    
+     uno::Any aTmp;
+-    aTmp <<= sal_Int32((mnLeft * 2) / 100);
+-    xPropSet->setPropertyValue(WW8_ASCII2STR("PositionX"), aTmp);
+-    aTmp <<= sal_Int32((mnTop * 2) / 100);
+-    xPropSet->setPropertyValue(WW8_ASCII2STR("PositionY"), aTmp);
+-    aTmp <<= sal_Int32((nWidth * 2) / 100);
+-    xPropSet->setPropertyValue(WW8_ASCII2STR("Width"), aTmp);
+-    aTmp <<= sal_Int32((nHeight * 2) / 100);
+-    xPropSet->setPropertyValue(WW8_ASCII2STR("Height"), aTmp);
++    sal_Int32 nFactor = 3528; 
++
++    if ( !bVBA  )
++    {
++        aTmp <<= sal_Int32((mnLeft * 2) / 100);
++        xPropSet->setPropertyValue(WW8_ASCII2STR("PositionX"), aTmp);
++        aTmp <<= sal_Int32((mnTop * 2) / 100);
++        xPropSet->setPropertyValue(WW8_ASCII2STR("PositionY"), aTmp);
++        aTmp <<= sal_Int32((nWidth * 2) / 100);
++        xPropSet->setPropertyValue(WW8_ASCII2STR("Width"), aTmp);
++        aTmp <<= sal_Int32((nHeight * 2) / 100);
++        xPropSet->setPropertyValue(WW8_ASCII2STR("Height"), aTmp);
++    }
++    else
++    {
++        aTmp <<= sal_Int32(mnLeft); // 100thmm
++        xPropSet->setPropertyValue(WW8_ASCII2STR("PositionX"), aTmp);
++        aTmp <<= sal_Int32(mnTop); //100th mm
++        xPropSet->setPropertyValue(WW8_ASCII2STR("PositionY"), aTmp);
++        aTmp <<= sal_Int32(nWidth); // 100thmm
++        xPropSet->setPropertyValue(WW8_ASCII2STR("Width"), aTmp);
++        aTmp <<= sal_Int32(nHeight); //100th mm
++        xPropSet->setPropertyValue(WW8_ASCII2STR("Height"), aTmp);
++    }
+     if ( msToolTip.Len() > 0 )
+     {
+ 	uno::Any aTmp(&msToolTip,getCppuType((OUString *)0));
+@@ -4321,6 +4344,8 @@ sal_Bool OCX_UserForm::Import(
+ {
+     uno::Reference<beans::XPropertySet>
+         xDialogPropSet(mxParent, uno::UNO_QUERY);
++    if ( !xDialogPropSet.is() )
++        return sal_False;
+     uno::Any aTmp(&sName,getCppuType((OUString *)0));
+     xDialogPropSet->setPropertyValue(
+         OUString(RTL_CONSTASCII_USTRINGPARAM("Name")), aTmp);
+@@ -4328,11 +4353,32 @@ sal_Bool OCX_UserForm::Import(
+         OUString(RTL_CONSTASCII_USTRINGPARAM("Title")), aTmp);
+     aTmp <<= ImportColor(mnBackColor);
+ 	xDialogPropSet->setPropertyValue( WW8_ASCII2STR("BackgroundColor"), aTmp);
++    sal_Bool bVBA = sal_False;
++    // Ok we are importing xls but maybe we aren't in VBA mode
++    // if we are not in VBA mode then we should import sizes etc. ( as before )
++    try
++    {
++        xDialogPropSet->getPropertyValue( OUString(RTL_CONSTASCII_USTRINGPARAM("VBAForm") ) ) >>= bVBA;
++    }
++    catch( uno::Exception& e )
++    {
++    }
++    sal_Int32 nFactor( 3528 );
++    if ( !bVBA )
++    {
++        aTmp <<= sal_Int32((nWidth * 2) / 100); 
++        xDialogPropSet->setPropertyValue(WW8_ASCII2STR("Width"), aTmp);
++        aTmp <<= sal_Int32((nHeight * 2) / 100); 
++        xDialogPropSet->setPropertyValue(WW8_ASCII2STR("Height"), aTmp);
++    }
++    else
++    {
++        aTmp <<= sal_Int32( nWidth + 160 ); // 100thmm
++        xDialogPropSet->setPropertyValue(WW8_ASCII2STR("Width"), aTmp);
++        aTmp <<= sal_Int32(nHeight + 662 - 714); //100th mm
++        xDialogPropSet->setPropertyValue(WW8_ASCII2STR("Height"), aTmp);
++    }
+ 
+-    aTmp <<= sal_Int32((nWidth * 2) / 100);
+-    xDialogPropSet->setPropertyValue(WW8_ASCII2STR("Width"), aTmp);
+-    aTmp <<= sal_Int32((nHeight * 2) / 100);
+-    xDialogPropSet->setPropertyValue(WW8_ASCII2STR("Height"), aTmp);
+ 
+     uno::Reference<beans::XPropertySet> xPropSet( mxParent, uno::UNO_QUERY );
+     OCX_ContainerControl::Import( xPropSet );
+diff --git svx/source/msfilter/svxmsbas.cxx svx/source/msfilter/svxmsbas.cxx
+index b00e19c..3b2feb0 100644
+--- svx/source/msfilter/svxmsbas.cxx
++++ svx/source/msfilter/svxmsbas.cxx
+@@ -89,7 +89,7 @@ int SvxImportMSVBasic::Import( const Str
+ 		nRet |= 1;
+ 
+     if (bImport)
+-        ImportForms_Impl(rStorageName, rSubStorageName);
++        ImportForms_Impl(rStorageName, rSubStorageName, !bAsComment);
+ 
+ 	if( bCopy && CopyStorage_Impl( rStorageName, rSubStorageName ))
+ 		nRet |= 2;
+@@ -98,7 +98,7 @@ int SvxImportMSVBasic::Import( const Str
+ }
+ 
+ bool SvxImportMSVBasic::ImportForms_Impl(const String& rStorageName,
+-    const String& rSubStorageName)
++    const String& rSubStorageName, BOOL bVBAMode )
+ {
+     SvStorageRef xVBAStg(xRoot->OpenSotStorage(rStorageName,
+         STREAM_READWRITE | STREAM_NOCREATE | STREAM_SHARE_DENYALL));
+@@ -182,7 +182,17 @@ bool SvxImportMSVBasic::ImportForms_Impl
+                     xSF->createInstance(
+                        OUString(RTL_CONSTASCII_USTRINGPARAM(
+                            "com.sun.star.awt.UnoControlDialogModel"))), uno::UNO_QUERY);
+-
++                // #FIXME HACK - mark the Model with the VBA mode
++                // In vba mode the imported userform uses 100th mm as units
++                // or geometry 
++                // In non vba mode MAP_APPFONT is used ( same as normal basic
++                // dialogs
++                if ( bVBAMode )
++                {
++                    Reference<XPropertySet> xDlgProps(xDialog, UNO_QUERY); 
++                    if ( xDlgProps.is() )
++                        xDlgProps->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("VBAForm") ), uno::makeAny( sal_True ) );
++                }
+                 OCX_UserForm aForm(xVBAStg, *aIter, *aIter, xDialog, xSF );
+                 aForm.pDocSh = &rDocSh;
+                 sal_Bool bOk = aForm.Read(xTypes);
+diff --git toolkit/inc/toolkit/helper/property.hxx toolkit/inc/toolkit/helper/property.hxx
+index db61c94..1abcda6 100644
+--- toolkit/inc/toolkit/helper/property.hxx
++++ toolkit/inc/toolkit/helper/property.hxx
+@@ -190,6 +190,7 @@ namespace rtl {
+ #define BASEPROPERTY_CUSTOMUNITTEXT                 136  // ::rtl::OUString
+ #define BASEPROPERTY_ENABLEVISIBLE                  137  // sal_Bool
+ #define BASEPROPERTY_GROUPNAME                      138  // ::rtl::OUString
++#define BASEPROPERTY_VBAFORM                      139  // sal_Bool
+ 
+ // Keine gebundenen Properties, werden immer aus der Property BASEPROPERTY_FONTDESCRIPTOR entnommen.
+ #define BASEPROPERTY_FONTDESCRIPTORPART_START			1000
+diff --git toolkit/source/controls/dialogcontrol.cxx toolkit/source/controls/dialogcontrol.cxx
+index be06bbb..f976562 100644
+--- toolkit/source/controls/dialogcontrol.cxx
++++ toolkit/source/controls/dialogcontrol.cxx
+@@ -80,6 +80,7 @@ using namespace ::com::sun::star::lang;
+ using namespace ::com::sun::star::container;
+ using namespace ::com::sun::star::beans;
+ using namespace ::com::sun::star::util;
++using namespace ::com::sun::star::script;
+ using namespace toolkit;
+ 
+ #define PROPERTY_RESOURCERESOLVER ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "ResourceResolver" ))
+@@ -289,6 +290,8 @@ UnoControlDialogModel::UnoControlDialogM
+ 	aBool <<= (sal_Bool) sal_True;
+ 	ImplRegisterProperty( BASEPROPERTY_MOVEABLE, aBool );
+ 	ImplRegisterProperty( BASEPROPERTY_CLOSEABLE, aBool );
++	aBool <<= (sal_Bool) sal_False;
++	ImplRegisterProperty( BASEPROPERTY_VBAFORM, aBool );
+ }
+ 
+ UnoControlDialogModel::UnoControlDialogModel( const UnoControlDialogModel& rModel )
+@@ -1475,17 +1478,32 @@ void UnoDialogControl::ImplSetPosSize( R
+ 	xP->getPropertyValue( ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Width" ) ) ) >>= nWidth;
+ 	xP->getPropertyValue( ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Height" ) ) ) >>= nHeight;
+ 
+-	// Currentley we are simply using MAP_APPFONT
++	// Currentley we are simply using MAP_APPFONT ( for normal Dialogs )
++	// and MAP_100TH_MM for imported Userforms
++	MapMode aMode( MAP_APPFONT );
++	sal_Bool bVBAForm = sal_False;
++	Reference< XPropertySet > xDlgModelProps( getModel(), UNO_QUERY );
++	if ( xDlgModelProps.is() )
++	{
++		try
++		{
++			xDlgModelProps->getPropertyValue( ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "VBAForm" ) ) ) >>= bVBAForm;
++		}
++		catch( Exception& )
++		{
++		}
++	} 
++	if ( bVBAForm )
++		aMode = MapMode( MAP_100TH_MM );
+ 	OutputDevice*pOutDev = Application::GetDefaultDevice();
+-	DBG_ASSERT( pOutDev, "Missing Default Device!" );
+ 	if ( pOutDev )
+ 	{
+ 		::Size aTmp( nX, nY );
+-		aTmp = pOutDev->LogicToPixel( aTmp, MAP_APPFONT );
++		aTmp = pOutDev->LogicToPixel( aTmp, aMode );
+ 		nX = aTmp.Width();
+ 		nY = aTmp.Height();
+ 		aTmp = ::Size( nWidth, nHeight );
+-		aTmp = pOutDev->LogicToPixel( aTmp, MAP_APPFONT );
++		aTmp = pOutDev->LogicToPixel( aTmp, aMode );
+ 		nWidth = aTmp.Width();
+ 		nHeight = aTmp.Height();
+ 	}
+diff --git toolkit/source/helper/property.cxx toolkit/source/helper/property.cxx
+index a7fc25b..8d1ee74 100644
+--- toolkit/source/helper/property.cxx
++++ toolkit/source/helper/property.cxx
+@@ -271,7 +271,8 @@ ImplPropertyInfo* ImplGetPropertyInfos( 
+ 			DECL_PROP_2		( "InvokesStopNodeEditing",	TREE_INVOKESSTOPNODEEDITING, sal_Bool,		BOUND, MAYBEDEFAULT ),
+             DECL_PROP_2     ( "DialogSourceURL",        DIALOGSOURCEURL,        ::rtl::OUString,    BOUND, MAYBEDEFAULT ),
+             DECL_PROP_2     ( "URL",                    URL,                    ::rtl::OUString,    BOUND, MAYBEDEFAULT ),
+-            DECL_PROP_2     ( "EnableVisible",          ENABLEVISIBLE,          sal_Bool,    BOUND, MAYBEDEFAULT )
++            DECL_PROP_2     ( "EnableVisible",          ENABLEVISIBLE,          sal_Bool,    BOUND, MAYBEDEFAULT ),
++            DECL_PROP_2     ( "VBAForm",          VBAFORM,          sal_Bool,    BOUND, MAYBEDEFAULT ),
+             };
+ 			pPropertyInfos = aImplPropertyInfos;
+ 			nElements = sizeof( aImplPropertyInfos ) / sizeof( ImplPropertyInfo );
+diff --git xmlscript/source/xmldlg_imexp/xmldlg_import.cxx xmlscript/source/xmldlg_imexp/xmldlg_import.cxx
+index 9abe014..816731a 100644
+--- xmlscript/source/xmldlg_imexp/xmldlg_import.cxx
++++ xmlscript/source/xmldlg_imexp/xmldlg_import.cxx
+@@ -61,6 +61,7 @@
+ #include <com/sun/star/view/SelectionType.hpp>
+ #include <com/sun/star/document/XStorageBasedDocument.hpp>
+ #include <com/sun/star/script/DocumentScriptLibraryContainer.hpp>
++#include <com/sun/star/script/XVBACompat.hpp>
+ 
+ using namespace ::com::sun::star;
+ using namespace ::com::sun::star::uno;
+@@ -1906,9 +1907,14 @@ Reference< xml::sax::XDocumentHandler > 
+     Reference< XModel > const & xDocument )
+     SAL_THROW( (Exception) )
+ {
++    DialogImport* pImport = new DialogImport( xContext, xDialogModel, xDocument );
++    uno::Reference< script::XVBACompat > xVBAModeSource( pImport->getScriptLibraryContainer(), uno::UNO_QUERY );
++    
++    uno::Reference< beans::XPropertySet > xDlgProps( xDialogModel, uno::UNO_QUERY );
++    if ( xVBAModeSource.is() && xDlgProps.is() && xVBAModeSource->getVBACompatModeOn() )
++        xDlgProps->setPropertyValue( OUSTR("VBAForm"), uno::makeAny( sal_True ) );
+     return ::xmlscript::createDocumentHandler(
+-        static_cast< xml::input::XRoot * >(
+-            new DialogImport( xContext, xDialogModel, xDocument ) ) );
++        static_cast< xml::input::XRoot * >( pImport ) );
+ }
+ 
+ }
