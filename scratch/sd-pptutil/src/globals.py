@@ -35,40 +35,6 @@ def decodeName (name):
     return newname
 
 
-def getRichText (bytes, textLen=None):
-    """parse a string of the rich-text format that Excel uses."""
-
-    flags = bytes[0]
-    if type(flags) == type('c'):
-        flags = ord(flags)
-    is16Bit   = (flags & 0x01)
-    isFarEast = (flags & 0x04)
-    isRich    = (flags & 0x08)
-
-    i = 1
-    formatRuns = 0
-    if isRich:
-        formatRuns = getSignedInt(bytes[i:i+2])
-        i += 2
-
-    extInfo = 0
-    if isFarEast:
-        extInfo = getSignedInt(bytes[i:i+4])
-        i += 4
-
-    extraBytes = 0
-    if textLen == None:
-        extraBytes = formatRuns*4 + extInfo
-        textLen = len(bytes) - extraBytes - i
-
-    totalByteLen = i + textLen + extraBytes
-    if is16Bit:
-        return ("<16-bit strings not supported yet>", totalByteLen)
-
-    text = toTextBytes(bytes[i:i+textLen])
-    return (text, totalByteLen)
-
-
 def dumpBytes (chars, subDivide=None):
     line = 0
     subDivideLine = None

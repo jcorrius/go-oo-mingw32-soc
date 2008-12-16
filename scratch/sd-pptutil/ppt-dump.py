@@ -43,7 +43,9 @@ class PPTDumper(object):
 
             dirstrm = strm.getDirectoryStreamByName(dirname)
             self.__printDirHeader(dirname, len(dirstrm.bytes))
-            if  dirname == "Revision Log":
+            if  dirname == "PowerPoint Document":
+                self.__readSubStream(dirstrm)
+            elif  dirname == "Current User":
                 self.__readSubStream(dirstrm)
             else:
                 globals.dumpBytes(dirstrm.bytes, 512)

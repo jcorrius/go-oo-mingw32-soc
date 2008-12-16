@@ -9,6 +9,7 @@ class EndOfStream(Exception): pass
 
 recData = {
 
+	0:  ["DFF_PST_Unknown"],      
 	1:  ["DFF_PST_SubContainerCompleted"],      
 	2:	["DFF_PST_IRRAtom"],                    
 	3:	["DFF_PST_PSS"],                        
@@ -83,7 +84,7 @@ recData = {
  3035:	["DFF_PST_OEShapeAtom"],                
  3998:	["DFF_PST_OutlineTextRefAtom"],         
  3999:	["DFF_PST_TextHeaderAtom"],             
- 4000:	["DFF_PST_TextCharsAtom"],              
+ 4000:	["DFF_PST_TextCharsAtom", record.UniString],
  4001:	["DFF_PST_StyleTextPropAtom"],          
  4002:	["DFF_PST_BaseTextPropAtom"],           
  4003:	["DFF_PST_TxMasterStyleAtom"],          
@@ -91,7 +92,7 @@ recData = {
  4005:	["DFF_PST_TxPFStyleAtom"],              
  4006:	["DFF_PST_TextRulerAtom"],              
  4007:	["DFF_PST_TextBookmarkAtom"],           
- 4008:	["DFF_PST_TextBytesAtom"],              
+ 4008:	["DFF_PST_TextBytesAtom", record.String],
  4009:	["DFF_PST_TxSIStyleAtom"],              
  4010:	["DFF_PST_TextSpecInfoAtom"],           
  4011:	["DFF_PST_DefaultRulerAtom"],           
@@ -293,12 +294,21 @@ class PPTDirStream(object):
 
         return bytes
 
-    def readByteArray (self, size=1):
+    def readRawByteArray (self, size=1):
         bytes = []
         for i in xrange(0, size):
             if self.pos >= self.size:
                 raise EndOfStream
             bytes.append(ord(self.bytes[self.pos]))
+            self.pos += 1
+        return bytes
+
+    def readByteArray (self, size=1):
+        bytes = []
+        for i in xrange(0, size):
+            if self.pos >= self.size:
+                raise EndOfStream
+            bytes.append(self.bytes[self.pos])
             self.pos += 1
         return bytes
 
@@ -310,30 +320,45 @@ class PPTDirStream(object):
             raise EndOfStream
 
         pos = self.pos
-        header = self.readRaw(2)
-        if header == 0x0000:
-            raise EndOfStream
-        size = self.readRaw(2)
-        bytes = self.readByteArray(size)
+        recordInstance = self.readRaw(2)
+        recordVersion = (recordInstance & 0x000F)
+        recordInstance = recordInstance / 16
+        recordType = self.readRaw(2)
+        size = self.readRaw(4)
+
+        # substream? recurse into that
+        if recordVersion == 0x0F:
+            substrm = PPTDirStream(self.readByteArray(size), self.params )
+            
+            try:
+                # read bytes until DFF_PST_SubContainerCompleted
+                header = 0x0000
+                while header != 0x0001:
+                    header = substrm.readRecord()
+                return recordInstance
+            except EndOfStream:
+                return recordInstance
+
+        bytes = self.readRawByteArray(size)
 
         # record handler that parses the raw bytes and displays more 
         # meaningful information.
         handler = None 
 
         print("")
-        self.__printSep('=', 61, "%4.4Xh: "%header)
-        if recData.has_key(header):
+        self.__printSep('=', 61, "%4.4Xh: "%recordType)
+        if recData.has_key(recordType):
             print("%4.4Xh: %s (%4.4Xh)"%
-                  (header, recData[header][0], header))
-            if len(recData[header]) >= 2:
-                handler = recData[header][1](header, size, bytes)
+                  (recordType, recData[recordType][0], recordType))
+            if len(recData[recordType]) >= 2:
+                handler = recData[recordType][1](recordType, size, bytes)
         else:
-            print("%4.4Xh: [unknown record name] (%4.4Xh)"%(header, header))
-        print("%4.4Xh:   size = %d; pos = %d"%(header, size, pos))
-        self.__printSep('-', 61, "%4.4Xh: "%header)
+            print("%4.4Xh: [unknown record name] (%4.4Xh)"%(recordType, recordInstance))
+        print("%4.4Xh:   size = %d; pos = %d"%(recordType, size, pos))
+        self.__printSep('-', 61, "%4.4Xh: "%recordType)
         for i in xrange(0, size):
             if (i+1) % 16 == 1:
-                output("%4.4Xh: "%header)
+                output("%4.4Xh: "%recordType)
             output("%2.2X "%bytes[i])
             if (i+1) % 16 == 0 and i != size-1:
                 print("")
@@ -344,4 +369,4 @@ class PPTDirStream(object):
             # record handler exists.  Parse the record and display more info.
             handler.output()
 
-        return header
+        return recordType

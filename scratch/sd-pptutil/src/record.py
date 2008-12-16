@@ -7,14 +7,12 @@ import globals
 
 class BaseRecordHandler(object):
 
-    def __init__ (self, header, size, bytes, strmData):
+    def __init__ (self, header, size, bytes):
         self.header = header
         self.size = size
         self.bytes = bytes
         self.lines = []
         self.pos = 0       # current byte position
-
-        self.strmData = strmData
 
     def parseBytes (self):
         """Parse the original bytes and generate human readable output.
@@ -79,3 +77,17 @@ append a line to be displayed.
         bytes = self.readBytes(8)
         return globals.getDouble(bytes)
 
+
+class String(BaseRecordHandler):
+    """Textual content."""
+
+    def parseBytes (self):
+        name = globals.getTextBytes(self.readRemainingBytes())
+        self.appendLine("text: '%s'"%name)
+
+class UniString(BaseRecordHandler):
+    """Textual content."""
+
+    def parseBytes (self):
+        name = globals.getUTF8FromUTF16(globals.getTextBytes(self.readRemainingBytes()))
+        self.appendLine("text: '%s'"%name)
