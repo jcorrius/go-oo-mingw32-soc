@@ -178,7 +178,7 @@ recData = {
 0xF000: ["DFF_msofbtDggContainer"],    
 0xF006:	["DFF_msofbtDgg"],             
 0xF016:	["DFF_msofbtCLSID"],           
-0xF00B:	["DFF_msofbtOPT"],             
+0xF00B:	["DFF_msofbtOPT", record.Property],             
 0xF11A:	["DFF_msofbtColorMRU"],        
 0xF11E:	["DFF_msofbtSplitMenuColors"], 
 0xF001:	["DFF_msofbtBstoreContainer"], 
@@ -348,10 +348,10 @@ class PPTDirStream(object):
         print("")
         self.__printSep('=', 61, "%4.4Xh: "%recordType)
         if recData.has_key(recordType):
-            print("%4.4Xh: %s (%4.4Xh)"%
-                  (recordType, recData[recordType][0], recordType))
+            print("%4.4Xh: %s (%4.4Xh %4.4Xh)"%
+                  (recordType, recData[recordType][0], recordType, recordInstance))
             if len(recData[recordType]) >= 2:
-                handler = recData[recordType][1](recordType, size, bytes)
+                handler = recData[recordType][1](recordType, recordInstance, size, bytes)
         else:
             print("%4.4Xh: [unknown record name] (%4.4Xh)"%(recordType, recordInstance))
         print("%4.4Xh:   size = %d; pos = %d"%(recordType, size, pos))
