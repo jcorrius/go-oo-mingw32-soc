@@ -1,3 +1,10 @@
+Fit list Impress feature - dynamically adapts font size for outline text to fit the shape area
+
+From: Thorsten Behrens <thb@openoffice.org>
+
+
+---
+
  offapi/com/sun/star/drawing/TextFitToSizeType.idl  |    7 +
  qadevOOo/runner/util/ValueChanger.java             |    2 
  sd/sdi/_drvwsh.sdi                                 |   12 --
@@ -18,7 +25,7 @@
  svx/source/sdr/primitive2d/sdrtextprimitive2d.cxx  |   54 ++++++++
  svx/source/svdraw/svdedxv.cxx                      |   10 +
  svx/source/svdraw/svdfppt.cxx                      |   12 ++
- svx/source/svdraw/svdotext.cxx                     |  107 ++++++++++++---
+ svx/source/svdraw/svdotext.cxx                     |  120 ++++++++++++++---
  svx/source/svdraw/svdotextdecomposition.cxx        |  140 +++++++++++++++++++-
  svx/source/svdraw/svdotxat.cxx                     |    3 
  svx/source/svdraw/svdotxed.cxx                     |   17 ++
@@ -26,7 +33,7 @@
  svx/source/svdraw/svdtxhdl.cxx                     |    3 
  svx/source/svdraw/svdview.cxx                      |    3 
  xmloff/source/draw/sdpropls.cxx                    |    4 -
- 28 files changed, 427 insertions(+), 98 deletions(-)
+ 28 files changed, 440 insertions(+), 98 deletions(-)
 
 
 diff --git offapi/com/sun/star/drawing/TextFitToSizeType.idl offapi/com/sun/star/drawing/TextFitToSizeType.idl
@@ -647,7 +654,7 @@ index ac53ab7..4aaba2e 100644
  			{
  		 		pTObj->SetMergedItem( SdrTextAutoGrowWidthItem( bAutoGrowWidth ) );
 diff --git svx/source/svdraw/svdotext.cxx svx/source/svdraw/svdotext.cxx
-index f52ab08..90ae9c4 100644
+index f52ab08..be7075b 100644
 --- svx/source/svdraw/svdotext.cxx
 +++ svx/source/svdraw/svdotext.cxx
 @@ -145,6 +145,7 @@ SdrTextObj::SdrTextObj()
@@ -756,7 +763,7 @@ index f52ab08..90ae9c4 100644
          {
              ULONG nStat=rOutliner.GetControlWord();
              nStat|=EE_CNTRL_STRETCHING|EE_CNTRL_AUTOPAGESIZE;
-@@ -1507,13 +1508,60 @@ void SdrTextObj::ImpSetupDrawOutlinerForPaint( FASTBOOL 		bContourFrame,
+@@ -1507,15 +1508,75 @@ void SdrTextObj::ImpSetupDrawOutlinerForPaint( FASTBOOL 		bContourFrame,
      if (!bContourFrame)
      {
          // FitToSize erstmal nicht mit ContourFrame
@@ -772,9 +779,9 @@ index f52ab08..90ae9c4 100644
 +        {
 +            ImpAutoFitText(rOutliner);
 +        }
-+    }
-+}
-+
+     }
+ }
+ 
 +void SdrTextObj::ImpAutoFitText( SdrOutliner& rOutliner ) const
 +{
 +    const Size aShapeSize=GetSnapRect().GetSize();
@@ -788,8 +795,12 @@ index f52ab08..90ae9c4 100644
 +{
 +    // EditEngine formatting is unstable enough for
 +    // line-breaking text that we need some more samples
-+    USHORT nMinStretchX=65535, nMinStretchY=65535;
-+    for(int i=0; i<3; ++i)
++
++    // loop early-exits if we detect an already attained value
++    USHORT nMinStretchX=0, nMinStretchY=0;
++    USHORT aOldStretchXVals[]={0,0,0,0,0,0,0,0,0,0};
++    const size_t aStretchArySize=sizeof(aOldStretchXVals)/sizeof(*aOldStretchXVals);
++    for(int i=0; i<aStretchArySize; ++i)
 +    {
 +        const Size aCurrTextSize = rOutliner.CalcTextSize();
 +        double fFactor(1.0);
@@ -801,7 +812,18 @@ index f52ab08..90ae9c4 100644
 +        USHORT nCurrStretchX, nCurrStretchY;
 +        rOutliner.GetGlobalCharStretching(nCurrStretchX, nCurrStretchY);
 +
-+        // only do the scaling once (we'll get notified again, recursively)
++        if (fFactor >= 1.0 )
++        {
++            // resulting text area fits into available shape rect -
++            // err on the larger streching, to optimally fill area
++            nMinStretchX = std::max(nMinStretchX,nCurrStretchX);
++            nMinStretchY = std::max(nMinStretchY,nCurrStretchY);
++        }
++
++        aOldStretchXVals[i] = nCurrStretchX;
++        if( std::find(aOldStretchXVals, aOldStretchXVals+i, nCurrStretchX) != aOldStretchXVals+i )
++            break; // same value already attained once; algo is looping, exit
++
 +        if (fFactor < 1.0 || (fFactor >= 1.0 && nCurrStretchX != 100))
 +        {
 +            nCurrStretchX = sal::static_int_cast<USHORT>(nCurrStretchX*fFactor);
@@ -809,18 +831,18 @@ index f52ab08..90ae9c4 100644
 +            rOutliner.SetGlobalCharStretching(std::min(USHORT(100),nCurrStretchX),
 +                                              std::min(USHORT(100),nCurrStretchY));
 +            OSL_TRACE("SdrTextObj::onEditOutlinerStatusEvent(): zoom is %d", nCurrStretchX);
-+
-+            nMinStretchX = std::min(nMinStretchX,nCurrStretchX);
-+            nMinStretchY = std::min(nMinStretchY,nCurrStretchY);
 +        }
-     }
++    }
 +
++    OSL_TRACE("---- SdrTextObj::onEditOutlinerStatusEvent(): final zoom is %d ----", nMinStretchX);
 +    rOutliner.SetGlobalCharStretching(std::min(USHORT(100),nMinStretchX),
 +                                      std::min(USHORT(100),nMinStretchY));
- }
- 
++}
++
  void SdrTextObj::SetupOutlinerFormatting( SdrOutliner& rOutl, Rectangle& rPaintRect ) const
-@@ -2107,6 +2155,17 @@ bool SdrTextObj::IsTextAnimationAllowed() const
+ {
+     ImpInitDrawOutliner( rOutl );
+@@ -2107,6 +2168,17 @@ bool SdrTextObj::IsTextAnimationAllowed() const
  	return mbTextAnimationAllowed;
  }
  
@@ -838,7 +860,7 @@ index f52ab08..90ae9c4 100644
  void SdrTextObj::SetTextAnimationAllowed(sal_Bool bNew)
  {
  	if(mbTextAnimationAllowed != bNew)
-@@ -2124,13 +2183,21 @@ void SdrTextObj::onEditOutlinerStatusEvent( EditStatus* pEditStatus )
+@@ -2124,13 +2196,21 @@ void SdrTextObj::onEditOutlinerStatusEvent( EditStatus* pEditStatus )
  	const bool bGrowY=(nStat & EE_STAT_TEXTHEIGHTCHANGED) !=0;
      if(bTextFrame && (bGrowX || bGrowY))
  	{
