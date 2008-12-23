@@ -31,7 +31,7 @@ class PPTDumper(object):
 
     def dump (self):
         file = open(self.filepath, 'rb')
-        strm = stream.PPTStream(file.read(), self.params)
+        strm = stream.PPTFile(file.read(), self.params)
         file.close()
         strm.printStreamInfo()
         strm.printHeader()
@@ -44,21 +44,17 @@ class PPTDumper(object):
             dirstrm = strm.getDirectoryStreamByName(dirname)
             self.__printDirHeader(dirname, len(dirstrm.bytes))
             if  dirname == "PowerPoint Document":
-                self.__readSubStream(dirstrm)
+                if not self.__readSubStream(dirstrm):
+                    return False
             elif  dirname == "Current User":
-                self.__readSubStream(dirstrm)
+                if not self.__readSubStream(dirstrm):
+                    return False
             else:
                 globals.dumpBytes(dirstrm.bytes, 512)
 
     def __readSubStream (self, strm):
-        try:
-            # read bytes from BOF to EOF.
-            header = 0x0000
-            while header != 0x000A:
-                header = strm.readRecord()
-            return True
-        except stream.EndOfStream:
-            return False
+        # read all records in substream
+        return strm.readRecords()
 
 
 def main (args):
@@ -89,7 +85,9 @@ def main (args):
         return
 
     dumper = PPTDumper(args[0], params)
-    dumper.dump()
+    if not dumper.dump():
+        error("FAILURE\n")
+        
 
 if __name__ == '__main__':
     main(sys.argv)

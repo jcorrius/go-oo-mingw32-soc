@@ -7,12 +7,13 @@ import globals
 
 class BaseRecordHandler(object):
 
-    def __init__ (self, recordType, recordInstance, size, bytes):
+    def __init__ (self, recordType, recordInstance, size, bytes, prefix=''):
         self.recordType = recordType
         self.recordInstance = recordInstance
         self.size = size
         self.bytes = bytes
         self.lines = []
+        self.prefix = prefix
         self.pos = 0       # current byte position
 
     def parseBytes (self):
@@ -24,11 +25,14 @@ append a line to be displayed.
 """
         pass
 
+    def __print (self, text):
+        print(self.prefix + text)
+
     def output (self):
         self.parseBytes()
-        print("%4.4Xh: %s"%(self.recordType, "-"*61))
+        self.__print("%4.4Xh: %s"%(self.recordType, "-"*61))
         for line in self.lines:
-            print("%4.4Xh: %s"%(self.recordType, line))
+            self.__print("%4.4Xh: %s"%(self.recordType, line))
 
     def appendLine (self, line):
         self.lines.append(line)
@@ -120,7 +124,155 @@ class Property(BaseRecordHandler):
                 self.appendLine("%4.4Xh: [unknown property type: %4.4Xh, value: %8.8Xh, complex: %d, blip: %d]"%(propType, propValue, isComplex, isBlip))
 
 # -------------------------------------------------------------------
-# special record handlers: properties
+# special record handlers: text style properties
+
+class TextStyles(BaseRecordHandler):
+    """Text style properties."""
+
+    def parseBytes (self):
+        # 4 bytes: total len of para attribs
+        # <para attribs>
+        # 4 bytes: total len of char attribs
+        # <char attribs>
+        paraAttribLen = self.readUnsignedInt(4)
+        paraAttribEndPos = self.pos + paraAttribLen
+        while self.pos < paraAttribEndPos:
+            self.parseParaStyle()
+            self.appendLine("-"*61)
+
+        charAttribLen = self.readUnsignedInt(4)
+        charAttribEndPos = self.pos + charAttribLen
+        while self.pos < charAttribEndPos:
+            self.parseCharStyle()
+            self.appendLine("-"*61)
+
+    def appendParaProp (self, text):
+        self.appendLine("para prop given: "+text)
+
+    def appendCharProp (self, text):
+        self.appendLine("char prop given: "+text)
+
+    def parseParaStyle (self):
+        indentLevel = self.readUnsignedInt(2)
+        styleMask = self.readUnsignedInt(4)
+
+        self.appendLine("para props for indent: %d"%indentLevel)
+
+        if styleMask & 0x000F:
+            bulletFlags = self.readUnsignedInt(2)
+            # filter bits not in flag field
+            bulletFlags = bulletFlags & (styleMask & 0x000F)
+            self.appendParaProp("bullet flags %4.4Xh"%bulletFlags)
+
+        if styleMask & 0x0080:
+            bulletChar = self.readUnsignedInt(2)
+            self.appendParaProp("bullet char %4.4Xh"%bulletChar)
+
+        if styleMask & 0x0010:
+            bulletTypeface = self.readUnsignedInt(2)
+            self.appendParaProp("bullet typeface %d"%bulletTypeface)
+
+        if styleMask & 0x0040:
+            bulletSize = self.readSignedInt(2)
+            self.appendParaProp("bullet size %d"%bulletSize)
+
+        if styleMask & 0x0020:
+            bulletColorAtom = ColorPropertyHandler(self.readUnsignedInt(2), self.readUnsignedInt(4), False, False, self.appendParaProp)
+            bulletColorAtom.output()
+            self.appendParaProp("bullet color atom")
+
+        if styleMask & 0x0800:
+            paraAlignment = self.readSignedInt(2)
+            self.appendParaProp("para alignment %4.4Xh"%paraAlignment)
+
+        if styleMask & 0x0400:
+            paraIndent = self.readSignedInt(2)
+            self.appendParaProp("para indent %d"%paraIndent)
+
+        if styleMask & 0x0200:
+            unused = self.readSignedInt(2)
+            self.appendParaProp("unused para property %4.4Xh"%unused)
+
+        if styleMask & 0x0100:
+            paraLeftMargin = self.readSignedInt(2)
+            self.appendParaProp("para left margin %d"%paraLeftMargin)
+
+        if styleMask & 0x1000:
+            paraLineSpacing = self.readSignedInt(2)
+            self.appendParaProp("para linespacing %d"%paraLineSpacing)
+
+        if styleMask & 0x2000:
+            paraSpaceBefore = self.readSignedInt(2)
+            self.appendParaProp("para space before %d"%paraSpaceBefore)
+
+        if styleMask & 0x4000:
+            paraSpaceAfter = self.readSignedInt(2)
+            self.appendParaProp("para space after %d"%paraSpaceAfter)
+
+        if styleMask & 0x8000:
+            paraDefaultTabSize = self.readSignedInt(2)
+            self.appendParaProp("para default tab size %d"%paraDefaultTabSize)
+
+        if styleMask & 0x100000:
+            numTabStops = self.readUnsignedInt(2)
+            for i in xrange(0, numTabStops):
+                tabDistance = self.readUnsignedInt(2)
+                tabAlignment = self.readUnsignedInt(2)
+                self.appendParaProp("para tab stop %d: distance %d, align %4.4Xh"%(i, tabDistance, tabAlignment))
+
+        if styleMask & 0x10000:
+            paraBaseline = self.readUnsignedInt(2)
+            self.appendParaProp("para baseline %d"%paraBaseline)
+
+        if styleMask & 0xE0000:
+            paraAsianLinebreaking = self.readUnsignedInt(2)
+            # filter bits not in flag field
+            paraAsianLinebreaking = paraAsianLinebreaking & ((styleMask & 0xE0000) / 0x20000)
+            self.appendParaProp("para asian line breaking flags %4.4Xh"%paraAsianLinebreaking)
+
+        if styleMask & 0x200000:
+            paraTextDirection = self.readUnsignedInt(2)
+            self.appendParaProp("para text direction %4.4Xh"%paraTextDirection)
+
+    def parseCharStyle (self):
+        styleMask = self.readUnsignedInt(4)
+
+        if styleMask & 0xFFFF:
+            charFlags = self.readUnsignedInt(2)
+            self.appendCharProp("char flags %4.4Xh"%charFlags)
+
+        if styleMask & 0x10000:
+            typeFace = self.readUnsignedInt(2)
+            self.appendCharProp("char typeface %d"%typeFace)
+
+        if styleMask & 0x200000:
+            oldTypeFace = self.readUnsignedInt(2)
+            self.appendCharProp("char old asian typeface %d"%oldTypeFace)
+
+        if styleMask & 0x400000:
+            ansiTypeFace = self.readUnsignedInt(2)
+            self.appendCharProp("char ansi typeface %d"%ansiTypeFace)
+
+        if styleMask & 0x800000:
+            symbolTypeFace = self.readUnsignedInt(2)
+            self.appendCharProp("char symbol typeface %d"%symbolTypeFace)
+
+        if styleMask & 0x20000:
+            fontSize = self.readUnsignedInt(2)
+            self.appendCharProp("char font size %d"%fontSize)
+
+        if styleMask & 0x40000:
+            charColorAtom = ColorPropertyHandler(self.readUnsignedInt(2), self.readUnsignedInt(4), False, False, self.appendCharProp)
+            charColorAtom.output()
+            self.appendCharProp("char color atom")
+
+        if styleMask & 0x80000:
+            fontPosition = self.readSignedInt(2)
+            self.appendCharProp("char font position %d"%fontPosition)
+
+
+# -------------------------------------------------------------------
+# special record handlers: property atoms
 
 class BasePropertyHandler():
     """Base property handler."""
@@ -146,7 +298,8 @@ class BoolPropertyHandler(BasePropertyHandler):
             if propData.has_key(i):
                 propEntry = propData[i]
                 if type(propEntry[1]) == type(BoolPropertyHandler):
-                    self.printer("%4.4Xh: %s = %d [\"%s\"]"%(self.propType, propEntry[0], (self.propValue & bitMask) != 0, propEntry[2]))
+                    flagValue = self.getTrueFalse(self.propValue & bitMask)
+                    self.printer("%4.4Xh: %s = %d [\"%s\"]"%(self.propType, propEntry[0], flagValue, propEntry[2]))
             bitMask *= 2
 
             
@@ -164,6 +317,24 @@ class FixedPointHandler(BasePropertyHandler):
     
 class ColorPropertyHandler(BasePropertyHandler):
     """Color property."""   
+
+    def split (self, packedColor):
+        return (packedColor & 0xFF0000) / 0x10000, (packedColor & 0xFF00) / 0x100, (packedColor & 0xFF)
+    
+    def output (self):
+        propEntry = ["<color atom>", None, "undocumented color property"]
+        if propData.has_key(self.propType):
+            propEntry = propData[self.propType]
+        colorValue = self.propValue & 0xFFFFFF
+        if self.propValue & 0xFE000000 == 0xFE000000:
+            self.printer("%4.4Xh: %s = (%d,%d,%d) [\"%s\"]"%(self.propType, propEntry[0], split(colorValue), propEntry[2]))
+        elif self.propValue & 0x08000000 or self.propValue & 0x10000000:
+            self.printer("%4.4Xh: %s = schemecolor(%d) [\"%s\"]"%(self.propType, propEntry[0], colorValue, propEntry[2]))
+        elif self.propValue & 0x04000000:
+            self.printer("%4.4Xh: %s = colorschemecolor(%d) [\"%s\"]"%(self.propType, propEntry[0], colorValue, propEntry[2]))
+        else:
+            self.printer("%4.4Xh: %s = <unidentified color>(%4.4Xh) [\"%s\"]"%(self.propType, propEntry[0], colorValue, propEntry[2]))
+
 
 class CharPropertyHandler(BasePropertyHandler):
     """string property."""  
@@ -467,6 +638,7 @@ propData = {
  904:  ["DFF_Prop_lidRegroup",                   LongPropertyHandler,              "Regroup ID"],
  927:  ["DFF_Prop_tableProperties",             LongPropertyHandler, ""],
  928:  ["DFF_Prop_tableRowProperties",          LongPropertyHandler, ""],
+ 937:  ["DFF_Prop_xmlstuff",                     LongPropertyHandler, "Embedded ooxml"],
  953:  ["DFF_Prop_fEditedWrap",                  BoolPropertyHandler,              "Has the wrap polygon been edited?"],
  954:  ["DFF_Prop_fBehindDocument",              BoolPropertyHandler,              "Word-only (shape is behind text)"],
  955:  ["DFF_Prop_fOnDblClickNotify",            BoolPropertyHandler,              "Notify client on a double click"],
