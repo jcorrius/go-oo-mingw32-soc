@@ -1,173 +1,197 @@
-Index: source/model/main/Diagram.cxx
-===================================================================
---- chart2/source/model/main/Diagram.cxx	(.../tags/DEV300_m35/chart2)	(revision 264806)
-+++ chart2/source/model/main/Diagram.cxx	(.../cws/koheichart01/chart2)	(revision 264806)
-@@ -78,6 +78,7 @@
-     PROP_DIAGRAM_SORT_BY_X_VALUES,
-     PROP_DIAGRAM_CONNECT_BARS,
+diff --git chart2/source/controller/chartapiwrapper/DiagramWrapper.cxx chart2/source/controller/chartapiwrapper/DiagramWrapper.cxx
+index 439a2b5..f451855 100644
+--- chart2/source/controller/chartapiwrapper/DiagramWrapper.cxx
++++ chart2/source/controller/chartapiwrapper/DiagramWrapper.cxx
+@@ -112,6 +112,7 @@ enum
+     PROP_DIAGRAM_DATAROW_SOURCE,
+ 
      PROP_DIAGRAM_GROUP_BARS_PER_AXIS,
 +    PROP_DIAGRAM_INCLUDE_HIDDEN_CELLS,
-     PROP_DIAGRAM_STARTING_ANGLE,
-     PROP_DIAGRAM_RIGHT_ANGLED_AXES,
-     PROP_DIAGRAM_PERSPECTIVE,
-@@ -125,6 +126,13 @@
+ 
+     PROP_DIAGRAM_SORT_BY_X_VALUES,
+ 
+@@ -233,6 +234,13 @@ void lcl_AddPropertiesToVector(
+                   beans::PropertyAttribute::BOUND
                    | beans::PropertyAttribute::MAYBEDEFAULT ));
  
-     rOutProperties.push_back(
-+        Property( C2U("IncludeHiddenCells"),
++    rOutProperties.push_back(
++        Property( C2U( "IncludeHiddenCells" ),
 +                  PROP_DIAGRAM_INCLUDE_HIDDEN_CELLS,
 +                  ::getBooleanCppuType(),
 +                  beans::PropertyAttribute::BOUND
 +                  | beans::PropertyAttribute::MAYBEDEFAULT ));
 +
-+    rOutProperties.push_back(
-         Property( C2U( "StartingAngle" ),
-                   PROP_DIAGRAM_STARTING_ANGLE,
-                   ::getCppuType( reinterpret_cast< const sal_Int32 * >(0) ),
-@@ -170,6 +178,7 @@
-     ::chart::PropertyHelper::setPropertyValueDefault( rOutMap, PROP_DIAGRAM_SORT_BY_X_VALUES, false );
-     ::chart::PropertyHelper::setPropertyValueDefault( rOutMap, PROP_DIAGRAM_CONNECT_BARS, false );
-     ::chart::PropertyHelper::setPropertyValueDefault( rOutMap, PROP_DIAGRAM_GROUP_BARS_PER_AXIS, true );
-+    ::chart::PropertyHelper::setPropertyValueDefault( rOutMap, PROP_DIAGRAM_INCLUDE_HIDDEN_CELLS, true );
-     ::chart::PropertyHelper::setPropertyValueDefault( rOutMap, PROP_DIAGRAM_RIGHT_ANGLED_AXES, false );
-     ::chart::PropertyHelper::setPropertyValueDefault< sal_Int32 >( rOutMap, PROP_DIAGRAM_STARTING_ANGLE, 90 );
- }
-Index: source/tools/ExplicitCategoriesProvider.cxx
-===================================================================
---- chart2/source/tools/ExplicitCategoriesProvider.cxx	(.../tags/DEV300_m35/chart2)	(revision 264806)
-+++ chart2/source/tools/ExplicitCategoriesProvider.cxx	(.../cws/koheichart01/chart2)	(revision 264806)
-@@ -34,7 +34,11 @@
- #include "ExplicitCategoriesProvider.hxx"
- #include "DiagramHelper.hxx"
- #include "CommonConverters.hxx"
-+#include "macros.hxx"
+     //new for XY charts
+     rOutProperties.push_back(
+         Property( C2U( "SortByXValues" ),
+diff --git chart2/source/controller/dialogs/ObjectNameProvider.cxx chart2/source/controller/dialogs/ObjectNameProvider.cxx
+index d477a34..b70e1df 100644
+--- chart2/source/controller/dialogs/ObjectNameProvider.cxx
++++ chart2/source/controller/dialogs/ObjectNameProvider.cxx
+@@ -53,6 +53,8 @@
  
-+#include <hash_set>
-+#include <vector>
-+
+ #include <com/sun/star/chart2/XTitle.hpp>
+ #include <com/sun/star/chart2/XRegressionCurveContainer.hpp>
++#include <com/sun/star/chart2/XDiagram.hpp>
++#include <com/sun/star/beans/XPropertySet.hpp>
+ 
  //.............................................................................
  namespace chart
- {
-@@ -45,9 +49,12 @@
+@@ -63,6 +65,10 @@ using namespace ::com::sun::star::chart2;
  using ::com::sun::star::uno::Reference;
  using ::com::sun::star::uno::Sequence;
+ using ::com::sun::star::uno::Any;
++using ::com::sun::star::uno::UNO_QUERY;
++using ::com::sun::star::chart2::XDiagram;
++using ::com::sun::star::beans::XPropertySet;
++using ::com::sun::star::beans::UnknownPropertyException;
  using rtl::OUString;
-+using ::std::hash_set;
-+using ::std::vector;
  
- ExplicitCategoriesProvider::ExplicitCategoriesProvider( const Reference< chart2::XCoordinateSystem >& xCooSysModel )
-     : m_bDirty(true)
-+    , m_bIncludeHiddelCells(true)
-     , m_xCooSysModel( xCooSysModel )
-     , m_xCategories()
- {
-@@ -63,20 +70,75 @@
- {
+ namespace
+@@ -95,6 +101,29 @@ void lcl_addText( OUString& rOut, const OUString& rSeparator, const OUString& rN
+         rOut+=rNext;
  }
  
-+static void lcl_removeHiddenIndices(Sequence<OUString>& rCategories, const Sequence<sal_Int32>& rHiddenValues)
++bool lcl_isHiddenCellsIncluded( const Reference<frame::XModel>& xChartModel )
 +{
-+    hash_set<sal_Int32> aIndices;
-+    sal_Int32 n = rHiddenValues.getLength();
-+    for (sal_Int32 i = 0; i < n; ++i)
-+        aIndices.insert(rHiddenValues[i]);
++    bool bIncluded = true;  // hidden cells are included by default.
 +
-+    vector<OUString> aNewCatsVector;
-+    n = rCategories.getLength();
-+    aNewCatsVector.reserve(n);
-+    for (sal_Int32 i = 0; i < n; ++i)
++    Reference< XDiagram > xDiagram( ChartModelHelper::findDiagram(xChartModel) );
++    if (!xDiagram.is())
++        return bIncluded;
++
++    Reference< XPropertySet > xProp( xDiagram, UNO_QUERY );
++    if (!xProp.is())
++        return bIncluded;
++
++    try
 +    {
-+        if (aIndices.count(i))
-+            // skip this value.
-+            continue;
-+
-+        aNewCatsVector.push_back(rCategories[i]);
++        xProp->getPropertyValue(C2U("IncludeHiddenCells")) >>= bIncluded;
++    }
++    catch (const UnknownPropertyException&)
++    {
 +    }
 +
-+    n = aNewCatsVector.size();
-+    rCategories.realloc(n);
-+    for (size_t i = 0; i < n; ++i)
-+        rCategories[i] = aNewCatsVector[i];
++    return bIncluded;
 +}
 +
- //XTextualDataSequence
- Sequence< ::rtl::OUString > SAL_CALL ExplicitCategoriesProvider::getTextualData() throw( uno::RuntimeException)
+ OUString lcl_getDataPointValueText( const Reference< XDataSeries >& xSeries, sal_Int32 nPointIndex,
+                                     const Reference< XCoordinateSystem >& xCooSys,
+                                     const Reference< frame::XModel >& xChartModel )
+@@ -111,6 +140,7 @@ OUString lcl_getDataPointValueText( const Reference< XDataSeries >& xSeries, sal
+ 
+     rtl::OUString aX, aY, aY_Min, aY_Max, aY_First, aY_Last;
+     double fValue = 0;
++    bool bIncludeHiddenCells = lcl_isHiddenCellsIncluded(xChartModel);
+ 
+     uno::Reference< util::XNumberFormatsSupplier > xNumberFormatsSupplier( xChartModel, uno::UNO_QUERY );
+     NumberFormatterWrapper aNumberFormatterWrapper( xNumberFormatsSupplier );
+@@ -130,6 +160,14 @@ OUString lcl_getDataPointValueText( const Reference< XDataSeries >& xSeries, sal
+ 	    {
+ 		    try
+ 		    {
++                if (!bIncludeHiddenCells)
++                {
++                    Sequence<sal_Int32> aHiddenValues;
++                    xProp->getPropertyValue( C2U("HiddenValues") ) >>= aHiddenValues;
++                    if (aHiddenValues.getLength())
++                        DataSeriesHelper::removeHiddenDataPoints(aData, aHiddenValues);
++                }
++
+                 uno::Any aARole = xProp->getPropertyValue( C2U( "Role" ) );
+                 rtl::OUString aRole;
+                 aARole >>= aRole;
+@@ -535,8 +573,11 @@ rtl::OUString ObjectNameProvider::getHelpText( const rtl::OUString& rObjectCID,
+             aWildcard = C2U("%POINTVALUES");
+             nIndex = aRet.indexOf( aWildcard );
+             if( nIndex != -1 )
+-                aRet = aRet.replaceAt( nIndex, aWildcard.getLength(), lcl_getDataPointValueText(
+-                xSeries,nPointIndex, DataSeriesHelper::getCoordinateSystemOfSeries(xSeries, xDiagram), xChartModel ) );
++            {    
++                OUString aValueText = lcl_getDataPointValueText(
++                    xSeries, nPointIndex, DataSeriesHelper::getCoordinateSystemOfSeries(xSeries, xDiagram), xChartModel);
++                aRet = aRet.replaceAt( nIndex, aWildcard.getLength(), aValueText );
++            }
+ 
+             //replace series name
+             aWildcard = C2U("%SERIESNAME");
+diff --git chart2/source/controller/dialogs/TabPages.hrc chart2/source/controller/dialogs/TabPages.hrc
+index a9fb1ab..494190f 100644
+--- chart2/source/controller/dialogs/TabPages.hrc
++++ chart2/source/controller/dialogs/TabPages.hrc
+@@ -94,10 +94,12 @@
+ #define GB_BAR						8
+ #define CB_CONNECTOR				9
+ #define CB_BARS_SIDE_BY_SIDE       10
+-#define FL_PLOT_MISSING_VALUES     11
+-#define RB_DONT_PAINT              12
+-#define RB_ASSUME_ZERO             13
+-#define RB_CONTINUE_LINE           14
++#define CB_INCLUDE_HIDDEN_CELLS    11
++#define FL_PLOT_OPTIONS            12
++#define RB_DONT_PAINT              13
++#define RB_ASSUME_ZERO             14
++#define RB_CONTINUE_LINE           15
++#define FT_MISSING_VALUES          16
+ 
+ //------------
+ //from old chart tplabel.hrc
+diff --git chart2/source/controller/dialogs/tp_PolarOptions.cxx chart2/source/controller/dialogs/tp_PolarOptions.cxx
+index 56b6907..df1c971 100644
+--- chart2/source/controller/dialogs/tp_PolarOptions.cxx
++++ chart2/source/controller/dialogs/tp_PolarOptions.cxx
+@@ -51,7 +51,9 @@ PolarOptionsTabPage::PolarOptionsTabPage( Window* pWindow,const SfxItemSet& rInA
+     m_aFL_StartingAngle( this, SchResId( FL_STARTING_ANGLE ) ),
+     m_aAngleDial( this, SchResId( CT_ANGLE_DIAL ) ),
+     m_aFT_Degrees( this, SchResId( FT_ROTATION_DEGREES ) ),
+-    m_aNF_StartingAngle( this, SchResId( NF_STARTING_ANGLE ) )
++    m_aNF_StartingAngle( this, SchResId( NF_STARTING_ANGLE ) ),
++    m_aFL_PlotOptions( this, SchResId( FL_PLOT_OPTIONS ) ),
++    m_aCB_IncludeHiddenCells( this, SchResId( CB_INCLUDE_HIDDEN_CELLS ) )
  {
-     if( m_bDirty )
-     {
--        if( m_xCategories.is() )
--            m_aExplicitCategories = DataSequenceToStringSequence(m_xCategories->getValues());
--        if(!m_aExplicitCategories.getLength())
--            m_aExplicitCategories = DiagramHelper::generateAutomaticCategories( uno::Reference< chart2::XCoordinateSystem >( m_xCooSysModel.get(), uno::UNO_QUERY ) );
-+        if (!m_xCategories.is())
-+            return m_aExplicitCategories;
+     FreeResource();
+ 
+@@ -78,6 +80,9 @@ BOOL PolarOptionsTabPage::FillItemSet( SfxItemSet& rOutAttrs )
+     if( m_aCB_Clockwise.IsVisible() )
+         rOutAttrs.Put(SfxInt32Item(SCHATTR_CLOCKWISE,m_aCB_Clockwise.IsChecked()));
+ 
++    if (m_aCB_IncludeHiddenCells.IsVisible())
++        rOutAttrs.Put(SfxBoolItem(SCHATTR_INCLUDE_HIDDEN_CELLS, m_aCB_IncludeHiddenCells.IsChecked()));
 +
-+        uno::Reference< data::XDataSequence > xValues = m_xCategories->getValues();
-+        uno::Reference< beans::XPropertySet > xProp(xValues, uno::UNO_QUERY);
-+        bool bIsHidden = false;
-+        Sequence<sal_Int32> aHiddenValues;
-+        if (xProp.is())
-+        {
-+            xProp->getPropertyValue( C2U( "IsHidden" ) ) >>= bIsHidden;
-+            xProp->getPropertyValue( C2U( "HiddenValues" ) ) >>= aHiddenValues;
-+        }
-+
-+        if (!bIsHidden || m_bIncludeHiddelCells)
-+        {
-+            m_aExplicitCategories = DataSequenceToStringSequence(xValues);
-+            if (!m_bIncludeHiddelCells)
-+                lcl_removeHiddenIndices(m_aExplicitCategories, aHiddenValues);
-+
-+            if(!m_aExplicitCategories.getLength())
-+                m_aExplicitCategories = DiagramHelper::generateAutomaticCategories(
-+                    uno::Reference< chart2::XCoordinateSystem >( m_xCooSysModel.get(), uno::UNO_QUERY ) );
-+        }
-+
-         m_bDirty = false;
-     }
-     return m_aExplicitCategories;
+     return TRUE;
  }
  
-+void ExplicitCategoriesProvider::setIncludeHiddenCells(bool b)
-+{
-+    m_bIncludeHiddelCells = b;
-+}
+@@ -108,6 +113,11 @@ void PolarOptionsTabPage::Reset(const SfxItemSet& rInAttrs)
+     {
+         m_aCB_Clockwise.Show(FALSE);
+     }
++    if (rInAttrs.GetItemState(SCHATTR_INCLUDE_HIDDEN_CELLS, TRUE, &pPoolItem) == SFX_ITEM_SET)
++    {
++        bool bVal = static_cast<const SfxBoolItem*>(pPoolItem)->GetValue();
++        m_aCB_IncludeHiddenCells.Check(bVal);
++    }
+ }
+ 
+ //.............................................................................
+diff --git chart2/source/controller/dialogs/tp_PolarOptions.hxx chart2/source/controller/dialogs/tp_PolarOptions.hxx
+index cd1f8e5..77f7a2e 100644
+--- chart2/source/controller/dialogs/tp_PolarOptions.hxx
++++ chart2/source/controller/dialogs/tp_PolarOptions.hxx
+@@ -58,6 +58,9 @@ private:
+     svx::DialControl m_aAngleDial;
+     FixedText        m_aFT_Degrees;
+     NumericField     m_aNF_StartingAngle;
 +
-+bool ExplicitCategoriesProvider::getIncludeHiddenCells() const
-+{
-+    return m_bIncludeHiddelCells;
-+}
-+
- // static
- OUString ExplicitCategoriesProvider::getCategoryByIndex(
-         const Reference< XCoordinateSystem >& xCooSysModel,
-Index: source/tools/UncachedDataSequence.cxx
-===================================================================
---- chart2/source/tools/UncachedDataSequence.cxx	(.../tags/DEV300_m35/chart2)	(revision 264806)
-+++ chart2/source/tools/UncachedDataSequence.cxx	(.../cws/koheichart01/chart2)	(revision 264806)
-@@ -79,7 +79,7 @@
-     const OUString & rRangeRepresentation )
-         : OPropertyContainer( GetBroadcastHelper()),
-           UncachedDataSequence_Base( GetMutex()),
--          m_bIsHidden( true ),
-+          m_bIsHidden( false ),
-           m_xDataProvider( xIntDataProv ),
-           m_aSourceRepresentation( rRangeRepresentation ),
-           m_xModifyEventForwarder( new ModifyListenerHelper::ModifyEventForwarder())
-@@ -93,7 +93,7 @@
-     const OUString & rRole )
-         : OPropertyContainer( GetBroadcastHelper()),
-           UncachedDataSequence_Base( GetMutex()),
--          m_bIsHidden( true ),
-+          m_bIsHidden( false ),
-           m_xDataProvider( xIntDataProv ),
-           m_aSourceRepresentation( rRangeRepresentation ),
-           m_xModifyEventForwarder( new ModifyListenerHelper::ModifyEventForwarder())
-Index: source/controller/dialogs/tp_PolarOptions.src
-===================================================================
---- chart2/source/controller/dialogs/tp_PolarOptions.src	(.../tags/DEV300_m35/chart2)	(revision 264806)
-+++ chart2/source/controller/dialogs/tp_PolarOptions.src	(.../cws/koheichart01/chart2)	(revision 264806)
-@@ -47,8 +47,8 @@
++    FixedLine        m_aFL_PlotOptions;
++    CheckBox         m_aCB_IncludeHiddenCells;
+ };
+ 
+ //.............................................................................
+diff --git chart2/source/controller/dialogs/tp_PolarOptions.src chart2/source/controller/dialogs/tp_PolarOptions.src
+index b01ba74..bdbf7c5 100644
+--- chart2/source/controller/dialogs/tp_PolarOptions.src
++++ chart2/source/controller/dialogs/tp_PolarOptions.src
+@@ -47,8 +47,8 @@ TabPage TP_POLAROPTIONS
      };
      FixedLine FL_STARTING_ANGLE
      {
@@ -178,7 +202,7 @@ Index: source/controller/dialogs/tp_PolarOptions.src
          Text [ en-US ] = "Starting angle" ;
      };
      Control CT_ANGLE_DIAL
-@@ -75,4 +75,17 @@
+@@ -75,4 +75,17 @@ TabPage TP_POLAROPTIONS
          Maximum = 359 ;
          SpinSize = 5 ;
      };
@@ -196,66 +220,11 @@ Index: source/controller/dialogs/tp_PolarOptions.src
 +        Text [ en-US ] = "Plot ~values from hidden cells";
 +    };
  };
-Index: source/controller/dialogs/tp_SeriesToAxis.hxx
-===================================================================
---- chart2/source/controller/dialogs/tp_SeriesToAxis.hxx	(.../tags/DEV300_m35/chart2)	(revision 264806)
-+++ chart2/source/controller/dialogs/tp_SeriesToAxis.hxx	(.../cws/koheichart01/chart2)	(revision 264806)
-@@ -74,11 +74,14 @@
-     CheckBox	aCBConnect;
-     CheckBox    aCBAxisSideBySide;
- 
--    FixedLine   m_aFL_EmptyCells;
-+    FixedLine   m_aFL_PlotOptions;
-+    FixedText   m_aFT_MissingValues;
-     RadioButton m_aRB_DontPaint;
-     RadioButton m_aRB_AssumeZero;
-     RadioButton m_aRB_ContinueLine;
- 
-+    CheckBox    m_aCBIncludeHiddenCells;
-+
-     DECL_LINK(EnableHdl, RadioButton * );
- 
-     sal_Int32   m_nAllSeriesAxisIndex;
-Index: source/controller/dialogs/tp_PolarOptions.hxx
-===================================================================
---- chart2/source/controller/dialogs/tp_PolarOptions.hxx	(.../tags/DEV300_m35/chart2)	(revision 264806)
-+++ chart2/source/controller/dialogs/tp_PolarOptions.hxx	(.../cws/koheichart01/chart2)	(revision 264806)
-@@ -58,6 +58,9 @@
-     svx::DialControl m_aAngleDial;
-     FixedText        m_aFT_Degrees;
-     NumericField     m_aNF_StartingAngle;
-+
-+    FixedLine        m_aFL_PlotOptions;
-+    CheckBox         m_aCB_IncludeHiddenCells;
- };
- 
- //.............................................................................
-Index: source/controller/dialogs/TabPages.hrc
-===================================================================
---- chart2/source/controller/dialogs/TabPages.hrc	(.../tags/DEV300_m35/chart2)	(revision 264806)
-+++ chart2/source/controller/dialogs/TabPages.hrc	(.../cws/koheichart01/chart2)	(revision 264806)
-@@ -89,10 +89,12 @@
- #define GB_BAR						8
- #define CB_CONNECTOR				9
- #define CB_BARS_SIDE_BY_SIDE       10
--#define FL_PLOT_MISSING_VALUES     11
--#define RB_DONT_PAINT              12
--#define RB_ASSUME_ZERO             13
--#define RB_CONTINUE_LINE           14
-+#define CB_INCLUDE_HIDDEN_CELLS    11
-+#define FL_PLOT_OPTIONS            12
-+#define RB_DONT_PAINT              13
-+#define RB_ASSUME_ZERO             14
-+#define RB_CONTINUE_LINE           15
-+#define FT_MISSING_VALUES          16
- 
- //------------
- //from old chart tplabel.hrc
-Index: source/controller/dialogs/tp_SeriesToAxis.cxx
-===================================================================
---- chart2/source/controller/dialogs/tp_SeriesToAxis.cxx	(.../tags/DEV300_m35/chart2)	(revision 264806)
-+++ chart2/source/controller/dialogs/tp_SeriesToAxis.cxx	(.../cws/koheichart01/chart2)	(revision 264806)
-@@ -63,10 +63,12 @@
+diff --git chart2/source/controller/dialogs/tp_SeriesToAxis.cxx chart2/source/controller/dialogs/tp_SeriesToAxis.cxx
+index 9b11c6b..e0987b3 100644
+--- chart2/source/controller/dialogs/tp_SeriesToAxis.cxx
++++ chart2/source/controller/dialogs/tp_SeriesToAxis.cxx
+@@ -63,10 +63,12 @@ SchOptionTabPage::SchOptionTabPage(Window* pWindow,const SfxItemSet& rInAttrs) :
  	aMTOverlap(this,SchResId(MT_OVERLAP)),
  	aCBConnect(this,SchResId(CB_CONNECTOR)),
      aCBAxisSideBySide(this,SchResId(CB_BARS_SIDE_BY_SIDE)),
@@ -269,7 +238,7 @@ Index: source/controller/dialogs/tp_SeriesToAxis.cxx
      m_bProvidesSecondaryYAxis(true),
      m_bProvidesOverlapAndGapWidth(false)
  {
-@@ -123,6 +125,9 @@
+@@ -123,6 +125,9 @@ BOOL SchOptionTabPage::FillItemSet(SfxItemSet& rOutAttrs)
      else if(m_aRB_ContinueLine.IsChecked())
          rOutAttrs.Put(SfxInt32Item(SCHATTR_MISSING_VALUE_TREATMENT,::com::sun::star::chart::MissingValueTreatment::CONTINUE));
  
@@ -279,12 +248,12 @@ Index: source/controller/dialogs/tp_SeriesToAxis.cxx
  	return TRUE;
  }
  
-@@ -215,10 +220,17 @@
+@@ -215,10 +220,17 @@ void SchOptionTabPage::Reset(const SfxItemSet& rInAttrs)
              m_aRB_DontPaint.Show(FALSE);
              m_aRB_AssumeZero.Show(FALSE);
              m_aRB_ContinueLine.Show(FALSE);
 -		    m_aFL_EmptyCells.Show(FALSE);
-+		    m_aFL_PlotOptions.Show(FALSE);
++            m_aFL_PlotOptions.Show(FALSE);
          }
      }
  
@@ -298,7 +267,7 @@ Index: source/controller/dialogs/tp_SeriesToAxis.cxx
      AdaptControlPositionsAndVisibility();
  }
  
-@@ -231,6 +243,12 @@
+@@ -231,6 +243,12 @@ void SchOptionTabPage::Init( bool bProvidesSecondaryYAxis, bool bProvidesOverlap
      AdaptControlPositionsAndVisibility();
  }
  
@@ -311,7 +280,7 @@ Index: source/controller/dialogs/tp_SeriesToAxis.cxx
  void SchOptionTabPage::AdaptControlPositionsAndVisibility()
  {
      aRbtAxis1.Show(m_bProvidesSecondaryYAxis);
-@@ -254,14 +272,13 @@
+@@ -254,14 +272,13 @@ void SchOptionTabPage::AdaptControlPositionsAndVisibility()
  	    else
              aPos = aGrpBar.GetPosPixel();
  
@@ -333,57 +302,40 @@ Index: source/controller/dialogs/tp_SeriesToAxis.cxx
      }
  
      if( !m_aRB_DontPaint.IsVisible() )
-Index: source/controller/dialogs/tp_PolarOptions.cxx
-===================================================================
---- chart2/source/controller/dialogs/tp_PolarOptions.cxx	(.../tags/DEV300_m35/chart2)	(revision 264806)
-+++ chart2/source/controller/dialogs/tp_PolarOptions.cxx	(.../cws/koheichart01/chart2)	(revision 264806)
-@@ -51,7 +51,9 @@
-     m_aFL_StartingAngle( this, SchResId( FL_STARTING_ANGLE ) ),
-     m_aAngleDial( this, SchResId( CT_ANGLE_DIAL ) ),
-     m_aFT_Degrees( this, SchResId( FT_ROTATION_DEGREES ) ),
--    m_aNF_StartingAngle( this, SchResId( NF_STARTING_ANGLE ) )
-+    m_aNF_StartingAngle( this, SchResId( NF_STARTING_ANGLE ) ),
-+    m_aFL_PlotOptions( this, SchResId( FL_PLOT_OPTIONS ) ),
-+    m_aCB_IncludeHiddenCells( this, SchResId( CB_INCLUDE_HIDDEN_CELLS ) )
- {
-     FreeResource();
+diff --git chart2/source/controller/dialogs/tp_SeriesToAxis.hxx chart2/source/controller/dialogs/tp_SeriesToAxis.hxx
+index af1f703..d6516a0 100644
+--- chart2/source/controller/dialogs/tp_SeriesToAxis.hxx
++++ chart2/source/controller/dialogs/tp_SeriesToAxis.hxx
+@@ -74,11 +74,14 @@ private: //member
+     CheckBox	aCBConnect;
+     CheckBox    aCBAxisSideBySide;
  
-@@ -78,6 +80,9 @@
-     if( m_aCB_Clockwise.IsVisible() )
-         rOutAttrs.Put(SfxInt32Item(SCHATTR_CLOCKWISE,m_aCB_Clockwise.IsChecked()));
+-    FixedLine   m_aFL_EmptyCells;
++    FixedLine   m_aFL_PlotOptions;
++    FixedText   m_aFT_MissingValues;
+     RadioButton m_aRB_DontPaint;
+     RadioButton m_aRB_AssumeZero;
+     RadioButton m_aRB_ContinueLine;
  
-+    if (m_aCB_IncludeHiddenCells.IsVisible())
-+        rOutAttrs.Put(SfxBoolItem(SCHATTR_INCLUDE_HIDDEN_CELLS, m_aCB_IncludeHiddenCells.IsChecked()));
++    CheckBox    m_aCBIncludeHiddenCells;
 +
-     return TRUE;
- }
+     DECL_LINK(EnableHdl, RadioButton * );
  
-@@ -108,6 +113,11 @@
-     {
-         m_aCB_Clockwise.Show(FALSE);
-     }
-+    if (rInAttrs.GetItemState(SCHATTR_INCLUDE_HIDDEN_CELLS, TRUE, &pPoolItem) == SFX_ITEM_SET)
-+    {
-+        bool bVal = static_cast<const SfxBoolItem*>(pPoolItem)->GetValue();
-+        m_aCB_IncludeHiddenCells.Check(bVal);
-+    }
- }
- 
- //.............................................................................
-Index: source/controller/dialogs/tp_SeriesToAxis.src
-===================================================================
---- chart2/source/controller/dialogs/tp_SeriesToAxis.src	(.../tags/DEV300_m35/chart2)	(revision 264806)
-+++ chart2/source/controller/dialogs/tp_SeriesToAxis.src	(.../cws/koheichart01/chart2)	(revision 264806)
-@@ -120,7 +120,7 @@
+     sal_Int32   m_nAllSeriesAxisIndex;
+diff --git chart2/source/controller/dialogs/tp_SeriesToAxis.src chart2/source/controller/dialogs/tp_SeriesToAxis.src
+index 9729f8a..58ea22a 100644
+--- chart2/source/controller/dialogs/tp_SeriesToAxis.src
++++ chart2/source/controller/dialogs/tp_SeriesToAxis.src
+@@ -120,7 +120,7 @@ TabPage TP_OPTIONS
          Pos = MAP_APPFONT ( 12 , 97 ) ;
  		Size = MAP_APPFONT ( 200 , 10 ) ;
  		TabStop = TRUE ;
 -		Text [ en-US ] = "Connection Lines";
-+		Text [ en-US ] = "Connection lines";
++        Text [ en-US ] = "Connection lines";
  	};
  
      CheckBox CB_BARS_SIDE_BY_SIDE
-@@ -131,16 +131,23 @@
+@@ -131,16 +131,23 @@ TabPage TP_OPTIONS
          Text [ en-US ] = "Show ~bars side by side";
      };
      
@@ -409,7 +361,7 @@ Index: source/controller/dialogs/tp_SeriesToAxis.src
          Size = MAP_APPFONT ( 80 , 10 ) ;
          TabStop = TRUE ;
          Text [ en-US ] = "~Leave gap";  
-@@ -148,7 +155,7 @@
+@@ -148,7 +155,7 @@ TabPage TP_OPTIONS
      
      RadioButton RB_ASSUME_ZERO
      {
@@ -418,7 +370,7 @@ Index: source/controller/dialogs/tp_SeriesToAxis.src
          Size = MAP_APPFONT ( 80 , 10 ) ;
          TabStop = TRUE ;
          Text [ en-US ] = "~Assume zero";  
-@@ -156,9 +163,17 @@
+@@ -156,9 +163,17 @@ TabPage TP_OPTIONS
      
      RadioButton RB_CONTINUE_LINE
      {
@@ -438,11 +390,11 @@ Index: source/controller/dialogs/tp_SeriesToAxis.src
 +        Text [ en-US ] = "Plot ~values from hidden cells";
 +    };
  };
-Index: source/controller/inc/SeriesOptionsItemConverter.hxx
-===================================================================
---- chart2/source/controller/inc/SeriesOptionsItemConverter.hxx	(.../tags/DEV300_m35/chart2)	(revision 264806)
-+++ chart2/source/controller/inc/SeriesOptionsItemConverter.hxx	(.../cws/koheichart01/chart2)	(revision 264806)
-@@ -93,6 +93,8 @@
+diff --git chart2/source/controller/inc/SeriesOptionsItemConverter.hxx chart2/source/controller/inc/SeriesOptionsItemConverter.hxx
+index 5966449..2653a13 100644
+--- chart2/source/controller/inc/SeriesOptionsItemConverter.hxx
++++ chart2/source/controller/inc/SeriesOptionsItemConverter.hxx
+@@ -93,6 +93,8 @@ private:
  
      ::com::sun::star::uno::Sequence< sal_Int32 > m_aSupportedMissingValueTreatments;
      sal_Int32 m_nMissingValueTreatment;
@@ -451,11 +403,11 @@ Index: source/controller/inc/SeriesOptionsItemConverter.hxx
  };
  
  } //  namespace wrapper
-Index: source/controller/itemsetwrapper/SchWhichPairs.hxx
-===================================================================
---- chart2/source/controller/itemsetwrapper/SchWhichPairs.hxx	(.../tags/DEV300_m35/chart2)	(revision 264806)
-+++ chart2/source/controller/itemsetwrapper/SchWhichPairs.hxx	(.../cws/koheichart01/chart2)	(revision 264806)
-@@ -163,7 +163,8 @@
+diff --git chart2/source/controller/itemsetwrapper/SchWhichPairs.hxx chart2/source/controller/itemsetwrapper/SchWhichPairs.hxx
+index 9b51d5d..d6215b2 100644
+--- chart2/source/controller/itemsetwrapper/SchWhichPairs.hxx
++++ chart2/source/controller/itemsetwrapper/SchWhichPairs.hxx
+@@ -163,7 +163,8 @@ const USHORT nDataPointWhichPairs[] =
      SCHATTR_STARTING_ANGLE,SCHATTR_STARTING_ANGLE, \
      SCHATTR_CLOCKWISE,SCHATTR_CLOCKWISE, \
      SCHATTR_MISSING_VALUE_TREATMENT,SCHATTR_MISSING_VALUE_TREATMENT, \
@@ -465,11 +417,11 @@ Index: source/controller/itemsetwrapper/SchWhichPairs.hxx
  
  const USHORT nSeriesOptionsWhichPairs[] =
  {
-Index: source/controller/itemsetwrapper/SeriesOptionsItemConverter.cxx
-===================================================================
---- chart2/source/controller/itemsetwrapper/SeriesOptionsItemConverter.cxx	(.../tags/DEV300_m35/chart2)	(revision 264806)
-+++ chart2/source/controller/itemsetwrapper/SeriesOptionsItemConverter.cxx	(.../cws/koheichart01/chart2)	(revision 264806)
-@@ -93,6 +93,7 @@
+diff --git chart2/source/controller/itemsetwrapper/SeriesOptionsItemConverter.cxx chart2/source/controller/itemsetwrapper/SeriesOptionsItemConverter.cxx
+index eae94e8..10a580c 100644
+--- chart2/source/controller/itemsetwrapper/SeriesOptionsItemConverter.cxx
++++ chart2/source/controller/itemsetwrapper/SeriesOptionsItemConverter.cxx
+@@ -93,6 +93,7 @@ SeriesOptionsItemConverter::SeriesOptionsItemConverter(
          , m_bClockwise(false)
          , m_aSupportedMissingValueTreatments()
          , m_nMissingValueTreatment(0)
@@ -477,7 +429,7 @@ Index: source/controller/itemsetwrapper/SeriesOptionsItemConverter.cxx
  {
      try
      {
-@@ -159,6 +160,8 @@
+@@ -159,6 +160,8 @@ SeriesOptionsItemConverter::SeriesOptionsItemConverter(
          m_aSupportedMissingValueTreatments = ChartTypeHelper::getSupportedMissingValueTreatments( xChartType );
          m_nMissingValueTreatment = DiagramHelper::getCorrectedMissingValueTreatment(
              ChartModelHelper::findDiagram(m_xChartModel), xChartType );
@@ -486,7 +438,7 @@ Index: source/controller/itemsetwrapper/SeriesOptionsItemConverter.cxx
      }
      catch( uno::Exception ex )
      {
-@@ -341,6 +344,27 @@
+@@ -341,6 +344,27 @@ bool SeriesOptionsItemConverter::ApplySpecialItem( USHORT nWhichId, const SfxIte
              }
          }
          break;
@@ -514,7 +466,7 @@ Index: source/controller/itemsetwrapper/SeriesOptionsItemConverter.cxx
      }
      return bChanged;
  }
-@@ -412,6 +436,11 @@
+@@ -412,6 +436,11 @@ void SeriesOptionsItemConverter::FillSpecialItem(
              rOutItemSet.Put( SfxIntegerListItem( nWhichId, aList ) );
              break;
          }
@@ -526,37 +478,76 @@ Index: source/controller/itemsetwrapper/SeriesOptionsItemConverter.cxx
          default:
              break;
     }
-Index: source/controller/chartapiwrapper/DiagramWrapper.cxx
-===================================================================
---- chart2/source/controller/chartapiwrapper/DiagramWrapper.cxx	(.../tags/DEV300_m35/chart2)	(revision 264806)
-+++ chart2/source/controller/chartapiwrapper/DiagramWrapper.cxx	(.../cws/koheichart01/chart2)	(revision 264806)
-@@ -112,6 +112,7 @@
-     PROP_DIAGRAM_DATAROW_SOURCE,
+diff --git chart2/source/inc/DataSeriesHelper.hxx chart2/source/inc/DataSeriesHelper.hxx
+index 226e902..7169987 100644
+--- chart2/source/inc/DataSeriesHelper.hxx
++++ chart2/source/inc/DataSeriesHelper.hxx
+@@ -41,6 +41,7 @@
  
-     PROP_DIAGRAM_GROUP_BARS_PER_AXIS,
-+    PROP_DIAGRAM_INCLUDE_HIDDEN_CELLS,
+ #include <vector>
+ #include <functional>
++#include <hash_set>
  
-     PROP_DIAGRAM_SORT_BY_X_VALUES,
+ namespace chart
+ {
+@@ -176,6 +177,34 @@ bool areAllSeriesAttachedToSameAxis(
+         const ::com::sun::star::uno::Reference< ::com::sun::star::chart2::XChartType >& xChartType,
+         sal_Int32 & rOutAxisIndex );
  
-@@ -233,6 +234,13 @@
-                   beans::PropertyAttribute::BOUND
-                   | beans::PropertyAttribute::MAYBEDEFAULT ));
- 
-+    rOutProperties.push_back(
-+        Property( C2U( "IncludeHiddenCells" ),
-+                  PROP_DIAGRAM_INCLUDE_HIDDEN_CELLS,
-+                  ::getBooleanCppuType(),
-+                  beans::PropertyAttribute::BOUND
-+                  | beans::PropertyAttribute::MAYBEDEFAULT ));
++template<typename T>
++void removeHiddenDataPoints(
++    ::com::sun::star::uno::Sequence<T>& rDataPoints,
++    const ::com::sun::star::uno::Sequence<sal_Int32>& rHiddenIndices )
++{
++    ::std::hash_set<sal_Int32> aIndices;
++    sal_Int32 n = rHiddenIndices.getLength();
++    for (sal_Int32 i = 0; i < n; ++i)
++        aIndices.insert(rHiddenIndices[i]);
 +
-     //new for XY charts
-     rOutProperties.push_back(
-         Property( C2U( "SortByXValues" ),
-Index: source/inc/chartview/ChartSfxItemIds.hxx
-===================================================================
---- chart2/source/inc/chartview/ChartSfxItemIds.hxx	(.../tags/DEV300_m35/chart2)	(revision 264806)
-+++ chart2/source/inc/chartview/ChartSfxItemIds.hxx	(.../cws/koheichart01/chart2)	(revision 264806)
-@@ -200,10 +200,11 @@
++    ::std::vector<T> aNewDataVector;
++    n = rDataPoints.getLength();
++    aNewDataVector.reserve(n);
++    for (sal_Int32 i = 0; i < n; ++i)
++    {
++        if (aIndices.count(i))
++            // skip this value.
++            continue;
++
++        aNewDataVector.push_back(rDataPoints[i]);
++    }
++
++    n = aNewDataVector.size();
++    rDataPoints.realloc(n);
++    for (size_t i = 0; i < static_cast<size_t>(n); ++i)
++        rDataPoints[i] = aNewDataVector[i];
++}
++
+ } //  namespace DataSeriesHelper
+ } //  namespace chart
+ 
+diff --git chart2/source/inc/ExplicitCategoriesProvider.hxx chart2/source/inc/ExplicitCategoriesProvider.hxx
+index e6bf4fc..401aa1d 100644
+--- chart2/source/inc/ExplicitCategoriesProvider.hxx
++++ chart2/source/inc/ExplicitCategoriesProvider.hxx
+@@ -58,9 +58,13 @@ public:
+             ::com::sun::star::chart2::XCoordinateSystem >& xCooSysModel,
+         sal_Int32 nIndex );
+ 
++    void setIncludeHiddenCells(bool b);
++    bool getIncludeHiddenCells() const;
++
+ private: //member
+     ::com::sun::star::uno::Sequence< ::rtl::OUString > m_aExplicitCategories;
+     bool volatile m_bDirty;
++    bool m_bIncludeHiddelCells;
+ 
+     ::com::sun::star::uno::WeakReference<
+         ::com::sun::star::chart2::XCoordinateSystem > m_xCooSysModel;
+diff --git chart2/source/inc/chartview/ChartSfxItemIds.hxx chart2/source/inc/chartview/ChartSfxItemIds.hxx
+index 52e47c0..b586e1c 100644
+--- chart2/source/inc/chartview/ChartSfxItemIds.hxx
++++ chart2/source/inc/chartview/ChartSfxItemIds.hxx
+@@ -205,10 +205,11 @@
  #define SCHATTR_DIAGRAM_STYLE           (SCHATTR_CHARTTYPE_START + 6)
  #define SCHATTR_TEXTBREAK               (SCHATTR_CHARTTYPE_START + 7)
  #define SCHATTR_GROUP_BARS_PER_AXIS     (SCHATTR_CHARTTYPE_START + 8)
@@ -572,29 +563,166 @@ Index: source/inc/chartview/ChartSfxItemIds.hxx
  
  #define SCHATTR_CHARTTYPE_END           SCHATTR_AVAILABLE_MISSING_VALUE_TREATMENTS
  
-Index: source/inc/ExplicitCategoriesProvider.hxx
-===================================================================
---- chart2/source/inc/ExplicitCategoriesProvider.hxx	(.../tags/DEV300_m35/chart2)	(revision 264806)
-+++ chart2/source/inc/ExplicitCategoriesProvider.hxx	(.../cws/koheichart01/chart2)	(revision 264806)
-@@ -58,9 +58,13 @@
-             ::com::sun::star::chart2::XCoordinateSystem >& xCooSysModel,
-         sal_Int32 nIndex );
+diff --git chart2/source/model/main/Diagram.cxx chart2/source/model/main/Diagram.cxx
+index 02bf2b7..308ed19 100644
+--- chart2/source/model/main/Diagram.cxx
++++ chart2/source/model/main/Diagram.cxx
+@@ -78,6 +78,7 @@ enum
+     PROP_DIAGRAM_SORT_BY_X_VALUES,
+     PROP_DIAGRAM_CONNECT_BARS,
+     PROP_DIAGRAM_GROUP_BARS_PER_AXIS,
++    PROP_DIAGRAM_INCLUDE_HIDDEN_CELLS,
+     PROP_DIAGRAM_STARTING_ANGLE,
+     PROP_DIAGRAM_RIGHT_ANGLED_AXES,
+     PROP_DIAGRAM_PERSPECTIVE,
+@@ -125,6 +126,13 @@ void lcl_AddPropertiesToVector(
+                   | beans::PropertyAttribute::MAYBEDEFAULT ));
  
-+    void setIncludeHiddenCells(bool b);
-+    bool getIncludeHiddenCells() const;
+     rOutProperties.push_back(
++        Property( C2U("IncludeHiddenCells"),
++                  PROP_DIAGRAM_INCLUDE_HIDDEN_CELLS,
++                  ::getBooleanCppuType(),
++                  beans::PropertyAttribute::BOUND
++                  | beans::PropertyAttribute::MAYBEDEFAULT ));
 +
- private: //member
-     ::com::sun::star::uno::Sequence< ::rtl::OUString > m_aExplicitCategories;
-     bool volatile m_bDirty;
-+    bool m_bIncludeHiddelCells;
++    rOutProperties.push_back(
+         Property( C2U( "StartingAngle" ),
+                   PROP_DIAGRAM_STARTING_ANGLE,
+                   ::getCppuType( reinterpret_cast< const sal_Int32 * >(0) ),
+@@ -170,6 +178,7 @@ void lcl_AddDefaultsToMap(
+     ::chart::PropertyHelper::setPropertyValueDefault( rOutMap, PROP_DIAGRAM_SORT_BY_X_VALUES, false );
+     ::chart::PropertyHelper::setPropertyValueDefault( rOutMap, PROP_DIAGRAM_CONNECT_BARS, false );
+     ::chart::PropertyHelper::setPropertyValueDefault( rOutMap, PROP_DIAGRAM_GROUP_BARS_PER_AXIS, true );
++    ::chart::PropertyHelper::setPropertyValueDefault( rOutMap, PROP_DIAGRAM_INCLUDE_HIDDEN_CELLS, true );
+     ::chart::PropertyHelper::setPropertyValueDefault( rOutMap, PROP_DIAGRAM_RIGHT_ANGLED_AXES, false );
+     ::chart::PropertyHelper::setPropertyValueDefault< sal_Int32 >( rOutMap, PROP_DIAGRAM_STARTING_ANGLE, 90 );
+ }
+diff --git chart2/source/tools/ExplicitCategoriesProvider.cxx chart2/source/tools/ExplicitCategoriesProvider.cxx
+index acd9585..177cf71 100644
+--- chart2/source/tools/ExplicitCategoriesProvider.cxx
++++ chart2/source/tools/ExplicitCategoriesProvider.cxx
+@@ -33,7 +33,9 @@
  
-     ::com::sun::star::uno::WeakReference<
-         ::com::sun::star::chart2::XCoordinateSystem > m_xCooSysModel;
-Index: source/view/axes/VCoordinateSystem.cxx
-===================================================================
---- chart2/source/view/axes/VCoordinateSystem.cxx	(.../tags/DEV300_m35/chart2)	(revision 264806)
-+++ chart2/source/view/axes/VCoordinateSystem.cxx	(.../cws/koheichart01/chart2)	(revision 264806)
-@@ -581,6 +581,16 @@
+ #include "ExplicitCategoriesProvider.hxx"
+ #include "DiagramHelper.hxx"
++#include "DataSeriesHelper.hxx"
+ #include "CommonConverters.hxx"
++#include "macros.hxx"
+ 
+ //.............................................................................
+ namespace chart
+@@ -45,9 +47,12 @@ using namespace ::com::sun::star::chart2;
+ using ::com::sun::star::uno::Reference;
+ using ::com::sun::star::uno::Sequence;
+ using rtl::OUString;
++using ::std::hash_set;
++using ::std::vector;
+ 
+ ExplicitCategoriesProvider::ExplicitCategoriesProvider( const Reference< chart2::XCoordinateSystem >& xCooSysModel )
+     : m_bDirty(true)
++    , m_bIncludeHiddelCells(true)
+     , m_xCooSysModel( xCooSysModel )
+     , m_xCategories()
+ {
+@@ -68,15 +73,45 @@ Sequence< ::rtl::OUString > SAL_CALL ExplicitCategoriesProvider::getTextualData(
+ {
+     if( m_bDirty )
+     {
+-        if( m_xCategories.is() )
+-            m_aExplicitCategories = DataSequenceToStringSequence(m_xCategories->getValues());
+-        if(!m_aExplicitCategories.getLength())
+-            m_aExplicitCategories = DiagramHelper::generateAutomaticCategories( uno::Reference< chart2::XCoordinateSystem >( m_xCooSysModel.get(), uno::UNO_QUERY ) );
++        if (!m_xCategories.is())
++            return m_aExplicitCategories;
++
++        uno::Reference< data::XDataSequence > xValues = m_xCategories->getValues();
++        uno::Reference< beans::XPropertySet > xProp(xValues, uno::UNO_QUERY);
++        bool bIsHidden = false;
++        Sequence<sal_Int32> aHiddenValues;
++        if (xProp.is())
++        {
++            xProp->getPropertyValue( C2U( "IsHidden" ) ) >>= bIsHidden;
++            xProp->getPropertyValue( C2U( "HiddenValues" ) ) >>= aHiddenValues;
++        }
++
++        if (!bIsHidden || m_bIncludeHiddelCells)
++        {
++            m_aExplicitCategories = DataSequenceToStringSequence(xValues);
++            if (!m_bIncludeHiddelCells)
++                DataSeriesHelper::removeHiddenDataPoints(m_aExplicitCategories, aHiddenValues);
++
++            if(!m_aExplicitCategories.getLength())
++                m_aExplicitCategories = DiagramHelper::generateAutomaticCategories(
++                    uno::Reference< chart2::XCoordinateSystem >( m_xCooSysModel.get(), uno::UNO_QUERY ) );
++        }
++
+         m_bDirty = false;
+     }
+     return m_aExplicitCategories;
+ }
+ 
++void ExplicitCategoriesProvider::setIncludeHiddenCells(bool b)
++{
++    m_bIncludeHiddelCells = b;
++}
++
++bool ExplicitCategoriesProvider::getIncludeHiddenCells() const
++{
++    return m_bIncludeHiddelCells;
++}
++
+ // static
+ OUString ExplicitCategoriesProvider::getCategoryByIndex(
+         const Reference< XCoordinateSystem >& xCooSysModel,
+diff --git chart2/source/tools/UncachedDataSequence.cxx chart2/source/tools/UncachedDataSequence.cxx
+index bcf99f7..1fa3b00 100644
+--- chart2/source/tools/UncachedDataSequence.cxx
++++ chart2/source/tools/UncachedDataSequence.cxx
+@@ -79,7 +79,7 @@ UncachedDataSequence::UncachedDataSequence(
+     const OUString & rRangeRepresentation )
+         : OPropertyContainer( GetBroadcastHelper()),
+           UncachedDataSequence_Base( GetMutex()),
+-          m_bIsHidden( true ),
++          m_bIsHidden( false ),
+           m_xDataProvider( xIntDataProv ),
+           m_aSourceRepresentation( rRangeRepresentation ),
+           m_xModifyEventForwarder( new ModifyListenerHelper::ModifyEventForwarder())
+@@ -93,7 +93,7 @@ UncachedDataSequence::UncachedDataSequence(
+     const OUString & rRole )
+         : OPropertyContainer( GetBroadcastHelper()),
+           UncachedDataSequence_Base( GetMutex()),
+-          m_bIsHidden( true ),
++          m_bIsHidden( false ),
+           m_xDataProvider( xIntDataProv ),
+           m_aSourceRepresentation( rRangeRepresentation ),
+           m_xModifyEventForwarder( new ModifyListenerHelper::ModifyEventForwarder())
+diff --git chart2/source/view/axes/ScaleAutomatism.cxx chart2/source/view/axes/ScaleAutomatism.cxx
+index 7c58236..3e412c4 100644
+--- chart2/source/view/axes/ScaleAutomatism.cxx
++++ chart2/source/view/axes/ScaleAutomatism.cxx
+@@ -134,7 +134,7 @@ void ScaleAutomatism::calculateExplicitScaleAndIncrement(
+         if( m_aSourceScale.AxisType==AxisType::PERCENT )
+             rExplicitScale.Minimum = 0.0;
+         else if( ::rtl::math::isNan( m_fValueMinimum ) )
+-            rExplicitScale.Minimum = 0.0;   //@todo get Minimum from scsaling or from plotter????
++            rExplicitScale.Minimum = 0.0;   //@todo get Minimum from scaling or from plotter????
+         else
+             rExplicitScale.Minimum = m_fValueMinimum;
+     }
+@@ -143,7 +143,7 @@ void ScaleAutomatism::calculateExplicitScaleAndIncrement(
+     if( bAutoMaximum )
+     {
+         if( m_aSourceScale.AxisType==AxisType::PERCENT )
+-            rExplicitScale.Minimum = 1.0;
++            rExplicitScale.Maximum = 1.0;
+         else if( ::rtl::math::isNan( m_fValueMaximum ) )
+             rExplicitScale.Maximum = 10.0;  //@todo get Maximum from scaling or from plotter????
+         else
+diff --git chart2/source/view/axes/VCoordinateSystem.cxx chart2/source/view/axes/VCoordinateSystem.cxx
+index 335538b..28ccfe4 100644
+--- chart2/source/view/axes/VCoordinateSystem.cxx
++++ chart2/source/view/axes/VCoordinateSystem.cxx
+@@ -581,6 +581,16 @@ void VCoordinateSystem::setSeriesNamesForAxis( const Sequence< rtl::OUString >&
      m_aSeriesNamesForZAxis = rSeriesNames;
  }
  
@@ -611,70 +739,66 @@ Index: source/view/axes/VCoordinateSystem.cxx
  sal_Int32 VCoordinateSystem::getNumberFormatKeyForAxis(
          const Reference< chart2::XAxis >& xAxis
          , const Reference< util::XNumberFormatsSupplier >& xNumberFormatsSupplier )
-Index: source/view/axes/ScaleAutomatism.cxx
-===================================================================
---- chart2/source/view/axes/ScaleAutomatism.cxx	(.../tags/DEV300_m35/chart2)	(revision 264806)
-+++ chart2/source/view/axes/ScaleAutomatism.cxx	(.../cws/koheichart01/chart2)	(revision 264806)
-@@ -134,7 +134,7 @@
-         if( m_aSourceScale.AxisType==AxisType::PERCENT )
-             rExplicitScale.Minimum = 0.0;
-         else if( ::rtl::math::isNan( m_fValueMinimum ) )
--            rExplicitScale.Minimum = 0.0;   //@todo get Minimum from scsaling or from plotter????
-+            rExplicitScale.Minimum = 0.0;   //@todo get Minimum from scaling or from plotter????
-         else
-             rExplicitScale.Minimum = m_fValueMinimum;
-     }
-@@ -143,7 +143,7 @@
-     if( bAutoMaximum )
-     {
-         if( m_aSourceScale.AxisType==AxisType::PERCENT )
--            rExplicitScale.Minimum = 1.0;
-+            rExplicitScale.Maximum = 1.0;
-         else if( ::rtl::math::isNan( m_fValueMaximum ) )
-             rExplicitScale.Maximum = 10.0;  //@todo get Maximum from scaling or from plotter????
-         else
-Index: source/view/main/ChartView.cxx
-===================================================================
---- chart2/source/view/main/ChartView.cxx	(.../tags/DEV300_m35/chart2)	(revision 264806)
-+++ chart2/source/view/main/ChartView.cxx	(.../cws/koheichart01/chart2)	(revision 264806)
-@@ -623,6 +623,7 @@
-     sal_Bool bSortByXValues = sal_False;
-     sal_Bool bConnectBars = sal_False;
-     sal_Bool bGroupBarsPerAxis = sal_True;
-+    sal_Bool bIncludeHiddenCells = sal_True;
-     sal_Int32 nStartingAngle = 90;
-     try
-     {
-@@ -630,6 +631,7 @@
-         xDiaProp->getPropertyValue( C2U( "SortByXValues" ) ) >>= bSortByXValues;
-         xDiaProp->getPropertyValue( C2U( "ConnectBars" ) ) >>= bConnectBars;
-         xDiaProp->getPropertyValue( C2U( "GroupBarsPerAxis" ) ) >>= bGroupBarsPerAxis;
-+        xDiaProp->getPropertyValue( C2U( "IncludeHiddenCells" ) ) >>= bIncludeHiddenCells;
-         xDiaProp->getPropertyValue( C2U( "StartingAngle" ) ) >>= nStartingAngle;
-     }
-     catch( const uno::Exception & ex )
-@@ -655,6 +657,7 @@
-     {
-         uno::Reference< XCoordinateSystem > xCooSys( aCooSysList[nCS] );
-         VCoordinateSystem* pVCooSys = addCooSysToList(m_rVCooSysList,xCooSys,xChartModel);
-+        pVCooSys->setIncludeHiddenCells(bIncludeHiddenCells);
+diff --git chart2/source/view/inc/VCoordinateSystem.hxx chart2/source/view/inc/VCoordinateSystem.hxx
+index 811f349..dae78bf 100644
+--- chart2/source/view/inc/VCoordinateSystem.hxx
++++ chart2/source/view/inc/VCoordinateSystem.hxx
+@@ -133,6 +133,9 @@ public:
+     virtual bool needSeriesNamesForAxis() const;
+     void setSeriesNamesForAxis( const ::com::sun::star::uno::Sequence< rtl::OUString >& rSeriesNames );
  
-         //iterate through all chart types in the current coordinate system
-         uno::Reference< XChartTypeContainer > xChartTypeContainer( xCooSys, uno::UNO_QUERY );
-@@ -695,7 +698,7 @@
-                 uno::Reference< XDataSeries > xDataSeries( aSeriesList[nS], uno::UNO_QUERY );
- 		        if(!xDataSeries.is())
- 			        continue;
--		        VDataSeries* pSeries = new VDataSeries( xDataSeries );
-+		        VDataSeries* pSeries = new VDataSeries( xDataSeries, bIncludeHiddenCells );
++    void setIncludeHiddenCells(bool b);
++    bool getIncludeHiddenCells() const;
++
+ protected: //methods
+     VCoordinateSystem( const ::com::sun::star::uno::Reference<
+         ::com::sun::star::chart2::XCoordinateSystem >& xCooSys );
+diff --git chart2/source/view/inc/VDataSeries.hxx chart2/source/view/inc/VDataSeries.hxx
+index e41340c..7bc8ca3 100644
+--- chart2/source/view/inc/VDataSeries.hxx
++++ chart2/source/view/inc/VDataSeries.hxx
+@@ -59,7 +59,7 @@ class VDataSequence
+ {
+ public:
+     void init( const ::com::sun::star::uno::Reference<
+-        ::com::sun::star::chart2::data::XDataSequence >& xModel);
++        ::com::sun::star::chart2::data::XDataSequence >& xModel, bool bIncludeHiddenCells );
+     bool is() const;
+     void clear();
+     double getValue( sal_Int32 index ) const;
+@@ -77,7 +77,7 @@ class VDataSeries
+ {
+ public:
+     VDataSeries( const ::com::sun::star::uno::Reference<
+-        ::com::sun::star::chart2::XDataSeries >& xDataSeries );
++        ::com::sun::star::chart2::XDataSeries >& xDataSeries, bool bIncludeHiddenCells );
+     virtual ~VDataSeries();
  
-                 pSeries->setGlobalSeriesIndex(nGlobalSeriesIndex);
-                 nGlobalSeriesIndex++;
-Index: source/view/main/ChartItemPool.cxx
-===================================================================
---- chart2/source/view/main/ChartItemPool.cxx	(.../tags/DEV300_m35/chart2)	(revision 264806)
-+++ chart2/source/view/main/ChartItemPool.cxx	(.../cws/koheichart01/chart2)	(revision 264806)
-@@ -197,6 +197,7 @@
+     ::com::sun::star::uno::Reference< ::com::sun::star::chart2::XDataSeries >
+@@ -138,6 +138,9 @@ public:
+     void setGroupBarsPerAxis( sal_Bool bGroupBarsPerAxis );
+     sal_Bool getGroupBarsPerAxis() const;
+ 
++    void setIncludeHiddenCells( sal_Bool bIncludeHiddenCells );
++    sal_Bool getIncludeHiddenCells() const;
++
+     void setStartingAngle( sal_Int32 nStartingAngle );
+     sal_Int32 getStartingAngle() const;
+     
+@@ -220,6 +223,8 @@ private: //member
+ 
+     sal_Bool                m_bGroupBarsPerAxis;
+ 
++    sal_Bool                m_bIncludeHiddenCells;
++
+     sal_Int32               m_nStartingAngle;
+ 
+     rtl::OUString           m_aSeriesParticle;
+diff --git chart2/source/view/main/ChartItemPool.cxx chart2/source/view/main/ChartItemPool.cxx
+index df6da6c..a678c8c 100644
+--- chart2/source/view/main/ChartItemPool.cxx
++++ chart2/source/view/main/ChartItemPool.cxx
+@@ -203,6 +203,7 @@ ChartItemPool::ChartItemPool():
      ppPoolDefaults[SCHATTR_DIAGRAM_STYLE        - SCHATTR_START] = new SvxChartStyleItem( CHSTYLE_2D_COLUMN, SCHATTR_DIAGRAM_STYLE );
      ppPoolDefaults[SCHATTR_TEXTBREAK            - SCHATTR_START] = new SfxBoolItem( SCHATTR_TEXTBREAK, FALSE );
      ppPoolDefaults[SCHATTR_GROUP_BARS_PER_AXIS  - SCHATTR_START] = new SfxBoolItem(SCHATTR_GROUP_BARS_PER_AXIS, FALSE);
@@ -682,14 +806,107 @@ Index: source/view/main/ChartItemPool.cxx
      ppPoolDefaults[SCHATTR_STARTING_ANGLE       - SCHATTR_START] = new SfxInt32Item( SCHATTR_STARTING_ANGLE, 90 );
      ppPoolDefaults[SCHATTR_CLOCKWISE            - SCHATTR_START] = new SfxBoolItem( SCHATTR_CLOCKWISE, FALSE );
  
-Index: source/view/main/VDataSeries.cxx
-===================================================================
---- chart2/source/view/main/VDataSeries.cxx	(.../tags/DEV300_m35/chart2)	(revision 264806)
-+++ chart2/source/view/main/VDataSeries.cxx	(.../cws/koheichart01/chart2)	(revision 264806)
-@@ -109,12 +109,11 @@
+diff --git chart2/source/view/main/ChartView.cxx chart2/source/view/main/ChartView.cxx
+index 03cd100..0433596 100644
+--- chart2/source/view/main/ChartView.cxx
++++ chart2/source/view/main/ChartView.cxx
+@@ -631,6 +631,7 @@ void SeriesPlotterContainer::initializeCooSysAndSeriesPlotter(
+     sal_Bool bSortByXValues = sal_False;
+     sal_Bool bConnectBars = sal_False;
+     sal_Bool bGroupBarsPerAxis = sal_True;
++    sal_Bool bIncludeHiddenCells = sal_True;
+     sal_Int32 nStartingAngle = 90;
+     try
+     {
+@@ -638,6 +639,7 @@ void SeriesPlotterContainer::initializeCooSysAndSeriesPlotter(
+         xDiaProp->getPropertyValue( C2U( "SortByXValues" ) ) >>= bSortByXValues;
+         xDiaProp->getPropertyValue( C2U( "ConnectBars" ) ) >>= bConnectBars;
+         xDiaProp->getPropertyValue( C2U( "GroupBarsPerAxis" ) ) >>= bGroupBarsPerAxis;
++        xDiaProp->getPropertyValue( C2U( "IncludeHiddenCells" ) ) >>= bIncludeHiddenCells;
+         xDiaProp->getPropertyValue( C2U( "StartingAngle" ) ) >>= nStartingAngle;
      }
- }
+     catch( const uno::Exception & ex )
+@@ -663,6 +665,7 @@ void SeriesPlotterContainer::initializeCooSysAndSeriesPlotter(
+     {
+         uno::Reference< XCoordinateSystem > xCooSys( aCooSysList[nCS] );
+         VCoordinateSystem* pVCooSys = addCooSysToList(m_rVCooSysList,xCooSys,xChartModel);
++        pVCooSys->setIncludeHiddenCells(bIncludeHiddenCells);
  
+         //iterate through all chart types in the current coordinate system
+         uno::Reference< XChartTypeContainer > xChartTypeContainer( xCooSys, uno::UNO_QUERY );
+@@ -703,7 +706,7 @@ void SeriesPlotterContainer::initializeCooSysAndSeriesPlotter(
+                 uno::Reference< XDataSeries > xDataSeries( aSeriesList[nS], uno::UNO_QUERY );
+ 		        if(!xDataSeries.is())
+ 			        continue;
+-		        VDataSeries* pSeries = new VDataSeries( xDataSeries );
++                VDataSeries* pSeries = new VDataSeries( xDataSeries, bIncludeHiddenCells );
+ 
+                 pSeries->setGlobalSeriesIndex(nGlobalSeriesIndex);
+                 nGlobalSeriesIndex++;
+diff --git chart2/source/view/main/VDataSeries.cxx chart2/source/view/main/VDataSeries.cxx
+index cb2f652..ed307ac 100644
+--- chart2/source/view/main/VDataSeries.cxx
++++ chart2/source/view/main/VDataSeries.cxx
+@@ -37,6 +37,7 @@
+ #include "LabelPositionHelper.hxx"
+ #include "ChartTypeHelper.hxx"
+ #include "ContainerHelper.hxx"
++#include "DataSeriesHelper.hxx"
+ #include "MeanValueRegressionCurveCalculator.hxx"
+ 
+ #include <com/sun/star/chart/MissingValueTreatment.hpp>
+@@ -61,60 +62,11 @@ using namespace ::com::sun::star;
+ using namespace ::com::sun::star::chart2;
+ using ::com::sun::star::uno::Reference;
+ 
+-namespace
+-{
+-    struct lcl_LessIndex
+-    {
+-        inline bool operator() ( const sal_Int32& first,
+-                             const sal_Int32& second )
+-        {
+-            return ( first < second );
+-        }
+-    };
+-
+-    void lcl_removeIndices( uno::Sequence< double >& rValues, const uno::Sequence< sal_Int32 >& rIndicesToRemove )
+-    {
+-        if( !rIndicesToRemove.getLength() )
+-            return;
+-
+-        ::std::vector< sal_Int32 > aIndicesToRemove( ContainerHelper::SequenceToVector( rIndicesToRemove) );
+-        ::std::sort( aIndicesToRemove.begin(), aIndicesToRemove.end(), lcl_LessIndex() );
+-        
+-        sal_Int32 nTarget=0;
+-        sal_Int32 nR = 0;
+-        sal_Int32 nRemove = aIndicesToRemove[nR];
+-        for( sal_Int32 nSource=0; nSource<rValues.getLength(); nSource++ )
+-        {
+-            if( nSource<nRemove || nRemove==-1 )
+-            {
+-                if( nTarget < nSource )
+-                    rValues[nTarget]=rValues[nSource];
+-                nTarget++;
+-                continue;
+-            }
+-            if( nSource==nRemove )
+-            {
+-                ++nR;
+-                if( nR<static_cast<sal_Int32>(aIndicesToRemove.size()) )
+-                    nRemove = aIndicesToRemove[nR];
+-                else
+-                    nRemove = -1;
+-            }
+-        }
+-
+-        if( nTarget>0 )
+-            rValues.realloc( nTarget );
+-        else
+-            rValues.realloc(0);
+-    }
+-}
+-
 -void VDataSequence::init( const uno::Reference< data::XDataSequence >& xModel )
 +void VDataSequence::init( const uno::Reference< data::XDataSequence >& xModel, bool bIncludeHiddenCells )
  {
@@ -701,7 +918,7 @@ Index: source/view/main/VDataSeries.cxx
      {
          uno::Reference<beans::XPropertySet> xProp(xModel, uno::UNO_QUERY );
          if( xProp.is())
-@@ -132,10 +131,10 @@
+@@ -132,15 +84,15 @@ void VDataSequence::init( const uno::Reference< data::XDataSequence >& xModel )
      }
  
      Model = xModel;
@@ -714,7 +931,13 @@ Index: source/view/main/VDataSeries.cxx
      {
          if( bIsHidden )
              Doubles.realloc(0);
-@@ -206,7 +205,7 @@
+         else if( aHiddenValues.getLength() )
+-            lcl_removeIndices( Doubles, aHiddenValues );
++            DataSeriesHelper::removeHiddenDataPoints(Doubles, aHiddenValues);
+     }
+ }
+ 
+@@ -206,7 +158,7 @@ VDataSeries::VDataSeries()
      DBG_ERROR("not implemented");
  }
  
@@ -723,7 +946,7 @@ Index: source/view/main/VDataSeries.cxx
      : m_nPolygonIndex(0)
      , m_fLogicMinX(0.0)
      , m_fLogicMaxX(0.0)
-@@ -236,6 +235,7 @@
+@@ -236,6 +188,7 @@ VDataSeries::VDataSeries( const uno::Reference< XDataSeries >& xDataSeries )
      , m_nAxisIndex(0)
      , m_bConnectBars(sal_False)
      , m_bGroupBarsPerAxis(sal_True)
@@ -731,7 +954,7 @@ Index: source/view/main/VDataSeries.cxx
      , m_nStartingAngle(90)
  
      , m_aSeriesParticle()
-@@ -280,17 +280,17 @@
+@@ -280,17 +233,17 @@ VDataSeries::VDataSeries( const uno::Reference< XDataSeries >& xDataSeries )
                  aARole >>= aRole;
  
                  if( aRole.equals(C2U("values-x")) )
@@ -755,7 +978,7 @@ Index: source/view/main/VDataSeries.cxx
                  //@todo assign the other roles (+ error for unknown?)
              }
              catch( uno::Exception& e )
-@@ -485,6 +485,16 @@
+@@ -485,6 +438,16 @@ sal_Bool VDataSeries::getGroupBarsPerAxis() const
      return m_bGroupBarsPerAxis;
  }
  
@@ -772,58 +995,3 @@ Index: source/view/main/VDataSeries.cxx
  void VDataSeries::setStartingAngle( sal_Int32 nStartingAngle )
  {
      m_nStartingAngle = nStartingAngle;
-Index: source/view/inc/VDataSeries.hxx
-===================================================================
---- chart2/source/view/inc/VDataSeries.hxx	(.../tags/DEV300_m35/chart2)	(revision 264806)
-+++ chart2/source/view/inc/VDataSeries.hxx	(.../cws/koheichart01/chart2)	(revision 264806)
-@@ -59,7 +59,7 @@
- {
- public:
-     void init( const ::com::sun::star::uno::Reference<
--        ::com::sun::star::chart2::data::XDataSequence >& xModel);
-+        ::com::sun::star::chart2::data::XDataSequence >& xModel, bool bIncludeHiddenCells );
-     bool is() const;
-     void clear();
-     double getValue( sal_Int32 index ) const;
-@@ -77,7 +77,7 @@
- {
- public:
-     VDataSeries( const ::com::sun::star::uno::Reference<
--        ::com::sun::star::chart2::XDataSeries >& xDataSeries );
-+        ::com::sun::star::chart2::XDataSeries >& xDataSeries, bool bIncludeHiddenCells );
-     virtual ~VDataSeries();
- 
-     ::com::sun::star::uno::Reference< ::com::sun::star::chart2::XDataSeries >
-@@ -138,6 +138,9 @@
-     void setGroupBarsPerAxis( sal_Bool bGroupBarsPerAxis );
-     sal_Bool getGroupBarsPerAxis() const;
- 
-+    void setIncludeHiddenCells( sal_Bool bIncludeHiddenCells );
-+    sal_Bool getIncludeHiddenCells() const;
-+
-     void setStartingAngle( sal_Int32 nStartingAngle );
-     sal_Int32 getStartingAngle() const;
-     
-@@ -220,6 +223,8 @@
- 
-     sal_Bool                m_bGroupBarsPerAxis;
- 
-+    sal_Bool                m_bIncludeHiddenCells;
-+
-     sal_Int32               m_nStartingAngle;
- 
-     rtl::OUString           m_aSeriesParticle;
-Index: source/view/inc/VCoordinateSystem.hxx
-===================================================================
---- chart2/source/view/inc/VCoordinateSystem.hxx	(.../tags/DEV300_m35/chart2)	(revision 264806)
-+++ chart2/source/view/inc/VCoordinateSystem.hxx	(.../cws/koheichart01/chart2)	(revision 264806)
-@@ -133,6 +133,9 @@
-     virtual bool needSeriesNamesForAxis() const;
-     void setSeriesNamesForAxis( const ::com::sun::star::uno::Sequence< rtl::OUString >& rSeriesNames );
- 
-+    void setIncludeHiddenCells(bool b);
-+    bool getIncludeHiddenCells() const;
-+
- protected: //methods
-     VCoordinateSystem( const ::com::sun::star::uno::Reference<
-         ::com::sun::star::chart2::XCoordinateSystem >& xCooSys );
