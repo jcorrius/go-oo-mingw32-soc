@@ -7,12 +7,14 @@ import globals
 
 class BaseRecordHandler(object):
 
-    def __init__ (self, recordType, recordInstance, size, bytes, prefix=''):
+    def __init__ (self, recordType, recordInstance, size, bytes, streamProperties, prefix='', propertyName=None):
         self.recordType = recordType
         self.recordInstance = recordInstance
         self.size = size
         self.bytes = bytes
         self.lines = []
+        self.streamProperties = streamProperties
+        self.propertyName = propertyName
         self.prefix = prefix
         self.pos = 0       # current byte position
 
@@ -41,6 +43,13 @@ append a line to be displayed.
         text = "%s: %s"%(name, self.getYesNo(value))
         self.appendLine(text)
 
+    def appendProperty (self, value):
+        if self.propertyName is not None:
+            self.streamProperties[self.propertyName] = value
+
+    def isEmpty (self):
+        return len(self.bytes) <= self.pos
+    
     def readBytes (self, length):
         r = self.bytes[self.pos:self.pos+length]
         self.pos += length
@@ -88,14 +97,24 @@ class String(BaseRecordHandler):
 
     def parseBytes (self):
         name = globals.getTextBytes(self.readRemainingBytes())
+        self.appendProperty(name)
         self.appendLine("text: '%s'"%name)
+
+def ShapeString (*args):
+    args += "ShapeText",
+    return String(*args)
 
 class UniString(BaseRecordHandler):
     """Textual content."""
 
     def parseBytes (self):
         name = globals.getUTF8FromUTF16(globals.getTextBytes(self.readRemainingBytes()))
+        self.appendProperty(name)
         self.appendLine("text: '%s'"%name)
+
+def ShapeUniString (*args):
+    args += "ShapeText",
+    return UniString(*args)
 
 # -------------------------------------------------------------------
 # special record handler: properties
@@ -106,7 +125,7 @@ class Property(BaseRecordHandler):
     def parseBytes (self):
         # each prop entry takes 6 bytes; complex stuff comes after
         # prop entries and fills remaining record space
-        complexBytes = self.bytes[self.pos+self.recordInstance*6:]
+        allComplexBytes = self.bytes[self.pos+self.recordInstance*6:]
 
         # recordInstance gives number of properties
         for i in xrange(0, self.recordInstance):
@@ -116,12 +135,51 @@ class Property(BaseRecordHandler):
             isComplex = (propType & 0x8000) != 0
             isBlip = ((propType & 0x4000) != 0) and not isComplex
             propType = (propType & 0x3FFF)
+            complexBytes = []
 
+            if isComplex:
+                # eat propValue bytes from complexBytes
+                complexBytes = allComplexBytes[:propValue]
+                allComplexBytes = allComplexBytes[propValue:]
+                
             if propData.has_key(propType):
-                handler = propData[propType][1](propType, propValue, isComplex, isBlip, self.appendLine)
+                handler = propData[propType][1](propType, propValue, isComplex, isBlip, complexBytes, self.appendLine)
                 handler.output()
             else:
                 self.appendLine("%4.4Xh: [unknown property type: %4.4Xh, value: %8.8Xh, complex: %d, blip: %d]"%(propType, propValue, isComplex, isBlip))
+
+# -------------------------------------------------------------------
+# special record handler: document atom
+
+class DocAtom(BaseRecordHandler):
+    """Document atom."""
+
+    def parseBytes (self):
+        slideWidth = self.readSignedInt(4)
+        slideHeight = self.readSignedInt(4)
+        notesWidth = self.readSignedInt(4)
+        notesHeight = self.readSignedInt(4)
+        oleWidth = self.readSignedInt(4)
+        oleHeight = self.readSignedInt(4)
+        notesMasterPersist = self.readUnsignedInt(4)
+        handoutMasterPersist = self.readUnsignedInt(4)
+        firstSlideNum = self.readUnsignedInt(2)
+        slideSizeType = self.readSignedInt(2)
+        savedWithFont = self.readUnsignedInt(1)
+        omitTitlePlace = self.readUnsignedInt(1)
+        right2Left = self.readUnsignedInt(1)
+        showComments = self.readUnsignedInt(1)
+
+        self.appendLine("Slide: (%d,%d), notes: (%d,%d), ole zoom: (%d,%d)"%(slideWidth, slideHeight,
+                                                                             notesWidth, notesHeight,
+                                                                             oleWidth, oleHeight))
+        self.appendLine("Notes master persist offset: %8.8Xh"%notesMasterPersist)
+        self.appendLine("Handout master persist offset: %8.8Xh"%handoutMasterPersist)
+        self.appendLine("1st slide num: %d, slide size type: %4.4Xh"%(firstSlideNum, slideSizeType))
+        self.appendLine("embedded fonts: %s, no placeholders on title slide: %s"%(savedWithFont,
+                                                                                  omitTitlePlace))
+        self.appendLine("RTL doc: %s, show comment shapes: %s"%(right2Left, showComments))
+
 
 # -------------------------------------------------------------------
 # special record handlers: text style properties
@@ -130,33 +188,44 @@ class TextStyles(BaseRecordHandler):
     """Text style properties."""
 
     def parseBytes (self):
-        # 4 bytes: total len of para attribs
+        # any shape text set? if not, no chance to calc run lengths
+        if not self.streamProperties.has_key("ShapeText"):
+            self.appendLine("no shape text given, skipping props")
+            return
+        
+        textLen = len(self.streamProperties["ShapeText"])
+
+        # 4 bytes: <count> characters of shape text this para run is meant for
         # <para attribs>
-        # 4 bytes: total len of char attribs
+        # repeat until all shape text is consumed
+        charPos = 0
+        while not self.isEmpty() and charPos < textLen:
+            runLen = self.readUnsignedInt(4)
+            charPos += runLen
+            self.parseParaStyle(runLen)
+            self.appendLine("-"*61)
+            
+        # 4 bytes: <count> characters of shape text this char run is meant for
         # <char attribs>
-        paraAttribLen = self.readUnsignedInt(4)
-        paraAttribEndPos = self.pos + paraAttribLen
-        while self.pos < paraAttribEndPos:
-            self.parseParaStyle()
+        # repeat until all shape text is consumed
+        charPos = 0
+        while not self.isEmpty() and charPos < textLen:
+            runLen = self.readUnsignedInt(4)
+            charPos += runLen
+            self.parseCharStyle(runLen)
             self.appendLine("-"*61)
-
-        charAttribLen = self.readUnsignedInt(4)
-        charAttribEndPos = self.pos + charAttribLen
-        while self.pos < charAttribEndPos:
-            self.parseCharStyle()
-            self.appendLine("-"*61)
-
+            
     def appendParaProp (self, text):
         self.appendLine("para prop given: "+text)
 
     def appendCharProp (self, text):
         self.appendLine("char prop given: "+text)
 
-    def parseParaStyle (self):
+    def parseParaStyle (self, runLen):
         indentLevel = self.readUnsignedInt(2)
         styleMask = self.readUnsignedInt(4)
 
-        self.appendLine("para props for indent: %d"%indentLevel)
+        self.appendLine("para props for %d chars, indent: %d"%(runLen,indentLevel))
 
         if styleMask & 0x000F:
             bulletFlags = self.readUnsignedInt(2)
@@ -177,7 +246,7 @@ class TextStyles(BaseRecordHandler):
             self.appendParaProp("bullet size %d"%bulletSize)
 
         if styleMask & 0x0020:
-            bulletColorAtom = ColorPropertyHandler(self.readUnsignedInt(2), self.readUnsignedInt(4), False, False, self.appendParaProp)
+            bulletColorAtom = ColorPropertyHandler(self.readUnsignedInt(2), self.readUnsignedInt(4), False, False, [], self.appendParaProp)
             bulletColorAtom.output()
             self.appendParaProp("bullet color atom")
 
@@ -234,8 +303,10 @@ class TextStyles(BaseRecordHandler):
             paraTextDirection = self.readUnsignedInt(2)
             self.appendParaProp("para text direction %4.4Xh"%paraTextDirection)
 
-    def parseCharStyle (self):
+    def parseCharStyle (self, runLen):
         styleMask = self.readUnsignedInt(4)
+
+        self.appendLine("char props for %d chars"%runLen)
 
         if styleMask & 0xFFFF:
             charFlags = self.readUnsignedInt(2)
@@ -262,7 +333,7 @@ class TextStyles(BaseRecordHandler):
             self.appendCharProp("char font size %d"%fontSize)
 
         if styleMask & 0x40000:
-            charColorAtom = ColorPropertyHandler(self.readUnsignedInt(2), self.readUnsignedInt(4), False, False, self.appendCharProp)
+            charColorAtom = ColorPropertyHandler(self.readUnsignedInt(2), self.readUnsignedInt(4), False, False, [], self.appendCharProp)
             charColorAtom.output()
             self.appendCharProp("char color atom")
 
@@ -277,17 +348,21 @@ class TextStyles(BaseRecordHandler):
 class BasePropertyHandler():
     """Base property handler."""
 
-    def __init__ (self, propType, propValue, isComplex, isBlip, printer):
+    def __init__ (self, propType, propValue, isComplex, isBlip, complexBytes, printer):
         self.propType = propType
         self.propValue = propValue
         self.isComplex = isComplex
         self.isBlip = isBlip
+        self.bytes = complexBytes
+        self.pos = 0
         self.printer = printer
+        if propData.has_key(self.propType):
+            self.propEntry = propData[self.propType]
     
     def output (self):
         if propData.has_key(self.propType):
-            propEntry = propData[self.propType]
-            self.printer("%4.4Xh: %s = %8.8Xh [\"%s\" - default handler]"%(self.propType, propEntry[0], self.propValue, propEntry[2]))
+            self.printer("%4.4Xh: %s = %8.8Xh [\"%s\" - default handler]"%(self.propType, self.propEntry[0],
+                                                                           self.propValue, self.propEntry[2]))
 
 class BoolPropertyHandler(BasePropertyHandler):
     """Bool properties."""
@@ -309,11 +384,39 @@ class LongPropertyHandler(BasePropertyHandler):
 class MsoArrayPropertyHandler(BasePropertyHandler):
     """MsoArray property."""
 
+    def readBytes (self, length):
+        r = self.bytes[self.pos:self.pos+length]
+        self.pos += length
+        return r
+
+    def readUnsignedInt (self, length):
+        bytes = self.readBytes(length)
+        return globals.getUnsignedInt(bytes)
+
+    def output (self):
+        if self.isComplex:
+            numElements = self.readUnsignedInt(2)
+            dummy = self.readUnsignedInt(2)
+            elementSize = self.readUnsignedInt(2)
+            self.printer("%4.4Xh: %s: [\"%s\"]"%(self.propType, self.propEntry[0], self.propEntry[2]))
+            for i in xrange(0, numElements):
+                currElem = self.readUnsignedInt(elementSize)
+                self.printer("%4.4Xh: %d = %Xh"%(i,currElem))
+
 class UniCharPropertyHandler(BasePropertyHandler):
     """unicode string property."""  
 
+    def output (self):
+        if self.isComplex:
+            name = globals.getUTF8FromUTF16(globals.getTextBytes(self.bytes))
+            self.printer("%4.4Xh: %s = %s: [\"%s\"]"%(self.propType, self.propEntry[0], name, self.propEntry[2]))
+
 class FixedPointHandler(BasePropertyHandler):
     """FixedPoint property."""
+
+    def output (self):
+        value = self.propValue / 65536.0
+        self.printer("%4.4Xh: %s = %f [\"%s\"]"%(self.propType, self.propEntry[0], value, self.propEntry[2]))
     
 class ColorPropertyHandler(BasePropertyHandler):
     """Color property."""   
@@ -339,8 +442,19 @@ class ColorPropertyHandler(BasePropertyHandler):
 class CharPropertyHandler(BasePropertyHandler):
     """string property."""  
 
+    def output (self):
+        if self.isComplex:
+            name = globals.getTextBytes(self.bytes)
+            self.printer("%4.4Xh: %s = %s: [\"%s\"]"%(self.propType, self.propEntry[0], name, self.propEntry[2]))
+
 class HandlesPropertyHandler(BasePropertyHandler):
-    """string property."""  
+    """handles property."""  
+
+class ZipStoragePropertyHandler(BasePropertyHandler):
+    """zip storage."""  
+
+    def output (self):
+        self.printer("zipped stuff")
 
 # -------------------------------------------------------------------
 # special record handler: properties
@@ -638,7 +752,7 @@ propData = {
  904:  ["DFF_Prop_lidRegroup",                   LongPropertyHandler,              "Regroup ID"],
  927:  ["DFF_Prop_tableProperties",             LongPropertyHandler, ""],
  928:  ["DFF_Prop_tableRowProperties",          LongPropertyHandler, ""],
- 937:  ["DFF_Prop_xmlstuff",                     LongPropertyHandler, "Embedded ooxml"],
+ 937:  ["DFF_Prop_xmlstuff",                     ZipStoragePropertyHandler, "Embedded ooxml"],
  953:  ["DFF_Prop_fEditedWrap",                  BoolPropertyHandler,              "Has the wrap polygon been edited?"],
  954:  ["DFF_Prop_fBehindDocument",              BoolPropertyHandler,              "Word-only (shape is behind text)"],
  955:  ["DFF_Prop_fOnDblClickNotify",            BoolPropertyHandler,              "Notify client on a double click"],

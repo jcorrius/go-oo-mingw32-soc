@@ -18,7 +18,7 @@ recData = {
     7:  ["DFF_PST_ClientSignal2"],              
    10:  ["DFF_PST_PowerPointStateInfoAtom"],    
  1000:  ["DFF_PST_Document"],                   
- 1001:  ["DFF_PST_DocumentAtom"],               
+ 1001:  ["DFF_PST_DocumentAtom", record.DocAtom],               
  1002:  ["DFF_PST_EndDocument"],                
  1003:  ["DFF_PST_SlidePersist"],               
  1004:  ["DFF_PST_SlideBase"],                  
@@ -84,22 +84,22 @@ recData = {
  3035:  ["DFF_PST_OEShapeAtom"],                
  3998:  ["DFF_PST_OutlineTextRefAtom"],         
  3999:  ["DFF_PST_TextHeaderAtom"],             
- 4000:  ["DFF_PST_TextCharsAtom", record.UniString],
+ 4000:  ["DFF_PST_TextCharsAtom", record.ShapeUniString],
  4001:  ["DFF_PST_StyleTextPropAtom", record.TextStyles],          
- 4002:  ["DFF_PST_BaseTextPropAtom"],           
+ 4002:  ["DFF_PST_BaseTextPropAtom", record.TextStyles],           
  4003:  ["DFF_PST_TxMasterStyleAtom"],          
  4004:  ["DFF_PST_TxCFStyleAtom"],              
  4005:  ["DFF_PST_TxPFStyleAtom"],              
  4006:  ["DFF_PST_TextRulerAtom"],              
  4007:  ["DFF_PST_TextBookmarkAtom"],           
- 4008:  ["DFF_PST_TextBytesAtom", record.String],
+ 4008:  ["DFF_PST_TextBytesAtom", record.ShapeString],
  4009:  ["DFF_PST_TxSIStyleAtom"],              
  4010:  ["DFF_PST_TextSpecInfoAtom"],           
  4011:  ["DFF_PST_DefaultRulerAtom"],           
  4023:  ["DFF_PST_FontEntityAtom"],             
  4024:  ["DFF_PST_FontEmbedData"],              
  4025:  ["DFF_PST_TypeFace"],                   
- 4026:  ["DFF_PST_CString"],                    
+ 4026:  ["DFF_PST_CString", record.UniString],                    
  4027:  ["DFF_PST_ExternalObject"],             
  4033:  ["DFF_PST_MetaFile"],                   
  4034:  ["DFF_PST_ExOleObj"],                   
@@ -202,7 +202,7 @@ recData = {
 0xF011: ["DFF_msofbtClientData"],      
 0xF11F: ["DFF_msofbtOleObject"],       
 0xF11D: ["DFF_msofbtDeletedPspl"],     
-0xF122: ["DFF_msofbtUDefProp"],        
+0xF122: ["DFF_msofbtUDefProp", record.Property],        
 0xF005: ["DFF_msofbtSolverContainer"], 
 0xF012: ["DFF_msofbtConnectorRule"],   
 0xF013: ["DFF_msofbtAlignRule"],       
@@ -244,7 +244,7 @@ class PPTFile(object):
 
     def __getDirectoryObj (self):
         obj = self.header.getDirectory()
-        if obj == None:
+        if obj is None:
             return None
         obj.parseDirEntries()
         return obj
@@ -252,14 +252,14 @@ class PPTFile(object):
 
     def printDirectory (self):
         obj = self.__getDirectoryObj()
-        if obj == None:
+        if obj is None:
             return
         obj.output()
 
 
     def getDirectoryNames (self):
         obj = self.__getDirectoryObj()
-        if obj == None:
+        if obj is None:
             return
         return obj.getDirectoryNames()
 
@@ -267,7 +267,7 @@ class PPTFile(object):
     def getDirectoryStreamByName (self, name):
         obj = self.__getDirectoryObj()
         bytes = []
-        if obj != None:
+        if obj is not None:
             bytes = obj.getRawStreamByName(name)
         strm = PPTDirStream(bytes, self.params)
         return strm
@@ -275,12 +275,13 @@ class PPTFile(object):
 
 class PPTDirStream(object):
     """Represents one single powerpoint file subdirectory, like e.g. \"PowerPoint Document\"."""
-    def __init__ (self, bytes, params, prefix=''):
+    def __init__ (self, bytes, params, prefix='', recordInfo=None):
         self.bytes = bytes
         self.size = len(self.bytes)
         self.pos = 0
         self.prefix = prefix
         self.params = params
+        self.properties = {"recordInfo": recordInfo}
 
 
     def readBytes (self, size=1):
@@ -305,8 +306,8 @@ class PPTDirStream(object):
 
     def readRecords (self):
         try:
-            # read until data is exhausted
-            while self.pos < self.size:
+            # read until data is exhausted (min record size: 8 bytes)
+            while self.pos+8 < self.size:
                 print("")
                 self.readRecord()
             return True 
@@ -336,6 +337,7 @@ class PPTDirStream(object):
                 print("")
         if size > 0:
             print("")
+            self.__printSep('-', 61, "%4.4Xh: "%recordType)
 
     
     def readRecord (self):
@@ -348,19 +350,22 @@ class PPTDirStream(object):
 
         self.printRecordHeader(startPos, recordInstance, recordVersion, recordType, size)
         bytes = self.readBytes(size)
-        
+
+        recordInfo = None
         if recData.has_key(recordType) and len(recData[recordType]) >= 2:
-            assert(recordVersion != 0x0F)
-            # call special record handler, if any
-            handler = recData[recordType][1](recordType, recordInstance, size, bytes, self.prefix)
+            recordInfo = recData[recordType]
+
+        if recordVersion == 0x0F:
+            # substream? recurse into that
+            subSubStrm = PPTDirStream(bytes, self.params, self.prefix+" ", recordInfo)
+            subSubStrm.readRecords()
+        elif recordInfo is not None:
+            handler = recordInfo[1](recordType, recordInstance, size, bytes, self.properties, self.prefix)
             print("")
-            if handler != None:
+            # call special record handler, if any
+            if handler is not None:
                 handler.output()
             self.printRecordDump(bytes, recordType)
-        elif recordVersion == 0x0F:
-            # substream? recurse into that
-            subSubStrm = PPTDirStream(bytes, self.params, self.prefix+" ")
-            subSubStrm.readRecords()
         elif size > 0:
             print("")
             self.printRecordDump(bytes, recordType)
