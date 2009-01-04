@@ -1,6 +1,20 @@
+########################################################################
+#
+#    OpenOffice.org - a multi-platform office productivity suite
+#
+#    Author:
+#      Kohei Yoshida  <kyoshida@novell.com>
+#      Thorsten Behrens <tbehrens@novell.com>	   	
+#
+#   The Contents of this file are made available subject to
+#   the terms of GNU Lesser General Public License Version 2.1.
+#
+########################################################################
 
-import struct
+import StringIO
 import globals
+import zipfile
+import xmlpp
 
 # -------------------------------------------------------------------
 # record handler classes
@@ -142,7 +156,7 @@ class Property(BaseRecordHandler):
                 complexBytes = allComplexBytes[:propValue]
                 allComplexBytes = allComplexBytes[propValue:]
                 
-            if propData.has_key(propType):
+            if propType in propData:
                 handler = propData[propType][1](propType, propValue, isComplex, isBlip, complexBytes, self.appendLine)
                 handler.output()
             else:
@@ -189,7 +203,7 @@ class TextStyles(BaseRecordHandler):
 
     def parseBytes (self):
         # any shape text set? if not, no chance to calc run lengths
-        if not self.streamProperties.has_key("ShapeText"):
+        if not "ShapeText" in self.streamProperties:
             self.appendLine("no shape text given, skipping props")
             return
         
@@ -296,7 +310,7 @@ class TextStyles(BaseRecordHandler):
         if styleMask & 0xE0000:
             paraAsianLinebreaking = self.readUnsignedInt(2)
             # filter bits not in flag field
-            paraAsianLinebreaking = paraAsianLinebreaking & ((styleMask & 0xE0000) / 0x20000)
+            paraAsianLinebreaking = paraAsianLinebreaking & ((styleMask & 0xE0000) // 0x20000)
             self.appendParaProp("para asian line breaking flags %4.4Xh"%paraAsianLinebreaking)
 
         if styleMask & 0x200000:
@@ -356,11 +370,11 @@ class BasePropertyHandler():
         self.bytes = complexBytes
         self.pos = 0
         self.printer = printer
-        if propData.has_key(self.propType):
+        if self.propType in propData:
             self.propEntry = propData[self.propType]
     
     def output (self):
-        if propData.has_key(self.propType):
+        if self.propType in propData:
             self.printer("%4.4Xh: %s = %8.8Xh [\"%s\" - default handler]"%(self.propType, self.propEntry[0],
                                                                            self.propValue, self.propEntry[2]))
 
@@ -370,7 +384,7 @@ class BoolPropertyHandler(BasePropertyHandler):
     def output (self):
         bitMask = 1
         for i in xrange(self.propType, self.propType-32):
-            if propData.has_key(i):
+            if i in propData:
                 propEntry = propData[i]
                 if type(propEntry[1]) == type(BoolPropertyHandler):
                     flagValue = self.getTrueFalse(self.propValue & bitMask)
@@ -422,11 +436,11 @@ class ColorPropertyHandler(BasePropertyHandler):
     """Color property."""   
 
     def split (self, packedColor):
-        return (packedColor & 0xFF0000) / 0x10000, (packedColor & 0xFF00) / 0x100, (packedColor & 0xFF)
+        return (packedColor & 0xFF0000) // 0x10000, (packedColor & 0xFF00) / 0x100, (packedColor & 0xFF)
     
     def output (self):
         propEntry = ["<color atom>", None, "undocumented color property"]
-        if propData.has_key(self.propType):
+        if self.propType in propData:
             propEntry = propData[self.propType]
         colorValue = self.propValue & 0xFFFFFF
         if self.propValue & 0xFE000000 == 0xFE000000:
@@ -454,7 +468,43 @@ class ZipStoragePropertyHandler(BasePropertyHandler):
     """zip storage."""  
 
     def output (self):
-        self.printer("zipped stuff")
+        class StreamWrap(object):
+            def __init__ (self,printer):
+                self.printer = printer
+                self.buffer = ""
+            def write (self,string):
+                self.buffer += string
+            def flush (self):
+                for line in self.buffer.splitlines():
+                    self.printer(line)
+            
+        self.printer("Zipped content:")
+        self.printer('='*61)
+        rawFile = StringIO.StringIO(self.bytes)
+        zipFile = zipfile.ZipFile(rawFile)
+        i = 0
+        # TODO: when 2.6/3.0 is in widespread use, change to infolist here
+        for filename in zipFile.namelist():
+            if i > 0:
+                self.printer('-'*61)
+            i += 1
+            self.printer(filename + ":")
+            self.printer('-'*61)
+
+            contents = zipFile.read(filename)
+            if filename.endswith(".xml") or contents.startswith("<?xml"):
+                wrapper = StreamWrap(self.printer)
+                xmlpp.pprint(contents,wrapper,1,80)
+                wrapper.flush()
+            else:
+                while len(contents):
+                    self.printer(contents[:60].replace('\n','').replace('\r',''))
+                    contents = contents[60:]
+#            content = zipFile.open(zipInfo)
+#            for line in content.readlines():
+#                self.printer(line)
+        zipFile.close()        
+
 
 # -------------------------------------------------------------------
 # special record handler: properties

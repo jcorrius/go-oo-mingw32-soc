@@ -1,3 +1,14 @@
+########################################################################
+#
+#    OpenOffice.org - a multi-platform office productivity suite
+#
+#    Author:
+#      Kohei Yoshida  <kyoshida@novell.com>
+#
+#   The Contents of this file are made available subject to
+#   the terms of GNU Lesser General Public License Version 2.1.
+#
+########################################################################
 
 import sys
 import stream, globals
@@ -314,7 +325,6 @@ class SAT(object):
         self.sectorIDs = []
         self.bytes = bytes
         self.array = []
-
         self.params = params
 
 
@@ -342,10 +352,10 @@ class SAT(object):
 
 
     def outputRawBytes (self):
-        bytes = []
+        bytes = ""
         for secID in self.sectorIDs:
             pos = 512 + secID*self.sectorSize
-            bytes.extend(self.bytes[pos:pos+self.sectorSize])
+            bytes += self.bytes[pos:pos+self.sectorSize]
         globals.dumpBytes(bytes, 512)
 
 
@@ -485,7 +495,7 @@ entire file stream.
         self.SSAT = header.getSSAT()
         self.header = header
         self.RootStorage = None
-        self.RootStorageBytes = []
+        self.RootStorageBytes = ""
         self.params = params
 
 
@@ -498,7 +508,7 @@ entire file stream.
         chain = self.header.getSAT().getSectorIDChain(firstSecID)
         for secID in chain:
             pos = 512 + secID*self.sectorSize
-            self.RootStorageBytes.extend(self.header.bytes[pos:pos+self.sectorSize])
+            self.RootStorageBytes += self.header.bytes[pos:pos+self.sectorSize]
 
 
     def __getRawStream (self, entry):
@@ -514,20 +524,20 @@ entire file stream.
             if self.RootStorage == None:
                 raise NoRootStorage
 
-            bytes = []
+            bytes = ""
             self.__buildRootStorageBytes()
             size = self.header.getShortSectorSize()
             for id in chain:
                 pos = id*size
-                bytes.extend(self.RootStorageBytes[pos:pos+size])
+                bytes += self.RootStorageBytes[pos:pos+size]
             return bytes
 
         offset = 512
         size = self.header.getSectorSize()
-        bytes = []
+        bytes = ""
         for id in chain:
             pos = offset + id*size
-            bytes.extend(self.header.bytes[pos:pos+size])
+            bytes += self.header.bytes[pos:pos+size]
 
         return bytes
 
@@ -683,10 +693,10 @@ entire file stream.
             return
 
         # combine all sectors first.
-        bytes = []
+        bytes = ""
         for secID in self.sectorIDs:
             pos = globals.getSectorPos(secID, self.sectorSize)
-            bytes.extend(self.bytes[pos:pos+self.sectorSize])
+            bytes += self.bytes[pos:pos+self.sectorSize]
 
         self.entries = []
 

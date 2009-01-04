@@ -1,3 +1,14 @@
+########################################################################
+#
+#    OpenOffice.org - a multi-platform office productivity suite
+#
+#    Author:
+#      Kohei Yoshida  <kyoshida@novell.com>
+#
+#   The Contents of this file are made available subject to
+#   the terms of GNU Lesser General Public License Version 2.1.
+#
+########################################################################
 
 import sys, struct, math
 

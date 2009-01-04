@@ -1,3 +1,15 @@
+########################################################################
+#
+#    OpenOffice.org - a multi-platform office productivity suite
+#
+#    Author:
+#      Kohei Yoshida  <kyoshida@novell.com>
+#      Thorsten Behrens <tbehrens@novell.com>	   	
+#
+#   The Contents of this file are made available subject to
+#   the terms of GNU Lesser General Public License Version 2.1.
+#
+########################################################################
 
 import sys
 import ole, globals, record
@@ -317,7 +329,7 @@ class PPTDirStream(object):
 
     def printRecordHeader (self, startPos, recordInstance, recordVersion, recordType, size):
         self.__printSep('=')
-        if recData.has_key(recordType):
+        if recordType in recData:
             self.__print("[%s]"%recData[recordType][0])
         else:
             self.__print("[anon record]")
@@ -344,7 +356,7 @@ class PPTDirStream(object):
         startPos = self.pos
         recordInstance = self.readUnsignedInt(2)
         recordVersion = (recordInstance & 0x000F)
-        recordInstance = recordInstance / 16
+        recordInstance = recordInstance // 16
         recordType = self.readUnsignedInt(2)
         size = self.readUnsignedInt(4)
 
@@ -352,7 +364,7 @@ class PPTDirStream(object):
         bytes = self.readBytes(size)
 
         recordInfo = None
-        if recData.has_key(recordType) and len(recData[recordType]) >= 2:
+        if recordType in recData and len(recData[recordType]) >= 2:
             recordInfo = recData[recordType]
 
         if recordVersion == 0x0F:
