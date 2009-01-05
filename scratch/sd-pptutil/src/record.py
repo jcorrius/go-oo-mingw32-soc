@@ -11,10 +11,7 @@
 #
 ########################################################################
 
-import StringIO
 import globals
-import zipfile
-import xmlpp
 
 # -------------------------------------------------------------------
 # record handler classes
@@ -130,6 +127,12 @@ def ShapeUniString (*args):
     args += "ShapeText",
     return UniString(*args)
 
+class ZipRecord(BaseRecordHandler):
+    """Zipped content."""
+
+    def parseBytes (self):
+        globals.outputZipContent(self.readRemainingBytes(), self.appendLine, 61)
+
 # -------------------------------------------------------------------
 # special record handler: properties
 
@@ -196,6 +199,30 @@ class DocAtom(BaseRecordHandler):
 
 
 # -------------------------------------------------------------------
+# special record handler: color scheme atom
+
+class ColorScheme(BaseRecordHandler):
+    """Color scheme atom."""
+
+    def parseBytes (self):
+        self.appendLine(globals.stringizeColorRef(self.readUnsignedInt(4),
+                                                  "Background"))
+        self.appendLine(globals.stringizeColorRef(self.readUnsignedInt(4),
+                                                  "Text and lines"))
+        self.appendLine(globals.stringizeColorRef(self.readUnsignedInt(4),
+                                                  "Shadows"))
+        self.appendLine(globals.stringizeColorRef(self.readUnsignedInt(4),
+                                                  "Title text"))
+        self.appendLine(globals.stringizeColorRef(self.readUnsignedInt(4),
+                                                  "Fills"))
+        self.appendLine(globals.stringizeColorRef(self.readUnsignedInt(4),
+                                                  "Accent"))
+        self.appendLine(globals.stringizeColorRef(self.readUnsignedInt(4),
+                                                  "Accent and hyperlink"))
+        self.appendLine(globals.stringizeColorRef(self.readUnsignedInt(4),
+                                                  "Accent and followed hyperlink"))
+
+# -------------------------------------------------------------------
 # special record handlers: text style properties
 
 class TextStyles(BaseRecordHandler):
@@ -216,7 +243,9 @@ class TextStyles(BaseRecordHandler):
         while not self.isEmpty() and charPos < textLen:
             runLen = self.readUnsignedInt(4)
             charPos += runLen
-            self.parseParaStyle(runLen)
+            indentLevel = self.readUnsignedInt(2)
+            self.appendLine("para props for %d chars, indent: %d"%(runLen,indentLevel))
+            self.parseParaStyle()
             self.appendLine("-"*61)
             
         # 4 bytes: <count> characters of shape text this char run is meant for
@@ -226,7 +255,8 @@ class TextStyles(BaseRecordHandler):
         while not self.isEmpty() and charPos < textLen:
             runLen = self.readUnsignedInt(4)
             charPos += runLen
-            self.parseCharStyle(runLen)
+            self.appendLine("char props for %d chars"%runLen)
+            self.parseCharStyle()
             self.appendLine("-"*61)
             
     def appendParaProp (self, text):
@@ -235,11 +265,8 @@ class TextStyles(BaseRecordHandler):
     def appendCharProp (self, text):
         self.appendLine("char prop given: "+text)
 
-    def parseParaStyle (self, runLen):
-        indentLevel = self.readUnsignedInt(2)
+    def parseParaStyle (self):
         styleMask = self.readUnsignedInt(4)
-
-        self.appendLine("para props for %d chars, indent: %d"%(runLen,indentLevel))
 
         if styleMask & 0x000F:
             bulletFlags = self.readUnsignedInt(2)
@@ -317,10 +344,8 @@ class TextStyles(BaseRecordHandler):
             paraTextDirection = self.readUnsignedInt(2)
             self.appendParaProp("para text direction %4.4Xh"%paraTextDirection)
 
-    def parseCharStyle (self, runLen):
+    def parseCharStyle (self):
         styleMask = self.readUnsignedInt(4)
-
-        self.appendLine("char props for %d chars"%runLen)
 
         if styleMask & 0xFFFF:
             charFlags = self.readUnsignedInt(2)
@@ -355,6 +380,27 @@ class TextStyles(BaseRecordHandler):
             fontPosition = self.readSignedInt(2)
             self.appendCharProp("char font position %d"%fontPosition)
 
+
+class MasterTextStyles(TextStyles):
+    """Master text style properties."""
+
+    def parseBytes (self):
+        self.appendLine("Master style for text type: %d"%self.recordInstance)
+        self.appendLine("-"*61)
+
+        # 2 bytes: number of indent levels following. each indent
+        # level has one para and one char prop entry, the para prop
+        # entry misses the indent specifier it has for StyleTextAtom.
+        numLevels = self.readUnsignedInt(2)
+        
+        for i in xrange(0, numLevels):
+            self.appendLine("para props for indent level: %d"%i)
+            self.parseParaStyle()
+            self.appendLine("-"*61)
+            self.appendLine("char props for indent level: %d"%i)
+            self.parseCharStyle()
+            self.appendLine("-"*61)
+            
 
 # -------------------------------------------------------------------
 # special record handlers: property atoms
@@ -394,6 +440,11 @@ class BoolPropertyHandler(BasePropertyHandler):
             
 class LongPropertyHandler(BasePropertyHandler):
     """Long property."""
+
+    def output (self):
+        if self.propType in propData:
+            self.printer("%4.4Xh: %s = %d [\"%s\"]"%(self.propType, self.propEntry[0],
+                                                     self.propValue, self.propEntry[2]))
         
 class MsoArrayPropertyHandler(BasePropertyHandler):
     """MsoArray property."""
@@ -436,22 +487,16 @@ class ColorPropertyHandler(BasePropertyHandler):
     """Color property."""   
 
     def split (self, packedColor):
-        return (packedColor & 0xFF0000) // 0x10000, (packedColor & 0xFF00) / 0x100, (packedColor & 0xFF)
+        return ((packedColor & 0xFF0000) // 0x10000, (packedColor & 0xFF00) / 0x100, (packedColor & 0xFF))
     
     def output (self):
         propEntry = ["<color atom>", None, "undocumented color property"]
         if self.propType in propData:
             propEntry = propData[self.propType]
-        colorValue = self.propValue & 0xFFFFFF
-        if self.propValue & 0xFE000000 == 0xFE000000:
-            self.printer("%4.4Xh: %s = (%d,%d,%d) [\"%s\"]"%(self.propType, propEntry[0], split(colorValue), propEntry[2]))
-        elif self.propValue & 0x08000000 or self.propValue & 0x10000000:
-            self.printer("%4.4Xh: %s = schemecolor(%d) [\"%s\"]"%(self.propType, propEntry[0], colorValue, propEntry[2]))
-        elif self.propValue & 0x04000000:
-            self.printer("%4.4Xh: %s = colorschemecolor(%d) [\"%s\"]"%(self.propType, propEntry[0], colorValue, propEntry[2]))
-        else:
-            self.printer("%4.4Xh: %s = <unidentified color>(%4.4Xh) [\"%s\"]"%(self.propType, propEntry[0], colorValue, propEntry[2]))
-
+        self.printer("%4.4Xh: %s [\"%s\"]"%(self.propType,
+                                            globals.stringizeColorRef(self.propValue,
+                                                                      propEntry[0]),
+                                            propEntry[2]))
 
 class CharPropertyHandler(BasePropertyHandler):
     """string property."""  
@@ -468,43 +513,7 @@ class ZipStoragePropertyHandler(BasePropertyHandler):
     """zip storage."""  
 
     def output (self):
-        class StreamWrap(object):
-            def __init__ (self,printer):
-                self.printer = printer
-                self.buffer = ""
-            def write (self,string):
-                self.buffer += string
-            def flush (self):
-                for line in self.buffer.splitlines():
-                    self.printer(line)
-            
-        self.printer("Zipped content:")
-        self.printer('='*61)
-        rawFile = StringIO.StringIO(self.bytes)
-        zipFile = zipfile.ZipFile(rawFile)
-        i = 0
-        # TODO: when 2.6/3.0 is in widespread use, change to infolist here
-        for filename in zipFile.namelist():
-            if i > 0:
-                self.printer('-'*61)
-            i += 1
-            self.printer(filename + ":")
-            self.printer('-'*61)
-
-            contents = zipFile.read(filename)
-            if filename.endswith(".xml") or contents.startswith("<?xml"):
-                wrapper = StreamWrap(self.printer)
-                xmlpp.pprint(contents,wrapper,1,80)
-                wrapper.flush()
-            else:
-                while len(contents):
-                    self.printer(contents[:60].replace('\n','').replace('\r',''))
-                    contents = contents[60:]
-#            content = zipFile.open(zipInfo)
-#            for line in content.readlines():
-#                self.printer(line)
-        zipFile.close()        
-
+        globals.outputZipContent(self.bytes, self.printer, 61)
 
 # -------------------------------------------------------------------
 # special record handler: properties
