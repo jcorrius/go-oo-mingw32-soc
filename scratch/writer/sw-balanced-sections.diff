@@ -1,0 +1,474 @@
+diff --git a/sw/source/core/inc/bodyfrm.hxx b/sw/source/core/inc/bodyfrm.hxx
+index e4492dc..f3d0c1d 100644
+--- sw/source/core/inc/bodyfrm.hxx
++++ sw/source/core/inc/bodyfrm.hxx
+@@ -37,8 +37,11 @@ class SwBorderAttrs;
+ 
+ class SwBodyFrm: public SwLayoutFrm
+ {
++private:
++    long m_height;
+ protected:
+ 	virtual void Format( const SwBorderAttrs *pAttrs = 0 );
++	virtual void MakeAll();
+ 
+ #if defined ( GCC) && defined ( C272 )
+ 	~SwBodyFrm();
+@@ -46,6 +49,8 @@ protected:
+ public:
+ 	SwBodyFrm( SwFrmFmt* );
+ 
++        virtual	void Paint( const SwRect& ) const;
++
+ 	DECL_FIXEDMEMPOOL_NEWDEL(SwBodyFrm)
+ };
+ 
+diff --git a/sw/source/core/inc/frame.hxx b/sw/source/core/inc/frame.hxx
+index 1316abd..64e8ae0 100644
+--- sw/source/core/inc/frame.hxx
++++ sw/source/core/inc/frame.hxx
+@@ -33,6 +33,8 @@
+ #include "swtypes.hxx"	// fuer SwTwips
+ #include "swrect.hxx"
+ #include "calbck.hxx"	// fuer SwClient
++#include <libxml/encoding.h>
++#include <libxml/xmlwriter.h>
+ 
+ class SwLayoutFrm;
+ class SwRootFrm;
+@@ -56,6 +58,7 @@ class SvxBrushItem;
+ class SwSelectionList;
+ struct SwPosition;
+ struct SwCrsrMoveState;
++class SwBodyFrm;
+ 
+ // --> OD 2004-07-06 #i28701#
+ class SwSortedObjs;
+@@ -406,6 +409,7 @@ protected:
+ 	void ColUnlock()   	{ bColLocked = FALSE; }
+ 
+ 	SwPageFrm *InsertPage( SwPageFrm *pSibling, BOOL bFtn );
++    
+ 	void PrepareMake();
+ 	void OptPrepareMake();
+ 	void MakePos();
+@@ -916,6 +920,10 @@ public:
+ 
+     // FME 2007-08-30 #i81146# new loop control
+     void ValidateThisAndAllLowers( const USHORT nStage );
++
++public:
++    virtual void dumpAsXml(xmlTextWriterPtr writer);
++    void dumpChildrenAsXml(xmlTextWriterPtr writer);
+ };
+ 
+ inline BOOL	SwFrm::IsInDocBody() const
+@@ -1056,11 +1064,18 @@ inline void SwFrm::InvalidateNextPos( BOOL bNoFtn )
+ 
+ inline void SwFrm::Calc() const
+ {
++    if (IsBodyFrm()) {
++		((SwFrm*)this)->PrepareMake();
++    }
++
+ 	if ( !bValidPos || !bValidPrtArea || !bValidSize )
+ 		((SwFrm*)this)->PrepareMake();
+ }
+ inline void SwFrm::OptCalc() const
+ {
++    if (IsBodyFrm()) {
++		((SwFrm*)this)->OptPrepareMake();
++    }
+ 	if ( !bValidPos || !bValidPrtArea || !bValidSize )
+ 		((SwFrm*)this)->OptPrepareMake();
+ }
+diff --git a/sw/source/core/inc/pagefrm.hxx b/sw/source/core/inc/pagefrm.hxx
+index 96951b9..92bce5d 100644
+--- sw/source/core/inc/pagefrm.hxx
++++ sw/source/core/inc/pagefrm.hxx
+@@ -45,6 +45,7 @@ struct SwCrsrMoveState;
+ class SdrObject;
+ class SwAttrSetChg;
+ class Font;
++class SwBodyFrm;
+ 
+ // OD 2004-05-07 #i28701# - replaced by class <SwSortedObjs>
+ //SV_DECL_PTRARR_SORT(SwSortDrawObjs,SdrObjectPtr,1,2);
+@@ -430,6 +431,8 @@ public:
+     static const Font& GetEmptyPageFont();
+ 
+     static SwTwips GetSidebarBorderWidth( const ViewShell* );
++
++    SwBodyFrm* InsertBody();
+ };
+ 
+ inline SwCntntFrm *SwPageFrm::FindFirstBodyCntnt()
+diff --git a/sw/source/core/layout/calcmove.cxx b/sw/source/core/layout/calcmove.cxx
+index ef39bd5..a7b9c64 100644
+--- sw/source/core/layout/calcmove.cxx
++++ sw/source/core/layout/calcmove.cxx
+@@ -67,6 +67,7 @@
+ // --> OD 2004-11-01 #i36347#
+ #include <flyfrms.hxx>
+ // <--
++#include <bodyfrm.hxx>
+ 
+ //------------------------------------------------------------------------
+ //				Move-Methoden
+@@ -871,6 +872,33 @@ void SwPageFrm::MakeAll()
+ |*************************************************************************/
+ 
+ 
++void SwBodyFrm::MakeAll()
++{
++    printf("SwBodyFrm::MakeAll\n");
++    if (GetUpper()->IsPageFrm()) { // we're the top-most body frm
++	// set height to max
++	m_height=0;
++	bValidSize = bValidPrtArea = FALSE;
++	SwLayoutFrm::MakeAll(); // do the layout
++
++	
++	
++	long nHeight=0;
++	for(SwFrm *pChild=this->GetLower();pChild!=NULL;pChild=pChild->GetNext()) {
++	    nHeight+=pChild->Frm().Height();
++	}
++	printf("\tnHeight=%i\n\n", (int)nHeight);
++	// set height to height of content
++	m_height=nHeight;
++	bValidSize = bValidPrtArea = FALSE;
++	SwLayoutFrm::MakeAll(); // do the layout
++	
++    } else { // we're inside a column frame
++	SwLayoutFrm::MakeAll();
++    }
++    
++}
++
+ void SwLayoutFrm::MakeAll()
+ {
+ 	PROTOCOL_ENTER( this, PROT_MAKEALL, 0, 0 )
+diff --git a/sw/source/core/layout/flowfrm.cxx b/sw/source/core/layout/flowfrm.cxx
+index 7b48ad0..1a3fa16 100644
+--- sw/source/core/layout/flowfrm.cxx
++++ sw/source/core/layout/flowfrm.cxx
+@@ -73,6 +73,7 @@
+ // --> OD 2004-10-15 #i26945#
+ #include <fmtfollowtextflow.hxx>
+ // <--
++#include "bodyfrm.hxx"
+ 
+ BOOL SwFlowFrm::bMoveBwdJump = FALSE;
+ 
+@@ -1847,15 +1848,35 @@ BOOL SwFlowFrm::CheckMoveFwd( BOOL &rbMakePage, BOOL bKeep, BOOL )
+ 		}
+ 		else
+ 		{
+-			if ( IsPageBreak( FALSE ) )
++		    if ( 1 && IsPageBreak( FALSE ) ) // this trigger a break...
+ 			{
++			    printf("IsPageBreak( FALSE )=%i rbMakePage=%i\n", IsPageBreak( FALSE ), rbMakePage);
++			    if (0) {
+ 				while ( MoveFwd( rbMakePage, TRUE ) )
+ 						/* do nothing */;
+ 				rbMakePage = FALSE;
+ 				bMovedFwd = TRUE;
++			    } else {
++				printf("BREAK rThis.type=%i", rThis.GetType());
++				if (rThis.IsTxtFrm()) { 
++				    SwTxtFrm &rTxtFrm=(SwTxtFrm&)rThis;
++				    rtl::OString aOString = ::rtl::OUStringToOString (rTxtFrm.GetTxt(), RTL_TEXTENCODING_UTF8);		   
++				    printf("\ttxt=\"%s\"\n", aOString.getStr());
++				}
++				if (rThis.GetUpper()->GetLower()!=&rThis) {
++				    // rThis is not the first item in the body
++				    // so we need a new one...
++				    SwPageFrm * pPage = rThis.FindPageFrm();				
++				    SwBodyFrm * pNewBody=pPage->InsertBody();
++				    MoveSubTree(pNewBody, pNewBody->Lower());
++				}
++				rbMakePage = FALSE;
++				bMovedFwd = TRUE;
++			    }
+ 			}
+-			else if ( IsColBreak ( FALSE ) )
++			else if ( 1 && IsColBreak ( FALSE ) )
+ 			{
++			    printf("COLBREAK\n");
+ 				const SwPageFrm *pPage = rThis.FindPageFrm();
+ 				SwFrm *pCol = rThis.FindColFrm();
+ 				do
+@@ -1890,6 +1911,13 @@ BOOL SwFlowFrm::CheckMoveFwd( BOOL &rbMakePage, BOOL bKeep, BOOL )
+ 
+ BOOL SwFlowFrm::MoveFwd( BOOL bMakePage, BOOL bPageBreak, BOOL bMoveAlways )
+ {
++    printf("MoveFwd: %i", rThis.GetType());
++    if (rThis.IsTxtFrm()) { 
++	SwTxtFrm &rTxtFrm=(SwTxtFrm&)rThis;
++	rtl::OString aOString = ::rtl::OUStringToOString (rTxtFrm.GetTxt(), RTL_TEXTENCODING_UTF8);		   
++	printf("\ttxt=\"%s\"\n", aOString.getStr());
++    }
++
+ //!!!!MoveFtnCntFwd muss ggf. mitgepflegt werden.
+ 	SwFtnBossFrm *pOldBoss = rThis.FindFtnBossFrm();
+ 	if ( rThis.IsInFtn() )
+@@ -1934,9 +1962,10 @@ BOOL SwFlowFrm::MoveFwd( BOOL bMakePage, BOOL bPageBreak, BOOL bMoveAlways )
+ 	}
+ 
+ 	BOOL bSamePage = TRUE;
++//	SwLayoutFrm *pNewUpper =
++//			rThis.GetLeaf( bMakePage ? MAKEPAGE_INSERT : MAKEPAGE_NONE, TRUE );
+ 	SwLayoutFrm *pNewUpper =
+-			rThis.GetLeaf( bMakePage ? MAKEPAGE_INSERT : MAKEPAGE_NONE, TRUE );
+-
++			rThis.GetNextLeaf( MAKEPAGE_NONE );
+ 	if ( pNewUpper )
+ 	{
+ 		PROTOCOL_ENTER( &rThis, PROT_MOVE_FWD, 0, 0 );
+diff --git a/sw/source/core/layout/makefile.mk b/sw/source/core/layout/makefile.mk
+index c70b264..a81d484 100644
+--- sw/source/core/layout/makefile.mk
++++ sw/source/core/layout/makefile.mk
+@@ -103,7 +103,8 @@ SLOFILES =  \
+     $(SLO)$/trvlfrm.obj \
+     $(SLO)$/unusedf.obj \
+     $(SLO)$/virtoutp.obj \
+-    $(SLO)$/wsfrm.obj
++    $(SLO)$/wsfrm.obj \
++    $(SLO)$/xmldump.obj
+ 
+ .IF "$(product)"==""
+ .IF "$(cap)"==""
+diff --git a/sw/source/core/layout/pagechg.cxx b/sw/source/core/layout/pagechg.cxx
+index e31c6ca..f30f671 100644
+--- sw/source/core/layout/pagechg.cxx
++++ sw/source/core/layout/pagechg.cxx
+@@ -95,7 +95,7 @@ using namespace ::com::sun::star;
+ |*
+ |*************************************************************************/
+ SwBodyFrm::SwBodyFrm( SwFrmFmt *pFmt ):
+-	SwLayoutFrm( pFmt )
++    SwLayoutFrm( pFmt ), m_height(0)
+ {
+     nType = FRMC_BODY;
+ }
+@@ -110,6 +110,17 @@ SwBodyFrm::SwBodyFrm( SwFrmFmt *pFmt ):
+ |*************************************************************************/
+ void SwBodyFrm::Format( const SwBorderAttrs * )
+ {
++    if (GetUpper()->IsPageFrm() && m_height>0) {
++	printf("SwBodyFrm::Format\n");
++	Prt().Pos().X() = Prt().Pos().Y() = 0;
++	Prt().Height(m_height);
++//	Prt().Height( Frm().Height() / 2 );
++//	printf("Prt().Height=%i\n", Prt().Height());
++	Frm().Height( Prt().Height());
++        Prt().Width( Frm().Width() );
++	bValidSize = bValidPrtArea = TRUE;
++	return;
++    }
+ 	//Formatieren des Body ist zu einfach, deshalb bekommt er ein eigenes
+ 	//Format; Umrandungen und dergl. sind hier nicht zu beruecksichtigen.
+ 	//Breite ist die der PrtArea des Uppers, Hoehe ist die Hoehe der PrtArea
+@@ -1272,6 +1283,22 @@ void SwFrm::CheckPageDescs( SwPageFrm *pStart, BOOL bNotifyFields )
+ #endif
+ }
+ 
++SwBodyFrm *SwPageFrm::InsertBody(  )
++{
++    SwFrm *pChild=this->GetLower();
++    while (pChild!=NULL && pChild->GetNext()!=NULL && pChild->GetNext()->IsBodyFrm() && pChild->GetNext()->GetNext()!=NULL && pChild->GetNext()->GetNext()->IsBodyFrm()) {
++	pChild=pChild->GetNext();	
++    }
++    if (pChild!=NULL && pChild->IsBodyFrm()) {
++	printf("found body..\n");
++	SwBodyFrm *pBodyFrm=new SwBodyFrm( this->GetFmt() );
++	pBodyFrm->InsertBehind(this, pChild);
++	return pBodyFrm;
++    } else {
++	return NULL;
++    }
++}
++
+ /*************************************************************************
+ |*
+ |*	SwFrm::InsertPage()
+@@ -2489,3 +2516,17 @@ const SwPageFrm& SwPageFrm::GetFormatPage() const
+     return *pRet;
+ }
+ 
++
++void SwBodyFrm::Paint( const SwRect& rRect) const
++{
++    ViewShell *pSh = GetShell();
++    OutputDevice* pOut =  pSh->GetOut();
++    pOut->Push();
++    pOut->SetLineColor(Color(255, 0, 0));
++    pOut->SetFillColor(COL_TRANSPARENT);
++//    SwRect aRect(Frm().Left()+5, Frm().Top()+5, Frm().Width()-5, Frm().Height()-5);
++    SwRect aRect=Frm();
++    pOut->DrawRect(aRect.SVRect());
++    pOut->Pop();
++    SwLayoutFrm::Paint(rRect);
++}
+diff --git a/sw/source/core/layout/xmldump.cxx b/sw/source/core/layout/xmldump.cxx
+index e69de29..d03183f 100644
+--- sw/source/core/layout/xmldump.cxx
++++ sw/source/core/layout/xmldump.cxx
+@@ -0,0 +1,86 @@
++#include "precompiled_sw.hxx"
++
++#include "frame.hxx"
++#include "txtfrm.hxx"
++
++void SwFrm::dumpAsXml(xmlTextWriterPtr writer)
++{
++    const char *name=NULL;
++
++    switch(GetType()) {
++	case FRM_ROOT:
++	    name="root";
++	    break;
++	case FRM_PAGE:
++	    name="page";
++	    break;
++	case FRM_COLUMN:
++	    name="column";
++	    break;
++	case FRM_HEADER:
++	    name="header";
++	    break;
++	case FRM_FOOTER:
++	    name="footer";
++	    break;
++	case FRM_FTNCONT:
++	    name="ftncont";
++	    break;
++	case FRM_FTN:
++	    name="ftn";
++	    break;
++	case FRM_BODY:
++	    name="body";
++	    break;
++	case FRM_FLY:
++	    name="fly";
++	    break;
++	case FRM_SECTION:
++	    name="section";
++	    break;
++	case FRM_UNUSED:
++	    name="unused";
++	    break;
++	case FRM_TAB:
++	    name="tab";
++	    break;
++	case FRM_ROW:
++	    name="row";
++	    break;
++	case FRM_CELL:
++	    name="cell";
++	    break;
++	case FRM_TXT:
++	    name="txt";
++	    break;
++	case FRM_NOTXT:	   
++	    name="txt";
++	    break;
++    };
++
++    if (name!=NULL) {
++	xmlTextWriterStartElement(writer, (const xmlChar*)name);
++	xmlTextWriterWriteFormatAttribute(writer, (const xmlChar*)"this", "%p", this);
++	if (IsTxtFrm()) {
++	    SwTxtFrm *pTxtFrm=(SwTxtFrm *)this;
++	    rtl::OUString aTxt=pTxtFrm->GetTxt();
++	    for(int i=0;i<32;i++) {
++		aTxt=aTxt.replace(i, '*');
++	    }
++	    rtl::OString aTxt8 = ::rtl::OUStringToOString (aTxt, RTL_TEXTENCODING_UTF8);
++	    xmlTextWriterWriteString(writer, (const xmlChar*)aTxt8.getStr());
++ 
++	} else {
++	    dumpChildrenAsXml(writer);
++	}
++	xmlTextWriterEndElement(writer);
++    }
++}
++
++void SwFrm::dumpChildrenAsXml(xmlTextWriterPtr writer)
++{
++    SwFrm *pFrm=GetLower();
++    for(;pFrm!=NULL;pFrm=pFrm->GetNext()) {
++	pFrm->dumpAsXml(writer);
++    }
++}
+diff --git a/sw/source/ui/docvw/edtwin.cxx b/sw/source/ui/docvw/edtwin.cxx
+index 9b920d1..bb5ca93 100644
+--- sw/source/ui/docvw/edtwin.cxx
++++ sw/source/ui/docvw/edtwin.cxx
+@@ -127,6 +127,7 @@
+ #include <crsskip.hxx>
+ #include <breakit.hxx>
+ #include <checkit.hxx>
++#include "../../core/inc/rootfrm.hxx"
+ 
+ #ifndef _HELPID_H
+ #include <helpid.h>
+@@ -1315,7 +1316,21 @@ void SwEditWin::KeyInput(const KeyEvent &rKEvt)
+ 	BOOL bChkInsBlank = pQuickHlpData->bChkInsBlank;
+ 	pQuickHlpData->bChkInsBlank = FALSE;
+ 
++	if (rKEvt.GetKeyCode().GetCode()==KEY_F12) {
++	    SwRootFrm* pLayout = GetView().GetDocShell()->GetWrtShell()->GetLayout();
++	    xmlTextWriterPtr writer = xmlNewTextWriterFilename("layout.xml", 0);
++	    if (writer!=NULL) {
++		printf("dumping layout in \"layout.xml\"\n");
++		xmlTextWriterStartDocument(writer, NULL, NULL, NULL);
++		pLayout->dumpAsXml(writer);
++		xmlTextWriterEndDocument(writer);
++		xmlFreeTextWriter(writer);
++	    }
++	    return;
++	}
++
+ 	KeyEvent aKeyEvent( rKEvt );
++
+ 	// look for vertical mappings
+ 	if( !bIsDocReadOnly && !rSh.IsSelFrmMode() && !rSh.IsObjSelected() )
+ 	{
+diff --git a/sw/util/makefile.mk b/sw/util/makefile.mk
+index 097824b..2713fdf 100644
+--- sw/util/makefile.mk
++++ sw/util/makefile.mk
+@@ -125,7 +125,8 @@ SHL1STDLIBS+= \
+ 	$(SALHELPERLIB) \
+     $(ICUUCLIB) \
+ 	$(I18NUTILLIB)	\
+-	$(AVMEDIALIB)
++	$(AVMEDIALIB)  \
++	$(LIBXML2LIB)
+ 
+ .IF "$(GUI)"=="WNT"
+ SHL1STDLIBS+= $(ADVAPI32LIB)
+@@ -155,7 +156,8 @@ SHL2STDLIBS= \
+             $(COMPHELPERLIB) \
+             $(CPPUHELPERLIB) \
+             $(CPPULIB) \
+-            $(SALLIB)
++            $(SALLIB) \
++	    $(LIBXML2LIB)
+ 
+ SHL2OBJS=   $(SLO)$/swdetect.obj \
+         $(SLO)$/swdet2.obj \
+@@ -193,7 +195,9 @@ SHL3STDLIBS= \
+ 			$(CPPUHELPERLIB)	\
+ 			$(CPPULIB) \
+             $(SALLIB) \
+-			$(SOTLIB)
++			$(SOTLIB) \
++	     $(LIBXML2LIB) 
++
+ 
+ SHL3LIBS=   $(SLB)$/swui.lib
+ LIB3TARGET = $(SLB)$/swui.lib
