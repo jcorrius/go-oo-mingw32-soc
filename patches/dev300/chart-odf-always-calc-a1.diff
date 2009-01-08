@@ -891,7 +891,7 @@ index f665b56..8b081be 100644
  			}
  		}
 diff --git sc/source/ui/unoobj/chart2uno.cxx sc/source/ui/unoobj/chart2uno.cxx
-index 763cc1a..534cdd5 100644
+index 763cc1a..8ce104c 100644
 --- sc/source/ui/unoobj/chart2uno.cxx
 +++ sc/source/ui/unoobj/chart2uno.cxx
 @@ -1008,7 +1008,7 @@ uno::Reference< chart2::data::XDataSequence > SAL_CALL
@@ -903,7 +903,7 @@ index 763cc1a..534cdd5 100644
          xResult.set(new ScChart2DataSequence(m_pDocument, this, aRangeList));
  
      return xResult;
-@@ -1042,9 +1042,9 @@ rtl::OUString SAL_CALL ScChart2DataProvider::convertRangeToXML( const rtl::OUStr
+@@ -1042,23 +1042,109 @@ rtl::OUString SAL_CALL ScChart2DataProvider::convertRangeToXML( const rtl::OUStr
      if( m_pDocument )
      {
          ScRangeList aList;
@@ -915,7 +915,36 @@ index 763cc1a..534cdd5 100644
      }
  
      return sRet;
-@@ -1053,12 +1053,64 @@ rtl::OUString SAL_CALL ScChart2DataProvider::convertRangeToXML( const rtl::OUStr
+ }
+ 
++static bool lcl_parseSingleRangeToken(
++    ScRange& rRange, const rtl::OUString& rToken, ScDocument* pDoc, ScAddress::Convention eConv,
++    const sal_Unicode cSep, const sal_Unicode cQuote)
++{
++    sal_Int32 nSepPos = ScRangeStringConverter::IndexOf(rToken, ':', 0, cQuote);
++    if (nSepPos >= 0)
++    {
++        rtl::OUString aStartAddr = rToken.copy(0, nSepPos);
++        rtl::OUString aEndAddr = rToken.copy(nSepPos+1);
++        USHORT nRes = rRange.aStart.Parse(aStartAddr, pDoc, eConv);
++        if ((nRes & SCA_VALID) != SCA_VALID)
++            return false;
++
++        nRes = rRange.aEnd.Parse(aEndAddr, pDoc, eConv);
++        if ((nRes & SCA_VALID) != SCA_VALID)
++            return false;
++    }
++    else
++    {
++        USHORT nRes = rRange.aStart.Parse(rToken, pDoc, eConv);
++        if ((nRes & SCA_VALID) != SCA_VALID)
++            return false;
++
++        rRange.aEnd = rRange.aStart;
++    }
++    return true;
++}
++
  rtl::OUString SAL_CALL ScChart2DataProvider::convertRangeFromXML( const rtl::OUString& sXMLRange )
      throw ( uno::RuntimeException, lang::IllegalArgumentException )
  {
@@ -930,51 +959,57 @@ index 763cc1a..534cdd5 100644
 +        ScAddress::Convention eConvUI = m_pDocument->GetAddressConvention();
 +        ScRange aRange;
 +
-+        // Chart always saves ranges using CONV_OOO convention.
-+        USHORT nRes = aRange.Parse(sXMLRange, m_pDocument, ScAddress::CONV_OOO);
-+        if ((nRes & SCA_VALID) == SCA_VALID)
-+        {
-+            // conversion success !
-+            String aRet;
-+            aRange.Format(aRet, SCA_VALID, m_pDocument, eConvUI);
-+            return aRet;
-+        }
++        rtl::OUString aRetStr;
++        sal_Int32 nOffset = 0;
++        bool bFirst = true;
 +
-+        if (eConvUI == ScAddress::CONV_OOO)
-+            // convertion failed !
-+            return sXMLRange;
++        while (nOffset >= 0)
++        {
++            rtl::OUString aToken;
++            ScRangeStringConverter::GetTokenByOffset(aToken, sXMLRange, nOffset, cSep, cQuote);
++            if (nOffset < 0)
++                // No more tokens to process.
++                break;
++
++            // Chart always saves ranges using CONV_OOO convention.
++            sal_Int32 nSepPos = ScRangeStringConverter::IndexOf(aToken, ':', 0, cQuote);
++            bool bSuccess = lcl_parseSingleRangeToken(aRange, aToken, m_pDocument, ScAddress::CONV_OOO, cSep, cQuote);
++
++            if (bSuccess)
++            {
++                String aNewToken;
++                aRange.Format(aNewToken, SCA_ABS_3D, m_pDocument, ScAddress::CONV_OOO);
++                if (bFirst)
++                    bFirst = false;
++                else
++                    aRetStr += rtl::OUString::createFromAscii(";");
++                aRetStr += aNewToken;
++                continue;
++            }
++
++            if (eConvUI == ScAddress::CONV_OOO)
++                // convertion failed !
++                continue;
 +
 +#if CHART_ADDRESS_CONV_WORKAROUND
-+        // Chart always expressed a range as [start cell] : [end cell]
-+        // regardless of address conventions when stored in ODF.  This means,
-+        // for example, Sheet1!A1:A3 in Excel A1 syntax was expressed as
-+        // Sheet1!A1:Sheet1!A3.
-+        sal_Int32 nSepPos = sXMLRange.indexOf(sal_Unicode(':'));
-+        if (nSepPos >= 0)
-+        {
-+            rtl::OUString aStartAddr = sXMLRange.copy(0, nSepPos);
-+            rtl::OUString aEndAddr = sXMLRange.copy(nSepPos+1);
-+            nRes = aRange.aStart.Parse(aStartAddr, m_pDocument, eConvUI);
-+            if ((nRes & SCA_VALID) != SCA_VALID)
-+                return sXMLRange;
++            // Chart always expressed a range as [start cell] : [end cell]
++            // regardless of address conventions when stored in ODF.  This means,
++            // for example, Sheet1!A1:A3 in Excel A1 syntax was expressed as
++            // Sheet1!A1:Sheet1!A3.
++            bSuccess = lcl_parseSingleRangeToken(aRange, aToken, m_pDocument, eConvUI, cSep, cQuote);
++            if (!bSuccess)
++                continue;
 +
-+            nRes = aRange.aEnd.Parse(aEndAddr, m_pDocument, eConvUI);
-+            if ((nRes & SCA_VALID) != SCA_VALID)
-+                return sXMLRange;
-+        }
-+        else
-+        {
-+            nRes = aRange.aStart.Parse(sXMLRange, m_pDocument, eConvUI);
-+            if ((nRes & SCA_VALID) != SCA_VALID)
-+                return sXMLRange;
-+
-+            aRange.aEnd = aRange.aStart;
-+        }
-+
-+        String aRet;
-+        aRange.Format(aRet, SCA_VALID, m_pDocument, eConvUI);
-+        return aRet;
++            String aNewToken;
++            aRange.Format(aNewToken, SCA_ABS_3D, m_pDocument, ScAddress::CONV_OOO);
++            if (bFirst)
++                bFirst = false;
++            else
++                aRetStr += rtl::OUString::createFromAscii(";");
++            aRetStr += aNewToken;
 +#endif
++        }
++        return aRetStr;
 +    }
 +
 +    // #i74062# When loading flat XML, this is called before the referenced sheets are in the document,
