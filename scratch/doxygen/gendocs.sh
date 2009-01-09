@@ -22,14 +22,24 @@ MASTER_BRANCH=DEV300
 # scrape latest milestone from EIS
 LATEST_MWS=`wget -O - http://eis.services.openoffice.org/EIS2/cws.rss.CWSAnnounceNewsFeed/mws 2>/dev/null | grep "<title>${MASTER_BRANCH}_[a-z0-9]\+ ready for use" | head -n1 | sed -e ' s/.*title>\([A-Z]\+[0-9]\+_[a-z0-9]\+\).*/\1/'`
 
+echo "Latest MWS: $LATEST_MWS"
+
 # fiddle milestone
 MILESTONE=`echo $LATEST_MWS | sed -e ' s/[A-Z]\+[0-9]\+_\([a-z0-9]\+\)/\1/'`
+MILESTONE_NUMBER=`echo $LATEST_MWS | sed -e ' s/[A-Z]\+[0-9]\+_[a-z]\([0-9]\+\)/\1/'`
 
 # checkout everything referenced from smoketest
 echo "Checking out $MASTER_BRANCH $MILESTONE ..."
-ooco -v Master=$MASTER_BRANCH -v Milestone=$MILESTONE
+if test $MILESTONE_NUMBER -gt 32; then
+	svn switch "svn://svn.services.openoffice.org/ooo/tags/${LATEST_MWS}" || {
+		echo "Run this in the toplevel dir of a ooo checkout"
+		exit 1
+	}
+else
+	ooco -v Master=$MASTER_BRANCH -v Milestone=$MILESTONE
+fi
 
-# configure some random build -
+# configure some random build - we need solver minimally populated
 pushd config_office ; ./configure --disable-odk --disable-mozilla ; popd
 
 # we just need a few paths to solver headers
@@ -39,18 +49,26 @@ source Linux*.sh
 # ...and those headers delivered
 for DIR in *; do if [ -d $DIR ]; then pushd $DIR; deliver; popd; fi; done
 
-# get list of modules in build order
+# get list of modules in build order - bah, blows RAM & disk, static list below
 #INPUT_PROJECTS=`build --all --show | sed -n -e '/Building module/ s/Building module // p'`
-INPUT_PROJECTS="basegfx vcl canvas cppcanvas oox svtools goodies xmloff slideshow sfx2 svx chart2 dbaccess sd sc sw"
+INPUT_PROJECTS="o3tl basegfx vcl canvas cppcanvas oox svtools goodies drawinglayer xmloff slideshow sfx2 svx chart2 dbaccess sd sc sw"
 
 # output directory for generated documentation
 BASE_OUTPUT="/tmp/docs"
+mkdir -p "$BASE_OUTPUT" || {
+	echo "Cannot create $BASE_OUTPUT"
+	exit 1
+}
 
 # paths for binary and configuration file
 BASE_PATH=`pwd`
-DOXYGEN_CFG="$HOME/bin/doxygen.cfg"
+DOXYGEN_CFG=`dirname $0`/doxygen.cfg
+if test ! -f "$DOXYGEN_CFG"; then
+	echo "please put doxygen.cfg next to this script"
+	exit 1
+fi
 
-# strip -I. and bin -I prefix. exlude system headers
+# strip -I. and bin -I prefix; exlude system headers
 DOXYGEN_INCLUDE_PATH=`echo $SOLARINC | sed -e ' s/-I\.//'g | sed -e ' s/ -I/ /'g | sed -e ' s|/usr/[^ ]*| |g'`
 
 # setup version string
@@ -119,14 +137,14 @@ EOF
 
 for PROJECT in $INPUT_PROJECTS;
 do
-  echo "<li><a href=\"$PROJECT/html/index.html\">$PROJECT</a></li>" >> $BASE_OUTPUT/index.html
+  echo "<li><a href=\"$PROJECT/html/classes.html\">$PROJECT</a></li>" >> $BASE_OUTPUT/index.html
 done
 
 cat - >> $BASE_OUTPUT/index.html <<EOF
         </ul>
         <p>Last updated: 
 EOF
-date >> $BASE_OUTPUT/index.html
+LANG= date >> $BASE_OUTPUT/index.html
 
 cat - >> $BASE_OUTPUT/index.html <<EOF
         </p>
