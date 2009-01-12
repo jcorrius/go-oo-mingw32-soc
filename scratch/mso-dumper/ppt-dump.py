@@ -16,7 +16,7 @@
 
 import sys, os.path, getopt
 sys.path.append(sys.path[0]+"/src")
-import ole, stream, globals
+import ole, pptstream, globals
 
 from globals import error
 
@@ -45,7 +45,7 @@ class PPTDumper(object):
 
     def dump (self):
         file = open(self.filepath, 'rb')
-        strm = stream.PPTFile(file.read(), self.params)
+        strm = pptstream.PPTFile(file.read(), self.params)
         file.close()
         strm.printStreamInfo()
         strm.printHeader()
