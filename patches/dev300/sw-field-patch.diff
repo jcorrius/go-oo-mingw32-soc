@@ -1,58 +1,5 @@
-diff --git a/sw/inc/IDocumentBookmarkAccess.hxx b/sw/inc/IDocumentBookmarkAccess.hxx
-index 90ed40d..6521bdd 100644
---- sw/inc/IDocumentBookmarkAccess.hxx
-+++ sw/inc/IDocumentBookmarkAccess.hxx
-@@ -34,11 +34,13 @@
- #include <sal/types.h>
- 
- class SwBookmark;
-+class SwFieldBookmark;
- class SwBookmarks;
- class SwPaM;
- class KeyCode;
- class String;
- class SwTxtNode;
-+class SwPosition;
- 
- /** Provides access to the bookmarks of a document.
- */
-@@ -51,6 +53,9 @@ public:
-         MARK,
-         DDE_BOOKMARK,
-         UNO_BOOKMARK,
-+	FIELD_MARK,
-+	FORM_FIELDMARK_TEXT,
-+	FORM_FIELDMARK_NO_TEXT,
-         // --> OD 2007-10-11 #i81002# - bookmark type for cross-references
-         CROSSREF_BOOKMARK
-         // <--
-@@ -167,6 +172,12 @@ public:
-     */
-     virtual SwBookmark& getBookmark(  /*[in]*/sal_uInt16 nPos, /*[in]*/bool bBkmrk) = 0;
- 
-+
-+    virtual SwBookmark* getFieldBookmarkFor(const SwPosition &pos) const = 0;    
-+    virtual SwFieldBookmark* getFormFieldBookmarkFor(const SwPosition &pos) const = 0;    
-+    virtual SwBookmark* getNextFieldBookmarkFor(const SwPosition &pos) const = 0;    
-+    virtual SwBookmark* getPrevFieldBookmarkFor(const SwPosition &pos) const = 0;    
-+
-     /** Get cross-reference bookmark name for certain text node
- 
-         OD 2007-11-16 #i83479#
-diff --git a/sw/inc/IDocumentSettingAccess.hxx b/sw/inc/IDocumentSettingAccess.hxx
-index 0466286..2478dbf 100644
---- sw/inc/IDocumentSettingAccess.hxx
-+++ sw/inc/IDocumentSettingAccess.hxx
-@@ -80,6 +80,7 @@ namespace com { namespace sun { namespace star { namespace i18n { struct Forbidd
-          UNIX_FORCE_ZERO_EXT_LEADING,
-          USE_OLD_PRINTER_METRICS,
-          TABS_RELATIVE_TO_INDENT,
-+	 PROTECT_FORM,
-          // --> OD 2008-06-05 #i89181#
-          TAB_AT_LEFT_INDENT_FOR_PARA_IN_LIST,
-          // <--
 diff --git a/sw/inc/bookmrk.hxx b/sw/inc/bookmrk.hxx
-index ec2522d..a6d1871 100644
+index 63e5f26..f540b68 100644
 --- sw/inc/bookmrk.hxx
 +++ sw/inc/bookmrk.hxx
 @@ -54,6 +54,7 @@ struct SwPosition;	// fwd Decl. wg. UI
@@ -73,115 +20,101 @@ index ec2522d..a6d1871 100644
      // --> OD 2007-10-10 #i81002#
      // made virtual and thus no longer inline
      virtual const SwPosition& GetBookmarkPos() const;
-@@ -100,7 +104,7 @@ public:
- 	// falls man wirklich auf gleiche Position abfragen will.
+@@ -101,6 +105,8 @@ public:
  	BOOL IsEqualPos( const SwBookmark &rBM ) const;
  
--    BOOL IsBookMark() const    { return IDocumentBookmarkAccess::BOOKMARK == eMarkType; }
-+    BOOL IsBookMark() const 	{ return IDocumentBookmarkAccess::BOOKMARK == eMarkType || IDocumentBookmarkAccess::FORM_FIELDMARK_TEXT == eMarkType || IDocumentBookmarkAccess::FORM_FIELDMARK_NO_TEXT == eMarkType; }
+ 	BOOL IsFormFieldMark() const 	{ return IDocumentBookmarkAccess::FORM_FIELDMARK_TEXT == eMarkType || IDocumentBookmarkAccess::FORM_FIELDMARK_NO_TEXT == eMarkType; }
++    BOOL IsTabbedFormFieldMark() const;
++
+     BOOL IsBookMark() const 	{ return IDocumentBookmarkAccess::BOOKMARK == eMarkType || IDocumentBookmarkAccess::FORM_FIELDMARK_TEXT == eMarkType || IDocumentBookmarkAccess::FORM_FIELDMARK_NO_TEXT == eMarkType; }
  //    // --> OD 2007-10-17 #TESTING#
  //    BOOL IsBookMark() const
- //    {
-@@ -110,6 +114,7 @@ public:
- //    // <--
- 	BOOL IsMark() const 		{ return IDocumentBookmarkAccess::MARK == eMarkType; }
-     BOOL IsUNOMark() const      { return IDocumentBookmarkAccess::UNO_BOOKMARK == eMarkType; }
-+    BOOL IsFormFieldMark() const 	{ return IDocumentBookmarkAccess::FORM_FIELDMARK_TEXT == eMarkType || IDocumentBookmarkAccess::FORM_FIELDMARK_NO_TEXT == eMarkType; }
-     // --> OD 2007-10-11 #i81002# - bookmark type for cross-references
-     BOOL IsCrossRefMark() const { return IDocumentBookmarkAccess::CROSSREF_BOOKMARK == eMarkType; }
-     // <--
-@@ -160,5 +165,71 @@ public:
-     // <--
- };
- 
-+class SwFieldBookmark : public SwBookmark
-+{
-+private:
-+	int fftype; // Type: 0 = Text, 1 = Check Box, 2 = List
-+	int ffres;
-+    bool ffprot;
-+	bool ffsize; // 0 = Auto, 1=Exact (see ffhps)
-+	int fftypetxt; // Type of text field: 0 = Regular text, 1 = Number, 2 = Date, 3 = Current date, 4 = Current time, 5 = Calculation
-+	bool ffrecalc; 
-+	int ffmaxlen; // Number of characters for text field. Zero means unlimited.
-+	int ffhps; // Check box size (half-point sizes).
-+
-+	String ffname;
-+	String ffhelptext;
-+        std::vector<String> *ffListEntries;
-+
+@@ -153,55 +159,37 @@ public:
+             
+ class SwFieldBookmark : public SwBookmark
+ {
 +public:
-+    SwFieldBookmark(const SwPosition& aPos,
-+	       const KeyCode& rCode,
-+	       const String& rName, const String& rShortName,
-+		   IDocumentBookmarkAccess::BookmarkType eMark);
++    typedef  std::pair< ::rtl::OUString, ::rtl::OUString > ParamPair_t;
+ private:
+-	int fftype; // Type: 0 = Text, 1 = Check Box, 2 = List
+-	int ffres;
+-    bool ffprot;
+-	bool ffsize; // 0 = Auto, 1=Exact (see ffhps)
+-	int fftypetxt; // Type of text field: 0 = Regular text, 1 = Number, 2 = Date, 3 = Current date, 4 = Current time, 5 = Calculation
+-	bool ffrecalc; 
+-	int ffmaxlen; // Number of characters for text field. Zero means unlimited.
+-	int ffhps; // Check box size (half-point sizes).
+-
+-	String ffname;
+-	String ffhelptext;
++    ::rtl::OUString m_type;
++    std::vector<ParamPair_t> m_params;
+ 
+ public:
+     SwFieldBookmark(const SwPosition& aPos,
+ 	       const KeyCode& rCode,
+ 	       const String& rName, const String& rShortName,
+-		   IDocumentBookmarkAccess::BookmarkType eMark);
+-
+-	void SetFieldType(int fftype);
+-	int GetFieldType();
+-
+-	void SetChecked(bool checked);
+-	bool IsChecked();
+-
+-	void SetFFName(String aNewName) {
+-		this->ffname=aNewName;
+-	}
+-
+-	String GetFFName()
+-	{
+-		return ffname;
+-	}
+-
+-	int GetFFRes() {
+-		return ffres;
+-	}
+-
+-	void SetFFRes(int nNew) {
+-		this->ffres=nNew;
+-	}
+-
+-	void SetFFHelpText(String newffhelptext) {
+-		this->ffhelptext=newffhelptext;
+-	}
+-
+-	String GetFFHelpText() {
+-		return ffhelptext;
+-	}
++		    IDocumentBookmarkAccess::BookmarkType eMark);
 +
 +    virtual ~SwFieldBookmark();
++    
++    void setTypeName(const ::rtl::OUString &typeName);
++    void invalidate();
++    SwPosition getSelectionStart();
++    SwPosition getSelectionEnd();
 +
-+	void SetType(int fftype);
-+	int GetType();
++    // field specific stuff
++    bool isTabbed() const;
 +
-+	void SetChecked(bool checked);
-+	bool IsChecked();
-+
-+	void SetFFName(String name) {
-+		this->ffname=name;
-+	}
-+
-+	String GetFFName()
-+	{
-+		return ffname;
-+	}
-+
-+	int GetFFRes() {
-+		return ffres;
-+	}
-+
-+	void SetFFRes(int res) {
-+		this->ffres=res;
-+	}
-+
-+	void SetFFHelpText(String helptext) {
-+		this->ffhelptext=helptext;
-+	}
-+
-+	String GetFFHelpText() {
-+		return ffhelptext;
-+	}
-+
-+        void invalidate();
-+
-+
-+        void addListItem(String item);
-+        int getListItems();
-+        String getListItem(int pos);
-+        void setCurrentListItem(int pos);
-+        int getCurrentListItem();
-+        String getCurrentListItemText();
-+
-+};
- 
- #endif
++    // generic methods
++    bool isType(const char *type) const;
++    rtl::OUString getTypeName();
++    void addParam(::rtl::OUString paramName, ::rtl::OUString paramValue, bool replaceExisting=true);
++    void addParam(const char* paramName, int value);
++    int getNumOfParams();
++    ParamPair_t getParam(int pos);
++    ParamPair_t getParam(const char *name, const char *defaultValue=NULL);
++    void addParams(std::vector<ParamPair_t> &params);
+ };
+             
+ class SwUNOMark: public SwBookmark
 diff --git a/sw/inc/crsrsh.hxx b/sw/inc/crsrsh.hxx
-index bd77643..5830026 100644
+index c4748cf..720f5a9 100644
 --- sw/inc/crsrsh.hxx
 +++ sw/inc/crsrsh.hxx
-@@ -46,12 +46,14 @@
- #include <tblsel.hxx>
- #include <IDocumentBookmarkAccess.hxx>
- 
-+
- // einige Forward Deklarationen
- 
- class KeyCode;
- class SfxItemSet;
- class SfxPoolItem;
- class SwBookmark;
-+class SwFieldBookmark;
- class SwCntntFrm;
- class SwCrsrShell;
- class SwCursor;
-@@ -110,7 +112,8 @@ struct SwContentAtPos
+@@ -112,7 +112,8 @@ struct SwContentAtPos
          SW_REFMARK          = 0x0100,
          SW_NUMLABEL         = 0x0200, // #i23726#
          SW_CONTENT_CHECK    = 0x0400, // --> FME 2005-05-13 #i43742# <--
@@ -191,299 +124,110 @@ index bd77643..5830026 100644
  #ifndef PRODUCT
  		,SW_CURR_ATTRS 		= 0x4000		// nur zum Debuggen
  		,SW_TABLEBOXVALUE	= 0x8000		// nur zum Debuggen
-@@ -122,6 +125,7 @@ struct SwContentAtPos
+@@ -124,6 +125,7 @@ struct SwContentAtPos
  		const SfxPoolItem* pAttr;
  		const SwRedline* pRedl;
          SwCntntNode * pNode; // #i23726#
-+   	        const SwFieldBookmark* pFldBookmark;
++	        const SwFieldBookmark* pFldBookmark;
  	} aFnd;
  
      int nDist; // #i23726#
-@@ -587,6 +591,13 @@ public:
- 		// werden, es wird dann bei gleichen Namen nur durchnumeriert.
- 	void MakeUniqueBookmarkName( String& rNm );
- 
-+        bool IsFormProtected();
-+        SwBookmark* IsInFieldBookmark();
-+        SwFieldBookmark* IsInFormFieldBookmark();
-+        SwBookmark* GetNextFieldBookmark();
-+        SwBookmark* GetPrevFieldBookmark();
-+        bool GotoFieldBookmark(SwBookmark *pBkmk);
-+
- 	// aktualisiere den Crsrs, d.H. setze ihn wieder in den Content.
- 	// Das sollte nur aufgerufen werden, wenn der Cursor z.B. beim
- 	// Loeschen von Rahmen irgendwohin gesetzt wurde. Die Position
 diff --git a/sw/inc/doc.hxx b/sw/inc/doc.hxx
-index bb76766..49e35c8 100644
+index e8b3e67..9261ee8 100644
 --- sw/inc/doc.hxx
 +++ sw/inc/doc.hxx
-@@ -600,6 +600,7 @@ private:
-     bool mbClipAsCharacterAnchoredWriterFlyFrames   : 1;   // OD 2006-04-13 #b6402800#
-     bool mbUnixForceZeroExtLeading                  : 1;   // FME 2006-10-09 #i60945#
-     bool mbOldPrinterMetrics                        : 1;   // FME 2007-05-14 #147385#
-+    bool mbProtectForm                              : 1;
-     bool mbTabRelativeToIndent;                            // #i24363# tab stops relative to indent
-     bool mbTabAtLeftIndentForParagraphsInList;             // OD 2008-06-05 #i89181# - see above
- 
-@@ -772,6 +773,11 @@ public:
+@@ -784,6 +784,14 @@ public:
      virtual void makeUniqueBookmarkName( /*[in/out]*/String& rName );
      virtual sal_uInt16 getBookmarkCount( /*[in]*/ bool bBkmrk ) const;
      virtual SwBookmark& getBookmark( /*[in]*/sal_uInt16 nPos, /*[in]*/bool bBkmrk );
-+    SwBookmark* getFieldBookmarkFor(const SwPosition &pos) const;
-+    SwBookmark* getNextFieldBookmarkFor(const SwPosition &pos) const;
-+    SwBookmark* getPrevFieldBookmarkFor(const SwPosition &pos) const;
-+    SwFieldBookmark* getFormFieldBookmarkFor(const SwPosition &pos) const;
++
++    SwFieldBookmark *makeFieldBookmark(/*[in]*/const SwPaM& rPaM, 
++				       /*[in]*/ const String& rName, 
++				       /*[in]*/ const rtl::OUString &rType);
++    SwFieldBookmark *makeNoTextFieldBookmark(/*[in]*/const SwPaM& rPaM, 
++					     /*[in]*/ const String& rName, 
++					     /*[in]*/ const rtl::OUString &rType);
 +
      virtual String getCrossRefBookmarkName(
              /*[in]*/const SwTxtNode& rTxtNode,
              /*[in]*/const CrossReferenceBookmarkSubType nCrossRefType ) const;
-@@ -958,6 +964,7 @@ public:
- 	/** IDocumentState
- 	*/
- 	virtual void SetModified();
-+        virtual void SetModified(SwPaM &rPaM);
- 	virtual void ResetModified();
- 	virtual bool IsModified() const;
- 	virtual bool IsLoaded() const;
+diff --git a/sw/inc/editsh.hxx b/sw/inc/editsh.hxx
+index aeec2f7..3ec7297 100644
+--- sw/inc/editsh.hxx
++++ sw/inc/editsh.hxx
+@@ -415,6 +415,9 @@ public:
+ 	const SwTOXType* 	GetTOXType(TOXTypes eTyp, USHORT nId) const;
+ 	void			 	InsertTOXType(const SwTOXType& rTyp);
+ 
++        // new field stuff
++        BOOL	UpdateField(SwFieldBookmark &fieldBM);
++
+ 	//AutoMark file
+ 	const String&	GetTOIAutoMarkURL() const;
+ 	void			SetTOIAutoMarkURL(const String& rSet);
 diff --git a/sw/inc/hintids.hxx b/sw/inc/hintids.hxx
-index 3d1406e..2662495 100644
+index 14fcf0b..8ac082f 100644
 --- sw/inc/hintids.hxx
 +++ sw/inc/hintids.hxx
-@@ -40,7 +40,16 @@
- #define CH_TXTATR_INWORD		((sal_Unicode)0x02)
- #define CH_TXTATR_TAB           ((sal_Unicode)'\t')
- #define CH_TXTATR_NEWLINE       ((sal_Unicode)'\n')
--
-+#define CH_TXT_ATR_FIELDSTART ((sal_Unicode)0x04)
-+#define CH_TXT_ATR_FIELDEND ((sal_Unicode)0x05)
-+#define CH_TXT_ATR_SUBST_FIELDSTART ("[")
-+#define CH_TXT_ATR_SUBST_FIELDEND ("]")
-+//#define CH_TXT_ATR_FORMELEMENT ((sal_Unicode)'#')
-+#define CH_TXT_ATR_FORMELEMENT ((sal_Unicode)0x06)
-+/*
-+#define FIELD_BOOKMARK_PREFIX "__"
-+#define FIELD_FORM_BOOKMARK_PREFIX "__FORM"
-+*/
+@@ -44,12 +44,8 @@
+ #define CH_TXT_ATR_FIELDEND ((sal_Unicode)0x05)
+ #define CH_TXT_ATR_SUBST_FIELDSTART ("[")
+ #define CH_TXT_ATR_SUBST_FIELDEND ("]")
+-//#define CH_TXT_ATR_FORMELEMENT ((sal_Unicode)'#')
+ #define CH_TXT_ATR_FORMELEMENT ((sal_Unicode)0x06)
+-/*
+-#define FIELD_BOOKMARK_PREFIX "__"
+-#define FIELD_FORM_BOOKMARK_PREFIX "__FORM"
+-*/
++
  /*
   * Hier kommen erst mal die enums fuer die Hints
   */
 diff --git a/sw/inc/pam.hxx b/sw/inc/pam.hxx
-index b9a9c43..5348fd7 100644
+index ea67c9d..e307f4b 100644
 --- sw/inc/pam.hxx
 +++ sw/inc/pam.hxx
-@@ -254,6 +254,8 @@ public:
+@@ -256,6 +256,7 @@ public:
  	DECL_FIXEDMEMPOOL_NEWDEL(SwPaM);
  
      String GetTxt() const;
-+
 +    void Invalidate();
  };
  
  
-diff --git a/sw/inc/unocoll.hxx b/sw/inc/unocoll.hxx
-index b2b3556..b7ace31 100644
---- sw/inc/unocoll.hxx
-+++ sw/inc/unocoll.hxx
-@@ -192,8 +192,10 @@ class SwUnoCollection
- #define SW_SERVICE_IMAP_POLYGON                         104
- #define SW_SERVICE_TYPE_TEXT_GRAPHIC                    105
- #define SW_SERVICE_CHART2_DATA_PROVIDER                 106
-+#define SW_SERVICE_TYPE_FIELDMARK                                     107 
-+#define SW_SERVICE_TYPE_FORMFIELDMARK                                 108 
- 
--#define SW_SERVICE_LAST                 SW_SERVICE_FIELDTYPE_DOCINFO_CUSTOM
-+#define SW_SERVICE_LAST                 SW_SERVICE_TYPE_FORMFIELDMARK
- 
- #define SW_SERVICE_INVALID			USHRT_MAX
- 
-@@ -469,7 +471,6 @@ public:
- 	static SwXBookmark* 	GetObject( SwBookmark& rBkm, SwDoc* pDoc );
- };
- 
--
- class SwXNumberingRulesCollection : public cppu::WeakImplHelper1
- <
-     ::com::sun::star::container::XIndexAccess
 diff --git a/sw/inc/unoobj.hxx b/sw/inc/unoobj.hxx
-index 98e3abe..5794183 100644
+index 226994d..bd39bef 100644
 --- sw/inc/unoobj.hxx
 +++ sw/inc/unoobj.hxx
-@@ -72,6 +72,7 @@
- #include <com/sun/star/text/XRedline.hpp>
- #include <cppuhelper/weak.hxx>
- #include <cppuhelper/factory.hxx>	// helper for factories
-+#include <cppuhelper/implbase1.hxx>	// helper for implementations
- #include <cppuhelper/implbase3.hxx>	// helper for implementations
- #include <cppuhelper/implbase4.hxx>	// helper for implementations
- #include <cppuhelper/implbase5.hxx>	// helper for implementations
-@@ -88,6 +89,10 @@
- #include <unomid.h>
- #include <tools/link.hxx>
+@@ -648,6 +648,7 @@ public:
+ 	SwXFieldmark(bool isReplacementObject, SwBookmark* pBkm = 0, SwDoc* pDoc = 0);
  
-+#include <IDocumentBookmarkAccess.hxx> 
-+#include <com/sun/star/text/XFormField.hpp> 
-+
-+
- class SwUnoCrsr;
- class SwCursor;
- class SwBookmark;
-@@ -579,6 +584,7 @@ SwRefBookmarkBaseClass;
- class SwXBookmark : public SwRefBookmarkBaseClass,
- 	public SwClient
- {
-+protected:
- 	SwEventListenerContainer	aLstnrCntnr;
- 	SwDoc*						pDoc;
- 	String 						m_aName;
-@@ -622,7 +628,8 @@ public:
-     virtual void SAL_CALL addVetoableChangeListener( const ::rtl::OUString& PropertyName, const ::com::sun::star::uno::Reference< ::com::sun::star::beans::XVetoableChangeListener >& aListener ) throw(::com::sun::star::beans::UnknownPropertyException, ::com::sun::star::lang::WrappedTargetException, ::com::sun::star::uno::RuntimeException);
-     virtual void SAL_CALL removeVetoableChangeListener( const ::rtl::OUString& PropertyName, const ::com::sun::star::uno::Reference< ::com::sun::star::beans::XVetoableChangeListener >& aListener ) throw(::com::sun::star::beans::UnknownPropertyException, ::com::sun::star::lang::WrappedTargetException, ::com::sun::star::uno::RuntimeException);
+ 	virtual void attachToRange(const ::com::sun::star::uno::Reference< ::com::sun::star::text::XTextRange > & xTextRange)throw( ::com::sun::star::lang::IllegalArgumentException, ::com::sun::star::uno::RuntimeException );
++/*
+ 	virtual ::rtl::OUString SAL_CALL getDescription(void)  throw( ::com::sun::star::uno::RuntimeException );
+     virtual ::sal_Int16 SAL_CALL getType(  ) throw (::com::sun::star::uno::RuntimeException);
+     virtual ::sal_Int16 SAL_CALL getRes(  ) throw (::com::sun::star::uno::RuntimeException);
+@@ -655,7 +656,15 @@ public:
+     virtual void SAL_CALL setType( ::sal_Int16 fieldType ) throw (::com::sun::star::uno::RuntimeException);
+     virtual void SAL_CALL setRes( ::sal_Int16 res ) throw (::com::sun::star::uno::RuntimeException);
+     virtual void SAL_CALL setDescription( const ::rtl::OUString& description ) throw (::com::sun::star::uno::RuntimeException);
++*/
  
--	void attachToRange(const ::com::sun::star::uno::Reference< ::com::sun::star::text::XTextRange > & xTextRange)throw( ::com::sun::star::lang::IllegalArgumentException, ::com::sun::star::uno::RuntimeException );
-+         void attachToRangeEx(const ::com::sun::star::uno::Reference< ::com::sun::star::text::XTextRange > & xTextRange, IDocumentBookmarkAccess::BookmarkType eMark)throw( ::com::sun::star::lang::IllegalArgumentException, ::com::sun::star::uno::RuntimeException );
-+         virtual void attachToRange(const ::com::sun::star::uno::Reference< ::com::sun::star::text::XTextRange > & xTextRange)throw( ::com::sun::star::lang::IllegalArgumentException, ::com::sun::star::uno::RuntimeException );
++    virtual ::rtl::OUString SAL_CALL getFieldType(void)  throw( ::com::sun::star::uno::RuntimeException );
++    virtual void SAL_CALL setFieldType( const ::rtl::OUString& description ) throw (::com::sun::star::uno::RuntimeException);
++    
++    virtual ::sal_Int16 SAL_CALL getParamCount(  ) throw (::com::sun::star::uno::RuntimeException);
++    virtual ::rtl::OUString SAL_CALL getParamName(::sal_Int16 i)  throw( ::com::sun::star::uno::RuntimeException );
++    virtual ::rtl::OUString SAL_CALL getParamValue(::sal_Int16 i)  throw( ::com::sun::star::uno::RuntimeException );
++    virtual void SAL_CALL addParam( const ::rtl::OUString& name, const ::rtl::OUString& value, ::sal_Bool replaceExisting ) throw (::com::sun::star::uno::RuntimeException);
+ //    virtual ::com::sun::star::uno::Any SAL_CALL queryInterface( ::com::sun::star::uno::Type const & rType ) throw (::com::sun::star::uno::RuntimeException);
  
- 	//SwClient
- 	virtual void 	Modify( SfxPoolItem *pOld, SfxPoolItem *pNew);
-@@ -1458,6 +1465,30 @@ public:
- 	SwDoc*				GetDoc() const{return pDoc;}
- 	void				Invalidate();
  };
--#endif
- 
-+typedef cppu::ImplInheritanceHelper1< SwXBookmark, ::com::sun::star::text::XFormField > SwXFieldmark_BASE;
-+ 
-+class SwXFieldmark : public SwXFieldmark_BASE 
-+{
-+private:
-+    bool isReplacementObject;
-+public:
-+    SwXFieldmark(bool isReplacementObject, SwBookmark* pBkm = 0, SwDoc* pDoc = 0);
-+    
-+    virtual void attachToRange(const ::com::sun::star::uno::Reference< ::com::sun::star::text::XTextRange > & xTextRange)throw( ::com::sun::star::lang::IllegalArgumentException, ::com::sun::star::uno::RuntimeException );
-+    virtual ::rtl::OUString SAL_CALL getDescription(void)  throw( ::com::sun::star::uno::RuntimeException );
-+    virtual ::sal_Int16 SAL_CALL getType(  ) throw (::com::sun::star::uno::RuntimeException);
-+    virtual ::sal_Int16 SAL_CALL getRes(  ) throw (::com::sun::star::uno::RuntimeException);
-+    
-+    virtual void SAL_CALL setType( ::sal_Int16 fieldType ) throw (::com::sun::star::uno::RuntimeException);
-+    virtual void SAL_CALL setRes( ::sal_Int16 res ) throw (::com::sun::star::uno::RuntimeException);
-+    virtual void SAL_CALL setDescription( const ::rtl::OUString& description ) throw (::com::sun::star::uno::RuntimeException);
-+    
-+    //    virtual ::com::sun::star::uno::Any SAL_CALL queryInterface( ::com::sun::star::uno::Type const & rType ) throw (::com::sun::star::uno::RuntimeException);
-+    
-+};
-+
-+
-+
-+#endif
- 
-diff --git a/sw/inc/unoport.hxx b/sw/inc/unoport.hxx
-index ac52d30..102a9c1 100644
---- sw/inc/unoport.hxx
-+++ sw/inc/unoport.hxx
-@@ -72,7 +72,10 @@ enum SwTextPortionType
- 	PORTION_REDLINE_END,
- 	PORTION_RUBY_START,
- 	PORTION_RUBY_END,
--    PORTION_SOFT_PAGEBREAK
-+    PORTION_SOFT_PAGEBREAK,
-+	PORTION_FIELD_START,
-+	PORTION_FIELD_END,
-+	PORTION_FIELD_START_END
- };
- 
- class SwXRubyPortion;
-diff --git a/sw/source/core/crsr/crbm.cxx b/sw/source/core/crsr/crbm.cxx
-index a430392..4f870e0 100644
---- sw/source/core/crsr/crbm.cxx
-+++ sw/source/core/crsr/crbm.cxx
-@@ -40,6 +40,7 @@
- #include "callnk.hxx"
- #include "swcrsr.hxx"
- #include <IDocumentBookmarkAccess.hxx>
-+#include <IDocumentSettingAccess.hxx>
- 
- /*
-  * Methoden der SwCrsrShell fuer Bookmark
-@@ -165,6 +166,65 @@ BOOL SwCrsrShell::GoNextBookmark()
- 	return TRUE;
- }
- 
-+bool SwCrsrShell::IsFormProtected() {
-+    return getIDocumentSettingAccess()->get(IDocumentSettingAccess::PROTECT_FORM);
-+}
-+
-+SwBookmark* SwCrsrShell::IsInFieldBookmark() {
-+// Refactor
-+    SwPosition pos(*GetCrsr()->GetPoint());
-+    return getIDocumentBookmarkAccess()->getFieldBookmarkFor(pos);
-+}
-+
-+SwFieldBookmark* SwCrsrShell::IsInFormFieldBookmark() {
-+// Refactor
-+    SwPosition pos(*GetCrsr()->GetPoint());
-+    return (SwFieldBookmark*)getIDocumentBookmarkAccess()->getFormFieldBookmarkFor(pos);
-+}
-+
-+SwBookmark* SwCrsrShell::GetNextFieldBookmark() {
-+    SwPosition pos(*GetCrsr()->GetPoint());
-+    return getIDocumentBookmarkAccess()->getNextFieldBookmarkFor(pos);
-+}
-+
-+SwBookmark* SwCrsrShell::GetPrevFieldBookmark() {
-+    SwPosition pos(*GetCrsr()->GetPoint());
-+    return getIDocumentBookmarkAccess()->getPrevFieldBookmarkFor(pos);
-+}
-+
-+bool SwCrsrShell::GotoFieldBookmark(SwBookmark *pBkmk) 
-+{
-+        if(pBkmk==NULL)
-+	    return false;
-+	// Crsr-Moves ueberwachen, evt. Link callen
-+	bool bRet = true;
-+	SwCallLink aLk( *this );
-+	SwCursor* pCrsr = GetSwCrsr();
-+	SwCrsrSaveState aSaveState( *pCrsr );
-+	
-+	*pCrsr->GetPoint() = pBkmk->GetPos();
-+	if( pBkmk->GetOtherPos() )
-+	{
-+		pCrsr->SetMark();
-+		*pCrsr->GetMark() = *pBkmk->GetOtherPos();
-+		if( *pCrsr->GetMark() > *pCrsr->GetPoint() )
-+			pCrsr->Exchange();
-+	}
-+	pCrsr->GetPoint()->nContent--;
-+	pCrsr->GetMark()->nContent++;
-+
-+
-+	if( pCrsr->IsSelOvr( nsSwCursorSelOverFlags::SELOVER_CHECKNODESSECTION | nsSwCursorSelOverFlags::SELOVER_TOGGLE ) )
-+	{
-+		pCrsr->DeleteMark();
-+		pCrsr->RestoreSavePos();
-+		bRet = false;
-+	}
-+	else
-+	    UpdateCrsr(SwCrsrShell::SCROLLWIN|SwCrsrShell::CHKRANGE|SwCrsrShell::READONLY);
-+
-+	return bRet;
-+}
- 
- BOOL SwCrsrShell::GoPrevBookmark()
- {
 diff --git a/sw/source/core/crsr/crstrvl.cxx b/sw/source/core/crsr/crstrvl.cxx
-index 544c5f5..376329e 100644
+index 544c5f5..f784e89 100644
 --- sw/source/core/crsr/crstrvl.cxx
 +++ sw/source/core/crsr/crstrvl.cxx
-@@ -78,6 +78,7 @@
- #include <wrong.hxx>
- 
- #include <vcl/window.hxx>
-+#include <bookmrk.hxx>
- #include <docufld.hxx> // OD 2008-06-19 #i90516#
- 
- using namespace ::com::sun::star;
-@@ -1170,6 +1171,16 @@ BOOL SwCrsrShell::GetContentAtPos( const Point& rPt,
+@@ -1170,6 +1170,16 @@ BOOL SwCrsrShell::GetContentAtPos( const Point& rPt,
  					}
  				}
  
@@ -501,25 +245,31 @@ index 544c5f5..376329e 100644
  				{
  					if( aTmpState.bFtnNoInfo )
 diff --git a/sw/source/core/crsr/pam.cxx b/sw/source/core/crsr/pam.cxx
-index 2f38a8a..4decb4f 100644
+index 04de143..db863b7 100644
 --- sw/source/core/crsr/pam.cxx
 +++ sw/source/core/crsr/pam.cxx
-@@ -55,6 +55,11 @@
- // <--
+@@ -56,6 +56,7 @@
  #include <ndtxt.hxx> // #111827#
  
-+#ifndef _BOOKMRK_HXX
-+#include <bookmrk.hxx>
-+#endif
+ #include <bookmrk.hxx>
 +#include <hints.hxx>
-+
+ 
  // fuer den dummen ?MSC-? Compiler
  inline xub_StrLen GetSttOrEnd( BOOL bCondition, const SwCntntNode& rNd )
- {
-@@ -765,6 +770,29 @@ BOOL SwPaM::HasReadonlySel( bool bFormView ) const
- 			}
+@@ -768,16 +769,29 @@ BOOL SwPaM::HasReadonlySel( bool bFormView ) const
  		}
  	}
+ // TODO: Form Protection when Enhanced Fields are enabled
+-//	if( !bRet )
+-//    {
+-//	    const SwDoc *pDoc=GetDoc();
+-//	    SwBookmark *pA = ( pDoc && pPoint ? pDoc->getFieldBookmarkFor( *pPoint ) : NULL );
+-//	    SwBookmark *pB = ( pDoc && pMark ? pDoc->getFieldBookmarkFor( *pMark ) : pA );
+-//	    bRet = ( pA != pB );
+-//	    bool bProtectForm = pDoc->get( IDocumentSettingAccess::PROTECT_FORM );
+-//	    if( bProtectForm )
+-//            bRet |= ( pA==NULL || pB==NULL );
+-//	}
 +	if (!bRet) {
 +	    const SwDoc *pDoc=GetDoc();
 +	    SwBookmark *pA=(pDoc&&pPoint?pDoc->getFieldBookmarkFor(*pPoint):NULL);
@@ -546,9 +296,9 @@ index 2f38a8a..4decb4f 100644
  	return bRet;
  }
  
-@@ -1136,3 +1164,15 @@ String SwPaM::GetTxt() const
- 
-     return aResult;
+@@ -1154,3 +1168,15 @@ BOOL SwPaM::Overlap(const SwPaM & a, const SwPaM & b)
+ {
+     return !(*b.End() <= *a.Start() || *a.End() <= *b.End());
  }
 +
 +void SwPaM::Invalidate()
@@ -562,46 +312,21 @@ index 2f38a8a..4decb4f 100644
 +	_pModify->Modify( 0, &aHint);
 +    }
 +}
-diff --git a/sw/source/core/doc/doc.cxx b/sw/source/core/doc/doc.cxx
-index 2ad2cea..cbb208a 100644
---- sw/source/core/doc/doc.cxx
-+++ sw/source/core/doc/doc.cxx
-@@ -180,6 +180,7 @@ bool SwDoc::get(/*[in]*/ DocumentSettingId id) const
-         case UNIX_FORCE_ZERO_EXT_LEADING: return mbUnixForceZeroExtLeading;
-         case USE_OLD_PRINTER_METRICS: return mbOldPrinterMetrics;
-         case TABS_RELATIVE_TO_INDENT : return mbTabRelativeToIndent;
-+	case PROTECT_FORM: return mbProtectForm;  
-         // --> OD 2008-06-05 #i89181#
-         case TAB_AT_LEFT_INDENT_FOR_PARA_IN_LIST: return mbTabAtLeftIndentForParagraphsInList;
-         // <--
-@@ -291,6 +292,9 @@ void SwDoc::set(/*[in]*/ DocumentSettingId id, /*[in]*/ bool value)
-         case UNIX_FORCE_ZERO_EXT_LEADING:
-             mbUnixForceZeroExtLeading = value;
-             break;
-+	case PROTECT_FORM:
-+	    mbProtectForm = value;
-+	    break;
- 
-         case USE_OLD_PRINTER_METRICS:
-             mbOldPrinterMetrics = value;
 diff --git a/sw/source/core/doc/docbm.cxx b/sw/source/core/doc/docbm.cxx
-index c20eaba..e53c617 100644
+index 59dd2a6..4545785 100644
 --- sw/source/core/doc/docbm.cxx
 +++ sw/source/core/doc/docbm.cxx
-@@ -61,6 +61,10 @@
+@@ -63,6 +63,7 @@
  // --> OD 2007-10-23 #i81002#
  #include <ndtxt.hxx>
  // <--
-+#include "swundo.hxx"
-+#include "hintids.hxx"
-+
-+static bool _checkFieldBookmarkSanity(const SwDoc *pDoc);
++#include "ecmaflds.hxx"
  
  SV_IMPL_OP_PTRARR_SORT(SwBookmarks, SwBookmarkPtr)
  
-@@ -87,6 +91,24 @@ SV_IMPL_OP_PTRARR_SORT(SwBookmarks, SwBookmarkPtr)
+@@ -88,6 +89,23 @@ SV_IMPL_OP_PTRARR_SORT(SwBookmarks, SwBookmarkPtr)
+         } while((_pStartShell=(ViewShell*)_pStartShell->GetNext())!= pEShell ); \
  	}
- 
  
 +static void lcl_docbm_FixPosition( SwPosition& rPos )
 +{
@@ -620,15 +345,36 @@ index c20eaba..e53c617 100644
 +    }
 +}
 +
-+
+ 
  /** IDocumentBookmarkAccess ssc
  */
- const SwBookmarks& SwDoc::getBookmarks() const
-@@ -99,7 +121,23 @@ SwBookmark* SwDoc::makeBookmark( /*[in]*/const SwPaM& rPaM, /*[in]*/const KeyCod
+@@ -96,28 +114,27 @@ const SwBookmarks& SwDoc::getBookmarks() const
+     return *pBookmarkTbl;
+ }
+ 
++
+ SwBookmark* SwDoc::makeBookmark( /*[in]*/const SwPaM& rPaM, /*[in]*/const KeyCode& rCode,
+                                  /*[in]*/ const String& rName, /*[in]*/const String& rShortName,
                                   /*[in]*/IDocumentBookmarkAccess::BookmarkType eMark )
  {
      SwBookmark *pBM( 0 );
--	if( MARK == eMark )
+-    if (FORM_FIELDMARK_TEXT == eMark || FORM_FIELDMARK_NO_TEXT == eMark /* rName.CompareToAscii(FIELD_BOOKMARK_PREFIX, strlen(FIELD_BOOKMARK_PREFIX))==0 */)
+-    {
+-        pBM = new SwFieldBookmark(*rPaM.GetPoint(), rCode, rName, rShortName, eMark);
+-        if( rPaM.HasMark() )
+-            pBM->SetOtherBookmarkPos( rPaM.GetMark() );
+-        else
+-            pBM->SetOtherBookmarkPos( &pBM->GetBookmarkPos() );
+-
+-        // TODO: lcl_FixPosition( *pBM->pPos1 ); 
+-        // TODO: lcl_FixPosition( *pBM->pPos2 );
+-        if( *pBM->GetOtherBookmarkPos() < pBM->GetBookmarkPos() )
+-        {
+-            SwPosition _pos( pBM->GetBookmarkPos() );
+-            pBM->SetBookmarkPos( pBM->GetOtherBookmarkPos() );
+-            pBM->SetOtherBookmarkPos( &_pos );
+-        }
+-        //ASSERT(*pBM->pPos1<=*pBM->pPos2, "");
 +    if (FORM_FIELDMARK_TEXT == eMark || FORM_FIELDMARK_NO_TEXT == eMark) {
 +	pBM = new SwFieldBookmark(*rPaM.GetPoint(), rCode, rName, rShortName, eMark);
 +	if( rPaM.HasMark() )
@@ -644,15 +390,82 @@ index c20eaba..e53c617 100644
 +	    pBM->pPos2=_pos;
 +	}
 +	ASSERT(*PBM->pPos1<=*pBM->pPos2, "");
-+    }
-+    else if( MARK == eMark )
-     {
-         pBM = new SwMark( *rPaM.GetPoint(), rCode, rName, rShortName );
      }
-@@ -167,6 +205,45 @@ SwBookmark* SwDoc::makeBookmark( /*[in]*/const SwPaM& rPaM, /*[in]*/const KeyCod
+     else if( MARK == eMark )
+     {
+@@ -146,7 +163,7 @@ SwBookmark* SwDoc::makeBookmark( /*[in]*/const SwPaM& rPaM, /*[in]*/const KeyCod
+ //    }
+ //    // <--
+     else if( BOOKMARK == eMark || DDE_BOOKMARK == eMark)
+-    {
++	{
+         // --> OD 2007-09-26 #i81002#
+         pBM = new SwBookmark( rPaM, rCode, rName, rShortName);
+         if ( eMark == DDE_BOOKMARK )
+@@ -154,7 +171,7 @@ SwBookmark* SwDoc::makeBookmark( /*[in]*/const SwPaM& rPaM, /*[in]*/const KeyCod
+             pBM->SetType( eMark );
+         }
+         // <--
+-    }
++	}
+     // --> OD 2007-10-17 #i81002#
+     else if ( eMark == CROSSREF_BOOKMARK )
+     {
+@@ -176,53 +193,56 @@ SwBookmark* SwDoc::makeBookmark( /*[in]*/const SwPaM& rPaM, /*[in]*/const KeyCod
+                     "<SwDoc::makeBookmark(..)> - creation of cross-reference bookmark with invalid PaM" );
+         }
+     }
+-    else
+-    {
++    // <--
++	else
++	{
+         // --> OD 2007-09-26 #i81002#
+         pBM = new SwUNOMark( rPaM, rCode, rName, rShortName);
+         // <--
+-    }
++	}
+ 
      // --> OD 2007-10-18 #i81002#
      if ( pBM )
      {
+-        if (FORM_FIELDMARK_TEXT == eMark || FORM_FIELDMARK_NO_TEXT == eMark /* pBM->GetName().CompareToAscii(FIELD_BOOKMARK_PREFIX, strlen(FIELD_BOOKMARK_PREFIX))==0 */) 
+-        {
+-            StartUndo(UNDO_UI_REPLACE, NULL);
+-            //ASSERT(*PBM->pPos1<=*pBM->pPos2, "Bookmark positions not normalized!!!!");
+-            const SwTxtNode* pStartTxtNode=this->GetNodes()[pBM->GetBookmarkPos().nNode]->GetTxtNode();
+-            const SwTxtNode* pEndTxtNode=this->GetNodes()[pBM->GetOtherBookmarkPos()->nNode]->GetTxtNode();
+-            sal_Unicode ch_start=pStartTxtNode->GetTxt().GetChar(pBM->GetBookmarkPos().nContent.GetIndex());
+-            sal_Unicode ch_end=pEndTxtNode->GetTxt().GetChar(pBM->GetOtherBookmarkPos()->nContent.GetIndex()-1);
+-            bool form=(IDocumentBookmarkAccess::FORM_FIELDMARK_NO_TEXT==eMark);  /*(pBM->GetName().CompareToAscii(FIELD_FORM_BOOKMARK_PREFIX, strlen(FIELD_FORM_BOOKMARK_PREFIX))==0);*/
+-            if (form) 
+-            {
+-                if (ch_start!=CH_TXT_ATR_FORMELEMENT)
+-                {
+-                    const SwPaM rRg(pBM->GetBookmarkPos());
+-                    Insert(rRg, CH_TXT_ATR_FORMELEMENT);
+-                    SwPosition aTmp( pBM->GetBookmarkPos() );
+-                    aTmp.nContent--;
+-                    pBM->SetBookmarkPos( &aTmp );
+-                }
+-            }
+-            else
+-            {
+-                if (ch_start!=CH_TXT_ATR_FIELDSTART)
+-                {
+-                    const SwPaM rRg(pBM->GetBookmarkPos());
+-                    Insert(rRg, CH_TXT_ATR_FIELDSTART);
+-                    SwPosition aTmp( pBM->GetBookmarkPos() );
+-                    aTmp.nContent--;
+-                    pBM->SetBookmarkPos( &aTmp );
+-                }
+-                if (ch_end!=CH_TXT_ATR_FIELDEND)
+-                {
+-                    const SwPaM rRg(*pBM->GetOtherBookmarkPos());
+-                    Insert(rRg, CH_TXT_ATR_FIELDEND);
+-                }
+-            }
+-        } 
 + 	if (FORM_FIELDMARK_TEXT == eMark || FORM_FIELDMARK_NO_TEXT == eMark ) {
 + 	    StartUndo(UNDO_UI_REPLACE, NULL);
 + 	    ASSERT(*PBM->pPos1<=*pBM->pPos2, "Bookmark positions not normalized!!!!");
@@ -669,18 +482,18 @@ index c20eaba..e53c617 100644
 + 	    sal_Unicode ch_end=pEndTxtNode->GetTxt().GetChar(ch_end_pos);
 + 	    bool form=(IDocumentBookmarkAccess::FORM_FIELDMARK_NO_TEXT==eMark);
 + 	    if (form) {
-+ 		if (ch_start!=CH_TXT_ATR_FORMELEMENT) {
++ 		if (1 || ch_start!=CH_TXT_ATR_FORMELEMENT) {
 +		    const SwPaM rRg(*pBM->pPos1);
 + 		    Insert(rRg, CH_TXT_ATR_FORMELEMENT);
 + 		    pBM->pPos1->nContent--;
 + 		}
 + 	    } else {
-+ 		if (ch_start!=CH_TXT_ATR_FIELDSTART) {
++ 		if (1 || ch_start!=CH_TXT_ATR_FIELDSTART) {
 +		    const SwPaM rRg(*pBM->pPos1);
 + 		    Insert(rRg, CH_TXT_ATR_FIELDSTART);
 + 		    pBM->pPos1->nContent--;
 + 		}
-+ 		if (ch_end!=CH_TXT_ATR_FIELDEND) {
++ 		if (1 ||  ch_end!=CH_TXT_ATR_FIELDEND) {
 +		    const SwPaM rRg(*pBM->pPos2);
 + 		    Insert(rRg, CH_TXT_ATR_FIELDEND);
 + 		}
@@ -695,225 +508,157 @@ index c20eaba..e53c617 100644
          if ( !pBookmarkTbl->Insert( pBM ) )
              delete pBM, pBM = 0;
          else
-@@ -185,10 +262,121 @@ SwBookmark* SwDoc::makeBookmark( /*[in]*/const SwPaM& rPaM, /*[in]*/const KeyCod
+@@ -241,12 +261,38 @@ SwBookmark* SwDoc::makeBookmark( /*[in]*/const SwPaM& rPaM, /*[in]*/const KeyCod
                      SetModified();
              }
          }
+-        if (FORM_FIELDMARK_TEXT == eMark || FORM_FIELDMARK_NO_TEXT == eMark /*pBM->GetName().CompareToAscii(FIELD_BOOKMARK_PREFIX, strlen(FIELD_BOOKMARK_PREFIX))==0*/)
+-            EndUndo(UNDO_UI_REPLACE, NULL);
 +	if (FORM_FIELDMARK_TEXT == eMark || FORM_FIELDMARK_NO_TEXT == eMark ) {
 +	    EndUndo(UNDO_UI_REPLACE, NULL);
 +	}
-+    }
-+    return pBM;
-+}
-+
-+SwBookmark* SwDoc::getFieldBookmarkFor(const SwPosition &pos) const {
-+    //@TODO make impl recursive
-+    int nCount=pBookmarkTbl->Count();
-+    while(--nCount>=0) {
-+ 	SwBookmark *pBM=(*pBookmarkTbl)[nCount];
-+ 	if (pBM->GetOtherPos()!=NULL 
-+ 	    && FORM_FIELDMARK_TEXT==pBM->GetType() /* pBM->GetName().CompareToAscii(FIELD_BOOKMARK_PREFIX, strlen(FIELD_BOOKMARK_PREFIX))==0 */
-+ 	    && pBM->GetPos()<pos 
-+ 	    && pos < *(pBM->GetOtherPos())) {
-+ 	    return pBM;
-+ 	}
-+    }
-+    return NULL;
-+}
-+
-+SwFieldBookmark* SwDoc::getFormFieldBookmarkFor(const SwPosition &pos) const {
-+    //@TODO make impl recursive
-+    int nCount=pBookmarkTbl->Count();
-+    while(--nCount>=0) {
-+ 	SwBookmark *pBM=(*pBookmarkTbl)[nCount];
-+ 	if (pBM->GetOtherPos()!=NULL 
-+ 	    && FORM_FIELDMARK_NO_TEXT==pBM->GetType() /* pBM->GetName().CompareToAscii(FIELD_FORM_BOOKMARK_PREFIX, strlen(FIELD_FORM_BOOKMARK_PREFIX))==0 */
-+ 	    && pBM->GetPos()<=pos 
-+ 	    && pos <= *(pBM->GetOtherPos())) {
-+ 	    return (SwFieldBookmark*)pBM;
-+ 	}
      }
--	return pBM;
-+    return NULL;
- }
- 
-+SwBookmark* SwDoc::getNextFieldBookmarkFor(const SwPosition &pos) const {
-+    int i=0;
-+    int nCount=pBookmarkTbl->Count();
-+    SwBookmark *pBM=NULL;
-+    while(i<nCount
-+ 	  && ((pBM=(*pBookmarkTbl)[i])==NULL
-+	      || !pBM->IsFormFieldMark() /* pBM->GetName().CompareToAscii(FIELD_BOOKMARK_PREFIX, strlen(FIELD_BOOKMARK_PREFIX))!=0 */
-+	      || pos >= pBM->GetPos() )) i++;
-+    
-+    if (i<nCount) {
-+ 	return pBM;
-+    } else {
-+ 	i=0; 
-+ 	while(i<nCount && (
-+		  (pBM=(*pBookmarkTbl)[i])==NULL
-+		  ||  !pBM->IsFormFieldMark() /*pBM->GetName().CompareToAscii(FIELD_BOOKMARK_PREFIX, strlen(FIELD_BOOKMARK_PREFIX))!=0*/ )) i++;
-+ 	return (i<nCount?pBM:NULL);
-+    }
-+}
-+
-+SwBookmark* SwDoc::getPrevFieldBookmarkFor(const SwPosition &pos) const {
-+    int nCount=pBookmarkTbl->Count();
-+    int i=nCount-1;
-+    SwBookmark *pBM=NULL;
-+    while(i>=0
-+ 	  && ((pBM=(*pBookmarkTbl)[i])==NULL
-+	      || !pBM->IsFormFieldMark() /*pBM->GetName().CompareToAscii(FIELD_BOOKMARK_PREFIX, strlen(FIELD_BOOKMARK_PREFIX))!=0*/
-+	      || pBM->GetOtherPos()==NULL
-+	      || pos <= *pBM->GetOtherPos() )) i--;
-+    
-+    if (i>=0) {
-+ 	return pBM;
-+    } else {
-+ 	i=nCount-1; 
-+ 	while(i>=0 && (
-+		  (pBM=(*pBookmarkTbl)[i])==NULL
-+		  ||  !pBM->IsFormFieldMark() /*pBM->GetName().CompareToAscii(FIELD_BOOKMARK_PREFIX, strlen(FIELD_BOOKMARK_PREFIX))!=0*/ )) i--;
-+ 	return (i>=0?pBM:NULL);
-+    }
-+}
-+
-+/*
-+ bool SwDoc::isValidSelectionWrtFieldBookmarks(const SwPosition &posA, const SwPostion &posB) {
-+ //@TODO optimize this
-+     SwBookmark *pA=getFieldBookmarkFor(posA);
-+     SwBookmark *pB=getFieldBookmarkFor(posB);
-+     return pA==pB;    
-+ }
-+ */
-+ 
-+ // not finished yet, still neet to add this check
-+ bool _checkFieldBookmarkSanity(const SwDoc *pDoc) {
-+     int nCount=pDoc->getBookmarks().Count();
-+     while(--nCount>=0) {
-+	 SwBookmark *pBM=pDoc->getBookmarks()[nCount];
-+	 if (pBM->IsFormFieldMark() /* pBM->GetName().CompareToAscii(FIELD_BOOKMARK_PREFIX, strlen(FIELD_BOOKMARK_PREFIX))==0 */) {
-+	     {
-+		 rtl::OUString s(pBM->GetName());
-+		 rtl::OString aOString = ::rtl::OUStringToOString (s, RTL_TEXTENCODING_UTF8);
-+		 const SwTxtNode* pStartTxtNode=pDoc->GetNodes()[pBM->GetPos().nNode]->GetTxtNode();
-+		 const SwTxtNode* pEndTxtNode=pDoc->GetNodes()[pBM->GetOtherPos()->nNode]->GetTxtNode();
-+		 xub_StrLen ch_start_pos=pBM->GetPos().nContent.GetIndex();
-+		 xub_StrLen ch_end_pos=pBM->GetOtherPos()->nContent.GetIndex();
-+		 if (ch_end_pos==0 || ch_end_pos<=ch_start_pos) {
-+		     ch_end_pos=ch_start_pos;
-+		 } else {
-+ 		    ch_end_pos--;
-+		 }
-+		 sal_Unicode ch_start=pStartTxtNode->GetTxt().GetChar(ch_start_pos);
-+		 sal_Unicode ch_end=pEndTxtNode->GetTxt().GetChar(ch_end_pos);
-+		 // printf("CHECK(%s %p[%i/'%c'] %p[%i/'%c']);\n", aOString.getStr(), pStartTxtNode, ch_start, ch_start, pEndTxtNode, ch_end, ch_end);
-+	     }	    
-+	 }
-+     }
-+     return true;
-+ }
-+  
-+
- void SwDoc::deleteBookmark( /*[in]*/sal_uInt16 nPos )
- {
- 	SwBookmark *pBM = (*pBookmarkTbl)[nPos];
-@@ -761,6 +949,8 @@ int lcl_RelativePosition( const SwPosition& rPos, ULONG nNode, xub_StrLen nCntnt
-     return nReturn;
+     return pBM;
  }
  
 +
++SwFieldBookmark *SwDoc::makeFieldBookmark(/*[in]*/const SwPaM& rPaM, 
++				       /*[in]*/ const String& rName, 
++				       /*[in]*/ const rtl::OUString &rType)
++{
++    SwFieldBookmark *pFieldmark=(SwFieldBookmark*)makeBookmark(rPaM, KeyCode(), rName, String(), IDocumentBookmarkAccess::FORM_FIELDMARK_TEXT);    
++    pFieldmark->setTypeName(rType);
++    if (1) {
++	rtl::OString aName8 = ::rtl::OUStringToOString (rName, RTL_TEXTENCODING_UTF8);
++	rtl::OString aType8 = ::rtl::OUStringToOString (rType, RTL_TEXTENCODING_UTF8);
++	printf("makeFieldBookmark(\"%s\", \"%s\")\n", aName8.getStr(), aType8.getStr());
++    }
++    return pFieldmark;
++}
 +
- void _SaveCntntIdx( SwDoc* pDoc, ULONG nNode, xub_StrLen nCntnt,
- 					SvULongs& rSaveArr, BYTE nSaveFly )
++SwFieldBookmark *SwDoc::makeNoTextFieldBookmark(/*[in]*/const SwPaM& rPaM, 
++				       /*[in]*/ const String& rName, 
++				       /*[in]*/ const rtl::OUString &rType)
++{
++    SwFieldBookmark *pFieldmark=(SwFieldBookmark*)makeBookmark(rPaM, KeyCode(), rName, String(), IDocumentBookmarkAccess::FORM_FIELDMARK_NO_TEXT);    
++    pFieldmark->setTypeName(rType);
++    return pFieldmark;
++}
++
++
+ SwBookmark* SwDoc::getFieldBookmarkFor(const SwPosition &pos) const
  {
-@@ -1375,3 +1565,93 @@ namespace bookmarkfunc
+     //@TODO make impl recursive
+@@ -255,7 +301,7 @@ SwBookmark* SwDoc::getFieldBookmarkFor(const SwPosition &pos) const
+     {
+         SwBookmark *pBM=(*pBookmarkTbl)[static_cast<USHORT>(nCount)];
+         if (pBM->GetOtherBookmarkPos()!=NULL 
+-            && FORM_FIELDMARK_TEXT==pBM->GetType() /* pBM->GetName().CompareToAscii(FIELD_BOOKMARK_PREFIX, strlen(FIELD_BOOKMARK_PREFIX))==0 */
++            && FORM_FIELDMARK_TEXT==pBM->GetType()
+             && pBM->GetBookmarkPos()<pos 
+             && pos < *(pBM->GetOtherBookmarkPos()))
+             return pBM;
+@@ -286,7 +332,7 @@ SwBookmark* SwDoc::getNextFieldBookmarkFor(const SwPosition &pos) const
+     SwBookmark *pBM=NULL;
+     while(i<nCount
+         && ((pBM=(*pBookmarkTbl)[i])==NULL
+-        || !pBM->IsFormFieldMark() /* pBM->GetName().CompareToAscii(FIELD_BOOKMARK_PREFIX, strlen(FIELD_BOOKMARK_PREFIX))!=0 */
++        || !pBM->IsTabbedFormFieldMark() 
+         || pos >= pBM->GetBookmarkPos() ))
+         i++;
+ 
+@@ -296,7 +342,7 @@ SwBookmark* SwDoc::getNextFieldBookmarkFor(const SwPosition &pos) const
+     {
+         i=0;
+         while(i<nCount
+-            && ((pBM=(*pBookmarkTbl)[i])==NULL || !pBM->IsFormFieldMark() /*pBM->GetName().CompareToAscii(FIELD_BOOKMARK_PREFIX, strlen(FIELD_BOOKMARK_PREFIX))!=0*/ ))
++            && ((pBM=(*pBookmarkTbl)[i])==NULL || !pBM->IsTabbedFormFieldMark() ))
+             i++;
+         return (i<nCount?pBM:NULL);
+     }
+@@ -309,7 +355,7 @@ SwBookmark* SwDoc::getPrevFieldBookmarkFor(const SwPosition &pos) const
+     SwBookmark *pBM=NULL;
+     while(i>=0
+         && ((pBM=(*pBookmarkTbl)[static_cast<USHORT>(i)])==NULL
+-        || !pBM->IsFormFieldMark() /*pBM->GetName().CompareToAscii(FIELD_BOOKMARK_PREFIX, strlen(FIELD_BOOKMARK_PREFIX))!=0*/
++        || !pBM->IsTabbedFormFieldMark()
+         || pBM->GetOtherBookmarkPos()==NULL
+         || pos <= *pBM->GetOtherBookmarkPos()))
+         i--;
+@@ -320,7 +366,7 @@ SwBookmark* SwDoc::getPrevFieldBookmarkFor(const SwPosition &pos) const
+     {
+         i=nCount-1; 
+         while(i>=0
+-            && ((pBM=(*pBookmarkTbl)[static_cast<USHORT>(i)])==NULL ||  !pBM->IsFormFieldMark() /*pBM->GetName().CompareToAscii(FIELD_BOOKMARK_PREFIX, strlen(FIELD_BOOKMARK_PREFIX))!=0*/ ))
++            && ((pBM=(*pBookmarkTbl)[static_cast<USHORT>(i)])==NULL ||  !pBM->IsTabbedFormFieldMark() ))
+             i--;
+         return (i>=0?pBM:NULL);
+     }
+@@ -1299,45 +1345,6 @@ void _RestoreCntntIdx( SwDoc* pDoc, SvULongs& rSaveArr,
+ 	}
+ }
+ 
+-SwFieldBookmark::SwFieldBookmark(const SwPosition& aPos,
+-		const KeyCode& rCode,
+-		const String& rName, const String& rShortName,
+-		IDocumentBookmarkAccess::BookmarkType eMark)
+-    : SwBookmark(aPos, rCode, rName, rShortName),
+-		fftype(0), // Type: 0 = Text, 1 = Check Box, 2 = List
+-		ffres(0),
+-		ffprot(0),
+-		ffsize(0), // 0 = Auto, 1=Exact (see ffhps)
+-		fftypetxt(0), // Type of text field: 0 = Regular text, 1 = Number, 2 = Date, 3 = Current date, 4 = Current time, 5 = Calculation
+-		ffrecalc(0), 
+-		ffmaxlen(0), // Number of characters for text field. Zero means unlimited.
+-		ffhps(24) // Check box size (half-point sizes).
+-{
+-	eMarkType = eMark;
+-}
+-
+-void SwFieldBookmark::SetChecked(bool checked)
+-{
+-	ASSERT(fftype==1, "This method is for checkboxes only...");
+-	ffres=(checked?1:0);
+-}
+-
+-bool SwFieldBookmark::IsChecked()
+-{
+-	ASSERT(fftype==1, "This method is for checkboxes only...");
+-	return ffres!=0;
+-}
+-
+-void SwFieldBookmark::SetFieldType(int newfftype)
+-{
+-	this->fftype=newfftype;
+-}
+-
+-int SwFieldBookmark::GetFieldType()
+-{
+-	return fftype;
+-}
+-
+ void _RestoreCntntIdx( SvULongs& rSaveArr, const SwNode& rNd,
+ 						xub_StrLen nLen, xub_StrLen nChkLen )
+ {
+@@ -1581,3 +1588,118 @@ namespace bookmarkfunc
      }
  }
  // <--
++
 +
 +
 +SwFieldBookmark::SwFieldBookmark(const SwPosition& aPos,
 +				 const KeyCode& rCode,
 +				 const String& rName, const String& rShortName,
 +				 IDocumentBookmarkAccess::BookmarkType eMark)
-+    : SwBookmark(aPos, rCode, rName, rShortName),
-+      fftype(0), // Type: 0 = Text, 1 = Check Box, 2 = List
-+      ffres(0),
-+      ffprot(0),
-+      ffsize(0), // 0 = Auto, 1=Exact (see ffhps)
-+      fftypetxt(0), // Type of text field: 0 = Regular text, 1 = Number, 2 = Date, 3 = Current date, 4 = Current time, 5 = Calculation
-+      ffrecalc(0), 
-+      ffmaxlen(0), // Number of characters for text field. Zero means unlimited.
-+      ffhps(24), // Check box size (half-point sizes).
-+      ffListEntries(NULL)
++    : SwBookmark(aPos, rCode, rName, rShortName)
 +{
 +    eMarkType = eMark;
 +}
 +
 +SwFieldBookmark::~SwFieldBookmark()
 +{
-+    if (ffListEntries!=NULL) {
-+	delete ffListEntries;
-+    }
-+}
 +
-+void SwFieldBookmark::SetChecked(bool checked)
-+{
-+    ASSERT(fftype==1, "This method is for checkboxes only...");
-+    ffres=(checked?1:0);
-+}
-+
-+bool SwFieldBookmark::IsChecked()
-+{
-+    ASSERT(fftype==1, "This method is for checkboxes only...");
-+    return ffres!=0;
-+}
-+
-+void SwFieldBookmark::SetType(int type)
-+{
-+    this->fftype=type;
-+}
-+
-+int SwFieldBookmark::GetType()
-+{
-+    return fftype;
-+}
-+
-+void SwFieldBookmark::addListItem(String item)
-+{
-+    if (ffListEntries==NULL) {
-+	ffListEntries=new std::vector<String>();
-+    }
-+    assert(ffListEntries!=NULL);
-+    ffListEntries->push_back(item);
-+}
-+
-+int SwFieldBookmark::getListItems()
-+{
-+    return (ffListEntries!=NULL?ffListEntries->size():0);
-+}
-+
-+String SwFieldBookmark::getListItem(int pos)
-+{
-+    return (ffListEntries!=NULL?(*ffListEntries)[pos]:String());
-+}
-+
-+void SwFieldBookmark::setCurrentListItem(int pos)
-+{
-+    if (ffListEntries!=NULL && (size_t)pos<ffListEntries->size()) {
-+	ffres=pos;
-+    }
-+}
-+
-+int SwFieldBookmark::getCurrentListItem()
-+{
-+    return ffres;
-+}
-+
-+String SwFieldBookmark::getCurrentListItemText()
-+{
-+    return getListItem(ffres);
 +}
 +
 +void SwFieldBookmark::invalidate() 
@@ -921,74 +666,189 @@ index c20eaba..e53c617 100644
 +    SwPaM aPaM(this->GetPos(), *this->GetOtherPos());
 +    aPaM.Invalidate();
 +}
-diff --git a/sw/source/core/doc/docedt.cxx b/sw/source/core/doc/docedt.cxx
-index ea83635..824c414 100644
---- sw/source/core/doc/docedt.cxx
-+++ sw/source/core/doc/docedt.cxx
-@@ -827,6 +827,12 @@ bool SwDoc::Insert( const SwPaM &rRg, sal_Unicode c )
- |*	  Beschreibung		Zeichen ueberschreiben
- *************************************************************************/
- 
-+void SwDoc::SetModified(SwPaM &rPaM)
++
++SwPosition SwFieldBookmark::getSelectionStart() 
 +{
-+    SwDataChanged aTmp( rPaM, 0 );
-+    SetModified();
++    SwPosition aPos=GetPos();
++    aPos.nContent++;
++    return aPos;
 +}
 +
- bool SwDoc::Overwrite( const SwPaM &rRg, sal_Unicode c )
- {
- 	SwPosition& rPt = *(SwPosition*)rRg.GetPoint();
-diff --git a/sw/source/core/doc/docnew.cxx b/sw/source/core/doc/docnew.cxx
-index 84150be..403acf8 100644
---- sw/source/core/doc/docnew.cxx
-+++ sw/source/core/doc/docnew.cxx
-@@ -319,6 +319,7 @@ SwDoc::SwDoc() :
-     mbUnixForceZeroExtLeading               = false;        // hidden
-     mbOldPrinterMetrics                     = false;        // hidden
-     mbTabRelativeToIndent                   = true;         // hidden
-+    mbProtectForm                           = false;        // hidden
-     // --> OD 2008-06-05 #i89181#
-     mbTabAtLeftIndentForParagraphsInList    = false;        // hidden
-     // <--
-diff --git a/sw/source/core/layout/trvlfrm.cxx b/sw/source/core/layout/trvlfrm.cxx
-index 258aaf7..7becfed 100644
---- sw/source/core/layout/trvlfrm.cxx
-+++ sw/source/core/layout/trvlfrm.cxx
-@@ -1628,6 +1628,13 @@ BOOL SwRootFrm::IsDummyPage( USHORT nPageNum ) const
- |*************************************************************************/
- BOOL SwFrm::IsProtected() const
- {
-+	if (this->IsCntntFrm() && ((SwCntntFrm*)this)->GetNode()) {
-+		const SwDoc *pDoc=((SwCntntFrm*)this)->GetNode()->GetDoc();
-+		bool isFormProtected=pDoc->get(IDocumentSettingAccess::PROTECT_FORM );
-+		if (isFormProtected) {
-+			return FALSE; // a hack for now, well deal with it laster, I we return true here we have a "double" locking 
-+		}
++SwPosition SwFieldBookmark::getSelectionEnd()
++{
++    SwPosition aPos=*GetOtherPos();
++    aPos.nContent--;
++    return aPos;
++}
++
++
++void SwFieldBookmark::setTypeName(const ::rtl::OUString &typeName)
++{
++    m_type=typeName;
++}
++
++BOOL SwBookmark::IsTabbedFormFieldMark() const
++{
++    return IsFormFieldMark() && ((const SwFieldBookmark*)this)->isTabbed();
++}
++
++bool SwFieldBookmark::isTabbed() const
++{
++    return isType(ECMA_FORMTEXT) || isType(ECMA_FORMCHECKBOX)  || isType(ECMA_FORMDROPDOWN);
++}
++
++bool SwFieldBookmark::isType(const char *type) const
++{
++    return m_type.compareToAscii(type)==0;
++}
++
++rtl::OUString SwFieldBookmark::getTypeName() {
++    return m_type;
++}
++
++void SwFieldBookmark::addParam(::rtl::OUString paramName, ::rtl::OUString paramValue, bool replaceExisting) 
++{
++    if (replaceExisting) {
++	bool replaced=false;
++	const int len=m_params.size();
++	for(int i=0;i<len;i++) {
++	    if (m_params[i].first.compareTo(paramName)==0) {
++		m_params[i]=ParamPair_t(paramName, paramValue);
++		replaced=true;
++	    }
 +	}
- 	//Der Frm kann in Rahmen, Zellen oder Bereichen geschuetzt sein.
- 	//Geht auch FlyFrms rekursiv hoch. Geht auch von Fussnoten zum Anker.
- 	const SwFrm *pFrm = this;
++	if (!replaced) {
++	    m_params.push_back(ParamPair_t(paramName, paramValue));
++	}
++    } else {
++	m_params.push_back(ParamPair_t(paramName, paramValue));
++    }
++}
++
++void SwFieldBookmark::addParam(const char* paramName, int value)
++{
++    rtl::OUString sName=rtl::OUString::createFromAscii(paramName);
++    rtl::OUString sValue=::rtl::OUString::valueOf((sal_Int32)value);
++    addParam(sName, sValue);
++}
++
++void SwFieldBookmark::addParams(std::vector<ParamPair_t> &params)
++{
++    for(std::vector<ParamPair_t>::iterator i=params.begin();i!=params.end();i++) {
++	m_params.push_back(*i);
++    }
++}
++
++int SwFieldBookmark::getNumOfParams() 
++{
++    return m_params.size();
++}
++
++SwFieldBookmark::ParamPair_t SwFieldBookmark::getParam(int pos)
++{
++    return m_params[pos];
++}
++
++SwFieldBookmark::ParamPair_t SwFieldBookmark::getParam(const char *name, const char *defaultValue) 
++{
++    for(std::vector<ParamPair_t>::iterator i=m_params.begin();i!=m_params.end();i++) {
++	if (i->first.compareToAscii(name)==0) {
++	    return *i;
++	}
++    }
++    return ParamPair_t(rtl::OUString(), (defaultValue? ::rtl::OUString::createFromAscii(defaultValue)  : ::rtl::OUString()));
++}
++
+diff --git a/sw/source/core/edit/edtox.cxx b/sw/source/core/edit/edtox.cxx
+index 125489c..03872f4 100644
+--- sw/source/core/edit/edtox.cxx
++++ sw/source/core/edit/edtox.cxx
+@@ -60,6 +60,9 @@
+ #ifndef _STATSTR_HRC
+ #include <statstr.hrc>
+ #endif
++#include <bookmrk.hxx>
++#include <ecmaflds.hxx>
++ 
+ 
+ using namespace ::com::sun::star;
+ using namespace ::com::sun::star::i18n;
+@@ -232,6 +235,19 @@ BOOL SwEditShell::UpdateTableOf( const SwTOXBase& rTOX, const SfxItemSet* pSet )
+ 	return bRet;
+ }
+ 
++BOOL SwEditShell::UpdateField(SwFieldBookmark &fieldBM) 
++{
++//    SwDocShell* pDocSh = pDoc->GetDocShell();
++    //@TODO implement me...; add undo etc...
++    if (pDoc && fieldBM.GetOtherBookmarkPos()!=NULL) {
++	SwPaM aPaM(fieldBM.getSelectionStart(), fieldBM.getSelectionEnd());
++	pDoc->Delete(aPaM);
++        pDoc->Insert(aPaM, String::CreateFromAscii("Implement me ;-)"), false);
++    }
++    return TRUE;
++}
++
++
+ /*--------------------------------------------------------------------
+ 	 Beschreibung: Aktuelles Verzeichnis vor oder in dem der Cursor
+ 								   steht
 diff --git a/sw/source/core/text/inftxt.cxx b/sw/source/core/text/inftxt.cxx
-index 7d240ee..06ec52c 100644
+index d96b2db..57ad903 100644
 --- sw/source/core/text/inftxt.cxx
 +++ sw/source/core/text/inftxt.cxx
-@@ -84,6 +84,9 @@
- 
- #include <unomid.h>
- 
-+#include <doc.hxx>
-+#include <pam.hxx>
-+
- using namespace ::com::sun::star;
- using namespace ::com::sun::star::linguistic2;
- using namespace ::com::sun::star::uno;
-@@ -1172,6 +1175,41 @@ void SwTxtPaintInfo::_DrawBackBrush( const SwLinePortion &rPor ) const
- {
- 	ASSERT( pFnt->GetBackColor(), "DrawBackBrush: Lost Color" );
- 
-+    {
-+	SwRect aIntersect;
-+	CalcRect( rPor, &aIntersect, 0 );
+@@ -1147,13 +1147,15 @@ void SwTxtPaintInfo::DrawCheckBox( const SwFieldFormPortion &rPor, bool checked)
+     SwRect aIntersect;
+     CalcRect( rPor, &aIntersect, 0 );
+     if ( aIntersect.HasArea() ) {
+-	if (OnWin()) {
+-	    OutputDevice* pOutDev = (OutputDevice*)GetOut();
+-	    pOutDev->Push( PUSH_LINECOLOR | PUSH_FILLCOLOR );
+-	    pOutDev->SetLineColor( Color(220, 233, 245));
+-	    pOutDev->SetFillColor( Color(220, 233, 245));
+-	    pOutDev->DrawRect( aIntersect.SVRect() );
+-	    pOutDev->Pop();
++	if (OnWin() && SwViewOption::IsFieldShadings() && !GetOpt().IsPagePreview()) {
++	    OutputDevice* pOut_ = (OutputDevice*)GetOut();
++	    pOut_->Push( PUSH_LINECOLOR | PUSH_FILLCOLOR );
++	    pOut_->SetFillColor( SwViewOption::GetFieldShadingsColor() );
++	    pOut_->SetLineColor();
++//	    pOut_->SetLineColor( Color(220, 233, 245));
++//	    pOut_->SetFillColor( Color(220, 233, 245));
++	    pOut_->DrawRect( aIntersect.SVRect() );
++	    pOut_->Pop();
+ 	}
+ 	const int delta=10;
+ 	Rectangle r(aIntersect.Left()+delta, aIntersect.Top()+delta, aIntersect.Right()-delta, aIntersect.Bottom()-delta);
+@@ -1205,31 +1207,30 @@ void SwTxtPaintInfo::_DrawBackBrush( const SwLinePortion &rPor ) const
+     {
+         SwRect aIntersect;
+         CalcRect( rPor, &aIntersect, 0 );
+-        SwTxtNode *pNd = pFrm->GetTxtNode();
+-        SwBookmark *pBM=NULL;   
+-        if ( aIntersect.HasArea() )
+-        {
+-            if (pNd)
+-            {
+-                const SwDoc *doc=pNd->GetDoc();
+-                if (doc!=NULL)
+-                {
+-                    SwIndex aIndex( pNd, GetIdx() );
+-                    SwPosition aPosition(*pNd, aIndex);
+-                    pBM=doc->getFieldBookmarkFor(aPosition);
+-                }
+-            }
+-            bool bIsStartMark=(1==GetLen() && CH_TXT_ATR_FIELDSTART==GetTxt().GetChar(GetIdx()));
+-            if (OnWin() && (pBM!=NULL || bIsStartMark))
+-            {
+-                OutputDevice* pOutDev = (OutputDevice*)GetOut();
+-                pOutDev->Push( PUSH_LINECOLOR | PUSH_FILLCOLOR );
+-                pOutDev->SetLineColor( Color(220, 233, 245));
+-                pOutDev->SetFillColor( Color(220, 233, 245));
+-                pOutDev->DrawRect( aIntersect.SVRect() );
+-                pOutDev->Pop();
+-            }
+-        }
 +	SwTxtNode *pNd = pFrm->GetTxtNode();
 +	SwBookmark *pBM=NULL;	
 +	if ( aIntersect.HasArea() )
@@ -1003,334 +863,96 @@ index 7d240ee..06ec52c 100644
 +	    }
 +	    bool bIsStartMark=(1==GetLen() && CH_TXT_ATR_FIELDSTART==GetTxt().GetChar(GetIdx()));
 +	    if (OnWin() && (pBM!=NULL || bIsStartMark) && SwViewOption::IsFieldShadings() && !GetOpt().IsPagePreview()) {
-+		OutputDevice* pOut = (OutputDevice*)GetOut();
-+		pOut->Push( PUSH_LINECOLOR | PUSH_FILLCOLOR );
-+		pOut->SetFillColor( SwViewOption::GetFieldShadingsColor() );
-+		pOut->SetLineColor();
-+//		pOut->SetLineColor( Color(220, 233, 245));
-+//		pOut->SetFillColor( Color(220, 233, 245));
-+		pOut->DrawRect( aIntersect.SVRect() );
-+		pOut->Pop();
++		OutputDevice* pOut_ = (OutputDevice*)GetOut();
++		pOut_->Push( PUSH_LINECOLOR | PUSH_FILLCOLOR );
++		pOut_->SetFillColor( SwViewOption::GetFieldShadingsColor() );
++		pOut_->SetLineColor();
++//		pOut_->SetLineColor( Color(220, 233, 245));
++//		pOut_->SetFillColor( Color(220, 233, 245));
++		pOut_->DrawRect( aIntersect.SVRect() );
++		pOut_->Pop();
 +	    }
 +	}
-+
-+    }
-+
-+
-+
-+    if( !pFnt->GetBackColor() )
-+	return;
-+
-     SwRect aIntersect;
-     CalcRect( rPor, 0, &aIntersect );
- 
-@@ -1194,6 +1232,36 @@ void SwTxtPaintInfo::_DrawBackBrush( const SwLinePortion &rPor ) const
      }
- }
+     if( !pFnt->GetBackColor() ) return;
  
-+
-+void SwTxtPaintInfo::DrawCheckBox( const SwFieldFormPortion &rPor, bool checked) const
-+{
-+    SwRect aIntersect;
-+    CalcRect( rPor, &aIntersect, 0 );
-+    if ( aIntersect.HasArea() ) {
-+	if (OnWin() && SwViewOption::IsFieldShadings() && !GetOpt().IsPagePreview()) {
-+	    OutputDevice* pOut = (OutputDevice*)GetOut();
-+	    pOut->Push( PUSH_LINECOLOR | PUSH_FILLCOLOR );
-+	    pOut->SetFillColor( SwViewOption::GetFieldShadingsColor() );
-+	    pOut->SetLineColor();
-+//	    pOut->SetLineColor( Color(220, 233, 245));
-+//	    pOut->SetFillColor( Color(220, 233, 245));
-+	    pOut->DrawRect( aIntersect.SVRect() );
-+	    pOut->Pop();
-+	}
-+	const int delta=10;
-+	Rectangle r(aIntersect.Left()+delta, aIntersect.Top()+delta, aIntersect.Right()-delta, aIntersect.Bottom()-delta);
-+	pOut->Push( PUSH_LINECOLOR | PUSH_FILLCOLOR );	    
-+	pOut->SetLineColor( Color(0, 0, 0));
-+	pOut->SetFillColor();
-+	pOut->DrawRect( r );
-+	if (checked) {
-+	    pOut->DrawLine(r.TopLeft(), r.BottomRight());
-+	    pOut->DrawLine(r.TopRight(), r.BottomLeft());
-+	    pOut->Pop();
-+	}
-+    }
-+}
-+
- /*************************************************************************
-  *					   SwTxtPaintInfo::DrawViewOpt()
-  *************************************************************************/
-@@ -1228,6 +1296,7 @@ void SwTxtPaintInfo::DrawViewOpt( const SwLinePortion &rPor,
- 			default:
- 			{
- 				ASSERT( !this, "SwTxtPaintInfo::DrawViewOpt: don't know how to draw this" );
-+				// printf("SwTxtPaintInfo::DrawViewOpt %04X\n", (int)nWhich);
- 				break;
- 			}
- 		}
-diff --git a/sw/source/core/text/inftxt.hxx b/sw/source/core/text/inftxt.hxx
-index 5a2518a..1796f40 100644
---- sw/source/core/text/inftxt.hxx
-+++ sw/source/core/text/inftxt.hxx
-@@ -471,7 +471,9 @@ public:
- 	void DrawBackground( const SwLinePortion &rPor ) const;
- 	void DrawViewOpt( const SwLinePortion &rPor, const MSHORT nWhich ) const;
- 	inline void DrawBackBrush( const SwLinePortion &rPor ) const
--		{ if( pFnt->GetBackColor() ) _DrawBackBrush( rPor ); }
-+	{ /* if( pFnt->GetBackColor() ) */ _DrawBackBrush( rPor ); }
-+
-+        void DrawCheckBox( const SwFieldFormPortion &rPor, bool checked) const;
- 
- 	inline void NotifyURL( const SwLinePortion &rPor ) const
- 		{ if( URLNotify() ) _NotifyURL( rPor ); }
-diff --git a/sw/source/core/text/itratr.cxx b/sw/source/core/text/itratr.cxx
-index b1faa94..af34e9e 100644
---- sw/source/core/text/itratr.cxx
-+++ sw/source/core/text/itratr.cxx
-@@ -346,6 +346,17 @@ xub_StrLen SwAttrIter::GetNextAttr( ) const
- 			if ( nNextEnd<nNext ) nNext = nNextEnd; // Wer ist naeher?
- 		}
- 	}
-+	if (m_pTxtNode!=NULL) {
-+	    //TODO maybe use hints like FieldHints for this instead of looking at the text...
-+	    int l=(nNext<m_pTxtNode->Len()?nNext:m_pTxtNode->Len());
-+	    int p=nPos;
-+	    const sal_Unicode *txt=m_pTxtNode->GetTxt().GetBuffer();
-+	    while(p<l && txt[p]!=CH_TXT_ATR_FIELDSTART && txt[p]!=CH_TXT_ATR_FIELDEND && txt[p]!=CH_TXT_ATR_FORMELEMENT) p++;
-+	    if ((p<l && p>nPos) || nNext<=p)
-+		nNext=p;
-+	    else
-+		nNext=p+1;
-+	}	
-     if( pRedln )
- 		return pRedln->GetNextRedln( nNext );
- 	return nNext;
-diff --git a/sw/source/core/text/itratr.hxx b/sw/source/core/text/itratr.hxx
-index 719ac63..b0f1354 100644
---- sw/source/core/text/itratr.hxx
-+++ sw/source/core/text/itratr.hxx
-@@ -75,18 +75,19 @@ private:
- 	inline void SetFnt( SwFont* pNew ) { pFnt = pNew; }
- 	const void* aMagicNo[ SW_SCRIPTS ];
- 	MSHORT aFntIdx[ SW_SCRIPTS ];
-+	const SwTxtNode* m_pTxtNode;
- 
- protected:
- 	void Chg( SwTxtAttr *pHt );
- 	void Rst( SwTxtAttr *pHt );
-     void CtorInitAttrIter( SwTxtNode& rTxtNode, SwScriptInfo& rScrInf, SwTxtFrm* pFrm = 0 );
--    inline SwAttrIter()
--		: pShell(0), pFnt(0), pLastOut(0),	nChgCnt(0), pRedln(0), nPropFont(0) {}
-+    inline SwAttrIter(SwTxtNode* pTxtNode) 
-+		: pShell(0), pFnt(0), pLastOut(0),	nChgCnt(0), pRedln(0), nPropFont(0), m_pTxtNode(pTxtNode) {}
- 
- public:
- 	// Konstruktor, Destruktor
-     inline SwAttrIter( SwTxtNode& rTxtNode, SwScriptInfo& rScrInf )
--		: pShell(0), pFnt(0), pHints(0), pScriptInfo(0), pLastOut(0), nChgCnt(0), pRedln(0),nPropFont(0)
-+		: pShell(0), pFnt(0), pHints(0), pScriptInfo(0), pLastOut(0), nChgCnt(0), pRedln(0),nPropFont(0), m_pTxtNode(&rTxtNode)
-         { CtorInitAttrIter( rTxtNode, rScrInf ); }
- 
- 	virtual ~SwAttrIter();
-diff --git a/sw/source/core/text/itrform2.cxx b/sw/source/core/text/itrform2.cxx
-index 239ba28..7feb1e1 100644
---- sw/source/core/text/itrform2.cxx
-+++ sw/source/core/text/itrform2.cxx
-@@ -837,14 +837,23 @@ SwTxtPortion *SwTxtFormatter::WhichTxtPor( SwTxtFormatInfo &rInf ) const
- 			// Erst zum Schluss !
- 			// Wenn pCurr keine Breite hat, kann sie trotzdem schon Inhalt haben,
- 			// z.B. bei nicht darstellbaren Zeichen.
-+if (rInf.GetLen()>0 && rInf.GetTxt().GetChar(rInf.GetIdx())==CH_TXT_ATR_FIELDSTART) {
-+				pPor = new SwFieldMarkPortion();
-+			    } else if (rInf.GetLen()>0 && rInf.GetTxt().GetChar(rInf.GetIdx())==CH_TXT_ATR_FIELDEND) {
-+				pPor = new SwFieldMarkPortion();
-+			    } else if (rInf.GetLen()>0 && rInf.GetTxt().GetChar(rInf.GetIdx())==CH_TXT_ATR_FORMELEMENT) {
-+				pPor = new SwFieldFormPortion();
-+			    } else
- 			if( !rInf.X() && !pCurr->GetPortion() && !pCurr->GetLen() &&
--				!GetFnt()->IsURL() )
--				pPor = pCurr;
--			else
-+			    !GetFnt()->IsURL() ) {
-+			    pPor = pCurr;
-+			 } else
- 			{
-+			     {
- 				pPor = new SwTxtPortion;
--				if( GetFnt()->IsURL() )
--					pPor->SetWhichPor( POR_URL );
-+			    }   
-+			    if( GetFnt()->IsURL() )
-+				pPor->SetWhichPor( POR_URL );
- 			}
- 		}
- 	}
-diff --git a/sw/source/core/text/itrform2.hxx b/sw/source/core/text/itrform2.hxx
-index 134f0bf..21667ab 100644
---- sw/source/core/text/itrform2.hxx
-+++ sw/source/core/text/itrform2.hxx
-@@ -139,7 +139,7 @@ public:
- 	sal_Bool CalcOnceMore();
- 
- 	void CtorInitTxtFormatter( SwTxtFrm *pFrm, SwTxtFormatInfo *pInf );
--    inline SwTxtFormatter( SwTxtFrm *pTxtFrm, SwTxtFormatInfo *pTxtFmtInf )
-+    inline SwTxtFormatter( SwTxtFrm *pTxtFrm, SwTxtFormatInfo *pTxtFmtInf ) : SwTxtPainter(pTxtFrm!=NULL?pTxtFrm->GetTxtNode():NULL)
-            { CtorInitTxtFormatter( pTxtFrm, pTxtFmtInf ); }
- 	~SwTxtFormatter();
- 
-diff --git a/sw/source/core/text/itrpaint.hxx b/sw/source/core/text/itrpaint.hxx
-index af542fb..d6bc99d 100644
---- sw/source/core/text/itrpaint.hxx
-+++ sw/source/core/text/itrpaint.hxx
-@@ -47,9 +47,10 @@ class SwTxtPainter : public SwTxtCursor
-                                 long nAdjustBaseLine = 0 );
- protected:
- 	void CtorInitTxtPainter( SwTxtFrm *pFrm, SwTxtPaintInfo *pInf );
--	inline SwTxtPainter() { }
-+	inline SwTxtPainter(SwTxtNode* pTxtNode) : SwTxtCursor(pTxtNode) { }
-+
- public:
--    inline SwTxtPainter( SwTxtFrm *pTxtFrm, SwTxtPaintInfo *pTxtPaintInf )
-+	inline SwTxtPainter( SwTxtFrm *pTxtFrm, SwTxtPaintInfo *pTxtPaintInf ) : SwTxtCursor(pTxtFrm!=NULL?pTxtFrm->GetTxtNode():NULL)
-            { CtorInitTxtPainter( pTxtFrm, pTxtPaintInf ); }
- 	void DrawTextLine( const SwRect &rPaint, SwSaveClip &rClip,
- 					   const sal_Bool bUnderSz );
-diff --git a/sw/source/core/text/itrtxt.hxx b/sw/source/core/text/itrtxt.hxx
-index 5a23f5d..5a529ab 100644
---- sw/source/core/text/itrtxt.hxx
-+++ sw/source/core/text/itrtxt.hxx
-@@ -68,10 +68,10 @@ protected:
- 	// Zuruecksetzen in die erste Zeile.
- 	void Init();
- 	void CtorInitTxtIter( SwTxtFrm *pFrm, SwTxtInfo *pInf );
--	inline SwTxtIter() { }
-+	inline SwTxtIter(SwTxtNode* pTxtNode) : SwAttrIter(pTxtNode) { }
- 
- public:
--    inline SwTxtIter( SwTxtFrm *pTxtFrm, SwTxtInfo *pTxtInf )
-+    inline SwTxtIter( SwTxtFrm *pTxtFrm, SwTxtInfo *pTxtInf ) : SwAttrIter(pTxtFrm!=NULL?pTxtFrm->GetTxtNode():NULL)
-            { CtorInitTxtIter( pTxtFrm, pTxtInf ); }
- 	inline const SwLineLayout *GetCurr() const { return pCurr; } // niemals 0!
- 	inline const SwLineLayout *GetNext() const { return pCurr->GetNext(); }
-@@ -157,9 +157,9 @@ protected:
- 	inline void SetDropLeft( const KSHORT nNew ) { nDropLeft = nNew; }
- 
- 	void CtorInitTxtMargin( SwTxtFrm *pFrm, SwTxtSizeInfo *pInf );
--	inline SwTxtMargin() { }
-+	inline SwTxtMargin(SwTxtNode* pTxtNode) : SwTxtIter(pTxtNode) { }
- public:
--    inline SwTxtMargin( SwTxtFrm *pTxtFrm, SwTxtSizeInfo *pTxtSizeInf )
-+    inline SwTxtMargin( SwTxtFrm *pTxtFrm, SwTxtSizeInfo *pTxtSizeInf ) : SwTxtIter(pTxtFrm!=NULL?pTxtFrm->GetTxtNode():NULL)
-            { CtorInitTxtMargin( pTxtFrm, pTxtSizeInf ); }
- 	inline SwTwips GetLeftMargin() const;
- 	inline SwTwips Left() const;
-@@ -227,13 +227,13 @@ class SwTxtAdjuster : public SwTxtMargin
- 								  const SwRect &rCurrRect );
- 
- protected:
--	inline SwTxtAdjuster() { }
-+	inline SwTxtAdjuster(SwTxtNode* pTxtNode) : SwTxtMargin(pTxtNode) { }
- 	// spannt beim Blocksatz die Glues auf.
- 	void CalcNewBlock( SwLineLayout *pCurr, const SwLinePortion *pStopAt,
- 		SwTwips nReal = 0 );
-     SwTwips CalcKanaAdj( SwLineLayout *pCurr );
- public:
--    inline SwTxtAdjuster( SwTxtFrm *pTxtFrm, SwTxtSizeInfo *pTxtSizeInf )
-+    inline SwTxtAdjuster( SwTxtFrm *pTxtFrm, SwTxtSizeInfo *pTxtSizeInf ) : SwTxtMargin(pTxtFrm!=NULL?pTxtFrm->GetTxtNode():NULL)
-            { CtorInitTxtMargin( pTxtFrm, pTxtSizeInf ); }
- 
- 	// wird von SwTxtFormatter wegen UpdatePos ueberladen
-@@ -266,9 +266,9 @@ class SwTxtCursor : public SwTxtAdjuster
- 	void _GetCharRect(SwRect *, const xub_StrLen, SwCrsrMoveState* );
- protected:
- 	void CtorInitTxtCursor( SwTxtFrm *pFrm, SwTxtSizeInfo *pInf );
--	inline SwTxtCursor() { }
-+	inline SwTxtCursor(SwTxtNode* pTxtNode) : SwTxtAdjuster(pTxtNode) { }
- public:
--    inline SwTxtCursor( SwTxtFrm *pTxtFrm, SwTxtSizeInfo *pTxtSizeInf )
-+    inline SwTxtCursor( SwTxtFrm *pTxtFrm, SwTxtSizeInfo *pTxtSizeInf ) : SwTxtAdjuster(pTxtFrm!=NULL?pTxtFrm->GetTxtNode():NULL)
-            { CtorInitTxtCursor( pTxtFrm, pTxtSizeInf ); }
- 	sal_Bool GetCharRect(SwRect *, const xub_StrLen, SwCrsrMoveState* = 0,
- 		const long nMax = 0 );
 diff --git a/sw/source/core/text/portxt.cxx b/sw/source/core/text/portxt.cxx
-index b7d0ddc..e6ecf6e 100644
+index 12943e2..bf2ad12 100644
 --- sw/source/core/text/portxt.cxx
 +++ sw/source/core/text/portxt.cxx
-@@ -52,6 +52,10 @@
- #include <IDocumentSettingAccess.hxx>
- #include <viewopt.hxx>  // SwViewOptions
+@@ -55,6 +55,7 @@
+ #include <bookmrk.hxx>
+ #include <pam.hxx>
+ #include <doc.hxx>
++#include <ecmaflds.hxx>
  
-+#include <bookmrk.hxx>
-+#include <pam.hxx>
-+#include <doc.hxx>
-+
  #if OSL_DEBUG_LEVEL > 1
  const sal_Char *GetLangName( const MSHORT nLang );
- #endif
-@@ -564,7 +568,17 @@ SwPosSize SwTxtPortion::GetTxtSize( const SwTxtSizeInfo &rInf ) const
- 
- void SwTxtPortion::Paint( const SwTxtPaintInfo &rInf ) const
- {
--	if( GetLen() )
-+	if (rInf.OnWin() && 1==rInf.GetLen() && CH_TXT_ATR_FIELDEND==rInf.GetTxt().GetChar(rInf.GetIdx())) {
-+	    rInf.DrawBackBrush( *this );
-+	    const XubString aTxt = XubString::CreateFromAscii(CH_TXT_ATR_SUBST_FIELDEND);
-+	    rInf.DrawText( aTxt, *this, 0, aTxt.Len(), false );	  
-+	}
-+	else if (rInf.OnWin() && 1==rInf.GetLen() && CH_TXT_ATR_FIELDSTART==rInf.GetTxt().GetChar(rInf.GetIdx())) {
-+	    rInf.DrawBackBrush( *this );
-+	    const XubString aTxt = XubString::CreateFromAscii(CH_TXT_ATR_SUBST_FIELDSTART);
-+	    rInf.DrawText( aTxt, *this, 0, aTxt.Len(), false );	  
-+	}
-+	else if( GetLen() )
- 	{
-         rInf.DrawBackBrush( *this );
- 
-@@ -750,3 +764,75 @@ void SwHolePortion::HandlePortion( SwPortionHandler& rPH ) const
-     rPH.Text( GetLen(), GetWhichPor() );
+@@ -778,36 +779,74 @@ sal_Bool SwFieldMarkPortion::Format( SwTxtFormatInfo & )
+     return ret;
  }
  
++namespace ecma {
++    static int getCurrentListIndex(SwFieldBookmark *pBM, ::rtl::OUString *currentText=NULL) {
++	int currentIndex=pBM->getParam(ECMA_FORMDROPDOWN_RESULT, "0").second.toInt32();
++	int idx=0;	
++	for(int i=0;i<pBM->getNumOfParams();i++) {
++	    SwFieldBookmark::ParamPair_t p=pBM->getParam(i);
++	    if (p.first.compareToAscii(ECMA_FORMDROPDOWN_LISTENTRY)==0) {
++		if (idx==currentIndex) {
++	    if (currentText!=NULL) *currentText=p.second;
++		    break;
++		} else
++		    idx++;
++	    }			       
++	}	
++    return idx;
++    }
++} /* ecma */
 +
-+void SwFieldMarkPortion::Paint( const SwTxtPaintInfo &rInf ) const
-+{
-+//	SwTxtPortion::Paint(rInf);
-+}
-+
-+sal_Bool SwFieldMarkPortion::Format( SwTxtFormatInfo &rInf ) 
-+{
-+    sal_Bool ret=0;
-+	Width(0);
-+    return ret;
-+}
-+
-+
-+void SwFieldFormPortion::Paint( const SwTxtPaintInfo &rInf ) const
-+{
-+//	SwTxtPortion::Paint(rInf);
-+    SwTxtNode *pNd=const_cast<SwTxtNode*>(rInf.GetTxtFrm()->GetTxtNode());
-+    const SwDoc *doc=pNd->GetDoc();
-+    SwIndex aIndex( pNd, rInf.GetIdx() );
-+    SwPosition aPosition(*pNd, aIndex);
-+    SwFieldBookmark *pBM=doc->getFormFieldBookmarkFor(aPosition);
-+    ASSERT(pBM!=NULL, "Where is my form field bookmark???");
+ 
+ void SwFieldFormPortion::Paint( const SwTxtPaintInfo &rInf ) const
+ {
+-//	SwTxtPortion::Paint(rInf);
+     SwTxtNode *pNd=const_cast<SwTxtNode*>(rInf.GetTxtFrm()->GetTxtNode());
+     const SwDoc *doc=pNd->GetDoc();
+     SwIndex aIndex( pNd, rInf.GetIdx() );
+     SwPosition aPosition(*pNd, aIndex);
+     SwFieldBookmark *pBM=doc->getFormFieldBookmarkFor(aPosition);
+     ASSERT(pBM!=NULL, "Where is my form field bookmark???");
+-    bool checked=(pBM!=NULL?pBM->IsChecked():false);
+-    rInf.DrawCheckBox( *this , checked);
+-//    const XubString aTxt = XubString::CreateFromAscii("[ ]");
+-//    rInf.DrawText( aTxt, *this, 0, aTxt.Len(), false );	  
 +    if (pBM!=NULL) {
-+	if (pBM->GetType()==1) { // a checkbox...	    
-+	    bool checked=pBM->IsChecked();
++	if (pBM->isType(ECMA_FORMCHECKBOX)==1) { // a checkbox...	    
++	    bool checked=pBM->getParam(ECMA_FORMCHECKBOX_CHECKED).second.compareToAscii("on")==0;
 +	    rInf.DrawCheckBox( *this , checked);
-+	} else if (pBM->GetType()==2) { // a list...
-+	    const XubString aTxt(pBM->getCurrentListItemText());
++	} else if (pBM->isType(ECMA_FORMDROPDOWN)) { // a list...
++	    rtl::OUString aTxt;
++	    int index=ecma::getCurrentListIndex(pBM, &aTxt);
 +	    rInf.DrawViewOpt( *this, POR_FLD );
-+	    rInf.DrawText( aTxt, *this, 0, aTxt.Len(), false );	  
++	    rInf.DrawText( aTxt, *this, 0, aTxt.getLength(), false );	  
 +	} else {
 +	    assert(0); // unknown type...
 +	}
 +    }
-+}
-+
-+sal_Bool SwFieldFormPortion::Format( SwTxtFormatInfo &rInf ) 
-+{
-+    sal_Bool ret=0;
+ }
+ 
+ sal_Bool SwFieldFormPortion::Format( SwTxtFormatInfo &rInf ) 
+ {
+     sal_Bool ret=0;
+-//	ret=SwTxtPortion::Format(rInf);
+-
+-	Width(rInf.GetTxtHeight());
+-	Height(rInf.GetTxtHeight());
+-	SetAscent(rInf.GetAscent());
+-	//int h=rInf.GetTxtHeight();
+-	
+-/*
+-	Height(100);
+-	SetAscent(100);
+-*/
 +    SwTxtNode *pNd=const_cast<SwTxtNode*>(rInf.GetTxtFrm()->GetTxtNode());
 +    const SwDoc *doc=pNd->GetDoc();
 +    SwIndex aIndex( pNd, rInf.GetIdx() );
@@ -1338,12 +960,13 @@ index b7d0ddc..e6ecf6e 100644
 +    SwFieldBookmark *pBM=doc->getFormFieldBookmarkFor(aPosition);
 +    ASSERT(pBM!=NULL, "Where is my form field bookmark???");
 +    if (pBM!=NULL) {
-+	if (pBM->GetType()==1) { // a checkbox...	    
++	if (pBM->isType(ECMA_FORMCHECKBOX)) {
 +	    Width(rInf.GetTxtHeight());
 +	    Height(rInf.GetTxtHeight());
 +	    SetAscent(rInf.GetAscent());
-+	} else if (pBM->GetType()==2) { // a list...
-+	    const XubString aTxt(pBM->getCurrentListItemText());
++        } else if (pBM->isType(ECMA_FORMDROPDOWN)) {
++	    ::rtl::OUString aTxt;
++	    ecma::getCurrentListIndex(pBM, &aTxt);
 +	    SwPosSize aPosSize=rInf.GetTxtSize(aTxt);
 +	    Width(aPosSize.Width());
 +	    Height(aPosSize.Height());
@@ -1353,1188 +976,776 @@ index b7d0ddc..e6ecf6e 100644
 +	}
 +
 +    }
-+//	ret=SwTxtPortion::Format(rInf);
-+#if 0
-+//	int h=rInf.GetTxtHeight();
-+#endif
-+/*
-+	Height(100);
-+	SetAscent(100);
-+*/
-+    return ret;
-+}
-diff --git a/sw/source/core/text/portxt.hxx b/sw/source/core/text/portxt.hxx
-index 819d285..0ab463e 100644
---- sw/source/core/text/portxt.hxx
-+++ sw/source/core/text/portxt.hxx
-@@ -95,8 +95,30 @@ public:
- 	DECL_FIXEDMEMPOOL_NEWDEL(SwHolePortion)
- };
- 
-+class SwFieldMarkPortion : public SwTxtPortion {
-+public:
-+    inline SwFieldMarkPortion() : SwTxtPortion() {
-+
-+    }
-+    virtual void Paint( const SwTxtPaintInfo &rInf ) const;
-+    virtual sal_Bool Format( SwTxtFormatInfo &rInf );
-+};
-+
-+class SwFieldFormPortion : public SwTxtPortion {
-+public:
-+    inline SwFieldFormPortion() : SwTxtPortion() {
-+
-+    }
-+    virtual void Paint( const SwTxtPaintInfo &rInf ) const;
-+    virtual sal_Bool Format( SwTxtFormatInfo &rInf );
-+};
-+
-+
- CLASSIO( SwTxtPortion )
- CLASSIO( SwHolePortion )
- 
- 
-+
-+
-+
- #endif
-diff --git a/sw/source/core/txtnode/swfont.cxx b/sw/source/core/txtnode/swfont.cxx
-index 8be8c0e..6009f71 100644
---- sw/source/core/txtnode/swfont.cxx
-+++ sw/source/core/txtnode/swfont.cxx
-@@ -795,6 +795,32 @@ Size SwSubFont::_GetTxtSize( SwDrawTextInfo& rInf )
- 		}
- 	}
- 
-+
-+	if (1==rInf.GetLen() && CH_TXT_ATR_FIELDSTART==rInf.GetText().GetChar(rInf.GetIdx())) {
-+	    xub_StrLen nOldIdx(rInf.GetIdx());
-+	    xub_StrLen nOldLen(rInf.GetLen());
-+	    String aNewText=String::CreateFromAscii(CH_TXT_ATR_SUBST_FIELDSTART);
-+	    rInf.SetText( aNewText );
-+	    rInf.SetIdx( 0 );
-+	    rInf.SetLen( aNewText.Len() );
-+	    aTxtSize = pLastFont->GetTextSize( rInf );	    
-+	    rInf.SetIdx( nOldIdx );
-+	    rInf.SetLen( nOldLen );
-+	}
-+	else
-+	if (1==rInf.GetLen() && CH_TXT_ATR_FIELDEND==rInf.GetText().GetChar(rInf.GetIdx())) {
-+	    xub_StrLen nOldIdx(rInf.GetIdx());
-+	    xub_StrLen nOldLen(rInf.GetLen());
-+	    String aNewText=String::CreateFromAscii(CH_TXT_ATR_SUBST_FIELDEND);
-+	    rInf.SetText( aNewText );
-+	    rInf.SetIdx( 0 );
-+	    rInf.SetLen( aNewText.Len() );
-+	    aTxtSize = pLastFont->GetTextSize( rInf );	    
-+	    rInf.SetIdx( nOldIdx );
-+	    rInf.SetLen( nOldLen );	
-+	}
-+
-+
- 	return aTxtSize;
+     return ret;
  }
  
 diff --git a/sw/source/core/unocore/unobkm.cxx b/sw/source/core/unocore/unobkm.cxx
-index 5667bd6..f2e41ed 100644
+index 26f40ec..755e6f8 100644
 --- sw/source/core/unocore/unobkm.cxx
 +++ sw/source/core/unocore/unobkm.cxx
-@@ -101,7 +101,7 @@ SwXBookmark::~SwXBookmark()
- /*-- 10.12.98 10:14:39---------------------------------------------------
- 
-   -----------------------------------------------------------------------*/
--void SwXBookmark::attachToRange(const uno::Reference< text::XTextRange > & xTextRange)
-+void SwXBookmark::attachToRangeEx(const uno::Reference< text::XTextRange > & xTextRange, IDocumentBookmarkAccess::BookmarkType eMark)
- 										throw( lang::IllegalArgumentException, uno::RuntimeException )
- {
- 	if(!bIsDescriptor)
-@@ -137,7 +137,7 @@ void SwXBookmark::attachToRange(const uno::Reference< text::XTextRange > & xText
-             IDocumentBookmarkAccess::BookmarkType eBkmkType =
-                                     pDoc->isCrossRefBookmarkName( m_aName )
-                                     ? IDocumentBookmarkAccess::CROSSREF_BOOKMARK
--                                    : IDocumentBookmarkAccess::BOOKMARK;
+@@ -7,7 +7,7 @@
+  * OpenOffice.org - a multi-platform office productivity suite
+  *
+  * $RCSfile: unobkm.cxx,v $
+- * $Revision: 1.17 $
++ * $Revision: 1.16 $
+  *
+  * This file is part of OpenOffice.org.
+  *
+@@ -134,14 +134,15 @@ void SwXBookmark::attachToRangeEx(const uno::Reference< text::XTextRange > & xTe
+ 				 m_aName =  C2S("Bookmark");
+             // --> OD 2007-10-23 #i81002#
+             // determine bookmark type due to its proposed name
+-            if( eMark == IDocumentBookmarkAccess::BOOKMARK &&
+-                pDoc->isCrossRefBookmarkName( m_aName ) )
+-                eMark = IDocumentBookmarkAccess::CROSSREF_BOOKMARK;
++            IDocumentBookmarkAccess::BookmarkType eBkmkType =
++                                    pDoc->isCrossRefBookmarkName( m_aName )
++                                    ? IDocumentBookmarkAccess::CROSSREF_BOOKMARK
 +                                    : eMark;
              // <--
              if( USHRT_MAX != pDoc->findBookmark(m_aName) )
                  pDoc->makeUniqueBookmarkName( m_aName );
-@@ -163,6 +163,118 @@ void SwXBookmark::attachToRange(const uno::Reference< text::XTextRange > & xText
- 	else
- 		throw lang::IllegalArgumentException();
+ 			KeyCode aCode;
+-            pBkm = pDoc->makeBookmark( aPam, aCode, m_aName, aEmptyStr, eMark);
++            pBkm = pDoc->makeBookmark( aPam, aCode, m_aName, aEmptyStr, eBkmkType);
+             // --> OD 2007-10-23 #i81002#
+             // Check, if bookmark has been created.
+             // E.g., the creation of a cross-reference bookmark is suppress,
+@@ -164,109 +165,87 @@ void SwXBookmark::attachToRangeEx(const uno::Reference< text::XTextRange > & xTe
  }
-+
-+void SwXBookmark::attachToRange(const uno::Reference< text::XTextRange > & xTextRange)
+ 
+ void SwXBookmark::attachToRange(const uno::Reference< text::XTextRange > & xTextRange)
+-    throw( lang::IllegalArgumentException, uno::RuntimeException )
 +										throw( lang::IllegalArgumentException, uno::RuntimeException )
-+{
-+	attachToRangeEx(xTextRange, IDocumentBookmarkAccess::BOOKMARK);
-+}
-+
+ {
+ 	attachToRangeEx(xTextRange, IDocumentBookmarkAccess::BOOKMARK);
+ }
+ 
+-SwXFieldmark::SwXFieldmark(bool _isReplacementObject, SwBookmark* pBkm, SwDoc* pDc)
+-    : SwXFieldmark_BASE(pBkm, pDc)
+-    , isReplacementObject(_isReplacementObject)
+-{ }
+-
+-
+-void SwXFieldmark::attachToRange(const uno::Reference< text::XTextRange > & xTextRange)
+-    throw( lang::IllegalArgumentException, uno::RuntimeException )
 +SwXFieldmark::SwXFieldmark(bool _isReplacementObject, SwBookmark* pBkm, SwDoc* pDc) : SwXFieldmark_BASE(pBkm, pDc),
 +isReplacementObject(_isReplacementObject)
-+{
-+}
-+
-+
+ {
+-    attachToRangeEx(xTextRange, (isReplacementObject?IDocumentBookmarkAccess::FORM_FIELDMARK_NO_TEXT:IDocumentBookmarkAccess::FORM_FIELDMARK_TEXT));
+ }
+ 
+-::rtl::OUString SwXFieldmark::getDescription(void) throw( ::com::sun::star::uno::RuntimeException )
++::rtl::OUString SwXFieldmark::getFieldType(void)  throw( ::com::sun::star::uno::RuntimeException )
+ {
+     vos::OGuard aGuard(Application::GetSolarMutex());
+     SwFieldBookmark* pBkm = (SwFieldBookmark*)GetBookmark();
+-    OUString sRet;
+     if(pBkm)
+-        sRet = pBkm->GetFFHelpText();
+-    /* //@TODO implement...
+-    else if(bIsDescriptor)
+-        sRet = m_aName;
+-        */
++	return pBkm->getTypeName();
+     else
+         throw uno::RuntimeException();
+-    return sRet;
+ }
+ 
+-::sal_Int16 SAL_CALL SwXFieldmark::getType(  ) throw (::com::sun::star::uno::RuntimeException)
++void SwXFieldmark::setFieldType( const ::rtl::OUString& fieldType ) throw (::com::sun::star::uno::RuntimeException)
+ {
+     vos::OGuard aGuard(Application::GetSolarMutex());
+     SwFieldBookmark* pBkm = (SwFieldBookmark*)GetBookmark();
+-    ::sal_Int16 sRet;
+-    if(pBkm)
+-        sRet = static_cast<sal_Int16>(pBkm->GetFieldType());
+-    /* //@TODO implement...
+-    else if(bIsDescriptor)
+-        sRet = m_aName;
+-        */
++    if (pBkm)
++        pBkm->setTypeName(fieldType);
+     else
+-        throw uno::RuntimeException();
+-    return sRet;
++        throw uno::RuntimeException();    
+ }
+ 
+-::sal_Int16 SAL_CALL SwXFieldmark::getRes(  ) throw (::com::sun::star::uno::RuntimeException)
++::sal_Int16 SwXFieldmark::getParamCount(  ) throw (::com::sun::star::uno::RuntimeException)
+ {
+     vos::OGuard aGuard(Application::GetSolarMutex());
+     SwFieldBookmark* pBkm = (SwFieldBookmark*)GetBookmark();
+-    ::sal_Int16 sRet;
+     if(pBkm)
+-        sRet = static_cast<sal_Int16>(pBkm->GetFFRes());
+-    /* //@TODO implement...
+-    else if(bIsDescriptor)
+-        sRet = m_aName;
+-        */
++	return pBkm->getNumOfParams();
+     else
+         throw uno::RuntimeException();
+-    return sRet;
+ }
+ 
+-
+-void SAL_CALL SwXFieldmark::setType( ::sal_Int16 fieldType ) throw (::com::sun::star::uno::RuntimeException)
++::rtl::OUString SwXFieldmark::getParamName(::sal_Int16 i)  throw( ::com::sun::star::uno::RuntimeException )
+ {
+     vos::OGuard aGuard(Application::GetSolarMutex());
+     SwFieldBookmark* pBkm = (SwFieldBookmark*)GetBookmark();
+-    if (pBkm)
+-        pBkm->SetFieldType(fieldType);
++    if(pBkm)
++	return pBkm->getParam(i).first;
+     else
+         throw uno::RuntimeException();
+ }
+ 
+-void SAL_CALL SwXFieldmark::setRes( ::sal_Int16 res ) throw (::com::sun::star::uno::RuntimeException)
++::rtl::OUString SwXFieldmark::getParamValue(::sal_Int16 i)  throw( ::com::sun::star::uno::RuntimeException )
+ {
+     vos::OGuard aGuard(Application::GetSolarMutex());
+     SwFieldBookmark* pBkm = (SwFieldBookmark*)GetBookmark();
+-    if (pBkm)
+-        pBkm->SetFFRes(res);
++    if(pBkm)
++	return pBkm->getParam(i).second;
+     else
+         throw uno::RuntimeException();
+ }
+ 
+-void SAL_CALL SwXFieldmark::setDescription( const ::rtl::OUString& description ) throw (::com::sun::star::uno::RuntimeException)
++void SwXFieldmark::addParam( const ::rtl::OUString& name, const ::rtl::OUString& value, ::sal_Bool replaceExisting ) throw (::com::sun::star::uno::RuntimeException)
+ {
+     vos::OGuard aGuard(Application::GetSolarMutex());
+     SwFieldBookmark* pBkm = (SwFieldBookmark*)GetBookmark();
+     if (pBkm)
+-        pBkm->SetFFHelpText(description);
++        pBkm->addParam(name, value, replaceExisting);
+     else
+-        throw uno::RuntimeException();
++        throw uno::RuntimeException();    
+ }
+ 
+-
 +void SwXFieldmark::attachToRange(const uno::Reference< text::XTextRange > & xTextRange)
 +										throw( lang::IllegalArgumentException, uno::RuntimeException )
 +{
 +	attachToRangeEx(xTextRange, (isReplacementObject?IDocumentBookmarkAccess::FORM_FIELDMARK_NO_TEXT:IDocumentBookmarkAccess::FORM_FIELDMARK_TEXT));
 +}
-+
-+::rtl::OUString SwXFieldmark::getDescription(void) throw( ::com::sun::star::uno::RuntimeException )
-+{
-+	vos::OGuard aGuard(Application::GetSolarMutex());
-+	SwFieldBookmark* pBkm = (SwFieldBookmark*)GetBookmark();
-+	OUString sRet;
-+	if(pBkm)
-+		sRet = pBkm->GetFFHelpText();
-+	/* //@TODO implement...
-+	else if(bIsDescriptor)
-+		sRet = m_aName;
-+		*/
-+	else
-+		throw uno::RuntimeException();
-+	return sRet;
-+}
-+
-+::sal_Int16 SAL_CALL SwXFieldmark::getType(  ) throw (::com::sun::star::uno::RuntimeException)
-+{
-+	vos::OGuard aGuard(Application::GetSolarMutex());
-+	SwFieldBookmark* pBkm = (SwFieldBookmark*)GetBookmark();
-+	::sal_Int16 sRet;
-+	if(pBkm)
-+		sRet = pBkm->GetType();
-+	/* //@TODO implement...
-+	else if(bIsDescriptor)
-+		sRet = m_aName;
-+		*/
-+	else
-+		throw uno::RuntimeException();
-+	return sRet;
-+}
-+
-+::sal_Int16 SAL_CALL SwXFieldmark::getRes(  ) throw (::com::sun::star::uno::RuntimeException)
-+{
-+	vos::OGuard aGuard(Application::GetSolarMutex());
-+	SwFieldBookmark* pBkm = (SwFieldBookmark*)GetBookmark();
-+	::sal_Int16 sRet;
-+	if(pBkm)
-+		sRet = pBkm->GetFFRes();
-+	/* //@TODO implement...
-+	else if(bIsDescriptor)
-+		sRet = m_aName;
-+		*/
-+	else
-+		throw uno::RuntimeException();
-+	return sRet;
-+}
-+
-+
-+void SAL_CALL SwXFieldmark::setType( ::sal_Int16 fieldType ) throw (::com::sun::star::uno::RuntimeException)
-+{
-+	vos::OGuard aGuard(Application::GetSolarMutex());
-+	SwFieldBookmark* pBkm = (SwFieldBookmark*)GetBookmark();
-+	if (pBkm) {
-+		pBkm->SetType(fieldType);
-+	} else {
-+		throw uno::RuntimeException();
-+	}
-+}
-+
-+void SAL_CALL SwXFieldmark::setRes( ::sal_Int16 res ) throw (::com::sun::star::uno::RuntimeException)
-+{
-+	vos::OGuard aGuard(Application::GetSolarMutex());
-+	SwFieldBookmark* pBkm = (SwFieldBookmark*)GetBookmark();
-+	if (pBkm) {
-+		pBkm->SetFFRes(res);
-+	} else {
-+		throw uno::RuntimeException();
-+	}
-+}
-+
-+void SAL_CALL SwXFieldmark::setDescription( const ::rtl::OUString& description ) throw (::com::sun::star::uno::RuntimeException)
-+{
-+	vos::OGuard aGuard(Application::GetSolarMutex());
-+	SwFieldBookmark* pBkm = (SwFieldBookmark*)GetBookmark();
-+	if (pBkm) {
-+		pBkm->SetFFHelpText(description);
-+	} else {
-+		throw uno::RuntimeException();
-+	}
-+}
-+
-+
-+
-+/*
-+
-+::com::sun::star::uno::Any SAL_CALL SwXFieldmark::queryInterface( ::com::sun::star::uno::Type const & rType ) throw (::com::sun::star::uno::RuntimeException)
-+{
-+		return SwXBookmark::queryInterface(rType);
-+}
-+*/
-+
-+
- /* -----------------18.02.99 13:31-------------------
-  *
-  * --------------------------------------------------*/
-diff --git a/sw/source/core/unocore/unocoll.cxx b/sw/source/core/unocore/unocoll.cxx
-index ba8fa57..dc4b53c 100644
---- sw/source/core/unocore/unocoll.cxx
-+++ sw/source/core/unocore/unocoll.cxx
-@@ -201,6 +201,8 @@ const ProvNamesId_Type __FAR_DATA aProvNamesId[] =
-     { "com.sun.star.image.ImageMapPolygonObject",             SW_SERVICE_IMAP_POLYGON },
-     { "com.sun.star.text.TextGraphicObject",                  SW_SERVICE_TYPE_TEXT_GRAPHIC },
-     { "com.sun.star.chart2.data.DataProvider",                SW_SERVICE_CHART2_DATA_PROVIDER },
-+    { "org.go-oo.text.Fieldmark",                             SW_SERVICE_TYPE_FIELDMARK },
-+    { "org.go-oo.text.FormFieldmark",                         SW_SERVICE_TYPE_FORMFIELDMARK },
  
-     // case-correct versions of the service names (see #i67811)
-     { CSS_TEXT_TEXTFIELD_DATE_TIME,                   SW_SERVICE_FIELDTYPE_DATETIME },
-@@ -369,6 +371,18 @@ uno::Reference< uno::XInterface >  	SwXServiceProvider::MakeInstance(sal_uInt16
- 			xRet =  (cppu::OWeakObject*)pBookmark;
- 		}
- 		break;
-+		case  SW_SERVICE_TYPE_FIELDMARK :
-+		{
-+			SwXFieldmark* pFieldmark = new SwXFieldmark(false);
-+			xRet =  (cppu::OWeakObject*)pFieldmark;
-+		}
-+		break;
-+		case  SW_SERVICE_TYPE_FORMFIELDMARK :
-+		{
-+			SwXFieldmark* pFieldmark = new SwXFieldmark(true);
-+			xRet =  (cppu::OWeakObject*)pFieldmark;
-+		}
-+		break;
- 		case  SW_SERVICE_TYPE_FOOTNOTE :
- 			xRet =  (cppu::OWeakObject*)new SwXFootnote(sal_False);
- 		break;
-@@ -1569,8 +1583,15 @@ SwXBookmark* 	SwXBookmarks::GetObject( SwBookmark& rBkm, SwDoc* pDoc )
+ /*
+ 
+ ::com::sun::star::uno::Any SAL_CALL SwXFieldmark::queryInterface( ::com::sun::star::uno::Type const & rType ) throw (::com::sun::star::uno::RuntimeException)
  {
- 	SwXBookmark* pBkm = (SwXBookmark*)SwClientIter( rBkm ).
- 									First( TYPE( SwXBookmark ));
--	if( !pBkm )
--		pBkm = new SwXBookmark(&rBkm, pDoc);
-+	if( !pBkm ) {
-+		if (IDocumentBookmarkAccess::FORM_FIELDMARK_TEXT==rBkm.GetType()) {
-+			pBkm = new SwXFieldmark(false, &rBkm, pDoc);
-+		} else if (IDocumentBookmarkAccess::FORM_FIELDMARK_NO_TEXT==rBkm.GetType()) {
-+			pBkm = new SwXFieldmark(true, &rBkm, pDoc);
-+		} else {
-+			pBkm = new SwXBookmark(&rBkm, pDoc);
-+		}
-+	}
- 	return pBkm;
+-        return SwXBookmark::queryInterface(rType);
++		return SwXBookmark::queryInterface(rType);
  }
- /******************************************************************
-diff --git a/sw/source/core/unocore/unoport.cxx b/sw/source/core/unocore/unoport.cxx
-index ef8f73f..05fefba 100644
---- sw/source/core/unocore/unoport.cxx
-+++ sw/source/core/unocore/unoport.cxx
-@@ -314,6 +314,9 @@ void SwXTextPortion::GetPropertyValue(
-                 case PORTION_RUBY_START:
-                 case PORTION_RUBY_END:      pRet = "Ruby";break;
-                 case PORTION_SOFT_PAGEBREAK:pRet = "SoftPageBreak";break;
-+                case PORTION_FIELD_START:pRet = "TextFieldStart";break;
-+                case PORTION_FIELD_END:pRet = "TextFieldEnd";break;
-+                case PORTION_FIELD_START_END:pRet = "TextFieldStartEnd";break;
-                 default:
-                     pRet = 0;
-                 }
-@@ -357,6 +360,8 @@ void SwXTextPortion::GetPropertyValue(
-                     case PORTION_REDLINE_END :
-                     case PORTION_RUBY_START:
-                     case PORTION_RUBY_END:
-+                    case PORTION_FIELD_START:
-+                    case PORTION_FIELD_END:
-                         rVal.setValue(&bIsCollapsed, ::getBooleanCppuType());
-                     break;
-                     default:
-@@ -374,6 +379,7 @@ void SwXTextPortion::GetPropertyValue(
-                     case PORTION_TOXMARK_START:
-                     case PORTION_REDLINE_START:
-                     case PORTION_RUBY_START:
-+                    case PORTION_FIELD_START:
-                     break;
+ */
  
-                     case PORTION_REFMARK_END:
-@@ -381,6 +387,7 @@ void SwXTextPortion::GetPropertyValue(
-                     case PORTION_BOOKMARK_END:
-                     case PORTION_REDLINE_END:
-                     case PORTION_RUBY_END:
-+                    case PORTION_FIELD_END:
-                         bStart = FALSE;
-                     break;
-                     default:
 diff --git a/sw/source/core/unocore/unoportenum.cxx b/sw/source/core/unocore/unoportenum.cxx
-index 17c144e..4371eed 100644
+index fc11495..c4160ba 100644
 --- sw/source/core/unocore/unoportenum.cxx
 +++ sw/source/core/unocore/unoportenum.cxx
-@@ -658,6 +658,10 @@ void lcl_FillBookmarkArray(SwDoc& rDoc,SwUnoCrsr& rUnoCrsr, SwXBookmarkPortion_I
-                  !dynamic_cast<SwCrossRefBookmark*>(pMark) )
- 				continue;
+@@ -653,15 +653,7 @@ void lcl_FillBookmarkArray(SwDoc& rDoc,SwUnoCrsr& rUnoCrsr, SwXBookmarkPortion_I
+         for( sal_uInt16 n = 0; n < nArrLen; ++n )
+         {
+             SwBookmark* pMark = rMarks.GetObject( n );
+-            /*
+-            if (pMark!=NULL && pMark->GetName().CompareToAscii(FIELD_BOOKMARK_PREFIX, strlen(FIELD_BOOKMARK_PREFIX))==0) {
+-                continue;
+-            }
  
-+	    if (pMark!=NULL && pMark->IsFormFieldMark()) {
-+		continue;
-+	    }
-+
-             const SwPosition& rPos1 = pMark->GetBookmarkPos();
-             // --> OD 2007-10-23 #i81002#
- //            const SwPosition* pPos2 = pMark->GetOtherBookmarkPos();
-@@ -981,8 +985,78 @@ void SwXTextPortionEnumeration::CreatePortions()
- 							}
- 						}
- 					}
--					if(!xRef.is() && pUnoCrsr->HasMark() )
--                        xRef = new SwXTextPortion(pUnoCrsr, xParent, ePortionType);
-+					if(!xRef.is() && pUnoCrsr->HasMark() ) {
-+						//flr: maybe its a good idea to add a special hint to the hints array and rely on the hint segmentation....
-+						xub_StrLen start=pUnoCrsr->GetMark()->nContent.GetIndex();
-+						xub_StrLen end=pUnoCrsr->GetPoint()->nContent.GetIndex();
-+						ASSERT(start<=end, "hmm --- why is this different");
-+						xub_StrLen startMarkerPos=pTxtNode->GetTxt().Search(CH_TXT_ATR_FIELDSTART, start);
-+						xub_StrLen endMarkerPos=pTxtNode->GetTxt().Search(CH_TXT_ATR_FIELDEND, start);
-+						xub_StrLen formMarkerPos=pTxtNode->GetTxt().Search(CH_TXT_ATR_FORMELEMENT, start);
-+						xub_StrLen markerPos=STRING_LEN;
-+						if (startMarkerPos>=start && startMarkerPos<end) {
-+							markerPos=startMarkerPos;
-+						}
-+						if (endMarkerPos>=start && endMarkerPos<end) {
-+							if (endMarkerPos<markerPos) {
-+								markerPos=endMarkerPos;
-+							}
-+						}
-+						if (formMarkerPos>=start && formMarkerPos<end) {
-+							if (formMarkerPos<markerPos) {
-+								markerPos=formMarkerPos;
-+							}
-+						}
-+						if (markerPos<end) {
-+							if (start==markerPos)
-+								end = markerPos+1;
-+							else
-+								end = markerPos;
-+							bAtEnd = sal_False;
-+							pUnoCrsr->GetPoint()->nContent = end;
-+						}
-+						if (start+1==end && pTxtNode->GetTxt().GetChar(start)==CH_TXT_ATR_FIELDSTART) {
-+						    SwDoc* pDoc = pUnoCrsr->GetDoc();
-+							SwBookmark* pFieldmark=NULL;
-+							if (pDoc && pUnoCrsr->GetPoint()) {
-+								pFieldmark=pDoc->getFieldBookmarkFor(*pUnoCrsr->GetPoint());
-+							}
-+							SwXTextPortion* pPortion=NULL;
-+							xRef = (pPortion=new SwXTextPortion(pUnoCrsr, xParent, PORTION_FIELD_START));
-+							if (pPortion && pFieldmark && pDoc) {
-+								pPortion->SetBookmark(new SwXFieldmark(false, pFieldmark, pDoc));
-+							}
-+						} else if (start+1==end && pTxtNode->GetTxt().GetChar(start)==CH_TXT_ATR_FIELDEND) {
-+						    SwDoc* pDoc = pUnoCrsr->GetDoc();
-+							SwBookmark* pFieldmark=NULL;
-+							if (pDoc && pUnoCrsr->GetPoint()) {
-+								SwPosition aPos(*pUnoCrsr->GetPoint());
-+								aPos.nContent=markerPos;
-+								pFieldmark=pDoc->getFieldBookmarkFor(aPos);
-+							}
-+							SwXTextPortion* pPortion=NULL;
-+							xRef = (pPortion = new SwXTextPortion(pUnoCrsr, xParent, PORTION_FIELD_END));
-+							if (pPortion && pFieldmark && pDoc) {
-+								pPortion->SetBookmark(new SwXFieldmark(false, pFieldmark, pDoc));
-+							}
-+						} else if (start+1==end && pTxtNode->GetTxt().GetChar(start)==CH_TXT_ATR_FORMELEMENT) {
-+						    SwDoc* pDoc = pUnoCrsr->GetDoc();
-+							SwFieldBookmark* pFieldmark=NULL;
-+							if (pDoc && pUnoCrsr->GetPoint()) {
-+								SwPosition aPos(*pUnoCrsr->GetPoint());
-+								aPos.nContent=markerPos;
-+								pFieldmark=pDoc->getFormFieldBookmarkFor(aPos);
-+							}
-+							SwXTextPortion* pPortion=NULL;							
-+							xRef = (pPortion = new SwXTextPortion(pUnoCrsr, xParent, PORTION_FIELD_START_END));
-+							if (pPortion && pFieldmark && pDoc) {
-+								pPortion->SetBookmark(new SwXFieldmark(true, pFieldmark, pDoc));
-+							}
-+						} else {
-+							xRef = new SwXTextPortion(pUnoCrsr, xParent, ePortionType);
-+						}
-+						
-+					}
- 					if(xRef.is())
- 						aPortionArr.Insert(new Reference<XTextRange>(xRef), aPortionArr.Count());
- 				}
-diff --git a/sw/source/filter/inc/fltshell.hxx b/sw/source/filter/inc/fltshell.hxx
-index 1a13705..5bee930 100644
---- sw/source/filter/inc/fltshell.hxx
-+++ sw/source/filter/inc/fltshell.hxx
-@@ -80,6 +80,7 @@ public:
- 	BOOL bOld;			// to mark Attributes *before* skipping field results
- 	BOOL bLocked;
- 	BOOL bCopied;
-+	BOOL bConsumedByField;
- 
- 	SwFltStackEntry(const SwPosition & rStartPos, SfxPoolItem* pHt );
- 	SwFltStackEntry(const SwFltStackEntry& rEntry);
-@@ -128,7 +129,7 @@ public:
- 
- 	void NewAttr(const SwPosition& rPos, const SfxPoolItem & rAttr );
- 
--	virtual void SetAttr(const SwPosition& rPos, USHORT nAttrId=0, BOOL bTstEnde=TRUE, long nHand = LONG_MAX);
-+	virtual void SetAttr(const SwPosition& rPos, USHORT nAttrId=0, BOOL bTstEnde=TRUE, long nHand = LONG_MAX, BOOL consumedByField=FALSE);
- 
- 	void StealAttr(const SwPosition* pPos, USHORT nAttrId = 0);
- 	void MarkAllAttrsOld();
-diff --git a/sw/source/filter/ww1/fltshell.cxx b/sw/source/filter/ww1/fltshell.cxx
-index bd671f7..4779d61 100644
---- sw/source/filter/ww1/fltshell.cxx
-+++ sw/source/filter/ww1/fltshell.cxx
-@@ -106,6 +106,7 @@ SwFltStackEntry::SwFltStackEntry(const SwPosition& rStartPos, SfxPoolItem* pHt )
- 	bOld	= FALSE;	// used for marking Attributes *before* skipping field results
- 	bLocked = TRUE; 	// locke das Attribut --> darf erst
- 	bCopied = FALSE;	// gesetzt werden, wenn es wieder geunlocked ist
-+	bConsumedByField = FALSE;
- }
- 
- SwFltStackEntry::SwFltStackEntry(const SwFltStackEntry& rEntry) :
-@@ -116,6 +117,7 @@ SwFltStackEntry::SwFltStackEntry(const SwFltStackEntry& rEntry) :
- 	nMkCntnt= rEntry.nMkCntnt;
- 	bOld	= rEntry.bOld;
- 	bLocked	= bCopied = TRUE; // when rEntry were NOT bLocked we would never have been called
-+	bConsumedByField = rEntry.bConsumedByField;
- }
- 
- 
-@@ -302,7 +304,7 @@ void SwFltControlStack::KillUnlockedAttrs(const SwPosition& pPos)
- // Returned, ob das gesuchte Attribut / die gesuchten Attribute
- // ueberhaupt auf dem Stack standen
- void SwFltControlStack::SetAttr(const SwPosition& rPos, USHORT nAttrId,
--								BOOL bTstEnde, long nHand )
-+								BOOL bTstEnde, long nHand, BOOL consumedByField )
- {
- 	ASSERT(!nAttrId ||
- 		(POOLATTR_BEGIN <= nAttrId && POOLATTR_END > nAttrId) ||
-@@ -330,8 +332,10 @@ void SwFltControlStack::SetAttr(const SwPosition& rPos, USHORT nAttrId,
- 					bF = true;
- 				}
- 			}
--			if (bF)
-+			if (bF) {
-+				pEntry->bConsumedByField = consumedByField;
- 				pEntry->SetEndPos(rPos);
-+			}
- 			continue;
- 		}
- 
-@@ -503,7 +507,7 @@ void SwFltControlStack::SetAttrInDoc(const SwPosition& rTmpPos, SwFltStackEntry*
- 				}
- 			}
- 			if( !pB->IsOnlyRef() &&
--				( !IsFlagSet(HYPO) || IsFlagSet(BOOK_AND_REF) ) )
-+				( !IsFlagSet(HYPO) || IsFlagSet(BOOK_AND_REF) ) && !pEntry->bConsumedByField)
- 			{
- 				MakeBookRegionOrPoint(pEntry, pDoc, aRegion, TRUE);
-                 pDoc->makeBookmark( aRegion, aEmptyKeyCode, rName, aEmptyStr, IDocumentBookmarkAccess::BOOKMARK);
+-            if (pMark!=NULL && pMark->GetName().CompareToAscii(FIELD_FORM_BOOKMARK_PREFIX, strlen(FIELD_FORM_BOOKMARK_PREFIX))==0) {
+-                continue;
+-            }
+-            */
+             if (pMark!=NULL && pMark->IsFormFieldMark())
+             {
+                 continue;
 diff --git a/sw/source/filter/ww8/wrtw8nds.cxx b/sw/source/filter/ww8/wrtw8nds.cxx
-index bbb2d97..b25a1b6 100644
+index 555ec8d..19a06fa 100644
 --- sw/source/filter/ww8/wrtw8nds.cxx
 +++ sw/source/filter/ww8/wrtw8nds.cxx
-@@ -104,6 +104,10 @@
- #include "wrtww8.hxx"
- #include "ww8par.hxx"
+@@ -112,6 +112,45 @@ using namespace sw::util;
+ using namespace sw::types;
+ using namespace nsFieldFlags;
  
-+#ifndef _BOOKMRK_HXX
-+#include <bookmrk.hxx>
-+#endif
 +
- using namespace ::com::sun::star;
- using namespace ::com::sun::star::i18n;
- using namespace sw::util;
-@@ -288,12 +292,22 @@ xub_StrLen WW8_SwAttrIter::SearchNext( xub_StrLen nStartPos )
-     xub_StrLen nMinPos = STRING_MAXLEN;
-     xub_StrLen i=0;
++static String lcl_getFieldCode(SwFieldBookmark* pFieldmark) {
++    ASSERT(pFieldmark!=NULL, "where is my fieldmark???");
++    if (pFieldmark->isType(ECMA_FORMTEXT)) {
++	return String::CreateFromAscii(" FORMTEXT ");
++    } else if (pFieldmark->isType(ECMA_FORMDROPDOWN)) {
++	return String::CreateFromAscii(" FORMDROPDOWN ");
++    } else if (pFieldmark->isType(ECMA_FORMCHECKBOX)) {
++	return String::CreateFromAscii(" FORMCHECKBOX ");
++    } else if (pFieldmark->isType(ECMA_TOC)) {
++	return String::CreateFromAscii(" TOC ");
++    } else if (pFieldmark->isType(ECMA_HYPERLINK)) {
++	return String::CreateFromAscii(" HYPERLINK ");
++    } else if (pFieldmark->isType(ECMA_PAGEREF)) {
++	return String::CreateFromAscii(" PAGEREF ");
++    } else {
++	return pFieldmark->getTypeName();
++    }
++}
++
++ww::eField lcl_getFieldId(SwFieldBookmark* pFieldmark) {
++    ASSERT(pFieldmark!=NULL, "where is my fieldmark???");
++    if (pFieldmark->isType(ECMA_FORMTEXT)) {
++	return ww::eFORMTEXT;
++    } else if (pFieldmark->isType(ECMA_FORMDROPDOWN)) {
++	return ww::eFORMCHECKBOX;
++    } else if (pFieldmark->isType(ECMA_FORMCHECKBOX)) {
++	return ww::eFORMDROPDOWN;
++    } else if (pFieldmark->isType(ECMA_TOC)) {
++	return ww::eTOC;
++    } else if (pFieldmark->isType(ECMA_HYPERLINK)) {
++	return ww::eHYPERLINK;
++    } else if (pFieldmark->isType(ECMA_PAGEREF)) {
++	return ww::ePAGEREF;
++    } else {
++	return ww::eUNKNOWN;
++    }    
++}
++
+ /*  */
  
-+	const String aTxt = rNd.GetTxt();
-+	xub_StrLen pos=aTxt.Search(CH_TXT_ATR_FIELDSTART, nStartPos);
+ WW8_AttrIter::WW8_AttrIter(SwWW8Writer& rWr)
+@@ -288,19 +327,17 @@ xub_StrLen WW8_SwAttrIter::SearchNext( xub_StrLen nStartPos )
+ {
+     xub_StrLen nPos;
+     xub_StrLen nMinPos = STRING_MAXLEN;
++    xub_StrLen i=0;
++
+ 	const String aTxt = rNd.GetTxt();
+ 	xub_StrLen pos = aTxt.Search(CH_TXT_ATR_FIELDSTART, nStartPos);
+-	if( pos==STRING_NOTFOUND )
+-    {
+-		pos = aTxt.Search(CH_TXT_ATR_FIELDEND, nStartPos);
+-        if( pos==STRING_NOTFOUND )
+-            pos = aTxt.Search(CH_TXT_ATR_FORMELEMENT, nStartPos);
+-    }
+-	if( pos!=STRING_NOTFOUND )
 +	if (pos==STRING_NOTFOUND) 
 +		pos=aTxt.Search(CH_TXT_ATR_FIELDEND, nStartPos);
 +	if (pos==STRING_NOTFOUND) 
 +		pos=aTxt.Search(CH_TXT_ATR_FORMELEMENT, nStartPos);
 +	if (pos!=STRING_NOTFOUND)  
-+		nMinPos=pos;
-+
+ 		nMinPos=pos;
+ 
+-    xub_StrLen i=0;
+-
      // first the redline, then the attributes
      if( pCurRedline )
      {
-         const SwPosition* pEnd = pCurRedline->End();
-         if (pEnd->nNode == rNd && ((i = pEnd->nContent.GetIndex()) >= nStartPos))
--            nMinPos = i;
-+			if (i<nMinPos)
-+				nMinPos = i;
-     }
- 
-     if( nCurRedlinePos < rWrt.pDoc->GetRedlineTbl().Count() )
-@@ -1526,8 +1540,65 @@ Writer& OutWW8_SwTxtNode( Writer& rWrt, SwCntntNode& rNode )
-         xub_StrLen nLen = nNextAttr - nAktPos;
-         if (!bTxtAtr && nLen)
-         {
--            String aSnippet(aAttrIter.GetSnippet(aStr, nAktPos, nLen));
--            if ((rWW8Wrt.nTxtTyp == TXT_EDN || rWW8Wrt.nTxtTyp == TXT_FTN) && nAktPos ==0)
-+			sal_Unicode ch=aStr.GetChar(nAktPos);
-+			int ofs=(ch==CH_TXT_ATR_FIELDSTART || ch==CH_TXT_ATR_FIELDEND || ch==CH_TXT_ATR_FORMELEMENT?1:0);
-+
-+			if (ch==CH_TXT_ATR_FIELDSTART) {
-+				SwPosition aPosition( *pNd, SwIndex( (SwTxtNode*)pNd, nAktPos+1 ) );
-+				SwFieldBookmark* pFieldmark=(SwFieldBookmark*)rWW8Wrt.pDoc->getFieldBookmarkFor( aPosition );
-+				ASSERT(pFieldmark!=NULL, "Looks like this doc is broken...; where is the Fieldmark for the FIELDSTART??");
-+
-+				if (pFieldmark!=NULL) {
-+					rWW8Wrt.AppendBookmark( pFieldmark->GetName(), 1);
-+				}
-+				rWW8Wrt.OutField(NULL, ww::eFORMTEXT, String::CreateFromAscii(" FORMTEXT "), WRITEFIELD_START | WRITEFIELD_CMD_START);	
-+				if (pFieldmark!=NULL) {
-+					rWW8Wrt.WriteFormData( *pFieldmark );
-+				}
-+				rWW8Wrt.OutField(NULL, ww::eFORMTEXT, String(), WRITEFIELD_CMD_END);
-+			} else if (ch==CH_TXT_ATR_FIELDEND) {
-+				SwPosition aPosition( *pNd, SwIndex( (SwTxtNode*)pNd, nAktPos ) );
-+				SwFieldBookmark* pFieldmark=(SwFieldBookmark*)rWW8Wrt.pDoc->getFieldBookmarkFor( aPosition );
-+				ASSERT(pFieldmark!=NULL, "Looks like this doc is broken...; where is the Fieldmark for the FIELDSTART??");
-+				rWW8Wrt.OutField(NULL, ww::eFORMTEXT, String(), WRITEFIELD_CLOSE);
-+				if (pFieldmark!=NULL) {
-+					rWW8Wrt.AppendBookmark( pFieldmark->GetName(), 0);
-+				}
-+			} else if (ch==CH_TXT_ATR_FORMELEMENT) {
-+				SwPosition aPosition( *pNd, SwIndex( (SwTxtNode*)pNd, nAktPos ) );
-+				SwFieldBookmark* pFieldmark=rWW8Wrt.pDoc->getFormFieldBookmarkFor( aPosition );
-+				ASSERT(pFieldmark!=NULL, "Looks like this doc is broken...; where is the Fieldmark for the FIELDSTART??");
-+				if (pFieldmark!=NULL) {
-+					rWW8Wrt.AppendBookmark( pFieldmark->GetName(), 1);
-+				}
-+				if (pFieldmark!=NULL) {
-+				    switch (pFieldmark->GetType()) {
-+					case 0: assert(0); /* should not happend*/ break;
-+					case 1: /* CHECKBOX */ 
-+					    rWW8Wrt.OutField(NULL, ww::eFORMCHECKBOX, String::CreateFromAscii(" FORMCHECKBOX "), WRITEFIELD_START | WRITEFIELD_CMD_START);
-+					    
-+					    rWW8Wrt.WriteFormData( *pFieldmark );
-+					    rWW8Wrt.OutField(NULL, ww::eFORMCHECKBOX, String(), WRITEFIELD_CMD_END | WRITEFIELD_CLOSE);
-+					    break;
-+					case 2: /* LIST */ 
-+					    rWW8Wrt.OutField(NULL, ww::eFORMDROPDOWN, String::CreateFromAscii(" FORMDROPDOWN "), WRITEFIELD_START | WRITEFIELD_CMD_START);
-+					    
-+					    rWW8Wrt.WriteFormData( *pFieldmark );
-+					    rWW8Wrt.OutField(NULL, ww::eFORMDROPDOWN, String(), WRITEFIELD_CMD_END | WRITEFIELD_CLOSE);
-+					    break;
-+					default:
-+					    break;
-+
-+
+@@ -1553,39 +1590,46 @@ Writer& OutWW8_SwTxtNode( Writer& rWrt, SwCntntNode& rNode )
+ 				SwPosition aPosition( *pNd, SwIndex( (SwTxtNode*)pNd, nAktPos+1 ) );
+ 				SwFieldBookmark* pFieldmark=(SwFieldBookmark*)rWW8Wrt.pDoc->getFieldBookmarkFor( aPosition );
+ 				ASSERT(pFieldmark!=NULL, "Looks like this doc is broken...; where is the Fieldmark for the FIELDSTART??");
+-
+ 				if (pFieldmark!=NULL) {
++				    if (pFieldmark->isType(ECMA_FORMTEXT)) {
+ 					rWW8Wrt.AppendBookmark( pFieldmark->GetName(), 1);
+-				}
+-				rWW8Wrt.OutField(NULL, ww::eFORMTEXT, String::CreateFromAscii(" FORMTEXT "), WRITEFIELD_START | WRITEFIELD_CMD_START);	
+-				if (pFieldmark!=NULL) {
 +				    }
-+				}
-+				if (pFieldmark!=NULL) {
-+					rWW8Wrt.AppendBookmark( pFieldmark->GetName(), 0);
-+				}
-+			}
-+			nLen-=ofs;
-+			String aSnippet(aAttrIter.GetSnippet(aStr, nAktPos+ofs, nLen));
-+            if ((rWW8Wrt.nTxtTyp == TXT_EDN || rWW8Wrt.nTxtTyp == TXT_FTN) && nAktPos ==0 && nLen>0)
-             {
-                 // Insert tab for aesthetic puposes #i24762#
-                 if (aSnippet.GetChar(0) != 0x09)
-@@ -1535,7 +1606,7 @@ Writer& OutWW8_SwTxtNode( Writer& rWrt, SwCntntNode& rNode )
-                     nLen++;
-                     aSnippet.Insert(0x09,0);
-                 }
--            }
-+			}
-             rWW8Wrt.OutSwString(aSnippet, 0, nLen, bUnicode, eChrSet );
-         }
- 
++				    rWW8Wrt.OutField(NULL, lcl_getFieldId(pFieldmark), lcl_getFieldCode(pFieldmark), WRITEFIELD_START | WRITEFIELD_CMD_START);	
++				    if (pFieldmark->isType(ECMA_FORMTEXT)) {
+ 					rWW8Wrt.WriteFormData( *pFieldmark );
++				    }
++				    if (pFieldmark->isType(ECMA_HYPERLINK)) {
++					rWW8Wrt.WriteHyperlinkData( *pFieldmark );
++				    }
++				    rWW8Wrt.OutField(NULL, lcl_getFieldId(pFieldmark), String(), WRITEFIELD_CMD_END);
+ 				}
+-				rWW8Wrt.OutField(NULL, ww::eFORMTEXT, String(), WRITEFIELD_CMD_END);
+ 			} else if (ch==CH_TXT_ATR_FIELDEND) {
+ 				SwPosition aPosition( *pNd, SwIndex( (SwTxtNode*)pNd, nAktPos ) );
+ 				SwFieldBookmark* pFieldmark=(SwFieldBookmark*)rWW8Wrt.pDoc->getFieldBookmarkFor( aPosition );
+ 				ASSERT(pFieldmark!=NULL, "Looks like this doc is broken...; where is the Fieldmark for the FIELDSTART??");
+-				rWW8Wrt.OutField(NULL, ww::eFORMTEXT, String(), WRITEFIELD_CLOSE);
+ 				if (pFieldmark!=NULL) {
++				    rWW8Wrt.OutField(NULL, lcl_getFieldId(pFieldmark), String(), WRITEFIELD_CLOSE);
++				    if (pFieldmark->isType(ECMA_FORMTEXT)) {
+ 					rWW8Wrt.AppendBookmark( pFieldmark->GetName(), 0);
++				    }
+ 				}
+ 			} else if (ch==CH_TXT_ATR_FORMELEMENT) {
+ 				SwPosition aPosition( *pNd, SwIndex( (SwTxtNode*)pNd, nAktPos ) );
+ 				SwFieldBookmark* pFieldmark=rWW8Wrt.pDoc->getFormFieldBookmarkFor( aPosition );
+ 				ASSERT(pFieldmark!=NULL, "Looks like this doc is broken...; where is the Fieldmark for the FIELDSTART??");
+ 				if (pFieldmark!=NULL) {
++				    if (pFieldmark->isType(ECMA_FORMDROPDOWN) || pFieldmark->isType(ECMA_FORMCHECKBOX)) {
+ 					rWW8Wrt.AppendBookmark( pFieldmark->GetName(), 1);
+-				}
+-				rWW8Wrt.OutField(NULL, ww::eFORMCHECKBOX, String::CreateFromAscii(" FORMCHECKBOX "), WRITEFIELD_START | WRITEFIELD_CMD_START);
+-				if (pFieldmark!=NULL) {
+-
++				    }
++				    rWW8Wrt.OutField(NULL, lcl_getFieldId(pFieldmark), lcl_getFieldCode(pFieldmark), WRITEFIELD_START | WRITEFIELD_CMD_START);
++				    if (pFieldmark->isType(ECMA_FORMCHECKBOX) || pFieldmark->isType(ECMA_FORMDROPDOWN)) {
+ 					rWW8Wrt.WriteFormData( *pFieldmark );
+-				}
+-				rWW8Wrt.OutField(NULL, ww::eFORMCHECKBOX, String(), WRITEFIELD_CMD_END | WRITEFIELD_CLOSE);
+-				if (pFieldmark!=NULL) {
++				    }
++				    rWW8Wrt.OutField(NULL, lcl_getFieldId(pFieldmark), String(), WRITEFIELD_CMD_END | WRITEFIELD_CLOSE);
++				    if (pFieldmark->isType(ECMA_FORMDROPDOWN) || pFieldmark->isType(ECMA_FORMCHECKBOX)) {
+ 					rWW8Wrt.AppendBookmark( pFieldmark->GetName(), 0);
+-				}
++				    }
++				}		
+ 			}
+ 			nLen-=static_cast<USHORT>(ofs);
+ 			String aSnippet(aAttrIter.GetSnippet(aStr, nAktPos+static_cast<USHORT>(ofs), nLen));
 diff --git a/sw/source/filter/ww8/wrtww8.cxx b/sw/source/filter/ww8/wrtww8.cxx
-index 4f1ba07..935d5c6 100644
+index cb5bf18..16c53ca 100644
 --- sw/source/filter/ww8/wrtww8.cxx
 +++ sw/source/filter/ww8/wrtww8.cxx
-@@ -103,6 +103,10 @@
+@@ -108,9 +108,8 @@
+ #include "writerhelper.hxx"
+ #include "writerwordglue.hxx"
+ 
+-#ifndef IDOCUMENTBOOKMARKACCESS_HXX_INCLUDED
+ #include <IDocumentBookmarkAccess.hxx>
+-#endif
++#include <ecmaflds.hxx>
+ 
+ #include <com/sun/star/document/XDocumentPropertiesSupplier.hpp>
  #include <com/sun/star/document/XDocumentProperties.hpp>
+@@ -2280,7 +2279,7 @@ void SwWW8Writer::OutWW8TableBackgrounds
  
- 
-+#ifndef IDOCUMENTBOOKMARKACCESS_HXX_INCLUDED
-+#include <IDocumentBookmarkAccess.hxx>
-+#endif
-+
- using namespace sw::util;
- using namespace sw::types;
- 
-@@ -185,7 +189,7 @@ public:
-     WW8_WrtBookmarks();
-     ~WW8_WrtBookmarks();
- 
--    void Append( WW8_CP nStartCp, const String& rNm );
-+    void Append( WW8_CP nStartCp, const String& rNm, const SwBookmark* pBkmk=NULL );
-     void Write( SwWW8Writer& rWrt );
-     void MoveFieldBookmarks(ULONG nFrom,ULONG nTo);
- 
-@@ -1222,7 +1226,7 @@ WW8_WrtBookmarks::~WW8_WrtBookmarks()
+ void SwWW8Writer::WriteText()
  {
- }
+-#ifdef DEBUG
++#ifndef NDEBUG
+     ::std::clog << "<WriteText>" << ::std::endl;
+     ::std::clog << dbg_out(pCurPam->GetDoc()->GetNodes()) << ::std::endl;
+ #endif
+@@ -3159,8 +3158,17 @@ void SwWW8Writer::WriteFormData(SwFieldBookmark &rFieldmark)
+ 	ASSERT(bWrtWW8, "No 95 export yet");
+ 	if (!bWrtWW8) return;
  
--void WW8_WrtBookmarks::Append( WW8_CP nStartCp, const String& rNm )
-+void WW8_WrtBookmarks::Append( WW8_CP nStartCp, const String& rNm,  const SwBookmark* pBkmk)
- {
-     USHORT nPos = GetPos( rNm );
-     if( USHRT_MAX == nPos )
-@@ -1254,7 +1258,7 @@ void WW8_WrtBookmarks::Append( WW8_CP nStartCp, const String& rNm )
-         if (aFieldBookmarks[nPos])
-             --nStartCp;
+-	int type=rFieldmark.GetFieldType();
+-	const String ffname=rFieldmark.GetFFName();
++	ASSERT(rFieldmark.isType(ECMA_FORMTEXT) || rFieldmark.isType(ECMA_FORMDROPDOWN) || rFieldmark.isType(ECMA_FORMCHECKBOX), "Unknown field type!!!");
++	if (!(rFieldmark.isType(ECMA_FORMTEXT) || rFieldmark.isType(ECMA_FORMDROPDOWN) || rFieldmark.isType(ECMA_FORMCHECKBOX)))
++	    return;
++
++	int type=0;
++	if (rFieldmark.isType(ECMA_FORMCHECKBOX))
++	    type=1;
++	if (rFieldmark.isType(ECMA_FORMDROPDOWN))
++	    type=2;
++	
++	const String ffname=rFieldmark.getParam("name").second;
  
--        aEndCps.Replace( nStartCp, nPos );
-+		aEndCps.Replace( nStartCp, nPos );
-     }
- }
- 
-@@ -1352,6 +1356,9 @@ void SwWW8Writer::AppendBookmarks( const SwTxtNode& rNd,
-         for( USHORT n = 0; n < aArr.Count(); ++n )
-         {
-             const SwBookmark& rBkmk = *(SwBookmark*)aArr[ n ];
-+	    if (rBkmk.IsFormFieldMark()) {
-+		continue;
-+	    }
-             const SwPosition* pPos = &rBkmk.GetBookmarkPos(),
-                             * pOPos = rBkmk.GetOtherBookmarkPos();
-             if( pOPos && pOPos->nNode == pPos->nNode &&
-@@ -1366,14 +1373,14 @@ void SwWW8Writer::AppendBookmarks( const SwTxtNode& rNd,
-                 nCntnt < nAktEnd ) )
-             {
-                 ULONG nCp = nSttCP + pPos->nContent.GetIndex() - nAktPos;
--                pBkmks->Append(nCp, BookmarkToWord(rBkmk.GetName()));
-+                pBkmks->Append(nCp, BookmarkToWord(rBkmk.GetName()), &rBkmk);
-             }
--            if( pOPos && nNd == pOPos->nNode.GetIndex() &&
-+			if( pOPos && nNd == pOPos->nNode.GetIndex() &&
-                 ( nCntnt = pOPos->nContent.GetIndex() ) >= nAktPos &&
-                 nCntnt < nAktEnd )
-             {
-                 ULONG nCp = nSttCP + pOPos->nContent.GetIndex() - nAktPos;
--                pBkmks->Append(nCp, BookmarkToWord(rBkmk.GetName()));
-+                pBkmks->Append(nCp, BookmarkToWord(rBkmk.GetName()), &rBkmk);
-             }
-         }
-     }
-@@ -1565,6 +1572,17 @@ void SwWW8Writer::WriteString16(SvStream& rStrm, const String& rStr,
-         rStrm.Write(&aBytes[0], aBytes.size());
- }
- 
-+void SwWW8Writer::WriteString_xstz(SvStream& rStrm, const String& rStr, bool bAddZero)
-+{
-+    ww::bytes aBytes;
-+    SwWW8Writer::InsUInt16(aBytes, rStr.Len());
-+    SwWW8Writer::InsAsString16(aBytes, rStr);
-+	if (bAddZero) 
-+		SwWW8Writer::InsUInt16(aBytes, 0);
-+	rStrm.Write(&aBytes[0], aBytes.size());
-+}
-+
-+
- void SwWW8Writer::WriteString8(SvStream& rStrm, const String& rStr,
-     bool bAddZero, rtl_TextEncoding eCodeSet)
- {
-@@ -2580,5 +2598,118 @@ void SwWW8Writer::RestoreMacroCmds()
-     pFib->lcbCmds = pTableStrm->Tell() - pFib->fcCmds;
- }
- 
-+void SwWW8Writer::WriteFormData(SwFieldBookmark &rFieldmark)
-+{
-+	ASSERT(bWrtWW8, "No 95 export yet");
-+	if (!bWrtWW8) return;
-+
-+	int type=rFieldmark.GetType();
-+	const String ffname=rFieldmark.GetFFName();
-+
-+	ULONG nDataStt = pDataStrm->Tell();
-+    pChpPlc->AppendFkpEntry( Strm().Tell() );
-+
-+    WriteChar( 0x01 );
-+    static BYTE aArr1[] = {
-+        0x03, 0x6a, 0,0,0,0,    // sprmCPicLocation
-+
-+        0x06, 0x08, 0x01,       // sprmCFData
-+        0x55, 0x08, 0x01,       // sprmCFSpec
-+        0x02, 0x08, 0x01        // sprmCFFldVanish
-+    };
-+    BYTE* pDataAdr = aArr1 + 2;
-+    Set_UInt32( pDataAdr, nDataStt );
-+
-+    pChpPlc->AppendFkpEntry(Strm().Tell(),
-+                sizeof( aArr1 ), aArr1 );
-+
-+	sal_uInt8 aFldHeader[] = 
-+	{
-+		0xFF, 0xFF, 0xFF, 0xFF, // Unicode Marker...
+ 	ULONG nDataStt = pDataStrm->Tell();
+     pChpPlc->AppendFkpEntry( Strm().Tell() );
+@@ -3182,13 +3190,29 @@ void SwWW8Writer::WriteFormData(SwFieldBookmark &rFieldmark)
+ 	sal_uInt8 aFldHeader[] = 
+ 	{
+ 		0xFF, 0xFF, 0xFF, 0xFF, // Unicode Marker...
+-		0, 0, 0, 0//, 0, 0, 0, 0
 +		0, 0, 0, 0, 0, 0 //, 0, 0
-+	};
-+
-+	aFldHeader[4] |= (type & 0x03);
-+	int ffres=rFieldmark.GetFFRes();
-+	aFldHeader[4] |= ((ffres<<2) & 0x7C);
-+
-+
-+	if (rFieldmark.GetType()==2) {
-+	    aFldHeader[5] |= 0x80; // ffhaslistbox
+ 	};
+ 
+ 	aFldHeader[4] |= (type & 0x03);
+-	int ffres=rFieldmark.GetFFRes();
++	int ffres=0;
++	if (type==1) { // checkbox
++	    ffres=rFieldmark.getParam(ECMA_FORMCHECKBOX_CHECKED).second.compareToAscii("on")==0;
++	} else if (type==2) { // drop down
++	    ffres=rFieldmark.getParam(ECMA_FORMDROPDOWN_RESULT, "0").second.toInt32();
 +	}
 +
-+	const String ffdeftext;
-+	const String ffformat;
-+	const String ffhelptext;
-+	const String ffstattext;
-+	const String ffentrymcr;
-+	const String ffexitmcr;
+ 	aFldHeader[4] |= ((ffres<<2) & 0x7C);
+ 
 +
-+    const sal_uInt8 aFldData[] =
-+    {
-+        0,0,0,0,        // len of struct
-+        0x44,0,         // the start of "next" data             
-+        0,0,0,0,0,0,0,0,0,0,                // PIC-Structure!  /10
-+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,    //  |              /16
-+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,    //  |              /16
-+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,    //  |              /16
-+        0,0,0,0,                            // /               /4
-+    };
-+	int slen=sizeof(aFldData)
-+		+sizeof(aFldHeader)
-+		+2*ffname.Len()+4
-+		+2*ffdeftext.Len()+4
-+		+2*ffformat.Len()+4
-+		+2*ffhelptext.Len()+4
-+		+2*ffstattext.Len()+4
-+		+2*ffentrymcr.Len()+4
-+		+2*ffexitmcr.Len()+4;
++	std::vector< ::rtl::OUString > aListItems;
++	if (type==2) {
++	    aFldHeader[5] |= 0x80; // ffhaslistbox
++	    for(int i=0;i<rFieldmark.getNumOfParams();i++) {
++		if (rFieldmark.getParam(i).first.compareToAscii(ECMA_FORMDROPDOWN_LISTENTRY)==0)
++		    aListItems.push_back(rFieldmark.getParam(i).second);
++	    }
++	}
++
+ 	const String ffdeftext;
+ 	const String ffformat;
+ 	const String ffhelptext;
+@@ -3196,6 +3220,7 @@ void SwWW8Writer::WriteFormData(SwFieldBookmark &rFieldmark)
+ 	const String ffentrymcr;
+ 	const String ffexitmcr;
+ 
++
+     const sal_uInt8 aFldData[] =
+     {
+         0,0,0,0,        // len of struct
+@@ -3215,6 +3240,15 @@ void SwWW8Writer::WriteFormData(SwFieldBookmark &rFieldmark)
+ 		+2*ffstattext.Len()+4
+ 		+2*ffentrymcr.Len()+4
+ 		+2*ffexitmcr.Len()+4;
 +	if (type==2) {
 +	    slen+=2; // for 0xFF, 0xFF
 +	    slen+=4; // for num of list items
-+	    const int items=rFieldmark.getListItems();
++	    const int items=aListItems.size();
 +	    for(int i=0;i<items;i++) {
-+		String item=rFieldmark.getListItem(i);
++		String item=aListItems[i];
 +		slen+=2*item.Len()+2;
 +	    }
 +	}
-+#ifdef OSL_BIGENDIAN
-+	slen=SWAPLONG(slen);
-+#endif // OSL_BIGENDIAN
-+	*((sal_uInt32 *)aFldData)=slen;
-+	int len=sizeof(aFldData) ;
-+	assert(len==0x44);
-+    pDataStrm->Write( aFldData, len);
-+
-+	len=sizeof(aFldHeader);
-+	assert(len==8);
+ #ifdef OSL_BIGENDIAN
+ 	slen=SWAPLONG(slen);
+ #endif // OSL_BIGENDIAN
+@@ -3225,14 +3259,14 @@ void SwWW8Writer::WriteFormData(SwFieldBookmark &rFieldmark)
+ 
+ 	len=sizeof(aFldHeader);
+ 	assert(len==8);
+-    pDataStrm->Write( aFldHeader, len);
 +	pDataStrm->Write( aFldHeader, len);
-+
+ 
+-    WriteString_xstz( *pDataStrm, ffname, true); // Form field name
 +	WriteString_xstz( *pDataStrm, ffname, true); // Form field name
-+
-+	if (type==0) {
+ 
+ 	if (type==0) {
+-		WriteString_xstz( *pDataStrm, ffdeftext, true);
 +	    WriteString_xstz( *pDataStrm, ffdeftext, true);
-+	} else {
+ 	} else {
+-		pDataStrm->WriteNumber((sal_uInt16)0);
 +	    *pDataStrm<<(sal_uInt16)0;
-+	}	
-+	WriteString_xstz( *pDataStrm, ffformat, true);
-+	WriteString_xstz( *pDataStrm, ffhelptext, true);
-+	WriteString_xstz( *pDataStrm, ffstattext, true);
-+	WriteString_xstz( *pDataStrm, ffentrymcr, true);
-+	WriteString_xstz( *pDataStrm, ffexitmcr, true);
-+	if (type==2) {
+ 	}	
+ 	WriteString_xstz( *pDataStrm, ffformat, true);
+ 	WriteString_xstz( *pDataStrm, ffhelptext, true);
+@@ -3240,13 +3274,26 @@ void SwWW8Writer::WriteFormData(SwFieldBookmark &rFieldmark)
+ 	WriteString_xstz( *pDataStrm, ffentrymcr, true);
+ 	WriteString_xstz( *pDataStrm, ffexitmcr, true);
+ 	if (type==2) {
+-		// 0xFF, 0xFF
+-		// sal_uInt32 number of strings
+-		// (sal_uInt16 len; sal_uInt16 unicode char[len])*num of strings
 +	    *pDataStrm<<(sal_uInt16)0xFFFF;
-+	    const int items=rFieldmark.getListItems();
++	    const int items=aListItems.size();
 +	    *pDataStrm<<(sal_uInt32)items;
 +	    for(int i=0;i<items;i++) {
-+		String item=rFieldmark.getListItem(i);
++		String item=aListItems[i];
 +		WriteString_xstz( *pDataStrm, item, false);
 +	    }
 +	    // 0xFF, 0xFF
 +	    // sal_uInt32 number of strings
 +	    // (sal_uInt16 len; sal_uInt16 unicode char[len])*num of strings
-+	}
-+
-+}
+ 	}
  
- /* vi:set tabstop=4 shiftwidth=4 expandtab: */
+ }
+ 
++
++void SwWW8Writer::WriteHyperlinkData(SwFieldBookmark &rFieldmark)
++{
++    //@TODO implement me !!!
++}
++
+ void SwWW8Writer::OutWW8_SwEndNode(SwNode * pNode)
+ {
+     ww8::WW8TableNodeInfo::Pointer_t pNodeInfo = 
 diff --git a/sw/source/filter/ww8/wrtww8.hxx b/sw/source/filter/ww8/wrtww8.hxx
-index a7ca0c1..9d47ee3 100644
+index 3b3f758..66236ed 100644
 --- sw/source/filter/ww8/wrtww8.hxx
 +++ sw/source/filter/ww8/wrtww8.hxx
-@@ -654,6 +654,7 @@ public:
-     static void WriteString8(SvStream& rStrm, const String& rStr,
-         bool bAddZero, rtl_TextEncoding eCodeSet);
- 
-+	static void WriteString_xstz(SvStream& rStrm, const String& rStr, bool bAddZero);
- #if 1
-     //Prefer ww::bytes to WW8Bytes, migrate away from the other ones.
-     static void InsUInt16(ww::bytes &rO, sal_uInt16 n);
-@@ -710,6 +711,8 @@ public:
-     void AddLinkTarget(const String& rURL);
-     void CollectOutlineBookmarks(const SwDoc &rDoc);
+@@ -729,6 +729,7 @@ public:
      void AddBookmark(String sBkmkName);
-+
-+	void WriteFormData(SwFieldBookmark &rFieldmark);
+ 
+ 	void WriteFormData(SwFieldBookmark &rFieldmark);
++	void WriteHyperlinkData(SwFieldBookmark &rFieldmark);
  private:
      //No copying
      SwWW8Writer(const SwWW8Writer&);
 diff --git a/sw/source/filter/ww8/ww8par.cxx b/sw/source/filter/ww8/ww8par.cxx
-index 45f0396..16bad6c 100644
+index cc284e1..121bed0 100644
 --- sw/source/filter/ww8/ww8par.cxx
 +++ sw/source/filter/ww8/ww8par.cxx
-@@ -139,6 +139,8 @@
- #include <com/sun/star/document/XDocumentProperties.hpp>
- #   include <svtools/itemiter.hxx>  //SfxItemIter
- 
-+#include <stdio.h>
-+
- #define MM_250 1417             // WW-Default fuer Hor. Seitenraender: 2.5 cm
- #define MM_200 1134             // WW-Default fuer u.Seitenrand: 2.0 cm
- 
-@@ -1508,6 +1510,12 @@ void SwWW8ImplReader::ImportDop()
-         }
-     }
- 
-+    const SvtFilterOptions* pOpt = SvtFilterOptions::Get();
-+    sal_Bool bUseEnhFields=(pOpt && pOpt->IsUseEnhancedFields());
-+    if (bUseEnhFields) {
-+	rDoc.set(IDocumentSettingAccess::PROTECT_FORM, pWDop->fProtEnabled );
-+    }
-+
-     maTracer.LeaveEnvironment(sw::log::eDocumentProperties);
- }
- 
-@@ -1614,6 +1622,7 @@ WW8ReaderSave::WW8ReaderSave(SwWW8ImplReader* pRdr ,WW8_CP nStartCp) :
+@@ -1627,7 +1627,6 @@ WW8ReaderSave::WW8ReaderSave(SwWW8ImplReader* pRdr ,WW8_CP nStartCp) :
      maOldApos.push_back(false);
      maOldApos.swap(pRdr->maApos);
      maOldFieldStack.swap(pRdr->maFieldStack);
-+	maFieldCtxStack.swap(pRdr->maNewFieldCtxStack);
+-	maFieldCtxStack.swap(pRdr->maNewFieldCtxStack);
  }
  
  void WW8ReaderSave::Restore( SwWW8ImplReader* pRdr )
-@@ -1660,6 +1669,7 @@ void WW8ReaderSave::Restore( SwWW8ImplReader* pRdr )
+@@ -1674,7 +1673,6 @@ void WW8ReaderSave::Restore( SwWW8ImplReader* pRdr )
          pRdr->pPlcxMan->RestoreAllPLCFx(maPLCFxSave);
      pRdr->maApos.swap(maOldApos);
      pRdr->maFieldStack.swap(maOldFieldStack);
-+	pRdr->maNewFieldCtxStack.swap(maFieldCtxStack);
+-	pRdr->maNewFieldCtxStack.swap(maFieldCtxStack);
  }
  
  void SwWW8ImplReader::Read_HdFtFtnText( const SwNodeIndex* pSttIdx,
-@@ -2674,6 +2684,22 @@ bool SwWW8ImplReader::ReadChar(long nPosCp, long nCpOfs)
+@@ -2689,22 +2687,6 @@ bool SwWW8ImplReader::ReadChar(long nPosCp, long nCpOfs)
          case 0x15:
              if( !bSpec )        // Juristenparagraph
                  cInsert = '\xa7';
-+			else { //0x15 is special --> so it's our field end mark...; hmmm what about field marks not handled by us??, maybe a problem with nested fields; probably an area of bugs... [well release quick and release often....]
-+				if (!maNewFieldCtxStack.empty() && pPaM!=NULL && pPaM->GetPoint()!=NULL) {
-+					WW8NewFieldCtx *pFieldCtx=maNewFieldCtxStack.back();
-+					maNewFieldCtxStack.pop_back();
-+					SwPosition aEndPos = *pPaM->GetPoint();
-+					SwPaM aFldPam( pFieldCtx->GetPtNode(), pFieldCtx->GetPtCntnt(), aEndPos.nNode, aEndPos.nContent.GetIndex());
-+					SwFieldBookmark *pFieldmark=(SwFieldBookmark*)rDoc.makeBookmark(aFldPam, KeyCode(), pFieldCtx->GetBookmarkName(), String(), IDocumentBookmarkAccess::FORM_FIELDMARK_TEXT);
-+					ASSERT(pFieldmark!=NULL, "hmmm; why was the bookmark not created?");
-+					if (pFieldmark!=NULL) {
-+						pFieldmark->SetType(0); // 0==Text
-+						// set field data here...
-+						pFieldCtx->SetCurrentFieldParamsTo(*pFieldmark);
-+					}
-+					delete pFieldCtx;
-+				}
-+			}
+-			else { //0x15 is special --> so it's our field end mark...; hmmm what about field marks not handled by us??, maybe a problem with nested fields; probably an area of bugs... [well release quick and release often....]
+-				if (!maNewFieldCtxStack.empty() && pPaM!=NULL && pPaM->GetPoint()!=NULL) {
+-					WW8NewFieldCtx *pFieldCtx=maNewFieldCtxStack.back();
+-					maNewFieldCtxStack.pop_back();
+-					SwPosition aEndPos = *pPaM->GetPoint();
+-					SwPaM aFldPam( pFieldCtx->GetPtNode(), pFieldCtx->GetPtCntnt(), aEndPos.nNode, aEndPos.nContent.GetIndex());
+-					SwFieldBookmark *pFieldmark=(SwFieldBookmark*)rDoc.makeBookmark(aFldPam, KeyCode(), pFieldCtx->GetBookmarkName(), String(), IDocumentBookmarkAccess::FORM_FIELDMARK_TEXT);
+-					ASSERT(pFieldmark!=NULL, "hmmm; why was the bookmark not created?");
+-					if (pFieldmark!=NULL) {
+-						pFieldmark->SetFieldType(0); // 0==Text
+-						// set field data here...
+-						pFieldCtx->SetCurrentFieldParamsTo(*pFieldmark);
+-					}
+-					delete pFieldCtx;
+-				}
+-			}
              break;
          case 0x9:
              cInsert = '\x9';    // Tab
-@@ -3461,6 +3487,8 @@ bool wwSectionManager::IsNewDoc() const
- 
- void wwSectionManager::InsertSegments()
- {
-+    const SvtFilterOptions* pOpt = SvtFilterOptions::Get();
-+    sal_Bool bUseEnhFields=(pOpt && pOpt->IsUseEnhancedFields());
-     mySegIter aEnd = maSegments.end();
-     mySegIter aStart = maSegments.begin();
-     for (mySegIter aIter = aStart; aIter != aEnd; ++aIter)
-@@ -3475,7 +3503,7 @@ void wwSectionManager::InsertSegments()
+@@ -3519,7 +3501,14 @@ void wwSectionManager::InsertSegments()
  
          bool bInsertSection = (aIter != aStart) ? (aIter->IsContinous() &&  bThisAndPreviousAreCompatible): false;
          bool bInsertPageDesc = !bInsertSection;
--        bool bProtected = SectionIsProtected(*aIter);
-+        bool bProtected = !bUseEnhFields && SectionIsProtected(*aIter); // do we really  need this ?? I guess I have a different logic in editshell which disales this...
- 
+-        bool bProtected = !bUseEnhFields && SectionIsProtected(*aIter); // do we really  need this ?? I guess I have a different logic in editshell which disales this...
++        bool bProtected = SectionIsProtected(*aIter); // do we really  need this ?? I guess I have a different logic in editshell which disales this...
++	if (bUseEnhFields && mrReader.pWDop->fProtEnabled && aIter->IsNotProtected()) {
++	    // here we have the special case that the whole document is protected, with the execption of this section.
++	    // I want to address this when I do the section rework, so for the moment we disable the overall protection then...
++	    mrReader.rDoc.set(IDocumentSettingAccess::PROTECT_FORM, false );
++	}
++
++
          if (bInsertPageDesc)
          {
+             /*
 diff --git a/sw/source/filter/ww8/ww8par.hxx b/sw/source/filter/ww8/ww8par.hxx
-index 1f8446c..f7c8871 100644
+index f887bc1..5404e49 100644
 --- sw/source/filter/ww8/ww8par.hxx
 +++ sw/source/filter/ww8/ww8par.hxx
-@@ -365,6 +365,32 @@ public:
-     void Swap(FieldEntry &rOther) throw();
+@@ -61,6 +61,8 @@
+ #include "ww8scan.hxx"  // WW8Fib
+ #include "ww8glsy.hxx"
+ #include "../inc/msfilter.hxx"
++#include <ecmaflds.hxx>
++#include <bookmrk.hxx>
+ 
+ class SwDoc;
+ class SwPaM;
+@@ -352,6 +354,8 @@ namespace sw
+             Position(const SwPosition &rPos);
+             Position(const Position &rPos);
+             operator SwPosition() const;
++	    SwNodeIndex GetPtNode() { return maPtNode; };
++	    xub_StrLen GetPtCntnt() { return mnPtCntnt; };        
+         };
+     }
+ }
+@@ -359,40 +363,31 @@ namespace sw
+ class FieldEntry
+ {
+ public:
+-    sw::hack::Position maStartPos;
+-    sal_uInt16 mnFieldId;
+-    FieldEntry(SwPosition &rPos, sal_uInt16 nFieldId) throw();
+-    FieldEntry(const FieldEntry &rOther) throw();
+-    FieldEntry &operator=(const FieldEntry &rOther) throw();
+-    void Swap(FieldEntry &rOther) throw();
+-};
++	typedef ::std::vector<SwFieldBookmark::ParamPair_t> Params_t;
+ 
+-class WW8NewFieldCtx
+-{
+ private:
+-	SwNodeIndex maPtNode;
+-    xub_StrLen mnPtCntnt;
+ 	::rtl::OUString sBookmarkName;
+ 	::rtl::OUString sBookmarkType;
+-	typedef ::std::pair< ::rtl::OUString, ::rtl::OUString> Param_t;
+-	typedef ::std::vector< Param_t > Params_t;
+ 	Params_t maParams;
+-  SwPaM * mpPaM;
+-
+ public:
+-	WW8NewFieldCtx(SwPosition &aStartPos, ::rtl::OUString sBookmarkName, ::rtl::OUString sBookmarkType);
+-	~WW8NewFieldCtx();
++    sw::hack::Position maStartPos;
++    sal_uInt16 mnFieldId;
++    FieldEntry(SwPosition &rPos, sal_uInt16 nFieldId) throw();
++    FieldEntry(const FieldEntry &rOther) throw();
++    FieldEntry &operator=(const FieldEntry &rOther) throw();
++    void Swap(FieldEntry &rOther) throw();
+ 
+-	SwNodeIndex GetPtNode() { return maPtNode; };
+-	xub_StrLen GetPtCntnt() { return mnPtCntnt; };
+-	::rtl::OUString GetBookmarkName();
+-	::rtl::OUString GetBookmarkType();
+-	void AddParam(::rtl::OUString name, ::rtl::OUString value);
+-	void SetCurrentFieldParamsTo(SwFieldBookmark &rFieldBookmark);
++    SwNodeIndex GetPtNode() { return maStartPos.GetPtNode(); };
++    xub_StrLen GetPtCntnt() { return maStartPos.GetPtCntnt(); };
+ 
++    ::rtl::OUString GetBookmarkName();
++    ::rtl::OUString GetBookmarkType();
++    void SetBookmarkName(::rtl::OUString bookmarkName);
++    void SetBookmarkType(::rtl::OUString bookmarkType);
++    void AddParam(::rtl::OUString name, ::rtl::OUString value);
++    Params_t &getParams();
  };
  
-+class WW8NewFieldCtx
-+{
-+private:
-+	SwNodeIndex maPtNode;
-+    xub_StrLen mnPtCntnt;
-+	::rtl::OUString sBookmarkName;
-+	::rtl::OUString sBookmarkType;
-+	typedef ::std::pair< ::rtl::OUString, ::rtl::OUString> Param_t;
-+	typedef ::std::vector< Param_t > Params_t;
-+	Params_t maParams;
-+  SwPaM * mpPaM;
-+
-+public:
-+	WW8NewFieldCtx(SwPosition &aStartPos, ::rtl::OUString sBookmarkName, ::rtl::OUString sBookmarkType);
-+	~WW8NewFieldCtx();
-+
-+	SwNodeIndex GetPtNode() { return maPtNode; };
-+	xub_StrLen GetPtCntnt() { return mnPtCntnt; };
-+	::rtl::OUString GetBookmarkName();
-+	::rtl::OUString GetBookmarkType();
-+	void AddParam(::rtl::OUString name, ::rtl::OUString value);
-+	void SetCurrentFieldParamsTo(SwFieldBookmark &rFieldBookmark);
-+
-+};
-+
-+
+-
  //-----------------------------------------
  //    Mini-Merker fuer einige Flags
  //-----------------------------------------
-@@ -397,6 +423,7 @@ private:
+@@ -425,7 +420,6 @@ private:
      bool mbWasParaEnd;
      bool mbHasBorder;
      bool mbFirstPara;
-+	std::deque<WW8NewFieldCtx *> maFieldCtxStack;
+-	std::deque<WW8NewFieldCtx *> maFieldCtxStack;
  public:
      WW8ReaderSave(SwWW8ImplReader* pRdr, WW8_CP nStart=-1);
      void Restore(SwWW8ImplReader* pRdr);
-@@ -851,6 +878,9 @@ private:
+@@ -880,9 +874,6 @@ private:
      std::deque<FieldEntry> maFieldStack;
      typedef std::deque<FieldEntry>::const_iterator mycFieldIter;
  
-+	typedef std::deque<WW8NewFieldCtx *> WW8NewFieldCtxStack_t;
-+	WW8NewFieldCtxStack_t maNewFieldCtxStack;
-+
+-	typedef std::deque<WW8NewFieldCtx *> WW8NewFieldCtxStack_t;
+-	WW8NewFieldCtxStack_t maNewFieldCtxStack;
+-
      /*
      A stack of open footnotes. Should only be one in it at any time.
      */
 diff --git a/sw/source/filter/ww8/ww8par3.cxx b/sw/source/filter/ww8/ww8par3.cxx
-index ce79eaf..ea3b681 100644
+index 8915eaf..1c225ec 100644
 --- sw/source/filter/ww8/ww8par3.cxx
 +++ sw/source/filter/ww8/ww8par3.cxx
-@@ -94,9 +94,58 @@
- #include "ww8par.hxx"
- #include "ww8par2.hxx"  // wg. Listen-Attributen in Styles
+@@ -96,6 +96,7 @@
  
-+#include <bookmrk.hxx>	
-+#include <svtools/fltrcfg.hxx>
-+
-+#include <stdio.h>
-+
- using namespace com::sun::star;
+ #include <bookmrk.hxx>	
+ #include <svtools/fltrcfg.hxx>
++#include <ecmaflds.hxx>
+ 
+ #include <stdio.h>
+ 
+@@ -103,49 +104,6 @@ using namespace com::sun::star;
  using namespace sw::util;
  using namespace sw::types;
-+
-+WW8NewFieldCtx::WW8NewFieldCtx(SwPosition &aStartPos, ::rtl::OUString sBookmarkName, ::rtl::OUString sBookmarkType)
-+: maPtNode(aStartPos.nNode), mnPtCntnt(aStartPos.nContent.GetIndex()), 
-+  sBookmarkName(sBookmarkName),
-+  sBookmarkType(sBookmarkType), mpPaM(NULL)
-+{
-+}
-+
-+
-+WW8NewFieldCtx::~WW8NewFieldCtx()
-+{
-+	if (mpPaM) delete mpPaM;
-+}
-+
-+::rtl::OUString WW8NewFieldCtx::GetBookmarkName()
-+{
-+	return sBookmarkName;
-+}
-+
-+::rtl::OUString WW8NewFieldCtx::GetBookmarkType()
-+{
-+	return sBookmarkType;
-+}
-+
-+void WW8NewFieldCtx::AddParam(::rtl::OUString name, ::rtl::OUString value)
-+{
-+	maParams.push_back( Param_t(name, value) );
-+}
-+
-+void WW8NewFieldCtx::SetCurrentFieldParamsTo(SwFieldBookmark &rFieldBookmark)
-+{
-+	for(Params_t::iterator i=maParams.begin();i!=maParams.end();i++) {
-+		::rtl::OUString aName=i->first;
-+		::rtl::OUString aValue=i->second;
-+		if (aName.compareToAscii("Description")==0) {
-+			rFieldBookmark.SetFFHelpText(aValue);
-+		} else if (aName.compareToAscii("Name")==0) {
-+			rFieldBookmark.SetFFName(aValue);
-+		} else if (aName.compareToAscii("Result")==0) {
-+			rFieldBookmark.SetFFRes( aValue.toInt32() );
-+		}
-+	}
-+}
-+
+ 
+-WW8NewFieldCtx::WW8NewFieldCtx(SwPosition &aStartPos, ::rtl::OUString _sBookmarkName, ::rtl::OUString _sBookmarkType)
+-: maPtNode(aStartPos.nNode), mnPtCntnt(aStartPos.nContent.GetIndex()), 
+-  sBookmarkName(_sBookmarkName),
+-  sBookmarkType(_sBookmarkType), mpPaM(NULL)
+-{
+-}
+-
+-
+-WW8NewFieldCtx::~WW8NewFieldCtx()
+-{
+-	if (mpPaM) delete mpPaM;
+-}
+-
+-::rtl::OUString WW8NewFieldCtx::GetBookmarkName()
+-{
+-	return sBookmarkName;
+-}
+-
+-::rtl::OUString WW8NewFieldCtx::GetBookmarkType()
+-{
+-	return sBookmarkType;
+-}
+-
+-void WW8NewFieldCtx::AddParam(::rtl::OUString name, ::rtl::OUString value)
+-{
+-	maParams.push_back( Param_t(name, value) );
+-}
+-
+-void WW8NewFieldCtx::SetCurrentFieldParamsTo(SwFieldBookmark &rFieldBookmark)
+-{
+-	for(Params_t::iterator i=maParams.begin();i!=maParams.end();i++) {
+-		::rtl::OUString aName=i->first;
+-		::rtl::OUString aValue=i->second;
+-		if (aName.compareToAscii("Description")==0) {
+-			rFieldBookmark.SetFFHelpText(aValue);
+-		} else if (aName.compareToAscii("Name")==0) {
+-			rFieldBookmark.SetFFName(aValue);
+-		} else if (aName.compareToAscii("Result")==0) {
+-			rFieldBookmark.SetFFRes( aValue.toInt32() );
+-		}
+-	}
+-}
+-
  //-----------------------------------------
  //            UNO-Controls
  //-----------------------------------------
-@@ -114,8 +163,9 @@ eF_ResT SwWW8ImplReader::Read_F_FormTextBox( WW8FieldDesc* pF, String& rStr )
- {
-     WW8FormulaEditBox aFormula(*this);
+@@ -222,10 +180,10 @@ eF_ResT SwWW8ImplReader::Read_F_FormTextBox( WW8FieldDesc* pF, String& rStr )
  
--    if (0x01 == rStr.GetChar(writer_cast<xub_StrLen>(pF->nLCode-1)))
-+    if (0x01 == rStr.GetChar(writer_cast<xub_StrLen>(pF->nLCode-1))) {
-         ImportFormulaControl(aFormula,pF->nSCode+pF->nLCode-1, WW8_CT_EDIT);
-+    }
  
-     /* #80205#
-     Here we have a small complication. This formula control contains
-@@ -127,23 +177,58 @@ eF_ResT SwWW8ImplReader::Read_F_FormTextBox( WW8FieldDesc* pF, String& rStr )
-     the field result into the formula here in place of the default
-     text.
-     */
--    aFormula.sDefault = GetFieldResult(pF);
+ 	if (aBookmarkName.Len()>0) {
+-		WW8NewFieldCtx *pFieldCtx=new WW8NewFieldCtx(*pPaM->GetPoint(), aBookmarkName, ::rtl::OUString::createFromAscii("ecma.office-open-xml.field.FORMTEXT"));
+-		maNewFieldCtxStack.push_back(pFieldCtx);
+-		pFieldCtx->AddParam(::rtl::OUString::createFromAscii("Description"), aFormula.sToolTip);
+-		pFieldCtx->AddParam(::rtl::OUString::createFromAscii("Name"), aFormula.sTitle);
++	    maFieldStack.back().SetBookmarkName(aBookmarkName);
++	    maFieldStack.back().SetBookmarkType(::rtl::OUString::createFromAscii(ECMA_FORMTEXT));
++	    maFieldStack.back().AddParam(::rtl::OUString::createFromAscii("Description"), aFormula.sToolTip);
++	    maFieldStack.back().AddParam(::rtl::OUString::createFromAscii("Name"), aFormula.sTitle);
+ 	}
+ 	return FLD_TEXT;
+     }
+@@ -269,15 +227,14 @@ eF_ResT SwWW8ImplReader::Read_F_FormCheckBox( WW8FieldDesc* pF, String& rStr )
+ 	}
  
--    //substituting Unicode spacing 0x2002 with double space for layout
--#if 0
--    aFormula.sDefault.SearchAndReplaceAll(
--        String(static_cast< sal_Unicode >(0x2002)),
--        CREATE_CONST_ASC("  "));
--#endif
-+    const SvtFilterOptions* pOpt = SvtFilterOptions::Get();
-+    sal_Bool bUseEnhFields=(pOpt && pOpt->IsUseEnhancedFields());
- 
--    SwInputField aFld((SwInputFieldType*)rDoc.GetSysFldType( RES_INPUTFLD ),
--        aFormula.sDefault , aFormula.sTitle , INP_TXT, 0 );
--    aFld.SetHelp(aFormula.sHelp);
--    aFld.SetToolTip(aFormula.sToolTip);
-+    if (!bUseEnhFields) {
-+	aFormula.sDefault = GetFieldResult(pF);
- 
--    rDoc.Insert(*pPaM, SwFmtFld(aFld), 0);
-+#if 0 // why not? (flr)
-+    //substituting Unicode spacing 0x2002 with double space for layout
-+	aFormula.sDefault.SearchAndReplaceAll(
-+	    String(static_cast< sal_Unicode >(0x2002)),
-+	    CREATE_CONST_ASC("  "));
-+#endif
- 
--    return FLD_OK;
-+	SwInputField aFld((SwInputFieldType*)rDoc.GetSysFldType( RES_INPUTFLD ),
-+			  aFormula.sDefault , aFormula.sTitle , INP_TXT, 0 );
-+	aFld.SetHelp(aFormula.sHelp);
-+	aFld.SetToolTip(aFormula.sToolTip);
-+
-+	rDoc.Insert(*pPaM, SwFmtFld(aFld), 0); 
-+	return FLD_OK;
-+    } else {
-+	WW8PLCFx_Book* pB = pPlcxMan->GetBook();
-+	String aBookmarkName;
-+	if (pB!=NULL) {
-+		WW8_CP currentCP=pF->nSCode;
-+		WW8_CP currentLen=pF->nLen;
-+
-+		USHORT bkmFindIdx;
-+		String aBookmarkFind=pB->GetBookmark(currentCP-1, currentCP+currentLen-1, bkmFindIdx);
-+
-+		if (aBookmarkFind.Len()>0) { 
-+			pB->SetStatus(bkmFindIdx, BOOK_FIELD); // mark bookmark as consumed, such that tl'll not get inserted as a "normal" bookmark again
-+			if (aBookmarkFind.Len()>0) {
-+				aBookmarkName=aBookmarkFind;
-+			}
-+		}
-+	}
-+
-+	if (pB!=NULL && aBookmarkName.Len()==0) {
-+		aBookmarkName=pB->GetUniqueBookmarkName(aFormula.sTitle);
-+	}
-+
-+
-+	if (aBookmarkName.Len()>0) {
-+		WW8NewFieldCtx *pFieldCtx=new WW8NewFieldCtx(*pPaM->GetPoint(), aBookmarkName, ::rtl::OUString::createFromAscii("ecma.office-open-xml.field.FORMTEXT"));
-+		maNewFieldCtxStack.push_back(pFieldCtx);
-+		pFieldCtx->AddParam(::rtl::OUString::createFromAscii("Description"), aFormula.sToolTip);
-+		pFieldCtx->AddParam(::rtl::OUString::createFromAscii("Name"), aFormula.sTitle);
-+	}
-+	return FLD_TEXT;
-+    }
- }
- 
- eF_ResT SwWW8ImplReader::Read_F_FormCheckBox( WW8FieldDesc* pF, String& rStr )
-@@ -155,9 +240,47 @@ eF_ResT SwWW8ImplReader::Read_F_FormCheckBox( WW8FieldDesc* pF, String& rStr )
- 
-     if (0x01 == rStr.GetChar(writer_cast<xub_StrLen>(pF->nLCode-1)))
-         ImportFormulaControl(aFormula,pF->nSCode+pF->nLCode-1, WW8_CT_CHECKBOX);
--
--    pFormImpl->InsertFormula(aFormula);
--    return FLD_OK;
-+    const SvtFilterOptions* pOpt = SvtFilterOptions::Get();
-+    sal_Bool bUseEnhFields=(pOpt && pOpt->IsUseEnhancedFields());
-+
-+    if (!bUseEnhFields) {
-+	pFormImpl->InsertFormula(aFormula); 
-+	return FLD_OK;
-+    } else {
-+	String aBookmarkName;
-+	WW8PLCFx_Book* pB = pPlcxMan->GetBook();
-+	if (pB!=NULL) {
-+		WW8_CP currentCP=pF->nSCode;
-+		WW8_CP currentLen=pF->nLen;
-+
-+		USHORT bkmFindIdx;
-+		String aBookmarkFind=pB->GetBookmark(currentCP-1, currentCP+currentLen-1, bkmFindIdx);
-+
-+		if (aBookmarkFind.Len()>0) { 
-+			pB->SetStatus(bkmFindIdx, BOOK_FIELD); // mark as consumed by field
-+			if (aBookmarkFind.Len()>0) {
-+				aBookmarkName=aBookmarkFind;
-+			}
-+		}
-+	}
-+
-+	if (pB!=NULL && aBookmarkName.Len()==0) {
-+		aBookmarkName=pB->GetUniqueBookmarkName(aFormula.sTitle);
-+	}
-+
-+	if (aBookmarkName.Len()>0) {
-+		SwFieldBookmark *pFieldmark=(SwFieldBookmark*)rDoc.makeBookmark(*pPaM, KeyCode(), aBookmarkName, String(), IDocumentBookmarkAccess::FORM_FIELDMARK_NO_TEXT);
-+		ASSERT(pFieldmark!=NULL, "hmmm; why was the bookmark not created?");
-+		if (pFieldmark!=NULL) {
-+			pFieldmark->SetType(1); // 0==Checkbox
-+			pFieldmark->SetFFName(aFormula.sTitle);
-+			pFieldmark->SetFFHelpText(aFormula.sToolTip);
-+			pFieldmark->SetChecked(aFormula.nChecked!=0);
-+			// set field data here...
-+		}
-+	}
-+	return FLD_OK;
-+    }
- }
- 
- eF_ResT SwWW8ImplReader::Read_F_FormListBox( WW8FieldDesc* pF, String& rStr)
-@@ -167,24 +290,72 @@ eF_ResT SwWW8ImplReader::Read_F_FormListBox( WW8FieldDesc* pF, String& rStr)
+ 	if (aBookmarkName.Len()>0) {
+-		SwFieldBookmark *pFieldmark=(SwFieldBookmark*)rDoc.makeBookmark(*pPaM, KeyCode(), aBookmarkName, String(), IDocumentBookmarkAccess::FORM_FIELDMARK_NO_TEXT);
+-		ASSERT(pFieldmark!=NULL, "hmmm; why was the bookmark not created?");
+-		if (pFieldmark!=NULL) {
+-			pFieldmark->SetFieldType(1); // 0==Checkbox
+-			pFieldmark->SetFFName(aFormula.sTitle);
+-			pFieldmark->SetFFHelpText(aFormula.sToolTip);
+-			pFieldmark->SetChecked(aFormula.nChecked!=0);
+-			// set field data here...
+-		}
++	    SwFieldBookmark *pFieldmark=(SwFieldBookmark*)rDoc.makeNoTextFieldBookmark(*pPaM, aBookmarkName, rtl::OUString::createFromAscii(ECMA_FORMCHECKBOX));
++	    ASSERT(pFieldmark!=NULL, "hmmm; why was the bookmark not created?");
++	    if (pFieldmark!=NULL) {
++		pFieldmark->addParam(rtl::OUString::createFromAscii(ECMA_FORMCHECKBOX_NAME), aFormula.sTitle);
++		pFieldmark->addParam(rtl::OUString::createFromAscii(ECMA_FORMCHECKBOX_HELPTEXT), aFormula.sToolTip);
++		pFieldmark->addParam(rtl::OUString::createFromAscii(ECMA_FORMCHECKBOX_CHECKED), ::rtl::OUString::createFromAscii(aFormula.nChecked!=0?"on":"off"));
++		// set field data here...
++	    }
+ 	}
+ 	return FLD_OK;
+     }
+@@ -290,24 +247,70 @@ eF_ResT SwWW8ImplReader::Read_F_FormListBox( WW8FieldDesc* pF, String& rStr)
      if (0x01 == rStr.GetChar(writer_cast<xub_StrLen>(pF->nLCode-1)))
          ImportFormulaControl(aFormula,pF->nSCode+pF->nLCode-1, WW8_CT_DROPDOWN);
  
 -    SwDropDownField aFld(
 -        (SwDropDownFieldType*)rDoc.GetSysFldType(RES_DROPDOWN));
--
++    const SvtFilterOptions* pOpt = SvtFilterOptions::Get();
++    sal_Bool bUseEnhFields=(pOpt && pOpt->IsUseEnhancedFields());
+ 
 -    aFld.SetName(aFormula.sTitle);
 -    aFld.SetHelp(aFormula.sHelp);
 -    aFld.SetToolTip(aFormula.sToolTip);
--
++    if (!bUseEnhFields) {
++	SwDropDownField aFld(
++	    (SwDropDownFieldType*)rDoc.GetSysFldType(RES_DROPDOWN));
+ 
 -    if (!aFormula.maListEntries.empty())
 -    {
 -        aFld.SetItems(aFormula.maListEntries);
 -        int nIndex = aFormula.fDropdownIndex  < aFormula.maListEntries.size()
 -            ? aFormula.fDropdownIndex : 0;
 -        aFld.SetSelectedItem(aFormula.maListEntries[nIndex]);
-+    const SvtFilterOptions* pOpt = SvtFilterOptions::Get();
-+    sal_Bool bUseEnhFields=(pOpt && pOpt->IsUseEnhancedFields());
-+
-+    if (!bUseEnhFields) {
-+	SwDropDownField aFld(
-+	    (SwDropDownFieldType*)rDoc.GetSysFldType(RES_DROPDOWN));
-+
+-    }
 +	aFld.SetName(aFormula.sTitle);
 +	aFld.SetHelp(aFormula.sHelp);
 +	aFld.SetToolTip(aFormula.sToolTip);
@@ -2569,269 +1780,285 @@ index ce79eaf..ea3b681 100644
 +			}
 +		}
 +	}
-+
+ 
+-    rDoc.Insert(*pPaM, SwFmtFld(aFld), 0);
 +	if (pB!=NULL && aBookmarkName.Len()==0) {
 +		aBookmarkName=pB->GetUniqueBookmarkName(aFormula.sTitle);
 +	}
 +
 +	if (aBookmarkName.Len()>0) {
-+		SwFieldBookmark *pFieldmark=(SwFieldBookmark*)rDoc.makeBookmark(*pPaM, KeyCode(), aBookmarkName, String(), IDocumentBookmarkAccess::FORM_FIELDMARK_NO_TEXT);
-+		ASSERT(pFieldmark!=NULL, "hmmm; why was the bookmark not created?");
-+		if (pFieldmark!=NULL) {
-+			pFieldmark->SetType(2); // 0==Checkbox
-+//			pFieldmark->SetFFName(aFormula.sTitle);
-+//			pFieldmark->SetFFHelpText(aFormula.sToolTip);
-+//			pFieldmark->SetChecked(aFormula.nChecked!=0);
-+			// set field data here...
-+			std::vector<String>::iterator it=aFormula.maListEntries.begin();
-+			for(;it!=aFormula.maListEntries.end();it++) {
-+			    pFieldmark->addListItem(*it);
-+			}
-+			pFieldmark->setCurrentListItem(aFormula.fDropdownIndex);
++	    SwFieldBookmark *pFieldmark=(SwFieldBookmark*)rDoc.makeNoTextFieldBookmark(*pPaM, aBookmarkName, ::rtl::OUString::createFromAscii(ECMA_FORMDROPDOWN));
++	    ASSERT(pFieldmark!=NULL, "hmmm; why was the bookmark not created?");
++	    if (pFieldmark!=NULL) {
++		rtl::OUString sListEntry=rtl::OUString::createFromAscii(ECMA_FORMDROPDOWN_LISTENTRY);
++		std::vector<String>::iterator it=aFormula.maListEntries.begin();
++		for(;it!=aFormula.maListEntries.end();it++) {
++		    pFieldmark->addParam(sListEntry, *it, false);
 +		}
++		int nIndex = aFormula.fDropdownIndex  < aFormula.maListEntries.size() ? aFormula.fDropdownIndex : 0;
++		pFieldmark->addParam(ECMA_FORMDROPDOWN_RESULT, nIndex);
++		// set field data here...
++	    }
 +	}
 +
 +	return FLD_OK;
-     }
++    }
  
--    rDoc.Insert(*pPaM, SwFmtFld(aFld), 0);
--
 -    return FLD_OK;
  }
  
  void SwWW8ImplReader::DeleteFormImpl()
-@@ -1968,6 +2139,18 @@ bool SwWW8ImplReader::ImportFormulaControl(WW8FormulaControl &aFormula,
+@@ -2097,11 +2100,18 @@ bool SwWW8ImplReader::ImportFormulaControl(WW8FormulaControl &aFormula,
+ 
      if((aPic.lcb > 0x3A) && !pDataStream->GetError() )
      {
-         pDataStream->Seek( nPicLocFc + aPic.cbHeader );
+-        pDataStream->Seek( nPicLocFc + aPic.cbHeader );
 +#if 0 // some debug fun; remove this later...
-+		int len=aPic.lcb-aPic.cbHeader;
-+		char *pBuf=(char*)malloc(len);
-+		pDataStream->Read( pBuf, len);
+ 		int len=aPic.lcb-aPic.cbHeader;
+ 		char *pBuf=(char*)malloc(len);
+ 		pDataStream->Read( pBuf, len);
 +	static int _h=0;
 +	char fname[255];
 +	sprintf(fname, "data%03i.data", _h++);
 +	FILE *out=fopen(fname, "wb");
 +	fwrite(pBuf, len, 1, out);
 +	fclose(out);
-+        pDataStream->Seek( nPicLocFc + aPic.cbHeader );
+         pDataStream->Seek( nPicLocFc + aPic.cbHeader );
 +#endif
          aFormula.FormulaRead(nWhich,pDataStream);
          bRet = true;
      }
 diff --git a/sw/source/filter/ww8/ww8par5.cxx b/sw/source/filter/ww8/ww8par5.cxx
-index c71044b..eca252a 100644
+index ff6bf5b..3c103bb 100644
 --- sw/source/filter/ww8/ww8par5.cxx
 +++ sw/source/filter/ww8/ww8par5.cxx
-@@ -323,7 +323,7 @@ long SwWW8ImplReader::Read_Book(WW8PLCFManResult*)
-     if (pB->GetIsEnd())
-     {
-         pReffedStck->SetAttr(*pPaM->GetPoint(), RES_FLTR_BOOKMARK, true,
--            pB->GetHandle());
-+            pB->GetHandle(), (eB & BOOK_FIELD)!=0);
+@@ -96,6 +96,7 @@
+ #include "ww8par2.hxx"
+ #include "writerhelper.hxx"
+ #include "fields.hxx"
++#include <svtools/fltrcfg.hxx>
+ 
+ #include <algorithm> // #i24377#
+ 
+@@ -329,9 +330,11 @@ long SwWW8ImplReader::Read_Book(WW8PLCFManResult*)
+ 
+     //"_Toc*" and "_Hlt*" are unnecessary
+     const String* pName = pB->GetName();
++#if 0
+     if(    !pName || pName->EqualsIgnoreCaseAscii( "_Toc", 0, 4 )
+         || pName->EqualsIgnoreCaseAscii( "_Hlt", 0, 4 ) )
          return 0;
-     }
++#endif 
  
-diff --git a/sw/source/filter/ww8/ww8scan.cxx b/sw/source/filter/ww8/ww8scan.cxx
-index 6050423..a9cdb03 100644
---- sw/source/filter/ww8/ww8scan.cxx
-+++ sw/source/filter/ww8/ww8scan.cxx
-@@ -3951,7 +3951,7 @@ void WW8ReadSTTBF(bool bVer8, SvStream& rStrm, UINT32 nStart, INT32 nLen,
- }
+     //JP 16.11.98: ToUpper darf auf keinen Fall gemacht werden, weil der
+     //Bookmark- name ein Hyperlink-Ziel sein kann!
+@@ -673,6 +676,9 @@ sal_uInt16 SwWW8ImplReader::End_Field()
+     if (!pF || !pF->EndPosIsFieldEnd())
+         return nRet;
  
- WW8PLCFx_Book::WW8PLCFx_Book(SvStream* pTblSt, const WW8Fib& rFib)
--    : WW8PLCFx(rFib.GetFIBVersion(), false), pStatus(0), nIsEnd(0)
-+    : WW8PLCFx(rFib.GetFIBVersion(), false), pStatus(0), nIsEnd(0), nBookmarkId(1)
- {
-     if( !rFib.fcPlcfbkf || !rFib.lcbPlcfbkf || !rFib.fcPlcfbkl ||
-         !rFib.lcbPlcfbkl || !rFib.fcSttbfbkmk || !rFib.lcbSttbfbkmk )
-@@ -4162,6 +4162,26 @@ String WW8PLCFx_Book::GetBookmark(long nStart,long nEnd, USHORT &nIndex)
-     return bFound ? aBookNames[i] : aEmptyStr;
- }
- 
-+String WW8PLCFx_Book::GetUniqueBookmarkName(String &suggestedName)
-+{
-+	String aRet=(suggestedName.Len()==0?String::CreateFromAscii("Unnamed"):suggestedName);
-+	int i=0;
-+	while(i<aBookNames.size()) {
-+		String &s=aBookNames[i];
-+		if (aRet.CompareTo(s)==0) {
-+			int len=aRet.Len();
-+			int p=len-1;
-+			while(p>0 && aRet.GetChar(p)>='0' && aRet.GetChar(p)<='9') p--;
-+			aRet=String(aRet, 0, p+1);
-+			aRet += String::CreateFromInt32( nBookmarkId++ );
-+			i=0; // start search from beginning
-+		} else {
-+			i++;
++    const SvtFilterOptions* pOpt = SvtFilterOptions::Get();
++    sal_Bool bUseEnhFields=(pOpt && pOpt->IsUseEnhancedFields());
++
+     ASSERT(!maFieldStack.empty(), "Empty field stack\n");
+     if (!maFieldStack.empty())
+     {
+@@ -684,8 +690,34 @@ sal_uInt16 SwWW8ImplReader::End_Field()
+         nRet = maFieldStack.back().mnFieldId;
+         switch (nRet)
+         {
+-            case 88:
+-                pCtrlStck->SetAttr(*pPaM->GetPoint(),RES_TXTATR_INETFMT);
++	    case 70:
++		if (bUseEnhFields && pPaM!=NULL && pPaM->GetPoint()!=NULL) {
++		    SwPosition aEndPos = *pPaM->GetPoint();
++		    SwPaM aFldPam( maFieldStack.back().GetPtNode(), maFieldStack.back().GetPtCntnt(), aEndPos.nNode, aEndPos.nContent.GetIndex());
++		    SwFieldBookmark *pFieldmark=(SwFieldBookmark*)rDoc.makeFieldBookmark(aFldPam, maFieldStack.back().GetBookmarkName(), ::rtl::OUString::createFromAscii(ECMA_FORMTEXT));
++		    ASSERT(pFieldmark!=NULL, "hmmm; why was the bookmark not created?");
++		    if (pFieldmark!=NULL) {
++			pFieldmark->addParams(maFieldStack.back().getParams());
++		    }
 +		}
-+	}
-+	return aRet;
++		break;
++	    case 8: // TOX_INDEX
++	    case 13: // TOX_CONTENT
++	    case 88: // HYPERLINK
++	    case 37: // REF
++		if (pPaM!=NULL && pPaM->GetPoint()!=NULL) {
++		    
++		    SwPosition aEndPos = *pPaM->GetPoint();
++		    SwPaM aFldPam( maFieldStack.back().GetPtNode(), maFieldStack.back().GetPtCntnt(), aEndPos.nNode, aEndPos.nContent.GetIndex());
++		    SwFieldBookmark *pFieldmark=(SwFieldBookmark*)rDoc.makeFieldBookmark(aFldPam, maFieldStack.back().GetBookmarkName(), maFieldStack.back().GetBookmarkType());
++		    ASSERT(pFieldmark!=NULL, "hmmm; why was the bookmark not created?");
++		    if (pFieldmark!=NULL) {
++			pFieldmark->addParams(maFieldStack.back().getParams());
++		    }
++		}
++		break;	       
++//            case 88:
++//                pCtrlStck->SetAttr(*pPaM->GetPoint(),RES_TXTATR_INETFMT);
+             break;
+             case 36:
+             case 68:
+@@ -704,6 +736,8 @@ bool AcceptableNestedField(sal_uInt16 nFieldCode)
+ {
+     switch (nFieldCode)
+     {
++	case 8:  // allow recursive field in TOC...
++	case 13: // allow recursive field in TOC...
+         case 36:
+         case 68:
+         case 79:
+@@ -742,6 +776,36 @@ FieldEntry &FieldEntry::operator=(const FieldEntry &rOther) throw()
+     return *this;
+ }
+ 
++::rtl::OUString FieldEntry::GetBookmarkName()
++{
++	return sBookmarkName;
 +}
 +
- bool WW8PLCFx_Book::MapName(String& rName)
++::rtl::OUString FieldEntry::GetBookmarkType()
++{
++	return sBookmarkType;
++}
++
++void FieldEntry::SetBookmarkName(::rtl::OUString bookmarkName) 
++{
++    sBookmarkName=bookmarkName;
++}
++
++void FieldEntry::SetBookmarkType(::rtl::OUString bookmarkType)
++{
++    sBookmarkType=bookmarkType;
++}
++
++void FieldEntry::AddParam(::rtl::OUString name, ::rtl::OUString value)
++{
++    maParams.push_back( SwFieldBookmark::ParamPair_t(name, value) );
++}
++
++FieldEntry::Params_t &FieldEntry::getParams() {
++    return maParams;
++}
++
++
+ // Read_Field liest ein Feld ein oder, wenn es nicht gelesen werden kann,
+ // wird 0 zurueckgegeben, so dass das Feld vom Aufrufer textuell gelesen wird.
+ // Returnwert: Gesamtlaenge des Feldes ( zum UEberlesen )
+@@ -2066,6 +2130,16 @@ eF_ResT SwWW8ImplReader::Read_F_PgRef( WW8FieldDesc*, String& rStr )
+ 
+     String sName(GetMappedBookmark(sOrigName));
+ 
++    if (1) {
++	::rtl::OUString aBookmarkName=::rtl::OUString::createFromAscii("_REF");
++	maFieldStack.back().SetBookmarkName(aBookmarkName);
++	maFieldStack.back().SetBookmarkType(::rtl::OUString::createFromAscii(ECMA_PAGEREF));
++	maFieldStack.back().AddParam(rtl::OUString(), sName);
++	return FLD_TEXT;
++    }
++
++
++
+     SwGetRefField aFld(
+         (SwGetRefFieldType*)rDoc.GetSysFldType( RES_GETREFFLD ), sName,
+         REF_BOOKMARK, 0, REF_PAGE );
+@@ -2728,6 +2802,14 @@ bool wwSectionManager::WillHavePageDescHere(SwNodeIndex aIdx) const
+ 
+ eF_ResT SwWW8ImplReader::Read_F_Tox( WW8FieldDesc* pF, String& rStr )
  {
-     if( !pBook[0] || !pBook[1] )
-diff --git a/sw/source/filter/ww8/ww8scan.hxx b/sw/source/filter/ww8/ww8scan.hxx
-index c20a112..b43ad9d 100644
---- sw/source/filter/ww8/ww8scan.hxx
-+++ sw/source/filter/ww8/ww8scan.hxx
-@@ -707,7 +707,7 @@ public:
-     bool GetPara(long nIdx, WW8FieldDesc& rF);
- };
++    if (1) {
++	::rtl::OUString aBookmarkName=::rtl::OUString::createFromAscii("_TOC");
++	maFieldStack.back().SetBookmarkName(aBookmarkName);
++	maFieldStack.back().SetBookmarkType(::rtl::OUString::createFromAscii(ECMA_TOC));
++//     maFieldStack.back().AddParam(::rtl::OUString::createFromAscii("Description"), aFormula.sToolTip);
++	return FLD_TEXT;
++    }
++
+     if (pF->nLRes < 3)
+         return FLD_TEXT;      // ignore (#i25440#)
  
--enum eBookStatus { BOOK_NORMAL = 0, BOOK_IGNORE = 0x1 };
-+enum eBookStatus { BOOK_NORMAL = 0, BOOK_IGNORE = 0x1, BOOK_FIELD = 0x2 };
+@@ -3245,6 +3327,14 @@ eF_ResT SwWW8ImplReader::Read_F_Shape(WW8FieldDesc* /*pF*/, String& /*rStr*/)
  
- // Iterator for Booknotes
- class WW8PLCFx_Book : public WW8PLCFx
-@@ -718,6 +718,7 @@ private:
-     eBookStatus* pStatus;
-     long nIMax;                         // Number of Booknotes
-     USHORT nIsEnd;
-+	int nBookmarkId; // counter incremented by GetUniqueBookmarkName.
-     
-     //No copying
-     WW8PLCFx_Book(const WW8PLCFx_Book&);
-@@ -744,6 +745,7 @@ public:
-     bool MapName(String& rName);
-     String GetBookmark(long nStart,long nEnd, USHORT &nIndex);
-     eBookStatus GetStatus() const;
-+	String GetUniqueBookmarkName(String &suggestedName);
- };
- 
- /*
+ eF_ResT SwWW8ImplReader::Read_F_Hyperlink( WW8FieldDesc* /*pF*/, String& rStr )
+ {
++    if (1) {
++	::rtl::OUString aBookmarkName=::rtl::OUString::createFromAscii("_HYPERLINK");
++	maFieldStack.back().SetBookmarkName(aBookmarkName);
++	maFieldStack.back().SetBookmarkType(::rtl::OUString::createFromAscii(ECMA_HYPERLINK));
++//     maFieldStack.back().AddParam(::rtl::OUString::createFromAscii("Description"), aFormula.sToolTip);
++	return FLD_TEXT;
++    }
++
+     String sURL, sTarget, sMark;
+     bool bDataImport = false;
+     //HYPERLINk "filename" [switches]
 diff --git a/sw/source/ui/docvw/edtwin.cxx b/sw/source/ui/docvw/edtwin.cxx
-index b288da4..1e57a48 100644
+index 1cd517c..7d509f0 100644
 --- sw/source/ui/docvw/edtwin.cxx
 +++ sw/source/ui/docvw/edtwin.cxx
-@@ -152,6 +152,9 @@
+@@ -151,6 +151,7 @@
+ 
+ #include <bookmrk.hxx>
+ #include <doc.hxx>
++#include <ecmaflds.hxx>
+ 
  #include "PostItMgr.hxx"
  #include "postit.hxx"
- 
-+#include <bookmrk.hxx>
-+#include <doc.hxx>
-+
- //JP 11.10.2001: enable test code for bug fix 91313
- #if !defined( PRODUCT ) && (OSL_DEBUG_LEVEL > 1)
- //#define TEST_FOR_BUG91313
-@@ -1449,6 +1452,10 @@ void SwEditWin::KeyInput(const KeyEvent &rKEvt)
-                        KS_Fly_Change, KS_Draw_Change,
-                        KS_SpecialInsert,
-                        KS_EnterCharCell,
-+
-+		       KS_GotoNextFieldBookmark,
-+		       KS_GotoPrevFieldBookmark,
-+
-                        KS_Ende };
- 
- 	SW_KeyState eKeyState = bIsDocReadOnly ? KS_CheckDocReadOnlyKeys
-@@ -1863,10 +1870,15 @@ KEYINPUT_CHECKTABLE_INSDEL:
- 					}
-                 case KEY_TAB:
- 				{
-+				    sal_Unicode ch=rSh.GetChar();
-+
- #ifdef SW_CRSR_TIMER
- 					BOOL bOld = rSh.ChgCrsrTimerFlag( FALSE );
- #endif
--					if( rSh.GetCurNumRule() && rSh.IsSttOfPara() &&
-+					if (rSh.IsFormProtected() || rSh.IsInFieldBookmark()!=NULL || rSh.GetChar(FALSE)==CH_TXT_ATR_FORMELEMENT) {
-+					    eKeyState=KS_GotoNextFieldBookmark; 
-+					}
-+					else if( rSh.GetCurNumRule() && rSh.IsSttOfPara() &&
- 						!rSh.HasReadonlySel() )
-                     {
-                         // --> OD 2007-10-02 #b660435#
-@@ -1915,8 +1927,11 @@ KEYINPUT_CHECKTABLE_INSDEL:
- #ifdef SW_CRSR_TIMER
- 					BOOL bOld = rSh.ChgCrsrTimerFlag( FALSE );
- #endif
--					if( rSh.GetCurNumRule() && rSh.IsSttOfPara() &&
--						!rSh.HasReadonlySel() )
-+					if (rSh.IsFormProtected() || rSh.IsInFieldBookmark()!=NULL || rSh.GetChar(FALSE)==CH_TXT_ATR_FORMELEMENT) {
-+					    eKeyState=KS_GotoPrevFieldBookmark; 
-+					}
-+					else if( rSh.GetCurNumRule() && rSh.IsSttOfPara() &&
-+						 !rSh.HasReadonlySel() )
-                     {
-                         // --> OD 2007-10-02 #b660435#
- //                        if (rSh.IsFirstOfNumRule()) // #i23725#
-@@ -2180,7 +2195,37 @@ KEYINPUT_CHECKTABLE_INSDEL:
- 			aCh = '\t';
- 			// kein break!
- 		case KS_InsChar:
--		if( !rSh.HasReadonlySel() )
-+		if (rSh.GetChar(FALSE)==CH_TXT_ATR_FORMELEMENT) {
-+		    SwFieldBookmark *fieldBM=rSh.IsInFormFieldBookmark(); //$flr refactor!!!
-+   		    ASSERT(fieldBM!=NULL, "Where is my FieldBookmark??");
-+		    if (fieldBM!=NULL) {
-+			switch (fieldBM->GetType()) {
-+			    case 0: // TEXT
-+				assert(0); // should not happen; since "TEXT" should never get CH_TXT_ATR_FORMELEMENT...
-+				break;
-+			    case 1: // CHECKBOX
-+				fieldBM->SetChecked(!fieldBM->IsChecked());
-+				fieldBM->invalidate();
-+				rSh.InvalidateWindows(rView.GetVisArea());
-+				break;
-+			    case 2: // LIST
-+				if (fieldBM && fieldBM->getListItems()>0) {
-+				    int li=fieldBM->getCurrentListItem()+1;
-+				    if (li>=fieldBM->getListItems()) {
-+					li=0;
-+				    }
-+				    fieldBM->setCurrentListItem(li);
-+				}
-+				fieldBM->invalidate();
-+				rSh.InvalidateWindows(rView.GetVisArea());
-+				break;
-+			    default:
-+				break;				
-+			}			
-+		    }
-+//		    rSh.Overwrite(String('X'));
-+		    eKeyState = KS_Ende;
-+		} else if( !rSh.HasReadonlySel() )
- 		{
- 			BOOL bIsNormalChar = GetAppCharClass().isLetterNumeric(
- 														String( aCh ), 0 );
-@@ -2291,6 +2336,24 @@ KEYINPUT_CHECKTABLE_INSDEL:
-                 nKS_NUMINDENTINC_Count = 2;
-                 break;
- 
-+	    case KS_GotoNextFieldBookmark:	    
-+	    {
-+		SwBookmark *pBM=rSh.GetNextFieldBookmark();
-+		if (pBM!=NULL) {
-+		    rSh.GotoFieldBookmark(pBM);
-+		}
-+	    }
-+	        break;
-+
-+	    case KS_GotoPrevFieldBookmark:	    
-+	    {
-+		SwBookmark *pBM=rSh.GetPrevFieldBookmark();
-+		if (pBM!=NULL) {
-+		    rSh.GotoFieldBookmark(pBM);
-+		}
-+	    }
-+	        break;
-+
-             case KS_NumIndentDec:
-                 // --> OD 2008-06-16 #i90078#
-                 rSh.ChangeIndentOfAllListLevels(-360);
-@@ -4094,7 +4157,8 @@ void SwEditWin::MouseButtonUp(const MouseEvent& rMEvt)
+@@ -2220,21 +2221,31 @@ KEYINPUT_CHECKTABLE_INSDEL:
+ 		    SwFieldBookmark *fieldBM=rSh.IsInFormFieldBookmark(); //$flr refactor!!!
+    		    ASSERT(fieldBM!=NULL, "Where is my FieldBookmark??");
+ 		    if (fieldBM!=NULL) {
+-			fieldBM->SetChecked(!fieldBM->IsChecked());
+-			SwDocShell* pDocSh = rView.GetDocShell();
+-			SwDoc *pDoc=pDocSh->GetDoc();
+-			ASSERT(fieldBM->GetOtherBookmarkPos()!=NULL, "where is the otherpos?");
+-			if (fieldBM->GetOtherBookmarkPos()!=NULL) {
+-			    SwPaM aPaM(fieldBM->GetBookmarkPos(), *fieldBM->GetOtherBookmarkPos());
+-			    if (0) {
+-				rSh.StartAllAction();  //$flr TODO: understand why this not works
+-				pDoc->SetModified(aPaM);
+-				rSh.EndAllAction();
+-			    } else {
+-				rSh.CalcLayout(); // workaround
++			if (fieldBM->isType(ECMA_FORMCHECKBOX)) {
++			    bool isChecked=fieldBM->getParam(ECMA_FORMCHECKBOX_CHECKED).second.compareToAscii("on")==0;
++			    printf("checked-before=%i\n", isChecked);
++			    isChecked=!isChecked; // swap it...
++			    printf("checked-after=%i\n", isChecked);
++			    fieldBM->addParam(rtl::OUString::createFromAscii(ECMA_FORMCHECKBOX_CHECKED), rtl::OUString::createFromAscii(isChecked?"on":"off"));
++			    printf("checked-after-add=%i\n", fieldBM->getParam(ECMA_FORMCHECKBOX_CHECKED).second.compareToAscii("on")==0);
++			    fieldBM->invalidate();
++			}
++			if (fieldBM->isType(ECMA_FORMDROPDOWN)) {
++			    int currentIndex=fieldBM->getParam(ECMA_FORMDROPDOWN_RESULT, "0").second.toInt32();
++			    int entries=0;
++			    for(int i=0;i<fieldBM->getNumOfParams();i++) {
++				SwFieldBookmark::ParamPair_t p=fieldBM->getParam(i);
++				if (p.first.compareToAscii(ECMA_FORMDROPDOWN_LISTENTRY)==0)
++				    entries++;
++			    }
++			    currentIndex++;
++			    if (currentIndex>=entries) {
++				currentIndex=0;
+ 			    }
++			    fieldBM->addParam(ECMA_FORMDROPDOWN_RESULT, currentIndex);
++			    fieldBM->invalidate();
++			    rSh.InvalidateWindows(rView.GetVisArea());
+ 			}
+-			
+ 		    }
+ //		    rSh.Overwrite(String('X'));
+ 		    eKeyState = KS_Ende;
+@@ -4170,7 +4181,7 @@ void SwEditWin::MouseButtonUp(const MouseEvent& rMEvt)
  
                          SwContentAtPos aCntntAtPos( SwContentAtPos::SW_CLICKFIELD |
  													SwContentAtPos::SW_INETATTR |
 -                                                    SwContentAtPos::SW_SMARTTAG );
-+                                                    SwContentAtPos::SW_SMARTTAG |
-+			    SwContentAtPos::SW_FORMCTRL);
++                                                    SwContentAtPos::SW_SMARTTAG  | SwContentAtPos::SW_FORMCTRL);
  
  						if( rSh.GetContentAtPos( aDocPt, aCntntAtPos, TRUE ) )
  						{
-@@ -4115,7 +4179,34 @@ void SwEditWin::MouseButtonUp(const MouseEvent& rMEvt)
+@@ -4191,7 +4202,29 @@ void SwEditWin::MouseButtonUp(const MouseEvent& rMEvt)
                                      if ( bExecSmarttags && SwSmartTagMgr::Get().IsSmartTagsEnabled() )
                                          rView.ExecSmartTagPopup( aDocPt );
                              }
@@ -2843,24 +2070,19 @@ index b288da4..1e57a48 100644
 +				    SwFieldBookmark *fieldBM=const_cast<SwFieldBookmark *>(aCntntAtPos.aFnd.pFldBookmark);
 +				    SwDocShell* pDocSh = rView.GetDocShell();
 +				    SwDoc *pDoc=pDocSh->GetDoc();
-+				    switch(fieldBM->GetType()) {
-+					case 0: // Text
-+					    assert(0); // should not happend; a "text" has not SW_FORMCTRL content pos...
-+					    break;
-+					case 1: // CheckBox
-+					    fieldBM->SetChecked(!fieldBM->IsChecked());
-+					    fieldBM->invalidate();
-+					    rSh.InvalidateWindows(rView.GetVisArea());
-+					    break;
-+					case 2: // List
-+					    rView.ExecFieldPopup( aDocPt, fieldBM );
-+					    fieldBM->invalidate();
-+					    rSh.InvalidateWindows(rView.GetVisArea());
-+					    break;
-+					default: 
-+					    break;
++				    if (fieldBM->isType(ECMA_FORMCHECKBOX)) {
++					bool isChecked=fieldBM->getParam(ECMA_FORMCHECKBOX_CHECKED).second.compareToAscii("on")==0;
++					isChecked=!isChecked; // swap it...
++					fieldBM->addParam(rtl::OUString::createFromAscii(ECMA_FORMCHECKBOX_CHECKED), rtl::OUString::createFromAscii(isChecked?"on":"off"));
++					fieldBM->invalidate();
++					rSh.InvalidateWindows(rView.GetVisArea());
++				    } else if (fieldBM->isType(ECMA_FORMDROPDOWN)) {
++					rView.ExecFieldPopup( aDocPt, fieldBM );
++					fieldBM->invalidate();
++					rSh.InvalidateWindows(rView.GetVisArea());
++				    } else {
++					// unknown type..
 +				    }
-+
 +				}
 +			    }
 +			    else // if ( SwContentAtPos::SW_INETATTR == aCntntAtPos.eCntntAtPos )
@@ -2868,7 +2090,7 @@ index b288da4..1e57a48 100644
                                  if ( bExecHyperlinks )
                                      rSh.ClickToINetAttr( *(SwFmtINetFmt*)aCntntAtPos.aFnd.pAttr, nFilter );
 diff --git a/sw/source/ui/inc/view.hxx b/sw/source/ui/inc/view.hxx
-index dc74558..1fe66b1 100644
+index dc74558..83334eb 100644
 --- sw/source/ui/inc/view.hxx
 +++ sw/source/ui/inc/view.hxx
 @@ -93,6 +93,7 @@ struct SwConversionArgs;
@@ -2879,43 +2101,48 @@ index dc74558..1fe66b1 100644
  	
  namespace com{ namespace sun { namespace star {
  	namespace view{ class XSelectionSupplier; }
-@@ -463,6 +464,7 @@ public:
+@@ -462,7 +463,7 @@ public:
+ 
  	DECL_LINK( SpellError, LanguageType * );
  	BOOL 			ExecSpellPopup( const Point& rPt );
- 
-+        BOOL            ExecFieldPopup( const Point& rPt, SwFieldBookmark *fieldBM );
+-
++    BOOL            ExecFieldPopup( const Point& rPt, SwFieldBookmark *fieldBM );
      // SMARTTAGS
      BOOL            ExecSmartTagPopup( const Point& rPt );
  
 diff --git a/sw/source/ui/inc/wrtsh.hxx b/sw/source/ui/inc/wrtsh.hxx
-index a4273e5..e4ee381 100644
+index 437101a..aedd1ca 100644
 --- sw/source/ui/inc/wrtsh.hxx
 +++ sw/source/ui/inc/wrtsh.hxx
-@@ -415,6 +415,8 @@ typedef BOOL (SwWrtShell:: *FNSimpleMove)();
+@@ -319,6 +319,9 @@ typedef BOOL (SwWrtShell:: *FNSimpleMove)();
+ 	void	InsertTableOf(const SwTOXBase& rTOX, const SfxItemSet* pSet = 0);
+ 	BOOL	UpdateTableOf(const SwTOXBase& rTOX, const SfxItemSet* pSet = 0);
  
- 	BOOL GotoField( const SwFmtFld& rFld );
- 
-+        bool GotoFieldBookmark(SwBookmark *pBkmk);
++        //  new fields
++	BOOL	UpdateField(SwFieldBookmark &fieldBM);
 +
- 	// jump to the next / previous hyperlink - inside text and also
- 	// on graphics
- 	BOOL SelectNextPrevHyperlink( BOOL bNext = TRUE );
+ 	// Numerierung und Bullets
+     /**
+        Turns on numbering or bullets.
 diff --git a/sw/source/ui/uiview/viewling.cxx b/sw/source/ui/uiview/viewling.cxx
-index 9d89f6b..894b3c1 100644
+index 8c30848..319b1e0 100644
 --- sw/source/ui/uiview/viewling.cxx
 +++ sw/source/ui/uiview/viewling.cxx
-@@ -101,6 +101,7 @@
+@@ -114,6 +114,8 @@
  #include <svx/dialogs.hrc>
  
  #include <unomid.h>
 +#include <bookmrk.hxx>
++#include <ecmaflds.hxx>
  
- using namespace ::com::sun::star;
- using namespace ::com::sun::star::beans;
-@@ -798,3 +799,143 @@ sal_Bool SwView::ExecSmartTagPopup( const Point& rPt )
+ #include <memory>
+ 
+@@ -931,3 +933,138 @@ sal_Bool SwView::ExecSmartTagPopup( const Point& rPt )
      return bRet;
  }
  
++
++
 +class SwFieldPopup : public PopupMenu
 +{
 +public:
@@ -2961,22 +2188,14 @@ index 9d89f6b..894b3c1 100644
 +
 +	assert(fieldBM!=NULL);
 +	if (fieldBM!=NULL) {
-+	    int listitems=fieldBM->getListItems();
-+	    for(int i=0;i<listitems;i++) {
-+		aListBox.InsertEntry(fieldBM->getListItem(i));
++	    int items=fieldBM->getNumOfParams();	    
++	    for(int i=0;i<items;i++) {
++		SwFieldBookmark::ParamPair_t p=fieldBM->getParam(i);
++		if (p.first.compareToAscii(ECMA_FORMDROPDOWN_LISTENTRY)==0) {
++		    aListBox.InsertEntry(p.second);
++		}
 +	    }
 +	}
-+/*
-+	aListBox.InsertEntry(::rtl::OUString::createFromAscii("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXY"));
-+	aListBox.InsertEntry(::rtl::OUString::createFromAscii("Hello"));
-+	aListBox.InsertEntry(::rtl::OUString::createFromAscii("World"));
-+	aListBox.InsertEntry(::rtl::OUString::createFromAscii("Red"));
-+	aListBox.InsertEntry(::rtl::OUString::createFromAscii("Green"));
-+	aListBox.InsertEntry(::rtl::OUString::createFromAscii("Blue"));
-+	aListBox.InsertEntry(::rtl::OUString::createFromAscii("Pink"));
-+	aListBox.InsertEntry(::rtl::OUString::createFromAscii("Orange"));
-+*/
-+//	aListBox.SetPosPixel(Size(0, 0));
 +	Size lbSize=aListBox.GetOptimalSize(WINDOWSIZE_PREFERRED);
 +	lbSize.Width()+=50;
 +	lbSize.Height()+=20;
@@ -3047,7 +2266,7 @@ index 9d89f6b..894b3c1 100644
 +	short ret=aFldDlg.Execute();
 +	int selection=aFldDlg.getSelection();
 +	if (selection>=0) {
-+	    fieldBM->setCurrentListItem((unsigned int)selection);
++	    fieldBM->addParam(ECMA_FORMDROPDOWN_RESULT, selection);
 +	}
 +    }
 +
@@ -3056,59 +2275,13 @@ index 9d89f6b..894b3c1 100644
 +
 +    return bRet;
 +}
-diff --git a/sw/source/ui/uno/SwXDocumentSettings.cxx b/sw/source/ui/uno/SwXDocumentSettings.cxx
-index 1240531..d187c0e 100644
---- sw/source/ui/uno/SwXDocumentSettings.cxx
-+++ sw/source/ui/uno/SwXDocumentSettings.cxx
-@@ -127,6 +127,7 @@ enum SwDocumentSettingsPropertyHandles
-     HANDLE_UNIX_FORCE_ZERO_EXT_LEADING,
-     HANDLE_USE_OLD_PRINTER_METRICS,
-     HANDLE_TABS_RELATIVE_TO_INDENT,
-+    HANDLE_PROTECT_FORM,
-     // --> OD 2008-06-05 #i89181#
-     HANDLE_TAB_AT_LEFT_INDENT_FOR_PARA_IN_LIST
-     // <--
-@@ -180,6 +181,7 @@ MasterPropertySetInfo * lcl_createSettingsInfo()
-         { RTL_CONSTASCII_STRINGPARAM("UnxForceZeroExtLeading"), HANDLE_UNIX_FORCE_ZERO_EXT_LEADING, CPPUTYPE_BOOLEAN, 0, 0},
-         { RTL_CONSTASCII_STRINGPARAM("UseOldPrinterMetrics"), HANDLE_USE_OLD_PRINTER_METRICS, CPPUTYPE_BOOLEAN, 0, 0},
-         { RTL_CONSTASCII_STRINGPARAM("TabsRelativeToIndent"), HANDLE_TABS_RELATIVE_TO_INDENT, CPPUTYPE_BOOLEAN, 0, 0},
-+	{ RTL_CONSTASCII_STRINGPARAM("ProtectForm"), HANDLE_PROTECT_FORM, CPPUTYPE_BOOLEAN, 0, 0},
-         // --> OD 2008-06-05 #i89181#
-         { RTL_CONSTASCII_STRINGPARAM("TabAtLeftIndentForParagraphsInList"), HANDLE_TAB_AT_LEFT_INDENT_FOR_PARA_IN_LIST, CPPUTYPE_BOOLEAN, 0, 0},
- 
-@@ -662,6 +664,12 @@ void SwXDocumentSettings::_setSingleValue( const comphelper::PropertyInfo & rInf
-             mpDoc->set(IDocumentSettingAccess::TABS_RELATIVE_TO_INDENT, bTmp);
-         }
-         break;
-+	case HANDLE_PROTECT_FORM:
-+        {
-+	    sal_Bool bTmp = *(sal_Bool*)rValue.getValue();
-+	    mpDoc->set(IDocumentSettingAccess::PROTECT_FORM, bTmp);
-+	}
-+	break;
-         // --> OD 2008-06-05 #i89181#
-         case HANDLE_TAB_AT_LEFT_INDENT_FOR_PARA_IN_LIST:
-         {
-@@ -983,7 +991,12 @@ void SwXDocumentSettings::_getSingleValue( const comphelper::PropertyInfo & rInf
-             rValue.setValue( &bTmp, ::getBooleanCppuType() );
-         }
-         break;
--        // --> OD 2008-06-05 #i89181#
-+        case HANDLE_PROTECT_FORM:
-+	{
-+             sal_Bool bTmp = mpDoc->get(IDocumentSettingAccess::PROTECT_FORM);
-+             rValue.setValue( &bTmp, ::getBooleanCppuType() );
-+	}
-+	break;        // --> OD 2008-06-05 #i89181#
-         case HANDLE_TAB_AT_LEFT_INDENT_FOR_PARA_IN_LIST:
-         {
-             sal_Bool bTmp = mpDoc->get(IDocumentSettingAccess::TAB_AT_LEFT_INDENT_FOR_PARA_IN_LIST);
++
 diff --git a/sw/source/ui/wrtsh/wrtsh1.cxx b/sw/source/ui/wrtsh/wrtsh1.cxx
-index 18c8feb..e7caf1b 100644
+index 0c98804..0e85b07 100644
 --- sw/source/ui/wrtsh/wrtsh1.cxx
 +++ sw/source/ui/wrtsh/wrtsh1.cxx
-@@ -1706,6 +1706,12 @@ SwWrtShell::SwWrtShell( SwDoc& rDoc, Window *_pWin, SwView &rShell,
- 	SET_CURR_SHELL( this );
+@@ -1720,6 +1720,12 @@ SwWrtShell::SwWrtShell( SwWrtShell& rSh, Window *_pWin, SwView &rShell )
+ 
  	SetSfxViewShell( (SfxViewShell *)&rShell );
  	SetFlyMacroLnk( LINK(this, SwWrtShell, ExecFlyMac) );
 +
@@ -3119,42 +2292,22 @@ index 18c8feb..e7caf1b 100644
 +	}
  }
  
- /*
-diff --git a/sw/source/ui/wrtsh/wrtsh3.cxx b/sw/source/ui/wrtsh/wrtsh3.cxx
-index 79f165b..183ae92 100644
---- sw/source/ui/wrtsh/wrtsh3.cxx
-+++ sw/source/ui/wrtsh/wrtsh3.cxx
-@@ -51,6 +51,7 @@
- #include "bookmrk.hxx"
- #include "doc.hxx"
- #include "wrtsh.hrc"
-+#include "docsh.hxx"
  
- #include <unomid.h>
- 
-@@ -109,6 +110,25 @@ BOOL SwWrtShell::GotoField( const SwFmtFld& rFld )
- 	return bRet;
+diff --git a/sw/source/ui/wrtsh/wrtsh2.cxx b/sw/source/ui/wrtsh/wrtsh2.cxx
+index 7a551df..13e1935 100644
+--- sw/source/ui/wrtsh/wrtsh2.cxx
++++ sw/source/ui/wrtsh/wrtsh2.cxx
+@@ -248,6 +248,13 @@ BOOL SwWrtShell::UpdateTableOf(const SwTOXBase& rTOX, const SfxItemSet* pSet)
+     return bResult;
  }
  
-+bool SwWrtShell::GotoFieldBookmark(SwBookmark *pBkmk)
++BOOL SwWrtShell::UpdateField(SwFieldBookmark &fieldBM)
 +{
-+   (this->*fnKillSel)( 0, sal_False );
-+
-+    bool bRet = SwCrsrShell::GotoFieldBookmark(pBkmk);
-+    if( bRet && IsSelFrmMode() )
-+    {
-+        UnSelectFrm();
-+        LeaveSelFrmMode();
-+    }
-+    if( IsSelection() )
-+    {
-+        fnKillSel = &SwWrtShell::ResetSelect;
-+        fnSetCrsr = &SwWrtShell::SetCrsrKillSel;
-+    }
-+    return bRet;
++    return SwEditShell::UpdateField(fieldBM);
 +}
 +
 +
- /*--------------------------------------------------------------------
-     Beschreibung: FontWork-Slots invalidieren
-  --------------------------------------------------------------------*/
++
+ 	// ein Klick aus das angegebene Feld. Der Cursor steht auf diesem.
+ 	// Fuehre die vor definierten Aktionen aus.
+ 
