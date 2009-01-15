@@ -22,6 +22,7 @@ my $DocName = shift || "";
 my $programpath = "$officepath"."3/program:$officepath/program:";
 my $basiclibrarypath = "$officepath/basis3.0/program";
 my $urelibpath = "$officepath/ure/lib";
+my $urebinpath = "$officepath/URE/bin";
 my $binext = "";
 my $testDocDir = "$binDir/TestDocuments";
 my $testLogDir = "$binDir/Logs";
@@ -57,7 +58,12 @@ if ( !$failed && open(UNAME, "uname -a|") ) {
       # windows under cygwin
       $sysDir = "win" ;
       $tmpPath=$ENV{"PATH"};
-      $ENV{"PATH"} = "$officepath/program:$officepath/URE/bin:$officepath/Basis/program:$tmpPath";
+# adjust for ooo-build ( need to make sure this works for non ooo-build too )
+      my $tmpofficepath = "$officepath"."/OpenOffice.org 3"; 
+      my $tmpofficebinpath = "$tmpofficepath/program"; 
+      my $tmpbasiclibpath = "$tmpofficepath/Basis/program"; 
+      my $tmpurebinpath = "$tmpofficepath/URE/bin"; 
+      $ENV{"PATH"} = "$tmpofficebinpath:$tmpbasiclibpath:$tmpurebinpath:$tmpPath";
       $testDocDir=`cygpath -m  $testDocDir`;
       uri_escape($testDocDir);
       # hacky windows url construction
@@ -71,8 +77,6 @@ if ( !$failed && open(UNAME, "uname -a|") ) {
       chomp($testLogDir);
       #print "*** log dir is $testLogDir\n";
       $binext = ".exe";
-      my $tmpPath=$ENV{"PATH"};
-      #print"*** win PATH is $tmpPath\n"
    }
    else{
       # unix we need to find sal etc. ( from the office path )
