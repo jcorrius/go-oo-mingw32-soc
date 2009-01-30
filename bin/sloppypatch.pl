@@ -25,42 +25,81 @@ for (;;) {
     sysopen( $fh, $tmpfile, O_RDWR | O_CREAT | O_EXCL ) && last;
 }
 
-my $eliding = 1;
-my $minusline = '';
-my $minusline_dir = '';
-my $minusline_subpath = '';
+sub analyze_path($)
+{
+    my $pf = shift;
+    my $topdir = undef;
+    my $subpath = undef;
+    
+#    print "analyzing path: $pf\n";
+    $pf =~ s|\.\/+||;
+    if ( $pf =~ m/^([^\/]+)([^ \t]+)/ ) {
+	$topdir = "$1";
+	$subpath = "$2";
+	chomp $subpath;
+    }
+    
+    return $topdir, $subpath;
+}
+
+my $applying = 0;
+my $firstline = undef;
+my $firstline_topdir = undef;
+my $firstline_subpath = undef;
 my $sections = 0;
 while (<STDIN>) {
     my $line = $_;
-    if ( $line =~ m/^--- [ \t]*\.?\/?([^\/]+)([^ \t]+)/ ) {
-	$minusline_topdir="$1";
-	$minusline_subpath="$2";
-	$minusline .= $line;
+
+    # unified context patches:
+    # 	first line:  --- path
+    #	second line: +++ path
+    # copied context patches:
+    # 	first line:  *** path
+    #	second line: --- path
+    if  ( ( ! defined $firstline ) &&
+          ( $line =~ m/^[\*-][\*-][\*-] [ \t]*([^\s]+)/ ) ) {
+	# found first line that defines the path of the patched file
+	($firstline_topdir, $firstline_subpath) = analyze_path("$1");
+	$firstline = $line if (defined $firstline_topdir);
 	next;
     }
-    if ( $line =~ m/^\+\+\+ [ \t]*\.?\/?([^\/]+)([^ \t]+)/ ) {
-	my $topdir="$1";
-	my $subpath="$2";
 
-	# need to use the --- path when the file should get removed
-	chomp $subpath;
-	if ("$topdir$subpath" eq "dev/null") {
-	    $topdir="$minusline_topdir";
-	    $subpath="$minusline_subpath";
+    if ( $line =~ m/^[\+-][\+-][\+-] [ \t]*([^\s]+)/ ) {
+	# found second line that defines the path of the patched file
+	($topdir, $subpath) = analyze_path("$1");
+
+	# need to check all ***, +++, --- paths; any of them might be correct
+	# the other path might be invalid, e.g. absolute path
+	# the relative paths starting with ".." must be invalid because we use
+	# the -p0 patches and the upper direcotry name is different with every milestone
+	if ( defined $topdir && "$topdir" ne ".." && -d "$applydir/$topdir" ) {
+#	    print "topdir: $topdir\n";
+	    $applying = 1;
+	} elsif ( defined $firstline_topdir && "$firstline_topdir" ne ".." && -d "$applydir/$firstline_topdir" ) {
+#	    print "firstline_topdir: $firstline_topdir\n";
+	    $applying = 1;
+	    $topdir = $firstline_topdir;
+	    $subpath = $firstline_subpath;
+	} else {
+	    $applying = 0;
 	}
 
-	$eliding = ! -d "$applydir/$topdir";
-
-	if (!$eliding) {
+	if ($applying) {
 	    $sections++;
 	    print STDERR "+ apply fragment for $topdir$subpath\n";
 	}
-	$line = $minusline . $line;
-	$minusline = '';
-	$minusline_topdir='';
-	$minusline_subpath='';
+    
     }
-    if (!$eliding) {
+
+    if (defined $firstline) {
+	# either it is the real first line that defines the file path
+	# or it might be the hunk definition in the copied context patches
+	# we should print it in both cases
+	$line = $firstline . $line;
+	$firstline = undef;
+    }
+
+    if ($applying) {
 	print $fh $line;
     }
 }
@@ -68,6 +107,7 @@ while (<STDIN>) {
 my $result = 0;
 if ($sections > 0) {
 # patch complains a lot with empty input
+#    print "calling: patch @ARGV < $tmpfile\n";
     if (system ("patch @ARGV < $tmpfile")) {
 	 print STDERR "\nError: failed to apply patch @ARGV: $!\n\n";
     }
