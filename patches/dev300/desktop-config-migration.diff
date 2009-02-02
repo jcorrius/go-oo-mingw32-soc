@@ -1,5 +1,19 @@
+diff --git desktop/source/app/app.cxx desktop/source/app/app.cxx
+index 38c3220..d3a3fc8 100644
+--- desktop/source/app/app.cxx
++++ desktop/source/app/app.cxx
+@@ -1429,6 +1429,9 @@ void Desktop::Main()
+         }
+ #endif
+ 
++        if (Migration::checkMigration())
++            Migration::doMigration();
++
+ 		// keep a language options instance...
+ 		pLanguageOptions.reset( new SvtLanguageOptions(sal_True));
+ 
 diff --git desktop/source/migration/migration.cxx desktop/source/migration/migration.cxx
-index 8811076..62ecfad 100644
+index bc6b168..c4a98ae 100644
 --- desktop/source/migration/migration.cxx
 +++ desktop/source/migration/migration.cxx
 @@ -57,6 +57,10 @@
@@ -197,19 +211,20 @@ index 8811076..62ecfad 100644
      sal_Bool result = sal_False;
      try{
          copyFiles();
-@@ -164,6 +307,11 @@ sal_Bool MigrationImpl::doMigration()
+@@ -164,6 +307,12 @@ sal_Bool MigrationImpl::doMigration()
  		// execute the migration items from Setup.xcu
  		// and refresh the cache
          copyConfig();
 +        
 +        // refresh pieces of the configuration
++        transCalcFormulaConfig();
 +        transKeyConfig();
 +        cleanCSVImportCharSet();
 +
  		refresh();
  
  		// execute custom migration services from Setup.xcu
-@@ -196,31 +344,83 @@ void MigrationImpl::refresh()
+@@ -196,31 +345,110 @@ void MigrationImpl::refresh()
  
  }
  
@@ -280,8 +295,6 @@ index 8811076..62ecfad 100644
 -            OUString::createFromAscii("MigrationCompleted")) >>= bMigrationCompleted;
 -    } catch (Exception&) {
 -        // just return false...
--    }
--    return bMigrationCompleted;
 +    // Overwrite the character set value for CSV import to -1 (unset) on every 
 +    // upgrade, to prevent it from being incorrectly set to Unicode. (n#376473)
 +
@@ -289,6 +302,34 @@ index 8811076..62ecfad 100644
 +    aPropSet.set(getConfigAccess("org.openoffice.Office.Calc/Dialogs/CSVImport", true), uno::UNO_QUERY_THROW);
 +    aPropSet->setPropertyValue(ascii("CharSet"), uno::makeAny(static_cast<sal_Int32>(-1)));
 +    uno::Reference< XChangesBatch >(aPropSet, uno::UNO_QUERY_THROW)->commitChanges();
++}
++
++void MigrationImpl::transCalcFormulaConfig()
++{
++    // Prior to 3.1.0, formula settings were stored in
++    // Calc/Calculate/FormulaSyntax.  Migrate that to
++    // Calc/Formula/Syntax/Grammar.
++
++    if (compareVersion(m_aConfigVerNum, VersionNumber(3,1,0)) >= 0)
++        return;
++
++    try
++    {
++        uno::Reference<XPropertySet> xPropSet1(
++            getConfigAccess("org.openoffice.Office.Calc/Calculate/Other", true), uno::UNO_QUERY_THROW);
++
++        sal_Int32 nFormulaSyntax = 0;
++        xPropSet1->getPropertyValue(ascii("FormulaSyntax")) >>= nFormulaSyntax;
++
++        uno::Reference<XPropertySet> xPropSet2(
++            getConfigAccess("org.openoffice.Office.Calc/Formula/Syntax", true), uno::UNO_QUERY_THROW);
++        xPropSet2->setPropertyValue(ascii("Grammar"), uno::makeAny(nFormulaSyntax));
++        uno::Reference<XChangesBatch>(xPropSet2, uno::UNO_QUERY_THROW)->commitChanges();
++    }
++    catch (const Exception&)
++    {
+     }
+-    return bMigrationCompleted;
  }
  
 +void MigrationImpl::setMigrationCompleted()
@@ -312,8 +353,30 @@ index 8811076..62ecfad 100644
  
  migrations_vr MigrationImpl::readMigrationSteps()
  {
+@@ -636,8 +864,19 @@ void MigrationImpl::runServices()
+     OUString aStratumSvc = OUString::createFromAscii("com.sun.star.configuration.backend.LocalSingleStratum");
+     uno::Sequence< uno::Any > stratumArgs(1);
+     stratumArgs[0] = uno::makeAny(aOldLayerURL);
+-	uno::Reference< XSingleLayerStratum> xStartum( m_xFactory->createInstanceWithArguments(
+-        aStratumSvc, stratumArgs), uno::UNO_QUERY);
++	uno::Reference< XSingleLayerStratum> xStartum;
++
++    try
++    {
++        xStartum.set( m_xFactory->createInstanceWithArguments(
++            aStratumSvc, stratumArgs), uno::UNO_QUERY);
++    }
++    catch (const Exception&)
++    {
++        // failed to create local single stratum service.
++        // TODO: Investigate this.
++        return;
++    }
+ 
+     // Build argument array
+     uno::Sequence< uno::Any > seqArguments(3);
 diff --git desktop/source/migration/migration_impl.hxx desktop/source/migration/migration_impl.hxx
-index e07847a..0d83eac 100644
+index e07847a..f9ea5e8 100644
 --- desktop/source/migration/migration_impl.hxx
 +++ desktop/source/migration/migration_impl.hxx
 @@ -76,6 +76,16 @@ typedef std::auto_ptr< migrations_v > migrations_vr;
@@ -344,12 +407,13 @@ index e07847a..0d83eac 100644
  
      // initializer functions...
      migrations_vr readMigrationSteps();
-@@ -104,9 +118,10 @@ private:
+@@ -104,9 +118,11 @@ private:
      void copyConfig();
      void runServices();
      void refresh();
 +    void transKeyConfig();
 +    void cleanCSVImportCharSet();
++    void transCalcFormulaConfig();
  
      void setMigrationCompleted();
 -    sal_Bool checkMigrationCompleted();
@@ -357,7 +421,7 @@ index e07847a..0d83eac 100644
  public:
      MigrationImpl(const NS_UNO::Reference< NS_CSS::lang::XMultiServiceFactory >&);
 diff --git officecfg/registry/schema/org/openoffice/Setup.xcs officecfg/registry/schema/org/openoffice/Setup.xcs
-index 7572879..247928a 100644
+index 7572879..339a7a4 100644
 --- officecfg/registry/schema/org/openoffice/Setup.xcs
 +++ officecfg/registry/schema/org/openoffice/Setup.xcs
 @@ -417,6 +417,14 @@
