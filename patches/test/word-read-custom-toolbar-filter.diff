@@ -24,7 +24,7 @@ index 25cb969..3360d48 100644
  
  # --- Tagets -------------------------------------------------------
 diff --git sw/source/filter/ww8/ww8par.cxx sw/source/filter/ww8/ww8par.cxx
-index a7f122b..1013a3b 100644
+index a7f122b..3b42acd 100644
 --- sw/source/filter/ww8/ww8par.cxx
 +++ sw/source/filter/ww8/ww8par.cxx
 @@ -142,11 +142,12 @@
@@ -41,7 +41,7 @@ index a7f122b..1013a3b 100644
  
  #define MM_250 1417             // WW-Default fuer Hor. Seitenraender: 2.5 cm
  #define MM_200 1134             // WW-Default fuer u.Seitenrand: 2.0 cm
-@@ -4173,7 +4174,39 @@ ULONG SwWW8ImplReader::SetSubStreams(SvStorageStreamRef &rTableStream,
+@@ -4173,7 +4174,40 @@ ULONG SwWW8ImplReader::SetSubStreams(SvStorageStreamRef &rTableStream,
              rTableStream = pStg->OpenSotStream( String::CreateFromAscii(
                  pWwFib->fWhichTblStm ? SL::a1Table : SL::a0Table),
                  STREAM_STD_READ);
@@ -75,15 +75,63 @@ index a7f122b..1013a3b 100644
 +                        OSL_TRACE("** Read of Customization data failed!!!! ");
 +                    rTableStream->Seek( nCur ); // return to previous position
 +                    aTCG.Print( stderr );
++                    aTCG.ImportCustomToolBar( mpDocShell->GetModel() );
 +                }
 +            }
 +#endif
              pTableStream = &rTableStream;
              pTableStream->SetNumberFormatInt( NUMBERFORMAT_INT_LITTLEENDIAN );
  
+diff --git vcl/source/gdi/bitmap2.cxx vcl/source/gdi/bitmap2.cxx
+index 5e931a7..7c5be41 100644
+--- vcl/source/gdi/bitmap2.cxx
++++ vcl/source/gdi/bitmap2.cxx
+@@ -49,6 +49,7 @@
+ 
+ #define DIBCOREHEADERSIZE			( 12UL )
+ #define DIBINFOHEADERSIZE			( sizeof( DIBInfoHeader ) )
++#define BITMAPINFOHEADER                        0x28
+ #define SETPIXEL4( pBuf, nX, cChar )( (pBuf)[ (nX) >> 1 ] |= ( (nX) & 1 ) ? ( cChar ): (cChar) << 4 );
+ 
+ // ----------------------
+@@ -308,16 +309,32 @@ BOOL Bitmap::ImplReadDIBInfoHeader( SvStream& rIStm, DIBInfoHeader& rHeader, sal
+ 	rIStm >> rHeader.nSize;
+ 
+ 	// BITMAPCOREHEADER
++	sal_Int16 nTmp16 = 0;
++	sal_uInt8 nTmp8 = 0;
+ 	if ( rHeader.nSize == DIBCOREHEADERSIZE )
+ 	{
+-		sal_Int16 nTmp16;
+ 
+ 		rIStm >> nTmp16; rHeader.nWidth = nTmp16;
+ 		rIStm >> nTmp16; rHeader.nHeight = nTmp16;
+ 		rIStm >> rHeader.nPlanes;
+ 		rIStm >> rHeader.nBitCount;
+ 	}
+-	else
++	else if ( rHeader.nSize == BITMAPINFOHEADER )
++	{
++		rIStm >> nTmp16; rHeader.nWidth = nTmp16;
++		rIStm >> nTmp16; rHeader.nHeight = nTmp16;
++		rIStm >> nTmp8; rHeader.nPlanes = nTmp8;
++		rIStm >> nTmp8; rHeader.nBitCount = nTmp8;
++		rIStm >> nTmp16; rHeader.nSizeImage = nTmp16;
++		rIStm >> nTmp16; rHeader.nCompression = nTmp16;
++		if ( !rHeader.nSizeImage ) // uncompressed?
++			rHeader.nSizeImage = ((rHeader.nWidth * rHeader.nBitCount + 31) & ~31) / 8 * rHeader.nHeight;
++		rIStm >> rHeader.nXPelsPerMeter;
++		rIStm >> rHeader.nYPelsPerMeter;
++		rIStm >> rHeader.nColsUsed;
++		rIStm >> rHeader.nColsImportant;
++	}
++        else
+ 	{
+ 		// unknown Header
+ 		if( rHeader.nSize < DIBINFOHEADERSIZE )
 --- /dev/null	2008-04-22 00:28:44.000000000 +0100
-+++ sw/source/filter/ww8/ww8toolbar.hxx	2009-02-02 12:06:14.000000000 +0000
-@@ -0,0 +1,539 @@
++++ sw/source/filter/ww8/ww8toolbar.hxx	2009-02-03 18:04:41.000000000 +0000
+@@ -0,0 +1,554 @@
 +#ifndef _WW8TOOLBAR_HXX
 +#define _WW8TOOLBAR_HXX
 +
@@ -93,8 +141,15 @@ index a7f122b..1013a3b 100644
 +#include <memory>
 +#include <vector>
 +#include <boost/shared_ptr.hpp>
-+class TBCHeader;
++#include <com/sun/star/frame/XModel.hpp>
++#include <com/sun/star/container/XIndexContainer.hpp>
++#include <com/sun/star/beans/XPropertySet.hpp>
++#include <vcl/bitmap.hxx>
 +
++namespace css = ::com::sun::star;
++
++class TBCHeader;
++class CustomToolBarImportHelper;
 +class TBBase
 +{
 +friend class Indent;
@@ -161,6 +216,7 @@ index a7f122b..1013a3b 100644
 +    ~TBCExtraInfo(){}
 +    bool Read(SotStorageStream *pS);
 +    void Print( FILE* );
++    rtl::OUString getOnAction();
 +};
 +
 +class TBCGeneralInfo  : public TBBase
@@ -171,13 +227,12 @@ index a7f122b..1013a3b 100644
 +    WString tooltip;
 +    TBCExtraInfo extraInfo;
 +
-+    TBCGeneralInfo(const TBCGeneralInfo&);
-+    TBCGeneralInfo& operator = ( const TBCGeneralInfo&);
 +public:
 +    TBCGeneralInfo();
 +    ~TBCGeneralInfo() {}
 +    bool Read(SotStorageStream *pS);
 +    void Print( FILE* );
++    bool ImportToolBarControlData( std::vector< css::beans::PropertyValue >& );
 +};
 +
 +class TBCBitMap : public TBBase
@@ -186,14 +241,14 @@ index a7f122b..1013a3b 100644
 +    sal_Int32 cbDIB;
 +//    BITMapInfoHeader biHeader;  // lets cheat and not read the bit map stuff right now
 +    sal_uInt8* pRestOfIt;
++    Bitmap mBitMap;
 +    int size;
 +public:
 +    TBCBitMap();
 +    ~TBCBitMap();
 +    bool Read(SotStorageStream *pS);
 +    void Print( FILE* );
-+    TBCBitMap(const TBCBitMap&);
-+    TBCBitMap& operator = ( const TBCBitMap&);
++    Bitmap& getBitMap(); 
 +};
 +
 +class TBCMenuSpecific : public TBBase
@@ -247,6 +302,8 @@ index a7f122b..1013a3b 100644
 +    ~TBCBSpecific(){}
 +    bool Read(SotStorageStream *pS);
 +    void Print( FILE* );
++    TBCBitMap* getIcon();
++    TBCBitMap* getIconMask();
 +};
 +
 +/* TBCHeader.tct                   controlSpecificInfo type
@@ -270,21 +327,6 @@ index a7f122b..1013a3b 100644
 +0x16 (ActiveX control)             controlSpecificInfo MUST NOT exist
 +
 +*/
-+
-+class TBCData : public TBBase
-+{
-+    const TBCHeader& rHeader;
-+    TBCGeneralInfo controlGeneralInfo;
-+    boost::shared_ptr< TBBase > controlSpecificInfo; // can be one of TBCBSpecific, TBCMenuSpecific or TBCComboDropdow nSpecific depending on the control type specified by TBCHeader.tct 
-+    TBCData(const TBCData&);
-+    TBCData& operator = ( const TBCData&);
-+public:
-+    TBCData( const TBCHeader& Header );
-+    ~TBCData(){}
-+    bool Read(SotStorageStream *pS);
-+    void Print( FILE* );
-+};
-+
 +class TBCHeader : public TBBase
 +{
 +    sal_Int8 bSignature; 
@@ -306,6 +348,21 @@ index a7f122b..1013a3b 100644
 +    void Print( FILE* );
 +};
 +
++class TBCData : public TBBase
++{
++    TBCHeader rHeader;
++    TBCGeneralInfo controlGeneralInfo;
++    boost::shared_ptr< TBBase > controlSpecificInfo; // can be one of TBCBSpecific, TBCMenuSpecific or TBCComboDropdow nSpecific depending on the control type specified by TBCHeader.tct 
++    TBCData(const TBCData&);
++    TBCData& operator = ( const TBCData&);
++public:
++    TBCData( const TBCHeader& Header );
++    ~TBCData(){}
++    bool Read(SotStorageStream *pS);
++    void Print( FILE* );
++    bool ImportToolBarControl(  const css::uno::Reference< css::container::XIndexContainer >&, CustomToolBarImportHelper& );
++};
++
 +class TBC : public TBBase
 +{
 +    TBCHeader tbch;
@@ -316,6 +373,7 @@ index a7f122b..1013a3b 100644
 +    ~TBC();
 +    bool Read(SotStorageStream *pS);
 +    void Print( FILE* );
++    bool ImportToolBarControl( const css::uno::Reference< css::container::XIndexContainer >&, CustomToolBarImportHelper& );
 +};
 +
 +class TB : public TBBase
@@ -356,6 +414,7 @@ index a7f122b..1013a3b 100644
 +    ~CTB();
 +    bool Read(SotStorageStream *pS);
 +    void Print( FILE* fp );
++    bool ImportCustomToolBar( CustomToolBarImportHelper& );
 +};
 +
 +class TBDelta : public TBBase
@@ -385,7 +444,7 @@ index a7f122b..1013a3b 100644
 +public:
 +    Tcg255SubStruct( bool bReadId );
 +    ~Tcg255SubStruct(){}
-+    virtual sal_uInt8 id() { return ch; }
++    virtual sal_uInt8 id() const { return ch; }
 +    bool Read(SotStorageStream *pS);
 +};
 +
@@ -402,6 +461,7 @@ index a7f122b..1013a3b 100644
 +    Customization();
 +    ~Customization();
 +    bool Read(SotStorageStream *pS);
++    bool ImportCustomToolBar( CustomToolBarImportHelper& );
 +    void Print( FILE* );
 +};
 +
@@ -427,6 +487,7 @@ index a7f122b..1013a3b 100644
 +    CTBWrapper( bool bReadId = true );
 +    ~CTBWrapper();
 +    bool Read(SotStorageStream *pS);
++    bool ImportCustomToolBar( CustomToolBarImportHelper& );
 +    void Print( FILE* );
 +};
 +
@@ -607,6 +668,7 @@ index a7f122b..1013a3b 100644
 +    ~Tcg255();
 +    bool Read(SotStorageStream *pS);
 +    void Print( FILE* );
++    bool ImportCustomToolBar( CustomToolBarImportHelper& );
 +};
 +
 +class Tcg: public TBBase
@@ -619,22 +681,60 @@ index a7f122b..1013a3b 100644
 +    Tcg();
 +    ~Tcg(){}
 +    bool Read(SotStorageStream *pS);
++    bool ImportCustomToolBar( const css::uno::Reference< css::frame::XModel >& rxModel );
 +    void Print( FILE* );
 +};
 +
 +#endif
 --- /dev/null	2008-04-22 00:28:44.000000000 +0100
-+++ sw/source/filter/ww8/ww8toolbar.cxx	2009-02-02 12:16:27.000000000 +0000
-@@ -0,0 +1,1275 @@
++++ sw/source/filter/ww8/ww8toolbar.cxx	2009-02-03 18:05:51.000000000 +0000
+@@ -0,0 +1,1473 @@
 +#include "ww8toolbar.hxx"
 +#include <rtl/ustrbuf.hxx>
 +#include <stdarg.h>
-+
++#include <com/sun/star/ui/XUIConfigurationManagerSupplier.hpp>
++#include <com/sun/star/graphic/XGraphic.hpp>
++#include <com/sun/star/ui/ItemType.hpp>
++#include <fstream>
++#include <vcl/graph.hxx>
 +int TBBase::nIndent = 0;
++
++using namespace com::sun::star;
 +
 +#define INDENT_INIT Indent a(true);
 +
 +#define INDENT Indent a;
++
++class CustomToolBarImportHelper
++{
++    uno::Reference< ui::XUIConfigurationManagerSupplier > m_xCfgSupp;
++public:
++    CustomToolBarImportHelper( const uno::Reference< frame::XModel >& rxModel );
++    uno::Reference< ui::XUIConfigurationManager > getCfgManager();
++    static uno::Any createCommandFromMacro( const rtl::OUString& sCmd );
++};
++
++CustomToolBarImportHelper::CustomToolBarImportHelper( const uno::Reference< frame::XModel >& rxModel )
++{
++    m_xCfgSupp.set( rxModel, uno::UNO_QUERY_THROW );
++}
++
++uno::Reference< ui::XUIConfigurationManager > 
++CustomToolBarImportHelper::getCfgManager()
++{
++    return m_xCfgSupp->getUIConfigurationManager();
++}
++
++uno::Any 
++CustomToolBarImportHelper::createCommandFromMacro( const rtl::OUString& sCmd )
++{
++//"vnd.sun.star.script:Standard.Module1.Main?language=Basic&location=document"    
++    static rtl::OUString part1 = rtl::OUString::createFromAscii( "vnd.sun.star.script:Standard.");
++    static rtl::OUString part2 = rtl::OUString::createFromAscii("?language=Basic&location=document");
++    // create script url
++    rtl::OUString scriptURL = part1 + sCmd + part2;
++    return uno::makeAny( scriptURL );
++}
 +
 +void
 +TBBase::indent_printf( FILE* fp, const char* format, ... )
@@ -760,6 +860,18 @@ index a7f122b..1013a3b 100644
 +        it->Print(fp);
 +    }
 +}
++
++bool CTBWrapper::ImportCustomToolBar( CustomToolBarImportHelper& helper )
++{
++    
++    for ( std::vector< Customization >::iterator it = rCustomizations.begin(); it != rCustomizations.end(); ++it )
++    {
++        if ( !(*it).ImportCustomToolBar( helper ) )
++            return false;
++    }
++    return false;
++}
++
 +Customization::Customization() : tbidForTBD( 0 )
 +,reserved1( 0 )
 +, ctbds( 0 )
@@ -810,6 +922,13 @@ index a7f122b..1013a3b 100644
 +            it->Print( fp );
 +    }
 +    
++}
++
++bool Customization::ImportCustomToolBar( CustomToolBarImportHelper& helper )
++{
++    if ( !customizationDataCTB.get() )
++        return false;
++    return customizationDataCTB->ImportCustomToolBar( helper );
 +}
 +
 +TBDelta::TBDelta() : doprfatendFlags(0)
@@ -905,6 +1024,30 @@ index a7f122b..1013a3b 100644
 +    }
 +}
 +
++bool CTB::ImportCustomToolBar( CustomToolBarImportHelper& helper )
++{
++    static rtl::OUString sToolbarPrefix( RTL_CONSTASCII_USTRINGPARAM( "private:resource/toolbar/custom_" ) );
++    
++    // Create default setting
++    uno::Reference< container::XIndexContainer > xIndexContainer( helper.getCfgManager()->createSettings(), uno::UNO_QUERY_THROW );
++    uno::Reference< container::XIndexAccess > xIndexAccess( xIndexContainer, uno::UNO_QUERY_THROW );
++    uno::Reference< beans::XPropertySet > xProps( xIndexContainer, uno::UNO_QUERY_THROW ); 
++
++    // set UI name for toolbar
++    xProps->setPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("UIName") ), uno::makeAny( name.getString() ) ); 
++
++    rtl::OUString sToolBarName = sToolbarPrefix.concat( name.getString() );
++
++    for ( std::vector< TBC >::iterator it =  rTBC.begin(); it != rTBC.end(); ++it )
++    {
++        // createToolBar item for control
++        if ( !it->ImportToolBarControl( xIndexContainer, helper ) )
++            return false;
++    }
++    helper.getCfgManager()->insertSettings( sToolBarName, xIndexAccess );
++    return true;
++}
++
 +TB::TB() : bSignature( 0 )
 +,bVersion( 0 )
 +,cCL( 0 )
@@ -974,6 +1117,15 @@ index a7f122b..1013a3b 100644
 +        indent_printf(fp,"  dumping toolbar data TBCData \n");
 +        tbcd->Print(fp);
 +    }
++}
++
++bool
++TBC::ImportToolBarControl( const css::uno::Reference< css::container::XIndexContainer >& toolbarcontainer, CustomToolBarImportHelper& helper )
++{
++   if ( tbcd.get() )
++       return tbcd->ImportToolBarControl( toolbarcontainer, helper );
++   return true;
++    
 +}
 +
 +TBCHeader::TBCHeader() : bSignature( 0x3 )
@@ -1063,6 +1215,46 @@ index a7f122b..1013a3b 100644
 +    return false;
 +}
 +
++bool TBCData::ImportToolBarControl( const css::uno::Reference< css::container::XIndexContainer >& toolbarcontainer, CustomToolBarImportHelper& helper )
++{
++    std::vector< css::beans::PropertyValue > props; 
++    controlGeneralInfo.ImportToolBarControlData( props );
++    uno::Sequence< beans::PropertyValue > sProps( props.size() );
++    beans::PropertyValue* pProp = sProps.getArray();
++
++    rtl::OUString sCommand;
++    for ( std::vector< css::beans::PropertyValue >::iterator it = props.begin(); it != props.end(); ++it, ++pProp )
++    {
++        *pProp = *it;
++        if ( it->Name.equals( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("CommandURL") ) ) )
++            it->Value >>= sCommand;
++    }
++
++    toolbarcontainer->insertByIndex( toolbarcontainer->getCount(), uno::makeAny( sProps ) );
++
++    if ( rHeader.getTct() == 0x01
++    || rHeader.getTct() == 0x10 )
++    {
++        TBCBSpecific* pSpecificInfo = dynamic_cast< TBCBSpecific* >( controlSpecificInfo.get() );
++        if ( pSpecificInfo )
++        {
++            // if we have a icon then lets  set it for the command ( but I
++            // have a nasty suspicion the toolbar actually needs to be set
++            // up ( and added ) before you can asssign an image :-/
++            if ( TBCBitMap* pIcon = pSpecificInfo->getIcon() )
++            {
++                Graphic aGraphic( pIcon->getBitMap() );
++                // #TODO apply icon mask ( transparency )
++                uno::Sequence< rtl::OUString > commands(1);
++                commands[ 0 ] = sCommand; 
++                uno::Sequence< uno::Reference< graphic::XGraphic > > images( 1 );
++                images[ 0 ] = aGraphic.GetXGraphic();
++            }
++        }
++    }
++    return true; // just ignore
++}
++
 +void TBCData::Print( FILE* fp )
 +{
 +    INDENT;
@@ -1145,6 +1337,12 @@ index a7f122b..1013a3b 100644
 +    
 +}
 +
++rtl::OUString
++TBCExtraInfo::getOnAction()
++{
++    return wstrOnAction.getString();
++}
++
 +TBCGeneralInfo::TBCGeneralInfo() : bFlags( 0 )
 +{
 +}
@@ -1178,6 +1376,48 @@ index a7f122b..1013a3b 100644
 +        rtl::OUStringToOString( tooltip.getString(), RTL_TEXTENCODING_UTF8 ).getStr() );
 +    if ( bFlags & 0x4 ) 
 +        extraInfo.Print( fp );
++}
++
++bool 
++TBCGeneralInfo::ImportToolBarControlData( std::vector< beans::PropertyValue >& sControlData )
++{
++    if ( ( bFlags & 0x5 ) )
++    {
++        beans::PropertyValue aProp;
++        aProp.Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("CommandURL") );
++        aProp.Value = CustomToolBarImportHelper::createCommandFromMacro( extraInfo.getOnAction() );
++        sControlData.push_back( aProp );
++
++        aProp.Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Label") );
++        aProp.Value = uno::makeAny( customText.getString() );
++        sControlData.push_back( aProp );
++
++
++        aProp.Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Type") );
++        aProp.Value = uno::makeAny( ui::ItemType::DEFAULT ); 
++        sControlData.push_back( aProp );
++
++
++        // #TODO find out about visible flag, where is it
++        aProp.Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Visible") );
++        aProp.Value = uno::makeAny( sal_True ); // where is the visible attribute stored
++        // Style this specifies whether ICON, TEXT or ICON & TEXT is stored
++        // 0, 1, 2 respecively for property 'Style'
++
++        // #TODO find out what is the property for tooltip?
++        sControlData.push_back( aProp );
++/*
++aToolbarItem(0).Name = "CommandURL" wstrOnAction
++aToolbarItem(0).Value = Command
++aToolbarItem(1).Name = "Label"      customText
++aToolbarItem(1).Value = Label
++aToolbarItem(2).Name = "Type"
++aToolbarItem(2).Value = 0
++aToolbarItem(3).Name = "Visible"
++aToolbarItem(3).Value = true        
++*/
++    }
++    return true;
 +}
 +
 +TBCMenuSpecific::TBCMenuSpecific() : tbid( 0 )
@@ -1274,6 +1514,18 @@ index a7f122b..1013a3b 100644
 +    indent_printf( fp, "  option string present? %s ->%s<-\n", bResult ? "true" : "false", bResult ? rtl::OUStringToOString( wstrAcc->getString(), RTL_TEXTENCODING_UTF8 ).getStr() : "N/A" );
 +}
 +
++TBCBitMap* 
++TBCBSpecific::getIcon()
++{
++    return icon.get();
++}
++
++TBCBitMap* 
++TBCBSpecific::getIconMask()
++{
++    return iconMask.get();
++}
++
 +TBCComboDropdownSpecific::TBCComboDropdownSpecific(const TBCHeader& header ) 
 +{
 +    if ( header.getTcID() == 0x01 )
@@ -1351,26 +1603,13 @@ index a7f122b..1013a3b 100644
 +
 +TBCBitMap::~TBCBitMap()
 +{
-+    if ( pRestOfIt )
-+        delete [] pRestOfIt;
 +}
 +
-+TBCBitMap::TBCBitMap(const TBCBitMap& other)
++// #FIXME Const-ness
++Bitmap& 
++TBCBitMap::getBitMap()
 +{
-+    *this = other;
-+}
-+
-+
-+TBCBitMap& TBCBitMap::operator = ( const TBCBitMap& other )
-+{
-+    if ( pRestOfIt )
-+        delete [] pRestOfIt;
-+    if ( other.size && other.pRestOfIt )
-+    {
-+        pRestOfIt = new sal_uInt8[ other.size ];
-+        pRestOfIt = static_cast< sal_uInt8* > ( memcpy( static_cast< void* >( pRestOfIt) , static_cast< void* >( other.pRestOfIt ), other.size ) );
-+    }
-+    return *this; 
++    return mBitMap;
 +}
 +
 +bool TBCBitMap::Read( SotStorageStream* pS)
@@ -1379,11 +1618,7 @@ index a7f122b..1013a3b 100644
 +    nOffSet = pS->Tell();
 +    *pS >> cbDIB;
 +    // cbDIB = sizeOf(biHeader) + sizeOf(colors) + sizeOf(bitmapData) + 10
-+    // slurp the rest of the structure as a blob ( we'll get to it later )
-+
-+    pRestOfIt = new sal_uInt8[ cbDIB - 10 ];
-+    pS->Read( pRestOfIt, cbDIB - 10 );
-+    return true;
++    return mBitMap.Read( *pS, FALSE );
 +}
 +
 +void TBCBitMap::Print( FILE* fp )
@@ -1414,6 +1649,12 @@ index a7f122b..1013a3b 100644
 +    indent_printf(fp, "[ 0x%x ] Tcg - dump %d\n", nOffSet, nTcgVer);
 +    indent_printf(fp,"  nTcgVer %d\n", nTcgVer);
 +    tcg->Print( fp );
++}
++
++bool Tcg::ImportCustomToolBar( const uno::Reference< frame::XModel >& rxModel )
++{
++    CustomToolBarImportHelper helper( rxModel );
++    return tcg->ImportCustomToolBar( helper );
 +}
 +
 +Tcg255::Tcg255()
@@ -1473,6 +1714,26 @@ index a7f122b..1013a3b 100644
 +    rgtcgData.push_back( pSubStruct );
 +    return true;
 +}
++
++bool Tcg255::ImportCustomToolBar( CustomToolBarImportHelper& helper )
++{
++    // Find the CTBWrapper
++    for ( std::vector< Tcg255SubStruct* >::const_iterator it = rgtcgData.begin(); it != rgtcgData.end(); ++it )
++    {
++        if ( (*it)->id() == 0x12 )
++        {
++            // not so great, shouldn't really have to do a horror casting    
++            CTBWrapper* pCTBWrapper =  dynamic_cast< CTBWrapper* > ( *it );
++            if ( pCTBWrapper )
++            {
++                if ( !pCTBWrapper->ImportCustomToolBar( helper ) )
++                    return false;
++            }
++        }
++    }
++    return true;
++}
++
 +
 +bool Tcg255::Read(SotStorageStream *pS)
 +{
