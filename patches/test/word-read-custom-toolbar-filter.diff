@@ -130,8 +130,8 @@ index 5e931a7..7c5be41 100644
  		// unknown Header
  		if( rHeader.nSize < DIBINFOHEADERSIZE )
 --- /dev/null	2008-04-22 00:28:44.000000000 +0100
-+++ sw/source/filter/ww8/ww8toolbar.hxx	2009-02-03 18:04:41.000000000 +0000
-@@ -0,0 +1,554 @@
++++ sw/source/filter/ww8/ww8toolbar.hxx	2009-02-04 13:42:05.000000000 +0000
+@@ -0,0 +1,556 @@
 +#ifndef _WW8TOOLBAR_HXX
 +#define _WW8TOOLBAR_HXX
 +
@@ -344,8 +344,10 @@ index 5e931a7..7c5be41 100644
 +    ~TBCHeader();
 +    sal_uInt8 getTct() const { return tct; }
 +    sal_uInt16 getTcID() const { return tcid; }
++    bool isVisible() { return !( bFlagsTCR & 0x1 ); }
 +    bool Read(SotStorageStream *pS);
 +    void Print( FILE* );
++    sal_uInt32 getTbct() { return tbct; };
 +};
 +
 +class TBCData : public TBBase
@@ -487,7 +489,7 @@ index 5e931a7..7c5be41 100644
 +    CTBWrapper( bool bReadId = true );
 +    ~CTBWrapper();
 +    bool Read(SotStorageStream *pS);
-+    bool ImportCustomToolBar( CustomToolBarImportHelper& );
++    bool ImportCustomToolBar( const css::uno::Reference< css::frame::XModel >& rxModel );
 +    void Print( FILE* );
 +};
 +
@@ -668,7 +670,7 @@ index 5e931a7..7c5be41 100644
 +    ~Tcg255();
 +    bool Read(SotStorageStream *pS);
 +    void Print( FILE* );
-+    bool ImportCustomToolBar( CustomToolBarImportHelper& );
++    bool ImportCustomToolBar( const css::uno::Reference< css::frame::XModel >& rxModel );
 +};
 +
 +class Tcg: public TBBase
@@ -687,16 +689,19 @@ index 5e931a7..7c5be41 100644
 +
 +#endif
 --- /dev/null	2008-04-22 00:28:44.000000000 +0100
-+++ sw/source/filter/ww8/ww8toolbar.cxx	2009-02-03 18:05:51.000000000 +0000
-@@ -0,0 +1,1473 @@
++++ sw/source/filter/ww8/ww8toolbar.cxx	2009-02-04 13:44:25.000000000 +0000
+@@ -0,0 +1,1543 @@
 +#include "ww8toolbar.hxx"
 +#include <rtl/ustrbuf.hxx>
 +#include <stdarg.h>
 +#include <com/sun/star/ui/XUIConfigurationManagerSupplier.hpp>
++#include <com/sun/star/ui/XUIConfigurationPersistence.hpp>
++#include <com/sun/star/ui/XImageManager.hpp>
 +#include <com/sun/star/graphic/XGraphic.hpp>
 +#include <com/sun/star/ui/ItemType.hpp>
 +#include <fstream>
 +#include <vcl/graph.hxx>
++#include <vcl/bitmapex.hxx>
 +int TBBase::nIndent = 0;
 +
 +using namespace com::sun::star;
@@ -707,12 +712,46 @@ index 5e931a7..7c5be41 100644
 +
 +class CustomToolBarImportHelper
 +{
++struct iconcontrolitem
++{
++    rtl::OUString sCommand;
++    uno::Reference< graphic::XGraphic > image;
++};
++    std::vector< iconcontrolitem > iconcommands;
++
 +    uno::Reference< ui::XUIConfigurationManagerSupplier > m_xCfgSupp;
 +public:
 +    CustomToolBarImportHelper( const uno::Reference< frame::XModel >& rxModel );
++
 +    uno::Reference< ui::XUIConfigurationManager > getCfgManager();
++
 +    static uno::Any createCommandFromMacro( const rtl::OUString& sCmd );
++
++    void addIcon( const uno::Reference< graphic::XGraphic >& xImage, const rtl::OUString& sString );
++    void applyIcons();
 +};
++
++void CustomToolBarImportHelper::applyIcons()
++{
++    for ( std::vector< iconcontrolitem >::iterator it = iconcommands.begin(); it != iconcommands.end(); ++it )
++    {
++        uno::Sequence< rtl::OUString > commands(1);
++        commands[ 0 ] = it->sCommand;
++        uno::Sequence< uno::Reference< graphic::XGraphic > > images(1);
++        images[ 0 ] = it->image;
++
++        uno::Reference< ui::XImageManager > xImageManager( getCfgManager()->getImageManager(), uno::UNO_QUERY_THROW );
++        xImageManager->insertImages( 1,  commands, images );
++    }
++}
++
++void CustomToolBarImportHelper::addIcon( const uno::Reference< graphic::XGraphic >& xImage, const rtl::OUString& sString )
++{
++    iconcontrolitem item;
++    item.sCommand = sString;
++    item.image = xImage;
++    iconcommands.push_back( item );
++}
 +
 +CustomToolBarImportHelper::CustomToolBarImportHelper( const uno::Reference< frame::XModel >& rxModel )
 +{
@@ -810,9 +849,9 @@ index 5e931a7..7c5be41 100644
 +    }
 +    if ( cCust )
 +    {
-+        Customization aCust;
 +        for ( sal_Int32 index = 0; index < cCust; ++index )
 +        {
++            Customization aCust;
 +            if ( !aCust.Read( pS ) )
 +                return false;
 +            rCustomizations.push_back( aCust );
@@ -861,11 +900,12 @@ index 5e931a7..7c5be41 100644
 +    }
 +}
 +
-+bool CTBWrapper::ImportCustomToolBar( CustomToolBarImportHelper& helper )
++bool CTBWrapper::ImportCustomToolBar( const uno::Reference< css::frame::XModel >& rxModel )
 +{
 +    
 +    for ( std::vector< Customization >::iterator it = rCustomizations.begin(); it != rCustomizations.end(); ++it )
 +    {
++        CustomToolBarImportHelper helper( rxModel );
 +        if ( !(*it).ImportCustomToolBar( helper ) )
 +            return false;
 +    }
@@ -1044,7 +1084,18 @@ index 5e931a7..7c5be41 100644
 +        if ( !it->ImportToolBarControl( xIndexContainer, helper ) )
 +            return false;
 +    }
++
++    OSL_TRACE("Name of toolbar :-/ %s", rtl::OUStringToOString( sToolBarName, RTL_TEXTENCODING_UTF8 ).getStr() );
++
 +    helper.getCfgManager()->insertSettings( sToolBarName, xIndexAccess );
++    helper.applyIcons();
++
++    uno::Reference< ui::XUIConfigurationPersistence > xPersistence( helper.getCfgManager()->getImageManager(), uno::UNO_QUERY_THROW );
++    xPersistence->store();
++
++    xPersistence.set( helper.getCfgManager(), uno::UNO_QUERY_THROW );
++    xPersistence->store();
++    
 +    return true;
 +}
 +
@@ -1219,8 +1270,30 @@ index 5e931a7..7c5be41 100644
 +{
 +    std::vector< css::beans::PropertyValue > props; 
 +    controlGeneralInfo.ImportToolBarControlData( props );
++    beans::PropertyValue aProp;
++    aProp.Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Visible") ) ;
++    aProp.Value = uno::makeAny( rHeader.isVisible() ); // where is the visible attribute stored
++/*
++    // Style this specifies whether ICON, TEXT or ICON & TEXT is stored
++    // 0, 1, 2 respecively for property 'Style'
++
++    beans::PropertyValue styleProp;
++    // ToolBar specific only not much good for interop
++    styleProp.Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Style") );
++
++    if ( ( rHeader.getTbct() & 0x3 ) == 0x3 )
++        styleProp.Value <<= sal_Int32( 2 );
++    else if ( rHeader.getTbct() & 0x2 )
++        styleProp.Value <<= sal_Int32( 0 );
++    else
++        styleProp.Value <<= sal_Int32( 1 );
++
++    props.push_back( styleProp );
++*/
++
 +    uno::Sequence< beans::PropertyValue > sProps( props.size() );
 +    beans::PropertyValue* pProp = sProps.getArray();
++   
 +
 +    rtl::OUString sCommand;
 +    for ( std::vector< css::beans::PropertyValue >::iterator it = props.begin(); it != props.end(); ++it, ++pProp )
@@ -1243,12 +1316,16 @@ index 5e931a7..7c5be41 100644
 +            // up ( and added ) before you can asssign an image :-/
 +            if ( TBCBitMap* pIcon = pSpecificInfo->getIcon() )
 +            {
-+                Graphic aGraphic( pIcon->getBitMap() );
-+                // #TODO apply icon mask ( transparency )
-+                uno::Sequence< rtl::OUString > commands(1);
-+                commands[ 0 ] = sCommand; 
-+                uno::Sequence< uno::Reference< graphic::XGraphic > > images( 1 );
-+                images[ 0 ] = aGraphic.GetXGraphic();
++                 BitmapEx aBitEx( pIcon->getBitMap() );
++                 if ( pSpecificInfo->getIconMask() )
++                     // according to the spec:
++                     // "the iconMask is white in all the areas in which the icon is
++                     // displayed as transparent and is black in all other areas."
++
++                     aBitEx = BitmapEx( aBitEx.GetBitmap(), pSpecificInfo->getIconMask()->getBitMap().CreateMask( Color( COL_WHITE ) ) );
++
++                 Graphic aGraphic( aBitEx );
++                 helper.addIcon( aGraphic.GetXGraphic(), sCommand );
 +            }
 +        }
 +    }
@@ -1392,17 +1469,13 @@ index 5e931a7..7c5be41 100644
 +        aProp.Value = uno::makeAny( customText.getString() );
 +        sControlData.push_back( aProp );
 +
-+
 +        aProp.Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Type") );
 +        aProp.Value = uno::makeAny( ui::ItemType::DEFAULT ); 
 +        sControlData.push_back( aProp );
 +
-+
-+        // #TODO find out about visible flag, where is it
-+        aProp.Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Visible") );
-+        aProp.Value = uno::makeAny( sal_True ); // where is the visible attribute stored
-+        // Style this specifies whether ICON, TEXT or ICON & TEXT is stored
-+        // 0, 1, 2 respecively for property 'Style'
++        aProp.Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("HelpURL") );
++        aProp.Value = uno::makeAny( CustomToolBarImportHelper::createCommandFromMacro( tooltip.getString() ) ); 
++        sControlData.push_back( aProp );
 +
 +        // #TODO find out what is the property for tooltip?
 +        sControlData.push_back( aProp );
@@ -1653,8 +1726,7 @@ index 5e931a7..7c5be41 100644
 +
 +bool Tcg::ImportCustomToolBar( const uno::Reference< frame::XModel >& rxModel )
 +{
-+    CustomToolBarImportHelper helper( rxModel );
-+    return tcg->ImportCustomToolBar( helper );
++    return tcg->ImportCustomToolBar( rxModel );
 +}
 +
 +Tcg255::Tcg255()
@@ -1715,7 +1787,7 @@ index 5e931a7..7c5be41 100644
 +    return true;
 +}
 +
-+bool Tcg255::ImportCustomToolBar( CustomToolBarImportHelper& helper )
++bool Tcg255::ImportCustomToolBar( const uno::Reference< css::frame::XModel >& rxModel )
 +{
 +    // Find the CTBWrapper
 +    for ( std::vector< Tcg255SubStruct* >::const_iterator it = rgtcgData.begin(); it != rgtcgData.end(); ++it )
@@ -1726,7 +1798,7 @@ index 5e931a7..7c5be41 100644
 +            CTBWrapper* pCTBWrapper =  dynamic_cast< CTBWrapper* > ( *it );
 +            if ( pCTBWrapper )
 +            {
-+                if ( !pCTBWrapper->ImportCustomToolBar( helper ) )
++                if ( !pCTBWrapper->ImportCustomToolBar( rxModel ) )
 +                    return false;
 +            }
 +        }
