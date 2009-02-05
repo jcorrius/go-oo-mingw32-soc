@@ -56,15 +56,19 @@ while (<STDIN>) {
     # copied context patches:
     # 	first line:  *** path
     #	second line: --- path
+    # IMPORTANT: we need extra reqular expression for --- and *** to do not match lines like -**
     if  ( ( ! defined $firstline ) &&
-          ( $line =~ m/^[\*-][\*-][\*-] [ \t]*([^\s]+)/ ) ) {
+          ( ( $line =~ m/^\*\*\* [ \t]*([^\s]+)/ ) ||
+	    ( $line =~ m/^--- [ \t]*([^\s]+)/ ) ) ) {
 	# found first line that defines the path of the patched file
 	($firstline_topdir, $firstline_subpath) = analyze_path("$1");
-	$firstline = $line if (defined $firstline_topdir);
+	$firstline = $line;
 	next;
     }
 
-    if ( $line =~ m/^[\+-][\+-][\+-] [ \t]*([^\s]+)/ ) {
+    # there are diffs with just the +++ line => the first line is missing in this cases
+    if ( ( ( defined $firstline ) && ( $line =~ m/^--- [ \t]*([^\s]+)/ ) ) ||
+         ( $line =~ m/^\+\+\+ [ \t]*([^\s]+)/ ) ) {
 	# found second line that defines the path of the patched file
 	($topdir, $subpath) = analyze_path("$1");
 
@@ -107,7 +111,7 @@ while (<STDIN>) {
 my $result = 0;
 if ($sections > 0) {
 # patch complains a lot with empty input
-#    print "calling: patch @ARGV < $tmpfile\n";
+#   print "calling: patch @ARGV < $tmpfile\n";
     if (system ("patch @ARGV < $tmpfile")) {
 	 print STDERR "\nError: failed to apply patch @ARGV: $!\n\n";
     }
