@@ -22,6 +22,7 @@ done << EOF
 unxlng*.pro
 unxlngi6
 localize.sdf
+.svn
 /solver
 *.orig
 autom4te.cache/
