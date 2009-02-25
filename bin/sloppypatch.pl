@@ -1,7 +1,6 @@
 #!/usr/bin/perl -w
 
-use IO::File;
-use POSIX qw(tmpnam);
+use File::Temp qw/ :mktemp  /;
 
 # apply a patch, but only if the top-level directory exists
 # mentioned in the patch; eg.
@@ -18,12 +17,8 @@ for (my $idx = 0; $idx < @ARGV; $idx++) {
     }
 }
 
-my $tmpfile;
-my $fh;
-for (;;) {
-    $tmpfile = tmpnam();
-    sysopen( $fh, $tmpfile, O_RDWR | O_CREAT | O_EXCL ) && last;
-}
+my $tmpfile, $fh;
+($fh,$tmpfile) = mkstemp("/tmp/sloopypatch-XXXXXX");
 
 sub analyze_path($)
 {
@@ -107,6 +102,7 @@ while (<STDIN>) {
 	print $fh $line;
     }
 }
+$fh->close;
 
 my $result = 0;
 if ($sections > 0) {
