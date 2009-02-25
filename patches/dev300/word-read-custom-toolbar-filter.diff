@@ -910,7 +910,7 @@ index 0000000..cb1c4bf
 +    nOffSet = pS->Tell();
 +    *pS >> cbDIB;
 +    // cbDIB = sizeOf(biHeader) + sizeOf(colors) + sizeOf(bitmapData) + 10
-+    return mBitMap.Read( *pS, FALSE );
++    return mBitMap.Read( *pS, FALSE, TRUE );
 +}
 +
 +void TBCBitMap::Print( FILE* fp )
@@ -2381,19 +2381,89 @@ index 0000000..188213c
 +};
 +
 +#endif
-diff --git vcl/source/gdi/bitmap2.cxx vcl/source/gdi/bitmap2.cxx
-index 5e931a7..7c5be41 100644
---- vcl/source/gdi/bitmap2.cxx
-+++ vcl/source/gdi/bitmap2.cxx
-@@ -49,6 +49,7 @@
+Index: vcl/inc/vcl/bitmap.hxx
+===================================================================
+--- vcl/inc/vcl/bitmap.hxx	(revision 267686)
++++ vcl/inc/vcl/bitmap.hxx	(working copy)
+@@ -270,9 +270,9 @@
+     SAL_DLLPRIVATE void                 ImplSetImpBitmap( ImpBitmap* pImpBmp );
+     SAL_DLLPRIVATE void                 ImplAssignWithSize( const Bitmap& rBitmap );
+ 
+-    SAL_DLLPRIVATE static BOOL          ImplReadDIB( SvStream& rIStm, Bitmap& rBmp, ULONG nOffset );
++    SAL_DLLPRIVATE static BOOL          ImplReadDIB( SvStream& rIStm, Bitmap& rBmp, ULONG nOffset, BOOL bMSOFormat=FALSE );
+     SAL_DLLPRIVATE static BOOL          ImplReadDIBFileHeader( SvStream& rIStm, ULONG& rOffset );
+-    SAL_DLLPRIVATE static BOOL          ImplReadDIBInfoHeader( SvStream& rIStm, DIBInfoHeader& rHeader, sal_Bool& bTopDown );
++    SAL_DLLPRIVATE static BOOL          ImplReadDIBInfoHeader( SvStream& rIStm, DIBInfoHeader& rHeader, sal_Bool& bTopDown, BOOL bMSOFormat = FALSE );
+     SAL_DLLPRIVATE static BOOL          ImplReadDIBPalette( SvStream& rIStm, BitmapWriteAccess& rAcc, BOOL bQuad );
+     SAL_DLLPRIVATE static BOOL          ImplReadDIBBits( SvStream& rIStm, DIBInfoHeader& rHeader, BitmapWriteAccess& rAcc, sal_Bool bTopDown );
+     SAL_DLLPRIVATE BOOL                 ImplWriteDIB( SvStream& rOStm, BitmapReadAccess& rAcc, BOOL bCompressed ) const;
+@@ -767,7 +767,7 @@
+ 
+ public:
+ 
+-    BOOL                    Read( SvStream& rIStm, BOOL bFileHeader = TRUE );
++    BOOL                    Read( SvStream& rIStm, BOOL bFileHeader = TRUE, BOOL bMSOFormat = FALSE );
+     BOOL                    Write( SvStream& rOStm, BOOL bCompressed = TRUE, BOOL bFileHeader = TRUE ) const;
+ 
+     friend VCL_DLLPUBLIC SvStream&        operator>>( SvStream& rIStm, Bitmap& rBitmap );
+Index: vcl/source/gdi/bitmap2.cxx
+===================================================================
+--- vcl/source/gdi/bitmap2.cxx	(revision 267686)
++++ vcl/source/gdi/bitmap2.cxx	(working copy)
+@@ -49,6 +49,8 @@
  
  #define DIBCOREHEADERSIZE			( 12UL )
  #define DIBINFOHEADERSIZE			( sizeof( DIBInfoHeader ) )
 +#define BITMAPINFOHEADER                        0x28
++
  #define SETPIXEL4( pBuf, nX, cChar )( (pBuf)[ (nX) >> 1 ] |= ( (nX) & 1 ) ? ( cChar ): (cChar) << 4 );
  
  // ----------------------
-@@ -308,16 +309,32 @@ BOOL Bitmap::ImplReadDIBInfoHeader( SvStream& rIStm, DIBInfoHeader& rHeader, sal
+@@ -132,7 +134,7 @@
+ 
+ // ------------------------------------------------------------------
+ 
+-BOOL Bitmap::Read( SvStream& rIStm, BOOL bFileHeader )
++BOOL Bitmap::Read( SvStream& rIStm, BOOL bFileHeader, BOOL bIsMSOFormat )
+ {
+ 	const USHORT	nOldFormat = rIStm.GetNumberFormatInt();
+ 	const ULONG 	nOldPos = rIStm.Tell();
+@@ -147,7 +149,7 @@
+ 			bRet = ImplReadDIB( rIStm, *this, nOffset );
+ 	}
+ 	else
+-		bRet = ImplReadDIB( rIStm, *this, nOffset );
++		bRet = ImplReadDIB( rIStm, *this, nOffset, bIsMSOFormat );
+ 
+ 	if( !bRet )
+ 	{
+@@ -164,16 +166,16 @@
+ 
+ // ------------------------------------------------------------------
+ 
+-BOOL Bitmap::ImplReadDIB( SvStream& rIStm, Bitmap& rBmp, ULONG nOffset )
++BOOL Bitmap::ImplReadDIB( SvStream& rIStm, Bitmap& rBmp, ULONG nOffset, BOOL bIsMSOFormat )
+ {
+ 	DIBInfoHeader	aHeader;
+ 	const ULONG 	nStmPos = rIStm.Tell();
+ 	BOOL			bRet = FALSE;
+ 	sal_Bool		bTopDown = sal_False;
+ 
+-	if( ImplReadDIBInfoHeader( rIStm, aHeader, bTopDown ) && aHeader.nWidth && aHeader.nHeight && aHeader.nBitCount )
++	if( ImplReadDIBInfoHeader( rIStm, aHeader, bTopDown, bIsMSOFormat ) && aHeader.nWidth && aHeader.nHeight && aHeader.nBitCount )
+ 	{
+ 		const USHORT nBitCount( discretizeBitcount(aHeader.nBitCount) );
+ 
+ 		const Size			aSizePixel( aHeader.nWidth, abs(aHeader.nHeight) );
+ 		BitmapPalette		aDummyPal;
+@@ -302,21 +304,37 @@
+ 
+ // ------------------------------------------------------------------
+ 
+-BOOL Bitmap::ImplReadDIBInfoHeader( SvStream& rIStm, DIBInfoHeader& rHeader, sal_Bool& bTopDown )
++BOOL Bitmap::ImplReadDIBInfoHeader( SvStream& rIStm, DIBInfoHeader& rHeader, sal_Bool& bTopDown, sal_Bool bIsMSOFormat )
+ {
+ 	// BITMAPINFOHEADER or BITMAPCOREHEADER
  	rIStm >> rHeader.nSize;
  
  	// BITMAPCOREHEADER
@@ -2408,8 +2478,7 @@ index 5e931a7..7c5be41 100644
  		rIStm >> rHeader.nPlanes;
  		rIStm >> rHeader.nBitCount;
  	}
--	else
-+	else if ( rHeader.nSize == BITMAPINFOHEADER )
++	else if ( bIsMSOFormat && ( rHeader.nSize == BITMAPINFOHEADER ) )
 +	{
 +		rIStm >> nTmp16; rHeader.nWidth = nTmp16;
 +		rIStm >> nTmp16; rHeader.nHeight = nTmp16;
@@ -2424,7 +2493,6 @@ index 5e931a7..7c5be41 100644
 +		rIStm >> rHeader.nColsUsed;
 +		rIStm >> rHeader.nColsImportant;
 +	}
-+        else
+ 	else
  	{
  		// unknown Header
- 		if( rHeader.nSize < DIBINFOHEADERSIZE )
