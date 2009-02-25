@@ -1,5 +1,5 @@
 diff --git sc/source/ui/docshell/docfunc.cxx sc/source/ui/docshell/docfunc.cxx
-index 4936634..243b637 100644
+index 123a716..fde95e5 100644
 --- sc/source/ui/docshell/docfunc.cxx
 +++ sc/source/ui/docshell/docfunc.cxx
 @@ -67,6 +67,7 @@
@@ -18,11 +18,11 @@ index 4936634..243b637 100644
  
  using namespace com::sun::star;
  using ::com::sun::star::uno::Sequence;
-@@ -3906,78 +3908,97 @@ BOOL ScDocFunc::FillAuto( ScRange& rRange, const ScMarkData* pTabMark, FillDir e
+@@ -3974,86 +3976,110 @@ BOOL ScDocFunc::FillAuto( ScRange& rRange, const ScMarkData* pTabMark, FillDir e
  
  //------------------------------------------------------------------------
  
--BOOL ScDocFunc::MergeCells( const ScRange& rRange, BOOL bContents, BOOL bRecord, BOOL bApi, BOOL bCenter )
+-BOOL ScDocFunc::MergeCells( const ScRange& rRange, BOOL bContents, BOOL bRecord, BOOL bApi )
 +BOOL ScDocFunc::MergeCells( const ScCellMergeOption& rOption, BOOL bContents, BOOL bRecord, BOOL bApi )
  {
 +    using ::std::set;
@@ -59,12 +59,6 @@ index 4936634..243b637 100644
 -			rDocShell.ErrorMessage(aTester.GetMessageId());
 -		return FALSE;
 -	}
--
--	if ( nStartCol == nEndCol && nStartRow == nEndRow )
--	{
--		// nichts zu tun
--		return TRUE;
--	}
 +    for (set<SCTAB>::const_iterator itr = itrBeg; itr != itrEnd; ++itr)
 +    {
 +        ScEditableTester aTester( pDoc, *itr, nStartCol, nStartRow, nEndCol, nEndRow );
@@ -75,13 +69,10 @@ index 4936634..243b637 100644
 +            return FALSE;
 +        }
  
--	if ( pDoc->HasAttrib( nStartCol, nStartRow, nTab, nEndCol, nEndRow, nTab,
--							HASATTR_MERGED | HASATTR_OVERLAPPED ) )
+-	if ( nStartCol == nEndCol && nStartRow == nEndRow )
 -	{
--		// "Zusammenfassen nicht verschachteln !"
--		if (!bApi)
--			rDocShell.ErrorMessage(STR_MSSG_MERGECELLS_0);
--		return FALSE;
+-		// nichts zu tun
+-		return TRUE;
 -	}
 +        if ( pDoc->HasAttrib( nStartCol, nStartRow, *itr, nEndCol, nEndRow, *itr,
 +                                HASATTR_MERGED | HASATTR_OVERLAPPED ) )
@@ -93,90 +84,114 @@ index 4936634..243b637 100644
 +        }
 +    }
  
--	BOOL bNeedContents = bContents &&
--			( !pDoc->IsBlockEmpty( nTab, nStartCol,nStartRow+1, nStartCol,nEndRow ) ||
--			  !pDoc->IsBlockEmpty( nTab, nStartCol+1,nStartRow, nEndCol,nEndRow ) );
+-	if ( pDoc->HasAttrib( nStartCol, nStartRow, nTab, nEndCol, nEndRow, nTab,
+-							HASATTR_MERGED | HASATTR_OVERLAPPED ) )
+-	{
+-		// "Zusammenfassen nicht verschachteln !"
+-		if (!bApi)
+-			rDocShell.ErrorMessage(STR_MSSG_MERGECELLS_0);
+-		return FALSE;
+-	}
 +    ScDocument* pUndoDoc = NULL;
++    bool bNeedContentsUndo = false;
 +    for (set<SCTAB>::const_iterator itr = itrBeg; itr != itrEnd; ++itr)
 +    {
 +        SCTAB nTab = *itr;
-+        BOOL bNeedContents = bContents &&
-+                ( !pDoc->IsBlockEmpty( nTab, nStartCol,nStartRow+1, nStartCol,nEndRow ) ||
-+                  !pDoc->IsBlockEmpty( nTab, nStartCol+1,nStartRow, nEndCol,nEndRow ) );
++        bool bNeedContents = bContents &&
++                ( !pDoc->IsBlockEmpty( nTab, nStartCol,nStartRow+1, nStartCol,nEndRow, true ) ||
++                  !pDoc->IsBlockEmpty( nTab, nStartCol+1,nStartRow, nEndCol,nEndRow, true ) );
 +    
 +        if (bRecord)
 +        {
-+            if ( (bNeedContents && bContents) || rOption.mbCenter )
++            // test if the range contains other notes which also implies that we need an undo document
++            bool bHasNotes = false;
++            for( ScAddress aPos( nStartCol, nStartRow, nTab ); !bHasNotes && (aPos.Col() <= nEndCol); aPos.IncCol() )
++                for( aPos.SetRow( nStartRow ); !bHasNotes && (aPos.Row() <= nEndRow); aPos.IncRow() )
++                    bHasNotes = ((aPos.Col() != nStartCol) || (aPos.Row() != nStartRow)) && (pDoc->GetNote( aPos ) != 0);
+ 
+-	BOOL bNeedContents = bContents &&
+-			( !pDoc->IsBlockEmpty( nTab, nStartCol,nStartRow+1, nStartCol,nEndRow, true ) ||
+-			  !pDoc->IsBlockEmpty( nTab, nStartCol+1,nStartRow, nEndCol,nEndRow, true ) );
++            if (bNeedContents || bHasNotes || rOption.mbCenter)
 +            {
 +                if (!pUndoDoc)
-+                {    
++                {
 +                    pUndoDoc = new ScDocument( SCDOCMODE_UNDO );
 +                    pUndoDoc->InitUndo(pDoc, nTab1, nTab2);
 +                }
++                // note captions are collected by drawing undo
 +                pDoc->CopyToDocument( nStartCol, nStartRow, nTab, nEndCol, nEndRow, nTab,
-+                                        IDF_ALL, FALSE, pUndoDoc );
++                                      IDF_ALL|IDF_NOCAPTIONS, FALSE, pUndoDoc );
 +            }
++            if( bHasNotes )
++                pDoc->BeginDrawUndo();
 +        }
  
+-    ScDocument* pUndoDoc = 0;
 -	if (bRecord)
 -	{
--		ScDocument* pUndoDoc = NULL;
--		if ( (bNeedContents && bContents) || bCenter )
--		{
--			pUndoDoc = new ScDocument( SCDOCMODE_UNDO );
--			pUndoDoc->InitUndo( pDoc, nTab, nTab );
--			pDoc->CopyToDocument( nStartCol, nStartRow, nTab, nEndCol, nEndRow, nTab,
--									IDF_ALL, FALSE, pUndoDoc );
--		}
--		rDocShell.GetUndoManager()->AddUndoAction(
--			new ScUndoMerge( &rDocShell,
--							nStartCol, nStartRow, nTab,
--							nEndCol, nEndRow, nTab, TRUE, pUndoDoc, bCenter) );
--	}
-+        if (bNeedContents && bContents)
+-        // test if the range contains other notes which also implies that we need an undo document
+-        bool bHasNotes = false;
+-        for( ScAddress aPos( nStartCol, nStartRow, nTab ); !bHasNotes && (aPos.Col() <= nEndCol); aPos.IncCol() )
+-            for( aPos.SetRow( nStartRow ); !bHasNotes && (aPos.Row() <= nEndRow); aPos.IncRow() )
+-                bHasNotes = ((aPos.Col() != nStartCol) || (aPos.Row() != nStartRow)) && (pDoc->GetNote( aPos ) != 0);
++        if (bNeedContents)
 +            pDoc->DoMergeContents( nTab, nStartCol,nStartRow, nEndCol,nEndRow );
-+        pDoc->DoMerge( nTab, nStartCol, nStartRow, nEndCol, nEndRow );
-+        
++        pDoc->DoMerge( nTab, nStartCol,nStartRow, nEndCol,nEndRow );
++	
 +        if (rOption.mbCenter)
 +        {
 +            pDoc->ApplyAttr( nStartCol, nStartRow, nTab, SvxHorJustifyItem( SVX_HOR_JUSTIFY_CENTER, ATTR_HOR_JUSTIFY ) );
 +            pDoc->ApplyAttr( nStartCol, nStartRow, nTab, SvxVerJustifyItem( SVX_VER_JUSTIFY_CENTER, ATTR_VER_JUSTIFY ) );
 +        }
-+    
-+        if ( !AdjustRowHeight( ScRange( 0, nStartRow, nTab, MAXCOL, nEndRow, nTab ) ) )
+ 
+-		if (bNeedContents || bHasNotes)
+-		{
+-			pUndoDoc = new ScDocument( SCDOCMODE_UNDO );
+-			pUndoDoc->InitUndo( pDoc, nTab, nTab );
+-            // note captions are collected by drawing undo
+-			pDoc->CopyToDocument( nStartCol, nStartRow, nTab, nEndCol, nEndRow, nTab,
+-                                    IDF_ALL|IDF_NOCAPTIONS, FALSE, pUndoDoc );
+-		}
+-        if( bHasNotes )
+-            pDoc->BeginDrawUndo();
+-	}
++        if ( !AdjustRowHeight( ScRange( 0,nStartRow,nTab, MAXCOL,nEndRow,nTab ) ) )
 +            rDocShell.PostPaint( nStartCol, nStartRow, nTab,
 +                                 nEndCol, nEndRow, nTab, PAINT_GRID );
-+        if ( (bNeedContents && bContents) || rOption.mbCenter )
-+        {
++        if (bNeedContents || rOption.mbCenter)
++        {    
 +            ScRange aRange(nStartCol, nStartRow, nTab, nEndCol, nEndRow, nTab);
 +            pDoc->SetDirty(aRange);
 +        }
-+    }
  
--	if (bNeedContents && bContents)
+-	if (bNeedContents)
 -		pDoc->DoMergeContents( nTab, nStartCol,nStartRow, nEndCol,nEndRow );
 -	pDoc->DoMerge( nTab, nStartCol,nStartRow, nEndCol,nEndRow );
--	
--	if (bCenter)
--	{
--		pDoc->ApplyAttr( nStartCol, nStartRow, nTab, SvxHorJustifyItem( SVX_HOR_JUSTIFY_CENTER, ATTR_HOR_JUSTIFY ) );
--		pDoc->ApplyAttr( nStartCol, nStartRow, nTab, SvxVerJustifyItem( SVX_VER_JUSTIFY_CENTER, ATTR_VER_JUSTIFY ) );
--	}
-+    if (pUndoDoc)
-+    {
-+        rDocShell.GetUndoManager()->AddUndoAction(
-+            new ScUndoMerge(&rDocShell, rOption, TRUE, pUndoDoc) );
++        bNeedContentsUndo != bNeedContents;
 +    }
+ 
+-    if( bRecord )
++    if (pUndoDoc)
+     {
+-        SdrUndoGroup* pDrawUndo = pDoc->GetDrawLayer() ? pDoc->GetDrawLayer()->GetCalcUndo() : 0;
++        SdrUndoGroup* pDrawUndo = pDoc->GetDrawLayer() ? pDoc->GetDrawLayer()->GetCalcUndo() : NULL;
+         rDocShell.GetUndoManager()->AddUndoAction(
+-            new ScUndoMerge( &rDocShell,
+-                            nStartCol, nStartRow, nTab,
+-                            nEndCol, nEndRow, nTab, bNeedContents, pUndoDoc, pDrawUndo ) );
++            new ScUndoMerge(&rDocShell, rOption, bNeedContentsUndo, pUndoDoc, pDrawUndo) );
+     }
  
 -	if ( !AdjustRowHeight( ScRange( 0,nStartRow,nTab, MAXCOL,nEndRow,nTab ) ) )
 -		rDocShell.PostPaint( nStartCol, nStartRow, nTab,
 -											nEndCol, nEndRow, nTab, PAINT_GRID );
--	if ( (bNeedContents && bContents) || bCenter )
+-	if (bNeedContents)
 -		pDoc->SetDirty( rRange );
  	aModificator.SetDocumentModified();
  
  	SfxBindings* pBindings = rDocShell.GetViewBindings();
-@@ -3993,49 +4014,81 @@ BOOL ScDocFunc::MergeCells( const ScRange& rRange, BOOL bContents, BOOL bRecord,
+@@ -4069,49 +4095,81 @@ BOOL ScDocFunc::MergeCells( const ScRange& rRange, BOOL bContents, BOOL bRecord,
  
  BOOL ScDocFunc::UnmergeCells( const ScRange& rRange, BOOL bRecord, BOOL bApi )
  {
@@ -357,7 +372,7 @@ index 0000000..2e2dff2
 +
 +#endif
 diff --git sc/source/ui/inc/docfunc.hxx sc/source/ui/inc/docfunc.hxx
-index cf19ea2..bafd306 100644
+index 8490bab..9976230 100644
 --- sc/source/ui/inc/docfunc.hxx
 +++ sc/source/ui/inc/docfunc.hxx
 @@ -49,6 +49,7 @@ class ScBaseCell;
@@ -368,21 +383,21 @@ index cf19ea2..bafd306 100644
  
  // ---------------------------------------------------------------------------
  
-@@ -168,9 +169,10 @@ public:
+@@ -172,9 +173,10 @@ public:
  
  	BOOL			ResizeMatrix( const ScRange& rOldRange, const ScAddress& rNewEnd, BOOL bApi );
  
 -	BOOL			MergeCells( const ScRange& rRange, BOOL bContents,
--								BOOL bRecord, BOOL bApi, BOOL bCenter );
 +	BOOL			MergeCells( const ScCellMergeOption& rOption, BOOL bContents,
-+								BOOL bRecord, BOOL bApi );
- 	BOOL			UnmergeCells( const ScRange& rRange, BOOL bRecord, BOOL bApi );
+ 								BOOL bRecord, BOOL bApi );
+-	BOOL			UnmergeCells( const ScRange& rRange, BOOL bRecord, BOOL bApi );
++ 	BOOL			UnmergeCells( const ScRange& rRange, BOOL bRecord, BOOL bApi );
 +	bool			UnmergeCells( const ScCellMergeOption& rOption, BOOL bRecord, BOOL bApi );
  
- 	BOOL			SetNote( const ScAddress& rPos, const ScPostIt& rNote, BOOL bApi );
- 
+     BOOL            SetNewRangeNames( ScRangeName* pNewRanges, BOOL bApi );     // takes ownership of pNewRanges
+ 	BOOL			ModifyRangeNames( const ScRangeName& rNewRanges, BOOL bApi );
 diff --git sc/source/ui/inc/undoblk.hxx sc/source/ui/inc/undoblk.hxx
-index 25634dd..2f8ef78 100644
+index 31932fd..2320502 100644
 --- sc/source/ui/inc/undoblk.hxx
 +++ sc/source/ui/inc/undoblk.hxx
 @@ -34,6 +34,7 @@
@@ -393,33 +408,29 @@ index 25634dd..2f8ef78 100644
  
  #include "cell.hxx"
  
-@@ -454,11 +455,8 @@ class ScUndoMerge: public ScSimpleUndo
+@@ -454,10 +455,8 @@ class ScUndoMerge: public ScSimpleUndo
  {
  public:
  					TYPEINFO();
 -					ScUndoMerge( ScDocShell* pNewDocShell,
 -								 SCCOL nStartX, SCROW nStartY, SCTAB nStartZ,
 -								 SCCOL nEndX,   SCROW nEndY,   SCTAB nEndZ,
--								 BOOL bNewDoMerge, ScDocument* pNewUndoDoc = NULL,
--								 BOOL bNewCenter = FALSE );
-+					ScUndoMerge(ScDocShell* pNewDocShell, const ScCellMergeOption& rOption,
-+								BOOL bNewDoMerge, ScDocument* pNewUndoDoc = NULL);
+-                                 bool bMergeContents, ScDocument* pUndoDoc, SdrUndoAction* pDrawUndo );
++                    ScUndoMerge( ScDocShell* pNewDocShell, const ScCellMergeOption& rOption,
++                                 bool bMergeContents, ScDocument* pUndoDoc, SdrUndoAction* pDrawUndo);
  	virtual 		~ScUndoMerge();
  
  	virtual void	Undo();
-@@ -469,10 +467,9 @@ public:
+@@ -468,7 +467,7 @@ public:
  	virtual String	GetComment() const;
  
  private:
--	ScRange			aRange;
+-    ScRange         maRange;
 +    ScCellMergeOption maOption;
- 	BOOL			bDoMerge;				// Merge oder aufheben
- 	ScDocument*		pUndoDoc;				// wenn Daten zusammengefasst
--	BOOL			bCenter;
- 
- 	void			DoChange( const BOOL bUndo ) const;
- };
-@@ -921,7 +918,7 @@ class ScUndoRemoveMerge: public ScBlockUndo
+     bool            mbMergeContents;        // Merge contents in Redo().
+     ScDocument*		mpUndoDoc;              // wenn Daten zusammengefasst
+     SdrUndoAction*  mpDrawUndo;
+@@ -920,7 +919,7 @@ class ScUndoRemoveMerge: public ScBlockUndo
  public:
  					TYPEINFO();
  					ScUndoRemoveMerge( ScDocShell* pNewDocShell,
@@ -428,7 +439,7 @@ index 25634dd..2f8ef78 100644
  									   ScDocument* pNewUndoDoc );
  	virtual 		~ScUndoRemoveMerge();
  
-@@ -933,6 +930,9 @@ public:
+@@ -932,6 +931,9 @@ public:
  	virtual String	GetComment() const;
  
  private:
@@ -438,8 +449,21 @@ index 25634dd..2f8ef78 100644
  	ScDocument*		pUndoDoc;
  };
  
+diff --git sc/source/ui/inc/viewfunc.hxx sc/source/ui/inc/viewfunc.hxx
+index 1f5102e..051a705 100644
+--- sc/source/ui/inc/viewfunc.hxx
++++ sc/source/ui/inc/viewfunc.hxx
+@@ -242,7 +242,7 @@ public:
+ 	BOOL			TestMergeCells();
+ 	BOOL			TestRemoveMerge();
+ 
+-	BOOL			MergeCells( BOOL bApi, BOOL& rDoContents, BOOL bRecord = TRUE );
++	BOOL			MergeCells( BOOL bApi, BOOL& rDoContents, BOOL bRecord = TRUE, BOOL bCenter = FALSE );
+ 	BOOL			RemoveMerge( BOOL bRecord = TRUE );
+ 
+ 	void			FillSimple( FillDir eDir, BOOL bRecord = TRUE );
 diff --git sc/source/ui/undo/undoblk.cxx sc/source/ui/undo/undoblk.cxx
-index 4d2cd3a..ff4d654 100644
+index 5b3e219..fe2c7bc 100644
 --- sc/source/ui/undo/undoblk.cxx
 +++ sc/source/ui/undo/undoblk.cxx
 @@ -66,6 +66,7 @@
@@ -450,7 +474,7 @@ index 4d2cd3a..ff4d654 100644
  
  // STATIC DATA -----------------------------------------------------------
  
-@@ -2038,8 +2039,9 @@ BOOL __EXPORT ScUndoRemoveBreaks::CanRepeat(SfxRepeatTarget& rTarget) const
+@@ -2066,8 +2067,9 @@ BOOL __EXPORT ScUndoRemoveBreaks::CanRepeat(SfxRepeatTarget& rTarget) const
  //
  
  ScUndoRemoveMerge::ScUndoRemoveMerge( ScDocShell* pNewDocShell,
@@ -462,7 +486,7 @@ index 4d2cd3a..ff4d654 100644
  	pUndoDoc( pNewUndoDoc )
  {
  }
-@@ -2056,66 +2058,78 @@ String __EXPORT ScUndoRemoveMerge::GetComment() const
+@@ -2084,66 +2086,78 @@ String __EXPORT ScUndoRemoveMerge::GetComment() const
  
  void __EXPORT ScUndoRemoveMerge::Undo()
  {
@@ -588,7 +612,7 @@ index 4d2cd3a..ff4d654 100644
  
  	EndRedo();
  }
-@@ -2131,6 +2145,13 @@ BOOL __EXPORT ScUndoRemoveMerge::CanRepeat(SfxRepeatTarget& rTarget) const
+@@ -2159,6 +2173,13 @@ BOOL __EXPORT ScUndoRemoveMerge::CanRepeat(SfxRepeatTarget& rTarget) const
  	return (rTarget.ISA(ScTabViewTarget));
  }
  
@@ -603,137 +627,154 @@ index 4d2cd3a..ff4d654 100644
  //
  //		nur Umrandung setzen, per ScRangeList (StarOne)
 diff --git sc/source/ui/undo/undoblk3.cxx sc/source/ui/undo/undoblk3.cxx
-index a04b997..9d92944 100644
+index 5521813..f3f006c 100644
 --- sc/source/ui/undo/undoblk3.cxx
 +++ sc/source/ui/undo/undoblk3.cxx
-@@ -793,18 +793,14 @@ BOOL __EXPORT ScUndoAutoFill::CanRepeat(SfxRepeatTarget& rTarget) const
+@@ -34,6 +34,7 @@
+ // INCLUDE -------------------------------------------------------------------
+ 
+ #include "scitems.hxx"
++#include <svx/algitem.hxx>
+ #include <svx/boxitem.hxx>
+ #include <svx/srchitem.hxx>
+ #include <svx/linkmgr.hxx>
+@@ -814,14 +815,12 @@ BOOL __EXPORT ScUndoAutoFill::CanRepeat(SfxRepeatTarget& rTarget) const
  
  //----------------------------------------------------------------------------
  
 -ScUndoMerge::ScUndoMerge( ScDocShell* pNewDocShell,
 -							SCCOL nStartX, SCROW nStartY, SCTAB nStartZ,
 -							SCCOL nEndX, SCROW nEndY, SCTAB nEndZ,
--							BOOL bNewDoMerge, ScDocument* pNewUndoDoc,
--							BOOL bNewCenter )
+-                            bool bMergeContents, ScDocument* pUndoDoc, SdrUndoAction* pDrawUndo )
 +ScUndoMerge::ScUndoMerge( ScDocShell* pNewDocShell, const ScCellMergeOption& rOption,
-+                          BOOL bNewDoMerge, ScDocument* pNewUndoDoc)
++                          bool bMergeContents, ScDocument* pUndoDoc, SdrUndoAction* pDrawUndo )
  		//
  	:	ScSimpleUndo( pNewDocShell ),
  		//
--		aRange	( nStartX, nStartY, nStartZ, nEndX, nEndY, nEndZ ),
+-		maRange( nStartX, nStartY, nStartZ, nEndX, nEndY, nEndZ ),
 +        maOption(rOption),
- 		bDoMerge( bNewDoMerge ),
--		pUndoDoc( pNewUndoDoc ),
--		bCenter ( bNewCenter )
-+		pUndoDoc( pNewUndoDoc )
- {
- }
+         mbMergeContents( bMergeContents ),
+         mpUndoDoc( pUndoDoc ),
+         mpDrawUndo( pDrawUndo )
+@@ -850,51 +849,77 @@ String ScUndoMerge::GetComment() const
  
-@@ -832,54 +828,64 @@ String __EXPORT ScUndoMerge::GetComment() const
- 
- void ScUndoMerge::DoChange( const BOOL bUndo ) const
+ void ScUndoMerge::DoChange( bool bUndo ) const
  {
 -	ScDocument* pDoc = pDocShell->GetDocument();
 +    using ::std::set;
  
--	ScUndoUtil::MarkSimpleBlock( pDocShell, aRange );
+-	ScUndoUtil::MarkSimpleBlock( pDocShell, maRange );
 +    if (maOption.maTabs.empty())
 +        // Nothing to do.
 +        return;
  
--	if (bDoMerge == bUndo)
--		pDoc->RemoveMerge( aRange.aStart.Col(), aRange.aStart.Row(), aRange.aStart.Tab() );
--//!		pDoc->RemoveMerge( aRange.aStart );
+-	if (bUndo)
+-        // remove merge (contents are copied back below from undo document)
+-		pDoc->RemoveMerge( maRange.aStart.Col(), maRange.aStart.Row(), maRange.aStart.Tab() );
 -	else
--/*!*/	pDoc->DoMerge( aRange.aStart.Tab(),
--					   aRange.aStart.Col(), aRange.aStart.Row(),
--					   aRange.aEnd.Col(),   aRange.aEnd.Row()   );
-+	ScDocument* pDoc = pDocShell->GetDocument();
+-        // repeat merge, but do not remove note captions (will be done by drawing redo below)
+-/*!*/	pDoc->DoMerge( maRange.aStart.Tab(),
+-					   maRange.aStart.Col(), maRange.aStart.Row(),
+-                       maRange.aEnd.Col(),   maRange.aEnd.Row(), false );
++    ScDocument* pDoc = pDocShell->GetDocument();
 +    ScTabViewShell* pViewShell = ScTabViewShell::GetActiveViewShell();
  
--	if (pUndoDoc)
--	{
--		if (bUndo)
--		{
--			pDoc->DeleteAreaTab( aRange, IDF_CONTENTS );
--			pUndoDoc->CopyToDocument( aRange, IDF_ALL, FALSE, pDoc );
--		}
--		else
-+    ScRange aCurRange = maOption.getSingleRange(pDocShell->GetCurTab());
-+    ScUndoUtil::MarkSimpleBlock(pDocShell, aCurRange);
-+
+-    // undo -> copy back deleted contents
+-	if (bUndo && mpUndoDoc)
+-    {
+-        pDoc->DeleteAreaTab( maRange, IDF_CONTENTS|IDF_NOCAPTIONS );
+-        mpUndoDoc->CopyToDocument( maRange, IDF_ALL|IDF_NOCAPTIONS, FALSE, pDoc );
+-    }
++    ScRange aCurRange = maOption.getSingleRange(pDocShell->GetCurTab());                          
++    ScUndoUtil::MarkSimpleBlock(pDocShell, aCurRange);                                            
++                                                                                                  
 +    for (set<SCTAB>::const_iterator itr = maOption.maTabs.begin(), itrEnd = maOption.maTabs.end();
-+          itr != itrEnd; ++itr)
-+    {
-+        SCTAB nTab = *itr;
-+        ScRange aRange = maOption.getSingleRange(nTab);
-+    
-+        if (bDoMerge == bUndo)
-+            pDoc->RemoveMerge( maOption.mnStartCol, maOption.mnStartRow, nTab );
-+        else
-+            pDoc->DoMerge( nTab, maOption.mnStartCol, maOption.mnStartRow,
-+                           maOption.mnEndCol, maOption.mnEndRow );
-+    
-+        if (pUndoDoc)
-         {
--/*!*/		pDoc->DoMergeContents( aRange.aStart.Tab(),
--								   aRange.aStart.Col(), aRange.aStart.Row(),
--								   aRange.aEnd.Col(),   aRange.aEnd.Row()   );
--            if (bCenter)
-+            if (bUndo)
-+            {
-+                pDoc->DeleteAreaTab(aRange, IDF_CONTENTS);
-+                pUndoDoc->CopyToDocument(aRange, IDF_ALL, FALSE, pDoc);
-+            }
-+            else
-             {
--                pDoc->ApplyAttr( aRange.aStart.Col(), aRange.aStart.Row(),
--                                 aRange.aStart.Tab(),
--                                 SvxHorJustifyItem( SVX_HOR_JUSTIFY_CENTER, ATTR_HOR_JUSTIFY ) );
--                pDoc->ApplyAttr( aRange.aStart.Col(), aRange.aStart.Row(),
--                                 aRange.aStart.Tab(),
--                                 SvxVerJustifyItem( SVX_VER_JUSTIFY_CENTER, ATTR_VER_JUSTIFY ) );
-+                pDoc->DoMergeContents( nTab,
-+                                       maOption.mnStartCol, maOption.mnStartRow,
-+                                       maOption.mnEndCol, maOption.mnEndRow );
-+                if (maOption.mbCenter)
-+                {
-+                    pDoc->ApplyAttr( maOption.mnStartCol, maOption.mnStartRow, nTab,
-+                                     SvxHorJustifyItem( SVX_HOR_JUSTIFY_CENTER, ATTR_HOR_JUSTIFY ) );
-+                    pDoc->ApplyAttr( maOption.mnStartCol, maOption.mnStartRow, nTab,
-+                                     SvxVerJustifyItem( SVX_VER_JUSTIFY_CENTER, ATTR_VER_JUSTIFY ) );
-+                }
-             }
-         }
--	}
++          itr != itrEnd; ++itr)                                                                   
++    {                                                                                             
++        SCTAB nTab = *itr;                                                                        
++        ScRange aRange = maOption.getSingleRange(nTab);                                           
  
--	BOOL bDidPaint = FALSE;
--	ScTabViewShell* pViewShell = ScTabViewShell::GetActiveViewShell();
--	if ( pViewShell )
--	{
--		pViewShell->SetTabNo( aRange.aStart.Tab() );
--		bDidPaint = pViewShell->AdjustRowHeight( aRange.aStart.Row(), aRange.aEnd.Row() );
--	}
+-    // redo -> merge contents again
+-    else if (!bUndo && mbMergeContents)
+-    {
+-/*!*/   pDoc->DoMergeContents( maRange.aStart.Tab(),
+-							   maRange.aStart.Col(), maRange.aStart.Row(),
+-							   maRange.aEnd.Col(),   maRange.aEnd.Row()   );
++        if (bUndo)
++            // remove merge (contents are copied back below from undo document)
++            pDoc->RemoveMerge( aRange.aStart.Col(), aRange.aStart.Row(), aRange.aStart.Tab() );
++        else
++        {    
++            // repeat merge, but do not remove note captions (will be done by drawing redo below)
++            pDoc->DoMerge( aRange.aStart.Tab(),
++                           aRange.aStart.Col(), aRange.aStart.Row(),
++                           aRange.aEnd.Col(),   aRange.aEnd.Row(), false );
++    
++            if (maOption.mbCenter)
++            {
++                pDoc->ApplyAttr( aRange.aStart.Col(), aRange.aStart.Row(),
++                                 aRange.aStart.Tab(),
++                                 SvxHorJustifyItem( SVX_HOR_JUSTIFY_CENTER, ATTR_HOR_JUSTIFY ) );
++                pDoc->ApplyAttr( aRange.aStart.Col(), aRange.aStart.Row(),
++                                 aRange.aStart.Tab(),
++                                 SvxVerJustifyItem( SVX_VER_JUSTIFY_CENTER, ATTR_VER_JUSTIFY ) );
++            }
++        }
++    
++        // undo -> copy back deleted contents
++        if (bUndo && mpUndoDoc)
++        {
++            pDoc->DeleteAreaTab( aRange, IDF_CONTENTS|IDF_NOCAPTIONS );
++            mpUndoDoc->CopyToDocument( aRange, IDF_ALL|IDF_NOCAPTIONS, FALSE, pDoc );
++        }
++    
++        // redo -> merge contents again
++        else if (!bUndo && mbMergeContents)
++        {
++            pDoc->DoMergeContents( aRange.aStart.Tab(),
++                                   aRange.aStart.Col(), aRange.aStart.Row(),
++                                   aRange.aEnd.Col(), aRange.aEnd.Row() );
++        }
++    
++        if (bUndo)
++            DoSdrUndoAction( mpDrawUndo, pDoc );
++        else
++            RedoSdrUndoAction( mpDrawUndo );
++    
 +        bool bDidPaint = false;
 +        if ( pViewShell )
 +        {
 +            pViewShell->SetTabNo(nTab);
 +            bDidPaint = pViewShell->AdjustRowHeight(maOption.mnStartRow, maOption.mnEndRow);
 +        }
- 
--	if (!bDidPaint)
--		ScUndoUtil::PaintMore( pDocShell, aRange );
++    
 +        if (!bDidPaint)
 +            ScUndoUtil::PaintMore(pDocShell, aRange);
-+    }
+     }
  
--	ShowTable( aRange );
-+    ShowTable(aCurRange);
+-    if (bUndo)
+-        DoSdrUndoAction( mpDrawUndo, pDoc );
+-    else
+-        RedoSdrUndoAction( mpDrawUndo );
+-
+-	BOOL bDidPaint = FALSE;
+-	ScTabViewShell* pViewShell = ScTabViewShell::GetActiveViewShell();
+-	if ( pViewShell )
+-	{
+-		pViewShell->SetTabNo( maRange.aStart.Tab() );
+-		bDidPaint = pViewShell->AdjustRowHeight( maRange.aStart.Row(), maRange.aEnd.Row() );
+-	}
+-
+-	if (!bDidPaint)
+-		ScUndoUtil::PaintMore( pDocShell, maRange );
+-
+-	ShowTable( maRange );
++	ShowTable(aCurRange);
  }
  
  
 diff --git sc/source/ui/unoobj/cellsuno.cxx sc/source/ui/unoobj/cellsuno.cxx
-index 79d5e40..4e7f35d 100644
+index c2eb810..d4cfb42 100644
 --- sc/source/ui/unoobj/cellsuno.cxx
 +++ sc/source/ui/unoobj/cellsuno.cxx
 @@ -71,6 +71,7 @@
@@ -753,7 +794,7 @@ index 79d5e40..4e7f35d 100644
 +            aRange.aEnd.Col(), aRange.aEnd.Row(), false);
 +        aMergeOption.maTabs.insert(aRange.aStart.Tab());
  		if ( bMerge )
--			aFunc.MergeCells( aRange, FALSE, TRUE, TRUE, FALSE );
+-			aFunc.MergeCells( aRange, FALSE, TRUE, TRUE );
 +			aFunc.MergeCells( aMergeOption, FALSE, TRUE, TRUE );
  		else
 -			aFunc.UnmergeCells( aRange, TRUE, TRUE );
@@ -841,6 +882,35 @@ index 0000000..ed6b8cb
 +
 +    return getSingleRange(nTab);
 +}
+diff --git sc/source/ui/view/cellsh3.cxx sc/source/ui/view/cellsh3.cxx
+index 57309e3..c689fa1 100644
+--- sc/source/ui/view/cellsh3.cxx
++++ sc/source/ui/view/cellsh3.cxx
+@@ -772,6 +772,7 @@ void ScCellShell::Execute( SfxRequest& rReq )
+             {
+                 // test whether to merge or to split
+                 bool bMerge = false;
++                BOOL bCenter = FALSE;
+                 switch( nSlot )
+                 {
+                     case FID_MERGE_ON:
+@@ -782,6 +783,7 @@ void ScCellShell::Execute( SfxRequest& rReq )
+                     break;
+                     case FID_MERGE_TOGGLE:
+                     {
++                        bCenter = TRUE;
+                         SfxPoolItem* pItem = 0;
+                         if( rBindings.QueryState( nSlot, pItem ) >= SFX_ITEM_DEFAULT )
+                             bMerge = !static_cast< SfxBoolItem* >( pItem )->GetValue();
+@@ -802,7 +804,7 @@ void ScCellShell::Execute( SfxRequest& rReq )
+                         bMoveContents = ((const SfxBoolItem*)pItem)->GetValue();
+                     }
+ 
+-                    if (pTabViewShell->MergeCells( bApi, bMoveContents ))
++                    if (pTabViewShell->MergeCells( bApi, bMoveContents, TRUE, bCenter ))
+                     {
+                         if (!bApi && bMoveContents)             // "ja" im Dialog geklickt
+                             rReq.AppendItem( SfxBoolItem( nSlot, bMoveContents ) );
 diff --git sc/source/ui/view/makefile.mk sc/source/ui/view/makefile.mk
 index 48395f3..46b8122 100644
 --- sc/source/ui/view/makefile.mk
@@ -854,7 +924,7 @@ index 48395f3..46b8122 100644
          $(SLO)$/olinewin.obj \
          $(SLO)$/hintwin.obj \
 diff --git sc/source/ui/view/viewfun2.cxx sc/source/ui/view/viewfun2.cxx
-index 050e3fb..19d87b2 100644
+index c563b9a..d6fd25d 100644
 --- sc/source/ui/view/viewfun2.cxx
 +++ sc/source/ui/view/viewfun2.cxx
 @@ -70,6 +70,7 @@ using namespace com::sun::star;
@@ -865,7 +935,16 @@ index 050e3fb..19d87b2 100644
  #include "compiler.hxx"
  #include "docfunc.hxx"
  #include "docpool.hxx"
-@@ -1129,11 +1130,27 @@ BOOL ScViewFunc::MergeCells( BOOL bApi, BOOL& rDoContents, BOOL bRecord, BOOL bC
+@@ -1087,7 +1088,7 @@ BOOL ScViewFunc::TestMergeCells()			// Vorab-Test (fuer Menue)
+ 
+ //----------------------------------------------------------------------------
+ 
+-BOOL ScViewFunc::MergeCells( BOOL bApi, BOOL& rDoContents, BOOL bRecord )
++BOOL ScViewFunc::MergeCells( BOOL bApi, BOOL& rDoContents, BOOL bRecord, BOOL bCenter )
+ {
+ 	//	Editable- und Verschachtelungs-Abfrage muss vorneweg sein (auch in DocFunc),
+ 	//	damit dann nicht die Inhalte-QueryBox kommt
+@@ -1130,10 +1131,26 @@ BOOL ScViewFunc::MergeCells( BOOL bApi, BOOL& rDoContents, BOOL bRecord )
  		return FALSE;
  	}
  
@@ -887,24 +966,23 @@ index 050e3fb..19d87b2 100644
 +    }
 +
  	BOOL bOk = TRUE;
- 	BOOL bNeedContents = FALSE;
  
--	if ( !pDoc->IsBlockEmpty( nStartTab, nStartCol,nStartRow+1, nStartCol,nEndRow ) ||
--		 !pDoc->IsBlockEmpty( nStartTab, nStartCol+1,nStartRow, nEndCol,nEndRow ) )
+-	if ( !pDoc->IsBlockEmpty( nStartTab, nStartCol,nStartRow+1, nStartCol,nEndRow, true ) ||
+-		 !pDoc->IsBlockEmpty( nStartTab, nStartCol+1,nStartRow, nEndCol,nEndRow, true ) )
 +    if (bAskDialog)
  	{
- 		bNeedContents = TRUE;
  		if (!bApi)
-@@ -1154,7 +1171,7 @@ BOOL ScViewFunc::MergeCells( BOOL bApi, BOOL& rDoContents, BOOL bRecord, BOOL bC
+ 		{
+@@ -1153,7 +1170,7 @@ BOOL ScViewFunc::MergeCells( BOOL bApi, BOOL& rDoContents, BOOL bRecord )
  	if (bOk)
  	{
  		HideCursor();
--		bOk = pDocSh->GetDocFunc().MergeCells( aMarkRange, rDoContents, bRecord, bApi, bCenter );
+-		bOk = pDocSh->GetDocFunc().MergeCells( aMarkRange, rDoContents, bRecord, bApi );
 +		bOk = pDocSh->GetDocFunc().MergeCells( aMergeOption, rDoContents, bRecord, bApi );
  		ShowCursor();
  
  		if (bOk)
-@@ -1190,6 +1207,32 @@ BOOL ScViewFunc::TestRemoveMerge()
+@@ -1189,6 +1206,32 @@ BOOL ScViewFunc::TestRemoveMerge()
  
  //----------------------------------------------------------------------------
  
@@ -937,7 +1015,7 @@ index 050e3fb..19d87b2 100644
  BOOL ScViewFunc::RemoveMerge( BOOL bRecord )
  {
  	ScRange aRange;
-@@ -1201,12 +1244,39 @@ BOOL ScViewFunc::RemoveMerge( BOOL bRecord )
+@@ -1200,12 +1243,39 @@ BOOL ScViewFunc::RemoveMerge( BOOL bRecord )
      }
  	else if (GetViewData()->GetSimpleArea( aRange ) == SC_MARK_SIMPLE)
  	{
@@ -979,3 +1057,22 @@ index 050e3fb..19d87b2 100644
          MarkRange( aExtended );
  		ShowCursor();
  
+diff --git sc/uiconfig/scalc/menubar/menubar.xml sc/uiconfig/scalc/menubar/menubar.xml
+index 118fac7..322d448 100644
+--- sc/uiconfig/scalc/menubar/menubar.xml
++++ sc/uiconfig/scalc/menubar/menubar.xml
+@@ -218,7 +218,13 @@
+                     <menu:menuitem menu:id=".uno:SetTabBgColor"/>
+                 </menu:menupopup>
+             </menu:menu>
+-            <menu:menuitem menu:id=".uno:ToggleMergeCells"/>
++            <menu:menu menu:id=".uno:MergeCellsMenu">
++                <menu:menupopup>
++                    <menu:menuitem menu:id=".uno:ToggleMergeCells"/>
++                    <menu:menuitem menu:id=".uno:MergeCells"/>
++                    <menu:menuitem menu:id=".uno:SplitCell"/>
++                </menu:menupopup>
++            </menu:menu>
+             <menu:menuseparator/>
+             <menu:menuitem menu:id=".uno:PageFormatDialog"/>
+             <menu:menu menu:id=".uno:PrintRangesMenu">
