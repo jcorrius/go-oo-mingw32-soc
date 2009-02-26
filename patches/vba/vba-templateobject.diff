@@ -159,6 +159,137 @@ diff --git sw/source/filter/ww8/ww8par.cxx sw/source/filter/ww8/ww8par.cxx
 index 714c63a..e6cca0f 100644
 --- sw/source/filter/ww8/ww8par.cxx
 +++ sw/source/filter/ww8/ww8par.cxx
+@@ -140,6 +140,7 @@
+ #include <iostream>
+ #include <dbgoutsw.hxx>
+ #endif
++#include <unotools/localfilehelper.hxx>
+ 
+ #define MM_250 1417             // WW-Default fuer Hor. Seitenraender: 2.5 cm
+ #define MM_200 1134             // WW-Default fuer u.Seitenrand: 2.0 cm
+@@ -219,6 +220,80 @@ bool registerDocEvent( SfxObjectShell* pShell )
+ 	return result;
+ }
+ 
++class Sttb : TBBase
++{
++struct SBBItem
++{
++    sal_uInt16 cchData;
++    rtl::OUString data; 
++    SBBItem() : cchData(0){}
++};
++    sal_uInt16 fExtend;
++    sal_uInt16 cData;
++    sal_uInt16 cbExtra;
++
++    std::vector< SBBItem > dataItems;
++
++    Sttb(const Sttb&);
++    Sttb& operator = ( const Sttb&);
++public:
++    Sttb();
++    ~Sttb();
++    bool Read(SvStream *pS);
++    void Print( FILE* fp );
++    rtl::OUString getStringAtIndex( sal_Int32 );
++};
++
++Sttb::Sttb() : fExtend( 0 )
++,cData( 0 )
++,cbExtra( 0 )
++{
++}
++
++Sttb::~Sttb()
++{
++}
++
++bool Sttb::Read( SvStream* pS )
++{
++    OSL_TRACE("Sttb::Read() stream pos 0x%x", pS->Tell() );
++    nOffSet = pS->Tell();
++    *pS >> fExtend >> cData >> cbExtra;
++    if ( cData )
++    {
++        for ( sal_Int32 index = 0; index < cData; ++index )
++        {
++            SBBItem aItem;
++            *pS >> aItem.cchData;
++            aItem.data = readUnicodeString( pS, aItem.cchData );
++            dataItems.push_back( aItem );
++        }
++    }
++    return true;
++}
++
++void Sttb::Print( FILE* fp )
++{
++    fprintf( fp, "[ 0x%x ] Sttb - dump\n", nOffSet);
++    fprintf( fp, " fExtend 0x%x [expected 0xFFFF ]\n", fExtend );
++    fprintf( fp, " cData no. or string data items %d (0x%x)\n", cData, cData );
++    
++    if ( cData )
++    {
++        for ( sal_Int32 index = 0; index < cData; ++index )
++            fprintf(fp,"   string dataItem[ %d(0x%x) ] has name %s\n", static_cast< int >( index ), static_cast< unsigned int >( index ), rtl::OUStringToOString( dataItems[ index ].data, RTL_TEXTENCODING_UTF8 ).getStr() );
++    }
++
++}
++
++rtl::OUString 
++Sttb::getStringAtIndex( sal_Int32 index )
++{
++    rtl::OUString aRet;
++    if ( index < dataItems.size() )
++        aRet = dataItems[ index ].data;
++    return aRet;
++}
+ 
+ SwMSDffManager::SwMSDffManager( SwWW8ImplReader& rRdr )
+     : SvxMSDffManager(*rRdr.pTableStream, rRdr.GetBaseURL(), rRdr.pWwFib->fcDggInfo,
+@@ -3725,6 +3800,41 @@ void SwWW8ImplReader::ReadDocInfo()
+         DBG_ASSERT(xDocProps.is(), "DocumentProperties is null");
+ 
+         if (xDocProps.is()) {
++            if ( pWwFib->fDot )
++            {
++                rtl::OUString sTemplateURL;
++                SfxMedium* pMedium = mpDocShell->GetMedium();
++                if ( pMedium )
++                {
++                    rtl::OUString aName = pMedium->GetName();
++                    INetURLObject aURL( aName );
++                    sTemplateURL = aURL.GetMainURL(INetURLObject::DECODE_TO_IURI);
++                    if ( sTemplateURL.getLength() > 0 )
++                        xDocProps->setTemplateURL( sTemplateURL );
++                }
++            }
++            else // not a template
++            {
++                long nCur = pTableStream->Tell();
++                Sttb aSttb;
++                pTableStream->Seek( pWwFib->fcSttbfAssoc ); // point at tgc record
++                if (!aSttb.Read( pTableStream ) )
++                    OSL_TRACE("** Read of SttbAssoc data failed!!!! ");
++                pTableStream->Seek( nCur ); // return to previous position, is that necessary?
++#if DEBUG
++                aSttb.Print( stderr );
++#endif
++                String sPath = aSttb.getStringAtIndex( 0x1 );
++                String aURL;
++                // attempt to convert to url ( won't work for obvious reasons on  linux 
++                if ( sPath.Len() )
++	        	::utl::LocalFileHelper::ConvertPhysicalNameToURL( sPath, aURL );
++                if ( aURL.Len() )
++                    xDocProps->setTemplateURL( aURL );
++                else
++                    xDocProps->setTemplateURL( sPath );
++                
++            }
+             sfx2::LoadOlePropertySet(xDocProps, pStg);
+         }
+     }
 @@ -3987,6 +3987,8 @@ ULONG SwWW8ImplReader::CoreLoad(WW8Glossary *pGloss, const SwPosition &rPos)
      {
          if (mbNewDoc && pStg && !pGloss) /*meaningless for a glossary, cmc*/
@@ -394,3 +525,68 @@ index 0000000..63a2f26
 +	virtual css::uno::Sequence<rtl::OUString> getServiceNames();
 +};
 +#endif /* SW_VBA_TEMPLATE_HXX */
+diff --git sfx2/source/doc/objcont.cxx sfx2/source/doc/objcont.cxx
+index 3d1668b..9bb525f 100644
+--- sfx2/source/doc/objcont.cxx
++++ sfx2/source/doc/objcont.cxx
+@@ -1471,31 +1471,35 @@ sal_Bool SfxObjectShell::IsHelpDocument() const
+ 
+ void SfxObjectShell::ResetFromTemplate( const String& rTemplateName, const String& rFileName )
+ {
+-    uno::Reference<document::XDocumentProperties> xDocProps(getDocProperties());
+-    xDocProps->setTemplateURL( ::rtl::OUString() );
+-    xDocProps->setTemplateName( ::rtl::OUString() );
+-    xDocProps->setTemplateDate( util::DateTime() );
+-    xDocProps->resetUserData( ::rtl::OUString() );
+-
+-	// TODO/REFACTOR:
+-	// Title?
+-
+-    if( ::utl::LocalFileHelper::IsLocalFile( rFileName ) )
+-	{
+-        String aFoundName;
+-        if( SFX_APP()->Get_Impl()->GetDocumentTemplates()->GetFull( String(), rTemplateName, aFoundName ) )
+-        {
+-            INetURLObject aObj( rFileName );
+-            xDocProps->setTemplateURL( aObj.GetMainURL(INetURLObject::DECODE_TO_IURI) );
+-            xDocProps->setTemplateName( rTemplateName );
+-
+-            ::DateTime now;
+-            xDocProps->setTemplateDate( util::DateTime(
+-                now.Get100Sec(), now.GetSec(), now.GetMin(),
+-                now.GetHour(), now.GetDay(), now.GetMonth(),
+-                now.GetYear() ) );
+-
+-			SetQueryLoadTemplate( sal_True );
++    // only care about reseting this data for openoffice formats otherwise
++    if ( IsOwnStorageFormat_Impl( *GetMedium())  )
++    {
++        uno::Reference<document::XDocumentProperties> xDocProps(getDocProperties());
++        xDocProps->setTemplateURL( ::rtl::OUString() );
++        xDocProps->setTemplateName( ::rtl::OUString() );
++        xDocProps->setTemplateDate( util::DateTime() );
++        xDocProps->resetUserData( ::rtl::OUString() );
++    
++    	// TODO/REFACTOR:
++    	// Title?
++    
++        if( ::utl::LocalFileHelper::IsLocalFile( rFileName ) )
++    	{
++            String aFoundName;
++            if( SFX_APP()->Get_Impl()->GetDocumentTemplates()->GetFull( String(), rTemplateName, aFoundName ) )
++            {
++                INetURLObject aObj( rFileName );
++                xDocProps->setTemplateURL( aObj.GetMainURL(INetURLObject::DECODE_TO_IURI) );
++                xDocProps->setTemplateName( rTemplateName );
++    
++                ::DateTime now;
++                xDocProps->setTemplateDate( util::DateTime(
++                    now.Get100Sec(), now.GetSec(), now.GetMin(),
++                    now.GetHour(), now.GetDay(), now.GetMonth(),
++                    now.GetYear() ) );
++    
++    			SetQueryLoadTemplate( sal_True );
++            }
+         }
+     }
+ }
