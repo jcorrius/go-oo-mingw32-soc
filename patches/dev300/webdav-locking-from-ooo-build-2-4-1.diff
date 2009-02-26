@@ -88,8 +88,8 @@ index 219cf18..b548b22 100644
 --- sfx2/inc/sfx2/docfile.hxx
 +++ sfx2/inc/sfx2/docfile.hxx
 @@ -181,7 +181,7 @@ public:
- 	const INetURLObject& GetURLObject() const;
- #endif
+     ::com::sun::star::util::DateTime GetInitFileDate();
+ 
      ::com::sun::star::uno::Reference< ::com::sun::star::ucb::XContent > GetContent() const;
 -	const String&       GetPhysicalName() const;
 +	const String&       GetPhysicalName( sal_Bool bForceCreateTempIfRemote = sal_True ) const;
@@ -206,15 +206,15 @@ index 44bf761..d80a13b 100644
  	  && ::utl::UCBContentHelper::IsDocument( GetURLObject().GetMainURL( INetURLObject::NO_DECODE ) ) );
  }
  
-@@ -892,7 +915,7 @@ uno::Reference < embed::XStorage > SfxMedium::GetOutputStorage()
+@@ -800,7 +800,7 @@
  
-     // medium based on OutputStream: must work with TempFile
-     if( aLogicName.CompareToAscii( "private:stream", 14 ) == COMPARE_EQUAL
--	  || !::utl::LocalFileHelper::IsLocalFile( aLogicName ) )
-+            || !SupportsActiveStreaming( aLogicName ) )
-         CreateTempFileNoCopy();
- 	// if Medium already contains a stream - TODO/LATER: store stream/outputstream in ImplData, not in Medium
- 	else if ( GetItemSet()->GetItemState( SID_STREAM ) < SFX_ITEM_SET )
+     sal_Bool bResult = pImp->m_bLocked;
+ 
+-    if ( ::utl::LocalFileHelper::IsLocalFile( aLogicName ) )
++    if ( SupportsActiveStreaming( aLogicName ) )
+     {
+         // the special file locking should be used only for file URLs
+ 
 @@ -1165,7 +1188,7 @@ uno::Reference < embed::XStorage > SfxMedium::GetStorage()
  
              try
@@ -229,10 +229,19 @@ index 44bf761..d80a13b 100644
  													  Reference< ::com::sun::star::ucb::XProgressHandler >() );
  
 -        if ( ::utl::LocalFileHelper::IsLocalFile( aDest.GetMainURL( INetURLObject::NO_DECODE ) ) || !aDest.removeSegment() )
-+		if ( SupportsActiveStreaming( aDest.GetMainURL( INetURLObject::NO_DECODE ) ) || !aDest.removeSegment() )
++        if ( SupportsActiveStreaming( aDest.GetMainURL( INetURLObject::NO_DECODE ) ) || !aDest.removeSegment() )
  		{
  			TransactedTransferForFS_Impl( aSource, aDest, xComEnv );
  		}
+@@ -2529,7 +2529,7 @@
+                     aMedium.erase( comphelper::MediaDescriptor::PROP_READONLY() );
+                     aMedium.addInputStream();
+                 }
+-                else if ( ::utl::LocalFileHelper::IsLocalFile( GetURLObject().GetMainURL( INetURLObject::NO_DECODE ) ) )
++                else if ( SupportsActiveStreaming( GetURLObject().GetMainURL( INetURLObject::NO_DECODE ) ) )
+                 {
+                     // use the special locking approach only for file URLs
+                     aMedium.addInputStreamOwnLock();
 diff --git sfx2/source/inc/helper.hxx sfx2/source/inc/helper.hxx
 index f37477d..1f46ed7 100644
 --- sfx2/source/inc/helper.hxx
@@ -2121,11 +2130,9 @@ index 08c7d07..6e80fee 100644
 +typedef struct ne_lock              NeonLock;
 +
  #endif // _NEONTYPES_HXX_
-diff --git ucb/source/ucp/webdav/webdavcontent.cxx ucb/source/ucp/webdav/webdavcontent.cxx
-index 38f590e..84cc057 100644
---- ucb/source/ucp/webdav/webdavcontent.cxx
-+++ ucb/source/ucp/webdav/webdavcontent.cxx
-@@ -48,20 +48,17 @@
+--- ucb/source/ucp/webdav/webdavcontent.cxx.original	2009-02-25 12:57:25.180000000 +0200
++++ ucb/source/ucp/webdav/webdavcontent.cxx	2009-02-25 13:04:04.992500000 +0200
+@@ -76,6 +76,7 @@
  #include <com/sun/star/beans/PropertySetInfoChangeEvent.hpp>
  #include <com/sun/star/beans/PropertyValue.hpp>
  #include <com/sun/star/io/XActiveDataSink.hpp>
@@ -2133,21 +2140,7 @@ index 38f590e..84cc057 100644
  #include <com/sun/star/io/XOutputStream.hpp>
  #include <com/sun/star/lang/IllegalAccessException.hpp>
  #include "com/sun/star/ucb/AuthenticationRequest.hpp"
- #include <com/sun/star/ucb/CommandFailedException.hpp>
- #include <com/sun/star/ucb/ContentInfoAttribute.hpp>
- #include <com/sun/star/ucb/InsertCommandArgument.hpp>
--#ifndef _COM_SUN_STAR_UCB_INTERACTIVEBADTRANSFRERURLEXCEPTION_HPP_
- #include <com/sun/star/ucb/InteractiveBadTransferURLException.hpp>
--#endif
- #include <com/sun/star/ucb/InteractiveAugmentedIOException.hpp>
- #include <com/sun/star/ucb/InteractiveNetworkConnectException.hpp>
--#ifndef _COM_SUN_STAR_UCB_INTERACTIVENETWORKGENBERALEXCEPTION_HPP_
- #include <com/sun/star/ucb/InteractiveNetworkGeneralException.hpp>
--#endif
- #include <com/sun/star/ucb/InteractiveNetworkReadException.hpp>
- #include <com/sun/star/ucb/InteractiveNetworkResolveNameException.hpp>
- #include <com/sun/star/ucb/InteractiveNetworkWriteException.hpp>
-@@ -90,6 +87,8 @@
+@@ -190,6 +193,8 @@
  #include "NeonUri.hxx"
  #include "UCBDeadPropertyValue.hxx"
  
@@ -2157,16 +2150,26 @@ index 38f590e..84cc057 100644
  using namespace webdav_ucp;
  
 @@ -353,7 +352,8 @@ Content::Content(
-   m_eResourceType( UNKNOWN ),
    m_pProvider( pProvider ),
-   m_bTransient( sal_False ),
--  m_bCollection( sal_False )
-+  m_bCollection( sal_False ),
-+  m_bForceReadOnly( sal_False )
+   m_bTransient( false ),
+   m_bCollection( false ),
+-  m_bDidGetOrHead( false )
++  m_bDidGetOrHead( false ),
++  m_bForceReadOnly( false )
  {
      try
      {
-@@ -624,6 +624,11 @@ uno::Any SAL_CALL Content::execute(
+@@ -390,7 +390,8 @@
+   m_pProvider( pProvider ),
+   m_bTransient( true ),
+   m_bCollection( isCollection ),
+-  m_bDidGetOrHead( false )
++  m_bDidGetOrHead( false ),
++  m_bForceReadOnly( false )
+ {
+     try
+     {
+@@ -722,6 +728,11 @@ uno::Any SAL_CALL Content::execute(
             ucb::CommandAbortedException,
             uno::RuntimeException )
  {
@@ -2178,7 +2181,7 @@ index 38f590e..84cc057 100644
      uno::Any aRet;
      
      if ( aCommand.Name.equalsAsciiL(
-@@ -1343,6 +1348,31 @@ uno::Reference< sdbc::XRow > Content::getPropertyValues(
+@@ -1441,6 +1452,31 @@ uno::Reference< sdbc::XRow > Content::ge
      uno::Reference< ucb::XContentIdentifier >    xIdentifier;
      rtl::Reference< ::ucbhelper::ContentProviderImplHelper > xProvider;
  
@@ -2207,189 +2210,94 @@ index 38f590e..84cc057 100644
 +        }
 +    }
 +
- 	const ResourceType & rType = getResourceType( xEnv );
      {
          osl::Guard< osl::Mutex > aGuard( m_aMutex );
-@@ -1463,8 +1493,13 @@ uno::Reference< sdbc::XRow > Content::getPropertyValues(
  
-                         if ( !bNetworkAccessAllowed )
-                         {
--                            cancelCommandExecution( e, xEnv );
--                            // unreachable
+@@ -1522,10 +1558,15 @@ uno::Reference< sdbc::XRow > Content::ge
+ 						
+ 						if ( !bNetworkAccessAllowed )
+ 						{
 +                            if ( e.getStatus() == SC_NOT_FOUND )
 +                                xProps.reset();
 +                            else
 +                            {
-+                                cancelCommandExecution( e, xEnv );
-+                                // unreachable
+ 							cancelCommandExecution( e, xEnv );
+ 							// unreachable
+ 						}
+ 					}
 +                            }
-                         }
-                     }
-                 }
-@@ -2023,30 +2058,90 @@ uno::Any Content::open(
+ 				}
+ 			}
+         }
+@@ -2140,8 +2181,9 @@ uno::Any Content::open(
          }
      }
  
 -    if ( rArg.Sink.is() )
 -    {
--        // Open document.
 +    if ( !rArg.Sink.is() )
 +        return aRet;
++
+         // Open document.
  
--        if ( ( rArg.Mode == ucb::OpenMode::DOCUMENT_SHARE_DENY_NONE ) ||
--             ( rArg.Mode == ucb::OpenMode::DOCUMENT_SHARE_DENY_WRITE ) )
--        {
--            // Currently(?) unsupported.
--            ucbhelper::cancelCommandExecution(
-+    // Open document.
-+
-+    if ( ( rArg.Mode == ucb::OpenMode::DOCUMENT_SHARE_DENY_NONE ) ||
-+         ( rArg.Mode == ucb::OpenMode::DOCUMENT_SHARE_DENY_WRITE ) )
-+    {
-+        // Currently(?) unsupported.
-+        ucbhelper::cancelCommandExecution(
-                 uno::makeAny(
-                     ucb::UnsupportedOpenModeException(
--                            rtl::OUString(),
--                            static_cast< cppu::OWeakObject * >( this ),
--                            sal_Int16( rArg.Mode ) ) ),
-+                        rtl::OUString(),
-+                        static_cast< cppu::OWeakObject * >( this ),
-+                        sal_Int16( rArg.Mode ) ) ),
-                 xEnv );
-+        // Unreachable
-+    }
-+
-+    rtl::OUString aURL = m_xIdentifier->getContentIdentifier();
-+    uno::Reference< io::XOutputStream > xOut
-+        = uno::Reference< io::XOutputStream >( rArg.Sink, uno::UNO_QUERY );
-+    if ( xOut.is() )
-+    {
+     if ( rArg.Mode == ucb::OpenMode::DOCUMENT_SHARE_DENY_WRITE )
+@@ -2163,6 +2205,9 @@ uno::Any Content::open(
+             = uno::Reference< io::XOutputStream >( rArg.Sink, uno::UNO_QUERY );
+         if ( xOut.is() )
+         {
 +#if OSL_DEBUG_LEVEL > 0
 +        fprintf( stderr, "WebDAV: rArg.Sink is XOutputStream\n" );
 +#endif
-+        // PUSH: write data
-+        try
-+        {
-+            std::auto_ptr< DAVResourceAccess > xResAccess;
-+
-+            {
-+                osl::MutexGuard aGuard( m_aMutex );
-+
-+                // throw away previously cached headers.
-+//                m_xCachedProps.reset();
-+
-+                xResAccess.reset(
-+                        new DAVResourceAccess( *m_xResAccess.get() ) );
-+            }
-+
-+            DAVResource aResource;
-+            std::vector< rtl::OUString > aHeaders;
-+            //                // Obtain list containing all HTTP headers that can
-+            //                // be mapped to UCB properties.
-+            //                ContentProperties::getMappableHTTPHeaders( aHeaders );
-+
-+            xResAccess->GET( xOut, aHeaders, aResource, xEnv );
-+
-+            {
-+                osl::MutexGuard aGuard( m_aMutex );
-+
-+                // cache headers.
-+//                m_xCachedProps.reset( new ContentProperties( aResource ) );
-+                std::vector< DAVPropertyValue >::const_iterator it = aResource.properties.begin();
-+                std::vector< DAVPropertyValue >::const_iterator end = aResource.properties.end();
-+                while ( it != end )
-+                {
-+                    DAVPropertyValue aProp = (*it++);
-+                    m_xCachedProps->addProperty( aProp.Name, aProp.Value, true);
-+                }
-+
-+                m_xResAccess.reset( 
-+                    new DAVResourceAccess( *xResAccess.get() ) );
-+            }
-+        }
-+        catch ( DAVException const & e )
-+        {
-+            cancelCommandExecution( e, xEnv );
-             // Unreachable
-         }
--
--        rtl::OUString aURL = m_xIdentifier->getContentIdentifier();
--        uno::Reference< io::XOutputStream > xOut
--            = uno::Reference< io::XOutputStream >( rArg.Sink, uno::UNO_QUERY );
--        if ( xOut.is() )
-+    }
-+    else
-+    {
-+        uno::Reference< io::XActiveDataSink > xDataSink
-+            = uno::Reference< io::XActiveDataSink >( rArg.Sink,
-+                    uno::UNO_QUERY );
-+        if ( xDataSink.is() )
-         {
--            // PUSH: write data
+             // PUSH: write data
+             try
+             {
+@@ -2209,6 +2254,58 @@ uno::Any Content::open(
+                                                          uno::UNO_QUERY );
+             if ( xDataSink.is() )
+             {
 +#if OSL_DEBUG_LEVEL > 0
 +            fprintf( stderr, "WebDAV: rArg.Sink is XActiveDataSink\n" );
 +#endif
 +            // PULL: wait for client read
-             try
-             {
-                 std::auto_ptr< DAVResourceAccess > xResAccess;
-@@ -2060,33 +2155,27 @@ uno::Any Content::open(
-                     xResAccess.reset(
-                         new DAVResourceAccess( *m_xResAccess.get() ) );
-                 }
--
++            try
++            {
++                {
++                    osl::MutexGuard aGuard( m_aMutex );
++
++                    // throw away previously cached headers.
++                    m_xCachedProps.reset();
++                }
 +                // fill inputsream sync; return if all data present
-                 DAVResource aResource;
-                 std::vector< rtl::OUString > aHeaders;
--//                // Obtain list containing all HTTP headers that can
--//                // be mapped to UCB properties.
--//                ContentProperties::getMappableHTTPHeaders( aHeaders );
--
--                xResAccess->GET( xOut, aHeaders, aResource, xEnv );
++                DAVResource aResource;
++                std::vector< rtl::OUString > aHeaders;
 +                //                        // Obtain list containing all HTTP headers that can
 +                //                        // be mapped to UCB properties.
 +                //                        ContentProperties::getMappableHTTPHeaders( aHeaders );
 +                uno::Reference< io::XInputStream > xIn
-+                    = xResAccess->GET( aHeaders, aResource, xEnv )->getInputStream();
- 
-                 {
-                     osl::MutexGuard aGuard( m_aMutex );
- 
-                     // cache headers.
- //                    m_xCachedProps.reset( new ContentProperties( aResource ) );
--					std::vector< DAVPropertyValue >::const_iterator it = aResource.properties.begin();
--  					std::vector< DAVPropertyValue >::const_iterator end	= aResource.properties.end();
--				  	while ( it != end )
--  					{
--						DAVPropertyValue aProp = (*it++);
--						m_xCachedProps->addProperty( aProp.Name, aProp.Value, true);
--					}	
--
--
- 
-                     m_xResAccess.reset( 
-                         new DAVResourceAccess( *xResAccess.get() ) );
++                    = m_xResAccess->GET( aHeaders, aResource, xEnv )->getInputStream();
 +
-                 }
++                {
++                    osl::MutexGuard aGuard( m_aMutex );
++
++                    m_xCachedProps.reset(
++                            new ContentProperties( aResource ) );
++                }
 +
 +                xDataSink->setInputStream( xIn );
-             }
-             catch ( DAVException const & e )
-             {
-@@ -2096,15 +2185,24 @@ uno::Any Content::open(
-         }
-         else
-         {
--            uno::Reference< io::XActiveDataSink > xDataSink
--                = uno::Reference< io::XActiveDataSink >( rArg.Sink,
--                                                         uno::UNO_QUERY );
--            if ( xDataSink.is() )
++            }
++            catch ( DAVException const & e )
++            {
++                cancelCommandExecution( e, xEnv );
++                // Unreachable
++            }
++        }
++        else
++        {
 +            uno::Reference< io::XActiveDataStreamer > xDataStreamer
 +                = uno::Reference< io::XActiveDataStreamer >( rArg.Sink,
 +                        uno::UNO_QUERY );
 +            if ( xDataStreamer.is() && !m_bForceReadOnly )
-             {
++            {
 +#if OSL_DEBUG_LEVEL > 0
 +                fprintf( stderr, "WebDAV: rArg.Sink is XActiveDataStreamer\n" );
 +#endif
@@ -2397,31 +2305,19 @@ index 38f590e..84cc057 100644
 +                ucb::Lock aLock;
 +                aLock.Depth = ucb::LockDepth_ZERO;
 +                aLock.Scope = ucb::LockScope_EXCLUSIVE;
-+                aLock.Timeout = 3*60; // 3 minutes
++                aLock.Timeout = 2*60; // 2 minutes
 +
                  // PULL: wait for client read
-+                std::auto_ptr< DAVResourceAccess > xResAccess;
                  try
                  {
--                    std::auto_ptr< DAVResourceAccess > xResAccess;
-                     {
-                         osl::MutexGuard aGuard( m_aMutex );
- 
-@@ -2118,43 +2216,69 @@ uno::Any Content::open(
-                     // fill inputsream sync; return if all data present
+@@ -2230,9 +2327,28 @@ uno::Any Content::open(
                      DAVResource aResource;
                      std::vector< rtl::OUString > aHeaders;
--//                        // Obtain list containing all HTTP headers that can
--//                        // be mapped to UCB properties.
--//                        ContentProperties::getMappableHTTPHeaders( aHeaders );
-+                    //                        // Obtain list containing all HTTP headers that can
-+                    //                        // be mapped to UCB properties.
-+                    //                        ContentProperties::getMappableHTTPHeaders( aHeaders );
  
 -                    uno::Reference< io::XInputStream > xIn
 -                        = xResAccess->GET( aHeaders, aResource, xEnv );
 +                    try {
-+                        xResAccess->LOCK( aLock, xEnv );
++                        m_xResAccess->LOCK( aLock, xEnv );
 +                    }
 +                    catch ( ucb::CommandFailedException const &e )
 +                    {
@@ -2438,21 +2334,15 @@ index 38f590e..84cc057 100644
 +
 +                    uno::Reference< io::XStream > xStream
 +                        = xResAccess->GET( aHeaders, aResource, xEnv, sal_True );
+ 					m_bDidGetOrHead = true;
 +
 +                    // pass the lock to the stream
 +                    static_cast< NeonInputStream* >( xStream.get() )->SetLock( aLock, m_xResAccess->getURL() );
- 
+ 					
                      {
-+
                          osl::MutexGuard aGuard( m_aMutex );
--  //                      m_xCachedProps.reset(
--  //                          new ContentProperties( aResource ) );
-+//                        m_xCachedProps.reset(
-+//                            new ContentProperties( aResource ) );
- 
-                         m_xResAccess.reset( 
+@@ -2243,16 +2360,22 @@ uno::Any Content::open(
                              new DAVResourceAccess( *xResAccess.get() ) );
- 
                      }
  
 -                    xDataSink->setInputStream( xIn );
@@ -2460,7 +2350,7 @@ index 38f590e..84cc057 100644
                  }
                  catch ( DAVException const & e )
                  {
-+                    xResAccess->UNLOCK( aLock, xEnv );
++                    m_xResAccess->UNLOCK( aLock, xEnv );
 +                    m_bForceReadOnly = sal_False;
 +
                      cancelCommandExecution( e, xEnv );
@@ -2475,23 +2365,7 @@ index 38f590e..84cc057 100644
                  // Note: aOpenCommand.Sink may contain an XStream
                  //       implementation. Support for this type of
                  //       sink is optional...
-                 ucbhelper::cancelCommandExecution(
--                    uno::makeAny(
--                        ucb::UnsupportedDataSinkException(
--                            rtl::OUString(),
--                            static_cast< cppu::OWeakObject * >( this ),
--                            rArg.Sink ) ),
--                    xEnv );
-+                        uno::makeAny(
-+                            ucb::UnsupportedDataSinkException(
-+                                rtl::OUString(),
-+                                static_cast< cppu::OWeakObject * >( this ),
-+                                rArg.Sink ) ),
-+                        xEnv );
-                 // Unreachable
-             }
-         }
-@@ -2172,6 +2296,9 @@ void Content::post(
+@@ -2280,6 +2403,9 @@ void Content::post(
      uno::Reference< io::XActiveDataSink > xSink( rArg.Sink, uno::UNO_QUERY );
      if ( xSink.is() )
      {
@@ -2501,7 +2375,7 @@ index 38f590e..84cc057 100644
          try
          {
              std::auto_ptr< DAVResourceAccess > xResAccess;
-@@ -2206,6 +2333,9 @@ void Content::post(
+@@ -2314,6 +2440,9 @@ void Content::post(
          uno::Reference< io::XOutputStream > xResult( rArg.Sink, uno::UNO_QUERY );
          if ( xResult.is() )
          {
@@ -2511,7 +2385,7 @@ index 38f590e..84cc057 100644
              try
              {
                  std::auto_ptr< DAVResourceAccess > xResAccess;
-@@ -2235,6 +2365,9 @@ void Content::post(
+@@ -2343,6 +2472,9 @@ void Content::post(
          }
          else
          {
@@ -2521,73 +2395,60 @@ index 38f590e..84cc057 100644
              ucbhelper::cancelCommandExecution(
                  uno::makeAny(
                      ucb::UnsupportedDataSinkException(
-@@ -2575,19 +2708,19 @@ void Content::transfer(
-         //
-         const rtl::OUString aScheme = sourceURI.GetScheme().toAsciiLowerCase();
-         if ( aScheme.equalsAsciiL(
--                RTL_CONSTASCII_STRINGPARAM( WEBDAV_URL_SCHEME ) ) )
--        {
--            sourceURI.SetScheme(
--                rtl::OUString::createFromAscii( HTTP_URL_SCHEME ) );
--        }
--        else if ( aScheme.equalsAsciiL(
--                RTL_CONSTASCII_STRINGPARAM( DAV_URL_SCHEME ) ) )
-+                RTL_CONSTASCII_STRINGPARAM( WEBDAV_URL_SCHEME ) ) ||
-+             aScheme.equalsAsciiL(
-+                RTL_CONSTASCII_STRINGPARAM( DAV_URL_SCHEME ) ) ||
-+             aScheme.equalsAsciiL(
-+                RTL_CONSTASCII_STRINGPARAM( PLAIN_WEBDAV_URL_SCHEME ) ) )
-         {
+@@ -2683,12 +2815,24 @@ void Content::transfer(
              sourceURI.SetScheme(
                  rtl::OUString::createFromAscii( HTTP_URL_SCHEME ) );
          }
++        else if ( aScheme.equalsAsciiL(
++                RTL_CONSTASCII_STRINGPARAM( PLAIN_WEBDAV_URL_SCHEME ) ) )
++        {
++            sourceURI.SetScheme(
++                rtl::OUString::createFromAscii( HTTP_URL_SCHEME ) );
++        }
          else if ( aScheme.equalsAsciiL(
--                RTL_CONSTASCII_STRINGPARAM( DAVS_URL_SCHEME ) ) )
-+                     RTL_CONSTASCII_STRINGPARAM( DAVS_URL_SCHEME ) ) ||
-+                  aScheme.equalsAsciiL(
-+                     RTL_CONSTASCII_STRINGPARAM( PLAIN_WEBDAVS_URL_SCHEME ) ) )
+                 RTL_CONSTASCII_STRINGPARAM( DAVS_URL_SCHEME ) ) )
          {
              sourceURI.SetScheme(
                  rtl::OUString::createFromAscii( HTTPS_URL_SCHEME ) );
-@@ -2611,13 +2744,23 @@ void Content::transfer(
          }
- 
-         if ( targetURI.GetScheme().toAsciiLowerCase().equalsAsciiL(
--                 RTL_CONSTASCII_STRINGPARAM( WEBDAV_URL_SCHEME ) ) )
-+                 RTL_CONSTASCII_STRINGPARAM( WEBDAV_URL_SCHEME ) ) ||
-+             targetURI.GetScheme().toAsciiLowerCase().equalsAsciiL(
-+                 RTL_CONSTASCII_STRINGPARAM( DAV_URL_SCHEME ) ) ||
-+             targetURI.GetScheme().toAsciiLowerCase().equalsAsciiL(
-+                 RTL_CONSTASCII_STRINGPARAM( PLAIN_WEBDAV_URL_SCHEME ) ) )
++        else if ( aScheme.equalsAsciiL(
++                RTL_CONSTASCII_STRINGPARAM( PLAIN_WEBDAVS_URL_SCHEME ) ) )
 +        {
-             targetURI.SetScheme(
-                 rtl::OUString::createFromAscii( HTTP_URL_SCHEME ) );
-+        }
-         else if ( targetURI.GetScheme().toAsciiLowerCase().equalsAsciiL(
--                 RTL_CONSTASCII_STRINGPARAM( DAV_URL_SCHEME ) ) )
-+                      RTL_CONSTASCII_STRINGPARAM( DAVS_URL_SCHEME ) ) ||
-+                  targetURI.GetScheme().toAsciiLowerCase().equalsAsciiL(
-+                      RTL_CONSTASCII_STRINGPARAM( PLAIN_WEBDAVS_URL_SCHEME ) ) )
-+        {
-             targetURI.SetScheme(
--                rtl::OUString::createFromAscii( HTTP_URL_SCHEME ) );
++            sourceURI.SetScheme(
 +                rtl::OUString::createFromAscii( HTTPS_URL_SCHEME ) );
 +        }
+         else
+         {
+             if ( !aScheme.equalsAsciiL(
+@@ -2707,6 +2851,18 @@ void Content::transfer(
+                  RTL_CONSTASCII_STRINGPARAM( DAV_URL_SCHEME ) ) )
+             targetURI.SetScheme(
+                 rtl::OUString::createFromAscii( HTTP_URL_SCHEME ) );
++        else if ( targetURI.GetScheme().toAsciiLowerCase().equalsAsciiL(
++                 RTL_CONSTASCII_STRINGPARAM( PLAIN_WEBDAV_URL_SCHEME ) ) )
++            targetURI.SetScheme(
++                rtl::OUString::createFromAscii( HTTP_URL_SCHEME ) );
++        else if ( targetURI.GetScheme().toAsciiLowerCase().equalsAsciiL(
++                 RTL_CONSTASCII_STRINGPARAM( DAVS_URL_SCHEME ) ) )
++            targetURI.SetScheme(
++                rtl::OUString::createFromAscii( HTTPS_URL_SCHEME ) );
++        else if ( targetURI.GetScheme().toAsciiLowerCase().equalsAsciiL(
++                 RTL_CONSTASCII_STRINGPARAM( PLAIN_WEBDAVS_URL_SCHEME ) ) )
++            targetURI.SetScheme(
++                rtl::OUString::createFromAscii( HTTPS_URL_SCHEME ) );
  	
          // @@@ This implementation of 'transfer' only works
          //     if the source and target are located at same host.
-diff --git ucb/source/ucp/webdav/webdavcontent.hxx ucb/source/ucp/webdav/webdavcontent.hxx
-index e945f78..cf91688 100644
 --- ucb/source/ucp/webdav/webdavcontent.hxx
 +++ ucb/source/ucp/webdav/webdavcontent.hxx
 @@ -90,6 +90,7 @@ class Content : public ::ucbhelper::ContentImplHelper,
- 	ContentProvider*  m_pProvider; // No need for a ref, base class holds object
-   	sal_Bool 		  m_bTransient;
- 	sal_Bool          m_bCollection;
-+	sal_Bool          m_bForceReadOnly;
+   	bool			  m_bTransient;
+ 	bool              m_bCollection;
+ 	bool              m_bDidGetOrHead;
++	bool              m_bForceReadOnly;
+ 	std::vector< rtl::OUString > m_aFailedPropNames;
  
  private:
- 	virtual com::sun::star::uno::Sequence< com::sun::star::beans::Property >
 diff --git ucb/source/ucp/webdav/webdavcontentcaps.cxx ucb/source/ucp/webdav/webdavcontentcaps.cxx
 index ba3d4bc..f5c5652 100644
 --- ucb/source/ucp/webdav/webdavcontentcaps.cxx
