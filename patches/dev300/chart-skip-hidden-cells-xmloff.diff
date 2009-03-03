@@ -1,8 +1,8 @@
 diff --git xmloff/inc/xmloff/xmltoken.hxx xmloff/inc/xmloff/xmltoken.hxx
-index e15041f..f75053d 100644
+index 828a67d..0586140 100644
 --- xmloff/inc/xmloff/xmltoken.hxx
 +++ xmloff/inc/xmloff/xmltoken.hxx
-@@ -2970,6 +2970,7 @@ namespace xmloff { namespace token {
+@@ -2976,6 +2976,7 @@ namespace xmloff { namespace token {
          XML_PERCENTAGE_DATA_STYLE_NAME,
          XML_VALUE_AND_PERCENTAGE,
          XML_GROUP_BARS_PER_AXIS,
@@ -22,11 +22,326 @@ index b1671d8..84c3d58 100644
      MAP_ENTRY_ODF12( "AutomaticPosition", CHART, XML_AUTOMATIC_POSITION, XML_TYPE_BOOL ),
      MAP_ENTRY_ODF12( "AutomaticSize", CHART, XML_AUTOMATIC_SIZE, XML_TYPE_BOOL ),
      MAP_ENTRY_ODF12( "StartingAngle", CHART, XML_ANGLE_OFFSET, XML_TYPE_NUMBER ),
+diff --git xmloff/source/chart/SchXMLExport.cxx xmloff/source/chart/SchXMLExport.cxx
+index c5d330b..fdc429c 100644
+--- xmloff/source/chart/SchXMLExport.cxx
++++ xmloff/source/chart/SchXMLExport.cxx
+@@ -552,6 +552,33 @@ double lcl_getValueFromSequence( const Reference< chart2::data::XDataSequence >
+     return aResult;
+ }
+ 
++bool lcl_SequenceHasUnhiddenData( const uno::Reference< chart2::data::XDataSequence >& xDataSequence )
++{
++    if( !xDataSequence.is() )
++        return false;
++    uno::Reference< beans::XPropertySet > xProp( xDataSequence, uno::UNO_QUERY );
++    if( xProp.is() )
++    {
++        bool bIsHidden = false;
++        uno::Sequence< sal_Int32 > aHiddenValues;
++        try
++        {
++            xProp->getPropertyValue( OUString( RTL_CONSTASCII_USTRINGPARAM( "IsHidden" ) ) ) >>= bIsHidden;
++            xProp->getPropertyValue( OUString( RTL_CONSTASCII_USTRINGPARAM( "HiddenValues" ) ) ) >>= aHiddenValues;
++            if( !aHiddenValues.getLength() && !bIsHidden )
++                return true;
++        }
++        catch( uno::Exception& e )
++        {
++            (void)e; // avoid warning
++            return true;
++        }
++    }
++    if( xDataSequence->getData().getLength() )
++        return true;
++    return false;
++}
++
+ struct lcl_TableData
+ {
+     typedef ::std::vector< OUString > tStringContainer;
+@@ -563,6 +590,8 @@ struct lcl_TableData
+     tStringContainer       aFirstRowRangeRepresentations;
+     tStringContainer       aFirstColumnStrings;
+     tStringContainer       aFirstColumnRangeRepresentations;
++
++    ::std::vector< sal_Int32 > aHiddenColumns; 
+ };
+ 
+ // ::std::bind2nd( ::std::mem_fun_ref( &T::resize ), nSize ) does not work
+@@ -739,6 +768,10 @@ lcl_TableData lcl_getDataForLocalTable(
+                 aRange = xRangeConversion->convertRangeToXML( aRange );
+         }
+         aResult.aDataRangeRepresentations.push_back( aRange );
++
++        //is column hidden?
++        if( !lcl_SequenceHasUnhiddenData(aIt->first) && !lcl_SequenceHasUnhiddenData(aIt->second) )
++            aResult.aHiddenColumns.push_back(nSeqIdx);
+     }
+ 
+     return aResult;
+@@ -1383,9 +1416,34 @@ void SchXMLExportHelper::exportTable()
+     }
+     {
+         SvXMLElementExport aColumns( mrExport, XML_NAMESPACE_TABLE, XML_TABLE_COLUMNS, sal_True, sal_True );
+-        mrExport.AddAttribute( XML_NAMESPACE_TABLE, XML_NUMBER_COLUMNS_REPEATED,
+-                               OUString::valueOf( static_cast< sal_Int64 >( aData.aFirstRowStrings.size())));
+-        SvXMLElementExport aColumn( mrExport, XML_NAMESPACE_TABLE, XML_TABLE_COLUMN, sal_True, sal_True );
++
++        sal_Int32 nNextIndex = 0;
++        for( size_t nN=0; nN< aData.aHiddenColumns.size(); nN++ )
++        {
++            //i91578 display of hidden values (copy paste scenario; export hidden flag thus it can be used during migration to locale table upon paste )
++            sal_Int32 nHiddenIndex = aData.aHiddenColumns[nN];
++            if( nHiddenIndex > nNextIndex )
++            {
++                sal_Int64 nRepeat = static_cast< sal_Int64 >( nHiddenIndex - nNextIndex );
++                if(nRepeat>1)
++                    mrExport.AddAttribute( XML_NAMESPACE_TABLE, XML_NUMBER_COLUMNS_REPEATED,
++                                   OUString::valueOf( nRepeat ));
++                SvXMLElementExport aColumn( mrExport, XML_NAMESPACE_TABLE, XML_TABLE_COLUMN, sal_True, sal_True );
++            }
++            mrExport.AddAttribute( XML_NAMESPACE_TABLE, XML_VISIBILITY, GetXMLToken( XML_COLLAPSE ) );
++            SvXMLElementExport aColumn( mrExport, XML_NAMESPACE_TABLE, XML_TABLE_COLUMN, sal_True, sal_True );
++            nNextIndex = nHiddenIndex+1;
++        }
++
++        sal_Int32 nEndIndex = aData.aFirstRowStrings.size()-1;
++        if( nEndIndex >= nNextIndex )
++        {
++            sal_Int64 nRepeat = static_cast< sal_Int64 >( nEndIndex - nNextIndex + 1 );
++            if(nRepeat>1)
++                mrExport.AddAttribute( XML_NAMESPACE_TABLE, XML_NUMBER_COLUMNS_REPEATED,
++                               OUString::valueOf( nRepeat ));
++            SvXMLElementExport aColumn( mrExport, XML_NAMESPACE_TABLE, XML_TABLE_COLUMN, sal_True, sal_True );
++        }
+     }
+ 
+     // export rows with content
+diff --git xmloff/source/chart/SchXMLTableContext.cxx xmloff/source/chart/SchXMLTableContext.cxx
+index 81398c3..8697fb8 100644
+--- xmloff/source/chart/SchXMLTableContext.cxx
++++ xmloff/source/chart/SchXMLTableContext.cxx
+@@ -43,7 +43,10 @@
+ #include <xmloff/nmspmap.hxx>
+ #include <xmloff/xmluconv.hxx>
+ #include <com/sun/star/frame/XModel.hpp>
++#include <com/sun/star/chart2/XDataSeriesContainer.hpp>
+ #include <com/sun/star/chart2/XChartDocument.hpp>
++#include <com/sun/star/chart2/XChartTypeContainer.hpp>
++#include <com/sun/star/chart2/XInternalDataProvider.hpp>
+ #include <com/sun/star/chart/XChartDataArray.hpp>
+ #include <com/sun/star/chart/ChartSeriesAddress.hpp>
+ #include <com/sun/star/beans/XPropertySet.hpp>
+@@ -672,7 +675,8 @@ void SchXMLTableColumnContext::StartElement( const uno::Reference< xml::sax::XAt
+ {
+ 	// get number-columns-repeated attribute
+ 	sal_Int16 nAttrCount = xAttrList.is()? xAttrList->getLength(): 0;
+-	rtl::OUString aValue;
++	sal_Int32 nRepeated = 1;
++    bool bHidden = false;
+ 
+ 	for( sal_Int16 i = 0; i < nAttrCount; i++ )
+ 	{
+@@ -683,20 +687,33 @@ void SchXMLTableColumnContext::StartElement( const uno::Reference< xml::sax::XAt
+ 		if( nPrefix == XML_NAMESPACE_TABLE &&
+ 			IsXMLToken( aLocalName, XML_NUMBER_COLUMNS_REPEATED ) )
+ 		{
+-			aValue = xAttrList->getValueByIndex( i );
+-			break;	 // we only need this attribute
++			rtl::OUString aValue = xAttrList->getValueByIndex( i );
++            if( aValue.getLength())
++                nRepeated = aValue.toInt32();
++		}
++        else if( nPrefix == XML_NAMESPACE_TABLE &&
++			IsXMLToken( aLocalName, XML_VISIBILITY ) )
++		{
++			rtl::OUString aVisibility = xAttrList->getValueByIndex( i );
++            bHidden = aVisibility.equals( GetXMLToken( XML_COLLAPSE ) );
+ 		}
+ 	}
+ 
+-	if( aValue.getLength())
+-	{
+-		sal_Int32 nRepeated = aValue.toInt32();
+-		mrTable.nNumberOfColsEstimate += nRepeated;
+-	}
+-	else
+-	{
+-		mrTable.nNumberOfColsEstimate++;
+-	}
++    sal_Int32 nOldCount = mrTable.nNumberOfColsEstimate;
++    sal_Int32 nNewCount = nOldCount + nRepeated;
++    mrTable.nNumberOfColsEstimate = nNewCount;
++
++    if( bHidden )
++    {
++        //i91578 display of hidden values (copy paste scenario; use hidden flag during migration to locale table upon paste )
++        sal_Int32 nColOffset = ( mrTable.bHasHeaderColumn ? 1 : 0 );
++        for( sal_Int32 nN = nOldCount; nN<nNewCount; nN++ )
++        {
++            sal_Int32 nHiddenColumnIndex = nN-nColOffset;
++            if( nHiddenColumnIndex>=0 )
++                mrTable.aHiddenColumns.push_back(nHiddenColumnIndex);
++        }
++    }
+ }
+ 
+ SchXMLTableColumnContext::~SchXMLTableColumnContext()
+@@ -1143,5 +1160,135 @@ void SchXMLTableHelper::postProcessTable(
+             xDataProv, xChartDoc, OUString(RTL_CONSTASCII_USTRINGPARAM("categories")),
+             0 /* nCooSysIndex */, 0 /* nDimension */ );
+     }
++
++    //i91578 display of hidden values (copy paste scenario; use hidden flag during migration to locale table upon paste )
++    //remove series that consist only of hidden columns
++    Reference< chart2::XInternalDataProvider > xInternalDataProvider( xDataProv, uno::UNO_QUERY );
++    if( xInternalDataProvider.is() && !rTable.aHiddenColumns.empty() )
++    {
++        try
++        {
++            Reference< chart2::XCoordinateSystemContainer > xCooSysCnt( xChartDoc->getFirstDiagram(), uno::UNO_QUERY_THROW );
++            Sequence< Reference< chart2::XCoordinateSystem > > aCooSysSeq( xCooSysCnt->getCoordinateSystems() );
++            for( sal_Int32 nC=0; nC<aCooSysSeq.getLength(); ++nC )
++            {
++                Reference< chart2::XChartTypeContainer > xCooSysContainer( aCooSysSeq[nC], uno::UNO_QUERY_THROW );
++                Sequence< Reference< chart2::XChartType > > aChartTypeSeq( xCooSysContainer->getChartTypes());
++                for( sal_Int32 nT=0; nT<aChartTypeSeq.getLength(); ++nT )
++                {
++                    Reference< chart2::XDataSeriesContainer > xSeriesContainer( aChartTypeSeq[nT], uno::UNO_QUERY );
++                    if(!xSeriesContainer.is())
++                        continue;
++                    Sequence< Reference< chart2::XDataSeries > > aSeriesSeq( xSeriesContainer->getDataSeries() );
++                    std::vector< Reference< chart2::XDataSeries > > aRemainingSeries;
++                    
++                    for( sal_Int32 nS = 0; nS < aSeriesSeq.getLength(); nS++ )
++                    {
++                        Reference< chart2::data::XDataSource > xDataSource( aSeriesSeq[nS], uno::UNO_QUERY );
++                        if( xDataSource.is() )
++                        {
++                            bool bHasUnhiddenColumns = false;
++                            rtl::OUString aRange;
++                            uno::Sequence< Reference< chart2::data::XLabeledDataSequence > > aSequences( xDataSource->getDataSequences() );
++                            for( sal_Int32 nN=0; nN< aSequences.getLength(); ++nN )
++                            {
++                                Reference< chart2::data::XLabeledDataSequence > xLabeledSequence( aSequences[nN] );
++                                if(!xLabeledSequence.is())
++                                    continue;
++                                Reference< chart2::data::XDataSequence > xValues( xLabeledSequence->getValues() );
++                                if( xValues.is() )
++                                {
++                                    aRange = xValues->getSourceRangeRepresentation();
++                                    if( ::std::find( rTable.aHiddenColumns.begin(), rTable.aHiddenColumns.end(), aRange.toInt32() ) == rTable.aHiddenColumns.end() )
++                                        bHasUnhiddenColumns = true;
++                                }
++                                if( !bHasUnhiddenColumns )
++                                {
++                                    Reference< chart2::data::XDataSequence > xLabel( xLabeledSequence->getLabel() );
++                                    if( xLabel.is() )
++                                    {
++                                        aRange = xLabel->getSourceRangeRepresentation();
++                                        sal_Int32 nSearchIndex = 0;
++                                        OUString aSecondToken = aRange.getToken( 1, ' ', nSearchIndex );
++                                        if( ::std::find( rTable.aHiddenColumns.begin(), rTable.aHiddenColumns.end(), aSecondToken.toInt32() ) == rTable.aHiddenColumns.end() )
++                                            bHasUnhiddenColumns = true;
++                                    }
++                                }
++                            }
++                            if( bHasUnhiddenColumns )
++                                aRemainingSeries.push_back( aSeriesSeq[nS] );
++                        }
++                    }                    
++
++                    if( static_cast<sal_Int32>(aRemainingSeries.size()) != aSeriesSeq.getLength() )
++                    {
++                        //remove the series that have only hidden data
++                        Sequence< Reference< chart2::XDataSeries > > aRemainingSeriesSeq( aRemainingSeries.size());
++                        ::std::copy( aRemainingSeries.begin(), aRemainingSeries.end(), aRemainingSeriesSeq.getArray());
++                        xSeriesContainer->setDataSeries( aRemainingSeriesSeq );
++
++                        //remove unused sequences
++                        Reference< chart2::data::XDataSource > xDataSource( xChartDoc, uno::UNO_QUERY );
++                        if( xDataSource.is() )
++                        {
++                            //first detect which collumns are really used
++                            std::map< sal_Int32, bool > aUsageMap;
++                            rtl::OUString aRange;
++                            Sequence< Reference< chart2::data::XLabeledDataSequence > > aUsedSequences( xDataSource->getDataSequences() );
++                            for( sal_Int32 nN=0; nN< aUsedSequences.getLength(); ++nN )
++                            {
++                                bool bUsed = false;
++                                Reference< chart2::data::XLabeledDataSequence > xLabeledSequence( aUsedSequences[nN] );
++                                if(!xLabeledSequence.is())
++                                    continue;
++                                Reference< chart2::data::XDataSequence > xValues( xLabeledSequence->getValues() );
++                                if( xValues.is() )
++                                {
++                                    aRange = xValues->getSourceRangeRepresentation();
++                                    sal_Int32 nIndex = aRange.toInt32();
++                                    if( nIndex!=0 || !aRange.equals(lcl_aCategoriesRange) )
++                                        aUsageMap[nIndex] = true;
++                                }
++                                Reference< chart2::data::XDataSequence > xLabel( xLabeledSequence->getLabel() );
++                                if( xLabel.is() )
++                                {
++                                    aRange = xLabel->getSourceRangeRepresentation();
++                                    sal_Int32 nSearchIndex = 0;
++                                    OUString aSecondToken = aRange.getToken( 1, ' ', nSearchIndex );
++                                    if( aSecondToken.getLength() )
++                                        aUsageMap[aSecondToken.toInt32()] = true;
++                                }
++                            }
++
++                            ::std::vector< sal_Int32 > aSequenceIndexesToDelete;
++                            for( ::std::vector< sal_Int32 >::const_iterator aIt(
++                                     rTable.aHiddenColumns.begin()); aIt != rTable.aHiddenColumns.end(); ++aIt )
++                            {
++                                sal_Int32 nSequenceIndex = *aIt;
++                                if( aUsageMap.find(nSequenceIndex) != aUsageMap.end() )
++                                    continue;
++                                aSequenceIndexesToDelete.push_back(nSequenceIndex);
++                            }
++                            
++                            // delete unnecessary sequences of the internal data
++                            // iterate using greatest index first, so that deletion does not
++                            // shift other sequences that will be deleted later
++                            ::std::sort( aSequenceIndexesToDelete.begin(), aSequenceIndexesToDelete.end());
++                            for( ::std::vector< sal_Int32 >::reverse_iterator aIt(
++                                     aSequenceIndexesToDelete.rbegin()); aIt != aSequenceIndexesToDelete.rend(); ++aIt )
++                            {
++                                if( *aIt != -1 )
++                                    xInternalDataProvider->deleteSequence( *aIt );
++                            }
++                        }
++                    }
++                }
++            }
++        }
++        catch( uno::Exception & ex )
++        {
++            (void)ex; // avoid warning for pro build
++        }
++    }
+ }
+ 
+diff --git xmloff/source/chart/transporttypes.hxx xmloff/source/chart/transporttypes.hxx
+index 96d2c73..8009d49 100644
+--- xmloff/source/chart/transporttypes.hxx
++++ xmloff/source/chart/transporttypes.hxx
+@@ -68,6 +68,8 @@ struct SchXMLTable
+ 
+     ::rtl::OUString aTableNameOfFile;                   /// the table name read at the table:table element
+ 
++    ::std::vector< sal_Int32 > aHiddenColumns;
++
+ 	SchXMLTable() : nRowIndex( -1 ),
+ 					nColumnIndex( -1 ),
+ 					nMaxColumnIndex( -1 ),
 diff --git xmloff/source/core/xmltoken.cxx xmloff/source/core/xmltoken.cxx
-index 474d0f4..11df02c 100644
+index 356d4cc..2b1d20b 100644
 --- xmloff/source/core/xmltoken.cxx
 +++ xmloff/source/core/xmltoken.cxx
-@@ -2970,6 +2970,7 @@ namespace xmloff { namespace token {
+@@ -2976,6 +2976,7 @@ namespace xmloff { namespace token {
          TOKEN( "percentage-data-style-name",      XML_PERCENTAGE_DATA_STYLE_NAME ),
          TOKEN( "value-and-percentage",            XML_VALUE_AND_PERCENTAGE ),
          TOKEN( "group-bars-per-axis",             XML_GROUP_BARS_PER_AXIS ),
