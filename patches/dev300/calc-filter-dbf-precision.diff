@@ -1,0 +1,133 @@
+diff --git sc/source/core/data/column3.cxx sc/source/core/data/column3.cxx
+index b9c8776..a6aeee0 100644
+--- sc/source/core/data/column3.cxx
++++ sc/source/core/data/column3.cxx
+@@ -1871,10 +1871,16 @@ xub_StrLen ScColumn::GetMaxNumberStringLen( USHORT& nPrecision,
+ 				if ( nLen )
+ 				{
+ 					if ( nFormat )
+-					{	// more decimals than standard?
+-						USHORT nPrec = pNumFmt->GetFormatPrecision( nFormat );
+-						if ( nPrec > nPrecision )
+-							nPrecision = nPrec;
++					{
++                        const SvNumberformat* pEntry = pNumFmt->GetEntry( nFormat );
++                        if (pEntry)
++                        {
++                            BOOL bThousand, bNegRed;
++                            USHORT nLeading;
++                            pEntry->GetFormatSpecialInfo(bThousand, bNegRed, nPrecision, nLeading);
++                        }
++                        else
++                            nPrecision = pNumFmt->GetFormatPrecision( nFormat );
+ 					}
+ 					if ( nPrecision )
+ 					{	// less than nPrecision in string => widen it
+diff --git sc/source/ui/docshell/docsh8.cxx sc/source/ui/docshell/docsh8.cxx
+index d12bd6a..05f4beb 100644
+--- sc/source/ui/docshell/docsh8.cxx
++++ sc/source/ui/docshell/docsh8.cxx
+@@ -80,8 +80,16 @@
+ #include "dbdocutl.hxx"
+ #include "dociter.hxx"
+ #include "globstr.hrc"
++#include "svtools/zformat.hxx"
++#include "svtools/intitem.hxx"
++#include "patattr.hxx"
++#include "scitems.hxx"
++#include "docpool.hxx"
++
++#include <vector>
+ 
+ using namespace com::sun::star;
++using ::std::vector;
+ 
+ // -----------------------------------------------------------------------
+ 
+@@ -193,6 +201,53 @@ BOOL ScDocShell::IsDocument( const INetURLObject& rURL )
+ 
+ // -----------------------------------------------------------------------
+ 
++static void lcl_setScalesToColumns(ScDocument& rDoc, const vector<long>& rScales)
++{
++    SvNumberFormatter* pFormatter = rDoc.GetFormatTable();
++    if (!pFormatter)
++        return;
++
++    SCCOL nColCount = static_cast<SCCOL>(rScales.size());
++    for (SCCOL i = 0; i < nColCount; ++i)
++    {
++        if (rScales[i] < 0)
++            continue;
++
++        sal_uInt32 nOldFormat;
++        rDoc.GetNumberFormat(static_cast<SCCOL>(i), 0, 0, nOldFormat);
++        const SvNumberformat* pOldEntry = pFormatter->GetEntry(nOldFormat);
++        if (!pOldEntry)
++            continue;
++
++        LanguageType eLang = pOldEntry->GetLanguage();
++        BOOL bThousand, bNegRed;
++        USHORT nPrecision, nLeading;
++        pOldEntry->GetFormatSpecialInfo(bThousand, bNegRed, nPrecision, nLeading);
++
++        nPrecision = static_cast<USHORT>(rScales[i]);
++        String aNewPicture;
++        pFormatter->GenerateFormat(aNewPicture, nOldFormat, eLang,
++                                   bThousand, bNegRed, nPrecision, nLeading);
++
++        sal_uInt32 nNewFormat = pFormatter->GetEntryKey(aNewPicture, eLang);
++        if (nNewFormat == NUMBERFORMAT_ENTRY_NOT_FOUND)
++        {
++            xub_StrLen nErrPos = 0;
++            short nNewType = 0;
++            bool bOk = pFormatter->PutEntry(
++                aNewPicture, nErrPos, nNewType, nNewFormat, eLang);
++
++            if (!bOk)
++                continue;
++        }
++
++        ScPatternAttr aNewAttrs( rDoc.GetPool() );
++        SfxItemSet& rSet = aNewAttrs.GetItemSet();
++        rSet.Put( SfxUInt32Item(ATTR_VALUE_FORMAT, nNewFormat) );
++        rDoc.ApplyPatternAreaTab(static_cast<SCCOL>(i), 0, static_cast<SCCOL>(i), MAXROW, 0, aNewAttrs);
++    }
++}
++
+ ULONG ScDocShell::DBaseImport( const String& rFullFileName, CharSet eCharSet,
+ 								BOOL bSimpleColWidth[MAXCOLCOUNT] )
+ {
+@@ -308,6 +363,7 @@ ULONG ScDocShell::DBaseImport( const String& rFullFileName, CharSet eCharSet,
+ 		//	read column names
+ 		//!	add type descriptions
+ 
++        vector<long> aScales(nColCount, -1);
+ 		for (i=0; i<nColCount; i++)
+ 		{
+ 			String aHeader = xMeta->getColumnLabel( i+1 );
+@@ -337,6 +393,7 @@ ULONG ScDocShell::DBaseImport( const String& rFullFileName, CharSet eCharSet,
+ 										nPrec, nScale ) );
+ 						aHeader += ',';
+ 						aHeader += String::CreateFromInt32( nScale );
++                        aScales[i] = nScale;
+ 					}
+ 					break;
+ 			}
+@@ -344,6 +401,8 @@ ULONG ScDocShell::DBaseImport( const String& rFullFileName, CharSet eCharSet,
+ 			aDocument.SetString( static_cast<SCCOL>(i), 0, 0, aHeader );
+ 		}
+ 
++        lcl_setScalesToColumns(aDocument, aScales);
++
+ 		SCROW nRow = 1;		// 0 is column titles
+ 		BOOL bEnd = FALSE;
+ 		while ( !bEnd && xRowSet->next() )
+@@ -470,7 +529,6 @@ void lcl_GetColumnTypes( ScDocShell& rDocShell,
+ 						break;
+ 					case 'N' :
+ 						nDbType = sdbc::DataType::DECIMAL;
+-						bTypeDefined = TRUE;
+ 						break;
+ 				}
+ 				if ( bTypeDefined && !nFieldLen && nToken > 2 )
