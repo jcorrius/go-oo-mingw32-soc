@@ -5,23 +5,27 @@ From: <af@openoffice.org>
 
 ---
 
- offapi/com/sun/star/presentation/XSlideShow.idl    |   37 +++
+ offapi/com/sun/star/presentation/XSlideShow.idl    |   37 ++
  .../sun/star/presentation/XSlideShowListener.idl   |    6 
- sd/source/ui/slideshow/slideshowimpl.cxx           |  120 ++++++++-
- sd/source/ui/slideshow/slideshowimpl.hxx           |    8 -
+ sd/source/ui/slideshow/slideshowimpl.cxx           |  120 +++++-
+ sd/source/ui/slideshow/slideshowimpl.hxx           |    8 
  .../source/engine/animationnodes/basenode.hxx      |    6 
  .../animationnodes/sequentialtimecontainer.cxx     |    6 
- slideshow/source/engine/eventqueue.cxx             |   47 +++
+ slideshow/source/engine/effectrewinder.cxx         |  404 ++++++++++++++++++++
+ slideshow/source/engine/effectrewinder.hxx         |  183 +++++++++
+ slideshow/source/engine/eventqueue.cxx             |   47 ++
  slideshow/source/engine/makefile.mk                |    1 
- slideshow/source/engine/screenupdater.cxx          |   83 ++++++
- slideshow/source/engine/slide/layermanager.cxx     |  105 ++++----
- slideshow/source/engine/slide/layermanager.hxx     |   35 +--
- slideshow/source/engine/slideshowimpl.cxx          |  270 ++++++++++++++++----
- slideshow/source/engine/usereventqueue.cxx         |   54 +++-
- slideshow/source/inc/eventqueue.hxx                |    8 +
- slideshow/source/inc/screenupdater.hxx             |   21 ++
+ slideshow/source/engine/screenupdater.cxx          |   83 ++++
+ slideshow/source/engine/slide/layermanager.cxx     |  105 +++--
+ slideshow/source/engine/slide/layermanager.hxx     |   35 --
+ slideshow/source/engine/slideshowimpl.cxx          |  270 +++++++++++--
+ slideshow/source/engine/usereventqueue.cxx         |   54 ++-
+ slideshow/source/inc/eventqueue.hxx                |    8 
+ slideshow/source/inc/screenupdater.hxx             |   21 +
  slideshow/source/inc/usereventqueue.hxx            |   18 +
- 16 files changed, 649 insertions(+), 176 deletions(-)
+ 18 files changed, 1236 insertions(+), 176 deletions(-)
+ create mode 100644 slideshow/source/engine/effectrewinder.cxx
+ create mode 100644 slideshow/source/engine/effectrewinder.hxx
 
 
 diff --git offapi/com/sun/star/presentation/XSlideShow.idl offapi/com/sun/star/presentation/XSlideShow.idl
@@ -424,6 +428,605 @@ index de63321..ab0c492 100644
      if (notifyDeactivatedChild( rNotifier ))
          return;
      
+diff --git slideshow/source/engine/effectrewinder.cxx slideshow/source/engine/effectrewinder.cxx
+new file mode 100644
+index 0000000..6459e6e
+--- /dev/null
++++ slideshow/source/engine/effectrewinder.cxx
+@@ -0,0 +1,404 @@
++/*************************************************************************
++ *
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ * 
++ * Copyright 2008 by Sun Microsystems, Inc.
++ *
++ * OpenOffice.org - a multi-platform office productivity suite
++ *
++ * $RCSfile: slideshowimpl.cxx,v $
++ * $Revision: 1.10 $
++ *
++ * This file is part of OpenOffice.org.
++ *
++ * OpenOffice.org is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License version 3
++ * only, as published by the Free Software Foundation.
++ *
++ * OpenOffice.org is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License version 3 for more details
++ * (a copy is included in the LICENSE file that accompanied this code).
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * version 3 along with OpenOffice.org.  If not, see
++ * <http://www.openoffice.org/license.html>
++ * for a copy of the LGPLv3 License.
++ *
++ ************************************************************************/
++
++#include "precompiled_slideshow.hxx"
++
++#include "effectrewinder.hxx"
++#include "eventqueue.hxx"
++#include "usereventqueue.hxx"
++#include "mouseeventhandler.hxx"
++#include "animationnodes/basecontainernode.hxx"
++#include "delayevent.hxx"
++
++#include <com/sun/star/awt/MouseEvent.hpp>
++#include <com/sun/star/animations/Event.hpp>
++#include <com/sun/star/animations/EventTrigger.hpp>
++#include <com/sun/star/container/XEnumerationAccess.hpp>
++#include <boost/function.hpp>
++#include <boost/bind.hpp>
++#include <boost/enable_shared_from_this.hpp>
++
++using ::com::sun::star::uno::Reference;
++using namespace ::com::sun::star;
++
++namespace slideshow { namespace internal {
++
++
++namespace {
++
++class RewinderEventHandler : public EventHandler
++{
++public:
++    typedef ::boost::function<bool(void)> Action;
++    RewinderEventHandler (const Action& rAction) : maAction(rAction) {}
++    virtual ~RewinderEventHandler (void) {}
++private:
++    const Action maAction;
++    virtual bool handleEvent (void) { return maAction(); }
++};
++
++
++
++class RewinderAnimationEventHandler : public AnimationEventHandler
++{
++public:
++    typedef ::boost::function<bool(const AnimationNodeSharedPtr& rpNode)> Action;
++    RewinderAnimationEventHandler (const Action& rAction) : maAction(rAction) {}
++    virtual ~RewinderAnimationEventHandler (void) {}
++private:
++    const Action maAction;
++    virtual bool handleAnimationEvent (const AnimationNodeSharedPtr& rpNode)
++        { return maAction(rpNode); }
++};
++
++
++
++} // end of anonymous namespace
++
++
++//----- EffectRewinder --------------------------------------------------------------
++
++EffectRewinder::EffectRewinder (
++    EventMultiplexer& rEventMultiplexer,
++    EventQueue& rEventQueue,
++    UserEventQueue& rUserEventQueue)
++    : mrEventMultiplexer(rEventMultiplexer),
++      mrEventQueue(rEventQueue),
++      mrUserEventQueue(rUserEventQueue),
++      mpSlideStartHandler(),
++      mpSlideEndHandler(),
++      mpAnimationStartHandler(),
++      mnMainSequenceEffectCount(0),
++      mpAsynchronousRewindEvent(),
++      mxCurrentAnimationRootNode()
++{
++    initialize();
++}
++
++
++
++
++void EffectRewinder::initialize (void)
++{
++    // Add some event handlers so that we are informed when
++    // a) an animation is started (we then check whether that belongs to a
++    // main sequence effect and if so, increase the respective counter),
++    // b,c) a slide was started or ended (in which case the effect counter
++    // is reset.
++    
++    mpAnimationStartHandler.reset(
++        new RewinderAnimationEventHandler(
++            ::boost::bind(&EffectRewinder::notifyAnimationStart, this, _1)));
++    mrEventMultiplexer.addAnimationStartHandler(mpAnimationStartHandler);
++    
++    mpSlideStartHandler.reset(
++        new RewinderEventHandler(
++            ::boost::bind(&EffectRewinder::resetEffectCount, this)));
++    mrEventMultiplexer.addSlideStartHandler(mpSlideStartHandler);
++    
++    mpSlideEndHandler.reset(
++        new RewinderEventHandler(
++            ::boost::bind(&EffectRewinder::resetEffectCount, this)));
++    mrEventMultiplexer.addSlideEndHandler(mpSlideEndHandler);
++}
++
++
++
++
++EffectRewinder::~EffectRewinder (void)
++{
++    dispose();
++}
++
++
++
++
++void EffectRewinder::dispose (void)
++{
++    if (mpAsynchronousRewindEvent)
++    {
++        mpAsynchronousRewindEvent->dispose();
++        mpAsynchronousRewindEvent.reset();
++    }
++    
++    if (mpAnimationStartHandler)
++    {
++        mrEventMultiplexer.removeAnimationStartHandler(mpAnimationStartHandler);
++        mpAnimationStartHandler.reset();
++    }
++
++    if (mpSlideStartHandler)
++    {
++        mrEventMultiplexer.removeSlideStartHandler(mpSlideStartHandler);
++        mpSlideStartHandler.reset();
++    }
++
++    if (mpSlideEndHandler)
++    {
++        mrEventMultiplexer.removeSlideEndHandler(mpSlideEndHandler);
++        mpSlideEndHandler.reset();
++    }
++}
++
++
++
++
++void EffectRewinder::setRootAnimationNode (
++    const uno::Reference<animations::XAnimationNode>& xRootNode)
++{
++    mxCurrentAnimationRootNode = xRootNode;
++}
++
++
++
++
++bool EffectRewinder::rewind (
++    const ::boost::shared_ptr<ScreenUpdater::UpdateLock>& rpPaintLock,
++    const ::boost::function<void(void)>& rSlideRewindFunctor,
++    const ::boost::function<void(void)>& rPreviousSlideFunctor)
++{
++    mpPaintLock = rpPaintLock;
++
++    // Do not allow nested rewinds.
++    if (mpAsynchronousRewindEvent)
++    {
++        OSL_ASSERT( ! mpAsynchronousRewindEvent);
++        return false;
++    }
++
++    // Abort (and skip over the rest of) any currently active animation.
++    mrUserEventQueue.callSkipEffectEventHandler();
++    mrEventQueue.forceEmpty();
++        
++    const int nSkipCount (mnMainSequenceEffectCount - 1);
++    if (nSkipCount < 0)
++    {
++        if ( ! rPreviousSlideFunctor)
++        {
++            OSL_ASSERT(rPreviousSlideFunctor);
++            return false;
++        }
++
++        // No main sequence effects to rewind on the current slide.
++        // Go back to the previous slide.
++        mpAsynchronousRewindEvent = makeEvent(
++            ::boost::bind(
++                &EffectRewinder::asynchronousRewindToPreviousSlide,
++                this,
++                rPreviousSlideFunctor));
++    }
++    else
++    {
++        // The actual rewinding is done asynchronously so that we can safely
++        // call other methods.
++        mpAsynchronousRewindEvent = makeEvent(
++            ::boost::bind(
++                &EffectRewinder::asynchronousRewind,
++                this,
++                nSkipCount,
++                true,
++                rSlideRewindFunctor));
++    }
++
++    if (mpAsynchronousRewindEvent)
++        mrEventQueue.addEvent(mpAsynchronousRewindEvent);
++
++    return mpAsynchronousRewindEvent.get()!=NULL;
++}
++
++
++
++
++void EffectRewinder::skipAllMainSequenceEffects (void)
++{
++    // Do not allow nested rewinds.
++    if (mpAsynchronousRewindEvent)
++    {
++        OSL_ASSERT(!mpAsynchronousRewindEvent);
++        return;
++    }
++
++    const int nTotalMainSequenceEffectCount (countMainSequenceEffects());
++    mpAsynchronousRewindEvent = makeEvent(
++        ::boost::bind(
++            &EffectRewinder::asynchronousRewind,
++            this,
++            nTotalMainSequenceEffectCount,
++            false,
++            ::boost::function<void(void)>()));
++    mrEventQueue.addEvent(mpAsynchronousRewindEvent);
++}
++
++
++
++
++sal_Int32 EffectRewinder::countMainSequenceEffects (void)
++{
++    // Determine the number of main sequence effects.
++    sal_Int32 nMainSequenceNodeCount (0);
++
++    ::std::queue<uno::Reference<animations::XAnimationNode> > aNodeQueue;
++    aNodeQueue.push(mxCurrentAnimationRootNode);
++    while ( ! aNodeQueue.empty())
++    {
++        const uno::Reference<animations::XAnimationNode> xNode (aNodeQueue.front());
++        aNodeQueue.pop();
++
++        // Does the current node belong to the main sequence?
++        if (xNode.is())
++        {
++            animations::Event aEvent;
++            if (xNode->getBegin() >>= aEvent)
++                if (aEvent.Trigger == animations::EventTrigger::ON_NEXT)
++                    ++nMainSequenceNodeCount;
++        }
++
++        // If the current node is a container then prepare its children for investigation.
++        uno::Reference<container::XEnumerationAccess> xEnumerationAccess (xNode, uno::UNO_QUERY);
++        if (xEnumerationAccess.is())
++        {
++            uno::Reference<container::XEnumeration> xEnumeration (
++                xEnumerationAccess->createEnumeration());
++            if (xEnumeration.is())
++                while (xEnumeration->hasMoreElements())
++                {
++                    aNodeQueue.push(
++                        uno::Reference<animations::XAnimationNode>(
++                            xEnumeration->nextElement(), uno::UNO_QUERY));
++                }
++        }
++    }
++
++    return nMainSequenceNodeCount;
++    
++    //    // Skip all main sequence nodes.
++    //    SkipSomeMainSequenceEffects(nMainSequenceNodeCount);
++}
++
++
++
++
++void EffectRewinder::skipSomeMainSequenceEffects (sal_Int32 nSkipCount)
++{
++    while (--nSkipCount >= 0)
++        skipSingleMainSequenceEffects();
++}
++
++
++
++
++void EffectRewinder::skipSingleMainSequenceEffects (void)
++{
++    // This basically just starts the next effect and then skips over its
++    // animation.
++    mrEventMultiplexer.notifyNextEffect();
++    mrEventQueue.forceEmpty();
++    mrUserEventQueue.callSkipEffectEventHandler();
++    mrEventQueue.forceEmpty();
++}
++
++
++
++
++bool EffectRewinder::resetEffectCount (void)
++{
++    mnMainSequenceEffectCount = 0;
++    return false;
++}
++
++
++
++
++bool EffectRewinder::notifyAnimationStart (const AnimationNodeSharedPtr& rpNode)
++{
++    // This notification is only relevant for us when the rpNode belongs to
++    // the main sequence.
++    BaseNodeSharedPtr pBaseNode (::boost::dynamic_pointer_cast<BaseNode>(rpNode));
++    if (pBaseNode)
++    {
++        BaseContainerNodeSharedPtr pParent (pBaseNode->getParentNode());
++        if (pParent && pParent->isMainSequenceRootNode())
++        {        
++            ++mnMainSequenceEffectCount;
++        }
++    }
++    return false;
++}
++
++
++
++
++void EffectRewinder::asynchronousRewind (
++    sal_Int32 nEffectCount,
++    const bool bRedisplayCurrentSlide,
++    const boost::function<void(void)>& rSlideRewindFunctor)
++{
++    OSL_ASSERT(mpAsynchronousRewindEvent);
++
++    if (bRedisplayCurrentSlide)
++    {
++        mpPaintLock->Activate();
++        // Re-display the current slide.
++        if (rSlideRewindFunctor)
++            rSlideRewindFunctor();
++        mpAsynchronousRewindEvent = makeEvent(
++            ::boost::bind(
++                &EffectRewinder::asynchronousRewind,
++                this,
++                nEffectCount,
++                false,
++                rSlideRewindFunctor));
++        mrEventQueue.addEventForNextRound(mpAsynchronousRewindEvent);
++    }
++    else
++    {
++        mrEventQueue.forceEmpty();
++        while (--nEffectCount >= 0)
++            skipSingleMainSequenceEffects();
++
++        mpAsynchronousRewindEvent.reset();
++        mpPaintLock.reset();
++    }
++}
++
++
++
++
++void EffectRewinder::asynchronousRewindToPreviousSlide (
++    const ::boost::function<void(void)>& rSlideRewindFunctor)
++{
++    OSL_ASSERT(mpAsynchronousRewindEvent);
++
++    mpAsynchronousRewindEvent.reset();
++    rSlideRewindFunctor();
++}
++
++
++} } // end of namespace ::slideshow::internal
+diff --git slideshow/source/engine/effectrewinder.hxx slideshow/source/engine/effectrewinder.hxx
+new file mode 100644
+index 0000000..32466ad
+--- /dev/null
++++ slideshow/source/engine/effectrewinder.hxx
+@@ -0,0 +1,183 @@
++/*************************************************************************
++ *
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ * 
++ * Copyright 2008 by Sun Microsystems, Inc.
++ *
++ * OpenOffice.org - a multi-platform office productivity suite
++ *
++ * $RCSfile: slideshowimpl.cxx,v $
++ * $Revision: 1.10 $
++ *
++ * This file is part of OpenOffice.org.
++ *
++ * OpenOffice.org is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License version 3
++ * only, as published by the Free Software Foundation.
++ *
++ * OpenOffice.org is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License version 3 for more details
++ * (a copy is included in the LICENSE file that accompanied this code).
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * version 3 along with OpenOffice.org.  If not, see
++ * <http://www.openoffice.org/license.html>
++ * for a copy of the LGPLv3 License.
++ *
++ ************************************************************************/
++
++#ifndef INCLUDED_SLIDESHOW_EFFECT_REWINDER_HXX
++#define INCLUDED_SLIDESHOW_EFFECT_REWINDER_HXX
++
++#include "animationnode.hxx"
++#include "eventhandler.hxx"
++#include "animationeventhandler.hxx"
++#include "event.hxx"
++#include "screenupdater.hxx"
++
++#include <com/sun/star/presentation/XSlideShow.hpp>
++#include <boost/scoped_ptr.hpp>
++#include <boost/function.hpp>
++#include <vector>
++
++namespace css = ::com::sun::star;
++
++namespace slideshow { namespace internal {
++
++class EventMultiplexer;
++class EventQueue;
++class UserEventQueue;
++
++/** Rewind single effects of the main effect sequence.  A rewind is
++    initiated by calling the Rewind() method.  Part of the processing is
++    done asynchronously.  Multiple EventQueue::update() calls may be
++    necessary to finish a rewind.
++
++    Remember to call SetRootAnimationNode() when switching to a different
++    slide so that the EffectRewinder can determine the number of main
++    sequence effects.
++*/
++class EffectRewinder
++{
++public:
++    EffectRewinder (
++        EventMultiplexer& rEventMultiplexer,
++        EventQueue& rEventQueue,
++        UserEventQueue& rUserEventQueue);
++    ~EffectRewinder (void);
++
++    /** Call Dispose() before the ownder of an EffectRewinder object dies so
++        that the EffectRewinder can release all references to the owner.
++        
++    */
++    void dispose (void);
++
++    /** Store the root node of the animation tree.  It is used in
++        CountMainSequenceEffects() to count the number of main sequence
++        effects (or effect groups.)
++    */
++    void setRootAnimationNode (
++        const css::uno::Reference<css::animations::XAnimationNode>& xRootNode);
++
++    /** Rewind one effect of the main effect sequence.  When the current
++        slide has not effects or no main sequence effect has yet been played
++        then switch to the previous slide and replay all of its main
++        sequence effects.
++        The caller has to pass two functors that redisplay the current slide
++        or switch to the previous slide so that it does not have to expose
++        its internals to us.  Only one of the two functors is called.
++        @param rpPaintLock
++            This paint lock is released after the whole asynchronous
++            procoess  of rewinding the current effect is completed.  It
++            prevents intermediate repaints  that would show partial replay
++            of effects.
++        @param rSlideRewindFunctor
++            This functor is called when the current slide is to be
++            redisplayed.  When it is called then the other functor is not
++            called.
++        @param rPreviousSlideFunctor
++            This functor is called to switch to the previous slide.  When it
++            is called then the other functor is not called.
++    */
++    bool rewind (
++        const ::boost::shared_ptr<ScreenUpdater::UpdateLock>& rpPaintLock,
++        const ::boost::function<void(void)>& rSlideRewindFunctor,
++        const ::boost::function<void(void)>& rPreviousSlideFunctor);
++
++    /** Call this method after gotoPreviousEffect() triggered a slide change
++        to the previous slide.
++    */
++    void skipAllMainSequenceEffects (void);
++
++private:
++    EventMultiplexer& mrEventMultiplexer;
++    EventQueue& mrEventQueue;
++    UserEventQueue& mrUserEventQueue;
++    
++    EventHandlerSharedPtr mpSlideStartHandler;
++    EventHandlerSharedPtr mpSlideEndHandler;
++    AnimationEventHandlerSharedPtr mpAnimationStartHandler;
++
++    /** The number off main sequence effects so far.
++    */
++    sal_Int32 mnMainSequenceEffectCount;
++
++    /** This is the currently scheduled event that executes the asynchronous
++        part of the effect rewinding.  It is also used as flag that prevents
++        nested rewinds.
++    */
++    EventSharedPtr mpAsynchronousRewindEvent;
++    
++    css::uno::Reference<css::animations::XAnimationNode> mxCurrentAnimationRootNode;
++    ::boost::shared_ptr<ScreenUpdater::UpdateLock> mpPaintLock;
++
++    void initialize (void);
++
++    bool resetEffectCount (void);
++    /** Called by listeners when an animation (not necessarily of a main
++        sequence effect) starts.
++    */
++    bool notifyAnimationStart (const AnimationNodeSharedPtr& rpNode);
++
++    /** Count the number of effects (or effect groups) in the main effect
++        sequence.
++    */
++    sal_Int32 countMainSequenceEffects (void);
++
++    /** Skip the next main sequence effect.
++    */
++    void skipSingleMainSequenceEffects (void);
++    
++    /** Skip the specified number of main sequence effects.
++    */
++    void skipSomeMainSequenceEffects (const sal_Int32 nSkipCount);
++
++    /** Rewind the last effect of the main effect sequence by replaying all
++        previous effects.
++        @param nEffectCount
++            The number of main sequence effects to replay.
++        @param bRedisplayCurrentSlide
++            When <TRUE/> then the current slide is redisplayed before the
++            effects are replayed.
++        @param rSlideRewindFunctor
++            This functor is used to redisplay the current slide.
++    */
++    void asynchronousRewind (
++        sal_Int32 nEffectCount,
++        const bool bRedisplayCurrentSlide,
++        const boost::function<void(void)>& rSlideRewindFunctor);
++
++    /** Go to the previous slide and replay all of its main sequence effects
++        (or effect groups).
++        @param rPreviousSlideFunctor
++            This functor is used to go to the previous slide.
++    */
++    void asynchronousRewindToPreviousSlide (
++        const ::boost::function<void(void)>& rPreviousSlideFunctor);
++};
++
++} } // end of namespace ::slideshow::internal
++
++#endif
 diff --git slideshow/source/engine/eventqueue.cxx slideshow/source/engine/eventqueue.cxx
 index cd1eb37..087d4d5 100644
 --- slideshow/source/engine/eventqueue.cxx
