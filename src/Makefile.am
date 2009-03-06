@@ -1,4 +1,4 @@
-SUBDIRS=layout sdf icons
+SUBDIRS=helpcontent2 icons layout sdf
 
 EXTRA_DIST=\
 	${wildcard setup_native_packinfo*.tar.bz2} \
