@@ -1,0 +1,1702 @@
+the fix for issue 48179
+
+From: <af@openoffice.org>
+
+
+---
+
+ offapi/com/sun/star/presentation/XSlideShow.idl    |   37 +++
+ .../sun/star/presentation/XSlideShowListener.idl   |    6 
+ sd/source/ui/slideshow/slideshowimpl.cxx           |  120 ++++++++-
+ sd/source/ui/slideshow/slideshowimpl.hxx           |    8 -
+ .../source/engine/animationnodes/basenode.hxx      |    6 
+ .../animationnodes/sequentialtimecontainer.cxx     |    6 
+ slideshow/source/engine/eventqueue.cxx             |   47 +++
+ slideshow/source/engine/makefile.mk                |    1 
+ slideshow/source/engine/screenupdater.cxx          |   83 ++++++
+ slideshow/source/engine/slide/layermanager.cxx     |  105 ++++----
+ slideshow/source/engine/slide/layermanager.hxx     |   35 +--
+ slideshow/source/engine/slideshowimpl.cxx          |  270 ++++++++++++++++----
+ slideshow/source/engine/usereventqueue.cxx         |   54 +++-
+ slideshow/source/inc/eventqueue.hxx                |    8 +
+ slideshow/source/inc/screenupdater.hxx             |   21 ++
+ slideshow/source/inc/usereventqueue.hxx            |   18 +
+ 16 files changed, 649 insertions(+), 176 deletions(-)
+
+
+diff --git offapi/com/sun/star/presentation/XSlideShow.idl offapi/com/sun/star/presentation/XSlideShow.idl
+index 4f4f021..272bf9d 100644
+--- offapi/com/sun/star/presentation/XSlideShow.idl
++++ offapi/com/sun/star/presentation/XSlideShow.idl
+@@ -93,6 +93,25 @@ interface XSlideShow : ::com::sun::star::uno::XInterface
+      */
+     boolean nextEffect();
+ 
++    /** Undo the last effect in the main sequence of the slideshow.<p>
++
++        The current slide is displayed as if the last user-triggered effect
++        has never been triggered.  If there is no previous effect on the
++        current slide then slideEnded(true) is called at the registered
++        XSlideShowListener objects, which can then trigger a change to the
++        previous slide.  Note that this command is executed asynchronously.
++        Multiple calls to update() may be necessary to complete its execution.
++        If there is currently no slideshow running, this method does
++        nothing.<p>
++
++        @return <TRUE/>, if the previous effect was successfully
++        triggered. This method returns <FALSE/>, if there is no show
++        running, the first effect on the first slide was not yet
++        triggered, or the implementation failed to trigger the previous
++        effect.
++     */
++    boolean previousEffect();
++
+     /** Start a shape-intrinsic animation or activity.<p>
+ 
+         This method starts an animation or activity intrinsic to the
+@@ -145,8 +164,24 @@ interface XSlideShow : ::com::sun::star::uno::XInterface
+                 a different slide, this will still work but will not have any performance
+                 improvements
+                 </li>
++            <li>name: SkipAllMainSequenceEffects, value: boolean.
++                When <TRUE/> then all main sequence effects on the new slide
++                are triggered.  This is typically used when going back one
++                effect leads to the previous slide.  On that slide all
++                effects have to be shown in order to continue the backward
++                travelling.
++                When <FALSE/>, the default, then no main sequence effect is
++                triggered.
++                </li>
++            <li>name: SkipSlideTransition, value: boolean.
++                When <TRUE/> then the slide transition animation, if there
++                is any, is not displayed.  This is typically used when going
++                back one effect leads to the previous slide.  Typically used
++                together with SkipAllMainSequenceEffects also being <TRUE/>.
++                When <FALSE/>, the default, then the slide transition
++                effect, if it exists, is played.
++                </li>
+         </ul>
+-
+     */
+     void displaySlide(
+         [in] ::com::sun::star::drawing::XDrawPage xSlide,
+diff --git offapi/com/sun/star/presentation/XSlideShowListener.idl offapi/com/sun/star/presentation/XSlideShowListener.idl
+index 74767f0..6266042 100644
+--- offapi/com/sun/star/presentation/XSlideShowListener.idl
++++ offapi/com/sun/star/presentation/XSlideShowListener.idl
+@@ -65,8 +65,12 @@ interface XSlideShowListener : ::com::sun::star::animations::XAnimationListener
+ 	/** Notify that the current slide has ended,
+         e.g. the user has clicked on the slide.
+         Calling displaySlide() twice will not issue this event.
++        @param reverse
++            For the default order (forward) this flag is <FALSE/>.
++            When the main sequence was traversed in reverse order then this
++            flag is <TRUE/>.
+     */
+-    void slideEnded();
++    void slideEnded( [in] boolean reverse );
+     
+     /** Notifies that a hyperlink has been clicked.
+         @param hyperLink hyperlink URL
+diff --git sd/source/ui/slideshow/slideshowimpl.cxx sd/source/ui/slideshow/slideshowimpl.cxx
+index 3953171..a792b79 100644
+--- sd/source/ui/slideshow/slideshowimpl.cxx
++++ sd/source/ui/slideshow/slideshowimpl.cxx
+@@ -183,7 +183,9 @@ public:
+ 	bool nextSlide();
+ 	bool previousSlide();
+ 
+-	void displayCurrentSlide( const Reference< XSlideShow >& xShow );
++	void displayCurrentSlide(
++        const Reference< XSlideShow >& xShow,
++        const bool bSkipAllMainSequenceEffects);
+ 
+ 	sal_Int32 getNextSlideIndex() const;
+ 	sal_Int32 getPreviousSlideIndex() const;
+@@ -480,29 +482,58 @@ bool AnimationSlideController::previousSlide()
+ 	return jumpToSlideIndex( getPreviousSlideIndex() );
+ }
+ 
+-void AnimationSlideController::displayCurrentSlide( const Reference< XSlideShow >& xShow )
++void AnimationSlideController::displayCurrentSlide(
++    const Reference< XSlideShow >& xShow,
++    const bool bSkipAllMainSequenceEffects)
+ {
+ 	const sal_Int32 nCurrentSlideNumber = getCurrentSlideNumber();
+ 
+ 	if( xShow.is() && (nCurrentSlideNumber != -1 ) )
+ 	{
+-		Sequence< PropertyValue > aProperties;
+ 		Reference< XDrawPage > xSlide;
+ 		Reference< XAnimationNode > xAnimNode;
+-
++        ::std::vector<PropertyValue> aProperties;
++        
+ 		const sal_Int32 nNextSlideNumber = getNextSlideNumber();
+ 		if( getSlideAPI( nNextSlideNumber, xSlide, xAnimNode )  )
+ 		{
+ 			Sequence< Any > aValue(2);
+ 			aValue[0] <<= xSlide;
+ 			aValue[1] <<= xAnimNode;
+-			aProperties.realloc(1);
+-            aProperties[0].Name = OUString( RTL_CONSTASCII_USTRINGPARAM( "Prefetch" ) );
+-			aProperties[0].Value <<= aValue;
++			aProperties.push_back(
++                PropertyValue(
++                    OUString( RTL_CONSTASCII_USTRINGPARAM( "Prefetch" ) ),
++                    -1,
++                    Any(aValue),
++                    PropertyState_DIRECT_VALUE));
+ 		}
++        if (bSkipAllMainSequenceEffects)
++        {
++            // Add one property that prevents the slide transition from being
++            // shown (to speed up the transition to the previous slide) and
++            // one to show all main sequence effects so that the user can
++            // continue to undo effects.
++            aProperties.push_back(
++                PropertyValue(
++                    OUString( RTL_CONSTASCII_USTRINGPARAM("SkipAllMainSequenceEffects")),
++                    -1,
++                    Any(sal_True),
++                    PropertyState_DIRECT_VALUE));
++            aProperties.push_back(
++                PropertyValue(
++                    OUString( RTL_CONSTASCII_USTRINGPARAM("SkipSlideTransition")),
++                    -1,
++                    Any(sal_True),
++                    PropertyState_DIRECT_VALUE));
++        }
+ 
++        // Convert vector into uno Sequence.
++		Sequence< PropertyValue > aPropertySequence (aProperties.size());
++        for (int nIndex=0,nCount=aProperties.size();nIndex<nCount; ++nIndex)
++            aPropertySequence[nIndex] = aProperties[nIndex];
++        
+ 		if( getSlideAPI( nCurrentSlideNumber, xSlide, xAnimNode ) )
+-			xShow->displaySlide( xSlide, xAnimNode, aProperties );
++			xShow->displaySlide( xSlide, xAnimNode, aPropertySequence );
+ 	}
+ }
+ 
+@@ -1247,9 +1278,12 @@ void SAL_CALL SlideshowImpl::removeSlideShowListener( const Reference< XSlideSho
+ 
+ // ---------------------------------------------------------
+ 
+-void SlideshowImpl::slideEnded()
++void SlideshowImpl::slideEnded(const bool bReverse)
+ {
+-	gotoNextSlide();
++    if (bReverse)
++        gotoPreviousSlide(true);
++    else
++        gotoNextSlide();
+ }
+ 
+ // ---------------------------------------------------------
+@@ -1399,14 +1433,14 @@ void SlideshowImpl::registerShapeEvents( Reference< XShapes >& xShapes ) throw(
+ 
+ // ---------------------------------------------------------
+ 
+-void SlideshowImpl::displayCurrentSlide()
++void SlideshowImpl::displayCurrentSlide (const bool bSkipAllMainSequenceEffects)
+ {
+ 	stopSound();
+ 	removeShapeEvents();
+ 
+ 	if( mpSlideController.get() && mxShow.is() )
+ 	{
+-		mpSlideController->displayCurrentSlide( mxShow );
++		mpSlideController->displayCurrentSlide( mxShow, bSkipAllMainSequenceEffects );
+ 		registerShapeEvents(mpSlideController->getCurrentSlideNumber());
+ 		update();
+ 
+@@ -1980,11 +2014,17 @@ bool SlideshowImpl::keyInput(const KeyEvent& rKEvt)
+ 				break;
+ 
+ 			case KEY_PAGEUP:
++				if(rKEvt.GetKeyCode().IsMod2())
++				{
++					gotoPreviousSlide();
++					break;
++				}
++				// warning, fall through!
+ 			case KEY_LEFT:
+ 			case KEY_UP:
+ 			case KEY_P:
+ 			case KEY_BACKSPACE:
+-				gotoPreviousSlide();
++				gotoPreviousEffect();
+ 				break;
+ 
+ 			case KEY_HOME:
+@@ -3096,6 +3136,30 @@ void SAL_CALL SlideshowImpl::gotoNextEffect(  ) throw (RuntimeException)
+ 
+ // --------------------------------------------------------------------
+ 
++void SAL_CALL SlideshowImpl::gotoPreviousEffect(  ) throw (RuntimeException)
++{
++	::vos::OGuard aSolarGuard( Application::GetSolarMutex() );
++
++	if( mxShow.is() && mpSlideController.get() && mpShowWindow )
++	{
++		if( mbIsPaused )
++			resume();
++
++		const ShowWindowMode eMode = mpShowWindow->GetShowWindowMode();
++		if( (eMode == SHOWWINDOWMODE_PAUSE) || (eMode == SHOWWINDOWMODE_BLANK) )
++		{
++			mpShowWindow->RestartShow();
++		}
++		else
++		{
++			mxShow->previousEffect();
++			update();
++		}
++	}
++}
++
++// --------------------------------------------------------------------
++
+ void SAL_CALL SlideshowImpl::gotoFirstSlide(  ) throw (RuntimeException)
+ {
+ 	::vos::OGuard aSolarGuard( Application::GetSolarMutex() );
+@@ -3216,6 +3280,11 @@ void SAL_CALL SlideshowImpl::gotoNextSlide(  ) throw (RuntimeException)
+ 
+ void SAL_CALL SlideshowImpl::gotoPreviousSlide(  ) throw (RuntimeException)
+ {
++    gotoPreviousSlide(false);
++}
++
++void SlideshowImpl::gotoPreviousSlide (const bool bSkipAllMainSequenceEffects)
++{
+ 	::vos::OGuard aSolarGuard( Application::GetSolarMutex() );
+ 
+ 	if( mxShow.is() && mpSlideController.get() ) try
+@@ -3236,8 +3305,22 @@ void SAL_CALL SlideshowImpl::gotoPreviousSlide(  ) throw (RuntimeException)
+ 		}
+ 		else
+ 		{
+-			if( mpSlideController->previousSlide() )
+-				displayCurrentSlide();
++            if( mpSlideController->previousSlide())
++                displayCurrentSlide(bSkipAllMainSequenceEffects);
++            else if (bSkipAllMainSequenceEffects)
++            {
++                // We could not go to the previous slide (probably because
++                // the current slide is already the first one).  We still
++                // have to call displayCurrentSlide because the calling
++                // slideshow can not determine whether there is a previous
++                // slide or not and has already prepared for a slide change.
++                // This slide change has to be completed now, even when
++                // changing to the same slide.
++                // Note that in this special case we do NOT pass
++                // bSkipAllMainSequenceEffects because we display the same
++                // slide as before and do not want to show all its effects.
++				displayCurrentSlide(false);
++            }
+ 		}
+ 	}
+ 	catch( Exception& e )
+@@ -3688,19 +3771,20 @@ void SAL_CALL SlideShowListenerProxy::slideAnimationsEnded(  ) throw (::com::sun
+ 
+ // ---------------------------------------------------------
+ 
+-void SlideShowListenerProxy::slideEnded() throw (RuntimeException)
++void SlideShowListenerProxy::slideEnded(sal_Bool bReverse) throw (RuntimeException)
+ {
+ 	{
+ 		::osl::MutexGuard aGuard( m_aMutex );
+ 
+ 		if( maListeners.getLength() >= 0 )
+-			maListeners.forEach<XSlideShowListener>( boost::mem_fn( &XSlideShowListener::slideEnded ) );
++			maListeners.forEach<XSlideShowListener>(
++                boost::bind( &XSlideShowListener::slideEnded, _1, bReverse) );
+ 	}
+ 
+ 	{
+ 		::vos::OGuard aSolarGuard( Application::GetSolarMutex() );
+ 		if( mxController.is() )
+-			mxController->slideEnded();
++			mxController->slideEnded(bReverse);
+ 	}
+ }
+ 
+diff --git sd/source/ui/slideshow/slideshowimpl.hxx sd/source/ui/slideshow/slideshowimpl.hxx
+index 672657e..a81ac62 100644
+--- sd/source/ui/slideshow/slideshowimpl.hxx
++++ sd/source/ui/slideshow/slideshowimpl.hxx
+@@ -166,7 +166,7 @@ public:
+     virtual void SAL_CALL slideTransitionStarted() throw (css::uno::RuntimeException);
+     virtual void SAL_CALL slideTransitionEnded() throw (css::uno::RuntimeException);
+     virtual void SAL_CALL slideAnimationsEnded() throw (css::uno::RuntimeException);
+-    virtual void SAL_CALL slideEnded() throw (css::uno::RuntimeException);
++    virtual void SAL_CALL slideEnded(sal_Bool bReverse) throw (css::uno::RuntimeException);
+     virtual void SAL_CALL hyperLinkClicked(const ::rtl::OUString & hyperLink) throw (css::uno::RuntimeException);
+ 
+     // css::lang::XEventListener:
+@@ -212,6 +212,7 @@ public:
+     virtual void SAL_CALL addSlideShowListener( const css::uno::Reference< css::presentation::XSlideShowListener >& Listener ) throw (css::uno::RuntimeException);
+     virtual void SAL_CALL removeSlideShowListener( const css::uno::Reference< css::presentation::XSlideShowListener >& Listener ) throw (css::uno::RuntimeException);
+     virtual void SAL_CALL gotoNextEffect(  ) throw (css::uno::RuntimeException);
++    virtual void SAL_CALL gotoPreviousEffect(  ) throw (css::uno::RuntimeException);
+     virtual void SAL_CALL gotoFirstSlide(  ) throw (css::uno::RuntimeException);
+     virtual void SAL_CALL gotoNextSlide(  ) throw (css::uno::RuntimeException);
+     virtual void SAL_CALL gotoPreviousSlide(  ) throw (css::uno::RuntimeException);
+@@ -241,7 +242,7 @@ public:
+     virtual ::sal_Bool SAL_CALL hasElements(  ) throw (::com::sun::star::uno::RuntimeException);
+ 
+ 	// will be called from the SlideShowListenerProxy when this event is fired from the XSlideShow
+-    void slideEnded();
++    void slideEnded(const bool bReverse);
+     void hyperLinkClicked(const ::rtl::OUString & hyperLink) throw (css::uno::RuntimeException);
+ 	void click(const css::uno::Reference< css::drawing::XShape > & xShape, const css::awt::MouseEvent & aOriginalEvent);
+ 
+@@ -282,7 +283,7 @@ private:
+ 
+ 	void createSlideList( bool bAll, bool bStartWithActualSlide, const String& rPresSlide );
+ 
+-	void displayCurrentSlide();
++	void displayCurrentSlide (const bool bSkipAllMainSequenceEffects = false);
+ 
+ 	void displaySlideNumber( sal_Int32 nSlide );
+ 	void displaySlideIndex( sal_Int32 nIndex );
+@@ -332,6 +333,7 @@ private:
+     css::uno::Reference< css::presentation::XSlideShow > createSlideShow() const;
+ 
+ 	void setAutoSaveState( bool bOn );
++    void gotoPreviousSlide (const bool bSkipAllMainSequenceEffects);
+ 
+ 	css::uno::Reference< css::presentation::XSlideShow > mxShow;
+ 	comphelper::ImplementationReference< ::sd::SlideShowView, css::presentation::XSlideShowView > mxView;
+diff --git slideshow/source/engine/animationnodes/basenode.hxx slideshow/source/engine/animationnodes/basenode.hxx
+index a25f6cb..dbf2f13 100644
+--- slideshow/source/engine/animationnodes/basenode.hxx
++++ slideshow/source/engine/animationnodes/basenode.hxx
+@@ -136,7 +136,9 @@ public:
+         const AnimationNodeSharedPtr& rNotifee );
+     // nop:
+     virtual void notifyDeactivating( const AnimationNodeSharedPtr& rNotifier );
+-    
++
++    bool isMainSequenceRootNode() const { return mbIsMainSequenceRootNode; }    
++
+ protected:
+     void scheduleDeactivationEvent( EventSharedPtr const& pEvent =
+                                     EventSharedPtr() );
+@@ -144,8 +146,6 @@ protected:
+     SlideShowContext const&                 getContext() const { return maContext; }
+     ::boost::shared_ptr<BaseNode> const&    getSelf() const { return mpSelf; }
+ 
+-    bool isMainSequenceRootNode() const { return mbIsMainSequenceRootNode; }    
+-
+     bool checkValidNode() const {
+         ENSURE_OR_THROW( mpSelf, "no self ptr set!" );
+         bool const bRet = (meCurrState != INVALID);
+diff --git slideshow/source/engine/animationnodes/sequentialtimecontainer.cxx slideshow/source/engine/animationnodes/sequentialtimecontainer.cxx
+index de63321..ab0c492 100644
+--- slideshow/source/engine/animationnodes/sequentialtimecontainer.cxx
++++ slideshow/source/engine/animationnodes/sequentialtimecontainer.cxx
+@@ -88,7 +88,7 @@ void SequentialTimeContainer::skipEffect(
+     if (isChildNode(pChildNode)) {
+         // empty all events ignoring timings => until next effect
+         getContext().mrEventQueue.forceEmpty();
+-        getContext().mrEventQueue.addEventForNextRound(
++        getContext().mrEventQueue.addEvent(
+             makeEvent( boost::bind(&AnimationNode::deactivate, pChildNode) ) );
+     }
+     else
+@@ -125,7 +125,8 @@ bool SequentialTimeContainer::resolveChild(
+         
+         // deactivate child node when skip event occurs:
+         getContext().mrUserEventQueue.registerSkipEffectEvent(
+-            mpCurrentSkipEvent );
++            mpCurrentSkipEvent,
++            mnFinishedChildren+1<maChildren.size());
+         // rewind to previous child:
+         getContext().mrUserEventQueue.registerRewindEffectEvent(
+             mpCurrentRewindEvent );
+@@ -136,6 +137,7 @@ bool SequentialTimeContainer::resolveChild(
+ void SequentialTimeContainer::notifyDeactivating(
+     AnimationNodeSharedPtr const& rNotifier )
+ {
++    OSL_TRACE("    SequentialTimeContainer::notifyDeactivating\r");
+     if (notifyDeactivatedChild( rNotifier ))
+         return;
+     
+diff --git slideshow/source/engine/eventqueue.cxx slideshow/source/engine/eventqueue.cxx
+index cd1eb37..087d4d5 100644
+--- slideshow/source/engine/eventqueue.cxx
++++ slideshow/source/engine/eventqueue.cxx
+@@ -66,6 +66,7 @@ namespace slideshow
+             : maMutex(),
+               maEvents(),
+               maNextEvents(),
++              maNextNextEvents(),
+               mpTimer( pPresTimer )
+         {
+         }
+@@ -131,6 +132,22 @@ namespace slideshow
+                                 mpTimer->getElapsedTime()) ) );
+             return true;
+         }
++
++        bool EventQueue::addEventWhenQueueIsEmpty (const EventSharedPtr& rpEvent)
++        {
++            ::osl::MutexGuard aGuard( maMutex );
++
++            ENSURE_OR_RETURN(
++                rpEvent.get() != NULL, 
++                    "EventQueue::addEvent: event ptr NULL");
++
++            maNextNextEvents.push(
++                EventEntry(
++                    rpEvent,
++                    rpEvent->getActivationTime(mpTimer->getElapsedTime())));
++
++            return true;
++        }
+     
+         void EventQueue::forceEmpty()
+         {
+@@ -157,12 +174,23 @@ namespace slideshow
+                 maEvents.push(*iPos);
+             }
+             EventEntryVector().swap( maNextEvents );
+-            
++           
+             // perform topmost, ready-to-execute event
+             // =======================================
+ 
+             const double nCurrTime( mpTimer->getElapsedTime() );
+-            
++
++            // When maEvents does not contain any events that are due now
++            // then process one event from maNextNextEvents.
++            if (!maNextNextEvents.empty()
++                && !bFireAllEvents
++                && (maEvents.empty() || maEvents.top().nTime > nCurrTime))
++            {
++                const EventEntry aEvent (maNextNextEvents.top());
++                maNextNextEvents.pop();
++                maEvents.push(aEvent);
++            }
++
+             // process ready/elapsed events. Note that the 'perceived'
+             // current time remains constant for this loop, thus we're
+             // processing only those events which where ready when we
+@@ -243,7 +271,7 @@ namespace slideshow
+         {
+             ::osl::MutexGuard aGuard( maMutex );
+ 
+-            return maEvents.empty();
++            return maEvents.empty() && maNextEvents.empty() && maNextNextEvents.empty();
+         }
+ 
+         double EventQueue::nextTimeout() const
+@@ -251,9 +279,16 @@ namespace slideshow
+             ::osl::MutexGuard aGuard( maMutex );
+ 
+             // return time for next entry (if any)
+-            return isEmpty() ? 
+-                ::std::numeric_limits<double>::max() :
+-                maEvents.top().nTime - mpTimer->getElapsedTime();
++            double nTimeout (::std::numeric_limits<double>::max());
++            const double nCurrentTime (mpTimer->getElapsedTime());
++            if ( ! maEvents.empty())
++                nTimeout = maEvents.top().nTime - nCurrentTime;
++            if ( ! maNextEvents.empty())
++                nTimeout = ::std::min(nTimeout, maNextEvents.front().nTime - nCurrentTime);
++            if ( ! maNextNextEvents.empty())
++                nTimeout = ::std::min(nTimeout, maNextNextEvents.top().nTime - nCurrentTime);
++            
++            return nTimeout;
+         }
+ 
+         void EventQueue::clear()
+diff --git slideshow/source/engine/makefile.mk slideshow/source/engine/makefile.mk
+index 1d45d2a..04c29db 100644
+--- slideshow/source/engine/makefile.mk
++++ slideshow/source/engine/makefile.mk
+@@ -70,6 +70,7 @@ SLOFILES =	$(SLO)$/activitiesqueue.obj \
+ 			$(SLO)$/attributemap.obj \
+ 			$(SLO)$/color.obj \
+ 			$(SLO)$/delayevent.obj \
++			$(SLO)$/effectrewinder.obj \
+ 			$(SLO)$/eventmultiplexer.obj \
+ 			$(SLO)$/eventqueue.obj \
+ 			$(SLO)$/expressionnodefactory.obj \
+diff --git slideshow/source/engine/screenupdater.cxx slideshow/source/engine/screenupdater.cxx
+index bf3ca0c..8cfaadd 100644
+--- slideshow/source/engine/screenupdater.cxx
++++ slideshow/source/engine/screenupdater.cxx
+@@ -36,6 +36,19 @@
+ #include <vector>
+ #include <algorithm>
+ 
++namespace {
++    class UpdateLock : public ::slideshow::internal::ScreenUpdater::UpdateLock
++    {
++    public:
++        UpdateLock (::slideshow::internal::ScreenUpdater& rUpdater, const bool bStartLocked);
++        virtual ~UpdateLock (void);
++        virtual void Activate (void);
++    private:
++        ::slideshow::internal::ScreenUpdater& mrUpdater;
++        bool mbIsActivated;
++    };
++}
++
+ namespace slideshow
+ {
+ namespace internal
+@@ -64,12 +77,16 @@ namespace internal
+         /// True, if at least one notifyUpdate() call had bViewClobbered set
+         bool                                   mbViewClobbered;
+ 
++        /// The screen is updated only when mnLockCount==0
++        sal_Int32 mnLockCount;
++        
+         explicit ImplScreenUpdater( UnoViewContainer const& rViewContainer ) :
+             maUpdaters(),
+             maViewUpdateRequests(),
+             mrViewContainer(rViewContainer),
+             mbUpdateAllRequest(false),
+-            mbViewClobbered(false)
++            mbViewClobbered(false),
++            mnLockCount(0)
+         {}
+     };
+ 
+@@ -100,6 +117,9 @@ namespace internal
+ 
+     void ScreenUpdater::commitUpdates()
+     {
++        if (mpImpl->mnLockCount > 0)
++            return;
++        
+         // cases:
+         //
+         // (a) no update necessary at all 
+@@ -178,6 +198,9 @@ namespace internal
+ 
+     void ScreenUpdater::requestImmediateUpdate()
+     {
++        if (mpImpl->mnLockCount > 0)
++            return;
++
+         // TODO(F2): This will interfere with other updates, since it
+         // happens out-of-sync with main animation loop. Might cause
+         // artifacts.
+@@ -186,5 +209,63 @@ namespace internal
+                        boost::mem_fn(&View::updateScreen) );
+     }
+ 
++    void ScreenUpdater::lockUpdates (void)
++    {
++        ++mpImpl->mnLockCount;
++        OSL_ASSERT(mpImpl->mnLockCount>0);
++    }
++
++    void ScreenUpdater::unlockUpdates (void)
++    {
++        OSL_ASSERT(mpImpl->mnLockCount>0);
++        if (mpImpl->mnLockCount > 0)
++        {
++            --mpImpl->mnLockCount;
++            if (mpImpl->mnLockCount)
++                commitUpdates();
++        }
++    }
++
++    ::boost::shared_ptr<ScreenUpdater::UpdateLock> ScreenUpdater::createLock (const bool bStartLocked)
++    {
++        return ::boost::shared_ptr<ScreenUpdater::UpdateLock>(new ::UpdateLock(*this, bStartLocked));
++    }
++
++
+ } // namespace internal
+ } // namespace slideshow
++
++namespace {
++
++UpdateLock::UpdateLock (
++    ::slideshow::internal::ScreenUpdater& rUpdater,
++    const bool bStartLocked)
++    : mrUpdater(rUpdater),
++      mbIsActivated(false)
++{
++    if (bStartLocked)
++        Activate();
++}
++
++
++
++
++UpdateLock::~UpdateLock (void)
++{
++    if (mbIsActivated)
++        mrUpdater.unlockUpdates();
++}
++
++
++
++
++void UpdateLock::Activate (void)
++{
++    if ( ! mbIsActivated)
++    {
++        mbIsActivated = true;
++        mrUpdater.lockUpdates();
++    }
++}
++
++}
+diff --git slideshow/source/engine/slide/layermanager.cxx slideshow/source/engine/slide/layermanager.cxx
+index 999d098..874b9c0 100644
+--- slideshow/source/engine/slide/layermanager.cxx
++++ slideshow/source/engine/slide/layermanager.cxx
+@@ -67,11 +67,11 @@ namespace slideshow
+         {
+             LayerSharedPtr                      pCurrLayer;
+             ViewLayerSharedPtr                  pCurrViewLayer;
+-            LayerShapeSet::const_iterator       aIter( maAllShapes.begin() );
+-            const LayerShapeSet::const_iterator aEnd ( maAllShapes.end() );
++            LayerShapeMap::const_iterator       aIter( maAllShapes.begin() );
++            const LayerShapeMap::const_iterator aEnd ( maAllShapes.end() );
+             while( aIter != aEnd )
+             {
+-                LayerSharedPtr pLayer = aIter->mpLayer.lock();
++                LayerSharedPtr pLayer = aIter->second.lock();
+                 if( pLayer && pLayer != pCurrLayer )
+                 {
+                     pCurrLayer = pLayer;
+@@ -79,7 +79,7 @@ namespace slideshow
+                 }
+                     
+                 if( pCurrViewLayer )
+-                    shapeFunc(aIter->mpShape,pCurrViewLayer);
++                    shapeFunc(aIter->first,pCurrViewLayer);
+ 
+                 ++aIter;
+             }
+@@ -164,8 +164,17 @@ namespace slideshow
+                 std::for_each(maAllShapes.begin(),
+                               maAllShapes.end(),
+                               boost::bind( &Shape::clearAllViewLayers,
+-                                           boost::bind( &ShapeEntry::getShape,
++                                           boost::bind( std::select1st<LayerShapeMap::value_type>(),
+                                                         _1 )));
++
++                for (LayerShapeMap::iterator
++                         iShape (maAllShapes.begin()),
++                         iEnd (maAllShapes.end());
++                     iShape!=iEnd;
++                     ++iShape)
++                {
++                    iShape->second.reset();
++                }
+                 
+                 if( bMoreThanOneLayer )
+                     maLayers.erase(maLayers.begin()+1,
+@@ -265,8 +274,7 @@ namespace slideshow
+             std::for_each( maAllShapes.begin(),
+                            maAllShapes.end(),
+                            boost::bind(&Shape::render,
+-                                       boost::bind(&ShapeEntry::getShape,
+-                                                   _1)) );
++                               boost::bind( ::std::select1st<LayerShapeMap::value_type>(), _1)) );
+         }
+ 
+         void LayerManager::addShape( const ShapeSharedPtr& rShape )
+@@ -287,13 +295,11 @@ namespace slideshow
+             implAddShape( rShape );
+         }
+ 
+-        void LayerManager::putShape2BackgroundLayer( const ShapeEntry& rShapeEntry )
++        void LayerManager::putShape2BackgroundLayer( LayerShapeMap::value_type& rShapeEntry )
+         {
+             LayerSharedPtr& rBgLayer( maLayers.front() );
+-            rBgLayer->setShapeViews(rShapeEntry.mpShape);
+-            // changing a part of the ShapeEntry irrelevant for the
+-            // set sort order
+-            const_cast<ShapeEntry&>(rShapeEntry).mpLayer = rBgLayer;
++            rBgLayer->setShapeViews(rShapeEntry.first);
++            rShapeEntry.second = rBgLayer;
+         }
+         
+         void LayerManager::implAddShape( const ShapeSharedPtr& rShape )
+@@ -301,16 +307,16 @@ namespace slideshow
+             OSL_ASSERT( !maLayers.empty() ); // always at least background layer
+             ENSURE_OR_THROW( rShape, "LayerManager::implAddShape(): invalid Shape" );
+ 
+-            ShapeEntry aShapeEntry(rShape);
++            LayerShapeMap::value_type aValue (rShape, LayerShapeMap::value_type::second_type());
+ 
+-            OSL_ASSERT( maAllShapes.find(aShapeEntry) == maAllShapes.end() ); // shape must not be added already
++            OSL_ASSERT( maAllShapes.find(rShape) == maAllShapes.end() ); // shape must not be added already
+             mbLayerAssociationDirty = true;
+ 
+             if( mbDisableAnimationZOrder )
+                 putShape2BackgroundLayer(
+-                    *maAllShapes.insert(aShapeEntry).first );
++                    *maAllShapes.insert(aValue).first );
+             else
+-                maAllShapes.insert(aShapeEntry);
++                maAllShapes.insert(aValue);
+ 
+             // update shape, it's just added and not yet painted
+             if( rShape->isVisible() )
+@@ -323,8 +329,7 @@ namespace slideshow
+             if( maXShapeHash.erase( rShape->getXShape() ) == 0 )
+                 return false; // shape not in map
+ 
+-            OSL_ASSERT( maAllShapes.find(
+-                            ShapeEntry(rShape)) != maAllShapes.end() );
++            OSL_ASSERT( maAllShapes.find(rShape) != maAllShapes.end() );
+ 
+             implRemoveShape( rShape );
+ 
+@@ -336,9 +341,7 @@ namespace slideshow
+             OSL_ASSERT( !maLayers.empty() ); // always at least background layer
+             ENSURE_OR_THROW( rShape, "LayerManager::implRemoveShape(): invalid Shape" );
+ 
+-            const LayerShapeSet::iterator aShapeEntry( 
+-                maAllShapes.find(
+-                    ShapeEntry(rShape)) );
++            const LayerShapeMap::iterator aShapeEntry( maAllShapes.find(rShape) );
+ 
+             if( aShapeEntry == maAllShapes.end() )
+                 return;
+@@ -354,7 +357,7 @@ namespace slideshow
+                 (rShape->isVisible() && 
+                  !rShape->isBackgroundDetached()) )
+             {
+-                LayerSharedPtr pLayer = aShapeEntry->mpLayer.lock();
++                LayerSharedPtr pLayer = aShapeEntry->second.lock();
+                 if( pLayer )
+                 {
+                     // store area early, once the shape is removed from 
+@@ -419,8 +422,7 @@ namespace slideshow
+ 
+             if( rOrigShape->revokeSubset( rSubsetShape ) )
+             {
+-                OSL_ASSERT( maAllShapes.find(
+-                                ShapeEntry(rSubsetShape)) != maAllShapes.end() );
++                OSL_ASSERT( maAllShapes.find(rSubsetShape) != maAllShapes.end() );
+ 
+                 implRemoveShape( rSubsetShape );
+ 
+@@ -584,11 +586,11 @@ namespace slideshow
+             bool                                bIsCurrLayerUpdating(false);
+             Layer::EndUpdater                   aEndUpdater;
+             LayerSharedPtr                      pCurrLayer;
+-            LayerShapeSet::const_iterator       aIter( maAllShapes.begin() );
+-            const LayerShapeSet::const_iterator aEnd ( maAllShapes.end() );
++            LayerShapeMap::const_iterator       aIter( maAllShapes.begin() );
++            const LayerShapeMap::const_iterator aEnd ( maAllShapes.end() );
+             while( aIter != aEnd )
+             {
+-                LayerSharedPtr pLayer = aIter->mpLayer.lock();
++                LayerSharedPtr pLayer = aIter->second.lock();
+                 if( pLayer != pCurrLayer )
+                 {
+                     pCurrLayer = pLayer;
+@@ -599,10 +601,10 @@ namespace slideshow
+                 }
+ 
+                 if( bIsCurrLayerUpdating &&
+-                    !aIter->mpShape->isBackgroundDetached() &&
+-                    pCurrLayer->isInsideUpdateArea(aIter->mpShape) )
++                    !aIter->first->isBackgroundDetached() &&
++                    pCurrLayer->isInsideUpdateArea(aIter->first) )
+                 {
+-                    if( !aIter->mpShape->render() )
++                    if( !aIter->first->render() )
+                         bRet = false;
+                 }
+ 
+@@ -694,8 +696,8 @@ namespace slideshow
+             bool bRet( true );
+             ViewLayerSharedPtr pTmpLayer( new DummyLayer( rTargetCanvas ) );
+ 
+-            LayerShapeSet::const_iterator       aIter( maAllShapes.begin() );
+-            const LayerShapeSet::const_iterator aEnd ( maAllShapes.end() );
++            LayerShapeMap::const_iterator       aIter( maAllShapes.begin() );
++            const LayerShapeMap::const_iterator aEnd ( maAllShapes.end() );
+             while( aIter != aEnd )
+             {
+                 try
+@@ -705,11 +707,11 @@ namespace slideshow
+                     // ViewLayer. Since we add the shapes in the
+                     // maShapeSet order (which is also the render order),
+                     // this is equivalent to a subsequent render() call)
+-                    aIter->mpShape->addViewLayer( pTmpLayer, 
+-                                                  true );
++                    aIter->first->addViewLayer( pTmpLayer, 
++                                                true );
+ 
+                     // and remove again, this is only temporary 
+-                    aIter->mpShape->removeViewLayer( pTmpLayer );
++                    aIter->first->removeViewLayer( pTmpLayer );
+                 }
+                 catch( uno::Exception& )
+                 {
+@@ -735,21 +737,19 @@ namespace slideshow
+             OSL_ASSERT( !maLayers.empty() ); // always at least background layer
+             ENSURE_OR_THROW( rShape, "LayerManager::addUpdateArea(): invalid Shape" );
+ 
+-            const LayerShapeSet::const_iterator aShapeEntry( 
+-                maAllShapes.find(
+-                    ShapeEntry(rShape)) );
++            const LayerShapeMap::const_iterator aShapeEntry( maAllShapes.find(rShape) );
+ 
+             if( aShapeEntry == maAllShapes.end() )
+                 return;
+             
+-            LayerSharedPtr pLayer = aShapeEntry->mpLayer.lock();
++            LayerSharedPtr pLayer = aShapeEntry->second.lock();
+             if( pLayer )
+                 pLayer->addUpdateRange( rShape->getUpdateArea() );
+         }
+ 
+         void LayerManager::commitLayerChanges( std::size_t              nCurrLayerIndex, 
+-                                               LayerShapeSet::const_iterator  aFirstLayerShape,
+-                                               LayerShapeSet::const_iterator  aEndLayerShapes )
++                                               LayerShapeMap::const_iterator  aFirstLayerShape,
++                                               LayerShapeMap::const_iterator  aEndLayerShapes )
+         {
+             const bool bLayerExists( maLayers.size() > nCurrLayerIndex );
+             if( bLayerExists )
+@@ -768,8 +768,8 @@ namespace slideshow
+                     // render and remove from update set    
+                     while( aFirstLayerShape != aEndLayerShapes )
+                     {
+-                        maUpdateShapes.erase(aFirstLayerShape->mpShape);
+-                        aFirstLayerShape->mpShape->render();
++                        maUpdateShapes.erase(aFirstLayerShape->first);
++                        aFirstLayerShape->first->render();
+                         ++aFirstLayerShape;
+                     }
+                 }
+@@ -825,13 +825,13 @@ namespace slideshow
+             std::size_t                   nCurrLayerIndex(0);
+             bool                          bIsBackgroundLayer(true);
+             bool                          bLastWasBackgroundDetached(false); // last shape sprite state
+-            LayerShapeSet::iterator       aCurrShapeEntry( maAllShapes.begin() );
+-            LayerShapeSet::iterator       aCurrLayerFirstShapeEntry( maAllShapes.begin() );
+-            const LayerShapeSet::iterator aEndShapeEntry ( maAllShapes.end() );
++            LayerShapeMap::iterator       aCurrShapeEntry( maAllShapes.begin() );
++            LayerShapeMap::iterator       aCurrLayerFirstShapeEntry( maAllShapes.begin() );
++            const LayerShapeMap::iterator aEndShapeEntry ( maAllShapes.end() );
+             ShapeUpdateSet                aUpdatedShapes; // shapes that need update
+             while( aCurrShapeEntry != aEndShapeEntry )
+             {
+-                const ShapeSharedPtr pCurrShape( aCurrShapeEntry->mpShape );
++                const ShapeSharedPtr pCurrShape( aCurrShapeEntry->first );
+                 const bool bThisIsBackgroundDetached( 
+                     pCurrShape->isBackgroundDetached() );
+ 
+@@ -851,7 +851,7 @@ namespace slideshow
+                     bIsBackgroundLayer = false;
+ 
+                     if( aWeakLayers.size() <= nCurrLayerIndex ||
+-                        aWeakLayers.at(nCurrLayerIndex) != aCurrShapeEntry->mpLayer )
++                        aWeakLayers.at(nCurrLayerIndex) != aCurrShapeEntry->second )
+                     {
+                         // no more layers left, or shape was not
+                         // member of this layer - create a new one
+@@ -868,7 +868,7 @@ namespace slideshow
+                 // above invalidates iterators
+                 LayerSharedPtr& rCurrLayer( maLayers.at(nCurrLayerIndex) );
+                 LayerWeakPtr& rCurrWeakLayer( aWeakLayers.at(nCurrLayerIndex) );
+-                if( rCurrWeakLayer != aCurrShapeEntry->mpLayer )
++                if( rCurrWeakLayer != aCurrShapeEntry->second )
+                 {
+                     // mismatch: shape is not contained in current
+                     // layer - move shape to that layer, then.
+@@ -879,7 +879,7 @@ namespace slideshow
+                     // non-sprite shape
+                     if( !bThisIsBackgroundDetached && pCurrShape->isVisible() )
+                     {
+-                        LayerSharedPtr pOldLayer( aCurrShapeEntry->mpLayer.lock() );
++                        LayerSharedPtr pOldLayer( aCurrShapeEntry->second.lock() );
+                         if( pOldLayer )
+                         {
+                             // old layer still valid? then we need to
+@@ -894,10 +894,7 @@ namespace slideshow
+                             maUpdateShapes.insert( pCurrShape );
+                     }
+ 
+-                    // std::set iterators are const for a reason - but
+-                    // here, we need modify an aspect of the
+-                    // ShapeEntry that has no influence on sort order
+-                    const_cast<ShapeEntry&>(*aCurrShapeEntry).mpLayer = rCurrWeakLayer;
++                    aCurrShapeEntry->second = rCurrWeakLayer;
+                 }
+                 
+                 // update layerbounds regardless of the fact that the
+diff --git slideshow/source/engine/slide/layermanager.hxx slideshow/source/engine/slide/layermanager.hxx
+index f2eb316..b435186 100644
+--- slideshow/source/engine/slide/layermanager.hxx
++++ slideshow/source/engine/slide/layermanager.hxx
+@@ -254,33 +254,18 @@ namespace slideshow
+                 hash< ::com::sun::star::uno::Reference<
+                       ::com::sun::star::drawing::XShape > > > XShapeHash;
+ 
+-            /** Element of all-shapes set
+-             */
+-            struct ShapeEntry
++            class ShapeComparator
+             {
+-                /// Shape this entry stands for
+-                ShapeSharedPtr    mpShape;
+-
+-                /// Layer this shape is currently displayed on
+-                LayerWeakPtr      mpLayer;
+-
+-                explicit ShapeEntry( ShapeSharedPtr const& rShape ) : 
+-                    mpShape(rShape), 
+-                    mpLayer()
+-                {}
+-
+-                ShapeSharedPtr const& getShape() const { return mpShape; }
+-
+-                bool operator<( const ShapeEntry& rRHS ) const
++            public:
++                bool operator() (const ShapeSharedPtr& rpS1, const ShapeSharedPtr& rpS2 ) const
+                 {
+-                    return Shape::lessThanShape::compare(mpShape.get(),
+-                                                         rRHS.mpShape.get());
++                    return Shape::lessThanShape::compare(rpS1.get(), rpS2.get());
+                 }
+             };
+-
+             /** Set of all shapes
+              */
+-            typedef ::std::set< ShapeEntry > LayerShapeSet;
++        private:
++            typedef ::std::map< ShapeSharedPtr, LayerWeakPtr, ShapeComparator > LayerShapeMap;
+             typedef ::std::set< ShapeSharedPtr > ShapeUpdateSet;
+ 
+ 
+@@ -309,12 +294,12 @@ namespace slideshow
+                 denoting one-behind-the-last shape of nCurrLayerIndex
+              */
+             void           commitLayerChanges( std::size_t                    nCurrLayerIndex, 
+-                                               LayerShapeSet::const_iterator  aFirstLayerShape,
+-                                               LayerShapeSet::const_iterator  aEndLayerShapes );
++                                               LayerShapeMap::const_iterator  aFirstLayerShape,
++                                               LayerShapeMap::const_iterator  aEndLayerShapes );
+  
+             /** Init Shape layers with background layer.
+              */
+-            void          putShape2BackgroundLayer( const ShapeEntry& rShapeEntry );
++            void          putShape2BackgroundLayer( LayerShapeMap::value_type& rShapeEntry );
+ 
+             /** Commits any pending layer reorg, due to shapes either
+                 entering or leaving animation mode
+@@ -364,7 +349,7 @@ namespace slideshow
+                 for buffering animation enable/disable changes, and
+                 shape update requests.
+             */
+-            LayerShapeSet            maAllShapes;
++            LayerShapeMap            maAllShapes;
+ 
+             /** Set of shapes that have requested an update
+                 
+diff --git slideshow/source/engine/slideshowimpl.cxx slideshow/source/engine/slideshowimpl.cxx
+index f83f803..d7cefbf 100644
+--- slideshow/source/engine/slideshowimpl.cxx
++++ slideshow/source/engine/slideshowimpl.cxx
+@@ -84,6 +84,7 @@
+ #include "activitiesqueue.hxx"
+ #include "activitiesfactory.hxx"
+ #include "interruptabledelayevent.hxx"
++#include "effectrewinder.hxx"
+ #include "slide.hxx"
+ #include "shapemaps.hxx"
+ #include "slideview.hxx"
+@@ -194,7 +195,7 @@ public:
+         
+         This method notifies the end of the third phase.
+     */
+-    void notifySlideEnded();
++    void notifySlideEnded (const bool bReverse);
+ 
+     /** Notification from eventmultiplexer that a hyperlink
+         has been clicked.
+@@ -209,6 +210,7 @@ public:
+ private:
+     // XSlideShow:
+     virtual sal_Bool SAL_CALL nextEffect() throw (uno::RuntimeException);
++    virtual sal_Bool SAL_CALL previousEffect() throw (uno::RuntimeException);
+     virtual sal_Bool SAL_CALL startShapeActivity(
+         uno::Reference<drawing::XShape> const& xShape )
+         throw (uno::RuntimeException);
+@@ -259,6 +261,12 @@ private:
+     virtual bool requestCursor( sal_Int16 nCursorShape );
+     virtual void resetCursor();
+ 
++    /** This is somewhat similar to displaySlide when called for the current
++        slide.  It has been simplified to take advantage of that no slide
++        change takes place.  Furthermore it does not show the slide
++        transition.
++    */
++    void redisplayCurrentSlide (void);
+     
+ protected:
+     // WeakComponentImplHelperBase
+@@ -314,12 +322,32 @@ private:
+         const SlideSharedPtr&                          rEnteringSlide,
+         const EventSharedPtr&                          rTransitionEndEvent );
+     
+-    /// Display/hide wait symbol on all views
+-    void setWaitState( bool bOn );
++    /** Request/release the wait symbol.  The wait symbol is displayed when
++        there are more requests then releases.  Locking the wait symbol
++        helps to avoid intermediate repaints.
++        
++        Do not call this method directly.  Use WaitSymbolLock instead.
++    */
++    void requestWaitSymbol (void);
++    void releaseWaitSymbol (void);
++
++    class WaitSymbolLock {public:
++        WaitSymbolLock(SlideShowImpl& rSlideShowImpl) : mrSlideShowImpl(rSlideShowImpl)
++            { mrSlideShowImpl.requestWaitSymbol(); }
++        ~WaitSymbolLock(void)
++            { mrSlideShowImpl.releaseWaitSymbol(); }
++    private: SlideShowImpl& mrSlideShowImpl;
++    };
++        
+ 
+     /// Filter requested cursor shape against hard slideshow cursors (wait, etc.)
+     sal_Int16 calcActiveCursor( sal_Int16 nCursorShape ) const;
+ 
++    /** This method is called asynchronously to finish the rewinding of an
++        effect to the previous slide that was initiated earlier.
++    */
++    void rewindEffectToPreviousSlide (void);
++
+     /// all registered views
+     UnoViewContainer                        maViewContainer;
+     
+@@ -374,7 +402,7 @@ private:
+ 
+     sal_Int16                               mnCurrentCursor;
+     
+-    bool                                    mbWaitState;
++    sal_Int32                               mnWaitSymbolRequestCount;
+     bool                                    mbAutomaticAdvancementMode;
+     bool                                    mbImageAnimationsAllowed;
+     bool                                    mbNoSlideTransitions;
+@@ -383,6 +411,8 @@ private:
+     bool                                    mbShowPaused;
+     bool                                    mbSlideShowIdle;
+     bool                                    mbDisableAnimationZOrder;
++
++    EffectRewinder                          maEffectRewinder;
+ };
+ 
+ 
+@@ -475,7 +505,7 @@ SlideShowImpl::SlideShowImpl(
+       mxPrefetchSlide(),
+       mxPrefetchAnimationNode(),
+       mnCurrentCursor(awt::SystemPointer::ARROW),
+-      mbWaitState(false),
++      mnWaitSymbolRequestCount(0),
+       mbAutomaticAdvancementMode(false),
+       mbImageAnimationsAllowed( true ),
+       mbNoSlideTransitions( false ),
+@@ -483,7 +513,8 @@ SlideShowImpl::SlideShowImpl(
+       mbForceManualAdvance( false ),
+       mbShowPaused( false ),
+       mbSlideShowIdle( true ),
+-      mbDisableAnimationZOrder( false )
++      mbDisableAnimationZOrder( false ),
++      maEffectRewinder(maEventMultiplexer, maEventQueue, maUserEventQueue)
+ {
+     // keep care not constructing any UNO references to this inside ctor,
+     // shift that code to create()!
+@@ -517,6 +548,8 @@ void SlideShowImpl::disposing()
+ {
+     osl::MutexGuard const guard( m_aMutex );
+ 
++    maEffectRewinder.dispose();
++    
+ 	// stop slide transition sound, if any:
+     stopSlideTransitionSound();
+ 
+@@ -617,7 +650,7 @@ ActivitySharedPtr SlideShowImpl::createSlideTransition(
+     const uno::Reference< drawing::XDrawPage >& xDrawPage,
+     const SlideSharedPtr&                       rLeavingSlide,
+     const SlideSharedPtr&                       rEnteringSlide,
+-    const EventSharedPtr&                       rTransitionEndEvent )
++    const EventSharedPtr&                       rTransitionEndEvent)
+ {
+     ENSURE_OR_THROW( !maViewContainer.empty(),
+                       "createSlideTransition(): No views" );
+@@ -702,7 +735,7 @@ ActivitySharedPtr SlideShowImpl::createSlideTransition(
+             bTransitionDirection,
+             aTransitionFadeColor,
+             resetSlideTransitionSound( aSound, bLoopSound ) ));
+-    
++
+     if( !pTransition )
+         return ActivitySharedPtr(); // no transition effect has been
+                                     // generated. Normally, that means
+@@ -789,20 +822,43 @@ SlideSharedPtr SlideShowImpl::makeSlide(
+     return pSlide;
+ }
+ 
+-void SlideShowImpl::setWaitState( bool bOn )
++void SlideShowImpl::requestWaitSymbol (void)
+ {
+-    mbWaitState = bOn;
+-    if( !mpWaitSymbol ) // fallback to cursor
+-        requestCursor(awt::SystemPointer::WAIT);
+-    else if( mbWaitState )
+-        mpWaitSymbol->show();
+-    else
+-        mpWaitSymbol->hide();
++    ++mnWaitSymbolRequestCount;
++    OSL_ASSERT(mnWaitSymbolRequestCount>0);
++
++    if (mnWaitSymbolRequestCount == 1)
++    {
++        if( !mpWaitSymbol )
++        {
++            // fall back to cursor
++            requestCursor(calcActiveCursor(mnCurrentCursor));
++        }
++        else
++            mpWaitSymbol->show();
++    }
++}
++    
++void SlideShowImpl::releaseWaitSymbol (void)
++{
++    --mnWaitSymbolRequestCount;
++    OSL_ASSERT(mnWaitSymbolRequestCount>=0);
++
++    if (mnWaitSymbolRequestCount == 0)
++    {
++        if( !mpWaitSymbol )
++        {
++            // fall back to cursor
++            requestCursor(calcActiveCursor(mnCurrentCursor));
++        }
++        else
++            mpWaitSymbol->hide();
++    }
+ }
+ 
+ sal_Int16 SlideShowImpl::calcActiveCursor( sal_Int16 nCursorShape ) const
+ {
+-    if( mbWaitState && !mpWaitSymbol ) // enforce wait cursor
++    if( mnWaitSymbolRequestCount>0 && !mpWaitSymbol ) // enforce wait cursor
+         nCursorShape = awt::SystemPointer::WAIT;
+     else if( !mbMouseVisible ) // enforce INVISIBLE
+         nCursorShape = awt::SystemPointer::INVISIBLE;
+@@ -846,10 +902,19 @@ void SlideShowImpl::stopShow()
+     }
+ }
+ 
+-struct SlideShowImpl::PrefetchPropertiesFunc 
++
++
++class SlideShowImpl::PrefetchPropertiesFunc 
+ {
+-    SlideShowImpl *const that;
+-    PrefetchPropertiesFunc( SlideShowImpl * that_ ) : that(that_) {}
++public:
++    PrefetchPropertiesFunc( SlideShowImpl * that_,
++        bool& rbSkipAllMainSequenceEffects,
++        bool& rbSkipSlideTransition)
++        : mpSlideShowImpl(that_),
++          mrbSkipAllMainSequenceEffects(rbSkipAllMainSequenceEffects),
++          mrbSkipSlideTransition(rbSkipSlideTransition)
++    {}
++    
+     void operator()( beans::PropertyValue const& rProperty ) const {
+         if (rProperty.Name.equalsAsciiL(
+                 RTL_CONSTASCII_STRINGPARAM("Prefetch") )) 
+@@ -857,16 +922,30 @@ struct SlideShowImpl::PrefetchPropertiesFunc
+             uno::Sequence<uno::Any> seq;
+             if ((rProperty.Value >>= seq) && seq.getLength() == 2) 
+             {
+-                seq[0] >>= that->mxPrefetchSlide;
+-                seq[1] >>= that->mxPrefetchAnimationNode;
++                seq[0] >>= mpSlideShowImpl->mxPrefetchSlide;
++                seq[1] >>= mpSlideShowImpl->mxPrefetchAnimationNode;
+             }
+         }
++        else if (rProperty.Name.equalsAsciiL(
++                RTL_CONSTASCII_STRINGPARAM("SkipAllMainSequenceEffects") ))
++        {
++            rProperty.Value >>= mrbSkipAllMainSequenceEffects;
++        }
++        else if (rProperty.Name.equalsAsciiL(
++                RTL_CONSTASCII_STRINGPARAM("SkipSlideTransition") ))
++        {
++            rProperty.Value >>= mrbSkipSlideTransition;
++        }
+         else 
+         {
+             OSL_ENSURE( false, rtl::OUStringToOString(
+                             rProperty.Name, RTL_TEXTENCODING_UTF8 ).getStr() );
+         }
+     }
++private:
++    SlideShowImpl *const mpSlideShowImpl;
++    bool& mrbSkipAllMainSequenceEffects;
++    bool& mrbSkipSlideTransition;
+ };
+ 
+ void SlideShowImpl::displaySlide(
+@@ -879,7 +958,9 @@ void SlideShowImpl::displaySlide(
+ 
+     if (isDisposed())
+         return;
+-    
++
++    maEffectRewinder.setRootAnimationNode(xRootNode);
++
+     // precondition: must only be called from the main thread!
+     DBG_TESTSOLARMUTEX();
+ 
+@@ -891,20 +972,20 @@ void SlideShowImpl::displaySlide(
+     // unconditionally. Otherwise, genuine
+     // shape animations (drawing layer and
+     // GIF) will not be stopped.
+-    
++
++    bool bSkipAllMainSequenceEffects (false);
++    bool bSkipSlideTransition (false);
+     std::for_each( rProperties.getConstArray(),
+                    rProperties.getConstArray() + rProperties.getLength(),
+-                   PrefetchPropertiesFunc(this) );
++        PrefetchPropertiesFunc(this, bSkipAllMainSequenceEffects, bSkipSlideTransition) );
+     
+     OSL_ENSURE( !maViewContainer.empty(), "### no views!" );
+     if (maViewContainer.empty())
+         return;
+-    
++
+     // this here might take some time
+     {
+-        comphelper::ScopeGuard const scopeGuard(
+-            boost::bind( &SlideShowImpl::setWaitState, this, false ) );
+-        setWaitState(true);
++        WaitSymbolLock aLock (*this);
+         
+         mpPreviousSlide = mpCurrentSlide;
+         mpCurrentSlide.reset();
+@@ -946,15 +1027,25 @@ void SlideShowImpl::displaySlide(
+             // create slide transition, and add proper end event 
+             // (which then starts the slide effects
+             // via CURRENT_SLIDE.show())
+-            ActivitySharedPtr const pSlideChangeActivity(
+-                createSlideTransition( mpCurrentSlide->getXDrawPage(),
+-                                       mpPreviousSlide,
+-                                       mpCurrentSlide,
+-                                       makeEvent( 
+-                                           boost::bind(
+-                                               &SlideShowImpl::notifySlideTransitionEnded,
+-                                               this,
+-                                               false ))));
++            ActivitySharedPtr pSlideChangeActivity (
++                createSlideTransition(
++                    mpCurrentSlide->getXDrawPage(),
++                    mpPreviousSlide,
++                    mpCurrentSlide,
++                    makeEvent( 
++                        boost::bind(
++                            &SlideShowImpl::notifySlideTransitionEnded,
++                            this,
++                            false ))));
++
++            if (bSkipSlideTransition)
++            {
++                // The transition activity was created for the side effects
++                // (like sound transitions).  Because we want to skip the
++                // acutual transition animation we do not need the activity
++                // anymore.
++                pSlideChangeActivity.reset();
++            }
+             
+             if (pSlideChangeActivity) 
+             {
+@@ -978,6 +1069,41 @@ void SlideShowImpl::displaySlide(
+     maEventMultiplexer.notifySlideTransitionStarted();
+     maListenerContainer.forEach<presentation::XSlideShowListener>(
+         boost::mem_fn( &presentation::XSlideShowListener::slideTransitionStarted ) );
++
++    // We are currently rewinding an effect.  This lead us from the next
++    // slide to this one.  To complete this we have to play back all main
++    // sequence effects on this slide.
++    if (bSkipAllMainSequenceEffects)
++        maEffectRewinder.skipAllMainSequenceEffects();
++}
++
++void SlideShowImpl::redisplayCurrentSlide (void)
++{
++    osl::MutexGuard const guard( m_aMutex );
++
++    if (isDisposed())
++        return;
++
++    // precondition: must only be called from the main thread!
++    DBG_TESTSOLARMUTEX();
++    stopShow();
++    
++    OSL_ENSURE( !maViewContainer.empty(), "### no views!" );
++    if (maViewContainer.empty())
++        return;
++
++    // No transition effect on this slide - schedule slide
++    // effect start event right away.
++    maEventQueue.addEvent( 
++        makeEvent( 
++            boost::bind(
++                &SlideShowImpl::notifySlideTransitionEnded,
++                this,
++                true )));
++
++    maEventMultiplexer.notifySlideTransitionStarted();
++    maListenerContainer.forEach<presentation::XSlideShowListener>(
++        boost::mem_fn( &presentation::XSlideShowListener::slideTransitionStarted ) );
+ }
+ 
+ sal_Bool SlideShowImpl::nextEffect() throw (uno::RuntimeException)
+@@ -996,6 +1122,50 @@ sal_Bool SlideShowImpl::nextEffect() throw (uno::RuntimeException)
+         return maEventMultiplexer.notifyNextEffect();
+ }
+ 
++           
++sal_Bool SlideShowImpl::previousEffect() throw (uno::RuntimeException)
++{
++    osl::MutexGuard const guard( m_aMutex );
++
++    if (isDisposed())
++        return false;
++    
++    // precondition: must only be called from the main thread!
++    DBG_TESTSOLARMUTEX();
++
++    if (mbShowPaused)
++        return true;
++    else
++    {
++        return maEffectRewinder.rewind(
++            maScreenUpdater.createLock(false),
++            ::boost::bind(&SlideShowImpl::redisplayCurrentSlide, this),
++            ::boost::bind(&SlideShowImpl::rewindEffectToPreviousSlide, this));
++    }
++}
++
++void SlideShowImpl::rewindEffectToPreviousSlide (void)
++{
++    // Show the wait symbol now and prevent it from showing temporary slide
++    // content while effects are played back.
++    WaitSymbolLock aLock (*this);
++
++    // A previous call to EffectRewinder::Rewind could not rewind the current
++    // effect because there are no effects on the current slide or none has
++    // yet been displayed.  Go to the previous slide.
++    notifySlideEnded(true);
++    
++    // Process pending events once more in order to have the following
++    // screen update show the last effect.  Not sure whether this should be
++    // necessary.
++    maEventQueue.forceEmpty();
++    
++    // We have to call the screen updater before the wait symbol is turned
++    // off.  Otherwise the wait symbol would force the display of an
++    // intermediate state of the slide (before the effects are replayed.)
++    maScreenUpdater.commitUpdates();
++}
++
+ sal_Bool SlideShowImpl::startShapeActivity(
+     uno::Reference<drawing::XShape> const& /*xShape*/ )
+     throw (uno::RuntimeException)
+@@ -1752,7 +1922,7 @@ void SlideShowImpl::notifySlideAnimationsEnded()
+         // schedule a slide end event, with automatic mode's
+         // delay
+         aNotificationEvents = makeInterruptableDelay(
+-            boost::bind( &SlideShowImpl::notifySlideEnded, this ),
++            boost::bind( &SlideShowImpl::notifySlideEnded, this, false ),
+             maEventMultiplexer.getAutomaticTimeout() );
+     }
+     else 
+@@ -1777,7 +1947,7 @@ void SlideShowImpl::notifySlideAnimationsEnded()
+             bHasAutomaticNextSlide )
+         {
+             aNotificationEvents = makeInterruptableDelay(
+-                boost::bind( &SlideShowImpl::notifySlideEnded, this ),
++                boost::bind( &SlideShowImpl::notifySlideEnded, this, false ),
+                 nAutomaticNextSlideTimeout);
+             
+             // TODO(F2): Provide a mechanism to let the user override   
+@@ -1794,7 +1964,7 @@ void SlideShowImpl::notifySlideAnimationsEnded()
+             // timeout involved.
+             aNotificationEvents.mpImmediateEvent = 
+                 makeEvent( boost::bind(
+-                               &SlideShowImpl::notifySlideEnded, this ) );
++                    &SlideShowImpl::notifySlideEnded, this, false ) );
+         }
+     }
+     
+@@ -1815,9 +1985,7 @@ void SlideShowImpl::notifySlideAnimationsEnded()
+     // change setup time a lot). Show the wait cursor, this
+     // indeed might take some seconds.
+     {
+-        comphelper::ScopeGuard const scopeGuard(
+-            boost::bind( &SlideShowImpl::setWaitState, this, false ) );
+-        setWaitState(true);
++        WaitSymbolLock aLock (*this);
+         
+         if (! matches( mpPrefetchSlide,
+                        mxPrefetchSlide, mxPrefetchAnimationNode )) 
+@@ -1839,13 +2007,13 @@ void SlideShowImpl::notifySlideAnimationsEnded()
+         boost::mem_fn( &presentation::XSlideShowListener::slideAnimationsEnded ) );
+ }
+ 
+-void SlideShowImpl::notifySlideEnded()
++void SlideShowImpl::notifySlideEnded (const bool bReverse)
+ {
+     osl::MutexGuard const guard( m_aMutex );
+ 
+     OSL_ENSURE( !isDisposed(), "### already disposed!" );
+     
+-    if (mpRehearseTimingsActivity) 
++    if (mpRehearseTimingsActivity && !bReverse) 
+     {
+         const double time = mpRehearseTimingsActivity->stop();
+         if (mpRehearseTimingsActivity->hasBeenClicked()) 
+@@ -1865,8 +2033,9 @@ void SlideShowImpl::notifySlideEnded()
+             }
+         }
+     }
+-    
+-    maEventMultiplexer.notifySlideEndEvent();
++
++    if (bReverse)
++        maEventMultiplexer.notifySlideEndEvent();
+     
+     stopShow();  // MUST call that: results in
+                  // maUserEventQueue.clear(). What's more,
+@@ -1878,7 +2047,10 @@ void SlideShowImpl::notifySlideEnded()
+                  // GIF) will not be stopped.
+     
+     maListenerContainer.forEach<presentation::XSlideShowListener>(
+-        boost::mem_fn( &presentation::XSlideShowListener::slideEnded ) );
++        boost::bind(
++            &presentation::XSlideShowListener::slideEnded,
++            _1,
++            bReverse) );
+ }
+ 
+ bool SlideShowImpl::notifyHyperLinkClicked( rtl::OUString const& hyperLink )
+diff --git slideshow/source/engine/usereventqueue.cxx slideshow/source/engine/usereventqueue.cxx
+index 1ead45a..774fd0a 100644
+--- slideshow/source/engine/usereventqueue.cxx
++++ slideshow/source/engine/usereventqueue.cxx
+@@ -306,26 +306,46 @@ public:
+                             EventMultiplexer & rEventMultiplexer )
+         : ClickEventHandler(rEventQueue),
+           mrEventQueue(rEventQueue),
+-          mrEventMultiplexer(rEventMultiplexer) {}
++          mrEventMultiplexer(rEventMultiplexer),
++          mbSkipTriggersNextEffect(true) {}
++
++    /** Remember to trigger (or not to trigger) the next effect after the
++        current effect is skiped.
++    */
++    void setSkipTriggersNextEffect (const bool bSkipTriggersNextEffect)
++    { mbSkipTriggersNextEffect = bSkipTriggersNextEffect; }
++
++    ///  Skip the current effect but do not triggere the next effect.
++    void skipEffect (void) { handleEvent_impl(false); }
+     
+ private:
+     virtual bool handleEvent_impl()
+     {
++        return handleEvent_impl(true);
++    }
++
++    bool handleEvent_impl (bool bNotifyNextEffect)
++    {
+         // fire all events, so animation nodes can register their
+         // next effect listeners:
+         if(fireAllEvents( maEvents, mrEventQueue )) 
+         {
+-            // then simulate a next effect event:
+-            // this skip effect handler is triggered upon next effect
+-            // events (multiplexer prio=-1)!
+-            // Posting a notifyNextEffect() here is only safe
+-            // (we don't run into busy loop), because we assume that
+-            // someone has registerered above for next effects
+-            // (multiplexer prio=0) at the user event queue.
+-            return mrEventQueue.addEventForNextRound(
+-                makeEvent( boost::bind(
++            makeEvent(::boost::bind(&EventQueue::forceEmpty, ::boost::ref(mrEventQueue)));
++            if (mbSkipTriggersNextEffect && bNotifyNextEffect)
++            {
++                // then simulate a next effect event: this skip effect
++                // handler is triggered upon next effect events (multiplexer
++                // prio=-1)!  Posting a notifyNextEffect() here is only safe
++                // (we don't run into busy loop), because we assume that
++                // someone has registerered above for next effects
++                // (multiplexer prio=0) at the user event queue.
++                return mrEventQueue.addEventWhenQueueIsEmpty(
++                    makeEvent( boost::bind(
+                                &EventMultiplexer::notifyNextEffect,
+                                boost::ref(mrEventMultiplexer) ) ) );
++            }
++            else
++                return true;
+         }
+         return false;
+     }
+@@ -333,6 +353,7 @@ private:
+ private:
+     EventQueue & mrEventQueue;
+     EventMultiplexer & mrEventMultiplexer;
++    bool mbSkipTriggersNextEffect;
+ };
+ 
+ class RewindEffectEventHandler : public MouseEventHandler_,
+@@ -888,7 +909,9 @@ void UserEventQueue::registerNextEffectEvent( const EventSharedPtr& rEvent )
+                                                   mbAdvanceOnClick ) );
+ }
+ 
+-void UserEventQueue::registerSkipEffectEvent( EventSharedPtr const & pEvent )
++void UserEventQueue::registerSkipEffectEvent(
++    EventSharedPtr const & pEvent,
++    const bool bSkipTriggersNextEffect)
+ {
+     if(!mpSkipEffectEventHandler) 
+     {
+@@ -905,6 +928,7 @@ void UserEventQueue::registerSkipEffectEvent( EventSharedPtr const & pEvent )
+         // we're called here)
+         mpSkipEffectEventHandler->setAdvanceOnClick( mbAdvanceOnClick );
+     }
++    mpSkipEffectEventHandler->setSkipTriggersNextEffect(bSkipTriggersNextEffect);
+     mpSkipEffectEventHandler->addEvent( pEvent );
+ }
+ 
+@@ -973,6 +997,14 @@ void UserEventQueue::registerMouseLeaveEvent( const EventSharedPtr& rEvent,
+                                 0.0 /* default prio */ ) );
+ }
+ 
++void UserEventQueue::callSkipEffectEventHandler (void)
++{
++    ::boost::shared_ptr<SkipEffectEventHandler> pHandler (
++        ::boost::dynamic_pointer_cast<SkipEffectEventHandler>(mpSkipEffectEventHandler));
++    if (pHandler)
++        pHandler->skipEffect();
++}
++
+ } // namespace internal
+ } // namespace presentation
+ 
+diff --git slideshow/source/inc/eventqueue.hxx slideshow/source/inc/eventqueue.hxx
+index de6fe5e..2657fcf 100644
+--- slideshow/source/inc/eventqueue.hxx
++++ slideshow/source/inc/eventqueue.hxx
+@@ -71,6 +71,13 @@ namespace slideshow
+                 process() are postponed to next process().
+              */
+             bool addEventForNextRound( const EventSharedPtr& event );
++
++            /** Another way to control the order of asynchronous event
++                exeqution.  Use this method to schedule events that are to
++                be executed after all regular events that have no delay,
++                even when they schedule new regular events without delay.
++            */
++            bool addEventWhenQueueIsEmpty (const EventSharedPtr& rpEvent);
+             
+             /** Process the event queue.
+ 
+@@ -138,6 +145,7 @@ namespace slideshow
+             ImplQueueType					maEvents;
+             typedef ::std::vector<EventEntry> EventEntryVector;
+             EventEntryVector                maNextEvents;
++            ImplQueueType                   maNextNextEvents;
+             void process_( bool bFireAllEvents );
+             
+             // perform timing of events via relative time
+diff --git slideshow/source/inc/screenupdater.hxx slideshow/source/inc/screenupdater.hxx
+index 26c40a8..10d500b 100644
+--- slideshow/source/inc/screenupdater.hxx
++++ slideshow/source/inc/screenupdater.hxx
+@@ -111,9 +111,30 @@ namespace slideshow
+              */
+             void requestImmediateUpdate();
+ 
++            class UpdateLock {public: virtual void Activate (void) = 0; };
++
++            /** Call this method to create a lock instead of calling
++                lockUpdates() and unlockUpdates() directly.
++                @param bStartLocked
++                    When <TRUE/> then the UpdateLock is created already
++                    locked. When <FALSE/> then Activate() has to be called in order
++                    to lock the lock.
++            */
++            ::boost::shared_ptr<UpdateLock> createLock (const bool bStartLocked);
++
++            /** Lock updates to prevent intermediate repaints.
++            */
++            void lockUpdates (void);
++
++            /** When called as often as lockUpdates() then commitUpdates()
++                is called.
++            */
++            void unlockUpdates (void);
++
+         private:
+             struct ImplScreenUpdater;
+             boost::scoped_ptr<ImplScreenUpdater> mpImpl;
++
+         };
+     }
+ }
+diff --git slideshow/source/inc/usereventqueue.hxx slideshow/source/inc/usereventqueue.hxx
+index fb8026d..c9613fa 100644
+--- slideshow/source/inc/usereventqueue.hxx
++++ slideshow/source/inc/usereventqueue.hxx
+@@ -188,8 +188,16 @@ public:
+         Then, all registered events are fired and removed from this
+         queue.  After firing, a next effect event is issued to this
+         queue to start the next effect.
++        @param pEvent
++            The event to execute when skipping the current effect.
++        @param bSkipTriggersNextEffect
++            When <TRUE/> then after skipping the current effect the next
++            effect is triggered.  When <FALSE/> then the next effect is not
++            triggered.
+     */
+-    void registerSkipEffectEvent( EventSharedPtr const& pEvent );
++    void registerSkipEffectEvent(
++        EventSharedPtr const& pEvent,
++        const bool bSkipTriggersNextEffect);
+     
+     /** Registes an event that is fired when the current effects(s)
+         are rewound, .e.g. when the right mouse button is pressed.
+@@ -262,7 +270,13 @@ public:
+     */
+     void registerMouseLeaveEvent( const EventSharedPtr& rEvent,
+                                   const ShapeSharedPtr& rShape );
+-    
++
++    /** Typically skipping the current effect is triggered by mouse clicks
++        or key presses that trigger the next effect.  This method allows the
++        skipping of effects to be triggered programatically.
++    */
++    void callSkipEffectEventHandler (void);
++
+ private:
+     /** Generically register an event on one of the handlers.
+         
