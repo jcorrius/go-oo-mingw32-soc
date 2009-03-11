@@ -1,0 +1,2851 @@
+--- connectivity/source/drivers/mozab/mozillasrc/MLdapAttributeMap.cxx	(.../tags/DEV300_m41/connectivity)	(revision 0)
++++ connectivity/source/drivers/mozab/mozillasrc/MLdapAttributeMap.cxx	(.../cws/moz2seamonkey01/connectivity)	(revision 269329)
+@@ -0,0 +1,452 @@
++/*************************************************************************
++* DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++* 
++* Copyright 2008 by Sun Microsystems, Inc.
++*
++* OpenOffice.org - a multi-platform office productivity suite
++*
++* $RCSfile: code,v $
++*
++* $Revision: 1.3 $
++*
++* This file is part of OpenOffice.org.
++*
++* OpenOffice.org is free software: you can redistribute it and/or modify
++* it under the terms of the GNU Lesser General Public License version 3
++* only, as published by the Free Software Foundation.
++*
++* OpenOffice.org is distributed in the hope that it will be useful,
++* but WITHOUT ANY WARRANTY; without even the implied warranty of
++* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++* GNU Lesser General Public License version 3 for more details
++* (a copy is included in the LICENSE file that accompanied this code).
++*
++* You should have received a copy of the GNU Lesser General Public License
++* version 3 along with OpenOffice.org.  If not, see
++* <http://www.openoffice.org/license.html>
++* for a copy of the LGPLv3 License.
++************************************************************************/
++
++// MARKER(update_precomp.py): autogen include statement, do not remove
++#include "precompiled_connectivity.hxx"
++
++#include <rtl/strbuf.hxx>
++    // keep this include at the beginning. Some of the other includes seems to inject a symbol "l" into the
++    // global namespace, which leads to a compiler warning in strbuf.hxx, about some parameters named "l"
++    // hiding objects "in an outer scope".
++
++#include "MLdapAttributeMap.hxx"
++#include "MTypeConverter.hxx"
++#include "MQueryHelper.hxx"
++
++#include <tools/diagnose_ex.h>
++
++#include <hash_map>
++
++//........................................................................
++namespace connectivity { namespace mozab {
++//........................................................................
++
++	//====================================================================
++	//= helper
++	//====================================================================
++    namespace
++    {
++        typedef nsresult (NS_STDCALL nsIAbCard::*CardPropertyGetter)( PRUnichar** aFirstName );
++        typedef nsresult (NS_STDCALL nsIAbCard::*CardPropertySetter)( const PRUnichar* aFirstName );
++        struct CardPropertyData
++        {
++            const sal_Char*     pLDAPAttributeList;
++            CardPropertyGetter  PropGetter;
++            CardPropertySetter  PropSetter;
++
++            CardPropertyData()
++                :pLDAPAttributeList( NULL )
++                ,PropGetter( NULL )
++                ,PropSetter( NULL )
++            {
++            }
++            CardPropertyData( const sal_Char* _pLDAPAttributeList, CardPropertyGetter _PropGetter, CardPropertySetter _PropSetter )
++                :pLDAPAttributeList( _pLDAPAttributeList )
++                ,PropGetter( _PropGetter )
++                ,PropSetter( _PropSetter )
++            {
++            }
++        };
++
++        typedef ::std::hash_map< ::rtl::OString, CardPropertyData, ::rtl::OStringHash > MapPropertiesToAttributes;
++
++        #define DEF_CARD_ACCESS( PropertyName ) \
++            &nsIAbCard::Get##PropertyName, &nsIAbCard::Set##PropertyName
++
++        static const MapPropertiesToAttributes& lcl_getPropertyMap()
++        {
++            static MapPropertiesToAttributes aMap;
++            if ( aMap.empty() )
++            {
++                struct MapEntry
++                {
++                    const sal_Char*     pAsciiPropertyName;
++                    const sal_Char*     pAsciiAttrributeList;
++                    CardPropertyGetter  PropGetter;
++                    CardPropertySetter  PropSetter;
++                };
++                const MapEntry aEntries[] = {
++                    { "FirstName",          "givenname",                                    DEF_CARD_ACCESS( FirstName ) },
++                    { "LastName",           "sn,surnname",                                  DEF_CARD_ACCESS( LastName ) },
++                    { "DisplayName",        "cn,commonname,displayname",                    DEF_CARD_ACCESS( DisplayName ) },
++                    { "NickName",           "xmozillanickname",                             DEF_CARD_ACCESS( NickName ) },
++                    { "PrimaryEmail",       "mail",                                         DEF_CARD_ACCESS( PrimaryEmail ) },
++                    { "SecondEmail",        "xmozillasecondemail",                          DEF_CARD_ACCESS( SecondEmail ) },
++                    { "WorkPhone",          "telephonenumber",                              DEF_CARD_ACCESS( WorkPhone ) },
++                    { "HomePhone",          "homephone",                                    DEF_CARD_ACCESS( HomePhone ) },
++                    { "FaxNumber",          "fax,facsimiletelephonenumber",                 DEF_CARD_ACCESS( FaxNumber ) },
++                    { "PagerNumber",        "pager,pagerphone",                             DEF_CARD_ACCESS( PagerNumber ) },
++                    { "CellularNumber",     "mobile,cellphone,carphone",                    DEF_CARD_ACCESS( CellularNumber ) },
++                    { "HomeAddress",        "homepostaladdress,mozillaHomeStreet",          DEF_CARD_ACCESS( HomeAddress ) },
++                    { "HomeAddress2",       "mozillaHomeStreet2",                           DEF_CARD_ACCESS( HomeAddress2 ) },
++                    { "HomeCity",           "homelocality,mozillaHomeLocalityName",         DEF_CARD_ACCESS( HomeCity ) },
++                    { "HomeState",          "homeregion,mozillaHomeState",                  DEF_CARD_ACCESS( HomeState ) },
++                    { "HomeZipCode",        "homepostalcode,mozillaHomePostalCode",         DEF_CARD_ACCESS( HomeZipCode ) },
++                    { "HomeCountry",        "homecountryname,mozillaHomeCountryName",       DEF_CARD_ACCESS( HomeCountry ) },
++                    { "WorkAddress",        "postofficebox,streetaddress,streetaddress1",   DEF_CARD_ACCESS( WorkAddress ) },
++                    { "WorkAddress2",       "streetaddress2",                               DEF_CARD_ACCESS( WorkAddress2 ) },
++                    { "WorkCity",           "l,locality",                                   DEF_CARD_ACCESS( WorkCity ) },
++                    { "WorkState",          "st,region",                                    DEF_CARD_ACCESS( WorkState ) },
++                    { "WorkZipCode",        "postalcode,zip",                               DEF_CARD_ACCESS( WorkZipCode ) },
++                    { "WorkCountry",        "countryname",                                  DEF_CARD_ACCESS( WorkCountry ) },
++                    { "JobTitle",           "title",                                        DEF_CARD_ACCESS( JobTitle ) },
++                    { "Department",         "ou,orgunit,department,departmentnumber",       DEF_CARD_ACCESS( Department ) },
++                    { "Company",            "o,company",                                    DEF_CARD_ACCESS( Company ) },
++                    { "WebPage1",           "workurl",                                      DEF_CARD_ACCESS( WebPage1 ) },
++                    { "WebPage2",           "homeurl",                                      DEF_CARD_ACCESS( WebPage2 ) },
++                    { "BirthYear",          "birthyear",                                    DEF_CARD_ACCESS( BirthYear ) },
++                    { "BirthMonth",         "birthmonth",                                   DEF_CARD_ACCESS( BirthMonth ) },
++                    { "BirthYear",          "birthday",                                     DEF_CARD_ACCESS( BirthDay ) },
++                    { "Custom1",            "custom1",                                      DEF_CARD_ACCESS( Custom1 ) },
++                    { "Custom2",            "custom2",                                      DEF_CARD_ACCESS( Custom2 ) },
++                    { "Custom3",            "custom3",                                      DEF_CARD_ACCESS( Custom3 ) },
++                    { "Custom4",            "custom4",                                      DEF_CARD_ACCESS( Custom4 ) },
++                    { "Notes",              "notes,description",                            DEF_CARD_ACCESS( Notes ) },
++                    { "PreferMailFormat",   "xmozillausehtmlmail",                          NULL, NULL },
++                    { NULL, NULL, NULL, NULL }
++                };
++                const MapEntry* loop = aEntries;
++                while ( loop->pAsciiPropertyName )
++                {
++                    aMap[ ::rtl::OString( loop->pAsciiPropertyName ) ] =
++                        CardPropertyData( loop->pAsciiAttrributeList, loop->PropGetter, loop->PropSetter );
++                    ++loop;
++                }
++            }
++            return aMap;
++        }
++    }
++
++	//====================================================================
++	//= AttributeMap_Data
++	//====================================================================
++    struct AttributeMap_Data
++    {
++    };
++
++	//====================================================================
++	//= MLdapAttributeMap
++	//====================================================================
++    // -------------------------------------------------------------------
++    MLdapAttributeMap::MLdapAttributeMap()
++        :m_pData( new AttributeMap_Data )
++    {
++    }
++
++    // -------------------------------------------------------------------
++    MLdapAttributeMap::~MLdapAttributeMap()
++    {
++    }
++
++    // -------------------------------------------------------------------
++    NS_IMPL_THREADSAFE_ISUPPORTS1( MLdapAttributeMap, nsIAbLDAPAttributeMap )
++
++    // -------------------------------------------------------------------
++    NS_IMETHODIMP MLdapAttributeMap::GetAttributeList(const nsACString & aProperty, nsACString & _retval)
++    {
++        ::rtl::OString sProperty( MTypeConverter::nsACStringToOString( aProperty ) );
++
++        const MapPropertiesToAttributes& rPropertyMap( lcl_getPropertyMap() );
++        MapPropertiesToAttributes::const_iterator pos = rPropertyMap.find( sProperty );
++
++        if ( pos == rPropertyMap.end() )
++        {
++            _retval.SetIsVoid( PR_TRUE );
++        }
++        else
++        {
++            MTypeConverter::asciiToNsACString( pos->second.pLDAPAttributeList, _retval );
++        }
++
++        return NS_OK;
++    }
++
++    // -------------------------------------------------------------------
++    NS_IMETHODIMP MLdapAttributeMap::GetAttributes(const nsACString & aProperty, PRUint32* aCount, char*** aAttrs)
++    {
++        OSL_ENSURE( false, "MLdapAttributeMap::GetAttributes: not implemented!" );
++        (void)aProperty;
++        (void)aCount;
++        (void)aAttrs;
++        return NS_ERROR_NOT_IMPLEMENTED;
++    }
++
++    // -------------------------------------------------------------------
++    NS_IMETHODIMP MLdapAttributeMap::GetFirstAttribute(const nsACString & aProperty, nsACString & _retval)
++    {
++        ::rtl::OString sProperty( MTypeConverter::nsACStringToOString( aProperty ) );
++
++        const MapPropertiesToAttributes& rPropertyMap( lcl_getPropertyMap() );
++        MapPropertiesToAttributes::const_iterator pos = rPropertyMap.find( sProperty );
++
++        if ( pos == rPropertyMap.end() )
++        {
++            _retval.SetIsVoid( PR_TRUE );
++        }
++        else
++        {
++            sal_Int32 tokenPos(0);
++            ::rtl::OString sAttributeList( pos->second.pLDAPAttributeList );
++            MTypeConverter::asciiToNsACString( sAttributeList.getToken( 0, ',', tokenPos ).getStr(), _retval );
++        }
++
++        return NS_OK;
++    }
++
++    // -------------------------------------------------------------------
++    NS_IMETHODIMP MLdapAttributeMap::SetAttributeList(const nsACString & aProperty, const nsACString & aAttributeList, PRBool allowInconsistencies)
++    {
++        OSL_ENSURE( false, "MLdapAttributeMap::SetAttributeList: not implemented!" );
++        (void)aProperty;
++        (void)aAttributeList;
++        (void)allowInconsistencies;
++        return NS_ERROR_NOT_IMPLEMENTED;
++    }
++
++    // -------------------------------------------------------------------
++    NS_IMETHODIMP MLdapAttributeMap::GetProperty(const nsACString & aAttribute, nsACString & _retval)
++    {
++        OSL_ENSURE( false, "MLdapAttributeMap::GetProperty: not implemented!" );
++        (void)aAttribute;
++        (void)_retval;
++        return NS_ERROR_NOT_IMPLEMENTED;
++    }
++
++    // -------------------------------------------------------------------
++    NS_IMETHODIMP MLdapAttributeMap::GetAllCardAttributes(nsACString & _retval)
++    {
++        const MapPropertiesToAttributes& rPropertyMap( lcl_getPropertyMap() );
++
++        ::rtl::OStringBuffer aAllAttributes;
++        for (   MapPropertiesToAttributes::const_iterator loop = rPropertyMap.begin();
++                loop != rPropertyMap.end();
++                ++loop
++            )
++        {
++            aAllAttributes.append( loop->second.pLDAPAttributeList );
++            if ( loop != rPropertyMap.end() )
++                aAllAttributes.append( ',' );
++        }
++
++        MTypeConverter::asciiToNsACString( aAllAttributes.getStr(), _retval );
++        return NS_OK;
++    }
++
++    // -------------------------------------------------------------------
++    NS_IMETHODIMP MLdapAttributeMap::CheckState(void)
++    {
++        // we do not allow modifying the map, so we're always in a valid state
++        return NS_OK;
++    }
++
++    // -------------------------------------------------------------------
++    NS_IMETHODIMP MLdapAttributeMap::SetFromPrefs(const nsACString & aPrefBranchName)
++    {
++        OSL_ENSURE( false, "MLdapAttributeMap::SetFromPrefs: not implemented!" );
++        (void)aPrefBranchName;
++        return NS_ERROR_NOT_IMPLEMENTED;
++    }
++
++    // -------------------------------------------------------------------
++    NS_IMETHODIMP MLdapAttributeMap::SetCardPropertiesFromLDAPMessage(nsILDAPMessage* aMessage, nsIAbCard* aCard)
++    {
++        NS_ENSURE_ARG_POINTER( aMessage );
++        NS_ENSURE_ARG_POINTER( aCard );
++
++        // in case that's not present in the LDAP message: set the "preferred mail format" to "none"
++        aCard->SetPreferMailFormat( nsIAbPreferMailFormat::unknown );
++
++        const MapPropertiesToAttributes& rPropertyMap( lcl_getPropertyMap() );
++        for (   MapPropertiesToAttributes::const_iterator prop = rPropertyMap.begin();
++                prop != rPropertyMap.end();
++                ++prop
++            )
++        {
++            // split the list of attributes for the current property
++            ::rtl::OString sAttributeList( prop->second.pLDAPAttributeList );
++            ::rtl::OString sAttribute;
++
++            sal_Int32 tokenPos = 0;
++            while ( tokenPos != -1 )
++            {
++                sAttribute = sAttributeList.getToken( 0, ',', tokenPos );
++
++                // retrieve the values for the current attribute
++                PRUint32 valueCount = 0;
++                PRUnichar** values = NULL;
++                nsresult rv = aMessage->GetValues( sAttribute.getStr(), &valueCount, &values );
++                if ( NS_FAILED( rv ) )
++                    // try the next attribute
++                    continue;
++
++                if ( valueCount )
++                {
++                    CardPropertySetter propSetter = prop->second.PropSetter;
++                    OSL_ENSURE( propSetter,
++                        "MLdapAttributeMap::SetCardPropertiesFromLDAPMessage: "
++                        "unexpected: could retrieve an attribute value, but have no setter for it!" );
++                    if ( propSetter )
++                    {
++                        (aCard->*propSetter)( values[0] );
++                    }
++
++                    // we're done with this property - no need to handle the remaining attributes which
++                    // map to it
++                    break;
++                }
++            }
++        }
++        return NS_OK;
++    }
++
++    // -------------------------------------------------------------------
++    namespace
++    {
++        struct PreferMailFormatType
++        {
++            const sal_Char* description;
++            PRUint32        formatType;
++
++            PreferMailFormatType()
++                :description( NULL )
++                ,formatType( nsIAbPreferMailFormat::unknown )
++            {
++            }
++
++            PreferMailFormatType( const sal_Char* _description, PRUint32 _formatType )
++                :description( _description )
++                ,formatType( _formatType )
++            {
++            }
++        };
++
++        static const PreferMailFormatType* lcl_getMailFormatTypes()
++        {
++            static const PreferMailFormatType aMailFormatTypes[] =
++            {
++                PreferMailFormatType( "text/plain", nsIAbPreferMailFormat::plaintext ),
++                PreferMailFormatType( "text/html",  nsIAbPreferMailFormat::html      ),
++                PreferMailFormatType( "unknown",    nsIAbPreferMailFormat::unknown   ),
++                PreferMailFormatType()
++            };
++            return aMailFormatTypes;
++        }
++    }
++
++    // -------------------------------------------------------------------
++    void MLdapAttributeMap::fillCardFromResult( nsIAbCard& _card, const MQueryHelperResultEntry& _result )
++    {
++        _card.SetPreferMailFormat( nsIAbPreferMailFormat::unknown );
++
++        ::rtl::OUString resultValue;
++
++        const MapPropertiesToAttributes& rPropertyMap( lcl_getPropertyMap() );
++        for (   MapPropertiesToAttributes::const_iterator prop = rPropertyMap.begin();
++                prop != rPropertyMap.end();
++                ++prop
++            )
++        {
++            resultValue = _result.getValue( prop->first );
++
++            CardPropertySetter propSetter = prop->second.PropSetter;
++            if ( propSetter )
++            {
++                (_card.*propSetter)( resultValue.getStr() );
++            }
++            else
++            {
++                if ( prop->first.equals( "PreferMailFormat" ) )
++                {
++                    unsigned int format = nsIAbPreferMailFormat::unknown;
++                    const PreferMailFormatType* pMailFormatType = lcl_getMailFormatTypes();
++                    while ( pMailFormatType->description )
++                    {
++                        if ( resultValue.equalsAscii( pMailFormatType->description ) )
++                        {
++                            format = pMailFormatType->formatType;
++                            break;
++                        }
++                        ++pMailFormatType;
++                    }
++                    _card.SetPreferMailFormat(format);
++                }
++                else
++                    OSL_ENSURE( false, "MLdapAttributeMap::fillCardFromResult: unexpected property without default setters!" );
++            }
++        }
++    }
++
++    // -------------------------------------------------------------------
++    void MLdapAttributeMap::fillResultFromCard( MQueryHelperResultEntry& _result, nsIAbCard& _card )
++    {
++        nsXPIDLString value;
++        ::rtl::OUString resultValue;
++
++        const MapPropertiesToAttributes& rPropertyMap( lcl_getPropertyMap() );
++        for (   MapPropertiesToAttributes::const_iterator prop = rPropertyMap.begin();
++                prop != rPropertyMap.end();
++                ++prop
++            )
++        {
++            CardPropertyGetter propGetter = prop->second.PropGetter;
++            if ( propGetter )
++            {
++                (_card.*propGetter)( getter_Copies( value ) );
++
++                nsAutoString temp( value );
++                MTypeConverter::nsStringToOUString( temp, resultValue );
++            }
++            else
++            {
++                if ( prop->first.equals( "PreferMailFormat" ) )
++                {
++                    unsigned int format = nsIAbPreferMailFormat::unknown;
++                    _card.GetPreferMailFormat( &format );
++                    const PreferMailFormatType* pMailFormatType = lcl_getMailFormatTypes();
++                    while ( pMailFormatType->description )
++                    {
++                        if ( format == pMailFormatType->formatType )
++                        {
++                            resultValue = ::rtl::OUString::createFromAscii( pMailFormatType->description );
++                            break;
++                        }
++                        ++pMailFormatType;
++                    }
++                }
++                else
++                    OSL_ENSURE( false, "MLdapAttributeMap::fillResultFromCard: unexpected property without default getters!" );
++            }
++
++            _result.insert( prop->first, resultValue );
++        }
++    }
++
++//........................................................................
++} } // namespace connectivity::mozab
++//........................................................................
+--- connectivity/source/drivers/mozab/mozillasrc/makefile.mk	(.../tags/DEV300_m41/connectivity)	(revision 269329)
++++ connectivity/source/drivers/mozab/mozillasrc/makefile.mk	(.../cws/moz2seamonkey01/connectivity)	(revision 269329)
+@@ -71,10 +71,13 @@
+ 	$(SLO)$/MQuery.obj			            \
+ 	$(SLO)$/MTypeConverter.obj              \
+ 	$(SLO)$/MNameMapper.obj					\
+-	$(SLO)$/MNSMozabProxy.obj	\
+-	$(SLO)$/MNSTerminateListener.obj
++	$(SLO)$/MNSMozabProxy.obj	            \
++	$(SLO)$/MNSTerminateListener.obj        \
++	$(SLO)$/MLdapAttributeMap.obj           \
+ 	
+ 
++CDEFS     += -DMOZILLA_INTERNAL_API
++
+ .IF "$(GUI)"=="UNX"
+ .IF "$(COMNAME)"=="sunpro5"
+ CFLAGS += -features=tmplife
+@@ -154,7 +157,7 @@
+ CFLAGSCXX += \
+             -fno-rtti -Wconversion -Wpointer-arith \
+             -Wcast-align -Woverloaded-virtual -Wsynth \
+-            -Wno-long-long
++            -Wno-long-long -Wno-deprecated
+ CDEFS     += -DTRACING
+ .ENDIF
+ .ENDIF
+--- connectivity/source/drivers/mozab/mozillasrc/MDatabaseMetaDataHelper.cxx	(.../tags/DEV300_m41/connectivity)	(revision 269329)
++++ connectivity/source/drivers/mozab/mozillasrc/MDatabaseMetaDataHelper.cxx	(.../cws/moz2seamonkey01/connectivity)	(revision 269329)
+@@ -48,10 +48,12 @@
+ #include <osl/mutex.hxx>
+ #include <osl/conditn.hxx>
+ 
++#include <nsIAbDirFactoryService.h>
+ #include <MNSInit.hxx>
+ #include <MNameMapper.hxx>
+ #include "MNSMozabProxy.hxx"
+ #include <MNSDeclares.hxx>
++
+ static ::osl::Mutex	m_aMetaMutex;
+ 
+ #include <osl/diagnose.h>
+--- connectivity/source/drivers/mozab/mozillasrc/MQuery.cxx	(.../tags/DEV300_m41/connectivity)	(revision 269329)
++++ connectivity/source/drivers/mozab/mozillasrc/MQuery.cxx	(.../cws/moz2seamonkey01/connectivity)	(revision 269329)
+@@ -30,14 +30,14 @@
+ 
+ // MARKER(update_precomp.py): autogen include statement, do not remove
+ #include "precompiled_connectivity.hxx"
++
+ #include <MQueryHelper.hxx>
+ #include <MNameMapper.hxx>
+ #include <MConnection.hxx>
+ #include <connectivity/dbexception.hxx>
+ #include "MQuery.hxx"
+-#ifndef _CONNECTIVITY_MAB_CONVERSIONS_HXX_
++#include "MLdapAttributeMap.hxx"
+ #include "MTypeConverter.hxx"
+-#endif
+ #include "MNSMozabProxy.hxx"
+ #include <com/sun/star/uno/Reference.hxx>
+ #include <unotools/processfactory.hxx>
+@@ -54,6 +54,7 @@
+ static NS_DEFINE_CID(kBooleanConditionStringCID, NS_BOOLEANCONDITIONSTRING_CID);
+ static NS_DEFINE_CID(kBooleanExpressionCID, NS_BOOLEANEXPRESSION_CID);
+ static NS_DEFINE_CID(kAbDirectoryQueryProxyCID, NS_ABDIRECTORYQUERYPROXY_CID);
++static NS_DEFINE_CID(kAbLDAPAttributeMap, NS_IABLDAPATTRIBUTEMAP_IID);
+ 
+ using namespace connectivity::mozab;
+ using namespace connectivity;
+@@ -139,31 +140,6 @@
+     NS_IF_ADDREF( m_aQueryHelper);
+ }
+ // -------------------------------------------------------------------------
+-void MQuery::setAttributes(::std::vector< ::rtl::OUString> &attrs)
+-{
+-    OSL_TRACE("IN MQuery::setAttributes()\n");
+-    ::osl::MutexGuard aGuard( m_aMutex );
+-
+-    m_aAttributes.clear();
+-	m_aAttributes.reserve(attrs.size());
+-    ::std::vector< ::rtl::OUString>::iterator aIterAttr = attrs.begin();
+-    ::std::map< ::rtl::OUString, ::rtl::OUString>::iterator aIterMap;
+-
+-	for ( aIterAttr = attrs.begin(); aIterAttr != attrs.end();++aIterAttr )
+-        m_aAttributes.push_back( m_rColumnAlias.getProgrammaticNameOrFallbackToAlias( *aIterAttr ) );
+-
+-    OSL_TRACE("\tOUT MQuery::setAttributes()\n");
+-}
+-// -------------------------------------------------------------------------
+-const ::std::vector< ::rtl::OUString> &MQuery::getAttributes() const
+-{
+-    OSL_TRACE("IN MQuery::getAttributes()\n");
+-
+-    OSL_TRACE("\tOUT MQuery::getAttributes()\n");
+-
+-    return(m_aAttributes);
+-}
+-// -------------------------------------------------------------------------
+ void MQuery::setAddressbook(::rtl::OUString &ab)
+ {
+     OSL_TRACE("IN MQuery::setAddressbook()\n");
+@@ -253,12 +229,9 @@
+ 
+             // Set the 'name' property of the boolString.
+             // Check if it's an alias first...
+-            rtl::OUString attrName;
+-            ::std::map< ::rtl::OUString, ::rtl::OUString>::const_iterator aIterMap;
+-            attrName = _aQuery->getColumnAlias().getProgrammaticNameOrFallbackToAlias( evStr->getName() );
+-            ::std::string aMiName = MTypeConverter::ouStringToStlString(attrName);
+-            boolString->SetName(strdup(aMiName.c_str()));
+-            OSL_TRACE("Name = %s ;", aMiName.c_str() );
++            rtl::OString attrName = _aQuery->getColumnAlias().getProgrammaticNameOrFallbackToUTF8Alias( evStr->getName() );
++            boolString->SetName( strdup( attrName.getStr() ) );
++            OSL_TRACE("Name = %s ;", attrName.getStr() );
+             // Set the 'matchType' property of the boolString. Check for equal length.
+             sal_Bool requiresValue = sal_True;
+             switch(evStr->getCond()) {
+@@ -609,8 +582,8 @@
+     PRInt32   count=1;
+ 
+     nsCOMPtr< nsIAbDirectoryQueryArguments > arguments = do_CreateInstance( kAbDirectoryQueryArgumentsCID, &rv);
+-
+     NS_ENSURE_SUCCESS( rv, rv );
++
+     rv = arguments->SetExpression(queryExpression);
+     NS_ENSURE_SUCCESS( rv, rv );
+ 
+@@ -620,6 +593,10 @@
+     rv = arguments->SetQuerySubDirectories(m_bQuerySubDirs);
+     NS_ENSURE_SUCCESS( rv, rv );
+ 
++    nsCOMPtr< nsIAbLDAPAttributeMap > attributeMap( new MLdapAttributeMap );
++    rv = arguments->SetTypeSpecificArg( attributeMap );
++    NS_ENSURE_SUCCESS( rv, rv );
++
+     // Execute the query.
+     OSL_TRACE( "****** calling DoQuery\n");
+ 
+@@ -722,7 +699,7 @@
+     switch ( nType )
+ 	{
+         case DataType::VARCHAR:
+-			xResEntry->setValue( m_rColumnAlias.getProgrammaticNameOrFallbackToAlias( aDBColumnName ), rValue.getString() );
++			xResEntry->setValue( m_rColumnAlias.getProgrammaticNameOrFallbackToUTF8Alias( aDBColumnName ), rValue.getString() );
+             break;
+         default:
+ 			OSL_ENSURE( sal_False, "invalid data type!" );
+@@ -749,7 +726,7 @@
+     switch ( nType )
+ 	{
+         case DataType::VARCHAR:
+-			rValue = xResEntry->getValue( m_rColumnAlias.getProgrammaticNameOrFallbackToAlias( aDBColumnName ) );
++			rValue = xResEntry->getValue( m_rColumnAlias.getProgrammaticNameOrFallbackToUTF8Alias( aDBColumnName ) );
+             break;
+ 
+         default:
+@@ -834,8 +811,7 @@
+     delete _ptr;
+ }
+ // -------------------------------------------------------------------------
+-sal_Bool MQuery::
+-isWritable(OConnection* _pCon)
++sal_Bool MQuery::isWritable(OConnection* _pCon)
+ {
+ 	if ( !m_aQueryDirectory )
+ 		return sal_False;
+--- connectivity/source/drivers/mozab/mozillasrc/MQueryHelper.cxx	(.../tags/DEV300_m41/connectivity)	(revision 269329)
++++ connectivity/source/drivers/mozab/mozillasrc/MQueryHelper.cxx	(.../cws/moz2seamonkey01/connectivity)	(revision 269329)
+@@ -30,62 +30,20 @@
+ 
+ // MARKER(update_precomp.py): autogen include statement, do not remove
+ #include "precompiled_connectivity.hxx"
+-#include <MQueryHelper.hxx>
+ 
++#include "MQueryHelper.hxx"
+ #include "MTypeConverter.hxx"
++#include "MConnection.hxx"
++#include "MNSDeclares.hxx"
++#include "MLdapAttributeMap.hxx"
++
+ #include <connectivity/dbexception.hxx>
+-#ifndef _CONNECTIVITY_MOZAB_BCONNECTION_HXX_
+-#include <MConnection.hxx>
+-#endif
+ 
+ #include "resource/mozab_res.hrc"
+-#include "MNSDeclares.hxx"
+ 
+ using namespace connectivity::mozab;
+ 
+ 
+-enum
+-{
+-        index_FirstName=0,
+-        index_LastName,
+-        index_DisplayName,
+-        index_NickName,
+-        index_PrimaryEmail,
+-        index_SecondEmail,
+-        index_PreferMailFormat,
+-        index_WorkPhone,
+-        index_HomePhone,
+-        index_FaxNumber,
+-        index_PagerNumber,
+-        index_CellularNumber,
+-        index_HomeAddress,
+-        index_HomeAddress2,
+-        index_HomeCity,
+-        index_HomeState,
+-        index_HomeZipCode,
+-        index_HomeCountry,
+-        index_WorkAddress,
+-        index_WorkAddress2,
+-        index_WorkCity,
+-        index_WorkState,
+-        index_WorkZipCode,
+-        index_WorkCountry,
+-        index_JobTitle,
+-        index_Department,
+-        index_Company,
+-        index_WebPage1,
+-        index_WebPage2,
+-        index_BirthYear,
+-        index_BirthMonth,
+-        index_BirthDay,
+-        index_Custom1,
+-        index_Custom2,
+-        index_Custom3,
+-        index_Custom4,
+-        index_Notes
+-};
+-
+-
+ NS_IMPL_THREADSAFE_ISUPPORTS1(connectivity::mozab::MQueryHelper,nsIAbDirectoryQueryResultListener)
+ 
+ //
+@@ -101,8 +59,6 @@
+ 
+ MQueryHelperResultEntry::~MQueryHelperResultEntry()
+ {
+-
+-
+     OSL_TRACE("IN MQueryHelperResultEntry::~MQueryHelperResultEntry()\n");
+ 	OSL_TRACE("OUT MQueryHelperResultEntry::~MQueryHelperResultEntry()\n");
+ 
+@@ -117,39 +73,31 @@
+ {
+ 	return m_Card;
+ }
+-void
+-MQueryHelperResultEntry::insert( const rtl::OUString &key, rtl::OUString &value )
++void MQueryHelperResultEntry::insert( const rtl::OString &key, rtl::OUString &value )
+ {
+-    m_Fields.insert( fieldMap::value_type( key, value ) );
++    m_Fields[ key ] = value;
+ }
+ 
+-rtl::OUString
+-MQueryHelperResultEntry::getValue( const rtl::OUString &key ) const
++rtl::OUString MQueryHelperResultEntry::getValue( const rtl::OString &key ) const
+ {
+-    fieldMap::const_iterator  iter;
+-
+-    iter = m_Fields.find( key );
+-
+-    if ( iter == m_Fields.end() ) {
++    FieldMap::const_iterator iter = m_Fields.find( key );
++    if ( iter == m_Fields.end() )
++    {
+         return rtl::OUString();
+-    } else {
+-        return (*iter).second;
+     }
++    else
++    {
++        return iter->second;
++    }
+ }
+ 
+-rtl::OUString
+-MQueryHelperResultEntry::setValue( const rtl::OUString &key, const rtl::OUString & rValue)
++void MQueryHelperResultEntry::setValue( const rtl::OString &key, const rtl::OUString & rValue)
+ {
+-    m_Fields.erase(key);
+-    m_Fields.insert( fieldMap::value_type( key, rValue ) );
+-    return rValue;
++    m_Fields[ key ] = rValue;
+ }
+ //
+ // class MQueryHelper
+ //
+-// MIME-types.
+-static char PreferMailFormatTypes[2][11] = {"text/plain",
+-                        "text/html"};
+ MQueryHelper::MQueryHelper()
+     :m_nIndex( 0 )
+     ,m_bHasMore( sal_True )
+@@ -473,7 +421,7 @@
+         nsCOMPtr<nsIAbCard> card(do_QueryInterface(cardSupports, &rv));
+         NS_ENSURE_SUCCESS(rv, rv);
+ 
+-            getCardValues(card);
++        getCardValues(card);
+     }
+     nsMemory::Free(name);
+ 
+@@ -484,56 +432,13 @@
+     return(NS_OK);
+ }
+ 
++// -----------------------------------------------------------------------------
+ void MQueryHelper::notifyQueryError()
+ {
+     m_bQueryComplete = sal_True ;
+     notifyResultOrComplete() ;
+ }
+ 
+-static const ::rtl::OUString& getAttribute(PRUint32 index)
+-{
+-    static const ::rtl::OUString sAttributeNames[] =
+-    {
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("FirstName")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("LastName")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("DisplayName")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("NickName")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("PrimaryEmail")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("SecondEmail")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("PreferMailFormat")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("WorkPhone")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("HomePhone")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("FaxNumber")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("PagerNumber")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("CellularNumber")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("HomeAddress")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("HomeAddress2")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("HomeCity")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("HomeState")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("HomeZipCode")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("HomeCountry")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("WorkAddress")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("WorkAddress2")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("WorkCity")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("WorkState")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("WorkZipCode")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("WorkCountry")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("JobTitle")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Department")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Company")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("WebPage1")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("WebPage2")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("BirthYear")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("BirthMonth")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("BirthDay")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Custom1")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Custom2")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Custom3")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Custom4")),
+-	    ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Notes"))
+-    };
+-    return sAttributeNames[index];
+-}
+ const char * getAddrURI(const nsIAbDirectory*  directory)
+ {
+ 	nsresult retCode;
+@@ -687,127 +592,7 @@
+ 		return sal_False;
+ 	}
+ 
+-	::rtl::OUString	sValue;
+-
+-    getCardAttributeAndValue(getAttribute(index_FirstName),sValue,resEntry);
+-    card->SetFirstName(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_LastName),sValue,resEntry);
+-    card->SetLastName(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_DisplayName),sValue,resEntry);
+-    card->SetDisplayName(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_NickName),sValue,resEntry);
+-    card->SetNickName(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_PrimaryEmail),sValue,resEntry);
+-    card->SetPrimaryEmail(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_SecondEmail),sValue,resEntry);
+-    card->SetSecondEmail(sValue.getStr());
+-
+-    unsigned int format;
+-    ::rtl::OUString prefMailValue;
+-    getCardAttributeAndValue(getAttribute(index_WorkPhone),prefMailValue,resEntry);
+-    for(format=2;format >0;format--)
+-    {
+-         if (! prefMailValue.compareTo(
+-         	 ::rtl::OUString::createFromAscii(PreferMailFormatTypes[format-1]) ) )
+-            break;
+-    }
+-    card->SetPreferMailFormat(format);
+-
+-    getCardAttributeAndValue(getAttribute(index_WorkPhone),sValue,resEntry);
+-    card->SetWorkPhone(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_HomePhone),sValue,resEntry);
+-    card->SetHomePhone(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_FaxNumber),sValue,resEntry);
+-    card->SetFaxNumber(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_PagerNumber),sValue,resEntry);
+-    card->SetPagerNumber(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_CellularNumber),sValue,resEntry);
+-    card->SetCellularNumber(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_HomeAddress),sValue,resEntry);
+-    card->SetHomeAddress(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_HomeAddress2),sValue,resEntry);
+-    card->SetHomeAddress2(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_HomeCity),sValue,resEntry);
+-    card->SetHomeCity(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_HomeState),sValue,resEntry);
+-    card->SetHomeState(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_HomeZipCode),sValue,resEntry);
+-    card->SetHomeZipCode(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_HomeCountry),sValue,resEntry);
+-    card->SetHomeCountry(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_WorkAddress),sValue,resEntry);
+-    card->SetWorkAddress(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_WorkAddress2),sValue,resEntry);
+-    card->SetWorkAddress2(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_WorkCity),sValue,resEntry);
+-    card->SetWorkCity(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_WorkState),sValue,resEntry);
+-    card->SetWorkState(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_WorkZipCode),sValue,resEntry);
+-    card->SetWorkZipCode(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_WorkCountry),sValue,resEntry);
+-    card->SetWorkCountry(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_JobTitle),sValue,resEntry);
+-    card->SetJobTitle(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_Department),sValue,resEntry);
+-    card->SetDepartment(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_Company),sValue,resEntry);
+-    card->SetCompany(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_WebPage1),sValue,resEntry);
+-    card->SetWebPage1(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_WebPage2),sValue,resEntry);
+-    card->SetWebPage2(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_BirthYear),sValue,resEntry);
+-    card->SetBirthYear(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_BirthMonth),sValue,resEntry);
+-    card->SetBirthMonth(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_BirthDay),sValue,resEntry);
+-    card->SetBirthDay(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_Custom1),sValue,resEntry);
+-    card->SetCustom1(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_Custom2),sValue,resEntry);
+-    card->SetCustom2(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_Custom3),sValue,resEntry);
+-    card->SetCustom3(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_Custom4),sValue,resEntry);
+-    card->SetCustom4(sValue.getStr());
+-
+-    getCardAttributeAndValue(getAttribute(index_Notes),sValue,resEntry);
+-    card->SetNotes(sValue.getStr());
+-
++    MLdapAttributeMap::fillCardFromResult( *card, *resEntry );
+ 	return sal_True;
+ }
+ 
+@@ -821,143 +606,8 @@
+ 	else
+ 	    resEntry = new MQueryHelperResultEntry();
+ 
+-    nsXPIDLString sValue;
+-
+-    card->GetFirstName(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_FirstName),sValue,resEntry);
+-
+-    card->GetLastName(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_LastName),sValue,resEntry);
+-
+-    card->GetDisplayName(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_DisplayName),sValue,resEntry);
+-
+-    card->GetNickName(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_NickName),sValue,resEntry);
+-
+-    card->GetPrimaryEmail(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_PrimaryEmail),sValue,resEntry);
+-
+-    card->GetSecondEmail(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_SecondEmail),sValue,resEntry);
+-
+-    unsigned int format = 0;
+-    card->GetPreferMailFormat(&format);
+-    ::rtl::OUString prefMailValue;
+-    switch(format)
+-    {
+-        case nsIAbPreferMailFormat::html:
+-            prefMailValue = ::rtl::OUString::createFromAscii(PreferMailFormatTypes[1]);
+-            break;
+-         case nsIAbPreferMailFormat::plaintext:
+-            prefMailValue = ::rtl::OUString::createFromAscii(PreferMailFormatTypes[0]);
+-            break;
+-         case nsIAbPreferMailFormat::unknown:
+-         default:
+-            prefMailValue = ::rtl::OUString::createFromAscii(PreferMailFormatTypes[0]);
+-            break;
+-
+-    }
+-    resEntry->insert( getAttribute(index_PreferMailFormat), prefMailValue );
+-
+-    card->GetWorkPhone(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_WorkPhone),sValue,resEntry);
+-
+-    card->GetHomePhone(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_HomePhone),sValue,resEntry);
+-
+-    card->GetFaxNumber(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_FaxNumber),sValue,resEntry);
+-
+-    card->GetPagerNumber(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_PagerNumber),sValue,resEntry);
+-
+-    card->GetCellularNumber(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_CellularNumber),sValue,resEntry);
+-
+-    card->GetHomeAddress(getter_Copies(sValue));
+-    PRInt32 offset;
+-    nsXPIDLString space;
+-    space.Assign(NS_LITERAL_STRING(" "));
+-    while ((offset = sValue.FindChar('\r')) >= 0) sValue.Replace(offset, 1, space);
+-    while ((offset = sValue.FindChar('\n')) >= 0) sValue.Replace(offset, 1, space);
+-    addCardAttributeAndValue(getAttribute(index_HomeAddress),sValue,resEntry);
+-
+-    card->GetHomeAddress2(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_HomeAddress2),sValue,resEntry);
+-
+-    card->GetHomeCity(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_HomeCity),sValue,resEntry);
+-
+-    card->GetHomeState(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_HomeState),sValue,resEntry);
+-
+-    card->GetHomeZipCode(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_HomeZipCode),sValue,resEntry);
+-
+-    card->GetHomeCountry(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_HomeCountry),sValue,resEntry);
+-
+-    card->GetWorkAddress(getter_Copies(sValue));
+-    while ((offset = sValue.FindChar('\r')) >= 0) sValue.Replace(offset, 1, space);
+-    while ((offset = sValue.FindChar('\n')) >= 0) sValue.Replace(offset, 1, space);
+-    addCardAttributeAndValue(getAttribute(index_WorkAddress),sValue,resEntry);
+-
+-    card->GetWorkAddress2(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_WorkAddress2),sValue,resEntry);
+-
+-    card->GetWorkCity(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_WorkCity),sValue,resEntry);
+-
+-    card->GetWorkState(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_WorkState),sValue,resEntry);
+-
+-    card->GetWorkZipCode(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_WorkZipCode),sValue,resEntry);
+-
+-    card->GetWorkCountry(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_WorkCountry),sValue,resEntry);
+-
+-    card->GetJobTitle(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_JobTitle),sValue,resEntry);
+-
+-    card->GetDepartment(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_Department),sValue,resEntry);
+-
+-    card->GetCompany(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_Company),sValue,resEntry);
+-
+-    card->GetWebPage1(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_WebPage1),sValue,resEntry);
+-
+-    card->GetWebPage2(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_WebPage2),sValue,resEntry);
+-
+-    card->GetBirthYear(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_BirthYear),sValue,resEntry);
+-
+-    card->GetBirthMonth(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_BirthMonth),sValue,resEntry);
+-
+-    card->GetBirthDay(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_BirthDay),sValue,resEntry);
+-
+-    card->GetCustom1(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_Custom1),sValue,resEntry);
+-
+-    card->GetCustom2(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_Custom2),sValue,resEntry);
+-
+-    card->GetCustom3(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_Custom3),sValue,resEntry);
+-
+-    card->GetCustom4(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_Custom4),sValue,resEntry);
+-
+-    card->GetNotes(getter_Copies(sValue));
+-    addCardAttributeAndValue(getAttribute(index_Notes),sValue,resEntry);
+-
+-	resEntry->setCard(card);
++    MLdapAttributeMap::fillResultFromCard( *resEntry, *card );
++    resEntry->setCard(card);
+ 	if (!rowIndex)
+ 		append( resEntry );
+ }
+@@ -975,21 +625,8 @@
+ 	getCardValues(card,rowIndex);
+ 	return sal_True;
+ }
+-void MQueryHelper::addCardAttributeAndValue(const ::rtl::OUString& sName, nsXPIDLString Value, MQueryHelperResultEntry *resEntry)
+-{
+-    nsAutoString temp(Value) ;
+-    ::rtl::OUString attrValue;
+-    MTypeConverter::nsStringToOUString( temp, attrValue );
+-    resEntry->insert( sName, attrValue );
+-}
+-
+-void MQueryHelper::getCardAttributeAndValue(const ::rtl::OUString& sName, ::rtl::OUString &ouValue, MQueryHelperResultEntry *resEntry)
+-{
+-    ouValue = resEntry->getValue( sName);
+-}
+-
+ // -------------------------------------------------------------------------
+-sal_Int32			MQueryHelper::createNewCard()
++sal_Int32 MQueryHelper::createNewCard()
+ {
+     ::osl::MutexGuard aGuard( m_aMutex );
+     nsresult rv;
+--- connectivity/source/drivers/mozab/mozillasrc/MLdapAttributeMap.hxx	(.../tags/DEV300_m41/connectivity)	(revision 0)
++++ connectivity/source/drivers/mozab/mozillasrc/MLdapAttributeMap.hxx	(.../cws/moz2seamonkey01/connectivity)	(revision 269329)
+@@ -0,0 +1,78 @@
++/*************************************************************************
++* DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++* 
++* Copyright 2008 by Sun Microsystems, Inc.
++*
++* OpenOffice.org - a multi-platform office productivity suite
++*
++* $RCSfile: code,v $
++*
++* $Revision: 1.3 $
++*
++* This file is part of OpenOffice.org.
++*
++* OpenOffice.org is free software: you can redistribute it and/or modify
++* it under the terms of the GNU Lesser General Public License version 3
++* only, as published by the Free Software Foundation.
++*
++* OpenOffice.org is distributed in the hope that it will be useful,
++* but WITHOUT ANY WARRANTY; without even the implied warranty of
++* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++* GNU Lesser General Public License version 3 for more details
++* (a copy is included in the LICENSE file that accompanied this code).
++*
++* You should have received a copy of the GNU Lesser General Public License
++* version 3 along with OpenOffice.org.  If not, see
++* <http://www.openoffice.org/license.html>
++* for a copy of the LGPLv3 License.
++************************************************************************/
++
++#ifndef CONNECTIVITY_MLDAPATTRIBUTEMAP_HXX
++#define CONNECTIVITY_MLDAPATTRIBUTEMAP_HXX
++
++#include <MNSInclude.hxx>
++
++#include <memory>
++
++//........................................................................
++namespace connectivity { namespace mozab {
++//........................................................................
++
++    struct AttributeMap_Data;
++    class MQueryHelperResultEntry;
++
++	//====================================================================
++	//= class MLdapAttributeMap
++	//====================================================================
++    /** implements the nsIAbLDAPAttributeMap interface
++
++        Somewhere between Mozilla 1.7.5 and SeaMonkey 1.1.12, the LDAP address book
++        implementation was changed to take the attribute mapping (from LDAP attributes
++        to address book properties) not directly from the preferences. Instead, this mapping
++        is now delivered by a dedicated implementation (supporting the nsIAbLDAPAttributeMap
++        interface).
++
++    */
++    class MLdapAttributeMap : public nsIAbLDAPAttributeMap
++	{
++    public:
++        MLdapAttributeMap();
++
++        NS_DECL_ISUPPORTS
++        NS_DECL_NSIABLDAPATTRIBUTEMAP
++
++        static void fillCardFromResult( nsIAbCard& _card, const MQueryHelperResultEntry& _result );
++        static void fillResultFromCard( MQueryHelperResultEntry& _result, nsIAbCard& _card );
++
++    protected:
++        virtual ~MLdapAttributeMap();
++
++    private:
++        ::std::auto_ptr< AttributeMap_Data >    m_pData;
++	};
++
++//........................................................................
++} } // namespace connectivity::mozab
++//........................................................................
++
++#endif // CONNECTIVITY_MLDAPATTRIBUTEMAP_HXX
+--- connectivity/source/drivers/mozab/mozillasrc/MTypeConverter.cxx	(.../tags/DEV300_m41/connectivity)	(revision 269329)
++++ connectivity/source/drivers/mozab/mozillasrc/MTypeConverter.cxx	(.../cws/moz2seamonkey01/connectivity)	(revision 269329)
+@@ -51,6 +51,32 @@
+     nss = mozString; // temp.
+ }
+ // -------------------------------------------------------------------------
++::rtl::OUString MTypeConverter::nsACStringToOUString( const nsACString& _source )
++{
++    const char* buffer = _source.BeginReading();
++    const char* bufferEnd = _source.EndReading();
++    return ::rtl::OUString( buffer, bufferEnd - buffer, RTL_TEXTENCODING_ASCII_US );
++}
++// -------------------------------------------------------------------------
++::rtl::OString MTypeConverter::nsACStringToOString( const nsACString& _source )
++{
++    const char* buffer = _source.BeginReading();
++    const char* bufferEnd = _source.EndReading();
++    return ::rtl::OString( buffer, bufferEnd - buffer );
++}
++// -------------------------------------------------------------------------
++void MTypeConverter::asciiOUStringToNsACString( const ::rtl::OUString& _asciiString, nsACString& _dest )
++{
++    ::rtl::OString sAsciiVersion( _asciiString.getStr(), _asciiString.getLength(), RTL_TEXTENCODING_ASCII_US );
++    asciiToNsACString( sAsciiVersion.getStr(), _dest );
++}
++// -------------------------------------------------------------------------
++void MTypeConverter::asciiToNsACString( const sal_Char* _asciiString, nsACString& _dest )
++{
++    _dest.Truncate();
++    _dest.AppendASCII( _asciiString );
++}
++// -------------------------------------------------------------------------
+ void MTypeConverter::nsStringToOUString(nsString const &nss, ::rtl::OUString &ous)
+ {
+     // Get clone of buffer.
+--- connectivity/source/drivers/mozab/mozillasrc/MQueryHelper.hxx	(.../tags/DEV300_m41/connectivity)	(revision 269329)
++++ connectivity/source/drivers/mozab/mozillasrc/MQueryHelper.hxx	(.../cws/moz2seamonkey01/connectivity)	(revision 269329)
+@@ -40,6 +40,8 @@
+ #include <comphelper/stl_types.hxx>
+ #include <osl/thread.hxx>
+ 
++#include <hash_map>
++
+ namespace connectivity
+ {
+ 	namespace mozab
+@@ -47,20 +49,20 @@
+         class MQueryHelperResultEntry
+ 		{
+         private:
+-            mutable ::osl::Mutex        m_aMutex;
++            typedef ::std::hash_map< ::rtl::OString, ::rtl::OUString, ::rtl::OStringHash >  FieldMap;
+ 
+-			DECLARE_STL_USTRINGACCESS_MAP(::rtl::OUString,fieldMap);
++            mutable ::osl::Mutex    m_aMutex;
++            FieldMap                m_Fields;
++            nsCOMPtr<nsIAbCard>     m_Card;
++            sal_Int32	            m_RowStates;
+ 
+-            fieldMap    m_Fields;
+-			nsCOMPtr<nsIAbCard> m_Card;
+-			sal_Int32	m_RowStates;
+         public:
+             MQueryHelperResultEntry();
+             ~MQueryHelperResultEntry();
+ 
+-            void insert( const rtl::OUString &key, rtl::OUString &value );
+-            rtl::OUString getValue( const rtl::OUString &key ) const;
+-            rtl::OUString setValue( const rtl::OUString &key, const rtl::OUString & rValue);
++            void            insert( const rtl::OString &key, rtl::OUString &value );
++            rtl::OUString   getValue( const rtl::OString &key ) const;
++            void            setValue( const rtl::OString &key, const rtl::OUString & rValue);
+ 
+             void setCard(nsIAbCard *card);
+             nsIAbCard *getCard();
+@@ -68,7 +70,8 @@
+             sal_Int32 getRowStates()  { return m_RowStates;};
+         };
+ 
+-        class MQueryHelper : public nsIAbDirectoryQueryResultListener, public ErrorResourceAccess
++        class MQueryHelper  :public nsIAbDirectoryQueryResultListener
++                            ,public ErrorResourceAccess
+ 		{
+         private:
+             typedef std::vector< MQueryHelperResultEntry* > resultsArray;
+@@ -89,8 +92,6 @@
+             void            clearResultOrComplete();
+             void            notifyResultOrComplete();
+             sal_Bool        waitForResultOrComplete( );
+-            void            addCardAttributeAndValue(const ::rtl::OUString& sName, nsXPIDLString sValue,MQueryHelperResultEntry *resEntry);
+-			void 			getCardAttributeAndValue(const ::rtl::OUString& sName, ::rtl::OUString &ouValue, MQueryHelperResultEntry *resEntry)	;
+             void            getCardValues(nsIAbCard  *card,sal_Int32 rowIndex=0);
+ #if OSL_DEBUG_LEVEL > 0
+             oslThreadIdentifier m_oThreadID;
+--- connectivity/source/drivers/mozab/mozillasrc/MQuery.hxx	(.../tags/DEV300_m41/connectivity)	(revision 269329)
++++ connectivity/source/drivers/mozab/mozillasrc/MQuery.hxx	(.../cws/moz2seamonkey01/connectivity)	(revision 269329)
+@@ -205,7 +205,6 @@
+ 		private:
+             MQueryDirectory                *m_aQueryDirectory;
+             MQueryHelper                   *m_aQueryHelper;
+-			::std::vector< ::rtl::OUString> m_aAttributes;
+ 			::rtl::OUString                 m_aAddressbook;
+ 			sal_Int32                       m_nMaxNrOfReturns;
+ 			sal_Bool                        m_bQuerySubDirs;
+@@ -238,9 +237,6 @@
+ 
+ 			sal_uInt32						InsertLoginInfo(OConnection* _pCon);
+ 
+-			void                            setAttributes( ::std::vector< ::rtl::OUString>&);
+-			const							::std::vector< ::rtl::OUString> &getAttributes(void) const;
+-
+ 			void                            setAddressbook( ::rtl::OUString&);
+ 			::rtl::OUString                 getAddressbook(void) const;
+ 
+--- connectivity/source/drivers/mozab/mozillasrc/MTypeConverter.hxx	(.../tags/DEV300_m41/connectivity)	(revision 269329)
++++ connectivity/source/drivers/mozab/mozillasrc/MTypeConverter.hxx	(.../cws/moz2seamonkey01/connectivity)	(revision 269329)
+@@ -54,6 +54,11 @@
+             static ::std::string ouStringToStlString(const ::rtl::OUString&);
+             static ::std::string nsStringToStlString(const nsString&);
+ 
++            static ::rtl::OUString nsACStringToOUString( const nsACString& _source );
++            static ::rtl::OString nsACStringToOString( const nsACString& _source );
++            static void asciiOUStringToNsACString( const ::rtl::OUString& _asciiString, nsACString& _dest );
++            static void asciiToNsACString( const sal_Char* _asciiString, nsACString& _dest );
++
+         private:
+ 			MTypeConverter() {};
+ 		};
+--- connectivity/source/drivers/mozab/mozillasrc/MNSInclude.hxx	(.../tags/DEV300_m41/connectivity)	(revision 269329)
++++ connectivity/source/drivers/mozab/mozillasrc/MNSInclude.hxx	(.../cws/moz2seamonkey01/connectivity)	(revision 269329)
+@@ -44,6 +44,7 @@
+ #include <nsCOMPtr.h>
+ #include <nsISupportsArray.h>
+ #include <nsString.h>
++
+ #if defined __SUNPRO_CC
+ #pragma disable_warn
+     // somewhere in the files included directly or indirectly in nsString.h, warnings are enabled, again
+@@ -70,6 +71,8 @@
+ #include <nsIAbDirectoryQueryProxy.h>
+ #include <nsIAbDirFactory.h>
+ #include <nsIRunnable.h>
++#include <nsIAbLDAPAttributeMap.h>
++#include <nsILDAPMessage.h>
+ 
+ #include <prerr.h>
+ 
+--- connectivity/source/drivers/mozab/MStatement.cxx	(.../tags/DEV300_m41/connectivity)	(revision 269329)
++++ connectivity/source/drivers/mozab/MStatement.cxx	(.../cws/moz2seamonkey01/connectivity)	(revision 269329)
+@@ -36,6 +36,7 @@
+ #include <comphelper/property.hxx>
+ #include <comphelper/uno3.hxx>
+ #include <osl/thread.h>
++#include <tools/diagnose_ex.h>
+ #include <com/sun/star/sdbc/ResultSetConcurrency.hpp>
+ #include <com/sun/star/sdbc/ResultSetType.hpp>
+ #include <com/sun/star/sdbc/FetchDirection.hpp>
+@@ -78,39 +79,33 @@
+ using namespace com::sun::star::io;
+ using namespace com::sun::star::util;
+ //------------------------------------------------------------------------------
+-OStatement_Base::OStatement_Base(OConnection* _pConnection )
+-    :OStatement_BASE(m_aMutex)
+-    ,OPropertySetHelper(OStatement_BASE::rBHelper)
++OCommonStatement::OCommonStatement(OConnection* _pConnection )
++    :OCommonStatement_IBASE(m_aMutex)
++    ,OPropertySetHelper(OCommonStatement_IBASE::rBHelper)
++    ,OCommonStatement_SBASE((::cppu::OWeakObject*)_pConnection, this)
+     ,m_xDBMetaData(_pConnection->getMetaData())
+     ,m_pTable(NULL)
+     ,m_pConnection(_pConnection)
+     ,m_aParser(_pConnection->getDriver()->getMSFactory())
+     ,m_pSQLIterator( new OSQLParseTreeIterator( _pConnection, _pConnection->createCatalog()->getTables(), m_aParser, NULL ) )
+     ,m_pParseTree(NULL)
+-    ,rBHelper(OStatement_BASE::rBHelper)
++    ,rBHelper(OCommonStatement_IBASE::rBHelper)
+ {
+ 	m_pConnection->acquire();
+-    OSL_TRACE("In/Out: OStatement_Base::OStatement_Base" );
++    OSL_TRACE("In/Out: OCommonStatement::OCommonStatement" );
+ }
+ // -----------------------------------------------------------------------------
+-OStatement_Base::~OStatement_Base()
++OCommonStatement::~OCommonStatement()
+ {
+ }
++
+ //------------------------------------------------------------------------------
+-void OStatement_Base::disposeResultSet()
++void OCommonStatement::disposing()
+ {
+-	// free the cursor if alive
+-	Reference< XComponent > xComp(m_xResultSet.get(), UNO_QUERY);
+-	if (xComp.is())
+-		xComp->dispose();
+-	m_xResultSet = Reference< XResultSet>();
+-}
+-//------------------------------------------------------------------------------
+-void OStatement_BASE2::disposing()
+-{
+ 	::osl::MutexGuard aGuard(m_aMutex);
+ 
+-	disposeResultSet();
++    clearWarnings();
++	clearCachedResultSet();
+ 
+ 	if (m_pConnection)
+ 		m_pConnection->release();
+@@ -119,77 +114,39 @@
+     m_pSQLIterator->dispose();
+ 
+     dispose_ChildImpl();
+-    OStatement_Base::disposing();
++    OCommonStatement_IBASE::disposing();
+ }
+ //-----------------------------------------------------------------------------
+-void SAL_CALL OStatement_BASE2::release() throw()
++Any SAL_CALL OCommonStatement::queryInterface( const Type & rType ) throw(RuntimeException)
+ {
+-	relase_ChildImpl();
+-}
+-//-----------------------------------------------------------------------------
+-Any SAL_CALL OStatement_Base::queryInterface( const Type & rType ) throw(RuntimeException)
+-{
+-	Any aRet = OStatement_BASE::queryInterface(rType);
++	Any aRet = OCommonStatement_IBASE::queryInterface(rType);
+ 	if(!aRet.hasValue())
+ 		aRet = OPropertySetHelper::queryInterface(rType);
+ 	return aRet;
+ }
+ // -------------------------------------------------------------------------
+-Sequence< Type > SAL_CALL OStatement_Base::getTypes(  ) throw(RuntimeException)
++Sequence< Type > SAL_CALL OCommonStatement::getTypes(  ) throw(RuntimeException)
+ {
+ 	::cppu::OTypeCollection aTypes(	::getCppuType( (const Reference< XMultiPropertySet > *)0 ),
+ 									::getCppuType( (const Reference< XFastPropertySet > *)0 ),
+ 									::getCppuType( (const Reference< XPropertySet > *)0 ));
+ 
+-	return ::comphelper::concatSequences(aTypes.getTypes(),OStatement_BASE::getTypes());
++	return ::comphelper::concatSequences(aTypes.getTypes(),OCommonStatement_IBASE::getTypes());
+ }
+ // -------------------------------------------------------------------------
+-void SAL_CALL OStatement_Base::close(  ) throw(SQLException, RuntimeException)
++void SAL_CALL OCommonStatement::close(  ) throw(SQLException, RuntimeException)
+ {
+ 	{
+ 		::osl::MutexGuard aGuard( m_aMutex );
+-		checkDisposed(OStatement_BASE::rBHelper.bDisposed);
+-
++		checkDisposed(OCommonStatement_IBASE::rBHelper.bDisposed);
+ 	}
+ 	dispose();
+ }
+-// -------------------------------------------------------------------------
+ 
+-void OStatement_Base::reset() throw (SQLException)
+-{
+-	::osl::MutexGuard aGuard( m_aMutex );
+-	checkDisposed(OStatement_BASE::rBHelper.bDisposed);
+ 
+-
+-	clearWarnings ();
+-
+-	if (m_xResultSet.get().is())
+-		clearMyResultSet();
+-}
+-//--------------------------------------------------------------------
+-// clearMyResultSet
+-// If a ResultSet was created for this Statement, close it
+-//--------------------------------------------------------------------
+-
+-void OStatement_Base::clearMyResultSet () throw (SQLException)
++// -------------------------------------------------------------------------
++void OCommonStatement::createTable( ) throw ( SQLException, RuntimeException )
+ {
+-	::osl::MutexGuard aGuard( m_aMutex );
+-	checkDisposed(OStatement_BASE::rBHelper.bDisposed);
+-
+-    try
+-    {
+-	    Reference<XCloseable> xCloseable;
+-	    if ( ::comphelper::query_interface( m_xResultSet.get(), xCloseable ) )
+-		    xCloseable->close();
+-    }
+-    catch( const DisposedException& ) { }
+-
+-    m_xResultSet = Reference< XResultSet >();
+-}
+-
+-void OStatement_Base::createTable( )
+-    throw ( SQLException, RuntimeException )
+-{
+     if(m_pParseTree)
+     {
+         ::vos::ORef<connectivity::OSQLColumns> xCreateColumn;
+@@ -233,13 +190,11 @@
+         getOwnConnection()->throwGenericSQLException( STR_QUERY_TOO_COMPLEX ,*this);
+ }
+ // -------------------------------------------------------------------------
+-sal_Bool OStatement_Base::parseSql( const ::rtl::OUString& sql , sal_Bool bAdjusted)
++OCommonStatement::StatementType OCommonStatement::parseSql( const ::rtl::OUString& sql , sal_Bool bAdjusted)
+     throw ( SQLException, RuntimeException )
+ {
+     ::rtl::OUString aErr;
+ 
+-    OSL_TRACE("In/Out :: OStatement::parseSql(%s)\n", OUtoCStr( sql ) );
+-
+     m_pParseTree = m_aParser.parseTree(aErr,sql);
+ 
+ #if OSL_DEBUG_LEVEL > 0
+@@ -285,12 +240,14 @@
+             createColumnMapping();
+ 
+             analyseSQL();
+-            break;
++            return eSelect;
++
+         case SQL_STATEMENT_CREATE_TABLE:
+             createTable();
+-			return sal_False;
++			return eCreateTable;
++
+         default:
+-            getOwnConnection()->throwGenericSQLException( STR_QUERY_TOO_COMPLEX ,*this);
++            break;
+         }
+     }
+     else if(!bAdjusted) //Our sql parser does not support a statement like "create table foo"
+@@ -298,35 +255,71 @@
+     {
+         return parseSql(sql + ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("(""E-mail"" caracter)")),sal_True);
+     }
+-    else
+-        getOwnConnection()->throwGenericSQLException( STR_QUERY_TOO_COMPLEX ,*this);
+-	return sal_True;
+ 
++    getOwnConnection()->throwGenericSQLException( STR_QUERY_TOO_COMPLEX, *this );
++    OSL_ENSURE( false, "OCommonStatement::parseSql: unreachable!" );
++    return eSelect;
++
+ }
+ // -------------------------------------------------------------------------
+-
+-OResultSet* OStatement_Base::createResultSet()
++Reference< XResultSet > OCommonStatement::impl_executeCurrentQuery()
+ {
+-    return new OResultSet( this, m_pSQLIterator );
++    clearCachedResultSet();
++
++    ::rtl::Reference< OResultSet > pResult( new OResultSet( this, m_pSQLIterator ) );
++    initializeResultSet( pResult.get() );
++
++    pResult->executeQuery();
++    cacheResultSet( pResult );  // only cache if we survived the execution
++
++    return pResult.get();
++
+ }
+-// -------------------------------------------------------------------------
+ 
+-void OStatement_Base::initializeResultSet( OResultSet* _pResult )
++// -------------------------------------------------------------------------
++void OCommonStatement::initializeResultSet( OResultSet* _pResult )
+ {
+-	OSL_TRACE("In : initializeResultSet");
++    ENSURE_OR_THROW( _pResult, "invalid result set" );
++
+     _pResult->setColumnMapping(m_aColMapping);
+     _pResult->setOrderByColumns(m_aOrderbyColumnNumber);
+     _pResult->setOrderByAscending(m_aOrderbyAscending);
+     _pResult->setBindingRow(m_aRow);
+     _pResult->setTable(m_pTable);
+-	OSL_TRACE("Out : initializeResultSet");
+ }
+ 
+ // -------------------------------------------------------------------------
+-sal_Bool SAL_CALL OStatement_Base::execute( const ::rtl::OUString& sql ) throw(SQLException, RuntimeException)
++void OCommonStatement::clearCachedResultSet()
+ {
++    Reference< XResultSet > xResultSet( m_xResultSet.get(), UNO_QUERY );
++    if ( !xResultSet.is() )
++        return;
++
++    try
++    {
++	    Reference< XCloseable > xCloseable( xResultSet, UNO_QUERY_THROW );
++	    xCloseable->close();
++    }
++    catch( const DisposedException& )
++    {
++        DBG_UNHANDLED_EXCEPTION();
++    }
++
++    m_xResultSet = Reference< XResultSet >();
++}
++
++// -------------------------------------------------------------------------
++void OCommonStatement::cacheResultSet( const ::rtl::Reference< OResultSet >& _pResult )
++{
++    ENSURE_OR_THROW( _pResult.is(), "invalid result set" );
++    m_xResultSet = Reference< XResultSet >( _pResult.get() );
++}
++
++// -------------------------------------------------------------------------
++sal_Bool SAL_CALL OCommonStatement::execute( const ::rtl::OUString& sql ) throw(SQLException, RuntimeException)
++{
+ 	::osl::MutexGuard aGuard( m_aMutex );
+-	checkDisposed(OStatement_BASE::rBHelper.bDisposed);
++	checkDisposed(OCommonStatement_IBASE::rBHelper.bDisposed);
+ 
+     OSL_TRACE("Statement::execute( %s )", OUtoCStr( sql ) );
+ 
+@@ -336,31 +329,26 @@
+ }
+ // -------------------------------------------------------------------------
+ 
+-Reference< XResultSet > SAL_CALL OStatement_Base::executeQuery( const ::rtl::OUString& sql ) throw(SQLException, RuntimeException)
++Reference< XResultSet > SAL_CALL OCommonStatement::executeQuery( const ::rtl::OUString& sql ) throw(SQLException, RuntimeException)
+ {
+ 	::osl::MutexGuard aGuard( m_ThreadMutex );
+-	checkDisposed(OStatement_BASE::rBHelper.bDisposed);
++	checkDisposed(OCommonStatement_IBASE::rBHelper.bDisposed);
+ 
+     OSL_TRACE("Statement::executeQuery( %s )", OUtoCStr( sql ) );
+ 
+-    if (!parseSql( sql )) //parseSql return false means this sql is a create table statement
++    // parse the statement
++    StatementType eStatementType = parseSql( sql );
++    if ( eStatementType != eSelect )
+ 		return NULL;
+ 
+-    OResultSet* pResult = createResultSet();
+-	Reference< XResultSet > xRS = pResult;
+-    initializeResultSet( pResult );
+-
+-    pResult->executeQuery();
+-	m_xResultSet = xRS; // we need a reference to it for later use
+-
+-	return xRS;
++    return impl_executeCurrentQuery();
+ }
+ // -------------------------------------------------------------------------
+ 
+-Reference< XConnection > SAL_CALL OStatement_Base::getConnection(  ) throw(SQLException, RuntimeException)
++Reference< XConnection > SAL_CALL OCommonStatement::getConnection(  ) throw(SQLException, RuntimeException)
+ {
+ 	::osl::MutexGuard aGuard( m_aMutex );
+-	checkDisposed(OStatement_BASE::rBHelper.bDisposed);
++	checkDisposed(OCommonStatement_IBASE::rBHelper.bDisposed);
+ 
+ 	// just return our connection here
+ 	return (Reference< XConnection >)m_pConnection;
+@@ -370,37 +358,37 @@
+ {
+ 	Any aRet = ::cppu::queryInterface(rType,static_cast< XServiceInfo*> (this));
+ 	if(!aRet.hasValue())
+-		aRet = OStatement_Base::queryInterface(rType);
++		aRet = OCommonStatement::queryInterface(rType);
+ 	return aRet;
+ }
+ // -------------------------------------------------------------------------
+-sal_Int32 SAL_CALL OStatement_Base::executeUpdate( const ::rtl::OUString& /*sql*/ ) throw(SQLException, RuntimeException)
++sal_Int32 SAL_CALL OCommonStatement::executeUpdate( const ::rtl::OUString& /*sql*/ ) throw(SQLException, RuntimeException)
+ {
+-    ::dbtools::throwFeatureNotImplementedException( "XPreparedStatement::executeUpdate", *this );
++    ::dbtools::throwFeatureNotImplementedException( "XStatement::executeUpdate", *this );
+ 	return 0;
+ 
+ }
+ // -------------------------------------------------------------------------
+-Any SAL_CALL OStatement_Base::getWarnings(  ) throw(SQLException, RuntimeException)
++Any SAL_CALL OCommonStatement::getWarnings(  ) throw(SQLException, RuntimeException)
+ {
+ 	::osl::MutexGuard aGuard( m_aMutex );
+-	checkDisposed(OStatement_BASE::rBHelper.bDisposed);
++	checkDisposed(OCommonStatement_IBASE::rBHelper.bDisposed);
+ 
+ 	return makeAny(m_aLastWarning);
+ }
+ // -------------------------------------------------------------------------
+ 
+ // -------------------------------------------------------------------------
+-void SAL_CALL OStatement_Base::clearWarnings(  ) throw(SQLException, RuntimeException)
++void SAL_CALL OCommonStatement::clearWarnings(  ) throw(SQLException, RuntimeException)
+ {
+ 	::osl::MutexGuard aGuard( m_aMutex );
+-	checkDisposed(OStatement_BASE::rBHelper.bDisposed);
++	checkDisposed(OCommonStatement_IBASE::rBHelper.bDisposed);
+ 
+ 
+ 	m_aLastWarning = SQLWarning();
+ }
+ // -------------------------------------------------------------------------
+-::cppu::IPropertyArrayHelper* OStatement_Base::createArrayHelper( ) const
++::cppu::IPropertyArrayHelper* OCommonStatement::createArrayHelper( ) const
+ {
+ 	// this properties are define by the service resultset
+ 	// they must in alphabetic order
+@@ -421,12 +409,12 @@
+ }
+ 
+ // -------------------------------------------------------------------------
+-::cppu::IPropertyArrayHelper & OStatement_Base::getInfoHelper()
++::cppu::IPropertyArrayHelper & OCommonStatement::getInfoHelper()
+ {
+-	return *const_cast<OStatement_Base*>(this)->getArrayHelper();
++	return *const_cast<OCommonStatement*>(this)->getArrayHelper();
+ }
+ // -------------------------------------------------------------------------
+-sal_Bool OStatement_Base::convertFastPropertyValue(
++sal_Bool OCommonStatement::convertFastPropertyValue(
+ 							Any & /*rConvertedValue*/,
+ 							Any & /*rOldValue*/,
+ 							sal_Int32 /*nHandle*/,
+@@ -438,7 +426,7 @@
+ 	return bConverted;
+ }
+ // -------------------------------------------------------------------------
+-void OStatement_Base::setFastPropertyValue_NoBroadcast(sal_Int32 nHandle,const Any& /*rValue*/) throw (Exception)
++void OCommonStatement::setFastPropertyValue_NoBroadcast(sal_Int32 nHandle,const Any& /*rValue*/) throw (Exception)
+ {
+ 	// set the value to what ever is nescessary
+ 	switch(nHandle)
+@@ -456,7 +444,7 @@
+ 	}
+ }
+ // -------------------------------------------------------------------------
+-void OStatement_Base::getFastPropertyValue(Any& /*rValue*/,sal_Int32 nHandle) const
++void OCommonStatement::getFastPropertyValue(Any& /*rValue*/,sal_Int32 nHandle) const
+ {
+ 	switch(nHandle)
+ 	{
+@@ -475,32 +463,32 @@
+ // -------------------------------------------------------------------------
+ IMPLEMENT_SERVICE_INFO(OStatement,"com.sun.star.sdbcx.OStatement","com.sun.star.sdbc.Statement");
+ // -----------------------------------------------------------------------------
+-void SAL_CALL OStatement_Base::acquire() throw()
++void SAL_CALL OCommonStatement::acquire() throw()
+ {
+-	OStatement_BASE::acquire();
++	OCommonStatement_IBASE::acquire();
+ }
+ // -----------------------------------------------------------------------------
+-void SAL_CALL OStatement_Base::release() throw()
++void SAL_CALL OCommonStatement::release() throw()
+ {
+-	OStatement_BASE::release();
++	relase_ChildImpl();
+ }
+ // -----------------------------------------------------------------------------
+ void SAL_CALL OStatement::acquire() throw()
+ {
+-	OStatement_BASE2::acquire();
++	OCommonStatement::acquire();
+ }
+ // -----------------------------------------------------------------------------
+ void SAL_CALL OStatement::release() throw()
+ {
+-	OStatement_BASE2::release();
++	OCommonStatement::release();
+ }
+ // -----------------------------------------------------------------------------
+-Reference< ::com::sun::star::beans::XPropertySetInfo > SAL_CALL OStatement_Base::getPropertySetInfo(  ) throw(RuntimeException)
++Reference< ::com::sun::star::beans::XPropertySetInfo > SAL_CALL OCommonStatement::getPropertySetInfo(  ) throw(RuntimeException)
+ {
+ 	return ::cppu::OPropertySetHelper::createPropertySetInfo(getInfoHelper());
+ }
+ // -----------------------------------------------------------------------------
+-void OStatement_Base::createColumnMapping()
++void OCommonStatement::createColumnMapping()
+ {
+     size_t i;
+ 
+@@ -524,7 +512,7 @@
+ }
+ // -----------------------------------------------------------------------------
+ 
+-void OStatement_Base::analyseSQL()
++void OCommonStatement::analyseSQL()
+ {
+ 	const OSQLParseNode* pOrderbyClause = m_pSQLIterator->getOrderTree();
+ 	if(pOrderbyClause)
+@@ -549,7 +537,7 @@
+ 	}
+ }
+ //------------------------------------------------------------------
+-void OStatement_Base::setOrderbyColumn(	OSQLParseNode* pColumnRef,
++void OCommonStatement::setOrderbyColumn(	OSQLParseNode* pColumnRef,
+ 										OSQLParseNode* pAscendingDescending)
+ {
+ 	::rtl::OUString aColumnName;
+--- connectivity/source/drivers/mozab/MConnection.hxx	(.../tags/DEV300_m41/connectivity)	(revision 269329)
++++ connectivity/source/drivers/mozab/MConnection.hxx	(.../cws/moz2seamonkey01/connectivity)	(revision 269329)
+@@ -55,7 +55,6 @@
+ 	namespace mozab
+ 	{
+ 
+-		class OStatement_Base;
+ 		class MozabDriver;
+ 		class ODatabaseMetaData;
+ 		class MNameMapper;
+--- connectivity/source/drivers/mozab/MStatement.hxx	(.../tags/DEV300_m41/connectivity)	(revision 269329)
++++ connectivity/source/drivers/mozab/MStatement.hxx	(.../cws/moz2seamonkey01/connectivity)	(revision 269329)
+@@ -64,21 +64,28 @@
+ 
+         typedef ::cppu::WeakComponentImplHelper3<	::com::sun::star::sdbc::XStatement,
+                                                     ::com::sun::star::sdbc::XWarningsSupplier,
+-                                                    ::com::sun::star::sdbc::XCloseable> OStatement_BASE;
++                                                    ::com::sun::star::sdbc::XCloseable> OCommonStatement_IBASE;
+ 
+ 		//**************************************************************
+-		//************ Class: OStatement_Base
++		//************ Class: OCommonStatement
+ 		// is a base class for the normal statement and for the prepared statement
+ 		//**************************************************************
+-		class OStatement_Base		:	public comphelper::OBaseMutex,
+-										public	OStatement_BASE,
+-										public	::cppu::OPropertySetHelper,
+-										public	::comphelper::OPropertyArrayUsageHelper<OStatement_Base>
++        class OCommonStatement;
++		typedef ::connectivity::OSubComponent< OCommonStatement, OCommonStatement_IBASE >  OCommonStatement_SBASE;
+ 
++		class OCommonStatement  :public comphelper::OBaseMutex
++								,public	OCommonStatement_IBASE
++								,public	::cppu::OPropertySetHelper
++								,public	::comphelper::OPropertyArrayUsageHelper< OCommonStatement >
++                                ,public OCommonStatement_SBASE
+ 		{
+-        ::com::sun::star::sdbc::SQLWarning                            m_aLastWarning;
+-		protected:
+-			::com::sun::star::uno::WeakReference< ::com::sun::star::sdbc::XResultSet>    m_xResultSet;   // The last ResultSet created
++			friend class ::connectivity::OSubComponent< OCommonStatement, OCommonStatement_IBASE >;
++
++        private:
++            ::com::sun::star::sdbc::SQLWarning                            m_aLastWarning;
++
++        protected:
++			::com::sun::star::uno::WeakReference< ::com::sun::star::sdbc::XResultSet >   m_xResultSet;
+             ::com::sun::star::uno::Reference< ::com::sun::star::sdbc::XDatabaseMetaData> m_xDBMetaData;
+             ::com::sun::star::uno::Reference< ::com::sun::star::container::XNameAccess>  m_xColNames; // table columns
+ 
+@@ -105,8 +112,6 @@
+ 
+ 		protected:
+ 
+-			void disposeResultSet();
+-
+ 			// OPropertyArrayUsageHelper
+ 			virtual ::cppu::IPropertyArrayHelper* createArrayHelper( ) const;
+ 			// OPropertySetHelper
+@@ -123,23 +128,37 @@
+ 			virtual void SAL_CALL getFastPropertyValue(
+ 																::com::sun::star::uno::Any& rValue,
+ 																sal_Int32 nHandle) const;
+-			virtual ~OStatement_Base();
++			virtual ~OCommonStatement();
+ 
+         protected:
+             //
+             // Driver Internal Methods
+             //
+-            virtual sal_Bool parseSql( const ::rtl::OUString& sql , sal_Bool bAdjusted = sal_False) throw ( 
+-                        ::com::sun::star::sdbc::SQLException, ::com::sun::star::uno::RuntimeException );
++            enum StatementType { eSelect, eCreateTable };
++            /** called to do the parsing of a to-be-executed SQL statement, and set all members as needed
++            */
++            virtual StatementType
++                            parseSql( const ::rtl::OUString& sql , sal_Bool bAdjusted = sal_False) throw ( ::com::sun::star::sdbc::SQLException, ::com::sun::star::uno::RuntimeException );
++            /** called to initialize a result set, according to a previously parsed SQL statement
++            */
++            virtual void    initializeResultSet( OResultSet* _pResult );
++            /** called when a possible cached instance of our last result set should be cleared
++            */
++            virtual void    clearCachedResultSet();
++            /** caches a result set which has just been created by an execution of an SQL statement
++            */
++            virtual void    cacheResultSet( const ::rtl::Reference< OResultSet >& _pResult );
+ 
+-            OResultSet*  createResultSet();
+-            virtual void initializeResultSet( OResultSet* _pResult );
++
++            /** executes the current query (the one which has been passed to the last parseSql call)
++            */
++            ::com::sun::star::uno::Reference< ::com::sun::star::sdbc::XResultSet >
++                            impl_executeCurrentQuery();
++
+             void         createColumnMapping();
+             void         analyseSQL();
+             void         setOrderbyColumn( connectivity::OSQLParseNode* pColumnRef,
+                                            connectivity::OSQLParseNode* pAscendingDescending);
+-            void         reset () throw( ::com::sun::star::sdbc::SQLException);
+-            void         clearMyResultSet () throw( ::com::sun::star::sdbc::SQLException);
+             virtual void createTable(  ) throw ( 
+                         ::com::sun::star::sdbc::SQLException, ::com::sun::star::uno::RuntimeException );
+ 
+@@ -147,11 +166,12 @@
+ 			// other methods
+ 			OConnection* getOwnConnection() const { return m_pConnection;}
+ 
+-			OStatement_Base(OConnection* _pConnection );
+-			using OStatement_BASE::operator ::com::sun::star::uno::Reference< ::com::sun::star::uno::XInterface >;
++			OCommonStatement(OConnection* _pConnection );
++			using OCommonStatement_IBASE::operator ::com::sun::star::uno::Reference< ::com::sun::star::uno::XInterface >;
+ 
+ 			// OComponentHelper
+-			virtual void SAL_CALL disposing(void){OStatement_BASE::disposing();}
++            virtual void SAL_CALL disposing(void);
++
+ 			// XInterface
+             virtual void SAL_CALL release() throw();
+ 			virtual void SAL_CALL acquire() throw();
+@@ -177,28 +197,14 @@
+             using OPropertySetHelper::getFastPropertyValue;
+ 		};
+ 
+-		class OStatement_BASE2	:public OStatement_Base
+-								,public ::connectivity::OSubComponent<OStatement_BASE2, OStatement_BASE>
+-
+-		{
+-			friend class OSubComponent<OStatement_BASE2, OStatement_BASE>;
+-		public:
+-			OStatement_BASE2(OConnection* _pConnection ) :  OStatement_Base(_pConnection ),
+-									::connectivity::OSubComponent<OStatement_BASE2, OStatement_BASE>((::cppu::OWeakObject*)_pConnection, this){}
+-			// OComponentHelper
+-			virtual void SAL_CALL disposing(void);
+-			// XInterface
+-            virtual void SAL_CALL release() throw();
+-		};
+-
+-		class OStatement :	public OStatement_BASE2,
++		class OStatement :	public OCommonStatement,
+                             public ::com::sun::star::lang::XServiceInfo
+ 		{
+ 		protected:
+ 			~OStatement(){}
+ 		public:
+ 			// ein Konstruktor, der fuer das Returnen des Objektes benoetigt wird:
+-			OStatement( OConnection* _pConnection) : OStatement_BASE2( _pConnection){}
++			OStatement( OConnection* _pConnection) : OCommonStatement( _pConnection){}
+ 			DECLARE_SERVICE_INFO();
+ 
+             virtual ::com::sun::star::uno::Any SAL_CALL queryInterface( const ::com::sun::star::uno::Type & rType ) throw(::com::sun::star::uno::RuntimeException);
+--- connectivity/source/drivers/mozab/post_include_mozilla.h	(.../tags/DEV300_m41/connectivity)	(revision 269329)
++++ connectivity/source/drivers/mozab/post_include_mozilla.h	(.../cws/moz2seamonkey01/connectivity)	(revision 269329)
+@@ -46,4 +46,3 @@
+ #ifdef _DEBUG_WAS_DEFINED
+     #define _DEBUG _DEBUG_WAS_DEFINED
+ #endif
+-
+--- connectivity/source/drivers/mozab/MResultSetMetaData.cxx	(.../tags/DEV300_m41/connectivity)	(revision 269329)
++++ connectivity/source/drivers/mozab/MResultSetMetaData.cxx	(.../cws/moz2seamonkey01/connectivity)	(revision 269329)
+@@ -184,12 +184,7 @@
+     if ( m_pTable->getConnection()->isLDAP() )
+     {
+         const OColumnAlias& aAliases( m_pTable->getConnection()->getColumnAlias() );
+-        OColumnAlias::ProgrammaticName eProgrammatic( aAliases.getProgrammaticNameIndex( sColumnName ) );
+-        if  (   ( eProgrammatic == OColumnAlias::HOMECOUNTRY )
+-            ||  ( eProgrammatic == OColumnAlias::WORKCOUNTRY )
+-            )
+-            // for those, we know that they're not searchable in the Mozilla/LDAP implementation.
+-            // There might be more ...
++        if ( !aAliases.isColumnSearchable( sColumnName ) )
+             return sal_False;
+     }
+ 
+--- connectivity/source/drivers/mozab/bootstrap/MNSInit.cxx	(.../tags/DEV300_m41/connectivity)	(revision 269329)
++++ connectivity/source/drivers/mozab/bootstrap/MNSInit.cxx	(.../cws/moz2seamonkey01/connectivity)	(revision 269329)
+@@ -34,12 +34,13 @@
+ 
+ #include "mozilla_nsinit.h"
+ 
++#include <MNSInit.hxx>
++
+ #include <sal/types.h>
+ #include <osl/diagnose.h>
+ #include <osl/conditn.hxx>
+ #include <osl/file.hxx>
+ #include <rtl/bootstrap.hxx>
+-#include <MNSInit.hxx>
+ 
+ #ifndef CONNECTIVITY_MOZAB_MCONFIGACCESS_HXX
+ #include "MConfigAccess.hxx"
+--- connectivity/source/drivers/mozab/bootstrap/makefile.mk	(.../tags/DEV300_m41/connectivity)	(revision 269329)
++++ connectivity/source/drivers/mozab/bootstrap/makefile.mk	(.../cws/moz2seamonkey01/connectivity)	(revision 269329)
+@@ -88,6 +88,8 @@
+ 	$(SLO)$/MNSProfileDirServiceProvider.obj
+ .ENDIF
+ 
++CDEFS     += -DMOZILLA_INTERNAL_API
++
+ .IF "$(GUI)"=="UNX"
+ .IF "$(COMNAME)"=="sunpro5"
+ CFLAGS += -features=tmplife
+@@ -167,7 +169,7 @@
+ CFLAGSCXX += \
+             -fno-rtti -Wconversion -Wpointer-arith \
+             -Wcast-align -Woverloaded-virtual -Wsynth \
+-            -Wno-long-long
++            -Wno-long-long -Wno-deprecated
+ CDEFS     += -DTRACING
+ .ENDIF
+ 
+--- connectivity/source/drivers/mozab/bootstrap/MMozillaBootstrap.cxx	(.../tags/DEV300_m41/connectivity)	(revision 269329)
++++ connectivity/source/drivers/mozab/bootstrap/MMozillaBootstrap.cxx	(.../cws/moz2seamonkey01/connectivity)	(revision 269329)
+@@ -30,6 +30,7 @@
+ 
+ // MARKER(update_precomp.py): autogen include statement, do not remove
+ #include "precompiled_connectivity.hxx"
++
+ #include "MMozillaBootstrap.hxx"
+ 
+ using namespace com::sun::star::uno;
+--- connectivity/source/drivers/mozab/MDatabaseMetaData.cxx	(.../tags/DEV300_m41/connectivity)	(revision 269329)
++++ connectivity/source/drivers/mozab/MDatabaseMetaData.cxx	(.../cws/moz2seamonkey01/connectivity)	(revision 269329)
+@@ -157,7 +157,7 @@
+                     // COLUMN_NAME
+                     aRow[4] = new ORowSetValueDecorator( compare->first );
+                     // ORDINAL_POSITION
+-                    aRow[17] = new ORowSetValueDecorator( static_cast< sal_Int32 >( compare->second.eProgrammaticNameIndex ) + 1 );
++                    aRow[17] = new ORowSetValueDecorator( static_cast< sal_Int32 >( compare->second.columnPosition ) + 1 );
+                     aRows.push_back(aRow);
+                 }
+             }
+--- connectivity/source/drivers/mozab/makefile.mk	(.../tags/DEV300_m41/connectivity)	(revision 269329)
++++ connectivity/source/drivers/mozab/makefile.mk	(.../cws/moz2seamonkey01/connectivity)	(revision 269329)
+@@ -64,13 +64,13 @@
+ 
+ .IF "$(OS)"=="WNT" 
+ .IF "$(COM)"=="GCC"
+-MOZ_LIB_XPCOM= -L$(MOZ_LIB) -lembed_base_s -lnspr4 -lmozreg_s -lxpcom
++MOZ_LIB_XPCOM= -L$(MOZ_LIB) -lembed_base_s -lnspr4 -lmozreg_s -lxpcom -lxpcom_core
+ .ELSE
+ LIB += $(MOZ_LIB)
+-MOZ_LIB_XPCOM= $(MOZ_EMBED_LIB) $(MOZ_LIB)$/nspr4.lib $(MOZ_REG_LIB) $(MOZ_LIB)$/xpcom.lib
++MOZ_LIB_XPCOM= $(MOZ_EMBED_LIB) $(MOZ_LIB)$/nspr4.lib $(MOZ_REG_LIB) $(MOZ_LIB)$/xpcom.lib $(MOZ_LIB)$/xpcom_core.lib
+ .ENDIF
+ .ELSE "$(OS)"=="WNT" 
+-MOZ_LIB_XPCOM= -L$(MOZ_LIB) -lembed_base_s -lnspr4 -lmozreg_s -lxpcom
++MOZ_LIB_XPCOM= -L$(MOZ_LIB) -lnspr4 -lxpcom_core -lmozreg_s -lembed_base_s
+ .ENDIF
+ #End of mozilla specific stuff.
+ 
+@@ -141,7 +141,8 @@
+ 	$(SLO)$/MNSINIParser.obj	\
+ 	$(SLO)$/MNSRunnable.obj	\
+ 	$(SLO)$/MNSProfile.obj					\
+-	$(SLO)$/MNSProfileDirServiceProvider.obj
++	$(SLO)$/MNSProfileDirServiceProvider.obj    \
++	$(SLO)$/MLdapAttributeMap.obj
+ 
+ 
+ SLO2FILES=\
+--- connectivity/source/drivers/mozab/MColumnAlias.cxx	(.../tags/DEV300_m41/connectivity)	(revision 269329)
++++ connectivity/source/drivers/mozab/MColumnAlias.cxx	(.../cws/moz2seamonkey01/connectivity)	(revision 269329)
+@@ -32,13 +32,16 @@
+ #include "precompiled_connectivity.hxx"
+ #include "MColumnAlias.hxx"
+ #include "MConnection.hxx"
++#include "MExtConfigAccess.hxx"
++
+ #include <com/sun/star/beans/XPropertySet.hpp>
+ #include <com/sun/star/container/XNameAccess.hpp>
+-#ifndef CONNECTIVITY_MOZAB_MEXTCONFIGACCESS_HXX
+-#include "MExtConfigAccess.hxx"
+-#endif
+ 
++#include <tools/diagnose_ex.h>
+ 
++#include <algorithm>
++#include <functional>
++
+ using namespace ::connectivity;
+ using namespace ::connectivity::mozab;
+ using namespace ::com::sun::star::uno;
+@@ -46,56 +49,57 @@
+ using namespace ::com::sun::star::beans;
+ using namespace ::com::sun::star::container;
+ 
+-static const ::rtl::OUString sProgrammaticNames[] =
+-{
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("FirstName")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("LastName")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("DisplayName")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("NickName")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("PrimaryEmail")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("SecondEmail")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("PreferMailFormat")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("WorkPhone")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("HomePhone")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("FaxNumber")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("PagerNumber")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("CellularNumber")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("HomeAddress")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("HomeAddress2")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("HomeCity")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("HomeState")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("HomeZipCode")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("HomeCountry")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("WorkAddress")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("WorkAddress2")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("WorkCity")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("WorkState")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("WorkZipCode")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("WorkCountry")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("JobTitle")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Department")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Company")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("WebPage1")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("WebPage2")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("BirthYear")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("BirthMonth")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("BirthDay")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Custom1")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Custom2")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Custom3")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Custom4")),
+-	::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Notes"))
+-};
+ //------------------------------------------------------------------------------
+ OColumnAlias::OColumnAlias( const ::com::sun::star::uno::Reference< ::com::sun::star::lang::XMultiServiceFactory >& _rxORB )
+ {
+-    for ( size_t i = 0; i < END - BEGIN; ++i )
+-        m_aAliasMap[ sProgrammaticNames[i] ] = AliasDescription( sProgrammaticNames[i], static_cast< ProgrammaticName>( i ) );
++    static const sal_Char* s_pProgrammaticNames[] =
++    {
++        "FirstName",
++        "LastName",
++        "DisplayName",
++        "NickName",
++        "PrimaryEmail",
++        "SecondEmail",
++        "PreferMailFormat",
++        "WorkPhone",
++        "HomePhone",
++        "FaxNumber",
++        "PagerNumber",
++        "CellularNumber",
++        "HomeAddress",
++        "HomeAddress2",
++        "HomeCity",
++        "HomeState",
++        "HomeZipCode",
++        "HomeCountry",
++        "WorkAddress",
++        "WorkAddress2",
++        "WorkCity",
++        "WorkState",
++        "WorkZipCode",
++        "WorkCountry",
++        "JobTitle",
++        "Department",
++        "Company",
++        "WebPage1",
++        "WebPage2",
++        "BirthYear",
++        "BirthMonth",
++        "BirthDay",
++        "Custom1",
++        "Custom2",
++        "Custom3",
++        "Custom4",
++        "Notes",
++    };
+ 
++    for ( size_t i = 0; i < sizeof( s_pProgrammaticNames ) / sizeof( s_pProgrammaticNames[0] ); ++i )
++        m_aAliasMap[ ::rtl::OUString::createFromAscii( s_pProgrammaticNames[i] ) ] = AliasEntry( s_pProgrammaticNames[i], i );
++
+     initialize( _rxORB );
+ }
+ 
+-//------------------------------------------------------------------
++//------------------------------------------------------------------------------
+ void OColumnAlias::initialize( const ::com::sun::star::uno::Reference< ::com::sun::star::lang::XMultiServiceFactory >& _rxORB )
+ {
+     // open our driver settings config node
+@@ -112,34 +116,26 @@
+ 			OSL_ENSURE( xAliasesNode.is(), "OColumnAlias::setAlias: missing the aliases node!" );
+ 
+ 			// this is a set of string nodes
+-			Sequence< ::rtl::OUString > aColumnProgrammaticNames;
++			Sequence< ::rtl::OUString > aProgrammaticNames;
+ 			if ( xAliasesNode.is() )
+-				aColumnProgrammaticNames = xAliasesNode->getElementNames();
++                aProgrammaticNames = xAliasesNode->getElementNames();
+ 
+ 			//.............................................................
+ 			// travel through all the set elements
+-			const ::rtl::OUString* pProgrammaticNames = aColumnProgrammaticNames.getConstArray();
+-			const ::rtl::OUString* pProgrammaticNamesEnd = pProgrammaticNames + aColumnProgrammaticNames.getLength();
++			const ::rtl::OUString* pProgrammaticNames = aProgrammaticNames.getConstArray();
++			const ::rtl::OUString* pProgrammaticNamesEnd = pProgrammaticNames + aProgrammaticNames.getLength();
+ 			::rtl::OUString sAssignedAlias;
+ 
+ 			for ( ; pProgrammaticNames < pProgrammaticNamesEnd; ++pProgrammaticNames )
+ 			{
+-				OSL_ENSURE( m_aAliasMap.end() != m_aAliasMap.find( *pProgrammaticNames ),
+-					"OColumnAlias::setAlias: found an invalid programmtic name!" );
+-					// if this asserts, somebody stored a programmatic name in the configuration
+-					// which is not allowed (i.e. not in the list of known programmatics).
++				OSL_VERIFY( xAliasesNode->getByName( *pProgrammaticNames ) >>= sAssignedAlias );
+ 
+-#if OSL_DEBUG_LEVEL > 0
+-				sal_Bool bExtractionSuccess =
+-#endif
+-				xAliasesNode->getByName( *pProgrammaticNames) >>= sAssignedAlias;
+-				OSL_ENSURE( bExtractionSuccess, "OColumnAlias::setAlias: invalid config data!" );
+-
+ 				// normalize in case the config data is corrupted
+ 				// (what we really don't need is an empty alias ...)
+ 				if ( 0 == sAssignedAlias.getLength() )
+ 					  sAssignedAlias = *pProgrammaticNames;
+ 
++                ::rtl::OString sAsciiProgrammaticName( ::rtl::OUStringToOString( *pProgrammaticNames, RTL_TEXTENCODING_ASCII_US ) );
+ 				//.............................................................
+             #if OSL_DEBUG_LEVEL > 0
+                 bool bFound = false;
+@@ -149,16 +145,12 @@
+                         ++search
+                     )
+                 {
+-                    if ( search->second.sProgrammaticName == *pProgrammaticNames )
++                    if ( search->second.programmaticAsciiName.equals( sAsciiProgrammaticName ) )
+                     {
+-                        AliasDescription aDescription( search->second );
+-
+-                        // delete this old entry for this programmatic name
++                        AliasEntry entry( search->second );
+                         m_aAliasMap.erase( search );
++                        m_aAliasMap[ sAssignedAlias ] = entry;
+ 
+-                        // insert the same AliasDescription under a new name - its alias
+-                        m_aAliasMap[ sAssignedAlias ] = aDescription;
+-
+                     #if OSL_DEBUG_LEVEL > 0
+                         bFound = true;
+                     #endif
+@@ -172,29 +164,31 @@
+ 		}
+ 		catch( const Exception& )
+ 		{
+-			OSL_ENSURE( sal_False, "OColumnAlias::setAlias: could not read my driver's configuration data!" );
++            DBG_UNHANDLED_EXCEPTION();
+ 		}
+ 	}
+ }
+ 
+ //------------------------------------------------------------------
+-OColumnAlias::ProgrammaticName OColumnAlias::getProgrammaticNameIndex( const ::rtl::OUString& _rAliasName ) const
++::rtl::OString OColumnAlias::getProgrammaticNameOrFallbackToUTF8Alias( const ::rtl::OUString& _rAlias ) const
+ {
+-    AliasMap::const_iterator pos = m_aAliasMap.find( _rAliasName );
++    AliasMap::const_iterator pos = m_aAliasMap.find( _rAlias );
+     if ( pos == m_aAliasMap.end() )
+     {
+-        OSL_ENSURE( false, "OColumnAlias::getProgrammaticNameIndex: unknown column alias!" );
+-        return END;
++        OSL_ENSURE( false, "OColumnAlias::getProgrammaticNameOrFallbackToUTF8Alias: no programmatic name for this alias!" );
++        return ::rtl::OUStringToOString( _rAlias, RTL_TEXTENCODING_UTF8 );
+     }
+-
+-    return pos->second.eProgrammaticNameIndex;
++    return pos->second.programmaticAsciiName;
+ }
+ 
+ //------------------------------------------------------------------
+-::rtl::OUString OColumnAlias::getProgrammaticNameOrFallbackToAlias( const ::rtl::OUString& _rAlias ) const
++bool OColumnAlias::isColumnSearchable( const ::rtl::OUString _alias ) const
+ {
+-    AliasMap::const_iterator pos = m_aAliasMap.find( _rAlias );
+-    if ( pos == m_aAliasMap.end() )
+-        return _rAlias;
+-    return pos->second.sProgrammaticName;
++    ::rtl::OString sProgrammatic = getProgrammaticNameOrFallbackToUTF8Alias( _alias );
++
++    return  (   !sProgrammatic.equals( "HomeCountry" )
++            &&  !sProgrammatic.equals( "WorkCountry" )
++            );
++    // for those, we know that they're not searchable in the Mozilla/LDAP implementation.
++    // There might be more ...
+ }
+--- connectivity/source/drivers/mozab/MColumnAlias.hxx	(.../tags/DEV300_m41/connectivity)	(revision 269329)
++++ connectivity/source/drivers/mozab/MColumnAlias.hxx	(.../cws/moz2seamonkey01/connectivity)	(revision 269329)
+@@ -36,7 +36,7 @@
+ 
+ #include <osl/mutex.hxx>
+ #include <vector>
+-#include <map>
++#include <hash_map>
+ 
+ namespace connectivity
+ {
+@@ -45,88 +45,41 @@
+ 		class OColumnAlias
+ 		{
+         public:
+-		    typedef enum {
+-                BEGIN = 0,
+-
+-			    FIRSTNAME = BEGIN,
+-			    LASTNAME,
+-			    DISPLAYNAME,
+-			    NICKNAME,
+-			    PRIMARYEMAIL,
+-			    SECONDEMAIL,
+-			    PREFERMAILFORMAT,
+-			    WORKPHONE,
+-			    HOMEPHONE,
+-			    FAXNUMBER,
+-			    PAGERNUMBER,
+-			    CELLULARNUMBER,
+-			    HOMEADDRESS,
+-			    HOMEADDRESS2,
+-			    HOMECITY,
+-			    HOMESTATE,
+-			    HOMEZIPCODE,
+-			    HOMECOUNTRY,
+-			    WORKADDRESS,
+-			    WORKADDRESS2,
+-			    WORKCITY,
+-			    WORKSTATE,
+-			    WORKZIPCODE,
+-			    WORKCOUNTRY,
+-			    JOBTITLE,
+-			    DEPARTMENT,
+-			    COMPANY,
+-			    WEBPAGE1,
+-			    WEBPAGE2,
+-			    BIRTHYEAR,
+-			    BIRTHMONTH,
+-			    BIRTHDAY,
+-			    CUSTOM1,
+-			    CUSTOM2,
+-			    CUSTOM3,
+-			    CUSTOM4,
+-			    NOTES,
+-
+-                END
+-		    } ProgrammaticName;
+-
+-            struct AliasDescription
++            struct AliasEntry
+             {
+-                ::rtl::OUString     sProgrammaticName;
+-                ProgrammaticName    eProgrammaticNameIndex;
++                ::rtl::OString  programmaticAsciiName;
++                sal_Int32       columnPosition;
+ 
+-                AliasDescription()
+-                    :eProgrammaticNameIndex( END )
++                AliasEntry()
++                    :programmaticAsciiName()
++                    ,columnPosition( 0 )
+                 {
+                 }
+-
+-                AliasDescription( const ::rtl::OUString& _rName, ProgrammaticName _eIndex )
+-                    :sProgrammaticName( _rName ), eProgrammaticNameIndex( _eIndex )
++                AliasEntry( const sal_Char* _programmaticAsciiName, sal_Int32 _columnPosition )
++                    :programmaticAsciiName( _programmaticAsciiName )
++                    ,columnPosition( _columnPosition )
+                 {
+                 }
+             };
++            typedef ::std::hash_map< ::rtl::OUString, AliasEntry, ::rtl::OUStringHash > AliasMap;
+ 
+-            typedef ::std::map< ::rtl::OUString, AliasDescription > AliasMap;
+-
+         private:
+ 			AliasMap    m_aAliasMap;
+ 
+-        protected:
+-			::osl::Mutex  m_aMutex;
+-
+         public:
+-			OColumnAlias(
+-                const ::com::sun::star::uno::Reference< ::com::sun::star::lang::XMultiServiceFactory > & );
++			OColumnAlias( const ::com::sun::star::uno::Reference< ::com::sun::star::lang::XMultiServiceFactory > & );
+ 
+-            ProgrammaticName getProgrammaticNameIndex( const ::rtl::OUString& _rAliasName ) const;
+             inline bool hasAlias( const ::rtl::OUString& _rAlias ) const
+             {
+                 return m_aAliasMap.find( _rAlias ) != m_aAliasMap.end();
+             }
+-            ::rtl::OUString getProgrammaticNameOrFallbackToAlias( const ::rtl::OUString& _rAlias ) const;
++            ::rtl::OString getProgrammaticNameOrFallbackToUTF8Alias( const ::rtl::OUString& _rAlias ) const;
+ 
+             inline AliasMap::const_iterator begin() const { return m_aAliasMap.begin(); }
+             inline AliasMap::const_iterator end() const { return m_aAliasMap.end(); }
+ 
++            bool isColumnSearchable( const ::rtl::OUString _alias ) const;
++
+ 		private:
+             void initialize( const ::com::sun::star::uno::Reference< ::com::sun::star::lang::XMultiServiceFactory >& _rxORB );
+ 		};
+--- connectivity/source/drivers/mozab/MPreparedStatement.cxx	(.../tags/DEV300_m41/connectivity)	(revision 269329)
++++ connectivity/source/drivers/mozab/MPreparedStatement.cxx	(.../cws/moz2seamonkey01/connectivity)	(revision 269329)
+@@ -67,11 +67,11 @@
+ 
+ 
+ OPreparedStatement::OPreparedStatement( OConnection* _pConnection,const ::rtl::OUString& sql)
+-	:OStatement_BASE2(_pConnection)
++	:OCommonStatement(_pConnection)
+     ,m_nNumParams(0)
+     ,m_sSqlStatement(sql)
+ 	,m_bPrepared(sal_False)
+-    ,m_pResultSet( NULL )
++    ,m_pResultSet()
+ {
+ }
+ // -----------------------------------------------------------------------------
+@@ -79,22 +79,18 @@
+ {
+ }
+ // -----------------------------------------------------------------------------
+-sal_Bool OPreparedStatement::lateInit()
++void OPreparedStatement::lateInit()
+ {
+-    return parseSql( m_sSqlStatement );
++    if ( eSelect != parseSql( m_sSqlStatement ) )
++        throw SQLException();
+ }
+ // -------------------------------------------------------------------------
+ void SAL_CALL OPreparedStatement::disposing()
+ {
+ 	::osl::MutexGuard aGuard(m_aMutex);
+ 
+-	if(m_pResultSet)
+-		m_pResultSet->release();
++	OCommonStatement::disposing();
+ 
+-	clearMyResultSet();
+-
+-	OStatement_BASE2::disposing();
+-
+ 	m_xMetaData = NULL;
+ 	if(m_aParameterRow.isValid())
+ 	{
+@@ -105,63 +101,61 @@
+ }
+ // -----------------------------------------------------------------------------
+ 
+-sal_Bool OPreparedStatement::parseSql( const ::rtl::OUString& sql , sal_Bool bAdjusted ) throw (
+-     ::com::sun::star::sdbc::SQLException, ::com::sun::star::uno::RuntimeException )
++OCommonStatement::StatementType OPreparedStatement::parseSql( const ::rtl::OUString& sql , sal_Bool bAdjusted )
++    throw ( ::com::sun::star::sdbc::SQLException, ::com::sun::star::uno::RuntimeException )
+ {
+-    OSL_TRACE("in :: OPreparedStatement::parseSql()");
+-    if (!OStatement_Base::parseSql( sql, bAdjusted ))
+-		return sal_False;
++    StatementType eStatementType = OCommonStatement::parseSql( sql, bAdjusted );
++    if ( eStatementType != eSelect )
++		return eStatementType;
+ 
+     m_xParamColumns = new OSQLColumns();
+ 
+-    Reference<XIndexAccess> xNames(m_xColNames,UNO_QUERY);
+-
+     // describe all parameters need for the resultset
+     describeParameter();
+ 
+-    OResultSet::setBoundedColumns(m_aRow,m_xParamColumns,xNames,sal_False,m_xDBMetaData,m_aColMapping);
++    Reference<XIndexAccess> xNames(m_xColNames,UNO_QUERY);
++    OResultSet::setBoundedColumns( m_aRow, m_xParamColumns, xNames, sal_False, m_xDBMetaData, m_aColMapping );
+ 
+-    m_pResultSet = createResultSet();
+-	m_pResultSet->acquire();
+-    m_xResultSet = Reference<XResultSet>(m_pResultSet);
+-    initializeResultSet(m_pResultSet);
+-    OSL_TRACE("Out :: OPreparedStatement::parseSql()");
+-	return sal_True;
++    return eStatementType;
+ }
+ 
+ // -----------------------------------------------------------------------------
+-
+-OResultSet* OPreparedStatement::createResultSet( )
++void OPreparedStatement::initializeResultSet( OResultSet* _pResult )
+ {
+-    OSL_TRACE("In/Out : OPreparedStatement::createResultSet( )");
+-    return new OResultSet( this, m_pSQLIterator );
++    OCommonStatement::initializeResultSet( _pResult );
++    _pResult->setParameterColumns( m_xParamColumns );
++    _pResult->setParameterRow( m_aParameterRow );
+ }
+ 
+ // -----------------------------------------------------------------------------
+-void OPreparedStatement::initializeResultSet( OResultSet* _pResult )
++void OPreparedStatement::clearCachedResultSet()
+ {
+-    OSL_TRACE("In : OPreparedStatement::initializeResultSet( )");
+-    OStatement_Base::initializeResultSet( _pResult );
+-
+-    _pResult->setParameterColumns(m_xParamColumns);
+-    _pResult->setParameterRow(m_aParameterRow);
+-    OSL_TRACE("Out : OPreparedStatement::initializeResultSet( )");
++    OCommonStatement::clearCachedResultSet();
++    m_pResultSet.clear();
++    m_xMetaData.clear();
+ }
++// -----------------------------------------------------------------------------
++void OPreparedStatement::cacheResultSet( const ::rtl::Reference< OResultSet >& _pResult )
++{
++    OCommonStatement::cacheResultSet( _pResult );
++    OSL_PRECOND( m_pResultSet == NULL, "OPreparedStatement::parseSql: you should call clearCachedResultSet before!" );
++    m_pResultSet = _pResult;
++}
+ 
+ // -----------------------------------------------------------------------------
+ void SAL_CALL OPreparedStatement::acquire() throw()
+ {
+-	OStatement_BASE2::acquire();
++	OCommonStatement::acquire();
+ }
+ // -----------------------------------------------------------------------------
+ void SAL_CALL OPreparedStatement::release() throw()
+ {
+-	OStatement_BASE2::release();
++	OCommonStatement::release();
+ }
+ // -----------------------------------------------------------------------------
+ Any SAL_CALL OPreparedStatement::queryInterface( const Type & rType ) throw(RuntimeException)
+ {
+-	Any aRet = OStatement_BASE2::queryInterface(rType);
++	Any aRet = OCommonStatement::queryInterface(rType);
+ 	if(!aRet.hasValue())
+ 		aRet = OPreparedStatement_BASE::queryInterface(rType);
+ 	return aRet;
+@@ -169,69 +163,49 @@
+ // -------------------------------------------------------------------------
+ ::com::sun::star::uno::Sequence< ::com::sun::star::uno::Type > SAL_CALL OPreparedStatement::getTypes(  ) throw(::com::sun::star::uno::RuntimeException)
+ {
+-	return ::comphelper::concatSequences(OPreparedStatement_BASE::getTypes(),OStatement_BASE2::getTypes());
++	return ::comphelper::concatSequences(OPreparedStatement_BASE::getTypes(),OCommonStatement::getTypes());
+ }
+ // -------------------------------------------------------------------------
+ 
+ Reference< XResultSetMetaData > SAL_CALL OPreparedStatement::getMetaData(  ) throw(SQLException, RuntimeException)
+ {
+ 	::osl::MutexGuard aGuard( m_aMutex );
+-	checkDisposed(OStatement_BASE::rBHelper.bDisposed);
+-    sal_Bool bReadOnly= sal_True;
+-    if (m_pResultSet)
++	checkDisposed(OCommonStatement_IBASE::rBHelper.bDisposed);
++
++    sal_Bool bReadOnly = sal_True;
++    if ( m_pResultSet.is() )
+         bReadOnly = m_pResultSet->determineReadOnly();
+-	if(!m_xMetaData.is())
++    // if we do not have a result set, then we have not been executed, yet. In this case, assuming readonly=true is
++    // okay, /me thinks.
++
++	if ( !m_xMetaData.is() )
+         m_xMetaData = new OResultSetMetaData( m_pSQLIterator->getSelectColumns(), m_pSQLIterator->getTables().begin()->first ,m_pTable,bReadOnly );
++
+ 	return m_xMetaData;
+ }
+-// -------------------------------------------------------------------------
+ 
+-void SAL_CALL OPreparedStatement::close(  ) throw(SQLException, RuntimeException)
+-{
+-	::osl::MutexGuard aGuard( m_aMutex );
+-	checkDisposed(OStatement_BASE::rBHelper.bDisposed);
+-
+-
+-	// Reset last warning message
+-
+-	try {
+-		clearWarnings ();
+-        clearMyResultSet();
+-		// OStatement_BASE2::close();
+-	}
+-	catch (SQLException &) {
+-		// If we get an error, ignore
+-	}
+-
+-	// Remove this Statement object from the Connection object's
+-	// list
+-}
+ // -------------------------------------------------------------------------
+-
+ sal_Bool SAL_CALL OPreparedStatement::execute(  ) throw(SQLException, RuntimeException)
+ {
+ 	::osl::MutexGuard aGuard( m_aMutex );
+-	checkDisposed(OStatement_BASE::rBHelper.bDisposed);
++	checkDisposed(OCommonStatement_IBASE::rBHelper.bDisposed);
+ 
+-
+-    Reference< XResultSet> xRS = OStatement_Base::executeQuery( m_sSqlStatement );
+-	// same as in statement with the difference that this statement also can contain parameter
+-
+-    OSL_TRACE("In/Out: OPreparedStatement::execute" );
+-	return xRS.is();
++    Reference< XResultSet> xResult = executeQuery();
++	return xResult.is();
+ }
+ // -------------------------------------------------------------------------
+ 
+ sal_Int32 SAL_CALL OPreparedStatement::executeUpdate(  ) throw(SQLException, RuntimeException)
+ {
+-	return 0;
++    ::dbtools::throwFeatureNotImplementedException( "XStatement::executeUpdate", *this );
++    return 0;
+ }
+ // -------------------------------------------------------------------------
+ 
+ void SAL_CALL OPreparedStatement::setString( sal_Int32 parameterIndex, const ::rtl::OUString& x ) throw(SQLException, RuntimeException)
+ {
+ 	::osl::MutexGuard aGuard( m_aMutex );
+-	checkDisposed(OStatement_BASE::rBHelper.bDisposed);
++	checkDisposed(OCommonStatement_IBASE::rBHelper.bDisposed);
+ 
+     OSL_TRACE("prepStmt::setString( %s )", OUtoCStr( x ) );
+     setParameter( parameterIndex, x );
+@@ -241,7 +215,7 @@
+ Reference< XConnection > SAL_CALL OPreparedStatement::getConnection(  ) throw(SQLException, RuntimeException)
+ {
+ 	::osl::MutexGuard aGuard( m_aMutex );
+-	checkDisposed(OStatement_BASE::rBHelper.bDisposed);
++	checkDisposed(OCommonStatement_IBASE::rBHelper.bDisposed);
+ 
+ 	return (Reference< XConnection >)m_pConnection;
+ }
+@@ -251,12 +225,11 @@
+ {
+ 	::osl::MutexGuard aGuard( m_aMutex );
+     OSL_TRACE("In: OPreparedStatement::executeQuery" );
+-	checkDisposed(OStatement_BASE::rBHelper.bDisposed);
++	checkDisposed(OCommonStatement_IBASE::rBHelper.bDisposed);
+ 
+-	Reference< XResultSet > rs = OStatement_Base::executeQuery( m_sSqlStatement );
+-
+-    OSL_TRACE("Out: OPreparedStatement::executeQuery" );
+-	return rs;
++    // our statement has already been parsed in lateInit, no need to do all this (potentially expensive)
++    // stuff again. Just execute.
++    return impl_executeCurrentQuery();
+ }
+ // -------------------------------------------------------------------------
+ 
+@@ -318,7 +291,7 @@
+ void SAL_CALL OPreparedStatement::setNull( sal_Int32 parameterIndex, sal_Int32 /*sqlType*/ ) throw(SQLException, RuntimeException)
+ {
+ 	::osl::MutexGuard aGuard( m_aMutex );
+-	checkDisposed(OStatement_BASE::rBHelper.bDisposed);
++	checkDisposed(OCommonStatement_IBASE::rBHelper.bDisposed);
+ 
+     checkAndResizeParameters(parameterIndex);
+ 
+@@ -410,7 +383,7 @@
+ 		case PROPERTY_ID_USEBOOKMARKS:
+ 			break;
+ 		default:
+-			OStatement_Base::setFastPropertyValue_NoBroadcast(nHandle,rValue);
++			OCommonStatement::setFastPropertyValue_NoBroadcast(nHandle,rValue);
+ 	}
+ }
+ // -----------------------------------------------------------------------------
+@@ -422,7 +395,7 @@
+ // -----------------------------------------------------------------------------
+ void OPreparedStatement::checkAndResizeParameters(sal_Int32 parameterIndex)
+ {
+-    ::connectivity::checkDisposed(OStatement_BASE::rBHelper.bDisposed);
++    ::connectivity::checkDisposed(OCommonStatement_IBASE::rBHelper.bDisposed);
+ 
+     if ( !m_aParameterRow.isValid() ) {
+         m_aParameterRow = new OValueVector();
+--- connectivity/source/drivers/mozab/pre_include_mozilla.h	(.../tags/DEV300_m41/connectivity)	(revision 269329)
++++ connectivity/source/drivers/mozab/pre_include_mozilla.h	(.../cws/moz2seamonkey01/connectivity)	(revision 269329)
+@@ -38,18 +38,28 @@
+ // Turn off DEBUG Assertions
+ #ifdef _DEBUG
+     #define _DEBUG_WAS_DEFINED _DEBUG
+-    #undef _DEBUG
++    #ifndef MOZILLA_ENABLE_DEBUG
++        #undef _DEBUG
++    #endif
+ #else
+     #undef _DEBUG_WAS_DEFINED
++    #ifdef MOZILLA_ENABLE_DEBUG
++        #define _DEBUG 1
++    #endif
+ #endif
+ 
+ // and turn off the additional virtual methods which are part of some interfaces when compiled
+ // with debug
+ #ifdef DEBUG
+     #define DEBUG_WAS_DEFINED DEBUG
+-    #undef DEBUG
++    #ifndef MOZILLA_ENABLE_DEBUG
++        #undef DEBUG
++    #endif
+ #else
+     #undef DEBUG_WAS_DEFINED
++    #ifdef MOZILLA_ENABLE_DEBUG
++        #define DEBUG 1
++    #endif
+ #endif
+ 
+ #if defined __GNUC__
+--- connectivity/source/drivers/mozab/MResultSet.cxx	(.../tags/DEV300_m41/connectivity)	(revision 269329)
++++ connectivity/source/drivers/mozab/MResultSet.cxx	(.../cws/moz2seamonkey01/connectivity)	(revision 269329)
+@@ -99,7 +99,7 @@
+ }
+ 
+ // -------------------------------------------------------------------------
+-OResultSet::OResultSet(OStatement_Base* pStmt, const ::boost::shared_ptr< connectivity::OSQLParseTreeIterator >& _pSQLIterator )
++OResultSet::OResultSet(OCommonStatement* pStmt, const ::boost::shared_ptr< connectivity::OSQLParseTreeIterator >& _pSQLIterator )
+ 	: OResultSet_BASE(m_aMutex)
+ 	,OPropertySetHelper(OResultSet_BASE::rBHelper)
+     ,m_pStatement(pStmt)
+@@ -510,7 +510,7 @@
+ {
+     ResultSetEntryGuard aGuard( *this );
+     OSL_TRACE("In/Out: OResultSet::close" );
+-	// dispose();
++	dispose();
+ }
+ // -------------------------------------------------------------------------
+ 
+@@ -1123,9 +1123,6 @@
+ 
+     m_aQuery.setExpression( queryExpression );
+ 
+-    // We need a unique id for caching mechanism so should fetch card:URI
+-    m_aQuery.setAttributes( m_aAttributeStrings );
+-
+     rtl::OUString aStr(  m_pTable->getName() );
+     m_aQuery.setAddressbook( aStr );
+ 
+--- connectivity/source/drivers/mozab/MDriver.cxx	(.../tags/DEV300_m41/connectivity)	(revision 269329)
++++ connectivity/source/drivers/mozab/MDriver.cxx	(.../cws/moz2seamonkey01/connectivity)	(revision 269329)
+@@ -306,7 +306,7 @@
+ 
+ 	// load the dbtools library
+ 	m_hModule = osl_loadModuleRelative(&thisModule, sModuleName.pData, 0);
+-	OSL_ENSURE(NULL != m_hModule, "MozabDriver::ensureInit: could not load the dbtools library!");
++	OSL_ENSURE(NULL != m_hModule, "MozabDriver::ensureInit: could not load the mozabdrv library!");
+ 	if ( !m_hModule )
+         return false;
+ 
+--- connectivity/source/drivers/mozab/MPreparedStatement.hxx	(.../tags/DEV300_m41/connectivity)	(revision 269329)
++++ connectivity/source/drivers/mozab/MPreparedStatement.hxx	(.../cws/moz2seamonkey01/connectivity)	(revision 269329)
+@@ -53,7 +53,7 @@
+ 										::com::sun::star::sdbc::XMultipleResults,
+                                         ::com::sun::star::lang::XServiceInfo> OPreparedStatement_BASE;
+ 
+-        class OPreparedStatement :  public  OStatement_BASE2,
++        class OPreparedStatement :  public  OCommonStatement,
+                                     public  OPreparedStatement_BASE
+         {
+         protected:
+@@ -79,7 +79,7 @@
+             ::rtl::OUString                             m_sSqlStatement;
+             ::com::sun::star::uno::Reference< ::com::sun::star::sdbc::XResultSetMetaData >  m_xMetaData;
+             sal_Bool                                    m_bPrepared;
+-            OResultSet*                                 m_pResultSet;
++            ::rtl::Reference< OResultSet >              m_pResultSet;
+             ::vos::ORef<connectivity::OSQLColumns>      m_xParamColumns;    // the parameter columns
+             OValueRow                                   m_aParameterRow;
+ 
+@@ -93,29 +93,29 @@
+             virtual ~OPreparedStatement();
+ 
+             virtual void SAL_CALL disposing();
+-            virtual sal_Bool parseSql( const ::rtl::OUString& sql , sal_Bool bAdjusted = sal_False) throw ( 
+-                           ::com::sun::star::sdbc::SQLException, ::com::sun::star::uno::RuntimeException );
+ 
+-			virtual OResultSet* createResultSet();
+-			::com::sun::star::uno::Reference< ::com::sun::star::sdbc::XResultSet> initResultSet();
++            // OCommonStatement overridables
++            virtual StatementType
++                            parseSql( const ::rtl::OUString& sql , sal_Bool bAdjusted = sal_False) throw ( ::com::sun::star::sdbc::SQLException, ::com::sun::star::uno::RuntimeException );
++            virtual void    initializeResultSet( OResultSet* _pResult );
++            virtual void    clearCachedResultSet();
++            virtual void    cacheResultSet( const ::rtl::Reference< OResultSet >& _pResult );
+ 
+-			void checkAndResizeParameters(sal_Int32 parameterIndex);
++
++            void checkAndResizeParameters(sal_Int32 parameterIndex);
+ 			void setParameter(sal_Int32 parameterIndex, const ORowSetValue& x);
+ 
+-
+ 			sal_uInt32 AddParameter(connectivity::OSQLParseNode * pParameter, 
+ 								const ::com::sun::star::uno::Reference< ::com::sun::star::beans::XPropertySet>& _xCol);
+ 			void scanParameter(OSQLParseNode* pParseNode,::std::vector< OSQLParseNode*>& _rParaNodes);
+ 			void describeColumn(OSQLParseNode* _pParameter,OSQLParseNode* _pNode,const OSQLTable& _xTable);
+ 			void describeParameter();
+ 
+-            virtual void initializeResultSet( OResultSet* _pResult );
+-
+         public:
+             DECLARE_SERVICE_INFO();
+             // ein Konstruktor, der fuer das Returnen des Objektes benoetigt wird:
+             OPreparedStatement( OConnection* _pConnection,const ::rtl::OUString& sql);
+-            sal_Bool lateInit();
++            void lateInit();
+ 
+             //XInterface
+             virtual ::com::sun::star::uno::Any SAL_CALL queryInterface( const ::com::sun::star::uno::Type & rType ) throw(::com::sun::star::uno::RuntimeException);
+@@ -153,8 +153,6 @@
+             virtual void SAL_CALL setClob( sal_Int32 parameterIndex, const ::com::sun::star::uno::Reference< ::com::sun::star::sdbc::XClob >& x ) throw(::com::sun::star::sdbc::SQLException, ::com::sun::star::uno::RuntimeException);
+             virtual void SAL_CALL setArray( sal_Int32 parameterIndex, const ::com::sun::star::uno::Reference< ::com::sun::star::sdbc::XArray >& x ) throw(::com::sun::star::sdbc::SQLException, ::com::sun::star::uno::RuntimeException);
+             virtual void SAL_CALL clearParameters(  ) throw(::com::sun::star::sdbc::SQLException, ::com::sun::star::uno::RuntimeException);
+-            // XCloseable
+-            virtual void SAL_CALL close(  ) throw(::com::sun::star::sdbc::SQLException, ::com::sun::star::uno::RuntimeException);
+             // XResultSetMetaDataSupplier
+             virtual ::com::sun::star::uno::Reference< ::com::sun::star::sdbc::XResultSetMetaData > SAL_CALL getMetaData(  ) throw(::com::sun::star::sdbc::SQLException, ::com::sun::star::uno::RuntimeException);
+ 			// XMultipleResults
+@@ -163,9 +161,9 @@
+             virtual sal_Bool SAL_CALL getMoreResults(  ) throw(::com::sun::star::sdbc::SQLException, ::com::sun::star::uno::RuntimeException);
+ 
+         public:
+-            using OStatement_Base::executeQuery;
+-            using OStatement_Base::executeUpdate;
+-            using OStatement_Base::execute;
++            using OCommonStatement::executeQuery;
++            using OCommonStatement::executeUpdate;
++            using OCommonStatement::execute;
+         protected:
+             using OPropertySetHelper::getFastPropertyValue;
+         };
+--- connectivity/source/drivers/mozab/MResultSet.hxx	(.../tags/DEV300_m41/connectivity)	(revision 269329)
++++ connectivity/source/drivers/mozab/MResultSet.hxx	(.../cws/moz2seamonkey01/connectivity)	(revision 269329)
+@@ -83,7 +83,7 @@
+ 							public	::comphelper::OPropertyArrayUsageHelper<OResultSet>
+ 		{
+ 		protected:
+-			OStatement_Base*							m_pStatement;
++			OCommonStatement*							m_pStatement;
+             ::com::sun::star::uno::Reference< ::com::sun::star::uno::XInterface>			m_xStatement;
+             ::com::sun::star::uno::Reference< ::com::sun::star::sdbc::XResultSetMetaData>   m_xMetaData;
+ 			sal_uInt32									m_nRowPos;
+@@ -126,7 +126,7 @@
+ 		public:
+ 			DECLARE_SERVICE_INFO();
+ 			
+-            OResultSet(OStatement_Base* pStmt, const ::boost::shared_ptr< ::connectivity::OSQLParseTreeIterator >& _pSQLIterator );
++            OResultSet(OCommonStatement* pStmt, const ::boost::shared_ptr< ::connectivity::OSQLParseTreeIterator >& _pSQLIterator );
+ 			
+ 
+ 			::com::sun::star::uno::Reference< ::com::sun::star::uno::XInterface > operator *()
+--- connectivity/source/drivers/mozab/MConnection.cxx	(.../tags/DEV300_m41/connectivity)	(revision 269329)
++++ connectivity/source/drivers/mozab/MConnection.cxx	(.../cws/moz2seamonkey01/connectivity)	(revision 269329)
+@@ -370,8 +370,7 @@
+ 	// the statement can only be executed more than once
+     OPreparedStatement* pPrepared = new OPreparedStatement(this,_sSql);
+ 	Reference< XPreparedStatement > xReturn = pPrepared;
+-    if ( !pPrepared->lateInit() )
+-        throw SQLException();
++    pPrepared->lateInit();
+     
+ 	m_aStatements.push_back(WeakReferenceHelper(xReturn));
+ 	return xReturn;
