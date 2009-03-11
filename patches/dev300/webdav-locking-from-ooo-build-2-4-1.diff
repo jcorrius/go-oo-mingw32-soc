@@ -1422,13 +1422,11 @@ diff -u ucb/webdav-orig/NeonInputStream.hxx ucb/source/ucp/webdav/NeonInputStrea
 diff -u ucb/webdav-orig/NeonSession.cxx ucb/source/ucp/webdav/NeonSession.cxx
 --- ucb/webdav-orig/NeonSession.cxx	2009-03-05 13:01:30.456375000 +0200
 +++ ucb/source/ucp/webdav/NeonSession.cxx	2009-03-06 13:29:19.847000000 +0200
-@@ -65,6 +65,9 @@
+@@ -65,6 +65,7 @@
  #ifndef _SIMPLECERTIFICATIONVALIDATIONREQUEST_HXX_
  #include "ucbhelper/simplecertificatevalidationrequest.hxx"
  #endif
-+#ifndef _UCBHELPER_CANCELCOMMANDEXECUTION_HXX_
 +#include <ucbhelper/cancelcommandexecution.hxx>
-+#endif
  
  #include <cppuhelper/bootstrap.hxx> 
  
@@ -1701,7 +1699,7 @@ diff -u ucb/webdav-orig/NeonSession.cxx ucb/source/ucp/webdav/NeonSession.cxx
              throw DAVException( DAVException::DAV_HTTP_ERROR,
                                  aText,
                                  makeStatusCode( aText ) );
-@@ -1471,77 +1501,151 @@
+@@ -1471,77 +1501,156 @@
      }
  }
  
@@ -1829,24 +1827,7 @@ diff -u ucb/webdav-orig/NeonSession.cxx ucb/source/ucp/webdav/NeonSession.cxx
 +    if ( bLockit )
 +    {
 +        int nRet;
-+        if ( !bAlreadyExists )
-+        {
-+            nRet = ne_lock( m_pHttpSession, theLock );
-+
-+            if ( nRet == NE_OK )
-+            {
-+                ne_lockstore_add( s_aNeonLockStore, theLock );
-+
-+                uno::Sequence< rtl::OUString > aTokens( 1 );
-+                aTokens[0] = rtl::OUString::createFromAscii( theLock->token );
-+                rLock.LockTokens = aTokens;
-+
-+#if OSL_DEBUG_LEVEL > 0
-+                fprintf( stderr, "WebDAV: locked the URL, the token is: %s\n", theLock->token );
-+#endif
-+            }
-+        }
-+        else
++        if ( bAlreadyExists )
 +        {
 +#if NEON_VERSION >= 0x0260
 +            nRet = ne_lock_refresh( m_pHttpSession, theLock );
@@ -1873,9 +1854,31 @@ diff -u ucb/webdav-orig/NeonSession.cxx ucb/source/ucp/webdav/NeonSession.cxx
 +
 +            ne_buffer_destroy( ctx.cdata );
 +#endif
++            if ( ( nRet == NE_ERROR ) && strncmp (ne_get_error (m_pHttpSession), "No activelock ", strlen ("No activelock ")) == 0 )
++            {
++                bAlreadyExists = false;
++                ne_lockstore_remove( s_aNeonLockStore, theLock );
++            }
++        }
++        if ( !bAlreadyExists )
++        {
++            nRet = ne_lock( m_pHttpSession, theLock );
++
++            if ( nRet == NE_OK )
++            {
++                ne_lockstore_add( s_aNeonLockStore, theLock );
++
++                uno::Sequence< rtl::OUString > aTokens( 1 );
++                aTokens[0] = rtl::OUString::createFromAscii( theLock->token );
++                rLock.LockTokens = aTokens;
++
++#if OSL_DEBUG_LEVEL > 0
++                fprintf( stderr, "WebDAV: locked the URL, the token is: %s\n", theLock->token );
++#endif
++            }
 +        }
 +
-+        if ( ( nRet == NE_ERROR ) && ( getStatusCode( m_pHttpSession ) == SC_LOCKED ) )
++        if ( ( nRet == NE_ERROR ) && getStatusCode( m_pHttpSession ) == SC_LOCKED )
 +        {
 +            ucbhelper::cancelCommandExecution( ucb::IOErrorCode_LOCKING_VIOLATION,
 +                    uno::Sequence< uno::Any >( 0 ), // FIXME more info about the file?
@@ -1887,7 +1890,7 @@ diff -u ucb/webdav-orig/NeonSession.cxx ucb/source/ucp/webdav/NeonSession.cxx
 +        else if ( nRet == NE_OK )
 +            fprintf( stderr, "WebDAV: locked/refreshed lock OK\n" );
 +        else
-+            fprintf( stderr, "WebDAV: failed to lock the file, status code is: %d\n", getStatusCode( m_pHttpSession ) );
++            fprintf( stderr, "WebDAV: failed to lock the file: %s\n", ne_get_error( m_pHttpSession ) );
 +#endif
 +    }
 +    else
@@ -2176,7 +2179,7 @@ diff -u ucb/webdav-orig/webdavcontent.cxx ucb/source/ucp/webdav/webdavcontent.cx
 +    else if ( !pSignalInfo || ( pSignalInfo->Signal != osl_Signal_User ) )
 +    {
 +        // terminating or something
-+		pContent->m_xResAccess->UNLOCK( *pContent->m_pLock, *pContent->m_pLockEnv );
++		pContent->m_xResAccess->UNLOCK( *pContent->m_pLock, pContent->m_xLockEnv );
 +		delete pContent->m_pLock;
 +		pContent->m_pLock = NULL;
 +    }
@@ -2255,7 +2258,7 @@ diff -u ucb/webdav-orig/webdavcontent.cxx ucb/source/ucp/webdav/webdavcontent.cx
 +	if (m_pLock != NULL)
 +	{
 +		try {
-+			m_xResAccess->UNLOCK( *m_pLock, *m_pLockEnv );
++			m_xResAccess->UNLOCK( *m_pLock, m_xLockEnv );
 +			delete m_pLock;
 +			m_pLock = NULL;
 +		}
@@ -2283,7 +2286,7 @@ diff -u ucb/webdav-orig/webdavcontent.cxx ucb/source/ucp/webdav/webdavcontent.cx
 +    // Refresh the lock if it expires in less than 30 s
 +    if ( m_pLock && m_nToExpire >= 0 && m_nToExpire < 30 )
 +    {
-+        m_xResAccess->LOCK( *m_pLock, *m_pLockEnv );
++        m_xResAccess->LOCK( *m_pLock, m_xLockEnv );
 +
 +        m_nToExpire = m_pLock->Timeout;
 +    }
@@ -2443,7 +2446,7 @@ diff -u ucb/webdav-orig/webdavcontent.cxx ucb/source/ucp/webdav/webdavcontent.cx
 -                        = xResAccess->GET( aHeaders, aResource, xEnv );
 +                    try {
 +                        m_xResAccess->LOCK( *m_pLock, xEnv );
-+						m_pLockEnv = &xEnv;
++						m_xLockEnv = xEnv;
 +                    }
 +                    catch ( ucb::CommandFailedException const &e )
 +                    {
@@ -2591,7 +2594,7 @@ diff -u ucb/webdav-orig/webdavcontent.hxx ucb/source/ucp/webdav/webdavcontent.hx
  	bool              m_bDidGetOrHead;
 +	bool              m_bForceReadOnly;
 +	com::sun::star::ucb::Lock *m_pLock;
-+	const uno::Reference< ucb::XCommandEnvironment > *m_pLockEnv;
++	uno::Reference< ucb::XCommandEnvironment > m_xLockEnv;
  	std::vector< rtl::OUString > m_aFailedPropNames;
  
  private:
