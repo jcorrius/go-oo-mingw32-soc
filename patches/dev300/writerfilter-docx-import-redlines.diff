@@ -1,5 +1,5 @@
 diff --git writerfilter/source/dmapper/DomainMapper.cxx writerfilter/source/dmapper/DomainMapper.cxx
-index 6129cee..67bedbd 100644
+index 6129cee..97d0446 100644
 --- writerfilter/source/dmapper/DomainMapper.cxx
 +++ writerfilter/source/dmapper/DomainMapper.cxx
 @@ -176,6 +176,10 @@ DomainMapper::~DomainMapper()
@@ -13,12 +13,21 @@ index 6129cee..67bedbd 100644
      }
      catch( const uno::Exception& rEx )
      {
+@@ -2089,7 +2093,7 @@ void DomainMapper::attribute(Id nName, Value & val)
+         break;
+         case NS_ooxml::LN_CT_Markup_id:
+             /* WRITERFILTERSTATUS: done: 100, planned: 0.5, spent: 0 */
+-            m_pImpl->SetCurrentRedlineId( sStringValue );
++            m_pImpl->SetCurrentRedlineId( nIntValue );
+         break;
+         case NS_ooxml::LN_token:
+             /* WRITERFILTERSTATUS: done: 100, planned: 0.5, spent: 0 */
 @@ -2143,6 +2147,9 @@ void DomainMapper::attribute(Id nName, Value & val)
          case NS_ooxml::LN_CT_Color_themeShade:
              //unsupported
          break;
 +    case NS_ooxml::LN_endtrackchange:
-+        m_pImpl->ResetRedlineProperties( );
++        m_pImpl->RemoveCurrentRedline( );
 +    break;
          default:
              {
@@ -62,7 +71,7 @@ index 6129cee..67bedbd 100644
          OSL_ENSURE( false, "which table is to be filled here?");
      }
 diff --git writerfilter/source/dmapper/DomainMapper_Impl.cxx writerfilter/source/dmapper/DomainMapper_Impl.cxx
-index ee73b1f..729be7d 100644
+index ee73b1f..6812db4 100644
 --- writerfilter/source/dmapper/DomainMapper_Impl.cxx
 +++ writerfilter/source/dmapper/DomainMapper_Impl.cxx
 @@ -75,7 +75,6 @@
@@ -102,7 +111,8 @@ index ee73b1f..729be7d 100644
 -            }
 -            else
 -            {
- 
+-
++    
 +                // Get the end of paragraph character inserted
 +                uno::Reference< text::XTextCursor > xCur = xTextRange->getText( )->createTextCursor( );
 +                xCur->gotoEnd( false );
@@ -162,16 +172,16 @@ index ee73b1f..729be7d 100644
      }
      catch( uno::Exception& )
      {
-@@ -1381,6 +1357,78 @@ void DomainMapper_Impl::PushFootOrEndnote( bool bIsFootnote )
+@@ -1381,6 +1357,87 @@ void DomainMapper_Impl::PushFootOrEndnote( bool bIsFootnote )
      }
  }
  
-+void DomainMapper_Impl::CreateRedline( uno::Reference< text::XTextRange > xRange, RedlineParamsPtr pRedline )
++void DomainMapper_Impl::CreateRedline( uno::Reference< text::XTextRange > xRange, RedlineParamsPtr& pRedline )
 +{
 +    if ( pRedline.get( ) )
 +    {
 +#if DEBUG
-+        clog << "REDLINE: Writing redline" << endl;
++        clog << "REDLINE: Writing redline: " << pRedline->m_nId << endl;
 +#endif
 +        try
 +        {
@@ -201,6 +211,9 @@ index ee73b1f..729be7d 100644
 +        }
 +        catch( const uno::Exception & rEx )
 +        {
++#if DEBUG
++            clog << "REDLINE: error - " << rtl::OUStringToOString( rEx.Message, RTL_TEXTENCODING_UTF8 ).getStr( ) << endl;
++#endif
 +            ( void ) rEx;
 +            OSL_ENSURE( false, "Exception in makeRedline" );
 +        }
@@ -218,14 +231,20 @@ index ee73b1f..729be7d 100644
 +
 +void DomainMapper_Impl::CheckRedline( uno::Reference< text::XTextRange > xRange )
 +{
-+    for ( int i = 0, length = m_aRedlines.size( ); i < length; i++ )
++    vector<RedlineParamsPtr>::iterator pIt = m_aRedlines.begin( );
++    vector< RedlineParamsPtr > aCleaned;
++    for (; pIt != m_aRedlines.end( ); pIt++ )
 +    {
-+        RedlineParamsPtr pCurrent( m_aRedlines[i] );
-+        CreateRedline( xRange, pCurrent );
++        CreateRedline( xRange, *pIt );
 +        
-+        if ( pCurrent.get( ) && ( pCurrent->m_nToken & 0xffff ) == ooxml::OOXML_mod )
-+            ResetRedlineProperties(  );
++        // Adding the non-mod redlines to the temporary vector
++        if ( pIt->get( ) && ( ( *pIt )->m_nToken & 0xffff ) != ooxml::OOXML_mod ) 
++        {
++            aCleaned.push_back( *pIt );
++        }
 +    }
++
++    m_aRedlines.swap( aCleaned );
 +}
 +
 +void DomainMapper_Impl::StartParaChange( )
@@ -241,7 +260,7 @@ index ee73b1f..729be7d 100644
  /*-- 22.12.2008 13:45:15---------------------------------------------------
  
    -----------------------------------------------------------------------*/
-@@ -3535,14 +3583,98 @@ bool DomainMapper_Impl::ExecuteFrameConversion()
+@@ -3535,14 +3592,98 @@ bool DomainMapper_Impl::ExecuteFrameConversion()
      }
      return bRet;
  }
@@ -279,7 +298,7 @@ index ee73b1f..729be7d 100644
 +sal_Int32 DomainMapper_Impl::GetCurrentRedlineToken(  )
 +{
 +    sal_Int32 nToken;
-+    RedlineParamsPtr pCurrent = GetTopRedline(  );
++    RedlineParamsPtr pCurrent( GetTopRedline(  ) );
 +    if ( pCurrent.get(  ) )
 +        nToken = pCurrent->m_nToken;
 +    return nToken;
@@ -287,28 +306,28 @@ index ee73b1f..729be7d 100644
 +
 +void DomainMapper_Impl::SetCurrentRedlineAuthor( rtl::OUString sAuthor )
 +{
-+    RedlineParamsPtr pCurrent = GetTopRedline(  );
++    RedlineParamsPtr pCurrent( GetTopRedline(  ) );
 +    if ( pCurrent.get(  ) )
 +        pCurrent->m_sAuthor = sAuthor;
 +}
 +
 +void DomainMapper_Impl::SetCurrentRedlineDate( rtl::OUString sDate )
 +{
-+    RedlineParamsPtr pCurrent = GetTopRedline(  );
++    RedlineParamsPtr pCurrent( GetTopRedline(  ) );
 +    if ( pCurrent.get(  ) )
 +        pCurrent->m_sDate = sDate;
 +}
 +
-+void DomainMapper_Impl::SetCurrentRedlineId( rtl::OUString sId )
++void DomainMapper_Impl::SetCurrentRedlineId( sal_Int32 sId )
 +{
-+    RedlineParamsPtr pCurrent = GetTopRedline(  );
++    RedlineParamsPtr pCurrent( GetTopRedline(  ) );
 +    if ( pCurrent.get(  ) )
-+        pCurrent->m_sId = sId;
++        pCurrent->m_nId = sId;
 +}
 +
 +void DomainMapper_Impl::SetCurrentRedlineToken( sal_Int32 nToken )
 +{
-+    RedlineParamsPtr pCurrent = GetTopRedline(  );
++    RedlineParamsPtr pCurrent( GetTopRedline(  ) );
 +    if ( pCurrent.get(  ) )
 +        pCurrent->m_nToken = nToken;
 +}
@@ -317,14 +336,14 @@ index ee73b1f..729be7d 100644
  
    -----------------------------------------------------------------------*/
 -void DomainMapper_Impl::ResetRedlineProperties()
-+void DomainMapper_Impl::ResetRedlineProperties( )
++void DomainMapper_Impl::RemoveCurrentRedline( )
  {
 -    m_CurrentRedlineAuthor = m_CurrentRedlineDate = m_CurrentRedlineId = ::rtl::OUString();
 -    n_CurrentRedlineToken = ooxml::OOXML_mod;
 +    if ( m_aRedlines.size( ) > 0 )
 +    {
 +#if DEBUG
-+        clog << "REDLINE: Removing current Redline from stack" << endl;
++        clog << "REDLINE: Removing back redline" << endl;
 +#endif
 +        m_aRedlines.pop_back( );
 +    }
@@ -344,7 +363,7 @@ index ee73b1f..729be7d 100644
  
  }}
 diff --git writerfilter/source/dmapper/DomainMapper_Impl.hxx writerfilter/source/dmapper/DomainMapper_Impl.hxx
-index f4dfaf0..ef4ed26 100644
+index f4dfaf0..1a9ad4d 100644
 --- writerfilter/source/dmapper/DomainMapper_Impl.hxx
 +++ writerfilter/source/dmapper/DomainMapper_Impl.hxx
 @@ -51,6 +51,7 @@
@@ -363,7 +382,7 @@ index f4dfaf0..ef4ed26 100644
 +{
 +    ::rtl::OUString m_sAuthor;
 +    ::rtl::OUString m_sDate;
-+    ::rtl::OUString m_sId;
++    sal_Int32       m_nId;
 +    sal_Int32       m_nToken;
 +};
 +typedef boost::shared_ptr< RedlineParams > RedlineParamsPtr;
@@ -400,7 +419,7 @@ index f4dfaf0..ef4ed26 100644
      }
      void SetDocumentSettingsProperty( const ::rtl::OUString& rPropName, const uno::Any& rValue );
  
-+    void CreateRedline( ::com::sun::star::uno::Reference< ::com::sun::star::text::XTextRange > xRange, RedlineParamsPtr pRedline  );
++    void CreateRedline( ::com::sun::star::uno::Reference< ::com::sun::star::text::XTextRange > xRange, RedlineParamsPtr& pRedline  );
 +
 +    void CheckParaRedline( ::com::sun::star::uno::Reference< ::com::sun::star::text::XTextRange > xRange );
 +
@@ -448,9 +467,9 @@ index f4dfaf0..ef4ed26 100644
 +    sal_Int32 GetCurrentRedlineToken( ); 
 +    void SetCurrentRedlineAuthor( rtl::OUString sAuthor );
 +    void SetCurrentRedlineDate( rtl::OUString sDate );
-+    void SetCurrentRedlineId( rtl::OUString sId );
++    void SetCurrentRedlineId( sal_Int32 nId );
 +    void SetCurrentRedlineToken( sal_Int32 nToken );
-+    void ResetRedlineProperties( );
++    void RemoveCurrentRedline( );
 +    void ResetParaRedline( );
  
  };
