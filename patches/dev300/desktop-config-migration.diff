@@ -13,7 +13,7 @@ index 38c3220..d3a3fc8 100644
  		pLanguageOptions.reset( new SvtLanguageOptions(sal_True));
  
 diff --git desktop/source/migration/migration.cxx desktop/source/migration/migration.cxx
-index bc6b168..65b63f9 100644
+index bc6b168..21ac07d 100644
 --- desktop/source/migration/migration.cxx
 +++ desktop/source/migration/migration.cxx
 @@ -57,6 +57,10 @@
@@ -37,7 +37,7 @@ index bc6b168..65b63f9 100644
  namespace desktop {
  
  
-@@ -127,19 +134,150 @@ OUString Migration::getOldVersionName()
+@@ -127,26 +134,154 @@ OUString Migration::getOldVersionName()
      return getImpl()->getOldVersionName();
  }
  
@@ -190,48 +190,72 @@ index bc6b168..65b63f9 100644
 +}
 + 
  MigrationImpl::MigrationImpl(const uno::Reference< XMultiServiceFactory >& xFactory)
-     : m_vrVersions(new strings_v)
+-    : m_vrVersions(new strings_v)
++    : m_vrVersions(NULL)
      , m_xFactory(xFactory)
-@@ -147,6 +285,7 @@ MigrationImpl::MigrationImpl(const uno::Reference< XMultiServiceFactory >& xFact
-     , m_aInfo(findInstallation())
-     , m_vrFileList(compileFileList())
-     , m_vrServiceList(compileServiceList())
+-    , m_vrMigrations(readMigrationSteps())
+-    , m_aInfo(findInstallation())
+-    , m_vrFileList(compileFileList())
+-    , m_vrServiceList(compileServiceList())
 +    , m_bMigrationCompleted(false)
  {
  }
  
-@@ -157,29 +296,44 @@ MigrationImpl::~MigrationImpl()
+@@ -157,29 +292,52 @@ MigrationImpl::~MigrationImpl()
  
  sal_Bool MigrationImpl::doMigration()
  {
 -    sal_Bool result = sal_False;
+-    try{
+-        copyFiles();
+-
+-		// execute the migration items from Setup.xcu
+-		// and refresh the cache
+-        copyConfig();
+-		refresh();
 +#if OSL_DEBUG_LEVEL > 0
 +    fprintf( stderr, "Migrating user configuration to newer OOo version.\n" );
 +#endif
-+
+ 
+-		// execute custom migration services from Setup.xcu
+-		// and refresh the cache
+-        runServices();
+-        refresh();
 +    sal_Bool result = sal_True;
-     try{
-         copyFiles();
- 
- 		// execute the migration items from Setup.xcu
- 		// and refresh the cache
-         copyConfig();
--		refresh();
-+        refresh();
- 
- 		// execute custom migration services from Setup.xcu
- 		// and refresh the cache
-         runServices();
-         refresh();
  
 -        result = sal_True;
-     } catch (...)
+-    } catch (...)
++    if (compareVersion(m_aConfigVerNum, VersionNumber(3,0,0)) < 0)
      {
-         OString aMsg("An unexpected exception was thrown during migration");
-         aMsg += "\nOldVersion: " + OUStringToOString(m_aInfo.productname, RTL_TEXTENCODING_ASCII_US);
-         aMsg += "\nDataPath  : " + OUStringToOString(m_aInfo.userdata, RTL_TEXTENCODING_ASCII_US);
-         OSL_ENSURE(sal_False, aMsg.getStr());
-+        result = sal_False;
+-        OString aMsg("An unexpected exception was thrown during migration");
+-        aMsg += "\nOldVersion: " + OUStringToOString(m_aInfo.productname, RTL_TEXTENCODING_ASCII_US);
+-        aMsg += "\nDataPath  : " + OUStringToOString(m_aInfo.userdata, RTL_TEXTENCODING_ASCII_US);
+-        OSL_ENSURE(sal_False, aMsg.getStr());
++        try
++        {
++            initDirectoryMigration();
++
++            copyFiles();
++    
++            // execute the migration items from Setup.xcu
++            // and refresh the cache
++            copyConfig();
++            refresh();
++    
++            // execute custom migration services from Setup.xcu
++            // and refresh the cache
++            runServices();
++            refresh();
++    
++        }
++        catch (...)
++        {
++            OString aMsg("An unexpected exception was thrown during migration");
++            aMsg += "\nOldVersion: " + OUStringToOString(m_aInfo.productname, RTL_TEXTENCODING_ASCII_US);
++            aMsg += "\nDataPath  : " + OUStringToOString(m_aInfo.userdata, RTL_TEXTENCODING_ASCII_US);
++            OSL_ENSURE(sal_False, aMsg.getStr());
++            result = sal_False;
++        }
      }
  
 +    try
@@ -248,7 +272,7 @@ index bc6b168..65b63f9 100644
  	// prevent running the migration multiple times
  	setMigrationCompleted();
      return result;
-@@ -196,31 +350,110 @@ void MigrationImpl::refresh()
+@@ -196,31 +354,119 @@ void MigrationImpl::refresh()
  
  }
  
@@ -374,33 +398,20 @@ index bc6b168..65b63f9 100644
 +    {
 +    }
 +}
++
++void MigrationImpl::initDirectoryMigration()
++{
++    m_vrVersions.reset(new strings_v);
++    m_vrMigrations = readMigrationSteps();
++    m_aInfo = findInstallation();
++    m_vrFileList = compileFileList();
++    m_vrServiceList = compileServiceList();
++}
  
  migrations_vr MigrationImpl::readMigrationSteps()
  {
-@@ -636,8 +869,19 @@ void MigrationImpl::runServices()
-     OUString aStratumSvc = OUString::createFromAscii("com.sun.star.configuration.backend.LocalSingleStratum");
-     uno::Sequence< uno::Any > stratumArgs(1);
-     stratumArgs[0] = uno::makeAny(aOldLayerURL);
--	uno::Reference< XSingleLayerStratum> xStartum( m_xFactory->createInstanceWithArguments(
--        aStratumSvc, stratumArgs), uno::UNO_QUERY);
-+	uno::Reference< XSingleLayerStratum> xStartum;
-+
-+    try
-+    {
-+        xStartum.set( m_xFactory->createInstanceWithArguments(
-+            aStratumSvc, stratumArgs), uno::UNO_QUERY);
-+    }
-+    catch (const Exception&)
-+    {
-+        // failed to create local single stratum service.
-+        // TODO: Investigate this.
-+        return;
-+    }
- 
-     // Build argument array
-     uno::Sequence< uno::Any > seqArguments(3);
 diff --git desktop/source/migration/migration_impl.hxx desktop/source/migration/migration_impl.hxx
-index e07847a..f9ea5e8 100644
+index e07847a..34ba8bd 100644
 --- desktop/source/migration/migration_impl.hxx
 +++ desktop/source/migration/migration_impl.hxx
 @@ -76,6 +76,16 @@ typedef std::auto_ptr< migrations_v > migrations_vr;
@@ -420,7 +431,7 @@ index e07847a..f9ea5e8 100644
  
  private:
      strings_vr m_vrVersions;
-@@ -85,6 +95,10 @@ private:
+@@ -85,6 +95,12 @@ private:
      strings_vr m_vrFileList;      // final list of files to be copied
      strings_vr m_vrConfigList;    // final list of nodes to be copied
      strings_vr m_vrServiceList;   // final list of services to be called
@@ -428,10 +439,12 @@ index e07847a..f9ea5e8 100644
 +    bool m_bMigrationCompleted;
 +    VersionNumber m_aAppVerNum;
 +    VersionNumber m_aConfigVerNum;
++
++    void initDirectoryMigration();
  
      // initializer functions...
      migrations_vr readMigrationSteps();
-@@ -104,9 +118,11 @@ private:
+@@ -104,9 +120,11 @@ private:
      void copyConfig();
      void runServices();
      void refresh();
