@@ -1,0 +1,148 @@
+diff --git sc/source/ui/vba/vbaeventshelper.cxx sc/source/ui/vba/vbaeventshelper.cxx
+index 8248d48..794cb84 100644
+--- sc/source/ui/vba/vbaeventshelper.cxx
++++ sc/source/ui/vba/vbaeventshelper.cxx
+@@ -56,8 +56,12 @@
+ #include <com/sun/star/util/XCloseBroadcaster.hpp>
+ #include <com/sun/star/frame/XControllerBorder.hpp>
+ #include <com/sun/star/frame/XBorderResizeListener.hpp>
+-#include "cellsuno.hxx" 
+-
++#include <com/sun/star/util/XChangesListener.hpp>
++#include <com/sun/star/util/ElementChange.hpp>
++#include <com/sun/star/util/XChangesNotifier.hpp>
++#include <com/sun/star/sheet/XCellRangeAddressable.hpp>
++#include <cellsuno.hxx> 
++#include <convuno.hxx>
+ #include <map>
+ 
+ using namespace std;
+@@ -69,6 +73,70 @@ const static rtl::OUString sUrlPart0 = rtl::OUString::createFromAscii( "vnd.sun.
+ const static rtl::OUString sUrlPart1 = rtl::OUString::createFromAscii( "vnd.sun.star.script:Standard.");
+ const static rtl::OUString sUrlPart2 = rtl::OUString::createFromAscii( "?language=Basic&location=document"); 
+ 
++typedef ::cppu::WeakImplHelper1< util::XChangesListener > WorksheetChangeListener_BASE;
++
++class WorksheetChangeListener : public WorksheetChangeListener_BASE
++{
++private:
++    ScVbaEventsHelper* pVbaEventsHelper;
++public:
++    WorksheetChangeListener(ScVbaEventsHelper* pHelper ) : pVbaEventsHelper( pHelper ){}
++    virtual void SAL_CALL changesOccurred(const util::ChangesEvent& aEvent) throw (uno::RuntimeException);
++    virtual void SAL_CALL disposing(const lang::EventObject& aSource) throw(uno::RuntimeException){}
++};
++
++void WorksheetChangeListener::changesOccurred(const util::ChangesEvent& aEvent) throw (uno::RuntimeException)
++{
++    sal_Int32 nCount = aEvent.Changes.getLength();
++    if( nCount == 0 )
++        return;
++    
++    util::ElementChange aChange = aEvent.Changes[ 0 ];
++    rtl::OUString sOperation;
++    aChange.Accessor >>= sOperation;
++    if( !sOperation.equalsIgnoreAsciiCaseAscii("cell-change") )
++        return;
++
++    if( nCount == 1 )
++    {
++        uno::Reference< table::XCellRange > xRangeObj;
++        aChange.ReplacedElement >>= xRangeObj;
++        if( xRangeObj.is() )
++        {
++            uno::Sequence< uno::Any > aArgs(1);
++            aArgs[0] <<= xRangeObj;
++            pVbaEventsHelper->ProcessCompatibleVbaEvent( VBAEVENT_WORKSHEET_CHANGE, aArgs );
++        }    
++        return;
++    }
++
++    ScRangeList aRangeList;
++    for( sal_Int32 nIndex = 0; nIndex < nCount; ++nIndex )
++    {
++        aChange = aEvent.Changes[ nIndex ];
++        aChange.Accessor >>= sOperation;
++        uno::Reference< table::XCellRange > xRangeObj;
++        aChange.ReplacedElement >>= xRangeObj;
++        if( xRangeObj.is() && sOperation.equalsIgnoreAsciiCaseAscii("cell-change") )
++        {
++            uno::Reference< sheet::XCellRangeAddressable > xCellRangeAddressable( xRangeObj, uno::UNO_QUERY );
++            if( xCellRangeAddressable.is() )
++            {
++                ScRange aRange;
++                ScUnoConversion::FillScRange( aRange, xCellRangeAddressable->getRangeAddress() );
++                aRangeList.Append( aRange );
++            }
++        }
++    }
++    
++    if( aRangeList.Count() > 0 )
++    {
++        uno::Reference< sheet::XSheetCellRangeContainer > xRanges( new ScCellRangesObj( pVbaEventsHelper->getDocumentShell(), aRangeList ) );
++        uno::Sequence< uno::Any > aArgs(1);
++        aArgs[0] <<= xRanges;
++        pVbaEventsHelper->ProcessCompatibleVbaEvent( VBAEVENT_WORKSHEET_CHANGE, aArgs );
++    }
++}
+ 
+ typedef ::cppu::WeakImplHelper3< awt::XWindowListener, util::XCloseListener, frame::XBorderResizeListener > WindowListener_BASE;
+ 
+@@ -394,8 +462,12 @@ ScVbaEventsHelper::ScVbaEventsHelper( uno::Sequence< css::uno::Any > const& aArg
+     : m_xContext( xContext ), mpVbaEventsListener( NULL ), mbOpened( sal_False ), mbIgnoreEvents( sal_False )
+ {
+     uno::Reference< frame::XModel > xModel ( getXSomethingFromArgs< frame::XModel >( aArgs, 0 ), uno::UNO_QUERY );
+-    ScDocShell* pDocShell = excel::getDocShell( xModel );
++    pDocShell = excel::getDocShell( xModel );
+     pDoc = pDocShell->GetDocument();
++    // Add worksheet change listener
++    uno::Reference< util::XChangesNotifier > xChangesNotifier( xModel, uno::UNO_QUERY );
++    if( xChangesNotifier.is() )
++        xChangesNotifier->addChangesListener( uno::Reference< util::XChangesListener >( new WorksheetChangeListener( this ) ) );
+ }
+ 
+ ScVbaEventsHelper::~ScVbaEventsHelper()
+@@ -782,6 +854,18 @@ SCTAB ScVbaEventsHelper::getTabFromArgs( const uno::Sequence< uno::Any > aArgs,
+         table::CellRangeAddress aAddress = xCellRangeAddressable->getRangeAddress();
+         nTab = aAddress.Sheet;
+     }
++    else
++    {
++        uno::Reference< sheet::XSheetCellRangeContainer > xRanges( getXSomethingFromArgs< sheet::XSheetCellRangeContainer >( aArgs, nPos ), uno::UNO_QUERY );
++        if( xRanges.is() )
++        {
++            uno::Sequence< table::CellRangeAddress > aRangeAddresses = xRanges->getRangeAddresses();
++            if( aRangeAddresses.getLength() > 0 )
++            {
++                nTab = aRangeAddresses[ 0 ].Sheet;
++            }
++        }
++    }
+     return nTab;
+ }
+ 
+diff --git sc/source/ui/vba/vbaeventshelper.hxx sc/source/ui/vba/vbaeventshelper.hxx
+index e8c41d3..e812aa0 100644
+--- sc/source/ui/vba/vbaeventshelper.hxx
++++ sc/source/ui/vba/vbaeventshelper.hxx
+@@ -47,10 +47,12 @@
+ typedef ::cppu::WeakImplHelper1< com::sun::star::document::XVbaEventsHelper > VBAWorkbookEvent_BASE;
+ 
+ class VbaEventsListener;
++class ScDocShell;
+ class ScVbaEventsHelper : public VBAWorkbookEvent_BASE
+ {
+ private:
+ 	ScDocument* pDoc;
++	ScDocShell* pDocShell;
+     css::uno::Reference< css::uno::XComponentContext > m_xContext;
+     VbaEventsListener* mpVbaEventsListener;
+     sal_Bool mbOpened;
+@@ -72,6 +74,7 @@ public:
+     ScVbaEventsHelper( css::uno::Sequence< css::uno::Any > const& aArgs, css::uno::Reference< css::uno::XComponentContext > const& xContext );
+     ~ScVbaEventsHelper();
+ 	ScDocument* getDocument() { return pDoc; };
++	ScDocShell* getDocumentShell() { return pDocShell; };
+     // XVBAWorkbookEventHelper
+     virtual sal_Bool SAL_CALL ProcessCompatibleVbaEvent( sal_Int32 nEventId, const css::uno::Sequence< css::uno::Any >& aArgs ) throw (css::uno::RuntimeException);
+     virtual void SAL_CALL setIgnoreEvents( ::sal_Bool _ignoreevents ) throw (css::uno::RuntimeException);
