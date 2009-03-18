@@ -1,0 +1,877 @@
+diff --git sc/inc/column.hxx sc/inc/column.hxx
+index 18cb668..9fbb51d 100644
+--- sc/inc/column.hxx
++++ sc/inc/column.hxx
+@@ -243,7 +243,8 @@ public:
+ 
+ 				//	TRUE = Zahlformat gesetzt
+ 	BOOL		SetString( SCROW nRow, SCTAB nTab, const String& rString,
+-						   formula::FormulaGrammar::AddressConvention conv = formula::FormulaGrammar::CONV_OOO );
++						   formula::FormulaGrammar::AddressConvention conv = formula::FormulaGrammar::CONV_OOO,
++                           SvNumberFormatter* pFormatter = NULL );
+ 	void		SetValue( SCROW nRow, const double& rVal);
+ 	void		SetError( SCROW nRow, const USHORT nError);
+ 
+diff --git sc/inc/document.hxx sc/inc/document.hxx
+index fbcca0d..810f215 100644
+--- sc/inc/document.hxx
++++ sc/inc/document.hxx
+@@ -729,7 +729,7 @@ public:
+ 	SC_DLLPUBLIC void			PutCell(SCCOL nCol, SCROW nRow, SCTAB nTab, ScBaseCell* pCell,
+ 							ULONG nFormatIndex, BOOL bForceTab = FALSE);
+ 					//	return TRUE = Zahlformat gesetzt
+-    SC_DLLPUBLIC BOOL           SetString( SCCOL nCol, SCROW nRow, SCTAB nTab, const String& rString );
++    SC_DLLPUBLIC BOOL           SetString( SCCOL nCol, SCROW nRow, SCTAB nTab, const String& rString, SvNumberFormatter* pFormatter = NULL );
+     SC_DLLPUBLIC void           SetValue( SCCOL nCol, SCROW nRow, SCTAB nTab, const double& rVal );
+ 	void 			SetError( SCCOL nCol, SCROW nRow, SCTAB nTab, const USHORT nError);
+ 
+diff --git sc/inc/filter.hxx sc/inc/filter.hxx
+index 82a2b84..bc72301 100644
+--- sc/inc/filter.hxx
++++ sc/inc/filter.hxx
+@@ -42,6 +42,7 @@ class SvStream;
+ class ScAddress;
+ class ScDocument;
+ class ScRange;
++class SvNumberFormatter;
+ 
+ // Return-Werte Im-/Exportfilter	(ULONG)
+ 
+@@ -92,7 +93,7 @@ class ScEEAbsImport {
+     virtual ~ScEEAbsImport() {}
+     virtual ULONG   Read( SvStream& rStream, const String& rBaseURL ) = 0;
+     virtual ScRange GetRange() = 0;
+-    virtual void    WriteToDocument( BOOL bSizeColsRows = FALSE, double nOutputFactor = 1.0 ) = 0;
++    virtual void    WriteToDocument( BOOL bSizeColsRows = FALSE, double nOutputFactor = 1.0, SvNumberFormatter* pFormatter = NULL ) = 0;
+ };
+ 
+ class ScFormatFilterPlugin {
+@@ -109,7 +110,8 @@ class ScFormatFilterPlugin {
+     virtual FltError ScImportDif( SvStream&, ScDocument*, const ScAddress& rInsPos,
+ 				 const CharSet eSrc = RTL_TEXTENCODING_DONTKNOW, UINT32 nDifOption = SC_DIFOPT_EXCEL ) = 0;
+     virtual FltError ScImportRTF( SvStream&, const String& rBaseURL, ScDocument*, ScRange& rRange ) = 0;
+-    virtual FltError ScImportHTML( SvStream&, const String& rBaseURL, ScDocument*, ScRange& rRange, double nOutputFactor = 1.0, BOOL bCalcWidthHeight = TRUE ) = 0;
++    virtual FltError ScImportHTML( SvStream&, const String& rBaseURL, ScDocument*, ScRange& rRange, double nOutputFactor = 1.0, 
++                                   BOOL bCalcWidthHeight = TRUE, SvNumberFormatter* pFormatter = NULL ) = 0;
+ 
+     // various import helpers
+     virtual ScEEAbsImport *CreateRTFImport( ScDocument* pDoc, const ScRange& rRange ) = 0;
+diff --git sc/inc/sc.hrc sc/inc/sc.hrc
+index 2822fa5..ec16438 100644
+--- sc/inc/sc.hrc
++++ sc/inc/sc.hrc
+@@ -1676,6 +1676,9 @@
+ 
+ #define RID_SCDLG_TAB_BG_COLOR          (SC_OOO_BUILD_START + 11)
+ 
++// Language chooser for text import filters.
++#define RID_SCDLG_LANG_CHOOSER           (SC_OOO_BUILD_START + 12)
++
+ #endif
+ 
+ 
+diff --git sc/inc/scabstdlg.hxx sc/inc/scabstdlg.hxx
+index 637682d..1a2b9a2 100644
+--- sc/inc/scabstdlg.hxx
++++ sc/inc/scabstdlg.hxx
+@@ -41,6 +41,7 @@
+ #include "sc.hrc"
+ #include "global.hxx"
+ #include "pivot.hxx"
++#include "i18npool/lang.h"
+ 
+ #include <tabvwsh.hxx>
+ 
+@@ -303,6 +304,13 @@ class AbstractScImportOptionsDlg : public VclAbstractDialog  //add for ScImportO
+ public:
+ 	virtual void GetImportOptions( ScImportOptions& rOptions ) const = 0;
+ };
++
++class AbstractScLangChooserDlg : public VclAbstractDialog //add for ScLangChooserDlg
++{
++public:
++    virtual LanguageType GetLanguageType() const = 0;
++};
++
+ //-------Scabstract fractory ---------------------------
+ class ScAbstractDialogFactory
+ {
+@@ -313,6 +321,8 @@ public:
+ 																	SvStream* pInStream, int nId,
+ 																	sal_Unicode cSep = '\t') = 0;
+ 
++    virtual     AbstractScLangChooserDlg * CreateScLangChooserDlg( Window* pParent, int nId ) = 0;
++
+ 	virtual		AbstractScAutoFormatDlg * CreateScAutoFormatDlg( Window*					pParent, //add for ScAutoFormatDlg
+ 																ScAutoFormat*				pAutoFormat,
+ 																const ScAutoFormatData*    pSelFormatData,
+diff --git sc/inc/table.hxx sc/inc/table.hxx
+index 93ef44e..f920d06 100644
+--- sc/inc/table.hxx
++++ sc/inc/table.hxx
+@@ -253,7 +253,7 @@ public:
+ 	void		PutCell( SCCOL nCol, SCROW nRow, ScBaseCell* pCell );
+ 	void		PutCell(SCCOL nCol, SCROW nRow, ULONG nFormatIndex, ScBaseCell* pCell);
+ 				//	TRUE = Zahlformat gesetzt
+-	BOOL		SetString( SCCOL nCol, SCROW nRow, SCTAB nTab, const String& rString );
++	BOOL		SetString( SCCOL nCol, SCROW nRow, SCTAB nTab, const String& rString, SvNumberFormatter* pFormatter = NULL );
+ 	void		SetValue( SCCOL nCol, SCROW nRow, const double& rVal );
+ 	void 		SetError( SCCOL nCol, SCROW nRow, USHORT nError);
+ 
+diff --git sc/source/core/data/column3.cxx sc/source/core/data/column3.cxx
+index ba6a42f..4e5d69a 100644
+--- sc/source/core/data/column3.cxx
++++ sc/source/core/data/column3.cxx
+@@ -1213,7 +1213,8 @@ void ScColumn::StartListeningInArea( SCROW nRow1, SCROW nRow2 )
+ 
+ //	TRUE = Zahlformat gesetzt
+ BOOL ScColumn::SetString( SCROW nRow, SCTAB nTabP, const String& rString,
+-						  formula::FormulaGrammar::AddressConvention eConv )
++                          formula::FormulaGrammar::AddressConvention eConv,
++                          SvNumberFormatter* pFormatter )
+ {
+ 	BOOL bNumFmtSet = FALSE;
+ 	if (VALIDROW(nRow))
+@@ -1225,7 +1226,8 @@ BOOL ScColumn::SetString( SCROW nRow, SCTAB nTabP, const String& rString,
+ 			double nVal;
+             sal_uInt32 nIndex, nOldIndex = 0;
+ 			sal_Unicode cFirstChar;
+-			SvNumberFormatter* pFormatter = pDocument->GetFormatTable();
++            if (!pFormatter)
++                pFormatter = pDocument->GetFormatTable();
+ 			SfxObjectShell* pDocSh = pDocument->GetDocumentShell();
+ 			if ( pDocSh )
+ 				bIsLoading = pDocSh->IsLoading();
+diff --git sc/source/core/data/document.cxx sc/source/core/data/document.cxx
+index 2df6897..3f3db14 100644
+--- sc/source/core/data/document.cxx
++++ sc/source/core/data/document.cxx
+@@ -2447,10 +2447,10 @@ void ScDocument::PutCell( const ScAddress& rPos, ScBaseCell* pCell, BOOL bForceT
+ }
+ 
+ 
+-BOOL ScDocument::SetString( SCCOL nCol, SCROW nRow, SCTAB nTab, const String& rString )
++BOOL ScDocument::SetString( SCCOL nCol, SCROW nRow, SCTAB nTab, const String& rString, SvNumberFormatter* pFormatter )
+ {
+ 	if ( ValidTab(nTab) && pTab[nTab] )
+-		return pTab[nTab]->SetString( nCol, nRow, nTab, rString );
++		return pTab[nTab]->SetString( nCol, nRow, nTab, rString, pFormatter );
+ 	else
+ 		return FALSE;
+ }
+diff --git sc/source/core/data/table2.cxx sc/source/core/data/table2.cxx
+index 93c3182..98e277f 100644
+--- sc/source/core/data/table2.cxx
++++ sc/source/core/data/table2.cxx
+@@ -843,10 +843,10 @@ void ScTable::PutCell( const ScAddress& rPos, ULONG nFormatIndex, ScBaseCell* pC
+ }
+ 
+ 
+-BOOL ScTable::SetString( SCCOL nCol, SCROW nRow, SCTAB nTabP, const String& rString )
++BOOL ScTable::SetString( SCCOL nCol, SCROW nRow, SCTAB nTabP, const String& rString, SvNumberFormatter* pFormatter )
+ {
+ 	if (ValidColRow(nCol,nRow))
+-        return aCol[nCol].SetString( nRow, nTabP, rString );
++        return aCol[nCol].SetString( nRow, nTabP, rString, pDocument->GetAddressConvention(), pFormatter );
+ 	else
+ 		return FALSE;
+ }
+diff --git sc/source/filter/html/htmlimp.cxx sc/source/filter/html/htmlimp.cxx
+index c8a282e..0c36e1c 100644
+--- sc/source/filter/html/htmlimp.cxx
++++ sc/source/filter/html/htmlimp.cxx
+@@ -63,13 +63,13 @@
+ //------------------------------------------------------------------------
+ 
+ FltError ScFormatFilterPluginImpl::ScImportHTML( SvStream &rStream, const String& rBaseURL, ScDocument *pDoc,
+-		ScRange& rRange, double nOutputFactor, BOOL bCalcWidthHeight )
++		ScRange& rRange, double nOutputFactor, BOOL bCalcWidthHeight, SvNumberFormatter* pFormatter )
+ {
+     ScHTMLImport aImp( pDoc, rBaseURL, rRange, bCalcWidthHeight );
+     FltError nErr = (FltError) aImp.Read( rStream, rBaseURL );
+ 	ScRange aR = aImp.GetRange();
+ 	rRange.aEnd = aR.aEnd;
+-	aImp.WriteToDocument( TRUE, nOutputFactor );
++	aImp.WriteToDocument( TRUE, nOutputFactor, pFormatter );
+ 	return nErr;
+ }
+ 
+@@ -137,9 +137,9 @@ void ScHTMLImport::InsertRangeName( ScDocument* pDoc, const String& rName, const
+ 		delete pRangeData;
+ }
+ 
+-void ScHTMLImport::WriteToDocument( BOOL bSizeColsRows, double nOutputFactor )
++void ScHTMLImport::WriteToDocument( BOOL bSizeColsRows, double nOutputFactor, SvNumberFormatter* pFormatter )
+ {
+-	ScEEImport::WriteToDocument( bSizeColsRows, nOutputFactor );
++	ScEEImport::WriteToDocument( bSizeColsRows, nOutputFactor, pFormatter );
+ 
+     const ScHTMLParser* pParser = GetParser();
+     const ScHTMLTable* pGlobTable = pParser->GetGlobalTable();
+diff --git sc/source/filter/inc/eeimport.hxx sc/source/filter/inc/eeimport.hxx
+index fef4486..9be2583 100644
+--- sc/source/filter/inc/eeimport.hxx
++++ sc/source/filter/inc/eeimport.hxx
+@@ -63,7 +63,8 @@ public:
+     virtual ULONG    Read( SvStream& rStream, const String& rBaseURL );
+     virtual ScRange  GetRange() { return maRange; }
+     virtual void     WriteToDocument( BOOL bSizeColsRows = FALSE,
+-                                      double nOutputFactor = 1.0 );
++                                      double nOutputFactor = 1.0,
++                                      SvNumberFormatter* pFormatter = NULL );
+ };
+ 
+ #endif
+diff --git sc/source/filter/inc/ftools.hxx sc/source/filter/inc/ftools.hxx
+index b670900..7b31d01 100644
+--- sc/source/filter/inc/ftools.hxx
++++ sc/source/filter/inc/ftools.hxx
+@@ -522,7 +522,9 @@ class ScFormatFilterPluginImpl : public ScFormatFilterPlugin {
+     virtual FltError ScImportDif( SvStream&, ScDocument*, const ScAddress& rInsPos,
+ 				 const CharSet eSrc = RTL_TEXTENCODING_DONTKNOW, UINT32 nDifOption = SC_DIFOPT_EXCEL );
+     virtual FltError ScImportRTF( SvStream&, const String& rBaseURL, ScDocument*, ScRange& rRange );
+-    virtual FltError ScImportHTML( SvStream&, const String& rBaseURL, ScDocument*, ScRange& rRange, double nOutputFactor = 1.0, BOOL bCalcWidthHeight = TRUE );
++    virtual FltError ScImportHTML( SvStream&, const String& rBaseURL, ScDocument*, ScRange& rRange, 
++                                   double nOutputFactor = 1.0, BOOL bCalcWidthHeight = TRUE, 
++                                   SvNumberFormatter* pFormatter = NULL );
+ 
+     virtual ScEEAbsImport *CreateRTFImport( ScDocument* pDoc, const ScRange& rRange );
+     virtual ScEEAbsImport *CreateHTMLImport( ScDocument* pDocP, const String& rBaseURL, const ScRange& rRange, BOOL bCalcWidthHeight );
+diff --git sc/source/filter/inc/htmlimp.hxx sc/source/filter/inc/htmlimp.hxx
+index 96ce225..387edee 100644
+--- sc/source/filter/inc/htmlimp.hxx
++++ sc/source/filter/inc/htmlimp.hxx
+@@ -45,7 +45,7 @@ public:
+     virtual ~ScHTMLImport();
+     const ScHTMLParser* GetParser() const { return (ScHTMLParser*)mpParser; }
+ 
+-	virtual void		WriteToDocument( BOOL bSizeColsRows = FALSE, double nOutputFactor = 1.0 );
++	virtual void		WriteToDocument( BOOL bSizeColsRows = FALSE, double nOutputFactor = 1.0, SvNumberFormatter* pFormatter = NULL );
+ 
+ 	static String		GetHTMLRangeNameList( ScDocument* pDoc, const String& rOrigName );
+ };
+diff --git sc/source/filter/rtf/eeimpars.cxx sc/source/filter/rtf/eeimpars.cxx
+index 3f813a1..df5a98b 100644
+--- sc/source/filter/rtf/eeimpars.cxx
++++ sc/source/filter/rtf/eeimpars.cxx
+@@ -129,7 +129,7 @@ ULONG ScEEImport::Read( SvStream& rStream, const String& rBaseURL )
+ }
+ 
+ 
+-void ScEEImport::WriteToDocument( BOOL bSizeColsRows, double nOutputFactor )
++void ScEEImport::WriteToDocument( BOOL bSizeColsRows, double nOutputFactor, SvNumberFormatter* pFormatter )
+ {
+     ScProgress* pProgress = new ScProgress( mpDoc->GetDocumentShell(),
+         ScGlobal::GetRscString( STR_LOAD_DOC ), mpParser->Count() );
+@@ -150,7 +150,8 @@ void ScEEImport::WriteToDocument( BOOL bSizeColsRows, double nOutputFactor )
+ 	nLastMergedRow = SCROW_MAX;
+ 	BOOL bHasGraphics = FALSE;
+ 	ScEEParseEntry* pE;
+-    SvNumberFormatter* pFormatter = mpDoc->GetFormatTable();
++    if (!pFormatter)
++        pFormatter = mpDoc->GetFormatTable();
+     bool bNumbersEnglishUS = (pFormatter->GetLanguage() != LANGUAGE_ENGLISH_US);
+     if (bNumbersEnglishUS)
+     {
+@@ -335,7 +336,7 @@ void ScEEImport::WriteToDocument( BOOL bSizeColsRows, double nOutputFactor )
+ 				else if ( !pE->aSel.HasRange() )
+ 				{
+ 					// maybe ALT text of IMG or similar
+-                    mpDoc->SetString( nCol, nRow, nTab, pE->aAltText );
++                    mpDoc->SetString( nCol, nRow, nTab, pE->aAltText, pFormatter );
+ 					// wenn SelRange komplett leer kann nachfolgender Text im gleichen Absatz liegen!
+ 				}
+ 				else
+@@ -380,7 +381,7 @@ void ScEEImport::WriteToDocument( BOOL bSizeColsRows, double nOutputFactor )
+                     if (bNumbersEnglishUS && !bEnUsRecognized)
+                         mpDoc->PutCell( nCol, nRow, nTab, new ScStringCell( aStr));
+                     else
+-                        mpDoc->SetString( nCol, nRow, nTab, aStr );
++                        mpDoc->SetString( nCol, nRow, nTab, aStr, pFormatter );
+ 				}
+ 			}
+ 			else
+diff --git sc/source/ui/attrdlg/scdlgfact.cxx sc/source/ui/attrdlg/scdlgfact.cxx
+index 5455908..ac23eb4 100644
+--- sc/source/ui/attrdlg/scdlgfact.cxx
++++ sc/source/ui/attrdlg/scdlgfact.cxx
+@@ -71,6 +71,7 @@
+ #include "validate.hxx" //add for ScValidationDlg
+ #include "validate.hrc" //add for ScValidationDlg
+ #include "sortdlg.hxx" //add for ScSortDlg
++#include "langchooser.hxx"
+ #include "opredlin.hxx" //add for  ScRedlineOptionsTabPage
+ #include "tpcalc.hxx" //add for ScTpCalcOptions
+ #include "tpprint.hxx" //add for ScTpPrintOptions
+@@ -118,6 +119,7 @@ IMPL_ABSTDLG_BASE(AbstractScShowTabDlg_Impl); //add for ScShowTabDlg
+ IMPL_ABSTDLG_BASE(AbstractScStringInputDlg_Impl); //add for ScStringInputDlg
+ IMPL_ABSTDLG_BASE(AbstractScTabBgColorDlg_Impl); //add for ScTabBgColorDlg
+ IMPL_ABSTDLG_BASE(AbstractScImportOptionsDlg_Impl); //add for ScImportOptionsDlg
++IMPL_ABSTDLG_BASE(AbstractScLangChooserDlg_Impl);
+ IMPL_ABSTDLG_BASE(AbstractTabDialog_Impl); //add for ScAttrDlg, ScHFEditDlg, ScStyleDlg, ScSubTotalDlg,ScCharDlg, ScParagraphDlg, ScValidationDlg, ScSortDlg
+ 
+ // AbstractTabDialog_Impl begin
+@@ -631,6 +633,14 @@ void AbstractScImportOptionsDlg_Impl::GetImportOptions( ScImportOptions& rOption
+ 	pDlg->GetImportOptions(rOptions);
+ }
+ // add for AbstractScImportOptionsDlg_Impl end
++
++//add for AbstractScLangChooserDlg_Impl begin
++LanguageType AbstractScLangChooserDlg_Impl::GetLanguageType() const
++{
++    return pDlg->getLanguageType();
++}
++//add for AbstractScLangChooserDlg_Impl end
++
+ // =========================Factories  for createdialog ===================
+ 
+ //add for ScImportAsciiDlg begin
+@@ -653,6 +663,21 @@ AbstractScImportAsciiDlg * ScAbstractDialogFactory_Impl::CreateScImportAsciiDlg
+ }
+ // ScImportAsciiDlg end
+ 
++AbstractScLangChooserDlg * ScAbstractDialogFactory_Impl::CreateScLangChooserDlg( Window* pParent, int nId )
++{
++    ScLangChooserDlg* pDlg = NULL;
++    switch (nId)
++    {
++        case RID_SCDLG_LANG_CHOOSER:
++            pDlg = new ScLangChooserDlg(pParent);
++        break;
++        default:
++            ;
++    }
++
++    return pDlg ? new AbstractScLangChooserDlg_Impl(pDlg) : NULL;
++}
++
+ //add for ScAutoFormatDlg begin
+ 
+ AbstractScAutoFormatDlg * ScAbstractDialogFactory_Impl::CreateScAutoFormatDlg( Window*					pParent, //add for ScAutoFormatDlg
+diff --git sc/source/ui/attrdlg/scdlgfact.hxx sc/source/ui/attrdlg/scdlgfact.hxx
+index 3efe3f6..4468686 100644
+--- sc/source/ui/attrdlg/scdlgfact.hxx
++++ sc/source/ui/attrdlg/scdlgfact.hxx
+@@ -65,6 +65,7 @@ class ScStringInputDlg;
+ class ScTabBgColorDlg;
+ class ScImportOptionsDlg;
+ class SfxTabDialog;
++class ScLangChooserDlg;
+ 
+ #define DECL_ABSTDLG_BASE(Class,DialogClass)		\
+ 	DialogClass* 		pDlg;                   	\
+@@ -356,6 +357,12 @@ class AbstractScImportOptionsDlg_Impl : public AbstractScImportOptionsDlg  //add
+ 	virtual void GetImportOptions( ScImportOptions& rOptions ) const;
+ };
+ 
++class AbstractScLangChooserDlg_Impl : public AbstractScLangChooserDlg
++{
++    DECL_ABSTDLG_BASE( AbstractScLangChooserDlg_Impl, ScLangChooserDlg)
++    virtual LanguageType GetLanguageType() const;
++};
++
+ //add for ScAttrDlg , ScHFEditDlg, ScStyleDlg, ScSubTotalDlg, ScCharDlg, ScParagraphDlg, ScValidationDlg, ScSortDlg
+ class AbstractTabDialog_Impl : public SfxAbstractTabDialog
+ {
+@@ -397,6 +404,8 @@ public:
+ 																	SvStream* pInStream, int nId,
+ 																	sal_Unicode cSep = '\t');
+ 
++    virtual AbstractScLangChooserDlg * CreateScLangChooserDlg( Window* pParent, int nId );
++
+ 	virtual		AbstractScAutoFormatDlg * CreateScAutoFormatDlg( Window*					pParent, //add for ScAutoFormatDlg
+ 																ScAutoFormat*				pAutoFormat,
+ 																const ScAutoFormatData*    pSelFormatData,
+diff --git sc/source/ui/dbgui/langchooser.cxx sc/source/ui/dbgui/langchooser.cxx
+new file mode 100644
+index 0000000..6441135
+--- /dev/null
++++ sc/source/ui/dbgui/langchooser.cxx
+@@ -0,0 +1,112 @@
++/*************************************************************************
++ *
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ * 
++ * Copyright 2008 by Sun Microsystems, Inc.
++ *
++ * OpenOffice.org - a multi-platform office productivity suite
++ *
++ * $RCSfile: langbox.hxx,v $
++ * $Revision: 1.4.242.1 $
++ *
++ * This file is part of OpenOffice.org.
++ *
++ * OpenOffice.org is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License version 3
++ * only, as published by the Free Software Foundation.
++ *
++ * OpenOffice.org is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License version 3 for more details
++ * (a copy is included in the LICENSE file that accompanied this code).
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * version 3 along with OpenOffice.org.  If not, see
++ * <http://www.openoffice.org/license.html>
++ * for a copy of the LGPLv3 License.
++ *
++ ************************************************************************/
++
++// MARKER(update_precomp.py): autogen include statement, do not remove
++#include "precompiled_sc.hxx"
++
++#undef SC_DLLIMPLEMENTATION
++
++//------------------------------------------------------------------------
++
++#include "langchooser.hxx"
++#include "langchooser.hrc"
++
++#include "scresid.hxx"
++#include "vcl/window.hxx"
++#include "vcl/msgbox.hxx"
++#include "vcl/svapp.hxx"
++
++ScLangChooserDlg::ScLangChooserDlg(Window* pParent) :
++    ModalDialog(pParent, ScResId(RID_SCDLG_LANG_CHOOSER)),
++
++    maBtnOk(this, ScResId(BTN_OK)),
++    maBtnCancel(this, ScResId(BTN_CANCEL)),
++    maBtnHelp(this, ScResId(BTN_HELP)),
++    maFlChooseLang(this, ScResId(FL_CHOOSE_LANG)),
++    maRbAutomatic(this, ScResId(RB_AUTOMATIC)), 
++    maRbCustom(this, ScResId(RB_CUSTOM)),
++    maLbCustomLang(this, ScResId(LB_CUSTOM_LANG))
++{
++    init();
++}
++
++ScLangChooserDlg::~ScLangChooserDlg()
++{
++}
++
++short ScLangChooserDlg::Execute()
++{
++    return ModalDialog::Execute();
++}
++
++LanguageType ScLangChooserDlg::getLanguageType() const
++{
++    if (maRbAutomatic.IsChecked())
++        return LANGUAGE_SYSTEM;
++
++    return maLbCustomLang.GetSelectLanguage();
++}
++
++void ScLangChooserDlg::init()
++{
++    Link aLink = LINK( this, ScLangChooserDlg, OKHdl );
++    maBtnOk.SetClickHdl(aLink);
++    aLink = LINK( this, ScLangChooserDlg, RadioHdl );
++    maRbAutomatic.SetClickHdl(aLink);
++    maRbCustom.SetClickHdl(aLink);
++
++    maRbAutomatic.Check(true);
++
++    maLbCustomLang.SetLanguageList(
++        LANG_LIST_ALL | LANG_LIST_ONLY_KNOWN, false, false);
++
++    LanguageType eLang = Application::GetSettings().GetLanguage();
++    maLbCustomLang.SelectLanguage(eLang);
++    maLbCustomLang.Disable();
++}
++
++IMPL_LINK( ScLangChooserDlg, OKHdl, OKButton*, EMPTYARG )
++{
++    EndDialog(RET_OK);
++    return 0;
++}
++
++IMPL_LINK( ScLangChooserDlg, RadioHdl, RadioButton*, pBtn )
++{
++    if (pBtn == &maRbAutomatic)
++    {
++        maLbCustomLang.Disable();
++    }
++    else if (pBtn == &maRbCustom)
++    {
++        maLbCustomLang.Enable();
++    }
++}
++
+diff --git sc/source/ui/dbgui/langchooser.src sc/source/ui/dbgui/langchooser.src
+new file mode 100644
+index 0000000..ace6782
+--- /dev/null
++++ sc/source/ui/dbgui/langchooser.src
+@@ -0,0 +1,95 @@
++/*************************************************************************
++ *
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ * 
++ * Copyright 2008 by Sun Microsystems, Inc.
++ *
++ * OpenOffice.org - a multi-platform office productivity suite
++ *
++ * $RCSfile: retypepassdlg.src,v $
++ * $Revision: 1.1.2.3 $
++ *
++ * This file is part of OpenOffice.org.
++ *
++ * OpenOffice.org is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License version 3
++ * only, as published by the Free Software Foundation.
++ *
++ * OpenOffice.org is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License version 3 for more details
++ * (a copy is included in the LICENSE file that accompanied this code).
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * version 3 along with OpenOffice.org.  If not, see
++ * <http://www.openoffice.org/license.html>
++ * for a copy of the LGPLv3 License.
++ *
++ ************************************************************************/
++
++#include "langchooser.hrc"
++
++ModalDialog RID_SCDLG_LANG_CHOOSER
++{
++    Text [ en-US ] = "Select Language" ;
++    Size = MAP_APPFONT ( 190 , 70 ) ;
++    Moveable = TRUE ;
++    Closeable = TRUE ;
++    OutputSize = TRUE ;
++
++    OKButton BTN_OK
++    {
++        Pos = MAP_APPFONT ( 135, 6 ) ;
++        Size = MAP_APPFONT ( 50, 14 ) ;
++        DefButton = TRUE ;
++    };
++
++    CancelButton BTN_CANCEL
++    {
++        Pos = MAP_APPFONT ( 135, 23 ) ;
++        Size = MAP_APPFONT ( 50, 14 ) ;
++    };
++
++    HelpButton BTN_HELP
++    {
++        Pos = MAP_APPFONT ( 135, 43 ) ;
++        Size = MAP_APPFONT ( 50, 14 ) ;
++    };
++
++    FixedLine FL_CHOOSE_LANG
++    {
++        Pos = MAP_APPFONT( 6, 3 ) ;
++        Size = MAP_APPFONT( 125, 14 ) ;
++
++        Text [ en-US ] = "Select the language to use for import" ; 
++    };
++
++    RadioButton RB_AUTOMATIC
++    {
++        Pos = MAP_APPFONT( 12, 20 ) ;
++        Size = MAP_APPFONT( 50, 10 ) ;
++        TabStop = TRUE ;
++
++        Text [ en-US ] = "Automatic" ; 
++    };
++
++    RadioButton RB_CUSTOM
++    {
++        Pos = MAP_APPFONT( 12, 34 ) ;
++        Size = MAP_APPFONT( 50, 10 ) ;
++        TabStop = TRUE ;
++
++        Text [ en-US ] = "Custom" ; 
++    };
++
++    ListBox LB_CUSTOM_LANG
++    {
++        Pos = MAP_APPFONT( 20, 50 ) ;
++        Size = MAP_APPFONT( 100, 55 ) ;
++        TabStop = TRUE ;
++        DropDown = TRUE ;
++        Sort = TRUE ;
++    };
++};
++
+diff --git sc/source/ui/dbgui/makefile.mk sc/source/ui/dbgui/makefile.mk
+index 0a95138..8df758d 100644
+--- sc/source/ui/dbgui/makefile.mk
++++ sc/source/ui/dbgui/makefile.mk
+@@ -53,6 +53,7 @@ SLOFILES =	\
+     $(SLO)$/pfiltdlg.obj	\
+     $(SLO)$/dbnamdlg.obj	\
+ 	$(SLO)$/expftext.obj	\
++    $(SLO)$/langchooser.obj \
+     $(SLO)$/subtdlg.obj		\
+     $(SLO)$/tpsubt.obj		\
+     $(SLO)$/fieldwnd.obj	\
+@@ -85,6 +86,7 @@ EXCEPTIONSFILES= \
+ 
+ SRS1NAME=$(TARGET)
+ SRC1FILES =  \
++	langchooser.src		\
+         pivot.src		\
+         pvfundlg.src	\
+         dpgroupdlg.src	\
+@@ -114,7 +116,8 @@ LIB1OBJFILES =  \
+ 	$(SLO)$/csvruler.obj	\
+ 	$(SLO)$/csvgrid.obj		\
+ 	$(SLO)$/csvtablebox.obj	\
+-    $(SLO)$/asciiopt.obj
++    $(SLO)$/asciiopt.obj \
++    $(SLO)$/langchooser.obj
+ 
+ # --- Tagets -------------------------------------------------------
+ 
+diff --git sc/source/ui/docshell/docsh.cxx sc/source/ui/docshell/docsh.cxx
+index ec2bc6d..2f08f6a 100644
+--- sc/source/ui/docshell/docsh.cxx
++++ sc/source/ui/docshell/docsh.cxx
+@@ -1273,12 +1273,23 @@ BOOL __EXPORT ScDocShell::ConvertFrom( SfxMedium& rMedium )
+ 				SvStream* pInStream = rMedium.GetInStream();
+ 				if (pInStream)
+ 				{
++                    LanguageType eLang = LANGUAGE_SYSTEM;
++                    SfxItemSet*	 pSet = rMedium.GetItemSet();
++                    const SfxPoolItem* pItem;
++                    if ( pSet && SFX_ITEM_SET ==
++                         pSet->GetItemState( SID_FILE_FILTEROPTIONS, TRUE, &pItem ) )
++                    {
++                        String aFilterOption = (static_cast<const SfxStringItem*>(pItem))->GetValue();
++                        eLang = static_cast<LanguageType>(aFilterOption.ToInt32());
++                    }
++
+ 					pInStream->Seek( 0 );
+ 					ScRange aRange;
+ 					// HTML macht eigenes ColWidth/RowHeight
+ 					CalcOutputFactor();
++                    SvNumberFormatter aNumFormatter(aDocument.GetServiceManager(), eLang);
+                     eError = ScFormatFilter::Get().ScImportHTML( *pInStream, rMedium.GetBaseURL(), &aDocument, aRange,
+-											GetOutputFactor(), !bWebQuery );
++											GetOutputFactor(), !bWebQuery, &aNumFormatter );
+ 					if (eError != eERR_OK)
+ 					{
+ 						if (!GetError())
+diff --git sc/source/ui/docshell/impex.cxx sc/source/ui/docshell/impex.cxx
+index cc51d67..83dd6da 100644
+--- sc/source/ui/docshell/impex.cxx
++++ sc/source/ui/docshell/impex.cxx
+@@ -1943,7 +1943,7 @@ class ScFormatFilterMissing : public ScFormatFilterPlugin {
+     virtual FltError ScImportDif( SvStream&, ScDocument*, const ScAddress&,
+ 				 const CharSet, UINT32 ) RETURN_ERROR
+     virtual FltError ScImportRTF( SvStream&, const String&, ScDocument*, ScRange& ) RETURN_ERROR
+-    virtual FltError ScImportHTML( SvStream&, const String&, ScDocument*, ScRange&, double, BOOL ) RETURN_ERROR
++    virtual FltError ScImportHTML( SvStream&, const String&, ScDocument*, ScRange&, double, BOOL, SvNumberFormatter* ) RETURN_ERROR
+ 
+     virtual ScEEAbsImport *CreateRTFImport( ScDocument*, const ScRange& ) { return NULL; }
+     virtual ScEEAbsImport *CreateHTMLImport( ScDocument*, const String&, const ScRange&, BOOL ) { return NULL; }
+diff --git sc/source/ui/inc/langchooser.hrc sc/source/ui/inc/langchooser.hrc
+new file mode 100644
+index 0000000..fb0be37
+--- /dev/null
++++ sc/source/ui/inc/langchooser.hrc
+@@ -0,0 +1,41 @@
++/*************************************************************************
++ *
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ * 
++ * Copyright 2008 by Sun Microsystems, Inc.
++ *
++ * OpenOffice.org - a multi-platform office productivity suite
++ *
++ * $RCSfile: retypepassdlg.src,v $
++ * $Revision: 1.1.2.3 $
++ *
++ * This file is part of OpenOffice.org.
++ *
++ * OpenOffice.org is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License version 3
++ * only, as published by the Free Software Foundation.
++ *
++ * OpenOffice.org is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License version 3 for more details
++ * (a copy is included in the LICENSE file that accompanied this code).
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * version 3 along with OpenOffice.org.  If not, see
++ * <http://www.openoffice.org/license.html>
++ * for a copy of the LGPLv3 License.
++ *
++ ************************************************************************/
++
++#include <sc.hrc>
++
++#define BTN_OK                   1
++#define BTN_CANCEL               2
++#define BTN_HELP                 3
++
++#define FL_CHOOSE_LANG           4
++#define RB_AUTOMATIC             5
++#define RB_CUSTOM                6
++#define LB_CUSTOM_LANG           7
++
+diff --git sc/source/ui/inc/langchooser.hxx sc/source/ui/inc/langchooser.hxx
+new file mode 100644
+index 0000000..7c63973
+--- /dev/null
++++ sc/source/ui/inc/langchooser.hxx
+@@ -0,0 +1,73 @@
++/*************************************************************************
++ *
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ * 
++ * Copyright 2008 by Sun Microsystems, Inc.
++ *
++ * OpenOffice.org - a multi-platform office productivity suite
++ *
++ * $RCSfile: langbox.hxx,v $
++ * $Revision: 1.4.242.1 $
++ *
++ * This file is part of OpenOffice.org.
++ *
++ * OpenOffice.org is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License version 3
++ * only, as published by the Free Software Foundation.
++ *
++ * OpenOffice.org is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License version 3 for more details
++ * (a copy is included in the LICENSE file that accompanied this code).
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * version 3 along with OpenOffice.org.  If not, see
++ * <http://www.openoffice.org/license.html>
++ * for a copy of the LGPLv3 License.
++ *
++ ************************************************************************/
++
++#ifndef SC_UI_LANGCHOOSER_HXX
++#define SC_UI_LANGCHOOSER_HXX
++
++#include "vcl/dialog.hxx"
++#include "vcl/button.hxx"
++#include "vcl/fixed.hxx"
++#include "i18npool/lang.h"
++#include "svx/langbox.hxx"
++
++class ScLangChooserDlg : public ModalDialog
++{
++public:
++    ScLangChooserDlg(Window* pParent);
++    virtual ~ScLangChooserDlg();
++
++    virtual short Execute();
++
++    LanguageType getLanguageType() const;
++
++private:
++    void init();
++
++private:
++    OKButton        maBtnOk;
++    CancelButton    maBtnCancel;
++    HelpButton      maBtnHelp;
++
++    FixedLine       maFlChooseLang;
++
++    RadioButton     maRbAutomatic;
++    RadioButton     maRbCustom;
++
++    SvxLanguageBox  maLbCustomLang;
++
++    String          maString;
++
++    DECL_LINK( OKHdl, OKButton* );
++
++    DECL_LINK( RadioHdl, RadioButton* );
++};
++
++
++#endif
+diff --git sc/source/ui/unoobj/filtuno.cxx sc/source/ui/unoobj/filtuno.cxx
+index 81efc76..99c1045 100644
+--- sc/source/ui/unoobj/filtuno.cxx
++++ sc/source/ui/unoobj/filtuno.cxx
+@@ -51,6 +51,10 @@
+ 
+ #include "sc.hrc" //CHINA001
+ #include "scabstdlg.hxx" //CHINA001
++#include "i18npool/lang.h"
++
++#include <memory>
++
+ using namespace ::com::sun::star;
+ 
+ //------------------------------------------------------------------------
+@@ -146,6 +150,10 @@ sal_Int16 SAL_CALL ScFilterOptionsObj::execute() throw(uno::RuntimeException)
+ 	sal_Int16 nRet = ui::dialogs::ExecutableDialogResults::CANCEL;
+ 
+ 	String aFilterString( aFilterName );
++
++    ScAbstractDialogFactory* pFact = ScAbstractDialogFactory::Create();
++    DBG_ASSERT(pFact, "ScAbstractFactory create fail!");
++
+ 	if ( !bExport && aFilterString == ScDocShell::GetAsciiFilterName() )
+ 	{
+ 		//	ascii import is special...
+@@ -164,8 +172,6 @@ sal_Int16 SAL_CALL ScFilterOptionsObj::execute() throw(uno::RuntimeException)
+ 			pInStream = utl::UcbStreamHelper::CreateStream( xInputStream );
+ 
+ 		//CHINA001 ScImportAsciiDlg* pDlg = new ScImportAsciiDlg( NULL, aPrivDatName, pInStream, cAsciiDel );
+-		ScAbstractDialogFactory* pFact = ScAbstractDialogFactory::Create();
+-		DBG_ASSERT(pFact, "ScAbstractFactory create fail!");//CHINA001
+ 		AbstractScImportAsciiDlg* pDlg = pFact->CreateScImportAsciiDlg( NULL, aPrivDatName, pInStream, RID_SCDLG_ASCII, cAsciiDel);
+ 		DBG_ASSERT(pDlg, "Dialog create fail!");//CHINA001
+ 		if ( pDlg->Execute() == RET_OK )
+@@ -178,6 +184,19 @@ sal_Int16 SAL_CALL ScFilterOptionsObj::execute() throw(uno::RuntimeException)
+ 		delete pDlg;
+ 		delete pInStream;
+ 	}
++    else if ( aFilterString == ScDocShell::GetWebQueryFilterName() )
++    {
++        // HTML import.
++        ::std::auto_ptr<AbstractScLangChooserDlg> pDlg(
++            pFact->CreateScLangChooserDlg(NULL, RID_SCDLG_LANG_CHOOSER));
++
++        if (pDlg->Execute() == RET_OK)
++        {
++            LanguageType eLang = pDlg->GetLanguageType();
++            aFilterOptions = String::CreateFromInt32(static_cast<sal_Int32>(eLang));
++            nRet = ui::dialogs::ExecutableDialogResults::OK;
++        }
++    }
+ 	else
+ 	{
+ 		sal_Bool bMultiByte = sal_True;
+@@ -249,8 +268,6 @@ sal_Int16 SAL_CALL ScFilterOptionsObj::execute() throw(uno::RuntimeException)
+ //CHINA001		&aOptions, &aTitle, bMultiByte, bDBEnc,
+ //CHINA001		!bExport );
+ //CHINA001 
+-		ScAbstractDialogFactory* pFact = ScAbstractDialogFactory::Create();
+-		DBG_ASSERT(pFact, "ScAbstractFactory create fail!");//CHINA001
+ 
+ 		AbstractScImportOptionsDlg* pDlg = pFact->CreateScImportOptionsDlg( NULL, RID_SCDLG_IMPORTOPT,
+ 																			bAscii, &aOptions, &aTitle, bMultiByte, bDBEnc,
+diff --git sc/util/makefile.mk sc/util/makefile.mk
+index dd6c36d..c1e152f 100644
+--- sc/util/makefile.mk
++++ sc/util/makefile.mk
+@@ -285,6 +285,7 @@ LIB8OBJFILES = \
+ 		$(SLO)$/dapidata.obj	\
+ 		$(SLO)$/crdlg.obj			\
+ 		$(SLO)$/scuiasciiopt.obj	\
++		$(SLO)$/langchooser.obj	\
+ 		$(SLO)$/scuiautofmt.obj	\
+ 	    $(SLO)$/dpgroupdlg.obj	\
+ 		$(SLO)$/editfield.obj
