@@ -1,8 +1,8 @@
 diff --git sc/inc/attrib.hxx sc/inc/attrib.hxx
-index 3fed033..271e91d 100644
+index 3fed033..22e7d27 100644
 --- sc/inc/attrib.hxx
 +++ sc/inc/attrib.hxx
-@@ -42,13 +42,14 @@
+@@ -42,13 +42,16 @@
  
  										// Flags fuer durch Merge verdeckte Zellen
  										// und Control fuer Auto-Filter
@@ -18,12 +18,29 @@ index 3fed033..271e91d 100644
 +#define SC_MF_AUTO              0x0004  /// autofilter arrow
 +#define SC_MF_BUTTON            0x0008  /// field button for datapilot
 +#define SC_MF_SCENARIO          0x0010
-+#define SC_MF_BUTTON_POPUP      0x0020  /// datapilot button with popup arrow
++#define SC_MF_BUTTON_POPUP      0x0020  /// dp button with popup arrow
++#define SC_MF_HIDDEN_MEMBER     0x0040  /// dp field button with presence of hidden member 
++#define SC_MF_DP_TABLE          0x0080  /// dp table output
 +
-+#define SC_MF_ALL               (SC_MF_HOR|SC_MF_VER|SC_MF_AUTO|SC_MF_BUTTON|SC_MF_SCENARIO|SC_MF_BUTTON_POPUP)
++#define SC_MF_ALL               0x00FF
  
  
  class EditTextObject;
+diff --git sc/inc/dpoutput.hxx sc/inc/dpoutput.hxx
+index 025e62d..1abccf0 100644
+--- sc/inc/dpoutput.hxx
++++ sc/inc/dpoutput.hxx
+@@ -124,8 +124,8 @@ private:
+ 	void			HeaderCell( SCCOL nCol, SCROW nRow, SCTAB nTab,
+ 								const com::sun::star::sheet::MemberResult& rData,
+ 								BOOL bColHeader, long nLevel );
+-	void			FieldCell( SCCOL nCol, SCROW nRow, SCTAB nTab, const String& rCaption,
+-								BOOL bFrame = TRUE );
++    void            FieldCell( SCCOL nCol, SCROW nRow, SCTAB nTab, const String& rCaption, 
++                               bool bInTable, bool bHasHiddenMember );
+ 	void			CalcSizes();
+ 
+     /** Query which sub-area of the table the cell is in. See
 diff --git sc/inc/dpoutputgeometry.hxx sc/inc/dpoutputgeometry.hxx
 new file mode 100644
 index 0000000..c8abd2c
@@ -94,18 +111,305 @@ index 0000000..c8abd2c
 +};
 +
 +#endif
+diff --git sc/inc/dptabsrc.hxx sc/inc/dptabsrc.hxx
+index f10ae2d..1c0f51b 100644
+--- sc/inc/dptabsrc.hxx
++++ sc/inc/dptabsrc.hxx
+@@ -348,6 +348,7 @@ private:
+ 	BOOL				bHasSelectedPage;
+ 	String				aSelectedPage;
+ 	ScDPItemData*		pSelectedData;		// internal, temporary, created from aSelectedPage
++    sal_Bool            mbHasHiddenMember;
+ 
+ public:
+ 							ScDPDimension( ScDPSource* pSrc, long nD );
 diff --git sc/inc/fillinfo.hxx sc/inc/fillinfo.hxx
-index c9bfc1d..5cf89f3 100644
+index c9bfc1d..7f8bd54 100644
 --- sc/inc/fillinfo.hxx
 +++ sc/inc/fillinfo.hxx
-@@ -99,6 +99,7 @@ struct CellInfo
+@@ -99,6 +99,8 @@ struct CellInfo
      BOOL                        bVOverlapped : 1;
      BOOL                        bAutoFilter : 1;
      BOOL                        bPushButton : 1;
 +    bool                        bPopupButton: 1;
++    bool                        bFilterActive:1;
  
      BOOL                        bPrinted : 1;               // bei Bedarf (Pagebreak-Modus)
  
+diff --git sc/inc/global.hxx sc/inc/global.hxx
+index a64dd1c..b2d6e50 100644
+--- sc/inc/global.hxx
++++ sc/inc/global.hxx
+@@ -94,8 +94,6 @@ extern "C" {
+ #define OLD_PIVOT_IMPLEMENTATION 0
+ 
+ //------------------------------------------------------------------------
+-struct LabelData;
+-//------------------------------------------------------------------------
+ 
+ //	die 1000 Namen des Calc...
+ //	Clipboard-Namen sind jetzt in so3/soapp.hxx
+diff --git sc/inc/pivot.hxx sc/inc/pivot.hxx
+index 042a10d..c548f04 100644
+--- sc/inc/pivot.hxx
++++ sc/inc/pivot.hxx
+@@ -53,6 +53,7 @@
+ #include "address.hxx"
+ 
+ #include <vector>
++#include <boost/shared_ptr.hpp>
+ 
+ class SubTotal;
+ #include "collect.hxx"
+@@ -80,7 +81,9 @@ class ScUserListData;
+ class ScMultipleReadHeader;
+ class ScMultipleWriteHeader;
+ class ScProgress;
+-struct LabelData;
++struct ScDPLabelData;
++
++typedef ::boost::shared_ptr<ScDPLabelData> ScDPLabelDataRef;
+ 
+ // -----------------------------------------------------------------------
+ 
+@@ -104,8 +107,7 @@ struct ScPivotParam
+     SCCOL           nCol;           // Cursor Position /
+     SCROW           nRow;           // bzw. Anfang des Zielbereiches
+     SCTAB           nTab;
+-    LabelData**     ppLabelArr;
+-    SCSIZE          nLabels;
++    ::std::vector<ScDPLabelDataRef> maLabelArray;
+     PivotField      aPageArr[PIVOT_MAXPAGEFIELD];
+     PivotField      aColArr[PIVOT_MAXFIELD];
+     PivotField      aRowArr[PIVOT_MAXFIELD];
+@@ -126,10 +128,8 @@ struct ScPivotParam
+     ScPivotParam&   operator=       ( const ScPivotParam& r );
+     BOOL            operator==      ( const ScPivotParam& r ) const;
+     void            Clear           ();
+-    void            ClearLabelData  ();
+     void            ClearPivotArrays();
+-    void            SetLabelData    ( LabelData**   ppLabArr,
+-                                      SCSIZE        nLab );
++    void            SetLabelData    (const ::std::vector<ScDPLabelDataRef>& r);
+     void            SetPivotArrays  ( const PivotField* pPageArr,
+                                       const PivotField* pColArr,
+                                       const PivotField* pRowArr,
+@@ -366,7 +366,7 @@ public:
+ 
+ //------------------------------------------------------------------------
+ 
+-struct LabelData
++struct ScDPLabelData
+ {
+     String              maName;         /// Visible name of the dimension.
+     SCsCOL              mnCol;
+@@ -383,7 +383,7 @@ struct LabelData
+     ::com::sun::star::sheet::DataPilotFieldLayoutInfo   maLayoutInfo;   /// Layout info.
+     ::com::sun::star::sheet::DataPilotFieldAutoShowInfo maShowInfo;     /// AutoShow info.
+ 
+-    explicit            LabelData( const String& rName, short nCol, bool bIsValue );
++    explicit            ScDPLabelData( const String& rName, short nCol, bool bIsValue );
+ };
+ 
+ // ============================================================================
+@@ -401,7 +401,6 @@ struct ScDPFuncData
+ 
+ // ============================================================================
+ 
+-typedef LabelData ScDPLabelData;
+ typedef std::vector< ScDPLabelData > ScDPLabelDataVec;
+ typedef std::vector< String > ScDPNameVec;
+ 
+diff --git sc/inc/scabstdlg.hxx sc/inc/scabstdlg.hxx
+index 637682d..b221238 100644
+--- sc/inc/scabstdlg.hxx
++++ sc/inc/scabstdlg.hxx
+@@ -243,7 +243,7 @@ class AbstractScDPSubtotalDlg : public VclAbstractDialog  //add for ScDPSubtotal
+ {
+ public:
+     virtual USHORT  GetFuncMask() const = 0;
+-    virtual void    FillLabelData( LabelData& rLabelData ) const = 0;
++    virtual void    FillLabelData( ScDPLabelData& rLabelData ) const = 0;
+ };
+ 
+ class AbstractScDPNumGroupDlg : public VclAbstractDialog
+diff --git sc/inc/unonames.hxx sc/inc/unonames.hxx
+index 6afb1a3..89b3a94 100644
+--- sc/inc/unonames.hxx
++++ sc/inc/unonames.hxx
+@@ -566,6 +566,7 @@
+ #define SC_UNO_LAYOUTNAME           "LayoutName"
+ #define SC_UNO_FIELD_SUBTOTALNAME   "FieldSubtotalName"
+ #define SC_UNO_GRANDTOTAL_NAME      "GrandTotalName"
++#define SC_UNO_HAS_HIDDEN_MEMBER    "HasHiddenMember"
+ 
+ //  (preliminary:)
+ #define SC_UNO_REFVALUE				"ReferenceValue"
+diff --git sc/source/core/data/dpobject.cxx sc/source/core/data/dpobject.cxx
+index fbf9c78..1c1c95f 100644
+--- sc/source/core/data/dpobject.cxx
++++ sc/source/core/data/dpobject.cxx
+@@ -1789,7 +1789,7 @@ BOOL ScDPObject::FillOldParam(ScPivotParam& rParam, BOOL bForFile) const
+ 	return TRUE;
+ }
+ 
+-void lcl_FillLabelData( LabelData& rData, const uno::Reference< beans::XPropertySet >& xDimProp )
++void lcl_FillLabelData( ScDPLabelData& rData, const uno::Reference< beans::XPropertySet >& xDimProp )
+ {
+ 	uno::Reference<sheet::XHierarchiesSupplier> xDimSupp( xDimProp, uno::UNO_QUERY );
+ 	if ( xDimProp.is() && xDimSupp.is() )
+@@ -1835,6 +1835,8 @@ void lcl_FillLabelData( LabelData& rData, const uno::Reference< beans::XProperty
+ 
+ BOOL ScDPObject::FillLabelData(ScPivotParam& rParam)
+ {
++    rParam.maLabelArray.clear();
++
+ 	((ScDPObject*)this)->CreateObjects();
+ 
+ 	uno::Reference<container::XNameAccess> xDimsName = xSource->getDimensions();
+@@ -1845,8 +1847,6 @@ BOOL ScDPObject::FillLabelData(ScPivotParam& rParam)
+ 	if (!nDimCount)
+ 		return FALSE;
+ 
+-	SCSIZE nOutCount = 0;
+-	LabelData** aLabelArr = new LabelData*[nDimCount];
+ 	for (long nDim=0; nDim < nDimCount; nDim++)
+ 	{
+ 		String aFieldName;
+@@ -1881,24 +1881,15 @@ BOOL ScDPObject::FillLabelData(ScPivotParam& rParam)
+                 SCsCOL nCol = static_cast< SCsCOL >( nDim );           //! ???
+                 bool bIsValue = true;                               //! check
+ 
+-                aLabelArr[nOutCount] = new LabelData( aFieldName, nCol, bIsValue );
+-
+-                LabelData& rLabelData = *aLabelArr[nOutCount];
+-                GetHierarchies( nDim, rLabelData.maHiers );
+-                GetMembers( nDim, rLabelData.maMembers, &rLabelData.maVisible, &rLabelData.maShowDet );
+-                lcl_FillLabelData( rLabelData, xDimProp );
+-
+-				++nOutCount;
++                ScDPLabelDataRef pNewLabel(new ScDPLabelData(aFieldName, nCol, bIsValue));
++                GetHierarchies(nDim, pNewLabel->maHiers);
++                GetMembers(nDim, pNewLabel->maMembers, &pNewLabel->maVisible, &pNewLabel->maShowDet);
++                lcl_FillLabelData(*pNewLabel, xDimProp);
++                rParam.maLabelArray.push_back(pNewLabel);
+ 			}
+ 		}
+ 	}
+ 
+-	rParam.SetLabelData( aLabelArr, nOutCount );
+-
+-	for (SCSIZE i=0; i<nOutCount; i++)
+-		delete aLabelArr[i];
+-	delete[] aLabelArr;
+-
+ 	return TRUE;
+ }
+ 
+diff --git sc/source/core/data/dpoutput.cxx sc/source/core/data/dpoutput.cxx
+index de9c898..caa5935 100644
+--- sc/source/core/data/dpoutput.cxx
++++ sc/source/core/data/dpoutput.cxx
+@@ -121,8 +121,13 @@ struct ScDPOutLevelData
+ 	uno::Sequence<sheet::MemberResult>	aResult;
+     String                              maName;   /// Name is the internal field name.
+     String                              aCaption; /// Caption is the name visible in the output table.
++    bool                                mbHasHiddenMember;
+ 
+-	ScDPOutLevelData() { nDim = nHier = nLevel = nDimPos = -1; }
++	ScDPOutLevelData()
++    { 
++        nDim = nHier = nLevel = nDimPos = -1; 
++        mbHasHiddenMember = false;
++    }
+ 
+ 	BOOL operator<(const ScDPOutLevelData& r) const
+ 		{ return nDimPos<r.nDimPos || ( nDimPos==r.nDimPos && nHier<r.nHier ) ||
+@@ -415,6 +420,8 @@ ScDPOutput::ScDPOutput( ScDocument* pD, const uno::Reference<sheet::XDimensionsS
+ 				BOOL bIsDataLayout = ScUnoHelpFunctions::GetBoolProperty(
+ 												xDimProp,
+ 												rtl::OUString::createFromAscii(DP_PROP_ISDATALAYOUT) );
++                bool bHasHiddenMember = ScUnoHelpFunctions::GetBoolProperty(
++                    xDimProp, OUString::createFromAscii(SC_UNO_HAS_HIDDEN_MEMBER));
+ 
+ 				if ( eDimOrient != sheet::DataPilotFieldOrientation_HIDDEN )
+ 				{
+@@ -464,6 +471,7 @@ ScDPOutput::ScDPOutput( ScDocument* pD, const uno::Reference<sheet::XDimensionsS
+ 										pColFields[nColFieldCount].aResult = xLevRes->getResults();
+                                         pColFields[nColFieldCount].maName  = aName;
+ 										pColFields[nColFieldCount].aCaption= aCaption;
++										pColFields[nColFieldCount].mbHasHiddenMember = bHasHiddenMember;
+ 										if (!lcl_MemberEmpty(pColFields[nColFieldCount].aResult))
+ 											++nColFieldCount;
+ 										break;
+@@ -475,6 +483,7 @@ ScDPOutput::ScDPOutput( ScDocument* pD, const uno::Reference<sheet::XDimensionsS
+ 										pRowFields[nRowFieldCount].aResult = xLevRes->getResults();
+                                         pRowFields[nRowFieldCount].maName  = aName;
+ 										pRowFields[nRowFieldCount].aCaption= aCaption;
++										pRowFields[nRowFieldCount].mbHasHiddenMember = bHasHiddenMember;
+ 										if (!lcl_MemberEmpty(pRowFields[nRowFieldCount].aResult))
+ 											++nRowFieldCount;
+ 										break;
+@@ -486,6 +495,7 @@ ScDPOutput::ScDPOutput( ScDocument* pD, const uno::Reference<sheet::XDimensionsS
+ 										pPageFields[nPageFieldCount].aResult = lcl_GetSelectedPageAsResult(xDimProp);
+                                         pPageFields[nPageFieldCount].maName  = aName;
+ 										pPageFields[nPageFieldCount].aCaption= aCaption;
++										pPageFields[nPageFieldCount].mbHasHiddenMember = bHasHiddenMember;
+ 										// no check on results for page fields
+ 										++nPageFieldCount;
+ 										break;
+@@ -658,14 +668,20 @@ void ScDPOutput::HeaderCell( SCCOL nCol, SCROW nRow, SCTAB nTab,
+ 	}
+ }
+ 
+-void ScDPOutput::FieldCell( SCCOL nCol, SCROW nRow, SCTAB nTab, const String& rCaption, BOOL bFrame )
++void ScDPOutput::FieldCell( SCCOL nCol, SCROW nRow, SCTAB nTab, const String& rCaption, 
++                            bool bInTable, bool bHasHiddenMember )
+ {
+ 	pDoc->SetString( nCol, nRow, nTab, rCaption );
+-	if (bFrame)
+-		lcl_SetFrame( pDoc,nTab, nCol,nRow, nCol,nRow, 20 );
++//  if (bInTable)
++//  	lcl_SetFrame( pDoc,nTab, nCol,nRow, nCol,nRow, 20 );
+ 
+ 	//	Button
+-	pDoc->ApplyAttr( nCol, nRow, nTab, ScMergeFlagAttr(SC_MF_BUTTON) );
++    sal_uInt16 nMergeFlag = SC_MF_BUTTON;
++    if (bInTable)
++        nMergeFlag |= SC_MF_BUTTON_POPUP;
++    if (bHasHiddenMember)
++        nMergeFlag |= SC_MF_HIDDEN_MEMBER;
++    pDoc->ApplyAttr( nCol, nRow, nTab, ScMergeFlagAttr(nMergeFlag) );
+ 
+ 	lcl_SetStyleById( pDoc,nTab, nCol,nRow, nCol,nRow, STR_PIVOT_STYLE_FIELDNAME );
+ }
+@@ -799,7 +815,7 @@ void ScDPOutput::Output()
+ 		SCCOL nHdrCol = aStartPos.Col();
+ 		SCROW nHdrRow = aStartPos.Row() + nField + ( bDoFilter ? 1 : 0 );
+ 		// draw without frame for consistency with filter button:
+-		FieldCell( nHdrCol, nHdrRow, nTab, pPageFields[nField].aCaption, FALSE );
++        FieldCell( nHdrCol, nHdrRow, nTab, pPageFields[nField].aCaption, false, pPageFields[nField].mbHasHiddenMember );
+ 		SCCOL nFldCol = nHdrCol + 1;
+ 
+ 		String aPageValue;
+@@ -838,7 +854,7 @@ void ScDPOutput::Output()
+ 	for (nField=0; nField<nColFieldCount; nField++)
+ 	{
+ 		SCCOL nHdrCol = nDataStartCol + (SCCOL)nField;				//! check for overflow
+-		FieldCell( nHdrCol, nTabStartRow, nTab, pColFields[nField].aCaption );
++        FieldCell( nHdrCol, nTabStartRow, nTab, pColFields[nField].aCaption, true, pColFields[nField].mbHasHiddenMember );
+ 
+ 		SCROW nRowPos = nMemberStartRow + (SCROW)nField;				//! check for overflow
+ 		const uno::Sequence<sheet::MemberResult> rSequence = pColFields[nField].aResult;
+@@ -875,7 +891,7 @@ void ScDPOutput::Output()
+ 	{
+ 		SCCOL nHdrCol = nTabStartCol + (SCCOL)nField;					//! check for overflow
+ 		SCROW nHdrRow = nDataStartRow - 1;
+-		FieldCell( nHdrCol, nHdrRow, nTab, pRowFields[nField].aCaption );
++        FieldCell( nHdrCol, nHdrRow, nTab, pRowFields[nField].aCaption, true, pRowFields[nField].mbHasHiddenMember );
+ 
+ 		SCCOL nColPos = nMemberStartCol + (SCCOL)nField;				//! check for overflow
+ 		const uno::Sequence<sheet::MemberResult> rSequence = pRowFields[nField].aResult;
 diff --git sc/source/core/data/dpoutputgeometry.cxx sc/source/core/data/dpoutputgeometry.cxx
 new file mode 100644
 index 0000000..7a6d813
@@ -229,76 +533,124 @@ index 0000000..7a6d813
 +
 +    return None;
 +}
+diff --git sc/source/core/data/dpsave.cxx sc/source/core/data/dpsave.cxx
+index 3072232..047efe3 100644
+--- sc/source/core/data/dpsave.cxx
++++ sc/source/core/data/dpsave.cxx
+@@ -638,6 +638,8 @@ void ScDPSaveDimension::WriteToSource( const uno::Reference<uno::XInterface>& xD
+ 		nHierCount = xHiers->getCount();
+ 	}
+ 
++    sal_Bool bHasHiddenMember = false;
++
+ 	for (long nHier=0; nHier<nHierCount; nHier++)
+ 	{
+ 		uno::Reference<uno::XInterface> xHierarchy = ScUnoHelpFunctions::AnyToInterface( xHiers->getByIndex(nHier) );
+@@ -730,12 +732,15 @@ void ScDPSaveDimension::WriteToSource( const uno::Reference<uno::XInterface>& xD
+ 
+ 						for (MemberList::const_iterator i=maMemberList.begin(); i != maMemberList.end() ; i++)
+ 						{
+-                            rtl::OUString aMemberName = (*i)->GetName();
++                            ScDPSaveMember* pMember = *i;
++                            if (!pMember->GetIsVisible())
++                                bHasHiddenMember = true;
++                            rtl::OUString aMemberName = pMember->GetName();
+                             if ( xMembers->hasByName( aMemberName ) )
+ 							{
+ 								uno::Reference<uno::XInterface> xMemberInt = ScUnoHelpFunctions::AnyToInterface(
+                                     xMembers->getByName( aMemberName ) );
+-								(*i)->WriteToSource( xMemberInt, nPosition );
++								pMember->WriteToSource( xMemberInt, nPosition );
+ 
+ 								if ( nPosition >= 0 )
+     								++nPosition;            // increase if initialized
+@@ -747,6 +752,14 @@ void ScDPSaveDimension::WriteToSource( const uno::Reference<uno::XInterface>& xD
+ 			}
+ 		}
+ 	}
++
++    if (xDimProp.is())
++    {
++        uno::Any any;
++        any <<= bHasHiddenMember;    
++        xDimProp->setPropertyValue(
++            OUString::createFromAscii(SC_UNO_HAS_HIDDEN_MEMBER), any);
++    }
+ }
+ 
+ // -----------------------------------------------------------------------
+diff --git sc/source/core/data/dptabsrc.cxx sc/source/core/data/dptabsrc.cxx
+index 2c045d6..a1b23db 100644
+--- sc/source/core/data/dptabsrc.cxx
++++ sc/source/core/data/dptabsrc.cxx
+@@ -1373,7 +1373,8 @@ ScDPDimension::ScDPDimension( ScDPSource* pSrc, long nD ) :
+     mpSubtotalName(NULL),
+ 	nSourceDim( -1 ),
+ 	bHasSelectedPage( FALSE ),
+-	pSelectedData( NULL )
++	pSelectedData( NULL ),
++    mbHasHiddenMember(false)
+ {
+ 	//!	hold pSource
+ }
+@@ -1569,6 +1570,7 @@ uno::Reference<beans::XPropertySetInfo> SAL_CALL ScDPDimension::getPropertySetIn
+ 		{MAP_CHAR_LEN(SC_UNO_USEDHIER),	0,	&getCppuType((sal_Int32*)0),				0, 0 },
+         {MAP_CHAR_LEN(SC_UNO_LAYOUTNAME), 0, &getCppuType(static_cast<rtl::OUString*>(0)), 0, 0 },
+         {MAP_CHAR_LEN(SC_UNO_FIELD_SUBTOTALNAME), 0, &getCppuType(static_cast<rtl::OUString*>(0)), 0, 0 },
++        {MAP_CHAR_LEN(SC_UNO_HAS_HIDDEN_MEMBER), 0, &getBooleanCppuType(), 0, 0 },
+         {0,0,0,0,0,0}
+ 	};
+ 	static uno::Reference<beans::XPropertySetInfo> aRef =
+@@ -1651,6 +1653,8 @@ void SAL_CALL ScDPDimension::setPropertyValue( const rtl::OUString& aPropertyNam
+         if (aValue >>= aName)
+             mpSubtotalName.reset(new OUString(aName));
+     }
++    else if (aNameStr.EqualsAscii(SC_UNO_HAS_HIDDEN_MEMBER))
++        aValue >>= mbHasHiddenMember;
+ 	else
+ 	{
+ 		DBG_ERROR("unknown property");
+@@ -1714,6 +1718,8 @@ uno::Any SAL_CALL ScDPDimension::getPropertyValue( const rtl::OUString& aPropert
+         aRet <<= mpLayoutName.get() ? *mpLayoutName : OUString::createFromAscii("");
+     else if (aNameStr.EqualsAscii(SC_UNO_FIELD_SUBTOTALNAME))
+         aRet <<= mpSubtotalName.get() ? *mpSubtotalName : OUString::createFromAscii("");
++    else if (aNameStr.EqualsAscii(SC_UNO_HAS_HIDDEN_MEMBER))
++        aRet <<= mbHasHiddenMember;
+ 	else
+ 	{
+ 		DBG_ERROR("unknown property");
 diff --git sc/source/core/data/fillinfo.cxx sc/source/core/data/fillinfo.cxx
-index 9fbeb09..f434db3 100644
+index 9fbeb09..53abf3e 100644
 --- sc/source/core/data/fillinfo.cxx
 +++ sc/source/core/data/fillinfo.cxx
-@@ -56,6 +56,31 @@
- #include "stlpool.hxx"
- 
- 
-+#include <stdio.h>
-+#include <string>
-+
-+namespace {
-+
-+class StackPrinter
-+{
-+public:
-+    explicit StackPrinter(const char* msg) :
-+        msMsg(msg)
-+    {
-+        fprintf(stdout, "%s: --begin\n", msMsg.c_str());
-+    }
-+
-+    ~StackPrinter()
-+    {
-+        fprintf(stdout, "%s: --end\n", msMsg.c_str());
-+    }
-+
-+private:
-+    ::std::string msMsg;
-+};
-+
-+}
-+
- // -----------------------------------------------------------------------
- 
- const USHORT ROWINFO_MAX = 1024;
-@@ -170,6 +195,8 @@ void ScDocument::FillInfo( ScTableInfo& rTabInfo, SCCOL nX1, SCROW nY1, SCCOL nX
- 							SCTAB nTab, double nScaleX, double nScaleY,
- 							BOOL bPageMode, BOOL bFormulaMode, const ScMarkData* pMarkData )
- {
-+    StackPrinter __stack_printer__("ScDocument::FillInfo");
-+
- 	DBG_ASSERT( pTab[nTab], "Tabelle existiert nicht" );
- 
- 	BOOL bLayoutRTL = IsLayoutRTL( nTab );
-@@ -332,6 +359,7 @@ void ScDocument::FillInfo( ScTableInfo& rTabInfo, SCCOL nX1, SCROW nY1, SCCOL nX
+@@ -332,6 +332,8 @@ void ScDocument::FillInfo( ScTableInfo& rTabInfo, SCCOL nX1, SCROW nY1, SCCOL nX
  			pInfo->bVOverlapped = FALSE;
  			pInfo->bAutoFilter	= FALSE;
  			pInfo->bPushButton	= FALSE;
 +            pInfo->bPopupButton = false;
++            pInfo->bFilterActive = false;
  			pInfo->nRotateDir	= SC_ROTDIR_NONE;
  
  			pInfo->bPrinted		= FALSE;					//	view-intern
-@@ -458,6 +486,7 @@ void ScDocument::FillInfo( ScTableInfo& rTabInfo, SCCOL nX1, SCROW nY1, SCCOL nX
+@@ -458,6 +460,8 @@ void ScDocument::FillInfo( ScTableInfo& rTabInfo, SCCOL nX1, SCROW nY1, SCCOL nX
  						BOOL bAutoFilter  = ((nOverlap & SC_MF_AUTO) != 0);
  						BOOL bPushButton  = ((nOverlap & SC_MF_BUTTON) != 0);
  						BOOL bScenario	  = ((nOverlap & SC_MF_SCENARIO) != 0);
 +                        bool bPopupButton = ((nOverlap & SC_MF_BUTTON_POPUP) != 0);
++                        bool bFilterActive = ((nOverlap & SC_MF_HIDDEN_MEMBER) != 0);
  						if (bMerged||bHOverlapped||bVOverlapped)
  							bAnyMerged = TRUE;								// intern
  
-@@ -498,6 +527,7 @@ void ScDocument::FillInfo( ScTableInfo& rTabInfo, SCCOL nX1, SCROW nY1, SCCOL nX
+@@ -498,6 +502,8 @@ void ScDocument::FillInfo( ScTableInfo& rTabInfo, SCCOL nX1, SCROW nY1, SCCOL nX
  								pInfo->bVOverlapped	= bVOverlapped;
  								pInfo->bAutoFilter	= bAutoFilter;
  								pInfo->bPushButton	= bPushButton;
 +                                pInfo->bPopupButton = bPopupButton;
++                                pInfo->bFilterActive = bFilterActive;
  								pInfo->pLinesAttr	= pLinesAttr;
                                  pInfo->mpTLBRLine   = pTLBRLine;
                                  pInfo->mpBLTRLine   = pBLTRLine;
-@@ -512,7 +542,7 @@ void ScDocument::FillInfo( ScTableInfo& rTabInfo, SCCOL nX1, SCROW nY1, SCCOL nX
+@@ -512,7 +518,7 @@ void ScDocument::FillInfo( ScTableInfo& rTabInfo, SCCOL nX1, SCROW nY1, SCCOL nX
  										nCurRow >= aEmbedRange.aStart.Row() &&
  										nCurRow <= aEmbedRange.aEnd.Row();
  
@@ -307,6 +659,132 @@ index 9fbeb09..f434db3 100644
  								{
  									pInfo->pBackground = ScGlobal::GetButtonBrushItem();
  									pThisRowInfo->bEmptyBack = FALSE;
+diff --git sc/source/core/data/global2.cxx sc/source/core/data/global2.cxx
+index 58b43e2..6272574 100644
+--- sc/source/core/data/global2.cxx
++++ sc/source/core/data/global2.cxx
+@@ -56,6 +56,7 @@
+ #include "sc.hrc"
+ #include "globstr.hrc"
+ 
++using ::std::vector;
+ 
+ // -----------------------------------------------------------------------
+ 
+@@ -825,7 +826,6 @@ bool PivotField::operator==( const PivotField& r ) const
+ 
+ ScPivotParam::ScPivotParam()
+ 	:	nCol(0), nRow(0), nTab(0),
+-		ppLabelArr( NULL ), nLabels(0),
+         nPageCount(0), nColCount(0), nRowCount(0), nDataCount(0),
+ 		bIgnoreEmptyRows(FALSE), bDetectCategories(FALSE),
+ 		bMakeTotalCol(TRUE), bMakeTotalRow(TRUE)
+@@ -836,23 +836,22 @@ ScPivotParam::ScPivotParam()
+ 
+ ScPivotParam::ScPivotParam( const ScPivotParam& r )
+ 	:	nCol( r.nCol ), nRow( r.nRow ), nTab( r.nTab ),
+-		ppLabelArr( NULL ), nLabels(0),
+         nPageCount(0), nColCount(0), nRowCount(0), nDataCount(0),
+ 		bIgnoreEmptyRows(r.bIgnoreEmptyRows),
+ 		bDetectCategories(r.bDetectCategories),
+ 		bMakeTotalCol(r.bMakeTotalCol),
+ 		bMakeTotalRow(r.bMakeTotalRow)
+ {
+-	SetLabelData	( r.ppLabelArr, r.nLabels );
+     SetPivotArrays  ( r.aPageArr, r.aColArr, r.aRowArr, r.aDataArr,
+                       r.nPageCount, r.nColCount, r.nRowCount, r.nDataCount );
++
++    SetLabelData(r.maLabelArray);
+ }
+ 
+ //------------------------------------------------------------------------
+ 
+ __EXPORT ScPivotParam::~ScPivotParam()
+ {
+-	ClearLabelData();
+ }
+ 
+ //------------------------------------------------------------------------
+@@ -864,26 +863,10 @@ void __EXPORT ScPivotParam::Clear()
+ 	nTab = 0;
+ 	bIgnoreEmptyRows = bDetectCategories = FALSE;
+ 	bMakeTotalCol = bMakeTotalRow = TRUE;
+-	ClearLabelData();
+ 	ClearPivotArrays();
++    maLabelArray.clear();
+ }
+ 
+-//------------------------------------------------------------------------
+-
+-void __EXPORT ScPivotParam::ClearLabelData()
+-{
+-	if ( (nLabels > 0) && ppLabelArr )
+-	{
+-		for ( SCSIZE i=0; i<nLabels; i++ )
+-			delete ppLabelArr[i];
+-		delete [] ppLabelArr;
+-		ppLabelArr = NULL;
+-		nLabels = 0;
+-	}
+-}
+-
+-//------------------------------------------------------------------------
+-
+ void __EXPORT ScPivotParam::ClearPivotArrays()
+ {
+     memset( aPageArr, 0, PIVOT_MAXPAGEFIELD * sizeof(PivotField) );
+@@ -896,20 +879,17 @@ void __EXPORT ScPivotParam::ClearPivotArrays()
+ 	nDataCount = 0;
+ }
+ 
+-//------------------------------------------------------------------------
+-
+-void __EXPORT ScPivotParam::SetLabelData( LabelData**	pLabArr,
+-										  SCSIZE		nLab )
++void ScPivotParam::SetLabelData(const vector<ScDPLabelDataRef>& r)
+ {
+-	ClearLabelData();
+-
+-	if ( (nLab > 0) && pLabArr )
+-	{
+-		nLabels = (nLab>MAX_LABELS) ? MAX_LABELS : nLab;
+-		ppLabelArr = new LabelData*[nLabels];
+-		for ( SCSIZE i=0; i<nLabels; i++ )
+-			ppLabelArr[i] = new LabelData( *(pLabArr[i]) );
+-	}
++    vector<ScDPLabelDataRef> aNewArray;
++    aNewArray.reserve(r.size());
++    for (vector<ScDPLabelDataRef>::const_iterator itr = r.begin(), itrEnd = r.end();
++          itr != itrEnd; ++itr)
++    {
++        ScDPLabelDataRef p(new ScDPLabelData(**itr));
++        aNewArray.push_back(p);
++    }
++    maLabelArray.swap(aNewArray);
+ }
+ 
+ //------------------------------------------------------------------------
+@@ -951,10 +931,9 @@ ScPivotParam& __EXPORT ScPivotParam::operator=( const ScPivotParam& r )
+ 	bMakeTotalCol	  = r.bMakeTotalCol;
+ 	bMakeTotalRow	  = r.bMakeTotalRow;
+ 
+-	SetLabelData	( r.ppLabelArr, r.nLabels );
+     SetPivotArrays  ( r.aPageArr, r.aColArr, r.aRowArr, r.aDataArr,
+                       r.nPageCount, r.nColCount, r.nRowCount, r.nDataCount );
+-
++    SetLabelData(r.maLabelArray);
+ 	return *this;
+ }
+ 
+@@ -969,7 +948,7 @@ BOOL __EXPORT ScPivotParam::operator==( const ScPivotParam& r ) const
+ 				 && (bDetectCategories == r.bDetectCategories)
+ 				 && (bMakeTotalCol == r.bMakeTotalCol)
+ 				 && (bMakeTotalRow == r.bMakeTotalRow)
+-				 && (nLabels 	== r.nLabels)
++                 && (maLabelArray.size() == r.maLabelArray.size())
+                  && (nPageCount == r.nPageCount)
+ 				 && (nColCount	== r.nColCount)
+ 				 && (nRowCount	== r.nRowCount)
 diff --git sc/source/core/data/makefile.mk sc/source/core/data/makefile.mk
 index 2abd0d8..c631bb4 100644
 --- sc/source/core/data/makefile.mk
@@ -327,8 +805,21 @@ index 2abd0d8..c631bb4 100644
  	$(SLO)$/dpsave.obj \
  	$(SLO)$/dbdocutl.obj \
  	$(SLO)$/dptabsrc.obj \
+diff --git sc/source/core/data/pivot2.cxx sc/source/core/data/pivot2.cxx
+index d45cebf..924a5cd 100644
+--- sc/source/core/data/pivot2.cxx
++++ sc/source/core/data/pivot2.cxx
+@@ -492,7 +492,7 @@ ScDataObject*	ScPivotCollection::Clone() const
+ 
+ // ============================================================================
+ 
+-LabelData::LabelData( const String& rName, short nCol, bool bIsValue ) :
++ScDPLabelData::ScDPLabelData( const String& rName, short nCol, bool bIsValue ) :
+     maName( rName ),
+     mnCol( nCol ),
+     mnFuncMask( PIVOT_FUNC_NONE ),
 diff --git sc/source/filter/xml/xmldpimp.cxx sc/source/filter/xml/xmldpimp.cxx
-index 9dfcd8c..103c5c8 100644
+index 9dfcd8c..3214942 100644
 --- sc/source/filter/xml/xmldpimp.cxx
 +++ sc/source/filter/xml/xmldpimp.cxx
 @@ -48,6 +48,7 @@
@@ -339,40 +830,7 @@ index 9dfcd8c..103c5c8 100644
  
  #include <xmloff/xmltkmap.hxx>
  #include <xmloff/nmspmap.hxx>
-@@ -67,6 +68,32 @@ using namespace com::sun::star;
- using namespace xmloff::token;
- using ::rtl::OUString;
- 
-+
-+#include <stdio.h>
-+#include <string>
-+
-+namespace {
-+
-+class StackPrinter
-+{
-+public:
-+    explicit StackPrinter(const char* msg) :
-+        msMsg(msg)
-+    {
-+        fprintf(stdout, "%s: --begin\n", msMsg.c_str());
-+    }
-+
-+    ~StackPrinter()
-+    {
-+        fprintf(stdout, "%s: --end\n", msMsg.c_str());
-+    }
-+
-+private:
-+    ::std::string msMsg;
-+};
-+
-+}
-+
- //------------------------------------------------------------------
- 
- ScXMLDataPilotTablesContext::ScXMLDataPilotTablesContext( ScXMLImport& rImport,
-@@ -126,6 +153,10 @@ ScXMLDataPilotTableContext::ScXMLDataPilotTableContext( ScXMLImport& rImport,
+@@ -126,6 +127,10 @@ ScXMLDataPilotTableContext::ScXMLDataPilotTableContext( ScXMLImport& rImport,
  	sDataPilotTableName(),
  	sApplicationData(),
  	sGrandTotal(GetXMLToken(XML_BOTH)),
@@ -383,7 +841,7 @@ index 9dfcd8c..103c5c8 100644
  	bIsNative(sal_True),
  	bIgnoreEmptyRows(sal_False),
  	bIdentifyCategories(sal_False),
-@@ -262,7 +293,13 @@ SvXMLImportContext *ScXMLDataPilotTableContext::CreateChildContext( USHORT nPref
+@@ -262,7 +267,13 @@ SvXMLImportContext *ScXMLDataPilotTableContext::CreateChildContext( USHORT nPref
  }
  
  void ScXMLDataPilotTableContext::SetButtons()
@@ -398,7 +856,7 @@ index 9dfcd8c..103c5c8 100644
  	OUString sAddress;
  	sal_Int32 nOffset = 0;
  	while( nOffset >= 0 )
-@@ -274,7 +311,13 @@ void ScXMLDataPilotTableContext::SetButtons()
+@@ -274,7 +285,21 @@ void ScXMLDataPilotTableContext::SetButtons()
              sal_Int32 nAddrOffset(0);
              if (pDoc && ScRangeStringConverter::GetAddressFromString( aScAddress, sAddress, pDoc, ::formula::FormulaGrammar::CONV_OOO, nAddrOffset ))
  			{
@@ -409,20 +867,31 @@ index 9dfcd8c..103c5c8 100644
 +                if (eType == ScDPOutputGeometry::Column || eType == ScDPOutputGeometry::Row)
 +                    nMFlag |= SC_MF_BUTTON_POPUP;
 +
++                // Use the cell's string value to see if this field contains a 
++                // hidden member.  Isn't there a better way?  GetString() is
++                // quite expensive...
++                String aCellStr;
++                pDoc->GetString(aScAddress.Col(), aScAddress.Row(), aScAddress.Tab(), aCellStr);
++                if (maHiddenMemberFields.count(aCellStr))
++                    nMFlag |= SC_MF_HIDDEN_MEMBER;
++
 +				ScMergeFlagAttr aAttr(nMFlag);
  				pDoc->ApplyAttr( aScAddress.Col(), aScAddress.Row(), aScAddress.Tab(), aAttr );
  			}
  		}
-@@ -294,6 +337,33 @@ void ScXMLDataPilotTableContext::AddDimension(ScDPSaveDimension* pDim)
+@@ -284,7 +309,7 @@ void ScXMLDataPilotTableContext::SetButtons()
+ 		pDPObject->RefreshAfterLoad();
+ }
+ 
+-void ScXMLDataPilotTableContext::AddDimension(ScDPSaveDimension* pDim)
++void ScXMLDataPilotTableContext::AddDimension(ScDPSaveDimension* pDim, bool bHasHiddenMember)
+ {
+ 	if (pDPSave)
+ 	{
+@@ -294,6 +319,30 @@ void ScXMLDataPilotTableContext::AddDimension(ScDPSaveDimension* pDim)
  				pDPSave->GetExistingDimensionByName(pDim->GetName()) )
  			pDim->SetDupFlag( TRUE );
  
-+        OUString aStr;
-+        ScXMLConverter::GetStringFromOrientation(aStr, static_cast<sheet::DataPilotFieldOrientation>(pDim->GetOrientation()));
-+        fprintf(stdout, "ScXMLDataPilotTableContext::AddDimension:   name = '%s'; orientation = '%s'\n", 
-+                rtl::OUStringToOString(pDim->GetName(), RTL_TEXTENCODING_UTF8).getStr(),
-+                rtl::OUStringToOString(aStr, RTL_TEXTENCODING_UTF8).getStr());
-+
 +        if (!pDim->IsDataLayout())
 +        {
 +            switch (pDim->GetOrientation())
@@ -443,15 +912,72 @@ index 9dfcd8c..103c5c8 100644
 +                default:
 +                    ;
 +            }
++
++            if (bHasHiddenMember)
++                maHiddenMemberFields.insert(pDim->GetName());
 +        }
  		pDPSave->AddDimension(pDim);
  	}
  }
+@@ -730,7 +779,8 @@ ScXMLDataPilotFieldContext::ScXMLDataPilotFieldContext( ScXMLImport& rImport,
+     bIsGroupField(sal_False),
+     bDateValue(sal_False),
+     bAutoStart(sal_False),
+-    bAutoEnd(sal_False)
++    bAutoEnd(sal_False),
++    mbHasHiddenMember(false)
+ {
+ 	sal_Bool bHasName(sal_False);
+ 	sal_Bool bDataLayout(sal_False);
+@@ -815,6 +865,16 @@ SvXMLImportContext *ScXMLDataPilotFieldContext::CreateChildContext( USHORT nPref
+ 	return pContext;
+ }
+ 
++void ScXMLDataPilotFieldContext::AddMember(ScDPSaveMember* pMember)
++{
++    if (pDim)
++        pDim->AddMember(pMember);
++
++    if (!pMember->GetIsVisible())
++        // This member is hidden.
++        mbHasHiddenMember = true;
++}
++
+ void ScXMLDataPilotFieldContext::AddGroup(const ::std::vector<rtl::OUString>& rMembers, const rtl::OUString& rName)
+ {
+     ScXMLDataPilotGroup aGroup;
+@@ -835,7 +895,7 @@ void ScXMLDataPilotFieldContext::EndElement()
+             String sPage(sSelectedPage);
+             pDim->SetCurrentPage(&sPage);
+         }
+-		pDataPilotTable->AddDimension(pDim);
++		pDataPilotTable->AddDimension(pDim, mbHasHiddenMember);
+         if (bIsGroupField)
+         {            
+             ScDPNumGroupInfo aInfo;
 diff --git sc/source/filter/xml/xmldpimp.hxx sc/source/filter/xml/xmldpimp.hxx
-index 25450c3..548b18e 100644
+index 25450c3..ac52bc3 100644
 --- sc/source/filter/xml/xmldpimp.hxx
 +++ sc/source/filter/xml/xmldpimp.hxx
-@@ -100,6 +100,10 @@ class ScXMLDataPilotTableContext : public SvXMLImportContext
+@@ -41,6 +41,8 @@
+ #include "dpobject.hxx"
+ #include "dpsave.hxx"
+ 
++#include <hash_set>
++
+ class ScXMLImport;
+ class ScDPSaveNumGroupDimension;
+ class ScDPSaveGroupDimension;
+@@ -79,6 +81,8 @@ public:
+ 
+ class ScXMLDataPilotTableContext : public SvXMLImportContext
+ {
++    typedef ::std::hash_set< ::rtl::OUString, ::rtl::OUStringHash > StringSet;
++    StringSet       maHiddenMemberFields;
+ 	ScDocument*		pDoc;
+ 	ScDPObject*		pDPObject;
+ 	ScDPSaveData*	pDPSave;
+@@ -100,6 +104,10 @@ class ScXMLDataPilotTableContext : public SvXMLImportContext
  	ScAddress		aFilterOutputPosition;
  	ScQueryParam	aSourceQueryParam;
  	ScMySourceType	nSourceType;
@@ -462,12 +988,50 @@ index 25450c3..548b18e 100644
  	sal_Bool		bIsNative;
  	sal_Bool		bIgnoreEmptyRows;
  	sal_Bool		bIdentifyCategories;
+@@ -148,7 +156,7 @@ public:
+ 	void SetFilterSourceRange(const ScRange& aValue) { aFilterSourceRange = aValue; }
+ //	void SetFilterIsCaseSensitive(const sal_Bool bValue) { aSourceQueryParam.bCaseSens = bValue; }
+ //	void SetFilterSkipDuplicates(const sal_Bool bValue) { aSourceQueryParam.bDuplicate = !bValue; }
+-	void AddDimension(ScDPSaveDimension* pDim);
++	void AddDimension(ScDPSaveDimension* pDim, bool bHasHiddenMember);
+     void AddGroupDim(const ScDPSaveNumGroupDimension& aNumGroupDim);
+     void AddGroupDim(const ScDPSaveGroupDimension& aGroupDim);
+ 	void SetButtons();
+@@ -301,12 +309,13 @@ class ScXMLDataPilotFieldContext : public SvXMLImportContext
+     sal_Int32                   nGroupPart;
+ 	sal_Int16					nFunction;
+ 	sal_Int16					nOrientation;
+-	sal_Bool					bShowEmpty;
+-    sal_Bool                    bSelectedPage;
+-    sal_Bool                    bIsGroupField;
+-    sal_Bool                    bDateValue;
+-    sal_Bool                    bAutoStart;
+-    sal_Bool                    bAutoEnd;
++	sal_Bool					bShowEmpty:1;
++    sal_Bool                    bSelectedPage:1;
++    sal_Bool                    bIsGroupField:1;
++    sal_Bool                    bDateValue:1;
++    sal_Bool                    bAutoStart:1;
++    sal_Bool                    bAutoEnd:1;
++    bool                        mbHasHiddenMember:1;
+ 
+ 	const ScXMLImport& GetScImport() const { return (const ScXMLImport&)GetImport(); }
+ 	ScXMLImport& GetScImport() { return (ScXMLImport&)GetImport(); }
+@@ -330,7 +339,7 @@ public:
+ 
+ 	void SetShowEmpty(const sal_Bool bValue) { if (pDim) pDim->SetShowEmpty(bValue); }
+ 	void SetSubTotals(const sal_uInt16* pFunctions, const sal_Int16 nCount) { if(pDim) pDim->SetSubTotals(nCount, pFunctions); }
+-	void AddMember(ScDPSaveMember* pMember) { if (pDim) pDim->AddMember(pMember); }
++	void AddMember(ScDPSaveMember* pMember);
+     void SetFieldReference(const com::sun::star::sheet::DataPilotFieldReference& aRef) { if (pDim) pDim->SetReferenceValue(&aRef); }
+     void SetAutoShowInfo(const com::sun::star::sheet::DataPilotFieldAutoShowInfo& aInfo) { if (pDim) pDim->SetAutoShowInfo(&aInfo); }
+     void SetSortInfo(const com::sun::star::sheet::DataPilotFieldSortInfo& aInfo) { if (pDim) pDim->SetSortInfo(&aInfo); }
 diff --git sc/source/ui/cctrl/dpcontrol.cxx sc/source/ui/cctrl/dpcontrol.cxx
 new file mode 100644
-index 0000000..043f996
+index 0000000..8a31c79
 --- /dev/null
 +++ sc/source/ui/cctrl/dpcontrol.cxx
-@@ -0,0 +1,166 @@
+@@ -0,0 +1,243 @@
 +/*************************************************************************
 + *
 + * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
@@ -507,8 +1071,10 @@ index 0000000..043f996
 +
 +#include "vcl/outdev.hxx"
 +#include "vcl/settings.hxx"
++#include "vcl/wintypes.hxx"
 +
 +using ::rtl::OUString;
++
 +
 +#include <stdio.h>
 +#include <string>
@@ -538,7 +1104,8 @@ index 0000000..043f996
 +ScDPFieldButton::ScDPFieldButton(OutputDevice* pOutDev, const StyleSettings* pStyle) :
 +    mpOutDev(pOutDev),
 +    mpStyle(pStyle),
-+    mbPopupButton(false)
++    mbPopupButton(false),
++    mbHasHiddenMember(false)
 +{
 +}
 +
@@ -562,21 +1129,29 @@ index 0000000..043f996
 +    mbPopupButton = b;
 +}
 +
++void ScDPFieldButton::setHasHiddenMember(bool b)
++{
++    mbHasHiddenMember = b;
++}
++
 +void ScDPFieldButton::draw()
 +{
-+    StackPrinter __stack_printer__("ScDPFieldButton::Draw");
-+
 +    const long nMargin = 2;
 +
++    // TODO: Make this look beautiful.
++
++    Font aTextFont( mpStyle->GetInfoFont() );
++    aTextFont.SetHeight( aTextFont.GetHeight()*1.1 );
 +    Rectangle aRect(maPos, maSize);
 +    mpOutDev->SetLineColor( mpStyle->GetDarkShadowColor() );
 +    mpOutDev->SetFillColor( mpStyle->GetFaceColor() );
++    mpOutDev->SetFont( aTextFont );
 +    mpOutDev->DrawRect(aRect);
 +
-+    Point aTextPos;
++    Point aTextPos = maPos;
 +    long nTHeight = mpOutDev->GetTextHeight();
 +    aTextPos.setX(maPos.getX() + nMargin);
-+    aTextPos.setY(maPos.getY() + maSize.Height()/2 + nTHeight/3);
++    aTextPos.setY(maPos.getY() + (maSize.Height()-nTHeight)/2);
 +    mpOutDev->DrawText(aTextPos, maText);
 +
 +    if (mbPopupButton)
@@ -620,19 +1195,85 @@ index 0000000..043f996
 +    aArrow.SetPoint(a1, 1);
 +    aArrow.SetPoint(a2, 2);
 +    mpOutDev->SetFillColor(mpStyle->GetDarkShadowColor());
-+    mpOutDev->DrawPolygon(aArrow);  
++    mpOutDev->DrawPolygon(aArrow);
++
++    if (mbHasHiddenMember)
++    {
++        Rectangle aCornerBox(
++            Point(aPos.X() + aSize.Width()*0.8, aPos.Y() + aSize.Height()*0.8), 
++            Size(aSize.Width()*0.2, aSize.Height()*0.2));
++        Color red(255,  0, 0);
++        mpOutDev->SetFillColor(red);
++        mpOutDev->SetLineColor(red);
++        mpOutDev->DrawRect(aCornerBox);
++    }
 +}
 +
 +// ============================================================================
 +
-+ScDPFieldPopupWindow::ScDPFieldPopupWindow(Window* pParent) :
-+    FloatingWindow(pParent, (WB_SYSTEMFLOATWIN|WB_SYSTEMWINDOW|WB_BORDER))
++ScDPFieldPopupWindow::Member::Member() :
++    mbVisible(true)
 +{
++}
++
++// ----------------------------------------------------------------------------
++
++ScDPFieldPopupWindow::ScDPFieldPopupWindow(Window* pParent) :
++    FloatingWindow(pParent, (WB_SYSTEMFLOATWIN|WB_SYSTEMWINDOW|WB_BORDER)),
++    maLBMembers(this, WB_AUTOHSCROLL)
++{
++    maLBMembers.SetPosSizePixel(GetPosPixel(), GetSizePixel());
++    maLBMembers.InsertEntry(String::CreateFromAscii("Test"));
++    maLBMembers.InsertEntry(String::CreateFromAscii("Test"));
++    maLBMembers.InsertEntry(String::CreateFromAscii("Test"));
 +}
 +
 +ScDPFieldPopupWindow::~ScDPFieldPopupWindow()
 +{
 +    EndPopupMode();
++}
++
++void ScDPFieldPopupWindow::Paint(const Rectangle& rRect)
++{
++    StackPrinter __stack_printer__("ScDPFieldPopupWindow::Paint");
++//  Draw(this, Point(), GetOutputSizePixel(), 0);
++
++    maLBMembers.Paint(rRect);
++}
++
++void ScDPFieldPopupWindow::Draw(OutputDevice* pDev, const Point& rPos, const Size& rSize, ULONG nFlags)
++{
++    StackPrinter __stack_printer__("ScDPFieldPopupWindow::Draw");
++    fprintf(stdout, "ScDPFieldPopupWindow::Draw:   pos = (%ld,%ld)  size = (%ld,%ld)\n",
++            rPos.X(), rPos.Y(), rSize.Width(), rSize.Height());
++
++    const StyleSettings& rStyle = GetSettings().GetStyleSettings();
++    pDev->SetFillColor(rStyle.GetFaceColor());
++    pDev->DrawRect(Rectangle(rPos,rSize));
++    if (!maMembers.empty())
++        pDev->DrawText(rPos, maMembers.front().maName);
++
++    maLBMembers.Draw(pDev, rPos, rSize, nFlags);
++}
++
++//Window* ScDPFieldPopupWindow::GetPreferredKeyInputWindow()
++//{
++//    // redirect keyinput in the child window
++//    Window* p = GetWindow(WINDOW_FIRSTCHILD);
++//    return p ? p->GetPreferredKeyInputWindow() : NULL;
++//}
++
++void ScDPFieldPopupWindow::setMemberSize(size_t n)
++{
++    maMembers.reserve(n);
++}
++
++void ScDPFieldPopupWindow::addMember(const OUString& rName, bool bVisible)
++{
++    Member aMember;
++    aMember.maName = rName;
++    aMember.mbVisible = bVisible;
++    maMembers.push_back(aMember);
 +}
 diff --git sc/source/ui/cctrl/makefile.mk sc/source/ui/cctrl/makefile.mk
 index 4cce7f6..8e8add3 100644
@@ -654,12 +1295,90 @@ index 4cce7f6..8e8add3 100644
  		$(SLO)$/tbzoomsliderctrl.obj
  
  # --- Tagets -------------------------------------------------------
+diff --git sc/source/ui/dbgui/pvlaydlg.cxx sc/source/ui/dbgui/pvlaydlg.cxx
+index 4dee615..588a290 100644
+--- sc/source/ui/dbgui/pvlaydlg.cxx
++++ sc/source/ui/dbgui/pvlaydlg.cxx
+@@ -64,6 +64,7 @@
+ #include "scabstdlg.hxx" //CHINA001
+ using namespace com::sun::star;
+ using ::rtl::OUString;
++using ::std::vector;
+ 
+ //----------------------------------------------------------------------------
+ 
+@@ -391,26 +392,25 @@ void ScDPLayoutDlg::StateChanged( StateChangedType nStateChange )
+ 
+ //----------------------------------------------------------------------------
+ 
+-void ScDPLayoutDlg::InitWndSelect( LabelData** ppLabelArr, long nLabels )
++void ScDPLayoutDlg::InitWndSelect( const vector<ScDPLabelDataRef>& rLabels )
+ {
+-	if ( ppLabelArr )
+-	{
+-        size_t nLabelCount = static_cast< size_t >( (nLabels > MAX_LABELS) ? MAX_LABELS : nLabels );
+-        size_t nLast = (nLabelCount > PAGE_SIZE) ? (PAGE_SIZE - 1) : (nLabelCount - 1);
++    size_t nLabelCount = rLabels.size();
++    if (nLabelCount > MAX_LABELS)
++        nLabelCount = MAX_LABELS;
++    size_t nLast = (nLabelCount > PAGE_SIZE) ? (PAGE_SIZE - 1) : (nLabelCount - 1);
+ 
+-        aLabelDataArr.clear();
+-        aLabelDataArr.reserve( nLabelCount );
+-        for ( size_t i=0; i < nLabelCount; i++ )
+-		{
+-            aLabelDataArr.push_back( *ppLabelArr[i] );
++    aLabelDataArr.clear();
++    aLabelDataArr.reserve( nLabelCount );
++    for ( size_t i=0; i < nLabelCount; i++ )
++    {
++        aLabelDataArr.push_back(*rLabels[i]);
+ 
+-			if ( i <= nLast )
+-			{
+-                aWndSelect.AddField( aLabelDataArr[i].maName, i );
+-                aSelectArr[i].reset( new ScDPFuncData( aLabelDataArr[i].mnCol, aLabelDataArr[i].mnFuncMask ) );
+-			}
+-		}
+-	}
++        if ( i <= nLast )
++        {
++            aWndSelect.AddField( aLabelDataArr[i].maName, i );
++            aSelectArr[i].reset( new ScDPFuncData( aLabelDataArr[i].mnCol, aLabelDataArr[i].mnFuncMask ) );
++        }
++    }
+ }
+ 
+ 
+@@ -506,18 +506,19 @@ void ScDPLayoutDlg::InitFocus()
+ 
+ void ScDPLayoutDlg::InitFields()
+ {
+-    InitWndSelect( thePivotData.ppLabelArr, static_cast<long>(thePivotData.nLabels) );
++    InitWndSelect(thePivotData.maLabelArray);
+     InitWnd( thePivotData.aPageArr, static_cast<long>(thePivotData.nPageCount), TYPE_PAGE );
+     InitWnd( thePivotData.aColArr,  static_cast<long>(thePivotData.nColCount),  TYPE_COL );
+     InitWnd( thePivotData.aRowArr,  static_cast<long>(thePivotData.nRowCount),  TYPE_ROW );
+     InitWnd( thePivotData.aDataArr, static_cast<long>(thePivotData.nDataCount), TYPE_DATA );
+ 
++    size_t nLabels = thePivotData.maLabelArray.size();
+     aSlider.SetPageSize( PAGE_SIZE );
+     aSlider.SetVisibleSize( PAGE_SIZE );
+     aSlider.SetLineSize( LINE_SIZE );
+-    aSlider.SetRange( Range( 0, static_cast<long>(((thePivotData.nLabels+LINE_SIZE-1)/LINE_SIZE)*LINE_SIZE) ) );
++    aSlider.SetRange( Range( 0, static_cast<long>(((nLabels+LINE_SIZE-1)/LINE_SIZE)*LINE_SIZE) ) );
+ 
+-    if ( thePivotData.nLabels > PAGE_SIZE )
++    if ( nLabels > PAGE_SIZE )
+     {
+         aSlider.SetEndScrollHdl( LINK( this, ScDPLayoutDlg, ScrollHdl ) );
+         aSlider.Show();
 diff --git sc/source/ui/inc/dpcontrol.hxx sc/source/ui/inc/dpcontrol.hxx
 new file mode 100644
-index 0000000..f957e4f
+index 0000000..8abd370
 --- /dev/null
 +++ sc/source/ui/inc/dpcontrol.hxx
-@@ -0,0 +1,87 @@
+@@ -0,0 +1,108 @@
 +/*************************************************************************
 + *
 + * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
@@ -696,6 +1415,7 @@ index 0000000..f957e4f
 +#include "rtl/ustring.hxx"
 +#include "tools/gen.hxx"
 +#include "vcl/floatwin.hxx"
++#include "svx/checklbx.hxx"
 +
 +class OutputDevice;
 +class Point;
@@ -716,6 +1436,7 @@ index 0000000..f957e4f
 +    void setText(const ::rtl::OUString& rText);
 +    void setBoundingBox(const Point& rPos, const Size& rSize);
 +    void setDrawPopupButton(bool b);
++    void setHasHiddenMember(bool b);
 +    void draw();
 +
 +    void getPopupBoundingBox(Point& rPos, Size& rSize) const;
@@ -731,24 +1452,43 @@ index 0000000..f957e4f
 +    OutputDevice*           mpOutDev;
 +    const StyleSettings*    mpStyle;
 +    bool                    mbPopupButton;
++    bool                    mbHasHiddenMember;
 +};
 +
 +// ============================================================================
 +
 +/** 
 + * This class implements a popup window for field button, for quick access 
-+ * of hide-item list, and possbly more stuff related to field attributes. 
++ * of hide-item list, and possibly more stuff related to field options. 
 + */
 +class ScDPFieldPopupWindow : public FloatingWindow
 +{
 +public:
 +    explicit ScDPFieldPopupWindow(Window* pParent);
 +    virtual ~ScDPFieldPopupWindow();
++
++    virtual void Paint(const Rectangle& rRect);
++    virtual void Draw(OutputDevice* pDev, const Point& rPos, const Size& rSize, ULONG nFlags);
++//  virtual Window* GetPreferredKeyInputWindow();
++
++    void setMemberSize(size_t n);
++    void addMember(const ::rtl::OUString& rName, bool bVisible);
++private:
++    struct Member
++    {
++        ::rtl::OUString maName;
++        bool            mbVisible;
++
++        Member();
++    };
++    ::std::vector<Member> maMembers;
++
++    SvxCheckListBox maLBMembers;
 +};
 +
 +#endif
 diff --git sc/source/ui/inc/gridwin.hxx sc/source/ui/inc/gridwin.hxx
-index 2946c39..7cb3980 100644
+index 2946c39..197d043 100644
 --- sc/source/ui/inc/gridwin.hxx
 +++ sc/source/ui/inc/gridwin.hxx
 @@ -39,6 +39,7 @@
@@ -775,15 +1515,36 @@ index 2946c39..7cb3980 100644
  
  	USHORT					nCursorHideCount;
  
-@@ -245,6 +248,8 @@ private:
- 	void			DPMouseMove( const MouseEvent& rMEvt );
+@@ -246,6 +249,16 @@ private:
  	void			DPMouseButtonUp( const MouseEvent& rMEvt );
  	void			DPTestMouse( const MouseEvent& rMEvt, BOOL bMove );
-+    bool            DPTestFieldPopupArrow( const MouseEvent& rMEvt );
-+    void            DPLaunchFieldPopupMenu( const Point& rSrcPos, const Size& rSrcSize );
  
++    /** 
++     * Check if the mouse click is on a field popup button. 
++     *  
++     * @return bool true if the field popup menu has been launched and no 
++     *         further mouse event handling is necessary, false otherwise.
++     */
++    bool            DPTestFieldPopupArrow(const MouseEvent& rMEvt, const ScAddress& rPos, ScDPObject* pDPObj);
++    void            DPLaunchFieldPopupMenu(
++        const Point& rSrcPos, const Size& rSrcSize, const ScAddress& rPos, ScDPObject* pDPObj);
++
  	void			RFMouseMove( const MouseEvent& rMEvt, BOOL bUp );
  
+ 	void			PagebreakMove( const MouseEvent& rMEvt, BOOL bUp );
+diff --git sc/source/ui/inc/pvlaydlg.hxx sc/source/ui/inc/pvlaydlg.hxx
+index a3e08cb..ed388d4 100644
+--- sc/source/ui/inc/pvlaydlg.hxx
++++ sc/source/ui/inc/pvlaydlg.hxx
+@@ -192,7 +192,7 @@ private:
+ private:
+     ScDPFieldWindow&        GetFieldWindow  ( ScDPFieldType eType );
+     void                    Init            (bool bNewOutput);
+-    void                    InitWndSelect   ( LabelData** ppLabelArr, long nLabels );
++    void                    InitWndSelect   ( const ::std::vector<ScDPLabelDataRef>& rLabels );
+     void                    InitWnd         ( PivotField* pArr, long nCount, ScDPFieldType eType );
+     void                    InitFocus       ();
+     void                    InitFields      ();
 diff --git sc/source/ui/view/gridwin.cxx sc/source/ui/view/gridwin.cxx
 index 3d7f3d4..078c55a 100644
 --- sc/source/ui/view/gridwin.cxx
@@ -805,10 +1566,10 @@ index 3d7f3d4..078c55a 100644
  			bMarking( FALSE ),
  			nButtonDown( 0 ),
 diff --git sc/source/ui/view/gridwin2.cxx sc/source/ui/view/gridwin2.cxx
-index c6f589e..4de2cf2 100644
+index c6f589e..1d06b25 100644
 --- sc/source/ui/view/gridwin2.cxx
 +++ sc/source/ui/view/gridwin2.cxx
-@@ -55,12 +55,38 @@
+@@ -55,11 +55,15 @@
  #include "dpoutput.hxx"		// ScDPPositionData
  #include "dpshttab.hxx"
  #include "dbdocfun.hxx"
@@ -816,55 +1577,21 @@ index c6f589e..4de2cf2 100644
  
  #include <com/sun/star/sheet/DataPilotFieldOrientation.hpp>
  #include "scabstdlg.hxx" //CHINA001
- using namespace com::sun::star;
+-using namespace com::sun::star;
  
++#include <vector>
++
++using namespace com::sun::star;
++using ::std::vector;
  
-+#include <stdio.h>
-+#include <string>
-+
-+namespace {
-+
-+class StackPrinter
-+{
-+public:
-+    explicit StackPrinter(const char* msg) :
-+        msMsg(msg)
-+    {
-+        fprintf(stdout, "%s: --begin\n", msMsg.c_str());
-+    }
-+
-+    ~StackPrinter()
-+    {
-+        fprintf(stdout, "%s: --end\n", msMsg.c_str());
-+    }
-+
-+private:
-+    ::std::string msMsg;
-+};
-+
-+}
-+
  // STATIC DATA -----------------------------------------------------------
  
- // -----------------------------------------------------------------------
-@@ -99,6 +125,7 @@ BOOL ScGridWindow::DoPageFieldSelection( SCCOL nCol, SCROW nRow )
- 
- void ScGridWindow::DoPushButton( SCCOL nCol, SCROW nRow, const MouseEvent& rMEvt )
- {
-+    StackPrinter __stack_printer__("ScGridWindow::DoPushButton");
- 	ScDocument* pDoc = pViewData->GetDocument();
- 	SCTAB nTab = pViewData->GetTabNo();
- 
-@@ -196,14 +223,25 @@ void ScGridWindow::DoPushButton( SCCOL nCol, SCROW nRow, const MouseEvent& rMEvt
- 		long nField = pDPObj->GetHeaderDim( aPos, nOrient );
- 		if ( nField >= 0 )
- 		{
-+            fprintf(stdout, "ScGridWindow::DoPushButton:   field button (%ld)\n", nField);
+@@ -199,6 +203,15 @@ void ScGridWindow::DoPushButton( SCCOL nCol, SCROW nRow, const MouseEvent& rMEvt
  			bDPMouse   = TRUE;
  			nDPField   = nField;
  			pDragDPObj = pDPObj;
 +
-+            if (DPTestFieldPopupArrow(rMEvt))
++            if (DPTestFieldPopupArrow(rMEvt, aPos, pDPObj))
 +            {    
 +                // field name pop up menu has been launched.  Don't activate 
 +                // field move.
@@ -875,50 +1602,67 @@ index c6f589e..4de2cf2 100644
  			DPTestMouse( rMEvt, TRUE );
  			StartTracking();
  		}
- 		else if ( pDPObj->IsFilterButton(aPos) )
- 		{
-+            fprintf(stdout, "ScGridWindow::DoPushButton:   filter button\n");
- 			ReleaseMouse();			// may have been captured in ButtonDown
- 
- 			ScQueryParam aQueryParam;
-@@ -726,6 +764,43 @@ void ScGridWindow::DPTestMouse( const MouseEvent& rMEvt, BOOL bMove )
+@@ -726,6 +739,66 @@ void ScGridWindow::DPTestMouse( const MouseEvent& rMEvt, BOOL bMove )
  		pViewData->GetView()->ResetTimer();
  }
  
-+bool ScGridWindow::DPTestFieldPopupArrow( const MouseEvent& rMEvt )
++bool ScGridWindow::DPTestFieldPopupArrow(const MouseEvent& rMEvt, const ScAddress& rPos, ScDPObject* pDPObj)
 +{
-+    Point aPixel = rMEvt.GetPosPixel();
-+    SCsCOL  nPosX;
-+    SCsROW  nPosY;
-+    pViewData->GetPosFromPixel( aPixel.X(), aPixel.Y(), eWhich, nPosX, nPosY );
-+
-+    Point aSrcPos = pViewData->GetScrPos(nPosX, nPosY, eWhich);
++    // Get the geometry of the cell.
++    Point aSrcPos = pViewData->GetScrPos(rPos.Col(), rPos.Row(), eWhich);
 +    long nSizeX, nSizeY;
-+    pViewData->GetMergeSizePixel(nPosX, nPosY, nSizeX, nSizeY);
++    pViewData->GetMergeSizePixel(rPos.Col(), rPos.Row(), nSizeX, nSizeY);
 +    Size aSrcSize(nSizeX, nSizeY);
 +
++    // Check if the mouse cursor is clicking on the popup arrow box.
 +    ScDPFieldButton aBtn(this, &GetSettings().GetStyleSettings());
 +    aBtn.setBoundingBox(aSrcPos, aSrcSize);
 +    Point aPopupPos;
 +    Size aPopupSize;
 +    aBtn.getPopupBoundingBox(aPopupPos, aPopupSize);
 +    Rectangle aRec(aPopupPos, aPopupSize);
-+    if (aRec.IsInside(aPixel))
-+    {    
-+        DPLaunchFieldPopupMenu(aSrcPos, aSrcSize);
++    if (aRec.IsInside(rMEvt.GetPosPixel()))
++    {
++        // Mouse cursor inside the popup arrow box.  Launch the field menu.
++        DPLaunchFieldPopupMenu(OutputToScreenPixel(aSrcPos), aSrcSize, rPos, pDPObj);
 +        return true;
 +    }
 +
 +    return false;
 +}
 +
-+void ScGridWindow::DPLaunchFieldPopupMenu( const Point& rSrcPos, const Size& rSrcSize )
++void ScGridWindow::DPLaunchFieldPopupMenu(
++    const Point& rSrcPos, const Size& rSrcSize, const ScAddress& rPos, ScDPObject* pDPObj)
 +{
-+    StackPrinter __stack_printer__("ScGridWindow::DPLaunchFieldPopupMenu");
++    // We need to get the list of field members.
++    ScPivotParam aDPParam;
++    pDPObj->FillLabelData(aDPParam);
++
++    USHORT nOrient;
++    long nDim = pDPObj->GetHeaderDim(rPos, nOrient);
++
++    if (aDPParam.maLabelArray.size() <= nDim)
++        // out-of-bound dimension ID.  This should never happen!
++        return;
++
++    const ScDPLabelData& rLabelData = *aDPParam.maLabelArray[nDim];
++    fprintf(stdout, "ScGridWindow::DPLaunchFieldPopupMenu:   field id = %d  name = '%s'\n", 
++            nDim, rtl::OUStringToOString(rLabelData.maName, RTL_TEXTENCODING_UTF8).getStr());
++
 +    mpDPFieldPopup.reset(new ScDPFieldPopupWindow(this));
-+    mpDPFieldPopup->SetPopupModeEndHdl( LINK( this, ScGridWindow, PopupModeEndHdl ) );
-+    mpDPFieldPopup->SetOutputSizePixel(Size(100,100));
-+    Rectangle aCellRect(OutputToScreenPixel(rSrcPos), rSrcSize);
++    sal_Int32 n = rLabelData.maMembers.getLength();
++    mpDPFieldPopup->setMemberSize(n);
++    for (sal_Int32 i = 0; i < n; ++i)
++    {
++        fprintf(stdout, "ScGridWindow::DPLaunchFieldPopupMenu:   member = '%s' (visible: %d)\n",
++                rtl::OUStringToOString(rLabelData.maMembers[i], RTL_TEXTENCODING_UTF8).getStr(),
++                rLabelData.maVisible[i]);
++        mpDPFieldPopup->addMember(rLabelData.maMembers[i], rLabelData.maVisible[i]);
++    }
++
++    mpDPFieldPopup->SetPopupModeEndHdl( LINK(this, ScGridWindow, PopupModeEndHdl) );
++    mpDPFieldPopup->SetOutputSizePixel(Size(150,300));
++    Rectangle aCellRect(rSrcPos, rSrcSize);
 +    mpDPFieldPopup->StartPopupMode(aCellRect, (FLOATWIN_POPUPMODE_DOWN | FLOATWIN_POPUPMODE_GRABFOCUS));
 +}
 +
@@ -926,7 +1670,7 @@ index c6f589e..4de2cf2 100644
  {
  	DPTestMouse( rMEvt, TRUE );
 diff --git sc/source/ui/view/gridwin4.cxx sc/source/ui/view/gridwin4.cxx
-index 97f04ad..aa604ee 100644
+index 97f04ad..dc63d97 100644
 --- sc/source/ui/view/gridwin4.cxx
 +++ sc/source/ui/view/gridwin4.cxx
 @@ -73,6 +73,7 @@
@@ -946,25 +1690,7 @@ index 97f04ad..aa604ee 100644
  	SCCOL nCol;
  	SCROW nRow;
  	SCSIZE nArrY;
-@@ -1307,12 +1310,17 @@ void ScGridWindow::DrawButtons( SCCOL nX1, SCROW /*nY1*/, SCCOL nX2, SCROW /*nY2
- 				CellInfo* pInfo = &pThisRowInfo->pCellInfo[nCol+1];
- 				if ( pInfo->bPushButton && !pInfo->bHOverlapped && !pInfo->bVOverlapped )
- 				{
-+                    fprintf(stdout, "ScGridWindow::DrawButtons:   push button at (%d,%ld)\n", nCol,nRow);
- 					Point aScrPos = pViewData->GetScrPos( nCol, nRow, eWhich );
- 					long nSizeX;
- 					long nSizeY;
- 					pViewData->GetMergeSizePixel( nCol, nRow, nSizeX, nSizeY );
- 					long nPosX = aScrPos.X();
- 					long nPosY = aScrPos.Y();
-+
-+                    fprintf(stdout, "ScGridWindow::DrawButtons:   src pos = (%ld,%ld)  size = (%ld,%ld)\n",
-+                            nPosX,nPosY,nSizeX,nSizeY);
-+
- 					if ( bLayoutRTL )
- 					{
- 						// overwrite the right, not left (visually) grid as long as the
-@@ -1320,13 +1328,12 @@ void ScGridWindow::DrawButtons( SCCOL nX1, SCROW /*nY1*/, SCCOL nX2, SCROW /*nY2
+@@ -1320,13 +1323,14 @@ void ScGridWindow::DrawButtons( SCCOL nX1, SCROW /*nY1*/, SCCOL nX2, SCROW /*nY2
  						nPosX -= nSizeX - 2;
  					}
  
@@ -975,12 +1701,67 @@ index 97f04ad..aa604ee 100644
 -					pContentDev->DrawLine( Point(nPosX,nPosY+nSizeY-1), Point(nPosX+nSizeX-1,nPosY+nSizeY-1) );
 -					pContentDev->DrawLine( Point(nPosX+nSizeX-1,nPosY), Point(nPosX+nSizeX-1,nPosY+nSizeY-1) );
 -					pContentDev->SetLineColor( COL_BLACK );
++                    // TODO: I need to check if the field contains a hidden member.
 +                    String aStr;
 +                    pDoc->GetString(nCol, nRow, nTab, aStr);
 +                    aDPFieldBtn.setText(aStr);
 +                    aDPFieldBtn.setBoundingBox(Point(nPosX,nPosY), Size(nSizeX,nSizeY));
 +                    aDPFieldBtn.setDrawPopupButton(pInfo->bPopupButton);
++                    aDPFieldBtn.setHasHiddenMember(pInfo->bFilterActive);
 +                    aDPFieldBtn.draw();
  				}
  			}
  		}
+diff --git svtools/source/contnr/svimpbox.cxx svtools/source/contnr/svimpbox.cxx
+index 42b2950..70c4ca8 100644
+--- svtools/source/contnr/svimpbox.cxx
++++ svtools/source/contnr/svimpbox.cxx
+@@ -899,14 +899,19 @@ Rectangle SvImpLBox::GetClipRegionRect() const
+ 
+ void SvImpLBox::Paint( const Rectangle& rRect )
+ {
++    fprintf(stdout, "SvImpLBox::Paint:   here\n");
+ 	if( !pView->GetVisibleCount() )
++    {
++        fprintf(stdout, "SvImpLBox::Paint:   no visible\n");    
+ 		return;
++    }
+ 
+ 	nFlags |= F_IN_PAINT;
+ 
+ 	if( nFlags & F_FILLING )
+ 	{
+ 		SvLBoxEntry* pFirst = pView->First();
++        fprintf(stdout, "SvImpLBox::Paint:   pFirst = %p\n", pFirst);
+ 		if( pFirst != pStartEntry )
+ 		{
+ 			ShowCursor( FALSE );
+@@ -915,6 +920,7 @@ void SvImpLBox::Paint( const Rectangle& rRect )
+ 			StopUserEvent();
+ 			ShowCursor( TRUE );
+ 			nCurUserEvent = Application::PostUserEvent(LINK(this,SvImpLBox,MyUserEvent),(void*)1);
++            fprintf(stdout, "SvImpLBox::Paint:   cp (%d)\n", __LINE__);
+ 			return;
+ 		}
+ 	}
+@@ -943,6 +949,8 @@ void SvImpLBox::Paint( const Rectangle& rRect )
+ 	USHORT nCount = (USHORT)( nRectHeight / nEntryHeight );
+ 		nCount += 2; // keine Zeile vergessen
+ 
++    fprintf(stdout, "SvImpLBox::Paint:   count = %d\n", nCount);
++
+ 	long nY = nStartLine * nEntryHeight;
+ 	SvLBoxEntry* pEntry = pStartEntry;
+ 	while( nStartLine && pEntry )
+diff --git svtools/source/contnr/svtreebx.cxx svtools/source/contnr/svtreebx.cxx
+index a2b2478..ec6f4f7 100644
+--- svtools/source/contnr/svtreebx.cxx
++++ svtools/source/contnr/svtreebx.cxx
+@@ -1189,6 +1189,7 @@ void SvTreeListBox::SetFont( const Font& rFont )
+ 
+ void SvTreeListBox::Paint( const Rectangle& rRect )
+ {
++    fprintf(stdout, "SvTreeListBox::Paint:   here\n");
+ 	DBG_CHKTHIS(SvTreeListBox,0);
+ 	SvLBox::Paint( rRect );
+ 	if( nTreeFlags & TREEFLAG_RECALCTABS )
