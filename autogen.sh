@@ -24,6 +24,8 @@ if test $# -eq 0 && test -f config.log; then
     echo "re-using arguments from last configure: $old_args";
 fi
 
+touch ChangeLog
+
 aclocal $ACLOCAL_FLAGS || exit 1;
 automake --gnu --add-missing --copy || exit 1;
 # intltoolize --copy --force --automake
