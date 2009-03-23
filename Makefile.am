@@ -15,6 +15,9 @@ EXTRA_DIST = \
 	intltool-update.in	\
 	intltool-extract.in
 
+dist-hook:
+	git log --date=short  --pretty="format:@%cd  %an <%ae>%n%n%s%n%n%e%b" | sed -e "s|^\([^@]\)|	\1|" -e "s|^@||" >$(distdir)/ChangeLog
+
 clean-local:
 	test -z "$(OOBUILDDIR)" || rm -rf $(OOBUILDDIR)
 	for icons in $(OOO_ICONS_VERS) ; do \
