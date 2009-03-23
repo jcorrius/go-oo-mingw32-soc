@@ -2,7 +2,7 @@
 #  MAYBE_BONOBO = bonobo
 # endif
 
-SUBDIRS = po desktop distro-configs bin etc patches man doc src stamp templates www # $(MAYBE_BONOBO)
+SUBDIRS = po desktop distro-configs bin etc patches man doc src stamp templates # $(MAYBE_BONOBO)
 
 include $(top_srcdir)/Makefile.shared
 
@@ -13,11 +13,7 @@ EXTRA_DIST = \
 	Makefile.shared		\
 	intltool-merge.in	\
 	intltool-update.in	\
-	intltool-extract.in	\
-	ChangeLog-to-1.3.0	\
-	ChangeLog-to-1.9.0	\
-	ChangeLog-to-2.0.0	\
-	ChangeLog-to-2.2
+	intltool-extract.in
 
 clean-local:
 	test -z "$(OOBUILDDIR)" || rm -rf $(OOBUILDDIR)
