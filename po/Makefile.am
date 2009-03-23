@@ -4,7 +4,6 @@ EXTRA_DIST=${wildcard *.po} \
 	${wildcard *.sdf} \
 	ooo-build.pot \
 	README \
-	ChangeLog \
 	POTFILES.in
 
 ooo_build_po_files = ${wildcard ooo-build-*.po}

@@ -1,7 +1,6 @@
 SUBDIRS=helpcontent2 icons layout sdf
 
 EXTRA_DIST=\
-	${wildcard setup_native_packinfo*.tar.bz2} \
 	Draft.jpg \
 	Novell.dic \
 	Ubuntu.dic \
