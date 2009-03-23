@@ -35,3 +35,13 @@ if test "x$NOCONFIGURE" = "x"; then
 else
     echo "Skipping configure process."
 fi
+
+# prepare git hooks
+for file in `cd git-hooks ; echo *`
+do
+    hook=".git/hooks/$file"
+    if [ ! -x "$hook" -a ! -L "$hook" ] ; then
+	rm -f "$hook"
+	ln -s "../../git-hooks/$file" "$hook"
+    fi
+done
