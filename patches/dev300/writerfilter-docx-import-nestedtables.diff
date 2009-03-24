@@ -1,0 +1,523 @@
+diff --git writerfilter/inc/resourcemodel/TableData.hxx writerfilter/inc/resourcemodel/TableData.hxx
+index 3d3076e..a43f253 100644
+--- writerfilter/inc/resourcemodel/TableData.hxx
++++ writerfilter/inc/resourcemodel/TableData.hxx
+@@ -276,6 +276,11 @@ class WRITERFILTER_DLLPUBLIC TableData
+     typedef ::std::vector<RowPointer_t> Rows;
+ 
+     /**
++       the table properties
++     */
++    PropertiesPointer mpTableProps;
++
++    /**
+        the data of the rows of the table
+     */
+     Rows mRows;
+@@ -349,6 +354,22 @@ public:
+         mpRow->insertCellProperties(i, pProps);
+     }
+ 
++    void insertTableProperties( PropertiesPointer pProps )
++    {
++        if ( mpTableProps.get( ) )
++            mpTableProps->insert( pProps );
++        else
++            mpTableProps = pProps;
++    }
++
++    /**
++      Return the table properties.
++     */
++    PropertiesPointer getTableProperties( ) 
++    {
++        return mpTableProps;
++    }
++
+     /**
+        Return number of rows in the table.
+      */
+diff --git writerfilter/inc/resourcemodel/TableManager.hxx writerfilter/inc/resourcemodel/TableManager.hxx
+index 54169d9..5fac601 100644
+--- writerfilter/inc/resourcemodel/TableManager.hxx
++++ writerfilter/inc/resourcemodel/TableManager.hxx
+@@ -103,6 +103,11 @@ public:
+         @param rT    end handle of cell
+     */
+     virtual void endCell(const T & rT) = 0;
++
++    virtual T* getTable( )
++    {
++        return NULL;
++    };
+ };
+ 
+ template <typename T, typename PropertiesPointer>
+@@ -151,16 +156,16 @@ class TableManager
+     /**
+        properties of the current cell
+     */
+-    PropertiesPointer mpCellProps;
++    vector< PropertiesPointer > mpCellProps;
+ 
+     /**
+         properties of the current row
+     */
+-    PropertiesPointer mpRowProps;
++    vector< PropertiesPointer > mpRowProps;
+ 
+-    /**
+-       properties of the current table
+-    */
++    /** 
++        properties of the current table: don't use them directly.
++     */
+     PropertiesPointer mpTableProps;
+ 
+     /**
+@@ -168,6 +173,7 @@ class TableManager
+     */
+     T mCurHandle;
+ 
++    T* mpInnerTable;
+     /**
+        stack of table data
+ 
+@@ -231,7 +237,6 @@ protected:
+      */
+     virtual void clearData();
+ 
+-
+ public:
+     TableManager();
+     virtual ~TableManager(){}
+@@ -351,7 +356,7 @@ public:
+ template <typename T, typename PropertiesPointer>
+ TableManager<T, PropertiesPointer>::TableManager()
+ : mbRowEnd(false), mbInCell(false), mbCellEnd(false), mnTableDepthNew(0),
+-  mnTableDepth(0)
++  mnTableDepth(0), mpInnerTable( NULL )
+ {
+ }
+ 
+@@ -398,6 +403,9 @@ void TableManager<T, PropertiesPointer>::handle(const T & rHandle)
+ template <typename T, typename PropertiesPointer>
+ void TableManager<T, PropertiesPointer>::startLevel()
+ {
++#if DEBUG
++    std::clog << "TableManager::startLevel()" << std::endl;
++#endif
+     typename TableData<T, PropertiesPointer>::Pointer_t pTableData
+         (new TableData<T, PropertiesPointer>(mTableDataStack.size()));
+ 
+@@ -407,10 +415,15 @@ void TableManager<T, PropertiesPointer>::startLevel()
+ template <typename T, typename PropertiesPointer>
+ void TableManager<T, PropertiesPointer>::endLevel()
+ {
++#if DEBUG
++    std::clog << "TableManager::endLevel()" << std::endl;
++#endif
+     if (mpTableDataHandler.get() != NULL)
+         resolveCurrentTable();
+-
+     mTableDataStack.pop();
++
++    if ( mpCellProps.size( ) > 0 )
++        mpCellProps.pop_back( );
+ }
+ 
+ template <typename T, typename PropertiesPointer>
+@@ -426,12 +439,6 @@ template <typename T, typename PropertiesPointer>
+ void TableManager<T, PropertiesPointer>::endParagraphGroup()
+ {
+     sal_Int32 nTableDepthDifference = mnTableDepthNew - mnTableDepth;
+-    while (nTableDepthDifference > 0)
+-    {
+-        startLevel();
+-
+-        --nTableDepthDifference;
+-    }
+     while (nTableDepthDifference < 0)
+     {
+         endLevel();
+@@ -447,14 +454,23 @@ void TableManager<T, PropertiesPointer>::endParagraphGroup()
+     if (mbRowEnd)
+     {
+         endOfRowAction();
+-        pTableData->endRow(mpRowProps);
+-        mpRowProps.reset();
++        pTableData->endRow( mpRowProps.back( ) );
++        mpRowProps.back( ).reset();
+     }
+-
+-    else if (mbInCell)
++    else if ( mbInCell )
+     {
+         if (! pTableData->isCellOpen())
+-            pTableData->addCell(mCurHandle, mpCellProps);
++        {
++            if ( mpInnerTable )
++            {
++                pTableData->addCell( *mpInnerTable, mpCellProps.back( ) );
++                mpInnerTable = NULL;
++            }
++            else
++            {
++                pTableData->addCell( mCurHandle, mpCellProps.back( ) );
++            }
++        }
+ 
+         if (mbCellEnd)
+         {
+@@ -462,7 +478,8 @@ void TableManager<T, PropertiesPointer>::endParagraphGroup()
+             pTableData->endCell(mCurHandle);
+         }
+     }
+-    mpCellProps.reset();
++    if ( mpCellProps.size( ) > 0 )
++        mpCellProps.back().reset( );
+ }
+ 
+ template <typename T, typename PropertiesPointer>
+@@ -538,10 +555,15 @@ void TableManager<T, PropertiesPointer>::utext(const sal_uInt8 * data, size_t le
+ template <typename T, typename PropertiesPointer>
+ void TableManager<T, PropertiesPointer>::cellProps(PropertiesPointer pProps)
+ {
+-    if(mpCellProps.get())
+-        mpCellProps->insert( pProps );
++    if ( mpCellProps.size( ) == ( mTableDataStack.size( ) - 1 ) )
++    {
++        if ( mpCellProps.back( ).get( ) )
++            mpCellProps.back()->insert( pProps );
++        else
++            mpCellProps.back( ) = pProps;
++    }
+     else
+-        mpCellProps = pProps;
++        mpCellProps.push_back( pProps );
+ }
+ 
+ template <typename T, typename PropertiesPointer>
+@@ -554,19 +576,24 @@ void TableManager<T, PropertiesPointer>::cellPropsByCell
+ template <typename T, typename PropertiesPointer>
+ void TableManager<T, PropertiesPointer>::insertRowProps(PropertiesPointer pProps)
+ {
+-    if( mpRowProps.get() )
+-        mpRowProps->insert( pProps );
++    if ( mpRowProps.size( ) == ( mTableDataStack.size( ) - 1 ) )
++    {
++        if( mpRowProps.back( ).get( ) )
++            mpRowProps.back( )->insert( pProps );
++        else
++            mpRowProps.back( ) = pProps;
++    }
+     else
+-        mpRowProps = pProps;
++        mpRowProps.push_back( pProps );
+ }
+ 
+ template <typename T, typename PropertiesPointer>
+ void TableManager<T, PropertiesPointer>::insertTableProps(PropertiesPointer pProps)
+ {
+-    if( mpTableProps.get() )
+-        mpTableProps->insert( pProps );
+-    else
+-        mpTableProps = pProps;
++    typename TableData<T, PropertiesPointer>::Pointer_t
++        pTableData = mTableDataStack.top();
++
++    pTableData->insertTableProperties( pProps );
+ }
+ 
+ template <typename T, typename PropertiesPointer>
+@@ -579,7 +606,7 @@ void TableManager<T, PropertiesPointer>::resolveCurrentTable()
+ 
+         unsigned int nRows = pTableData->getRowCount();
+ 
+-        mpTableDataHandler->startTable(nRows, pTableData->getDepth(), mpTableProps);
++        mpTableDataHandler->startTable(nRows, pTableData->getDepth(), pTableData->getTableProperties( ) );
+ 
+         for (unsigned int nRow = 0; nRow < nRows; ++nRow)
+         {
+@@ -602,8 +629,9 @@ void TableManager<T, PropertiesPointer>::resolveCurrentTable()
+         }
+ 
+         mpTableDataHandler->endTable();
++
++        mpInnerTable = mpTableDataHandler->getTable( );
+     }
+-    mpTableProps.reset();
+     clearData();
+ }
+ 
+diff --git writerfilter/source/dmapper/DomainMapperTableHandler.cxx writerfilter/source/dmapper/DomainMapperTableHandler.cxx
+index 77ff19c..454a285 100644
+--- writerfilter/source/dmapper/DomainMapperTableHandler.cxx
++++ writerfilter/source/dmapper/DomainMapperTableHandler.cxx
+@@ -263,6 +263,7 @@ void DomainMapperTableHandler::endTable()
+         }
+         m_aTableProperties->Invalidate();
+         sNames += ::rtl::OUString(' ');
++        clog << "Props: " << rtl::OUStringToOString( sNames, RTL_TEXTENCODING_UTF8 ).getStr( ) << endl;
+     }
+ }
+ #endif
+@@ -432,10 +433,17 @@ void DomainMapperTableHandler::endTable()
+                                 m_aTableProperties->find( PropertyDefinition( PROP_HEADER_ROW_COUNT, false ) );
+         if( aRepeatIter == m_aTableProperties->end() )
+             m_aTableProperties->Insert( PROP_HEADER_ROW_COUNT, false, uno::makeAny( (sal_Int32)0 ));
++
++        // Remove the PROP_HEADER_ROW_COUNT from the table default to avoid
++        // propagating it to the cells
++        PropertyMap::iterator aDefaultRepeatIt =
++                                pTableDefaults->find( PropertyDefinition( PROP_HEADER_ROW_COUNT, false ) );
++        if ( aDefaultRepeatIt != pTableDefaults->end( ) )
++            pTableDefaults->erase( aDefaultRepeatIt );
+         
+         aTableProperties = m_aTableProperties->GetPropertyValues();
+     }
+-    
++   
+     //  expands to uno::Sequence< Sequence< beans::PropertyValues > > 
+     CellPropertyValuesSeq_t     aCellProperties( m_aCellProperties.size() );
+     
+@@ -512,7 +520,9 @@ void DomainMapperTableHandler::endTable()
+                 pAllCellProps->insert( *aCellIterator );
+                 aCellIterator->get( )->swap( *pAllCellProps.get( ) );
+ 
++#if DEBUG
+                 clog << "Cell #" << nCell << ", Row #" << nRow << endl;
++#endif
+ 
+                 lcl_computeCellBorders( pTableBorders, *aCellIterator, nCell, nRow, bIsEndCol, bIsEndRow );
+ 
+@@ -631,12 +641,15 @@ void DomainMapperTableHandler::endTable()
+         (void) nCellPropertiesProperties;
+         ++nCellPropertiesProperties;
+     }    
+-#endif           
+             clog << "Converting table" << endl;
+-            m_xText->convertToTable(*m_pTableSeq, 
++#endif           
++                
++            uno::Reference<text::XTextTable> xTable = m_xText->convertToTable(*m_pTableSeq, 
+                                     aCellProperties,
+                                     aRowProperties,
+                                     aTableProperties);
++
++            m_xTableRange = xTable->getAnchor( );
+         }
+         catch (lang::IllegalArgumentException e)
+         {
+diff --git writerfilter/source/dmapper/DomainMapperTableHandler.hxx writerfilter/source/dmapper/DomainMapperTableHandler.hxx
+index d0e4382..833dd3c 100644
+--- writerfilter/source/dmapper/DomainMapperTableHandler.hxx
++++ writerfilter/source/dmapper/DomainMapperTableHandler.hxx
+@@ -66,6 +66,8 @@ class DomainMapperTableHandler : public TableDataHandler<Handle_t , TablePropert
+     RowSequencePointer_t    m_pRowSeq;
+     TableSequencePointer_t  m_pTableSeq;
+ 
++    Handle_t               m_xTableRange;
++
+     // properties
+     PropertyMapVector2      m_aCellProperties;
+     PropertyMapVector1      m_aRowProperties;
+@@ -87,6 +89,11 @@ public:
+     virtual void endRow();
+     virtual void startCell(const Handle_t & start, TablePropertyMapPtr pProps);
+     virtual void endCell(const Handle_t & end);
++
++    virtual Handle_t* getTable( ) 
++    {
++        return &m_xTableRange;
++    };
+ };
+ 
+ }}
+diff --git writerfilter/source/dmapper/DomainMapperTableManager.cxx writerfilter/source/dmapper/DomainMapperTableManager.cxx
+index 802fc48..a704768 100644
+--- writerfilter/source/dmapper/DomainMapperTableManager.cxx
++++ writerfilter/source/dmapper/DomainMapperTableManager.cxx
+@@ -226,10 +226,15 @@ bool DomainMapperTableManager::sprm(Sprm & rSprm)
+             break;
+             /* WRITERFILTERSTATUS: done: 1, planned: 2, spent: 0 */
+             case NS_ooxml::LN_CT_TblGridBase_gridCol:
+-            
+-            if(!m_nRow)
+-            {    
+-                m_aTableGrid.push_back( ConversionHelper::convertTwipToMM100( nIntValue ) );
++            {   
++                getCurrentGrid()->push_back( ConversionHelper::convertTwipToMM100( nIntValue ) );
++
++                // Compute the table width from the grid
++                m_nTableWidth += getCurrentGrid( )->back( );
++                  
++                TablePropertyMapPtr pPropMap( new TablePropertyMap );
++                pPropMap->setValue( TablePropertyMap::TABLE_WIDTH, m_nTableWidth );
++                insertTableProps( pPropMap );
+             }    
+             break;
+             /* WRITERFILTERSTATUS: done: 1, planned: 2, spent: 0 */
+@@ -250,7 +255,7 @@ bool DomainMapperTableManager::sprm(Sprm & rSprm)
+                 {
+                     //fill missing elements with '1'
+                     m_aGridSpans.insert( m_aGridSpans.end(), m_nCell - m_aGridSpans.size(), 1 );
+-                }    
++                }   
+                 m_aGridSpans.push_back( nIntValue );
+             }
+             break;
+@@ -277,12 +282,39 @@ bool DomainMapperTableManager::sprm(Sprm & rSprm)
+                     cellProps( pProps );
+                 }
+                 break;
++            case NS_ooxml::LN_tblStart:
++                {
++                    startLevel( );
++                }
++                break;
+             default:
+                 bRet = false;
+         }
+     }
+     return bRet;
+ }
++
++boost::shared_ptr< vector<sal_Int32> > DomainMapperTableManager::getCurrentGrid( )
++{
++    return m_aTableGrid.back( );
++}
++
++void DomainMapperTableManager::startLevel( )
++{
++    DomainMapperTableManager_Base_t::startLevel( );
++
++    IntVectorPtr pNewGrid( new vector<sal_Int32> );
++    m_aTableGrid.push_back( pNewGrid );
++    m_nTableWidth = 0;
++}
++
++void DomainMapperTableManager::endLevel( )
++{
++    m_aTableGrid.pop_back( );
++    
++    DomainMapperTableManager_Base_t::endLevel( );
++}
++
+ /*-- 02.05.2007 14:36:26---------------------------------------------------
+ 
+   -----------------------------------------------------------------------*/
+@@ -295,10 +327,11 @@ void DomainMapperTableManager::endOfCellAction()
+   -----------------------------------------------------------------------*/
+ void DomainMapperTableManager::endOfRowAction()
+ {
+-    if(!m_nRow && !m_nTableWidth && m_aTableGrid.size())
++    IntVectorPtr pTableGrid = getCurrentGrid( );
++    if(!m_nRow && !m_nTableWidth && pTableGrid->size())
+     {
+-        ::std::vector<sal_Int32>::const_iterator aCellIter = m_aTableGrid.begin();
+-        while( aCellIter != m_aTableGrid.end() )
++        ::std::vector<sal_Int32>::const_iterator aCellIter = pTableGrid->begin();
++        while( aCellIter != pTableGrid->end() )
+              m_nTableWidth += *aCellIter++;
+         if( m_nTableWidth > 0)
+         {
+@@ -319,7 +352,7 @@ void DomainMapperTableManager::endOfRowAction()
+     for( ; aGridSpanIter != m_aGridSpans.end(); ++aGridSpanIter)
+         nGrids += *aGridSpanIter;
+ 
+-    if( m_aTableGrid.size() == nGrids )
++    if( pTableGrid->size() == nGrids )
+     {
+         //determine table width 
+         double nFullWidth = m_nTableWidth;
+@@ -335,7 +368,7 @@ void DomainMapperTableManager::endOfRowAction()
+             double fGridWidth = 0.;
+             do
+             {
+-                fGridWidth += m_aTableGrid[nBorderGridIndex++];
++                fGridWidth += (*pTableGrid.get())[nBorderGridIndex++];
+             }while( --nGridCount );
+             
+             sal_Int16 nRelPos = 
+@@ -361,7 +394,6 @@ void DomainMapperTableManager::endOfRowAction()
+ void DomainMapperTableManager::clearData()
+ {
+     m_nRow = m_nCell = m_nCellBorderIndex = m_nHeaderRepeat = m_nTableWidth = 0;
+-    m_aTableGrid.clear();
+     m_aGridSpans.clear();
+     m_sTableStyleName = ::rtl::OUString();
+     m_pTableStyleTextProperies.reset();
+diff --git writerfilter/source/dmapper/DomainMapperTableManager.hxx writerfilter/source/dmapper/DomainMapperTableManager.hxx
+index 563abb1..3cf1fa3 100644
+--- writerfilter/source/dmapper/DomainMapperTableManager.hxx
++++ writerfilter/source/dmapper/DomainMapperTableManager.hxx
+@@ -40,8 +40,11 @@
+ 
+ namespace writerfilter {
+ namespace dmapper {
++
+ class DomainMapperTableManager : public DomainMapperTableManager_Base_t
+ {
++    typedef boost::shared_ptr< std::vector<sal_Int32> > IntVectorPtr;
++
+     sal_uInt32      m_nRow;
+     sal_uInt32      m_nCell;
+     sal_uInt32      m_nCellBorderIndex; //borders are provided for all cells and need counting
+@@ -51,7 +54,7 @@ class DomainMapperTableManager : public DomainMapperTableManager_Base_t
+     ::rtl::OUString m_sTableStyleName;    
+     PropertyMapPtr  m_pTableStyleTextProperies;
+ 
+-    ::std::vector<sal_Int32>  m_aTableGrid;
++    ::std::vector< IntVectorPtr >  m_aTableGrid;
+     ::std::vector<sal_Int32>  m_aGridSpans;
+     
+     TablePropertiesHandler   *m_pTablePropsHandler;
+@@ -70,9 +73,14 @@ public:
+ 
+     virtual bool sprm(Sprm & rSprm);
+ 
++    virtual void startLevel( );
++    virtual void endLevel( );
++
+     virtual void endOfCellAction();
+     virtual void endOfRowAction();
+ 
++    IntVectorPtr getCurrentGrid( );
++
+     const ::rtl::OUString& getTableStyleName() const { return m_sTableStyleName; }
+     /// copy the text properties of the table style and its parent into pContext
+     void    CopyTextProperties(PropertyMapPtr pContext, StyleSheetTablePtr pStyleSheetTable);
+diff --git writerfilter/source/ooxml/OOXMLFastContextHandler.cxx writerfilter/source/ooxml/OOXMLFastContextHandler.cxx
+index 6e7d02a..c9a0a3a 100644
+--- writerfilter/source/ooxml/OOXMLFastContextHandler.cxx
++++ writerfilter/source/ooxml/OOXMLFastContextHandler.cxx
+@@ -1869,6 +1869,16 @@ void OOXMLFastContextHandlerTextTable::lcl_startFastElement
+     throw (uno::RuntimeException, xml::sax::SAXException)
+ {
+     mnTableDepth++;
++        
++    boost::shared_ptr<OOXMLPropertySet> pProps( new OOXMLPropertySetImpl );
++    {
++        OOXMLValue::Pointer_t pVal
++            (new OOXMLIntegerValue(mnTableDepth));
++        OOXMLProperty::Pointer_t pProp
++            (new OOXMLPropertyImpl(NS_ooxml::LN_tblStart, pVal, OOXMLPropertyImpl::SPRM));
++        pProps->add(pProp);
++    }
++    mpParserState->setCharacterProperties(pProps);
+ 
+     startAction(Element);
+ }
+diff --git writerfilter/source/ooxml/model.xml writerfilter/source/ooxml/model.xml
+index 9539296..91cd253 100644
+--- writerfilter/source/ooxml/model.xml
++++ writerfilter/source/ooxml/model.xml
+@@ -18,6 +18,7 @@
+   <token tokenid="ooxml:inputstream"/>
+   <token tokenid="ooxml:trackchange"/>
+   <token tokenid="ooxml:object"/>
++  <token tokenid="ooxml:tblStart"/>
+   <namespace name="dml-stylesheet" url="http://schemas.openxmlformats.org/drawingml/2006/main" file="dml-stylesheet.rng">
+     <start name="theme"/>
+     <start name="themeOverride"/>
