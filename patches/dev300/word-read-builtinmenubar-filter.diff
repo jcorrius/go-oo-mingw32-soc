@@ -1,0 +1,442 @@
+diff --git svx/inc/svx/mstoolbar.hxx svx/inc/svx/mstoolbar.hxx
+index 1e28ded..b3667a8 100644
+--- svx/inc/svx/mstoolbar.hxx
++++ svx/inc/svx/mstoolbar.hxx
+@@ -71,6 +71,7 @@ public:
+ 
+     virtual bool Read(SvStream *pS) = 0;
+     virtual void Print( FILE* ) {} // #FIXME remove this an implement the debug routines in all the classes below to enable some sort of readable output
++    sal_uInt32 GetOffset() { return nOffSet; }
+ };
+ 
+ class Indent
+@@ -133,6 +134,9 @@ public:
+     bool Read(SvStream *pS);
+     void Print( FILE* );
+     bool ImportToolBarControlData( CustomToolBarImportHelper&, std::vector< css::beans::PropertyValue >& );
++    rtl::OUString CustomText() { return customText.getString(); }
++    rtl::OUString DescriptionText() { return descriptionText.getString(); }
++    rtl::OUString Tooltip() { return tooltip.getString(); }
+ };
+ 
+ class SVX_DLLPUBLIC TBCBitMap : public TBBase
+@@ -263,6 +267,7 @@ public:
+     bool Read(SvStream *pS);
+     void Print( FILE* );
+     bool ImportToolBarControl(  const css::uno::Reference< css::container::XIndexContainer >&, CustomToolBarImportHelper&, std::vector< css::beans::PropertyValue >& );
++    TBCGeneralInfo& getGeneralInfo() { return controlGeneralInfo; }
+ };
+ 
+ #endif
+diff --git svx/source/msfilter/mstoolbar.cxx svx/source/msfilter/mstoolbar.cxx
+index 1f51eb1..9579db7 100644
+--- svx/source/msfilter/mstoolbar.cxx
++++ svx/source/msfilter/mstoolbar.cxx
+@@ -266,7 +266,8 @@ void TBCData::Print( FILE* fp )
+     indent_printf(fp,"[ 0x%x ] TBCData -- dump\n", nOffSet );
+     indent_printf(fp,"  dumping controlGeneralInfo( TBCGeneralInfo )\n");
+     controlGeneralInfo.Print( fp );
+-    if ( rHeader.getTct() == 1 )
++    //if ( rHeader.getTct() == 1 )
++    if ( controlSpecificInfo.get() )
+     {
+         indent_printf(fp,"  dumping controlSpecificInfo( TBCBSpecificInfo )\n");
+         controlSpecificInfo->Print( fp );
+@@ -381,7 +382,7 @@ TBCGeneralInfo::ImportToolBarControlData( CustomToolBarImportHelper& helper, std
+         }
+ 
+         aProp.Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Label") );
+-        aProp.Value = uno::makeAny( customText.getString() );
++        aProp.Value = uno::makeAny( customText.getString().replace('&','~') );
+         sControlData.push_back( aProp );
+ 
+         aProp.Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Type") );
+diff --git sw/source/filter/ww8/ww8par.cxx sw/source/filter/ww8/ww8par.cxx
+index ea3831c..80d5549 100644
+--- sw/source/filter/ww8/ww8par.cxx
++++ sw/source/filter/ww8/ww8par.cxx
+@@ -4122,7 +4122,7 @@ ULONG SwWW8ImplReader::CoreLoad(WW8Glossary *pGloss, const SwPosition &rPos)
+                 if (!aTCG.Read( pTableStream ) )
+                     OSL_TRACE("** Read of Customization data failed!!!! ");
+                 pTableStream->Seek( nCur ); // return to previous position, is that necessary?
+-#if DEBUG
++#if 1
+                 aTCG.Print( stderr );
+ #endif
+                 aTCG.ImportCustomToolBar( *mpDocShell );
+diff --git sw/source/filter/ww8/ww8toolbar.cxx sw/source/filter/ww8/ww8toolbar.cxx
+index 216ac28..d30856a 100644
+--- sw/source/filter/ww8/ww8toolbar.cxx
++++ sw/source/filter/ww8/ww8toolbar.cxx
+@@ -5,6 +5,8 @@
+ #include <com/sun/star/ui/XUIConfigurationPersistence.hpp>
+ #include <com/sun/star/ui/XModuleUIConfigurationManagerSupplier.hpp>
+ #include <com/sun/star/lang/XMultiServiceFactory.hpp>
++#include <com/sun/star/lang/XSingleComponentFactory.hpp>
++#include <com/sun/star/lang/XMultiComponentFactory.hpp>
+ #include <com/sun/star/ui/XImageManager.hpp>
+ #include <com/sun/star/ui/ItemType.hpp>
+ #include <fstream>
+@@ -72,6 +74,13 @@ CTBWrapper::~CTBWrapper()
+ {
+ }
+ 
++Customization* CTBWrapper::GetCustomizaton( sal_Int16 index )
++{
++    if ( index < 0 || index >= rCustomizations.size() )
++        return NULL;
++    return &rCustomizations[ index ]; 
++}
++
+ bool CTBWrapper::Read( SvStream* pS )
+ {
+     OSL_TRACE("CTBWrapper::Read() stream pos 0x%x", pS->Tell() );
+@@ -83,8 +92,6 @@ bool CTBWrapper::Read( SvStream* pS )
+     {
+         // cbDTBC is the size in bytes of the TBC array
+         // but the size of a TBC element is dynamic ( and this relates to TBDelta's
+-        // which we don't read right now )
+-        //pS->SeekRel( cbDTBC );
+         int nStart = pS->Tell();
+ 
+         int bytesRead = 0;
+@@ -105,15 +112,30 @@ bool CTBWrapper::Read( SvStream* pS )
+     {
+         for ( sal_Int32 index = 0; index < cCust; ++index )
+         {
+-            Customization aCust;
++            Customization aCust( this );
+             if ( !aCust.Read( pS ) )
+                 return false;
+             rCustomizations.push_back( aCust );
+         } 
+     } 
++    std::vector< sal_Int16 >::iterator it_end = dropDownMenuIndices.end();
++    for ( std::vector< sal_Int16 >::iterator it = dropDownMenuIndices.begin(); it != it_end; ++it )
++    {
++        rCustomizations[ *it ].bIsDroppedMenuTB = true;
++    }
+     return true;
+ }
+ 
++TBC* CTBWrapper::GetTBCAtOffset( sal_uInt32 nStreamOffset )
++{
++    for ( std::vector< TBC >::iterator it = rtbdc.begin(); it != rtbdc.end(); ++it )
++    {
++        if ( (*it).GetOffset() == nStreamOffset )
++            return &(*it);
++    }
++    return NULL;
++}
++
+ void CTBWrapper::Print( FILE* fp )
+ {
+     Indent a;
+@@ -169,9 +191,11 @@ bool CTBWrapper::ImportCustomToolBar( SfxObjectShell& rDocSh )
+     return false;
+ }
+ 
+-Customization::Customization() : tbidForTBD( 0 )
++Customization::Customization( CTBWrapper* wrapper ) : tbidForTBD( 0 )
+ ,reserved1( 0 )
+ , ctbds( 0 )
++, pWrapper( wrapper )
++, bIsDroppedMenuTB( false )
+ {
+ }
+ 
+@@ -186,12 +210,14 @@ bool Customization::Read( SvStream *pS)
+     *pS >> tbidForTBD >> reserved1 >> ctbds;
+     if ( tbidForTBD )
+     {
+-        TBDelta aTBDelta;
+         for ( sal_Int32 index = 0; index < ctbds; ++index )
+         {
++            TBDelta aTBDelta;
+             if (!aTBDelta.Read( pS ) )
+                 return false;
+             customizationDataTBDelta.push_back( aTBDelta );
++            if ( aTBDelta.ControlDropsToolBar() )
++                pWrapper->InsertDropIndex( aTBDelta.CustomizationIndex() );
+         }
+     }
+     else
+@@ -214,6 +240,21 @@ void Customization::Print( FILE* fp )
+         customizationDataCTB->Print( fp );
+     else
+     {
++        const char* pToolBar = NULL;
++        switch ( tbidForTBD )
++        {
++            case 0x9:
++                pToolBar = "Standard";
++                break;
++            case 0x25:
++                pToolBar = "Builtin-Menu";
++                break;
++            default:
++                pToolBar = "Unknown toolbar";
++                break;
++        }
++        
++        indent_printf( fp,"  TBDelta(s) are associated with %s toolbar.\n", pToolBar);
+         std::vector< TBDelta >::iterator it = customizationDataTBDelta.begin();
+         for ( sal_Int32 index = 0; index < ctbds; ++it,++index )
+             it->Print( fp );
+@@ -221,8 +262,79 @@ void Customization::Print( FILE* fp )
+     
+ }
+ 
++bool Customization::ImportMenu( const uno::Reference< container::XIndexContainer >& xIndexContainer, CustomToolBarImportHelper& helper )
++{
++    if ( !customizationDataCTB.get() )
++        return false;
++    return customizationDataCTB->ImportMenu( xIndexContainer, helper );
++}
++
+ bool Customization::ImportCustomToolBar( CustomToolBarImportHelper& helper )
+ {
++    if ( bIsDroppedMenuTB )
++        return true; // ignore ( will be processed by the ImportMenu )
++    if ( tbidForTBD == 0x25 && customizationDataTBDelta.size() )  // we can handle in a limited way additions the built-in menu bar
++    {
++        for ( std::vector< TBDelta >::iterator it = customizationDataTBDelta.begin(); it != customizationDataTBDelta.end(); ++it )
++        {
++            // for each new menu ( control that drops a toolbar )
++            // import a toolbar
++            if ( it->ControlIsInserted() && it->ControlDropsToolBar() )
++            {
++                Customization* pCust = pWrapper->GetCustomizaton( it->CustomizationIndex() );
++                if ( pCust )
++                {
++                    // currently only support built-in menu
++                    rtl::OUString sMenuBar( RTL_CONSTASCII_USTRINGPARAM("private:resource/menubar/") );
++                    if ( tbidForTBD != 0x25 )
++                        return false;
++
++                    sMenuBar = sMenuBar.concat( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("menubar") ) );
++                    // Get menu name
++                    TBC* pTBC = pWrapper->GetTBCAtOffset( it->TBCStreamOffset() );
++                    if ( !pTBC )
++                        return false;
++                    rtl::OUString sMenuName = pTBC->GetCustomText();
++                    sMenuName = sMenuName.replace('&','~');
++
++                    // see if the document has already setting for the menubar
++                
++                    uno::Reference< container::XIndexContainer > xIndexContainer;
++                    if ( helper.getCfgManager()->hasSettings( sMenuBar ) )
++                        xIndexContainer.set( helper.getCfgManager()->getSettings( sMenuBar, sal_True ), uno::UNO_QUERY_THROW );
++                    else
++                    {
++                        if ( helper.getAppCfgManager()->hasSettings( sMenuBar ) )
++                            xIndexContainer.set( helper.getAppCfgManager()->getSettings( sMenuBar, sal_True ), uno::UNO_QUERY_THROW );
++                        else 
++                            xIndexContainer.set( helper.getAppCfgManager()->createSettings(), uno::UNO_QUERY_THROW );
++                    }
++               
++                    uno::Reference< lang::XSingleComponentFactory > xSCF( xIndexContainer, uno::UNO_QUERY_THROW );
++                    uno::Reference< beans::XPropertySet > xProps( ::comphelper::getProcessServiceFactory(), uno::UNO_QUERY_THROW );
++                    uno::Reference< uno::XComponentContext > xContext(  xProps->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "DefaultContext" ))), uno::UNO_QUERY_THROW );
++                    // create the popup menu
++                    uno::Sequence< beans::PropertyValue > aPopupMenu( 4 );
++                    aPopupMenu[0].Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("CommandURL") );
++                    aPopupMenu[0].Value = uno::makeAny( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("vnd.openoffice.org:") ) + sMenuName );
++                    aPopupMenu[1].Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Label") );
++                    aPopupMenu[1].Value <<= sMenuName;
++                    aPopupMenu[2].Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Type" ) );
++                    aPopupMenu[2].Value <<= sal_Int32( 0 );
++                    aPopupMenu[3].Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("ItemDescriptorContainer") );
++                    uno::Reference< container::XIndexContainer > xMenuContainer( xSCF->createInstanceWithContext( xContext ), uno::UNO_QUERY_THROW );
++                    aPopupMenu[3].Value <<= xMenuContainer;
++                    if ( !pCust->ImportMenu( xMenuContainer, helper ) )
++                        return false;
++                    OSL_TRACE("** there are %d menu items on the bar, inserting after that", xIndexContainer->getCount() );
++                    xIndexContainer->insertByIndex( xIndexContainer->getCount(), uno::makeAny( aPopupMenu ) );
++
++                    helper.getCfgManager()->insertSettings( sMenuBar, uno::Reference< container::XIndexAccess >( xIndexContainer, uno::UNO_QUERY_THROW ) );
++                }
++            }
++        }
++        return true;
++    }
+     if ( !customizationDataCTB.get() )
+         return false;
+     return customizationDataCTB->ImportCustomToolBar( helper );
+@@ -237,6 +349,39 @@ TBDelta::TBDelta() : doprfatendFlags(0)
+ {
+ }
+ 
++bool TBDelta::ControlIsModified()
++{
++    return ( ( doprfatendFlags & 0x3 ) == 0x2 );
++}
++
++bool TBDelta::ControlIsInserted()
++{
++    return ( ( doprfatendFlags & 0x3 ) == 0x1 );
++}
++
++bool TBDelta::ControlIsChanged()
++{
++    return ( ( doprfatendFlags & 0x3 ) == 0x1 );
++}
++
++bool TBDelta::ControlDropsToolBar()
++{
++    return !( CiTBDE & 0x8000 );
++}
++
++sal_Int32 TBDelta::TBCStreamOffset()
++{
++    return fc;
++}
++
++sal_Int16 TBDelta::CustomizationIndex()
++{
++    sal_Int16 nIndex = CiTBDE;
++    nIndex = nIndex >> 1;
++    nIndex &= 0x1ff; // only 13 bits are relevant
++    return nIndex;
++}
++
+ bool TBDelta::Read(SvStream *pS)
+ {
+     OSL_TRACE("TBDelta::Read() stream pos 0x%x", pS->Tell() );
+@@ -259,6 +404,11 @@ void TBDelta::Print( FILE* fp )
+     indent_printf( fp, " fc 0x%x\n", static_cast< unsigned int >( fc ) );
+     indent_printf( fp, " CiTBDE 0x%x\n",CiTBDE );
+     indent_printf( fp, " cbTBC 0x%x\n", cbTBC );
++    if ( ControlDropsToolBar() )
++    {
++        indent_printf( fp, " this delta is associated with a control that drops a menu toolbar\n", cbTBC );
++        indent_printf( fp, " the menu toolbar drops the toolbar defined at index[%d] in the rCustomizations array of the CTBWRAPPER that contains this TBDelta\n", CustomizationIndex() );
++    }
+ }
+ 
+ CTB::CTB() : cbTBData( 0 )
+@@ -356,6 +506,17 @@ bool CTB::ImportCustomToolBar( CustomToolBarImportHelper& helper )
+     return true;
+ }
+ 
++bool CTB::ImportMenu( const css::uno::Reference< css::container::XIndexContainer >& xIndexContainer, CustomToolBarImportHelper& rHelper )
++{
++    for ( std::vector< TBC >::iterator it =  rTBC.begin(); it != rTBC.end(); ++it )
++    {
++        // createToolBar item for control
++        if ( !it->ImportToolBarControl( xIndexContainer, rHelper ) )
++            return false;
++    }
++    return true;
++}
++
+ TB::TB() : bSignature( 0 )
+ ,bVersion( 0 )
+ ,cCL( 0 )
+@@ -496,6 +657,17 @@ TBC::ImportToolBarControl( const css::uno::Reference< css::container::XIndexCont
+     return true;
+ }
+ 
++rtl::OUString 
++TBC::GetCustomText()
++{
++    rtl::OUString sCustomText;
++    if ( tbcd.get() )
++        sCustomText = tbcd->getGeneralInfo().CustomText();
++    return sCustomText;
++   
++    
++}
++
+ bool 
+ Xst::Read( SvStream* pS )
+ {
+diff --git sw/source/filter/ww8/ww8toolbar.hxx sw/source/filter/ww8/ww8toolbar.hxx
+index 675a16e..c3e57ed 100644
+--- sw/source/filter/ww8/ww8toolbar.hxx
++++ sw/source/filter/ww8/ww8toolbar.hxx
+@@ -26,6 +26,7 @@ public:
+     bool Read(SvStream *pS);
+     void Print( FILE* );
+     bool ImportToolBarControl( const css::uno::Reference< css::container::XIndexContainer >&, CustomToolBarImportHelper& );
++    rtl::OUString GetCustomText();
+ };
+ 
+ class TB : public TBBase
+@@ -67,11 +68,13 @@ public:
+     bool Read(SvStream *pS);
+     void Print( FILE* fp );
+     bool ImportCustomToolBar( CustomToolBarImportHelper& );
++    bool ImportMenu( const css::uno::Reference< css::container::XIndexContainer >&, CustomToolBarImportHelper& );
+ };
+ 
+ class TBDelta : public TBBase
+ {
+     sal_uInt8 doprfatendFlags;
++
+     sal_uInt8 ibts;
+     sal_Int32 cidNext; 
+     sal_Int32 cid;
+@@ -83,6 +86,13 @@ public:
+     ~TBDelta(){}
+     bool Read(SvStream *pS);
+     void Print( FILE* );
++    bool ControlIsModified();
++    bool ControlIsInserted();
++    bool ControlIsChanged();
++    bool ControlDropsToolBar();
++    sal_Int32 TBCStreamOffset();
++    sal_Int16 CustomizationIndex();
++    
+ };
+ 
+ class Tcg255SubStruct : public TBBase
+@@ -100,20 +110,23 @@ public:
+     bool Read(SvStream *pS);
+ };
+ 
++class CTBWrapper;
+ class Customization : public TBBase
+ {
++friend class CTBWrapper;
+     sal_Int32 tbidForTBD;
+     sal_uInt16 reserved1;
+     sal_Int16 ctbds;
+-
++    CTBWrapper* pWrapper;
+     boost::shared_ptr< CTB > customizationDataCTB;
+     std::vector< TBDelta > customizationDataTBDelta; 
+-    
++    bool bIsDroppedMenuTB; 
+ public:    
+-    Customization();
++    Customization( CTBWrapper* rapper );
+     ~Customization();
+     bool Read(SvStream *pS);
+     bool ImportCustomToolBar( CustomToolBarImportHelper& );
++    bool ImportMenu( const css::uno::Reference< css::container::XIndexContainer >&, CustomToolBarImportHelper& );
+     void Print( FILE* );
+ };
+ 
+@@ -132,16 +145,19 @@ class CTBWrapper : public Tcg255SubStruct
+ 
+     sal_Int32 cbDTBC;
+ 
+-    std::vector< TBC > rtbdc; // array of TBC's - we don't read these yet 
++    std::vector< TBC > rtbdc; // 
+     std::vector< Customization > rCustomizations; // array of Customizations
+-
++    std::vector< sal_Int16 > dropDownMenuIndices; // array of indexes of Customization toolbars that are dropped by a menu
+     CTBWrapper(const CTBWrapper&);
+     CTBWrapper& operator = ( const CTBWrapper&);
+ public:
+     CTBWrapper( bool bReadId = true );
+     ~CTBWrapper();
++    void InsertDropIndex( sal_Int32 aIndex ) { dropDownMenuIndices.push_back( aIndex ); }
++    TBC* GetTBCAtOffset( sal_uInt32 nStreamOffset );
+     bool Read(SvStream *pS);
+     bool ImportCustomToolBar( SfxObjectShell& rDocSh );
++    Customization* GetCustomizaton( sal_Int16 index );
+     void Print( FILE* );
+ };
+ 
