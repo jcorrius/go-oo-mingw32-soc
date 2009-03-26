@@ -111,6 +111,19 @@ index 0000000..c8abd2c
 +};
 +
 +#endif
+diff --git sc/inc/dpsave.hxx sc/inc/dpsave.hxx
+index cb381fb..931871c 100644
+--- sc/inc/dpsave.hxx
++++ sc/inc/dpsave.hxx
+@@ -179,6 +179,8 @@ public:
+ 
+ 	void					WriteToSource( const com::sun::star::uno::Reference<
+ 											com::sun::star::uno::XInterface>& xDim );
++
++    void                    UpdateMemberVisibility(const ::std::hash_map< ::rtl::OUString, bool, ::rtl::OUStringHash>& rData);
+ };
+ 
+ 
 diff --git sc/inc/dptabsrc.hxx sc/inc/dptabsrc.hxx
 index 9d6e8e4..22492d5 100644
 --- sc/inc/dptabsrc.hxx
@@ -534,10 +547,18 @@ index 0000000..7a6d813
 +    return None;
 +}
 diff --git sc/source/core/data/dpsave.cxx sc/source/core/data/dpsave.cxx
-index f41ea2c..5ba25dc 100644
+index f41ea2c..5c92822 100644
 --- sc/source/core/data/dpsave.cxx
 +++ sc/source/core/data/dpsave.cxx
-@@ -642,6 +642,8 @@ void ScDPSaveDimension::WriteToSource( const uno::Reference<uno::XInterface>& xD
+@@ -62,6 +62,7 @@
+ 
+ using namespace com::sun::star;
+ using ::rtl::OUString;
++using ::rtl::OUStringHash;
+ using ::std::hash_map;
+ using ::std::auto_ptr;
+ 
+@@ -642,6 +643,8 @@ void ScDPSaveDimension::WriteToSource( const uno::Reference<uno::XInterface>& xD
  		nHierCount = xHiers->getCount();
  	}
  
@@ -546,7 +567,7 @@ index f41ea2c..5ba25dc 100644
  	for (long nHier=0; nHier<nHierCount; nHier++)
  	{
  		uno::Reference<uno::XInterface> xHierarchy = ScUnoHelpFunctions::AnyToInterface( xHiers->getByIndex(nHier) );
-@@ -734,12 +736,15 @@ void ScDPSaveDimension::WriteToSource( const uno::Reference<uno::XInterface>& xD
+@@ -734,12 +737,15 @@ void ScDPSaveDimension::WriteToSource( const uno::Reference<uno::XInterface>& xD
  
  						for (MemberList::const_iterator i=maMemberList.begin(); i != maMemberList.end() ; i++)
  						{
@@ -564,7 +585,7 @@ index f41ea2c..5ba25dc 100644
  
  								if ( nPosition >= 0 )
      								++nPosition;            // increase if initialized
-@@ -751,6 +756,14 @@ void ScDPSaveDimension::WriteToSource( const uno::Reference<uno::XInterface>& xD
+@@ -751,6 +757,28 @@ void ScDPSaveDimension::WriteToSource( const uno::Reference<uno::XInterface>& xD
  			}
  		}
  	}
@@ -575,6 +596,20 @@ index f41ea2c..5ba25dc 100644
 +        any <<= bHasHiddenMember;    
 +        xDimProp->setPropertyValue(
 +            OUString::createFromAscii(SC_UNO_HAS_HIDDEN_MEMBER), any);
++    }
++}
++
++void ScDPSaveDimension::UpdateMemberVisibility(const hash_map<OUString, bool, OUStringHash>& rData)
++{
++    typedef hash_map<OUString, bool, OUStringHash> DataMap;
++    MemberList::iterator itrMem = maMemberList.begin(), itrMemEnd = maMemberList.end();
++    for (; itrMem != itrMemEnd; ++itrMem)
++    {
++        ScDPSaveMember* pMem = *itrMem;
++        const String& rMemName = pMem->GetName();
++        DataMap::const_iterator itr = rData.find(rMemName);
++        if (itr != rData.end())
++            pMem->SetIsVisible(itr->second);
 +    }
  }
  
@@ -1028,10 +1063,10 @@ index 25450c3..ac52bc3 100644
      void SetSortInfo(const com::sun::star::sheet::DataPilotFieldSortInfo& aInfo) { if (pDim) pDim->SetSortInfo(&aInfo); }
 diff --git sc/source/ui/cctrl/dpcontrol.cxx sc/source/ui/cctrl/dpcontrol.cxx
 new file mode 100644
-index 0000000..2fd83d7
+index 0000000..168caa4
 --- /dev/null
 +++ sc/source/ui/cctrl/dpcontrol.cxx
-@@ -0,0 +1,379 @@
+@@ -0,0 +1,583 @@
 +/*************************************************************************
 + *
 + * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
@@ -1074,32 +1109,9 @@ index 0000000..2fd83d7
 +#include "vcl/wintypes.hxx"
 +
 +using ::rtl::OUString;
++using ::rtl::OUStringHash;
 +using ::std::vector;
-+
-+#include <stdio.h>
-+#include <string>
-+
-+namespace {
-+
-+class StackPrinter
-+{
-+public:
-+    explicit StackPrinter(const char* msg) :
-+        msMsg(msg)
-+    {
-+        fprintf(stdout, "%s: --begin\n", msMsg.c_str());
-+    }
-+
-+    ~StackPrinter()
-+    {
-+        fprintf(stdout, "%s: --end\n", msMsg.c_str());
-+    }
-+
-+private:
-+    ::std::string msMsg;
-+};
-+
-+}
++using ::std::hash_map;
 +
 +ScDPFieldButton::ScDPFieldButton(OutputDevice* pOutDev, const StyleSettings* pStyle) :
 +    mpOutDev(pOutDev),
@@ -1211,6 +1223,40 @@ index 0000000..2fd83d7
 +
 +// ============================================================================
 +
++namespace {
++
++class OKButtonEvent : public ScDPFieldPopupWindow::ButtonEvent
++{
++public:
++    OKButtonEvent(ScDPFieldPopupWindow* pParent) :
++        mpParent(pParent) {}
++
++    virtual void execute()
++    {
++        mpParent->close(true);
++    }
++private:
++    ScDPFieldPopupWindow* mpParent;
++};
++
++class CancelButtonEvent : public ScDPFieldPopupWindow::ButtonEvent
++{
++public:
++    CancelButtonEvent(ScDPFieldPopupWindow* pParent) :
++        mpParent(pParent) {}
++
++    virtual void execute()
++    {
++        mpParent->close(false);
++    }
++private:
++    ScDPFieldPopupWindow* mpParent;
++};
++
++}
++
++// ----------------------------------------------------------------------------
++
 +ScDPFieldPopupWindow::Member::Member() :
 +    mbVisible(true)
 +{
@@ -1222,7 +1268,9 @@ index 0000000..2fd83d7
 +    FloatingWindow(pParent, (WB_SYSTEMFLOATWIN|WB_SYSTEMWINDOW|WB_NOBORDER)),
 +    maMemberList(this),
 +    maBtnOk(this),
-+    maBtnCancel(this)
++    maBtnCancel(this),
++    mpAuxData(NULL),
++    mpOKAction(NULL)
 +{
 +    init();
 +}
@@ -1232,19 +1280,26 @@ index 0000000..2fd83d7
 +    SetOutputSizePixel(Size(150, 300));
 +    Size aOutSize = GetOutputSizePixel();
 +
++    maChildControls.reserve(3);
++
 +    maMemberList.setSize(Size(140, 240));
 +    maMemberList.setPosition(Point(5, 5));
++    maChildControls.push_back(&maMemberList);
 +
 +    maBtnOk.setSize(Size(60, 22));
 +    maBtnOk.setPosition(Point(12, 268));
 +    maBtnOk.setLabel(OUString::createFromAscii("OK"));
++    maBtnOk.setEvent(new OKButtonEvent(this));
++    maChildControls.push_back(&maBtnOk);
 +
 +    maBtnCancel.setSize(Size(60, 22));
 +    maBtnCancel.setPosition(Point(80, 268));
 +    maBtnCancel.setLabel(OUString::createFromAscii("Cancel"));
++    maBtnCancel.setEvent(new CancelButtonEvent(this));
++    maChildControls.push_back(&maBtnCancel);
 +}
 +
-+const vector<ScDPFieldPopupWindow::Member>& ScDPFieldPopupWindow::getMembers() const
++vector<ScDPFieldPopupWindow::Member>& ScDPFieldPopupWindow::getMembers()
 +{
 +    return maMembers;
 +}
@@ -1254,31 +1309,65 @@ index 0000000..2fd83d7
 +    EndPopupMode();
 +}
 +
-+void ScDPFieldPopupWindow::MouseMove(const MouseEvent& rMEvt)
++void ScDPFieldPopupWindow::MouseMove(const MouseEvent& /*rMEvt*/)
 +{
++#if 0 // We don't handle this event in this popup window.
++    Point pos = rMEvt.GetPosPixel();
++    vector<ChildControl*>::iterator itr = maChildControls.begin(), itrEnd = maChildControls.end();
++    for (; itr != itrEnd; ++itr)
++    {
++        ChildControl* p = *itr;
++        Rectangle aBound(p->getPosition(), p->getSize());
++        if (aBound.IsInside(pos))
++        {
++            // Found the right control.
++            p->mouseMove(rMEvt);
++            return;
++        }
++    }
++#endif
 +}
 +
 +void ScDPFieldPopupWindow::MouseButtonDown(const MouseEvent& rMEvt)
 +{
 +    Point pos = rMEvt.GetPosPixel();
-+    fprintf(stdout, "ScDPFieldPopupWindow::MouseButtonDown:   pos = (%ld,%ld)\n", pos.X(), pos.Y());
-+
++    vector<ChildControl*>::iterator itr = maChildControls.begin(), itrEnd = maChildControls.end();
++    for (; itr != itrEnd; ++itr)
++    {
++        ChildControl* p = *itr;
++        Rectangle aBound(p->getPosition(), p->getSize());
++        if (aBound.IsInside(pos))
++        {
++            // Found the right control.
++            p->mouseButtonDown(rMEvt);
++            return;
++        }
++    }
 +}
 +
 +void ScDPFieldPopupWindow::MouseButtonUp(const MouseEvent& rMEvt)
 +{
++    Point pos = rMEvt.GetPosPixel();
++    vector<ChildControl*>::iterator itr = maChildControls.begin(), itrEnd = maChildControls.end();
++    for (; itr != itrEnd; ++itr)
++    {
++        ChildControl* p = *itr;
++        Rectangle aBound(p->getPosition(), p->getSize());
++        if (aBound.IsInside(pos))
++        {
++            // Found the right control.
++            p->mouseButtonUp(rMEvt);
++            return;
++        }
++    }
 +}
 +
 +void ScDPFieldPopupWindow::Paint(const Rectangle& rRect)
 +{
 +    Window::Paint(rRect);
-+    StackPrinter __stack_printer__("ScDPFieldPopupWindow::Paint");
-+    fprintf(stdout, "ScDPFieldPopupWindow::Paint:   (%ld,%ld) - (%ld,%ld)\n", 
-+            rRect.Left(), rRect.Top(), rRect.Right(), rRect.Bottom());
 +
 +    const StyleSettings& rStyle = GetSettings().GetStyleSettings();
 +    SetFillColor(rStyle.GetFaceColor());
-+//  SetLineColor(rStyle.GetFaceColor());
 +    DrawRect(rRect);
 +    maMemberList.paint();
 +    maBtnOk.paint();
@@ -1296,6 +1385,39 @@ index 0000000..2fd83d7
 +    aMember.maName = rName;
 +    aMember.mbVisible = bVisible;
 +    maMembers.push_back(aMember);
++}
++
++void ScDPFieldPopupWindow::getResult(hash_map<OUString, bool, OUStringHash>& rResult)
++{
++    typedef hash_map<OUString, bool, OUStringHash> ResultMap;
++    ResultMap aResult;
++    vector<Member>::const_iterator itr = maMembers.begin(), itrEnd = maMembers.end();
++    for (; itr != itrEnd; ++itr)
++        aResult.insert(ResultMap::value_type(itr->maName, itr->mbVisible));
++    rResult.swap(aResult);
++}
++
++void ScDPFieldPopupWindow::close(bool bOK)
++{
++    if (bOK && mpOKAction.get())
++        mpOKAction->execute();
++
++    EndPopupMode();
++}
++
++void ScDPFieldPopupWindow::setAuxData(AuxData* p)
++{
++    mpAuxData.reset(p);
++}
++
++ScDPFieldPopupWindow::AuxData* ScDPFieldPopupWindow::getAuxData()
++{
++    return mpAuxData.get();
++}
++
++void ScDPFieldPopupWindow::setOKAction(OKAction* p)
++{
++    mpOKAction.reset(p);
 +}
 +
 +// ----------------------------------------------------------------------------
@@ -1330,10 +1452,26 @@ index 0000000..2fd83d7
 +    return mpParent;
 +}
 +
++void ScDPFieldPopupWindow::ChildControl::mouseMove(const MouseEvent&)
++{
++    // not implemented.
++}
++
++void ScDPFieldPopupWindow::ChildControl::mouseButtonUp(const MouseEvent&)
++{
++    // not implemented.
++}
++
++void ScDPFieldPopupWindow::ChildControl::mouseButtonDown(const MouseEvent&)
++{
++    // not implemented.
++}
++
 +// ----------------------------------------------------------------------------
 +
 +ScDPFieldPopupWindow::ListBox::ListBox(ScDPFieldPopupWindow* pParent) :
-+    ChildControl(pParent)
++    ChildControl(pParent),
++    mnTextHeight(0)
 +{
 +}
 +
@@ -1348,32 +1486,109 @@ index 0000000..2fd83d7
 +    pOut->SetFillColor(rStyle.GetFieldColor());
 +    pOut->DrawRect(aBound);
 +
-+    Font aFont = pOut->GetDrawPixelFont(pOut);
++    Font aFont = rStyle.GetLabelFont();
++    aFont.SetHeight(12);
 +    pOut->SetFont(aFont);
-+    long nTextHeight = pOut->GetTextHeight();
++    mnTextHeight = pOut->GetTextHeight();
 +    long x = rPos.X() + 3;
 +    long y = rPos.Y() + 3;
 +    const vector<ScDPFieldPopupWindow::Member>& rMembers = pOut->getMembers();
 +    size_t n = rMembers.size();
 +    for (size_t i = 0; i < n; ++i)
 +    {
-+        ImplControlValue aControlValue(BUTTONVALUE_ON);
++        ButtonValue nState = rMembers[i].mbVisible ? BUTTONVALUE_ON : BUTTONVALUE_OFF;
++        ImplControlValue aControlValue(nState);
 +        Region aCtrlRegion(Rectangle(
-+            Point(x,y), Size(nTextHeight, nTextHeight)));
++            Point(x,y), Size(mnTextHeight, mnTextHeight)));
 +        pOut->DrawNativeControl(
 +            CTRL_CHECKBOX, PART_ENTIRE_CONTROL, aCtrlRegion, CTRL_STATE_ENABLED,
 +            aControlValue, OUString() );
 +
 +        pOut->DrawText(Point(x+20,y), rMembers[i].maName);
-+        y += nTextHeight + 2;
++        y += mnTextHeight + 2;
 +    }
++}
++
++void ScDPFieldPopupWindow::ListBox::paintItem(size_t nItemId)
++{
++    ScDPFieldPopupWindow* pOut = getParent();
++    const vector<ScDPFieldPopupWindow::Member>& rMembers = pOut->getMembers();
++    if (nItemId >= rMembers.size())
++        return;
++
++    const Point& rPos = getPosition();
++    const StyleSettings& rStyle = pOut->GetSettings().GetStyleSettings();
++
++    Font aFont = rStyle.GetLabelFont();
++    aFont.SetHeight(12);
++    pOut->SetFont(aFont);
++    mnTextHeight = pOut->GetTextHeight();
++    long x = rPos.X() + 3;
++    long y = rPos.Y() + 3;
++    y += (mnTextHeight+2)*nItemId;
++
++    ButtonValue nState = rMembers[nItemId].mbVisible ? BUTTONVALUE_ON : BUTTONVALUE_OFF;
++    ImplControlValue aControlValue(nState);
++    Region aCtrlRegion(Rectangle(
++        Point(x,y), Size(mnTextHeight, mnTextHeight)));
++    pOut->DrawNativeControl(
++        CTRL_CHECKBOX, PART_ENTIRE_CONTROL, aCtrlRegion, CTRL_STATE_ENABLED,
++        aControlValue, OUString() );
++
++    pOut->DrawText(Point(x+20,y), rMembers[nItemId].maName);
++}
++
++void ScDPFieldPopupWindow::ListBox::mouseButtonDown(const MouseEvent& rMEvt)
++{
++    Point pos = rMEvt.GetPosPixel();
++    sal_Int8 nMemberId = getItemIndex(pos);
++
++    if (nMemberId < 0)
++        return;
++
++    vector<Member>& rMembers = getParent()->getMembers();
++    size_t n = rMembers.size();
++    if (static_cast<size_t>(nMemberId) >= n)
++        // This should never happen, but just in case ...
++        return;
++
++    rMembers[nMemberId].mbVisible = !rMembers[nMemberId].mbVisible;
++    paintItem(nMemberId);
++}
++
++void ScDPFieldPopupWindow::ListBox::mouseButtonUp(const MouseEvent& /*rMEvt*/)
++{
++}
++
++sal_Int8 ScDPFieldPopupWindow::ListBox::getItemIndex(const Point& rPos)
++{
++    if (mnTextHeight <= 0)
++        return -1;
++
++    const Point& rLBPos = getPosition();
++    ScDPFieldPopupWindow* pOut = getParent();
++
++    long x = rLBPos.X() + 3;
++    long y = rLBPos.Y() + 3;
++    const vector<ScDPFieldPopupWindow::Member>& rMembers = pOut->getMembers();
++    sal_Int8 n = static_cast<sal_Int8>(rMembers.size());
++    for (sal_Int8 i = 0; i < n; ++i)
++    {
++        Rectangle aBound(Point(x,y), Size(mnTextHeight,mnTextHeight));
++        if (aBound.IsInside(rPos))
++            return i;
++        y += mnTextHeight + 2;
++    }
++
++    return -1;
 +}
 +
 +// ----------------------------------------------------------------------------
 +
 +ScDPFieldPopupWindow::Button::Button(ScDPFieldPopupWindow* pParent) :
 +    ChildControl(pParent),
-+    mbPressed(false)
++    mbPressed(false),
++    mpEvent(NULL)
 +{
 +}
 +
@@ -1395,20 +1610,44 @@ index 0000000..2fd83d7
 +    const StyleSettings& rStyle = pOut->GetSettings().GetStyleSettings();
 +    Rectangle aRect(rPos, rSize);
 +
-+    ImplControlValue aControlValue;
 +    Region aCtrlRegion(aRect);
++
++    ControlState nState = CTRL_STATE_ENABLED;
++    if (mbPressed)
++        nState |= CTRL_STATE_PRESSED;
++
 +    pOut->DrawNativeControl(
-+        CTRL_PUSHBUTTON, PART_ENTIRE_CONTROL, aCtrlRegion, CTRL_STATE_ENABLED,
-+        aControlValue, OUString() );
++        CTRL_PUSHBUTTON, PART_ENTIRE_CONTROL, aCtrlRegion, nState, ImplControlValue(), OUString());
 +
 +    // Draw label at the center of the button.
-+    pOut->SetFont(rStyle.GetLabelFont());
++    Font aFont = rStyle.GetLabelFont();
++    aFont.SetHeight(11);
++    pOut->SetFont(aFont);
 +    long nTWidth = pOut->GetTextWidth(maLabel);
 +    long nXOffset = (rSize.Width() - nTWidth)/2;
 +    long nTHeight = pOut->GetTextHeight();
 +    long nYOffset = (rSize.Height() - nTHeight)/2;
 +    Point aTPos(rPos.X() + nXOffset, rPos.Y() + nYOffset);
 +    pOut->DrawText(aTPos, maLabel);
++}
++
++void ScDPFieldPopupWindow::Button::setEvent(ScDPFieldPopupWindow::ButtonEvent* p)
++{
++    mpEvent.reset(p);
++}
++
++void ScDPFieldPopupWindow::Button::mouseButtonDown(const MouseEvent& /*rMEvt*/)
++{
++    mbPressed = true;
++    paint();
++}
++
++void ScDPFieldPopupWindow::Button::mouseButtonUp(const MouseEvent& /*rMEvt*/)
++{
++    mbPressed = false;
++    paint();
++    if (mpEvent.get())
++        mpEvent->execute();
 +}
 +
 diff --git sc/source/ui/cctrl/makefile.mk sc/source/ui/cctrl/makefile.mk
@@ -1511,10 +1750,10 @@ index 4dee615..588a290 100644
          aSlider.Show();
 diff --git sc/source/ui/inc/dpcontrol.hxx sc/source/ui/inc/dpcontrol.hxx
 new file mode 100644
-index 0000000..66d23dc
+index 0000000..24ffe82
 --- /dev/null
 +++ sc/source/ui/inc/dpcontrol.hxx
-@@ -0,0 +1,160 @@
+@@ -0,0 +1,223 @@
 +/*************************************************************************
 + *
 + * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
@@ -1553,6 +1792,9 @@ index 0000000..66d23dc
 +#include "vcl/floatwin.hxx"
 +#include "vcl/button.hxx"
 +#include "svx/checklbx.hxx"
++
++#include <memory>
++#include <hash_map>
 +
 +class OutputDevice;
 +class Point;
@@ -1601,6 +1843,28 @@ index 0000000..66d23dc
 +class ScDPFieldPopupWindow : public FloatingWindow
 +{
 +public:
++    class ButtonEvent
++    {
++    public:
++        virtual void execute() = 0;
++    };
++
++    /** 
++     * Auxiliary data that the client code may need to store.  Create a 
++     * sub-class of this and store data there. 
++     */ 
++    struct AuxData {};
++
++    /** 
++     * Action to perform when the OK button is pressed.  Create a sub-class of 
++     * this to implement the desired action.
++     */
++    class OKAction
++    {
++    public:
++        virtual void execute() = 0;
++    };
++
 +    explicit ScDPFieldPopupWindow(Window* pParent);
 +    virtual ~ScDPFieldPopupWindow();
 +
@@ -1612,6 +1876,22 @@ index 0000000..66d23dc
 +
 +    void setMemberSize(size_t n);
 +    void addMember(const ::rtl::OUString& rName, bool bVisible);
++    void getResult(::std::hash_map< ::rtl::OUString, bool, ::rtl::OUStringHash>& rResult);
++    void close(bool bOK);
++
++    /** 
++     * Set auxiliary data that the client code might need.  Note that this 
++     * popup window class manages its life time; no explicit deletion of the 
++     * instance is needed in the client code.
++     */
++    void setAuxData(AuxData* p);
++
++    /** 
++     * Get the store auxiliary data, or NULL if no such data is stored.
++     */
++    AuxData* getAuxData();
++
++    void setOKAction(OKAction* p);
 +
 +private:
 +    struct Member
@@ -1621,11 +1901,6 @@ index 0000000..66d23dc
 +
 +        Member();
 +    };
-+
-+    void init();
-+    const ::std::vector<Member>& getMembers() const;
-+
-+private:
 +
 +    class ChildControl
 +    {
@@ -1639,6 +1914,10 @@ index 0000000..66d23dc
 +        const Size& getSize() const;
 +        ScDPFieldPopupWindow* getParent() const;
 +
++        virtual void mouseButtonDown(const MouseEvent& rMEvt);
++        virtual void mouseButtonUp(const MouseEvent& rMEvt);
++        virtual void mouseMove(const MouseEvent& rMEvt);
++
 +    private:
 +        Point maPos;
 +        Size maSize;
@@ -1651,6 +1930,15 @@ index 0000000..66d23dc
 +        ListBox(ScDPFieldPopupWindow* pParent);
 +
 +        void paint();
++        void paintItem(size_t nItemId);
++
++        virtual void mouseButtonDown(const MouseEvent& rMEvt);
++        virtual void mouseButtonUp(const MouseEvent& rMEvt);
++
++    private:
++        sal_Int8 getItemIndex(const Point& rPos);
++
++        long mnTextHeight;
 +    };
 +
 +    class Button : public ChildControl
@@ -1661,22 +1949,36 @@ index 0000000..66d23dc
 +        void setPressed(bool b);
 +        void setLabel(const ::rtl::OUString& rLabel);
 +        void paint();
++        void setEvent(ButtonEvent* p);
++
++        virtual void mouseButtonDown(const MouseEvent& rMEvt);
++        virtual void mouseButtonUp(const MouseEvent& rMEvt);
 +
 +    private:
 +        ::rtl::OUString maLabel;
 +        bool mbPressed;
++
++        ::std::auto_ptr<ButtonEvent> mpEvent;
 +    };
++
++    void init();
++    ::std::vector<Member>& getMembers();
++
++private:
 +
 +    ListBox maMemberList;
 +    Button maBtnOk;
 +    Button maBtnCancel;
 +
-+    ::std::vector<Member> maMembers;
++    ::std::vector<ChildControl*>    maChildControls;
++    ::std::vector<Member>           maMembers;
++    ::std::auto_ptr<AuxData>        mpAuxData;
++    ::std::auto_ptr<OKAction>       mpOKAction;
 +};
 +
 +#endif
 diff --git sc/source/ui/inc/gridwin.hxx sc/source/ui/inc/gridwin.hxx
-index 2946c39..197d043 100644
+index 2946c39..30b563b 100644
 --- sc/source/ui/inc/gridwin.hxx
 +++ sc/source/ui/inc/gridwin.hxx
 @@ -39,6 +39,7 @@
@@ -1720,6 +2022,15 @@ index 2946c39..197d043 100644
  	void			RFMouseMove( const MouseEvent& rMEvt, BOOL bUp );
  
  	void			PagebreakMove( const MouseEvent& rMEvt, BOOL bUp );
+@@ -419,6 +432,8 @@ public:
+ 
+ 	void			CheckNeedsRepaint();
+ 
++    void            UpdateDPFromFieldPopupMenu();
++
+ 	// #114409#
+ 	void CursorChanged();
+ 	void DrawLayerCreated();
 diff --git sc/source/ui/inc/pvlaydlg.hxx sc/source/ui/inc/pvlaydlg.hxx
 index a3e08cb..ed388d4 100644
 --- sc/source/ui/inc/pvlaydlg.hxx
@@ -1795,10 +2106,10 @@ index 3d7f3d4..0e9fdb4 100644
      DeleteSelectionOverlay();
      DeleteAutoFillOverlay();
 diff --git sc/source/ui/view/gridwin2.cxx sc/source/ui/view/gridwin2.cxx
-index c6f589e..2e27996 100644
+index c6f589e..7769177 100644
 --- sc/source/ui/view/gridwin2.cxx
 +++ sc/source/ui/view/gridwin2.cxx
-@@ -55,11 +55,15 @@
+@@ -55,11 +55,20 @@
  #include "dpoutput.hxx"		// ScDPPositionData
  #include "dpshttab.hxx"
  #include "dbdocfun.hxx"
@@ -1809,13 +2120,18 @@ index c6f589e..2e27996 100644
 -using namespace com::sun::star;
  
 +#include <vector>
++#include <hash_map>
 +
 +using namespace com::sun::star;
 +using ::std::vector;
++using ::std::auto_ptr;
++using ::std::hash_map;
++using ::rtl::OUString;
++using ::rtl::OUStringHash;
  
  // STATIC DATA -----------------------------------------------------------
  
-@@ -199,6 +203,15 @@ void ScGridWindow::DoPushButton( SCCOL nCol, SCROW nRow, const MouseEvent& rMEvt
+@@ -199,6 +208,15 @@ void ScGridWindow::DoPushButton( SCCOL nCol, SCROW nRow, const MouseEvent& rMEvt
  			bDPMouse   = TRUE;
  			nDPField   = nField;
  			pDragDPObj = pDPObj;
@@ -1831,7 +2147,7 @@ index c6f589e..2e27996 100644
  			DPTestMouse( rMEvt, TRUE );
  			StartTracking();
  		}
-@@ -726,6 +739,65 @@ void ScGridWindow::DPTestMouse( const MouseEvent& rMEvt, BOOL bMove )
+@@ -726,6 +744,114 @@ void ScGridWindow::DPTestMouse( const MouseEvent& rMEvt, BOOL bMove )
  		pViewData->GetView()->ResetTimer();
  }
  
@@ -1860,38 +2176,87 @@ index c6f589e..2e27996 100644
 +    return false;
 +}
 +
++namespace {
++
++struct DPFieldPopupData : public ScDPFieldPopupWindow::AuxData
++{
++    ScPivotParam    maDPParam;
++    ScDPObject*     mpDPObj;
++    long            mnDim;
++};
++
++class DPFieldPopupOKAction : public ScDPFieldPopupWindow::OKAction
++{
++public:
++    explicit DPFieldPopupOKAction(ScGridWindow* p) : 
++        mpGridWindow(p) {}
++
++    virtual void execute()
++    {
++        mpGridWindow->UpdateDPFromFieldPopupMenu();
++    }
++private:
++    ScGridWindow* mpGridWindow;
++};
++
++}
++
 +void ScGridWindow::DPLaunchFieldPopupMenu(
 +    const Point& rSrcPos, const Size& rSrcSize, const ScAddress& rPos, ScDPObject* pDPObj)
 +{
 +    // We need to get the list of field members.
-+    ScPivotParam aDPParam;
-+    pDPObj->FillLabelData(aDPParam);
++    auto_ptr<DPFieldPopupData> pDPData(new DPFieldPopupData);
++    pDPObj->FillLabelData(pDPData->maDPParam);
++    pDPData->mpDPObj = pDPObj;
 +
 +    USHORT nOrient;
-+    long nDim = pDPObj->GetHeaderDim(rPos, nOrient);
++    pDPData->mnDim = pDPObj->GetHeaderDim(rPos, nOrient);
 +
-+    if (aDPParam.maLabelArray.size() <= nDim)
++    if (pDPData->maDPParam.maLabelArray.size() <= pDPData->mnDim)
 +        // out-of-bound dimension ID.  This should never happen!
 +        return;
 +
-+    const ScDPLabelData& rLabelData = *aDPParam.maLabelArray[nDim];
-+    fprintf(stdout, "ScGridWindow::DPLaunchFieldPopupMenu:   field id = %d  name = '%s'\n", 
-+            nDim, rtl::OUStringToOString(rLabelData.maName, RTL_TEXTENCODING_UTF8).getStr());
++    const ScDPLabelData& rLabelData = *pDPData->maDPParam.maLabelArray[pDPData->mnDim];
 +
 +    mpDPFieldPopup.reset(new ScDPFieldPopupWindow(this));
++    mpDPFieldPopup->setAuxData(pDPData.release());
++    mpDPFieldPopup->setOKAction(new DPFieldPopupOKAction(this));
 +    sal_Int32 n = rLabelData.maMembers.getLength();
 +    mpDPFieldPopup->setMemberSize(n);
 +    for (sal_Int32 i = 0; i < n; ++i)
-+    {
-+        fprintf(stdout, "ScGridWindow::DPLaunchFieldPopupMenu:   member = '%s' (visible: %d)\n",
-+                rtl::OUStringToOString(rLabelData.maMembers[i], RTL_TEXTENCODING_UTF8).getStr(),
-+                rLabelData.maVisible[i]);
 +        mpDPFieldPopup->addMember(rLabelData.maMembers[i], rLabelData.maVisible[i]);
-+    }
 +
 +    mpDPFieldPopup->SetPopupModeEndHdl( LINK(this, ScGridWindow, PopupModeEndHdl) );
 +    Rectangle aCellRect(rSrcPos, rSrcSize);
 +    mpDPFieldPopup->StartPopupMode(aCellRect, (FLOATWIN_POPUPMODE_DOWN | FLOATWIN_POPUPMODE_GRABFOCUS));
++}
++
++void ScGridWindow::UpdateDPFromFieldPopupMenu()
++{
++    if (!mpDPFieldPopup.get())
++        return;
++
++    DPFieldPopupData* pDPData = static_cast<DPFieldPopupData*>(mpDPFieldPopup->getAuxData());
++    if (!pDPData)
++        return;
++
++    ScDPObject* pDPObj = pDPData->mpDPObj;
++    ScDPObject aNewDPObj(*pDPObj);
++    aNewDPObj.BuildAllDimensionMembers();
++    ScDPSaveData* pSaveData = aNewDPObj.GetSaveData();
++
++    BOOL bIsDataLayout;
++    String aDimName = pDPObj->GetDimName(pDPData->mnDim, bIsDataLayout);
++    ScDPSaveDimension* pDim = pSaveData->GetDimensionByName(aDimName);
++    if (!pDim)
++        return;
++
++    hash_map<OUString, bool, OUStringHash> aResult;
++    mpDPFieldPopup->getResult(aResult);
++    pDim->UpdateMemberVisibility(aResult);
++
++    ScDBDocFunc aFunc(*pViewData->GetDocShell());
++    aFunc.DataPilotUpdate(pDPObj, &aNewDPObj, true, false);
 +}
 +
  void ScGridWindow::DPMouseMove( const MouseEvent& rMEvt )
