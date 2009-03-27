@@ -37,6 +37,7 @@ script_files = \
 	re-root \
 	stat-localizations \
 	strace-rewrite \
+	unopkg-regenerate-cache \
 	unpack \
 	setup.in \
 	transform \
