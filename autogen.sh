@@ -37,7 +37,7 @@ else
 fi
 
 # prepare git hooks
-for file in `cd git-hooks ; echo *`
+[ -d .git ] && for file in `cd git-hooks ; echo *`
 do
     hook=".git/hooks/$file"
     if [ ! -x "$hook" -a ! -L "$hook" ] ; then
