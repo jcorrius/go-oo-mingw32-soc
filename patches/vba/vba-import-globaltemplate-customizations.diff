@@ -1,0 +1,179 @@
+diff --git officecfg/registry/schema/org/openoffice/Office/Writer.xcs officecfg/registry/schema/org/openoffice/Office/Writer.xcs
+index b578c56..666a69f 100644
+--- officecfg/registry/schema/org/openoffice/Office/Writer.xcs
++++ officecfg/registry/schema/org/openoffice/Office/Writer.xcs
+@@ -749,6 +749,17 @@
+ 		</group>
+ 	</templates>
+ 	<component>
++        <group oor:name="GlobalTemplateList">
++            <info>
++               <desc>Contains the most recently opened documents.</desc>
++            </info>
++            <prop oor:name="Paths" oor:type="oor:string-list">
++                <info>
++                    <desc>Lists the file global templates loaded when importing writer documents.</desc>
++                </info>
++                <value oor:separator=";"></value> 
++            </prop>
++        </group>
+         <group oor:name="MailMergeWizard">
+             <info>
+                 <desc>Settings of the mail merge wizard.</desc>
+diff --git sw/source/filter/ww8/ww8par.cxx sw/source/filter/ww8/ww8par.cxx
+index 80d5549..a488847 100644
+--- sw/source/filter/ww8/ww8par.cxx
++++ sw/source/filter/ww8/ww8par.cxx
+@@ -141,6 +141,7 @@
+ #include <dbgoutsw.hxx>
+ #endif
+ #include <unotools/localfilehelper.hxx>
++#include <comphelper/configurationhelper.hxx>
+ 
+ #define MM_250 1417             // WW-Default fuer Hor. Seitenraender: 2.5 cm
+ #define MM_200 1134             // WW-Default fuer u.Seitenrand: 2.0 cm
+@@ -241,7 +242,7 @@ public:
+     ~Sttb();
+     bool Read(SvStream *pS);
+     void Print( FILE* fp );
+-    rtl::OUString getStringAtIndex( sal_Int32 );
++    rtl::OUString getStringAtIndex( sal_uInt32 );
+ };
+ 
+ Sttb::Sttb() : fExtend( 0 )
+@@ -287,7 +288,7 @@ void Sttb::Print( FILE* fp )
+ }
+ 
+ rtl::OUString 
+-Sttb::getStringAtIndex( sal_Int32 index )
++Sttb::getStringAtIndex( sal_uInt32 index )
+ {
+     rtl::OUString aRet;
+     if ( index < dataItems.size() )
+@@ -3840,6 +3841,76 @@ void SwWW8ImplReader::ReadDocInfo()
+     }
+ }
+ 
++class WW8Customizations
++{
++    SvStream* mpTableStream;
++    WW8Fib mWw8Fib;
++public:
++    WW8Customizations( SvStream*, WW8Fib& );
++    bool  Import( SwDocShell* pShell );
++};
++
++WW8Customizations::WW8Customizations( SvStream* pTableStream, WW8Fib& rFib ) : mpTableStream(pTableStream), mWw8Fib( rFib )
++{
++}
++
++bool WW8Customizations::Import( SwDocShell* pShell ) 
++{
++    Tcg aTCG;
++    long nCur = mpTableStream->Tell();
++    mpTableStream->Seek( mWw8Fib.fcCmds ); // point at tgc record
++    if (!aTCG.Read( mpTableStream ) )
++        OSL_TRACE("** Read of Customization data failed!!!! ");
++    mpTableStream->Seek( nCur ); // return to previous position, is that necessary?
++#if 1
++    aTCG.Print( stderr );
++#endif
++    return aTCG.ImportCustomToolBar( *pShell );
++}
++
++bool SwWW8ImplReader::ReadGlobalTemplateSettings()
++{
++    uno::Sequence< rtl::OUString > sGlobalTemplates;
++    rtl::OUString sNode = rtl::OUString::createFromAscii( "org.openoffice.Office.Writer/GlobalTemplateList" );
++
++    css::uno::Reference< css::container::XNameAccess > xCfg( ::comphelper::ConfigurationHelper::openConfig( ::comphelper::getProcessServiceFactory(), sNode, ::comphelper::ConfigurationHelper::E_STANDARD), uno::UNO_QUERY_THROW);
++
++    try
++    {
++        xCfg->getByName( rtl::OUString::createFromAscii("Paths") ) >>= sGlobalTemplates;
++    }
++    catch( uno::Exception& )
++    {
++    }
++    sal_Int32 nEntries = sGlobalTemplates.getLength();
++    bool bRes = true;
++    for ( sal_Int32 i=0; i<nEntries; ++i )
++    {
++        SotStorageRef rRoot = new SotStorage( sGlobalTemplates[ i ], STREAM_STD_READWRITE, STORAGE_TRANSACTED ); 
++        // Read Macro Projects
++        const SvtFilterOptions* pVBAFlags = SvtFilterOptions::Get();
++        SvxImportMSVBasic aVBasic(*mpDocShell, *rRoot,
++            pVBAFlags->IsLoadWordBasicCode(),
++            pVBAFlags->IsLoadWordBasicStorage() );
++        String s1(CREATE_CONST_ASC("Macros"));
++        String s2(CREATE_CONST_ASC("VBA"));
++        int nRet = aVBasic.Import( s1, s2, ! pVBAFlags->IsLoadWordBasicCode() );
++        // Read toolbars & menus
++        SvStorageStreamRef refMainStream = rRoot->OpenSotStream( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("WordDocument") ) );
++        refMainStream->SetNumberFormatInt(NUMBERFORMAT_INT_LITTLEENDIAN);
++        WW8Fib aWwFib( *refMainStream, 8 );       
++        SvStorageStreamRef xTableStream = rRoot->OpenSotStream(String::CreateFromAscii( aWwFib.fWhichTblStm ? SL::a1Table : SL::a0Table), STREAM_STD_READ);
++
++        if (xTableStream.Is() && SVSTREAM_OK == xTableStream->GetError())
++        {
++            xTableStream->SetNumberFormatInt(NUMBERFORMAT_INT_LITTLEENDIAN);
++            WW8Customizations aGblCustomisations( xTableStream, aWwFib ); 
++            aGblCustomisations.Import( mpDocShell );
++        }
++    }
++    return bRes;
++}
++
+ ULONG SwWW8ImplReader::CoreLoad(WW8Glossary *pGloss, const SwPosition &rPos)
+ {
+     ULONG nErrRet = 0;
+@@ -4097,10 +4168,11 @@ ULONG SwWW8ImplReader::CoreLoad(WW8Glossary *pGloss, const SwPosition &rPos)
+     {
+         if (mbNewDoc && pStg && !pGloss) /*meaningless for a glossary, cmc*/
+         {
+-            
+             mpDocShell->SetIsTemplate( pWwFib->fDot ); // point at tgc record
+             const SvtFilterOptions* pVBAFlags = SvtFilterOptions::Get();
+             maTracer.EnterEnvironment(sw::log::eMacros);
++            // Read Global templates 
++            ReadGlobalTemplateSettings();
+             // Create and insert Excel vba Globals
+             uno::Any aGlobs;
+             aGlobs <<= ::comphelper::getProcessServiceFactory()->createInstance( ::rtl::OUString::createFromAscii( "ooo.vba.word.Globals") );
+@@ -4112,21 +4184,8 @@ ULONG SwWW8ImplReader::CoreLoad(WW8Glossary *pGloss, const SwPosition &rPos)
+             String s1(CREATE_CONST_ASC("Macros"));
+             String s2(CREATE_CONST_ASC("VBA"));
+             int nRet = aVBasic.Import( s1, s2, ! pVBAFlags->IsLoadWordBasicCode() );
+-            // Read custom toolbars 
+-            if ( pWwFib->lcbCmds )
+-            {
+-                // there is a tgc255 structure
+-                long nCur = pTableStream->Tell();
+-                Tcg aTCG;
+-                pTableStream->Seek( pWwFib->fcCmds ); // point at tgc record
+-                if (!aTCG.Read( pTableStream ) )
+-                    OSL_TRACE("** Read of Customization data failed!!!! ");
+-                pTableStream->Seek( nCur ); // return to previous position, is that necessary?
+-#if 1
+-                aTCG.Print( stderr );
+-#endif
+-                aTCG.ImportCustomToolBar( *mpDocShell );
+-            }
++            WW8Customizations aCustomisations( pTableStream, *pWwFib ); 
++            aCustomisations.Import( mpDocShell );
+             if( 2 & nRet )
+             {
+                 maTracer.Log(sw::log::eContainsVisualBasic);
+diff --git sw/source/filter/ww8/ww8par.hxx sw/source/filter/ww8/ww8par.hxx
+index 69f8e36..840dfdf 100644
+--- sw/source/filter/ww8/ww8par.hxx
++++ sw/source/filter/ww8/ww8par.hxx
+@@ -1424,7 +1424,7 @@ private:
+     // determine object attribute "Layout in Table Cell"
+     bool IsObjectLayoutInTableCell( const UINT32 nLayoutInTableCell ) const;
+     // <--
+-
++    bool ReadGlobalTemplateSettings();
+     //No copying
+     SwWW8ImplReader(const SwWW8ImplReader &);
+     SwWW8ImplReader& operator=(const SwWW8ImplReader&);
