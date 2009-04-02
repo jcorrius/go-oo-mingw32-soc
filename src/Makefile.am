@@ -1,9 +1,8 @@
 SUBDIRS=helpcontent2 icons layout sdf
 
 EXTRA_DIST=\
+	${wildcard *.dic} \
 	Draft.jpg \
-	Novell.dic \
-	Ubuntu.dic \
 	banner_nld.bmp \
 	cli_uno_bridge.dll.config.in \
 	mono-ooo.pc.in \
