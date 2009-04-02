@@ -1,0 +1,348 @@
+diff --git oox/inc/oox/xls/commentsfragment.hxx oox/inc/oox/xls/commentsfragment.hxx
+new file mode 100644
+index 0000000..055eae0
+--- /dev/null
++++ oox/inc/oox/xls/commentsfragment.hxx
+@@ -0,0 +1,68 @@
++/*************************************************************************
++ *
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * Copyright 2008 by Sun Microsystems, Inc.
++ *
++ * OpenOffice.org - a multi-platform office productivity suite
++ *
++ * This file is part of OpenOffice.org.
++ *
++ * OpenOffice.org is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License version 3
++ * only, as published by the Free Software Foundation.
++ *
++ * OpenOffice.org is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License version 3 for more details
++ * (a copy is included in the LICENSE file that accompanied this code).
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * version 3 along with OpenOffice.org.  If not, see
++ * <http://www.openoffice.org/license.html>
++ * for a copy of the LGPLv3 License.
++ *
++ ************************************************************************/
++
++#ifndef OOX_XLS_COMMENTSFRAGMENT_HXX
++#define OOX_XLS_COMMENTSFRAGMENT_HXX
++
++#include "oox/xls/excelhandlers.hxx"
++#include "oox/xls/richstring.hxx"
++
++namespace oox {
++namespace xls {
++
++class OoxCommentsFragment : public OoxWorksheetFragmentBase
++{
++public:
++    explicit OoxCommentsFragment( const WorksheetHelper& rHelper, const ::rtl::OUString& rFragmentPath );
++
++protected:
++    RichStringRef createRichString();
++    void setComment( rtl::OUString const& address, RichStringRef string );
++    void finalizeImport();
++
++    // oox.core.ContextHandler2Helper
++    virtual ContextWrapper onCreateContext( sal_Int32 nElement, const AttributeList& rAttribs );
++    virtual void onStartElement( const AttributeList& rAttribs );
++    virtual ContextWrapper onCreateRecordContext( sal_Int32 nRecId, RecordInputStream& rStrm );
++    virtual void onStartRecord( RecordInputStream& rStrm );
++
++    // oox.core.FragmentHandler2
++    virtual const ::oox::core::RecordInfo* getRecordInfos() const;
++
++private:
++    rtl::OUString maRef;
++    typedef RefMap< ::rtl::OUString, RichString > StringMap;
++    StringMap maComments;
++    //typedef RefVector< RichString > StringVec;
++    //StringVec maStrings;
++};
++
++} // namespace xls
++} // namespace oox
++
++#endif
++
+diff --git oox/inc/oox/xls/richstring.hxx oox/inc/oox/xls/richstring.hxx
+index f1dc8cf..925498c 100644
+--- oox/inc/oox/xls/richstring.hxx
++++ oox/inc/oox/xls/richstring.hxx
+@@ -75,6 +75,7 @@ public:
+     void                convert(
+                             const ::com::sun::star::uno::Reference< ::com::sun::star::text::XText >& rxText,
+                             sal_Int32 nXfId );
++    ::rtl::OUString getString() const;
+ 
+ private:
+     ::rtl::OUString     maText;         /// Portion text.
+@@ -257,6 +258,7 @@ public:
+     void                convert(
+                             const ::com::sun::star::uno::Reference< ::com::sun::star::text::XText >& rxText,
+                             sal_Int32 nXfId ) const;
++    ::rtl::OUString getString() const;
+ 
+ private:
+     /** Creates, appends, and returns a new empty string portion. */
+diff --git oox/source/xls/commentsfragment.cxx oox/source/xls/commentsfragment.cxx
+new file mode 100644
+index 0000000..3128890
+--- /dev/null
++++ oox/source/xls/commentsfragment.cxx
+@@ -0,0 +1,169 @@
++/*************************************************************************
++ *
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * Copyright 2008 by Sun Microsystems, Inc.
++ *
++ * OpenOffice.org - a multi-platform office productivity suite
++ *
++ * This file is part of OpenOffice.org.
++ *
++ * OpenOffice.org is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License version 3
++ * only, as published by the Free Software Foundation.
++ *
++ * OpenOffice.org is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License version 3 for more details
++ * (a copy is included in the LICENSE file that accompanied this code).
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * version 3 along with OpenOffice.org.  If not, see
++ * <http://www.openoffice.org/license.html>
++ * for a copy of the LGPLv3 License.
++ *
++ ************************************************************************/
++
++#include "oox/xls/commentsfragment.hxx"
++
++#include <com/sun/star/sheet/XSheetAnnotations.hpp>
++#include <com/sun/star/sheet/XSheetAnnotationsSupplier.hpp>
++#include <com/sun/star/text/XText.hpp>
++
++#include "oox/xls/pagesettings.hxx"
++#include "oox/xls/richstringcontext.hxx"
++
++using namespace ::com::sun::star;
++using ::rtl::OUString;
++using ::oox::core::RecordInfo;
++
++#ifndef __PRETTY_FUNCTION__
++#define __PRETTY_FUNCTION__ __FUNCTION__
++#endif
++#define OUSTRING_CSTR( str ) \
++    rtl::OUStringToOString( str, RTL_TEXTENCODING_ASCII_US ).getStr()
++
++// FIXME: determine values (how?) and move do biffhelper.hxx
++const sal_Int32 OOBIN_ID_COMMENTS = 0x0001;
++const sal_Int32 OOBIN_ID_COMMENTLIST = 0x0002;
++const sal_Int32 OOBIN_ID_COMMENT = 0x0003;
++const sal_Int32 OOBIN_ID_TEXT = 0x0004;
++
++namespace oox {
++namespace xls {
++
++OoxCommentsFragment::OoxCommentsFragment( const WorksheetHelper& rHelper, const OUString& rFragmentPath ) :
++    OoxWorksheetFragmentBase( rHelper, rFragmentPath )
++{
++}
++
++RichStringRef OoxCommentsFragment::createRichString()
++{
++    RichStringRef xString( new RichString( *this ) );
++    maComments[maRef] = xString;
++    return xString;
++}
++
++void OoxCommentsFragment::setComment( OUString const& address, RichStringRef string )
++{
++    OoxCellData cell;
++    cell.mxCell = getCell( address, &cell.maAddress );
++    uno::Reference<sheet::XSpreadsheet> xSheet = getSheet( cell.maAddress.Sheet );
++    uno::Reference<sheet::XSheetAnnotationsSupplier> xSupplier( xSheet, uno::UNO_QUERY );
++    uno::Reference< sheet::XSheetAnnotations > xAnnotations( xSupplier->getAnnotations(), uno::UNO_QUERY );
++    xAnnotations->insertNew( cell.maAddress, string->getString());
++}
++
++void OoxCommentsFragment::finalizeImport()
++{
++    for ( StringMap::const_iterator it = maComments.begin();
++          it != maComments.end(); ++it )
++        setComment( it->first, it->second );
++}
++
++ContextWrapper OoxCommentsFragment::onCreateContext( sal_Int32 nElement, const AttributeList& )
++{
++    switch ( getCurrentElement() )
++    {
++        case XML_ROOT_CONTEXT:
++            return nElement == XLS_TOKEN( comments );
++        case XLS_TOKEN( comments ):
++            return nElement == XLS_TOKEN( commentList );
++        case XLS_TOKEN( commentList ):
++            return nElement == XLS_TOKEN( comment );
++        case XLS_TOKEN( comment ):
++            switch (nElement)
++            {
++                case XLS_TOKEN( text ):
++                        return new OoxRichStringContext( *this, createRichString() );
++            }
++    }
++    return false;
++}
++
++void OoxCommentsFragment::onStartElement( const AttributeList& rAttribs )
++{
++    switch ( getCurrentElement() )
++    {
++        case XLS_TOKEN( comments ):
++            break;
++        case XLS_TOKEN( comment ):
++            {
++                OUString ref = rAttribs.getString( XML_ref, OUString() );
++                if (ref.getLength ())
++                    maRef = ref;
++            }
++    }
++}
++
++ContextWrapper OoxCommentsFragment::onCreateRecordContext( sal_Int32 nRecId, RecordInputStream& )
++{
++    switch ( getCurrentElement() )
++    {
++        case XML_ROOT_CONTEXT:
++            return nRecId == OOBIN_ID_COMMENTS;
++        case OOBIN_ID_COMMENTS:
++            return nRecId == OOBIN_ID_COMMENTLIST;
++        case OOBIN_ID_COMMENTLIST:
++        {
++            if (nRecId == OOBIN_ID_COMMENT)
++                // TODO: parse REF
++                OSL_TRACE( "%s: REF:%s", __PRETTY_FUNCTION__, OUSTRING_CSTR( maRef ));
++            return nRecId == OOBIN_ID_COMMENT;
++        }
++        case OOBIN_ID_COMMENT:
++            switch (nRecId)
++            {
++                case OOBIN_ID_TEXT:
++                    return new OoxRichStringContext( *this, createRichString() );
++            }
++    }
++    return false;
++}
++
++void OoxCommentsFragment::onStartRecord( RecordInputStream& )
++{
++    switch( getCurrentElement() )
++    {
++        case OOBIN_ID_COMMENTS:
++            // TODO
++            ;
++    }
++}
++
++const RecordInfo* OoxCommentsFragment::getRecordInfos() const
++{
++    static const RecordInfo spRecInfos[] =
++    {
++        { OOBIN_ID_COMMENTS, OOBIN_ID_COMMENTS + 1 },
++        { OOBIN_ID_COMMENTLIST, OOBIN_ID_COMMENTLIST + 1 },
++        { OOBIN_ID_COMMENT, OOBIN_ID_COMMENT + 1 },
++        { OOBIN_ID_TEXT, OOBIN_ID_TEXT + 1 },
++        { -1, -1 }
++    };
++    return spRecInfos;
++}
++
++} // namespace xls
++} // namespace oox
+diff --git oox/source/xls/makefile.mk oox/source/xls/makefile.mk
+index 99ee1f9..c4e2a37 100644
+--- oox/source/xls/makefile.mk
++++ oox/source/xls/makefile.mk
+@@ -53,6 +53,7 @@ SLOFILES =										\
+ 		$(SLO)$/biffinputstream.obj				\
+ 		$(SLO)$/biffoutputstream.obj			\
+ 		$(SLO)$/chartsheetfragment.obj			\
++                $(SLO)$/commentsfragment.obj \
+ 		$(SLO)$/condformatbuffer.obj			\
+ 		$(SLO)$/condformatcontext.obj			\
+ 		$(SLO)$/connectionsfragment.obj			\
+diff --git oox/source/xls/richstring.cxx oox/source/xls/richstring.cxx
+index f914b1c..240dabf 100644
+--- oox/source/xls/richstring.cxx
++++ oox/source/xls/richstring.cxx
+@@ -104,6 +104,11 @@ void RichStringPortion::convert( const Reference< XText >& rxText, sal_Int32 nXf
+     }
+ }
+ 
++OUString RichStringPortion::getString() const
++{
++    return maText;
++}
++
+ // ----------------------------------------------------------------------------
+ 
+ void BinFontPortionData::read( RecordInputStream& rStrm )
+@@ -499,6 +504,15 @@ void RichString::convert( const Reference< XText >& rxText, sal_Int32 nXfId ) co
+     }
+ }
+ 
++OUString RichString::getString() const
++{
++    OUString string;
++    for ( PortionVec::const_iterator it = maFontPortions.begin();
++          it != maFontPortions.end(); ++it )
++        string += (*it)->getString();
++    return string;
++}
++    
+ // private --------------------------------------------------------------------
+ 
+ RichStringPortionRef RichString::createPortion()
+diff --git oox/source/xls/worksheetfragment.cxx oox/source/xls/worksheetfragment.cxx
+index 302230f..70ebe03 100644
+--- oox/source/xls/worksheetfragment.cxx
++++ oox/source/xls/worksheetfragment.cxx
+@@ -35,6 +35,7 @@
+ #include "oox/xls/addressconverter.hxx"
+ #include "oox/xls/autofiltercontext.hxx"
+ #include "oox/xls/biffinputstream.hxx"
++#include "oox/xls/commentsfragment.hxx"
+ #include "oox/xls/condformatcontext.hxx"
+ #include "oox/xls/externallinkbuffer.hxx"
+ #include "oox/xls/pagesettings.hxx"
+@@ -109,6 +110,9 @@ OoxWorksheetFragment::OoxWorksheetFragment( const WorkbookHelper& rHelper,
+     RelationsRef xTableRels = getRelations().getRelationsFromType( CREATE_OFFICEDOC_RELATIONSTYPE( "table" ) );
+     for( Relations::const_iterator aIt = xTableRels->begin(), aEnd = xTableRels->end(); aIt != aEnd; ++aIt )
+         importOoxFragment( new OoxTableFragment( *this, getFragmentPathFromTarget( aIt->second.maTarget ) ) );
++    RelationsRef xCommentRels = getRelations().getRelationsFromType( CREATE_OFFICEDOC_RELATIONSTYPE( "comments" ) );
++    for( Relations::const_iterator aIt = xCommentRels->begin(), aEnd = xCommentRels->end(); aIt != aEnd; ++aIt )
++        importOoxFragment( new OoxCommentsFragment( *this, getFragmentPathFromTarget( aIt->second.maTarget ) ) );
+ }
+ 
+ // oox.core.ContextHandler2Helper interface -----------------------------------
+diff --git sc/source/core/data/postit.cxx sc/source/core/data/postit.cxx
+index 89e363c..02de1bd 100644
+--- sc/source/core/data/postit.cxx
++++ sc/source/core/data/postit.cxx
+@@ -478,7 +478,7 @@ void ScPostIt::CreateCaption( const ScAddress& rPos, const SdrCaptionObj* pCapti
+ 
+     // drawing layer may be missing, if a note is copied into a clipboard document
+     DBG_ASSERT( !mrDoc.IsUndo(), "ScPostIt::CreateCaption - note caption should not be created in undo documents" );
+-    if( mrDoc.IsClipboard() )
++    if ( mrDoc.IsClipboard() || ! mrDoc.GetDrawLayer() )
+         mrDoc.InitDrawLayer();
+ 
+     if( ScDrawLayer* pDrawLayer = mrDoc.GetDrawLayer() )
