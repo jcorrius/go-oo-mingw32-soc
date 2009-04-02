@@ -6,4 +6,5 @@ CLEANFILES=unpack \
 	   prebuild \
 	   build.tools \
 	   build.extra.translations \
+	   build.extra.translations.lang.list \
 	   build
