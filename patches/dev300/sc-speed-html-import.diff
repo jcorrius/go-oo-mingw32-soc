@@ -1,0 +1,241 @@
+diff -u -r source/pristine.filter/html/htmlpars.cxx source/filter/html/htmlpars.cxx
+--- sc/source/filter/html/htmlpars.cxx
++++ sc/source/filter/html/htmlpars.cxx
+@@ -72,6 +72,96 @@
+ 
+ using namespace ::com::sun::star;
+ 
++/*
++ * Table to track which cells are used, and hence locked,
++ * replacing old, horribly slow ScRangeList with N^2 behavior.
++ */
++class ScHTMLLockTable {
++protected:
++  struct ScAddressHashFunc : public std::unary_function< const ScAddress &, size_t >
++  {
++	size_t operator() (const ScAddress &addr) const
++	{
++	  return static_cast< UINT16 >( addr.Row() ) ^ (static_cast< UINT8 >( addr.Col() ) << 16);
++	}
++  };
++  std::hash_map<ScAddress, bool, ScAddressHashFunc> maIndividualCells;
++  ScRangeList maRangeList;
++public:
++  ScHTMLLockTable()
++  { }
++  ~ScHTMLLockTable()
++  { }
++
++  bool IsEmpty( const ScAddress &rAddr ) const
++  {
++	if( maIndividualCells.find( rAddr ) != maIndividualCells.end() )
++	  return false;
++	return maRangeList.Find( rAddr ) == NULL;
++  }
++
++  void AddRange( const ScRange &rRange )
++  {
++	if( rRange.aStart == rRange.aEnd )
++	  {
++		//		fprintf( stderr, "Single cell\n");
++		maIndividualCells.insert( std::pair<ScAddress, bool>( rRange.aStart, true ) );
++	  }
++	else
++	  {
++		/*		fprintf (stderr, "Multi-cell: %d, %d -> %d, %d\n",
++				 (int) rRange.aStart.Col(), (int) rRange.aStart.Row(),
++				 (int) rRange.aEnd.Col(), (int) rRange.aEnd.Row()); */
++		maRangeList.Append( rRange );
++	  }
++  }
++  ScHTMLSize GetSpan( const ScAddress &rAddr ) const
++  {
++	if( maIndividualCells.find( rAddr ) != maIndividualCells.end() )
++	  return ScHTMLSize (1, 1);
++
++	ScRange *pRange = maRangeList.Find( rAddr );
++	if( pRange == NULL )
++	  return ScHTMLSize (1, 1);
++
++	return ScHTMLSize( pRange->aEnd.Col() - pRange->aStart.Col() + 1,
++					   pRange->aEnd.Row() - pRange->aStart.Row() + 1 );
++  }
++  sal_uInt32 Count() const
++  {
++	return maRangeList.Count();
++  }
++  void AppendRange( ScAddress aPos, const ScHTMLSize &rSpanSize,
++					ScRange &rInsertedRange)
++  {
++	while( !IsEmpty( aPos ) )
++	  aPos.IncCol();
++
++	rInsertedRange = ScRange( aPos );
++	rInsertedRange.aEnd.Move( rSpanSize.mnCols - 1, rSpanSize.mnRows - 1, 0 );
++	
++    // Scan horizontally to find ranges that vertically overlap with us
++    // and shrink them to move them up - this applies only to ranges,
++    // individual cells will be to the left and/or above us and can't 
++    // be handled here...
++	if( maRangeList.Intersects( rInsertedRange ) )
++	  {
++		// This is a highly uncommon case:
++		// we care only about ranges above us, thus use a lame algorithm:
++		// check each cell in the first row, and shrink upwards.
++		for( ScAddress aAddr( aPos ); aAddr.Col() < rInsertedRange.aEnd.Col(); aAddr.IncCol() )
++		  {
++			ScRange *pRange;
++			if( ( pRange = maRangeList.Find( aAddr ) ) != NULL )
++			  pRange->aEnd.SetRow( aPos.Row() - 1 );
++		  }
++		
++	  }
++
++	AddRange (rInsertedRange);
++  }
++};
++
+ 
+ SV_IMPL_VARARR_SORT( ScHTMLColOffset, ULONG );
+ 
+@@ -1971,6 +2061,7 @@
+     mpParentTable( &rParentTable ),
+     maTableId( rParentTable.maTableId.mrnUnusedId ),
+     maTableItemSet( rParentTable.GetCurrItemSet() ),
++	mpLockTable( new ScHTMLLockTable() ),
+     mrEditEngine( rParentTable.mrEditEngine ),
+     mrEEParseList( rParentTable.mrEEParseList ),
+     mpCurrEntryList( 0 ),
+@@ -2010,6 +2101,7 @@
+     mpParentTable( 0 ),
+     maTableId( rnUnusedId ),
+     maTableItemSet( rPool ),
++	mpLockTable( new ScHTMLLockTable() ),
+     mrEditEngine( rEditEngine ),
+     mrEEParseList( rEEParseList ),
+     mpCurrEntryList( 0 ),
+@@ -2028,6 +2120,7 @@
+ 
+ ScHTMLTable::~ScHTMLTable()
+ {
++  delete mpLockTable;
+ }
+ 
+ const SfxItemSet& ScHTMLTable::GetCurrItemSet() const
+@@ -2038,10 +2131,7 @@
+ 
+ ScHTMLSize ScHTMLTable::GetSpan( const ScHTMLPos& rCellPos ) const
+ {
+-    ScHTMLSize aSpan( 1, 1 );
+-    if( ScRange* pRange = maLockList.Find( rCellPos.MakeAddr() ) )
+-        aSpan.Set( pRange->aEnd.Col() - pRange->aStart.Col() + 1, pRange->aEnd.Row() - pRange->aStart.Row() + 1 );
+-    return aSpan;
++    return mpLockTable->GetSpan( rCellPos.MakeAddr() );
+ }
+ 
+ ScHTMLTable* ScHTMLTable::FindNestedTable( ScHTMLTableId nTableId ) const
+@@ -2435,24 +2525,12 @@
+ 
+ void ScHTMLTable::InsertNewCell( const ScHTMLSize& rSpanSize )
+ {
+-    ScRange* pRange;
++    ScRange aNewRange;
++    mpLockTable->AppendRange( maCurrCell.MakeAddr(), rSpanSize, aNewRange );
+ 
+-    // find an unused cell
+-    while( (pRange = maLockList.Find( maCurrCell.MakeAddr() )) != 0 )
+-        maCurrCell.mnCol = pRange->aEnd.Col() + 1;
++	maCurrCell.mnCol = aNewRange.aStart.Col() + 1;
+     mpCurrEntryList = &maEntryMap[ maCurrCell ];
+ 
+-    // try to find collisions, shrink existing ranges
+-    SCCOL nColEnd = maCurrCell.mnCol + rSpanSize.mnCols;
+-    for( ScAddress aAddr( maCurrCell.MakeAddr() ); aAddr.Col() < nColEnd; aAddr.IncCol() )
+-        if( (pRange = maLockList.Find( aAddr )) != 0 )
+-            pRange->aEnd.SetRow( maCurrCell.mnRow - 1 );
+-
+-    // insert the new range into the lock list
+-    ScRange aNewRange( maCurrCell.MakeAddr() );
+-    aNewRange.aEnd.Move( rSpanSize.mnCols - 1, rSpanSize.mnRows - 1, 0 );
+-    maLockList.Append( aNewRange );
+-
+     // adjust table size
+     maSize.mnCols = ::std::max< SCCOL >( maSize.mnCols, aNewRange.aEnd.Col() + 1 );
+     maSize.mnRows = ::std::max< SCROW >( maSize.mnRows, aNewRange.aEnd.Row() + 1 );
+@@ -2474,6 +2552,33 @@
+         ImplDataOff();
+     if( mbRowOn )
+     {
++	  /*        if (maCurrCell.mnRow > 0)
++        { // Try and back-merge the lock-list to avoid N^2 lookups
++			SCCOL nColIdx = Min (0, maCurrCell.mnCol - 1);
++		    ScAddress aLastAddr = maCurrCell.MakeAddr();
++		    ScAddress aThisAddr = maCurrCell.MakeAddr();
++			aLastAddr.IncRow( -1 );
++			aLastAddr.SetCol( nColIdx );
++			aThisAddr.SetCol( nColIdx );
++			ScRange *pLastRange = maLockList.Find (aLastAddr);
++			ScRange *pThisRange = maLockList.Find (aThisAddr);
++			if (!pLastRange)
++			  fprintf (stderr, "Last : null\n");
++			else
++			  fprintf (stderr, "Last: %d, %d -> %d, %d\n",
++					   pLastRange->aStart.Col(), pLastRange->aStart.Row(),
++					   pLastRange->aEnd.Col(), pLastRange->aEnd.Row());
++			if (!pThisRange)
++			  fprintf (stderr, "This : null\n");
++			else
++			  fprintf (stderr, "This: %d, %d -> %d, %d\n",
++					   pThisRange->aStart.Col(), pThisRange->aStart.Row(),
++					   pThisRange->aEnd.Col(), pThisRange->aEnd.Row());
++			fprintf (stderr, "Lock list: %d long\n", maLockList.Count());
++			} */
++	    if (mpLockTable->Count() > 0)
++	      fprintf (stderr, "Lock list: %d long\n", (int)mpLockTable->Count());
++
+         mpRowItemSet.reset();
+         ++maCurrCell.mnRow;
+         mbRowOn = mbDataOn = false;
+@@ -2594,15 +2699,15 @@
+     {
+         for( aAddr.SetCol( 0 ); aAddr.Col() < maSize.mnCols; aAddr.IncCol() )
+         {
+-            if( !maLockList.Find( aAddr ) )
++		    if( mpLockTable->IsEmpty( aAddr ) )
+             {
+                 // create a range for the lock list (used to calc. cell span)
+                 ScRange aRange( aAddr );
+                 do
+                     aRange.aEnd.IncCol();
+-                while( (aRange.aEnd.Col() < maSize.mnCols) && !maLockList.Find( aRange.aEnd ) );
++                while( (aRange.aEnd.Col() < maSize.mnCols) && mpLockTable->IsEmpty( aRange.aEnd ) );
+                 aRange.aEnd.IncCol( -1 );
+-                maLockList.Append( aRange );
++				mpLockTable->AddRange( aRange );
+ 
+                 // insert a dummy entry
+                 ScHTMLEntryPtr pEntry = CreateEntry();
+
+
+diff -u -r source/pristine.filter/inc/htmlpars.hxx source/filter/inc/htmlpars.hxx
+--- sc/source/filter/inc/htmlpars.hxx
++++ sc/source/filter/inc/htmlpars.hxx
+@@ -334,6 +334,8 @@
+ 
+ // ----------------------------------------------------------------------------
+ 
++class ScHTMLLockTable;
++
+ class ScHTMLTableMap;
+ 
+ /** Stores data for one table in an HTML document.
+@@ -543,7 +545,7 @@
+     SfxItemSet                  maTableItemSet;     /// Items for the entire table.
+     SfxItemSetPtr               mpRowItemSet;       /// Items for the current table row.
+     SfxItemSetPtr               mpDataItemSet;      /// Items for the current cell.
+-    ScRangeList                 maLockList;         /// Locked cells (needed for merged cells).
++    ScHTMLLockTable            *mpLockTable;        /// Locked cells (needed for merged cells).
+     EditEngine&                 mrEditEngine;       /// Edit engine (from ScEEParser).
+     ScEEParseList&              mrEEParseList;      /// List that owns the parse entries (from ScEEParser).
+     ScHTMLEntryMap              maEntryMap;         /// List of entries for each cell.
+

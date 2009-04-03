@@ -1,7 +1,34 @@
+Bug:
+	+ https://bugzilla.novell.com/show_bug.cgi?id=443663
+
+** Nail the performance:
+	+ all iterating over the maLockList - just broken ...
+	+ just need a hash_map at the front of that for
+	  single regions ... [ doh / trivial ;-]  :-)
+	+ dum de dum ! ...
+	+ re-factor out maLockList ...x
+
+* Most of the performance problem is fixable, and in
+  ScRangeList::Find (40%) which is just being abused AFAICS
+
+* Can we clone an EditEngine's contents, and blank the EditEngine
+  as we parse the HTML - to fix the row limit issue ?
+
+* Is there something that is not an edit-engine we can use instead ?
+	+ svx/inc/svx/editobj.hxx (EditTextObject)
+		+ uses some magic store itself - obviously so ...
+	+ 'CreateTextObject' in EditEng ... [!? ;-]
+
+
+* svtools/inc/svtools/itemset.cxx
+* svtools/source/items1/itemset.cxx
+	The SfxItemSet
+	+ the ItemPool is shared ...
+		+ SfxPoolItems - are ref counted ...
+
+----- trace -----
 
 #0  0xb781ecfd in SvPtrarr::GetPos(void* const&) const () from /home/opt/PPInstall/program/../basis-link/program/libsvlli.so
-
-
 #1  0xb0b6455d in ImpEditEngine::CreateESel(EditSelection const&) () from /home/opt/PPInstall/program/../basis-link/program/libsvxli.so
 
 	svx/source/editengine/impedit.hxx
@@ -85,6 +112,67 @@ inline ESelection ImpEditEngine::CreateESel( const EditSelection& rSel )
 
 #10 0xa8605ce1 in ScHTMLLayoutParser::Read(SvStream&, String const&) () from /home/opt/PPInstall/basis3.1/program/libscfiltli.so
 
+sc/source/filter/html/htmlpars.cxx
+sc/source/filter/inc/htmlpars.hxx (ScHTMLLayoutParser)
+	+ ScHTMLLayoutParser : ScHTMLParser : ScEEParser
+
+
+
+** Positions are created and managed by ScEEParser::NewActEntry [...]
+	+ this stores USHORT Para / Pos stuff init's selection code.
+
+** Why use the edit engine ? presumably we have to un-wind it's attribute
+   stuff later anyway (encoding or something ?) ...
+
+	+ UM !?
+		+ ScEEParseEntry
+			+ ESelection 'aSel'
+			+ but also has 'pValStr', 'pNumStr', 'pName' etc. ...
+			+ so -why- not the data ?
+				+ why point to the EditEngine ?
+				+ why not empty that out as we go ?
+			+ no doubt fun to manage but ...
+
+
+	* htmlimp.cxx: "WriteToDocument" is called ...
+		+ what fun ! :-)
+		+ this copies the data from our intermediate
+		  parsed form to the sheet itself ...
+
+* rtf/eeimpars.cxx EEImport:::WriteToDocument
+	+ does the raw data copying ...
+
+	* Uses 'aSel':
+		+ aSet - GetAtribs on selection ...
+	* checks start/end para - are they the same ?
+	  and is formatting simple (?)
+
+	* the text itself:
+		if ( aValStr.Len() )
+			mpDoc->SetValue( nCol, nRow, nTab, fVal );
+
+		if (simple !) ...
+			if( pE->bEntirePara )
+		            {
+			        aStr = mpEngine->GetText( pE->aSel.nStartPara );
+	                    }
+		            else
+			    {
+				aStr = mpEngine->GetText( pE->aSel );
+	                        aStr.EraseLeadingAndTrailingChars();
+		            }
+			else
+			    EditTextObject - create it ...
+				    + can we include this ?
+
+		* Can we *really* not flatten this to a Cell *
+		  as we create it ?
+			+ RTF is a problem of course ...
+			+ [ different formatting semantics ? ]
+		* But we have no 'document' at Cell creation time [urgh]
+			+ so we need flattened / generic Cell info again.
+
+----
 
 working premis: row 6582  SIKENDER SINGH - a 64k issue ... [!?]
 	+ in the number of entries we can store ? :-)
@@ -97,9 +185,6 @@ working premis: row 6582  SIKENDER SINGH - a 64k issue ... [!?]
 
 parhtml.cxx - seems to work 
 
-sc/source/filter/html/htmlpars.cxx
-sc/source/filter/inc/htmlpars.hxx (ScHTMLLayoutParser)
-	+ ScHTMLLayoutParser : ScHTMLParser : ScEEParser
 
 	+ returns an 'ScHTMLTable' ...
 		+ structures seem fine there ...
@@ -158,3 +243,291 @@ ESel 65533 6, 65533 6
 
 And ~nothing can be done - we hit 65533 paras,
 and that is it ...
+
+
+
+All hits of 'aSel':
+
+
+
+
+diff -u -r pristine.filththtmlpars.cxx filththtmlpars.cxx
+--- pristine.filththtmlpars.cxx	2009-02-20 20:20:04.000000000 +0000
++++ filththtmlpars.cxx	2009-04-02 14:58:01.000000000 +0100
+@@ -210,25 +210,25 @@
+     ScEEParser::NewActEntry( pE );
+     if ( pE )
+     {
+-        if ( !pE->aSel.HasRange() )
++        if ( !pE->aESel.HasRange() )
+         { / komplett leer, nachfolgender Text landet im gleichen Absatz!
+-            pActEntry->aSel.nStartPara = pE->aSel.nEndPara;
+-            pActEntry->aSel.nStartPos = pE->aSel.nEndPos;
++            pActEntry->aESel.nStartPara = pE->aESel.nEndPara;
++            pActEntry->aESel.nStartPos = pE->aESel.nEndPos;
+         }
+     }
+-    pActEntry->aSel.nEndPara = pActEntry->aSel.nStartPara;
+-    pActEntry->aSel.nEndPos = pActEntry->aSel.nStartPos;
++    pActEntry->aESel.nEndPara = pActEntry->aESel.nStartPara;
++    pActEntry->aESel.nEndPos = pActEntry->aESel.nStartPos;
+ }
+ 
+ 
+ void ScHTMLLayoutParser::EntryEnd( ScEEParseEntry* pE, const ESelection& rSel )
+ {
+-    if ( rSel.nEndPara >= pE->aSel.nStartPara )
++    if ( rSel.nEndPara >= pE->aESel.nStartPara )
+     {
+-        pE->aSel.nEndPara = rSel.nEndPara;
+-        pE->aSel.nEndPos = rSel.nEndPos;
++        pE->aESel.nEndPara = rSel.nEndPara;
++        pE->aESel.nEndPos = rSel.nEndPos;
+     }
+-    else if ( rSel.nStartPara == pE->aSel.nStartPara - 1 && !pE->aSel.HasRange() )
++    else if ( rSel.nStartPara == pE->aESel.nStartPara - 1 && !pE->aESel.HasRange() )
+     { / kein Absatz angehaengt aber leer, nichts tun
+     }
+     else
+@@ -729,7 +729,7 @@
+     if ( nColMax < nColCnt )
+         nColMax = nColCnt;    / globales MaxCol fuer ScEEParser GetDimensions!
+     EntryEnd( pActEntry, pInfo->aSelection );
+-    ESelection& rSel = pActEntry->aSel;
++    ESelection& rSel = pActEntry->aESel;
+     while ( rSel.nStartPara < rSel.nEndPara
+             && pEdit->GetTextLen( rSel.nStartPara ) == 0 )
+     { / vorgehaengte Leerabsaetze strippen
+@@ -1106,7 +1106,7 @@
+     else
+     { / einfache Table auf Dokumentebene
+         EntryEnd( pActEntry, pInfo->aSelection );
+-        if ( pActEntry->aSel.HasRange() )
++        if ( pActEntry->aESel.HasRange() )
+         { / noch fliegender Text
+             CloseEntry( pInfo );
+             NextRow( pInfo );
+@@ -1476,7 +1476,7 @@
+ 
+ BOOL ScHTMLLayoutParser::IsAtBeginningOfText( ImportInfo* pInfo )
+ {
+-    ESelection& rSel = pActEntry->aSel;
++    ESelection& rSel = pActEntry->aESel;
+     return rSel.nStartPara == rSel.nEndPara &&
+         rSel.nStartPara <= pInfo->aSelection.nEndPara &&
+         pEdit->GetTextLen( rSel.nStartPara ) == 0;
+@@ -1790,45 +1790,45 @@
+ 
+ bool ScHTMLEntry::HasContents() const
+ {
+-     return mbImportAlways || aSel.HasRange() || aAltText.Len() || IsTable();
++     return mbImportAlways || aESel.HasRange() || aAltText.Len() || IsTable();
+ }
+ 
+ void ScHTMLEntry::AdjustStart( const ImportInfo& rInfo )
+ {
+   / set start position
+-    aSel.nStartPara = rInfo.aSelection.nStartPara;
+-    aSel.nStartPos = rInfo.aSelection.nStartPos;
++    aESel.nStartPara = rInfo.aSelection.nStartPara;
++    aESel.nStartPos = rInfo.aSelection.nStartPos;
+   / adjust end position
+-    if( (aSel.nEndPara < aSel.nStartPara) || ((aSel.nEndPara == aSel.nStartPara) && (aSel.nEndPos < aSel.nStartPos)) )
++    if( (aESel.nEndPara < aESel.nStartPara) || ((aESel.nEndPara == aESel.nStartPara) && (aESel.nEndPos < aESel.nStartPos)) )
+     {
+-        aSel.nEndPara = aSel.nStartPara;
+-        aSel.nEndPos = aSel.nStartPos;
++        aESel.nEndPara = aESel.nStartPara;
++        aESel.nEndPos = aESel.nStartPos;
+     }
+ }
+ 
+ void ScHTMLEntry::AdjustEnd( const ImportInfo& rInfo )
+ {
+-    DBG_ASSERT( (aSel.nEndPara < rInfo.aSelection.nEndPara) ||
+-                ((aSel.nEndPara == rInfo.aSelection.nEndPara) && (aSel.nEndPos <= rInfo.aSelection.nEndPos)),
++    DBG_ASSERT( (aESel.nEndPara < rInfo.aSelection.nEndPara) ||
++                ((aESel.nEndPara == rInfo.aSelection.nEndPara) && (aESel.nEndPos <= rInfo.aSelection.nEndPos)),
+                 "ScHTMLQueryParser::AdjustEntryEnd - invalid end position" );
+   / set end position
+-    aSel.nEndPara = rInfo.aSelection.nEndPara;
+-    aSel.nEndPos = rInfo.aSelection.nEndPos;
++    aESel.nEndPara = rInfo.aSelection.nEndPara;
++    aESel.nEndPos = rInfo.aSelection.nEndPos;
+ }
+ 
+ void ScHTMLEntry::Strip( const EditEngine& rEditEngine )
+ {
+   / strip leading empty paragraphs
+-    while( (aSel.nStartPara < aSel.nEndPara) && (rEditEngine.GetTextLen( aSel.nStartPara ) <= aSel.nStartPos) )
++    while( (aESel.nStartPara < aESel.nEndPara) && (rEditEngine.GetTextLen( aESel.nStartPara ) <= aESel.nStartPos) )
+     {
+-        ++aSel.nStartPara;
+-        aSel.nStartPos = 0;
++        ++aESel.nStartPara;
++        aESel.nStartPos = 0;
+     }
+   / strip trailing empty paragraphs
+-    while( (aSel.nStartPara < aSel.nEndPara) && (aSel.nEndPos == 0) )
++    while( (aESel.nStartPara < aESel.nEndPara) && (aESel.nEndPos == 0) )
+     {
+-        --aSel.nEndPara;
+-        aSel.nEndPos = rEditEngine.GetTextLen( aSel.nEndPara );
++        --aESel.nEndPara;
++        aESel.nEndPos = rEditEngine.GetTextLen( aESel.nEndPara );
+     }
+ }
+ 
+@@ -2343,7 +2343,7 @@
+ {
+     DBG_ASSERT( !mpCurrEntry.get(), "ScHTMLTable::CreateNewEntry - old entry still present" );
+     mpCurrEntry = CreateEntry();
+-    mpCurrEntry->aSel = rInfo.aSelection;
++    mpCurrEntry->aESel = rInfo.aSelection;
+ }
+ 
+ void ScHTMLTable::ImplPushEntryToList( ScHTMLEntryList& rEntryList, ScHTMLEntryPtr& rpEntry )
+Only in filthtml: htmlpars.cxx~
+diff -u -r pristine.filtieeparser.hxx filtieeparser.hxx
+--- pristine.filtieeparser.hxx	2009-02-20 20:20:06.000000000 +0000
++++ filtieeparser.hxx	2009-04-02 13:03:10.000000000 +0100
+@@ -64,7 +64,7 @@
+ struct ScEEParseEntry
+ {
+ 	SfxItemSet			aItemSet;
+-	ESelection			aSel;	/ Selection in EditEngine
++	ESelection			aESel;	/ Selection in EditEngine
+ 	String*				pValStr;/ HTML evtl. SDVAL String
+ 	String*				pNumStr;/ HTML evtl. SDNUM String
+ 	String*				pName;	/ HTML evtl. AnchRangeName
+Only in filtinc: eeparser.hxx~
+diff -u -r pristine.filtihtmlpars.hxx filtihtmlpars.hxx
+--- pristine.filtihtmlpars.hxx	2009-02-20 20:20:06.000000000 +0000
++++ filtihtmlpars.hxx	2009-04-02 14:53:36.000000000 +0100
+@@ -292,7 +292,7 @@
+                                     ScHTMLTableId nTableId = SC_HTML_NO_TABLE );
+ 
+   ** Returns true, if the selection of the entry is empty.
+-    inline bool                 IsEmpty() const { return !aSel.HasRange(); }
++    inline bool                 IsEmpty() const { return !aESel.HasRange(); }
+   ** Returns true, if the entry has any content to be imported.
+     bool                        HasContents() const;
+   ** Returns true, if the entry represents a table.
+Only in filtinc: htmlpars.hxx~
+diff -u -r pristine.filtreeimpars.cxx filtreeimpars.cxx
+--- pristine.filtreeimpars.cxx	2009-03-19 15:06:26.000000000 +0000
++++ filtreeimpars.cxx	2009-04-02 14:59:03.000000000 +0100
+@@ -183,7 +183,7 @@
+ 		pE->nRow = nRow;
+ 		if ( ValidCol(nCol) && ValidRow(nRow) )
+ 		{
+-            SfxItemSet aSet = mpEngine->GetAttribs( pE->aSel );
++            SfxItemSet aSet = mpEngine->GetAttribs( pE->aESel );
+ 	/ Default raus, wir setzen selber linrechts je nachdem ob Text
+ 	/ oder Zahl; EditView.GetAttribs liefert immer kompletten Set
+ 	/ mit Defaults aufgefuellt
+@@ -192,7 +192,7 @@
+ 				aSet.ClearItem( EE_PARA_JUST );
+ 
+ 	/ Testen, ob einfacher String ohne gemischte Attribute
+-			BOOL bSimple = ( pE->aSel.nStartPara == pE->aSel.nEndPara );
++			BOOL bSimple = ( pE->aESel.nStartPara == pE->aESel.nEndPara );
+             for (USHORT nId = EE_CHAR_START; nId <= EE_CHAR_END && bSimple; nId++)
+ 			{
+                 const SfxPoolItem* pItem = 0;
+@@ -275,7 +275,7 @@
+                     pPosture = 0;
+                 if ( pFont || pHeight || pWeight || pPosture )
+                 {
+-                    String aStr( mpEngine->GetText( pE->aSel ) );
++                    String aStr( mpEngine->GetText( pE->aESel ) );
+                     BYTE nScriptType = mpDoc->GetStringScriptType( aStr );
+                     const BYTE nScripts[3] = { SCRIPTTYPE_LATIN,
+                         SCRIPTTYPE_ASIAN, SCRIPTTYPE_COMPLEX };
+@@ -333,7 +333,7 @@
+ 			{
+ 				if ( aValStr.Len() )
+                     mpDoc->SetValue( nCol, nRow, nTab, fVal );
+-				else if ( !pE->aSel.HasRange() )
++				else if ( !pE->aESel.HasRange() )
+ 				{
+ 			/ maybe ALT text of IMG or similar
+                     mpDoc->SetString( nCol, nRow, nTab, pE->aAltText, pFormatter );
+@@ -344,11 +344,11 @@
+                     String aStr;
+                     if( pE->bEntirePara )
+                     {
+-                        aStr = mpEngine->GetText( pE->aSel.nStartPara );
++                        aStr = mpEngine->GetText( pE->aESel.nStartPara );
+                     }
+                     else
+                     {
+-                        aStr = mpEngine->GetText( pE->aSel );
++                        aStr = mpEngine->GetText( pE->aESel );
+                         aStr.EraseLeadingAndTrailingChars();
+                     }
+ 
+@@ -386,7 +386,7 @@
+ 			}
+ 			else
+ 			{
+-                EditTextObject* pObject = mpEngine->CreateTextObject( pE->aSel );
++                EditTextObject* pObject = mpEngine->CreateTextObject( pE->aESel );
+                 mpDoc->PutCell( nCol, nRow, nTab, new ScEditCell( pObject,
+                     mpDoc, mpEngine->GetEditTextObjectPool() ) );
+ 				delete pObject;
+@@ -629,8 +629,8 @@
+ void ScEEParser::NewActEntry( ScEEParseEntry* pE )
+ / neuer freifliegender pActEntry
+ 	pActEntry = new ScEEParseEntry( pPool );
+-	pActEntry->aSel.nStartPara = (pE ? pE->aSel.nEndPara + 1 : 0);
+-	pActEntry->aSel.nStartPos = 0;
++	pActEntry->aESel.nStartPara = (pE ? pE->aESel.nEndPara + 1 : 0);
++	pActEntry->aESel.nStartPos = 0;
+ }
+ 
+ 
+Only in filtrtf: eeimpars.cxx~
+diff -u -r pristine.filtrrtfparse.cxx filtrrtfparse.cxx
+--- pristine.filtrrtfparse.cxx	2009-02-20 20:20:06.000000000 +0000
++++ filtrrtfparse.cxx	2009-04-02 15:08:24.000000000 +0100
+@@ -97,12 +97,12 @@
+ 		ScEEParseEntry* pE = pList->Last();
+ 		if ( pE
+ 		/ komplett leer
+-			&& (( pE->aSel.nStartPara == pE->aSel.nEndPara
+-					&& pE->aSel.nStartPos == pE->aSel.nEndPos)
++			&& (( pE->aESel.nStartPara == pE->aESel.nEndPara
++					&& pE->aESel.nStartPos == pE->aESel.nEndPos)
+ 		/ leerer Paragraph
+-				|| ( pE->aSel.nStartPara + 1 == pE->aSel.nEndPara
+-					&& pE->aSel.nStartPos == pEdit->GetTextLen( pE->aSel.nStartPara )
+-					&& pE->aSel.nEndPos == 0 )) )
++				|| ( pE->aESel.nStartPara + 1 == pE->aESel.nEndPara
++					&& pE->aESel.nStartPos == pEdit->GetTextLen( pE->aESel.nStartPara )
++					&& pE->aESel.nEndPos == 0 )) )
+ 		/ den letzten leeren Absatz nicht uebernehmen
+ 			pList->Remove();
+ 			delete pE;
+@@ -117,9 +117,9 @@
+ void ScRTFParser::EntryEnd( ScEEParseEntry* pE, const ESelection& aSel )
+ {
+/ Paragraph -2 stript den angehaengten leeren Paragraph
+-	pE->aSel.nEndPara = aSel.nEndPara - 2;
++	pE->aESel.nEndPara = aSel.nEndPara - 2;
+/ obwohl das nEndPos heisst, ist das letzte Position + 1
+-	pE->aSel.nEndPos = pEdit->GetTextLen( aSel.nEndPara - 1 );
++	pE->aESel.nEndPos = pEdit->GetTextLen( aSel.nEndPara - 1 );
+ }
+ 
+ 
+@@ -374,7 +374,7 @@
+ 					pE->nTwips = pActDefault->nTwips;
+ 		/ Selection des freifliegenden pActEntry anpassen
+ 		/ Paragraph -1 wg. Textaufbruch in EditEngine waehrend Parse
+-				pActEntry->aSel.nStartPara = pInfo->aSelection.nEndPara - 1;
++				pActEntry->aESel.nStartPara = pInfo->aSelection.nEndPara - 1;
+ 			}
+ 			pActDefault = pDefaultList->Next();
+ 			nLastToken = pInfo->nToken;
+Only in filtrtf: rtfparse.cxx~
