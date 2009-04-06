@@ -62,17 +62,28 @@ sub patch_has_no_effect ($$)
 
 sub do_patch {
     my $patch = shift;
-    my $base_cmd = shift;
+    my $patch_cmd = shift;
+    my $patch_args = shift;
     my $patch_file = basename($patch);
+    my $cmd_base = "";
     my $cmd_output = "";
 
 # short circuit in sloppy patching mode, when there is no file to patch
 # speeds up, and calms down the split build pleasingly
-    if ($base_cmd =~ m/sloppypatch.pl/) {
+    if ($patch_cmd =~ m/sloppypatch.pl/) {
 	if (patch_has_no_effect ($patch, $dest_dir)) {
 	    print "$patch_file: sloppily skipping...\n"; 
 	    return 0;
 	}
+    }
+
+    # 
+    if ($patch_cmd =~ m/defuzzpatch/) {
+	$cmd_base = "$patch_cmd $dest_dir $patch $patch_args";
+    } else {
+	my $cmd_input = "< $patch";
+	$cmd_input = 'unix2dos ' . $cmd_input . ' |' if $^O =~ /cygwin/i;
+	$cmd_base = "$cmd_input $patch_cmd $patch_args";
     }
 
     print "$patch_file: testing..."; 
@@ -80,15 +91,12 @@ sub do_patch {
     if ($quiet) 
         { $cmd_output = " > /dev/null " }
 
-    my $cmd_input = "< $patch";
-    $cmd_input = 'unix2dos ' . $cmd_input . ' |' if $^O =~ /cygwin/i;
-
-    my $cmd = $cmd_input." $base_cmd --dry-run ".$cmd_output;
+    my $cmd = "$cmd_base --dry-run $cmd_output";
 
     print "$cmd\n" unless $quiet;
     system ($cmd) && die "Testing patch $patch_file failed.";
 
-    $cmd = $cmd_input." $base_cmd > /dev/null";
+    $cmd = "$cmd_base > /dev/null";
     if($quiet)
         { print "applying..." }
     else
@@ -772,7 +780,7 @@ sub apply_patches {
     foreach $patch ( sort { $b cmp $a } @to_unapply ) {
         print "\n" unless $quiet;
         print "Unapplying patch $patch\n";
-        do_patch $patch, $base_cmd." -R";
+        do_patch $patch, $patch_cmd, $patch_args." -R";
         unlink $patch || die "Can't remove $patch $!";
     }
 
@@ -792,7 +800,7 @@ sub apply_patches {
     foreach $patch (@to_apply) {
         my $patch_file = basename($patch);
         print "\n" unless $quiet;
-        if (do_patch ($patch, $base_cmd)) {
+        if (do_patch ($patch, $patch_cmd, $patch_args)) {
 	    my $patch_copy = sprintf("%s/%03d-%s", $applied_patches, $patch_num++, $patch_file);
 
 	    print "copy $patch_file -> $patch_copy\n" unless $quiet;
@@ -813,7 +821,7 @@ sub remove_patches {
 
     foreach $patch_file (reverse (applied_patches_list())) {
         print "\nRemoving ".basename($patch_file)."...\n" unless $quiet;
-        do_patch $patch_file, $base_cmd;
+        do_patch $patch_file, $patch_cmd, $patch_args;
         unlink $patch_file;
     }
     rmdir $applied_patches
@@ -1068,7 +1076,7 @@ sub print_statistic_no_issue ($)
 
 (@ARGV > 1) ||
     die "Syntax:\n".
-    "apply <path-to-patchdir> <src root> --tag=<src680-m90> [--distro=<Debian> [--distro=<Binfilter> [...]]] [--hotfixes=<dir>] [--quiet] [--dry-run] [ patch flags ]\n" .
+    "apply <path-to-patchdir> <src root> --tag=<src680-m90> [--distro=<Debian> [--distro=<Binfilter> [...]]] [--hotfixes=<dir>] [--quiet] [--dry-run] [--defuzz] [ patch flags ]\n" .
     "apply <path-to-patchdir> --series-from=<Debian>\n" .
     "apply <path-to-patchdir> --add-developer\n" .
     "apply <path-to-patchdir> --find-unused\n" .
@@ -1089,6 +1097,7 @@ $additional_sections_applied = 0;
 $extra_hotfixes_dir = "";
 $tag = '';
 $dry_run = 0;
+$defuzz = 0;
 $find_unused = 0;
 $add_developer = 0;
 $statistic = 0;
@@ -1144,7 +1153,11 @@ foreach $a (@ARGV) {
 	    $tag = $1;
 	} elsif ($a =~ m/--dry-run/g) {
 	    $dry_run = 1;
+	} elsif ($a =~ m/--defuzz/g) {
+	    die "Error: --pieces and --defuzz can't be used together" if ($pieces == 1);
+	    $defuzz = 1;
 	} elsif ($a =~ m/--pieces/g) {
+	    die "Error: --pieces and --defuzz can't be used together" if ($defuzz == 1);
 	    $pieces = 1;
 	} else {
 	    push @arguments, $a;
@@ -1193,17 +1206,21 @@ if ($dry_run || $add_developer || $find_unused || $statistic) {
     $applied_patches = $dest_dir.'/applied_patches';
 
     $opts = join ' ', @arguments;
-    my $base_args = " -l -p0 $opts -d $dest_dir";
-    $base_cmd = "@GNUPATCH@";
+    $patch_args = " -l -p0 $opts -d $dest_dir";
+    $patch_cmd = "@GNUPATCH@";
     if ($pieces) {
 	# nasty path mess
-	$base_cmd = "$patch_dir/../../bin/sloppypatch.pl";
-	-f $base_cmd || die "no sloppy patch command $base_cmd";
+	$patch_cmd = "$patch_dir/../../bin/sloppypatch.pl";
+	-f $patch_cmd || die "no sloppy patch command $patch_cmd";
     }
-    $base_cmd = $base_cmd . $base_args;
+    if ($defuzz) {
+	# nasty path mess
+	$patch_cmd = "$patch_dir/../../bin/defuzzpatch";
+	-f $patch_cmd || die "no defuzz patch command $patch_cmd";
+    }
 
     if (is_old_patch_version()) {
-	$base_cmd = 'sed \'s/^\(@.*\)\r$/\1/\' | ' . $base_cmd;
+	$patch_cmd = 'sed \'s/^\(@.*\)\r$/\1/\' | ' . $patch_cmd;
     }
 
     if ($remove) {
