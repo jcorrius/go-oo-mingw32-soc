@@ -8,6 +8,7 @@ script_files = \
 	build-ooo \
 	build-tools \
 	cvs-tags-normalize \
+	defuzzpatch \
 	extract-gsi \
 	extract-new-strings \
 	font-munge \
