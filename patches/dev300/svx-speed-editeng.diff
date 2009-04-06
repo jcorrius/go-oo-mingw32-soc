@@ -1,69 +1,117 @@
-diff -u -r /opt/OpenOffice/svn-HEAD/build/ooo310-m4/svx/source/editeng/editdoc.cxx svx/source/editeng/editdoc.cxx
---- svx/source/editeng/editdoc.cxx
-+++ svx/source/editeng/editdoc.cxx
-@@ -1235,6 +1235,7 @@
- 	nDefTab = DEFTAB;
- 	bIsVertical = FALSE;
- 	bIsFixedCellHeight = FALSE;
-+	nLastPos = 0;
- 
- 	// Don't create a empty node, Clear() will be called in EditEngine-CTOR
- 
-@@ -1966,6 +1967,35 @@
- 	}
+diff -u -r /opt/OpenOffice/svn-HEAD/build/ooo310-m4/svx/source/editeng/editdoc2.cxx svx/source/editeng/editdoc2.cxx
+--- svx/source/editeng/editdoc2.cxx
++++ svx/source/editeng/editdoc2.cxx
+@@ -324,10 +324,42 @@
+ 	DBG_ASSERT( aLineList[ aLineList.Count()-1 ]->GetEnd() == pNode->Len(), "CorrectLines: Ende stimmt nicht!" );
  }
  
-+USHORT EditDoc::GetPos( ContentNode* pNode ) const
-+{
-+  USHORT nCount = ContentList::Count();
++// Shared reverse lookup acceleration pieces ...
 +
++static USHORT FastGetPos( const VoidPtr *pPtrArray, USHORT nPtrArrayLen,
++						  VoidPtr pPtr, USHORT &rLastPos )
++{
 +  // Through certain filter code-paths we do a lot of appends, which in
 +  // turn call GetPos - creating some N^2 nightmares. If we have a
 +  // non-trivially large list, do a few checks from the end first.
-+  if( nLastPos > 16 )
++  if( rLastPos > 16 )
 +    {
 +      USHORT nEnd;
-+      if (nLastPos > nCount - 2)
-+	nEnd = nCount;
++      if (rLastPos > nPtrArrayLen - 2)
++		nEnd = nPtrArrayLen;
 +      else
-+	nEnd = nLastPos + 2;
++		nEnd = rLastPos + 2;
 +
-+      for( USHORT nIdx = nLastPos - 2; nIdx < nEnd; nIdx++ )
-+	{
-+	  if( pData[ nIdx ] == pNode )
-+	    {
-+	      ((EditDoc *)this)->nLastPos = nIdx;
-+	      return nIdx;
-+	    }
-+	}
++      for( USHORT nIdx = rLastPos - 2; nIdx < nEnd; nIdx++ )
++		{
++		  if( pPtrArray[ nIdx ] == pPtr )
++			{
++			  rLastPos = nIdx;
++			  return nIdx;
++			}
++		}
 +    }
-+
-+  ((EditDoc *)this)->nLastPos = ContentList::GetPos(pNode);
-+  return nLastPos;
++  // The world's lamest linear search from svarray ...
++  for( USHORT nIdx = 0; nIdx < nPtrArrayLen; nIdx++ )
++	if (pPtrArray[ nIdx ] == pPtr )
++	  return rLastPos = nIdx;
++  return USHRT_MAX;
 +}
 +
- 
  // -------------------------------------------------------------------------
- // class EditCharAttribList
-
-
+ // class ParaPortionList
+ // -------------------------------------------------------------------------
+-ParaPortionList::ParaPortionList()
++ParaPortionList::ParaPortionList() : nLastCache( 0 )
+ {
+ }
+ 
+@@ -336,6 +368,20 @@
+ 	Reset();
+ }
+ 
++USHORT ParaPortionList::GetPos( const ParaPortionPtr &rPtr ) const
++{
++	return FastGetPos( reinterpret_cast<const VoidPtr *>( GetData() ),
++					   Count(), static_cast<VoidPtr>( rPtr ),
++					   ((ParaPortionList *)this)->nLastCache );
++}
++
++USHORT ContentList::GetPos( const ContentNodePtr &rPtr ) const
++{
++    return FastGetPos( reinterpret_cast<const VoidPtr *>( GetData() ),
++					   Count(), static_cast<VoidPtr>( rPtr ),
++					   ((ContentList *)this)->nLastCache );
++}
++
+ void ParaPortionList::Reset()
+ {
+ 	for ( USHORT nPortion = 0; nPortion < Count(); nPortion++ )
+diff -u -r /opt/OpenOffice/svn-HEAD/build/ooo310-m4/svx/source/editeng/editdoc.cxx svx/source/editeng/editdoc.cxx
+--- /opt/OpenOffice/svn-HEAD/build/ooo310-m4/svx/source/editeng/editdoc.cxx	2009-02-26 08:39:48.000000000 +0000
++++ svx/source/editeng/editdoc.cxx	2009-04-06 14:04:09.000000000 +0100
+@@ -258,7 +258,7 @@
+ 	4035, 4036, 4037, 4038
+ };
+ 
+-SV_IMPL_PTRARR( ContentList, ContentNode* );
++SV_IMPL_PTRARR( DummyContentList, ContentNode* );
+ SV_IMPL_VARARR( ScriptTypePosInfos, ScriptTypePosInfo );
+ SV_IMPL_VARARR( WritingDirectionInfos, WritingDirectionInfo );
+ // SV_IMPL_VARARR( ExtraCharInfos, ExtraCharInfo );
 diff -u -r /opt/OpenOffice/svn-HEAD/build/ooo310-m4/svx/source/editeng/editdoc.hxx svx/source/editeng/editdoc.hxx
---- svx/source/editeng/editdoc.hxx
-+++ svx/source/editeng/editdoc.hxx
-@@ -698,6 +698,7 @@
- 	BOOL			bOwnerOfPool;
- 	BOOL			bModified;
+--- /opt/OpenOffice/svn-HEAD/build/ooo310-m4/svx/source/editeng/editdoc.hxx	2009-02-26 08:39:48.000000000 +0000
++++ svx/source/editeng/editdoc.hxx	2009-04-06 14:03:23.000000000 +0100
+@@ -285,7 +285,15 @@
+ };
  
-+	USHORT			nLastPos;
- protected:
- 	void			ImplDestroyContents();
+ typedef ContentNode* ContentNodePtr;
+-SV_DECL_PTRARR( ContentList, ContentNodePtr, 0, 4 )
++SV_DECL_PTRARR( DummyContentList, ContentNodePtr, 0, 4 )
++
++class ContentList : public DummyContentList
++{
++  USHORT nLastCache;
++public:
++  ContentList() : DummyContentList( 0, 4 ), nLastCache(0) {}
++  USHORT GetPos( const ContentNodePtr &rPtr ) const;
++};
  
-@@ -753,7 +754,7 @@
- 	BOOL			RemoveAttribs( ContentNode* pNode, USHORT nStart, USHORT nEnd, EditCharAttrib*& rpStarting, EditCharAttrib*& rpEnding, USHORT nWhich = 0 );
- 	void			FindAttribs( ContentNode* pNode, USHORT nStartPos, USHORT nEndPos, SfxItemSet& rCurSet );
+ // -------------------------------------------------------------------------
+ // class EditPaM
+@@ -612,6 +620,7 @@
+ // -------------------------------------------------------------------------
+ class ParaPortionList : public DummyParaPortionList
+ {
++	USHORT nLastCache;
+ public:
+ 					ParaPortionList();
+ 					~ParaPortionList();
+@@ -623,6 +632,8 @@
+ 	inline ParaPortion*	SaveGetObject( USHORT nPos ) const
+ 		{ return ( nPos < Count() ) ? GetObject( nPos ) : 0; }
  
--	USHORT			GetPos( ContentNode* pNode ) const { return ContentList::GetPos(pNode); }
-+        USHORT			GetPos( ContentNode* pNode ) const;
- 	ContentNode*	SaveGetObject( USHORT nPos ) const { return ( nPos < Count() ) ? GetObject( nPos ) : 0; }
- 
- 	static XubString	GetSepStr( LineEnd eEnd );
++	USHORT                  GetPos( const ParaPortionPtr &rPtr ) const;
++
+ 	// temporaer:
+ 	void			DbgCheck( EditDoc& rDoc );
+ };
