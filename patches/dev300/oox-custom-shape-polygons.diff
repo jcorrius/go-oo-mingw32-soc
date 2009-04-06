@@ -1,0 +1,374 @@
+diff --git oox/inc/oox/drawingml/customshapegeometry.hxx oox/inc/oox/drawingml/customshapegeometry.hxx
+index af1e6fe..fc86081 100644
+--- oox/inc/oox/drawingml/customshapegeometry.hxx
++++ oox/inc/oox/drawingml/customshapegeometry.hxx
+@@ -44,11 +44,11 @@ namespace oox { namespace drawingml {
+ class CustomShapeGeometryContext : public ::oox::core::ContextHandler
+ {
+ public:
+-    CustomShapeGeometryContext( ::oox::core::ContextHandler& rParent, const ::com::sun::star::uno::Reference< ::com::sun::star::xml::sax::XFastAttributeList >& xAttributes, CustomShapeProperties& rCustomShapeProperties );
++    CustomShapeGeometryContext( ::oox::core::ContextHandler& rParent, const ::com::sun::star::uno::Reference< ::com::sun::star::xml::sax::XFastAttributeList >& xAttributes, Shape& rShape );
+ 	virtual ::com::sun::star::uno::Reference< ::com::sun::star::xml::sax::XFastContextHandler > SAL_CALL createFastChildContext( ::sal_Int32 aElementToken, const ::com::sun::star::uno::Reference< ::com::sun::star::xml::sax::XFastAttributeList >& xAttribs ) throw (::com::sun::star::xml::sax::SAXException, ::com::sun::star::uno::RuntimeException);
+ 
+ private:
+-    CustomShapeProperties& mrCustomShapeProperties;
++    Shape& mrShape;
+ };
+ 
+ // ---------------------------------------------------------------------
+diff --git oox/inc/oox/drawingml/customshapeproperties.hxx oox/inc/oox/drawingml/customshapeproperties.hxx
+index 2fe36f2..53554d7 100644
+--- oox/inc/oox/drawingml/customshapeproperties.hxx
++++ oox/inc/oox/drawingml/customshapeproperties.hxx
+@@ -35,6 +35,7 @@
+ #include "oox/drawingml/color.hxx"
+ #include <com/sun/star/graphic/XGraphic.hpp>
+ #include <boost/shared_ptr.hpp>
++#include <basegfx/polygon/b2dpolypolygon.hxx>
+ #include "tokens.hxx"
+ #include <vector>
+ #include <map>
+@@ -80,11 +81,12 @@ public:
+ 	std::vector< CustomShapeGuide >& getAdjustmentValues(){ return maAdjustmentValues; };
+ 
+ 	double getValue( const std::vector< CustomShapeGuide >&, sal_uInt32 nIndex ) const;
+-
++    ::basegfx::B2DPolyPolygon& getPolygon() { return maPolygon; }
+ private:
+ 
+ 	rtl::OUString					maShapePresetType;
+ 	std::vector< CustomShapeGuide >	maAdjustmentValues;
++    ::basegfx::B2DPolyPolygon maPolygon;
+ };
+ 
+ } }
+diff --git oox/inc/oox/drawingml/shape.hxx oox/inc/oox/drawingml/shape.hxx
+index 5a7e7e5..547f72e 100644
+--- oox/inc/oox/drawingml/shape.hxx
++++ oox/inc/oox/drawingml/shape.hxx
+@@ -33,7 +33,7 @@
+ 
+ #include "oox/helper/propertymap.hxx"
+ #include "oox/drawingml/drawingmltypes.hxx"
+-#include "oox/drawingml/customshapeproperties.hxx"
++//#include "oox/drawingml/customshapeproperties.hxx"
+ #include "oox/drawingml/textliststyle.hxx"
+ 
+ #include <com/sun/star/frame/XModel.hpp>
+@@ -45,6 +45,9 @@
+ 
+ namespace oox { namespace drawingml {
+ 
++class CustomShapeProperties;
++typedef boost::shared_ptr< CustomShapeProperties > CustomShapePropertiesPtr;
++
+ typedef ::std::map< ::rtl::OUString, ShapePtr > ShapeIdMap;
+ 
+ struct ShapeStyleRef
+diff --git oox/source/drawingml/chart/plotareaconverter.cxx oox/source/drawingml/chart/plotareaconverter.cxx
+index f3baa2c..ce6e3e7 100644
+--- oox/source/drawingml/chart/plotareaconverter.cxx
++++ oox/source/drawingml/chart/plotareaconverter.cxx
+@@ -31,6 +31,7 @@
+ 
+ #include "oox/drawingml/chart/plotareaconverter.hxx"
+ #include <com/sun/star/drawing/Direction3D.hpp>
++#include <com/sun/star/drawing/ProjectionMode.hpp>
+ #include <com/sun/star/drawing/ShadeMode.hpp>
+ #include <com/sun/star/chart2/XChartDocument.hpp>
+ #include <com/sun/star/chart2/XCoordinateSystemContainer.hpp>
+diff --git oox/source/drawingml/customshapegeometry.cxx oox/source/drawingml/customshapegeometry.cxx
+index 752c7b1..e4b99d6 100644
+--- oox/source/drawingml/customshapegeometry.cxx
++++ oox/source/drawingml/customshapegeometry.cxx
+@@ -29,10 +29,12 @@
+  ************************************************************************/
+ 
+ #include "oox/drawingml/customshapegeometry.hxx"
++#include "oox/drawingml/customshapeproperties.hxx"
+ 
+ #include <com/sun/star/xml/sax/FastToken.hpp>
+ #include <comphelper/stl_types.hxx>
+ #include <hash_map>
++#include <basegfx/polygon/b2dpolygon.hxx>
+ 
+ #include "oox/helper/helper.hxx"
+ #include "oox/helper/propertymap.hxx"
+@@ -41,6 +43,7 @@
+ 
+ using ::rtl::OUString;
+ using ::com::sun::star::beans::NamedValue;
++using namespace ::basegfx;
+ using namespace ::oox::core;
+ using namespace ::com::sun::star::uno;
+ using namespace ::com::sun::star::xml::sax;
+@@ -184,6 +187,88 @@ Reference< XFastContextHandler > AdjustmentValueContext::createFastChildContext(
+ 
+ // ---------------------------------------------------------------------
+ 
++class PathListContext : public ContextHandler
++{
++public:
++    PathListContext( ContextHandler& rParent, Shape& rShape );
++	virtual ::com::sun::star::uno::Reference< ::com::sun::star::xml::sax::XFastContextHandler > SAL_CALL createFastChildContext( ::sal_Int32 aElementToken, const ::com::sun::star::uno::Reference< ::com::sun::star::xml::sax::XFastAttributeList >& xAttribs ) throw (::com::sun::star::xml::sax::SAXException, ::com::sun::star::uno::RuntimeException);
++    virtual void SAL_CALL endFastElement( sal_Int32 aElementToken ) throw (SAXException, RuntimeException);
++
++protected:
++    Shape& mrShape;
++    sal_Int32 maPointToken;
++    ::basegfx::B2DPolygon maPolygon;
++};
++
++PathListContext::PathListContext( ContextHandler& rParent, Shape& rShape )
++: ContextHandler( rParent )
++, mrShape( rShape )
++{
++}
++
++Reference< XFastContextHandler > PathListContext::createFastChildContext( sal_Int32 aElementToken, const Reference< XFastAttributeList >& xAttribs ) throw (SAXException, RuntimeException)
++{
++  switch( aElementToken ) {
++  case NMSP_DRAWINGML | XML_path:
++      maPolygon.clear();
++      break;
++  case NMSP_DRAWINGML | XML_close:
++      maPolygon.setClosed( true );
++      break;
++  case NMSP_DRAWINGML | XML_pt:
++  {
++      OUString sX, sY;
++
++      sX = xAttribs->getOptionalValue( XML_x );
++      sY = xAttribs->getOptionalValue( XML_y );
++
++      double dX, dY;
++
++      dX = sX.toDouble();
++      dY = sY.toDouble();
++
++      maPolygon.append( B2DPoint ( dX, dY ) );
++      break;
++  }
++  case NMSP_DRAWINGML | XML_lnTo:
++  case NMSP_DRAWINGML | XML_moveTo:
++      maPointToken = aElementToken;
++      break;
++  }
++
++  return this;
++}
++
++void PathListContext::endFastElement( sal_Int32 aElementToken ) throw (SAXException, RuntimeException)
++{
++    switch( aElementToken ) {
++	case NMSP_DRAWINGML|XML_pathLst:
++	{
++	    B2DPolyPolygon& rPoly = mrShape.getCustomShapeProperties()->getPolygon();
++	    if( rPoly.count() ) {
++		if( rPoly.areControlPointsUsed() ) {
++		    if( rPoly.isClosed() )
++			mrShape.setServiceName( "com.sun.star.drawing.ClosedBezierShape" );
++		    else
++			mrShape.setServiceName( "com.sun.star.drawing.OpenBezierShape" );
++		} else {
++		    if( rPoly.isClosed() )
++			mrShape.setServiceName( "com.sun.star.drawing.PolyPolygonPathShape" );
++		    else
++			mrShape.setServiceName( "com.sun.star.drawing.PolyLinePathShape" );
++		}
++	    }
++	    break;
++	}
++	case NMSP_DRAWINGML|XML_path:
++	    if( maPolygon.count() > 0 )
++		mrShape.getCustomShapeProperties()->getPolygon().append( maPolygon );
++	    break;
++    }
++}
++
++// ---------------------------------------------------------------------
++
+ OUString GetShapeType( sal_Int32 nType )
+ {
+ 	OUString sType;
+@@ -985,9 +1070,9 @@ static OUString GetTextShapeType( sal_Int32 nType )
+ 
+ // ---------------------------------------------------------------------
+ // CT_CustomGeometry2D
+-CustomShapeGeometryContext::CustomShapeGeometryContext( ContextHandler& rParent, const Reference< XFastAttributeList >& /* xAttribs */, CustomShapeProperties& rCustomShapeProperties )
++CustomShapeGeometryContext::CustomShapeGeometryContext( ContextHandler& rParent, const Reference< XFastAttributeList >& /* xAttribs */, Shape& rShape )
+ : ContextHandler( rParent )
+-, mrCustomShapeProperties( rCustomShapeProperties )
++, mrShape( rShape )
+ {
+ }
+ 
+@@ -1001,8 +1086,9 @@ Reference< XFastContextHandler > CustomShapeGeometryContext::createFastChildCont
+ 	case NMSP_DRAWINGML|XML_ahLst:		// CT_AdjustHandleList adjust handle list
+ 	case NMSP_DRAWINGML|XML_cxnLst:	// CT_ConnectionSiteList connection site list
+ 	case NMSP_DRAWINGML|XML_rect:	// CT_GeomRectList geometry rect list
++	  break;
+ 	case NMSP_DRAWINGML|XML_pathLst:	// CT_Path2DList 2d path list
+-		break;
++	    return new PathListContext( *this, mrShape );
+ 	}
+ 
+ 	Reference< XFastContextHandler > xEmpty;
+diff --git oox/source/drawingml/diagram/diagramdefinitioncontext.cxx oox/source/drawingml/diagram/diagramdefinitioncontext.cxx
+index c28e8eb..94441be 100644
+--- oox/source/drawingml/diagram/diagramdefinitioncontext.cxx
++++ oox/source/drawingml/diagram/diagramdefinitioncontext.cxx
+@@ -34,6 +34,7 @@
+ #include "layoutnodecontext.hxx"
+ #include "diagramdefinitioncontext.hxx"
+ #include "oox/drawingml/diagram/datamodelcontext.hxx"
++#include "tokens.hxx"
+ 
+ using namespace ::oox::core;
+ using namespace ::com::sun::star::uno;
+diff --git oox/source/drawingml/diagram/diagramfragmenthandler.cxx oox/source/drawingml/diagram/diagramfragmenthandler.cxx
+index fc5fe05..f666fb8 100644
+--- oox/source/drawingml/diagram/diagramfragmenthandler.cxx
++++ oox/source/drawingml/diagram/diagramfragmenthandler.cxx
+@@ -34,7 +34,7 @@
+ #include "oox/drawingml/diagram/datamodelcontext.hxx"
+ #include "oox/core/namespaces.hxx"
+ #include "diagramdefinitioncontext.hxx"
+-
++#include "tokens.hxx"
+ 
+ using namespace ::oox::core;
+ using namespace ::com::sun::star::xml::sax;
+diff --git oox/source/drawingml/graphicshapecontext.cxx oox/source/drawingml/graphicshapecontext.cxx
+index 42e6156..da97719 100644
+--- oox/source/drawingml/graphicshapecontext.cxx
++++ oox/source/drawingml/graphicshapecontext.cxx
+@@ -32,6 +32,7 @@
+ 
+ #include "oox/drawingml/fillpropertiesgroupcontext.hxx"
+ #include "oox/drawingml/graphicshapecontext.hxx"
++#include "oox/drawingml/customshapeproperties.hxx"
+ #include "oox/drawingml/diagram/diagramfragmenthandler.hxx"
+ #include "oox/drawingml/table/tablecontext.hxx"
+ #include "oox/core/namespaces.hxx"
+diff --git oox/source/drawingml/shape.cxx oox/source/drawingml/shape.cxx
+index b1f3559..655083c 100644
+--- oox/source/drawingml/shape.cxx
++++ oox/source/drawingml/shape.cxx
+@@ -29,6 +29,7 @@
+  ************************************************************************/
+ 
+ #include "oox/drawingml/shape.hxx"
++#include "oox/drawingml/customshapeproperties.hxx"
+ #include "oox/drawingml/theme.hxx"
+ #include "oox/drawingml/fillproperties.hxx"
+ #include "oox/drawingml/lineproperties.hxx"
+@@ -209,8 +210,8 @@ void Shape::addChildren(
+     aIter = rMaster.maChildren.begin();
+     while( aIter != rMaster.maChildren.end() )
+     {
+-        Rectangle aShapeRect;
+-        Rectangle* pShapeRect = 0;
++        awt::Rectangle aShapeRect;
++        awt::Rectangle* pShapeRect = 0;
+         if ( ( nGlobalLeft != SAL_MAX_INT32 ) && ( nGlobalRight != SAL_MIN_INT32 ) && ( nGlobalTop != SAL_MAX_INT32 ) && ( nGlobalBottom != SAL_MIN_INT32 ) )
+         {
+             sal_Int32 nGlobalWidth = nGlobalRight - nGlobalLeft;
+@@ -284,6 +285,36 @@ Reference< XShape > Shape::createAndInsert(
+         aTransformation.translate( aPosition.X / 360.0, aPosition.Y / 360.0 );
+     }
+ 
++    if ( mpCustomShapePropertiesPtr && mpCustomShapePropertiesPtr->getPolygon().count() )
++    {
++	::basegfx::B2DPolyPolygon& rPolyPoly = mpCustomShapePropertiesPtr->getPolygon();
++
++	if( rPolyPoly.count() > 0 ) {
++	    if( rPolyPoly.areControlPointsUsed() ) {
++		// TODO Beziers
++	    } else {
++		uno::Sequence< uno::Sequence< awt::Point > > aPolyPolySequence( rPolyPoly.count() );
++
++		for (sal_uInt32 j = 0; j < rPolyPoly.count(); j++ ) {
++		    ::basegfx::B2DPolygon aPoly = rPolyPoly.getB2DPolygon( j );
++
++		    // now creating the corresponding PolyPolygon
++		    sal_Int32 i, nNumPoints = aPoly.count();
++		    uno::Sequence< awt::Point > aPointSequence( nNumPoints );
++		    awt::Point* pPoints = aPointSequence.getArray();
++		    for( i = 0; i < nNumPoints; ++i )
++		    {
++			const ::basegfx::B2DPoint aPoint( aPoly.getB2DPoint( i ) );
++			pPoints[ i ] = awt::Point( static_cast< sal_Int32 >( aPoint.getX() ), static_cast< sal_Int32 >( aPoint.getY() ) );
++		    }
++		    aPolyPolySequence.getArray()[ j ] = aPointSequence;
++		}
++		static const OUString sPolyPolygon(RTL_CONSTASCII_USTRINGPARAM("PolyPolygon"));
++		maShapeProperties[ sPolyPolygon ] <<= aPolyPolySequence;
++	    }
++	}
++    }
++
+     // special for lineshape
+     if ( rServiceName == OUString::createFromAscii( "com.sun.star.drawing.LineShape" ) )
+     {
+diff --git oox/source/drawingml/shapepropertiescontext.cxx oox/source/drawingml/shapepropertiescontext.cxx
+index 9ef39a4..479b706 100644
+--- oox/source/drawingml/shapepropertiescontext.cxx
++++ oox/source/drawingml/shapepropertiescontext.cxx
+@@ -77,7 +77,7 @@ Reference< XFastContextHandler > ShapePropertiesContext::createFastChildContext(
+ 
+ 	// GeometryGroup
+ 	case NMSP_DRAWINGML|XML_custGeom:	// custom geometry "CT_CustomGeometry2D"
+-        xRet.set( new CustomShapeGeometryContext( *this, xAttribs, *(mrShape.getCustomShapeProperties())  ) );
++        xRet.set( new CustomShapeGeometryContext( *this, xAttribs, mrShape ) );
+ 		break;
+ 
+ 
+diff --git oox/source/drawingml/table/tablerowcontext.cxx oox/source/drawingml/table/tablerowcontext.cxx
+index f3ae44c..09913a0 100644
+--- oox/source/drawingml/table/tablerowcontext.cxx
++++ oox/source/drawingml/table/tablerowcontext.cxx
+@@ -34,6 +34,7 @@
+ #include "oox/drawingml/table/tablecellcontext.hxx"
+ #include "oox/drawingml/table/tablerow.hxx"
+ #include "oox/core/namespaces.hxx"
++#include "tokens.hxx"
+ 
+ using namespace ::oox::core;
+ using namespace ::com::sun::star;
+diff --git oox/source/drawingml/theme.cxx oox/source/drawingml/theme.cxx
+index e1a7f63..84e1506 100644
+--- oox/source/drawingml/theme.cxx
++++ oox/source/drawingml/theme.cxx
+@@ -29,6 +29,7 @@
+  ************************************************************************/
+ 
+ #include "oox/drawingml/theme.hxx"
++#include "tokens.hxx"
+ 
+ using ::rtl::OUString;
+ 
+diff --git oox/source/shape/ShapeContextHandler.cxx oox/source/shape/ShapeContextHandler.cxx
+index fd72690..90239fa 100644
+--- oox/source/shape/ShapeContextHandler.cxx
++++ oox/source/shape/ShapeContextHandler.cxx
+@@ -30,6 +30,7 @@
+ 
+ #include "ShapeContextHandler.hxx"
+ #include "oox/vml/drawingfragmenthandler.hxx"
++#include "tokens.hxx"
+ 
+ namespace oox { namespace shape {
+ 
+diff --git oox/source/xls/themebuffer.cxx oox/source/xls/themebuffer.cxx
+index 65f9a2f..ca499c5 100644
+--- oox/source/xls/themebuffer.cxx
++++ oox/source/xls/themebuffer.cxx
+@@ -31,6 +31,7 @@
+ #include "oox/xls/themebuffer.hxx"
+ #include "oox/xls/stylesbuffer.hxx"
+ #include "oox/xls/stylespropertyhelper.hxx"
++#include "tokens.hxx"
+ 
+ using ::oox::drawingml::ClrScheme;
+ using ::oox::drawingml::Color;
