@@ -1,0 +1,786 @@
+diff --git offapi/com/sun/star/awt/Key.idl offapi/com/sun/star/awt/Key.idl
+index 7265d9d..fe2d2df 100644
+--- offapi/com/sun/star/awt/Key.idl
++++ offapi/com/sun/star/awt/Key.idl
+@@ -461,6 +461,14 @@ published constants Key
+ 
+     const short SCROLLLOCK = 1314;
+ 
++    //------------------------------------------------------------------------- 
++
++    const short BRACKETLEFT = 1315;
++
++    //------------------------------------------------------------------------- 
++
++    const short BRACKETRIGHT = 1316;
++
+ 	//-------------------------------------------------------------------------
+     
+     const short DELETE_TO_BEGIN_OF_LINE = 1536;
+diff --git officecfg/registry/data/org/openoffice/Office/UI/CalcCommands.xcu officecfg/registry/data/org/openoffice/Office/UI/CalcCommands.xcu
+index 3df357d..561590d 100644
+--- officecfg/registry/data/org/openoffice/Office/UI/CalcCommands.xcu
++++ officecfg/registry/data/org/openoffice/Office/UI/CalcCommands.xcu
+@@ -1593,6 +1593,16 @@
+                     <value xml:lang="en-US">Assign Macro...</value>
+                 </prop>
+             </node>
++            <node oor:name=".uno:MarkPrecedents" oor:op="replace">
++                <prop oor:name="Label" oor:type="xs:string">
++                    <value xml:lang="en-US">Mark Precedents</value>
++                </prop> 
++            </node> 
++            <node oor:name=".uno:MarkDependents" oor:op="replace">
++                <prop oor:name="Label" oor:type="xs:string">
++                    <value xml:lang="en-US">Mark Dependents</value>
++                </prop>
++            </node>
+         </node>
+ 	</node>
+ </oor:component-data>
+diff --git sc/inc/cell.hxx sc/inc/cell.hxx
+index 45d0de2..714fb1e 100644
+--- sc/inc/cell.hxx
++++ sc/inc/cell.hxx
+@@ -662,6 +662,7 @@ private:
+ public:
+ 				ScDetectiveRefIter( ScFormulaCell* pCell );
+ 	BOOL		GetNextRef( ScRange& rRange );
++    ScToken*    GetNextRefToken();
+ };
+ 
+ // ============================================================================
+diff --git sc/inc/detfunc.hxx sc/inc/detfunc.hxx
+index 0b07af8..ca3ffc8 100644
+--- sc/inc/detfunc.hxx
++++ sc/inc/detfunc.hxx
+@@ -35,6 +35,9 @@
+ #include <tools/gen.hxx>
+ #include <tools/color.hxx>
+ #include "scdllapi.h"
++#include "token.hxx"
++
++#include <vector>
+ 
+ class SdrObject;
+ class SdrPage;
+@@ -46,6 +49,7 @@ class ScDetectiveData;
+ class ScDocument;
+ class ScAddress;
+ class ScRange;
++class ScRangeList;
+ 
+ #define SC_DET_MAXCIRCLE	1000
+ 
+@@ -146,6 +150,9 @@ public:
+ 
+ 	BOOL		MarkInvalid(BOOL& rOverflow);
+ 
++    void        GetAllPreds(SCCOL nCol1, SCROW nRow1, SCCOL nCol2, SCROW nRow2, ::std::vector<ScSharedTokenRef>& rRefTokens);
++    void        GetAllSuccs(SCCOL nCol1, SCROW nRow1, SCCOL nCol2, SCROW nRow2, ::std::vector<ScSharedTokenRef>& rRefTokens);
++
+     static void UpdateAllComments( ScDocument& rDoc );        // on all tables
+ 	void		UpdateAllArrowColors();		// on all tables
+ 
+diff --git sc/inc/reftokenhelper.hxx sc/inc/reftokenhelper.hxx
+index d7b335f..44619ab 100644
+--- sc/inc/reftokenhelper.hxx
++++ sc/inc/reftokenhelper.hxx
+@@ -78,6 +78,9 @@ public:
+     static void join(::std::vector<ScSharedTokenRef>& rTokens, const ScSharedTokenRef& pToken);
+ 
+     static bool getDoubleRefDataFromToken(ScComplexRefData& rData, const ScSharedTokenRef& pToken);
++
++    static ScSharedTokenRef createRefToken(const ScAddress& rAddr);
++    static ScSharedTokenRef createRefToken(const ScRange& rRange);
+ };
+ 
+ #endif
+diff --git sc/inc/sc.hrc sc/inc/sc.hrc
+index ec16438..3ecd9ba 100644
+--- sc/inc/sc.hrc
++++ sc/inc/sc.hrc
+@@ -902,6 +902,9 @@
+ #define SID_DETECTIVE_REFRESH   (DETECTIVE_START+14)
+ #define SID_DETECTIVE_AUTO      (DETECTIVE_START+15)
+ 
++#define SID_DETECTIVE_MARK_PRED (DETECTIVE_START+16)
++#define SID_DETECTIVE_MARK_SUCC (DETECTIVE_START+17)
++
+ #define DETECTIVE_END			(DETECTIVE_START+20)
+ 
+ #define SID_API_SLOTS			(DETECTIVE_END)
+diff --git sc/sdi/cellsh.sdi sc/sdi/cellsh.sdi
+index baec475..3a4047c 100644
+--- sc/sdi/cellsh.sdi
++++ sc/sdi/cellsh.sdi
+@@ -113,6 +113,8 @@ interface CellSelection
+ 	SID_DETECTIVE_ADD_ERR	[ ExecMethod = ExecuteEdit; StateMethod = GetState; ]
+ 	SID_DETECTIVE_INVALID	[ ExecMethod = ExecuteEdit; StateMethod = GetState; ]
+ 	SID_DETECTIVE_REFRESH	[ ExecMethod = ExecuteEdit; StateMethod = GetState; ]
++	SID_DETECTIVE_MARK_PRED	[ ExecMethod = ExecuteEdit; StateMethod = GetState; ]
++	SID_DETECTIVE_MARK_SUCC	[ ExecMethod = ExecuteEdit; StateMethod = GetState; ]
+ 	FID_INS_ROW				[ ExecMethod = ExecuteEdit; StateMethod = GetBlockState; ]
+ 	FID_INS_COLUMN			[ ExecMethod = ExecuteEdit; StateMethod = GetBlockState; ]
+ 	FID_INS_CELLSDOWN		[ ExecMethod = ExecuteEdit; StateMethod = GetBlockState; ]
+diff --git sc/sdi/scalc.sdi sc/sdi/scalc.sdi
+index 430d474..77fc5b7 100644
+--- sc/sdi/scalc.sdi
++++ sc/sdi/scalc.sdi
+@@ -7977,4 +7977,53 @@ SfxBoolItem ToggleSheetGrid FID_TAB_TOGGLE_GRID
+     GroupId = GID_FORMAT;
+ ]
+ 
++//--------------------------------------------------------------------------
++SfxVoidItem MarkPrecedents SID_DETECTIVE_MARK_PRED
++()
++[
++    /* flags: */
++    AutoUpdate = FALSE,
++    Cachable = Cachable,
++    FastCall = FALSE,
++    HasCoreId = FALSE,
++    HasDialog = FALSE,
++    ReadOnlyDoc = TRUE,
++    Toggle = FALSE,
++    Container = FALSE,
++    RecordAbsolute = FALSE,
++    RecordPerSet;
++    Synchron;
++    
++    /* config: */
++    AccelConfig = TRUE,
++    MenuConfig = TRUE,
++    StatusBarConfig = FALSE,
++    ToolBoxConfig = FALSE,
++    GroupId = GID_OPTIONS;
++]
++
++//--------------------------------------------------------------------------
++SfxVoidItem MarkDependents SID_DETECTIVE_MARK_SUCC
++()
++[
++    /* flags: */
++    AutoUpdate = FALSE,
++    Cachable = Cachable,
++    FastCall = FALSE,
++    HasCoreId = FALSE,
++    HasDialog = FALSE,
++    ReadOnlyDoc = TRUE,
++    Toggle = FALSE,
++    Container = FALSE,
++    RecordAbsolute = FALSE,
++    RecordPerSet;
++    Synchron;
++    
++    /* config: */
++    AccelConfig = TRUE,
++    MenuConfig = TRUE,
++    StatusBarConfig = FALSE,
++    ToolBoxConfig = FALSE,
++    GroupId = GID_OPTIONS;
++]
+ 
+diff --git sc/source/core/data/cell.cxx sc/source/core/data/cell.cxx
+index b181e4c..d28de5e 100644
+--- sc/source/core/data/cell.cxx
++++ sc/source/core/data/cell.cxx
+@@ -1981,7 +1981,7 @@ BOOL lcl_ScDetectiveRefIter_SkipRef( ScToken* p )
+ 	if ( rRef1.IsColDeleted() || rRef1.IsRowDeleted() || rRef1.IsTabDeleted()
+ 			|| !rRef1.Valid() )
+ 		return TRUE;
+-	if ( p->GetType() == svDoubleRef )
++	if ( p->GetType() == svDoubleRef || p->GetType() == svExternalDoubleRef )
+ 	{
+ 		ScSingleRefData& rRef2 = p->GetDoubleRef().Ref2;
+ 		if ( rRef2.IsColDeleted() || rRef2.IsRowDeleted() || rRef2.IsTabDeleted()
+@@ -1994,18 +1994,7 @@ BOOL lcl_ScDetectiveRefIter_SkipRef( ScToken* p )
+ BOOL ScDetectiveRefIter::GetNextRef( ScRange& rRange )
+ {
+ 	BOOL bRet = FALSE;
+-
+-	ScToken* p = static_cast<ScToken*>(pCode->GetNextReferenceRPN());
+-	if (p)
+-		p->CalcAbsIfRel( aPos );
+-
+-	while ( p && lcl_ScDetectiveRefIter_SkipRef( p ) )
+-	{
+-		p = static_cast<ScToken*>(pCode->GetNextReferenceRPN());
+-		if (p)
+-			p->CalcAbsIfRel( aPos );
+-	}
+-
++    ScToken* p = GetNextRefToken();
+ 	if( p )
+ 	{
+ 		SingleDoubleRefProvider aProv( *p );
+@@ -2017,4 +2006,19 @@ BOOL ScDetectiveRefIter::GetNextRef( ScRange& rRange )
+ 	return bRet;
+ }
+ 
++ScToken* ScDetectiveRefIter::GetNextRefToken()
++{
++    ScToken* p = static_cast<ScToken*>(pCode->GetNextReferenceRPN());
++    if (p)
++        p->CalcAbsIfRel( aPos );
++
++    while ( p && lcl_ScDetectiveRefIter_SkipRef( p ) )
++    {
++        p = static_cast<ScToken*>(pCode->GetNextReferenceRPN());
++        if (p)
++            p->CalcAbsIfRel( aPos );
++    }
++    return p;
++}
++
+ // ============================================================================
+diff --git sc/source/core/tool/detfunc.cxx sc/source/core/tool/detfunc.cxx
+index f2a2a42..7251a1d 100644
+--- sc/source/core/tool/detfunc.cxx
++++ sc/source/core/tool/detfunc.cxx
+@@ -80,6 +80,12 @@
+ #include "attrib.hxx"
+ #include "scmod.hxx"
+ #include "postit.hxx"
++#include "rangelst.hxx"
++#include "reftokenhelper.hxx"
++
++#include <vector>
++
++using ::std::vector;
+ 
+ //------------------------------------------------------------------------
+ 
+@@ -1407,6 +1413,52 @@ BOOL ScDetectiveFunc::MarkInvalid(BOOL& rOverflow)
+ 	return ( bDeleted || nInsCount != 0 );
+ }
+ 
++void ScDetectiveFunc::GetAllPreds(SCCOL nCol1, SCROW nRow1, SCCOL nCol2, SCROW nRow2,
++                                  vector<ScSharedTokenRef>& rRefTokens)
++{
++    ScCellIterator aCellIter(pDoc, nCol1, nRow1, nTab, nCol2, nRow2, nTab);
++    for (ScBaseCell* pCell = aCellIter.GetFirst(); pCell; pCell = aCellIter.GetNext())
++    {
++        if (pCell->GetCellType() != CELLTYPE_FORMULA)
++            continue;
++
++        ScFormulaCell* pFCell = static_cast<ScFormulaCell*>(pCell);
++        ScDetectiveRefIter aRefIter(pFCell);
++        for (ScToken* p = aRefIter.GetNextRefToken(); p; p = aRefIter.GetNextRefToken())
++        {
++            ScSharedTokenRef pRef(static_cast<ScToken*>(p->Clone()));
++            ScRefTokenHelper::join(rRefTokens, pRef);
++        }
++    }
++}
++
++void ScDetectiveFunc::GetAllSuccs(SCCOL nCol1, SCROW nRow1, SCCOL nCol2, SCROW nRow2, 
++                                  vector<ScSharedTokenRef>& rRefTokens)
++{
++    vector<ScSharedTokenRef> aSrcRange;
++    aSrcRange.push_back(
++        ScRefTokenHelper::createRefToken(ScRange(nCol1, nRow1, nTab, nCol2, nRow2, nTab)));
++
++    ScCellIterator aCellIter(pDoc, 0, 0, nTab, MAXCOL, MAXROW, nTab);
++    for (ScBaseCell* pCell = aCellIter.GetFirst(); pCell; pCell = aCellIter.GetNext())
++    {
++        if (pCell->GetCellType() != CELLTYPE_FORMULA)
++            continue;
++
++        ScFormulaCell* pFCell = static_cast<ScFormulaCell*>(pCell);
++        ScDetectiveRefIter aRefIter(pFCell);
++        for (ScToken* p = aRefIter.GetNextRefToken(); p; p = aRefIter.GetNextRefToken())
++        {
++            ScSharedTokenRef pRef(static_cast<ScToken*>(p->Clone()));
++            if (ScRefTokenHelper::intersects(aSrcRange, pRef))
++            {
++                pRef = ScRefTokenHelper::createRefToken(aCellIter.GetPos());
++                ScRefTokenHelper::join(rRefTokens, pRef);
++            }
++        }
++    }
++}
++
+ void ScDetectiveFunc::UpdateAllComments( ScDocument& rDoc )
+ {
+ 	//	for all caption objects, update attributes and SpecialTextBoxShadow flag
+diff --git sc/source/core/tool/reftokenhelper.cxx sc/source/core/tool/reftokenhelper.cxx
+index 0e07819..6a46f9c 100644
+--- sc/source/core/tool/reftokenhelper.cxx
++++ sc/source/core/tool/reftokenhelper.cxx
+@@ -436,3 +436,19 @@ bool ScRefTokenHelper::getDoubleRefDataFromToken(ScComplexRefData& rData, const
+     }
+     return true;
+ }
++
++ScSharedTokenRef ScRefTokenHelper::createRefToken(const ScAddress& rAddr)
++{
++    ScSingleRefData aRefData;
++    aRefData.InitAddress(rAddr);
++    ScSharedTokenRef pRef(new ScSingleRefToken(aRefData));
++    return pRef;
++}
++
++ScSharedTokenRef ScRefTokenHelper::createRefToken(const ScRange& rRange)
++{
++    ScComplexRefData aRefData;
++    aRefData.InitRange(rRange);
++    ScSharedTokenRef pRef(new ScDoubleRefToken(aRefData));
++    return pRef;
++}
+diff --git sc/source/ui/docshell/docfunc.cxx sc/source/ui/docshell/docfunc.cxx
+index fde95e5..2326d92 100644
+--- sc/source/ui/docshell/docfunc.cxx
++++ sc/source/ui/docshell/docfunc.cxx
+@@ -106,7 +106,7 @@
+ 
+ using namespace com::sun::star;
+ using ::com::sun::star::uno::Sequence;
+-
++using ::std::vector;
+ 
+ // STATIC DATA -----------------------------------------------------------
+ 
+@@ -524,6 +524,44 @@ BOOL ScDocFunc::DetectiveRefresh( BOOL bAutomatic )
+ 	return bDone;
+ }
+ 
++static void lcl_collectAllPredOrSuccRanges(
++    const ScRangeList& rSrcRanges, vector<ScSharedTokenRef>& rRefTokens, ScDocShell& rDocShell,
++    bool bPred)
++{
++    ScDocument* pDoc = rDocShell.GetDocument();
++    vector<ScSharedTokenRef> aRefTokens;
++    ScRangeList aSrcRanges(rSrcRanges);
++    ScRange* p = aSrcRanges.First();
++    if (!p)
++        return;
++    ScDetectiveFunc aDetFunc(pDoc, p->aStart.Tab());
++    ScRangeList aDestRanges;
++    for (; p; p = aSrcRanges.Next())
++    {
++        if (bPred)
++        {    
++            aDetFunc.GetAllPreds(
++                p->aStart.Col(), p->aStart.Row(), p->aEnd.Col(), p->aEnd.Row(), aRefTokens);
++        }
++        else
++        {    
++            aDetFunc.GetAllSuccs(
++                p->aStart.Col(), p->aStart.Row(), p->aEnd.Col(), p->aEnd.Row(), aRefTokens);
++        }
++    }
++    rRefTokens.swap(aRefTokens);
++}
++
++void ScDocFunc::DetectiveCollectAllPreds(const ScRangeList& rSrcRanges, vector<ScSharedTokenRef>& rRefTokens)
++{
++    lcl_collectAllPredOrSuccRanges(rSrcRanges, rRefTokens, rDocShell, true);
++}
++
++void ScDocFunc::DetectiveCollectAllSuccs(const ScRangeList& rSrcRanges, vector<ScSharedTokenRef>& rRefTokens)
++{
++    lcl_collectAllPredOrSuccRanges(rSrcRanges, rRefTokens, rDocShell, false);
++}
++
+ //------------------------------------------------------------------------
+ 
+ BOOL ScDocFunc::DeleteContents( const ScMarkData& rMark, USHORT nFlags,
+diff --git sc/source/ui/inc/docfunc.hxx sc/source/ui/inc/docfunc.hxx
+index 9976230..753e761 100644
+--- sc/source/ui/inc/docfunc.hxx
++++ sc/source/ui/inc/docfunc.hxx
+@@ -36,6 +36,9 @@
+ #include "postit.hxx"
+ #include "formula/grammar.hxx"
+ #include "tabbgcolor.hxx"
++#include "token.hxx"
++
++#include <vector>
+ 
+ class ScEditEngineDefaulter;
+ class SfxUndoAction;
+@@ -44,6 +47,7 @@ class ScDocShell;
+ class ScMarkData;
+ class ScPatternAttr;
+ class ScRange;
++class ScRangeList;
+ class ScRangeName;
+ class ScBaseCell;
+ class ScTokenArray;
+@@ -79,6 +83,8 @@ public:
+ 	BOOL			DetectiveMarkInvalid(SCTAB nTab);
+ 	BOOL			DetectiveDelAll(SCTAB nTab);
+ 	BOOL			DetectiveRefresh(BOOL bAutomatic = FALSE);
++    void            DetectiveCollectAllPreds(const ScRangeList& rSrcRanges, ::std::vector<ScSharedTokenRef>& rRefTokens);
++    void            DetectiveCollectAllSuccs(const ScRangeList& rSrcRanges, ::std::vector<ScSharedTokenRef>& rRefTokens);
+ 
+ 	BOOL			DeleteContents( const ScMarkData& rMark, USHORT nFlags,
+ 									BOOL bRecord, BOOL bApi );
+diff --git sc/source/ui/inc/viewfunc.hxx sc/source/ui/inc/viewfunc.hxx
+index 3f99bde..d227c16 100644
+--- sc/source/ui/inc/viewfunc.hxx
++++ sc/source/ui/inc/viewfunc.hxx
+@@ -330,6 +330,8 @@ public:
+ 	void			DetectiveMarkInvalid();
+ 	void			DetectiveDelAll();
+ 	void			DetectiveRefresh();
++    void            DetectiveMarkPred();
++    void            DetectiveMarkSucc();
+ 
+ 	void			ShowNote( bool bShow = true );
+ 	inline void		HideNote() { ShowNote( false ); }
+@@ -370,6 +372,8 @@ private:
+ 	BOOL			TestFormatArea( SCCOL nCol, SCROW nRow, SCTAB nTab, BOOL bAttrChanged );
+ 	void			DoAutoAttributes( SCCOL nCol, SCROW nRow, SCTAB nTab,
+ 										BOOL bAttrChanged, BOOL bAddUndo );
++
++    void            MarkAndJumpToRanges(const ScRangeList& rRanges);
+ };
+ 
+ 
+diff --git sc/source/ui/view/cellsh1.cxx sc/source/ui/view/cellsh1.cxx
+index ce1010e..8a46b55 100644
+--- sc/source/ui/view/cellsh1.cxx
++++ sc/source/ui/view/cellsh1.cxx
+@@ -1592,6 +1592,13 @@ void ScCellShell::ExecuteEdit( SfxRequest& rReq )
+ 			rReq.Done();
+ 			break;
+ 
++        case SID_DETECTIVE_MARK_PRED:
++            pTabViewShell->DetectiveMarkPred();
++            break;
++        case SID_DETECTIVE_MARK_SUCC:
++            pTabViewShell->DetectiveMarkSucc();
++            break;
++
+         case SID_SPELL_DIALOG:
+ //           pTabViewShell->DoSpellingChecker();
+             {
+diff --git sc/source/ui/view/gridwin.cxx sc/source/ui/view/gridwin.cxx
+index 078c55a..67107db 100644
+--- sc/source/ui/view/gridwin.cxx
++++ sc/source/ui/view/gridwin.cxx
+@@ -3108,6 +3108,17 @@ void __EXPORT ScGridWindow::KeyInput(const KeyEvent& rKEvt)
+ 				ShowNoteMarker( pViewData->GetCurX(), pViewData->GetCurY(), TRUE );
+ 			return;
+ 		}
++        if (aCode.GetCode() == KEY_BRACKETLEFT && aCode.GetModifier() == KEY_MOD1)
++        {
++            pViewSh->DetectiveMarkPred();
++            return;
++        }
++        if (aCode.GetCode() == KEY_BRACKETRIGHT && aCode.GetModifier() == KEY_MOD1)
++        {
++            pViewSh->DetectiveMarkSucc();
++            return;
++        }
++        
+ 	}
+ 
+ 	Window::KeyInput(rKEvt);
+diff --git sc/source/ui/view/tabvwsh3.cxx sc/source/ui/view/tabvwsh3.cxx
+index 836f359..e971954 100644
+--- sc/source/ui/view/tabvwsh3.cxx
++++ sc/source/ui/view/tabvwsh3.cxx
+@@ -414,13 +414,14 @@ void ScTabViewShell::Execute( SfxRequest& rReq )
+ 					{
+ 						pViewData->ResetOldCursor();
+ 						SetCursor( nCol, nRow );
+-						AlignToCursor( nCol, nRow, SC_FOLLOW_JUMP );
+ 						rBindings.Invalidate( SID_CURRENTCELL );
+ 						rBindings.Update( nSlot );
+ 
+ 						if (!rReq.IsAPI())
+ 							rReq.Done();
+ 					}
++                    // align to cursor even if the cursor position hasn't changed.
++                    AlignToCursor( nCol, nRow, SC_FOLLOW_JUMP );
+ 
+ 					rReq.SetReturnValue( SfxStringItem( SID_CURRENTCELL, aAddress ) );
+ 				}
+diff --git sc/source/ui/view/viewfun6.cxx sc/source/ui/view/viewfun6.cxx
+index bd3ccdf..19d19ba 100644
+--- sc/source/ui/view/viewfun6.cxx
++++ sc/source/ui/view/viewfun6.cxx
+@@ -50,6 +50,13 @@
+ #include "globstr.hrc"
+ #include "sc.hrc"
+ #include "fusel.hxx"
++#include "reftokenhelper.hxx"
++#include "externalrefmgr.hxx"
++
++#include <vector>
++
++using ::rtl::OUStringBuffer;
++using ::std::vector;
+ 
+ //==================================================================
+ 
+@@ -140,6 +147,136 @@ void ScViewFunc::DetectiveRefresh()
+ 	RecalcPPT();
+ }
+ 
++static void lcl_jumpToRange(const ScRange& rRange, ScViewData* pView, ScDocument* pDoc)
++{
++    String aAddrText;
++    rRange.Format(aAddrText, SCR_ABS_3D, pDoc);
++    SfxStringItem aPosItem(SID_CURRENTCELL, aAddrText);
++    SfxBoolItem aUnmarkItem(FN_PARAM_1, TRUE);        // remove existing selection
++    pView->GetDispatcher().Execute(
++        SID_CURRENTCELL, SFX_CALLMODE_SYNCHRON | SFX_CALLMODE_RECORD,
++        &aPosItem, &aUnmarkItem, 0L);
++}
++
++void ScViewFunc::MarkAndJumpToRanges(const ScRangeList& rRanges)
++{
++    ScViewData* pView = GetViewData();
++    ScDocShell* pDocSh = pView->GetDocShell();
++
++    ScRangeList aRanges(rRanges);
++    ScRange* p = aRanges.First();
++    ScRangeList aRangesToMark;
++    ScAddress aCurPos = pView->GetCurPos();
++    for (; p; p = aRanges.Next())
++    {
++        // Collect only those ranges that are on the same sheet as the current
++        // cursor.
++
++        if (p->aStart.Tab() == aCurPos.Tab())
++            aRangesToMark.Append(*p);
++    }
++
++    if (!aRangesToMark.Count())
++        return;
++
++    // Jump to the first range of all precedent ranges.
++    p = aRangesToMark.First();
++    lcl_jumpToRange(*p, pView, pDocSh->GetDocument());
++
++    for (; p; p = aRangesToMark.Next())
++        MarkRange(*p, false, true);
++}
++
++void ScViewFunc::DetectiveMarkPred()
++{
++    ScViewData* pView = GetViewData();
++    ScDocShell* pDocSh = pView->GetDocShell();
++    ScDocument* pDoc = pDocSh->GetDocument();
++    ScMarkData& rMarkData = pView->GetMarkData();
++    ScAddress aCurPos = pView->GetCurPos();
++    ScRangeList aRanges;
++    if (rMarkData.IsMarked() || rMarkData.IsMultiMarked())
++        rMarkData.FillRangeListWithMarks(&aRanges, false);
++    else
++        aRanges.Append(aCurPos);
++
++    vector<ScSharedTokenRef> aRefTokens;
++    pDocSh->GetDocFunc().DetectiveCollectAllPreds(aRanges, aRefTokens);
++
++    if (aRefTokens.empty())
++        // No precedents found.  Nothing to do.
++        return;
++
++    ScSharedTokenRef p = aRefTokens.front();
++    if (ScRefTokenHelper::isExternalRef(p))
++    {
++        // This is external.  Open the external document if available, and 
++        // jump to the destination.
++
++        sal_uInt16 nFileId = p->GetIndex();
++        ScExternalRefManager* pRefMgr = pDoc->GetExternalRefManager();
++        const String* pPath = pRefMgr->getExternalFileName(nFileId);
++
++        ScRange aRange;
++        if (pPath && ScRefTokenHelper::getRangeFromToken(aRange, p, true))
++        {
++            const String& rTabName = p->GetString();
++            OUStringBuffer aBuf;
++            aBuf.append(*pPath);
++            aBuf.append(sal_Unicode('#'));
++            aBuf.append(rTabName);
++            aBuf.append(sal_Unicode('.'));
++
++            String aRangeStr;
++            aRange.Format(aRangeStr, SCA_VALID); 
++            aBuf.append(aRangeStr);
++
++            ScGlobal::OpenURL(aBuf.makeStringAndClear(), String());
++        }
++        return;
++    }
++    else
++    {
++        ScRange aRange;
++        ScRefTokenHelper::getRangeFromToken(aRange, p, false);
++        if (aRange.aStart.Tab() != aCurPos.Tab())
++        {
++            // The first precedent range is on a different sheet.  Jump to it 
++            // immediately and forget the rest.
++            lcl_jumpToRange(aRange, pView, pDoc);
++            return;
++        }
++    }
++
++    ScRangeList aDestRanges;
++    ScRefTokenHelper::getRangeListFromTokens(aDestRanges, aRefTokens);
++    MarkAndJumpToRanges(aDestRanges);
++}
++
++void ScViewFunc::DetectiveMarkSucc()
++{
++    ScViewData* pView = GetViewData();
++    ScDocShell* pDocSh = pView->GetDocShell();
++    ScMarkData& rMarkData = pView->GetMarkData();
++    ScAddress aCurPos = pView->GetCurPos();
++    ScRangeList aRanges;
++    if (rMarkData.IsMarked() || rMarkData.IsMultiMarked())
++        rMarkData.FillRangeListWithMarks(&aRanges, false);
++    else
++        aRanges.Append(aCurPos);
++
++    vector<ScSharedTokenRef> aRefTokens;
++    pDocSh->GetDocFunc().DetectiveCollectAllSuccs(aRanges, aRefTokens);
++
++    if (aRefTokens.empty())
++        // No dependants found.  Nothing to do.
++        return;
++
++    ScRangeList aDestRanges;
++    ScRefTokenHelper::getRangeListFromTokens(aDestRanges, aRefTokens);
++    MarkAndJumpToRanges(aDestRanges);
++}
++
+ //---------------------------------------------------------------------------
+ 
+ void ScViewFunc::ShowNote( bool bShow )
+diff --git sfx2/source/appl/appopen.cxx sfx2/source/appl/appopen.cxx
+index 9514db0..3829050 100644
+--- sfx2/source/appl/appopen.cxx
++++ sfx2/source/appl/appopen.cxx
+@@ -1150,7 +1150,8 @@ void SfxApplication::OpenDocExec_Impl( SfxRequest& rReq )
+ 			aTypeName = xTypeDetection->queryTypeByURL( aURL.Main );
+ 			SfxFilterMatcher& rMatcher = SFX_APP()->GetFilterMatcher();
+ 			const SfxFilter* pFilter = rMatcher.GetFilter4EA( aTypeName );
+-			if ( !pFilter || !( pFilter->IsOwnFormat() ))
++//			if ( !pFilter || !( pFilter->IsOwnFormat() ))
++            if (false)
+ 			{
+ 				// hyperlink does not link to own type => special handling (http, ftp) browser and (other external protocols) OS
+ 				Reference< XSystemShellExecute > xSystemShellExecute( ::comphelper::getProcessServiceFactory()->createInstance(
+diff --git sfx2/source/view/topfrm.cxx sfx2/source/view/topfrm.cxx
+index db1b3a2..921696e 100644
+--- sfx2/source/view/topfrm.cxx
++++ sfx2/source/view/topfrm.cxx
+@@ -913,26 +913,6 @@ sal_Bool SfxTopFrame::InsertDocument( SfxObjectShell* pDoc )
+     if ( pMarkItem )
+ 		aMark = pMarkItem->GetValue();
+ 
+-	if ( pDoc->Get_Impl()->nLoadedFlags & SFX_LOADED_MAINDOCUMENT )
+-	{
+-    	if ( pViewDataItem )
+-			pFrame->GetViewShell()->ReadUserData( pViewDataItem->GetValue(), sal_True );
+-		else if( aMark.Len() )
+-			GetCurrentViewFrame()->GetViewShell()->JumpToMark( aMark );
+-	}
+-	else
+-	{
+-		// Daten setzen, die in FinishedLoading ausgewertet werden
+-		MarkData_Impl*& rpMark = pDoc->Get_Impl()->pMarkData;
+-		if (!rpMark)
+-			rpMark = new MarkData_Impl;
+-		rpMark->pFrame = GetCurrentViewFrame();
+-		if ( pViewDataItem )
+-			rpMark->aUserData = pViewDataItem->GetValue();
+-		else
+-			rpMark->aMark = aMark;
+-	}
+-
+ 	// Position und Groesse setzen
+ 	//sal_uInt16 nWinMode = pModeItem ? pModeItem->GetValue() : 1;
+ 	if ( pAreaItem && !pOld )
+@@ -1000,6 +980,26 @@ sal_Bool SfxTopFrame::InsertDocument( SfxObjectShell* pDoc )
+         GetWindow().Show();
+     }
+ 
++    if ( pDoc->Get_Impl()->nLoadedFlags & SFX_LOADED_MAINDOCUMENT )
++    {
++        if ( pViewDataItem )
++            pFrame->GetViewShell()->ReadUserData( pViewDataItem->GetValue(), sal_True );
++        else if( aMark.Len() )
++            GetCurrentViewFrame()->GetViewShell()->JumpToMark( aMark );
++    }
++    else
++    {
++        // Daten setzen, die in FinishedLoading ausgewertet werden
++        MarkData_Impl*& rpMark = pDoc->Get_Impl()->pMarkData;
++        if (!rpMark)
++            rpMark = new MarkData_Impl;
++        rpMark->pFrame = GetCurrentViewFrame();
++        if ( pViewDataItem )
++            rpMark->aUserData = pViewDataItem->GetValue();
++        else
++            rpMark->aMark = aMark;
++    }
++
+ 	// Jetzt UpdateTitle, hidden TopFrames haben sonst keinen Namen!
+ 	pFrame->UpdateTitle();
+ 
+diff --git vcl/inc/vcl/keycodes.hxx vcl/inc/vcl/keycodes.hxx
+index 8e7c6a4..8102826 100644
+--- vcl/inc/vcl/keycodes.hxx
++++ vcl/inc/vcl/keycodes.hxx
+@@ -158,6 +158,8 @@
+ #define KEY_DECIMAL     ((USHORT)::com::sun::star::awt::Key::DECIMAL)
+ #define KEY_TILDE       ((USHORT)::com::sun::star::awt::Key::TILDE)
+ #define KEY_QUOTELEFT   ((USHORT)::com::sun::star::awt::Key::QUOTELEFT)
++#define KEY_BRACKETLEFT ((USHORT)::com::sun::star::awt::Key::BRACKETLEFT)
++#define KEY_BRACKETRIGHT ((USHORT)::com::sun::star::awt::Key::BRACKETRIGHT)
+ 
+ #define KEY_CAPSLOCK    ((USHORT)::com::sun::star::awt::Key::CAPSLOCK)
+ #define KEY_NUMLOCK     ((USHORT)::com::sun::star::awt::Key::NUMLOCK)
+diff --git vcl/unx/gtk/window/gtkframe.cxx vcl/unx/gtk/window/gtkframe.cxx
+index 16193c3..6f07f1c 100644
+--- vcl/unx/gtk/window/gtkframe.cxx
++++ vcl/unx/gtk/window/gtkframe.cxx
+@@ -212,6 +212,8 @@ static USHORT GetKeyCode( guint keyval )
+             case GDK_asciitilde:	nCode = KEY_TILDE;		break;
+             case GDK_leftsinglequotemark:
+             case GDK_quoteleft:	nCode = KEY_QUOTELEFT;		break;           
++            case GDK_bracketleft:  nCode = KEY_BRACKETLEFT;  break;
++            case GDK_bracketright: nCode = KEY_BRACKETRIGHT; break;
+             // some special cases, also see saldisp.cxx
+             // - - - - - - - - - - - - -  Apollo - - - - - - - - - - - - - 0x1000
+             case 0x1000FF02: // apXK_Copy
+diff --git vcl/unx/source/app/saldisp.cxx vcl/unx/source/app/saldisp.cxx
+index f505eb5..00ab850 100644
+--- vcl/unx/source/app/saldisp.cxx
++++ vcl/unx/source/app/saldisp.cxx
+@@ -1314,6 +1314,12 @@ XubString SalDisplay::GetKeyName( USHORT nKeyCode ) const
+         case KEY_QUOTELEFT:
+             nKeySym = XK_grave;
+             break;
++        case KEY_BRACKETLEFT:
++            nKeySym = XK_bracketleft;
++            break;
++        case KEY_BRACKETRIGHT:
++            nKeySym = XK_bracketright;
++            break;
+ 
+         default:
+             nKeySym = 0;
+@@ -1644,6 +1650,14 @@ USHORT SalDisplay::GetKeyCode( KeySym keysym, char*pcPrintable ) const
+             nKey = KEY_QUOTELEFT;
+             *pcPrintable = '`';
+             break;
++        case XK_bracketleft:
++            nKey = KEY_BRACKETLEFT;
++            *pcPrintable = '[';
++            break;
++         case XK_bracketright:
++             nKey = KEY_BRACKETRIGHT;
++             *pcPrintable = ']';
++             break;
+ //      case XK_Linefeed:
+ //          *pcPrintable = '\n';
+ //          break;
