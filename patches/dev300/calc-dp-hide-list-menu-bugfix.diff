@@ -1,0 +1,321 @@
+diff --git sc/inc/attrib.hxx sc/inc/attrib.hxx
+index 22e7d27..88e353b 100644
+--- sc/inc/attrib.hxx
++++ sc/inc/attrib.hxx
+@@ -106,6 +106,7 @@ public:
+ 
+ 	BOOL	HasAutoFilter() const		{ return ( GetValue() & SC_MF_AUTO ) != 0; }
+ 	BOOL	HasButton() const			{ return ( GetValue() & SC_MF_BUTTON ) != 0; }
++    bool    HasDPTable() const          { return ( GetValue() & SC_MF_DP_TABLE ) != 0; }
+ 
+ 	BOOL	IsScenario() const			{ return ( GetValue() & SC_MF_SCENARIO ) != 0; }
+ };
+diff --git sc/inc/dpobject.hxx sc/inc/dpobject.hxx
+index 503c531..b361472 100644
+--- sc/inc/dpobject.hxx
++++ sc/inc/dpobject.hxx
+@@ -319,6 +319,11 @@ public:
+ 
+     ScSimpleSharedString& GetSharedString();
+ 
++    void FreeTable(ScDPObject* pDPObj);
++    SC_DLLPUBLIC bool InsertNewTable(ScDPObject* pDPObj);
++
++    bool        HasDPTable(SCCOL nCol, SCROW nRow, SCTAB nTab) const;
++
+     ScDPCacheCell* getCacheCellFromPool(const ScDPCacheCell& rCell);
+     void clearCacheCellPool();
+ };
+diff --git sc/source/core/data/documen8.cxx sc/source/core/data/documen8.cxx
+index bbcb513..e6f15fd 100644
+--- sc/source/core/data/documen8.cxx
++++ sc/source/core/data/documen8.cxx
+@@ -95,6 +95,7 @@
+ #include "globstr.hrc"
+ #include "sc.hrc"
+ #include "charthelper.hxx"
++#include "dpobject.hxx"
+ 
+ #define GET_SCALEVALUE(set,id) 	((const SfxUInt16Item&)(set.Get( id ))).GetValue()
+ 
+@@ -712,8 +713,13 @@ BOOL ScDocument::OnlineSpellInRange( const ScRange& rSpellRange, ScAddress& rSpe
+ 	//	skip everything left of rSpellPos:
+ 	while ( pCell && nRow == rSpellPos.Row() && nCol < rSpellPos.Col() )
+ 		pCell = aIter.GetNext( nCol, nRow );
+-	while ( pCell )
++
++	for (; pCell; pCell = aIter.GetNext(nCol, nRow))
+ 	{
++        if (pDPCollection->HasDPTable(nCol, nRow, nTab))
++            // Don't spell check within datapilot table.
++            continue;
++
+ 		CellType eType = pCell->GetCellType();
+ 		if ( eType == CELLTYPE_STRING || eType == CELLTYPE_EDIT )
+ 		{
+@@ -798,8 +804,6 @@ BOOL ScDocument::OnlineSpellInRange( const ScRange& rSpellRange, ScAddress& rSpe
+ 
+ 		if ( ++nCellCount >= SPELL_MAXCELLS )			// seen enough cells?
+ 			break;
+-
+-		pCell = aIter.GetNext( nCol, nRow );
+ 	}
+ 
+ 	if ( pCell )
+diff --git sc/source/core/data/dpobject.cxx sc/source/core/data/dpobject.cxx
+index eddb200..a403571 100644
+--- sc/source/core/data/dpobject.cxx
++++ sc/source/core/data/dpobject.cxx
+@@ -542,6 +542,9 @@ void ScDPObject::Output()
+ 
+ 	//	aOutRange is always the range that was last output to the document
+ 	aOutRange = pOutput->GetOutputRange();
++    const ScAddress& s = aOutRange.aStart;
++    const ScAddress& e = aOutRange.aEnd;
++    pDoc->ApplyFlagsTab(s.Col(), s.Row(), e.Col(), e.Row(), s.Tab(), SC_MF_DP_TABLE);
+ }
+ 
+ const ScRange ScDPObject::GetOutputRangeByType( sal_Int32 nType )
+@@ -2489,7 +2492,7 @@ void ScDPCollection::WriteRefsTo( ScDPCollection& r ) const
+ 
+                 ScDPObject* pDestObj = new ScDPObject( *pSourceObj );
+                 pDestObj->SetAlive(TRUE);
+-                if ( !r.Insert(pDestObj) )
++                if ( !r.InsertNewTable(pDestObj) )
+                 {
+                     DBG_ERROR("cannot insert DPObject");
+                     DELETEZ( pDestObj );
+@@ -2524,6 +2527,39 @@ ScSimpleSharedString& ScDPCollection::GetSharedString()
+     return maSharedString;
+ }
+ 
++void ScDPCollection::FreeTable(ScDPObject* pDPObj)
++{
++    const ScRange& rOutRange = pDPObj->GetOutRange();
++    const ScAddress& s = rOutRange.aStart;
++    const ScAddress& e = rOutRange.aEnd;
++    pDoc->RemoveFlagsTab(s.Col(), s.Row(), e.Col(), e.Row(), s.Tab(), SC_MF_DP_TABLE);
++    Free(pDPObj);
++}
++
++bool ScDPCollection::InsertNewTable(ScDPObject* pDPObj)
++{
++    bool bSuccess = Insert(pDPObj);
++    if (bSuccess)
++    {
++        const ScRange& rOutRange = pDPObj->GetOutRange();
++        const ScAddress& s = rOutRange.aStart;
++        const ScAddress& e = rOutRange.aEnd;
++        pDoc->ApplyFlagsTab(s.Col(), s.Row(), e.Col(), e.Row(), s.Tab(), SC_MF_DP_TABLE);
++    }
++    return bSuccess;
++}
++
++bool ScDPCollection::HasDPTable(SCCOL nCol, SCROW nRow, SCTAB nTab) const
++{
++    const ScMergeFlagAttr* pMergeAttr = static_cast<const ScMergeFlagAttr*>(
++            pDoc->GetAttr(nCol, nRow, nTab, ATTR_MERGE_FLAG));
++
++    if (!pMergeAttr)
++        return false;
++
++    return pMergeAttr->HasDPTable();
++}
++
+ ScDPCacheCell* ScDPCollection::getCacheCellFromPool(const ScDPCacheCell& rCell)
+ {
+     ScDPCacheCell aCell(rCell);
+diff --git sc/source/core/data/dpoutput.cxx sc/source/core/data/dpoutput.cxx
+index 431cf47..edb3c48 100644
+--- sc/source/core/data/dpoutput.cxx
++++ sc/source/core/data/dpoutput.cxx
+@@ -690,7 +690,7 @@ void ScDPOutput::FieldCell( SCCOL nCol, SCROW nRow, SCTAB nTab, const String& rC
+         nMergeFlag |= SC_MF_BUTTON_POPUP;
+     if (bHasHiddenMember)
+         nMergeFlag |= SC_MF_HIDDEN_MEMBER;
+-    pDoc->ApplyAttr( nCol, nRow, nTab, ScMergeFlagAttr(nMergeFlag) );
++    pDoc->ApplyFlagsTab(nCol, nRow, nCol, nRow, nTab, nMergeFlag);
+ 
+ 	lcl_SetStyleById( pDoc,nTab, nCol,nRow, nCol,nRow, STR_PIVOT_STYLE_FIELDNAME );
+ }
+@@ -698,7 +698,7 @@ void ScDPOutput::FieldCell( SCCOL nCol, SCROW nRow, SCTAB nTab, const String& rC
+ void lcl_DoFilterButton( ScDocument* pDoc, SCCOL nCol, SCROW nRow, SCTAB nTab )
+ {
+ 	pDoc->SetString( nCol, nRow, nTab, ScGlobal::GetRscString(STR_CELL_FILTER) );
+-	pDoc->ApplyAttr( nCol, nRow, nTab, ScMergeFlagAttr(SC_MF_BUTTON) );
++    pDoc->ApplyFlagsTab(nCol, nRow, nCol, nRow, nTab, SC_MF_BUTTON);
+ }
+ 
+ void ScDPOutput::CalcSizes()
+diff --git sc/source/core/data/dpoutputgeometry.cxx sc/source/core/data/dpoutputgeometry.cxx
+index 4d6996b..8eb552a 100644
+--- sc/source/core/data/dpoutputgeometry.cxx
++++ sc/source/core/data/dpoutputgeometry.cxx
+@@ -128,7 +128,10 @@ void ScDPOutputGeometry::getRowFieldPositions(vector<ScAddress>& rAddrs) const
+     else if (mbShowFilter)
+         nCurRow += 2;
+ 
+-    nCurRow += static_cast<SCROW>(mnColumnFields);
++    if (mnColumnFields)
++        nCurRow += static_cast<SCROW>(mnColumnFields);
++    else
++        ++nCurRow;
+ 
+     SCROW nRow = nCurRow;
+     SCTAB nTab = maOutRange.aStart.Tab();
+@@ -164,6 +167,7 @@ ScDPOutputGeometry::FieldType ScDPOutputGeometry::getFieldButtonType(const ScAdd
+ {
+     // We will ignore the table position for now.
+ 
++    bool bExtraTitleRow = (mnColumnFields == 0);
+     bool bDataLayout = mnDataFields > 1;
+ 
+     SCROW nCurRow = maOutRange.aStart.Row();
+@@ -192,6 +196,9 @@ ScDPOutputGeometry::FieldType ScDPOutputGeometry::getFieldButtonType(const ScAdd
+         nCurRow += static_cast<SCROW>(mnColumnFields);
+     }
+ 
++    if (bExtraTitleRow)
++        ++nCurRow;
++
+     if (mnRowFields)
+     {
+         SCCOL nColStart = maOutRange.aStart.Col();
+diff --git sc/source/core/data/pivot2.cxx sc/source/core/data/pivot2.cxx
+index 924a5cd..ab8a699 100644
+--- sc/source/core/data/pivot2.cxx
++++ sc/source/core/data/pivot2.cxx
+@@ -158,12 +158,7 @@ void ScPivot::SetJustifyRight(SCCOL nCol1, SCROW nRow1, SCCOL nCol2, SCROW nRow2
+ 
+ void ScPivot::SetButton(SCCOL nCol1, SCROW nRow1, SCCOL nCol2, SCROW nRow2)
+ {
+-	if (pDoc->pTab[nDestTab])
+-	{
+-		ScPatternAttr aPattern( pDoc->GetPool() );
+-		aPattern.GetItemSet().Put( ScMergeFlagAttr(SC_MF_BUTTON) );
+-		pDoc->pTab[nDestTab]->ApplyPatternArea(nCol1, nRow1, nCol2, nRow2, aPattern);
+-	}
++    pDoc->ApplyFlagsTab(nCol1, nRow1, nCol2, nRow2, nDestTab, SC_MF_BUTTON);
+ }
+ 
+ void ScPivot::SetStyle(SCCOL nCol1, SCROW nRow1, SCCOL nCol2, SCROW nRow2, USHORT nId)
+diff --git sc/source/filter/excel/xipivot.cxx sc/source/filter/excel/xipivot.cxx
+index f225c67..fd85060 100644
+--- sc/source/filter/excel/xipivot.cxx
++++ sc/source/filter/excel/xipivot.cxx
+@@ -1396,7 +1396,7 @@ void XclImpPivotTable::Convert()
+     pDPObj->SetAlive( TRUE );
+     pDPObj->SetHeaderLayout( maPTViewEx9Info.mnGridLayout == 0 );
+ 
+-    GetDoc().GetDPCollection()->Insert( pDPObj );
++    GetDoc().GetDPCollection()->InsertNewTable(pDPObj);
+     mpDPObj = pDPObj;
+ 
+     ApplyMergeFlags(aOutRange, aSaveData);
+@@ -1439,10 +1439,8 @@ void XclImpPivotTable::ApplyMergeFlags(const ScRange& rOutRange, const ScDPSaveD
+         if (rSaveData.HasInvisibleMember(aName))
+             nMFlag |= SC_MF_HIDDEN_MEMBER;
+ 
+-        ScMergeFlagAttr aAttr(nMFlag);
+-        rDoc.ApplyAttr(itr->Col(), itr->Row(), itr->Tab(), aAttr);
+-        ScMergeFlagAttr aAttr2(SC_MF_AUTO);
+-        rDoc.ApplyAttr(itr->Col()+1, itr->Row(), itr->Tab(), aAttr2);
++        rDoc.ApplyFlagsTab(itr->Col(), itr->Row(), itr->Col(), itr->Row(), itr->Tab(), nMFlag);
++        rDoc.ApplyFlagsTab(itr->Col()+1, itr->Row(), itr->Col()+1, itr->Row(), itr->Tab(), SC_MF_AUTO);
+     }
+ 
+     vector<ScAddress> aColBtns;
+@@ -1456,8 +1454,7 @@ void XclImpPivotTable::ApplyMergeFlags(const ScRange& rOutRange, const ScDPSaveD
+         rDoc.GetString(itr->Col(), itr->Row(), itr->Tab(), aName);
+         if (rSaveData.HasInvisibleMember(aName))
+             nMFlag |= SC_MF_HIDDEN_MEMBER;
+-        ScMergeFlagAttr aAttr(nMFlag);
+-        rDoc.ApplyAttr(itr->Col(), itr->Row(), itr->Tab(), aAttr);
++        rDoc.ApplyFlagsTab(itr->Col(), itr->Row(), itr->Col(), itr->Row(), itr->Tab(), nMFlag);
+     }
+ 
+     vector<ScAddress> aRowBtns;
+@@ -1471,14 +1468,12 @@ void XclImpPivotTable::ApplyMergeFlags(const ScRange& rOutRange, const ScDPSaveD
+         rDoc.GetString(itr->Col(), itr->Row(), itr->Tab(), aName);
+         if (rSaveData.HasInvisibleMember(aName))
+             nMFlag |= SC_MF_HIDDEN_MEMBER;
+-        ScMergeFlagAttr aAttr(nMFlag);
+-        rDoc.ApplyAttr(itr->Col(), itr->Row(), itr->Tab(), aAttr);
++        rDoc.ApplyFlagsTab(itr->Col(), itr->Row(), itr->Col(), itr->Row(), itr->Tab(), nMFlag);
+     }
+     if (bDataLayout)
+     {
+         --itr; // move back to the last row field position.
+-        ScMergeFlagAttr aAttr(SC_MF_BUTTON);
+-        rDoc.ApplyAttr(itr->Col()+1, itr->Row(), itr->Tab(), aAttr);
++        rDoc.ApplyFlagsTab(itr->Col(), itr->Row(), itr->Col(), itr->Row(), itr->Tab(), SC_MF_BUTTON);
+     }
+ }
+ 
+diff --git sc/source/filter/xml/xmldpimp.cxx sc/source/filter/xml/xmldpimp.cxx
+index 3214942..de4c7ca 100644
+--- sc/source/filter/xml/xmldpimp.cxx
++++ sc/source/filter/xml/xmldpimp.cxx
+@@ -299,8 +299,7 @@ void ScXMLDataPilotTableContext::SetButtons()
+                 if (maHiddenMemberFields.count(aCellStr))
+                     nMFlag |= SC_MF_HIDDEN_MEMBER;
+ 
+-				ScMergeFlagAttr aAttr(nMFlag);
+-				pDoc->ApplyAttr( aScAddress.Col(), aScAddress.Row(), aScAddress.Tab(), aAttr );
++                pDoc->ApplyFlagsTab(aScAddress.Col(), aScAddress.Row(), aScAddress.Col(), aScAddress.Row(), aScAddress.Tab(), nMFlag);
+ 			}
+ 		}
+ 	}
+@@ -449,7 +448,7 @@ void ScXMLDataPilotTableContext::EndElement()
+ 		{
+ 			ScDPCollection* pDPCollection = pDoc->GetDPCollection();
+ 			pDPObject->SetAlive(sal_True);
+-			pDPCollection->Insert(pDPObject);
++            pDPCollection->InsertNewTable(pDPObject);
+ 		}
+ 		SetButtons();
+ 	}
+diff --git sc/source/ui/docshell/dbdocfun.cxx sc/source/ui/docshell/dbdocfun.cxx
+index 96c2ccd..c5b3670 100644
+--- sc/source/ui/docshell/dbdocfun.cxx
++++ sc/source/ui/docshell/dbdocfun.cxx
+@@ -1233,7 +1233,7 @@ BOOL ScDBDocFunc::DataPilotUpdate( ScDPObject* pOldObj, const ScDPObject* pNewOb
+ 								  aRange.aEnd.Col(),   aRange.aEnd.Row(),
+ 								  nTab, SC_MF_AUTO );
+ 
+-			pDoc->GetDPCollection()->Free( pOldObj );	// object is deleted here
++            pDoc->GetDPCollection()->FreeTable( pOldObj );  // object is deleted here
+ 
+ 			rDocShell.PostPaintGridAll();	//! only necessary parts
+ 			rDocShell.PostPaint( aRange.aStart.Col(), aRange.aStart.Row(), nTab,
+@@ -1277,7 +1277,7 @@ BOOL ScDBDocFunc::DataPilotUpdate( ScDPObject* pOldObj, const ScDPObject* pNewOb
+ 
+ 				pDestObj = new ScDPObject( *pNewObj );
+ 				pDestObj->SetAlive(TRUE);
+-				if ( !pDoc->GetDPCollection()->Insert(pDestObj) )
++                if ( !pDoc->GetDPCollection()->InsertNewTable(pDestObj) )
+ 				{
+ 					DBG_ERROR("cannot insert DPObject");
+ 					DELETEZ( pDestObj );
+diff --git sc/source/ui/undo/undodat.cxx sc/source/ui/undo/undodat.cxx
+index 15d6c76..89c0fbe 100644
+--- sc/source/ui/undo/undodat.cxx
++++ sc/source/ui/undo/undodat.cxx
+@@ -1879,7 +1879,7 @@ void __EXPORT ScUndoDataPilot::Undo()
+ 			else
+ 			{
+ 				//	delete inserted object
+-				pDoc->GetDPCollection()->Free(pDocObj);
++                pDoc->GetDPCollection()->FreeTable(pDocObj);
+ 			}
+ 		}
+ 	}
+@@ -1889,7 +1889,7 @@ void __EXPORT ScUndoDataPilot::Undo()
+ 
+ 		ScDPObject* pDestObj = new ScDPObject( *pOldDPObject );
+ 		pDestObj->SetAlive(TRUE);
+-		if ( !pDoc->GetDPCollection()->Insert(pDestObj) )
++		if ( !pDoc->GetDPCollection()->InsertNewTable(pDestObj) )
+ 		{
+ 			DBG_ERROR("cannot insert DPObject");
+ 			DELETEZ( pDestObj );
