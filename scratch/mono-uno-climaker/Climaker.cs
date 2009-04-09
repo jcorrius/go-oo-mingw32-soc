@@ -637,3 +637,4 @@ example: climaker --out cli_mytypes.dll \
         return ret;
     }
 }
+
