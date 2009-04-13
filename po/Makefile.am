@@ -36,3 +36,6 @@ ooo-build-%.sdf: ooo-build-%.po ooo-build.sdf /usr/bin/po2oo ../bin/po2sdf
 	echo "       and can be found at" ; \
 	echo "       http://download.opensuse.org/repositories/OpenOffice.org:/EXTRAS/" ; \
 	exit 1
+
+clean-local:
+	rm -f .intltool-merge-cache

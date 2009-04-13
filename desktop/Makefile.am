@@ -9,7 +9,7 @@ old_gnome_files = \
 
 all: $(desktop_in_files:.desktop.in.in=.desktop) $(old_gnome_files:.in=)
 
-clean: 
+clean-local: 
 	rm -f $(desktop_in_files:.desktop.in.in=.desktop.in) \
 	      $(desktop_in_files:.desktop.in.in=.desktop) \
 	      $(old_gnome_files:.in=)
