@@ -1,0 +1,608 @@
+diff --git oox/inc/oox/xls/excelfilter.hxx oox/inc/oox/xls/excelfilter.hxx
+index 4ed3418..f1e2d65 100644
+--- oox/inc/oox/xls/excelfilter.hxx
++++ oox/inc/oox/xls/excelfilter.hxx
+@@ -58,6 +58,8 @@ public:
+ 	virtual const ::oox::drawingml::table::TableStyleListPtr getTableStyles();
+     virtual ::oox::drawingml::chart::ChartConverter& getChartConverter();
+ 
++    virtual sal_Bool filter( const ::com::sun::star::uno::Sequence< ::com::sun::star::beans::PropertyValue >& rDescriptor ) throw( ::com::sun::star::uno::RuntimeException );
++
+ private:
+     virtual ::rtl::OUString implGetImplementationName() const;
+ 
+diff --git oox/source/xls/excelfilter.cxx oox/source/xls/excelfilter.cxx
+index cb02ba3..fcf3d3f 100644
+--- oox/source/xls/excelfilter.cxx
++++ oox/source/xls/excelfilter.cxx
+@@ -43,7 +43,9 @@ using ::com::sun::star::uno::Any;
+ using ::com::sun::star::uno::Reference;
+ using ::com::sun::star::uno::Sequence;
+ using ::com::sun::star::uno::Exception;
++using ::com::sun::star::uno::UNO_QUERY;
+ using ::com::sun::star::uno::XInterface;
++using ::com::sun::star::lang::XComponent;
+ using ::com::sun::star::lang::XMultiServiceFactory;
+ using ::com::sun::star::xml::sax::XFastDocumentHandler;
+ using ::oox::core::BinaryFilterBase;
+@@ -143,6 +145,32 @@ const TableStyleListPtr ExcelFilter::getTableStyles()
+     return mpHelper->getChartConverter();
+ }
+ 
++sal_Bool ExcelFilter::filter( const ::com::sun::star::uno::Sequence< ::com::sun::star::beans::PropertyValue >& rDescriptor ) throw( ::com::sun::star::uno::RuntimeException )
++{
++    if ( XmlFilterBase::filter( rDescriptor ) )
++        return true;
++
++    if ( isExportFilter() )
++    {
++        Reference< XExporter > xExporter( getGlobalFactory()->createInstance( CREATE_OUSTRING( "com.sun.star.comp.oox.ExcelFilterExport" ) ), UNO_QUERY );
++
++        if ( xExporter.is() )
++        {
++            Reference< XComponent > xDocument( getModel(), UNO_QUERY );
++            Reference< XFilter > xFilter( xExporter, UNO_QUERY );
++
++            if ( xFilter.is() )
++            {
++                xExporter->setSourceDocument( xDocument );
++                if ( xFilter->filter( rDescriptor ) )
++                    return true;
++            }
++        }
++    }
++
++    return false;
++}
++
+ OUString ExcelFilter::implGetImplementationName() const
+ {
+     return ExcelFilter_getImplementationName();
+diff --git sc/inc/filter.hxx sc/inc/filter.hxx
+index bc72301..275f787 100644
+--- sc/inc/filter.hxx
++++ sc/inc/filter.hxx
+@@ -72,7 +72,7 @@ enum EXCIMPFORMAT { EIF_AUTO, EIF_BIFF5, EIF_BIFF8, EIF_BIFF_LE4 };
+ 
+ // fuer Export
+ enum ExportFormatLotus { ExpWK1, ExpWK3, ExpWK4 };
+-enum ExportFormatExcel { ExpBiff2, ExpBiff3, ExpBiff4, ExpBiff4W, ExpBiff5, ExpBiff8, Exp2007Xml };
++enum ExportFormatExcel { ExpBiff2, ExpBiff3, ExpBiff4, ExpBiff4W, ExpBiff5, ExpBiff8 };
+ 
+ 
+ // Optionen fuer DIF-Im-/Export (Kombination ueber '|')
+diff --git sc/source/filter/excel/excdoc.cxx sc/source/filter/excel/excdoc.cxx
+index ff03be7..0e213f6 100644
+--- sc/source/filter/excel/excdoc.cxx
++++ sc/source/filter/excel/excdoc.cxx
+@@ -769,19 +769,17 @@ void ExcDocument::Write( SvStream& rSvStrm )
+ 		pExpChangeTrack->Write();
+ }
+ 
+-void ExcDocument::WriteXml( SvStream& rStrm )
++void ExcDocument::WriteXml( XclExpXmlStream& rStrm )
+ {
+-    XclExpXmlStream aStrm( ::comphelper::getProcessServiceFactory(), rStrm, GetRoot() );
+-
+     SfxObjectShell* pDocShell = GetDocShell();
+ 
+     using namespace ::com::sun::star;
+     uno::Reference<document::XDocumentPropertiesSupplier> xDPS( pDocShell->GetModel(), uno::UNO_QUERY_THROW );
+     uno::Reference<document::XDocumentProperties> xDocProps = xDPS->getDocumentProperties();
+ 
+-    aStrm.exportDocumentProperties( xDocProps );
++    rStrm.exportDocumentProperties( xDocProps );
+ 
+-    sax_fastparser::FSHelperPtr& rWorkbook = aStrm.GetCurrentStream();
++    sax_fastparser::FSHelperPtr& rWorkbook = rStrm.GetCurrentStream();
+     rWorkbook->startElement( XML_workbook,
+             XML_xmlns, "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+             FSNS(XML_xmlns, XML_r), "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+@@ -800,7 +798,7 @@ void ExcDocument::WriteXml( SvStream& rStrm )
+ 
+         GetOldRoot().pEscher->GetStrm().Seek(0);   // ready for take off
+ 
+-        aHeader.WriteXml( aStrm );
++        aHeader.WriteXml( rStrm );
+ 
+         for( size_t nTab = 0, nTabCount = maTableList.GetSize(); nTab < nTabCount; ++nTab )
+         {
+@@ -811,16 +809,16 @@ void ExcDocument::WriteXml( SvStream& rStrm )
+                 xBoundsheet->SetStreamPos( aXclStrm.GetSvStreamPos() );
+ #endif
+             // write the table
+-            maTableList.GetRecord( nTab )->WriteXml( aStrm );
++            maTableList.GetRecord( nTab )->WriteXml( rStrm );
+         }
+     }
+ 
+     if( pExpChangeTrack )
+-        pExpChangeTrack->WriteXml( aStrm );
++        pExpChangeTrack->WriteXml( rStrm );
+ 
+     rWorkbook->endElement( XML_workbook );
+     rWorkbook.reset();
+ 
+-    aStrm.commit();
++    rStrm.commit();
+ }
+ 
+diff --git sc/source/filter/excel/excel.cxx sc/source/filter/excel/excel.cxx
+index 1ae79fb..d19958d 100644
+--- sc/source/filter/excel/excel.cxx
++++ sc/source/filter/excel/excel.cxx
+@@ -250,25 +250,10 @@ static FltError lcl_ExportExcelBiff( SfxMedium& rMedium, ScDocument *pDocument,
+     return eRet;
+ }
+ 
+-static FltError lcl_ExportExcel2007Xml( SfxMedium& rMedium, ScDocument *pDocument,
+-        SvStream* pMedStrm, CharSet eNach )
+-{
+-    SotStorageRef xRootStrg = (SotStorage*) 0;
+-
+-    XclExpRootData aExpData( EXC_BIFF8, rMedium, xRootStrg, *pDocument, eNach );
+-    aExpData.meOutput = EXC_OUTPUT_XML_2007;
+-
+-    ExportXml2007 aFilter( aExpData, *pMedStrm );
+-
+-    FltError eRet = aFilter.Write();
+-
+-    return eRet;
+-}
+-
+ FltError ScFormatFilterPluginImpl::ScExportExcel5( SfxMedium& rMedium, ScDocument *pDocument,
+     ExportFormatExcel eFormat, CharSet eNach )
+ {
+-    if( eFormat != ExpBiff5 && eFormat != ExpBiff8 && eFormat != Exp2007Xml )
++    if( eFormat != ExpBiff5 && eFormat != ExpBiff8 )
+         return eERR_NI;
+ 
+     // check the passed Calc document
+@@ -283,8 +268,6 @@ FltError ScFormatFilterPluginImpl::ScExportExcel5( SfxMedium& rMedium, ScDocumen
+     FltError eRet = eERR_UNKN_BIFF;
+     if( eFormat == ExpBiff5 || eFormat == ExpBiff8 )
+         eRet = lcl_ExportExcelBiff( rMedium, pDocument, pMedStrm, eFormat == ExpBiff8, eNach );
+-    else if( eFormat == Exp2007Xml )
+-        eRet = lcl_ExportExcel2007Xml( rMedium, pDocument, pMedStrm, eNach );
+ 
+ 	return eRet;
+ }
+diff --git sc/source/filter/excel/expop2.cxx sc/source/filter/excel/expop2.cxx
+index bed1d2c..b4763c4 100644
+--- sc/source/filter/excel/expop2.cxx
++++ sc/source/filter/excel/expop2.cxx
+@@ -153,63 +153,3 @@ ExportBiff8::~ExportBiff8()
+ 	delete pExcRoot->pEscher;
+ 	pExcRoot->pEscher = NULL;
+ }
+-
+-
+-ExportXml2007::ExportXml2007( XclExpRootData& rExpData, SvStream& rStrm )
+-    : ExportTyp( rStrm, &rExpData.mrDoc, rExpData.meTextEnc )
+-    , XclExpRoot( rExpData )
+-{
+-    pExcRoot = &GetOldRoot();
+-    pExcRoot->pER = this;
+-    pExcRoot->eDateiTyp = Biff8;
+-    pExcRoot->pEscher = new XclEscher( *pExcRoot->pER, GetDoc().GetTableCount() );
+-    pExcDoc = new ExcDocument( *this );
+-}
+-
+-
+-ExportXml2007::~ExportXml2007()
+-{
+-    delete pExcRoot->pEscher;
+-    pExcRoot->pEscher = NULL;
+-
+-    delete pExcDoc;
+-}
+-
+-
+-FltError ExportXml2007::Write()
+-{
+-    SfxObjectShell* pDocShell = GetDocShell();
+-    DBG_ASSERT( pDocShell, "ExportXml2007::Write - no document shell" );
+-
+-    SotStorageRef xRootStrg = GetRootStorage();
+-    DBG_ASSERT( xRootStrg.Is(), "ExportXml2007::Write - no root storage" );
+-
+-    bool bWriteBasicCode = false;
+-    bool bWriteBasicStrg = false;
+-
+-    if( SvtFilterOptions* pFilterOpt = SvtFilterOptions::Get() )
+-    {
+-        bWriteBasicCode = pFilterOpt->IsLoadExcelBasicCode();
+-        bWriteBasicStrg = pFilterOpt->IsLoadExcelBasicStorage();
+-    }
+-
+-    if( pDocShell && xRootStrg.Is() && bWriteBasicStrg )
+-    {
+-        SvxImportMSVBasic aBasicImport( *pDocShell, *xRootStrg, bWriteBasicCode, bWriteBasicStrg );
+-        ULONG nErr = aBasicImport.SaveOrDelMSVBAStorage( TRUE, EXC_STORAGE_VBA_PROJECT );
+-        if( nErr != ERRCODE_NONE )
+-            pDocShell->SetError( nErr );
+-    }
+-
+-    pExcDoc->ReadDoc();         // ScDoc -> ExcDoc
+-    pExcDoc->WriteXml( aOut );  // wechstreamen
+-
+-    //! TODO: separate warnings for columns and sheets
+-    const XclExpAddressConverter& rAddrConv = GetAddressConverter();
+-    if( rAddrConv.IsColTruncated() || rAddrConv.IsRowTruncated() || rAddrConv.IsTabTruncated() )
+-        return SCWARN_EXPORT_MAXROW;
+-
+-    return eERR_OK;
+-}
+-
+-
+diff --git sc/source/filter/excel/xestream.cxx sc/source/filter/excel/xestream.cxx
+index 33cd93b..a147e13 100644
+--- sc/source/filter/excel/xestream.cxx
++++ sc/source/filter/excel/xestream.cxx
+@@ -49,6 +49,11 @@
+ #include "rangelst.hxx"
+ #include "compiler.hxx"
+ 
++#include <../../ui/inc/docsh.hxx>
++#include <svtools/fltrcfg.hxx>
++#include <svx/svxmsbas.hxx>
++#include <excdoc.hxx>
++
+ #include <oox/core/tokens.hxx>
+ #include <formula/grammar.hxx>
+ #include <oox/export/drawingml.hxx>
+@@ -58,14 +63,20 @@
+ using ::std::vector;
+ 
+ using ::com::sun::star::beans::PropertyValue;
++using ::com::sun::star::embed::XStorage;
+ using ::com::sun::star::io::XOutputStream;
+ using ::com::sun::star::io::XStream;
+ using ::com::sun::star::lang::XComponent;
+ using ::com::sun::star::lang::XMultiServiceFactory;
+ using ::com::sun::star::lang::XServiceInfo;
++using ::com::sun::star::lang::XSingleServiceFactory;
++using ::com::sun::star::registry::InvalidRegistryException;
++using ::com::sun::star::registry::XRegistryKey;
++using ::com::sun::star::uno::Exception;
+ using ::com::sun::star::uno::Reference;
+ using ::com::sun::star::uno::Sequence;
+ using ::com::sun::star::uno::UNO_QUERY;
++using ::com::sun::star::uno::XInterface;
+ using ::oox::drawingml::DrawingML;
+ using ::rtl::OString;
+ using ::rtl::OUString;
+@@ -968,29 +979,10 @@ sax_fastparser::FSHelperPtr XclXmlUtils::WriteFontData( sax_fastparser::FSHelper
+ 
+ // ============================================================================
+ 
+-XclExpXmlStream::XclExpXmlStream( const Reference< XMultiServiceFactory >& rSMgr, SvStream& rStrm, const XclExpRoot& rRoot )
+-    : XmlFilterBase( rSMgr )
+-    , mrRoot( rRoot )
++XclExpXmlStream::XclExpXmlStream( const Reference< XMultiServiceFactory >& rSMgr )
++    : XmlFilterBase( rSMgr ),
++      mpRoot( NULL )
+ {
+-    Sequence< PropertyValue > aArgs( 1 );
+-    const OUString sStream( RTL_CONSTASCII_USTRINGPARAM( "StreamForOutput" ) );
+-    aArgs[0].Name  = sStream;
+-    aArgs[0].Value <<= Reference< XStream > ( new OStreamWrapper( rStrm ) );
+-
+-    XServiceInfo* pInfo = rRoot.GetDocModelObj();
+-    Reference< XComponent > aComponent( pInfo, UNO_QUERY );
+-    setSourceDocument( aComponent );
+-    filter( aArgs );
+-
+-    PushStream( CreateOutputStream(
+-                OUString::createFromAscii( "xl/workbook.xml" ),
+-                OUString::createFromAscii( "xl/workbook.xml" ),
+-                Reference< XOutputStream >(),
+-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+-                "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" ) );
+-
+-    DrawingML::ResetCounters();
+-    XclObjList::ResetCounters();
+ }
+ 
+ XclExpXmlStream::~XclExpXmlStream()
+@@ -1108,14 +1100,59 @@ oox::drawingml::chart::ChartConverter& XclExpXmlStream::getChartConverter()
+     return * (oox::drawingml::chart::ChartConverter*) NULL;
+ }
+ 
+-bool XclExpXmlStream::exportDocument() throw()
++ScDocShell* XclExpXmlStream::getDocShell()
+ {
+-    return false;
++    Reference< XInterface > xModel( getModel(), UNO_QUERY );
++
++    ScModelObj *pObj = dynamic_cast < ScModelObj* >( xModel.get() );
++
++    if ( pObj )
++        return reinterpret_cast < ScDocShell* >( pObj->GetEmbeddedObject() );
++
++    return 0;
+ }
+ 
+-::rtl::OUString XclExpXmlStream::implGetImplementationName() const
++bool XclExpXmlStream::exportDocument() throw()
+ {
+-    return CREATE_OUSTRING( "TODO" );
++    ScDocShell* pShell = getDocShell();
++    ScDocument* pDoc = pShell->GetDocument();
++    SotStorageRef rStorage = dynamic_cast <SotStorage*>( Reference<XStorage>( pShell->GetStorage() ).get() );
++
++    XclExpRootData aData( EXC_BIFF8, *pShell->GetMedium (), rStorage, *pDoc, RTL_TEXTENCODING_DONTKNOW );
++    XclExpRoot aRoot( aData );
++
++    mpRoot = &aRoot;
++    aRoot.GetOldRoot().pER = &aRoot;
++    aRoot.GetOldRoot().eDateiTyp = Biff8;
++    XclEscher escher( *aRoot.GetOldRoot ().pER, pDoc->GetTableCount () );
++    aRoot.GetOldRoot().pEscher = &escher;
++
++    if ( SvtFilterOptions* pOptions = SvtFilterOptions::Get() )
++        if ( pShell && pOptions->IsLoadExcelBasicStorage() )
++            if ( sal_uInt32 nError
++                 = SvxImportMSVBasic( *pShell, *rStorage,
++                                      pOptions->IsLoadExcelBasicCode(),
++                                      pOptions->IsLoadExcelBasicStorage() )
++                .SaveOrDelMSVBAStorage( true, EXC_STORAGE_VBA_PROJECT) )
++            {
++                pShell->SetError( nError );
++            }
++
++    OUString const workbook = CREATE_OUSTRING( "xl/workbook.xml" );
++    PushStream( CreateOutputStream( workbook, workbook,
++                                    Reference <XOutputStream>(),
++                                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
++                                    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" ) );
++
++    // destruct at the end of the block
++    {
++        ExcDocument aDocRoot( aRoot );
++        aDocRoot.ReadDoc();
++        aDocRoot.WriteXml( *this );
++    }
++
++    mpRoot = NULL;
++    return true;
+ }
+ 
+ void XclExpXmlStream::Trace( const char* format, ...)
+@@ -1126,3 +1163,98 @@ void XclExpXmlStream::Trace( const char* format, ...)
+     va_end( ap );
+ }
+ 
++//////////////////////////////////////////////////////////////////////////
++// UNO stuff so that the filter is registered
++//////////////////////////////////////////////////////////////////////////
++
++#define IMPL_NAME "com.sun.star.comp.oox.ExcelFilterExport"
++
++OUString XlsxExport_getImplementationName()
++{
++    return OUString( RTL_CONSTASCII_USTRINGPARAM( IMPL_NAME ) );
++}
++
++::rtl::OUString XclExpXmlStream::implGetImplementationName() const
++{
++    return CREATE_OUSTRING( "TODO" );
++}
++
++
++Sequence< OUString > SAL_CALL XlsxExport_getSupportedServiceNames() throw()
++{
++    const OUString aServiceName( RTL_CONSTASCII_USTRINGPARAM( "com.sun.star.document.ExportFilter" ) );
++    const Sequence< OUString > aSeq( &aServiceName, 1 );
++    return aSeq;
++}
++
++Reference< XInterface > SAL_CALL XlsxExport_createInstance(const Reference< XMultiServiceFactory > & rSMgr ) throw( Exception )
++{
++    return (cppu::OWeakObject*) new XclExpXmlStream( rSMgr );
++}
++
++#ifdef __cplusplus
++extern "C"
++{
++#endif
++
++SAL_DLLPUBLIC_EXPORT void SAL_CALL component_getImplementationEnvironment( const sal_Char ** ppEnvTypeName, uno_Environment ** /* ppEnv */ )
++{
++    *ppEnvTypeName = CPPU_CURRENT_LANGUAGE_BINDING_NAME;
++}
++
++SAL_DLLPUBLIC_EXPORT sal_Bool SAL_CALL component_writeInfo( void* /* pServiceManager */, void* pRegistryKey )
++{
++    sal_Bool bRet = sal_False;
++
++    if( pRegistryKey )
++    {
++        try
++        {
++            Reference< XRegistryKey > xNewKey1(
++                    static_cast< XRegistryKey* >( pRegistryKey )->createKey(                                
++                        OUString::createFromAscii( IMPL_NAME "/UNO/SERVICES/" ) ) );
++            xNewKey1->createKey( XlsxExport_getSupportedServiceNames().getConstArray()[0] );
++
++            bRet = sal_True;
++        }
++        catch( InvalidRegistryException& )
++        {
++            OSL_ENSURE( sal_False, "### InvalidRegistryException!" );
++        }
++    }
++
++    return bRet;
++}
++
++// ------------------------
++// - component_getFactory -
++// ------------------------
++
++SAL_DLLPUBLIC_EXPORT void* SAL_CALL component_getFactory( const sal_Char* pImplName, void* pServiceManager, void* /* pRegistryKey */ )
++{
++    Reference< XSingleServiceFactory > xFactory;
++    void* pRet = 0;
++
++    if ( rtl_str_compare( pImplName, IMPL_NAME ) == 0 )
++    {
++        const OUString aServiceName( OUString::createFromAscii( IMPL_NAME ) );
++
++        xFactory = Reference< XSingleServiceFactory >( ::cppu::createSingleFactory(
++                    reinterpret_cast< XMultiServiceFactory* >( pServiceManager ),
++                    XlsxExport_getImplementationName(),
++                    XlsxExport_createInstance,
++                    XlsxExport_getSupportedServiceNames() ) );
++    }
++
++    if ( xFactory.is() )
++    {
++        xFactory->acquire();
++        pRet = xFactory.get();
++    }
++
++    return pRet;
++}
++
++#ifdef __cplusplus
++}
++#endif
+diff --git sc/source/filter/inc/excdoc.hxx sc/source/filter/inc/excdoc.hxx
+index dd73a3e..26edc01 100644
+--- sc/source/filter/inc/excdoc.hxx
++++ sc/source/filter/inc/excdoc.hxx
+@@ -113,7 +113,7 @@ public:
+ 
+ 	void				ReadDoc( void );
+ 	void				Write( SvStream& rSvStrm );
+-	void				WriteXml( SvStream& rSvStrm );
++	void				WriteXml( XclExpXmlStream& );
+ };
+ 
+ 
+diff --git sc/source/filter/inc/exp_op.hxx sc/source/filter/inc/exp_op.hxx
+index f696cc3..b0197c1 100644
+--- sc/source/filter/inc/exp_op.hxx
++++ sc/source/filter/inc/exp_op.hxx
+@@ -130,21 +130,6 @@ public:
+ };
+ 
+ 
+-class ExportXml2007 : public ExportTyp, protected XclExpRoot
+-{
+-private:
+-    ExcDocument*        pExcDoc;
+-
+-protected:
+-    RootData*           pExcRoot;
+-
+-public:
+-                        ExportXml2007( XclExpRootData& rExpData, SvStream& rStrm );
+-    virtual				~ExportXml2007();
+-    FltError			Write();
+-};
+-
+-
+ #endif
+ 
+ 
+diff --git sc/source/filter/inc/xestream.hxx sc/source/filter/inc/xestream.hxx
+index 172f054..fc986fb 100644
+--- sc/source/filter/inc/xestream.hxx
++++ sc/source/filter/inc/xestream.hxx
+@@ -269,6 +269,7 @@ private:
+     (s.Len() && s.GetChar( 0 ) != 0 ? XclXmlUtils::ToOString( s ).getStr() : NULL)
+ 
+ class ScAddress;
++class ScDocShell;
+ class ScDocument;
+ class ScFormulaCell;
+ class ScRange;
+@@ -317,11 +318,11 @@ public:
+ class XclExpXmlStream : public oox::core::XmlFilterBase
+ {
+ public:
+-    XclExpXmlStream( const com::sun::star::uno::Reference< com::sun::star::lang::XMultiServiceFactory >& rSMgr, SvStream& rStrm, const XclExpRoot& rRoot );
++    XclExpXmlStream( const com::sun::star::uno::Reference< com::sun::star::lang::XMultiServiceFactory >& rSMgr );
+     virtual ~XclExpXmlStream();
+ 
+     /** Returns the filter root data. */
+-    inline const XclExpRoot& GetRoot() const { return mrRoot; }
++    inline const XclExpRoot& GetRoot() const { return *mpRoot; }
+ 
+     sax_fastparser::FSHelperPtr& GetCurrentStream();
+     void PushStream( sax_fastparser::FSHelperPtr aStream );
+@@ -354,12 +355,13 @@ public:
+     void Trace( const char* format, ...);
+ private:
+     virtual ::rtl::OUString implGetImplementationName() const;
++    ScDocShell *getDocShell();
+ 
+     typedef std::map< ::rtl::OUString, 
+         std::pair< ::rtl::OUString, 
+             sax_fastparser::FSHelperPtr > >     XclExpXmlPathToStateMap;
+ 
+-    const XclExpRoot&                           mrRoot;         /// Filter root data.
++    const XclExpRoot*                           mpRoot;
+     std::stack< sax_fastparser::FSHelperPtr >   maStreams;
+     XclExpXmlPathToStateMap                     maOpenedStreamMap;
+ };
+diff --git sc/source/ui/docshell/docsh.cxx sc/source/ui/docshell/docsh.cxx
+index 9ed459f..04825b9 100644
+--- sc/source/ui/docshell/docsh.cxx
++++ sc/source/ui/docshell/docsh.cxx
+@@ -166,7 +166,6 @@ static const sal_Char __FAR_DATA pFilterExcel95[]	= "MS Excel 95";
+ static const sal_Char __FAR_DATA pFilterEx95Temp[]	= "MS Excel 95 Vorlage/Template";
+ static const sal_Char __FAR_DATA pFilterExcel97[]	= "MS Excel 97";
+ static const sal_Char __FAR_DATA pFilterEx97Temp[]	= "MS Excel 97 Vorlage/Template";
+-static const sal_Char __FAR_DATA pFilterEx07Xml[]   = "Calc MS Excel 2007 XML";
+ static const sal_Char __FAR_DATA pFilterDBase[]		= "dBase";
+ static const sal_Char __FAR_DATA pFilterDif[]		= "DIF";
+ static const sal_Char __FAR_DATA pFilterSylk[]		= "SYLK";
+@@ -1954,8 +1953,7 @@ BOOL __EXPORT ScDocShell::ConvertTo( SfxMedium &rMed )
+ 	}
+ 	else if (aFltName.EqualsAscii(pFilterExcel5) || aFltName.EqualsAscii(pFilterExcel95) ||
+ 			 aFltName.EqualsAscii(pFilterExcel97) || aFltName.EqualsAscii(pFilterEx5Temp) ||
+-			 aFltName.EqualsAscii(pFilterEx95Temp) || aFltName.EqualsAscii(pFilterEx97Temp) ||
+-			 aFltName.EqualsAscii(pFilterEx07Xml))
++			 aFltName.EqualsAscii(pFilterEx95Temp) || aFltName.EqualsAscii(pFilterEx97Temp))
+ 	{
+ 		WaitObject aWait( GetActiveDialogParent() );
+ 
+@@ -2008,8 +2006,6 @@ BOOL __EXPORT ScDocShell::ConvertTo( SfxMedium &rMed )
+             ExportFormatExcel eFormat = ExpBiff5;
+             if( aFltName.EqualsAscii( pFilterExcel97 ) || aFltName.EqualsAscii( pFilterEx97Temp ) )
+                 eFormat = ExpBiff8;
+-            if( aFltName.EqualsAscii( pFilterEx07Xml ) )
+-                eFormat = Exp2007Xml;
+             FltError eError = ScFormatFilter::Get().ScExportExcel5( rMed, &aDocument, eFormat, RTL_TEXTENCODING_MS_1252 );
+ 
+             if( eError && !GetError() )
+diff --git sc/util/scfilt.map sc/util/scfilt.map
+index 589736f..dc24c02 100644
+--- sc/util/scfilt.map
++++ sc/util/scfilt.map
+@@ -1,6 +1,9 @@
+ SCFILT_1_0 {
+   global:
+     ScFilterCreate;
++    component_getImplementationEnvironment;
++    component_writeInfo;
++    component_getFactory;
+   local:
+     *;
+ };
+diff --git scp2/source/calc/file_calc.scp scp2/source/calc/file_calc.scp
+index e49770f..4674990 100644
+--- scp2/source/calc/file_calc.scp
++++ scp2/source/calc/file_calc.scp
+@@ -49,7 +49,7 @@ STD_UNO_LIB_FILE_PATCH( gid_File_Lib_Sc, sc)
+ 
+ STD_LIB_FILE_PATCH( gid_File_Lib_Scui, scui)
+ 
+-STD_LIB_FILE( gid_File_Lib_Scfilt, scfilt)
++STD_UNO_LIB_FILE( gid_File_Lib_Scfilt, scfilt)
+ 
+ STD_UNO_LIB_FILE( gid_File_Lib_Scd, scd)
+ 
