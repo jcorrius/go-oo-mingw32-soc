@@ -17,6 +17,7 @@ script_files = \
 	help-font-munge \
 	install-dictionaries \
 	install-mono \
+	install-sdk \
 	install-artwork \
 	java-set-classpath.in \
 	localize-ooo \
