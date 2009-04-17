@@ -1,0 +1,92 @@
+diff --git basic/source/inc/runtime.hxx basic/source/inc/runtime.hxx
+index 5a1bff2..6384306 100644
+--- basic/source/inc/runtime.hxx
++++ basic/source/inc/runtime.hxx
+@@ -315,6 +315,7 @@ class SbiRuntime
+ 	SbxArrayRef   refExprStk;       // expression stack
+ 	SbxArrayRef   refCaseStk;       // CASE expression stack
+ 	SbxArrayRef   refRedimpArray;   // Array saved to use for REDIM PRESERVE
++	SbxVariableRef   refRedim;   // Array saved to use for REDIM
+ 	SbxVariableRef xDummyVar;		// Ersatz fuer nicht gefundene Variablen
+ 	SbxVariable* mpExtCaller;		// Caller ( external - e.g. button name, shape, range object etc. - only in vba mode )
+ 	SbiArgvStack*  pArgvStk;		// ARGV-Stack
+diff --git basic/source/runtime/step0.cxx basic/source/runtime/step0.cxx
+index a2df718..fa66194 100644
+--- basic/source/runtime/step0.cxx
++++ basic/source/runtime/step0.cxx
+@@ -48,6 +48,11 @@
+ 
+ #include <algorithm>
+ 
++// for a patch forward declaring these methods below makes sense
++// but, #FIXME lets really just move the methods to the top
++void lcl_clearImpl( SbxVariableRef& refVar, SbxDataType& eType );
++void lcl_eraseImpl( SbxVariableRef& refVar, bool bVBAEnabled );
++
+ SbxVariable* getDefaultProp( SbxVariable* pRef );
+ 
+ void SbiRuntime::StepNOP()
+@@ -637,6 +642,17 @@ void SbiRuntime::StepDIM()
+ // #56204 DIM-Funktionalitaet in Hilfsmethode auslagern (step0.cxx)
+ void SbiRuntime::DimImpl( SbxVariableRef refVar )
+ {
++	// If refDim then this DIM statement is terminating a ReDIM and
++	// previous StepERASE_CLEAR for an array, the following actions have 
++	// been delayed from ( StepERASE_CLEAR ) 'till here
++	if ( refRedim ) 
++	{
++		if ( !refRedimpArray ) // only erase the array not ReDim Preserve
++			lcl_eraseImpl( refVar, bVBAEnabled );
++		SbxDataType eType = refVar->GetType();
++		lcl_clearImpl( refVar, eType );
++		refRedim = NULL;
++	}
+ 	SbxArray* pDims = refVar->GetParameters();
+ 	// Muss eine gerade Anzahl Argumente haben
+ 	// Man denke daran, dass Arg[0] nicht zaehlt!
+@@ -802,6 +818,7 @@ void SbiRuntime::StepREDIMP()
+ void SbiRuntime::StepREDIMP_ERASE()
+ {
+ 	SbxVariableRef refVar = PopVar();
++	refRedim = refVar;
+ 	SbxDataType eType = refVar->GetType();
+ 	if( eType & SbxARRAY )
+ 	{
+@@ -812,12 +829,6 @@ void SbiRuntime::StepREDIMP_ERASE()
+ 			refRedimpArray = pDimArray;
+ 		}
+ 
+-		// As in ERASE
+-		USHORT nSavFlags = refVar->GetFlags();
+-		refVar->ResetFlag( SBX_FIXED );
+-		refVar->SetType( SbxDataType(eType & 0x0FFF) );
+-		refVar->SetFlags( nSavFlags );
+-		refVar->Clear();
+ 	}
+ 	else
+ 	if( refVar->IsFixed() )
+@@ -890,10 +901,7 @@ void SbiRuntime::StepERASE()
+ 
+ void SbiRuntime::StepERASE_CLEAR()
+ {
+-	SbxVariableRef refVar = PopVar();
+-	lcl_eraseImpl( refVar, bVBAEnabled );
+-	SbxDataType eType = refVar->GetType();
+-	lcl_clearImpl( refVar, eType );
++	refRedim = PopVar();
+ }
+ 
+ void SbiRuntime::StepARRAYACCESS()
+diff --git basic/source/runtime/step2.cxx basic/source/runtime/step2.cxx
+index 5606274..8e82cbf 100644
+--- basic/source/runtime/step2.cxx
++++ basic/source/runtime/step2.cxx
+@@ -458,7 +458,7 @@ SbxVariable* SbiRuntime::CheckArray( SbxVariable* pElem )
+ {
+ 	// Falls wir ein Array haben, wollen wir bitte das Array-Element!
+ 	SbxArray* pPar;
+-	if( pElem->GetType() & SbxARRAY )
++	if( ( pElem->GetType() & SbxARRAY ) && (SbxVariable*)refRedim != pElem )
+ 	{
+ 		SbxBase* pElemObj = pElem->GetObject();
+ 		SbxDimArray* pDimArray = PTR_CAST(SbxDimArray,pElemObj);
