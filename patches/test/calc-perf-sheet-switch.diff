@@ -1,0 +1,856 @@
+diff --git sc/inc/address.hxx sc/inc/address.hxx
+index b8e5ef2..43452f8 100644
+--- sc/inc/address.hxx
++++ sc/inc/address.hxx
+@@ -88,6 +88,7 @@ const SCSIZE   SCSIZE_MAX   = ::std::numeric_limits<SCSIZE>::max();
+ // The maximum values. Defines are needed for preprocessor checks in
+ // bcaslot.cxx, otherwise type safe constants are preferred.
+ #define MAXROWCOUNT_DEFINE 1048576
++//#define MAXROWCOUNT_DEFINE 65536
+ #define MAXCOLCOUNT_DEFINE 1024
+ 
+ // Count values
+diff --git sc/inc/document.hxx sc/inc/document.hxx
+index 407851d..ecab008 100644
+--- sc/inc/document.hxx
++++ sc/inc/document.hxx
+@@ -427,6 +427,7 @@ private:
+ 	::std::vector< SCTAB > maTabs;
+ 
+ 	inline BOOL 		RowHidden( SCROW nRow, SCTAB nTab );		// FillInfo
++    bool                RowHidden(SCROW nRow, SCTAB nTab, SCROW& rLastHiddenRow) const;
+ 
+ public:
+ 	SC_DLLPUBLIC ULONG			GetCellCount() const;		// alle Zellen
+diff --git sc/inc/flagcontainer.hxx sc/inc/flagcontainer.hxx
+new file mode 100644
+index 0000000..e4a678c
+--- /dev/null
++++ sc/inc/flagcontainer.hxx
+@@ -0,0 +1,59 @@
++/*************************************************************************
++ *
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ * 
++ * Copyright 2008 by Sun Microsystems, Inc.
++ *
++ * OpenOffice.org - a multi-platform office productivity suite
++ *
++ * $RCSfile: compressedarray.hxx,v $
++ * $Revision: 1.7.32.2 $
++ *
++ * This file is part of OpenOffice.org.
++ *
++ * OpenOffice.org is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License version 3
++ * only, as published by the Free Software Foundation.
++ *
++ * OpenOffice.org is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License version 3 for more details
++ * (a copy is included in the LICENSE file that accompanied this code).
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * version 3 along with OpenOffice.org.  If not, see
++ * <http://www.openoffice.org/license.html>
++ * for a copy of the LGPLv3 License.
++ *
++ ************************************************************************/
++
++#ifndef SC_FLAGCONTAINER_HXX
++#define SC_FLAGCONTAINER_HXX
++
++#include "flatsegmenttree.hxx"
++#include "address.hxx"
++
++class ScHiddenRowTracker
++{
++public:
++    struct RangeData
++    {
++        SCROW   mnRow1;
++        SCROW   mnRow2;
++        bool    mbVisible;
++    };
++    ScHiddenRowTracker();
++    ~ScHiddenRowTracker();
++
++    void setHidden(SCROW nRow1, SCROW nRow2);
++    void setVisible(SCROW nRow1, SCROW nRow2);
++    bool isVisible(SCROW nRow) const;
++    bool getRangeData(SCROW nRow, RangeData& rData) const;
++
++private:
++    ::mdds::flat_segment_tree<SCROW, bool> maHiddenRows;
++};
++
++
++#endif
+diff --git sc/inc/flatsegmenttree.hxx sc/inc/flatsegmenttree.hxx
+new file mode 100644
+index 0000000..2f2bede
+--- /dev/null
++++ sc/inc/flatsegmenttree.hxx
+@@ -0,0 +1,364 @@
++/*************************************************************************
++ *
++ *  The Contents of this file are made available subject to
++ *  the terms of GNU Lesser General Public License Version 2.1.
++ *
++ *
++ *    GNU Lesser General Public License Version 2.1 or later
++ *    =============================================
++ *    Copyright 2009 by Kohei Yoshida.
++ *    1039 Kingsway Drive, Apex, NC 27502, USA
++ *
++ *    This library is free software; you can redistribute it and/or
++ *    modify it under the terms of the GNU Lesser General Public
++ *    License version 2.1, as published by the Free Software Foundation.
++ *
++ *    This library is distributed in the hope that it will be useful,
++ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ *    Lesser General Public License for more details.
++ *
++ *    You should have received a copy of the GNU Lesser General Public
++ *    License along with this library; if not, write to the Free Software
++ *    Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ *    MA  02111-1307  USA
++ *
++ ************************************************************************/
++
++#ifndef __MDDS_FLATSEGMENTTREE_HXX__
++#define __MDDS_FLATSEGMENTTREE_HXX__
++
++#include <memory>
++#include <boost/shared_ptr.hpp>
++#include <iostream>
++
++#define DEBUG_FLAT_SEGMENT_TREE 0
++
++namespace mdds {
++
++#if DEBUG_FLAT_SEGMENT_TREE
++unsigned long node_instance_count = 0;
++#endif
++
++template<typename _NodePtr>
++void disconnect_node(_NodePtr& p)
++{
++    p->left.reset();
++    p->right.reset();
++    p->parent.reset();
++}
++
++template<typename _Key, typename _Value>
++class flat_segment_tree
++{
++public:
++    typedef _Key    key_type;
++    typedef _Value  value_type;
++
++    struct node;
++    typedef ::boost::shared_ptr<node> node_ptr;
++
++    struct nonleaf_value_type
++    {
++        key_type low;   /// low range value (inclusive)
++        key_type high;  /// high range value (non-inclusive)
++    };
++
++    struct leaf_value_type
++    {
++        key_type    key;
++        value_type  value;
++    };
++
++    struct node
++    {
++        node_ptr    parent; /// parent node
++        node_ptr    left;   /// left child node or previous sibling if it's a leaf node.
++        node_ptr    right;  /// right child node or next sibling if it's aleaf node.
++        bool        is_leaf;
++
++        union {
++            nonleaf_value_type  value_nonleaf;
++            leaf_value_type     value_leaf;
++        };
++
++        node(bool _is_leaf) :
++            parent(static_cast<node*>(NULL)),
++            left(static_cast<node*>(NULL)),
++            right(static_cast<node*>(NULL)),
++            is_leaf(_is_leaf)
++        {
++#if DEBUG_FLAT_SEGMENT_TREE
++            ++node_instance_count;
++#endif
++        }
++
++        ~node()
++        {
++#if DEBUG_FLAT_SEGMENT_TREE
++            --node_instance_count;
++#endif
++        }
++    };
++
++    flat_segment_tree(key_type min_val, key_type max_val, value_type init_val) :
++        m_left_leaf(new node(true)),
++        m_right_leaf(new node(true))
++    {
++        // we need to create two end nodes during initialization.
++        m_left_leaf->value_leaf.key = min_val;
++        m_left_leaf->value_leaf.value = init_val;
++        m_left_leaf->right = m_right_leaf;
++
++        m_right_leaf->value_leaf.key = max_val;
++        m_right_leaf->left = m_left_leaf;
++    }
++
++    ~flat_segment_tree()
++    {
++        // Go through all leaf nodes, and disconnect their links.
++        node_ptr cur_node = m_left_leaf;
++        do
++        {
++            node_ptr next_node = cur_node->right;
++            disconnect_node(cur_node);
++            cur_node = next_node;
++        }
++        while (cur_node != m_right_leaf);
++
++        disconnect_node(m_right_leaf);
++    }
++
++    /** 
++     * Insert a new segment into the tree.
++     *
++     * @param start start value of the segment being inserted.  The value is 
++     *              inclusive.
++     * @param end end value of the segment being inserted.  The value is not 
++     *            inclusive.
++     * @param val value associated with this segment.
++     */
++    void insert_segment(key_type start, key_type end, value_type val)
++    {
++        if (end < m_left_leaf->value_leaf.key || start > m_right_leaf->value_leaf.key)
++            // The new segment does not overlap the current interval.
++            return;
++
++        if (start < m_left_leaf->value_leaf.key)
++            // The start value should not be smaller than the current minimum.
++            start = m_left_leaf->value_leaf.key;
++
++        if (end > m_right_leaf->value_leaf.key)
++            // The end value should not be larger than the current maximum.
++            end = m_right_leaf->value_leaf.key;
++
++        if (start >= end)
++            return;
++
++        // Find the node with value that either equals or is greater than the
++        // start value.
++
++        node_ptr start_pos = get_insertion_pos_leaf(start, m_left_leaf);
++        if (!start_pos)
++            // Insertion position not found.  Bail out.
++            return;
++
++        node_ptr end_pos = get_insertion_pos_leaf(end, start_pos);
++        if (!end_pos)
++            end_pos = m_right_leaf;
++
++        node_ptr new_start_node;
++        value_type old_value;
++
++        // Set the start node.
++
++        if (start_pos->value_leaf.key == start)
++        {
++            // Re-use the existing node, but save the old value for later.
++
++            if (start_pos->left && start_pos->left->value_leaf.value == val)
++            {
++                // Extend the existing segment.
++                old_value = start_pos->value_leaf.value;
++                new_start_node = start_pos->left;
++            }
++            else
++            {
++                // Update the value of the existing node.
++                old_value = start_pos->value_leaf.value;
++                start_pos->value_leaf.value = val;
++                new_start_node = start_pos;
++            }
++        }
++        else if (start_pos->left->value_leaf.value == val)
++        {
++            // Extend the existing segment.
++            old_value = start_pos->left->value_leaf.value;
++            new_start_node = start_pos->left;
++        }
++        else
++        {
++            // Insert a new node before the insertion position node.
++            node_ptr new_node(new node(true));
++            new_node->value_leaf.key = start;
++            new_node->value_leaf.value = val;
++            new_start_node = new_node;
++
++            node_ptr left_node = start_pos->left;
++            old_value = left_node->value_leaf.value;
++
++            // Link to the left node.
++            left_node->right = new_node;
++            new_node->left = left_node;
++
++            // Link to the right node.
++            new_node->right = start_pos;
++            start_pos->left = new_node;
++        }
++
++        node_ptr cur_node = new_start_node->right;
++        while (cur_node != end_pos)
++        {
++            // Disconnect the link between the current node and the previous node.
++            cur_node->left->right.reset();
++            cur_node->left.reset();
++            old_value = cur_node->value_leaf.value;
++
++            cur_node = cur_node->right;
++        }
++
++        // Set the end node.
++
++        if (end_pos->value_leaf.key == end)
++        {
++            // The new segment ends exactly at the end node position.
++
++            if (end_pos->value_leaf.value == val)
++            {
++                // Remove this node, and connect the new start node with the 
++                // node that comes after this node.
++                new_start_node->right = end_pos->right;
++                if (end_pos->right)
++                    end_pos->right->left = new_start_node;
++                disconnect_node(end_pos);
++            }
++            else
++            {
++                // Just link the new segment to this node.
++                new_start_node->right = end_pos;
++                end_pos->left = new_start_node;
++            }
++        }
++        else if (old_value == val)
++        {
++            new_start_node->right = end_pos;
++            end_pos->left = new_start_node;
++        }
++        else
++        {
++            // Insert a new node before the insertion position node.
++            node_ptr new_node(new node(true));
++            new_node->value_leaf.key = end;
++            new_node->value_leaf.value = old_value;
++
++            // Link to the left node.
++            new_start_node->right = new_node;
++            new_node->left = new_start_node;
++
++            // Link to the right node.
++            new_node->right = end_pos;
++            end_pos->left = new_node;
++        }
++    }
++
++    bool search(key_type key, value_type& value, key_type* start = NULL, key_type* end = NULL) const
++    {
++        if (key < m_left_leaf->value_leaf.key || m_right_leaf->value_leaf.key <= key)
++            // key value is out-of-bound.
++            return false;
++
++        const node* pos = get_insertion_pos_leaf(key, m_left_leaf.get());
++        if (pos->value_leaf.key == key)
++        {
++            value = pos->value_leaf.value;
++            if (start)
++                *start = pos->value_leaf.key;
++            if (end && pos->right)
++                *end = pos->right->value_leaf.key;
++            return true;
++        }
++        else if (pos->left && pos->left->value_leaf.key < key)
++        {
++            value = pos->left->value_leaf.value;
++            if (start)
++                *start = pos->left->value_leaf.key;
++            if (end)
++                *end = pos->value_leaf.key;
++            return true;
++        }
++
++        return false;
++    }
++
++    void dump_leaf_nodes() const
++    {
++        using ::std::cout;
++        using ::std::endl;
++
++        cout << "------------------------------------------" << endl;
++
++        node_ptr cur_node = m_left_leaf;
++        long node_id = 0;
++        while (cur_node)
++        {
++            cout << "node " << node_id++ << ": key = " << cur_node->value_leaf.key
++                << "; value = " << cur_node->value_leaf.value 
++                << endl;
++            cur_node = cur_node->right;
++        }
++#if DEBUG_FLAT_SEGMENT_TREE
++        cout << endl << "node instance count = " << node_instance_count << endl;
++#endif
++    }
++
++private:
++    flat_segment_tree();
++
++    node_ptr get_insertion_pos_leaf(key_type key, const node_ptr& start_pos) const
++    {
++        node_ptr cur_node = start_pos;
++        while (cur_node)
++        {
++            if (key <= cur_node->value_leaf.key)
++            {
++                // Found the insertion position.
++                return cur_node;
++            }
++            cur_node = cur_node->right;
++        }
++        return node_ptr();
++    }
++
++    const node* get_insertion_pos_leaf(key_type key, const node* start_pos) const
++    {
++        const node* cur_node = start_pos;
++        while (cur_node)
++        {
++            if (key <= cur_node->value_leaf.key)
++            {
++                // Found the insertion position.
++                return cur_node;
++            }
++            cur_node = cur_node->right.get();
++        }
++        return NULL;
++    }
++
++private:
++    node_ptr m_left_leaf;
++    node_ptr m_right_leaf;
++};
++
++}
++
++#endif
+diff --git sc/inc/table.hxx sc/inc/table.hxx
+index 6f7b016..c574236 100644
+--- sc/inc/table.hxx
++++ sc/inc/table.hxx
+@@ -40,6 +40,7 @@
+ #include "compressedarray.hxx"
+ 
+ #include <memory>
++#include <boost/shared_ptr.hpp>
+ 
+ namespace utl {
+ 	class SearchParam;
+@@ -75,7 +76,7 @@ struct RowInfo;
+ struct ScFunctionData;
+ struct ScLineFlags;
+ class CollatorWrapper;
+-
++class ScHiddenRowTracker;
+ 
+ class ScTable
+ {
+@@ -114,6 +115,7 @@ private:
+ 
+ 	BYTE*			pColFlags;
+ 	ScBitMaskCompressedArray< SCROW, BYTE>*     pRowFlags;
++    ::boost::shared_ptr<ScHiddenRowTracker>     mpHiddenRows;
+ 
+ 	ScOutlineTable*	pOutlineTable;
+ 
+diff --git sc/source/core/data/fillinfo.cxx sc/source/core/data/fillinfo.cxx
+index 53abf3e..40fb4c4 100644
+--- sc/source/core/data/fillinfo.cxx
++++ sc/source/core/data/fillinfo.cxx
+@@ -54,7 +54,43 @@
+ #include "docpool.hxx"
+ #include "conditio.hxx"
+ #include "stlpool.hxx"
++#include "flagcontainer.hxx"
+ 
++#include <stdio.h>
++#include <string>
++#include <sys/time.h>
++
++namespace {
++
++class StackPrinter
++{
++public:
++    explicit StackPrinter(const char* msg) :
++        msMsg(msg)
++    {
++        fprintf(stdout, "%s: --begin\n", msMsg.c_str());
++        mfStartTime = getTime();
++    }
++
++    ~StackPrinter()
++    {
++        double fEndTime = getTime();
++        fprintf(stdout, "%s: --end (duration: %g sec)\n", msMsg.c_str(), (fEndTime-mfStartTime));
++    }
++
++private:
++    double getTime() const
++    {
++        timeval tv;
++        gettimeofday(&tv, NULL);
++        return tv.tv_sec + tv.tv_usec / 1000000.0;
++    }
++
++    ::std::string msMsg;
++    double mfStartTime;
++};
++
++}
+ 
+ // -----------------------------------------------------------------------
+ 
+@@ -160,7 +196,31 @@ void lcl_GetMergeRange( SCsCOL nX, SCsROW nY, SCSIZE nArrY,
+ 
+ inline BOOL ScDocument::RowHidden( SCROW nRow, SCTAB nTab )
+ {
+-	return ( pTab[nTab]->pRowFlags->GetValue(nRow) & CR_HIDDEN ) != 0;
++    bool b = ( pTab[nTab]->pRowFlags->GetValue(nRow) & CR_HIDDEN ) != 0;
++#if 0
++    bool bHidden = !pTab[nTab]->mpHiddenRows->isVisible(nRow);
++    if (b != bHidden)
++        fprintf(stdout, "ScDocument::RowHidden:   bad! (table = %d; row = %ld) (hidden %d; myvalue %d)\n",
++                nTab, nRow, b, bHidden);
++#endif
++	return b;
++}
++
++bool ScDocument::RowHidden(SCROW nRow, SCTAB nTab, SCROW& rLastHiddenRow) const
++{
++    ScHiddenRowTracker::RangeData aData;
++    if (!pTab[nTab]->mpHiddenRows->getRangeData(nRow, aData))
++    {
++        fprintf(stdout, "ScDocument::RowHidden:   failed (row = %ld, tab = %d)\n", nRow, nTab);    
++        return true;
++    }
++
++    if (aData.mbVisible)
++        return false;
++
++    // This row is hidden.
++    rLastHiddenRow = aData.mnRow2;
++    return true;
+ }
+ 
+ 
+@@ -170,6 +230,7 @@ void ScDocument::FillInfo( ScTableInfo& rTabInfo, SCCOL nX1, SCROW nY1, SCCOL nX
+ 							SCTAB nTab, double nScaleX, double nScaleY,
+ 							BOOL bPageMode, BOOL bFormulaMode, const ScMarkData* pMarkData )
+ {
++	StackPrinter __stack_printer__("ScDocument::FillInfo");
+ 	DBG_ASSERT( pTab[nTab], "Tabelle existiert nicht" );
+ 
+ 	BOOL bLayoutRTL = IsLayoutRTL( nTab );
+@@ -370,10 +431,14 @@ void ScDocument::FillInfo( ScTableInfo& rTabInfo, SCCOL nX1, SCROW nY1, SCCOL nX
+ 		}
+ 	}
+ 
++	fprintf(stdout, "ScDocument::FillInfo:   hot spot begins\n");
++
+ 	for (nArrX=0; nArrX<=nX2+2; nArrX++)					// links & rechts + 1
+ 	{
+ 		nX = (nArrX>0) ? nArrX-1 : MAXCOL+1;					// negativ -> ungueltig
+ 
++//  	fprintf(stdout, "ScDocument::FillInfo:   nX = %d\n", nX);
++
+ 		if ( ValidCol(nX) )
+ 		{
+             // #i58049#, #i57939# Hidden columns must be skipped here, or their attributes
+@@ -395,7 +460,12 @@ void ScDocument::FillInfo( ScTableInfo& rTabInfo, SCCOL nX1, SCROW nY1, SCCOL nX
+                 while ( nUIndex < pThisCol->nCount &&
+                         (nThisRow=pThisCol->pItems[nUIndex].nRow) <= nY2 )
+                 {
+-                    if ( !RowHidden( nThisRow,nTab ) )
++                    SCROW nLastHiddenRow;
++                    if (RowHidden(nThisRow, nTab, nLastHiddenRow))
++                    {
++                        fprintf(stdout, "ScDocument::FillInfo:   last hidden = %ld\n", nLastHiddenRow);
++                    }
++                    else
+                     {
+                         while ( pRowInfo[nArrY].nRowNo < nThisRow )
+                             ++nArrY;
+@@ -429,7 +499,6 @@ void ScDocument::FillInfo( ScTableInfo& rTabInfo, SCCOL nX1, SCROW nY1, SCCOL nX
+ 					SCSIZE  nIndex;
+ 					(void) pThisAttrArr->Search( nCurRow, nIndex );
+ 
+-
+ 					do
+ 					{
+ 						nThisRow=pThisAttrArr->pData[nIndex].nRow;				// Ende des Bereichs
+@@ -482,9 +551,18 @@ void ScDocument::FillInfo( ScTableInfo& rTabInfo, SCCOL nX1, SCROW nY1, SCCOL nX
+ 						if ( nConditional && pCondFormList )
+ 							pCondForm = pCondFormList->GetFormat( nConditional );
+ 
++						long _loopcount = 0;
++                        fprintf(stdout, "ScDocument::FillInfo:   nCurRow before loop = %ld\n", nCurRow);
+ 						do
+ 						{
+-							if ( nArrY==0 || !RowHidden( nCurRow,nTab ) )
++#define NEW_METHOD 1
++#if NEW_METHOD
++                            SCROW nLastHiddenRow = -1;
++                            bool bRowHidden = RowHidden(nCurRow, nTab, nLastHiddenRow);
++#else
++                            bool bRowHidden = RowHidden(nCurRow, nTab);
++#endif
++							if ( nArrY==0 || !bRowHidden )
+ 							{
+ 								RowInfo* pThisRowInfo = &pRowInfo[nArrY];
+ 								if (pBackground != pDefBackground)			// Spalten-HG == Standard ?
+@@ -554,14 +632,26 @@ void ScDocument::FillInfo( ScTableInfo& rTabInfo, SCCOL nX1, SCROW nY1, SCCOL nX
+ 
+ 								++nArrY;
+ 							}
++#if NEW_METHOD
++                            else if (bRowHidden && nLastHiddenRow >= 0)
++                            {
++                                fprintf(stdout, "ScDocument::FillInfo:   last hidden row = %ld (this row = %ld; y extra = %ld)\n",
++                                        nLastHiddenRow, nThisRow, nYExtra);
++                                nCurRow = nLastHiddenRow;
++                                if (nCurRow > nThisRow)
++                                    nCurRow = nThisRow;
++                            }
++#endif
+ 							++nCurRow;
++							++_loopcount;
+ 						}
+ 						while (nCurRow <= nThisRow && nCurRow <= nYExtra);
+ 						++nIndex;
++						fprintf(stdout, "ScDocument::FillInfo:   (after loop) loop count = %ld  nCurRow = %ld  nThisRow = %ld  nYExtra = %ld\n", 
++                                _loopcount, nCurRow, nThisRow, nYExtra);
+ 					}
+ 					while ( nIndex < pThisAttrArr->nCount && nThisRow < nYExtra );
+ 
+-
+ 					if (pMarkData && pMarkData->IsMultiMarked())
+ 					{
+ 						//	Blockmarken
+@@ -624,6 +714,8 @@ void ScDocument::FillInfo( ScTableInfo& rTabInfo, SCCOL nX1, SCROW nY1, SCCOL nX
+ 		// STD_COL_WIDTH ganz links und rechts wird fuer DrawExtraShadow gebraucht
+ 	}
+ 
++	fprintf(stdout, "ScDocument::FillInfo:   hot spot ends (last column = %d)\n", nX);
++
+ 	//-------------------------------------------------------------------------
+ 	//	bedingte Formatierung auswerten
+ 
+diff --git sc/source/core/data/flagcontainer.cxx sc/source/core/data/flagcontainer.cxx
+new file mode 100644
+index 0000000..f66bc93
+--- /dev/null
++++ sc/source/core/data/flagcontainer.cxx
+@@ -0,0 +1,75 @@
++/*************************************************************************
++ *
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ * 
++ * Copyright 2008 by Sun Microsystems, Inc.
++ *
++ * OpenOffice.org - a multi-platform office productivity suite
++ *
++ * $RCSfile: compressedarray.hxx,v $
++ * $Revision: 1.7.32.2 $
++ *
++ * This file is part of OpenOffice.org.
++ *
++ * OpenOffice.org is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License version 3
++ * only, as published by the Free Software Foundation.
++ *
++ * OpenOffice.org is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License version 3 for more details
++ * (a copy is included in the LICENSE file that accompanied this code).
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * version 3 along with OpenOffice.org.  If not, see
++ * <http://www.openoffice.org/license.html>
++ * for a copy of the LGPLv3 License.
++ *
++ ************************************************************************/
++
++// MARKER(update_precomp.py): autogen include statement, do not remove
++#include "precompiled_sc.hxx"
++
++#include "flagcontainer.hxx"
++
++ScHiddenRowTracker::ScHiddenRowTracker() :
++    maHiddenRows(0, MAXROW+1, false)
++{
++}
++
++ScHiddenRowTracker::~ScHiddenRowTracker()
++{
++}
++
++void ScHiddenRowTracker::setHidden(SCROW nRow1, SCROW nRow2)
++{
++    maHiddenRows.insert_segment(nRow1, nRow2+1, true);
++}
++
++void ScHiddenRowTracker::setVisible(SCROW nRow1, SCROW nRow2)
++{
++    maHiddenRows.insert_segment(nRow1, nRow2+1, false);
++}
++
++bool ScHiddenRowTracker::isVisible(SCROW nRow) const
++{
++    bool bHidden = false;
++    if (maHiddenRows.search(nRow, bHidden))
++        return !bHidden;
++    
++    return true;
++}
++
++bool ScHiddenRowTracker::getRangeData(SCROW nRow, RangeData& rData) const
++{
++    bool bHidden;
++    SCROW nRow1, nRow2;
++    if (!maHiddenRows.search(nRow, bHidden, &nRow1, &nRow2))
++        return false;
++
++    rData.mnRow1 = nRow1;
++    rData.mnRow2 = nRow2-1; // end point is not inclusive.
++    rData.mbVisible = !bHidden;
++    return true;
++}
+diff --git sc/source/core/data/makefile.mk sc/source/core/data/makefile.mk
+index c631bb4..703ae93 100644
+--- sc/source/core/data/makefile.mk
++++ sc/source/core/data/makefile.mk
+@@ -114,7 +114,8 @@ SLOFILES =  \
+ 	$(SLO)$/tabprotection.obj \
+ 	$(SLO)$/userdat.obj \
+ 	$(SLO)$/validat.obj \
+-	$(SLO)$/postit.obj
++	$(SLO)$/postit.obj \
++	$(SLO)$/flagcontainer.obj
+ 
+ EXCEPTIONSFILES= \
+     $(SLO)$/autonamecache.obj \
+@@ -147,7 +148,8 @@ EXCEPTIONSFILES= \
+ 	$(SLO)$/dbdocutl.obj \
+ 	$(SLO)$/dptabsrc.obj \
+ 	$(SLO)$/drwlayer.obj \
+-	$(SLO)$/globalx.obj
++	$(SLO)$/globalx.obj \
++	$(SLO)$/flagcontainer.obj
+ 
+ .IF "$(OS)$(COM)$(CPUNAME)"=="LINUXGCCSPARC"
+ NOOPTFILES= \
+diff --git sc/source/core/data/table1.cxx sc/source/core/data/table1.cxx
+index ddd1bbb..2a10860 100644
+--- sc/source/core/data/table1.cxx
++++ sc/source/core/data/table1.cxx
+@@ -115,6 +115,7 @@
+ #include "hints.hxx"		// fuer Paint-Broadcast
+ #include "prnsave.hxx"
+ #include "tabprotection.hxx"
++#include "flagcontainer.hxx"
+ 
+ // STATIC DATA -----------------------------------------------------------
+ 
+@@ -139,6 +140,7 @@ ScTable::ScTable( ScDocument* pDoc, SCTAB nNewTab, const String& rNewName,
+ 	pRowHeight( NULL ),
+ 	pColFlags( NULL ),
+ 	pRowFlags( NULL ),
++    mpHiddenRows(new ScHiddenRowTracker),
+ 	pOutlineTable( NULL ),
+ 	bTableAreaValid( FALSE ),
+ 	bVisible( TRUE ),
+diff --git sc/source/core/data/table2.cxx sc/source/core/data/table2.cxx
+index 9fc7727..1e7cea7 100644
+--- sc/source/core/data/table2.cxx
++++ sc/source/core/data/table2.cxx
+@@ -60,6 +60,7 @@
+ #include "bcaslot.hxx"
+ #include "postit.hxx"
+ #include "globstr.hrc"
++#include "flagcontainer.hxx"
+ 
+ #include <math.h>
+ 
+@@ -2280,9 +2281,15 @@ void ScTable::ShowRow(SCROW nRow, BOOL bShow)
+ 			}
+ 
+ 			if (bShow)
++            {
++                mpHiddenRows->setVisible(nRow, nRow);    
+ 				pRowFlags->SetValue( nRow, nFlags & ~(CR_HIDDEN | CR_FILTERED));
++            }
+ 			else
++            {    
++                mpHiddenRows->setHidden(nRow, nRow);    
+ 				pRowFlags->SetValue( nRow, nFlags | CR_HIDDEN);
++            }
+ 			if( !--nRecalcLvl )
+ 				SetDrawPageSize();
+ 
+@@ -2319,9 +2326,15 @@ void ScTable::DBShowRow(SCROW nRow, BOOL bShow)
+ 
+ 		//	Filter-Flag immer setzen, auch wenn Hidden unveraendert
+ 		if (bShow)
++        {    
++            mpHiddenRows->setVisible(nRow, nRow);    
+ 			pRowFlags->SetValue( nRow, nFlags & ~(CR_HIDDEN | CR_FILTERED));
++        }
+ 		else
++        {    
++            mpHiddenRows->setHidden(nRow, nRow);    
+ 			pRowFlags->SetValue( nRow, nFlags | (CR_HIDDEN | CR_FILTERED));
++        }
+ 		if( !--nRecalcLvl )
+ 			SetDrawPageSize();
+ 
+@@ -2421,9 +2434,15 @@ void ScTable::ShowRows(SCROW nRow1, SCROW nRow2, BOOL bShow)
+ 		}
+ 
+ 		if (bShow)
++        {    
+             pRowFlags->AndValue( nStartRow, nEndRow, sal::static_int_cast<BYTE>(~(CR_HIDDEN | CR_FILTERED)) );
++            mpHiddenRows->setVisible(nStartRow, nEndRow);
++        }
+ 		else
++        {    
+             pRowFlags->OrValue( nStartRow, nEndRow, CR_HIDDEN);
++            mpHiddenRows->setHidden(nStartRow, nEndRow);
++        }
+ 
+ 		if ( bChanged )
+ 		{
