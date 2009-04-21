@@ -1,23 +1,416 @@
+diff --git writerfilter/inc/dmapper/DomainMapper.hxx writerfilter/inc/dmapper/DomainMapper.hxx
+index a8306dc..e0873f7 100644
+--- writerfilter/inc/dmapper/DomainMapper.hxx
++++ writerfilter/inc/dmapper/DomainMapper.hxx
+@@ -109,6 +109,9 @@ public:
+     virtual void endParagraphGroup();
+     virtual void startCharacterGroup();
+     virtual void endCharacterGroup();
++    virtual void startShape( ::com::sun::star::uno::Reference< com::sun::star::drawing::XShape > xShape );
++    virtual void endShape( );
++
+     virtual void text(const sal_uInt8 * data, size_t len);
+     virtual void utext(const sal_uInt8 * data, size_t len);
+     virtual void props(writerfilter::Reference<Properties>::Pointer_t ref);
+diff --git writerfilter/inc/resourcemodel/WW8ResourceModel.hxx writerfilter/inc/resourcemodel/WW8ResourceModel.hxx
+index 76c08d1..29d176f 100644
+--- writerfilter/inc/resourcemodel/WW8ResourceModel.hxx
++++ writerfilter/inc/resourcemodel/WW8ResourceModel.hxx
+@@ -35,6 +35,7 @@
+ #include <memory>
+ #include <boost/shared_ptr.hpp>
+ #include <sal/types.h>
++#include <com/sun/star/drawing/XShape.hpp>
+ #include <com/sun/star/uno/Any.hxx>
+ #include <WriterFilterDllApi.hxx>
+ #include <resourcemodel/OutputWithDepth.hxx>
+@@ -220,6 +221,13 @@ public:
+     virtual void endCharacterGroup() = 0;
+ 
+     /**
++      Receives a shape.
++     */
++    virtual void startShape( ::com::sun::star::uno::Reference< ::com::sun::star::drawing::XShape > xShape ) = 0;
++
++    virtual void endShape( ) = 0;
++
++    /**
+        Receives 8-bit per character text.
+ 
+        @param data  buffer containing the text
+diff --git writerfilter/source/dmapper/DomainMapper.cxx writerfilter/source/dmapper/DomainMapper.cxx
+index 44782d4..35f441d 100644
+--- writerfilter/source/dmapper/DomainMapper.cxx
++++ writerfilter/source/dmapper/DomainMapper.cxx
+@@ -1925,13 +1925,6 @@ void DomainMapper::attribute(Id nName, Value & val)
+             //afterwards the adding of the binary data.
+             m_pImpl->GetGraphicImport( IMPORT_AS_DETECTED_INLINE )->attribute(nName, val);
+             m_pImpl->ImportGraphic( val.getProperties(), IMPORT_AS_DETECTED_INLINE );
+-            if( m_pImpl->IsInShapeContext() )
+-            {
+-                //imported text from temporary shape needs to be copied to the real shape
+-                uno::Reference< drawing::XShape > xShape;
+-                val.getAny() >>= xShape;
+-                m_pImpl->CopyTemporaryShapeText( xShape );
+-            }
+         }
+         break;
+         case NS_ooxml::LN_CT_FramePr_dropCap:
+@@ -2095,13 +2088,6 @@ void DomainMapper::attribute(Id nName, Value & val)
+             /* WRITERFILTERSTATUS: done: 100, planned: 0.5, spent: 0 */
+             m_pImpl->SetCurrentRedlineToken( nIntValue );
+         break;
+-        case NS_ooxml::LN_mark_shape:
+-            /* WRITERFILTERSTATUS: done: 100, planned: 0.5, spent: 0 */
+-            if( nIntValue )
+-                m_pImpl->PopShapeContext();
+-            else
+-                m_pImpl->PushShapeContext();
+-        break;
+         case NS_ooxml::LN_CT_LineNumber_countBy:
+         /* WRITERFILTERSTATUS: done: 0, planned: 0.5, spent: 0 */
+         case NS_ooxml::LN_CT_LineNumber_restart:
+@@ -3963,7 +3949,7 @@ void DomainMapper::sprm( Sprm& rSprm, PropertyMapPtr rContext, SprmType eSprmTyp
+                 m_pImpl->ResetGraphicImport();
+                 // todo: It's a shape, now start shape import
+             }
+-        }
++        } 
+     }
+     break;
+     case NS_ooxml::LN_EG_RPrBase_vertAlign:
+@@ -4059,15 +4045,18 @@ void DomainMapper::sprm( Sprm& rSprm, PropertyMapPtr rContext, SprmType eSprmTyp
+     case NS_ooxml::LN_object:
+     {
+         writerfilter::Reference<Properties>::Pointer_t pProperties = rSprm.getProps();
+-        if( pProperties.get())
++        if( pProperties.get( ) )
+         {
+             OLEHandlerPtr pOLEHandler( new OLEHandler );
+             pProperties->resolve(*pOLEHandler);
+-            ::rtl::OUString sStreamName = pOLEHandler->copyOLEOStream( m_pImpl->GetTextDocument() );
+-            if(sStreamName.getLength())
++            if ( pOLEHandler->isOLEObject( ) )
+             {
+-                m_pImpl->appendOLE( sStreamName, pOLEHandler );
+-            }
++                ::rtl::OUString sStreamName = pOLEHandler->copyOLEOStream( m_pImpl->GetTextDocument() );
++                if( sStreamName.getLength() )
++                {
++                    m_pImpl->appendOLE( sStreamName, pOLEHandler );
++                }
++            } 
+         }
+     }
+     break;
+@@ -4221,6 +4210,16 @@ void DomainMapper::endParagraphGroup()
+ #endif
+ }
+ 
++void DomainMapper::startShape( uno::Reference< drawing::XShape > xShape )
++{
++    m_pImpl->PushShapeContext( xShape );
++}
++
++void DomainMapper::endShape( ) 
++{
++    m_pImpl->PopShapeContext( );
++}
++
+ /*-- 13.06.2007 16:15:55---------------------------------------------------
+ 
+   -----------------------------------------------------------------------*/
 diff --git writerfilter/source/dmapper/DomainMapper_Impl.cxx writerfilter/source/dmapper/DomainMapper_Impl.cxx
-index 7508531..ee73b1f 100644
+index 7508531..9180f34 100644
 --- writerfilter/source/dmapper/DomainMapper_Impl.cxx
 +++ writerfilter/source/dmapper/DomainMapper_Impl.cxx
-@@ -1432,7 +1432,8 @@ void DomainMapper_Impl::PushShapeContext()
-         uno::Reference< text::XTextAppend > xShapeAppend( xTemporaryShape, uno::UNO_QUERY );
-         //insert into the document
-         uno::Reference< text::XTextContent > xShapeContent( xTemporaryShape, uno::UNO_QUERY_THROW );
--        xShapeContent->attach( GetBodyText()->getStart() );
-+        // TODO Is it enought to comment this line?
-+        //xShapeContent->attach( GetBodyText()->getStart() );
-         m_aTextAppendStack.push(uno::Reference< text::XTextAppend >( xShapeAppend, uno::UNO_QUERY_THROW ));
+@@ -36,6 +36,8 @@
+ #include <com/sun/star/beans/XPropertyState.hpp>
+ #include <com/sun/star/container/XIndexReplace.hpp>
+ #include <com/sun/star/container/XNamed.hpp>
++#include <com/sun/star/drawing/XDrawPageSupplier.hpp>
++#include <com/sun/star/drawing/XShapes.hpp>
+ #include <com/sun/star/lang/XMultiServiceFactory.hpp>
+ #include <com/sun/star/style/XStyleFamiliesSupplier.hpp>
+ #include <com/sun/star/style/LineNumberPosition.hpp>
+@@ -55,6 +57,7 @@
+ #include <com/sun/star/text/ReferenceFieldPart.hpp>
+ #include <com/sun/star/text/ReferenceFieldSource.hpp>
+ #include <com/sun/star/text/SizeType.hpp>
++#include <com/sun/star/text/TextContentAnchorType.hpp>
+ #include <com/sun/star/text/WrapTextMode.hpp>
+ #include <com/sun/star/text/XDependentTextField.hpp>
+ #include <com/sun/star/text/XParagraphCursor.hpp>
+@@ -75,6 +78,9 @@
+ #endif
+ #include <ooxml/OOXMLFastTokens.hxx>
+ 
++#if DEBUG
++#include <com/sun/star/lang/XServiceInfo.hpp>
++#endif
+ 
+ #include <map>
+ 
+@@ -393,6 +399,7 @@ DomainMapper_Impl::DomainMapper_Impl(
+         m_bIsFirstSection( true ),
+         m_bIsColumnBreakDeferred( false ),
+         m_bIsPageBreakDeferred( false ),
++        m_bIsInShape( false ),
+         m_TableManager( eDocumentType == DOCUMENT_OOXML ),
+         m_nCurrentTabStopIndex( 0 ),
+         m_sCurrentParaStyleId(),
+@@ -839,6 +846,10 @@ void lcl_AddRangeAndStyle(
+ 
+ void DomainMapper_Impl::finishParagraph( PropertyMapPtr pPropertyMap )
+ {
++#if DEBUG
++    clog << "finishParagraph" << endl;
++#endif
++
+     ParagraphPropertyMap* pParaContext = dynamic_cast< ParagraphPropertyMap* >( pPropertyMap.get() );
+     TextAppendContext& rAppendContext = m_aTextAppendStack.top();
+     uno::Reference< text::XTextAppend >  xTextAppend = rAppendContext.xTextAppend;
+@@ -1048,6 +1059,24 @@ void DomainMapper_Impl::finishParagraph( PropertyMapPtr pPropertyMap )
+                 uno::Reference< text::XTextRange > xTextRange =
+                     xTextAppend->finishParagraph( aProperties );
+                 m_TableManager.handle(xTextRange);
++            
++                // Set the anchor of the objects to the created paragraph
++                while ( m_aAnchoredStack.size( ) > 0 && !m_bIsInShape )
++                {
++                    uno::Reference< text::XTextContent > xObj = m_aAnchoredStack.top( );
++                    try 
++                    {
++#if DEBUG
++                        rtl::OUString sText( xTextRange->getString( ) );
++#endif
++                        xObj->attach( xTextRange );
++                    } 
++                    catch ( uno::RuntimeException& )
++                    {
++                        // this is normal: the shape is already attached
++                    }   
++                    m_aAnchoredStack.pop( );
++                }
+             }
+             else
+             {
+@@ -1055,7 +1084,6 @@ void DomainMapper_Impl::finishParagraph( PropertyMapPtr pPropertyMap )
+             }
+             if( !bKeepLastParagraphProperties )
+                 rAppendContext.pLastParagraphProperties = pToBeSavedProperties;
+-
+         }
+         catch(const lang::IllegalArgumentException& rIllegal)
+         {
+@@ -1065,7 +1093,7 @@ void DomainMapper_Impl::finishParagraph( PropertyMapPtr pPropertyMap )
+         catch(const uno::Exception& rEx)
+         {
+             (void)rEx;
+-            OSL_ENSURE( false, "ArgumentException in DomainMapper_Impl::finishParagraph" );
++            //OSL_ENSURE( false, "ArgumentException in DomainMapper_Impl::finishParagraph" );
+         }
      }
-     catch( uno::Exception& )
+ }
+@@ -1170,6 +1198,7 @@ void DomainMapper_Impl::appendTextContent(
+         }
+     }
+ }
++
+ /*-- 24.04.2008 08:38:07---------------------------------------------------
+ 
+   -----------------------------------------------------------------------*/
+@@ -1419,57 +1448,53 @@ void DomainMapper_Impl::PopAnnotation()
+     m_xAnnotationField.clear();
+ 
+ }
+-/*-- 20.03.2008 09:01:58---------------------------------------------------
+ 
+-  -----------------------------------------------------------------------*/
+-void DomainMapper_Impl::PushShapeContext()
++void DomainMapper_Impl::PushShapeContext( const uno::Reference< drawing::XShape > xShape )
+ {
+-    try
++#if DEBUG
++    clog << "PushShapeContext" << endl;
++#endif
++    m_bIsInShape = true;
++    try 
+     {
+-        uno::Reference< text::XText > xTemporaryShape( GetTextFactory()->createInstance(
+-                ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("com.sun.star.drawing.RectangleShape") )),
+-                uno::UNO_QUERY_THROW );
+-        uno::Reference< text::XTextAppend > xShapeAppend( xTemporaryShape, uno::UNO_QUERY );
+-        //insert into the document
+-        uno::Reference< text::XTextContent > xShapeContent( xTemporaryShape, uno::UNO_QUERY_THROW );
+-        xShapeContent->attach( GetBodyText()->getStart() );
+-        m_aTextAppendStack.push(uno::Reference< text::XTextAppend >( xShapeAppend, uno::UNO_QUERY_THROW ));
+-    }
+-    catch( uno::Exception& )
++        // Add the shape to the text append stack
++        m_aTextAppendStack.push( uno::Reference< text::XTextAppend >( xShape, uno::UNO_QUERY_THROW ) );
++
++        // Add the shape to the anchored objects stack
++        uno::Reference< text::XTextContent > xTxtContent( xShape, uno::UNO_QUERY_THROW );
++        m_aAnchoredStack.push( xTxtContent );
++
++        PropertyNameSupplier& rPropNameSupplier = PropertyNameSupplier::GetPropertyNameSupplier();
++
++        uno::Reference< beans::XPropertySet > xProps( xShape, uno::UNO_QUERY_THROW );
++        xProps->setPropertyValue( 
++                rPropNameSupplier.GetName( PROP_ANCHOR_TYPE ),
++                uno::makeAny( text::TextContentAnchorType_AT_PARAGRAPH ) );
++        xProps->setPropertyValue(
++                rPropNameSupplier.GetName( PROP_OPAQUE ),
++                uno::makeAny( true ) );
++    } 
++    catch ( const uno::Exception& e )
+     {
+-        OSL_ENSURE( false, "exception in DomainMapper_Impl::PushShapeContext" );
++#if DEBUG
++        clog << "Exception when adding shape: ";
++        clog << rtl::OUStringToOString( e.Message, RTL_TEXTENCODING_UTF8 ).getStr( );
++        clog << endl;
++#endif
+     }
+ }
++
+ /*-- 20.03.2008 09:01:59---------------------------------------------------
+ 
+   -----------------------------------------------------------------------*/
+ void DomainMapper_Impl::PopShapeContext()
+ {
+-    m_xTemporaryShape = uno::Reference< drawing::XShape >( m_aTextAppendStack.top().xTextAppend, uno::UNO_QUERY );
++#if DEBUG
++        clog << "PopShapeContext" << endl;
++#endif
++    
+     m_aTextAppendStack.pop();
+-}
+-/*-- 20.03.2008 12:31:58---------------------------------------------------
+-
+-  -----------------------------------------------------------------------*/
+-void DomainMapper_Impl::CopyTemporaryShapeText( uno::Reference< drawing::XShape > xShape )
+-{
+-    uno::Reference< text::XTextCopy >xShapeText( xShape, uno::UNO_QUERY );
+-    uno::Reference< text::XTextCopy >xTempShapeText( m_xTemporaryShape, uno::UNO_QUERY );
+-    if( xShapeText.is() && xTempShapeText.is() )
+-    {
+-        xShapeText->copyText( xTempShapeText );
+-    }
+-    try
+-    {
+-        uno::Reference< lang::XComponent >xTemp( m_xTemporaryShape, uno::UNO_QUERY );
+-        if( xTemp.is() )
+-            xTemp->dispose();
+-    }
+-    catch( const uno::Exception& )
+-    {
+-    }
+-    m_xTemporaryShape = uno::Reference< drawing::XShape >();
+-
++    m_bIsInShape = false;
+ }
+ /*-- 12.09.2006 08:07:55---------------------------------------------------
+ 
+diff --git writerfilter/source/dmapper/DomainMapper_Impl.hxx writerfilter/source/dmapper/DomainMapper_Impl.hxx
+index f4dfaf0..9981b4e 100644
+--- writerfilter/source/dmapper/DomainMapper_Impl.hxx
++++ writerfilter/source/dmapper/DomainMapper_Impl.hxx
+@@ -34,6 +34,7 @@
+ #include <com/sun/star/text/XTextCursor.hpp>
+ #include <com/sun/star/text/XTextAppend.hpp>
+ #include <com/sun/star/text/XTextAppendAndConvert.hpp>
++#include <com/sun/star/text/XTextFrame.hpp>
+ #include <com/sun/star/style/TabStop.hpp>
+ #include <com/sun/star/container/XNameContainer.hpp>
+ #include <vector>
+@@ -177,6 +178,7 @@ typedef std::stack<ContextType>                 ContextStack;
+ typedef std::stack<PropertyMapPtr>              PropertyStack;
+ typedef std::stack< TextAppendContext >         TextAppendStack;
+ typedef std::stack<FieldContextPtr>                FieldStack;
++typedef std::stack< com::sun::star::uno::Reference< com::sun::star::text::XTextContent > >  TextContentStack;
+ 
+ /*-- 18.07.2006 08:49:08---------------------------------------------------
+ 
+@@ -267,12 +269,16 @@ private:
+ 
+     TextAppendStack                                                                 m_aTextAppendStack;
+ 
++    TextContentStack
++              m_aAnchoredStack; 
++
+     FieldStack                                                                      m_aFieldStack;
+     bool                                                                            m_bFieldMode;
+     bool                                                                            m_bSetUserFieldContent;
+     bool                                                                            m_bIsFirstSection;
+     bool                                                                            m_bIsColumnBreakDeferred;
+     bool                                                                            m_bIsPageBreakDeferred;
++    bool                                                                            m_bIsInShape;
+ 
+     LineNumberSettings                                                              m_aLineNumberSettings;
+ 
+@@ -317,9 +323,6 @@ private:
+     ::rtl::OUString                 m_CurrentRedlineId;
+     sal_Int32                       n_CurrentRedlineToken;
+ 
+-    //shape import
+-    ::com::sun::star::uno::Reference< ::com::sun::star::drawing::XShape >      m_xTemporaryShape;
+-
+     //annotation import
+     uno::Reference< beans::XPropertySet >                                      m_xAnnotationField;
+ 
+@@ -432,10 +435,8 @@ public:
+     void        SetAnyTableImport( bool bSet ) { m_bInAnyTableImport = bSet;}
+     bool        IsAnyTableImport()const { return m_bInAnyTableImport;}
+ 
+-    void PushShapeContext();
++    void PushShapeContext( const ::com::sun::star::uno::Reference< ::com::sun::star::drawing::XShape > xShape );
+     void PopShapeContext();
+-    bool IsInShapeContext() const { return m_xTemporaryShape.is(); }
+-    void CopyTemporaryShapeText( ::com::sun::star::uno::Reference< ::com::sun::star::drawing::XShape > xShape );
+ 
+     void PushPageHeader(SectionPropertyMap::PageType eType);
+     void PushPageFooter(SectionPropertyMap::PageType eType);
+diff --git writerfilter/source/dmapper/FontTable.cxx writerfilter/source/dmapper/FontTable.cxx
+index 7e3251d..16be55d 100644
+--- writerfilter/source/dmapper/FontTable.cxx
++++ writerfilter/source/dmapper/FontTable.cxx
+@@ -647,6 +647,15 @@ void FontTable::substream(Id, ::writerfilter::Reference<Stream>::Pointer_t)
+ void FontTable::info(const string& )
+ {
+ }
++
++void FontTable::startShape( ::com::sun::star::uno::Reference< ::com::sun::star::drawing::XShape > )
++{
++}
++
++void FontTable::endShape( )
++{
++}
++
+ /*-- 21.06.2006 11:21:38---------------------------------------------------
+ 
+   -----------------------------------------------------------------------*/
+diff --git writerfilter/source/dmapper/FontTable.hxx writerfilter/source/dmapper/FontTable.hxx
+index 498e816..f6e8859 100644
+--- writerfilter/source/dmapper/FontTable.hxx
++++ writerfilter/source/dmapper/FontTable.hxx
+@@ -98,6 +98,8 @@ public:
+     virtual void substream(Id name,
+                            ::writerfilter::Reference<Stream>::Pointer_t ref);
+     virtual void info(const string & info);
++    virtual void startShape( ::com::sun::star::uno::Reference< ::com::sun::star::drawing::XShape > xShape );
++    virtual void endShape( );
+ 
+     const FontEntry*    getFontEntry(sal_uInt32 nIndex);
+     sal_uInt32          size();
 diff --git writerfilter/source/dmapper/GraphicHelpers.cxx writerfilter/source/dmapper/GraphicHelpers.cxx
 new file mode 100644
-index 0000000..9dedce1
+index 0000000..a9508c5
 --- /dev/null
 +++ writerfilter/source/dmapper/GraphicHelpers.cxx
-@@ -0,0 +1,159 @@
+@@ -0,0 +1,223 @@
 +#include "ConversionHelper.hxx"
 +#include "GraphicHelpers.hxx"
 +
@@ -26,6 +419,7 @@ index 0000000..9dedce1
 +#include <com/sun/star/text/HoriOrientation.hpp>
 +#include <com/sun/star/text/VertOrientation.hpp>
 +#include <com/sun/star/text/RelOrientation.hpp>
++#include <com/sun/star/text/WrapTextMode.hpp>
 +
 +#include <iostream>
 +using namespace std;
@@ -176,13 +570,76 @@ index 0000000..9dedce1
 +    }
 +}
 +
++WrapHandler::WrapHandler( ) :
++    Properties( ),
++    m_nType( 0 ),
++    m_nSide( 0 )
++{
++}
++
++WrapHandler::~WrapHandler( )
++{
++}
++
++void WrapHandler::attribute( Id aName, Value& rVal )
++{
++    switch ( aName )
++    {
++        case NS_ooxml::LN_CT_Wrap_type:
++            m_nType = sal_Int32( rVal.getInt( ) );
++            break;
++        case NS_ooxml::LN_CT_Wrap_side:
++            m_nSide = sal_Int32( rVal.getInt( ) );
++            break; 
++        default:;
++    }
++}
++
++void WrapHandler::sprm( Sprm& )
++{
++}
++
++sal_Int32 WrapHandler::getWrapMode( )
++{
++    sal_Int32 nMode = com::sun::star::text::WrapTextMode_NONE;
++
++    switch ( m_nType )
++    {
++        case NS_ooxml::LN_Value_vml_wordprocessingDrawing_ST_WrapType_square:
++        case NS_ooxml::LN_Value_vml_wordprocessingDrawing_ST_WrapType_tight:
++            {
++                switch ( m_nSide )
++                {
++                    case NS_ooxml::LN_Value_vml_wordprocessingDrawing_ST_WrapSide_left:
++                        nMode = com::sun::star::text::WrapTextMode_LEFT;
++                        break;
++                    case NS_ooxml::LN_Value_vml_wordprocessingDrawing_ST_WrapSide_right:
++                        nMode = com::sun::star::text::WrapTextMode_RIGHT;
++                        break;
++                    default:
++                        nMode = com::sun::star::text::WrapTextMode_PARALLEL;
++                }
++            }
++            break;
++        case NS_ooxml::LN_Value_vml_wordprocessingDrawing_ST_WrapType_through:
++            nMode = com::sun::star::text::WrapTextMode_THROUGHT;
++            break;
++        case NS_ooxml::LN_Value_vml_wordprocessingDrawing_ST_WrapType_topAndBottom:
++        case NS_ooxml::LN_Value_vml_wordprocessingDrawing_ST_WrapType_none:
++        default:
++            nMode = com::sun::star::text::WrapTextMode_NONE;
++    }
++
++    return nMode;
++}
++
 +} }
 diff --git writerfilter/source/dmapper/GraphicHelpers.hxx writerfilter/source/dmapper/GraphicHelpers.hxx
 new file mode 100644
-index 0000000..1335e68
+index 0000000..5142c8b
 --- /dev/null
 +++ writerfilter/source/dmapper/GraphicHelpers.hxx
-@@ -0,0 +1,32 @@
+@@ -0,0 +1,48 @@
 +#ifndef INCLUDED_GRAPHICHELPERS_HXX
 +#define INCLUDED_GRAPHICHELPERS_HXX
 +
@@ -212,11 +669,27 @@ index 0000000..1335e68
 +}; 
 +typedef boost::shared_ptr<PositionHandler> PositionHandlerPtr;
 +
++class WRITERFILTER_DLLPRIVATE WrapHandler: public Properties
++{
++public:
++    WrapHandler( );
++    ~WrapHandler( );
++
++    sal_Int32 m_nType;
++    sal_Int32 m_nSide;
++
++    sal_Int32 getWrapMode( );
++
++    virtual void attribute( Id aName, Value& rVal );
++    virtual void sprm( Sprm& rSprm );
++};
++typedef boost::shared_ptr<WrapHandler> WrapHandlerPtr;
++
 +} }
 +
 +#endif
 diff --git writerfilter/source/dmapper/GraphicImport.cxx writerfilter/source/dmapper/GraphicImport.cxx
-index c234d69..a26da3f 100644
+index c234d69..31519f8 100644
 --- writerfilter/source/dmapper/GraphicImport.cxx
 +++ writerfilter/source/dmapper/GraphicImport.cxx
 @@ -29,7 +29,9 @@
@@ -448,7 +921,7 @@ index c234d69..a26da3f 100644
 +}
 +
 +/*-- 01.11.2006 09:45:02---------------------------------------------------
-+
+ 
 +  -----------------------------------------------------------------------*/
 +void GraphicImport::data(const sal_uInt8* buf, size_t len, writerfilter::Reference<Properties>::Pointer_t /*ref*/)
 +{
@@ -459,13 +932,29 @@ index c234d69..a26da3f 100644
 +        
 +        uno::Reference< io::XInputStream > xIStream = new XInputStreamHelper( buf, len, m_pImpl->bIsBitmap );
 +        aMediaProperties[0].Value <<= xIStream;
- 
++
 +        m_xGraphicObject = createGraphicObject( aMediaProperties );
  }
  /*-- 01.11.2006 09:45:03---------------------------------------------------
  
+@@ -2161,6 +2244,15 @@ void GraphicImport::substream(Id /*name*/, ::writerfilter::Reference<Stream>::Po
+ void GraphicImport::info(const string & /*info*/)
+ {
+ }
++    
++void GraphicImport::startShape( ::com::sun::star::uno::Reference< ::com::sun::star::drawing::XShape > /*xShape*/ )
++{
++}
++
++void GraphicImport::endShape( )
++{
++}
++
+ /*-- 09.08.2007 10:17:00---------------------------------------------------
+ 
+   -----------------------------------------------------------------------*/
 diff --git writerfilter/source/dmapper/GraphicImport.hxx writerfilter/source/dmapper/GraphicImport.hxx
-index 99daac9..6a0d544 100644
+index 99daac9..6ff1c3f 100644
 --- writerfilter/source/dmapper/GraphicImport.hxx
 +++ writerfilter/source/dmapper/GraphicImport.hxx
 @@ -51,6 +51,11 @@ namespace com{ namespace sun { namespace star {
@@ -490,6 +979,141 @@ index 99daac9..6a0d544 100644
  
  public:
      explicit GraphicImport(::com::sun::star::uno::Reference < ::com::sun::star::uno::XComponentContext >    xComponentContext,
+@@ -112,6 +120,8 @@ public:
+     virtual void substream(Id name,
+                            ::writerfilter::Reference<Stream>::Pointer_t ref);
+     virtual void info(const string & info);
++    virtual void startShape( ::com::sun::star::uno::Reference< ::com::sun::star::drawing::XShape > xShape );
++    virtual void endShape( );
+ 
+     ::com::sun::star::uno::Reference< ::com::sun::star::text::XTextContent > GetGraphicObject();
+     bool    IsGraphic() const;
+diff --git writerfilter/source/dmapper/OLEHandler.cxx writerfilter/source/dmapper/OLEHandler.cxx
+index 48ae2fe..910943e 100644
+--- writerfilter/source/dmapper/OLEHandler.cxx
++++ writerfilter/source/dmapper/OLEHandler.cxx
+@@ -29,6 +29,8 @@
+  ************************************************************************/
+ #include <OLEHandler.hxx>
+ #include <PropertyMap.hxx>
++#include "GraphicHelpers.hxx"
++
+ #include <doctok/resourceids.hxx>
+ #include <ooxml/resourceids.hxx>
+ #include <com/sun/star/beans/PropertyValue.hpp>
+@@ -54,7 +56,8 @@ using namespace ::com::sun::star;
+   -----------------------------------------------------------------------*/
+ OLEHandler::OLEHandler() :
+     m_nDxaOrig(0),
+-    m_nDyaOrig(0)
++    m_nDyaOrig(0),
++    m_nWrapMode(0)
+ {
+ }
+ /*-- 23.04.2008 10:46:14---------------------------------------------------
+@@ -108,15 +111,28 @@ void OLEHandler::attribute(Id rName, Value & rVal)
+             rVal.getAny() >>= xTempShape;
+             if( xTempShape.is() )
+             {
+-                m_aShapeSize = xTempShape->getSize();
+-                m_aShapePosition = xTempShape->getPosition();
++                m_xShape.set( xTempShape );
++                
+                 try
+                 {
++                    m_aShapeSize = xTempShape->getSize();
++                    m_aShapePosition = xTempShape->getPosition();
++
+                     uno::Reference< beans::XPropertySet > xShapeProps( xTempShape, uno::UNO_QUERY_THROW );
+-                    xShapeProps->getPropertyValue( PropertyNameSupplier::GetPropertyNameSupplier().GetName( PROP_BITMAP ) ) >>= m_xReplacement;
++                    PropertyNameSupplier& rNameSupplier = PropertyNameSupplier::GetPropertyNameSupplier();
++
++                    xShapeProps->getPropertyValue( rNameSupplier.GetName( PROP_BITMAP ) ) >>= m_xReplacement;
++               
++                    xShapeProps->setPropertyValue( 
++                        rNameSupplier.GetName( PROP_SURROUND ),
++                        uno::makeAny( m_nWrapMode ) );
+                 }
+-                catch( const uno::Exception& )
++                catch( const uno::Exception& e )
+                 {
++#if DEBUG
++                    clog << "Exception in OLE Handler: ";
++                    clog << rtl::OUStringToOString( e.Message, RTL_TEXTENCODING_UTF8 ).getStr( ) << endl;
++#endif
+                 }    
+             }
+         }
+@@ -142,8 +158,22 @@ void OLEHandler::sprm(Sprm & rSprm)
+             }
+         }
+         break;
++        case NS_ooxml::LN_wrap_wrap:
++        {
++            writerfilter::Reference<Properties>::Pointer_t pProperties = rSprm.getProps();
++            if ( pProperties.get( ) )
++            {
++                WrapHandlerPtr pHandler( new WrapHandler );
++                pProperties->resolve( *pHandler );
++
++                m_nWrapMode = pHandler->getWrapMode( );
++            }
++        }
++        break;
+         default:
++        {
+             OSL_ENSURE( false, "unknown attribute");
++        }
+     }
+ }
+ /*-- 23.04.2008 11:15:19---------------------------------------------------
+@@ -152,9 +182,10 @@ void OLEHandler::sprm(Sprm & rSprm)
+ ::rtl::OUString OLEHandler::copyOLEOStream( uno::Reference< text::XTextDocument > xTextDocument )
+ {
+     ::rtl::OUString sRet;
+-    if( !m_xInputStream.is() )
++    if( !m_xInputStream.is( ) )
+         return sRet;
+-    try{
++    try
++    {
+         uno::Reference < lang::XMultiServiceFactory > xFactory(xTextDocument, uno::UNO_QUERY_THROW);
+         uno::Reference< document::XEmbeddedObjectResolver > xEmbeddedResolver(
+             xFactory->createInstance(
+diff --git writerfilter/source/dmapper/OLEHandler.hxx writerfilter/source/dmapper/OLEHandler.hxx
+index c56358a..d65035f 100644
+--- writerfilter/source/dmapper/OLEHandler.hxx
++++ writerfilter/source/dmapper/OLEHandler.hxx
+@@ -38,6 +38,8 @@
+ #include <com/sun/star/awt/Size.hpp>
+ #include <com/sun/star/awt/Point.hpp>
+ 
++#include <com/sun/star/drawing/XShape.hpp>
++
+ namespace com{ namespace sun{ namespace star{
+     namespace embed{
+         class XEmbeddedObject;
+@@ -72,6 +74,9 @@ class WRITERFILTER_DLLPRIVATE OLEHandler : public Properties
+ 
+     sal_Int32                   m_nDxaOrig;
+     sal_Int32                   m_nDyaOrig;
++    sal_Int32                   m_nWrapMode;
++
++    ::com::sun::star::uno::Reference< ::com::sun::star::drawing::XShape > m_xShape;
+ 
+     ::com::sun::star::awt::Size m_aShapeSize;
+     ::com::sun::star::awt::Point m_aShapePosition;
+@@ -87,6 +92,10 @@ public:
+     virtual void attribute(Id Name, Value & val);
+     virtual void sprm(Sprm & sprm);
+ 
++    inline ::com::sun::star::uno::Reference< ::com::sun::star::drawing::XShape > getShape( ) { return m_xShape; };
++
++    inline bool isOLEObject( ) { return m_xInputStream.is( ); };
++
+     ::rtl::OUString copyOLEOStream( ::com::sun::star::uno::Reference< ::com::sun::star::text::XTextDocument > xTextDocument );
+ 
+     ::com::sun::star::awt::Size     getSize() const { return m_aShapeSize;}
 diff --git writerfilter/source/dmapper/makefile.mk writerfilter/source/dmapper/makefile.mk
 index 75279c4..c1fcc36 100644
 --- writerfilter/source/dmapper/makefile.mk
@@ -502,10 +1126,230 @@ index 75279c4..c1fcc36 100644
                      $(SLO)$/TablePropertiesHandler.obj \
                      $(SLO)$/CellColorHandler.obj \
                      $(SLO)$/CellMarginHandler.obj \
+diff --git writerfilter/source/ooxml/OOXMLFastContextHandler.cxx writerfilter/source/ooxml/OOXMLFastContextHandler.cxx
+index 6e7d02a..937c6f6 100644
+--- writerfilter/source/ooxml/OOXMLFastContextHandler.cxx
++++ writerfilter/source/ooxml/OOXMLFastContextHandler.cxx
+@@ -1954,7 +1954,7 @@ void SAL_CALL ShapesNoAdd::remove(const uno::Reference< drawing::XShape > & xSha
+ 
+ OOXMLFastContextHandlerShape::OOXMLFastContextHandlerShape
+ (OOXMLFastContextHandler * pContext)
+-: OOXMLFastContextHandlerProperties(pContext)
++: OOXMLFastContextHandlerProperties(pContext), m_bShapeSent( false )
+ {
+     uno::Reference<uno::XComponentContext> xContext(getComponentContext());
+ 
+@@ -2010,7 +2010,24 @@ void OOXMLFastContextHandlerShape::lcl_startFastElement
+     startAction(Element);
+ 
+     if (mrShapeContext.is())
++    {
+         mrShapeContext->startFastElement(Element, Attribs);
++        
++        if ( Element == ( NS_vml|OOXML_textbox ) && !m_bShapeSent )
++        {
++            uno::Reference<drawing::XShape> xShape(mrShapeContext->getShape());
++            if (xShape.is())
++            {
++                OOXMLValue::Pointer_t
++                    pValue(new OOXMLShapeValue(xShape));
++                newProperty(NS_ooxml::LN_shape, pValue);
++                m_bShapeSent = true;
++
++                // Notify the dmapper that the shape is ready to use
++                mpStream->startShape( xShape );
++            }
++        }
++    }
+ }
+ 
+ void SAL_CALL OOXMLFastContextHandlerShape::startUnknownElement
+@@ -2029,19 +2046,28 @@ void OOXMLFastContextHandlerShape::lcl_endFastElement
+ {
+     if (mrShapeContext.is())
+     {
+-        mrShapeContext->endFastElement(Element);
+-
+-        uno::Reference<drawing::XShape> xShape(mrShapeContext->getShape());
++        bool bIsPicture = Element == ( NS_picture | OOXML_pic );
+ 
+-        if (xShape.is())
++        mrShapeContext->endFastElement(Element);
++                    
++        if ( !m_bShapeSent )
+         {
+-            awt::Point aPoint(xShape->getPosition());
+-            awt::Size aSize(xShape->getSize());
+-
+-            OOXMLValue::Pointer_t
+-                pValue(new OOXMLShapeValue(xShape));
+-            newProperty(NS_ooxml::LN_shape, pValue);
++            uno::Reference<drawing::XShape> xShape(mrShapeContext->getShape());
++            if (xShape.is())
++            {
++                OOXMLValue::Pointer_t
++                    pValue(new OOXMLShapeValue(xShape));
++                newProperty(NS_ooxml::LN_shape, pValue);
++                m_bShapeSent = true;
++      
++                // Notify the dmapper that the shape is ready to use
++                if ( !bIsPicture )
++                    mpStream->startShape( xShape );
++            }
+         }
++
++        if ( Element != ( NS_vml|OOXML_textbox ) && !bIsPicture )
++            mpStream->endShape( );
+     }
+ 
+     OOXMLFastContextHandlerProperties::lcl_endFastElement(Element);
+@@ -2085,6 +2111,7 @@ OOXMLFastContextHandlerShape::lcl_createFastChildContext
+                 pWrapper->addNamespace(NS_wordprocessingml);
+                 pWrapper->addNamespace(NS_vml_wordprocessingDrawing);
+                 pWrapper->addNamespace(NS_office);
++                pWrapper->addToken( NS_vml|OOXML_textbox );
+ 
+                 xContextHandler.set(pWrapper);
+             }
+@@ -2092,6 +2119,7 @@ OOXMLFastContextHandlerShape::lcl_createFastChildContext
+                 xContextHandler.set(this);
+             break;
+     }
++   
+ 
+     return xContextHandler;
+ }
+@@ -2201,6 +2229,11 @@ void OOXMLFastContextHandlerWrapper::addNamespace(const Id & nId)
+     mMyNamespaces.insert(nId);
+ }
+ 
++void OOXMLFastContextHandlerWrapper::addToken( Token_t Token )
++{
++    mMyTokens.insert( Token );
++}
++
+ void OOXMLFastContextHandlerWrapper::lcl_startFastElement
+ (Token_t Element,
+  const uno::Reference< xml::sax::XFastAttributeList > & Attribs)
+@@ -2245,8 +2278,15 @@ OOXMLFastContextHandlerWrapper::lcl_createFastChildContext
+     debug_logger->endElement("Wrapper-createChildContext");
+ #endif
+ 
+-    if (mMyNamespaces.find(nNameSpace) != mMyNamespaces.end())
++    bool bInNamespaces = mMyNamespaces.find(nNameSpace) != mMyNamespaces.end();
++    bool bInTokens = mMyTokens.find( Element ) != mMyTokens.end( );
++    if ( bInNamespaces )
+         xResult.set(createFromStart(Element, Attribs));
++    else if ( bInTokens )
++    {
++        mxContext->createFastChildContext(Element, Attribs);
++        xResult.set( mpParent );
++    }
+     else if (mxContext.is())
+     {
+         OOXMLFastContextHandlerWrapper * pWrapper =
+diff --git writerfilter/source/ooxml/OOXMLFastContextHandler.hxx writerfilter/source/ooxml/OOXMLFastContextHandler.hxx
+index dc45603..3f513b5 100644
+--- writerfilter/source/ooxml/OOXMLFastContextHandler.hxx
++++ writerfilter/source/ooxml/OOXMLFastContextHandler.hxx
+@@ -558,6 +558,9 @@ protected:
+ 
+ class OOXMLFastContextHandlerShape: public OOXMLFastContextHandlerProperties
+ {
++private:
++    bool m_bShapeSent;
++
+ public:
+     explicit OOXMLFastContextHandlerShape
+     (OOXMLFastContextHandler * pContext);
+@@ -647,6 +650,7 @@ public:
+     virtual ResourceEnum_t getResource() const;
+ 
+     void addNamespace(const Id & nId);
++    void addToken( Token_t Element );
+ 
+     virtual void newProperty(const Id & rId, OOXMLValue::Pointer_t pVal);
+     virtual void setPropertySet(OOXMLPropertySet::Pointer_t pPropertySet);
+@@ -681,6 +685,7 @@ protected:
+ private:
+     uno::Reference<XFastContextHandler> mxContext;
+     set<Id> mMyNamespaces;
++    set<Token_t> mMyTokens;
+     OOXMLPropertySet::Pointer_t mpPropertySet;
+ 
+     OOXMLFastContextHandler * getFastContextHandler() const;
+diff --git writerfilter/source/ooxml/makefile.mk writerfilter/source/ooxml/makefile.mk
+index 29df82f..35f7db7 100644
+--- writerfilter/source/ooxml/makefile.mk
++++ writerfilter/source/ooxml/makefile.mk
+@@ -151,6 +151,8 @@ OOXMLGPERFFASTTOKENXSL=gperffasttokenhandler.xsl
+ 
+ OOXMLRESOURCEIDSHXX=$(OOXMLHXXOUTDIR)$/resourceids.hxx
+ 
++NSPROCESS=namespace_preprocess.pl
++
+ TOKENXML=$(OOXMLCXXOUTDIR)$/token.xml
+ TOKENXMLTMP=$(OOXMLCXXOUTDIR)$/token.tmp
+ 
+@@ -162,6 +164,7 @@ OOXMLVALUESHXX=$(OOXMLCXXOUTDIR)$/OOXMLvalues.hxx
+ OOXMLVALUESCXX=$(OOXMLCXXOUTDIR)$/OOXMLvalues.cxx
+ GPERFFASTTOKENHXX=$(OOXMLHXXOUTDIR)$/gperffasttoken.hxx
+ MODELPROCESSED=$(MISC)$/model_preprocessed.xml
++NSXSL=$(MISC)$/namespacesmap.xsl
+ 
+ OOXMLGENHEADERS= \
+ 	$(OOXMLFASTRESOURCESHXX) \
+@@ -192,8 +195,12 @@ $(TOKENXMLTMP): $(SOLARVER)$/$(INPATH)$/inc$(UPDMINOREXT)$/oox$/token.txt
+ $(TOKENXML): tokenxmlheader $(TOKENXMLTMP) tokenxmlfooter
+ 	$(TYPE) tokenxmlheader $(TOKENXMLTMP) tokenxmlfooter > $@
+ 
+-$(MODELPROCESSED): $(OOXMLPREPROCESSXSL) $(OOXMLMODEL)
+-	$(XSLTPROC) $(OOXMLPREPROCESSXSL) $(OOXMLMODEL) > $@
++$(NSXSL) : $(OOXMLMODEL) $(SOLARVER)$/$(INPATH)$/inc$(UPDMINOREXT)$/oox$/namespaces.txt $(OOXMLPREPROCESSXSL) $(NSPROCESS)
++    $(PERL) $(NSPROCESS) $(SOLARVER)$/$(INPATH)$/inc$(UPDMINOREXT)$/oox$/namespaces.txt $(PWD)$/$(OOXMLPREPROCESSXSL) > $@
++
++
++$(MODELPROCESSED): $(NSXSL) $(OOXMLPREPROCESSXSL) $(OOXMLMODEL)
++	$(XSLTPROC) $(NSXSL) $(OOXMLMODEL) > $@
+ 
+ $(OOXMLHXXOUTDIRCREATED):
+ 	$(MKDIRHIER) $(OOXMLHXXOUTDIR)
 diff --git writerfilter/source/ooxml/model.xml writerfilter/source/ooxml/model.xml
-index 9539296..eb83b34 100644
+index 9539296..faf4683 100644
 --- writerfilter/source/ooxml/model.xml
 +++ writerfilter/source/ooxml/model.xml
+@@ -1,18 +1,18 @@
+ <?xml version="1.0"?>
+ <model xmlns:rng="http://relaxng.org/ns/structure/1.0">
+-  <namespace-alias name="http://www.w3.org/XML/1998/namespace" alias="xml" id="1"/>
+-  <namespace-alias name="http://schemas.openxmlformats.org/officeDocument/2006/relationships" alias="relationships" id="3"/>
+-  <namespace-alias name="urn:schemas-microsoft-com:office:office" alias="office" id="11"/>
+-  <namespace-alias name="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" alias="theme" id="14"/>
+-  <namespace-alias name="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" alias="wordprocessingDrawing" id="15"/>
+-  <namespace-alias name="http://schemas.openxmlformats.org/drawingml/2006/main" alias="drawingml" id="21"/>
+-  <namespace-alias name="urn:schemas-microsoft-com:vml" alias="vml" id="24"/>
+-  <namespace-alias name="http://schemas.openxmlformats.org/drawingml/2006/picture" alias="picture" id="25"/>
+-  <namespace-alias name="urn:schemas-microsoft-com:office:word" alias="vml_wordprocessingDrawing" id="32"/>
+-  <namespace-alias name="http://schemas.openxmlformats.org/wordprocessingml/2006/main" alias="wordprocessingml" id="60"/>
+-  <namespace-alias name="http://schemas.openxmlformats.org/officeDocument/2006/math" alias="math" id="61"/>
+-  <namespace-alias name="http://schemas.openxmlformats.org/schemaLibrary/2006/main" alias="schemaLibrary" id="62"/>
+-  <namespace-alias name="http://sprm" alias="sprm" id="99"/>
++  <namespace-alias name="http://www.w3.org/XML/1998/namespace" alias="xml" id="XML"/>
++  <namespace-alias name="http://schemas.openxmlformats.org/officeDocument/2006/relationships" alias="relationships" id="RELATIONSHIPS"/>
++  <namespace-alias name="urn:schemas-microsoft-com:office:office" alias="office" id="OFFICE"/>
++  <namespace-alias name="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" alias="theme" id="THEME"/>
++  <namespace-alias name="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" alias="wordprocessingDrawing" id="DOC_DRAWINGML"/>
++  <namespace-alias name="http://schemas.openxmlformats.org/drawingml/2006/main" alias="drawingml" id="DRAWINGML"/>
++  <namespace-alias name="urn:schemas-microsoft-com:vml" alias="vml" id="VML"/>
++  <namespace-alias name="http://schemas.openxmlformats.org/drawingml/2006/picture" alias="picture" id="PICTURE"/>
++  <namespace-alias name="urn:schemas-microsoft-com:office:word" alias="vml_wordprocessingDrawing" id="VML_DOC"/>
++  <namespace-alias name="http://schemas.openxmlformats.org/wordprocessingml/2006/main" alias="wordprocessingml" id="DOC"/>
++  <namespace-alias name="http://schemas.openxmlformats.org/officeDocument/2006/math" alias="math" id="MATH"/>
++  <namespace-alias name="http://schemas.openxmlformats.org/schemaLibrary/2006/main" alias="schemaLibrary" id="SML"/>
++  <namespace-alias name="http://sprm" alias="sprm" id="SPRM"/>
+   <token tokenid="ooxml:shape"/>
+   <token tokenid="ooxml:token"/>
+   <token tokenid="ooxml:inputstream"/>
 @@ -6505,11 +6505,17 @@
            </element>
          </choice>
@@ -584,8 +1428,109 @@ index 9539296..eb83b34 100644
      <resource name="ST_AlignV" resource="List" generated="yes">
        <value name="top" tokenid="ooxml:Value_wordprocessingDrawing_ST_AlignV_top">top</value>
        <value name="bottom" tokenid="ooxml:Value_wordprocessingDrawing_ST_AlignV_bottom">bottom</value>
+@@ -8326,8 +8338,6 @@
+       <element name="nvPicPr" tokenid="ooxml:CT_Picture_nvPicPr"/>
+       <element name="blipFill" tokenid="ooxml:CT_Picture_blipFill"/>
+       <element name="spPr" tokenid="ooxml:CT_Picture_spPr"/>
+-      <action name="start" action="mark" sendtokenid="ooxml:mark_shape" value="0"/>
+-      <action name="end" action="mark" sendtokenid="ooxml:mark_shape" value="1"/>
+     </resource>
+     <resource name="pic" resource="Properties">
+       <element name="pic" tokenid="ooxml:pic_pic"/>
+@@ -21784,8 +21794,6 @@
+     <resource name="CT_Picture" resource="Shape">
+       <element name="movie" tokenid="ooxml:CT_Picture_movie"/>
+       <element name="control" tokenid="ooxml:CT_Picture_control"/>
+-      <action name="start" action="mark" sendtokenid="ooxml:mark_shape" value="0"/>
+-      <action name="end" action="mark" sendtokenid="ooxml:mark_shape" value="1"/>
+       <action name="end" action="sendPropertiesWithId" sendtokenid="ooxml:object"/>
+       <action name="end" action="clearProps"/>
+     </resource>
+diff --git writerfilter/source/ooxml/modelpreprocess.xsl writerfilter/source/ooxml/modelpreprocess.xsl
+index 51efa93..90376fc 100644
+--- writerfilter/source/ooxml/modelpreprocess.xsl
++++ writerfilter/source/ooxml/modelpreprocess.xsl
+@@ -225,4 +225,4 @@
+      <xsl:apply-templates/>
+    </xsl:copy>
+   </xsl:template>
+-</xsl:stylesheet>
+\ No newline at end of file
++</xsl:stylesheet>
+diff --git writerfilter/source/ooxml/namespace_preprocess.pl writerfilter/source/ooxml/namespace_preprocess.pl
+new file mode 100644
+index 0000000..f354cdb
+--- /dev/null
++++ writerfilter/source/ooxml/namespace_preprocess.pl
+@@ -0,0 +1,66 @@
++$ARGV0 = shift @ARGV;
++$ARGV1 = shift @ARGV;
++
++print <<EOF;
++<?xml version="1.0"?>
++<xsl:stylesheet version="1.0"
++    xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
++  <xsl:output method="xml"/>
++
++  <xsl:include href="$ARGV1"/>
++
++  <xsl:template match="namespace-alias[\@id]">
++    <xsl:variable name="value">
++      <xsl:call-template name="getnamespaceid">
++        <xsl:with-param name="id" select="\@id" />
++      </xsl:call-template>
++    </xsl:variable>
++    <xsl:copy>
++      <xsl:apply-templates select="@*"/>
++      <xsl:attribute name="id">
++        <xsl:value-of select="\$value"/>
++      </xsl:attribute>
++    </xsl:copy>
++  </xsl:template>
++
++  <xsl:template name="getnamespaceid">
++    <xsl:param name='id'/>
++    <xsl:choose>
++EOF
++
++
++# print the mapping
++open ( NAMESPACES, $ARGV0 ) || die "can't open namespace file: $!";
++$group = 0;
++$i = 1;
++while ( <NAMESPACES> )
++{
++    chomp( $_ );
++    $_ =~ s/\s*//g;
++    if ( $_ =~ m/^$/ )
++    {
++        # Start a new group
++        $i = 0;
++        $group++;
++    } 
++    elsif ( $_ =~ m/^[^#]/ )
++    {
++        # Neither an empty line nor a comment
++        $_ =~ /^[a-zA-Z0-9-_]+$/ or die "Invalid namespace token $_";
++        $_ =~ s/-/_/g;
++        $no = $group*10 + $i;
++        print <<EOF;
++      <xsl:when test="\$id = '$_'">
++        <xsl:text>$no</xsl:text>
++      </xsl:when>
++EOF
++        ++$i;
++    }
++}
++
++print <<EOF;
++    </xsl:choose>
++  </xsl:template>
++
++</xsl:stylesheet>
++EOF
 diff --git writerfilter/source/ooxml/resourcestools.xsl writerfilter/source/ooxml/resourcestools.xsl
-index 9b17e4d..96c34ae 100644
+index 9b17e4d..7296cbd 100644
 --- writerfilter/source/ooxml/resourcestools.xsl
 +++ writerfilter/source/ooxml/resourcestools.xsl
 @@ -92,6 +92,20 @@
@@ -609,6 +1554,15 @@ index 9b17e4d..96c34ae 100644
  
    <xsl:template name="licenseheader">
      <xsl:text>
+@@ -398,7 +412,7 @@ public:
+        Generate switch body for createFastChildContext
+   -->
+   <xsl:template name="switchbodycreatechildcontext">
+-    <xsl:for-each select=".//rng:element[@name]">
++      <xsl:for-each select=".//rng:element[@name]">
+         <xsl:call-template name="caselabelfasttoken"/>
+         <xsl:variable name="createstatement">
+           <xsl:call-template name="fastelementcreatestatement"/>
 @@ -1543,6 +1557,12 @@ uno::Reference &lt; xml::sax::XFastParser &gt; OOXMLStreamImpl::getFastParser()
        </xsl:if>
      </xsl:for-each>
@@ -697,6 +1651,18 @@ index 9b17e4d..96c34ae 100644
    <xsl:template name="fastattributeslistvalue">
      <xsl:for-each select=".//rng:attribute">
        <xsl:variable name="myfasttoken">
+@@ -1739,9 +1806,9 @@ void </xsl:text>
+       </xsl:if>
+         <!-- </xsl:if> -->
+   </xsl:template>
+-
++  
+   <xsl:template name="fastelementcreatestatement">
+-    <xsl:for-each select=".//rng:ref">
++    <xsl:for-each select=".//rng:ref">  
+       <xsl:choose>
+         <xsl:when test="@name='BUILT_IN_ANY_TYPE'">
+           <xsl:text>createFromStart(Element, Attribs)</xsl:text>
 @@ -1999,6 +2066,29 @@ void </xsl:text>
  
    <xsl:template name="fastcharactersbody">
@@ -727,3 +1693,70 @@ index 9b17e4d..96c34ae 100644
      <xsl:for-each select="ancestor::namespace/resource[@name = $name]//action[@name='characters']">
        <xsl:call-template name="chooseaction"/>
      </xsl:for-each>
+diff --git writerfilter/source/resourcemodel/WW8Analyzer.cxx writerfilter/source/resourcemodel/WW8Analyzer.cxx
+index 0bcf198..a3d70cf 100644
+--- writerfilter/source/resourcemodel/WW8Analyzer.cxx
++++ writerfilter/source/resourcemodel/WW8Analyzer.cxx
+@@ -168,6 +168,14 @@ void WW8Analyzer::info(const string & /*info*/)
+ {
+ }
+ 
++void WW8Analyzer::startShape( ::com::sun::star::uno::Reference< ::com::sun::star::drawing::XShape > /*xShape*/ )
++{
++}
++
++void WW8Analyzer::endShape( )
++{
++}
++
+ void WW8Analyzer::dumpStats(ostream & o) const
+ {
+     {
+diff --git writerfilter/source/resourcemodel/WW8Analyzer.hxx writerfilter/source/resourcemodel/WW8Analyzer.hxx
+index e437ed9..763d531 100644
+--- writerfilter/source/resourcemodel/WW8Analyzer.hxx
++++ writerfilter/source/resourcemodel/WW8Analyzer.hxx
+@@ -92,6 +92,8 @@ public:
+     virtual void substream(Id name, 
+                            writerfilter::Reference<Stream>::Pointer_t ref);
+     virtual void info(const string & info);
++    virtual void startShape( ::com::sun::star::uno::Reference< ::com::sun::star::drawing::XShape > xShape );
++    virtual void endShape( );
+ 
+     void dumpStats(ostream & o) const;
+ };
+diff --git writerfilter/source/resourcemodel/resourcemodel.cxx writerfilter/source/resourcemodel/resourcemodel.cxx
+index 7b4bdf8..d0ae060 100644
+--- writerfilter/source/resourcemodel/resourcemodel.cxx
++++ writerfilter/source/resourcemodel/resourcemodel.cxx
+@@ -266,6 +266,16 @@ void WW8StreamHandler::endCharacterGroup()
+ {
+     output.addItem("</character-group>");
+ }
++    
++void WW8StreamHandler::startShape( ::com::sun::star::uno::Reference< ::com::sun::star::drawing::XShape > /*xShape*/ )
++{
++    output.addItem("<shape>");
++}
++
++void WW8StreamHandler::endShape( )
++{
++    output.addItem( "</shape>" );
++}
+ 
+ void WW8StreamHandler::text(const sal_uInt8 * data, size_t len)
+ {
+diff --git writerfilter/source/resourcemodel/resourcemodel.hxx writerfilter/source/resourcemodel/resourcemodel.hxx
+index eb2a2a4..14c73f0 100644
+--- writerfilter/source/resourcemodel/resourcemodel.hxx
++++ writerfilter/source/resourcemodel/resourcemodel.hxx
+@@ -50,6 +50,9 @@ public:
+     virtual void props(writerfilter::Reference<Properties>::Pointer_t ref);
+     virtual void table(Id name, 
+                        writerfilter::Reference<Table>::Pointer_t ref);
++    
++    virtual void startShape( ::com::sun::star::uno::Reference< ::com::sun::star::drawing::XShape > xShape );
++    virtual void endShape( );
+ 
+     virtual void substream(Id name, writerfilter::Reference<Stream>::Pointer_t ref);
+ 
