@@ -1,4 +1,4 @@
-the fix for issue 48179
+Updated slideshow effect rewind feature from CWS slideshow1
 
 From: Thorsten Behrens <thb@openoffice.org>
 
@@ -6,26 +6,31 @@ From: Thorsten Behrens <thb@openoffice.org>
 ---
 
  offapi/com/sun/star/presentation/XSlideShow.idl    |   37 ++
+ .../sun/star/presentation/XSlideShowController.idl |    8 
  .../sun/star/presentation/XSlideShowListener.idl   |    6 
  sd/source/ui/slideshow/slideshowimpl.cxx           |  120 +++++-
  sd/source/ui/slideshow/slideshowimpl.hxx           |    8 
- .../presenter/PresenterCurrentSlideObserver.cxx    |    9 
+ sdext/source/presenter/PresenterController.cxx     |   11 -
+ .../presenter/PresenterCurrentSlideObserver.cxx    |    4 
  .../presenter/PresenterCurrentSlideObserver.hxx    |    2 
+ sdext/source/presenter/description.xml             |    4 
  .../source/engine/animationnodes/basenode.hxx      |    6 
  .../animationnodes/sequentialtimecontainer.cxx     |    6 
- slideshow/source/engine/effectrewinder.cxx         |  404 ++++++++++++++++++++
- slideshow/source/engine/effectrewinder.hxx         |  183 +++++++++
+ slideshow/source/engine/effectrewinder.cxx         |  432 ++++++++++++++++++++
+ slideshow/source/engine/effectrewinder.hxx         |  185 +++++++++
+ slideshow/source/engine/eventmultiplexer.cxx       |   10 
  slideshow/source/engine/eventqueue.cxx             |   47 ++
  slideshow/source/engine/makefile.mk                |    1 
  slideshow/source/engine/screenupdater.cxx          |   83 ++++
- slideshow/source/engine/slide/layermanager.cxx     |  105 +++--
+ slideshow/source/engine/shapes/drawshape.cxx       |    6 
+ slideshow/source/engine/slide/layermanager.cxx     |  105 ++---
  slideshow/source/engine/slide/layermanager.hxx     |   35 --
- slideshow/source/engine/slideshowimpl.cxx          |  270 +++++++++++--
+ slideshow/source/engine/slideshowimpl.cxx          |  270 ++++++++++---
  slideshow/source/engine/usereventqueue.cxx         |   54 ++-
  slideshow/source/inc/eventqueue.hxx                |    8 
  slideshow/source/inc/screenupdater.hxx             |   21 +
  slideshow/source/inc/usereventqueue.hxx            |   18 +
- 20 files changed, 1244 insertions(+), 179 deletions(-)
+ 25 files changed, 1303 insertions(+), 184 deletions(-)
  create mode 100644 slideshow/source/engine/effectrewinder.cxx
  create mode 100644 slideshow/source/engine/effectrewinder.hxx
 
@@ -86,6 +91,25 @@ index 4f4f021..272bf9d 100644
      */
      void displaySlide(
          [in] ::com::sun::star::drawing::XDrawPage xSlide,
+diff --git offapi/com/sun/star/presentation/XSlideShowController.idl offapi/com/sun/star/presentation/XSlideShowController.idl
+index 46989ec..d203a74 100644
+--- offapi/com/sun/star/presentation/XSlideShowController.idl
++++ offapi/com/sun/star/presentation/XSlideShowController.idl
+@@ -121,6 +121,14 @@ interface XSlideShowController
+ 
+ 	//------------------------------------------------------------------------- 
+ 
++	/** undo the last effects that where triggered by a generic trigger.
++		<p>If there is no previous effect that can be undone then the
++		previous slide will be displayed.
++	*/
++	void gotoPreviousEffect();
++
++	//------------------------------------------------------------------------- 
++
+ 	/** goto and display first slide */
+ 	void gotoFirstSlide();
+ 
 diff --git offapi/com/sun/star/presentation/XSlideShowListener.idl offapi/com/sun/star/presentation/XSlideShowListener.idl
 index 74767f0..6266042 100644
 --- offapi/com/sun/star/presentation/XSlideShowListener.idl
@@ -105,10 +129,10 @@ index 74767f0..6266042 100644
      /** Notifies that a hyperlink has been clicked.
          @param hyperLink hyperlink URL
 diff --git sd/source/ui/slideshow/slideshowimpl.cxx sd/source/ui/slideshow/slideshowimpl.cxx
-index 3953171..a792b79 100644
+index de96eac..c8d46f4 100644
 --- sd/source/ui/slideshow/slideshowimpl.cxx
 +++ sd/source/ui/slideshow/slideshowimpl.cxx
-@@ -183,7 +183,9 @@ public:
+@@ -184,7 +184,9 @@ public:
  	bool nextSlide();
  	bool previousSlide();
  
@@ -119,7 +143,7 @@ index 3953171..a792b79 100644
  
  	sal_Int32 getNextSlideIndex() const;
  	sal_Int32 getPreviousSlideIndex() const;
-@@ -480,29 +482,58 @@ bool AnimationSlideController::previousSlide()
+@@ -481,29 +483,58 @@ bool AnimationSlideController::previousSlide()
  	return jumpToSlideIndex( getPreviousSlideIndex() );
  }
  
@@ -185,7 +209,7 @@ index 3953171..a792b79 100644
  	}
  }
  
-@@ -1247,9 +1278,12 @@ void SAL_CALL SlideshowImpl::removeSlideShowListener( const Reference< XSlideSho
+@@ -1251,9 +1282,12 @@ void SAL_CALL SlideshowImpl::removeSlideShowListener( const Reference< XSlideSho
  
  // ---------------------------------------------------------
  
@@ -200,7 +224,7 @@ index 3953171..a792b79 100644
  }
  
  // ---------------------------------------------------------
-@@ -1399,14 +1433,14 @@ void SlideshowImpl::registerShapeEvents( Reference< XShapes >& xShapes ) throw(
+@@ -1403,14 +1437,14 @@ void SlideshowImpl::registerShapeEvents( Reference< XShapes >& xShapes ) throw(
  
  // ---------------------------------------------------------
  
@@ -217,7 +241,7 @@ index 3953171..a792b79 100644
  		registerShapeEvents(mpSlideController->getCurrentSlideNumber());
  		update();
  
-@@ -1980,11 +2014,17 @@ bool SlideshowImpl::keyInput(const KeyEvent& rKEvt)
+@@ -1984,11 +2018,17 @@ bool SlideshowImpl::keyInput(const KeyEvent& rKEvt)
  				break;
  
  			case KEY_PAGEUP:
@@ -236,7 +260,7 @@ index 3953171..a792b79 100644
  				break;
  
  			case KEY_HOME:
-@@ -3096,6 +3136,30 @@ void SAL_CALL SlideshowImpl::gotoNextEffect(  ) throw (RuntimeException)
+@@ -3081,6 +3121,30 @@ void SAL_CALL SlideshowImpl::gotoNextEffect(  ) throw (RuntimeException)
  
  // --------------------------------------------------------------------
  
@@ -267,7 +291,7 @@ index 3953171..a792b79 100644
  void SAL_CALL SlideshowImpl::gotoFirstSlide(  ) throw (RuntimeException)
  {
  	::vos::OGuard aSolarGuard( Application::GetSolarMutex() );
-@@ -3216,6 +3280,11 @@ void SAL_CALL SlideshowImpl::gotoNextSlide(  ) throw (RuntimeException)
+@@ -3201,6 +3265,11 @@ void SAL_CALL SlideshowImpl::gotoNextSlide(  ) throw (RuntimeException)
  
  void SAL_CALL SlideshowImpl::gotoPreviousSlide(  ) throw (RuntimeException)
  {
@@ -279,7 +303,7 @@ index 3953171..a792b79 100644
  	::vos::OGuard aSolarGuard( Application::GetSolarMutex() );
  
  	if( mxShow.is() && mpSlideController.get() ) try
-@@ -3236,8 +3305,22 @@ void SAL_CALL SlideshowImpl::gotoPreviousSlide(  ) throw (RuntimeException)
+@@ -3221,8 +3290,22 @@ void SAL_CALL SlideshowImpl::gotoPreviousSlide(  ) throw (RuntimeException)
  		}
  		else
  		{
@@ -304,7 +328,7 @@ index 3953171..a792b79 100644
  		}
  	}
  	catch( Exception& e )
-@@ -3688,19 +3771,20 @@ void SAL_CALL SlideShowListenerProxy::slideAnimationsEnded(  ) throw (::com::sun
+@@ -3673,19 +3756,20 @@ void SAL_CALL SlideShowListenerProxy::slideAnimationsEnded(  ) throw (::com::sun
  
  // ---------------------------------------------------------
  
@@ -329,7 +353,7 @@ index 3953171..a792b79 100644
  }
  
 diff --git sd/source/ui/slideshow/slideshowimpl.hxx sd/source/ui/slideshow/slideshowimpl.hxx
-index 672657e..a81ac62 100644
+index c297d4d..0219f11 100644
 --- sd/source/ui/slideshow/slideshowimpl.hxx
 +++ sd/source/ui/slideshow/slideshowimpl.hxx
 @@ -166,7 +166,7 @@ public:
@@ -341,7 +365,7 @@ index 672657e..a81ac62 100644
      virtual void SAL_CALL hyperLinkClicked(const ::rtl::OUString & hyperLink) throw (css::uno::RuntimeException);
  
      // css::lang::XEventListener:
-@@ -212,6 +212,7 @@ public:
+@@ -210,6 +210,7 @@ public:
      virtual void SAL_CALL addSlideShowListener( const css::uno::Reference< css::presentation::XSlideShowListener >& Listener ) throw (css::uno::RuntimeException);
      virtual void SAL_CALL removeSlideShowListener( const css::uno::Reference< css::presentation::XSlideShowListener >& Listener ) throw (css::uno::RuntimeException);
      virtual void SAL_CALL gotoNextEffect(  ) throw (css::uno::RuntimeException);
@@ -349,7 +373,7 @@ index 672657e..a81ac62 100644
      virtual void SAL_CALL gotoFirstSlide(  ) throw (css::uno::RuntimeException);
      virtual void SAL_CALL gotoNextSlide(  ) throw (css::uno::RuntimeException);
      virtual void SAL_CALL gotoPreviousSlide(  ) throw (css::uno::RuntimeException);
-@@ -241,7 +242,7 @@ public:
+@@ -239,7 +240,7 @@ public:
      virtual ::sal_Bool SAL_CALL hasElements(  ) throw (::com::sun::star::uno::RuntimeException);
  
  	// will be called from the SlideShowListenerProxy when this event is fired from the XSlideShow
@@ -358,7 +382,7 @@ index 672657e..a81ac62 100644
      void hyperLinkClicked(const ::rtl::OUString & hyperLink) throw (css::uno::RuntimeException);
  	void click(const css::uno::Reference< css::drawing::XShape > & xShape, const css::awt::MouseEvent & aOriginalEvent);
  
-@@ -282,7 +283,7 @@ private:
+@@ -280,7 +281,7 @@ private:
  
  	void createSlideList( bool bAll, bool bStartWithActualSlide, const String& rPresSlide );
  
@@ -375,11 +399,39 @@ index 672657e..a81ac62 100644
  
  	css::uno::Reference< css::presentation::XSlideShow > mxShow;
  	comphelper::ImplementationReference< ::sd::SlideShowView, css::presentation::XSlideShowView > mxView;
+diff --git sdext/source/presenter/PresenterController.cxx sdext/source/presenter/PresenterController.cxx
+index 9c54364..975b116 100644
+--- sdext/source/presenter/PresenterController.cxx
++++ sdext/source/presenter/PresenterController.cxx
+@@ -918,13 +918,22 @@ void SAL_CALL PresenterController::keyReleased (const awt::KeyEvent& rEvent)
+             break;
+ 
+         case awt::Key::PAGEUP:
++            if (mxSlideShowController.is())
++            {
++                if (rEvent.Modifiers == awt::KeyModifier::MOD2)
++                    mxSlideShowController->gotoPreviousSlide();
++                else
++                    mxSlideShowController->gotoPreviousEffect();
++            }
++            break;
++
+         case awt::Key::LEFT:
+         case awt::Key::UP:
+         case awt::Key::P:
+         case awt::Key::BACKSPACE:
+             if (mxSlideShowController.is())
+             {
+-                mxSlideShowController->gotoPreviousSlide();
++                mxSlideShowController->gotoPreviousEffect();
+             }
+             break;
+ 
 diff --git sdext/source/presenter/PresenterCurrentSlideObserver.cxx sdext/source/presenter/PresenterCurrentSlideObserver.cxx
-index 8f587c5..d2d8436 100644
+index 8f587c5..87abc55 100644
 --- sdext/source/presenter/PresenterCurrentSlideObserver.cxx
 +++ sdext/source/presenter/PresenterCurrentSlideObserver.cxx
-@@ -109,7 +109,7 @@ void SAL_CALL PresenterCurrentSlideObserver::resumed (void)
+@@ -109,13 +109,13 @@ void SAL_CALL PresenterCurrentSlideObserver::resumed (void)
  {
  }
  
@@ -388,22 +440,15 @@ index 8f587c5..d2d8436 100644
      throw (css::uno::RuntimeException)
  {
      // Determine whether the new current slide (the one after the one that
-@@ -118,7 +118,12 @@ void SAL_CALL PresenterCurrentSlideObserver::slideEnded (void)
-     if (mxSlideShowController.is())
+     // just ended) is the slide past the last slide in the presentation,
+     // i.e. the one that says something like "click to end presentation...".
+-    if (mxSlideShowController.is())
++    if (mxSlideShowController.is() && !bReverse)
          if (mxSlideShowController->getNextSlideIndex() < 0)
              if( mpPresenterController.is() )
--                mpPresenterController->UpdateCurrentSlide(+1);
-+            {
-+                if( bReverse )
-+                    mpPresenterController->UpdateCurrentSlide(-1);
-+                else
-+                    mpPresenterController->UpdateCurrentSlide(+1);
-+            }
- }
- 
- void SAL_CALL PresenterCurrentSlideObserver::hyperLinkClicked (const rtl::OUString &)
+                 mpPresenterController->UpdateCurrentSlide(+1);
 diff --git sdext/source/presenter/PresenterCurrentSlideObserver.hxx sdext/source/presenter/PresenterCurrentSlideObserver.hxx
-index 8775c50..f6e2d94 100644
+index 8775c50..8608b52 100644
 --- sdext/source/presenter/PresenterCurrentSlideObserver.hxx
 +++ sdext/source/presenter/PresenterCurrentSlideObserver.hxx
 @@ -76,7 +76,7 @@ public:
@@ -411,10 +456,27 @@ index 8775c50..f6e2d94 100644
      virtual void SAL_CALL slideTransitionEnded(  ) throw (::com::sun::star::uno::RuntimeException);
      virtual void SAL_CALL slideAnimationsEnded(  ) throw (::com::sun::star::uno::RuntimeException);
 -    virtual void SAL_CALL slideEnded(  ) throw (::com::sun::star::uno::RuntimeException);
-+    virtual void SAL_CALL slideEnded( ::sal_Bool reverse ) throw (::com::sun::star::uno::RuntimeException);
++    virtual void SAL_CALL slideEnded(sal_Bool bReverse) throw (::com::sun::star::uno::RuntimeException);
      virtual void SAL_CALL hyperLinkClicked( const ::rtl::OUString& hyperLink ) throw (::com::sun::star::uno::RuntimeException);
  
  	// XAnimationListener
+diff --git sdext/source/presenter/description.xml sdext/source/presenter/description.xml
+index c00b8f0..35e2acc 100644
+--- sdext/source/presenter/description.xml
++++ sdext/source/presenter/description.xml
+@@ -8,10 +8,10 @@
+   <identifier value="com.sun.PresenterScreen-UPDATED_PLATFORM" />
+ 
+   <dependencies>
+-    <OpenOffice.org-minimal-version value="3.0" dep:name="OpenOffice.org 3.0"/>
++    <OpenOffice.org-minimal-version value="3.1" dep:name="OpenOffice.org 3.2"/>
+   </dependencies>
+ 
+-  <version value="1.0.2" />
++  <version value="1.1.0" />
+ 
+   <platform value="UPDATED_PLATFORM" />
+ 
 diff --git slideshow/source/engine/animationnodes/basenode.hxx slideshow/source/engine/animationnodes/basenode.hxx
 index a25f6cb..dbf2f13 100644
 --- slideshow/source/engine/animationnodes/basenode.hxx
@@ -472,10 +534,10 @@ index de63321..ab0c492 100644
      
 diff --git slideshow/source/engine/effectrewinder.cxx slideshow/source/engine/effectrewinder.cxx
 new file mode 100644
-index 0000000..6459e6e
+index 0000000..b7db667
 --- /dev/null
 +++ slideshow/source/engine/effectrewinder.cxx
-@@ -0,0 +1,404 @@
+@@ -0,0 +1,432 @@
 +/*************************************************************************
 + *
 + * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
@@ -575,7 +637,8 @@ index 0000000..6459e6e
 +      mpAnimationStartHandler(),
 +      mnMainSequenceEffectCount(0),
 +      mpAsynchronousRewindEvent(),
-+      mxCurrentAnimationRootNode()
++      mxCurrentAnimationRootNode(),
++      mbNonUserTriggeredMainSequenceEffectSeen(false)
 +{
 +    initialize();
 +}
@@ -819,14 +882,30 @@ index 0000000..6459e6e
 +    // This notification is only relevant for us when the rpNode belongs to
 +    // the main sequence.
 +    BaseNodeSharedPtr pBaseNode (::boost::dynamic_pointer_cast<BaseNode>(rpNode));
-+    if (pBaseNode)
++    if ( ! pBaseNode)
++        return false;
++
++    BaseContainerNodeSharedPtr pParent (pBaseNode->getParentNode());
++    if ( ! (pParent && pParent->isMainSequenceRootNode()))
++        return false;
++
++    // This notification is only relevant for us when the effect is user
++    // triggered.
++    bool bIsUserTriggered (false);
++    
++    Reference<animations::XAnimationNode> xNode (rpNode->getXAnimationNode());
++    if (xNode.is())
 +    {
-+        BaseContainerNodeSharedPtr pParent (pBaseNode->getParentNode());
-+        if (pParent && pParent->isMainSequenceRootNode())
-+        {        
-+            ++mnMainSequenceEffectCount;
-+        }
++        animations::Event aEvent;
++        if ((xNode->getBegin() >>= aEvent))
++            bIsUserTriggered = (aEvent.Trigger == animations::EventTrigger::ON_NEXT);
 +    }
++
++    if (bIsUserTriggered)
++        ++mnMainSequenceEffectCount;
++    else
++        mbNonUserTriggeredMainSequenceEffectSeen = true;
++
 +    return false;
 +}
 +
@@ -857,7 +936,16 @@ index 0000000..6459e6e
 +    }
 +    else
 +    {
++        // Process initial events and skip any animations that are started
++        // when the slide is shown.
++        mbNonUserTriggeredMainSequenceEffectSeen = false;
 +        mrEventQueue.forceEmpty();
++        if (mbNonUserTriggeredMainSequenceEffectSeen)
++        {
++            mrUserEventQueue.callSkipEffectEventHandler();
++            mrEventQueue.forceEmpty();
++        }
++
 +        while (--nEffectCount >= 0)
 +            skipSingleMainSequenceEffects();
 +
@@ -879,13 +967,15 @@ index 0000000..6459e6e
 +}
 +
 +
++
++
 +} } // end of namespace ::slideshow::internal
 diff --git slideshow/source/engine/effectrewinder.hxx slideshow/source/engine/effectrewinder.hxx
 new file mode 100644
-index 0000000..32466ad
+index 0000000..ee49127
 --- /dev/null
 +++ slideshow/source/engine/effectrewinder.hxx
-@@ -0,0 +1,183 @@
+@@ -0,0 +1,185 @@
 +/*************************************************************************
 + *
 + * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
@@ -1021,6 +1111,8 @@ index 0000000..32466ad
 +    css::uno::Reference<css::animations::XAnimationNode> mxCurrentAnimationRootNode;
 +    ::boost::shared_ptr<ScreenUpdater::UpdateLock> mpPaintLock;
 +
++    bool mbNonUserTriggeredMainSequenceEffectSeen;
++    
 +    void initialize (void);
 +
 +    bool resetEffectCount (void);
@@ -1069,6 +1161,27 @@ index 0000000..32466ad
 +} } // end of namespace ::slideshow::internal
 +
 +#endif
+diff --git slideshow/source/engine/eventmultiplexer.cxx slideshow/source/engine/eventmultiplexer.cxx
+index 87c9f44..b36d2c7 100644
+--- slideshow/source/engine/eventmultiplexer.cxx
++++ slideshow/source/engine/eventmultiplexer.cxx
+@@ -448,7 +448,15 @@ void EventMultiplexerImpl::forEachView( XSlideShowViewFunc pViewMethod )
+         for( UnoViewVector::const_iterator aIter( mrViewContainer.begin() ),
+                  aEnd( mrViewContainer.end() ); aIter != aEnd; ++aIter ) 
+         {
+-            ((*aIter)->getUnoView().get()->*pViewMethod)( mxListener.get() );
++            uno::Reference<presentation::XSlideShowView> xView ((*aIter)->getUnoView());
++            if (xView.is())
++            {
++                (xView.get()->*pViewMethod)( mxListener.get() );
++            }
++            else
++            {
++                OSL_ASSERT(xView.is());
++            }
+         }
+     }
+ }
 diff --git slideshow/source/engine/eventqueue.cxx slideshow/source/engine/eventqueue.cxx
 index cd1eb37..087d4d5 100644
 --- slideshow/source/engine/eventqueue.cxx
@@ -1297,8 +1410,32 @@ index bf3ca0c..8cfaadd 100644
 +}
 +
 +}
+diff --git slideshow/source/engine/shapes/drawshape.cxx slideshow/source/engine/shapes/drawshape.cxx
+index c203c9d..8894073 100644
+--- slideshow/source/engine/shapes/drawshape.cxx
++++ slideshow/source/engine/shapes/drawshape.cxx
+@@ -262,7 +262,8 @@ namespace slideshow
+     
+         void DrawShape::updateStateIds() const
+         {
+-            // update the states, we've just redrawn
++            // Update the states, we've just redrawn or created a new
++            // attribute layer.
+             if( mpAttributeLayer )
+             {
+                 mnAttributeTransformationState = mpAttributeLayer->getTransformationState();
+@@ -1277,6 +1278,9 @@ namespace slideshow
+             // create new layer, with last as its new child
+             mpAttributeLayer.reset( new ShapeAttributeLayer( mpAttributeLayer ) );
+ 
++            // Update the local state ids to reflect those of the new layer.
++            updateStateIds();
++
+             return mpAttributeLayer;
+         }
+ 
 diff --git slideshow/source/engine/slide/layermanager.cxx slideshow/source/engine/slide/layermanager.cxx
-index 999d098..874b9c0 100644
+index 999d098..f55bef6 100644
 --- slideshow/source/engine/slide/layermanager.cxx
 +++ slideshow/source/engine/slide/layermanager.cxx
 @@ -67,11 +67,11 @@ namespace slideshow
@@ -1376,7 +1513,7 @@ index 999d098..874b9c0 100644
              ENSURE_OR_THROW( rShape, "LayerManager::implAddShape(): invalid Shape" );
  
 -            ShapeEntry aShapeEntry(rShape);
-+            LayerShapeMap::value_type aValue (rShape, LayerShapeMap::value_type::second_type());
++            LayerShapeMap::value_type aValue (rShape, LayerWeakPtr());
  
 -            OSL_ASSERT( maAllShapes.find(aShapeEntry) == maAllShapes.end() ); // shape must not be added already
 +            OSL_ASSERT( maAllShapes.find(rShape) == maAllShapes.end() ); // shape must not be added already
@@ -1651,17 +1788,17 @@ index f2eb316..b435186 100644
              /** Set of shapes that have requested an update
                  
 diff --git slideshow/source/engine/slideshowimpl.cxx slideshow/source/engine/slideshowimpl.cxx
-index f83f803..d7cefbf 100644
+index 4245e07..92a1562 100644
 --- slideshow/source/engine/slideshowimpl.cxx
 +++ slideshow/source/engine/slideshowimpl.cxx
-@@ -84,6 +84,7 @@
- #include "activitiesqueue.hxx"
- #include "activitiesfactory.hxx"
- #include "interruptabledelayevent.hxx"
+@@ -92,6 +92,7 @@
+ #include "slidebitmap.hxx"
+ #include "rehearsetimingsactivity.hxx"
+ #include "waitsymbol.hxx"
 +#include "effectrewinder.hxx"
- #include "slide.hxx"
- #include "shapemaps.hxx"
- #include "slideview.hxx"
+ #include "framerate.hxx"
+ 
+ #include <boost/noncopyable.hpp>
 @@ -194,7 +195,7 @@ public:
          
          This method notifies the end of the third phase.
@@ -1727,7 +1864,7 @@ index f83f803..d7cefbf 100644
      /// all registered views
      UnoViewContainer                        maViewContainer;
      
-@@ -374,7 +402,7 @@ private:
+@@ -368,7 +396,7 @@ private:
  
      sal_Int16                               mnCurrentCursor;
      
@@ -1736,7 +1873,7 @@ index f83f803..d7cefbf 100644
      bool                                    mbAutomaticAdvancementMode;
      bool                                    mbImageAnimationsAllowed;
      bool                                    mbNoSlideTransitions;
-@@ -383,6 +411,8 @@ private:
+@@ -377,6 +405,8 @@ private:
      bool                                    mbShowPaused;
      bool                                    mbSlideShowIdle;
      bool                                    mbDisableAnimationZOrder;
@@ -1745,7 +1882,7 @@ index f83f803..d7cefbf 100644
  };
  
  
-@@ -475,7 +505,7 @@ SlideShowImpl::SlideShowImpl(
+@@ -469,7 +499,7 @@ SlideShowImpl::SlideShowImpl(
        mxPrefetchSlide(),
        mxPrefetchAnimationNode(),
        mnCurrentCursor(awt::SystemPointer::ARROW),
@@ -1754,7 +1891,7 @@ index f83f803..d7cefbf 100644
        mbAutomaticAdvancementMode(false),
        mbImageAnimationsAllowed( true ),
        mbNoSlideTransitions( false ),
-@@ -483,7 +513,8 @@ SlideShowImpl::SlideShowImpl(
+@@ -477,7 +507,8 @@ SlideShowImpl::SlideShowImpl(
        mbForceManualAdvance( false ),
        mbShowPaused( false ),
        mbSlideShowIdle( true ),
@@ -1764,7 +1901,7 @@ index f83f803..d7cefbf 100644
  {
      // keep care not constructing any UNO references to this inside ctor,
      // shift that code to create()!
-@@ -517,6 +548,8 @@ void SlideShowImpl::disposing()
+@@ -511,6 +542,8 @@ void SlideShowImpl::disposing()
  {
      osl::MutexGuard const guard( m_aMutex );
  
@@ -1773,7 +1910,7 @@ index f83f803..d7cefbf 100644
  	// stop slide transition sound, if any:
      stopSlideTransitionSound();
  
-@@ -617,7 +650,7 @@ ActivitySharedPtr SlideShowImpl::createSlideTransition(
+@@ -611,7 +644,7 @@ ActivitySharedPtr SlideShowImpl::createSlideTransition(
      const uno::Reference< drawing::XDrawPage >& xDrawPage,
      const SlideSharedPtr&                       rLeavingSlide,
      const SlideSharedPtr&                       rEnteringSlide,
@@ -1782,7 +1919,7 @@ index f83f803..d7cefbf 100644
  {
      ENSURE_OR_THROW( !maViewContainer.empty(),
                        "createSlideTransition(): No views" );
-@@ -702,7 +735,7 @@ ActivitySharedPtr SlideShowImpl::createSlideTransition(
+@@ -696,7 +729,7 @@ ActivitySharedPtr SlideShowImpl::createSlideTransition(
              bTransitionDirection,
              aTransitionFadeColor,
              resetSlideTransitionSound( aSound, bLoopSound ) ));
@@ -1791,7 +1928,7 @@ index f83f803..d7cefbf 100644
      if( !pTransition )
          return ActivitySharedPtr(); // no transition effect has been
                                      // generated. Normally, that means
-@@ -789,20 +822,43 @@ SlideSharedPtr SlideShowImpl::makeSlide(
+@@ -783,20 +816,43 @@ SlideSharedPtr SlideShowImpl::makeSlide(
      return pSlide;
  }
  
@@ -1844,7 +1981,7 @@ index f83f803..d7cefbf 100644
          nCursorShape = awt::SystemPointer::WAIT;
      else if( !mbMouseVisible ) // enforce INVISIBLE
          nCursorShape = awt::SystemPointer::INVISIBLE;
-@@ -846,10 +902,19 @@ void SlideShowImpl::stopShow()
+@@ -840,10 +896,19 @@ void SlideShowImpl::stopShow()
      }
  }
  
@@ -1867,7 +2004,7 @@ index f83f803..d7cefbf 100644
      void operator()( beans::PropertyValue const& rProperty ) const {
          if (rProperty.Name.equalsAsciiL(
                  RTL_CONSTASCII_STRINGPARAM("Prefetch") )) 
-@@ -857,16 +922,30 @@ struct SlideShowImpl::PrefetchPropertiesFunc
+@@ -851,16 +916,30 @@ struct SlideShowImpl::PrefetchPropertiesFunc
              uno::Sequence<uno::Any> seq;
              if ((rProperty.Value >>= seq) && seq.getLength() == 2) 
              {
@@ -1900,7 +2037,7 @@ index f83f803..d7cefbf 100644
  };
  
  void SlideShowImpl::displaySlide(
-@@ -879,7 +958,9 @@ void SlideShowImpl::displaySlide(
+@@ -873,7 +952,9 @@ void SlideShowImpl::displaySlide(
  
      if (isDisposed())
          return;
@@ -1911,7 +2048,7 @@ index f83f803..d7cefbf 100644
      // precondition: must only be called from the main thread!
      DBG_TESTSOLARMUTEX();
  
-@@ -891,20 +972,20 @@ void SlideShowImpl::displaySlide(
+@@ -885,20 +966,20 @@ void SlideShowImpl::displaySlide(
      // unconditionally. Otherwise, genuine
      // shape animations (drawing layer and
      // GIF) will not be stopped.
@@ -1938,7 +2075,7 @@ index f83f803..d7cefbf 100644
          
          mpPreviousSlide = mpCurrentSlide;
          mpCurrentSlide.reset();
-@@ -946,15 +1027,25 @@ void SlideShowImpl::displaySlide(
+@@ -940,15 +1021,25 @@ void SlideShowImpl::displaySlide(
              // create slide transition, and add proper end event 
              // (which then starts the slide effects
              // via CURRENT_SLIDE.show())
@@ -1973,7 +2110,7 @@ index f83f803..d7cefbf 100644
              
              if (pSlideChangeActivity) 
              {
-@@ -978,6 +1069,41 @@ void SlideShowImpl::displaySlide(
+@@ -972,6 +1063,41 @@ void SlideShowImpl::displaySlide(
      maEventMultiplexer.notifySlideTransitionStarted();
      maListenerContainer.forEach<presentation::XSlideShowListener>(
          boost::mem_fn( &presentation::XSlideShowListener::slideTransitionStarted ) );
@@ -2015,7 +2152,7 @@ index f83f803..d7cefbf 100644
  }
  
  sal_Bool SlideShowImpl::nextEffect() throw (uno::RuntimeException)
-@@ -996,6 +1122,50 @@ sal_Bool SlideShowImpl::nextEffect() throw (uno::RuntimeException)
+@@ -990,6 +1116,50 @@ sal_Bool SlideShowImpl::nextEffect() throw (uno::RuntimeException)
          return maEventMultiplexer.notifyNextEffect();
  }
  
@@ -2066,7 +2203,7 @@ index f83f803..d7cefbf 100644
  sal_Bool SlideShowImpl::startShapeActivity(
      uno::Reference<drawing::XShape> const& /*xShape*/ )
      throw (uno::RuntimeException)
-@@ -1752,7 +1922,7 @@ void SlideShowImpl::notifySlideAnimationsEnded()
+@@ -1692,7 +1862,7 @@ void SlideShowImpl::notifySlideAnimationsEnded()
          // schedule a slide end event, with automatic mode's
          // delay
          aNotificationEvents = makeInterruptableDelay(
@@ -2075,7 +2212,7 @@ index f83f803..d7cefbf 100644
              maEventMultiplexer.getAutomaticTimeout() );
      }
      else 
-@@ -1777,7 +1947,7 @@ void SlideShowImpl::notifySlideAnimationsEnded()
+@@ -1717,7 +1887,7 @@ void SlideShowImpl::notifySlideAnimationsEnded()
              bHasAutomaticNextSlide )
          {
              aNotificationEvents = makeInterruptableDelay(
@@ -2084,7 +2221,7 @@ index f83f803..d7cefbf 100644
                  nAutomaticNextSlideTimeout);
              
              // TODO(F2): Provide a mechanism to let the user override   
-@@ -1794,7 +1964,7 @@ void SlideShowImpl::notifySlideAnimationsEnded()
+@@ -1734,7 +1904,7 @@ void SlideShowImpl::notifySlideAnimationsEnded()
              // timeout involved.
              aNotificationEvents.mpImmediateEvent = 
                  makeEvent( boost::bind(
@@ -2093,7 +2230,7 @@ index f83f803..d7cefbf 100644
          }
      }
      
-@@ -1815,9 +1985,7 @@ void SlideShowImpl::notifySlideAnimationsEnded()
+@@ -1755,9 +1925,7 @@ void SlideShowImpl::notifySlideAnimationsEnded()
      // change setup time a lot). Show the wait cursor, this
      // indeed might take some seconds.
      {
@@ -2104,7 +2241,7 @@ index f83f803..d7cefbf 100644
          
          if (! matches( mpPrefetchSlide,
                         mxPrefetchSlide, mxPrefetchAnimationNode )) 
-@@ -1839,13 +2007,13 @@ void SlideShowImpl::notifySlideAnimationsEnded()
+@@ -1779,13 +1947,13 @@ void SlideShowImpl::notifySlideAnimationsEnded()
          boost::mem_fn( &presentation::XSlideShowListener::slideAnimationsEnded ) );
  }
  
@@ -2120,7 +2257,7 @@ index f83f803..d7cefbf 100644
      {
          const double time = mpRehearseTimingsActivity->stop();
          if (mpRehearseTimingsActivity->hasBeenClicked()) 
-@@ -1865,8 +2033,9 @@ void SlideShowImpl::notifySlideEnded()
+@@ -1805,8 +1973,9 @@ void SlideShowImpl::notifySlideEnded()
              }
          }
      }
@@ -2132,7 +2269,7 @@ index f83f803..d7cefbf 100644
      
      stopShow();  // MUST call that: results in
                   // maUserEventQueue.clear(). What's more,
-@@ -1878,7 +2047,10 @@ void SlideShowImpl::notifySlideEnded()
+@@ -1818,7 +1987,10 @@ void SlideShowImpl::notifySlideEnded()
                   // GIF) will not be stopped.
      
      maListenerContainer.forEach<presentation::XSlideShowListener>(
