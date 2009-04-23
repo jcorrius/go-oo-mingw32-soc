@@ -17,10 +17,13 @@ while read F ; do
 done << EOF
 /applied_patches
 /Linux*Env.Set*
+/MacOS*Env.Set*
 /bootstrap
 /makefile.mk
 unxlng*.pro
 unxlngi6
+unxmacx*.pro
+unxmacxi
 localize.sdf
 .svn
 /solver
