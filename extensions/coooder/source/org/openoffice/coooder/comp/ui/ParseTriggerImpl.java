@@ -20,6 +20,8 @@ package org.openoffice.coooder.comp.ui;
 
 import java.util.Calendar;
 
+import org.openoffice.coooder.comp.HighlighterImpl;
+
 import org.openoffice.coooder.XHighlighter;
 import org.openoffice.coooder.XLanguage;
 import org.openoffice.coooder.theLanguagesManager;
@@ -128,7 +130,8 @@ public final class ParseTriggerImpl extends WeakBase implements XServiceInfo, XJ
 
                 // Parse the code snippet
                 long debut = Calendar.getInstance().getTimeInMillis();
-                xHighlighter.parse(monitor);
+                ((HighlighterImpl)xHighlighter).setProgressDialog( monitor );
+                xHighlighter.parse();
                 long fin = Calendar.getInstance().getTimeInMillis();
                 long duree = fin - debut;
                 

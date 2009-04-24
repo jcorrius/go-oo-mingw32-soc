@@ -18,8 +18,6 @@
  */
 package org.openoffice.coooder.comp.ui;
 
-import org.openoffice.coooder.XProgressListener;
-
 import com.sun.star.awt.InvalidateStyle;
 import com.sun.star.awt.XControl;
 import com.sun.star.awt.XProgressBar;
@@ -39,7 +37,7 @@ import com.sun.star.uno.XComponentContext;
  * @author cbosdonnat
  *
  */
-public class ProgressDialog extends AbstractDialog implements XProgressListener {
+public class ProgressDialog extends AbstractDialog {
 
     private static final String LABEL_NAME = "lblDescription";
     private static final String BAR_NAME = "barProgress";
