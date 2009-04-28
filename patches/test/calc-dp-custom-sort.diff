@@ -1,0 +1,1049 @@
+diff --git sc/inc/sc.hrc sc/inc/sc.hrc
+index 3ecd9ba..32f883a 100644
+--- sc/inc/sc.hrc
++++ sc/inc/sc.hrc
+@@ -1682,6 +1682,9 @@
+ // Language chooser for text import filters.
+ #define RID_SCDLG_LANG_CHOOSER           (SC_OOO_BUILD_START + 12)
+ 
++// Datapilot controls
++#define RID_SC_DPCONTROL                 (SC_OOO_BUILD_START + 13)
++
+ #endif
+ 
+ 
+diff --git sc/source/ui/cctrl/dpcontrol.cxx sc/source/ui/cctrl/dpcontrol.cxx
+index e188ab3..dbc5db3 100644
+--- sc/source/ui/cctrl/dpcontrol.cxx
++++ sc/source/ui/cctrl/dpcontrol.cxx
+@@ -38,6 +38,9 @@
+ #include "vcl/outdev.hxx"
+ #include "vcl/settings.hxx"
+ #include "vcl/wintypes.hxx"
++#include "vcl/decoview.hxx"
++
++#define MENU_NOT_SELECTED 999
+ 
+ using ::rtl::OUString;
+ using ::rtl::OUStringHash;
+@@ -182,6 +185,180 @@ void ScDPFieldButton::drawPopupButton()
+ 
+ // ============================================================================
+ 
++ScMenuFloatingWindow::ScMenuFloatingWindow(Window* pParent, WinBits nStyle) :
++    FloatingWindow(pParent, nStyle),
++    mnSelectedMenu(MENU_NOT_SELECTED),
++    mnClickedMenu(MENU_NOT_SELECTED)
++{
++    const sal_uInt16 nPopupFontHeight = 12;
++    const StyleSettings& rStyle = GetSettings().GetStyleSettings();
++    maLabelFont = rStyle.GetLabelFont();
++    maLabelFont.SetHeight(nPopupFontHeight);
++    SetFont(maLabelFont);
++}
++
++ScMenuFloatingWindow::~ScMenuFloatingWindow()
++{
++}
++
++void ScMenuFloatingWindow::MouseMove(const MouseEvent& rMEvt)
++{
++    const Point& rPos = rMEvt.GetPosPixel();
++    size_t nSelectedMenu = getEnclosingMenuItem(rPos);
++    if (mnSelectedMenu != nSelectedMenu)
++    {
++        highlightMenuItem(mnSelectedMenu, false);
++        highlightMenuItem(nSelectedMenu, true);
++        mnSelectedMenu = nSelectedMenu;
++    }
++        
++    Window::MouseMove(rMEvt);
++}
++
++void ScMenuFloatingWindow::MouseButtonDown(const MouseEvent& rMEvt)
++{
++    const Point& rPos = rMEvt.GetPosPixel();
++    mnClickedMenu = getEnclosingMenuItem(rPos);
++    Window::MouseButtonDown(rMEvt);
++}
++
++void ScMenuFloatingWindow::MouseButtonUp(const MouseEvent& rMEvt)
++{
++    do
++    {
++        if (mnClickedMenu >= maMenuItems.size())
++            break;
++
++        if (!maMenuItems[mnClickedMenu].mpAction)
++            // no action is defined.
++            break;
++
++        maMenuItems[mnClickedMenu].mpAction->execute();
++        EndPopupMode();
++    }
++    while (false);
++
++    mnClickedMenu = MENU_NOT_SELECTED;
++    Window::MouseButtonUp(rMEvt);
++}
++
++void ScMenuFloatingWindow::addMenuItem(const OUString& rText, bool bEnabled, Action* pAction)
++{
++    MenuItem aItem;
++    aItem.maText = rText;
++    aItem.mbEnabled = bEnabled;
++    aItem.mbSubMenu = false;
++    aItem.mpAction.reset(pAction);
++    maMenuItems.push_back(aItem);
++}
++
++void ScMenuFloatingWindow::addSubMenuItem(const OUString& rText, bool bEnabled)
++{
++    MenuItem aItem;
++    aItem.maText = rText;
++    aItem.mbEnabled = bEnabled;
++    aItem.mbSubMenu = true;
++    maMenuItems.push_back(aItem);
++}
++
++void ScMenuFloatingWindow::drawMenuItem(size_t nPos)
++{
++    if (nPos >= maMenuItems.size())
++        return;
++
++    Point aPos;
++    Size aSize;
++    getMenuItemPosSize(aPos, aSize, nPos);
++
++    DecorationView aDecoView(this);
++    long nXOffset = 5;
++    long nYOffset = (aSize.Height() - maLabelFont.GetHeight())/2;
++    DrawCtrlText(Point(aPos.X()+nXOffset, aPos.Y() + nYOffset), maMenuItems[nPos].maText, 0, STRING_LEN,
++                 maMenuItems[nPos].mbEnabled ? TEXT_DRAW_MNEMONIC : TEXT_DRAW_DISABLE);
++
++    if (maMenuItems[nPos].mbSubMenu)
++    {
++        long nFontHeight = maLabelFont.GetHeight();
++        Point aMarkerPos = aPos;
++        aMarkerPos.Y() += aSize.Height()/2 - nFontHeight/4 + 1;
++        aMarkerPos.X() += aSize.Width() - nFontHeight + nFontHeight/4;
++        Size aMarkerSize(nFontHeight/2, nFontHeight/2);
++        aDecoView.DrawSymbol(Rectangle(aMarkerPos, aMarkerSize),
++                             SYMBOL_SPIN_RIGHT, GetTextColor(), 0);
++    }
++}
++
++const Font& ScMenuFloatingWindow::getLabelFont() const
++{
++    return maLabelFont;
++}
++
++void ScMenuFloatingWindow::highlightMenuItem(size_t nPos, bool bSelected)
++{
++    if (nPos >= maMenuItems.size())
++        return;
++
++    if (nPos == MENU_NOT_SELECTED)
++        return;
++
++    if (!maMenuItems[nPos].mbEnabled)
++        return;
++
++    const StyleSettings& rStyle = GetSettings().GetStyleSettings();
++    Color aBackColor = rStyle.GetMenuColor();
++    SetFillColor(aBackColor);
++    SetLineColor(aBackColor);
++
++    Point aPos;
++    Size aSize;
++    getMenuItemPosSize(aPos, aSize, nPos);
++    DrawRect(Rectangle(aPos,aSize));
++    Region aRegion(Rectangle(aPos,aSize));
++    if (IsNativeControlSupported(CTRL_MENU_POPUP, PART_MENU_ITEM))
++    {
++        ControlState nState = bSelected ? CTRL_STATE_SELECTED : 0;
++        if (maMenuItems[nPos].mbEnabled)
++            nState |= CTRL_STATE_ENABLED;
++        DrawNativeControl(CTRL_MENU_POPUP, PART_MENU_ITEM, aRegion, nState, ImplControlValue(), OUString());
++    }
++
++    drawMenuItem(nPos);
++}
++
++void ScMenuFloatingWindow::getMenuItemPosSize(Point& rPos, Size& rSize, size_t nPos) const
++{
++    const sal_uInt16 nLeftMargin = 5;
++    const sal_uInt16 nTopMargin = 5;
++    const sal_uInt16 nMenuItemHeight = maLabelFont.GetHeight()*2;
++
++    Size aWndSize = GetSizePixel();
++
++    Point aPos1(nLeftMargin, nTopMargin);
++    Size aSize1(aWndSize.Width() - nLeftMargin*2, nMenuItemHeight);
++
++    rPos = aPos1;
++    rPos.Y() += aSize1.Height()*nPos;
++    rSize = aSize1;
++}
++
++size_t ScMenuFloatingWindow::getEnclosingMenuItem(const Point& rPos) const
++{
++    size_t n = maMenuItems.size();
++    for (size_t i = 0; i <= n; ++i)
++    {
++        Point aPos;
++        Size aSize;
++        getMenuItemPosSize(aPos, aSize, i);
++        Rectangle aRect(aPos, aSize);
++        if (aRect.IsInside(rPos))
++            return i;
++    }
++    return MENU_NOT_SELECTED;
++}
++
++// ============================================================================
++
++
+ ScDPFieldPopupWindow::Member::Member() :
+     mbVisible(true)
+ {
+@@ -189,8 +366,17 @@ ScDPFieldPopupWindow::Member::Member() :
+ 
+ // ----------------------------------------------------------------------------
+ 
++ScDPFieldPopupWindow::MenuItem::MenuItem() :
++    mbEnabled(true),
++    mbSubMenu(false),
++    mpAction(static_cast<ScDPFieldPopupWindow::Action*>(NULL))
++{
++}
++
++// ----------------------------------------------------------------------------
++
+ ScDPFieldPopupWindow::ScDPFieldPopupWindow(Window* pParent) :
+-    FloatingWindow(pParent, (WB_SYSTEMFLOATWIN|WB_SYSTEMWINDOW|WB_NOBORDER)),
++    ScMenuFloatingWindow(pParent, (WB_SYSTEMFLOATWIN|WB_SYSTEMWINDOW|WB_NOBORDER)),
+     maCheck0(this, 0),
+     maCheck1(this, 0),
+     maCheck2(this, 0),
+@@ -201,8 +387,6 @@ ScDPFieldPopupWindow::ScDPFieldPopupWindow(Window* pParent) :
+     maCheck7(this, 0),
+     maCheck8(this, 0),
+     maCheck9(this, 0),
+-    maCheck10(this, 0),
+-    maCheck11(this, 0),
+     maScrollBar(this, WB_VERT),
+     maBtnOk(this),
+     maBtnCancel(this),
+@@ -210,12 +394,13 @@ ScDPFieldPopupWindow::ScDPFieldPopupWindow(Window* pParent) :
+     mpOKAction(NULL),
+     mnScrollPos(0)
+ {
+-    SetOutputSizePixel(Size(150, 280));
++    Point aPos;
++    Size aSize;
++    getSectionPosSize(aPos, aSize, WHOLE);
++    SetOutputSizePixel(aSize);
+     Size aOutSize = GetOutputSizePixel();
+ 
+-    const StyleSettings& rStyle = GetSettings().GetStyleSettings();
+-
+-    mpCheckPtr.reserve(12);
++    mpCheckPtr.reserve(10);
+     mpCheckPtr.push_back(&maCheck0);
+     mpCheckPtr.push_back(&maCheck1);
+     mpCheckPtr.push_back(&maCheck2);
+@@ -226,33 +411,27 @@ ScDPFieldPopupWindow::ScDPFieldPopupWindow(Window* pParent) :
+     mpCheckPtr.push_back(&maCheck7);
+     mpCheckPtr.push_back(&maCheck8);
+     mpCheckPtr.push_back(&maCheck9);
+-    mpCheckPtr.push_back(&maCheck10);
+-    mpCheckPtr.push_back(&maCheck11);
+     
+-    Point aPos;
+-    Size aSize;
+     getSectionPosSize(aPos, aSize, FIRST_LISTITEM);    
+-    Font aMemFont(rStyle.GetLabelFont());
+-    aMemFont.SetHeight(11);
+     for (vector<CheckBox*>::iterator itr = mpCheckPtr.begin(), itrEnd = mpCheckPtr.end();
+           itr != itrEnd; ++itr)
+     {
+         CheckBox* p = *itr;
+         p->SetPosSizePixel(aPos, aSize);
+-        p->SetFont(aMemFont);
++        p->SetFont(getLabelFont());
+         p->SetClickHdl( LINK(this, ScDPFieldPopupWindow, CheckBoxHdl) );
+-        aPos.Y() += 18;
++        aPos.Y() += aSize.Height() + 1;
+     }
+ 
+     getSectionPosSize(aPos, aSize, BTN_OK);
+     maBtnOk.SetPosSizePixel(aPos, aSize);
+-    maBtnOk.SetFont(aMemFont);
++    maBtnOk.SetFont(getLabelFont());
+     maBtnOk.SetClickHdl( LINK(this, ScDPFieldPopupWindow, OKButtonHdl) );
+     maBtnOk.Show();
+ 
+     getSectionPosSize(aPos, aSize, BTN_CANCEL);
+     maBtnCancel.SetPosSizePixel(aPos, aSize);
+-    maBtnCancel.SetFont(aMemFont);
++    maBtnCancel.SetFont(getLabelFont());
+     maBtnCancel.Show();
+ 
+     getSectionPosSize(aPos, aSize, SCROLL_BAR_V);
+@@ -264,6 +443,11 @@ ScDPFieldPopupWindow::ScDPFieldPopupWindow(Window* pParent) :
+     maScrollBar.EnableDrag(true);
+ }
+ 
++ScDPFieldPopupWindow::~ScDPFieldPopupWindow()
++{
++    EndPopupMode();
++}
++
+ vector<ScDPFieldPopupWindow::Member>& ScDPFieldPopupWindow::getMembers()
+ {
+     return maMembers;
+@@ -271,61 +455,69 @@ vector<ScDPFieldPopupWindow::Member>& ScDPFieldPopupWindow::getMembers()
+ 
+ void ScDPFieldPopupWindow::getSectionPosSize(Point& rPos, Size& rSize, SectionType eType) const
+ {
+-    static const long nListBoxMargin = 5;
+-    static const long nBottomBtnAreaHeight = 50;
+-    static const long nInnerItemMargin = 5;
+-    static const long nScrollBarWidth = 17;
+-    static const long nBtnWidth = 60;
+-    static const long nBtnHeight = 22;
+-    static const long nBottomMargin = 10;
+-
+-    const Size& rWndSize = GetSizePixel();
++    const sal_uInt16 nListBoxMargin = 5;
++    const sal_uInt16 nTopMargin = 5;
++//  const sal_uInt16 nMenuLeftMargin = 5;
++    const sal_uInt16 nMenuItemHeight = getLabelFont().GetHeight()*2;
++    const sal_uInt16 nMenuItemCount = 3;
++    const sal_uInt16 nBottomBtnAreaHeight = 50;
++    const sal_uInt16 nInnerItemMargin = 5;
++    const sal_uInt16 nScrollBarWidth = 17;
++    const sal_uInt16 nBtnWidth = 60;
++    const sal_uInt16 nBtnHeight = getLabelFont().GetHeight()*2;
++    const sal_uInt16 nBottomMargin = 10;
++    const sal_uInt16 nMenuListMargin = 20;
++
++    Size aWndSize = Size(160, 340);
++    sal_uInt16 nMenuHeight = nMenuItemHeight * nMenuItemCount;
+ 
+     switch (eType)
+     {
+         case WHOLE:
++        {
+             rPos  = Point(0, 0);
+-            rSize = rWndSize;
++            rSize = aWndSize;
++        }
+         break;
+         case LISTBOX_AREA:
+         {
+-            rPos = Point(nListBoxMargin, nListBoxMargin);
++            rPos = Point(nListBoxMargin, nTopMargin + nMenuHeight + nMenuListMargin);
+             rSize = Size(
+-                rWndSize.Width() -  nListBoxMargin*2, 
+-                rWndSize.Height() - nListBoxMargin - nBottomBtnAreaHeight);
++                aWndSize.Width() - nListBoxMargin*2, 
++                aWndSize.Height() - nTopMargin - nMenuHeight - nMenuListMargin - nBottomBtnAreaHeight);
+         }
+         break;
+         case FIRST_LISTITEM:
+         {
+             rPos = Point(nListBoxMargin + nInnerItemMargin,
+-                         nListBoxMargin + nInnerItemMargin);
++                         nTopMargin + nMenuHeight + nMenuListMargin + nInnerItemMargin);
+             rSize = Size(
+-                rWndSize.Width() - nListBoxMargin*2 - nInnerItemMargin - nScrollBarWidth - 10,
++                aWndSize.Width() - nListBoxMargin*2 - nInnerItemMargin - nScrollBarWidth - 10,
+                 17);
+         }
+         break;
+         case BTN_OK:
+         {
+-            long x = (rWndSize.Width() - nBtnWidth*2)/3;
+-            long y = rWndSize.Height() - nBottomMargin - nBtnHeight;
++            long x = (aWndSize.Width() - nBtnWidth*2)/3;
++            long y = aWndSize.Height() - nBottomMargin - nBtnHeight;
+             rPos = Point(x, y);
+             rSize = Size(nBtnWidth, nBtnHeight);
+         }
+         break;
+         case BTN_CANCEL:
+         {
+-            long x = (rWndSize.Width() - nBtnWidth*2)/3*2 + nBtnWidth;
+-            long y = rWndSize.Height() - nBottomMargin - nBtnHeight;
++            long x = (aWndSize.Width() - nBtnWidth*2)/3*2 + nBtnWidth;
++            long y = aWndSize.Height() - nBottomMargin - nBtnHeight;
+             rPos = Point(x, y);
+             rSize = Size(nBtnWidth, nBtnHeight);
+         }
+         break;
+         case SCROLL_BAR_V:
+         {
+-            long x = rWndSize.Width() - nListBoxMargin - nInnerItemMargin - nScrollBarWidth;
+-            long y = nListBoxMargin + nInnerItemMargin;
++            long x = aWndSize.Width() - nListBoxMargin - nInnerItemMargin - nScrollBarWidth;
++            long y = nTopMargin + nMenuHeight + nMenuListMargin + nInnerItemMargin;
+             rPos = Point(x, y);
+-            long h = rWndSize.Height() - nListBoxMargin - nBottomBtnAreaHeight - nInnerItemMargin*2;
++            long h = aWndSize.Height() - nTopMargin - nMenuHeight - nMenuListMargin - nBottomBtnAreaHeight - nInnerItemMargin*2;
+             rSize = Size(nScrollBarWidth, h);
+         }
+         break;
+@@ -377,11 +569,6 @@ IMPL_LINK( ScDPFieldPopupWindow, ScrollHdl, ScrollBar*, EMPTYARG )
+     return 0;
+ }
+ 
+-ScDPFieldPopupWindow::~ScDPFieldPopupWindow()
+-{
+-    EndPopupMode();
+-}
+-
+ void ScDPFieldPopupWindow::Paint(const Rectangle& rRect)
+ {
+     Window::Paint(rRect);
+@@ -404,6 +591,10 @@ void ScDPFieldPopupWindow::Paint(const Rectangle& rRect)
+     SetFillColor(aMemberBackColor);
+     getSectionPosSize(aPos, aSize, LISTBOX_AREA);
+     DrawRect(Rectangle(aPos,aSize));
++
++    // Menu items
++    for (size_t i = 0; i <= 2; ++i)
++        drawMenuItem(i);
+ }
+ 
+ void ScDPFieldPopupWindow::setMemberSize(size_t n)
+@@ -472,7 +663,7 @@ ScDPFieldPopupWindow::ExtendedData* ScDPFieldPopupWindow::getExtendedData()
+     return mpExtendedData.get();
+ }
+ 
+-void ScDPFieldPopupWindow::setOKAction(OKAction* p)
++void ScDPFieldPopupWindow::setOKAction(Action* p)
+ {
+     mpOKAction.reset(p);
+ }
+diff --git sc/source/ui/cctrl/dpcontrol.src sc/source/ui/cctrl/dpcontrol.src
+new file mode 100644
+index 0000000..6c5fffe
+--- /dev/null
++++ sc/source/ui/cctrl/dpcontrol.src
+@@ -0,0 +1,49 @@
++/*************************************************************************
++ *
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * Copyright 2008 by Sun Microsystems, Inc.
++ *
++ * OpenOffice.org - a multi-platform office productivity suite
++ *
++ * $RCSfile: globstr.src,v $
++ * $Revision: 1.74.96.1 $
++ *
++ * This file is part of OpenOffice.org.
++ *
++ * OpenOffice.org is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License version 3
++ * only, as published by the Free Software Foundation.
++ *
++ * OpenOffice.org is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License version 3 for more details
++ * (a copy is included in the LICENSE file that accompanied this code).
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * version 3 along with OpenOffice.org.  If not, see
++ * <http://www.openoffice.org/license.html>
++ * for a copy of the LGPLv3 License.
++ *
++ ************************************************************************/
++
++#include "dpcontrol.hrc"
++
++Resource RID_SC_DPCONTROL
++{
++    String STR_MENU_SORT_ASC
++    {
++        Text [ en-US ] = "Sort Ascending" ;
++    };
++
++    String STR_MENU_SORT_DESC
++    {
++        Text [ en-US ] = "Sort Descending" ;
++    };
++
++    String STR_MENU_SORT_CUSTOM
++    {
++        Text [ en-US ] = "Custom Sort" ;
++    };
++};
+diff --git sc/source/ui/cctrl/makefile.mk sc/source/ui/cctrl/makefile.mk
+index 8e8add3..70095d8 100644
+--- sc/source/ui/cctrl/makefile.mk
++++ sc/source/ui/cctrl/makefile.mk
+@@ -45,7 +45,8 @@ LIBTARGET=NO
+ # --- Files --------------------------------------------------------
+ 
+ EXCEPTIONSFILES= \
+-    $(SLO)$/tbzoomsliderctrl.obj
++    $(SLO)$/tbzoomsliderctrl.obj \
++    $(SLO)$/dpcontrol.obj
+ 
+ SLOFILES =	\
+ 		$(SLO)$/popmenu.obj		\
+@@ -55,6 +56,10 @@ SLOFILES =	\
+ 		$(SLO)$/editfield.obj	\
+ 		$(EXCEPTIONSFILES)
+ 
++SRS1NAME=$(TARGET)
++SRC1FILES = \
++	dpcontrol.src
++
+ LIB1TARGET=$(SLB)$/$(TARGET).lib
+ LIB1OBJFILES= \
+ 		$(SLO)$/popmenu.obj		\
+@@ -63,6 +68,7 @@ LIB1OBJFILES= \
+ 		$(SLO)$/dpcontrol.obj	\
+ 		$(SLO)$/tbzoomsliderctrl.obj
+ 
++
+ # --- Tagets -------------------------------------------------------
+ 
+ .INCLUDE :  target.mk
+diff --git sc/source/ui/inc/dbfunc.hxx sc/source/ui/inc/dbfunc.hxx
+index d894e48..d04f8f6 100644
+--- sc/source/ui/inc/dbfunc.hxx
++++ sc/source/ui/inc/dbfunc.hxx
+@@ -101,6 +101,7 @@ public:
+     void            UngroupDataPilot();
+     void            DataPilotInput( const ScAddress& rPos, const String& rString );
+ 
++    bool            DataPilotSort( const ScAddress& rPos );
+     BOOL            DataPilotMove( const ScRange& rSource, const ScAddress& rDest );
+ 
+     BOOL            HasSelectionForDrillDown( USHORT& rOrientation );
+diff --git sc/source/ui/inc/dpcontrol.hrc sc/source/ui/inc/dpcontrol.hrc
+new file mode 100644
+index 0000000..2ca698d
+--- /dev/null
++++ sc/source/ui/inc/dpcontrol.hrc
+@@ -0,0 +1,40 @@
++/*************************************************************************
++ *
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ * 
++ * Copyright 2008 by Sun Microsystems, Inc.
++ *
++ * OpenOffice.org - a multi-platform office productivity suite
++ *
++ * $RCSfile: protectiondlg.hrc,v $
++ * $Revision: 1.1.2.1 $
++ *
++ * This file is part of OpenOffice.org.
++ *
++ * OpenOffice.org is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License version 3
++ * only, as published by the Free Software Foundation.
++ *
++ * OpenOffice.org is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License version 3 for more details
++ * (a copy is included in the LICENSE file that accompanied this code).
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * version 3 along with OpenOffice.org.  If not, see
++ * <http://www.openoffice.org/license.html>
++ * for a copy of the LGPLv3 License.
++ *
++ ************************************************************************/
++
++#ifndef __DPCONTROL_HRC__
++#define __DPCONTROL_HRC__
++
++#include <sc.hrc>
++
++#define STR_MENU_SORT_ASC       1
++#define STR_MENU_SORT_DESC      2
++#define STR_MENU_SORT_CUSTOM    3
++
++#endif
+diff --git sc/source/ui/inc/dpcontrol.hxx sc/source/ui/inc/dpcontrol.hxx
+index 6a28354..c3e217d 100644
+--- sc/source/ui/inc/dpcontrol.hxx
++++ sc/source/ui/inc/dpcontrol.hxx
+@@ -37,6 +37,7 @@
+ #include "vcl/button.hxx"
+ #include "vcl/scrbar.hxx"
+ 
++#include <boost/shared_ptr.hpp>
+ #include <memory>
+ #include <hash_map>
+ 
+@@ -80,35 +81,74 @@ private:
+ 
+ // ============================================================================
+ 
+-/** 
+- * This class implements a popup window for field button, for quick access 
+- * of hide-item list, and possibly more stuff related to field options. 
+- */
+-class ScDPFieldPopupWindow : public FloatingWindow
++class ScMenuFloatingWindow : public FloatingWindow
+ {
+ public:
+-    class ButtonEvent
++    /** 
++     * Action to perform when an event takes place.  Create a sub-class of 
++     * this to implement the desired action. 
++     */
++    class Action
+     {
+     public:
+         virtual void execute() = 0;
+     };
+ 
++    explicit ScMenuFloatingWindow(Window* pParent, WinBits nStyle);
++    virtual ~ScMenuFloatingWindow();
++
++    virtual void MouseMove(const MouseEvent& rMEvt);
++    virtual void MouseButtonDown(const MouseEvent& rMEvt);
++    virtual void MouseButtonUp(const MouseEvent& rMEvt);
++
++    void addMenuItem(const ::rtl::OUString& rText, bool bEnabled, Action* pAction);
++    void addSubMenuItem(const ::rtl::OUString& rText, bool bEnabled);
++
++protected:
++    void drawMenuItem(size_t nPos);
++    const Font& getLabelFont() const;
++
++private:
++    void highlightMenuItem(size_t nPos, bool bSelected);
++
++    void getMenuItemPosSize(Point& rPos, Size& rSize, size_t nPos) const;
++    size_t getEnclosingMenuItem(const Point& rPos) const;
++
++private:
++    struct MenuItem
++    {
++        ::rtl::OUString maText;
++        bool            mbEnabled;
++        bool            mbSubMenu;
++
++        ::boost::shared_ptr<Action> mpAction;
++
++        MenuItem();
++    };
++
++    ::std::vector<MenuItem>         maMenuItems;
++
++    Font    maLabelFont;
++
++    size_t  mnSelectedMenu;
++    size_t  mnClickedMenu;
++};
++
++// ============================================================================
++
++/** 
++ * This class implements a popup window for field button, for quick access 
++ * of hide-item list, and possibly more stuff related to field options. 
++ */
++class ScDPFieldPopupWindow : public ScMenuFloatingWindow
++{
++public:
+     /** 
+      * Extended data that the client code may need to store.  Create a 
+      * sub-class of this and store data there. 
+      */ 
+     struct ExtendedData {};
+ 
+-    /** 
+-     * Action to perform when the OK button is pressed.  Create a sub-class of 
+-     * this to implement the desired action.
+-     */
+-    class OKAction
+-    {
+-    public:
+-        virtual void execute() = 0;
+-    };
+-
+     explicit ScDPFieldPopupWindow(Window* pParent);
+     virtual ~ScDPFieldPopupWindow();
+ 
+@@ -117,6 +157,7 @@ public:
+     void setMemberSize(size_t n);
+     void addMember(const ::rtl::OUString& rName, bool bVisible);
+     void initMembers();
++
+     void getResult(::std::hash_map< ::rtl::OUString, bool, ::rtl::OUStringHash>& rResult);
+     void close(bool bOK);
+ 
+@@ -132,7 +173,7 @@ public:
+      */
+     ExtendedData* getExtendedData();
+ 
+-    void setOKAction(OKAction* p);
++    void setOKAction(Action* p);
+ 
+ private:
+     struct Member
+@@ -173,8 +214,6 @@ private:
+     CheckBox maCheck7;
+     CheckBox maCheck8;
+     CheckBox maCheck9;
+-    CheckBox maCheck10;
+-    CheckBox maCheck11;
+ 
+     ScrollBar   maScrollBar;
+ 
+@@ -185,9 +224,9 @@ private:
+ 
+     ::std::vector<Member>           maMembers;
+     ::std::auto_ptr<ExtendedData>   mpExtendedData;
+-    ::std::auto_ptr<OKAction>       mpOKAction;
++    ::std::auto_ptr<Action>         mpOKAction;
+ 
+-    size_t mnScrollPos;
++    size_t  mnScrollPos;
+ };
+ 
+ #endif
+diff --git sc/source/ui/view/dbfunc3.cxx sc/source/ui/view/dbfunc3.cxx
+index d83add1..832fecc 100644
+--- sc/source/ui/view/dbfunc3.cxx
++++ sc/source/ui/view/dbfunc3.cxx
+@@ -81,9 +81,13 @@
+ #include "patattr.hxx"
+ #include "unonames.hxx"
+ #include "cell.hxx"
++#include "userlist.hxx"
+ 
+ #include <hash_set>
++#include <hash_map>
+ #include <memory>
++#include <list>
++#include <vector>
+ 
+ using namespace com::sun::star;
+ using ::com::sun::star::uno::Any;
+@@ -94,8 +98,49 @@ using ::com::sun::star::beans::XPropertySet;
+ using ::com::sun::star::container::XNameAccess;
+ using ::com::sun::star::sheet::XDimensionsSupplier;
+ using ::rtl::OUString;
++using ::rtl::OUStringHash;
+ using ::rtl::OUStringBuffer;
+ using ::std::auto_ptr;
++using ::std::list;
++using ::std::vector;
++using ::std::hash_map;
++
++
++#include <stdio.h>
++#include <string>
++#include <sys/time.h>
++
++namespace {
++
++class StackPrinter
++{
++public:
++    explicit StackPrinter(const char* msg) :
++        msMsg(msg)
++    {
++        fprintf(stdout, "%s: --begin\n", msMsg.c_str());
++        mfStartTime = getTime();
++    }
++
++    ~StackPrinter()
++    {
++        double fEndTime = getTime();
++        fprintf(stdout, "%s: --end (duration: %g sec)\n", msMsg.c_str(), (fEndTime-mfStartTime));
++    }
++
++private:
++    double getTime() const
++    {
++        timeval tv;
++        gettimeofday(&tv, NULL);
++        return tv.tv_sec + tv.tv_usec / 1000000.0;
++    }
++
++    ::std::string msMsg;
++    double mfStartTime;
++};
++
++}
+ 
+ // STATIC DATA -----------------------------------------------------------
+ 
+@@ -1695,8 +1740,149 @@ void lcl_MoveToEnd( ScDPSaveDimension& rDim, const String& rItemName )
+     // puts it to the end of the list even if it was in the list before.
+ }
+ 
++bool ScDBFunc::DataPilotSort( const ScAddress& rPos )
++{
++    StackPrinter __stack_printer__("ScDBFunc::DataPilotSort");
++
++    ScDocument* pDoc = GetViewData()->GetDocument();
++    ScDPObject* pDPObj = pDoc->GetDPAtCursor(rPos.Col(), rPos.Row(), rPos.Tab());
++    if (!pDPObj)
++        return false;
++
++    // We need to run this to get all members later.
++    pDPObj->BuildAllDimensionMembers();
++
++    USHORT nOrientation;
++    long nDimIndex = pDPObj->GetHeaderDim(rPos, nOrientation);
++    if (nDimIndex < 0)
++        // Invalid dimension index.  Bail out.
++        return false;
++
++    BOOL bDataLayout;
++    String aDimName = pDPObj->GetDimName(nDimIndex, bDataLayout);
++    fprintf(stdout, "ScDBFunc::DataPilotSort:   dim name = '%s'\n", rtl::OUStringToOString(aDimName, RTL_TEXTENCODING_UTF8).getStr());
++    ScDPSaveData* pSaveData = pDPObj->GetSaveData();
++    if (!pSaveData)
++        return false;
++
++    ScDPSaveData aNewSaveData(*pSaveData);
++    ScDPSaveDimension* pSaveDim = aNewSaveData.GetDimensionByName(aDimName);
++    if (!pSaveDim)
++        return false;
++
++    typedef ScDPSaveDimension::MemberList MemList;
++    const MemList& rDimMembers = pSaveDim->GetMembers();
++    list<OUString> aMembers;
++    size_t nMemberCount = 0;
++    for (MemList::const_iterator itr = rDimMembers.begin(), itrEnd = rDimMembers.end();
++          itr != itrEnd; ++itr)
++    {
++        ScDPSaveMember* pMem = *itr;
++        fprintf(stdout, "ScDBFunc::DataPilotSort:   member = '%s'\n", 
++                rtl::OUStringToOString(pMem->GetName(), RTL_TEXTENCODING_UTF8).getStr());
++        aMembers.push_back(pMem->GetName());
++        ++nMemberCount;
++    }
++
++    // Sort the member list in ascending order.
++    aMembers.sort();
++    for (list<OUString>::const_iterator itr = aMembers.begin(), itrEnd = aMembers.end(); 
++          itr != itrEnd; ++itr)
++        fprintf(stdout, "ScDBFunc::DataPilotSort:   (sorted) member = '%s'\n", rtl::OUStringToOString(*itr, RTL_TEXTENCODING_UTF8).getStr());
++
++    ScUserList* pUserList = ScGlobal::GetUserList();
++    if (!pUserList)
++        return false;
++
++    sal_uInt16 n = pUserList->GetCount();
++    if (!n)
++        return false;
++
++    for (sal_uInt16 i = 0; i < n; ++i)
++    {
++        ScUserListData* pData = static_cast<ScUserListData*>((*pUserList)[i]);
++        fprintf(stdout, "ScDBFunc::DataPilotSort:   user list = '%s'\n", 
++                rtl::OUStringToOString(pData->GetString(), RTL_TEXTENCODING_UTF8).getStr());
++    }
++
++    // Just use the first user list for testing.
++    ScUserListData* pData = static_cast<ScUserListData*>((*pUserList)[0]);
++    sal_uInt16 nSubCount = pData->GetSubCount();
++    typedef hash_map<OUString, sal_uInt16, OUStringHash> UserSortMap;
++    UserSortMap aSubStrs;
++    if (pData)
++    {
++        for (sal_uInt16 i = 0; i < nSubCount; ++i)
++        {
++            String aSub = pData->GetSubStr(i);
++            fprintf(stdout, "ScDBFunc::DataPilotSort:   sub str = '%s'\n", 
++                    rtl::OUStringToOString(aSub, RTL_TEXTENCODING_UTF8).getStr());
++            aSubStrs.insert(UserSortMap::value_type(aSub, i));
++        }
++    }
++
++    // Rank all members.
++
++    vector<OUString> aRankedNames(nMemberCount);
++    sal_uInt16 nCurStrId = 0;
++    for (list<OUString>::const_iterator itr = aMembers.begin(), itrEnd = aMembers.end(); 
++          itr != itrEnd; ++itr)
++    {
++        OUString aName = *itr;
++        sal_uInt16 nRank = 0;
++        UserSortMap::const_iterator itrSub = aSubStrs.find(aName);
++        if (itrSub == aSubStrs.end())
++            nRank = nSubCount + nCurStrId++;
++        else
++            nRank = itrSub->second;
++        fprintf(stdout, "ScDBFunc::DataPilotSort:   member = '%s' rank = %d\n",
++                rtl::OUStringToOString(aName, RTL_TEXTENCODING_UTF8).getStr(), nRank);
++        aRankedNames[nRank] = aName;
++    }
++
++    // Re-order ScDPSaveMember instances with the new ranks.
++
++    for (vector<OUString>::const_iterator itr = aRankedNames.begin(), itrEnd = aRankedNames.end();
++          itr != itrEnd; ++itr)
++    {
++        fprintf(stdout, "ScDBFunc::DataPilotSort:   (ranked) member = '%s'\n", 
++                rtl::OUStringToOString(*itr, RTL_TEXTENCODING_UTF8).getStr());
++        const ScDPSaveMember* pOldMem = pSaveDim->GetExistingMemberByName(*itr);
++        if (!pOldMem)
++            // All members are supposed to be present.
++            continue;
++
++        ScDPSaveMember* pNewMem = new ScDPSaveMember(*pOldMem);
++        pSaveDim->AddMember(pNewMem);
++    }
++
++    // Set the sorting mode to manual for now.  We may introduce a new sorting
++    // mode later on.
++
++    sheet::DataPilotFieldSortInfo aSortInfo;
++    aSortInfo.Mode = sheet::DataPilotFieldSortMode::MANUAL;
++    pSaveDim->SetSortInfo(&aSortInfo);
++
++    // Update the datapilot with the newly sorted field members.
++
++    auto_ptr<ScDPObject> pNewObj(new ScDPObject(*pDPObj));
++    pNewObj->SetSaveData(aNewSaveData);
++    ScDBDocFunc aFunc(*GetViewData()->GetDocShell());
++
++    return aFunc.DataPilotUpdate(pDPObj, pNewObj.get(), true, false);
++}
++
+ BOOL ScDBFunc::DataPilotMove( const ScRange& rSource, const ScAddress& rDest )
+ {
++    StackPrinter __stack_printer__("ScDBFunc::DataPilotMove");
++    {
++        String aSrc, aDest;
++        rSource.Format(aSrc, SCR_ABS);
++        rDest.Format(aDest, SCA_ABS);
++        fprintf(stdout, "ScDBFunc::DataPilotMove:   src = '%s'  dest = '%s'\n",
++                rtl::OUStringToOString(aSrc, RTL_TEXTENCODING_UTF8).getStr(),
++                rtl::OUStringToOString(aDest, RTL_TEXTENCODING_UTF8).getStr());
++    }
+     BOOL bRet = FALSE;
+     ScDocument* pDoc = GetViewData()->GetDocument();
+     ScDPObject* pDPObj = pDoc->GetDPAtCursor( rSource.aStart.Col(), rSource.aStart.Row(), rSource.aStart.Tab() );
+@@ -1729,6 +1915,13 @@ BOOL ScDBFunc::DataPilotMove( const ScRange& rSource, const ScAddress& rDest )
+                     bValid = false;     // empty (subtotal) or different field
+             }
+ 
++        {
++            using ::std::vector;
++            vector<OUString>::const_iterator itr = aMembersVector.begin(), itrEnd = aMembersVector.end();
++            for (; itr != itrEnd; ++itr)
++                fprintf(stdout, "ScDBFunc::DataPilotMove:   member = '%s'\n", rtl::OUStringToOString(*itr, RTL_TEXTENCODING_UTF8).getStr());
++        }
++
+         if ( bValid )
+         {
+             BOOL bIsDataLayout;
+diff --git sc/source/ui/view/gridwin2.cxx sc/source/ui/view/gridwin2.cxx
+index 63ce024..abd09c2 100644
+--- sc/source/ui/view/gridwin2.cxx
++++ sc/source/ui/view/gridwin2.cxx
+@@ -56,6 +56,8 @@
+ #include "dpshttab.hxx"
+ #include "dbdocfun.hxx"
+ #include "dpcontrol.hxx"
++#include "dpcontrol.hrc"
++#include "strload.hxx"
+ 
+ #include <com/sun/star/sheet/DataPilotFieldOrientation.hpp>
+ #include "scabstdlg.hxx" //CHINA001
+@@ -763,6 +765,7 @@ bool ScGridWindow::DPTestFieldPopupArrow(const MouseEvent& rMEvt, const ScAddres
+     {
+         // Mouse cursor inside the popup arrow box.  Launch the field menu.
+         DPLaunchFieldPopupMenu(OutputToScreenPixel(aSrcPos), aSrcSize, rPos, pDPObj);
++//      pViewData->GetViewShell()->DataPilotSort(rPos);
+         return true;
+     }
+ 
+@@ -778,7 +781,7 @@ struct DPFieldPopupData : public ScDPFieldPopupWindow::ExtendedData
+     long            mnDim;
+ };
+ 
+-class DPFieldPopupOKAction : public ScDPFieldPopupWindow::OKAction
++class DPFieldPopupOKAction : public ScMenuFloatingWindow::Action
+ {
+ public:
+     explicit DPFieldPopupOKAction(ScGridWindow* p) : 
+@@ -792,6 +795,40 @@ private:
+     ScGridWindow* mpGridWindow;
+ };
+ 
++class PopupSortAction : public ScMenuFloatingWindow::Action
++{
++public:
++    enum SortType { ASCENDING, DESCENDING, CUSTOM };
++
++    explicit PopupSortAction(const ScAddress& rPos, SortType eType, ScTabViewShell* pViewShell) :
++        maPos(rPos), meType(eType), mpViewShell(pViewShell) {}
++
++    virtual void execute()
++    {
++        switch (meType)
++        {
++            case ASCENDING:
++                fprintf(stdout, "PopupSortAction::execute:   ascending\n");
++                mpViewShell->DataPilotSort(maPos);
++            break;
++            case DESCENDING:
++                fprintf(stdout, "PopupSortAction::execute:   descending\n");
++                mpViewShell->DataPilotSort(maPos);
++            break;
++            case CUSTOM:
++                fprintf(stdout, "PopupSortAction::execute:   custom sort\n");
++            break;
++            default:
++                ;
++        }
++    }
++
++private:
++    ScAddress       maPos;
++    SortType        meType;
++    ScTabViewShell* mpViewShell;
++};
++
+ }
+ 
+ void ScGridWindow::DPLaunchFieldPopupMenu(
+@@ -820,6 +857,17 @@ void ScGridWindow::DPLaunchFieldPopupMenu(
+         mpDPFieldPopup->addMember(rLabelData.maMembers[i], rLabelData.maVisible[i]);
+     mpDPFieldPopup->initMembers();
+ 
++    // Populate the menus.
++    ScTabViewShell* pViewShell = pViewData->GetViewShell();
++    mpDPFieldPopup->addMenuItem(
++        ScRscStrLoader(RID_SC_DPCONTROL, STR_MENU_SORT_ASC).GetString(), true, 
++        new PopupSortAction(rPos, PopupSortAction::ASCENDING, pViewShell));
++    mpDPFieldPopup->addMenuItem(
++        ScRscStrLoader(RID_SC_DPCONTROL, STR_MENU_SORT_DESC).GetString(), true,
++        new PopupSortAction(rPos, PopupSortAction::DESCENDING, pViewShell));
++    mpDPFieldPopup->addSubMenuItem(
++        ScRscStrLoader(RID_SC_DPCONTROL, STR_MENU_SORT_CUSTOM).GetString(), true);
++
+     mpDPFieldPopup->SetPopupModeEndHdl( LINK(this, ScGridWindow, PopupModeEndHdl) );
+     Rectangle aCellRect(rSrcPos, rSrcSize);
+     mpDPFieldPopup->StartPopupMode(aCellRect, (FLOATWIN_POPUPMODE_DOWN | FLOATWIN_POPUPMODE_GRABFOCUS));
+diff --git sc/util/makefile.mk sc/util/makefile.mk
+index 88e0594..bdf4954 100644
+--- sc/util/makefile.mk
++++ sc/util/makefile.mk
+@@ -58,6 +58,7 @@ RESLIB1LIST=\
+ 	$(SRS)$/formdlgs.srs \
+ 	$(SRS)$/pagedlg.srs	\
+ 	$(SRS)$/navipi.srs	\
++	$(SRS)$/cctrl.srs	\
+ 	$(SOLARCOMMONRESDIR)$/sfx.srs
+ 
+ RESLIB1NAME=sc
