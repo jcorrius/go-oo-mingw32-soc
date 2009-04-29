@@ -13,7 +13,7 @@ index 3ecd9ba..32f883a 100644
  
  
 diff --git sc/source/ui/cctrl/dpcontrol.cxx sc/source/ui/cctrl/dpcontrol.cxx
-index e188ab3..dbc5db3 100644
+index e188ab3..fab0f64 100644
 --- sc/source/ui/cctrl/dpcontrol.cxx
 +++ sc/source/ui/cctrl/dpcontrol.cxx
 @@ -38,6 +38,9 @@
@@ -26,24 +26,39 @@ index e188ab3..dbc5db3 100644
  
  using ::rtl::OUString;
  using ::rtl::OUStringHash;
-@@ -182,6 +185,180 @@ void ScDPFieldButton::drawPopupButton()
+@@ -182,6 +185,282 @@ void ScDPFieldButton::drawPopupButton()
  
  // ============================================================================
  
-+ScMenuFloatingWindow::ScMenuFloatingWindow(Window* pParent, WinBits nStyle) :
-+    FloatingWindow(pParent, nStyle),
++ScMenuFloatingWindow::MenuItem::MenuItem() :
++    mbEnabled(true),
++    mpAction(static_cast<ScDPFieldPopupWindow::Action*>(NULL)),
++    mpSubMenuWin(static_cast<ScMenuFloatingWindow*>(NULL))
++{
++}
++
++// ----------------------------------------------------------------------------
++
++ScMenuFloatingWindow::ScMenuFloatingWindow(Window* pParent) :
++    FloatingWindow(pParent, (WB_SYSTEMFLOATWIN|WB_SYSTEMWINDOW|WB_NOBORDER)),
 +    mnSelectedMenu(MENU_NOT_SELECTED),
-+    mnClickedMenu(MENU_NOT_SELECTED)
++    mnClickedMenu(MENU_NOT_SELECTED),
++    mpParentMenu(dynamic_cast<ScMenuFloatingWindow*>(pParent)),
++    mpActiveSubMenu(NULL),
++    mbActionFired(false)
 +{
 +    const sal_uInt16 nPopupFontHeight = 12;
 +    const StyleSettings& rStyle = GetSettings().GetStyleSettings();
 +    maLabelFont = rStyle.GetLabelFont();
 +    maLabelFont.SetHeight(nPopupFontHeight);
 +    SetFont(maLabelFont);
++
++    SetPopupModeEndHdl( LINK(this, ScMenuFloatingWindow, EndPopupHdl) );
 +}
 +
 +ScMenuFloatingWindow::~ScMenuFloatingWindow()
 +{
++    EndPopupMode();
 +}
 +
 +void ScMenuFloatingWindow::MouseMove(const MouseEvent& rMEvt)
@@ -79,6 +94,7 @@ index e188ab3..dbc5db3 100644
 +            break;
 +
 +        maMenuItems[mnClickedMenu].mpAction->execute();
++        mbActionFired = true;
 +        EndPopupMode();
 +    }
 +    while (false);
@@ -92,18 +108,18 @@ index e188ab3..dbc5db3 100644
 +    MenuItem aItem;
 +    aItem.maText = rText;
 +    aItem.mbEnabled = bEnabled;
-+    aItem.mbSubMenu = false;
 +    aItem.mpAction.reset(pAction);
 +    maMenuItems.push_back(aItem);
 +}
 +
-+void ScMenuFloatingWindow::addSubMenuItem(const OUString& rText, bool bEnabled)
++ScMenuFloatingWindow* ScMenuFloatingWindow::addSubMenuItem(const OUString& rText, bool bEnabled)
 +{
 +    MenuItem aItem;
 +    aItem.maText = rText;
 +    aItem.mbEnabled = bEnabled;
-+    aItem.mbSubMenu = true;
++    aItem.mpSubMenuWin.reset(new ScFieldSubMenuWindow(this));
 +    maMenuItems.push_back(aItem);
++    return aItem.mpSubMenuWin.get();
 +}
 +
 +void ScMenuFloatingWindow::drawMenuItem(size_t nPos)
@@ -121,7 +137,7 @@ index e188ab3..dbc5db3 100644
 +    DrawCtrlText(Point(aPos.X()+nXOffset, aPos.Y() + nYOffset), maMenuItems[nPos].maText, 0, STRING_LEN,
 +                 maMenuItems[nPos].mbEnabled ? TEXT_DRAW_MNEMONIC : TEXT_DRAW_DISABLE);
 +
-+    if (maMenuItems[nPos].mbSubMenu)
++    if (maMenuItems[nPos].mpSubMenuWin)
 +    {
 +        long nFontHeight = maLabelFont.GetHeight();
 +        Point aMarkerPos = aPos;
@@ -133,9 +149,35 @@ index e188ab3..dbc5db3 100644
 +    }
 +}
 +
++void ScMenuFloatingWindow::drawAllMenuItems()
++{
++    size_t n = maMenuItems.size();
++    for (size_t i = 0; i < n; ++i)
++        drawMenuItem(i);
++}
++
 +const Font& ScMenuFloatingWindow::getLabelFont() const
 +{
 +    return maLabelFont;
++}
++
++void ScMenuFloatingWindow::resizeToFitMenuItems()
++{
++    if (maMenuItems.empty())
++        return;
++
++    vector<MenuItem>::const_iterator itr = maMenuItems.begin(), itrEnd = maMenuItems.end();
++    long nTextWidth = 0;
++    for (; itr != itrEnd; ++itr)
++        nTextWidth = ::std::max(GetTextWidth(itr->maText), nTextWidth);
++
++    size_t nLastPos = maMenuItems.size()-1;
++    Point aPos;
++    Size aSize;
++    getMenuItemPosSize(aPos, aSize, nLastPos);
++    aPos.X() += nTextWidth + 15;
++    aPos.Y() += aSize.Height() + 5;
++    SetOutputSizePixel(Size(aPos.X(), aPos.Y()));
 +}
 +
 +void ScMenuFloatingWindow::highlightMenuItem(size_t nPos, bool bSelected)
@@ -168,6 +210,31 @@ index e188ab3..dbc5db3 100644
 +    }
 +
 +    drawMenuItem(nPos);
++
++    if (maMenuItems[nPos].mpSubMenuWin)
++    {
++        ScMenuFloatingWindow* pSubMenu = maMenuItems[nPos].mpSubMenuWin.get();
++        if (pSubMenu != mpActiveSubMenu)
++        {
++            if (mpActiveSubMenu)
++                mpActiveSubMenu->EndPopupMode();
++
++            sal_uInt32 nOldFlags = GetPopupModeFlags();
++            SetPopupModeFlags(nOldFlags | FLOATWIN_POPUPMODE_NOAPPFOCUSCLOSE);
++            pSubMenu->resizeToFitMenuItems();
++            pSubMenu->StartPopupMode(
++                Rectangle(aPos,aSize), (FLOATWIN_POPUPMODE_RIGHT | FLOATWIN_POPUPMODE_GRABFOCUS));
++            pSubMenu->AddPopupModeWindow(this);
++            SetPopupModeFlags(nOldFlags);
++
++            mpActiveSubMenu = pSubMenu;
++        }
++    }
++    else if (mpActiveSubMenu)
++    {
++        mpActiveSubMenu->EndPopupMode();
++        mpActiveSubMenu = NULL;
++    }
 +}
 +
 +void ScMenuFloatingWindow::getMenuItemPosSize(Point& rPos, Size& rSize, size_t nPos) const
@@ -201,32 +268,57 @@ index e188ab3..dbc5db3 100644
 +    return MENU_NOT_SELECTED;
 +}
 +
++IMPL_LINK( ScMenuFloatingWindow, EndPopupHdl, void*, EMPTYARG )
++{
++    if (mbActionFired && mpParentMenu)
++        mpParentMenu->EndPopupMode();
++    return 0;
++}
++
 +// ============================================================================
 +
++ScFieldSubMenuWindow::ScFieldSubMenuWindow(Window* pParent) :
++    ScMenuFloatingWindow(pParent)
++{
++    SetOutputSizePixel(Size(160, 200));
++}
++
++ScFieldSubMenuWindow::~ScFieldSubMenuWindow()
++{
++}
++
++void ScFieldSubMenuWindow::Paint(const Rectangle& /*rRect*/)
++{
++    const StyleSettings& rStyle = GetSettings().GetStyleSettings();
++    Color aBackColor = rStyle.GetMenuColor();
++    Color aBorderColor = rStyle.GetShadowColor();
++
++    Size aSize = GetSizePixel();
++
++    // Window background
++    SetFillColor(aBackColor);
++    SetLineColor(aBorderColor);
++    DrawRect(Rectangle(Point(0,0), aSize));
++
++    // Menu items
++    drawAllMenuItems();
++}
++
++// ============================================================================
 +
  ScDPFieldPopupWindow::Member::Member() :
      mbVisible(true)
  {
-@@ -189,8 +366,17 @@ ScDPFieldPopupWindow::Member::Member() :
- 
+@@ -190,7 +469,7 @@ ScDPFieldPopupWindow::Member::Member() :
  // ----------------------------------------------------------------------------
  
-+ScDPFieldPopupWindow::MenuItem::MenuItem() :
-+    mbEnabled(true),
-+    mbSubMenu(false),
-+    mpAction(static_cast<ScDPFieldPopupWindow::Action*>(NULL))
-+{
-+}
-+
-+// ----------------------------------------------------------------------------
-+
  ScDPFieldPopupWindow::ScDPFieldPopupWindow(Window* pParent) :
 -    FloatingWindow(pParent, (WB_SYSTEMFLOATWIN|WB_SYSTEMWINDOW|WB_NOBORDER)),
-+    ScMenuFloatingWindow(pParent, (WB_SYSTEMFLOATWIN|WB_SYSTEMWINDOW|WB_NOBORDER)),
++    ScMenuFloatingWindow(pParent),
      maCheck0(this, 0),
      maCheck1(this, 0),
      maCheck2(this, 0),
-@@ -201,8 +387,6 @@ ScDPFieldPopupWindow::ScDPFieldPopupWindow(Window* pParent) :
+@@ -201,8 +480,6 @@ ScDPFieldPopupWindow::ScDPFieldPopupWindow(Window* pParent) :
      maCheck7(this, 0),
      maCheck8(this, 0),
      maCheck9(this, 0),
@@ -235,7 +327,7 @@ index e188ab3..dbc5db3 100644
      maScrollBar(this, WB_VERT),
      maBtnOk(this),
      maBtnCancel(this),
-@@ -210,12 +394,13 @@ ScDPFieldPopupWindow::ScDPFieldPopupWindow(Window* pParent) :
+@@ -210,12 +487,13 @@ ScDPFieldPopupWindow::ScDPFieldPopupWindow(Window* pParent) :
      mpOKAction(NULL),
      mnScrollPos(0)
  {
@@ -253,7 +345,7 @@ index e188ab3..dbc5db3 100644
      mpCheckPtr.push_back(&maCheck0);
      mpCheckPtr.push_back(&maCheck1);
      mpCheckPtr.push_back(&maCheck2);
-@@ -226,33 +411,27 @@ ScDPFieldPopupWindow::ScDPFieldPopupWindow(Window* pParent) :
+@@ -226,33 +504,27 @@ ScDPFieldPopupWindow::ScDPFieldPopupWindow(Window* pParent) :
      mpCheckPtr.push_back(&maCheck7);
      mpCheckPtr.push_back(&maCheck8);
      mpCheckPtr.push_back(&maCheck9);
@@ -291,19 +383,18 @@ index e188ab3..dbc5db3 100644
      maBtnCancel.Show();
  
      getSectionPosSize(aPos, aSize, SCROLL_BAR_V);
-@@ -264,6 +443,11 @@ ScDPFieldPopupWindow::ScDPFieldPopupWindow(Window* pParent) :
+@@ -264,6 +536,10 @@ ScDPFieldPopupWindow::ScDPFieldPopupWindow(Window* pParent) :
      maScrollBar.EnableDrag(true);
  }
  
 +ScDPFieldPopupWindow::~ScDPFieldPopupWindow()
 +{
-+    EndPopupMode();
 +}
 +
  vector<ScDPFieldPopupWindow::Member>& ScDPFieldPopupWindow::getMembers()
  {
      return maMembers;
-@@ -271,61 +455,69 @@ vector<ScDPFieldPopupWindow::Member>& ScDPFieldPopupWindow::getMembers()
+@@ -271,61 +547,69 @@ vector<ScDPFieldPopupWindow::Member>& ScDPFieldPopupWindow::getMembers()
  
  void ScDPFieldPopupWindow::getSectionPosSize(Point& rPos, Size& rSize, SectionType eType) const
  {
@@ -395,7 +486,7 @@ index e188ab3..dbc5db3 100644
              rSize = Size(nScrollBarWidth, h);
          }
          break;
-@@ -377,11 +569,6 @@ IMPL_LINK( ScDPFieldPopupWindow, ScrollHdl, ScrollBar*, EMPTYARG )
+@@ -377,11 +661,6 @@ IMPL_LINK( ScDPFieldPopupWindow, ScrollHdl, ScrollBar*, EMPTYARG )
      return 0;
  }
  
@@ -407,18 +498,17 @@ index e188ab3..dbc5db3 100644
  void ScDPFieldPopupWindow::Paint(const Rectangle& rRect)
  {
      Window::Paint(rRect);
-@@ -404,6 +591,10 @@ void ScDPFieldPopupWindow::Paint(const Rectangle& rRect)
+@@ -404,6 +683,9 @@ void ScDPFieldPopupWindow::Paint(const Rectangle& rRect)
      SetFillColor(aMemberBackColor);
      getSectionPosSize(aPos, aSize, LISTBOX_AREA);
      DrawRect(Rectangle(aPos,aSize));
 +
 +    // Menu items
-+    for (size_t i = 0; i <= 2; ++i)
-+        drawMenuItem(i);
++    drawAllMenuItems();
  }
  
  void ScDPFieldPopupWindow::setMemberSize(size_t n)
-@@ -472,7 +663,7 @@ ScDPFieldPopupWindow::ExtendedData* ScDPFieldPopupWindow::getExtendedData()
+@@ -472,7 +754,7 @@ ScDPFieldPopupWindow::ExtendedData* ScDPFieldPopupWindow::getExtendedData()
      return mpExtendedData.get();
  }
  
@@ -516,14 +606,14 @@ index 8e8add3..70095d8 100644
  
  .INCLUDE :  target.mk
 diff --git sc/source/ui/inc/dbfunc.hxx sc/source/ui/inc/dbfunc.hxx
-index d894e48..d04f8f6 100644
+index d894e48..b494ae6 100644
 --- sc/source/ui/inc/dbfunc.hxx
 +++ sc/source/ui/inc/dbfunc.hxx
 @@ -101,6 +101,7 @@ public:
      void            UngroupDataPilot();
      void            DataPilotInput( const ScAddress& rPos, const String& rString );
  
-+    bool            DataPilotSort( const ScAddress& rPos );
++    bool            DataPilotSort( const ScAddress& rPos, bool bAscending, sal_uInt16* pUserListId = NULL );
      BOOL            DataPilotMove( const ScRange& rSource, const ScAddress& rDest );
  
      BOOL            HasSelectionForDrillDown( USHORT& rOrientation );
@@ -574,7 +664,7 @@ index 0000000..2ca698d
 +
 +#endif
 diff --git sc/source/ui/inc/dpcontrol.hxx sc/source/ui/inc/dpcontrol.hxx
-index 6a28354..c3e217d 100644
+index 6a28354..e7f7bc8 100644
 --- sc/source/ui/inc/dpcontrol.hxx
 +++ sc/source/ui/inc/dpcontrol.hxx
 @@ -37,6 +37,7 @@
@@ -585,7 +675,7 @@ index 6a28354..c3e217d 100644
  #include <memory>
  #include <hash_map>
  
-@@ -80,35 +81,74 @@ private:
+@@ -80,35 +81,94 @@ private:
  
  // ============================================================================
  
@@ -608,7 +698,7 @@ index 6a28354..c3e217d 100644
          virtual void execute() = 0;
      };
  
-+    explicit ScMenuFloatingWindow(Window* pParent, WinBits nStyle);
++    explicit ScMenuFloatingWindow(Window* pParent);
 +    virtual ~ScMenuFloatingWindow();
 +
 +    virtual void MouseMove(const MouseEvent& rMEvt);
@@ -616,26 +706,30 @@ index 6a28354..c3e217d 100644
 +    virtual void MouseButtonUp(const MouseEvent& rMEvt);
 +
 +    void addMenuItem(const ::rtl::OUString& rText, bool bEnabled, Action* pAction);
-+    void addSubMenuItem(const ::rtl::OUString& rText, bool bEnabled);
++    ScMenuFloatingWindow* addSubMenuItem(const ::rtl::OUString& rText, bool bEnabled);
 +
 +protected:
 +    void drawMenuItem(size_t nPos);
++    void drawAllMenuItems();
 +    const Font& getLabelFont() const;
 +
 +private:
++    void resizeToFitMenuItems();
 +    void highlightMenuItem(size_t nPos, bool bSelected);
 +
 +    void getMenuItemPosSize(Point& rPos, Size& rSize, size_t nPos) const;
 +    size_t getEnclosingMenuItem(const Point& rPos) const;
++
++    DECL_LINK( EndPopupHdl, void* );
 +
 +private:
 +    struct MenuItem
 +    {
 +        ::rtl::OUString maText;
 +        bool            mbEnabled;
-+        bool            mbSubMenu;
 +
 +        ::boost::shared_ptr<Action> mpAction;
++        ::boost::shared_ptr<ScMenuFloatingWindow> mpSubMenuWin;
 +
 +        MenuItem();
 +    };
@@ -646,6 +740,22 @@ index 6a28354..c3e217d 100644
 +
 +    size_t  mnSelectedMenu;
 +    size_t  mnClickedMenu;
++
++    ScMenuFloatingWindow* mpParentMenu;
++    ScMenuFloatingWindow* mpActiveSubMenu;
++
++    bool    mbActionFired;
++};
++
++// ============================================================================
++
++class ScFieldSubMenuWindow : public ScMenuFloatingWindow
++{
++public:
++    explicit ScFieldSubMenuWindow(Window* pParent);
++    virtual ~ScFieldSubMenuWindow();
++
++    virtual void Paint(const Rectangle& rRect);
 +};
 +
 +// ============================================================================
@@ -676,7 +786,7 @@ index 6a28354..c3e217d 100644
      explicit ScDPFieldPopupWindow(Window* pParent);
      virtual ~ScDPFieldPopupWindow();
  
-@@ -117,6 +157,7 @@ public:
+@@ -117,6 +177,7 @@ public:
      void setMemberSize(size_t n);
      void addMember(const ::rtl::OUString& rName, bool bVisible);
      void initMembers();
@@ -684,7 +794,7 @@ index 6a28354..c3e217d 100644
      void getResult(::std::hash_map< ::rtl::OUString, bool, ::rtl::OUStringHash>& rResult);
      void close(bool bOK);
  
-@@ -132,7 +173,7 @@ public:
+@@ -132,7 +193,7 @@ public:
       */
      ExtendedData* getExtendedData();
  
@@ -693,7 +803,7 @@ index 6a28354..c3e217d 100644
  
  private:
      struct Member
-@@ -173,8 +214,6 @@ private:
+@@ -173,8 +234,6 @@ private:
      CheckBox maCheck7;
      CheckBox maCheck8;
      CheckBox maCheck9;
@@ -702,7 +812,7 @@ index 6a28354..c3e217d 100644
  
      ScrollBar   maScrollBar;
  
-@@ -185,9 +224,9 @@ private:
+@@ -185,9 +244,9 @@ private:
  
      ::std::vector<Member>           maMembers;
      ::std::auto_ptr<ExtendedData>   mpExtendedData;
@@ -715,7 +825,7 @@ index 6a28354..c3e217d 100644
  
  #endif
 diff --git sc/source/ui/view/dbfunc3.cxx sc/source/ui/view/dbfunc3.cxx
-index d83add1..832fecc 100644
+index d83add1..e94ba14 100644
 --- sc/source/ui/view/dbfunc3.cxx
 +++ sc/source/ui/view/dbfunc3.cxx
 @@ -81,9 +81,13 @@
@@ -732,7 +842,7 @@ index d83add1..832fecc 100644
  
  using namespace com::sun::star;
  using ::com::sun::star::uno::Any;
-@@ -94,8 +98,49 @@ using ::com::sun::star::beans::XPropertySet;
+@@ -94,8 +98,12 @@ using ::com::sun::star::beans::XPropertySet;
  using ::com::sun::star::container::XNameAccess;
  using ::com::sun::star::sheet::XDimensionsSupplier;
  using ::rtl::OUString;
@@ -742,54 +852,15 @@ index d83add1..832fecc 100644
 +using ::std::list;
 +using ::std::vector;
 +using ::std::hash_map;
-+
-+
-+#include <stdio.h>
-+#include <string>
-+#include <sys/time.h>
-+
-+namespace {
-+
-+class StackPrinter
-+{
-+public:
-+    explicit StackPrinter(const char* msg) :
-+        msMsg(msg)
-+    {
-+        fprintf(stdout, "%s: --begin\n", msMsg.c_str());
-+        mfStartTime = getTime();
-+    }
-+
-+    ~StackPrinter()
-+    {
-+        double fEndTime = getTime();
-+        fprintf(stdout, "%s: --end (duration: %g sec)\n", msMsg.c_str(), (fEndTime-mfStartTime));
-+    }
-+
-+private:
-+    double getTime() const
-+    {
-+        timeval tv;
-+        gettimeofday(&tv, NULL);
-+        return tv.tv_sec + tv.tv_usec / 1000000.0;
-+    }
-+
-+    ::std::string msMsg;
-+    double mfStartTime;
-+};
-+
-+}
  
  // STATIC DATA -----------------------------------------------------------
  
-@@ -1695,8 +1740,149 @@ void lcl_MoveToEnd( ScDPSaveDimension& rDim, const String& rItemName )
+@@ -1695,6 +1703,124 @@ void lcl_MoveToEnd( ScDPSaveDimension& rDim, const String& rItemName )
      // puts it to the end of the list even if it was in the list before.
  }
  
-+bool ScDBFunc::DataPilotSort( const ScAddress& rPos )
++bool ScDBFunc::DataPilotSort( const ScAddress& rPos, bool bAscending, sal_uInt16* pUserListId )
 +{
-+    StackPrinter __stack_printer__("ScDBFunc::DataPilotSort");
-+
 +    ScDocument* pDoc = GetViewData()->GetDocument();
 +    ScDPObject* pDPObj = pDoc->GetDPAtCursor(rPos.Col(), rPos.Row(), rPos.Tab());
 +    if (!pDPObj)
@@ -805,13 +876,12 @@ index d83add1..832fecc 100644
 +        return false;
 +
 +    BOOL bDataLayout;
-+    String aDimName = pDPObj->GetDimName(nDimIndex, bDataLayout);
-+    fprintf(stdout, "ScDBFunc::DataPilotSort:   dim name = '%s'\n", rtl::OUStringToOString(aDimName, RTL_TEXTENCODING_UTF8).getStr());
 +    ScDPSaveData* pSaveData = pDPObj->GetSaveData();
 +    if (!pSaveData)
 +        return false;
 +
 +    ScDPSaveData aNewSaveData(*pSaveData);
++    String aDimName = pDPObj->GetDimName(nDimIndex, bDataLayout);
 +    ScDPSaveDimension* pSaveDim = aNewSaveData.GetDimensionByName(aDimName);
 +    if (!pSaveDim)
 +        return false;
@@ -824,46 +894,35 @@ index d83add1..832fecc 100644
 +          itr != itrEnd; ++itr)
 +    {
 +        ScDPSaveMember* pMem = *itr;
-+        fprintf(stdout, "ScDBFunc::DataPilotSort:   member = '%s'\n", 
-+                rtl::OUStringToOString(pMem->GetName(), RTL_TEXTENCODING_UTF8).getStr());
 +        aMembers.push_back(pMem->GetName());
 +        ++nMemberCount;
 +    }
 +
 +    // Sort the member list in ascending order.
 +    aMembers.sort();
-+    for (list<OUString>::const_iterator itr = aMembers.begin(), itrEnd = aMembers.end(); 
-+          itr != itrEnd; ++itr)
-+        fprintf(stdout, "ScDBFunc::DataPilotSort:   (sorted) member = '%s'\n", rtl::OUStringToOString(*itr, RTL_TEXTENCODING_UTF8).getStr());
 +
-+    ScUserList* pUserList = ScGlobal::GetUserList();
-+    if (!pUserList)
-+        return false;
-+
-+    sal_uInt16 n = pUserList->GetCount();
-+    if (!n)
-+        return false;
-+
-+    for (sal_uInt16 i = 0; i < n; ++i)
-+    {
-+        ScUserListData* pData = static_cast<ScUserListData*>((*pUserList)[i]);
-+        fprintf(stdout, "ScDBFunc::DataPilotSort:   user list = '%s'\n", 
-+                rtl::OUStringToOString(pData->GetString(), RTL_TEXTENCODING_UTF8).getStr());
-+    }
-+
-+    // Just use the first user list for testing.
-+    ScUserListData* pData = static_cast<ScUserListData*>((*pUserList)[0]);
-+    sal_uInt16 nSubCount = pData->GetSubCount();
 +    typedef hash_map<OUString, sal_uInt16, OUStringHash> UserSortMap;
 +    UserSortMap aSubStrs;
-+    if (pData)
++    sal_uInt16 nSubCount = 0;
++    if (pUserListId)
 +    {
-+        for (sal_uInt16 i = 0; i < nSubCount; ++i)
++        ScUserList* pUserList = ScGlobal::GetUserList();
++        if (!pUserList)
++            return false;
++    
++        sal_uInt16 n = pUserList->GetCount();
++        if (!n || *pUserListId >= n)
++            return false;
++        
++        ScUserListData* pData = static_cast<ScUserListData*>((*pUserList)[*pUserListId]);
++        if (pData)
 +        {
-+            String aSub = pData->GetSubStr(i);
-+            fprintf(stdout, "ScDBFunc::DataPilotSort:   sub str = '%s'\n", 
-+                    rtl::OUStringToOString(aSub, RTL_TEXTENCODING_UTF8).getStr());
-+            aSubStrs.insert(UserSortMap::value_type(aSub, i));
++            nSubCount = pData->GetSubCount();
++            for (sal_uInt16 i = 0; i < nSubCount; ++i)
++            {
++                String aSub = pData->GetSubStr(i);
++                aSubStrs.insert(UserSortMap::value_type(aSub, i));
++            }
 +        }
 +    }
 +
@@ -881,8 +940,10 @@ index d83add1..832fecc 100644
 +            nRank = nSubCount + nCurStrId++;
 +        else
 +            nRank = itrSub->second;
-+        fprintf(stdout, "ScDBFunc::DataPilotSort:   member = '%s' rank = %d\n",
-+                rtl::OUStringToOString(aName, RTL_TEXTENCODING_UTF8).getStr(), nRank);
++
++        if (!bAscending)
++            nRank = nMemberCount - nRank - 1;
++
 +        aRankedNames[nRank] = aName;
 +    }
 +
@@ -891,8 +952,6 @@ index d83add1..832fecc 100644
 +    for (vector<OUString>::const_iterator itr = aRankedNames.begin(), itrEnd = aRankedNames.end();
 +          itr != itrEnd; ++itr)
 +    {
-+        fprintf(stdout, "ScDBFunc::DataPilotSort:   (ranked) member = '%s'\n", 
-+                rtl::OUStringToOString(*itr, RTL_TEXTENCODING_UTF8).getStr());
 +        const ScDPSaveMember* pOldMem = pSaveDim->GetExistingMemberByName(*itr);
 +        if (!pOldMem)
 +            // All members are supposed to be present.
@@ -920,53 +979,21 @@ index d83add1..832fecc 100644
 +
  BOOL ScDBFunc::DataPilotMove( const ScRange& rSource, const ScAddress& rDest )
  {
-+    StackPrinter __stack_printer__("ScDBFunc::DataPilotMove");
-+    {
-+        String aSrc, aDest;
-+        rSource.Format(aSrc, SCR_ABS);
-+        rDest.Format(aDest, SCA_ABS);
-+        fprintf(stdout, "ScDBFunc::DataPilotMove:   src = '%s'  dest = '%s'\n",
-+                rtl::OUStringToOString(aSrc, RTL_TEXTENCODING_UTF8).getStr(),
-+                rtl::OUStringToOString(aDest, RTL_TEXTENCODING_UTF8).getStr());
-+    }
      BOOL bRet = FALSE;
-     ScDocument* pDoc = GetViewData()->GetDocument();
-     ScDPObject* pDPObj = pDoc->GetDPAtCursor( rSource.aStart.Col(), rSource.aStart.Row(), rSource.aStart.Tab() );
-@@ -1729,6 +1915,13 @@ BOOL ScDBFunc::DataPilotMove( const ScRange& rSource, const ScAddress& rDest )
-                     bValid = false;     // empty (subtotal) or different field
-             }
- 
-+        {
-+            using ::std::vector;
-+            vector<OUString>::const_iterator itr = aMembersVector.begin(), itrEnd = aMembersVector.end();
-+            for (; itr != itrEnd; ++itr)
-+                fprintf(stdout, "ScDBFunc::DataPilotMove:   member = '%s'\n", rtl::OUStringToOString(*itr, RTL_TEXTENCODING_UTF8).getStr());
-+        }
-+
-         if ( bValid )
-         {
-             BOOL bIsDataLayout;
 diff --git sc/source/ui/view/gridwin2.cxx sc/source/ui/view/gridwin2.cxx
-index 63ce024..abd09c2 100644
+index 63ce024..72a6606 100644
 --- sc/source/ui/view/gridwin2.cxx
 +++ sc/source/ui/view/gridwin2.cxx
-@@ -56,6 +56,8 @@
+@@ -56,6 +56,9 @@
  #include "dpshttab.hxx"
  #include "dbdocfun.hxx"
  #include "dpcontrol.hxx"
 +#include "dpcontrol.hrc"
 +#include "strload.hxx"
++#include "userlist.hxx"
  
  #include <com/sun/star/sheet/DataPilotFieldOrientation.hpp>
  #include "scabstdlg.hxx" //CHINA001
-@@ -763,6 +765,7 @@ bool ScGridWindow::DPTestFieldPopupArrow(const MouseEvent& rMEvt, const ScAddres
-     {
-         // Mouse cursor inside the popup arrow box.  Launch the field menu.
-         DPLaunchFieldPopupMenu(OutputToScreenPixel(aSrcPos), aSrcSize, rPos, pDPObj);
-+//      pViewData->GetViewShell()->DataPilotSort(rPos);
-         return true;
-     }
- 
 @@ -778,7 +781,7 @@ struct DPFieldPopupData : public ScDPFieldPopupWindow::ExtendedData
      long            mnDim;
  };
@@ -976,7 +1003,7 @@ index 63ce024..abd09c2 100644
  {
  public:
      explicit DPFieldPopupOKAction(ScGridWindow* p) : 
-@@ -792,6 +795,40 @@ private:
+@@ -792,6 +795,39 @@ private:
      ScGridWindow* mpGridWindow;
  };
  
@@ -985,23 +1012,21 @@ index 63ce024..abd09c2 100644
 +public:
 +    enum SortType { ASCENDING, DESCENDING, CUSTOM };
 +
-+    explicit PopupSortAction(const ScAddress& rPos, SortType eType, ScTabViewShell* pViewShell) :
-+        maPos(rPos), meType(eType), mpViewShell(pViewShell) {}
++    explicit PopupSortAction(const ScAddress& rPos, SortType eType, sal_uInt16 nUserListIndex, ScTabViewShell* pViewShell) :
++        maPos(rPos), meType(eType), mnUserListIndex(nUserListIndex), mpViewShell(pViewShell) {}
 +
 +    virtual void execute()
 +    {
 +        switch (meType)
 +        {
 +            case ASCENDING:
-+                fprintf(stdout, "PopupSortAction::execute:   ascending\n");
-+                mpViewShell->DataPilotSort(maPos);
++                mpViewShell->DataPilotSort(maPos, true);
 +            break;
 +            case DESCENDING:
-+                fprintf(stdout, "PopupSortAction::execute:   descending\n");
-+                mpViewShell->DataPilotSort(maPos);
++                mpViewShell->DataPilotSort(maPos, false);
 +            break;
 +            case CUSTOM:
-+                fprintf(stdout, "PopupSortAction::execute:   custom sort\n");
++                mpViewShell->DataPilotSort(maPos, true, &mnUserListIndex);
 +            break;
 +            default:
 +                ;
@@ -1011,30 +1036,67 @@ index 63ce024..abd09c2 100644
 +private:
 +    ScAddress       maPos;
 +    SortType        meType;
++    sal_uInt16      mnUserListIndex;
 +    ScTabViewShell* mpViewShell;
 +};
 +
  }
  
  void ScGridWindow::DPLaunchFieldPopupMenu(
-@@ -820,6 +857,17 @@ void ScGridWindow::DPLaunchFieldPopupMenu(
-         mpDPFieldPopup->addMember(rLabelData.maMembers[i], rLabelData.maVisible[i]);
-     mpDPFieldPopup->initMembers();
- 
+@@ -814,11 +850,48 @@ void ScGridWindow::DPLaunchFieldPopupMenu(
+     mpDPFieldPopup.reset(new ScDPFieldPopupWindow(this));
+     mpDPFieldPopup->setExtendedData(pDPData.release());
+     mpDPFieldPopup->setOKAction(new DPFieldPopupOKAction(this));
+-    sal_Int32 n = rLabelData.maMembers.getLength();
+-    mpDPFieldPopup->setMemberSize(n);
+-    for (sal_Int32 i = 0; i < n; ++i)
+-        mpDPFieldPopup->addMember(rLabelData.maMembers[i], rLabelData.maVisible[i]);
+-    mpDPFieldPopup->initMembers();
++    {
++        sal_Int32 n = rLabelData.maMembers.getLength();
++        mpDPFieldPopup->setMemberSize(n);
++        for (sal_Int32 i = 0; i < n; ++i)
++            mpDPFieldPopup->addMember(rLabelData.maMembers[i], rLabelData.maVisible[i]);
++        mpDPFieldPopup->initMembers();
++    }
++
++    vector<OUString> aUserSortNames;
++    ScUserList* pUserList = ScGlobal::GetUserList();
++    if (pUserList)
++    {
++        sal_uInt16 n = pUserList->GetCount();
++        aUserSortNames.reserve(n);
++        for (sal_uInt16 i = 0; i < n; ++i)
++        {
++            ScUserListData* pData = static_cast<ScUserListData*>((*pUserList)[i]);
++            aUserSortNames.push_back(pData->GetString());
++        }
++    }
++
 +    // Populate the menus.
 +    ScTabViewShell* pViewShell = pViewData->GetViewShell();
 +    mpDPFieldPopup->addMenuItem(
 +        ScRscStrLoader(RID_SC_DPCONTROL, STR_MENU_SORT_ASC).GetString(), true, 
-+        new PopupSortAction(rPos, PopupSortAction::ASCENDING, pViewShell));
++        new PopupSortAction(rPos, PopupSortAction::ASCENDING, 0, pViewShell));
 +    mpDPFieldPopup->addMenuItem(
 +        ScRscStrLoader(RID_SC_DPCONTROL, STR_MENU_SORT_DESC).GetString(), true,
-+        new PopupSortAction(rPos, PopupSortAction::DESCENDING, pViewShell));
-+    mpDPFieldPopup->addSubMenuItem(
-+        ScRscStrLoader(RID_SC_DPCONTROL, STR_MENU_SORT_CUSTOM).GetString(), true);
++        new PopupSortAction(rPos, PopupSortAction::DESCENDING, 0, pViewShell));
++    ScMenuFloatingWindow* pSubMenu = mpDPFieldPopup->addSubMenuItem(
++        ScRscStrLoader(RID_SC_DPCONTROL, STR_MENU_SORT_CUSTOM).GetString(), !aUserSortNames.empty());
 +
++    if (pSubMenu && !aUserSortNames.empty())
++    {
++        size_t n = aUserSortNames.size();
++        for (size_t i = 0; i < n; ++i)
++        {    
++            pSubMenu->addMenuItem(
++                aUserSortNames[i], true, 
++                new PopupSortAction(rPos, PopupSortAction::CUSTOM, i, pViewShell));
++        }
++    }
+ 
      mpDPFieldPopup->SetPopupModeEndHdl( LINK(this, ScGridWindow, PopupModeEndHdl) );
      Rectangle aCellRect(rSrcPos, rSrcSize);
-     mpDPFieldPopup->StartPopupMode(aCellRect, (FLOATWIN_POPUPMODE_DOWN | FLOATWIN_POPUPMODE_GRABFOCUS));
 diff --git sc/util/makefile.mk sc/util/makefile.mk
 index 88e0594..bdf4954 100644
 --- sc/util/makefile.mk
