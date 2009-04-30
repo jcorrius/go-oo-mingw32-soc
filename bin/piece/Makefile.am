@@ -1,6 +1,6 @@
 EXTRA_DIST = \
 	sys-setup.in \
-	unpack-l10n \
+	unpack-extras \
 	copyexcept \
 	desktop-support-app \
 	noulf noulfconv \
