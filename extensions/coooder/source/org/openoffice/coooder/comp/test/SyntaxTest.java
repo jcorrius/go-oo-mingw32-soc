@@ -81,7 +81,7 @@ public class SyntaxTest extends UnoTestCase {
         xHL.setLanguage(xLang);
         
         // There is no need of a progress monitor here.
-        xHL.parse(null);
+        xHL.parse();
     }
     
     private void compareWithGeshi(XTextDocument pDoc, String pLanguage) {
