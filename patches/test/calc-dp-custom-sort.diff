@@ -13,7 +13,7 @@ index 3ecd9ba..32f883a 100644
  
  
 diff --git sc/source/ui/cctrl/dpcontrol.cxx sc/source/ui/cctrl/dpcontrol.cxx
-index e188ab3..fab0f64 100644
+index e188ab3..7df90ee 100644
 --- sc/source/ui/cctrl/dpcontrol.cxx
 +++ sc/source/ui/cctrl/dpcontrol.cxx
 @@ -38,6 +38,9 @@
@@ -26,7 +26,7 @@ index e188ab3..fab0f64 100644
  
  using ::rtl::OUString;
  using ::rtl::OUStringHash;
-@@ -182,6 +185,282 @@ void ScDPFieldButton::drawPopupButton()
+@@ -182,6 +185,507 @@ void ScDPFieldButton::drawPopupButton()
  
  // ============================================================================
  
@@ -39,14 +39,41 @@ index e188ab3..fab0f64 100644
 +
 +// ----------------------------------------------------------------------------
 +
++ScMenuFloatingWindow::SubMenuItem::SubMenuItem(ScMenuFloatingWindow* pParent) :
++    mpSubMenu(NULL),
++    mnMenuPos(MENU_NOT_SELECTED),
++    mpParent(pParent)
++{
++    maTimer.SetTimeoutHdl( LINK(this, ScMenuFloatingWindow::SubMenuItem, TimeoutHdl) );
++    maTimer.SetTimeout(mpParent->GetSettings().GetMouseSettings().GetMenuDelay());
++}
++
++void ScMenuFloatingWindow::SubMenuItem::reset()
++{
++    mpSubMenu = NULL;
++    mnMenuPos = MENU_NOT_SELECTED;
++    maTimer.Stop();
++}
++
++IMPL_LINK( ScMenuFloatingWindow::SubMenuItem, TimeoutHdl, void*, EMPTYARG )
++{
++    mpParent->handleMenuTimeout(this);
++    return 0;
++}
++
++// ----------------------------------------------------------------------------
++
 +ScMenuFloatingWindow::ScMenuFloatingWindow(Window* pParent) :
 +    FloatingWindow(pParent, (WB_SYSTEMFLOATWIN|WB_SYSTEMWINDOW|WB_NOBORDER)),
++    maOpenTimer(this),
++    maCloseTimer(this),
 +    mnSelectedMenu(MENU_NOT_SELECTED),
 +    mnClickedMenu(MENU_NOT_SELECTED),
 +    mpParentMenu(dynamic_cast<ScMenuFloatingWindow*>(pParent)),
 +    mpActiveSubMenu(NULL),
 +    mbActionFired(false)
 +{
++    // TODO: How do we get the right font to use here ?
 +    const sal_uInt16 nPopupFontHeight = 12;
 +    const StyleSettings& rStyle = GetSettings().GetStyleSettings();
 +    maLabelFont = rStyle.GetLabelFont();
@@ -65,13 +92,8 @@ index e188ab3..fab0f64 100644
 +{
 +    const Point& rPos = rMEvt.GetPosPixel();
 +    size_t nSelectedMenu = getEnclosingMenuItem(rPos);
-+    if (mnSelectedMenu != nSelectedMenu)
-+    {
-+        highlightMenuItem(mnSelectedMenu, false);
-+        highlightMenuItem(nSelectedMenu, true);
-+        mnSelectedMenu = nSelectedMenu;
-+    }
-+        
++    setSelectedMenuItem(nSelectedMenu);
++
 +    Window::MouseMove(rMEvt);
 +}
 +
@@ -84,23 +106,61 @@ index e188ab3..fab0f64 100644
 +
 +void ScMenuFloatingWindow::MouseButtonUp(const MouseEvent& rMEvt)
 +{
-+    do
-+    {
-+        if (mnClickedMenu >= maMenuItems.size())
-+            break;
-+
-+        if (!maMenuItems[mnClickedMenu].mpAction)
-+            // no action is defined.
-+            break;
-+
-+        maMenuItems[mnClickedMenu].mpAction->execute();
-+        mbActionFired = true;
-+        EndPopupMode();
-+    }
-+    while (false);
-+
++    executeMenu(mnClickedMenu);
 +    mnClickedMenu = MENU_NOT_SELECTED;
 +    Window::MouseButtonUp(rMEvt);
++}
++
++void ScMenuFloatingWindow::KeyInput(const KeyEvent& rKEvt)
++{
++    const KeyCode& rKeyCode = rKEvt.GetKeyCode();
++    bool bHandled = true;
++    size_t nSelectedMenu = mnSelectedMenu;
++    size_t nLastMenuPos = maMenuItems.size() - 1;
++    switch (rKeyCode.GetCode())
++    {
++        case KEY_UP:
++            if (nSelectedMenu == MENU_NOT_SELECTED || nSelectedMenu == 0)
++                nSelectedMenu = nLastMenuPos;
++            else
++                --nSelectedMenu;
++            setSelectedMenuItem(nSelectedMenu, false);
++        break;
++        case KEY_DOWN:
++            if (nSelectedMenu == MENU_NOT_SELECTED || nSelectedMenu == nLastMenuPos)
++                nSelectedMenu = 0;
++            else
++                ++nSelectedMenu;
++            setSelectedMenuItem(nSelectedMenu, false);
++        break;
++        case KEY_LEFT:
++            if (mpParentMenu)
++                mpParentMenu->endSubMenu();
++        break;
++        case KEY_RIGHT:
++        {
++            if (mnSelectedMenu >= maMenuItems.size() || mnSelectedMenu == MENU_NOT_SELECTED)
++                break;
++
++            const MenuItem& rMenu = maMenuItems[mnSelectedMenu];
++            if (!rMenu.mbEnabled || !rMenu.mpSubMenuWin)
++                break;
++
++            maOpenTimer.mnMenuPos = mnSelectedMenu;
++            maOpenTimer.mpSubMenu = rMenu.mpSubMenuWin.get();
++            launchSubMenu(true);
++        }
++        break;
++        case KEY_RETURN:
++            if (nSelectedMenu != MENU_NOT_SELECTED)
++                executeMenu(nSelectedMenu);
++        break;
++        default:
++            bHandled = false;
++    }
++
++    if (!bHandled)
++        Window::KeyInput(rKEvt);
 +}
 +
 +void ScMenuFloatingWindow::addMenuItem(const OUString& rText, bool bEnabled, Action* pAction)
@@ -153,12 +213,158 @@ index e188ab3..fab0f64 100644
 +{
 +    size_t n = maMenuItems.size();
 +    for (size_t i = 0; i < n; ++i)
-+        drawMenuItem(i);
++        highlightMenuItem(i, i == mnSelectedMenu);    
 +}
 +
 +const Font& ScMenuFloatingWindow::getLabelFont() const
 +{
 +    return maLabelFont;
++}
++
++void ScMenuFloatingWindow::executeMenu(size_t nPos)
++{
++    if (nPos >= maMenuItems.size())
++        return;
++
++    if (!maMenuItems[nPos].mpAction)
++        // no action is defined.
++        return;
++
++    maMenuItems[nPos].mpAction->execute();
++    mbActionFired = true;
++    EndPopupMode();
++}
++
++void ScMenuFloatingWindow::setSelectedMenuItem(size_t nPos, bool bSubMenuTimer)
++{
++    if (mnSelectedMenu != nPos)
++    {
++        selectMenuItem(mnSelectedMenu, false, bSubMenuTimer);
++        selectMenuItem(nPos, true, bSubMenuTimer);
++        mnSelectedMenu = nPos;
++    }
++}
++
++size_t ScMenuFloatingWindow::getSelectedMenuItem() const
++{
++    return mnSelectedMenu;
++}
++
++void ScMenuFloatingWindow::handleMenuTimeout(SubMenuItem* pTimer)
++{
++    if (pTimer == &maOpenTimer)
++    {
++        // Close any open submenu immediately.
++        if (maCloseTimer.mpSubMenu)
++        {
++            maCloseTimer.mpSubMenu->EndPopupMode();
++            maCloseTimer.mpSubMenu = NULL;
++            maCloseTimer.maTimer.Stop();
++        }
++
++        launchSubMenu(false);
++    }
++    else if (pTimer == &maCloseTimer)
++    {
++        // end submenu.
++        if (maCloseTimer.mpSubMenu)
++        {
++            maOpenTimer.mpSubMenu = NULL;
++
++            maCloseTimer.mpSubMenu->EndPopupMode();
++            maCloseTimer.mpSubMenu = NULL;
++
++            highlightMenuItem(maOpenTimer.mnMenuPos, false);
++            maOpenTimer.mnMenuPos = MENU_NOT_SELECTED;
++        }
++    }
++}
++
++void ScMenuFloatingWindow::queueLaunchSubMenu(size_t nPos, ScMenuFloatingWindow* pMenu)
++{
++    if (!pMenu)
++        return;
++
++    // Set the submenu on launch queue.
++    if (maOpenTimer.mpSubMenu)
++    {
++        if (maOpenTimer.mpSubMenu == pMenu)
++        {
++            if (pMenu == maCloseTimer.mpSubMenu)
++                maCloseTimer.reset();
++            return;
++        }
++
++        // new submenu is being requested.
++        queueCloseSubMenu();
++    }
++
++    maOpenTimer.mpSubMenu = pMenu;
++    maOpenTimer.mnMenuPos = nPos;
++    maOpenTimer.maTimer.Start();
++}
++
++void ScMenuFloatingWindow::queueCloseSubMenu()
++{
++    if (!maOpenTimer.mpSubMenu)
++        return;
++
++    maCloseTimer.mpSubMenu = maOpenTimer.mpSubMenu;
++    maCloseTimer.mnMenuPos = maOpenTimer.mnMenuPos;
++    maCloseTimer.maTimer.Start();
++}
++
++void ScMenuFloatingWindow::launchSubMenu(bool bSetMenuPos)
++{
++    Point aPos;
++    Size aSize;
++    getMenuItemPosSize(aPos, aSize, maOpenTimer.mnMenuPos);
++    ScMenuFloatingWindow* pSubMenu = maOpenTimer.mpSubMenu;
++
++    if (!pSubMenu)
++        return;
++
++    sal_uInt32 nOldFlags = GetPopupModeFlags();
++    SetPopupModeFlags(nOldFlags | FLOATWIN_POPUPMODE_NOAPPFOCUSCLOSE);
++    pSubMenu->resetMenu(bSetMenuPos);
++    pSubMenu->StartPopupMode(
++        Rectangle(aPos,aSize), (FLOATWIN_POPUPMODE_RIGHT | FLOATWIN_POPUPMODE_GRABFOCUS));
++    pSubMenu->AddPopupModeWindow(this);
++    SetPopupModeFlags(nOldFlags);
++}
++
++void ScMenuFloatingWindow::endSubMenu()
++{
++    if (maOpenTimer.mpSubMenu)
++    {
++        maOpenTimer.mpSubMenu->EndPopupMode();
++        maOpenTimer.mpSubMenu = NULL;
++        highlightMenuItem(maOpenTimer.mnMenuPos, true);
++    }
++}
++
++void ScMenuFloatingWindow::notify(NotificationType eType)
++{
++    switch (eType)
++    {
++        case SUBMENU_FOCUSED:
++            // Cancel any request for ending submenu.
++            maCloseTimer.reset();
++            if (mnSelectedMenu != maOpenTimer.mnMenuPos)
++            {
++                highlightMenuItem(maOpenTimer.mnMenuPos, true);
++                mnSelectedMenu = maOpenTimer.mnMenuPos;
++            }
++        break;
++        default:
++            ;
++    }
++}
++
++void ScMenuFloatingWindow::resetMenu(bool bSetMenuPos)
++{
++    mnSelectedMenu = bSetMenuPos ? 0 : MENU_NOT_SELECTED;
++    resizeToFitMenuItems();
 +}
 +
 +void ScMenuFloatingWindow::resizeToFitMenuItems()
@@ -180,17 +386,42 @@ index e188ab3..fab0f64 100644
 +    SetOutputSizePixel(Size(aPos.X(), aPos.Y()));
 +}
 +
-+void ScMenuFloatingWindow::highlightMenuItem(size_t nPos, bool bSelected)
++void ScMenuFloatingWindow::selectMenuItem(size_t nPos, bool bSelected, bool bSubMenuTimer)
 +{
-+    if (nPos >= maMenuItems.size())
++    if (nPos >= maMenuItems.size() || nPos == MENU_NOT_SELECTED)
++    {
++        queueCloseSubMenu();
 +        return;
-+
-+    if (nPos == MENU_NOT_SELECTED)
-+        return;
++    }
 +
 +    if (!maMenuItems[nPos].mbEnabled)
++    {    
++        queueCloseSubMenu();
 +        return;
++    }
 +
++    highlightMenuItem(nPos, bSelected);
++
++    if (bSelected)
++    {
++        if (mpParentMenu)
++            mpParentMenu->notify(SUBMENU_FOCUSED);
++
++        if (bSubMenuTimer)
++        {
++            if (maMenuItems[nPos].mpSubMenuWin)
++            {
++                ScMenuFloatingWindow* pSubMenu = maMenuItems[nPos].mpSubMenuWin.get();
++                queueLaunchSubMenu(nPos, pSubMenu);
++            }
++            else
++                queueCloseSubMenu();
++        }
++    }
++}
++
++void ScMenuFloatingWindow::highlightMenuItem(size_t nPos, bool bSelected)
++{
 +    const StyleSettings& rStyle = GetSettings().GetStyleSettings();
 +    Color aBackColor = rStyle.GetMenuColor();
 +    SetFillColor(aBackColor);
@@ -199,49 +430,41 @@ index e188ab3..fab0f64 100644
 +    Point aPos;
 +    Size aSize;
 +    getMenuItemPosSize(aPos, aSize, nPos);
-+    DrawRect(Rectangle(aPos,aSize));
 +    Region aRegion(Rectangle(aPos,aSize));
++    bool bNativeDrawn = true;
 +    if (IsNativeControlSupported(CTRL_MENU_POPUP, PART_MENU_ITEM))
 +    {
++        DrawRect(Rectangle(aPos,aSize));
 +        ControlState nState = bSelected ? CTRL_STATE_SELECTED : 0;
 +        if (maMenuItems[nPos].mbEnabled)
 +            nState |= CTRL_STATE_ENABLED;
-+        DrawNativeControl(CTRL_MENU_POPUP, PART_MENU_ITEM, aRegion, nState, ImplControlValue(), OUString());
++        bNativeDrawn = DrawNativeControl(
++            CTRL_MENU_POPUP, PART_MENU_ITEM, aRegion, nState, ImplControlValue(), OUString());
 +    }
++    else
++        bNativeDrawn = false;
 +
-+    drawMenuItem(nPos);
-+
-+    if (maMenuItems[nPos].mpSubMenuWin)
++    if (!bNativeDrawn)
 +    {
-+        ScMenuFloatingWindow* pSubMenu = maMenuItems[nPos].mpSubMenuWin.get();
-+        if (pSubMenu != mpActiveSubMenu)
++        if (bSelected)
 +        {
-+            if (mpActiveSubMenu)
-+                mpActiveSubMenu->EndPopupMode();
-+
-+            sal_uInt32 nOldFlags = GetPopupModeFlags();
-+            SetPopupModeFlags(nOldFlags | FLOATWIN_POPUPMODE_NOAPPFOCUSCLOSE);
-+            pSubMenu->resizeToFitMenuItems();
-+            pSubMenu->StartPopupMode(
-+                Rectangle(aPos,aSize), (FLOATWIN_POPUPMODE_RIGHT | FLOATWIN_POPUPMODE_GRABFOCUS));
-+            pSubMenu->AddPopupModeWindow(this);
-+            SetPopupModeFlags(nOldFlags);
-+
-+            mpActiveSubMenu = pSubMenu;
++            aBackColor = rStyle.GetMenuHighlightColor();
++            SetFillColor(aBackColor);
++            SetLineColor(aBackColor);
 +        }
++        DrawRect(Rectangle(aPos,aSize));
 +    }
-+    else if (mpActiveSubMenu)
-+    {
-+        mpActiveSubMenu->EndPopupMode();
-+        mpActiveSubMenu = NULL;
-+    }
++
++    Color aTextColor = bSelected ? rStyle.GetMenuHighlightTextColor() : rStyle.GetMenuTextColor();
++    SetTextColor(aTextColor);
++    drawMenuItem(nPos);
 +}
 +
 +void ScMenuFloatingWindow::getMenuItemPosSize(Point& rPos, Size& rSize, size_t nPos) const
 +{
 +    const sal_uInt16 nLeftMargin = 5;
 +    const sal_uInt16 nTopMargin = 5;
-+    const sal_uInt16 nMenuItemHeight = maLabelFont.GetHeight()*2;
++    const sal_uInt16 nMenuItemHeight = maLabelFont.GetHeight()*1.8;
 +
 +    Size aWndSize = GetSizePixel();
 +
@@ -256,7 +479,7 @@ index e188ab3..fab0f64 100644
 +size_t ScMenuFloatingWindow::getEnclosingMenuItem(const Point& rPos) const
 +{
 +    size_t n = maMenuItems.size();
-+    for (size_t i = 0; i <= n; ++i)
++    for (size_t i = 0; i < n; ++i)
 +    {
 +        Point aPos;
 +        Size aSize;
@@ -272,6 +495,7 @@ index e188ab3..fab0f64 100644
 +{
 +    if (mbActionFired && mpParentMenu)
 +        mpParentMenu->EndPopupMode();
++
 +    return 0;
 +}
 +
@@ -301,6 +525,7 @@ index e188ab3..fab0f64 100644
 +    DrawRect(Rectangle(Point(0,0), aSize));
 +
 +    // Menu items
++    SetTextColor(rStyle.GetMenuTextColor());
 +    drawAllMenuItems();
 +}
 +
@@ -309,7 +534,7 @@ index e188ab3..fab0f64 100644
  ScDPFieldPopupWindow::Member::Member() :
      mbVisible(true)
  {
-@@ -190,7 +469,7 @@ ScDPFieldPopupWindow::Member::Member() :
+@@ -190,7 +694,7 @@ ScDPFieldPopupWindow::Member::Member() :
  // ----------------------------------------------------------------------------
  
  ScDPFieldPopupWindow::ScDPFieldPopupWindow(Window* pParent) :
@@ -318,7 +543,7 @@ index e188ab3..fab0f64 100644
      maCheck0(this, 0),
      maCheck1(this, 0),
      maCheck2(this, 0),
-@@ -201,8 +480,6 @@ ScDPFieldPopupWindow::ScDPFieldPopupWindow(Window* pParent) :
+@@ -201,8 +705,6 @@ ScDPFieldPopupWindow::ScDPFieldPopupWindow(Window* pParent) :
      maCheck7(this, 0),
      maCheck8(this, 0),
      maCheck9(this, 0),
@@ -327,7 +552,7 @@ index e188ab3..fab0f64 100644
      maScrollBar(this, WB_VERT),
      maBtnOk(this),
      maBtnCancel(this),
-@@ -210,12 +487,13 @@ ScDPFieldPopupWindow::ScDPFieldPopupWindow(Window* pParent) :
+@@ -210,12 +712,13 @@ ScDPFieldPopupWindow::ScDPFieldPopupWindow(Window* pParent) :
      mpOKAction(NULL),
      mnScrollPos(0)
  {
@@ -345,7 +570,7 @@ index e188ab3..fab0f64 100644
      mpCheckPtr.push_back(&maCheck0);
      mpCheckPtr.push_back(&maCheck1);
      mpCheckPtr.push_back(&maCheck2);
-@@ -226,33 +504,27 @@ ScDPFieldPopupWindow::ScDPFieldPopupWindow(Window* pParent) :
+@@ -226,33 +729,27 @@ ScDPFieldPopupWindow::ScDPFieldPopupWindow(Window* pParent) :
      mpCheckPtr.push_back(&maCheck7);
      mpCheckPtr.push_back(&maCheck8);
      mpCheckPtr.push_back(&maCheck9);
@@ -383,7 +608,7 @@ index e188ab3..fab0f64 100644
      maBtnCancel.Show();
  
      getSectionPosSize(aPos, aSize, SCROLL_BAR_V);
-@@ -264,6 +536,10 @@ ScDPFieldPopupWindow::ScDPFieldPopupWindow(Window* pParent) :
+@@ -264,6 +761,10 @@ ScDPFieldPopupWindow::ScDPFieldPopupWindow(Window* pParent) :
      maScrollBar.EnableDrag(true);
  }
  
@@ -394,7 +619,7 @@ index e188ab3..fab0f64 100644
  vector<ScDPFieldPopupWindow::Member>& ScDPFieldPopupWindow::getMembers()
  {
      return maMembers;
-@@ -271,61 +547,69 @@ vector<ScDPFieldPopupWindow::Member>& ScDPFieldPopupWindow::getMembers()
+@@ -271,61 +772,67 @@ vector<ScDPFieldPopupWindow::Member>& ScDPFieldPopupWindow::getMembers()
  
  void ScDPFieldPopupWindow::getSectionPosSize(Point& rPos, Size& rSize, SectionType eType) const
  {
@@ -409,8 +634,7 @@ index e188ab3..fab0f64 100644
 -    const Size& rWndSize = GetSizePixel();
 +    const sal_uInt16 nListBoxMargin = 5;
 +    const sal_uInt16 nTopMargin = 5;
-+//  const sal_uInt16 nMenuLeftMargin = 5;
-+    const sal_uInt16 nMenuItemHeight = getLabelFont().GetHeight()*2;
++    const sal_uInt16 nMenuHeight = 60;
 +    const sal_uInt16 nMenuItemCount = 3;
 +    const sal_uInt16 nBottomBtnAreaHeight = 50;
 +    const sal_uInt16 nInnerItemMargin = 5;
@@ -420,8 +644,7 @@ index e188ab3..fab0f64 100644
 +    const sal_uInt16 nBottomMargin = 10;
 +    const sal_uInt16 nMenuListMargin = 20;
 +
-+    Size aWndSize = Size(160, 340);
-+    sal_uInt16 nMenuHeight = nMenuItemHeight * nMenuItemCount;
++    Size aWndSize = Size(160, 330);
  
      switch (eType)
      {
@@ -486,19 +709,23 @@ index e188ab3..fab0f64 100644
              rSize = Size(nScrollBarWidth, h);
          }
          break;
-@@ -377,11 +661,6 @@ IMPL_LINK( ScDPFieldPopupWindow, ScrollHdl, ScrollBar*, EMPTYARG )
+@@ -377,9 +884,13 @@ IMPL_LINK( ScDPFieldPopupWindow, ScrollHdl, ScrollBar*, EMPTYARG )
      return 0;
  }
  
 -ScDPFieldPopupWindow::~ScDPFieldPopupWindow()
--{
--    EndPopupMode();
--}
--
- void ScDPFieldPopupWindow::Paint(const Rectangle& rRect)
++void ScDPFieldPopupWindow::MouseMove(const MouseEvent& rMEvt)
  {
-     Window::Paint(rRect);
-@@ -404,6 +683,9 @@ void ScDPFieldPopupWindow::Paint(const Rectangle& rRect)
+-    EndPopupMode();
++    ScMenuFloatingWindow::MouseMove(rMEvt);
++
++    size_t nSelectedMenu = getSelectedMenuItem();
++    if (nSelectedMenu == MENU_NOT_SELECTED)
++        queueCloseSubMenu();
+ }
+ 
+ void ScDPFieldPopupWindow::Paint(const Rectangle& rRect)
+@@ -404,6 +915,9 @@ void ScDPFieldPopupWindow::Paint(const Rectangle& rRect)
      SetFillColor(aMemberBackColor);
      getSectionPosSize(aPos, aSize, LISTBOX_AREA);
      DrawRect(Rectangle(aPos,aSize));
@@ -508,7 +735,7 @@ index e188ab3..fab0f64 100644
  }
  
  void ScDPFieldPopupWindow::setMemberSize(size_t n)
-@@ -472,7 +754,7 @@ ScDPFieldPopupWindow::ExtendedData* ScDPFieldPopupWindow::getExtendedData()
+@@ -472,7 +986,7 @@ ScDPFieldPopupWindow::ExtendedData* ScDPFieldPopupWindow::getExtendedData()
      return mpExtendedData.get();
  }
  
@@ -664,18 +891,20 @@ index 0000000..2ca698d
 +
 +#endif
 diff --git sc/source/ui/inc/dpcontrol.hxx sc/source/ui/inc/dpcontrol.hxx
-index 6a28354..e7f7bc8 100644
+index 6a28354..91a815e 100644
 --- sc/source/ui/inc/dpcontrol.hxx
 +++ sc/source/ui/inc/dpcontrol.hxx
-@@ -37,6 +37,7 @@
+@@ -36,7 +36,9 @@
+ #include "vcl/floatwin.hxx"
  #include "vcl/button.hxx"
  #include "vcl/scrbar.hxx"
++#include "vcl/timer.hxx"
  
 +#include <boost/shared_ptr.hpp>
  #include <memory>
  #include <hash_map>
  
-@@ -80,35 +81,94 @@ private:
+@@ -80,43 +82,138 @@ private:
  
  // ============================================================================
  
@@ -704,6 +933,7 @@ index 6a28354..e7f7bc8 100644
 +    virtual void MouseMove(const MouseEvent& rMEvt);
 +    virtual void MouseButtonDown(const MouseEvent& rMEvt);
 +    virtual void MouseButtonUp(const MouseEvent& rMEvt);
++    virtual void KeyInput(const KeyEvent& rKEvt);
 +
 +    void addMenuItem(const ::rtl::OUString& rText, bool bEnabled, Action* pAction);
 +    ScMenuFloatingWindow* addSubMenuItem(const ::rtl::OUString& rText, bool bEnabled);
@@ -713,8 +943,24 @@ index 6a28354..e7f7bc8 100644
 +    void drawAllMenuItems();
 +    const Font& getLabelFont() const;
 +
++    void executeMenu(size_t nPos);
++    void setSelectedMenuItem(size_t nPos, bool bSubMenuTimer = true);
++    size_t getSelectedMenuItem() const;
++    void queueLaunchSubMenu(size_t nPos, ScMenuFloatingWindow* pMenu);
++    void queueCloseSubMenu();
++    void launchSubMenu(bool bSetMenuPos);
++    void endSubMenu();
++
 +private:
++    struct SubMenuItem;
++    void handleMenuTimeout(SubMenuItem* pTimer);
++
++    enum NotificationType { SUBMENU_FOCUSED };
++    void notify(NotificationType eType);
++
++    void resetMenu(bool bSetMenuPos);
 +    void resizeToFitMenuItems();
++    void selectMenuItem(size_t nPos, bool bSelected, bool bSubMenuTimer);
 +    void highlightMenuItem(size_t nPos, bool bSelected);
 +
 +    void getMenuItemPosSize(Point& rPos, Size& rSize, size_t nPos) const;
@@ -735,6 +981,23 @@ index 6a28354..e7f7bc8 100644
 +    };
 +
 +    ::std::vector<MenuItem>         maMenuItems;
++
++    struct SubMenuItem
++    {
++        Timer                   maTimer;
++        ScMenuFloatingWindow*   mpSubMenu;
++        size_t                  mnMenuPos;
++
++        DECL_LINK( TimeoutHdl, void* );
++
++        SubMenuItem(ScMenuFloatingWindow* pParent);
++        void reset();
++
++    private:
++        ScMenuFloatingWindow* mpParent;
++    };
++    SubMenuItem   maOpenTimer;
++    SubMenuItem   maCloseTimer;
 +
 +    Font    maLabelFont;
 +
@@ -786,7 +1049,9 @@ index 6a28354..e7f7bc8 100644
      explicit ScDPFieldPopupWindow(Window* pParent);
      virtual ~ScDPFieldPopupWindow();
  
-@@ -117,6 +177,7 @@ public:
++    virtual void MouseMove(const MouseEvent& rMEvt);
+     virtual void Paint(const Rectangle& rRect);
+ 
      void setMemberSize(size_t n);
      void addMember(const ::rtl::OUString& rName, bool bVisible);
      void initMembers();
@@ -794,7 +1059,7 @@ index 6a28354..e7f7bc8 100644
      void getResult(::std::hash_map< ::rtl::OUString, bool, ::rtl::OUStringHash>& rResult);
      void close(bool bOK);
  
-@@ -132,7 +193,7 @@ public:
+@@ -132,7 +229,7 @@ public:
       */
      ExtendedData* getExtendedData();
  
@@ -803,7 +1068,7 @@ index 6a28354..e7f7bc8 100644
  
  private:
      struct Member
-@@ -173,8 +234,6 @@ private:
+@@ -173,8 +270,6 @@ private:
      CheckBox maCheck7;
      CheckBox maCheck8;
      CheckBox maCheck9;
@@ -812,7 +1077,7 @@ index 6a28354..e7f7bc8 100644
  
      ScrollBar   maScrollBar;
  
-@@ -185,9 +244,9 @@ private:
+@@ -185,9 +280,9 @@ private:
  
      ::std::vector<Member>           maMembers;
      ::std::auto_ptr<ExtendedData>   mpExtendedData;
@@ -825,7 +1090,7 @@ index 6a28354..e7f7bc8 100644
  
  #endif
 diff --git sc/source/ui/view/dbfunc3.cxx sc/source/ui/view/dbfunc3.cxx
-index d83add1..e94ba14 100644
+index d83add1..f58d9b5 100644
 --- sc/source/ui/view/dbfunc3.cxx
 +++ sc/source/ui/view/dbfunc3.cxx
 @@ -81,9 +81,13 @@
@@ -842,7 +1107,7 @@ index d83add1..e94ba14 100644
  
  using namespace com::sun::star;
  using ::com::sun::star::uno::Any;
-@@ -94,8 +98,12 @@ using ::com::sun::star::beans::XPropertySet;
+@@ -94,8 +98,13 @@ using ::com::sun::star::beans::XPropertySet;
  using ::com::sun::star::container::XNameAccess;
  using ::com::sun::star::sheet::XDimensionsSupplier;
  using ::rtl::OUString;
@@ -852,10 +1117,11 @@ index d83add1..e94ba14 100644
 +using ::std::list;
 +using ::std::vector;
 +using ::std::hash_map;
++using ::std::hash_set;
  
  // STATIC DATA -----------------------------------------------------------
  
-@@ -1695,6 +1703,124 @@ void lcl_MoveToEnd( ScDPSaveDimension& rDim, const String& rItemName )
+@@ -1695,6 +1704,134 @@ void lcl_MoveToEnd( ScDPSaveDimension& rDim, const String& rItemName )
      // puts it to the end of the list even if it was in the list before.
  }
  
@@ -889,17 +1155,21 @@ index d83add1..e94ba14 100644
 +    typedef ScDPSaveDimension::MemberList MemList;
 +    const MemList& rDimMembers = pSaveDim->GetMembers();
 +    list<OUString> aMembers;
++    hash_set<OUString, ::rtl::OUStringHash> aMemberSet;
 +    size_t nMemberCount = 0;
 +    for (MemList::const_iterator itr = rDimMembers.begin(), itrEnd = rDimMembers.end();
 +          itr != itrEnd; ++itr)
 +    {
 +        ScDPSaveMember* pMem = *itr;
 +        aMembers.push_back(pMem->GetName());
++        aMemberSet.insert(pMem->GetName());
 +        ++nMemberCount;
 +    }
 +
 +    // Sort the member list in ascending order.
 +    aMembers.sort();
++
++    // Collect and rank those custom sort strings that also exist in the member name list.
 +
 +    typedef hash_map<OUString, sal_uInt16, OUStringHash> UserSortMap;
 +    UserSortMap aSubStrs;
@@ -910,18 +1180,24 @@ index d83add1..e94ba14 100644
 +        if (!pUserList)
 +            return false;
 +    
-+        sal_uInt16 n = pUserList->GetCount();
-+        if (!n || *pUserListId >= n)
-+            return false;
++        {
++            sal_uInt16 n = pUserList->GetCount();
++            if (!n || *pUserListId >= n)
++                return false;
++        }
 +        
 +        ScUserListData* pData = static_cast<ScUserListData*>((*pUserList)[*pUserListId]);
 +        if (pData)
 +        {
-+            nSubCount = pData->GetSubCount();
-+            for (sal_uInt16 i = 0; i < nSubCount; ++i)
++            sal_uInt16 n = pData->GetSubCount();
++            for (sal_uInt16 i = 0; i < n; ++i)
 +            {
-+                String aSub = pData->GetSubStr(i);
-+                aSubStrs.insert(UserSortMap::value_type(aSub, i));
++                OUString aSub = pData->GetSubStr(i);
++                if (!aMemberSet.count(aSub))
++                    // This string doesn't exist in the member name set.  Don't add this.
++                    continue;
++
++                aSubStrs.insert(UserSortMap::value_type(aSub, nSubCount++));
 +            }
 +        }
 +    }
