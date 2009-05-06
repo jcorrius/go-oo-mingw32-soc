@@ -22,7 +22,6 @@ script_files = \
 	java-set-classpath.in \
 	localize-ooo \
 	make-win32-iso \
-	nothing \
 	ooconfig \
 	ooinstall \
 	oosmoketest.in \
