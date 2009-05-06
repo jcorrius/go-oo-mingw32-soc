@@ -1,0 +1,1029 @@
+diff --git sc/inc/tabprotection.hxx sc/inc/tabprotection.hxx
+index 99fec7b..b986070 100644
+--- sc/inc/tabprotection.hxx
++++ sc/inc/tabprotection.hxx
+@@ -35,7 +35,6 @@
+ #include <com/sun/star/uno/Sequence.hxx>
+ 
+ #include "global.hxx"
+-#include <vector>
+ #include <boost/shared_ptr.hpp>
+ 
+ #define ENABLE_SHEET_PROTECTION 1
+@@ -45,8 +44,9 @@ class ScTableProtectionImpl;
+ 
+ enum ScPasswordHash
+ {
+-    PASSHASH_OOO = 0,
+-    PASSHASH_XL
++    PASSHASH_SHA1 = 0,
++    PASSHASH_XL,
++    PASSHASH_UNSPECIFIED
+ };
+ 
+ class ScPassHashHelper
+@@ -56,7 +56,11 @@ public:
+         least one hash that needs to be regenerated, it returns true.  If all
+         hash values are compatible with the specified hash type, then it
+         returns false. */
+-    static bool needsPassHashRegen(const ScDocument& rDoc, ScPasswordHash eHash);
++    static bool needsPassHashRegen(const ScDocument& rDoc, ScPasswordHash eHash1, ScPasswordHash eHash2 = PASSHASH_UNSPECIFIED);
++
++    static ::rtl::OUString getHashURI(ScPasswordHash eHash);
++
++    static ScPasswordHash getHashTypeFromURI(const ::rtl::OUString& rURI);
+ 
+ private:
+     ScPassHashHelper();
+@@ -75,11 +79,13 @@ public:
+     virtual void setProtected(bool bProtected) = 0;
+ 
+     virtual bool isPasswordEmpty() const = 0;
+-    virtual bool hasPasswordHash(ScPasswordHash eHash) const = 0;
++    virtual bool hasPasswordHash(ScPasswordHash eHash, ScPasswordHash eHash2 = PASSHASH_UNSPECIFIED) const = 0;
+     virtual void setPassword(const String& aPassText) = 0;
+-    virtual ::com::sun::star::uno::Sequence<sal_Int8> getPasswordHash(ScPasswordHash eHash) const = 0;
+-    virtual void setPasswordHash(const ::com::sun::star::uno::Sequence<sal_Int8>& aPassword, 
+-                                 ScPasswordHash eHash = PASSHASH_OOO) = 0;
++    virtual ::com::sun::star::uno::Sequence<sal_Int8> getPasswordHash(
++        ScPasswordHash eHash, ScPasswordHash eHas2 = PASSHASH_UNSPECIFIED) const = 0;
++    virtual void setPasswordHash(
++        const ::com::sun::star::uno::Sequence<sal_Int8>& aPassword, 
++        ScPasswordHash eHash = PASSHASH_SHA1, ScPasswordHash eHash2 = PASSHASH_UNSPECIFIED) = 0;
+     virtual bool verifyPassword(const String& aPassText) const = 0;
+ };
+ 
+@@ -105,11 +111,13 @@ public:
+     virtual void setProtected(bool bProtected);
+             
+     virtual bool isPasswordEmpty() const;
+-    virtual bool hasPasswordHash(ScPasswordHash eHash) const;
++    virtual bool hasPasswordHash(ScPasswordHash eHash, ScPasswordHash eHash2 = PASSHASH_UNSPECIFIED) const;
+     virtual void setPassword(const String& aPassText);
+-    virtual ::com::sun::star::uno::Sequence<sal_Int8> getPasswordHash(ScPasswordHash eHash) const;
+-    virtual void setPasswordHash(const ::com::sun::star::uno::Sequence<sal_Int8>& aPassword, 
+-                                 ScPasswordHash eHash = PASSHASH_OOO);
++    virtual ::com::sun::star::uno::Sequence<sal_Int8> getPasswordHash(
++        ScPasswordHash eHash, ScPasswordHash eHash2 = PASSHASH_UNSPECIFIED) const;
++    virtual void setPasswordHash(
++        const ::com::sun::star::uno::Sequence<sal_Int8>& aPassword, 
++        ScPasswordHash eHash = PASSHASH_SHA1, ScPasswordHash eHash2 = PASSHASH_UNSPECIFIED);
+     virtual bool verifyPassword(const String& aPassText) const;
+     
+     bool isOptionEnabled(Option eOption) const;
+@@ -162,11 +170,13 @@ public:
+     virtual void setProtected(bool bProtected);
+             
+     virtual bool isPasswordEmpty() const;
+-    virtual bool hasPasswordHash(ScPasswordHash eHash) const;
++    virtual bool hasPasswordHash(ScPasswordHash eHash, ScPasswordHash eHash2 = PASSHASH_UNSPECIFIED) const;
+     virtual void setPassword(const String& aPassText);
+-    virtual ::com::sun::star::uno::Sequence<sal_Int8> getPasswordHash(ScPasswordHash eHash) const;
+-    virtual void setPasswordHash(const ::com::sun::star::uno::Sequence<sal_Int8>& aPassword, 
+-                                 ScPasswordHash eHash = PASSHASH_OOO);
++    virtual ::com::sun::star::uno::Sequence<sal_Int8> getPasswordHash(
++        ScPasswordHash eHash, ScPasswordHash eHash2 = PASSHASH_UNSPECIFIED) const;
++    virtual void setPasswordHash(
++        const ::com::sun::star::uno::Sequence<sal_Int8>& aPassword, 
++        ScPasswordHash eHash = PASSHASH_SHA1, ScPasswordHash eHash2 = PASSHASH_UNSPECIFIED);
+     virtual bool verifyPassword(const String& aPassText) const;
+     
+     bool isOptionEnabled(Option eOption) const;
+diff --git sc/source/core/data/tabprotection.cxx sc/source/core/data/tabprotection.cxx
+index 2e51a33..2b9d67d 100644
+--- sc/source/core/data/tabprotection.cxx
++++ sc/source/core/data/tabprotection.cxx
+@@ -38,20 +38,24 @@
+ #include "svtools/PasswordHelper.hxx"
+ #include "document.hxx"
+ 
++#include <vector>
++
+ #define DEBUG_TAB_PROTECTION 0
+ 
+ using namespace ::com::sun::star;
+ using ::com::sun::star::uno::Sequence;
+ using ::rtl::OUString;
++using ::rtl::OUStringBuffer;
++using ::std::vector;
+ 
+ // ============================================================================
+ 
+-bool ScPassHashHelper::needsPassHashRegen(const ScDocument& rDoc, ScPasswordHash eHash)
++bool ScPassHashHelper::needsPassHashRegen(const ScDocument& rDoc, ScPasswordHash eHash1, ScPasswordHash eHash2)
+ {
+     if (rDoc.IsDocProtected())
+     {
+         const ScDocProtection* p = rDoc.GetDocProtection();
+-        if (!p->isPasswordEmpty() && !p->hasPasswordHash(eHash))
++        if (!p->isPasswordEmpty() && !p->hasPasswordHash(eHash1, eHash2))
+             return true;
+     }
+ 
+@@ -63,13 +67,37 @@ bool ScPassHashHelper::needsPassHashRegen(const ScDocument& rDoc, ScPasswordHash
+             // Sheet not protected.  Skip it.
+             continue;
+ 
+-        if (!p->isPasswordEmpty() && !p->hasPasswordHash(eHash))
++        if (!p->isPasswordEmpty() && !p->hasPasswordHash(eHash1, eHash2))
+             return true;
+     }
+ 
+     return false;
+ }
+ 
++OUString ScPassHashHelper::getHashURI(ScPasswordHash eHash)
++{
++    switch (eHash)
++    {
++        case PASSHASH_SHA1:
++            return OUString::createFromAscii("http://www.w3.org/2000/09/xmldsig#sha1");
++        case PASSHASH_XL:
++            return OUString::createFromAscii("http://www.oasis-open.org/committees/office/legacy-hash-excel");
++        case PASSHASH_UNSPECIFIED:
++        default:
++            ;
++    }
++    return OUString();
++}
++
++ScPasswordHash ScPassHashHelper::getHashTypeFromURI(const OUString& rURI)
++{
++    if (rURI.equalsAscii("http://www.w3.org/2000/09/xmldsig#sha1"))
++        return PASSHASH_SHA1;
++    else if (rURI.equalsAscii("http://www.oasis-open.org/committees/office/legacy-hash-excel"))
++        return PASSHASH_XL;
++    return PASSHASH_UNSPECIFIED;
++}
++
+ // ============================================================================
+ 
+ ScPassHashProtectable::~ScPassHashProtectable()
+@@ -115,7 +143,8 @@ static Sequence<sal_Int8> lcl_getXLHash(const String& aPassText)
+ class ScTableProtectionImpl
+ {
+ public:
+-    static ::com::sun::star::uno::Sequence<sal_Int8> hashPassword(const String& aPassText, ScPasswordHash eHash = PASSHASH_OOO);
++    static Sequence<sal_Int8> hashPassword(const String& aPassText, ScPasswordHash eHash = PASSHASH_SHA1);
++    static Sequence<sal_Int8> hashPassword(const Sequence<sal_Int8>& rPassHash, ScPasswordHash eHash = PASSHASH_SHA1);
+ 
+     explicit ScTableProtectionImpl(SCSIZE nOptSize);
+     explicit ScTableProtectionImpl(const ScTableProtectionImpl& r);
+@@ -125,10 +154,13 @@ public:
+     void setProtected(bool bProtected);
+ 
+     bool isPasswordEmpty() const;
+-    bool hasPasswordHash(ScPasswordHash eHash) const;
++    bool hasPasswordHash(ScPasswordHash eHash, ScPasswordHash eHash2 = PASSHASH_UNSPECIFIED) const;
+     void setPassword(const String& aPassText);
+-    ::com::sun::star::uno::Sequence<sal_Int8> getPasswordHash(ScPasswordHash eHash) const;
+-    void setPasswordHash(const ::com::sun::star::uno::Sequence<sal_Int8>& aPassword, ScPasswordHash eHash = PASSHASH_OOO);
++    ::com::sun::star::uno::Sequence<sal_Int8> getPasswordHash(
++        ScPasswordHash eHash, ScPasswordHash eHash2 = PASSHASH_UNSPECIFIED) const;
++    void setPasswordHash(
++        const ::com::sun::star::uno::Sequence<sal_Int8>& aPassword, 
++        ScPasswordHash eHash = PASSHASH_SHA1, ScPasswordHash eHash2 = PASSHASH_UNSPECIFIED);
+     bool verifyPassword(const String& aPassText) const;
+     
+     bool isOptionEnabled(SCSIZE nOptId) const;
+@@ -140,7 +172,8 @@ private:
+     ::std::vector<bool> maOptions;
+     bool mbEmptyPass;
+     bool mbProtected;
+-    ScPasswordHash meHash;
++    ScPasswordHash meHash1;
++    ScPasswordHash meHash2;
+ };
+ 
+ Sequence<sal_Int8> ScTableProtectionImpl::hashPassword(const String& aPassText, ScPasswordHash eHash)
+@@ -151,19 +184,44 @@ Sequence<sal_Int8> ScTableProtectionImpl::hashPassword(const String& aPassText,
+         case PASSHASH_XL:
+             aHash = lcl_getXLHash(aPassText);
+         break;
+-        case PASSHASH_OOO:
+-        default:            
++        case PASSHASH_SHA1:
+             SvPasswordHelper::GetHashPassword(aHash, aPassText);
+         break;
++        default:
++            ;
+     }
+     return aHash;
+ }
+ 
++Sequence<sal_Int8> ScTableProtectionImpl::hashPassword(
++    const Sequence<sal_Int8>& rPassHash, ScPasswordHash eHash)
++{
++    if (!rPassHash.getLength() || eHash == PASSHASH_UNSPECIFIED)
++        return rPassHash;
++
++    // TODO: Right now, we only support double-hash by SHA1.
++    if (eHash == PASSHASH_SHA1)
++    {
++        vector<sal_Char> aChars;
++        sal_Int32 n = rPassHash.getLength();
++        aChars.reserve(n);
++        for (sal_Int32 i = 0; i < n; ++i)
++            aChars.push_back(static_cast<sal_Char>(rPassHash[i]));
++
++        Sequence<sal_Int8> aNewHash;
++        SvPasswordHelper::GetHashPassword(aNewHash, &aChars[0], aChars.size());
++        return aNewHash;
++    }
++
++    return rPassHash;
++}
++
+ ScTableProtectionImpl::ScTableProtectionImpl(SCSIZE nOptSize) :
+     maOptions(nOptSize),
+     mbEmptyPass(true),
+     mbProtected(false),
+-    meHash(PASSHASH_OOO)
++    meHash1(PASSHASH_SHA1),
++    meHash2(PASSHASH_UNSPECIFIED)
+ {
+ }
+ 
+@@ -173,7 +231,8 @@ ScTableProtectionImpl::ScTableProtectionImpl(const ScTableProtectionImpl& r) :
+     maOptions(r.maOptions),
+     mbEmptyPass(r.mbEmptyPass),
+     mbProtected(r.mbProtected),
+-    meHash(r.meHash)
++    meHash1(r.meHash1),
++    meHash2(r.meHash2)
+ {
+ }
+ 
+@@ -217,7 +276,7 @@ bool ScTableProtectionImpl::isPasswordEmpty() const
+     return mbEmptyPass;
+ }
+ 
+-bool ScTableProtectionImpl::hasPasswordHash(ScPasswordHash eHash) const
++bool ScTableProtectionImpl::hasPasswordHash(ScPasswordHash eHash, ScPasswordHash eHash2) const
+ {
+     if (mbEmptyPass)
+         return true;
+@@ -225,35 +284,65 @@ bool ScTableProtectionImpl::hasPasswordHash(ScPasswordHash eHash) const
+     if (maPassText.Len())
+         return true;
+ 
+-    if (meHash == eHash)
+-        return true;
++    if (meHash1 == eHash)
++    {
++        if (meHash2 == PASSHASH_UNSPECIFIED)
++            // single hash.
++            return true;
++
++        return meHash2 == eHash2;
++    }
+ 
+     return false;
+ }
+ 
+-Sequence<sal_Int8> ScTableProtectionImpl::getPasswordHash(ScPasswordHash eHash) const
++Sequence<sal_Int8> ScTableProtectionImpl::getPasswordHash(
++    ScPasswordHash eHash, ScPasswordHash eHash2) const
+ {
++    Sequence<sal_Int8> aPassHash;
++
+     if (mbEmptyPass)
+         // Flaged as empty.
+-        return Sequence<sal_Int8>();
++        return aPassHash;
+ 
+     if (maPassText.Len())
++    {    
+         // Cleartext password exists.  Hash it.
+-        return hashPassword(maPassText, eHash);
++        aPassHash = hashPassword(maPassText, eHash);
++        if (eHash2 != PASSHASH_UNSPECIFIED)
++            // Double-hash it.
++            aPassHash = hashPassword(aPassHash, eHash2);
+ 
+-    if (meHash == eHash)
+-        // Stored hash exists.
+-        return maPassHash;
++        return aPassHash;
++    }
++    else
++    {
++        // No clear text password.  Check if we have a hash value of the right hash type.
++        if (meHash1 == eHash)
++        {
++            aPassHash = maPassHash;
++
++            if (meHash2 == eHash2)
++                // Matching double-hash requested.
++                return aPassHash;
++            else if (meHash2 == PASSHASH_UNSPECIFIED)
++                // primary hashing type match.  Double hash it by the requested 
++                // double-hash type.
++                return hashPassword(aPassHash, eHash2);
++        }
++    }
+ 
+-    // Failed to find a matching hash.
++    // failed.
+     return Sequence<sal_Int8>();
+ }
+ 
+-void ScTableProtectionImpl::setPasswordHash(const uno::Sequence<sal_Int8>& aPassword, ScPasswordHash eHash)
++void ScTableProtectionImpl::setPasswordHash(
++    const uno::Sequence<sal_Int8>& aPassword, ScPasswordHash eHash, ScPasswordHash eHash2)
+ {
+     sal_Int32 nLen = aPassword.getLength();
+     mbEmptyPass = nLen <= 0 ? true : false;
+-    meHash = eHash;
++    meHash1 = eHash;
++    meHash2 = eHash2;
+     maPassHash = aPassword;
+ 
+ #if DEBUG_TAB_PROTECTION
+@@ -277,7 +366,8 @@ bool ScTableProtectionImpl::verifyPassword(const String& aPassText) const
+         // Clear text password exists, and this one takes precedence.
+         return aPassText.Equals(maPassText);
+ 
+-    Sequence<sal_Int8> aHash = hashPassword(aPassText, meHash);
++    Sequence<sal_Int8> aHash = hashPassword(aPassText, meHash1);
++    aHash = hashPassword(aHash, meHash2);
+ 
+ #if DEBUG_TAB_PROTECTION    
+     fprintf(stdout, "ScTableProtectionImpl::verifyPassword: hash = ");
+@@ -353,9 +443,9 @@ bool ScDocProtection::isPasswordEmpty() const
+     return mpImpl->isPasswordEmpty();
+ }
+ 
+-bool ScDocProtection::hasPasswordHash(ScPasswordHash eHash) const
++bool ScDocProtection::hasPasswordHash(ScPasswordHash eHash, ScPasswordHash eHash2) const
+ {
+-    return mpImpl->hasPasswordHash(eHash);
++    return mpImpl->hasPasswordHash(eHash, eHash2);
+ }
+ 
+ void ScDocProtection::setPassword(const String& aPassText)
+@@ -363,14 +453,15 @@ void ScDocProtection::setPassword(const String& aPassText)
+     mpImpl->setPassword(aPassText);
+ }
+ 
+-uno::Sequence<sal_Int8> ScDocProtection::getPasswordHash(ScPasswordHash eHash) const
++uno::Sequence<sal_Int8> ScDocProtection::getPasswordHash(ScPasswordHash eHash, ScPasswordHash eHash2) const
+ {
+-    return mpImpl->getPasswordHash(eHash);
++    return mpImpl->getPasswordHash(eHash, eHash2);
+ }
+ 
+-void ScDocProtection::setPasswordHash(const uno::Sequence<sal_Int8>& aPassword, ScPasswordHash eHash)
++void ScDocProtection::setPasswordHash(
++    const uno::Sequence<sal_Int8>& aPassword, ScPasswordHash eHash, ScPasswordHash eHash2)
+ {
+-    mpImpl->setPasswordHash(aPassword, eHash);
++    mpImpl->setPasswordHash(aPassword, eHash, eHash2);
+ }
+ 
+ bool ScDocProtection::verifyPassword(const String& aPassText) const
+@@ -428,9 +519,9 @@ bool ScTableProtection::isPasswordEmpty() const
+     return mpImpl->isPasswordEmpty();
+ }
+ 
+-bool ScTableProtection::hasPasswordHash(ScPasswordHash eHash) const
++bool ScTableProtection::hasPasswordHash(ScPasswordHash eHash, ScPasswordHash eHash2) const
+ {
+-    return mpImpl->hasPasswordHash(eHash);
++    return mpImpl->hasPasswordHash(eHash, eHash2);
+ }
+ 
+ void ScTableProtection::setPassword(const String& aPassText)
+@@ -438,14 +529,15 @@ void ScTableProtection::setPassword(const String& aPassText)
+     mpImpl->setPassword(aPassText);
+ }
+ 
+-Sequence<sal_Int8> ScTableProtection::getPasswordHash(ScPasswordHash eHash) const
++Sequence<sal_Int8> ScTableProtection::getPasswordHash(ScPasswordHash eHash, ScPasswordHash eHash2) const
+ {
+-    return mpImpl->getPasswordHash(eHash);
++    return mpImpl->getPasswordHash(eHash, eHash2);
+ }
+ 
+-void ScTableProtection::setPasswordHash(const uno::Sequence<sal_Int8>& aPassword, ScPasswordHash eHash)
++void ScTableProtection::setPasswordHash(
++    const uno::Sequence<sal_Int8>& aPassword, ScPasswordHash eHash, ScPasswordHash eHash2)
+ {
+-    mpImpl->setPasswordHash(aPassword, eHash);
++    mpImpl->setPasswordHash(aPassword, eHash, eHash2);
+ }
+ 
+ bool ScTableProtection::verifyPassword(const String& aPassText) const
+diff --git sc/source/filter/xml/xmlbodyi.cxx sc/source/filter/xml/xmlbodyi.cxx
+index fa993ef..c118998 100644
+--- sc/source/filter/xml/xmlbodyi.cxx
++++ sc/source/filter/xml/xmlbodyi.cxx
+@@ -77,6 +77,8 @@ ScXMLBodyContext::ScXMLBodyContext( ScXMLImport& rImport,
+ 											  const uno::Reference<xml::sax::XAttributeList>& xAttrList ) :
+ 	SvXMLImportContext( rImport, nPrfx, rLName ),
+ 	sPassword(),
++    meHash1(PASSHASH_UNSPECIFIED),
++    meHash2(PASSHASH_UNSPECIFIED),
+ 	bProtected(sal_False),
+     bHadCalculationSettings(sal_False),
+ 	pChangeTrackingImportHelper(NULL)
+@@ -122,6 +124,10 @@ ScXMLBodyContext::ScXMLBodyContext( ScXMLImport& rImport,
+ 				bProtected = IsXMLToken(sValue, XML_TRUE);
+ 			else if (IsXMLToken(aLocalName, XML_PROTECTION_KEY))
+ 				sPassword = sValue;
++            else if (IsXMLToken(aLocalName, XML_PROTECTION_KEY_DIGEST_ALGORITHM))
++                meHash1 = ScPassHashHelper::getHashTypeFromURI(sValue);
++            else if (IsXMLToken(aLocalName, XML_PROTECTION_KEY_DIGEST_ALGORITHM_2))
++                meHash2 = ScPassHashHelper::getHashTypeFromURI(sValue);
+ 		}
+ 	}
+ }
+@@ -291,7 +297,7 @@ void ScXMLBodyContext::EndElement()
+ 			if (sPassword.getLength())
+             {
+ 				SvXMLUnitConverter::decodeBase64(aPass, sPassword);
+-                pProtection->setPasswordHash(aPass, PASSHASH_OOO);
++                pProtection->setPasswordHash(aPass, meHash1, meHash2);
+             }
+ 
+             pDoc->SetDocProtection(pProtection.get());
+diff --git sc/source/filter/xml/xmlbodyi.hxx sc/source/filter/xml/xmlbodyi.hxx
+index 483741e..69d5407 100644
+--- sc/source/filter/xml/xmlbodyi.hxx
++++ sc/source/filter/xml/xmlbodyi.hxx
+@@ -34,12 +34,16 @@
+ #include <xmloff/xmlictxt.hxx>
+ #include <xmloff/xmlimp.hxx>
+ 
++#include "tabprotection.hxx"
++
+ class ScXMLImport;
+ class ScXMLChangeTrackingImportHelper;
+ 
+ class ScXMLBodyContext : public SvXMLImportContext
+ {
+ 	rtl::OUString	sPassword;
++    ScPasswordHash  meHash1;
++    ScPasswordHash  meHash2;
+ 	sal_Bool		bProtected;
+     sal_Bool        bHadCalculationSettings;
+ 
+diff --git sc/source/filter/xml/xmlexprt.cxx sc/source/filter/xml/xmlexprt.cxx
+index 3658d78..089f12d 100644
+--- sc/source/filter/xml/xmlexprt.cxx
++++ sc/source/filter/xml/xmlexprt.cxx
+@@ -1441,12 +1441,36 @@ void ScXMLExport::SetBodyAttributes()
+ 		AddAttribute(XML_NAMESPACE_TABLE, XML_STRUCTURE_PROTECTED, XML_TRUE);
+ 		rtl::OUStringBuffer aBuffer;
+         uno::Sequence<sal_Int8> aPassHash;
++        ScPasswordHash eHashUsed = PASSHASH_UNSPECIFIED;
+         const ScDocProtection* p = pDoc->GetDocProtection();
+         if (p)
+-            aPassHash = p->getPasswordHash(PASSHASH_OOO);
++        {
++            if (p->hasPasswordHash(PASSHASH_SHA1))
++            {    
++                aPassHash = p->getPasswordHash(PASSHASH_SHA1);
++                eHashUsed = PASSHASH_SHA1;
++            }
++            else if (p->hasPasswordHash(PASSHASH_XL, PASSHASH_SHA1))
++            {    
++                aPassHash = p->getPasswordHash(PASSHASH_XL, PASSHASH_SHA1);
++                eHashUsed = PASSHASH_XL;
++            }
++        }
+ 		SvXMLUnitConverter::encodeBase64(aBuffer, aPassHash);
+ 		if (aBuffer.getLength())
++        {    
+ 			AddAttribute(XML_NAMESPACE_TABLE, XML_PROTECTION_KEY, aBuffer.makeStringAndClear());
++            if (eHashUsed == PASSHASH_XL)
++            {
++                AddAttribute(XML_NAMESPACE_TABLE, XML_PROTECTION_KEY_DIGEST_ALGORITHM, 
++                             ScPassHashHelper::getHashURI(PASSHASH_XL));
++                AddAttribute(XML_NAMESPACE_TABLE, XML_PROTECTION_KEY_DIGEST_ALGORITHM_2,
++                             ScPassHashHelper::getHashURI(PASSHASH_SHA1));
++            }
++            else if (eHashUsed == PASSHASH_SHA1)
++                AddAttribute(XML_NAMESPACE_TABLE, XML_PROTECTION_KEY_DIGEST_ALGORITHM, 
++                             ScPassHashHelper::getHashURI(PASSHASH_SHA1));
++        }
+ 	}
+ }
+ 
+@@ -1513,18 +1537,46 @@ void ScXMLExport::_ExportContent()
+                     AddAttribute(sAttrName, sOUTableName);
+                     AddAttribute(sAttrStyleName, aTableStyles[nTable]);
+                     uno::Reference<util::XProtectable> xProtectable (xTable, uno::UNO_QUERY);
++                    ScTableProtection* pProtect = NULL;
+                     if (xProtectable.is() && xProtectable->isProtected())
+                     {
+                         AddAttribute(XML_NAMESPACE_TABLE, XML_PROTECTED, XML_TRUE);
+-                        rtl::OUStringBuffer aBuffer;
+                         if (pDoc)
+                         {
+-                            ScTableProtection* pProtect = pDoc->GetTabProtection(static_cast<SCTAB>(nTable));
++                            pProtect = pDoc->GetTabProtection(static_cast<SCTAB>(nTable));
+                             if (pProtect)
+-                                SvXMLUnitConverter::encodeBase64(aBuffer, pProtect->getPasswordHash(PASSHASH_OOO));
++                            {    
++                                rtl::OUStringBuffer aBuffer;
++                                ScPasswordHash eHashUsed = PASSHASH_UNSPECIFIED;
++                                if (pProtect->hasPasswordHash(PASSHASH_SHA1))
++                                {    
++                                    SvXMLUnitConverter::encodeBase64(aBuffer, pProtect->getPasswordHash(PASSHASH_SHA1));
++                                    eHashUsed = PASSHASH_SHA1;
++                                }
++                                else if (pProtect->hasPasswordHash(PASSHASH_XL, PASSHASH_SHA1))
++                                {
++                                    // Double-hash this by SHA1 on top of the legacy xls hash.
++                                    uno::Sequence<sal_Int8> aHash = pProtect->getPasswordHash(PASSHASH_XL, PASSHASH_SHA1);
++                                    SvXMLUnitConverter::encodeBase64(aBuffer, aHash);
++                                    eHashUsed = PASSHASH_XL;
++                                }
++                                if (aBuffer.getLength())
++                                {    
++                                    AddAttribute(XML_NAMESPACE_TABLE, XML_PROTECTION_KEY, aBuffer.makeStringAndClear());
++                                    if (eHashUsed == PASSHASH_XL)
++                                    {
++                                        AddAttribute(XML_NAMESPACE_TABLE, XML_PROTECTION_KEY_DIGEST_ALGORITHM, 
++                                                     ScPassHashHelper::getHashURI(PASSHASH_XL));
++                                        AddAttribute(XML_NAMESPACE_TABLE, XML_PROTECTION_KEY_DIGEST_ALGORITHM_2,
++                                                     ScPassHashHelper::getHashURI(PASSHASH_SHA1));
++                                    }
++                                    else if (eHashUsed == PASSHASH_SHA1)
++                                        AddAttribute(XML_NAMESPACE_TABLE, XML_PROTECTION_KEY_DIGEST_ALGORITHM, 
++                                                     ScPassHashHelper::getHashURI(PASSHASH_SHA1));
++
++                                }
++                            }
+                         }
+-                        if (aBuffer.getLength())
+-                            AddAttribute(XML_NAMESPACE_TABLE, XML_PROTECTION_KEY, aBuffer.makeStringAndClear());
+                     }
+                     rtl::OUString sPrintRanges;
+                     table::CellRangeAddress aColumnHeaderRange;
+@@ -1535,6 +1587,20 @@ void ScXMLExport::_ExportContent()
+                     else if (!pDoc->IsPrintEntireSheet(static_cast<SCTAB>(nTable)))
+                         AddAttribute( XML_NAMESPACE_TABLE, XML_PRINT, XML_FALSE);
+                     SvXMLElementExport aElemT(*this, sElemTab, sal_True, sal_True);
++                    
++                    if (pProtect && pProtect->isProtected())
++                    {
++                        if (pProtect->isOptionEnabled(ScTableProtection::SELECT_LOCKED_CELLS))
++                            AddAttribute(XML_NAMESPACE_TABLE, XML_SELECT_PROTECTED_CELLS, XML_TRUE);
++                        if (pProtect->isOptionEnabled(ScTableProtection::SELECT_UNLOCKED_CELLS))
++                            AddAttribute(XML_NAMESPACE_TABLE, XML_SELECT_UNPROTECTED_CELLS, XML_TRUE);
++
++                        rtl::OUString aElemName = GetNamespaceMap().GetQNameByKey(
++                            XML_NAMESPACE_TABLE, GetXMLToken(XML_TABLE_PROTECTION));
++
++                        SvXMLElementExport aElemProtected(*this, aElemName, true, true);
++                    }
++
+                     CheckAttrList();
+                     WriteTableSource();
+                     WriteScenario();
+diff --git sc/source/filter/xml/xmlimprt.cxx sc/source/filter/xml/xmlimprt.cxx
+index 4517591..728373e 100644
+--- sc/source/filter/xml/xmlimprt.cxx
++++ sc/source/filter/xml/xmlimprt.cxx
+@@ -637,6 +637,7 @@ const SvXMLTokenMap& ScXMLImport::GetTableElemTokenMap()
+             { XML_NAMESPACE_TABLE,	XML_TABLE_HEADER_COLUMNS,		XML_TOK_TABLE_HEADER_COLS	},
+             { XML_NAMESPACE_TABLE,	XML_TABLE_COLUMNS,				XML_TOK_TABLE_COLS			},
+             { XML_NAMESPACE_TABLE,	XML_TABLE_COLUMN,				XML_TOK_TABLE_COL			},
++            { XML_NAMESPACE_TABLE,  XML_TABLE_PROTECTION,           XML_TOK_TABLE_PROTECTION    },
+             { XML_NAMESPACE_TABLE,	XML_TABLE_ROW_GROUP,			XML_TOK_TABLE_ROW_GROUP		},
+             { XML_NAMESPACE_TABLE,	XML_TABLE_HEADER_ROWS,			XML_TOK_TABLE_HEADER_ROWS	},
+             { XML_NAMESPACE_TABLE,	XML_TABLE_ROWS, 				XML_TOK_TABLE_ROWS			},
+@@ -654,6 +655,22 @@ const SvXMLTokenMap& ScXMLImport::GetTableElemTokenMap()
+     return *pTableElemTokenMap;
+ }
+ 
++const SvXMLTokenMap& ScXMLImport::GetTableProtectionAttrTokenMap()
++{
++    if (!pTableProtectionElemTokenMap)
++    {
++        static __FAR_DATA SvXMLTokenMapEntry aTableProtectionTokenMap[] =
++        {
++            { XML_NAMESPACE_TABLE, XML_SELECT_PROTECTED_CELLS,      XML_TOK_TABLE_SELECT_PROTECTED_CELLS    },
++            { XML_NAMESPACE_TABLE, XML_SELECT_UNPROTECTED_CELLS,    XML_TOK_TABLE_SELECT_UNPROTECTED_CELLS  },
++            XML_TOKEN_MAP_END
++        };
++        pTableProtectionElemTokenMap = new SvXMLTokenMap(aTableProtectionTokenMap);
++    }
++
++    return *pTableProtectionElemTokenMap;
++}
++
+ const SvXMLTokenMap& ScXMLImport::GetTableRowsElemTokenMap()
+ {
+     if( !pTableRowsElemTokenMap )
+@@ -700,9 +717,11 @@ const SvXMLTokenMap& ScXMLImport::GetTableAttrTokenMap()
+         {
+             { XML_NAMESPACE_TABLE, XML_NAME,						XML_TOK_TABLE_NAME				},
+             { XML_NAMESPACE_TABLE, XML_STYLE_NAME,					XML_TOK_TABLE_STYLE_NAME		},
+-            { XML_NAMESPACE_TABLE, XML_PROTECTED,					XML_TOK_TABLE_PROTECTION		},
++            { XML_NAMESPACE_TABLE, XML_PROTECTED,                   XML_TOK_TABLE_PROTECTED         },
+             { XML_NAMESPACE_TABLE, XML_PRINT_RANGES,				XML_TOK_TABLE_PRINT_RANGES		},
+             { XML_NAMESPACE_TABLE, XML_PROTECTION_KEY,				XML_TOK_TABLE_PASSWORD			},
++            { XML_NAMESPACE_TABLE, XML_PROTECTION_KEY_DIGEST_ALGORITHM, XML_TOK_TABLE_PASSHASH      },
++            { XML_NAMESPACE_TABLE, XML_PROTECTION_KEY_DIGEST_ALGORITHM_2, XML_TOK_TABLE_PASSHASH_2  },
+             { XML_NAMESPACE_TABLE, XML_PRINT,               		XML_TOK_TABLE_PRINT             },
+             XML_TOKEN_MAP_END
+         };
+@@ -1685,6 +1704,7 @@ ScXMLImport::ScXMLImport(
+ 	pLabelRangesElemTokenMap( 0 ),
+ 	pLabelRangeAttrTokenMap( 0 ),
+ 	pTableElemTokenMap( 0 ),
++    pTableProtectionElemTokenMap(NULL),
+ 	pTableRowsElemTokenMap( 0 ),
+ 	pTableColsElemTokenMap( 0 ),
+ 	pTableScenarioAttrTokenMap( 0 ),
+@@ -1811,6 +1831,7 @@ ScXMLImport::~ScXMLImport() throw()
+     delete pLabelRangesElemTokenMap;
+     delete pLabelRangeAttrTokenMap;
+     delete pTableElemTokenMap;
++    delete pTableProtectionElemTokenMap;
+     delete pTableRowsElemTokenMap;
+     delete pTableColsElemTokenMap;
+     delete pTableAttrTokenMap;
+diff --git sc/source/filter/xml/xmlimprt.hxx sc/source/filter/xml/xmlimprt.hxx
+index 093846a..8ff4178 100644
+--- sc/source/filter/xml/xmlimprt.hxx
++++ sc/source/filter/xml/xmlimprt.hxx
+@@ -172,6 +172,7 @@ enum ScXMLTableTokens
+ 	XML_TOK_TABLE_COL,
+ 	XML_TOK_TABLE_ROW_GROUP,
+ 	XML_TOK_TABLE_HEADER_ROWS,
++    XML_TOK_TABLE_PROTECTION,
+ 	XML_TOK_TABLE_ROWS,
+ 	XML_TOK_TABLE_ROW,
+ 	XML_TOK_TABLE_SOURCE,
+@@ -180,6 +181,12 @@ enum ScXMLTableTokens
+ 	XML_TOK_TABLE_FORMS
+ };
+ 
++enum ScXMLTokenProtectionTokens
++{
++    XML_TOK_TABLE_SELECT_PROTECTED_CELLS,
++    XML_TOK_TABLE_SELECT_UNPROTECTED_CELLS
++};
++
+ enum ScXMLTableRowsTokens
+ {
+ 	XML_TOK_TABLE_ROWS_ROW_GROUP,
+@@ -200,9 +207,11 @@ enum ScXMLTableAttrTokens
+ {
+ 	XML_TOK_TABLE_NAME,
+ 	XML_TOK_TABLE_STYLE_NAME,
+-	XML_TOK_TABLE_PROTECTION,
++	XML_TOK_TABLE_PROTECTED,
+ 	XML_TOK_TABLE_PRINT_RANGES,
+ 	XML_TOK_TABLE_PASSWORD,
++	XML_TOK_TABLE_PASSHASH,
++	XML_TOK_TABLE_PASSHASH_2,
+     XML_TOK_TABLE_PRINT
+ };
+ 
+@@ -699,6 +708,7 @@ class ScXMLImport: public SvXMLImport
+ 	SvXMLTokenMap			*pLabelRangesElemTokenMap;
+ 	SvXMLTokenMap			*pLabelRangeAttrTokenMap;
+ 	SvXMLTokenMap			*pTableElemTokenMap;
++    SvXMLTokenMap           *pTableProtectionElemTokenMap;
+ 	SvXMLTokenMap			*pTableRowsElemTokenMap;
+ 	SvXMLTokenMap			*pTableColsElemTokenMap;
+ 	SvXMLTokenMap			*pTableScenarioAttrTokenMap;
+@@ -865,6 +875,7 @@ public:
+ 	const SvXMLTokenMap& GetLabelRangesElemTokenMap();
+ 	const SvXMLTokenMap& GetLabelRangeAttrTokenMap();
+ 	const SvXMLTokenMap& GetTableElemTokenMap();
++    const SvXMLTokenMap& GetTableProtectionAttrTokenMap();
+ 	const SvXMLTokenMap& GetTableRowsElemTokenMap();
+ 	const SvXMLTokenMap& GetTableColsElemTokenMap();
+ 	const SvXMLTokenMap& GetTableAttrTokenMap();
+diff --git sc/source/filter/xml/xmlsubti.cxx sc/source/filter/xml/xmlsubti.cxx
+index 72ddec3..3a001e9 100644
+--- sc/source/filter/xml/xmlsubti.cxx
++++ sc/source/filter/xml/xmlsubti.cxx
+@@ -148,6 +148,15 @@ void ScMyTableData::SetChangedCols(const sal_Int32 nValue)
+ 
+ /*******************************************************************************************************************************/
+ 
++ScXMLTabProtectionData::ScXMLTabProtectionData() :
++    meHash1(PASSHASH_UNSPECIFIED), 
++    meHash2(PASSHASH_UNSPECIFIED),
++    mbProtected(false), 
++    mbSelectProtectedCells(false), 
++    mbSelectUnprotectedCells(false)
++{
++}
++
+ ScMyTables::ScMyTables(ScXMLImport& rTempImport)
+ 	: rImport(rTempImport),
+ 	aResizeShapes(rTempImport),
+@@ -173,7 +182,7 @@ ScMyTables::~ScMyTables()
+ }
+ 
+ void ScMyTables::NewSheet(const rtl::OUString& sTableName, const rtl::OUString& sStyleName,
+-						const sal_Bool bTempProtection, const rtl::OUString& sTempPassword)
++                          const ScXMLTabProtectionData& rProtectData)
+ {
+ 	if (rImport.GetModel().is())
+ 	{
+@@ -189,8 +198,7 @@ void ScMyTables::NewSheet(const rtl::OUString& sTableName, const rtl::OUString&
+ 		}
+         ++nCurrentSheet;
+ 
+-		bProtection = bTempProtection;
+-		sPassword = sTempPassword;
++        maProtectionData = rProtectData;
+ 		uno::Reference <sheet::XSpreadsheetDocument> xSpreadDoc( rImport.GetModel(), uno::UNO_QUERY );
+ 		if ( xSpreadDoc.is() )
+ 		{
+@@ -617,13 +625,16 @@ void ScMyTables::DeleteTable()
+         aMatrixRangeList.clear();
+     }
+ 
+-	if (rImport.GetDocument() && bProtection)
++	if (rImport.GetDocument() && maProtectionData.mbProtected)
+ 	{
+-		uno::Sequence<sal_Int8> aPass;
+-		SvXMLUnitConverter::decodeBase64(aPass, sPassword);
++		uno::Sequence<sal_Int8> aHash;
++		SvXMLUnitConverter::decodeBase64(aHash, maProtectionData.maPassword);
++
+         auto_ptr<ScTableProtection> pProtect(new ScTableProtection);
+-        pProtect->setProtected(bProtection);
+-        pProtect->setPasswordHash(aPass, PASSHASH_OOO);
++        pProtect->setProtected(maProtectionData.mbProtected);
++        pProtect->setPasswordHash(aHash, maProtectionData.meHash1, maProtectionData.meHash2);
++        pProtect->setOption(ScTableProtection::SELECT_LOCKED_CELLS,   maProtectionData.mbSelectProtectedCells);
++        pProtect->setOption(ScTableProtection::SELECT_UNLOCKED_CELLS, maProtectionData.mbSelectUnprotectedCells);
+         rImport.GetDocument()->SetTabProtection(static_cast<SCTAB>(nCurrentSheet), pProtect.get());
+ 	}
+ 
+diff --git sc/source/filter/xml/xmlsubti.hxx sc/source/filter/xml/xmlsubti.hxx
+index 23dc5db..349b395 100644
+--- sc/source/filter/xml/xmlsubti.hxx
++++ sc/source/filter/xml/xmlsubti.hxx
+@@ -43,6 +43,7 @@
+ #include <list>
+ #include "XMLTableShapeResizer.hxx"
+ #include "formula/grammar.hxx"
++#include "tabprotection.hxx"
+ 
+ class ScXMLImport;
+ 
+@@ -107,6 +108,18 @@ struct ScMatrixRange
+     }
+ };
+ 
++struct ScXMLTabProtectionData
++{
++    ::rtl::OUString maPassword;
++    ScPasswordHash  meHash1;
++    ScPasswordHash  meHash2;
++    bool            mbProtected;
++    bool            mbSelectProtectedCells;
++    bool            mbSelectUnprotectedCells;
++
++    ScXMLTabProtectionData();
++};
++
+ class ScMyTables
+ {
+ private:
+@@ -121,8 +134,8 @@ private:
+ 	::com::sun::star::uno::Reference< ::com::sun::star::drawing::XDrawPage > xDrawPage;
+ 	::com::sun::star::uno::Reference < ::com::sun::star::drawing::XShapes > xShapes;
+ 	rtl::OUString						sCurrentSheetName;
+-	rtl::OUString						sPassword;
+ 	std::vector<ScMyTableData*>			aTableVec;
++    ScXMLTabProtectionData              maProtectionData;
+     ScMyMatrixRangeList                 aMatrixRangeList;
+ 	com::sun::star::table::CellAddress	aRealCellPos;
+ 	sal_Int32							nCurrentColStylePos;
+@@ -130,7 +143,6 @@ private:
+ 	sal_Int16							nCurrentXShapes;
+ 	sal_Int32							nTableCount;
+ 	sal_Int32							nCurrentSheet;
+-	sal_Bool							bProtection;
+ 
+ 	sal_Bool 							IsMerged (const com::sun::star::uno::Reference <com::sun::star::table::XCellRange>& xCellRange,
+ 												const sal_Int32 nCol, const sal_Int32 nRow,
+@@ -145,7 +157,7 @@ public:
+ 										ScMyTables(ScXMLImport& rImport);
+ 										~ScMyTables();
+ 	void   								NewSheet(const rtl::OUString& sTableName, const rtl::OUString& sStyleName,
+-												const sal_Bool bProtection, const rtl::OUString& sPassword);
++                                                 const ScXMLTabProtectionData& rProtectData);
+ 	void								AddRow();
+ 	void								SetRowStyle(const rtl::OUString& rCellStyleName);
+ 	void								AddColumn(sal_Bool bIsCovered);
+@@ -156,6 +168,7 @@ public:
+ 	com::sun::star::table::CellAddress	GetRealCellPos();
+ 	void								AddColCount(sal_Int32 nTempColCount);
+ 	void								AddColStyle(const sal_Int32 nRepeat, const rtl::OUString& rCellStyleName);
++    ScXMLTabProtectionData&             GetCurrentProtectionData() { return maProtectionData; }
+ 	rtl::OUString						GetCurrentSheetName() const { return sCurrentSheetName; }
+ 	sal_Int32							GetCurrentSheet() const { return nCurrentSheet; }
+ 	sal_Int32							GetCurrentColumn() const { return aTableVec[nTableCount - 1]->GetColCount(); }
+diff --git sc/source/filter/xml/xmltabi.cxx sc/source/filter/xml/xmltabi.cxx
+index fc09927..5229085 100644
+--- sc/source/filter/xml/xmltabi.cxx
++++ sc/source/filter/xml/xmltabi.cxx
+@@ -64,6 +64,9 @@
+ 
+ using namespace com::sun::star;
+ using namespace xmloff::token;
++using ::com::sun::star::uno::Reference;
++using ::com::sun::star::xml::sax::XAttributeList;
++using ::rtl::OUString;
+ 
+ /** 
+  * Determine whether this table is an external reference cache from its 
+@@ -152,10 +155,9 @@ ScXMLTableContext::ScXMLTableContext( ScXMLImport& rImport,
+ {
+ 	if (!bTempIsSubTable)
+ 	{
+-		sal_Bool bProtection(sal_False);
++        ScXMLTabProtectionData aProtectData;
+ 		rtl::OUString sName;
+ 		rtl::OUString sStyleName;
+-		rtl::OUString sPassword;
+ 		sal_Int16 nAttrCount(xAttrList.is() ? xAttrList->getLength() : 0);
+ 		const SvXMLTokenMap& rAttrTokenMap = GetScImport().GetTableAttrTokenMap();
+ 		for( sal_Int16 i=0; i < nAttrCount; ++i )
+@@ -174,15 +176,21 @@ ScXMLTableContext::ScXMLTableContext( ScXMLImport& rImport,
+ 				case XML_TOK_TABLE_STYLE_NAME:
+ 						sStyleName = sValue;
+ 					break;
+-				case XML_TOK_TABLE_PROTECTION:
+-						bProtection = IsXMLToken(sValue, XML_TRUE);
+-					break;
++				case XML_TOK_TABLE_PROTECTED:
++                    aProtectData.mbProtected = IsXMLToken(sValue, XML_TRUE);
++                break;
+ 				case XML_TOK_TABLE_PRINT_RANGES:
+ 						sPrintRanges = sValue;
+ 					break;
+ 				case XML_TOK_TABLE_PASSWORD:
+-						sPassword = sValue;
+-					break;
++                    aProtectData.maPassword = sValue;
++                break;
++                case XML_TOK_TABLE_PASSHASH:
++                    aProtectData.meHash1 = ScPassHashHelper::getHashTypeFromURI(sValue);
++                break;
++                case XML_TOK_TABLE_PASSHASH_2:
++                    aProtectData.meHash2 = ScPassHashHelper::getHashTypeFromURI(sValue);
++                break;
+                 case XML_TOK_TABLE_PRINT:
+                     {
+                         if (IsXMLToken(sValue, XML_FALSE))
+@@ -209,7 +217,7 @@ ScXMLTableContext::ScXMLTableContext( ScXMLImport& rImport,
+         else
+         {
+             // This is a regular table.
+-            GetScImport().GetTables().NewSheet(sName, sStyleName, bProtection, sPassword);
++            GetScImport().GetTables().NewSheet(sName, sStyleName, aProtectData);
+         }
+ 	}
+ 	else
+@@ -271,6 +279,9 @@ SvXMLImportContext *ScXMLTableContext::CreateChildContext( USHORT nPrefix,
+ 			pContext = new ScXMLTableColContext( GetScImport(), nPrefix,
+ 													  rLName, xAttrList );
+ 		break;
++    case XML_TOK_TABLE_PROTECTION:
++        pContext = new ScXMLTableProtectionContext( GetScImport(), nPrefix, rLName, xAttrList );
++        break;
+ 	case XML_TOK_TABLE_ROW_GROUP:
+ 		pContext = new ScXMLTableRowsContext( GetScImport(), nPrefix,
+ 												   rLName, xAttrList,
+@@ -384,3 +395,61 @@ void ScXMLTableContext::EndElement()
+ 	GetScImport().UnlockSolarMutex();
+ }
+ 
++// ============================================================================
++
++ScXMLImport& ScXMLTableProtectionContext::GetScImport()
++{
++    return static_cast<ScXMLImport&>(GetImport());
++}
++
++ScXMLTableProtectionContext::ScXMLTableProtectionContext(
++    ScXMLImport& rImport, USHORT nPrefix, const OUString& rLName, 
++    const Reference<XAttributeList>& xAttrList ) :
++    SvXMLImportContext( rImport, nPrefix, rLName )
++{
++    const SvXMLTokenMap& rAttrTokenMap = GetScImport().GetTableProtectionAttrTokenMap();
++    bool bSelectProtectedCells = false;
++    bool bSelectUnprotectedCells = false;
++
++    sal_Int16 nAttrCount = xAttrList.is() ? xAttrList->getLength() : 0;
++
++    for (sal_Int16 i = 0; i < nAttrCount; ++i)
++    {
++        const OUString& aAttrName = xAttrList->getNameByIndex(i);
++        const OUString aValue = xAttrList->getValueByIndex(i);
++
++        OUString aLocalName;
++        USHORT nLocalPrefix = GetScImport().GetNamespaceMap().GetKeyByAttrName(
++            aAttrName, &aLocalName);
++    
++        switch (rAttrTokenMap.Get(nLocalPrefix, aLocalName))
++        {
++            case XML_TOK_TABLE_SELECT_PROTECTED_CELLS:
++                bSelectProtectedCells = IsXMLToken(aValue, XML_TRUE);
++            break;
++            case XML_TOK_TABLE_SELECT_UNPROTECTED_CELLS:
++                bSelectUnprotectedCells = IsXMLToken(aValue, XML_TRUE);
++            break;
++            default:
++                ;
++        }
++    }
++
++    ScXMLTabProtectionData& rProtectData = GetScImport().GetTables().GetCurrentProtectionData();
++    rProtectData.mbSelectProtectedCells   = bSelectProtectedCells;
++    rProtectData.mbSelectUnprotectedCells = bSelectUnprotectedCells;
++}
++
++ScXMLTableProtectionContext::~ScXMLTableProtectionContext()
++{
++}
++
++SvXMLImportContext* ScXMLTableProtectionContext::CreateChildContext(
++    USHORT /*nPrefix*/, const OUString& /*rLocalName*/, const Reference<XAttributeList>& /*xAttrList*/ )
++{
++    return NULL;
++}
++
++void ScXMLTableProtectionContext::EndElement()
++{
++}
+diff --git sc/source/filter/xml/xmltabi.hxx sc/source/filter/xml/xmltabi.hxx
+index 7fc6031..bd3482c 100644
+--- sc/source/filter/xml/xmltabi.hxx
++++ sc/source/filter/xml/xmltabi.hxx
+@@ -77,4 +77,26 @@ public:
+ 	virtual void EndElement();
+ };
+ 
++// ============================================================================
++
++class ScXMLTableProtectionContext : public SvXMLImportContext
++{
++    ScXMLImport& GetScImport();
++
++public:
++    ScXMLTableProtectionContext( ScXMLImport& rImport, USHORT nPrefix,
++                        const ::rtl::OUString& rLName,
++                        const ::com::sun::star::uno::Reference<
++                                 ::com::sun::star::xml::sax::XAttributeList>& xAttrList );
++
++    virtual ~ScXMLTableProtectionContext();
++
++    virtual SvXMLImportContext *CreateChildContext( USHORT nPrefix,
++                                     const ::rtl::OUString& rLocalName,
++                                     const ::com::sun::star::uno::Reference<
++                                        ::com::sun::star::xml::sax::XAttributeList>& xAttrList );
++
++    virtual void EndElement();
++};
++
+ #endif
+diff --git sc/source/ui/docshell/docsh.cxx sc/source/ui/docshell/docsh.cxx
+index 04825b9..9caaf5f 100644
+--- sc/source/ui/docshell/docsh.cxx
++++ sc/source/ui/docshell/docsh.cxx
+@@ -1440,9 +1440,14 @@ BOOL __EXPORT ScDocShell::SaveAs( SfxMedium& rMedium )
+ 
+ #if ENABLE_SHEET_PROTECTION
+     ScTabViewShell* pViewShell = GetBestViewShell();
+-    if (pViewShell && ScPassHashHelper::needsPassHashRegen(aDocument, PASSHASH_OOO))
++    bool bNeedsRehash = ScPassHashHelper::needsPassHashRegen(aDocument, PASSHASH_SHA1);
++    if (bNeedsRehash)
++        // legacy xls hash double-hashed by SHA1 is also supported.
++        bNeedsRehash = ScPassHashHelper::needsPassHashRegen(aDocument, PASSHASH_XL, PASSHASH_SHA1);
++
++    if (pViewShell && bNeedsRehash)
+     {
+-        if (!pViewShell->ExecuteRetypePassDlg(PASSHASH_OOO))
++        if (!pViewShell->ExecuteRetypePassDlg(PASSHASH_SHA1))
+             // password re-type cancelled.  Don't save the document.
+             return false;
+     }
+diff --git sc/source/ui/miscdlgs/retypepassdlg.cxx sc/source/ui/miscdlgs/retypepassdlg.cxx
+index 7786115..899ae0d 100644
+--- sc/source/ui/miscdlgs/retypepassdlg.cxx
++++ sc/source/ui/miscdlgs/retypepassdlg.cxx
+@@ -77,7 +77,7 @@ ScRetypePassDlg::ScRetypePassDlg(Window* pParent) :
+ 
+     mpDocItem(static_cast<ScDocProtection*>(NULL)),
+     mnCurScrollPos(0),
+-    meDesiredHash(PASSHASH_OOO)
++    meDesiredHash(PASSHASH_SHA1)
+ {
+     Init();
+ }
