@@ -6,6 +6,37 @@
 chmod a+x solenv/bin/build.pl
 chmod a+x solenv/bin/gccinstlib.pl
 
+# Check for a present git config
+if [ ! -w .git/config  ] ; then
+    echo ".git/config should be writable"
+    exit 1
+fi
+
+# Creating the nothing script
+while read L ; do
+    echo "$L" >> "../bin/nothing"
+done << EOF
+#!/bin/sh
+exit 0
+EOF
+
+# Changing the .git/config
+while read L ; do
+    echo "$L" >> ".git/config"
+done << EOF
+
+[diff "swallow"]
+    command = nothing
+EOF
+
+# Creating the .gitattributes
+while read L ; do
+    echo "$L" >> ".gitattributes"
+done << EOF
+/applied_patches/* diff=swallow
+EOF
+
+# Creating the .gitignore
 while read F ; do
     D=`dirname "$F"`
     B=`basename "$F"`
@@ -15,7 +46,6 @@ while read F ; do
         [ -d "$D" ] && echo "$B" >> "$D/.gitignore"
     fi
 done << EOF
-/applied_patches
 /Linux*Env.Set*
 /MacOS*Env.Set*
 /bootstrap
