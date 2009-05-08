@@ -1,0 +1,164 @@
+diff --git svx/inc/svx/msocximex.hxx svx/inc/svx/msocximex.hxx
+index 733304d..8735679 100644
+--- svx/inc/svx/msocximex.hxx
++++ svx/inc/svx/msocximex.hxx
+@@ -231,7 +231,7 @@ class SVX_DLLPUBLIC OCX_Control
+ {
+ public:
+ 	OCX_Control(UniString sN, OCX_Control* parent = NULL ) : nWidth( 0 ), nHeight( 0 ), mnLeft(0), mnTop(0),
+-		mnStep(0), mnBackColor(0x8000000FL), mnForeColor(0), mnTabPos(0), sName(sN), pDocSh(0),
++		mnStep(0), mnBackColor(0x8000000FL), mnForeColor(0), mnTabPos(0), mbVisible(true), sName(sN), pDocSh(0),
+ 		bSetInDialog(FALSE), mpParent( parent ) {}
+ 	sal_Bool FullRead(SotStorageStream *pS)
+ 	{
+@@ -288,6 +288,7 @@ public:
+ 	sal_Int32 mnBackColor;
+ 	sal_Int32 mnForeColor;
+         sal_uInt16 mnTabPos;
++	bool mbVisible;
+ 	UniString sName;
+ 	UniString msToolTip;
+ 	UniString msParentName;
+@@ -488,7 +489,7 @@ public:
+ };
+ struct ContainerRecord
+ {
+-    ContainerRecord():nTop(0), nLeft(0), nSubStorageId(0), nSubStreamLen(0), nTabPos(0), nTypeIdent(0) {}
++    ContainerRecord():nTop(0), nLeft(0), nSubStorageId(0), nSubStreamLen(0), nTabPos(0), nTypeIdent(0), bVisible( true ) {}
+ 
+     ::rtl::OUString cName;
+     ::rtl::OUString controlTip;
+@@ -501,6 +502,7 @@ struct ContainerRecord
+     sal_uInt32 nSubStreamLen;
+     sal_uInt16  nTabPos;
+     sal_uInt16 nTypeIdent;
++    bool bVisible;
+ };
+ 
+ typedef std::vector<OCX_Control*>::iterator CtrlIterator;
+diff --git svx/source/msfilter/msocximex.cxx svx/source/msfilter/msocximex.cxx
+index c554c11..013f87d 100644
+--- svx/source/msfilter/msocximex.cxx
++++ svx/source/msfilter/msocximex.cxx
+@@ -662,7 +662,11 @@ class ContainerRecReader
+                 pS->SeekRel( 4 );
+             // option flags
+             if( nContentFlags & 0x00000010 )
+-                pS->SeekRel( 4 );
++            {
++                sal_uInt32 nBitFlags = 0;
++                *pS >> nBitFlags;
++                rec.bVisible = ( ( nBitFlags & 0x02 ) == 0x02 );
++            }
+             // substream size
+             if( nContentFlags & 0x00000020 )
+                 *pS >> rec.nSubStreamLen;
+@@ -1122,6 +1126,13 @@ sal_Bool OCX_Control::Import(uno::Reference<container::XNameContainer> &rDialog
+ 	uno::Any aTmp(&msToolTip,getCppuType((OUString *)0));
+         xPropSet->setPropertyValue(WW8_ASCII2STR("HelpText"), aTmp);
+     }
++    try
++    {
++        xPropSet->setPropertyValue(WW8_ASCII2STR("EnableVisible"), uno::makeAny( mbVisible ) );
++    }
++    catch( uno::Exception& )
++    {
++    }
+ 
+     if ( mnStep )
+     {
+@@ -3702,6 +3713,7 @@ void OCX_ContainerControl::ProcessControl(OCX_Control* pControl,SvStorageStream*
+                 {
+                     pControl->msCtrlSource = rec.sCtrlSource;
+                     pControl->msRowSource = rec.sRowSource;
++                    break;
+                 }
+         }
+         pControl->sName = rec.cName;
+@@ -3716,6 +3728,7 @@ void OCX_ContainerControl::ProcessControl(OCX_Control* pControl,SvStorageStream*
+         // reflect the ms tabbing from orig MS UserForm, see below
+         pControl->mnTabPos = rec.nTabPos;
+         pControl->SetInDialog(true);
++        pControl->mbVisible = rec.bVisible;
+         if ( mnStep )
+         {
+             // If the container has a step then it should be
+diff --git xmlscript/source/xmldlg_imexp/xmldlg_export.cxx xmlscript/source/xmldlg_imexp/xmldlg_export.cxx
+index 9915578..d9dac12 100644
+--- xmlscript/source/xmldlg_imexp/xmldlg_export.cxx
++++ xmlscript/source/xmldlg_imexp/xmldlg_export.cxx
+@@ -996,6 +996,21 @@ void ElementDescriptor::readDefaults( bool supportPrintable )
+         OSL_ENSURE( 0, "unexpected property type for \"Enabled\": not bool!" );
+     }
+     
++    sal_Bool bVisible = sal_True;
++    try
++    {
++        if (_xProps->getPropertyValue( OUString( RTL_CONSTASCII_USTRINGPARAM("EnableVisible") ) ) >>= bVisible)
++        {
++   
++            // only write out the non default case
++            if (! bVisible)
++            {
++                addAttribute( OUString( RTL_CONSTASCII_USTRINGPARAM(XMLNS_DIALOGS_PREFIX ":enablevisible") ),
++                              OUString( RTL_CONSTASCII_USTRINGPARAM("false") ) );
++            }
++        }
++    }
++    catch( Exception& ){}
+     // force writing of pos/size
+     a = _xProps->getPropertyValue( OUString( RTL_CONSTASCII_USTRINGPARAM("PositionX") ) );
+     if (a.getValueTypeClass() == TypeClass_LONG)
+diff --git xmlscript/source/xmldlg_imexp/xmldlg_import.cxx xmlscript/source/xmldlg_imexp/xmldlg_import.cxx
+index 816731a..602d46c 100644
+--- xmlscript/source/xmldlg_imexp/xmldlg_import.cxx
++++ xmlscript/source/xmldlg_imexp/xmldlg_import.cxx
+@@ -1616,6 +1616,20 @@ void ImportContext::importDefaults(
+             OUString( RTL_CONSTASCII_USTRINGPARAM("Enabled") ), makeAny( sal_False ) );
+     }
+ 
++    sal_Bool bVisible = sal_True;
++    if (getBoolAttr(
++            &bVisible, OUString( RTL_CONSTASCII_USTRINGPARAM("enablevisible") ),
++            xAttributes, _pImport->XMLNS_DIALOGS_UID ) && !bVisible)
++    {
++	try
++	{
++		
++        	_xControlModel->setPropertyValue(
++            		OUString( RTL_CONSTASCII_USTRINGPARAM("EnableVisible") ), makeAny( sal_False ) );
++	}
++	catch( Exception& ){}
++    }
++
+     if (!importLongProperty( nBaseX,
+                              OUString( RTL_CONSTASCII_USTRINGPARAM("PositionX") ),
+                              OUString( RTL_CONSTASCII_USTRINGPARAM("left") ),
+diff --git vbahelper/source/msforms/vbacontrol.cxx vbahelper/source/msforms/vbacontrol.cxx
+index 793a199..3503631 100644
+--- vbahelper/source/msforms/vbacontrol.cxx
++++ vbahelper/source/msforms/vbacontrol.cxx
+@@ -189,14 +189,23 @@ void SAL_CALL ScVbaControl::setEnabled( sal_Bool bVisible ) throw (uno::RuntimeE
+ 
+ sal_Bool SAL_CALL ScVbaControl::getVisible() throw (uno::RuntimeException)
+ {
++/*
+     uno::Reference< awt::XWindow2 > xWindow2( getWindowPeer(), uno::UNO_QUERY_THROW );
+     return xWindow2->isVisible();
++*/
++    sal_Bool bVisible = sal_False;
++    m_xProps->getPropertyValue(rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "EnableVisible" ) ) ) >>= bVisible;
++    return bVisible;
+ }
+ 
+ void SAL_CALL ScVbaControl::setVisible( sal_Bool bVisible ) throw (uno::RuntimeException)
+ {
++/*
+     uno::Reference< awt::XWindow2 > xWindow2( getWindowPeer(), uno::UNO_QUERY_THROW );
+     xWindow2->setVisible( bVisible );
++*/
++    m_xProps->setPropertyValue
++            (rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "EnableVisible" ) ), uno::makeAny( bVisible ) );
+ }
+ double SAL_CALL ScVbaControl::getHeight() throw (uno::RuntimeException)
+ {
