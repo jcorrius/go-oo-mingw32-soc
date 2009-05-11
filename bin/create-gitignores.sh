@@ -12,27 +12,15 @@ if [ ! -w .git/config  ] ; then
     exit 1
 fi
 
-# Creating the nothing script
-while read L ; do
-    echo "$L" >> "../bin/nothing"
-done << EOF
-#!/bin/sh
-exit 0
-EOF
-
 # Changing the .git/config
-while read L ; do
-    echo "$L" >> ".git/config"
-done << EOF
+cat >> ".git/config" << EOF
 
 [diff "swallow"]
-    command = nothing
+    command = /bin/true
 EOF
 
 # Creating the .gitattributes
-while read L ; do
-    echo "$L" >> ".gitattributes"
-done << EOF
+cat >> ".gitattributes" << EOF
 /applied_patches/* diff=swallow
 EOF
 
