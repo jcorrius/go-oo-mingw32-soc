@@ -7,7 +7,7 @@ if test "z$1" = "z--clean"; then
     rm -Rf autom4te.cache bonobo/autom4te.cache
     rm -f missing install-sh mkinstalldirs libtool ltmain.sh
     rm -f bonobo/missing bonobo/install-sh bonobo/mkinstalldirs \
-	bonobo/libtool bonobo/ltmain.sh
+          bonobo/libtool bonobo/ltmain.sh
     exit 1;
 fi
 
@@ -37,11 +37,13 @@ else
 fi
 
 # prepare git hooks
-[ -d .git ] && for file in `cd git-hooks ; echo *`
-do
-    hook=".git/hooks/$file"
-    if [ ! -x "$hook" -a ! -L "$hook" ] ; then
-	rm -f "$hook"
-	ln -s "../../git-hooks/$file" "$hook"
-    fi
-done
+if [ -d .git ] ; then
+    for file in `cd git-hooks ; echo *`
+    do
+        hook=".git/hooks/$file"
+        if [ ! -x "$hook" -a ! -L "$hook" ] ; then
+            rm -f "$hook"
+            ln -s "../../git-hooks/$file" "$hook"
+        fi
+    done
+fi
