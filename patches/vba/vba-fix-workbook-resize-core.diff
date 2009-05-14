@@ -1,0 +1,234 @@
+Index: sc/source/ui/vba/vbaeventshelper.hxx
+===================================================================
+--- sc/source/ui/vba/vbaeventshelper.hxx	(revision 271848)
++++ sc/source/ui/vba/vbaeventshelper.hxx	(working copy)
+@@ -40,6 +40,7 @@
+ #include <cppuhelper/implbase1.hxx>
+ #include <com/sun/star/document/VbaEventId.hpp>
+ #include <com/sun/star/document/XVbaEventsHelper.hpp>
++#include <com/sun/star/awt/XWindowListener.hpp>
+ #include "excelvbahelper.hxx"
+ 
+ #define INVALID_TAB -1
+@@ -54,7 +55,7 @@
+ 	ScDocument* pDoc;
+ 	ScDocShell* pDocShell;
+     css::uno::Reference< css::uno::XComponentContext > m_xContext;
+-    VbaEventsListener* mpVbaEventsListener;
++    css::uno::Reference< css::awt::XWindowListener > m_xVbaEventsListener;
+     sal_Bool mbOpened;
+     sal_Bool mbIgnoreEvents;
+ 
+@@ -69,7 +70,7 @@
+     sal_Bool processVbaEvent( const sal_Int32 nEventId, const css::uno::Sequence< css::uno::Any >& rArgs, const SCTAB nTab = INVALID_TAB );
+ 
+ public:
+-	ScVbaEventsHelper( ScDocument* pDocument ):pDoc( pDocument ), mpVbaEventsListener( NULL ), mbOpened( sal_False ){};
++	ScVbaEventsHelper( ScDocument* pDocument ):pDoc( pDocument ), mbOpened( sal_False ){};
+     ScVbaEventsHelper( css::uno::Sequence< css::uno::Any > const& aArgs, css::uno::Reference< css::uno::XComponentContext > const& xContext );
+     ~ScVbaEventsHelper();
+ 	ScDocument* getDocument() { return pDoc; };
+Index: sc/source/ui/vba/vbaeventshelper.cxx
+===================================================================
+--- sc/source/ui/vba/vbaeventshelper.cxx	(revision 271848)
++++ sc/source/ui/vba/vbaeventshelper.cxx	(working copy)
+@@ -49,7 +49,6 @@
+ #include <com/sun/star/sheet/XSpreadsheetDocument.hpp>
+ #include <com/sun/star/sheet/XSpreadsheet.hpp>
+ #include <com/sun/star/container/XNamed.hpp>
+-#include <com/sun/star/awt/XWindowListener.hpp>
+ #include <com/sun/star/awt/WindowEvent.hpp>
+ #include <com/sun/star/lang/EventObject.hpp>
+ #include <com/sun/star/util/XCloseListener.hpp>
+@@ -64,6 +63,7 @@
+ #include <convuno.hxx>
+ #include <map>
+ #include <svx/msvbahelper.hxx>
++#include <vcl/svapp.hxx>
+ 
+ using namespace std;
+ using namespace com::sun::star;
+@@ -140,19 +140,20 @@
+ // This class is to process Workbook window related event
+ class VbaEventsListener : public WindowListener_BASE
+ {
++    ::osl::Mutex m_aMutex;
+     ScVbaEventsHelper* pVbaEventsHelper;
+     uno::Reference< frame::XModel > m_xModel;
+-    sal_Bool m_bPrepare;
+     sal_Bool m_bWindowResized;
+     sal_Bool m_bBorderChanged;
+ protected :
+     uno::Reference< awt::XWindow > GetContainerWindow();
+     uno::Reference< frame::XFrame > GetFrame();
+     sal_Bool IsMouseReleased();
+-    DECL_LINK( fireResizeMacro, Timer* );
++    DECL_LINK( fireResizeMacro, void* );
+     void processWindowResizeMacro();
+ public :
+     VbaEventsListener( ScVbaEventsHelper* pHelper );
++    ~VbaEventsListener();
+     void startEventsLinstener();
+     void stopEventsLinstener();
+     // XWindowListener
+@@ -169,11 +170,16 @@
+ };
+ VbaEventsListener::VbaEventsListener( ScVbaEventsHelper* pHelper ) : pVbaEventsHelper( pHelper )
+ {
++    OSL_TRACE("VbaEventsListener::VbaEventsListener( 0x%x ) - ctor ", this );
+     m_xModel.set( pVbaEventsHelper->getDocument()->GetDocumentShell()->GetModel(), uno::UNO_QUERY );
+-    m_bPrepare = sal_False;
+     m_bWindowResized = sal_False;
+     m_bBorderChanged = sal_False;
+ }
++
++VbaEventsListener::~VbaEventsListener()
++{
++    OSL_TRACE("VbaEventsListener::~VbaEventsListener( 0x%x ) - dtor ", this );
++}
+ uno::Reference< frame::XFrame > 
+ VbaEventsListener::GetFrame()
+ {
+@@ -286,41 +292,39 @@
+         pVbaEventsHelper = NULL;
+     }
+ }
++
+ void
+ VbaEventsListener::processWindowResizeMacro()
+ {
++    OSL_TRACE("**** Attempt to FIRE MACRO **** ");
+     if( pVbaEventsHelper )
+         pVbaEventsHelper->ProcessCompatibleVbaEvent( VBAEVENT_WORKBOOK_WINDOWRESIZE, uno::Sequence< uno::Any >() );
+ }
+-IMPL_LINK( VbaEventsListener, fireResizeMacro, Timer*, pTimer )
++
++IMPL_LINK( VbaEventsListener, fireResizeMacro, void*, pParam )
+ {
+-    if( pVbaEventsHelper && m_bPrepare && pTimer )
++    if ( pVbaEventsHelper ) 
+     {
+         if( IsMouseReleased() )
+-        {
+-            pTimer->Stop();
+-            delete pTimer;
+-            pTimer = 0;
+-            m_bPrepare = sal_False;
+-            processWindowResizeMacro();
+-        }
++                processWindowResizeMacro();
+     }
++    release();
+     return 0;
+ }
++
+ void SAL_CALL
+ VbaEventsListener::windowResized(  const awt::WindowEvent& /*aEvent*/ ) throw ( uno::RuntimeException )
+ {
++    ::osl::MutexGuard aGuard( m_aMutex );
+     // Workbook_window_resize event
+-    OSL_TRACE("VbaEventsListener::windowResized");
+     m_bWindowResized = sal_True;
+     Window* pWindow = (VCLUnoHelper::GetWindow(  GetContainerWindow() ) );
+-    if( pWindow && !m_bPrepare && m_bBorderChanged )
++
++    if( pWindow && m_bBorderChanged )
+     {
+-        m_bPrepare = sal_True;
+         m_bBorderChanged = m_bWindowResized = sal_False;
+-        AutoTimer* pTimer = new AutoTimer();
+-        pTimer->SetTimeoutHdl( LINK( this, VbaEventsListener, fireResizeMacro ) );
+-        pTimer->Start();
++        acquire(); // ensure we don't get deleted before the event is handled
++        Application::PostUserEvent( LINK( this, VbaEventsListener, fireResizeMacro ), NULL );
+     }
+ }
+ void SAL_CALL
+@@ -341,6 +345,8 @@
+ void SAL_CALL
+ VbaEventsListener::disposing(  const lang::EventObject& /*aEvent*/ ) throw ( uno::RuntimeException )
+ {
++    ::osl::MutexGuard aGuard( m_aMutex );
++    OSL_TRACE("VbaEventsListener::disposing(0x%x)", this);
+     pVbaEventsHelper = NULL;
+ }
+ void SAL_CALL 
+@@ -351,23 +357,21 @@
+ void SAL_CALL 
+ VbaEventsListener::notifyClosing( const lang::EventObject& Source ) throw (uno::RuntimeException)
+ {
+-    OSL_TRACE("VbaEventsListener::notifyClosing");
++    ::osl::MutexGuard aGuard( m_aMutex );
+     stopEventsLinstener();
+ }
+ void SAL_CALL 
+ VbaEventsListener::borderWidthsChanged( const uno::Reference< uno::XInterface >& aObject, const frame::BorderWidths& aNewSize ) throw (uno::RuntimeException)
+ {
++    ::osl::MutexGuard aGuard( m_aMutex );
+     // work with WindowResized event to guard Window Resize event.
+-    OSL_TRACE("VbaEventsListener::borderWidthsChanged");
+     m_bBorderChanged = sal_True;
+     Window* pWindow = (VCLUnoHelper::GetWindow(  GetContainerWindow() ) );
+-    if( pWindow && !m_bPrepare && m_bWindowResized )
++    if( pWindow && m_bWindowResized )
+     {
+-        m_bPrepare = sal_True;
+         m_bWindowResized = m_bBorderChanged = sal_False;
+-        AutoTimer* pTimer = new AutoTimer();
+-        pTimer->SetTimeoutHdl( LINK( this, VbaEventsListener, fireResizeMacro ) );
+-        pTimer->Start();
++        acquire(); // ensure we don't get deleted before the timer fires.
++        Application::PostUserEvent( LINK( this, VbaEventsListener, fireResizeMacro ), NULL );
+     }
+ }
+ 
+@@ -456,7 +460,7 @@
+ }
+ 
+ ScVbaEventsHelper::ScVbaEventsHelper( uno::Sequence< css::uno::Any > const& aArgs, uno::Reference< uno::XComponentContext > const& xContext )
+-    : m_xContext( xContext ), mpVbaEventsListener( NULL ), mbOpened( sal_False ), mbIgnoreEvents( sal_False )
++    : m_xContext( xContext ), mbOpened( sal_False ), mbIgnoreEvents( sal_False )
+ {
+     uno::Reference< frame::XModel > xModel ( getXSomethingFromArgs< frame::XModel >( aArgs, 0 ), uno::UNO_QUERY );
+     pDocShell = excel::getDocShell( xModel );
+@@ -469,10 +473,6 @@
+ 
+ ScVbaEventsHelper::~ScVbaEventsHelper()
+ {
+-    if( mpVbaEventsListener )
+-    {
+-        mpVbaEventsListener = NULL;
+-    }
+ }
+ 
+ rtl::OUString
+@@ -993,10 +993,11 @@
+                 ProcessCompatibleVbaEvent( VBAEVENT_WORKBOOK_ACTIVATE, aArgs );
+             }
+             // register the window listener.
+-            if( !mpVbaEventsListener )
++            if( !m_xVbaEventsListener.is() )
+             {
+-                mpVbaEventsListener = new VbaEventsListener( this );
+-                mpVbaEventsListener->startEventsLinstener();
++                m_xVbaEventsListener = new VbaEventsListener( this );
++                VbaEventsListener* pEventsListener = dynamic_cast< VbaEventsListener* >( m_xVbaEventsListener.get() );
++                pEventsListener->startEventsLinstener();
+             }
+             break;
+         }
+@@ -1006,10 +1007,11 @@
+ 		case VBAEVENT_WORKBOOK_BEFORECLOSE:
+         {
+             sal_Bool bCancel = processVbaEvent( nEventId, aArgs ); 
+-            if( mpVbaEventsListener && !bCancel )
++            if( m_xVbaEventsListener.is() && !bCancel )
+             {
+-                mpVbaEventsListener->stopEventsLinstener();
+-                mpVbaEventsListener = NULL;
++                VbaEventsListener* pEventsListener = dynamic_cast< VbaEventsListener* >( m_xVbaEventsListener.get() );
++                pEventsListener->stopEventsLinstener();
++                m_xVbaEventsListener = NULL;
+             }
+             return bCancel;
+         }
