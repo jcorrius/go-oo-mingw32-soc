@@ -7,6 +7,9 @@ EXTRA_DIST=\
 	cli_uno_bridge.dll.config.in \
 	mono-ooo.pc.in \
 	nologoinstall_nld.bmp \
+	openintro_go-oo.bmp \
+	openabout_go-oo.bmp \
+	ooosetup_nld.ico \
 	ooobanner_nld.bmp \
 	ooobitmap_nld.bmp \
 	openintro_nld.bmp \
