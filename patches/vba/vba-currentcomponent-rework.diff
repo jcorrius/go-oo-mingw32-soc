@@ -1,0 +1,1558 @@
+diff --git sc/source/filter/excel/excimp8.cxx sc/source/filter/excel/excimp8.cxx
+index 846682b..4d1db8b 100644
+--- sc/source/filter/excel/excimp8.cxx
++++ sc/source/filter/excel/excimp8.cxx
+@@ -295,9 +295,16 @@ void ImportExcel8::ReadBasic( void )
+                 // The only wrinkle seems if this document is loaded 'InVisible'
+                 // but.. I don't see that this is possible from the vba API 
+                 // I could be wrong though
++                // There may be implications setting the current component
++                // too early :-/ so I will just manually set the Basic Variables
++                //SfxObjectShell::SetCurrentComponent( pShell->GetModel() );
+                 BasicManager* pAppMgr = SFX_APP()->GetBasicManager();
+                 if ( pAppMgr )
+-                    pAppMgr->SetGlobalUNOConstant( "ThisComponent", makeAny( pShell->GetModel() ) );
++                {
++                    uno::Any aModel = uno::makeAny( pShell->GetModel() );
++                    pAppMgr->SetGlobalUNOConstant( "ThisExcelDoc", aModel );
++                }
++
+             }
+         }
+     }
+diff --git sc/source/ui/unoobj/docuno.cxx sc/source/ui/unoobj/docuno.cxx
+index 3149254..f2f1eb5 100644
+--- sc/source/ui/unoobj/docuno.cxx
++++ sc/source/ui/unoobj/docuno.cxx
+@@ -102,6 +102,7 @@
+ using namespace com::sun::star;
+ using namespace com::sun::star::document::VbaEventId;
+ 
++#define SC_UNO_VBADOCOBJ "ThisVBADocObj" // perhaps we want to actually make this ThisWorkbook ?
+ //------------------------------------------------------------------------
+ 
+ //	alles ohne Which-ID, Map nur fuer PropertySetInfo
+@@ -116,6 +117,7 @@ const SfxItemPropertyMap* lcl_GetDocOptPropertyMap()
+         {MAP_CHAR_LEN(SC_UNO_AUTOCONTFOC),       0, &getBooleanCppuType(),                                    0, 0},
+         {MAP_CHAR_LEN(SC_UNO_BASICLIBRARIES),    0, &getCppuType((uno::Reference< script::XLibraryContainer >*)0), beans::PropertyAttribute::READONLY, 0},
+         {MAP_CHAR_LEN(SC_UNO_DIALOGLIBRARIES),   0, &getCppuType((uno::Reference< script::XLibraryContainer >*)0), beans::PropertyAttribute::READONLY, 0},
++        {MAP_CHAR_LEN(SC_UNO_VBADOCOBJ),   0, &getCppuType((beans::PropertyValue*)0), beans::PropertyAttribute::READONLY, 0},
+         {MAP_CHAR_LEN(SC_UNO_CALCASSHOWN),       0, &getBooleanCppuType(),                                    0, 0},
+         {MAP_CHAR_LEN(SC_UNONAME_CLOCAL),        0, &getCppuType((lang::Locale*)0),                           0, 0},
+         {MAP_CHAR_LEN(SC_UNO_CJK_CLOCAL),        0, &getCppuType((lang::Locale*)0),                           0, 0},
+@@ -1555,6 +1557,13 @@ uno::Any SAL_CALL ScModelObj::getPropertyValue( const rtl::OUString& aPropertyNa
+         {
+             aRet <<= pDocShell->GetDialogContainer();
+         }
++        else if ( aString.EqualsAscii( SC_UNO_VBADOCOBJ ) )
++        {
++            beans::PropertyValue aProp;
++            aProp.Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("ThisExcelDoc") );
++            aProp.Value <<= pDocShell->GetModel();
++            aRet <<= aProp;
++        }
+         else if ( aString.EqualsAscii( SC_UNO_RUNTIMEUID ) )
+         {
+             aRet <<= getRuntimeUID();
+diff --git sc/source/ui/vba/excelvbahelper.cxx sc/source/ui/vba/excelvbahelper.cxx
+index 795ec5a..5f133d9 100644
+--- sc/source/ui/vba/excelvbahelper.cxx
++++ sc/source/ui/vba/excelvbahelper.cxx
+@@ -193,7 +193,7 @@ getBestViewShell( const css::uno::Reference< css::frame::XModel>& xModel )
+ ScTabViewShell* 
+ getCurrentBestViewShell()
+ { 
+-	uno::Reference< frame::XModel > xModel = getCurrentDocument();
++	uno::Reference< frame::XModel > xModel = getCurrentExcelDoc();
+ 	return getBestViewShell( xModel );
+ }
+ 
+diff --git sc/source/ui/vba/vbaapplication.cxx sc/source/ui/vba/vbaapplication.cxx
+index 9088dc9..c06f3bd 100644
+--- sc/source/ui/vba/vbaapplication.cxx
++++ sc/source/ui/vba/vbaapplication.cxx
+@@ -123,7 +123,7 @@ class ActiveWorkbook : public ScVbaWorkbook
+ protected:
+ 	virtual uno::Reference< frame::XModel > getModel()
+ 	{ 	
+-		return getCurrentDocument(); 
++		return getCurrentExcelDoc(); 
+ 	}
+ public:
+ 	ActiveWorkbook( const uno::Reference< XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext) : ScVbaWorkbook(  xParent, xContext ){}
+@@ -163,8 +163,9 @@ uno::Any SAL_CALL
+ ScVbaApplication::getSelection() throw (uno::RuntimeException)
+ {
+     OSL_TRACE("** ScVbaApplication::getSelection() ** ");
++    uno::Reference< frame::XModel > xModel( getCurrentDocument() );
+ 
+-    Reference< view::XSelectionSupplier > xSelSupp( getCurrentDocument()->getCurrentController(), UNO_QUERY_THROW );
++    Reference< view::XSelectionSupplier > xSelSupp( xModel->getCurrentController(), UNO_QUERY_THROW );
+     Reference< beans::XPropertySet > xPropSet( xSelSupp, UNO_QUERY_THROW );
+     OUString aPropName = OUString::createFromAscii( SC_UNO_FILTERED_RANGE_SELECTION );
+     uno::Any aOldVal = xPropSet->getPropertyValue( aPropName );
+@@ -198,10 +199,10 @@ ScVbaApplication::getSelection() throw (uno::RuntimeException)
+ 		uno::Reference< lang::XServiceInfo > xShapeServiceInfo( xShape, uno::UNO_QUERY_THROW );
+ 		if ( xShapeServiceInfo->supportsService( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "com.sun.star.drawing.Text" ) ) )  )
+ 		{
+-                return uno::makeAny( uno::Reference< msforms::XTextBoxShape >(new ScVbaTextBoxShape( mxContext, xShape, xShapes, getCurrentDocument() ) ) );
++                return uno::makeAny( uno::Reference< msforms::XTextBoxShape >(new ScVbaTextBoxShape( mxContext, xShape, xShapes, xModel ) ) );
+ 		}
+ 	}
+-        return uno::makeAny( uno::Reference< msforms::XShape >(new ScVbaShape( this, mxContext, xShape, xShapes, ScVbaShape::getType( xShape ) ) ) );
++        return uno::makeAny( uno::Reference< msforms::XShape >(new ScVbaShape( this, mxContext, xShape, xShapes, xModel, ScVbaShape::getType( xShape ) ) ) );
+     }
+     else if( xServiceInfo->supportsService( rtl::OUString::createFromAscii("com.sun.star.sheet.SheetCellRange")) ||
+              xServiceInfo->supportsService( rtl::OUString::createFromAscii("com.sun.star.sheet.SheetCellRanges")))
+@@ -288,7 +289,7 @@ ScVbaApplication::Evaluate( const ::rtl::OUString& Name ) throw (uno::RuntimeExc
+ uno::Any 
+ ScVbaApplication::Dialogs( const uno::Any &aIndex ) throw (uno::RuntimeException)
+ {
+-	uno::Reference< excel::XDialogs > xDialogs( new ScVbaDialogs( uno::Reference< XHelperInterface >( this ), mxContext ) );
++	uno::Reference< excel::XDialogs > xDialogs( new ScVbaDialogs( uno::Reference< XHelperInterface >( this ), mxContext, getCurrentDocument() ) );
+ 	if( !aIndex.hasValue() )
+ 		return uno::Any( xDialogs );
+ 	return uno::Any( xDialogs->Item( aIndex ) );
+@@ -581,7 +582,7 @@ ScVbaApplication::GoTo( const uno::Any& Reference, const uno::Any& Scroll ) thro
+ sal_Int32 SAL_CALL
+ ScVbaApplication::getCursor() throw (uno::RuntimeException)
+ {
+-    sal_Int32 nPointerStyle =  getPointerStyle();
++    sal_Int32 nPointerStyle =  getPointerStyle(getCurrentDocument());
+ 
+     switch( nPointerStyle )
+     {
+@@ -603,12 +604,13 @@ ScVbaApplication::setCursor( sal_Int32 _cursor ) throw (uno::RuntimeException)
+ {
+     try
+     {
++	uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY_THROW );
+         switch( _cursor )
+         {
+             case excel::XlMousePointer::xlNorthwestArrow:
+             {
+                 const Pointer& rPointer( POINTER_ARROW );
+-                setCursorHelper( rPointer, sal_False );
++                setCursorHelper( xModel, rPointer, sal_False );
+                 break;
+             }
+             case excel::XlMousePointer::xlWait:
+@@ -616,13 +618,13 @@ ScVbaApplication::setCursor( sal_Int32 _cursor ) throw (uno::RuntimeException)
+             {
+                 const Pointer& rPointer( static_cast< PointerStyle >( _cursor ) );
+                 //It will set the edit window, toobar and statusbar's mouse pointer.
+-                setCursorHelper( rPointer, sal_True );
++                setCursorHelper( xModel, rPointer, sal_True );
+                 break;
+             }
+             case excel::XlMousePointer::xlDefault:
+             {
+                 const Pointer& rPointer( POINTER_NULL );
+-                setCursorHelper( rPointer, sal_False );
++                setCursorHelper( xModel, rPointer, sal_False );
+                 break;
+             }
+             default:
+@@ -1125,17 +1127,6 @@ ScVbaApplication::Volatile( const uno::Any& aVolatile )  throw ( uno::RuntimeExc
+ 
+ // this is bound to break when loading the document
+ 	return; 
+-/*
+-	if ( bVolatile )
+-		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("Volatile - not supported" ) ), uno::Reference< uno::XInterface >() );
+-	// bVoloatile is false - currently this only would make sense if 
+-	// the autocalculate mode is set to be true.
+-
+-	// so really this is crap, #TODO try and understand how ( or if ) 
+-	// the calculation mode and volatile interoperate
+-	if ( ! getCalculation() == excel::XlCalculation::xlCalculationAutomatic )
+-		setCalculation(  excel::XlCalculation::xlCalculationAutomatic );
+-*/
+ }
+ 
+ ::sal_Bool SAL_CALL 
+@@ -1189,6 +1180,12 @@ ScVbaApplication::Caller( const uno::Any& /*aIndex*/ ) throw ( uno::RuntimeExcep
+ 	return aRet;
+ }
+ 
++uno::Reference< frame::XModel > 
++ScVbaApplication::getCurrentDocument() throw (css::uno::RuntimeException)
++{
++    return getCurrentExcelDoc();
++}
++
+ rtl::OUString& 
+ ScVbaApplication::getServiceImplName()
+ {
+diff --git sc/source/ui/vba/vbaapplication.hxx sc/source/ui/vba/vbaapplication.hxx
+index 67b6ba9..d7098b4 100644
+--- sc/source/ui/vba/vbaapplication.hxx
++++ sc/source/ui/vba/vbaapplication.hxx
+@@ -47,6 +47,8 @@ class ScVbaApplication : public ScVbaApplication_BASE
+ private:
+ 	sal_Int32 m_xCalculation;
+ 	rtl::OUString getOfficePath( const rtl::OUString& sPath ) throw ( css::uno::RuntimeException );
++protected:
++        virtual css::uno::Reference< css::frame::XModel > getCurrentDocument() throw (css::uno::RuntimeException);
+ public:
+ 	ScVbaApplication( const css::uno::Reference< css::uno::XComponentContext >& m_xContext );
+ 	virtual ~ScVbaApplication();
+diff --git sc/source/ui/vba/vbachartobject.cxx sc/source/ui/vba/vbachartobject.cxx
+index c87e356..71942f1 100644
+--- sc/source/ui/vba/vbachartobject.cxx
++++ sc/source/ui/vba/vbachartobject.cxx
+@@ -120,10 +120,11 @@ ScVbaChartObject::Activate() throw ( script::BasicErrorException )
+ {
+ 	try
+ 	{
+-		// #TODO #FIXME should be ThisWorkbook or equivelant
+-		// XModel
++		// #TODO #FIXME should be ThisWorkbook or equivelant, or in
++		// fact probably the chart object should be created with 
++		// the XModel owner
+ 		//uno::Reference< view::XSelectionSupplier > xSelectionSupplier( getXModel().getCurrentController());
+-		uno::Reference< view::XSelectionSupplier > xSelectionSupplier( getCurrentDocument()->getCurrentController(), uno::UNO_QUERY_THROW );
++		uno::Reference< view::XSelectionSupplier > xSelectionSupplier( getCurrentExcelDoc()->getCurrentController(), uno::UNO_QUERY_THROW );
+ 		xSelectionSupplier->select(uno::makeAny(xShape));
+ 	}
+ 	catch (uno::Exception& )
+diff --git sc/source/ui/vba/vbacharts.cxx sc/source/ui/vba/vbacharts.cxx
+index 3c87bb5..7dc8cbc 100644
+--- sc/source/ui/vba/vbacharts.cxx
++++ sc/source/ui/vba/vbacharts.cxx
+@@ -35,11 +35,9 @@ using namespace ::com::sun::star;
+ using namespace ::ooo::vba;
+ 
+ 
+-ScVbaCharts::ScVbaCharts( const css::uno::Reference< ov::XHelperInterface >& _xParent, const css::uno::Reference< css::uno::XComponentContext >& _xContext ) : Charts_BASE(_xParent, _xContext, uno::Reference< container::XIndexAccess >() )
++ScVbaCharts::ScVbaCharts( const css::uno::Reference< ov::XHelperInterface >& _xParent, const css::uno::Reference< css::uno::XComponentContext >& _xContext, const uno::Reference< frame::XModel >& xModel ) : Charts_BASE(_xParent, _xContext, uno::Reference< container::XIndexAccess >())
+ {
+-	// #TODO #FIXME surely this is wrong, you should never use the 
+-	// currently documement ( it could be anything )
+-	xComponent.set( getCurrentDocument(), uno::UNO_QUERY_THROW );
++	xComponent.set( xModel, uno::UNO_QUERY_THROW );
+ 	xSpreadsheetDocument.set( xComponent, uno::UNO_QUERY_THROW );
+ }
+ 
+diff --git sc/source/ui/vba/vbacharts.hxx sc/source/ui/vba/vbacharts.hxx
+index cedfeaa..fc227ba 100644
+--- sc/source/ui/vba/vbacharts.hxx
++++ sc/source/ui/vba/vbacharts.hxx
+@@ -43,7 +43,7 @@ class ScVbaCharts : public Charts_BASE
+ 	css::uno::Reference< css::sheet::XSpreadsheetDocument > xSpreadsheetDocument;
+ 	css::uno::Reference< css::lang::XComponent > xComponent;
+ public:
+-	ScVbaCharts( const css::uno::Reference< ov::XHelperInterface >& _xParent, const css::uno::Reference< css::uno::XComponentContext >& _xContext );
++	ScVbaCharts( const css::uno::Reference< ov::XHelperInterface >& _xParent, const css::uno::Reference< css::uno::XComponentContext >& _xContext, const css::uno::Reference< css::frame::XModel >& xModel );
+ 	// XCharts
+ 	virtual css::uno::Any SAL_CALL Add() throw (css::script::BasicErrorException, css::uno::RuntimeException);
+ 	virtual css::uno::Reference< ov::excel::XChart > SAL_CALL getActiveChart(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException);
+diff --git sc/source/ui/vba/vbadialog.hxx sc/source/ui/vba/vbadialog.hxx
+index 8625166..648f038 100644
+--- sc/source/ui/vba/vbadialog.hxx
++++ sc/source/ui/vba/vbadialog.hxx
+@@ -40,7 +40,7 @@ typedef cppu::ImplInheritanceHelper1< VbaDialogBase, ov::excel::XDialog > ScVbaD
+ class ScVbaDialog : public ScVbaDialog_BASE
+ {
+ public:
+-	ScVbaDialog( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext > xContext, sal_Int32 nIndex ):ScVbaDialog_BASE( xParent, xContext, nIndex ) {}
++	ScVbaDialog( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext > xContext, const css::uno::Reference< css::frame::XModel >& xModel, sal_Int32 nIndex ):ScVbaDialog_BASE( xParent, xContext, xModel, nIndex ) {}
+ 	virtual ~ScVbaDialog() {}
+ 
+ 	// Methods
+diff --git sc/source/ui/vba/vbadialogs.cxx sc/source/ui/vba/vbadialogs.cxx
+index c0c8bf7..6f90e4b 100644
+--- sc/source/ui/vba/vbadialogs.cxx
++++ sc/source/ui/vba/vbadialogs.cxx
+@@ -44,7 +44,7 @@ ScVbaDialogs::Item( const uno::Any &aItem ) throw (uno::RuntimeException)
+ {
+ 	sal_Int32 nIndex = 0;
+ 	aItem >>= nIndex;
+-	uno::Reference< excel::XDialog > aDialog( new ScVbaDialog( uno::Reference< XHelperInterface >( Application(),uno::UNO_QUERY_THROW ), mxContext, nIndex ) );
++	uno::Reference< excel::XDialog > aDialog( new ScVbaDialog( uno::Reference< XHelperInterface >( Application(),uno::UNO_QUERY_THROW ), mxContext, m_xModel, nIndex ) );
+ 	return uno::Any( aDialog );
+ }
+ 
+diff --git sc/source/ui/vba/vbadialogs.hxx sc/source/ui/vba/vbadialogs.hxx
+index ab53253..c902b7a 100644
+--- sc/source/ui/vba/vbadialogs.hxx
++++ sc/source/ui/vba/vbadialogs.hxx
+@@ -42,7 +42,7 @@ typedef cppu::ImplInheritanceHelper1< VbaDialogsBase, ov::excel::XDialogs > ScVb
+ class ScVbaDialogs : public ScVbaDialogs_BASE
+ {
+ public:
+-	ScVbaDialogs( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext > &xContext ): ScVbaDialogs_BASE( xParent, xContext ) {} 
++	ScVbaDialogs( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext > &xContext, const css::uno::Reference< css::frame::XModel >& xModel ): ScVbaDialogs_BASE( xParent, xContext, xModel ) {} 
+ 	virtual ~ScVbaDialogs() {}
+ 
+ 	// XCollection
+diff --git sc/source/ui/vba/vbarange.cxx sc/source/ui/vba/vbarange.cxx
+index 927152b..986c376 100644
+--- sc/source/ui/vba/vbarange.cxx
++++ sc/source/ui/vba/vbarange.cxx
+@@ -2024,13 +2024,19 @@ ScVbaRange::Activate() throw (uno::RuntimeException)
+ 	RangeHelper thisRange( xCellRange );
+ 	uno::Reference< sheet::XCellRangeAddressable > xThisRangeAddress = thisRange.getCellRangeAddressable();
+ 	table::CellRangeAddress thisRangeAddress = xThisRangeAddress->getRangeAddress();
+-	
++        uno::Reference< frame::XModel > xModel;	
++        ScDocShell* pShell = getScDocShell();
++
++        if ( pShell )
++            xModel = pShell->GetModel();
++
++        if ( !xModel.is() )
++            throw uno::RuntimeException(); 
++
+ 	// get current selection
+-	// #FIXME don't use getCurrentDocument
+-	uno::Reference< sheet::XCellRangeAddressable > xRange( getCurrentDocument()->getCurrentSelection(), ::uno::UNO_QUERY);
++	uno::Reference< sheet::XCellRangeAddressable > xRange( xModel->getCurrentSelection(), ::uno::UNO_QUERY);
+ 
+-	// #FIXME don't use getCurrentDocument
+-	uno::Reference< sheet::XSheetCellRanges > xRanges( getCurrentDocument()->getCurrentSelection(), ::uno::UNO_QUERY);
++	uno::Reference< sheet::XSheetCellRanges > xRanges( xModel->getCurrentSelection(), ::uno::UNO_QUERY);
+ 
+ 	if ( xRanges.is() )
+ 	{
+@@ -2543,10 +2549,12 @@ ScVbaRange::PasteSpecial( const uno::Any& Paste, const uno::Any& Operation, cons
+ {
+ 	if ( m_Areas->getCount() > 1 )
+ 		throw uno::RuntimeException( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("That command cannot be used on multiple selections" ) ), uno::Reference< uno::XInterface >() );
+-	// #FIXME doen't use current document
+-	uno::Reference< view::XSelectionSupplier > xSelection( getCurrentDocument()->getCurrentController(), uno::UNO_QUERY_THROW );
++        ScDocShell* pShell = getScDocShell(); 
++  
++        uno::Reference< frame::XModel > xModel( ( pShell ? pShell->GetModel() : NULL ), uno::UNO_QUERY_THROW );
++	uno::Reference< view::XSelectionSupplier > xSelection( xModel->getCurrentController(), uno::UNO_QUERY_THROW );
+ 	// save old selection
+-	uno::Reference< uno::XInterface > xSel( getScDocShell()->GetModel()->getCurrentSelection() );
++	uno::Reference< uno::XInterface > xSel( xModel->getCurrentSelection() );
+ 	// select this range
+ 	xSelection->select( uno::makeAny( mxRange ) );
+ 	// set up defaults	
+@@ -3880,7 +3888,7 @@ ScVbaRange::ApplicationRange( const uno::Reference< uno::XComponentContext >& xC
+ 	if ( Cell1.hasValue() && !Cell2.hasValue() && sRangeName.getLength() )
+ 	{
+ 		const static rtl::OUString sNamedRanges( RTL_CONSTASCII_USTRINGPARAM("NamedRanges"));
+-		uno::Reference< beans::XPropertySet > xPropSet( getCurrentDocument(), uno::UNO_QUERY_THROW );
++		uno::Reference< beans::XPropertySet > xPropSet( getCurrentExcelDoc(), uno::UNO_QUERY_THROW );
+ 		
+ 		uno::Reference< container::XNameAccess > xNamed( xPropSet->getPropertyValue( sNamedRanges ), uno::UNO_QUERY_THROW );
+ 		uno::Reference< sheet::XCellRangeReferrer > xReferrer;
+@@ -3903,7 +3911,7 @@ ScVbaRange::ApplicationRange( const uno::Reference< uno::XComponentContext >& xC
+ 			}
+ 		}
+ 	}
+-	uno::Reference< sheet::XSpreadsheetView > xView( getCurrentDocument()->getCurrentController(), uno::UNO_QUERY );
++	uno::Reference< sheet::XSpreadsheetView > xView( getCurrentExcelDoc()->getCurrentController(), uno::UNO_QUERY );
+ 	uno::Reference< table::XCellRange > xSheetRange( xView->getActiveSheet(), uno::UNO_QUERY_THROW ); 
+ 	ScVbaRange* pRange = new ScVbaRange( uno::Reference< XHelperInterface >(), xContext, xSheetRange );
+ 	uno::Reference< excel::XRange > xVbSheetRange( pRange );
+diff --git sc/source/ui/vba/vbatextboxshape.cxx sc/source/ui/vba/vbatextboxshape.cxx
+index 49600d3..954521b 100644
+--- sc/source/ui/vba/vbatextboxshape.cxx
++++ sc/source/ui/vba/vbatextboxshape.cxx
+@@ -41,7 +41,7 @@
+ using namespace com::sun::star;
+ using namespace ooo::vba;
+ 
+-ScVbaTextBoxShape::ScVbaTextBoxShape( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< drawing::XShape >& xShape, const uno::Reference< drawing::XShapes >& xShapes, const uno::Reference< frame::XModel >& xModel ) : TextBoxShapeImpl_BASE( uno::Reference< XHelperInterface >(), xContext, xShape, xShapes, ScVbaShape::getType( xShape )  )
++ScVbaTextBoxShape::ScVbaTextBoxShape( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< drawing::XShape >& xShape, const uno::Reference< drawing::XShapes >& xShapes, const uno::Reference< frame::XModel >& xModel ) : TextBoxShapeImpl_BASE( uno::Reference< XHelperInterface >(), xContext, xShape, xShapes, xModel, ScVbaShape::getType( xShape )  )
+ {
+     m_xTextRange.set( xShape , uno::UNO_QUERY_THROW );
+     m_xModel.set( xModel );
+diff --git sc/source/ui/vba/vbaworkbook.cxx sc/source/ui/vba/vbaworkbook.cxx
+index ded6aad..1c60441 100644
+--- sc/source/ui/vba/vbaworkbook.cxx
++++ sc/source/ui/vba/vbaworkbook.cxx
+@@ -64,7 +64,7 @@ class ActiveSheet : public ScVbaWorksheet
+ protected:
+ 	virtual uno::Reference< frame::XModel > getModel()
+ 	{ 	
+-		return getCurrentDocument(); 
++		return getCurrentExcelDoc(); 
+ 	}
+ 	virtual uno::Reference< sheet::XSpreadsheet > getSheet()
+ 	{ 
+diff --git sc/source/ui/vba/vbaworksheet.cxx sc/source/ui/vba/vbaworksheet.cxx
+index ddd5111..7922782 100644
+--- sc/source/ui/vba/vbaworksheet.cxx
++++ sc/source/ui/vba/vbaworksheet.cxx
+@@ -712,7 +712,7 @@ ScVbaWorksheet::Shapes( const uno::Any& aIndex ) throw (uno::RuntimeException)
+     uno::Reference< drawing::XShapes > xShapes( xDrawPageSupplier->getDrawPage(), uno::UNO_QUERY_THROW );
+     uno::Reference< container::XIndexAccess > xIndexAccess( xShapes, uno::UNO_QUERY_THROW );
+ 
+-   uno::Reference< msforms::XShapes> xVbaShapes( new ScVbaShapes( this, mxContext, xIndexAccess ) );
++   uno::Reference< msforms::XShapes> xVbaShapes( new ScVbaShapes( this, mxContext, xIndexAccess, getModel() ) );
+    if ( aIndex.hasValue() )
+       return xVbaShapes->Item( aIndex, uno::Any() ); 
+    return uno::makeAny( xVbaShapes );
+diff --git sfx2/source/doc/objxtor.cxx sfx2/source/doc/objxtor.cxx
+index 3421628..43c7458 100644
+--- sfx2/source/doc/objxtor.cxx
++++ sfx2/source/doc/objxtor.cxx
+@@ -136,6 +136,32 @@ DBG_NAME(SfxObjectShell)
+ extern svtools::AsynchronLink* pPendingCloser;
+ static WeakReference< XInterface > s_xCurrentComponent;
+ 
++void lcl_UpdateAppBasicDocVars(  const Reference< XInterface >& _rxComponent, bool bClear = false )
++{
++    BasicManager* pAppMgr = SFX_APP()->GetBasicManager();
++    if ( pAppMgr )
++    {
++        uno::Reference< beans::XPropertySet > xProps( _rxComponent, uno::UNO_QUERY );
++        if ( xProps.is() )
++        {
++            try
++            {
++                beans::PropertyValue aProp;
++                xProps->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("ThisVBADocObj") ) ) >>= aProp;
++                const char* pAscii = rtl::OUStringToOString( aProp.Name, RTL_TEXTENCODING_UTF8 ).getStr();
++                if ( bClear )
++                    pAppMgr->SetGlobalUNOConstant( pAscii, uno::makeAny( uno::Reference< uno::XInterface >() ) );
++                else
++                    pAppMgr->SetGlobalUNOConstant( pAscii, aProp.Value );
++    
++            }
++            catch( uno::Exception& e )
++            {
++            }
++        }
++    }
++}
++
+ //=========================================================================
+ 
+ /** This Listener is used to get notified when the XDocumentProperties of the
+@@ -211,6 +237,7 @@ void SAL_CALL SfxModelListener_Impl::disposing( const com::sun::star::lang::Even
+     ::vos::OGuard aSolarGuard( Application::GetSolarMutex() );
+     if ( SfxObjectShell::GetCurrentComponent() == _rEvent.Source )
+     {
++        lcl_UpdateAppBasicDocVars( SfxObjectShell::GetCurrentComponent(), true );
+         // remove ThisComponent reference from AppBasic
+         SfxObjectShell::SetCurrentComponent( Reference< XInterface >() );
+     }
+@@ -1095,7 +1122,10 @@ void SfxObjectShell::SetCurrentComponent( const Reference< XInterface >& _rxComp
+ 
+     BasicManager* pAppMgr = SFX_APP()->GetBasicManager();
+     if ( pAppMgr )
++    {
++        lcl_UpdateAppBasicDocVars( _rxComponent );
+         pAppMgr->SetGlobalUNOConstant( "ThisComponent", makeAny( _rxComponent ) );
++    }
+ 
+ #if OSL_DEBUG_LEVEL > 0
+     const char* pComponentImplName = _rxComponent.get() ? typeid( *_rxComponent.get() ).name() : "void";
+diff --git sw/inc/unomap.hxx sw/inc/unomap.hxx
+index 1e842ab..9e928cb 100644
+--- sw/inc/unomap.hxx
++++ sw/inc/unomap.hxx
+@@ -307,6 +307,7 @@
+ 
+ #define WID_LAYOUT_SIZE                         1104
+ #define WID_DOC_DIALOG_LIBRARIES                1105
++#define WID_DOC_VBA_DOCOBJ                      1106
+ 
+ 
+ //AutoText
+diff --git sw/inc/unoprnms.hxx sw/inc/unoprnms.hxx
+index 2aacb96..d3d4d05 100644
+--- sw/inc/unoprnms.hxx
++++ sw/inc/unoprnms.hxx
+@@ -805,7 +805,8 @@ enum SwPropNameIds
+ /* 0735 */  UNO_NAME_CHAR_OVERLINE_HAS_COLOR,
+ /* 0736 */  UNO_NAME_OUTLINE_LEVEL,  //#outline level,add<-zhaojianwei outlinelevel
+ /* 0737 */  UNO_NAME_IS_TEMPLATE,
+-/* 0738 */  SW_PROPNAME_END
++/* 0738 */  UNO_NAME_VBA_DOCOBJ,
++/* 0739 */  SW_PROPNAME_END
+ };
+ 
+ 
+diff --git sw/source/core/unocore/unomap.cxx sw/source/core/unocore/unomap.cxx
+index 14ff14e..1430c12 100644
+--- sw/source/core/unocore/unomap.cxx
++++ sw/source/core/unocore/unomap.cxx
+@@ -1698,6 +1698,7 @@ const SfxItemPropertyMap* SwUnoPropertyMapProvider::GetPropertyMap(sal_uInt16 nP
+ 					{ SW_PROP_NMID(UNO_NAME_CHAR_LOCALE), RES_CHRATR_LANGUAGE ,   CPPU_E2T(CPPUTYPE_LOCALE), PropertyAttribute::MAYBEVOID,  MID_LANG_LOCALE },
+ 					{ SW_PROP_NMID(UNO_NAME_CHARACTER_COUNT), WID_DOC_CHAR_COUNT,			CPPU_E2T(CPPUTYPE_INT32),	PropertyAttribute::READONLY,   0},
+                     { SW_PROP_NMID(UNO_NAME_DIALOG_LIBRARIES), WID_DOC_DIALOG_LIBRARIES,  CPPU_E2T(CPPUTYPE_REFLIBCONTAINER), PropertyAttribute::READONLY, 0},
++                    { SW_PROP_NMID(UNO_NAME_VBA_DOCOBJ), WID_DOC_VBA_DOCOBJ,  CPPU_E2T(CPPUTYPE_PROPERTYVALUE), PropertyAttribute::READONLY, 0},
+ 					{ SW_PROP_NMID(UNO_NAME_INDEX_AUTO_MARK_FILE_U_R_L), WID_DOC_AUTO_MARK_URL, CPPU_E2T(CPPUTYPE_OUSTRING),	PROPERTY_NONE,   0},
+ 					{ SW_PROP_NMID(UNO_NAME_PARAGRAPH_COUNT), WID_DOC_PARA_COUNT,			CPPU_E2T(CPPUTYPE_INT32),	PropertyAttribute::READONLY,   0},
+ 					{ SW_PROP_NMID(UNO_NAME_RECORD_CHANGES), WID_DOC_CHANGES_RECORD,		CPPU_E2T(CPPUTYPE_BOOLEAN),	PROPERTY_NONE,   0},
+diff --git sw/source/core/unocore/unoprnms.cxx sw/source/core/unocore/unoprnms.cxx
+index 35a7192..4f7e68b 100644
+--- sw/source/core/unocore/unoprnms.cxx
++++ sw/source/core/unocore/unoprnms.cxx
+@@ -779,7 +779,8 @@ const SwPropNameTab aPropNameTab = {
+ /* 0734 CHAR_OVERLINE_COLOR */         {MAP_CHAR_LEN("CharOverlineColor")},
+ /* 0735 CHAR_OVERLINE_HAS_COLOR */     {MAP_CHAR_LEN("CharOverlineHasColor")},
+ /* 0736 UNO_NAME_OUTLINE_LEVEL */       {MAP_CHAR_LEN("OutlineLevel")},//#outline level,add<-zhaojianwei Outlinelevel
+-/* 0737 UNO_NAME_IS_TEMPLATE */       {MAP_CHAR_LEN("IsTemplate")}
++/* 0737 UNO_NAME_IS_TEMPLATE */       {MAP_CHAR_LEN("IsTemplate")},
++/* 0738 UNO_NAME_VBA_DOCOBJ */       {MAP_CHAR_LEN("ThisVBADocObj")},
+ };
+ 
+ const SwPropNameLen& SwGetPropName( USHORT nId )
+diff --git sw/source/ui/uno/unotxdoc.cxx sw/source/ui/uno/unotxdoc.cxx
+index 9bc3d85..c22a03b 100644
+--- sw/source/ui/uno/unotxdoc.cxx
++++ sw/source/ui/uno/unotxdoc.cxx
+@@ -2264,6 +2264,14 @@ Any SwXTextDocument::getPropertyValue(const OUString& rPropertyName)
+         case WID_DOC_DIALOG_LIBRARIES:
+             aAny <<= pDocShell->GetDialogContainer();
+         break;
++        case WID_DOC_VBA_DOCOBJ:
++        {
++            beans::PropertyValue aProp;
++            aProp.Name = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("ThisWordDoc") );
++            aProp.Value <<= pDocShell->GetModel();
++            aAny <<= aProp;
++        }
++        break;
+         case WID_DOC_RUNTIME_UID:
+             aAny <<= getRuntimeUID();
+         break;
+diff --git sw/source/ui/vba/vbaapplication.cxx sw/source/ui/vba/vbaapplication.cxx
+index 4117688..9c70772 100644
+--- sw/source/ui/vba/vbaapplication.cxx
++++ sw/source/ui/vba/vbaapplication.cxx
+@@ -148,7 +148,7 @@ SwVbaApplication::Addins( const uno::Any& index ) throw (uno::RuntimeException)
+ uno::Any SAL_CALL
+ SwVbaApplication::Dialogs( const uno::Any& index ) throw (uno::RuntimeException)
+ {
+-    uno::Reference< word::XDialogs > xCol( new SwVbaDialogs( this, mxContext ) );
++    uno::Reference< word::XDialogs > xCol( new SwVbaDialogs( this, mxContext, getCurrentDocument() ));
+     if ( index.hasValue() )
+         return xCol->Item( index );
+     return uno::makeAny( xCol );
+@@ -180,6 +180,12 @@ float SAL_CALL SwVbaApplication::CentimetersToPoints( float _Centimeters ) throw
+     return VbaApplicationBase::CentimetersToPoints( _Centimeters );
+ }
+ 
++uno::Reference< frame::XModel > 
++SwVbaApplication::getCurrentDocument() throw (css::uno::RuntimeException)
++{
++    return getCurrentWordDoc();
++}
++
+ rtl::OUString& 
+ SwVbaApplication::getServiceImplName()
+ {
+diff --git sw/source/ui/vba/vbaapplication.hxx sw/source/ui/vba/vbaapplication.hxx
+index e896e02..935a03c 100644
+--- sw/source/ui/vba/vbaapplication.hxx
++++ sw/source/ui/vba/vbaapplication.hxx
+@@ -71,5 +71,7 @@ public:
+ 	// XHelperInterface
+ 	virtual rtl::OUString& getServiceImplName();
+ 	virtual css::uno::Sequence<rtl::OUString> getServiceNames();
++protected:
++    virtual css::uno::Reference< css::frame::XModel > getCurrentDocument() throw (css::uno::RuntimeException);
+ };
+ #endif /* SW_VBA_APPLICATION_HXX */
+diff --git sw/source/ui/vba/vbadialog.hxx sw/source/ui/vba/vbadialog.hxx
+index 9090f15..b320a18 100644
+--- sw/source/ui/vba/vbadialog.hxx
++++ sw/source/ui/vba/vbadialog.hxx
+@@ -40,7 +40,7 @@ typedef cppu::ImplInheritanceHelper1< VbaDialogBase, ov::word::XDialog > SwVbaDi
+ class SwVbaDialog : public SwVbaDialog_BASE
+ {
+ public:
+-	SwVbaDialog( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext > xContext, sal_Int32 nIndex ):SwVbaDialog_BASE( xParent, xContext, nIndex ) {}
++	SwVbaDialog( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext > xContext, const css::uno::Reference< css::frame::XModel >& xModel, sal_Int32 nIndex ):SwVbaDialog_BASE( xParent, xContext, xModel, nIndex ) {}
+ 	virtual ~SwVbaDialog() {}
+ 
+ 	// Methods
+diff --git sw/source/ui/vba/vbadialogs.cxx sw/source/ui/vba/vbadialogs.cxx
+index 26dd7f1..e905442 100644
+--- sw/source/ui/vba/vbadialogs.cxx
++++ sw/source/ui/vba/vbadialogs.cxx
+@@ -39,7 +39,7 @@ SwVbaDialogs::Item( const uno::Any &aItem ) throw (uno::RuntimeException)
+ {
+ 	sal_Int32 nIndex = 0;
+ 	aItem >>= nIndex;
+-	uno::Reference< word::XDialog > aDialog( new SwVbaDialog( uno::Reference< XHelperInterface >( Application(),uno::UNO_QUERY_THROW ), mxContext, nIndex ) );
++	uno::Reference< word::XDialog > aDialog( new SwVbaDialog( uno::Reference< XHelperInterface >( Application(),uno::UNO_QUERY_THROW ), mxContext, m_xModel, nIndex ) );
+ 	return uno::Any( aDialog );
+ }
+ 
+diff --git sw/source/ui/vba/vbadialogs.hxx sw/source/ui/vba/vbadialogs.hxx
+index ef36067..63e45f5 100644
+--- sw/source/ui/vba/vbadialogs.hxx
++++ sw/source/ui/vba/vbadialogs.hxx
+@@ -42,7 +42,7 @@ typedef cppu::ImplInheritanceHelper1< VbaDialogsBase, ov::word::XDialogs > SwVba
+ class SwVbaDialogs : public SwVbaDialogs_BASE
+ {
+ public:
+-	SwVbaDialogs( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext > &xContext ): SwVbaDialogs_BASE( xParent, xContext ) {} 
++	SwVbaDialogs( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext > &xContext, const css::uno::Reference< css::frame::XModel >& xModel ): SwVbaDialogs_BASE( xParent, xContext, xModel ) {} 
+ 	virtual ~SwVbaDialogs() {}
+ 
+ 	// XCollection
+diff --git sw/source/ui/vba/vbadocument.cxx sw/source/ui/vba/vbadocument.cxx
+index 906a617..1090a8b 100644
+--- sw/source/ui/vba/vbadocument.cxx
++++ sw/source/ui/vba/vbadocument.cxx
+@@ -205,7 +205,9 @@ SwVbaDocument::Shapes( const uno::Any& index ) throw (uno::RuntimeException)
+     uno::Reference< drawing::XDrawPageSupplier > xDrawPageSupplier( getModel(), uno::UNO_QUERY_THROW );
+     //uno::Reference< drawing::XShapes > xShapes( xDrawPageSupplier->getDrawPage(), uno::UNO_QUERY_THROW );
+     uno::Reference< container::XIndexAccess > xIndexAccess( xDrawPageSupplier->getDrawPage(), uno::UNO_QUERY_THROW );
+-    uno::Reference< XCollection > xCol( new ScVbaShapes( this, mxContext, xIndexAccess ) );
++    uno::Reference< frame::XModel > xModel( mxTextDocument, uno::UNO_QUERY_THROW );
++    uno::Reference< XCollection > xCol( new ScVbaShapes( this, mxContext, xIndexAccess, xModel ) );
++
+     if ( index.hasValue() )
+         return xCol->Item( index, uno::Any() );
+     return uno::makeAny( xCol );
+diff --git sw/source/ui/vba/vbaheaderfooter.cxx sw/source/ui/vba/vbaheaderfooter.cxx
+index c1eb4ec..a08c155 100644
+--- sw/source/ui/vba/vbaheaderfooter.cxx
++++ sw/source/ui/vba/vbaheaderfooter.cxx
+@@ -87,7 +87,7 @@ SwVbaHeaderFooter::Shapes( const uno::Any& index ) throw (uno::RuntimeException)
+     uno::Reference< drawing::XDrawPageSupplier > xDrawPageSupplier( mxModel, uno::UNO_QUERY_THROW );
+     //uno::Reference< drawing::XShapes > xShapes( xDrawPageSupplier->getDrawPage(), uno::UNO_QUERY_THROW );
+     uno::Reference< container::XIndexAccess > xIndexAccess( xDrawPageSupplier->getDrawPage(), uno::UNO_QUERY_THROW );
+-    uno::Reference< XCollection > xCol( new ScVbaShapes( this, mxContext, xIndexAccess ) );
++    uno::Reference< XCollection > xCol( new ScVbaShapes( this, mxContext, xIndexAccess, mxModel ) );
+     if ( index.hasValue() )
+         return xCol->Item( index, uno::Any() );
+     return uno::makeAny( xCol );
+diff --git sw/source/ui/vba/vbaselection.cxx sw/source/ui/vba/vbaselection.cxx
+index b85c2d7..167838f 100644
+--- sw/source/ui/vba/vbaselection.cxx
++++ sw/source/ui/vba/vbaselection.cxx
+@@ -639,7 +639,7 @@ SwVbaSelection::ShapeRange( ) throw (uno::RuntimeException)
+     uno::Reference< drawing::XDrawPageSupplier > xDrawPageSupplier( mxModel, uno::UNO_QUERY_THROW );
+     uno::Reference< drawing::XDrawPage > xDrawPage = xDrawPageSupplier->getDrawPage();
+     uno::Reference< container::XIndexAccess > xShapesAccess( xShapes, uno::UNO_QUERY_THROW );
+-    return uno::makeAny( uno::Reference< msforms::XShapeRange >( new ScVbaShapeRange( this, mxContext, xShapesAccess, xDrawPage ) ) );
++    return uno::makeAny( uno::Reference< msforms::XShapeRange >( new ScVbaShapeRange( this, mxContext, xShapesAccess, xDrawPage, mxModel ) ) );
+ }
+ 
+ ::sal_Int32 SAL_CALL SwVbaSelection::getStart() throw (uno::RuntimeException)
+diff --git sw/source/ui/vba/vbasystem.cxx sw/source/ui/vba/vbasystem.cxx
+index 0b233a4..c68a7c0 100644
+--- sw/source/ui/vba/vbasystem.cxx
++++ sw/source/ui/vba/vbasystem.cxx
+@@ -88,7 +88,7 @@ SwVbaSystem::~SwVbaSystem()
+ sal_Int32 SAL_CALL
+ SwVbaSystem::getCursor() throw (uno::RuntimeException)
+ {
+-    sal_Int32 nPointerStyle =  getPointerStyle();
++    sal_Int32 nPointerStyle =  getPointerStyle( getCurrentWordDoc() );
+ 
+     switch( nPointerStyle )
+     {
+@@ -115,27 +115,27 @@ SwVbaSystem::setCursor( sal_Int32 _cursor ) throw (uno::RuntimeException)
+             case word::WdCursorType::wdCursorNorthwestArrow:
+             {
+                 const Pointer& rPointer( POINTER_ARROW );
+-                setCursorHelper( rPointer, sal_False );
++                setCursorHelper( getCurrentWordDoc(), rPointer, sal_False );
+                 break;
+             }
+             case word::WdCursorType::wdCursorWait:
+             {
+                 const Pointer& rPointer( static_cast< PointerStyle >( POINTER_WAIT ) );
+                 //It will set the edit window, toobar and statusbar's mouse pointer.
+-                setCursorHelper( rPointer, sal_True );
++                setCursorHelper( getCurrentWordDoc(), rPointer, sal_True );
+                 break;
+             }
+             case word::WdCursorType::wdCursorIBeam:
+             {
+                 const Pointer& rPointer( static_cast< PointerStyle >( POINTER_TEXT ) );
+                 //It will set the edit window, toobar and statusbar's mouse pointer.
+-                setCursorHelper( rPointer, sal_True );
++                setCursorHelper( getCurrentWordDoc(), rPointer, sal_True );
+                 break;
+             }
+             case word::WdCursorType::wdCursorNormal:
+             {
+                 const Pointer& rPointer( POINTER_NULL );
+-                setCursorHelper( rPointer, sal_False );
++                setCursorHelper( getCurrentWordDoc(), rPointer, sal_False );
+                 break;
+             }
+             default:
+diff --git vbahelper/inc/vbahelper/vbaapplicationbase.hxx vbahelper/inc/vbahelper/vbaapplicationbase.hxx
+index a4d550b..e100387 100644
+--- vbahelper/inc/vbahelper/vbaapplicationbase.hxx
++++ vbahelper/inc/vbahelper/vbaapplicationbase.hxx
+@@ -42,8 +42,8 @@ class VBAHELPER_DLLPUBLIC VbaApplicationBase : public ApplicationBase_BASE
+ protected:
+     VbaApplicationBase( const css::uno::Reference< css::uno::XComponentContext >& xContext );
+     virtual ~VbaApplicationBase();
+-    virtual SfxObjectShell* GetDocShell( const css::uno::Reference< css::frame::XModel >& /*xModel*/ ) throw (css::uno::RuntimeException) { return NULL; }
+ 
++    virtual css::uno::Reference< css::frame::XModel > getCurrentDocument() throw (css::uno::RuntimeException) = 0;
+ public:
+ 	// XHelperInterface ( parent is itself )
+ 	virtual css::uno::Reference< ov::XHelperInterface > SAL_CALL getParent(  ) throw (css::script::BasicErrorException, css::uno::RuntimeException) { return this; }
+diff --git vbahelper/inc/vbahelper/vbadialogbase.hxx vbahelper/inc/vbahelper/vbadialogbase.hxx
+index 4b3e2a2..a36c056 100644
+--- vbahelper/inc/vbahelper/vbadialogbase.hxx
++++ vbahelper/inc/vbahelper/vbadialogbase.hxx
+@@ -33,6 +33,7 @@
+ #include <cppuhelper/implbase1.hxx>
+ #include <ooo/vba/XDialogBase.hpp>
+ #include <vbahelper/vbahelperinterface.hxx>
++#include <com/sun/star/frame/XModel.hpp>
+ 
+ typedef InheritedHelperInterfaceImpl1< ov::XDialogBase > VbaDialogBase_BASE;
+ 
+@@ -40,8 +41,9 @@ class VBAHELPER_DLLPUBLIC VbaDialogBase : public VbaDialogBase_BASE
+ {
+ protected:
+ 	sal_Int32 mnIndex;
++        css::uno::Reference< css::frame::XModel > m_xModel;
+ public:
+-	VbaDialogBase( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext > xContext, sal_Int32 nIndex ):VbaDialogBase_BASE( xParent, xContext ), mnIndex( nIndex ) {}
++	VbaDialogBase( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::frame::XModel >& xModel, sal_Int32 nIndex ):VbaDialogBase_BASE( xParent, xContext ), mnIndex( nIndex ), m_xModel( xModel ) {}
+ 	virtual ~VbaDialogBase() {}
+ 
+ 	// Methods
+diff --git vbahelper/inc/vbahelper/vbadialogsbase.hxx vbahelper/inc/vbahelper/vbadialogsbase.hxx
+index e8b1b2e..dc5d389 100644
+--- vbahelper/inc/vbahelper/vbadialogsbase.hxx
++++ vbahelper/inc/vbahelper/vbadialogsbase.hxx
+@@ -34,13 +34,16 @@
+ #include <ooo/vba/XHelperInterface.hpp>
+ #include <ooo/vba/XDialogsBase.hpp>
+ #include <vbahelper/vbahelperinterface.hxx>
++#include <com/sun/star/frame/XModel.hpp>
+ 
+ typedef InheritedHelperInterfaceImpl1< ov::XDialogsBase > VbaDialogsBase_BASE;
+ 
+ class VBAHELPER_DLLPUBLIC VbaDialogsBase : public VbaDialogsBase_BASE
+ {
++protected:
++        css::uno::Reference< css::frame::XModel > m_xModel;
+ public:
+-	VbaDialogsBase( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext > &xContext ): VbaDialogsBase_BASE( xParent, xContext ) {} 
++	VbaDialogsBase( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext > &xContext, const css::uno::Reference< css::frame::XModel >& xModel ): VbaDialogsBase_BASE( xParent, xContext ), m_xModel( xModel ) {} 
+ 	virtual ~VbaDialogsBase() {}
+ 
+ 	// XCollection
+diff --git vbahelper/inc/vbahelper/vbahelper.hxx vbahelper/inc/vbahelper/vbahelper.hxx
+index 77eb2a3..047019c 100644
+--- vbahelper/inc/vbahelper/vbahelper.hxx
++++ vbahelper/inc/vbahelper/vbahelper.hxx
+@@ -66,8 +66,9 @@ namespace ooo
+         VBAHELPER_DLLPUBLIC SfxObjectShell* getSfxObjShell( const css::uno::Reference< css::frame::XModel >& xModel ) throw ( css::uno::RuntimeException);
+         VBAHELPER_DLLPUBLIC css::uno::Reference< css::uno::XInterface > createVBAUnoAPIService( SfxObjectShell* pShell,  const sal_Char* _pAsciiName ) throw (css::uno::RuntimeException);
+         VBAHELPER_DLLPUBLIC css::uno::Reference< css::uno::XInterface > createVBAUnoAPIServiceWithArgs( SfxObjectShell* pShell,  const sal_Char* _pAsciiName, const css::uno::Sequence< css::uno::Any >& aArgs ) throw (css::uno::RuntimeException);
+-        VBAHELPER_DLLPUBLIC css::uno::Reference< css::frame::XModel > getCurrentDocument() throw (css::uno::RuntimeException);
+-        VBAHELPER_DLLPUBLIC css::uno::Reference< css::frame::XModel > getDocumentContext() throw (css::uno::RuntimeException);
++        css::uno::Reference< css::frame::XModel > getCurrentDoc( const rtl::OUString& sKey ) throw (css::uno::RuntimeException);
++        VBAHELPER_DLLPUBLIC css::uno::Reference< css::frame::XModel > getCurrentExcelDoc() throw (css::uno::RuntimeException);
++        VBAHELPER_DLLPUBLIC css::uno::Reference< css::frame::XModel > getCurrentWordDoc() throw (css::uno::RuntimeException);
+ 
+ 		VBAHELPER_DLLPUBLIC css::uno::Reference< css::beans::XIntrospectionAccess > getIntrospectionAccess( const css::uno::Any& aObject ) throw (css::uno::RuntimeException);
+ 		VBAHELPER_DLLPUBLIC css::uno::Reference< css::script::XTypeConverter > getTypeConverter( const css::uno::Reference< css::uno::XComponentContext >& xContext ) throw (css::uno::RuntimeException);
+@@ -91,8 +92,8 @@ namespace ooo
+ 	    VBAHELPER_DLLPUBLIC double getPixelTo100thMillimeterConversionFactor( css::uno::Reference< css::awt::XDevice >& xDevice, sal_Bool bVertical);
+     	VBAHELPER_DLLPUBLIC double PointsToPixels( css::uno::Reference< css::awt::XDevice >& xDevice, double fPoints, sal_Bool bVertical);
+ 	    VBAHELPER_DLLPUBLIC double PixelsToPoints( css::uno::Reference< css::awt::XDevice >& xDevice, double fPoints, sal_Bool bVertical);
+-        VBAHELPER_DLLPUBLIC sal_Int32 getPointerStyle();
+-        VBAHELPER_DLLPUBLIC void setCursorHelper( const Pointer& rPointer, sal_Bool bOverWrite );
++        VBAHELPER_DLLPUBLIC sal_Int32 getPointerStyle( const css::uno::Reference< css::frame::XModel >& );
++        VBAHELPER_DLLPUBLIC void setCursorHelper( const css::uno::Reference< css::frame::XModel >& xModel, const Pointer& rPointer, sal_Bool bOverWrite );
+ 
+ class VBAHELPER_DLLPUBLIC Millimeter
+ {
+diff --git vbahelper/inc/vbahelper/vbashape.hxx vbahelper/inc/vbahelper/vbashape.hxx
+index 7893905..14debe4 100644
+--- vbahelper/inc/vbahelper/vbashape.hxx
++++ vbahelper/inc/vbahelper/vbashape.hxx
+@@ -54,6 +54,7 @@ protected:
+     css::uno::Reference< css::drawing::XShapes > m_xShapes;
+     css::uno::Reference< css::beans::XPropertySet > m_xPropertySet;
+     sal_Int32 m_nType;
++    css::uno::Reference< css::frame::XModel > m_xModel;
+     css::uno::Any m_aRange;
+ 	virtual void addListeners();
+ 	virtual void removeShapeListener() throw( css::uno::RuntimeException );
+@@ -61,8 +62,8 @@ protected:
+ 	virtual rtl::OUString& getServiceImplName();
+ 	virtual css::uno::Sequence<rtl::OUString> getServiceNames();
+ public:
+-    ScVbaShape( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::drawing::XShape >& xShape, const css::uno::Reference< css::drawing::XShapes >& xShapes, sal_Int32 nType ) throw ( css::lang::IllegalArgumentException );
+-    ScVbaShape( const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::drawing::XShape >& xShape ) throw ( css::lang::IllegalArgumentException );
++    ScVbaShape( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::drawing::XShape >& xShape, const css::uno::Reference< css::drawing::XShapes >& xShapes, const css::uno::Reference< css::frame::XModel >& xModel, sal_Int32 nType ) throw ( css::lang::IllegalArgumentException );
++    ScVbaShape( const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::drawing::XShape >& xShape, const css::uno::Reference< css::frame::XModel >& xModel ) throw ( css::lang::IllegalArgumentException );
+     virtual ~ScVbaShape();
+     css::uno::Any getRange() { return m_aRange; };
+     void setRange( css::uno::Any aRange ) { m_aRange = aRange; };
+diff --git vbahelper/inc/vbahelper/vbashaperange.hxx vbahelper/inc/vbahelper/vbashaperange.hxx
+index af39456..0d29c3a 100644
+--- vbahelper/inc/vbahelper/vbashaperange.hxx
++++ vbahelper/inc/vbahelper/vbashaperange.hxx
+@@ -46,11 +46,12 @@ private:
+     css::uno::Reference< css::drawing::XShapes > m_xShapes;
+     sal_Int32 m_nShapeGroupCount;
+ protected:
++    css::uno::Reference< css::frame::XModel > m_xModel;
+ 	virtual rtl::OUString& getServiceImplName();
+ 	virtual css::uno::Sequence<rtl::OUString> getServiceNames();
+ 	css::uno::Reference< css::drawing::XShapes > getShapes() throw (css::uno::RuntimeException) ;
+ public:
+-    ScVbaShapeRange( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::container::XIndexAccess >& xShapes, const css::uno::Reference< css::drawing::XDrawPage>& xDrawShape );
++    ScVbaShapeRange( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::container::XIndexAccess >& xShapes, const css::uno::Reference< css::drawing::XDrawPage>& xDrawShape, const css::uno::Reference< css::frame::XModel >& xModel );
+ 
+     // Methods
+     virtual void SAL_CALL Select(  ) throw (css::uno::RuntimeException);
+diff --git vbahelper/inc/vbahelper/vbashapes.hxx vbahelper/inc/vbahelper/vbashapes.hxx
+index 597f97b..dfbe5b1 100644
+--- vbahelper/inc/vbahelper/vbashapes.hxx
++++ vbahelper/inc/vbahelper/vbashapes.hxx
+@@ -49,6 +49,7 @@ private:
+     sal_Int32 m_nNewShapeCount;
+     void initBaseCollection();
+ protected:
++    css::uno::Reference< css::frame::XModel > m_xModel;
+ 	virtual rtl::OUString& getServiceImplName();
+ 	virtual css::uno::Sequence<rtl::OUString> getServiceNames();
+ 	virtual css::uno::Reference< css::container::XIndexAccess > getShapesByArrayIndices( const css::uno::Any& Index ) throw (css::uno::RuntimeException);
+@@ -62,7 +63,7 @@ protected:
+     //css::awt::Point calculateTopLeftMargin( css::uno::Reference< ov::XHelperInterface > xDocument );
+     
+ public:
+-    ScVbaShapes( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::container::XIndexAccess > xShapes );
++    ScVbaShapes( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::container::XIndexAccess > xShapes, const css::uno::Reference< css::frame::XModel >& xModel );
+     static void setDefaultShapeProperties( css::uno::Reference< css::drawing::XShape > xShape ) throw (css::uno::RuntimeException);
+     static void setShape_NameProperty( css::uno::Reference< css::drawing::XShape > xShape, rtl::OUString sName );
+     //XEnumerationAccess
+diff --git vbahelper/source/vbahelper/vbaapplicationbase.cxx vbahelper/source/vbahelper/vbaapplicationbase.cxx
+index 0d9f52e..b73013f 100644
+--- vbahelper/source/vbahelper/vbaapplicationbase.cxx
++++ vbahelper/source/vbahelper/vbaapplicationbase.cxx
+@@ -120,7 +120,7 @@ VbaApplicationBase::setDisplayStatusBar(sal_Bool bDisplayStatusBar) throw (uno::
+ uno::Any SAL_CALL
+ VbaApplicationBase::CommandBars( const uno::Any& aIndex ) throw (uno::RuntimeException)
+ {
+-    uno::Reference< XCommandBars > xCommandBars( new ScVbaCommandBars( this, mxContext, uno::Reference< container::XIndexAccess >() ) );
++    uno::Reference< XCommandBars > xCommandBars( new ScVbaCommandBars( this, mxContext, uno::Reference< container::XIndexAccess >(), getCurrentDocument() ) );
+     if( aIndex.hasValue() )
+         return uno::makeAny( xCommandBars->Item( aIndex, uno::Any() ) );
+     return uno::makeAny( xCommandBars );
+@@ -134,7 +134,7 @@ VbaApplicationBase::getVersion() throw (uno::RuntimeException)
+ 
+ void SAL_CALL VbaApplicationBase::Run( const ::rtl::OUString& MacroName, const uno::Any& varg1, const uno::Any& varg2, const uno::Any& varg3, const uno::Any& varg4, const uno::Any& varg5, const uno::Any& varg6, const uno::Any& varg7, const uno::Any& varg8, const uno::Any& varg9, const uno::Any& varg10, const uno::Any& varg11, const uno::Any& varg12, const uno::Any& varg13, const uno::Any& varg14, const uno::Any& varg15, const uno::Any& varg16, const uno::Any& varg17, const uno::Any& varg18, const uno::Any& varg19, const uno::Any& varg20, const uno::Any& varg21, const uno::Any& varg22, const uno::Any& varg23, const uno::Any& varg24, const uno::Any& varg25, const uno::Any& varg26, const uno::Any& varg27, const uno::Any& varg28, const uno::Any& varg29, const uno::Any& varg30 ) throw (uno::RuntimeException)
+ {
+-    VBAMacroResolvedInfo aMacroInfo = resolveVBAMacro( GetDocShell( getCurrentDocument() ), MacroName );
++    VBAMacroResolvedInfo aMacroInfo = resolveVBAMacro( getSfxObjShell( getCurrentDocument() ), MacroName );
+     if( aMacroInfo.IsResolved() )
+     {
+         // handle the arguments
+diff --git vbahelper/source/vbahelper/vbacommandbar.cxx vbahelper/source/vbahelper/vbacommandbar.cxx
+index ba9f49b..a74ccd5 100644
+--- vbahelper/source/vbahelper/vbacommandbar.cxx
++++ vbahelper/source/vbahelper/vbacommandbar.cxx
+@@ -46,7 +46,7 @@
+ using namespace com::sun::star;
+ using namespace ooo::vba;
+ 
+-ScVbaCommandBar::ScVbaCommandBar( const uno::Reference< XHelperInterface > xParent, const uno::Reference< uno::XComponentContext > xContext, sal_Int32 nModuleType ) throw (uno::RuntimeException) : CommandBar_BASE( xParent, xContext )
++ScVbaCommandBar::ScVbaCommandBar( const uno::Reference< XHelperInterface > xParent, const uno::Reference< uno::XComponentContext > xContext, const uno::Reference< frame::XModel >& xModel, sal_Int32 nModuleType ) throw (uno::RuntimeException) : CommandBar_BASE( xParent, xContext ), m_xModel( xModel )
+ {
+     // it's a menu bar
+     // only supporting factory menus ( no custom menus )
+@@ -67,7 +67,7 @@ ScVbaCommandBar::ScVbaCommandBar( const uno::Reference< XHelperInterface > xPare
+     m_bIsMenu = sal_True;
+     m_bCustom = sal_False;
+ }
+-ScVbaCommandBar::ScVbaCommandBar( const uno::Reference< XHelperInterface > xParent, const uno::Reference< uno::XComponentContext > xContext, rtl::OUString sToolBarName, sal_Bool bTemporary, sal_Bool bCreate ) throw (uno::RuntimeException) :  CommandBar_BASE( xParent, xContext )
++ScVbaCommandBar::ScVbaCommandBar( const uno::Reference< XHelperInterface > xParent, const uno::Reference< uno::XComponentContext > xContext, const uno::Reference< frame::XModel >& xModel, rtl::OUString sToolBarName, sal_Bool bTemporary, sal_Bool bCreate ) throw (uno::RuntimeException) :  CommandBar_BASE( xParent, xContext ), m_xModel( xModel )
+ {
+     // it's a tool bar
+     m_xParentHardRef.set( xParent, uno::UNO_QUERY_THROW );
+@@ -248,7 +248,7 @@ ScVbaCommandBar::setVisible( ::sal_Bool _visible ) throw (uno::RuntimeException)
+ {
+     try
+     {
+-        uno::Reference< frame::XFrame > xFrame( getCurrentDocument()->getCurrentController()->getFrame(), uno::UNO_QUERY_THROW ); 
++        uno::Reference< frame::XFrame > xFrame( m_xModel->getCurrentController()->getFrame(), uno::UNO_QUERY_THROW ); 
+         uno::Reference< beans::XPropertySet > xPropertySet( xFrame, uno::UNO_QUERY_THROW );
+         uno::Reference< frame::XLayoutManager > xLayoutManager( xPropertySet->getPropertyValue( rtl::OUString::createFromAscii("LayoutManager") ), uno::UNO_QUERY_THROW );
+         if( _visible )
+@@ -313,7 +313,7 @@ uno::Any SAL_CALL
+ ScVbaCommandBar::Controls( const uno::Any& aIndex ) throw (script::BasicErrorException, uno::RuntimeException)
+ {
+     sal_Int32 nIndex;
+-    uno::Reference< XCommandBarControls > xCommandBarControls( new ScVbaCommandBarControls( this, mxContext, uno::Reference< container::XIndexAccess >() ) );
++    uno::Reference< XCommandBarControls > xCommandBarControls( new ScVbaCommandBarControls( this, mxContext, uno::Reference< container::XIndexAccess >(), m_xModel ) );
+     if( aIndex.hasValue() )
+     {
+         if( aIndex >>= nIndex )
+diff --git vbahelper/source/vbahelper/vbacommandbar.hxx vbahelper/source/vbahelper/vbacommandbar.hxx
+index c53a5cd..52f63bc 100644
+--- vbahelper/source/vbahelper/vbacommandbar.hxx
++++ vbahelper/source/vbahelper/vbacommandbar.hxx
+@@ -78,9 +78,10 @@ protected:
+     void getToolBarSettings( rtl::OUString sToolBarName ) throw( css::uno::RuntimeException );
+     void getMenuSettings();
+     void addCustomBar();
++    css::uno::Reference< css::frame::XModel > m_xModel;
+ public:
+-    ScVbaCommandBar( const css::uno::Reference< ov::XHelperInterface > xParent, const css::uno::Reference< css::uno::XComponentContext > xContext, sal_Int32 nModuleType ) throw( css::uno::RuntimeException );
+-    ScVbaCommandBar( const css::uno::Reference< ov::XHelperInterface > xParent, const css::uno::Reference< css::uno::XComponentContext > xContext, rtl::OUString sToolBarName, sal_Bool bTemporary, sal_Bool bCreate ) throw( css::uno::RuntimeException );
++    ScVbaCommandBar( const css::uno::Reference< ov::XHelperInterface > xParent, const css::uno::Reference< css::uno::XComponentContext > xContext, const css::uno::Reference< css::frame::XModel >& xModel, sal_Int32 nModuleType ) throw( css::uno::RuntimeException );
++    ScVbaCommandBar( const css::uno::Reference< ov::XHelperInterface > xParent, const css::uno::Reference< css::uno::XComponentContext > xContext, const css::uno::Reference< css::frame::XModel >& xModel, rtl::OUString sToolBarName, sal_Bool bTemporary, sal_Bool bCreate ) throw( css::uno::RuntimeException );
+     
+     sal_Bool IsMenu() { return m_bIsMenu; };
+     css::uno::Reference< css::ui::XUIConfigurationManager > GetUICfgManager() { return m_xUICfgManager; };
+diff --git vbahelper/source/vbahelper/vbacommandbarcontrol.cxx vbahelper/source/vbahelper/vbacommandbarcontrol.cxx
+index 2fcce8a..1bea689 100644
+--- vbahelper/source/vbahelper/vbacommandbarcontrol.cxx
++++ vbahelper/source/vbahelper/vbacommandbarcontrol.cxx
+@@ -69,7 +69,7 @@ beans::PropertyValues lcl_repalcePropertyValue( beans::PropertyValues aPropertyV
+     return aPropertyValues;
+ }
+ 
+-ScVbaCommandBarControl::ScVbaCommandBarControl( const uno::Reference< XHelperInterface > xParent, const uno::Reference< uno::XComponentContext > xContext, rtl::OUString sName, sal_Int32 nPosition, sal_Int32 nType ) throw (uno::RuntimeException) : CommandBarControl_BASE( xParent, xContext ), m_sName( sName ), m_nPosition( nPosition ), m_nType( nType )
++ScVbaCommandBarControl::ScVbaCommandBarControl( const uno::Reference< XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext, const rtl::OUString& sName, sal_Int32 nPosition, sal_Int32 nType ) throw (uno::RuntimeException) : CommandBarControl_BASE( xParent, xContext ), m_sName( sName ), m_nPosition( nPosition ), m_nType( nType )
+ {
+     // exsiting CommandBarBarControl
+     m_xParentHardRef.set( xParent, uno::UNO_QUERY_THROW );
+@@ -99,7 +99,7 @@ ScVbaCommandBarControl::ScVbaCommandBarControl( const uno::Reference< XHelperInt
+     }
+     m_bTemporary = sal_True;
+ }
+-ScVbaCommandBarControl::ScVbaCommandBarControl( const uno::Reference< XHelperInterface > xParent, const uno::Reference< uno::XComponentContext > xContext, rtl::OUString sName, sal_Int32 nPosition, sal_Bool bTemporary, sal_Int32 nType) throw (uno::RuntimeException) :  CommandBarControl_BASE( xParent, xContext ), m_nPosition( nPosition ), m_bTemporary( bTemporary ), m_nType( nType )
++ScVbaCommandBarControl::ScVbaCommandBarControl( const uno::Reference< XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext, const rtl::OUString& sName, sal_Int32 nPosition, sal_Bool bTemporary, sal_Int32 nType) throw (uno::RuntimeException) :  CommandBarControl_BASE( xParent, xContext ), m_nPosition( nPosition ), m_bTemporary( bTemporary ), m_nType( nType )
+ {
+     m_xParentHardRef.set( xParent, uno::UNO_QUERY_THROW );
+     initObjects();
+@@ -289,8 +289,7 @@ ScVbaCommandBarControl::setOnAction( const ::rtl::OUString& _onaction ) throw (u
+     if( m_xCurrentSettings.is() )
+     {
+         // get the current model
+-        uno::Reference< frame::XModel > xModel( getCurrentDocument() ); 
+-        VBAMacroResolvedInfo aResolvedMacro = ooo::vba::resolveVBAMacro( getSfxObjShell( xModel ), _onaction, true );
++        VBAMacroResolvedInfo aResolvedMacro = ooo::vba::resolveVBAMacro( getSfxObjShell( m_pCommandBarControls->GetModel() ), _onaction, true );
+         if ( aResolvedMacro.IsResolved() )
+         {
+             rtl::OUString aCommandURL = ooo::vba::makeMacroURL( aResolvedMacro.ResolvedMacro() );
+@@ -353,7 +352,7 @@ uno::Any SAL_CALL
+ ScVbaCommandBarControl::Controls( const uno::Any& aIndex ) throw (script::BasicErrorException, uno::RuntimeException)
+ {
+     sal_Int32 nIndex;
+-    uno::Reference< XCommandBarControls > xCommandBarControls( new ScVbaCommandBarControls( this, mxContext, uno::Reference< container::XIndexAccess >() ) );
++    uno::Reference< XCommandBarControls > xCommandBarControls( new ScVbaCommandBarControls( this, mxContext, uno::Reference< container::XIndexAccess >(), m_pCommandBarControls->GetModel() ) );
+     if( aIndex.hasValue() )
+     {
+         if( aIndex >>= nIndex )
+@@ -385,11 +384,11 @@ ScVbaCommandBarControl::getServiceNames()
+ }
+ 
+ //////////// ScVbaCommandBarPopup //////////////////////////////
+-ScVbaCommandBarPopup::ScVbaCommandBarPopup( const uno::Reference< XHelperInterface > xParent, const uno::Reference< uno::XComponentContext > xContext, rtl::OUString sName, sal_Int32 nPosition ) throw (uno::RuntimeException) : CommandBarPopup_BASE( xParent, xContext, sName, nPosition, office::MsoControlType::msoControlPopup )
++ScVbaCommandBarPopup::ScVbaCommandBarPopup( const uno::Reference< XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext, const rtl::OUString& sName, sal_Int32 nPosition ) throw (uno::RuntimeException) : CommandBarPopup_BASE( xParent, xContext, sName, nPosition, office::MsoControlType::msoControlPopup )
+ {
+ }
+ 
+-ScVbaCommandBarPopup::ScVbaCommandBarPopup( const uno::Reference< XHelperInterface > xParent, const uno::Reference< uno::XComponentContext > xContext, rtl::OUString sName, sal_Int32 nPosition, sal_Bool bTemporary ) throw (uno::RuntimeException) : CommandBarPopup_BASE( xParent, xContext, sName, nPosition, bTemporary, office::MsoControlType::msoControlPopup) 
++ScVbaCommandBarPopup::ScVbaCommandBarPopup( const uno::Reference< XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext, const rtl::OUString& sName, sal_Int32 nPosition, sal_Bool bTemporary ) throw (uno::RuntimeException) : CommandBarPopup_BASE( xParent, xContext, sName, nPosition, bTemporary, office::MsoControlType::msoControlPopup ) 
+ {
+ }
+ 
+@@ -412,11 +411,11 @@ ScVbaCommandBarPopup::getServiceNames()
+ }
+ 
+ //////////// ScVbaCommandBarButton //////////////////////////////
+-ScVbaCommandBarButton::ScVbaCommandBarButton( const uno::Reference< XHelperInterface > xParent, const uno::Reference< uno::XComponentContext > xContext, rtl::OUString sName, sal_Int32 nPosition ) throw (uno::RuntimeException) : CommandBarButton_BASE( xParent, xContext, sName, nPosition, office::MsoControlType::msoControlButton )
++ScVbaCommandBarButton::ScVbaCommandBarButton( const uno::Reference< XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext, const rtl::OUString& sName, sal_Int32 nPosition ) throw (uno::RuntimeException) : CommandBarButton_BASE( xParent, xContext, sName, nPosition, office::MsoControlType::msoControlButton )
+ {
+ }
+ 
+-ScVbaCommandBarButton::ScVbaCommandBarButton( const uno::Reference< XHelperInterface > xParent, const uno::Reference< uno::XComponentContext > xContext, rtl::OUString sName, sal_Int32 nPosition, sal_Bool bTemporary ) throw (uno::RuntimeException) : CommandBarButton_BASE( xParent, xContext, sName, nPosition, bTemporary, office::MsoControlType::msoControlButton) 
++ScVbaCommandBarButton::ScVbaCommandBarButton( const uno::Reference< XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext, const rtl::OUString& sName, sal_Int32 nPosition, sal_Bool bTemporary ) throw (uno::RuntimeException) : CommandBarButton_BASE( xParent, xContext, sName, nPosition, bTemporary, office::MsoControlType::msoControlButton) 
+ {
+ }
+ 
+diff --git vbahelper/source/vbahelper/vbacommandbarcontrol.hxx vbahelper/source/vbahelper/vbacommandbarcontrol.hxx
+index 4d7d133..c1a8b07 100644
+--- vbahelper/source/vbahelper/vbacommandbarcontrol.hxx
++++ vbahelper/source/vbahelper/vbacommandbarcontrol.hxx
+@@ -51,9 +51,9 @@ private:
+     rtl::OUString       m_sName;
+     rtl::OUString       m_sBarName;
+     rtl::OUString       m_sCommand;
+-    sal_Int32           m_nType;
+     sal_Int32           m_nPosition;
+     sal_Bool            m_bTemporary;
++    sal_Int32           m_nType;
+     sal_Bool            m_bIsMenu;
+     ScVbaCommandBarControls*        m_pCommandBarControls;
+     css::uno::Reference< ov::XHelperInterface >               m_xParentHardRef;
+@@ -67,8 +67,8 @@ private:
+     void createNewMenuBarControl();
+     void createNewToolBarControl();
+ public:
+-    ScVbaCommandBarControl( const css::uno::Reference< ov::XHelperInterface > xParent, const css::uno::Reference< css::uno::XComponentContext > xContext, rtl::OUString sName, sal_Int32 nPosition = 0, sal_Int32 nType = ov::office::MsoControlType::msoControlButton ) throw (css::uno::RuntimeException);
+-    ScVbaCommandBarControl( const css::uno::Reference< ov::XHelperInterface > xParent, const css::uno::Reference< css::uno::XComponentContext > xContext, rtl::OUString sName, sal_Int32 nPosition, sal_Bool bTemporary, sal_Int32 nType = ov::office::MsoControlType::msoControlButton ) throw (css::uno::RuntimeException);
++    ScVbaCommandBarControl( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const rtl::OUString& sName, sal_Int32 nPosition = 0, sal_Int32 nType = ov::office::MsoControlType::msoControlButton ) throw (css::uno::RuntimeException);
++    ScVbaCommandBarControl( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const rtl::OUString& sName, sal_Int32 nPosition, sal_Bool bTemporary, sal_Int32 nType = ov::office::MsoControlType::msoControlButton ) throw (css::uno::RuntimeException);
+     css::uno::Reference< css::ui::XUIConfigurationManager > GetUICfgManager() { return m_xUICfgManager; };
+     css::uno::Reference< css::ui::XUIConfigurationPersistence > GetUICfgPers() { return m_xUICfgPers; };
+     css::uno::Reference< css::container::XIndexContainer >  GetBarSettings() { return m_xBarSettings; };
+@@ -99,8 +99,8 @@ typedef cppu::ImplInheritanceHelper1< ScVbaCommandBarControl, ov::XCommandBarPop
+ class ScVbaCommandBarPopup : public CommandBarPopup_BASE
+ {
+ public:
+-    ScVbaCommandBarPopup( const css::uno::Reference< ov::XHelperInterface > xParent, const css::uno::Reference< css::uno::XComponentContext > xContext, rtl::OUString sName, sal_Int32 nPosition = 0 ) throw (css::uno::RuntimeException);
+-    ScVbaCommandBarPopup( const css::uno::Reference< ov::XHelperInterface > xParent, const css::uno::Reference< css::uno::XComponentContext > xContext, rtl::OUString sName, sal_Int32 nPosition, sal_Bool bTemporary ) throw (css::uno::RuntimeException);
++    ScVbaCommandBarPopup( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const rtl::OUString& sName, sal_Int32 nPosition = 0 ) throw (css::uno::RuntimeException);
++    ScVbaCommandBarPopup( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const rtl::OUString& sName, sal_Int32 nPosition, sal_Bool bTemporary ) throw (css::uno::RuntimeException);
+ 	// XHelperInterface
+ 	virtual rtl::OUString& getServiceImplName();
+ 	virtual css::uno::Sequence<rtl::OUString> getServiceNames();
+@@ -110,8 +110,8 @@ typedef cppu::ImplInheritanceHelper1< ScVbaCommandBarControl, ov::XCommandBarBut
+ class ScVbaCommandBarButton : public CommandBarButton_BASE
+ {
+ public:
+-    ScVbaCommandBarButton( const css::uno::Reference< ov::XHelperInterface > xParent, const css::uno::Reference< css::uno::XComponentContext > xContext, rtl::OUString sName, sal_Int32 nPosition = 0 ) throw (css::uno::RuntimeException);
+-    ScVbaCommandBarButton( const css::uno::Reference< ov::XHelperInterface > xParent, const css::uno::Reference< css::uno::XComponentContext > xContext, rtl::OUString sName, sal_Int32 nPosition, sal_Bool bTemporary ) throw (css::uno::RuntimeException);
++    ScVbaCommandBarButton( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const rtl::OUString& sName, sal_Int32 nPosition = 0 ) throw (css::uno::RuntimeException);
++    ScVbaCommandBarButton( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const rtl::OUString& sName, sal_Int32 nPosition, sal_Bool bTemporary ) throw (css::uno::RuntimeException);
+ 	// XHelperInterface
+ 	virtual rtl::OUString& getServiceImplName();
+ 	virtual css::uno::Sequence<rtl::OUString> getServiceNames();
+diff --git vbahelper/source/vbahelper/vbacommandbarcontrols.cxx vbahelper/source/vbahelper/vbacommandbarcontrols.cxx
+index 1d01405..c6adbc2 100644
+--- vbahelper/source/vbahelper/vbacommandbarcontrols.cxx
++++ vbahelper/source/vbahelper/vbacommandbarcontrols.cxx
+@@ -70,7 +70,7 @@ public:
+     }
+ };
+ 
+-ScVbaCommandBarControls::ScVbaCommandBarControls( const uno::Reference< XHelperInterface > xParent, const uno::Reference< uno::XComponentContext > xContext, const uno::Reference< container::XIndexAccess> xIndexAccess ) throw (uno::RuntimeException) : CommandBarControls_BASE( xParent, xContext, xIndexAccess )
++ScVbaCommandBarControls::ScVbaCommandBarControls( const uno::Reference< XHelperInterface > xParent, const uno::Reference< uno::XComponentContext > xContext, const uno::Reference< container::XIndexAccess> xIndexAccess, const uno::Reference< frame::XModel >& xModel ) throw (uno::RuntimeException) : CommandBarControls_BASE( xParent, xContext, xIndexAccess ), m_xModel( xModel )
+ {
+     m_bIsMenu = sal_False;
+     m_bHasElements = sal_False;
+diff --git vbahelper/source/vbahelper/vbacommandbarcontrols.hxx vbahelper/source/vbahelper/vbacommandbarcontrols.hxx
+index ff00609..f9ebe25 100644
+--- vbahelper/source/vbahelper/vbacommandbarcontrols.hxx
++++ vbahelper/source/vbahelper/vbacommandbarcontrols.hxx
+@@ -57,9 +57,10 @@ private:
+     css::uno::Reference< css::ui::XUIConfigurationPersistence >     m_xUICfgPers;
+     css::uno::Reference< css::container::XIndexContainer >          m_xBarSettings;
+     css::uno::Reference< css::container::XIndexContainer >          m_xCurrentSettings;
++    css::uno::Reference< css::frame::XModel >          m_xModel;
+ 
+ public:
+-    ScVbaCommandBarControls( const css::uno::Reference< ov::XHelperInterface > xParent, const css::uno::Reference< css::uno::XComponentContext > xContext, const css::uno::Reference< css::container::XIndexAccess > xIndexAccess ) throw( css::uno::RuntimeException );
++    ScVbaCommandBarControls( const css::uno::Reference< ov::XHelperInterface > xParent, const css::uno::Reference< css::uno::XComponentContext > xContext, const css::uno::Reference< css::container::XIndexAccess > xIndexAccess, const  css::uno::Reference< css::frame::XModel >& xModel ) throw( css::uno::RuntimeException );
+     css::uno::Reference< css::ui::XUIConfigurationManager > GetUICfgManager() { return m_xUICfgManager; };
+     css::uno::Reference< css::ui::XUIConfigurationPersistence > GetUICfgPers() { return m_xUICfgPers; };
+     css::uno::Reference< css::container::XIndexContainer >  GetBarSettings() { return m_xBarSettings; };
+@@ -73,6 +74,7 @@ public:
+     }
+     rtl::OUString GetControlNameByIndex( const sal_Int32 nIndex ) throw ( css::uno::RuntimeException );
+ 
++    css::uno::Reference< css::frame::XModel > GetModel() { return m_xModel; }
+     // Attributes
+     virtual ::sal_Int32 SAL_CALL getCount() throw (css::uno::RuntimeException);
+     // XEnumerationAccess
+diff --git vbahelper/source/vbahelper/vbacommandbars.cxx vbahelper/source/vbahelper/vbacommandbars.cxx
+index 66a1652..3aae99b 100644
+--- vbahelper/source/vbahelper/vbacommandbars.cxx
++++ vbahelper/source/vbahelper/vbacommandbars.cxx
+@@ -54,8 +54,9 @@ class CommandBarEnumeration : public CommandBarEnumeration_BASE
+     uno::Reference< XCommandBars > m_xCommandBars;
+     uno::Sequence< rtl::OUString > m_sNames;
+     sal_Int32 m_nCurrentPosition;
++    uno::Reference< frame::XModel > m_xModel;
+ public:
+-    CommandBarEnumeration( const uno::Reference< uno::XComponentContext > xContext, const uno::Reference< XCommandBars > xCommandBars, const uno::Sequence< rtl::OUString > sNames ) : m_xContext( xContext ), m_xCommandBars( xCommandBars ), m_sNames( sNames ), m_nCurrentPosition( 0 )
++    CommandBarEnumeration( const uno::Reference< uno::XComponentContext > xContext, const uno::Reference< XCommandBars > xCommandBars, const uno::Sequence< rtl::OUString > sNames, const uno::Reference< frame::XModel >& xModel ) : m_xContext( xContext ), m_xCommandBars( xCommandBars ), m_sNames( sNames ), m_nCurrentPosition( 0 ), m_xModel( xModel )
+     {
+     }
+     virtual sal_Bool SAL_CALL hasMoreElements() throw ( uno::RuntimeException )
+@@ -79,7 +80,7 @@ public:
+                    if( sName.getLength() > 0 )
+                    {
+                         uno::Reference< XHelperInterface > xHelperInterface( m_xCommandBars, uno::UNO_QUERY_THROW );
+-                        uno::Reference< XCommandBar > xCommandBar( new ScVbaCommandBar( xHelperInterface, m_xContext, sName, sal_True, sal_False ) );
++                        uno::Reference< XCommandBar > xCommandBar( new ScVbaCommandBar( xHelperInterface, m_xContext, m_xModel,  sName, sal_True, sal_False ) );
+                         if( xCommandBar.is() )
+                             return uno::makeAny( xCommandBar );
+                         else
+@@ -99,14 +100,14 @@ public:
+ };
+ 
+ 
+-ScVbaCommandBars::ScVbaCommandBars( const uno::Reference< XHelperInterface > xParent, const uno::Reference< uno::XComponentContext > xContext, const uno::Reference< container::XIndexAccess > xIndexAccess ) : CommandBars_BASE( xParent, xContext, xIndexAccess )
++ScVbaCommandBars::ScVbaCommandBars( const uno::Reference< XHelperInterface > xParent, const uno::Reference< uno::XComponentContext > xContext, const uno::Reference< container::XIndexAccess > xIndexAccess, const uno::Reference< frame::XModel >& xModel ) : CommandBars_BASE( xParent, xContext, xIndexAccess ), m_xModel( xModel )
+ {
+     retrieveObjects();
+ }
+ void
+ ScVbaCommandBars::retrieveObjects() throw ( uno::RuntimeException )
+ {
+-    uno::Reference< lang::XServiceInfo > xServiceInfo( getCurrentDocument(), uno::UNO_QUERY_THROW );
++    uno::Reference< lang::XServiceInfo > xServiceInfo( m_xModel, uno::UNO_QUERY_THROW );
+     if( xServiceInfo->supportsService( sSpreadsheetDocumentUrl ) )
+     {
+         m_sModuleName = sSpreadsheetDocumentUrl;
+@@ -132,7 +133,7 @@ ScVbaCommandBars::getElementType() throw ( uno::RuntimeException )
+ uno::Reference< container::XEnumeration >
+ ScVbaCommandBars::createEnumeration() throw ( uno::RuntimeException )
+ {
+-    return uno::Reference< container::XEnumeration >( new CommandBarEnumeration( mxContext, this, m_xNameAccess->getElementNames() ) );
++    return uno::Reference< container::XEnumeration >( new CommandBarEnumeration( mxContext, this, m_xNameAccess->getElementNames(), m_xModel ) );
+ }
+ 
+ uno::Any
+@@ -145,15 +146,15 @@ ScVbaCommandBars::createCollectionObject( const uno::Any& aSource )
+         sToolBarName = sToolBarName.toAsciiLowerCase();
+         if( sToolBarName.equalsIgnoreAsciiCase( rtl::OUString::createFromAscii("Worksheet Menu Bar") ) )
+         {
+-            return uno::makeAny( uno::Reference< XCommandBar > ( new ScVbaCommandBar( this, mxContext, 0 ) ) );
++            return uno::makeAny( uno::Reference< XCommandBar > ( new ScVbaCommandBar( this, mxContext, m_xModel, 0 ) ) );
+         }
+         else if( sToolBarName.equalsIgnoreAsciiCase( rtl::OUString::createFromAscii("Menu Bar") ) )
+         {
+-            return uno::makeAny( uno::Reference< XCommandBar > ( new ScVbaCommandBar( this, mxContext, 1 ) ) );
++            return uno::makeAny( uno::Reference< XCommandBar > ( new ScVbaCommandBar( this, mxContext, m_xModel, 1 ) ) );
+         }
+         else if( checkToolBarExist( sToolBarName ) )
+         {
+-            return uno::makeAny( uno::Reference< XCommandBar > (new ScVbaCommandBar( this, mxContext, sToolBarName, sal_True, sal_False ) ) );
++            return uno::makeAny( uno::Reference< XCommandBar > (new ScVbaCommandBar( this, mxContext, m_xModel, sToolBarName, sal_True, sal_False ) ) );
+         }
+     }
+     return uno::Any();
+@@ -175,7 +176,7 @@ ScVbaCommandBars::Add( const css::uno::Any& Name, const css::uno::Any& /*Positio
+     {
+         bTemporary = sal_True;
+     }
+-    return uno::Reference< XCommandBar >( new ScVbaCommandBar( this, mxContext, sName.toAsciiLowerCase(), bTemporary, sal_True ) );
++    return uno::Reference< XCommandBar >( new ScVbaCommandBar( this, mxContext, m_xModel, sName.toAsciiLowerCase(), bTemporary, sal_True ) );
+ }
+ sal_Int32 SAL_CALL 
+ ScVbaCommandBars::getCount() throw(css::uno::RuntimeException)
+diff --git vbahelper/source/vbahelper/vbacommandbars.hxx vbahelper/source/vbahelper/vbacommandbars.hxx
+index 7442002..d1ebf4b 100644
+--- vbahelper/source/vbahelper/vbacommandbars.hxx
++++ vbahelper/source/vbahelper/vbacommandbars.hxx
+@@ -52,8 +52,10 @@ private:
+     css::uno::Reference< css::container::XNameAccess > m_xNameAccess;
+     rtl::OUString m_sModuleName;
+     void retrieveObjects() throw( css::uno::RuntimeException );
++protected:
++    css::uno::Reference< css::frame::XModel > m_xModel;
+ public:
+-    ScVbaCommandBars( const css::uno::Reference< ov::XHelperInterface > xParent, const css::uno::Reference< css::uno::XComponentContext > xContext, const css::uno::Reference< css::container::XIndexAccess > xIndexAccess );
++    ScVbaCommandBars( const css::uno::Reference< ov::XHelperInterface > xParent, const css::uno::Reference< css::uno::XComponentContext > xContext, const css::uno::Reference< css::container::XIndexAccess > xIndexAccess, const css::uno::Reference< css::frame::XModel >& xModel );
+ 
+     sal_Bool checkToolBarExist( rtl::OUString sToolBarName );
+     rtl::OUString GetModuleName(){ return m_sModuleName; };
+diff --git vbahelper/source/vbahelper/vbadialogbase.cxx vbahelper/source/vbahelper/vbadialogbase.cxx
+index 205442e..6294fc7 100644
+--- vbahelper/source/vbahelper/vbadialogbase.cxx
++++ vbahelper/source/vbahelper/vbadialogbase.cxx
+@@ -38,15 +38,14 @@ void
+ VbaDialogBase::Show() throw(uno::RuntimeException)
+ {
+ 	rtl::OUString aURL;
+-    uno::Reference< frame::XModel > xModel = getCurrentDocument();
+-	if ( xModel.is() )
++	if ( m_xModel.is() )
+ 	{
+ 		aURL = mapIndexToName( mnIndex );
+ 		if( aURL.getLength() == 0  )
+ 			throw uno::RuntimeException(
+ 				::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( " Unable to open the specified dialog " ) ),
+ 				uno::Reference< XInterface > () );
+-		dispatchRequests( xModel, aURL );
++		dispatchRequests( m_xModel, aURL );
+ 	}
+ }	
+ 
+diff --git vbahelper/source/vbahelper/vbadocumentbase.cxx vbahelper/source/vbahelper/vbadocumentbase.cxx
+index e53279e..339e454 100644
+--- vbahelper/source/vbahelper/vbadocumentbase.cxx
++++ vbahelper/source/vbahelper/vbadocumentbase.cxx
+@@ -137,7 +137,7 @@ VbaDocumentBase::Close( const uno::Any &rSaveArg, const uno::Any &rFileArg,
+ 	// we shouldn't do so. Otherwhise some strange things can happen.
+ 	else
+ 	{
+-		uno::Reference< lang::XComponent > xDisposable ( getCurrentDocument(), uno::UNO_QUERY );
++		uno::Reference< lang::XComponent > xDisposable ( getModel(), uno::UNO_QUERY );
+ 		if ( xDisposable.is() )
+ 			xDisposable->dispose();
+ 	}
+diff --git vbahelper/source/vbahelper/vbadocumentsbase.cxx vbahelper/source/vbahelper/vbadocumentsbase.cxx
+index 6d5ddb3..e7907b7 100644
+--- vbahelper/source/vbahelper/vbadocumentsbase.cxx
++++ vbahelper/source/vbahelper/vbadocumentsbase.cxx
+@@ -242,11 +242,15 @@ VbaDocumentsBase::Add() throw (uno::RuntimeException)
+ void
+ VbaDocumentsBase::Close() throw (uno::RuntimeException)
+ {
++// #FIXME this *MUST* be wrong documents::close surely closes ALL documents
++// in the collection, use of getCurrentDocument here is totally wrong
++/*
+ 	uno::Reference< lang::XMultiComponentFactory > xSMgr(
+ 		mxContext->getServiceManager(), uno::UNO_QUERY_THROW );
+ 	uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY_THROW );
+ 	rtl::OUString url = rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( ".uno:CloseDoc"));
+ 	dispatchRequests(xModel,url);
++*/
+ }
+ 
+ // #TODO# #FIXME# can any of the unused params below be used?
+diff --git vbahelper/source/vbahelper/vbahelper.cxx vbahelper/source/vbahelper/vbahelper.cxx
+index 97ebb3b..c8c96cc 100644
+--- vbahelper/source/vbahelper/vbahelper.cxx
++++ vbahelper/source/vbahelper/vbahelper.cxx
+@@ -400,8 +400,9 @@ dispatchRequests (uno::Reference< frame::XModel>& xModel,rtl::OUString & aUrl)
+ 
+ 
+ 
++
+  uno::Reference< frame::XModel > 
+-getCurrentDocument() throw (uno::RuntimeException)
++getCurrentDoc( const rtl::OUString& sKey ) throw (uno::RuntimeException)
+ {
+ 	uno::Reference< frame::XModel > xModel;
+ 	SbxObject* pBasic = dynamic_cast< SbxObject* > ( SFX_APP()->GetBasic() );
+@@ -426,7 +427,7 @@ getCurrentDocument() throw (uno::RuntimeException)
+ 
+ 
+     uno::Any aModel; 
+-    SbxVariable *pCompVar = basicChosen->Find(  UniString(RTL_CONSTASCII_USTRINGPARAM("ThisComponent")), SbxCLASS_OBJECT );
++    SbxVariable *pCompVar = basicChosen->Find(  sKey, SbxCLASS_OBJECT );
+ 
+ 	if ( pCompVar )
+ 	{
+@@ -434,30 +435,19 @@ getCurrentDocument() throw (uno::RuntimeException)
+ 		if ( sal_False == ( aModel >>= xModel ) ||
+ 			!xModel.is() )
+ 		{
+-			// trying last gasp try the current component
+-			uno::Reference< beans::XPropertySet > xProps( ::comphelper::getProcessServiceFactory(), uno::UNO_QUERY_THROW );
+-			// test if vba service is present
+-			uno::Reference< uno::XComponentContext > xCtx( xProps->getPropertyValue( rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "DefaultContext" ))), uno::UNO_QUERY_THROW );
+-			uno::Reference<lang::XMultiComponentFactory > xSMgr( xCtx->getServiceManager(), uno::UNO_QUERY_THROW );
+-			uno::Reference< frame::XDesktop > xDesktop (xSMgr->createInstanceWithContext(::rtl::OUString::createFromAscii("com.sun.star.frame.Desktop"), xCtx), uno::UNO_QUERY_THROW );
+-			xModel.set( xDesktop->getCurrentComponent(), uno::UNO_QUERY );
+-			if ( !xModel.is() )
+-			{
+-				throw uno::RuntimeException( 
+-					rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Can't extract model from basic ( its obviously not set yet ) therefore don't know the currently selected document") ), uno::Reference< uno::XInterface >() );
+-			}
+-			return xModel;
++			throw uno::RuntimeException( 
++				rtl::OUString( RTL_CONSTASCII_USTRINGPARAM( "Can't extract model from basic ( its obviously not set yet ) therefore don't know the current documet context") ), uno::Reference< uno::XInterface >() );
+ 		}
+ 		else
+ 		{
+-			OSL_TRACE("Have model ThisComponent points to url %s",
++			OSL_TRACE("Have model points to url %s",
+ 			::rtl::OUStringToOString( xModel->getURL(),
+ 				RTL_TEXTENCODING_ASCII_US ).pData->buffer );
+ 		}
+ 	}
+ 	else
+ 	{
+-		OSL_TRACE("Failed to get ThisComponent");
++		OSL_TRACE("Failed to get %s", rtl::OUStringToOString( sKey, RTL_TEXTENCODING_UTF8 ).getStr() );
+ 		throw uno::RuntimeException( 
+ 			rtl::OUString( 
+ 				RTL_CONSTASCII_USTRINGPARAM(
+@@ -467,6 +457,21 @@ getCurrentDocument() throw (uno::RuntimeException)
+ 	return xModel;
+ }
+ 
++
++ uno::Reference< frame::XModel > 
++getCurrentExcelDoc() throw (uno::RuntimeException)
++{
++   static const rtl::OUString sThisExcelDoc( RTL_CONSTASCII_USTRINGPARAM("ThisExcelDoc" ) );
++   return getCurrentDoc( sThisExcelDoc ); 
++}
++
++ uno::Reference< frame::XModel > 
++getCurrentWordDoc() throw (uno::RuntimeException)
++{
++   static const rtl::OUString sThisWordDoc( RTL_CONSTASCII_USTRINGPARAM("ThisWordDoc" ) );
++   return getCurrentDoc( sThisWordDoc ); 
++}
++
+ sal_Int32 
+ OORGBToXLRGB( sal_Int32 nCol )
+ {
+@@ -828,23 +833,13 @@ ConcreteXShapeGeometryAttributes::ConcreteXShapeGeometryAttributes( const css::u
+     m_pShapeHelper.reset( new ShapeHelper( xShape ) );
+ }
+ 
+-static uno::Reference< frame::XController > lcl_getCurrentController()
+-{
+-    const uno::Reference< frame::XModel > xWorkingDoc( SfxObjectShell::GetCurrentComponent(), uno::UNO_QUERY );
+-    uno::Reference< frame::XController > xController;
+-    if ( xWorkingDoc.is() )
+-        xController.set( xWorkingDoc->getCurrentController(), uno::UNO_SET_THROW );
+-    else
+-        xController.set( SfxObjectShell::GetCurrentComponent(), uno::UNO_QUERY_THROW );
+-    return xController;
+-}
+-
+-sal_Int32 getPointerStyle()
++sal_Int32 getPointerStyle( const uno::Reference< frame::XModel >& xModel )
+ {
++    
+     sal_Int32 nPointerStyle( POINTER_ARROW );
+     try
+     {
+-        const uno::Reference< frame::XController > xController( lcl_getCurrentController(),     uno::UNO_SET_THROW );
++        const uno::Reference< frame::XController > xController( xModel->getCurrentController(),     uno::UNO_SET_THROW );
+         const uno::Reference< frame::XFrame >      xFrame     ( xController->getFrame(),        uno::UNO_SET_THROW );
+         const uno::Reference< awt::XWindow >       xWindow    ( xFrame->getContainerWindow(),   uno::UNO_SET_THROW );
+         // why the heck isn't there an XWindowPeer::getPointer, but a setPointer only?
+@@ -859,11 +854,14 @@ sal_Int32 getPointerStyle()
+     return nPointerStyle;
+ }
+ 
+-void setCursorHelper( const Pointer& rPointer, sal_Bool bOverWrite )
++// #FIXME this method looks wrong, shouldn't it just affect calc *or* writer
++// document/frame/window(s) but not both ( and depending on what api called 
++// this )
++void setCursorHelper( const uno::Reference< frame::XModel >& xModel, const Pointer& rPointer, sal_Bool bOverWrite )
+ {
+     ::std::vector< uno::Reference< frame::XController > > aControllers;
+ 
+-    const uno::Reference< frame::XModel2 > xModel2( SfxObjectShell::GetCurrentComponent(), uno::UNO_QUERY );
++    uno::Reference< frame::XModel2 > xModel2( xModel, uno::UNO_QUERY );
+     if ( xModel2.is() )
+     {
+         const uno::Reference< container::XEnumeration > xEnumControllers( xModel2->getControllers(), uno::UNO_SET_THROW );
+@@ -875,17 +873,12 @@ void setCursorHelper( const Pointer& rPointer, sal_Bool bOverWrite )
+     }
+     else
+     {
+-        const uno::Reference< frame::XModel > xModel( SfxObjectShell::GetCurrentComponent(), uno::UNO_QUERY );
++        const uno::Reference< frame::XModel > xModel( xModel2, uno::UNO_QUERY );
+         if ( xModel.is() )
+         {
+             const uno::Reference< frame::XController > xController( xModel->getCurrentController(), uno::UNO_SET_THROW );
+             aControllers.push_back( xController );
+         }
+-        else
+-        {
+-            const uno::Reference< frame::XController > xController( SfxObjectShell::GetCurrentComponent(), uno::UNO_QUERY_THROW );
+-            aControllers.push_back( xController );
+-        }
+     }
+ 
+     for (   ::std::vector< uno::Reference< frame::XController > >::const_iterator controller = aControllers.begin();
+diff --git vbahelper/source/vbahelper/vbashape.cxx vbahelper/source/vbahelper/vbashape.cxx
+index 5a8dbd6..c35745b 100644
+--- vbahelper/source/vbahelper/vbashape.cxx
++++ vbahelper/source/vbahelper/vbashape.cxx
+@@ -58,14 +58,14 @@ using namespace ::ooo::vba;
+ using namespace ::com::sun::star;
+ using namespace ::vos;
+ 
+-ScVbaShape::ScVbaShape( const uno::Reference< XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< drawing::XShape >& xShape, const uno::Reference< drawing::XShapes >& xShapes, sal_Int32 nType ) throw( lang::IllegalArgumentException ) : ScVbaShape_BASE( xParent, xContext ), m_xShape( xShape ), m_xShapes( xShapes ), m_nType( nType )
++ScVbaShape::ScVbaShape( const uno::Reference< XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< drawing::XShape >& xShape, const uno::Reference< drawing::XShapes >& xShapes, const uno::Reference< frame::XModel >& xModel, sal_Int32 nType ) throw( lang::IllegalArgumentException ) : ScVbaShape_BASE( xParent, xContext ), m_xShape( xShape ), m_xShapes( xShapes ), m_nType( nType ), m_xModel( xModel )
+ {
+     m_xPropertySet.set( m_xShape, uno::UNO_QUERY_THROW );
+     m_pShapeHelper.reset( new ShapeHelper( m_xShape ) );
+     addListeners();
+ }
+ 
+-ScVbaShape::ScVbaShape( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< drawing::XShape >& xShape ) throw( lang::IllegalArgumentException ) : ScVbaShape_BASE( uno::Reference< XHelperInterface >(), xContext ), m_xShape( xShape )
++ScVbaShape::ScVbaShape( const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< drawing::XShape >& xShape, const uno::Reference< frame::XModel >& xModel ) throw( lang::IllegalArgumentException ) : ScVbaShape_BASE( uno::Reference< XHelperInterface >(), xContext ), m_xShape( xShape ), m_xModel( xModel )
+ {
+     // add listener
+     addListeners();
+@@ -311,8 +311,7 @@ ScVbaShape::getPictureFormat() throw (uno::RuntimeException)
+ uno::Any SAL_CALL 
+ ScVbaShape::TextFrame() throw (uno::RuntimeException)
+ {
+-    uno::Reference< frame::XModel > xModel = getCurrentDocument();
+-    uno::Reference< lang::XServiceInfo > xServiceInfo( xModel, uno::UNO_QUERY_THROW );
++    uno::Reference< lang::XServiceInfo > xServiceInfo( m_xModel, uno::UNO_QUERY_THROW );
+     if( xServiceInfo->supportsService( ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("com.sun.star.sheet.SpreadsheetDocument" ) ) ) )
+     {
+         uno::Reference< lang::XMultiServiceFactory > xSF( comphelper::getProcessServiceFactory(), uno::UNO_QUERY_THROW );
+@@ -452,8 +451,7 @@ ScVbaShape::ScaleWidth( double Factor, sal_Bool /*RelativeToOriginalSize*/, sal_
+ void SAL_CALL
+ ScVbaShape::Select( const uno::Any& /*Replace*/ ) throw ( uno::RuntimeException )
+ {
+-    uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY_THROW );
+-    uno::Reference< view::XSelectionSupplier > xSelectSupp( xModel->getCurrentController(), uno::UNO_QUERY_THROW );
++    uno::Reference< view::XSelectionSupplier > xSelectSupp( m_xModel->getCurrentController(), uno::UNO_QUERY_THROW );
+     xSelectSupp->select( uno::makeAny( m_xShape ) );
+ }
+ 
+@@ -473,7 +471,7 @@ ScVbaShape::ShapeRange( const uno::Any& index ) throw ( uno::RuntimeException )
+ 	uno::Reference< container::XIndexAccess > xIndexAccess( new XNamedObjectCollectionHelper< drawing::XShape >( aVec ) );
+ 	uno::Reference< container::XChild > xChild( m_xShape, uno::UNO_QUERY_THROW );	
+ 	// #FIXME for want of a better parent, setting this
+-	uno::Reference< msforms::XShapeRange > xShapeRange( new ScVbaShapeRange( mxParent, mxContext, xIndexAccess,  uno::Reference< drawing::XDrawPage >( xChild->getParent(), uno::UNO_QUERY_THROW ) ) );
++	uno::Reference< msforms::XShapeRange > xShapeRange( new ScVbaShapeRange( mxParent, mxContext, xIndexAccess,  uno::Reference< drawing::XDrawPage >( xChild->getParent(), uno::UNO_QUERY_THROW ), m_xModel ) );
+ 	if ( index.hasValue() )
+ 		return xShapeRange->Item( index, uno::Any() );
+ 	return uno::makeAny( xShapeRange );
+@@ -644,8 +642,7 @@ ScVbaShape::setRelativeVerticalPosition( ::sal_Int32 _relativeverticalposition )
+ uno::Any SAL_CALL 
+ ScVbaShape::WrapFormat() throw (uno::RuntimeException)
+ {
+-    uno::Reference< frame::XModel > xModel = getCurrentDocument();
+-    uno::Reference< lang::XServiceInfo > xServiceInfo( xModel, uno::UNO_QUERY_THROW );
++    uno::Reference< lang::XServiceInfo > xServiceInfo( m_xModel, uno::UNO_QUERY_THROW );
+     if( xServiceInfo->supportsService( ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("com.sun.star.text.TextDocument" ) ) ) )
+     {
+         uno::Reference< lang::XMultiServiceFactory > xSF( comphelper::getProcessServiceFactory(), uno::UNO_QUERY_THROW );
+diff --git vbahelper/source/vbahelper/vbashaperange.cxx vbahelper/source/vbahelper/vbashaperange.cxx
+index ae1a1fb..0c3535b 100644
+--- vbahelper/source/vbahelper/vbashaperange.cxx
++++ vbahelper/source/vbahelper/vbashaperange.cxx
+@@ -58,7 +58,7 @@ public:
+ 
+ };
+ 
+-ScVbaShapeRange::ScVbaShapeRange( const uno::Reference< XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< container::XIndexAccess >& xShapes, const uno::Reference< drawing::XDrawPage >& xDrawPage ) : ScVbaShapeRange_BASE( xParent, xContext, xShapes ), m_xDrawPage( xDrawPage ), m_nShapeGroupCount(0)
++ScVbaShapeRange::ScVbaShapeRange( const uno::Reference< XHelperInterface >& xParent, const uno::Reference< uno::XComponentContext >& xContext, const uno::Reference< container::XIndexAccess >& xShapes, const uno::Reference< drawing::XDrawPage >& xDrawPage, const uno::Reference< frame::XModel >& xModel  ) : ScVbaShapeRange_BASE( xParent, xContext, xShapes ), m_xDrawPage( xDrawPage ), m_nShapeGroupCount(0), m_xModel( xModel )
+ {
+ }
+ 
+@@ -66,8 +66,7 @@ ScVbaShapeRange::ScVbaShapeRange( const uno::Reference< XHelperInterface >& xPar
+ void SAL_CALL 
+ ScVbaShapeRange::Select(  ) throw (uno::RuntimeException)
+ {
+-    uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY_THROW );
+-    uno::Reference< view::XSelectionSupplier > xSelectSupp( xModel->getCurrentController(), uno::UNO_QUERY_THROW );
++    uno::Reference< view::XSelectionSupplier > xSelectSupp( m_xModel->getCurrentController(), uno::UNO_QUERY_THROW );
+     xSelectSupp->select( uno::makeAny( getShapes() ) );
+ }
+ 
+@@ -77,7 +76,7 @@ ScVbaShapeRange::Group() throw (uno::RuntimeException)
+     uno::Reference< drawing::XShapeGrouper > xShapeGrouper( m_xDrawPage, uno::UNO_QUERY_THROW );
+     uno::Reference< drawing::XShapeGroup > xShapeGroup( xShapeGrouper->group( getShapes() ), uno::UNO_QUERY_THROW );
+     uno::Reference< drawing::XShape > xShape( xShapeGroup, uno::UNO_QUERY_THROW );
+-    return uno::Reference< msforms::XShape >( new ScVbaShape( getParent(), mxContext, xShape, getShapes(), office::MsoShapeType::msoGroup ) );
++    return uno::Reference< msforms::XShape >( new ScVbaShape( getParent(), mxContext, xShape, getShapes(), m_xModel, office::MsoShapeType::msoGroup ) );
+ }
+ 
+ uno::Reference< drawing::XShapes > 
+@@ -359,7 +358,7 @@ ScVbaShapeRange:: createCollectionObject( const css::uno::Any& aSource )
+ 	uno::Reference< drawing::XShape > xShape( aSource, uno::UNO_QUERY_THROW );
+ 	// #TODO  #FIXME Shape parent should always be the sheet the shapes belong 
+ 	// to 
+-	uno::Reference< msforms::XShape > xVbShape( new ScVbaShape( uno::Reference< XHelperInterface >(), mxContext, xShape, getShapes(), ScVbaShape::getType( xShape ) ) ); 
++	uno::Reference< msforms::XShape > xVbShape( new ScVbaShape( uno::Reference< XHelperInterface >(), mxContext, xShape, getShapes(), m_xModel, ScVbaShape::getType( xShape ) ) ); 
+         return uno::makeAny( xVbShape );
+ }
+ 
+diff --git vbahelper/source/vbahelper/vbashapes.cxx vbahelper/source/vbahelper/vbashapes.cxx
+index 6515c6e..ee5cf91 100644
+--- vbahelper/source/vbahelper/vbashapes.cxx
++++ vbahelper/source/vbahelper/vbashapes.cxx
+@@ -89,7 +89,7 @@ void ScVbaShapes::initBaseCollection()
+ 	m_xNameAccess.set( xShapes, uno::UNO_QUERY );
+ }
+ 
+-ScVbaShapes::ScVbaShapes( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::container::XIndexAccess > xShapes ): ScVbaShapes_BASE( xParent, xContext, xShapes ), m_nNewShapeCount(0)
++ScVbaShapes::ScVbaShapes( const css::uno::Reference< ov::XHelperInterface >& xParent, const css::uno::Reference< css::uno::XComponentContext >& xContext, const css::uno::Reference< css::container::XIndexAccess > xShapes, const uno::Reference< frame::XModel>& xModel ): ScVbaShapes_BASE( xParent, xContext, xShapes ), m_nNewShapeCount(0), m_xModel( xModel )
+ {
+     m_xShapes.set( xShapes, uno::UNO_QUERY_THROW );
+     m_xDrawPage.set( xShapes, uno::UNO_QUERY_THROW ); 
+@@ -108,7 +108,7 @@ ScVbaShapes::createCollectionObject( const css::uno::Any& aSource ) throw (uno::
+     if( aSource.hasValue() )
+     {
+         uno::Reference< drawing::XShape > xShape( aSource, uno::UNO_QUERY_THROW );
+-        return uno::makeAny( uno::Reference< msforms::XShape >( new ScVbaShape( getParent(), mxContext, xShape, m_xShapes, ScVbaShape::getType( xShape ) ) ) );
++        return uno::makeAny( uno::Reference< msforms::XShape >( new ScVbaShape( getParent(), mxContext, xShape, m_xShapes, m_xModel, ScVbaShape::getType( xShape ) ) ) );
+     }
+     return uno::Any();
+ }
+@@ -208,14 +208,13 @@ ScVbaShapes::Range( const uno::Any& shapes ) throw (css::uno::RuntimeException)
+ 		aIndex <<= sIndices;
+ 		xShapes = getShapesByArrayIndices( aIndex );
+ 	}
+-	return new ScVbaShapeRange(  getParent(), mxContext, xShapes, m_xDrawPage );
++	return new ScVbaShapeRange(  getParent(), mxContext, xShapes, m_xDrawPage, m_xModel );
+ }
+ 
+ void SAL_CALL 
+ ScVbaShapes::SelectAll() throw (uno::RuntimeException)
+ {
+-    uno::Reference< frame::XModel > xModel( getCurrentDocument(), uno::UNO_QUERY_THROW );
+-    uno::Reference< view::XSelectionSupplier > xSelectSupp( xModel->getCurrentController(), uno::UNO_QUERY_THROW );
++    uno::Reference< view::XSelectionSupplier > xSelectSupp( m_xModel->getCurrentController(), uno::UNO_QUERY_THROW );
+     try
+     {
+         xSelectSupp->select( uno::makeAny( m_xShapes ) );
+@@ -231,8 +230,7 @@ ScVbaShapes::SelectAll() throw (uno::RuntimeException)
+ uno::Reference< drawing::XShape > 
+ ScVbaShapes::createShape( rtl::OUString service ) throw (css::uno::RuntimeException)
+ {
+-	// #FIXME don't use getCurrentDocument
+-    uno::Reference< lang::XMultiServiceFactory > xMSF( getCurrentDocument(), uno::UNO_QUERY_THROW );
++    uno::Reference< lang::XMultiServiceFactory > xMSF( m_xModel, uno::UNO_QUERY_THROW );
+     uno::Reference< drawing::XShape > xShape( xMSF->createInstance( service ), uno::UNO_QUERY_THROW );
+     return xShape;
+ }
+@@ -264,7 +262,7 @@ ScVbaShapes::AddRectangle( sal_Int32 startX, sal_Int32 startY, sal_Int32 nLineWi
+     size.Width = nWidth;
+     xShape->setSize( size );
+ 
+-    ScVbaShape *pScVbaShape = new ScVbaShape( getParent(), mxContext, xShape, m_xShapes, ScVbaShape::getType( xShape ) );
++    ScVbaShape *pScVbaShape = new ScVbaShape( getParent(), mxContext, xShape, m_xShapes, m_xModel, ScVbaShape::getType( xShape ) );
+     pScVbaShape->setRange( aRange ); 
+     return uno::makeAny( uno::Reference< msforms::XShape > ( pScVbaShape ) );
+ }
+@@ -308,7 +306,7 @@ ScVbaShapes::AddEllipse( sal_Int32 startX, sal_Int32 startY, sal_Int32 nLineWidt
+     size.Width = nWidth;
+     xShape->setSize(size);
+ 
+-    ScVbaShape *pScVbaShape = new ScVbaShape( getParent(), mxContext, xShape, m_xShapes, ScVbaShape::getType( xShape ) );
++    ScVbaShape *pScVbaShape = new ScVbaShape( getParent(), mxContext, xShape, m_xShapes, m_xModel, ScVbaShape::getType( xShape ) );
+     pScVbaShape->setRange( aRange ); 
+     return uno::makeAny( uno::Reference< msforms::XShape > ( pScVbaShape ) );
+ }
+@@ -344,7 +342,7 @@ ScVbaShapes::AddLine( sal_Int32 StartX, sal_Int32 StartY, sal_Int32 endX, sal_In
+     size.Width = nWidth;
+     xShape->setSize(size);
+ 
+-    ScVbaShape *pScVbaShape = new ScVbaShape( getParent(), mxContext, xShape, m_xShapes, ScVbaShape::getType( xShape ) );
++    ScVbaShape *pScVbaShape = new ScVbaShape( getParent(), mxContext, xShape, m_xShapes, m_xModel, ScVbaShape::getType( xShape ) );
+     return uno::makeAny( uno::Reference< msforms::XShape > ( pScVbaShape ) );
+ }
+ 
+@@ -366,7 +364,7 @@ ScVbaShapes::AddShape( sal_Int32 _nType, sal_Int32 _nLeft, sal_Int32 _nTop, sal_
+ uno::Any SAL_CALL
+ ScVbaShapes::AddTextbox( sal_Int32 _nOrientation, sal_Int32 _nLeft, sal_Int32 _nTop, sal_Int32 _nWidth, sal_Int32 _nHeight ) throw (uno::RuntimeException)
+ {
+-    uno::Reference< lang::XServiceInfo > xServiceInfo( getCurrentDocument(), uno::UNO_QUERY_THROW );
++    uno::Reference< lang::XServiceInfo > xServiceInfo( m_xModel, uno::UNO_QUERY_THROW );
+     if( xServiceInfo->supportsService( ::rtl::OUString( RTL_CONSTASCII_USTRINGPARAM("com.sun.star.text.TextDocument" ) ) ) )
+     {
+         return AddTextboxInWriter( _nOrientation, _nLeft, _nTop, _nWidth, _nHeight );
+@@ -416,7 +414,7 @@ ScVbaShapes::AddTextboxInWriter( sal_Int32 _nOrientation, sal_Int32 _nLeft, sal_
+     xShapeProps->setPropertyValue( rtl::OUString::createFromAscii( "LayerName" ), uno::makeAny( sLayerName ) );
+ 
+ 
+-    ScVbaShape *pScVbaShape = new ScVbaShape( getParent(), mxContext, xShape, m_xShapes, ScVbaShape::getType( xShape ) );
++    ScVbaShape *pScVbaShape = new ScVbaShape( getParent(), mxContext, xShape, m_xShapes, m_xModel, ScVbaShape::getType( xShape ) );
+     return uno::makeAny( uno::Reference< msforms::XShape > ( pScVbaShape ) );
+ }
+ 
+@@ -445,7 +443,7 @@ ScVbaShapes::AddShape( const rtl::OUString& sService, const rtl::OUString& sName
+     size.Width = nWidth;
+     xShape->setSize(size);
+ 
+-    ScVbaShape *pScVbaShape = new ScVbaShape( getParent(), mxContext, xShape, m_xShapes, ScVbaShape::getType( xShape ) );
++    ScVbaShape *pScVbaShape = new ScVbaShape( getParent(), mxContext, xShape, m_xShapes, m_xModel, ScVbaShape::getType( xShape ) );
+     return uno::makeAny( uno::Reference< msforms::XShape > ( pScVbaShape ) );
+ }
+ void
